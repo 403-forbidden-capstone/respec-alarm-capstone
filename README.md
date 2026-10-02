@@ -62,7 +62,7 @@
 | 머지 방식 | Squash만 |
 | 강제 push · 브랜치 삭제 | 금지 |
 
-현재는 무료 플랜의 private 레포라 GitHub가 이 규칙을 강제하지 않습니다. 규칙은 만들어 두었고, 그 전까지는 팀 약속으로 지킵니다. 조직이 Team 플랜으로 바뀌면 자동으로 적용됩니다.
+무료 플랜의 private 레포에서는 GitHub가 보호 규칙을 지원하지 않아, 지금은 **팀 약속으로 지킵니다.** 규칙은 [`.github/rulesets/main.json`](.github/rulesets/main.json)에 준비되어 있어서, 조직이 Team 플랜으로 바뀌거나 레포가 public이 되면 Settings → Rules → Rulesets → New ruleset → Import a ruleset으로 이 파일을 올리면 바로 적용됩니다.
 
 ## 마일스톤
 
