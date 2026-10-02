@@ -1,0 +1,51 @@
+name: Claude
+
+# PR · 이슈 댓글에 @claude 라고 멘션할 때만 실행됩니다. (자동으로 매 PR마다 돌지 않음)
+#   예) @claude 리뷰해줘          → pr-review 스킬로 PR 전체 검수 후 댓글로 보고
+#       @claude 이 함수 왜 이렇게 했어?  → 질문에 답변
+#       @claude 이거 고쳐줘        → 같은 PR 브랜치에 커밋
+# 필요한 것: Claude GitHub App 설치 + 레포 Secret `CLAUDE_CODE_OAUTH_TOKEN`
+
+on:
+  issue_comment:
+    types: [created]
+  pull_request_review_comment:
+    types: [created]
+  pull_request_review:
+    types: [submitted]
+
+concurrency:
+  group: claude-${{ github.event.issue.number || github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  claude:
+    if: |
+      (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude')) ||
+      (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@claude')) ||
+      (github.event_name == 'pull_request_review' && contains(github.event.review.body, '@claude'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+      id-token: write
+      actions: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Claude
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          additional_permissions: |
+            actions: read
+          claude_args: |
+            --model claude-opus-5-5
+            --max-turns 40
+            --allowedTools "Skill,Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(git status:*),Bash(git merge-base:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(cat:*),Bash(test:*),Bash(ls:*)"
+            --append-system-prompt "항상 한국어로 답한다. 리뷰 · 검수 · '봐줘' · '머지해도 돼?' 같은 요청이면 반드시 pr-review 스킬(.claude/skills/pr-review)을 사용한다. 이 실행 환경은 GitHub Actions라 브라우저 · Lighthouse · 이중 빌드는 쓸 수 없으니 해당 항목은 '건너뜀: 사유'로 적는다. 최종 보고는 PR 댓글 하나로 정리한다."

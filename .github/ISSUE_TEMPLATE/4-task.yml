@@ -1,0 +1,80 @@
+name: 🔧 작업
+description: 설정 · 문서 · 리팩토링처럼 기능도 버그도 아닌 일
+type: Task
+projects: ["403-forbidden-capstone/1"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        제목에는 할 일을 짧게 적어 주세요. 예) `Supabase 프로젝트 연결` · `노션 가이드 정리`
+
+  - type: dropdown
+    id: part
+    attributes:
+      label: 파트
+      options:
+        - FE
+        - BE
+        - AI
+        - DATA
+        - DESIGN
+        - PM
+    validations:
+      required: true
+
+  - type: textarea
+    id: todo
+    attributes:
+      label: 📌 할 일
+    validations:
+      required: true
+
+  - type: textarea
+    id: done
+    attributes:
+      label: ✅ 완료 조건
+      value: |
+        - [ ]
+
+  - type: textarea
+    id: refs
+    attributes:
+      label: 📎 참고 자료
+
+  - type: markdown
+    attributes:
+      value: |
+        ---
+        ### 일정
+        비워 둬도 돼요. 시작일이 없으면 브랜치를 만든 날이 자동으로 들어가요.
+
+  - type: dropdown
+    id: priority
+    attributes:
+      label: 우선순위
+      options:
+        - 🔴 높음
+        - 🟡 보통
+        - ⚪ 낮음
+      default: 1
+
+  - type: dropdown
+    id: size
+    attributes:
+      label: 크기
+      options:
+        - S — 반나절 이하
+        - M — 1~2일
+        - L — 3일 이상 (쪼개기 권장)
+
+  - type: input
+    id: start
+    attributes:
+      label: 시작일
+      placeholder: 2026-10-07 또는 10/7
+
+  - type: input
+    id: due
+    attributes:
+      label: 목표일
+      placeholder: 2026-10-10 또는 10/10

@@ -1,0 +1,50 @@
+name: 보드 연동
+
+# 이슈 · 브랜치 · PR 이벤트를 조직 보드(Re:Spec Alarm 보드)에 반영합니다.
+#   이슈 작성          → 보드 등록 · 백로그, 이슈 틀의 파트 · 우선순위 · 크기 · 시작일 · 목표일 · 주차
+#   브랜치 생성        → 브랜치 이름의 이슈가 진행 중, 빈 시작일은 오늘, 담당자가 없으면 만든 사람
+#   PR 생성            → 연결된 이슈(Closes #번호)가 리뷰
+#   PR 머지 · 이슈 닫힘 → 완료 (Not planned로 닫으면 보드에서 보관)
+# 필요한 것: 레포 Secret PROJECT_TOKEN (repo · project 권한)
+
+on:
+  issues:
+    types: [opened, closed, reopened]
+  create:
+  pull_request:
+    types: [opened, reopened, edited, ready_for_review, closed]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: board-sync-${{ github.event.issue.number || github.event.pull_request.number || github.event.ref }}
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    name: 보드 연동
+    if: github.event_name != 'create' || github.event.ref_type == 'branch'
+    runs-on: ubuntu-latest
+    env:
+      PROJECT_TOKEN: ${{ secrets.PROJECT_TOKEN }}
+    steps:
+      - name: 토큰 확인
+        if: env.PROJECT_TOKEN == ''
+        run: echo "::notice::PROJECT_TOKEN 시크릿이 없어 보드 연동을 건너뜁니다."
+
+      - name: 스크립트 가져오기
+        if: env.PROJECT_TOKEN != ''
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          sparse-checkout: .github/scripts
+
+      - name: 보드에 반영
+        if: env.PROJECT_TOKEN != ''
+        uses: actions/github-script@v8
+        with:
+          github-token: ${{ env.PROJECT_TOKEN }}
+          script: |
+            const sync = require('./.github/scripts/project-sync.js');
+            await sync({ github, context, core });

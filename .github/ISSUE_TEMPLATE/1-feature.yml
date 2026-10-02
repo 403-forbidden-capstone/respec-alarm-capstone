@@ -1,0 +1,95 @@
+name: 🚀 기능 요청 · 추가 · 개선
+description: 새 기능이나 화면을 만들거나, 있는 기능을 고칠 때
+type: Feature
+projects: ["403-forbidden-capstone/1"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        제목에는 무엇을 하는지만 짧게 적어 주세요. 예) `알람 목록 화면` · `약속 시각 역산 API`
+        담당자와 마일스톤은 오른쪽에서 고르고, 아래 **일정** 칸은 보드에 그대로 들어가요.
+
+  - type: dropdown
+    id: part
+    attributes:
+      label: 파트
+      options:
+        - FE
+        - BE
+        - AI
+        - DATA
+        - DESIGN
+        - PM
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: 📝 현재 문제점
+      description: 무엇이 부족하거나 불편한지, 왜 필요한지
+      placeholder: 예) 약속을 등록해도 몇 시에 일어나야 하는지 사용자가 직접 계산해야 한다.
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: 🛠️ 해결 방안 · 제안 기능
+      description: 어떻게 해결하고 무엇을 만들지
+      placeholder: 예) 약속 시각에서 이동 · 준비 · 여유 시간을 빼 기상 알람을 자동으로 잡는다.
+    validations:
+      required: true
+
+  - type: textarea
+    id: tasks
+    attributes:
+      label: ⚙️ 작업 내용
+      description: 체크박스로 쪼개 두면 이슈와 보드에 진행률이 보여요
+      value: |
+        - [ ]
+        - [ ]
+
+  - type: textarea
+    id: refs
+    attributes:
+      label: 📎 참고 자료
+      description: 피그마 링크, 상세설계(ALG · API · 테이블), 캡처
+
+  - type: markdown
+    attributes:
+      value: |
+        ---
+        ### 일정
+        비워 둬도 돼요. 시작일이 없으면 브랜치를 만든 날이 자동으로 들어가요.
+
+  - type: dropdown
+    id: priority
+    attributes:
+      label: 우선순위
+      options:
+        - 🔴 높음
+        - 🟡 보통
+        - ⚪ 낮음
+      default: 1
+
+  - type: dropdown
+    id: size
+    attributes:
+      label: 크기
+      options:
+        - S — 반나절 이하
+        - M — 1~2일
+        - L — 3일 이상 (쪼개기 권장)
+
+  - type: input
+    id: start
+    attributes:
+      label: 시작일
+      placeholder: 2026-10-07 또는 10/7
+
+  - type: input
+    id: due
+    attributes:
+      label: 목표일
+      placeholder: 2026-10-10 또는 10/10

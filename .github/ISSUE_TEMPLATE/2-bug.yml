@@ -1,0 +1,113 @@
+name: ❗ 버그 이슈
+description: 의도와 다르게 동작하는 문제를 알릴 때
+type: Bug
+projects: ["403-forbidden-capstone/1"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        제목에는 어디서 무슨 문제가 생기는지 적어 주세요. 예) `알람 해제 후 울림 화면이 안 닫힘`
+
+  - type: dropdown
+    id: part
+    attributes:
+      label: 파트
+      options:
+        - FE
+        - BE
+        - AI
+        - DATA
+        - DESIGN
+        - PM
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: 🗒️ 설명
+      description: 어느 화면 · 기능에서 어떤 현상이 나타나는지
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: 🔄 재현 방법
+      value: |
+        1.
+        2.
+        3.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: ✅ 예상 동작 · ❌ 실제 동작
+      value: |
+        - 예상:
+        - 실제:
+    validations:
+      required: true
+
+  - type: textarea
+    id: evidence
+    attributes:
+      label: 📸 참고 자료
+      description: 스크린샷 · 화면 녹화 · 에러 로그 (이미지는 끌어다 놓기)
+
+  - type: dropdown
+    id: where
+    attributes:
+      label: ⚙️ 실행 환경
+      multiple: true
+      options:
+        - 개발용 APK
+        - 데모 APK
+        - 웹 미리보기
+        - 서버 · DB
+
+  - type: input
+    id: device
+    attributes:
+      label: 기기 · Android 버전
+      placeholder: 예) 갤럭시 S24 · Android 15
+
+  - type: markdown
+    attributes:
+      value: |
+        ---
+        ### 일정
+        비워 둬도 돼요. 시작일이 없으면 브랜치를 만든 날이 자동으로 들어가요.
+
+  - type: dropdown
+    id: priority
+    attributes:
+      label: 우선순위
+      options:
+        - 🔴 높음
+        - 🟡 보통
+        - ⚪ 낮음
+      default: 0
+
+  - type: dropdown
+    id: size
+    attributes:
+      label: 크기
+      options:
+        - S — 반나절 이하
+        - M — 1~2일
+        - L — 3일 이상 (쪼개기 권장)
+
+  - type: input
+    id: start
+    attributes:
+      label: 시작일
+      placeholder: 2026-10-07 또는 10/7
+
+  - type: input
+    id: due
+    attributes:
+      label: 목표일
+      placeholder: 2026-10-10 또는 10/10
