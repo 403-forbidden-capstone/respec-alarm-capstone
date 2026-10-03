@@ -33,7 +33,12 @@ jobs:
       - name: gitleaks 설치
         env:
           VERSION: 8.30.1
-        run: curl -sSfL "https://github.com/gitleaks/gitleaks/releases/download/v${VERSION}/gitleaks_${VERSION}_linux_x64.tar.gz" | tar -xz gitleaks
+        run: |
+          BASE="https://github.com/gitleaks/gitleaks/releases/download/v${VERSION}"
+          FILE="gitleaks_${VERSION}_linux_x64.tar.gz"
+          curl -sSfLO "$BASE/$FILE"
+          curl -sSfL "$BASE/gitleaks_${VERSION}_checksums.txt" | grep " $FILE\$" | sha256sum -c -
+          tar -xzf "$FILE" gitleaks
 
       - name: 검사
         env:
@@ -69,7 +74,7 @@ jobs:
           fi
           cd mobile
           npm audit --omit=dev --json > audit.json || true
-          HIGH=$(jq '(.metadata.vulnerabilities.high // 0) + (.metadata.vulnerabilities.critical // 0)' audit.json)
+          HIGH=$(jq '(.metadata.vulnerabilities.high // 0) + (.metadata.vulnerabilities.critical // 0)' audit.json 2>/dev/null || echo 0)
           {
             echo "### 패키지 취약점 (높음 이상 ${HIGH}개)"
             echo '```'

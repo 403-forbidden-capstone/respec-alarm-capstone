@@ -53,7 +53,7 @@ jobs:
             const openPRs = (await github.paginate(github.rest.pulls.list, { owner, repo, state: 'open', per_page: 100 })).filter((p) => !p.draft);
             const milestones = await github.paginate(github.rest.issues.listMilestones, { owner, repo, state: 'open', sort: 'due_on', direction: 'asc', per_page: 100 });
 
-            const done = touched.filter((i) => !isPR(i) && inWeek(i.closed_at) && i.state_reason !== 'not_planned');
+            const done = touched.filter((i) => !isPR(i) && inWeek(i.closed_at) && (i.state_reason ?? 'completed') === 'completed');
             const merged = touched.filter((i) => isPR(i) && inWeek(i.pull_request.merged_at));
             const created = touched.filter((i) => !isPR(i) && inWeek(i.created_at));
             const stale = openIssues.filter(notSummary).filter((i) => daysAgo(i.updated_at) >= 7);
@@ -87,7 +87,10 @@ jobs:
             ].join('\n');
 
             await core.summary.addRaw(text).write();
-            if (dryRun) return core.info('미리 보기라 이슈에 올리지 않았어요. 실행 결과(Summary)를 보세요.');
+            if (dryRun) {
+              core.info(text);
+              return core.info('미리 보기라 이슈에 올리지 않았어요.');
+            }
 
             let target = openIssues.find((i) => i.title === TITLE);
             if (!target) {

@@ -22,6 +22,8 @@ concurrency:
 jobs:
   tidy:
     name: PR 정리
+    # Dependabot PR은 토큰이 읽기 전용이라 건너뜁니다. 라벨은 dependabot.yml이 붙입니다.
+    if: github.actor != 'dependabot[bot]'
     runs-on: ubuntu-latest
     steps:
       - name: 라벨 · 담당자 정리
