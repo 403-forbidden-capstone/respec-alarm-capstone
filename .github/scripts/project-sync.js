@@ -10,7 +10,8 @@ const SIZES = ['S', 'M', 'L'];
 // feat/12-FE-alarm-list 처럼 우리 규칙의 브랜치와, 이슈 사이드바에서 만든 12-alarm-list 둘 다 받는다.
 const BRANCH_ISSUE = /^(?:(?:feat|fix|docs|refactor|chore)\/)?(\d+)-/;
 // 제목이 [WIP]로 시작하면 아직 리뷰받을 상태가 아니다.
-const WIP = /^\s*\[WIP\]/i;
+// claude-review.yml의 startsWith(title, '[WIP]')와 같은 기준 (대소문자 무시).
+const WIP = /^\[WIP\]/i;
 // 리뷰어로 뽑지 않을 GitHub 아이디. 회사 분께 쓰기 권한을 드리면 여기에 넣는다.
 const REVIEWER_EXCLUDE = [];
 
@@ -206,6 +207,11 @@ async function requestReviewer(pr, { github, context, core }) {
     const fewest = Math.min(...load.values());
     const pool = candidates.filter((login) => load.get(login) === fewest);
     const reviewer = pool[Math.floor(Math.random() * pool.length)];
+
+    // 같은 PR의 실행은 차례로 돌지만 이벤트 payload는 옛 값이다. 지정 직전에 PR을 다시 읽어
+    // 앞선 실행이 이미 리뷰어를 붙였거나 그사이 [WIP] · 닫힘이 됐으면 건너뛴다.
+    const { data: latest } = await github.rest.pulls.get({ owner, repo, pull_number: pr.number });
+    if (latest.state !== 'open' || WIP.test(latest.title ?? '') || latest.requested_reviewers?.length || latest.requested_teams?.length) return;
 
     await github.rest.pulls.requestReviewers({ owner, repo, pull_number: pr.number, reviewers: [reviewer] });
     core.info(`리뷰어로 ${reviewer} 님을 지정했어요.`);
