@@ -1,7 +1,7 @@
 <!--
 📚 PR 제목 = main에 남는 커밋 한 줄 (Squash 머지)
 형식: [파트] [유형] 작업 내용        예) [FE] [FEAT] 알람 목록 화면 구현
-파트: FE · BE · AI · DATA · DESIGN · ALL(공통)
+파트: FE · BE · AI · DATA · DESIGN · PM · ALL(공통)
 유형: FEAT · FIX · DOCS · REFACTOR · CHORE
 아직 리뷰받을 상태가 아니면 제목 앞에 [WIP]를 붙여 주세요.
 -->

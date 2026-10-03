@@ -2,9 +2,6 @@
 
 팀원 4명이 모두 Claude를 씁니다. 이 파일은 모두의 Claude가 같이 읽는 공통 규칙입니다.
 
-- 내 역할과 지금 하는 일: 각자의 `CLAUDE.local.md` (레포에 안 올라감, 본인 카드를 불러옴)
-- 누가 무엇을 맡았는지: `.claude/team/<이름>.md`
-
 ## 프로젝트
 
 - 포텐셜랩스 Re:Spec 음성 알람 앱에 대학생용 기능을 더하는 산학 캡스톤입니다. 기능 번호는 ①~④, ⑥ (README의 마일스톤 참고)
@@ -30,9 +27,9 @@
 
 - **한 폴더에 Claude 세션 하나.** 동시에 두 작업을 하면 작업 폴더를 나눕니다: `git worktree add ../respec-<이슈번호> -b <브랜치>`
 - 커밋은 파일을 지정해서 합니다. `git add .` · `git add -A`는 다른 작업 파일까지 섞여 들어가므로 쓰지 않습니다. 커밋 전에 `git status`로 확인합니다.
-- 이슈 범위 밖 파일은 고치지 않습니다. 다른 사람 카드에 적힌 담당 영역이면 먼저 작업자에게 알립니다.
+- 이슈 범위 밖 파일은 고치지 않습니다. 꼭 고쳐야 하면 먼저 작업자에게 알리고 PR에 이유를 적습니다.
 - 여럿이 같이 고치는 파일(`package.json`, 잠금 파일, `app.json`, DB 마이그레이션)은 작은 PR로 따로 올립니다. 잠금 파일 충돌은 손으로 고치지 말고 `npm install`로 다시 만듭니다.
-- 작업 시작 전에 main을 받아 오고(`git pull`), PR 전에는 `git rebase origin/main` 합니다. 밀어 넣을 때는 `--force-with-lease`만 씁니다.
+- 작업 시작 전에 main을 받아 오고(`git pull`), PR 전에는 main을 반영합니다(`git pull origin main` 또는 `git rebase origin/main`). rebase했으면 `--force-with-lease`로만 push합니다.
 - Claude의 기억은 사람마다 따로라 서로 공유되지 않습니다. 팀이 알아야 할 결정은 이 파일이나 문서에 PR로 남깁니다.
 
 ## 비밀값
