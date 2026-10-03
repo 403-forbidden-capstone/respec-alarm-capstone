@@ -9,6 +9,10 @@ const PRIORITIES = ['높음', '보통', '낮음'];
 const SIZES = ['S', 'M', 'L'];
 // feat/12-FE-alarm-list 처럼 우리 규칙의 브랜치와, 이슈 사이드바에서 만든 12-alarm-list 둘 다 받는다.
 const BRANCH_ISSUE = /^(?:(?:feat|fix|docs|refactor|chore)\/)?(\d+)-/;
+// 제목이 [WIP]로 시작하면 아직 리뷰받을 상태가 아니다.
+const WIP = /^\s*\[WIP\]/i;
+// 리뷰어로 뽑지 않을 GitHub 아이디. 회사 분께 쓰기 권한을 드리면 여기에 넣는다.
+const REVIEWER_EXCLUDE = [];
 
 const STATUS = {
   backlog: '백로그',
@@ -41,7 +45,7 @@ module.exports = async function projectSync({ github, context, core }) {
   }
 
   if (eventName === 'pull_request') {
-    return onPullRequest(sync, payload, { github, context });
+    return onPullRequest(sync, payload, { github, context, core });
   }
 };
 
@@ -112,8 +116,9 @@ async function onBranchCreated(sync, payload, { github, context, core }) {
 }
 
 // PR: 연결된 이슈(Closes #번호)를 리뷰 → 머지면 완료, 머지 없이 닫히면 다시 진행 중
-// 리뷰로 옮길 때 이슈의 파트 라벨을 PR에 붙이고, 비어 있는 담당자를 PR 작성자로 채운다
-async function onPullRequest(sync, payload, { github, context }) {
+// 열려 있으면 이슈의 파트 라벨과 빈 담당자를 채우고, 리뷰받을 상태면 리뷰어 1명을 지정한다.
+// [WIP] PR은 카드를 진행 중에 두고 리뷰어도 지정하지 않는다.
+async function onPullRequest(sync, payload, { github, context, core }) {
   const { action, pull_request: pr } = payload;
   const { repository } = await github.graphql(
     `query($owner: String!, $repo: String!, $number: Int!) {
@@ -134,12 +139,12 @@ async function onPullRequest(sync, payload, { github, context }) {
   );
   const issues = repository.pullRequest.closingIssuesReferences.nodes;
 
+  const open = ['opened', 'reopened', 'edited', 'ready_for_review'].includes(action) && pr.state === 'open';
+  const ready = open && !pr.draft && !WIP.test(pr.title ?? '');
+
   let status = null;
-  if (['opened', 'reopened', 'edited', 'ready_for_review'].includes(action) && pr.state === 'open' && !pr.draft) {
-    status = STATUS.review;
-  } else if (action === 'closed') {
-    status = pr.merged ? STATUS.done : STATUS.inProgress;
-  }
+  if (open) status = ready ? STATUS.review : STATUS.inProgress;
+  else if (action === 'closed') status = pr.merged ? STATUS.done : STATUS.inProgress;
   if (!status) return;
 
   for (const issue of issues) {
@@ -148,7 +153,8 @@ async function onPullRequest(sync, payload, { github, context }) {
     await sync.setStatus(itemId, status);
   }
 
-  if (status === STATUS.review) await fillPullRequest(pr, issues, { github, context });
+  if (open) await fillPullRequest(pr, issues, { github, context });
+  if (ready) await requestReviewer(pr, { github, context, core });
 }
 
 // 파트 라벨(릴리즈 노트 분류용)과 담당자(보드 카드에 누가 하는지 보이게).
@@ -172,6 +178,39 @@ async function fillPullRequest(pr, issues, { github, context }) {
     if (issue.state === 'OPEN' && issue.assignees.totalCount === 0) {
       await github.rest.issues.addAssignees({ owner, repo, issue_number: issue.number, assignees });
     }
+  }
+}
+
+// 리뷰어 1명: PR 작성자를 뺀 팀원(쓰기 권한) 중 지금 리뷰 요청이 가장 적은 사람, 같으면 무작위.
+// 이미 리뷰어가 있거나 사람이 리뷰를 남긴 PR은 건드리지 않는다.
+async function requestReviewer(pr, { github, context, core }) {
+  const { owner, repo } = context.repo;
+  const author = pr.user?.login;
+  if (pr.user?.type !== 'User' || pr.requested_reviewers?.length || pr.requested_teams?.length) return;
+
+  try {
+    const reviews = await github.paginate(github.rest.pulls.listReviews, { owner, repo, pull_number: pr.number, per_page: 100 });
+    if (reviews.some((r) => r.user?.type === 'User' && r.user.login !== author)) return;
+
+    const members = await github.paginate(github.rest.repos.listCollaborators, { owner, repo, permission: 'push', per_page: 100 });
+    const candidates = members
+      .filter((m) => m.type === 'User' && m.login !== author && !REVIEWER_EXCLUDE.includes(m.login))
+      .map((m) => m.login);
+    if (!candidates.length) return core.info('리뷰어로 뽑을 팀원이 없어 건너뜁니다.');
+
+    const load = new Map(candidates.map((login) => [login, 0]));
+    const openPRs = await github.paginate(github.rest.pulls.list, { owner, repo, state: 'open', per_page: 100 });
+    for (const p of openPRs) {
+      for (const r of p.requested_reviewers ?? []) if (load.has(r.login)) load.set(r.login, load.get(r.login) + 1);
+    }
+    const fewest = Math.min(...load.values());
+    const pool = candidates.filter((login) => load.get(login) === fewest);
+    const reviewer = pool[Math.floor(Math.random() * pool.length)];
+
+    await github.rest.pulls.requestReviewers({ owner, repo, pull_number: pr.number, reviewers: [reviewer] });
+    core.info(`리뷰어로 ${reviewer} 님을 지정했어요.`);
+  } catch (error) {
+    core.warning(`리뷰어를 지정하지 못했어요: ${error.message}`);
   }
 }
 
