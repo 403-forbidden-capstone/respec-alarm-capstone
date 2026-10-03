@@ -16,6 +16,9 @@ const STATUS = {
   review: '리뷰',
   done: '완료',
 };
+// 보드 칸 순서. 이슈 작성 · 브랜치 생성은 카드를 앞으로만 옮긴다.
+// 이슈를 만들고 바로 브랜치 · PR까지 올리면 늦게 끝난 실행이 카드를 되돌릴 수 있어서다.
+const FLOW = ['백로그', '이번 주', '진행 중', '리뷰', '완료'];
 
 module.exports = async function projectSync({ github, context, core }) {
   const board = await loadBoard(github);
@@ -45,7 +48,7 @@ module.exports = async function projectSync({ github, context, core }) {
 // 이슈 작성: 보드 등록 → 백로그 → 이슈 틀에 적은 값을 필드로
 async function onIssueOpened(sync, issue, { github, context }) {
   const itemId = await sync.addItem(issue.node_id);
-  await sync.setStatus(itemId, STATUS.backlog);
+  await sync.moveForward(itemId, STATUS.backlog);
 
   const form = parseForm(issue.body ?? '');
 
@@ -95,7 +98,7 @@ async function onBranchCreated(sync, payload, { github, context, core }) {
   if (issue.pull_request || issue.state !== 'open') return;
 
   const itemId = await sync.addItem(issue.node_id);
-  await sync.setStatus(itemId, STATUS.inProgress);
+  await sync.moveForward(itemId, STATUS.inProgress);
 
   const today = todayInSeoul();
   const start = (await sync.readValue(itemId, '시작일'))?.date;
@@ -221,6 +224,28 @@ function makeSync({ github, core, board }) {
     await update(itemId, fieldName, { singleSelectOptionId: option.id });
   };
 
+  const setStatus = (itemId, keyword) => setOption(itemId, 'Status', (name) => name.includes(keyword));
+
+  const readValue = async (itemId, fieldName) => {
+    const { node } = await github.graphql(
+      `query($id: ID!, $name: String!) {
+        node(id: $id) {
+          ... on ProjectV2Item {
+            fieldValueByName(name: $name) {
+              ... on ProjectV2ItemFieldDateValue { date }
+              ... on ProjectV2ItemFieldIterationValue { iterationId }
+              ... on ProjectV2ItemFieldSingleSelectValue { name }
+            }
+          }
+        }
+      }`,
+      { id: itemId, name: fieldName },
+    );
+    return node?.fieldValueByName ?? null;
+  };
+
+  const stage = (name) => FLOW.findIndex((word) => name.includes(word));
+
   return {
     async addItem(contentId) {
       const { addProjectV2ItemById } = await github.graphql(
@@ -232,29 +257,19 @@ function makeSync({ github, core, board }) {
       return addProjectV2ItemById.item.id;
     },
     setOption,
-    setStatus: (itemId, keyword) => setOption(itemId, 'Status', (name) => name.includes(keyword)),
+    setStatus,
+    readValue,
+    async moveForward(itemId, keyword) {
+      const current = (await readValue(itemId, 'Status'))?.name;
+      if (current && stage(current) >= stage(keyword)) return;
+      await setStatus(itemId, keyword);
+    },
     setDate: (itemId, fieldName, date) => update(itemId, fieldName, { date }),
     async setIteration(itemId, date) {
       const config = board.field('주차')?.configuration;
       const iterations = [...(config?.iterations ?? []), ...(config?.completedIterations ?? [])];
       const iteration = iterations.find((it) => isWithin(date, it.startDate, it.duration));
       if (iteration) await update(itemId, '주차', { iterationId: iteration.id });
-    },
-    async readValue(itemId, fieldName) {
-      const { node } = await github.graphql(
-        `query($id: ID!, $name: String!) {
-          node(id: $id) {
-            ... on ProjectV2Item {
-              fieldValueByName(name: $name) {
-                ... on ProjectV2ItemFieldDateValue { date }
-                ... on ProjectV2ItemFieldIterationValue { iterationId }
-              }
-            }
-          }
-        }`,
-        { id: itemId, name: fieldName },
-      );
-      return node?.fieldValueByName ?? null;
     },
     async archive(itemId) {
       await github.graphql(
