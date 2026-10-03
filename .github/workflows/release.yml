@@ -1,0 +1,91 @@
+name: 데모 릴리즈
+
+# v로 시작하는 태그를 달면 Releases에 데모 버전을 만듭니다.
+#   git tag v0.1.0
+#   git push origin v0.1.0
+# - 릴리즈 노트: 머지된 PR을 라벨(FE · BE · DESIGN)별로 묶어 자동으로 씁니다 (.github/release.yml)
+# - 앱(mobile/eas.json)과 Secret EXPO_TOKEN이 있으면 EAS로 APK를 빌드해 첨부하고 설치 QR을 붙입니다
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 릴리즈 태그 (예 v0.1.0). main 최신 커밋에 붙습니다
+        required: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ inputs.tag || github.ref_name }}
+
+jobs:
+  release:
+    name: 데모 릴리즈
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      TAG: ${{ inputs.tag || github.ref_name }}
+      EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: APK를 빌드할 수 있는지 확인
+        id: app
+        run: |
+          if [ -f mobile/eas.json ] && [ -n "$EXPO_TOKEN" ]; then
+            echo "build=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "build=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::앱(mobile/eas.json)이나 EXPO_TOKEN이 없어 APK 없이 릴리즈만 만듭니다."
+          fi
+
+      - name: Node
+        if: steps.app.outputs.build == 'true'
+        uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+
+      - name: EAS
+        if: steps.app.outputs.build == 'true'
+        uses: expo/expo-github-action@v9
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      - name: APK 빌드
+        if: steps.app.outputs.build == 'true'
+        working-directory: mobile
+        run: |
+          npm ci
+          eas build --platform android --profile preview --non-interactive --wait --json > ../build.json
+          APK_URL=$(jq -r '.[0].artifacts.buildUrl' ../build.json)
+          curl -sSfL -o "../respec-alarm-${TAG}.apk" "$APK_URL"
+          echo "APK_URL=$APK_URL" >> "$GITHUB_ENV"
+
+      - name: 릴리즈 만들기
+        env:
+          EVENT: ${{ github.event_name }}
+        run: |
+          NOTES=""
+          if [ -n "${APK_URL:-}" ]; then
+            QR="https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=$(jq -rn --arg u "$APK_URL" '$u|@uri')"
+            NOTES=$(printf '## 폰에 설치\n\n<img src="%s" width="180" alt="APK 설치 QR" />\n\nQR을 찍거나 아래 APK를 받아 설치합니다.\n' "$QR")
+          fi
+          # 직접 실행했을 때만 태그가 아직 없으므로 main 최신 커밋에 새로 붙입니다
+          TARGET=()
+          if [ "$EVENT" = "workflow_dispatch" ]; then TARGET=(--target "$GITHUB_SHA"); fi
+          gh release create "$TAG" \
+            --title "Re:Spec Alarm $TAG" \
+            "${TARGET[@]}" \
+            --generate-notes \
+            --notes "$NOTES" \
+            $(ls respec-alarm-*.apk 2>/dev/null)
