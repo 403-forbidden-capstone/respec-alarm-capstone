@@ -1,0 +1,13 @@
+# 릴리즈 노트를 만들 때 머지된 PR을 라벨별로 묶는 기준입니다.
+changelog:
+  categories:
+    - title: 프론트엔드
+      labels: [FE]
+    - title: 백엔드
+      labels: [BE]
+    - title: 디자인
+      labels: [DESIGN]
+    - title: 버전 업데이트
+      labels: [dependencies]
+    - title: 기타
+      labels: ["*"]

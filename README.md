@@ -80,6 +80,25 @@ PR 제목   [파트] [유형] 작업 내용             [FE] [FEAT] 알람 목�
 
 한 폴더에서는 Claude 세션을 하나만 엽니다. 동시에 두 작업을 하면 `git worktree`로 폴더를 나누고, 커밋은 파일을 지정해서 합니다.
 
+## 자동화
+
+| 언제 | 무엇이 |
+|---|---|
+| 이슈를 만들면 | 보드에 등록, 이슈 틀 값으로 보드 칸 채우기 |
+| 브랜치를 만들면 | 이슈가 진행 중으로, 빈 시작일 · 담당자 채우기 |
+| PR을 열면 | Claude 리뷰, 파트 · 크기 라벨, 담당자 지정, 비밀값 유출 검사 |
+| 머지하면 | 이슈가 완료로 |
+| 매주 월요일 오전 9시 | `주간 요약` 이슈에 지난주 완료 · 머지 · 리뷰 대기 · 멈춘 일 정리 |
+| `v`로 시작하는 태그를 달면 | Releases에 데모 버전, 앱이 있으면 APK와 설치 QR |
+| 매달 | 워크플로 부품 버전 올리기 PR (Dependabot) |
+
+데모 버전은 main에서 태그를 달아 만듭니다.
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
 ## main 보호 규칙
 
 PR 필수, 승인 1명(새 커밋이 올라오면 다시 승인), 리뷰 대화 해결, Squash만, 강제 push와 브랜치 삭제 금지.
@@ -108,7 +127,12 @@ PR 필수, 승인 1명(새 커밋이 올라오면 다시 승인), 리뷰 대화 
 |---|---|---|
 | `PROJECT_TOKEN` | 보드 자동 연동 | classic 토큰, 권한 `repo` · `project` |
 | `CLAUDE_CODE_OAUTH_TOKEN` | Claude 리뷰 | `npx @anthropic-ai/claude-code setup-token`으로 발급 |
+| `EXPO_TOKEN` | 데모 릴리즈 APK 빌드 | Expo 계정 설정에서 발급 (앱이 생긴 뒤) |
 
-자동화 파일은 `.github/workflows/`의 `project-sync.yml`(보드 연동), `claude-review.yml`(PR 자동 리뷰), `claude.yml`(@claude 멘션)입니다.
+자동화 파일은 모두 `.github/workflows/`에 있습니다.
 
 </details>
+
+## 라이선스
+
+팀 403 Forbidden(김지형 · 유혜린 · 이수연 · 전준성)의 저작물입니다. 포텐셜랩스와의 산학 협력 범위 안에서만 사용할 수 있습니다. 자세한 내용은 [LICENSE](LICENSE)를 봅니다.

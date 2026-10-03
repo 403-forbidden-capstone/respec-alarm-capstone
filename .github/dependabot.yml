@@ -1,0 +1,16 @@
+# 워크플로에서 쓰는 GitHub Actions 부품의 버전을 한 달에 한 번 확인해, 올리기 PR을 하나로 묶어 만듭니다.
+# 앱 패키지(npm)는 Expo SDK 버전과 맞물려 있어 자동으로 올리지 않습니다. `npx expo install --fix`로 맞춥니다.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+      timezone: Asia/Seoul
+    commit-message:
+      prefix: "[ALL] [CHORE]"
+    labels:
+      - dependencies
+    groups:
+      actions:
+        patterns: ["*"]

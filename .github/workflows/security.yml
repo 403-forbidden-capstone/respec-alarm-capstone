@@ -1,0 +1,86 @@
+name: 보안 검사
+
+# 비밀값 유출: 커밋에 키 · 토큰 · 비밀번호가 들어갔는지 gitleaks로 검사하고, 발견되면 실패합니다.
+#   PR은 PR의 커밋만, main push는 새로 들어온 커밋만, 매주 월요일에는 전체 기록을 검사합니다.
+#   실수로 올렸다면 커밋을 지우기 전에 그 키부터 재발급합니다. 이미 노출된 것으로 봅니다.
+# 패키지 취약점: 앱(mobile/)이 있으면 npm audit 결과를 요약합니다. 알림만 하고 막지는 않습니다.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    - cron: '0 1 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: security-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  secrets:
+    name: 비밀값 유출 검사
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: gitleaks 설치
+        env:
+          VERSION: 8.30.1
+        run: |
+          BASE="https://github.com/gitleaks/gitleaks/releases/download/v${VERSION}"
+          FILE="gitleaks_${VERSION}_linux_x64.tar.gz"
+          curl -sSfLO "$BASE/$FILE"
+          curl -sSfL "$BASE/gitleaks_${VERSION}_checksums.txt" | grep " $FILE\$" | sha256sum -c -
+          tar -xzf "$FILE" gitleaks
+
+      - name: 검사
+        env:
+          EVENT: ${{ github.event_name }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+          BEFORE: ${{ github.event.before }}
+        run: |
+          RANGE=""
+          if [ "$EVENT" = "pull_request" ]; then
+            RANGE="$PR_BASE..$PR_HEAD"
+          elif [ "$EVENT" = "push" ] && [ -n "$BEFORE" ] && [ "$BEFORE" != "0000000000000000000000000000000000000000" ]; then
+            RANGE="$BEFORE..$GITHUB_SHA"
+          fi
+          if [ -n "$RANGE" ]; then
+            ./gitleaks git --redact --verbose --log-opts="$RANGE" .
+          else
+            ./gitleaks git --redact --verbose .
+          fi
+
+  packages:
+    name: 패키지 취약점 검사
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: 검사
+        run: |
+          if [ ! -f mobile/package-lock.json ]; then
+            echo "앱(mobile/)이 아직 없어 건너뜁니다." | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          cd mobile
+          npm audit --omit=dev --json > audit.json || true
+          HIGH=$(jq '(.metadata.vulnerabilities.high // 0) + (.metadata.vulnerabilities.critical // 0)' audit.json 2>/dev/null || echo 0)
+          {
+            echo "### 패키지 취약점 (높음 이상 ${HIGH}개)"
+            echo '```'
+            npm audit --omit=dev --audit-level=high || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$HIGH" != "0" ]; then
+            echo "::warning::높음 이상 취약점 ${HIGH}개. Expo 패키지는 npx expo install --fix로 맞춰 보세요."
+          fi
