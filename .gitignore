@@ -1,0 +1,38 @@
+# 의존성
+node_modules/
+
+# Expo · 빌드 산출물
+.expo/
+dist/
+web-build/
+expo-env.d.ts
+*.tsbuildinfo
+.metro-health-check*
+
+# 네이티브 폴더 — npx expo prebuild가 매번 새로 만듦
+mobile/android/
+mobile/ios/
+.kotlin/
+
+# 비밀 값
+.env
+.env*.local
+*.jks
+*.keystore
+*.p8
+*.p12
+*.key
+*.pem
+*.mobileprovision
+
+# 개인 클로드 설정 (레포에 안 올림)
+CLAUDE.local.md
+.claude/settings.local.json
+
+# 로그 · OS
+npm-debug.*
+yarn-debug.*
+yarn-error.*
+*.orig.*
+.DS_Store
+Thumbs.db

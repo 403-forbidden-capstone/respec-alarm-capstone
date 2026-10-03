@@ -62,7 +62,23 @@ PR 제목   [파트] [유형] 작업 내용             [FE] [FEAT] 알람 목�
 
 ## 리뷰
 
-리뷰어 1명의 승인이 기본입니다. PR 댓글에 `@claude 리뷰해줘`라고 쓰면 Claude가 `pr-review` 기준으로 검수해 댓글을 남깁니다. 멘션할 때만 실행됩니다.
+리뷰어 1명의 승인이 기본이고, 그 전에 Claude가 먼저 한 번 봅니다.
+
+- PR을 열면 Claude가 `pr-review` 스킬과 [레포 체크리스트](.claude/review-checklist.md)로 검수해 댓글을 남깁니다.
+- 새 커밋마다 다시 돌지는 않습니다. 다시 받고 싶으면 PR 댓글에 `@claude 다시 리뷰해줘`라고 씁니다.
+- 제목에 `[WIP]`가 있거나 문서만 바꾼 PR은 건너뜁니다. `[WIP]`를 빼는 순간 검수합니다.
+- 변경이 크거나 위험한 영역이면 보고 끝에 `/code-review ultra` 추천이 붙습니다. 로컬 Claude Code에서 실행합니다.
+- 코드 줄 댓글에서 `@claude 이거 왜 이렇게 했어?`처럼 물어볼 수도 있습니다.
+
+## Claude 같이 쓰기
+
+| 파일 | 레포에 올라감 | 용도 |
+|---|:-:|---|
+| [`CLAUDE.md`](CLAUDE.md) | 올라감 | 모두의 Claude가 읽는 공통 규칙 |
+| [`.claude/team/<이름>.md`](.claude/team) | 올라감 | 각자의 역할 · 담당 영역 카드 |
+| `CLAUDE.local.md` | 안 올라감 | 내 카드 불러오기와 지금 하는 일 |
+
+한 폴더에서는 Claude 세션을 하나만 엽니다. 동시에 두 작업을 하면 `git worktree`로 폴더를 나누고, 커밋은 파일을 지정해서 합니다.
 
 ## main 보호 규칙
 
@@ -90,9 +106,9 @@ PR 필수, 승인 1명(새 커밋이 올라오면 다시 승인), 리뷰 대화 
 
 | Secret | 용도 | 만드는 법 |
 |---|---|---|
-| `PROJECT_TOKEN` | 보드 자동 연동 | Fine-grained 토큰, 소유자 `403-forbidden-capstone`, 레포 `respec-alarm-capstone`만, 권한 Issues 읽기·쓰기 · Pull requests 읽기 · 조직 Projects 읽기·쓰기 |
+| `PROJECT_TOKEN` | 보드 자동 연동 | classic 토큰, 권한 `repo` · `project` |
 | `CLAUDE_CODE_OAUTH_TOKEN` | Claude 리뷰 | `npx @anthropic-ai/claude-code setup-token`으로 발급 |
 
-자동화 파일은 `.github/workflows/project-sync.yml`(보드 연동)과 `.github/workflows/claude.yml`(Claude 리뷰)입니다.
+자동화 파일은 `.github/workflows/`의 `project-sync.yml`(보드 연동), `claude-review.yml`(PR 자동 리뷰), `claude.yml`(@claude 멘션)입니다.
 
 </details>

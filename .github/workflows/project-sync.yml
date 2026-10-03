@@ -51,7 +51,7 @@ jobs:
               await sync({ github, context, core });
             } catch (error) {
               if (/not accessible|Bad credentials|scope/i.test(error.message)) {
-                core.setFailed(`PROJECT_TOKEN 권한이 부족해요. 소유자 403-forbidden-capstone, Issues 읽기·쓰기, Pull requests 읽기, 조직 Projects 읽기·쓰기가 있어야 해요. (${error.message})`);
+                core.setFailed(`PROJECT_TOKEN 권한이 부족해요. classic 토큰이면 repo · project 권한이 있어야 해요. (${error.message})`);
               } else {
                 throw error;
               }

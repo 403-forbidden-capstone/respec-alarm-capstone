@@ -1,0 +1,67 @@
+name: Claude 자동 리뷰
+
+# PR이 열리면 Claude가 pr-review 스킬 + 레포 체크리스트로 한 번 검수합니다.
+#   - 새 커밋마다 다시 돌지 않습니다. 다시 받고 싶으면 PR 댓글에 "@claude 다시 리뷰해줘"
+#   - 제목에 [WIP]가 있으면 건너뛰고, [WIP]를 빼는 순간 검수합니다
+#   - 문서(.md)만 바꾼 PR, Dependabot PR은 건너뜁니다
+# 사용량은 CLAUDE_CODE_OAUTH_TOKEN 주인의 Claude 구독에서 나갑니다.
+
+on:
+  pull_request:
+    types: [opened, reopened, ready_for_review, edited]
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
+
+concurrency:
+  group: claude-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    name: Claude 리뷰
+    if: |
+      github.event.pull_request.draft == false &&
+      github.event.pull_request.user.type != 'Bot' &&
+      !startsWith(github.event.pull_request.title, '[WIP]') &&
+      (github.event.action != 'edited' || startsWith(github.event.changes.title.from, '[WIP]'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+      id-token: write
+      actions: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Claude
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          prompt: |
+            REPO: ${{ github.repository }}
+            PR 번호: ${{ github.event.pull_request.number }}
+            PR 제목: ${{ github.event.pull_request.title }}
+            기준 브랜치: ${{ github.event.pull_request.base.ref }}
+
+            이 PR을 검수해 주세요. PR 브랜치는 이미 현재 폴더에 체크아웃되어 있습니다.
+
+            1. `pr-review` 스킬로 기본 검수를 합니다. GitHub Actions 환경이라 브라우저 · Lighthouse · 이중 빌드가 필요한 항목은 "건너뜀: 사유"로 적습니다.
+            2. 이어서 `.claude/review-checklist.md`의 레포 전용 항목을 확인합니다.
+            3. 결과는 한국어로, GitHub 댓글로만 남깁니다. 메시지로 답하지 않습니다.
+               - 확실한 줄 단위 문제는 `mcp__github_inline_comment__create_inline_comment`(confirmed: true)로 해당 줄에 남깁니다. 많아야 10개입니다.
+               - 전체 보고는 `gh pr comment`로 댓글 하나만 남깁니다. 순서: 한 줄 요약 → 머지 판단(머지 가능 / 수정 후 머지 / 막힘) → 심각도 순 발견 사항(파일:줄) → 건너뛴 항목.
+            4. 아래 중 하나라도 해당하면 보고 맨 끝에 한 줄을 붙입니다. 해당하지 않으면 넣지 않습니다.
+               "더 깊은 검수가 필요하면 로컬 Claude Code에서 `/code-review ultra ${{ github.event.pull_request.number }}` 를 추천합니다 — 이유: (한 줄)"
+               - 바뀐 파일 15개 이상 또는 바뀐 줄 500줄 이상
+               - 인증 · 권한(RLS) · 비밀값 · 외부 입력 처리 · 알람 예약처럼 틀리면 위험한 영역
+               - 확신이 낮은 발견이 여러 개
+          claude_args: |
+            --model claude-opus-5-5
+            --max-turns 50
+            --allowedTools "Skill,Read,Glob,Grep,mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(git merge-base:*),Bash(cat:*),Bash(ls:*)"
