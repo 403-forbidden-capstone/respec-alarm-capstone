@@ -109,13 +109,21 @@ async function onBranchCreated(sync, payload, { github, context, core }) {
 }
 
 // PR: 연결된 이슈(Closes #번호)를 리뷰 → 머지면 완료, 머지 없이 닫히면 다시 진행 중
+// 리뷰로 옮길 때 이슈의 파트 라벨을 PR에 붙이고, 비어 있는 담당자를 PR 작성자로 채운다
 async function onPullRequest(sync, payload, { github, context }) {
   const { action, pull_request: pr } = payload;
   const { repository } = await github.graphql(
     `query($owner: String!, $repo: String!, $number: Int!) {
       repository(owner: $owner, name: $repo) {
         pullRequest(number: $number) {
-          closingIssuesReferences(first: 10) { nodes { id number state } }
+          closingIssuesReferences(first: 10) {
+            nodes {
+              id number state
+              repository { nameWithOwner }
+              labels(first: 20) { nodes { name } }
+              assignees(first: 1) { totalCount }
+            }
+          }
         }
       }
     }`,
@@ -135,6 +143,32 @@ async function onPullRequest(sync, payload, { github, context }) {
     if (status !== STATUS.done && issue.state !== 'OPEN') continue;
     const itemId = await sync.addItem(issue.id);
     await sync.setStatus(itemId, status);
+  }
+
+  if (status === STATUS.review) await fillPullRequest(pr, issues, { github, context });
+}
+
+// 파트 라벨(릴리즈 노트 분류용)과 담당자(보드 카드에 누가 하는지 보이게).
+// 이미 있으면 건드리지 않으므로 PR을 고쳐서 다시 돌아도 같은 결과다.
+async function fillPullRequest(pr, issues, { github, context }) {
+  const { owner, repo } = context.repo;
+  const ours = issues.filter((issue) => issue.repository.nameWithOwner === `${owner}/${repo}`);
+
+  const current = (pr.labels ?? []).map((l) => l.name);
+  const parts = new Set();
+  for (const issue of ours) {
+    for (const { name } of issue.labels.nodes) if (PART_LABELS.includes(name)) parts.add(name);
+  }
+  const missing = [...parts].filter((name) => !current.includes(name));
+  if (missing.length) await github.rest.issues.addLabels({ owner, repo, issue_number: pr.number, labels: missing });
+
+  if (pr.user?.type !== 'User') return;
+  const assignees = [pr.user.login];
+  if (!pr.assignees?.length) await github.rest.issues.addAssignees({ owner, repo, issue_number: pr.number, assignees });
+  for (const issue of ours) {
+    if (issue.state === 'OPEN' && issue.assignees.totalCount === 0) {
+      await github.rest.issues.addAssignees({ owner, repo, issue_number: issue.number, assignees });
+    }
   }
 }
 

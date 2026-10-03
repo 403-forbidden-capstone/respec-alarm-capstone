@@ -24,6 +24,7 @@
 
 - 이슈 → 브랜치 → PR → 리뷰 → Squash 머지 (자세한 규칙은 README)
 - 브랜치 `{유형}/{이슈번호}-{파트}-{설명}`, PR 제목 `[파트] [유형] 작업 내용`, 본문 `Closes #이슈번호`
+- PR 본문은 `.github/pull_request_template.md` 틀대로 씁니다. `gh pr create --body`로 만들 때도 틀을 읽어서 채웁니다.
 - main에 직접 push하지 않습니다. 커밋 · push · PR · 이슈 생성은 작업자에게 확인받고 합니다.
 
 ## 4명이 같이 쓸 때
