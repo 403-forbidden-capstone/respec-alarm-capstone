@@ -54,7 +54,7 @@
 PR 제목   [파트] [유형] 작업 내용             [FE] [FEAT] 알람 목록 화면 구현
 ```
 
-- 유형은 `feat` `fix` `docs` `refactor` `chore`, 파트는 `FE` `BE` `AI` `DATA` `DESIGN` `ALL`(공통)입니다.
+- 유형은 `feat` `fix` `docs` `refactor` `chore`, 파트는 `FE` `BE` `AI` `DATA` `DESIGN` `PM` `ALL`(공통)입니다.
 - 브랜치 이름에 이슈 번호가 있어야 보드가 따라 움직입니다.
 - Squash 머지만 허용되어 PR 제목이 그대로 `main`의 커밋 한 줄이 됩니다.
 - 승인 1명을 받고 리뷰 대화를 모두 해결한 뒤 작성자 본인이 머지합니다. 머지한 브랜치는 자동으로 지워집니다.
@@ -72,11 +72,7 @@ PR 제목   [파트] [유형] 작업 내용             [FE] [FEAT] 알람 목�
 
 ## Claude 같이 쓰기
 
-| 파일 | 레포에 올라감 | 용도 |
-|---|:-:|---|
-| [`CLAUDE.md`](CLAUDE.md) | 올라감 | 모두의 Claude가 읽는 공통 규칙 |
-| [`.claude/team/<이름>.md`](.claude/team) | 올라감 | 각자의 역할 · 담당 영역 카드 |
-| `CLAUDE.local.md` | 안 올라감 | 내 카드 불러오기와 지금 하는 일 |
+모두의 Claude가 [`CLAUDE.md`](CLAUDE.md)의 공통 규칙을 읽습니다. 팀이 알아야 할 결정은 이 파일에 PR로 남깁니다.
 
 한 폴더에서는 Claude 세션을 하나만 엽니다. 동시에 두 작업을 하면 `git worktree`로 폴더를 나누고, 커밋은 파일을 지정해서 합니다.
 
