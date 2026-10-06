@@ -21,7 +21,7 @@ on:
 permissions:
   contents: read
 
-# 빌드 요청은 한 번에 하나씩 (무료 플랜은 동시 빌드 1개)
+# 빌드 "요청"만 한 번에 하나씩 보냄. 실제 빌드 줄 세우기는 EAS 대기열이 함 (무료 플랜은 동시 빌드 1개)
 concurrency:
   group: eas-build
   cancel-in-progress: false

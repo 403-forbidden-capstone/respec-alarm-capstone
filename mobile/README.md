@@ -73,7 +73,8 @@ npx eas-cli update --channel preview --message "무엇을 고쳤는지"
 - EAS 무료 플랜은 한 달 Android 빌드 15회. 네이티브가 안 바뀌면 빌드하지 않음
 - 데모 릴리스는 `v0.1.0`처럼 태그를 달면 release.yml이 preview APK를 빌드해 Releases에 QR과 함께 붙임
 - 처음 한 번은 Expo 조직 Owner가 터미널에서 `development` 빌드를 직접 돌려 키스토어를 만듦(이후 빌드는 버튼으로 됨)
-- 설정값: `eas.json`(프로필 · 채널), `app.json`(`runtimeVersion` fingerprint, `updates.url`), Secret `EXPO_TOKEN`(Expo 조직 로봇 토큰)
+- 설정값: `eas.json`(프로필 · 채널), `app.json`(`runtimeVersion` fingerprint), Secret `EXPO_TOKEN`(Expo 조직 로봇 토큰)
+- `app.json`의 `owner` · `projectId` · `updates.url`은 Expo 조직을 만든 뒤 연결 PR로 넣음. 그 전에는 `eas update`가 동작하지 않음
 
 ### 환경 변수
 
