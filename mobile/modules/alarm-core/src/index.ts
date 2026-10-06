@@ -49,7 +49,7 @@ function requireAlarmCore(): AlarmCoreNativeModule {
   return nativeModule;
 }
 
-/** 예약: atMillis(epoch ms)에 한 번 울림. 같은 id면 덮어씀 */
+/** 예약: atMillis(epoch ms)에 한 번 울림. 같은 id면 덮어씀, 지난 시각이면 reject */
 export async function scheduleOneShotAlarm(id: string, title: string, atMillis: number) {
   requireAlarmCore().scheduleOneShot(id, title, atMillis);
 }

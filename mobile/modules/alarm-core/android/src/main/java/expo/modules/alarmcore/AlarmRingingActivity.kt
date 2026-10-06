@@ -122,12 +122,12 @@ class AlarmRingingActivity : Activity() {
     setContentView(root)
   }
 
+  // 화면은 소리가 멈출 때 서비스가 닫음 (미루기 예약이 실패해 계속 울리면 화면도 남아 해제할 수 있음)
   private fun sendAlarmAction(action: String) {
     sendBroadcast(Intent(this, AlarmActionReceiver::class.java).apply {
       this.action = action
       putExtra(AlarmScheduler.EXTRA_ALARM_ID, alarmId)
     })
-    finish()
   }
 
   private fun matchWidth() = LinearLayout.LayoutParams(

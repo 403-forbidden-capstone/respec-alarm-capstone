@@ -11,6 +11,7 @@ import android.media.AudioAttributes
 import android.media.AudioFocusRequest
 import android.media.AudioManager
 import android.media.MediaPlayer
+import android.media.RingtoneManager
 import android.net.Uri
 import android.os.Build
 import android.os.Handler
@@ -191,11 +192,29 @@ class AlarmPlaybackService : Service() {
       requestAudioFocus(audioAttributes)
       forceAlarmVolume()
 
-      // 알람음은 이 모듈 res/raw에 있음. 빌드 때 앱 리소스로 합쳐지므로 앱 패키지 이름으로 찾음
-      val uri = Uri.parse("android.resource://$packageName/${R.raw.alarm_siren}")
-      val player = MediaPlayer()
+      // 우리 알람음이 안 되면 폰 기본 알람음으로 (무음으로 끝나지 않게)
+      val player = alarmSounds().firstNotNullOfOrNull { preparePlayer(it, audioAttributes) }
+        ?: throw IllegalStateException("알람음을 재생할 수 없습니다.")
       mediaPlayer = player
-      player.setAudioAttributes(audioAttributes)
+      player.setVolume(1f, 1f)
+      player.start()
+    }.isSuccess
+
+    if (!started) releasePlayback()
+    return started
+  }
+
+  // 알람음은 이 모듈 res/raw에 있음. 빌드 때 앱 리소스로 합쳐지므로 앱 패키지 이름으로 찾음
+  private fun alarmSounds(): List<Uri> = listOfNotNull(
+    Uri.parse("android.resource://$packageName/${R.raw.alarm_siren}"),
+    RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM),
+  )
+
+  // 재생 준비까지 끝낸 플레이어. 실패하면 null
+  private fun preparePlayer(uri: Uri, attributes: AudioAttributes): MediaPlayer? {
+    val player = MediaPlayer()
+    return runCatching {
+      player.setAudioAttributes(attributes)
       player.setDataSource(this, uri)
       player.isLooping = true
       // 재생 중에 오류가 나도 멈추고 볼륨을 되돌림
@@ -204,12 +223,8 @@ class AlarmPlaybackService : Service() {
         true
       }
       player.prepare()
-      player.setVolume(1f, 1f)
-      player.start()
-    }.isSuccess
-
-    if (!started) releasePlayback()
-    return started
+      player
+    }.onFailure { player.release() }.getOrNull()
   }
 
   private fun requestAudioFocus(attributes: AudioAttributes) {

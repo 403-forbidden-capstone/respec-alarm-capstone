@@ -4,6 +4,7 @@ import android.app.AlarmManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
 import java.util.Calendar
 
 object AlarmScheduler {
@@ -22,7 +23,9 @@ object AlarmScheduler {
   private fun requestCode(id: String): Int = id.hashCode() and 0x7fffffff
 
   private fun alarmIntent(context: Context, id: String): PendingIntent {
+    // PendingIntent는 extras를 비교하지 않음 → data에 id를 넣어 알람마다 구분 (requestCode 해시가 겹쳐도 안 덮어씀)
     val intent = Intent(context, AlarmReceiver::class.java).apply {
+      data = Uri.fromParts("alarmcore", id, null)
       putExtra(EXTRA_ALARM_ID, id)
     }
     return PendingIntent.getBroadcast(
@@ -34,6 +37,8 @@ object AlarmScheduler {
   }
 
   fun scheduleOneShot(context: Context, id: String, title: String, triggerAtMillis: Long) {
+    // setAlarmClock은 지난 시각이면 바로 울림 → 거절함
+    require(triggerAtMillis > System.currentTimeMillis()) { "이미 지난 시각입니다." }
     AlarmStorage.saveOneShot(context, id, title, triggerAtMillis)
     runCatching { schedule(context, id, triggerAtMillis) }.onFailure {
       AlarmStorage.remove(context, id)
