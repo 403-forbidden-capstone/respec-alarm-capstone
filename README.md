@@ -14,7 +14,7 @@
 ![Gemini API](https://img.shields.io/badge/Gemini_API-24292f?style=flat-square&logo=googlegemini&logoColor=white)
 ![Android](https://img.shields.io/badge/Android-24292f?style=flat-square&logo=android&logoColor=white)
 
-[보드](https://github.com/orgs/403-forbidden-capstone/projects/1) · [새 이슈](https://github.com/403-forbidden-capstone/respec-alarm-capstone/issues/new/choose) · [마일스톤](https://github.com/403-forbidden-capstone/respec-alarm-capstone/milestones) · [Pull Requests](https://github.com/403-forbidden-capstone/respec-alarm-capstone/pulls)
+[웹 미리보기](https://respec-alarm-9omnn7zo.pages.dev) · [클릭 목업](https://respec-alarm-9omnn7zo.pages.dev/mockup.html) · [최신 APK](https://github.com/403-forbidden-capstone/respec-alarm-capstone/releases/latest) · [보드](https://github.com/orgs/403-forbidden-capstone/projects/1) · [새 이슈](https://github.com/403-forbidden-capstone/respec-alarm-capstone/issues/new/choose) · [마일스톤](https://github.com/403-forbidden-capstone/respec-alarm-capstone/milestones) · [Pull Requests](https://github.com/403-forbidden-capstone/respec-alarm-capstone/pulls)
 
 <sub>2026-2 캡스톤디자인 · 포텐셜랩스 산학 협력 · 팀 403 Forbidden</sub>
 
@@ -77,8 +77,9 @@ PR 제목   [파트] [유형] 작업 내용             [FE] [FEAT] 알람 목�
 |---|---|
 | 이슈를 만들면 | 보드에 등록, 이슈 틀 값으로 보드 칸 채우기 |
 | 브랜치를 만들면 | 이슈가 진행 중으로, 빈 시작일 · 담당자 채우기 |
-| PR을 열면 | 이슈가 리뷰로, 이슈의 파트 라벨을 PR에, 빈 담당자 채우기, Claude 리뷰, 비밀값 유출 검사 |
-| 머지하면 | 이슈가 완료로 |
+| PR을 열면 | 이슈가 리뷰로, 이슈의 파트 라벨을 PR에, 빈 담당자 채우기, Claude 리뷰, 비밀값 유출 검사, 웹 미리보기 주소 (검사 목록의 Cloudflare Pages → Details) |
+| 머지하면 | 이슈가 완료로, [웹 미리보기](https://respec-alarm-9omnn7zo.pages.dev) 고정 주소 갱신 |
+| Actions → APK 빌드 → Run workflow | EAS로 개발용 · 테스트용 APK 빌드, 실행 요약에 설치 QR |
 | 매주 월요일 오전 9시 | `주간 요약` 이슈에 지난주 완료 · 머지 · 리뷰 대기 · 멈춘 일 정리 |
 | `v`로 시작하는 태그를 달면 | Releases에 데모 버전, 앱이 있으면 APK와 설치 QR |
 | 매달 | 워크플로 부품 버전 올리기 PR (Dependabot) |
@@ -110,17 +111,23 @@ PR 필수, 승인 1명(새 커밋이 올라오면 다시 승인), 리뷰 대화 
 | 창의경진대회 데모 | 12/4 시연 |
 
 <details>
-<summary>관리자 설정</summary>
+<summary>관리자 설정 · 비밀값</summary>
 
 <br />
 
-| Secret | 용도 | 만드는 법 |
+| 값 | 넣는 곳 | 만드는 곳 |
 |---|---|---|
-| `PROJECT_TOKEN` | 보드 자동 연동 | classic 토큰, 권한 `repo` · `project` |
-| `CLAUDE_CODE_OAUTH_TOKEN` | Claude 리뷰 | `npx @anthropic-ai/claude-code setup-token`으로 발급 |
-| `EXPO_TOKEN` | 데모 릴리즈 APK 빌드 | Expo 계정 설정에서 발급 (앱이 생긴 뒤) |
+| `PROJECT_TOKEN` | GitHub Secret | classic 토큰, 권한 `repo` · `project` |
+| `CLAUDE_CODE_OAUTH_TOKEN` | GitHub Secret | `npx @anthropic-ai/claude-code setup-token` |
+| `EXPO_TOKEN` | GitHub Secret | expo.dev → 조직 → Access tokens → 로봇 사용자 |
+| `EXPO_PUBLIC_SUPABASE_URL` · `EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | `mobile/.env` · Cloudflare 변수 · EAS 환경 변수 | Supabase → Project Settings → API Keys |
+| `KAKAO_REST_API_KEY` · `GEMINI_API_KEY` | Supabase Edge Function secrets | 카카오 디벨로퍼스 · Google AI Studio |
+| 카카오 · 구글 로그인 키 | Supabase → Authentication → Providers | 카카오 디벨로퍼스 · Google Cloud Console |
+| `google-services.json` · FCM 서비스 계정 키 | EAS 파일 환경 변수 · credentials | Firebase 콘솔 |
 
-자동화 파일은 모두 `.github/workflows/`에 있습니다.
+공개돼도 되는 값은 `EXPO_PUBLIC_`으로 시작하는 두 개뿐입니다. 나머지는 레포와 앱에 넣지 않습니다. 예시 파일은 [`mobile/.env.example`](mobile/.env.example)과 [`supabase/functions/.env.example`](supabase/functions/.env.example)입니다.
+
+자동화 파일은 모두 `.github/workflows/`에 있습니다. 웹 미리보기 빌드 설정은 Cloudflare Pages 프로젝트 `respec-alarm-9omnn7zo`에 있습니다.
 
 </details>
 

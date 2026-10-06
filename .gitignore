@@ -14,9 +14,10 @@ mobile/android/
 mobile/ios/
 .kotlin/
 
-# 비밀 값
+# 비밀 값 — 예시 파일(.env.example)만 올림
 .env
-.env*.local
+.env.*
+!.env.example
 *.jks
 *.keystore
 *.p8
@@ -24,6 +25,28 @@ mobile/ios/
 *.key
 *.pem
 *.mobileprovision
+# EAS 로컬 인증 파일(키스토어 경로 · 비밀번호)
+credentials.json
+# FCM 설정 · 서비스 계정 키 — EAS 파일 환경 변수 · credentials로 넣음
+google-services.json
+*firebase-adminsdk*.json
+service-account*.json
+
+# Supabase CLI 임시 폴더
+supabase/.branches/
+supabase/.temp/
+
+# Cloudflare wrangler (쓰게 되면)
+.wrangler/
+.dev.vars
+
+# Python (모델 학습 스크립트)
+__pycache__/
+.venv/
+.ipynb_checkpoints/
+
+# 테스트
+coverage/
 
 # 개인 클로드 설정 (레포에 안 올림)
 CLAUDE.local.md

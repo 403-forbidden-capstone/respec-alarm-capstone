@@ -38,9 +38,10 @@ npm run web
 
 | 무엇 | 어디 | 주소 |
 |---|---|---|
-| 웹 미리보기 | Cloudflare Pages | main: `https://<프로젝트>.pages.dev` · PR: `https://<브랜치>.<프로젝트>.pages.dev` |
-| 클릭 목업 | 같은 사이트 | `https://<프로젝트>.pages.dev/mockup.html` |
-| 앱 APK | EAS Build | 빌드 페이지의 Install 버튼 → 링크 · QR |
+| 웹 미리보기 | Cloudflare Pages | main: https://respec-alarm-9omnn7zo.pages.dev · PR: `https://<브랜치>.respec-alarm-9omnn7zo.pages.dev` |
+| 클릭 목업 | 같은 사이트 | https://respec-alarm-9omnn7zo.pages.dev/mockup.html |
+| 최신 데모 APK | GitHub Releases | [releases/latest](https://github.com/403-forbidden-capstone/respec-alarm-capstone/releases/latest) (QR은 누구나, 파일은 레포 멤버) |
+| 테스트 APK | EAS Build | Actions 실행 요약의 QR → 빌드 페이지 Install 버튼. Expo 조직 멤버는 expo.dev 빌드 목록 |
 
 ### 웹
 
@@ -73,3 +74,12 @@ npx eas-cli update --channel preview --message "무엇을 고쳤는지"
 - 데모 릴리스는 `v0.1.0`처럼 태그를 달면 release.yml이 preview APK를 빌드해 Releases에 QR과 함께 붙임
 - 처음 한 번은 Expo 조직 Owner가 터미널에서 `development` 빌드를 직접 돌려 키스토어를 만듦(이후 빌드는 버튼으로 됨)
 - 설정값: `eas.json`(프로필 · 채널), `app.json`(`runtimeVersion` fingerprint, `updates.url`), Secret `EXPO_TOKEN`(Expo 조직 로봇 토큰)
+
+### 환경 변수
+
+```bash
+cp .env.example .env
+```
+
+- 값을 받는 곳과 넣는 곳은 루트 README의 "관리자 설정 · 비밀값" 표에 있음. `.env`는 커밋되지 않음
+- `EXPO_PUBLIC_` 값은 빌드할 때 번들에 박힘. 로컬은 `.env`, 웹 미리보기는 Cloudflare 변수, APK는 EAS 환경 변수에 같은 값을 넣음

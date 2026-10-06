@@ -75,9 +75,13 @@ jobs:
             echo "## EAS $PROFILE 빌드 요청됨"
             echo
             if [ -n "$URL" ]; then
+              QR="https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=$(jq -rn --arg u "$URL" '$u|@uri')"
               echo "빌드 페이지: $URL"
               echo
-              echo "끝나면(보통 10~30분, 무료 플랜은 대기열이 길 수 있음) 페이지의 **Install** 버튼 → 링크 · QR로 폰에 설치합니다."
+              echo "<img src=\"$QR\" width=\"160\" alt=\"빌드 페이지 QR\" />"
+              echo
+              echo "끝나면(보통 10~30분, 무료 플랜은 대기열이 길 수 있음) 폰으로 QR을 찍고 페이지의 **Install** 버튼으로 설치합니다."
+              echo "Expo 조직 멤버는 [빌드 목록](${URL%/builds/*}/builds)에서 언제든 최신 빌드를 받습니다."
             else
               echo "빌드 페이지 주소를 로그에서 못 찾았어요. 위 로그를 확인해 주세요."
             fi
