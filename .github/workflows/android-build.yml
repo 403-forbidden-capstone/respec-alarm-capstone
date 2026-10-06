@@ -51,6 +51,14 @@ jobs:
     env:
       EXPO_NO_TELEMETRY: '1'
     steps:
+      # 기본 러너 디스크로는 Gradle 네이티브 빌드 중 꽉 참(No space left on device) → 안 쓰는 도구를 지움 (Android SDK는 남김)
+      - name: 디스크 비우기
+        working-directory: .
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/.ghcup /usr/local/share/boost /usr/local/share/powershell /usr/share/swift /opt/hostedtoolcache/CodeQL
+          sudo docker image prune --all --force > /dev/null 2>&1 || true
+          df -h /
+
       - name: Checkout
         uses: actions/checkout@v7
 
