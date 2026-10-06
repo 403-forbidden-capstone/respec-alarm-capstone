@@ -47,7 +47,7 @@ npm run web
 
 - main에 머지되면 고정 주소가 바뀜. PR을 열면 브랜치마다 미리보기 주소가 생김
 - PR 아래 검사 목록의 Workers Builds → Details를 누르면 미리보기로 감
-- Cloudflare Worker `respec-alarm-capstone`의 빌드 설정: 경로 `mobile` · 빌드 `npm run build:web` · 배포 `npx wrangler deploy`. Node는 `.nvmrc`, 출력 폴더(`dist`)와 없는 주소 처리는 `wrangler.jsonc`
+- Cloudflare Worker `respec-alarm-capstone`의 빌드 설정(Production · Previews 따로 있음, 둘 다 같게): 경로 `mobile` · 빌드 `npm run build:web` · 배포 `npx wrangler deploy` · Preview command `npx wrangler preview`. Node는 `.nvmrc`, 출력 폴더(`dist`)와 없는 주소 처리는 `wrangler.jsonc`
 - `public/` 안의 파일은 그대로 사이트에 실림(`public/mockup.html` → `/mockup.html`). `_headers`로 검색 엔진 색인을 막음
 - 폰 전용 기능(알람 모듈 · 소리 · 알림)은 웹에서 부르면 깨짐. `Platform.OS === 'web'`이면 건너뛰게 씀
 
