@@ -1,15 +1,12 @@
-import { StyleSheet, Text, View } from 'react-native';
+import { Screen, Text, TopBar } from '@/components/ui';
 
-// 03 AI 탭 — 목업이 들어올 자리
+// 03 AI 탭 — 목업 A02(AI 대화)가 들어올 자리 (#39)
 export default function AiScreen() {
   return (
-    <View style={styles.container}>
-      <Text style={styles.title}>03 AI</Text>
-    </View>
+    <Screen>
+      <TopBar screenId="A02" />
+      <Text variant="title">AI 대화</Text>
+      <Text variant="lead">자기 전 · 기상 후 대화가 들어올 자리예요.</Text>
+    </Screen>
   );
 }
-
-const styles = StyleSheet.create({
-  container: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  title: { fontSize: 20, fontWeight: '600' },
-});
