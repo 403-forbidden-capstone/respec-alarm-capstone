@@ -1,6 +1,6 @@
 import { Text as RNText, type TextProps as RNTextProps } from 'react-native';
 
-import { colors, font, type, type TypeVariant, type Weight } from '@/theme';
+import { colors, font, typeScale, type TypeVariant, type Weight } from '@/theme';
 
 type Tone = 'ink' | 'sub' | 'faint' | 'inverse' | 'warn';
 
@@ -26,7 +26,7 @@ export function Text({ variant = 'body', tone, weight, align, style, ...rest }: 
   return (
     <RNText
       style={[
-        type[variant],
+        typeScale[variant],
         { color: toneColor[tone ?? defaultTone] },
         weight ? font(weight) : null,
         align ? { textAlign: align } : null,

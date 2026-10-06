@@ -42,13 +42,13 @@ export default function RootLayout() {
 }
 
 const styles = StyleSheet.create({
-  page: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#E6E9E4' },
+  page: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.stage },
   phone: {
     width: PHONE.width,
     overflow: 'hidden',
     borderRadius: 52,
     borderWidth: 12,
-    borderColor: '#1A1B1A',
+    borderColor: colors.device,
     backgroundColor: colors.bg,
   },
 });

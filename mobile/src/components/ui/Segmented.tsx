@@ -39,7 +39,7 @@ const styles = StyleSheet.create({
   item: { flex: 1, height: size.segment, borderRadius: radius.segmentItem, alignItems: 'center', justifyContent: 'center' },
   on: {
     backgroundColor: colors.card,
-    shadowColor: '#000',
+    shadowColor: colors.shadow,
     shadowOpacity: 0.06,
     shadowRadius: 2,
     shadowOffset: { width: 0, height: 1 },

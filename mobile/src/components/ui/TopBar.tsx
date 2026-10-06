@@ -11,7 +11,7 @@ type Props = {
   right?: ReactNode;
 };
 
-// 화면 맨 위 줄 — 이전 버튼 · 화면 번호 · 오른쪽 버튼
+// 화면 맨 위 줄 — 왼쪽은 이전 버튼(있으면) 또는 화면 번호, 오른쪽은 버튼
 export function TopBar({ screenId, onBack, right }: Props) {
   return (
     <View style={styles.row}>

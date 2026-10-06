@@ -24,7 +24,7 @@ export function font(weight: Weight = 400): Pick<TextStyle, 'fontFamily'> {
 }
 
 // 목업 CSS의 글자 크기 · 굵기 · 줄 간격 · 자간(em → px)
-export const type = {
+export const typeScale = {
   screenId: { ...font(400), fontSize: 11.5, letterSpacing: 0.7 }, // .sid
   title: { ...font(700), fontSize: 23, lineHeight: 30, letterSpacing: -0.6 }, // .ttl
   lead: { ...font(400), fontSize: 13.5, lineHeight: 20 }, // .lead
@@ -40,4 +40,4 @@ export const type = {
   ringTime: { ...font(600), fontSize: 78, lineHeight: 82, letterSpacing: -3.5, fontVariant: ['tabular-nums'] }, // .ring-time
 } satisfies Record<string, TextStyle>;
 
-export type TypeVariant = keyof typeof type;
+export type TypeVariant = keyof typeof typeScale;

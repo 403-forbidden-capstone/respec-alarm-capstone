@@ -11,6 +11,7 @@ export const colors = {
   chip: '#EFEFEC', // 칩 · 세그먼트 바탕
   dash: '#CFCFCA', // 점선 카드 테두리
   switchOff: '#D8D8D4',
+  shadow: '#000000', // 그림자 색 (투명도는 쓰는 곳에서)
   inverse: '#FFFFFF', // 어두운 바탕 위 글자
 
   // 상태 점 · 경고
@@ -18,6 +19,10 @@ export const colors = {
   mid: '#7B99E8', // 준비 중
   zz: '#D3A630', // 아직 자는 중
   warn: '#C8553D', // 기준선 · 경고
+
+  // 웹 데모 휴대폰 틀 (PC 브라우저에서만)
+  stage: '#E6E9E4',
+  device: '#1A1B1A',
 
   // 알람 울림 화면 바탕 (종류별)
   ringWake: '#141414',

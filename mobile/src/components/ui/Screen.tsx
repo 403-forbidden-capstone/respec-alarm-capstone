@@ -12,9 +12,10 @@ type Props = {
 };
 
 // 화면 바탕 · 좌우 여백 · 안전 영역을 맞춘 화면 틀
+// 아래 고정 버튼(footer)이 있으면 시스템 내비게이션 막대에 가리지 않게 아래 안전 영역도 잡음
 export function Screen({ children, scroll = true, footer, contentStyle }: Props) {
   return (
-    <SafeAreaView style={styles.safe} edges={['top']}>
+    <SafeAreaView style={styles.safe} edges={footer ? ['top', 'bottom'] : ['top']}>
       {scroll ? (
         <ScrollView
           style={styles.fill}
