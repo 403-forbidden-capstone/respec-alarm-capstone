@@ -38,16 +38,16 @@ npm run web
 
 | 무엇 | 어디 | 주소 |
 |---|---|---|
-| 웹 미리보기 | Cloudflare Pages | main: https://respec-alarm-9omnn7zo.pages.dev · PR: `https://<브랜치>.respec-alarm-9omnn7zo.pages.dev` |
-| 클릭 목업 | 같은 사이트 | https://respec-alarm-9omnn7zo.pages.dev/mockup.html |
+| 웹 미리보기 | Cloudflare Workers | main: `https://respec-alarm-capstone.<계정>.workers.dev` · PR: 검사 목록의 Workers Builds → Details |
+| 클릭 목업 | 같은 사이트 | `/mockup.html` |
 | 최신 데모 APK | GitHub Releases | [releases/latest](https://github.com/403-forbidden-capstone/respec-alarm-capstone/releases/latest) (QR은 누구나, 파일은 레포 멤버) |
 | 테스트 APK | EAS Build | Actions 실행 요약의 QR → 빌드 페이지 Install 버튼. Expo 조직 멤버는 expo.dev 빌드 목록 |
 
 ### 웹
 
 - main에 머지되면 고정 주소가 바뀜. PR을 열면 브랜치마다 미리보기 주소가 생김
-- PR 아래 검사 목록의 Cloudflare Pages → Details를 누르면 미리보기로 감
-- 빌드 설정은 Cloudflare 쪽에 있음: 루트 `mobile`, 명령 `npm run build:web`, 출력 `dist`, Node는 `.nvmrc`
+- PR 아래 검사 목록의 Workers Builds → Details를 누르면 미리보기로 감
+- Cloudflare Worker `respec-alarm-capstone`의 빌드 설정: 경로 `mobile` · 빌드 `npm run build:web` · 배포 `npx wrangler deploy`. Node는 `.nvmrc`, 출력 폴더(`dist`)와 없는 주소 처리는 `wrangler.jsonc`
 - `public/` 안의 파일은 그대로 사이트에 실림(`public/mockup.html` → `/mockup.html`). `_headers`로 검색 엔진 색인을 막음
 - 폰 전용 기능(알람 모듈 · 소리 · 알림)은 웹에서 부르면 깨짐. `Platform.OS === 'web'`이면 건너뛰게 씀
 

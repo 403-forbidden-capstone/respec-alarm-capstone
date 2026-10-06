@@ -14,7 +14,7 @@
 ![Gemini API](https://img.shields.io/badge/Gemini_API-24292f?style=flat-square&logo=googlegemini&logoColor=white)
 ![Android](https://img.shields.io/badge/Android-24292f?style=flat-square&logo=android&logoColor=white)
 
-[웹 미리보기](https://respec-alarm-9omnn7zo.pages.dev) · [클릭 목업](https://respec-alarm-9omnn7zo.pages.dev/mockup.html) · [최신 APK](https://github.com/403-forbidden-capstone/respec-alarm-capstone/releases/latest) · [보드](https://github.com/orgs/403-forbidden-capstone/projects/1) · [새 이슈](https://github.com/403-forbidden-capstone/respec-alarm-capstone/issues/new/choose) · [마일스톤](https://github.com/403-forbidden-capstone/respec-alarm-capstone/milestones) · [Pull Requests](https://github.com/403-forbidden-capstone/respec-alarm-capstone/pulls)
+[최신 APK](https://github.com/403-forbidden-capstone/respec-alarm-capstone/releases/latest) · [보드](https://github.com/orgs/403-forbidden-capstone/projects/1) · [새 이슈](https://github.com/403-forbidden-capstone/respec-alarm-capstone/issues/new/choose) · [마일스톤](https://github.com/403-forbidden-capstone/respec-alarm-capstone/milestones) · [Pull Requests](https://github.com/403-forbidden-capstone/respec-alarm-capstone/pulls)
 
 <sub>2026-2 캡스톤디자인 · 포텐셜랩스 산학 협력 · 팀 403 Forbidden</sub>
 
@@ -77,8 +77,8 @@ PR 제목   [파트] [유형] 작업 내용             [FE] [FEAT] 알람 목�
 |---|---|
 | 이슈를 만들면 | 보드에 등록, 이슈 틀 값으로 보드 칸 채우기 |
 | 브랜치를 만들면 | 이슈가 진행 중으로, 빈 시작일 · 담당자 채우기 |
-| PR을 열면 | 이슈가 리뷰로, 이슈의 파트 라벨을 PR에, 빈 담당자 채우기, Claude 리뷰, 비밀값 유출 검사, 웹 미리보기 주소 (검사 목록의 Cloudflare Pages → Details) |
-| 머지하면 | 이슈가 완료로, [웹 미리보기](https://respec-alarm-9omnn7zo.pages.dev) 고정 주소 갱신 |
+| PR을 열면 | 이슈가 리뷰로, 이슈의 파트 라벨을 PR에, 빈 담당자 채우기, Claude 리뷰, 비밀값 유출 검사, 웹 미리보기 주소 (검사 목록의 Workers Builds → Details) |
+| 머지하면 | 이슈가 완료로, 웹 미리보기 고정 주소 갱신 |
 | Actions → APK 빌드 → Run workflow | EAS로 개발용 · 테스트용 APK 빌드, 실행 요약에 설치 QR |
 | 매주 월요일 오전 9시 | `주간 요약` 이슈에 지난주 완료 · 머지 · 리뷰 대기 · 멈춘 일 정리 |
 | `v`로 시작하는 태그를 달면 | Releases에 데모 버전, 앱이 있으면 APK와 설치 QR |
@@ -127,7 +127,7 @@ PR 필수, 승인 1명(새 커밋이 올라오면 다시 승인), 리뷰 대화 
 
 공개돼도 되는 값은 `EXPO_PUBLIC_`으로 시작하는 두 개뿐입니다. 나머지는 레포와 앱에 넣지 않습니다. 예시 파일은 [`mobile/.env.example`](mobile/.env.example)과 [`supabase/functions/.env.example`](supabase/functions/.env.example)입니다.
 
-자동화 파일은 모두 `.github/workflows/`에 있습니다. 웹 미리보기 빌드 설정은 Cloudflare Pages 프로젝트 `respec-alarm-9omnn7zo`에 있습니다.
+자동화 파일은 모두 `.github/workflows/`에 있습니다. 웹 미리보기 빌드 설정은 Cloudflare Worker `respec-alarm-capstone`(대시보드)과 [`mobile/wrangler.jsonc`](mobile/wrangler.jsonc)에 있습니다.
 
 </details>
 
