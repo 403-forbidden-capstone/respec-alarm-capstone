@@ -14,7 +14,7 @@
 ![Gemini API](https://img.shields.io/badge/Gemini_API-24292f?style=flat-square&logo=googlegemini&logoColor=white)
 ![Android](https://img.shields.io/badge/Android-24292f?style=flat-square&logo=android&logoColor=white)
 
-[최신 APK](https://github.com/403-forbidden-capstone/respec-alarm-capstone/releases/latest) · [보드](https://github.com/orgs/403-forbidden-capstone/projects/1) · [새 이슈](https://github.com/403-forbidden-capstone/respec-alarm-capstone/issues/new/choose) · [마일스톤](https://github.com/403-forbidden-capstone/respec-alarm-capstone/milestones) · [Pull Requests](https://github.com/403-forbidden-capstone/respec-alarm-capstone/pulls)
+[웹 미리보기](https://respec-alarm-capstone.vmgfh878.workers.dev) · [최신 APK](https://github.com/403-forbidden-capstone/respec-alarm-capstone/releases/latest) · [보드](https://github.com/orgs/403-forbidden-capstone/projects/1) · [새 이슈](https://github.com/403-forbidden-capstone/respec-alarm-capstone/issues/new/choose) · [마일스톤](https://github.com/403-forbidden-capstone/respec-alarm-capstone/milestones) · [Pull Requests](https://github.com/403-forbidden-capstone/respec-alarm-capstone/pulls)
 
 <sub>2026-2 캡스톤디자인 · 포텐셜랩스 산학 협력 · 팀 403 Forbidden</sub>
 

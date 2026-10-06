@@ -38,7 +38,7 @@ npm run web
 
 | 무엇 | 어디 | 주소 |
 |---|---|---|
-| 웹 미리보기 | Cloudflare Workers | main: `https://respec-alarm-capstone.<계정>.workers.dev` · PR: 검사 목록의 Workers Builds → Details |
+| 웹 미리보기 | Cloudflare Workers | main: [respec-alarm-capstone.vmgfh878.workers.dev](https://respec-alarm-capstone.vmgfh878.workers.dev) · PR: Cloudflare 봇 댓글의 미리보기 주소 |
 | 클릭 목업 | 같은 사이트 | `/mockup.html` |
 | 최신 데모 APK | GitHub Releases | [releases/latest](https://github.com/403-forbidden-capstone/respec-alarm-capstone/releases/latest) (QR은 누구나, 파일은 레포 멤버) |
 | 테스트 APK | EAS Build | Actions 실행 요약의 QR → 빌드 페이지 Install 버튼. Expo 조직 멤버는 expo.dev 빌드 목록 |
