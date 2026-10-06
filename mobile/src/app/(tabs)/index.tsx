@@ -1,15 +1,12 @@
-import { StyleSheet, Text, View } from 'react-native';
+import { Screen, Text, TopBar } from '@/components/ui';
 
-// 01 홈 탭 — 목업이 들어올 자리
+// 01 홈 탭 — 목업 H01(홈)이 들어올 자리 (#30)
 export default function HomeScreen() {
   return (
-    <View style={styles.container}>
-      <Text style={styles.title}>01 홈</Text>
-    </View>
+    <Screen>
+      <TopBar screenId="H01" />
+      <Text variant="title">홈</Text>
+      <Text variant="lead">다음 알람 · 오늘 일정 · 루틴이 들어올 자리예요.</Text>
+    </Screen>
   );
 }
-
-const styles = StyleSheet.create({
-  container: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  title: { fontSize: 20, fontWeight: '600' },
-});

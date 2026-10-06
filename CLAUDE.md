@@ -17,6 +17,13 @@
 - 패키지는 `npx expo install <패키지>`로 추가합니다. SDK에 맞는 버전이 들어갑니다.
 - Expo Go로는 실행되지 않고 개발용 APK가 필요합니다. 네이티브 모듈 · 플러그인 · `app.json` · 네이티브 패키지를 바꾸면 팀원 모두 APK를 다시 받아야 하므로 PR 설명에 적습니다.
 
+## 화면
+
+- 동작 · 흐름은 클릭 목업(`mobile/public/mockup.html`, 화면 번호 H01 · G01 등), 모양은 피그마를 기준으로 합니다.
+- 색 · 간격 · 글자 크기는 `mobile/src/theme`, 공용 부품은 `mobile/src/components/ui`에서 가져옵니다. 화면 파일에 색 값 · 글꼴을 직접 적지 않습니다. 글자는 `Text`로 씁니다.
+- 부품 견본은 `/dev/ui`(앱은 `respecalarm://dev/ui`)에서 봅니다.
+- 피그마 MCP는 한 달 호출 수가 적어서(View 자리 20회) 프레임 하나를 꼭 봐야 할 때만 씁니다.
+
 ## Git 흐름
 
 - 이슈 → 브랜치 → PR → 리뷰 → Squash 머지 (자세한 규칙은 README)
