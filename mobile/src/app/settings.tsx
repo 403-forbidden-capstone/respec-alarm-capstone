@@ -2,15 +2,23 @@ import { router } from 'expo-router';
 import { useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
-import { Button, Card, KeyValueRow, Screen, Text, TopBar } from '@/components/ui';
+import { Button, Card, KeyValueRow, Screen, SectionHeader, Text, TopBar } from '@/components/ui';
 import { useAuth } from '@/features/auth/AuthProvider';
+import type { TransportType } from '@/features/profile/types';
 import { signOut } from '@/lib/auth';
 
 const PROVIDER_NAME: Record<string, string> = { kakao: '카카오', google: 'Google' };
+const TRANSPORT_NAME: Record<TransportType, string> = {
+  TRANSIT: '대중교통',
+  BUS: '버스',
+  SUBWAY: '지하철',
+  CAR: '자차',
+  WALK: '도보',
+};
 
-// 설정 — 지금은 계정 정보 · 로그아웃만. 준비시간 · 알람 선호 · 권한은 온보딩과 함께 추가
+// 설정 — 계정 · 아침 준비 기본값 · 로그아웃. 값 바꾸기는 화면을 옮길 때(#30~) 붙임
 export default function SettingsScreen() {
-  const { session, enabled } = useAuth();
+  const { session, profile, enabled } = useAuth();
   const [error, setError] = useState<string | null>(null);
   const user = session?.user;
   const provider = (user?.app_metadata?.provider as string | undefined) ?? '';
@@ -20,10 +28,24 @@ export default function SettingsScreen() {
       <TopBar onBack={router.canGoBack() ? router.back : undefined} />
       <Text variant="title">설정</Text>
 
-      <Card style={styles.card}>
+      <SectionHeader title="계정" />
+      <Card>
         <KeyValueRow first label="로그인" value={enabled ? (PROVIDER_NAME[provider] ?? (provider || '-')) : '목업 모드'} />
-        <KeyValueRow label="이메일" value={user?.email ?? '-'} />
+        <KeyValueRow label="닉네임" value={profile?.nickname ?? '-'} />
+        <KeyValueRow label="아이디" value={profile?.handle ? `@${profile.handle}` : '-'} />
       </Card>
+
+      {profile ? (
+        <>
+          <SectionHeader title="아침 준비 기본값" />
+          <Card>
+            <KeyValueRow first label="준비 시간" value={`${profile.default_prepare_minutes}분`} />
+            <KeyValueRow label="여유 시간" value={`${profile.default_buffer_minutes}분`} />
+            <KeyValueRow label="이동 수단" value={TRANSPORT_NAME[profile.default_transport]} />
+            <KeyValueRow label="출발지" value={profile.home_name ?? '-'} />
+          </Card>
+        </>
+      ) : null}
 
       {enabled && user ? (
         <View style={styles.stack}>
@@ -46,6 +68,5 @@ export default function SettingsScreen() {
 }
 
 const styles = StyleSheet.create({
-  card: { marginTop: 16 },
-  stack: { gap: 8 },
+  stack: { gap: 8, marginTop: 16 },
 });

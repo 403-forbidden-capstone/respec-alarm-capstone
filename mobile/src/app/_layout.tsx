@@ -30,11 +30,11 @@ export default function RootLayout() {
   );
 }
 
-// 로그인 전에는 login만, 로그인 뒤에는 탭 · 앱 화면만 열림
+// 로그인 전에는 login만, 아이디를 정하기 전에는 onboarding만, 그 뒤에는 탭 · 앱 화면만 열림
 // Supabase가 연결 안 된 목업 모드(enabled=false)는 로그인 없이 바로 탭
 // dev/* · auth/callback은 어느 쪽에서도 열림. 앱 화면을 새로 만들면 첫 번째 Protected 안에 넣음
 function RootStack() {
-  const { session, loading, enabled } = useAuth();
+  const { session, loading, enabled, needsOnboarding } = useAuth();
 
   useEffect(() => {
     if (!loading) SplashScreen.hideAsync();
@@ -42,15 +42,19 @@ function RootStack() {
 
   if (loading) return null;
   const needsLogin = enabled && !session;
+  const ready = !needsLogin && !needsOnboarding;
 
   return (
     <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: colors.bg } }}>
-      <Stack.Protected guard={!needsLogin}>
+      <Stack.Protected guard={ready}>
         <Stack.Screen name="(tabs)" />
         <Stack.Screen name="settings" />
       </Stack.Protected>
       <Stack.Protected guard={needsLogin}>
         <Stack.Screen name="login" />
+      </Stack.Protected>
+      <Stack.Protected guard={needsOnboarding}>
+        <Stack.Screen name="onboarding" />
       </Stack.Protected>
     </Stack>
   );
