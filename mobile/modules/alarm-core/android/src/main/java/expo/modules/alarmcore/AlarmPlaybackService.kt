@@ -13,7 +13,9 @@ import android.media.AudioManager
 import android.media.MediaPlayer
 import android.net.Uri
 import android.os.Build
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
 import android.os.PowerManager
 import androidx.core.app.NotificationCompat
 
@@ -26,6 +28,16 @@ class AlarmPlaybackService : Service() {
     private const val NOTIFICATION_ID = 4101
     private const val EXTRA_ID = "alarm_id"
     private const val EXTRA_TITLE = "alarm_title"
+
+    // 아무도 안 끄면 5분 뒤 멈춤. 강도별 다시 울림(#29 · #33)이 생기면 그 로직으로 바꿈
+    private const val AUTO_STOP_MILLIS = 5 * 60 * 1000L
+
+    // 웨이크락은 자동 정지보다 1분 길게 잡음 (보통은 그 전에 onDestroy에서 풀림)
+    private const val WAKE_LOCK_TIMEOUT_MILLIS = AUTO_STOP_MILLIS + 60 * 1000L
+
+    // 지금 울리는 알람 id. 안 울리면 null
+    @Volatile
+    var ringingAlarmId: String? = null
 
     fun start(context: Context, id: String, title: String) {
       val intent = Intent(context, AlarmPlaybackService::class.java).apply {
@@ -42,7 +54,16 @@ class AlarmPlaybackService : Service() {
     fun stop(context: Context) {
       context.stopService(Intent(context, AlarmPlaybackService::class.java))
     }
+
+    // 울리는 알람이 ids 중 하나일 때만 멈춤
+    fun stopIfRinging(context: Context, ids: List<String>) {
+      val ringing = ringingAlarmId ?: return
+      if (ids.contains(ringing)) stop(context)
+    }
   }
+
+  private val handler = Handler(Looper.getMainLooper())
+  private val autoStop = Runnable { stopSelf() }
 
   private var mediaPlayer: MediaPlayer? = null
   private var audioManager: AudioManager? = null
@@ -58,8 +79,16 @@ class AlarmPlaybackService : Service() {
   override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
     val id = intent?.getStringExtra(EXTRA_ID) ?: "alarm"
     val title = intent?.getStringExtra(EXTRA_TITLE) ?: "알람"
+    ringingAlarmId = id
     startForegroundCompat(buildNotification(id, title))
-    if (mediaPlayer == null) startPlayback()
+    holdWakeLock()
+    if (mediaPlayer == null && !startPlayback()) {
+      stopSelf()
+      return START_NOT_STICKY
+    }
+    // 새 알람이 오면 자동 정지 시간을 다시 잼
+    handler.removeCallbacks(autoStop)
+    handler.postDelayed(autoStop, AUTO_STOP_MILLIS)
     return START_NOT_STICKY
   }
 
@@ -150,28 +179,37 @@ class AlarmPlaybackService : Service() {
     return builder.build()
   }
 
-  private fun startPlayback() {
+  // 실패하면 바꾼 볼륨 · 포커스 · 웨이크락을 바로 되돌리고 false
+  private fun startPlayback(): Boolean {
     audioManager = getSystemService(AudioManager::class.java)
     val audioAttributes = AudioAttributes.Builder()
       .setUsage(AudioAttributes.USAGE_ALARM)
       .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
       .build()
 
-    requestAudioFocus(audioAttributes)
-    forceAlarmVolume()
-    acquireWakeLock()
+    val started = runCatching {
+      requestAudioFocus(audioAttributes)
+      forceAlarmVolume()
 
-    // 알람음은 이 모듈 res/raw에 있음. 빌드 때 앱 리소스로 합쳐지므로 앱 패키지 이름으로 찾음
-    val uri = Uri.parse("android.resource://$packageName/${R.raw.alarm_siren}")
+      // 알람음은 이 모듈 res/raw에 있음. 빌드 때 앱 리소스로 합쳐지므로 앱 패키지 이름으로 찾음
+      val uri = Uri.parse("android.resource://$packageName/${R.raw.alarm_siren}")
+      val player = MediaPlayer()
+      mediaPlayer = player
+      player.setAudioAttributes(audioAttributes)
+      player.setDataSource(this, uri)
+      player.isLooping = true
+      // 재생 중에 오류가 나도 멈추고 볼륨을 되돌림
+      player.setOnErrorListener { _, _, _ ->
+        stopSelf()
+        true
+      }
+      player.prepare()
+      player.setVolume(1f, 1f)
+      player.start()
+    }.isSuccess
 
-    mediaPlayer = MediaPlayer().apply {
-      setAudioAttributes(audioAttributes)
-      setDataSource(this@AlarmPlaybackService, uri)
-      isLooping = true
-      prepare()
-      setVolume(1f, 1f)
-      start()
-    }
+    if (!started) releasePlayback()
+    return started
   }
 
   private fun requestAudioFocus(attributes: AudioAttributes) {
@@ -199,14 +237,19 @@ class AlarmPlaybackService : Service() {
     if (maximum > 0) manager.setStreamVolume(AudioManager.STREAM_ALARM, maximum, 0)
   }
 
-  private fun acquireWakeLock() {
-    val powerManager = getSystemService(PowerManager::class.java)
-    wakeLock = powerManager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "$packageName:alarm").apply {
-      acquire()
-    }
+  // 새 알람마다 다시 잡아서 시간 제한을 늘림
+  private fun holdWakeLock() {
+    val lock = wakeLock ?: getSystemService(PowerManager::class.java)
+      .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "$packageName:alarm")
+      .apply { setReferenceCounted(false) }
+    wakeLock = lock
+    lock.acquire(WAKE_LOCK_TIMEOUT_MILLIS)
   }
 
-  override fun onDestroy() {
+  // 해제 · 미루기 · 자동 정지 · 실패 모두 여기서 원래대로 되돌림 (여러 번 불러도 됨)
+  private fun releasePlayback() {
+    handler.removeCallbacks(autoStop)
+
     mediaPlayer?.runCatching {
       if (isPlaying) stop()
       release()
@@ -214,13 +257,24 @@ class AlarmPlaybackService : Service() {
     mediaPlayer = null
 
     audioManager?.let { manager ->
-      audioFocusRequest?.let { manager.abandonAudioFocusRequest(it) }
-      previousAlarmVolume?.let { manager.setStreamVolume(AudioManager.STREAM_ALARM, it, 0) }
+      audioFocusRequest?.let { request -> runCatching { manager.abandonAudioFocusRequest(request) } }
+      previousAlarmVolume?.let { volume ->
+        runCatching { manager.setStreamVolume(AudioManager.STREAM_ALARM, volume, 0) }
+      }
     }
+    audioFocusRequest = null
     previousAlarmVolume = null
+
     wakeLock?.runCatching { if (isHeld) release() }
     wakeLock = null
+  }
+
+  override fun onDestroy() {
+    releasePlayback()
+    ringingAlarmId = null
     stopForeground(STOP_FOREGROUND_REMOVE)
+    // 어떻게 멈췄든 떠 있는 알람 화면도 닫음
+    AlarmRingingActivity.closeIfShowing()
     super.onDestroy()
   }
 

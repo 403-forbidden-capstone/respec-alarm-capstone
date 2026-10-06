@@ -1,5 +1,6 @@
 // 알람 코어 — 화면은 이 파일의 함수만 부름
 // 흐름: AlarmManager.setAlarmClock → BroadcastReceiver → 포그라운드 서비스 → MediaPlayer(USAGE_ALARM)
+// 아무도 안 끄면 5분 뒤 멈춤 (매일 반복 예약은 그대로). 미루기는 "<id>__snooze" 하나로 예약됨
 // 지금은 Android만 있음. 웹 · iOS · 모듈 없는 옛 APK에서는 import해도 안 깨지고,
 // 예약 · 테스트는 reject, 취소 · 끄기는 아무것도 안 함, 조회는 빈 값을 돌려줌
 import { Platform } from 'react-native';
@@ -58,7 +59,7 @@ export async function scheduleDailyAlarm(id: string, title: string, hour: number
   requireAlarmCore().scheduleDaily(id, title, hour, minute);
 }
 
-/** 취소: 예약을 지우고, 울리는 중이면 멈춤 */
+/** 취소: 그 알람과 딸린 미루기 예약을 지우고, 그 알람이 울리는 중이면 멈춤 */
 export async function cancelAlarm(id: string) {
   nativeModule?.cancel(id);
 }

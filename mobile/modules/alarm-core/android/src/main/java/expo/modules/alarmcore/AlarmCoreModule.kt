@@ -19,10 +19,11 @@ class AlarmCoreModule : Module() {
       AlarmScheduler.scheduleDaily(context, id, title, hour, minute)
     }
 
+    // 그 알람 · 딸린 미루기를 지우고, 그중 하나가 울리는 중일 때만 멈춤
     Function("cancel") { id: String ->
       val context = appContext.reactContext ?: return@Function
-      AlarmScheduler.cancel(context, id)
-      AlarmPlaybackService.stop(context)
+      val cancelledIds = AlarmScheduler.cancel(context, id)
+      AlarmPlaybackService.stopIfRinging(context, cancelledIds)
     }
 
     Function("cancelAll") {

@@ -10,6 +10,15 @@ object AlarmScheduler {
   const val EXTRA_ALARM_ID = "alarm_id"
   const val EXTRA_ALARM_TITLE = "alarm_title"
 
+  private const val SNOOZE_SUFFIX = "__snooze"
+
+  // 미루기 알람은 원래 알람마다 하나: "<원래 id>__snooze" (미룬 알람을 또 미뤄도 같은 키)
+  fun snoozeId(id: String): String {
+    var baseId = id
+    while (baseId.endsWith(SNOOZE_SUFFIX)) baseId = baseId.removeSuffix(SNOOZE_SUFFIX)
+    return baseId + SNOOZE_SUFFIX
+  }
+
   private fun requestCode(id: String): Int = id.hashCode() and 0x7fffffff
 
   private fun alarmIntent(context: Context, id: String): PendingIntent {
@@ -80,10 +89,15 @@ object AlarmScheduler {
     alarmManager.setAlarmClock(AlarmManager.AlarmClockInfo(triggerAtMillis, showOperation), operation)
   }
 
-  fun cancel(context: Context, id: String) {
+  // 그 알람과 딸린 미루기 알람까지 지우고, 지운 id들을 돌려줌
+  fun cancel(context: Context, id: String): List<String> {
+    val ids = listOf(id, snoozeId(id)).distinct()
     val alarmManager = context.getSystemService(AlarmManager::class.java)
-    alarmManager.cancel(alarmIntent(context, id))
-    AlarmStorage.remove(context, id)
+    ids.forEach { target ->
+      alarmManager.cancel(alarmIntent(context, target))
+      AlarmStorage.remove(context, target)
+    }
+    return ids
   }
 
   fun cancelAll(context: Context) {

@@ -94,7 +94,8 @@ export default function AlarmTestScreen() {
       <ScrollView contentContainerStyle={styles.content}>
         <Text style={styles.title}>알람 테스트 (개발용)</Text>
         <Text style={styles.body}>
-          예약 → 화면 끄기 → 잠금화면 위로 울리는지 확인. 울리면 해제 또는 10분 미루기.
+          예약 → 화면 끄기 → 잠금화면 위로 울리는지 확인. 울리면 해제 또는 10분 미루기. 안 끄면 5분 뒤
+          자동으로 멈춤.
         </Text>
 
         {!isAlarmCoreAvailable ? (

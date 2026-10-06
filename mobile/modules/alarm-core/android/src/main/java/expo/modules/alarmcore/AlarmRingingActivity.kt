@@ -10,16 +10,38 @@ import android.view.WindowManager
 import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.TextView
+import java.lang.ref.WeakReference
 
 class AlarmRingingActivity : Activity() {
+  companion object {
+    private var showing: WeakReference<AlarmRingingActivity>? = null
+
+    // 소리가 멈추면(해제 · 미루기 · 자동 정지 · 취소) 서비스가 불러서 알람 화면을 닫음
+    fun closeIfShowing() {
+      showing?.get()?.finish()
+      showing = null
+    }
+  }
+
   private var alarmId: String = "alarm"
   private var alarmTitle: String = "알람"
 
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
+    // 이미 멈춘 뒤에 늦게 열리면 바로 닫음
+    if (AlarmPlaybackService.ringingAlarmId == null) {
+      finish()
+      return
+    }
+    showing = WeakReference(this)
     readAlarmDetails(intent)
     showOverLockScreen()
     renderAlarmControls()
+  }
+
+  override fun onDestroy() {
+    if (showing?.get() === this) showing = null
+    super.onDestroy()
   }
 
   override fun onNewIntent(intent: Intent) {

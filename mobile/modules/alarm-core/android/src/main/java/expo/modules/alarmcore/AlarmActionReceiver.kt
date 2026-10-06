@@ -14,12 +14,11 @@ class AlarmActionReceiver : BroadcastReceiver() {
       AlarmPlaybackService.ACTION_SNOOZE -> {
         val original = AlarmStorage.get(context, id)
         AlarmPlaybackService.stop(context)
-        val snoozeId = "${id}__snooze"
         // 정확한 알람 권한이 없으면 예약이 실패함 → 앱이 죽지 않게 막음
         runCatching {
           AlarmScheduler.scheduleOneShot(
             context,
-            snoozeId,
+            AlarmScheduler.snoozeId(id),
             original?.title ?: "알람",
             System.currentTimeMillis() + 10 * 60 * 1000L,
           )
