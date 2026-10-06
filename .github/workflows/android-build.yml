@@ -12,6 +12,7 @@ on:
     paths:
       - 'mobile/app.json'
       - 'mobile/app.config.*'
+      - 'mobile/assets/images/**'
       - 'mobile/package.json'
       - 'mobile/package-lock.json'
       - 'mobile/modules/**'
@@ -23,6 +24,7 @@ on:
     paths:
       - 'mobile/app.json'
       - 'mobile/app.config.*'
+      - 'mobile/assets/images/**'
       - 'mobile/package.json'
       - 'mobile/package-lock.json'
       - 'mobile/modules/**'
@@ -36,7 +38,7 @@ permissions:
 
 concurrency:
   group: android-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}  # main 실행은 취소하지 않음 (Gradle 캐시 저장)
 
 jobs:
   build:
