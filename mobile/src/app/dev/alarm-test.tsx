@@ -34,6 +34,8 @@ export default function AlarmTestScreen() {
   const [alarms, setAlarms] = useState<ScheduledAlarm[]>([]);
   const [permissions, setPermissions] = useState<Permissions | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  // 다시 읽기 실패는 따로 보여 줌 (예약 · 취소 결과 메시지를 덮어쓰지 않게)
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     if (!isAlarmCoreAvailable) return;
@@ -45,8 +47,9 @@ export default function AlarmTestScreen() {
       ]);
       setAlarms(list);
       setPermissions({ exact, fullScreen });
+      setLoadError(null);
     } catch (error) {
-      setMessage(`불러오기 실패: ${errorText(error)}`);
+      setLoadError(`불러오기 실패: ${errorText(error)}`);
     }
   }, []);
 
@@ -136,6 +139,7 @@ export default function AlarmTestScreen() {
 
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>예약된 알람 {alarms.length}개</Text>
+          {loadError ? <Text style={styles.error}>{loadError}</Text> : null}
           {alarms.length === 0 ? (
             <Text style={styles.note}>없음</Text>
           ) : (
@@ -186,5 +190,6 @@ const styles = StyleSheet.create({
   note: { fontSize: 13, color: '#57606A' },
   warning: { fontSize: 14, color: '#B42318', backgroundColor: '#FEF3F2', padding: 12 },
   message: { fontSize: 14, color: '#0B4F8A' },
+  error: { fontSize: 14, color: '#B42318' },
   row: { gap: 2, paddingVertical: 6 },
 });

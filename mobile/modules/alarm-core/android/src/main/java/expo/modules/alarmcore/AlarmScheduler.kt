@@ -52,6 +52,8 @@ object AlarmScheduler {
     }
   }
 
+  // 재부팅 · 시간 변경 · 매일 반복 때 다시 예약함
+  // 한 번짜리 알람이 꺼져 있는 동안 시각이 지났으면 늦게 울리지 않고 지움 (의도한 동작)
   fun scheduleStored(context: Context, alarm: StoredAlarm) {
     val triggerAtMillis = if (alarm.repeat == "DAILY") {
       nextDailyMillis(alarm.hour, alarm.minute)
@@ -78,8 +80,9 @@ object AlarmScheduler {
     }
     val alarmManager = context.getSystemService(AlarmManager::class.java)
     val operation = alarmIntent(context, id)
+    // 상태 표시줄 · 시계 앱에서 다음 알람을 누르면 열 화면. 런처 화면이 없으면 알람 화면(안 울리면 바로 닫힘)
     val showIntent = context.packageManager.getLaunchIntentForPackage(context.packageName)
-      ?: Intent(context, AlarmReceiver::class.java)
+      ?: Intent(context, AlarmRingingActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
     val showOperation = PendingIntent.getActivity(
       context,
       requestCode("show_$id"),
