@@ -1,0 +1,12 @@
+{
+  "name": "respec-alarm-db-check",
+  "private": true,
+  "description": "supabase/migrations를 PGlite에 적용해 RLS · 권한 · 함수 동작을 확인함",
+  "type": "module",
+  "scripts": {
+    "test": "node db-check.mjs"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "0.5.8"
+  }
+}
