@@ -2,6 +2,7 @@
   "expo": {
     "name": "Re:Spec Alarm",
     "slug": "respec-alarm",
+    "owner": "respec-alarm-capstone",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
@@ -38,6 +39,14 @@
     },
     "runtimeVersion": {
       "policy": "fingerprint"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/77a4da8b-7ba2-4520-b537-0f0190b6b22e"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "77a4da8b-7ba2-4520-b537-0f0190b6b22e"
+      }
     }
   }
 }
