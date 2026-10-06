@@ -1,0 +1,84 @@
+name: APK 빌드
+
+# GitHub 화면에서 버튼으로 EAS 빌드를 시작합니다: Actions → APK 빌드 → Run workflow
+#   development: 개발용 APK(expo-dev-client). 네이티브 모듈 · 플러그인 · 네이티브 패키지 · app.json이 바뀌었을 때
+#   preview:     팀 테스트용 APK. 설치 링크 · QR은 빌드가 끝난 뒤 EAS 빌드 페이지의 Install 버튼에서
+# EAS 무료 플랜은 한 달 Android 빌드 15회입니다. JS만 바뀐 건 빌드 대신 `eas update`로 보냅니다 (mobile/README.md 배포 절).
+# 데모 릴리스(v 태그 → APK 첨부)는 release.yml이 따로 합니다.
+
+on:
+  workflow_dispatch:
+    inputs:
+      profile:
+        description: 빌드 프로필
+        type: choice
+        options: [development, preview]
+        default: development
+      message:
+        description: 빌드 메모 (선택)
+        required: false
+
+permissions:
+  contents: read
+
+# 빌드 요청은 한 번에 하나씩 (무료 플랜은 동시 빌드 1개)
+concurrency:
+  group: eas-build
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: EAS ${{ inputs.profile }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: EXPO_TOKEN 확인
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+        run: |
+          if [ -z "$EXPO_TOKEN" ]; then
+            echo "::error::Secret EXPO_TOKEN이 없어요. Expo 조직의 로봇 토큰을 레포 Secret에 넣어 주세요 (mobile/README.md 배포 절)."
+            exit 1
+          fi
+
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Node
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: mobile/.nvmrc
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+
+      - name: EAS
+        uses: expo/expo-github-action@v9
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      - name: 패키지 설치
+        working-directory: mobile
+        run: npm ci
+
+      - name: 빌드 요청
+        working-directory: mobile
+        env:
+          PROFILE: ${{ inputs.profile }}
+          MESSAGE: ${{ inputs.message }}
+        run: |
+          set -o pipefail
+          eas build --platform android --profile "$PROFILE" --non-interactive --no-wait \
+            ${MESSAGE:+--message "$MESSAGE"} 2>&1 | tee ../build.log
+          URL=$(grep -oE 'https://expo\.dev/accounts/[^ ]+/builds/[0-9a-f-]+' ../build.log | head -1)
+          {
+            echo "## EAS $PROFILE 빌드 요청됨"
+            echo
+            if [ -n "$URL" ]; then
+              echo "빌드 페이지: $URL"
+              echo
+              echo "끝나면(보통 10~30분, 무료 플랜은 대기열이 길 수 있음) 페이지의 **Install** 버튼 → 링크 · QR로 폰에 설치합니다."
+            else
+              echo "빌드 페이지 주소를 로그에서 못 찾았어요. 위 로그를 확인해 주세요."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
