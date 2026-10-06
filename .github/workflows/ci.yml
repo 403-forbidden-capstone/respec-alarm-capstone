@@ -2,6 +2,8 @@ name: 앱 검사
 
 # mobile/이 바뀐 PR과 main push에서 앱이 깨지지 않았는지 확인합니다.
 #   타입 검사: tsc --noEmit
+#   린트: expo lint (ESLint, Expo 기본 규칙 + React Compiler 규칙)
+#   단위 테스트: jest (jest-expo). 계산 · 판정 같은 순수 함수는 테스트를 같이 올립니다
 #   웹 빌드: expo export --platform web. 웹 데모가 만들어지는지 보고,
 #            폰 전용 기능을 웹에서 그대로 부르면 여기서 깨집니다.
 
@@ -25,7 +27,7 @@ concurrency:
 
 jobs:
   check:
-    name: 타입 검사 · 웹 빌드
+    name: 타입 · 린트 · 테스트 · 웹 빌드
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -46,6 +48,12 @@ jobs:
 
       - name: 타입 검사
         run: npx tsc --noEmit
+
+      - name: 린트
+        run: npm run lint
+
+      - name: 단위 테스트
+        run: npm test -- --ci
 
       - name: 웹 빌드
         run: npx expo export --platform web --output-dir dist

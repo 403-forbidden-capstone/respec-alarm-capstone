@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useState } from 'react';
 import { Animated, Pressable, StyleSheet } from 'react-native';
 
 import { colors, size } from '@/theme';
@@ -15,7 +15,8 @@ const TRAVEL = size.switchW - KNOB - 6;
 
 // 켜기 · 끄기 스위치 (.sw) — 기본 Switch 대신 목업 모양으로
 export function Toggle({ value, onChange, label, disabled }: Props) {
-  const x = useRef(new Animated.Value(value ? TRAVEL : 0)).current;
+  // 움직임 값은 처음 한 번만 만듦 (React Compiler 규칙상 렌더 중 ref 읽기 대신 state 초기값)
+  const [x] = useState(() => new Animated.Value(value ? TRAVEL : 0));
 
   useEffect(() => {
     Animated.timing(x, { toValue: value ? TRAVEL : 0, duration: 180, useNativeDriver: true }).start();

@@ -15,6 +15,8 @@ npm run web
 
 패키지는 `npx expo install <이름>`으로 추가합니다. SDK 57에 맞는 버전이 들어갑니다.
 
+PR 전에 `npm run typecheck` · `npm run lint` · `npm test`를 돌립니다. PR에서는 CI(앱 검사)가 같은 걸 돌립니다.
+
 ## 폴더
 
 | 폴더 | 내용 |
