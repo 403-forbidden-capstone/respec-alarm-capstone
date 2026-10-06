@@ -1,7 +1,7 @@
 -- =====================================================================
 -- 목업 보완 5개 — 목업 화면에 필요한데 4장 15개 테이블에 없는 것 (DB 담당 결정, 10/6)
 --   ① profiles.handle        "@아이디" 친구 검색용 고유 아이디 + find_profile_by_handle()
---   ② groups.invite_code     그룹 참여 초대 코드 + join_group_by_invite_code()
+--   ② groups.invite_code     그룹 참여 초대 코드 + join_group_by_invite_code() · regenerate_invite_code()
 --   ③ get_group_wake_status  그룹원 오늘 기상 상태 조회 (기상 공유를 허용한 사람만)
 --   ④ push_tokens            기기 푸시 토큰 + register_push_token()  (2장 R-1)
 --   ⑤ ACKNOWLEDGED           alarm_event_type 값 추가 — 알림 원탭 응답  (2장 R-3)
@@ -85,6 +85,31 @@ begin
         wake_share_opt_in = case when gm.invite_status = 'LEFT' then false else gm.wake_share_opt_in end;
 
   return v_group_id;
+end;
+$$;
+
+-- 초대 코드 새로 받기 — 만든 사람만 쓸 수 있고 새 코드를 돌려줌. 옛 코드는 바로 못 씀
+-- 만든 사람이 구성원을 내보내면 rls 마이그레이션의 트리거가 같은 방식으로 코드를 자동으로 바꿈
+create function public.regenerate_invite_code(p_group_id uuid)
+returns text
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_code text;
+begin
+  update public.groups g
+  set invite_code = default
+  where g.group_id = p_group_id
+    and g.owner_id = (select auth.uid())
+  returning g.invite_code into v_code;
+
+  if v_code is null then
+    raise exception '그룹을 만든 사람만 초대 코드를 바꿀 수 있음' using errcode = '42501';
+  end if;
+
+  return v_code;
 end;
 $$;
 

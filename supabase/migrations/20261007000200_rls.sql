@@ -161,7 +161,8 @@ $$;
 -- ---------------------------------------------------------------------
 
 -- 주인 · 연결 칼럼은 못 바꾸게 함
---   예) 알람 설정 권한을 받은 사람이 남의 알람을 자기 것으로 옮기기, 구성원 행의 group_id를 바꿔 남의 그룹에 들어가기
+--   예) 알람 설정 권한을 받은 사람이 남의 알람을 자기 것으로 옮기기, 구성원 행의 group_id를 바꿔 남의 그룹에 들어가기,
+--       두 그룹에 함께 있는 그룹원이 공동 약속을 다른 그룹으로 옮기기
 --   트리거 인자로 막을 칼럼 이름을 받음
 create function private.prevent_key_change()
 returns trigger
@@ -185,7 +186,7 @@ create trigger keep_keys before update on public.friends
 create trigger keep_keys before update on public.group_members
   for each row execute function private.prevent_key_change('group_id', 'user_id');
 create trigger keep_keys before update on public.appointments
-  for each row execute function private.prevent_key_change('creator_id');
+  for each row execute function private.prevent_key_change('creator_id', 'group_id');
 create trigger keep_keys before update on public.alarms
   for each row execute function private.prevent_key_change('user_id', 'participant_id', 'routine_id');
 
@@ -206,6 +207,29 @@ $$;
 
 create trigger add_owner_as_member after insert on public.groups
   for each row execute function private.add_group_owner_as_member();
+
+-- 만든 사람이 다른 구성원을 내보내면(행 삭제) 초대 코드를 새로 바꿈
+--   내보내진 사람은 코드를 이미 알고 있어서, 안 바꾸면 그 코드로 바로 다시 들어올 수 있음
+--   본인이 나간 경우 · 탈퇴(auth 계정 삭제)로 지워진 경우는 그대로 둠. 그룹을 지울 때는 바꿀 행이 없어 넘어감
+create function private.rotate_invite_code_on_kick()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  if old.user_id is distinct from (select auth.uid()) then
+    update public.groups g
+    set invite_code = default
+    where g.group_id = old.group_id
+      and g.owner_id = (select auth.uid());
+  end if;
+  return null;
+end;
+$$;
+
+create trigger rotate_invite_code_on_kick after delete on public.group_members
+  for each row execute function private.rotate_invite_code_on_kick();
 
 -- 관계가 끝나면 그 출처로 준 권한 행만 지움 (4.7 "권한 회수" — 다른 출처의 권한은 그대로 둠)
 --   4.7은 애플리케이션 삭제지만, 상대가 준 권한 행은 RLS상 앱이 못 지우므로 DB에서 같은 규칙으로 처리함
@@ -378,7 +402,7 @@ create policy groups_delete_owner on public.groups
 -- group_members: 본인 행과, 참여 중인 그룹의 구성원 목록을 봄
 --   초대는 참여 중인 구성원 · 만든 사람이 INVITED로만 함 (기상 공유 동의는 꺼진 채로)
 --   수락 · 기상 공유 동의 · 나가기는 본인만 함 (남이 내 동의를 켤 수 없음)
---   내보내기는 만든 사람이 행을 지워서 함
+--   내보내기는 만든 사람이 행을 지워서 함 (그때 초대 코드가 새로 바뀜)
 create policy group_members_select on public.group_members
   for select to authenticated
   using (user_id = (select auth.uid())
@@ -429,6 +453,7 @@ create policy sharing_permissions_delete_owner on public.sharing_permissions
 
 -- appointments: 개인 일정(group_id 없음)은 본인만
 --   공동 약속은 참여 중인 그룹원도 조회 · 수정함. 삭제는 등록자만
+--   등록자 · 그룹(creator_id · group_id)은 keep_keys 트리거가 못 바꾸게 함
 create policy appointments_select on public.appointments
   for select to authenticated
   using (creator_id = (select auth.uid())
@@ -737,6 +762,7 @@ revoke execute on all functions in schema private from public, anon, authenticat
 grant execute on function
   public.find_profile_by_handle(text),
   public.join_group_by_invite_code(text),
+  public.regenerate_invite_code(uuid),
   public.get_group_wake_status(uuid, date),
   public.register_push_token(text, text),
   public.get_public_profiles(uuid[])

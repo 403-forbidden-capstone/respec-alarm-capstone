@@ -1,7 +1,7 @@
 -- =====================================================================
 -- Re:Spec Alarm 기본 스키마 (상세설계서 4장 v2 기준)
 --   ENUM 19개 · 테이블 15개 · 제약조건 · 인덱스 · 예상 준비시간 뷰
---   updated_at 자동 갱신 트리거(4.7) · 가입하면 profiles 행을 만드는 트리거
+--   updated_at 자동 갱신 트리거(4.7) · 가입하면 profiles 행을 만드는 트리거 · 시간대 값 검사(4장 외)
 -- 4장에 없는 목업 보완 5개는 20261007000100_mockup_extras.sql에 둠
 -- RLS · 실행 권한은 20261007000200_rls.sql에서 켬
 -- =====================================================================
@@ -445,3 +445,31 @@ $$;
 create trigger on_auth_user_created
   after insert on auth.users
   for each row execute function public.handle_new_user();
+
+
+-- ---------------------------------------------------------------------
+-- 11. (4장 외 추가) 시간대 값 검사
+-- ---------------------------------------------------------------------
+-- profiles.timezone은 PostgreSQL이 아는 이름(pg_timezone_names)만 받음
+--   모르는 값이 들어가면 시각 계산(get_group_wake_status 등)이 오류로 멈추므로 저장할 때 막음
+--   CHECK 제약은 다른 테이블 · 뷰를 못 읽어서 트리거로 함
+
+create function public.check_profile_timezone()
+returns trigger
+language plpgsql
+set search_path = ''
+as $$
+begin
+  if not exists (
+    select 1
+    from pg_catalog.pg_timezone_names t
+    where t.name = new.timezone
+  ) then
+    raise exception '알 수 없는 시간대: %', new.timezone using errcode = '22023';
+  end if;
+  return new;
+end;
+$$;
+
+create trigger check_timezone before insert or update of timezone on public.profiles
+  for each row execute function public.check_profile_timezone();
