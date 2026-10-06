@@ -2,7 +2,8 @@ name: 안드로이드 빌드 검사
 
 # 네이티브에 영향을 주는 파일이 바뀐 PR과 main push에서 Android 앱이 실제로 컴파일되는지 확인합니다.
 #   앱 검사(ci.yml)는 타입 · 웹 빌드만 보므로 Kotlin 모듈 · 설정 플러그인 · 네이티브 패키지가 깨져도 잡지 못합니다.
-#   expo prebuild로 android/ 폴더를 만들고 Gradle 디버그 빌드를 돕니다 (arm64 하나만, APK는 남기지 않음).
+#   expo prebuild로 android/ 폴더를 만들고 Gradle 디버그 빌드를 돕니다 (arm64 하나만).
+#   만든 APK는 개발용 APK로 3일 남깁니다. 실행 요약의 링크로 받으면 EAS 무료 횟수(월 15회)를 안 씁니다.
 #   한 번에 10~15분 걸리고 Actions 무료 분량(월 2,000분)을 쓰므로 아래 paths에 해당할 때만 돕니다.
 #   손으로 돌리려면 Actions → 안드로이드 빌드 검사 → Run workflow
 #   Gradle 캐시는 main에서 돌 때만 저장되고 PR은 읽기만 합니다 (gradle/actions 기본 동작).
@@ -54,6 +55,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
+      - name: 디스크 확보
+        # 네이티브 빌드가 러너 디스크를 다 써서 실패한 적이 있어(#15), 이 빌드에 안 쓰는 도구를 먼저 지웁니다
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/.ghcup /usr/local/share/boost /usr/share/swift /opt/hostedtoolcache/CodeQL
+          sudo docker image prune --all --force > /dev/null 2>&1 || true
+          df -h / | tail -1
+
       - name: Node
         uses: actions/setup-node@v7
         with:
@@ -78,4 +86,28 @@ jobs:
 
       - name: Gradle 디버그 빌드
         working-directory: mobile/android
-        run: ./gradlew :app:assembleDebug -PreactNativeArchitectures=arm64-v8a
+        run: |
+          ./gradlew :app:assembleDebug -PreactNativeArchitectures=arm64-v8a
+          cp app/build/outputs/apk/debug/app-debug.apk ../respec-alarm-dev.apk
+
+      - name: 개발용 APK 남기기
+        id: apk
+        uses: actions/upload-artifact@v7
+        with:
+          path: mobile/respec-alarm-dev.apk
+          archive: false
+          retention-days: 3
+          if-no-files-found: error
+
+      - name: 받는 법 안내
+        env:
+          APK_URL: ${{ steps.apk.outputs.artifact-url }}
+        run: |
+          {
+            echo "### 개발용 APK"
+            echo ""
+            echo "[respec-alarm-dev.apk 받기]($APK_URL) (3일 보관)"
+            echo ""
+            echo "- 폰에 설치한 뒤 PC에서 npx expo start로 연결해 씁니다. EAS 개발용 APK와 쓰는 법이 같습니다."
+            echo "- EAS로 받은 앱과 서명이 달라서 처음 한 번은 앱을 지우고 설치합니다."
+          } >> "$GITHUB_STEP_SUMMARY"
