@@ -98,7 +98,7 @@ textarea.note{font:inherit;font-size:12.5px;border:1px solid var(--line);border-
   <div class="side" id="side">
     <div class="bar">
       <button data-src="/" class="on">앱</button>
-      <button data-src="/mockup">목업</button>
+      <button data-src="/mockup.html">목업</button>
       <button data-src="/dev/ui">UI 부품</button>
       <span class="sp"></span>
       <button id="btnReload" title="다시 불러오기">↻</button>
@@ -276,7 +276,7 @@ const SETUP = [
   ['배포 길: 웹 Cloudflare ✓ · APK 태그 릴리스', 'doing'],
 ];
 const LINKS = [
-  ['웹 미리보기 (main)', SITE.web], ['클릭 목업', SITE.web + '/mockup'], ['UI 부품', SITE.web + '/dev/ui'],
+  ['웹 미리보기 (main)', SITE.web], ['클릭 목업', SITE.web + '/mockup.html'], ['UI 부품', SITE.web + '/dev/ui'],
   ['레포', `https://github.com/${SITE.org}/${SITE.repo}`], ['Pull Requests', `https://github.com/${SITE.org}/${SITE.repo}/pulls`],
   ['보드 (Projects)', `https://github.com/orgs/${SITE.org}/projects/${SITE.project}`], ['최신 APK (Releases)', `https://github.com/${SITE.org}/${SITE.repo}/releases/latest`],
   ['APK 빌드 버튼 (Actions)', `https://github.com/${SITE.org}/${SITE.repo}/actions/workflows/eas-build.yml`],
@@ -354,17 +354,22 @@ const esc = (x) => String(x).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&l
 const chip = (st, text) => `<span class="chip ${st}">${esc(text ?? STATUS_KO[st] ?? st)}</span>`;
 const issueLink = (n) => { const it = issue(n); const st = statusOf(n); return `<a href="https://github.com/${SITE.org}/${SITE.repo}/issues/${n}" target="_blank" title="${esc(it ? it.t : '')}">#${n}</a> ${chip(st)}`; };
 const fmtDate = (d) => d ? d.slice(5).replace('-', '/') : '';
-const today = new Date(); const ymd = (d) => d.toISOString().slice(0, 10);
-const daysTo = (s) => Math.ceil((new Date(s) - today) / 864e5);
+const today = new Date();
+// 'YYYY-MM-DD'를 new Date()에 그대로 넣으면 UTC 자정(KST 09:00)이 되어 새벽 0~9시엔 D-day · 주차 · 지연이 하루 어긋남 → 로컬 자정으로 읽음
+const localDate = (s) => new Date(s + 'T00:00');
+const ymd = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+const daysTo = (s) => Math.ceil((localDate(s) - today) / 864e5);
 
 // ───────────────────────────────── 렌더
 const TABDEF = [['big', '큰 그림'], ['screens', '화면'], ['features', '기능'], ['links', '연결'], ['todo', '할 일'], ['env', '환경'], ['dec', '결정']];
 function render() {
-  const w = Math.floor((today - new Date(SITE.week1)) / 6048e5) + 1;
+  const w = Math.floor((today - localDate(SITE.week1)) / 6048e5) + 1;
   document.getElementById('meta').textContent = `W${w} · 1차 데모 D-${daysTo(SITE.demo1)} · 대회 D-${daysTo(SITE.contest)}`;
+  const R = { big: rBig, screens: rScreens, features: rFeatures, links: rLinks, todo: rTodo, env: rEnv, dec: rDec };
+  if (!R[tab]) tab = 'big'; // localStorage에 남은 예전 탭 id(지웠거나 바꾼 것)면 큰 그림으로. 화면(sel)은 rScreens에서 첫 화면으로 떨어짐
   document.getElementById('tabs').innerHTML = TABDEF.map(([id, name]) => `<button data-tab="${id}" class="${tab === id ? 'on' : ''}">${name}</button>`).join('');
   const m = document.getElementById('main');
-  m.innerHTML = ({ big: rBig, screens: rScreens, features: rFeatures, links: rLinks, todo: rTodo, env: rEnv, dec: rDec })[tab]();
+  m.innerHTML = R[tab]();
   const sm = document.getElementById('syncMeta');
   if (live) sm.textContent = `동기화 ${new Date(live.at).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}`;
   else if (SNAPSHOT) sm.textContent = `스냅샷 ${SNAPSHOT.at} (토큰 넣으면 실시간)`;
@@ -412,7 +417,7 @@ function rScreens() {
   const tree = TABS.map(([id, name]) => `<div class="g">${name}</div>` + SCREENS.filter(x => x.tab === id).map(x =>
     `<div class="it ${x.code === s.code ? 'on' : ''}" data-sel="${x.code}"><span class="dot ${screenStatus(x)}"></span>${x.code} ${esc(x.name)}</div>`).join('')).join('');
   const f = fileOf(s);
-  const fileText = s.native ? '네이티브 화면 (alarm-core)' : f ? `<code>${esc(f.path)}</code> ${f.known ? (f.exists ? chip('done', 'main에 있음') : chip('todo', 'main에 없음')) : '<span class="muted">동기화하면 확인</span>'}` : '';
+  const fileText = s.native ? '네이티브 화면 (alarm-core)' : f ? `<code>${esc(f.path)}</code> ${f.known ? (f.exists ? chip('done', 'main에 있음') : chip('todo', 'main에 없음')) : `<span class="muted">${live ? '파일 목록 못 읽음 (토큰 Contents 권한 확인)' : '동기화하면 확인'}</span>`}` : '';
   const rows = s.data.map(d => `<tr><td>${chip('k-' + d.k, d.k)}</td><td>${esc(d.t)}</td><td>${d.r.map(r => `<code>${esc(r)}</code>`).join(' ')}</td></tr>`).join('');
   const links = SCREENS.filter(o => o !== s && o.data.some(d => d.r.some(r => s.data.some(e => e.r.includes(r))))).map(o => `<a href="#" data-sel="${o.code}">${o.code} ${esc(o.name)}</a>`).join(' · ');
   const openPrs = s.issues.flatMap(prsOf).filter((p, i, a) => a.findIndex(q => q.number === p.number) === i);
@@ -423,7 +428,7 @@ function rScreens() {
       <tr><td>파일</td><td>${fileText}</td></tr>
       <tr><td>이슈</td><td>${s.issues.map(issueLink).join(' &nbsp; ')}</td></tr>
       ${openPrs.length ? `<tr><td>PR</td><td>${openPrs.map(p => `<a href="https://github.com/${SITE.org}/${SITE.repo}/pull/${p.number}" target="_blank">#${p.number}</a> ${esc(p.title)} ${p.draft ? chip('wait', 'WIP') : ''} ${p.checks ? chip(p.checks === 'SUCCESS' ? 'done' : p.checks === 'PENDING' ? 'wait' : 'doing', '검사 ' + ({ SUCCESS: '통과', FAILURE: '실패', ERROR: '오류', PENDING: '진행' }[p.checks] || p.checks)) : ''}`).join('<br>')}</td></tr>` : ''}
-      <tr><td>목업</td><td><a href="/mockup" target="_blank">mockup.html</a>의 ${s.code} 화면</td></tr>
+      <tr><td>목업</td><td><a href="/mockup.html" target="_blank">mockup.html</a>의 ${s.code} 화면</td></tr>
       <tr><td>연결 화면</td><td>${links || '<span class="muted">없음</span>'}</td></tr>
     </table>
     <h3>이 화면이 읽고 쓰는 것</h3>
@@ -434,7 +439,6 @@ function rScreens() {
 
 function rFeatures() {
   return FEATURES.map(f => {
-    const ss = SCREENS.filter(s => s.feat.includes(f.id) || (f.id === 'M1'));
     const scr = f.id === 'M1' ? '' : `<div class="row" style="margin-top:6px"><span class="muted">화면</span> ${SCREENS.filter(s => s.feat.includes(f.id)).map(s => `<a href="#" data-sel="${s.code}" data-go="screens:${s.code}">${s.code} ${esc(s.name)}</a>`).join(' · ') || '<span class="muted">—</span>'}</div>`;
     return `<div class="card" style="margin-bottom:12px">
       <div class="row"><h2 style="margin:0">${esc(f.name)}</h2><span class="chip wait">${esc(f.ms)}</span></div>
@@ -470,7 +474,7 @@ function rTodo() {
   const labels = ['1차 데모', 'AI 대기', 'iOS', 'FE', 'BE'];
   const f = todoFilter;
   const list = all.filter(i => (!f.status || statusOf(i.n) === f.status) && (!f.ms || i.ms === f.ms) && (!f.label || (i.labels || []).includes(f.label)))
-    .sort((a, b) => { const da = statusOf(a.n) === 'done', db = statusOf(b.n) === 'done'; if (da !== db) return da ? 1 : -1; return (a.due || '9') < (b.due || '9') ? -1 : 1; });
+    .sort((a, b) => { const da = statusOf(a.n) === 'done', db = statusOf(b.n) === 'done'; if (da !== db) return da ? 1 : -1; const x = a.due || '9', y = b.due || '9'; return x < y ? -1 : x > y ? 1 : 0; });
   const t = ymd(today);
   const rows = list.map(i => {
     const st = statusOf(i.n); const late = i.due && i.due < t && st !== 'done';
@@ -495,8 +499,8 @@ function rEnv() {
   return `<div class="grid2">
     <div class="card"><h2>세팅 10단계</h2>${setup}<div class="muted" style="margin-top:8px">상태는 이 브라우저에만 저장</div></div>
     <div class="card"><h2>링크</h2><table>${links}</table>
-      <h3>GitHub 연결</h3><div class="row"><input class="tok" id="tok" type="password" placeholder="ghp_… (repo · read:project)" value="${esc(token)}"><button id="tokSave">저장</button><button id="tokClear">지우기</button></div>
-      <div class="muted" style="margin-top:4px">classic 토큰: <code>repo</code> + <code>read:project</code>. 이 브라우저의 localStorage에만 저장되고 어디에도 보내지 않음(GitHub API 호출에만 씀)</div></div>
+      <h3>GitHub 연결</h3><div class="row"><input class="tok" id="tok" type="password" placeholder="github_pat_… (읽기 전용)" value="${esc(token)}"><button id="tokSave">저장</button><button id="tokClear">지우기</button></div>
+      <div class="muted" style="margin-top:4px"><a href="https://github.com/settings/personal-access-tokens/new" target="_blank">fine-grained 토큰</a>, 읽기 전용으로 — 대상: 이 레포 1곳 · Repository permissions: <code>Contents</code> · <code>Issues</code> · <code>Pull requests</code> 읽기 · Organization permissions: <code>Projects</code> 읽기. classic <code>repo</code> 토큰은 쓰기까지 열리니 쓰지 않음. 이 브라우저의 localStorage에만 남고 어디에도 보내지 않음(GitHub API 호출에만 씀)</div></div>
   </div>
   <div class="card" style="margin-top:14px"><h2>명령</h2><table>${cmds}</table>
     <h3>폴더</h3><table><tr><td><code>mobile/</code></td><td>앱. <code>src/app</code> 화면(파일 = 주소) · <code>src/features/*/api.ts</code> 데이터 · <code>modules/alarm-core</code> 네이티브</td></tr>
@@ -525,7 +529,9 @@ async function sync() {
   const b = document.getElementById('btnSync'); b.disabled = true; b.textContent = '동기화 중…';
   try {
     const H = { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' };
-    const g = await fetch('https://api.github.com/graphql', { method: 'POST', headers: H, body: JSON.stringify({ query: GQL, variables: { org: SITE.org, repo: SITE.repo, num: SITE.project } }) }).then(r => r.json());
+    // 401 · 403이면 응답이 { message } 하나라 g.data에서 TypeError가 남 → 상태 코드로 먼저 걸러 원인을 그대로 보여줌
+    const gh = async (url, init) => { const r = await fetch(url, init); const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(`GitHub ${r.status}: ${j.message || r.statusText}`); return j; };
+    const g = await gh('https://api.github.com/graphql', { method: 'POST', headers: H, body: JSON.stringify({ query: GQL, variables: { org: SITE.org, repo: SITE.repo, num: SITE.project } }) });
     if (g.errors) throw new Error(g.errors.map(e => e.message).join('; '));
     const items = g.data.organization.projectV2.items.nodes.map(it => {
       const fv = {}; for (const v of it.fieldValues.nodes) if (v.field) fv[v.field.name] = v.name ?? v.date;
@@ -533,14 +539,15 @@ async function sync() {
       return { n: c.number, t: c.title || '', st: c.state || 'DRAFT', status: fv['Status'], ms: c.milestone && c.milestone.title, start: fv['시작일'], due: fv['목표일'], part: fv['파트'], labels: c.labels ? c.labels.nodes.map(l => l.name) : [] };
     });
     const prs = g.data.repository.pullRequests.nodes.map(p => ({ number: p.number, title: p.title, state: 'OPEN', draft: p.isDraft, branch: p.headRefName, review: p.reviewDecision, closes: p.closingIssuesReferences.nodes.map(x => x.number), checks: p.commits.nodes[0]?.commit?.statusCheckRollup?.state || null }));
-    const t = await fetch(`https://api.github.com/repos/${SITE.org}/${SITE.repo}/git/trees/main?recursive=1`, { headers: H }).then(r => r.json());
-    const tree = (t.tree || []).filter(x => x.type === 'blob').map(x => x.path);
+    // 파일 목록은 못 읽어도(Contents 권한 빠짐 등) 보드 · PR은 살림. tree가 null이면 화면 탭에 "main에 없음" 대신 "파일 목록 못 읽음"으로 보임
+    const t = await gh(`https://api.github.com/repos/${SITE.org}/${SITE.repo}/git/trees/main?recursive=1`, { headers: H }).catch(() => null);
+    const tree = t && t.tree ? t.tree.filter(x => x.type === 'blob').map(x => x.path) : null;
     live = { at: Date.now(), items, prs, tree }; LS.set('sync', live);
-  } catch (e) { alert('동기화 실패: ' + e.message + '\n토큰 권한(repo · read:project)을 확인해 주세요.'); }
+  } catch (e) { alert('동기화 실패: ' + e.message + '\n토큰 권한(이 레포 Contents · Issues · Pull requests 읽기, 조직 Projects 읽기)을 확인해 주세요.'); }
   b.disabled = false; b.textContent = '동기화'; render();
 }
 function askToken() {
-  const v = prompt('GitHub classic 토큰 (repo · read:project). 이 브라우저에만 저장됩니다.', token || '');
+  const v = prompt('GitHub fine-grained 토큰, 읽기 전용 (이 레포 Contents · Issues · Pull requests + 조직 Projects). 이 브라우저에만 저장됩니다.', token || '');
   if (v === null) return; token = v.trim(); LS.set('ghToken', token); render(); if (token) sync();
 }
 
