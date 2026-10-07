@@ -12,6 +12,7 @@
     "build:web": "expo export --platform web"
   },
   "dependencies": {
+    "@capstone/alarm-core": "file:./modules/alarm-core",
     "@expo/ui": "~57.0.21",
     "expo": "~57.0.26",
     "expo-constants": "~57.0.18",
