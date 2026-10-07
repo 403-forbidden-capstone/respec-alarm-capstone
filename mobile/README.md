@@ -47,7 +47,8 @@ npm run web
 
 - main에 머지되면 고정 주소가 바뀜. PR을 열면 브랜치마다 미리보기 주소가 생김
 - PR 아래 검사 목록의 Workers Builds → Details를 누르면 미리보기로 감
-- Cloudflare Worker `respec-alarm-capstone`의 빌드 설정: Root directory는 비우고 레포 맨 위에서 돔. 빌드 `cd mobile && npm ci && npm run build:web` · 배포 `npx wrangler deploy -c mobile/wrangler.jsonc` · Preview command `npx wrangler preview -c mobile/wrangler.jsonc` · Enable Preview builds 체크. 출력 폴더(`dist`)와 없는 주소 처리는 `wrangler.jsonc`
+- Cloudflare Worker `respec-alarm-capstone`의 빌드 설정: Root directory는 비우고 레포 맨 위에서 돔. main은 빌드 `cd mobile && npm ci && npm run build:web` · 배포 `npx wrangler deploy -c mobile/wrangler.jsonc`. 출력 폴더(`dist`)와 없는 주소 처리는 `wrangler.jsonc`
+- PR 브랜치 빌드는 Cloudflare의 옛 규칙이 대시보드 수정을 안 따르고 맨 위에서 `npm run build:web` → `npx wrangler preview`로 돎. 그래서 레포 맨 위 `package.json`(mobile로 들어가는 build:web)과 `wrangler.jsonc`(결과 = `mobile/dist`)가 있음
 - `public/` 안의 파일은 그대로 사이트에 실림(`public/mockup.html` → `/mockup.html`). `_headers`로 검색 엔진 색인을 막음
 - 폰 전용 기능(알람 모듈 · 소리 · 알림)은 웹에서 부르면 깨짐. `Platform.OS === 'web'`이면 건너뛰게 씀
 

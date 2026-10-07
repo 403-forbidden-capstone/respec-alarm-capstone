@@ -2,7 +2,7 @@
 // Workers Builds 설정은 레포 맨 위에서 돔 (Root directory 비움 — main용 · PR용 규칙이 경로를 따로 저장해서 어긋났었음)
 //   Build command    cd mobile && npm ci && npm run build:web
 //   Deploy command   npx wrangler deploy -c mobile/wrangler.jsonc    (main)
-//   Preview command  npx wrangler preview -c mobile/wrangler.jsonc   (PR 브랜치, Enable Preview builds 체크)
+//   PR 브랜치는 레포 맨 위 wrangler.jsonc를 씀 (그쪽 주석 참고). 두 파일의 name · assets 설정은 같게 유지
 // name은 Cloudflare 대시보드의 Worker 이름과 같아야 함 (다르면 빌드 실패)
 {
   "name": "respec-alarm-capstone",

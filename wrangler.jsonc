@@ -1,0 +1,15 @@
+// 웹 미리보기 — PR 브랜치 빌드용 Cloudflare 설정 (레포 맨 위에서 도는 규칙이 읽음)
+// Cloudflare의 PR용 빌드 규칙이 대시보드 수정을 안 따르고 "맨 위에서 npm run build:web → npx wrangler preview"로 돎
+//   → 맨 위 package.json의 build:web이 mobile로 들어가 빌드하고, 이 파일이 결과 폴더(mobile/dist)를 가리킴
+// main 배포는 mobile/wrangler.jsonc를 씀. 두 파일의 name · assets 설정은 같게 유지
+{
+  "name": "respec-alarm-capstone",
+  "compatibility_date": "2026-10-06",
+  "assets": {
+    "directory": "./mobile/dist",
+    // 없는 주소는 index.html로 → 앱 안 화면 이동(Expo Router)이 새로고침에도 살아 있음
+    "not_found_handling": "single-page-application"
+  },
+  // PR 미리보기(wrangler preview)에 필요한 칸
+  "previews": {}
+}
