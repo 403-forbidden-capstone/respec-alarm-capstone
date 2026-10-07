@@ -127,7 +127,7 @@ PR 필수, 승인 1명(새 커밋이 올라오면 다시 승인), 리뷰 대화 
 
 공개돼도 되는 값은 `EXPO_PUBLIC_`으로 시작하는 두 개뿐입니다. 나머지는 레포와 앱에 넣지 않습니다. 예시 파일은 [`mobile/.env.example`](mobile/.env.example)과 [`supabase/functions/.env.example`](supabase/functions/.env.example)입니다.
 
-자동화 파일은 모두 `.github/workflows/`에 있습니다. 웹 미리보기 빌드 설정은 Cloudflare Worker `respec-alarm-capstone`(대시보드)과 [`mobile/wrangler.jsonc`](mobile/wrangler.jsonc)에 있습니다.
+자동화 파일은 모두 `.github/workflows/`에 있습니다. 웹 미리보기 빌드 설정은 Cloudflare Worker `respec-alarm-capstone`(대시보드)과 [`mobile/wrangler.jsonc`](mobile/wrangler.jsonc)(main), 맨 위 [`wrangler.jsonc`](wrangler.jsonc) · `package.json`(PR 미리보기)에 있습니다.
 
 </details>
 
