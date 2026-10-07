@@ -103,7 +103,7 @@ export function formatDateParen(date: Date) {
   return `${month}월 ${day}일 (${weekday})`;
 }
 
-// 지금 · 5분 뒤 · 1시간 5분 뒤
+// 지금 · 5분 뒤 · 1시간 5분 뒤 — 지난 시각도 '지금' (다음 알람처럼 앞으로 올 시각에만 씀)
 export function formatRelative(from: Date, to: Date) {
   const diff = minutesBetween(from, to);
   if (diff <= 0) return '지금';

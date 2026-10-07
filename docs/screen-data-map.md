@@ -151,3 +151,4 @@
 | 2 | H03 강도를 배경음 · 말소리 · 진동 따로 고름 | `intensity` 하나 + `voice_tone` · `sound_key`, 진동 칸 없음 | #29에서 축별로 둘지 정함 |
 | 3 | G04 "변경 기록" | 저장 자리 없음 | 처음엔 주인에게 푸시만 |
 | 4 | — | 카카오 응답은 저장 · 재사용 불가인데 `est_travel_minutes` · `travel_source` CACHED가 있음 | #27에서 계산에 쓴 값만 남기는지 정함 |
+| 5 | G02 · H01 그룹원 상태에 준비 시작 · 출발 · 도착까지 보임 | `get_group_wake_status`는 기상 상태(`wake_status`)와 시각만 돌려줌, MISSED는 목업에 없음 | #45에서 G02에 어디까지 보일지 정함 (목업 api는 글자 `WakeState`, 실데이터는 상태 값 + 시각으로 바꿈) |

@@ -28,16 +28,19 @@ describe('ALG-02 강도', () => {
     expect(autoLevel(appointment('a1'))).toBe(1);
     expect(autoLevel(appointment('a2'))).toBe(0);
     db.lateCount4w = 2;
-    expect(autoLevel(appointment('a1'))).toBe(2);
-    db.lateCount4w = 1;
+    try {
+      expect(autoLevel(appointment('a1'))).toBe(2);
+    } finally {
+      db.lateCount4w = 1;
+    }
   });
 });
 
 describe('ALG-03 권한 합집합', () => {
   it('관계 중 하나라도 허용하면 허용', () => {
     const f = orGrants([
-      { source: '친구', viewAlarm: true, editAlarm: true, viewWake: false },
-      { source: '캡스톤팀', viewAlarm: true, editAlarm: false, viewWake: true },
+      { source: '친구', sourceType: 'FRIEND', sourceId: 'sy', viewAlarm: true, editAlarm: true, viewWake: false },
+      { source: '캡스톤팀', sourceType: 'GROUP', sourceId: 'cap', viewAlarm: true, editAlarm: false, viewWake: true },
     ]);
     expect([f.viewAlarm, f.editAlarm, f.viewWake, f.count]).toEqual([true, true, true, 3]);
   });

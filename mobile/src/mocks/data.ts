@@ -121,6 +121,7 @@ export const db = {
   lateCount4w: 1, // 최근 4주 늦잠 지각
   wakeThetaMinutes: 1, // 기상 판정 기준 θ
   me: { wakeAt: null as Date | null, departAt: null as Date | null, arriveAt: null as Date | null },
+  wakeConfirmations: {} as Record<string, { at: Date; how: 'self' | 'auto' }>, // 알람 id별 기상 확정
   events: [] as { at: Date; label: string; source: string }[], // 오늘 실제로 일어난 일
   journalWritten: false,
   todos: [
@@ -147,15 +148,15 @@ export const db = {
       fam: off(),
     } as Record<string, PermissionSet>,
   },
-  // 내가 받은 권한 [관계 이름, 권한]
+  // 내가 받은 권한 (사람별 · 관계별)
   received: {
     sy: [
-      { source: '친구', viewAlarm: true, editAlarm: true, viewWake: false },
-      { source: '캡스톤팀', viewAlarm: true, editAlarm: false, viewWake: true },
+      { source: '친구', sourceType: 'FRIEND', sourceId: 'sy', viewAlarm: true, editAlarm: true, viewWake: false },
+      { source: '캡스톤팀', sourceType: 'GROUP', sourceId: 'cap', viewAlarm: true, editAlarm: false, viewWake: true },
     ],
-    jh: [{ source: '캡스톤팀', viewAlarm: true, editAlarm: false, viewWake: true }],
-    js: [{ source: '캡스톤팀', viewAlarm: false, editAlarm: false, viewWake: true }],
-  } as Record<string, (PermissionSet & { source: string })[]>,
+    jh: [{ source: '캡스톤팀', sourceType: 'GROUP', sourceId: 'cap', viewAlarm: true, editAlarm: false, viewWake: true }],
+    js: [{ source: '캡스톤팀', sourceType: 'GROUP', sourceId: 'cap', viewAlarm: false, editAlarm: false, viewWake: true }],
+  } as Record<string, (PermissionSet & { source: string; sourceType: 'FRIEND' | 'GROUP'; sourceId: string })[]>,
   sharedAlarms: {} as Record<string, { on: boolean; shift: number }>, // 공유받은 알람을 내가 바꾼 값
   shareLog: [] as { at: Date; text: string }[],
   suggestion: { id: 's1', appointmentId: 'a3', minutes: 10, status: 'PENDING' as SuggestionStatus, appliedMinutes: 0 },

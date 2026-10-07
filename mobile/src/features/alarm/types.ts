@@ -5,7 +5,12 @@ import type { Enums } from '@/types/database';
 export type AlarmKind = Exclude<Enums<'alarm_type'>, 'ROUTINE'>; // 기상 · 준비 · 출발 · 도착
 export type Importance = Enums<'importance_level'>;
 export type Transport = Enums<'transport_type'>;
-export type Level = 0 | 1 | 2; // 약 · 중 · 강 (DB alarm_intensity SOFT · NORMAL · STRONG)
+export type Level = 0 | 1 | 2; // 약 · 중 · 강 — 화면에서 LEVELS 칸을 고를 때 씀
+export type AlarmIntensity = Enums<'alarm_intensity'>; // DB · 알람 코어 값
+
+const INTENSITY_OF: readonly AlarmIntensity[] = ['SOFT', 'NORMAL', 'STRONG'];
+export const toAlarmIntensity = (level: Level): AlarmIntensity => INTENSITY_OF[level];
+export const toLevel = (intensity: AlarmIntensity) => INTENSITY_OF.indexOf(intensity) as Level;
 export type IntensityAxis = 'sound' | 'voice' | 'vibration'; // 배경음 · 말소리 · 진동
 
 export const KIND_LABEL: Record<AlarmKind, string> = { WAKE: '기상', PREPARE: '준비', DEPARTURE: '출발', ARRIVE: '도착' };
@@ -35,6 +40,7 @@ export const AXES: readonly (readonly [IntensityAxis, string])[] = [
 ];
 
 export type AlarmTime = {
+  id: string; // 알람 id (DB alarms.alarm_id) — 목업은 `${일정 id}:${종류}`
   kind: AlarmKind;
   at: Date;
   enabled: boolean; // 종류별로 끈 알람 (도착은 목표 시각이라 항상 true)
@@ -107,12 +113,14 @@ export type Estimate = {
   weight: number; // n / (n + k)
   residualP80: number; // 개인 오차 P80 (분)
   sameDayWake: boolean; // 같은 날 앞선 일정에 기상 알람이 있어 외출 준비만
+  latePoint: number; // 최근 4주 늦잠 지각 점수 (강도 계산)
 };
 
 // 울림 화면 (H07) — 실제 울림은 알람 코어(네이티브)
 export type RingKind = Exclude<AlarmKind, 'ARRIVE'>;
 
 export type RingInfo = {
+  alarmId: string;
   kind: RingKind;
   appointment: Appointment;
   at: Date; // 울리는 시각
@@ -122,10 +130,12 @@ export type RingInfo = {
   important: boolean;
 };
 
-// 기상 확인 (H08)
+// 기상 확인 (H08) — 기상 알람 하나 기준 (alarm_events.alarm_id에 WAKE_CONFIRMED)
 export type WakeCheck = {
+  alarmId: string;
   appointmentTitle: string;
   groupName: string | null; // 기상 완료를 알려 줄 그룹
   dismissedAt: Date; // 기상 알람을 끈 시각
   thetaMinutes: number; // 기상 판정 기준 θ — 해제 뒤 10분 동안 누적 화면 사용
+  confirmed: { at: Date; how: 'self' | 'auto' } | null; // 이미 확정했으면
 };

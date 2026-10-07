@@ -27,8 +27,9 @@ export const PERMISSIONS: readonly { key: Permission; name: string; description:
   { key: 'viewWake', name: '기상 상태 조회', description: '기상 확인 여부와 확인 시각을 볼 수 있어요.' },
 ];
 
-// 관계 하나에서 준(받은) 권한
-export type GrantRow = PermissionSet & { source: string }; // 친구 · 캡스톤팀
+// 관계 하나에서 준(받은) 권한 — DB sharing_permissions의 source_type · source_id
+// sourceId: 그룹이면 group_id, 친구면 상대 사람 id (실데이터는 friends.friend_id로 찾아 사람으로 바꿈)
+export type GrantRow = PermissionSet & { source: string; sourceType: 'FRIEND' | 'GROUP'; sourceId: string }; // source = 친구 · 캡스톤팀
 
 // 여러 관계의 권한을 항목별로 합친 결과 (하나라도 허용하면 허용)
 export type FinalGrant = PermissionSet & { rows: GrantRow[]; count: number };

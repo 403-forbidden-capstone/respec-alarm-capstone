@@ -49,8 +49,8 @@ export type Suggestion = {
   deltas: { label: string; value: string }[]; // 1회 전 +10분 …
   appointment: { id: string; title: string; at: Date };
   minutes: number; // 제안한 앞당김 (분)
-  currentWake: Date; // 지금 기상 알람
-  proposedWake: Date;
+  currentWake: Date; // 지금(적용 뒤에는 적용 전) 기상 알람
+  proposedWake: Date; // 제안(적용 뒤에는 실제로 적용한) 기상 알람
   status: SuggestionStatus;
   applied: { wake: Date; prepare: Date | null } | null; // 적용한 뒤 시각
 };
