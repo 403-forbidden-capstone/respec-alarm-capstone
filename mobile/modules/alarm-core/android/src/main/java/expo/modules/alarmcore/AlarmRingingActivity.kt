@@ -127,6 +127,7 @@ class AlarmRingingActivity : Activity() {
     sendBroadcast(Intent(this, AlarmActionReceiver::class.java).apply {
       this.action = action
       putExtra(AlarmScheduler.EXTRA_ALARM_ID, alarmId)
+      putExtra(AlarmScheduler.EXTRA_ALARM_TITLE, alarmTitle)
     })
   }
 

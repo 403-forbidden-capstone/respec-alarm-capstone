@@ -142,6 +142,7 @@ class AlarmPlaybackService : Service() {
     val snoozeIntent = Intent(this, AlarmActionReceiver::class.java).apply {
       action = ACTION_SNOOZE
       putExtra(AlarmScheduler.EXTRA_ALARM_ID, id)
+      putExtra(AlarmScheduler.EXTRA_ALARM_TITLE, title)
     }
 
     val builder = NotificationCompat.Builder(this, CHANNEL_ID)
