@@ -22,7 +22,7 @@ jobs:
       !startsWith(github.event.pull_request.title, '[WIP]') &&
       (github.event.action != 'edited' || startsWith(github.event.changes.title.from, '[WIP]'))
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     # job에 둬야 건너뛰는 실행(PR 본문 수정 등)이 돌고 있는 리뷰를 취소하지 않습니다
     concurrency:
       group: claude-review-${{ github.event.pull_request.number }}
