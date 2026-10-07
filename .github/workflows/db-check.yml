@@ -1,27 +1,36 @@
-name: DB 검사
+name: DB 검사 · 적용
 
-# supabase/가 바뀐 PR과 main push에서 마이그레이션이 깨지지 않았는지 확인합니다.
-#   PGlite(WASM Postgres)에 Supabase 흉내(auth 스키마 · 역할)를 만들고 마이그레이션을 순서대로 적용한 뒤
-#   RLS · 권한 · 함수 동작을 확인합니다. Docker나 실제 Supabase 프로젝트에는 연결하지 않습니다.
-#   로컬에서는 supabase/tests에서 npm ci && npm test로 똑같이 돌립니다.
+# DB 구조는 supabase/migrations의 새 파일로만 바꾸고, 실제 프로젝트에는 이 워크플로가 넣습니다 (터미널 db push 안 함).
+#   PR · main  마이그레이션 · RLS 검사: PGlite(WASM Postgres)에 Supabase 흉내를 만들고 적용 → RLS · 권한 · 함수 동작 확인
+#              실제 이미지 적용 · 타입: 실제 Supabase Postgres(supabase db start)에 처음부터 적용
+#                (PR만) 이미 있는 마이그레이션을 고쳤거나 새 파일 이름이 앞서면 실패 · 앱 타입이 스키마와 다르면 실패
+#   main       두 검사가 통과하면 실제 프로젝트에 supabase db push
+#   비밀값 SUPABASE_ACCESS_TOKEN 하나 (supabase/README.md)
 
 on:
   pull_request:
     paths:
       - 'supabase/**'
+      - 'mobile/src/types/database.ts'
       - '.github/workflows/db-check.yml'
   push:
     branches: [main]
     paths:
       - 'supabase/**'
       - '.github/workflows/db-check.yml'
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
   group: db-check-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  # main은 적용 중에 끊지 않음
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  SUPABASE_CLI_VERSION: 2.119.0
+  PROJECT_REF: gomrhctwjvttoqifxktt
 
 jobs:
   check:
@@ -46,3 +55,98 @@ jobs:
 
       - name: 검사
         run: npm test
+
+  rehearse:
+    name: 실제 이미지 적용 · 타입
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 2
+
+      - name: 마이그레이션 파일 규칙
+        if: github.event_name == 'pull_request'
+        run: |
+          base=$(git rev-parse HEAD^1)
+          # 받는 브랜치에 이미 있는 파일은 실제 DB에 들어갔을 수 있어서 고쳐도 다시 적용되지 않음
+          touched=$(git diff --name-status --no-renames "$base" HEAD -- supabase/migrations | awk '$1 != "A" { print $2 }')
+          if [ -n "$touched" ]; then
+            echo "::error::이미 있는 마이그레이션을 고쳤어요. 바꿀 내용은 새 파일로 올려요: $(echo $touched)"
+            exit 1
+          fi
+          # 실제 DB는 이름(시각) 순서로 쌓여서 새 파일이 기존 것보다 앞이면 적용이 막힘
+          last=$(git ls-tree --name-only "$base" supabase/migrations/ | sed -n 's#^supabase/migrations/\(.*\.sql\)$#\1#p' | sort | tail -n 1)
+          for f in $(git diff --name-only --diff-filter=A "$base" HEAD -- 'supabase/migrations/*.sql'); do
+            f=${f##*/}
+            if [ -n "$last" ] && [[ "$f" < "$last" ]]; then
+              echo "::error::$f 이름이 이미 있는 $last 보다 앞이에요. npx supabase migration new 로 지금 시각 이름을 받아 옮겨요"
+              exit 1
+            fi
+          done
+          echo "통과 (기준 마지막 파일: ${last:-없음})"
+
+      - name: Supabase CLI
+        uses: supabase/setup-cli@v3
+        with:
+          version: ${{ env.SUPABASE_CLI_VERSION }}
+
+      - name: 임시 DB에 적용
+        run: supabase db start
+
+      - name: 앱 타입 확인
+        id: types
+        if: github.event_name == 'pull_request'
+        run: |
+          supabase gen types --lang typescript --local --schema public > "$RUNNER_TEMP/database.ts"
+          if cmp -s "$RUNNER_TEMP/database.ts" mobile/src/types/database.ts; then
+            echo "mobile/src/types/database.ts가 스키마와 같음"
+            exit 0
+          fi
+          echo "::error file=mobile/src/types/database.ts::앱 타입이 스키마와 달라요. 이 실행의 database-types 파일로 바꿔요"
+          diff -u mobile/src/types/database.ts "$RUNNER_TEMP/database.ts" | head -n 200 || true
+          exit 1
+
+      - name: 새 앱 타입 올리기
+        if: failure() && steps.types.outcome == 'failure'
+        uses: actions/upload-artifact@v7
+        with:
+          name: database-types
+          path: ${{ runner.temp }}/database.ts
+          retention-days: 3
+
+  deploy:
+    name: 실제 DB에 적용
+    needs: [check, rehearse]
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    concurrency:
+      group: db-deploy
+      cancel-in-progress: false
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      # 없으면 CLI가 토큰으로 임시 로그인 역할을 만들어 접속함
+      SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: 비밀값 확인
+        run: |
+          if [ -z "$SUPABASE_ACCESS_TOKEN" ]; then
+            echo "::error::저장소 비밀값 SUPABASE_ACCESS_TOKEN이 없어요. supabase/README.md대로 넣고 이 실행을 다시 돌려요"
+            exit 1
+          fi
+
+      - name: Supabase CLI
+        uses: supabase/setup-cli@v3
+        with:
+          version: ${{ env.SUPABASE_CLI_VERSION }}
+
+      - name: 프로젝트 연결
+        run: supabase link --project-ref "$PROJECT_REF"
+
+      - name: 적용
+        run: supabase db push

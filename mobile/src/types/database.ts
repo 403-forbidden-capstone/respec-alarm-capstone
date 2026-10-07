@@ -1,0 +1,554 @@
+
+export type Json = string | number | boolean | null | { [key: string]: Json | undefined } | Json[]
+
+export type Database = {
+  
+  "public": {
+          Tables: {
+            "alarm_events": {
+                  Row: {
+                    "alarm_id": string,"created_at": string,"event_at": string,"event_id": number,"event_type": Database["public"]['Enums']["alarm_event_type"],"feedback_type": Database["public"]['Enums']["alarm_feedback_type"] | null,"sequence_no": number,"snooze_minutes": number | null,"user_id": string
+                  }
+                  Insert: {
+                    "alarm_id": string,"created_at"?: string,"event_at"?: string,"event_id"?: number,"event_type": Database["public"]['Enums']["alarm_event_type"],"feedback_type"?: Database["public"]['Enums']["alarm_feedback_type"] | null,"sequence_no"?: number,"snooze_minutes"?: number | null,"user_id": string
+                  }
+                  Update: {
+                    "alarm_id"?: string,"created_at"?: string,"event_at"?: string,"event_id"?: number,"event_type"?: Database["public"]['Enums']["alarm_event_type"],"feedback_type"?: Database["public"]['Enums']["alarm_feedback_type"] | null,"sequence_no"?: number,"snooze_minutes"?: number | null,"user_id"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "alarm_events_alarm_id_fkey"
+      columns: ["alarm_id"]
+isOneToOne: false
+      referencedRelation: "alarms"
+      referencedColumns: ["alarm_id"]
+    },{
+      foreignKeyName: "alarm_events_user_id_fkey"
+      columns: ["user_id"]
+isOneToOne: false
+      referencedRelation: "profiles"
+      referencedColumns: ["user_id"]
+    }
+                  ]
+                },"alarm_suggestions": {
+                  Row: {
+                    "created_at": string,"current_value": string | null,"responded_at": string | null,"result_value": string | null,"source_event_id": number | null,"status": Database["public"]['Enums']["alarm_suggestion_status"],"suggested_value": string,"suggestion_id": string,"suggestion_type": Database["public"]['Enums']["alarm_suggestion_type"],"suppress_until": string | null,"target_alarm_id": string | null,"user_id": string
+                  }
+                  Insert: {
+                    "created_at"?: string,"current_value"?: string | null,"responded_at"?: string | null,"result_value"?: string | null,"source_event_id"?: number | null,"status"?: Database["public"]['Enums']["alarm_suggestion_status"],"suggested_value": string,"suggestion_id"?: string,"suggestion_type": Database["public"]['Enums']["alarm_suggestion_type"],"suppress_until"?: string | null,"target_alarm_id"?: string | null,"user_id": string
+                  }
+                  Update: {
+                    "created_at"?: string,"current_value"?: string | null,"responded_at"?: string | null,"result_value"?: string | null,"source_event_id"?: number | null,"status"?: Database["public"]['Enums']["alarm_suggestion_status"],"suggested_value"?: string,"suggestion_id"?: string,"suggestion_type"?: Database["public"]['Enums']["alarm_suggestion_type"],"suppress_until"?: string | null,"target_alarm_id"?: string | null,"user_id"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "alarm_suggestions_source_event_id_fkey"
+      columns: ["source_event_id"]
+isOneToOne: false
+      referencedRelation: "alarm_events"
+      referencedColumns: ["event_id"]
+    },{
+      foreignKeyName: "alarm_suggestions_target_alarm_id_fkey"
+      columns: ["target_alarm_id"]
+isOneToOne: false
+      referencedRelation: "alarms"
+      referencedColumns: ["alarm_id"]
+    },{
+      foreignKeyName: "alarm_suggestions_user_id_fkey"
+      columns: ["user_id"]
+isOneToOne: false
+      referencedRelation: "profiles"
+      referencedColumns: ["user_id"]
+    }
+                  ]
+                },"alarms": {
+                  Row: {
+                    "alarm_id": string,"alarm_type": Database["public"]['Enums']["alarm_type"],"created_at": string,"intensity": Database["public"]['Enums']["alarm_intensity"],"is_enabled": boolean,"last_calculated_at": string,"participant_id": string | null,"routine_id": string | null,"scheduled_at": string,"snooze_limit": number,"sound_key": string | null,"step_order": number | null,"updated_at": string,"user_id": string,"voice_tone": Database["public"]['Enums']["voice_tone"]
+                  }
+                  Insert: {
+                    "alarm_id"?: string,"alarm_type": Database["public"]['Enums']["alarm_type"],"created_at"?: string,"intensity"?: Database["public"]['Enums']["alarm_intensity"],"is_enabled"?: boolean,"last_calculated_at"?: string,"participant_id"?: string | null,"routine_id"?: string | null,"scheduled_at": string,"snooze_limit"?: number,"sound_key"?: string | null,"step_order"?: number | null,"updated_at"?: string,"user_id": string,"voice_tone"?: Database["public"]['Enums']["voice_tone"]
+                  }
+                  Update: {
+                    "alarm_id"?: string,"alarm_type"?: Database["public"]['Enums']["alarm_type"],"created_at"?: string,"intensity"?: Database["public"]['Enums']["alarm_intensity"],"is_enabled"?: boolean,"last_calculated_at"?: string,"participant_id"?: string | null,"routine_id"?: string | null,"scheduled_at"?: string,"snooze_limit"?: number,"sound_key"?: string | null,"step_order"?: number | null,"updated_at"?: string,"user_id"?: string,"voice_tone"?: Database["public"]['Enums']["voice_tone"]
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "alarms_participant_id_fkey"
+      columns: ["participant_id"]
+isOneToOne: false
+      referencedRelation: "appointment_participants"
+      referencedColumns: ["participant_id"]
+    },{
+      foreignKeyName: "alarms_routine_id_fkey"
+      columns: ["routine_id"]
+isOneToOne: false
+      referencedRelation: "routines"
+      referencedColumns: ["routine_id"]
+    },{
+      foreignKeyName: "alarms_user_id_fkey"
+      columns: ["user_id"]
+isOneToOne: false
+      referencedRelation: "profiles"
+      referencedColumns: ["user_id"]
+    }
+                  ]
+                },"appointment_participants": {
+                  Row: {
+                    "actual_travel_minutes": number | null,"appointment_id": string,"arrived_at": string | null,"buffer_minutes": number,"departed_at": string | null,"est_travel_minutes": number | null,"is_late": boolean | null,"late_minutes": number | null,"origin_lat": number | null,"origin_lng": number | null,"origin_name": string | null,"participant_id": string,"prepare_minutes": number,"transport_type": Database["public"]['Enums']["transport_type"],"travel_source": Database["public"]['Enums']["travel_source"],"updated_at": string,"user_id": string
+                  }
+                  Insert: {
+                    "actual_travel_minutes"?: number | null,"appointment_id": string,"arrived_at"?: string | null,"buffer_minutes"?: number,"departed_at"?: string | null,"est_travel_minutes"?: number | null,"is_late"?: boolean | null,"late_minutes"?: number | null,"origin_lat"?: number | null,"origin_lng"?: number | null,"origin_name"?: string | null,"participant_id"?: string,"prepare_minutes"?: number,"transport_type"?: Database["public"]['Enums']["transport_type"],"travel_source"?: Database["public"]['Enums']["travel_source"],"updated_at"?: string,"user_id": string
+                  }
+                  Update: {
+                    "actual_travel_minutes"?: number | null,"appointment_id"?: string,"arrived_at"?: string | null,"buffer_minutes"?: number,"departed_at"?: string | null,"est_travel_minutes"?: number | null,"is_late"?: boolean | null,"late_minutes"?: number | null,"origin_lat"?: number | null,"origin_lng"?: number | null,"origin_name"?: string | null,"participant_id"?: string,"prepare_minutes"?: number,"transport_type"?: Database["public"]['Enums']["transport_type"],"travel_source"?: Database["public"]['Enums']["travel_source"],"updated_at"?: string,"user_id"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "appointment_participants_appointment_id_fkey"
+      columns: ["appointment_id"]
+isOneToOne: false
+      referencedRelation: "appointments"
+      referencedColumns: ["appointment_id"]
+    },{
+      foreignKeyName: "appointment_participants_user_id_fkey"
+      columns: ["user_id"]
+isOneToOne: false
+      referencedRelation: "profiles"
+      referencedColumns: ["user_id"]
+    }
+                  ]
+                },"appointments": {
+                  Row: {
+                    "appointment_at": string,"appointment_id": string,"created_at": string,"creator_id": string,"dest_lat": number | null,"dest_lng": number | null,"dest_name": string,"group_id": string | null,"importance": Database["public"]['Enums']["importance_level"],"memo": string | null,"recurrence_rule": string | null,"title": string,"updated_at": string
+                  }
+                  Insert: {
+                    "appointment_at": string,"appointment_id"?: string,"created_at"?: string,"creator_id": string,"dest_lat"?: number | null,"dest_lng"?: number | null,"dest_name": string,"group_id"?: string | null,"importance"?: Database["public"]['Enums']["importance_level"],"memo"?: string | null,"recurrence_rule"?: string | null,"title": string,"updated_at"?: string
+                  }
+                  Update: {
+                    "appointment_at"?: string,"appointment_id"?: string,"created_at"?: string,"creator_id"?: string,"dest_lat"?: number | null,"dest_lng"?: number | null,"dest_name"?: string,"group_id"?: string | null,"importance"?: Database["public"]['Enums']["importance_level"],"memo"?: string | null,"recurrence_rule"?: string | null,"title"?: string,"updated_at"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "appointments_creator_id_fkey"
+      columns: ["creator_id"]
+isOneToOne: false
+      referencedRelation: "profiles"
+      referencedColumns: ["user_id"]
+    },{
+      foreignKeyName: "appointments_group_id_fkey"
+      columns: ["group_id"]
+isOneToOne: false
+      referencedRelation: "groups"
+      referencedColumns: ["group_id"]
+    }
+                  ]
+                },"conversation_sessions": {
+                  Row: {
+                    "apply_status": Database["public"]['Enums']["apply_status"],"created_at": string,"ended_at": string | null,"extracted_data": Json | null,"input_mode": Database["public"]['Enums']["input_mode"],"session_id": string,"session_type": Database["public"]['Enums']["session_type"],"started_at": string,"transcript": string | null,"user_id": string
+                  }
+                  Insert: {
+                    "apply_status"?: Database["public"]['Enums']["apply_status"],"created_at"?: string,"ended_at"?: string | null,"extracted_data"?: Json | null,"input_mode"?: Database["public"]['Enums']["input_mode"],"session_id"?: string,"session_type": Database["public"]['Enums']["session_type"],"started_at"?: string,"transcript"?: string | null,"user_id": string
+                  }
+                  Update: {
+                    "apply_status"?: Database["public"]['Enums']["apply_status"],"created_at"?: string,"ended_at"?: string | null,"extracted_data"?: Json | null,"input_mode"?: Database["public"]['Enums']["input_mode"],"session_id"?: string,"session_type"?: Database["public"]['Enums']["session_type"],"started_at"?: string,"transcript"?: string | null,"user_id"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "conversation_sessions_user_id_fkey"
+      columns: ["user_id"]
+isOneToOne: false
+      referencedRelation: "profiles"
+      referencedColumns: ["user_id"]
+    }
+                  ]
+                },"daily_journals": {
+                  Row: {
+                    "ai_summary": string | null,"coaching_insight": string | null,"edited_summary": string | null,"encouragement": string | null,"generated_at": string | null,"is_edited": boolean,"journal_id": string,"record_date": string,"routine_suggestion": string | null,"sentiment": number | null,"source_session_id": string | null,"suggestion_status": Database["public"]['Enums']["apply_status"],"updated_at": string,"user_id": string
+                  }
+                  Insert: {
+                    "ai_summary"?: string | null,"coaching_insight"?: string | null,"edited_summary"?: string | null,"encouragement"?: string | null,"generated_at"?: string | null,"is_edited"?: boolean,"journal_id"?: string,"record_date": string,"routine_suggestion"?: string | null,"sentiment"?: number | null,"source_session_id"?: string | null,"suggestion_status"?: Database["public"]['Enums']["apply_status"],"updated_at"?: string,"user_id": string
+                  }
+                  Update: {
+                    "ai_summary"?: string | null,"coaching_insight"?: string | null,"edited_summary"?: string | null,"encouragement"?: string | null,"generated_at"?: string | null,"is_edited"?: boolean,"journal_id"?: string,"record_date"?: string,"routine_suggestion"?: string | null,"sentiment"?: number | null,"source_session_id"?: string | null,"suggestion_status"?: Database["public"]['Enums']["apply_status"],"updated_at"?: string,"user_id"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "daily_journals_source_session_id_fkey"
+      columns: ["source_session_id"]
+isOneToOne: false
+      referencedRelation: "conversation_sessions"
+      referencedColumns: ["session_id"]
+    },{
+      foreignKeyName: "daily_journals_user_id_fkey"
+      columns: ["user_id"]
+isOneToOne: false
+      referencedRelation: "profiles"
+      referencedColumns: ["user_id"]
+    }
+                  ]
+                },"daily_records": {
+                  Row: {
+                    "actual_prepare_minutes": number | null,"condition_note": string | null,"data_source": Database["public"]['Enums']["record_source"],"record_date": string,"record_id": string,"routine_done_rate": number | null,"sleep_at": string | null,"sleep_satisfaction": number | null,"updated_at": string,"user_id": string,"wake_confirmed_at": string | null,"wake_reported_at": string | null
+                  }
+                  Insert: {
+                    "actual_prepare_minutes"?: number | null,"condition_note"?: string | null,"data_source"?: Database["public"]['Enums']["record_source"],"record_date": string,"record_id"?: string,"routine_done_rate"?: number | null,"sleep_at"?: string | null,"sleep_satisfaction"?: number | null,"updated_at"?: string,"user_id": string,"wake_confirmed_at"?: string | null,"wake_reported_at"?: string | null
+                  }
+                  Update: {
+                    "actual_prepare_minutes"?: number | null,"condition_note"?: string | null,"data_source"?: Database["public"]['Enums']["record_source"],"record_date"?: string,"record_id"?: string,"routine_done_rate"?: number | null,"sleep_at"?: string | null,"sleep_satisfaction"?: number | null,"updated_at"?: string,"user_id"?: string,"wake_confirmed_at"?: string | null,"wake_reported_at"?: string | null
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "daily_records_user_id_fkey"
+      columns: ["user_id"]
+isOneToOne: false
+      referencedRelation: "profiles"
+      referencedColumns: ["user_id"]
+    }
+                  ]
+                },"friends": {
+                  Row: {
+                    "accepted_at": string | null,"addressee_id": string,"friend_id": string,"requested_at": string,"requester_id": string,"status": Database["public"]['Enums']["friend_status"]
+                  }
+                  Insert: {
+                    "accepted_at"?: string | null,"addressee_id": string,"friend_id"?: string,"requested_at"?: string,"requester_id": string,"status"?: Database["public"]['Enums']["friend_status"]
+                  }
+                  Update: {
+                    "accepted_at"?: string | null,"addressee_id"?: string,"friend_id"?: string,"requested_at"?: string,"requester_id"?: string,"status"?: Database["public"]['Enums']["friend_status"]
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "friends_addressee_id_fkey"
+      columns: ["addressee_id"]
+isOneToOne: false
+      referencedRelation: "profiles"
+      referencedColumns: ["user_id"]
+    },{
+      foreignKeyName: "friends_requester_id_fkey"
+      columns: ["requester_id"]
+isOneToOne: false
+      referencedRelation: "profiles"
+      referencedColumns: ["user_id"]
+    }
+                  ]
+                },"group_members": {
+                  Row: {
+                    "group_id": string,"group_member_id": string,"invite_status": Database["public"]['Enums']["invite_status"],"joined_at": string | null,"user_id": string,"wake_share_opt_in": boolean
+                  }
+                  Insert: {
+                    "group_id": string,"group_member_id"?: string,"invite_status"?: Database["public"]['Enums']["invite_status"],"joined_at"?: string | null,"user_id": string,"wake_share_opt_in"?: boolean
+                  }
+                  Update: {
+                    "group_id"?: string,"group_member_id"?: string,"invite_status"?: Database["public"]['Enums']["invite_status"],"joined_at"?: string | null,"user_id"?: string,"wake_share_opt_in"?: boolean
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "group_members_group_id_fkey"
+      columns: ["group_id"]
+isOneToOne: false
+      referencedRelation: "groups"
+      referencedColumns: ["group_id"]
+    },{
+      foreignKeyName: "group_members_user_id_fkey"
+      columns: ["user_id"]
+isOneToOne: false
+      referencedRelation: "profiles"
+      referencedColumns: ["user_id"]
+    }
+                  ]
+                },"groups": {
+                  Row: {
+                    "created_at": string,"description": string | null,"group_id": string,"group_name": string,"invite_code": string,"owner_id": string,"updated_at": string
+                  }
+                  Insert: {
+                    "created_at"?: string,"description"?: string | null,"group_id"?: string,"group_name": string,"invite_code"?: string,"owner_id": string,"updated_at"?: string
+                  }
+                  Update: {
+                    "created_at"?: string,"description"?: string | null,"group_id"?: string,"group_name"?: string,"invite_code"?: string,"owner_id"?: string,"updated_at"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "groups_owner_id_fkey"
+      columns: ["owner_id"]
+isOneToOne: false
+      referencedRelation: "profiles"
+      referencedColumns: ["user_id"]
+    }
+                  ]
+                },"profiles": {
+                  Row: {
+                    "created_at": string,"default_buffer_minutes": number,"default_prepare_minutes": number,"default_transport": Database["public"]['Enums']["transport_type"],"handle": string | null,"home_lat": number | null,"home_lng": number | null,"home_name": string | null,"intensity_offset": number,"nickname": string,"preferred_sound_key": string | null,"preferred_voice_tone": Database["public"]['Enums']["voice_tone"] | null,"profile_image_url": string | null,"timezone": string,"updated_at": string,"user_id": string
+                  }
+                  Insert: {
+                    "created_at"?: string,"default_buffer_minutes"?: number,"default_prepare_minutes"?: number,"default_transport"?: Database["public"]['Enums']["transport_type"],"handle"?: string | null,"home_lat"?: number | null,"home_lng"?: number | null,"home_name"?: string | null,"intensity_offset"?: number,"nickname": string,"preferred_sound_key"?: string | null,"preferred_voice_tone"?: Database["public"]['Enums']["voice_tone"] | null,"profile_image_url"?: string | null,"timezone"?: string,"updated_at"?: string,"user_id": string
+                  }
+                  Update: {
+                    "created_at"?: string,"default_buffer_minutes"?: number,"default_prepare_minutes"?: number,"default_transport"?: Database["public"]['Enums']["transport_type"],"handle"?: string | null,"home_lat"?: number | null,"home_lng"?: number | null,"home_name"?: string | null,"intensity_offset"?: number,"nickname"?: string,"preferred_sound_key"?: string | null,"preferred_voice_tone"?: Database["public"]['Enums']["voice_tone"] | null,"profile_image_url"?: string | null,"timezone"?: string,"updated_at"?: string,"user_id"?: string
+                  }
+                  Relationships: [
+                    
+                  ]
+                },"push_tokens": {
+                  Row: {
+                    "created_at": string,"id": string,"last_seen_at": string,"platform": string,"token": string,"user_id": string
+                  }
+                  Insert: {
+                    "created_at"?: string,"id"?: string,"last_seen_at"?: string,"platform"?: string,"token": string,"user_id": string
+                  }
+                  Update: {
+                    "created_at"?: string,"id"?: string,"last_seen_at"?: string,"platform"?: string,"token"?: string,"user_id"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "push_tokens_user_id_fkey"
+      columns: ["user_id"]
+isOneToOne: false
+      referencedRelation: "profiles"
+      referencedColumns: ["user_id"]
+    }
+                  ]
+                },"routines": {
+                  Row: {
+                    "created_at": string,"goal": string | null,"is_active": boolean,"origin": Database["public"]['Enums']["routine_origin"],"repeat_days": string,"routine_id": string,"source_journal_id": string | null,"steps": NonNullable<Json>,"title": string,"updated_at": string,"user_id": string
+                  }
+                  Insert: {
+                    "created_at"?: string,"goal"?: string | null,"is_active"?: boolean,"origin"?: Database["public"]['Enums']["routine_origin"],"repeat_days"?: string,"routine_id"?: string,"source_journal_id"?: string | null,"steps"?: NonNullable<Json>,"title": string,"updated_at"?: string,"user_id": string
+                  }
+                  Update: {
+                    "created_at"?: string,"goal"?: string | null,"is_active"?: boolean,"origin"?: Database["public"]['Enums']["routine_origin"],"repeat_days"?: string,"routine_id"?: string,"source_journal_id"?: string | null,"steps"?: NonNullable<Json>,"title"?: string,"updated_at"?: string,"user_id"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "routines_source_journal_id_fkey"
+      columns: ["source_journal_id"]
+isOneToOne: false
+      referencedRelation: "daily_journals"
+      referencedColumns: ["journal_id"]
+    },{
+      foreignKeyName: "routines_user_id_fkey"
+      columns: ["user_id"]
+isOneToOne: false
+      referencedRelation: "profiles"
+      referencedColumns: ["user_id"]
+    }
+                  ]
+                },"sharing_permissions": {
+                  Row: {
+                    "can_edit_alarm": boolean,"can_view_alarm": boolean,"can_view_wake": boolean,"created_at": string,"grantee_id": string,"owner_id": string,"permission_id": string,"source_id": string,"source_type": Database["public"]['Enums']["permission_source"],"updated_at": string
+                  }
+                  Insert: {
+                    "can_edit_alarm"?: boolean,"can_view_alarm"?: boolean,"can_view_wake"?: boolean,"created_at"?: string,"grantee_id": string,"owner_id": string,"permission_id"?: string,"source_id": string,"source_type": Database["public"]['Enums']["permission_source"],"updated_at"?: string
+                  }
+                  Update: {
+                    "can_edit_alarm"?: boolean,"can_view_alarm"?: boolean,"can_view_wake"?: boolean,"created_at"?: string,"grantee_id"?: string,"owner_id"?: string,"permission_id"?: string,"source_id"?: string,"source_type"?: Database["public"]['Enums']["permission_source"],"updated_at"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "sharing_permissions_grantee_id_fkey"
+      columns: ["grantee_id"]
+isOneToOne: false
+      referencedRelation: "profiles"
+      referencedColumns: ["user_id"]
+    },{
+      foreignKeyName: "sharing_permissions_owner_id_fkey"
+      columns: ["owner_id"]
+isOneToOne: false
+      referencedRelation: "profiles"
+      referencedColumns: ["user_id"]
+    }
+                  ]
+                },"todos": {
+                  Row: {
+                    "appointment_id": string | null,"created_at": string,"done_at": string | null,"due_date": string | null,"is_done": boolean,"source_session_id": string | null,"title": string,"todo_id": string,"todo_type": Database["public"]['Enums']["todo_type"],"user_id": string
+                  }
+                  Insert: {
+                    "appointment_id"?: string | null,"created_at"?: string,"done_at"?: string | null,"due_date"?: string | null,"is_done"?: boolean,"source_session_id"?: string | null,"title": string,"todo_id"?: string,"todo_type"?: Database["public"]['Enums']["todo_type"],"user_id": string
+                  }
+                  Update: {
+                    "appointment_id"?: string | null,"created_at"?: string,"done_at"?: string | null,"due_date"?: string | null,"is_done"?: boolean,"source_session_id"?: string | null,"title"?: string,"todo_id"?: string,"todo_type"?: Database["public"]['Enums']["todo_type"],"user_id"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "todos_appointment_id_fkey"
+      columns: ["appointment_id"]
+isOneToOne: false
+      referencedRelation: "appointments"
+      referencedColumns: ["appointment_id"]
+    },{
+      foreignKeyName: "todos_source_session_id_fkey"
+      columns: ["source_session_id"]
+isOneToOne: false
+      referencedRelation: "conversation_sessions"
+      referencedColumns: ["session_id"]
+    },{
+      foreignKeyName: "todos_user_id_fkey"
+      columns: ["user_id"]
+isOneToOne: false
+      referencedRelation: "profiles"
+      referencedColumns: ["user_id"]
+    }
+                  ]
+                }
+          }
+          Views: {
+            "v_prepare_time_stats": {
+                  Row: {
+                    "p80_minutes": number | null,"sample_count": number | null,"user_id": string | null
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "daily_records_user_id_fkey"
+      columns: ["user_id"]
+isOneToOne: false
+      referencedRelation: "profiles"
+      referencedColumns: ["user_id"]
+    }
+                  ]
+                }
+          }
+          Functions: {
+            "find_profile_by_handle":
+{ Args: { "p_handle": string }; Returns: {
+              "handle": string,"nickname": string,"profile_image_url": string,"user_id": string
+            }[]
+                           },
+"get_group_wake_status":
+{ Args: { "p_date"?: string,"p_group_id": string }; Returns: {
+              "dismissed_at": string,"is_me": boolean,"missed_at": string,"nickname": string,"profile_image_url": string,"rang_at": string,"snooze_count": number,"user_id": string,"wake_alarm_at": string,"wake_confirmed_at": string,"wake_status": string
+            }[]
+                           },
+"get_public_profiles":
+{ Args: { "p_user_ids"?: (string)[] }; Returns: {
+              "handle": string,"nickname": string,"profile_image_url": string,"user_id": string
+            }[]
+                           },
+"join_group_by_invite_code":
+{ Args: { "p_invite_code": string }; Returns: string
+                           },
+"regenerate_invite_code":
+{ Args: { "p_group_id": string }; Returns: string
+                           },
+"register_push_token":
+{ Args: { "p_platform"?: string,"p_token": string }; Returns: undefined
+                           }
+          }
+          Enums: {
+            "alarm_event_type": "TRIGGERED"|"SNOOZED"|"DISMISSED"|"WAKE_CONFIRMED"|"ARRIVAL_CONFIRMED"|"MISSED"|"FEEDBACK"|"ACKNOWLEDGED","alarm_feedback_type": "GOOD"|"TOO_LOUD"|"TOO_QUIET"|"VOICE_DISLIKE"|"SOUND_DISLIKE","alarm_intensity": "SOFT"|"NORMAL"|"STRONG","alarm_suggestion_status": "PENDING"|"APPLIED"|"EDITED"|"IGNORED","alarm_suggestion_type": "VOICE_TONE"|"SOUND"|"INTENSITY","alarm_type": "WAKE"|"PREPARE"|"DEPARTURE"|"ARRIVE"|"ROUTINE","apply_status": "PENDING"|"APPLIED"|"REJECTED","friend_status": "PENDING"|"ACCEPTED"|"BLOCKED","importance_level": "LOW"|"NORMAL"|"HIGH","input_mode": "VOICE"|"TEXT","invite_status": "INVITED"|"JOINED"|"LEFT","permission_source": "FRIEND"|"GROUP","record_source": "MANUAL"|"ALARM"|"AI","routine_origin": "USER"|"AI_SUGGESTED","session_type": "BEFORE_SLEEP"|"AFTER_WAKE"|"ANYTIME","todo_type": "TASK"|"ITEM","transport_type": "WALK"|"TRANSIT"|"BUS"|"SUBWAY"|"CAR","travel_source": "API"|"CACHED"|"MANUAL","voice_tone": "CALM"|"NEUTRAL"|"DIRECT"
+          }
+          CompositeTypes: {
+            [_ in never]: never
+          }
+        }
+}
+
+type DatabaseWithoutInternals = Omit<Database, '__InternalSupabase'>
+
+type DefaultSchema = DatabaseWithoutInternals[Extract<keyof Database, "public">]
+
+export type Tables<
+  DefaultSchemaTableNameOrOptions extends
+    | keyof (DefaultSchema["Tables"] & DefaultSchema["Views"])
+    | { schema: keyof DatabaseWithoutInternals },
+  TableName extends DefaultSchemaTableNameOrOptions extends {
+    schema: keyof DatabaseWithoutInternals
+  }
+    ? keyof (DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"] &
+        DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Views"])
+    : never = never
+> = DefaultSchemaTableNameOrOptions extends { schema: keyof DatabaseWithoutInternals }
+  ? (DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"] &
+      DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Views"])[TableName] extends {
+      Row: infer R
+    }
+    ? R
+    : never
+  : DefaultSchemaTableNameOrOptions extends keyof (DefaultSchema["Tables"] & DefaultSchema["Views"])
+  ? (DefaultSchema["Tables"] & DefaultSchema["Views"])[DefaultSchemaTableNameOrOptions] extends {
+      Row: infer R
+    }
+    ? R
+    : never
+  : never
+
+export type TablesInsert<
+  DefaultSchemaTableNameOrOptions extends
+    | keyof DefaultSchema["Tables"]
+    | { schema: keyof DatabaseWithoutInternals },
+  TableName extends DefaultSchemaTableNameOrOptions extends {
+    schema: keyof DatabaseWithoutInternals
+  }
+    ? keyof DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"]
+    : never = never
+> = DefaultSchemaTableNameOrOptions extends { schema: keyof DatabaseWithoutInternals }
+  ? DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"][TableName] extends {
+      Insert: infer I
+    }
+    ? I
+    : never
+  : DefaultSchemaTableNameOrOptions extends keyof DefaultSchema["Tables"]
+  ? DefaultSchema["Tables"][DefaultSchemaTableNameOrOptions] extends {
+      Insert: infer I
+    }
+    ? I
+    : never
+  : never
+
+export type TablesUpdate<
+  DefaultSchemaTableNameOrOptions extends
+    | keyof DefaultSchema["Tables"]
+    | { schema: keyof DatabaseWithoutInternals },
+  TableName extends DefaultSchemaTableNameOrOptions extends {
+    schema: keyof DatabaseWithoutInternals
+  }
+    ? keyof DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"]
+    : never = never
+> = DefaultSchemaTableNameOrOptions extends { schema: keyof DatabaseWithoutInternals }
+  ? DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"][TableName] extends {
+      Update: infer U
+    }
+    ? U
+    : never
+  : DefaultSchemaTableNameOrOptions extends keyof DefaultSchema["Tables"]
+  ? DefaultSchema["Tables"][DefaultSchemaTableNameOrOptions] extends {
+      Update: infer U
+    }
+    ? U
+    : never
+  : never
+
+export type Enums<
+  DefaultSchemaEnumNameOrOptions extends
+    | keyof DefaultSchema["Enums"]
+    | { schema: keyof DatabaseWithoutInternals },
+  EnumName extends DefaultSchemaEnumNameOrOptions extends {
+    schema: keyof DatabaseWithoutInternals
+  }
+    ? keyof DatabaseWithoutInternals[DefaultSchemaEnumNameOrOptions["schema"]]["Enums"]
+    : never = never
+> = DefaultSchemaEnumNameOrOptions extends { schema: keyof DatabaseWithoutInternals }
+  ? DatabaseWithoutInternals[DefaultSchemaEnumNameOrOptions["schema"]]["Enums"][EnumName]
+  : DefaultSchemaEnumNameOrOptions extends keyof DefaultSchema["Enums"]
+  ? DefaultSchema["Enums"][DefaultSchemaEnumNameOrOptions]
+  : never
+
+export type CompositeTypes<
+  PublicCompositeTypeNameOrOptions extends
+    | keyof DefaultSchema["CompositeTypes"]
+    | { schema: keyof DatabaseWithoutInternals },
+  CompositeTypeName extends PublicCompositeTypeNameOrOptions extends {
+    schema: keyof DatabaseWithoutInternals
+  }
+    ? keyof DatabaseWithoutInternals[PublicCompositeTypeNameOrOptions["schema"]]["CompositeTypes"]
+    : never = never
+> = PublicCompositeTypeNameOrOptions extends { schema: keyof DatabaseWithoutInternals }
+  ? DatabaseWithoutInternals[PublicCompositeTypeNameOrOptions["schema"]]["CompositeTypes"][CompositeTypeName]
+  : PublicCompositeTypeNameOrOptions extends keyof DefaultSchema["CompositeTypes"]
+  ? DefaultSchema["CompositeTypes"][PublicCompositeTypeNameOrOptions]
+  : never
+
+export const Constants = {
+  "public": {
+          Enums: {
+            "alarm_event_type": ["TRIGGERED", "SNOOZED", "DISMISSED", "WAKE_CONFIRMED", "ARRIVAL_CONFIRMED", "MISSED", "FEEDBACK", "ACKNOWLEDGED"],"alarm_feedback_type": ["GOOD", "TOO_LOUD", "TOO_QUIET", "VOICE_DISLIKE", "SOUND_DISLIKE"],"alarm_intensity": ["SOFT", "NORMAL", "STRONG"],"alarm_suggestion_status": ["PENDING", "APPLIED", "EDITED", "IGNORED"],"alarm_suggestion_type": ["VOICE_TONE", "SOUND", "INTENSITY"],"alarm_type": ["WAKE", "PREPARE", "DEPARTURE", "ARRIVE", "ROUTINE"],"apply_status": ["PENDING", "APPLIED", "REJECTED"],"friend_status": ["PENDING", "ACCEPTED", "BLOCKED"],"importance_level": ["LOW", "NORMAL", "HIGH"],"input_mode": ["VOICE", "TEXT"],"invite_status": ["INVITED", "JOINED", "LEFT"],"permission_source": ["FRIEND", "GROUP"],"record_source": ["MANUAL", "ALARM", "AI"],"routine_origin": ["USER", "AI_SUGGESTED"],"session_type": ["BEFORE_SLEEP", "AFTER_WAKE", "ANYTIME"],"todo_type": ["TASK", "ITEM"],"transport_type": ["WALK", "TRANSIT", "BUS", "SUBWAY", "CAR"],"travel_source": ["API", "CACHED", "MANUAL"],"voice_tone": ["CALM", "NEUTRAL", "DIRECT"]
+          }
+        }
+} as const
