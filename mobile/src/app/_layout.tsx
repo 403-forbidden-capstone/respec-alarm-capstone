@@ -6,6 +6,7 @@ import * as WebBrowser from 'expo-web-browser';
 import { useEffect, type ReactNode } from 'react';
 import { Platform, StyleSheet, useWindowDimensions, View } from 'react-native';
 
+import { SheetHost, ToastHost } from '@/components/ui';
 import { AuthProvider, useAuth } from '@/features/auth/AuthProvider';
 import { ProfileRetryScreen } from '@/features/auth/ProfileRetryScreen';
 import { colors, fontFiles } from '@/theme';
@@ -31,6 +32,8 @@ export default function RootLayout() {
       <PhoneFrame>
         <StatusBar style="dark" />
         <RootStack />
+        <SheetHost />
+        <ToastHost />
       </PhoneFrame>
     </AuthProvider>
   );
@@ -57,6 +60,18 @@ function RootStack() {
       <Stack.Protected guard={ready}>
         <Stack.Screen name="(tabs)" />
         <Stack.Screen name="settings" />
+        {/* 목업 화면 (M1) — 화면 번호 · 데이터는 docs/screen-data-map.md, 한눈에 보기는 /dev/screens */}
+        <Stack.Screen name="alarms" />
+        <Stack.Screen name="alarm/[id]" />
+        <Stack.Screen name="schedule/new" />
+        <Stack.Screen name="wake" />
+        <Stack.Screen name="ring" options={{ animation: 'fade' }} />
+        <Stack.Screen name="friends/[id]/index" />
+        <Stack.Screen name="friends/[id]/alarms" />
+        <Stack.Screen name="permissions" />
+        <Stack.Screen name="groups/[id]/index" />
+        <Stack.Screen name="groups/[id]/members/[userId]" />
+        <Stack.Screen name="suggestion/[id]" />
       </Stack.Protected>
       <Stack.Protected guard={needsLogin}>
         <Stack.Screen name="login" />

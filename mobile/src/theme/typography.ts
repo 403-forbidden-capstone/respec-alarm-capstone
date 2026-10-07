@@ -36,6 +36,11 @@ export const typeScale = {
   small: { ...font(400), fontSize: 12.5, lineHeight: 18 }, // .small
   caption: { ...font(400), fontSize: 11.5, lineHeight: 16 }, // .meta · .note.sm
   button: { ...font(600), fontSize: 15 },
+  reading: { ...font(400), fontSize: 14.5, lineHeight: 23 }, // .voice p · .jtext
+  sheetTitle: { ...font(700), fontSize: 18, lineHeight: 25, letterSpacing: -0.2 }, // .sheet h3 · .done-big b
+  ampm: { ...font(400), fontSize: 16, lineHeight: 20 }, // .ampm
+  compare: { ...font(600), fontSize: 26, lineHeight: 32, fontVariant: ['tabular-nums'] }, // .cmp b · .stepper b
+  stat: { ...font(600), fontSize: 30, lineHeight: 36, letterSpacing: -0.6, fontVariant: ['tabular-nums'] }, // .stat .big
   number: { ...font(300), fontSize: 46, lineHeight: 50, letterSpacing: -1.6, fontVariant: ['tabular-nums'] }, // .num
   ringTime: { ...font(600), fontSize: 78, lineHeight: 82, letterSpacing: -3.5, fontVariant: ['tabular-nums'] }, // .ring-time
 } satisfies Record<string, TextStyle>;
