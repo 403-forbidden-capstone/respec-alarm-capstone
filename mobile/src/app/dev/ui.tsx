@@ -7,11 +7,13 @@ import {
   Button,
   Card,
   Chip,
+  Field,
   KeyValueRow,
   ProgressBar,
   Screen,
   SectionHeader,
   Segmented,
+  Stepper,
   Text,
   Toggle,
   TopBar,
@@ -26,6 +28,8 @@ const SWATCHES = ['bg', 'card', 'line', 'chip', 'ink', 'sub', 'faint', 'ok', 'mi
 export default function UiSampleScreen() {
   const [on, setOn] = useState(true);
   const [seg, setSeg] = useState<'friend' | 'group'>('friend');
+  const [nickname, setNickname] = useState('지형');
+  const [prepare, setPrepare] = useState(60);
 
   return (
     <Screen>
@@ -87,6 +91,12 @@ export default function UiSampleScreen() {
         <KeyValueRow label="날짜" value="5월 22일 (목)" />
         <KeyValueRow label="이동 시간" value="50분" sub="길찾기 + 내 실측 3회" />
         <KeyValueRow label="알람 받기" value={<Toggle value={on} onChange={setOn} label="알람 받기" />} />
+      </Card>
+
+      <SectionHeader title="입력 · 숫자" right="온보딩 · 설정" />
+      <Card>
+        <Field first label="닉네임" value={nickname} onChangeText={setNickname} maxLength={30} placeholder="이름" />
+        <Stepper label="준비 시간" value={prepare} onChange={setPrepare} min={10} max={180} unit="분" />
       </Card>
 
       <SectionHeader title="고르기 · 사람 · 진행" />

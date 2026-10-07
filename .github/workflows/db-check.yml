@@ -1,0 +1,48 @@
+name: DB 검사
+
+# supabase/가 바뀐 PR과 main push에서 마이그레이션이 깨지지 않았는지 확인합니다.
+#   PGlite(WASM Postgres)에 Supabase 흉내(auth 스키마 · 역할)를 만들고 마이그레이션을 순서대로 적용한 뒤
+#   RLS · 권한 · 함수 동작을 확인합니다. Docker나 실제 Supabase 프로젝트에는 연결하지 않습니다.
+#   로컬에서는 supabase/tests에서 npm ci && npm test로 똑같이 돌립니다.
+
+on:
+  pull_request:
+    paths:
+      - 'supabase/**'
+      - '.github/workflows/db-check.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'supabase/**'
+      - '.github/workflows/db-check.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: db-check-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: 마이그레이션 · RLS 검사
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: supabase/tests
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: supabase/tests/package-lock.json
+
+      - name: 패키지 설치
+        run: npm ci
+
+      - name: 검사
+        run: npm test

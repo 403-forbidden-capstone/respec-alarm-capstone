@@ -79,7 +79,8 @@ jobs:
           npm ci
           eas build --platform android --profile preview --non-interactive --wait --json > ../build.json
           APK_URL=$(jq -r '.[0].artifacts.buildUrl' ../build.json)
-          curl -sSfL -o "../respec-alarm-${TAG}.apk" "$APK_URL"
+          # 파일 이름을 고정해 두면 releases/latest/download/respec-alarm.apk가 항상 최신 데모 APK를 가리킵니다 (레포 멤버용)
+          curl -sSfL -o ../respec-alarm.apk "$APK_URL"
           echo "APK_URL=$APK_URL" >> "$GITHUB_ENV"
 
       - name: 릴리즈 만들기
@@ -89,7 +90,7 @@ jobs:
           NOTES=""
           if [ -n "${APK_URL:-}" ]; then
             QR="https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=$(jq -rn --arg u "$APK_URL" '$u|@uri')"
-            NOTES=$(printf '## 폰에 설치\n\n<img src="%s" width="180" alt="APK 설치 QR" />\n\nQR을 찍거나 아래 APK를 받아 설치합니다.\n' "$QR")
+            NOTES=$(printf '## 폰에 설치\n\n<img src="%s" width="180" alt="APK 설치 QR" />\n\nQR을 찍으면 레포 권한 없이도 받을 수 있습니다. 레포 멤버는 아래 APK 파일을 받아도 됩니다.\n' "$QR")
           fi
           # 직접 실행했을 때만 태그가 아직 없으므로 main 최신 커밋에 새로 붙입니다
           TARGET=()
@@ -99,4 +100,4 @@ jobs:
             "${TARGET[@]}" \
             --generate-notes \
             --notes "$NOTES" \
-            $(ls respec-alarm-*.apk 2>/dev/null)
+            $(ls respec-alarm.apk 2>/dev/null)

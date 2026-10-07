@@ -1,0 +1,585 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Re:Spec 개발 보드</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
+<style>
+:root{--ink:#1b1b1b;--sub:#5f5e5a;--mute:#9a9891;--line:#e4e2db;--line2:#cfcdc5;--bg:#f6f5f1;--card:#fff;--teal:#1d9e75;--teal-bg:#e1f5ee;--amber:#ba7517;--amber-bg:#faeeda;--blue:#185fa5;--blue-bg:#e6f1fb;--purple:#534ab7;--purple-bg:#eeedfe;--red:#a32d2d;--red-bg:#fcebeb;--r:8px}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%}
+body{font-family:"Pretendard Variable",Pretendard,-apple-system,"Segoe UI",sans-serif;color:var(--ink);background:var(--bg);font-size:13.5px;line-height:1.55}
+a{color:var(--blue);text-decoration:none}a:hover{text-decoration:underline}
+button{font:inherit;color:var(--ink);background:#fff;border:1px solid var(--line2);border-radius:var(--r);padding:5px 10px;cursor:pointer}
+button:hover{background:var(--bg)}button.on{background:var(--ink);color:#fff;border-color:var(--ink)}
+code,kbd{font-family:ui-monospace,Consolas,monospace;font-size:12px;background:var(--bg);border:1px solid var(--line);border-radius:4px;padding:1px 5px}
+pre{font-family:ui-monospace,Consolas,monospace;font-size:12px;background:#fff;border:1px solid var(--line);border-radius:var(--r);padding:10px 12px;overflow:auto;margin:6px 0}
+.top{display:flex;align-items:center;gap:12px;padding:10px 16px;background:#fff;border-bottom:1px solid var(--line);position:sticky;top:0;z-index:5}
+.top h1{font-size:15px;font-weight:600;margin:0}
+.top .meta{color:var(--sub);font-size:12.5px}
+.top .sp{flex:1}
+.tabs{display:flex;gap:2px;padding:6px 12px;background:#fff;border-bottom:1px solid var(--line);position:sticky;top:46px;z-index:5}
+.tabs button{border:0;background:none;padding:6px 11px;border-radius:6px;color:var(--sub)}
+.tabs button.on{background:var(--bg);color:var(--ink);font-weight:600}
+.wrap{display:grid;grid-template-columns:minmax(0,1fr) auto;min-height:calc(100vh - 92px)}
+.main{padding:16px 18px;min-width:0}
+.side{border-left:1px solid var(--line);background:#fff;padding:10px;display:none;position:sticky;top:92px;height:calc(100vh - 92px);overflow:auto}
+.side.show{display:block}
+.side iframe{width:390px;height:780px;border:1px solid var(--line2);border-radius:18px;background:#fff;display:block}
+.side .bar{display:flex;gap:6px;margin-bottom:8px;align-items:center}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 16px}
+.chip{display:inline-block;font-size:11.5px;padding:1px 8px;border-radius:999px;border:1px solid transparent;vertical-align:1px;white-space:nowrap}
+.chip.done{background:var(--teal-bg);color:#085041}.chip.doing{background:var(--amber-bg);color:#633806}.chip.review{background:var(--blue-bg);color:#0c447c}.chip.week{background:var(--purple-bg);color:#3c3489}.chip.todo{background:#f1efe8;color:#5f5e5a}.chip.wait{background:#fff;color:var(--mute);border-color:var(--line2)}.chip.ai{background:#fff;color:var(--mute);border:1px dashed var(--line2)}
+.chip.k-DB{background:var(--teal-bg);color:#085041}.chip.k-RPC{background:var(--purple-bg);color:#3c3489}.chip.k-Edge{background:var(--blue-bg);color:#0c447c}.chip.k-폰{background:var(--amber-bg);color:#633806}.chip.k-배치{background:#f1efe8;color:#5f5e5a}.chip.k-Auth{background:var(--red-bg);color:#791f1f}
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px;background:#d3d1c7;vertical-align:0}
+.dot.done{background:var(--teal)}.dot.doing{background:#ef9f27}.dot.review{background:#378add}.dot.week{background:#7f77dd}
+h2{font-size:15px;font-weight:600;margin:0 0 10px}
+h3{font-size:13.5px;font-weight:600;margin:14px 0 6px;color:var(--sub)}
+table{border-collapse:collapse;width:100%;font-size:12.5px}
+th,td{text-align:left;padding:5px 8px;border-bottom:1px solid var(--line);vertical-align:top}
+th{color:var(--sub);font-weight:500;white-space:nowrap}
+tr:hover td{background:#fbfaf7}
+.muted{color:var(--mute)}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+/* 큰 그림 */
+.big{display:grid;grid-template-columns:1.1fr 1.1fr .8fr;gap:14px}
+.box{border:1px solid var(--line2);border-radius:12px;padding:12px 14px;background:#fff}
+.box h4{margin:0 0 8px;font-size:13px;font-weight:600}
+.node{display:flex;justify-content:space-between;align-items:center;padding:6px 8px;border:1px solid var(--line);border-radius:8px;margin:4px 0;background:#fff;cursor:pointer}
+.node:hover{border-color:var(--line2);background:#fbfaf7}
+.node small{color:var(--mute)}
+.arrow{color:var(--mute);text-align:center;font-size:12px;margin:6px 0}
+/* 화면 */
+.screens{display:grid;grid-template-columns:200px minmax(0,1fr);gap:14px}
+.tree{background:#fff;border:1px solid var(--line);border-radius:12px;padding:10px 6px;position:sticky;top:104px;align-self:start;max-height:calc(100vh - 120px);overflow:auto}
+.tree .g{font-size:11.5px;color:var(--mute);padding:8px 8px 2px}
+.tree .it{padding:4px 8px;border-radius:6px;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tree .it:hover{background:var(--bg)}.tree .it.on{background:var(--bg);font-weight:600}
+.kv td:first-child{color:var(--sub);width:84px;white-space:nowrap}
+/* 기능 */
+.flow{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:6px 0 10px}
+.flow span{background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:3px 8px;font-size:12.5px}
+.flow i{color:var(--mute);font-style:normal}
+/* 연결 */
+.matrix-wrap{overflow:auto;border:1px solid var(--line);border-radius:12px;background:#fff}
+.matrix th,.matrix td{white-space:nowrap;text-align:center;padding:4px 6px}
+.matrix th.v{writing-mode:vertical-rl;transform:rotate(180deg);height:120px;font-size:11.5px;text-align:left;padding:6px 2px}
+.matrix td:first-child,.matrix th:first-child{text-align:left;position:sticky;left:0;background:#fff;font-weight:500}
+.matrix .y{color:var(--teal);font-weight:700}
+/* 할 일 */
+.filters{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px}
+.filters button{padding:3px 9px;font-size:12.5px}
+.late{color:var(--red)}
+.todo-title{max-width:420px}
+/* 환경 */
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.check{display:flex;gap:8px;align-items:flex-start;padding:5px 0;border-bottom:1px solid var(--line)}
+.check select{font:inherit;font-size:12px;border:1px solid var(--line2);border-radius:6px;padding:1px 4px;background:#fff}
+input.tok{font:inherit;border:1px solid var(--line2);border-radius:6px;padding:4px 8px;width:300px}
+textarea.note{font:inherit;font-size:12.5px;border:1px solid var(--line);border-radius:6px;width:100%;min-height:36px;padding:4px 6px;margin-top:4px}
+@media (max-width:1100px){.wrap{grid-template-columns:1fr}.side{position:static;height:auto;border-left:0;border-top:1px solid var(--line)}.big{grid-template-columns:1fr}.screens{grid-template-columns:1fr}.tree{position:static;max-height:none}.grid2{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="top">
+  <h1>Re:Spec 개발 보드</h1>
+  <span class="meta" id="meta"></span>
+  <span class="sp"></span>
+  <span class="meta" id="syncMeta">GitHub 미연결</span>
+  <button id="btnSync">동기화</button>
+  <button id="btnToken" title="GitHub 토큰은 이 브라우저에만 저장됨">GitHub 연결</button>
+  <button id="btnSide">앱 보기</button>
+</div>
+<div class="tabs" id="tabs"></div>
+<div class="wrap">
+  <div class="main" id="main"></div>
+  <div class="side" id="side">
+    <div class="bar">
+      <button data-src="/" class="on">앱</button>
+      <button data-src="/mockup.html">목업</button>
+      <button data-src="/dev/ui">UI 부품</button>
+      <span class="sp"></span>
+      <button id="btnReload" title="다시 불러오기">↻</button>
+    </div>
+    <iframe id="frame" src="/" title="앱 미리보기"></iframe>
+  </div>
+</div>
+
+<script>
+// ───────────────────────────────── 데이터 (docs/screen-data-map.md · docs/alarm-core.md 기준)
+const SITE = {
+  web: 'https://respec-alarm-capstone.vmgfh878.workers.dev',
+  org: '403-forbidden-capstone', repo: 'respec-alarm-capstone', project: 1,
+  week1: '2026-10-05', demo1: '2026-10-19', contest: '2026-12-04',
+};
+const TABS = [
+  ['home', '01 홈'], ['group', '02 그룹'], ['ai', '03 AI'], ['records', '04 기록'], ['common', '공통'],
+];
+// 표기: k = DB · RPC · Edge · 폰 · 배치 · Auth, r = 테이블 · 함수 이름
+const SCREENS = [
+  { code: 'H01', name: '홈', tab: 'home', route: '(tabs)/index', issues: [30], feat: ['①', '④', '②'],
+    data: [
+      { k: 'DB', t: '다음 알람', r: ['alarms', 'appointment_participants', 'appointments'] },
+      { k: 'DB', t: '오늘 일정(저녁엔 내일)', r: ['appointment_participants', 'appointments'] },
+      { k: 'DB', t: '오늘 루틴 · 진행', r: ['routines', 'alarm_events'] },
+      { k: 'DB', t: '내일 준비물 체크', r: ['todos'] },
+      { k: 'DB', t: '제안 카드', r: ['alarm_suggestions'] },
+      { k: 'RPC', t: '그룹 기상 요약', r: ['get_group_wake_status'] },
+    ] },
+  { code: 'H02', name: '알람 목록', tab: 'home', route: 'alarms', issues: [30], feat: ['①'],
+    data: [
+      { k: 'DB', t: '날짜별 알람', r: ['alarms', 'appointment_participants', 'appointments'] },
+      { k: 'DB', t: '켜기 · 끄기', r: ['alarms'] },
+      { k: '폰', t: '예약 취소 · 다시 예약', r: ['alarm-core'] },
+    ] },
+  { code: 'H03', name: '알람 설정', tab: 'home', route: 'alarm/[id]', issues: [30, 32], feat: ['①'],
+    data: [
+      { k: 'DB', t: '연결 일정 · 이동 조건 · 준비 시간', r: ['appointments', 'appointment_participants'] },
+      { k: 'DB', t: '예측 준비(P80) 근거', r: ['v_prepare_time_stats'] },
+      { k: 'Edge', t: '여유 시간 바꾸면 다시 계산 → 저장', r: ['alarm-suggest', 'alarm-commit'] },
+      { k: '폰', t: '다시 예약', r: ['alarm-core'] },
+      { k: 'DB', t: '강도 직접 고르기', r: ['alarms'] },
+    ] },
+  { code: 'H05', name: '새 일정', tab: 'home', route: 'schedule/new', issues: [31, 32], feat: ['①'],
+    data: [
+      { k: 'Edge', t: '장소 검색(카카오)', r: ['place-search'] },
+      { k: 'Edge', t: '이동시간 · 알람 시각 · 강도 미리 보기', r: ['alarm-suggest'] },
+      { k: 'Edge', t: '약속 · 참여 조건 · 알람 4종 한 번에 저장', r: ['alarm-commit', 'appointments', 'appointment_participants', 'alarms'] },
+      { k: 'DB', t: '준비물', r: ['todos'] },
+      { k: '폰', t: '예약', r: ['alarm-core'] },
+    ] },
+  { code: 'H07', name: '알람 울림', tab: 'home', route: null, native: true, issues: [33], feat: ['①'],
+    data: [
+      { k: '폰', t: '소리 · 강도 · 미루기 · 해제', r: ['alarm-core'] },
+      { k: 'DB', t: '기록(TRIGGERED · SNOOZED · DISMISSED), 오프라인이면 보관 후 전송', r: ['alarm_events'] },
+    ] },
+  { code: 'H08', name: '기상 확인', tab: 'home', route: 'wake', issues: [35, 40], feat: ['④'],
+    data: [
+      { k: '폰', t: '판정(폰 사용 · 버튼)', r: ['alarm-core'] },
+      { k: 'DB', t: 'WAKE_CONFIRMED + 기상 시각', r: ['alarm_events', 'daily_records'] },
+      { k: 'DB', t: '확인 알림 원탭 → ACKNOWLEDGED', r: ['alarm_events'] },
+      { k: '배치', t: '끝까지 안 깨면 MISSED', r: ['suggestion-generate'] },
+    ] },
+  { code: 'F01·G01', name: '친구와 그룹', tab: 'group', route: '(tabs)/group', issues: [43, 44], feat: ['②'],
+    data: [
+      { k: 'DB', t: '친구 목록 · 받은 요청 · 수락', r: ['friends'] },
+      { k: 'RPC', t: '이름 · 사진, 아이디 검색', r: ['get_public_profiles', 'find_profile_by_handle'] },
+      { k: 'DB', t: '그룹 목록 · 만들기', r: ['groups', 'group_members'] },
+      { k: 'RPC', t: '초대 코드로 참여, 오늘 기상 n명', r: ['join_group_by_invite_code', 'get_group_wake_status'] },
+    ] },
+  { code: 'F02', name: '친구 권한', tab: 'group', route: 'friends/[id]', issues: [44], feat: ['②'],
+    data: [{ k: 'DB', t: '관계별 받은 권한 → 항목별 OR은 앱에서', r: ['sharing_permissions'] }] },
+  { code: 'F03', name: '공유 권한 설정', tab: 'group', route: 'permissions', issues: [44], feat: ['②'],
+    data: [{ k: 'DB', t: '내가 주는 권한 3종 · 받은 권한 보기', r: ['sharing_permissions'] }] },
+  { code: 'G02', name: '그룹 상세', tab: 'group', route: 'groups/[id]', issues: [44, 45], feat: ['②'],
+    data: [
+      { k: 'DB', t: '그룹 · 멤버 · 기상 공유 동의', r: ['groups', 'group_members'] },
+      { k: 'DB', t: '연결 일정', r: ['appointments'] },
+      { k: 'RPC', t: '멤버 기상 상태', r: ['get_group_wake_status'] },
+    ] },
+  { code: 'G03', name: '그룹원 기상 상태', tab: 'group', route: 'groups/[id]/members/[userId]', issues: [45], feat: ['②'],
+    data: [
+      { k: 'RPC', t: '오늘 기상 흐름', r: ['get_group_wake_status'] },
+      { k: 'Edge', t: '깨우기 알림', r: ['notify', 'push_tokens'] },
+    ] },
+  { code: 'G04', name: '공유받은 알람', tab: 'group', route: 'friends/[id]/alarms', issues: [46], feat: ['②'],
+    data: [
+      { k: 'DB', t: '친구 알람(조회 권한은 RLS)', r: ['alarms'] },
+      { k: 'Edge', t: '설정 권한이면 켜기 · 끄기 · ±5분 → 주인에게 알림', r: ['notify'] },
+    ] },
+  { code: 'A02', name: 'AI 대화', tab: 'ai', route: '(tabs)/ai', issues: [39, 42], feat: ['③'], ai: true,
+    data: [
+      { k: 'Edge', t: '대화 기록 · 추출 결과', r: ['voice-*', 'conversation_sessions'] },
+      { k: 'Edge', t: '찾은 일정 · 준비물 저장', r: ['appointments', 'todos'] },
+    ] },
+  { code: 'A03', name: '하루 기록 · 일기', tab: 'ai', route: 'journal/[date]', issues: [48], feat: ['⑥'], ai: true,
+    data: [
+      { k: 'DB', t: '일기 읽기 · 고치기', r: ['daily_journals'] },
+      { k: 'Edge', t: '일기 만들기', r: ['journal-*'] },
+      { k: 'DB', t: '오늘의 사실', r: ['alarm_events', 'appointment_participants', 'todos'] },
+    ] },
+  { code: 'A04', name: '루틴 편집', tab: 'ai', route: 'routine/[id]', issues: [48], feat: ['⑥'],
+    data: [
+      { k: 'DB', t: '루틴(이름 · 요일 · 단계)', r: ['routines'] },
+      { k: 'DB', t: '단계 알람', r: ['alarms'] },
+      { k: '폰', t: '예약', r: ['alarm-core'] },
+    ] },
+  { code: 'R02', name: '나의 기록', tab: 'records', route: '(tabs)/records', issues: [38, 41], feat: ['④'],
+    data: [
+      { k: 'DB', t: '월간', r: ['daily_records'] },
+      { k: 'DB', t: '주간(평균 기상 · 목표 기상률은 앱 계산)', r: ['daily_records', 'appointment_participants'] },
+      { k: 'DB', t: '일간(설정값 vs 실제)', r: ['alarms', 'alarm_events'] },
+    ] },
+  { code: 'S01', name: '알람 조정 제안', tab: 'records', route: 'suggestion/[id]', issues: [49], feat: ['④'],
+    data: [
+      { k: 'DB', t: '제안 · 적용 · 수정 · 무시', r: ['alarm_suggestions'] },
+      { k: 'Edge', t: '시각이 바뀌면 저장 → 다시 예약', r: ['alarm-commit'] },
+      { k: '배치', t: '매일 제안 만들기', r: ['suggestion-generate'] },
+    ] },
+  { code: 'L01', name: '로그인', tab: 'common', route: 'login', issues: [25], feat: ['기반'],
+    data: [{ k: 'Auth', t: '카카오 · 구글 → 가입하면 profiles 자동 생성', r: ['profiles'] }] },
+  { code: 'L02', name: '온보딩', tab: 'common', route: 'onboarding', issues: [25], feat: ['기반'],
+    data: [
+      { k: 'DB', t: '아이디 · 집 · 기본 준비 · 여유 · 이동 수단', r: ['profiles'] },
+      { k: 'Edge', t: '집 검색', r: ['place-search'] },
+      { k: '폰', t: '권한 안내(알림 · 정확한 알람 · 잠금화면)', r: ['alarm-core'] },
+    ] },
+  { code: 'L03', name: '설정', tab: 'common', route: 'settings', issues: [25], feat: ['기반'],
+    data: [{ k: 'RPC', t: '푸시 토큰 등록', r: ['register_push_token', 'push_tokens'] }] },
+];
+const FEATURES = [
+  { id: '기반', name: '기반 — 로그인 · 온보딩 · 환경', ms: 'M0', issues: [20, 21, 22, 23, 25, 26, 34],
+    flow: ['L01 로그인', 'L02 온보딩', 'profiles', '권한 안내', 'L03 설정'] },
+  { id: 'M1', name: '화면 옮기기 — 목업 → 앱', ms: 'M1', issues: [24, 30, 38, 43, 39],
+    flow: ['mockup.html', '디자인 기본값 #24', '홈 · 알람 #30', '기록 · 제안 #38', '그룹 · 친구 #43', 'AI #39'] },
+  { id: '①', name: '① 약속 → 진짜 알람', ms: 'M2', issues: [27, 29, 31, 32, 33],
+    flow: ['H05 새 일정', 'place-search', 'alarm-suggest(카카오 대중교통)', 'alarm-commit', 'alarms 4종', '폰 예약', 'H07 울림', 'alarm_events'] },
+  { id: '④', name: '④ 자동 수집 · 기록', ms: 'M5', issues: [35, 36, 40, 41, 49, 51],
+    flow: ['H07 해제', 'H08 기상 판정', '지오펜스 출발 · 도착', 'appointment_participants 실측', 'daily_records', 'R02 기록', 'suggestion-generate', 'S01 제안'] },
+  { id: '②', name: '② 공유 · 기상 확인', ms: 'M3', issues: [44, 45, 46],
+    flow: ['F01 친구', 'F03 권한', 'G02 그룹', 'get_group_wake_status', 'G03 기상 상태', 'notify 푸시', 'G04 공유받은 알람'] },
+  { id: '③', name: '③ 음성 대화 (AI 대기)', ms: 'M4', issues: [37, 42], ai: true,
+    flow: ['A02 녹음', 'Edge voice-*', 'Gemini', 'JSON', 'alarm-commit', '폰 TTS 답'] },
+  { id: '⑥', name: '⑥ 일기 · 루틴 (AI 대기)', ms: 'M6', issues: [48], ai: true,
+    flow: ['A02 대화', 'journal-*', 'daily_journals', 'A03 일기', '루틴 추천', 'A04 루틴', '단계 알람'] },
+  { id: '데모', name: '데모 · 리허설', ms: '데모', issues: [28, 47, 50, 52, 53, 54, 60],
+    flow: ['1차 데모 빌드 #60 (10/19)', '팀 자가 사용 #47', '데모 모드 #50', '동결 #52', '리허설 #53', 'v1.0.0 #54'] },
+  { id: 'iOS', name: 'iOS (도전)', ms: '데모', issues: [55, 56, 57, 58, 59],
+    flow: ['코어 뼈대 #56', '맥 첫 빌드 #57', '기능 맞추기 #58', '지원 범위 #59'] },
+];
+const KINDS = {
+  table: ['profiles', 'friends', 'groups', 'group_members', 'sharing_permissions', 'appointments', 'appointment_participants', 'alarms', 'alarm_events', 'daily_records', 'todos', 'routines', 'alarm_suggestions', 'conversation_sessions', 'daily_journals', 'push_tokens', 'v_prepare_time_stats'],
+  rpc: ['get_group_wake_status', 'get_public_profiles', 'find_profile_by_handle', 'join_group_by_invite_code', 'register_push_token'],
+  edge: ['place-search', 'alarm-suggest', 'alarm-commit', 'notify', 'suggestion-generate', 'voice-*', 'journal-*'],
+  phone: ['alarm-core'],
+};
+const EDGE = [
+  ['place-search', '장소 검색', '카카오 로컬'], ['alarm-suggest', '이동시간 · 기상 · 준비 · 출발 · 도착 시각 · 강도 계산(저장 안 함)', '카카오 대중교통'],
+  ['alarm-commit', '약속 · 참여 조건 · 알람을 한 번에 저장', '—'], ['notify', '다른 사람 폰에 푸시', 'Expo Push'],
+  ['suggestion-generate', '매일 제안 만들기(배치)', '—'], ['voice-* · journal-*', 'AI 대화 · 일기 (AI 대기)', 'Gemini'],
+];
+const NATIVE = [
+  ['scheduleOneShotAlarm(id, title, atMillis)', '그 시각에 한 번 울림, 같은 id면 덮어씀'],
+  ['scheduleDailyAlarm(id, title, hour, minute)', '매일 울림'],
+  ['cancelAlarm(id) · cancelAllAlarms()', '예약 지우기'],
+  ['getScheduledAlarms()', '폰에 걸린 예약 목록'],
+  ['canScheduleExactAlarms() · canUseFullScreenIntent()', '권한 확인'],
+  ['startAlarmTest(title) · stopAlarm()', '바로 울리기 · 끄기'],
+  ['isAlarmCoreAvailable', 'Android + 모듈 든 APK인지'],
+];
+const SETUP = [
+  ['레포 정리 · 앱 뼈대 main', 'done'], ['각자 PC: Node 24 · clone · npm ci', 'doing'], ['Android Studio PC 1대', 'todo'],
+  ['Expo · EAS 연결(프로젝트 · EXPO_TOKEN)', 'done'], ['알람 코어 이전 (#62)', 'review'], ['Supabase 프로젝트 · 스키마 (#63)', 'review'],
+  ['외부 키: 카카오 · Gemini · FCM (#23)', 'todo'], ['로그인 · 온보딩 (#67)', 'review'], ['CI 보강: 린트 · 테스트 (#68)', 'review'],
+  ['배포 길: 웹 Cloudflare ✓ · APK 태그 릴리스', 'doing'],
+];
+const LINKS = [
+  ['웹 미리보기 (main)', SITE.web], ['클릭 목업', SITE.web + '/mockup.html'], ['UI 부품', SITE.web + '/dev/ui'],
+  ['레포', `https://github.com/${SITE.org}/${SITE.repo}`], ['Pull Requests', `https://github.com/${SITE.org}/${SITE.repo}/pulls`],
+  ['보드 (Projects)', `https://github.com/orgs/${SITE.org}/projects/${SITE.project}`], ['최신 APK (Releases)', `https://github.com/${SITE.org}/${SITE.repo}/releases/latest`],
+  ['APK 빌드 버튼 (Actions)', `https://github.com/${SITE.org}/${SITE.repo}/actions/workflows/eas-build.yml`],
+  ['EAS 빌드 목록', 'https://expo.dev/accounts/respec-alarm-capstone/projects/respec-alarm/builds'],
+  ['Supabase 프로젝트', 'https://supabase.com/dashboard/project/gomrhctwjvttoqifxktt'], ['Cloudflare', 'https://dash.cloudflare.com/'],
+];
+const COMMANDS = [
+  ['폰 화면을 PC에', 'scrcpy --always-on-top --window-width 360'],
+  ['웹으로 개발', 'cd mobile && npm run web'],
+  ['폰(개발용 APK)에 바로 반영', 'cd mobile && npx expo start'],
+  ['개발용 APK 빌드', 'npx eas-cli build -p android --profile development'],
+  ['JS만 바뀐 걸 preview 앱에', 'npx eas-cli update --channel preview --message "무엇을 고쳤는지"'],
+  ['데모 릴리스 (APK + QR)', 'git tag v0.1.0 && git push origin v0.1.0'],
+  ['폰 로그', 'adb logcat -s ReactNativeJS AlarmCore'],
+  ['모듈 의존 그래프', 'cd tools/deps-graph && npm run graph'],
+];
+const DECISIONS = [
+  ['음성 대화: 1턴(녹음 → Edge → Gemini → JSON) vs 실시간', 'AI 보류', ['#37', '#42']],
+  ['알람 음성 안내 TTS: 폰 내장 vs Gemini', '폰 내장 (기본)', []],
+  ['강도 3단계: 축별(배경음 · 말소리 · 진동) vs 하나', '#29에서', ['#29']],
+  ['S01 시각 조정 제안 종류를 alarm_suggestion_type에 추가', '#49에서', ['#49']],
+  ['G04 변경 기록 저장 자리 (처음엔 주인에게 푸시만)', '푸시만', ['#46']],
+  ['카카오 응답 저장 · 재사용 불가 → est_travel_minutes · CACHED 처리', '#27에서', ['#27']],
+  ['1차 데모 범위 (10/19)', '라벨 1차 데모 22개 + #60', ['#60']],
+  ['웹 미리보기 Cloudflare · 앱 APK 태그 릴리스', '정함 (10/6)', ['#13']],
+];
+const SNAPSHOT = /*SNAPSHOT*/{"at":"2026-10-07","items":[{"t":"👥 4명 역할 분담 확정","st":"DRAFT","status":"📥 백로그","part":"PM","labels":[]},{"t":"🎨 피그마 파일 링크 공유","st":"DRAFT","status":"📌 이번 주","start":"2026-10-03","due":"2026-10-03","part":"DESIGN","labels":[]},{"t":"🤖 Copilot 리뷰 가능 여부 확인","st":"DRAFT","status":"📥 백로그","part":"PM","labels":[]},{"n":1,"t":"레포 자동화 · 라이선스 추가","st":"CLOSED","status":"✅ 완료","ms":"M0 세팅","start":"2026-10-03","due":"2026-10-03","part":"PM","labels":[]},{"n":4,"t":"PR 정리를 보드 연동에 합치기","st":"CLOSED","status":"✅ 완료","ms":"M0 세팅","start":"2026-10-03","due":"2026-10-03","part":"PM","labels":[]},{"n":6,"t":"팀 카드 빼고 가이드와 레포 문서 맞추기","st":"CLOSED","status":"✅ 완료","ms":"M0 세팅","start":"2026-10-03","due":"2026-10-03","part":"PM","labels":[]},{"n":10,"t":"Expo 앱 뼈대 올리기","st":"CLOSED","status":"✅ 완료","ms":"M1 목업 화면","start":"2026-10-03","due":"2026-10-04","part":"FE","labels":["FE"]},{"n":13,"t":"배포 길 세팅: 웹 미리보기(Cloudflare Pages) · 앱 APK(EAS)","st":"CLOSED","status":"✅ 완료","ms":"M0 세팅","start":"2026-10-06","labels":[]},{"n":17,"t":"주간 요약 댓글 접기","st":"CLOSED","status":"✅ 완료","ms":"M0 세팅","start":"2026-10-06","due":"2026-10-06","part":"PM","labels":[]},{"n":16,"t":"안드로이드 빌드 검사 추가","st":"CLOSED","status":"✅ 완료","ms":"M0 세팅","start":"2026-10-06","due":"2026-10-06","part":"PM","labels":[]},{"n":20,"t":"EAS 연결 · 개발 빌드 폰에 설치","st":"OPEN","status":"📌 이번 주","ms":"M0 세팅","start":"2026-10-07","due":"2026-10-08","part":"PM","labels":["1차 데모"]},{"n":21,"t":"구현 기준 5개 정하기","st":"OPEN","status":"🏃 진행 중","ms":"M0 세팅","start":"2026-10-07","due":"2026-10-10","part":"PM","labels":[]},{"n":22,"t":"Supabase 프로젝트 · 스키마 · RLS","st":"OPEN","status":"👀 리뷰","ms":"M0 세팅","start":"2026-10-07","due":"2026-10-08","part":"BE","labels":["BE","1차 데모"]},{"n":23,"t":"외부 키 발급 (카카오 · Gemini · FCM)","st":"OPEN","status":"📌 이번 주","ms":"M0 세팅","start":"2026-10-07","due":"2026-10-10","part":"PM","labels":["1차 데모"]},{"n":24,"t":"디자인 기본값 (색 · 글꼴 · 간격 · 공용 컴포넌트)","st":"CLOSED","status":"✅ 완료","ms":"M1 목업 화면","start":"2026-10-08","due":"2026-10-08","part":"DESIGN","labels":["DESIGN","1차 데모"]},{"n":25,"t":"로그인 이전 · 온보딩 · 권한 안내","st":"OPEN","status":"🏃 진행 중","ms":"M0 세팅","start":"2026-10-09","due":"2026-10-10","part":"FE","labels":["FE","1차 데모"]},{"n":26,"t":"알람 코어 이전 · 첫 관문 (잠금화면 위로 울림)","st":"OPEN","status":"🏃 진행 중","ms":"M0 세팅","start":"2026-10-08","due":"2026-10-09","part":"FE","labels":["FE","1차 데모"]},{"n":27,"t":"카카오 대중교통 실제 응답 확인","st":"OPEN","status":"📌 이번 주","ms":"M2 기능① 약속 기반 개인 알람","start":"2026-10-10","due":"2026-10-10","part":"BE","labels":["BE","1차 데모"]},{"n":28,"t":"대회 · 학사 일정 확인","st":"OPEN","status":"📥 백로그","ms":"창의경진대회 데모","start":"2026-10-12","due":"2026-10-16","part":"PM","labels":[]},{"n":29,"t":"알람 강도 3단계 확인","st":"OPEN","status":"📌 이번 주","ms":"M2 기능① 약속 기반 개인 알람","start":"2026-10-09","due":"2026-10-09","part":"FE","labels":["FE","1차 데모"]},{"n":30,"t":"홈 · 알람 화면 옮기기","st":"OPEN","status":"📌 이번 주","ms":"M1 목업 화면","start":"2026-10-10","due":"2026-10-11","part":"FE","labels":["FE","1차 데모"]},{"n":31,"t":"약속 입력 · 장소 검색","st":"OPEN","status":"📌 이번 주","ms":"M2 기능① 약속 기반 개인 알람","start":"2026-10-11","due":"2026-10-11","part":"FE","labels":["FE","1차 데모"]},{"n":32,"t":"이동시간 · 기상 시각 역산 · 강도 계산","st":"OPEN","status":"📌 이번 주","ms":"M2 기능① 약속 기반 개인 알람","start":"2026-10-11","due":"2026-10-12","part":"BE","labels":["BE","1차 데모"]},{"n":33,"t":"알람 예약 · 울림 · 미루기 · 기록","st":"OPEN","status":"📥 백로그","ms":"M2 기능① 약속 기반 개인 알람","start":"2026-10-12","due":"2026-10-13","part":"FE","labels":["FE","1차 데모"]},{"n":34,"t":"CI 보강 (린트 · 단위 테스트 · Edge Function 검사)","st":"OPEN","status":"🏃 진행 중","ms":"M0 세팅","start":"2026-10-20","due":"2026-10-21","part":"PM","labels":[]},{"n":35,"t":"기상 자동 확인 가능 여부 확인","st":"OPEN","status":"📥 백로그","ms":"M5 기능④ 캘린더 · 하루 기록","start":"2026-10-13","due":"2026-10-13","part":"FE","labels":["FE","1차 데모"]},{"n":36,"t":"지오펜스 확인","st":"OPEN","status":"📥 백로그","ms":"M5 기능④ 캘린더 · 하루 기록","start":"2026-10-13","due":"2026-10-13","part":"FE","labels":["FE","1차 데모"]},{"n":37,"t":"음성 1턴 확인","st":"OPEN","status":"📥 백로그","ms":"M4 기능③ 수면 전후 Voice AI","part":"AI","labels":["AI 대기"]},{"n":38,"t":"기록 · 제안 화면 옮기기","st":"OPEN","status":"📥 백로그","ms":"M1 목업 화면","start":"2026-10-14","due":"2026-10-14","part":"FE","labels":["FE","1차 데모"]},{"n":39,"t":"AI 화면 옮기기","st":"OPEN","status":"📥 백로그","ms":"M1 목업 화면","part":"FE","labels":["FE","AI 대기"]},{"n":40,"t":"기상 · 출발 · 도착 자동 수집","st":"OPEN","status":"📥 백로그","ms":"M5 기능④ 캘린더 · 하루 기록","start":"2026-10-14","due":"2026-10-15","part":"FE","labels":["FE","1차 데모"]},{"n":41,"t":"준비 실측 · 지각 판정 · 기록 연결","st":"OPEN","status":"📥 백로그","ms":"M5 기능④ 캘린더 · 하루 기록","start":"2026-10-14","due":"2026-10-15","part":"BE","labels":["BE","1차 데모"]},{"n":42,"t":"자기 전 · 기상 후 음성 대화 (1턴)","st":"OPEN","status":"📥 백로그","ms":"M4 기능③ 수면 전후 Voice AI","part":"AI","labels":["AI 대기"]},{"n":43,"t":"그룹 · 친구 화면 옮기기","st":"OPEN","status":"📥 백로그","ms":"M1 목업 화면","start":"2026-10-15","due":"2026-10-15","part":"FE","labels":["FE","1차 데모"]},{"n":44,"t":"친구 · 그룹 · 공유 권한","st":"OPEN","status":"📥 백로그","ms":"M3 기능② 알람 공유 · 기상 확인","start":"2026-10-15","due":"2026-10-16","part":"BE","labels":["BE","1차 데모"]},{"n":45,"t":"기상 상태 실시간 · 미확인 푸시","st":"OPEN","status":"📥 백로그","ms":"M3 기능② 알람 공유 · 기상 확인","start":"2026-10-16","due":"2026-10-17","part":"BE","labels":["BE","1차 데모"]},{"n":46,"t":"공동 약속 · 친구가 알람 설정","st":"OPEN","status":"📥 백로그","ms":"M3 기능② 알람 공유 · 기상 확인","start":"2026-10-17","due":"2026-10-17","part":"FE","labels":["FE","1차 데모"]},{"n":47,"t":"팀 자가 사용 · P2 통합 APK","st":"OPEN","status":"📥 백로그","ms":"창의경진대회 데모","start":"2026-10-20","due":"2026-11-22","part":"PM","labels":[]},{"n":48,"t":"일기 · 루틴 추천 · 루틴 알람","st":"OPEN","status":"📥 백로그","ms":"M6 기능⑥ AI 일기 · 루틴","part":"AI","labels":["AI 대기"]},{"n":49,"t":"학습 · 제안 루프 v1","st":"OPEN","status":"📥 백로그","ms":"M5 기능④ 캘린더 · 하루 기록","start":"2026-10-20","due":"2026-10-22","part":"DATA","labels":[]},{"n":50,"t":"데모 모드 · 시드 · 데모 계정","st":"OPEN","status":"📥 백로그","ms":"창의경진대회 데모","start":"2026-10-23","due":"2026-10-24","part":"FE","labels":["FE"]},{"n":51,"t":"모델 결과 시연용 (합성 데이터)","st":"OPEN","status":"📥 백로그","ms":"M5 기능④ 캘린더 · 하루 기록","part":"DATA","labels":["AI 대기"]},{"n":52,"t":"기능 동결 · UX 리뷰 · 버그 수정","st":"OPEN","status":"📥 백로그","ms":"창의경진대회 데모","start":"2026-11-23","due":"2026-11-29","part":"PM","labels":[]},{"n":53,"t":"시연 리허설 · 백업 영상","st":"OPEN","status":"📥 백로그","ms":"창의경진대회 데모","start":"2026-11-24","due":"2026-12-03","part":"PM","labels":[]},{"n":54,"t":"데모 빌드 v1.0.0 고정 · D-3 점검","st":"OPEN","status":"📥 백로그","ms":"창의경진대회 데모","start":"2026-12-01","due":"2026-12-03","part":"PM","labels":[]},{"n":55,"t":"iOS 빌드 (도전 영역)","st":"OPEN","status":"📥 백로그","ms":"창의경진대회 데모","start":"2026-10-17","due":"2026-11-27","part":"FE","labels":["FE","iOS"]},{"n":56,"t":"iOS 알람 코어 뼈대 (Windows에서)","st":"OPEN","status":"📥 백로그","ms":"창의경진대회 데모","start":"2026-10-17","due":"2026-10-17","part":"FE","labels":["FE","iOS","1차 데모"]},{"n":57,"t":"맥에서 첫 iOS 빌드 · 울림 확인","st":"OPEN","status":"📥 백로그","ms":"창의경진대회 데모","start":"2026-10-26","due":"2026-10-31","part":"FE","labels":["FE","iOS"]},{"n":58,"t":"iOS 알람 기능 맞추기","st":"OPEN","status":"📥 백로그","ms":"창의경진대회 데모","start":"2026-11-09","due":"2026-11-14","part":"FE","labels":["FE","iOS"]},{"n":59,"t":"iOS 지원 범위 표시","st":"OPEN","status":"📥 백로그","ms":"창의경진대회 데모","start":"2026-11-23","due":"2026-11-27","part":"PM","labels":["iOS"]},{"n":60,"t":"1차 데모 빌드 · 제출","st":"OPEN","status":"📥 백로그","ms":"창의경진대회 데모","start":"2026-10-18","due":"2026-10-19","part":"PM","labels":["1차 데모"]},{"n":65,"t":"안드로이드 빌드 검사 APK 남기기 · 디스크 부족 막기","st":"OPEN","status":"👀 리뷰","ms":"M0 세팅","start":"2026-10-07","due":"2026-10-07","part":"FE","labels":["FE"]},{"n":69,"t":"DB 변경 자동 적용 (PR 임시 DB 검사 · 머지 시 적용)","st":"OPEN","status":"🏃 진행 중","ms":"M0 세팅","start":"2026-10-07","due":"2026-10-07","part":"BE","labels":["BE"]},{"n":70,"t":"자동 리뷰에 방향성 · 자가 검수 · Android 항목 추가","st":"OPEN","status":"👀 리뷰","ms":"M0 세팅","start":"2026-10-07","due":"2026-10-07","part":"PM","labels":[]},{"n":73,"t":"개발 도구: 모듈 의존 그래프(madge) · 순환 의존 검사","st":"OPEN","status":"👀 리뷰","ms":"M0 세팅","start":"2026-10-07","due":"2026-10-07","labels":[]},{"n":75,"t":"Cloudflare 빌드 설정 문서를 실제 명령으로 맞추기","st":"CLOSED","status":"✅ 완료","ms":null,"start":"2026-10-07","labels":[]}],"prs":[{"number":74,"title":"[ALL] [CHORE] 개발 도구: 모듈 의존 그래프 · 순환 의존 검사","state":"OPEN","draft":false,"branch":"chore/73-ALL-deps-graph","review":null,"closes":[73],"checks":"SUCCESS"},{"number":72,"title":"[BE] [CHORE] DB 변경 자동 적용: PR 임시 DB 검사 · 머지 시 db push","state":"OPEN","draft":true,"branch":"chore/69-BE-db-auto-apply","review":null,"closes":[],"checks":"FAILURE"},{"number":71,"title":"[ALL] [CHORE] 자동 리뷰에 방향성 · 자가 검수 · Android 항목 추가","state":"OPEN","draft":false,"branch":"chore/70-ALL-review-direction-selfcheck","review":null,"closes":[70],"checks":"FAILURE"},{"number":62,"title":"[FE] [FEAT] 알람 코어 이전 · 잠금화면 위 울림 테스트 화면","state":"OPEN","draft":false,"branch":"feat/26-FE-alarm-core","review":null,"closes":[],"checks":"FAILURE"},{"number":68,"title":"[ALL] [CHORE] CI 보강: 린트 · 단위 테스트","state":"OPEN","draft":false,"branch":"chore/34-ALL-lint-test","review":null,"closes":[],"checks":"FAILURE"},{"number":67,"title":"[FE] [FEAT] 카카오 · 구글 로그인 · 온보딩","state":"OPEN","draft":false,"branch":"feat/25-FE-login","review":null,"closes":[],"checks":"FAILURE"},{"number":66,"title":"[FE] [CHORE] 안드로이드 빌드 검사 APK 남기기 · 디스크 부족 막기","state":"OPEN","draft":false,"branch":"chore/65-FE-dev-apk-artifact","review":null,"closes":[65],"checks":"FAILURE"},{"number":63,"title":"[BE] [FEAT] Supabase 스키마 · RLS (4장 15테이블 + 목업 보완 5개)","state":"OPEN","draft":false,"branch":"feat/22-BE-supabase-schema","review":null,"closes":[22],"checks":"FAILURE"},{"number":64,"title":"[PM] [DOCS] 화면 ↔ 데이터 ↔ API 매핑 · 알람 코어 인터페이스","state":"OPEN","draft":false,"branch":"docs/21-PM-screen-data-map","review":null,"closes":[],"checks":"FAILURE"}]};
+
+// ───────────────────────────────── 상태
+const LS = {
+  get: (k, d) => { try { const v = localStorage.getItem('board.' + k); return v == null ? d : JSON.parse(v); } catch { return d; } },
+  set: (k, v) => { try { localStorage.setItem('board.' + k, JSON.stringify(v)); } catch {} },
+};
+let tab = LS.get('tab', 'big');
+let sel = LS.get('sel', 'H01');
+let live = LS.get('sync', null);        // { at, items, prs, tree }
+let token = LS.get('ghToken', '');
+let todoFilter = LS.get('todoFilter', { status: '', ms: '', label: '' });
+const envState = LS.get('env', {});
+const decState = LS.get('dec', {});
+
+const STATUS = { '✅ 완료': 'done', '🏃 진행 중': 'doing', '👀 리뷰': 'review', '📌 이번 주': 'week', '📥 백로그': 'todo' };
+const STATUS_KO = { done: '완료', doing: '진행 중', review: '리뷰', week: '이번 주', todo: '백로그', wait: '대기', ai: 'AI 대기' };
+const PART = { FE: 'FE', BE: 'BE', AI: 'AI', DATA: 'DATA', DESIGN: 'DESIGN', PM: 'PM' };
+
+function items() { return (live && live.items) || (SNAPSHOT && SNAPSHOT.items) || []; }
+function prs() { return (live && live.prs) || (SNAPSHOT && SNAPSHOT.prs) || []; }
+function issue(n) { return items().find(i => i.n === n); }
+// PR 본문에 Closes #가 없으면 브랜치 이름의 번호(feat/26-FE-…)로 잇는다
+function closesOf(p) { if (p.closes && p.closes.length) return p.closes; const m = /^[a-z]+\/(\d+)-/.exec(p.branch || ''); return m ? [Number(m[1])] : []; }
+function prsOf(n) { return prs().filter(p => closesOf(p).includes(n)); }
+function statusOf(n) {
+  const it = issue(n); if (!it) return 'wait';
+  if (it.labels && it.labels.includes('AI 대기') && it.st !== 'CLOSED') return 'ai';
+  if (it.st === 'CLOSED') return 'done';
+  if (prsOf(n).some(p => p.state === 'OPEN')) return 'review';
+  return STATUS[it.status] || 'todo';
+}
+function screenStatus(s) {
+  const st = s.issues.map(statusOf);
+  if (st.every(x => x === 'done')) return 'done';
+  if (st.includes('review')) return 'review';
+  if (st.includes('doing')) return 'doing';
+  if (st.includes('week')) return 'week';
+  if (s.ai || st.every(x => x === 'ai')) return 'ai';
+  return 'todo';
+}
+function fileOf(s) {
+  if (!s.route) return null;
+  const want = `mobile/src/app/${s.route}.tsx`;
+  const tree = live && live.tree; if (!tree) return { path: want, known: false };
+  return { path: want, known: true, exists: tree.includes(want) };
+}
+const esc = (x) => String(x).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const chip = (st, text) => `<span class="chip ${st}">${esc(text ?? STATUS_KO[st] ?? st)}</span>`;
+const issueLink = (n) => { const it = issue(n); const st = statusOf(n); return `<a href="https://github.com/${SITE.org}/${SITE.repo}/issues/${n}" target="_blank" title="${esc(it ? it.t : '')}">#${n}</a> ${chip(st)}`; };
+const fmtDate = (d) => d ? d.slice(5).replace('-', '/') : '';
+const today = new Date();
+// 'YYYY-MM-DD'를 new Date()에 그대로 넣으면 UTC 자정(KST 09:00)이 되어 새벽 0~9시엔 D-day · 주차 · 지연이 하루 어긋남 → 로컬 자정으로 읽음
+const localDate = (s) => new Date(s + 'T00:00');
+const ymd = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+const daysTo = (s) => Math.ceil((localDate(s) - today) / 864e5);
+
+// ───────────────────────────────── 렌더
+const TABDEF = [['big', '큰 그림'], ['screens', '화면'], ['features', '기능'], ['links', '연결'], ['todo', '할 일'], ['env', '환경'], ['dec', '결정']];
+function render() {
+  const w = Math.floor((today - localDate(SITE.week1)) / 6048e5) + 1;
+  document.getElementById('meta').textContent = `W${w} · 1차 데모 D-${daysTo(SITE.demo1)} · 대회 D-${daysTo(SITE.contest)}`;
+  const R = { big: rBig, screens: rScreens, features: rFeatures, links: rLinks, todo: rTodo, env: rEnv, dec: rDec };
+  if (!R[tab]) tab = 'big'; // localStorage에 남은 예전 탭 id(지웠거나 바꾼 것)면 큰 그림으로. 화면(sel)은 rScreens에서 첫 화면으로 떨어짐
+  document.getElementById('tabs').innerHTML = TABDEF.map(([id, name]) => `<button data-tab="${id}" class="${tab === id ? 'on' : ''}">${name}</button>`).join('');
+  const m = document.getElementById('main');
+  m.innerHTML = R[tab]();
+  const sm = document.getElementById('syncMeta');
+  if (live) sm.textContent = `동기화 ${new Date(live.at).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}`;
+  else if (SNAPSHOT) sm.textContent = `스냅샷 ${SNAPSHOT.at} (토큰 넣으면 실시간)`;
+  else sm.textContent = 'GitHub 미연결';
+  document.getElementById('btnToken').textContent = token ? 'GitHub 연결됨' : 'GitHub 연결';
+}
+
+function rBig() {
+  const cnt = (f) => SCREENS.filter(f).length;
+  const byTab = TABS.map(([id, name]) => {
+    const ss = SCREENS.filter(s => s.tab === id);
+    const done = ss.filter(s => screenStatus(s) === 'done').length;
+    return `<div class="node" data-go="screens:${ss[0].code}"><span>${name} <small>화면 ${ss.length}</small></span><small>${done}/${ss.length} 완료</small></div>`;
+  }).join('');
+  const feat = FEATURES.map(f => {
+    const st = f.issues.map(statusOf); const done = st.filter(x => x === 'done').length;
+    return `<div class="node" data-go="features:${f.id}"><span>${esc(f.name)}</span><small>${done}/${f.issues.length}</small></div>`;
+  }).join('');
+  const edgeExists = (name) => live && live.tree ? live.tree.some(p => p.startsWith(`supabase/functions/${name.split(' ')[0]}/`)) : null;
+  const edges = EDGE.map(([n]) => `<div class="node" data-go="links:"><span>${esc(n)}</span><small>${edgeExists(n) === null ? '' : edgeExists(n) ? '있음' : '없음'}</small></div>`).join('');
+  return `
+  <div class="big">
+    <div class="box"><h4>폰 — Expo 앱</h4>${byTab}
+      <div class="arrow">↓ JS 함수</div>
+      <div class="node" data-go="links:"><span>alarm-core <small>Kotlin · AlarmManager</small></span><small>${NATIVE.length} 함수</small></div>
+      <div class="muted" style="margin-top:8px;font-size:12px">알람은 서버 · 인터넷 없이 울림. 계산 · 저장은 서버, 울리는 건 폰</div>
+    </div>
+    <div class="box"><h4>Supabase</h4>
+      <div class="node" data-go="links:"><span>테이블 <small>4장 15 + 보완</small></span><small>${KINDS.table.length - 1} + 뷰 1</small></div>
+      <div class="node" data-go="links:"><span>RPC <small>DB 함수</small></span><small>${KINDS.rpc.length}</small></div>
+      <div class="arrow">Edge Functions · 비밀 키는 여기만</div>${edges}
+      <div class="node"><span>배치 <small>pg_cron 03:00</small></span><small>suggestion-generate</small></div>
+    </div>
+    <div class="box"><h4>외부</h4>
+      <div class="node"><span>카카오 <small>로컬 · 대중교통</small></span><small>place-search · alarm-suggest</small></div>
+      <div class="node"><span>Expo Push <small>FCM</small></span><small>notify</small></div>
+      <div class="node"><span>Gemini <small>AI 대기</small></span><small>voice-* · journal-*</small></div>
+      <h4 style="margin-top:14px">기능</h4>${feat}
+    </div>
+  </div>`;
+}
+
+function rScreens() {
+  const s = SCREENS.find(x => x.code === sel) || SCREENS[0];
+  const tree = TABS.map(([id, name]) => `<div class="g">${name}</div>` + SCREENS.filter(x => x.tab === id).map(x =>
+    `<div class="it ${x.code === s.code ? 'on' : ''}" data-sel="${x.code}"><span class="dot ${screenStatus(x)}"></span>${x.code} ${esc(x.name)}</div>`).join('')).join('');
+  const f = fileOf(s);
+  const fileText = s.native ? '네이티브 화면 (alarm-core)' : f ? `<code>${esc(f.path)}</code> ${f.known ? (f.exists ? chip('done', 'main에 있음') : chip('todo', 'main에 없음')) : `<span class="muted">${live ? '파일 목록 못 읽음 (토큰 Contents 권한 확인)' : '동기화하면 확인'}</span>`}` : '';
+  const rows = s.data.map(d => `<tr><td>${chip('k-' + d.k, d.k)}</td><td>${esc(d.t)}</td><td>${d.r.map(r => `<code>${esc(r)}</code>`).join(' ')}</td></tr>`).join('');
+  const links = SCREENS.filter(o => o !== s && o.data.some(d => d.r.some(r => s.data.some(e => e.r.includes(r))))).map(o => `<a href="#" data-sel="${o.code}">${o.code} ${esc(o.name)}</a>`).join(' · ');
+  const openPrs = s.issues.flatMap(prsOf).filter((p, i, a) => a.findIndex(q => q.number === p.number) === i);
+  return `<div class="screens"><div class="tree">${tree}</div>
+  <div class="card">
+    <div class="row"><h2 style="margin:0">${s.code} ${esc(s.name)}</h2>${chip(screenStatus(s))}${s.feat.map(x => `<span class="chip wait">${esc(x)}</span>`).join('')}</div>
+    <table class="kv" style="margin-top:10px">
+      <tr><td>파일</td><td>${fileText}</td></tr>
+      <tr><td>이슈</td><td>${s.issues.map(issueLink).join(' &nbsp; ')}</td></tr>
+      ${openPrs.length ? `<tr><td>PR</td><td>${openPrs.map(p => `<a href="https://github.com/${SITE.org}/${SITE.repo}/pull/${p.number}" target="_blank">#${p.number}</a> ${esc(p.title)} ${p.draft ? chip('wait', 'WIP') : ''} ${p.checks ? chip(p.checks === 'SUCCESS' ? 'done' : p.checks === 'PENDING' ? 'wait' : 'doing', '검사 ' + ({ SUCCESS: '통과', FAILURE: '실패', ERROR: '오류', PENDING: '진행' }[p.checks] || p.checks)) : ''}`).join('<br>')}</td></tr>` : ''}
+      <tr><td>목업</td><td><a href="/mockup.html" target="_blank">mockup.html</a>의 ${s.code} 화면</td></tr>
+      <tr><td>연결 화면</td><td>${links || '<span class="muted">없음</span>'}</td></tr>
+    </table>
+    <h3>이 화면이 읽고 쓰는 것</h3>
+    <table><tr><th style="width:60px">어디</th><th>무엇</th><th>테이블 · 함수</th></tr>${rows}</table>
+    <h3>근거</h3><div class="muted">docs/screen-data-map.md · 상세설계서 4장(테이블) · 5장(함수) · 7장(흐름)</div>
+  </div></div>`;
+}
+
+function rFeatures() {
+  return FEATURES.map(f => {
+    const scr = f.id === 'M1' ? '' : `<div class="row" style="margin-top:6px"><span class="muted">화면</span> ${SCREENS.filter(s => s.feat.includes(f.id)).map(s => `<a href="#" data-sel="${s.code}" data-go="screens:${s.code}">${s.code} ${esc(s.name)}</a>`).join(' · ') || '<span class="muted">—</span>'}</div>`;
+    return `<div class="card" style="margin-bottom:12px">
+      <div class="row"><h2 style="margin:0">${esc(f.name)}</h2><span class="chip wait">${esc(f.ms)}</span></div>
+      <div class="flow">${f.flow.map((x, i) => (i ? '<i>→</i>' : '') + `<span>${esc(x)}</span>`).join('')}</div>
+      <div class="row"><span class="muted">이슈</span> ${f.issues.map(issueLink).join(' &nbsp; ')}</div>${scr}
+    </div>`;
+  }).join('');
+}
+
+function rLinks() {
+  const cols = [['테이블', KINDS.table], ['RPC', KINDS.rpc], ['Edge', KINDS.edge], ['폰', KINDS.phone]];
+  const head = `<tr><th></th>${cols.map(([g, arr]) => `<th colspan="${arr.length}" style="text-align:center;border-left:1px solid var(--line2)">${g}</th>`).join('')}</tr>
+    <tr><th>화면</th>${cols.map(([, arr]) => arr.map((c, i) => `<th class="v" style="${i === 0 ? 'border-left:1px solid var(--line2)' : ''}">${esc(c)}</th>`).join('')).join('')}</tr>`;
+  const body = SCREENS.map(s => {
+    const refs = new Set(s.data.flatMap(d => d.r));
+    return `<tr><td><a href="#" data-go="screens:${s.code}">${s.code} ${esc(s.name)}</a></td>${cols.map(([, arr]) => arr.map((c, i) => `<td class="${refs.has(c) ? 'y' : ''}" style="${i === 0 ? 'border-left:1px solid var(--line2)' : ''}">${refs.has(c) ? '●' : ''}</td>`).join('')).join('')}</tr>`;
+  }).join('');
+  const usedBy = (c) => SCREENS.filter(s => s.data.some(d => d.r.includes(c))).map(s => s.code);
+  const edgeRows = EDGE.map(([n, w, ext]) => `<tr><td><code>${esc(n)}</code></td><td>${esc(w)}</td><td>${esc(ext)}</td><td>${usedBy(n.split(' ')[0]).join(' · ')}</td></tr>`).join('');
+  const nat = NATIVE.map(([n, w]) => `<tr><td><code>${esc(n)}</code></td><td>${esc(w)}</td></tr>`).join('');
+  return `<h2>화면 × 테이블 · 함수 · 폰</h2><div class="muted" style="margin-bottom:8px">● = 그 화면이 읽거나 씀. 테이블 하나 바꾸면 어느 화면이 영향받는지 세로로 보면 됨</div>
+  <div class="matrix-wrap"><table class="matrix">${head}${body}</table></div>
+  <div class="grid2" style="margin-top:14px">
+    <div class="card"><h2>Edge Function</h2><table><tr><th>이름</th><th>하는 일</th><th>외부</th><th>화면</th></tr>${edgeRows}</table></div>
+    <div class="card"><h2>alarm-core (폰)</h2><table><tr><th>함수</th><th>하는 일</th></tr>${nat}</table>
+      <div class="muted" style="margin-top:8px">앞으로: #29 강도 · #33 알람 4종 · 기록 · 맞추기 · #35 기상 확인 · 음성 안내. 예약 꾸러미 <code>RingPackage</code></div></div>
+  </div>`;
+}
+
+function rTodo() {
+  const all = items().filter(i => i.n);
+  const mss = [...new Set(all.map(i => i.ms).filter(Boolean))];
+  const labels = ['1차 데모', 'AI 대기', 'iOS', 'FE', 'BE'];
+  const f = todoFilter;
+  const list = all.filter(i => (!f.status || statusOf(i.n) === f.status) && (!f.ms || i.ms === f.ms) && (!f.label || (i.labels || []).includes(f.label)))
+    .sort((a, b) => { const da = statusOf(a.n) === 'done', db = statusOf(b.n) === 'done'; if (da !== db) return da ? 1 : -1; const x = a.due || '9', y = b.due || '9'; return x < y ? -1 : x > y ? 1 : 0; });
+  const t = ymd(today);
+  const rows = list.map(i => {
+    const st = statusOf(i.n); const late = i.due && i.due < t && st !== 'done';
+    const pr = prsOf(i.n).map(p => `<a href="https://github.com/${SITE.org}/${SITE.repo}/pull/${p.number}" target="_blank">PR #${p.number}</a>`).join(' ');
+    const scr = SCREENS.filter(s => s.issues.includes(i.n)).map(s => `<a href="#" data-go="screens:${s.code}">${s.code}</a>`).join(' ');
+    return `<tr><td><a href="https://github.com/${SITE.org}/${SITE.repo}/issues/${i.n}" target="_blank">#${i.n}</a></td><td class="todo-title">${esc(i.t)}</td><td>${chip(st)}</td><td>${esc(i.part || '')}</td><td>${esc(i.ms || '')}</td><td class="${late ? 'late' : ''}">${fmtDate(i.start)}${i.due ? ' → ' + fmtDate(i.due) : ''}</td><td>${pr}</td><td>${scr}</td></tr>`;
+  }).join('');
+  const btn = (k, v, label) => `<button class="${f[k] === v ? 'on' : ''}" data-f="${k}" data-v="${esc(v)}">${esc(label)}</button>`;
+  const counts = Object.fromEntries(['week', 'doing', 'review', 'todo', 'done', 'ai'].map(s => [s, all.filter(i => statusOf(i.n) === s).length]));
+  return `<div class="filters">${btn('status', '', '전체')}${['week', 'doing', 'review', 'todo', 'done', 'ai'].map(s => btn('status', s, `${STATUS_KO[s]} ${counts[s]}`)).join('')}</div>
+  <div class="filters">${btn('ms', '', '마일스톤 전체')}${mss.map(m => btn('ms', m, m)).join('')}</div>
+  <div class="filters">${btn('label', '', '라벨 전체')}${labels.map(l => btn('label', l, l)).join('')}</div>
+  <div class="card" style="padding:0 6px"><table><tr><th>#</th><th>할 일</th><th>상태</th><th>파트</th><th>마일스톤</th><th>시작 → 목표</th><th>PR</th><th>화면</th></tr>${rows || '<tr><td colspan="8" class="muted">없음</td></tr>'}</table></div>
+  <div class="muted" style="margin-top:8px">상태의 정답은 GitHub 보드. 여기서는 보기만 하고, 바꾸는 건 보드에서</div>`;
+}
+
+function rEnv() {
+  const opts = ['done', 'doing', 'review', 'todo'];
+  const setup = SETUP.map(([t, d], i) => { const v = envState[i] || d; return `<div class="check"><span class="dot ${v}" style="margin-top:7px"></span><span style="flex:1">${i + 1}. ${esc(t)}</span><select data-env="${i}">${opts.map(o => `<option value="${o}" ${o === v ? 'selected' : ''}>${STATUS_KO[o]}</option>`).join('')}</select></div>`; }).join('');
+  const links = LINKS.map(([n, u]) => `<tr><td>${esc(n)}</td><td><a href="${u}" target="_blank">${esc(u.replace('https://', ''))}</a></td></tr>`).join('');
+  const cmds = COMMANDS.map(([n, c]) => `<tr><td>${esc(n)}</td><td><code>${esc(c)}</code></td></tr>`).join('');
+  return `<div class="grid2">
+    <div class="card"><h2>세팅 10단계</h2>${setup}<div class="muted" style="margin-top:8px">상태는 이 브라우저에만 저장</div></div>
+    <div class="card"><h2>링크</h2><table>${links}</table>
+      <h3>GitHub 연결</h3><div class="row"><input class="tok" id="tok" type="password" placeholder="github_pat_… (읽기 전용)" value="${esc(token)}"><button id="tokSave">저장</button><button id="tokClear">지우기</button></div>
+      <div class="muted" style="margin-top:4px"><a href="https://github.com/settings/personal-access-tokens/new" target="_blank">fine-grained 토큰</a>, 읽기 전용으로 — 대상: 이 레포 1곳 · Repository permissions: <code>Contents</code> · <code>Issues</code> · <code>Pull requests</code> 읽기 · Organization permissions: <code>Projects</code> 읽기. classic <code>repo</code> 토큰은 쓰기까지 열리니 쓰지 않음. 이 브라우저의 localStorage에만 남고 어디에도 보내지 않음(GitHub API 호출에만 씀)</div></div>
+  </div>
+  <div class="card" style="margin-top:14px"><h2>명령</h2><table>${cmds}</table>
+    <h3>폴더</h3><table><tr><td><code>mobile/</code></td><td>앱. <code>src/app</code> 화면(파일 = 주소) · <code>src/features/*/api.ts</code> 데이터 · <code>modules/alarm-core</code> 네이티브</td></tr>
+    <tr><td><code>supabase/</code></td><td>마이그레이션 · Edge Functions (#63 · #72)</td></tr><tr><td><code>tools/deps-graph/</code></td><td>모듈 의존 그래프 (#74)</td></tr>
+    <tr><td><code>docs/</code></td><td>화면 ↔ 데이터 ↔ API 매핑 · 알람 코어 인터페이스 (#64)</td></tr></table></div>`;
+}
+
+function rDec() {
+  return `<div class="card"><h2>정할 것 · 정한 것</h2><table><tr><th></th><th>무엇</th><th>지금</th><th>어디서</th><th>메모</th></tr>` +
+    DECISIONS.map(([q, now, refs], i) => { const d = decState[i] || {}; return `<tr><td><input type="checkbox" data-dec="${i}" ${d.done ? 'checked' : ''} title="정함"></td><td style="${d.done ? 'color:var(--mute)' : ''}">${esc(q)}</td><td>${esc(now)}</td><td>${refs.map(r => `<a href="https://github.com/${SITE.org}/${SITE.repo}/issues/${r.slice(1)}" target="_blank">${r}</a>`).join(' ')}</td><td><textarea class="note" data-decnote="${i}" placeholder="정한 내용">${esc(d.note || '')}</textarea></td></tr>`; }).join('') +
+    `</table><div class="muted" style="margin-top:8px">체크 · 메모는 이 브라우저에만 저장. 팀이 알아야 할 결정은 이슈 댓글이나 docs/에 PR로</div></div>`;
+}
+
+// ───────────────────────────────── GitHub 동기화
+const GQL = `query($org:String!,$repo:String!,$num:Int!){
+  organization(login:$org){ projectV2(number:$num){ items(first:100){ nodes{
+    fieldValues(first:20){ nodes{
+      ... on ProjectV2ItemFieldSingleSelectValue{ field{ ... on ProjectV2FieldCommon{ name } } name }
+      ... on ProjectV2ItemFieldDateValue{ field{ ... on ProjectV2FieldCommon{ name } } date } } }
+    content{ ... on Issue{ number title state milestone{ title } labels(first:10){ nodes{ name } } } } } } } }
+  repository(owner:$org,name:$repo){ pullRequests(first:50,states:[OPEN],orderBy:{field:UPDATED_AT,direction:DESC}){ nodes{
+    number title isDraft headRefName reviewDecision closingIssuesReferences(first:5){ nodes{ number } }
+    commits(last:1){ nodes{ commit{ statusCheckRollup{ state } } } } } } } }`;
+async function sync() {
+  if (!token) { askToken(); return; }
+  const b = document.getElementById('btnSync'); b.disabled = true; b.textContent = '동기화 중…';
+  try {
+    const H = { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' };
+    // 401 · 403이면 응답이 { message } 하나라 g.data에서 TypeError가 남 → 상태 코드로 먼저 걸러 원인을 그대로 보여줌
+    const gh = async (url, init) => { const r = await fetch(url, init); const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(`GitHub ${r.status}: ${j.message || r.statusText}`); return j; };
+    const g = await gh('https://api.github.com/graphql', { method: 'POST', headers: H, body: JSON.stringify({ query: GQL, variables: { org: SITE.org, repo: SITE.repo, num: SITE.project } }) });
+    if (g.errors) throw new Error(g.errors.map(e => e.message).join('; '));
+    const items = g.data.organization.projectV2.items.nodes.map(it => {
+      const fv = {}; for (const v of it.fieldValues.nodes) if (v.field) fv[v.field.name] = v.name ?? v.date;
+      const c = it.content || {};
+      return { n: c.number, t: c.title || '', st: c.state || 'DRAFT', status: fv['Status'], ms: c.milestone && c.milestone.title, start: fv['시작일'], due: fv['목표일'], part: fv['파트'], labels: c.labels ? c.labels.nodes.map(l => l.name) : [] };
+    });
+    const prs = g.data.repository.pullRequests.nodes.map(p => ({ number: p.number, title: p.title, state: 'OPEN', draft: p.isDraft, branch: p.headRefName, review: p.reviewDecision, closes: p.closingIssuesReferences.nodes.map(x => x.number), checks: p.commits.nodes[0]?.commit?.statusCheckRollup?.state || null }));
+    // 파일 목록은 못 읽어도(Contents 권한 빠짐 등) 보드 · PR은 살림. tree가 null이면 화면 탭에 "main에 없음" 대신 "파일 목록 못 읽음"으로 보임
+    const t = await gh(`https://api.github.com/repos/${SITE.org}/${SITE.repo}/git/trees/main?recursive=1`, { headers: H }).catch(() => null);
+    const tree = t && t.tree ? t.tree.filter(x => x.type === 'blob').map(x => x.path) : null;
+    live = { at: Date.now(), items, prs, tree }; LS.set('sync', live);
+  } catch (e) { alert('동기화 실패: ' + e.message + '\n토큰 권한(이 레포 Contents · Issues · Pull requests 읽기, 조직 Projects 읽기)을 확인해 주세요.'); }
+  b.disabled = false; b.textContent = '동기화'; render();
+}
+function askToken() {
+  const v = prompt('GitHub fine-grained 토큰, 읽기 전용 (이 레포 Contents · Issues · Pull requests + 조직 Projects). 이 브라우저에만 저장됩니다.', token || '');
+  if (v === null) return; token = v.trim(); LS.set('ghToken', token); render(); if (token) sync();
+}
+
+// ───────────────────────────────── 이벤트
+document.addEventListener('click', (e) => {
+  const el = e.target.closest('[data-tab],[data-go],[data-sel],[data-f],[data-src],#btnSync,#btnToken,#btnSide,#btnReload,#tokSave,#tokClear');
+  if (!el) return;
+  if (el.dataset.tab) { tab = el.dataset.tab; LS.set('tab', tab); render(); return; }
+  if (el.dataset.go !== undefined) { e.preventDefault(); const [t, s] = el.dataset.go.split(':'); tab = t; if (s) sel = s; LS.set('tab', tab); LS.set('sel', sel); render(); return; }
+  if (el.dataset.sel) { e.preventDefault(); sel = el.dataset.sel; LS.set('sel', sel); render(); return; }
+  if (el.dataset.f) { todoFilter[el.dataset.f] = el.dataset.v; LS.set('todoFilter', todoFilter); render(); return; }
+  if (el.dataset.src) { document.querySelectorAll('.side .bar [data-src]').forEach(b => b.classList.toggle('on', b === el)); document.getElementById('frame').src = el.dataset.src; LS.set('src', el.dataset.src); return; }
+  if (el.id === 'btnSync') sync();
+  if (el.id === 'btnToken') askToken();
+  if (el.id === 'btnSide') { const s = document.getElementById('side'); s.classList.toggle('show'); LS.set('side', s.classList.contains('show')); el.classList.toggle('on', s.classList.contains('show')); }
+  if (el.id === 'btnReload') { const f = document.getElementById('frame'); f.src = f.src; }
+  if (el.id === 'tokSave') { token = document.getElementById('tok').value.trim(); LS.set('ghToken', token); render(); if (token) sync(); }
+  if (el.id === 'tokClear') { token = ''; LS.set('ghToken', ''); live = null; LS.set('sync', null); render(); }
+});
+document.addEventListener('change', (e) => {
+  const el = e.target;
+  if (el.dataset.env) { envState[el.dataset.env] = el.value; LS.set('env', envState); render(); }
+  if (el.dataset.dec) { decState[el.dataset.dec] = { ...(decState[el.dataset.dec] || {}), done: el.checked }; LS.set('dec', decState); render(); }
+});
+document.addEventListener('input', (e) => {
+  const el = e.target; if (el.dataset.decnote) { decState[el.dataset.decnote] = { ...(decState[el.dataset.decnote] || {}), note: el.value }; LS.set('dec', decState); }
+});
+
+// 시작
+if (LS.get('side', false)) { document.getElementById('side').classList.add('show'); document.getElementById('btnSide').classList.add('on'); }
+const src0 = LS.get('src', '/'); document.getElementById('frame').src = src0; document.querySelectorAll('.side .bar [data-src]').forEach(b => b.classList.toggle('on', b.dataset.src === src0));
+render();
+</script>
+</body>
+</html>

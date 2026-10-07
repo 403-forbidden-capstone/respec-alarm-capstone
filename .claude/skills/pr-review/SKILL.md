@@ -148,6 +148,7 @@ Don't run every check on every PR — read the diff from Step 0 and pick:
 | `fetch`/`axios`/http client calls, new/changed endpoints | External API latency | `references/api-latency.md` |
 | A dev/preview script exists and the diff touches rendered UI/routes | Web vitals | `references/web-vitals.md` |
 | A whole sort/search/selection/ordering algorithm is replaced (not just a condition or data source feeding an unchanged one) | Algorithm-swap regression check | `references/angles/algorithm-swap-check.md` |
+| Android native code — `*.kt`/`*.java`, `AndroidManifest.xml`, `android/**`, `modules/**/android/**`, Gradle files, or a config plugin that edits native files | Android native check (the rows above are web/React-centric and mostly won't trigger on this code) | `references/android-native-check.md` |
 
 A pure logic change inside an already-imported function (same imports, same exports, just different internal behavior) essentially never moves bundle size — don't spend a double-build on it. Building twice via a worktree costs real time; reserve it for diffs where the import graph or dependency tree actually changed.
 
@@ -158,6 +159,14 @@ Every check must degrade to a one-line "skipped: <reason>" in the final report r
 ## Step 5 — Optional: learnings
 
 If `<repo>/.claude/pr-review-learnings.md` exists, read it before writing findings — it holds things the user has previously told you to stop flagging in this repo (e.g. "we intentionally don't memoize this component, ignore re-render warnings on `<Chart>`"). Skip anything it covers. If the user dismisses a finding as intentional during this session, offer to append it there for next time — don't do it silently.
+
+## Step 5a — Direction
+
+Steps 1–4 ask whether the diff is correct. This step asks whether its shape will hold once the next issues build on it. Function signatures, IDs, stored formats and event names are cheapest to change while nothing calls them yet. Read `references/direction-check.md` and apply it: gather the linked issue, the open issues and PRs that will build on this code, and the design docs/schema; then report where the current shape collides with them, citing the source for each. Every PR gets this step; a small fix gets one line ("방향성: 해당 없음 — reason").
+
+## Step 5b — Self-check (before writing the report)
+
+Read `references/self-check.md` and run it against your draft findings: files not read in full, languages/platforms no gating row covered, PR-body claims not compared with code, commits pushed after the last review, previous findings without a status, anything noticed but not written down. Fold what it finds into the findings, tagged "(자가 검수에서 추가)". This is the same model checking itself, so it targets mechanical coverage gaps, not a second opinion on judgment calls.
 
 ## Step 6 — Report
 
@@ -170,6 +179,9 @@ Group findings by feature area (the files/directories they cluster in), not as a
 
 ### Summary
 One paragraph: what changed, and the overall verdict (safe to merge / needs changes / blocked).
+
+### Direction
+From Step 5a — 2–8 items (now / where it collides, with source / proposal), or one line when not applicable. Last line: which items are cheapest to settle now.
 
 ### <Feature area 1>
 - [severity] finding — file:line — one-line fix suggestion
@@ -187,11 +199,14 @@ One paragraph: what changed, and the overall verdict (safe to merge / needs chan
 ### Repo process
 One or two lines from `repo-process-check.md` — what's missing (CI, branch protection, lint, PR template), stated as a standing fact about the repo, not a finding about this PR. Omit this section only if the repo genuinely has all of it.
 
+### Self-check
+From Step 5b — what was re-checked, how many findings it added (or none), what this environment can't verify, and any category of the diff the skill has no reference for.
+
 ### Skipped
 - <check>: <reason>
 ```
 
-Findings from Steps 1–2 (the correctness angles and the security pass) and the diff-triggered checks in Step 4 (backend/data-layer, lifecycle/cleanup, accessibility-in-code, test coverage, derived-value integrity, interactive-viz scope, error propagation, async migration) all fold into the feature-area groups by where they actually are in the code — don't give each check its own separate untouched sub-report. The point of this skill is one merged picture organized the way a reviewer thinks about the change, not a stack of reports stapled together by which pass produced them.
+Findings from Steps 1–2 (the correctness angles and the security pass) and the diff-triggered checks in Step 4 (backend/data-layer, lifecycle/cleanup, accessibility-in-code, test coverage, derived-value integrity, interactive-viz scope, error propagation, async migration, Android native) and anything the Step 5b self-check added all fold into the feature-area groups by where they actually are in the code — don't give each check its own separate untouched sub-report. The point of this skill is one merged picture organized the way a reviewer thinks about the change, not a stack of reports stapled together by which pass produced them.
 
 ## Step 7 — When to suggest `/code-review ultra`
 
