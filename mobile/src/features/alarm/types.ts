@@ -107,6 +107,7 @@ export type Estimate = {
   weight: number; // n / (n + k)
   residualP80: number; // 개인 오차 P80 (분)
   sameDayWake: boolean; // 같은 날 앞선 일정에 기상 알람이 있어 외출 준비만
+  latePoint: number; // 최근 4주 늦잠 지각 점수 (강도 계산)
 };
 
 // 울림 화면 (H07) — 실제 울림은 알람 코어(네이티브)
@@ -128,4 +129,5 @@ export type WakeCheck = {
   groupName: string | null; // 기상 완료를 알려 줄 그룹
   dismissedAt: Date; // 기상 알람을 끈 시각
   thetaMinutes: number; // 기상 판정 기준 θ — 해제 뒤 10분 동안 누적 화면 사용
+  confirmed: { at: Date; how: 'self' | 'auto' } | null; // 이미 확정했으면
 };

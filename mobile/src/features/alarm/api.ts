@@ -211,6 +211,7 @@ export async function estimateAppointment(d: AppointmentDraft): Promise<Estimate
     weight,
     residualP80: residual,
     sameDayWake,
+    latePoint: db.lateCount4w >= 2 ? 1 : 0,
   };
 }
 
@@ -242,11 +243,13 @@ export async function createAppointment(estimate: Estimate): Promise<Appointment
 }
 
 // 음성 안내 문장 — 강도(말소리)에 따라 말투가 바뀜. 출발 알람은 같이 가는 그룹원 상황을 알려 줌
-function voiceLine(a: MockAppointment, kind: RingKind, at: Date) {
+// again = 기상 확인이 안 돼 다시 울림
+function voiceLine(a: MockAppointment, kind: RingKind, at: Date, again: boolean) {
   const chain = alarmChain(a);
   const depart = chain.find((x) => x.kind === 'DEPARTURE')?.at ?? a.at;
   const when = spokenTime(a.at);
   if (kind === 'WAKE') {
+    if (again) return `아직 기상 확인이 안 됐어요. ${a.title}에 늦지 않게 지금 일어나 주세요.`;
     const subject = josa(a.title, '이', '가');
     return [
       `좋은 아침이에요. 오늘 ${when}에 ${subject} 있어요. 천천히 일어나 볼까요?`,
@@ -276,7 +279,7 @@ function voiceLine(a: MockAppointment, kind: RingKind, at: Date) {
 }
 
 // 울림 화면 (H07) — 실제 울림은 알람 코어(네이티브). 이 화면은 디자인 · 웹 미리 보기용
-export async function getRing(appointmentId: string, kind: RingKind): Promise<RingInfo | null> {
+export async function getRing(appointmentId: string, kind: RingKind, again = false): Promise<RingInfo | null> {
   const a = find(appointmentId);
   if (!a) return null;
   const alarm = alarmChain(a).find((x) => x.kind === kind);
@@ -288,7 +291,7 @@ export async function getRing(appointmentId: string, kind: RingKind): Promise<Ri
     appointment: toAppointment(a),
     at: alarm.at,
     voiceTone: LEVELS[axisLevel(a, 'voice')].voice,
-    voiceLine: voiceLine(a, kind, alarm.at),
+    voiceLine: voiceLine(a, kind, alarm.at, again),
     levelLine: `알람 강도 ${sound.name} · 배경음 ${sound.sound} · 진동 ${vibration.vibration}`,
     important: a.importance !== 'LOW',
   };
@@ -302,6 +305,7 @@ export async function getWakeCheck(): Promise<WakeCheck> {
     groupName: a.groupId ? (db.groups[a.groupId]?.name ?? null) : null,
     dismissedAt: alarmChain(a)[0].at,
     thetaMinutes: db.wakeThetaMinutes,
+    confirmed: db.me.wakeAt ? { at: db.me.wakeAt, how: db.events.some((e) => e.label === '기상 확인' && e.source === '직접 응답') ? 'self' : 'auto' } : null,
   };
 }
 

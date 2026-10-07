@@ -8,11 +8,12 @@ import { Text } from './Text';
 type Props = {
   screenId?: string; // 목업 화면 번호(H01 등). 개발 중 확인용, 없으면 숨김
   onBack?: () => void; // 있으면 왼쪽에 "← 이전"
+  left?: ReactNode; // 이전 · 화면 번호 대신 왼쪽에 둘 것 (홈의 날짜)
   right?: ReactNode;
 };
 
 // 화면 맨 위 줄 — 왼쪽은 이전 버튼(있으면) 또는 화면 번호, 오른쪽은 버튼
-export function TopBar({ screenId, onBack, right }: Props) {
+export function TopBar({ screenId, onBack, left, right }: Props) {
   return (
     <View style={styles.row}>
       {onBack ? (
@@ -21,6 +22,8 @@ export function TopBar({ screenId, onBack, right }: Props) {
             ← 이전
           </Text>
         </Pressable>
+      ) : left ? (
+        left
       ) : screenId ? (
         <Text variant="screenId">{screenId}</Text>
       ) : (
