@@ -3,8 +3,8 @@ import * as WebBrowser from 'expo-web-browser';
 
 import { supabase } from './supabase';
 
-// 웹에서 로그인 팝업이 끝나면 팝업을 닫고 결과를 원래 창에 넘김
-WebBrowser.maybeCompleteAuthSession();
+// 웹 팝업의 결과를 원래 창에 넘기는 WebBrowser.maybeCompleteAuthSession()은 app/_layout.tsx에서 부름
+// (화면이 열릴 때만 읽히는 모듈에 두면 /auth/callback으로 돌아온 팝업에서 실행되지 않을 수 있음)
 
 export type OAuthProvider = 'kakao' | 'google';
 
