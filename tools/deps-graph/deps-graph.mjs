@@ -62,14 +62,20 @@ const edgeCount = modules.reduce((n, m) => n + graph[m].length, 0);
 console.log(`모듈 ${modules.length}개 · 의존 ${edgeCount}개 · 순환 ${cycles.length}개`);
 for (const cycle of cycles) console.log('  순환:', cycle.join(' → '));
 
+// 경로를 못 푼 import(예: tsconfig paths가 틀어져 `@/` 별칭이 안 풀릴 때)는 그래프에서 조용히 빠지므로 check에서는 실패로 침
+const skipped = result.warnings().skipped;
+if (skipped.length) console.log(`  경로를 못 푼 import ${skipped.length}개:`, skipped.join(', '));
+
 if (checkOnly) {
-  process.exit(cycles.length ? 1 : 0);
+  process.exit(cycles.length || skipped.length ? 1 : 0);
 }
 
 const groupOf = (m) => (m.includes('/') ? m.split('/')[0] : '(root)');
 const label = (m) => m.replace(/\.(tsx?|js)$/, '');
 const id = (m) => JSON.stringify(m);
 const inCycle = new Set(cycles.flat());
+// 순환을 이루는 화살표만 빨갛게: 순환마다 이웃한 쌍(마지막 → 첫 번째 포함)
+const cycleEdges = new Set(cycles.flatMap((c) => c.map((m, k) => `${m}\0${c[(k + 1) % c.length]}`)));
 
 const groups = new Map();
 for (const m of modules) {
@@ -96,7 +102,7 @@ for (const [g, members] of groups) {
 }
 for (const m of modules) {
   for (const dep of graph[m]) {
-    const red = inCycle.has(m) && inCycle.has(dep) ? ' [color="#E24B4A"]' : '';
+    const red = cycleEdges.has(`${m}\0${dep}`) ? ' [color="#E24B4A"]' : '';
     lines.push(`  ${id(m)} -> ${id(dep)}${red};`);
   }
 }

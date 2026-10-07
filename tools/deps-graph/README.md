@@ -13,3 +13,5 @@ npm run graph
 - `npm run check` — 순환 의존이 있으면 실패. CI에 넣을 수 있음
 
 앱 `package.json`과는 별개라 앱 의존성이 늘지 않습니다. Graphviz 설치가 필요 없습니다.
+
+`.js` 파일과 이미지 import는 그래프에 안 나옴(`ts` · `tsx`만). 경로를 못 푼 import가 있으면 `check`가 실패함.
