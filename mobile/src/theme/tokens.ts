@@ -24,6 +24,10 @@ export const colors = {
   stage: '#E6E9E4',
   device: '#1A1B1A',
 
+  // 로그인 버튼 (카카오 디자인 가이드 색)
+  kakao: '#FEE500',
+  kakaoText: 'rgba(0, 0, 0, 0.85)',
+
   // 알람 울림 화면 바탕 (종류별)
   ringWake: '#141414',
   ringPrepare: '#262A28',

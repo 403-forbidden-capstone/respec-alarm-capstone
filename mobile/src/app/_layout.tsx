@@ -2,41 +2,80 @@ import { useFonts } from 'expo-font';
 import { Stack } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
-import { useEffect } from 'react';
+import * as WebBrowser from 'expo-web-browser';
+import { useEffect, type ReactNode } from 'react';
 import { Platform, StyleSheet, useWindowDimensions, View } from 'react-native';
 
+import { AuthProvider, useAuth } from '@/features/auth/AuthProvider';
+import { ProfileRetryScreen } from '@/features/auth/ProfileRetryScreen';
 import { colors, fontFiles } from '@/theme';
 
-// 글꼴을 다 읽을 때까지 시작 화면을 유지함
+// 글꼴 · 로그인 상태를 다 읽을 때까지 시작 화면을 유지함
 SplashScreen.preventAutoHideAsync();
+
+// 웹 로그인 팝업이 /auth/callback으로 돌아오면 팝업 주소(토큰 포함)를 원래 창에 넘기고 팝업이 닫힘
+// 팝업에서 확실히 실행되는 모듈은 이 루트 레이아웃뿐이라 여기서 부름 (화면 파일은 열릴 때만 읽히고, 폰에서는 아무 일도 안 함)
+WebBrowser.maybeCompleteAuthSession();
 
 // 웹 데모를 PC 브라우저로 열면 휴대폰 크기 화면으로 가운데에 보여 줌
 const PHONE = { width: 390, height: 844 };
 
 export default function RootLayout() {
   const [loaded, error] = useFonts(fontFiles);
-  const { width, height } = useWindowDimensions();
-
-  useEffect(() => {
-    if (loaded || error) SplashScreen.hideAsync();
-  }, [loaded, error]);
 
   // 글꼴을 못 읽어도 시스템 글꼴로 계속 진행함
   if (!loaded && !error) return null;
 
-  const stack = (
-    <>
-      <StatusBar style="dark" />
-      <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: colors.bg } }} />
-    </>
+  return (
+    <AuthProvider>
+      <PhoneFrame>
+        <StatusBar style="dark" />
+        <RootStack />
+      </PhoneFrame>
+    </AuthProvider>
   );
+}
 
+// 로그인 전에는 login만, 아이디를 정하기 전에는 onboarding만, 그 뒤에는 탭 · 앱 화면만 열림
+// 로그인은 됐는데 프로필을 못 읽었으면(오프라인 등) 온보딩 대신 다시 시도 화면
+// Supabase가 연결 안 된 목업 모드(enabled=false)는 로그인 없이 바로 탭
+// dev/* · auth/callback은 어느 쪽에서도 열림. 앱 화면을 새로 만들면 첫 번째 Protected 안에 넣음
+function RootStack() {
+  const { session, loading, enabled, needsOnboarding, profileError, refreshProfile } = useAuth();
+
+  useEffect(() => {
+    if (!loading) SplashScreen.hideAsync();
+  }, [loading]);
+
+  if (loading) return null;
+  if (profileError) return <ProfileRetryScreen message={profileError} onRetry={refreshProfile} />;
+  const needsLogin = enabled && !session;
+  const ready = !needsLogin && !needsOnboarding;
+
+  return (
+    <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: colors.bg } }}>
+      <Stack.Protected guard={ready}>
+        <Stack.Screen name="(tabs)" />
+        <Stack.Screen name="settings" />
+      </Stack.Protected>
+      <Stack.Protected guard={needsLogin}>
+        <Stack.Screen name="login" />
+      </Stack.Protected>
+      <Stack.Protected guard={needsOnboarding}>
+        <Stack.Screen name="onboarding" />
+      </Stack.Protected>
+    </Stack>
+  );
+}
+
+function PhoneFrame({ children }: { children: ReactNode }) {
+  const { width, height } = useWindowDimensions();
   const wide = Platform.OS === 'web' && width > PHONE.width + 80;
-  if (!wide) return stack;
+  if (!wide) return <>{children}</>;
 
   return (
     <View style={styles.page}>
-      <View style={[styles.phone, { height: Math.min(PHONE.height, height - 48) }]}>{stack}</View>
+      <View style={[styles.phone, { height: Math.min(PHONE.height, height - 48) }]}>{children}</View>
     </View>
   );
 }
