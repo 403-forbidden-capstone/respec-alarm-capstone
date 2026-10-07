@@ -5,7 +5,12 @@ import type { Enums } from '@/types/database';
 export type AlarmKind = Exclude<Enums<'alarm_type'>, 'ROUTINE'>; // 기상 · 준비 · 출발 · 도착
 export type Importance = Enums<'importance_level'>;
 export type Transport = Enums<'transport_type'>;
-export type Level = 0 | 1 | 2; // 약 · 중 · 강 (DB alarm_intensity SOFT · NORMAL · STRONG)
+export type Level = 0 | 1 | 2; // 약 · 중 · 강 — 화면에서 LEVELS 칸을 고를 때 씀
+export type AlarmIntensity = Enums<'alarm_intensity'>; // DB · 알람 코어 값
+
+const INTENSITY_OF: readonly AlarmIntensity[] = ['SOFT', 'NORMAL', 'STRONG'];
+export const toAlarmIntensity = (level: Level): AlarmIntensity => INTENSITY_OF[level];
+export const toLevel = (intensity: AlarmIntensity) => INTENSITY_OF.indexOf(intensity) as Level;
 export type IntensityAxis = 'sound' | 'voice' | 'vibration'; // 배경음 · 말소리 · 진동
 
 export const KIND_LABEL: Record<AlarmKind, string> = { WAKE: '기상', PREPARE: '준비', DEPARTURE: '출발', ARRIVE: '도착' };
@@ -35,6 +40,7 @@ export const AXES: readonly (readonly [IntensityAxis, string])[] = [
 ];
 
 export type AlarmTime = {
+  id: string; // 알람 id (DB alarms.alarm_id) — 목업은 `${일정 id}:${종류}`
   kind: AlarmKind;
   at: Date;
   enabled: boolean; // 종류별로 끈 알람 (도착은 목표 시각이라 항상 true)
@@ -114,6 +120,7 @@ export type Estimate = {
 export type RingKind = Exclude<AlarmKind, 'ARRIVE'>;
 
 export type RingInfo = {
+  alarmId: string;
   kind: RingKind;
   appointment: Appointment;
   at: Date; // 울리는 시각
@@ -123,8 +130,9 @@ export type RingInfo = {
   important: boolean;
 };
 
-// 기상 확인 (H08)
+// 기상 확인 (H08) — 기상 알람 하나 기준 (alarm_events.alarm_id에 WAKE_CONFIRMED)
 export type WakeCheck = {
+  alarmId: string;
   appointmentTitle: string;
   groupName: string | null; // 기상 완료를 알려 줄 그룹
   dismissedAt: Date; // 기상 알람을 끈 시각

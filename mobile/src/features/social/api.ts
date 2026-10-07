@@ -31,9 +31,13 @@ const none = (): PermissionSet => ({ viewAlarm: false, editAlarm: false, viewWak
 // 내가 이 사람에게 준 최종 권한 — 친구 관계 + 같이 있는 모든 그룹을 항목별로 합침
 function givenTo(personId: string): FinalGrant {
   const rows: GrantRow[] = [];
-  if (db.friends.includes(personId) && db.grants.friend[personId]) rows.push({ source: '친구', ...copy(db.grants.friend[personId]) });
+  if (db.friends.includes(personId) && db.grants.friend[personId]) {
+    rows.push({ source: '친구', sourceType: 'FRIEND', sourceId: personId, ...copy(db.grants.friend[personId]) });
+  }
   for (const g of Object.values(db.groups)) {
-    if (g.members.includes(personId)) rows.push({ source: g.name, ...copy(db.grants.group[g.id] ?? none()) });
+    if (g.members.includes(personId)) {
+      rows.push({ source: g.name, sourceType: 'GROUP', sourceId: g.id, ...copy(db.grants.group[g.id] ?? none()) });
+    }
   }
   return orGrants(rows);
 }
@@ -167,6 +171,7 @@ export async function getShareSettings(id: RelationId): Promise<PermissionSet> {
 }
 
 export async function saveShareSettings(id: RelationId, next: PermissionSet) {
+  if (!relationOf(id)) return;
   const [kind, key] = id.split(':');
   if (kind === 'friend') db.grants.friend[key] = copy(next);
   else db.grants.group[key] = copy(next);
@@ -178,13 +183,13 @@ export async function getReceived(id: RelationId): Promise<{ person: Person; per
   const [kind, key] = id.split(':');
   if (kind === 'friend') {
     return (db.received[key] ?? [])
-      .filter((r) => r.source === '친구')
+      .filter((r) => r.sourceType === 'FRIEND')
       .map((r) => ({ person: person(key), permissions: copy(r) }));
   }
   const g = db.groups[key];
   if (!g) return [];
   return g.members.flatMap((pid) => {
-    const row = (db.received[pid] ?? []).find((r) => r.source === g.name);
+    const row = (db.received[pid] ?? []).find((r) => r.sourceType === 'GROUP' && r.sourceId === g.id);
     return row ? [{ person: person(pid), permissions: copy(row) }] : [];
   });
 }

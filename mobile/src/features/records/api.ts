@@ -11,8 +11,9 @@ import type { DayMark, DayRecord, MonthRecord, Suggestion, WeekRecord } from './
 
 const WEEK = ['월', '화', '수', '목', '금', '토', '일'];
 
-// 월간 (R02) — 2025년 5월, 1일은 목요일이라 월요일 시작 달력에서 앞 빈칸 3개
-export async function getMonth(): Promise<MonthRecord> {
+// 월간 (R02) — 실데이터는 daily_records.record_date로 그달을 읽음
+// 목업은 2025년 5월 한 달만 있음 (1일이 목요일이라 월요일 시작 달력에서 앞 빈칸 3개)
+export async function getMonth(year: number, month: number): Promise<MonthRecord> {
   const todayDone = db.me.wakeAt != null || db.journalWritten;
   const days = Array.from({ length: 31 }, (_, i) => {
     const day = i + 1;
@@ -28,8 +29,8 @@ export async function getMonth(): Promise<MonthRecord> {
   };
 }
 
-// 주간 (R02) — 오늘 기상이 확인되면 오늘도 더함
-export async function getWeek(): Promise<WeekRecord> {
+// 주간 (R02) — anyDay가 든 주 (월요일 시작). 목업은 5월 19일 주만 있음. 오늘 기상이 확인되면 오늘도 더함
+export async function getWeek(anyDay: Date): Promise<WeekRecord> {
   const a1 = db.appointments.find((a) => a.id === 'a1');
   const rows = pastWakes.map((x) => ({ ...x }));
   if (db.me.wakeAt && a1) {
@@ -59,8 +60,8 @@ export async function getWeek(): Promise<WeekRecord> {
   };
 }
 
-// 일간 (R02) — 설정한 알람과 실제로 일어난 일
-export async function getDay(): Promise<DayRecord> {
+// 일간 (R02) — 그날 설정한 알람과 실제로 일어난 일. 목업은 5월 22일만 있음
+export async function getDay(date: Date): Promise<DayRecord> {
   const a1 = db.appointments.find((a) => a.id === 'a1');
   const t = now().getTime();
   const planned = a1
@@ -82,6 +83,8 @@ function buildSuggestion(): Suggestion | null {
   const wake = chain[0].at;
   const prepare = chain.find((x) => x.kind === 'PREPARE')?.at ?? null;
   const applied = s.status === 'APPLIED' || s.status === 'EDITED';
+  // 적용 전: 지금 → 제안, 적용 뒤: 적용 전 시각 → 실제로 적용한 시각
+  const before = applied ? addMinutes(wake, s.appliedMinutes) : wake;
   return {
     id: s.id,
     title: `다음 알람을 ${s.minutes}분 앞당겨 볼까요?`,
@@ -94,8 +97,8 @@ function buildSuggestion(): Suggestion | null {
     ],
     appointment: { id: a.id, title: a.title, at: a.at },
     minutes: s.minutes,
-    currentWake: applied ? addMinutes(wake, s.appliedMinutes) : wake,
-    proposedWake: addMinutes(applied ? addMinutes(wake, s.appliedMinutes) : wake, -s.minutes),
+    currentWake: before,
+    proposedWake: applied ? wake : addMinutes(wake, -s.minutes),
     status: s.status,
     applied: applied ? { wake, prepare } : null,
   };

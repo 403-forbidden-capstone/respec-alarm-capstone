@@ -1,4 +1,4 @@
-import { router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import { Fragment, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
@@ -18,12 +18,32 @@ const METER_MAX = 5; // 분
 // H08 기상 확인 — 기상 알람을 끈 뒤 10분 동안 화면 사용으로 판정, 모자라면 확인 알림
 // 실제 판정(사용 정보 접근)은 #35 · #40. 지금은 목업처럼 "시연용" 버튼으로 두 경우를 보여 줌
 export default function WakeScreen() {
-  const { data } = useLoad(getWakeCheck);
-  if (!data) return (
-    <Screen>
-      <TopBar />
-    </Screen>
-  );
+  const { alarm } = useLocalSearchParams<{ alarm?: string }>();
+  const { data } = useLoad(() => getWakeCheck(alarm));
+  const back = router.canGoBack() ? router.back : undefined;
+
+  if (data === undefined) {
+    return (
+      <Screen>
+        <TopBar onBack={back} />
+      </Screen>
+    );
+  }
+  if (data === null) {
+    return (
+      <Screen>
+        <TopBar onBack={back} screenId="H08" />
+        <Text variant="title" style={styles.title}>
+          기상 확인
+        </Text>
+        <Card>
+          <Text variant="body" tone="sub">
+            기상 알람을 해제하면 여기서 기상을 판정해요.
+          </Text>
+        </Card>
+      </Screen>
+    );
+  }
   return <WakeFlow check={data} />;
 }
 
@@ -38,7 +58,7 @@ function WakeFlow({ check }: { check: WakeCheck }) {
   const back = router.canGoBack() ? router.back : undefined;
 
   async function confirm(how: 'self' | 'auto', usage: number, recent: number) {
-    await confirmWake(how, observeEnd);
+    await confirmWake(check.alarmId, how, observeEnd);
     setState({ phase: 'confirmed', usage, recent, at: observeEnd, how });
     toast(`기상을 확인했어요 · ${group}에 공유했어요`);
   }
@@ -48,7 +68,7 @@ function WakeFlow({ check }: { check: WakeCheck }) {
   // 시연용: 알람만 끄고 다시 자면 조건을 못 채워 확인 알림
   const sleepAgain = () => setState({ phase: 'prompt', usage: 0.4, recent: 0, at: null, how: null });
   // 시연용: 확인 알림에도 응답이 없으면 기상 알람이 다시 울림
-  const noReply = () => router.replace({ pathname: '/ring', params: { appointment: 'a1', kind: 'WAKE', again: '1' } });
+  const noReply = () => router.replace({ pathname: '/ring', params: { alarm: check.alarmId, again: '1' } });
 
   const meters = (
     <>

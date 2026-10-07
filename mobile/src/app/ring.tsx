@@ -25,11 +25,11 @@ const BACKGROUND: Record<RingKind, string> = {
 const SNOOZE_MINUTES = [5, 10, 15] as const;
 
 // H07 알람 울림 — 실제 울림은 알람 코어의 네이티브 화면이 띄움 (#33에서 이 디자인과 맞춤)
-// 이 화면은 디자인 · 웹 미리 보기용: /ring?appointment=a1&kind=WAKE (again=1이면 기상 확인 실패 뒤 다시 울림)
+// 이 화면은 디자인 · 웹 미리 보기용: /ring?alarm=a1:WAKE (again=1이면 기상 확인 실패 뒤 다시 울림)
 export default function RingScreen() {
-  const params = useLocalSearchParams<{ appointment?: string; kind?: string; again?: string }>();
-  const kind: RingKind = params.kind === 'PREPARE' || params.kind === 'DEPARTURE' ? params.kind : 'WAKE';
-  const { data } = useLoad(() => getRing(params.appointment ?? 'a1', kind, params.again === '1'));
+  const params = useLocalSearchParams<{ alarm?: string; again?: string }>();
+  const { data } = useLoad(() => getRing(params.alarm ?? 'a1:WAKE', params.again === '1'));
+  const kind: RingKind = data?.kind ?? 'WAKE';
   const [minutes, setMinutes] = useState<number>(5);
   const close = () => (router.canGoBack() ? router.back() : router.replace('/'));
 
@@ -42,7 +42,7 @@ export default function RingScreen() {
   // 기상 알람을 끄면 기상 확인(H08)으로, 준비 · 출발은 안내만
   function dismiss() {
     if (kind === 'WAKE') {
-      router.replace('/wake');
+      router.replace({ pathname: '/wake', params: { alarm: data?.alarmId ?? 'a1:WAKE' } });
       return;
     }
     if (kind === 'PREPARE') {

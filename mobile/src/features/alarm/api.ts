@@ -251,10 +251,11 @@ function voiceLine(a: MockAppointment, kind: RingKind, at: Date, again: boolean)
   if (kind === 'WAKE') {
     if (again) return `아직 기상 확인이 안 됐어요. ${a.title}에 늦지 않게 지금 일어나 주세요.`;
     const subject = josa(a.title, '이', '가');
+    const late = db.lateCount4w ? ` 최근 4주에 ${db.lateCount4w}번 늦었어요.` : '';
     return [
       `좋은 아침이에요. 오늘 ${when}에 ${subject} 있어요. 천천히 일어나 볼까요?`,
       `좋은 아침이에요. 오늘 ${when}에 ${subject} 있어요. 지금 일어나면 여유롭게 준비할 수 있어요.`,
-      `지금 일어나야 해요. ${when} ${a.title}, 최근 4주에 두 번 늦었어요. 바로 일어나세요.`,
+      `지금 일어나야 해요. ${when} ${a.title}.${late} 바로 일어나세요.`,
     ][axisLevel(a, 'voice')];
   }
   if (kind === 'PREPARE') {
@@ -278,15 +279,23 @@ function voiceLine(a: MockAppointment, kind: RingKind, at: Date, again: boolean)
   return `출발 시간입니다. 지금 나가면 ${when} ${a.title}에 여유 ${a.bufferMinutes}분을 두고 도착해요.`;
 }
 
+// 알람 id(`${일정 id}:${종류}`)로 일정과 알람을 찾음 — 실데이터는 alarms.alarm_id
+function findAlarm(alarmId: string) {
+  const a = find(alarmId.split(':')[0]);
+  const alarm = a ? alarmChain(a).find((x) => x.id === alarmId) : undefined;
+  return a && alarm ? { a, alarm } : null;
+}
+
 // 울림 화면 (H07) — 실제 울림은 알람 코어(네이티브). 이 화면은 디자인 · 웹 미리 보기용
-export async function getRing(appointmentId: string, kind: RingKind, again = false): Promise<RingInfo | null> {
-  const a = find(appointmentId);
-  if (!a) return null;
-  const alarm = alarmChain(a).find((x) => x.kind === kind);
-  if (!alarm) return null;
+export async function getRing(alarmId: string, again = false): Promise<RingInfo | null> {
+  const found = findAlarm(alarmId);
+  if (!found || found.alarm.kind === 'ARRIVE') return null;
+  const { a, alarm } = found;
+  const kind = alarm.kind as RingKind;
   const sound = LEVELS[axisLevel(a, 'sound')];
   const vibration = LEVELS[axisLevel(a, 'vibration')];
   return {
+    alarmId: alarm.id,
     kind,
     appointment: toAppointment(a),
     at: alarm.at,
@@ -298,19 +307,30 @@ export async function getRing(appointmentId: string, kind: RingKind, again = fal
 }
 
 // 기상 확인 (H08) — 기상 알람을 끈 뒤 화면 사용으로 판정. 실데이터는 #35 · #40
-export async function getWakeCheck(): Promise<WakeCheck> {
-  const a = find('a1') ?? db.appointments[0];
+// alarmId가 없으면 오늘 첫 기상 알람
+export async function getWakeCheck(alarmId?: string): Promise<WakeCheck | null> {
+  const found = alarmId
+    ? findAlarm(alarmId)
+    : db.appointments
+        .map((a) => ({ a, alarm: alarmChain(a)[0] }))
+        .filter(({ alarm }) => alarm.kind === 'WAKE')
+        .sort((x, y) => x.alarm.at.getTime() - y.alarm.at.getTime())[0];
+  if (!found || found.alarm.kind !== 'WAKE') return null;
+  const { a, alarm } = found;
+  const confirmed = db.wakeConfirmations[alarm.id];
   return {
+    alarmId: alarm.id,
     appointmentTitle: a.title,
     groupName: a.groupId ? (db.groups[a.groupId]?.name ?? null) : null,
-    dismissedAt: alarmChain(a)[0].at,
+    dismissedAt: alarm.at,
     thetaMinutes: db.wakeThetaMinutes,
-    confirmed: db.me.wakeAt ? { at: db.me.wakeAt, how: db.events.some((e) => e.label === '기상 확인' && e.source === '직접 응답') ? 'self' : 'auto' } : null,
+    confirmed: confirmed ? { ...confirmed } : null,
   };
 }
 
-// how: self = 확인 알림에 직접 응답, auto = 화면 사용으로 자동 판정
-export async function confirmWake(how: 'self' | 'auto', at: Date) {
+// how: self = 확인 알림에 직접 응답, auto = 화면 사용으로 자동 판정 — 실데이터는 alarm_events WAKE_CONFIRMED
+export async function confirmWake(alarmId: string, how: 'self' | 'auto', at: Date) {
+  db.wakeConfirmations[alarmId] = { at, how };
   db.me.wakeAt = at;
   db.events.push({ at, label: '기상 확인', source: how === 'self' ? '직접 응답' : '자동 판정' });
 }

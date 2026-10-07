@@ -11,17 +11,22 @@ import { db, kst, timelines, TODAY, type MockAppointment } from './data';
 // 그날 첫 일정이 아니면(기상 알람 없음) 준비 알람만. 준비 알람은 기상 뒤 준비 전 활동만큼 뒤
 export function alarmChain(a: MockAppointment): AlarmTime[] {
   const depart = addMinutes(a.at, -(a.bufferMinutes + a.travelMinutes));
-  const enabled = (kind: string) => !db.disabledKinds.has(`${a.id}:${kind}`);
+  const alarm = (kind: AlarmTime['kind'], at: Date): AlarmTime => ({
+    id: `${a.id}:${kind}`,
+    kind,
+    at,
+    enabled: kind === 'ARRIVE' || !db.disabledKinds.has(`${a.id}:${kind}`),
+  });
   const list: AlarmTime[] = [];
   if (a.withWake) {
     const wake = addMinutes(depart, -a.predictedPrepMinutes);
-    list.push({ kind: 'WAKE', at: wake, enabled: enabled('WAKE') });
-    if (a.beforePrepMinutes > 0) list.push({ kind: 'PREPARE', at: addMinutes(wake, a.beforePrepMinutes), enabled: enabled('PREPARE') });
+    list.push(alarm('WAKE', wake));
+    if (a.beforePrepMinutes > 0) list.push(alarm('PREPARE', addMinutes(wake, a.beforePrepMinutes)));
   } else {
-    list.push({ kind: 'PREPARE', at: addMinutes(depart, -a.predictedPrepMinutes), enabled: enabled('PREPARE') });
+    list.push(alarm('PREPARE', addMinutes(depart, -a.predictedPrepMinutes)));
   }
-  list.push({ kind: 'DEPARTURE', at: depart, enabled: enabled('DEPARTURE') });
-  list.push({ kind: 'ARRIVE', at: addMinutes(a.at, -a.bufferMinutes), enabled: true });
+  list.push(alarm('DEPARTURE', depart));
+  list.push(alarm('ARRIVE', addMinutes(a.at, -a.bufferMinutes)));
   return list;
 }
 
