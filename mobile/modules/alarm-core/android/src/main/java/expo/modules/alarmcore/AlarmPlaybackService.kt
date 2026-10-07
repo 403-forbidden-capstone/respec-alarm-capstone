@@ -66,6 +66,14 @@ class AlarmPlaybackService : Service() {
   private val handler = Handler(Looper.getMainLooper())
   private val autoStop = Runnable { stopSelf() }
 
+  private val audioAttributes: AudioAttributes = AudioAttributes.Builder()
+    .setUsage(AudioAttributes.USAGE_ALARM)
+    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+    .build()
+
+  // 아직 안 틀어 본 알람음 (우리 알람음 → 폰 기본 알람음 순). 재생 도중 오류가 나면 다음 것으로 넘어감
+  private var remainingSounds: MutableList<Uri> = mutableListOf()
+
   private var mediaPlayer: MediaPlayer? = null
   private var audioManager: AudioManager? = null
   private var audioFocusRequest: AudioFocusRequest? = null
@@ -184,21 +192,13 @@ class AlarmPlaybackService : Service() {
   // 실패하면 바꾼 볼륨 · 포커스 · 웨이크락을 바로 되돌리고 false
   private fun startPlayback(): Boolean {
     audioManager = getSystemService(AudioManager::class.java)
-    val audioAttributes = AudioAttributes.Builder()
-      .setUsage(AudioAttributes.USAGE_ALARM)
-      .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-      .build()
+    remainingSounds = alarmSounds().toMutableList()
 
     val started = runCatching {
       requestAudioFocus(audioAttributes)
       forceAlarmVolume()
-
       // 우리 알람음이 안 되면 폰 기본 알람음으로 (무음으로 끝나지 않게)
-      val player = alarmSounds().firstNotNullOfOrNull { preparePlayer(it, audioAttributes) }
-        ?: throw IllegalStateException("알람음을 재생할 수 없습니다.")
-      mediaPlayer = player
-      player.setVolume(1f, 1f)
-      player.start()
+      if (!playNextSound()) throw IllegalStateException("알람음을 재생할 수 없습니다.")
     }.isSuccess
 
     if (!started) releasePlayback()
@@ -211,21 +211,46 @@ class AlarmPlaybackService : Service() {
     RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM),
   )
 
-  // 재생 준비까지 끝낸 플레이어. 실패하면 null
-  private fun preparePlayer(uri: Uri, attributes: AudioAttributes): MediaPlayer? {
-    val player = MediaPlayer()
-    return runCatching {
-      player.setAudioAttributes(attributes)
-      player.setDataSource(this, uri)
-      player.isLooping = true
-      // 재생 중에 오류가 나도 멈추고 볼륨을 되돌림
-      player.setOnErrorListener { _, _, _ ->
-        stopSelf()
+  // 남은 알람음 중 처음으로 재생되는 것을 틂. 하나도 안 되면 false
+  private fun playNextSound(): Boolean {
+    while (remainingSounds.isNotEmpty()) {
+      releasePlayer()
+      val player = preparePlayer(remainingSounds.removeAt(0)) ?: continue
+      mediaPlayer = player
+      // 재생 도중 오류(오디오 서버 재시작 등)가 나면 다음 알람음으로, 더 없으면 멈추고 볼륨을 되돌림
+      // 준비가 끝난 뒤에 붙여서 준비 실패 이벤트가 여기로 오지 않게 함. 지금 플레이어의 오류일 때만 반응
+      player.setOnErrorListener { errored, _, _ ->
+        if (errored === mediaPlayer && !playNextSound()) stopSelf()
         true
       }
+      val playing = runCatching {
+        player.setVolume(1f, 1f)
+        player.start()
+      }.isSuccess
+      if (playing) return true
+    }
+    releasePlayer()
+    return false
+  }
+
+  // 재생 준비까지 끝낸 플레이어. 실패하면 null
+  private fun preparePlayer(uri: Uri): MediaPlayer? {
+    val player = MediaPlayer()
+    return runCatching {
+      player.setAudioAttributes(audioAttributes)
+      player.setDataSource(this, uri)
+      player.isLooping = true
       player.prepare()
       player
     }.onFailure { player.release() }.getOrNull()
+  }
+
+  private fun releasePlayer() {
+    mediaPlayer?.let { player ->
+      runCatching { if (player.isPlaying) player.stop() }
+      runCatching { player.release() }
+    }
+    mediaPlayer = null
   }
 
   private fun requestAudioFocus(attributes: AudioAttributes) {
@@ -265,12 +290,8 @@ class AlarmPlaybackService : Service() {
   // 해제 · 미루기 · 자동 정지 · 실패 모두 여기서 원래대로 되돌림 (여러 번 불러도 됨)
   private fun releasePlayback() {
     handler.removeCallbacks(autoStop)
-
-    mediaPlayer?.runCatching {
-      if (isPlaying) stop()
-      release()
-    }
-    mediaPlayer = null
+    remainingSounds.clear()
+    releasePlayer()
 
     audioManager?.let { manager ->
       audioFocusRequest?.let { request -> runCatching { manager.abandonAudioFocusRequest(request) } }
