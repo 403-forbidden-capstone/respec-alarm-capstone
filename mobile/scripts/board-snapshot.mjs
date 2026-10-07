@@ -12,13 +12,14 @@ const REPO = 'respec-alarm-capstone';
 const PROJECT = 1;
 const here = dirname(fileURLToPath(import.meta.url));
 const outDir = resolve(here, '..', process.env.BOARD_SNAPSHOT_DIR || 'dist');
-const token = process.env.BOARD_GITHUB_TOKEN || process.env.GITHUB_TOKEN;
+const token = process.env.BOARD_GITHUB_TOKEN; // Actions의 GITHUB_TOKEN은 조직 Projects 권한이 없어 대신 쓰지 않음
 
 if (!token) {
   console.log('board-snapshot: BOARD_GITHUB_TOKEN 없음 → 스냅샷 건너뜀 (HTML 안 스냅샷 사용)');
   process.exit(0);
 }
 
+// 아래 질의 · 매핑은 mobile/public/board.html의 GQL · sync()와 같은 모양이어야 함 — 한쪽을 고치면 둘 다
 const GQL = `query($org:String!,$repo:String!,$num:Int!){
   organization(login:$org){ projectV2(number:$num){ items(first:100){ nodes{
     fieldValues(first:20){ nodes{
@@ -52,14 +53,18 @@ try {
     checks: p.commits.nodes[0]?.commit?.statusCheckRollup?.state || null,
   }));
 
-  const t = await fetch(`https://api.github.com/repos/${ORG}/${REPO}/git/trees/main?recursive=1`, { headers }).then((r) => r.json());
-  const tree = (t.tree || []).filter((x) => x.type === 'blob').map((x) => x.path)
-    .filter((p) => p.startsWith('mobile/src/') || p.startsWith('supabase/') || p.startsWith('docs/'));
+  if (items.length >= 100) console.log('board-snapshot: 경고 — 카드가 100개를 넘어 뒤쪽이 잘림 (pageInfo 처리 필요)');
+  // 파일 목록은 못 읽으면 null → 보드에서 "없음"이 아니라 "모름"으로 보임 (브라우저 동기화와 같은 규칙)
+  const tr = await fetch(`https://api.github.com/repos/${ORG}/${REPO}/git/trees/main?recursive=1`, { headers });
+  const t = tr.ok ? await tr.json() : null;
+  const tree = t && t.tree ? t.tree.filter((x) => x.type === 'blob').map((x) => x.path)
+    .filter((p) => p.startsWith('mobile/src/') || p.startsWith('supabase/') || p.startsWith('docs/')) : null;
+  if (!tree) console.log(`board-snapshot: 파일 목록 못 읽음 (${tr.status}) → tree 없이 저장`);
 
   if (!existsSync(outDir)) mkdirSync(outDir, { recursive: true });
   const out = resolve(outDir, 'board-snapshot.json');
   writeFileSync(out, JSON.stringify({ at: new Date().toISOString(), items, prs, tree }));
-  console.log(`board-snapshot: 카드 ${items.length} · PR ${prs.length} · 파일 ${tree.length} → ${out}`);
+  console.log(`board-snapshot: 카드 ${items.length} · PR ${prs.length} · 파일 ${tree ? tree.length : '없음'} → ${out}`);
 } catch (e) {
   console.log(`board-snapshot: 실패 (${e.message}) → 스냅샷 건너뜀`);
 }

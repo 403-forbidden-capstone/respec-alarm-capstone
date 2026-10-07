@@ -205,7 +205,7 @@ const SCREENS = [
       { k: 'DB', t: '준비물', r: ['todos'] },
       { k: '폰', t: '예약', r: ['alarm-core'] },
     ] },
-  { code: 'H07', name: '알람 울림', tab: 'home', route: null, native: true, issues: [33], feat: ['①'],
+  { code: 'H07', name: '알람 울림', tab: 'home', route: 'ring', issues: [33], feat: ['①'],
     data: [
       { k: '폰', t: '소리 · 강도 · 미루기 · 해제', r: ['alarm-core'] },
       { k: 'DB', t: '기록(TRIGGERED · SNOOZED · DISMISSED), 오프라인이면 보관 후 전송', r: ['alarm_events'] },
@@ -382,9 +382,11 @@ const STATUS = { '✅ 완료': 'done', '🏃 진행 중': 'doing', '👀 리뷰'
 const STATUS_KO = { done: '완료', doing: '진행 중', review: '리뷰', week: '이번 주', todo: '백로그', wait: '대기', ai: 'AI 대기' };
 const ORDER = { doing: 0, review: 1, week: 2, todo: 3, ai: 4, wait: 5, done: 6 };
 
-function items() { return (live && live.items) || (SNAPSHOT && SNAPSHOT.items) || []; }
-function prs() { return (live && live.prs) || (SNAPSHOT && SNAPSHOT.prs) || []; }
-function tree() { return (live && live.tree) || (SNAPSHOT && SNAPSHOT.tree) || null; }
+// 동기화 결과(live)와 빌드 스냅샷 중 더 새로운 쪽을 씀 — 며칠 전 동기화가 새 빌드를 가리지 않게
+const src = () => (live && (!SNAPSHOT || live.at >= SNAPSHOT.at)) ? live : SNAPSHOT;
+function items() { const s = src(); return (s && s.items) || []; }
+function prs() { const s = src(); return (s && s.prs) || []; }
+function tree() { const s = src(); return (s && s.tree) || null; }
 function issue(n) { return items().find(i => i.n === n); }
 // PR 본문에 Closes #가 없으면 브랜치 이름의 번호(feat/26-FE-…)로 잇는다
 function closesOf(p) { if (p.closes && p.closes.length) return p.closes; const m = /^[a-z]+\/(\d+)-/.exec(p.branch || ''); return m ? [Number(m[1])] : []; }
@@ -409,8 +411,10 @@ const screenStatus = (s) => groupStatus(s.issues, s.ai);
 function fileOf(s) {
   if (!s.route) return null;
   const want = `mobile/src/app/${s.route}.tsx`;
+  const alt = `mobile/src/app/${s.route}/index.tsx`; // friends/[id]/index.tsx 꼴도 같은 화면
   const t = tree(); if (!t) return { path: want, known: false };
-  return { path: want, known: true, exists: t.includes(want) };
+  const exists = t.includes(want) || t.includes(alt);
+  return { path: t.includes(alt) ? alt : want, known: true, exists };
 }
 const esc = (x) => String(x).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const chip = (st, text) => `<span class="chip ${st}">${esc(text ?? STATUS_KO[st] ?? st)}</span>`;
@@ -576,7 +580,7 @@ function rTodo() {
     const st = p.st[i.n]; const late = g === '지연';
     const pr = prsOf(i.n).map(x => ` <a href="${ghPr(x.number)}" target="_blank" rel="noopener" title="${esc(x.title)}">PR #${x.number}</a>`).join('');
     const scr = SCREENS.filter(s => s.issues.includes(i.n)).map(s => `<a class="in" href="#" data-go="screens:${s.code}">${s.code}</a>`).join(' ');
-    const dueText = i.due ? (late ? `${fmtDate(i.due)} <span class="late">D+${Math.round((today - localDate(i.due)) / 864e5)}</span>` : fmtDate(i.due)) : '';
+    const dueText = i.due ? (late ? `${fmtDate(i.due)} <span class="late">D+${Math.round((localDate(todayS) - localDate(i.due)) / 864e5)}</span>` : fmtDate(i.due)) : '';
     rows.push(`<tr class="${late ? 'islate' : ''} ${st === 'done' ? 'dim' : ''}"><td><a href="${ghIssue(i.n)}" target="_blank" rel="noopener">#${i.n}</a> ${esc(i.t)} <span class="muted" title="${esc(i.ms || '')}">${esc(msShort(i.ms))}</span></td><td>${chip(st)}${pr}</td><td>${esc(i.part || '')}</td><td class="due" title="${i.start ? '시작 ' + fmtDate(i.start) : ''}">${dueText}</td><td>${scr}</td></tr>`);
   }
   const btn = (k, v, label) => `<button class="${f[k] === v ? 'on' : ''}" data-f="${k}" data-v="${esc(v)}">${esc(label)}</button>`;
@@ -622,6 +626,7 @@ function rDec() {
 }
 
 // ───────────────────────────────── GitHub 동기화
+// 아래 질의 · 매핑은 mobile/scripts/board-snapshot.mjs와 같은 모양이어야 함 — 한쪽을 고치면 둘 다
 const GQL = `query($org:String!,$repo:String!,$num:Int!){
   organization(login:$org){ projectV2(number:$num){ items(first:100){ nodes{
     fieldValues(first:20){ nodes{
