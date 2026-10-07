@@ -39,11 +39,11 @@
 ## 화면별 데이터
 
 ### H01 홈
-- 다음 알람: `alarms`(내 것, 켜짐, 지금 이후 가장 이른 것) → `appointment_participants` → `appointments`(제목 · 장소 · 시각) — DB
+- 다음 알람: `alarms`(내 것, 켜짐, 지금 이후 가장 이른 것) → `appointment_participants` → `appointments`(제목 · 장소 · 시각) — DB. 루틴 알람이면 `participant_id`가 NULL이라 `routines.title`을 씀
 - 오늘 일정(저녁엔 내일): `appointment_participants`(나) + `appointments.appointment_at` 날짜 — DB
 - 오늘 루틴 · 진행: `routines`(켜짐, 오늘 요일) + 오늘 `alarm_events` ACKNOWLEDGED(단계 알람) — DB
 - 내일 준비물(저녁): `todos`(ITEM, 내일) 읽기 · 체크(`is_done` · `done_at`) — DB
-- 제안 카드: `alarm_suggestions`(PENDING, `suppress_until` 지남) — DB
+- 제안 카드: `alarm_suggestions`(PENDING) — DB. `suppress_until`은 "이 시각 전엔 같은 종류 제안을 만들지 않음"이라 `suggestion-generate`에서만 봄
 - 그룹 기상 요약: `get_group_wake_status(group_id)` — RPC
 
 ### H02 알람 목록
@@ -54,7 +54,7 @@
 - 연결 일정 · 이동 조건 · 준비 시간: `appointments` + `appointment_participants`(출발지 · 이동 수단 · 예상 이동 · 출처 · 준비 · 여유) — DB
 - 예측 준비(P80) 근거: `v_prepare_time_stats` — DB
 - 여유 시간을 바꾸면 다시 계산: `alarm-suggest` — Edge → 저장 `alarm-commit` — Edge → 다시 예약 — 폰
-- 강도 직접 고르기: `alarms.intensity` · `voice_tone` · `sound_key` — DB
+- 강도 직접 고르기: `alarms.intensity` · `voice_tone` · `sound_key` — DB → 다시 예약 — 폰
 
 ### H05 새 일정
 - 장소 검색: `place-search`(카카오 키워드) — Edge
@@ -64,10 +64,11 @@
 ### H07 알람 울림
 - 소리 · 강도 · 미루기 · 해제 — 폰
 - 기록: `alarm_events` TRIGGERED · SNOOZED(`snooze_minutes`) · DISMISSED — DB (오프라인이면 폰에 보관 후 다시 보냄)
+- 무음 알림 원탭("준비 시작" · "출발했어요" · "도착했어요"): `alarm_events` ACKNOWLEDGED(PREPARE · DEPARTURE) · ARRIVAL_CONFIRMED(ARRIVE) + `appointment_participants.departed_at` · `arrived_at` — DB. 도착 때 `is_late` · `late_minutes`(`arrived_at` − `appointment_at`)는 앱이 계산해 같이 저장. 지오펜스 자동 수집(#40) · 지각 판정(#41)도 같은 자리에 씀
 
 ### H08 기상 확인
 - 판정(폰 사용 · 버튼) → `alarm_events` WAKE_CONFIRMED + `daily_records.wake_confirmed_at` — DB
-- 확인 알림 원탭 → ACKNOWLEDGED — DB, 끝까지 안 깨면 MISSED — 배치
+- 확인 알림 원탭 → ACKNOWLEDGED — DB, 끝까지 안 깨면 MISSED 기록 + 미확인 푸시 — `wake-check` 배치(아래 표)
 
 ### F01 · G01 친구와 그룹
 - 친구 목록: `friends`(ACCEPTED) + 이름 · 사진 `get_public_profiles` — DB · RPC
@@ -89,15 +90,15 @@
 - 그룹 · 멤버: `groups` + `group_members` — DB, 기상 공유 동의 `wake_share_opt_in` — DB
 - 연결 일정: `appointments`(`group_id`) — DB
 - 멤버 기상 상태: `get_group_wake_status` — RPC
-- 초대: `groups.invite_code` 공유
+- 초대: `groups.invite_code` 공유, 다시 만들기 `regenerate_invite_code` — RPC
 
 ### G03 그룹원 기상 상태
 - 오늘 기상 흐름: `get_group_wake_status` — RPC (기상 관련 값만, 준비 · 출발 · 도착은 본인만)
 - 깨우기 알림: `notify` — Edge → `push_tokens`
 
 ### G04 공유받은 알람
-- 친구 알람: `alarms`(주인 = 친구) — DB, 조회 권한은 RLS가 확인
-- 설정 권한이면 켜기 · 끄기 · ±5분: `alarms` — DB → 주인에게 알림 `notify` — Edge → 주인 폰이 다시 예약
+- 친구 알람: `alarms`(주인 = 친구) — DB, 조회 권한은 RLS가 확인. 약속 제목 · 장소까지 보여 주려면 RPC 하나 더 필요(`appointments` RLS는 본인 · 그룹원만) — #46에서
+- 설정 권한이면 켜기 · 끄기 · ±5분: `alarms` — DB → 주인에게 알림 `notify` — Edge → 주인 폰이 다시 예약. RLS는 설정 권한이면 강도 · 소리까지 허용하므로 ±5분 제한은 화면에서 지킴(#46에서 확정)
 
 ### A02 AI 대화 (AI 대기)
 - 대화 기록: `conversation_sessions`(`transcript` · `extracted_data` · `apply_status`) — Edge
@@ -134,8 +135,9 @@
 | `place-search` | 장소 검색 | 카카오 로컬 | H05 · 온보딩 |
 | `alarm-suggest` | 이동시간 · 기상 · 준비 · 출발 · 도착 시각 · 강도 계산 (저장 안 함) | 카카오 대중교통 | H05 · H03 |
 | `alarm-commit` | 약속 · 참여 조건 · 알람을 한 번에 저장 | — | H05 · H03 · S01 |
-| `notify` | 다른 사람 폰에 푸시 | Expo Push | G03 · G04 · 미확인 알림 |
-| `suggestion-generate` | 매일 제안 만들기 (배치) | — | S01 |
+| `notify` | 다른 사람 폰에 푸시. 보내기 전에 권한 확인: G03은 같은 그룹 + `wake_share_opt_in`, G04는 `can_edit_alarm`일 때만 | Expo Push | G03 · G04 · 미확인 알림 |
+| `wake-check` | 5분마다 기상 미확인 알람을 MISSED로 기록하고 미확인 푸시(`notify`) — pg_cron 배치 | — | H08 · G03 |
+| `suggestion-generate` | 매일 03:00 제안 만들기, 반복 알람 다음 회차 메우기 (배치) | — | S01 |
 | `voice-*` · `journal-*` | AI 대화 · 일기 | Gemini | A02 · A03 (AI 대기) |
 
 나머지(목록 · 체크 · 권한 · 기록 화면)는 Edge 없이 DB · RPC로 함.
