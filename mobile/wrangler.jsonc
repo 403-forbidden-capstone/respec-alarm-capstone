@@ -1,0 +1,18 @@
+// 웹 미리보기 — Cloudflare Workers 정적 사이트 설정
+// Workers Builds 설정은 레포 맨 위에서 돔 (Root directory 비움 — main용 · PR용 규칙이 경로를 따로 저장해서 어긋났었음)
+//   Build command    cd mobile && npm ci && npm run build:web
+//   Deploy command   npx wrangler deploy -c mobile/wrangler.jsonc    (main)
+//   PR 브랜치는 레포 맨 위 wrangler.jsonc를 씀 (그쪽 주석 참고). 두 파일의 name · assets 설정은 같게 유지
+// name은 Cloudflare 대시보드의 Worker 이름과 같아야 함 (다르면 빌드 실패)
+{
+  "name": "respec-alarm-capstone",
+  "compatibility_date": "2026-10-06",
+  "assets": {
+    // npm run build:web(expo export)이 만든 폴더. public/ 안의 mockup.html · _headers도 여기로 복사됨
+    "directory": "./dist",
+    // 없는 주소는 index.html로 → 앱 안 화면 이동(Expo Router)이 새로고침에도 살아 있음
+    "not_found_handling": "single-page-application"
+  },
+  // PR 미리보기(wrangler preview)에 필요한 칸. 미리보기만 다르게 쓸 값이 없어서 비워 둠
+  "previews": {}
+}

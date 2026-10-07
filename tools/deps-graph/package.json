@@ -1,0 +1,15 @@
+{
+  "name": "deps-graph",
+  "private": true,
+  "type": "module",
+  "description": "mobile/src 모듈 의존 그래프(SVG) · 순환 의존 검사",
+  "scripts": {
+    "graph": "node deps-graph.mjs",
+    "check": "node deps-graph.mjs --check"
+  },
+  "devDependencies": {
+    "@viz-js/viz": "^3.31.0",
+    "madge": "^8.0.0",
+    "typescript": "^5.9.3"
+  }
+}

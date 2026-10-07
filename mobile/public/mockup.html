@@ -1,0 +1,1220 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Re:Spec Alarm 클릭 목업</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@300;400;500;600;700&display=swap">
+<style>
+:root{
+  box-sizing:border-box;
+  padding-top:env(safe-area-inset-top,0px);
+  padding-bottom:env(safe-area-inset-bottom,0px);
+  --stage:#e6e9e4; --panel:#f8f9f6; --pline:#d3d9d1; --pink:#1c2a24; --pmuted:#5f6b64; --deck:#1f4a3d; --deck-soft:#dce8e1;
+  --a-bg:#f6f6f4; --a-card:#ffffff; --a-line:#e6e6e2; --a-ink:#151515; --a-sub:#6b6b67; --a-faint:#a5a5a0; --a-chip:#efefec;
+  --ok:#55b477; --mid:#7b99e8; --zz:#d3a630; --warn:#c8553d;
+  --font:Pretendard,"IBM Plex Sans KR","Apple SD Gothic Neo","Malgun Gothic","Noto Sans KR",system-ui,sans-serif;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){--stage:#111513; --panel:#1a201d; --pline:#2c3631; --pink:#e3ebe6; --pmuted:#9aa69f; --deck:#2c6a56; --deck-soft:#22332c;}
+}
+:root[data-theme="dark"]{--stage:#111513; --panel:#1a201d; --pline:#2c3631; --pink:#e3ebe6; --pmuted:#9aa69f; --deck:#2c6a56; --deck-soft:#22332c;}
+*,*::before,*::after{box-sizing:border-box}
+html{height:100%; scroll-padding-top:env(safe-area-inset-top,0px)}
+body{height:100%; margin:0; background:var(--stage); color:var(--pink); font-family:var(--font); -webkit-font-smoothing:antialiased; word-break:keep-all}
+button{font:inherit; color:inherit}
+:focus-visible{outline:2px solid var(--deck); outline-offset:2px}
+.screen :focus-visible{outline-color:var(--a-ink)}
+
+/* stage */
+.stage{min-height:100%; display:flex; align-items:center; justify-content:center; gap:36px; padding:20px 24px}
+.device-wrap{position:relative; flex:none; width:414px; height:868px}
+.device{position:absolute; top:0; left:0; width:414px; height:868px; transform-origin:top left; border-radius:58px; background:#1a1b1a; padding:12px; box-shadow:0 40px 80px -40px rgba(15,30,24,.55), inset 0 0 0 1px #2c2d2c}
+.cam{position:absolute; top:25px; left:50%; width:11px; height:11px; margin-left:-5.5px; border-radius:50%; background:#070707; z-index:40; box-shadow:0 0 0 2px #232323}
+.screen{position:relative; width:390px; height:844px; border-radius:46px; overflow:hidden; background:var(--a-bg); color:var(--a-ink); display:flex; flex-direction:column; font-size:14px; line-height:1.45}
+.sbar{height:42px; flex:none; display:flex; align-items:center; justify-content:space-between; padding:8px 30px 0; font-size:13px; font-weight:600; font-variant-numeric:tabular-nums}
+.sbar .ic{display:flex; gap:6px; align-items:center}
+.sig{display:flex; gap:1.5px; align-items:flex-end; height:11px}
+.sig i{width:3px; background:currentColor; border-radius:1px}
+.sig i:nth-child(1){height:4px}.sig i:nth-child(2){height:6px}.sig i:nth-child(3){height:8px}.sig i:nth-child(4){height:11px}
+.bat{width:22px; height:11px; border:1.5px solid currentColor; border-radius:3px; position:relative}
+.bat::after{content:''; position:absolute; top:1.5px; bottom:1.5px; left:1.5px; right:5px; background:currentColor; border-radius:1px}
+#view{flex:1; overflow-y:auto; overflow-x:hidden; padding:0 20px 28px; scrollbar-width:none; outline:none}
+#view::-webkit-scrollbar{display:none}
+
+/* tabs */
+.tabs{flex:none; display:grid; grid-template-columns:repeat(4,1fr); background:#fff; border-top:1px solid var(--a-line); padding:8px 6px 16px}
+.tabs button{border:0; background:none; display:flex; flex-direction:column; align-items:center; gap:4px; font-size:11.5px; color:var(--a-faint); padding:4px 0; cursor:pointer}
+.tabs .n{font-size:10px; min-width:26px; height:16px; line-height:16px; border-radius:8px; background:var(--a-chip); color:var(--a-faint); text-align:center; font-variant-numeric:tabular-nums}
+.tabs .on{color:var(--a-ink); font-weight:600}
+.tabs .on .n{background:var(--a-ink); color:#fff}
+
+/* type + layout */
+.top{display:flex; align-items:center; justify-content:space-between; min-height:44px; margin-top:2px}
+.sid{font-size:11.5px; color:var(--a-faint); letter-spacing:.06em}
+.back,.tlink{border:0; background:none; padding:6px 0; font-size:13.5px; color:var(--a-sub); cursor:pointer}
+.tbtn{border:1px solid var(--a-line); background:#fff; border-radius:16px; height:32px; padding:0 12px; font-size:13px; cursor:pointer; white-space:nowrap}
+.ttl{font-size:23px; font-weight:700; letter-spacing:-.025em; margin:8px 0 4px; line-height:1.3}
+.lead{margin:0 0 18px; color:var(--a-sub); font-size:13.5px}
+.ink{color:var(--a-ink)}
+.h2{display:flex; align-items:center; justify-content:space-between; margin:22px 0 10px; font-size:15.5px; font-weight:700}
+.h2 small{font-weight:500; color:var(--a-sub); font-size:12.5px}
+.small{font-size:12.5px; color:var(--a-sub)}
+p.small{margin:4px 0 0; line-height:1.55}
+.block{display:block}
+.ctr{text-align:center}
+.big2{font-size:17px; font-weight:700; letter-spacing:-.01em; line-height:1.4}
+.between{display:flex; justify-content:space-between; align-items:center; gap:10px}
+.grow{flex:1; min-width:0; display:flex; flex-direction:column}
+.grow small{font-size:12.5px; color:var(--a-sub)}
+.note{font-size:12px; color:var(--a-sub); margin:4px 4px 14px; line-height:1.55}
+.note.sm{margin:10px 0 0; font-size:11.5px; color:var(--a-faint)}
+.empty{color:var(--a-sub); font-size:13px; margin:6px 0; line-height:1.55}
+
+.card{display:block; background:var(--a-card); border:1px solid var(--a-line); border-radius:22px; padding:16px 18px; margin:0 0 12px; text-align:left; width:100%}
+button.card{cursor:pointer}
+.card.dash{background:transparent; border-style:dashed; border-color:#cfcfca}
+.card.flat{border:0; padding:0}
+.lbl{font-size:12px; color:var(--a-sub); margin:0 0 8px}
+.lbl2{font-size:11.5px; color:var(--a-faint); margin:8px 0 6px}
+.kv{display:flex; justify-content:space-between; align-items:center; gap:12px; padding:11px 0}
+.kv + .kv{border-top:1px solid var(--a-line)}
+.kv .k{color:var(--a-sub); font-size:13.5px}
+.kv .v{font-weight:600; text-align:right; display:flex; flex-direction:column; align-items:flex-end}
+.kv .v small{font-weight:400; font-size:11.5px; color:var(--a-faint)}
+.kv .v.row-r{flex-direction:row; align-items:center; gap:12px}
+.kv small.block{font-size:12px; color:var(--a-sub); font-weight:400}
+.btn{display:flex; align-items:center; justify-content:center; width:100%; height:52px; border:0; border-radius:16px; background:var(--a-ink); color:#fff; font-weight:600; font-size:15px; cursor:pointer}
+.btn.ghost{background:#fff; color:var(--a-ink); border:1px solid var(--a-line)}
+.btn.plain{background:none; color:var(--a-sub); height:44px; font-weight:500}
+.btn.sm{height:38px; width:auto; padding:0 16px; font-size:13.5px; border-radius:12px}
+.btn:disabled{opacity:.35; cursor:default}
+.stack{display:grid; gap:10px; margin-top:16px}
+.row2{display:flex; gap:8px; margin-top:12px}
+.chip{display:inline-flex; align-items:center; height:26px; padding:0 10px; border-radius:13px; border:1px solid var(--a-line); background:#fff; font-size:12px; color:var(--a-ink); white-space:nowrap}
+.chip.fill{background:var(--a-chip); border-color:transparent}
+.chip.ink{background:var(--a-ink); color:#fff; border-color:var(--a-ink)}
+.chip.dark{background:transparent; border-color:rgba(255,255,255,.35); color:#fff}
+.chips{display:flex; flex-wrap:wrap; gap:6px}
+
+.sw{width:46px; height:28px; border-radius:14px; background:#d8d8d4; position:relative; border:0; cursor:pointer; flex:none; transition:background .18s}
+.sw.on{background:var(--a-ink)}
+.sw::after{content:''; position:absolute; top:3px; left:3px; width:22px; height:22px; border-radius:50%; background:#fff; transition:transform .18s}
+.sw.on::after{transform:translateX(18px)}
+.seg{display:flex; background:var(--a-chip); border-radius:14px; padding:4px; margin-bottom:6px}
+.seg button{flex:1; height:38px; border:0; background:none; border-radius:11px; font-size:14px; color:var(--a-sub); cursor:pointer}
+.seg button.on{background:#fff; color:var(--a-ink); font-weight:600; box-shadow:0 1px 2px rgba(0,0,0,.06)}
+
+/* alarm card */
+.acard{padding:14px 16px}
+.acard.off{opacity:.45}
+.acard-h{display:flex; justify-content:space-between; align-items:center}
+.acard-b{display:flex; justify-content:space-between; align-items:center; width:100%; border:0; background:none; padding:2px 0 0; text-align:left; cursor:pointer}
+.acard-b.static{cursor:default}
+.bigt{display:flex; align-items:baseline; gap:6px}
+.ampm{font-size:16px; color:var(--a-sub)}
+.num{font-size:46px; font-weight:300; letter-spacing:-.035em; font-variant-numeric:tabular-nums; line-height:1.1}
+.kind{font-size:13px; color:var(--a-sub)}
+.chain{display:flex; flex-direction:column; align-items:flex-end; font-size:12px; line-height:1.35; font-weight:600}
+.chain i{font-style:normal; color:var(--a-faint); font-weight:400; line-height:1}
+.meta{font-size:11.5px; color:var(--a-faint); margin:2px 0 0; line-height:1.5}
+.foot{text-align:right; font-size:12.5px; color:var(--a-sub); margin:6px 0 0}
+.shift{display:flex; gap:8px; margin-top:12px}
+
+/* schedule rows */
+.srow{display:grid; grid-template-columns:50px 2px 1fr; gap:12px; align-items:center; width:100%; border:0; background:none; text-align:left; padding:10px 0; cursor:pointer}
+div.srow{cursor:default}
+.srow + .srow{border-top:1px solid var(--a-line)}
+.st small{display:block; font-size:11px; color:var(--a-sub)}
+.st b{font-size:15px; font-variant-numeric:tabular-nums}
+.sb{height:30px; background:var(--a-ink); width:2px}
+div.srow .sb{background:var(--a-line)}
+.sx b{display:block; font-size:14.5px}
+.sx small{font-size:12px; color:var(--a-sub)}
+.rcard b,.sug b{display:block; font-size:15px}
+.rcard small,.sug small{display:block; font-size:12.5px; color:var(--a-sub); margin-top:2px}
+.rcard s{color:var(--a-faint)}
+.prog{display:block; height:6px; border-radius:3px; background:var(--a-chip); margin-top:12px; overflow:hidden}
+.prog b{display:block; height:100%; background:var(--a-ink); transition:width .25s}
+.todo{display:flex; align-items:center; gap:10px; width:100%; border:0; background:none; padding:10px 0; text-align:left; cursor:pointer}
+.todo + .todo{border-top:1px solid var(--a-line)}
+.cb{width:20px; height:20px; border-radius:6px; border:1.5px solid var(--a-faint); display:grid; place-items:center; flex:none}
+.todo.done{color:var(--a-faint); text-decoration:line-through}
+.todo.done .cb{background:var(--a-ink); border-color:var(--a-ink)}
+.todo.done .cb::after{content:'✓'; color:#fff; font-size:12px}
+.cta .btn{margin-top:12px}
+.gq{display:flex; align-items:center; gap:12px}
+.gq b{display:block}
+.gq small{font-size:12.5px; color:var(--a-sub)}
+.avs{display:flex}
+.avs .avatar{margin-left:-8px; box-shadow:0 0 0 2px #fff}
+.avs .avatar:first-child{margin-left:0}
+
+/* people */
+.avatar{width:40px; height:40px; border-radius:50%; background:var(--a-chip); display:grid; place-items:center; font-size:13px; font-weight:600; position:relative; flex:none}
+.avatar.sm{width:32px; height:32px; font-size:12px}
+.dot{position:absolute; top:0; right:-1px; width:10px; height:10px; border-radius:50%; border:2px solid #fff; font-style:normal}
+.dot.ok{background:var(--ok)}
+.dot.mid{background:var(--mid)}
+.dot.zz{background:none; border:0; width:auto; height:auto; color:var(--zz); font-size:11px; font-weight:700; top:-6px; right:-2px; line-height:1}
+.person{display:flex; align-items:center; gap:12px; width:100%; border:0; background:none; text-align:left; padding:12px 0; cursor:pointer}
+div.person{cursor:default}
+.person + .person{border-top:1px solid var(--a-line)}
+.person .pr{font-size:12.5px; color:var(--a-sub); display:flex; gap:6px; align-items:center; white-space:nowrap}
+.mini{border:0; background:none; font-size:12px; color:var(--a-sub); padding:6px 4px; cursor:pointer; white-space:nowrap}
+.mini:disabled{color:var(--a-faint); text-decoration:line-through; cursor:default}
+.req{display:flex; align-items:center; gap:12px}
+.search{display:flex; align-items:center; gap:8px; background:#fff; border:1px solid var(--a-line); border-radius:16px; padding:0 14px; height:48px; margin:14px 0 12px}
+.search:focus-within{border-color:var(--a-ink)}
+.search input{flex:1; border:0; background:none; font:inherit; outline:none; min-width:0}
+.tiles{display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-top:14px}
+.tile{height:96px; border-radius:20px; border:1px solid var(--a-line); background:#fff; text-align:left; padding:14px; display:flex; flex-direction:column; cursor:pointer}
+.tile b{font-size:20px; font-weight:400; margin-bottom:auto; line-height:1}
+.tile span{font-weight:600; font-size:14px}
+.tile small{font-size:11.5px; color:var(--a-sub)}
+.tile.dark{background:var(--a-ink); color:#fff; border-color:var(--a-ink)}
+.tile.dark small{color:rgba(255,255,255,.6)}
+.gcard b{display:block; font-size:16px; margin-top:10px}
+.gcard small{display:block; color:var(--a-sub); font-size:12.5px; margin:2px 0 10px}
+.gcard.row{display:flex; align-items:center; gap:12px}
+.gcard.row b,.gcard.row small{margin:0}
+.gico{width:42px; height:42px; border-radius:12px; background:var(--a-ink); color:#fff; display:grid; place-items:center; font-size:13px; font-weight:600; flex:none}
+.gico.light{background:var(--a-chip); color:var(--a-ink); border-radius:50%}
+.gico.sm{width:36px; height:36px}
+.perm{padding:12px 0}
+.perm + .perm{border-top:1px solid var(--a-line)}
+.ptab{width:100%; border-collapse:collapse; font-size:12.5px}
+.ptab th,.ptab td{padding:8px 4px; text-align:center; border-bottom:1px solid var(--a-line)}
+.ptab th{font-weight:500; color:var(--a-sub); font-size:11.5px}
+.ptab th:first-child,.ptab td:first-child{text-align:left}
+.ptab tr.fin td{font-weight:700; border-bottom:0}
+.yes{color:var(--a-ink); font-weight:700}
+.no{color:var(--a-faint)}
+
+/* detail */
+input[type=range]{width:100%; accent-color:var(--a-ink); margin:4px 0 2px}
+.formula{background:var(--a-chip); border-radius:14px; padding:12px 14px; font-size:13px; font-variant-numeric:tabular-nums; margin:0 0 6px; line-height:1.5}
+.axis{display:flex; justify-content:space-between; align-items:center; margin-top:12px}
+.axis em{font-style:normal; font-size:11px; color:var(--a-sub); background:var(--a-chip); border-radius:8px; padding:1px 6px; margin-left:4px}
+.lvopts{display:flex; gap:4px; background:var(--a-chip); border-radius:12px; padding:3px}
+.lvopts button{border:0; background:none; width:42px; height:30px; border-radius:9px; cursor:pointer; color:var(--a-sub)}
+.lvopts .on{background:var(--a-ink); color:#fff; font-weight:600}
+.axdesc{margin:4px 0 0; font-size:12px; color:var(--a-faint); text-align:right}
+
+/* form */
+.field{display:flex; align-items:center; justify-content:space-between; padding:10px 0; gap:12px}
+.field + .field{border-top:1px solid var(--a-line)}
+.field .k{color:var(--a-sub); font-size:13.5px; flex:none}
+.field input,.field select{border:0; background:none; font:inherit; font-weight:600; text-align:right; color:var(--a-ink); min-width:0; width:62%; padding:4px 0; border-radius:6px}
+.field select{-webkit-appearance:none; appearance:none; cursor:pointer; text-align-last:right}
+.opts{display:grid; grid-template-columns:repeat(3,1fr); gap:8px}
+.opt{height:44px; border-radius:14px; border:0; background:var(--a-chip); cursor:pointer; font-size:14px}
+.opt.on{background:var(--a-ink); color:#fff; font-weight:600}
+
+/* ringing */
+#overlay:empty,#modal:empty{display:none}
+.ring{position:absolute; inset:0; z-index:30; display:flex; flex-direction:column; padding:52px 22px 28px; background:#141414; color:#fff; animation:rise .35s ease-out}
+.ring.depart{background:#4a4a54}
+.ring.prepare{background:#262a28}
+.ring-top{display:flex; justify-content:space-between; align-items:center}
+.sid.lt{color:rgba(255,255,255,.45)}
+.ring-head{text-align:center; margin:30px 0 0; font-size:15px; opacity:.8}
+.ring-time{text-align:center; font-size:78px; font-weight:600; letter-spacing:-.045em; line-height:1.05; margin:4px 0 0; font-variant-numeric:tabular-nums}
+.ring-title{text-align:center; font-size:17px; font-weight:600; margin:14px 0 2px}
+.ring-sub{text-align:center; font-size:13px; opacity:.65; margin:0}
+.voice{margin-top:22px; background:rgba(255,255,255,.08); border-radius:20px; padding:16px 18px}
+.voice small{display:block; font-size:11.5px; opacity:.6; margin-bottom:6px}
+.voice p{margin:0; font-size:14.5px; line-height:1.6}
+.wave{display:flex; gap:3px; align-items:center; height:18px; margin-top:10px}
+.wave i{width:3px; height:6px; border-radius:2px; background:rgba(255,255,255,.8); animation:wv 1s ease-in-out infinite}
+.wave i:nth-child(2n){animation-delay:.18s}
+.wave i:nth-child(3n){animation-delay:.36s}
+.lvline{font-size:11.5px; opacity:.55; margin:10px 2px 0}
+.snz{margin-top:auto}
+.snz small{font-size:12px; opacity:.7}
+.snz-opts{display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin:8px 0 16px}
+.snz-opts button{height:42px; border-radius:14px; border:0; background:rgba(255,255,255,.1); color:#fff; cursor:pointer}
+.snz-opts .on{background:#fff; color:#141414; font-weight:600}
+.ring-btns{display:grid; grid-template-columns:1fr 1.3fr; gap:10px}
+.rbtn{height:54px; border-radius:18px; border:0; background:rgba(255,255,255,.12); color:#fff; font-weight:600; cursor:pointer}
+.rbtn.main{background:#fff; color:#141414}
+@keyframes wv{0%,100%{height:4px}50%{height:16px}}
+@keyframes rise{from{transform:translateY(14px); opacity:0}to{transform:none; opacity:1}}
+
+/* wake check */
+.flow{display:flex; flex-wrap:wrap; gap:6px; align-items:center; font-size:12px; margin:0 0 14px}
+.flow span{padding:5px 10px; border-radius:12px; border:1px solid var(--a-line); color:var(--a-faint); background:#fff}
+.flow span.done{color:var(--a-ink)}
+.flow span.on{background:var(--a-ink); color:#fff; border-color:var(--a-ink)}
+.flow i{font-style:normal; color:var(--a-faint)}
+.meter{margin:12px 0}
+.meter .mh{display:flex; justify-content:space-between; font-size:13px}
+.meter .mt{height:8px; border-radius:4px; background:var(--a-chip); margin-top:6px; position:relative}
+.meter .mt b{position:absolute; top:0; bottom:0; left:0; background:var(--a-ink); border-radius:4px; transition:width .4s}
+.meter .th{position:absolute; top:-4px; bottom:-4px; width:2px; background:var(--warn)}
+.sim{border:1px dashed var(--a-faint); border-radius:18px; padding:14px; margin-top:14px}
+.sim p{margin:0 0 10px; font-size:12px; color:var(--a-sub)}
+.stack2{display:grid; gap:8px}
+.notif{background:#fff; border-radius:18px; padding:14px 16px; box-shadow:0 10px 26px -14px rgba(0,0,0,.3); border:1px solid var(--a-line); margin-bottom:12px}
+.notif .nh{display:flex; justify-content:space-between; font-size:12px; color:var(--a-sub); margin-bottom:6px}
+.notif p{margin:4px 0 12px; color:var(--a-sub); font-size:13px}
+.done-big{text-align:center; padding:18px 0 14px}
+.done-big .ck{width:64px; height:64px; border-radius:50%; background:var(--a-ink); color:#fff; display:grid; place-items:center; margin:0 auto 14px; font-size:28px}
+.done-big b{font-size:18px}
+
+/* timeline */
+.tl{list-style:none; margin:0; padding:0}
+.tl li{display:grid; grid-template-columns:64px 10px 1fr auto; gap:8px; align-items:center; padding:9px 0; font-size:13.5px}
+.tl .t{font-size:12px; color:var(--a-sub); font-variant-numeric:tabular-nums}
+.tl .d{width:7px; height:7px; border-radius:50%; background:var(--a-line)}
+.tl li.now .d{background:var(--a-ink)}
+.tl li.past{color:var(--a-faint)}
+.tl .src{font-size:11.5px; color:var(--a-faint); text-align:right}
+
+/* chat */
+.chat{display:flex; flex-direction:column; gap:10px; padding:4px 0 8px}
+.msg{max-width:84%; padding:12px 14px; border-radius:18px; font-size:14px; line-height:1.55}
+.msg time{display:block; font-size:11px; color:var(--a-faint); margin-top:4px}
+.msg.ai{background:#fff; border:1px solid var(--a-line); border-bottom-left-radius:6px; align-self:flex-start}
+.msg.me{background:var(--a-ink); color:#fff; border-bottom-right-radius:6px; align-self:flex-end}
+.msg.me time{color:rgba(255,255,255,.55)}
+.typing{display:flex; gap:4px; padding:16px}
+.typing i{width:6px; height:6px; border-radius:50%; background:var(--a-faint); animation:bl 1s infinite}
+.typing i:nth-child(2){animation-delay:.15s}
+.typing i:nth-child(3){animation-delay:.3s}
+.xcard{max-width:92%}
+.xcard > small{display:block; font-size:11.5px; color:var(--a-faint); margin-bottom:6px}
+.xr{display:flex; justify-content:space-between; gap:12px; font-size:13px; padding:6px 0; border-top:1px solid var(--a-line)}
+.xr span{color:var(--a-sub)}
+.xr em{font-style:normal; font-weight:400; font-size:11px; color:var(--a-sub); margin-left:4px}
+.xcard .q{margin:10px 0; font-weight:600}
+.xbtns{display:flex; gap:6px; flex-wrap:wrap}
+.xs{margin:6px 0 0; font-size:12.5px; color:var(--a-sub)}
+#view.chatview{padding-bottom:0}
+.composer{position:sticky; bottom:0; margin:0 -20px; padding:18px 16px 14px; background:linear-gradient(rgba(246,246,244,0),var(--a-bg) 30%)}
+.cbox{background:#fff; border:1px solid var(--a-line); border-radius:26px; padding:12px 16px 14px; text-align:center; box-shadow:0 10px 30px -18px rgba(0,0,0,.25)}
+.cbox .small{margin:0 0 8px; display:block}
+.tin{display:flex; gap:6px; margin-bottom:10px}
+.tin input{flex:1; border:1px solid var(--a-line); border-radius:12px; padding:0 12px; height:38px; font:inherit; min-width:0}
+.cbtns{display:flex; align-items:center; justify-content:center; gap:16px}
+.pill{height:38px; padding:0 16px; border-radius:19px; background:var(--a-chip); border:0; cursor:pointer}
+.pill.on{background:var(--a-ink); color:#fff}
+.mic{width:58px; height:58px; border-radius:50%; background:var(--a-ink); color:#fff; border:0; font-weight:600; font-size:13px; cursor:pointer}
+.mic:disabled{opacity:.3; cursor:default}
+.mic.listen{animation:pulse 1s infinite}
+@keyframes bl{0%,100%{opacity:.3}50%{opacity:1}}
+@keyframes pulse{0%,100%{box-shadow:0 0 0 0 rgba(20,20,20,.3)}50%{box-shadow:0 0 0 12px rgba(20,20,20,0)}}
+
+/* journal + routine */
+.jtext{font-size:14.5px; line-height:1.75; margin:4px 0 6px}
+textarea{width:100%; border:1px solid var(--a-line); border-radius:14px; padding:12px; font:inherit; line-height:1.6; resize:vertical; color:var(--a-ink)}
+.days{display:flex; justify-content:space-between}
+.days button{width:38px; height:38px; border-radius:50%; border:0; background:var(--a-chip); color:var(--a-faint); cursor:pointer}
+.days .on{background:var(--a-ink); color:#fff}
+.rstep{display:grid; grid-template-columns:48px 1fr auto; gap:10px; align-items:center; padding:12px 0}
+.rstep + .rstep{border-top:1px solid var(--a-line)}
+.rstep > b{font-variant-numeric:tabular-nums; font-size:13px}
+.rstep .nm{display:block; font-size:14px}
+.rstep small{font-size:11.5px; color:var(--a-faint)}
+
+/* records */
+.cal-h{font-size:14px; margin-bottom:12px}
+.cal-h > span{color:var(--a-faint)}
+.cal{display:grid; grid-template-columns:repeat(7,1fr); gap:4px 0; text-align:center; font-size:13px}
+.cal .w{font-size:11px; color:var(--a-faint); padding-bottom:4px}
+.cal button{border:0; background:none; height:40px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:3px; cursor:pointer; font-variant-numeric:tabular-nums}
+.cal button span{width:28px; height:28px; display:grid; place-items:center; border-radius:50%}
+.cal .today span{background:var(--a-ink); color:#fff}
+.cal .fut{color:var(--a-faint)}
+.cal i{width:4px; height:4px; border-radius:50%; background:var(--a-ink)}
+.cal i.part{background:var(--a-faint)}
+.cal i.none{background:transparent}
+.legend{display:flex; gap:14px; justify-content:center; font-size:11.5px; color:var(--a-sub); margin-top:10px; border-top:1px solid var(--a-line); padding-top:10px}
+.legend i{display:inline-block; width:5px; height:5px; border-radius:50%; background:var(--a-ink); margin-right:5px; vertical-align:middle}
+.legend i.part{background:var(--a-faint)}
+.wstrip{display:grid; grid-template-columns:repeat(7,1fr); gap:4px; text-align:center}
+.wstrip span{border-radius:14px; padding:8px 0; background:var(--a-chip); display:flex; flex-direction:column; align-items:center; gap:2px}
+.wstrip small{font-size:11px; color:var(--a-sub)}
+.wstrip b{font-size:14px}
+.wstrip i{width:4px; height:4px; border-radius:50%; background:var(--a-ink)}
+.wstrip .fut{opacity:.5}
+.wstrip .fut i{background:transparent}
+.wstrip .on{background:var(--a-ink); color:#fff}
+.wstrip .on small{color:rgba(255,255,255,.7)}
+.wstrip .on i{background:#fff}
+.stats{display:grid; grid-template-columns:1fr 1fr; gap:10px}
+.stat small{display:block; font-size:12px; color:var(--a-sub)}
+.stat .big{display:block; font-size:30px; font-weight:600; letter-spacing:-.02em; margin:4px 0; font-variant-numeric:tabular-nums}
+.bar{display:grid; grid-template-columns:48px 1fr 28px; align-items:center; gap:10px; font-size:13px; margin:8px 0}
+.bar .tr{height:8px; border-radius:4px; background:var(--a-chip); overflow:hidden}
+.bar .tr b{display:block; height:100%; background:var(--a-ink); border-radius:4px}
+.bar > span:last-child{text-align:right; color:var(--a-sub); font-variant-numeric:tabular-nums}
+
+/* suggestion */
+.trio{display:grid; grid-template-columns:repeat(3,1fr); margin-top:16px; text-align:center}
+.trio small{display:block; font-size:11.5px; color:var(--a-faint)}
+.trio b{font-size:15px}
+.cmp{display:flex; align-items:center; gap:12px; margin:8px 0 10px}
+.cmp span{flex:1; border-radius:16px; padding:14px; text-align:center; background:var(--a-chip)}
+.cmp .c-new{background:var(--a-ink); color:#fff}
+.cmp small{display:block; font-size:11.5px; opacity:.7}
+.cmp b{font-size:26px; font-weight:600; font-variant-numeric:tabular-nums}
+.cmp i{font-style:normal; color:var(--a-faint)}
+.stepper{display:flex; align-items:center; justify-content:space-between; margin:18px 0 6px}
+.stepper b{font-size:24px; font-variant-numeric:tabular-nums}
+
+/* modal + toast */
+.modal{position:absolute; inset:0; z-index:50; background:rgba(20,20,20,.38); display:flex; align-items:flex-end}
+.sheet{width:100%; background:#fff; border-radius:26px 26px 0 0; padding:22px 20px 26px; max-height:88%; overflow:auto; animation:rise .25s ease-out}
+.sheet h3{margin:0 0 6px; font-size:18px; letter-spacing:-.01em}
+.calc{list-style:none; padding:0; margin:14px 0; counter-reset:c}
+.calc li{display:grid; grid-template-columns:22px 1fr; gap:10px; padding:8px 0; font-size:14px; font-weight:600}
+.calc li::before{counter-increment:c; content:counter(c); width:22px; height:22px; border-radius:50%; background:var(--a-ink); color:#fff; font-size:11.5px; display:grid; place-items:center}
+.calc small{display:block; color:var(--a-sub); font-size:12px; font-weight:400; margin-top:2px}
+#toast{position:absolute; left:50%; bottom:96px; transform:translate(-50%,10px); background:var(--a-ink); color:#fff; padding:11px 16px; border-radius:14px; font-size:13px; max-width:330px; width:max-content; opacity:0; pointer-events:none; transition:opacity .2s,transform .2s; z-index:60; text-align:center; line-height:1.45}
+#toast.show{opacity:1; transform:translate(-50%,0)}
+
+/* demo panel */
+.panel{width:330px; flex:none; background:var(--panel); border:1px solid var(--pline); border-radius:26px; padding:22px 18px 20px; overflow:auto; color:var(--pink); position:relative}
+.panel h2{margin:0; font-size:17px; font-weight:700; letter-spacing:-.01em}
+.p-sub{margin:2px 0 16px; font-size:12.5px; color:var(--pmuted)}
+.p-clock{background:var(--deck); color:#fff; border-radius:18px; padding:14px 16px; display:flex; flex-direction:column}
+.p-clock .d{font-size:12.5px; opacity:.8}
+.p-clock .t{font-size:30px; font-weight:300; letter-spacing:-.02em; font-variant-numeric:tabular-nums; line-height:1.25}
+.p-clock .s{font-size:12.5px; margin-top:6px; opacity:.92; line-height:1.45}
+.p-h{font-size:13px; font-weight:700; margin:20px 0 8px}
+.steps{list-style:none; margin:0; padding:0; display:grid; gap:2px}
+.steps button{width:100%; display:grid; grid-template-columns:68px 1fr; gap:8px; text-align:left; border:0; background:none; padding:9px 10px; border-radius:12px; cursor:pointer; color:var(--pink)}
+.steps button:hover{background:var(--deck-soft)}
+.steps button.on{background:var(--deck); color:#fff}
+.steps .stc{font-size:12.5px; font-variant-numeric:tabular-nums; color:var(--pmuted); padding-top:1px}
+.steps .on .stc{color:rgba(255,255,255,.8)}
+.steps .sl{font-size:13.5px; font-weight:600}
+.steps .sn{display:block; font-size:12px; font-weight:400; color:var(--pmuted); margin-top:1px}
+.steps .on .sn{color:rgba(255,255,255,.75)}
+.exp label{display:flex; gap:10px; align-items:flex-start; justify-content:space-between; font-size:13px; padding:8px 2px; cursor:pointer}
+.exp label > span{flex:1}
+.exp small{display:block; color:var(--pmuted); font-size:12px}
+.exp input[type=checkbox]{margin-top:3px; accent-color:var(--deck); width:16px; height:16px}
+.exp select{font:inherit; font-size:13px; border:1px solid var(--pline); border-radius:10px; background:var(--panel); color:var(--pink); padding:4px 8px}
+.p-reset{margin-top:16px; width:100%; height:42px; border-radius:12px; border:1px solid var(--pline); background:none; color:var(--pink); cursor:pointer}
+.p-note{font-size:12px; color:var(--pmuted); margin:14px 2px 0; line-height:1.55}
+.p-close{display:none}
+.fab{display:none}
+
+@media (max-width:760px){
+  .stage{padding:0; height:100%; min-height:0; display:block}
+  .device-wrap{width:100%; height:100%}
+  .device{position:static; width:100%; height:100%; border-radius:0; padding:0; transform:none!important; box-shadow:none; background:var(--a-bg)}
+  .cam,.sbar{display:none}
+  .screen{width:100%; height:100%; border-radius:0}
+  #view{padding-top:6px}
+  .panel{position:fixed; left:0; right:0; bottom:0; width:auto; max-height:80%; border-radius:24px 24px 0 0; z-index:100; transform:translateY(105%); transition:transform .25s; padding-bottom:calc(20px + env(safe-area-inset-bottom,0px)); box-shadow:0 -20px 40px -20px rgba(0,0,0,.35)}
+  .panel.open{transform:none}
+  .p-close{display:block; position:absolute; top:16px; right:16px; border:1px solid var(--pline); background:none; color:var(--pink); border-radius:12px; height:32px; padding:0 12px; cursor:pointer}
+  .fab{display:block; position:fixed; left:50%; transform:translateX(-50%); top:calc(env(safe-area-inset-top,0px) + 10px); z-index:90; height:30px; padding:0 14px; border-radius:15px; border:0; background:var(--deck); color:#fff; font-size:12.5px; font-weight:600; box-shadow:0 6px 16px -8px rgba(0,0,0,.45); cursor:pointer}
+}
+@media (prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important; transition:none!important}}
+</style>
+</head>
+<body>
+<main class="stage">
+  <div class="device-wrap" id="wrap">
+    <div class="device" id="device">
+      <span class="cam" aria-hidden="true"></span>
+      <div class="screen" id="screen">
+        <div class="sbar" aria-hidden="true"><span id="sbarTime">7:55</span><span class="ic"><span class="sig"><i></i><i></i><i></i><i></i></span><span class="bat"></span></span></div>
+        <div id="view" tabindex="-1"></div>
+        <nav class="tabs" id="tabs" aria-label="하단 탭"></nav>
+        <div id="overlay"></div>
+        <div id="modal"></div>
+        <div id="toast" role="status" aria-live="polite"></div>
+      </div>
+    </div>
+  </div>
+  <aside class="panel" id="panel" aria-label="데모 컨트롤"></aside>
+</main>
+<button class="fab" id="fab" data-act="panelOpen" aria-controls="panel">데모 진행</button>
+<script>
+(function(){
+'use strict';
+/* ---------- 고정 데이터 (발표 자료의 10시 팀 주간회의 예시 기준) ---------- */
+const DOW={21:'수',22:'목',23:'금',24:'토'};
+const TYPE={WAKE:'기상',PREPARE:'준비',DEPART:'출발',ARRIVE:'도착'};
+const P={
+  me:{name:'나',short:'나',ini:'나'},
+  sy:{name:'이수연',short:'수연',ini:'수',handle:'@etion'},
+  jh:{name:'김지형',short:'지형',ini:'지',handle:'@vmgfh'},
+  js:{name:'전준성',short:'준성',ini:'준',handle:'@jackjs'},
+  bj:{name:'강범준',short:'범준',ini:'범',handle:'@june'}
+};
+const PLACES=[{name:'세종대학교',travel:50},{name:'학교 도서관',travel:45},{name:'강남역 2번출구',travel:40},{name:'홍대입구역',travel:35}];
+const TRANS={'대중교통':1,'자차':0.7,'도보':1.6};
+const IMP={LOW:{label:'보통',base:0},MID:{label:'중요',base:1},HIGH:{label:'매우 중요',base:2}};
+const LV=[
+  {name:'약',bg:'60% · 부드러운 소리',voice:'차분 · 다정',vib:'없음'},
+  {name:'중',bg:'80% · 기본 소리',voice:'일정 안내형',vib:'짧게 반복'},
+  {name:'강',bg:'100% · 강한 소리',voice:'직설형',vib:'강하게 연속'}
+];
+const AXES=[['bg','배경음'],['voice','말소리'],['vib','진동']];
+const PERMS=[['alarm','알람 조회','내 알람 시간과 반복 일정을 볼 수 있어요.'],['edit','알람 설정','내 알람을 추가하거나 시간을 바꿀 수 있어요.'],['wake','기상 상태 조회','기상 확인 여부와 확인 시각을 볼 수 있어요.']];
+/* 그룹원의 5월 22일 하루 (분 단위) */
+const TL={
+  sy:[[450,'알람 울림'],[452,'알람 해제'],[455,'기상 확인','본인 응답'],[458,'준비 시작'],[520,'출발'],[588,'도착']],
+  jh:[[440,'알람 울림'],[444,'알람 해제'],[450,'기상 확인','자동 판정'],[480,'준비 시작'],[530,'출발'],[592,'도착']],
+  js:[[530,'알람 울림'],[532,'알람 해제'],[535,'기상 확인','자동 판정'],[538,'준비 시작'],[565,'출발'],[591,'도착']]
+};
+const MALARM={
+  sy:[{id:'s1',day:22,chain:[[450,'기상'],[458,'준비'],[520,'출발']],appt:'팀 주간회의 · 세종대학교 · 오전 10:00',lv:'중',note:'준비 70분 · 이동 70분 · 여유 10분'},
+      {id:'s2',day:23,chain:[[520,'기상'],[530,'준비'],[580,'출발']],appt:'교양 수업 · 광화문 · 오전 10:30',lv:'약',note:'준비 60분 · 이동 40분 · 여유 10분'}],
+  jh:[{id:'j1',day:22,chain:[[440,'기상'],[480,'준비'],[530,'출발']],appt:'팀 주간회의 · 세종대학교 · 오전 10:00',lv:'중',note:'준비 90분 · 이동 60분 · 여유 10분'}],
+  js:[{id:'k1',day:22,chain:[[530,'기상'],[538,'준비'],[565,'출발']],appt:'팀 주간회의 · 세종대학교 · 오전 10:00',lv:'강',note:'준비 35분 · 이동 25분 · 여유 10분'}]
+};
+const SCRIPT=[
+  {who:'ai',text:'오늘 아침 준비는 어땠나요? 평소보다 조금 서두른 것 같아요.'},
+  {who:'me',text:'맞아요. 회의 자료를 챙기느라 샤워 시간을 줄였어요.'},
+  {who:'ai',text:'이번 주에만 세 번째로 아침이 바빴어요. 회의 전날 밤에 미리 챙기는 루틴을 일기와 함께 제안해 드릴게요. 내일 일정도 있나요?'},
+  {who:'me',text:'내일 오후 2시에 학교 도서관에서 스터디 있어요. 노트북 충전기도 챙겨야 해요.'},
+  {who:'card'}
+];
+const STEPS=[
+  {id:'eve',t:-180,clock:'전날 밤 9:00',label:'저녁 홈',note:'내일 첫 알람과 준비물 확인',go:'home'},
+  {id:'morn',t:475,clock:'오전 7:55',label:'아침 홈',note:'그룹원 기상 현황',go:'home'},
+  {id:'wake',t:480,clock:'오전 8:00',label:'기상 알람',note:'ALG-01 역산 · ALG-02 강도',ring:['a1','WAKE']},
+  {id:'prep',t:510,clock:'오전 8:30',label:'준비 알람',note:'준비 전 활동 30분 뒤',ring:['a1','PREPARE']},
+  {id:'dep',t:540,clock:'오전 9:00',label:'출발 알람',note:'그룹원 상황을 음성으로 안내',ring:['a1','DEPART']},
+  {id:'leave',t:543,clock:'오전 9:03',label:'집을 나섬',note:'지오펜스로 출발 기록',act:'leave'},
+  {id:'arr',t:590,clock:'오전 9:50',label:'세종대학교 도착',note:'지오펜스로 도착 · 지각 판정',act:'arrive'},
+  {id:'night',t:1350,clock:'밤 10:30',label:'자기 전 AI 대화',note:'ALG-05 추출 · ALG-06 일기',go:'ai'},
+  {id:'sugg',t:1355,clock:'밤 10:35',label:'알람 조정 제안',note:'ALG-07 · 수락할 때만 적용',go:'suggestion'}
+];
+const META={
+  home:{id:'H01',name:'홈',alg:'다음 알람 · 오늘 일정 · 루틴'},
+  alarms:{id:'H02',name:'알람 목록',alg:'ALG-01 · 일정별 기상 · 준비 · 출발'},
+  detail:{id:'H03',name:'알람 설정',alg:'ALG-01 역산 · ALG-02 강도'},
+  newAppt:{id:'H05',name:'새 일정 만들기',alg:'ALG-01 · POST /appointments/{id}/estimate'},
+  wake:{id:'H08',name:'기상 확인',alg:'ALG-04 기상 상태 판정'},
+  group:{id:'G01',name:'친구와 그룹',alg:'ALG-03 · 관계별 권한'},
+  groupDetail:{id:'G02',name:'그룹 상세',alg:'GET /groups/{id}/wake-status'},
+  memberWake:{id:'G03',name:'그룹원 기상 상태',alg:'ALG-04 결과 공유'},
+  sharedAlarm:{id:'G04',name:'공유받은 알람',alg:'ALG-03 · PATCH /shared/alarms'},
+  friendPerm:{id:'F02',name:'친구 권한',alg:'ALG-03 권한 합집합 (OR)'},
+  permSet:{id:'F03',name:'공유 권한 설정',alg:'ALG-03 · PUT /permissions'},
+  ai:{id:'A02',name:'AI 대화',alg:'ALG-05 생활정보 구조화 추출'},
+  journal:{id:'A03',name:'하루 기록',alg:'ALG-06 하루 기록 · 루틴 제안'},
+  routine:{id:'A04',name:'루틴 편집',alg:'ALG-06 · 수락하면 알람 루틴'},
+  rec:{id:'R02',name:'나의 기록',alg:'daily_records · 설정값과 실제값'},
+  suggestion:{id:'S01',name:'알람 조정 제안',alg:'ALG-07 개인화 갱신 · 검증'},
+  ring:{id:'H07',name:'알람 울림',alg:'ALG-02 강도 · 음성 안내'}
+};
+
+function initState(){return{
+  now:475, stack:[{s:'home'}], stepId:'morn',
+  appts:[
+    {id:'a1',title:'팀 주간회의',day:22,at:600,place:'세종대학교',origin:'집',transport:'대중교통',travel:50,travelSrc:'길찾기 + 내 실측 3회',buffer:10,pre:30,prep:20,p80:60,imp:'MID',repeat:'매주 목요일',group:'cap',items:['노트북','회의 자료'],wake:true},
+    {id:'a2',title:'저녁약속',day:22,at:1080,place:'강남역 2번출구',origin:'세종대학교',transport:'대중교통',travel:20,travelSrc:'길찾기',buffer:5,pre:0,prep:20,p80:25,imp:'LOW',repeat:'반복 없음',group:null,items:[],wake:false},
+    {id:'a3',title:'수업',day:23,at:540,place:'세종대학교',origin:'집',transport:'대중교통',travel:50,travelSrc:'길찾기 + 내 실측 5회',buffer:10,pre:10,prep:20,p80:40,imp:'MID',repeat:'매주 금요일',group:null,items:['과제 출력물'],wake:true}
+  ],
+  plain:[{day:22,at:930,title:'치과 예약'}],
+  off:{}, offType:{}, over:{},
+  late4w:1, theta:1, snoozeMin:5,
+  ring:null, snooze:null,
+  wake:{phase:'idle',at:null,usage:0,recent:0,how:null},
+  me:{wakeAt:null,departAt:null,arriveAt:null},
+  events:[],
+  rMorning:{title:'차분한 출근 준비',steps:['물 마시기','스트레칭','샤워','출발'],done:0},
+  rNight:null, rDraft:null,
+  todos:[{id:'t1',title:'노트북',day:22,done:true},{id:'t2',title:'회의 자료',day:22,done:false},{id:'t3',title:'과제 출력물',day:23,done:false}],
+  grants:{
+    friend:{sy:{alarm:true,edit:true,wake:false},jh:{alarm:false,edit:false,wake:false},js:{alarm:false,edit:false,wake:false}},
+    group:{cap:{alarm:true,edit:false,wake:true},fam:{alarm:false,edit:false,wake:false}}
+  },
+  received:{
+    sy:[{src:'친구',alarm:true,edit:true,wake:false},{src:'캡스톤팀',alarm:true,edit:false,wake:true}],
+    jh:[{src:'캡스톤팀',alarm:true,edit:false,wake:true}],
+    js:[{src:'캡스톤팀',alarm:false,edit:false,wake:true}]
+  },
+  friends:['sy','jh','js'], requests:['bj'],
+  groups:{cap:{name:'캡스톤팀',members:['me','sy','jh','js'],since:'2025년 3월부터 함께하는 중'},fam:{name:'우리 가족',members:['me','mom','dad'],since:'2023년 1월부터 함께하는 중'}},
+  shared:{}, shareLog:[],
+  seg:{group:'friend',rec:'week',perm:'give'},
+  permRel:'cap', pDraft:null,
+  chat:{msgs:[{who:'ai',text:SCRIPT[0].text,t:1340}],step:1,busy:false,listen:false,mode:'voice',text:null,card:null},
+  journal:null, editJ:false, jText:'',
+  sug:{status:'pending',prev:null},
+  draft:null, dDraft:null, calc:null, modal:null, _key:''
+};}
+let S=initState();
+
+/* ---------- 도우미 ---------- */
+const $=s=>document.querySelector(s);
+const esc=s=>String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const mod=t=>((t%1440)+1440)%1440;
+function hm(t){const x=mod(t),h=Math.floor(x/60),m=x%60,ap=h<12?'오전':'오후';let hh=h%12;if(hh===0)hh=12;return{ap,s:hh+':'+String(m).padStart(2,'0')};}
+function fmt(t){const x=hm(t);return x.ap+' '+x.s;}
+function spoken(t){const x=mod(t),h=Math.floor(x/60),m=x%60;let hh=h%12;if(hh===0)hh=12;return (h<12?'오전 ':'오후 ')+hh+'시'+(m?' '+m+'분':'');}
+function h24(t){const x=mod(t);return String(Math.floor(x/60)).padStart(2,'0')+':'+String(x%60).padStart(2,'0');}
+const dayOf=abs=>22+Math.floor(abs/1440);
+const dLabel=d=>`5월 ${d}일 ${DOW[d]}요일`;
+const dShort=d=>`5월 ${d}일 ${DOW[d]}`;
+function josa(w,a,b){const c=w.charCodeAt(w.length-1);if(c<0xac00||c>0xd7a3)return w+b;return w+(((c-0xac00)%28)?a:b);}
+function joinKo(arr){if(arr.length<2)return arr.join('');return arr.slice(0,-1).map((x,i)=>i===arr.length-2?josa(x,'과','와')+' ':x+', ').join('')+arr[arr.length-1];}
+function relTime(d){if(d<=0)return '지금';const h=Math.floor(d/60),m=d%60;return ((h?h+'시간 ':'')+(m?m+'분 ':'')+'뒤').trim();}
+const cur=()=>S.stack[S.stack.length-1];
+const byId=id=>S.appts.find(a=>a.id===id);
+const isOn=id=>!S.off[id];
+const typeOn=(id,t)=>!S.offType[id+':'+t];
+function logE(t,label,src){S.events.push({t,label,src});S.events.sort((x,y)=>x.t-y.t);}
+
+/* ALG-01: 기상 = 약속 − 여유 − 이동 − 준비(P80) */
+function alarmsOf(a){
+  const dep=a.at-a.buffer-a.travel, L=[];
+  if(a.wake){const w=dep-a.p80;L.push({type:'WAKE',t:w});if(a.pre>0)L.push({type:'PREPARE',t:w+a.pre});}
+  else L.push({type:'PREPARE',t:dep-a.p80});
+  L.push({type:'DEPART',t:dep});L.push({type:'ARRIVE',t:a.at-a.buffer});
+  return L;
+}
+/* ALG-02: 중요도 기본값 + 지각 가산 → 0~2 */
+function autoLv(a){return Math.max(0,Math.min(2,IMP[a.imp].base+(S.late4w>=2?1:0)));}
+function axLv(a,ax){const o=S.over[a.id];return o&&o[ax]!=null?o[ax]:autoLv(a);}
+function nextAlarm(){
+  let best=null;
+  for(const a of S.appts){if(!isOn(a.id))continue;
+    for(const al of alarmsOf(a)){if(al.type==='ARRIVE'||!typeOn(a.id,al.type))continue;
+      const abs=(a.day-22)*1440+al.t;if(abs>=S.now&&(!best||abs<best.abs))best={a,al,abs};}}
+  return best;
+}
+function estimate(d){
+  const at=(()=>{const [h,m]=String(d.time||'14:00').split(':').map(Number);return h*60+(m||0);})();
+  const place=PLACES.find(p=>p.name===d.place)||PLACES[0];
+  const travel=Math.max(5,Math.round(place.travel*TRANS[d.transport]/5)*5);
+  const day=+d.day;
+  const hasWake=S.appts.some(a=>a.day===day&&a.wake&&alarmsOf(a)[0].t<at);
+  const wake=!hasWake, common=wake?50:15, n=10, k=10, w=n/(n+k), resid=20, corr=Math.round(w*resid);
+  const p80=common+corr, pre=wake?20:0;
+  const a={id:'n'+Date.now(),title:(d.title||'').trim()||'새 일정',day,at,place:place.name,origin:'집',transport:d.transport,travel,travelSrc:'길찾기',buffer:10,pre,prep:common-pre,p80,imp:d.imp,repeat:d.repeat,group:null,items:String(d.items||'').split(',').map(s=>s.trim()).filter(Boolean),wake};
+  return {a,common,corr,n,k,w,resid,hasWake};
+}
+/* ALG-03: 관계별 권한 행을 항목별 OR */
+function orRows(rows){const f={alarm:false,edit:false,wake:false,rows};rows.forEach(r=>{f.alarm=f.alarm||r.alarm;f.edit=f.edit||r.edit;f.wake=f.wake||r.wake;});f.count=(f.alarm?1:0)+(f.edit?1:0)+(f.wake?1:0);return f;}
+function finalGrant(pid){
+  const rows=[];
+  if(S.friends.includes(pid)&&S.grants.friend[pid])rows.push(Object.assign({src:'친구'},S.grants.friend[pid]));
+  for(const gid in S.groups){const g=S.groups[gid];if(g.members.includes(pid))rows.push(Object.assign({src:g.name},S.grants.group[gid]));}
+  return orRows(rows);
+}
+const recvFinal=pid=>orRows(S.received[pid]||[]);
+function memberState(pid){
+  if(pid==='me')return myState();
+  const tl=TL[pid];
+  if(S.now<0)return {text:'내일 알람 '+hm(tl[0][0]).s,dot:'zz',woke:false};
+  let last=null;for(const e of tl)if(e[0]<=S.now)last=e;
+  if(!last)return {text:'취침 중 · 알람 '+hm(tl[0][0]).s,dot:'zz',woke:false};
+  const t=fmt(last[0]);
+  switch(last[1]){
+    case '알람 울림':return {text:'알람 울리는 중',dot:'zz',woke:false};
+    case '알람 해제':return {text:'알람 해제 · 기상 확인 전',dot:'zz',woke:false};
+    case '기상 확인':return {text:'기상 완료 · '+t,dot:'ok',woke:true};
+    case '준비 시작':return {text:'준비 시작 · '+t,dot:'mid',woke:true};
+    case '출발':return {text:'출발 · '+t,dot:'mid',woke:true};
+    default:return {text:'도착 · '+t,dot:'ok',woke:true};
+  }
+}
+function myState(){
+  const m=S.me, w=hm(alarmsOf(byId('a1'))[0].t).s;
+  if(S.now<0)return {text:'내일 알람 '+w,dot:'zz',woke:false};
+  if(m.arriveAt!=null)return {text:'도착 · '+fmt(m.arriveAt),dot:'ok',woke:true};
+  if(m.departAt!=null)return {text:'출발 · '+fmt(m.departAt),dot:'mid',woke:true};
+  if(m.wakeAt!=null)return {text:'기상 완료 · '+fmt(m.wakeAt),dot:'ok',woke:true};
+  if(S.ring&&S.ring.type==='WAKE')return {text:'알람 울리는 중',dot:'zz',woke:false};
+  if(S.wake.phase==='observing'||S.wake.phase==='prompt')return {text:'알람 해제 · 기상 확인 중',dot:'zz',woke:false};
+  return {text:'취침 중 · 알람 '+w,dot:'zz',woke:false};
+}
+const wokeCount=gid=>S.groups[gid].members.filter(p=>(p==='me'||TL[p])&&memberState(p).woke).length;
+/* ---------- 공통 조각 ---------- */
+const backBtn='<button class="back" data-act="back">← 이전</button>';
+const sid=id=>`<span class="sid">${id}</span>`;
+const top=(l,r)=>`<div class="top">${l}${r||'<span></span>'}</div>`;
+function sw(on,act,data,label){const d=Object.entries(data||{}).map(([k,v])=>` data-${k}="${esc(v)}"`).join('');return `<button class="sw${on?' on':''}" role="switch" aria-checked="${on}" aria-label="${esc(label)}" data-act="${act}"${d}></button>`;}
+function segHtml(key,opts,val){return `<div class="seg" role="tablist">${opts.map(([v,l])=>`<button role="tab" aria-selected="${v===val}" class="${v===val?'on':''}" data-act="seg" data-k="${key}" data-v="${v}">${l}</button>`).join('')}</div>`;}
+function kv(k,v,sub){return `<div class="kv"><span class="k">${k}</span><span class="v">${v}${sub?`<small>${sub}</small>`:''}</span></div>`;}
+function avatar(pid,sm){const p=P[pid];const st=(pid==='me'||TL[pid])?memberState(pid):null;const dot=st?`<i class="dot ${st.dot}">${st.dot==='zz'?'z':''}</i>`:'';return `<span class="avatar${sm?' sm':''}">${p?p.ini:'?'}${dot}</span>`;}
+function alarmCard(a){
+  const L=alarmsOf(a).filter(x=>x.type!=='ARRIVE'), f=L[0], x=hm(f.t), on=isOn(a.id);
+  return `<div class="card acard${on?'':' off'}"><div class="acard-h"><span class="small">${dShort(a.day)}${a.group?' · 캡스톤팀 공유':''}</span>${sw(on,'toggleAppt',{id:a.id},a.title+' 알람')}</div>
+  <button class="acard-b" data-act="go" data-to="detail" data-id="${a.id}" aria-label="${esc(a.title)} 알람 설정 열기"><span class="bigt"><span class="ampm">${x.ap}</span><span class="num">${x.s}</span><span class="kind">${TYPE[f.type]}</span></span><span class="chain">${L.map(y=>`<span>${fmt(y.t)} ${TYPE[y.type]}</span>`).join('<i>-</i>')}</span></button>
+  <p class="meta">알람 강도 · ${LV[axLv(a,'bg')].name}<br>준비 ${a.p80}분 · 이동 ${a.travel}분 · 여유 ${a.buffer}분</p>
+  <p class="foot">${esc(a.title)} · ${esc(a.place)} · ${fmt(a.at)}</p></div>`;
+}
+function schedRows(day){
+  const it=[...S.appts.filter(a=>a.day===day).map(a=>({at:a.at,title:a.title,place:a.place,imp:a.imp,id:a.id})),...S.plain.filter(p=>p.day===day).map(p=>({at:p.at,title:p.title}))].sort((x,y)=>x.at-y.at);
+  if(!it.length)return '<p class="empty">일정이 없어요. 일정을 추가하면 알람을 계산해 드려요.</p>';
+  return it.map(x=>{const t=hm(x.at);const inner=`<span class="st"><small>${t.ap}</small><b>${t.s}</b></span><span class="sb"></span><span class="sx"><b>${esc(x.title)}</b>${x.place?`<small>${esc(x.place)} · ${IMP[x.imp].label}</small>`:'<small>알람 없는 일정</small>'}</span>`;
+    return x.id?`<button class="srow" data-act="go" data-to="detail" data-id="${x.id}">${inner}</button>`:`<div class="srow">${inner}</div>`;}).join('');
+}
+function meter(l,v,max,th){const pct=Math.min(100,v/max*100);return `<div class="meter"><div class="mh"><span>${l}</span><b>${v.toFixed(1)}분</b></div><div class="mt"><b style="width:${pct}%"></b>${th!=null?`<span class="th" style="left:${Math.min(100,th/max*100)}%" title="기준 θ"></span>`:''}</div></div>`;}
+function tlList(rows,nowLast){return `<ul class="tl">${rows.map((r,i)=>`<li class="${nowLast&&i===rows.length-1?'now':''}${r.past?' past':''}"><span class="t">${fmt(r.t)}</span><span class="d"></span><span>${esc(r.label)}</span><span class="src">${esc(r.src||'')}</span></li>`).join('')}</ul>`;}
+
+/* ---------- 화면 ---------- */
+const SCR={};
+SCR.home=()=>{
+  const t=mod(S.now), d=dayOf(S.now), eve=S.now<0||t>=1080;
+  const greet=eve?'차분한 저녁이에요':t<720?'좋은 아침이에요':'좋은 오후예요';
+  const target=eve?d+1:d, nx=nextAlarm();
+  let h=top(`<span class="small">${dLabel(d)}</span>`,'<button class="tbtn" data-act="go" data-to="alarms">알람 전체</button>')+`<h1 class="ttl">${greet}</h1>`;
+  if(nx)h+=`<div class="h2">다음 알람<small>${relTime(nx.abs-S.now)}</small></div>`+alarmCard(nx.a);
+  h+=`<div class="h2">${eve?'내일 일정':'오늘 일정'}<button class="tlink" data-act="newAppt">+ 일정 추가</button></div><div class="card">${schedRows(target)}</div>`;
+  if(!eve){
+    const r=S.rMorning;
+    h+=`<div class="h2">오늘 루틴<small>${r.done}/${r.steps.length} 완료</small></div><button class="card rcard" data-act="rTick" aria-label="${r.title} 다음 단계 완료"><b>${r.title}</b><small>${r.steps.map((s,i)=>i<r.done?`<s>${s}</s>`:s).join(' · ')}</small><span class="prog"><b style="width:${r.done/r.steps.length*100}%"></b></span></button>`;
+  }else{
+    const td=S.todos.filter(x=>x.day===target);
+    h+=`<div class="h2">내일 준비물<small>${td.filter(x=>x.done).length}/${td.length}</small></div><div class="card">${td.length?td.map(x=>`<button class="todo${x.done?' done':''}" data-act="todo" data-id="${x.id}" aria-pressed="${x.done}"><span class="cb"></span>${esc(x.title)}</button>`).join(''):'<p class="empty">챙길 준비물이 없어요.</p>'}</div>`;
+    if(S.rNight)h+=`<div class="h2">저녁 루틴</div><button class="card rcard" data-act="go" data-to="routine"><b>${esc(S.rNight.title)}</b><small>매주 ${S.rNight.days.join(' · ')} · ${h24(S.rNight.steps[0].t)}부터 ${S.rNight.steps.length}단계</small></button>`;
+    h+=`<div class="card cta"><b>자기 전 AI 대화</b><p class="small">오늘을 돌아보고 내일 일정과 준비물을 정리해요.</p><button class="btn" data-act="tab" data-t="ai">대화 시작</button></div>`;
+  }
+  if(S.sug.status==='pending')h+=`<button class="card dash sug" data-act="go" data-to="suggestion"><b>다음 알람을 10분 앞당겨 볼까요?</b><small>최근 3번의 준비가 예상보다 오래 걸렸어요.</small></button>`;
+  if(!eve){const g=S.groups.cap;h+=`<button class="card gq" data-act="openGroup" data-id="cap"><span class="avs">${g.members.map(p=>avatar(p,true)).join('')}</span><span><b>캡스톤팀</b><small>오늘 ${wokeCount('cap')}명 기상 완료</small></span></button>`;}
+  return h;
+};
+SCR.alarms=()=>{
+  const days=[...new Set(S.appts.map(a=>a.day))].sort((x,y)=>x-y);
+  let h=top(backBtn,'<button class="tbtn" data-act="newAppt">+ 새 일정</button>')+'<h1 class="ttl">알람</h1><p class="lead">일정마다 기상 · 준비 · 출발 알람을 계산해 두었어요.</p>';
+  days.forEach(d=>{h+=`<div class="h2">${dLabel(d)}</div>`+S.appts.filter(a=>a.day===d).sort((x,y)=>x.at-y.at).map(alarmCard).join('');});
+  return h;
+};
+function calcInner(a){
+  const L=alarmsOf(a), f=L[0];
+  return `<p class="lbl">알람 시각</p><p class="formula">${TYPE[f.type]} ${fmt(f.t)} = 약속 ${fmt(a.at)} − 여유 ${a.buffer} − 이동 ${a.travel} − 준비 ${a.p80}${f.type==='WAKE'&&a.pre?`<br>준비 알람은 기상 후 준비 전 활동 ${a.pre}분 뒤`:''}</p>${L.map(x=>`<div class="kv"><span class="k">${TYPE[x.type]}${x.type==='ARRIVE'?' 목표':''}</span><span class="v row-r">${fmt(x.t)}${x.type==='ARRIVE'?'':sw(typeOn(a.id,x.type),'toggleType',{id:a.id,type:x.type},TYPE[x.type]+' 알람')}</span></div>`).join('')}`;
+}
+function lvCard(a){
+  const base=IMP[a.imp].base, late=S.late4w>=2?1:0, auto=autoLv(a), o=S.over[a.id]||{};
+  return `<div class="card"><p class="lbl">알람 강도</p><p class="small">자동 ${LV[auto].name} · 중요도 ${IMP[a.imp].label} ${base}점 + 최근 4주 늦잠 지각 ${S.late4w}회 ${late}점</p>
+  ${AXES.map(([ax,name])=>{const c=axLv(a,ax);return `<div class="axis"><span class="k">${name}${o[ax]!=null?'<em>직접 고름</em>':''}</span><span class="lvopts" role="group" aria-label="${name} 강도">${LV.map((l,i)=>`<button class="${i===c?'on':''}" data-act="axis" data-id="${a.id}" data-ax="${ax}" data-lv="${i}" aria-pressed="${i===c}">${l.name}</button>`).join('')}</span></div><p class="axdesc">${LV[c][ax]}</p>`;}).join('')}
+  <p class="note sm">직접 고른 항목은 자동 계산보다 항상 먼저 적용돼요.</p>
+  ${Object.keys(o).length?`<button class="tlink" data-act="axisReset" data-id="${a.id}">모두 자동으로 되돌리기</button>`:''}</div>`;
+}
+SCR.detail=c=>{
+  const a=byId(c.id);if(!a)return top(backBtn)+'<p class="empty">일정을 찾을 수 없어요.</p>';
+  if(!S.dDraft||S.dDraft.aid!==a.id)S.dDraft={aid:a.id,buffer:a.buffer};
+  const b=S.dDraft.buffer, tmp=Object.assign({},a,{buffer:b}), f=alarmsOf(tmp)[0], margin=a.p80-a.pre-a.prep;
+  let h=top(backBtn)+`<h1 class="ttl">알람 설정</h1><p class="lead">${dShort(a.day)} · <b class="ink" id="leadT">${fmt(f.t)} ${TYPE[f.type]}</b></p>`;
+  h+=`<div class="card"><p class="lbl">연결 일정</p><div class="between"><b class="big2">${esc(a.title)}</b><span class="chip fill">${IMP[a.imp].label}</span></div><p class="small">${fmt(a.at)} · ${esc(a.place)} · ${esc(a.repeat)}</p></div>`;
+  h+=`<div class="card"><p class="lbl">이동 조건</p>${kv('출발 위치',esc(a.origin))}${kv('이동 수단',esc(a.transport))}${kv('예상 이동',a.travel+'분',a.travelSrc)}</div>`;
+  h+=`<div class="card"><p class="lbl">준비 시간</p>${a.pre?kv('준비 전 활동',a.pre+'분'):''}${kv('실제 준비',a.prep+'분')}${kv('P80 여유','+'+margin+'분','열 번 중 여덟 번은 늦지 않게')}${kv('예측 준비',a.p80+'분','공통 P80 + 개인 보정')}<div class="kv"><span class="k">여유 시간</span><b class="v" id="bufVal">${b}분</b></div><input type="range" min="0" max="30" step="5" value="${b}" data-input="buffer" aria-label="여유 시간"></div>`;
+  h+=`<div class="card" id="calcBox">${calcInner(tmp)}</div>`+lvCard(a);
+  h+='<div class="stack"><button class="btn" data-act="detailSave">저장</button></div>';
+  return h;
+};
+SCR.newAppt=()=>{
+  if(!S.draft)S.draft={title:'스터디',day:'23',time:'14:00',repeat:'반복 없음',place:'학교 도서관',transport:'대중교통',imp:'LOW',items:'노트북 충전기'};
+  const d=S.draft, opt=(arr,v)=>arr.map(([val,l])=>`<option value="${val}"${String(val)===String(v)?' selected':''}>${l}</option>`).join('');
+  return top(backBtn)+`<h1 class="ttl">새 일정 만들기</h1><p class="lead">약속 정보를 바탕으로 필요한 알람을 계산해요.</p>
+  <div class="card"><p class="lbl">일정 정보</p>
+    <label class="field"><span class="k">일정명</span><input data-f="title" value="${esc(d.title)}" maxlength="30"></label>
+    <label class="field"><span class="k">날짜</span><select data-f="day">${opt([[22,'5월 22일 (목)'],[23,'5월 23일 (금)'],[24,'5월 24일 (토)']],d.day)}</select></label>
+    <label class="field"><span class="k">시간</span><input type="time" data-f="time" value="${esc(d.time)}"></label>
+    <label class="field"><span class="k">반복</span><select data-f="repeat">${opt([['반복 없음','반복 없음'],['매주','매주 같은 요일']],d.repeat)}</select></label></div>
+  <div class="card"><p class="lbl">장소와 중요도</p>
+    <label class="field"><span class="k">장소</span><select data-f="place">${opt(PLACES.map(p=>[p.name,p.name]),d.place)}</select></label>
+    <label class="field"><span class="k">이동 수단</span><select data-f="transport">${opt(Object.keys(TRANS).map(k=>[k,k]),d.transport)}</select></label>
+    <p class="k small" style="margin:12px 0 8px">중요도</p><div class="opts">${Object.entries(IMP).map(([k,v])=>`<button class="opt${d.imp===k?' on':''}" data-act="naImp" data-v="${k}" aria-pressed="${d.imp===k}">${v.label}</button>`).join('')}</div></div>
+  <div class="card"><label class="field"><span class="k">준비물</span><input data-f="items" value="${esc(d.items)}" placeholder="쉼표로 구분"></label></div>
+  <div class="stack"><button class="btn" data-act="naCalc">저장하고 알람 설정하기</button></div>`;
+};
+SCR.wake=()=>{
+  const w=S.wake, ph=w.phase;
+  let flow='<span class="done">해제됨</span><i>→</i>';
+  flow+=`<span class="${ph==='observing'?'on':'done'}">관찰 중</span><i>→</i>`;
+  if(ph==='prompt')flow+='<span class="on">확인 알림</span>';
+  else if(ph==='confirmed'&&w.how==='본인 응답')flow+='<span class="done">확인 알림</span><i>→</i><span class="on">기상 확정</span>';
+  else if(ph==='confirmed')flow+='<span class="on">기상 확정</span>';
+  else flow+='<span>기상 확정</span>';
+  let h=top(S.stack.length>1?backBtn:sid('H08'),S.stack.length>1?sid('H08'):'')+'<h1 class="ttl">기상 확인</h1><p class="lead">알람을 끈 것만으로는 기상으로 보지 않아요.</p>'+`<div class="flow" aria-label="판정 단계">${flow}</div>`;
+  const meters=`${meter('누적 사용 · 해제 후 10분',w.usage,5,S.theta)}${meter('최근 사용 · 뒤쪽 5분',w.recent,5,null)}<p class="formula">기상 확정 = 누적 사용 ≥ θ(${S.theta}분) 그리고 최근 사용 &gt; 0</p>`;
+  if(ph==='idle')return h+'<div class="card"><p class="empty">기상 알람을 해제하면 여기서 기상을 판정해요.</p></div>';
+  if(ph==='observing'){
+    h+=`<div class="card"><p class="lbl">${fmt(w.at)}에 해제 · 10분 동안 화면 사용을 보고 있어요</p>${meters}</div>`;
+    h+='<div class="sim"><p>시연용 · 해제 후 10분을 어떻게 보낼지 골라 보세요</p><div class="stack2"><button class="btn" data-act="simUse">폰을 보며 일어나기</button><button class="btn ghost" data-act="simSleep">알람만 끄고 다시 잠들기</button></div></div>';
+  }else if(ph==='prompt'){
+    h+=`<div class="notif" role="alert"><div class="nh"><b>Re:Spec Alarm</b><small>${hm(S.now).s}</small></div><b>지금 일어나셨나요?</b><p>응답하면 캡스톤팀에 기상 완료로 표시돼요.</p><button class="btn sm" data-act="confirmYes">일어났어요</button></div>`;
+    h+=`<div class="card"><p class="lbl">조건을 채우지 못해 확인 알림을 보냈어요</p>${meters}</div>`;
+    h+='<div class="sim"><p>시연용</p><button class="btn ghost" data-act="noReply">응답 없이 5분 지나기</button></div>';
+  }else{
+    h+=`<div class="done-big"><span class="ck" aria-hidden="true">✓</span><b>기상 확정 · ${fmt(S.me.wakeAt)}</b><p class="small">${w.how==='본인 응답'?'확인 알림에 직접 응답했어요':'화면 사용으로 자동 판정했어요'} · 캡스톤팀에 공유했어요</p></div>`;
+    h+=`<div class="card">${meters}</div><div class="stack"><button class="btn" data-act="tab" data-t="home">홈으로</button><button class="btn ghost" data-act="openGroup" data-id="cap">캡스톤팀 기상 현황 보기</button></div>`;
+  }
+  return h;
+};
+SCR.group=()=>{
+  const seg=S.seg.group;
+  let h=top(sid(seg==='friend'?'F01':'G01'),'<button class="tlink" data-act="openPerm" data-rel="cap">권한 관리</button>')+`<h1 class="ttl">친구와 그룹</h1><p class="lead">${seg==='friend'?'관계를 만들고 서로 공유할 정보를 관리해요.':'목적에 맞는 그룹을 만들고 공유 범위를 정해요.'}</p>`+segHtml('group',[['friend','친구'],['group','그룹']],seg);
+  if(seg==='friend'){
+    h+='<div class="search"><span aria-hidden="true">⌕</span><input placeholder="이름 또는 사용자 ID 검색" aria-label="친구 검색"><button class="tlink" data-act="toastMsg" data-m="목업에서는 검색 결과가 없어요">추가</button></div>';
+    S.requests.forEach(pid=>{h+=`<div class="card req">${avatar(pid)}<span class="grow"><b>${P[pid].name}</b><small>${P[pid].handle}의 친구 요청</small></span><button class="btn sm" data-act="acceptFriend" data-pid="${pid}">수락</button></div>`;});
+    h+=`<div class="h2">내 친구<small>${S.friends.length}명</small></div><div class="card">${S.friends.map(pid=>{const f=finalGrant(pid);return `<button class="person" data-act="go" data-to="friendPerm" data-pid="${pid}">${avatar(pid)}<span class="grow"><b>${P[pid].name}</b><small>${P[pid].handle}</small></span><span class="pr">${f.count?'권한 '+f.count+'개':'공유 없음'} ›</span></button>`;}).join('')}</div>`;
+    h+='<p class="note">친구는 역할이 아닌 관계예요. 친구가 되어도 알람과 기상 상태는 권한을 허용한 뒤에만 볼 수 있어요.</p>';
+  }else{
+    h+='<div class="tiles"><button class="tile dark" data-act="toastMsg" data-m="그룹 만들기는 이번 목업 범위 밖이에요"><b>+</b><span>새 그룹 만들기</span><small>이름과 멤버 설정</small></button><button class="tile" data-act="toastMsg" data-m="초대 코드 입력은 이번 목업 범위 밖이에요"><b>↳</b><span>그룹 참여하기</span><small>초대 코드 입력</small></button></div>';
+    const g=S.groups.cap, gr=S.grants.group.cap;
+    h+=`<div class="h2">참여 중인 그룹<small>2개</small></div><button class="card gcard" data-act="go" data-to="groupDetail" data-id="cap"><span class="gico">캡</span><b>캡스톤팀</b><small>${g.members.length}명 · 오늘 ${wokeCount('cap')}명 기상 완료</small><span class="chips">${PERMS.filter(p=>gr[p[0]]).map(p=>`<span class="chip">${p[1]}</span>`).join('')||'<span class="chip">공유 권한 없음</span>'}</span></button>`;
+    h+='<button class="card gcard row" data-act="toastMsg" data-m="우리 가족은 공유 권한이 없어 기상 상태를 볼 수 없어요"><span class="gico light">가족</span><span class="grow"><b>우리 가족</b><small>3명 · 공유 권한 없음</small></span><span class="small">›</span></button>';
+  }
+  return h;
+};
+SCR.friendPerm=c=>{
+  const pid=c.pid, p=P[pid], f=finalGrant(pid), gN=Object.values(S.groups).filter(g=>g.members.includes(pid)).length;
+  const cell=v=>`<td class="${v?'yes':'no'}">${v?'✓':'·'}</td>`;
+  let h=top(backBtn)+`<h1 class="ttl">${p.name}님의 권한</h1><p class="lead">여러 관계에서 받은 권한을 합친 최종 결과예요.</p>`;
+  h+=`<div class="card"><p class="lbl">관계별 권한을 합치면</p><table class="ptab"><thead><tr><th>관계</th><th>알람 조회</th><th>알람 설정</th><th>기상 조회</th></tr></thead><tbody>${f.rows.map(r=>`<tr><td>${r.src}</td>${cell(r.alarm)}${cell(r.edit)}${cell(r.wake)}</tr>`).join('')}<tr class="fin"><td>최종</td>${cell(f.alarm)}${cell(f.edit)}${cell(f.wake)}</tr></tbody></table><p class="small">친구 · 함께하는 그룹 ${gN}개 · 하나라도 허용하면 허용</p></div>`;
+  h+=`<div class="h2">${p.short}님이 가진 최종 권한<span class="chip ink">${f.count}개 허용</span></div><div class="card">${PERMS.map(([k,name])=>{const srcs=f.rows.filter(r=>r[k]).map(r=>r.src);return `<div class="perm"><div class="between"><b>${name}</b><span class="small">${f[k]?'허용됨':'허용 안 됨'}</span></div>${srcs.length?`<p class="lbl2">권한 출처</p><div class="chips">${srcs.map(s=>`<span class="chip">${s}</span>`).join('')}</div>`:''}</div>`;}).join('')}</div>`;
+  h+=`<div class="card between"><span><b>관계별 권한 수정</b><small class="block small">출처를 골라 권한을 회수할 수 있어요.</small></span><button class="tbtn" data-act="openPerm" data-rel="f:${pid}">설정</button></div>`;
+  return h;
+};
+function relInfo(rel){
+  if(rel.indexOf('f:')===0){const pid=rel.slice(2);return {type:'friend',label:P[pid].name,sub:'친구',ico:avatar(pid,true)};}
+  const g=S.groups[rel];return {type:'group',label:g.name,sub:'그룹 · 멤버 '+g.members.length+'명',ico:`<span class="gico sm">${g.name.slice(0,1)}</span>`};
+}
+const grantOf=rel=>rel.indexOf('f:')===0?S.grants.friend[rel.slice(2)]:S.grants.group[rel];
+function recvFor(rel){
+  if(rel.indexOf('f:')===0){const pid=rel.slice(2);return (S.received[pid]||[]).filter(r=>r.src==='친구').map(r=>Object.assign({pid},r));}
+  const g=S.groups[rel];
+  return g.members.filter(p=>S.received[p]).map(pid=>{const r=S.received[pid].find(x=>x.src===g.name);return r?Object.assign({pid},r):null;}).filter(Boolean);
+}
+SCR.permSet=()=>{
+  const rel=S.permRel, info=relInfo(rel);
+  if(!S.pDraft||S.pDraft.rel!==rel){const g=grantOf(rel);S.pDraft={rel,alarm:g.alarm,edit:g.edit,wake:g.wake};}
+  const side=S.seg.perm;
+  let h=top(backBtn)+'<h1 class="ttl">공유 권한 설정</h1><p class="lead">관계별로 내가 공유할 정보와 허용할 행동을 정해요.</p>';
+  h+=`<div class="card between"><span class="gq">${info.ico}<span><small class="block small">권한을 적용할 관계</small><b>${info.label}</b><small class="block small">${info.sub}</small></span></span><button class="tlink" data-act="relPick">변경</button></div>`+segHtml('perm',[['give','내가 공유'],['recv','받은 권한']],side);
+  if(side==='give'){
+    h+=`<div class="card">${PERMS.map(([k,name,desc])=>`<div class="kv"><span><b>${name}</b><small class="block">${desc}</small></span>${sw(S.pDraft[k],'pToggle',{k},name)}</div>`).join('')}</div>`;
+    h+=`<div class="card dash"><p class="lbl">적용 방식</p><p class="small">${info.type==='group'?'이 설정은 그룹 관계에서 주는 권한만 바꿔요. 멤버별 최종 권한은 친구 관계와 참여 중인 모든 그룹의 허용 권한을 합쳐 결정돼요.':'이 설정은 친구 관계에서 주는 권한만 바꿔요. 같은 그룹에 있다면 그룹에서 준 권한은 그대로 남아요.'}</p></div>`;
+    h+='<div class="stack"><button class="btn" data-act="pSave">변경사항 저장</button></div>';
+  }else{
+    const rows=recvFor(rel);
+    h+=`<div class="card">${rows.length?rows.map(r=>`<div class="person">${avatar(r.pid)}<span class="grow"><b>${P[r.pid].name}</b><small>${PERMS.filter(p=>r[p[0]]).map(p=>p[1]).join(' · ')||'받은 권한 없음'}</small></span></div>`).join(''):'<p class="empty">이 관계에서 받은 권한이 없어요.</p>'}</div>`;
+  }
+  return h;
+};
+SCR.groupDetail=c=>{
+  const gid=c.id||'cap', g=S.groups[gid], gr=S.grants.group[gid], a=byId('a1');
+  let h=top(backBtn,'<button class="tlink" data-act="toastMsg" data-m="그룹 메뉴는 이번 목업 범위 밖이에요" aria-label="그룹 메뉴">···</button>')+`<h1 class="ttl">${g.name}</h1><p class="lead">${g.members.length}명 · ${g.since}</p>`;
+  h+=`<div class="card"><div class="between"><p class="lbl">그룹 공유 범위</p><button class="tlink" data-act="openPerm" data-rel="${gid}">+ 설정</button></div><div class="chips">${PERMS.filter(p=>gr[p[0]]).map(p=>`<span class="chip">${p[1]}</span>`).join('')||'<span class="chip">없음</span>'}</div></div>`;
+  h+=`<button class="card" data-act="go" data-to="detail" data-id="a1"><p class="lbl">연결 일정</p><div class="between"><b class="big2">${a.title}</b><span class="chip fill">${IMP[a.imp].label}</span></div><small class="block small">${dShort(a.day)} · ${fmt(a.at)} · ${a.place}</small></button>`;
+  h+=`<div class="h2">멤버 · 기상 상태<button class="tlink" data-act="toastMsg" data-m="초대 링크를 복사했어요">+ 초대</button></div><div class="card">${g.members.map(pid=>{
+    const st=memberState(pid);
+    if(pid==='me')return `<div class="person">${avatar(pid)}<span class="grow"><b>나</b><small>${st.text}</small></span><button class="mini" data-act="go" data-to="detail" data-id="a1">내 알람</button></div>`;
+    const r=recvFinal(pid);
+    return `<div class="person">${avatar(pid)}<span class="grow"><b>${P[pid].name}</b><small>${st.text}</small></span><button class="mini" data-act="go" data-to="memberWake" data-pid="${pid}"${r.wake?'':' disabled title="기상 상태 조회 권한이 없어요"'}>기상 확인</button><button class="mini" data-act="go" data-to="sharedAlarm" data-pid="${pid}"${r.alarm?'':' disabled title="알람 조회 권한이 없어요"'}>알람 보기</button></div>`;
+  }).join('')}</div>`;
+  h+='<div class="card dash"><p class="lbl">권한 안내</p><p class="small">그룹에서 권한을 회수해도 친구 관계나 다른 그룹에서 같은 권한을 허용했다면 해당 사용자의 최종 권한은 유지돼요.</p></div>';
+  return h;
+};
+function memberAlarmCard(al,pid,canEdit){
+  const sh=S.shared[al.id]||{on:true,shift:0}, ch=al.chain.map(([t,l])=>[t+sh.shift,l]), f=hm(ch[0][0]);
+  return `<div class="card acard${sh.on?'':' off'}"><div class="acard-h"><span class="small">${dShort(al.day)}</span>${canEdit?sw(sh.on,'shToggle',{id:al.id,pid},'공유 알람 켜기'):''}</div><div class="acard-b static"><span class="bigt"><span class="ampm">${f.ap}</span><span class="num">${f.s}</span><span class="kind">${ch[0][1]}</span></span><span class="chain">${ch.map(([t,l])=>`<span>${fmt(t)} ${l}</span>`).join('<i>-</i>')}</span></div><p class="meta">알람 강도 · ${al.lv}<br>${al.note}</p><p class="foot">${al.appt}</p>${canEdit?`<div class="shift"><button class="tbtn" data-act="shShift" data-id="${al.id}" data-pid="${pid}" data-d="-5">5분 앞당기기</button><button class="tbtn" data-act="shShift" data-id="${al.id}" data-pid="${pid}" data-d="5">5분 늦추기</button></div>`:''}</div>`;
+}
+SCR.memberWake=c=>{
+  const pid=c.pid, p=P[pid], tl=TL[pid];
+  const SRC={'알람 울림':'자동 기록','알람 해제':'기상 미확정','준비 시작':'진행 중','출발':'지오펜스','도착':'지오펜스'};
+  const shown=tl.filter(e=>S.now>=0&&e[0]<=S.now).map(e=>({t:e[0],label:e[1],src:e[2]||SRC[e[1]]}));
+  let h=top(backBtn)+`<h1 class="ttl">${p.short}의 기상 상태</h1><p class="lead">오늘의 기상 알람</p>`+memberAlarmCard(MALARM[pid][0],pid,false);
+  h+='<p class="note">알람 해제가 아니라 본인이 확인한 기상 기록이에요.</p>';
+  h+=`<div class="card"><p class="lbl">오늘의 흐름</p>${shown.length?tlList(shown,true):`<p class="empty">아직 알람이 울리지 않았어요. ${p.short}님의 알람은 ${fmt(tl[0][0])}이에요.</p>`}</div>`;
+  h+=`<div class="card"><p class="lbl">공유 범위</p><b>기상 확인 여부와 시각</b><p class="small">${p.short}님이 '캡스톤팀' 그룹에 허용한 범위만 표시해요. 수면 시간이나 알람 메모는 공유되지 않아요.</p></div>`;
+  h+=`<div class="stack"><button class="btn ghost" data-act="ping" data-pid="${pid}">${p.short}에게 알람 보내기</button></div>`;
+  return h;
+};
+SCR.sharedAlarm=c=>{
+  const pid=c.pid, p=P[pid], r=recvFinal(pid), tags=[];
+  r.rows.forEach(x=>{if(x.alarm)tags.push('조회 · '+x.src);if(x.edit)tags.push('설정 · '+x.src);});
+  let h=top(backBtn,'<button class="tlink" data-act="shLog">변경 기록</button>')+`<h1 class="ttl">${p.short}님의 알람</h1><p class="lead">${p.short}님이 공유한 알람을 확인하고 관리해요.</p>`;
+  h+=`<div class="card"><b>${r.edit?'조회와 설정 권한이 있어요':'조회 권한만 있어요'}</b><div class="chips" style="margin-top:8px">${tags.map(t=>`<span class="chip">${t}</span>`).join('')}</div></div>`;
+  h+=MALARM[pid].map(al=>memberAlarmCard(al,pid,r.edit)).join('');
+  h+=`<p class="note">${r.edit?`변경하면 ${p.short}님에게 알림이 전송되고 권한 변경 기록에 남아요.`:'알람 설정 권한이 없어 볼 수만 있어요.'}</p>`;
+  return h;
+};
+function cardMsg(m){
+  const st=S.chat.card?S.chat.card.status:'pending';
+  return `<div class="msg ai xcard"><small>대화에서 찾은 내용</small>
+  <div class="xr"><span>일정</span><b>스터디</b></div><div class="xr"><span>날짜 · 시간</span><b>5월 23일 (금) 오후 2:00</b></div><div class="xr"><span>장소</span><b>학교 도서관</b></div><div class="xr"><span>준비물</span><b>노트북 충전기<em>바로 추가함</em></b></div>
+  <p class="q">“내일 오후 2시 스터디로 저장할까요?”</p>
+  ${st==='pending'?'<div class="xbtns"><button class="btn sm" data-act="chatSave">저장</button><button class="btn sm ghost" data-act="chatEdit">수정</button><button class="btn sm plain" data-act="chatReject">저장 안 함</button></div>':`<p class="xs">${st==='saved'?'저장했어요':'저장하지 않았어요'}</p>`}<time>AI · ${fmt(m.t)}</time></div>`;
+}
+SCR.ai=()=>{
+  const ch=S.chat;
+  let h=top(sid('A02'),'<button class="tlink" data-act="chatDone">대화 종료</button>')+'<h1 class="ttl">하루를 돌아봐요</h1><p class="lead">기본 AI · 차분한 코치</p><div class="chat" aria-live="polite">';
+  ch.msgs.forEach(m=>{h+=m.who==='card'?cardMsg(m):`<div class="msg ${m.who}">${esc(m.text)}<time>${m.who==='ai'?'AI · ':''}${fmt(m.t)}</time></div>`;});
+  if(ch.busy&&!ch.listen)h+='<div class="msg ai typing" aria-label="AI가 답하는 중"><i></i><i></i><i></i></div>';
+  h+='</div>';
+  const next=SCRIPT[ch.step], canSay=!ch.busy&&next&&next.who==='me';
+  const status=ch.listen?'듣고 있어요…':ch.busy?'AI가 정리하고 있어요':canSay?'말할 준비가 됐어요':ch.card&&ch.card.status==='pending'?'찾은 일정을 확인해 주세요':'대화를 마치려면 완료를 눌러 주세요';
+  h+=`<div class="composer"><div class="cbox"><span class="small">${status}</span>${ch.mode==='text'&&canSay?`<div class="tin"><input data-input="chat" value="${esc(ch.text!=null?ch.text:next.text)}" aria-label="보낼 메시지"><button class="btn sm" data-act="chatSend">보내기</button></div>`:''}<div class="cbtns"><button class="pill${ch.mode==='text'?' on':''}" data-act="chatMode" aria-pressed="${ch.mode==='text'}">텍스트</button><button class="mic${ch.listen?' listen':''}" data-act="chatSpeak"${canSay?'':' disabled'}>말하기</button><button class="pill" data-act="chatDone">완료</button></div></div></div>`;
+  return h;
+};
+function genJournal(){
+  const m=S.me, a=byId('a1'), snz=S.events.filter(e=>e.label.indexOf('미루기')>=0).length;
+  const late=m.arriveAt!=null?Math.max(0,m.arriveAt-a.at):null, said=S.chat.msgs.some(x=>x.who==='me');
+  let s='';
+  if(m.wakeAt!=null)s+=`${snz?`알람을 ${snz}번 미룬 뒤 `:''}${fmt(m.wakeAt)}에 일어났어요. `;
+  if(m.departAt!=null&&m.arriveAt!=null)s+=`${fmt(m.departAt)}에 집을 나서 ${fmt(m.arriveAt)}에 ${a.place}에 도착했고, ${a.title}에 ${late?late+'분 늦었어요':'늦지 않았어요'}. `;
+  else if(m.arriveAt!=null)s+=`${fmt(m.arriveAt)}에 ${a.place}에 도착했어요. `;
+  if(said)s+='회의 자료를 챙기느라 샤워 시간을 줄인 게 아쉬웠다고 했어요.';
+  if(!s)s='오늘은 남은 기록이 많지 않아 짧게 적어요. 내일은 기상 확인부터 남겨 봐요.';
+  else if(m.wakeAt==null&&m.arriveAt==null)s='오늘은 기록이 많지 않아 짧게 남겨요. '+s;
+  const facts=S.events.filter(e=>/^(기상 확인|집 출발|도착|재알람|일정 저장|준비물 저장)|미루기/.test(e.label)).map(e=>({t:e.t,label:e.label,src:e.src}));
+  if(said)facts.push({t:1345,label:'회고 · 회의 자료 때문에 샤워 시간을 줄임',src:'AI 대화'});
+  facts.sort((x,y)=>x.t-y.t);
+  const prev=S.journal;
+  S.journal={ai:s,text:prev&&prev.edited?prev.text:s,edited:prev?prev.edited:false,facts,
+    coach:'이번 주 세 번, 회의가 있는 날 아침 준비가 바빴어요. 전날 밤에 자료와 가방을 챙기면 아침 준비가 줄어들어요.',
+    cheer:m.arriveAt!=null&&!late?'오늘도 약속 시간 안에 도착했어요. 이 흐름을 이어가요.':'내일은 조금 더 여유 있게 시작해 봐요.',
+    routine:prev?prev.routine:'pending'};
+}
+SCR.journal=()=>{
+  const j=S.journal;
+  let h=top(S.stack.length>1?backBtn:sid('A03'));
+  if(!j)return h+'<h1 class="ttl">하루 기록</h1><div class="card"><p class="empty">자기 전 AI 대화를 마치면 오늘 기록으로 일기를 만들어요.</p><div class="stack"><button class="btn" data-act="tab" data-t="ai">AI 대화 하러 가기</button></div></div>';
+  h+='<h1 class="ttl">5월 22일 하루 기록</h1><p class="lead">기록된 사실만 골라 AI가 쓴 일기예요.</p>';
+  h+=`<div class="card"><div class="between"><p class="lbl">AI 일기</p><span class="chip fill">${j.edited?'직접 수정함':'AI 작성'}</span></div>${S.editJ?`<textarea data-input="journal" rows="6" aria-label="일기 수정">${esc(S.jText)}</textarea><div class="row2"><button class="btn sm" data-act="jSave">저장</button><button class="btn sm ghost" data-act="jCancel">취소</button></div>`:`<p class="jtext">${esc(j.text)}</p><button class="tlink" data-act="jEdit">수정</button>`}<p class="note sm">숫자와 시각은 기록과 대조해 확인했어요.</p></div>`;
+  h+=`<div class="card"><p class="lbl">오늘의 사실 · 출처 우선순위 직접 입력 &gt; 자동 &gt; 알림 &gt; AI</p>${j.facts.length?tlList(j.facts,false):'<p class="empty">기록된 사실이 없어요. 데모 컨트롤에서 아침 흐름을 먼저 진행해 보세요.</p>'}</div>`;
+  h+=`<div class="card"><p class="lbl">회고 코칭</p><p class="jtext">${j.coach}</p><p class="lbl">격려</p><p class="jtext">${j.cheer}</p></div>`;
+  if(j.routine==='pending')h+='<div class="card"><p class="lbl">루틴 제안 · 같은 문제가 최근 7일 중 3일</p><b class="big2">회의 전날 준비</b><p class="small">수요일 밤 9:30부터 3단계 · 아침 알람은 앞당기지 않아요</p><div class="row2"><button class="btn sm" data-act="rAccept">루틴 만들기</button><button class="btn sm ghost" data-act="rDecline">괜찮아요</button></div></div>';
+  else h+=`<div class="card"><p class="lbl">루틴 제안</p><p class="small">${j.routine==='accepted'?'회의 전날 준비 루틴을 만들었어요.':'이 루틴은 14일 동안 다시 제안하지 않아요.'}</p></div>`;
+  return h;
+};
+SCR.routine=()=>{
+  const r=S.rDraft||S.rNight;if(!r)return top(backBtn)+'<p class="empty">편집할 루틴이 없어요.</p>';
+  const D=['월','화','수','목','금','토','일'];
+  let h=top(backBtn)+`<h1 class="ttl">${esc(r.title)}</h1><p class="lead">제안된 루틴을 확인하고 내 생활에 맞게 조정하세요.</p>`;
+  h+=`<div class="card"><p class="lbl">루틴 정보</p>${kv('이름',esc(r.title))}${kv('목표',esc(r.goal))}</div>`;
+  h+=`<div class="card"><p class="lbl">반복 요일</p><div class="days">${D.map(d=>`<button class="${r.days.indexOf(d)>=0?'on':''}" data-act="rDay" data-d="${d}" aria-pressed="${r.days.indexOf(d)>=0}">${d}</button>`).join('')}</div></div>`;
+  h+=`<div class="card"><div class="between"><p class="lbl">단계별 실행</p><button class="tlink" data-act="rAdd">+ 단계 추가</button></div>${r.steps.map((s,i)=>`<div class="rstep"><b>${h24(s.t)}</b><span><b class="nm">${esc(s.name)}</b><small>${s.dur}분 · 알람 ${s.alarm?'있음':'없음'}</small></span>${sw(s.alarm,'rStepAlarm',{i},s.name+' 알람')}</div>`).join('')}</div>`;
+  h+=`<div class="card between"><span><b>루틴 활성화</b><small class="block small">${r.days.length?`다음 ${r.days[0]}요일부터 시작해요.`:'반복 요일을 골라 주세요.'}</small></span>${sw(r.active,'rActive',{},'루틴 활성화')}</div>`;
+  h+=`<div class="stack"><button class="btn" data-act="rSave"${r.days.length?'':' disabled'}>루틴 저장</button></div>`;
+  return h;
+};
+function recMonth(){
+  const W=['월','화','수','목','금','토','일'];let cells='<span></span><span></span><span></span>';
+  for(let d=1;d<=31;d++){
+    const wk=((d+2)%7)>=5, today=d===22;
+    const dot=d<22?`<i class="${wk?'part':''}"></i>`:today&&(S.me.wakeAt!=null||S.journal)?'<i></i>':'<i class="none"></i>';
+    const act=today?'data-act="seg" data-k="rec" data-v="day"':`data-act="toastMsg" data-m="${d>22?'아직 오지 않은 날이에요':`5월 ${d}일 기록은 이번 목업에 없어요`}"`;
+    cells+=`<button class="${today?'today':''}${d>22?' fut':''}" ${act} aria-label="5월 ${d}일"><span>${d}</span>${dot}</button>`;
+  }
+  return `<div class="card"><div class="between cal-h"><span>‹</span><b>2025년 5월</b><span>›</span></div><div class="cal">${W.map(w=>`<span class="w">${w}</span>`).join('')}${cells}</div><div class="legend"><span><i></i>기록 완료</span><span><i class="part"></i>일부 기록</span></div></div>
+  <button class="card between" data-act="go" data-to="journal"><span><small class="block small">5월 22일 기록</small><b>실행 기록 ${S.events.length}개 · AI 일기 ${S.journal?'작성됨':'아직 없음'}</b></span><span class="small">›</span></button>`;
+}
+function recWeek(){
+  const days=[{d:19,w:'월',wake:451,score:76},{d:20,w:'화',wake:440,score:92},{d:21,w:'수',wake:444,score:84}];
+  const a1w=alarmsOf(byId('a1'))[0].t;
+  if(S.me.wakeAt!=null){const ok=S.me.wakeAt<=a1w+10;days.push({d:22,w:'목',wake:S.me.wakeAt,score:ok?88:61});}
+  const avg=Math.round(days.reduce((s,x)=>s+x.wake,0)/days.length), diff=453-avg, goal=days.filter(x=>x.score>=70).length;
+  const strip=[19,20,21,22,23,24,25].map((d,i)=>`<span class="${d===22?'on':''}${d>22?' fut':''}"><small>${['월','화','수','목','금','토','일'][i]}</small><b>${d}</b><i></i></span>`).join('');
+  return `<div class="card"><div class="between cal-h"><span>‹</span><span class="ctr"><b>5월 19일 — 25일</b><small class="block small">이번 주</small></span><span>›</span></div><div class="wstrip">${strip}</div></div>
+  <div class="stats"><div class="card stat"><small>평균 기상</small><b class="big">${hm(avg).s}</b><small>${diff>0?`지난주보다 ${diff}분 빨라요`:diff<0?`지난주보다 ${-diff}분 늦어요`:'지난주와 같아요'}</small></div><div class="card stat"><small>목표 기상률</small><b class="big">${Math.round(goal/days.length*100)}%</b><small>이번 주 ${goal}/${days.length}일</small></div></div>
+  <div class="card"><p class="lbl">주간 실행 흐름</p>${days.map(x=>`<div class="bar"><span>${x.w} ${x.d}</span><span class="tr"><b style="width:${x.score}%"></b></span><span>${x.score}</span></div>`).join('')}${S.me.wakeAt==null?'<p class="note sm">오늘 기록은 기상 확인 뒤에 더해져요.</p>':''}</div>
+  <div class="card"><p class="lbl">이번 주 AI 코칭</p><p class="jtext">회의가 있는 날은 준비가 평균 12분 길었어요. 전날 밤 준비 루틴을 만들면 아침이 여유로워져요.</p></div>`;
+}
+function recDay(){
+  const a=byId('a1'), plan=alarmsOf(a).map(x=>({t:x.t,label:TYPE[x.type]+(x.type==='ARRIVE'?' 목표':' 알람'),src:a.title,past:x.t<=S.now&&S.now>=0}));
+  return `<div class="card"><p class="lbl">5월 22일 · 설정한 값</p>${tlList(plan,false)}</div>
+  <div class="card"><p class="lbl">실제로 일어난 일</p>${S.events.length?tlList(S.events,true):'<p class="empty">아직 기록이 없어요. 데모 컨트롤에서 오전 8:00 기상 알람부터 진행해 보세요.</p>'}</div>`;
+}
+SCR.rec=()=>{
+  const seg=S.seg.rec;
+  return top(sid('R02'))+'<h1 class="ttl">나의 기록</h1><p class="lead">실행 흐름과 하루의 변화를 확인해요.</p>'+segHtml('rec',[['month','월간'],['week','주간'],['day','일간']],seg)+'<div style="height:12px"></div>'+(seg==='month'?recMonth():seg==='week'?recWeek():recDay());
+};
+SCR.suggestion=()=>{
+  const a=byId('a3'), L=alarmsOf(a), w=L[0].t;
+  let h=top(backBtn)+'<h1 class="ttl">다음 알람을 조정할까요?</h1><p class="lead">최근 실행 기록을 바탕으로 더 잘 맞는 시간을 찾았어요.</p>';
+  h+=`<div class="card"><p class="lbl">제안 이유</p><b class="big2">최근 3번의 준비가<br>예상보다 평균 12분 더 걸렸어요.</b><div class="trio">${[['1회 전','+10분'],['2회 전','+14분'],['3회 전','+12분']].map(([k,v])=>`<span><small>${k}</small><b>${v}</b></span>`).join('')}</div></div>`;
+  if(S.sug.status==='pending'){
+    h+=`<div class="card"><p class="lbl">변경 제안 · ${dShort(a.day)} ${a.title}</p><div class="cmp"><span><small>기존</small><b>${hm(w).s}</b></span><i>→</i><span class="c-new"><small>제안</small><b>${hm(w-10).s}</b></span></div><p class="small ctr">준비 알람도 10분 앞당겨져요.</p></div>`;
+    h+='<div class="stack"><button class="btn" data-act="sugApply" data-v="10">제안 적용하기</button><button class="btn ghost" data-act="sugEdit">직접 수정하기</button><button class="btn plain" data-act="sugDismiss">이번 제안 무시</button></div>';
+  }else if(S.sug.status==='applied'){
+    h+=`<div class="card"><p class="lbl">적용했어요</p><b class="big2">${dShort(a.day)} ${a.title}<br>기상 ${fmt(w)} · 준비 ${fmt(L[1].t)}</b><p class="small">다음 기록에서 성능이 나빠지면 이전 값으로 되돌려요.</p></div><div class="stack"><button class="btn ghost" data-act="sugUndo">이전 값으로 되돌리기</button></div>`;
+  }else{
+    h+='<div class="card"><p class="small">이번 제안을 무시했어요. 같은 제안은 당분간 다시 보이지 않아요.</p></div><div class="stack"><button class="btn ghost" data-act="sugReopen">제안 다시 보기</button></div>';
+  }
+  return h;
+};
+
+/* ---------- 알람 울림 (H07) ---------- */
+function voiceLine(a,r){
+  const L=alarmsOf(a), dep=L.find(x=>x.type==='DEPART').t, at=spoken(a.at), lv=axLv(a,'voice'), tt=josa(a.title,'이','가');
+  if(r.type==='WAKE'){
+    if(r.re)return `아직 기상 확인이 안 됐어요. ${a.title}에 늦지 않게 지금 일어나 주세요.`;
+    if(r.snoozed)return `${r.min}분 미뤘어요. ${spoken(dep)} 출발까지 ${dep-mod(S.now)}분 남았어요. 지금 일어나면 아직 괜찮아요.`;
+    return [`좋은 아침이에요. 오늘 ${at}에 ${tt} 있어요. 천천히 일어나 볼까요?`,`좋은 아침이에요. 오늘 ${at}에 ${tt} 있어요. 지금 일어나면 여유롭게 준비할 수 있어요.`,`지금 일어나야 해요. ${at} ${a.title}, 최근 4주에 두 번 늦었어요. 바로 일어나세요.`][lv];
+  }
+  if(r.type==='PREPARE')return a.items.length?`준비를 시작할 시간이에요. ${a.items.join(', ')} 챙기는 것 잊지 마세요.`:`준비를 시작할 시간이에요. ${spoken(dep)}에 출발해요.`;
+  if(a.group==='cap'){
+    const o=['sy','jh','js'], gone=o.filter(p=>TL[p].some(e=>e[1]==='출발'&&e[0]<=S.now));
+    const prep=o.filter(p=>gone.indexOf(p)<0&&TL[p].some(e=>e[1]==='준비 시작'&&e[0]<=S.now));
+    let s='출발 시간입니다.';
+    if(gone.length)s+=` 캡스톤팀에서 ${josa(joinKo(gone.map(p=>P[p].short+'님')),'이','가')} 이미 출발했어요.`;
+    if(prep.length)s+=` ${josa(joinKo(prep.map(p=>P[p].short+'님')),'은','는')} 기상 후 준비를 시작했어요.`;
+    return s;
+  }
+  return `출발 시간입니다. 지금 나가면 ${at} ${a.title}에 여유 ${a.buffer}분을 두고 도착해요.`;
+}
+function ringHtml(){
+  const r=S.ring, a=byId(r.aid), head={WAKE:'일어날 시간이에요',PREPARE:'준비할 시간이에요',DEPART:'출발할 시간이에요'}[r.type];
+  const bg=axLv(a,'bg'), vo=axLv(a,'voice'), vi=axLv(a,'vib');
+  return `<div class="ring ${r.type.toLowerCase()}" role="alertdialog" aria-label="${head}">
+  <div class="ring-top"><span class="sid lt">H07</span>${a.imp!=='LOW'?'<span class="chip dark">중요 일정</span>':''}</div>
+  <p class="ring-head">${head}</p><p class="ring-time">${hm(S.now).s}</p>
+  <p class="ring-title">${esc(a.title)}</p><p class="ring-sub">${fmt(a.at)} · ${esc(a.place)}</p>
+  <div class="voice"><small>음성 안내 · ${LV[vo].voice}</small><p>“${voiceLine(a,r)}”</p><span class="wave" aria-hidden="true">${'<i></i>'.repeat(16)}</span></div>
+  <p class="lvline">알람 강도 ${LV[bg].name} · 배경음 ${LV[bg].bg} · 진동 ${LV[vi].vib}</p>
+  <div class="snz"><small>미루기 시간</small><div class="snz-opts" role="group" aria-label="미루기 시간">${[5,10,15].map(m=>`<button class="${S.snoozeMin===m?'on':''}" data-act="snzMin" data-m="${m}" aria-pressed="${S.snoozeMin===m}">${m}분</button>`).join('')}</div>
+  <div class="ring-btns"><button class="rbtn" data-act="snooze">${S.snoozeMin}분 미루기</button><button class="rbtn main" data-act="dismiss">알람 해제</button></div></div></div>`;
+}
+
+/* ---------- 시트 ---------- */
+function relOptions(){return ['cap','fam'].concat(S.friends.map(p=>'f:'+p)).map(rel=>Object.assign({rel},relInfo(rel)));}
+function calcHtml(){
+  const e=S.calc, a=e.a, L=alarmsOf(a), f=L[0], lv=autoLv(a);
+  return `<h3>알람을 이렇게 맞출게요</h3><p class="small">${esc(a.title)} · ${dShort(a.day)} ${fmt(a.at)} · ${esc(a.place)}</p>
+  <ol class="calc"><li><span>이동시간 ${a.travel}분<small>카카오 길찾기 · ${esc(a.transport)} 최소 소요시간</small></span></li>
+  <li><span>공통 P80 ${e.common}분<small>분위수 회귀 τ = 0.8 · ${a.wake?'기상부터 출발까지':'같은 날 기상 알람이 있어 외출 준비만'}</small></span></li>
+  <li><span>개인 보정 +${e.corr}분<small>내 기록 ${e.n}건 · 가중치 ${e.n}÷(${e.n}+${e.k}) = ${e.w} × 개인 오차 P80 ${e.resid}분</small></span></li>
+  <li><span>${TYPE[f.type]} ${fmt(f.t)}<small>${fmt(a.at)} − 여유 ${a.buffer} − 이동 ${a.travel} − 준비 ${a.p80}</small></span></li>
+  <li><span>알람 강도 ${LV[lv].name}<small>중요도 ${IMP[a.imp].label} ${IMP[a.imp].base}점 + 최근 4주 늦잠 지각 ${S.late4w>=2?1:0}점</small></span></li></ol>
+  <div class="chips">${L.map(x=>`<span class="chip fill">${TYPE[x.type]} ${fmt(x.t)}</span>`).join('')}</div>
+  <div class="stack"><button class="btn" data-act="calcSave">알람 저장</button><button class="btn plain" data-act="mClose">돌아가서 수정</button></div>`;
+}
+function modalHtml(){
+  const m=S.modal;let inner='';
+  if(m.kind==='calc')inner=calcHtml();
+  else if(m.kind==='confirm')inner=`<h3>${m.title}</h3><p class="small">${m.body}</p><div class="stack">${m.actions.map(x=>`<button class="btn${x.ghost?' ghost':''}" data-act="${x.act}">${x.label}</button>`).join('')}</div>`;
+  else if(m.kind==='rel')inner=`<h3>권한을 적용할 관계</h3><div class="card flat">${relOptions().map(o=>`<button class="person" data-act="relSet" data-rel="${o.rel}">${o.ico}<span class="grow"><b>${o.label}</b><small>${o.sub}</small></span>${o.rel===S.permRel?'<span class="chip ink">선택됨</span>':''}</button>`).join('')}</div>`;
+  else if(m.kind==='sugEdit'){const w=alarmsOf(byId('a3'))[0].t;inner=`<h3>기상 시각 직접 정하기</h3><p class="small">수업 · 5월 23일 금 · 지금 ${fmt(w)}</p><div class="stepper"><button class="tbtn" data-act="sugStep" data-d="-5">5분 늦게</button><b>${fmt(w-m.v)}</b><button class="tbtn" data-act="sugStep" data-d="5">5분 일찍</button></div><div class="stack"><button class="btn" data-act="sugApplyEdit"${m.v?'':' disabled'}>이 시간으로 적용</button><button class="btn plain" data-act="mClose">취소</button></div>`;}
+  else if(m.kind==='log')inner=`<h3>변경 기록</h3>${S.shareLog.length?tlList(S.shareLog.map(l=>({t:l.t,label:l.text,src:'나'})),false):'<p class="empty">아직 바꾼 내용이 없어요.</p>'}<div class="stack"><button class="btn ghost" data-act="mClose">닫기</button></div>`;
+  return `<div class="modal" data-act="mClose"><div class="sheet" data-act="noop" role="dialog" aria-modal="true">${inner}</div></div>`;
+}
+/* ---------- 렌더 ---------- */
+function tabsHtml(){
+  const root=S.stack[0].s;
+  return [['home','01','홈'],['group','02','그룹'],['ai','03','AI'],['rec','04','기록']].map(([k,n,l])=>`<button class="${root===k?'on':''}" data-act="tab" data-t="${k}"${root===k?' aria-current="page"':''}><span class="n">${n}</span>${l}</button>`).join('');
+}
+function stepList(){
+  const AL=alarmsOf(byId('a1')), tOf=ty=>AL.find(x=>x.type===ty).t;
+  const L=STEPS.map(s=>{const x=Object.assign({},s);
+    if(s.ring){const al=AL.find(y=>y.type===s.ring[1]);if(al){x.t=al.t;x.clock=fmt(al.t);}}
+    if(s.id==='morn'){x.t=Math.min(475,AL[0].t-5);x.clock=fmt(x.t);}
+    if(s.act==='leave'){x.t=tOf('DEPART')+3;x.clock=fmt(x.t);}
+    if(s.act==='arrive'){x.t=tOf('ARRIVE');x.clock=fmt(x.t);}
+    return x;});
+  if(S.snooze){const i=L.findIndex(s=>s.id==='wake');L.splice(i+1,0,{id:'resnz',clock:fmt(S.snooze.until),label:'미룬 알람 다시 울림',note:'강도는 그대로, 문구만 바뀜',act:'resnooze'});}
+  return L;
+}
+function renderPanel(){
+  const c=cur(), m=S.ring?META.ring:(META[c.s]||{id:'',name:'',alg:''}), d=dayOf(S.now);
+  $('#panel').innerHTML=`<button class="p-close" data-act="panelClose">닫기</button>
+  <h2>Re:Spec Alarm 목업</h2><p class="p-sub">403 Forbidden · 눌러서 따라가는 하루</p>
+  <div class="p-clock"><span class="d">5월 ${d}일 (${DOW[d]})</span><span class="t">${fmt(S.now)}</span><span class="s">${m.id} ${m.name} · ${m.alg}</span></div>
+  <p class="p-h">하루 따라가기</p><ol class="steps">${stepList().map((s,i)=>`<li><button class="${S.stepId===s.id?'on':''}" data-act="step" data-i="${i}"${S.stepId===s.id?' aria-current="step"':''}><span class="stc">${s.clock}</span><span class="sl">${s.label}<span class="sn">${s.note}</span></span></button></li>`).join('')}</ol>
+  <p class="p-h">바꿔 보기</p><div class="exp"><label><input type="checkbox" id="expLate"${S.late4w>=2?' checked':''}><span>최근 4주 늦잠 지각 2회<small>ALG-02 · 중요 일정의 강도가 '강'으로 올라가요</small></span></label>
+  <label><span>기상 판정 기준 θ<small>ALG-04 · 해제 후 누적 화면 사용</small></span><select id="expTheta">${[1,2,3].map(v=>`<option value="${v}"${S.theta===v?' selected':''}>${v}분</option>`).join('')}</select></label></div>
+  <button class="p-reset" data-act="reset">처음부터 다시</button>
+  <p class="p-note">숫자는 발표 자료의 10시 팀 주간회의 예시에 맞췄어요. 화면 안의 버튼도 모두 눌러 볼 수 있어요.</p>`;
+}
+function render(){
+  const view=$('#view'), c=cur(), key=c.s+(c.id||'')+(c.pid||''), keep=S._key===key?view.scrollTop:0;
+  view.className=c.s==='ai'?'chatview':'';
+  view.innerHTML=(SCR[c.s]||SCR.home)(c);
+  if(c.s==='ai')view.scrollTop=view.scrollHeight;else view.scrollTop=keep;
+  S._key=key;
+  $('#tabs').innerHTML=tabsHtml();
+  $('#overlay').innerHTML=S.ring?ringHtml():'';
+  $('#modal').innerHTML=S.modal?modalHtml():'';
+  $('#sbarTime').textContent=hm(S.now).s;
+  renderPanel();
+}
+let tT;
+function toast(msg){const el=$('#toast');el.textContent=msg;el.classList.add('show');clearTimeout(tT);tT=setTimeout(()=>el.classList.remove('show'),2600);}
+function go(s,p){S.stack.push(Object.assign({s},p||{}));render();}
+function closePanel(){$('#panel').classList.remove('open');}
+function rewind(t){
+  S.events=S.events.filter(e=>e.t<=t);
+  ['wakeAt','departAt','arriveAt'].forEach(k=>{if(S.me[k]!=null&&S.me[k]>t)S.me[k]=null;});
+  if(S.wake.at!=null&&S.wake.at>t)S.wake={phase:'idle',at:null,usage:0,recent:0,how:null};
+  if(S.snooze&&S.snooze.until>t)S.snooze=null;
+}
+function wakeConfirm(how){
+  S.wake.phase='confirmed';S.wake.how=how;S.me.wakeAt=S.now;
+  logE(S.now,'기상 확인',how==='본인 응답'?'직접 응답':'자동 판정');
+  toast('기상을 확인했어요 · 캡스톤팀에 공유했어요');
+}
+function chatDraft(){return {title:'스터디',day:'23',time:'14:00',repeat:'반복 없음',place:'학교 도서관',transport:'대중교통',imp:'LOW',items:'노트북 충전기'};}
+function chatResolve(st,a){
+  const ch=S.chat;if(!ch.card||ch.card.status!=='pending')return;
+  ch.card.status=st;let txt;
+  if(st==='saved'){const L=alarmsOf(a),pr=L.find(x=>x.type==='PREPARE')||L[0],dp=L.find(x=>x.type==='DEPART');txt=`저장했어요. 내일 ${fmt(pr.t)} 준비, ${fmt(dp.t)} 출발 알람을 맞춰 둘게요. 오늘 대화는 여기까지 할까요?`;}
+  else txt='알겠어요. 스터디는 저장하지 않았어요. 오늘 대화는 여기까지 할까요?';
+  ch.msgs.push({who:'ai',text:txt,t:S.now});
+}
+function userSay(txt){const ch=S.chat;ch.msgs.push({who:'me',text:txt,t:S.now});ch.step++;ch.text=null;render();setTimeout(aiTurn,800);}
+function aiTurn(){
+  const ch=S.chat, line=SCRIPT[ch.step];
+  if(line){
+    if(line.who==='card'){
+      ch.card={status:'pending'};ch.msgs.push({who:'card',t:S.now});
+      if(!S.todos.some(x=>x.id==='t4')){S.todos.push({id:'t4',title:'노트북 충전기',day:23,done:false});logE(S.now,'준비물 저장 · 노트북 충전기','AI 대화');}
+    }else ch.msgs.push({who:'ai',text:line.text,t:S.now});
+    ch.step++;
+  }
+  ch.busy=false;render();
+}
+
+/* ---------- 동작 ---------- */
+const A={};
+A.noop=()=>{};
+A.go=d=>go(d.to,{id:d.id,pid:d.pid});
+A.back=()=>{if(S.stack.length>1)S.stack.pop();S.dDraft=null;render();};
+A.tab=d=>{S.stack=[{s:d.t}];S.dDraft=null;render();};
+A.toastMsg=d=>toast(d.m);
+A.seg=d=>{S.seg[d.k]=d.v;if(d.k==='rec'&&S.stack[0].s!=='rec')S.stack=[{s:'rec'}];render();};
+A.toggleAppt=d=>{S.off[d.id]=!S.off[d.id];toast(S.off[d.id]?'이 일정의 알람을 껐어요':'이 일정의 알람을 켰어요');render();};
+A.toggleType=d=>{const k=d.id+':'+d.type;S.offType[k]=!S.offType[k];render();};
+A.axis=d=>{const o=S.over[d.id]||(S.over[d.id]={});o[d.ax]=+d.lv;render();};
+A.axisReset=d=>{delete S.over[d.id];render();};
+A.detailSave=()=>{
+  const a=byId(S.dDraft.aid), b=S.dDraft.buffer;
+  if(b===a.buffer){toast('바뀐 내용이 없어요');return;}
+  const L=alarmsOf(a), o=L[0].t, n=alarmsOf(Object.assign({},a,{buffer:b}))[0].t;
+  if(Math.abs(o-n)>=5){S.modal={kind:'confirm',title:TYPE[L[0].type]+' 알람 시각이 바뀌어요',body:`${fmt(o)} → ${fmt(n)}<br>기존보다 5분 이상 바뀌면 한 번 더 확인해요.`,actions:[{label:'바꾸기',act:'detailApply'},{label:'그대로 두기',act:'detailKeep',ghost:true}]};render();}
+  else A.detailApply();
+};
+A.detailApply=()=>{const a=byId(S.dDraft.aid);a.buffer=S.dDraft.buffer;S.modal=null;toast('알람 시각을 다시 계산했어요');render();};
+A.detailKeep=()=>{const a=byId(S.dDraft.aid);S.dDraft.buffer=a.buffer;S.modal=null;render();};
+A.newAppt=()=>{S.draft=null;go('newAppt');};
+A.naImp=d=>{S.draft.imp=d.v;render();};
+A.naCalc=()=>{if(!String(S.draft.title).trim()){toast('일정명을 입력해 주세요');return;}S.calc=estimate(S.draft);S.modal={kind:'calc'};render();};
+A.calcSave=()=>{
+  const e=S.calc, from=S.draft&&S.draft.fromChat, n=alarmsOf(e.a).filter(x=>x.type!=='ARRIVE').length;
+  S.appts.push(e.a);S.draft=null;S.modal=null;logE(S.now,'일정 저장 · '+e.a.title,from?'AI 대화 · 수정함':'직접 입력');
+  if(from){S.stack.pop();chatResolve('saved',e.a);}else S.stack=[{s:'home'},{s:'alarms'}];
+  toast(`알람 ${n}개를 맞췄어요`);render();
+};
+A.snzMin=d=>{S.snoozeMin=+d.m;render();};
+A.snooze=()=>{
+  const r=S.ring, cnt=(r.snoozed||0)+1;
+  if(cnt>3){toast('미루기는 3번까지예요');return;}
+  S.snooze={aid:r.aid,type:r.type,until:S.now+S.snoozeMin,count:cnt,min:S.snoozeMin};
+  logE(S.now,`${TYPE[r.type]} 알람 ${S.snoozeMin}분 미루기`,'자동');S.ring=null;S.stepId='resnz';
+  toast(`${S.snoozeMin}분 뒤 다시 울려요 · 데모 컨트롤에서 이어 가세요`);render();
+};
+A.dismiss=()=>{
+  const r=S.ring;S.ring=null;logE(S.now,TYPE[r.type]+' 알람 해제','자동');
+  if(r.type==='WAKE'){S.wake={phase:'observing',at:S.now,usage:0,recent:0,how:null};S.stack=[{s:'home'},{s:'wake'}];}
+  else if(r.type==='PREPARE'){const a=byId(r.aid);toast(a.items.length?'준비물: '+a.items.join(', '):'준비를 시작해요');}
+  else toast('집을 벗어나면 출발이 자동으로 기록돼요');
+  render();
+};
+A.simUse=()=>{S.now=S.wake.at+10;S.wake.usage=3.2;S.wake.recent=1.4;if(S.wake.usage>=S.theta&&S.wake.recent>0)wakeConfirm('자동 판정');render();};
+A.simSleep=()=>{S.now=S.wake.at+10;S.wake.usage=0.4;S.wake.recent=0;S.wake.phase='prompt';logE(S.now,'확인 알림 발송','알림');render();};
+A.confirmYes=()=>{wakeConfirm('본인 응답');render();};
+A.noReply=()=>{S.now+=5;logE(S.now,'재알람','자동');S.wake.phase='idle';S.ring={aid:'a1',type:'WAKE',re:true};render();};
+A.openGroup=d=>{S.seg.group='group';S.stack=[{s:'group'},{s:'groupDetail',id:d.id}];render();};
+A.openPerm=d=>{S.permRel=d.rel;S.pDraft=null;S.seg.perm='give';go('permSet');};
+A.relPick=()=>{S.modal={kind:'rel'};render();};
+A.relSet=d=>{S.permRel=d.rel;S.pDraft=null;S.modal=null;render();};
+A.pToggle=d=>{S.pDraft[d.k]=!S.pDraft[d.k];render();};
+A.pSave=()=>{
+  const d=S.pDraft, g=grantOf(d.rel);g.alarm=d.alarm;g.edit=d.edit;g.wake=d.wake;S.pDraft=null;
+  const info=relInfo(d.rel), f=finalGrant('sy');
+  toast(`${info.label} 관계에 저장했어요 · 수연님 최종 권한 ${f.count}개`);render();
+};
+A.acceptFriend=d=>{S.requests=S.requests.filter(x=>x!==d.pid);S.friends.push(d.pid);S.grants.friend[d.pid]={alarm:false,edit:false,wake:false};toast(P[d.pid].name+'님과 친구가 됐어요 · 공유는 아직 없어요');render();};
+A.ping=d=>toast(P[d.pid].short+'님에게 깨우기 알림을 보냈어요');
+A.shToggle=d=>{const s=S.shared[d.id]||(S.shared[d.id]={on:true,shift:0});s.on=!s.on;S.shareLog.push({t:S.now,text:`${P[d.pid].short}님 알람 ${s.on?'켬':'끔'}`});toast(P[d.pid].short+'님에게 변경 알림을 보냈어요');render();};
+A.shShift=d=>{const s=S.shared[d.id]||(S.shared[d.id]={on:true,shift:0});s.shift+=+d.d;S.shareLog.push({t:S.now,text:`${P[d.pid].short}님 알람 5분 ${+d.d<0?'앞당김':'늦춤'}`});toast(P[d.pid].short+'님에게 변경 알림을 보냈어요');render();};
+A.shLog=()=>{S.modal={kind:'log'};render();};
+A.mClose=()=>{S.modal=null;render();};
+A.todo=d=>{const t=S.todos.find(x=>x.id===d.id);t.done=!t.done;render();};
+A.rTick=()=>{const r=S.rMorning;r.done=(r.done+1)%(r.steps.length+1);if(r.done===r.steps.length)toast('오늘 루틴을 모두 마쳤어요');render();};
+A.chatMode=()=>{S.chat.mode=S.chat.mode==='text'?'voice':'text';S.chat.text=null;render();};
+A.chatSpeak=()=>{const ch=S.chat,next=SCRIPT[ch.step];if(ch.busy||!next||next.who!=='me')return;ch.busy=true;ch.listen=true;render();setTimeout(()=>{ch.listen=false;userSay(next.text);},1100);};
+A.chatSend=()=>{const ch=S.chat,next=SCRIPT[ch.step];if(ch.busy||!next||next.who!=='me')return;const txt=String(ch.text!=null?ch.text:next.text).trim()||next.text;ch.busy=true;userSay(txt);};
+A.chatSave=()=>{const e=estimate(chatDraft());S.appts.push(e.a);logE(S.now,'일정 저장 · 스터디','AI 대화 · 확인함');chatResolve('saved',e.a);toast('스터디 알람을 맞췄어요');render();};
+A.chatEdit=()=>{S.draft=Object.assign(chatDraft(),{fromChat:true});go('newAppt');};
+A.chatReject=()=>{chatResolve('rejected');render();};
+A.chatDone=()=>{genJournal();logE(S.now,'AI 대화 종료','AI');S.stack=[{s:'ai'},{s:'journal'}];render();};
+A.jEdit=()=>{S.editJ=true;S.jText=S.journal.text;render();};
+A.jSave=()=>{S.journal.text=S.jText;S.journal.edited=S.jText!==S.journal.ai;S.editJ=false;toast('일기를 저장했어요');render();};
+A.jCancel=()=>{S.editJ=false;render();};
+A.rAccept=()=>{S.rDraft={title:'회의 전날 준비',goal:'여유로운 아침',days:['수'],active:true,steps:[{t:1290,name:'회의 자료 확인',dur:5,alarm:true},{t:1295,name:'노트북 충전',dur:2,alarm:false},{t:1297,name:'가방에 준비물 넣기',dur:3,alarm:false}]};go('routine');};
+A.rDecline=()=>{S.journal.routine='rejected';toast('알겠어요 · 14일 동안 같은 루틴은 제안하지 않아요');render();};
+const rCur=()=>S.rDraft||S.rNight;
+A.rDay=d=>{const r=rCur(),i=r.days.indexOf(d.d),o='월화수목금토일';if(i>=0)r.days.splice(i,1);else r.days.push(d.d);r.days.sort((x,y)=>o.indexOf(x)-o.indexOf(y));render();};
+A.rStepAlarm=d=>{const s=rCur().steps[+d.i];s.alarm=!s.alarm;render();};
+A.rAdd=()=>{const r=rCur(),l=r.steps[r.steps.length-1];r.steps.push({t:l.t+l.dur,name:'새 단계',dur:5,alarm:false});render();};
+A.rActive=()=>{const r=rCur();r.active=!r.active;render();};
+A.rSave=()=>{
+  const r=rCur();S.rNight=r;S.rDraft=null;if(S.journal)S.journal.routine='accepted';
+  const n=r.steps.filter(s=>s.alarm).length;logE(S.now,'루틴 저장 · '+r.title,'직접 입력');
+  if(S.stack.length>1)S.stack.pop();
+  toast(r.active?`저장했어요 · 루틴 알람 ${n}개가 다음 ${r.days[0]}요일부터 울려요`:'저장했어요 · 루틴은 꺼 둔 상태예요');render();
+};
+A.sugApply=d=>{const a=byId('a3');S.sug.prev=a.p80;a.p80+=+d.v;S.sug.status='applied';S.modal=null;logE(S.now,`알람 조정 수락 · ${d.v}분 앞당김`,'직접 입력');toast(`내일 기상 알람이 ${fmt(alarmsOf(a)[0].t)}에 울려요`);render();};
+A.sugEdit=()=>{S.modal={kind:'sugEdit',v:10};render();};
+A.sugStep=d=>{S.modal.v=Math.max(0,Math.min(30,S.modal.v+ +d.d));render();};
+A.sugApplyEdit=()=>A.sugApply({v:S.modal.v});
+A.sugUndo=()=>{const a=byId('a3');a.p80=S.sug.prev;S.sug.status='pending';logE(S.now,'알람 조정 되돌림','직접 입력');toast('이전 값으로 되돌렸어요');render();};
+A.sugDismiss=()=>{S.sug.status='dismissed';toast('이번 제안을 무시했어요');render();};
+A.sugReopen=()=>{S.sug.status='pending';render();};
+A.step=d=>{
+  const st=stepList()[+d.i];if(!st)return;S.modal=null;
+  if(st.act==='resnooze'){const sn=S.snooze;S.now=sn.until;S.ring={aid:sn.aid,type:sn.type,snoozed:sn.count,min:sn.min};S.snooze=null;logE(S.now,TYPE[sn.type]+' 알람 다시 울림','자동');}
+  else{if(st.t<S.now)rewind(st.t);S.now=st.t;S.ring=null;}
+  if(st.ring){const [aid,type]=st.ring;
+    if(!isOn(aid)||!typeOn(aid,type))toast('꺼 둔 알람이라 울리지 않아요');
+    else{S.ring={aid,type,snoozed:0};S.snooze=null;if(type==='WAKE'&&S.me.wakeAt==null)S.wake={phase:'idle',at:null,usage:0,recent:0,how:null};logE(S.now,TYPE[type]+' 알람 울림','자동');}}
+  if(st.go==='home')S.stack=[{s:'home'}];
+  if(st.go==='ai')S.stack=[{s:'ai'}];
+  if(st.go==='suggestion')S.stack=[{s:'home'},{s:'suggestion'}];
+  if(st.act==='leave'){S.me.departAt=S.now;logE(S.now,'집 출발','자동 · 지오펜스');toast('집을 벗어나 출발을 기록했어요');}
+  if(st.act==='arrive'){const a=byId('a1'),late=Math.max(0,S.now-a.at);S.me.arriveAt=S.now;logE(S.now,late?`도착 · ${late}분 지각`:'도착 · 지각 아님','자동 · 지오펜스');toast(late?late+'분 늦게 도착했어요':`약속 ${a.at-S.now}분 전에 도착했어요`);}
+  S.stepId=st.id;closePanel();render();
+};
+A.reset=()=>{S=initState();closePanel();toast('처음 상태로 돌아왔어요');render();};
+A.panelOpen=()=>$('#panel').classList.add('open');
+A.panelClose=closePanel;
+
+/* ---------- 이벤트 ---------- */
+document.addEventListener('click',e=>{const el=e.target.closest('[data-act]');if(!el)return;const f=A[el.dataset.act];if(f){e.preventDefault();f(el.dataset,el);}});
+document.addEventListener('input',e=>{
+  const el=e.target;
+  if(el.dataset.input==='buffer'&&S.dDraft){
+    S.dDraft.buffer=+el.value;const a=byId(S.dDraft.aid),tmp=Object.assign({},a,{buffer:+el.value}),f=alarmsOf(tmp)[0];
+    $('#bufVal').textContent=el.value+'분';$('#calcBox').innerHTML=calcInner(tmp);$('#leadT').textContent=fmt(f.t)+' '+TYPE[f.type];
+  }else if(el.dataset.input==='journal')S.jText=el.value;
+  else if(el.dataset.input==='chat')S.chat.text=el.value;
+  else if(el.dataset.f&&S.draft)S.draft[el.dataset.f]=el.value;
+});
+document.addEventListener('change',e=>{
+  const el=e.target;
+  if(el.id==='expLate'){S.late4w=el.checked?2:1;toast(el.checked?'늦잠 지각 2회 · 중요 일정의 강도가 한 단계 올라가요':'늦잠 지각 1회 · 원래 강도로 돌아왔어요');render();}
+  else if(el.id==='expTheta'){S.theta=+el.value;toast(`기상 판정 기준 θ를 ${el.value}분으로 바꿨어요`);render();}
+  else if(el.dataset.f&&S.draft)S.draft[el.dataset.f]=el.value;
+});
+document.addEventListener('keydown',e=>{if(e.key==='Escape'){if(S.modal){S.modal=null;render();}else closePanel();}});
+function fit(){
+  const wrap=$('#wrap'),dev=$('#device'),pan=$('#panel');
+  if(innerWidth<=760){wrap.style.width='';wrap.style.height='';dev.style.transform='';pan.style.maxHeight='';return;}
+  const s=Math.min(1,(innerHeight-40)/868);
+  wrap.style.width=414*s+'px';wrap.style.height=868*s+'px';dev.style.transform='scale('+s+')';pan.style.maxHeight=Math.max(420,868*s)+'px';
+}
+addEventListener('resize',fit);
+render();fit();
+})();
+
+</script>
+</body>
+</html>
