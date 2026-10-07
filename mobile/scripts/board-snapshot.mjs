@@ -33,9 +33,11 @@ const GQL = `query($org:String!,$repo:String!,$num:Int!){
 const headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', 'User-Agent': 'respec-board-snapshot' };
 
 try {
-  const g = await fetch('https://api.github.com/graphql', {
+  const gr = await fetch('https://api.github.com/graphql', {
     method: 'POST', headers, body: JSON.stringify({ query: GQL, variables: { org: ORG, repo: REPO, num: PROJECT } }),
-  }).then((r) => r.json());
+  });
+  if (!gr.ok) throw new Error(`GitHub ${gr.status} ${gr.statusText}`);
+  const g = await gr.json();
   if (g.errors) throw new Error(g.errors.map((e) => e.message).join('; '));
 
   const items = g.data.organization.projectV2.items.nodes.map((it) => {
@@ -53,7 +55,7 @@ try {
     checks: p.commits.nodes[0]?.commit?.statusCheckRollup?.state || null,
   }));
 
-  if (items.length >= 100) console.log('board-snapshot: 경고 — 카드가 100개를 넘어 뒤쪽이 잘림 (pageInfo 처리 필요)');
+  if (items.length >= 100) console.log('board-snapshot: 경고 — 카드가 100개에 닿음. 넘는 카드는 빠짐 (pageInfo 처리 필요, board.html 질의도 같이)');
   // 파일 목록은 못 읽으면 null → 보드에서 "없음"이 아니라 "모름"으로 보임 (브라우저 동기화와 같은 규칙)
   const tr = await fetch(`https://api.github.com/repos/${ORG}/${REPO}/git/trees/main?recursive=1`, { headers });
   const t = tr.ok ? await tr.json() : null;

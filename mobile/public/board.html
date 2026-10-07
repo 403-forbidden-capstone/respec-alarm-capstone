@@ -383,10 +383,12 @@ const STATUS_KO = { done: '완료', doing: '진행 중', review: '리뷰', week:
 const ORDER = { doing: 0, review: 1, week: 2, todo: 3, ai: 4, wait: 5, done: 6 };
 
 // 동기화 결과(live)와 빌드 스냅샷 중 더 새로운 쪽을 씀 — 며칠 전 동기화가 새 빌드를 가리지 않게
-const src = () => (live && (!SNAPSHOT || live.at >= SNAPSHOT.at)) ? live : SNAPSHOT;
+// at은 live가 숫자(Date.now), HTML 안 스냅샷은 ISO 문자열이라 숫자로 맞춰 비교함
+const ms = (x) => typeof x === 'number' ? x : (Date.parse(x) || 0);
+const src = () => (live && (!SNAPSHOT || ms(live.at) >= ms(SNAPSHOT.at))) ? live : SNAPSHOT;
 function items() { const s = src(); return (s && s.items) || []; }
 function prs() { const s = src(); return (s && s.prs) || []; }
-function tree() { const s = src(); return (s && s.tree) || null; }
+function tree() { const s = src(); const o = s === live ? SNAPSHOT : live; return (s && s.tree) || (o && o.tree) || null; }
 function issue(n) { return items().find(i => i.n === n); }
 // PR 본문에 Closes #가 없으면 브랜치 이름의 번호(feat/26-FE-…)로 잇는다
 function closesOf(p) { if (p.closes && p.closes.length) return p.closes; const m = /^[a-z]+\/(\d+)-/.exec(p.branch || ''); return m ? [Number(m[1])] : []; }
@@ -460,9 +462,10 @@ function render() {
   document.getElementById('tabs').innerHTML = TABDEF.map(([id, name]) => `<button role="tab" aria-selected="${tab === id}" data-tab="${id}" class="${tab === id ? 'on' : ''}">${name}</button>`).join('');
   document.getElementById('main').innerHTML = R[tab]();
   const sm = document.getElementById('syncMeta');
-  const when = (ms) => new Date(ms).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+  const when = (x) => new Date(ms(x)).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+  const s = src();
   if (syncError) { sm.textContent = '동기화 실패 · ' + syncError; sm.classList.add('late'); sm.title = '권한: 이 레포 Contents · Issues · Pull requests 읽기, 조직 Projects 읽기'; }
-  else { sm.classList.remove('late'); if (live) { sm.textContent = `동기화 ${when(live.at)}`; sm.title = ''; } else if (SNAPSHOT) { sm.textContent = `스냅샷 ${when(SNAPSHOT.at)}`; sm.title = 'main 빌드 시점. 동기화를 누르면 지금 상태'; } else { sm.textContent = ''; } }
+  else { sm.classList.remove('late'); if (s && s === live) { sm.textContent = `동기화 ${when(live.at)}`; sm.title = ''; } else if (s) { sm.textContent = `스냅샷 ${when(s.at)}`; sm.title = 'main 빌드 시점. 동기화를 누르면 지금 상태'; } else { sm.textContent = ''; } }
 }
 
 function rBig() {
