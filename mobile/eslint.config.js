@@ -9,9 +9,11 @@ module.exports = defineConfig([
     ignores: ['dist/*', 'android/*', 'ios/*', 'public/*', '.expo/*'],
   },
   {
+    // effect 안에서 setState를 바로 부르는 곳이 main에 이미 있어 이 두 파일만 경고로 둠. 새 코드에서는 그대로 에러
+    //   AuthProvider: 로그아웃 때 setLoaded — 작성자가 렌더 중 state 조정으로 바꿀지 판단
+    //   alarm-test: async refresh() 호출 — setState가 await 뒤라 오탐
+    files: ['src/features/auth/AuthProvider.tsx', 'src/app/dev/alarm-test.tsx'],
     rules: {
-      // effect 안에서 setState를 바로 부르는 곳(AuthProvider 로그아웃 비우기 · alarm-test 첫 읽기)이
-      // 이미 main에 있어 경고로 둠. async 함수 호출은 오탐이고, 나머지는 작성자가 렌더 중 state 조정으로 바꿀지 판단
       'react-hooks/set-state-in-effect': 'warn',
     },
   },
