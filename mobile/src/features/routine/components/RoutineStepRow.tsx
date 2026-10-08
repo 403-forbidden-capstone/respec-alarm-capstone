@@ -23,7 +23,7 @@ export function RoutineStepRow({ step, time, first, onPress, onToggleAlarm }: Pr
         accessibilityLabel={`${time} ${step.name} 단계 편집`}
         style={({ pressed }) => [styles.main, pressed && styles.pressed]}
       >
-        <Text variant="bodyStrong" style={styles.time}>
+        <Text variant="note" weight={600} style={styles.time}>
           {time}
         </Text>
         <View style={styles.text}>
@@ -42,7 +42,7 @@ const styles = StyleSheet.create({
   row: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 12 },
   divider: { borderTopWidth: 1, borderTopColor: colors.line },
   main: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10 },
-  time: { width: 48, fontSize: 13, fontVariant: ['tabular-nums'] },
+  time: { width: 48, fontVariant: ['tabular-nums'] },
   text: { flex: 1 },
   pressed: { opacity: 0.6 },
 });

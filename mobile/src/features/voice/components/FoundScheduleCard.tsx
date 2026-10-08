@@ -48,10 +48,10 @@ export function FoundScheduleCard({ found, at, onSave, onEdit, onReject }: Props
 function Row({ label, value, note }: { label: string; value: string; note?: string }) {
   return (
     <View style={styles.row}>
-      <Text variant="body" tone="sub" style={styles.cell}>
+      <Text variant="note" tone="sub">
         {label}
       </Text>
-      <Text variant="bodyStrong" align="right" style={[styles.cell, styles.value]}>
+      <Text variant="note" weight={600} align="right" style={styles.value}>
         {value}
         {note ? (
           <Text variant="caption" tone="sub">
@@ -74,7 +74,6 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: colors.line,
   },
-  cell: { fontSize: 13 },
   value: { flexShrink: 1 },
   question: { marginVertical: 10 },
   buttons: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },

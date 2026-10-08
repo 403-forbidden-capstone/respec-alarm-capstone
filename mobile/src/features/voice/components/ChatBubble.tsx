@@ -14,7 +14,7 @@ export function Bubble({ who, wide, children }: { who: 'ai' | 'me'; wide?: boole
 export function BubbleTime({ who, at }: { who: 'ai' | 'me'; at: Date }) {
   const me = who === 'me';
   return (
-    <Text variant="caption" tone={me ? 'inverse' : 'faint'} style={[styles.time, me && styles.meTime]}>
+    <Text variant="tiny" tone={me ? 'inverse' : 'faint'} style={[styles.time, me && styles.meTime]}>
       {me ? formatTime(at) : `AI · ${formatTime(at)}`}
     </Text>
   );
@@ -70,7 +70,7 @@ const styles = StyleSheet.create({
   me: { alignSelf: 'flex-end', backgroundColor: colors.ink, borderBottomRightRadius: 6 },
   wide: { maxWidth: '92%' },
   text: { lineHeight: 21.5 },
-  time: { marginTop: 4, fontSize: 11 },
+  time: { marginTop: 4 },
   meTime: { opacity: 0.55 },
   typing: { flexDirection: 'row', gap: 4, padding: 16 },
   dot: { width: 6, height: 6, borderRadius: 3, backgroundColor: colors.faint },

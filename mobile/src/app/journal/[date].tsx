@@ -8,7 +8,7 @@ import { declineRoutineSuggestion, editJournal, getJournal } from '@/features/ro
 import type { Journal } from '@/features/routine/types';
 import { dateParts, formatTime } from '@/lib/format';
 import { useLoad } from '@/lib/useLoad';
-import { colors, font } from '@/theme';
+import { colors, typeScale } from '@/theme';
 
 // A03 하루 기록 · 일기 — 기록된 사실만 골라 AI가 쓴 일기 · 오늘의 사실 · 회고 코칭 · 루틴 제안
 // 일기는 AI 대화(A02)를 마치면 생기고, 다시 마치면 다시 씀(고친 글 · 루틴 제안 응답은 그대로). AI 대기라 목업 문장틀로 씀
@@ -177,9 +177,7 @@ const styles = StyleSheet.create({
   link: { alignSelf: 'flex-start' },
   note: { marginTop: 10 },
   input: {
-    ...font(400),
-    fontSize: 14.5,
-    lineHeight: 23,
+    ...typeScale.reading,
     minHeight: 160,
     marginTop: 4,
     padding: 12,

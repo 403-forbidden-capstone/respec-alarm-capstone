@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Animated, Pressable, StyleSheet, TextInput, View } from 'react-native';
 
 import { Button, Text } from '@/components/ui';
-import { colors, font } from '@/theme';
+import { colors, typeScale } from '@/theme';
 
 type Props = {
   status: string; // 듣고 있어요… · 말할 준비가 됐어요 등
@@ -95,7 +95,7 @@ function MicButton({ listening, disabled, onPress }: { listening: boolean; disab
         accessibilityState={{ disabled, busy: listening }}
         style={({ pressed }) => [styles.mic, disabled && !listening && styles.micOff, pressed && styles.pressed]}
       >
-        <Text variant="body" tone="inverse" weight={600} style={styles.micText}>
+        <Text variant="note" tone="inverse" weight={600}>
           말하기
         </Text>
       </Pressable>
@@ -119,8 +119,7 @@ const styles = StyleSheet.create({
   status: { marginBottom: 8 },
   inputRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 10 },
   input: {
-    ...font(400),
-    fontSize: 14,
+    ...typeScale.body,
     flex: 1,
     minWidth: 0,
     height: 38,
@@ -138,6 +137,5 @@ const styles = StyleSheet.create({
   ring: { position: 'absolute', width: MIC, height: MIC, borderRadius: MIC / 2, backgroundColor: colors.ink },
   mic: { width: MIC, height: MIC, borderRadius: MIC / 2, backgroundColor: colors.ink, alignItems: 'center', justifyContent: 'center' },
   micOff: { opacity: 0.3 },
-  micText: { fontSize: 13 },
   pressed: { opacity: 0.75 },
 });
