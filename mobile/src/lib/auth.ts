@@ -54,3 +54,9 @@ export async function signOut() {
   const { error } = await supabase.auth.signOut();
   if (error) throw error;
 }
+
+// 저장된 로그인이 있는지 — 가짜 데이터 모드에서 실데이터로 바꿀 때 갈 곳(탭 · 로그인)을 정함 (useAuth는 가짜 모드에서 세션을 숨김)
+export async function hasSession(): Promise<boolean> {
+  const { data } = await supabase.auth.getSession();
+  return data.session != null;
+}

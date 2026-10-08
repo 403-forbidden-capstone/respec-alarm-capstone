@@ -31,7 +31,10 @@ export default function OnboardingScreen() {
   const canSave = handleOk && nickname.trim().length > 0 && !saving;
 
   async function save() {
-    if (!session) return;
+    if (!session) {
+      setError('가짜 데이터 모드라 저장하지 않아요'); // /dev/screens에서 화면만 열어 본 경우
+      return;
+    }
     setSaving(true);
     setError(null);
     try {
