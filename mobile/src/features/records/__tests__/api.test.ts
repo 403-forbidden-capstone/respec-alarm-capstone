@@ -5,6 +5,7 @@ import { db, kst } from '@/mocks/data';
 
 import {
   applySuggestion,
+  getDay,
   getMonth,
   getPendingSuggestion,
   getSuggestion,
@@ -12,6 +13,7 @@ import {
   ignoreSuggestion,
   reopenSuggestion,
   undoSuggestion,
+  weekEmptyText,
 } from '../api';
 import { EDIT_MAX, stepMinutes, suggestionPhase } from '../suggestion';
 
@@ -49,6 +51,16 @@ describe('R02 주간', () => {
   it('다른 주는 요약 없음', async () => {
     const w = await getWeek(kst(12, 0));
     expect([w.title, w.relative, w.summary]).toEqual(['5월 12일 — 18일', '지난주', null]);
+  });
+
+  it('일간은 받은 날짜로 — 목업에 없는 날은 빈 기록', async () => {
+    const d = await getDay(kst(20, 9 * 60));
+    expect([d.date.getTime(), d.planned.length, d.actual.length]).toEqual([kst(20, 0).getTime(), 0, 0]);
+  });
+
+  it('요약이 없는 주: 기록 점이 있으면 "요약 없음", 점도 없으면 "기록 없음"', async () => {
+    expect(weekEmptyText(await getWeek(kst(12, 0)))).toBe('이 주 요약은 이번 목업에 없어요.');
+    expect(weekEmptyText(await getWeek(kst(40, 0)))).toBe('이 주에는 기록이 없어요.');
   });
 });
 
@@ -100,6 +112,11 @@ describe('S01 알람 조정 제안', () => {
     const s = await getSuggestion('s1');
     expect([s?.status, s && formatTime(s.currentWake)]).toEqual(['PENDING', '오전 7:20']);
     expect(db.events.at(-1)?.label).toBe('알람 조정 되돌림');
+  });
+
+  it('0분으로는 적용되지 않음', async () => {
+    await applySuggestion('s1', 0);
+    expect((await getSuggestion('s1'))?.status).toBe('PENDING');
   });
 
   it('무시 → 다시 보기', async () => {

@@ -3,7 +3,7 @@
 //   읽기 · 쓰기 위치는 docs/screen-data-map.md (R02 · S01, 제안은 alarm_suggestions)
 import { KIND_LABEL } from '@/features/alarm/types';
 import { now } from '@/lib/clock';
-import { addMinutes, dateParts, isSameDay } from '@/lib/format';
+import { addMinutes, dateParts, isSameDay, startOfDay } from '@/lib/format';
 import { alarmChain } from '@/mocks/calc';
 import { db, kst, lastWeekAverageWake, pastWakes, TODAY } from '@/mocks/data';
 
@@ -82,8 +82,15 @@ export async function getWeek(anyDay: Date): Promise<WeekRecord> {
   };
 }
 
-// 일간 (R02) — 그날 설정한 알람과 실제로 일어난 일. 목업은 5월 22일만 있음
+// 주간 요약이 없을 때 문구 — 날짜 줄에 기록 점이 있는데 "기록이 없어요"라고 하면 어긋남
+export function weekEmptyText(week: WeekRecord): string {
+  return week.strip.some((d) => d.recorded) ? '이 주 요약은 이번 목업에 없어요.' : '이 주에는 기록이 없어요.';
+}
+
+// 일간 (R02) — 그날 설정한 알람과 실제로 일어난 일. 목업은 5월 22일만 있고 다른 날은 빈 기록
 export async function getDay(date: Date): Promise<DayRecord> {
+  const day = startOfDay(date);
+  if (!isSameDay(day, today())) return { date: day, planned: [], actual: [] };
   const a1 = db.appointments.find((a) => a.id === 'a1');
   const t = now().getTime();
   const planned = a1
@@ -94,7 +101,7 @@ export async function getDay(date: Date): Promise<DayRecord> {
         past: x.at.getTime() <= t,
       }))
     : [];
-  return { date: today(), planned, actual: db.events.map((e) => ({ ...e })) };
+  return { date: day, planned, actual: db.events.map((e) => ({ ...e })) };
 }
 
 function buildSuggestion(): Suggestion | null {
@@ -139,7 +146,8 @@ export async function getSuggestion(id: string): Promise<Suggestion | null> {
 export async function applySuggestion(id: string, minutes: number) {
   const s = db.suggestion;
   const a = db.appointments.find((x) => x.id === s.appointmentId);
-  if (s.id !== id || !a || s.status === 'APPLIED' || s.status === 'EDITED') return;
+  // 0분 이하는 적용할 게 없음 (화면도 0분이면 버튼을 끔)
+  if (s.id !== id || !a || minutes <= 0 || s.status === 'APPLIED' || s.status === 'EDITED') return;
   a.predictedPrepMinutes += minutes;
   s.appliedMinutes = minutes;
   s.status = minutes === s.minutes ? 'APPLIED' : 'EDITED';

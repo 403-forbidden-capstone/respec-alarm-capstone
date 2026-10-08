@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
 import { Card, Screen, Segmented, Text, Timeline, toast, TopBar, type TimelineItem } from '@/components/ui';
-import { getDay, getMonth, getWeek } from '@/features/records/api';
+import { getDay, getMonth, getWeek, weekEmptyText } from '@/features/records/api';
 import { shiftMonth, weekStart } from '@/features/records/calendar';
 import { MonthCalendar } from '@/features/records/components/MonthCalendar';
 import { ScoreBars } from '@/features/records/components/ScoreBars';
@@ -31,10 +31,16 @@ export default function RecordsScreen() {
     return { year, month };
   });
   const [week, setWeek] = useState(() => weekStart(now()));
+  const [day, setDay] = useState(() => now()); // 일간에서 볼 날 — 실데이터(#41)가 붙으면 달력에서 고른 날
 
-  // 목업은 오늘만 일간 기록이 있음 — 실데이터(#41)가 붙으면 기록 있는 날 모두 열리게
+  function openDay(date: Date) {
+    setDay(date);
+    setView('day');
+  }
+
+  // 목업은 오늘만 일간 기록이 있음 — 실데이터(#41)가 붙으면 기록 있는 날 모두 openDay로
   function pressDay(d: MonthDay) {
-    if (d.isToday) setView('day');
+    if (d.isToday) openDay(d.date);
     else if (d.isFuture) toast('아직 오지 않은 날이에요');
     else toast(`${dateParts(d.date).month}월 ${d.day}일 기록은 이번 목업에 없어요`);
   }
@@ -59,7 +65,7 @@ export default function RecordsScreen() {
             onPrev={() => setMonth((m) => shiftMonth(m.year, m.month, -1))}
             onNext={() => setMonth((m) => shiftMonth(m.year, m.month, 1))}
             onPressDay={pressDay}
-            onOpenToday={() => setView('day')}
+            onOpenToday={() => openDay(now())}
           />
         ) : view === 'week' ? (
           <WeekSection
@@ -69,7 +75,7 @@ export default function RecordsScreen() {
             onNext={() => setWeek((w) => addDays(w, 7))}
           />
         ) : (
-          <DaySection />
+          <DaySection key={dayKey(day)} date={day} />
         )}
       </View>
     </Screen>
@@ -127,7 +133,7 @@ function WeekSection({ anyDay, onPrev, onNext }: { anyDay: Date; onPrev: () => v
       ) : (
         <Card>
           <Text variant="body" tone="sub">
-            이 주에는 기록이 없어요.
+            {weekEmptyText(data)}
           </Text>
         </Card>
       )}
@@ -177,8 +183,8 @@ function Stat({ label, value, sub }: { label: string; value: string; sub: string
 }
 
 // 일간 — 그날 설정한 알람 · 실제로 일어난 일 (마지막 줄이 지금)
-function DaySection() {
-  const { data } = useLoad(() => getDay(now()));
+function DaySection({ date }: { date: Date }) {
+  const { data } = useLoad(() => getDay(date));
   if (!data) return null;
   const { month, day } = dateParts(data.date);
 

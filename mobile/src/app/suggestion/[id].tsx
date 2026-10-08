@@ -41,32 +41,50 @@ export default function SuggestionScreen() {
 
 function Detail({ suggestion: s, reload, onBack }: { suggestion: Suggestion; reload: () => void; onBack?: () => void }) {
   const [editing, setEditing] = useState<number | null>(null); // 직접 수정 시트에서 고른 앞당김(분), 닫혀 있으면 null
+  const [busy, setBusy] = useState(false);
   const phase = suggestionPhase(s.status);
+
+  // 버튼은 한 번에 하나씩 — 연타하면 토스트가 두 번 뜨고, 실데이터(#49)에선 두 번 저장될 수 있음. 실패하면 이유를 토스트로
+  async function act(task: () => Promise<void>) {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await task();
+    } catch (e) {
+      toast(e instanceof Error && e.message ? e.message : '하지 못했어요. 다시 해 주세요');
+    } finally {
+      setBusy(false);
+    }
+  }
   const target = `${formatDateShort(s.appointment.at)} ${s.appointment.title}`;
 
-  async function apply(minutes: number) {
-    await applySuggestion(s.id, minutes);
-    setEditing(null);
-    toast(`${dayWord(s.currentWake, now())} 기상 알람이 ${formatTime(addMinutes(s.currentWake, -minutes))}에 울려요`);
-    reload();
-  }
+  const apply = (minutes: number) =>
+    act(async () => {
+      await applySuggestion(s.id, minutes);
+      setEditing(null);
+      toast(`${dayWord(s.currentWake, now())} 기상 알람이 ${formatTime(addMinutes(s.currentWake, -minutes))}에 울려요`);
+      reload();
+    });
 
-  async function undo() {
-    await undoSuggestion(s.id);
-    toast('이전 값으로 되돌렸어요');
-    reload();
-  }
+  const undo = () =>
+    act(async () => {
+      await undoSuggestion(s.id);
+      toast('이전 값으로 되돌렸어요');
+      reload();
+    });
 
-  async function ignore() {
-    await ignoreSuggestion(s.id);
-    toast('이번 제안을 무시했어요');
-    reload();
-  }
+  const ignore = () =>
+    act(async () => {
+      await ignoreSuggestion(s.id);
+      toast('이번 제안을 무시했어요');
+      reload();
+    });
 
-  async function reopen() {
-    await reopenSuggestion(s.id);
-    reload();
-  }
+  const reopen = () =>
+    act(async () => {
+      await reopenSuggestion(s.id);
+      reload();
+    });
 
   return (
     <Screen>
