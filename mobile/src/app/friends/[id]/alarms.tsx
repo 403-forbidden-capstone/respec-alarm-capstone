@@ -30,7 +30,7 @@ export default function SharedAlarmsScreen() {
       {log?.length ? (
         <Timeline items={log.map((l) => ({ time: formatTime(l.at), label: l.text, source: '나' }))} />
       ) : (
-        <Text variant="body" tone="sub" style={styles.empty}>
+        <Text variant="note" tone="sub" style={styles.empty}>
           아직 바꾼 내용이 없어요.
         </Text>
       )}
@@ -115,6 +115,6 @@ const styles = StyleSheet.create({
   lead: { marginBottom: 18 },
   summary: { backgroundColor: colors.chip },
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 8 },
-  empty: { fontSize: 13, marginVertical: 6 },
+  empty: { marginVertical: 6 },
   stack: { gap: 10, marginTop: 16 },
 });

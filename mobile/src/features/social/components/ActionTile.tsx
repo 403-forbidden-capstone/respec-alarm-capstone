@@ -20,7 +20,7 @@ export function ActionTile({ icon, title, sub, dark, onPress }: Props) {
       accessibilityLabel={`${title} · ${sub}`}
       style={({ pressed }) => [styles.tile, dark && styles.dark, pressed && styles.pressed]}
     >
-      <Text variant="big" tone={dark ? 'inverse' : 'ink'} weight={400} style={styles.icon}>
+      <Text variant="sheetTitle" tone={dark ? 'inverse' : 'ink'} weight={400} style={styles.icon}>
         {icon}
       </Text>
       <Text variant="bodyStrong" tone={dark ? 'inverse' : 'ink'}>
@@ -45,5 +45,5 @@ const styles = StyleSheet.create({
   },
   dark: { backgroundColor: colors.ink, borderColor: colors.ink },
   pressed: { opacity: 0.75 },
-  icon: { fontSize: 20, lineHeight: 22, marginBottom: 'auto' },
+  icon: { marginBottom: 'auto' },
 });

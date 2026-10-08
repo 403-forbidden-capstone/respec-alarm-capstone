@@ -3,7 +3,7 @@ import { StyleSheet, TextInput, View } from 'react-native';
 
 import { Text } from '@/components/ui';
 import { TextLink } from '@/features/alarm/components/TextLink';
-import { colors, font, radius } from '@/theme';
+import { colors, radius, typeScale } from '@/theme';
 
 type Props = {
   placeholder: string;
@@ -53,5 +53,5 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   focused: { borderColor: colors.ink },
-  input: { ...font(400), flex: 1, minWidth: 0, fontSize: 14, color: colors.ink, paddingVertical: 0 },
+  input: { ...typeScale.body, flex: 1, minWidth: 0, color: colors.ink, paddingVertical: 0 },
 });

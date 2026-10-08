@@ -214,7 +214,7 @@ function ReceivedList({ relationId }: { relationId: RelationId }) {
           );
         })
       ) : (
-        <Text variant="body" tone="sub" style={styles.empty}>
+        <Text variant="note" tone="sub" style={styles.empty}>
           이 관계에서 받은 권한이 없어요.
         </Text>
       )}
@@ -234,5 +234,5 @@ const styles = StyleSheet.create({
   description: { marginTop: 2 },
   paragraph: { lineHeight: 20 },
   stack: { gap: 10, marginTop: 16 },
-  empty: { fontSize: 13, marginVertical: 6 },
+  empty: { marginVertical: 6 },
 });

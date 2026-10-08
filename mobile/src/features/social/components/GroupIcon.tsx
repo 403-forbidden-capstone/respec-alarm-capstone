@@ -13,7 +13,7 @@ type Props = {
 export function GroupIcon({ label, light, small }: Props) {
   return (
     <View style={[styles.box, small && styles.small, light && styles.light]}>
-      <Text variant="label" tone={light ? 'ink' : 'inverse'} weight={600} style={styles.text}>
+      <Text variant="note" tone={light ? 'ink' : 'inverse'} weight={600}>
         {label}
       </Text>
     </View>
@@ -31,5 +31,4 @@ const styles = StyleSheet.create({
   },
   small: { width: 36, height: 36 },
   light: { backgroundColor: colors.chip },
-  text: { fontSize: 13 },
 });

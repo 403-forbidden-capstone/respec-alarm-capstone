@@ -62,7 +62,7 @@ export default function MemberWakeScreen() {
             items={timeline.map((e) => ({ time: formatTime(e.at), label: e.label, source: e.source }))}
           />
         ) : (
-          <Text variant="body" tone="sub" style={styles.empty}>
+          <Text variant="note" tone="sub" style={styles.empty}>
             아직 알람이 울리지 않았어요. {p.short}님의 알람은 {formatTime(firstAlarmAt)}이에요.
           </Text>
         )}
@@ -89,7 +89,7 @@ const styles = StyleSheet.create({
   title: { marginTop: 8, marginBottom: 4 },
   lead: { marginBottom: 18 },
   label: { marginBottom: 8 },
-  empty: { fontSize: 13, lineHeight: 20, marginVertical: 6 },
+  empty: { marginVertical: 6 },
   paragraph: { marginTop: 4, lineHeight: 20 },
   stack: { gap: 10, marginTop: 16 },
 });

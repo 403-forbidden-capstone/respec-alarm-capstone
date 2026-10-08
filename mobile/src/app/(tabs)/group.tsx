@@ -133,7 +133,7 @@ function GroupTab({ groups }: { groups: GroupItem[] }) {
               <View style={styles.row}>
                 <GroupIcon label={g.initial} light />
                 <View style={styles.grow}>
-                  <Text variant="big" style={styles.groupName}>
+                  <Text variant="big">
                     {g.name}
                   </Text>
                   <Text variant="small" tone="sub">
@@ -156,7 +156,7 @@ function GroupTab({ groups }: { groups: GroupItem[] }) {
                 →
               </Text>
             </View>
-            <Text variant="big" style={[styles.groupName, styles.groupNameTop]}>
+            <Text variant="big" style={styles.groupNameTop}>
               {g.name}
             </Text>
             <Text variant="small" tone="sub" style={styles.groupSub}>
@@ -196,7 +196,6 @@ const styles = StyleSheet.create({
   between: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between' },
   trailing: { alignItems: 'flex-end' },
   tiles: { flexDirection: 'row', gap: 10, marginTop: 14 },
-  groupName: { fontSize: 16, lineHeight: 22 },
   groupNameTop: { marginTop: 10 },
   groupSub: { marginTop: 2, marginBottom: 10 },
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
