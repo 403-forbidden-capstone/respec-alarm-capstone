@@ -197,7 +197,7 @@ function WakeFlow({ check }: { check: WakeCheck }) {
               <Button
                 label={`${check.groupName ?? '그룹'} 기상 현황 보기`}
                 variant="ghost"
-                onPress={() => openGroupDetail(check.groupId!)}
+                onPress={() => openGroupDetail(check.groupId!, 'stack')}
               />
             ) : null}
           </View>
