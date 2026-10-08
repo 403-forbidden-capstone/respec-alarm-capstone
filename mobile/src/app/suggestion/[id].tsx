@@ -1,4 +1,4 @@
-import { router, useLocalSearchParams } from 'expo-router';
+import { useLocalSearchParams } from 'expo-router';
 import { useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
@@ -12,13 +12,14 @@ import { now } from '@/lib/clock';
 import { addMinutes, formatDateShort, formatTime } from '@/lib/format';
 import { useLoad } from '@/lib/useLoad';
 import { useAction } from '@/lib/useAction';
+import { backOrHome } from '@/lib/nav';
 
 // S01 알람 조정 제안 — 최근 기록으로 고른 앞당김을 적용 · 직접 수정 · 무시, 적용한 뒤에는 이전 값으로 되돌리기
 // 적용하면 그 일정의 예측 준비가 늘어 기상 · 준비 알람이 같이 앞당겨짐 (실제 저장 · 다시 예약은 #49)
 export default function SuggestionScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { data, reload } = useLoad(() => getSuggestion(id));
-  const back = router.canGoBack() ? router.back : undefined;
+  const back = backOrHome; // 앞 화면이 없으면(주소로 바로 열기) 홈으로
 
   if (data === undefined) {
     return (

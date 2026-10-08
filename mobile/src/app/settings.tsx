@@ -1,4 +1,3 @@
-import { router } from 'expo-router';
 import { useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
@@ -8,6 +7,7 @@ import { DataModeToggle } from '@/features/auth/DataModeToggle';
 import type { TransportType } from '@/features/profile/types';
 import { signOut } from '@/lib/auth';
 import { canUseRealData } from '@/lib/mode';
+import { backOrHome } from '@/lib/nav';
 
 const PROVIDER_NAME: Record<string, string> = { kakao: '카카오', google: 'Google' };
 const TRANSPORT_NAME: Record<TransportType, string> = {
@@ -27,7 +27,7 @@ export default function SettingsScreen() {
 
   return (
     <Screen>
-      <TopBar onBack={router.canGoBack() ? router.back : undefined} />
+      <TopBar onBack={backOrHome} />
       <Text variant="title">설정</Text>
 
       <SectionHeader title="계정" />

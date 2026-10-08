@@ -1,4 +1,4 @@
-import { router, useLocalSearchParams } from 'expo-router';
+import { useLocalSearchParams } from 'expo-router';
 import { useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
@@ -20,6 +20,7 @@ import { PERMISSIONS, type PermissionSet, type Relation, type RelationId } from 
 import { useLoad } from '@/lib/useLoad';
 import { colors } from '@/theme';
 import { useAction } from '@/lib/useAction';
+import { backOrHome } from '@/lib/nav';
 
 type Side = 'give' | 'recv';
 
@@ -38,7 +39,7 @@ export default function PermissionSettingsScreen() {
   const [picking, setPicking] = useState(false);
   // 저장 전 스위치 값 — 관계를 바꾸면 버림, 내가 공유 · 받은 권한을 오가도 남음 (목업 pDraft)
   const [draft, setDraft] = useState<{ id: RelationId; set: PermissionSet } | null>(null);
-  const back = router.canGoBack() ? router.back : undefined;
+  const back = backOrHome; // 앞 화면이 없으면(주소로 바로 열기) 홈으로
 
   const head = (
     <>
