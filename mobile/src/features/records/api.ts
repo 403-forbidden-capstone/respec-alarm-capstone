@@ -3,34 +3,45 @@
 //   읽기 · 쓰기 위치는 docs/screen-data-map.md (R02 · S01, 제안은 alarm_suggestions)
 import { KIND_LABEL } from '@/features/alarm/types';
 import { now } from '@/lib/clock';
-import { addMinutes } from '@/lib/format';
+import { addMinutes, dateParts, isSameDay } from '@/lib/format';
 import { alarmChain } from '@/mocks/calc';
 import { db, kst, lastWeekAverageWake, pastWakes, TODAY } from '@/mocks/data';
 
-import type { DayMark, DayRecord, MonthRecord, Suggestion, WeekRecord } from './types';
+import { leadingBlanks, monthDays, monthTitle, weekDays, weekRelative, weekTitle } from './calendar';
+import type { DayMark, DayRecord, MonthRecord, Suggestion, WeekRecord, WeekSummary } from './types';
 
-const WEEK = ['월', '화', '수', '목', '금', '토', '일'];
+// 기록 화면의 오늘 — 목업은 시나리오 시각(아침 · 전날 밤)과 상관없이 5월 22일
+const today = () => kst(TODAY, 0);
 
-// 월간 (R02) — 실데이터는 daily_records.record_date로 그달을 읽음
-// 목업은 2025년 5월 한 달만 있음 (1일이 목요일이라 월요일 시작 달력에서 앞 빈칸 3개)
+// 그날 기록 표시 — 목업은 2025년 5월만 있음: 지난 평일 기록 완료 · 주말 일부 기록, 오늘은 기상 확인 · 일기 뒤에 완료
+// 실데이터는 daily_records가 있는지 · 얼마나 채워졌는지로 정함
+function markOf(date: Date): DayMark {
+  const { year, month, day, weekdayIndex } = dateParts(date);
+  if (year !== 2025 || month !== 5) return 'none';
+  const weekend = weekdayIndex === 0 || weekdayIndex === 6;
+  if (day < TODAY) return weekend ? 'partial' : 'done';
+  return day === TODAY && (db.me.wakeAt != null || db.journalWritten) ? 'done' : 'none';
+}
+
+// 월간 (R02) — 실데이터는 daily_records.record_date로 그달을 읽음. 목업에 없는 달은 기록 없이 달력만
 export async function getMonth(year: number, month: number): Promise<MonthRecord> {
-  const todayDone = db.me.wakeAt != null || db.journalWritten;
-  const days = Array.from({ length: 31 }, (_, i) => {
-    const day = i + 1;
-    const weekend = (day + 2) % 7 >= 5;
-    const mark: DayMark = day < TODAY ? (weekend ? 'partial' : 'done') : day === TODAY && todayDone ? 'done' : 'none';
-    return { date: kst(day, 0), day, mark, isToday: day === TODAY, isFuture: day > TODAY };
-  });
+  const t = today();
   return {
-    title: '2025년 5월',
-    leadingBlanks: 3,
-    days,
-    today: { date: kst(TODAY, 0), eventCount: db.events.length, journalWritten: db.journalWritten },
+    title: monthTitle(year, month),
+    leadingBlanks: leadingBlanks(year, month),
+    days: monthDays(year, month).map((date) => ({
+      date,
+      day: dateParts(date).day,
+      mark: markOf(date),
+      isToday: isSameDay(date, t),
+      isFuture: date.getTime() > t.getTime(),
+    })),
+    today: { date: t, eventCount: db.events.length, journalWritten: db.journalWritten },
   };
 }
 
-// 주간 (R02) — anyDay가 든 주 (월요일 시작). 목업은 5월 19일 주만 있음. 오늘 기상이 확인되면 오늘도 더함
-export async function getWeek(anyDay: Date): Promise<WeekRecord> {
+// 주간 요약 — 목업은 5월 19일 주만 있음. 오늘 기상이 확인되면 오늘도 더함
+function mockWeekSummary(): WeekSummary {
   const a1 = db.appointments.find((a) => a.id === 'a1');
   const rows = pastWakes.map((x) => ({ ...x }));
   if (db.me.wakeAt && a1) {
@@ -42,21 +53,32 @@ export async function getWeek(anyDay: Date): Promise<WeekRecord> {
   const diff = lastWeekAverageWake - average;
   const goal = rows.filter((x) => x.score >= 70).length;
   return {
-    title: '5월 19일 — 25일',
-    strip: [19, 20, 21, 22, 23, 24, 25].map((day, i) => ({
-      date: kst(day, 0),
-      weekday: WEEK[i],
-      day,
-      isToday: day === TODAY,
-      isFuture: day > TODAY,
-    })),
     averageWake: kst(TODAY, average),
     averageText: diff > 0 ? `지난주보다 ${diff}분 빨라요` : diff < 0 ? `지난주보다 ${-diff}분 늦어요` : '지난주와 같아요',
     goalRate: Math.round((goal / rows.length) * 100),
     goalText: `이번 주 ${goal}/${rows.length}일`,
-    bars: rows.map((x) => ({ label: `${WEEK[(x.day - 19) % 7]} ${x.day}`, score: x.score })),
+    bars: rows.map((x) => ({ label: `${dateParts(kst(x.day, 0)).weekday} ${x.day}`, score: x.score })),
     todayPending: db.me.wakeAt == null,
     coaching: '회의가 있는 날은 준비가 평균 12분 길었어요. 전날 밤 준비 루틴을 만들면 아침이 여유로워져요.',
+  };
+}
+
+// 주간 (R02) — anyDay가 든 주 (월요일 시작). 목업에 없는 주는 요약 없이 날짜 줄만
+export async function getWeek(anyDay: Date): Promise<WeekRecord> {
+  const t = today();
+  const days = weekDays(anyDay);
+  return {
+    title: weekTitle(anyDay),
+    relative: weekRelative(anyDay, t),
+    strip: days.map((date) => ({
+      date,
+      weekday: dateParts(date).weekday,
+      day: dateParts(date).day,
+      isToday: isSameDay(date, t),
+      isFuture: date.getTime() > t.getTime(),
+      recorded: markOf(date) !== 'none',
+    })),
+    summary: days.some((d) => isSameDay(d, t)) ? mockWeekSummary() : null,
   };
 }
 
@@ -72,7 +94,7 @@ export async function getDay(date: Date): Promise<DayRecord> {
         past: x.at.getTime() <= t,
       }))
     : [];
-  return { date: kst(TODAY, 0), planned, actual: db.events.map((e) => ({ ...e })) };
+  return { date: today(), planned, actual: db.events.map((e) => ({ ...e })) };
 }
 
 function buildSuggestion(): Suggestion | null {
@@ -124,7 +146,7 @@ export async function applySuggestion(id: string, minutes: number) {
   db.events.push({ at: now(), label: `알람 조정 수락 · ${minutes}분 앞당김`, source: '직접 입력' });
 }
 
-// 이전 값으로 되돌리기
+// 이전 값으로 되돌리기 — 제안은 다시 기다림으로 (목업 A.sugUndo)
 export async function undoSuggestion(id: string) {
   const s = db.suggestion;
   const a = db.appointments.find((x) => x.id === s.appointmentId);
@@ -132,6 +154,7 @@ export async function undoSuggestion(id: string) {
   a.predictedPrepMinutes -= s.appliedMinutes;
   s.appliedMinutes = 0;
   s.status = 'PENDING';
+  db.events.push({ at: now(), label: '알람 조정 되돌림', source: '직접 입력' });
 }
 
 // 이번 제안 무시 — 같은 종류 제안은 당분간 다시 만들지 않음 (suppress_until)
