@@ -7,7 +7,7 @@ import type { RoutineProgress } from '../types';
 // 오늘 루틴 카드 (.rcard) — 누를 때마다 다음 단계를 끝냄, 끝낸 단계는 줄을 그음
 export function RoutineCard({ routine, onPress }: { routine: RoutineProgress; onPress: () => void }) {
   return (
-    <Card onPress={onPress} accessibilityLabel={`${routine.title} 다음 단계 완료`}>
+    <Card onPress={onPress} accessibilityLabel={`${routine.title} 다음 단계 완료 · ${routine.done}/${routine.steps.length} 완료`}>
       <Text variant="bodyLarge" weight={600}>
         {routine.title}
       </Text>
