@@ -30,25 +30,24 @@ const SNOOZE_MINUTES = [5, 10, 15] as const;
 export default function RingScreen() {
   const params = useLocalSearchParams<{ alarm?: string; again?: string }>();
   const alarmId = params.alarm ?? 'a1:WAKE';
-  const { data } = useLoad(async () => {
-    const ring = await getRing(alarmId, params.again === '1');
-    // 기상 알람이면 홈 · 그룹의 내 상태가 '알람 울리는 중'
-    if (ring) await startRing(ring.alarmId, ring.at);
-    return ring;
-  });
+  const { data, error } = useLoad(() => getRing(alarmId, params.again === '1'));
   // 읽는 동안에도 맞는 배경이 보이게 알람 id(<일정>:<종류>)의 종류를 먼저 씀
   const fromId = params.alarm?.split(':')[1];
   const kind: RingKind = data?.kind ?? (fromId && Object.keys(HEAD).includes(fromId) ? (fromId as RingKind) : 'WAKE');
   const [minutes, setMinutes] = useState<number>(5);
   const handled = useRef(false); // 두 번 눌러도 해제 · 미루기는 한 번만 기록
 
-  // 미루기 · 해제 없이 나가면(안드로이드 · 웹 뒤로 가기) 울리는 중 표시만 지움
-  useEffect(
-    () => () => {
-      if (!handled.current) void stopRing(alarmId);
-    },
-    [alarmId],
-  );
+  // 울림을 읽은 뒤 내 상태를 '알람 울리는 중'으로 (기상 알람만), 미루기 · 해제 없이 나가면(안드로이드 · 웹 뒤로 가기) 그 표시만 지움
+  // 불러오는 함수가 아니라 여기서 시작해야, 읽는 도중에 나가도 지우기가 시작보다 먼저 돌지 않음
+  const ringId = data?.alarmId ?? null;
+  const ringAt = data?.at.getTime() ?? null;
+  useEffect(() => {
+    if (!ringId || ringAt == null) return;
+    void startRing(ringId, new Date(ringAt));
+    return () => {
+      if (!handled.current) void stopRing(ringId);
+    };
+  }, [ringId, ringAt]);
 
   // 미루기는 3번까지 — 횟수는 #33에서 알람 코어가 셀 예정 (지금 코어는 안 셈, docs/alarm-core.md)
   async function snooze() {
@@ -160,14 +159,14 @@ export default function RingScreen() {
             </View>
           </View>
         </View>
-      ) : data === null ? (
+      ) : data === null || (data === undefined && error) ? (
         // 웹 미리 보기에서 알람 id가 틀렸거나 도착(울리지 않는 알림)일 때
         <View style={styles.missing}>
           <Text variant="body" tone="inverse" align="center">
             울릴 알람을 찾을 수 없어요
           </Text>
           <Pressable onPress={backOrHome} accessibilityRole="button" style={[styles.button, styles.closeButton]}>
-            <Text variant="button" style={{ color: colors.ringWake }}>
+            <Text variant="button" style={{ color: BACKGROUND[kind] }}>
               닫기
             </Text>
           </Pressable>
