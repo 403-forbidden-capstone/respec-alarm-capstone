@@ -130,8 +130,38 @@ td.due{white-space:nowrap;font-variant-numeric:tabular-nums}
 .check{display:flex;gap:8px;align-items:center;padding:6px 0;border-bottom:1px solid var(--line);font-size:13px}
 .check select{font-size:12px;padding:1px 4px}
 input.tok{font:inherit;font-size:13px;border:1px solid var(--line2);border-radius:var(--r);padding:4px 8px;width:300px}
-textarea.note{font:inherit;font-size:13px;color:var(--ink);border:1px solid var(--line);border-radius:6px;width:100%;min-height:28px;padding:4px 6px;margin:0;resize:vertical}
-textarea.note:focus{min-height:64px}
+/* 결정: 한 줄 = 안건(누르면 펼침), 틸 테두리 = 먼저 고른 안 */
+.dec-head{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;margin-bottom:4px}
+.dec-head h2{margin:0}.dec-head b{color:var(--ink);font-weight:600}
+.dec-head .row{margin-left:auto}
+.dec-g{margin-top:18px}
+.dec-g>.k{padding-bottom:6px;border-bottom:1px solid var(--line2)}
+.dec{border-bottom:1px solid var(--line)}
+.dec-row{display:flex;align-items:center;gap:12px;cursor:pointer;border-radius:6px}
+.dec-row:hover{background:var(--bg)}
+.dec-tg{flex:1;min-width:0;display:flex;align-items:baseline;gap:10px;border:0;background:none;padding:9px 4px;text-align:left;font-size:14px;line-height:1.45}
+.dec-tg:hover{background:none}
+.dec-tg::before{content:"";flex:none;width:6px;height:6px;border-right:1.5px solid var(--mute);border-bottom:1.5px solid var(--mute);transform:translateY(-2px) rotate(-45deg);margin-left:4px;transition:transform .15s}
+.dec.open .dec-tg::before{transform:translateY(-3px) rotate(45deg)}
+.dec-id{flex:none;min-width:28px;font-family:ui-monospace,Consolas,monospace;font-size:12px;color:var(--mute)}
+.dec-q{min-width:0}
+.dec.open .dec-q{font-weight:600}
+.dec-side{display:flex;gap:6px;align-items:center;flex-wrap:wrap;justify-content:flex-end;font-size:13px;padding-right:6px}
+.dec-res{color:var(--teal-ink);font-weight:500}
+.dec-body{display:grid;gap:14px;padding:2px 12px 18px 52px;font-size:13px}
+.dec-body h4{margin:0 0 6px;font-size:12px;font-weight:600;color:var(--sub)}
+.dec-body p{margin:0;max-width:72ch}
+.dec-body ul{margin:0;padding-left:18px}
+.dec-meta{display:grid;grid-template-columns:auto 1fr;gap:3px 14px}
+.dec-meta .k{padding-top:1px}
+table.dec-t{max-width:760px}
+table.dec-t td:first-child{width:34%;color:var(--sub)}
+.dec-opts{display:grid;gap:6px;max-width:760px}
+.dec-opt{display:grid;grid-template-columns:18px minmax(0,1fr);gap:10px;padding:8px 12px;border:1px solid var(--line);border-radius:var(--r);background:#fff;line-height:1.55}
+.dec-opt.pick{border-color:var(--teal);background:var(--teal-bg)}
+.dec-opt .key{font-family:ui-monospace,Consolas,monospace;font-weight:600;color:var(--teal-ink)}
+@media (prefers-reduced-motion:reduce){.dec-tg::before{transition:none}}
+@media (max-width:760px){.dec-row{flex-wrap:wrap;gap:0}.dec-side{justify-content:flex-start;padding:0 0 8px 46px}.dec-body{padding-left:8px}}
 .cp{padding:1px 8px;font-size:12px;color:var(--sub)}
 .wrap:has(.side.show) .grid2{grid-template-columns:1fr}
 .wrap:has(.side.show) .screens{grid-template-columns:176px minmax(0,1fr)}
@@ -351,17 +381,8 @@ const COMMANDS = [
   ['폰 로그', 'adb logcat -s ReactNativeJS AlarmCore'],
   ['모듈 의존 그래프', 'cd tools/deps-graph && npm run graph'],
 ];
-const DECISIONS = [
-  ['음성 대화: 1턴(녹음 → Edge → Gemini → JSON) vs 실시간', 'AI 보류', ['#37', '#42']],
-  ['알람 음성 안내 TTS: 폰 내장 vs Gemini', '폰 내장', []],
-  ['강도 3단계: 축별(배경음 · 말소리 · 진동) vs 하나', '#29에서', ['#29']],
-  ['S01 시각 조정 제안 종류를 alarm_suggestion_type에 추가', '#49에서', ['#49']],
-  ['G04 변경 기록 저장 자리', '처음엔 주인에게 푸시만', ['#46']],
-  ['카카오 응답 저장 · 재사용 불가 → est_travel_minutes · CACHED 처리', '#27에서', ['#27']],
-  ['반복 알람: 서버가 다음 회차 하나만 만듦 (폰은 반복 안 함)', '#33에서 확정', ['#33']],
-  ['1차 데모 범위 (10/19)', '라벨 1차 데모 + #60', ['#60']],
-  ['웹 미리보기 Cloudflare · 앱 APK 태그 릴리스', '정함 (10/6)', ['#13']],
-];
+// 결정 안건 — 원본은 docs/decisions.md. 손으로 고치지 말고 문서를 고친 뒤 `npm run board:decisions` (웹 빌드 때는 자동)
+const DECISIONS = /*DECISIONS*/[{"id":"D1","title":"알람 강도를 배경음 · 말소리 · 진동 따로 고르게 할지","status":"정할 것","meta":{"출처":"PR #84 · `docs/screen-data-map.md` 스키마 보완 2","이슈":"#29","기한":"#29 시작 전"},"blocks":[{"h":"지금 어긋난 곳","parts":[{"t":"table","head":["어디","지금"],"rows":[["화면 H03 · 목업","세 축을 따로 고름, \"자동으로 되돌리기\" 버튼 있음"],["DB `alarms`","`intensity` 하나 + `voice_tone` · `sound_key`, 진동 칸 없음"]]}]},{"h":"선택지","parts":[{"t":"opts","v":[{"key":"A","name":"축별로 고름","tag":"먼저 고른 안","desc":"기본값은 강도(약 · 보통 · 강)에서 오고, 직접 고르면 그 값. 말소리 = `voice_tone`, 배경음 = 강도 + `sound_key`","sub":["할 일: `alarms`에 진동 칸 추가, 진동 패턴 3개(없음 · 짧게 반복 · 강하게 연속) 직접 구현"]},{"key":"B","name":"강도 하나만","tag":"","desc":"약 · 보통 · 강 중 하나만 고르고 세 축은 강도를 따라감","sub":["할 일: H03에서 축별 선택 빼기, DB는 그대로"]}]}]}]},{"id":"D2","title":"기상 확인 알림에 응답이 없으면 알람을 다시 울릴지","status":"정할 것","meta":{"출처":"PR #84","이슈":"#35 · #45","기한":"#35 시작 전"},"blocks":[{"h":"지금 어긋난 곳","parts":[{"t":"table","head":["어디","지금"],"rows":[["화면 H08 · 목업","확인 알림에도 응답이 없으면 기상 알람이 다시 울림"],["`docs/screen-data-map.md` H08","끝까지 안 깨면 MISSED 기록 + 그룹에 미확인 푸시(5분마다 도는 `wake-check`)만, 다시 울림 없음"],["#35 본문 (10/7 더함)","해제 뒤 10분 동안 폰 사용도 기상 확정도 없으면 같은 강도로 1번 더 울림, 미루기 횟수에 안 셈"]]}]},{"h":"선택지","parts":[{"t":"opts","v":[{"key":"A","name":"1번 더 울리고, 그래도 안 깨면 MISSED","tag":"먼저 고른 안","desc":"다시 울림 1번 → 응답 없으면 MISSED 기록 + 그룹에 미확인 푸시","sub":["할 일: docs H08 문구 고치기, 알람 코어에 다시 울림 자리 만들기(#79)"]},{"key":"B","name":"다시 울리지 않고 MISSED만","tag":"","desc":"docs에 적힌 대로 MISSED 기록 + 그룹에 미확인 푸시","sub":["할 일: 화면 H08 · 목업 흐름에서 다시 울림 빼기, #35 체크 항목 빼기"]}]}]}]},{"id":"D3","title":"미루기 시간과 횟수","status":"정할 것","meta":{"출처":"PR #84","이슈":"#29 · #33","기한":"#29 시작 전"},"blocks":[{"h":"지금 어긋난 곳","parts":[{"t":"table","head":["어디","지금"],"rows":[["화면 H07 · 목업","5 · 10 · 15분 중 고름 (기본 5분)"],["`docs/alarm-core.md`","미루기 최대 3번"],["알람 코어 (main, PR #62)","10분 고정, 횟수 제한 없음"]]}]},{"h":"선택지","parts":[{"t":"opts","v":[{"key":"A","name":"5 · 10 · 15분 고르기 + 최대 3번","tag":"먼저 고른 안","desc":"울림 화면에 \"미루기 1/3회\", 다 쓰면 버튼을 끄고 짧게 준비하는 안내로 넘김","sub":["할 일: 네이티브 울림 화면에 시간 고르기 · 횟수 추가, `alarm_events.snooze_minutes`에 기록(칸은 이미 있음)"]},{"key":"B","name":"10분 고정 + 최대 3번","tag":"","desc":"시간은 지금 코어 그대로, 횟수만 막음","sub":["할 일: 네이티브에 횟수만 추가, 화면 H07에서 시간 고르기 빼기"]},{"key":"C","name":"지금 코어 그대로 (10분 · 무제한)","tag":"","desc":"네이티브는 손대지 않음","sub":["할 일: 화면 H07 · `docs/alarm-core.md`를 코어에 맞춰 고치기"]}]}]},{"h":"참고","parts":[{"t":"p","v":"안 끄고 두면 저절로 다시 울리는 것(약 1번 · 보통 2번 · 강 3번, #29)은 미루기 횟수와 따로 셈."}]}]},{"id":"D4","title":"반복 알람을 서버가 몇 회차까지 미리 만들지","status":"정할 것","meta":{"출처":"결정 탭 (10/7)","이슈":"#33","기한":"#33 시작 전"},"blocks":[{"h":"지금 어긋난 곳","parts":[{"t":"table","head":["어디","지금"],"rows":[["결정 탭 (10/7)","서버가 다음 회차 하나만 만듦, 폰은 반복 안 함"],["`docs/screen-data-map.md` Edge 표","`suggestion-generate`가 매일 03:00 반복 알람 다음 회차를 메움"],["#33 본문 (10/7 더함)","서버가 앞으로 2주치를 만들어 두고 폰이 한꺼번에 예약 (앱을 며칠 안 열어도 울림)"]]}]},{"h":"선택지","parts":[{"t":"opts","v":[{"key":"A","name":"2주치 미리","tag":"#33에 적힌 안","desc":"앱을 며칠 안 열어도 울림","sub":["할 일: docs Edge 표 문구 고치기"]},{"key":"B","name":"다음 회차 하나만","tag":"","desc":"매일 배치가 한 회차씩 메움","sub":["할 일: #33 체크 항목 고치기"]}]}]}]},{"id":"D5","title":"카카오 응답을 어디까지 남길지","status":"정할 것","meta":{"출처":"`docs/screen-data-map.md` 스키마 보완 4","이슈":"#27","기한":"#27에서"},"blocks":[{"h":"지금 어긋난 곳","parts":[{"t":"table","head":["어디","지금"],"rows":[["카카오 API 약관","응답 저장 · 재사용 불가"],["DB","`est_travel_minutes` · `travel_source` CACHED 칸 있음"]]}]},{"h":"참고","parts":[{"t":"p","v":"#27에서 실제 응답을 보고, 계산에 쓴 값(분)만 남겨도 되는지 정함."}]}]},{"id":"D6","title":"S01 시각 조정 제안 종류를 `alarm_suggestion_type`에 추가","status":"정할 것","meta":{"출처":"`docs/screen-data-map.md` 스키마 보완 1","이슈":"#49","기한":"#49에서"},"blocks":[{"h":"지금 어긋난 곳","parts":[{"t":"table","head":["어디","지금"],"rows":[["목업 S01","\"다음 알람 10분 앞당김\" 제안"],["DB `alarm_suggestion_type`","VOICE_TONE · SOUND · INTENSITY뿐, 시각 조정 없음"]]}]}]},{"id":"D7","title":"음성 대화: 1턴 vs 실시간","status":"보류","meta":{"출처":"결정 탭 (10/7)","이슈":"#37 · #42","보류 이유":"AI는 내용 확정 뒤 (10/6 재계획, 라벨 `AI 대기`)"},"blocks":[{"h":"선택지","parts":[{"t":"opts","v":[{"key":"A","name":"1턴","tag":"","desc":"녹음 → Edge → Gemini → JSON","sub":[]},{"key":"B","name":"실시간","tag":"","desc":"말하는 동안 주고받음","sub":[]}]}]}]},{"id":"D8","title":"알람 음성 안내 TTS: 폰 내장 vs Gemini","status":"정한 것","meta":{"출처":"상세설계서 (9/28)","결과":"폰 내장 — Gemini TTS 안 씀 (9/28)"},"blocks":[]},{"id":"D9","title":"G04 변경 기록 저장 자리","status":"정한 것","meta":{"출처":"`docs/screen-data-map.md` 스키마 보완 3","이슈":"#46","결과":"처음엔 저장 없이 주인에게 푸시만"},"blocks":[]},{"id":"D10","title":"1차 데모 범위 (10/19)","status":"정한 것","meta":{"출처":"10/6 재계획","이슈":"#60","결과":"라벨 `1차 데모` 이슈 + #60 (10/6)"},"blocks":[]},{"id":"D11","title":"배포 길: 웹 미리보기 · 앱","status":"정한 것","meta":{"출처":"배포 세팅","이슈":"#13","결과":"웹 미리보기 Cloudflare · 앱 APK 태그 릴리스 (10/6)"},"blocks":[]}];
 let SNAPSHOT = /*SNAPSHOT*/{"at":"2026-10-07T12:07:04.217Z","items":[{"t":"","st":"DRAFT","status":"📥 백로그","part":"PM","labels":[]},{"t":"","st":"DRAFT","status":"📌 이번 주","start":"2026-10-03","due":"2026-10-03","part":"DESIGN","labels":[]},{"t":"","st":"DRAFT","status":"📥 백로그","part":"PM","labels":[]},{"n":1,"t":"레포 자동화 · 라이선스 추가","st":"CLOSED","status":"✅ 완료","ms":"M0 세팅","start":"2026-10-03","due":"2026-10-03","part":"PM","labels":[]},{"n":4,"t":"PR 정리를 보드 연동에 합치기","st":"CLOSED","status":"✅ 완료","ms":"M0 세팅","start":"2026-10-03","due":"2026-10-03","part":"PM","labels":[]},{"n":6,"t":"팀 카드 빼고 가이드와 레포 문서 맞추기","st":"CLOSED","status":"✅ 완료","ms":"M0 세팅","start":"2026-10-03","due":"2026-10-03","part":"PM","labels":[]},{"n":10,"t":"Expo 앱 뼈대 올리기","st":"CLOSED","status":"✅ 완료","ms":"M1 목업 화면","start":"2026-10-03","due":"2026-10-04","part":"FE","labels":["FE"]},{"n":13,"t":"배포 길 세팅: 웹 미리보기(Cloudflare Pages) · 앱 APK(EAS)","st":"CLOSED","status":"✅ 완료","ms":"M0 세팅","start":"2026-10-06","labels":[]},{"n":17,"t":"주간 요약 댓글 접기","st":"CLOSED","status":"✅ 완료","ms":"M0 세팅","start":"2026-10-06","due":"2026-10-06","part":"PM","labels":[]},{"n":16,"t":"안드로이드 빌드 검사 추가","st":"CLOSED","status":"✅ 완료","ms":"M0 세팅","start":"2026-10-06","due":"2026-10-06","part":"PM","labels":[]},{"n":20,"t":"EAS 연결 · 개발 빌드 폰에 설치","st":"OPEN","status":"📌 이번 주","ms":"M0 세팅","start":"2026-10-07","due":"2026-10-08","part":"PM","labels":["1차 데모"]},{"n":21,"t":"구현 기준 5개 정하기","st":"OPEN","status":"🏃 진행 중","ms":"M0 세팅","start":"2026-10-07","due":"2026-10-10","part":"PM","labels":[]},{"n":22,"t":"Supabase 프로젝트 · 스키마 · RLS","st":"CLOSED","status":"✅ 완료","ms":"M0 세팅","start":"2026-10-07","due":"2026-10-08","part":"BE","labels":["BE","1차 데모"]},{"n":23,"t":"외부 키 발급 (카카오 · Gemini · FCM)","st":"OPEN","status":"📌 이번 주","ms":"M0 세팅","start":"2026-10-07","due":"2026-10-10","part":"PM","labels":["1차 데모"]},{"n":24,"t":"디자인 기본값 (색 · 글꼴 · 간격 · 공용 컴포넌트)","st":"CLOSED","status":"✅ 완료","ms":"M1 목업 화면","start":"2026-10-08","due":"2026-10-08","part":"DESIGN","labels":["DESIGN","1차 데모"]},{"n":25,"t":"로그인 이전 · 온보딩 · 권한 안내","st":"OPEN","status":"🏃 진행 중","ms":"M0 세팅","start":"2026-10-09","due":"2026-10-10","part":"FE","labels":["FE","1차 데모"]},{"n":26,"t":"알람 코어 이전 · 첫 관문 (잠금화면 위로 울림)","st":"OPEN","status":"🏃 진행 중","ms":"M0 세팅","start":"2026-10-08","due":"2026-10-09","part":"FE","labels":["FE","1차 데모"]},{"n":27,"t":"카카오 대중교통 실제 응답 확인","st":"OPEN","status":"📌 이번 주","ms":"M2 기능① 약속 기반 개인 알람","start":"2026-10-10","due":"2026-10-10","part":"BE","labels":["BE","1차 데모"]},{"n":28,"t":"대회 · 학사 일정 확인","st":"OPEN","status":"📥 백로그","ms":"창의경진대회 데모","start":"2026-10-12","due":"2026-10-16","part":"PM","labels":[]},{"n":29,"t":"알람 강도 3단계 확인","st":"OPEN","status":"📌 이번 주","ms":"M2 기능① 약속 기반 개인 알람","start":"2026-10-10","due":"2026-10-11","part":"FE","labels":["FE","1차 데모"]},{"n":30,"t":"홈 · 알람 화면 옮기기","st":"OPEN","status":"🏃 진행 중","ms":"M1 목업 화면","start":"2026-10-10","due":"2026-10-11","part":"FE","labels":["FE","1차 데모"]},{"n":31,"t":"약속 입력 · 장소 검색","st":"OPEN","status":"📌 이번 주","ms":"M2 기능① 약속 기반 개인 알람","start":"2026-10-11","due":"2026-10-11","part":"FE","labels":["FE","1차 데모"]},{"n":32,"t":"이동시간 · 기상 시각 역산 · 강도 계산","st":"OPEN","status":"📌 이번 주","ms":"M2 기능① 약속 기반 개인 알람","start":"2026-10-11","due":"2026-10-12","part":"BE","labels":["BE","1차 데모"]},{"n":33,"t":"알람 예약 · 울림 · 미루기 · 기록","st":"OPEN","status":"📥 백로그","ms":"M2 기능① 약속 기반 개인 알람","start":"2026-10-12","due":"2026-10-13","part":"FE","labels":["FE","1차 데모"]},{"n":34,"t":"CI 보강 (린트 · 단위 테스트 · Edge Function 검사)","st":"OPEN","status":"🏃 진행 중","ms":"M0 세팅","start":"2026-10-20","due":"2026-10-21","part":"PM","labels":[]},{"n":35,"t":"기상 자동 확인 가능 여부 확인","st":"OPEN","status":"📥 백로그","ms":"M5 기능④ 캘린더 · 하루 기록","start":"2026-10-13","due":"2026-10-13","part":"FE","labels":["FE","1차 데모"]},{"n":36,"t":"지오펜스 확인","st":"OPEN","status":"📥 백로그","ms":"M5 기능④ 캘린더 · 하루 기록","start":"2026-10-13","due":"2026-10-13","part":"FE","labels":["FE","1차 데모"]},{"n":37,"t":"음성 1턴 확인","st":"OPEN","status":"📥 백로그","ms":"M4 기능③ 수면 전후 Voice AI","part":"AI","labels":["AI 대기"]},{"n":38,"t":"기록 · 제안 화면 옮기기","st":"OPEN","status":"📥 백로그","ms":"M1 목업 화면","start":"2026-10-14","due":"2026-10-14","part":"FE","labels":["FE","1차 데모"]},{"n":39,"t":"AI 화면 옮기기","st":"OPEN","status":"📥 백로그","ms":"M1 목업 화면","part":"FE","labels":["FE","AI 대기"]},{"n":40,"t":"기상 · 출발 · 도착 자동 수집","st":"OPEN","status":"📥 백로그","ms":"M5 기능④ 캘린더 · 하루 기록","start":"2026-10-14","due":"2026-10-15","part":"FE","labels":["FE","1차 데모"]},{"n":41,"t":"준비 실측 · 지각 판정 · 기록 연결","st":"OPEN","status":"📥 백로그","ms":"M5 기능④ 캘린더 · 하루 기록","start":"2026-10-14","due":"2026-10-15","part":"BE","labels":["BE","1차 데모"]},{"n":42,"t":"자기 전 · 기상 후 음성 대화 (1턴)","st":"OPEN","status":"📥 백로그","ms":"M4 기능③ 수면 전후 Voice AI","part":"AI","labels":["AI 대기"]},{"n":43,"t":"그룹 · 친구 화면 옮기기","st":"OPEN","status":"📥 백로그","ms":"M1 목업 화면","start":"2026-10-15","due":"2026-10-15","part":"FE","labels":["FE","1차 데모"]},{"n":44,"t":"친구 · 그룹 · 공유 권한","st":"OPEN","status":"📥 백로그","ms":"M3 기능② 알람 공유 · 기상 확인","start":"2026-10-15","due":"2026-10-16","part":"BE","labels":["BE","1차 데모"]},{"n":45,"t":"기상 상태 실시간 · 미확인 푸시","st":"OPEN","status":"📥 백로그","ms":"M3 기능② 알람 공유 · 기상 확인","start":"2026-10-16","due":"2026-10-17","part":"BE","labels":["BE","1차 데모"]},{"n":46,"t":"공동 약속 · 친구가 알람 설정","st":"OPEN","status":"📥 백로그","ms":"M3 기능② 알람 공유 · 기상 확인","start":"2026-10-17","due":"2026-10-17","part":"FE","labels":["FE","1차 데모"]},{"n":47,"t":"팀 자가 사용 · P2 통합 APK","st":"OPEN","status":"📥 백로그","ms":"창의경진대회 데모","start":"2026-10-20","due":"2026-11-22","part":"PM","labels":[]},{"n":48,"t":"일기 · 루틴 추천 · 루틴 알람","st":"OPEN","status":"📥 백로그","ms":"M6 기능⑥ AI 일기 · 루틴","part":"AI","labels":["AI 대기"]},{"n":49,"t":"학습 · 제안 루프 v1","st":"OPEN","status":"📥 백로그","ms":"M5 기능④ 캘린더 · 하루 기록","start":"2026-10-20","due":"2026-10-22","part":"DATA","labels":[]},{"n":50,"t":"데모 모드 · 시드 · 데모 계정","st":"OPEN","status":"📥 백로그","ms":"창의경진대회 데모","start":"2026-10-23","due":"2026-10-24","part":"FE","labels":["FE"]},{"n":51,"t":"모델 결과 시연용 (합성 데이터)","st":"OPEN","status":"📥 백로그","ms":"M5 기능④ 캘린더 · 하루 기록","part":"DATA","labels":["AI 대기"]},{"n":52,"t":"기능 동결 · UX 리뷰 · 버그 수정","st":"OPEN","status":"📥 백로그","ms":"창의경진대회 데모","start":"2026-11-23","due":"2026-11-29","part":"PM","labels":[]},{"n":53,"t":"시연 리허설 · 백업 영상","st":"OPEN","status":"📥 백로그","ms":"창의경진대회 데모","start":"2026-11-24","due":"2026-12-03","part":"PM","labels":[]},{"n":54,"t":"데모 빌드 v1.0.0 고정 · D-3 점검","st":"OPEN","status":"📥 백로그","ms":"창의경진대회 데모","start":"2026-12-01","due":"2026-12-03","part":"PM","labels":[]},{"n":55,"t":"iOS 빌드 (도전 영역)","st":"OPEN","status":"📥 백로그","ms":"창의경진대회 데모","start":"2026-10-17","due":"2026-11-27","part":"FE","labels":["FE","iOS"]},{"n":56,"t":"iOS 알람 코어 뼈대 (Windows에서)","st":"OPEN","status":"📥 백로그","ms":"창의경진대회 데모","start":"2026-10-17","due":"2026-10-17","part":"FE","labels":["FE","iOS","1차 데모"]},{"n":57,"t":"맥에서 첫 iOS 빌드 · 울림 확인","st":"OPEN","status":"📥 백로그","ms":"창의경진대회 데모","start":"2026-10-26","due":"2026-10-31","part":"FE","labels":["FE","iOS"]},{"n":58,"t":"iOS 알람 기능 맞추기","st":"OPEN","status":"📥 백로그","ms":"창의경진대회 데모","start":"2026-11-09","due":"2026-11-14","part":"FE","labels":["FE","iOS"]},{"n":59,"t":"iOS 지원 범위 표시","st":"OPEN","status":"📥 백로그","ms":"창의경진대회 데모","start":"2026-11-23","due":"2026-11-27","part":"PM","labels":["iOS"]},{"n":60,"t":"1차 데모 빌드 · 제출","st":"OPEN","status":"📥 백로그","ms":"창의경진대회 데모","start":"2026-10-18","due":"2026-10-19","part":"PM","labels":["1차 데모"]},{"n":65,"t":"안드로이드 빌드 검사 APK 남기기 · 디스크 부족 막기","st":"CLOSED","status":"✅ 완료","ms":"M0 세팅","start":"2026-10-07","due":"2026-10-07","part":"FE","labels":["FE"]},{"n":69,"t":"DB 변경 자동 적용 (PR 임시 DB 검사 · 머지 시 적용)","st":"CLOSED","status":"✅ 완료","ms":"M0 세팅","start":"2026-10-07","due":"2026-10-07","part":"BE","labels":["BE"]},{"n":70,"t":"자동 리뷰에 방향성 · 자가 검수 · Android 항목 추가","st":"CLOSED","status":"✅ 완료","ms":"M0 세팅","start":"2026-10-07","due":"2026-10-07","part":"PM","labels":[]},{"n":73,"t":"개발 도구: 모듈 의존 그래프(madge) · 순환 의존 검사","st":"CLOSED","status":"✅ 완료","ms":"M0 세팅","start":"2026-10-07","due":"2026-10-07","labels":[]},{"n":75,"t":"Cloudflare 빌드 설정 문서를 실제 명령으로 맞추기","st":"CLOSED","status":"✅ 완료","ms":null,"start":"2026-10-07","labels":[]},{"n":77,"t":"개발 보드 화면 /board: 큰 그림 · 화면 · 기능 · 연결 · 할 일 · 환경 · 결정","st":"CLOSED","status":"✅ 완료","ms":"M0 세팅","start":"2026-10-07","due":"2026-10-08","labels":[]},{"n":79,"t":"알람 코어 구조: 공통 약속 하나 + Android · iOS 구현","st":"OPEN","status":"📥 백로그","ms":"M2 기능① 약속 기반 개인 알람","start":"2026-10-09","due":"2026-10-10","part":"FE","labels":["FE","1차 데모"]},{"n":80,"t":"공유받은 알람이 바뀌면 폰 예약 바로 맞추기","st":"OPEN","status":"📥 백로그","ms":"M3 기능② 알람 공유 · 기상 확인","start":"2026-10-17","due":"2026-10-17","part":"BE","labels":["FE","BE"]},{"n":81,"t":"해제 뒤 알람 평가 · 선호 배경음","st":"OPEN","status":"📥 백로그","ms":"M2 기능① 약속 기반 개인 알람","start":"2026-10-14","due":"2026-10-14","part":"FE","labels":["FE"]},{"n":85,"t":"기능 흐름 PR은 작업자 확인 · 판단 근거 달기","st":"CLOSED","status":"✅ 완료","ms":"M0 세팅","start":"2026-10-07","due":"2026-10-07","part":"PM","labels":[]},{"n":87,"t":"개발 보드: 가독성 개선 · 빌드 때 보드 스냅샷 자동 갱신","st":"OPEN","status":"📥 백로그","ms":"M0 세팅","start":"2026-10-07","due":"2026-10-08","labels":[]}],"prs":[{"number":84,"title":"[FE] [FEAT] 홈 · 알람 화면 옮기기 (H01 · H02 · H03 · H05 · H07 · H08)","state":"OPEN","draft":false,"branch":"feat/30-FE-home-alarm-screens","review":null,"closes":[],"checks":"SUCCESS"},{"number":83,"title":"[FE] [FEAT] 목업 화면 공통: 가짜 데이터 · 공용 부품 · 화면 자리","state":"OPEN","draft":false,"branch":"feat/30-FE-mock-base","review":null,"closes":[],"checks":"SUCCESS"}],"tree":["docs/alarm-core.md","docs/screen-data-map.md","mobile/src/app/(tabs)/_layout.tsx","mobile/src/app/(tabs)/ai.tsx","mobile/src/app/(tabs)/group.tsx","mobile/src/app/(tabs)/index.tsx","mobile/src/app/(tabs)/records.tsx","mobile/src/app/_layout.tsx","mobile/src/app/alarm/.gitkeep","mobile/src/app/auth/callback.tsx","mobile/src/app/dev/alarm-test.tsx","mobile/src/app/dev/ui.tsx","mobile/src/app/friends/.gitkeep","mobile/src/app/groups/.gitkeep","mobile/src/app/login.tsx","mobile/src/app/onboarding.tsx","mobile/src/app/routine/.gitkeep","mobile/src/app/schedule/.gitkeep","mobile/src/app/settings.tsx","mobile/src/app/suggestion/.gitkeep","mobile/src/components/ui/Avatar.tsx","mobile/src/components/ui/Button.tsx","mobile/src/components/ui/Card.tsx","mobile/src/components/ui/Chip.tsx","mobile/src/components/ui/Field.tsx","mobile/src/components/ui/KeyValueRow.tsx","mobile/src/components/ui/ProgressBar.tsx","mobile/src/components/ui/Screen.tsx","mobile/src/components/ui/SectionHeader.tsx","mobile/src/components/ui/Segmented.tsx","mobile/src/components/ui/Stepper.tsx","mobile/src/components/ui/TabBar.tsx","mobile/src/components/ui/Text.tsx","mobile/src/components/ui/Toggle.tsx","mobile/src/components/ui/TopBar.tsx","mobile/src/components/ui/index.ts","mobile/src/features/alarm/api.ts","mobile/src/features/alarm/components/.gitkeep","mobile/src/features/alarm/hooks/.gitkeep","mobile/src/features/alarm/types.ts","mobile/src/features/auth/AuthProvider.tsx","mobile/src/features/auth/ProfileRetryScreen.tsx","mobile/src/features/profile/api.ts","mobile/src/features/profile/types.ts","mobile/src/features/records/api.ts","mobile/src/features/records/components/.gitkeep","mobile/src/features/records/hooks/.gitkeep","mobile/src/features/records/types.ts","mobile/src/features/routine/api.ts","mobile/src/features/routine/components/.gitkeep","mobile/src/features/routine/hooks/.gitkeep","mobile/src/features/routine/types.ts","mobile/src/features/social/api.ts","mobile/src/features/social/components/.gitkeep","mobile/src/features/social/hooks/.gitkeep","mobile/src/features/social/types.ts","mobile/src/features/voice/api.ts","mobile/src/features/voice/components/.gitkeep","mobile/src/features/voice/hooks/.gitkeep","mobile/src/features/voice/types.ts","mobile/src/lib/.gitkeep","mobile/src/lib/auth.ts","mobile/src/lib/supabase.ts","mobile/src/mocks/.gitkeep","mobile/src/theme/__tests__/typography.test.ts","mobile/src/theme/index.ts","mobile/src/theme/tokens.ts","mobile/src/theme/typography.ts","mobile/src/types/database.ts","supabase/.gitignore","supabase/README.md","supabase/config.toml","supabase/functions/.env.example","supabase/migrations/20261007000000_init_schema.sql","supabase/migrations/20261007000100_mockup_extras.sql","supabase/migrations/20261007000200_rls.sql","supabase/tests/README.md","supabase/tests/db-check.mjs","supabase/tests/package-lock.json","supabase/tests/package.json"]};
 
 // ───────────────────────────────── 상태
@@ -376,7 +397,7 @@ let token = LS.get('ghToken', '');
 let todoFilter = LS.get('todoFilter', { status: '', ms: '', label: '' });
 let syncError = '';
 const envState = LS.get('env', {});
-const decState = LS.get('dec', {});
+const decOpen = new Set(LS.get('decOpen', [])); // 펼친 안건 번호(D1 …)
 
 const STATUS = { '✅ 완료': 'done', '🏃 진행 중': 'doing', '👀 리뷰': 'review', '📌 이번 주': 'week', '📥 백로그': 'todo' };
 const STATUS_KO = { done: '완료', doing: '진행 중', review: '리뷰', week: '이번 주', todo: '백로그', wait: '대기', ai: 'AI 대기' };
@@ -618,14 +639,47 @@ function rEnv() {
     <tr><td><code>tools/deps-graph/</code></td><td>모듈 의존 그래프</td></tr></table></div>`;
 }
 
+// 결정: 원본 docs/decisions.md → DECISIONS. 한 줄 = 안건, 누르면 세부(지금 어긋난 곳 · 선택지 · 참고)
+const DEC_GROUPS = ['정할 것', '보류', '정한 것'];
+const DEC_DOC = `https://github.com/${SITE.org}/${SITE.repo}/blob/main/docs/decisions.md`;
+// 문서 글줄 → HTML: `코드` · **굵게** · PR #n · #n (links=false면 링크 없이 — 버튼 안 제목용)
+const inl = (s, links = true) => String(s || '').split(/(`[^`]+`)/).map((p) => /^`[^`]+`$/.test(p) ? `<code>${esc(p.slice(1, -1))}</code>`
+  : esc(p).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>').replace(/(PR )?#(\d+)/g, (m, pr, n) => links ? `<a href="${pr ? ghPr(n) : ghIssue(n)}" target="_blank" rel="noopener">${m}</a>` : m)).join('');
+const decIssues = (d) => [...new Set((String(d.meta['이슈'] || '').match(/#\d+/g) || []).map((x) => Number(x.slice(1))))];
+// 기한 = 연결 이슈 중 안 끝난 것의 가장 이른 시작일 (보드 날짜를 따라감)
+const decDue = (d) => decIssues(d).map(issue).filter((it) => it && it.start && it.st !== 'CLOSED').map((it) => it.start).sort()[0] || '';
+function decPart(p) {
+  if (p.t === 'p') return `<p>${inl(p.v)}</p>`;
+  if (p.t === 'ul') return `<ul>${p.v.map((x) => `<li>${inl(x)}</li>`).join('')}</ul>`;
+  if (p.t === 'table') return `<table class="dec-t"><tr>${p.head.map((h) => `<th>${inl(h)}</th>`).join('')}</tr>${p.rows.map((r) => `<tr>${r.map((c) => `<td>${inl(c)}</td>`).join('')}</tr>`).join('')}</table>`;
+  if (p.t === 'opts') return `<div class="dec-opts">${p.v.map((o) => `<div class="dec-opt${o.tag ? ' pick' : ''}"><span class="key">${esc(o.key)}</span><div>
+    <div><b>${inl(o.name)}</b>${o.tag ? ` <span class="chip review">${esc(o.tag)}</span>` : ''}</div>${o.desc ? `<div>${inl(o.desc)}</div>` : ''}${o.sub.map((s) => `<div class="muted">${inl(s)}</div>`).join('')}</div></div>`).join('')}</div>`;
+  return '';
+}
+function decRow(d) {
+  const open = decOpen.has(d.id);
+  const due = d.status === '정할 것' ? decDue(d) : '';
+  const tail = d.status === '정한 것' ? `<span class="dec-res">${inl(d.meta['결과'])}</span>`
+    : d.status === '보류' ? `<span class="muted">${inl(d.meta['보류 이유'])}</span>`
+    : due ? `<span class="num ${due < todayS ? 'late' : 'muted'}" title="연결 이슈 시작일">~${fmtDate(due)}</span>` : '';
+  const meta = Object.entries(d.meta).map(([k, v]) => `<span class="k">${esc(k)}</span><span>${inl(v)}${k === '기한' && due ? ` <span class="muted num">· ${fmtDate(due)}</span>` : ''}</span>`).join('');
+  return `<div class="dec${open ? ' open' : ''}">
+    <div class="dec-row" data-dec="${esc(d.id)}">
+      <button class="dec-tg" aria-expanded="${open}" aria-controls="dec-${esc(d.id)}"><span class="dec-id">${esc(d.id)}</span><span class="dec-q">${inl(d.title, false)}</span></button>
+      <span class="dec-side">${decIssues(d).map(issuePill).join('')}${tail}</span>
+    </div>` +
+    (open ? `<div class="dec-body" id="dec-${esc(d.id)}"><div class="dec-meta">${meta}</div>` +
+      d.blocks.map((b) => `<div>${b.h ? `<h4>${esc(b.h)}</h4>` : ''}${b.parts.map(decPart).join('')}</div>`).join('') + `</div>` : '') +
+    `</div>`;
+}
 function rDec() {
-  const idx = DECISIONS.map((_, i) => i).sort((a, b) => ((decState[a] || {}).done ? 1 : 0) - ((decState[b] || {}).done ? 1 : 0));
-  const doneN = idx.filter(i => (decState[i] || {}).done).length;
-  return `<div class="card"><h2>정할 것 <span class="num muted" style="font-weight:500">${DECISIONS.length - doneN}</span> · 정한 것 <span class="num muted" style="font-weight:500">${doneN}</span></h2>
-    <table><tr><th style="width:1%">정함</th><th style="width:40%">질문</th><th style="width:24%">답</th><th>이슈</th><th style="width:22%">메모</th></tr>` +
-    idx.map(i => { const [q, now, refs] = DECISIONS[i]; const d = decState[i] || {}; const undecided = /^#/.test(now);
-      return `<tr class="${d.done ? 'dim' : ''}"><td><input type="checkbox" data-dec="${i}" ${d.done ? 'checked' : ''}></td><td>${esc(q)}</td><td style="font-weight:500">${undecided ? '<span class="muted">미정</span>' : esc(now)}</td><td>${refs.map(r => `<a href="${ghIssue(r.slice(1))}" target="_blank" rel="noopener">${r}</a>`).join(' ')}</td><td><textarea class="note" rows="1" data-decnote="${i}" placeholder="정한 내용">${esc(d.note || '')}</textarea></td></tr>`; }).join('') +
-    `</table><div class="note">팀이 알아야 할 결정은 이슈 댓글이나 docs/에 PR로</div></div>`;
+  const by = Object.fromEntries(DEC_GROUPS.map((g) => [g, DECISIONS.filter((d) => d.status === g)]));
+  const head = `<div class="dec-head"><h2>결정</h2><span class="muted num">${DEC_GROUPS.map((g) => `${g} <b>${by[g].length}</b>`).join(' · ')}</span>
+    <span class="row"><button data-decall="open">모두 펼치기</button><button data-decall="close">모두 접기</button></span></div>
+    <div class="muted">원본 <a href="${DEC_DOC}" target="_blank" rel="noopener">docs/decisions.md</a> · 회의에서 정하면 결과를 적고 정한 것으로 옮김</div>`;
+  if (!DECISIONS.length) return `<div class="card">${head}<p class="note">안건이 비어 있음 — <code>cd mobile && npm run board:decisions</code></p></div>`;
+  return `<div class="card">${head}` + DEC_GROUPS.filter((g) => by[g].length).map((g) =>
+    `<div class="dec-g"><div class="k">${g} <span class="num">${by[g].length}</span></div>${by[g].map(decRow).join('')}</div>`).join('') + `</div>`;
 }
 
 // ───────────────────────────────── GitHub 동기화
@@ -675,9 +729,17 @@ async function loadSnapshot() {
 
 // ───────────────────────────────── 이벤트
 document.addEventListener('click', (e) => {
-  const el = e.target.closest('[data-tab],[data-go],[data-sel],[data-f],[data-src],[data-copy],#btnSync,#btnSide,#btnReload,#tokSave,#tokClear');
+  const el = e.target.closest('[data-tab],[data-go],[data-sel],[data-f],[data-src],[data-copy],[data-dec],[data-decall],#btnSync,#btnSide,#btnReload,#tokSave,#tokClear');
   if (!el) return;
   if (el.dataset.tab) { tab = el.dataset.tab; LS.set('tab', tab); render(); return; }
+  if (el.dataset.decall) { if (el.dataset.decall === 'open') DECISIONS.forEach((d) => decOpen.add(d.id)); else decOpen.clear(); LS.set('decOpen', [...decOpen]); render(); return; }
+  if (el.dataset.dec) {
+    if (e.target.closest('a')) return; // 줄 안 이슈 링크는 그대로 열림
+    const id = el.dataset.dec; if (decOpen.has(id)) decOpen.delete(id); else decOpen.add(id);
+    LS.set('decOpen', [...decOpen]); render();
+    const b = document.querySelector(`.dec-row[data-dec="${CSS.escape(id)}"] .dec-tg`); if (b) b.focus({ preventScroll: true });
+    return;
+  }
   if (el.dataset.f !== undefined) {
     e.preventDefault();
     if (el.dataset.f === 'reset') todoFilter = { status: '', ms: '', label: '' }; else todoFilter[el.dataset.f] = el.dataset.v;
@@ -704,10 +766,6 @@ document.addEventListener('change', (e) => {
   const el = e.target;
   if (el.dataset.fsel) { todoFilter[el.dataset.fsel] = el.value; LS.set('todoFilter', todoFilter); render(); }
   if (el.dataset.env) { envState[el.dataset.env] = el.value; LS.set('env', envState); render(); }
-  if (el.dataset.dec) { decState[el.dataset.dec] = { ...(decState[el.dataset.dec] || {}), done: el.checked }; LS.set('dec', decState); render(); }
-});
-document.addEventListener('input', (e) => {
-  const el = e.target; if (el.dataset.decnote) { decState[el.dataset.decnote] = { ...(decState[el.dataset.decnote] || {}), note: el.value }; LS.set('dec', decState); }
 });
 // 화면 트리: ↑ ↓로 이동
 document.addEventListener('keydown', (e) => {
