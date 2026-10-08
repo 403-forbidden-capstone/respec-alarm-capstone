@@ -51,7 +51,7 @@ function RootStack() {
   }, [loading]);
 
   if (loading) return null;
-  if (profileError) return <ProfileRetryScreen message={profileError} onRetry={refreshProfile} />;
+  if (profileError != null) return <ProfileRetryScreen message={profileError} onRetry={refreshProfile} />;
   const needsLogin = enabled && !session;
   const ready = !needsLogin && !needsOnboarding;
   const mock = !enabled;
