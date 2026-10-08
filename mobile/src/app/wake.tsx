@@ -34,7 +34,7 @@ export default function WakeScreen() {
   if (data === undefined) {
     return (
       <Screen>
-        <TopBar onBack={backOrHome} />
+        <TopBar onBack={backOrHome} screenId="H08" />
       </Screen>
     );
   }
@@ -42,7 +42,7 @@ export default function WakeScreen() {
   if (data === null) {
     return (
       <Screen>
-        <TopBar onBack={backOrHome} right={<Text variant="screenId">H08</Text>} />
+        <TopBar onBack={backOrHome} screenId="H08" />
         <Text variant="title" style={styles.title}>
           기상 확인
         </Text>
@@ -115,7 +115,7 @@ function WakeFlow({ check }: { check: WakeCheck }) {
 
   return (
     <Screen>
-      <TopBar onBack={backOrHome} right={<Text variant="screenId">H08</Text>} />
+      <TopBar onBack={backOrHome} screenId="H08" />
       <Text variant="title" style={styles.title}>
         기상 확인
       </Text>

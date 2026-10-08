@@ -152,6 +152,7 @@ export default function RingScreen() {
                 </Text>
               </Pressable>
               <Pressable onPress={dismiss} accessibilityRole="button" style={[styles.button, styles.main]}>
+                {/* 목업 .rbtn.main 글자색은 종류와 상관없이 #141414 */}
                 <Text variant="button" style={{ color: colors.ringWake }}>
                   알람 해제
                 </Text>
