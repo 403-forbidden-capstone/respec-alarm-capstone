@@ -2,7 +2,7 @@ import { router } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
 import { KeyboardAvoidingView, ScrollView, StyleSheet, View } from 'react-native';
 
-import { Screen, Text, toast, TopBar } from '@/components/ui';
+import { LoadError, Screen, Text, toast, TopBar } from '@/components/ui';
 import { TextLink } from '@/features/alarm/components/TextLink';
 import { finishConversation, getConversation, rejectFoundSchedule, saveFoundSchedule, say } from '@/features/voice/api';
 import { ChatBubble, TypingBubble } from '@/features/voice/components/ChatBubble';
@@ -18,7 +18,7 @@ const LISTEN_MS = 1100; // 말하기를 누른 뒤 듣는 시간 (목업 chatSpe
 // 03 AI 탭 · A02 AI 대화 — 자기 전 대화. AI 대기라 목업 대본대로 흘러감 (마이크 · 음성 합성 · 서버 호출 없음)
 // 말하기 = 다음 대본 문장을 말한 것으로 침, 텍스트 = 그 문장을 고쳐 보냄. 일정을 찾으면 카드로 확인받고, 완료하면 하루 기록(A03)으로
 export default function AiScreen() {
-  const { data, reload } = useLoad(getConversation);
+  const { data, error, reload } = useLoad(getConversation);
   const [mode, setMode] = useState<'voice' | 'text'>('voice');
   const [draftText, setDraftText] = useState<string | null>(null); // 글 모드에서 고친 글 (null = 대본 문장 그대로)
   const [listening, setListening] = useState(false);
@@ -66,6 +66,7 @@ export default function AiScreen() {
     return (
       <Screen>
         <TopBar screenId="A02" />
+        {error ? <LoadError onRetry={reload} /> : null}
       </Screen>
     );
   }

@@ -2,7 +2,7 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { useState, type ReactNode } from 'react';
 import { StyleSheet, TextInput, View } from 'react-native';
 
-import { Button, Card, Chip, Screen, Text, Timeline, toast, TopBar } from '@/components/ui';
+import { Button, Card, Chip, LoadError, Screen, Text, Timeline, toast, TopBar } from '@/components/ui';
 import { TextLink } from '@/features/alarm/components/TextLink';
 import { declineRoutineSuggestion, editJournal, getJournal } from '@/features/routine/api';
 import type { Journal } from '@/features/routine/types';
@@ -16,10 +16,17 @@ import { colors, typeScale } from '@/theme';
 // 일기는 AI 대화(A02)를 마치면 생기고, 다시 마치면 다시 씀(고친 글 · 루틴 제안 응답은 그대로). AI 대기라 목업 문장틀로 씀
 export default function JournalScreen() {
   const { date } = useLocalSearchParams<{ date: string }>();
-  const { data, reload } = useLoad(() => getJournal(date));
+  const { data, error, reload } = useLoad(() => getJournal(date));
   const top = <TopBar onBack={backOrHome} screenId="A03" />; // 앞 화면이 없으면(주소로 바로 열기) 홈으로
 
-  if (data === undefined) return <Screen>{top}</Screen>;
+  if (data === undefined) {
+    return (
+      <Screen>
+        {top}
+        {error ? <LoadError onRetry={reload} /> : null}
+      </Screen>
+    );
+  }
   if (data === null) {
     return (
       <Screen>

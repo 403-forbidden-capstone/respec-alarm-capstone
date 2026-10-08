@@ -6,6 +6,7 @@ import { useAuth } from '@/features/auth/AuthProvider';
 import { DataModeToggle } from '@/features/auth/DataModeToggle';
 import type { TransportType } from '@/features/profile/types';
 import { signOut } from '@/lib/auth';
+import { userMessage } from '@/lib/errors';
 import { canUseRealData } from '@/lib/mode';
 import { backOrHome } from '@/lib/nav';
 
@@ -54,7 +55,7 @@ export default function SettingsScreen() {
           <Button
             label="로그아웃"
             variant="ghost"
-            onPress={() => signOut().catch((e) => setError(e instanceof Error ? e.message : '로그아웃하지 못했어요'))}
+            onPress={() => signOut().catch((e) => setError(userMessage(e, '로그아웃하지 못했어요')))}
           />
           {error ? (
             <Text variant="small" tone="warn">

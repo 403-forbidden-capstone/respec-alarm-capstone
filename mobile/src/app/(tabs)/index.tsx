@@ -1,7 +1,7 @@
 import { router } from 'expo-router';
 import { StyleSheet, View } from 'react-native';
 
-import { Avatar, Button, Card, Screen, SectionHeader, Text, toast, TopBar, TopBarButton } from '@/components/ui';
+import { Avatar, Button, Card, LoadError, Screen, SectionHeader, Text, toast, TopBar, TopBarButton } from '@/components/ui';
 import { getDaySchedule, getNextAlarm } from '@/features/alarm/api';
 import { AppointmentAlarmCard } from '@/features/alarm/components/AppointmentAlarmCard';
 import { ScheduleList } from '@/features/alarm/components/ScheduleList';
@@ -44,12 +44,13 @@ function greeting(t: Date) {
 
 // H01 홈 — 다음 알람 · 오늘 일정 · 루틴(아침) 또는 준비물(저녁) · 제안 · 그룹 기상
 export default function HomeScreen() {
-  const { data, reload } = useLoad(loadHome);
+  const { data, error, reload } = useLoad(loadHome);
   const newSchedule = () => router.push('/schedule/new');
 
   if (!data) return (
     <Screen>
       <TopBar />
+      {error ? <LoadError onRetry={reload} /> : null}
     </Screen>
   );
   const { t, evening, next, schedule, routine, todos, suggestion, group, eveningRoutine } = data;

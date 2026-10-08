@@ -4,6 +4,7 @@ import { Pressable, StyleSheet, View } from 'react-native';
 import { Screen, Text } from '@/components/ui';
 import { useAuth } from '@/features/auth/AuthProvider';
 import { signInWithProvider, type OAuthProvider } from '@/lib/auth';
+import { userMessage } from '@/lib/errors';
 import { colors, radius, size } from '@/theme';
 
 // 로그인 — 카카오 · 구글. 로그인되면 루트 레이아웃이 알아서 탭으로 보냄
@@ -23,7 +24,7 @@ export default function LoginScreen() {
     try {
       await signInWithProvider(provider);
     } catch (e) {
-      setError(e instanceof Error ? e.message : '로그인하지 못했어요');
+      setError(userMessage(e, '로그인하지 못했어요'));
     } finally {
       setBusy(null);
     }
