@@ -1,3 +1,4 @@
+import { router } from 'expo-router';
 import { useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
@@ -64,7 +65,6 @@ export default function RecordsScreen() {
             onPrev={() => setMonth((m) => shiftMonth(m.year, m.month, -1))}
             onNext={() => setMonth((m) => shiftMonth(m.year, m.month, 1))}
             onPressDay={pressDay}
-            onOpenToday={() => openDay(recordToday())}
           />
         ) : view === 'week' ? (
           <WeekSection
@@ -87,11 +87,10 @@ type MonthProps = {
   onPrev: () => void;
   onNext: () => void;
   onPressDay: (d: MonthDay) => void;
-  onOpenToday: () => void;
 };
 
 // 월간 — 달력 + 오늘 기록 카드. 달이 바뀌면 key가 바뀌어 새로 읽음
-function MonthSection({ year, month, onPrev, onNext, onPressDay, onOpenToday }: MonthProps) {
+function MonthSection({ year, month, onPrev, onNext, onPressDay }: MonthProps) {
   const { data } = useLoad(() => getMonth(year, month));
   if (!data) return null;
   const today = dateParts(data.today.date);
@@ -99,8 +98,11 @@ function MonthSection({ year, month, onPrev, onNext, onPressDay, onOpenToday }: 
   return (
     <>
       <MonthCalendar record={data} onPrev={onPrev} onNext={onNext} onPressDay={onPressDay} />
-      {/* 목업은 A03 하루 기록(#48)으로 감 — 그 화면이 생기기 전까지는 오늘 일간 기록으로 */}
-      <Card onPress={onOpenToday}>
+      {/* 오늘 기록 카드 → A03 하루 기록 (목업 recMonth data-to="journal") */}
+      <Card
+        onPress={() => router.push({ pathname: '/journal/[date]', params: { date: dayKey(data.today.date) } })}
+        accessibilityLabel={`${today.month}월 ${today.day}일 하루 기록 열기`}
+      >
         <View style={styles.between}>
           <View style={styles.grow}>
             <Text variant="small">

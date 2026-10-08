@@ -6,7 +6,7 @@ import { dateParts } from '@/lib/format';
 import { aiDb, ROUTINE_SUGGESTION, suggestedRoutine } from '@/mocks/ai';
 import { db } from '@/mocks/data';
 
-import type { Journal, Routine, RoutineProgress, Todo } from './types';
+import type { Journal, Routine, RoutineProgress, Todo, Weekday } from './types';
 
 // 오늘 루틴 (H01 아침)
 export async function getTodayRoutine(): Promise<RoutineProgress | null> {
@@ -62,6 +62,13 @@ export async function editJournal(recordDate: string, text: string) {
 export async function declineRoutineSuggestion(recordDate: string) {
   const j = aiDb.journals[recordDate];
   if (j && j.suggestion === 'PENDING') j.suggestion = 'REJECTED';
+}
+
+// 홈 저녁 "저녁 루틴" 카드 — A04에서 저장한 루틴(목업 S.rNight, 가장 최근 저장). 없으면 null
+export async function getEveningRoutine(): Promise<{ id: string; title: string; days: Weekday[]; startMinute: number; stepCount: number } | null> {
+  const r = aiDb.routines[aiDb.routines.length - 1];
+  if (!r?.id) return null;
+  return { id: r.id, title: r.title, days: [...r.days], startMinute: r.startMinute, stepCount: r.steps.length };
 }
 
 // 루틴 편집 (A04) — id가 'new'면 일기의 루틴 제안으로 만든 초안(저장 전), 아니면 저장한 루틴

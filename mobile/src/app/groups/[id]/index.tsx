@@ -53,7 +53,7 @@ function Detail({ group: g, onBack }: { group: GroupDetail; onBack?: () => void 
       <TopBar
         onBack={onBack}
         screenId="G02"
-        right={<TextLink label="···" onPress={() => toast('그룹 메뉴는 이번 목업 범위 밖이에요')} />}
+        right={<TextLink label="···" accessibilityLabel="그룹 메뉴" onPress={() => toast('그룹 메뉴는 이번 목업 범위 밖이에요')} />}
       />
       <Text variant="title" style={styles.title}>
         {g.name}

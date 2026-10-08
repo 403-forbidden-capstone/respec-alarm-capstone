@@ -1,4 +1,4 @@
-import { router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import { useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
@@ -29,8 +29,13 @@ async function loadSocial() {
 }
 
 // G01 친구와 그룹 — 친구 탭(목업 F01: 요청 수락 · 친구별 권한 수) · 그룹 탭(목업 G01: 참여 중인 그룹 · 오늘 기상 수)
+// 홈 · 기상 확인에서 그룹 상세를 열 때 이 탭이 '그룹' 칸으로 밑에 깔림 (lib/nav openGroupDetail, ?seg=group — 목업 A.openGroup)
 export default function GroupScreen() {
-  const [tab, setTab] = useState<Tab>('friend');
+  const { seg } = useLocalSearchParams<{ seg?: string }>();
+  // 직접 고른 칸은 같은 주소(seg)일 때만 유지 — 다른 화면이 seg를 바꿔 열면 그 칸으로
+  const [picked, setPicked] = useState<{ seg?: string; tab: Tab } | null>(null);
+  const tab: Tab = picked && picked.seg === seg ? picked.tab : seg === 'group' ? 'group' : 'friend';
+  const setTab = (next: Tab) => setPicked({ seg, tab: next });
   const { data, error, reload } = useLoad(loadSocial);
   const { run } = useAction();
 
