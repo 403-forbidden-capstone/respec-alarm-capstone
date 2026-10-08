@@ -19,6 +19,7 @@ import {
 } from '@/features/alarm/types';
 import { foundScheduleDraft, saveFoundSchedule } from '@/features/voice/api';
 import { dayKey, formatDateParen, formatDateShort, formatTime, formatTime24 } from '@/lib/format';
+import { backOrHome } from '@/lib/nav';
 import { useLoad } from '@/lib/useLoad';
 import { colors } from '@/theme';
 import { userMessage } from '@/lib/errors';
@@ -71,7 +72,7 @@ export default function NewScheduleScreen() {
 
   return (
     <Screen>
-      <TopBar onBack={router.canGoBack() ? router.back : undefined} screenId="H05" />
+      <TopBar onBack={backOrHome} screenId="H05" />
       <Text variant="title" style={styles.title}>
         새 일정 만들기
       </Text>

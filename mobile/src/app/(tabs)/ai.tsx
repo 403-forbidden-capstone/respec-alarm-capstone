@@ -23,7 +23,8 @@ export default function AiScreen() {
   const [draftText, setDraftText] = useState<string | null>(null); // 글 모드에서 고친 글 (null = 대본 문장 그대로)
   const [listening, setListening] = useState(false);
   const [thinking, setThinking] = useState(false); // 내 말을 보내고 AI 답을 기다리는 중
-  const [pendingText, setPendingText] = useState<string | null>(null); // 보낸 내 말 — 답을 기다리는 동안 먼저 보여 줌
+  const [pendingText, setPendingText] = useState<string | null>(null);
+  const [pendingAt, setPendingAt] = useState<Date | null>(null); // 보낸 시각 — 렌더마다 now()가 바뀌지 않게 (실데이터 모드는 지금 시각) // 보낸 내 말 — 답을 기다리는 동안 먼저 보여 줌
   // 카드 저장 · 완료 같은 버튼은 한 번에 하나씩, 다시 읽기가 끝날 때까지 — 실패하면 토스트 (lib/useAction)
   const { busy, run: act } = useAction();
   const scroll = useRef<ScrollView>(null);
@@ -35,6 +36,7 @@ export default function AiScreen() {
   // 실데이터에서 next에 대본 문장이 없고 글 모드도 아니면(음성) 보낼 글을 모르니 점 세 개만. 다시 읽은 뒤에 정리 표시를 내림
   async function talk(text?: string) {
     setPendingText(text?.trim() || (next?.who === 'me' ? next.text : null));
+    setPendingAt(now());
     setThinking(true);
     try {
       await say(text);
@@ -150,7 +152,7 @@ export default function AiScreen() {
                 <ChatBubble key={m.id} who={m.who} text={m.text} at={m.at} />
               ),
             )}
-            {thinking && pendingText ? <ChatBubble who="me" text={pendingText} at={now()} /> : null}
+            {thinking && pendingText ? <ChatBubble who="me" text={pendingText} at={pendingAt ?? now()} /> : null}
             {thinking ? <TypingBubble /> : null}
           </View>
         </ScrollView>
@@ -167,7 +169,7 @@ export default function AiScreen() {
             onToggleMode={toggleMode}
             onSpeak={speak}
             onDone={finish}
-            doneDisabled={thinking}
+            doneDisabled={thinking || busy}
           />
         </View>
       </KeyboardAvoidingView>

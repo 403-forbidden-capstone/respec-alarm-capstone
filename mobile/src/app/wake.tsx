@@ -1,5 +1,5 @@
 import { router, useLocalSearchParams } from 'expo-router';
-import { Fragment, useState } from 'react';
+import { Fragment, useRef, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
 import { Button, Card, ProgressBar, Screen, Text, toast, TopBar } from '@/components/ui';
@@ -7,6 +7,7 @@ import { confirmWake, getWakeCheck, missWake, promptWake } from '@/features/alar
 import { FormulaBox } from '@/features/alarm/components/FormulaBox';
 import { WAKE_NO_REPLY_MINUTES, WAKE_OBSERVE_MINUTES, type WakeCheck } from '@/features/alarm/types';
 import { addMinutes, formatTime, timeParts } from '@/lib/format';
+import { backOrHome, openGroupDetail } from '@/lib/nav';
 import { useLoad } from '@/lib/useLoad';
 import { colors } from '@/theme';
 
@@ -14,30 +15,34 @@ type Phase = 'observing' | 'prompt' | 'confirmed';
 type WakeState = { phase: Phase; usage: number; recent: number; at: Date | null; how: 'self' | 'auto' | null };
 type How = WakeState['how'];
 
-// 시연용 사용 시간 (분) — 폰을 보며 일어남 · 알람만 끄고 다시 잠듦 (목업 simUse · simSleep)
-const USED = { usage: 3.2, recent: 1.4 };
-const SLEPT = { usage: 0.4, recent: 0 };
-
 const METER_MAX = 5; // 분
+
+// 단계 · 사용 시간은 가짜 db에 있음(api) — 시연 값도 api가 정함
+function toState(check: WakeCheck): WakeState {
+  const use = { usage: check.usage, recent: check.recent };
+  const c = check.confirmed;
+  if (c) return { phase: 'confirmed', ...use, at: c.at, how: c.how };
+  return { phase: check.phase, ...use, at: null, how: null };
+}
 
 // H08 기상 확인 — 기상 알람을 끈 뒤 10분 동안 화면 사용으로 판정, 모자라면 확인 알림
 // 실제 판정(사용 정보 접근)은 #35 · #40. 지금은 목업처럼 "시연용" 버튼으로 두 경우를 보여 줌
 export default function WakeScreen() {
   const { alarm } = useLocalSearchParams<{ alarm?: string }>();
   const { data } = useLoad(() => getWakeCheck(alarm));
-  const back = router.canGoBack() ? router.back : undefined;
 
   if (data === undefined) {
     return (
       <Screen>
-        <TopBar onBack={back} />
+        <TopBar onBack={backOrHome} />
       </Screen>
     );
   }
+  // 확정 전인데 기상 알람을 아직 안 껐으면(울리기 전 · 울리는 중) 목업 빈 화면 — 알람을 못 찾아도 같음
   if (data === null) {
     return (
       <Screen>
-        <TopBar onBack={back} screenId="H08" />
+        <TopBar onBack={backOrHome} right={<Text variant="screenId">H08</Text>} />
         <Text variant="title" style={styles.title}>
           기상 확인
         </Text>
@@ -58,21 +63,30 @@ export default function WakeScreen() {
 
 // 단계는 가짜 db에 남아 있어서(api) 화면을 나갔다 와도 이어짐 — 확인 알림 단계면 확인 알림부터
 function WakeFlow({ check }: { check: WakeCheck }) {
-  const [state, setState] = useState<WakeState>(() => {
-    const c = check.confirmed;
-    if (c) return { phase: 'confirmed', ...(c.how === 'self' ? SLEPT : USED), at: c.at, how: c.how };
-    if (check.phase === 'prompt') return { phase: 'prompt', ...SLEPT, at: null, how: null };
-    return { phase: 'observing', usage: 0, recent: 0, at: null, how: null };
-  });
+  const [state, setState] = useState(() => toState(check));
+  // 두 번 눌러도 한 단계에서 한 번만 기록 (H07 handled와 같음) — 단계가 바뀌면 다시 누를 수 있음
+  const handled = useRef<Phase | null>(null);
   // 실제로 끈 시각부터 10분 — 다시 울린 뒤 끄면 그 시각부터
   const observeEnd = addMinutes(check.dismissedAt, WAKE_OBSERVE_MINUTES);
   // 그룹 일정이 아니면 공유 문구 · 그룹 버튼을 뺌
   const shared = check.groupId != null ? ` · ${check.groupName ?? '그룹'}에 공유했어요` : '';
-  const back = router.canGoBack() ? router.back : undefined;
+
+  function first() {
+    if (handled.current === state.phase) return false;
+    handled.current = state.phase;
+    return true;
+  }
+
+  // api가 바꾼 단계 · 사용 시간을 다시 읽음
+  async function refresh() {
+    const next = await getWakeCheck(check.alarmId);
+    if (next) setState(toState(next));
+  }
 
   async function confirm(how: 'self' | 'auto') {
+    if (!first()) return;
     await confirmWake(check.alarmId, how, observeEnd);
-    setState({ phase: 'confirmed', ...(how === 'self' ? SLEPT : USED), at: observeEnd, how });
+    await refresh();
     toast(`기상을 확인했어요${shared}`);
   }
 
@@ -80,11 +94,13 @@ function WakeFlow({ check }: { check: WakeCheck }) {
   const useAndWake = () => confirm('auto');
   // 시연용: 알람만 끄고 다시 자면 조건을 못 채워 관찰이 끝날 때 확인 알림
   async function sleepAgain() {
+    if (!first()) return;
     await promptWake(check.alarmId, observeEnd);
-    setState({ phase: 'prompt', ...SLEPT, at: null, how: null });
+    await refresh();
   }
   // 시연용: 확인 알림에도 응답이 없으면 5분 뒤 기상 알람이 다시 울림
   async function noReply() {
+    if (!first()) return;
     await missWake(check.alarmId, addMinutes(observeEnd, WAKE_NO_REPLY_MINUTES));
     router.replace({ pathname: '/ring', params: { alarm: check.alarmId, again: '1' } });
   }
@@ -99,11 +115,7 @@ function WakeFlow({ check }: { check: WakeCheck }) {
 
   return (
     <Screen>
-      <TopBar
-        onBack={back}
-        screenId={back ? undefined : 'H08'}
-        right={back ? <Text variant="screenId">H08</Text> : undefined}
-      />
+      <TopBar onBack={backOrHome} right={<Text variant="screenId">H08</Text>} />
       <Text variant="title" style={styles.title}>
         기상 확인
       </Text>
@@ -185,7 +197,7 @@ function WakeFlow({ check }: { check: WakeCheck }) {
               <Button
                 label={`${check.groupName ?? '그룹'} 기상 현황 보기`}
                 variant="ghost"
-                onPress={() => router.push({ pathname: '/groups/[id]', params: { id: check.groupId! } })}
+                onPress={() => openGroupDetail(check.groupId!)}
               />
             ) : null}
           </View>

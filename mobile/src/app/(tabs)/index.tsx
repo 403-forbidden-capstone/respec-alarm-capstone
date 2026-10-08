@@ -13,6 +13,7 @@ import { TodoList } from '@/features/routine/components/TodoList';
 import { getGroupSummary, listGroups } from '@/features/social/api';
 import { now } from '@/lib/clock';
 import { addDays, formatDate, formatRelative, minuteOfDay, startOfDay } from '@/lib/format';
+import { openGroupDetail } from '@/lib/nav';
 import { useLoad } from '@/lib/useLoad';
 import { colors } from '@/theme';
 
@@ -148,7 +149,7 @@ export default function HomeScreen() {
       ) : null}
 
       {!evening && group ? (
-        <Card onPress={() => router.push({ pathname: '/groups/[id]', params: { id: group.id } })}>
+        <Card onPress={() => openGroupDetail(group.id)}>
           <View style={styles.group}>
             <View style={styles.avatars}>
               {group.members.map(({ person, state }, i) => (

@@ -9,6 +9,7 @@ import type { Journal } from '@/features/routine/types';
 import { dateParts, formatTime } from '@/lib/format';
 import { useLoad } from '@/lib/useLoad';
 import { colors, typeScale } from '@/theme';
+import { useAction } from '@/lib/useAction';
 
 // A03 하루 기록 · 일기 — 기록된 사실만 골라 AI가 쓴 일기 · 오늘의 사실 · 회고 코칭 · 루틴 제안
 // 일기는 AI 대화(A02)를 마치면 생기고, 다시 마치면 다시 씀(고친 글 · 루틴 제안 응답은 그대로). AI 대기라 목업 문장틀로 씀
@@ -41,23 +42,26 @@ export default function JournalScreen() {
   return <JournalView journal={data} reload={reload} top={top} />;
 }
 
-function JournalView({ journal: j, reload, top }: { journal: Journal; reload: () => void; top: ReactNode }) {
+function JournalView({ journal: j, reload, top }: { journal: Journal; reload: () => Promise<boolean>; top: ReactNode }) {
   const [editing, setEditing] = useState<string | null>(null); // 고치는 중인 글 (null = 읽기)
+  const { busy, run } = useAction(); // 저장 · 괜찮아요는 한 번에 하나씩, 실패하면 토스트
   const { month, day } = dateParts(j.date);
 
-  async function save() {
-    if (editing == null) return;
-    await editJournal(j.recordDate, editing);
-    setEditing(null);
-    toast('일기를 저장했어요');
-    reload();
-  }
+  const save = () =>
+    run(async () => {
+      if (editing == null) return;
+      await editJournal(j.recordDate, editing);
+      setEditing(null);
+      toast('일기를 저장했어요');
+      await reload();
+    });
 
-  async function decline() {
-    await declineRoutineSuggestion(j.recordDate);
-    toast('알겠어요 · 14일 동안 같은 루틴은 제안하지 않아요');
-    reload();
-  }
+  const decline = () =>
+    run(async () => {
+      await declineRoutineSuggestion(j.recordDate);
+      toast('알겠어요 · 14일 동안 같은 루틴은 제안하지 않아요');
+      await reload();
+    });
 
   return (
     <Screen>
@@ -87,7 +91,7 @@ function JournalView({ journal: j, reload, top }: { journal: Journal; reload: ()
               style={styles.input}
             />
             <View style={styles.row}>
-              <Button label="저장" small onPress={save} disabled={!editing.trim()} />
+              <Button label="저장" small onPress={save} disabled={!editing.trim() || busy} />
               <Button label="취소" small variant="ghost" onPress={() => setEditing(null)} />
             </View>
           </>
@@ -149,7 +153,7 @@ function JournalView({ journal: j, reload, top }: { journal: Journal; reload: ()
               small
               onPress={() => router.push({ pathname: '/routine/[id]', params: { id: 'new', journal: j.recordDate } })}
             />
-            <Button label="괜찮아요" small variant="ghost" onPress={decline} />
+            <Button label="괜찮아요" small variant="ghost" onPress={decline} disabled={busy} />
           </View>
         </Card>
       ) : (

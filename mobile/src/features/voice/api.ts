@@ -2,10 +2,10 @@
 // 지금은 src/mocks의 가짜 데이터를 돌려주고, Supabase가 붙으면 이 파일 안에서만 바꿉니다.
 //   읽기 · 쓰기 위치는 docs/screen-data-map.md (A02 AI 대화 · A03 하루 기록)
 // AI 대기 — 대화는 목업 대본(mocks/ai.ts)대로 흘러감. 마이크 · 음성 합성 · 서버 호출 없음 (실제는 voice-* Edge + Gemini, #42 · D7)
-import { createAppointment, estimateAppointment } from '@/features/alarm/api';
+import { createAppointment, draftAt, estimateAppointment } from '@/features/alarm/api';
 import type { Appointment, AppointmentDraft, Estimate } from '@/features/alarm/types';
 import { now } from '@/lib/clock';
-import { addMinutes, dateParts, dayKey, startOfDay } from '@/lib/format';
+import { dateParts, dayKey } from '@/lib/format';
 import {
   aiDb,
   aiTurn,
@@ -31,16 +31,11 @@ function chat(): MockChat {
   return aiDb.chat;
 }
 
-function draftAt(d: AppointmentDraft) {
-  const [h, m] = d.time.split(':').map(Number);
-  return addMinutes(startOfDay(d.date), (h || 0) * 60 + (m || 0));
-}
-
 function foundOf(c: MockChat): FoundSchedule | null {
   if (!c.found) return null;
   return {
     title: FOUND_DRAFT.title,
-    at: draftAt(FOUND_DRAFT),
+    at: draftAt(FOUND_DRAFT.date, FOUND_DRAFT.time), // H05 계산과 같은 함수 (틀린 시간은 14:00)
     place: FOUND_DRAFT.place,
     importance: FOUND_DRAFT.importance,
     items: FOUND_DRAFT.items
