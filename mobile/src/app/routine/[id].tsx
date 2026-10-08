@@ -126,7 +126,7 @@ function RoutineEditor({ initial, onBack }: { initial: Routine; onBack?: () => v
       </Card>
 
       <View style={styles.stack}>
-        <Button label="루틴 저장" onPress={save} disabled={!canSave(routine)} />
+        <Button label="루틴 저장" onPress={save} disabled={!canSave(routine) || saving} />
       </View>
 
       <Sheet visible={step != null} onClose={() => setEditing(null)} title="단계 편집">

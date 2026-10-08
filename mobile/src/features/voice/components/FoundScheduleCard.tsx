@@ -13,10 +13,11 @@ type Props = {
   onSave: () => void;
   onEdit: () => void; // 새 일정(H05)에서 고쳐서 저장
   onReject: () => void;
+  disabled?: boolean; // 저장 · 저장 안 함이 도는 중
 };
 
 // 대화에서 찾은 일정 카드 (.xcard) — 저장 · 수정 · 저장 안 함, 고른 뒤에는 결과만
-export function FoundScheduleCard({ found, at, onSave, onEdit, onReject }: Props) {
+export function FoundScheduleCard({ found, at, onSave, onEdit, onReject, disabled }: Props) {
   return (
     <Bubble who="ai" wide>
       <Text variant="caption" tone="faint" style={styles.head}>
@@ -31,9 +32,9 @@ export function FoundScheduleCard({ found, at, onSave, onEdit, onReject }: Props
       </Text>
       {found.status === 'PENDING' ? (
         <View style={styles.buttons}>
-          <Button label="저장" small onPress={onSave} />
-          <Button label="수정" small variant="ghost" onPress={onEdit} />
-          <Button label="저장 안 함" small variant="plain" onPress={onReject} />
+          <Button label="저장" small onPress={onSave} disabled={disabled} />
+          <Button label="수정" small variant="ghost" onPress={onEdit} disabled={disabled} />
+          <Button label="저장 안 함" small variant="plain" onPress={onReject} disabled={disabled} />
         </View>
       ) : (
         <Text variant="small" tone="sub" style={styles.result}>

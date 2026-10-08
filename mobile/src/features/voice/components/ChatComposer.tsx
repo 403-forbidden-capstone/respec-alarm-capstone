@@ -15,10 +15,11 @@ type Props = {
   onToggleMode: () => void;
   onSpeak: () => void;
   onDone: () => void;
+  doneDisabled?: boolean; // AI가 정리 중이면 완료를 막음 — 끝난 대화에 답 · 카드가 붙지 않게
 };
 
 // 대화 아래 입력 칸 (.composer) — 상태 한 줄 · 글 입력(글 모드) · 텍스트 / 말하기 / 완료
-export function ChatComposer({ status, mode, canSay, listening, text, onChangeText, onSend, onToggleMode, onSpeak, onDone }: Props) {
+export function ChatComposer({ status, mode, canSay, listening, text, onChangeText, onSend, onToggleMode, onSpeak, onDone, doneDisabled }: Props) {
   return (
     <View style={styles.box}>
       <Text variant="small" tone="sub" align="center" style={styles.status} accessibilityLiveRegion="polite">
@@ -41,19 +42,20 @@ export function ChatComposer({ status, mode, canSay, listening, text, onChangeTe
       <View style={styles.buttons}>
         <Pill label="텍스트" on={mode === 'text'} onPress={onToggleMode} />
         <MicButton listening={listening} disabled={!canSay} onPress={onSpeak} />
-        <Pill label="완료" onPress={onDone} />
+        <Pill label="완료" onPress={onDone} disabled={doneDisabled} />
       </View>
     </View>
   );
 }
 
-function Pill({ label, on, onPress }: { label: string; on?: boolean; onPress: () => void }) {
+function Pill({ label, on, disabled, onPress }: { label: string; on?: boolean; disabled?: boolean; onPress: () => void }) {
   return (
     <Pressable
       onPress={onPress}
+      disabled={disabled}
       accessibilityRole="button"
-      accessibilityState={on != null ? { selected: on } : undefined}
-      style={({ pressed }) => [styles.pill, on && styles.pillOn, pressed && styles.pressed]}
+      accessibilityState={on != null ? { selected: on, disabled } : { disabled }}
+      style={({ pressed }) => [styles.pill, on && styles.pillOn, disabled && styles.pillOff, pressed && styles.pressed]}
     >
       <Text variant="body" tone={on ? 'inverse' : 'ink'}>
         {label}
@@ -133,6 +135,7 @@ const styles = StyleSheet.create({
   buttons: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 16 },
   pill: { height: 38, paddingHorizontal: 16, borderRadius: 19, backgroundColor: colors.chip, justifyContent: 'center' },
   pillOn: { backgroundColor: colors.ink },
+  pillOff: { opacity: 0.4 },
   micWrap: { width: MIC, height: MIC, alignItems: 'center', justifyContent: 'center' },
   ring: { position: 'absolute', width: MIC, height: MIC, borderRadius: MIC / 2, backgroundColor: colors.ink },
   mic: { width: MIC, height: MIC, borderRadius: MIC / 2, backgroundColor: colors.ink, alignItems: 'center', justifyContent: 'center' },

@@ -8,6 +8,7 @@ import { finishConversation, getConversation, rejectFoundSchedule, saveFoundSche
 import { ChatBubble, TypingBubble } from '@/features/voice/components/ChatBubble';
 import { ChatComposer } from '@/features/voice/components/ChatComposer';
 import { FoundScheduleCard } from '@/features/voice/components/FoundScheduleCard';
+import { now } from '@/lib/clock';
 import { useLoad } from '@/lib/useLoad';
 
 const LISTEN_MS = 1100; // 말하기를 누른 뒤 듣는 시간 (목업 chatSpeak). AI가 답하는 시간은 api(say)가 기다림
@@ -20,23 +21,28 @@ export default function AiScreen() {
   const [draftText, setDraftText] = useState<string | null>(null); // 글 모드에서 고친 글 (null = 대본 문장 그대로)
   const [listening, setListening] = useState(false);
   const [thinking, setThinking] = useState(false); // 내 말을 보내고 AI 답을 기다리는 중
+  const [pendingText, setPendingText] = useState<string | null>(null); // 보낸 내 말 — 답을 기다리는 동안 먼저 보여 줌
   const [busy, setBusy] = useState(false); // 카드 저장 · 완료 같은 버튼이 도는 중 — 두 번 눌러도 한 번만
   const scroll = useRef<ScrollView>(null);
 
   const next = data?.next ?? null;
   const canSay = !listening && !thinking && next?.who === 'me';
 
-  // 내 말을 보내고 AI 답까지 기다림 (api say가 한 번에 돌려줌). 실패하면 이유를 토스트로
+  // 내 말을 보내고 AI 답까지 기다림 (api say가 한 번에 돌려줌). 보낼 글을 알면 답을 기다리는 동안 내 말을 먼저 그림(목업 userSay)
+  // 실데이터 음성 모드는 서버가 받아 적기 전엔 글을 모르니 점 세 개만 — 그때는 text 없이 부름. 실패하면 토스트
   async function talk(text?: string) {
+    setPendingText(text?.trim() || (next?.who === 'me' ? next.text : null));
     setThinking(true);
     try {
       await say(text);
       setDraftText(null);
     } catch (e) {
-      toast(e instanceof Error && e.message ? e.message : '말을 보내지 못했어요');
+      const message = e instanceof Error ? e.message : '';
+      toast(/[가-힣]/.test(message) ? message : '말을 보내지 못했어요');
     } finally {
+      await reload();
       setThinking(false);
-      reload();
+      setPendingText(null);
     }
   }
 
@@ -87,7 +93,8 @@ export default function AiScreen() {
     try {
       await task();
     } catch (e) {
-      toast(e instanceof Error && e.message ? e.message : '하지 못했어요. 다시 해 주세요');
+      const message = e instanceof Error ? e.message : '';
+      toast(/[가-힣]/.test(message) ? message : '하지 못했어요. 다시 해 주세요');
     } finally {
       setBusy(false);
     }
@@ -101,6 +108,7 @@ export default function AiScreen() {
   // 대화 종료 · 완료 — 일기를 만들고 하루 기록으로
   const finish = () =>
     act(async () => {
+      if (thinking) return; // 정리 중에 끝내면 끝난 대화에 답 · 카드가 붙음
       setListening(false);
       const { recordDate } = await finishConversation();
       router.push({ pathname: '/journal/[date]', params: { date: recordDate } });
@@ -147,12 +155,14 @@ export default function AiScreen() {
                     onSave={saveFound}
                     onEdit={() => router.push({ pathname: '/schedule/new', params: { from: 'chat' } })}
                     onReject={rejectFound}
+                    disabled={busy}
                   />
                 ) : null
               ) : (
                 <ChatBubble key={m.id} who={m.who} text={m.text} at={m.at} />
               ),
             )}
+            {thinking && pendingText ? <ChatBubble who="me" text={pendingText} at={now()} /> : null}
             {thinking ? <TypingBubble /> : null}
           </View>
         </ScrollView>
@@ -169,6 +179,7 @@ export default function AiScreen() {
             onToggleMode={toggleMode}
             onSpeak={speak}
             onDone={finish}
+            doneDisabled={thinking}
           />
         </View>
       </KeyboardAvoidingView>

@@ -1,9 +1,9 @@
 // ③ 수면 전후 음성 AI — 이 기능에서 쓰는 타입
 // 이름은 DB(conversation_sessions)를 따르고, 화면에 바로 쓰기 좋게 모양만 바꿈
 import type { Importance } from '@/features/alarm/types';
-import type { ApplyStatus } from '@/features/routine/types';
+import type { Enums } from '@/types/database';
 
-export type { ApplyStatus } from '@/features/routine/types'; // PENDING · APPLIED · REJECTED
+export type ApplyStatus = Enums<'apply_status'>; // PENDING · APPLIED · REJECTED (DB 값 그대로 — 루틴과 같은 enum)
 
 // 대화 한 줄 — card = AI가 대화에서 찾은 일정 카드 (내용은 Conversation.found)
 export type ChatMessage = {
