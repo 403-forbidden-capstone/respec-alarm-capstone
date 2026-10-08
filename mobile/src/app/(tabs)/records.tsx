@@ -2,13 +2,12 @@ import { useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
 import { Card, Screen, Segmented, Text, Timeline, toast, TopBar, type TimelineItem } from '@/components/ui';
-import { getDay, getMonth, getWeek, weekEmptyText } from '@/features/records/api';
+import { getDay, getMonth, getWeek, recordToday, weekEmptyText } from '@/features/records/api';
 import { shiftMonth, weekStart } from '@/features/records/calendar';
 import { MonthCalendar } from '@/features/records/components/MonthCalendar';
 import { ScoreBars } from '@/features/records/components/ScoreBars';
 import { WeekStrip } from '@/features/records/components/WeekStrip';
 import type { MonthDay, TimelineRow, WeekSummary } from '@/features/records/types';
-import { now } from '@/lib/clock';
 import { addDays, dateParts, dayKey, formatTime, timeParts } from '@/lib/format';
 import { useLoad } from '@/lib/useLoad';
 
@@ -27,11 +26,11 @@ const toItem = (row: TimelineRow): TimelineItem => ({ time: formatTime(row.at), 
 export default function RecordsScreen() {
   const [view, setView] = useState<RecordView>('week'); // 목업 첫 화면은 주간
   const [month, setMonth] = useState(() => {
-    const { year, month } = dateParts(now());
+    const { year, month } = dateParts(recordToday());
     return { year, month };
   });
-  const [week, setWeek] = useState(() => weekStart(now()));
-  const [day, setDay] = useState(() => now()); // 일간에서 볼 날 — 실데이터(#41)가 붙으면 달력에서 고른 날
+  const [week, setWeek] = useState(() => weekStart(recordToday()));
+  const [day, setDay] = useState(() => recordToday()); // 일간에서 볼 날 — 실데이터(#41)가 붙으면 달력에서 고른 날
 
   function openDay(date: Date) {
     setDay(date);
@@ -65,7 +64,7 @@ export default function RecordsScreen() {
             onPrev={() => setMonth((m) => shiftMonth(m.year, m.month, -1))}
             onNext={() => setMonth((m) => shiftMonth(m.year, m.month, 1))}
             onPressDay={pressDay}
-            onOpenToday={() => openDay(now())}
+            onOpenToday={() => openDay(recordToday())}
           />
         ) : view === 'week' ? (
           <WeekSection

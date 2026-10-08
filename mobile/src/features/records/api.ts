@@ -13,6 +13,9 @@ import type { DayMark, DayRecord, MonthRecord, Suggestion, WeekRecord, WeekSumma
 // 기록 화면의 오늘 — 목업은 시나리오 시각(아침 · 전날 밤)과 상관없이 5월 22일
 const today = () => kst(TODAY, 0);
 
+// 기록 화면이 여는 "오늘" — 목업 기록은 5월 22일 하루라 시나리오가 전날 밤이어도 22일을 보여 줌 (실데이터는 now() 기준으로 바꿈)
+export const recordToday = today;
+
 // 그날 기록 표시 — 목업은 2025년 5월만 있음: 지난 평일 기록 완료 · 주말 일부 기록, 오늘은 기상 확인 · 일기 뒤에 완료
 // 실데이터는 daily_records가 있는지 · 얼마나 채워졌는지로 정함
 function markOf(date: Date): DayMark {
@@ -101,7 +104,9 @@ export async function getDay(date: Date): Promise<DayRecord> {
         past: x.at.getTime() <= t,
       }))
     : [];
-  return { date: day, planned, actual: db.events.map((e) => ({ ...e })) };
+  // 넣은 순서가 아니라 시각순 — 마지막 줄(지금 강조)이 가장 늦은 일이 되게 (목업 logE 정렬)
+  const actual = db.events.map((e) => ({ ...e })).sort((x, y) => x.at.getTime() - y.at.getTime());
+  return { date: day, planned, actual };
 }
 
 function buildSuggestion(): Suggestion | null {

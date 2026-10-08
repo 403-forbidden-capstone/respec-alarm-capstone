@@ -53,6 +53,14 @@ describe('R02 주간', () => {
     expect([w.title, w.relative, w.summary]).toEqual(['5월 12일 — 18일', '지난주', null]);
   });
 
+  it('실제로 일어난 일은 시각순 (넣은 순서와 상관없이)', async () => {
+    db.events.push({ at: kst(22, 7 * 60), label: '이른 기록', source: '테스트' });
+    const d = await getDay(kst(22, 0));
+    const times = d.actual.map((e) => e.at.getTime());
+    expect(times).toEqual([...times].sort((x, y) => x - y));
+    db.events.pop();
+  });
+
   it('일간은 받은 날짜로 — 목업에 없는 날은 빈 기록', async () => {
     const d = await getDay(kst(20, 9 * 60));
     expect([d.date.getTime(), d.planned.length, d.actual.length]).toEqual([kst(20, 0).getTime(), 0, 0]);
