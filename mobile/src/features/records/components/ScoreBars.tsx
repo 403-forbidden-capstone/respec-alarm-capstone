@@ -9,13 +9,13 @@ export function ScoreBars({ bars }: { bars: { label: string; score: number }[] }
     <View>
       {bars.map((b) => (
         <View key={b.label} style={styles.row} accessible accessibilityLabel={`${b.label}일 ${b.score}점`}>
-          <Text variant="body" style={styles.label}>
+          <Text variant="note" style={styles.label}>
             {b.label}
           </Text>
           <View style={styles.track}>
             <View style={[styles.fill, { width: `${Math.max(0, Math.min(100, b.score))}%` }]} />
           </View>
-          <Text variant="body" tone="sub" align="right" style={styles.score}>
+          <Text variant="note" tone="sub" align="right" style={styles.score}>
             {b.score}
           </Text>
         </View>
@@ -26,8 +26,8 @@ export function ScoreBars({ bars }: { bars: { label: string; score: number }[] }
 
 const styles = StyleSheet.create({
   row: { flexDirection: 'row', alignItems: 'center', gap: 10, marginVertical: 8 },
-  label: { width: 48, fontSize: 13 },
+  label: { width: 48 },
   track: { flex: 1, height: 8, borderRadius: 4, backgroundColor: colors.chip, overflow: 'hidden' },
   fill: { height: '100%', borderRadius: 4, backgroundColor: colors.ink },
-  score: { width: 28, fontSize: 13, fontVariant: ['tabular-nums'] },
+  score: { width: 28, fontVariant: ['tabular-nums'] },
 });

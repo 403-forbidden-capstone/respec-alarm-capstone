@@ -26,7 +26,7 @@ export function MonthCalendar({ record, onPrev, onNext, onPressDay }: Props) {
       <CalendarHeader title={record.title} unit="달" onPrev={onPrev} onNext={onNext} />
       <View style={styles.row}>
         {WEEK.map((w) => (
-          <Text key={w} variant="caption" align="center" style={styles.weekday}>
+          <Text key={w} variant="tiny" align="center" style={styles.weekday}>
             {w}
           </Text>
         ))}
@@ -53,7 +53,7 @@ function DayCell({ day: d, onPress }: { day: MonthDay; onPress: () => void }) {
       style={({ pressed }) => [styles.cell, pressed && styles.pressed]}
     >
       <View style={[styles.num, d.isToday && styles.today]}>
-        <Text variant="body" tone={d.isToday ? 'inverse' : d.isFuture ? 'faint' : 'ink'} weight={d.isToday ? 600 : 400} style={styles.numText}>
+        <Text variant="note" tone={d.isToday ? 'inverse' : d.isFuture ? 'faint' : 'ink'} weight={d.isToday ? 600 : 400} style={styles.numText}>
           {d.day}
         </Text>
       </View>
@@ -75,12 +75,12 @@ function Legend({ mark }: { mark: DayMark }) {
 
 const styles = StyleSheet.create({
   row: { flexDirection: 'row' },
-  weekday: { flex: 1, fontSize: 11, paddingBottom: 4 },
+  weekday: { flex: 1, paddingBottom: 4 },
   cell: { flex: 1, height: 44, alignItems: 'center', justifyContent: 'center', gap: 3 },
   pressed: { opacity: 0.6 },
   num: { width: 28, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
   today: { backgroundColor: colors.ink },
-  numText: { fontSize: 13, fontVariant: ['tabular-nums'] },
+  numText: { fontVariant: ['tabular-nums'] },
   dot: { width: 4, height: 4, borderRadius: 2 },
   done: { backgroundColor: colors.ink },
   partial: { backgroundColor: colors.faint },

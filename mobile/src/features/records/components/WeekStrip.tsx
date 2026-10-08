@@ -34,7 +34,7 @@ function DayChip({ day: d }: { day: WeekDay }) {
       accessible
       accessibilityLabel={`${d.weekday}요일 ${d.day}일${d.isToday ? ' 오늘' : ''}${d.recorded ? ' 기록 있음' : ''}`}
     >
-      <Text variant="caption" tone={d.isToday ? 'inverse' : 'sub'} style={[styles.weekday, d.isToday && styles.weekdayOn]}>
+      <Text variant="tiny" tone={d.isToday ? 'inverse' : 'sub'} style={d.isToday && styles.weekdayOn}>
         {d.weekday}
       </Text>
       <Text variant="bodyStrong" tone={d.isToday ? 'inverse' : 'ink'} style={styles.num}>
@@ -50,7 +50,6 @@ const styles = StyleSheet.create({
   day: { flex: 1, alignItems: 'center', gap: 2, paddingVertical: 8, borderRadius: 14, backgroundColor: colors.chip },
   on: { backgroundColor: colors.ink },
   future: { opacity: 0.5 },
-  weekday: { fontSize: 11 },
   weekdayOn: { opacity: 0.7 },
   num: { fontVariant: ['tabular-nums'] },
   dot: { width: 4, height: 4, borderRadius: 2 },

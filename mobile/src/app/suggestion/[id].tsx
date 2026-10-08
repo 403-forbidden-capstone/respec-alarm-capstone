@@ -89,7 +89,7 @@ function Detail({ suggestion: s, reload, onBack }: { suggestion: Suggestion; rel
               <Text variant="caption" align="center">
                 {d.label}
               </Text>
-              <Text variant="bodyStrong" weight={700} align="center" style={styles.trioValue}>
+              <Text variant="bodyLarge" weight={700} align="center">
                 {d.value}
               </Text>
             </View>
@@ -199,7 +199,6 @@ const styles = StyleSheet.create({
   label: { marginBottom: 8 },
   trio: { flexDirection: 'row', marginTop: 16 },
   trioItem: { flex: 1 },
-  trioValue: { fontSize: 15 },
   sub: { marginTop: 4 },
   stack: { gap: 10, marginTop: 16 },
   stepper: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 18, marginBottom: 6 },
