@@ -12,13 +12,10 @@ import { RoutineCard } from '@/features/routine/components/RoutineCard';
 import { TodoList } from '@/features/routine/components/TodoList';
 import { getGroupSummary, listGroups } from '@/features/social/api';
 import { now } from '@/lib/clock';
-import { addDays, formatDate, formatRelative, minuteOfDay, startOfDay } from '@/lib/format';
+import { addDays, formatDate, formatMinuteOfDay, formatRelative, minuteOfDay, startOfDay } from '@/lib/format';
 import { openGroupDetail } from '@/lib/nav';
 import { useLoad } from '@/lib/useLoad';
 import { colors } from '@/theme';
-
-// 0시부터 분 → 21:30 (루틴 카드)
-const hhmm = (m: number) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
 
 // 저녁(오후 6시부터 · 전날 밤)에는 내일 일정 · 내일 준비물, 낮에는 오늘 일정 · 오늘 루틴
 async function loadHome() {
@@ -120,7 +117,7 @@ export default function HomeScreen() {
                   {eveningRoutine.title}
                 </Text>
                 <Text variant="small" tone="sub" style={styles.cardSub}>
-                  매주 {eveningRoutine.days.join(' · ')} · {hhmm(eveningRoutine.startMinute)}부터 {eveningRoutine.stepCount}단계
+                  매주 {eveningRoutine.days.join(' · ')} · {formatMinuteOfDay(eveningRoutine.startMinute)}부터 {eveningRoutine.stepCount}단계
                 </Text>
               </Card>
             </>

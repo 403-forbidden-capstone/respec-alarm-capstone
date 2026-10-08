@@ -6,6 +6,7 @@ import {
   formatDateShort,
   formatRelative,
   formatTime,
+  formatMinuteOfDay,
   formatTime24,
   josa,
   joinKo,
@@ -53,5 +54,13 @@ describe('조사', () => {
     expect(joinKo(['수연님'])).toBe('수연님');
     expect(joinKo(['수연님', '지형님'])).toBe('수연님과 지형님');
     expect(joinKo(['수연님', '지형님', '준성님'])).toBe('수연님, 지형님과 준성님');
+  });
+});
+
+describe('formatMinuteOfDay', () => {
+  it('0시부터 분을 HH:MM으로, 하루를 넘으면 다음 날 시각', () => {
+    expect(formatMinuteOfDay(1290)).toBe('21:30');
+    expect(formatMinuteOfDay(5)).toBe('00:05');
+    expect(formatMinuteOfDay(1440 + 30)).toBe('00:30');
   });
 });
