@@ -146,8 +146,10 @@ export async function getSuggestion(id: string): Promise<Suggestion | null> {
 export async function applySuggestion(id: string, minutes: number) {
   const s = db.suggestion;
   const a = db.appointments.find((x) => x.id === s.appointmentId);
-  // 0분 이하는 적용할 게 없음 (화면도 0분이면 버튼을 끔)
-  if (s.id !== id || !a || minutes <= 0 || s.status === 'APPLIED' || s.status === 'EDITED') return;
+  // 거절은 한국어 이유로 던짐 — 화면이 토스트로 보여 주고 성공 안내는 안 띄움
+  if (s.id !== id || !a) throw new Error('제안을 찾을 수 없어요');
+  if (minutes <= 0) throw new Error('앞당길 시간을 골라 주세요'); // 화면도 0분이면 버튼을 끔
+  if (s.status === 'APPLIED' || s.status === 'EDITED') throw new Error('이미 적용한 제안이에요');
   a.predictedPrepMinutes += minutes;
   s.appliedMinutes = minutes;
   s.status = minutes === s.minutes ? 'APPLIED' : 'EDITED';

@@ -1,5 +1,5 @@
 import { router, useLocalSearchParams } from 'expo-router';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
 import { Button, Card, Screen, Sheet, Text, toast, TopBar, TopBarButton } from '@/components/ui';
@@ -41,18 +41,23 @@ export default function SuggestionScreen() {
 
 function Detail({ suggestion: s, reload, onBack }: { suggestion: Suggestion; reload: () => void; onBack?: () => void }) {
   const [editing, setEditing] = useState<number | null>(null); // 직접 수정 시트에서 고른 앞당김(분), 닫혀 있으면 null
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState(false); // 버튼을 흐리게 보여 주는 데만
+  const running = useRef(false); // 같은 렌더 안에서 두 번 눌러도 막음
   const phase = suggestionPhase(s.status);
 
-  // 버튼은 한 번에 하나씩 — 연타하면 토스트가 두 번 뜨고, 실데이터(#49)에선 두 번 저장될 수 있음. 실패하면 이유를 토스트로
+  // 버튼은 한 번에 하나씩 — 연타하면 토스트가 두 번 뜨고, 실데이터(#49)에선 두 번 저장될 수 있음
+  // 실패하면 한국어 이유만 토스트로 (서버 오류 원문은 기본 문구로)
   async function act(task: () => Promise<void>) {
-    if (busy) return;
+    if (running.current) return;
+    running.current = true;
     setBusy(true);
     try {
       await task();
     } catch (e) {
-      toast(e instanceof Error && e.message ? e.message : '하지 못했어요. 다시 해 주세요');
+      const message = e instanceof Error ? e.message : '';
+      toast(/[가-힣]/.test(message) ? message : '하지 못했어요. 다시 해 주세요');
     } finally {
+      running.current = false;
       setBusy(false);
     }
   }
@@ -127,9 +132,9 @@ function Detail({ suggestion: s, reload, onBack }: { suggestion: Suggestion; rel
             </Text>
           </Card>
           <View style={styles.stack}>
-            <Button label="제안 적용하기" onPress={() => apply(s.minutes)} />
-            <Button label="직접 수정하기" variant="ghost" onPress={() => setEditing(s.minutes)} />
-            <Button label="이번 제안 무시" variant="plain" onPress={ignore} />
+            <Button label="제안 적용하기" onPress={() => apply(s.minutes)} disabled={busy} />
+            <Button label="직접 수정하기" variant="ghost" onPress={() => setEditing(s.minutes)} disabled={busy} />
+            <Button label="이번 제안 무시" variant="plain" onPress={ignore} disabled={busy} />
           </View>
         </>
       ) : null}
@@ -150,7 +155,7 @@ function Detail({ suggestion: s, reload, onBack }: { suggestion: Suggestion; rel
             </Text>
           </Card>
           <View style={styles.stack}>
-            <Button label="이전 값으로 되돌리기" variant="ghost" onPress={undo} />
+            <Button label="이전 값으로 되돌리기" variant="ghost" onPress={undo} disabled={busy} />
           </View>
         </>
       ) : null}
@@ -161,7 +166,7 @@ function Detail({ suggestion: s, reload, onBack }: { suggestion: Suggestion; rel
             <Text variant="small">이번 제안을 무시했어요. 같은 제안은 당분간 다시 보이지 않아요.</Text>
           </Card>
           <View style={styles.stack}>
-            <Button label="제안 다시 보기" variant="ghost" onPress={reopen} />
+            <Button label="제안 다시 보기" variant="ghost" onPress={reopen} disabled={busy} />
           </View>
         </>
       ) : null}

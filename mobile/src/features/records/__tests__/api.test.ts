@@ -101,7 +101,7 @@ describe('S01 알람 조정 제안', () => {
 
   it('직접 고친 분으로 적용하면 EDITED, 두 번 적용되지 않음', async () => {
     await applySuggestion('s1', 15);
-    await applySuggestion('s1', 15);
+    await expect(applySuggestion('s1', 15)).rejects.toThrow('이미 적용한 제안이에요');
     const s = await getSuggestion('s1');
     expect([s?.status, s && formatTime(s.proposedWake), s && formatTime(s.currentWake)]).toEqual(['EDITED', '오전 7:05', '오전 7:20']);
   });
@@ -115,7 +115,7 @@ describe('S01 알람 조정 제안', () => {
   });
 
   it('0분으로는 적용되지 않음', async () => {
-    await applySuggestion('s1', 0);
+    await expect(applySuggestion('s1', 0)).rejects.toThrow('앞당길 시간을 골라 주세요');
     expect((await getSuggestion('s1'))?.status).toBe('PENDING');
   });
 
