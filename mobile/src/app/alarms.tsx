@@ -1,7 +1,7 @@
 import { router } from 'expo-router';
 import { StyleSheet, View } from 'react-native';
 
-import { Screen, SectionHeader, Text, TopBar, TopBarButton } from '@/components/ui';
+import { LoadError, Screen, SectionHeader, Text, TopBar, TopBarButton } from '@/components/ui';
 import { listAppointments } from '@/features/alarm/api';
 import { AppointmentAlarmCard } from '@/features/alarm/components/AppointmentAlarmCard';
 import type { Appointment } from '@/features/alarm/types';
@@ -18,7 +18,7 @@ function byDay(list: Appointment[]) {
 
 // H02 알람 목록 — 일정마다 기상 · 준비 · 출발 알람
 export default function AlarmsScreen() {
-  const { data, reload } = useLoad(listAppointments);
+  const { data, error, reload } = useLoad(listAppointments);
 
   return (
     <Screen>
@@ -41,6 +41,7 @@ export default function AlarmsScreen() {
             </View>
           ))
         : null}
+      {!data && error ? <LoadError onRetry={reload} /> : null}
     </Screen>
   );
 }

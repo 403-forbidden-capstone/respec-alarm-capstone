@@ -2,7 +2,7 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { Fragment, useRef, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
-import { Button, Card, ProgressBar, Screen, Text, toast, TopBar } from '@/components/ui';
+import { Button, Card, LoadError, ProgressBar, Screen, Text, toast, TopBar } from '@/components/ui';
 import { confirmWake, getWakeCheck, missWake, promptWake } from '@/features/alarm/api';
 import { FormulaBox } from '@/features/alarm/components/FormulaBox';
 import { WAKE_NO_REPLY_MINUTES, WAKE_OBSERVE_MINUTES, type WakeCheck } from '@/features/alarm/types';
@@ -29,12 +29,13 @@ function toState(check: WakeCheck): WakeState {
 // 실제 판정(사용 정보 접근)은 #35 · #40. 지금은 목업처럼 "시연용" 버튼으로 두 경우를 보여 줌
 export default function WakeScreen() {
   const { alarm } = useLocalSearchParams<{ alarm?: string }>();
-  const { data } = useLoad(() => getWakeCheck(alarm));
+  const { data, error, reload } = useLoad(() => getWakeCheck(alarm));
 
   if (data === undefined) {
     return (
       <Screen>
         <TopBar onBack={backOrHome} screenId="H08" />
+        {error ? <LoadError onRetry={reload} /> : null}
       </Screen>
     );
   }
