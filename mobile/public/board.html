@@ -183,6 +183,7 @@ table.dec-t td:first-child{width:34%;color:var(--sub)}
   <div class="side" id="side">
     <div class="bar">
       <button data-src="/" class="on">앱</button>
+      <button data-src="/?mode=mock" title="로그인 없이 목업 시나리오 데이터로 엶 (#97)">앱 · 가짜</button>
       <button data-src="/mockup.html">목업</button>
       <button data-src="/dev/ui">UI 부품</button>
       <span style="flex:1"></span>
@@ -363,7 +364,7 @@ const SETUP = [
   ['배포 길: 웹 Cloudflare · APK 태그 릴리스', 'doing'],
 ];
 const LINKS = [
-  ['웹 미리보기 (main)', SITE.web], ['클릭 목업', SITE.web + '/mockup.html'], ['UI 부품', SITE.web + '/dev/ui'],
+  ['웹 미리보기 (main)', SITE.web], ['클릭 목업', SITE.web + '/mockup.html'], ['UI 부품', SITE.web + '/dev/ui'], ['앱 · 가짜 데이터', SITE.web + '/?mode=mock'],
   ['레포', `https://github.com/${SITE.org}/${SITE.repo}`], ['Pull Requests', `https://github.com/${SITE.org}/${SITE.repo}/pulls`],
   ['보드 (Projects)', `https://github.com/orgs/${SITE.org}/projects/${SITE.project}`], ['최신 APK (Releases)', `https://github.com/${SITE.org}/${SITE.repo}/releases/latest`],
   ['APK 빌드 버튼 (Actions)', `https://github.com/${SITE.org}/${SITE.repo}/actions/workflows/eas-build.yml`],
