@@ -161,6 +161,15 @@ describe('H08 기상 확인 화면 데이터', () => {
     expect([check!.usage, check!.recent, formatTime(check!.confirmed!.at)]).toEqual([3.2, 1.4, '오전 8:10']);
   });
 
+  it('이미 확정한 알람은 다시 확정해도 처음 판정 그대로', async () => {
+    await dismissRing(WAKE, kst(22, 480));
+    await confirmWake(WAKE, 'auto', kst(22, 490));
+    await confirmWake(WAKE, 'self', kst(22, 500));
+    const check = await getWakeCheck(WAKE);
+    expect([check!.confirmed!.how, formatTime(check!.confirmed!.at)]).toEqual(['auto', '오전 8:10']);
+    expect(labels()).toEqual(['오전 8:00 기상 알람 해제', '오전 8:10 기상 확인']);
+  });
+
   it('확정한 판정의 사용 시간은 다른 기상 알람이 울려도 그대로', async () => {
     await dismissRing(WAKE, kst(22, 480));
     await confirmWake(WAKE, 'auto', kst(22, 490));

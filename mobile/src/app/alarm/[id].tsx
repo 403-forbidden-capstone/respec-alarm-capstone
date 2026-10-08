@@ -39,14 +39,14 @@ export default function AlarmDetailScreen() {
   if (data === undefined) {
     return (
       <Screen>
-        <TopBar onBack={backOrHome} />
+        <TopBar onBack={backOrHome} screenId="H03" />
       </Screen>
     );
   }
   if (data === null) {
     return (
       <Screen>
-        <TopBar onBack={backOrHome} />
+        <TopBar onBack={backOrHome} screenId="H03" />
         <Text variant="body" tone="sub">
           일정을 찾을 수 없어요.
         </Text>
@@ -100,6 +100,17 @@ function Detail({ appointment: a, reload }: { appointment: AppointmentDetail; re
     setConfirm(false);
     toast('알람 시각을 다시 계산했어요');
     reload();
+  }
+
+  // 확인 시트 "바꾸기" — 저장과 같은 잠금으로 연타를 막음
+  async function confirmApply() {
+    if (saving.current) return;
+    saving.current = true;
+    try {
+      await apply();
+    } finally {
+      saving.current = false;
+    }
   }
 
   function keep() {
@@ -254,7 +265,7 @@ function Detail({ appointment: a, reload }: { appointment: AppointmentDetail; re
           {'\n'}기존보다 5분 이상 바뀌면 한 번 더 확인해요.
         </Text>
         <View style={styles.stack}>
-          <Button label="바꾸기" onPress={apply} />
+          <Button label="바꾸기" onPress={confirmApply} />
           <Button label="그대로 두기" variant="ghost" onPress={keep} />
         </View>
       </Sheet>
