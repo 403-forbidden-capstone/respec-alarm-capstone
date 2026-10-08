@@ -2,7 +2,7 @@ import { router } from 'expo-router';
 import { useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
-import { Button, Card, Chip, Field, Screen, Sheet, Text, toast, TopBar } from '@/components/ui';
+import { Button, Card, Chip, Field, LoadError, Screen, Sheet, Text, toast, TopBar } from '@/components/ui';
 import { createAppointment, defaultDraft, draftAt, draftDates, estimateAppointment, listPlaces } from '@/features/alarm/api';
 import { OptionGrid } from '@/features/alarm/components/OptionGrid';
 import { SelectRow } from '@/features/alarm/components/SelectRow';
@@ -33,7 +33,7 @@ const IMPORTANCE_OPTIONS = (['LOW', 'NORMAL', 'HIGH'] as const).map((v) => [v, I
 
 // H05 새 일정 만들기 — 입력하면 이동시간 · 준비 시간으로 알람을 계산해 확인 시트로 보여 줌
 export default function NewScheduleScreen() {
-  const { data: places } = useLoad(listPlaces);
+  const { data: places, error: placesError, reload: reloadPlaces } = useLoad(listPlaces);
   const [draft, setDraft] = useState(defaultDraft);
   const [estimate, setEstimate] = useState<Estimate | null>(null);
   const [saving, setSaving] = useState(false);
@@ -86,6 +86,8 @@ export default function NewScheduleScreen() {
         <SelectRow label="반복" value={draft.repeat} options={REPEAT_OPTIONS} onChange={(v) => set('repeat', v)} />
       </Card>
 
+      {/* 장소 목록을 못 읽으면 장소를 고를 수 없으니 이유 + 다시 시도 */}
+      {!places && placesError ? <LoadError onRetry={reloadPlaces} /> : null}
       <Card>
         <Text variant="label" tone="sub">
           장소와 중요도
