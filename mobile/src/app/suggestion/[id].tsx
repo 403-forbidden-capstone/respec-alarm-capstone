@@ -1,5 +1,5 @@
 import { router, useLocalSearchParams } from 'expo-router';
-import { useRef, useState } from 'react';
+import { useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
 import { Button, Card, Screen, Sheet, Text, toast, TopBar, TopBarButton } from '@/components/ui';
@@ -11,6 +11,7 @@ import type { Suggestion } from '@/features/records/types';
 import { now } from '@/lib/clock';
 import { addMinutes, formatDateShort, formatTime } from '@/lib/format';
 import { useLoad } from '@/lib/useLoad';
+import { useAction } from '@/lib/useAction';
 
 // S01 알람 조정 제안 — 최근 기록으로 고른 앞당김을 적용 · 직접 수정 · 무시, 적용한 뒤에는 이전 값으로 되돌리기
 // 적용하면 그 일정의 예측 준비가 늘어 기상 · 준비 알람이 같이 앞당겨짐 (실제 저장 · 다시 예약은 #49)
@@ -39,28 +40,11 @@ export default function SuggestionScreen() {
   return <Detail suggestion={data} reload={reload} onBack={back} />;
 }
 
-function Detail({ suggestion: s, reload, onBack }: { suggestion: Suggestion; reload: () => void; onBack?: () => void }) {
+function Detail({ suggestion: s, reload, onBack }: { suggestion: Suggestion; reload: () => Promise<boolean>; onBack?: () => void }) {
   const [editing, setEditing] = useState<number | null>(null); // 직접 수정 시트에서 고른 앞당김(분), 닫혀 있으면 null
-  const [busy, setBusy] = useState(false); // 버튼을 흐리게 보여 주는 데만
-  const running = useRef(false); // 같은 렌더 안에서 두 번 눌러도 막음
+  // 버튼은 한 번에 하나씩, 다시 읽기가 끝날 때까지 잠금 — 연타 · 옛 화면에서 다시 누르기를 막음 (lib/useAction)
+  const { busy, run: act } = useAction();
   const phase = suggestionPhase(s.status);
-
-  // 버튼은 한 번에 하나씩 — 연타하면 토스트가 두 번 뜨고, 실데이터(#49)에선 두 번 저장될 수 있음
-  // 실패하면 한국어 이유만 토스트로 (서버 오류 원문은 기본 문구로)
-  async function act(task: () => Promise<void>) {
-    if (running.current) return;
-    running.current = true;
-    setBusy(true);
-    try {
-      await task();
-    } catch (e) {
-      const message = e instanceof Error ? e.message : '';
-      toast(/[가-힣]/.test(message) ? message : '하지 못했어요. 다시 해 주세요');
-    } finally {
-      running.current = false;
-      setBusy(false);
-    }
-  }
   const target = `${formatDateShort(s.appointment.at)} ${s.appointment.title}`;
 
   const apply = (minutes: number) =>
@@ -68,27 +52,27 @@ function Detail({ suggestion: s, reload, onBack }: { suggestion: Suggestion; rel
       await applySuggestion(s.id, minutes);
       setEditing(null);
       toast(`${dayWord(s.currentWake, now())} 기상 알람이 ${formatTime(addMinutes(s.currentWake, -minutes))}에 울려요`);
-      reload();
+      await reload();
     });
 
   const undo = () =>
     act(async () => {
       await undoSuggestion(s.id);
       toast('이전 값으로 되돌렸어요');
-      reload();
+      await reload();
     });
 
   const ignore = () =>
     act(async () => {
       await ignoreSuggestion(s.id);
       toast('이번 제안을 무시했어요');
-      reload();
+      await reload();
     });
 
   const reopen = () =>
     act(async () => {
       await reopenSuggestion(s.id);
-      reload();
+      await reload();
     });
 
   return (
@@ -179,6 +163,7 @@ function Detail({ suggestion: s, reload, onBack }: { suggestion: Suggestion; rel
             onChange={setEditing}
             onApply={() => apply(editing)}
             onCancel={() => setEditing(null)}
+            busy={busy}
           />
         ) : null}
       </Sheet>
@@ -192,10 +177,11 @@ type EditProps = {
   onChange: (minutes: number) => void;
   onApply: () => void;
   onCancel: () => void;
+  busy: boolean; // 적용이 도는 중 — 시트 버튼을 흐리게
 };
 
 // 직접 수정 시트 — 5분씩 늦게 · 일찍, 지금 시각 그대로(0분)면 적용할 수 없음
-function EditWake({ suggestion: s, minutes, onChange, onApply, onCancel }: EditProps) {
+function EditWake({ suggestion: s, minutes, onChange, onApply, onCancel, busy }: EditProps) {
   return (
     <>
       <Text variant="small">
@@ -209,8 +195,8 @@ function EditWake({ suggestion: s, minutes, onChange, onApply, onCancel }: EditP
         <TopBarButton label={`${EDIT_STEP}분 일찍`} onPress={() => onChange(stepMinutes(minutes, EDIT_STEP))} />
       </View>
       <View style={styles.stack}>
-        <Button label="이 시간으로 적용" onPress={onApply} disabled={minutes === 0} />
-        <Button label="취소" variant="plain" onPress={onCancel} />
+        <Button label="이 시간으로 적용" onPress={onApply} disabled={minutes === 0 || busy} />
+        <Button label="취소" variant="plain" onPress={onCancel} disabled={busy} />
       </View>
     </>
   );
