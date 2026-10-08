@@ -22,6 +22,7 @@ export default function AlarmsScreen() {
   return (
     <Screen>
       <TopBar
+        screenId="H02"
         onBack={router.canGoBack() ? router.back : undefined}
         right={<TopBarButton label="+ 새 일정" onPress={() => router.push('/schedule/new')} />}
       />

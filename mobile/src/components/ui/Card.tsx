@@ -7,15 +7,21 @@ type Props = {
   children: ReactNode;
   variant?: 'default' | 'dash' | 'flat'; // dash = 비어 있을 때 점선, flat = 테두리 · 여백 없음
   onPress?: () => void;
+  accessibilityLabel?: string; // 누를 수 있는 카드를 화면 읽기가 부를 이름
   style?: StyleProp<ViewStyle>;
 };
 
 // 흰 카드 (.card) — 누를 수 있으면 onPress를 줌
-export function Card({ children, variant = 'default', onPress, style }: Props) {
+export function Card({ children, variant = 'default', onPress, accessibilityLabel, style }: Props) {
   const cardStyle = [styles.base, styles[variant], style];
   if (onPress) {
     return (
-      <Pressable onPress={onPress} style={({ pressed }) => [cardStyle, pressed && styles.pressed]} accessibilityRole="button">
+      <Pressable
+        onPress={onPress}
+        style={({ pressed }) => [cardStyle, pressed && styles.pressed]}
+        accessibilityRole="button"
+        accessibilityLabel={accessibilityLabel}
+      >
         {children}
       </Pressable>
     );

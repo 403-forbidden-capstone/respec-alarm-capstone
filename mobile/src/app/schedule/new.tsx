@@ -34,6 +34,7 @@ export default function NewScheduleScreen() {
   const { data: places } = useLoad(listPlaces);
   const [draft, setDraft] = useState(defaultDraft);
   const [estimate, setEstimate] = useState<Estimate | null>(null);
+  const [saving, setSaving] = useState(false);
   const set = <K extends keyof typeof draft>(key: K, value: (typeof draft)[K]) => setDraft((d) => ({ ...d, [key]: value }));
 
   async function calculate() {
@@ -41,24 +42,31 @@ export default function NewScheduleScreen() {
       toast('일정명을 입력해 주세요');
       return;
     }
-    if (!/^\d{1,2}:\d{2}$/.test(draft.time.trim())) {
+    // 24시간제 00:00~23:59만 — 25:99처럼 넘치면 다음 날로 조용히 넘어간 알람이 생김
+    if (!/^([01]?\d|2[0-3]):[0-5]\d$/.test(draft.time.trim())) {
       toast('시간을 14:00처럼 적어 주세요');
       return;
     }
     setEstimate(await estimateAppointment({ ...draft, time: draft.time.trim() }));
   }
 
+  // 두 번 눌러도 일정이 한 번만 들어가게 저장 중에는 막음
   async function save() {
-    if (!estimate) return;
-    const saved = await createAppointment(estimate);
-    setEstimate(null);
-    toast(`알람 ${saved.alarms.filter((x) => x.kind !== 'ARRIVE').length}개를 맞췄어요`);
-    router.dismissTo('/alarms');
+    if (!estimate || saving) return;
+    setSaving(true);
+    try {
+      const saved = await createAppointment(estimate);
+      setEstimate(null);
+      toast(`알람 ${saved.alarms.filter((x) => x.kind !== 'ARRIVE').length}개를 맞췄어요`);
+      router.dismissTo('/alarms');
+    } finally {
+      setSaving(false);
+    }
   }
 
   return (
     <Screen>
-      <TopBar onBack={router.canGoBack() ? router.back : undefined} />
+      <TopBar onBack={router.canGoBack() ? router.back : undefined} screenId="H05" />
       <Text variant="title" style={styles.title}>
         새 일정 만들기
       </Text>
@@ -105,7 +113,7 @@ export default function NewScheduleScreen() {
           options={TRANSPORT_OPTIONS}
           onChange={(v) => set('transport', v)}
         />
-        <Text variant="body" tone="sub" style={styles.optLabel}>
+        <Text variant="rowLabel" tone="sub" style={styles.optLabel}>
           중요도
         </Text>
         <OptionGrid<Importance>
@@ -190,7 +198,7 @@ function CalcSteps({ estimate: e, onSave, onEdit }: { estimate: Estimate; onSave
 const styles = StyleSheet.create({
   title: { marginTop: 8, marginBottom: 4 },
   lead: { marginBottom: 18 },
-  optLabel: { fontSize: 13.5, marginTop: 12, marginBottom: 8 },
+  optLabel: { marginTop: 12, marginBottom: 8 },
   stack: { gap: 10, marginTop: 16 },
   steps: { marginVertical: 14 },
   step: { flexDirection: 'row', gap: 10, paddingVertical: 8 },

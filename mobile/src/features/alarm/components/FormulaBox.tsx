@@ -8,7 +8,7 @@ export function FormulaBox({ lines }: { lines: string[] }) {
   return (
     <View style={styles.box}>
       {lines.map((line) => (
-        <Text key={line} variant="body" style={styles.text}>
+        <Text key={line} variant="note" style={styles.text}>
           {line}
         </Text>
       ))}
@@ -18,5 +18,5 @@ export function FormulaBox({ lines }: { lines: string[] }) {
 
 const styles = StyleSheet.create({
   box: { backgroundColor: colors.chip, borderRadius: 14, paddingVertical: 12, paddingHorizontal: 14, marginBottom: 6 },
-  text: { fontSize: 13, lineHeight: 19.5, fontVariant: ['tabular-nums'] },
+  text: { fontVariant: ['tabular-nums'] },
 });

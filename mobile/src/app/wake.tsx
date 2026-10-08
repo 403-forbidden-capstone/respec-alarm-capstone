@@ -54,13 +54,14 @@ function WakeFlow({ check }: { check: WakeCheck }) {
       : { phase: 'observing', usage: 0, recent: 0, at: null, how: null },
   );
   const observeEnd = addMinutes(check.dismissedAt, 10);
-  const group = check.groupName ?? '그룹';
+  // 그룹 일정이 아니면 공유 문구 · 그룹 버튼을 뺌
+  const shared = check.groupId != null ? ` · ${check.groupName ?? '그룹'}에 공유했어요` : '';
   const back = router.canGoBack() ? router.back : undefined;
 
   async function confirm(how: 'self' | 'auto', usage: number, recent: number) {
     await confirmWake(check.alarmId, how, observeEnd);
     setState({ phase: 'confirmed', usage, recent, at: observeEnd, how });
-    toast(`기상을 확인했어요 · ${group}에 공유했어요`);
+    toast(`기상을 확인했어요${shared}`);
   }
 
   // 시연용: 폰을 보며 일어나면 누적 사용이 θ를 넘어 자동 판정
@@ -125,8 +126,8 @@ function WakeFlow({ check }: { check: WakeCheck }) {
               </Text>
             </View>
             <Text variant="bodyStrong">지금 일어나셨나요?</Text>
-            <Text variant="body" tone="sub" style={styles.notifText}>
-              응답하면 {group}에 기상 완료로 표시돼요.
+            <Text variant="note" tone="sub" style={styles.notifText}>
+              {check.groupId != null ? `응답하면 ${check.groupName ?? '그룹'}에 기상 완료로 표시돼요.` : '응답하면 기상 완료로 기록돼요.'}
             </Text>
             <Button label="일어났어요" small onPress={() => confirm('self', 0.4, 0)} />
           </View>
@@ -155,17 +156,20 @@ function WakeFlow({ check }: { check: WakeCheck }) {
             </View>
             <Text variant="sheetTitle">기상 확정 · {formatTime(state.at)}</Text>
             <Text variant="small" tone="sub" align="center" style={styles.doneText}>
-              {state.how === 'self' ? '확인 알림에 직접 응답했어요' : '화면 사용으로 자동 판정했어요'} · {group}에 공유했어요
+              {state.how === 'self' ? '확인 알림에 직접 응답했어요' : '화면 사용으로 자동 판정했어요'}
+              {shared}
             </Text>
           </View>
           <Card>{meters}</Card>
           <View style={styles.stack}>
             <Button label="홈으로" onPress={() => router.dismissTo('/')} />
-            <Button
-              label={`${group} 기상 현황 보기`}
-              variant="ghost"
-              onPress={() => router.push({ pathname: '/groups/[id]', params: { id: 'cap' } })}
-            />
+            {check.groupId != null ? (
+              <Button
+                label={`${check.groupName ?? '그룹'} 기상 현황 보기`}
+                variant="ghost"
+                onPress={() => router.push({ pathname: '/groups/[id]', params: { id: check.groupId! } })}
+              />
+            ) : null}
           </View>
         </>
       ) : null}
@@ -209,10 +213,10 @@ function Meter({ label, value, threshold }: { label: string; value: number; thre
   return (
     <View style={styles.meter}>
       <View style={styles.meterHead}>
-        <Text variant="body" style={styles.meterText}>
+        <Text variant="note">
           {label}
         </Text>
-        <Text variant="bodyStrong" style={styles.meterText}>
+        <Text variant="note" weight={600}>
           {value.toFixed(1)}분
         </Text>
       </View>
@@ -236,7 +240,6 @@ const styles = StyleSheet.create({
   flowOn: { backgroundColor: colors.ink, borderColor: colors.ink },
   meter: { marginVertical: 12 },
   meterHead: { flexDirection: 'row', justifyContent: 'space-between' },
-  meterText: { fontSize: 13 },
   sim: { borderWidth: 1, borderStyle: 'dashed', borderColor: colors.faint, borderRadius: 18, padding: 14, marginTop: 14 },
   simText: { marginBottom: 10 },
   simButtons: { gap: 8 },
@@ -251,7 +254,7 @@ const styles = StyleSheet.create({
     boxShadow: `0 10px 26px -14px ${colors.shadow}4D`,
   },
   notifHead: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 },
-  notifText: { fontSize: 13, marginTop: 4, marginBottom: 12 },
+  notifText: { marginTop: 4, marginBottom: 12 },
   done: { alignItems: 'center', paddingTop: 18, paddingBottom: 14 },
   check: {
     width: 64,

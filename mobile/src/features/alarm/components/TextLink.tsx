@@ -6,7 +6,7 @@ import { Text } from '@/components/ui';
 export function TextLink({ label, onPress, strong }: { label: string; onPress: () => void; strong?: boolean }) {
   return (
     <Pressable onPress={onPress} hitSlop={8} accessibilityRole="button" style={({ pressed }) => pressed && { opacity: 0.6 }}>
-      <Text variant="body" tone="sub" weight={strong ? 700 : 400} style={{ fontSize: 13.5 }}>
+      <Text variant="rowLabel" tone="sub" weight={strong ? 700 : 400}>
         {label}
       </Text>
     </Pressable>
