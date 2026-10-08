@@ -12,16 +12,19 @@ type Props = {
   right?: ReactNode;
 };
 
-// 화면 맨 위 줄 — 왼쪽은 이전 버튼(있으면) 또는 화면 번호, 오른쪽은 버튼
+// 화면 맨 위 줄 — 왼쪽은 이전 버튼(있으면, 옆에 화면 번호) 또는 화면 번호, 오른쪽은 버튼
 export function TopBar({ screenId, onBack, left, right }: Props) {
   return (
     <View style={styles.row}>
       {onBack ? (
-        <Pressable onPress={onBack} hitSlop={8} accessibilityRole="button" accessibilityLabel="이전 화면">
-          <Text variant="body" tone="sub">
-            ← 이전
-          </Text>
-        </Pressable>
+        <View style={styles.left}>
+          <Pressable onPress={onBack} hitSlop={8} accessibilityRole="button" accessibilityLabel="이전 화면">
+            <Text variant="body" tone="sub">
+              ← 이전
+            </Text>
+          </Pressable>
+          {screenId ? <Text variant="screenId">{screenId}</Text> : null}
+        </View>
       ) : left ? (
         left
       ) : screenId ? (
@@ -47,6 +50,7 @@ export function TopBarButton({ label, onPress }: { label: string; onPress?: () =
 
 const styles = StyleSheet.create({
   row: { minHeight: size.topBar, marginTop: 2, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  left: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   tbtn: {
     height: 32,
     paddingHorizontal: 12,

@@ -7,13 +7,14 @@ import { PermissionTable } from '@/features/social/components/PermissionTable';
 import { PERMISSIONS } from '@/features/social/types';
 import { useLoad } from '@/lib/useLoad';
 import { colors } from '@/theme';
+import { backOrHome } from '@/lib/nav';
 
 // F02 친구 권한 — 이 친구가 내 정보에 대해 가진 최종 권한(친구 · 그룹 관계별 권한을 항목별 OR)과 출처
 // 권한을 바꾸려면 공유 권한 설정(F03)에서 친구 관계를 고른 채로 엶
 export default function FriendPermissionScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { data, error, reload } = useLoad(() => getFriendGrant(id));
-  const back = router.canGoBack() ? router.back : undefined;
+  const back = backOrHome; // 앞 화면이 없으면(주소로 바로 열기) 홈으로
 
   if (data === undefined) {
     return (
