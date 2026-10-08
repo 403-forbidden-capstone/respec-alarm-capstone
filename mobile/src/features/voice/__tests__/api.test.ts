@@ -1,25 +1,28 @@
-import { describe, expect, it } from '@jest/globals';
+import { beforeAll, describe, expect, it } from '@jest/globals';
 
 import { declineRoutineSuggestion, editJournal, getJournal, getRoutine, saveRoutine } from '@/features/routine/api';
 import { formatTime } from '@/lib/format';
 import { db } from '@/mocks/data';
 
-import { finishConversation, foundScheduleDraft, getConversation, reply, saveFoundSchedule, say } from '../api';
+import { finishConversation, foundScheduleDraft, getConversation, mockTiming, rejectFoundSchedule, saveFoundSchedule, say } from '../api';
 
 // A02 → A03 → A04 한 바퀴 — 목업에서 말하기 두 번 · 저장 · 완료 · 루틴 만들기를 누른 것과 같은 결과인지
 // (테스트 파일마다 목업 데이터가 새로 읽혀서 다른 테스트에 남지 않음)
 describe('AI 대화 → 하루 기록 → 루틴', () => {
+  beforeAll(() => {
+    mockTiming.replyMs = 0; // AI가 정리하는 척 기다리는 시간 없이
+  });
+
   it('대본대로 주고받으면 찾은 일정 카드가 뜨고 준비물이 바로 들어감', async () => {
     const start = await getConversation();
     expect(start.messages.map((m) => m.who)).toEqual(['ai']);
     expect(start.next?.who).toBe('me');
     expect(foundScheduleDraft()).toBeNull();
 
-    await say();
-    expect((await getConversation()).next).toEqual({ who: 'ai' });
-    await reply();
-    await say();
-    const c = await reply();
+    const first = await say(); // 내 말 + AI 답을 한 번에
+    expect(first.messages.map((m) => m.who)).toEqual(['ai', 'me', 'ai']);
+    expect(first.next?.who).toBe('me');
+    const c = await say();
 
     expect(c.messages.map((m) => m.who)).toEqual(['ai', 'me', 'ai', 'me', 'card']);
     expect(c.next).toBeNull();
@@ -29,7 +32,7 @@ describe('AI 대화 → 하루 기록 → 루틴', () => {
     expect(db.events.map((e) => `${e.label} · ${e.source}`)).toContain('준비물 저장 · 노트북 충전기 · AI 대화');
     expect(foundScheduleDraft()?.title).toBe('스터디');
 
-    await reply(); // 대본이 끝나면 아무 일 없음
+    await say(); // 대본이 끝나면 아무 일 없음
     expect((await getConversation()).messages).toHaveLength(5);
   });
 
@@ -47,6 +50,12 @@ describe('AI 대화 → 하루 기록 → 루틴', () => {
       '저장했어요. 내일 오후 12:40 준비, 오후 1:05 출발 알람을 맞춰 둘게요. 오늘 대화는 여기까지 할까요?',
     );
     expect(db.events.map((e) => `${e.label} · ${e.source}`)).toContain('일정 저장 · 스터디 · AI 대화 · 확인함');
+
+    // 이미 확인한 카드는 다시 저장되지 않음 (두 번 누르기 · H05 다시 열기)
+    await expect(saveFoundSchedule()).rejects.toThrow('이미 확인한 일정이에요');
+    await rejectFoundSchedule();
+    expect((await getConversation()).found?.status).toBe('APPLIED');
+    expect(foundScheduleDraft()).toBeNull();
   });
 
   it('대화를 마치면 그날 일기가 생기고, 고친 글은 다시 만들어도 남음', async () => {

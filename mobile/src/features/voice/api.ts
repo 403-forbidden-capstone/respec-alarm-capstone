@@ -41,6 +41,7 @@ function foundOf(c: MockChat): FoundSchedule | null {
     title: FOUND_DRAFT.title,
     at: draftAt(FOUND_DRAFT),
     place: FOUND_DRAFT.place,
+    importance: FOUND_DRAFT.importance,
     items: FOUND_DRAFT.items
       .split(',')
       .map((s) => s.trim())
@@ -64,15 +65,22 @@ export async function getConversation(): Promise<Conversation> {
   return toConversation(chat());
 }
 
-// 내 차례에 말함 — text가 없거나 비면 대본 문장 (말하기 버튼). 내 차례가 아니면 그대로
+// 목업만: AI가 정리하는 척 기다리는 시간 (목업 userSay → aiTurn 0.8초). 실데이터는 Edge 응답을 기다림. 테스트는 0
+export const mockTiming = { replyMs: 800 };
+const pause = (ms: number) => (ms > 0 ? new Promise<void>((resolve) => setTimeout(resolve, ms)) : Promise.resolve());
+
+// 내 차례에 말하고 AI 답까지 받아 같이 돌려줌 — text가 없거나 비면 대본 문장 (말하기 버튼). 내 차례가 아니면 그대로
+// 실데이터(D7 A안 1턴)는 녹음 → voice-* Edge → Gemini가 내 말 · AI 답을 한 번에 주므로, 붙일 때 이 함수 안만 바뀜
 export async function say(text?: string): Promise<Conversation> {
-  userTurn(chat(), now(), text);
-  return toConversation(chat());
+  const c = chat();
+  if (!userTurn(c, now(), text)) return toConversation(c);
+  await pause(mockTiming.replyMs);
+  aiReply(c);
+  return toConversation(c);
 }
 
 // AI 차례 — 대본의 다음 말. 일정을 찾으면 카드를 띄우고 준비물은 바로 준비물 목록에 넣음
-export async function reply(): Promise<Conversation> {
-  const c = chat();
+function aiReply(c: MockChat) {
   if (aiTurn(c, now()) === 'card') {
     const found = foundOf(c);
     const day = found ? dateParts(found.at).day : TODAY + 1;
@@ -82,17 +90,18 @@ export async function reply(): Promise<Conversation> {
       db.events.push({ at: now(), label: `준비물 저장 · ${title}`, source: 'AI 대화' });
     }
   }
-  return toConversation(c);
 }
 
 // 찾은 일정의 새 일정 입력값 — "수정"으로 H05를 열 때 채움 (카드가 아직 안 나왔으면 null)
 export function foundScheduleDraft(): AppointmentDraft | null {
-  return aiDb.chat?.found ? { ...FOUND_DRAFT } : null;
+  return aiDb.chat?.found === 'PENDING' ? { ...FOUND_DRAFT } : null;
 }
 
 // 찾은 일정 저장 — estimate가 있으면 H05에서 고친 값. 알람을 맞추고 AI가 한마디 덧붙임
 // 실데이터는 Edge가 appointments · 알람을 저장하고 apply_status = APPLIED
 export async function saveFoundSchedule(estimate?: Estimate): Promise<Appointment> {
+  // 이미 저장 · 저장 안 함을 고른 카드면 막음 — 두 번 누르거나 H05를 다시 열어도 일정이 두 벌 생기지 않게
+  if (aiDb.chat?.found !== 'PENDING') throw new Error('이미 확인한 일정이에요');
   const e = estimate ?? (await estimateAppointment(FOUND_DRAFT));
   const saved = await createAppointment(e, estimate ? 'AI 대화 · 수정함' : 'AI 대화 · 확인함');
   const prepare = saved.alarms.find((x) => x.kind === 'PREPARE') ?? saved.alarms[0];
@@ -103,6 +112,7 @@ export async function saveFoundSchedule(estimate?: Estimate): Promise<Appointmen
 
 // 찾은 일정 저장 안 함 (apply_status = REJECTED)
 export async function rejectFoundSchedule() {
+  if (aiDb.chat?.found !== 'PENDING') return;
   resolveFound(chat(), 'REJECTED', rejectedReply(FOUND_DRAFT.title), now());
 }
 

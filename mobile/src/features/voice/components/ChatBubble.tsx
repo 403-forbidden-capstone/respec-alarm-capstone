@@ -45,7 +45,7 @@ export function TypingBubble() {
   }, [phase]);
 
   return (
-    <View style={[styles.base, styles.ai, styles.typing]} accessibilityLabel="AI가 답하는 중">
+    <View style={[styles.base, styles.ai, styles.typing]} accessible accessibilityLabel="AI가 답하는 중">
       {DOT_SHIFTS.map((s) => {
         // 0.3 → 1 → 0.3을 s만큼 늦게 — 시작 · 끝 값은 그 시점의 밝기
         const edge = 0.3 + 1.4 * s;

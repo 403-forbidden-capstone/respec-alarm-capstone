@@ -42,16 +42,25 @@ export default function RoutineScreen() {
 function RoutineEditor({ initial, onBack }: { initial: Routine; onBack?: () => void }) {
   const [routine, setRoutine] = useState(initial);
   const [editing, setEditing] = useState<string | null>(null); // 편집 시트를 연 단계
+  const [saving, setSaving] = useState(false); // 두 번 눌러도 루틴이 한 벌만 생기게
   const times = stepTimes(routine);
   const index = routine.steps.findIndex((s) => s.id === editing);
   const step = index >= 0 ? routine.steps[index] : null;
 
   // 저장 — 제안에서 왔으면 일기로 돌아감. 주소로 바로 열었으면 저장한 루틴 주소로 바꿈
   async function save() {
-    const saved = await saveRoutine(routine);
-    toast(savedMessage(saved));
-    if (router.canGoBack()) router.back();
-    else if (saved.id) router.replace({ pathname: '/routine/[id]', params: { id: saved.id } });
+    if (saving) return;
+    setSaving(true);
+    try {
+      const saved = await saveRoutine(routine);
+      toast(savedMessage(saved));
+      if (router.canGoBack()) router.back();
+      else if (saved.id) router.replace({ pathname: '/routine/[id]', params: { id: saved.id } });
+    } catch (e) {
+      toast(e instanceof Error && e.message ? e.message : '루틴을 저장하지 못했어요');
+    } finally {
+      setSaving(false);
+    }
   }
 
   function removeEditing() {

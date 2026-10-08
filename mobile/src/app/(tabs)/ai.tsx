@@ -4,14 +4,13 @@ import { KeyboardAvoidingView, ScrollView, StyleSheet, View } from 'react-native
 
 import { Screen, Text, toast, TopBar } from '@/components/ui';
 import { TextLink } from '@/features/alarm/components/TextLink';
-import { finishConversation, getConversation, rejectFoundSchedule, reply, saveFoundSchedule, say } from '@/features/voice/api';
+import { finishConversation, getConversation, rejectFoundSchedule, saveFoundSchedule, say } from '@/features/voice/api';
 import { ChatBubble, TypingBubble } from '@/features/voice/components/ChatBubble';
 import { ChatComposer } from '@/features/voice/components/ChatComposer';
 import { FoundScheduleCard } from '@/features/voice/components/FoundScheduleCard';
 import { useLoad } from '@/lib/useLoad';
 
-const LISTEN_MS = 1100; // 말하기를 누른 뒤 듣는 시간 (목업 chatSpeak)
-const REPLY_MS = 800; // 내 말 뒤 AI가 답하기까지 (목업 userSay → aiTurn)
+const LISTEN_MS = 1100; // 말하기를 누른 뒤 듣는 시간 (목업 chatSpeak). AI가 답하는 시간은 api(say)가 기다림
 
 // 03 AI 탭 · A02 AI 대화 — 자기 전 대화. AI 대기라 목업 대본대로 흘러감 (마이크 · 음성 합성 · 서버 호출 없음)
 // 말하기 = 다음 대본 문장을 말한 것으로 침, 텍스트 = 그 문장을 고쳐 보냄. 일정을 찾으면 카드로 확인받고, 완료하면 하루 기록(A03)으로
@@ -20,33 +19,38 @@ export default function AiScreen() {
   const [mode, setMode] = useState<'voice' | 'text'>('voice');
   const [draftText, setDraftText] = useState<string | null>(null); // 글 모드에서 고친 글 (null = 대본 문장 그대로)
   const [listening, setListening] = useState(false);
+  const [thinking, setThinking] = useState(false); // 내 말을 보내고 AI 답을 기다리는 중
+  const [busy, setBusy] = useState(false); // 카드 저장 · 완료 같은 버튼이 도는 중 — 두 번 눌러도 한 번만
   const scroll = useRef<ScrollView>(null);
 
   const next = data?.next ?? null;
-  const count = data?.messages.length ?? 0;
-  const aiPending = next?.who === 'ai';
-  const canSay = !listening && next?.who === 'me';
+  const canSay = !listening && !thinking && next?.who === 'me';
 
-  // 말하기 — 잠깐 듣고 나서 내 말이 올라감. 화면을 떠나면 타이머를 지움
+  // 내 말을 보내고 AI 답까지 기다림 (api say가 한 번에 돌려줌). 실패하면 이유를 토스트로
+  async function talk(text?: string) {
+    setThinking(true);
+    try {
+      await say(text);
+      setDraftText(null);
+    } catch (e) {
+      toast(e instanceof Error && e.message ? e.message : '말을 보내지 못했어요');
+    } finally {
+      setThinking(false);
+      reload();
+    }
+  }
+
+  // 말하기 — 잠깐 듣고 나서 보냄. 화면을 떠나면 타이머를 지움
   useEffect(() => {
     if (!listening) return;
-    const timer = setTimeout(async () => {
-      await say();
+    const timer = setTimeout(() => {
       setListening(false);
-      reload();
+      talk();
     }, LISTEN_MS);
     return () => clearTimeout(timer);
-  }, [listening, reload]);
-
-  // AI 차례면 잠깐 정리한 뒤 답함 — 화면을 떠났다 돌아와도 차례가 남아 있으면 다시 잡음
-  useEffect(() => {
-    if (!aiPending) return;
-    const timer = setTimeout(async () => {
-      await reply();
-      reload();
-    }, REPLY_MS);
-    return () => clearTimeout(timer);
-  }, [aiPending, count, reload]);
+    // talk는 렌더마다 새로 만들어지지만 듣기가 시작될 때 한 번만 걸면 됨
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [listening]);
 
   if (!data) {
     return (
@@ -59,7 +63,7 @@ export default function AiScreen() {
 
   const status = listening
     ? '듣고 있어요…'
-    : aiPending
+    : thinking
       ? 'AI가 정리하고 있어요'
       : canSay
         ? '말할 준비가 됐어요'
@@ -71,11 +75,22 @@ export default function AiScreen() {
     if (canSay) setListening(true);
   }
 
-  async function send() {
+  function send() {
     if (!canSay || next?.who !== 'me') return;
-    await say(draftText ?? next.text);
-    setDraftText(null);
-    reload();
+    talk(draftText ?? next.text);
+  }
+
+  // 버튼 동작은 한 번에 하나씩, 실패하면 토스트
+  async function act(task: () => Promise<void>) {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await task();
+    } catch (e) {
+      toast(e instanceof Error && e.message ? e.message : '하지 못했어요. 다시 해 주세요');
+    } finally {
+      setBusy(false);
+    }
   }
 
   function toggleMode() {
@@ -84,22 +99,25 @@ export default function AiScreen() {
   }
 
   // 대화 종료 · 완료 — 일기를 만들고 하루 기록으로
-  async function finish() {
-    setListening(false);
-    const { recordDate } = await finishConversation();
-    router.push({ pathname: '/journal/[date]', params: { date: recordDate } });
-  }
+  const finish = () =>
+    act(async () => {
+      setListening(false);
+      const { recordDate } = await finishConversation();
+      router.push({ pathname: '/journal/[date]', params: { date: recordDate } });
+    });
 
-  async function saveFound() {
-    const saved = await saveFoundSchedule();
-    toast(`${saved.title} 알람을 맞췄어요`);
-    reload();
-  }
+  const saveFound = () =>
+    act(async () => {
+      const saved = await saveFoundSchedule();
+      toast(`${saved.title} 알람을 맞췄어요`);
+      reload();
+    });
 
-  async function rejectFound() {
-    await rejectFoundSchedule();
-    reload();
-  }
+  const rejectFound = () =>
+    act(async () => {
+      await rejectFoundSchedule();
+      reload();
+    });
 
   return (
     <Screen scroll={false} contentStyle={styles.screen}>
@@ -135,7 +153,7 @@ export default function AiScreen() {
                 <ChatBubble key={m.id} who={m.who} text={m.text} at={m.at} />
               ),
             )}
-            {aiPending && !listening ? <TypingBubble /> : null}
+            {thinking ? <TypingBubble /> : null}
           </View>
         </ScrollView>
 

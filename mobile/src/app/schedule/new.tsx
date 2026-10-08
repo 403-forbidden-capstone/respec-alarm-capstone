@@ -33,7 +33,9 @@ const IMPORTANCE_OPTIONS = (['LOW', 'NORMAL', 'HIGH'] as const).map((v) => [v, I
 // H05 새 일정 만들기 — 입력하면 이동시간 · 준비 시간으로 알람을 계산해 확인 시트로 보여 줌
 // from=chat: AI 대화(A02)에서 찾은 일정을 "수정"으로 연 것 — 찾은 값으로 채우고, 저장하면 대화로 돌아감
 export default function NewScheduleScreen() {
-  const fromChat = useLocalSearchParams<{ from?: string }>().from === 'chat';
+  const fromParam = useLocalSearchParams<{ from?: string }>().from;
+  // 대화에서 왔고 찾은 일정이 아직 대기일 때만 — 이미 확인한 카드면 보통 새 일정으로 (두 벌 저장 막기)
+  const [fromChat] = useState(() => fromParam === 'chat' && foundScheduleDraft() != null);
   const { data: places } = useLoad(listPlaces);
   const [draft, setDraft] = useState(() => (fromChat ? foundScheduleDraft() : null) ?? defaultDraft());
   const [estimate, setEstimate] = useState<Estimate | null>(null);
@@ -63,6 +65,8 @@ export default function NewScheduleScreen() {
       toast(`알람 ${saved.alarms.filter((x) => x.kind !== 'ARRIVE').length}개를 맞췄어요`);
       if (fromChat && router.canGoBack()) router.back();
       else router.dismissTo('/alarms');
+    } catch (e) {
+      toast(e instanceof Error && e.message ? e.message : '저장하지 못했어요');
     } finally {
       setSaving(false);
     }
