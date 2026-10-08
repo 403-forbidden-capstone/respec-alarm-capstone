@@ -2,7 +2,7 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
-import { Button, Card, KeyValueRow, Screen, Sheet, Text, toast, Toggle, TopBar } from '@/components/ui';
+import { Button, Card, KeyValueRow, LoadError, Screen, Sheet, Text, toast, Toggle, TopBar } from '@/components/ui';
 import { TextLink } from '@/features/alarm/components/TextLink';
 import { getRoutine, saveRoutine } from '@/features/routine/api';
 import { DayPicker } from '@/features/routine/components/DayPicker';
@@ -18,12 +18,13 @@ import { useLoad } from '@/lib/useLoad';
 // /routine/new?journal=2025-05-22 = 그 일기의 제안으로 만든 초안, /routine/r2 = 저장한 루틴
 export default function RoutineScreen() {
   const { id, journal } = useLocalSearchParams<{ id: string; journal?: string }>();
-  const { data } = useLoad(() => getRoutine(id, journal));
+  const { data, error, reload } = useLoad(() => getRoutine(id, journal));
 
   if (data === undefined) {
     return (
       <Screen>
         <TopBar onBack={backOrHome} screenId="A04" />
+        {error ? <LoadError onRetry={reload} /> : null}
       </Screen>
     );
   }
