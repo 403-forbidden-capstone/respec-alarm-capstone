@@ -130,13 +130,19 @@ export type RingInfo = {
   important: boolean;
 };
 
+// 기상 판정 단계 (목업 S.wake.phase + 기상 알람 울림) — 울림 → 해제 뒤 관찰 → 확인 알림 → 확정
+export type WakePhase = 'idle' | 'ringing' | 'observing' | 'prompt' | 'confirmed';
+export const WAKE_OBSERVE_MINUTES = 10; // 해제 뒤 화면 사용을 보는 시간 — 끝나면 확정 또는 확인 알림
+export const WAKE_NO_REPLY_MINUTES = 5; // 확인 알림에 응답이 없으면 이만큼 뒤 기상 알람이 다시 울림
+
 // 기상 확인 (H08) — 기상 알람 하나 기준 (alarm_events.alarm_id에 WAKE_CONFIRMED)
 export type WakeCheck = {
   alarmId: string;
   appointmentTitle: string;
   groupId: string | null; // 기상 완료를 알려 줄 그룹 — 없으면 공유 안내 · 그룹 버튼을 숨김
   groupName: string | null;
-  dismissedAt: Date; // 기상 알람을 끈 시각
+  phase: 'observing' | 'prompt'; // 확정 전 단계 (확정이면 confirmed)
+  dismissedAt: Date; // 기상 알람을 실제로 끈 시각 (다시 울린 뒤 끄면 그 시각)
   thetaMinutes: number; // 기상 판정 기준 θ — 해제 뒤 10분 동안 누적 화면 사용
   confirmed: { at: Date; how: 'self' | 'auto' } | null; // 이미 확정했으면
 };
