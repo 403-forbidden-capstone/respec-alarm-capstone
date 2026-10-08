@@ -1,4 +1,4 @@
-import { router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import { useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
@@ -16,6 +16,7 @@ import {
   type Importance,
   type Transport,
 } from '@/features/alarm/types';
+import { foundScheduleDraft, saveFoundSchedule } from '@/features/voice/api';
 import { dayKey, formatDateParen, formatDateShort, formatTime } from '@/lib/format';
 import { useLoad } from '@/lib/useLoad';
 import { colors } from '@/theme';
@@ -30,9 +31,11 @@ const TRANSPORT_OPTIONS = (['TRANSIT', 'CAR', 'WALK'] as const).map((t) => [t, T
 const IMPORTANCE_OPTIONS = (['LOW', 'NORMAL', 'HIGH'] as const).map((v) => [v, IMPORTANCE_LABEL[v]] as const);
 
 // H05 새 일정 만들기 — 입력하면 이동시간 · 준비 시간으로 알람을 계산해 확인 시트로 보여 줌
+// from=chat: AI 대화(A02)에서 찾은 일정을 "수정"으로 연 것 — 찾은 값으로 채우고, 저장하면 대화로 돌아감
 export default function NewScheduleScreen() {
+  const fromChat = useLocalSearchParams<{ from?: string }>().from === 'chat';
   const { data: places } = useLoad(listPlaces);
-  const [draft, setDraft] = useState(defaultDraft);
+  const [draft, setDraft] = useState(() => (fromChat ? foundScheduleDraft() : null) ?? defaultDraft());
   const [estimate, setEstimate] = useState<Estimate | null>(null);
   const set = <K extends keyof typeof draft>(key: K, value: (typeof draft)[K]) => setDraft((d) => ({ ...d, [key]: value }));
 
@@ -50,10 +53,11 @@ export default function NewScheduleScreen() {
 
   async function save() {
     if (!estimate) return;
-    const saved = await createAppointment(estimate);
+    const saved = fromChat ? await saveFoundSchedule(estimate) : await createAppointment(estimate);
     setEstimate(null);
     toast(`알람 ${saved.alarms.filter((x) => x.kind !== 'ARRIVE').length}개를 맞췄어요`);
-    router.dismissTo('/alarms');
+    if (fromChat && router.canGoBack()) router.back();
+    else router.dismissTo('/alarms');
   }
 
   return (

@@ -216,7 +216,8 @@ export async function estimateAppointment(d: AppointmentDraft): Promise<Estimate
 }
 
 // 계산한 일정을 저장 — 실데이터는 alarm-commit (일정 · 참여 조건 · 알람 4개를 한 번에)
-export async function createAppointment(estimate: Estimate): Promise<Appointment> {
+// source = 하루 기록에 남길 출처 (AI 대화에서 찾은 일정이면 'AI 대화 · 확인함' 등)
+export async function createAppointment(estimate: Estimate, source = '직접 입력'): Promise<Appointment> {
   const a = estimate.appointment;
   const saved: MockAppointment = {
     id: a.id,
@@ -238,7 +239,7 @@ export async function createAppointment(estimate: Estimate): Promise<Appointment
     withWake: a.withWake,
   };
   db.appointments.push(saved);
-  db.events.push({ at: now(), label: `일정 저장 · ${saved.title}`, source: '직접 입력' });
+  db.events.push({ at: now(), label: `일정 저장 · ${saved.title}`, source });
   return toAppointment(saved);
 }
 

@@ -1,0 +1,89 @@
+import { describe, expect, it } from '@jest/globals';
+
+import { declineRoutineSuggestion, editJournal, getJournal, getRoutine, saveRoutine } from '@/features/routine/api';
+import { formatTime } from '@/lib/format';
+import { db } from '@/mocks/data';
+
+import { finishConversation, foundScheduleDraft, getConversation, reply, saveFoundSchedule, say } from '../api';
+
+// A02 → A03 → A04 한 바퀴 — 목업에서 말하기 두 번 · 저장 · 완료 · 루틴 만들기를 누른 것과 같은 결과인지
+// (테스트 파일마다 목업 데이터가 새로 읽혀서 다른 테스트에 남지 않음)
+describe('AI 대화 → 하루 기록 → 루틴', () => {
+  it('대본대로 주고받으면 찾은 일정 카드가 뜨고 준비물이 바로 들어감', async () => {
+    const start = await getConversation();
+    expect(start.messages.map((m) => m.who)).toEqual(['ai']);
+    expect(start.next?.who).toBe('me');
+    expect(foundScheduleDraft()).toBeNull();
+
+    await say();
+    expect((await getConversation()).next).toEqual({ who: 'ai' });
+    await reply();
+    await say();
+    const c = await reply();
+
+    expect(c.messages.map((m) => m.who)).toEqual(['ai', 'me', 'ai', 'me', 'card']);
+    expect(c.next).toBeNull();
+    expect(c.found).toMatchObject({ title: '스터디', place: '학교 도서관', items: ['노트북 충전기'], status: 'PENDING' });
+    expect(formatTime(c.found!.at)).toBe('오후 2:00');
+    expect(db.todos.filter((t) => t.title === '노트북 충전기' && t.day === 23)).toHaveLength(1);
+    expect(db.events.map((e) => `${e.label} · ${e.source}`)).toContain('준비물 저장 · 노트북 충전기 · AI 대화');
+    expect(foundScheduleDraft()?.title).toBe('스터디');
+
+    await reply(); // 대본이 끝나면 아무 일 없음
+    expect((await getConversation()).messages).toHaveLength(5);
+  });
+
+  it('저장하면 알람을 맞추고 준비 · 출발 시각으로 답함 (같은 날 수업 기상이 있어 외출 준비만)', async () => {
+    const saved = await saveFoundSchedule();
+    expect(saved.title).toBe('스터디');
+    expect(saved.alarms.map((x) => `${x.kind} ${formatTime(x.at)}`)).toEqual([
+      'PREPARE 오후 12:40',
+      'DEPARTURE 오후 1:05',
+      'ARRIVE 오후 1:50',
+    ]);
+    const c = await getConversation();
+    expect(c.found?.status).toBe('APPLIED');
+    expect(c.messages[c.messages.length - 1].text).toBe(
+      '저장했어요. 내일 오후 12:40 준비, 오후 1:05 출발 알람을 맞춰 둘게요. 오늘 대화는 여기까지 할까요?',
+    );
+    expect(db.events.map((e) => `${e.label} · ${e.source}`)).toContain('일정 저장 · 스터디 · AI 대화 · 확인함');
+  });
+
+  it('대화를 마치면 그날 일기가 생기고, 고친 글은 다시 만들어도 남음', async () => {
+    expect(await getJournal('2025-05-22')).toBeNull();
+    const { recordDate } = await finishConversation();
+    expect(recordDate).toBe('2025-05-22');
+    expect(db.journalWritten).toBe(true);
+
+    const j = await getJournal(recordDate);
+    expect(j?.text).toBe('오늘은 기록이 많지 않아 짧게 남겨요. 회의 자료를 챙기느라 샤워 시간을 줄인 게 아쉬웠다고 했어요.');
+    // 시나리오 시각이 멈춰 있어 모두 같은 시각 — 기록된 순서, 대화에서 한 말은 맨 뒤
+    expect(j?.facts.map((f) => f.label)).toEqual([
+      '준비물 저장 · 노트북 충전기',
+      '일정 저장 · 스터디',
+      '회고 · 회의 자료 때문에 샤워 시간을 줄임',
+    ]);
+    expect(j?.suggestion.status).toBe('PENDING');
+
+    await editJournal(recordDate, '고친 일기');
+    await finishConversation();
+    const again = await getJournal(recordDate);
+    expect(again?.text).toBe('고친 일기');
+    expect(again?.edited).toBe(true);
+  });
+
+  it('루틴 제안 초안을 저장하면 제안이 수락으로 바뀌고 저장한 루틴을 다시 열 수 있음', async () => {
+    const draft = await getRoutine('new', '2025-05-22');
+    expect(draft).toMatchObject({ id: null, title: '회의 전날 준비', days: ['수'], sourceJournal: '2025-05-22' });
+
+    const saved = await saveRoutine({ ...draft!, steps: [...draft!.steps, { id: 's4', name: '  ', minutes: 5, alarm: false }] });
+    expect(saved.id).toBe('r2');
+    expect(saved.steps[3].name).toBe('새 단계'); // 이름을 비우면 새 단계
+    expect((await getJournal('2025-05-22'))?.suggestion.status).toBe('APPLIED');
+    expect((await getRoutine('r2'))?.steps).toHaveLength(4);
+    expect(await getRoutine('r1')).toBeNull(); // 아침 루틴은 단계 이름만 있어 편집 대상 아님
+
+    await declineRoutineSuggestion('2025-05-22'); // 이미 수락했으면 그대로
+    expect((await getJournal('2025-05-22'))?.suggestion.status).toBe('APPLIED');
+  });
+});

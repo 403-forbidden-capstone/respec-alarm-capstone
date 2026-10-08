@@ -72,6 +72,8 @@ function RootStack() {
         <Stack.Screen name="groups/[id]/index" />
         <Stack.Screen name="groups/[id]/members/[userId]" />
         <Stack.Screen name="suggestion/[id]" />
+        <Stack.Screen name="journal/[date]" />
+        <Stack.Screen name="routine/[id]" />
       </Stack.Protected>
       <Stack.Protected guard={needsLogin}>
         <Stack.Screen name="login" />
