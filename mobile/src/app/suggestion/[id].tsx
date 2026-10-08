@@ -10,9 +10,9 @@ import { EDIT_STEP, stepMinutes, suggestionPhase } from '@/features/records/sugg
 import type { Suggestion } from '@/features/records/types';
 import { now } from '@/lib/clock';
 import { addMinutes, formatDateShort, formatTime } from '@/lib/format';
-import { useLoad } from '@/lib/useLoad';
-import { useAction } from '@/lib/useAction';
 import { backOrHome } from '@/lib/nav';
+import { useAction } from '@/lib/useAction';
+import { useLoad } from '@/lib/useLoad';
 
 // S01 알람 조정 제안 — 최근 기록으로 고른 앞당김을 적용 · 직접 수정 · 무시, 적용한 뒤에는 이전 값으로 되돌리기
 // 적용하면 그 일정의 예측 준비가 늘어 기상 · 준비 알람이 같이 앞당겨짐 (실제 저장 · 다시 예약은 #49)

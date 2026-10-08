@@ -56,8 +56,7 @@ function RoutineEditor({ initial, onBack }: { initial: Routine; onBack?: () => v
       toast(savedMessage(saved));
       if (router.canGoBack()) router.back();
       else if (saved.id) router.replace({ pathname: '/routine/[id]', params: { id: saved.id } });
-    });
-
+    }, '루틴을 저장하지 못했어요');
 
   function removeEditing() {
     if (!step) return;

@@ -1,5 +1,5 @@
 import { useLocalSearchParams } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
 import { Button, Card, Chip, KeyValueRow, Screen, Sheet, Stepper, Text, toast, Toggle, TopBar } from '@/components/ui';
@@ -60,6 +60,7 @@ function Detail({ appointment: a, reload }: { appointment: AppointmentDetail; re
   const [buffer, setBuffer] = useState(a.bufferMinutes);
   const [preview, setPreview] = useState<AlarmTime[]>(a.alarms);
   const [confirm, setConfirm] = useState(false);
+  const saving = useRef(false);
 
   // 여유 시간을 바꾸면 알람 시각을 다시 계산 (저장 전 미리 보기)
   useEffect(() => {
@@ -78,14 +79,20 @@ function Detail({ appointment: a, reload }: { appointment: AppointmentDetail; re
   const anyManual = AXES.some(([axis]) => a.intensity.axes[axis].manual);
 
   async function save() {
+    if (saving.current) return; // 두 번 눌러도 한 번만 (다시 계산 · 저장이 겹치지 않게)
     if (buffer === a.bufferMinutes) {
       toast('바뀐 내용이 없어요');
       return;
     }
-    // 기존보다 5분 이상 바뀌면 한 번 더 확인 — 미리 보기가 늦게 올 수 있어(실데이터는 서버 계산) 저장할 때 다시 계산한 값으로 비교
-    const next = (await previewAlarms(a.id, buffer))[0] ?? first;
-    if (Math.abs(minutesBetween(before.at, next.at)) >= 5) setConfirm(true);
-    else apply();
+    saving.current = true;
+    try {
+      // 기존보다 5분 이상 바뀌면 한 번 더 확인 — 미리 보기가 늦게 올 수 있어(실데이터는 서버 계산) 저장할 때 다시 계산한 값으로 비교
+      const next = (await previewAlarms(a.id, buffer))[0] ?? first;
+      if (Math.abs(minutesBetween(before.at, next.at)) >= 5) setConfirm(true);
+      else await apply();
+    } finally {
+      saving.current = false;
+    }
   }
 
   async function apply() {
