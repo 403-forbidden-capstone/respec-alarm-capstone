@@ -134,7 +134,8 @@ export type RingInfo = {
 export type WakeCheck = {
   alarmId: string;
   appointmentTitle: string;
-  groupName: string | null; // 기상 완료를 알려 줄 그룹
+  groupId: string | null; // 기상 완료를 알려 줄 그룹 — 없으면 공유 안내 · 그룹 버튼을 숨김
+  groupName: string | null;
   dismissedAt: Date; // 기상 알람을 끈 시각
   thetaMinutes: number; // 기상 판정 기준 θ — 해제 뒤 10분 동안 누적 화면 사용
   confirmed: { at: Date; how: 'self' | 'auto' } | null; // 이미 확정했으면

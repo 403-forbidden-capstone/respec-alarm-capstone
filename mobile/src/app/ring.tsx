@@ -29,11 +29,13 @@ const SNOOZE_MINUTES = [5, 10, 15] as const;
 export default function RingScreen() {
   const params = useLocalSearchParams<{ alarm?: string; again?: string }>();
   const { data } = useLoad(() => getRing(params.alarm ?? 'a1:WAKE', params.again === '1'));
-  const kind: RingKind = data?.kind ?? 'WAKE';
+  // 읽는 동안에도 맞는 배경이 보이게 알람 id(<일정>:<종류>)의 종류를 먼저 씀
+  const fromId = params.alarm?.split(':')[1];
+  const kind: RingKind = data?.kind ?? (fromId && Object.keys(HEAD).includes(fromId) ? (fromId as RingKind) : 'WAKE');
   const [minutes, setMinutes] = useState<number>(5);
   const close = () => (router.canGoBack() ? router.back() : router.replace('/'));
 
-  // 미루기는 3번까지 (횟수는 알람 코어가 셈, #33)
+  // 미루기는 3번까지 — 횟수는 #33에서 알람 코어가 셀 예정 (지금 코어는 안 셈, docs/alarm-core.md)
   function snooze() {
     toast(`${minutes}분 뒤 다시 울려요`);
     close();
@@ -72,7 +74,7 @@ export default function RingScreen() {
             ) : null}
           </View>
 
-          <Text variant="body" tone="inverse" align="center" style={styles.head}>
+          <Text variant="bodyLarge" tone="inverse" align="center" style={styles.head}>
             {HEAD[kind]}
           </Text>
           <Text variant="ringTime" tone="inverse" align="center" style={styles.time}>
@@ -134,6 +136,18 @@ export default function RingScreen() {
             </View>
           </View>
         </View>
+      ) : data === null ? (
+        // 웹 미리 보기에서 알람 id가 틀렸거나 도착(울리지 않는 알림)일 때
+        <View style={styles.missing}>
+          <Text variant="body" tone="inverse" align="center">
+            울릴 알람을 찾을 수 없어요
+          </Text>
+          <Pressable onPress={close} accessibilityRole="button" style={[styles.button, styles.closeButton]}>
+            <Text variant="button" style={{ color: colors.ringWake }}>
+              닫기
+            </Text>
+          </Pressable>
+        </View>
       ) : null}
     </SafeAreaView>
   );
@@ -142,6 +156,8 @@ export default function RingScreen() {
 const styles = StyleSheet.create({
   screen: { flex: 1 },
   body: { flex: 1, paddingTop: 10, paddingHorizontal: 22, paddingBottom: 28 },
+  missing: { flex: 1, justifyContent: 'center', gap: 16, paddingHorizontal: 22 },
+  closeButton: { backgroundColor: colors.inverse },
   top: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', minHeight: 26 },
   chip: {
     height: 26,
@@ -151,7 +167,7 @@ const styles = StyleSheet.create({
     borderColor: colors.ringLine,
     justifyContent: 'center',
   },
-  head: { marginTop: 30, fontSize: 15, opacity: 0.8 },
+  head: { marginTop: 30, opacity: 0.8 },
   time: { marginTop: 4 },
   title: { marginTop: 14, marginBottom: 2 },
   voice: { marginTop: 22, backgroundColor: colors.ringPanel, borderRadius: 20, paddingVertical: 16, paddingHorizontal: 18 },

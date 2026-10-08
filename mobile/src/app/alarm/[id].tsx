@@ -77,13 +77,14 @@ function Detail({ appointment: a, reload, onBack }: { appointment: AppointmentDe
   const margin = a.predictedPrepMinutes - a.beforePrepMinutes - a.prepMinutes;
   const anyManual = AXES.some(([axis]) => a.intensity.axes[axis].manual);
 
-  function save() {
+  async function save() {
     if (buffer === a.bufferMinutes) {
       toast('바뀐 내용이 없어요');
       return;
     }
-    // 기존보다 5분 이상 바뀌면 한 번 더 확인
-    if (Math.abs(minutesBetween(before.at, first.at)) >= 5) setConfirm(true);
+    // 기존보다 5분 이상 바뀌면 한 번 더 확인 — 미리 보기가 늦게 올 수 있어(실데이터는 서버 계산) 저장할 때 다시 계산한 값으로 비교
+    const next = (await previewAlarms(a.id, buffer))[0] ?? first;
+    if (Math.abs(minutesBetween(before.at, next.at)) >= 5) setConfirm(true);
     else apply();
   }
 
@@ -116,7 +117,7 @@ function Detail({ appointment: a, reload, onBack }: { appointment: AppointmentDe
 
   return (
     <Screen>
-      <TopBar onBack={onBack} />
+      <TopBar onBack={onBack} screenId="H03" />
       <Text variant="title" style={styles.title}>
         알람 설정
       </Text>
@@ -203,11 +204,11 @@ function Detail({ appointment: a, reload, onBack }: { appointment: AppointmentDe
             <View key={axis}>
               <View style={styles.axis}>
                 <View style={styles.axisName}>
-                  <Text variant="body" tone="sub" style={styles.axisLabel}>
+                  <Text variant="rowLabel" tone="sub">
                     {name}
                   </Text>
                   {manual ? (
-                    <Text variant="caption" tone="sub" style={styles.manual}>
+                    <Text variant="tiny" tone="sub" style={styles.manual}>
                       직접 고름
                     </Text>
                   ) : null}
@@ -263,8 +264,7 @@ const styles = StyleSheet.create({
   timeRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   axis: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 12 },
   axisName: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  axisLabel: { fontSize: 13.5 },
-  manual: { backgroundColor: colors.chip, borderRadius: 8, paddingHorizontal: 6, fontSize: 11, overflow: 'hidden' },
+  manual: { backgroundColor: colors.chip, borderRadius: 8, paddingHorizontal: 6, overflow: 'hidden' },
   axisDesc: { marginTop: 4 },
   note: { marginTop: 10 },
   reset: { marginTop: 6, alignSelf: 'flex-start' },
