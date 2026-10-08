@@ -1,4 +1,5 @@
 // 내 프로필 — 데이터 접근은 이 파일에서만 함 (docs/screen-data-map.md 로그인 · 온보딩)
+import { UserError } from '@/lib/errors';
 import { supabase } from '@/lib/supabase';
 
 import type { OnboardingInput, Profile } from './types';
@@ -53,7 +54,7 @@ export async function resetOnboarding(userId: string): Promise<void> {
     .select('user_id');
   if (error) throw error;
   // RLS에 막히거나 다른 사용자면 오류 없이 0행 — 비운 줄 알고 넘어가지 않게
-  if (!data?.length) throw new Error('내 프로필을 바꾸지 못했어요');
+  if (!data?.length) throw new UserError('내 프로필을 바꾸지 못했어요');
 }
 
 // 온보딩 저장 — 아이디 중복이면 DB 유일 제약(23505)이 막음
@@ -65,7 +66,7 @@ export async function saveOnboarding(userId: string, input: OnboardingInput): Pr
     .select(COLUMNS)
     .single();
   if (error) {
-    if (error.code === '23505') throw new Error('이미 쓰는 아이디예요');
+    if (error.code === '23505') throw new UserError('이미 쓰는 아이디예요');
     throw error;
   }
   return data as Profile;

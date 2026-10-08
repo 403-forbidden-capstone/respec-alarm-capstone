@@ -5,6 +5,7 @@ import { Button, Card, Field, Screen, SectionHeader, Segmented, Stepper, Text } 
 import { useAuth } from '@/features/auth/AuthProvider';
 import { isHandleTaken, saveOnboarding } from '@/features/profile/api';
 import { HANDLE_PATTERN, type TransportType } from '@/features/profile/types';
+import { userMessage } from '@/lib/errors';
 
 const TRANSPORTS = [
   ['TRANSIT', '대중교통'],
@@ -52,7 +53,7 @@ export default function OnboardingScreen() {
       });
       await refreshProfile();
     } catch (e) {
-      setError(e instanceof Error ? e.message : '저장하지 못했어요');
+      setError(userMessage(e, '저장하지 못했어요'));
     } finally {
       setSaving(false);
     }
