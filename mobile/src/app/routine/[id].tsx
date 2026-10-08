@@ -11,7 +11,7 @@ import { StepEditor } from '@/features/routine/components/StepEditor';
 import { addStep, canSave, moveStep, removeStep, savedMessage, stepTimes, toggleDay, updateStep } from '@/features/routine/draft';
 import type { Routine } from '@/features/routine/types';
 import { useLoad } from '@/lib/useLoad';
-import { userMessage } from '@/lib/errors';
+import { useAction } from '@/lib/useAction';
 
 // A04 루틴 편집 — 일기(A03)의 루틴 제안을 내 생활에 맞게 고쳐 저장 (저장해야 루틴 · 단계 알람이 생김)
 // /routine/new?journal=2025-05-22 = 그 일기의 제안으로 만든 초안, /routine/r2 = 저장한 루틴
@@ -43,26 +43,20 @@ export default function RoutineScreen() {
 function RoutineEditor({ initial, onBack }: { initial: Routine; onBack?: () => void }) {
   const [routine, setRoutine] = useState(initial);
   const [editing, setEditing] = useState<string | null>(null); // 편집 시트를 연 단계
-  const [saving, setSaving] = useState(false); // 두 번 눌러도 루틴이 한 벌만 생기게
+  const { busy: saving, run: runSave } = useAction(); // 두 번 눌러도 루틴이 한 벌만 생기게
   const times = stepTimes(routine);
   const index = routine.steps.findIndex((s) => s.id === editing);
   const step = index >= 0 ? routine.steps[index] : null;
 
-  // 저장 — 제안에서 왔으면 일기로 돌아감. 주소로 바로 열었으면 저장한 루틴 주소로 바꿈
-  async function save() {
-    if (saving) return;
-    setSaving(true);
-    try {
+  // 저장 — 제안에서 왔으면 일기로 돌아감. 주소로 바로 열었으면 저장한 루틴 주소로 바꿈. 한 번에 하나씩, 실패하면 토스트 (lib/useAction)
+  const save = () =>
+    runSave(async () => {
       const saved = await saveRoutine(routine);
       toast(savedMessage(saved));
       if (router.canGoBack()) router.back();
       else if (saved.id) router.replace({ pathname: '/routine/[id]', params: { id: saved.id } });
-    } catch (e) {
-      toast(userMessage(e, '루틴을 저장하지 못했어요'));
-    } finally {
-      setSaving(false);
-    }
-  }
+    });
+
 
   function removeEditing() {
     if (!step) return;
