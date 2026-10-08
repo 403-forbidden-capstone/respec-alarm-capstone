@@ -6,6 +6,7 @@ import { now } from '@/lib/clock';
 import { addMinutes, dateParts, isSameDay, startOfDay } from '@/lib/format';
 import { alarmChain } from '@/mocks/calc';
 import { db, kst, lastWeekAverageWake, pastWakes, TODAY } from '@/mocks/data';
+import { UserError } from '@/lib/errors';
 
 import { leadingBlanks, monthDays, monthTitle, weekDays, weekRelative, weekTitle } from './calendar';
 import type { DayMark, DayRecord, MonthRecord, Suggestion, WeekRecord, WeekSummary } from './types';
@@ -152,20 +153,21 @@ export async function applySuggestion(id: string, minutes: number) {
   const s = db.suggestion;
   const a = db.appointments.find((x) => x.id === s.appointmentId);
   // 거절은 한국어 이유로 던짐 — 화면이 토스트로 보여 주고 성공 안내는 안 띄움
-  if (s.id !== id || !a) throw new Error('제안을 찾을 수 없어요');
-  if (minutes <= 0) throw new Error('앞당길 시간을 골라 주세요'); // 화면도 0분이면 버튼을 끔
-  if (s.status === 'APPLIED' || s.status === 'EDITED') throw new Error('이미 적용한 제안이에요');
+  if (s.id !== id || !a) throw new UserError('제안을 찾을 수 없어요');
+  if (minutes <= 0) throw new UserError('앞당길 시간을 골라 주세요'); // 화면도 0분이면 버튼을 끔
+  if (s.status === 'APPLIED' || s.status === 'EDITED') throw new UserError('이미 적용한 제안이에요');
   a.predictedPrepMinutes += minutes;
   s.appliedMinutes = minutes;
   s.status = minutes === s.minutes ? 'APPLIED' : 'EDITED';
   db.events.push({ at: now(), label: `알람 조정 수락 · ${minutes}분 앞당김`, source: '직접 입력' });
 }
 
-// 이전 값으로 되돌리기 — 제안은 다시 기다림으로 (목업 A.sugUndo)
+// 이전 값으로 되돌리기 — 제안은 다시 기다림으로 (목업 A.sugUndo). 적용한 제안이 아니면 거절
 export async function undoSuggestion(id: string) {
   const s = db.suggestion;
   const a = db.appointments.find((x) => x.id === s.appointmentId);
-  if (s.id !== id || !a || (s.status !== 'APPLIED' && s.status !== 'EDITED')) return;
+  if (s.id !== id || !a) throw new UserError('제안을 찾을 수 없어요');
+  if (s.status !== 'APPLIED' && s.status !== 'EDITED') throw new UserError('적용한 제안만 되돌릴 수 있어요');
   a.predictedPrepMinutes -= s.appliedMinutes;
   s.appliedMinutes = 0;
   s.status = 'PENDING';
@@ -174,9 +176,13 @@ export async function undoSuggestion(id: string) {
 
 // 이번 제안 무시 — 같은 종류 제안은 당분간 다시 만들지 않음 (suppress_until)
 export async function ignoreSuggestion(id: string) {
-  if (db.suggestion.id === id) db.suggestion.status = 'IGNORED';
+  if (db.suggestion.id !== id) throw new UserError('제안을 찾을 수 없어요');
+  if (db.suggestion.status !== 'PENDING') throw new UserError('기다리는 제안만 무시할 수 있어요');
+  db.suggestion.status = 'IGNORED';
 }
 
 export async function reopenSuggestion(id: string) {
-  if (db.suggestion.id === id && db.suggestion.status === 'IGNORED') db.suggestion.status = 'PENDING';
+  if (db.suggestion.id !== id) throw new UserError('제안을 찾을 수 없어요');
+  if (db.suggestion.status !== 'IGNORED') throw new UserError('무시한 제안만 다시 볼 수 있어요');
+  db.suggestion.status = 'PENDING';
 }

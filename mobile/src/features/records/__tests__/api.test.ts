@@ -122,6 +122,14 @@ describe('S01 알람 조정 제안', () => {
     expect(db.events.at(-1)?.label).toBe('알람 조정 되돌림');
   });
 
+  it('상태에 맞지 않는 되돌리기 · 무시 · 다시 보기는 이유와 함께 거절', async () => {
+    await expect(undoSuggestion('s1')).rejects.toThrow('적용한 제안만 되돌릴 수 있어요');
+    await expect(reopenSuggestion('s1')).rejects.toThrow('무시한 제안만 다시 볼 수 있어요');
+    await applySuggestion('s1', 10);
+    await expect(ignoreSuggestion('s1')).rejects.toThrow('기다리는 제안만 무시할 수 있어요');
+    await undoSuggestion('s1');
+  });
+
   it('0분으로는 적용되지 않음', async () => {
     await expect(applySuggestion('s1', 0)).rejects.toThrow('앞당길 시간을 골라 주세요');
     expect((await getSuggestion('s1'))?.status).toBe('PENDING');
