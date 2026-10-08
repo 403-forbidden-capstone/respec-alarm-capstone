@@ -1,11 +1,11 @@
 import { router, useLocalSearchParams } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { Text, toast } from '@/components/ui';
-import { getRing } from '@/features/alarm/api';
+import { dismissRing, getRing, snoozeRing, startRing } from '@/features/alarm/api';
 import { VoiceWave } from '@/features/alarm/components/VoiceWave';
 import type { RingKind } from '@/features/alarm/types';
 import { formatTime, timeParts } from '@/lib/format';
@@ -28,27 +28,40 @@ const SNOOZE_MINUTES = [5, 10, 15] as const;
 // 이 화면은 디자인 · 웹 미리 보기용: /ring?alarm=a1:WAKE (again=1이면 기상 확인 실패 뒤 다시 울림)
 export default function RingScreen() {
   const params = useLocalSearchParams<{ alarm?: string; again?: string }>();
-  const { data } = useLoad(() => getRing(params.alarm ?? 'a1:WAKE', params.again === '1'));
+  const { data } = useLoad(async () => {
+    const ring = await getRing(params.alarm ?? 'a1:WAKE', params.again === '1');
+    // 기상 알람이면 홈 · 그룹의 내 상태가 '알람 울리는 중'
+    if (ring) await startRing(ring.alarmId, ring.at);
+    return ring;
+  });
   // 읽는 동안에도 맞는 배경이 보이게 알람 id(<일정>:<종류>)의 종류를 먼저 씀
   const fromId = params.alarm?.split(':')[1];
   const kind: RingKind = data?.kind ?? (fromId && Object.keys(HEAD).includes(fromId) ? (fromId as RingKind) : 'WAKE');
   const [minutes, setMinutes] = useState<number>(5);
   const close = () => (router.canGoBack() ? router.back() : router.replace('/'));
+  const handled = useRef(false); // 두 번 눌러도 해제 · 미루기는 한 번만 기록
 
   // 미루기는 3번까지 — 횟수는 #33에서 알람 코어가 셀 예정 (지금 코어는 안 셈, docs/alarm-core.md)
-  function snooze() {
+  async function snooze() {
+    if (!data || handled.current) return;
+    handled.current = true;
+    await snoozeRing(data.alarmId);
     toast(`${minutes}분 뒤 다시 울려요`);
     close();
   }
 
   // 기상 알람을 끄면 기상 확인(H08)으로, 준비 · 출발은 안내만
-  function dismiss() {
-    if (kind === 'WAKE') {
-      router.replace({ pathname: '/wake', params: { alarm: data?.alarmId ?? 'a1:WAKE' } });
+  // 끈 시각 = 지금 울리는 시각 (다시 울림이면 그 시각) — 기상 확인이 이 시각부터 10분을 봄
+  async function dismiss() {
+    if (!data || handled.current) return;
+    handled.current = true;
+    await dismissRing(data.alarmId, data.at);
+    if (data.kind === 'WAKE') {
+      router.replace({ pathname: '/wake', params: { alarm: data.alarmId } });
       return;
     }
-    if (kind === 'PREPARE') {
-      const items = data?.appointment.items ?? [];
+    if (data.kind === 'PREPARE') {
+      const items = data.appointment.items;
       toast(items.length ? `준비물: ${items.join(', ')}` : '준비를 시작해요');
     } else {
       toast('집을 벗어나면 출발이 자동으로 기록돼요');
