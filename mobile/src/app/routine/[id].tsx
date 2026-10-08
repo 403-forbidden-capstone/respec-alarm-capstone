@@ -12,13 +12,14 @@ import { addStep, canSave, moveStep, removeStep, savedMessage, stepTimes, toggle
 import type { Routine } from '@/features/routine/types';
 import { useLoad } from '@/lib/useLoad';
 import { useAction } from '@/lib/useAction';
+import { backOrHome } from '@/lib/nav';
 
 // A04 루틴 편집 — 일기(A03)의 루틴 제안을 내 생활에 맞게 고쳐 저장 (저장해야 루틴 · 단계 알람이 생김)
 // /routine/new?journal=2025-05-22 = 그 일기의 제안으로 만든 초안, /routine/r2 = 저장한 루틴
 export default function RoutineScreen() {
   const { id, journal } = useLocalSearchParams<{ id: string; journal?: string }>();
   const { data } = useLoad(() => getRoutine(id, journal));
-  const back = router.canGoBack() ? router.back : undefined;
+  const back = backOrHome; // 앞 화면이 없으면(주소로 바로 열기) 홈으로
 
   if (data === undefined) {
     return (
@@ -30,7 +31,7 @@ export default function RoutineScreen() {
   if (data === null) {
     return (
       <Screen>
-        <TopBar onBack={back} screenId={back ? undefined : 'A04'} />
+        <TopBar onBack={back} screenId="A04" />
         <Text variant="body" tone="sub">
           편집할 루틴이 없어요.
         </Text>
@@ -55,8 +56,7 @@ function RoutineEditor({ initial, onBack }: { initial: Routine; onBack?: () => v
       toast(savedMessage(saved));
       if (router.canGoBack()) router.back();
       else if (saved.id) router.replace({ pathname: '/routine/[id]', params: { id: saved.id } });
-    });
-
+    }, '루틴을 저장하지 못했어요');
 
   function removeEditing() {
     if (!step) return;
