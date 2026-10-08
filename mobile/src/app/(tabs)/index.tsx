@@ -128,7 +128,7 @@ export default function HomeScreen() {
       ) : null}
 
       {!evening && group ? (
-        <Card onPress={() => openGroupDetail(group.id)}>
+        <Card onPress={() => openGroupDetail(group.id, 'tab')}>
           <View style={styles.group}>
             <View style={styles.avatars}>
               {group.members.map(({ person, state }, i) => (
