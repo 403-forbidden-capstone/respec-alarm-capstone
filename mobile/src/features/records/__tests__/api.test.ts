@@ -54,11 +54,17 @@ describe('R02 주간', () => {
   });
 
   it('실제로 일어난 일은 시각순 (넣은 순서와 상관없이)', async () => {
-    db.events.push({ at: kst(22, 7 * 60), label: '이른 기록', source: '테스트' });
-    const d = await getDay(kst(22, 0));
-    const times = d.actual.map((e) => e.at.getTime());
-    expect(times).toEqual([...times].sort((x, y) => x - y));
-    db.events.pop();
+    const before = db.events.length;
+    db.events.push(
+      { at: kst(22, 9 * 60), label: '늦은 기록', source: '테스트' },
+      { at: kst(22, 7 * 60), label: '이른 기록', source: '테스트' },
+    );
+    try {
+      const d = await getDay(kst(22, 0));
+      expect(d.actual.map((e) => e.label).slice(-2)).toEqual(['이른 기록', '늦은 기록']);
+    } finally {
+      db.events.length = before;
+    }
   });
 
   it('일간은 받은 날짜로 — 목업에 없는 날은 빈 기록', async () => {
