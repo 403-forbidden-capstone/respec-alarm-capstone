@@ -21,13 +21,12 @@ export default function SharedAlarmsScreen() {
   const { data, error, reload } = useLoad(() => getSharedAlarms(id));
   const { run } = useAction();
   const [log, setLog] = useState<ShareLogItem[] | null>(null);
-  const back = backOrHome; // 앞 화면이 없으면(주소로 바로 열기) 홈으로
 
   async function openLog() {
     setLog(await getShareLog());
   }
 
-  const top = <TopBar onBack={back} screenId="G04" right={<TextLink label="변경 기록" onPress={openLog} />} />;
+  const top = <TopBar onBack={backOrHome} screenId="G04" right={<TextLink label="변경 기록" onPress={openLog} />} />;
   const logSheet = (
     <Sheet visible={log != null} onClose={() => setLog(null)} title="변경 기록">
       {log?.length ? (
