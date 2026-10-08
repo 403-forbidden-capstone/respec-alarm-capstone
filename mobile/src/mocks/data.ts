@@ -127,6 +127,8 @@ export const db = {
     phase: 'idle' as WakePhase,
     ringAt: null as Date | null, // 울린 시각 (다시 울림이면 그 시각)
     dismissedAt: null as Date | null, // 실제로 끈 시각
+    usage: 0, // 누적 사용 · 해제 후 10분 (분) — 지금은 시연 값 (목업 S.wake.usage)
+    recent: 0, // 최근 사용 · 뒤쪽 5분 (분)
   },
   wakeConfirmations: {} as Record<string, { at: Date; how: 'self' | 'auto' }>, // 알람 id별 기상 확정
   events: [] as { at: Date; label: string; source: string }[], // 오늘 실제로 일어난 일

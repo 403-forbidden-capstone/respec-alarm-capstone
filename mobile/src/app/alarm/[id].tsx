@@ -1,4 +1,4 @@
-import { router, useLocalSearchParams } from 'expo-router';
+import { useLocalSearchParams } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
@@ -25,6 +25,7 @@ import {
   type Level,
 } from '@/features/alarm/types';
 import { formatDateShort, formatTime, minutesBetween } from '@/lib/format';
+import { backOrHome } from '@/lib/nav';
 import { useLoad } from '@/lib/useLoad';
 import { colors } from '@/theme';
 
@@ -34,29 +35,28 @@ const LEVEL_OPTIONS = LEVELS.map((l, i) => [i as Level, l.name] as const);
 export default function AlarmDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { data, reload } = useLoad(() => getAppointment(id));
-  const back = router.canGoBack() ? router.back : undefined;
 
   if (data === undefined) {
     return (
       <Screen>
-        <TopBar onBack={back} />
+        <TopBar onBack={backOrHome} />
       </Screen>
     );
   }
   if (data === null) {
     return (
       <Screen>
-        <TopBar onBack={back} />
+        <TopBar onBack={backOrHome} />
         <Text variant="body" tone="sub">
           일정을 찾을 수 없어요.
         </Text>
       </Screen>
     );
   }
-  return <Detail key={data.id} appointment={data} reload={reload} onBack={back} />;
+  return <Detail key={data.id} appointment={data} reload={reload} />;
 }
 
-function Detail({ appointment: a, reload, onBack }: { appointment: AppointmentDetail; reload: () => void; onBack?: () => void }) {
+function Detail({ appointment: a, reload }: { appointment: AppointmentDetail; reload: () => void }) {
   const [buffer, setBuffer] = useState(a.bufferMinutes);
   const [preview, setPreview] = useState<AlarmTime[]>(a.alarms);
   const [confirm, setConfirm] = useState(false);
@@ -117,7 +117,7 @@ function Detail({ appointment: a, reload, onBack }: { appointment: AppointmentDe
 
   return (
     <Screen>
-      <TopBar onBack={onBack} screenId="H03" />
+      <TopBar onBack={backOrHome} screenId="H03" />
       <Text variant="title" style={styles.title}>
         알람 설정
       </Text>
