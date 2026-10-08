@@ -144,5 +144,7 @@ export type WakeCheck = {
   phase: 'observing' | 'prompt'; // 확정 전 단계 (확정이면 confirmed)
   dismissedAt: Date; // 기상 알람을 실제로 끈 시각 (다시 울린 뒤 끄면 그 시각)
   thetaMinutes: number; // 기상 판정 기준 θ — 해제 뒤 10분 동안 누적 화면 사용
+  usage: number; // 누적 사용 · 해제 후 10분 (분) — 지금은 시연 값, 실데이터는 #35 · #40
+  recent: number; // 최근 사용 · 뒤쪽 5분 (분)
   confirmed: { at: Date; how: 'self' | 'auto' } | null; // 이미 확정했으면
 };
