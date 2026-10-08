@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
-import { Card, Screen, Segmented, Text, Timeline, toast, TopBar, type TimelineItem } from '@/components/ui';
+import { Card, LoadError, Screen, Segmented, Text, Timeline, toast, TopBar, type TimelineItem } from '@/components/ui';
 import { getDay, getMonth, getWeek, recordToday, weekEmptyText } from '@/features/records/api';
 import { shiftMonth, weekStart } from '@/features/records/calendar';
 import { MonthCalendar } from '@/features/records/components/MonthCalendar';
@@ -92,8 +92,8 @@ type MonthProps = {
 
 // 월간 — 달력 + 오늘 기록 카드. 달이 바뀌면 key가 바뀌어 새로 읽음
 function MonthSection({ year, month, onPrev, onNext, onPressDay, onOpenToday }: MonthProps) {
-  const { data } = useLoad(() => getMonth(year, month));
-  if (!data) return null;
+  const { data, error, reload } = useLoad(() => getMonth(year, month));
+  if (!data) return error ? <LoadError onRetry={reload} /> : null;
   const today = dateParts(data.today.date);
 
   return (
@@ -121,8 +121,8 @@ function MonthSection({ year, month, onPrev, onNext, onPressDay, onOpenToday }: 
 
 // 주간 — 날짜 줄 + 평균 기상 · 목표 기상률 · 날마다 실행 점수 · AI 코칭. 주가 바뀌면 key가 바뀌어 새로 읽음
 function WeekSection({ anyDay, onPrev, onNext }: { anyDay: Date; onPrev: () => void; onNext: () => void }) {
-  const { data } = useLoad(() => getWeek(anyDay));
-  if (!data) return null;
+  const { data, error, reload } = useLoad(() => getWeek(anyDay));
+  if (!data) return error ? <LoadError onRetry={reload} /> : null;
 
   return (
     <>
@@ -183,8 +183,8 @@ function Stat({ label, value, sub }: { label: string; value: string; sub: string
 
 // 일간 — 그날 설정한 알람 · 실제로 일어난 일 (마지막 줄이 지금)
 function DaySection({ date }: { date: Date }) {
-  const { data } = useLoad(() => getDay(date));
-  if (!data) return null;
+  const { data, error, reload } = useLoad(() => getDay(date));
+  if (!data) return error ? <LoadError onRetry={reload} /> : null;
   const { month, day } = dateParts(data.date);
 
   return (

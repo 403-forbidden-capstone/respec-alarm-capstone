@@ -2,7 +2,7 @@ import { useLocalSearchParams } from 'expo-router';
 import { useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
-import { Button, Card, Screen, Sheet, Text, toast, TopBar, TopBarButton } from '@/components/ui';
+import { Button, Card, LoadError, Screen, Sheet, Text, toast, TopBar, TopBarButton } from '@/components/ui';
 import { applySuggestion, getSuggestion, ignoreSuggestion, reopenSuggestion, undoSuggestion } from '@/features/records/api';
 import { dayWord } from '@/features/records/calendar';
 import { CompareTimes } from '@/features/records/components/CompareTimes';
@@ -18,30 +18,30 @@ import { useLoad } from '@/lib/useLoad';
 // 적용하면 그 일정의 예측 준비가 늘어 기상 · 준비 알람이 같이 앞당겨짐 (실제 저장 · 다시 예약은 #49)
 export default function SuggestionScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
-  const { data, reload } = useLoad(() => getSuggestion(id));
-  const back = backOrHome; // 앞 화면이 없으면(주소로 바로 열기) 홈으로
+  const { data, error, reload } = useLoad(() => getSuggestion(id));
 
   if (data === undefined) {
     return (
       <Screen>
-        <TopBar onBack={back} />
+        <TopBar screenId="S01" onBack={backOrHome} />
+        {error ? <LoadError onRetry={reload} /> : null}
       </Screen>
     );
   }
   if (data === null) {
     return (
       <Screen>
-        <TopBar screenId="S01" onBack={back} />
+        <TopBar screenId="S01" onBack={backOrHome} />
         <Text variant="body" tone="sub">
           제안을 찾을 수 없어요.
         </Text>
       </Screen>
     );
   }
-  return <Detail suggestion={data} reload={reload} onBack={back} />;
+  return <Detail suggestion={data} reload={reload} />;
 }
 
-function Detail({ suggestion: s, reload, onBack }: { suggestion: Suggestion; reload: () => Promise<boolean>; onBack?: () => void }) {
+function Detail({ suggestion: s, reload }: { suggestion: Suggestion; reload: () => Promise<boolean> }) {
   const [editing, setEditing] = useState<number | null>(null); // 직접 수정 시트에서 고른 앞당김(분), 닫혀 있으면 null
   // 버튼은 한 번에 하나씩, 다시 읽기가 끝날 때까지 잠금 — 연타 · 옛 화면에서 다시 누르기를 막음 (lib/useAction)
   const { busy, run: act } = useAction();
@@ -78,7 +78,8 @@ function Detail({ suggestion: s, reload, onBack }: { suggestion: Suggestion; rel
 
   return (
     <Screen>
-      <TopBar screenId="S01" onBack={onBack} />
+      {/* 앞 화면이 없으면(주소로 바로 열기) 홈으로 */}
+      <TopBar screenId="S01" onBack={backOrHome} />
       <Text variant="title" style={styles.title}>
         다음 알람을 조정할까요?
       </Text>
