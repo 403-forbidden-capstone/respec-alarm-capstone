@@ -1,7 +1,7 @@
 import { router, useLocalSearchParams } from 'expo-router';
 import { StyleSheet, View } from 'react-native';
 
-import { Avatar, Card, Chip, Screen, SectionHeader, Text, toast, TopBar } from '@/components/ui';
+import { Avatar, Card, Chip, LoadError, Screen, SectionHeader, Text, toast, TopBar } from '@/components/ui';
 import { IMPORTANCE_LABEL } from '@/features/alarm/types';
 import { TextLink } from '@/features/alarm/components/TextLink';
 import { getGroup } from '@/features/social/api';
@@ -16,13 +16,14 @@ import { useLoad } from '@/lib/useLoad';
 // 멤버의 기상 확인(G03) · 알람 보기(G04)는 그 사람에게 받은 권한(친구 · 그룹 합집합)이 있을 때만 누름
 export default function GroupDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
-  const { data } = useLoad(() => getGroup(id));
+  const { data, error, reload } = useLoad(() => getGroup(id));
   const back = router.canGoBack() ? router.back : undefined;
 
   if (data === undefined) {
     return (
       <Screen>
         <TopBar onBack={back} screenId="G02" />
+        {error ? <LoadError onRetry={reload} /> : null}
       </Screen>
     );
   }

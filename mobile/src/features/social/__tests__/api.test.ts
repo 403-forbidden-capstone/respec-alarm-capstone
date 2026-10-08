@@ -40,7 +40,9 @@ describe('F02 친구 권한', () => {
     expect(grant?.final.count).toBe(3);
   });
 
-  it('모르는 사람이면 null', async () => {
+  it('모르는 사람 · 친구가 아닌 그룹원 · 나는 null', async () => {
     expect(await getFriendGrant('nobody')).toBeNull();
+    expect(await getFriendGrant('mom')).toBeNull();
+    expect(await getFriendGrant('me')).toBeNull();
   });
 });

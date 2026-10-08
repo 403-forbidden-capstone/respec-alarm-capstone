@@ -131,11 +131,11 @@ export async function getGroup(groupId: string): Promise<GroupDetail | null> {
   };
 }
 
-// 친구 권한 (F02) — 이 친구가 내 정보에 대해 가진 최종 권한과 출처. 모르는 사람이면 null
+// 친구 권한 (F02) — 이 친구가 내 정보에 대해 가진 최종 권한과 출처. 친구가 아니면 null (그룹원 · 나를 주소로 열어도)
 export async function getFriendGrant(
   personId: string,
 ): Promise<{ person: Person; final: FinalGrant; groupCount: number } | null> {
-  if (!people[personId]) return null;
+  if (!db.friends.includes(personId)) return null;
   return {
     person: person(personId),
     final: givenTo(personId),
@@ -231,9 +231,10 @@ export async function getSharedAlarms(personId: string): Promise<SharedAlarms | 
   const alarms = memberAlarms[personId];
   if (!alarms) return null;
   const received = receivedFrom(personId);
+  // 조회가 없으면 설정도 못 쓰므로 설정 꼬리표도 뺌 ("조회 권한이 없어요"와 엇갈리지 않게)
   const tags = received.rows.flatMap((r) => [
     ...(r.viewAlarm ? [`조회 · ${r.source}`] : []),
-    ...(r.editAlarm ? [`설정 · ${r.source}`] : []),
+    ...(r.editAlarm && received.viewAlarm ? [`설정 · ${r.source}`] : []),
   ]);
   return {
     person: person(personId),

@@ -2,7 +2,7 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
-import { Avatar, Button, Card, Chip, Screen, Segmented, Sheet, Text, toast, Toggle, TopBar } from '@/components/ui';
+import { Avatar, Button, Card, Chip, LoadError, Screen, Segmented, Sheet, Text, toast, Toggle, TopBar } from '@/components/ui';
 import { TextLink } from '@/features/alarm/components/TextLink';
 import {
   getFriendGrant,
@@ -19,6 +19,7 @@ import { parseRelation, permissionNames, togglePermission } from '@/features/soc
 import { PERMISSIONS, type PermissionSet, type Relation, type RelationId } from '@/features/social/types';
 import { useLoad } from '@/lib/useLoad';
 import { colors } from '@/theme';
+import { useAction } from '@/lib/useAction';
 
 type Side = 'give' | 'recv';
 
@@ -31,7 +32,7 @@ const SIDES = [
 // 주소: /permissions?relation=group:cap · friend:sy. 없으면 첫 관계(그룹 먼저 — 목업 "권한 관리"는 캡스톤팀)
 export default function PermissionSettingsScreen() {
   const { relation: param } = useLocalSearchParams<{ relation?: string }>();
-  const { data: relations } = useLoad(listRelations);
+  const { data: relations, error, reload } = useLoad(listRelations);
   const [picked, setPicked] = useState<RelationId | null>(null);
   const [side, setSide] = useState<Side>('give');
   const [picking, setPicking] = useState(false);
@@ -51,7 +52,7 @@ export default function PermissionSettingsScreen() {
     </>
   );
 
-  if (!relations) return <Screen>{head}</Screen>;
+  if (!relations) return <Screen>{head}{error ? <LoadError onRetry={reload} /> : null}</Screen>;
   const wanted = picked ?? param ?? relations[0]?.id;
   const relation = relations.find((r) => r.id === wanted);
   if (!relation) {
@@ -135,16 +136,19 @@ function ShareEditor({
   draft: PermissionSet | null;
   onDraft: (set: PermissionSet | null) => void;
 }) {
-  const { data: saved, reload } = useLoad(() => getShareSettings(relation.id));
-  if (!saved) return null;
+  const { data: saved, error, reload } = useLoad(() => getShareSettings(relation.id));
+  const { busy, run } = useAction();
+  if (!saved) return error ? <LoadError onRetry={reload} /> : null;
   const current = draft ?? saved;
 
-  async function save() {
-    await saveShareSettings(relation.id, current);
-    onDraft(null);
-    reload();
-    toast(await savedMessage(relation));
-  }
+  // 바꾼 게 없으면 저장 버튼을 끔. 다시 읽기가 끝난 뒤 초안을 버려야 스위치가 예전 값으로 깜빡이지 않음
+  const save = () =>
+    run(async () => {
+      await saveShareSettings(relation.id, current);
+      await reload();
+      onDraft(null);
+      toast(await savedMessage(relation));
+    });
 
   return (
     <>
@@ -172,7 +176,7 @@ function ShareEditor({
         </Text>
       </Card>
       <View style={styles.stack}>
-        <Button label="변경사항 저장" onPress={save} />
+        <Button label="변경사항 저장" onPress={save} disabled={!draft || busy} />
       </View>
     </>
   );
@@ -195,8 +199,8 @@ async function savedMessage(relation: Relation) {
 
 // 받은 권한 — 이 관계에서 상대(그룹이면 멤버마다)가 나에게 준 권한
 function ReceivedList({ relationId }: { relationId: RelationId }) {
-  const { data } = useLoad(() => getReceived(relationId));
-  if (!data) return null;
+  const { data, error, reload } = useLoad(() => getReceived(relationId));
+  if (!data) return error ? <LoadError onRetry={reload} /> : null;
 
   return (
     <Card>

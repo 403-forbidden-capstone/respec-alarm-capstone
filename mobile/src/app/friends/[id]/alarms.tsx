@@ -2,7 +2,7 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
-import { Button, Card, Chip, Screen, Sheet, Text, Timeline, toast, TopBar } from '@/components/ui';
+import { Button, Card, Chip, LoadError, Screen, Sheet, Text, Timeline, toast, TopBar } from '@/components/ui';
 import { TextLink } from '@/features/alarm/components/TextLink';
 import { getShareLog, getSharedAlarms, setSharedAlarmEnabled, shiftSharedAlarm } from '@/features/social/api';
 import { MemberAlarmCard } from '@/features/social/components/MemberAlarmCard';
@@ -11,12 +11,14 @@ import type { ShareLogItem } from '@/features/social/types';
 import { formatTime } from '@/lib/format';
 import { useLoad } from '@/lib/useLoad';
 import { colors } from '@/theme';
+import { useAction } from '@/lib/useAction';
 
 // G04 공유받은 알람 — 친구 · 그룹원이 공유한 알람을 봄. 설정 권한이 있으면 켜기 · 끄기 · 5분 옮기기
 // 바꾸면 주인에게 알림(실데이터는 notify Edge Function), 변경 기록은 이번 실행 동안만 남음 (docs/decisions.md D9)
 export default function SharedAlarmsScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
-  const { data, reload } = useLoad(() => getSharedAlarms(id));
+  const { data, error, reload } = useLoad(() => getSharedAlarms(id));
+  const { run } = useAction();
   const [log, setLog] = useState<ShareLogItem[] | null>(null);
   const back = router.canGoBack() ? router.back : undefined;
 
@@ -40,7 +42,7 @@ export default function SharedAlarmsScreen() {
     </Sheet>
   );
 
-  if (data === undefined) return <Screen>{top}</Screen>;
+  if (data === undefined) return <Screen>{top}{error ? <LoadError onRetry={reload} /> : null}</Screen>;
   if (data === null) {
     return (
       <Screen>
@@ -55,17 +57,20 @@ export default function SharedAlarmsScreen() {
 
   const { person: p, canView, canEdit, tags, alarms } = data;
 
-  async function toggle(alarmId: string, next: boolean) {
-    await setSharedAlarmEnabled(p.id, alarmId, next);
-    toast(`${p.short}님에게 변경 알림을 보냈어요`);
-    reload();
-  }
+  // 연타해도 한 번씩 — 실데이터에선 "5분 앞당기기"를 두 번 누르면 두 번 옮겨질 수 있음
+  const toggle = (alarmId: string, next: boolean) =>
+    run(async () => {
+      await setSharedAlarmEnabled(p.id, alarmId, next);
+      toast(`${p.short}님에게 변경 알림을 보냈어요`);
+      await reload();
+    });
 
-  async function shift(alarmId: string, minutes: number) {
-    await shiftSharedAlarm(p.id, alarmId, minutes);
-    toast(`${p.short}님에게 변경 알림을 보냈어요`);
-    reload();
-  }
+  const shift = (alarmId: string, minutes: number) =>
+    run(async () => {
+      await shiftSharedAlarm(p.id, alarmId, minutes);
+      toast(`${p.short}님에게 변경 알림을 보냈어요`);
+      await reload();
+    });
 
   return (
     <Screen>
@@ -90,6 +95,11 @@ export default function SharedAlarmsScreen() {
         ) : null}
       </Card>
 
+      {canView && !alarms.length ? (
+        <Text variant="body" tone="sub">
+          공유된 알람이 없어요.
+        </Text>
+      ) : null}
       {alarms.map((a) => (
         <MemberAlarmCard
           key={a.id}

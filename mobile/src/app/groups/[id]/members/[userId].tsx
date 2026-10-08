@@ -1,24 +1,27 @@
 import { router, useLocalSearchParams } from 'expo-router';
 import { StyleSheet, View } from 'react-native';
 
-import { Button, Card, Screen, Text, Timeline, toast, TopBar } from '@/components/ui';
+import { Button, Card, LoadError, Screen, Text, Timeline, toast, TopBar } from '@/components/ui';
 import { getMemberWake, sendWakePing } from '@/features/social/api';
 import { MemberAlarmCard } from '@/features/social/components/MemberAlarmCard';
 import { Note } from '@/features/social/components/Note';
 import { formatTime } from '@/lib/format';
 import { useLoad } from '@/lib/useLoad';
+import { useAction } from '@/lib/useAction';
 
 // G03 그룹원 기상 상태 — 오늘 기상 알람 · 지금까지 일어난 일(시나리오 시각까지) · 깨우기 알림
 // 이 그룹 구성원이고 나에게 기상 조회 권한을 줬을 때만 보임 (api가 아니면 null)
 export default function MemberWakeScreen() {
   const { id, userId } = useLocalSearchParams<{ id: string; userId: string }>();
-  const { data } = useLoad(() => getMemberWake(id, userId));
+  const { data, error, reload } = useLoad(() => getMemberWake(id, userId));
+  const { run } = useAction();
   const back = router.canGoBack() ? router.back : undefined;
 
   if (data === undefined) {
     return (
       <Screen>
         <TopBar onBack={back} screenId="G03" />
+        {error ? <LoadError onRetry={reload} /> : null}
       </Screen>
     );
   }
@@ -35,10 +38,11 @@ export default function MemberWakeScreen() {
 
   const { person: p, groupName, alarm, timeline, firstAlarmAt } = data;
 
-  async function ping() {
-    await sendWakePing(p.id);
-    toast(`${p.short}님에게 깨우기 알림을 보냈어요`);
-  }
+  const ping = () =>
+    run(async () => {
+      await sendWakePing(p.id);
+      toast(`${p.short}님에게 깨우기 알림을 보냈어요`);
+    });
 
   return (
     <Screen>

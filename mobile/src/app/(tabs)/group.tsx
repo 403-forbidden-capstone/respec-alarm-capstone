@@ -2,7 +2,7 @@ import { router } from 'expo-router';
 import { useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
-import { Avatar, Button, Card, Chip, Screen, SectionHeader, Segmented, Text, toast, TopBar } from '@/components/ui';
+import { Avatar, Button, Card, Chip, LoadError, Screen, SectionHeader, Segmented, Text, toast, TopBar } from '@/components/ui';
 import { TextLink } from '@/features/alarm/components/TextLink';
 import { acceptFriend, listFriendRequests, listFriends, listGroups } from '@/features/social/api';
 import { ActionTile } from '@/features/social/components/ActionTile';
@@ -14,6 +14,7 @@ import { permissionNames } from '@/features/social/permissions';
 import type { FriendItem, GroupItem, Person } from '@/features/social/types';
 import { josa } from '@/lib/format';
 import { useLoad } from '@/lib/useLoad';
+import { useAction } from '@/lib/useAction';
 
 type Tab = 'friend' | 'group';
 
@@ -30,13 +31,15 @@ async function loadSocial() {
 // G01 친구와 그룹 — 친구 탭(목업 F01: 요청 수락 · 친구별 권한 수) · 그룹 탭(목업 G01: 참여 중인 그룹 · 오늘 기상 수)
 export default function GroupScreen() {
   const [tab, setTab] = useState<Tab>('friend');
-  const { data, reload } = useLoad(loadSocial);
+  const { data, error, reload } = useLoad(loadSocial);
+  const { run } = useAction();
 
-  async function accept(p: Person) {
-    await acceptFriend(p.id);
-    toast(`${p.name}님과 친구가 됐어요 · 공유는 아직 없어요`);
-    reload();
-  }
+  const accept = (p: Person) =>
+    run(async () => {
+      await acceptFriend(p.id);
+      toast(`${p.name}님과 친구가 됐어요 · 공유는 아직 없어요`);
+      await reload();
+    });
 
   return (
     <Screen>
@@ -52,6 +55,7 @@ export default function GroupScreen() {
       </Text>
       <Segmented options={TABS} value={tab} onChange={setTab} />
 
+      {!data && error ? <LoadError onRetry={reload} /> : null}
       {data && tab === 'friend' ? <FriendTab friends={data.friends} requests={data.requests} onAccept={accept} /> : null}
       {data && tab === 'group' ? <GroupTab groups={data.groups} /> : null}
     </Screen>

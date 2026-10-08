@@ -1,7 +1,7 @@
 import { router, useLocalSearchParams } from 'expo-router';
 import { StyleSheet, View } from 'react-native';
 
-import { Card, Chip, Screen, SectionHeader, Text, TopBar, TopBarButton } from '@/components/ui';
+import { Card, Chip, LoadError, Screen, SectionHeader, Text, TopBar, TopBarButton } from '@/components/ui';
 import { getFriendGrant } from '@/features/social/api';
 import { PermissionTable } from '@/features/social/components/PermissionTable';
 import { PERMISSIONS } from '@/features/social/types';
@@ -12,13 +12,14 @@ import { colors } from '@/theme';
 // 권한을 바꾸려면 공유 권한 설정(F03)에서 친구 관계를 고른 채로 엶
 export default function FriendPermissionScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
-  const { data } = useLoad(() => getFriendGrant(id));
+  const { data, error, reload } = useLoad(() => getFriendGrant(id));
   const back = router.canGoBack() ? router.back : undefined;
 
   if (data === undefined) {
     return (
       <Screen>
         <TopBar onBack={back} screenId="F02" />
+        {error ? <LoadError onRetry={reload} /> : null}
       </Screen>
     );
   }
