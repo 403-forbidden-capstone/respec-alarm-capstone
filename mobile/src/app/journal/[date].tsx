@@ -7,18 +7,17 @@ import { TextLink } from '@/features/alarm/components/TextLink';
 import { declineRoutineSuggestion, editJournal, getJournal } from '@/features/routine/api';
 import type { Journal } from '@/features/routine/types';
 import { dateParts, formatTime } from '@/lib/format';
+import { backOrHome } from '@/lib/nav';
+import { useAction } from '@/lib/useAction';
 import { useLoad } from '@/lib/useLoad';
 import { colors, typeScale } from '@/theme';
-import { useAction } from '@/lib/useAction';
-import { backOrHome } from '@/lib/nav';
 
 // A03 하루 기록 · 일기 — 기록된 사실만 골라 AI가 쓴 일기 · 오늘의 사실 · 회고 코칭 · 루틴 제안
 // 일기는 AI 대화(A02)를 마치면 생기고, 다시 마치면 다시 씀(고친 글 · 루틴 제안 응답은 그대로). AI 대기라 목업 문장틀로 씀
 export default function JournalScreen() {
   const { date } = useLocalSearchParams<{ date: string }>();
   const { data, reload } = useLoad(() => getJournal(date));
-  const back = backOrHome; // 앞 화면이 없으면(주소로 바로 열기) 홈으로
-  const top = <TopBar onBack={back} screenId="A03" />;
+  const top = <TopBar onBack={backOrHome} screenId="A03" />; // 앞 화면이 없으면(주소로 바로 열기) 홈으로
 
   if (data === undefined) return <Screen>{top}</Screen>;
   if (data === null) {
@@ -55,14 +54,14 @@ function JournalView({ journal: j, reload, top }: { journal: Journal; reload: ()
       setEditing(null);
       toast('일기를 저장했어요');
       await reload();
-    });
+    }, '일기를 저장하지 못했어요');
 
   const decline = () =>
     run(async () => {
       await declineRoutineSuggestion(j.recordDate);
       toast('알겠어요 · 14일 동안 같은 루틴은 제안하지 않아요');
       await reload();
-    });
+    }, '제안을 넘기지 못했어요');
 
   return (
     <Screen>

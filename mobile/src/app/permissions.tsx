@@ -39,11 +39,10 @@ export default function PermissionSettingsScreen() {
   const [picking, setPicking] = useState(false);
   // 저장 전 스위치 값 — 관계를 바꾸면 버림, 내가 공유 · 받은 권한을 오가도 남음 (목업 pDraft)
   const [draft, setDraft] = useState<{ id: RelationId; set: PermissionSet } | null>(null);
-  const back = backOrHome; // 앞 화면이 없으면(주소로 바로 열기) 홈으로
 
   const head = (
     <>
-      <TopBar onBack={back} screenId="F03" />
+      <TopBar onBack={backOrHome} screenId="F03" />
       <Text variant="title" style={styles.title}>
         공유 권한 설정
       </Text>

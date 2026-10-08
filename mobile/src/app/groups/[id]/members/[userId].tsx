@@ -16,12 +16,11 @@ export default function MemberWakeScreen() {
   const { id, userId } = useLocalSearchParams<{ id: string; userId: string }>();
   const { data, error, reload } = useLoad(() => getMemberWake(id, userId));
   const { run } = useAction();
-  const back = backOrHome; // 앞 화면이 없으면(주소로 바로 열기) 홈으로
 
   if (data === undefined) {
     return (
       <Screen>
-        <TopBar onBack={back} screenId="G03" />
+        <TopBar onBack={backOrHome} screenId="G03" />
         {error ? <LoadError onRetry={reload} /> : null}
       </Screen>
     );
@@ -29,7 +28,7 @@ export default function MemberWakeScreen() {
   if (data === null) {
     return (
       <Screen>
-        <TopBar onBack={back} screenId="G03" />
+        <TopBar onBack={backOrHome} screenId="G03" />
         <Text variant="body" tone="sub">
           기상 상태를 볼 수 없어요.
         </Text>
@@ -47,7 +46,7 @@ export default function MemberWakeScreen() {
 
   return (
     <Screen>
-      <TopBar onBack={back} screenId="G03" />
+      <TopBar onBack={backOrHome} screenId="G03" />
       <Text variant="title" style={styles.title}>
         {p.short}의 기상 상태
       </Text>

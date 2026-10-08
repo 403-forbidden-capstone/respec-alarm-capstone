@@ -9,9 +9,9 @@ import { ChatBubble, TypingBubble } from '@/features/voice/components/ChatBubble
 import { ChatComposer } from '@/features/voice/components/ChatComposer';
 import { FoundScheduleCard } from '@/features/voice/components/FoundScheduleCard';
 import { now } from '@/lib/clock';
-import { useLoad } from '@/lib/useLoad';
-import { useAction } from '@/lib/useAction';
 import { userMessage } from '@/lib/errors';
+import { useAction } from '@/lib/useAction';
+import { useLoad } from '@/lib/useLoad';
 
 const LISTEN_MS = 1100; // 말하기를 누른 뒤 듣는 시간 (목업 chatSpeak). AI가 답하는 시간은 api(say)가 기다림
 
@@ -23,8 +23,8 @@ export default function AiScreen() {
   const [draftText, setDraftText] = useState<string | null>(null); // 글 모드에서 고친 글 (null = 대본 문장 그대로)
   const [listening, setListening] = useState(false);
   const [thinking, setThinking] = useState(false); // 내 말을 보내고 AI 답을 기다리는 중
-  const [pendingText, setPendingText] = useState<string | null>(null);
-  const [pendingAt, setPendingAt] = useState<Date | null>(null); // 보낸 시각 — 렌더마다 now()가 바뀌지 않게 (실데이터 모드는 지금 시각) // 보낸 내 말 — 답을 기다리는 동안 먼저 보여 줌
+  const [pendingText, setPendingText] = useState<string | null>(null); // 보낸 내 말 — 답을 기다리는 동안 먼저 보여 줌
+  const [pendingAt, setPendingAt] = useState<Date | null>(null); // 보낸 시각 — 렌더마다 now()가 바뀌지 않게 (실데이터 모드는 지금 시각)
   // 카드 저장 · 완료 같은 버튼은 한 번에 하나씩, 다시 읽기가 끝날 때까지 — 실패하면 토스트 (lib/useAction)
   const { busy, run: act } = useAction();
   const scroll = useRef<ScrollView>(null);
