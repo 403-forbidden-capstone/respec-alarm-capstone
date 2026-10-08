@@ -10,38 +10,37 @@ import { RoutineStepRow } from '@/features/routine/components/RoutineStepRow';
 import { StepEditor } from '@/features/routine/components/StepEditor';
 import { addStep, canSave, moveStep, removeStep, savedMessage, stepTimes, toggleDay, updateStep } from '@/features/routine/draft';
 import type { Routine } from '@/features/routine/types';
-import { useLoad } from '@/lib/useLoad';
-import { useAction } from '@/lib/useAction';
 import { backOrHome } from '@/lib/nav';
+import { useAction } from '@/lib/useAction';
+import { useLoad } from '@/lib/useLoad';
 
 // A04 루틴 편집 — 일기(A03)의 루틴 제안을 내 생활에 맞게 고쳐 저장 (저장해야 루틴 · 단계 알람이 생김)
 // /routine/new?journal=2025-05-22 = 그 일기의 제안으로 만든 초안, /routine/r2 = 저장한 루틴
 export default function RoutineScreen() {
   const { id, journal } = useLocalSearchParams<{ id: string; journal?: string }>();
   const { data } = useLoad(() => getRoutine(id, journal));
-  const back = backOrHome; // 앞 화면이 없으면(주소로 바로 열기) 홈으로
 
   if (data === undefined) {
     return (
       <Screen>
-        <TopBar onBack={back} />
+        <TopBar onBack={backOrHome} screenId="A04" />
       </Screen>
     );
   }
   if (data === null) {
     return (
       <Screen>
-        <TopBar onBack={back} screenId="A04" />
+        <TopBar onBack={backOrHome} screenId="A04" />
         <Text variant="body" tone="sub">
           편집할 루틴이 없어요.
         </Text>
       </Screen>
     );
   }
-  return <RoutineEditor key={data.id ?? 'new'} initial={data} onBack={back} />;
+  return <RoutineEditor key={data.id ?? 'new'} initial={data} />;
 }
 
-function RoutineEditor({ initial, onBack }: { initial: Routine; onBack?: () => void }) {
+function RoutineEditor({ initial }: { initial: Routine }) {
   const [routine, setRoutine] = useState(initial);
   const [editing, setEditing] = useState<string | null>(null); // 편집 시트를 연 단계
   const { busy: saving, run: runSave } = useAction(); // 두 번 눌러도 루틴이 한 벌만 생기게
@@ -66,7 +65,7 @@ function RoutineEditor({ initial, onBack }: { initial: Routine; onBack?: () => v
 
   return (
     <Screen>
-      <TopBar onBack={onBack} screenId={onBack ? undefined : 'A04'} />
+      <TopBar onBack={backOrHome} screenId="A04" />
       <Text variant="title" style={styles.title}>
         {routine.title}
       </Text>
