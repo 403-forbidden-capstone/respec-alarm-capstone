@@ -31,7 +31,8 @@ export default function JournalScreen() {
             자기 전 AI 대화를 마치면 오늘 기록으로 일기를 만들어요.
           </Text>
           <View style={styles.stack}>
-            <Button label="AI 대화 하러 가기" onPress={() => router.navigate('/ai')} />
+            {/* 탭 루트로 돌아가 AI 탭을 엶 — 일기 화면은 기록에서 빠짐 (목업 A.tab, wake의 dismissTo와 같은 방식) */}
+            <Button label="AI 대화 하러 가기" onPress={() => router.dismissTo('/ai')} />
           </View>
         </Card>
       </Screen>
