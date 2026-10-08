@@ -6,6 +6,7 @@ import { listAppointments } from '@/features/alarm/api';
 import { AppointmentAlarmCard } from '@/features/alarm/components/AppointmentAlarmCard';
 import type { Appointment } from '@/features/alarm/types';
 import { dayKey, formatDate } from '@/lib/format';
+import { backOrHome } from '@/lib/nav';
 import { useLoad } from '@/lib/useLoad';
 
 // 날짜별로 묶음 (시각 순은 api가 맞춰 줌)
@@ -23,7 +24,7 @@ export default function AlarmsScreen() {
     <Screen>
       <TopBar
         screenId="H02"
-        onBack={router.canGoBack() ? router.back : undefined}
+        onBack={backOrHome}
         right={<TopBarButton label="+ 새 일정" onPress={() => router.push('/schedule/new')} />}
       />
       <Text variant="title" style={styles.title}>
