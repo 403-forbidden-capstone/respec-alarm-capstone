@@ -18,7 +18,7 @@ export function TimeRow({ label, value, onChange, first }: Props) {
   const [open, setOpen] = useState(false);
   const minutes = minuteOfDay(value);
   const hour = Math.floor(minutes / 60);
-  const minute = minutes % 60;
+  const minute = Math.floor((minutes % 60) / 5) * 5; // 5분 단위가 아닌 값(대화에서 찾은 14:07 등)은 시트에서 5분 단위로 내려 고름
   const text = formatTime(value);
   const set = (h: number, m: number) => onChange(addMinutes(startOfDay(value), h * 60 + m));
 

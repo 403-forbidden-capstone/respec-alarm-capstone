@@ -1,4 +1,4 @@
-import { router, useLocalSearchParams } from 'expo-router';
+import { useLocalSearchParams } from 'expo-router';
 import { useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
@@ -12,6 +12,7 @@ import { formatTime } from '@/lib/format';
 import { useLoad } from '@/lib/useLoad';
 import { colors } from '@/theme';
 import { useAction } from '@/lib/useAction';
+import { backOrHome } from '@/lib/nav';
 
 // G04 공유받은 알람 — 친구 · 그룹원이 공유한 알람을 봄. 설정 권한이 있으면 켜기 · 끄기 · 5분 옮기기
 // 바꾸면 주인에게 알림(실데이터는 notify Edge Function), 변경 기록은 이번 실행 동안만 남음 (docs/decisions.md D9)
@@ -20,7 +21,7 @@ export default function SharedAlarmsScreen() {
   const { data, error, reload } = useLoad(() => getSharedAlarms(id));
   const { run } = useAction();
   const [log, setLog] = useState<ShareLogItem[] | null>(null);
-  const back = router.canGoBack() ? router.back : undefined;
+  const back = backOrHome; // 앞 화면이 없으면(주소로 바로 열기) 홈으로
 
   async function openLog() {
     setLog(await getShareLog());

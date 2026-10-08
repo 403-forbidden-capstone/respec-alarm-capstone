@@ -3,10 +3,10 @@
 //   읽기 · 쓰기 위치는 docs/screen-data-map.md (R02 · S01, 제안은 alarm_suggestions)
 import { KIND_LABEL } from '@/features/alarm/types';
 import { now } from '@/lib/clock';
+import { UserError } from '@/lib/errors';
 import { addMinutes, dateParts, isSameDay, startOfDay } from '@/lib/format';
 import { alarmChain } from '@/mocks/calc';
 import { db, kst, lastWeekAverageWake, pastWakes, TODAY } from '@/mocks/data';
-import { UserError } from '@/lib/errors';
 
 import { leadingBlanks, monthDays, monthTitle, weekDays, weekRelative, weekTitle } from './calendar';
 import type { DayMark, DayRecord, MonthRecord, Suggestion, WeekRecord, WeekSummary } from './types';

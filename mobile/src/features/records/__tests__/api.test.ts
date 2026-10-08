@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from '@jest/globals';
 
 import { formatTime } from '@/lib/format';
 import { db, kst } from '@/mocks/data';
+import { UserError } from '@/lib/errors';
 
 import {
   applySuggestion,
@@ -138,6 +139,9 @@ describe('S01 알람 조정 제안', () => {
 
   it('0분으로는 적용되지 않음', async () => {
     await expect(applySuggestion('s1', 0)).rejects.toThrow('앞당길 시간을 골라 주세요');
+    // 화면이 이유를 보여 주려면 UserError여야 함 (그냥 Error면 기본 문구)
+    await expect(applySuggestion('s1', 0)).rejects.toBeInstanceOf(UserError);
+    await expect(applySuggestion('nope', 10)).rejects.toThrow('제안을 찾을 수 없어요');
     expect((await getSuggestion('s1'))?.status).toBe('PENDING');
   });
 
