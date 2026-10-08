@@ -39,6 +39,9 @@ export type Routine = {
   sourceJournal: string | null; // 이 루틴을 제안한 일기 날짜 (2025-05-22)
 };
 
+// 홈 저녁 "저녁 루틴" 카드 (H01)
+export type EveningRoutine = { id: string; title: string; days: Weekday[]; startMinute: number; stepCount: number };
+
 export type ApplyStatus = Enums<'apply_status'>; // PENDING · APPLIED · REJECTED
 
 // 오늘의 사실 한 줄 — 출처 우선순위 직접 입력 > 자동 > 알림 > AI

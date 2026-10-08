@@ -6,7 +6,7 @@ import { dateParts } from '@/lib/format';
 import { aiDb, ROUTINE_SUGGESTION, suggestedRoutine } from '@/mocks/ai';
 import { db } from '@/mocks/data';
 
-import type { Journal, Routine, RoutineProgress, Todo, Weekday } from './types';
+import type { EveningRoutine, Journal, Routine, RoutineProgress, Todo } from './types';
 
 // 오늘 루틴 (H01 아침)
 export async function getTodayRoutine(): Promise<RoutineProgress | null> {
@@ -65,7 +65,7 @@ export async function declineRoutineSuggestion(recordDate: string) {
 }
 
 // 홈 저녁 "저녁 루틴" 카드 — A04에서 가장 최근에 저장한 루틴(목업 S.rNight). 저장하면 목록 맨 뒤로 가므로 마지막 것. 없으면 null
-export async function getEveningRoutine(): Promise<{ id: string; title: string; days: Weekday[]; startMinute: number; stepCount: number } | null> {
+export async function getEveningRoutine(): Promise<EveningRoutine | null> {
   const r = aiDb.routines[aiDb.routines.length - 1];
   if (!r?.id) return null;
   return { id: r.id, title: r.title, days: [...r.days], startMinute: r.startMinute, stepCount: r.steps.length };
