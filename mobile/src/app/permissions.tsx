@@ -99,7 +99,8 @@ export default function PermissionSettingsScreen() {
           key={relation.id}
           relation={relation}
           draft={draft?.id === relation.id ? draft.set : null}
-          onDraft={(set) => setDraft(set ? { id: relation.id, set } : null)}
+          // 비울 때는 이 관계의 초안만 — 저장 중에 관계를 바꿨으면 새 관계의 초안은 남김
+          onDraft={(set) => setDraft((d) => (set ? { id: relation.id, set } : d?.id === relation.id ? null : d))}
         />
       ) : (
         <ReceivedList key={relation.id} relationId={relation.id} />
@@ -140,14 +141,19 @@ function ShareEditor({
   const { busy, run } = useAction();
   if (!saved) return error ? <LoadError onRetry={reload} /> : null;
   const current = draft ?? saved;
+  const changed = draft != null && PERMISSIONS.some(({ key }) => draft[key] !== saved[key]);
 
-  // 바꾼 게 없으면 저장 버튼을 끔. 다시 읽기가 끝난 뒤 초안을 버려야 스위치가 예전 값으로 깜빡이지 않음
+  // 바꾼 게 없으면(켰다가 다시 꺼도) 저장 버튼을 끔. 다시 읽기가 끝난 뒤 초안을 버려야 스위치가 예전 값으로 깜빡이지 않음
+  // 다시 읽기에 실패하면 초안을 남겨 둠 — 저장된 값과 화면이 어긋나지 않게
   const save = () =>
     run(async () => {
       await saveShareSettings(relation.id, current);
-      await reload();
-      onDraft(null);
-      toast(await savedMessage(relation));
+      if (await reload()) {
+        onDraft(null);
+        toast(await savedMessage(relation));
+      } else {
+        toast('저장했어요. 바뀐 값을 다시 불러오지 못했어요');
+      }
     });
 
   return (
@@ -176,7 +182,7 @@ function ShareEditor({
         </Text>
       </Card>
       <View style={styles.stack}>
-        <Button label="변경사항 저장" onPress={save} disabled={!draft || busy} />
+        <Button label="변경사항 저장" onPress={save} disabled={!changed || busy} />
       </View>
     </>
   );

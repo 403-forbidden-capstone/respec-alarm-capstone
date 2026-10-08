@@ -15,7 +15,9 @@ export function useAction() {
     try {
       await task();
     } catch (e) {
-      toast(e instanceof Error && e.message ? e.message : '하지 못했어요. 다시 해 주세요');
+      // 서버 오류 원문(영어)은 보여 주지 않음 — 이유를 알려야 하는 오류는 api.ts가 한국어로 바꿔 던짐
+      const message = e instanceof Error ? e.message : '';
+      toast(/[가-힣]/.test(message) ? message : '하지 못했어요. 다시 해 주세요');
     } finally {
       running.current = false;
       setBusy(false);
