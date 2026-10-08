@@ -406,6 +406,7 @@ export async function missWake(alarmId: string, at: Date) {
 // how: self = 확인 알림에 직접 응답(사용 시간은 확인 알림 때 그대로), auto = 화면 사용으로 자동 판정(시연: 폰을 보며 일어남)
 // 실데이터는 alarm_events WAKE_CONFIRMED
 export async function confirmWake(alarmId: string, how: 'self' | 'auto', at: Date) {
+  if (db.wakeConfirmations[alarmId]) return; // 이미 확정한 알람은 처음 판정 그대로
   if (db.wake.alarmId === alarmId) db.wake = { ...db.wake, phase: 'confirmed', ...(how === 'auto' ? USED : {}) };
   const use = db.wake.alarmId === alarmId ? { usage: db.wake.usage, recent: db.wake.recent } : how === 'auto' ? USED : NO_USE;
   db.wakeConfirmations[alarmId] = { at, how, ...use };

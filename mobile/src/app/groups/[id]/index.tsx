@@ -18,12 +18,11 @@ import { backOrHome } from '@/lib/nav';
 export default function GroupDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { data, error, reload } = useLoad(() => getGroup(id));
-  const back = backOrHome; // 앞 화면이 없으면(주소로 바로 열기) 홈으로
 
   if (data === undefined) {
     return (
       <Screen>
-        <TopBar onBack={back} screenId="G02" />
+        <TopBar onBack={backOrHome} screenId="G02" />
         {error ? <LoadError onRetry={reload} /> : null}
       </Screen>
     );
@@ -31,14 +30,14 @@ export default function GroupDetailScreen() {
   if (data === null) {
     return (
       <Screen>
-        <TopBar onBack={back} screenId="G02" />
+        <TopBar onBack={backOrHome} screenId="G02" />
         <Text variant="body" tone="sub">
           그룹을 찾을 수 없어요.
         </Text>
       </Screen>
     );
   }
-  return <Detail group={data} onBack={back} />;
+  return <Detail group={data} onBack={backOrHome} />;
 }
 
 function Detail({ group: g, onBack }: { group: GroupDetail; onBack?: () => void }) {

@@ -14,12 +14,11 @@ import { backOrHome } from '@/lib/nav';
 export default function FriendPermissionScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { data, error, reload } = useLoad(() => getFriendGrant(id));
-  const back = backOrHome; // 앞 화면이 없으면(주소로 바로 열기) 홈으로
 
   if (data === undefined) {
     return (
       <Screen>
-        <TopBar onBack={back} screenId="F02" />
+        <TopBar onBack={backOrHome} screenId="F02" />
         {error ? <LoadError onRetry={reload} /> : null}
       </Screen>
     );
@@ -27,7 +26,7 @@ export default function FriendPermissionScreen() {
   if (data === null) {
     return (
       <Screen>
-        <TopBar onBack={back} screenId="F02" />
+        <TopBar onBack={backOrHome} screenId="F02" />
         <Text variant="body" tone="sub">
           친구를 찾을 수 없어요.
         </Text>
@@ -38,7 +37,7 @@ export default function FriendPermissionScreen() {
   const { person: p, final, groupCount } = data;
   return (
     <Screen>
-      <TopBar onBack={back} screenId="F02" />
+      <TopBar onBack={backOrHome} screenId="F02" />
       <Text variant="title" style={styles.title}>
         {p.name}님의 권한
       </Text>
