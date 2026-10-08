@@ -2,15 +2,30 @@ import { router, type Href } from 'expo-router';
 import { useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 
-import { Card, Screen, SectionHeader, Segmented, Text, toast, TopBar } from '@/components/ui';
+import { Button, Card, Screen, SectionHeader, Segmented, Text, toast, TopBar } from '@/components/ui';
+import { useAuth } from '@/features/auth/AuthProvider';
+import { DataModeToggle, goAfterRender } from '@/features/auth/DataModeToggle';
+import { resetOnboarding } from '@/features/profile/api';
+import { signOut } from '@/lib/auth';
 import { scenarioTime, setScenarioTime, type ScenarioTime } from '@/lib/clock';
+import { canUseRealData, useMode } from '@/lib/mode';
 import { colors } from '@/theme';
 
 // 개발용 화면 목록 — 탭에는 없고 주소로만 들어옴: /dev/screens (앱은 respecalarm://dev/screens)
 // 목업의 데모 패널 대신 화면 번호로 바로 열고, 시나리오 시각(아침 · 전날 밤)을 바꿔 봄
+// 맨 위에서 데이터 모드(실데이터 · 가짜)를 바꿈 — 실데이터는 로그인 · 온보딩부터 E2E로 돌릴 때
 type Row = { id: string; name: string; href: Href };
 
 const SECTIONS: { title: string; issue: string; rows: Row[] }[] = [
+  {
+    title: '로그인 · 온보딩 · 설정',
+    issue: '#25',
+    rows: [
+      { id: '—', name: '로그인 (가짜 데이터 모드에서만 열림)', href: '/login' },
+      { id: '—', name: '온보딩 (가짜 데이터 모드에서만 열림)', href: '/onboarding' },
+      { id: '—', name: '설정', href: '/settings' },
+    ],
+  },
   {
     title: '홈 · 알람',
     issue: '#30',
@@ -71,6 +86,23 @@ const TIMES = [
 
 export default function ScreenListScreen() {
   const [time, setTime] = useState<ScenarioTime>(scenarioTime());
+  const { mode } = useMode();
+  const { session, refreshProfile } = useAuth();
+  const [busy, setBusy] = useState(false);
+
+  // E2E 반복용 — 계정은 그대로, 다음 화면에서 로그인 또는 온보딩으로 감
+  async function run(task: () => Promise<void>, done: string, next: Href) {
+    setBusy(true);
+    try {
+      await task();
+      toast(done);
+      goAfterRender(next);
+    } catch (e) {
+      toast(e instanceof Error ? e.message : '하지 못했어요');
+    } finally {
+      setBusy(false);
+    }
+  }
 
   function changeTime(next: ScenarioTime) {
     setScenarioTime(next);
@@ -82,9 +114,41 @@ export default function ScreenListScreen() {
     <Screen>
       <TopBar onBack={router.canGoBack() ? router.back : undefined} screenId="DEV" />
       <Text variant="title">목업 화면 목록</Text>
-      <Text variant="lead">클릭 목업(mockup.html)의 화면 번호로 바로 열어요. 데이터는 목업과 같은 가짜 데이터예요.</Text>
+      <Text variant="lead">클릭 목업(mockup.html)의 화면 번호로 바로 열어요. 가짜 데이터 모드는 목업과 같은 데이터예요.</Text>
 
-      <SectionHeader title="시나리오 시각" right="5월 22일 목요일" />
+      <SectionHeader
+        title="데이터 모드"
+        right={canUseRealData ? (mode === 'real' ? (session ? '로그인됨' : '로그인 전') : '') : 'Supabase 연결 안 됨'}
+      />
+      <DataModeToggle />
+      {mode === 'real' && session ? (
+        <View style={styles.actions}>
+          <Button
+            small
+            variant="ghost"
+            label="로그아웃"
+            disabled={busy}
+            onPress={() => run(signOut, '로그아웃했어요', '/login')}
+          />
+          <Button
+            small
+            variant="ghost"
+            label="온보딩부터 다시"
+            disabled={busy}
+            onPress={() =>
+              run(async () => {
+                await resetOnboarding(session.user.id);
+                await refreshProfile();
+              }, '아이디 · 집 · 기본값을 비웠어요', '/onboarding')
+            }
+          />
+        </View>
+      ) : null}
+      <Text variant="caption" style={styles.note}>
+        아직 실데이터로 안 붙인 화면은 실데이터 모드에서도 가짜 데이터를 보여 줘요. 시각은 실데이터 모드면 지금 시각이에요.
+      </Text>
+
+      <SectionHeader title="시나리오 시각 (가짜 데이터)" right="5월 22일 목요일" />
       <Segmented options={TIMES} value={time} onChange={changeTime} />
 
       {SECTIONS.map((section) => (
@@ -127,4 +191,5 @@ const styles = StyleSheet.create({
   id: { width: 36 },
   name: { flex: 1 },
   note: { marginTop: 4, marginHorizontal: 4 },
+  actions: { flexDirection: 'row', gap: 8, marginTop: 8 },
 });

@@ -3,9 +3,10 @@ import { useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
 import { Button, Card, Chip, Field, Screen, Sheet, Text, toast, TopBar } from '@/components/ui';
-import { createAppointment, defaultDraft, draftDates, estimateAppointment, listPlaces } from '@/features/alarm/api';
+import { createAppointment, defaultDraft, draftAt, draftDates, estimateAppointment, listPlaces } from '@/features/alarm/api';
 import { OptionGrid } from '@/features/alarm/components/OptionGrid';
 import { SelectRow } from '@/features/alarm/components/SelectRow';
+import { TimeRow } from '@/features/alarm/components/TimeRow';
 import {
   IMPORTANCE_LABEL,
   IMPORTANCE_POINT,
@@ -17,7 +18,7 @@ import {
   type Transport,
 } from '@/features/alarm/types';
 import { foundScheduleDraft, saveFoundSchedule } from '@/features/voice/api';
-import { dayKey, formatDateParen, formatDateShort, formatTime } from '@/lib/format';
+import { dayKey, formatDateParen, formatDateShort, formatTime, formatTime24 } from '@/lib/format';
 import { useLoad } from '@/lib/useLoad';
 import { colors } from '@/theme';
 
@@ -47,12 +48,7 @@ export default function NewScheduleScreen() {
       toast('일정명을 입력해 주세요');
       return;
     }
-    // 24시간제 00:00~23:59만 — 25:99처럼 넘치면 다음 날로 조용히 넘어간 알람이 생김
-    if (!/^([01]?\d|2[0-3]):[0-5]\d$/.test(draft.time.trim())) {
-      toast('시간을 14:00처럼 적어 주세요');
-      return;
-    }
-    setEstimate(await estimateAppointment({ ...draft, time: draft.time.trim() }));
+    setEstimate(await estimateAppointment(draft));
   }
 
   // 두 번 눌러도 일정이 한 번만 들어가게 저장 중에는 막음
@@ -93,14 +89,7 @@ export default function NewScheduleScreen() {
           options={DATE_OPTIONS}
           onChange={(key) => set('date', DATES.find((d) => dayKey(d) === key) ?? draft.date)}
         />
-        <Field
-          label="시간"
-          value={draft.time}
-          onChangeText={(v) => set('time', v)}
-          keyboardType="numbers-and-punctuation"
-          maxLength={5}
-          placeholder="14:00"
-        />
+        <TimeRow label="시간" value={draftAt(draft.date, draft.time)} onChange={(at) => set('time', formatTime24(at))} />
         <SelectRow label="반복" value={draft.repeat} options={REPEAT_OPTIONS} onChange={(v) => set('repeat', v)} />
       </Card>
 

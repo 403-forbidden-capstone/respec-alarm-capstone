@@ -41,7 +41,7 @@ export default function RootLayout() {
 
 // 로그인 전에는 login만, 아이디를 정하기 전에는 onboarding만, 그 뒤에는 탭 · 앱 화면만 열림
 // 로그인은 됐는데 프로필을 못 읽었으면(오프라인 등) 온보딩 대신 다시 시도 화면
-// Supabase가 연결 안 된 목업 모드(enabled=false)는 로그인 없이 바로 탭
+// 가짜 데이터 모드(enabled=false, lib/mode.ts)는 로그인 없이 바로 탭. login · onboarding은 /dev/screens에서 열어 볼 수만 있음
 // dev/* · auth/callback은 어느 쪽에서도 열림. 앱 화면을 새로 만들면 첫 번째 Protected 안에 넣음
 function RootStack() {
   const { session, loading, enabled, needsOnboarding, profileError, refreshProfile } = useAuth();
@@ -54,6 +54,7 @@ function RootStack() {
   if (profileError) return <ProfileRetryScreen message={profileError} onRetry={refreshProfile} />;
   const needsLogin = enabled && !session;
   const ready = !needsLogin && !needsOnboarding;
+  const mock = !enabled;
 
   return (
     <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: colors.bg } }}>
@@ -75,10 +76,10 @@ function RootStack() {
         <Stack.Screen name="journal/[date]" />
         <Stack.Screen name="routine/[id]" />
       </Stack.Protected>
-      <Stack.Protected guard={needsLogin}>
+      <Stack.Protected guard={needsLogin || mock}>
         <Stack.Screen name="login" />
       </Stack.Protected>
-      <Stack.Protected guard={needsOnboarding}>
+      <Stack.Protected guard={needsOnboarding || mock}>
         <Stack.Screen name="onboarding" />
       </Stack.Protected>
     </Stack>

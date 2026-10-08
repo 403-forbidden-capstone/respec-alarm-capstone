@@ -1,14 +1,228 @@
-import { router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
+import { useRef, useState } from 'react';
+import { StyleSheet, View } from 'react-native';
 
-import { Screen, Text, TopBar } from '@/components/ui';
+import { Button, Card, Screen, Sheet, Text, toast, TopBar, TopBarButton } from '@/components/ui';
+import { applySuggestion, getSuggestion, ignoreSuggestion, reopenSuggestion, undoSuggestion } from '@/features/records/api';
+import { dayWord } from '@/features/records/calendar';
+import { CompareTimes } from '@/features/records/components/CompareTimes';
+import { EDIT_STEP, stepMinutes, suggestionPhase } from '@/features/records/suggestion';
+import type { Suggestion } from '@/features/records/types';
+import { now } from '@/lib/clock';
+import { addMinutes, formatDateShort, formatTime } from '@/lib/format';
+import { useLoad } from '@/lib/useLoad';
 
-// S01 알람 조정 제안 — 목업 화면이 들어올 자리 (#38)
+// S01 알람 조정 제안 — 최근 기록으로 고른 앞당김을 적용 · 직접 수정 · 무시, 적용한 뒤에는 이전 값으로 되돌리기
+// 적용하면 그 일정의 예측 준비가 늘어 기상 · 준비 알람이 같이 앞당겨짐 (실제 저장 · 다시 예약은 #49)
 export default function SuggestionScreen() {
+  const { id } = useLocalSearchParams<{ id: string }>();
+  const { data, reload } = useLoad(() => getSuggestion(id));
+  const back = router.canGoBack() ? router.back : undefined;
+
+  if (data === undefined) {
+    return (
+      <Screen>
+        <TopBar onBack={back} />
+      </Screen>
+    );
+  }
+  if (data === null) {
+    return (
+      <Screen>
+        <TopBar screenId="S01" onBack={back} />
+        <Text variant="body" tone="sub">
+          제안을 찾을 수 없어요.
+        </Text>
+      </Screen>
+    );
+  }
+  return <Detail suggestion={data} reload={reload} onBack={back} />;
+}
+
+function Detail({ suggestion: s, reload, onBack }: { suggestion: Suggestion; reload: () => void; onBack?: () => void }) {
+  const [editing, setEditing] = useState<number | null>(null); // 직접 수정 시트에서 고른 앞당김(분), 닫혀 있으면 null
+  const [busy, setBusy] = useState(false); // 버튼을 흐리게 보여 주는 데만
+  const running = useRef(false); // 같은 렌더 안에서 두 번 눌러도 막음
+  const phase = suggestionPhase(s.status);
+
+  // 버튼은 한 번에 하나씩 — 연타하면 토스트가 두 번 뜨고, 실데이터(#49)에선 두 번 저장될 수 있음
+  // 실패하면 한국어 이유만 토스트로 (서버 오류 원문은 기본 문구로)
+  async function act(task: () => Promise<void>) {
+    if (running.current) return;
+    running.current = true;
+    setBusy(true);
+    try {
+      await task();
+    } catch (e) {
+      const message = e instanceof Error ? e.message : '';
+      toast(/[가-힣]/.test(message) ? message : '하지 못했어요. 다시 해 주세요');
+    } finally {
+      running.current = false;
+      setBusy(false);
+    }
+  }
+  const target = `${formatDateShort(s.appointment.at)} ${s.appointment.title}`;
+
+  const apply = (minutes: number) =>
+    act(async () => {
+      await applySuggestion(s.id, minutes);
+      setEditing(null);
+      toast(`${dayWord(s.currentWake, now())} 기상 알람이 ${formatTime(addMinutes(s.currentWake, -minutes))}에 울려요`);
+      reload();
+    });
+
+  const undo = () =>
+    act(async () => {
+      await undoSuggestion(s.id);
+      toast('이전 값으로 되돌렸어요');
+      reload();
+    });
+
+  const ignore = () =>
+    act(async () => {
+      await ignoreSuggestion(s.id);
+      toast('이번 제안을 무시했어요');
+      reload();
+    });
+
+  const reopen = () =>
+    act(async () => {
+      await reopenSuggestion(s.id);
+      reload();
+    });
+
   return (
     <Screen>
-      <TopBar screenId="S01" onBack={router.canGoBack() ? router.back : undefined} />
-      <Text variant="title">알람 조정 제안</Text>
-      <Text variant="lead">목업 S01 화면이 들어올 자리예요.</Text>
+      <TopBar screenId="S01" onBack={onBack} />
+      <Text variant="title" style={styles.title}>
+        다음 알람을 조정할까요?
+      </Text>
+      <Text variant="lead" style={styles.lead}>
+        최근 실행 기록을 바탕으로 더 잘 맞는 시간을 찾았어요.
+      </Text>
+
+      <Card>
+        <Text variant="label" style={styles.label}>
+          제안 이유
+        </Text>
+        <Text variant="big">{s.reason}</Text>
+        <View style={styles.trio}>
+          {s.deltas.map((d) => (
+            <View key={d.label} style={styles.trioItem}>
+              <Text variant="caption" align="center">
+                {d.label}
+              </Text>
+              <Text variant="bodyLarge" weight={700} align="center">
+                {d.value}
+              </Text>
+            </View>
+          ))}
+        </View>
+      </Card>
+
+      {phase === 'pending' ? (
+        <>
+          <Card>
+            <Text variant="label" style={styles.label}>
+              변경 제안 · {target}
+            </Text>
+            <CompareTimes before={s.currentWake} after={s.proposedWake} />
+            <Text variant="small" align="center">
+              준비 알람도 {s.minutes}분 앞당겨져요.
+            </Text>
+          </Card>
+          <View style={styles.stack}>
+            <Button label="제안 적용하기" onPress={() => apply(s.minutes)} disabled={busy} />
+            <Button label="직접 수정하기" variant="ghost" onPress={() => setEditing(s.minutes)} disabled={busy} />
+            <Button label="이번 제안 무시" variant="plain" onPress={ignore} disabled={busy} />
+          </View>
+        </>
+      ) : null}
+
+      {phase === 'applied' && s.applied ? (
+        <>
+          <Card>
+            <Text variant="label" style={styles.label}>
+              적용했어요
+            </Text>
+            <Text variant="big">
+              {target}
+              {'\n'}기상 {formatTime(s.applied.wake)}
+              {s.applied.prepare ? ` · 준비 ${formatTime(s.applied.prepare)}` : ''}
+            </Text>
+            <Text variant="small" style={styles.sub}>
+              다음 기록에서 성능이 나빠지면 이전 값으로 되돌려요.
+            </Text>
+          </Card>
+          <View style={styles.stack}>
+            <Button label="이전 값으로 되돌리기" variant="ghost" onPress={undo} disabled={busy} />
+          </View>
+        </>
+      ) : null}
+
+      {phase === 'ignored' ? (
+        <>
+          <Card>
+            <Text variant="small">이번 제안을 무시했어요. 같은 제안은 당분간 다시 보이지 않아요.</Text>
+          </Card>
+          <View style={styles.stack}>
+            <Button label="제안 다시 보기" variant="ghost" onPress={reopen} disabled={busy} />
+          </View>
+        </>
+      ) : null}
+
+      <Sheet visible={editing != null} onClose={() => setEditing(null)} title="기상 시각 직접 정하기">
+        {editing != null ? (
+          <EditWake
+            suggestion={s}
+            minutes={editing}
+            onChange={setEditing}
+            onApply={() => apply(editing)}
+            onCancel={() => setEditing(null)}
+          />
+        ) : null}
+      </Sheet>
     </Screen>
   );
 }
+
+type EditProps = {
+  suggestion: Suggestion;
+  minutes: number; // 앞당길 분
+  onChange: (minutes: number) => void;
+  onApply: () => void;
+  onCancel: () => void;
+};
+
+// 직접 수정 시트 — 5분씩 늦게 · 일찍, 지금 시각 그대로(0분)면 적용할 수 없음
+function EditWake({ suggestion: s, minutes, onChange, onApply, onCancel }: EditProps) {
+  return (
+    <>
+      <Text variant="small">
+        {s.appointment.title} · {formatDateShort(s.appointment.at)} · 지금 {formatTime(s.currentWake)}
+      </Text>
+      <View style={styles.stepper}>
+        <TopBarButton label={`${EDIT_STEP}분 늦게`} onPress={() => onChange(stepMinutes(minutes, -EDIT_STEP))} />
+        <Text variant="compare" accessibilityLiveRegion="polite">
+          {formatTime(addMinutes(s.currentWake, -minutes))}
+        </Text>
+        <TopBarButton label={`${EDIT_STEP}분 일찍`} onPress={() => onChange(stepMinutes(minutes, EDIT_STEP))} />
+      </View>
+      <View style={styles.stack}>
+        <Button label="이 시간으로 적용" onPress={onApply} disabled={minutes === 0} />
+        <Button label="취소" variant="plain" onPress={onCancel} />
+      </View>
+    </>
+  );
+}
+
+const styles = StyleSheet.create({
+  title: { marginTop: 8, marginBottom: 4 },
+  lead: { marginBottom: 18 },
+  label: { marginBottom: 8 },
+  trio: { flexDirection: 'row', marginTop: 16 },
+  trioItem: { flex: 1 },
+  sub: { marginTop: 4 },
+  stack: { gap: 10, marginTop: 16 },
+  stepper: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 18, marginBottom: 6 },
+});
