@@ -74,6 +74,11 @@ export function memberState(personId: string, now: Date): WakeState {
     if (arriveAt) return { text: `도착 · ${formatTime(arriveAt)}`, dot: 'ok', woke: true };
     if (departAt) return { text: `출발 · ${formatTime(departAt)}`, dot: 'mid', woke: true };
     if (wakeAt) return { text: `기상 완료 · ${formatTime(wakeAt)}`, dot: 'ok', woke: true };
+    // 기상 알람이 울리는 중 · 끈 뒤 판정 중 (목업 myState)
+    if (db.wake.phase === 'ringing') return { text: '알람 울리는 중', dot: 'zz', woke: false };
+    if (db.wake.phase === 'observing' || db.wake.phase === 'prompt') {
+      return { text: '알람 해제 · 기상 확인 중', dot: 'zz', woke: false };
+    }
     return { text: `취침 중 · 알람 ${first}`, dot: 'zz', woke: false };
   }
   const tl = timelines[personId];

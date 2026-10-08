@@ -96,6 +96,7 @@ export type TimelineEntry = { at: Date; label: string; source: string };
 
 export type MemberWake = {
   person: Person;
+  groupName: string; // 공유 범위 안내 (캡스톤팀에 허용한 범위만)
   alarm: MemberAlarm;
   timeline: TimelineEntry[]; // 지금까지 일어난 일
   firstAlarmAt: Date;
@@ -103,6 +104,7 @@ export type MemberWake = {
 
 export type SharedAlarms = {
   person: Person;
+  canView: boolean; // 알람 조회 권한 — 없으면 alarms는 빈 목록 (RLS와 같게)
   canEdit: boolean;
   tags: string[]; // 조회 · 친구, 설정 · 친구 …
   alarms: MemberAlarm[];

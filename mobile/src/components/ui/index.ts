@@ -7,6 +7,7 @@ export { Card } from './Card';
 export { Chip } from './Chip';
 export { Field } from './Field';
 export { KeyValueRow } from './KeyValueRow';
+export { LoadError } from './LoadError';
 export { ProgressBar } from './ProgressBar';
 export { Screen } from './Screen';
 export { SectionHeader } from './SectionHeader';
