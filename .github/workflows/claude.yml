@@ -30,6 +30,7 @@ jobs:
       contents: write
       pull-requests: write
       issues: write
+      statuses: write
       id-token: write
       actions: read
     steps:
@@ -37,6 +38,10 @@ jobs:
         uses: actions/checkout@v7
         with:
           fetch-depth: 0
+
+      - name: 시작 시각
+        id: start
+        run: echo "at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
 
       - name: Claude 토큰 정리
         # 복사하다 붙은 공백 · 줄바꿈을 지웁니다
@@ -57,4 +62,24 @@ jobs:
             --model claude-opus-5-5
             --max-turns 60
             --allowedTools "Skill,Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(git status:*),Bash(git merge-base:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr list:*),Bash(gh issue view:*),Bash(gh issue list:*),Bash(cat:*),Bash(test:*),Bash(ls:*)"
-            --append-system-prompt "항상 한국어로 답한다. 리뷰 · 검수 · '봐줘' · '머지해도 돼?' 같은 요청이면 반드시 pr-review 스킬(.claude/skills/pr-review)을 쓰고, 이어서 .claude/review-checklist.md의 레포 전용 항목도 확인한다. 스킬의 방향성(Step 5a)과 자가 검수(Step 5b)도 빼지 않고, 다시 리뷰하는 경우엔 지난 리뷰 뒤에 올라온 커밋과 지난 지적의 상태를 꼭 포함한다. 기능 흐름 PR(체크리스트 기준, 애매하면 해당)이면 체크리스트의 '기능 흐름 · 판단 근거' 칸(단계별 흐름, 값 · 규칙마다 문서 근거와 실제 확인, 근거 없으면 '근거 없음 — 작성자 판단')을 넣고, 머지 판단은 '흐름 확인 후 머지', 보고 맨 마지막 줄은 '- [ ] 작업자가 기능 흐름 · 판단 근거를 확인함'으로 한다. 이 실행 환경은 GitHub Actions라 브라우저 · Lighthouse · 이중 빌드는 쓸 수 없으니 해당 항목은 '건너뜀: 사유'로 적는다. 변경이 크거나 위험한 영역이면 보고 끝에 로컬 Claude Code의 '/code-review ultra <PR번호>'를 한 줄로 추천한다. 최종 보고는 PR 댓글 하나로 정리한다."
+            --append-system-prompt "항상 한국어로 답한다. 리뷰 · 검수 · '봐줘' · '머지해도 돼?' 같은 요청이면 반드시 pr-review 스킬(.claude/skills/pr-review)을 쓰고, 이어서 .claude/review-checklist.md의 레포 전용 항목도 확인한다. 스킬의 방향성(Step 5a)과 자가 검수(Step 5b)도 빼지 않고, 다시 리뷰하는 경우엔 지난 리뷰 뒤에 올라온 커밋과 지난 지적의 상태를 꼭 포함한다. 기능 흐름 PR(체크리스트 기준, 애매하면 해당)이면 체크리스트의 '기능 흐름 · 판단 근거' 칸(단계별 흐름, 값 · 규칙마다 문서 근거와 실제 확인, 근거 없으면 '근거 없음 — 작성자 판단')을 넣고, 머지 판단은 '흐름 확인 후 머지', 보고 맨 마지막 줄에 '<!-- flow-check:required -->'를 그대로 넣는다(워크플로가 라벨 · 검사를 붙이는 표시). PR 본문의 흐름 확인 줄은 작업자만 체크하므로 건드리지 않는다. 이 실행 환경은 GitHub Actions라 브라우저 · Lighthouse · 이중 빌드는 쓸 수 없으니 해당 항목은 '건너뜀: 사유'로 적는다. 변경이 크거나 위험한 영역이면 보고 끝에 로컬 Claude Code의 '/code-review ultra <PR번호>'를 한 줄로 추천한다. 최종 보고는 PR 댓글 하나로 정리한다."
+
+      # PR에서 부른 리뷰가 기능 흐름 PR로 판단하면 라벨 · "흐름 확인" 검사를 붙임. 스크립트는 늘 main 것을 씀
+      - name: 흐름 확인 스크립트 (main)
+        if: always() && (github.event.issue.pull_request || github.event.pull_request)
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          path: .flow-check
+          sparse-checkout: .github/scripts
+
+      - name: 흐름 확인
+        if: always() && (github.event.issue.pull_request || github.event.pull_request)
+        uses: actions/github-script@v9
+        env:
+          SINCE: ${{ steps.start.outputs.at }}
+        with:
+          script: |
+            const flowCheck = require('./.flow-check/.github/scripts/flow-check.js');
+            const prNumber = context.payload.issue?.number ?? context.payload.pull_request.number;
+            await flowCheck({ github, context, core, mode: 'mention', prNumber, since: process.env.SINCE });
