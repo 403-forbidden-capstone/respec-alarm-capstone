@@ -109,6 +109,7 @@ describe('H07 · H08 기상 알람 → 해제 → 확인 알림 → 다시 울�
     await startRing(WAKE, kst(22, 495));
     expect(db.wake.phase).toBe('confirmed');
     await dismissRing(WAKE, kst(22, 495));
+    await snoozeRing(WAKE, 5, kst(22, 495)); // 확정 뒤에 미뤄도 기록이 붙지 않음
     expect(db.wake.phase).toBe('confirmed');
     expect(me()).toBe('기상 완료 · 오전 8:10');
     expect(labels()).toEqual(['오전 8:00 기상 알람 해제', '오전 8:10 기상 확인']);
@@ -158,5 +159,13 @@ describe('H08 기상 확인 화면 데이터', () => {
     await confirmWake(WAKE, 'auto', kst(22, 490));
     const check = await getWakeCheck(WAKE);
     expect([check!.usage, check!.recent, formatTime(check!.confirmed!.at)]).toEqual([3.2, 1.4, '오전 8:10']);
+  });
+
+  it('확정한 판정의 사용 시간은 다른 기상 알람이 울려도 그대로', async () => {
+    await dismissRing(WAKE, kst(22, 480));
+    await confirmWake(WAKE, 'auto', kst(22, 490));
+    db.wake = { ...db.wake, alarmId: 'other:WAKE', phase: 'ringing', usage: 0, recent: 0 }; // 다른 기상 알람이 울림
+    const check = await getWakeCheck(WAKE);
+    expect([check!.usage, check!.recent, check!.confirmed!.how]).toEqual([3.2, 1.4, 'auto']);
   });
 });
