@@ -341,7 +341,8 @@ export async function stopRing(alarmId: string) {
 // 미룬 뒤 다시 울림 · 3번 제한 · SNOOZED 기록은 알람 코어(#33)
 export async function snoozeRing(alarmId: string, minutes: number, at: Date) {
   const found = findAlarm(alarmId);
-  if (!found) return;
+  // 이미 기상 확정한 알람이면 해제처럼 기록을 그대로 둠 (확정 뒤에 미루기가 붙지 않게)
+  if (!found || db.wakeConfirmations[alarmId]) return;
   await stopRing(alarmId);
   db.events.push({ at, label: `${KIND_LABEL[found.alarm.kind]} 알람 ${minutes}분 미루기`, source: '자동' });
 }
@@ -380,9 +381,10 @@ export async function getWakeCheck(alarmId?: string): Promise<WakeCheck | null> 
     // 확정 뒤 다른 기상 알람이 울려 판정이 바뀌었으면 알람 시각에 끈 것으로 봄
     dismissedAt: live?.dismissedAt ?? alarm.at,
     thetaMinutes: db.wakeThetaMinutes,
-    usage: live?.usage ?? 0,
-    recent: live?.recent ?? 0,
-    confirmed: confirmed ? { ...confirmed } : null,
+    // 확정했으면 그때 저장한 사용 시간 — 다른 기상 알람이 울려 db.wake가 바뀌어도 "자동 판정"과 0분이 엇갈리지 않게
+    usage: confirmed ? confirmed.usage : (live?.usage ?? 0),
+    recent: confirmed ? confirmed.recent : (live?.recent ?? 0),
+    confirmed: confirmed ? { at: confirmed.at, how: confirmed.how } : null,
   };
 }
 
@@ -403,8 +405,9 @@ export async function missWake(alarmId: string, at: Date) {
 // how: self = 확인 알림에 직접 응답(사용 시간은 확인 알림 때 그대로), auto = 화면 사용으로 자동 판정(시연: 폰을 보며 일어남)
 // 실데이터는 alarm_events WAKE_CONFIRMED
 export async function confirmWake(alarmId: string, how: 'self' | 'auto', at: Date) {
-  db.wakeConfirmations[alarmId] = { at, how };
-  db.me.wakeAt = at;
   if (db.wake.alarmId === alarmId) db.wake = { ...db.wake, phase: 'confirmed', ...(how === 'auto' ? USED : {}) };
+  const use = db.wake.alarmId === alarmId ? { usage: db.wake.usage, recent: db.wake.recent } : how === 'auto' ? USED : NO_USE;
+  db.wakeConfirmations[alarmId] = { at, how, ...use };
+  db.me.wakeAt = at;
   db.events.push({ at, label: '기상 확인', source: how === 'self' ? '직접 응답' : '자동 판정' });
 }

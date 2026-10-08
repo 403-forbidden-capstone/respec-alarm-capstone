@@ -37,7 +37,7 @@ const SECTIONS: { title: string; issue: string; rows: Row[] }[] = [
       { id: 'H07', name: '알람 울림 · 기상', href: { pathname: '/ring', params: { alarm: 'a1:WAKE' } } },
       { id: 'H07', name: '알람 울림 · 준비', href: { pathname: '/ring', params: { alarm: 'a1:PREPARE' } } },
       { id: 'H07', name: '알람 울림 · 출발', href: { pathname: '/ring', params: { alarm: 'a1:DEPARTURE' } } },
-      { id: 'H08', name: '기상 확인', href: { pathname: '/wake', params: { alarm: 'a1:WAKE' } } },
+      { id: 'H08', name: '기상 확인 · 해제 전 빈 화면 (판정은 H07 기상 → 알람 해제)', href: { pathname: '/wake', params: { alarm: 'a1:WAKE' } } },
     ],
   },
   {
