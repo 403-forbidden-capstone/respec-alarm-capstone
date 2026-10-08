@@ -38,6 +38,7 @@ export function useLoad<T>(load: () => Promise<T>) {
   useFocusEffect(useCallback(() => run(), [run]));
 
   // 값을 바꾼 뒤 같은 화면에서 다시 읽을 때 — 기다리면 다 읽은 뒤에 이어감(저장 뒤 초안 버리기 등), 다시 읽기에 성공했는지 돌려줌
+  // 주의: "읽기가 끝났는지"이지 "이 응답이 화면에 반영됐는지"가 아님 — 더 새 읽기에 밀려 버려진 응답도 true
   const reload = useCallback(() => new Promise<boolean>((resolve) => void run(resolve)), [run]);
 
   return { data: state.data, error: state.error, reload };
