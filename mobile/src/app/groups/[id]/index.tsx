@@ -11,13 +11,14 @@ import { permissionNames } from '@/features/social/permissions';
 import type { GroupDetail, GroupMember } from '@/features/social/types';
 import { formatDateShort, formatTime } from '@/lib/format';
 import { useLoad } from '@/lib/useLoad';
+import { backOrHome } from '@/lib/nav';
 
 // G02 그룹 상세 — 내가 이 그룹에 준 공유 범위 · 연결 일정 · 멤버 기상 상태
 // 멤버의 기상 확인(G03) · 알람 보기(G04)는 그 사람에게 받은 권한(친구 · 그룹 합집합)이 있을 때만 누름
 export default function GroupDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { data, error, reload } = useLoad(() => getGroup(id));
-  const back = router.canGoBack() ? router.back : undefined;
+  const back = backOrHome; // 앞 화면이 없으면(주소로 바로 열기) 홈으로
 
   if (data === undefined) {
     return (
@@ -53,7 +54,7 @@ function Detail({ group: g, onBack }: { group: GroupDetail; onBack?: () => void 
       <TopBar
         onBack={onBack}
         screenId="G02"
-        right={<TextLink label="···" onPress={() => toast('그룹 메뉴는 이번 목업 범위 밖이에요')} />}
+        right={<TextLink label="···" accessibilityLabel="그룹 메뉴" onPress={() => toast('그룹 메뉴는 이번 목업 범위 밖이에요')} />}
       />
       <Text variant="title" style={styles.title}>
         {g.name}
