@@ -3,15 +3,20 @@ import { Fragment, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
 import { Button, Card, ProgressBar, Screen, Text, toast, TopBar } from '@/components/ui';
-import { confirmWake, getWakeCheck } from '@/features/alarm/api';
+import { confirmWake, getWakeCheck, missWake, promptWake } from '@/features/alarm/api';
 import { FormulaBox } from '@/features/alarm/components/FormulaBox';
-import type { WakeCheck } from '@/features/alarm/types';
+import { WAKE_NO_REPLY_MINUTES, WAKE_OBSERVE_MINUTES, type WakeCheck } from '@/features/alarm/types';
 import { addMinutes, formatTime, timeParts } from '@/lib/format';
 import { useLoad } from '@/lib/useLoad';
 import { colors } from '@/theme';
 
 type Phase = 'observing' | 'prompt' | 'confirmed';
 type WakeState = { phase: Phase; usage: number; recent: number; at: Date | null; how: 'self' | 'auto' | null };
+type How = WakeState['how'];
+
+// 시연용 사용 시간 (분) — 폰을 보며 일어남 · 알람만 끄고 다시 잠듦 (목업 simUse · simSleep)
+const USED = { usage: 3.2, recent: 1.4 };
+const SLEPT = { usage: 0.4, recent: 0 };
 
 const METER_MAX = 5; // 분
 
@@ -36,6 +41,10 @@ export default function WakeScreen() {
         <Text variant="title" style={styles.title}>
           기상 확인
         </Text>
+        <Text variant="lead" style={styles.lead}>
+          알람을 끈 것만으로는 기상으로 보지 않아요.
+        </Text>
+        <Flow phase="idle" how={null} />
         <Card>
           <Text variant="body" tone="sub">
             기상 알람을 해제하면 여기서 기상을 판정해요.
@@ -47,29 +56,38 @@ export default function WakeScreen() {
   return <WakeFlow check={data} />;
 }
 
+// 단계는 가짜 db에 남아 있어서(api) 화면을 나갔다 와도 이어짐 — 확인 알림 단계면 확인 알림부터
 function WakeFlow({ check }: { check: WakeCheck }) {
-  const [state, setState] = useState<WakeState>(() =>
-    check.confirmed
-      ? { phase: 'confirmed', usage: 3.2, recent: 1.4, at: check.confirmed.at, how: check.confirmed.how }
-      : { phase: 'observing', usage: 0, recent: 0, at: null, how: null },
-  );
-  const observeEnd = addMinutes(check.dismissedAt, 10);
+  const [state, setState] = useState<WakeState>(() => {
+    const c = check.confirmed;
+    if (c) return { phase: 'confirmed', ...(c.how === 'self' ? SLEPT : USED), at: c.at, how: c.how };
+    if (check.phase === 'prompt') return { phase: 'prompt', ...SLEPT, at: null, how: null };
+    return { phase: 'observing', usage: 0, recent: 0, at: null, how: null };
+  });
+  // 실제로 끈 시각부터 10분 — 다시 울린 뒤 끄면 그 시각부터
+  const observeEnd = addMinutes(check.dismissedAt, WAKE_OBSERVE_MINUTES);
   // 그룹 일정이 아니면 공유 문구 · 그룹 버튼을 뺌
   const shared = check.groupId != null ? ` · ${check.groupName ?? '그룹'}에 공유했어요` : '';
   const back = router.canGoBack() ? router.back : undefined;
 
-  async function confirm(how: 'self' | 'auto', usage: number, recent: number) {
+  async function confirm(how: 'self' | 'auto') {
     await confirmWake(check.alarmId, how, observeEnd);
-    setState({ phase: 'confirmed', usage, recent, at: observeEnd, how });
+    setState({ phase: 'confirmed', ...(how === 'self' ? SLEPT : USED), at: observeEnd, how });
     toast(`기상을 확인했어요${shared}`);
   }
 
   // 시연용: 폰을 보며 일어나면 누적 사용이 θ를 넘어 자동 판정
-  const useAndWake = () => confirm('auto', 3.2, 1.4);
-  // 시연용: 알람만 끄고 다시 자면 조건을 못 채워 확인 알림
-  const sleepAgain = () => setState({ phase: 'prompt', usage: 0.4, recent: 0, at: null, how: null });
-  // 시연용: 확인 알림에도 응답이 없으면 기상 알람이 다시 울림
-  const noReply = () => router.replace({ pathname: '/ring', params: { alarm: check.alarmId, again: '1' } });
+  const useAndWake = () => confirm('auto');
+  // 시연용: 알람만 끄고 다시 자면 조건을 못 채워 관찰이 끝날 때 확인 알림
+  async function sleepAgain() {
+    await promptWake(check.alarmId, observeEnd);
+    setState({ phase: 'prompt', ...SLEPT, at: null, how: null });
+  }
+  // 시연용: 확인 알림에도 응답이 없으면 5분 뒤 기상 알람이 다시 울림
+  async function noReply() {
+    await missWake(check.alarmId, addMinutes(observeEnd, WAKE_NO_REPLY_MINUTES));
+    router.replace({ pathname: '/ring', params: { alarm: check.alarmId, again: '1' } });
+  }
 
   const meters = (
     <>
@@ -92,7 +110,7 @@ function WakeFlow({ check }: { check: WakeCheck }) {
       <Text variant="lead" style={styles.lead}>
         알람을 끈 것만으로는 기상으로 보지 않아요.
       </Text>
-      <Flow state={state} />
+      <Flow phase={state.phase} how={state.how} />
 
       {state.phase === 'observing' ? (
         <>
@@ -129,7 +147,7 @@ function WakeFlow({ check }: { check: WakeCheck }) {
             <Text variant="note" tone="sub" style={styles.notifText}>
               {check.groupId != null ? `응답하면 ${check.groupName ?? '그룹'}에 기상 완료로 표시돼요.` : '응답하면 기상 완료로 기록돼요.'}
             </Text>
-            <Button label="일어났어요" small onPress={() => confirm('self', 0.4, 0)} />
+            <Button label="일어났어요" small onPress={() => confirm('self')} />
           </View>
           <Card>
             <Text variant="label" tone="sub">
@@ -178,15 +196,16 @@ function WakeFlow({ check }: { check: WakeCheck }) {
 }
 
 // 판정 단계 (.flow) — 해제됨 → 관찰 중 → (확인 알림) → 기상 확정
-function Flow({ state }: { state: WakeState }) {
+// idle(끈 알람 없음)은 목업 그대로 해제됨 · 관찰 중을 지난 단계로 그림
+function Flow({ phase, how }: { phase: Phase | 'idle'; how: How }) {
   const steps: { label: string; mode: 'done' | 'on' | 'todo' }[] = [
     { label: '해제됨', mode: 'done' },
-    { label: '관찰 중', mode: state.phase === 'observing' ? 'on' : 'done' },
+    { label: '관찰 중', mode: phase === 'observing' ? 'on' : 'done' },
   ];
-  if (state.phase === 'prompt') steps.push({ label: '확인 알림', mode: 'on' });
-  else if (state.phase === 'confirmed' && state.how === 'self') {
+  if (phase === 'prompt') steps.push({ label: '확인 알림', mode: 'on' });
+  else if (phase === 'confirmed' && how === 'self') {
     steps.push({ label: '확인 알림', mode: 'done' }, { label: '기상 확정', mode: 'on' });
-  } else steps.push({ label: '기상 확정', mode: state.phase === 'confirmed' ? 'on' : 'todo' });
+  } else steps.push({ label: '기상 확정', mode: phase === 'confirmed' ? 'on' : 'todo' });
 
   return (
     <View style={styles.flow} accessibilityLabel="판정 단계">

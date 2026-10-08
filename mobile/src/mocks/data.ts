@@ -1,7 +1,7 @@
 // 목업 시나리오 데이터 — mockup.html의 고정 데이터 · initState를 옮김 (2025년 5월 22일 목요일, 10시 팀 주간회의 예시)
 // 화면은 이 폴더를 직접 읽지 않고 features/*/api.ts를 거침. 기능별로 실데이터가 붙으면 그 부분을 지움
 // 바꾼 값(알람 켜기 · 권한 등)은 앱을 다시 열 때까지만 남음
-import type { Importance, IntensityAxis, Level, Transport } from '@/features/alarm/types';
+import type { Importance, IntensityAxis, Level, Transport, WakePhase } from '@/features/alarm/types';
 import type { SuggestionStatus } from '@/features/records/types';
 import type { PermissionSet } from '@/features/social/types';
 
@@ -121,6 +121,13 @@ export const db = {
   lateCount4w: 1, // 최근 4주 늦잠 지각
   wakeThetaMinutes: 1, // 기상 판정 기준 θ
   me: { wakeAt: null as Date | null, departAt: null as Date | null, arriveAt: null as Date | null },
+  // 지금 진행 중인 기상 판정 (목업 S.wake · S.ring) — 기상 알람 하나만. 홈 · 그룹의 내 상태가 읽음
+  wake: {
+    alarmId: null as string | null,
+    phase: 'idle' as WakePhase,
+    ringAt: null as Date | null, // 울린 시각 (다시 울림이면 그 시각)
+    dismissedAt: null as Date | null, // 실제로 끈 시각
+  },
   wakeConfirmations: {} as Record<string, { at: Date; how: 'self' | 'auto' }>, // 알람 id별 기상 확정
   events: [] as { at: Date; label: string; source: string }[], // 오늘 실제로 일어난 일
   journalWritten: false,
