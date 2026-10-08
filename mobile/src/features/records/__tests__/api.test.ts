@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it } from '@jest/globals';
 
+import { UserError } from '@/lib/errors';
 import { formatTime } from '@/lib/format';
 import { db, kst } from '@/mocks/data';
-import { UserError } from '@/lib/errors';
 
 import {
   applySuggestion,
