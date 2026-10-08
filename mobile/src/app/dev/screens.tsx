@@ -4,10 +4,11 @@ import { Pressable, StyleSheet, View } from 'react-native';
 
 import { Button, Card, Screen, SectionHeader, Segmented, Text, toast, TopBar } from '@/components/ui';
 import { useAuth } from '@/features/auth/AuthProvider';
+import { DataModeToggle, goAfterRender } from '@/features/auth/DataModeToggle';
 import { resetOnboarding } from '@/features/profile/api';
-import { hasSession, signOut } from '@/lib/auth';
+import { signOut } from '@/lib/auth';
 import { scenarioTime, setScenarioTime, type ScenarioTime } from '@/lib/clock';
-import { canUseRealData, setMode, useMode, type DataMode } from '@/lib/mode';
+import { canUseRealData, useMode } from '@/lib/mode';
 import { colors } from '@/theme';
 
 // 개발용 화면 목록 — 탭에는 없고 주소로만 들어옴: /dev/screens (앱은 respecalarm://dev/screens)
@@ -20,8 +21,8 @@ const SECTIONS: { title: string; issue: string; rows: Row[] }[] = [
     title: '로그인 · 온보딩 · 설정',
     issue: '#25',
     rows: [
-      { id: '—', name: '로그인 (가짜 모드에서 열어 보기)', href: '/login' },
-      { id: '—', name: '온보딩 (가짜 모드에서 열어 보기)', href: '/onboarding' },
+      { id: '—', name: '로그인 (가짜 데이터 모드에서만 열림)', href: '/login' },
+      { id: '—', name: '온보딩 (가짜 데이터 모드에서만 열림)', href: '/onboarding' },
       { id: '—', name: '설정', href: '/settings' },
     ],
   },
@@ -65,14 +66,6 @@ const SECTIONS: { title: string; issue: string; rows: Row[] }[] = [
   },
 ];
 
-// 모드 · 로그인 상태가 화면 묶음(Stack.Protected)에 반영된 다음 렌더 뒤에 옮김 — 막힌 묶음의 주소로는 안 열리므로 갈 곳을 직접 줌
-const go = (href: Href) => setTimeout(() => router.replace(href), 0);
-
-const MODES = [
-  ['real', '실데이터'],
-  ['mock', '가짜 데이터'],
-] as const;
-
 const TIMES = [
   ['morning', '아침 오전 7:55'],
   ['evening', '전날 밤 9:00'],
@@ -84,23 +77,13 @@ export default function ScreenListScreen() {
   const { session, refreshProfile } = useAuth();
   const [busy, setBusy] = useState(false);
 
-  // 모드를 바꾸면 처음 화면으로 — 실데이터면 로그인 · 온보딩 순서대로 다시 탐
-  async function changeMode(next: DataMode) {
-    if (setMode(next) !== next) {
-      toast('Supabase가 연결되지 않아 가짜 데이터로 돌아요');
-      return;
-    }
-    toast(next === 'real' ? '실데이터 모드예요. 로그인부터 시작해요' : '가짜 데이터 모드예요. 목업 시나리오로 돌아요');
-    go(next === 'real' && !(await hasSession().catch(() => false)) ? '/login' : '/');
-  }
-
   // E2E 반복용 — 계정은 그대로, 다음 화면에서 로그인 또는 온보딩으로 감
   async function run(task: () => Promise<void>, done: string, next: Href) {
     setBusy(true);
     try {
       await task();
       toast(done);
-      go(next);
+      goAfterRender(next);
     } catch (e) {
       toast(e instanceof Error ? e.message : '하지 못했어요');
     } finally {
@@ -124,7 +107,7 @@ export default function ScreenListScreen() {
         title="데이터 모드"
         right={canUseRealData ? (mode === 'real' ? (session ? '로그인됨' : '로그인 전') : '') : 'Supabase 연결 안 됨'}
       />
-      <Segmented options={MODES} value={mode} onChange={changeMode} />
+      <DataModeToggle />
       {mode === 'real' && session ? (
         <View style={styles.actions}>
           <Button

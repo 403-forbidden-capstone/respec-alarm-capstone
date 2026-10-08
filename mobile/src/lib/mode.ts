@@ -35,7 +35,7 @@ function readWeb(): DataMode {
   let saved: DataMode | null = null;
   try {
     saved = parse(globalThis.localStorage?.getItem(KEY));
-    if (fromUrl) globalThis.localStorage?.setItem(KEY, fromUrl);
+    if (fromUrl) globalThis.localStorage?.setItem(KEY, allowed(fromUrl));
   } catch {
     // 저장소를 막은 브라우저 — 이번 실행에만 씀
   }
@@ -63,7 +63,16 @@ export function isMock(): boolean {
 export function setMode(next: DataMode): DataMode {
   const mode = allowed(next);
   emit({ mode, ready: true });
-  AsyncStorage.setItem(KEY, mode).catch(() => {}); // 저장 실패는 이번 실행에만 적용
+  // 저장 실패는 이번 실행에만 적용. 웹은 읽을 때(readWeb)와 같은 localStorage에 바로 씀
+  if (Platform.OS === 'web') {
+    try {
+      globalThis.localStorage?.setItem(KEY, mode);
+    } catch {
+      // 저장소를 막은 브라우저
+    }
+  } else {
+    AsyncStorage.setItem(KEY, mode).catch(() => {});
+  }
   return mode;
 }
 

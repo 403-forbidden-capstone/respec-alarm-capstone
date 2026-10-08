@@ -38,7 +38,7 @@ export const MOCK_PROFILE: Profile = {
 
 // 온보딩부터 다시 (개발용, /dev/screens) — 아이디 · 집을 비우고 기본값을 DB 기본값으로. 계정은 그대로
 export async function resetOnboarding(userId: string): Promise<void> {
-  const { error } = await supabase
+  const { data, error } = await supabase
     .from('profiles')
     .update({
       handle: null,
@@ -49,8 +49,11 @@ export async function resetOnboarding(userId: string): Promise<void> {
       default_buffer_minutes: 10,
       default_transport: 'TRANSIT',
     })
-    .eq('user_id', userId);
+    .eq('user_id', userId)
+    .select('user_id');
   if (error) throw error;
+  // RLS에 막히거나 다른 사용자면 오류 없이 0행 — 비운 줄 알고 넘어가지 않게
+  if (!data?.length) throw new Error('내 프로필을 바꾸지 못했어요');
 }
 
 // 온보딩 저장 — 아이디 중복이면 DB 유일 제약(23505)이 막음

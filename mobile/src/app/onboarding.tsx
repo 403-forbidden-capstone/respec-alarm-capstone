@@ -14,7 +14,7 @@ const TRANSPORTS = [
 
 // 처음 설정 — 아이디 · 아침 준비 기본값 · 집. 저장하면 루트 레이아웃이 탭으로 보냄
 export default function OnboardingScreen() {
-  const { session, profile, refreshProfile } = useAuth();
+  const { session, profile, enabled, refreshProfile } = useAuth();
   const [nickname, setNickname] = useState(profile?.nickname ?? '');
   const [handle, setHandle] = useState('');
   const [prepare, setPrepare] = useState(profile?.default_prepare_minutes ?? 60);
@@ -31,7 +31,7 @@ export default function OnboardingScreen() {
   const canSave = handleOk && nickname.trim().length > 0 && !saving;
 
   async function save() {
-    if (!session) {
+    if (!enabled || !session) {
       setError('가짜 데이터 모드라 저장하지 않아요'); // /dev/screens에서 화면만 열어 본 경우
       return;
     }

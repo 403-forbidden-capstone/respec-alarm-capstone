@@ -39,13 +39,14 @@ const errorMessage = (e: unknown) => {
 
 // 로그인 상태 · 내 프로필을 앱 전체에 알려 줌 — 화면에서는 useAuth()
 // 데이터 모드(lib/mode.ts)가 가짜면 세션은 그대로 두고(로그인 유지) 화면에는 가짜 프로필만 보여 줌
+// 세션 · 프로필은 모드와 상관없이 읽어 둠 — 실데이터로 돌아올 때 프로필을 다시 읽느라 화면 묶음이 비지 않게
 export function AuthProvider({ children }: { children: ReactNode }) {
   const { mode, ready: modeReady } = useMode();
   const real = isSupabaseConfigured && mode === 'real';
   const [session, setSession] = useState<Session | null>(null);
   const [sessionLoading, setSessionLoading] = useState(isSupabaseConfigured);
   const [loaded, setLoaded] = useState<Loaded>(EMPTY);
-  const userId = real ? (session?.user.id ?? null) : null;
+  const userId = session?.user.id ?? null;
 
   useEffect(() => {
     if (!isSupabaseConfigured) return;
