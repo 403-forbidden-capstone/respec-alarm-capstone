@@ -9,7 +9,7 @@ import type { Todo } from '../types';
 export function TodoList({ todos, onToggle }: { todos: Todo[]; onToggle: (id: string) => void }) {
   if (!todos.length) {
     return (
-      <Text variant="body" tone="sub" style={styles.empty}>
+      <Text variant="note" tone="sub" style={styles.empty}>
         챙길 준비물이 없어요.
       </Text>
     );
@@ -54,5 +54,5 @@ const styles = StyleSheet.create({
   },
   boxOn: { backgroundColor: colors.ink, borderColor: colors.ink },
   done: { textDecorationLine: 'line-through' },
-  empty: { fontSize: 13, marginVertical: 6 },
+  empty: { marginVertical: 6 },
 });

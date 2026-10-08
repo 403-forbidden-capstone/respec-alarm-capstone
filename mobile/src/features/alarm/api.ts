@@ -322,6 +322,7 @@ export async function getWakeCheck(alarmId?: string): Promise<WakeCheck | null> 
   return {
     alarmId: alarm.id,
     appointmentTitle: a.title,
+    groupId: a.groupId && db.groups[a.groupId] ? a.groupId : null,
     groupName: a.groupId ? (db.groups[a.groupId]?.name ?? null) : null,
     dismissedAt: alarm.at,
     thetaMinutes: db.wakeThetaMinutes,

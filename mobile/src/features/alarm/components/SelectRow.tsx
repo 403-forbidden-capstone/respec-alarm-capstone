@@ -25,7 +25,7 @@ export function SelectRow<T extends string>({ label, value, options, onChange, f
         accessibilityLabel={`${label} ${current}`}
         style={({ pressed }) => [styles.row, !first && styles.divider, pressed && styles.pressed]}
       >
-        <Text variant="body" tone="sub" style={styles.label}>
+        <Text variant="rowLabel" tone="sub">
           {label}
         </Text>
         <Text variant="bodyStrong">{current}</Text>
@@ -38,8 +38,8 @@ export function SelectRow<T extends string>({ label, value, options, onChange, f
               onChange(v);
               setOpen(false);
             }}
-            accessibilityRole="button"
-            accessibilityState={{ selected: v === value }}
+            accessibilityRole="radio"
+            accessibilityState={{ checked: v === value }}
             style={[styles.option, i > 0 && styles.divider]}
           >
             <Text variant="body" weight={v === value ? 600 : 400}>
@@ -57,6 +57,5 @@ const styles = StyleSheet.create({
   row: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, paddingVertical: 14 },
   divider: { borderTopWidth: 1, borderTopColor: colors.line },
   pressed: { opacity: 0.6 },
-  label: { fontSize: 13.5 },
   option: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 14, minHeight: 52 },
 });
