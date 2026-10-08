@@ -10,6 +10,8 @@ import { ChatComposer } from '@/features/voice/components/ChatComposer';
 import { FoundScheduleCard } from '@/features/voice/components/FoundScheduleCard';
 import { now } from '@/lib/clock';
 import { useLoad } from '@/lib/useLoad';
+import { useAction } from '@/lib/useAction';
+import { userMessage } from '@/lib/errors';
 
 const LISTEN_MS = 1100; // 말하기를 누른 뒤 듣는 시간 (목업 chatSpeak). AI가 답하는 시간은 api(say)가 기다림
 
@@ -22,14 +24,15 @@ export default function AiScreen() {
   const [listening, setListening] = useState(false);
   const [thinking, setThinking] = useState(false); // 내 말을 보내고 AI 답을 기다리는 중
   const [pendingText, setPendingText] = useState<string | null>(null); // 보낸 내 말 — 답을 기다리는 동안 먼저 보여 줌
-  const [busy, setBusy] = useState(false); // 카드 저장 · 완료 같은 버튼이 도는 중 — 두 번 눌러도 한 번만
+  // 카드 저장 · 완료 같은 버튼은 한 번에 하나씩, 다시 읽기가 끝날 때까지 — 실패하면 토스트 (lib/useAction)
+  const { busy, run: act } = useAction();
   const scroll = useRef<ScrollView>(null);
 
   const next = data?.next ?? null;
   const canSay = !listening && !thinking && next?.who === 'me';
 
   // 내 말을 보내고 AI 답까지 기다림 (api say가 한 번에 돌려줌). 보낼 글을 알면 답을 기다리는 동안 내 말을 먼저 그림(목업 userSay)
-  // 실데이터 음성 모드는 서버가 받아 적기 전엔 글을 모르니 점 세 개만 — 그때는 text 없이 부름. 실패하면 토스트
+  // 실데이터에서 next에 대본 문장이 없고 글 모드도 아니면(음성) 보낼 글을 모르니 점 세 개만. 다시 읽은 뒤에 정리 표시를 내림
   async function talk(text?: string) {
     setPendingText(text?.trim() || (next?.who === 'me' ? next.text : null));
     setThinking(true);
@@ -37,8 +40,7 @@ export default function AiScreen() {
       await say(text);
       setDraftText(null);
     } catch (e) {
-      const message = e instanceof Error ? e.message : '';
-      toast(/[가-힣]/.test(message) ? message : '말을 보내지 못했어요');
+      toast(userMessage(e, '말을 보내지 못했어요'));
     } finally {
       await reload();
       setThinking(false);
@@ -86,20 +88,6 @@ export default function AiScreen() {
     talk(draftText ?? next.text);
   }
 
-  // 버튼 동작은 한 번에 하나씩, 실패하면 토스트
-  async function act(task: () => Promise<void>) {
-    if (busy) return;
-    setBusy(true);
-    try {
-      await task();
-    } catch (e) {
-      const message = e instanceof Error ? e.message : '';
-      toast(/[가-힣]/.test(message) ? message : '하지 못했어요. 다시 해 주세요');
-    } finally {
-      setBusy(false);
-    }
-  }
-
   function toggleMode() {
     setMode((m) => (m === 'text' ? 'voice' : 'text'));
     setDraftText(null);
@@ -118,13 +106,13 @@ export default function AiScreen() {
     act(async () => {
       const saved = await saveFoundSchedule();
       toast(`${saved.title} 알람을 맞췄어요`);
-      reload();
+      await reload();
     });
 
   const rejectFound = () =>
     act(async () => {
       await rejectFoundSchedule();
-      reload();
+      await reload();
     });
 
   return (
@@ -138,7 +126,7 @@ export default function AiScreen() {
           keyboardShouldPersistTaps="handled"
           onContentSizeChange={() => scroll.current?.scrollToEnd({ animated: true })}
         >
-          <TopBar screenId="A02" right={<TextLink label="대화 종료" onPress={finish} />} />
+          <TopBar screenId="A02" right={<TextLink label="대화 종료" onPress={finish} disabled={thinking || busy} />} />
           <Text variant="title" style={styles.title}>
             하루를 돌아봐요
           </Text>

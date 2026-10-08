@@ -21,6 +21,7 @@ import {
   type MockChat,
 } from '@/mocks/ai';
 import { db, kst, TODAY } from '@/mocks/data';
+import { UserError } from '@/lib/errors';
 
 import type { Conversation, FoundSchedule } from './types';
 
@@ -101,7 +102,7 @@ export function foundScheduleDraft(): AppointmentDraft | null {
 // 실데이터는 Edge가 appointments · 알람을 저장하고 apply_status = APPLIED
 export async function saveFoundSchedule(estimate?: Estimate): Promise<Appointment> {
   // 이미 저장 · 저장 안 함을 고른 카드면 막음 — 두 번 누르거나 H05를 다시 열어도 일정이 두 벌 생기지 않게
-  if (aiDb.chat?.found !== 'PENDING') throw new Error('이미 확인한 일정이에요');
+  if (aiDb.chat?.found !== 'PENDING') throw new UserError('이미 확인한 일정이에요');
   const e = estimate ?? (await estimateAppointment(FOUND_DRAFT));
   const saved = await createAppointment(e, estimate ? 'AI 대화 · 수정함' : 'AI 대화 · 확인함');
   const prepare = saved.alarms.find((x) => x.kind === 'PREPARE') ?? saved.alarms[0];

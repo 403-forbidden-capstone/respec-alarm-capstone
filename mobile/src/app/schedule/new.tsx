@@ -21,6 +21,7 @@ import { foundScheduleDraft, saveFoundSchedule } from '@/features/voice/api';
 import { dayKey, formatDateParen, formatDateShort, formatTime, formatTime24 } from '@/lib/format';
 import { useLoad } from '@/lib/useLoad';
 import { colors } from '@/theme';
+import { userMessage } from '@/lib/errors';
 
 const DATES = draftDates();
 const DATE_OPTIONS = DATES.map((d) => [dayKey(d), formatDateParen(d)] as const);
@@ -62,7 +63,7 @@ export default function NewScheduleScreen() {
       if (fromChat && router.canGoBack()) router.back();
       else router.dismissTo('/alarms');
     } catch (e) {
-      toast(e instanceof Error && e.message ? e.message : '저장하지 못했어요');
+      toast(userMessage(e, '저장하지 못했어요'));
     } finally {
       setSaving(false);
     }

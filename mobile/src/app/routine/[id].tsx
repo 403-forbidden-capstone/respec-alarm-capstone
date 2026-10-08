@@ -11,6 +11,7 @@ import { StepEditor } from '@/features/routine/components/StepEditor';
 import { addStep, canSave, moveStep, removeStep, savedMessage, stepTimes, toggleDay, updateStep } from '@/features/routine/draft';
 import type { Routine } from '@/features/routine/types';
 import { useLoad } from '@/lib/useLoad';
+import { userMessage } from '@/lib/errors';
 
 // A04 루틴 편집 — 일기(A03)의 루틴 제안을 내 생활에 맞게 고쳐 저장 (저장해야 루틴 · 단계 알람이 생김)
 // /routine/new?journal=2025-05-22 = 그 일기의 제안으로 만든 초안, /routine/r2 = 저장한 루틴
@@ -57,7 +58,7 @@ function RoutineEditor({ initial, onBack }: { initial: Routine; onBack?: () => v
       if (router.canGoBack()) router.back();
       else if (saved.id) router.replace({ pathname: '/routine/[id]', params: { id: saved.id } });
     } catch (e) {
-      toast(e instanceof Error && e.message ? e.message : '루틴을 저장하지 못했어요');
+      toast(userMessage(e, '루틴을 저장하지 못했어요'));
     } finally {
       setSaving(false);
     }
