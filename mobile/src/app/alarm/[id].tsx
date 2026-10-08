@@ -2,7 +2,7 @@ import { useLocalSearchParams } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
-import { Button, Card, Chip, KeyValueRow, Screen, Sheet, Stepper, Text, toast, Toggle, TopBar } from '@/components/ui';
+import { Button, Card, Chip, KeyValueRow, LoadError, Screen, Sheet, Stepper, Text, toast, Toggle, TopBar } from '@/components/ui';
 import {
   getAppointment,
   previewAlarms,
@@ -34,12 +34,13 @@ const LEVEL_OPTIONS = LEVELS.map((l, i) => [i as Level, l.name] as const);
 // H03 알람 설정 — 연결 일정 · 이동 조건 · 준비 시간 · 여유를 바꾸면 다시 계산 · 강도 직접 고르기
 export default function AlarmDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
-  const { data, reload } = useLoad(() => getAppointment(id));
+  const { data, error, reload } = useLoad(() => getAppointment(id));
 
   if (data === undefined) {
     return (
       <Screen>
         <TopBar onBack={backOrHome} screenId="H03" />
+        {error ? <LoadError onRetry={reload} /> : null}
       </Screen>
     );
   }
@@ -114,6 +115,7 @@ function Detail({ appointment: a, reload }: { appointment: AppointmentDetail; re
   }
 
   function keep() {
+    if (saving.current) return; // "바꾸기"가 저장하는 중이면 그대로 두기 · 시트 닫기도 기다림
     setBuffer(a.bufferMinutes);
     setConfirm(false);
   }
