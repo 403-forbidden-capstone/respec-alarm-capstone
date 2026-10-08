@@ -117,7 +117,7 @@ export default function HomeScreen() {
 
       {suggestion ? (
         <Card variant="dash" onPress={() => router.push({ pathname: '/suggestion/[id]', params: { id: suggestion.id } })}>
-          <Text variant="bodyStrong" style={styles.cardTitle}>
+          <Text variant="bodyLarge" weight={600}>
             {suggestion.title}
           </Text>
           <Text variant="small" tone="sub" style={styles.cardSub}>
@@ -154,7 +154,6 @@ const styles = StyleSheet.create({
   title: { marginTop: 8, marginBottom: 4 },
   ctaText: { marginTop: 4 },
   ctaButton: { marginTop: 12 },
-  cardTitle: { fontSize: 15 },
   cardSub: { marginTop: 2 },
   group: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   avatars: { flexDirection: 'row' },

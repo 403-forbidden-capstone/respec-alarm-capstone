@@ -11,7 +11,7 @@ import { IMPORTANCE_LABEL, type ScheduleItem } from '../types';
 export function ScheduleList({ items }: { items: ScheduleItem[] }) {
   if (!items.length) {
     return (
-      <Text variant="body" tone="sub" style={styles.empty}>
+      <Text variant="note" tone="sub" style={styles.empty}>
         일정이 없어요. 일정을 추가하면 알람을 계산해 드려요.
       </Text>
     );
@@ -23,16 +23,16 @@ export function ScheduleList({ items }: { items: ScheduleItem[] }) {
         const inner = (
           <>
             <View style={styles.time}>
-              <Text variant="caption" tone="sub" style={styles.ampm}>
+              <Text variant="tiny" tone="sub">
                 {t.ampm}
               </Text>
-              <Text variant="bodyStrong" weight={700} style={styles.hm}>
+              <Text variant="bodyLarge" weight={700} style={styles.hm}>
                 {t.hm}
               </Text>
             </View>
             <View style={[styles.bar, !item.appointmentId && styles.barPlain]} />
             <View style={styles.text}>
-              <Text variant="bodyStrong" weight={700} style={styles.title}>
+              <Text variant="listTitle">
                 {item.title}
               </Text>
               <Text variant="label" tone="sub">
@@ -67,11 +67,9 @@ const styles = StyleSheet.create({
   divider: { borderTopWidth: 1, borderTopColor: colors.line },
   pressed: { opacity: 0.7 },
   time: { width: 50 },
-  ampm: { fontSize: 11 },
-  hm: { fontSize: 15, fontVariant: ['tabular-nums'] },
+  hm: { fontVariant: ['tabular-nums'] },
   bar: { width: 2, height: 30, backgroundColor: colors.ink },
   barPlain: { backgroundColor: colors.line },
   text: { flex: 1 },
-  title: { fontSize: 14.5 },
-  empty: { fontSize: 13, marginVertical: 6 },
+  empty: { marginVertical: 6 },
 });
