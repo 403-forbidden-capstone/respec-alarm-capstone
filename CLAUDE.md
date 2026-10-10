@@ -25,7 +25,7 @@
 - 화면은 데이터를 `mobile/src/features/*/api.ts`로만 읽습니다. 지금은 `mobile/src/mocks`의 가짜 데이터를 돌려주고, 실데이터가 붙으면 api.ts만 바꿉니다. 옮긴 목업 화면은 `/dev/screens`에서 번호로 엽니다.
 - 시각 · 날짜 글자는 `mobile/src/lib/format`(오전 7:55 · 5월 22일 목요일), 지금 시각은 `lib/clock`의 `now()`를 씁니다.
 - 쓰기 버튼은 `lib/useAction`(두 번 누름 막기 · 실패 토스트), 못 읽으면 `components/ui`의 `LoadError`, "← 이전"은 `lib/nav`의 `backOrHome`을 씁니다. 사용자에게 보여 줄 실패 이유는 api.ts가 `lib/errors`의 `UserError`로 던지고, 그 밖의 오류(DB · 네트워크 원문)는 화면이 기본 문구로 바꿔 보여 줍니다.
-- 피그마 MCP는 한 달 호출 수가 적어서(View 자리 20회) 프레임 하나를 꼭 봐야 할 때만 씁니다.
+- 피그마 화면은 `docs/design/figma/`의 PNG(목업 번호 대응표 포함)를 먼저 봅니다. 피그마 MCP는 한 달 호출 수가 적어서(View 자리 20회) PNG에 없는 걸 꼭 봐야 할 때만 씁니다.
 
 ## Git 흐름
 
