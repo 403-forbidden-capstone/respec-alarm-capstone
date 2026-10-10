@@ -17,6 +17,14 @@ jest.mock('../supabase', () => ({
   },
 }));
 
+// 실데이터 스위치(lib/flags) — 아래 테스트는 켠 상태가 기본, 끈 상태는 따로 확인
+let mockReady = true;
+jest.mock('../flags', () => ({
+  get REAL_DATA_READY() {
+    return mockReady;
+  },
+}));
+
 type Loaded = { mode: typeof import('../mode'); clock: typeof import('../clock') };
 
 // 모듈을 새로 불러옴 — 앱을 다시 연 것과 같음 (isolateModules는 require로만 새로 읽힘)
@@ -37,6 +45,7 @@ describe('데이터 모드', () => {
   beforeEach(() => {
     mockStore.clear();
     mockConfigured = false;
+    mockReady = true;
     jest.clearAllMocks();
   });
 
@@ -68,6 +77,34 @@ describe('데이터 모드', () => {
     expect(mode.setMode('real')).toBe('real');
     expect(mockStorage.setItem).toHaveBeenCalledWith('respec.dataMode', 'real');
     expect(clock.now().toISOString()).not.toBe(SCENARIO_MORNING);
+  });
+
+  it('실데이터 스위치가 꺼져 있으면 연결돼 있어도 가짜 · 저장된 실데이터도 가짜 (#116)', async () => {
+    mockConfigured = true;
+    mockReady = false;
+    mockStore.set('respec.dataMode', 'real');
+    const { mode, clock } = load();
+    await flush();
+    expect(mode.canUseRealData).toBe(false);
+    expect(mode.getMode()).toBe('mock');
+    expect(mockStorage.setItem).not.toHaveBeenCalled(); // 읽기만 하고 덮어쓰지 않음 — 스위치를 켜면 저장된 real로 다시 열림
+    expect(mockStore.get('respec.dataMode')).toBe('real');
+    expect(mode.setMode('real')).toBe('mock');
+    expect(clock.now().toISOString()).toBe(SCENARIO_MORNING);
+  });
+
+  it('실데이터 스위치가 꺼져 있으면 저장값이 없거나 못 읽어도 가짜로 시작함', async () => {
+    mockConfigured = true;
+    mockReady = false;
+    let opened = load();
+    expect(opened.mode.getMode()).toBe('mock'); // 저장값을 읽기 전 첫 화면도
+    await flush();
+    expect(opened.mode.getMode()).toBe('mock');
+
+    mockStorage.getItem.mockRejectedValueOnce(new Error('저장소 오류'));
+    opened = load();
+    await flush();
+    expect(opened.mode.getMode()).toBe('mock');
   });
 
   it('저장값을 못 읽으면 기본값으로 시작함', async () => {
