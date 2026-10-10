@@ -17,6 +17,14 @@ jest.mock('../supabase', () => ({
   },
 }));
 
+// 실데이터 스위치(lib/flags) — 아래 테스트는 켠 상태가 기본, 끈 상태는 따로 확인
+let mockReady = true;
+jest.mock('../flags', () => ({
+  get REAL_DATA_READY() {
+    return mockReady;
+  },
+}));
+
 const store = new Map<string, string>();
 const g = globalThis as unknown as { localStorage?: unknown; location?: unknown };
 
@@ -34,6 +42,7 @@ describe('데이터 모드 (웹)', () => {
   beforeEach(() => {
     store.clear();
     mockConfigured = true;
+    mockReady = true;
     g.localStorage = {
       getItem: (k: string) => store.get(k) ?? null,
       setItem: (k: string, v: string) => void store.set(k, v),
@@ -63,6 +72,19 @@ describe('데이터 모드 (웹)', () => {
     const mode = open('?mode=real');
     expect(mode.getMode()).toBe('mock');
     expect(store.get('respec.dataMode')).toBe('mock');
+  });
+
+  it('실데이터 스위치가 꺼져 있으면 ?mode=real이어도 가짜로 돌고 가짜로 저장함 (#116)', () => {
+    mockReady = false;
+    const mode = open('?mode=real');
+    expect(mode.getMode()).toBe('mock');
+    expect(store.get('respec.dataMode')).toBe('mock');
+  });
+
+  it('실데이터 스위치가 꺼져 있으면 저장된 real도 주소 없이 열 때 가짜 (#116)', () => {
+    mockReady = false;
+    store.set('respec.dataMode', 'real');
+    expect(open('').getMode()).toBe('mock');
   });
 
   it('바꾸면 localStorage에 바로 씀', () => {
