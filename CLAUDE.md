@@ -22,6 +22,8 @@
 - 동작 · 흐름은 클릭 목업(`mobile/public/mockup.html`, 화면 번호 H01 · G01 등), 모양은 피그마를 기준으로 합니다.
 - 색 · 간격 · 글자 크기는 `mobile/src/theme`, 공용 부품은 `mobile/src/components/ui`에서 가져옵니다. 화면 파일에 색 값 · 글꼴을 직접 적지 않습니다. 글자는 `Text`로 씁니다.
 - 부품 견본은 `/dev/ui`(앱은 `respecalarm://dev/ui`)에서 봅니다.
+- 화면은 데이터를 `mobile/src/features/*/api.ts`로만 읽습니다. 지금은 `mobile/src/mocks`의 가짜 데이터를 돌려주고, 실데이터가 붙으면 api.ts만 바꿉니다. 옮긴 목업 화면은 `/dev/screens`에서 번호로 엽니다.
+- 시각 · 날짜 글자는 `mobile/src/lib/format`(오전 7:55 · 5월 22일 목요일), 지금 시각은 `lib/clock`의 `now()`를 씁니다.
 - 피그마 MCP는 한 달 호출 수가 적어서(View 자리 20회) 프레임 하나를 꼭 봐야 할 때만 씁니다.
 
 ## Git 흐름

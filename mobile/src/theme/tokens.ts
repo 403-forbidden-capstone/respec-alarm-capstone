@@ -12,6 +12,7 @@ export const colors = {
   dash: '#CFCFCA', // 점선 카드 테두리
   switchOff: '#D8D8D4',
   shadow: '#000000', // 그림자 색 (투명도는 쓰는 곳에서)
+  scrim: 'rgba(20, 20, 20, 0.38)', // 시트 뒤를 어둡게
   inverse: '#FFFFFF', // 어두운 바탕 위 글자
 
   // 상태 점 · 경고
