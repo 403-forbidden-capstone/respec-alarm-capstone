@@ -6,7 +6,7 @@ import { dateParts } from '@/lib/format';
 import { aiDb, ROUTINE_SUGGESTION, suggestedRoutine } from '@/mocks/ai';
 import { db } from '@/mocks/data';
 
-import type { Journal, Routine, RoutineProgress, Todo } from './types';
+import type { EveningRoutine, Journal, Routine, RoutineProgress, Todo } from './types';
 
 // 오늘 루틴 (H01 아침)
 export async function getTodayRoutine(): Promise<RoutineProgress | null> {
@@ -64,6 +64,13 @@ export async function declineRoutineSuggestion(recordDate: string) {
   if (j && j.suggestion === 'PENDING') j.suggestion = 'REJECTED';
 }
 
+// 홈 저녁 "저녁 루틴" 카드 — A04에서 가장 최근에 저장한 루틴(목업 S.rNight). 저장하면 목록 맨 뒤로 가므로 마지막 것. 없으면 null
+export async function getEveningRoutine(): Promise<EveningRoutine | null> {
+  const r = aiDb.routines[aiDb.routines.length - 1];
+  if (!r?.id) return null;
+  return { id: r.id, title: r.title, days: [...r.days], startMinute: r.startMinute, stepCount: r.steps.length };
+}
+
 // 루틴 편집 (A04) — id가 'new'면 일기의 루틴 제안으로 만든 초안(저장 전), 아니면 저장한 루틴
 export async function getRoutine(id: string, sourceJournal?: string): Promise<Routine | null> {
   if (id === 'new') return suggestedRoutine(sourceJournal ?? null);
@@ -78,9 +85,10 @@ export async function saveRoutine(routine: Routine): Promise<Routine> {
     id: routine.id ?? `r${aiDb.routines.length + 2}`, // r1은 아침 루틴
     steps: routine.steps.map((s) => ({ ...s, name: s.name.trim() || '새 단계' })),
   });
+  // 고친 루틴도 목록 맨 뒤로 — "가장 최근 저장"이 마지막 (실데이터는 routines.updated_at 순)
   const i = aiDb.routines.findIndex((x) => x.id === saved.id);
-  if (i >= 0) aiDb.routines[i] = saved;
-  else aiDb.routines.push(saved);
+  if (i >= 0) aiDb.routines.splice(i, 1);
+  aiDb.routines.push(saved);
   const j = saved.sourceJournal ? aiDb.journals[saved.sourceJournal] : undefined;
   if (j) j.suggestion = 'APPLIED';
   db.events.push({ at: now(), label: `루틴 저장 · ${saved.title}`, source: '직접 입력' });

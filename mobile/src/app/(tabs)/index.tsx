@@ -7,12 +7,12 @@ import { AppointmentAlarmCard } from '@/features/alarm/components/AppointmentAla
 import { ScheduleList } from '@/features/alarm/components/ScheduleList';
 import { TextLink } from '@/features/alarm/components/TextLink';
 import { getPendingSuggestion } from '@/features/records/api';
-import { advanceRoutine, getTodayRoutine, listTodos, toggleTodo } from '@/features/routine/api';
+import { advanceRoutine, getEveningRoutine, getTodayRoutine, listTodos, toggleTodo } from '@/features/routine/api';
 import { RoutineCard } from '@/features/routine/components/RoutineCard';
 import { TodoList } from '@/features/routine/components/TodoList';
 import { getGroupSummary, listGroups } from '@/features/social/api';
 import { now } from '@/lib/clock';
-import { addDays, formatDate, formatRelative, minuteOfDay, startOfDay } from '@/lib/format';
+import { addDays, formatDate, formatMinuteOfDay, formatRelative, minuteOfDay, startOfDay } from '@/lib/format';
 import { openGroupDetail } from '@/lib/nav';
 import { useLoad } from '@/lib/useLoad';
 import { colors } from '@/theme';
@@ -24,15 +24,16 @@ async function loadHome() {
   const evening = minuteOfDay(t) >= 18 * 60;
   const target = evening ? addDays(today, 1) : today;
   const groups = await listGroups();
-  const [next, schedule, routine, todos, suggestion, group] = await Promise.all([
+  const [next, schedule, routine, todos, suggestion, group, eveningRoutine] = await Promise.all([
     getNextAlarm(),
     getDaySchedule(target),
     getTodayRoutine(),
     listTodos(target),
     getPendingSuggestion(),
     groups[0] ? getGroupSummary(groups[0].id) : Promise.resolve(null),
+    evening ? getEveningRoutine() : Promise.resolve(null),
   ]);
-  return { t, evening, next, schedule, routine, todos, suggestion, group };
+  return { t, evening, next, schedule, routine, todos, suggestion, group, eveningRoutine };
 }
 
 function greeting(t: Date) {
@@ -52,7 +53,7 @@ export default function HomeScreen() {
       {error ? <LoadError onRetry={reload} /> : null}
     </Screen>
   );
-  const { t, evening, next, schedule, routine, todos, suggestion, group } = data;
+  const { t, evening, next, schedule, routine, todos, suggestion, group, eveningRoutine } = data;
 
   async function tickRoutine() {
     if (!routine) return;
@@ -105,6 +106,23 @@ export default function HomeScreen() {
           <Card>
             <TodoList todos={todos} onToggle={tickTodo} />
           </Card>
+          {/* 저장한 저녁 루틴이 있으면 루틴 편집(A04)으로 — 목업 SCR.home 저녁 루틴 카드 */}
+          {eveningRoutine ? (
+            <>
+              <SectionHeader title="저녁 루틴" />
+              <Card
+                onPress={() => router.push({ pathname: '/routine/[id]', params: { id: eveningRoutine.id } })}
+                accessibilityLabel={`${eveningRoutine.title} 루틴 열기`}
+              >
+                <Text variant="bodyLarge" weight={600}>
+                  {eveningRoutine.title}
+                </Text>
+                <Text variant="small" tone="sub" style={styles.cardSub}>
+                  매주 {eveningRoutine.days.join(' · ')} · {formatMinuteOfDay(eveningRoutine.startMinute)}부터 {eveningRoutine.stepCount}단계
+                </Text>
+              </Card>
+            </>
+          ) : null}
           <Card>
             <Text variant="bodyStrong">자기 전 AI 대화</Text>
             <Text variant="small" tone="sub" style={styles.ctaText}>

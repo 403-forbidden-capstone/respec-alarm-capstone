@@ -125,3 +125,9 @@ export function joinKo(words: string[]) {
   const head = words.slice(0, -1).map((w, i) => (i === words.length - 2 ? `${josa(w, '과', '와')} ` : `${w}, `));
   return head.join('') + words[words.length - 1];
 }
+
+// 0시부터 분 → '21:30' (루틴 시작 시각 등). 하루를 넘으면 다음 날 시각으로 (목업 h24)
+export function formatMinuteOfDay(minutes: number) {
+  const m = ((minutes % 1440) + 1440) % 1440;
+  return `${pad(Math.floor(m / 60))}:${pad(m % 60)}`;
+}
