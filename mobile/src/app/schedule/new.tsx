@@ -1,4 +1,4 @@
-import { router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import { useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
@@ -17,10 +17,12 @@ import {
   type Importance,
   type Transport,
 } from '@/features/alarm/types';
+import { foundScheduleDraft, saveFoundSchedule } from '@/features/voice/api';
 import { dayKey, formatDateParen, formatDateShort, formatTime, formatTime24 } from '@/lib/format';
 import { backOrHome } from '@/lib/nav';
 import { useLoad } from '@/lib/useLoad';
 import { colors } from '@/theme';
+import { userMessage } from '@/lib/errors';
 
 const DATES = draftDates();
 const DATE_OPTIONS = DATES.map((d) => [dayKey(d), formatDateParen(d)] as const);
@@ -32,9 +34,13 @@ const TRANSPORT_OPTIONS = (['TRANSIT', 'CAR', 'WALK'] as const).map((t) => [t, T
 const IMPORTANCE_OPTIONS = (['LOW', 'NORMAL', 'HIGH'] as const).map((v) => [v, IMPORTANCE_LABEL[v]] as const);
 
 // H05 새 일정 만들기 — 입력하면 이동시간 · 준비 시간으로 알람을 계산해 확인 시트로 보여 줌
+// from=chat: AI 대화(A02)에서 찾은 일정을 "수정"으로 연 것 — 찾은 값으로 채우고, 저장하면 대화로 돌아감
 export default function NewScheduleScreen() {
+  const fromParam = useLocalSearchParams<{ from?: string }>().from;
+  // 대화에서 왔고 찾은 일정이 아직 대기일 때만 — 이미 확인한 카드면 보통 새 일정으로 (두 벌 저장 막기)
+  const [fromChat] = useState(() => fromParam === 'chat' && foundScheduleDraft() != null);
   const { data: places, error: placesError, reload: reloadPlaces } = useLoad(listPlaces);
-  const [draft, setDraft] = useState(defaultDraft);
+  const [draft, setDraft] = useState(() => (fromChat ? foundScheduleDraft() : null) ?? defaultDraft());
   const [estimate, setEstimate] = useState<Estimate | null>(null);
   const [saving, setSaving] = useState(false);
   const set = <K extends keyof typeof draft>(key: K, value: (typeof draft)[K]) => setDraft((d) => ({ ...d, [key]: value }));
@@ -52,10 +58,13 @@ export default function NewScheduleScreen() {
     if (!estimate || saving) return;
     setSaving(true);
     try {
-      const saved = await createAppointment(estimate);
+      const saved = fromChat ? await saveFoundSchedule(estimate) : await createAppointment(estimate);
       setEstimate(null);
       toast(`알람 ${saved.alarms.filter((x) => x.kind !== 'ARRIVE').length}개를 맞췄어요`);
-      router.dismissTo('/alarms');
+      if (fromChat && router.canGoBack()) router.back();
+      else router.dismissTo('/alarms');
+    } catch (e) {
+      toast(userMessage(e, '저장하지 못했어요'));
     } finally {
       setSaving(false);
     }

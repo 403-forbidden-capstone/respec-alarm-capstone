@@ -56,6 +56,19 @@ const SECTIONS: { title: string; issue: string; rows: Row[] }[] = [
       { id: 'S01', name: '알람 조정 제안', href: { pathname: '/suggestion/[id]', params: { id: 's1' } } },
     ],
   },
+  {
+    title: 'AI · 루틴',
+    issue: '#39',
+    rows: [
+      { id: 'A02', name: 'AI 대화', href: '/ai' },
+      { id: 'A03', name: '하루 기록 · 일기', href: { pathname: '/journal/[date]', params: { date: '2025-05-22' } } },
+      {
+        id: 'A04',
+        name: '루틴 편집 · 회의 전날 준비',
+        href: { pathname: '/routine/[id]', params: { id: 'new', journal: '2025-05-22' } },
+      },
+    ],
+  },
 ];
 
 const TIMES = [
@@ -160,7 +173,7 @@ export default function ScreenListScreen() {
       ))}
 
       <Text variant="caption" style={styles.note}>
-        AI 화면(A02 · A03 · A04)은 #39에서 옮겨요. 실제 알람 울림은 알람 코어의 네이티브 화면이고, 울림 시험은 /dev/alarm-test에서 해요.
+        AI 화면(A02 · A03 · A04)은 AI 대기라 목업 대본대로 움직여요. 일기(A03)는 A02에서 대화를 마치면 생겨요. 실제 알람 울림은 알람 코어의 네이티브 화면이고, 울림 시험은 /dev/alarm-test에서 해요.
       </Text>
     </Screen>
   );

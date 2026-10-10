@@ -74,6 +74,8 @@ function RootStack() {
         <Stack.Screen name="groups/[id]/index" />
         <Stack.Screen name="groups/[id]/members/[userId]" />
         <Stack.Screen name="suggestion/[id]" />
+        <Stack.Screen name="journal/[date]" />
+        <Stack.Screen name="routine/[id]" />
       </Stack.Protected>
       {/* 목업에 없는 설정 · 로그인 · 온보딩 — 로그인을 붙일 때까지 빠짐 */}
       <Stack.Protected guard={ready && canUseRealData}>
