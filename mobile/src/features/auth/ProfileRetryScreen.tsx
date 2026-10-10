@@ -3,9 +3,10 @@ import { StyleSheet, View } from 'react-native';
 
 import { Button, Screen, Text } from '@/components/ui';
 import { signOut } from '@/lib/auth';
+import { userMessage } from '@/lib/errors';
 
 type Props = {
-  message: string; // 못 읽은 이유 (useAuth().profileError)
+  message: string; // 못 읽은 이유 (useAuth().profileError) — UserError일 때만, 아니면 ''
   onRetry: () => Promise<void>; // 다시 읽기 (useAuth().refreshProfile) — 실패하면 던짐
 };
 
@@ -21,7 +22,7 @@ export function ProfileRetryScreen({ message, onRetry }: Props) {
     try {
       await action();
     } catch (e) {
-      setError(e instanceof Error ? e.message : '다시 시도하지 못했어요');
+      setError(userMessage(e, '다시 시도하지 못했어요'));
     } finally {
       setBusy(false);
     }
@@ -45,7 +46,7 @@ export function ProfileRetryScreen({ message, onRetry }: Props) {
       <View style={styles.center}>
         <Text variant="title">내 정보를 불러오지 못했어요</Text>
         <Text variant="lead">연결을 확인한 뒤 다시 시도해 주세요.</Text>
-        <Text variant="caption">{message}</Text>
+        {message ? <Text variant="caption">{message}</Text> : null}
       </View>
     </Screen>
   );

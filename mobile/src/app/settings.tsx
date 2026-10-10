@@ -1,11 +1,14 @@
-import { router } from 'expo-router';
 import { useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
 import { Button, Card, KeyValueRow, Screen, SectionHeader, Text, TopBar } from '@/components/ui';
 import { useAuth } from '@/features/auth/AuthProvider';
+import { DataModeToggle } from '@/features/auth/DataModeToggle';
 import type { TransportType } from '@/features/profile/types';
 import { signOut } from '@/lib/auth';
+import { userMessage } from '@/lib/errors';
+import { canUseRealData } from '@/lib/mode';
+import { backOrHome } from '@/lib/nav';
 
 const PROVIDER_NAME: Record<string, string> = { kakao: '카카오', google: 'Google' };
 const TRANSPORT_NAME: Record<TransportType, string> = {
@@ -16,7 +19,7 @@ const TRANSPORT_NAME: Record<TransportType, string> = {
   WALK: '도보',
 };
 
-// 설정 — 계정 · 아침 준비 기본값 · 로그아웃. 값 바꾸기는 화면을 옮길 때(#30~) 붙임
+// 설정 — 계정 · 아침 준비 기본값 · 로그아웃 · 개발(데이터 모드). 값 바꾸기는 화면을 옮길 때(#30~) 붙임
 export default function SettingsScreen() {
   const { session, profile, enabled } = useAuth();
   const [error, setError] = useState<string | null>(null);
@@ -25,12 +28,12 @@ export default function SettingsScreen() {
 
   return (
     <Screen>
-      <TopBar onBack={router.canGoBack() ? router.back : undefined} />
+      <TopBar onBack={backOrHome} />
       <Text variant="title">설정</Text>
 
       <SectionHeader title="계정" />
       <Card>
-        <KeyValueRow first label="로그인" value={enabled ? (PROVIDER_NAME[provider] ?? (provider || '-')) : '목업 모드'} />
+        <KeyValueRow first label="로그인" value={enabled ? (PROVIDER_NAME[provider] ?? (provider || '-')) : '가짜 데이터 모드'} />
         <KeyValueRow label="닉네임" value={profile?.nickname ?? '-'} />
         <KeyValueRow label="아이디" value={profile?.handle ? `@${profile.handle}` : '-'} />
       </Card>
@@ -52,7 +55,7 @@ export default function SettingsScreen() {
           <Button
             label="로그아웃"
             variant="ghost"
-            onPress={() => signOut().catch((e) => setError(e instanceof Error ? e.message : '로그아웃하지 못했어요'))}
+            onPress={() => signOut().catch((e) => setError(userMessage(e, '로그아웃하지 못했어요')))}
           />
           {error ? (
             <Text variant="small" tone="warn">
@@ -61,12 +64,21 @@ export default function SettingsScreen() {
           ) : null}
         </View>
       ) : (
-        <Text variant="small">Supabase가 연결되면 로그인 정보가 여기에 보여요.</Text>
+        <Text variant="small">
+          {canUseRealData ? '실데이터 모드로 바꾸면 로그인 정보가 여기에 보여요.' : '로그인을 붙이면 로그인 정보가 여기에 보여요.'}
+        </Text>
       )}
+
+      <SectionHeader title="개발" right={canUseRealData ? undefined : '실데이터 아직 안 붙임'} />
+      <DataModeToggle />
+      <Text variant="caption" style={styles.note}>
+        가짜 데이터는 목업 시나리오(5월 22일)로 로그인 없이 돌아요. 화면 목록은 /dev/screens
+      </Text>
     </Screen>
   );
 }
 
 const styles = StyleSheet.create({
   stack: { gap: 8, marginTop: 16 },
+  note: { marginTop: 4, marginHorizontal: 4 },
 });

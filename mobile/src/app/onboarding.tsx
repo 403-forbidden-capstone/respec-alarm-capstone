@@ -5,6 +5,7 @@ import { Button, Card, Field, Screen, SectionHeader, Segmented, Stepper, Text } 
 import { useAuth } from '@/features/auth/AuthProvider';
 import { isHandleTaken, saveOnboarding } from '@/features/profile/api';
 import { HANDLE_PATTERN, type TransportType } from '@/features/profile/types';
+import { userMessage } from '@/lib/errors';
 
 const TRANSPORTS = [
   ['TRANSIT', '대중교통'],
@@ -14,7 +15,7 @@ const TRANSPORTS = [
 
 // 처음 설정 — 아이디 · 아침 준비 기본값 · 집. 저장하면 루트 레이아웃이 탭으로 보냄
 export default function OnboardingScreen() {
-  const { session, profile, refreshProfile } = useAuth();
+  const { session, profile, enabled, refreshProfile } = useAuth();
   const [nickname, setNickname] = useState(profile?.nickname ?? '');
   const [handle, setHandle] = useState('');
   const [prepare, setPrepare] = useState(profile?.default_prepare_minutes ?? 60);
@@ -31,7 +32,10 @@ export default function OnboardingScreen() {
   const canSave = handleOk && nickname.trim().length > 0 && !saving;
 
   async function save() {
-    if (!session) return;
+    if (!enabled || !session) {
+      setError('가짜 데이터 모드라 저장하지 않아요'); // /dev/screens에서 화면만 열어 본 경우
+      return;
+    }
     setSaving(true);
     setError(null);
     try {
@@ -49,7 +53,7 @@ export default function OnboardingScreen() {
       });
       await refreshProfile();
     } catch (e) {
-      setError(e instanceof Error ? e.message : '저장하지 못했어요');
+      setError(userMessage(e, '저장하지 못했어요'));
     } finally {
       setSaving(false);
     }
