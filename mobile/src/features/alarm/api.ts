@@ -8,7 +8,10 @@ import { db, kst, people, places, timelines, TODAY, transportFactor, type MockAp
 
 import {
   IMPORTANCE_POINT,
+  KIND_LABEL,
   LEVELS,
+  WAKE_NO_REPLY_MINUTES,
+  WAKE_OBSERVE_MINUTES,
   type AlarmKind,
   type AlarmTime,
   type Appointment,
@@ -165,10 +168,15 @@ export function defaultDraft(): AppointmentDraft {
   };
 }
 
+// 날짜 + 시간 칸('14:00') → 시각. 시간이 비었거나 형식이 틀리면 목업처럼 14:00
+export function draftAt(date: Date, time: string): Date {
+  const match = /^([01]?\d|2[0-3]):([0-5]\d)$/.exec(time.trim());
+  return addMinutes(startOfDay(date), match ? Number(match[1]) * 60 + Number(match[2]) : 14 * 60);
+}
+
 // 알람 계산 (H05 확인 시트) — 공통 P80 + 개인 보정(n ÷ (n + k) × 개인 오차 P80)
 export async function estimateAppointment(d: AppointmentDraft): Promise<Estimate> {
-  const [h, m] = d.time.split(':').map(Number);
-  const at = addMinutes(startOfDay(d.date), (h || 0) * 60 + (m || 0));
+  const at = draftAt(d.date, d.time);
   const place = places.find((p) => p.name === d.place) ?? places[0];
   const travel = Math.max(5, Math.round((place.travelMinutes * (transportFactor[d.transport] ?? 1)) / 5) * 5);
   const sameDayWake = db.appointments.some((a) => isSameDay(a.at, at) && a.withWake && alarmChain(a)[0].at < at);
@@ -287,30 +295,74 @@ function findAlarm(alarmId: string) {
 }
 
 // 울림 화면 (H07) — 실제 울림은 알람 코어(네이티브). 이 화면은 디자인 · 웹 미리 보기용
+// again = 확인 알림에 응답이 없어 다시 울림 → 큰 시각은 다시 울린 시각 (목업 ring-time = S.now). 기상 알람만, 다른 종류는 무시
 export async function getRing(alarmId: string, again = false): Promise<RingInfo | null> {
   const found = findAlarm(alarmId);
   if (!found || found.alarm.kind === 'ARRIVE') return null;
   const { a, alarm } = found;
   const kind = alarm.kind as RingKind;
+  const re = again && kind === 'WAKE';
   const sound = LEVELS[axisLevel(a, 'sound')];
   const vibration = LEVELS[axisLevel(a, 'vibration')];
+  const rang = db.wake.alarmId === alarm.id && db.wake.phase === 'ringing' ? db.wake.ringAt : null;
+  // 기록이 없으면(주소로 바로 열기) 알람 시각에 끈 것으로 보고 관찰 10분 + 응답 없음 5분 뒤
+  const at = re ? (rang ?? addMinutes(alarm.at, WAKE_OBSERVE_MINUTES + WAKE_NO_REPLY_MINUTES)) : alarm.at;
   return {
     alarmId: alarm.id,
     kind,
     appointment: toAppointment(a),
-    at: alarm.at,
+    at,
     voiceTone: LEVELS[axisLevel(a, 'voice')].voice,
-    voiceLine: voiceLine(a, kind, alarm.at, again),
+    voiceLine: voiceLine(a, kind, at, re),
     levelLine: `알람 강도 ${sound.name} · 배경음 ${sound.sound} · 진동 ${vibration.vibration}`,
     important: a.importance !== 'LOW',
   };
 }
 
+// 해제 뒤 화면 사용 시간 (분) — 실데이터는 #35 · #40
+// 지금은 시연 값: 폰을 보며 일어남 · 알람만 끄고 다시 잠듦 (목업 simUse · simSleep)
+const NO_USE = { usage: 0, recent: 0 };
+const USED = { usage: 3.2, recent: 1.4 };
+const SLEPT = { usage: 0.4, recent: 0 };
+
+// 울리기 시작 (H07) — 기상 알람이면 내 상태가 '알람 울리는 중'. 실데이터는 알람 코어(#33) · alarm_events TRIGGERED
+// 이미 기상 확정한 알람이면 판정을 그대로 둠 (목업은 기상 전에만 S.wake를 비움)
+export async function startRing(alarmId: string, at: Date) {
+  if (findAlarm(alarmId)?.alarm.kind !== 'WAKE' || db.wakeConfirmations[alarmId]) return;
+  db.wake = { alarmId, phase: 'ringing', ringAt: at, dismissedAt: null, ...NO_USE };
+}
+
+// 미루기 · 해제 없이 울림 화면을 나감 (뒤로 가기) — 울리는 중 표시만 지우고 기록은 안 남김
+export async function stopRing(alarmId: string) {
+  if (db.wake.alarmId === alarmId && db.wake.phase === 'ringing') db.wake = { ...db.wake, phase: 'idle' };
+}
+
+// 미루기 (H07) — 울리는 중 표시를 지우고 기록 (목업 A.snooze). at = 미룬 시각
+// 미룬 뒤 다시 울림 · 3번 제한 · SNOOZED 기록은 알람 코어(#33)
+export async function snoozeRing(alarmId: string, minutes: number, at: Date) {
+  const found = findAlarm(alarmId);
+  // 이미 기상 확정한 알람이면 해제처럼 기록을 그대로 둠 (확정 뒤에 미루기가 붙지 않게)
+  if (!found || db.wakeConfirmations[alarmId]) return;
+  await stopRing(alarmId);
+  db.events.push({ at, label: `${KIND_LABEL[found.alarm.kind]} 알람 ${minutes}분 미루기`, source: '자동' });
+}
+
+// 알람 해제 (H07) — at = 실제로 끈 시각(울린 시각). 기상 알람이면 기상 판정(관찰 중)을 시작
+// 이미 기상 확정한 알람이면 판정 · 기록을 그대로 둠 (해제 기록이 겹치지 않게). 실데이터는 alarm_events DISMISSED
+export async function dismissRing(alarmId: string, at: Date) {
+  const found = findAlarm(alarmId);
+  if (!found || db.wakeConfirmations[alarmId]) return;
+  db.events.push({ at, label: `${KIND_LABEL[found.alarm.kind]} 알람 해제`, source: '자동' });
+  if (found.alarm.kind === 'WAKE') db.wake = { alarmId, phase: 'observing', ringAt: null, dismissedAt: at, ...NO_USE };
+}
+
 // 기상 확인 (H08) — 기상 알람을 끈 뒤 화면 사용으로 판정. 실데이터는 #35 · #40
-// alarmId가 없으면 오늘 첫 기상 알람
+// alarmId가 없으면 진행 중인 판정, 그것도 없으면 오늘 첫 기상 알람
+// 확정 전인데 아직 안 껐으면(울리기 전 · 울리는 중) 목업 빈 화면처럼 null
 export async function getWakeCheck(alarmId?: string): Promise<WakeCheck | null> {
-  const found = alarmId
-    ? findAlarm(alarmId)
+  const id = alarmId ?? db.wake.alarmId;
+  const found = id
+    ? findAlarm(id)
     : db.appointments
         .map((a) => ({ a, alarm: alarmChain(a)[0] }))
         .filter(({ alarm }) => alarm.kind === 'WAKE')
@@ -318,19 +370,45 @@ export async function getWakeCheck(alarmId?: string): Promise<WakeCheck | null> 
   if (!found || found.alarm.kind !== 'WAKE') return null;
   const { a, alarm } = found;
   const confirmed = db.wakeConfirmations[alarm.id];
+  const live = db.wake.alarmId === alarm.id ? db.wake : null;
+  if (!confirmed && live?.phase !== 'observing' && live?.phase !== 'prompt') return null;
   return {
     alarmId: alarm.id,
     appointmentTitle: a.title,
+    groupId: a.groupId && db.groups[a.groupId] ? a.groupId : null,
     groupName: a.groupId ? (db.groups[a.groupId]?.name ?? null) : null,
-    dismissedAt: alarm.at,
+    phase: live?.phase === 'prompt' ? 'prompt' : 'observing',
+    // 확정 뒤 다른 기상 알람이 울려 판정이 바뀌었으면 알람 시각에 끈 것으로 봄
+    dismissedAt: live?.dismissedAt ?? alarm.at,
     thetaMinutes: db.wakeThetaMinutes,
-    confirmed: confirmed ? { ...confirmed } : null,
+    // 확정했으면 그때 저장한 사용 시간 — 다른 기상 알람이 울려 db.wake가 바뀌어도 "자동 판정"과 0분이 엇갈리지 않게
+    usage: confirmed ? confirmed.usage : (live?.usage ?? 0),
+    recent: confirmed ? confirmed.recent : (live?.recent ?? 0),
+    confirmed: confirmed ? { at: confirmed.at, how: confirmed.how } : null,
   };
 }
 
-// how: self = 확인 알림에 직접 응답, auto = 화면 사용으로 자동 판정 — 실데이터는 alarm_events WAKE_CONFIRMED
+// 확인 알림 (H08) — 해제 뒤 10분 동안 조건을 못 채움 (시연: 알람만 끄고 다시 잠듦). at = 관찰이 끝난 시각. 실데이터는 #35 · #40
+export async function promptWake(alarmId: string, at: Date) {
+  const dismissedAt = db.wake.alarmId === alarmId ? db.wake.dismissedAt : null;
+  db.wake = { alarmId, phase: 'prompt', ringAt: null, dismissedAt, ...SLEPT };
+  db.events.push({ at, label: '확인 알림 발송', source: '알림' });
+}
+
+// 확인 알림에도 응답이 없음 → 기상 알람이 다시 울림 (H07 again=1). at = 다시 울리는 시각
+// 다시 울릴지는 D2에서 정함 — 안 울리기로 하면 이 함수와 재알람 기록을 같이 뺌
+export async function missWake(alarmId: string, at: Date) {
+  db.wake = { alarmId, phase: 'ringing', ringAt: at, dismissedAt: null, ...NO_USE };
+  db.events.push({ at, label: '재알람', source: '자동' });
+}
+
+// how: self = 확인 알림에 직접 응답(사용 시간은 확인 알림 때 그대로), auto = 화면 사용으로 자동 판정(시연: 폰을 보며 일어남)
+// 실데이터는 alarm_events WAKE_CONFIRMED
 export async function confirmWake(alarmId: string, how: 'self' | 'auto', at: Date) {
-  db.wakeConfirmations[alarmId] = { at, how };
+  if (db.wakeConfirmations[alarmId]) return; // 이미 확정한 알람은 처음 판정 그대로
+  if (db.wake.alarmId === alarmId) db.wake = { ...db.wake, phase: 'confirmed', ...(how === 'auto' ? USED : {}) };
+  const use = db.wake.alarmId === alarmId ? { usage: db.wake.usage, recent: db.wake.recent } : how === 'auto' ? USED : NO_USE;
+  db.wakeConfirmations[alarmId] = { at, how, ...use };
   db.me.wakeAt = at;
   db.events.push({ at, label: '기상 확인', source: how === 'self' ? '직접 응답' : '자동 판정' });
 }

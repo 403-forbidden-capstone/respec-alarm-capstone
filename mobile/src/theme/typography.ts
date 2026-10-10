@@ -30,11 +30,16 @@ export const typeScale = {
   lead: { ...font(400), fontSize: 13.5, lineHeight: 20 }, // .lead
   section: { ...font(700), fontSize: 15.5, lineHeight: 22 }, // .h2
   big: { ...font(700), fontSize: 17, lineHeight: 24, letterSpacing: -0.2 }, // .big2
+  bodyLarge: { ...font(400), fontSize: 15, lineHeight: 21 }, // 카드 제목 · 목록 시각 · 울림 머리말 (굵기는 weight로)
   body: { ...font(400), fontSize: 14, lineHeight: 20 },
+  listTitle: { ...font(700), fontSize: 14.5, lineHeight: 20 }, // 일정 목록 제목
+  rowLabel: { ...font(400), fontSize: 13.5, lineHeight: 19 }, // .row 왼쪽 이름 · 선택 줄
+  note: { ...font(400), fontSize: 13, lineHeight: 19 }, // .note · 계산식 · 빈 목록 안내
   bodyStrong: { ...font(600), fontSize: 14, lineHeight: 20 },
   label: { ...font(400), fontSize: 12, lineHeight: 17 }, // .lbl
   small: { ...font(400), fontSize: 12.5, lineHeight: 18 }, // .small
   caption: { ...font(400), fontSize: 11.5, lineHeight: 16 }, // .meta · .note.sm
+  tiny: { ...font(400), fontSize: 11, lineHeight: 15 }, // 오전/오후 작은 글자 · 직접 고름 표시
   button: { ...font(600), fontSize: 15 },
   reading: { ...font(400), fontSize: 14.5, lineHeight: 23 }, // .voice p · .jtext
   sheetTitle: { ...font(700), fontSize: 18, lineHeight: 25, letterSpacing: -0.2 }, // .sheet h3 · .done-big b
