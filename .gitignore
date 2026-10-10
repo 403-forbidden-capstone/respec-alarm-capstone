@@ -8,6 +8,8 @@ web-build/
 expo-env.d.ts
 *.tsbuildinfo
 .metro-health-check*
+# expo가 mobile/에 자동으로 만드는 파일 (안의 expo-env.d.ts는 바로 위에서 이미 무시)
+mobile/.gitignore
 
 # 네이티브 폴더 — npx expo prebuild가 매번 새로 만듦
 mobile/android/
@@ -52,10 +54,19 @@ coverage/
 CLAUDE.local.md
 .claude/settings.local.json
 
+# 편집기
+.idea/
+.vscode/
+
+# 오피스 문서를 열면 옆에 생기는 잠금 파일 (docs/제출물)
+~$*
+
 # 로그 · OS
+*.log
 npm-debug.*
 yarn-debug.*
 yarn-error.*
 *.orig.*
 .DS_Store
 Thumbs.db
+Desktop.ini
