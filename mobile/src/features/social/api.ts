@@ -131,8 +131,11 @@ export async function getGroup(groupId: string): Promise<GroupDetail | null> {
   };
 }
 
-// 친구 권한 (F02) — 이 친구가 내 정보에 대해 가진 최종 권한과 출처
-export async function getFriendGrant(personId: string): Promise<{ person: Person; final: FinalGrant; groupCount: number }> {
+// 친구 권한 (F02) — 이 친구가 내 정보에 대해 가진 최종 권한과 출처. 친구가 아니면 null (그룹원 · 나를 주소로 열어도)
+export async function getFriendGrant(
+  personId: string,
+): Promise<{ person: Person; final: FinalGrant; groupCount: number } | null> {
+  if (!db.friends.includes(personId)) return null;
   return {
     person: person(personId),
     final: givenTo(personId),
@@ -203,27 +206,43 @@ const SOURCE: Record<string, string> = {
   도착: '지오펜스',
 };
 
-export async function getMemberWake(personId: string): Promise<MemberWake | null> {
+// 그 그룹의 구성원이고 나에게 기상 조회 권한을 줬을 때만 (get_group_wake_status와 같게), 아니면 null
+export async function getMemberWake(groupId: string, personId: string): Promise<MemberWake | null> {
+  const g = db.groups[groupId];
   const tl = timelines[personId];
   const alarms = memberAlarms[personId];
+  if (!g?.members.includes(personId) || !receivedFrom(personId).viewWake) return null;
   if (!tl || !alarms?.length) return null;
   const t = now().getTime();
   const timeline: TimelineEntry[] = tl
     .map(([m, label, source]) => ({ at: kst(TODAY, m), label, source: source ?? SOURCE[label] ?? '' }))
     .filter((e) => e.at.getTime() <= t);
-  return { person: person(personId), alarm: toMemberAlarm(alarms[0]), timeline, firstAlarmAt: kst(TODAY, tl[0][0]) };
+  return {
+    person: person(personId),
+    groupName: g.name,
+    alarm: toMemberAlarm(alarms[0]),
+    timeline,
+    firstAlarmAt: kst(TODAY, tl[0][0]),
+  };
 }
 
-// 공유받은 알람 (G04)
+// 공유받은 알람 (G04) — 조회 권한이 없으면 알람은 비워서 줌 (alarms RLS와 같게)
 export async function getSharedAlarms(personId: string): Promise<SharedAlarms | null> {
   const alarms = memberAlarms[personId];
   if (!alarms) return null;
   const received = receivedFrom(personId);
+  // 조회가 없으면 설정도 못 쓰므로 설정 꼬리표도 뺌 ("조회 권한이 없어요"와 엇갈리지 않게)
   const tags = received.rows.flatMap((r) => [
     ...(r.viewAlarm ? [`조회 · ${r.source}`] : []),
-    ...(r.editAlarm ? [`설정 · ${r.source}`] : []),
+    ...(r.editAlarm && received.viewAlarm ? [`설정 · ${r.source}`] : []),
   ]);
-  return { person: person(personId), canEdit: received.editAlarm, tags, alarms: alarms.map(toMemberAlarm) };
+  return {
+    person: person(personId),
+    canView: received.viewAlarm,
+    canEdit: received.viewAlarm && received.editAlarm, // 조회가 안 되면 고칠 알람도 안 보임 (docs/screen-data-map.md F03)
+    tags,
+    alarms: received.viewAlarm ? alarms.map(toMemberAlarm) : [],
+  };
 }
 
 export async function setSharedAlarmEnabled(personId: string, alarmId: string, enabled: boolean) {

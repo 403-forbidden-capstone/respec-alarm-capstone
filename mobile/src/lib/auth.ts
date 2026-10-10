@@ -1,6 +1,7 @@
 import * as Linking from 'expo-linking';
 import * as WebBrowser from 'expo-web-browser';
 
+import { UserError } from './errors';
 import { supabase } from './supabase';
 
 // 웹 팝업의 결과를 원래 창에 넘기는 WebBrowser.maybeCompleteAuthSession()은 app/_layout.tsx에서 부름
@@ -33,7 +34,7 @@ export async function signInWithProvider(provider: OAuthProvider) {
     options: { redirectTo: authRedirectUrl, skipBrowserRedirect: true },
   });
   if (error) throw error;
-  if (!data?.url) throw new Error('로그인 주소를 받지 못했어요');
+  if (!data?.url) throw new UserError('로그인 주소를 받지 못했어요');
 
   const result = await WebBrowser.openAuthSessionAsync(data.url, authRedirectUrl);
   if (result.type !== 'success') return null;
