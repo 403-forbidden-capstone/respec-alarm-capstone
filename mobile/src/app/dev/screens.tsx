@@ -13,19 +13,11 @@ import { colors } from '@/theme';
 
 // 개발용 화면 목록 — 탭에는 없고 주소로만 들어옴: /dev/screens (앱은 respecalarm://dev/screens)
 // 목업의 데모 패널 대신 화면 번호로 바로 열고, 시나리오 시각(아침 · 전날 밤)을 바꿔 봄
-// 맨 위에서 데이터 모드(실데이터 · 가짜)를 바꿈 — 실데이터는 로그인 · 온보딩부터 E2E로 돌릴 때
+// 실데이터를 쓸 수 있을 때만(lib/flags REAL_DATA_READY) 맨 위에서 데이터 모드를 바꿈 — 로그인 · 온보딩부터 E2E로 돌릴 때
+// 목업에 없는 로그인 · 온보딩 · 설정은 목록에 두지 않음 (#116)
 type Row = { id: string; name: string; href: Href };
 
 const SECTIONS: { title: string; issue: string; rows: Row[] }[] = [
-  {
-    title: '로그인 · 온보딩 · 설정',
-    issue: '#25',
-    rows: [
-      { id: '—', name: '로그인 (가짜 데이터 모드에서만 열림)', href: '/login' },
-      { id: '—', name: '온보딩 (가짜 데이터 모드에서만 열림)', href: '/onboarding' },
-      { id: '—', name: '설정', href: '/settings' },
-    ],
-  },
   {
     title: '홈 · 알람',
     issue: '#30',
@@ -116,12 +108,13 @@ export default function ScreenListScreen() {
       <Text variant="title">목업 화면 목록</Text>
       <Text variant="lead">클릭 목업(mockup.html)의 화면 번호로 바로 열어요. 가짜 데이터 모드는 목업과 같은 데이터예요.</Text>
 
-      <SectionHeader
-        title="데이터 모드"
-        right={canUseRealData ? (mode === 'real' ? (session ? '로그인됨' : '로그인 전') : '') : 'Supabase 연결 안 됨'}
-      />
-      <DataModeToggle />
-      {mode === 'real' && session ? (
+      {canUseRealData ? (
+        <>
+          <SectionHeader title="데이터 모드" right={mode === 'real' ? (session ? '로그인됨' : '로그인 전') : ''} />
+          <DataModeToggle />
+        </>
+      ) : null}
+      {canUseRealData && mode === 'real' && session ? (
         <View style={styles.actions}>
           <Button
             small
@@ -144,9 +137,11 @@ export default function ScreenListScreen() {
           />
         </View>
       ) : null}
-      <Text variant="caption" style={styles.note}>
-        아직 실데이터로 안 붙인 화면은 실데이터 모드에서도 가짜 데이터를 보여 줘요. 시각은 실데이터 모드면 지금 시각이에요.
-      </Text>
+      {canUseRealData ? (
+        <Text variant="caption" style={styles.note}>
+          아직 실데이터로 안 붙인 화면은 실데이터 모드에서도 가짜 데이터를 보여 줘요. 시각은 실데이터 모드면 지금 시각이에요.
+        </Text>
+      ) : null}
 
       <SectionHeader title="시나리오 시각 (가짜 데이터)" right="5월 22일 목요일" />
       <Segmented options={TIMES} value={time} onChange={changeTime} />
