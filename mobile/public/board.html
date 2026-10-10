@@ -105,6 +105,27 @@ div.node{border-style:dashed;cursor:default}
 .flow span.scr{background:#fff;border-color:var(--line2);font-weight:500}
 .flow i{color:var(--mute);font-style:normal}
 .feat.ai{opacity:.7}
+/* 연결 */
+.conn-wrap{overflow-x:auto}
+.conn{display:block;width:100%;min-width:860px;height:auto}
+.conn .cn-box{fill:#fff;stroke:var(--line2)}
+.conn .cn-box.hub{stroke:var(--teal);stroke-width:1.5}
+.conn .cn-t{font-size:13px;font-weight:600;fill:var(--ink)}
+.conn .cn-s{font-size:11px;fill:var(--mute)}
+.conn .cn-g{font-size:11px;font-weight:600;fill:var(--sub)}
+.conn .cn-i{font-size:12px;fill:var(--ink)}
+.conn .cn-i.dim{fill:var(--sub)}
+.conn .cn-done{fill:var(--teal)}
+.conn .cn-todo{fill:#fff;stroke:#a19f96;stroke-width:1.5}
+.conn .cn-later{fill:#fff;stroke:#c9c7bf;stroke-width:1.5;stroke-dasharray:2 2}
+.conn .e{fill:none;stroke-width:1.6}
+.conn .e.done{stroke:var(--teal)}.conn .ah.done{fill:var(--teal)}
+.conn .e.todo{stroke:#a19f96;stroke-dasharray:5 4}.conn .ah.todo{fill:#a19f96}
+.conn .e.later{stroke:#c9c7bf;stroke-dasharray:2 4}.conn .ah.later{fill:#c9c7bf}
+.conn .el{font-size:11px;fill:var(--sub);paint-order:stroke;stroke:#fff;stroke-width:4px;stroke-linejoin:round}
+.conn-legend{display:flex;gap:16px;flex-wrap:wrap;font-size:12px;color:var(--sub);margin-top:8px}
+.conn-legend i{display:inline-block;width:22px;border-top:2px solid var(--teal);vertical-align:middle;margin-right:6px}
+.conn-legend i.todo{border-top:2px dashed #a19f96}.conn-legend i.later{border-top:2px dotted #c9c7bf}
 /* 매핑 */
 .matrix-wrap{overflow:auto;max-height:calc(100vh - 190px);border:1px solid var(--line);border-radius:var(--r-lg);background:#fff}
 .matrix th,.matrix td{white-space:nowrap;text-align:center;padding:2px 6px;border-left:1px solid #f1efe8}
@@ -473,7 +494,7 @@ function plan() {
 }
 
 // ───────────────────────────────── 렌더
-const TABDEF = [['big', '큰 그림'], ['todo', '할 일'], ['screens', '화면'], ['features', '기능'], ['links', '매핑'], ['dec', '결정'], ['env', '환경']];
+const TABDEF = [['big', '큰 그림'], ['todo', '할 일'], ['screens', '화면'], ['features', '기능'], ['links', '연결'], ['dec', '결정'], ['env', '환경']];
 function render() {
   const p = plan();
   const nx = p.next[0];
@@ -570,7 +591,91 @@ function rFeatures() {
   }).join('');
 }
 
-function rLinks() {
+// 연결 — 서비스 사이를 무엇으로 이어 놨는지 (10/10 확인). 키는 이름 · 넣은 곳만 적고 값은 적지 않음
+// 상태: done = 됨 · todo = 할 일 · later = 나중(AI · iOS). 바뀌면 여기 상태만 고침
+const CONN_AS_OF = '10/10';
+const CONN_NODES = [
+  { t: 'GitHub', s: '레포 · Actions 비밀값', box: [16, 40, 214, 132], items: [['SUPABASE_ACCESS_TOKEN', 'done'], ['EXPO_TOKEN', 'done'], ['PROJECT_TOKEN', 'done'], ['CLAUDE_CODE_OAUTH_TOKEN', 'done']] },
+  { t: '각자 PC', s: '로컬 개발', box: [16, 250, 200, 78], items: [['mobile/.env (주소 · 공개 키)', 'done']] },
+  { t: 'Apple Developer', s: 'iOS (#55~#59)', box: [16, 420, 200, 96], items: [['개발자 계정 (연 $99)', 'later'], ['iOS 빌드 · 아이폰 설치', 'later']] },
+  { t: 'Cloudflare', s: '웹 배포', box: [300, 40, 220, 96], items: [['빌드 변수: Supabase 주소', 'done'], ['빌드 변수: 공개 키', 'done']] },
+  { t: 'Expo · EAS', s: '앱 빌드 · 푸시 전달', box: [300, 172, 220, 150], items: [['환경 변수 3곳: 주소 · 공개 키', 'done'], ['Android 서명 키', 'done'], ['FCM 서비스 계정 키', 'todo'], ['google-services.json', 'todo'], ['Expo Push 받는 길', 'todo']] },
+  { t: 'Firebase', s: 'Android 푸시 (FCM)', box: [300, 368, 220, 96], items: [['프로젝트 · Android 앱 등록', 'todo'], ['서비스 계정 키 만들기', 'todo']] },
+  { t: 'Supabase', s: 'DB · 로그인 · 서버 함수', box: [600, 40, 240, 370], hub: true, groups: [
+    ['DB', [['마이그레이션 머지하면 자동 적용', 'done'], ['접근 규칙 (RLS)', 'done']]],
+    ['로그인', [['Redirect URLs', 'done'], ['카카오 공급자', 'todo'], ['구글 공급자', 'done']]],
+    ['Edge Functions', [['함수 · 자동 배포 (지금 0개)', 'todo'], ['비밀값 KAKAO_REST_API_KEY (임시)', 'done'], ['비밀값 GEMINI_API_KEY', 'later']]],
+    ['예약 · 실시간 · 푸시', [['pg_cron · pg_net', 'todo'], ['Realtime', 'todo'], ['푸시 토큰 저장 (push_tokens)', 'todo']]],
+  ] },
+  { t: '카카오 디벨로퍼스', s: '로그인 · 지도는 팀원 앱', box: [900, 40, 190, 114], items: [['Redirect URI · Client Secret', 'todo'], ['비즈 앱 전환 · 동의항목', 'todo'], ['지도 키 (팀원 앱에서 받음)', 'todo']] },
+  { t: 'Google Cloud', s: '구글 로그인', box: [900, 184, 190, 96], items: [['OAuth 클라이언트 (웹)', 'done'], ['테스트 사용자', 'done']] },
+  { t: 'Google AI Studio', s: 'Gemini', box: [900, 304, 190, 78], items: [['API 키 (AI 대기)', 'later']] },
+];
+// [선 경로, 상태, 글자, 글자 x · y, 정렬]
+const CONN_EDGES = [
+  ['M116 40 V18 H720 V40', 'done', '머지하면 DB 자동 적용', 418, 13],
+  ['M230 82 H300', 'done', 'push → 빌드', 265, 74],
+  ['M230 150 L300 200', 'done', '빌드 버튼', 262, 190],
+  ['M520 86 H600', 'done', '주소 · 키', 560, 78],
+  ['M520 214 H600', 'done', '주소 · 키', 560, 206],
+  ['M600 262 H520', 'todo', '푸시 요청', 560, 254],
+  ['M410 322 V368', 'todo', 'FCM 키', 418, 349, 'start'],
+  ['M216 470 L300 300', 'later', 'iOS 빌드', 222, 446, 'start'],
+  ['M216 289 H280 V560 H720 V410', 'done', '로컬 개발도 같은 Supabase', 500, 553],
+  ['M840 80 H900', 'todo', '로그인', 870, 72],
+  ['M840 122 H900', 'todo', '지도 검색', 870, 114],
+  ['M840 230 H900', 'done', '로그인', 870, 222],
+  ['M840 343 H900', 'later', 'AI', 870, 335],
+];
+// 지형님이 대시보드에서 할 것 — 자세한 순서는 PR · 대화 기록
+const CONN_TODO = [
+  ['카카오 앱 설정 (내 앱)', 'https://developers.kakao.com/console/app', '계정 설정 → 본인인증 → 앱 → 일반 → 비즈니스 정보 → 개인 개발자 비즈 앱 전환(사업자 정보 등록 아님) → 플랫폼 키 → REST API 키: 리다이렉트 URI = Supabase callback · 클라이언트 시크릿 코드 복사 → 카카오 로그인 → 동의항목: 닉네임 · 프로필 사진 · 이메일(필수)'],
+  ['Supabase 카카오 공급자 켜기', 'https://supabase.com/dashboard/project/gomrhctwjvttoqifxktt/auth/providers', 'REST API 키 + 클라이언트 시크릿 (구글은 켜짐)'],
+  ['Edge 비밀값 KAKAO_REST_API_KEY 바꾸기', 'https://supabase.com/dashboard/project/gomrhctwjvttoqifxktt/functions/secrets', '팀원 지도 키를 받으면 같은 이름으로 덮어쓰기 (지금은 임시 값)'],
+  ['Firebase 프로젝트 · Android 앱', 'https://console.firebase.google.com/', '패키지 com.forbidden403.respecalarm → google-services.json · 서비스 계정 키(JSON). 레포에 넣지 않음'],
+  ['EAS에 푸시 키 올리기', 'https://expo.dev/accounts/respec-alarm-capstone/projects/respec-alarm/credentials', 'Android → FCM V1 서비스 계정 키 · google-services.json은 파일 환경 변수'],
+  ['Apple Developer 가입 (iOS 빌드 때)', 'https://developer.apple.com/programs/', '아이폰에 설치하려면 필요 (연 $99) · 앱 화면 · 로그인 · 푸시는 그대로 iOS에서 돌고, 알람 울림만 iOS용으로 따로 (#56~#58)'],
+];
+// 키가 있는 곳 — [이름, 넣은 곳, 쓰는 곳, 팀원에게]
+const CONN_KEYS = [
+  ['EXPO_PUBLIC_SUPABASE_URL · _PUBLISHABLE_KEY', 'mobile/.env · Cloudflare 빌드 변수 · EAS 3곳', '앱 · 웹이 DB · 로그인', '줘도 됨 (공개 값)'],
+  ['SUPABASE_ACCESS_TOKEN', 'GitHub Actions', 'DB 적용 · Edge 배포', '안 줌'],
+  ['EXPO_TOKEN', 'GitHub Actions', 'APK 빌드 버튼', '안 줌'],
+  ['PROJECT_TOKEN · CLAUDE_CODE_OAUTH_TOKEN', 'GitHub Actions', '보드 연동 · 자동 리뷰', '안 줌'],
+  ['카카오 REST 키 · Client Secret (내 앱)', 'Supabase 로그인 공급자', '카카오 로그인', '안 줌'],
+  ['구글 Client ID · Secret', 'Supabase 로그인 공급자', '구글 로그인', '안 줌'],
+  ['KAKAO_REST_API_KEY (팀원 앱)', 'Supabase Edge 비밀값', '장소 검색 · 길찾기', '안 줌'],
+  ['GEMINI_API_KEY', 'Supabase Edge 비밀값', 'AI (대기)', '안 줌'],
+  ['FCM 서비스 계정 키 · google-services.json', 'EAS (credentials · 파일 변수)', '푸시 전달 · 앱 빌드', '안 줌 · 레포에 안 넣음'],
+];
+
+function connSvg() {
+  const nodes = CONN_NODES.map((n) => {
+    const [x, y, w, h] = n.box;
+    const line = (txt, st, yy) => `<circle cx="${x + 16}" cy="${yy - 4}" r="4" class="cn-${st}"/><text x="${x + 27}" y="${yy}" class="cn-i${st === 'done' ? '' : ' dim'}">${esc(txt)}</text>`;
+    let out = `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="10" class="cn-box${n.hub ? ' hub' : ''}"/>
+      <text x="${x + 12}" y="${y + 22}" class="cn-t">${esc(n.t)}</text><text x="${x + 12}" y="${y + 38}" class="cn-s">${esc(n.s)}</text>`;
+    let yy = y + 60;
+    if (n.groups) {
+      for (const [g, items] of n.groups) {
+        out += `<text x="${x + 12}" y="${yy}" class="cn-g">${esc(g)}</text>`;
+        yy += 18;
+        for (const [t, st] of items) { out += line(t, st, yy); yy += 18; }
+        yy += 8;
+      }
+    } else {
+      for (const [t, st] of n.items) { out += line(t, st, yy); yy += 18; }
+    }
+    return out;
+  }).join('');
+  const edges = CONN_EDGES.map(([d, st, label, lx, ly, anchor]) => `<path d="${d}" class="e ${st}" marker-end="url(#ah-${st})"/>
+    <text x="${lx}" y="${ly}" class="el" text-anchor="${anchor || 'middle'}">${esc(label)}</text>`).join('');
+  const marker = (st) => `<marker id="ah-${st}" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" class="ah ${st}"/></marker>`;
+  return `<svg class="conn" viewBox="0 0 1100 580" role="img" aria-label="서비스 연결 그림"><defs>${marker('done')}${marker('todo')}${marker('later')}</defs>${edges}${nodes}</svg>`;
+}
+
+// 화면 × 데이터 표 — 연결 탭 아래에 접어 둠 (개발할 때 봄)
+function mappingDetail() {
   const cols = [['테이블', KINDS.table], ['RPC', KINDS.rpc], ['Edge · 배치', KINDS.edge], ['폰', KINDS.phone]];
   const ncol = cols.reduce((n, [, a]) => n + a.length, 0);
   const head = `<thead><tr><th></th>${cols.map(([g, arr]) => `<th colspan="${arr.length}" style="border-left:1px solid var(--line2)">${g}</th>`).join('')}</tr>
@@ -582,11 +687,26 @@ function rLinks() {
   const usedBy = (c) => SCREENS.filter(s => s.data.some(d => d.r.includes(c))).map(s => s.code);
   const edgeRows = EDGE.map(([n, w, ext]) => `<tr><td><code>${esc(n)}</code></td><td>${esc(w)}</td><td>${esc(ext)}</td><td>${usedBy(n.split(' ')[0]).join(' · ')}</td></tr>`).join('');
   const nat = NATIVE.map(([n, w]) => `<tr><td><code>${esc(n)}</code></td><td>${esc(w)}</td></tr>`).join('');
-  return `<div class="row" style="margin-bottom:10px"><h2 style="margin:0">화면 × 테이블 · 함수 · 폰</h2><span class="muted">● = 읽거나 씀. 세로로 보면 테이블 하나가 닿는 화면</span></div>
-  <div class="matrix-wrap"><table class="matrix">${head}<tbody>${body}</tbody></table></div>
+  return `<details><summary>화면 × 테이블 · 함수 · 폰 (개발용 표)</summary>
+  <div class="row" style="margin:10px 0"><span class="muted">● = 읽거나 씀. 세로로 보면 테이블 하나가 닿는 화면</span></div>
+  <div class="matrix-wrap"><table class="matrix">${head}<tbody>${body}</tbody></table></div></details>
   <details><summary>Edge Function · 배치 ${EDGE.length}개</summary><div class="card" style="margin-top:8px"><table><tr><th>이름</th><th>하는 일</th><th>외부</th><th>화면</th></tr>${edgeRows}</table></div></details>
   <details><summary>alarm-core 함수 ${NATIVE.length}개</summary><div class="card" style="margin-top:8px"><table><tr><th>함수</th><th>하는 일</th></tr>${nat}</table>
     <div class="note">앞으로: #29 강도 · #33 알람 4종 + 루틴 · 기록 · 맞추기 · #35 기상 확인 · 음성 안내. 예약 꾸러미 <code>RingPackage</code>, 반복은 서버가 다음 회차만 (docs/alarm-core.md)</div></div></details>`;
+}
+
+function rLinks() {
+  const count = (st) => CONN_NODES.flatMap((n) => n.groups ? n.groups.flatMap(([, it]) => it) : n.items).filter(([, s]) => s === st).length;
+  const todo = CONN_TODO.map(([t, u, d], i) => `<tr><td class="num muted" style="width:1%">${i + 1}</td><td style="white-space:nowrap"><a href="${u}" target="_blank" rel="noopener">${esc(t)}</a></td><td class="muted">${esc(d)}</td></tr>`).join('');
+  const keys = CONN_KEYS.map(([n, w, use, share]) => `<tr><td>${/[가-힣]/.test(n) ? esc(n) : `<code>${esc(n)}</code>`}</td><td>${esc(w)}</td><td>${esc(use)}</td><td class="${share.startsWith('줘도') ? '' : 'muted'}">${esc(share)}</td></tr>`).join('');
+  return `<div class="card">
+    <div class="row" style="margin-bottom:6px"><h2 style="margin:0">무엇에 무엇을 연결했나</h2><span class="muted">${CONN_AS_OF} 확인 · 됨 ${count('done')} · 할 일 ${count('todo')} · 나중 ${count('later')}</span></div>
+    <div class="conn-wrap">${connSvg()}</div>
+    <div class="conn-legend"><span><i></i>됨</span><span><i class="todo"></i>할 일</span><span><i class="later"></i>나중 (AI · iOS)</span><span>틸 테두리 = 가운데 서버 Supabase</span></div>
+  </div>
+  <div class="card" style="margin-top:16px"><h2>대시보드에서 할 것</h2><table>${todo}</table><div class="note">Supabase callback = <code>https://gomrhctwjvttoqifxktt.supabase.co/auth/v1/callback</code></div></div>
+  <div class="card" style="margin-top:12px"><h2>키가 있는 곳 <span class="muted" style="font-weight:500">이름만</span></h2><table><tr><th>이름</th><th>넣은 곳</th><th>쓰는 곳</th><th>팀원에게</th></tr>${keys}</table></div>
+  ${mappingDetail()}`;
 }
 
 function rTodo() {
