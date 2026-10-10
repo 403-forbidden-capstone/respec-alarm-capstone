@@ -1,0 +1,1114 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<meta name="color-scheme" content="light">
+<title>Re:Spec AI 실험실</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
+<style>
+/* 앱 기본 디자인 그대로 — mobile/src/theme/tokens.ts · typography.ts · 클릭 목업(mockup.html)의 :root 값과 클래스 모양을 따름. 밝은 화면만. */
+:root{
+  --bg:#f6f6f4;--card:#ffffff;--line:#e6e6e2;--ink:#151515;--sub:#6b6b67;--faint:#a5a5a0;--chip:#efefec;--dash:#cfcfca;
+  --ok:#55b477;--mid:#7b99e8;--zz:#d3a630;--warn:#c8553d;
+  --font:Pretendard,"Pretendard Variable","IBM Plex Sans KR","Apple SD Gothic Neo","Malgun Gothic","Noto Sans KR",system-ui,sans-serif;
+  color-scheme:light;
+}
+*,*::before,*::after{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--bg);color:var(--ink);font-family:var(--font);font-size:14px;line-height:1.45;word-break:keep-all;overflow-wrap:anywhere;-webkit-font-smoothing:antialiased}
+a{color:var(--ink);text-decoration:underline;text-decoration-color:var(--dash);text-underline-offset:2px}
+a:hover{text-decoration-color:var(--ink)}
+button,select{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--ink);outline-offset:2px}
+p{margin:0 0 8px}
+code,pre{font-family:ui-monospace,Consolas,"D2Coding",monospace;font-size:12px}
+code{background:var(--chip);border-radius:6px;padding:1px 5px}
+pre{background:var(--chip);border-radius:14px;padding:12px 14px;margin:6px 0 0;overflow:auto;white-space:pre-wrap;word-break:break-word;line-height:1.55}
+.num{font-variant-numeric:tabular-nums}
+.sub{color:var(--sub)}.muted{color:var(--faint)}.small{font-size:12.5px;color:var(--sub)}
+.warn-t{color:var(--warn)}
+/* 위 줄 · 탭 막대 (TopBar · TabBar) */
+.hdr{position:sticky;top:0;z-index:10;background:#fff;border-bottom:1px solid var(--line)}
+.hdr-in{max-width:1100px;margin:0 auto;padding:0 20px}
+.top{display:flex;align-items:center;justify-content:space-between;gap:10px;min-height:44px;margin-top:2px;flex-wrap:wrap}
+.brand{font-size:15px;font-weight:700;letter-spacing:-.01em;color:var(--ink);text-decoration:none}
+.tabs{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));max-width:560px;padding:0 0 4px}
+.tabs a{display:flex;flex-direction:column;align-items:center;gap:4px;padding:4px 0 6px;font-size:11.5px;color:var(--faint);text-decoration:none;white-space:nowrap}
+.tabs .n{font-size:10px;min-width:26px;height:16px;line-height:16px;border-radius:8px;background:var(--chip);color:var(--faint);text-align:center;font-variant-numeric:tabular-nums}
+.tabs a.on{color:var(--ink);font-weight:600}
+.tabs a.on .n{background:var(--ink);color:#fff}
+main{max-width:1100px;margin:0 auto;padding:0 20px 56px;min-width:0}
+footer{max-width:1100px;margin:0 auto;padding:0 20px 32px;color:var(--faint);font-size:11.5px;line-height:1.55}
+/* 글자 */
+.sid{font-size:11.5px;color:var(--faint);letter-spacing:.06em}
+.crumbs{font-size:12.5px;color:var(--faint);margin:14px 0 0}
+.crumbs a{color:var(--sub);text-decoration:none}
+.crumbs a:hover{text-decoration:underline}
+h1.ttl{font-size:23px;font-weight:700;letter-spacing:-.025em;margin:8px 0 4px;line-height:1.3}
+.lead{margin:0 0 18px;color:var(--sub);font-size:13.5px}
+.h2{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:2px 10px;margin:22px 0 10px;font-size:15.5px;font-weight:700}
+.h2 small{font-weight:500;color:var(--sub);font-size:12.5px}
+.big2{font-size:17px;font-weight:700;letter-spacing:-.01em;line-height:1.4}
+h3{font-size:12px;font-weight:600;color:var(--sub);margin:14px 0 6px}
+h3:first-child{margin-top:0}
+.lbl{font-size:12px;color:var(--sub);margin:0 0 8px}
+.note{font-size:12px;color:var(--sub);margin:6px 2px 0;line-height:1.55}
+.empty{color:var(--sub);font-size:13px;margin:6px 0;line-height:1.55}
+/* 카드 (Card) */
+.card{display:block;background:var(--card);border:1px solid var(--line);border-radius:22px;padding:16px 18px;margin:0 0 12px}
+.card.dash{background:transparent;border-style:dashed;border-color:var(--dash)}
+.card.flush{padding-top:4px;padding-bottom:4px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(320px,100%),1fr));gap:12px;margin-bottom:12px}
+.grid>.card{margin:0}
+.grid.stats{grid-template-columns:repeat(auto-fill,minmax(min(200px,100%),1fr))}
+.sec>.card:last-child{margin-bottom:12px}
+/* 칩 (Chip) · 세그먼트 (Segmented) · 버튼 */
+.chip{display:inline-flex;align-items:center;gap:6px;height:26px;padding:0 10px;border-radius:13px;border:1px solid var(--line);background:#fff;font-size:12px;color:var(--ink);white-space:nowrap;text-decoration:none;vertical-align:middle}
+.chip.fill{background:var(--chip);border-color:transparent}
+.chip.ink{background:var(--ink);color:#fff;border-color:var(--ink)}
+a.chip:hover{background:var(--chip)}
+a.chip.ink:hover{background:var(--ink)}
+.chips{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.sd{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--line);flex:none;font-style:normal}
+.sd.ok{background:var(--ok)}.sd.mid{background:var(--mid)}.sd.zz{background:var(--zz)}.sd.warn{background:var(--warn)}.sd.off{background:none;box-shadow:inset 0 0 0 1.5px var(--faint)}
+.seg{display:flex;background:var(--chip);border-radius:14px;padding:4px;overflow-x:auto;scrollbar-width:none;gap:2px}
+.seg::-webkit-scrollbar{display:none}
+.seg>button,.seg>a{flex:1 0 auto;min-height:34px;padding:0 14px;border:0;background:none;border-radius:11px;font-size:13.5px;color:var(--sub);cursor:pointer;text-decoration:none;display:flex;align-items:center;justify-content:center;white-space:nowrap}
+.seg>.on{background:#fff;color:var(--ink);font-weight:600;box-shadow:0 1px 2px rgba(0,0,0,.06)}
+.btn{display:inline-flex;align-items:center;justify-content:center;height:38px;padding:0 16px;border:0;border-radius:12px;background:var(--ink);color:#fff;font-weight:600;font-size:13.5px;cursor:pointer;text-decoration:none;white-space:nowrap}
+.btn.ghost{background:#fff;color:var(--ink);border:1px solid var(--line)}
+.btn.sm{height:32px;padding:0 12px;font-size:13px}
+.btn:hover{opacity:.88}
+.more{display:flex;margin:10px auto 0}
+.go{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:auto;padding-top:12px}
+/* 필터 막대 */
+.filters{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(128px,100%),1fr));gap:12px 12px;align-items:end;padding:14px 18px}
+.filters .fld{display:flex;flex-direction:column;min-width:0}
+.filters .fld.wide{grid-column:1/-1}
+.filters .lbl{margin:0 0 6px}
+select.sel{height:36px;border:1px solid var(--line);border-radius:12px;background:#fff;padding:0 10px;font-size:13px;width:100%;min-width:0;color:var(--ink)}
+select.sel:focus{border-color:var(--ink)}
+.count{margin:14px 2px 8px;color:var(--sub);font-size:12.5px}
+/* 한 줄 목록 · KeyValueRow */
+.lrow{display:flex;gap:12px;align-items:center;padding:11px 0}
+.lrow+.lrow{border-top:1px solid var(--line)}
+.lrow.top{align-items:flex-start}
+.lrow .grow{flex:1;min-width:0}
+.kv{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:11px 0}
+.kv+.kv{border-top:1px solid var(--line)}
+.kv .k{color:var(--sub);font-size:13.5px}
+.kv .v{font-weight:600;text-align:right;display:flex;flex-direction:column;align-items:flex-end;min-width:0}
+.kv .v small{font-weight:400;font-size:11.5px;color:var(--faint)}
+.kvl{display:grid;grid-template-columns:7rem minmax(0,1fr);gap:4px 14px;padding:11px 0;align-items:start}
+.kvl+.kvl{border-top:1px solid var(--line)}
+.kvl .k{color:var(--sub);font-size:13.5px}
+.kvl .v{min-width:0;line-height:1.55}
+@media (max-width:560px){.kvl{grid-template-columns:1fr}}
+.stat .big{font-size:30px;font-weight:600;letter-spacing:-.02em;font-variant-numeric:tabular-nums;line-height:1.2}
+.stat .big small{font-size:14px;font-weight:400;color:var(--sub);letter-spacing:0}
+.stat .small{margin:4px 0 0;line-height:1.5}
+.prog{display:block;height:6px;border-radius:3px;background:var(--chip);margin-top:10px;overflow:hidden}
+.prog b{display:block;height:100%;background:var(--ink)}
+/* 표 */
+.scroll{overflow-x:auto;margin:0 -4px;padding:0 4px}
+table{border-collapse:collapse;width:100%;font-size:13px;line-height:1.45}
+th,td{text-align:left;padding:9px 8px;border-bottom:1px solid var(--line);vertical-align:top}
+th{color:var(--sub);font-weight:500;font-size:12px;white-space:nowrap}
+td.r,th.r{text-align:right}
+tr:last-child td{border-bottom:0}
+td .note{display:block;margin:2px 0 0}
+td a{color:var(--ink);font-weight:600}
+/* 사람 */
+.avatar{width:40px;height:40px;border-radius:50%;background:var(--chip);display:grid;place-items:center;font-size:13px;font-weight:600;flex:none}
+.person{display:flex;align-items:center;gap:12px;padding:12px 0;color:var(--ink);text-decoration:none}
+.person+.person{border-top:1px solid var(--line)}
+.person .pm{flex:1;min-width:0}
+.person .pm b{display:block;font-size:14.5px}
+.person .pm small{display:block;font-size:12.5px;color:var(--sub)}
+.person .pr{font-size:12.5px;color:var(--sub);text-align:right;flex:none}
+@media (max-width:640px){.person{flex-wrap:wrap}.person .pm{flex-basis:calc(100% - 52px)}.person .pr{text-align:left;margin-left:52px;flex-basis:100%}}
+/* 대화 · 프롬프트 목록 줄 */
+.crow{display:grid;grid-template-columns:8.5rem 10rem minmax(0,1fr) 11rem minmax(0,1.1fr);gap:4px 14px;padding:11px 0;color:var(--ink);text-decoration:none;align-items:start}
+.crow+.crow{border-top:1px solid var(--line)}
+.crow:hover{background:var(--bg);box-shadow:-18px 0 0 var(--bg),18px 0 0 var(--bg)}
+.crow small{display:block;color:var(--faint);font-size:11.5px}
+.crow b{font-weight:600}
+@media (max-width:860px){.crow{grid-template-columns:1fr 1fr}.crow>:nth-child(5){grid-column:1/-1}}
+.prow{display:grid;grid-template-columns:minmax(10rem,13rem) 6.5rem minmax(0,1fr) 7rem;gap:4px 14px;padding:11px 0;align-items:start}
+.prow+.prow{border-top:1px solid var(--line)}
+.prow.v{color:var(--sub)}
+.prow .id a{font-weight:600;color:var(--ink)}
+@media (max-width:760px){.prow{grid-template-columns:1fr 1fr}.prow>:nth-child(3){grid-column:1/-1}}
+.fam{margin-bottom:6px}
+/* 타임라인 (Timeline) — 대화 턴 */
+.tl2{list-style:none;margin:0;padding:0}
+.tl2>li{display:grid;grid-template-columns:56px 14px minmax(0,1fr);gap:8px;position:relative;padding-bottom:12px}
+.tl2>li::before{content:"";position:absolute;left:70px;top:16px;bottom:-4px;width:1px;background:var(--line)}
+.tl2>li:last-child::before{display:none}
+.tl2 .rail{display:contents}
+.tl2 .t{font-size:12px;color:var(--sub);font-variant-numeric:tabular-nums;padding-top:11px}
+.tl2 .d{width:7px;height:7px;border-radius:50%;background:var(--line);margin:15px 0 0 3.5px;position:relative;z-index:1;font-style:normal}
+.tl2 li.ai .d{background:var(--ink)}
+.tl2 li .d.bad{background:var(--warn)}
+.tcard{background:#fff;border:1px solid var(--line);border-radius:18px;padding:12px 14px;min-width:0}
+.tl2 li.user .tcard{background:var(--chip);border-color:transparent}
+.thd{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:6px;font-size:12px;color:var(--sub)}
+.thd .tt{display:none;font-weight:700;color:var(--ink);font-size:13px;margin-right:2px}
+.say{font-size:14.5px;line-height:1.65;margin:0 0 4px;white-space:pre-wrap}
+.drow{display:grid;grid-template-columns:4.6rem minmax(0,1fr);gap:2px 10px;padding:8px 0 2px;margin-top:8px;border-top:1px solid var(--line)}
+.tl2 li.user .drow{border-top-color:rgba(0,0,0,.07)}
+.drow>.k{font-size:12px;color:var(--sub);padding-top:1px}
+.drow ul{margin:0;padding-left:16px}.drow li{margin:1px 0}
+@media (max-width:560px){.drow{grid-template-columns:1fr}.tl2>li{grid-template-columns:44px 14px minmax(0,1fr);gap:6px}.tl2>li::before{left:56px}}
+.probs{margin:6px 0 0;padding:8px 12px;background:rgba(200,85,61,.09);border-radius:12px;color:var(--warn);font-size:13px;line-height:1.5}
+.probs div+div{margin-top:2px}
+.tl2.compact>li{grid-template-columns:14px minmax(0,1fr)}
+.tl2.compact>li::before{left:3px}
+.tl2.compact .t{display:none}
+.tl2.compact .thd .tt{display:inline}
+.tl2.compact .d{margin-left:0}
+.tl2.compact .say{font-size:14px}
+.tl2.compact .drow{grid-template-columns:1fr}
+details{margin:6px 0 0}
+summary{cursor:pointer;color:var(--sub);font-size:13px}
+summary:hover{color:var(--ink)}
+.compare{display:grid;grid-template-columns:repeat(var(--n,2),minmax(0,1fr));gap:14px;align-items:start}
+@media (max-width:900px){.compare{grid-template-columns:1fr}}
+/* 차이 */
+.diff{font-family:ui-monospace,Consolas,"D2Coding",monospace;font-size:12px;border:1px solid var(--line);border-radius:14px;overflow:auto;background:#fff}
+.diff div{display:grid;grid-template-columns:3rem 3rem 1.2rem 1fr;white-space:pre-wrap;word-break:break-word;padding:0 6px}
+.diff .n{color:var(--faint);text-align:right;padding-right:6px;user-select:none}
+.diff .add{background:rgba(85,180,119,.16)}
+.diff .del{background:rgba(200,85,61,.13)}
+.diff .gap{color:var(--faint);background:var(--chip)}
+/* 진행 흐름 (.flow) */
+.flow{display:flex;flex-wrap:wrap;gap:6px;align-items:center;font-size:12.5px}
+.flow span{display:inline-flex;align-items:center;gap:6px;padding:5px 10px;border-radius:12px;border:1px solid var(--line);color:var(--faint);background:#fff}
+.flow span.done{color:var(--ink)}
+.flow span.on{background:var(--ink);color:#fff;border-color:var(--ink)}
+.flow i.ar{font-style:normal;color:var(--faint)}
+.xcard{display:flex;flex-direction:column;gap:6px}
+.xcard ul{margin:2px 0 0;padding-left:18px;color:var(--sub);font-size:13px}
+.xcard .big2 a{text-decoration:none}
+.xcard .big2 a:hover{text-decoration:underline}
+.bar-line{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.bar-line .prog{width:160px;margin:0}
+.err{padding:16px 18px}
+.mono-id{font-variant-numeric:tabular-nums}
+/* v3 사람 카드 — 진짜 모습 | 앱이 보는 기록 */
+.vhd,.vrow{display:grid;grid-template-columns:6.2rem minmax(0,1fr) minmax(0,1fr);gap:4px 18px}
+.vhd{padding:2px 0 8px;font-size:12px;color:var(--sub);border-bottom:1px solid var(--line)}
+.vrow{padding:12px 0;align-items:start;line-height:1.55}
+.vrow+.vrow{border-top:1px solid var(--line)}
+.vrow .k{font-weight:600;font-size:13.5px}
+.vrow .a{color:var(--sub)}
+@media (max-width:760px){.vhd{display:none}.vrow{grid-template-columns:1fr}.vrow>div[data-l]::before{content:attr(data-l);display:block;font-size:11.5px;color:var(--faint);margin-bottom:1px}}
+/* v3 14일 기록 — 하루 한 줄 */
+.dhd,.day{display:grid;grid-template-columns:4.4rem 5rem 7.6rem 8.4rem 8.2rem 6.6rem 5.8rem minmax(10.5rem,1fr);gap:4px 12px}
+.dhd{padding:2px 0 8px;font-size:12px;color:var(--sub);border-bottom:1px solid var(--line)}
+.day{padding:12px 0;align-items:start;font-size:13.5px}
+.day+.day{border-top:1px solid var(--line)}
+.day .dc{min-width:0}
+.day .dt b{font-size:14.5px}
+.pair .ln{display:flex;flex-wrap:wrap;gap:0 6px;align-items:baseline;font-variant-numeric:tabular-nums}
+.pair .l{font-size:11.5px;color:var(--faint);width:2.6rem;flex:none}
+.pair b.dv{font-weight:600}
+.pair .gap{font-size:11.5px;color:var(--warn)}
+.og{font-size:11.5px;color:var(--faint);margin:6px 0 2px;white-space:normal}
+.og:first-child{margin-top:0}
+.day .notes{margin:0;padding:0;list-style:none;font-size:12.5px;color:var(--sub);line-height:1.5}
+.day .notes li{display:flex;gap:6px;align-items:baseline;margin:0 0 3px}
+.day .notes .sd{margin-top:5px}
+@media (max-width:1080px){
+  .dhd{display:none}
+  .day{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px 14px}
+  .day>.dc[data-l]::before{content:attr(data-l);display:block;font-size:11.5px;color:var(--faint);margin-bottom:2px}
+  .day>.dt{grid-column:1/-1}.day>.dt::before{display:none!important}
+  .day>.dn{grid-column:1/-1}
+}
+</style>
+</head>
+<body>
+<header class="hdr">
+  <div class="hdr-in">
+    <div class="top">
+      <a class="brand" href="#/">Re:Spec AI 실험실</a>
+      <span class="chip fill" id="round-badge">예전 · 라운드 1 (타이핑 대화)</span>
+    </div>
+    <nav class="tabs" id="tabs">
+      <a href="#/" data-k="home"><span class="n">01</span>홈</a>
+      <a href="#/exp" data-k="exp"><span class="n">02</span>실험</a>
+      <a href="#/people" data-k="people"><span class="n">03</span>사람</a>
+      <a href="#/conv" data-k="conv"><span class="n">04</span>대화</a>
+      <a href="#/prompts" data-k="prompts"><span class="n">05</span>프롬프트</a>
+      <a href="#/terms" data-k="terms"><span class="n">06</span>용어</a>
+    </nav>
+  </div>
+</header>
+<main id="app"><p class="empty">불러오는 중…</p></main>
+<footer id="foot">AI 실험실 분석 화면 · 가짜 사람과 가짜 대화만 있어요 · 시험용 사람 · 대화는 최종 시험 전까지 들어 있지 않아요</footer>
+
+<script>
+"use strict";
+/* ───────── 바탕 ───────── */
+// 데이터는 이 페이지 옆 data/ 폴더. /lab 으로 열려도 /lab/ 처럼 읽는다.
+const BASE = (() => {
+  let p = location.pathname;
+  if (/\.html?$/.test(p)) p = p.replace(/[^/]*$/, "");
+  else if (!p.endsWith("/")) p += "/";
+  return p + "data/";
+})();
+const app = document.getElementById("app");
+
+function h(tag, props, ...kids) {
+  const el = document.createElement(tag);
+  if (props) for (const [k, v] of Object.entries(props)) {
+    if (v === undefined || v === null || v === false) continue;
+    if (k === "class") el.className = v;
+    else if (k === "text") el.textContent = v;
+    else if (k.startsWith("on") && typeof v === "function") el.addEventListener(k.slice(2), v);
+    else el.setAttribute(k, v === true ? "" : v);
+  }
+  put(el, kids);
+  return el;
+}
+function put(el, kids) {
+  for (const k of kids.flat(Infinity)) {
+    if (k === null || k === undefined || k === false) continue;
+    el.append(k.nodeType ? k : document.createTextNode(String(k)));
+  }
+  return el;
+}
+
+const cache = new Map();
+function load(name) {
+  if (!cache.has(name)) {
+    cache.set(name, fetch(BASE + name, { cache: "no-cache" }).then(async (r) => {
+      if (!r.ok) throw new Error(`${name} — ${r.status}`);
+      const t = await r.text();
+      try { return JSON.parse(t); } catch { throw new Error(`${name} — JSON이 아님 (없는 파일이면 서버가 HTML을 돌려줌)`); }
+    }).catch((e) => { cache.delete(name); throw e; }));
+  }
+  return cache.get(name);
+}
+
+// 대화는 실행 폴더마다 파일 하나(conv/<실행>.json) — 그 실행의 대화를 처음 열 때 받고 이후엔 캐시
+async function loadConv(run, id) {
+  const pack = await load(`conv/${run}.json`);
+  const c = pack.convs && pack.convs[id];
+  if (!c) throw new Error(`conv/${run}.json 안에 ${id} 대화가 없어요`);
+  return c;
+}
+
+/* ───────── 주소 ───────── */
+function parseHash() {
+  const raw = location.hash.replace(/^#\/?/, "");
+  const i = raw.indexOf("?");
+  const p = i < 0 ? raw : raw.slice(0, i);
+  const q = new URLSearchParams(i < 0 ? "" : raw.slice(i + 1));
+  return { parts: p.split("/").filter(Boolean).map((x) => { try { return decodeURIComponent(x); } catch { return x; } }), q };
+}
+function href(parts, query) {
+  const qs = query ? new URLSearchParams(Object.entries(query).filter(([, v]) => v !== "" && v != null)).toString() : "";
+  return "#/" + parts.map(encodeURIComponent).join("/") + (qs ? "?" + qs : "");
+}
+const hConv = (run, id) => href(["conv", run, id]);
+const hPrompt = (key) => href(["prompts", key]);
+const hExp = (id) => href(["exp", id]);
+
+/* ───────── 작은 도우미 ───────── */
+const pct = (a, b) => (b ? `${a}/${b} (${Math.round((a / b) * 100)}%)` : `${a}/${b}`);
+const f2 = (x) => (x === null || x === undefined ? "—" : x.toFixed(2));
+const usd = (x) => (x === null || x === undefined ? "—" : "$" + (x >= 1 ? x.toFixed(2) : x.toFixed(4)));
+function kst(iso) {
+  try {
+    const p = Object.fromEntries(new Intl.DateTimeFormat("ko-KR", { timeZone: "Asia/Seoul", month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false, hourCycle: "h23" }).formatToParts(new Date(iso)).map((x) => [x.type, x.value]));
+    return `${p.month}/${p.day} ${p.hour}:${p.minute}`;
+  } catch { return iso; }
+}
+
+// 칩 — variant: "" 테두리 · "fill" 회색 바탕 · "ink" 검은 바탕. extra: { href, dot, title } (dot = 상태 점 ok · mid · zz · warn · off)
+function chip(text, variant, extra) {
+  const e = extra || {};
+  return h(e.href ? "a" : "span", { class: "chip" + (variant ? " " + variant : ""), href: e.href, title: e.title },
+    e.dot ? h("i", { class: "sd " + e.dot }) : null, text);
+}
+// 상태 점 의미: ok = 좋음 · 끝남 · mid = 진행 · 후보 · zz = 참고 · 멈춤 · warn = 문제
+const PROBLEM_DOT = { rule: "warn", err_missed: "warn", t2_bad: "warn", fail: "warn", acts: "zz", early_end: "zz", no_reflect: "zz", sq_missed: "zz" };
+const probChip = (code, label) => chip(label, "", { dot: PROBLEM_DOT[code] || "zz" });
+const okChip = () => chip("문제 없음", "", { dot: "ok" });
+const STATUS_CHIP = { "지금 쓰는 판": ["ink", null], "채택": ["", "ok"], "기준판": ["fill", null], "후보": ["", "mid"], "실험 변형": ["fill", null], "점검용": ["", "warn"], "실험 도구": ["fill", null] };
+const statusChip = (ko) => { const [v, dot] = STATUS_CHIP[ko] || ["fill", null]; return chip(ko, v, { dot }); };
+const crumbs = (...items) => h("div", { class: "crumbs" }, items.map((x, i) => [i ? " › " : "", typeof x === "string" ? x : h("a", { href: x.href }, x.t)]));
+const title = (t, ...more) => h("h1", { class: "ttl" }, t, ...more);
+// 섹션 — 제목(.h2)은 카드 밖, 내용은 흰 카드 안
+const section = (heading, ...kids) => h("div", { class: "sec" }, heading ? h("div", { class: "h2" }, heading) : null, h("div", { class: "card" }, kids));
+const empty = (t) => h("p", { class: "empty" }, t);
+const kv = (k, v, sub) => h("div", { class: "kv" }, h("span", { class: "k" }, k), h("span", { class: "v" }, v, sub ? h("small", null, sub) : null));
+const kvl = (k, ...v) => h("div", { class: "kvl" }, h("span", { class: "k" }, k), h("div", { class: "v" }, v));
+const stat = (lbl, big, sub, prog) => h("div", { class: "card stat" }, h("div", { class: "lbl" }, lbl), h("div", { class: "big" }, big),
+  prog ? h("span", { class: "prog" }, h("b", { style: `width:${prog}%` })) : null, sub ? h("p", { class: "small" }, sub) : null);
+const btn = (text, hrefv, ghost, sm) => h("a", { class: "btn" + (ghost ? " ghost" : "") + (sm ? " sm" : ""), href: hrefv }, text);
+
+const STYLE_KO = { POLITE: "존댓말", CASUAL: "편한 말투", TYPO_SLANG: "오타 · 줄임말", STT: "받아쓰기 말투" };
+const RES_OPTS = [["", "전부"], ["ok", "문제 없음"], ["bad", "문제 있음"], ["rule", "규칙 어김"], ["err_missed", "틀린 자동 기록을 못 고침"], ["t2_bad", "추출이 많이 틀림"], ["fail", "실행 오류"], ["acts", "물음 표시 어긋남"], ["early_end", "신호 없이 AI가 먼저 마무리"], ["no_reflect", "돌아보기 없이 마무리"], ["sq_missed", "서버 질문을 안 물음"]];
+
+/* ───────── 화면 바꾸기 ───────── */
+let token = 0;
+function setNav(k) { document.querySelectorAll("#tabs a").forEach((a) => a.classList.toggle("on", a.dataset.k === k)); }
+function mount(node, ttl) {
+  app.replaceChildren(node);
+  document.title = (ttl ? ttl + " · " : "") + "Re:Spec AI 실험실";
+}
+function errView(e) {
+  return h("div", { class: "card dash err", style: "margin-top:18px" }, h("div", { class: "big2" }, "불러오지 못했어요"),
+    h("p", { style: "margin-top:6px" }, String(e && e.message ? e.message : e)),
+    h("p", { class: "small" }, "ai-lab 폴더에서 ", h("code", null, "npm run dash"), " 로 묶음을 만든 뒤 다시 열어 주세요. 배포판이면 mobile/public/lab/data 가 같이 올라갔는지 확인."));
+}
+async function route() {
+  const my = ++token;
+  const { parts, q } = parseHash();
+  const [a, b, c] = parts;
+  setNav(a === "compare" ? "conv" : a === "diff" ? "prompts" : a || "home");
+  if (!app.firstChild || app.dataset.key !== location.hash) app.replaceChildren(empty("불러오는 중…"));
+  app.dataset.key = location.hash;
+  try {
+    let v;
+    if (!a) v = await vHome();
+    else if (a === "exp") v = b ? await vExp(b) : await vExpList(q);
+    else if (a === "people") v = b ? await vPerson(b) : await vPeople(q);
+    else if (a === "conv") v = b && c ? await vConv(b, c) : await vConvList(q);
+    else if (a === "compare") v = await vCompare(b, q);
+    else if (a === "prompts") v = b ? await vPrompt(b) : await vPrompts(q);
+    else if (a === "diff") v = await vDiff(q);
+    else if (a === "terms") v = vTerms();
+    else v = h("div", { class: "card dash", style: "margin-top:18px" }, h("p", null, "없는 화면이에요. "), h("a", { href: "#/" }, "홈으로"));
+    if (my !== token) return;
+    mount(v.node || v, v.title);
+    window.scrollTo(0, 0);
+  } catch (e) {
+    if (my !== token) return;
+    mount(errView(e), "오류");
+  }
+}
+window.addEventListener("hashchange", route);
+
+/* ───────── 필터 막대 ───────── */
+// defs: [{key,label,options:[[value,label]],seg?}] · state: {key:value}. 값은 주소에 남음(replaceState). seg: true면 세그먼트로.
+function filterBar(defs, state, onChange, extra) {
+  const form = h("div", { class: "card filters" });
+  const resets = [];
+  for (const d of defs) {
+    if (d.seg) {
+      const seg = h("div", { class: "seg", role: "tablist", "aria-label": d.label });
+      const paint = () => seg.querySelectorAll("button").forEach((b) => { const on = b.dataset.v === (state[d.key] || ""); b.classList.toggle("on", on); b.setAttribute("aria-selected", on ? "true" : "false"); });
+      d.options.forEach(([v, l]) => seg.append(h("button", { type: "button", role: "tab", "data-v": v, onclick: () => { state[d.key] = v; paint(); onChange(); } }, l)));
+      paint();
+      resets.push(() => { state[d.key] = ""; paint(); });
+      form.append(h("div", { class: "fld wide" }, h("div", { class: "lbl" }, d.label), seg));
+    } else {
+      const sel = h("select", { class: "sel", "aria-label": d.label }, d.options.map(([v, l]) => h("option", { value: v }, l)));
+      sel.value = state[d.key] || "";
+      sel.addEventListener("change", () => { state[d.key] = sel.value; onChange(); });
+      resets.push(() => { state[d.key] = ""; sel.value = ""; });
+      form.append(h("label", { class: "fld" }, h("span", { class: "lbl" }, d.label), sel));
+    }
+  }
+  form.append(h("div", { class: "fld" }, h("button", { type: "button", class: "btn ghost sm", style: "align-self:flex-start", onclick: () => { resets.forEach((f) => f()); onChange(); } }, "초기화")));
+  if (extra) form.append(extra);
+  return form;
+}
+function syncHash(parts, state) {
+  const nh = href(parts, state);
+  if (nh !== location.hash) { history.replaceState(null, "", nh); app.dataset.key = nh; }
+}
+
+/* ───────── 홈 ───────── */
+async function vHome() {
+  const idx = await load("index.json");
+  const root = h("div");
+  root.append(title("AI 실험실"),
+    h("p", { class: "lead" }, "프롬프트를 고치며 돌린 실험을, 누가 어떤 상황에서 뭐라고 했고 AI가 뭐라고 답했는지까지 열어 볼 수 있는 화면이에요."),
+    idx.v3 ? h("div", { class: "card" }, h("div", { class: "lrow top", style: "padding:0;flex-wrap:wrap" },
+      h("i", { class: "sd ok", style: "margin-top:7px" }),
+      h("div", { class: "grow" }, h("div", { class: "big2" }, idx.v3.label),
+        h("p", { class: "small", style: "margin:2px 0 0" }, `지금 쓰는 데이터는 v3예요 — 사람 ${idx.v3.people}명(개발용) · ${idx.v3.days}일 기록 · 시나리오 ${idx.v3.scenarios_dev}개. 사람 화면에서 진짜 모습과 앱이 본 기록을 나란히 볼 수 있어요.`)),
+      btn("사람 보기", "#/people"))) : null,
+    h("div", { class: "card dash" }, h("p", { class: "small", style: "margin:0" }, `아래 실험 결과 · 대화는 ${idx.round_label} 기록이에요. 말로 하는 v3 실험은 아직 안 돌렸고, 예전에는 AI 생각을 저장하지 않아서 대화 화면의 'AI 생각' 칸은 '기록 없음'으로 보여요.`)));
+
+  const flow = h("div", { class: "flow" });
+  idx.stages.forEach((s, i) => {
+    if (i) flow.append(h("i", { class: "ar" }, "›"));
+    const cls = s.status === "done" ? "done" : s.status === "doing" ? "on" : "";
+    const dot = s.status === "done" ? "ok" : s.status === "doing" ? "mid" : s.status === "paused" ? "zz" : "off";
+    flow.append(h("span", { class: cls, title: s.note || "" }, h("i", { class: "sd " + dot }), s.name));
+  });
+  const cr = idx.credit;
+  root.append(section("진행", flow,
+    idx.stages.filter((s) => s.note).map((s) => h("p", { class: "note" }, `${s.name} — ${s.note}`)),
+    h("div", { class: "lrow", style: "margin-top:12px;border-top:1px solid var(--line);flex-wrap:wrap" },
+      cr ? h("div", { class: "bar-line" },
+        h("span", null, h("span", { class: "sub" }, "크레딧 "), h("b", { class: "num" }, usd(cr.spent_usd)), h("span", { class: "sub" }, ` / 차단선 $${cr.block_usd} (전체 $${cr.credit_usd}, ${cr.expires} 만료)`)),
+        h("span", { class: "prog" }, h("b", { style: `width:${Math.min(100, (cr.spent_usd / cr.block_usd) * 100)}%` }))) : null),
+    h("p", { class: "note" }, `마지막 갱신 ${kst(idx.generated_at)} · 대화 ${idx.counts.convs} · 사람 ${idx.counts.people} · 프롬프트 ${idx.counts.prompts} · 실험 ${idx.counts.experiments}`)));
+
+  root.append(h("div", { class: "h2" }, "실험별 결론"));
+  const grid = h("div", { class: "grid" });
+  for (const e of idx.experiments) {
+    grid.append(h("div", { class: "card xcard" },
+      h("div", { class: "sid" }, `실험 ${e.num} · ${e.status === "paused" ? "멈춤" : "끝남"}`),
+      h("div", { class: "big2" }, h("a", { href: hExp(e.id) }, e.title)),
+      h("p", { class: "sub", style: "margin:0;font-size:13.5px" }, e.headline),
+      h("ul", null, e.bullets.map((b) => h("li", null, b))),
+      h("div", { class: "go" },
+        btn("자세히", hExp(e.id)),
+        e.convs > 0 ? btn(`대화 보기 (${e.convs})`, href(["conv"], { exp: e.id }), true) : h("span", { class: "muted small" }, "대화 파일 없음 (재생 · 계산 실험)"))));
+  }
+  root.append(grid);
+
+  const rp = idx.recent_prompts;
+  if (rp.length) {
+    root.append(section("최근 바뀐 프롬프트", rp.map((p) => h("div", { class: "lrow" },
+      h("span", { class: "muted num", style: "flex:none;width:3.4rem;font-size:12.5px" }, p.date.slice(5).replace("-", "/")),
+      h("div", { class: "grow" }, h("a", { href: hPrompt(p.ref), style: "font-weight:600" }, p.ref), " ", statusChip(p.status_ko), h("div", { class: "small" }, p.note)),
+      p.parent ? btn(`비교 +${p.added} −${p.removed}`, href(["diff"], { a: p.parent, b: p.ref }), true, true) : null))));
+  }
+  root.append(h("p", { class: "note" }, idx.test_policy));
+  return { node: root, title: "홈" };
+}
+
+/* ───────── 실험 ───────── */
+const featName = (idx, id) => (idx.features.find((f) => f.id === id) || { name: id }).name;
+
+async function vExpList(q) {
+  const [idx, ex] = await Promise.all([load("index.json"), load("experiments.json")]);
+  const state = { feat: q.get("feat") || "" };
+  const root = h("div");
+  const listBox = h("div", { class: "grid" });
+  const draw = () => {
+    syncHash(["exp"], state);
+    listBox.replaceChildren(...ex.experiments.filter((e) => !state.feat || e.features.includes(state.feat)).map((e) =>
+      h("div", { class: "card xcard" },
+        h("div", { class: "sid" }, `실험 ${e.num} · ${e.period} · ${e.status === "paused" ? "멈춤" : "끝남"}`),
+        h("div", { class: "big2" }, h("a", { href: hExp(e.id) }, e.title)),
+        h("div", { class: "chips" }, e.features.map((f) => chip(featName(idx, f), "fill"))),
+        h("p", { class: "sub", style: "margin:0;font-size:13.5px" }, e.headline),
+        h("div", { class: "go" }, btn("자세히", hExp(e.id)), e.convs ? btn(`대화 ${e.convs}`, href(["conv"], { exp: e.id }), true) : null))));
+  };
+  root.append(title("실험"), h("p", { class: "lead" }, `${ex.round_label} 실험 ${ex.experiments.length}개. 카드를 누르면 무엇을 비교했고 결과가 어땠는지 나와요.`),
+    filterBar([{ key: "feat", label: "기능", options: [["", "전부"], ...idx.features.map((f) => [f.id, f.name])] }], state, draw), listBox);
+  draw();
+  return { node: root, title: "실험" };
+}
+
+function tableOf(t) {
+  const hasLinks = t.rows.some((r) => r.links);
+  // 숫자 칸은 오른쪽, 글 칸은 왼쪽
+  const numeric = t.cols.map((_, i) => t.rows.every((r) => /^[0-9$—.~(+−-]/.test(r.cells[i] || "—")));
+  const head = h("tr", null, h("th", null, ""), t.cols.map((c, i) => h("th", { class: numeric[i] ? "r" : "" }, c)));
+  const body = t.rows.map((r) => h("tr", null,
+    h("td", null, r.label, r.note ? h("span", { class: "note" }, r.note) : null),
+    t.cols.map((_, i) => {
+      const cell = r.cells[i] === undefined ? "" : r.cells[i];
+      const l = r.links && r.links[i];
+      return h("td", { class: numeric[i] ? "r num" : "" }, l ? h("a", { href: "#/conv?" + l }, cell) : cell);
+    })));
+  return h("div", null, h("h3", null, t.title), h("div", { class: "scroll" }, h("table", null, h("thead", null, head), h("tbody", null, body))),
+    hasLinks ? h("p", { class: "note" }, "굵게 밑줄 친 칸을 누르면 그 대화 목록이 열려요.") : null, t.note ? h("p", { class: "note" }, t.note) : null);
+}
+
+function runStatsTable(stats) {
+  const rows = [
+    ["대화 수", (s) => String(s.n)],
+    ["AI 턴 평균", (s) => f2(s.ai_turns)],
+    ["추출 F1 평균", (s) => f2(s.f1)],
+    ["숨은 사실 전달", (s) => pct(s.truth[0], s.truth[1])],
+    ["틀린 자동 기록 정정", (s) => (s.err[1] ? pct(s.err[0], s.err[1]) : "—")],
+    ["규칙 어긴 대화", (s) => `${s.rule_convs} / ${s.n}`],
+    ["문제 있는 대화", (s) => `${s.bad_convs} / ${s.n}`],
+    ["돌아보기 없이 마무리", (s) => `${s.no_reflect} / ${s.n}`],
+    ["설문 귀찮음 (낮을수록 좋음)", (s) => f2(s.ux_annoying)],
+    ["대화당 비용", (s) => usd(s.cost)],
+    ["검수 있는 대화", (s) => `${s.audited} / ${s.n}`],
+  ];
+  const head = h("tr", null, h("th", null, ""), stats.map((s) => h("th", { class: "r", title: s.label }, h("a", { href: href(["conv"], { run: s.run }), style: "color:var(--sub);font-weight:500" }, s.run))));
+  return h("div", { class: "scroll" }, h("table", null, h("thead", null, head), h("tbody", null, rows.map(([l, f]) => h("tr", null, h("td", null, l), stats.map((s) => h("td", { class: "r num" }, f(s))))))));
+}
+
+function diffBlock(d) {
+  const wrap = h("div");
+  const n = 8;
+  const item = (it) => h("div", { class: "lrow top" },
+    h("div", { style: "flex:none;width:8.5rem" }, h("b", null, it.id), h("span", { class: "sub" }, ` ${it.who}`), h("div", { class: "small" }, it.type_ko)),
+    h("ul", { class: "small grow", style: "margin:0;padding-left:16px" }, it.reasons.map((r) => h("li", null, r))),
+    btn("나란히 보기", href(["compare", it.id], { runs: d.a + "," + d.b }), true, true));
+  wrap.append(h("p", { class: "small", style: "margin:0 0 4px" }, `${d.a_label} 대 ${d.b_label}: 같은 상황 ${d.shared}개 중 `, h("b", { style: "color:var(--ink)" }, `${d.total}개`), "가 다르게 끝났어요.", d.total > d.items.length ? ` (영향이 큰 ${d.items.length}개만 보여요)` : ""));
+  d.items.slice(0, n).forEach((it) => wrap.append(item(it)));
+  if (d.items.length > n) {
+    const rest = h("div"); d.items.slice(n).forEach((it) => rest.append(item(it)));
+    rest.hidden = true;
+    const more = h("button", { type: "button", class: "btn ghost sm more", onclick: () => { rest.hidden = !rest.hidden; more.textContent = rest.hidden ? `더 보기 (+${d.items.length - n})` : "접기"; } }, `더 보기 (+${d.items.length - n})`);
+    wrap.append(rest, more);
+  }
+  return wrap;
+}
+
+async function vExp(id) {
+  const [idx, ex] = await Promise.all([load("index.json"), load("experiments.json")]);
+  const e = ex.experiments.find((x) => x.id === id);
+  if (!e) throw new Error(`실험 ${id}가 없어요`);
+  const root = h("div");
+  root.append(crumbs({ t: "실험", href: "#/exp" }, `실험 ${e.num}`),
+    title(e.title),
+    h("div", { class: "chips", style: "margin:6px 0 16px" }, chip(ex.round_label, "fill"), chip(e.period), chip(e.status === "paused" ? "멈춤" : "끝남", "", { dot: e.status === "paused" ? "zz" : "ok" }), e.features.map((f) => chip(featName(idx, f)))));
+  root.append(h("div", { class: "card" }, kvl("질문", e.question), kvl("누구로", e.who), kvl("한 줄 결론", h("b", null, e.headline))));
+
+  const armRows = e.arms.map((a) => h("div", { class: "lrow top" },
+    h("div", { style: "flex:none;width:9.5rem;font-weight:600" }, a.label),
+    h("div", { class: "grow" }, h("div", { class: "small", style: "margin-bottom:6px" }, a.desc),
+      h("div", { class: "chips" }, a.prompts.map((k) => chip(k, "fill", { href: hPrompt(k) })), a.runs.map((r) => chip(r, "", { href: href(["conv"], { run: r }) }))))));
+  root.append(section("비교한 판", armRows));
+
+  root.append(section("결과", e.tables.map(tableOf)));
+  if (e.run_stats.length) root.append(section("대화 요약 (대화 파일에서 바로 센 값)", runStatsTable(e.run_stats),
+    h("p", { class: "note" }, "보고서 숫자는 정리 전 1회차 기준이라 조금 다를 수 있어요. 실행 이름을 누르면 그 대화 목록이 열려요.")));
+  if (e.diffs.length) {
+    const body = h("div");
+    const show = (i) => body.replaceChildren(diffBlock(e.diffs[i]));
+    const short = (l) => String(l).split(" · ")[0];
+    const kids = [];
+    if (e.diffs.length > 1) {
+      const seg = h("div", { class: "seg", role: "tablist", style: "margin-bottom:10px" });
+      e.diffs.forEach((d, i) => seg.append(h("button", { type: "button", role: "tab", class: i === 0 ? "on" : "", onclick: () => { seg.querySelectorAll("button").forEach((b, j) => b.classList.toggle("on", j === i)); show(i); } }, `${short(d.a_label)} 대 ${short(d.b_label)}`)));
+      kids.push(seg);
+    }
+    show(0);
+    root.append(section("달라진 대화", ...kids, body, h("p", { class: "note" }, "같은 상황(시나리오)을 두 판이 다르게 끝낸 대화예요. 이유가 많이 겹친 것부터 보여요.")));
+  }
+  const exs = e.examples.filter((x) => x.items.length);
+  if (exs.length) root.append(section("대화 예시", exs.map((x) => h("div", null, h("h3", null, x.label), h("div", { class: "chips" }, x.items.map((it) => chip(`${it.id} ${it.who} · ${it.type_ko}${it.note ? " · " + it.note : ""}`, "", { href: hConv(it.run, it.id) })))))));
+  root.append(section("결론", h("p", { style: "font-size:14.5px;line-height:1.65" }, e.conclusion), h("h3", null, "한계 · 주의"),
+    h("ul", { class: "small", style: "margin:0;padding-left:18px;line-height:1.6" }, e.caveats.map((c) => h("li", null, c))), h("p", { class: "note", style: "margin-top:10px" }, "출처: " + e.sources.join(" · "))));
+  if (e.convs > 0) root.append(h("p", null, btn(`이 실험의 대화 ${e.convs}개 보기`, href(["conv"], { exp: e.id }))));
+  return { node: root, title: e.title };
+}
+
+/* ───────── 사람 ───────── */
+async function vPeople(q) {
+  const pp = await load("people.json");
+  const state = { style: q.get("style") || "" };
+  const root = h("div");
+  const box = h("div", { class: "card flush" });
+  const draw = () => {
+    syncHash(["people"], state);
+    const list = pp.people.filter((p) => !state.style || p.style === state.style);
+    box.replaceChildren(...(list.length ? list.map((p) => h("a", { class: "person", href: href(["people", p.id]) },
+      h("span", { class: "avatar" }, p.name.slice(0, 1)),
+      h("span", { class: "pm" }, h("b", null, p.name),
+        h("small", null, `${p.v3 && p.route ? p.route : `${p.living} · ${p.transport} ${p.travel_minutes}분`} · ${p.style_ko}`),
+        h("small", null, p.habits.slice(0, 3).join(" · "))),
+      h("span", { class: "pr" }, p.late ? `v3 ${p.late.days}일 중 지각 ${p.late.real}일` : "", p.late ? h("br") : null, `예전 대화 ${p.convs.total} · 문제 ${p.convs.bad}`))) : [empty("조건에 맞는 사람이 없어요.")]));
+  };
+  root.append(title("사람"), h("p", { class: "lead" }, `v3 가상 유저 ${pp.people.length}명 (개발용). 이름을 누르면 진짜 모습과 앱이 보는 기록을 나란히 보고, 14일 기록과 예전 대화도 볼 수 있어요.`),
+    filterBar([{ key: "style", label: "말투", seg: true, options: [["", "전부"], ...Object.entries(STYLE_KO)] }], state, draw), box,
+    h("p", { class: "note" }, "시험용 사람 4명은 최종 시험 전까지 이 화면에 없어요."));
+  draw();
+  return { node: root, title: "사람" };
+}
+
+const gapTxt = (g) => (g === null || g === undefined ? "" : ` (${g > 0 ? "+" : ""}${g}분)`);
+const mdText = (s) => String(s).replace(/\*\*/g, "");
+// 앱 기록 한 줄: 앱 값 (진짜와 다르면 점 + 차이) / 실제 값
+function pairLines(app, real, flag, gap, opts) {
+  opts = opts || {};
+  return h("div", { class: "pair" },
+    h("div", { class: "ln" }, h("span", { class: "l" }, "앱"),
+      app === null ? h("span", { class: opts.unknown ? "warn-t" : "muted" }, opts.unknown || "기록 없음") : h("b", { class: flag ? "dv" : "" }, flag ? h("i", { class: "sd warn", style: "margin-right:5px" }) : null, opts.fmt ? opts.fmt(app) : app),
+      flag && gap !== null && gap !== undefined && Math.abs(gap) >= 5 ? h("span", { class: "gap" }, gapTxt(gap).trim()) : null),
+    h("div", { class: "ln" }, h("span", { class: "l" }, "실제"), real === null || real === undefined ? "—" : (opts.fmt ? opts.fmt(real) : real)));
+}
+function dayRow(d) {
+  const [, mm, dd] = d.d.split("-");
+  const many = d.outings.length > 1;
+  const og = (o, node) => h("div", null, many ? h("div", { class: "og" }, o.title) : null, node);
+  const cell = (label, ...kids) => h("div", { class: "dc", "data-l": label }, kids);
+  const min = (x) => `${x}분`;
+  const row = h("div", { class: "day" });
+  row.append(
+    h("div", { class: "dc dt" }, h("b", { class: "num" }, `${Number(mm)}/${Number(dd)}`), ` ${d.wd}`, d.rain ? h("span", null, " ", chip("비", "fill")) : null),
+    cell("알람", d.alarm ? [h("b", { class: "num" }, d.alarm), d.snoozes ? h("div", { class: "small" }, `미룸 ${d.snoozes}번`) : h("div", { class: "small" }, "안 미룸")] : h("span", { class: "muted" }, "알람 없음")),
+    cell("기상", pairLines(d.wake.app, d.wake.real, d.wake.flag, d.wake.gap)),
+    cell("출발", d.outings.length ? d.outings.map((o) => og(o, h("div", null, pairLines(o.depart.app, o.depart.real, o.depart.flag, o.depart.gap),
+      o.fake.length ? h("div", { class: "ln small", style: "margin-top:2px" }, h("i", { class: "sd warn", style: "margin-right:5px;flex:none" }), `가짜 출발 ${o.fake.join(", ")}`) : null))) : h("span", { class: "muted" }, "외출 없음")),
+    cell("이동", d.outings.length ? d.outings.map((o) => og(o, h("div", { class: "pair" },
+      h("div", { class: "ln" }, h("span", { class: "l" }, "길찾기"), o.travel.route === null ? "—" : min(o.travel.route)),
+      h("div", { class: "ln" }, h("span", { class: "l" }, "앱"), o.travel.app === null ? h("span", { class: "muted" }, "기록 없음") : min(o.travel.app)),
+      h("div", { class: "ln" }, h("span", { class: "l" }, "실제"), o.travel.flag ? h("b", { class: "dv" }, h("i", { class: "sd warn", style: "margin-right:5px" }), min(o.travel.real)) : min(o.travel.real))))) : h("span", { class: "muted" }, "—")),
+    cell("도착", d.outings.length ? d.outings.map((o) => og(o, pairLines(o.arrive.app, o.arrive.real, o.arrive.flag, o.arrive.gap))) : h("span", { class: "muted" }, "—")),
+    cell("지각", d.outings.length ? d.outings.map((o) => og(o, pairLines(o.late.app === null ? null : o.late.app, o.late.real, o.late.flag, null, { fmt: (x) => (x === 0 ? "정시" : `${x}분`), unknown: o.late.real > 0 ? "앱은 모름" : "모름" }))) : h("span", { class: "muted" }, "—")),
+    h("div", { class: "dc dn", "data-l": "앱 기록이 진짜와 다른 곳" },
+      d.notes.length ? h("ul", { class: "notes" }, d.notes.map((n) => h("li", null, h("i", { class: "sd warn" }), h("span", null, n)))) : h("span", { class: "muted small" }, "앱 기록이 진짜와 비슷해요"),
+      d.events.length ? h("details", { style: "margin-top:4px" }, h("summary", null, "그날 진짜 있었던 일"), h("ul", { class: "small", style: "margin:4px 0 0;padding-left:16px" }, d.events.map((e) => h("li", null, e)))) : null));
+  return row;
+}
+
+function v3Section(p) {
+  const out = h("div");
+  out.append(section("가정 카드 (v3) — 진짜 모습 · 앱이 보는 기록",
+    h("p", { class: "small", style: "margin:0 0 10px" }, `말투: ${p.speech}`),
+    h("div", { class: "vhd" }, h("span"), h("span", null, "진짜 모습"), h("span", null, "앱이 보는 기록")),
+    p.card.map((r) => h("div", { class: "vrow" }, h("div", { class: "k" }, r.step), h("div", { "data-l": "진짜 모습" }, mdText(r.real)), h("div", { class: "a", "data-l": "앱이 보는 기록" }, mdText(r.app))))));
+  out.append(section("숨은 습관", h("div", { class: "chips" }, p.habits.map((x) => chip(x, "fill"))),
+    h("p", { class: "note" }, "가상 유저만 아는 진짜 습관이에요. 앱은 이걸 모르고 기록만 봐요 — AI가 대화로 알아내야 해요.")));
+
+  const s = p.stats;
+  const gapWord = (g, early, late) => (g === null ? "기록 없음" : Math.abs(g) < 0.5 ? "실제와 거의 같음" : `실제보다 평균 ${Math.abs(g)}분 ${g < 0 ? early : late}`);
+  out.append(section(`${s.days}일 기록 (${p.days[0].d.slice(5).replace("-", "/")} ~ ${p.days[p.days.length - 1].d.slice(5).replace("-", "/")})`,
+    kv("지각한 날", `진짜 ${s.late_real}일 · 앱이 본 것 ${s.late_app}일`, `외출이 있던 ${s.with_outing}일 중`),
+    kv("기상 확정", gapWord(s.wake_gap_avg, "이름", "늦음")),
+    kv("출발 감지", gapWord(s.depart_gap_avg, "이름", "늦음"), s.fake_departs ? `가짜 출발 ${s.fake_departs}번` : null),
+    kv("도착 감지", gapWord(s.arrive_gap_avg, "이름", "늦음")),
+    kv("이동 시간", s.travel_over_route_real === null ? "—" : `길찾기보다 실제 평균 +${s.travel_over_route_real}분`, s.travel_over_route_app === null ? null : `앱은 +${s.travel_over_route_app}분으로 봄`),
+    kv("앱 기록이 진짜와 다른 날", `${s.flagged_days} / ${s.days}일`, s.missing ? `기록 없음 ${s.missing}번` : null)));
+  const days = h("div", { class: "card" },
+    h("div", { class: "dhd" }, ["날짜", "알람", "기상", "출발", "이동", "도착", "지각", "앱 기록이 진짜와 다른 곳"].map((t) => h("span", null, t))),
+    p.days.map(dayRow));
+  out.append(h("div", { class: "sec" }, h("div", { class: "h2" }, "하루씩 보기", h("small", null, "앱 = 앱이 본 기록 · 실제 = 진짜 · 빨간 점 = 5분 넘게 다르거나 기록이 없거나 틀림")), days));
+  return out;
+}
+
+async function vPerson(id) {
+  const [pp, ci] = await Promise.all([load("people.json"), load("conv-index.json")]);
+  const p = pp.people.find((x) => x.id === id);
+  if (!p) throw new Error(`사람 ${id}가 없어요 (시험용은 최종 시험 전에는 안 보여요)`);
+  const v3 = p.v3 ? await load("people-v3.json") : null;
+  const x3 = v3 ? v3.people.find((x) => x.id === id) : null;
+  const mine = ci.rows.filter((r) => r.p === id);
+  const root = h("div");
+  root.append(crumbs({ t: "사람", href: "#/people" }, p.name),
+    h("div", { style: "display:flex;align-items:center;gap:12px;margin-top:8px" }, h("span", { class: "avatar" }, p.name.slice(0, 1)),
+      h("div", null, title(p.name), h("div", { class: "small" }, `${p.age}세 · ${p.major} · ${p.id} · ${p.split_ko}`))),
+    h("div", { class: "chips", style: "margin:12px 0 0" }, x3 ? chip(v3.label, "ink") : null, chip(`예전 대화 ${p.convs.total}개`, "fill")),
+    h("p", { class: "lead", style: "margin-top:12px" }, x3 ? mdText(x3.summary) : p.bio));
+
+  if (x3) root.append(v3Section(x3));
+  else {
+    const hasApp = p.card_r1.some((r) => r.app);
+    root.append(section("가정 카드 (예전)", p.card_r1.map((r) => kvl(r.step, r.real)), hasApp ? null : h("p", { class: "note" }, pp.note)));
+  }
+
+  if (v3 && v3.scenarios[id] && v3.scenarios[id].length) {
+    const list = v3.scenarios[id];
+    root.append(section(`v3 시나리오 ${list.length}개`,
+      h("p", { class: "small", style: "margin:0 0 8px" }, "이 사람으로 돌릴 대화 상황이에요. 아직 돌린 대화는 없어요 (실험 E0부터)."),
+      h("div", { class: "chips" }, list.map((s) => chip(`${s.date.slice(5).replace("-", "/")} ${s.type_ko}`, "", { title: `${s.id} · ${s.session}` })))));
+  }
+
+  // ── 예전 (라운드 1) ──
+  root.append(h("div", { class: "h2", style: "margin-top:30px" }, "예전 · 라운드 1", h("small", null, "타이핑 대화 실험 기록")));
+  if (x3) root.append(h("div", { class: "card" }, h("details", { style: "margin:0" }, h("summary", null, "예전 가정 카드 (라운드 1 — 진짜 모습만 있음)"), p.card_r1.map((r) => kvl(r.step, r.real)))));
+
+  // 판(실행)별 요약
+  const byRun = new Map();
+  for (const r of mine) { if (!byRun.has(r.run)) byRun.set(r.run, []); byRun.get(r.run).push(r); }
+  root.append(section("판별 요약 (예전)", h("div", { class: "scroll" }, h("table", null,
+    h("thead", null, h("tr", null, h("th", null, "실행"), h("th", { class: "r" }, "대화"), h("th", { class: "r" }, "숨은 사실 전달"), h("th", { class: "r" }, "문제 있는 대화"))),
+    h("tbody", null, ci.runs.filter((r) => byRun.has(r.run)).map((r) => {
+      const rs = byRun.get(r.run);
+      const tr = rs.reduce((s, x) => [s[0] + x.tr[0], s[1] + x.tr[1]], [0, 0]);
+      return h("tr", null, h("td", null, h("a", { href: href(["conv"], { run: r.run, p: id }) }, r.run), h("span", { class: "note" }, r.label)),
+        h("td", { class: "r num" }, String(rs.length)), h("td", { class: "r num" }, pct(tr[0], tr[1])), h("td", { class: "r num" }, `${rs.filter((x) => x.bad).length}`));
+    }))))));
+
+  // 시나리오(날)별로 모아 버전별 칩
+  const byScn = new Map();
+  for (const r of mine) { if (!byScn.has(r.id)) byScn.set(r.id, []); byScn.get(r.id).push(r); }
+  const scn = [...byScn.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+  root.append(section(`이 사람 대화 — 예전 · 상황별 · 판별 (${mine.length}개)`,
+    scn.map(([sid, rs]) => h("div", { class: "lrow top", style: "flex-wrap:wrap" },
+      h("div", { style: "flex:none;width:11rem" }, h("b", null, sid), h("div", { class: "small" }, `${rs[0].type_ko} · ${ci.sessions[rs[0].sess] || rs[0].sess}`)),
+      h("div", { class: "chips grow" }, rs.map((r) => chip(r.run, "", { href: hConv(r.run, r.id), dot: r.bad ? "warn" : "ok", title: r.pr.map((x) => ci.problems[x]).join(" · ") || "문제 없음" }))),
+      rs.length > 1 ? btn("나란히", href(["compare", sid], { runs: rs.slice(0, 3).map((r) => r.run).join(",") }), true, true) : null)),
+    h("p", { class: "note" }, "점 색: 초록 = 문제 없음, 빨강 = 규칙 어김 · 틀린 기록 못 고침 · 추출 많이 틀림 · 오류 중 하나 이상.")));
+  return { node: root, title: p.name };
+}
+
+/* ───────── 대화 목록 ───────── */
+async function vConvList(q) {
+  const [ci, idx] = await Promise.all([load("conv-index.json"), load("index.json")]);
+  const keys = ["exp", "run", "pv", "p", "style", "type", "sess", "res", "sort"];
+  const state = Object.fromEntries(keys.map((k) => [k, q.get(k) || ""]));
+  const rows = ci.rows;
+  const uniq = (f) => [...new Set(rows.map(f))];
+  const runOrder = new Map(ci.runs.map((r, i) => [r.run, i]));
+  const pvs = [...new Set(rows.flatMap((r) => r.pv))].sort();
+  const people = [...new Map(rows.map((r) => [r.p, r.who])).entries()].sort();
+  const defs = [
+    { key: "sess", label: "자기 전 / 기상 후", seg: true, options: [["", "전부"], ...Object.entries(ci.sessions)] },
+    { key: "exp", label: "실험", options: [["", "전부"], ...idx.experiments.filter((e) => e.convs).map((e) => [e.id, `${e.num}. ${e.title}`])] },
+    { key: "run", label: "실행(판)", options: [["", "전부"], ...ci.runs.map((r) => [r.run, `${r.run} · ${r.label}`])] },
+    { key: "pv", label: "프롬프트 버전", options: [["", "전부"], ...pvs.map((k) => [k, k])] },
+    { key: "p", label: "사람", options: [["", "전부"], ...people.map(([id, n]) => [id, `${n} (${id})`])] },
+    { key: "style", label: "말투", options: [["", "전부"], ...uniq((r) => r.style).map((s) => [s, STYLE_KO[s] || s])] },
+    { key: "type", label: "상황", options: [["", "전부"], ...Object.entries(ci.types)] },
+    { key: "res", label: "결과", options: RES_OPTS },
+    { key: "sort", label: "정렬", options: [["", "기본 (실행 · 번호순)"], ["rule", "규칙 어긴 턴 많은 순"], ["f1", "추출 F1 낮은 순"], ["truth", "숨은 사실 전달 낮은 순"]] },
+  ];
+  const resOK = (r, s) => !s || (s === "ok" ? !r.bad : s === "bad" ? r.bad : r.pr.includes(s));
+  const PAGE = 80;
+  let shown = PAGE;
+  const root = h("div");
+  const box = h("div");
+  const counter = h("p", { class: "count" });
+  const draw = (reset) => {
+    if (reset) shown = PAGE;
+    syncHash(["conv"], state);
+    const s = state;
+    let list = rows.filter((r) => (!s.exp || r.exp === s.exp) && (!s.run || r.run === s.run) && (!s.pv || r.pv.includes(s.pv)) && (!s.p || r.p === s.p) && (!s.style || r.style === s.style) && (!s.type || r.type === s.type) && (!s.sess || r.sess === s.sess) && resOK(r, s.res));
+    const ord = (a, b) => (runOrder.get(a.run) - runOrder.get(b.run)) || a.id.localeCompare(b.id);
+    if (s.sort === "rule") list = [...list].sort((a, b) => b.nfl - a.nfl || ord(a, b));
+    else if (s.sort === "f1") list = [...list].sort((a, b) => (a.f1 ?? 9) - (b.f1 ?? 9) || ord(a, b));
+    else if (s.sort === "truth") list = [...list].sort((a, b) => (a.tr[0] / (a.tr[1] || 1)) - (b.tr[0] / (b.tr[1] || 1)) || ord(a, b));
+    else list = [...list].sort(ord);
+    counter.textContent = `대화 ${list.length}개` + (list.length ? ` (전체 ${rows.length}개 중)` : " — 조건에 맞는 대화가 없어요");
+    const cl = h("div", { class: "card flush" });
+    list.slice(0, shown).forEach((r) => cl.append(convRow(r, ci)));
+    box.replaceChildren(list.length ? cl : empty("초기화를 눌러 조건을 풀어 보세요."));
+    if (list.length > shown) box.append(h("button", { type: "button", class: "btn ghost more", onclick: () => { shown += PAGE; draw(false); } }, `더 보기 (+${Math.min(PAGE, list.length - shown)})`));
+  };
+  root.append(title("대화"), h("p", { class: "lead" }, `${ci.round_label} 가상 유저와 AI가 나눈 대화예요. 고른 조건은 주소에 남아서, 주소를 그대로 보내면 같은 목록이 열려요.`),
+    filterBar(defs, state, () => draw(true)), counter, box);
+  draw(true);
+  return { node: root, title: "대화" };
+}
+function convRow(r, ci) {
+  return h("a", { class: "crow", href: hConv(r.run, r.id) },
+    h("span", null, h("b", { class: "mono-id" }, r.id), h("small", null, r.run)),
+    h("span", null, `${r.who} · ${r.type_ko}`, h("small", null, `${ci.sessions[r.sess] || r.sess} · ${r.open === "QUESTION_FIRST" ? "질문 먼저" : "요약 먼저"}`)),
+    h("span", { class: "sub" }, r.t1 || "—", h("small", null, `${r.arm} · AI ${r.ai}턴`)),
+    h("span", { class: "num" }, `숨은 사실 ${r.tr[0]}/${r.tr[1]}`, h("small", null, `F1 ${r.f1 === null ? "—" : r.f1.toFixed(2)}${r.err[1] ? ` · 틀린 기록 ${r.err[0]}/${r.err[1]}` : ""}`)),
+    h("span", { class: "chips" }, r.pr.length ? r.pr.map((x) => probChip(x, x === "rule" ? `규칙 어김 ${r.nfl}턴` : ci.problems[x])) : okChip()));
+}
+
+/* ───────── 대화 상세 ───────── */
+function truthLabel(conv, id) {
+  const t = conv.truth.find((x) => x.id === id);
+  return t ? `${id} (${t.kind_ko})` : id;
+}
+function checkLine(t) {
+  const has = (c) => t.flags.some((f) => f.code === c);
+  const ruleBad = t.flags.some((f) => f.code !== "acts_mismatch");
+  const parts = [
+    [ruleBad, `규칙 ${ruleBad ? "✗" : "✓"}`],
+    [has("unsupported_numbers"), `숫자 ${has("unsupported_numbers") ? "✗" : "✓"}`],
+    [has("multi_question"), `물음 ${t.questions === null ? "?" : t.questions}개`],
+    [has("over_length"), `길이 ${t.chars}자`],
+    [has("acts_mismatch"), `표시 ${has("acts_mismatch") ? "✗" : "✓"}`],
+  ];
+  return h("span", null, parts.flatMap(([bad, text], i) => [i ? " · " : "", h("span", { class: bad ? "warn-t" : "" }, text)]));
+}
+const drow = (k, ...v) => h("div", { class: "drow" }, h("span", { class: "k" }, k), h("div", null, v));
+
+// 대화 한 건을 타임라인으로 — 왼쪽에 몇 번째 턴인지, 점 · 세로선, 오른쪽에 그 턴의 카드 (AI = 흰 카드, 사용자 = 회색 카드)
+function turnCards(conv, opts) {
+  opts = opts || {};
+  const out = h("ol", { class: "tl2" + (opts.compact ? " compact" : "") });
+  for (const t of conv.turns) {
+    if (t.role === "ai") {
+      const bad = t.flags.some((f) => f.code !== "acts_mismatch");
+      const li = h("li", { class: "ai" });
+      li.append(h("span", { class: "t" }, `AI ${t.n}`), h("i", { class: "d" + (bad ? " bad" : "") }));
+      const card = h("div", { class: "tcard" });
+      card.append(h("div", { class: "thd" }, h("span", { class: "tt" }, `AI ${t.n}턴`), t.latency_ms ? `${(t.latency_ms / 1000).toFixed(1)}초` : null, t.ended ? chip("마무리 답", "fill") : null, t.acts.map((a) => chip(a.label + (a.ref ? " " + a.ref : ""), "fill"))));
+      card.append(h("p", { class: "say" }, t.text));
+      card.append(drow("검사", checkLine(t),
+        t.flags.length ? h("div", { class: "probs" }, t.flags.map((f) => h("div", null, f.label + (f.detail ? ` — ${f.detail}` : "")))) : null,
+        t.diag.length ? h("div", { class: "small" }, "참고: " + t.diag.map((f) => f.label + (f.detail ? ` (${f.detail})` : "")).join(" · ")) : null));
+      if (!opts.compact) {
+        card.append(h("details", null, h("summary", null, "AI가 받은 화면 (펼치기)"), t.screen ? h("pre", null, t.screen) : h("p", { class: "small" }, "이 대화는 옛 화면 판으로 돌았고 그때의 화면은 저장되지 않았어요.")));
+        card.append(h("details", null, h("summary", null, "AI 생각 요약 (펼치기)"), h("p", { class: "small" }, "기록 없음 — 예전(타이핑 대화) 실행은 AI 생각을 저장하지 않았어요. v3 실험부터 저장해요.")));
+      }
+      li.append(card);
+      out.append(li);
+    } else {
+      const li = h("li", { class: "user" });
+      li.append(h("span", { class: "t" }, `사용자 ${t.n}`), h("i", { class: "d" + (t.improvised ? " bad" : "") }));
+      const card = h("div", { class: "tcard" });
+      card.append(h("div", { class: "thd" }, h("span", { class: "tt" }, `사용자 ${t.n}턴`), t.wants_to_end ? chip("끝내고 싶다는 뜻", "") : null));
+      card.append(h("p", { class: "say" }, t.text));
+      if (t.extract) {
+        const ex = t.extract;
+        card.append(drow("② 추출", h("ul", null, ex.lines.map((l) => h("li", null, l))),
+          !ex.valid ? h("div", { class: "probs" }, "추출 결과가 형식에 안 맞아요" + (ex.errors.length ? ": " + ex.errors.join("; ") : "")) : null,
+          !opts.compact && ex.raw ? h("details", null, h("summary", null, "원본 JSON"), h("pre", null, JSON.stringify(ex.raw, null, 1))) : null));
+      }
+      if (t.server) card.append(drow("서버", h("ul", null, t.server.lines.map((l) => h("li", null, l)))));
+      const said = t.conveyed.filter((c) => c.status !== "NOT_SAID");
+      card.append(drow("검수자",
+        said.length ? h("ul", null, said.map((c) => h("li", null, `숨은 사실 ${truthLabel(conv, c.id)} — ${c.label}`))) : h("span", { class: "muted" }, "이 턴에서 새로 전한 숨은 사실 없음"),
+        t.confirm_answers.length ? h("div", { class: "small" }, "저장 확인에 답함: " + t.confirm_answers.map((c) => `${c.pending_id} ${c.answer}`).join(", ")) : null,
+        t.improvised ? h("div", { class: "probs" }, "숨은 사실에 없는 말을 지어냄: " + t.improvised) : null));
+      li.append(card);
+      out.append(li);
+    }
+  }
+  return out;
+}
+const SCORE = (n) => (n === null || n === undefined ? "—" : String(n));
+
+function truthList(conv) {
+  return h("div", null, conv.truth.map((t) => {
+    const dot = t.status === "NOT_SAID" ? "off" : t.status === "VAGUE" ? "zz" : "ok";
+    return h("div", { class: "lrow top" },
+      h("i", { class: "sd " + dot, style: "margin-top:6px" }),
+      h("div", { class: "grow" }, h("b", null, t.id), " ", chip(t.kind_ko, "fill"), " ", chip(t.disclosure_ko), h("div", { style: "margin-top:4px" }, t.hint),
+        t.turn ? h("div", { class: "small" }, `사용자 ${t.turn}턴${t.quote ? ` — "${t.quote}"` : ""}`) : null),
+      h("span", { class: "small", style: "flex:none" }, t.label));
+  }));
+}
+
+async function vConv(run, id) {
+  const [conv, ci, idx] = await Promise.all([loadConv(run, id), load("conv-index.json"), load("index.json")]);
+  const xe = idx.experiments.find((e) => e.id === conv.exp);
+  const others = ci.rows.filter((r) => r.id === id && r.run !== run);
+  const r = conv.result;
+  const root = h("div");
+  root.append(crumbs({ t: "대화", href: "#/conv" }, { t: run, href: href(["conv"], { run }) }, id),
+    title(`${id} · ${conv.persona.name} · ${conv.type_ko}`),
+    h("div", { class: "chips", style: "margin:6px 0 16px" },
+      chip(conv.round_label, "fill"), xe ? chip(`실험 ${xe.num}. ${xe.title}`, "", { href: hExp(xe.id) }) : null, chip(conv.arm_label), chip(conv.session_ko), chip(conv.opening_ko),
+      Object.entries(conv.prompts).filter(([, v]) => v && v.includes("@")).map(([k, v]) => chip(v.split("#")[0], "fill", { href: hPrompt(v.split("#")[0]), title: k })),
+      r.problems.length ? r.problems.map((x) => probChip(x, ci.problems[x] || x)) : okChip()));
+
+  const fe = r.facts && r.facts.err_total ? `틀린 자동 기록 ${r.facts.err_conveyed}/${r.facts.err_total} 정정` : null;
+  root.append(h("div", { class: "grid stats" },
+    stat("대화", h("span", null, `AI ${r.ai_turns}턴`), `사용자 ${r.user_turns}턴 · ${r.end_reason_ko}${r.rule_turns.length ? ` · 규칙 어긴 턴 AI ${r.rule_turns.join(", ")}` : ""}`),
+    stat("숨은 사실", h("span", null, `${r.truth.conveyed}/${r.truth.total}`), `분명히 전함 ${r.truth.clear} · ${conv.truth_source === "audit" ? "독립 검수 기준" : "가상 유저 자기보고 기준 (검수 전)"}${fe ? " · " + fe : ""}`, r.truth.total ? Math.round((r.truth.conveyed / r.truth.total) * 100) : 0),
+    stat("추출 (T2) F1", f2(r.f1), r.t2 ? `맞게 담음 ${r.t2.tp} · 지어냄 ${r.t2.hallucinated} · 놓침 ${r.t2.fn}` : null),
+    stat("비용 · 시간", usd(conv.cost.total), "AI 답 " + (conv.latency.t1.length ? conv.latency.t1.map((x) => (x / 1000).toFixed(1)).join(" · ") + "초" : "—")),
+    h("div", { class: "card" }, h("div", { class: "lbl" }, "설문 (5점)"),
+      conv.ux ? [kv("귀찮음", SCORE(conv.ux.annoying)), kv("자연스러움", SCORE(conv.ux.natural)), kv("길이 적당", SCORE(conv.ux.length_ok)), kv("다시 쓸지", SCORE(conv.ux.would_reuse))] : empty("설문 없음"))));
+
+  root.append(section("이 날 상황", h("p", { class: "sub", style: "margin:0" }, conv.notes), h("details", null, h("summary", null, "가상 유저가 아는 자기 하루 (펼치기)"), h("pre", null, conv.situation))));
+  root.append(section("숨은 사실 — AI가 대화로 알아냈나", truthList(conv)));
+  root.append(h("div", { class: "h2" }, "대화 — 턴마다"));
+  root.append(h("p", { class: "note", style: "margin:-4px 2px 12px" }, "타이핑으로 나눈 대화라 '받아쓰기 · 정리' 단계는 없고, 사용자가 친 글이 곧 '하려던 말'이에요."));
+  root.append(turnCards(conv));
+  if (conv.ux && conv.ux.comment) root.append(section("가상 유저 소감", h("p", { style: "margin:0;font-size:14.5px;line-height:1.65" }, conv.ux.comment)));
+  if (r.t2) root.append(h("div", { class: "card" }, h("details", { style: "margin:0" }, h("summary", null, "추출 채점 자세히"),
+    h("ul", { style: "margin:8px 0 0;padding-left:18px" }, r.t2.gold.map((g) => h("li", null, `${truthLabel(conv, g.id.split("+")[0])} · ${g.group} → ${g.outcome === "TP" ? "맞게 담음" : g.outcome}`))),
+    r.t2.bad.length ? h("p", { class: "small", style: "margin-top:8px" }, "정답에 없는데 담음: " + r.t2.bad.map((b) => `${b.group} (${b.outcome})`).join(", ")) : null)));
+  if (conv.errors.length) root.append(h("div", { class: "card dash" }, h("p", { class: "warn-t", style: "margin:0" }, "실행 중 오류: " + conv.errors.join(" / "))));
+  if (r.unrelayed_change.length) root.append(h("div", { class: "card dash" }, h("p", { class: "small", style: "margin:0" }, h("i", { class: "sd zz" }), " 마지막 사용자 말 뒤의 처리 결과를 아무도 전하지 못하고 끝났어요: " + r.unrelayed_change.join(", "))));
+
+  root.append(section("같은 상황의 다른 판",
+    others.length ? h("div", null, h("div", { class: "chips" }, others.map((o) => chip(`${o.run} · ${o.arm}${o.bad ? " · 문제" : ""}`, "", { href: hConv(o.run, o.id), dot: o.bad ? "warn" : "ok" }))),
+      h("p", { style: "margin-top:12px" }, btn("나란히 보기", href(["compare", id], { runs: [run, ...others.map((o) => o.run)].slice(0, 3).join(",") })))) : empty("이 상황은 다른 판에서 돌린 적이 없어요."),
+    h("p", { class: "small", style: "margin:8px 0 0" }, h("a", { href: href(["people", conv.persona.id]) }, `${conv.persona.name}의 다른 대화`))));
+  return { node: root, title: `${id} ${conv.persona.name}` };
+}
+
+/* ───────── 나란히 보기 ───────── */
+async function vCompare(id, q) {
+  const ci = await load("conv-index.json");
+  const avail = ci.rows.filter((r) => r.id === id);
+  if (!avail.length) throw new Error(`${id} 대화가 없어요`);
+  let runs = (q.get("runs") || "").split(",").filter((r) => avail.some((a) => a.run === r));
+  if (!runs.length) runs = avail.slice(0, 3).map((a) => a.run);
+  const convs = await Promise.all(runs.map((r) => loadConv(r, id)));
+  const root = h("div");
+  const seg = h("div", { class: "seg", style: "margin-bottom:14px" }, avail.map((a) => {
+    const on = runs.includes(a.run);
+    const next = on ? runs.filter((r) => r !== a.run) : [...runs, a.run];
+    return h("a", { class: on ? "on" : "", href: href(["compare", id], { runs: next.join(",") }), title: a.run }, `${a.run} · ${a.arm}`);
+  }));
+  root.append(crumbs({ t: "대화", href: "#/conv" }, "나란히 보기", id), title(`${id} · ${avail[0].who} · ${avail[0].type_ko}`),
+    h("p", { class: "lead" }, "같은 상황을 판마다 돌린 대화를 옆에 놓았어요. 아래에서 판을 더하거나 뺄 수 있어요."), seg);
+  const cmp = h("div", { class: "compare", style: `--n:${convs.length}` });
+  convs.forEach((c) => {
+    const r = c.result;
+    cmp.append(h("div", null,
+      h("div", { class: "card" },
+        h("div", { class: "lrow", style: "padding:0 0 8px" }, h("b", { class: "grow" }, c.arm_label), btn("자세히 열기", hConv(c.run, c.id), true, true)),
+        h("div", { class: "chips", style: "margin-bottom:8px" }, r.problems.length ? r.problems.map((x) => probChip(x, ci.problems[x] || x)) : okChip()),
+        h("div", { class: "small num" }, `AI ${r.ai_turns}턴 · 숨은 사실 ${r.truth.conveyed}/${r.truth.total}${r.facts && r.facts.err_total ? ` · 틀린 기록 ${r.facts.err_conveyed}/${r.facts.err_total} 정정` : ""} · F1 ${f2(r.f1)}`),
+        h("div", { class: "small muted" }, (c.prompts.t1 || "").split("#")[0])),
+      turnCards(c, { compact: true })));
+  });
+  root.append(cmp);
+  return { node: root, title: `${id} 나란히 보기` };
+}
+
+/* ───────── 프롬프트 ───────── */
+function lineage(list) {
+  // 부모-자식 순서로 펼쳐 깊이를 붙인다 (같은 부모 아래는 날짜 → 이름순)
+  const byParent = new Map();
+  const keys = new Set(list.map((p) => p.ref));
+  for (const p of list) { const k = p.parent && keys.has(p.parent) ? p.parent : ""; if (!byParent.has(k)) byParent.set(k, []); byParent.get(k).push(p); }
+  const out = [];
+  const walk = (parent, depth) => {
+    (byParent.get(parent) || []).sort((a, b) => a.date.localeCompare(b.date) || a.ref.localeCompare(b.ref)).forEach((p) => { out.push({ p, depth }); walk(p.ref, depth + 1); });
+  };
+  walk("", 0);
+  return out;
+}
+async function vPrompts(q) {
+  const pr = await load("prompts.json");
+  const state = { feat: q.get("feat") || "", st: q.get("st") || "" };
+  const root = h("div");
+  const box = h("div");
+  const draw = () => {
+    syncHash(["prompts"], state);
+    box.replaceChildren();
+    for (const f of pr.features) {
+      if (state.feat && f.id !== state.feat) continue;
+      const items = pr.prompts.filter((p) => p.feature === f.id && (!state.st || (state.st === "main" ? ["current", "adopted", "baseline"].includes(p.status) : p.status === state.st)));
+      if (!items.length) continue;
+      const card = h("div", { class: "card flush" });
+      for (const g of [...new Set(items.map((p) => p.id))]) {
+        for (const { p, depth } of lineage(items.filter((x) => x.id === g))) {
+          const v = p.status === "variant" || p.status === "tool" || p.status === "sanity";
+          card.append(h("div", { class: "prow" + (v ? " v" : "") },
+            h("span", { class: "id", style: `padding-left:${Math.min(depth, 4) * 14}px` }, h("a", { href: hPrompt(p.ref) }, p.ref), p.parent ? null : h("span", { class: "muted small" }, " (처음)")),
+            h("span", null, statusChip(p.status_ko)),
+            h("span", null, p.note, p.result ? h("span", { class: "small", style: "display:block" }, "→ " + p.result) : null),
+            h("span", { class: "small num" }, p.date.slice(5).replace("-", "/"), p.diff ? ` +${p.diff.added} −${p.diff.removed}` : "", p.convs ? h("a", { style: "display:block;color:var(--ink)", href: href(["conv"], { pv: p.ref }) }, `대화 ${p.convs}`) : null)));
+        }
+      }
+      box.append(h("div", { class: "fam" }, h("div", { class: "h2" }, f.name, h("small", null, f.where)), card));
+    }
+    if (!box.firstChild) box.append(empty("조건에 맞는 프롬프트가 없어요."));
+  };
+  root.append(title("프롬프트"), h("p", { class: "lead" }, `${pr.prompts.length}개 버전. 들여쓴 것은 그 윗 버전에서 갈라져 나온 판이에요. 회색은 실험 변형이고, 이름을 누르면 전문과 바뀐 줄이 나와요. 날짜는 파일을 마지막으로 고친 날이에요.`),
+    filterBar([
+      { key: "st", label: "상태", seg: true, options: [["", "전부"], ["main", "기준 · 채택 · 지금 판"], ["variant", "실험 변형"], ["candidate", "후보"], ["tool", "실험 도구"]] },
+      { key: "feat", label: "기능", options: [["", "전부"], ...pr.features.map((f) => [f.id, f.name])] },
+    ], state, draw), box);
+  draw();
+  return { node: root, title: "프롬프트" };
+}
+
+function diffUnified(aText, bText, ctx) {
+  const A = aText.split("\n"), B = bText.split("\n");
+  const n = A.length, m = B.length;
+  const dp = Array.from({ length: n + 1 }, () => new Uint32Array(m + 1));
+  for (let i = n - 1; i >= 0; i--) for (let j = m - 1; j >= 0; j--) dp[i][j] = A[i] === B[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
+  const seq = [];
+  let i = 0, j = 0;
+  while (i < n && j < m) {
+    if (A[i] === B[j]) { seq.push({ op: "=", t: A[i], a: i + 1, b: j + 1 }); i++; j++; }
+    else if (dp[i + 1][j] >= dp[i][j + 1]) { seq.push({ op: "-", t: A[i], a: i + 1 }); i++; }
+    else { seq.push({ op: "+", t: B[j], b: j + 1 }); j++; }
+  }
+  while (i < n) { seq.push({ op: "-", t: A[i], a: i + 1 }); i++; }
+  while (j < m) { seq.push({ op: "+", t: B[j], b: j + 1 }); j++; }
+  const keep = new Array(seq.length).fill(false);
+  seq.forEach((x, k) => { if (x.op !== "=") for (let d = -ctx; d <= ctx; d++) if (seq[k + d]) keep[k + d] = true; });
+  const box = h("div", { class: "diff" });
+  let gap = 0;
+  const flush = () => { if (gap) { box.append(h("div", { class: "gap" }, h("span"), h("span"), h("span"), `… 같은 줄 ${gap}개`)); gap = 0; } };
+  let added = 0, removed = 0;
+  seq.forEach((x, k) => {
+    if (x.op === "+") added++; if (x.op === "-") removed++;
+    if (!keep[k]) { gap++; return; }
+    flush();
+    box.append(h("div", { class: x.op === "+" ? "add" : x.op === "-" ? "del" : "" }, h("span", { class: "n" }, x.a || ""), h("span", { class: "n" }, x.b || ""), h("span", null, x.op === "=" ? " " : x.op), h("span", null, x.t)));
+  });
+  flush();
+  return { box, added, removed, same: added + removed === 0 };
+}
+
+async function vPrompt(key) {
+  const [pr, idx] = await Promise.all([load("prompts.json"), load("index.json")]);
+  const expTitle = (id) => { const e = idx.experiments.find((x) => x.id === id); return e ? `${e.num}. ${e.title}` : id; };
+  const p = pr.prompts.find((x) => x.ref === key);
+  if (!p) throw new Error(`프롬프트 ${key}가 없어요`);
+  const parent = p.parent ? pr.prompts.find((x) => x.ref === p.parent) : null;
+  const kids = pr.prompts.filter((x) => x.parent === key);
+  const root = h("div");
+  root.append(crumbs({ t: "프롬프트", href: "#/prompts" }, p.id, p.version),
+    title(p.ref),
+    h("div", { class: "chips", style: "margin:6px 0 16px" }, statusChip(p.status_ko), chip(p.date.slice(5).replace("-", "/") + " 수정"), p.model ? chip(p.model, "fill") : null, p.effort ? chip("effort " + p.effort, "fill") : null, chip("sha " + p.sha, "fill")));
+  root.append(h("div", { class: "card" },
+    kvl("한 줄", p.note || "—"),
+    p.result ? kvl("결과", p.result) : null,
+    kvl("부모 버전", parent ? h("span", null, h("a", { href: hPrompt(parent.ref) }, parent.ref), "  ", btn("부모와 비교", href(["diff"], { a: parent.ref, b: p.ref }), true, true)) : "없음 (처음 판)"),
+    kvl("갈라진 판", kids.length ? h("div", { class: "chips" }, kids.map((k) => chip(k.ref, "", { href: hPrompt(k.ref) }))) : "없음"),
+    kvl("쓴 실험", p.used_in.length ? h("div", { class: "chips" }, p.used_in.map((e) => chip(expTitle(e), "fill", { href: hExp(e) }))) : "—"),
+    kvl("쓴 대화", p.convs ? h("a", { href: href(["conv"], { pv: p.ref }) }, `${p.convs}개 보기`) : "대화 파일 없음 (재생 · 계산 실험에서 쓴 판)")));
+  if (parent && p.diff) {
+    const d = diffUnified(parent.text, p.text, 1);
+    root.append(section(`바뀐 줄 — ${parent.ref} 대비`, p.diff.lines.length <= 1 ? h("p", { class: "empty" }, "version 줄만 달라요. 내용은 같아요.") : null, d.box, h("p", { class: "note" }, "초록 = 새 줄, 빨강 = 뺀 줄")));
+  }
+  // 다른 판과 비교 고르기
+  const same = pr.prompts.filter((x) => x.id === p.id && x.ref !== p.ref);
+  if (same.length) {
+    const sel = h("select", { class: "sel", style: "max-width:320px", "aria-label": "비교할 버전" }, same.map((x) => h("option", { value: x.ref }, x.ref)));
+    root.append(section("다른 버전과 비교", h("div", { style: "display:flex;gap:8px;flex-wrap:wrap;align-items:center" }, sel, h("button", { type: "button", class: "btn sm", onclick: () => { location.hash = href(["diff"], { a: sel.value, b: p.ref }); } }, "비교 열기"))));
+  }
+  root.append(section("전문", h("details", { style: "margin:0" }, h("summary", null, `펼치기 (${p.lines}줄)`), h("pre", null, p.text))));
+  return { node: root, title: p.ref };
+}
+
+async function vDiff(q) {
+  const pr = await load("prompts.json");
+  const a = pr.prompts.find((x) => x.ref === q.get("a"));
+  const b = pr.prompts.find((x) => x.ref === q.get("b"));
+  if (!a || !b) throw new Error("비교할 두 버전이 필요해요 (예: #/diff?a=T1@v1&b=T1@v1.2-flow)");
+  const ci = await load("conv-index.json");
+  const root = h("div");
+  const d = diffUnified(a.text, b.text, 2);
+  root.append(crumbs({ t: "프롬프트", href: "#/prompts" }, "비교"), title(`${a.ref} → ${b.ref}`),
+    h("p", { class: "lead" }, d.same ? "두 버전의 내용이 같아요." : `새 줄 ${d.added}개 · 뺀 줄 ${d.removed}개 (version 머리말 한 줄 포함)`));
+  root.append(section("바뀐 줄", d.box, h("p", { class: "note" }, "초록 = 새 줄, 빨강 = 뺀 줄")));
+  // 이 변경으로 결과가 달라진 대화: A를 쓴 대화와 B를 쓴 대화에서 같은 상황끼리 문제 여부가 다른 것
+  const rowsA = ci.rows.filter((r) => r.pv.includes(a.ref) && !r.pv.includes(b.ref));
+  const rowsB = ci.rows.filter((r) => r.pv.includes(b.ref) && !r.pv.includes(a.ref));
+  const byId = (rows) => { const m = new Map(); rows.forEach((r) => { if (!m.has(r.id)) m.set(r.id, r); }); return m; };
+  const A = byId(rowsA), B = byId(rowsB);
+  const worse = [], better = [];
+  for (const [id, ra] of A) { const rb = B.get(id); if (!rb) continue; if (ra.bad && !rb.bad) better.push([ra, rb]); else if (!ra.bad && rb.bad) worse.push([ra, rb]); }
+  const line = ([ra, rb]) => h("div", { class: "lrow" }, h("span", { style: "flex:none;width:9rem" }, h("b", null, ra.id), h("span", { class: "sub" }, ` ${ra.who}`)), h("span", { class: "small grow" }, ra.type_ko), btn("나란히 보기", href(["compare", ra.id], { runs: ra.run + "," + rb.run }), true, true));
+  if (A.size && B.size) {
+    root.append(section("이 변경으로 결과가 달라진 대화", h("p", { class: "small", style: "margin:0" }, `${a.ref}를 쓴 대화 ${A.size}개와 ${b.ref}를 쓴 대화 ${B.size}개 중 같은 상황끼리 비교 (문제 있음 여부 기준)`),
+      h("h3", { style: "margin-top:14px" }, `좋아진 것 ${better.length}개`), better.length ? better.slice(0, 12).map(line) : empty("없음"),
+      h("h3", null, `나빠진 것 ${worse.length}개`), worse.length ? worse.slice(0, 12).map(line) : empty("없음")));
+  } else {
+    root.append(section("이 변경으로 결과가 달라진 대화", empty("두 버전을 모두 쓴 대화 파일이 없어요. 재생 · 계산 실험에서만 쓴 버전은 대화 단위로 비교할 수 없어요.")));
+  }
+  return { node: root, title: "프롬프트 비교" };
+}
+
+/* ───────── 용어 ───────── */
+const TERMS = [
+  ["숨은 사실", "가상 유저만 아는 오늘의 진짜 사정. AI가 대화로 알아내야 해요. 독립 검수자(AUDIT)가 대화를 읽고 '말했는지'를 따로 판정해요."],
+  ["전달됨 · 흐릿하게 · 정정", "숨은 사실을 사용자가 분명히 말함 / 대충 말함 / 틀린 기록을 고쳐 말함. '안 말함'은 AI가 못 이끌어 냈다는 뜻이기도 해요."],
+  ["감지 오류 (틀린 자동 기록)", "앱이 자동으로 모은 기록(출발 · 도착 등)이 실제와 달라서 사용자가 '아니에요'라고 고쳐야 하는 경우. 기준판에서 6개 대화뿐이라 숫자가 작아요."],
+  ["확인 필요", "서버가 '저장할까요?'를 물어야 하는 것 (일정 · 시각 · 알람 바꾸기)."],
+  ["서버 질문", "서버가 정한 질문(원인 · 중요도 · 준비물 등). AI는 대화당 한 번, 뜻을 바꾸지 않고 말만 다듬어 물어요."],
+  ["규칙 어김", "코드가 세는 규칙 위반: 한 번에 두 개 이상 묻기, 서버가 안 한 저장을 했다고 말하기, 저장 약속, 위험하지 않은데 109 안내, 서버가 준 적 없는 숫자, 해요체 아님, 너무 긴 답, 시각 표기 섞임 등. 물음 종류 표시(acts) 어긋남은 표기 약속이라 따로 셈."],
+  ["돌아보기 (REFLECT)", "'오늘 어땠어요?'처럼 하루를 돌아보는 물음. 자기 전 대화는 마무리 전에 1번 하는 게 규칙이에요."],
+  ["이른 마무리", "사용자가 끝내자는 신호(잘게, ㅂㅂ)를 안 보냈는데 AI가 먼저 마무리 답(end)을 낸 경우."],
+  ["판 (A · B · C)", "같은 상황에서 프롬프트나 서버 설정만 바꿔 다시 돌린 것. 실행 이름(fv1-a1 등)은 그 판을 돌린 폴더예요."],
+  ["개발용 / 시험용", "프롬프트를 고칠 때 보는 사람 8명 / 마지막에 한 번만 확인하는 처음 보는 사람 4명. 시험용은 최종 시험 전까지 이 화면에 없어요."],
+  ["F1", "말한 것 중 맞게 뽑은 비율과 뽑은 것 중 맞는 비율을 합친 점수 (1에 가까울수록 좋음). 추출(T2)을 채점할 때 써요."],
+  ["승률 (쌍 비교)", "같은 자리에서 새 답과 기준 답을 판정 모델이 비교해 새 답이 이긴 비율. 0.5면 비김. 판정 잡음이 ±0.1 정도라 그보다 작은 차이는 못 가려요."],
+  ["정답표 (gold)", "대화에서 뽑아야 할 정답. 가상 유저 자기보고로 먼저 만들고(v0), 독립 검수 결과로 다시 만든 것이 v1이에요."],
+  ["가상 유저 (SIM)", "AI(Sonnet)가 가상 인물 역할로 사용자 말을 만들어 내는 도구. 설문(SIM_UX)도 같이 써서 귀찮음 · 자연스러움을 5점으로 물어요."],
+  ["예전 · 라운드 1", "타이핑으로 나눈 대화 실험. 말로 하는 대화(받아쓰기 → 정리 → 추출 → 답)와 AI 생각 기록은 v3 실험부터라 이 화면에 아직 없어요."],
+  ["pinball · 커버리지", "추천 시간이 실제와 얼마나 어긋났는지(낮을수록 좋음) / 추천 시간 안에 준비가 끝난 날의 비율(목표 80%). 추천 비서 실험에서 써요."],
+  ["상태 점", "초록 = 좋음 · 끝남 · 문제 없음, 파랑 = 진행 중 · 후보, 노랑 = 참고 · 멈춤, 빨강 = 문제. 속이 빈 점은 아직 안 한 것이에요."],
+];
+function vTerms() {
+  return { node: h("div", null, title("용어"), h("p", { class: "lead" }, "화면에 나오는 말을 풀어 쓴 목록이에요."),
+    h("div", { class: "card flush" }, TERMS.map(([k, v]) => h("div", { class: "kvl", style: "grid-template-columns:12rem minmax(0,1fr)" }, h("b", null, k), h("span", { class: "sub" }, v))))), title: "용어" };
+}
+
+/* ───────── 시작 ───────── */
+load("index.json").then((i) => { document.getElementById("round-badge").textContent = i.v3 ? i.v3.badge : i.round_label; document.getElementById("foot").textContent = `AI 실험실 분석 화면 · 마지막 갱신 ${kst(i.generated_at)} · 가짜 사람과 가짜 대화만 있어요 · ${i.test_policy}`; }).catch(() => {});
+route();
+</script>
+</body>
+</html>
