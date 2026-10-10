@@ -4,8 +4,8 @@ import { createContext, useCallback, useContext, useEffect, useState, type React
 import { getMyProfile, MOCK_PROFILE } from '@/features/profile/api';
 import type { Profile } from '@/features/profile/types';
 import { userMessage } from '@/lib/errors';
-import { useMode } from '@/lib/mode';
-import { isSupabaseConfigured, supabase } from '@/lib/supabase';
+import { canUseRealData, useMode } from '@/lib/mode';
+import { supabase } from '@/lib/supabase';
 
 type AuthState = {
   session: Session | null;
@@ -38,16 +38,17 @@ const errorMessage = (e: unknown) => userMessage(e, '');
 // 로그인 상태 · 내 프로필을 앱 전체에 알려 줌 — 화면에서는 useAuth()
 // 데이터 모드(lib/mode.ts)가 가짜면 세션은 그대로 두고(로그인 유지) 화면에는 가짜 프로필만 보여 줌
 // 세션 · 프로필은 모드와 상관없이 읽어 둠 — 실데이터로 돌아올 때 프로필을 다시 읽느라 화면 묶음이 비지 않게
+// 실데이터를 못 쓰면(Supabase 연결 안 됨 · lib/flags REAL_DATA_READY = false) 세션 · 프로필을 아예 읽지 않음 (#116)
 export function AuthProvider({ children }: { children: ReactNode }) {
   const { mode, ready: modeReady } = useMode();
-  const real = isSupabaseConfigured && mode === 'real';
+  const real = canUseRealData && mode === 'real';
   const [session, setSession] = useState<Session | null>(null);
-  const [sessionLoading, setSessionLoading] = useState(isSupabaseConfigured);
+  const [sessionLoading, setSessionLoading] = useState(canUseRealData);
   const [loaded, setLoaded] = useState<Loaded>(EMPTY);
   const userId = session?.user.id ?? null;
 
   useEffect(() => {
-    if (!isSupabaseConfigured) return;
+    if (!canUseRealData) return;
     // 저장된 세션을 못 읽어도(AsyncStorage 오류 등) 시작 화면에 멈추지 않게 함
     supabase.auth
       .getSession()

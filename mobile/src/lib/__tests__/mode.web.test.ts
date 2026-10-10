@@ -79,6 +79,11 @@ describe('데이터 모드 (웹)', () => {
     const mode = open('?mode=real');
     expect(mode.getMode()).toBe('mock');
     expect(store.get('respec.dataMode')).toBe('mock');
+  });
+
+  it('실데이터 스위치가 꺼져 있으면 저장된 real도 주소 없이 열 때 가짜 (#116)', () => {
+    mockReady = false;
+    store.set('respec.dataMode', 'real');
     expect(open('').getMode()).toBe('mock');
   });
 

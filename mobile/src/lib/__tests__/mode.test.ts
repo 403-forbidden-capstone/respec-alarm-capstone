@@ -87,8 +87,24 @@ describe('데이터 모드', () => {
     await flush();
     expect(mode.canUseRealData).toBe(false);
     expect(mode.getMode()).toBe('mock');
+    expect(mockStorage.setItem).not.toHaveBeenCalled(); // 읽기만 하고 덮어쓰지 않음 — 스위치를 켜면 저장된 real로 다시 열림
+    expect(mockStore.get('respec.dataMode')).toBe('real');
     expect(mode.setMode('real')).toBe('mock');
     expect(clock.now().toISOString()).toBe(SCENARIO_MORNING);
+  });
+
+  it('실데이터 스위치가 꺼져 있으면 저장값이 없거나 못 읽어도 가짜로 시작함', async () => {
+    mockConfigured = true;
+    mockReady = false;
+    let opened = load();
+    expect(opened.mode.getMode()).toBe('mock'); // 저장값을 읽기 전 첫 화면도
+    await flush();
+    expect(opened.mode.getMode()).toBe('mock');
+
+    mockStorage.getItem.mockRejectedValueOnce(new Error('저장소 오류'));
+    opened = load();
+    await flush();
+    expect(opened.mode.getMode()).toBe('mock');
   });
 
   it('저장값을 못 읽으면 기본값으로 시작함', async () => {
