@@ -34,8 +34,9 @@ pre{background:var(--chip);border-radius:14px;padding:12px 14px;margin:6px 0 0;o
 .hdr-in{max-width:1100px;margin:0 auto;padding:0 20px}
 .top{display:flex;align-items:center;justify-content:space-between;gap:10px;min-height:44px;margin-top:2px;flex-wrap:wrap}
 .brand{font-size:15px;font-weight:700;letter-spacing:-.01em;color:var(--ink);text-decoration:none}
-.tabs{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));max-width:560px;padding:0 0 4px}
-.tabs a{display:flex;flex-direction:column;align-items:center;gap:4px;padding:4px 0 6px;font-size:11.5px;color:var(--faint);text-decoration:none;white-space:nowrap}
+.tabs{display:flex;max-width:760px;padding:0 0 4px;overflow-x:auto;scrollbar-width:none}
+.tabs::-webkit-scrollbar{display:none}
+.tabs a{flex:1 0 auto;min-width:3.6rem;display:flex;flex-direction:column;align-items:center;gap:4px;padding:4px 8px 6px;font-size:11.5px;color:var(--faint);text-decoration:none;white-space:nowrap}
 .tabs .n{font-size:10px;min-width:26px;height:16px;line-height:16px;border-radius:8px;background:var(--chip);color:var(--faint);text-align:center;font-variant-numeric:tabular-nums}
 .tabs a.on{color:var(--ink);font-weight:600}
 .tabs a.on .n{background:var(--ink);color:#fff}
@@ -195,6 +196,38 @@ summary:hover{color:var(--ink)}
 .xcard .big2 a:hover{text-decoration:underline}
 .bar-line{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
 .bar-line .prog{width:160px;margin:0}
+.chip.xs{height:18px;font-size:11px;padding:0 7px;gap:4px;vertical-align:1px}
+/* v3 받아쓰기 — 인식이 바꾼 곳 · 정리 판별 */
+mark.nz{background:rgba(200,85,61,.16);color:inherit;border-radius:5px;padding:0 2px}
+mark.nz.forced{background:rgba(200,85,61,.32);font-weight:600}
+.nzl{margin:6px 0 0;padding-left:16px;line-height:1.55}
+.tcard>.thd+.drow{border-top:0;margin-top:0;padding-top:0}
+.tcard.hit{box-shadow:0 0 0 2px var(--ink)}
+.t0v{padding:8px 0;border-top:1px solid rgba(0,0,0,.07)}
+.t0v:first-of-type{border-top:0}
+.t0v>b{display:block;font-size:12.5px;margin-bottom:2px}
+.t0v .small{margin-top:3px}
+.exrow{color:var(--ink);text-decoration:none;align-items:flex-start}
+.exrow:hover{background:var(--bg);box-shadow:-18px 0 0 var(--bg),18px 0 0 var(--bg)}
+.mdref{border-bottom:1px dotted var(--faint);color:var(--sub)}
+/* 마크다운 글 (실험 정리 · 카드) */
+.md{font-size:14px;line-height:1.7;min-width:0}
+.md>*:first-child{margin-top:0}
+.md p{margin:0 0 10px}
+.md h1.mdh1{font-size:19px;margin:0 0 6px;letter-spacing:-.02em}
+.md .mdh2{font-size:17px;font-weight:700;margin:30px 0 10px;padding-top:16px;border-top:1px solid var(--line);color:var(--ink);letter-spacing:-.01em}
+.md .mdh3{font-size:14.5px;font-weight:700;color:var(--ink);margin:20px 0 6px}
+.md .mdh4{font-size:13px;font-weight:700;color:var(--sub);margin:16px 0 4px}
+.md ul,.md ol{margin:0 0 10px;padding-left:20px}
+.md li{margin:2px 0}
+.md li>ul,.md li>ol{margin:2px 0 4px}
+.md blockquote{margin:0 0 12px;padding:10px 14px;background:var(--chip);border-radius:14px;color:var(--sub);font-size:13px;line-height:1.6}
+.md hr{border:0;border-top:1px solid var(--line);margin:22px 0}
+.md pre.mdcode{white-space:pre;overflow-x:auto;word-break:normal;margin:0 0 12px;font-size:12px;line-height:1.6}
+.md table{margin:0 0 4px}
+.md .scroll{margin:0 -4px 12px}
+.mdcard{padding:20px 22px}
+@media (max-width:560px){.mdcard{padding:14px 16px}}
 .err{padding:16px 18px}
 .mono-id{font-variant-numeric:tabular-nums}
 /* v3 사람 카드 — 진짜 모습 | 앱이 보는 기록 */
@@ -235,15 +268,17 @@ summary:hover{color:var(--ink)}
   <div class="hdr-in">
     <div class="top">
       <a class="brand" href="#/">Re:Spec AI 실험실</a>
-      <span class="chip fill" id="round-badge">예전 · 라운드 1 (타이핑 대화)</span>
+      <span class="chip fill" id="round-badge">v3 · 말로 하는 대화</span>
     </div>
     <nav class="tabs" id="tabs">
       <a href="#/" data-k="home"><span class="n">01</span>홈</a>
       <a href="#/exp" data-k="exp"><span class="n">02</span>실험</a>
-      <a href="#/people" data-k="people"><span class="n">03</span>사람</a>
-      <a href="#/conv" data-k="conv"><span class="n">04</span>대화</a>
-      <a href="#/prompts" data-k="prompts"><span class="n">05</span>프롬프트</a>
-      <a href="#/terms" data-k="terms"><span class="n">06</span>용어</a>
+      <a href="#/summary" data-k="summary"><span class="n">03</span>실험 정리</a>
+      <a href="#/people" data-k="people"><span class="n">04</span>사람</a>
+      <a href="#/conv" data-k="conv"><span class="n">05</span>대화</a>
+      <a href="#/prompts" data-k="prompts"><span class="n">06</span>프롬프트</a>
+      <a href="#/cards" data-k="cards"><span class="n">07</span>카드</a>
+      <a href="#/terms" data-k="terms"><span class="n">08</span>용어</a>
     </nav>
   </div>
 </header>
@@ -314,9 +349,10 @@ function href(parts, query) {
   const qs = query ? new URLSearchParams(Object.entries(query).filter(([, v]) => v !== "" && v != null)).toString() : "";
   return "#/" + parts.map(encodeURIComponent).join("/") + (qs ? "?" + qs : "");
 }
-const hConv = (run, id) => href(["conv", run, id]);
+const hConv = (run, id, u) => href(["conv", run, id], u ? { u: String(u) } : undefined);
 const hPrompt = (key) => href(["prompts", key]);
 const hExp = (id) => href(["exp", id]);
+const expLabel = (e) => e.code || `실험 ${e.num}`;
 
 /* ───────── 작은 도우미 ───────── */
 const pct = (a, b) => (b ? `${a}/${b} (${Math.round((a / b) * 100)}%)` : `${a}/${b}`);
@@ -379,7 +415,9 @@ async function route() {
     if (!a) v = await vHome();
     else if (a === "exp") v = b ? await vExp(b) : await vExpList(q);
     else if (a === "people") v = b ? await vPerson(b) : await vPeople(q);
-    else if (a === "conv") v = b && c ? await vConv(b, c) : await vConvList(q);
+    else if (a === "conv") v = b && c ? await vConv(b, c, q) : await vConvList(q);
+    else if (a === "summary") v = await vSummary();
+    else if (a === "cards") v = await vCards(b);
     else if (a === "compare") v = await vCompare(b, q);
     else if (a === "prompts") v = b ? await vPrompt(b) : await vPrompts(q);
     else if (a === "diff") v = await vDiff(q);
@@ -388,11 +426,13 @@ async function route() {
     if (my !== token) return;
     mount(v.node || v, v.title);
     window.scrollTo(0, 0);
+    if (v.after) v.after();
   } catch (e) {
     if (my !== token) return;
     mount(errView(e), "오류");
   }
 }
+try { history.scrollRestoration = "manual"; } catch { /* 무시 */ }
 window.addEventListener("hashchange", route);
 
 /* ───────── 필터 막대 ───────── */
@@ -430,13 +470,25 @@ async function vHome() {
   const idx = await load("index.json");
   const root = h("div");
   root.append(title("AI 실험실"),
-    h("p", { class: "lead" }, "프롬프트를 고치며 돌린 실험을, 누가 어떤 상황에서 뭐라고 했고 AI가 뭐라고 답했는지까지 열어 볼 수 있는 화면이에요."),
-    idx.v3 ? h("div", { class: "card" }, h("div", { class: "lrow top", style: "padding:0;flex-wrap:wrap" },
-      h("i", { class: "sd ok", style: "margin-top:7px" }),
-      h("div", { class: "grow" }, h("div", { class: "big2" }, idx.v3.label),
-        h("p", { class: "small", style: "margin:2px 0 0" }, `지금 쓰는 데이터는 v3예요 — 사람 ${idx.v3.people}명(개발용) · ${idx.v3.days}일 기록 · 시나리오 ${idx.v3.scenarios_dev}개. 사람 화면에서 진짜 모습과 앱이 본 기록을 나란히 볼 수 있어요.`)),
-      btn("사람 보기", "#/people"))) : null,
-    h("div", { class: "card dash" }, h("p", { class: "small", style: "margin:0" }, `아래 실험 결과 · 대화는 ${idx.round_label} 기록이에요. 말로 하는 v3 실험은 아직 안 돌렸고, 예전에는 AI 생각을 저장하지 않아서 대화 화면의 'AI 생각' 칸은 '기록 없음'으로 보여요.`)));
+    h("p", { class: "lead" }, "프롬프트를 고치며 돌린 실험을, 누가 어떤 상황에서 뭐라고 했고 AI가 뭐라고 답했는지까지 열어 볼 수 있는 화면이에요."));
+  if (idx.v3) {
+    const flow = h("div", { class: "flow" });
+    idx.v3.progress.forEach((s, i) => {
+      if (i) flow.append(h("i", { class: "ar" }, "›"));
+      flow.append(h("span", { class: s.status === "done" ? "done" : s.status === "doing" ? "on" : "", title: s.note || "" },
+        h("i", { class: "sd " + (s.status === "done" ? "ok" : s.status === "doing" ? "mid" : "off") }), s.name));
+    });
+    root.append(h("div", { class: "card" },
+      h("div", { class: "lrow top", style: "padding:0;flex-wrap:wrap" },
+        h("i", { class: "sd ok", style: "margin-top:7px" }),
+        h("div", { class: "grow" }, h("div", { class: "big2" }, idx.v3.label),
+          h("p", { class: "small", style: "margin:2px 0 0" }, `지금 쓰는 데이터는 v3예요 — 사람 ${idx.v3.people}명(개발용) · ${idx.v3.days}일 기록 · 시나리오 ${idx.v3.scenarios_dev}개 · 말로 하는 대화 ${idx.counts.v3_convs}개(E0 기준 대화).`)),
+        btn("사람 보기", "#/people")),
+      h("div", { style: "margin-top:12px" }, flow),
+      idx.v3.progress.filter((s) => s.note && s.status !== "todo").map((s) => h("p", { class: "note" }, `${s.name} — ${s.note}`)),
+      h("div", { class: "go", style: "padding-top:10px" }, btn("E0 결과 보기", hExp("e0")), btn("실험 정리 읽기", "#/summary", true), btn("프롬프트 카드", "#/cards", true))));
+  }
+  root.append(h("div", { class: "card dash" }, h("p", { class: "small", style: "margin:0" }, `아래 '예전' 표시가 붙은 실험 결과 · 대화는 ${idx.round_label} 기록이에요. 그때는 AI 생각을 저장하지 않아서 대화 화면의 'AI 생각' 칸이 '기록 없음'으로 보여요.`)));
 
   const flow = h("div", { class: "flow" });
   idx.stages.forEach((s, i) => {
@@ -446,19 +498,19 @@ async function vHome() {
     flow.append(h("span", { class: cls, title: s.note || "" }, h("i", { class: "sd " + dot }), s.name));
   });
   const cr = idx.credit;
-  root.append(section("진행", flow,
+  root.append(section("진행 (예전 · 라운드 1)", flow,
     idx.stages.filter((s) => s.note).map((s) => h("p", { class: "note" }, `${s.name} — ${s.note}`)),
     h("div", { class: "lrow", style: "margin-top:12px;border-top:1px solid var(--line);flex-wrap:wrap" },
       cr ? h("div", { class: "bar-line" },
-        h("span", null, h("span", { class: "sub" }, "크레딧 "), h("b", { class: "num" }, usd(cr.spent_usd)), h("span", { class: "sub" }, ` / 차단선 $${cr.block_usd} (전체 $${cr.credit_usd}, ${cr.expires} 만료)`)),
+        h("span", null, h("span", { class: "sub" }, "크레딧 "), h("b", { class: "num" }, usd(cr.spent_usd)), h("span", { class: "sub" }, ` / 실험 상한 $${cr.block_usd} (전체 $${cr.credit_usd}, ${cr.expires} 만료)`)),
         h("span", { class: "prog" }, h("b", { style: `width:${Math.min(100, (cr.spent_usd / cr.block_usd) * 100)}%` }))) : null),
-    h("p", { class: "note" }, `마지막 갱신 ${kst(idx.generated_at)} · 대화 ${idx.counts.convs} · 사람 ${idx.counts.people} · 프롬프트 ${idx.counts.prompts} · 실험 ${idx.counts.experiments}`)));
+    h("p", { class: "note" }, `마지막 갱신 ${kst(idx.generated_at)} · 대화 ${idx.counts.convs} (v3 ${idx.counts.v3_convs}) · 사람 ${idx.counts.people} · 프롬프트 ${idx.counts.prompts} · 실험 ${idx.counts.experiments}`)));
 
   root.append(h("div", { class: "h2" }, "실험별 결론"));
   const grid = h("div", { class: "grid" });
   for (const e of idx.experiments) {
     grid.append(h("div", { class: "card xcard" },
-      h("div", { class: "sid" }, `실험 ${e.num} · ${e.status === "paused" ? "멈춤" : "끝남"}`),
+      h("div", { class: "sid" }, `${expLabel(e)} · ${e.round === "v3" ? "v3" : "예전"} · ${e.status === "paused" ? "멈춤" : "끝남"}`),
       h("div", { class: "big2" }, h("a", { href: hExp(e.id) }, e.title)),
       h("p", { class: "sub", style: "margin:0;font-size:13.5px" }, e.headline),
       h("ul", null, e.bullets.map((b) => h("li", null, b))),
@@ -491,13 +543,13 @@ async function vExpList(q) {
     syncHash(["exp"], state);
     listBox.replaceChildren(...ex.experiments.filter((e) => !state.feat || e.features.includes(state.feat)).map((e) =>
       h("div", { class: "card xcard" },
-        h("div", { class: "sid" }, `실험 ${e.num} · ${e.period} · ${e.status === "paused" ? "멈춤" : "끝남"}`),
+        h("div", { class: "sid" }, `${expLabel(e)} · ${e.round === "v3" ? "v3" : "예전"} · ${e.period} · ${e.status === "paused" ? "멈춤" : "끝남"}`),
         h("div", { class: "big2" }, h("a", { href: hExp(e.id) }, e.title)),
         h("div", { class: "chips" }, e.features.map((f) => chip(featName(idx, f), "fill"))),
         h("p", { class: "sub", style: "margin:0;font-size:13.5px" }, e.headline),
         h("div", { class: "go" }, btn("자세히", hExp(e.id)), e.convs ? btn(`대화 ${e.convs}`, href(["conv"], { exp: e.id }), true) : null))));
   };
-  root.append(title("실험"), h("p", { class: "lead" }, `${ex.round_label} 실험 ${ex.experiments.length}개. 카드를 누르면 무엇을 비교했고 결과가 어땠는지 나와요.`),
+  root.append(title("실험"), h("p", { class: "lead" }, `실험 ${ex.experiments.length}개 — v3(말로 하는 대화) E0와 예전 · 라운드 1(타이핑 대화)의 실험들이에요. 카드를 누르면 무엇을 비교했고 결과가 어땠는지 나와요.`),
     filterBar([{ key: "feat", label: "기능", options: [["", "전부"], ...idx.features.map((f) => [f.id, f.name])] }], state, draw), listBox);
   draw();
   return { node: root, title: "실험" };
@@ -560,9 +612,9 @@ async function vExp(id) {
   const e = ex.experiments.find((x) => x.id === id);
   if (!e) throw new Error(`실험 ${id}가 없어요`);
   const root = h("div");
-  root.append(crumbs({ t: "실험", href: "#/exp" }, `실험 ${e.num}`),
+  root.append(crumbs({ t: "실험", href: "#/exp" }, expLabel(e)),
     title(e.title),
-    h("div", { class: "chips", style: "margin:6px 0 16px" }, chip(ex.round_label, "fill"), chip(e.period), chip(e.status === "paused" ? "멈춤" : "끝남", "", { dot: e.status === "paused" ? "zz" : "ok" }), e.features.map((f) => chip(featName(idx, f)))));
+    h("div", { class: "chips", style: "margin:6px 0 16px" }, chip(e.round_label, e.round === "v3" ? "ink" : "fill"), chip(e.period), chip(e.status === "paused" ? "멈춤" : "끝남", "", { dot: e.status === "paused" ? "zz" : "ok" }), e.features.map((f) => chip(featName(idx, f)))));
   root.append(h("div", { class: "card" }, kvl("질문", e.question), kvl("누구로", e.who), kvl("한 줄 결론", h("b", null, e.headline))));
 
   const armRows = e.arms.map((a) => h("div", { class: "lrow top" },
@@ -588,7 +640,8 @@ async function vExp(id) {
     root.append(section("달라진 대화", ...kids, body, h("p", { class: "note" }, "같은 상황(시나리오)을 두 판이 다르게 끝낸 대화예요. 이유가 많이 겹친 것부터 보여요.")));
   }
   const exs = e.examples.filter((x) => x.items.length);
-  if (exs.length) root.append(section("대화 예시", exs.map((x) => h("div", null, h("h3", null, x.label), h("div", { class: "chips" }, x.items.map((it) => chip(`${it.id} ${it.who} · ${it.type_ko}${it.note ? " · " + it.note : ""}`, "", { href: hConv(it.run, it.id) })))))));
+  if (exs.length) root.append(section("대화 예시", exs.map((x) => h("div", null, h("h3", null, x.label), x.items.map((it) => h("a", { class: "lrow exrow", href: hConv(it.run, it.id, it.u) },
+    h("b", { class: "mono-id", style: "flex:none;min-width:8rem" }, it.u ? `${it.id} · 말 ${it.u}` : it.id), h("span", { class: "grow small" }, `${it.who} · ${it.type_ko}${it.note ? " — " + it.note : ""}`)))))));
   root.append(section("결론", h("p", { style: "font-size:14.5px;line-height:1.65" }, e.conclusion), h("h3", null, "한계 · 주의"),
     h("ul", { class: "small", style: "margin:0;padding-left:18px;line-height:1.6" }, e.caveats.map((c) => h("li", null, c))), h("p", { class: "note", style: "margin-top:10px" }, "출처: " + e.sources.join(" · "))));
   if (e.convs > 0) root.append(h("p", null, btn(`이 실험의 대화 ${e.convs}개 보기`, href(["conv"], { exp: e.id }))));
@@ -686,15 +739,27 @@ async function vPerson(id) {
   const v3 = p.v3 ? await load("people-v3.json") : null;
   const x3 = v3 ? v3.people.find((x) => x.id === id) : null;
   const mine = ci.rows.filter((r) => r.p === id);
+  const mineV3 = mine.filter((r) => r.gen === "v3");
+  const mineR1 = mine.filter((r) => r.gen !== "v3");
   const root = h("div");
   root.append(crumbs({ t: "사람", href: "#/people" }, p.name),
     h("div", { style: "display:flex;align-items:center;gap:12px;margin-top:8px" }, h("span", { class: "avatar" }, p.name.slice(0, 1)),
       h("div", null, title(p.name), h("div", { class: "small" }, `${p.age}세 · ${p.major} · ${p.id} · ${p.split_ko}`))),
-    h("div", { class: "chips", style: "margin:12px 0 0" }, x3 ? chip(v3.label, "ink") : null, chip(`예전 대화 ${p.convs.total}개`, "fill")),
+    h("div", { class: "chips", style: "margin:12px 0 0" }, x3 ? chip(v3.label, "ink") : null, chip(`v3 대화 ${mineV3.length}개`), chip(`예전 대화 ${mineR1.length}개`, "fill")),
     h("p", { class: "lead", style: "margin-top:12px" }, x3 ? mdText(x3.summary) : p.bio));
 
-  if (x3) root.append(v3Section(x3));
-  else {
+  if (x3) {
+    const sec = v3Section(x3);
+    // 가정 카드 · 숨은 습관까지 먼저, 그다음 v3 대화, 그다음 14일 기록
+    const kids = [...sec.children];
+    kids.slice(0, 2).forEach((k) => root.append(k));
+    root.append(section(`v3 대화 — 말로 하는 대화 (${mineV3.length}개)`,
+      mineV3.length ? h("div", null, h("div", { class: "scroll", style: "margin:0 -18px" }, mineV3.map((r) => convRow(r, ci))),
+        h("p", { class: "note" }, "사용자 말을 열면 하려던 말 → 받아쓰기(잡음) → AI가 본 글을 볼 수 있어요. AI 생각(모델 원문)은 접혀 있어요."),
+        h("p", { style: "margin:8px 0 0" }, btn("대화 목록에서 보기", href(["conv"], { gen: "v3", p: id }), true, true)))
+        : empty("아직 이 사람의 v3 대화가 없어요.")));
+    kids.slice(2).forEach((k) => root.append(k));
+  } else {
     const hasApp = p.card_r1.some((r) => r.app);
     root.append(section("가정 카드 (예전)", p.card_r1.map((r) => kvl(r.step, r.real)), hasApp ? null : h("p", { class: "note" }, pp.note)));
   }
@@ -702,8 +767,11 @@ async function vPerson(id) {
   if (v3 && v3.scenarios[id] && v3.scenarios[id].length) {
     const list = v3.scenarios[id];
     root.append(section(`v3 시나리오 ${list.length}개`,
-      h("p", { class: "small", style: "margin:0 0 8px" }, "이 사람으로 돌릴 대화 상황이에요. 아직 돌린 대화는 없어요 (실험 E0부터)."),
-      h("div", { class: "chips" }, list.map((s) => chip(`${s.date.slice(5).replace("-", "/")} ${s.type_ko}`, "", { title: `${s.id} · ${s.session}` })))));
+      h("p", { class: "small", style: "margin:0 0 8px" }, "이 사람으로 돌릴 대화 상황이에요. E0에서는 이 상황들로 기준 대화를 만들었어요."),
+      h("div", { class: "chips" }, list.map((s) => {
+        const conv = mineV3.find((r) => r.id === s.id);
+        return chip(`${s.date.slice(5).replace("-", "/")} ${s.type_ko}`, "", { title: `${s.id} · ${s.session}`, href: conv ? hConv(conv.run, conv.id) : undefined });
+      }))));
   }
 
   // ── 예전 (라운드 1) ──
@@ -712,7 +780,7 @@ async function vPerson(id) {
 
   // 판(실행)별 요약
   const byRun = new Map();
-  for (const r of mine) { if (!byRun.has(r.run)) byRun.set(r.run, []); byRun.get(r.run).push(r); }
+  for (const r of mineR1) { if (!byRun.has(r.run)) byRun.set(r.run, []); byRun.get(r.run).push(r); }
   root.append(section("판별 요약 (예전)", h("div", { class: "scroll" }, h("table", null,
     h("thead", null, h("tr", null, h("th", null, "실행"), h("th", { class: "r" }, "대화"), h("th", { class: "r" }, "숨은 사실 전달"), h("th", { class: "r" }, "문제 있는 대화"))),
     h("tbody", null, ci.runs.filter((r) => byRun.has(r.run)).map((r) => {
@@ -724,9 +792,9 @@ async function vPerson(id) {
 
   // 시나리오(날)별로 모아 버전별 칩
   const byScn = new Map();
-  for (const r of mine) { if (!byScn.has(r.id)) byScn.set(r.id, []); byScn.get(r.id).push(r); }
+  for (const r of mineR1) { if (!byScn.has(r.id)) byScn.set(r.id, []); byScn.get(r.id).push(r); }
   const scn = [...byScn.entries()].sort((a, b) => a[0].localeCompare(b[0]));
-  root.append(section(`이 사람 대화 — 예전 · 상황별 · 판별 (${mine.length}개)`,
+  root.append(section(`이 사람 대화 — 예전 · 상황별 · 판별 (${mineR1.length}개)`,
     scn.map(([sid, rs]) => h("div", { class: "lrow top", style: "flex-wrap:wrap" },
       h("div", { style: "flex:none;width:11rem" }, h("b", null, sid), h("div", { class: "small" }, `${rs[0].type_ko} · ${ci.sessions[rs[0].sess] || rs[0].sess}`)),
       h("div", { class: "chips grow" }, rs.map((r) => chip(r.run, "", { href: hConv(r.run, r.id), dot: r.bad ? "warn" : "ok", title: r.pr.map((x) => ci.problems[x]).join(" · ") || "문제 없음" }))),
@@ -738,7 +806,7 @@ async function vPerson(id) {
 /* ───────── 대화 목록 ───────── */
 async function vConvList(q) {
   const [ci, idx] = await Promise.all([load("conv-index.json"), load("index.json")]);
-  const keys = ["exp", "run", "pv", "p", "style", "type", "sess", "res", "sort"];
+  const keys = ["gen", "exp", "run", "pv", "p", "style", "type", "sess", "res", "sort"];
   const state = Object.fromEntries(keys.map((k) => [k, q.get(k) || ""]));
   const rows = ci.rows;
   const uniq = (f) => [...new Set(rows.map(f))];
@@ -746,8 +814,9 @@ async function vConvList(q) {
   const pvs = [...new Set(rows.flatMap((r) => r.pv))].sort();
   const people = [...new Map(rows.map((r) => [r.p, r.who])).entries()].sort();
   const defs = [
+    { key: "gen", label: "자료", seg: true, options: [["", "전부"], ["v3", "v3 · 말로 하는 대화"], ["r1", "예전 · 타이핑 대화"]] },
     { key: "sess", label: "자기 전 / 기상 후", seg: true, options: [["", "전부"], ...Object.entries(ci.sessions)] },
-    { key: "exp", label: "실험", options: [["", "전부"], ...idx.experiments.filter((e) => e.convs).map((e) => [e.id, `${e.num}. ${e.title}`])] },
+    { key: "exp", label: "실험", options: [["", "전부"], ...idx.experiments.filter((e) => e.convs).map((e) => [e.id, `${expLabel(e)}. ${e.title}`])] },
     { key: "run", label: "실행(판)", options: [["", "전부"], ...ci.runs.map((r) => [r.run, `${r.run} · ${r.label}`])] },
     { key: "pv", label: "프롬프트 버전", options: [["", "전부"], ...pvs.map((k) => [k, k])] },
     { key: "p", label: "사람", options: [["", "전부"], ...people.map(([id, n]) => [id, `${n} (${id})`])] },
@@ -766,7 +835,7 @@ async function vConvList(q) {
     if (reset) shown = PAGE;
     syncHash(["conv"], state);
     const s = state;
-    let list = rows.filter((r) => (!s.exp || r.exp === s.exp) && (!s.run || r.run === s.run) && (!s.pv || r.pv.includes(s.pv)) && (!s.p || r.p === s.p) && (!s.style || r.style === s.style) && (!s.type || r.type === s.type) && (!s.sess || r.sess === s.sess) && resOK(r, s.res));
+    let list = rows.filter((r) => (!s.gen || r.gen === s.gen) && (!s.exp || r.exp === s.exp) && (!s.run || r.run === s.run) && (!s.pv || r.pv.includes(s.pv)) && (!s.p || r.p === s.p) && (!s.style || r.style === s.style) && (!s.type || r.type === s.type) && (!s.sess || r.sess === s.sess) && resOK(r, s.res));
     const ord = (a, b) => (runOrder.get(a.run) - runOrder.get(b.run)) || a.id.localeCompare(b.id);
     if (s.sort === "rule") list = [...list].sort((a, b) => b.nfl - a.nfl || ord(a, b));
     else if (s.sort === "f1") list = [...list].sort((a, b) => (a.f1 ?? 9) - (b.f1 ?? 9) || ord(a, b));
@@ -778,14 +847,14 @@ async function vConvList(q) {
     box.replaceChildren(list.length ? cl : empty("초기화를 눌러 조건을 풀어 보세요."));
     if (list.length > shown) box.append(h("button", { type: "button", class: "btn ghost more", onclick: () => { shown += PAGE; draw(false); } }, `더 보기 (+${Math.min(PAGE, list.length - shown)})`));
   };
-  root.append(title("대화"), h("p", { class: "lead" }, `${ci.round_label} 가상 유저와 AI가 나눈 대화예요. 고른 조건은 주소에 남아서, 주소를 그대로 보내면 같은 목록이 열려요.`),
+  root.append(title("대화"), h("p", { class: "lead" }, "가상 유저와 AI가 나눈 대화예요 — v3(말로 하는 대화)와 예전(타이핑 대화)을 '자료'로 나눠 볼 수 있어요. 고른 조건은 주소에 남아서, 주소를 그대로 보내면 같은 목록이 열려요."),
     filterBar(defs, state, () => draw(true)), counter, box);
   draw(true);
   return { node: root, title: "대화" };
 }
 function convRow(r, ci) {
   return h("a", { class: "crow", href: hConv(r.run, r.id) },
-    h("span", null, h("b", { class: "mono-id" }, r.id), h("small", null, r.run)),
+    h("span", null, h("b", { class: "mono-id" }, r.id), h("small", null, r.run, " ", r.gen === "v3" ? chip("v3", "ink xs") : chip("예전", "fill xs"))),
     h("span", null, `${r.who} · ${r.type_ko}`, h("small", null, `${ci.sessions[r.sess] || r.sess} · ${r.open === "QUESTION_FIRST" ? "질문 먼저" : "요약 먼저"}`)),
     h("span", { class: "sub" }, r.t1 || "—", h("small", null, `${r.arm} · AI ${r.ai}턴`)),
     h("span", { class: "num" }, `숨은 사실 ${r.tr[0]}/${r.tr[1]}`, h("small", null, `F1 ${r.f1 === null ? "—" : r.f1.toFixed(2)}${r.err[1] ? ` · 틀린 기록 ${r.err[0]}/${r.err[1]}` : ""}`)),
@@ -811,6 +880,40 @@ function checkLine(t) {
 }
 const drow = (k, ...v) => h("div", { class: "drow" }, h("span", { class: "k" }, k), h("div", null, v));
 
+// 받아쓰기 글에서 인식이 바꾼 자리를 표시 — noise 기록의 '바뀐 글(to)'을 글 속에서 찾아 칠함 (찾을 수 없는 것: 문장부호 · 군말 빠짐 등은 아래 목록에만)
+function highlightStt(stt, noise) {
+  const spans = [];
+  for (const n of noise) {
+    if (!n.to || n.to === "없음" || n.to === ".") continue;
+    const at = stt.indexOf(n.to);
+    if (at >= 0) spans.push({ a: at, b: at + n.to.length, n });
+  }
+  spans.sort((x, y) => x.a - y.a);
+  const out = [];
+  let pos = 0;
+  for (const s of spans) {
+    if (s.a < pos) continue; // 겹치면 앞 것만
+    if (s.a > pos) out.push(stt.slice(pos, s.a));
+    out.push(h("mark", { class: "nz" + (s.n.type === "forced" ? " forced" : ""), title: `${s.n.type_ko}: ${s.n.from} → ${s.n.to}` }, stt.slice(s.a, s.b)));
+    pos = s.b;
+  }
+  if (pos < stt.length) out.push(stt.slice(pos));
+  return out;
+}
+
+// 이 사용자 말을 정리(T0) 판들이 어떻게 고쳤나
+function t0Block(v) {
+  return h("details", { class: "t0d" }, h("summary", null, `정리(T0)를 했다면 — ${v.t0.length}판이 이 말을 어떻게 고쳤나 (펼치기)`),
+    h("p", { class: "small", style: "margin:6px 0" }, "실제 대화는 정리 없이 받아쓰기 그대로 진행했어요. 아래는 같은 말을 정리 프롬프트에 따로 넣어 본 결과예요 (E0)."),
+    h("div", { class: "t0v" }, h("b", null, "받아쓰기 그대로 (NONE)"), h("div", null, v.stt)),
+    v.t0.map((x) => h("div", { class: "t0v" },
+      h("b", null, x.name, x.ms ? h("span", { class: "muted small" }, `  ${(x.ms / 1000).toFixed(1)}초`) : null),
+      h("div", null, x.clean || h("span", { class: "muted" }, "(빈 글)")),
+      x.uncertain.length ? h("div", { class: "small" }, x.uncertain.map((u) => h("div", null, h("i", { class: "sd zz", style: "margin-right:5px" }), `표시: '${u.span}' — ${u.why}`))) : h("div", { class: "small muted" }, "표시 없음"),
+      x.judge ? h("div", { class: "small" }, h("i", { class: "sd " + (x.judge.meaning_changed ? "warn" : "ok"), style: "margin-right:5px" }), x.judge.meaning_changed ? "뜻이 바뀜 — " : "뜻 그대로 — ", x.judge.note) : null)),
+    h("p", { class: "note" }, "표시 = 정리가 '잘못 들렸을 수 있다'고 짚은 곳. 뜻 판정은 표본 30말에만 있어요 (Sonnet 판정)."));
+}
+
 // 대화 한 건을 타임라인으로 — 왼쪽에 몇 번째 턴인지, 점 · 세로선, 오른쪽에 그 턴의 카드 (AI = 흰 카드, 사용자 = 회색 카드)
 function turnCards(conv, opts) {
   opts = opts || {};
@@ -828,21 +931,36 @@ function turnCards(conv, opts) {
         t.diag.length ? h("div", { class: "small" }, "참고: " + t.diag.map((f) => f.label + (f.detail ? ` (${f.detail})` : "")).join(" · ")) : null));
       if (!opts.compact) {
         card.append(h("details", null, h("summary", null, "AI가 받은 화면 (펼치기)"), t.screen ? h("pre", null, t.screen) : h("p", { class: "small" }, "이 대화는 옛 화면 판으로 돌았고 그때의 화면은 저장되지 않았어요.")));
-        card.append(h("details", null, h("summary", null, "AI 생각 요약 (펼치기)"), h("p", { class: "small" }, "기록 없음 — 예전(타이핑 대화) 실행은 AI 생각을 저장하지 않았어요. v3 실험부터 저장해요.")));
+        if (conv.thinking && conv.thinking.recorded) {
+          card.append(h("details", null, h("summary", null, "생각 요약 (모델 원문)"),
+            t.thinking ? [h("p", { class: "small", style: "margin:6px 0 0" }, "모델이 영어로 쓴 생각 요약이에요. 번역 · 가공 없이 그대로 보여요."), h("pre", null, t.thinking)] : h("p", { class: "small" }, "이 턴은 생각 없이 바로 답했어요 (쉬운 턴).")));
+        } else {
+          card.append(h("details", null, h("summary", null, "AI 생각 요약 (펼치기)"), h("p", { class: "small" }, "기록 없음 — 예전(타이핑 대화) 실행은 AI 생각을 저장하지 않았어요. v3 실험부터 저장해요.")));
+        }
       }
       li.append(card);
       out.append(li);
     } else {
-      const li = h("li", { class: "user" });
+      const li = h("li", { class: "user", "data-turn": String(t.n) });
       li.append(h("span", { class: "t" }, `사용자 ${t.n}`), h("i", { class: "d" + (t.improvised ? " bad" : "") }));
       const card = h("div", { class: "tcard" });
-      card.append(h("div", { class: "thd" }, h("span", { class: "tt" }, `사용자 ${t.n}턴`), t.wants_to_end ? chip("끝내고 싶다는 뜻", "") : null));
-      card.append(h("p", { class: "say" }, t.text));
+      const v = t.v3;
+      card.append(h("div", { class: "thd" }, h("span", { class: "tt" }, `사용자 ${t.n}턴`), t.wants_to_end ? chip("끝내고 싶다는 뜻", "") : null, v && v.noise_summary ? h("span", { class: "small" }, `받아쓰기가 바꾼 것: ${v.noise_summary}`) : null));
+      if (v) {
+        card.append(drow("하려던 말", h("span", { class: "say" }, v.intended)));
+        card.append(drow("받아쓰기", h("span", { class: "say" }, highlightStt(v.stt, v.noise)),
+          !opts.compact && v.noise.length ? h("ul", { class: "small nzl" }, v.noise.map((n) => h("li", null, h("b", null, n.type_ko), n.type === "forced" ? " (시나리오가 일부러 틀리게 함)" : "", `: ${n.from} → ${n.to}`))) : null,
+          !opts.compact && !v.noise.length ? h("div", { class: "small muted" }, "인식이 바꾼 것 없음") : null));
+        if (!opts.compact || !v.same) card.append(drow("AI가 본 글", v.same ? h("span", { class: "muted" }, "받아쓰기 그대로 (따로 정리 안 함)") : h("span", { class: "say" }, v.ai_saw)));
+      } else {
+        card.append(h("p", { class: "say" }, t.text));
+      }
       if (t.extract) {
         const ex = t.extract;
         card.append(drow("② 추출", h("ul", null, ex.lines.map((l) => h("li", null, l))),
           !ex.valid ? h("div", { class: "probs" }, "추출 결과가 형식에 안 맞아요" + (ex.errors.length ? ": " + ex.errors.join("; ") : "")) : null,
-          !opts.compact && ex.raw ? h("details", null, h("summary", null, "원본 JSON"), h("pre", null, JSON.stringify(ex.raw, null, 1))) : null));
+          !opts.compact && ex.raw ? h("details", null, h("summary", null, "원본 JSON"), h("pre", null, JSON.stringify(ex.raw, null, 1))) : null,
+          !opts.compact && ex.thinking ? h("details", null, h("summary", null, "추출 생각 요약 (모델 원문)"), h("p", { class: "small", style: "margin:6px 0 0" }, "모델이 영어로 쓴 생각 요약이에요."), h("pre", null, ex.thinking)) : null));
       }
       if (t.server) card.append(drow("서버", h("ul", null, t.server.lines.map((l) => h("li", null, l)))));
       const said = t.conveyed.filter((c) => c.status !== "NOT_SAID");
@@ -850,12 +968,14 @@ function turnCards(conv, opts) {
         said.length ? h("ul", null, said.map((c) => h("li", null, `숨은 사실 ${truthLabel(conv, c.id)} — ${c.label}`))) : h("span", { class: "muted" }, "이 턴에서 새로 전한 숨은 사실 없음"),
         t.confirm_answers.length ? h("div", { class: "small" }, "저장 확인에 답함: " + t.confirm_answers.map((c) => `${c.pending_id} ${c.answer}`).join(", ")) : null,
         t.improvised ? h("div", { class: "probs" }, "숨은 사실에 없는 말을 지어냄: " + t.improvised) : null));
+      if (v && !opts.compact && v.t0.length) card.append(t0Block(v));
       li.append(card);
       out.append(li);
     }
   }
   return out;
 }
+
 const SCORE = (n) => (n === null || n === undefined ? "—" : String(n));
 
 function truthList(conv) {
@@ -869,32 +989,36 @@ function truthList(conv) {
   }));
 }
 
-async function vConv(run, id) {
+async function vConv(run, id, q) {
   const [conv, ci, idx] = await Promise.all([loadConv(run, id), load("conv-index.json"), load("index.json")]);
   const xe = idx.experiments.find((e) => e.id === conv.exp);
   const others = ci.rows.filter((r) => r.id === id && r.run !== run);
   const r = conv.result;
+  const isV3 = conv.round === "v3";
   const root = h("div");
   root.append(crumbs({ t: "대화", href: "#/conv" }, { t: run, href: href(["conv"], { run }) }, id),
     title(`${id} · ${conv.persona.name} · ${conv.type_ko}`),
     h("div", { class: "chips", style: "margin:6px 0 16px" },
-      chip(conv.round_label, "fill"), xe ? chip(`실험 ${xe.num}. ${xe.title}`, "", { href: hExp(xe.id) }) : null, chip(conv.arm_label), chip(conv.session_ko), chip(conv.opening_ko),
+      chip(conv.round_label, isV3 ? "ink" : "fill"), xe ? chip(`${expLabel(xe)}. ${xe.title}`, "", { href: hExp(xe.id) }) : null, chip(conv.arm_label), chip(conv.session_ko), chip(conv.opening_ko),
       Object.entries(conv.prompts).filter(([, v]) => v && v.includes("@")).map(([k, v]) => chip(v.split("#")[0], "fill", { href: hPrompt(v.split("#")[0]), title: k })),
       r.problems.length ? r.problems.map((x) => probChip(x, ci.problems[x] || x)) : okChip()));
 
   const fe = r.facts && r.facts.err_total ? `틀린 자동 기록 ${r.facts.err_conveyed}/${r.facts.err_total} 정정` : null;
+  const basis = conv.truth_source === "audit" ? (r.audit_basis === "intended" ? "독립 검수 기준 (하려던 말을 읽고 판정)" : "독립 검수 기준") : "가상 유저 자기보고 기준 (검수 전)";
   root.append(h("div", { class: "grid stats" },
     stat("대화", h("span", null, `AI ${r.ai_turns}턴`), `사용자 ${r.user_turns}턴 · ${r.end_reason_ko}${r.rule_turns.length ? ` · 규칙 어긴 턴 AI ${r.rule_turns.join(", ")}` : ""}`),
-    stat("숨은 사실", h("span", null, `${r.truth.conveyed}/${r.truth.total}`), `분명히 전함 ${r.truth.clear} · ${conv.truth_source === "audit" ? "독립 검수 기준" : "가상 유저 자기보고 기준 (검수 전)"}${fe ? " · " + fe : ""}`, r.truth.total ? Math.round((r.truth.conveyed / r.truth.total) * 100) : 0),
+    stat("숨은 사실", h("span", null, `${r.truth.conveyed}/${r.truth.total}`), `분명히 전함 ${r.truth.clear} · ${basis}${fe ? " · " + fe : ""}`, r.truth.total ? Math.round((r.truth.conveyed / r.truth.total) * 100) : 0),
     stat("추출 (T2) F1", f2(r.f1), r.t2 ? `맞게 담음 ${r.t2.tp} · 지어냄 ${r.t2.hallucinated} · 놓침 ${r.t2.fn}` : null),
     stat("비용 · 시간", usd(conv.cost.total), "AI 답 " + (conv.latency.t1.length ? conv.latency.t1.map((x) => (x / 1000).toFixed(1)).join(" · ") + "초" : "—")),
     h("div", { class: "card" }, h("div", { class: "lbl" }, "설문 (5점)"),
-      conv.ux ? [kv("귀찮음", SCORE(conv.ux.annoying)), kv("자연스러움", SCORE(conv.ux.natural)), kv("길이 적당", SCORE(conv.ux.length_ok)), kv("다시 쓸지", SCORE(conv.ux.would_reuse))] : empty("설문 없음"))));
+      conv.ux ? [kv("귀찮음", SCORE(conv.ux.annoying)), kv("자연스러움", SCORE(conv.ux.natural)), kv("길이 적당", SCORE(conv.ux.length_ok)), kv("다시 쓸지", SCORE(conv.ux.would_reuse))] : empty(isV3 ? "이 실험에서는 설문을 안 했어요" : "설문 없음"))));
 
   root.append(section("이 날 상황", h("p", { class: "sub", style: "margin:0" }, conv.notes), h("details", null, h("summary", null, "가상 유저가 아는 자기 하루 (펼치기)"), h("pre", null, conv.situation))));
   root.append(section("숨은 사실 — AI가 대화로 알아냈나", truthList(conv)));
   root.append(h("div", { class: "h2" }, "대화 — 턴마다"));
-  root.append(h("p", { class: "note", style: "margin:-4px 2px 12px" }, "타이핑으로 나눈 대화라 '받아쓰기 · 정리' 단계는 없고, 사용자가 친 글이 곧 '하려던 말'이에요."));
+  root.append(h("p", { class: "note", style: "margin:-4px 2px 12px" }, isV3
+    ? "말로 하는 대화예요. 사용자 말은 하려던 말 → 폰의 받아쓰기(인식이 바꾼 곳을 칠해 보여요) → AI가 본 글 순서이고, AI 턴에는 모델 원문 생각 요약이 접혀 있어요. 검수는 하려던 말을 기준으로 해요."
+    : "타이핑으로 나눈 대화라 '받아쓰기 · 정리' 단계는 없고, 사용자가 친 글이 곧 '하려던 말'이에요."));
   root.append(turnCards(conv));
   if (conv.ux && conv.ux.comment) root.append(section("가상 유저 소감", h("p", { style: "margin:0;font-size:14.5px;line-height:1.65" }, conv.ux.comment)));
   if (r.t2) root.append(h("div", { class: "card" }, h("details", { style: "margin:0" }, h("summary", null, "추출 채점 자세히"),
@@ -907,7 +1031,28 @@ async function vConv(run, id) {
     others.length ? h("div", null, h("div", { class: "chips" }, others.map((o) => chip(`${o.run} · ${o.arm}${o.bad ? " · 문제" : ""}`, "", { href: hConv(o.run, o.id), dot: o.bad ? "warn" : "ok" }))),
       h("p", { style: "margin-top:12px" }, btn("나란히 보기", href(["compare", id], { runs: [run, ...others.map((o) => o.run)].slice(0, 3).join(",") })))) : empty("이 상황은 다른 판에서 돌린 적이 없어요."),
     h("p", { class: "small", style: "margin:8px 0 0" }, h("a", { href: href(["people", conv.persona.id]) }, `${conv.persona.name}의 다른 대화`))));
-  return { node: root, title: `${id} ${conv.persona.name}` };
+  // ?u=3 이면 그 사용자 말 카드로 가서 (있으면) 정리 비교를 펼침
+  const after = () => {
+    const u = q && q.get("u");
+    if (!u) return;
+    const li = document.querySelector(`li[data-turn="${CSS.escape(u)}"]`);
+    if (!li) return;
+    const d = li.querySelector("details.t0d");
+    if (d) d.open = true;
+    li.querySelector(".tcard").classList.add("hit");
+    // 글꼴 · 펼침으로 높이가 바뀌어도 그 카드가 맨 위에 오도록 1.5초 동안 맞춤 (사용자가 스크롤하면 멈춤)
+    let live = true;
+    for (const ev of ["wheel", "touchstart", "keydown", "mousedown"]) window.addEventListener(ev, () => { live = false; }, { once: true, passive: true });
+    const t0 = performance.now();
+    const tick = () => {
+      if (!live || performance.now() - t0 > 1500) return;
+      const off = li.getBoundingClientRect().top - 110;
+      if (Math.abs(off) > 2) window.scrollBy(0, off);
+      requestAnimationFrame(tick);
+    };
+    tick();
+  };
+  return { node: root, title: `${id} ${conv.persona.name}`, after };
 }
 
 /* ───────── 나란히 보기 ───────── */
@@ -1097,13 +1242,151 @@ const TERMS = [
   ["승률 (쌍 비교)", "같은 자리에서 새 답과 기준 답을 판정 모델이 비교해 새 답이 이긴 비율. 0.5면 비김. 판정 잡음이 ±0.1 정도라 그보다 작은 차이는 못 가려요."],
   ["정답표 (gold)", "대화에서 뽑아야 할 정답. 가상 유저 자기보고로 먼저 만들고(v0), 독립 검수 결과로 다시 만든 것이 v1이에요."],
   ["가상 유저 (SIM)", "AI(Sonnet)가 가상 인물 역할로 사용자 말을 만들어 내는 도구. 설문(SIM_UX)도 같이 써서 귀찮음 · 자연스러움을 5점으로 물어요."],
-  ["예전 · 라운드 1", "타이핑으로 나눈 대화 실험. 말로 하는 대화(받아쓰기 → 정리 → 추출 → 답)와 AI 생각 기록은 v3 실험부터라 이 화면에 아직 없어요."],
+  ["v3 · 예전 · 라운드 1", "v3 = 말로 하는 대화(받아쓰기) 기준의 지금 쓰는 데이터와 실험(E0 ~). 예전 · 라운드 1 = 타이핑으로 나눈 대화 실험으로, 받아쓰기 단계와 AI 생각 기록이 없어요. 화면에는 'v3' · '예전' 표시로 구분해요."],
   ["pinball · 커버리지", "추천 시간이 실제와 얼마나 어긋났는지(낮을수록 좋음) / 추천 시간 안에 준비가 끝난 날의 비율(목표 80%). 추천 비서 실험에서 써요."],
+  ["받아쓰기 (STT)", "폰이 마이크로 들은 말을 글자로 바꿔 주는 기능. 앱은 안드로이드 기본(구글) 음성 인식을 가정해요. 실험에서는 실제 엔진이 아니라 규칙으로 흉내 낸 잡음(문장부호 · 숫자 표기 · 군말 · 띄어쓰기 · 소리 틀림 · 끝 잘림)을 입혀요."],
+  ["하려던 말 (intended)", "가상 유저가 입으로 말했을 문장 그대로. 받아쓰기가 이걸 글자로 바꾸면서 흠이 생겨요. 검수는 하려던 말을 기준으로 해요."],
+  ["정리 (T0)", "받아쓰기 글을 추출 · 답 앞에서 한 번 더 LLM으로 고치는 단계 (숫자 통일 · 말 바꾸기 정리 · 이름 되살리기). E0 결과: 따로 두지 않기로 했어요."],
+  ["표시 (uncertain)", "정리가 '잘못 들렸을 수 있다'고 짚어 둔 곳. 이걸 서버가 되물을 것으로 넘기면 AI가 자연스럽게 되물어요."],
+  ["생각 요약 (모델 원문)", "AI가 답하기 전에 한 생각의 요약. 모델이 영어로 쓰고, 이 화면은 번역 · 가공 없이 그대로 보여 줘요. v3 실험부터 저장해요. 쉬운 턴은 생각 없이 바로 답해서 비어 있어요."],
   ["상태 점", "초록 = 좋음 · 끝남 · 문제 없음, 파랑 = 진행 중 · 후보, 노랑 = 참고 · 멈춤, 빨강 = 문제. 속이 빈 점은 아직 안 한 것이에요."],
 ];
 function vTerms() {
   return { node: h("div", null, title("용어"), h("p", { class: "lead" }, "화면에 나오는 말을 풀어 쓴 목록이에요."),
     h("div", { class: "card flush" }, TERMS.map(([k, v]) => h("div", { class: "kvl", style: "grid-template-columns:12rem minmax(0,1fr)" }, h("b", null, k), h("span", { class: "sub" }, v))))), title: "용어" };
+}
+
+/* ───────── 글 (실험 정리 · 프롬프트 카드) — 간단한 마크다운 → 화면 ───────── */
+// 레포 안 글끼리의 링크는 이 화면의 주소로 바꾸고, 화면에 없는 파일(spec/… 등)은 글자만 남김
+function mdLinkTarget(url) {
+  if (/^https?:\/\//.test(url)) return { href: url, ext: true };
+  let u = url;
+  try { u = decodeURIComponent(url); } catch { /* 그대로 */ }
+  u = u.replace(/^(\.\.\/|\.\/)+/, "").replace(/#.*$/, "");
+  if (u === "실험정리.md") return { href: "#/summary" };
+  const m = /^프롬프트카드\/([^/]+)\.md$/.exec(u);
+  if (m) return { href: "#/cards/" + encodeURIComponent(m[1]) };
+  return null;
+}
+function mdInline(src) {
+  const out = [];
+  const re = /(`+)([^`]+?)\1|\*\*([^*]+?)\*\*|\[([^\]]+)\]\(([^)\s]+)\)/g;
+  let pos = 0;
+  let m;
+  while ((m = re.exec(src)) !== null) {
+    if (m.index > pos) out.push(src.slice(pos, m.index));
+    if (m[2] !== undefined) out.push(h("code", null, m[2]));
+    else if (m[3] !== undefined) out.push(h("b", null, mdInline(m[3])));
+    else {
+      const t = mdLinkTarget(m[5]);
+      if (t) out.push(h("a", { href: t.href, target: t.ext ? "_blank" : null, rel: t.ext ? "noopener" : null }, m[4]));
+      else out.push(h("span", { class: "mdref", title: "이 화면에는 없는 파일이에요 (ai-lab 폴더에 있음)" }, m[4]));
+    }
+    pos = m.index + m[0].length;
+  }
+  if (pos < src.length) out.push(src.slice(pos));
+  return out;
+}
+const MD_BLOCK = /^(`{3,}|#{1,6}\s|>|\s*([-*]|\d+\.)\s+\S|\s*\|)/;
+function mdRender(src) {
+  const lines = src.replace(/\r\n?/g, "\n").split("\n");
+  const root = h("div", { class: "md" });
+  const heads = [];
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i];
+    if (/^\s*$/.test(line)) { i++; continue; }
+    let m;
+    if ((m = /^(`{3,})(.*)$/.exec(line))) {
+      const n = m[1].length;
+      const buf = [];
+      i++;
+      while (i < lines.length && !(new RegExp("^`{" + n + ",}\\s*$").test(lines[i].trim()))) { buf.push(lines[i]); i++; }
+      i++;
+      root.append(h("pre", { class: "mdcode" }, h("code", null, buf.join("\n"))));
+      continue;
+    }
+    if ((m = /^(#{1,6})\s+(.*)$/.exec(line))) {
+      const lv = m[1].length;
+      const el = h("h" + lv, { class: "mdh" + lv }, mdInline(m[2]));
+      if (lv === 2) heads.push({ title: m[2], el });
+      root.append(el);
+      i++;
+      continue;
+    }
+    if (/^(-{3,}|\*{3,})\s*$/.test(line)) { root.append(h("hr")); i++; continue; }
+    if (/^\s*\|/.test(line) && i + 1 < lines.length && /^\s*\|[\s:|-]+\|\s*$/.test(lines[i + 1])) {
+      const cells = (l) => l.trim().replace(/^\|/, "").replace(/\|$/, "").split("|").map((c) => c.trim());
+      const head = cells(line);
+      i += 2;
+      const rows = [];
+      while (i < lines.length && /^\s*\|/.test(lines[i])) { rows.push(cells(lines[i])); i++; }
+      const numeric = head.map((_, c) => c > 0 && rows.length > 0 && rows.every((r) => /^\**[0-9$—.~(+−-]/.test(r[c] || "—")));
+      const ths = head.map((c, k) => h("th", { class: numeric[k] ? "r" : "" }, mdInline(c)));
+      const trs = rows.map((r) => h("tr", null, head.map((_, k) => h("td", { class: numeric[k] ? "r num" : "" }, mdInline(r[k] || "")))));
+      root.append(h("div", { class: "scroll" }, h("table", null, h("thead", null, h("tr", null, ths)), h("tbody", null, trs))));
+      continue;
+    }
+    if (/^>/.test(line)) {
+      const buf = [];
+      while (i < lines.length && /^>/.test(lines[i])) { buf.push(lines[i].replace(/^>\s?/, "")); i++; }
+      root.append(h("blockquote", null, buf.map((t, k) => [k ? h("br") : null, mdInline(t)])));
+      continue;
+    }
+    if (/^\s*([-*]|\d+\.)\s+\S/.test(line)) {
+      const stack = [];
+      let host = root;
+      while (i < lines.length && /^\s*([-*]|\d+\.)\s+\S/.test(lines[i])) {
+        const mm = /^(\s*)([-*]|\d+\.)\s+(.*)$/.exec(lines[i]);
+        const indent = mm[1].length;
+        const ordered = /\d/.test(mm[2]);
+        while (stack.length && indent < stack[stack.length - 1].indent) stack.pop();
+        if (!stack.length || indent > stack[stack.length - 1].indent) {
+          const list = h(ordered ? "ol" : "ul");
+          if (stack.length) stack[stack.length - 1].lastLi.append(list); else host.append(list);
+          stack.push({ list, indent, lastLi: null });
+        }
+        const top = stack[stack.length - 1];
+        const li = h("li", null, mdInline(mm[3]));
+        top.list.append(li);
+        top.lastLi = li;
+        i++;
+        // 들여쓴 이어 줄은 앞 항목에 붙임
+        while (i < lines.length && /^\s{2,}\S/.test(lines[i]) && !/^\s*([-*]|\d+\.)\s+\S/.test(lines[i])) { li.append(" ", mdInline(lines[i].trim())); i++; }
+      }
+      continue;
+    }
+    const buf = [];
+    while (i < lines.length && !/^\s*$/.test(lines[i]) && (buf.length === 0 || !MD_BLOCK.test(lines[i]))) { buf.push(lines[i]); i++; }
+    root.append(h("p", null, buf.map((t, k) => [k ? " " : "", mdInline(t)])));
+  }
+  return { node: root, heads };
+}
+
+async function vSummary() {
+  const [docs, idx] = await Promise.all([load("docs.json"), load("index.json")]);
+  if (!docs.summary) throw new Error("실험정리.md가 묶음에 없어요");
+  const r = mdRender(docs.summary.md);
+  const root = h("div");
+  const e0 = idx.experiments.find((e) => e.id === "e0");
+  root.append(title("실험 정리"), h("p", { class: "lead" }, "ai-lab/실험정리.md를 그대로 보여 줘요 — 실험이 끝날 때마다 한 장씩 채워져요. 숫자 표와 대화 예시 원문이 들어 있어요."),
+    h("div", { class: "chips", style: "margin-bottom:12px" },
+      r.heads.map((hd) => h("a", { class: "chip", href: "#/summary", onclick: (ev) => { ev.preventDefault(); hd.el.scrollIntoView({ block: "start" }); window.scrollBy(0, -110); } }, hd.title.replace(/\*\*/g, "").replace(/\s*\(.*$/, ""))),
+      e0 ? chip("E0 실험 페이지", "ink", { href: hExp("e0") }) : null),
+    h("div", { class: "card mdcard" }, r.node));
+  return { node: root, title: "실험 정리" };
+}
+
+async function vCards(id) {
+  const docs = await load("docs.json");
+  if (!docs.cards.length) throw new Error("프롬프트 카드가 묶음에 없어요");
+  const card = docs.cards.find((c) => c.id === id) || docs.cards[0];
+  const r = mdRender(card.md);
+  const root = h("div");
+  const seg = h("div", { class: "seg", role: "tablist", style: "margin-bottom:14px" }, docs.cards.map((c) => h("a", { class: c.id === card.id ? "on" : "", href: "#/cards/" + encodeURIComponent(c.id) }, c.id.replace(/^(\d+)-(.*)$/, "$1 · $2"))));
+  root.append(title("프롬프트 카드"), h("p", { class: "lead" }, "앱을 만들 때 그대로 가져다 쓰는 지점별 프롬프트 카드예요 (ai-lab/프롬프트카드). 한 지점이 한 장이고, 실험이 끝날 때마다 채워져요."),
+    docs.cards.length > 1 ? seg : null, h("div", { class: "card mdcard" }, r.node));
+  return { node: root, title: card.title };
 }
 
 /* ───────── 시작 ───────── */
