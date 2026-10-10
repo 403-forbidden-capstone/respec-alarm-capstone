@@ -2,15 +2,22 @@ import { useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 
 import { Screen, Text } from '@/components/ui';
+import { useAuth } from '@/features/auth/AuthProvider';
 import { signInWithProvider, type OAuthProvider } from '@/lib/auth';
 import { colors, radius, size } from '@/theme';
 
 // 로그인 — 카카오 · 구글. 로그인되면 루트 레이아웃이 알아서 탭으로 보냄
 export default function LoginScreen() {
+  const { enabled } = useAuth();
   const [busy, setBusy] = useState<OAuthProvider | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   async function login(provider: OAuthProvider) {
+    // 가짜 데이터 모드에서는 화면만 열어 봄 (/dev/screens) — 로그인해도 가짜 프로필이 쓰이므로 막음
+    if (!enabled) {
+      setError('가짜 데이터 모드예요. 로그인하려면 /dev/screens나 설정에서 실데이터로 바꿔 주세요');
+      return;
+    }
     setBusy(provider);
     setError(null);
     try {
