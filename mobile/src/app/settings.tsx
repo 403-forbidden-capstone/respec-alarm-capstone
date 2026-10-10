@@ -65,11 +65,11 @@ export default function SettingsScreen() {
         </View>
       ) : (
         <Text variant="small">
-          {canUseRealData ? '실데이터 모드로 바꾸면 로그인 정보가 여기에 보여요.' : 'Supabase가 연결되면 로그인 정보가 여기에 보여요.'}
+          {canUseRealData ? '실데이터 모드로 바꾸면 로그인 정보가 여기에 보여요.' : '로그인을 붙이면 로그인 정보가 여기에 보여요.'}
         </Text>
       )}
 
-      <SectionHeader title="개발" right={canUseRealData ? undefined : 'Supabase 연결 안 됨'} />
+      <SectionHeader title="개발" right={canUseRealData ? undefined : '실데이터 아직 안 붙임'} />
       <DataModeToggle />
       <Text variant="caption" style={styles.note}>
         가짜 데이터는 목업 시나리오(5월 22일)로 로그인 없이 돌아요. 화면 목록은 /dev/screens
