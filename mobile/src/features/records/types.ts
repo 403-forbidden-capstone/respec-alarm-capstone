@@ -18,9 +18,16 @@ export type MonthRecord = {
   today: { date: Date; eventCount: number; journalWritten: boolean };
 };
 
-export type WeekRecord = {
-  title: string; // 5월 19일 — 25일
-  strip: { date: Date; weekday: string; day: number; isToday: boolean; isFuture: boolean }[];
+export type WeekDay = {
+  date: Date;
+  weekday: string; // 월
+  day: number;
+  isToday: boolean;
+  isFuture: boolean;
+  recorded: boolean; // 그날 기록이 있으면 점
+};
+
+export type WeekSummary = {
   averageWake: Date;
   averageText: string; // 지난주보다 2분 빨라요
   goalRate: number; // 0~100
@@ -28,6 +35,13 @@ export type WeekRecord = {
   bars: { label: string; score: number }[]; // 월 19 · 76
   todayPending: boolean; // 오늘 기록은 기상 확인 뒤에 더해짐
   coaching: string;
+};
+
+export type WeekRecord = {
+  title: string; // 5월 19일 — 25일
+  relative: string; // 이번 주 · 지난주 · 2주 전
+  strip: WeekDay[]; // 월 ~ 일
+  summary: WeekSummary | null; // 기록이 없는 주는 null
 };
 
 export type TimelineRow = { at: Date; label: string; source: string; past?: boolean };
