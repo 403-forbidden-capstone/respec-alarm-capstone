@@ -1,16 +1,18 @@
 import type { Session } from '@supabase/supabase-js';
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react';
 
-import { getMyProfile } from '@/features/profile/api';
+import { getMyProfile, MOCK_PROFILE } from '@/features/profile/api';
 import type { Profile } from '@/features/profile/types';
-import { isSupabaseConfigured, supabase } from '@/lib/supabase';
+import { userMessage } from '@/lib/errors';
+import { canUseRealData, useMode } from '@/lib/mode';
+import { supabase } from '@/lib/supabase';
 
 type AuthState = {
   session: Session | null;
   profile: Profile | null; // 내 profiles 행 (가입하면 DB가 만들어 둠)
-  profileError: string | null; // 프로필을 못 읽은 이유 (오프라인 등). 이때는 온보딩으로 보내지 않고 다시 시도
+  profileError: string | null; // 프로필을 못 읽었으면 문자열(보여 줄 이유, 없으면 ''), 읽었으면 null. 못 읽었을 때는 온보딩으로 보내지 않고 다시 시도
   loading: boolean; // 저장된 세션 · 프로필을 읽는 중
-  enabled: boolean; // Supabase가 연결돼 있어 로그인이 필요한지 (false면 목업 모드)
+  enabled: boolean; // 실데이터 모드라 로그인이 필요한지 (false면 가짜 데이터 모드 — 로그인 없이 가짜 프로필로 탭)
   needsOnboarding: boolean; // 로그인했고 프로필도 읽었는데 아이디를 아직 안 정함
   refreshProfile: () => Promise<void>; // 다시 읽음. 실패하면 기존 프로필은 그대로 두고 오류를 던짐
 };
@@ -30,21 +32,23 @@ const AuthContext = createContext<AuthState>({
 type Loaded = { userId: string | null; profile: Profile | null; error: string | null };
 const EMPTY: Loaded = { userId: null, profile: null, error: null };
 
-// 네트워크 오류는 supabase-js가 Error가 아닌 { message } 객체로 주므로 둘 다 읽음
-const errorMessage = (e: unknown) => {
-  const message = typeof e === 'object' && e != null && 'message' in e ? String(e.message) : '';
-  return message || '내 정보를 불러오지 못했어요';
-};
+// 못 읽은 이유 — UserError일 때만 그 이유, Supabase · 네트워크 원문은 빈 글자 (CLAUDE.md 화면 규칙). 빈 글자여도 "못 읽음"은 맞음
+const errorMessage = (e: unknown) => userMessage(e, '');
 
 // 로그인 상태 · 내 프로필을 앱 전체에 알려 줌 — 화면에서는 useAuth()
+// 데이터 모드(lib/mode.ts)가 가짜면 세션은 그대로 두고(로그인 유지) 화면에는 가짜 프로필만 보여 줌
+// 세션 · 프로필은 모드와 상관없이 읽어 둠 — 실데이터로 돌아올 때 프로필을 다시 읽느라 화면 묶음이 비지 않게
+// 실데이터를 못 쓰면(Supabase 연결 안 됨 · lib/flags REAL_DATA_READY = false) 세션 · 프로필을 아예 읽지 않음 (#116)
 export function AuthProvider({ children }: { children: ReactNode }) {
+  const { mode, ready: modeReady } = useMode();
+  const real = canUseRealData && mode === 'real';
   const [session, setSession] = useState<Session | null>(null);
-  const [sessionLoading, setSessionLoading] = useState(isSupabaseConfigured);
+  const [sessionLoading, setSessionLoading] = useState(canUseRealData);
   const [loaded, setLoaded] = useState<Loaded>(EMPTY);
   const userId = session?.user.id ?? null;
 
   useEffect(() => {
-    if (!isSupabaseConfigured) return;
+    if (!canUseRealData) return;
     // 저장된 세션을 못 읽어도(AsyncStorage 오류 등) 시작 화면에 멈추지 않게 함
     supabase.auth
       .getSession()
@@ -84,23 +88,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const profileReady = userId == null || loaded.userId === userId;
   const current = userId != null && loaded.userId === userId ? loaded : EMPTY;
 
-  return (
-    <AuthContext.Provider
-      value={{
+  const value: AuthState = real
+    ? {
         session,
         profile: current.profile,
         profileError: current.error,
-        loading: sessionLoading || !profileReady,
-        enabled: isSupabaseConfigured,
+        loading: !modeReady || sessionLoading || !profileReady,
+        enabled: true,
         // 읽기에 성공했는데 아이디가 없을 때만 온보딩 — 못 읽은 경우는 루트 레이아웃이 다시 시도 화면을 보여 줌
-        needsOnboarding:
-          isSupabaseConfigured && session != null && profileReady && current.error == null && !current.profile?.handle,
+        needsOnboarding: session != null && profileReady && current.error == null && !current.profile?.handle,
         refreshProfile,
-      }}
-    >
-      {children}
-    </AuthContext.Provider>
-  );
+      }
+    : {
+        session: null,
+        profile: MOCK_PROFILE,
+        profileError: null,
+        loading: !modeReady,
+        enabled: false,
+        needsOnboarding: false,
+        refreshProfile,
+      };
+
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 
 export function useAuth() {

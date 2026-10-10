@@ -3,7 +3,8 @@ name: Claude 자동 리뷰
 # PR이 열리면 Claude가 pr-review 스킬 + 레포 체크리스트로 한 번 검수합니다. (방향성 · 자가 검수 포함)
 #   - 새 커밋마다 다시 돌지 않습니다. 다시 받고 싶으면 PR 댓글에 "@claude 다시 리뷰해줘"
 #   - 제목에 [WIP]가 있으면 건너뛰고, [WIP]를 빼는 순간 검수합니다
-#   - 받는 브랜치가 바뀌면 다시 검수합니다 (다른 PR 위에 쌓인 PR이 main으로 바뀔 때)
+#   - 받는 브랜치가 바뀌면(쌓인 PR이 main으로 바뀔 때) 아직 리뷰 판단이 없는 PR만 검수합니다
+#     이미 판단("흐름 확인 후 머지" 등)을 받은 PR은 다시 돌지 않습니다 — 작업자가 확인하고 머지 (#114)
 #   - 문서(.md)만 바꾼 PR, Dependabot PR은 건너뜁니다
 #   - 리뷰 댓글이 안 달리면(워크플로가 main과 다름 · 사용량 한도 등) 실패로 남기고 PR에 이유를 적습니다
 #   - 기능 흐름 PR이면 `흐름 확인 필요` 라벨과 "흐름 확인" 검사를 붙입니다 (.github/scripts/flow-check.js)
@@ -40,12 +41,31 @@ jobs:
       id-token: write
       actions: read
     steps:
+      # 받는 브랜치만 바뀐 경우: 이 PR에 Claude 리뷰 판단 댓글이 이미 있으면 아래 단계를 모두 건너뜀
+      - name: 이미 리뷰했는지
+        id: prior
+        if: github.event.action == 'edited' && github.event.changes.base != null
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          # --paginate는 쪽마다 개수를 따로 내므로 awk로 더함
+          n=$(gh api "repos/$GITHUB_REPOSITORY/issues/$PR/comments" --paginate \
+            --jq '[.[] | select(.user.login == "claude[bot]" and (.body | contains("머지 판단")))] | length' \
+            | awk '{ s += $1 } END { print s + 0 }')
+          if [ "$n" -gt 0 ]; then
+            echo "reviewed=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::이미 Claude 리뷰 판단이 있어 다시 돌리지 않음 (판단 댓글 ${n}개). 다시 받으려면 PR 댓글에 @claude 다시 리뷰해줘"
+          fi
+
       - name: Checkout
+        if: steps.prior.outputs.reviewed != 'true'
         uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
       - name: Claude 토큰 정리
+        if: steps.prior.outputs.reviewed != 'true'
         # 복사하다 붙은 공백 · 줄바꿈을 지웁니다
         env:
           RAW_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
@@ -55,10 +75,12 @@ jobs:
           echo "CLAUDE_TOKEN=$TOKEN" >> "$GITHUB_ENV"
 
       - name: 시작 시각
+        if: steps.prior.outputs.reviewed != 'true'
         id: start
         run: echo "at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
 
       - name: Claude
+        if: steps.prior.outputs.reviewed != 'true'
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ env.CLAUDE_TOKEN }}
@@ -89,6 +111,7 @@ jobs:
 
       # 스크립트는 늘 main 것을 씀 (오래된 브랜치에도 같은 규칙)
       - name: 흐름 확인 스크립트 (main)
+        if: steps.prior.outputs.reviewed != 'true'
         uses: actions/checkout@v7
         with:
           ref: ${{ github.event.repository.default_branch }}
@@ -97,6 +120,7 @@ jobs:
 
       # 리뷰 댓글이 없으면 실패로 남기고, 기능 흐름 PR이면 라벨 · "흐름 확인" 검사를 붙임
       - name: 리뷰 확인 · 흐름 확인
+        if: steps.prior.outputs.reviewed != 'true'
         uses: actions/github-script@v9
         env:
           SINCE: ${{ steps.start.outputs.at }}
@@ -114,5 +138,5 @@ jobs:
         run: |
           gh pr comment "$PR" --repo "$GITHUB_REPOSITORY" --body "Claude 자동 리뷰가 댓글을 남기지 못함 ([실행 기록]($RUN_URL))
 
-          - 이 브랜치의 리뷰 워크플로가 main과 다르면 Claude가 건너뜀 (main을 반영하기 전 브랜치, main이 아닌 브랜치 위에 쌓인 PR) → 이 PR에 \`@claude 다시 리뷰해줘\` 댓글. 쌓인 PR은 아래 PR이 머지돼 main으로 바뀌면 자동으로 다시 돎
+          - 이 브랜치의 리뷰 워크플로가 main과 다르면 Claude가 건너뜀 (main을 반영하기 전 브랜치, main이 아닌 브랜치 위에 쌓인 PR) → 이 PR에 \`@claude 다시 리뷰해줘\` 댓글. 판단을 아직 못 받은 쌓인 PR은 아래 PR이 머지돼 main으로 바뀌면 자동으로 돎
           - 사용량 한도면 풀린 뒤 같은 댓글"

@@ -6,8 +6,10 @@ import * as WebBrowser from 'expo-web-browser';
 import { useEffect, type ReactNode } from 'react';
 import { Platform, StyleSheet, useWindowDimensions, View } from 'react-native';
 
+import { SheetHost, ToastHost } from '@/components/ui';
 import { AuthProvider, useAuth } from '@/features/auth/AuthProvider';
 import { ProfileRetryScreen } from '@/features/auth/ProfileRetryScreen';
+import { canUseRealData } from '@/lib/mode';
 import { colors, fontFiles } from '@/theme';
 
 // 글꼴 · 로그인 상태를 다 읽을 때까지 시작 화면을 유지함
@@ -31,6 +33,8 @@ export default function RootLayout() {
       <PhoneFrame>
         <StatusBar style="dark" />
         <RootStack />
+        <SheetHost />
+        <ToastHost />
       </PhoneFrame>
     </AuthProvider>
   );
@@ -38,7 +42,8 @@ export default function RootLayout() {
 
 // 로그인 전에는 login만, 아이디를 정하기 전에는 onboarding만, 그 뒤에는 탭 · 앱 화면만 열림
 // 로그인은 됐는데 프로필을 못 읽었으면(오프라인 등) 온보딩 대신 다시 시도 화면
-// Supabase가 연결 안 된 목업 모드(enabled=false)는 로그인 없이 바로 탭
+// 가짜 데이터 모드(enabled=false, lib/mode.ts)는 로그인 없이 바로 탭. login · onboarding은 주소로 열어 볼 수만 있음
+// 로그인을 붙이기 전(lib/flags REAL_DATA_READY = false)에는 login · onboarding · settings를 아예 뺌 — 주소로 열어도 탭 홈 (#116)
 // dev/* · auth/callback은 어느 쪽에서도 열림. 앱 화면을 새로 만들면 첫 번째 Protected 안에 넣음
 function RootStack() {
   const { session, loading, enabled, needsOnboarding, profileError, refreshProfile } = useAuth();
@@ -48,20 +53,36 @@ function RootStack() {
   }, [loading]);
 
   if (loading) return null;
-  if (profileError) return <ProfileRetryScreen message={profileError} onRetry={refreshProfile} />;
+  if (profileError != null) return <ProfileRetryScreen message={profileError} onRetry={refreshProfile} />;
   const needsLogin = enabled && !session;
   const ready = !needsLogin && !needsOnboarding;
+  const preview = !enabled && canUseRealData; // 가짜 모드에서 login · onboarding을 열어 보기 (실데이터를 쓸 수 있을 때만)
 
   return (
     <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: colors.bg } }}>
       <Stack.Protected guard={ready}>
         <Stack.Screen name="(tabs)" />
+        {/* 목업 화면 (M1) — 화면 번호 · 데이터는 docs/screen-data-map.md, 한눈에 보기는 /dev/screens */}
+        <Stack.Screen name="alarms" />
+        <Stack.Screen name="alarm/[id]" />
+        <Stack.Screen name="schedule/new" />
+        <Stack.Screen name="wake" />
+        <Stack.Screen name="ring" options={{ animation: 'fade' }} />
+        <Stack.Screen name="friends/[id]/index" />
+        <Stack.Screen name="friends/[id]/alarms" />
+        <Stack.Screen name="permissions" />
+        <Stack.Screen name="groups/[id]/index" />
+        <Stack.Screen name="groups/[id]/members/[userId]" />
+        <Stack.Screen name="suggestion/[id]" />
+      </Stack.Protected>
+      {/* 목업에 없는 설정 · 로그인 · 온보딩 — 로그인을 붙일 때까지 빠짐 */}
+      <Stack.Protected guard={ready && canUseRealData}>
         <Stack.Screen name="settings" />
       </Stack.Protected>
-      <Stack.Protected guard={needsLogin}>
+      <Stack.Protected guard={needsLogin || preview}>
         <Stack.Screen name="login" />
       </Stack.Protected>
-      <Stack.Protected guard={needsOnboarding}>
+      <Stack.Protected guard={needsOnboarding || preview}>
         <Stack.Screen name="onboarding" />
       </Stack.Protected>
     </Stack>

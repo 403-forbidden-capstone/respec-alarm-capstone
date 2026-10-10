@@ -12,6 +12,7 @@ export const colors = {
   dash: '#CFCFCA', // 점선 카드 테두리
   switchOff: '#D8D8D4',
   shadow: '#000000', // 그림자 색 (투명도는 쓰는 곳에서)
+  scrim: 'rgba(20, 20, 20, 0.38)', // 시트 뒤를 어둡게
   inverse: '#FFFFFF', // 어두운 바탕 위 글자
 
   // 상태 점 · 경고
@@ -32,6 +33,11 @@ export const colors = {
   ringWake: '#141414',
   ringPrepare: '#262A28',
   ringDepart: '#4A4A54',
+  ringPanel: 'rgba(255, 255, 255, 0.08)', // 울림 화면의 음성 안내 칸
+  ringOption: 'rgba(255, 255, 255, 0.1)', // 미루기 시간 버튼
+  ringButton: 'rgba(255, 255, 255, 0.12)', // 미루기 버튼
+  ringLine: 'rgba(255, 255, 255, 0.35)', // 어두운 바탕 위 칩 테두리
+  ringWave: 'rgba(255, 255, 255, 0.8)', // 음성 파형
 } as const;
 
 export const radius = {
