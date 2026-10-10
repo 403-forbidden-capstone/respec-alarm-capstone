@@ -17,6 +17,7 @@ export function DataModeToggle() {
   const { mode } = useMode();
 
   async function change(next: DataMode) {
+    if (next === mode) return; // 지금 모드를 다시 누르면 그대로 (Segmented는 같은 값도 onChange를 부름)
     if (setMode(next) !== next) {
       toast('Supabase가 연결되지 않아 가짜 데이터로 돌아요');
       return;
