@@ -47,7 +47,7 @@
 해당이면 보고에 두 칸을 더함 (머지 판단 바로 뒤):
 
 1. 기능 흐름 — **작업자가 미리보기에서 그대로 따라 하며 확인하는 순서**로 씀. 코드 설명이 아니라 "어느 화면에서 무엇을 누르면 무엇이 보이는지"
-   - 맨 위에 시작 주소 한 줄: 이 PR의 Cloudflare 미리보기(`https://<브랜치 이름에서 / 를 - 로 바꾸고 소문자>-respec-alarm-capstone.vmgfh878.workers.dev`) + 경로 + `?mode=mock`. 화면 번호 목록은 `/dev/screens?mode=mock`
+   - 맨 위에 시작 주소 한 줄: 이 PR의 Cloudflare 미리보기(PR에 달린 Cloudflare 댓글의 Preview URL, 보통 `https://<브랜치 이름에서 / 를 - 로 바꾸고 소문자>-respec-alarm-capstone.vmgfh878.workers.dev`) + 경로 + `?mode=mock`. 화면 번호 목록은 `/dev/screens?mode=mock`
    - 한 단계 = `화면 번호(이름) → "누르는 것" → 보이는 것` 한 줄. 버튼 · 탭 · 토스트 · 화면 글자는 코드에 있는 글자 그대로 따옴표로. 지어내지 않음
    - 이 PR이 새로 만든 단계는 "(새로)", 바꾼 단계는 "(바뀜)". 실패하면 화면에 무엇이 뜨는지도 한 줄로
    - 함수 이름 · 파일:줄 · 상태 이름은 흐름 줄에 넣지 않음 (판단 · 근거 표 · 발견 사항에만)
