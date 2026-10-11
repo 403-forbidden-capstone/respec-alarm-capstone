@@ -552,14 +552,14 @@ const bigH2 = (t, ...more) => h("div", { class: "h2", style: "font-size:21px;let
 function firstTimeCard() {
   const lk = (t, to) => h("a", { href: to }, t);
   return h("div", { class: "sec" },
-    bigH2("처음이라면", h("small", null, "이 화면은 이런 곳이에요")),
+    bigH2("실험실 소개", h("small", null, "처음 보는 팀원용")),
     h("div", { class: "card lede" },
-      kvl("무엇을 하는 곳", "앱에서 AI가 말하는 자리(자기 전 · 기상 후 대화 답, 대화에서 저장할 것 뽑기, 일기 · 코칭, 아침 준비 시간 추천)마다 'AI에게 주는 지시문'을 미리 시험해서 가장 좋은 판을 고르는 곳이에요."),
-      kvl("어떻게 시험하나", "가상 유저 12명(개발용 8 · 시험용 4)이 상대예요. 습관이 다른 사람을 AI가 연기하고, 음성 받아쓰기가 글자를 틀리게 적는 잡음까지 흉내 내요. 지시문을 판마다 바꿔 같은 대화를 시켜 보고 점수를 비교해요."),
-      kvl("결과는", "'지시문 카드'로 남아요. 실제 앱에는 그 카드를 그대로 붙여요."),
-      kvl("읽는 순서", "진행 단계(바로 아래) → ", lk("실험", "#/exp"), "(E0 · E1 · E2 …) → ", lk("대화", "#/conv"), " → ", lk("사람", "#/people"), " → ", lk("카드", "#/cards"), ". 낯선 말은 ", lk("용어", "#/terms"), "에서 찾아요."),
-      h("div", { class: "go", style: "padding-top:8px" }, btn("개발 보드로 돌아가기", "/board", true, true))),
-    h("p", { class: "note" }, "실험은 모두 Claude Haiku 5.5로 했고, 운영 모델(Gemini)에서는 아직 확인 안 됐어요."));
+      kvl("목적", "앱에서 AI가 응답하는 지점(취침 전 · 기상 후 대화, 대화에서 저장 항목 추출, 일기 · 코칭, 아침 준비 시간 추천)마다 프롬프트를 미리 실험해 가장 좋은 판을 고름."),
+      kvl("방법", "가상 유저 12명(개발용 8 · 시험용 4)과 대화. 습관이 다른 사용자를 AI가 연기하고, 음성 인식(STT) 오류까지 시뮬레이션. 프롬프트를 판별로 바꿔 같은 대화를 돌리고 점수를 비교."),
+      kvl("산출물", "프롬프트 카드. 실제 앱에는 이 카드를 그대로 적용."),
+      kvl("읽는 순서", "진행 현황(아래) → ", lk("실험", "#/exp"), "(E0 · E1 · E2 …) → ", lk("대화", "#/conv"), " → ", lk("사람", "#/people"), " → ", lk("카드", "#/cards"), ". 모르는 말은 ", lk("용어", "#/terms"), " 탭 참고."),
+      h("div", { class: "go", style: "padding-top:8px" }, btn("개발 보드로", "/board", true, true))),
+    h("p", { class: "note" }, "실험은 모두 Claude Haiku 5.5 기준. 운영 모델(Gemini)에서는 미검증."));
 }
 
 // 지금 어디까지 왔나 — 진행 단계마다 한 줄: 이름 · 하는 일 · (끝났으면) 결론 한 줄
@@ -577,9 +577,9 @@ function stepsSection(idx) {
     const link = e && state === "done" && e.headline;
     let line = null;
     if (link) line = h("p", { class: "cl" }, h("b", null, koCodes(oneLine(e.headline))), " ", h("span", { class: "small" }, "자세히 ›"));
-    else if (state === "doing") line = h("p", { class: "cl sub" }, (s.note && s.note !== "진행 중" ? s.note + " · " : "") + "지금 돌리는 중이라 결론은 아직 없어요.");
+    else if (state === "doing") line = h("p", { class: "cl sub" }, (s.note && s.note !== "진행 중" ? s.note + " · " : "") + "진행 중 — 결론 미정");
     else if (state === "done" && s.note) line = h("p", { class: "cl sub" }, s.note);
-    const mark = state === "done" ? chip("끝", "", { dot: "ok" }) : state === "doing" ? chip("지금 하는 중", "ink") : state === "next" ? chip("다음", "", { dot: "mid" }) : chip("나중", "fill");
+    const mark = state === "done" ? chip("완료", "", { dot: "ok" }) : state === "doing" ? chip("진행 중", "ink") : state === "next" ? chip("다음", "", { dot: "mid" }) : chip("예정", "fill");
     const dot = h("i", { class: "sd " + (state === "done" ? "ok" : state === "doing" ? "mid" : "off"), style: "margin-top:10px" });
     const body = h("div", { class: "grow" },
       h("div", { class: "nm" }, ko, codeTail(code, ko)),
@@ -588,9 +588,9 @@ function stepsSection(idx) {
     return link ? h("a", { class: "lrow top exrow", href: hExp(e.id) }, dot, body, mark) : h("div", { class: "lrow top" }, dot, body, mark);
   });
   return h("div", { class: "sec steps" },
-    bigH2("지금 어디까지 왔나", h("small", null, "v3 · 말로 하는 대화 기준")),
+    bigH2("진행 현황", h("small", null, "v3 · 음성 대화 기준")),
     h("div", { class: "card" }, rows),
-    h("div", { class: "go", style: "padding-top:0" }, btn("실험 정리 읽기", "#/summary", true), btn("지시문 카드", "#/cards", true), btn("가상 유저 보기", "#/people", true)));
+    h("div", { class: "go", style: "padding-top:0" }, btn("실험 정리 읽기", "#/summary", true), btn("프롬프트 카드", "#/cards", true), btn("가상 유저 보기", "#/people", true)));
 }
 
 // 지난 실험 결론 — 예전 · 라운드 1의 실험을 한 줄씩. 코드 이름(T4 · T5 등)이 든 부분은 이름 뒤에 작게
@@ -598,13 +598,13 @@ function pastSection(idx) {
   const past = idx.experiments.filter((e) => e.round !== "v3");
   if (!past.length) return null;
   return h("div", { class: "sec steps past" },
-    bigH2("지난 실험 결론", h("small", null, "예전 · 라운드 1 (타이핑으로 나눈 대화) · 최근 것부터 · 누르면 자세히")),
+    bigH2("이전 실험 결론", h("small", null, "라운드 1 (텍스트 대화) · 최신순 · 클릭하면 상세")),
     h("div", { class: "card" }, past.map((e) => {
       const [name, ...rest] = String(e.title).split(" — ");
       return h("a", { class: "lrow top exrow", href: hExp(e.id) },
         h("i", { class: "sd " + (e.status === "paused" ? "zz" : "ok"), style: "margin-top:9px" }),
         h("div", { class: "grow" }, h("div", { class: "nm" }, name, rest.length ? h("small", null, rest.join(" — ")) : null), h("p", { class: "cl" }, koCodes(oneLine(e.headline)))),
-        e.status === "paused" ? chip("멈춤", "fill") : null);
+        e.status === "paused" ? chip("중단", "fill") : null);
     })));
 }
 
@@ -615,7 +615,7 @@ async function vHome() {
   if (idx.v3 && idx.v3.progress) {
     const p = idx.v3.progress; const done = p.filter((x) => x.status === "done").length; const doing = p.find((x) => x.status === "doing");
     const nm = (x) => x.name.replace(/^E\d+\s+/, "");
-    root.append(h("p", { class: "lead", style: "font-size:16px;color:var(--ink);margin:0 0 14px" }, `AI 지시문 시험소 · ${p.length}단계 중 ${done} 끝${doing ? ` · 지금 "${nm(doing)}" 시험 중` : ""}`));
+    root.append(h("p", { class: "lead", style: "font-size:16px;color:var(--ink);margin:0 0 14px" }, `AI 프롬프트 실험 · ${p.length}단계 중 ${done}단계 완료${doing ? ` · 현재 "${nm(doing)}" 실험 진행 중` : ""}`));
   }
   root.append(firstTimeCard());
   if (idx.v3) root.append(stepsSection(idx));
@@ -624,9 +624,9 @@ async function vHome() {
 
   const rp = idx.recent_prompts;
   if (rp.length) {
-    // 앞 이름표(T2 · SIM …)로 어느 자리의 지시문인지 한국어 이름을 찾아 앞에 둠
+    // 앞 이름표(T2 · SIM …)로 어느 자리의 프롬프트인지 한국어 이름을 찾아 앞에 둠
     const slot = (ref) => { const k = String(ref).split("@")[0]; const f = idx.features.find((x) => x.id === k || (x.id === "T45" && /^T[45]$/.test(k))); return f ? f.name : null; };
-    root.append(section(["최근 고친 지시문", h("small", null, "AI에게 주는 지시문(프롬프트) 중 최근에 고친 것")], rp.map((p) => h("div", { class: "lrow" },
+    root.append(section(["최근 수정한 프롬프트", h("small", null, "최근 수정분")], rp.map((p) => h("div", { class: "lrow" },
       h("span", { class: "muted num", style: "flex:none;width:3.4rem;font-size:12.5px" }, p.date.slice(5).replace("-", "/")),
       h("div", { class: "grow" }, h("a", { href: hPrompt(p.ref), style: "font-weight:600" }, slot(p.ref) ? [slot(p.ref), h("span", { class: "muted small", style: "font-weight:400" }, ` (${p.ref})`)] : p.ref), " ", statusChip(p.status_ko), h("div", { class: "small" }, plainKo(p.note))),
       p.parent ? btn(`비교 +${p.added} −${p.removed}`, href(["diff"], { a: p.parent, b: p.ref }), true, true) : null))));
@@ -664,7 +664,7 @@ async function vExpList(q) {
     syncHash(["exp"], state);
     listBox.replaceChildren(...ex.experiments.filter((e) => !state.feat || e.features.includes(state.feat)).map((e) =>
       h("div", { class: "card xcard" },
-        h("div", { class: "sid" }, `${expLabel(e)} · ${e.round === "v3" ? "v3" : "예전"} · ${e.period} · ${e.status === "paused" ? "멈춤" : "끝남"}`),
+        h("div", { class: "sid" }, `${expLabel(e)} · ${e.round === "v3" ? "v3" : "예전"} · ${e.period} · ${e.status === "paused" ? "중단" : "완료"}`),
         h("div", { class: "big2" }, h("a", { href: hExp(e.id) }, e.title)),
         h("div", { class: "chips" }, e.features.map((f) => chip(featName(idx, f), "fill"))),
         h("p", { class: "sub", style: "margin:0;font-size:13.5px" }, plainKo(e.headline)),
@@ -765,15 +765,15 @@ async function vExp(id) {
   const root = h("div");
   root.append(crumbs({ t: "실험", href: "#/exp" }, expLabel(e)),
     title(plainKo(e.title)),
-    h("div", { class: "chips", style: "margin:6px 0 16px" }, chip(e.round_label, e.round === "v3" ? "ink" : "fill"), chip(e.period), chip(e.status === "paused" ? "멈춤" : "끝남", "", { dot: e.status === "paused" ? "zz" : "ok" }), e.features.map((f) => chip(featName(idx, f)))));
+    h("div", { class: "chips", style: "margin:6px 0 16px" }, chip(e.round_label, e.round === "v3" ? "ink" : "fill"), chip(e.period), chip(e.status === "paused" ? "중단" : "완료", "", { dot: e.status === "paused" ? "zz" : "ok" }), e.features.map((f) => chip(featName(idx, f)))));
   // 이 실험은 — 무엇을 바꿔 봤고(판) → 무엇으로 쟀고 → 결론, 세 줄만. 데이터에 없는 줄은 뺌. 질문 · 대상은 접어 둠
   const meas = measuredOf(e);
   const armLine = h("span", null, e.arms.map((a, i) => { const [ko, code] = splitCode(a.label); return [i ? " · " : "", h("b", null, ko), codeTail(code, ko)]; }));
-  const why = [e.question ? kvl("알고 싶었던 것", plainKo(e.question)) : null, e.who ? kvl("누구로", plainKo(e.who)) : null].filter(Boolean);
-  root.append(h("div", { class: "sec" }, bigH2("이 실험은"),
+  const why = [e.question ? kvl("실험 질문", plainKo(e.question)) : null, e.who ? kvl("대상", plainKo(e.who)) : null].filter(Boolean);
+  root.append(h("div", { class: "sec" }, bigH2("실험 개요"),
     h("div", { class: "card lede" },
-      e.arms.length ? kvl(e.arms.length > 1 ? `바꿔 본 것 (${e.arms.length}판)` : "돌려 본 판", armLine) : null,
-      meas ? kvl("잰 것", plainKo(meas), h("div", { class: "small" }, "숫자는 아래 '결과' 표에 있어요.")) : null,
+      e.arms.length ? kvl(e.arms.length > 1 ? `비교한 판 (${e.arms.length})` : "실행한 판", armLine) : null,
+      meas ? kvl("측정 항목", plainKo(meas), h("div", { class: "small" }, "수치는 아래 '결과' 표 참고.")) : null,
       e.headline ? kvl("결론", h("b", null, plainKo(e.headline))) : null,
       why.length ? h("details", { style: "margin-top:6px;border-top:1px solid var(--line);padding-top:10px" }, h("summary", null, "왜 했고 누구로 했나 (펼치기)"), why) : null)));
 
@@ -783,7 +783,7 @@ async function vExp(id) {
       h("div", { style: "flex:none;width:9.5rem;font-weight:600" }, ko, code ? h("div", { class: "small muted", style: "font-weight:400" }, code) : null),
       h("div", { class: "grow" }, h("div", { class: "small", style: "margin-bottom:6px" }, plainKo(a.desc)),
         h("div", { class: "chips" },
-          a.prompts.length ? h("span", { class: "small muted" }, "쓴 지시문") : null, a.prompts.map((k) => chip(k, "fill", { href: hPrompt(k) })),
+          a.prompts.length ? h("span", { class: "small muted" }, "쓴 프롬프트") : null, a.prompts.map((k) => chip(k, "fill", { href: hPrompt(k) })),
           a.runs.length ? h("span", { class: "small muted" }, "돌린 대화 묶음") : null, a.runs.map((r) => chip(r, "", { href: href(["conv"], { run: r }) })))));
   });
   root.append(section(["비교한 판", h("small", null, "같은 상황을 판마다 돌렸어요")], armRows));
@@ -1124,7 +1124,7 @@ function turnCards(conv, opts) {
         const ex = t.extract;
         card.append(drow("② 추출", h("ul", null, ex.lines.map((l) => h("li", null, l))),
           !ex.valid ? h("div", { class: "probs" }, "추출 결과가 형식에 안 맞아요" + (ex.errors.length ? ": " + ex.errors.join("; ") : "")) : null,
-          !opts.compact && ex.raw ? h("details", null, h("summary", null, "뽑은 결과 원문 (개발자용)"), h("pre", null, JSON.stringify(ex.raw, null, 1))) : null,
+          !opts.compact && ex.raw ? h("details", null, h("summary", null, "추출 결과 원본 JSON"), h("pre", null, JSON.stringify(ex.raw, null, 1))) : null,
           !opts.compact && ex.thinking ? h("details", null, h("summary", null, "추출 생각 요약 (모델 원문)"), h("p", { class: "small", style: "margin:6px 0 0" }, "모델이 영어로 쓴 생각 요약이에요."), h("pre", null, ex.thinking)) : null));
       }
       if (t.server) card.append(drow("서버", h("ul", null, t.server.lines.map((l) => h("li", null, l)))));
@@ -1394,9 +1394,9 @@ async function vDiff(q) {
 /* ───────── 용어 ───────── */
 // 앞쪽 TERMS_CORE = 처음 보는 사람이 먼저 알아야 할 말, 뒤쪽 TERMS_MORE = 결과 표 · 대화 화면에 나오는 말
 const TERMS_CORE = [
-  ["지시문 (프롬프트)", "AI에게 '이런 일을 이렇게 해 줘'라고 미리 적어 두는 글이에요. 같은 AI도 지시문을 어떻게 쓰느냐에 따라 답이 달라져요. 그래서 이 실험실은 지시문을 한 군데씩 고쳐 가며 어느 쪽이 나은지 비교해요. 앱에서 AI가 말하는 자리마다 지시문이 하나씩 있어요."],
+  ["프롬프트", "AI에게 '이런 일을 이렇게 해 줘'라고 미리 적어 두는 글이에요. 같은 AI도 프롬프트을 어떻게 쓰느냐에 따라 답이 달라져요. 그래서 이 실험실은 프롬프트을 한 군데씩 고쳐 가며 어느 쪽이 나은지 비교해요. 앱에서 AI가 말하는 자리마다 프롬프트이 하나씩 있어요."],
   ["가상 유저 (SIM)", "습관이 다른 가상의 사람(서윤 · 도현 · 하은 …)을 AI가 연기해서, 앱 사용자 대신 AI와 대화해 주는 도구예요. 사람마다 말투 · 통학 방법 · 알람을 끈 뒤 습관이 달라요. 대화가 끝나면 '귀찮았나 · 자연스러웠나'를 5점으로 답하는 설문도 이 AI가 해요."],
-  ["판 (A · B · C …)", "같은 상황에서 지시문(또는 서버 설정)을 한 군데씩 바꿔 다시 돌린 한 벌이에요. A판 · B판처럼 이름을 붙이고, 앞 판 위에 하나를 더 얹기도 해요 (예: B = A + 서버가 고름). 판끼리 같은 상황의 점수를 견줘서 어느 쪽이 나은지 봐요. 화면의 'fv1-a1' 같은 이름은 그 판을 돌린 기록의 이름이에요."],
+  ["판 (A · B · C …)", "같은 상황에서 프롬프트(또는 서버 설정)을 한 군데씩 바꿔 다시 돌린 한 벌이에요. A판 · B판처럼 이름을 붙이고, 앞 판 위에 하나를 더 얹기도 해요 (예: B = A + 서버가 고름). 판끼리 같은 상황의 점수를 견줘서 어느 쪽이 나은지 봐요. 화면의 'fv1-a1' 같은 이름은 그 판을 돌린 기록의 이름이에요."],
   ["E0 ~ E4 (실험 번호)", "v3 실험에 순서대로 붙인 번호예요. E0 받아쓰기 정리 · E1 대화 답 · E2 추출 · E3 일기 · 코칭 · E4 추천 비서. 하나가 끝날 때마다 '실험 정리'에 한 장씩 채워져요."],
   ["받아쓰기 (STT)", "사용자가 폰에 말하면 마이크가 들은 대로 글자로 적어 주는 기능이에요. 가끔 숫자를 다르게 적거나('일곱 시 반'과 '7시 30분') 비슷한 소리로 잘못 적어요. 앱은 안드로이드 기본(구글) 음성 인식을 가정하고, 실험에서는 실제 엔진 대신 규칙으로 이런 잡음(문장부호 · 숫자 표기 · 군말 · 띄어쓰기 · 소리 틀림 · 끝 잘림)을 흉내 내 입혀요."],
   ["추출 (T2)", "대화에서 앱이 저장해야 할 것(일정 · 알람 · 기록 확인 · 이유)을 AI가 골라 적는 단계예요. 고른 결과를 정답표와 맞춰 보고 F1 점수로 채점해요."],
@@ -1404,14 +1404,14 @@ const TERMS_CORE = [
   ["F1", "맞게 뽑은 비율을 하나로 합친 점수예요. '정답 중 뽑아낸 비율'과 '뽑은 것 중 맞는 비율'을 합쳐서, 빠뜨린 것도 엉뚱하게 뽑은 것도 적을수록 높아요. 1이 만점이에요. 추출(T2)을 채점할 때 써요."],
   ["판정 (AI가 채점)", "'말이 자연스러운가 · 근거가 맞는가'처럼 사람이 일일이 읽기 어려운 것을, 다른 AI가 정해 둔 기준표대로 채점하는 거예요. 이 채점에도 잡음이 있어서, 승률 같은 숫자에는 오차 폭을 같이 적어요."],
   ["사람 보정 (판정 보정)", "AI가 한 채점이 믿을 만한지 사람이 직접 맞춰 보는 단계예요. 대화 30건쯤을 사람이 읽고 AI 채점과 견줘요. 진행 단계에 '판정 보정'으로 나와요. 그 전의 정답은 AI 검수자가 한 번 판정한 거예요."],
-  ["동결", "한 번 나눈 대화를 그대로 저장해 두고(얼려 두고), 지시문만 바꿔 같은 대화를 다시 돌려 보는 방법이에요. 판끼리 똑같은 조건에서 비교하려고 써요. 보고서에는 '대화 120건 동결'처럼 나와요."],
+  ["동결", "한 번 나눈 대화를 그대로 저장해 두고(얼려 두고), 프롬프트만 바꿔 같은 대화를 다시 돌려 보는 방법이에요. 판끼리 똑같은 조건에서 비교하려고 써요. 보고서에는 '대화 120건 동결'처럼 나와요."],
   ["p50 · p95 (걸리는 시간)", "여러 번 잰 시간을 짧은 것부터 줄 세웠을 때 한가운데 값이 p50이에요 — 보통 걸리는 시간이에요. p95는 100번 중 95번이 이 시간 안에 끝난다는 뜻이라, 느린 편에 걸리는 시간이에요."],
 ];
 const TERMS_MORE = [
   ["T0 ~ T5 (AI가 일하는 자리)", "앱에서 AI가 일하는 자리마다 붙인 이름표예요. T0 받아쓰기 정리 · T1 대화 답 · T2 추출 · T3 사유 분류 · T4 일기 · T5 코칭. 화면에서는 한국어 이름을 앞에 두고 이름표는 뒤에 작게 적어요."],
-  ["개발용 / 시험용", "지시문을 고칠 때 보는 사람 8명 / 마지막에 한 번만 확인하는 처음 보는 사람 4명이에요. 시험용은 최종 시험 전까지 이 화면에 없어요."],
+  ["개발용 / 시험용", "프롬프트을 고칠 때 보는 사람 8명 / 마지막에 한 번만 확인하는 처음 보는 사람 4명이에요. 시험용은 최종 시험 전까지 이 화면에 없어요."],
   ["시나리오", "대화가 시작되는 상황 하나예요 (어느 사람의 · 어느 날 · 어떤 일 — 늦잠 지각, 시험 전날, 새 일정 등). 판마다 같은 시나리오를 돌려서 서로 비교해요."],
-  ["기준판 (v0)", "비교의 출발점이 되는 첫 지시문이에요. 새 판이 기준판보다 나아졌는지를 봐요."],
+  ["기준판 (v0)", "비교의 출발점이 되는 첫 프롬프트이에요. 새 판이 기준판보다 나아졌는지를 봐요."],
   ["하려던 말", "가상 유저가 입으로 말하려던 문장 그대로예요. 받아쓰기가 글자로 바꾸는 사이에 틀리는 곳이 생겨요. 검수는 이 문장을 기준으로 해요."],
   ["대화 답 (T1)", "자기 전 · 기상 후, 사용자가 말할 때마다 AI가 하는 한두 문장 답이에요. 기록을 확인하고, 물어서 숨은 사실을 알아내는 게 일이에요."],
   ["승률 (쌍 비교)", "같은 자리에서 새 답과 기준 답을 판정 모델이 나란히 놓고 골랐을 때 새 답이 이긴 비율이에요. 0.5면 비김이에요. 판정 잡음이 ±0.1 정도라 그보다 작은 차이는 못 가려요."],
@@ -1434,8 +1434,8 @@ const TERMS = [...TERMS_CORE, ...TERMS_MORE];
 function vTerms() {
   const list = (items) => h("div", { class: "card flush terms" }, items.map(([k, v]) => h("div", { class: "kvl" }, h("b", null, k), h("span", null, v))));
   return { node: h("div", null, title("용어"), h("p", { class: "lead", style: "font-size:15px" }, "화면에 나오는 말을 풀어 쓴 목록이에요. '먼저 알아 둘 말'만 읽어도 홈 · 실험 화면은 읽을 수 있어요."),
-    bigH2("먼저 알아 둘 말", h("small", null, `${TERMS_CORE.length}개`)), list(TERMS_CORE),
-    bigH2("결과 표 · 대화 화면에 나오는 말", h("small", null, `${TERMS_MORE.length}개`)), list(TERMS_MORE)), title: "용어" };
+    bigH2("기본 용어", h("small", null, `${TERMS_CORE.length}개`)), list(TERMS_CORE),
+    bigH2("결과 표 · 대화 화면 용어", h("small", null, `${TERMS_MORE.length}개`)), list(TERMS_MORE)), title: "용어" };
 }
 
 /* ───────── 글 (실험 정리 · 프롬프트 카드) — 간단한 마크다운 → 화면 ───────── */
@@ -1572,7 +1572,7 @@ async function vCards(id) {
   const r = mdRender(card.md);
   const root = h("div");
   const seg = h("div", { class: "seg", role: "tablist", style: "margin-bottom:14px" }, docs.cards.map((c) => h("a", { class: c.id === card.id ? "on" : "", href: "#/cards/" + encodeURIComponent(c.id) }, c.id.replace(/^(\d+)-(.*)$/, "$1 · $2"))));
-  put(root, [title("프롬프트 카드"), h("p", { class: "lead" }, "앱을 만들 때 그대로 가져다 쓰는 지시문(프롬프트) 카드예요. AI가 말하는 자리 하나가 한 장이고, 실험이 끝날 때마다 채워져요."),
+  put(root, [title("프롬프트 카드"), h("p", { class: "lead" }, "앱을 만들 때 그대로 가져다 쓰는 프롬프트 카드예요. AI가 말하는 자리 하나가 한 장이고, 실험이 끝날 때마다 채워져요."),
     docs.cards.length > 1 ? seg : null, h("div", { class: "card mdcard" }, r.node)]);
   return { node: root, title: card.title };
 }
