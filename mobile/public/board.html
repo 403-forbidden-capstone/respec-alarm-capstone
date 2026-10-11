@@ -94,6 +94,23 @@ a.node{text-decoration:none}a.node:hover{border-color:var(--line2);background:va
 .steps li::marker{color:var(--mute);font-variant-numeric:tabular-nums}
 .why{margin:0 0 8px;color:var(--sub);max-width:80ch}
 details.dev{margin-top:14px}
+/* 동작 표 */
+.ck-top h2{font-size:18px;margin-bottom:8px}
+.ck-sum{font-size:15px;line-height:1.6;margin:0 0 8px;max-width:84ch}.ck-sum b{font-size:17px;font-variant-numeric:tabular-nums}
+.ck-legend{font-size:13px;color:var(--ink);display:flex;flex-wrap:wrap;gap:4px 8px;align-items:center}
+.sy{display:inline-block;font-size:19px;line-height:1;font-weight:600;min-width:1em;text-align:center;font-family:"Segoe UI Symbol","Apple Symbols",sans-serif}
+.sy-ok{color:var(--teal)}.sy-part{color:var(--ink)}.sy-no{color:#a19f96}.sy-na{color:#cfcdc5}.sy-unk{color:var(--mute);font-size:16px}
+table.ck{font-size:14px}table.ck th{font-size:13px;padding:8px 10px}table.ck td{padding:9px 10px;vertical-align:middle}
+table.ck th.st,table.ck td.st{text-align:center;width:64px}
+.ck-name{font-weight:500}.ck-id{font-family:ui-monospace,Consolas,monospace;font-size:12px;color:var(--mute);margin-right:8px}
+.ck-block{white-space:nowrap}
+tr.ck{cursor:pointer}tr.ck.open td{background:var(--bg);border-bottom:0}
+tr.ck-body td{padding:0 14px 18px 14px;background:var(--bg)}
+.ck-detail{display:grid;grid-template-columns:minmax(0,1.3fr) minmax(0,1fr);gap:4px 24px}
+.ck-detail h4{margin:10px 0 6px;font-size:12px;font-weight:600;color:var(--sub)}
+.ck-detail ol{margin:0;padding-left:20px;line-height:1.55;max-width:70ch}.ck-detail li{margin:3px 0}
+.ck-detail .kv td:first-child{width:56px}
+@media (max-width:900px){.ck-detail{grid-template-columns:1fr}.ck-block{white-space:normal}}
 .node small{color:var(--mute);font-size:12px}
 .node>small:last-child{white-space:nowrap;text-align:right}
 .node .dots .dot{margin:0 0 0 3px}
@@ -597,35 +614,136 @@ const SCREENS = [
 ];
 for (const s of SCREENS) s.issues = [...s.ui, ...s.link]; // 할 일 · 상태 계산용
 
-// 기능 = 화면들을 잇는 큰 흐름. why = 왜 이렇게 만드는지 한두 줄, flow = 사용자 눈에 보이는 순서(화면 번호가 있으면 화면 탭으로 이어짐)
-const FEATURES = [
-  { id: 'M1', name: '화면 옮기기 — 클릭 목업 → 앱', ms: 'M1', issues: [24, 30, 43, 38, 39, 109, 97],
-    why: '목업에서 정한 화면을 앱 코드로 다 옮겼음(10/10). 지금 앱은 5월 22일 가짜 시나리오 데이터로 돌고, 로그인 · 온보딩 · 설정은 빼 둠(#116)',
-    flow: ['디자인 기본값', '홈 · 알람 6장', '그룹 · 친구 6장', '기록 · 제안 2장', 'AI · 루틴 3장', '화면 사이 길 잇기'] },
-  { id: '①', name: '① 약속 → 진짜 알람', ms: 'M2', issues: [27, 29, 31, 32, 33],
-    why: '약속 시각에서 여유 · 이동 · 준비 시간을 빼면 기상 시각. 준비 시간은 지난 기록의 P80. 폰이 꺼져 있어도 울려야 해서 알람은 서버가 아니라 폰이 울림',
-    flow: ['새 일정 입력 (H05)', '장소 검색', '이동시간 계산', '기상 · 준비 · 출발 역산', '폰에 예약', '울림 (H07)', '미루기 · 해제 기록'] },
-  { id: '④', name: '④ 자동 수집 · 기록', ms: 'M5', issues: [35, 36, 40, 41, 49, 51],
-    why: '사용자가 입력하지 않아도 기상 · 출발 · 도착을 폰이 모아 기록하고, 그 기록으로 다음 알람을 고쳐 감 — 교수님 피드백 "자동 수집 우선"',
-    flow: ['기상 알람 해제', '10분 관찰 → 기상 판정 (H08)', '집을 벗어나면 출발', '도착', '실제 준비 · 이동 시간 기록', '기록 (R02)', '새벽에 제안 만들기', '제안 (S01)'] },
-  { id: '②', name: '② 공유 · 기상 확인', ms: 'M3', issues: [44, 45, 46, 80],
-    why: '친구 · 그룹에게 알람 조회 · 알람 설정 · 기상 상태 조회 세 가지를 따로 줌. 기상 상태는 본인이 공유에 동의했을 때만 보이고, 남이 내 알람을 바꾸면 나에게 알림이 옴',
-    flow: ['친구 · 그룹 (G01)', '권한 주기 (F03)', '그룹 상세 (G02)', '기상 상태 · 깨우기 (G03)', '공유받은 알람 조정 (G04)', '주인에게 푸시'] },
-  { id: '③', name: '③ 음성 대화', ms: 'M4', issues: [37, 42], ai: true,
-    why: '실시간 통화가 아니라 한 번 말하고 한 번 답(보류 D7). 어떤 지시문이 가장 좋은지는 AI 실험실에서 가상 유저로 시험하는 중',
-    flow: ['말하기 (A02)', '폰 받아쓰기', 'AI 한 턴 답', '찾은 일정 저장 → 알람', '폰 목소리로 읽어 줌'] },
-  { id: '⑥', name: '⑥ 일기 · 루틴', ms: 'M6', issues: [48], ai: true,
-    why: '대화가 끝나면 AI가 하루를 일기로 정리하고, 반복되는 준비를 루틴으로 제안. 루틴의 단계마다 알람을 걸 수 있음',
-    flow: ['대화 끝', 'AI 일기 (A03)', '오늘의 사실', '루틴 제안', '루틴 편집 (A04)', '단계 알람'] },
-  { id: '기반', name: '기반 — 로그인 · 온보딩 · 환경', ms: 'M0', issues: [20, 21, 22, 23, 25, 26, 34],
-    why: '로그인 · 온보딩은 화면은 있지만 흐름에서 빼 둠(#116). 서버(Supabase) 테이블 · 접근 규칙은 다 있고, 개발용 APK · 외부 키 · 알람 엔진 이전이 남음',
-    flow: ['카카오 · 구글 로그인 (L01)', '온보딩 (L02)', '권한 안내', '설정 (L03)'] },
-  { id: '데모', name: '데모 · 리허설', ms: '데모', issues: [28, 47, 50, 52, 53, 54, 60],
-    why: '1차 데모(10/19)는 화면 흐름 + 폰에서 울리는 알람. 그 뒤 팀이 직접 써 보고, 데모 계정 · 가짜 기록을 채워 시연 영상까지',
-    flow: ['1차 데모 빌드 (#60)', '팀 자가 사용 (#47)', '데모 모드 · 시드 (#50)', '기능 동결 (#52)', '리허설 (#53)', 'v1.0.0 (#54)'] },
-  { id: 'iOS', name: 'iOS (도전)', ms: '데모', issues: [55, 56, 57, 58, 59],
-    why: '화면 · 로그인 · 푸시는 그대로 iOS에서 돌고, 알람 울림만 iOS용으로 따로 만들어야 함',
-    flow: ['코어 뼈대 (#56)', '맥에서 첫 빌드 (#57)', '기능 맞추기 (#58)', '지원 범위 표시 (#59)'] },
+// 동작 확인표 — 한 줄 = 사용자가 해 볼 수 있는 일 하나. 이 보드의 첫 화면.
+//   네 칸: web = 배포 주소(가짜 데이터)에서 직접 눌러 보면 되나 · phone = 개발용 APK에서 되나 · server = 실제 저장 · 계산 · 푸시가 되나 · test = 자동 검사(CI)가 있나
+//   st: ok ● 됨 · part ◐ 일부 · no ○ 안 됨 · na – 해당 없음 · unk ? 안 해 봄.  ev = 근거(날짜 · 흐름 확인 묶음 · 테스트 파일 · 이슈)
+//   how = 확인하는 법(배포 주소에서 그대로 따라 하기, capstone/docs/흐름확인_1010.md 기준), start = "앱에서 열기" 주소, issues = 막는 이슈, dec = 걸린 결정
+const CHECKS = [
+  // ── 알람
+  { id: 'C01', area: '알람', name: '홈: 다음 알람 · 오늘 일정 · 저녁이면 화면이 바뀜', screens: ['H01'], start: '/',
+    web: { st: 'ok', ev: '10/10 흐름 확인 #84 1' }, phone: { st: 'unk', ev: 'APK를 아직 안 받음 (#20)' },
+    server: { st: 'no', ev: '가짜 데이터만 읽음 — 테이블(alarms · appointments)은 있음' }, test: { st: 'part', ev: 'mocks/calc 그룹원 상태 · routine/api 저녁 루틴 카드' },
+    how: ['화면 목록 → "H01 홈" → "5월 22일 목요일" · 다음 알람 "5분 뒤" · 기상 8:00 / 준비 8:30 / 출발 9:00', '아래로 → 오늘 일정 · 루틴 0/4 · 제안 카드 "10분 앞당겨 볼까요?" · 캡스톤팀 카드', '화면 목록에서 "전날 밤 9:00" → "H01 홈" → "차분한 저녁이에요" · 내일 일정 · "자기 전 AI 대화"'],
+    issues: [45], dec: ['D13', 'D34'] },
+  { id: 'C02', area: '알람', name: '알람 켜고 끄기 → 홈의 다음 알람이 바뀜', screens: ['H02', 'H01'], start: '/alarms',
+    web: { st: 'ok', ev: '10/10 흐름 확인 #84 2-1~4' }, phone: { st: 'unk', ev: 'APK 안 받음' },
+    server: { st: 'no', ev: '저장 안 됨 · 폰 예약 취소도 안 됨 (#33)' }, test: { st: 'no', ev: '없음' },
+    how: ['홈 "알람 전체" → 날짜별 카드(팀 주간회의 8:00 · 저녁약속 5:10 · 수업 7:20)', '팀 주간회의 스위치 끄기 → "이 일정의 알람을 껐어요" · 카드 흐려짐', '"← 이전" → 홈 다음 알람이 "9시간 15분 뒤" 저녁약속으로 바뀜 → 다시 켜기'],
+    issues: [33], dec: [] },
+  { id: 'C03', area: '알람', name: '여유 시간을 바꾸면 기상 시각을 다시 계산', screens: ['H03'], start: '/alarm/a1',
+    web: { st: 'ok', ev: '10/10 흐름 확인 #84 2-5~8' }, phone: { st: 'unk', ev: 'APK 안 받음' },
+    server: { st: 'no', ev: '이동시간은 가짜 값 — 카카오 길찾기 안 붙음 (#27 #32) · 저장 안 됨' }, test: { st: 'ok', ev: 'mocks/calc ALG-01 역산 (10시 회의 → 8:00 · 8:30 · 9:00)' },
+    how: ['알람 목록 → "오전 8:00 기상" 줄 → 계산식 "기상 8:00 = 약속 10:00 − 여유 10 − 이동 50 − 준비 60"', '여유 "+" → "저장" → 시트 "8:00 → 7:55" → "그대로 두기" → 다시 "저장" → "바뀐 내용이 없어요"', '여유 "−" → "저장" → "8:00 → 8:05" → "바꾸기" → "알람 시각을 다시 계산했어요"'],
+    issues: [32, 27], dec: ['D12'] },
+  { id: 'C04', area: '알람', name: '알람 강도를 축별로 직접 고르기', screens: ['H03'], start: '/alarm/a1',
+    web: { st: 'ok', ev: '10/10 흐름 확인 #84 2-9' }, phone: { st: 'unk', ev: '실제 소리 · 진동 차이는 폰에서만 (#29)' },
+    server: { st: 'no', ev: '저장 안 됨' }, test: { st: 'ok', ev: 'mocks/calc ALG-02 강도(중요 일정 · 늦잠 지각 2회면 한 단계 위)' },
+    how: ['알람 설정 강도 칸에서 "말소리"를 다른 단계로 → "직접 고름" 표시', '"모두 자동으로 되돌리기" → 원래대로'],
+    issues: [29], dec: ['D1'] },
+  { id: 'C05', area: '알람', name: '약속을 넣으면 기상 · 준비 · 출발 알람 3개를 계산해 저장', screens: ['H05', 'H02'], start: '/schedule/new',
+    web: { st: 'ok', ev: '10/10 흐름 확인 #84 3' }, phone: { st: 'unk', ev: 'APK 안 받음' },
+    server: { st: 'no', ev: '장소 검색(#31) · 이동시간(#32) · 저장 · 폰 예약(#33) 전부 안 됨' }, test: { st: 'ok', ev: 'alarm/api H05 시간 칸 · mocks/calc 역산(첫 일정 아니면 준비부터)' },
+    how: ['알람 목록 "+ 새 일정" → 날짜 5월 23일 · 시간 오후 2:00 · 장소 학교 도서관', '"저장하고 알람 설정하기" → 시트 "알람을 이렇게 맞출게요" — 같은 날 기상이 있어 외출 준비만(P80 15분)', '"돌아가서 수정" → 날짜 5월 24일(토) → 다시 → "기상 오후 12:05"(P80 50분)', '"알람 저장" → 목록에 스터디 카드 · "알람 3개를 맞췄어요"', '일정명 지우고 저장 → "일정명을 입력해 주세요"'],
+    issues: [31, 32, 33], dec: [] },
+  { id: 'C06', area: '알람', name: '울림 화면 3종(기상 · 준비 · 출발) · 미루기 · 해제', screens: ['H07'], start: '/ring?alarm=a1:WAKE',
+    web: { st: 'ok', ev: '10/10 흐름 확인 #84 4 — 앱 화면만' }, phone: { st: 'unk', ev: '소리 · 진동 · 잠금화면 위는 C08' },
+    server: { st: 'no', ev: '울림 · 미루기 · 해제 기록 저장 안 됨 (#33)' }, test: { st: 'ok', ev: 'alarm/api 미루기 · 해제 기록 · 준비 · 출발은 해제만' },
+    how: ['화면 목록 "H07 알람 울림 · 기상" → "일어날 시간이에요" · 8:00 · 음성 안내 글', '"15분" → "15분 미루기" → "15분 뒤 다시 울려요"', '"H07 · 준비" → "알람 해제" → "준비물: 노트북, 회의 자료"', '"H07 · 출발" → 음성에 "수연님과 지형님이 이미 출발했어요" → 해제 → "집을 벗어나면 출발이 자동으로 기록돼요"'],
+    issues: [33], dec: ['D3', 'D8'] },
+  { id: 'C07', area: '알람', name: '기상 확인 판정 · 응답이 없으면 다시 울림', screens: ['H08', 'H07'], start: '/wake?alarm=a1:WAKE',
+    web: { st: 'part', ev: '10/10 흐름 확인 #84 5 — 시연 버튼으로 흉내, 실제 폰 사용 감지는 아님' }, phone: { st: 'unk', ev: '폰 사용 감지 안 만듦 (#35)' },
+    server: { st: 'no', ev: '기상 기록 · 확인 푸시 · 못 일어남 판정 전부 안 됨 (#40 #45)' }, test: { st: 'ok', ev: 'alarm/api 해제 → 확인 알림 → 다시 울림 · 기상 확정' },
+    how: ['"H07 기상" → "알람 해제" → "오전 8:00에 해제 · 10분 동안 화면 사용을 보고 있어요"', '"알람만 끄고 다시 잠들기" → 알림 "지금 일어나셨나요?" · 누적 0.4분', '"응답 없이 5분 지나기" → 울림 8:15 → 해제 → "폰을 보며 일어나기" → "기상 확정 · 오전 8:25"', '"캡스톤팀 기상 현황 보기" → 그룹 상세에 "나 · 기상 완료 · 오전 8:25"'],
+    issues: [35, 40, 45], dec: ['D2', 'D14'] },
+  { id: 'C08', area: '알람', name: '폰에서 정시에 울림 — 잠금화면 위 · 소리 · 진동', screens: [], start: null,
+    web: { st: 'na', ev: '웹에선 못 울림 (#98 웹 스텁 예정)' }, phone: { st: 'unk', ev: '울림 모듈(Kotlin)과 시험 화면은 있음 · APK를 한 번도 안 받아 못 해 봄 (#20 #26)' },
+    server: { st: 'na', ev: '폰 안에서 끝남' }, test: { st: 'no', ev: '없음' },
+    how: ['개발용 APK 설치(#20) → 앱에서 respecalarm://dev/alarm-test → 권한 2개(정확한 알람 · 잠금화면 위) 확인', '"1분 뒤 울림" 예약 → 폰 잠그고 기다림 → 잠금화면 위로 울림 화면이 뜨면 됨', '지금은 시험 화면만 — 앱의 알람 목록과는 아직 안 이어짐 (#33)'],
+    issues: [20, 26, 33, 79], dec: [] },
+  { id: 'C09', area: '알람', name: '집을 벗어나면 출발 · 도착이 자동으로 기록됨', screens: [], start: null,
+    web: { st: 'na', ev: '위치는 폰에서만' }, phone: { st: 'no', ev: '위치 권한 · 지오펜스 아직 없음 (#36 #40)' },
+    server: { st: 'no', ev: '실측 기록 · 지각 판정 없음 (#41)' }, test: { st: 'no', ev: '없음' },
+    how: ['아직 만든 것이 없음 — 출발 알람 해제 뒤 문구만 있음 (C06)'],
+    issues: [36, 40, 41], dec: [] },
+  // ── 그룹 · 친구
+  { id: 'C10', area: '그룹 · 친구', name: '친구 요청 수락 · 친구 · 그룹 목록', screens: ['F01·G01'], start: '/group',
+    web: { st: 'part', ev: '10/10 흐름 확인 #104 1 — 검색 · 새 그룹 · 참여는 안내만' }, phone: { st: 'unk', ev: 'APK 안 받음' },
+    server: { st: 'no', ev: 'friends · groups 테이블과 초대 코드 함수는 있음 · 앱이 안 씀 (#44)' }, test: { st: 'no', ev: '없음' },
+    how: ['화면 목록 "G01" → 강범준 요청 "수락" → "친구가 됐어요 · 공유는 아직 없어요" · 내 친구 4명', '위 칸 "그룹" → 캡스톤팀 "4명 · 오늘 2명 기상 완료" · 우리 가족 "공유 권한 없음"(누르면 안내만)', '"새 그룹 만들기" · "그룹 참여하기" → 범위 밖 안내'],
+    issues: [44], dec: ['D21', 'D22'] },
+  { id: 'C11', area: '그룹 · 친구', name: '공유 권한 주기 — 알람 조회 · 알람 설정 · 기상 상태', screens: ['F02', 'F03'], start: '/friends/sy',
+    web: { st: 'ok', ev: '10/10 흐름 확인 #104 2 · 3' }, phone: { st: 'unk', ev: 'APK 안 받음' },
+    server: { st: 'no', ev: 'sharing_permissions 테이블 있음 · 저장 안 됨 (#44)' }, test: { st: 'ok', ev: 'social/permissions 스위치 연동 · social/api F02 권한 합치기' },
+    how: ['친구 "이수연" → 권한 표 "3개 허용" → 맨 아래 "설정"', '"기상 상태 조회" 켰다 끄기 → 저장 버튼이 켜졌다 꺼짐 · "알람 조회" 끄면 "알람 설정"도 꺼짐', '관계 "변경" → 김지형 → "알람 설정" 켜기(조회도 켜짐) → "변경사항 저장" → "김지형 관계에 저장했어요 · 최종 권한 3개"'],
+    issues: [44], dec: ['D17', 'D18', 'D19'] },
+  { id: 'C12', area: '그룹 · 친구', name: '그룹 상세 · 멤버 기상 상태 · 초대', screens: ['G02', 'G03'], start: '/groups/cap',
+    web: { st: 'ok', ev: '10/10 흐름 확인 #104 3 · 4' }, phone: { st: 'unk', ev: 'APK 안 받음' },
+    server: { st: 'no', ev: '그룹 기상 요약 함수는 DB에 있음 · 앱이 안 부름 (#44 #45)' }, test: { st: 'ok', ev: 'social/api G03 권한별 · mocks/calc 그룹원 상태' },
+    how: ['그룹 "캡스톤팀" → 멤버 줄: 나 취침 중 · 수연 준비 시작 7:38 · 지형 기상 완료 7:30 · 준성 취침 중(버튼 흐림)', '수연 "기상 확인" → "오늘의 흐름" 울림 → 해제 → 기상 확인 → 준비 시작', '"+ 초대" → "초대 링크를 복사했어요" · 공유 범위 "+ 설정" → 저장 → 칩 3개'],
+    issues: [44, 45], dec: ['D21'] },
+  { id: 'C13', area: '그룹 · 친구', name: '깨우기 알림 보내기', screens: ['G03'], start: '/groups/cap/members/sy',
+    web: { st: 'part', ev: '10/10 흐름 확인 #104 4-3 — 토스트만, 실제로 안 감' }, phone: { st: 'no', ev: '푸시 받는 길 없음' },
+    server: { st: 'no', ev: '푸시 보내기 함수 · FCM 키 · 토큰 저장 전부 없음 (#23 #45)' }, test: { st: 'no', ev: '없음' },
+    how: ['수연 기상 상태 → "수연에게 알람 보내기" → "깨우기 알림을 보냈어요" (여기까지만)'],
+    issues: [23, 45], dec: [] },
+  { id: 'C14', area: '그룹 · 친구', name: '공유받은 알람 켜기 · 끄기 · 5분 옮기기 · 변경 기록', screens: ['G04'], start: '/friends/sy/alarms',
+    web: { st: 'ok', ev: '10/10 흐름 확인 #104 4-5~9' }, phone: { st: 'unk', ev: 'APK 안 받음' },
+    server: { st: 'no', ev: '주인에게 알림 · 주인 폰 예약 맞추기 안 됨 (#46 #80)' }, test: { st: 'ok', ev: 'social/api G04 권한별 알람' },
+    how: ['수연 "알람 보기" → 꼬리표 "조회 · 친구" "설정 · 친구" "조회 · 캡스톤팀"', '"5분 앞당기기" → "변경 알림을 보냈어요" · 7:30 → 7:25(준비 · 출발도) · 스위치 끄기', '"변경 기록" → 오늘 한 일 목록 / 김지형 "알람 보기" → 조회만 · 버튼 없음'],
+    issues: [46, 80], dec: ['D9', 'D20', 'D35'] },
+  // ── 기록 · 제안
+  { id: 'C15', area: '기록 · 제안', name: '기록 주간 · 월간 · 일간 보기', screens: ['R02'], start: '/records',
+    web: { st: 'ok', ev: '10/10 흐름 확인 #105 1 · 2' }, phone: { st: 'unk', ev: 'APK 안 받음' },
+    server: { st: 'no', ev: 'daily_records 테이블 있음 · 집계 안 됨 (#41)' }, test: { st: 'ok', ev: 'records/api 월간 · 주간 · 일간 · records/calendar 달 · 주 계산' },
+    how: ['"R02 나의 기록" → 주간: 평균 7:25 · 목표 100% · 막대 19 ~ 21일 · "오늘 기록은 기상 확인 뒤에"', '"→" 다음 주 "기록이 없어요" · "←" 두 번 지난주 "요약은 이번 목업에 없어요"', '"월간" → 22일 검은 원 · 평일 점 · "→" 6월(점 없음) · 날짜 누르면 일간'],
+    issues: [41], dec: ['D26', 'D27', 'D28'] },
+  { id: 'C16', area: '기록 · 제안', name: '기상을 확정하면 오늘 점수가 기록에 더해짐', screens: ['H08', 'R02'], start: '/wake?alarm=a1:WAKE',
+    web: { st: 'ok', ev: '10/10 흐름 확인 #105 1-5~7' }, phone: { st: 'unk', ev: 'APK 안 받음' },
+    server: { st: 'no', ev: '기록 저장 안 됨 (#41)' }, test: { st: 'ok', ev: 'records/api 실제로 일어난 일 시각순' },
+    how: ['"H07 기상" → 해제 → "폰을 보며 일어나기" → "기상 확정 · 오전 8:10"', '"홈으로" → 아래 탭 "기록" → 평균 7:36 · 이번 주 4/4 · 막대에 목 22 · "일간"에 해제 · 기상 확인'],
+    issues: [41], dec: [] },
+  { id: 'C17', area: '기록 · 제안', name: '알람 조정 제안 적용 · 직접 수정 · 무시 · 되돌리기', screens: ['S01', 'H01'], start: '/suggestion/s1',
+    web: { st: 'ok', ev: '10/10 흐름 확인 #105 3 · 4 · 5' }, phone: { st: 'unk', ev: 'APK 안 받음' },
+    server: { st: 'no', ev: '제안은 서버가 새벽에 만들어야 함 — 없음 (#49) · 적용 저장 안 됨' }, test: { st: 'ok', ev: 'records/api S01 제안 → 적용' },
+    how: ['홈 점선 카드 → S01 "최근 3번의 준비가 평균 12분 더" · 7:20 → 7:10', '"제안 적용하기" → "내일 기상 알람이 오전 7:10에 울려요" → 홈 카드 사라짐 · 알람 목록 수업 7:10 · 기록 일간에 "알람 조정 수락"', '"직접 수정하기" → "5분 일찍" → 7:05 / "이전 값으로 되돌리기" / 전날 밤 "이번 제안 무시" → "제안 다시 보기"'],
+    issues: [49], dec: ['D23', 'D24', 'D25'] },
+  // ── AI · 루틴
+  { id: 'C18', area: 'AI · 루틴', name: 'AI 대화 → 일정 찾기 → 알람까지 저장', screens: ['A02', 'H05'], start: '/ai',
+    web: { st: 'part', ev: '10/10 흐름 확인 #106 1 · 2 · 3 — 대본대로, 무슨 말을 해도 같은 답' }, phone: { st: 'unk', ev: '마이크 · 음성 합성 없음' },
+    server: { st: 'no', ev: 'AI 호출 · 대화 저장 없음 — AI 대기 (#37 #42). 지시문은 AI 실험실에서 실험 중' }, test: { st: 'ok', ev: 'voice/api 대본 흐름 · mocks/ai 대본' },
+    how: ['"A02 AI 대화" → "말하기" → 내 말 → AI 답', '"텍스트" → 보내기 → 카드 "대화에서 찾은 내용" 스터디 · 5월 23일 오후 2:00 · 학교 도서관 · 노트북 충전기', '"저장" → "스터디 알람을 맞췄어요" → 홈 "알람 전체"에 스터디 12:40 · 1:05 / "수정" → 새 일정에 채워짐 / "저장 안 함"'],
+    issues: [37, 42], dec: ['D7', 'D32', 'D36'] },
+  { id: 'C19', area: 'AI · 루틴', name: '대화를 마치면 일기 · 오늘의 사실 · 루틴 제안', screens: ['A03'], start: '/journal/2025-05-22',
+    web: { st: 'part', ev: '10/10 흐름 확인 #106 3 · 4 — 일기 글은 대본' }, phone: { st: 'unk', ev: 'APK 안 받음' },
+    server: { st: 'no', ev: '일기 AI · 저장 없음 (#48)' }, test: { st: 'ok', ev: 'voice/api 일기 · mocks/ai 하루 기록' },
+    how: ['A02 "완료" → "5월 22일 하루 기록" · 칩 "AI 작성" · 오늘의 사실 3줄 · 루틴 제안 "회의 전날 준비"', '"수정" → 글 고쳐 "저장" → "직접 수정함"', '"괜찮아요" → "14일 동안 같은 루틴은 제안하지 않아요"'],
+    issues: [48], dec: ['D30', 'D31', 'D37'] },
+  { id: 'C20', area: 'AI · 루틴', name: '루틴 만들기 · 단계 편집 · 저장 → 저녁 홈 카드', screens: ['A04', 'H01'], start: '/routine/new?journal=2025-05-22',
+    web: { st: 'ok', ev: '10/10 흐름 확인 #106 4 · 5' }, phone: { st: 'unk', ev: '단계 알람 울림은 없음' },
+    server: { st: 'no', ev: 'routines 저장 안 됨 (#48)' }, test: { st: 'ok', ev: 'routine/draft 단계 시각 · 요일 · routine/api 저녁 카드' },
+    how: ['A03 "루틴 만들기" → 요일 "수" 끄면 저장 꺼짐 → 단계 줄 → 시트에서 시간 "+" · "위로" · 알람 켜기', '"루틴 저장" → "루틴 알람 2개가 다음 수요일부터 울려요"', '"전날 밤" 홈 → "저녁 루틴" 카드 "회의 전날 준비 · 매주 수 · 금"'],
+    issues: [48, 33], dec: ['D29', 'D33'] },
+  // ── 기반 · 서버
+  { id: 'C21', area: '기반 · 서버', name: '로그인 · 온보딩', screens: ['L01', 'L02'], start: null,
+    web: { st: 'no', ev: '흐름에서 뺌 (#116) — "/"로 열면 로그인 없이 홈. 화면 파일은 있음 (#67)' }, phone: { st: 'unk', ev: 'APK 안 받음' },
+    server: { st: 'part', ev: 'Supabase 로그인: 구글 켜짐 · 카카오 공급자 아직 (연결 탭)' }, test: { st: 'ok', ev: 'lib/mode 가짜 · 실데이터 스위치' },
+    how: ['지금은 꺼 둠: 시크릿 창에서 "/" → 로그인 없이 홈 · "/login"을 직접 열어도 홈', '로그인을 붙일 때(#25) 실데이터 스위치 · 온보딩부터 다시 켜짐'],
+    issues: [25], dec: ['D38'] },
+  { id: 'C22', area: '기반 · 서버', name: '서버(Supabase)에 저장 · 읽기', screens: [], start: null,
+    web: { st: 'no', ev: 'profiles 하나만 서버 — 나머지 데이터 함수는 전부 가짜' }, phone: { st: 'no', ev: '같은 코드' },
+    server: { st: 'part', ev: '테이블 16 · 접근 규칙 · DB 함수 6 있음(머지하면 자동 적용, 10/8 성공) · 서버 함수(Edge) 0/7 (#99)' }, test: { st: 'ok', ev: 'DB 검사 CI — 임시 DB(PGlite) + 실제 적용 리허설' },
+    how: ['Supabase 대시보드 → Table Editor에 테이블 16개 · SQL 함수 6개', '앱에서는 아직 아무 화면도 서버를 읽지 않음 — 실데이터 스위치 꺼짐 (#116)'],
+    issues: [99, 22], dec: [] },
+  { id: 'C23', area: '기반 · 서버', name: '푸시 알림 (깨우기 · 변경 · 기상 미확인)', screens: [], start: null,
+    web: { st: 'na', ev: '폰에서만' }, phone: { st: 'no', ev: '받는 길 없음' },
+    server: { st: 'no', ev: 'FCM 키 · 토큰 저장 · 보내기 함수 — 하나도 없음 (#23 #45)' }, test: { st: 'no', ev: '없음' },
+    how: ['아직 만든 것이 없음 — 연결 탭 "대시보드에서 할 것" 4 · 5번(Firebase · EAS 키)부터'],
+    issues: [23, 45], dec: [] },
+  { id: 'C24', area: '기반 · 서버', name: '웹 배포 · 개발용 APK', screens: [], start: null,
+    web: { st: 'ok', ev: 'main에 머지되면 자동 배포(이 주소) · PR마다 미리보기' }, phone: { st: 'no', ev: 'APK 0회 — Actions 아티팩트 또는 EAS 개발 빌드 (#20)' },
+    server: { st: 'ok', ev: 'DB 변경도 머지하면 자동 적용 (#82)' }, test: { st: 'ok', ev: 'CI: 린트 · 단위 테스트 15파일 · 안드로이드 빌드 검사 · DB 검사' },
+    how: ['PR을 올리면 검사 4개(앱 검사 · DB 검사 · 안드로이드 빌드 · 웹 미리보기)가 돌고, 머지하면 이 주소가 새 판으로 바뀜', 'APK: Actions "안드로이드 빌드 검사" 실행 요약의 아티팩트(3일) 또는 환경 탭 명령'],
+    issues: [20], dec: [] },
 ];
 const KINDS = {
   table: ['profiles', 'friends', 'groups', 'group_members', 'sharing_permissions', 'appointments', 'appointment_participants', 'alarms', 'alarm_events', 'daily_records', 'todos', 'routines', 'alarm_suggestions', 'conversation_sessions', 'daily_journals', 'push_tokens', 'v_prepare_time_stats'],
@@ -691,7 +809,7 @@ const LS = {
   get: (k, d) => { try { const v = localStorage.getItem('board.' + k); return v == null ? d : JSON.parse(v); } catch { return d; } },
   set: (k, v) => { try { localStorage.setItem('board.' + k, JSON.stringify(v)); } catch {} },
 };
-let tab = LS.get('tab', 'big');
+let tab = LS.get('tab', 'checks');
 let sel = LS.get('sel', 'H01');
 let live = LS.get('sync', null);        // { at, items, prs, tree }
 let token = LS.get('ghToken', '');
@@ -699,6 +817,7 @@ let todoFilter = LS.get('todoFilter', { status: '', ms: '', label: '' });
 let syncError = '';
 const envState = LS.get('env', {});
 const decOpen = new Set(LS.get('decOpen', [])); // 펼친 안건 번호(D1 …)
+const ckOpen = new Set(LS.get('ckOpen', []));   // 펼친 동작 줄(C01 …)
 
 const STATUS = { '✅ 완료': 'done', '🏃 진행 중': 'doing', '👀 리뷰': 'review', '📌 이번 주': 'week', '📥 백로그': 'todo' };
 const STATUS_KO = { done: '완료', doing: '진행 중', review: '리뷰', week: '이번 주', todo: '백로그', wait: '대기', ai: 'AI 대기', half: '화면만' };
@@ -778,15 +897,15 @@ function plan() {
 }
 
 // ───────────────────────────────── 렌더
-const TABDEF = [['big', '큰 그림'], ['todo', '할 일'], ['screens', '화면'], ['features', '기능'], ['links', '연결'], ['dec', '결정'], ['env', '환경']];
+const TABDEF = [['checks', '동작'], ['todo', '할 일'], ['dec', '결정'], ['links', '연결'], ['env', '개발']];
 function render() {
   const p = plan();
   const nx = p.next[0];
   document.getElementById('meta').innerHTML = `<b>W${weekNo}</b> · 1차 데모 <b>D-${daysTo(SITE.demo1)}</b> · 대회 <b>D-${daysTo(SITE.contest)}</b>`
     + (nx ? ` · 다음 <a class="in" href="${ghIssue(nx.n)}" target="_blank" rel="noopener">#${nx.n} ${esc(nx.t)}</a> <b>${fmtDate(nx.due)}</b>` : '')
     + (p.late.length ? ` · <span class="late">지연 ${p.late.length}</span>` : '');
-  const R = { big: rBig, screens: rScreens, features: rFeatures, links: rLinks, todo: rTodo, env: rEnv, dec: rDec };
-  if (!R[tab]) tab = 'big';
+  const R = { checks: rChecks, links: rLinks, todo: rTodo, env: rEnv, dec: rDec };
+  if (!R[tab]) tab = 'checks';
   document.getElementById('tabs').innerHTML = TABDEF.map(([id, name]) => `<button role="tab" aria-selected="${tab === id}" data-tab="${id}" class="${tab === id ? 'on' : ''}">${name}</button>`).join('');
   document.getElementById('main').innerHTML = R[tab]();
   const sm = document.getElementById('syncMeta');
@@ -796,127 +915,63 @@ function render() {
   else { sm.classList.remove('late'); if (s && s === live) { sm.textContent = `동기화 ${when(live.at)}`; sm.title = ''; } else if (s) { sm.textContent = `스냅샷 ${when(s.at)}`; sm.title = 'main 빌드 시점. 동기화를 누르면 지금 상태'; } else { sm.textContent = ''; } }
 }
 
-// 글줄 → HTML: #n = 이슈 링크, Dn = 결정 탭의 그 안건, (H03) 같은 화면 번호 = 화면 탭
-const scrByCode = (c) => SCREENS.find(s => s.code.split('·').includes(c));
+// 글줄 → HTML: #n = 이슈 링크, Dn = 결정 탭의 그 안건
 const txt = (s) => esc(s)
   .replace(/#(\d+)/g, (m, n) => `<a href="${ghIssue(n)}" target="_blank" rel="noopener">${m}</a>`)
-  .replace(/\bD(\d+)\b/g, (m) => `<a class="in" href="#" data-go="dec:${m}">${m}</a>`)
-  .replace(/\(([A-Z]\d{2})\)/g, (m, c) => { const sc = scrByCode(c); return sc ? `(<a class="in" href="#" data-go="screens:${sc.code}">${c}</a>)` : m; });
+  .replace(/\bD(\d+)\b/g, (m) => `<a class="in" href="#" data-go="dec:${m}">${m}</a>`);
 // 결정 안건 알약: 정한 것 = 틸, 보류 = 회색 테두리, 정할 것 = 회색
 const decLink = (id) => { const d = DECISIONS.find(x => x.id === id); const st = !d ? 'wait' : d.status === '정한 것' ? 'done' : d.status === '보류' ? 'wait' : 'todo';
   const t = d ? d.title : ''; return `<a class="chip ${st}" href="#" data-go="dec:${esc(id)}" title="${esc(t)}">${esc(id)}${t ? ' ' + esc(t.length > 30 ? t.slice(0, 30) + '…' : t) : ''}</a>`; };
 
-function rBig() {
+// 진행 중 · 리뷰 · 이번 주 · 지연 + 다음 3개 — 할 일 탭 맨 위
+function nowCard() {
   const p = plan();
   const stat = (k, label, extra) => `<a href="#" class="stat ${k === 'late' ? 'late' : ''}" data-go="todo:" data-f="status" data-v="${k === 'late' ? '' : k}"><b>${k === 'late' ? p.late.length : p.counts[k]}</b>${label}${extra || ''}</a>`;
-  const now = `<div class="card now">
+  return `<div class="card now">
     <div class="stats">${stat('doing', '진행 중')}${stat('review', '리뷰', p.failing ? ` <span class="muted">· 검사 실패 ${p.failing}</span>` : '')}${stat('week', '이번 주')}${stat('late', '지연')}</div>
     <div class="next"><span class="muted">다음</span>${p.next.map((i, k) => `${k ? '<i class="i">→</i>' : ''}<a class="in" href="${ghIssue(i.n)}" target="_blank" rel="noopener">#${i.n} ${esc(i.t)}</a> <span class="num muted">${fmtDate(i.due)}</span>`).join('') || '<span class="muted">날짜 있는 카드 없음</span>'}</div>
   </div>`;
-  const live = SCREENS.filter(s => !s.off);
-  const moved = live.filter(s => stageOf(s).ui === 'done').length, linked = live.filter(s => stageOf(s).link === 'done').length;
-  const intro = `<div class="card intro">
-    <h2>이 앱은</h2>
-    <p>약속을 넣으면 <b>기상 · 준비 · 출발 알람</b>을 거꾸로 계산해 폰에서 울리고, 일어났는지 · 나갔는지를 <b>자동으로 모아</b> 다음 알람을 고쳐 가는 알람 앱. 친구 · 그룹과 기상 상태를 나누고, 자기 전엔 <b>AI와 짧게 대화</b>해 내일을 준비함.</p>
-    <div class="row"><span class="k">처음이라면</span><span>① 오른쪽 위 <b>앱 보기</b>를 켜고 <a class="in" href="#" data-go="screens:H01">화면</a> 탭에서 한 장씩 "앱에서 보기"로 따라가기</span><i>→</i><span>② <a class="in" href="#" data-go="features:">기능</a> 탭에서 왜 그렇게 되는지</span><i>→</i><span>③ <a class="in" href="#" data-go="dec:">결정</a> 탭에서 아직 안 정한 것</span></div>
-    <div class="row"><span class="k">지금</span><span>화면 옮김 <b class="num">${moved}/${live.length}</b> · 서버 · 폰 붙임 <b class="num">${linked}/${live.length}</b> · 앱은 아직 가짜 데이터(5월 22일 시나리오)로 돎</span></div>
-  </div>`;
-  const span = (f) => { const ds = f.issues.map(issue).filter(Boolean); const a = ds.map(i => i.start).filter(Boolean).sort()[0]; const b = ds.map(i => i.due).filter(Boolean).sort().pop(); return a ? `${fmtDate(a)}–${fmtDate(b || a)}` : ''; };
-  const feat = FEATURES.map((f, i) => {
-    const done = f.issues.filter(n => statusOf(n) === 'done').length;
-    return `<button type="button" class="node" data-go="features:${f.id}"><span><span class="dot ${groupStatus(f.issues, f.ai)}"></span>${i + 1}. ${esc(f.name)} <small>${span(f)}</small></span><small class="num">${done}/${f.issues.length}</small></button>`;
-  }).join('');
-  const byTab = TABS.map(([id, name]) => {
-    const ss = SCREENS.filter(s => s.tab === id);
-    return `<button type="button" class="node" data-go="screens:${ss[0].code}"><span>${name} <small>화면 ${ss.length}</small></span><small class="dots">${ss.map(s => `<span class="dot ${screenStatus(s)}" title="${s.code} ${esc(s.name)}"></span>`).join('')}</small></button>`;
-  }).join('');
-  const t = tree();
-  const edgeExists = (name) => t ? t.some(x => x.startsWith(`supabase/functions/${name.split(' ')[0]}/`)) : null;
-  const edges = EDGE.map(([n, ko, , ext]) => { const ex = edgeExists(n); return `<button type="button" class="node" data-go="links:"><span>${esc(ko)} <small>${esc(n)}</small></span><small>${esc(ext)}${ex === null ? '' : ex ? ' · 있음' : ' · 아직 없음'}</small></button>`; }).join('');
-  return now + intro + `<div class="big">
-    <div class="box"><h4>순서 — 기능 묶음</h4>${feat}</div>
-    <div class="box"><h4>앱 — 폰에서 보이는 것</h4>${byTab}
-      <div class="arrow">↓ 화면이 부름</div>
-      <button type="button" class="node" data-go="links:"><span>폰 알람 엔진 <small>서버 없이 정시에 울림 · Android</small></span><small>${NATIVE.length} 기능</small></button>
-      <div class="note">● 다 됨 · ◐ 화면만 옮김 · ○ 아직</div>
-    </div>
-    <div class="box"><h4>서버 — Supabase</h4>
-      <button type="button" class="node" data-go="links:"><span>저장소 (테이블) <small>사람 · 친구 · 약속 · 알람 · 기록 …</small></span><small>${KINDS.table.length - 1} · 뷰 1</small></button>
-      <button type="button" class="node" data-go="links:"><span>DB 함수 <small>그룹 기상 요약 · 초대 코드 …</small></span><small>${KINDS.rpc.length}</small></button>
-      <div class="arrow" title="외부 API 키는 서버 함수 비밀값에만">서버 함수 (Edge) — 외부 서비스 · 계산 · 푸시</div>${edges}
-    </div>
-    <div class="box"><h4>곁에 있는 것</h4>
-      <a class="node" href="/lab/" target="_blank" rel="noopener"><span>AI 실험실 <small>AI 지시문을 가상 유저로 시험 · 어디까지 왔는지</small></span><small>/lab</small></a>
-      <a class="node" href="https://github.com/orgs/${SITE.org}/projects/${SITE.project}" target="_blank" rel="noopener"><span>GitHub 보드 <small>카드 원본 · 상태는 여기서 바꿈</small></span><small>Projects</small></a>
-      <button type="button" class="node" data-go="links:"><span>연결 <small>어느 서비스에 어떤 키로 이었나</small></span></button>
-      <button type="button" class="node" data-go="env:"><span>환경 <small>명령 · 링크 · 세팅 · 폴더</small></span></button>
-    </div>
-  </div>`;
 }
 
-function rScreens() {
-  const s = SCREENS.find(x => x.code === sel) || SCREENS[0];
-  const tr = TABS.map(([id, name]) => { const ss = SCREENS.filter(x => x.tab === id); const done = ss.filter(x => stageOf(x).ui === 'done').length;
-    return `<div class="g">${name}<span class="num" title="화면 옮김">${done}/${ss.length}</span></div>` + ss.map(x =>
-    `<button type="button" class="it ${x.code === s.code ? 'on' : ''}" data-sel="${x.code}"><span class="dot ${screenStatus(x)}"></span>${x.code} ${esc(x.name)}</button>`).join(''); }).join('');
-  const st = stageOf(s);
-  const stageChips = s.off ? chip('wait', '지금은 흐름에서 뺌')
-    : chip(st.ui === 'done' ? 'done' : st.ui, st.ui === 'done' ? '화면 옮김' : '화면 ' + STATUS_KO[st.ui])
-      + chip(st.link === 'done' ? 'done' : st.link, st.link === 'done' ? '서버 · 폰 붙임' : st.link === 'ai' ? '서버 · AI 대기' : '서버 · 폰 안 붙임');
-  const f = fileOf(s);
-  const fileText = s.native ? '네이티브 화면 (alarm-core)' : f ? `<code>${esc(f.path)}</code> ${f.known ? (f.exists ? chip('done', 'main에 있음') : chip('todo', 'main에 없음')) : ''}` : '';
-  const rows = s.data.map(d => `<tr><td class="k">${esc(d.k)}</td><td>${esc(d.t)}</td><td>${d.r.map(r => `<code>${esc(r)}</code>`).join(' ')}</td></tr>`).join('');
-  const mentions = (x) => [...(x.from || []), ...(x.steps || [])].join(' ').match(/\(([A-Z]\d{2})\)/g) || [];
-  const mine = new Set(mentions(s).map(m => m.slice(1, -1)));
-  const links = SCREENS.filter(o => o !== s && (o.code.split('·').some(c => mine.has(c)) || mentions(o).some(m => s.code.split('·').includes(m.slice(1, -1)))))
-    .map(o => `<a class="in" href="#" data-sel="${o.code}"><span class="dot ${screenStatus(o)}"></span>${o.code} ${esc(o.name)}</a>`).join(' · ');
-  const openPrs = s.issues.flatMap(prsOf).filter((p, i, a) => a.findIndex(q => q.number === p.number) === i);
-  const checkChip = (c) => c ? chip(c === 'SUCCESS' ? 'done' : c === 'PENDING' ? 'wait' : 'doing', '검사 ' + ({ SUCCESS: '통과', FAILURE: '실패', ERROR: '오류', PENDING: '진행' }[c] || c)) : '';
-  const li = (arr) => (arr || []).map(x => `<li>${txt(x)}</li>`).join('');
-  const demoBtn = s.demo ? `<button type="button" data-src="${esc(s.demo)}${s.demo.includes('?') ? '&' : '?'}mode=mock" title="오른쪽 앱 창에서 이 화면을 엶 (가짜 데이터)">앱에서 보기</button>` : '';
-  return `<div class="screens"><div class="tree">${tr}<div class="note" style="padding:8px 8px 4px">● 다 됨 · ◐ 화면만 · ○ 아직</div></div>
-  <div class="card">
-    <div class="row"><h2 style="margin:0">${s.code} ${esc(s.name)}</h2>${stageChips}<span class="muted">기능 ${s.feat.map(esc).join(' · ')}</span><span class="row" style="margin-left:auto">${demoBtn}<a class="in" href="#" data-src="/dev/screens?mode=mock">화면 목록</a></span></div>
-    <p class="what">${txt(s.what)}</p>
-    <div class="sec"><h3>들어오는 길</h3><ul>${li(s.from)}</ul></div>
-    <div class="sec"><h3>흐름 — 누르면 → 보임</h3><ol class="steps">${li(s.steps)}</ol></div>
-    <div class="sec"><h3>규칙 · 왜</h3><ul>${li(s.rules)}</ul></div>
-    <div class="sec"><h3>아직 안 되는 것</h3><ul>${li(s.missing)}</ul></div>
-    <table class="kv" style="margin-top:14px">
-      <tr><td>이슈</td><td><span class="row">${s.ui.map(issuePill).join('')}${s.link.length ? `<span class="muted">붙이기</span>${s.link.map(issuePill).join('')}` : ''}</span></td></tr>
-      ${openPrs.length ? `<tr><td>PR</td><td>${openPrs.map(p => `<a href="${ghPr(p.number)}" target="_blank" rel="noopener">#${p.number}</a> ${esc(p.title)} ${p.draft ? chip('wait', 'WIP') : ''} ${checkChip(p.checks)}`).join('<br>')}</td></tr>` : ''}
-      ${s.dec && s.dec.length ? `<tr><td>정할 것</td><td><span class="row">${s.dec.map(decLink).join('')}</span></td></tr>` : ''}
-      <tr><td>같이 보기</td><td>${links || '<span class="muted">없음</span>'}</td></tr>
-    </table>
-    <details class="dev"><summary>개발용 — 파일 · 데이터</summary>
-      <table class="kv" style="margin-top:8px"><tr><td>파일</td><td>${fileText}</td></tr></table>
-      <table style="margin-top:8px"><tr><th style="width:56px">위치</th><th>용도</th><th>테이블 · 함수</th></tr>${rows}</table>
-      <div class="note">docs/screen-data-map.md · 상세설계서 4장(테이블) · 5장(함수) · 7장(흐름)</div>
+// ───────────────────────────────── 동작 — 기능이 실제로 되는지
+const ST = { ok: ['●', '됨'], part: ['◐', '일부'], no: ['○', '안 됨'], na: ['–', '해당 없음'], unk: ['?', '안 해 봄'] };
+const COLS = [['web', '웹', '배포 주소에서 가짜 데이터로 직접 눌러 보면 되나'], ['phone', '폰', '개발용 APK에서 되나'], ['server', '서버', '실제 저장 · 계산 · 푸시가 되나 (Supabase)'], ['test', '테스트', '자동 검사(CI)가 이 기능을 덮나']];
+const sym = (st) => `<span class="sy sy-${st}" title="${ST[st][1]}">${ST[st][0]}</span>`;
+function rChecks() {
+  const count = (k, sts) => CHECKS.filter(c => sts.includes(c[k].st)).length;
+  const areas = [...new Set(CHECKS.map(c => c.area))];
+  const head = `<div class="card ck-top">
+    <h2>지금 되는 것 <span class="muted" style="font-size:13px;font-weight:500">${CHECKS.length}개 기능 기준</span></h2>
+    <p class="ck-sum">웹 미리보기(가짜 데이터)에서 <b>${count('web', ['ok'])}개</b>는 되고 <b>${count('web', ['part'])}개</b>는 일부만 됨 · 폰에서 해 본 것 <b>${count('phone', ['ok'])}개</b> · 실제 서버로 되는 것 <b>${count('server', ['ok'])}개</b> · 자동 검사가 있는 것 <b>${count('test', ['ok'])}개</b></p>
+    <div class="ck-legend">${Object.keys(ST).map(k => `${sym(k)} ${ST[k][1]}`).join('<span class="muted"> · </span>')}<span class="muted" style="margin-left:14px">줄을 누르면 확인하는 법 · 근거가 펼쳐짐. "앱에서 열기"는 오른쪽 앱 창에 그 화면(가짜 데이터, 5월 22일 시나리오)</span></div>
+    <details class="dev"><summary>이 앱은 · 칸이 뜻하는 것</summary>
+      <p style="margin:8px 0 6px;max-width:80ch">약속을 넣으면 기상 · 준비 · 출발 알람을 거꾸로 계산해 폰에서 울리고, 일어났는지 · 나갔는지를 자동으로 모아 다음 알람을 고쳐 가는 알람 앱. 친구 · 그룹과 기상 상태를 나누고, 자기 전엔 AI와 짧게 대화해 내일을 준비함.</p>
+      <table class="kv">${COLS.map(([, n, d]) => `<tr><td>${n}</td><td>${d}</td></tr>`).join('')}</table>
+      <div class="note">근거의 "흐름 확인 #84 2-5"는 10/10에 직접 따라 한 흐름 확인 문서의 PR · 묶음 · 단계 번호. 날짜가 오래되면 다시 확인할 것 — 상태를 고치려면 이 파일의 CHECKS 줄을 고쳐 PR</div>
     </details>
-  </div></div>`;
-}
-
-function rFeatures() {
-  const span = (f) => { const ds = f.issues.map(issue).filter(Boolean); const a = ds.map(i => i.start).filter(Boolean).sort()[0]; const b = ds.map(i => i.due).filter(Boolean).sort().pop(); return a ? `${fmtDate(a)}–${fmtDate(b || a)}` : ''; };
-  const flowItem = (x) => {
-    const m = /\(([A-Z]\d{2})\)/.exec(x); const sc = m && scrByCode(m[1]);
-    if (sc) return `<span class="scr"><a class="in" href="#" data-go="screens:${sc.code}">${esc(x)}</a></span>`;
-    const n = /#(\d+)/.exec(x);
-    if (n) return `<span>${esc(x.replace(/\s*\(?#\d+\)?/, '').trim())} <a class="in" href="${ghIssue(n[1])}" target="_blank" rel="noopener">#${n[1]}</a></span>`;
-    return `<span>${esc(x)}</span>`;
-  };
-  const head = `<div class="note" style="margin:0 0 10px">위에서 아래로 = 만드는 순서. 흐름 칸의 화면 번호를 누르면 화면 탭, 점은 이슈 상태(● 끝 · ◐ 화면만 · ○ 아직)</div>`;
-  return head + FEATURES.map((f, i) => {
-    const done = f.issues.filter(n => statusOf(n) === 'done').length;
-    const scr = SCREENS.filter(s => s.feat.includes(f.id));
-    return `<div class="card feat ${f.ai ? 'ai' : ''}">
-      <h2><span class="dot ${groupStatus(f.issues, f.ai)}"></span>${i + 1}. ${esc(f.name)}${f.ai ? ' ' + chip('ai') : ''}<span class="num">${esc(f.ms)} · ${span(f)} · ${done}/${f.issues.length}</span></h2>
-      ${f.why ? `<p class="why">${txt(f.why)}</p>` : ''}
-      <div class="flow">${f.flow.map((x, k) => (k ? '<i>→</i>' : '') + flowItem(x)).join('')}</div>
-      <div class="row">${f.issues.map(issuePill).join('')}</div>
-      ${scr.length ? `<div class="row" style="margin-top:8px"><span class="muted">화면</span> ${scr.map(s => `<a class="in" href="#" data-go="screens:${s.code}"><span class="dot ${screenStatus(s)}"></span>${s.code} ${esc(s.name)}</a>`).join(' · ')}</div>` : ''}
-    </div>`;
-  }).join('');
+  </div>`;
+  const rows = [];
+  for (const a of areas) {
+    const list = CHECKS.filter(c => c.area === a);
+    rows.push(`<tr class="grp"><td colspan="6">${esc(a)} <span class="num" style="font-weight:500">· 웹에서 됨 ${list.filter(c => c.web.st === 'ok').length}/${list.length}</span></td></tr>`);
+    for (const c of list) {
+      const open = ckOpen.has(c.id);
+      const block = c.issues.map(n => ({ n, st: statusOf(n) })).filter(x => x.st !== 'done');
+      rows.push(`<tr class="ck${open ? ' open' : ''}" data-ck="${c.id}"><td class="ck-name"><span class="ck-id">${c.id}</span>${esc(c.name)}</td>${COLS.map(([k]) => `<td class="st" title="${esc(c[k].ev)}">${sym(c[k].st)}</td>`).join('')}<td class="ck-block">${block.length ? block.map(x => issuePill(x.n)).join(' ') : '<span class="muted">—</span>'}</td></tr>`);
+      if (open) {
+        const start = c.start ? `<button type="button" data-src="${esc(c.start)}${c.start.includes('?') ? '&' : '?'}mode=mock" style="margin-top:8px">앱에서 열기</button>` : '';
+        rows.push(`<tr class="ck-body"><td colspan="6"><div class="ck-detail">
+          <div><h4>확인하는 법</h4><ol>${c.how.map(h => `<li>${txt(h)}</li>`).join('')}</ol>${start}</div>
+          <div><h4>근거</h4><table class="kv">${COLS.map(([k, n]) => `<tr><td>${n}</td><td>${sym(c[k].st)} ${ST[c[k].st][1]} <span class="muted">— ${txt(c[k].ev)}</span></td></tr>`).join('')}</table>
+            ${c.dec.length ? `<h4>걸린 결정</h4><div class="row">${c.dec.map(decLink).join('')}</div>` : ''}
+            ${c.screens.length ? `<h4>화면</h4><div class="muted">${c.screens.map(esc).join(' · ')}</div>` : ''}</div>
+        </div></td></tr>`);
+      }
+    }
+  }
+  const thead = `<tr><th>기능</th>${COLS.map(([, n, d]) => `<th class="st" title="${esc(d)}">${n}</th>`).join('')}<th>막는 것</th></tr>`;
+  return head + `<div class="card flush"><table class="ck sticky">${thead}${rows.join('')}</table></div>
+  <div class="note">폰 · 서버 칸이 거의 비어 있는 이유: 화면은 다 옮겼지만(10/10) 개발용 APK를 아직 안 받았고(#20), 앱의 데이터 함수가 아직 서버를 안 부름(#116 · 로그인 #25 뒤). 자동으로 웹 흐름을 돌려 이 표를 채우는 일은 아직 없음</div>`;
 }
 
 // 연결 — 서비스 사이를 무엇으로 이어 놨는지 (10/10 확인). 키는 이름 · 넣은 곳만 적고 값은 적지 않음
@@ -1059,7 +1114,7 @@ function rTodo() {
   }
   const btn = (k, v, label) => `<button class="${f[k] === v ? 'on' : ''}" data-f="${k}" data-v="${esc(v)}">${esc(label)}</button>`;
   const hasFilter = f.status || f.ms || f.label;
-  return `<div class="note" style="margin:0 0 8px">GitHub 보드 카드를 목표일로 묶음 — 지연 = 목표일이 지남 · AI 대기 = AI 방식이 정해진 뒤 · 상태는 GitHub 보드에서 바꿈</div>
+  return nowCard() + `<div class="note" style="margin:0 0 8px">GitHub 보드 카드를 목표일로 묶음 — 지연 = 목표일이 지남 · AI 대기 = AI 방식이 정해진 뒤 · 상태는 GitHub 보드에서 바꿈</div>
   <div class="filters">${btn('status', '', `전체 ${all.length}`)}${['doing', 'review', 'week', 'todo', 'ai', 'done'].map(s => btn('status', s, `${STATUS_KO[s]} ${p.counts[s]}`)).join('')}
     <select data-fsel="ms"><option value="">마일스톤</option>${mss.map(m => `<option value="${esc(m)}" ${f.ms === m ? 'selected' : ''}>${esc(msShort(m))}</option>`).join('')}</select>
     <select data-fsel="label"><option value="">라벨</option>${labels.map(l => `<option value="${esc(l)}" ${f.label === l ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select>
@@ -1184,8 +1239,13 @@ async function loadSnapshot() {
 
 // ───────────────────────────────── 이벤트
 document.addEventListener('click', (e) => {
-  const el = e.target.closest('[data-tab],[data-go],[data-sel],[data-f],[data-src],[data-copy],[data-dec],[data-decall],#btnSync,#btnSide,#btnReload,#tokSave,#tokClear');
+  const el = e.target.closest('[data-tab],[data-go],[data-sel],[data-f],[data-src],[data-copy],[data-dec],[data-decall],[data-ck],#btnSync,#btnSide,#btnReload,#tokSave,#tokClear');
   if (!el) return;
+  if (el.dataset.ck) {
+    if (e.target.closest('a,button')) return; // 줄 안 이슈 링크는 그대로
+    const id = el.dataset.ck; if (ckOpen.has(id)) ckOpen.delete(id); else ckOpen.add(id);
+    LS.set('ckOpen', [...ckOpen]); render(); return;
+  }
   if (el.dataset.tab) { tab = el.dataset.tab; LS.set('tab', tab); render(); return; }
   if (el.dataset.decall) { if (el.dataset.decall === 'open') DECISIONS.forEach((d) => decOpen.add(d.id)); else decOpen.clear(); LS.set('decOpen', [...decOpen]); render(); return; }
   if (el.dataset.dec) {
