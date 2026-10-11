@@ -486,6 +486,8 @@ async function vHome() {
         btn("사람 보기", "#/people")),
       h("div", { style: "margin-top:12px" }, flow),
       idx.v3.progress.filter((s) => s.note && s.status !== "todo").map((s) => h("p", { class: "note" }, `${s.name} — ${s.note}`)),
+      idx.v3.progress.some((s) => s.status === "todo") ? h("p", { class: "small", style: "margin:12px 0 2px;font-weight:600" }, "남은 실험") : null,
+      idx.v3.progress.filter((s) => s.status === "todo").map((s) => h("p", { class: "note" }, s.note ? `${s.name} — ${s.note}` : s.name)),
       h("div", { class: "go", style: "padding-top:10px" }, btn("E0 결과 보기", hExp("e0")), btn("실험 정리 읽기", "#/summary", true), btn("프롬프트 카드", "#/cards", true))));
   }
   root.append(h("div", { class: "card dash" }, h("p", { class: "small", style: "margin:0" }, `아래 '예전' 표시가 붙은 실험 결과 · 대화는 ${idx.round_label} 기록이에요. 그때는 AI 생각을 저장하지 않아서 대화 화면의 'AI 생각' 칸이 '기록 없음'으로 보여요.`)));
