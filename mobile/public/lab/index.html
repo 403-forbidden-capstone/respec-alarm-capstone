@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex">
 <meta name="color-scheme" content="light">
+<link rel="icon" href="data:,">
 <title>Re:Spec AI 실험실</title>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
 <style>
@@ -36,7 +37,7 @@ pre{background:var(--chip);border-radius:14px;padding:12px 14px;margin:6px 0 0;o
 .brand{font-size:15px;font-weight:700;letter-spacing:-.01em;color:var(--ink);text-decoration:none}
 .tabs{display:flex;max-width:760px;padding:0 0 4px;overflow-x:auto;scrollbar-width:none}
 .tabs::-webkit-scrollbar{display:none}
-.tabs a{flex:1 0 auto;min-width:3.6rem;display:flex;flex-direction:column;align-items:center;gap:4px;padding:4px 8px 6px;font-size:11.5px;color:var(--faint);text-decoration:none;white-space:nowrap}
+.tabs a{flex:1 0 auto;min-width:3.6rem;display:flex;flex-direction:column;align-items:center;gap:4px;padding:4px 8px 6px;font-size:12.5px;color:var(--sub);text-decoration:none;white-space:nowrap}
 .tabs .n{font-size:10px;min-width:26px;height:16px;line-height:16px;border-radius:8px;background:var(--chip);color:var(--faint);text-align:center;font-variant-numeric:tabular-nums}
 .tabs a.on{color:var(--ink);font-weight:600}
 .tabs a.on .n{background:var(--ink);color:#fff}
@@ -128,7 +129,7 @@ td a{color:var(--ink);font-weight:600}
 .person .pm{flex:1;min-width:0}
 .person .pm b{display:block;font-size:14.5px}
 .person .pm small{display:block;font-size:12.5px;color:var(--sub)}
-.person .pr{font-size:12.5px;color:var(--sub);text-align:right;flex:none}
+.person .pr{font-size:12.5px;color:var(--sub);text-align:right;flex:none;max-width:100%;white-space:normal}
 @media (max-width:640px){.person{flex-wrap:wrap}.person .pm{flex-basis:calc(100% - 52px)}.person .pr{text-align:left;margin-left:52px;flex-basis:100%}}
 /* 대화 · 프롬프트 목록 줄 */
 .crow{display:grid;grid-template-columns:8.5rem 10rem minmax(0,1fr) 11rem minmax(0,1.1fr);gap:4px 14px;padding:11px 0;color:var(--ink);text-decoration:none;align-items:start}
@@ -143,6 +144,23 @@ td a{color:var(--ink);font-weight:600}
 .prow .id a{font-weight:600;color:var(--ink)}
 @media (max-width:760px){.prow{grid-template-columns:1fr 1fr}.prow>:nth-child(3){grid-column:1/-1}}
 .fam{margin-bottom:6px}
+/* 용어 목록 — 좁은 화면에서는 글자 위 · 설명 아래 */
+.terms .kvl{grid-template-columns:12rem minmax(0,1fr)}
+@media (max-width:560px){.terms .kvl{grid-template-columns:1fr}}
+.terms .kvl b{font-size:15.5px;line-height:1.5}
+.terms .kvl span{font-size:15px;line-height:1.7;color:#3a3a37}
+/* 첫 화면 큰 글씨 — 처음이라면 · 이 실험은 · 지금 어디까지 왔나 */
+.lede .kvl{padding:12px 0}
+.lede .kvl .k{font-size:14px;font-weight:600;color:var(--ink)}
+.lede .kvl .v{font-size:15.5px;line-height:1.65}
+.steps .lrow{padding:16px 0;gap:14px}
+.steps .nm{font-size:19px;font-weight:700;letter-spacing:-.015em;line-height:1.35}
+.steps .nm small{font-size:13px;font-weight:500;color:var(--faint);margin-left:6px;letter-spacing:0}
+.steps .role{font-size:13.5px;color:var(--sub);margin:2px 0 0;line-height:1.5}
+.steps .cl{font-size:16px;line-height:1.55;margin:6px 0 0}
+.steps .lrow>.chip{flex:none}
+.steps.past .nm{font-size:16.5px}
+.steps.past .cl{font-size:15px;color:#3a3a37}
 /* 타임라인 (Timeline) — 대화 턴 */
 .tl2{list-style:none;margin:0;padding:0}
 .tl2>li{display:grid;grid-template-columns:56px 14px minmax(0,1fr);gap:8px;position:relative;padding-bottom:12px}
@@ -321,10 +339,10 @@ const cache = new Map();
 function load(name) {
   if (!cache.has(name)) {
     cache.set(name, fetch(BASE + name, { cache: "no-cache" }).then(async (r) => {
-      if (!r.ok) throw new Error(`${name} — ${r.status}`);
+      if (!r.ok) throw new Error(`자료 ${name} 응답 ${r.status}`);
       const t = await r.text();
-      try { return JSON.parse(t); } catch { throw new Error(`${name} — JSON이 아님 (없는 파일이면 서버가 HTML을 돌려줌)`); }
-    }).catch((e) => { cache.delete(name); throw e; }));
+      try { return JSON.parse(t); } catch { throw new Error(`자료 ${name}의 형식이 맞지 않아요 (없는 자료면 서버가 엉뚱한 글을 돌려줘요)`); }
+    }).catch((e) => { cache.delete(name); if (e && typeof e === "object") e.tech = true; throw e; }));
   }
   return cache.get(name);
 }
@@ -333,7 +351,7 @@ function load(name) {
 async function loadConv(run, id) {
   const pack = await load(`conv/${run}.json`);
   const c = pack.convs && pack.convs[id];
-  if (!c) throw new Error(`conv/${run}.json 안에 ${id} 대화가 없어요`);
+  if (!c) throw new Error(`${run} 판의 자료에 ${id} 대화가 없어요`);
   return c;
 }
 
@@ -387,6 +405,63 @@ const kvl = (k, ...v) => h("div", { class: "kvl" }, h("span", { class: "k" }, k)
 const stat = (lbl, big, sub, prog) => h("div", { class: "card stat" }, h("div", { class: "lbl" }, lbl), h("div", { class: "big" }, big),
   prog ? h("span", { class: "prog" }, h("b", { style: `width:${prog}%` })) : null, sub ? h("p", { class: "small" }, sub) : null);
 const btn = (text, hrefv, ghost, sm) => h("a", { class: "btn" + (ghost ? " ghost" : "") + (sm ? " sm" : ""), href: hrefv }, text);
+// 코드 이름표는 작게 뒤로 — "NONE 받아쓰기 그대로" → ["받아쓰기 그대로", "NONE"]. 뒤에 한국어가 있고 앞 낱말이 이름표처럼 생겼을 때만 나눔
+function splitCode(label) {
+  const s = String(label);
+  const m = /^([A-Za-z0-9][A-Za-z0-9._~+-]*)\s+(?=.*[가-힣])/.exec(s);
+  if (!m || m[1] === "AI") return [s, null];
+  return [s.slice(m[0].length), m[1]];
+}
+// 이름이 이미 괄호를 품고 있으면 [ ]로, 아니면 ( )로 감쌈
+const codeTail = (code, ko) => (code ? h("span", { class: "muted small", style: "font-weight:400" }, String(ko).includes("(") ? ` [${code}]` : ` (${code})`) : null);
+// 화면에 그대로 내보내기 어려운 기술 낱말을 풀어 씀
+// (JSON 낱말 · 함수 이름 · 설정 이름 · 데이터 이름표 → 한국어)
+const plainKo = (s) => String(s)
+  .replace(/JSON/g, "정해진 형식")
+  .replace(/propose_changes/g, "'변경 제안'")
+  .replace(/prep · daily_record/g, "준비 시간 · 하루 기록")
+  .replace(/daily_record/g, "하루 기록")
+  .replace(/\s*\(freeze-v0\)/g, "")
+  .replace(/\s*\(gold v1\)/g, "")
+  .replace(/\(intended\)/g, "")
+  .replace(/effort low로/g, "생각 깊이를 '낮음'으로")
+  .replace(/medium 유지/g, "'보통' 유지")
+  .replace(/잡음 mid/g, "잡음 '중간'")
+  .replace(/잡음을 high로/g, "잡음을 '높음'으로")
+  .replace(/\(mid · high\)/g, "(중간 · 높음)")
+  .replace(/ESTIMATE_SHORT는 '원래 그만큼 걸림'일 때만/g, "'원래 그만큼 걸림' 태그는 그럴 때만")
+  .replace(/= ETC\)/g, "= 기타)")
+  .replace(/발표\(PRESENTATION\)/g, "발표");
+// 글 속의 코드 이름(T4.v1 · SIM.v2 …)을 '한국어 이름 + 뒤에 작은 이름표'로 바꿔 보여 줌 (노드 목록)
+const CODE_KO = { T0: "받아쓰기 정리", T1: "대화 답", T2: "추출", T3: "사유 분류", T4: "일기", T5: "코칭", SIM: "가상 유저" };
+function koCodes(s) {
+  const out = [];
+  const re = /\b(T[0-5]|SIM)(\.v\d+(?:\.\d+)*(?:-[A-Za-z0-9]+)?)?/g;
+  let pos = 0, m;
+  while ((m = re.exec(s)) !== null) {
+    if (m.index > pos) out.push(s.slice(pos, m.index));
+    out.push(CODE_KO[m[1]], h("span", { class: "muted small", style: "font-weight:400" }, " " + m[0]));
+    pos = m.index + m[0].length;
+  }
+  if (pos < s.length) out.push(s.slice(pos));
+  return out;
+}
+// 한 줄 결론 — '—' 앞이나 첫 문장만 (첫 문장이 너무 짧으면 둘째 문장까지). 전체 글은 실험 화면에 있음
+function oneLine(s) {
+  const t = plainKo(s).trim();
+  const dash = t.indexOf(" — ");
+  if (dash > 8) return t.slice(0, dash);
+  let end = t.length, from = 0;
+  for (;;) {
+    const i = t.indexOf(". ", from);
+    if (i < 0) break;
+    if (i + 1 >= 24) { end = i + 1; break; }
+    from = i + 2;
+  }
+  return t.slice(0, end);
+}
+// 표 아래 설명에서 "출처: spec/….md 5절" 같은 파일 이름 문장을 뺌 (뒤에 붙은 뜻 있는 괄호는 남김)
+const plainNote = (s) => String(s).replace(/출처:\s*((?:[^.(]|\.(?=md\b|jsonl?\b))*)(\([^)]*\))?(?:\.\s+|\.?$)/g, (_, _src, par) => (par && !/절/.test(par) ? par + " " : "")).trim();
 
 const STYLE_KO = { POLITE: "존댓말", CASUAL: "편한 말투", TYPO_SLANG: "오타 · 줄임말", STT: "받아쓰기 말투" };
 const RES_OPTS = [["", "전부"], ["ok", "문제 없음"], ["bad", "문제 있음"], ["rule", "규칙 어김"], ["err_missed", "틀린 자동 기록을 못 고침"], ["t2_bad", "추출이 많이 틀림"], ["fail", "실행 오류"], ["acts", "물음 표시 어긋남"], ["early_end", "신호 없이 AI가 먼저 마무리"], ["no_reflect", "돌아보기 없이 마무리"], ["sq_missed", "서버 질문을 안 물음"]];
@@ -399,9 +474,13 @@ function mount(node, ttl) {
   document.title = (ttl ? ttl + " · " : "") + "Re:Spec AI 실험실";
 }
 function errView(e) {
+  const msg = String(e && e.message ? e.message : e);
+  // 자료를 못 받은 경우(기술 오류)는 쉬운 말로 먼저 알리고, 원인은 접어 둠. 그 밖의 오류(없는 실험 · 사람 등)는 글을 그대로 보여 줌
+  if (!(e && e.tech)) return h("div", { class: "card dash err", style: "margin-top:18px" }, h("div", { class: "big2" }, "불러오지 못했어요"), h("p", { style: "margin-top:6px" }, msg));
   return h("div", { class: "card dash err", style: "margin-top:18px" }, h("div", { class: "big2" }, "불러오지 못했어요"),
-    h("p", { style: "margin-top:6px" }, String(e && e.message ? e.message : e)),
-    h("p", { class: "small" }, "ai-lab 폴더에서 ", h("code", null, "npm run dash"), " 로 묶음을 만든 뒤 다시 열어 주세요. 배포판이면 mobile/public/lab/data 가 같이 올라갔는지 확인."));
+    h("p", { style: "margin-top:6px" }, "화면에 필요한 자료를 열지 못했어요. 새로고침해 보고, 계속 안 되면 개발 보드 담당에게 알려 주세요."),
+    h("details", null, h("summary", null, "자세한 내용 (개발자용)"), h("p", { class: "small", style: "margin:6px 0 0" }, msg),
+      h("p", { class: "small", style: "margin:4px 0 0" }, "자료 묶음을 만들지 않았거나 배포에서 빠졌을 때 이렇게 나와요. 자료를 만드는 쪽에서 묶음을 다시 만든 뒤 열어 주세요.")));
 }
 async function route() {
   const my = ++token;
@@ -466,32 +545,94 @@ function syncHash(parts, state) {
 }
 
 /* ───────── 홈 ───────── */
+// 첫 화면 제목은 크게
+const bigH2 = (t, ...more) => h("div", { class: "h2", style: "font-size:21px;letter-spacing:-.02em;margin-top:26px" }, t, ...more);
+
+// 처음 보는 사람을 위한 안내 카드 — 네 줄 + 돌아가기. 이 실험실이 무엇이고 어떤 순서로 읽으면 되는지
+function firstTimeCard() {
+  const lk = (t, to) => h("a", { href: to }, t);
+  return h("div", { class: "sec" },
+    bigH2("실험실 소개", h("small", null, "처음 보는 팀원용")),
+    h("div", { class: "card lede" },
+      kvl("목적", "앱에서 AI가 응답하는 지점(취침 전 · 기상 후 대화, 대화에서 저장 항목 추출, 일기 · 코칭, 아침 준비 시간 추천)마다 프롬프트를 미리 실험해 가장 좋은 판을 고름."),
+      kvl("방법", "가상 유저 12명(개발용 8 · 시험용 4)과 대화. 습관이 다른 사용자를 AI가 연기하고, 음성 인식(STT) 오류까지 시뮬레이션. 프롬프트를 판별로 바꿔 같은 대화를 돌리고 점수를 비교."),
+      kvl("산출물", "프롬프트 카드. 실제 앱에는 이 카드를 그대로 적용."),
+      kvl("읽는 순서", "진행 현황(아래) → ", lk("실험", "#/exp"), "(E0 · E1 · E2 …) → ", lk("대화", "#/conv"), " → ", lk("사람", "#/people"), " → ", lk("카드", "#/cards"), ". 모르는 말은 ", lk("용어", "#/terms"), " 탭 참고."),
+      h("div", { class: "go", style: "padding-top:8px" }, btn("개발 보드로", "/board", true, true))),
+    h("p", { class: "note" }, "실험은 모두 Claude Haiku 5.5 기준. 운영 모델(Gemini)에서는 미검증."));
+}
+
+// 지금 어디까지 왔나 — 진행 단계마다 한 줄: 이름 · 하는 일 · (끝났으면) 결론 한 줄
+function stepsSection(idx) {
+  const prog = idx.v3.progress;
+  const firstTodo = prog.findIndex((s) => s.status === "todo");
+  const bare = (n) => n.replace(/^[①-⑳]\s*/, "");
+  const rows = prog.map((s, i) => {
+    const m = /^(E\d+)\s+(.+)$/.exec(s.name);
+    const code = m ? m[1] : null;
+    const ko = m ? m[2] : s.name;
+    const e = code ? idx.experiments.find((x) => x.code === code) : null;
+    const f = idx.features.find((x) => bare(x.name) === ko);
+    const state = s.status === "done" ? "done" : s.status === "doing" ? "doing" : i === firstTodo ? "next" : "todo";
+    const link = e && state === "done" && e.headline;
+    let line = null;
+    if (link) line = h("p", { class: "cl" }, h("b", null, koCodes(oneLine(e.headline))), " ", h("span", { class: "small" }, "자세히 ›"));
+    else if (state === "doing") line = h("p", { class: "cl sub" }, (s.note && s.note !== "진행 중" ? s.note + " · " : "") + "진행 중 — 결론 미정");
+    else if (state === "done" && s.note) line = h("p", { class: "cl sub" }, s.note);
+    const mark = state === "done" ? chip("완료", "", { dot: "ok" }) : state === "doing" ? chip("진행 중", "ink") : state === "next" ? chip("다음", "", { dot: "mid" }) : chip("예정", "fill");
+    const dot = h("i", { class: "sd " + (state === "done" ? "ok" : state === "doing" ? "mid" : "off"), style: "margin-top:10px" });
+    const body = h("div", { class: "grow" },
+      h("div", { class: "nm" }, ko, codeTail(code, ko)),
+      f ? h("p", { class: "role" }, plainKo(f.where).replace(/\s*\(E0 결과[^)]*\)/, "")) : null,
+      line);
+    return link ? h("a", { class: "lrow top exrow", href: hExp(e.id) }, dot, body, mark) : h("div", { class: "lrow top" }, dot, body, mark);
+  });
+  return h("div", { class: "sec steps" },
+    bigH2("진행 현황", h("small", null, "v3 · 음성 대화 기준")),
+    h("div", { class: "card" }, rows),
+    h("div", { class: "go", style: "padding-top:0" }, btn("실험 정리 읽기", "#/summary", true), btn("프롬프트 카드", "#/cards", true), btn("가상 유저 보기", "#/people", true)));
+}
+
+// 지난 실험 결론 — 예전 · 라운드 1의 실험을 한 줄씩. 코드 이름(T4 · T5 등)이 든 부분은 이름 뒤에 작게
+function pastSection(idx) {
+  const past = idx.experiments.filter((e) => e.round !== "v3");
+  if (!past.length) return null;
+  return h("div", { class: "sec steps past" },
+    bigH2("이전 실험 결론", h("small", null, "라운드 1 (텍스트 대화) · 최신순 · 클릭하면 상세")),
+    h("div", { class: "card" }, past.map((e) => {
+      const [name, ...rest] = String(e.title).split(" — ");
+      return h("a", { class: "lrow top exrow", href: hExp(e.id) },
+        h("i", { class: "sd " + (e.status === "paused" ? "zz" : "ok"), style: "margin-top:9px" }),
+        h("div", { class: "grow" }, h("div", { class: "nm" }, name, rest.length ? h("small", null, rest.join(" — ")) : null), h("p", { class: "cl" }, koCodes(oneLine(e.headline)))),
+        e.status === "paused" ? chip("중단", "fill") : null);
+    })));
+}
+
 async function vHome() {
   const idx = await load("index.json");
   const root = h("div");
-  root.append(title("AI 실험실"),
-    h("p", { class: "lead" }, "프롬프트를 고치며 돌린 실험을, 누가 어떤 상황에서 뭐라고 했고 AI가 뭐라고 답했는지까지 열어 볼 수 있는 화면이에요."));
-  if (idx.v3) {
-    const flow = h("div", { class: "flow" });
-    idx.v3.progress.forEach((s, i) => {
-      if (i) flow.append(h("i", { class: "ar" }, "›"));
-      flow.append(h("span", { class: s.status === "done" ? "done" : s.status === "doing" ? "on" : "", title: s.note || "" },
-        h("i", { class: "sd " + (s.status === "done" ? "ok" : s.status === "doing" ? "mid" : "off") }), s.name));
-    });
-    root.append(h("div", { class: "card" },
-      h("div", { class: "lrow top", style: "padding:0;flex-wrap:wrap" },
-        h("i", { class: "sd ok", style: "margin-top:7px" }),
-        h("div", { class: "grow" }, h("div", { class: "big2" }, idx.v3.label),
-          h("p", { class: "small", style: "margin:2px 0 0" }, `지금 쓰는 데이터는 v3예요 — 사람 ${idx.v3.people}명(개발용) · ${idx.v3.days}일 기록 · 시나리오 ${idx.v3.scenarios_dev}개 · 말로 하는 대화 ${idx.counts.v3_convs}개(E0 기준 대화).`)),
-        btn("사람 보기", "#/people")),
-      h("div", { style: "margin-top:12px" }, flow),
-      idx.v3.progress.filter((s) => s.note && s.status !== "todo").map((s) => h("p", { class: "note" }, `${s.name} — ${s.note}`)),
-      idx.v3.progress.some((s) => s.status === "todo") ? h("p", { class: "small", style: "margin:12px 0 2px;font-weight:600" }, "남은 실험") : null,
-      idx.v3.progress.filter((s) => s.status === "todo").map((s) => h("p", { class: "note" }, s.note ? `${s.name} — ${s.note}` : s.name)),
-      h("div", { class: "go", style: "padding-top:10px" }, btn("E0 결과 보기", hExp("e0")), btn("실험 정리 읽기", "#/summary", true), btn("프롬프트 카드", "#/cards", true))));
+  root.append(title("AI 실험실"));
+  if (idx.v3 && idx.v3.progress) {
+    const p = idx.v3.progress; const done = p.filter((x) => x.status === "done").length; const doing = p.find((x) => x.status === "doing");
+    const nm = (x) => x.name.replace(/^E\d+\s+/, "");
+    root.append(h("p", { class: "lead", style: "font-size:16px;color:var(--ink);margin:0 0 14px" }, `AI 프롬프트 실험 · ${p.length}단계 중 ${done}단계 완료${doing ? ` · 현재 "${nm(doing)}" 실험 진행 중` : ""}`));
   }
-  root.append(h("div", { class: "card dash" }, h("p", { class: "small", style: "margin:0" }, `아래 '예전' 표시가 붙은 실험 결과 · 대화는 ${idx.round_label} 기록이에요. 그때는 AI 생각을 저장하지 않아서 대화 화면의 'AI 생각' 칸이 '기록 없음'으로 보여요.`)));
+  root.append(firstTimeCard());
+  if (idx.v3) root.append(stepsSection(idx));
+  const past = pastSection(idx);
+  if (past) root.append(past);
 
+  const rp = idx.recent_prompts;
+  if (rp.length) {
+    // 앞 이름표(T2 · SIM …)로 어느 자리의 프롬프트인지 한국어 이름을 찾아 앞에 둠
+    const slot = (ref) => { const k = String(ref).split("@")[0]; const f = idx.features.find((x) => x.id === k || (x.id === "T45" && /^T[45]$/.test(k))); return f ? f.name : null; };
+    root.append(section(["최근 수정한 프롬프트", h("small", null, "최근 수정분")], rp.map((p) => h("div", { class: "lrow" },
+      h("span", { class: "muted num", style: "flex:none;width:3.4rem;font-size:12.5px" }, p.date.slice(5).replace("-", "/")),
+      h("div", { class: "grow" }, h("a", { href: hPrompt(p.ref), style: "font-weight:600" }, slot(p.ref) ? [slot(p.ref), h("span", { class: "muted small", style: "font-weight:400" }, ` (${p.ref})`)] : p.ref), " ", statusChip(p.status_ko), h("div", { class: "small" }, plainKo(p.note))),
+      p.parent ? btn(`비교 +${p.added} −${p.removed}`, href(["diff"], { a: p.parent, b: p.ref }), true, true) : null))));
+  }
+
+  // 예전 실험의 진행 · 크레딧 · 갱신 정보는 접어 둠
   const flow = h("div", { class: "flow" });
   idx.stages.forEach((s, i) => {
     if (i) flow.append(h("i", { class: "ar" }, "›"));
@@ -500,35 +641,13 @@ async function vHome() {
     flow.append(h("span", { class: cls, title: s.note || "" }, h("i", { class: "sd " + dot }), s.name));
   });
   const cr = idx.credit;
-  root.append(section("진행 (예전 · 라운드 1)", flow,
+  root.append(h("div", { class: "card" }, h("details", { style: "margin:0" }, h("summary", null, "예전 실험의 진행 · 크레딧 · 자료 정보 (펼치기)"),
+    h("div", { style: "margin-top:12px" }, flow),
     idx.stages.filter((s) => s.note).map((s) => h("p", { class: "note" }, `${s.name} — ${s.note}`)),
-    h("div", { class: "lrow", style: "margin-top:12px;border-top:1px solid var(--line);flex-wrap:wrap" },
-      cr ? h("div", { class: "bar-line" },
-        h("span", null, h("span", { class: "sub" }, "크레딧 "), h("b", { class: "num" }, usd(cr.spent_usd)), h("span", { class: "sub" }, ` / 실험 상한 $${cr.block_usd} (전체 $${cr.credit_usd}, ${cr.expires} 만료)`)),
-        h("span", { class: "prog" }, h("b", { style: `width:${Math.min(100, (cr.spent_usd / cr.block_usd) * 100)}%` }))) : null),
-    h("p", { class: "note" }, `마지막 갱신 ${kst(idx.generated_at)} · 대화 ${idx.counts.convs} (v3 ${idx.counts.v3_convs}) · 사람 ${idx.counts.people} · 프롬프트 ${idx.counts.prompts} · 실험 ${idx.counts.experiments}`)));
-
-  root.append(h("div", { class: "h2" }, "실험별 결론"));
-  const grid = h("div", { class: "grid" });
-  for (const e of idx.experiments) {
-    grid.append(h("div", { class: "card xcard" },
-      h("div", { class: "sid" }, `${expLabel(e)} · ${e.round === "v3" ? "v3" : "예전"} · ${e.status === "paused" ? "멈춤" : "끝남"}`),
-      h("div", { class: "big2" }, h("a", { href: hExp(e.id) }, e.title)),
-      h("p", { class: "sub", style: "margin:0;font-size:13.5px" }, e.headline),
-      h("ul", null, e.bullets.map((b) => h("li", null, b))),
-      h("div", { class: "go" },
-        btn("자세히", hExp(e.id)),
-        e.convs > 0 ? btn(`대화 보기 (${e.convs})`, href(["conv"], { exp: e.id }), true) : h("span", { class: "muted small" }, "대화 파일 없음 (재생 · 계산 실험)"))));
-  }
-  root.append(grid);
-
-  const rp = idx.recent_prompts;
-  if (rp.length) {
-    root.append(section("최근 바뀐 프롬프트", rp.map((p) => h("div", { class: "lrow" },
-      h("span", { class: "muted num", style: "flex:none;width:3.4rem;font-size:12.5px" }, p.date.slice(5).replace("-", "/")),
-      h("div", { class: "grow" }, h("a", { href: hPrompt(p.ref), style: "font-weight:600" }, p.ref), " ", statusChip(p.status_ko), h("div", { class: "small" }, p.note)),
-      p.parent ? btn(`비교 +${p.added} −${p.removed}`, href(["diff"], { a: p.parent, b: p.ref }), true, true) : null))));
-  }
+    cr ? h("div", { class: "bar-line", style: "margin-top:12px" },
+      h("span", null, h("span", { class: "sub" }, "크레딧 "), h("b", { class: "num" }, usd(cr.spent_usd)), h("span", { class: "sub" }, ` / 실험 상한 $${cr.block_usd} (전체 $${cr.credit_usd}, ${cr.expires} 만료)`)),
+      h("span", { class: "prog" }, h("b", { style: `width:${Math.min(100, (cr.spent_usd / cr.block_usd) * 100)}%` }))) : null,
+    h("p", { class: "note" }, `마지막 갱신 ${kst(idx.generated_at)} · 대화 ${idx.counts.convs} (v3 ${idx.counts.v3_convs}) · 사람 ${idx.counts.people} · 프롬프트 ${idx.counts.prompts} · 실험 ${idx.counts.experiments}`))));
   root.append(h("p", { class: "note" }, idx.test_policy));
   return { node: root, title: "홈" };
 }
@@ -545,10 +664,10 @@ async function vExpList(q) {
     syncHash(["exp"], state);
     listBox.replaceChildren(...ex.experiments.filter((e) => !state.feat || e.features.includes(state.feat)).map((e) =>
       h("div", { class: "card xcard" },
-        h("div", { class: "sid" }, `${expLabel(e)} · ${e.round === "v3" ? "v3" : "예전"} · ${e.period} · ${e.status === "paused" ? "멈춤" : "끝남"}`),
+        h("div", { class: "sid" }, `${expLabel(e)} · ${e.round === "v3" ? "v3" : "예전"} · ${e.period} · ${e.status === "paused" ? "중단" : "완료"}`),
         h("div", { class: "big2" }, h("a", { href: hExp(e.id) }, e.title)),
         h("div", { class: "chips" }, e.features.map((f) => chip(featName(idx, f), "fill"))),
-        h("p", { class: "sub", style: "margin:0;font-size:13.5px" }, e.headline),
+        h("p", { class: "sub", style: "margin:0;font-size:13.5px" }, plainKo(e.headline)),
         h("div", { class: "go" }, btn("자세히", hExp(e.id)), e.convs ? btn(`대화 ${e.convs}`, href(["conv"], { exp: e.id }), true) : null))));
   };
   root.append(title("실험"), h("p", { class: "lead" }, `실험 ${ex.experiments.length}개 — v3(말로 하는 대화) E0와 예전 · 라운드 1(타이핑 대화)의 실험들이에요. 카드를 누르면 무엇을 비교했고 결과가 어땠는지 나와요.`),
@@ -561,16 +680,16 @@ function tableOf(t) {
   const hasLinks = t.rows.some((r) => r.links);
   // 숫자 칸은 오른쪽, 글 칸은 왼쪽
   const numeric = t.cols.map((_, i) => t.rows.every((r) => /^[0-9$—.~(+−-]/.test(r.cells[i] || "—")));
-  const head = h("tr", null, h("th", null, ""), t.cols.map((c, i) => h("th", { class: numeric[i] ? "r" : "" }, c)));
+  const head = h("tr", null, h("th", null, ""), t.cols.map((c, i) => h("th", { class: numeric[i] ? "r" : "" }, plainKo(c))));
   const body = t.rows.map((r) => h("tr", null,
-    h("td", null, r.label, r.note ? h("span", { class: "note" }, r.note) : null),
+    h("td", null, plainKo(r.label), r.note ? h("span", { class: "note" }, plainKo(r.note)) : null),
     t.cols.map((_, i) => {
-      const cell = r.cells[i] === undefined ? "" : r.cells[i];
+      const cell = r.cells[i] === undefined ? "" : plainKo(r.cells[i]);
       const l = r.links && r.links[i];
       return h("td", { class: numeric[i] ? "r num" : "" }, l ? h("a", { href: "#/conv?" + l }, cell) : cell);
     })));
-  return h("div", null, h("h3", null, t.title), h("div", { class: "scroll" }, h("table", null, h("thead", null, head), h("tbody", null, body))),
-    hasLinks ? h("p", { class: "note" }, "굵게 밑줄 친 칸을 누르면 그 대화 목록이 열려요.") : null, t.note ? h("p", { class: "note" }, t.note) : null);
+  return h("div", null, h("h3", null, plainKo(t.title)), h("div", { class: "scroll" }, h("table", null, h("thead", null, head), h("tbody", null, body))),
+    hasLinks ? h("p", { class: "note" }, "굵게 밑줄 친 칸을 누르면 그 대화 목록이 열려요.") : null, plainNote(t.note || "") ? h("p", { class: "note" }, plainKo(plainNote(t.note))) : null);
 }
 
 function runStatsTable(stats) {
@@ -609,25 +728,69 @@ function diffBlock(d) {
   return wrap;
 }
 
+// 이 실험이 잰 것 — 첫 결과 표에서 읽음. 표의 줄이 잰 항목이면 그 이름들, 줄이 판 이름 · 가설이면 표 제목을 씀. 없으면 null
+function measuredOf(e) {
+  const t = (e.tables || [])[0];
+  if (!t || !t.rows.length) return null;
+  const keys = e.arms.flatMap((a) => [a.id, a.label]).filter(Boolean);
+  const isArm = (l) => /^h\d/.test(l) || keys.some((k) => l === k || l.startsWith(k + " "));
+  const names = t.rows.filter((r) => !/^\s/.test(String(r.label))).map((r) => String(r.label).trim().replace(/\s*\([^)]*\)\s*$/, "")).filter(Boolean);
+  const items = [...new Set(names.filter((l) => !isArm(l)))];
+  if (items.length && items.length * 2 > names.length) {
+    // 항목 이름을 길이 110자 안에서 (적어도 2개) 보여 주고 나머지는 개수로
+    let n = 0, len = 0;
+    while (n < Math.min(4, items.length) && (n < 2 || len + items[n].length <= 110)) { len += items[n].length + 3; n++; }
+    return items.slice(0, n).join(" · ") + (items.length > n ? ` 외 ${items.length - n}가지` : "");
+  }
+  return t.title || null;
+}
+
+// 출처 — 이 화면에서 읽을 수 있는 글은 링크로, 나머지 원본 파일 이름은 접어 둠
+function sourcesNote(e) {
+  const links = [], raw = [];
+  for (const s of e.sources) {
+    const t = mdLinkTarget(String(s).split(/\s+/)[0]);
+    if (t && !t.ext) links.push(h("a", { href: t.href }, t.href === "#/summary" ? "실험 정리" : "프롬프트 카드"));
+    else raw.push(String(s));
+  }
+  return h("div", { style: "margin-top:10px" },
+    links.length ? h("p", { class: "note", style: "margin:0" }, "더 자세히 읽기: ", links.map((a, i) => [i ? " · " : "", a])) : null,
+    raw.length ? h("details", null, h("summary", { class: "small" }, "원본 자료 이름 (개발자용)"), h("p", { class: "note", style: "margin:4px 0 0" }, raw.join(" · "))) : null);
+}
+
 async function vExp(id) {
   const [idx, ex] = await Promise.all([load("index.json"), load("experiments.json")]);
   const e = ex.experiments.find((x) => x.id === id);
   if (!e) throw new Error(`실험 ${id}가 없어요`);
   const root = h("div");
   root.append(crumbs({ t: "실험", href: "#/exp" }, expLabel(e)),
-    title(e.title),
-    h("div", { class: "chips", style: "margin:6px 0 16px" }, chip(e.round_label, e.round === "v3" ? "ink" : "fill"), chip(e.period), chip(e.status === "paused" ? "멈춤" : "끝남", "", { dot: e.status === "paused" ? "zz" : "ok" }), e.features.map((f) => chip(featName(idx, f)))));
-  root.append(h("div", { class: "card" }, kvl("질문", e.question), kvl("누구로", e.who), kvl("한 줄 결론", h("b", null, e.headline))));
+    title(plainKo(e.title)),
+    h("div", { class: "chips", style: "margin:6px 0 16px" }, chip(e.round_label, e.round === "v3" ? "ink" : "fill"), chip(e.period), chip(e.status === "paused" ? "중단" : "완료", "", { dot: e.status === "paused" ? "zz" : "ok" }), e.features.map((f) => chip(featName(idx, f)))));
+  // 이 실험은 — 무엇을 바꿔 봤고(판) → 무엇으로 쟀고 → 결론, 세 줄만. 데이터에 없는 줄은 뺌. 질문 · 대상은 접어 둠
+  const meas = measuredOf(e);
+  const armLine = h("span", null, e.arms.map((a, i) => { const [ko, code] = splitCode(a.label); return [i ? " · " : "", h("b", null, ko), codeTail(code, ko)]; }));
+  const why = [e.question ? kvl("실험 질문", plainKo(e.question)) : null, e.who ? kvl("대상", plainKo(e.who)) : null].filter(Boolean);
+  root.append(h("div", { class: "sec" }, bigH2("실험 개요"),
+    h("div", { class: "card lede" },
+      e.arms.length ? kvl(e.arms.length > 1 ? `비교한 판 (${e.arms.length})` : "실행한 판", armLine) : null,
+      meas ? kvl("측정 항목", plainKo(meas), h("div", { class: "small" }, "수치는 아래 '결과' 표 참고.")) : null,
+      e.headline ? kvl("결론", h("b", null, plainKo(e.headline))) : null,
+      why.length ? h("details", { style: "margin-top:6px;border-top:1px solid var(--line);padding-top:10px" }, h("summary", null, "왜 했고 누구로 했나 (펼치기)"), why) : null)));
 
-  const armRows = e.arms.map((a) => h("div", { class: "lrow top" },
-    h("div", { style: "flex:none;width:9.5rem;font-weight:600" }, a.label),
-    h("div", { class: "grow" }, h("div", { class: "small", style: "margin-bottom:6px" }, a.desc),
-      h("div", { class: "chips" }, a.prompts.map((k) => chip(k, "fill", { href: hPrompt(k) })), a.runs.map((r) => chip(r, "", { href: href(["conv"], { run: r }) }))))));
-  root.append(section("비교한 판", armRows));
+  const armRows = e.arms.map((a) => {
+    const [ko, code] = splitCode(a.label);
+    return h("div", { class: "lrow top" },
+      h("div", { style: "flex:none;width:9.5rem;font-weight:600" }, ko, code ? h("div", { class: "small muted", style: "font-weight:400" }, code) : null),
+      h("div", { class: "grow" }, h("div", { class: "small", style: "margin-bottom:6px" }, plainKo(a.desc)),
+        h("div", { class: "chips" },
+          a.prompts.length ? h("span", { class: "small muted" }, "쓴 프롬프트") : null, a.prompts.map((k) => chip(k, "fill", { href: hPrompt(k) })),
+          a.runs.length ? h("span", { class: "small muted" }, "돌린 대화 묶음") : null, a.runs.map((r) => chip(r, "", { href: href(["conv"], { run: r }) })))));
+  });
+  root.append(section(["비교한 판", h("small", null, "같은 상황을 판마다 돌렸어요")], armRows));
 
   root.append(section("결과", e.tables.map(tableOf)));
-  if (e.run_stats.length) root.append(section("대화 요약 (대화 파일에서 바로 센 값)", runStatsTable(e.run_stats),
-    h("p", { class: "note" }, "보고서 숫자는 정리 전 1회차 기준이라 조금 다를 수 있어요. 실행 이름을 누르면 그 대화 목록이 열려요.")));
+  if (e.run_stats.length) root.append(section("대화 요약 (대화 기록에서 바로 센 값)", runStatsTable(e.run_stats),
+    h("p", { class: "note" }, "보고서 숫자는 정리 전 1회차 기준이라 조금 다를 수 있어요. 판 이름을 누르면 그 대화 목록이 열려요.")));
   if (e.diffs.length) {
     const body = h("div");
     const show = (i) => body.replaceChildren(diffBlock(e.diffs[i]));
@@ -644,8 +807,8 @@ async function vExp(id) {
   const exs = e.examples.filter((x) => x.items.length);
   if (exs.length) root.append(section("대화 예시", exs.map((x) => h("div", null, h("h3", null, x.label), x.items.map((it) => h("a", { class: "lrow exrow", href: hConv(it.run, it.id, it.u) },
     h("b", { class: "mono-id", style: "flex:none;min-width:8rem" }, it.u ? `${it.id} · 말 ${it.u}` : it.id), h("span", { class: "grow small" }, `${it.who} · ${it.type_ko}${it.note ? " — " + it.note : ""}`)))))));
-  root.append(section("결론", h("p", { style: "font-size:14.5px;line-height:1.65" }, e.conclusion), h("h3", null, "한계 · 주의"),
-    h("ul", { class: "small", style: "margin:0;padding-left:18px;line-height:1.6" }, e.caveats.map((c) => h("li", null, c))), h("p", { class: "note", style: "margin-top:10px" }, "출처: " + e.sources.join(" · "))));
+  root.append(section("결론", h("p", { style: "font-size:14.5px;line-height:1.65" }, plainKo(e.conclusion)), h("h3", null, "한계 · 주의"),
+    h("ul", { class: "small", style: "margin:0;padding-left:18px;line-height:1.6" }, e.caveats.map((c) => h("li", null, plainKo(c)))), sourcesNote(e)));
   if (e.convs > 0) root.append(h("p", null, btn(`이 실험의 대화 ${e.convs}개 보기`, href(["conv"], { exp: e.id }))));
   return { node: root, title: e.title };
 }
@@ -907,7 +1070,7 @@ function highlightStt(stt, noise) {
 function t0Block(v) {
   return h("details", { class: "t0d" }, h("summary", null, `정리(T0)를 했다면 — ${v.t0.length}판이 이 말을 어떻게 고쳤나 (펼치기)`),
     h("p", { class: "small", style: "margin:6px 0" }, "실제 대화는 정리 없이 받아쓰기 그대로 진행했어요. 아래는 같은 말을 정리 프롬프트에 따로 넣어 본 결과예요 (E0)."),
-    h("div", { class: "t0v" }, h("b", null, "받아쓰기 그대로 (NONE)"), h("div", null, v.stt)),
+    h("div", { class: "t0v" }, h("b", null, "받아쓰기 그대로 (정리 안 함)"), h("div", null, v.stt)),
     v.t0.map((x) => h("div", { class: "t0v" },
       h("b", null, x.name, x.ms ? h("span", { class: "muted small" }, `  ${(x.ms / 1000).toFixed(1)}초`) : null),
       h("div", null, x.clean || h("span", { class: "muted" }, "(빈 글)")),
@@ -961,7 +1124,7 @@ function turnCards(conv, opts) {
         const ex = t.extract;
         card.append(drow("② 추출", h("ul", null, ex.lines.map((l) => h("li", null, l))),
           !ex.valid ? h("div", { class: "probs" }, "추출 결과가 형식에 안 맞아요" + (ex.errors.length ? ": " + ex.errors.join("; ") : "")) : null,
-          !opts.compact && ex.raw ? h("details", null, h("summary", null, "원본 JSON"), h("pre", null, JSON.stringify(ex.raw, null, 1))) : null,
+          !opts.compact && ex.raw ? h("details", null, h("summary", null, "추출 결과 원본 JSON"), h("pre", null, JSON.stringify(ex.raw, null, 1))) : null,
           !opts.compact && ex.thinking ? h("details", null, h("summary", null, "추출 생각 요약 (모델 원문)"), h("p", { class: "small", style: "margin:6px 0 0" }, "모델이 영어로 쓴 생각 요약이에요."), h("pre", null, ex.thinking)) : null));
       }
       if (t.server) card.append(drow("서버", h("ul", null, t.server.lines.map((l) => h("li", null, l)))));
@@ -1120,11 +1283,11 @@ async function vPrompts(q) {
           card.append(h("div", { class: "prow" + (v ? " v" : "") },
             h("span", { class: "id", style: `padding-left:${Math.min(depth, 4) * 14}px` }, h("a", { href: hPrompt(p.ref) }, p.ref), p.parent ? null : h("span", { class: "muted small" }, " (처음)")),
             h("span", null, statusChip(p.status_ko)),
-            h("span", null, p.note, p.result ? h("span", { class: "small", style: "display:block" }, "→ " + p.result) : null),
+            h("span", null, plainKo(p.note), p.result ? h("span", { class: "small", style: "display:block" }, "→ " + plainKo(p.result)) : null),
             h("span", { class: "small num" }, p.date.slice(5).replace("-", "/"), p.diff ? ` +${p.diff.added} −${p.diff.removed}` : "", p.convs ? h("a", { style: "display:block;color:var(--ink)", href: href(["conv"], { pv: p.ref }) }, `대화 ${p.convs}`) : null)));
         }
       }
-      box.append(h("div", { class: "fam" }, h("div", { class: "h2" }, f.name, h("small", null, f.where)), card));
+      box.append(h("div", { class: "fam" }, h("div", { class: "h2" }, f.name, h("small", null, plainKo(f.where))), card));
     }
     if (!box.firstChild) box.append(empty("조건에 맞는 프롬프트가 없어요."));
   };
@@ -1177,17 +1340,17 @@ async function vPrompt(key) {
   const root = h("div");
   root.append(crumbs({ t: "프롬프트", href: "#/prompts" }, p.id, p.version),
     title(p.ref),
-    h("div", { class: "chips", style: "margin:6px 0 16px" }, statusChip(p.status_ko), chip(p.date.slice(5).replace("-", "/") + " 수정"), p.model ? chip(p.model, "fill") : null, p.effort ? chip("effort " + p.effort, "fill") : null, chip("sha " + p.sha, "fill")));
+    h("div", { class: "chips", style: "margin:6px 0 16px" }, statusChip(p.status_ko), chip(p.date.slice(5).replace("-", "/") + " 수정", "", { title: "내용 지문 " + p.sha }), p.model ? chip(p.model, "fill") : null, p.effort ? chip("생각 깊이 " + p.effort, "fill", { title: "모델에게 준 생각 깊이 설정" }) : null));
   root.append(h("div", { class: "card" },
-    kvl("한 줄", p.note || "—"),
-    p.result ? kvl("결과", p.result) : null,
+    kvl("한 줄", plainKo(p.note || "—")),
+    p.result ? kvl("결과", plainKo(p.result)) : null,
     kvl("부모 버전", parent ? h("span", null, h("a", { href: hPrompt(parent.ref) }, parent.ref), "  ", btn("부모와 비교", href(["diff"], { a: parent.ref, b: p.ref }), true, true)) : "없음 (처음 판)"),
     kvl("갈라진 판", kids.length ? h("div", { class: "chips" }, kids.map((k) => chip(k.ref, "", { href: hPrompt(k.ref) }))) : "없음"),
     kvl("쓴 실험", p.used_in.length ? h("div", { class: "chips" }, p.used_in.map((e) => chip(expTitle(e), "fill", { href: hExp(e) }))) : "—"),
-    kvl("쓴 대화", p.convs ? h("a", { href: href(["conv"], { pv: p.ref }) }, `${p.convs}개 보기`) : "대화 파일 없음 (재생 · 계산 실험에서 쓴 판)")));
+    kvl("쓴 대화", p.convs ? h("a", { href: href(["conv"], { pv: p.ref }) }, `${p.convs}개 보기`) : "대화 기록 없음 (재생 · 계산 실험에서 쓴 판)")));
   if (parent && p.diff) {
     const d = diffUnified(parent.text, p.text, 1);
-    root.append(section(`바뀐 줄 — ${parent.ref} 대비`, p.diff.lines.length <= 1 ? h("p", { class: "empty" }, "version 줄만 달라요. 내용은 같아요.") : null, d.box, h("p", { class: "note" }, "초록 = 새 줄, 빨강 = 뺀 줄")));
+    root.append(section(`바뀐 줄 — ${parent.ref} 대비`, p.diff.lines.length <= 1 ? h("p", { class: "empty" }, "버전 표시 줄만 달라요. 내용은 같아요.") : null, d.box, h("p", { class: "note" }, "초록 = 새 줄, 빨강 = 뺀 줄")));
   }
   // 다른 판과 비교 고르기
   const same = pr.prompts.filter((x) => x.id === p.id && x.ref !== p.ref);
@@ -1203,12 +1366,12 @@ async function vDiff(q) {
   const pr = await load("prompts.json");
   const a = pr.prompts.find((x) => x.ref === q.get("a"));
   const b = pr.prompts.find((x) => x.ref === q.get("b"));
-  if (!a || !b) throw new Error("비교할 두 버전이 필요해요 (예: #/diff?a=T1@v1&b=T1@v1.2-flow)");
+  if (!a || !b) throw new Error("비교할 두 버전이 필요해요. 프롬프트 목록에서 버전을 골라 '비교'를 눌러 주세요.");
   const ci = await load("conv-index.json");
   const root = h("div");
   const d = diffUnified(a.text, b.text, 2);
   root.append(crumbs({ t: "프롬프트", href: "#/prompts" }, "비교"), title(`${a.ref} → ${b.ref}`),
-    h("p", { class: "lead" }, d.same ? "두 버전의 내용이 같아요." : `새 줄 ${d.added}개 · 뺀 줄 ${d.removed}개 (version 머리말 한 줄 포함)`));
+    h("p", { class: "lead" }, d.same ? "두 버전의 내용이 같아요." : `새 줄 ${d.added}개 · 뺀 줄 ${d.removed}개 (버전 표시 한 줄 포함)`));
   root.append(section("바뀐 줄", d.box, h("p", { class: "note" }, "초록 = 새 줄, 빨강 = 뺀 줄")));
   // 이 변경으로 결과가 달라진 대화: A를 쓴 대화와 B를 쓴 대화에서 같은 상황끼리 문제 여부가 다른 것
   const rowsA = ci.rows.filter((r) => r.pv.includes(a.ref) && !r.pv.includes(b.ref));
@@ -1223,39 +1386,56 @@ async function vDiff(q) {
       h("h3", { style: "margin-top:14px" }, `좋아진 것 ${better.length}개`), better.length ? better.slice(0, 12).map(line) : empty("없음"),
       h("h3", null, `나빠진 것 ${worse.length}개`), worse.length ? worse.slice(0, 12).map(line) : empty("없음")));
   } else {
-    root.append(section("이 변경으로 결과가 달라진 대화", empty("두 버전을 모두 쓴 대화 파일이 없어요. 재생 · 계산 실험에서만 쓴 버전은 대화 단위로 비교할 수 없어요.")));
+    root.append(section("이 변경으로 결과가 달라진 대화", empty("두 버전을 모두 쓴 대화 기록이 없어요. 재생 · 계산 실험에서만 쓴 버전은 대화 단위로 비교할 수 없어요.")));
   }
   return { node: root, title: "프롬프트 비교" };
 }
 
 /* ───────── 용어 ───────── */
-const TERMS = [
-  ["숨은 사실", "가상 유저만 아는 오늘의 진짜 사정. AI가 대화로 알아내야 해요. 독립 검수자(AUDIT)가 대화를 읽고 '말했는지'를 따로 판정해요."],
-  ["전달됨 · 흐릿하게 · 정정", "숨은 사실을 사용자가 분명히 말함 / 대충 말함 / 틀린 기록을 고쳐 말함. '안 말함'은 AI가 못 이끌어 냈다는 뜻이기도 해요."],
-  ["감지 오류 (틀린 자동 기록)", "앱이 자동으로 모은 기록(출발 · 도착 등)이 실제와 달라서 사용자가 '아니에요'라고 고쳐야 하는 경우. 기준판에서 6개 대화뿐이라 숫자가 작아요."],
-  ["확인 필요", "서버가 '저장할까요?'를 물어야 하는 것 (일정 · 시각 · 알람 바꾸기)."],
-  ["서버 질문", "서버가 정한 질문(원인 · 중요도 · 준비물 등). AI는 대화당 한 번, 뜻을 바꾸지 않고 말만 다듬어 물어요."],
-  ["규칙 어김", "코드가 세는 규칙 위반: 한 번에 두 개 이상 묻기, 서버가 안 한 저장을 했다고 말하기, 저장 약속, 위험하지 않은데 109 안내, 서버가 준 적 없는 숫자, 해요체 아님, 너무 긴 답, 시각 표기 섞임 등. 물음 종류 표시(acts) 어긋남은 표기 약속이라 따로 셈."],
-  ["돌아보기 (REFLECT)", "'오늘 어땠어요?'처럼 하루를 돌아보는 물음. 자기 전 대화는 마무리 전에 1번 하는 게 규칙이에요."],
-  ["이른 마무리", "사용자가 끝내자는 신호(잘게, ㅂㅂ)를 안 보냈는데 AI가 먼저 마무리 답(end)을 낸 경우."],
-  ["판 (A · B · C)", "같은 상황에서 프롬프트나 서버 설정만 바꿔 다시 돌린 것. 실행 이름(fv1-a1 등)은 그 판을 돌린 폴더예요."],
-  ["개발용 / 시험용", "프롬프트를 고칠 때 보는 사람 8명 / 마지막에 한 번만 확인하는 처음 보는 사람 4명. 시험용은 최종 시험 전까지 이 화면에 없어요."],
-  ["F1", "말한 것 중 맞게 뽑은 비율과 뽑은 것 중 맞는 비율을 합친 점수 (1에 가까울수록 좋음). 추출(T2)을 채점할 때 써요."],
-  ["승률 (쌍 비교)", "같은 자리에서 새 답과 기준 답을 판정 모델이 비교해 새 답이 이긴 비율. 0.5면 비김. 판정 잡음이 ±0.1 정도라 그보다 작은 차이는 못 가려요."],
-  ["정답표 (gold)", "대화에서 뽑아야 할 정답. 가상 유저 자기보고로 먼저 만들고(v0), 독립 검수 결과로 다시 만든 것이 v1이에요."],
-  ["가상 유저 (SIM)", "AI(Sonnet)가 가상 인물 역할로 사용자 말을 만들어 내는 도구. 설문(SIM_UX)도 같이 써서 귀찮음 · 자연스러움을 5점으로 물어요."],
-  ["v3 · 예전 · 라운드 1", "v3 = 말로 하는 대화(받아쓰기) 기준의 지금 쓰는 데이터와 실험(E0 ~). 예전 · 라운드 1 = 타이핑으로 나눈 대화 실험으로, 받아쓰기 단계와 AI 생각 기록이 없어요. 화면에는 'v3' · '예전' 표시로 구분해요."],
-  ["pinball · 커버리지", "추천 시간이 실제와 얼마나 어긋났는지(낮을수록 좋음) / 추천 시간 안에 준비가 끝난 날의 비율(목표 80%). 추천 비서 실험에서 써요."],
-  ["받아쓰기 (STT)", "폰이 마이크로 들은 말을 글자로 바꿔 주는 기능. 앱은 안드로이드 기본(구글) 음성 인식을 가정해요. 실험에서는 실제 엔진이 아니라 규칙으로 흉내 낸 잡음(문장부호 · 숫자 표기 · 군말 · 띄어쓰기 · 소리 틀림 · 끝 잘림)을 입혀요."],
-  ["하려던 말 (intended)", "가상 유저가 입으로 말했을 문장 그대로. 받아쓰기가 이걸 글자로 바꾸면서 흠이 생겨요. 검수는 하려던 말을 기준으로 해요."],
-  ["정리 (T0)", "받아쓰기 글을 추출 · 답 앞에서 한 번 더 LLM으로 고치는 단계 (숫자 통일 · 말 바꾸기 정리 · 이름 되살리기). E0 결과: 따로 두지 않기로 했어요."],
-  ["표시 (uncertain)", "정리가 '잘못 들렸을 수 있다'고 짚어 둔 곳. 이걸 서버가 되물을 것으로 넘기면 AI가 자연스럽게 되물어요."],
-  ["생각 요약 (모델 원문)", "AI가 답하기 전에 한 생각의 요약. 모델이 영어로 쓰고, 이 화면은 번역 · 가공 없이 그대로 보여 줘요. v3 실험부터 저장해요. 쉬운 턴은 생각 없이 바로 답해서 비어 있어요."],
-  ["상태 점", "초록 = 좋음 · 끝남 · 문제 없음, 파랑 = 진행 중 · 후보, 노랑 = 참고 · 멈춤, 빨강 = 문제. 속이 빈 점은 아직 안 한 것이에요."],
+// 앞쪽 TERMS_CORE = 처음 보는 사람이 먼저 알아야 할 말, 뒤쪽 TERMS_MORE = 결과 표 · 대화 화면에 나오는 말
+const TERMS_CORE = [
+  ["프롬프트", "AI에게 '이런 일을 이렇게 해 줘'라고 미리 적어 두는 글이에요. 같은 AI도 프롬프트을 어떻게 쓰느냐에 따라 답이 달라져요. 그래서 이 실험실은 프롬프트을 한 군데씩 고쳐 가며 어느 쪽이 나은지 비교해요. 앱에서 AI가 말하는 자리마다 프롬프트이 하나씩 있어요."],
+  ["가상 유저 (SIM)", "습관이 다른 가상의 사람(서윤 · 도현 · 하은 …)을 AI가 연기해서, 앱 사용자 대신 AI와 대화해 주는 도구예요. 사람마다 말투 · 통학 방법 · 알람을 끈 뒤 습관이 달라요. 대화가 끝나면 '귀찮았나 · 자연스러웠나'를 5점으로 답하는 설문도 이 AI가 해요."],
+  ["판 (A · B · C …)", "같은 상황에서 프롬프트(또는 서버 설정)을 한 군데씩 바꿔 다시 돌린 한 벌이에요. A판 · B판처럼 이름을 붙이고, 앞 판 위에 하나를 더 얹기도 해요 (예: B = A + 서버가 고름). 판끼리 같은 상황의 점수를 견줘서 어느 쪽이 나은지 봐요. 화면의 'fv1-a1' 같은 이름은 그 판을 돌린 기록의 이름이에요."],
+  ["E0 ~ E4 (실험 번호)", "v3 실험에 순서대로 붙인 번호예요. E0 받아쓰기 정리 · E1 대화 답 · E2 추출 · E3 일기 · 코칭 · E4 추천 비서. 하나가 끝날 때마다 '실험 정리'에 한 장씩 채워져요."],
+  ["받아쓰기 (STT)", "사용자가 폰에 말하면 마이크가 들은 대로 글자로 적어 주는 기능이에요. 가끔 숫자를 다르게 적거나('일곱 시 반'과 '7시 30분') 비슷한 소리로 잘못 적어요. 앱은 안드로이드 기본(구글) 음성 인식을 가정하고, 실험에서는 실제 엔진 대신 규칙으로 이런 잡음(문장부호 · 숫자 표기 · 군말 · 띄어쓰기 · 소리 틀림 · 끝 잘림)을 흉내 내 입혀요."],
+  ["추출 (T2)", "대화에서 앱이 저장해야 할 것(일정 · 알람 · 기록 확인 · 이유)을 AI가 골라 적는 단계예요. 고른 결과를 정답표와 맞춰 보고 F1 점수로 채점해요."],
+  ["정답표", "대화에서 뽑아야 할 정답을 적어 둔 표예요. 처음엔 가상 유저가 스스로 말한 것(v0)으로 만들었고, 검수 AI가 대화를 다시 읽어 고친 것이 v1이에요."],
+  ["F1", "맞게 뽑은 비율을 하나로 합친 점수예요. '정답 중 뽑아낸 비율'과 '뽑은 것 중 맞는 비율'을 합쳐서, 빠뜨린 것도 엉뚱하게 뽑은 것도 적을수록 높아요. 1이 만점이에요. 추출(T2)을 채점할 때 써요."],
+  ["판정 (AI가 채점)", "'말이 자연스러운가 · 근거가 맞는가'처럼 사람이 일일이 읽기 어려운 것을, 다른 AI가 정해 둔 기준표대로 채점하는 거예요. 이 채점에도 잡음이 있어서, 승률 같은 숫자에는 오차 폭을 같이 적어요."],
+  ["사람 보정 (판정 보정)", "AI가 한 채점이 믿을 만한지 사람이 직접 맞춰 보는 단계예요. 대화 30건쯤을 사람이 읽고 AI 채점과 견줘요. 진행 단계에 '판정 보정'으로 나와요. 그 전의 정답은 AI 검수자가 한 번 판정한 거예요."],
+  ["동결", "한 번 나눈 대화를 그대로 저장해 두고(얼려 두고), 프롬프트만 바꿔 같은 대화를 다시 돌려 보는 방법이에요. 판끼리 똑같은 조건에서 비교하려고 써요. 보고서에는 '대화 120건 동결'처럼 나와요."],
+  ["p50 · p95 (걸리는 시간)", "여러 번 잰 시간을 짧은 것부터 줄 세웠을 때 한가운데 값이 p50이에요 — 보통 걸리는 시간이에요. p95는 100번 중 95번이 이 시간 안에 끝난다는 뜻이라, 느린 편에 걸리는 시간이에요."],
 ];
+const TERMS_MORE = [
+  ["T0 ~ T5 (AI가 일하는 자리)", "앱에서 AI가 일하는 자리마다 붙인 이름표예요. T0 받아쓰기 정리 · T1 대화 답 · T2 추출 · T3 사유 분류 · T4 일기 · T5 코칭. 화면에서는 한국어 이름을 앞에 두고 이름표는 뒤에 작게 적어요."],
+  ["개발용 / 시험용", "프롬프트을 고칠 때 보는 사람 8명 / 마지막에 한 번만 확인하는 처음 보는 사람 4명이에요. 시험용은 최종 시험 전까지 이 화면에 없어요."],
+  ["시나리오", "대화가 시작되는 상황 하나예요 (어느 사람의 · 어느 날 · 어떤 일 — 늦잠 지각, 시험 전날, 새 일정 등). 판마다 같은 시나리오를 돌려서 서로 비교해요."],
+  ["기준판 (v0)", "비교의 출발점이 되는 첫 프롬프트이에요. 새 판이 기준판보다 나아졌는지를 봐요."],
+  ["하려던 말", "가상 유저가 입으로 말하려던 문장 그대로예요. 받아쓰기가 글자로 바꾸는 사이에 틀리는 곳이 생겨요. 검수는 이 문장을 기준으로 해요."],
+  ["대화 답 (T1)", "자기 전 · 기상 후, 사용자가 말할 때마다 AI가 하는 한두 문장 답이에요. 기록을 확인하고, 물어서 숨은 사실을 알아내는 게 일이에요."],
+  ["승률 (쌍 비교)", "같은 자리에서 새 답과 기준 답을 판정 모델이 나란히 놓고 골랐을 때 새 답이 이긴 비율이에요. 0.5면 비김이에요. 판정 잡음이 ±0.1 정도라 그보다 작은 차이는 못 가려요."],
+  ["숨은 사실", "가상 유저만 아는 오늘의 진짜 사정이에요. AI가 대화로 알아내야 해요. 독립 검수자가 대화를 읽고 '말했는지'를 따로 판정해요."],
+  ["전달됨 · 흐릿하게 · 정정", "숨은 사실을 사용자가 분명히 말함 / 대충 말함 / 틀린 기록을 고쳐 말함. '안 말함'은 AI가 못 이끌어 냈다는 뜻이기도 해요."],
+  ["감지 오류 (틀린 자동 기록)", "앱이 자동으로 모은 기록(출발 · 도착 등)이 실제와 달라서 사용자가 '아니에요'라고 고쳐야 하는 경우예요. 기준판에서 6개 대화뿐이라 숫자가 작아요."],
+  ["확인 필요", "서버가 '저장할까요?'를 물어야 하는 것 (일정 · 시각 · 알람 바꾸기)이에요."],
+  ["서버 질문", "서버가 정한 질문(원인 · 중요도 · 준비물 등)이에요. AI는 대화당 한 번, 뜻을 바꾸지 않고 말만 다듬어 물어요."],
+  ["규칙 어김", "코드가 세는 규칙 위반이에요: 한 번에 두 개 이상 묻기, 서버가 안 한 저장을 했다고 말하기, 저장 약속, 위험하지 않은데 109 안내, 서버가 준 적 없는 숫자, 해요체 아님, 너무 긴 답, 시각 표기 섞임 등. 물음 종류 표시가 어긋난 것은 표기 약속이라 따로 셈."],
+  ["돌아보기", "'오늘 어땠어요?'처럼 하루를 돌아보는 물음이에요. 자기 전 대화는 마무리 전에 1번 하는 게 규칙이에요."],
+  ["이른 마무리", "사용자가 끝내자는 신호(잘게, ㅂㅂ)를 안 보냈는데 AI가 먼저 마무리 답을 낸 경우예요."],
+  ["v3 · 예전 · 라운드 1", "v3 = 말로 하는 대화(받아쓰기) 기준의 지금 쓰는 데이터와 실험(E0 ~)이에요. 예전 · 라운드 1 = 타이핑으로 나눈 대화 실험으로, 받아쓰기 단계와 AI 생각 기록이 없어요. 화면에는 'v3' · '예전' 표시로 구분해요."],
+  ["pinball · 커버리지", "추천 시간이 실제와 얼마나 어긋났는지(낮을수록 좋음) / 추천 시간 안에 준비가 끝난 날의 비율(목표 80%)이에요. 추천 비서 실험에서 써요."],
+  ["정리 (T0)", "받아쓰기 글을 추출 · 답 앞에서 한 번 더 AI로 고치는 단계예요 (숫자 통일 · 말 바꾸기 정리 · 이름 되살리기). E0 결과: 따로 두지 않기로 했어요."],
+  ["표시", "정리가 '잘못 들렸을 수 있다'고 짚어 둔 곳이에요. 이걸 서버가 되물을 것으로 넘기면 AI가 자연스럽게 되물어요."],
+  ["생각 요약 (모델 원문)", "AI가 답하기 전에 한 생각의 요약이에요. 모델이 영어로 쓰고, 이 화면은 번역 · 가공 없이 그대로 보여 줘요. v3 실험부터 저장해요. 쉬운 턴은 생각 없이 바로 답해서 비어 있어요."],
+  ["상태 점", "초록 = 좋음 · 끝남 · 문제 없음, 파랑 = 진행 중 · 후보, 노랑 = 참고 · 멈춤, 빨강 = 문제예요. 속이 빈 점은 아직 안 한 것이에요."],
+];
+const TERMS = [...TERMS_CORE, ...TERMS_MORE];
 function vTerms() {
-  return { node: h("div", null, title("용어"), h("p", { class: "lead" }, "화면에 나오는 말을 풀어 쓴 목록이에요."),
-    h("div", { class: "card flush" }, TERMS.map(([k, v]) => h("div", { class: "kvl", style: "grid-template-columns:12rem minmax(0,1fr)" }, h("b", null, k), h("span", { class: "sub" }, v))))), title: "용어" };
+  const list = (items) => h("div", { class: "card flush terms" }, items.map(([k, v]) => h("div", { class: "kvl" }, h("b", null, k), h("span", null, v))));
+  return { node: h("div", null, title("용어"), h("p", { class: "lead", style: "font-size:15px" }, "화면에 나오는 말을 풀어 쓴 목록이에요. '먼저 알아 둘 말'만 읽어도 홈 · 실험 화면은 읽을 수 있어요."),
+    bigH2("기본 용어", h("small", null, `${TERMS_CORE.length}개`)), list(TERMS_CORE),
+    bigH2("결과 표 · 대화 화면 용어", h("small", null, `${TERMS_MORE.length}개`)), list(TERMS_MORE)), title: "용어" };
 }
 
 /* ───────── 글 (실험 정리 · 프롬프트 카드) — 간단한 마크다운 → 화면 ───────── */
@@ -1270,23 +1450,29 @@ function mdLinkTarget(url) {
   if (m) return { href: "#/cards/" + encodeURIComponent(m[1]) };
   return null;
 }
+// 파일 이름처럼 생긴 글 (spec/e0.md · 프롬프트카드/01-….md · results.json …)
+const looksFile = (s) => /\.(md|jsonl?|ts|tsx|mjs|js)$/i.test(s);
+// 글 사이에 그대로 적힌 파일 경로(data/v3/….json 등)는 '원본 자료'로 바꿈
+const plainPaths = (t) => t.replace(/(?:\.{1,2}\/)*(?:[\w가-힣.\-]+\/)+[\w가-힣.\-]+\.(?:md|jsonl?|tsx?|mjs)\b/g, "원본 자료");
 function mdInline(src) {
   const out = [];
   const re = /(`+)([^`]+?)\1|\*\*([^*]+?)\*\*|\[([^\]]+)\]\(([^)\s]+)\)/g;
   let pos = 0;
   let m;
   while ((m = re.exec(src)) !== null) {
-    if (m.index > pos) out.push(src.slice(pos, m.index));
-    if (m[2] !== undefined) out.push(h("code", null, m[2]));
+    if (m.index > pos) out.push(plainPaths(src.slice(pos, m.index)));
+    if (m[2] !== undefined) out.push(looksFile(m[2]) ? h("span", { class: "mdref", title: "원본 파일: " + m[2] }, "원본 파일") : h("code", null, m[2]));
     else if (m[3] !== undefined) out.push(h("b", null, mdInline(m[3])));
     else {
       const t = mdLinkTarget(m[5]);
-      if (t) out.push(h("a", { href: t.href, target: t.ext ? "_blank" : null, rel: t.ext ? "noopener" : null }, m[4]));
-      else out.push(h("span", { class: "mdref", title: "이 화면에는 없는 파일이에요 (ai-lab 폴더에 있음)" }, m[4]));
+      // 파일 이름이 글자로 보이는 링크는 쉬운 이름으로 바꾸고, 이름은 마우스를 올렸을 때만 보임
+      const label = !looksFile(m[4]) ? m[4] : t && t.href === "#/summary" ? "실험 정리" : t && t.href.startsWith("#/cards/") ? "프롬프트 카드" : "원본 자료";
+      if (t) out.push(h("a", { href: t.href, target: t.ext ? "_blank" : null, rel: t.ext ? "noopener" : null, title: looksFile(m[4]) ? m[4] : null }, label));
+      else out.push(h("span", { class: "mdref", title: "원본 자료예요 (이 화면에는 링크가 없어요)" + (looksFile(m[4]) ? " · " + m[4] : "") }, label));
     }
     pos = m.index + m[0].length;
   }
-  if (pos < src.length) out.push(src.slice(pos));
+  if (pos < src.length) out.push(plainPaths(src.slice(pos)));
   return out;
 }
 const MD_BLOCK = /^(`{3,}|#{1,6}\s|>|\s*([-*]|\d+\.)\s+\S|\s*\|)/;
@@ -1367,11 +1553,11 @@ function mdRender(src) {
 
 async function vSummary() {
   const [docs, idx] = await Promise.all([load("docs.json"), load("index.json")]);
-  if (!docs.summary) throw new Error("실험정리.md가 묶음에 없어요");
+  if (!docs.summary) throw new Error("실험 정리 글이 아직 없어요");
   const r = mdRender(docs.summary.md);
   const root = h("div");
   const e0 = idx.experiments.find((e) => e.id === "e0");
-  root.append(title("실험 정리"), h("p", { class: "lead" }, "ai-lab/실험정리.md를 그대로 보여 줘요 — 실험이 끝날 때마다 한 장씩 채워져요. 숫자 표와 대화 예시 원문이 들어 있어요."),
+  root.append(title("실험 정리"), h("p", { class: "lead" }, "실험 정리 글을 그대로 보여 줘요 — 실험이 끝날 때마다 한 장씩 채워져요. 실험마다 한 줄 결론 › 왜 했나 › 누구로 해 봤나 › 대화로 보면 › 결과 › 아직 모르는 것 순서로 적혀 있어요."),
     h("div", { class: "chips", style: "margin-bottom:12px" },
       r.heads.map((hd) => h("a", { class: "chip", href: "#/summary", onclick: (ev) => { ev.preventDefault(); hd.el.scrollIntoView({ block: "start" }); window.scrollBy(0, -110); } }, hd.title.replace(/\*\*/g, "").replace(/\s*\(.*$/, ""))),
       e0 ? chip("E0 실험 페이지", "ink", { href: hExp("e0") }) : null),
@@ -1381,13 +1567,13 @@ async function vSummary() {
 
 async function vCards(id) {
   const docs = await load("docs.json");
-  if (!docs.cards.length) throw new Error("프롬프트 카드가 묶음에 없어요");
+  if (!docs.cards.length) throw new Error("프롬프트 카드가 아직 없어요");
   const card = docs.cards.find((c) => c.id === id) || docs.cards[0];
   const r = mdRender(card.md);
   const root = h("div");
   const seg = h("div", { class: "seg", role: "tablist", style: "margin-bottom:14px" }, docs.cards.map((c) => h("a", { class: c.id === card.id ? "on" : "", href: "#/cards/" + encodeURIComponent(c.id) }, c.id.replace(/^(\d+)-(.*)$/, "$1 · $2"))));
-  root.append(title("프롬프트 카드"), h("p", { class: "lead" }, "앱을 만들 때 그대로 가져다 쓰는 지점별 프롬프트 카드예요 (ai-lab/프롬프트카드). 한 지점이 한 장이고, 실험이 끝날 때마다 채워져요."),
-    docs.cards.length > 1 ? seg : null, h("div", { class: "card mdcard" }, r.node));
+  put(root, [title("프롬프트 카드"), h("p", { class: "lead" }, "앱을 만들 때 그대로 가져다 쓰는 프롬프트 카드예요. AI가 말하는 자리 하나가 한 장이고, 실험이 끝날 때마다 채워져요."),
+    docs.cards.length > 1 ? seg : null, h("div", { class: "card mdcard" }, r.node)]);
   return { node: root, title: card.title };
 }
 
