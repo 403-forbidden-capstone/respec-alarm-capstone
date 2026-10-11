@@ -6,10 +6,11 @@
 <meta name="robots" content="noindex">
 <title>Re:Spec 개발 보드</title>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
+<link rel="icon" href="data:,">
 <style>
 :root{--ink:#1b1b1b;--sub:#5f5e5a;--mute:#74726b;--line:#e4e2db;--line2:#cfcdc5;--bg:#f6f5f1;--bg2:#e9e7df;--card:#fff;--teal:#1d9e75;--teal-ink:#085041;--teal-bg:#e1f5ee;--red:#a32d2d;--r:8px;--r-lg:12px;--hdr:92px}
 *{box-sizing:border-box}
-html,body{margin:0;height:100%}
+html,body{margin:0;min-height:100%}
 body{font-family:"Pretendard Variable",Pretendard,-apple-system,"Segoe UI",sans-serif;color:var(--ink);background:var(--bg);font-size:14px;line-height:1.5;word-break:keep-all}
 a{color:var(--ink);text-decoration:underline;text-decoration-color:var(--line2);text-underline-offset:2px}
 a:hover{text-decoration-color:var(--ink)}
@@ -99,7 +100,17 @@ details.dev{margin-top:14px}
 .ck-sum{font-size:15px;line-height:1.6;margin:0 0 8px;max-width:84ch}.ck-sum b{font-size:17px;font-variant-numeric:tabular-nums}
 .ck-legend{font-size:13px;color:var(--ink);display:flex;flex-wrap:wrap;gap:4px 8px;align-items:center}
 .sy{display:inline-block;font-size:19px;line-height:1;font-weight:600;min-width:1em;text-align:center;font-family:"Segoe UI Symbol","Apple Symbols",sans-serif}
-.sy-ok{color:var(--teal)}.sy-part{color:var(--ink)}.sy-no{color:#a19f96}.sy-na{color:#cfcdc5}.sy-unk{color:var(--mute);font-size:16px}
+.sy-ok{color:var(--teal)}.sy-part{color:var(--ink)}.sy-no{color:#8a877e}.sy-na{color:#b5b2a8}.sy-unk{color:var(--mute);font-size:16px}
+.ck-why{font-size:13px;color:var(--sub);margin:0 0 8px;max-width:84ch}
+table.ck th small{display:block;font-weight:400;color:var(--mute);font-size:11px;margin-top:1px}
+.ck-tg{display:inline-block;width:6px;height:6px;border-right:1.5px solid var(--mute);border-bottom:1.5px solid var(--mute);transform:translateY(-2px) rotate(-45deg);margin:0 10px 0 2px;transition:transform .15s}
+tr.ck.open .ck-tg{transform:translateY(-3px) rotate(45deg)}
+tr.ck:focus-visible{outline:2px solid var(--teal);outline-offset:-2px}
+.ck-iss{margin:0;padding-left:18px;line-height:1.55}.ck-iss li{margin:2px 0}
+@media (prefers-reduced-motion:reduce){.ck-tg{transition:none}}
+@media (max-width:760px){.top{flex-wrap:wrap;height:auto;min-height:46px;padding:6px 12px}#meta{order:9;flex:1 1 100%;white-space:normal;overflow:visible}.top .meta#syncMeta{display:none}.tabs{position:static}
+  .card.flush{overflow-x:auto}table.ck .ck-name{min-width:200px}.ck-block{white-space:normal}.matrix-wrap{max-height:none}
+  .dec-row{flex-wrap:wrap}.dec-tg{flex:1 1 100%}.dec-meta{grid-template-columns:1fr}code{word-break:break-all;white-space:normal}}
 table.ck{font-size:14px}table.ck th{font-size:13px;padding:8px 10px}table.ck td{padding:9px 10px;vertical-align:middle}
 table.ck th.st,table.ck td.st{text-align:center;width:64px}
 .ck-name{font-weight:500}.ck-id{font-family:ui-monospace,Consolas,monospace;font-size:12px;color:var(--mute);margin-right:8px}
@@ -237,7 +248,7 @@ table.dec-t td:first-child{width:34%;color:var(--sub)}
       <span style="flex:1"></span>
       <button id="btnReload">새로고침</button>
     </div>
-    <iframe id="frame" src="/?mode=mock" title="앱 미리보기"></iframe>
+    <iframe id="frame" title="앱 미리보기"></iframe>
     <div class="note" style="padding:0 4px">가짜 데이터(5월 22일 시나리오). 주소를 다시 열면 처음 상태로 돌아감 — 한 묶음은 화면 안 버튼으로만 움직이기</div>
   </div>
 </div>
@@ -643,7 +654,7 @@ const CHECKS = [
   { id: 'C05', area: '알람', name: '약속을 넣으면 기상 · 준비 · 출발 알람 3개를 계산해 저장', screens: ['H05', 'H02'], start: '/schedule/new',
     web: { st: 'ok', ev: '10/10 흐름 확인 #84 3' }, phone: { st: 'unk', ev: 'APK 안 받음' },
     server: { st: 'no', ev: '장소 검색(#31) · 이동시간(#32) · 저장 · 폰 예약(#33) 전부 안 됨' }, test: { st: 'part', ev: 'alarm/api H05 시간 칸 · mocks/calc 역산(첫 일정 아니면 준비부터)만 — 계산 시트(P80) · 알람 3개 저장은 검사 없음' },
-    how: ['알람 목록 "+ 새 일정" → 날짜 5월 23일 · 시간 오후 2:00 · 장소 학교 도서관', '"저장하고 알람 설정하기" → 시트 "알람을 이렇게 맞출게요" — 같은 날 기상이 있어 외출 준비만(P80 15분)', '"돌아가서 수정" → 날짜 5월 24일(토) → 다시 → "기상 오후 12:05"(P80 50분)', '"알람 저장" → 목록에 스터디 카드 · "알람 3개를 맞췄어요"', '일정명 지우고 저장 → "일정명을 입력해 주세요"'],
+    how: ['알람 목록 "+ 새 일정" → 날짜 5월 23일 · 시간 오후 2:00 · 장소 학교 도서관', '"저장하고 알람 설정하기" → 시트 "알람을 이렇게 맞출게요" — 같은 날 기상이 있어 외출 준비만(P80 15분 — 10번 중 8번은 그 안에 끝난 준비 시간)', '"돌아가서 수정" → 날짜 5월 24일(토) → 다시 → "기상 오후 12:05"(P80 50분)', '"알람 저장" → 목록에 스터디 카드 · "알람 3개를 맞췄어요"', '일정명 지우고 저장 → "일정명을 입력해 주세요"'],
     issues: [31, 32, 33], dec: [] },
   { id: 'C06', area: '알람', name: '울림 화면 3종(기상 · 준비 · 출발) · 미루기 · 해제', screens: ['H07'], start: '/ring?alarm=a1:WAKE',
     web: { st: 'ok', ev: '10/10 흐름 확인 #84 4 — 앱 화면만' }, phone: { st: 'unk', ev: '소리 · 진동 · 잠금화면 위는 C08' },
@@ -659,7 +670,7 @@ const CHECKS = [
     web: { st: 'na', ev: '웹에선 못 울림 (#98 웹 스텁 예정)' }, phone: { st: 'unk', ev: '울림 모듈(Kotlin)과 시험 화면은 있음 · APK를 한 번도 안 받아 못 해 봄 (#20 #26)' },
     server: { st: 'na', ev: '폰 안에서 끝남' }, test: { st: 'part', ev: 'CI 안드로이드 빌드 검사가 Kotlin 모듈이 컴파일되는지만 봄 — 울림 동작 검사는 없음' },
     how: ['개발용 APK 받기(#20): PR · main의 "안드로이드 빌드 검사" 실행 요약에서 respec-alarm-dev.apk(3일 보관) 또는 EAS 개발 빌드 → 폰에 설치', '앱에서 respecalarm://dev/alarm-test → 권한 2개(정확한 알람 · 잠금화면 위) 확인 → "1분 뒤 테스트 알람" → 폰 잠그고 기다림 → 잠금화면 위로 울림 화면이 뜨면 됨', '지금은 시험 화면만 — 앱의 알람 목록과는 아직 안 이어짐 (#33)'],
-    issues: [20, 26, 33, 79], dec: [] },
+    issues: [20, 26, 33, 79, 98], dec: [] },
   { id: 'C09', area: '알람', name: '집을 벗어나면 출발 · 도착이 자동으로 기록됨', screens: [], start: null,
     web: { st: 'na', ev: '위치는 폰에서만' }, phone: { st: 'no', ev: '위치 권한 · 지오펜스 아직 없음 (#36 #40)' },
     server: { st: 'no', ev: '실측 기록 · 지각 판정 없음 (#41)' }, test: { st: 'no', ev: '없음' },
@@ -726,7 +737,7 @@ const CHECKS = [
   // ── 기반 · 서버
   { id: 'C21', area: '기반 · 서버', name: '로그인 · 온보딩', screens: ['L01', 'L02'], start: null,
     web: { st: 'no', ev: '흐름에서 뺌 (#116) — "/"로 열면 로그인 없이 홈. 화면 파일은 있음 (#67)' }, phone: { st: 'unk', ev: 'APK 안 받음' },
-    server: { st: 'part', ev: 'Supabase 로그인: 구글 켜짐 · 카카오 공급자 아직 (연결 탭)' }, test: { st: 'ok', ev: 'lib/mode 가짜 · 실데이터 스위치' },
+    server: { st: 'part', ev: '10/10 확인 — Supabase 로그인: 구글 켜짐 · 카카오 공급자 아직 (연결 탭)' }, test: { st: 'ok', ev: 'lib/mode 가짜 · 실데이터 스위치' },
     how: ['지금은 꺼 둠: 시크릿 창에서 "/" → 로그인 없이 홈 · "/login"을 직접 열어도 홈', '로그인을 붙일 때(#25) 실데이터 스위치 · 온보딩부터 다시 켜짐'],
     issues: [25], dec: ['D38'] },
   { id: 'C22', area: '기반 · 서버', name: '서버(Supabase)에 저장 · 읽기', screens: [], start: null,
@@ -740,8 +751,8 @@ const CHECKS = [
     how: ['아직 만든 것이 없음 — 연결 탭 "대시보드에서 할 것" 4 · 5번(Firebase · EAS 키)부터'],
     issues: [23, 45], dec: [] },
   { id: 'C24', area: '기반 · 서버', name: '웹 배포 · 개발용 APK', screens: [], start: null,
-    web: { st: 'ok', ev: 'main에 머지되면 자동 배포(이 주소) · PR마다 미리보기' }, phone: { st: 'no', ev: 'APK 0회 — Actions 아티팩트 또는 EAS 개발 빌드 (#20)' },
-    server: { st: 'ok', ev: 'DB 변경도 머지하면 자동 적용 (#82)' }, test: { st: 'ok', ev: 'CI: 린트 · 단위 테스트 15파일 · 안드로이드 빌드 검사 · DB 검사' },
+    web: { st: 'ok', ev: '10/11 확인 — main에 머지되면 자동 배포(이 주소) · PR마다 미리보기' }, phone: { st: 'no', ev: 'APK 0회 — Actions 아티팩트 또는 EAS 개발 빌드 (#20)' },
+    server: { st: 'na', ev: '기능이 아니라 배포 길 — DB 변경도 머지하면 자동 적용 (#82)' }, test: { st: 'ok', ev: 'CI: 린트 · 단위 테스트 15파일 · 안드로이드 빌드 검사 · DB 검사' },
     how: ['PR을 올리면 검사 4개(앱 검사 · DB 검사 · 안드로이드 빌드 · 웹 미리보기)가 돌고, 머지하면 이 주소가 새 판으로 바뀜', 'APK: Actions "안드로이드 빌드 검사" 실행 요약의 아티팩트(3일) 또는 환경 탭 명령'],
     issues: [20], dec: [] },
 ];
@@ -901,7 +912,7 @@ const TABDEF = [['checks', '동작'], ['todo', '할 일'], ['dec', '결정'], ['
 function render() {
   const p = plan();
   const nx = p.next[0];
-  document.getElementById('meta').innerHTML = `<b>W${weekNo}</b> · 1차 데모 <b>D-${daysTo(SITE.demo1)}</b> · 대회 <b>D-${daysTo(SITE.contest)}</b>`
+  document.getElementById('meta').innerHTML = `1차 데모(${fmtDate(SITE.demo1)}) <b>D-${daysTo(SITE.demo1)}</b> · 대회(${fmtDate(SITE.contest)}) <b>D-${daysTo(SITE.contest)}</b>`
     + (nx ? ` · 다음 <a class="in" href="${ghIssue(nx.n)}" target="_blank" rel="noopener">#${nx.n} ${esc(nx.t)}</a> <b>${fmtDate(nx.due)}</b>` : '')
     + (p.late.length ? ` · <span class="late">지연 ${p.late.length}</span>` : '');
   const R = { checks: rChecks, links: rLinks, todo: rTodo, env: rEnv, dec: rDec };
@@ -935,7 +946,7 @@ function nowCard() {
 
 // ───────────────────────────────── 동작 — 기능이 실제로 되는지
 const ST = { ok: ['●', '됨'], part: ['◐', '일부'], no: ['○', '안 됨'], na: ['–', '해당 없음'], unk: ['?', '안 해 봄'] };
-const COLS = [['web', '웹', '배포 주소에서 가짜 데이터로 직접 눌러 보면 되나'], ['phone', '폰', '개발용 APK에서 되나'], ['server', '서버', '실제 저장 · 계산 · 푸시가 되나 (Supabase)'], ['test', '테스트', '자동 검사(CI)가 이 기능을 덮나']];
+const COLS = [['web', '웹', '배포 주소에서 가짜 데이터로 직접 눌러 보면 되나', '가짜 데이터'], ['phone', '폰', '개발용 APK에서 되나', '개발용 APK'], ['server', '서버', '실제 저장 · 계산 · 푸시가 되나 (Supabase)', '실제 저장'], ['test', '테스트', '자동 검사(CI)가 이 기능을 덮나', '자동 검사']];
 const sym = (st) => `<span class="sy sy-${st}" title="${ST[st][1]}">${ST[st][0]}</span>`;
 function rChecks() {
   const count = (k, sts) => CHECKS.filter(c => sts.includes(c[k].st)).length;
@@ -943,8 +954,9 @@ function rChecks() {
   const head = `<div class="card ck-top">
     <h2>지금 되는 것 <span class="muted" style="font-size:13px;font-weight:500">${CHECKS.length}개 기능 기준</span></h2>
     <p class="ck-sum">웹 미리보기(가짜 데이터)에서 <b>${count('web', ['ok'])}개</b>는 되고 <b>${count('web', ['part'])}개</b>는 일부만 됨 · 폰에서 해 본 것 <b>${count('phone', ['ok'])}개</b> · 실제 서버로 되는 것 <b>${count('server', ['ok'])}개</b> · 자동 검사가 있는 것 <b>${count('test', ['ok'])}개</b></p>
-    <div class="ck-legend">${Object.keys(ST).map(k => `${sym(k)} ${ST[k][1]}`).join('<span class="muted"> · </span>')}<span class="muted" style="margin-left:14px">줄을 누르면 확인하는 법 · 근거가 펼쳐짐. "앱에서 열기"는 오른쪽 앱 창에 그 화면(가짜 데이터, 5월 22일 시나리오)</span></div>
-    <details class="dev"><summary>이 앱은 · 칸이 뜻하는 것</summary>
+    <div class="ck-why">폰 칸이 전부 ?인 이유: 개발용 APK를 아직 한 번도 안 받음(#20). 서버 칸이 비는 이유: 앱이 아직 서버를 안 부름 — 로그인(#25)을 붙인 뒤부터. 테이블 · 접근 규칙은 준비됨(C22)</div>
+    <div class="ck-legend">${Object.keys(ST).map(k => `${sym(k)} ${ST[k][1]}`).join('<span class="muted"> · </span>')}<span class="muted" style="margin-left:14px">▸ 줄을 누르면 확인하는 법 · 근거가 펼쳐짐. "앱에서 열기"는 앱 창(넓은 화면은 오른쪽, 좁은 화면은 맨 아래)에 그 화면 — 가짜 데이터, 5월 22일 시나리오</span><span class="row" style="margin-left:auto"><button data-ckall="open">모두 펼치기</button><button data-ckall="close">모두 접기</button></span></div>
+    <details class="dev"><summary>칸 설명 — 웹 · 폰 · 서버 · 테스트가 뭐예요? · 이 앱은</summary>
       <p style="margin:8px 0 6px;max-width:80ch">약속을 넣으면 기상 · 준비 · 출발 알람을 거꾸로 계산해 폰에서 울리고, 일어났는지 · 나갔는지를 자동으로 모아 다음 알람을 고쳐 가는 알람 앱. 친구 · 그룹과 기상 상태를 나누고, 자기 전엔 AI와 짧게 대화해 내일을 준비함.</p>
       <table class="kv">${COLS.map(([, n, d]) => `<tr><td>${n}</td><td>${d}</td></tr>`).join('')}</table>
       <div class="note">근거의 "흐름 확인 #84 2-5"는 10/10에 직접 따라 한 흐름 확인 문서의 PR · 묶음 · 단계 번호. 날짜가 오래되면 다시 확인할 것 — 상태를 고치려면 이 파일의 CHECKS 줄을 고쳐 PR</div>
@@ -953,25 +965,27 @@ function rChecks() {
   const rows = [];
   for (const a of areas) {
     const list = CHECKS.filter(c => c.area === a);
-    rows.push(`<tr class="grp"><td colspan="6">${esc(a)} <span class="num" style="font-weight:500">· 웹에서 됨 ${list.filter(c => c.web.st === 'ok').length}/${list.length}</span></td></tr>`);
+    rows.push(`<tr class="grp"><td colspan="6">${esc(a)} <span class="num" style="font-weight:500">· 웹에서 됨 ${list.filter(c => c.web.st === 'ok').length}/${list.filter(c => c.web.st !== 'na').length}</span></td></tr>`);
     for (const c of list) {
       const open = ckOpen.has(c.id);
       const block = c.issues.map(n => ({ n, st: statusOf(n) })).filter(x => x.st !== 'done');
-      rows.push(`<tr class="ck${open ? ' open' : ''}" data-ck="${c.id}"><td class="ck-name"><span class="ck-id">${c.id}</span>${esc(c.name)}</td>${COLS.map(([k]) => `<td class="st" title="${esc(c[k].ev)}">${sym(c[k].st)}</td>`).join('')}<td class="ck-block">${block.length ? block.map(x => issuePill(x.n)).join(' ') : '<span class="muted">—</span>'}</td></tr>`);
+      rows.push(`<tr class="ck${open ? ' open' : ''}" data-ck="${c.id}" role="button" tabindex="0" aria-expanded="${open}"><td class="ck-name"><span class="ck-tg"></span><span class="ck-id">${c.id}</span>${esc(c.name)}</td>${COLS.map(([k]) => `<td class="st" title="${esc(c[k].ev)}">${sym(c[k].st)}</td>`).join('')}<td class="ck-block">${block.length ? block.map(x => issuePill(x.n)).join(' ') : '<span class="muted">—</span>'}</td></tr>`);
       if (open) {
-        const start = c.start ? `<button type="button" data-src="${esc(c.start)}${c.start.includes('?') ? '&' : '?'}mode=mock" style="margin-top:8px">앱에서 열기</button>` : '';
+        const start = c.start ? `<button type="button" data-src="${esc(c.start)}${c.start.includes('?') ? '&' : '?'}mode=mock" style="margin-top:8px" title="앱 창에서 이 화면을 엶 (가짜 데이터)">앱에서 열기</button>` : '';
+        const iss = c.issues.map(n => { const it = issue(n); const st = statusOf(n); return `<li><a href="${ghIssue(n)}" target="_blank" rel="noopener">#${n}</a> ${esc(it ? it.t : '')} <span class="muted">· ${STATUS_KO[st]}</span></li>`; }).join('');
         rows.push(`<tr class="ck-body"><td colspan="6"><div class="ck-detail">
           <div><h4>확인하는 법</h4><ol>${c.how.map(h => `<li>${txt(h)}</li>`).join('')}</ol>${start}</div>
           <div><h4>근거</h4><table class="kv">${COLS.map(([k, n]) => `<tr><td>${n}</td><td>${sym(c[k].st)} ${ST[c[k].st][1]} <span class="muted">— ${txt(c[k].ev)}</span></td></tr>`).join('')}</table>
+            ${iss ? `<h4>막는 것</h4><ul class="ck-iss">${iss}</ul>` : ''}
             ${c.dec.length ? `<h4>걸린 결정</h4><div class="row">${c.dec.map(decLink).join('')}</div>` : ''}
             ${c.screens.length ? `<h4>화면</h4><div class="muted">${c.screens.map(esc).join(' · ')}</div>` : ''}</div>
         </div></td></tr>`);
       }
     }
   }
-  const thead = `<tr><th>기능</th>${COLS.map(([, n, d]) => `<th class="st" title="${esc(d)}">${n}</th>`).join('')}<th>막는 것</th></tr>`;
+  const thead = `<tr><th>기능</th>${COLS.map(([, n, d, sub]) => `<th class="st" title="${esc(d)}">${n}<small>${sub}</small></th>`).join('')}<th>막는 것</th></tr>`;
   return head + `<div class="card flush"><table class="ck sticky">${thead}${rows.join('')}</table></div>
-  <div class="note">폰 · 서버 칸이 거의 비어 있는 이유: 화면은 다 옮겼지만(10/10) 개발용 APK를 아직 안 받았고(#20), 앱의 데이터 함수가 아직 서버를 안 부름(#116 · 로그인 #25 뒤). 자동으로 웹 흐름을 돌려 이 표를 채우는 일은 아직 없음</div>`;
+  <div class="note">자동으로 웹 흐름을 돌려 이 표를 채우는 일은 아직 없음 — 지금은 10/10 흐름 확인 문서와 코드 · 이슈를 대조해 손으로 적음</div>`;
 }
 
 // 연결 — 서비스 사이를 무엇으로 이어 놨는지 (10/10 확인). 키는 이름 · 넣은 곳만 적고 값은 적지 않음
@@ -1065,7 +1079,7 @@ function mappingDetail() {
     <tr><th>화면</th>${cols.map(([, arr]) => arr.map((c, i) => `<th class="v" style="${i === 0 ? 'border-left:1px solid var(--line2)' : ''}">${esc(c)}</th>`).join('')).join('')}</tr></thead>`;
   const body = TABS.map(([id, name]) => `<tr class="grp"><td colspan="${ncol + 1}">${name}</td></tr>` + SCREENS.filter(s => s.tab === id).map(s => {
     const refs = new Set(s.data.flatMap(d => d.r));
-    return `<tr><td><a class="in" href="#" data-go="screens:${s.code}">${s.code} ${esc(s.name)}</a></td>${cols.map(([, arr]) => arr.map((c, i) => `<td class="${refs.has(c) ? 'y' : ''}" style="${i === 0 ? 'border-left:1px solid var(--line2)' : ''}">${refs.has(c) ? '●' : ''}</td>`).join('')).join('')}</tr>`;
+    return `<tr><td>${s.code} ${esc(s.name)}</td>${cols.map(([, arr]) => arr.map((c, i) => `<td class="${refs.has(c) ? 'y' : ''}" style="${i === 0 ? 'border-left:1px solid var(--line2)' : ''}">${refs.has(c) ? '●' : ''}</td>`).join('')).join('')}</tr>`;
   }).join('')).join('');
   const usedBy = (c) => SCREENS.filter(s => s.data.some(d => d.r.includes(c))).map(s => s.code);
   const edgeRows = EDGE.map(([n, ko, w, ext]) => `<tr><td>${esc(ko)}<br><code>${esc(n)}</code></td><td>${esc(w)}</td><td>${esc(ext)}</td><td>${usedBy(n.split(' ')[0]).join(' · ')}</td></tr>`).join('');
@@ -1108,7 +1122,7 @@ function rTodo() {
     if (g !== lastG) { rows.push(`<tr class="grp"><td colspan="5">${g} · ${list.filter(x => grpOf(x) === g).length}</td></tr>`); lastG = g; }
     const st = p.st[i.n]; const late = g === '지연';
     const pr = prsOf(i.n).map(x => ` <a href="${ghPr(x.number)}" target="_blank" rel="noopener" title="${esc(x.title)}">PR #${x.number}</a>`).join('');
-    const scr = SCREENS.filter(s => s.issues.includes(i.n)).map(s => `<a class="in" href="#" data-go="screens:${s.code}">${s.code}</a>`).join(' ');
+    const scr = SCREENS.filter(s => s.issues.includes(i.n)).map(s => `<span class="muted">${s.code}</span>`).join(' ');
     const dueText = i.due ? (late ? `${fmtDate(i.due)} <span class="late">D+${Math.round((localDate(todayS) - localDate(i.due)) / 864e5)}</span>` : fmtDate(i.due)) : '';
     rows.push(`<tr class="${late ? 'islate' : ''} ${st === 'done' ? 'dim' : ''}"><td><a href="${ghIssue(i.n)}" target="_blank" rel="noopener">#${i.n}</a> ${esc(i.t)} <span class="muted" title="${esc(i.ms || '')}">${esc(msShort(i.ms))}</span></td><td>${chip(st)}${pr}</td><td>${esc(i.part || '')}</td><td class="due" title="${i.start ? '시작 ' + fmtDate(i.start) : ''}">${dueText}</td><td>${scr}</td></tr>`);
   }
@@ -1186,7 +1200,7 @@ function rDec() {
   const by = Object.fromEntries(DEC_GROUPS.map((g) => [g, DECISIONS.filter((d) => d.status === g)]));
   const head = `<div class="dec-head"><h2>결정</h2><span class="muted num">${DEC_GROUPS.map((g) => `${g} <b>${by[g].length}</b>`).join(' · ')}</span>
     <span class="row"><button data-decall="open">모두 펼치기</button><button data-decall="close">모두 접기</button></span></div>
-    <div class="muted">팀 회의에서 정할 것. 줄을 누르면 왜 정해야 하는지(지금 어긋난 곳)와 선택지가 펼쳐지고, 틸 테두리가 먼저 고른 안. 화면 탭의 "규칙 · 왜"에서 D번호를 누르면 여기로 옴. 원본 <a href="${DEC_DOC}" target="_blank" rel="noopener">docs/decisions.md</a> · 회의에서 정하면 결과를 적고 정한 것으로 옮김</div>`;
+    <div class="muted">팀 회의에서 정할 것. 줄을 누르면 왜 정해야 하는지(지금 어긋난 곳)와 선택지가 펼쳐지고, 틸 테두리가 먼저 고른 안. 동작 탭에서 줄을 펼쳐 "걸린 결정"의 D번호를 누르면 여기로 옴. 원본 <a href="${DEC_DOC}" target="_blank" rel="noopener">docs/decisions.md</a> · 회의에서 정하면 결과를 적고 정한 것으로 옮김</div>`;
   if (!DECISIONS.length) return `<div class="card">${head}<p class="note">안건이 비어 있음 — <code>cd mobile && npm run board:decisions</code></p></div>`;
   return `<div class="card">${head}` + DEC_GROUPS.filter((g) => by[g].length).map((g) =>
     `<div class="dec-g"><div class="k">${g} <span class="num">${by[g].length}</span></div>${by[g].map(decRow).join('')}</div>`).join('') + `</div>`;
@@ -1225,7 +1239,7 @@ async function sync() {
 }
 function askToken() {
   const v = prompt('GitHub fine-grained 토큰, 읽기 전용 (이 레포 Contents · Issues · Pull requests + 조직 Projects). 이 브라우저에만 저장됩니다.', token || '');
-  if (v === null) return; token = v.trim(); LS.set('ghToken', token); render(); if (token) sync();
+  if (v == null) return; token = v.trim(); LS.set('ghToken', token); render(); if (token) sync();
 }
 // 배포본은 빌드 때 만든 스냅샷을 먼저 읽음 (main에 머지될 때마다 갱신됨)
 async function loadSnapshot() {
@@ -1239,8 +1253,9 @@ async function loadSnapshot() {
 
 // ───────────────────────────────── 이벤트
 document.addEventListener('click', (e) => {
-  const el = e.target.closest('[data-tab],[data-go],[data-sel],[data-f],[data-src],[data-copy],[data-dec],[data-decall],[data-ck],#btnSync,#btnSide,#btnReload,#tokSave,#tokClear');
+  const el = e.target.closest('[data-tab],[data-go],[data-sel],[data-f],[data-src],[data-copy],[data-dec],[data-decall],[data-ck],[data-ckall],#btnSync,#btnSide,#btnReload,#tokSave,#tokClear');
   if (!el) return;
+  if (el.dataset.ckall) { if (el.dataset.ckall === 'open') CHECKS.forEach((c) => ckOpen.add(c.id)); else ckOpen.clear(); LS.set('ckOpen', [...ckOpen]); render(); return; }
   if (el.dataset.ck) {
     if (e.target.closest('a,button')) return; // 줄 안 이슈 링크는 그대로
     const id = el.dataset.ck; if (ckOpen.has(id)) ckOpen.delete(id); else ckOpen.add(id);
@@ -1276,11 +1291,11 @@ document.addEventListener('click', (e) => {
     e.preventDefault();
     const side = document.getElementById('side'); if (!side.classList.contains('show')) { side.classList.add('show'); LS.set('side', true); document.getElementById('btnSide').classList.add('on'); }
     document.querySelectorAll('.side .bar [data-src]').forEach(b => b.classList.toggle('on', b.dataset.src === el.dataset.src));
-    document.getElementById('frame').src = el.dataset.src; LS.set('src', el.dataset.src); return;
+    document.getElementById('frame').src = el.dataset.src; LS.set('src', el.dataset.src); if (innerWidth < 760) side.scrollIntoView({ block: 'start' }); return;
   }
   if (el.dataset.copy !== undefined) { navigator.clipboard.writeText(el.dataset.copy).then(() => { el.textContent = '복사됨'; setTimeout(() => { el.textContent = '복사'; }, 1200); }); return; }
   if (el.id === 'btnSync') sync();
-  if (el.id === 'btnSide') { const s = document.getElementById('side'); s.classList.toggle('show'); LS.set('side', s.classList.contains('show')); el.classList.toggle('on', s.classList.contains('show')); }
+  if (el.id === 'btnSide') { const s = document.getElementById('side'); s.classList.toggle('show'); LS.set('side', s.classList.contains('show')); el.classList.toggle('on', s.classList.contains('show')); const fr = document.getElementById('frame'); if (s.classList.contains('show') && !fr.getAttribute('src')) fr.src = src0; }
   if (el.id === 'btnReload') { const f = document.getElementById('frame'); f.src = f.src; }
   if (el.id === 'tokSave') { token = document.getElementById('tok').value.trim(); LS.set('ghToken', token); render(); if (token) sync(); }
   if (el.id === 'tokClear') { token = ''; LS.set('ghToken', ''); live = null; LS.set('sync', null); syncError = ''; render(); }
@@ -1289,6 +1304,13 @@ document.addEventListener('change', (e) => {
   const el = e.target;
   if (el.dataset.fsel) { todoFilter[el.dataset.fsel] = el.value; LS.set('todoFilter', todoFilter); render(); }
   if (el.dataset.env) { envState[el.dataset.env] = el.value; LS.set('env', envState); render(); }
+});
+// 동작 줄: Enter · Space로 펼침
+document.addEventListener('keydown', (e) => {
+  const row = e.target.closest && e.target.closest('tr[data-ck]');
+  if (!row || (e.key !== 'Enter' && e.key !== ' ')) return;
+  e.preventDefault(); const id = row.dataset.ck; if (ckOpen.has(id)) ckOpen.delete(id); else ckOpen.add(id);
+  LS.set('ckOpen', [...ckOpen]); render(); const r2 = document.querySelector(`tr[data-ck="${CSS.escape(id)}"]`); if (r2) r2.focus();
 });
 // 화면 트리: ↑ ↓로 이동
 document.addEventListener('keydown', (e) => {
@@ -1310,7 +1332,7 @@ main.addEventListener('mouseleave', () => main.querySelectorAll('.matrix .hl').f
 
 // 시작
 if (LS.get('side', false)) { document.getElementById('side').classList.add('show'); document.getElementById('btnSide').classList.add('on'); }
-let src0 = LS.get('src', '/?mode=mock'); if (src0 === '/' || src0 === '/mockup.html') src0 = '/?mode=mock'; document.getElementById('frame').src = src0; document.querySelectorAll('.side .bar [data-src]').forEach(b => b.classList.toggle('on', b.dataset.src === src0));
+let src0 = LS.get('src', '/?mode=mock'); if (src0 === '/' || src0 === '/mockup.html') src0 = '/?mode=mock'; if (LS.get('side', false)) document.getElementById('frame').src = src0; document.querySelectorAll('.side .bar [data-src]').forEach(b => b.classList.toggle('on', b.dataset.src === src0));
 render();
 loadSnapshot();
 </script>

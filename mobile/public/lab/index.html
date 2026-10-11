@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex">
 <meta name="color-scheme" content="light">
+<link rel="icon" href="data:,">
 <title>Re:Spec AI 실험실</title>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
 <style>
@@ -36,7 +37,7 @@ pre{background:var(--chip);border-radius:14px;padding:12px 14px;margin:6px 0 0;o
 .brand{font-size:15px;font-weight:700;letter-spacing:-.01em;color:var(--ink);text-decoration:none}
 .tabs{display:flex;max-width:760px;padding:0 0 4px;overflow-x:auto;scrollbar-width:none}
 .tabs::-webkit-scrollbar{display:none}
-.tabs a{flex:1 0 auto;min-width:3.6rem;display:flex;flex-direction:column;align-items:center;gap:4px;padding:4px 8px 6px;font-size:11.5px;color:var(--faint);text-decoration:none;white-space:nowrap}
+.tabs a{flex:1 0 auto;min-width:3.6rem;display:flex;flex-direction:column;align-items:center;gap:4px;padding:4px 8px 6px;font-size:12.5px;color:var(--sub);text-decoration:none;white-space:nowrap}
 .tabs .n{font-size:10px;min-width:26px;height:16px;line-height:16px;border-radius:8px;background:var(--chip);color:var(--faint);text-align:center;font-variant-numeric:tabular-nums}
 .tabs a.on{color:var(--ink);font-weight:600}
 .tabs a.on .n{background:var(--ink);color:#fff}
@@ -128,7 +129,7 @@ td a{color:var(--ink);font-weight:600}
 .person .pm{flex:1;min-width:0}
 .person .pm b{display:block;font-size:14.5px}
 .person .pm small{display:block;font-size:12.5px;color:var(--sub)}
-.person .pr{font-size:12.5px;color:var(--sub);text-align:right;flex:none}
+.person .pr{font-size:12.5px;color:var(--sub);text-align:right;flex:none;max-width:100%;white-space:normal}
 @media (max-width:640px){.person{flex-wrap:wrap}.person .pm{flex-basis:calc(100% - 52px)}.person .pr{text-align:left;margin-left:52px;flex-basis:100%}}
 /* 대화 · 프롬프트 목록 줄 */
 .crow{display:grid;grid-template-columns:8.5rem 10rem minmax(0,1fr) 11rem minmax(0,1.1fr);gap:4px 14px;padding:11px 0;color:var(--ink);text-decoration:none;align-items:start}
@@ -554,9 +555,9 @@ function firstTimeCard() {
     bigH2("처음이라면", h("small", null, "이 화면은 이런 곳이에요")),
     h("div", { class: "card lede" },
       kvl("무엇을 하는 곳", "앱에서 AI가 말하는 자리(자기 전 · 기상 후 대화 답, 대화에서 저장할 것 뽑기, 일기 · 코칭, 아침 준비 시간 추천)마다 'AI에게 주는 지시문'을 미리 시험해서 가장 좋은 판을 고르는 곳이에요."),
-      kvl("어떻게 시험하나", "가상 유저 12명이 상대예요. 습관이 다른 사람을 AI가 연기하고, 음성 받아쓰기가 글자를 틀리게 적는 잡음까지 흉내 내요. 지시문을 판마다 바꿔 같은 대화를 시켜 보고 점수를 비교해요."),
+      kvl("어떻게 시험하나", "가상 유저 12명(개발용 8 · 시험용 4)이 상대예요. 습관이 다른 사람을 AI가 연기하고, 음성 받아쓰기가 글자를 틀리게 적는 잡음까지 흉내 내요. 지시문을 판마다 바꿔 같은 대화를 시켜 보고 점수를 비교해요."),
       kvl("결과는", "'지시문 카드'로 남아요. 실제 앱에는 그 카드를 그대로 붙여요."),
-      kvl("읽는 순서", "진행 단계 → 실험 ", lk("E0 · E1 · E2", "#/exp"), " → 대화 예시 → ", lk("사람", "#/people"), " → ", lk("카드", "#/cards"), ". 낯선 말은 ", lk("용어", "#/terms"), "에서 찾아요."),
+      kvl("읽는 순서", "진행 단계(바로 아래) → ", lk("실험", "#/exp"), "(E0 · E1 · E2 …) → ", lk("대화", "#/conv"), " → ", lk("사람", "#/people"), " → ", lk("카드", "#/cards"), ". 낯선 말은 ", lk("용어", "#/terms"), "에서 찾아요."),
       h("div", { class: "go", style: "padding-top:8px" }, btn("개발 보드로 돌아가기", "/board", true, true))),
     h("p", { class: "note" }, "실험은 모두 Claude Haiku 5.5로 했고, 운영 모델(Gemini)에서는 아직 확인 안 됐어요."));
 }
@@ -610,7 +611,13 @@ function pastSection(idx) {
 async function vHome() {
   const idx = await load("index.json");
   const root = h("div");
-  root.append(title("AI 실험실"), firstTimeCard());
+  root.append(title("AI 실험실"));
+  if (idx.v3 && idx.v3.progress) {
+    const p = idx.v3.progress; const done = p.filter((x) => x.status === "done").length; const doing = p.find((x) => x.status === "doing");
+    const nm = (x) => x.name.replace(/^E\d+\s+/, "");
+    root.append(h("p", { class: "lead", style: "font-size:16px;color:var(--ink);margin:0 0 14px" }, `AI 지시문 시험소 · ${p.length}단계 중 ${done} 끝${doing ? ` · 지금 "${nm(doing)}" 시험 중` : ""}`));
+  }
+  root.append(firstTimeCard());
   if (idx.v3) root.append(stepsSection(idx));
   const past = pastSection(idx);
   if (past) root.append(past);
