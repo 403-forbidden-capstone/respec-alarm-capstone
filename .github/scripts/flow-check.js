@@ -59,7 +59,7 @@ module.exports = async function flowCheck({ github, context, core, mode, prNumbe
     }
   }
 
-  // 라벨이 있는데 본문에 확인 줄이 없으면(틀에서 지웠거나 라벨을 손으로 붙임) 끝에 붙임
+  // 라벨이 있는데 본문에 확인 줄이 없으면 끝에 붙임 (PR 틀엔 없음 — 기능 흐름 PR에만 생김)
   if (labeled && !body.includes(CHECK_TEXT)) {
     body = `${body.trimEnd()}\n\n${CHECK_LINE}\n`;
     await github.rest.pulls.update({ owner, repo, pull_number: prNumber, body });
