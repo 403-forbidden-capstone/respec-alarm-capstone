@@ -1,45 +1,22 @@
 name: 안드로이드 빌드 검사
 
-# 네이티브에 영향을 주는 파일이 바뀐 PR과 main push에서 Android 앱이 실제로 컴파일되는지 확인합니다.
+# Android 앱이 실제로 컴파일되는지 확인합니다. 손으로만 돌립니다: Actions → 안드로이드 빌드 검사 → Run workflow → 브랜치 선택
 #   앱 검사(ci.yml)는 타입 · 린트 · 테스트 · 웹 빌드만 보므로 Kotlin 모듈 · 설정 플러그인 · 네이티브 패키지가 깨져도 잡지 못합니다.
+#   app.json · package.json · modules/ · plugins/ 를 바꾼 PR은 머지 전에 그 브랜치로 한 번 돌립니다.
 #   expo prebuild로 android/ 폴더를 만들고 Gradle 디버그 빌드를 돕니다 (arm64 하나만).
 #   만든 APK는 개발용 APK로 3일 남깁니다. 실행 요약의 링크로 받으면 EAS 무료 횟수(월 15회)를 안 씁니다.
-#   한 번에 10~15분 걸리고 Actions 무료 분량(월 2,000분)을 쓰므로 아래 paths에 해당할 때만 돕니다.
-#   손으로 돌리려면 Actions → 안드로이드 빌드 검사 → Run workflow
-#   Gradle 캐시는 main에서 돌 때만 저장되고 PR은 읽기만 합니다 (gradle/actions 기본 동작).
+#   한 번에 10~15분 걸려 Actions 무료 분량(월 2,000분)을 가장 많이 써서 PR · main push 자동 실행은 뺐습니다 (#134).
+#   Gradle 캐시는 main에서 돌 때만 저장되고 다른 브랜치는 읽기만 합니다 (gradle/actions 기본 동작).
 
 on:
-  pull_request:
-    paths:
-      - 'mobile/app.json'
-      - 'mobile/app.config.*'
-      - 'mobile/assets/images/**'
-      - 'mobile/package.json'
-      - 'mobile/package-lock.json'
-      - 'mobile/modules/**'
-      - 'mobile/plugins/**'
-      - 'mobile/android/**'
-      - '.github/workflows/android-build.yml'
-  push:
-    branches: [main]
-    paths:
-      - 'mobile/app.json'
-      - 'mobile/app.config.*'
-      - 'mobile/assets/images/**'
-      - 'mobile/package.json'
-      - 'mobile/package-lock.json'
-      - 'mobile/modules/**'
-      - 'mobile/plugins/**'
-      - 'mobile/android/**'
-      - '.github/workflows/android-build.yml'
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: android-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}  # main 실행은 취소하지 않음 (Gradle 캐시 저장)
+  group: android-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}  # main 실행은 취소하지 않음 (Gradle 캐시 저장)
 
 jobs:
   build:

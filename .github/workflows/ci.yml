@@ -1,6 +1,6 @@
 name: 앱 검사
 
-# mobile/이 바뀐 PR과 main push에서 앱이 깨지지 않았는지 확인합니다.
+# mobile/이 바뀐 PR에서 앱이 깨지지 않았는지 확인합니다. main push는 PR에서 같은 걸 검사해서 뺐습니다 (#134).
 #   타입 검사: tsc --noEmit
 #   린트: expo lint (ESLint, Expo 기본 규칙 + React Compiler 규칙)
 #   단위 테스트: jest (jest-expo). 계산 · 판정 같은 순수 함수는 테스트를 같이 올립니다
@@ -9,11 +9,6 @@ name: 앱 검사
 
 on:
   pull_request:
-    paths:
-      - 'mobile/**'
-      - '.github/workflows/ci.yml'
-  push:
-    branches: [main]
     paths:
       - 'mobile/**'
       - '.github/workflows/ci.yml'

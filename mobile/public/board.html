@@ -423,7 +423,7 @@ const CHECKS = [
   { id: 'C08', area: '알람', name: '실기기 정시 울림 — 잠금화면 위 · 소리 · 진동', screens: [], start: null,
     web: { st: 'na', ev: '웹에서는 울림 불가 (#98 웹 스텁 예정)' }, phone: { st: 'unk', ev: '울림 모듈(Kotlin) · 테스트 화면은 있음 · APK 미빌드라 미확인 (#20 #26)' },
     server: { st: 'na', ev: '폰 단독 동작' }, test: { st: 'part', ev: 'CI 안드로이드 빌드 검사가 Kotlin 모듈 컴파일만 확인 — 울림 동작 테스트 없음' },
-    how: ['개발용 APK 확보(#20): PR · main의 "안드로이드 빌드 검사" 실행 요약에서 respec-alarm-dev.apk(3일 보관) 또는 EAS 개발 빌드 → 실기기 설치', '앱에서 respecalarm://dev/alarm-test → 권한 2개(정확한 알람 · 잠금화면 위) 확인 → "1분 뒤 테스트 알람" → 화면 잠그고 대기 → 잠금화면 위로 울림 화면이 뜨면 정상', '현재는 테스트 화면만 — 앱 알람 목록과는 미연결 (#33)'],
+    how: ['개발용 APK 확보(#20): Actions → "안드로이드 빌드 검사" → Run workflow로 돌린 실행 요약에서 respec-alarm-dev.apk(3일 보관) 또는 EAS 개발 빌드 → 실기기 설치', '앱에서 respecalarm://dev/alarm-test → 권한 2개(정확한 알람 · 잠금화면 위) 확인 → "1분 뒤 테스트 알람" → 화면 잠그고 대기 → 잠금화면 위로 울림 화면이 뜨면 정상', '현재는 테스트 화면만 — 앱 알람 목록과는 미연결 (#33)'],
     issues: [20, 26, 33, 79, 98], dec: [] },
   { id: 'C09', area: '알람', name: '출발 · 도착 자동 기록(지오펜스)', screens: [], start: null,
     web: { st: 'na', ev: '위치 기능은 실기기 전용' }, phone: { st: 'no', ev: '위치 권한 · 지오펜스 미구현 (#36 #40)' },
@@ -507,7 +507,7 @@ const CHECKS = [
   { id: 'C24', area: '기반 · 서버', name: '웹 배포 · 개발용 APK 빌드', screens: [], start: null,
     web: { st: 'ok', ev: '10/11 확인 — main 머지 시 자동 배포(현재 주소) · PR별 미리보기' }, phone: { st: 'no', ev: 'APK 빌드 0회 — Actions 아티팩트 또는 EAS 개발 빌드 (#20)' },
     server: { st: 'na', ev: '기능이 아닌 배포 파이프라인 — DB 변경도 머지 시 자동 적용 (#82)' }, test: { st: 'ok', ev: 'CI: 린트 · 단위 테스트 15파일 · 안드로이드 빌드 검사 · DB 검사' },
-    how: ['PR 생성 시 검사 4개(앱 검사 · DB 검사 · 안드로이드 빌드 · 웹 미리보기) 실행, 머지 시 현재 주소가 새 버전으로 교체', 'APK: Actions "안드로이드 빌드 검사" 실행 요약의 아티팩트(3일 보관) 또는 개발 탭 명령'],
+    how: ['PR 생성 시 검사 3개(앱 검사 · DB 검사 · 웹 미리보기) 실행, 머지 시 현재 주소가 새 버전으로 교체', 'APK: Actions → "안드로이드 빌드 검사" → Run workflow로 돌린 실행 요약의 아티팩트(3일 보관) 또는 개발 탭 명령'],
     issues: [20], dec: [] },
 ];
 const KINDS = {
