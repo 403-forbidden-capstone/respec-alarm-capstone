@@ -15,6 +15,7 @@
 | 실험별 자세한 표 · 다시 돌리는 법 | [spec/](spec/) |
 | 프롬프트 원문 전체 (버린 판 포함) | [prompts/](prompts/) |
 | 화면 데이터 (JSON, 개발용 대화만) | [mobile/public/lab/data/](../../mobile/public/lab/data/) |
+| 실험을 직접 다시 돌리려면 (코드 · 데이터 · 실행 기록 원본, 비공개) | [respec-ai-lab](https://github.com/403-forbidden-capstone/respec-ai-lab) — 먼저 `인계.md` |
 
 ## 프롬프트 카드
 
