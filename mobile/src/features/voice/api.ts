@@ -1,7 +1,7 @@
 // ③ 수면 전후 음성 AI — 데이터 접근은 이 파일에서만 합니다.
 // 지금은 src/mocks의 가짜 데이터를 돌려주고, Supabase가 붙으면 이 파일 안에서만 바꿉니다.
 //   읽기 · 쓰기 위치는 docs/screen-data-map.md (A02 AI 대화 · A03 하루 기록)
-// AI 대기 — 대화는 목업 대본(mocks/ai.ts)대로 흘러감. 마이크 · 음성 합성 · 서버 호출 없음 (실제는 voice-* Edge + Gemini, #42 · D7)
+// AI 대기 — 대화는 목업 대본(mocks/ai.ts)대로 흘러감. 마이크 · 음성 합성 · 서버 호출 없음 (실제는 Gemini Live 직결 + voice-* Edge, #42 · D7 실시간)
 import { createAppointment, draftAt, estimateAppointment } from '@/features/alarm/api';
 import type { Appointment, AppointmentDraft, Estimate } from '@/features/alarm/types';
 import { now } from '@/lib/clock';
@@ -61,12 +61,12 @@ export async function getConversation(): Promise<Conversation> {
   return toConversation(chat());
 }
 
-// 목업만: AI가 정리하는 척 기다리는 시간 (목업 userSay → aiTurn 0.8초). 실데이터는 Edge 응답을 기다림. 테스트는 0
+// 목업만: AI가 정리하는 척 기다리는 시간 (목업 userSay → aiTurn 0.8초). 실데이터는 Gemini Live 답을 기다림. 테스트는 0
 export const mockTiming = { replyMs: 800 };
 const pause = (ms: number) => (ms > 0 ? new Promise<void>((resolve) => setTimeout(resolve, ms)) : Promise.resolve());
 
 // 내 차례에 말하고 AI 답까지 받아 같이 돌려줌 — text가 없거나 비면 대본 문장 (말하기 버튼). 내 차례가 아니면 그대로
-// 실데이터(D7 A안 1턴)는 녹음 → voice-* Edge → Gemini가 내 말 · AI 답을 한 번에 주므로, 붙일 때 이 함수 안만 바뀜
+// 실데이터(D7 실시간)는 폰이 Gemini Live에 바로 붙어(voice-session 단기 토큰) 내 말 · AI 답이 흘러 들어옴 — 붙일 때 이 함수 자리가 대화 연결로 바뀌고, 저장은 대화 뒤 voice-commit
 export async function say(text?: string): Promise<Conversation> {
   const c = chat();
   if (!userTurn(c, now(), text)) return toConversation(c);
