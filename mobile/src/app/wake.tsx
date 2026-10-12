@@ -67,7 +67,8 @@ function WakeFlow({ check }: { check: WakeCheck }) {
   const [state, setState] = useState(() => toState(check));
   // 두 번 눌러도 한 단계에서 한 번만 기록 (H07 handled와 같음) — 단계가 바뀌면 다시 누를 수 있음
   const handled = useRef<Phase | null>(null);
-  // 실제로 끈 시각부터 10분 — 다시 울린 뒤 끄면 그 시각부터
+  // 실제로 끈 시각부터 10분 — 다시 울린 뒤 끄면 그 시각부터. 판정 시점(확정 · 확인 알림)으로만 씀
+  // 자동 판정의 기록 시각은 api가 누적 사용이 θ를 넘은 시각으로 남김 (D14)
   const observeEnd = addMinutes(check.dismissedAt, WAKE_OBSERVE_MINUTES);
   // 그룹 일정이 아니면 공유 문구 · 그룹 버튼을 뺌
   const shared = check.groupId != null ? ` · ${check.groupName ?? '그룹'}에 공유했어요` : '';
@@ -187,7 +188,9 @@ function WakeFlow({ check }: { check: WakeCheck }) {
             </View>
             <Text variant="sheetTitle">기상 확정 · {formatTime(state.at)}</Text>
             <Text variant="small" tone="sub" align="center" style={styles.doneText}>
-              {state.how === 'self' ? '확인 알림에 직접 응답했어요' : '화면 사용으로 자동 판정했어요'}
+              {state.how === 'self'
+                ? '확인 알림에 직접 응답했어요'
+                : '화면 사용으로 자동 판정했어요 · 사용이 θ를 넘은 시각으로 기록했어요'}
               {shared}
             </Text>
           </View>
