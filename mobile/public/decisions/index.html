@@ -58,7 +58,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, summary:focus
 .cmt { display: flex; flex-direction: column; gap: 8px; border-top: 1px dashed var(--line); padding-top: 12px; }
 .meeting .cmt { border-top: 0; padding-top: 0; }
 .cmt h3 { margin: 0; color: var(--accent); }
-.cnt { font-family: var(--mono); font-size: 11px; color: var(--muted); }
+.cnt { font-size: 11.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
 .thread { display: flex; flex-direction: column; gap: 6px; }
 .c { background: var(--note); border: 1px solid var(--line); border-radius: 10px; padding: 8px 11px; }
 .c.new { animation: cnew 1.6s ease-out; }
@@ -91,9 +91,7 @@ details.d { background: var(--paper); border: 1px solid var(--line); border-radi
 details.d[open] { border-color: var(--accent); }
 details.d summary { list-style: none; cursor: pointer; padding: 11px 14px; display: grid; grid-template-columns: auto 1fr auto; gap: 4px 12px; align-items: baseline; }
 details.d summary::-webkit-details-marker { display: none; }
-.id { font-family: var(--mono); font-size: 12px; font-weight: 600; color: var(--accent); background: var(--accent-soft); border-radius: 6px; padding: 1px 7px; }
-.st-보류 .id { color: var(--hold); background: var(--hold-soft); }
-.st-정한것 .id { color: var(--done); background: var(--soft); }
+.id { display: inline-flex; align-items: center; justify-content: center; min-width: 46px; height: 22px; font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; color: var(--muted); background: transparent; border: 1px solid var(--line); border-radius: 6px; padding: 0 8px; }
 .ttl { font-weight: 600; min-width: 0; }
 .due { color: var(--muted); font-size: 12px; white-space: nowrap; }
 .peek { grid-column: 2 / -1; color: var(--muted); font-size: 12.5px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -102,6 +100,35 @@ details.d summary::-webkit-details-marker { display: none; }
 .meta { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 12.5px; color: var(--muted); }
 .meta b { color: var(--ink); font-weight: 500; }
 .result { background: var(--accent-soft); border-radius: 10px; padding: 10px 12px; }
+.result.hold { background: var(--hold-soft); }
+.result.hold b { color: var(--hold); }
+.rmeta { font-size: 12px; color: var(--muted); margin-top: 2px; }
+/* 라벨은 전부 같은 회색 틀 — 코드 반영 상태만 앞의 작은 점 색으로: 반영 전(회색) · 반영 중(주황) · 반영됨(초록) · 코드 없음(빈 점) */
+.chip.code::before { content: ""; width: 6px; height: 6px; border-radius: 50%; margin-right: 5px; background: var(--muted); flex: none; }
+.chip.c1::before { background: #d97706; }
+.chip.c2::before { background: #16a34a; }
+.chip.c3::before { background: transparent; box-shadow: inset 0 0 0 1px var(--muted); }
+.pickmark { font-size: 11.5px; font-weight: 600; color: var(--accent); margin-left: 8px; }
+.opt.chosen { border-color: var(--accent); }
+.vrow { grid-column: 2; display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; margin-top: 6px; min-height: 0; }
+.vrow:empty { display: none; }
+.vbtn { font: inherit; font-size: 12px; font-weight: 500; height: 26px; padding: 0 10px; border-radius: 7px; border: 1px solid var(--line); background: var(--paper); color: var(--ink); cursor: pointer; }
+.vbtn:hover { border-color: var(--muted); }
+.vbtn.on { border-color: var(--accent); color: var(--accent); font-weight: 600; }
+.vn { font-size: 12px; font-weight: 600; color: var(--ink); font-variant-numeric: tabular-nums; }
+.vwho { font-size: 12px; color: var(--muted); }
+.decide { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; }
+.decide .hint { font-size: 12px; color: var(--muted); }
+.dact { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.dact .sp { flex: 1; }
+.dform { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.dform .pick, .code-row .k { font-size: 12px; color: var(--muted); display: inline-flex; gap: 6px; align-items: center; }
+.dform select, .dform input, .code-row select, .code-row input { font: inherit; font-size: 13px; padding: 6px 9px; border: 1px solid var(--line); border-radius: 8px; background: var(--paper); color: var(--ink); }
+.dform input[data-dresult] { flex: 1 1 240px; min-width: 0; }
+.code-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; flex: 1 1 auto; }
+.code-row .chip { margin-left: 0; }
+.code-row input { width: 110px; }
+.btn.ghost { background: transparent; }
 .result b { color: var(--accent); }
 h3 { font-size: 12px; letter-spacing: .05em; color: var(--muted); margin: 0 0 6px; font-weight: 600; }
 .tbl { overflow-x: auto; }
@@ -111,9 +138,9 @@ th { font-size: 12px; color: var(--muted); font-weight: 500; background: var(--s
 td:first-child { white-space: nowrap; font-weight: 500; }
 .opts { display: flex; flex-direction: column; gap: 8px; }
 .opt { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; }
-.opt .k { font-family: var(--mono); font-weight: 600; color: var(--muted); grid-row: span 3; }
+.opt .k { font-weight: 700; color: var(--muted); grid-row: span 4; }
 .opt .nm { font-weight: 600; min-width: 0; }
-.tag { display: inline-block; font-size: 11px; font-weight: 500; border-radius: 5px; padding: 0 6px; margin-left: 6px; border: 1px solid var(--muted); color: var(--muted); vertical-align: 1px; }
+.tag, .op-chip, .chip { display: inline-flex; align-items: center; height: 20px; font-size: 11.5px; font-weight: 600; line-height: 1; border-radius: 6px; padding: 0 7px; margin-left: 6px; border: 1px solid var(--line); color: var(--muted); background: var(--paper); vertical-align: 2px; white-space: nowrap; }
 .opt .ds { min-width: 0; }
 .opt ul { margin: 4px 0 0; padding-left: 16px; color: var(--muted); font-size: 13px; }
 .opt li.todo { color: var(--ink); list-style: none; margin-left: -16px; }
@@ -132,7 +159,7 @@ textarea { width: 100%; min-height: 84px; resize: vertical; font: inherit; font-
 .opinion h3 { color: var(--accent); }
 .situ { background: var(--soft); border-radius: 10px; padding: 10px 12px; }
 .situ p.par, .situ ul.plain { color: var(--ink); }
-.op-chip { display: inline-block; font-size: 11px; font-weight: 600; color: var(--accent); border: 1px solid var(--accent); border-radius: 5px; padding: 0 6px; margin-left: 8px; vertical-align: 1px; }
+.op-chip { }
 
 /* 펼치면 오른쪽에 화면: 목업(목업.html) · 추가 화면 와이어프레임 · 피그마 캡처 · 앱 웹 미리보기 */
 :root { --s: .74; --mark: #f5a524; }
@@ -168,7 +195,7 @@ footer { margin-top: 36px; color: var(--muted); font-size: 12px; display: flex; 
 <div class="wrap">
   <header>
     <h1>결정 안건</h1>
-    <p>줄을 누르면 지금 어긋난 곳 · 선택지가 펼쳐지고, 오른쪽에 그 안건의 화면이 떠요(노란 테두리 = 안건이 가리키는 곳). 안건마다 아래 "의견"에 이름과 함께 남기면, 같은 링크를 연 사람 모두에게 바로 보여요.</p>
+    <p>줄을 누르면 상황 · 선택지와 그 안건의 화면이 떠요(노란 테두리 = 안건이 가리키는 곳). 안건마다 아래 "의견"에 이름과 함께 남기면, 같은 링크를 연 사람 모두에게 바로 보여요. 선택지마다 투표할 수 있고, 한 안이 3표가 되면 자동으로 "정한 것"으로 옮겨져요. 직접 옮길 땐 고른 안과 결과를 적고 "정한 것으로 이동".</p>
     <div class="stats" id="stats"></div>
   </header>
 
@@ -195,7 +222,7 @@ footer { margin-top: 36px; color: var(--muted); font-size: 12px; display: flex; 
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.2/dist/umd/supabase.js"></script>
 <script>
-const DATA = /*DATA*/[{"id":"D38","title":"온보딩에서 무엇을 받고, 권한 · 동의는 언제 물을지","status":"정할 것","meta":{"출처":"계획서 대조 (10/10) — 상세설계서 7장 v4 7.13.2 · `docs/screen-data-map.md` 로그인 · 온보딩 · 설정 · 개발계획_v1 10절 17","이슈":"#25 · #128","기한":"#25 시작 전"},"blocks":[{"h":"지금 어긋난 곳","parts":[{"t":"table","head":["어디","지금"],"rows":[["앱 온보딩 `onboarding.tsx`","닉네임 · 아이디 · 준비 시간 · 여유 시간 · 이동 수단 · 집(이름만). 집 좌표 · 동의 · 권한 없음. #117로 앱 흐름에서 빠져 있음"],["`docs/screen-data-map.md`","온보딩 = 아이디 · 집 좌표(장소 검색) · 권한 안내 3개(알림 · 정확한 알람 · 잠금화면 위 울림)"],["개발계획_v1 10절 17","권한 안내 6개 = 위 3개 + 위치 · 사용 정보 접근 · 마이크"],["상세설계서 7장 v4 7.13.2","설치 때 한꺼번에 묻지 않음. 버튼을 3번쯤 누른 뒤 자동으로 할지 물음 (교수님 피드백 \"자동 수집 우선\")"],["개인정보 동의","8장에 원칙만, 화면 · 문구 없음 (위치 · 음성 · 기상 공유)"],["AI용 개인정보","문서에 따로 받는 항목 없음 — 대화 · 기록에서 뽑음"],["시간대","`profiles.timezone`은 있는데 얻는 방법이 문서에 없음"]]}]},{"h":"선택지","parts":[{"t":"opts","v":[{"key":"A","name":"필요한 때 필요한 것만","tag":"먼저 고른 안","desc":"온보딩엔 첫 알람이 울리는 데 필요한 것만 받고, 나머지는 그 기능을 처음 쓸 때 · 써 본 뒤에 물음 (아래 참고 표)","sub":["AI용 추가 정보(평소 기상 · 취침, 아침형 · 저녁형, 직업 · 학교, AI 말투)는 온보딩에서 안 받음","시간대는 묻지 않고 폰 설정에서 읽음","할 일: 개인정보 동의 화면 문구, 사용 정보 접근 안내 화면(안드로이드 설정으로 이동), 권한마다 처음 묻는 지점, 집 장소 검색(좌표)"]},{"key":"B","name":"온보딩에서 한 번에","tag":"","desc":"권한 6개 + AI용 정보까지 처음에 다 받음","sub":["할 일: 온보딩 단계 늘림, 7장 v4 7.13.2 수정"]}]},{"t":"p","v":"지금 코드: 온보딩 6칸만, 권한 · 동의는 묻지 않음"}]},{"h":"참고","parts":[{"t":"table","head":["언제","무엇"],"rows":[["온보딩","지금 6칸 + 집 위치(지도) + 개인정보 동의 1장 + 알람 권한 4개(알림 · 정확한 알람 · 잠금화면 위 울림 · 배터리 최적화 제외)"],["처음 쓸 때","위치 \"항상 허용\"(출발 · 도착 확인을 켤 때) · 마이크 + AI 대화 동의(첫 대화) · 기상 공유 동의(그룹 참여) · 캘린더(가져오기를 누를 때)"],["써 본 뒤","사용 정보 접근 — 기상 확인 버튼을 몇 번 누른 뒤 \"이제 자동으로 확인할까요?\". 어떤 앱인지는 안 읽고 화면 켜짐 · 잠금 해제 시각만 씀, 설정에서 직접 켜는 특수 권한. 웨어러블 · 활동 인식은 선택"]]}]}]},{"id":"D1","title":"알람 강도를 배경음 · 말소리 · 진동 따로 고르게 할지","status":"정할 것","meta":{"출처":"PR #84 · `docs/screen-data-map.md` 스키마 보완 2","이슈":"#29","기한":"#29 시작 전"},"blocks":[{"h":"지금 어긋난 곳","parts":[{"t":"table","head":["어디","지금"],"rows":[["화면 H03 · 목업","세 축을 따로 고름, \"자동으로 되돌리기\" 버튼 있음"],["DB `alarms`","`intensity` 하나 + `voice_tone` · `sound_key`, 진동 칸 없음"]]}]},{"h":"선택지","parts":[{"t":"opts","v":[{"key":"A","name":"축별로 고름","tag":"먼저 고른 안","desc":"기본값은 강도(약 · 보통 · 강)에서 오고, 직접 고르면 그 값. 말소리 = `voice_tone`, 배경음 = 강도 + `sound_key`","sub":["할 일: `alarms`에 진동 칸 추가, 진동 패턴 3개(없음 · 짧게 반복 · 강하게 연속) 직접 구현"]},{"key":"B","name":"강도 하나만","tag":"","desc":"약 · 보통 · 강 중 하나만 고르고 세 축은 강도를 따라감","sub":["할 일: H03에서 축별 선택 빼기, DB는 그대로"]}]}]}]},{"id":"D2","title":"기상 확인 알림에 응답이 없으면 알람을 다시 울릴지","status":"정할 것","meta":{"출처":"PR #84","이슈":"#35 · #45","기한":"#35 시작 전"},"blocks":[{"h":"지금 어긋난 곳","parts":[{"t":"table","head":["어디","지금"],"rows":[["화면 H08 · 목업","확인 알림에도 응답이 없으면 기상 알람이 다시 울림"],["`docs/screen-data-map.md` H08","끝까지 안 깨면 MISSED 기록 + 그룹에 미확인 푸시(5분마다 도는 `wake-check`)만, 다시 울림 없음"],["#35 본문 (10/7 더함)","해제 뒤 10분 동안 폰 사용도 기상 확정도 없으면 같은 강도로 1번 더 울림, 미루기 횟수에 안 셈"]]}]},{"h":"선택지","parts":[{"t":"opts","v":[{"key":"A","name":"1번 더 울리고, 그래도 안 깨면 MISSED","tag":"먼저 고른 안","desc":"다시 울림 1번 → 응답 없으면 MISSED 기록 + 그룹에 미확인 푸시","sub":["할 일: docs H08 문구 고치기, 알람 코어에 다시 울림 자리 만들기(#79)"]},{"key":"B","name":"다시 울리지 않고 MISSED만","tag":"","desc":"docs에 적힌 대로 MISSED 기록 + 그룹에 미확인 푸시","sub":["할 일: 화면 H08 · 목업 흐름에서 다시 울림 빼기, #35 체크 항목 빼기"]}]}]}]},{"id":"D3","title":"미루기 시간과 횟수","status":"정할 것","meta":{"출처":"PR #84","이슈":"#29 · #33","기한":"#29 시작 전"},"blocks":[{"h":"지금 어긋난 곳","parts":[{"t":"table","head":["어디","지금"],"rows":[["화면 H07 · 목업","5 · 10 · 15분 중 고름 (기본 5분)"],["`docs/alarm-core.md`","미루기 최대 3번"],["알람 코어 (main, PR #62)","10분 고정, 횟수 제한 없음"]]}]},{"h":"선택지","parts":[{"t":"opts","v":[{"key":"A","name":"5 · 10 · 15분 고르기 + 최대 3번","tag":"먼저 고른 안","desc":"울림 화면에 \"미루기 1/3회\", 다 쓰면 버튼을 끄고 짧게 준비하는 안내로 넘김","sub":["할 일: 네이티브 울림 화면에 시간 고르기 · 횟수 추가, `alarm_events.snooze_minutes`에 기록(칸은 이미 있음)"]},{"key":"B","name":"10분 고정 + 최대 3번","tag":"","desc":"시간은 지금 코어 그대로, 횟수만 막음","sub":["할 일: 네이티브에 횟수만 추가, 화면 H07에서 시간 고르기 빼기"]},{"key":"C","name":"지금 코어 그대로 (10분 · 무제한)","tag":"","desc":"네이티브는 손대지 않음","sub":["할 일: 화면 H07 · `docs/alarm-core.md`를 코어에 맞춰 고치기"]}]}]},{"h":"참고","parts":[{"t":"p","v":"안 끄고 두면 저절로 다시 울리는 것(약 1번 · 보통 2번 · 강 3번, #29)은 미루기 횟수와 따로 셈."}]}]},{"id":"D4","title":"반복 알람을 서버가 몇 회차까지 미리 만들지","status":"정할 것","meta":{"출처":"결정 탭 (10/7)","이슈":"#33","기한":"#33 시작 전"},"blocks":[{"h":"지금 어긋난 곳","parts":[{"t":"table","head":["어디","지금"],"rows":[["결정 탭 (10/7)","서버가 다음 회차 하나만 만듦, 폰은 반복 안 함"],["`docs/screen-data-map.md` Edge 표","`suggestion-generate`가 매일 03:00 반복 알람 다음 회차를 메움"],["#33 본문 (10/7 더함)","서버가 앞으로 2주치를 만들어 두고 폰이 한꺼번에 예약 (앱을 며칠 안 열어도 울림)"]]}]},{"h":"선택지","parts":[{"t":"opts","v":[{"key":"A","name":"2주치 미리","tag":"#33에 적힌 안","desc":"앱을 며칠 안 열어도 울림","sub":["할 일: docs Edge 표 문구 고치기"]},{"key":"B","name":"다음 회차 하나만","tag":"","desc":"매일 배치가 한 회차씩 메움","sub":["할 일: #33 체크 항목 고치기"]}]}]}]},{"id":"D5","title":"카카오 응답을 어디까지 남길지","status":"정할 것","meta":{"출처":"`docs/screen-data-map.md` 스키마 보완 4","이슈":"#27","기한":"#27에서"},"blocks":[{"h":"무슨 상황","parts":[{"t":"p","v":"일정을 만들 때(H05) 서버가 카카오 대중교통 길찾기를 불러 이동 시간(분)을 받고, 기상 시각 = 약속 − 여유 − 이동 − 준비로 계산함. 이 응답에서 무엇을 DB에 남길지가 문제."},{"t":"ul","v":["남기는 값이 있어야 하는 곳: H03 계산식(\"이동 50분 · 길찾기 + 내 실측 3회\"), 반복 일정 다음 회차 알람 계산(D4), 실측 이동 시간과 비교하는 학습(#49)","카카오는 응답을 DB · 캐시에 저장 · 재사용하지 말고 실시간 호출만 하라고 답함(데브톡 9/1 · 9/17). 이동 안내 동안 메모리에만 두고 끝나면 버리는 건 허용"]}]},{"h":"지금 어긋난 곳","parts":[{"t":"table","head":["어디","지금"],"rows":[["카카오 API 약관","응답 저장 · 재사용 불가"],["DB `appointment_participants`","`est_travel_minutes`(경로 API 조회 결과) · `travel_source`(API · CACHED · MANUAL) 칸 있음 — CACHED = 저장해 둔 값을 다시 씀"]]}]},{"h":"선택지","parts":[{"t":"opts","v":[{"key":"A","name":"계산에 쓴 분만 기록으로 남김","tag":"","desc":"경로 · 원문은 안 남김. 다시 계산할 땐(반복 회차 · 여유 변경) 카카오를 다시 부름","sub":["할 일: `travel_source` CACHED 안 씀, 반복 회차마다 호출 수 확인"]},{"key":"B","name":"분을 남기고 반복 회차 · 재계산에도 그 값을 씀","tag":"`travel_source = CACHED`","desc":"호출이 적음, 약관 '재사용'에 걸릴 수 있음","sub":["할 일: 카카오에 \"계산 결과(분)만 저장\"도 재사용인지 문의"]},{"key":"C","name":"아무것도 안 남김","tag":"","desc":"H03 계산식의 이동 분도 열 때마다 다시 부름","sub":["할 일: `est_travel_minutes` 칸 비워 둠, 학습은 실측 이동 시간만 씀"]}]}]},{"h":"참고","parts":[{"t":"p","v":"#27에서 실제 응답 · 약관 문구를 보고 정함."}]}]},{"id":"D6","title":"S01 시각 조정 제안 종류를 `alarm_suggestion_type`에 추가","status":"정할 것","meta":{"출처":"`docs/screen-data-map.md` 스키마 보완 1","이슈":"#49","기한":"#49에서"},"blocks":[{"h":"지금 어긋난 곳","parts":[{"t":"table","head":["어디","지금"],"rows":[["목업 S01","\"다음 알람 10분 앞당김\" 제안"],["DB `alarm_suggestion_type`","VOICE_TONE · SOUND · INTENSITY뿐, 시각 조정 없음"]]}]},{"h":"선택지","parts":[{"t":"opts","v":[{"key":"A","name":"시각 조정 종류를 enum에 추가","tag":"","desc":"목업 S01 그대로","sub":["할 일: `alarm_suggestion_type`에 값 추가(마이그레이션), 적용 대상은 D25와 같이 정함"]},{"key":"B","name":"시각 조정은 제안하지 않음","tag":"","desc":"S01을 강도 · 말소리 · 배경음 제안으로 바꿈","sub":["할 일: 목업 · 화면 S01 문구와 예시 바꾸기"]}]}]}]},{"id":"D12","title":"알람 설정(H03)에서 여유 시간을 고르는 범위 · 단위","status":"정할 것","meta":{"출처":"PR #84 (작성자 판단)","이슈":"#32","기한":"#32 시작 전"},"blocks":[{"h":"지금 어긋난 곳","parts":[{"t":"table","head":["어디","지금"],"rows":[["화면 H03","0~30분, 5분 단위 Stepper (목업 슬라이더 대신)"],["H03 저장 규칙","\"5분 이상 바뀌면 한 번 더 확인\" — 5분 단위라 늘 확인 시트가 뜨고 \"5분 미만이면 바로 저장\" 분기는 닿지 않음"]]}]},{"h":"선택지","parts":[{"t":"opts","v":[{"key":"A","name":"0~30분 · 5분 단위","tag":"지금 코드","desc":"","sub":[]},{"key":"B","name":"1분 단위","tag":"","desc":"5분 미만 변경은 확인 없이 저장됨","sub":["할 일: Stepper 단위만 바꿈"]}]}]}]},{"id":"D13","title":"홈(H01)이 저녁 화면으로 바뀌는 시각","status":"정할 것","meta":{"출처":"PR #84 (작성자 판단)","이슈":"#30","기한":"PR #84 머지 전"},"blocks":[{"h":"지금 어긋난 곳","parts":[{"t":"table","head":["어디","지금"],"rows":[["화면 H01","오후 6시부터 내일 일정 · 내일 준비물 · 자기 전 AI 대화로 바뀜"],["목업","시연 시각(아침 · 전날 밤 9시)만 있어 기준 시각이 안 적혀 있음"]]}]},{"h":"선택지","parts":[{"t":"opts","v":[{"key":"A","name":"오후 6시 고정","tag":"지금 코드","desc":"","sub":[]},{"key":"B","name":"오늘 마지막 일정이 끝난 뒤","tag":"","desc":"","sub":[]}]}]}]},{"id":"D15","title":"실데이터 모드에서 아직 안 붙인 화면","status":"정할 것","meta":{"출처":"PR #103 (작성자 판단)","이슈":"#97","기한":"기능을 실데이터로 붙이기 전"},"blocks":[{"h":"지금 어긋난 곳","parts":[{"t":"table","head":["어디","지금"],"rows":[["실데이터 모드","시각은 지금 시각, 아직 Supabase로 안 바꾼 화면은 가짜 데이터(2025년 5월 시나리오)를 그대로 보여 줌 → 지난 날짜라 어색함"]]}]},{"h":"선택지","parts":[{"t":"opts","v":[{"key":"A","name":"그대로","tag":"지금 코드","desc":"기능을 붙일 때마다 그 화면만 바뀜","sub":[]},{"key":"B","name":"실데이터 모드에선 안 붙인 화면을 \"준비 중\"으로","tag":"","desc":"","sub":["할 일: `features/*/api.ts` 함수마다 실데이터 모드 빈 값"]}]}]}]},{"id":"D16","title":"개발 메뉴를 출시 빌드에서도 보여 줄지","status":"정할 것","meta":{"출처":"PR #103 (작성자 판단)","이슈":"#97 · #50","기한":"#60 1차 데모 빌드 전"},"blocks":[{"h":"지금 어긋난 곳","parts":[{"t":"table","head":["어디","지금"],"rows":[["`/dev/screens` · `/dev/ui` · `/dev/alarm-test`","주소를 알면 누구나 열림"],["설정 화면","\"개발\" 절(데이터 모드 토글)이 늘 보임"]]}]},{"h":"선택지","parts":[{"t":"opts","v":[{"key":"A","name":"그대로","tag":"지금 코드","desc":"","sub":[]},{"key":"B","name":"개발 빌드에서만","tag":"","desc":"출시 APK · 웹 배포에선 숨김","sub":[]},{"key":"C","name":"숨김 메뉴로","tag":"","desc":"#50 데모 모드 숨김 메뉴와 같이","sub":[]}]}]}]},{"id":"D17","title":"친구 권한(F02)이 보여 주는 권한의 방향","status":"정할 것","meta":{"출처":"PR #104","이슈":"#44","기한":"#44 시작 전"},"blocks":[{"h":"지금 어긋난 곳","parts":[{"t":"table","head":["어디","지금"],"rows":[["목업 `finalGrant` · 지금 코드","내가 그 친구에게 준 권한"],["`docs/screen-data-map.md` F02","친구가 나에게 준 권한"]]}]},{"h":"선택지","parts":[{"t":"opts","v":[{"key":"A","name":"내가 준 권한","tag":"지금 코드, 목업","desc":"","sub":["할 일: docs F02 문구 고치기"]},{"key":"B","name":"받은 권한","tag":"","desc":"","sub":["할 일: F02 표 · 문구를 받은 쪽으로 다시"]}]}]}]},{"id":"D18","title":"그룹 공유 권한을 어떤 단위로 저장할지","status":"정할 것","meta":{"출처":"PR #104","이슈":"#44","기한":"#44 시작 전"},"blocks":[{"h":"지금 어긋난 곳","parts":[{"t":"table","head":["어디","지금"],"rows":[["목업 · 화면 F03","그룹마다 권한 한 줄"],["DB `sharing_permissions`","(준 사람, 받은 사람, 출처)마다 한 줄 → 그룹이면 멤버마다 행을 써야 함"],["규칙","나중에 들어온 멤버에게 그룹 권한을 줄지 정해진 게 없음"]]}]},{"h":"선택지","parts":[{"t":"opts","v":[{"key":"A","name":"멤버마다 행 + 새 멤버가 들어오면 그 그룹 권한으로 행 추가","tag":"","desc":"","sub":["할 일: 그룹 참여 때 행을 만드는 RPC · 트리거"]},{"key":"B","name":"그룹 단위로 한 줄 저장하는 자리 추가","tag":"","desc":"","sub":["할 일: 마이그레이션 · RLS 다시"]}]},{"t":"p","v":"지금 코드: 가짜 데이터라 그룹마다 한 줄(목업) — DB에 붙일 때 둘 중 하나로."}]}]},{"id":"D19","title":"그룹 기상 조회를 켤 때 기상 공유 동의도 켤지","status":"정할 것","meta":{"출처":"PR #104","이슈":"#44 · #45","기한":"#44 시작 전"},"blocks":[{"h":"지금 어긋난 곳","parts":[{"t":"table","head":["어디","지금"],"rows":[["DB","`group_members.wake_share_opt_in`이 켜져 있어야 그룹 기상 조회를 인정"],["화면 F03 · 목업","동의 스위치가 없음"]]}]},{"h":"선택지","parts":[{"t":"opts","v":[{"key":"A","name":"F03에서 기상 상태 조회를 켜면 동의도 같이 켬","tag":"","desc":"","sub":[]},{"key":"B","name":"F03에 동의 스위치를 따로 둠","tag":"","desc":"","sub":[]}]},{"t":"p","v":"지금 코드: 동의 개념 없음(목업). 깨우기 알림(`notify`) 조건도 `docs/screen-data-map.md`는 \"같은 그룹 + `wake_share_opt_in`\", 화면 · `get_group_wake_status`는 기상 조회 권한(`VIEW_WAKE`, 그룹에서 받은 권한은 동의도 필요)이라 다름 — 친구 권한으로도 볼 수 있는지, 깨우기 알림은 권한 없이 \"같은 그룹 + 동의\"만 보는지를 #45 · #46에서 하나로."}]}]},{"id":"D20","title":"공유받은 알람(G04)의 변경 기록 시트","status":"정할 것","meta":{"출처":"PR #104","이슈":"#46","기한":"#46 시작 전"},"blocks":[{"h":"지금 어긋난 곳","parts":[{"t":"table","head":["어디","지금"],"rows":[["D9 (정한 것)","처음엔 저장 없이 주인에게 푸시만"],["목업 · 화면 G04","\"변경 기록\" 시트가 있음 (지금은 앱을 다시 열면 사라짐)"],["가짜 api","권한 변경(F03) · 깨우기 알림(G03)도 같은 기록에 섞임 — 목업은 알람 변경만"]]}]},{"h":"선택지","parts":[{"t":"opts","v":[{"key":"A","name":"시트 빼기","tag":"","desc":"D9 그대로","sub":[]},{"key":"B","name":"시트 유지 + 저장 자리 추가","tag":"","desc":"D9를 다시 정함","sub":[]}]},{"t":"p","v":"지금 코드: 시트는 있고 저장은 없음(둘 다 아님)."}]}]},{"id":"D21","title":"기상 권한을 안 받은 그룹의 상세 화면","status":"정할 것","meta":{"출처":"PR #104","이슈":"#43","기한":"PR #104 머지 전"},"blocks":[{"h":"지금 어긋난 곳","parts":[{"t":"table","head":["어디","지금"],"rows":[["목업 · 화면 G01","기상 조회 권한이 없는 그룹(우리 가족)은 토스트만, 상세(G02)로 못 들어감"],["결과","그 그룹의 상세 · 초대 · 공유 범위 설정을 열 길이 권한 관리(F03)뿐"]]}]},{"h":"선택지","parts":[{"t":"opts","v":[{"key":"A","name":"그대로","tag":"지금 코드, 목업","desc":"","sub":[]},{"key":"B","name":"상세는 열고 기상 칸만 숨김","tag":"","desc":"","sub":[]}]}]}]},{"id":"D22","title":"피그마에만 있는 요소를 넣을지 (그룹 · 친구)","status":"정할 것","meta":{"출처":"PR #104","이슈":"#43","기한":"PR #104 머지 전"},"blocks":[{"h":"참고","parts":[{"t":"p","v":"목업 기준이라 안 넣은 것: F02 아래 \"알람 보기 · 기상 확인하기\" 타일, G02 멤버 줄 \"권한 보기\", G03 위 \"완료 · 목표보다 2분 일찍\" 카드와 \"응원 보내기\"(목업은 \"알람 보내기\"), G04 \"다음 알람 · 알람 추가 · 반복 알람\" 구성. 넣기로 하면 목업에 먼저 반영함."}]},{"h":"선택지","parts":[{"t":"opts","v":[{"key":"A","name":"안 넣음","tag":"지금 코드","desc":"목업 기준 그대로","sub":[]},{"key":"B","name":"전부 넣음","tag":"","desc":"목업에 먼저 그리고 화면에 반영","sub":["할 일: G04 \"알람 추가\"는 친구 알람을 대신 만드는 기능이라 #46 범위 확인"]},{"key":"C","name":"골라서 넣음","tag":"","desc":"위 항목마다 넣을지 정함 (예: \"응원 보내기\"만)","sub":[]}]}]}]},{"id":"D23","title":"알람 조정 제안을 되돌렸을 때 남길 상태","status":"정할 것","meta":{"출처":"PR #105","이슈":"#49","기한":"#49 시작 전"},"blocks":[{"h":"지금 어긋난 곳","parts":[{"t":"table","head":["어디","지금"],"rows":[["목업 · 화면 S01","되돌리면 제안이 처음(PENDING)으로 돌아감"],["DB `alarm_suggestions`","되돌림 상태가 없음. PENDING으로 돌리면 `result_value`를 비워야 해서 적용 이력이 사라짐"],["S01 문구","\"다음 기록에서 성능이 나빠지면 이전 값으로 되돌려요\"(자동 되돌림) — docs · 스키마에 자리 없음"]]}]},{"h":"선택지","parts":[{"t":"opts","v":[{"key":"A","name":"되돌림 상태 추가","tag":"","desc":"이력이 남음","sub":["할 일: `alarm_suggestion_status` enum에 값 추가(마이그레이션)"]},{"key":"B","name":"PENDING으로 돌리고 이력은 기록(alarm_events · daily_records)에만","tag":"지금 코드, 목업","desc":"","sub":[]}]}]}]},{"id":"D24","title":"제안을 무시 · 거절하면 얼마나 안 보여 줄지 (알람 조정 · 루틴)","status":"정할 것","meta":{"출처":"PR #105 · D30의 \"다시 제안 금지 기간\"을 여기로 합침 (10/13)","이슈":"#49 · #48","기한":"#49 시작 전"},"blocks":[{"h":"지금 어긋난 곳","parts":[{"t":"table","head":["어디","지금"],"rows":[["목업 · 화면 S01 알람 조정 제안","\"이번 제안 무시\" → \"당분간 다시 보이지 않아요\" — 기간이 어디에도 없음 (`alarm_suggestions.suppress_until` 칸만 있음)"],["목업 A03 루틴 제안","\"괜찮아요\" → 14일 동안 다시 제안 안 함"]]}]},{"h":"선택지","parts":[{"t":"opts","v":[{"key":"A","name":"둘 다 14일","tag":"","desc":"루틴 제안 목업 값에 맞춤","sub":[]},{"key":"B","name":"알람 조정 7일 · 루틴 14일","tag":"","desc":"알람 기록은 매일 쌓여 근거가 빨리 바뀜","sub":[]},{"key":"C","name":"기간 대신 새 기록 기준","tag":"","desc":"무시한 뒤 실측이 3번 더 쌓이면 다시 제안","sub":[]}]}]},{"h":"참고","parts":[{"t":"p","v":"S01 \"제안 다시 보기\"(무시 → 대기)를 누르면 `suppress_until`을 비우고 PENDING으로, `responded_at`은 남김 — 같이 확인. 루틴 제안 기한을 어디에 저장할지는 D30."}]}]},{"id":"D25","title":"제안을 적용하는 대상: 일정 vs 알람 하나","status":"정할 것","meta":{"출처":"PR #105 · D6과 이어짐","이슈":"#49","기한":"#49 시작 전"},"blocks":[{"h":"지금 어긋난 곳","parts":[{"t":"table","head":["어디","지금"],"rows":[["목업 · 화면 S01","일정(매주 금요일 수업)의 예측 준비를 늘려 앞으로의 회차가 모두 바뀜"],["DB `alarm_suggestions`","`target_alarm_id`로 알람 하나만 가리킴"],["예측 준비(P80)","`v_prepare_time_stats`는 사용자 단위 뷰라 실측이 쌓이면 바로 바뀜 → 적용한 +10분을 일정마다 둘 자리가 없어 덮어써질 수 있음"]]}]},{"h":"선택지","parts":[{"t":"opts","v":[{"key":"A","name":"일정 단위","tag":"","desc":"반복 회차에 다 적용 (지금 코드, 목업)","sub":["할 일: 제안에 일정 칸 추가(마이그레이션), 적용분을 P80과 따로 저장(일정별 오프셋)"]},{"key":"B","name":"알람 하나","tag":"스키마 그대로","desc":"","sub":["할 일: S01 문구를 \"다음 알람\"만으로"]}]}]}]},{"id":"D26","title":"주간 점수 · 목표 기상 규칙","status":"정할 것","meta":{"출처":"PR #105","이슈":"#41","기한":"#41 시작 전"},"blocks":[{"h":"참고","parts":[{"t":"p","v":"R02 주간의 막대 점수와 \"70점 이상이면 목표 기상\" 규칙은 목업 값뿐이고 DB에 점수 칸이 없음. 점수 계산식 · 저장 여부(`daily_records`에 칸 추가 또는 그때그때 계산)를 정함. 목업은 지난 날 점수가 고정값이고, 오늘만 기상 확정이 기상 알람 + 10분 안이면 88점 · 넘으면 61점."}]},{"h":"선택지","parts":[{"t":"opts","v":[{"key":"A","name":"점수 없이 목표 기상 O/X","tag":"","desc":"기상 확정이 기상 알람 + 10분 안이면 목표 기상. 막대 대신 날마다 O/X, 목표 기상률 = O 날 수 ÷ 기록한 날 수","sub":[]},{"key":"B","name":"기상 점수","tag":"","desc":"알람 시각보다 늦은 분만큼 깎음(예: 100 − 늦은 분 × 3), 70점 이상 = 목표 기상","sub":[]},{"key":"C","name":"하루 점수","tag":"","desc":"기상 · 출발 · 도착(지각) 합산, 70점 이상 = 목표 기상","sub":[]}]},{"t":"p","v":"저장: 셋 다 `daily_records.wake_confirmed_at` · `is_late`로 그때그때 계산 가능 — 칸 추가는 계산이 무거울 때만."}]}]},{"id":"D27","title":"월간 달력 점(기록 완료 · 일부 기록)의 기준","status":"정할 것","meta":{"출처":"PR #105","이슈":"#41","기한":"#41 시작 전"},"blocks":[{"h":"참고","parts":[{"t":"p","v":"기록 완료 · 일부 기록의 정의가 없음. 목업은 평일 완료, 주말 일부로 그려져 있음."}]},{"h":"선택지","parts":[{"t":"opts","v":[{"key":"A","name":"기상 · 출발 · 도착이 다 있으면 완료, 하나라도 있으면 일부","tag":"","desc":"","sub":[]},{"key":"B","name":"기상 확정만 있으면 완료","tag":"","desc":"출발 · 도착은 일정 있는 날만 생겨서 주말이 늘 일부로 보이는 걸 피함","sub":[]},{"key":"C","name":"그날 있어야 할 기록 기준","tag":"","desc":"일정 있는 날은 기상 · 출발 · 도착, 없는 날은 기상만 다 차면 완료","sub":[]}]}]}]},{"id":"D28","title":"기록 탭(R02) 첫 화면","status":"정할 것","meta":{"출처":"PR #105","이슈":"#38","기한":"PR #105 머지 전"},"blocks":[{"h":"선택지","parts":[{"t":"opts","v":[{"key":"A","name":"주간","tag":"지금 코드, 목업","desc":"","sub":[]},{"key":"B","name":"월간","tag":"피그마","desc":"","sub":[]}]}]}]},{"id":"D29","title":"루틴 단계의 모양 · 반복 요일 형식","status":"정할 것","meta":{"출처":"PR #106","이슈":"#48","기한":"#48 시작 전"},"blocks":[{"h":"지금 어긋난 곳","parts":[{"t":"table","head":["어디","지금"],"rows":[["목업 · 화면 A04","단계마다 시각 · 걸리는 시간, 첫 단계 시각부터 차례로 계산"],["DB `routines.steps`","`{order, title, offset, type, is_alarm}` — 첫 단계 시각 칸이 없고 `offset`의 기준이 안 적혀 있음"],["DB `repeat_days`","'MON~FRI' 같은 형식이 정해지지 않음"]]}]},{"h":"선택지 (단계 시각)","parts":[{"t":"opts","v":[{"key":"A","name":"시작 시각 칸 추가 + `offset` = 시작에서 몇 분 뒤","tag":"","desc":"목업과 같음(21:30 시작 → 0 · 5 · 7분 뒤)","sub":["할 일: `routines`에 시작 시각 칸(마이그레이션), 단계 시간을 바꾸면 뒤 단계 `offset`을 다시 계산"]},{"key":"B","name":"단계마다 시각을 직접 저장","tag":"","desc":"`offset` 대신 `time`","sub":["할 일: `steps` 모양 바꿈, 시작을 옮기면 단계 시각을 전부 같이 옮김"]},{"key":"C","name":"기상 알람 기준 `offset`","tag":"","desc":"아침 루틴이면 기상 + n분, 저녁 루틴이면 취침 기준","sub":["할 일: 기준 알람(기상 · 취침)을 루틴에 연결하는 칸, 저녁 루틴 기준 시각 정의"]}]}]},{"h":"선택지 (반복 요일)","parts":[{"t":"opts","v":[{"key":"A","name":"요일 배열","tag":"","desc":"`{MON,WED,FRI}` (Postgres 배열), 화면 요일 버튼과 1:1","sub":[]},{"key":"B","name":"문자열","tag":"","desc":"'MON~FRI' · 'MON,WED' 같은 형식을 정해 둠, 읽을 때 파싱","sub":[]}]}]},{"h":"참고","parts":[{"t":"p","v":"루틴을 어떤 것으로 어떻게 넣을지 아직 안 정해짐(D33 보류) — 프로토타입에서 루틴을 빼면 이 안건도 같이 보류."}]}]},{"id":"D30","title":"루틴 제안을 저장할 자리","status":"정할 것","meta":{"출처":"PR #106 · 다시 제안 금지 기간은 D24로 옮김 (10/13)","이슈":"#48","기한":"#48 시작 전"},"blocks":[{"h":"지금 어긋난 곳","parts":[{"t":"table","head":["어디","지금"],"rows":[["목업 A03","제안 = 이름 · 이유 · 요약 + 초안(요일 · 단계). \"괜찮아요\" 뒤 다시 제안 안 하는 기간(목업 14일)은 D24에서 정함"],["DB `daily_journals`","`routine_suggestion` 글 하나 · `suggestion_status`(`apply_status`)뿐, 초안 칸 없음"]]}]},{"h":"선택지","parts":[{"t":"opts","v":[{"key":"A","name":"`daily_journals`에 초안(jsonb) 칸 추가","tag":"","desc":"","sub":["할 일: 마이그레이션. D24에서 기간을 두면 거절 기한도 같은 줄에 — 일기는 하루 한 줄이라 제안을 만들 때마다 최근 일기에서 기한이 남은 줄을 찾아봐야 함"]},{"key":"B","name":"루틴 제안 테이블을 따로 만듦","tag":"","desc":"초안 · 상태 · 거절 기한(D24)을 한 줄에","sub":["할 일: 마이그레이션 · RLS"]},{"key":"C","name":"초안 없이 글만 남김","tag":"","desc":"목업에서 초안을 덜어냄, \"루틴 만들기\"를 누르면 A04에서 빈 루틴부터","sub":["할 일: D24에서 기간을 두면 거절 기한 칸만 `daily_journals`에 추가"]}]},{"t":"p","v":"지금 코드: 가짜 데이터라 초안까지 들고 있음(목업)."}]}]},{"id":"D31","title":"하루 기록(A03) 사실 출처에 AI 대화 결과를 넣을지","status":"정할 것","meta":{"출처":"PR #106","이슈":"#48","기한":"#48 시작 전"},"blocks":[{"h":"무슨 상황","parts":[{"t":"p","v":"자기 전 AI 대화를 마치면 A03 하루 기록이 만들어짐. AI는 \"오늘의 사실\" 목록에 있는 것만 골라 일기를 씀(지어내지 않게). 이 사실 목록에 **AI 대화 중에 한 일**도 넣을지가 문제."},{"t":"ul","v":["예: 밤 10:30 대화에서 \"내일 2시 도서관 스터디\"를 저장하고 준비물 \"노트북 충전기\"를 추가함 → 일기에 \"내일 스터디 일정을 잡고 충전기를 챙겨 두기로 했어요\"가 들어가도 되는지","목업 · 화면은 이미 넣고 있음: 사실 목록에 \"일정 저장 · 스터디 (AI 대화 · 확인함)\", \"준비물 저장 · 노트북 충전기 (AI 대화)\", \"루틴 저장\", \"AI 대화 종료\"","`docs/screen-data-map.md` A03 사실 출처는 `alarm_events` · `appointment_participants`(출발 · 도착 · 지각) · `todos`뿐 — 대화 결과(`conversation_sessions`)가 없음"]}]},{"h":"선택지","parts":[{"t":"opts","v":[{"key":"A","name":"넣음","tag":"지금 코드, 목업","desc":"대화에서 저장한 일정 · 준비물 · 루틴도 사실로, 출처 표시는 \"AI 대화\"","sub":["할 일: docs A03 사실 출처에 `conversation_sessions`(저장한 것만) 추가"]},{"key":"B","name":"안 넣음","tag":"","desc":"사실은 알람 · 위치 자동 기록과 직접 입력만, 대화 내용은 회고 코칭에만 씀","sub":["할 일: 목업 · 화면 사실 목록에서 AI 대화 항목 빼기"]}]}]}]},{"id":"D32","title":"대화에서 찾은 준비물을 바로 저장할지","status":"정할 것","meta":{"출처":"PR #106","이슈":"#42","기한":"#42 시작 전"},"blocks":[{"h":"무슨 상황","parts":[{"t":"p","v":"AI 대화(A02)에서 \"내일 오후 2시 학교 도서관에서 스터디 있어요. 노트북 충전기도 챙겨야 해요\"라고 말하면, AI가 \"대화에서 찾은 내용\" 카드를 띄움 — 일정 스터디 · 5월 23일 오후 2:00 · 학교 도서관 · 준비물 노트북 충전기. 카드 아래 버튼은 저장 · 수정 · 저장 안 함."},{"t":"ul","v":["지금은 카드가 뜨는 순간 준비물이 이미 저장됨(카드에 \"바로 추가함\" 표시) → 홈 저녁 \"내일 준비물\"에 바로 생김","그래서 일정을 \"저장 안 함\"으로 눌러도 준비물은 남음"]}]},{"h":"선택지","parts":[{"t":"opts","v":[{"key":"A","name":"바로 저장","tag":"지금 코드, 목업","desc":"준비물은 일정과 따로, 말한 즉시 할 일 목록에 들어감. 일정을 안 저장하면 준비물만 남음","sub":[]},{"key":"B","name":"찾은 일정을 확인할 때 같이 저장","tag":"","desc":"\"저장\"을 눌러야 일정 · 준비물이 같이 들어가고, \"저장 안 함\"이면 둘 다 안 남음","sub":["할 일: 카드 \"바로 추가함\" 표시 빼기, 준비물 저장을 일정 저장(`alarm-commit`)에 묶음"]}]}]}]},{"id":"D34","title":"작은 동작 확인 2개 (홈 · 알람)","status":"정할 것","meta":{"출처":"PR #84 리뷰","이슈":"#30","기한":"PR #84 머지 전"},"blocks":[{"h":"1. 알람 설정(H03) 확인 시트를 바깥을 눌러 닫을 때","parts":[{"t":"p","v":"H03에서 여유 시간을 바꾸고 \"저장\"을 누르면, 알람 시각이 5분 이상 바뀔 때 확인 시트가 뜸 — \"기상 알람 시각이 바뀌어요 · 오전 8:00 → 오전 7:50 · 바꾸기 / 그대로 두기\". 이때 버튼 대신 시트 바깥(어두운 곳)을 눌러 닫으면 지금은 \"그대로 두기\"와 같게 처리됨 → 바꾼 여유가 원래 값으로 돌아감."},{"t":"opts","v":[{"key":"A","name":"그대로 두기와 같음","tag":"지금 코드","desc":"바깥을 누르면 취소, 여유도 원래 값","sub":[]},{"key":"B","name":"시트만 닫음","tag":"","desc":"바꾼 여유는 화면에 남고 저장은 안 된 상태, 다시 \"저장\"을 누를 수 있음","sub":[]}]}]},{"h":"2. 홈(H01) 오늘 루틴 카드를 다 끝낸 뒤 또 누를 때","parts":[{"t":"p","v":"홈 아침의 \"오늘 루틴\" 카드(차분한 출근 준비: 물 마시기 · 스트레칭 · 샤워 · 출발)는 누를 때마다 한 단계씩 완료로 줄이 그어짐. 4/4를 다 끝낸 뒤 또 누르면 지금은 0/4로 돌아감."},{"t":"opts","v":[{"key":"A","name":"처음으로 돌아감","tag":"지금 코드","desc":"잘못 눌렀을 때 되돌리는 길이 이것뿐","sub":[]},{"key":"B","name":"다 끝나면 그대로","tag":"","desc":"완료 표시 유지, 되돌리기는 따로(길게 누르기 등)","sub":[]}]},{"t":"p","v":"루틴은 아직 정해진 게 없어서(D33 보류) 2번은 루틴을 넣을 때 다시 봐도 됨."}]}]},{"id":"D35","title":"공유받은 알람(G04) 시각을 얼마나 옮길 수 있게 할지","status":"정할 것","meta":{"출처":"PR #104 리뷰","이슈":"#46","기한":"#46 시작 전"},"blocks":[{"h":"참고","parts":[{"t":"p","v":"지금은 \"5분 앞당기기 · 늦추기\"를 몇 번이든 누를 수 있어 자정을 넘길 수 있음(가짜 데이터). ±5분 한 번씩은 목업 · `docs/screen-data-map.md` G04 그대로이고, 모두 합쳐 옮길 수 있는 범위(예: ±60분)를 정함."}]},{"h":"선택지","parts":[{"t":"opts","v":[{"key":"A","name":"모두 합쳐 ±60분","tag":"","desc":"5분씩 12번까지","sub":[]},{"key":"B","name":"모두 합쳐 ±30분","tag":"","desc":"","sub":[]},{"key":"C","name":"범위 제한 없이 자정만 못 넘게","tag":"","desc":"","sub":[]}]}]},{"h":"의견","parts":[{"t":"ul","v":["모두 합쳐 ±1시간 내외"]}]}]},{"id":"D37","title":"상세 화면에서도 아래 탭을 보일지","status":"정할 것","meta":{"출처":"목업 대조 점검 (화면 PR 전체)","이슈":"#30 · #43","기한":"PR #84 머지 전"},"blocks":[{"h":"지금 어긋난 곳","parts":[{"t":"table","head":["어디","지금"],"rows":[["목업","모든 화면에 아래 탭(홈 · 그룹 · AI · 기록), 처음 연 탭이 강조, 탭을 누르면 그 탭 첫 화면으로"],["RN 화면","알람 설정 · 그룹 상세 같은 상세 화면은 탭 위에 쌓여 아래 탭이 없고 \"← 이전\"으로만 돌아감 (Expo Router 기본 Stack)"]]}]},{"h":"선택지","parts":[{"t":"opts","v":[{"key":"A","name":"그대로","tag":"지금 코드","desc":"상세는 이전으로만","sub":[]},{"key":"B","name":"탭마다 Stack","tag":"","desc":"상세에서도 아래 탭이 보임","sub":["할 일: `(tabs)` 아래 탭별 폴더로 상세 화면을 옮김, 주소 · 뒤로 가기 다시 확인"]}]}]}]},{"id":"D33","title":"저장한 루틴을 다시 여는 길","status":"보류","meta":{"출처":"PR #106","이슈":"#48 · #30","보류 이유":"루틴을 어떤 것으로 어떻게 넣을지 아직 안 정해짐 — 프로토타입 단계에 안 넣을 수도 있음 (10/13)"},"blocks":[{"h":"지금 어긋난 곳","parts":[{"t":"table","head":["어디","지금"],"rows":[["목업 홈(저녁)","\"저녁 루틴\" 카드에서 루틴을 엶"],["화면 H01 (#84)","저녁 루틴 카드가 없어 A04는 `/dev/screens`로만 열림"],["아침 루틴","가짜 데이터가 단계 이름뿐이라 A04 모양과 안 맞음"]]}]},{"h":"선택지","parts":[{"t":"opts","v":[{"key":"A","name":"홈 저녁에 루틴 카드 추가","tag":"목업, PR #110에 넣음","desc":"","sub":[]},{"key":"B","name":"기록 · 설정 등 다른 곳에 루틴 목록","tag":"","desc":"","sub":[]}]},{"t":"p","v":"지금 코드: A — 목업대로 홈 저녁에 \"저녁 루틴\" 카드(PR #110). 아침 루틴을 A04로 여는 길은 여전히 없음."}]}]},{"id":"D7","title":"음성 대화: 1턴 vs 실시간","status":"정한 것","meta":{"출처":"결정 탭 (10/7)","이슈":"#37 · #42","결과":"B. 실시간 — Gemini Live 단말 직결, 목소리도 Gemini Live가 냄 (10/13)"},"blocks":[{"h":"지금 어긋난 곳","parts":[{"t":"table","head":["어디","지금"],"rows":[["상세설계서 2장 v3 · 5장","Gemini Live API 단말 직결 = 실시간. 목소리도 Gemini Live가 냄 (TTS 따로 없음)"],["덱 15 · 16쪽","음성 1턴 `/voice/turns` + Gemini TTS"],["D8 (정한 것, 9/28)","알람 음성 안내는 폰 내장 TTS, Gemini TTS 안 씀"],["AI 실험 (ai-lab)","1턴 전제 (받아쓰기 글로 주고받음)"]]}]},{"h":"선택지","parts":[{"t":"opts","v":[{"key":"A","name":"1턴","tag":"","desc":"녹음 → Edge → Gemini → JSON","sub":[]},{"key":"B","name":"실시간","tag":"","desc":"말하는 동안 주고받음","sub":[]}]}]}]},{"id":"D8","title":"알람 음성 안내 TTS: 폰 내장 vs Gemini","status":"정한 것","meta":{"출처":"상세설계서 (9/28)","결과":"폰 내장 — Gemini TTS 안 씀 (9/28)"},"blocks":[]},{"id":"D9","title":"G04 변경 기록 저장 자리","status":"정한 것","meta":{"출처":"`docs/screen-data-map.md` 스키마 보완 3","이슈":"#46","결과":"처음엔 저장 없이 주인에게 푸시만"},"blocks":[]},{"id":"D10","title":"1차 데모 범위 (10/19)","status":"정한 것","meta":{"출처":"10/6 재계획","이슈":"#60","결과":"라벨 `1차 데모` 이슈 + #60 (10/6)"},"blocks":[]},{"id":"D11","title":"배포 길: 웹 미리보기 · 앱","status":"정한 것","meta":{"출처":"배포 세팅","이슈":"#13","결과":"웹 미리보기 Cloudflare · 앱 APK 태그 릴리스 (10/6)"},"blocks":[]},{"id":"D14","title":"기상 확정 시각을 언제로 기록할지 (H08)","status":"정한 것","meta":{"출처":"PR #84 (작성자 판단)","이슈":"#35 · #40","결과":"B. θ를 넘은 시각 — 관찰(10분)이 끝난 뒤 누적 사용이 θ를 넘은 시각으로 거꾸로 기록 (10/13, 코드 PR #137)"},"blocks":[{"h":"지금 어긋난 곳","parts":[{"t":"table","head":["어디","지금"],"rows":[["화면 H08 (PR #137 전)","확정 시각 = 알람 해제 + 10분(관찰 끝)"],["판정 규칙","해제 뒤 10분 누적 사용 ≥ θ(목업 1~3분 중 고름) 그리고 뒤쪽 5분 최근 사용 > 0 — 관찰이 끝나야 판정됨"]]}]},{"h":"선택지","parts":[{"t":"opts","v":[{"key":"A","name":"관찰이 끝난 시각 (해제 + 10분)","tag":"PR #137 전 코드","desc":"","sub":[]},{"key":"B","name":"θ를 넘은 시각","tag":"PR #137","desc":"관찰이 끝난 뒤 그 시각을 거꾸로 기록, 실제 일어난 시각에 더 가까움","sub":["할 일: #40 자동 수집에서 사용 시각을 같이 남김"]}]}]}]},{"id":"D36","title":"대화에서 일정을 여러 개 찾았을 때","status":"정한 것","meta":{"출처":"PR #106 리뷰","이슈":"#42","결과":"B. 여러 개 다 받음 — 기상과 이어지는 첫 일정은 자세히 안내하고, 나머지 일정은 시간에 맞춰 가벼운 푸시로 알림 (10/13)"},"blocks":[{"h":"지금 어긋난 곳","parts":[{"t":"table","head":["어디","지금"],"rows":[["화면 A02 · 가짜 api","찾은 일정은 대화당 하나(`Conversation.found`), 카드 한 장"],["DB `conversation_sessions.extracted_data` · #42","\"일정 · 할 일 · 준비물 추출 결과\" — 여러 개가 나올 수 있음"]]}]},{"h":"선택지","parts":[{"t":"opts","v":[{"key":"A","name":"하나만","tag":"지금 코드, 목업","desc":"여러 개면 첫 일정만 카드로","sub":[]},{"key":"B","name":"여러 개","tag":"","desc":"카드마다 저장 · 저장 안 함","sub":["할 일: `found`를 배열로, 카드 메시지에 찾은 항목 id"]}]}]}]}];
+const DATA = /*DATA*/[{"id":"D38","title":"온보딩에서 무엇을 받고, 권한 · 동의는 언제 물을지","status":"정할 것","meta":{"출처":"계획서 대조 (10/10) — 상세설계서 7장 v4 7.13.2 · `docs/screen-data-map.md` 로그인 · 온보딩 · 설정 · 개발계획_v1 10절 17","이슈":"#25 · #128","기한":"#25 시작 전"},"blocks":[{"h":"지금 어긋난 곳","parts":[{"t":"table","head":["어디","지금"],"rows":[["앱 온보딩 `onboarding.tsx`","닉네임 · 아이디 · 준비 시간 · 여유 시간 · 이동 수단 · 집(이름만). 집 좌표 · 동의 · 권한 없음. #117로 앱 흐름에서 빠져 있음"],["`docs/screen-data-map.md`","온보딩 = 아이디 · 집 좌표(장소 검색) · 권한 안내 3개(알림 · 정확한 알람 · 잠금화면 위 울림)"],["개발계획_v1 10절 17","권한 안내 6개 = 위 3개 + 위치 · 사용 정보 접근 · 마이크"],["상세설계서 7장 v4 7.13.2","설치 때 한꺼번에 묻지 않음. 버튼을 3번쯤 누른 뒤 자동으로 할지 물음 (교수님 피드백 \"자동 수집 우선\")"],["개인정보 동의","8장에 원칙만, 화면 · 문구 없음 (위치 · 음성 · 기상 공유)"],["AI용 개인정보","문서에 따로 받는 항목 없음 — 대화 · 기록에서 뽑음"],["시간대","`profiles.timezone`은 있는데 얻는 방법이 문서에 없음"]]}]},{"h":"선택지","parts":[{"t":"opts","v":[{"key":"A","name":"필요한 때 필요한 것만","tag":"먼저 고른 안","desc":"온보딩엔 첫 알람이 울리는 데 필요한 것만 받고, 나머지는 그 기능을 처음 쓸 때 · 써 본 뒤에 물음 (아래 참고 표)","sub":["AI용 추가 정보(평소 기상 · 취침, 아침형 · 저녁형, 직업 · 학교, AI 말투)는 온보딩에서 안 받음","시간대는 묻지 않고 폰 설정에서 읽음","할 일: 개인정보 동의 화면 문구, 사용 정보 접근 안내 화면(안드로이드 설정으로 이동), 권한마다 처음 묻는 지점, 집 장소 검색(좌표)"]},{"key":"B","name":"온보딩에서 한 번에","tag":"","desc":"권한 6개 + AI용 정보까지 처음에 다 받음","sub":["할 일: 온보딩 단계 늘림, 7장 v4 7.13.2 수정"]}]},{"t":"p","v":"지금 코드: 온보딩 6칸만, 권한 · 동의는 묻지 않음"}]},{"h":"참고","parts":[{"t":"table","head":["언제","무엇"],"rows":[["온보딩","지금 6칸 + 집 위치(지도) + 개인정보 동의 1장 + 알람 권한 4개(알림 · 정확한 알람 · 잠금화면 위 울림 · 배터리 최적화 제외)"],["처음 쓸 때","위치 \"항상 허용\"(출발 · 도착 확인을 켤 때) · 마이크 + AI 대화 동의(첫 대화) · 기상 공유 동의(그룹 참여) · 캘린더(가져오기를 누를 때)"],["써 본 뒤","사용 정보 접근 — 기상 확인 버튼을 몇 번 누른 뒤 \"이제 자동으로 확인할까요?\". 어떤 앱인지는 안 읽고 화면 켜짐 · 잠금 해제 시각만 씀, 설정에서 직접 켜는 특수 권한. 웨어러블 · 활동 인식은 선택"]]}]}]},{"id":"D1","title":"알람 강도를 배경음 · 말소리 · 진동 따로 고르게 할지","status":"정할 것","meta":{"출처":"PR #84 · `docs/screen-data-map.md` 스키마 보완 2","이슈":"#29","기한":"#29 시작 전"},"blocks":[{"h":"지금 어긋난 곳","parts":[{"t":"table","head":["어디","지금"],"rows":[["화면 H03 · 목업","세 축을 따로 고름, \"자동으로 되돌리기\" 버튼 있음"],["DB `alarms`","`intensity` 하나 + `voice_tone` · `sound_key`, 진동 칸 없음"]]}]},{"h":"선택지","parts":[{"t":"opts","v":[{"key":"A","name":"축별로 고름","tag":"먼저 고른 안","desc":"기본값은 강도(약 · 보통 · 강)에서 오고, 직접 고르면 그 값. 말소리 = `voice_tone`, 배경음 = 강도 + `sound_key`","sub":["할 일: `alarms`에 진동 칸 추가, 진동 패턴 3개(없음 · 짧게 반복 · 강하게 연속) 직접 구현"]},{"key":"B","name":"강도 하나만","tag":"","desc":"약 · 보통 · 강 중 하나만 고르고 세 축은 강도를 따라감","sub":["할 일: H03에서 축별 선택 빼기, DB는 그대로"]}]}]}]},{"id":"D2","title":"기상 확인 알림에 응답이 없으면 알람을 다시 울릴지","status":"정할 것","meta":{"출처":"PR #84","이슈":"#35 · #45","기한":"#35 시작 전"},"blocks":[{"h":"지금 어긋난 곳","parts":[{"t":"table","head":["어디","지금"],"rows":[["화면 H08 · 목업","확인 알림에도 응답이 없으면 기상 알람이 다시 울림"],["`docs/screen-data-map.md` H08","끝까지 안 깨면 MISSED 기록 + 그룹에 미확인 푸시(5분마다 도는 `wake-check`)만, 다시 울림 없음"],["#35 본문 (10/7 더함)","해제 뒤 10분 동안 폰 사용도 기상 확정도 없으면 같은 강도로 1번 더 울림, 미루기 횟수에 안 셈"]]}]},{"h":"선택지","parts":[{"t":"opts","v":[{"key":"A","name":"1번 더 울리고, 그래도 안 깨면 MISSED","tag":"먼저 고른 안","desc":"다시 울림 1번 → 응답 없으면 MISSED 기록 + 그룹에 미확인 푸시","sub":["할 일: docs H08 문구 고치기, 알람 코어에 다시 울림 자리 만들기(#79)"]},{"key":"B","name":"다시 울리지 않고 MISSED만","tag":"","desc":"docs에 적힌 대로 MISSED 기록 + 그룹에 미확인 푸시","sub":["할 일: 화면 H08 · 목업 흐름에서 다시 울림 빼기, #35 체크 항목 빼기"]}]}]}]},{"id":"D3","title":"미루기 시간과 횟수","status":"정할 것","meta":{"출처":"PR #84","이슈":"#29 · #33","기한":"#29 시작 전"},"blocks":[{"h":"지금 어긋난 곳","parts":[{"t":"table","head":["어디","지금"],"rows":[["화면 H07 · 목업","5 · 10 · 15분 중 고름 (기본 5분)"],["`docs/alarm-core.md`","미루기 최대 3번"],["알람 코어 (main, PR #62)","10분 고정, 횟수 제한 없음"]]}]},{"h":"선택지","parts":[{"t":"opts","v":[{"key":"A","name":"5 · 10 · 15분 고르기 + 최대 3번","tag":"먼저 고른 안","desc":"울림 화면에 \"미루기 1/3회\", 다 쓰면 버튼을 끄고 짧게 준비하는 안내로 넘김","sub":["할 일: 네이티브 울림 화면에 시간 고르기 · 횟수 추가, `alarm_events.snooze_minutes`에 기록(칸은 이미 있음)"]},{"key":"B","name":"10분 고정 + 최대 3번","tag":"","desc":"시간은 지금 코어 그대로, 횟수만 막음","sub":["할 일: 네이티브에 횟수만 추가, 화면 H07에서 시간 고르기 빼기"]},{"key":"C","name":"지금 코어 그대로 (10분 · 무제한)","tag":"","desc":"네이티브는 손대지 않음","sub":["할 일: 화면 H07 · `docs/alarm-core.md`를 코어에 맞춰 고치기"]}]}]},{"h":"참고","parts":[{"t":"p","v":"안 끄고 두면 저절로 다시 울리는 것(약 1번 · 보통 2번 · 강 3번, #29)은 미루기 횟수와 따로 셈."}]}]},{"id":"D4","title":"반복 알람을 서버가 몇 회차까지 미리 만들지","status":"정할 것","meta":{"출처":"결정 탭 (10/7)","이슈":"#33","기한":"#33 시작 전"},"blocks":[{"h":"지금 어긋난 곳","parts":[{"t":"table","head":["어디","지금"],"rows":[["결정 탭 (10/7)","서버가 다음 회차 하나만 만듦, 폰은 반복 안 함"],["`docs/screen-data-map.md` Edge 표","`suggestion-generate`가 매일 03:00 반복 알람 다음 회차를 메움"],["#33 본문 (10/7 더함)","서버가 앞으로 2주치를 만들어 두고 폰이 한꺼번에 예약 (앱을 며칠 안 열어도 울림)"]]}]},{"h":"선택지","parts":[{"t":"opts","v":[{"key":"A","name":"2주치 미리","tag":"#33에 적힌 안","desc":"앱을 며칠 안 열어도 울림","sub":["할 일: docs Edge 표 문구 고치기"]},{"key":"B","name":"다음 회차 하나만","tag":"","desc":"매일 배치가 한 회차씩 메움","sub":["할 일: #33 체크 항목 고치기"]}]}]}]},{"id":"D5","title":"카카오 응답을 어디까지 남길지","status":"정할 것","meta":{"출처":"`docs/screen-data-map.md` 스키마 보완 4","이슈":"#27","기한":"#27에서"},"blocks":[{"h":"무슨 상황","parts":[{"t":"p","v":"일정을 만들 때(H05) 서버가 카카오 대중교통 길찾기를 불러 이동 시간(분)을 받고, 기상 시각 = 약속 − 여유 − 이동 − 준비로 계산함. 이 응답에서 무엇을 DB에 남길지가 문제."},{"t":"ul","v":["남기는 값이 있어야 하는 곳: H03 계산식(\"이동 50분 · 길찾기 + 내 실측 3회\"), 반복 일정 다음 회차 알람 계산(D4), 실측 이동 시간과 비교하는 학습(#49)","카카오는 응답을 DB · 캐시에 저장 · 재사용하지 말고 실시간 호출만 하라고 답함(데브톡 9/1 · 9/17). 이동 안내 동안 메모리에만 두고 끝나면 버리는 건 허용"]}]},{"h":"지금 어긋난 곳","parts":[{"t":"table","head":["어디","지금"],"rows":[["카카오 API 약관","응답 저장 · 재사용 불가"],["DB `appointment_participants`","`est_travel_minutes`(경로 API 조회 결과) · `travel_source`(API · CACHED · MANUAL) 칸 있음 — CACHED = 저장해 둔 값을 다시 씀"]]}]},{"h":"선택지","parts":[{"t":"opts","v":[{"key":"A","name":"계산에 쓴 분만 기록으로 남김","tag":"","desc":"경로 · 원문은 안 남김. 다시 계산할 땐(반복 회차 · 여유 변경) 카카오를 다시 부름","sub":["할 일: `travel_source` CACHED 안 씀, 반복 회차마다 호출 수 확인"]},{"key":"B","name":"분을 남기고 반복 회차 · 재계산에도 그 값을 씀","tag":"`travel_source = CACHED`","desc":"호출이 적음, 약관 '재사용'에 걸릴 수 있음","sub":["할 일: 카카오에 \"계산 결과(분)만 저장\"도 재사용인지 문의"]},{"key":"C","name":"아무것도 안 남김","tag":"","desc":"H03 계산식의 이동 분도 열 때마다 다시 부름","sub":["할 일: `est_travel_minutes` 칸 비워 둠, 학습은 실측 이동 시간만 씀"]}]}]},{"h":"참고","parts":[{"t":"p","v":"#27에서 실제 응답 · 약관 문구를 보고 정함."}]}]},{"id":"D6","title":"S01 시각 조정 제안 종류를 `alarm_suggestion_type`에 추가","status":"정할 것","meta":{"출처":"`docs/screen-data-map.md` 스키마 보완 1","이슈":"#49","기한":"#49에서"},"blocks":[{"h":"지금 어긋난 곳","parts":[{"t":"table","head":["어디","지금"],"rows":[["목업 S01","\"다음 알람 10분 앞당김\" 제안"],["DB `alarm_suggestion_type`","VOICE_TONE · SOUND · INTENSITY뿐, 시각 조정 없음"]]}]},{"h":"선택지","parts":[{"t":"opts","v":[{"key":"A","name":"시각 조정 종류를 enum에 추가","tag":"","desc":"목업 S01 그대로","sub":["할 일: `alarm_suggestion_type`에 값 추가(마이그레이션), 적용 대상은 D25와 같이 정함"]},{"key":"B","name":"시각 조정은 제안하지 않음","tag":"","desc":"S01을 강도 · 말소리 · 배경음 제안으로 바꿈","sub":["할 일: 목업 · 화면 S01 문구와 예시 바꾸기"]}]}]}]},{"id":"D12","title":"알람 설정(H03)에서 여유 시간을 고르는 범위 · 단위","status":"정할 것","meta":{"출처":"PR #84 (작성자 판단)","이슈":"#32","기한":"#32 시작 전"},"blocks":[{"h":"지금 어긋난 곳","parts":[{"t":"table","head":["어디","지금"],"rows":[["화면 H03","0~30분, 5분 단위 Stepper (목업 슬라이더 대신)"],["H03 저장 규칙","\"5분 이상 바뀌면 한 번 더 확인\" — 5분 단위라 늘 확인 시트가 뜨고 \"5분 미만이면 바로 저장\" 분기는 닿지 않음"]]}]},{"h":"선택지","parts":[{"t":"opts","v":[{"key":"A","name":"0~30분 · 5분 단위","tag":"지금 코드","desc":"","sub":[]},{"key":"B","name":"1분 단위","tag":"","desc":"5분 미만 변경은 확인 없이 저장됨","sub":["할 일: Stepper 단위만 바꿈"]}]}]}]},{"id":"D13","title":"홈(H01)이 저녁 화면으로 바뀌는 시각","status":"정할 것","meta":{"출처":"PR #84 (작성자 판단)","이슈":"#30","기한":"PR #84 머지 전"},"blocks":[{"h":"지금 어긋난 곳","parts":[{"t":"table","head":["어디","지금"],"rows":[["화면 H01","오후 6시부터 내일 일정 · 내일 준비물 · 자기 전 AI 대화로 바뀜"],["목업","시연 시각(아침 · 전날 밤 9시)만 있어 기준 시각이 안 적혀 있음"]]}]},{"h":"선택지","parts":[{"t":"opts","v":[{"key":"A","name":"오후 6시 고정","tag":"지금 코드","desc":"","sub":[]},{"key":"B","name":"오늘 마지막 일정이 끝난 뒤","tag":"","desc":"","sub":[]}]}]}]},{"id":"D15","title":"실데이터 모드에서 아직 안 붙인 화면","status":"정할 것","meta":{"출처":"PR #103 (작성자 판단)","이슈":"#97","기한":"기능을 실데이터로 붙이기 전"},"blocks":[{"h":"지금 어긋난 곳","parts":[{"t":"table","head":["어디","지금"],"rows":[["실데이터 모드","시각은 지금 시각, 아직 Supabase로 안 바꾼 화면은 가짜 데이터(2025년 5월 시나리오)를 그대로 보여 줌 → 지난 날짜라 어색함"]]}]},{"h":"선택지","parts":[{"t":"opts","v":[{"key":"A","name":"그대로","tag":"지금 코드","desc":"기능을 붙일 때마다 그 화면만 바뀜","sub":[]},{"key":"B","name":"실데이터 모드에선 안 붙인 화면을 \"준비 중\"으로","tag":"","desc":"","sub":["할 일: `features/*/api.ts` 함수마다 실데이터 모드 빈 값"]}]}]}]},{"id":"D16","title":"개발 메뉴를 출시 빌드에서도 보여 줄지","status":"정할 것","meta":{"출처":"PR #103 (작성자 판단)","이슈":"#97 · #50","기한":"#60 1차 데모 빌드 전"},"blocks":[{"h":"지금 어긋난 곳","parts":[{"t":"table","head":["어디","지금"],"rows":[["`/dev/screens` · `/dev/ui` · `/dev/alarm-test`","주소를 알면 누구나 열림"],["설정 화면","\"개발\" 절(데이터 모드 토글)이 늘 보임"]]}]},{"h":"선택지","parts":[{"t":"opts","v":[{"key":"A","name":"그대로","tag":"지금 코드","desc":"","sub":[]},{"key":"B","name":"개발 빌드에서만","tag":"","desc":"출시 APK · 웹 배포에선 숨김","sub":[]},{"key":"C","name":"숨김 메뉴로","tag":"","desc":"#50 데모 모드 숨김 메뉴와 같이","sub":[]}]}]}]},{"id":"D17","title":"친구 권한(F02)이 보여 주는 권한의 방향","status":"정할 것","meta":{"출처":"PR #104","이슈":"#44","기한":"#44 시작 전"},"blocks":[{"h":"지금 어긋난 곳","parts":[{"t":"table","head":["어디","지금"],"rows":[["목업 `finalGrant` · 지금 코드","내가 그 친구에게 준 권한"],["`docs/screen-data-map.md` F02","친구가 나에게 준 권한"]]}]},{"h":"선택지","parts":[{"t":"opts","v":[{"key":"A","name":"내가 준 권한","tag":"지금 코드, 목업","desc":"","sub":["할 일: docs F02 문구 고치기"]},{"key":"B","name":"받은 권한","tag":"","desc":"","sub":["할 일: F02 표 · 문구를 받은 쪽으로 다시"]}]}]}]},{"id":"D18","title":"그룹 공유 권한을 어떤 단위로 저장할지","status":"정할 것","meta":{"출처":"PR #104","이슈":"#44","기한":"#44 시작 전"},"blocks":[{"h":"지금 어긋난 곳","parts":[{"t":"table","head":["어디","지금"],"rows":[["목업 · 화면 F03","그룹마다 권한 한 줄"],["DB `sharing_permissions`","(준 사람, 받은 사람, 출처)마다 한 줄 → 그룹이면 멤버마다 행을 써야 함"],["규칙","나중에 들어온 멤버에게 그룹 권한을 줄지 정해진 게 없음"]]}]},{"h":"선택지","parts":[{"t":"opts","v":[{"key":"A","name":"멤버마다 행 + 새 멤버가 들어오면 그 그룹 권한으로 행 추가","tag":"","desc":"","sub":["할 일: 그룹 참여 때 행을 만드는 RPC · 트리거"]},{"key":"B","name":"그룹 단위로 한 줄 저장하는 자리 추가","tag":"","desc":"","sub":["할 일: 마이그레이션 · RLS 다시"]}]},{"t":"p","v":"지금 코드: 가짜 데이터라 그룹마다 한 줄(목업) — DB에 붙일 때 둘 중 하나로."}]}]},{"id":"D19","title":"그룹 기상 조회를 켤 때 기상 공유 동의도 켤지","status":"정할 것","meta":{"출처":"PR #104","이슈":"#44 · #45","기한":"#44 시작 전"},"blocks":[{"h":"지금 어긋난 곳","parts":[{"t":"table","head":["어디","지금"],"rows":[["DB","`group_members.wake_share_opt_in`이 켜져 있어야 그룹 기상 조회를 인정"],["화면 F03 · 목업","동의 스위치가 없음"]]}]},{"h":"선택지","parts":[{"t":"opts","v":[{"key":"A","name":"F03에서 기상 상태 조회를 켜면 동의도 같이 켬","tag":"","desc":"","sub":[]},{"key":"B","name":"F03에 동의 스위치를 따로 둠","tag":"","desc":"","sub":[]}]},{"t":"p","v":"지금 코드: 동의 개념 없음(목업). 깨우기 알림(`notify`) 조건도 `docs/screen-data-map.md`는 \"같은 그룹 + `wake_share_opt_in`\", 화면 · `get_group_wake_status`는 기상 조회 권한(`VIEW_WAKE`, 그룹에서 받은 권한은 동의도 필요)이라 다름 — 친구 권한으로도 볼 수 있는지, 깨우기 알림은 권한 없이 \"같은 그룹 + 동의\"만 보는지를 #45 · #46에서 하나로."}]}]},{"id":"D20","title":"공유받은 알람(G04)의 변경 기록 시트","status":"정할 것","meta":{"출처":"PR #104","이슈":"#46","기한":"#46 시작 전"},"blocks":[{"h":"지금 어긋난 곳","parts":[{"t":"table","head":["어디","지금"],"rows":[["D9 (정한 것)","처음엔 저장 없이 주인에게 푸시만"],["목업 · 화면 G04","\"변경 기록\" 시트가 있음 (지금은 앱을 다시 열면 사라짐)"],["가짜 api","권한 변경(F03) · 깨우기 알림(G03)도 같은 기록에 섞임 — 목업은 알람 변경만"]]}]},{"h":"선택지","parts":[{"t":"opts","v":[{"key":"A","name":"시트 빼기","tag":"","desc":"D9 그대로","sub":[]},{"key":"B","name":"시트 유지 + 저장 자리 추가","tag":"","desc":"D9를 다시 정함","sub":[]}]},{"t":"p","v":"지금 코드: 시트는 있고 저장은 없음(둘 다 아님)."}]}]},{"id":"D21","title":"기상 권한을 안 받은 그룹의 상세 화면","status":"정할 것","meta":{"출처":"PR #104","이슈":"#43","기한":"PR #104 머지 전"},"blocks":[{"h":"지금 어긋난 곳","parts":[{"t":"table","head":["어디","지금"],"rows":[["목업 · 화면 G01","기상 조회 권한이 없는 그룹(우리 가족)은 토스트만, 상세(G02)로 못 들어감"],["결과","그 그룹의 상세 · 초대 · 공유 범위 설정을 열 길이 권한 관리(F03)뿐"]]}]},{"h":"선택지","parts":[{"t":"opts","v":[{"key":"A","name":"그대로","tag":"지금 코드, 목업","desc":"","sub":[]},{"key":"B","name":"상세는 열고 기상 칸만 숨김","tag":"","desc":"","sub":[]}]}]}]},{"id":"D22","title":"피그마에만 있는 요소를 넣을지 (그룹 · 친구)","status":"정할 것","meta":{"출처":"PR #104","이슈":"#43","기한":"PR #104 머지 전"},"blocks":[{"h":"참고","parts":[{"t":"p","v":"목업 기준이라 안 넣은 것: F02 아래 \"알람 보기 · 기상 확인하기\" 타일, G02 멤버 줄 \"권한 보기\", G03 위 \"완료 · 목표보다 2분 일찍\" 카드와 \"응원 보내기\"(목업은 \"알람 보내기\"), G04 \"다음 알람 · 알람 추가 · 반복 알람\" 구성. 넣기로 하면 목업에 먼저 반영함."}]},{"h":"선택지","parts":[{"t":"opts","v":[{"key":"A","name":"안 넣음","tag":"지금 코드","desc":"목업 기준 그대로","sub":[]},{"key":"B","name":"전부 넣음","tag":"","desc":"목업에 먼저 그리고 화면에 반영","sub":["할 일: G04 \"알람 추가\"는 친구 알람을 대신 만드는 기능이라 #46 범위 확인"]},{"key":"C","name":"골라서 넣음","tag":"","desc":"위 항목마다 넣을지 정함 (예: \"응원 보내기\"만)","sub":[]}]}]}]},{"id":"D23","title":"알람 조정 제안을 되돌렸을 때 남길 상태","status":"정할 것","meta":{"출처":"PR #105","이슈":"#49","기한":"#49 시작 전"},"blocks":[{"h":"지금 어긋난 곳","parts":[{"t":"table","head":["어디","지금"],"rows":[["목업 · 화면 S01","되돌리면 제안이 처음(PENDING)으로 돌아감"],["DB `alarm_suggestions`","되돌림 상태가 없음. PENDING으로 돌리면 `result_value`를 비워야 해서 적용 이력이 사라짐"],["S01 문구","\"다음 기록에서 성능이 나빠지면 이전 값으로 되돌려요\"(자동 되돌림) — docs · 스키마에 자리 없음"]]}]},{"h":"선택지","parts":[{"t":"opts","v":[{"key":"A","name":"되돌림 상태 추가","tag":"","desc":"이력이 남음","sub":["할 일: `alarm_suggestion_status` enum에 값 추가(마이그레이션)"]},{"key":"B","name":"PENDING으로 돌리고 이력은 기록(alarm_events · daily_records)에만","tag":"지금 코드, 목업","desc":"","sub":[]}]}]}]},{"id":"D24","title":"제안을 무시 · 거절하면 얼마나 안 보여 줄지 (알람 조정 · 루틴)","status":"정할 것","meta":{"출처":"PR #105 · D30의 \"다시 제안 금지 기간\"을 여기로 합침 (10/13)","이슈":"#49 · #48","기한":"#49 시작 전"},"blocks":[{"h":"지금 어긋난 곳","parts":[{"t":"table","head":["어디","지금"],"rows":[["목업 · 화면 S01 알람 조정 제안","\"이번 제안 무시\" → \"당분간 다시 보이지 않아요\" — 기간이 어디에도 없음 (`alarm_suggestions.suppress_until` 칸만 있음)"],["목업 A03 루틴 제안","\"괜찮아요\" → 14일 동안 다시 제안 안 함"]]}]},{"h":"선택지","parts":[{"t":"opts","v":[{"key":"A","name":"둘 다 14일","tag":"","desc":"루틴 제안 목업 값에 맞춤","sub":[]},{"key":"B","name":"알람 조정 7일 · 루틴 14일","tag":"","desc":"알람 기록은 매일 쌓여 근거가 빨리 바뀜","sub":[]},{"key":"C","name":"기간 대신 새 기록 기준","tag":"","desc":"무시한 뒤 실측이 3번 더 쌓이면 다시 제안","sub":[]}]}]},{"h":"참고","parts":[{"t":"p","v":"S01 \"제안 다시 보기\"(무시 → 대기)를 누르면 `suppress_until`을 비우고 PENDING으로, `responded_at`은 남김 — 같이 확인. 루틴 제안 기한을 어디에 저장할지는 D30."}]}]},{"id":"D25","title":"제안을 적용하는 대상: 일정 vs 알람 하나","status":"정할 것","meta":{"출처":"PR #105 · D6과 이어짐","이슈":"#49","기한":"#49 시작 전"},"blocks":[{"h":"지금 어긋난 곳","parts":[{"t":"table","head":["어디","지금"],"rows":[["목업 · 화면 S01","일정(매주 금요일 수업)의 예측 준비를 늘려 앞으로의 회차가 모두 바뀜"],["DB `alarm_suggestions`","`target_alarm_id`로 알람 하나만 가리킴"],["예측 준비(P80)","`v_prepare_time_stats`는 사용자 단위 뷰라 실측이 쌓이면 바로 바뀜 → 적용한 +10분을 일정마다 둘 자리가 없어 덮어써질 수 있음"]]}]},{"h":"선택지","parts":[{"t":"opts","v":[{"key":"A","name":"일정 단위","tag":"","desc":"반복 회차에 다 적용 (지금 코드, 목업)","sub":["할 일: 제안에 일정 칸 추가(마이그레이션), 적용분을 P80과 따로 저장(일정별 오프셋)"]},{"key":"B","name":"알람 하나","tag":"스키마 그대로","desc":"","sub":["할 일: S01 문구를 \"다음 알람\"만으로"]}]}]}]},{"id":"D26","title":"주간 점수 · 목표 기상 규칙","status":"정할 것","meta":{"출처":"PR #105","이슈":"#41","기한":"#41 시작 전"},"blocks":[{"h":"참고","parts":[{"t":"p","v":"R02 주간의 막대 점수와 \"70점 이상이면 목표 기상\" 규칙은 목업 값뿐이고 DB에 점수 칸이 없음. 점수 계산식 · 저장 여부(`daily_records`에 칸 추가 또는 그때그때 계산)를 정함. 목업은 지난 날 점수가 고정값이고, 오늘만 기상 확정이 기상 알람 + 10분 안이면 88점 · 넘으면 61점."}]},{"h":"선택지","parts":[{"t":"opts","v":[{"key":"A","name":"점수 없이 목표 기상 O/X","tag":"","desc":"기상 확정이 기상 알람 + 10분 안이면 목표 기상. 막대 대신 날마다 O/X, 목표 기상률 = O 날 수 ÷ 기록한 날 수","sub":[]},{"key":"B","name":"기상 점수","tag":"","desc":"알람 시각보다 늦은 분만큼 깎음(예: 100 − 늦은 분 × 3), 70점 이상 = 목표 기상","sub":[]},{"key":"C","name":"하루 점수","tag":"","desc":"기상 · 출발 · 도착(지각) 합산, 70점 이상 = 목표 기상","sub":[]}]},{"t":"p","v":"저장: 셋 다 `daily_records.wake_confirmed_at` · `is_late`로 그때그때 계산 가능 — 칸 추가는 계산이 무거울 때만."}]}]},{"id":"D27","title":"월간 달력 점(기록 완료 · 일부 기록)의 기준","status":"정할 것","meta":{"출처":"PR #105","이슈":"#41","기한":"#41 시작 전"},"blocks":[{"h":"참고","parts":[{"t":"p","v":"기록 완료 · 일부 기록의 정의가 없음. 목업은 평일 완료, 주말 일부로 그려져 있음."}]},{"h":"선택지","parts":[{"t":"opts","v":[{"key":"A","name":"기상 · 출발 · 도착이 다 있으면 완료, 하나라도 있으면 일부","tag":"","desc":"","sub":[]},{"key":"B","name":"기상 확정만 있으면 완료","tag":"","desc":"출발 · 도착은 일정 있는 날만 생겨서 주말이 늘 일부로 보이는 걸 피함","sub":[]},{"key":"C","name":"그날 있어야 할 기록 기준","tag":"","desc":"일정 있는 날은 기상 · 출발 · 도착, 없는 날은 기상만 다 차면 완료","sub":[]}]}]}]},{"id":"D28","title":"기록 탭(R02) 첫 화면","status":"정할 것","meta":{"출처":"PR #105","이슈":"#38","기한":"PR #105 머지 전"},"blocks":[{"h":"선택지","parts":[{"t":"opts","v":[{"key":"A","name":"주간","tag":"지금 코드, 목업","desc":"","sub":[]},{"key":"B","name":"월간","tag":"피그마","desc":"","sub":[]}]}]}]},{"id":"D29","title":"루틴 단계의 모양 · 반복 요일 형식","status":"정할 것","meta":{"출처":"PR #106","이슈":"#48","기한":"#48 시작 전"},"blocks":[{"h":"지금 어긋난 곳","parts":[{"t":"table","head":["어디","지금"],"rows":[["목업 · 화면 A04","단계마다 시각 · 걸리는 시간, 첫 단계 시각부터 차례로 계산"],["DB `routines.steps`","`{order, title, offset, type, is_alarm}` — 첫 단계 시각 칸이 없고 `offset`의 기준이 안 적혀 있음"],["DB `repeat_days`","'MON~FRI' 같은 형식이 정해지지 않음"]]}]},{"h":"선택지 (단계 시각)","parts":[{"t":"opts","v":[{"key":"A","name":"시작 시각 칸 추가 + `offset` = 시작에서 몇 분 뒤","tag":"","desc":"목업과 같음(21:30 시작 → 0 · 5 · 7분 뒤)","sub":["할 일: `routines`에 시작 시각 칸(마이그레이션), 단계 시간을 바꾸면 뒤 단계 `offset`을 다시 계산"]},{"key":"B","name":"단계마다 시각을 직접 저장","tag":"","desc":"`offset` 대신 `time`","sub":["할 일: `steps` 모양 바꿈, 시작을 옮기면 단계 시각을 전부 같이 옮김"]},{"key":"C","name":"기상 알람 기준 `offset`","tag":"","desc":"아침 루틴이면 기상 + n분, 저녁 루틴이면 취침 기준","sub":["할 일: 기준 알람(기상 · 취침)을 루틴에 연결하는 칸, 저녁 루틴 기준 시각 정의"]}]}]},{"h":"선택지 (반복 요일)","parts":[{"t":"opts","v":[{"key":"A","name":"요일 배열","tag":"","desc":"`{MON,WED,FRI}` (Postgres 배열), 화면 요일 버튼과 1:1","sub":[]},{"key":"B","name":"문자열","tag":"","desc":"'MON~FRI' · 'MON,WED' 같은 형식을 정해 둠, 읽을 때 파싱","sub":[]}]}]},{"h":"참고","parts":[{"t":"p","v":"루틴을 어떤 것으로 어떻게 넣을지 아직 안 정해짐(D33 보류) — 프로토타입에서 루틴을 빼면 이 안건도 같이 보류."}]}]},{"id":"D30","title":"루틴 제안을 저장할 자리","status":"정할 것","meta":{"출처":"PR #106 · 다시 제안 금지 기간은 D24로 옮김 (10/13)","이슈":"#48","기한":"#48 시작 전"},"blocks":[{"h":"지금 어긋난 곳","parts":[{"t":"table","head":["어디","지금"],"rows":[["목업 A03","제안 = 이름 · 이유 · 요약 + 초안(요일 · 단계). \"괜찮아요\" 뒤 다시 제안 안 하는 기간(목업 14일)은 D24에서 정함"],["DB `daily_journals`","`routine_suggestion` 글 하나 · `suggestion_status`(`apply_status`)뿐, 초안 칸 없음"]]}]},{"h":"선택지","parts":[{"t":"opts","v":[{"key":"A","name":"`daily_journals`에 초안(jsonb) 칸 추가","tag":"","desc":"","sub":["할 일: 마이그레이션. D24에서 기간을 두면 거절 기한도 같은 줄에 — 일기는 하루 한 줄이라 제안을 만들 때마다 최근 일기에서 기한이 남은 줄을 찾아봐야 함"]},{"key":"B","name":"루틴 제안 테이블을 따로 만듦","tag":"","desc":"초안 · 상태 · 거절 기한(D24)을 한 줄에","sub":["할 일: 마이그레이션 · RLS"]},{"key":"C","name":"초안 없이 글만 남김","tag":"","desc":"목업에서 초안을 덜어냄, \"루틴 만들기\"를 누르면 A04에서 빈 루틴부터","sub":["할 일: D24에서 기간을 두면 거절 기한 칸만 `daily_journals`에 추가"]}]},{"t":"p","v":"지금 코드: 가짜 데이터라 초안까지 들고 있음(목업)."}]}]},{"id":"D31","title":"하루 기록(A03) 사실 출처에 AI 대화 결과를 넣을지","status":"정할 것","meta":{"출처":"PR #106","이슈":"#48","기한":"#48 시작 전"},"blocks":[{"h":"무슨 상황","parts":[{"t":"p","v":"자기 전 AI 대화를 마치면 A03 하루 기록이 만들어짐. AI는 \"오늘의 사실\" 목록에 있는 것만 골라 일기를 씀(지어내지 않게). 이 사실 목록에 **AI 대화 중에 한 일**도 넣을지가 문제."},{"t":"ul","v":["예: 밤 10:30 대화에서 \"내일 2시 도서관 스터디\"를 저장하고 준비물 \"노트북 충전기\"를 추가함 → 일기에 \"내일 스터디 일정을 잡고 충전기를 챙겨 두기로 했어요\"가 들어가도 되는지","목업 · 화면은 이미 넣고 있음: 사실 목록에 \"일정 저장 · 스터디 (AI 대화 · 확인함)\", \"준비물 저장 · 노트북 충전기 (AI 대화)\", \"루틴 저장\", \"AI 대화 종료\"","`docs/screen-data-map.md` A03 사실 출처는 `alarm_events` · `appointment_participants`(출발 · 도착 · 지각) · `todos`뿐 — 대화 결과(`conversation_sessions`)가 없음"]}]},{"h":"선택지","parts":[{"t":"opts","v":[{"key":"A","name":"넣음","tag":"지금 코드, 목업","desc":"대화에서 저장한 일정 · 준비물 · 루틴도 사실로, 출처 표시는 \"AI 대화\"","sub":["할 일: docs A03 사실 출처에 `conversation_sessions`(저장한 것만) 추가"]},{"key":"B","name":"안 넣음","tag":"","desc":"사실은 알람 · 위치 자동 기록과 직접 입력만, 대화 내용은 회고 코칭에만 씀","sub":["할 일: 목업 · 화면 사실 목록에서 AI 대화 항목 빼기"]}]}]}]},{"id":"D32","title":"대화에서 찾은 준비물을 바로 저장할지","status":"정할 것","meta":{"출처":"PR #106","이슈":"#42","기한":"#42 시작 전"},"blocks":[{"h":"무슨 상황","parts":[{"t":"p","v":"AI 대화(A02)에서 \"내일 오후 2시 학교 도서관에서 스터디 있어요. 노트북 충전기도 챙겨야 해요\"라고 말하면, AI가 \"대화에서 찾은 내용\" 카드를 띄움 — 일정 스터디 · 5월 23일 오후 2:00 · 학교 도서관 · 준비물 노트북 충전기. 카드 아래 버튼은 저장 · 수정 · 저장 안 함."},{"t":"ul","v":["지금은 카드가 뜨는 순간 준비물이 이미 저장됨(카드에 \"바로 추가함\" 표시) → 홈 저녁 \"내일 준비물\"에 바로 생김","그래서 일정을 \"저장 안 함\"으로 눌러도 준비물은 남음"]}]},{"h":"선택지","parts":[{"t":"opts","v":[{"key":"A","name":"바로 저장","tag":"지금 코드, 목업","desc":"준비물은 일정과 따로, 말한 즉시 할 일 목록에 들어감. 일정을 안 저장하면 준비물만 남음","sub":[]},{"key":"B","name":"찾은 일정을 확인할 때 같이 저장","tag":"","desc":"\"저장\"을 눌러야 일정 · 준비물이 같이 들어가고, \"저장 안 함\"이면 둘 다 안 남음","sub":["할 일: 카드 \"바로 추가함\" 표시 빼기, 준비물 저장을 일정 저장(`alarm-commit`)에 묶음"]}]}]}]},{"id":"D34","title":"작은 동작 확인 2개 (홈 · 알람)","status":"정할 것","meta":{"출처":"PR #84 리뷰","이슈":"#30","기한":"PR #84 머지 전"},"blocks":[{"h":"1. 알람 설정(H03) 확인 시트를 바깥을 눌러 닫을 때","parts":[{"t":"p","v":"H03에서 여유 시간을 바꾸고 \"저장\"을 누르면, 알람 시각이 5분 이상 바뀔 때 확인 시트가 뜸 — \"기상 알람 시각이 바뀌어요 · 오전 8:00 → 오전 7:50 · 바꾸기 / 그대로 두기\". 이때 버튼 대신 시트 바깥(어두운 곳)을 눌러 닫으면 지금은 \"그대로 두기\"와 같게 처리됨 → 바꾼 여유가 원래 값으로 돌아감."},{"t":"opts","v":[{"key":"A","name":"그대로 두기와 같음","tag":"지금 코드","desc":"바깥을 누르면 취소, 여유도 원래 값","sub":[]},{"key":"B","name":"시트만 닫음","tag":"","desc":"바꾼 여유는 화면에 남고 저장은 안 된 상태, 다시 \"저장\"을 누를 수 있음","sub":[]}]}]},{"h":"2. 홈(H01) 오늘 루틴 카드를 다 끝낸 뒤 또 누를 때","parts":[{"t":"p","v":"홈 아침의 \"오늘 루틴\" 카드(차분한 출근 준비: 물 마시기 · 스트레칭 · 샤워 · 출발)는 누를 때마다 한 단계씩 완료로 줄이 그어짐. 4/4를 다 끝낸 뒤 또 누르면 지금은 0/4로 돌아감."},{"t":"opts","v":[{"key":"A","name":"처음으로 돌아감","tag":"지금 코드","desc":"잘못 눌렀을 때 되돌리는 길이 이것뿐","sub":[]},{"key":"B","name":"다 끝나면 그대로","tag":"","desc":"완료 표시 유지, 되돌리기는 따로(길게 누르기 등)","sub":[]}]},{"t":"p","v":"루틴은 아직 정해진 게 없어서(D33 보류) 2번은 루틴을 넣을 때 다시 봐도 됨."}]}]},{"id":"D35","title":"공유받은 알람(G04) 시각을 얼마나 옮길 수 있게 할지","status":"정할 것","meta":{"출처":"PR #104 리뷰","이슈":"#46","기한":"#46 시작 전"},"blocks":[{"h":"참고","parts":[{"t":"p","v":"지금은 \"5분 앞당기기 · 늦추기\"를 몇 번이든 누를 수 있어 자정을 넘길 수 있음(가짜 데이터). ±5분 한 번씩은 목업 · `docs/screen-data-map.md` G04 그대로이고, 모두 합쳐 옮길 수 있는 범위(예: ±60분)를 정함."}]},{"h":"선택지","parts":[{"t":"opts","v":[{"key":"A","name":"모두 합쳐 ±60분","tag":"","desc":"5분씩 12번까지","sub":[]},{"key":"B","name":"모두 합쳐 ±30분","tag":"","desc":"","sub":[]},{"key":"C","name":"범위 제한 없이 자정만 못 넘게","tag":"","desc":"","sub":[]}]}]},{"h":"의견","parts":[{"t":"ul","v":["모두 합쳐 ±1시간 내외"]}]}]},{"id":"D37","title":"상세 화면에서도 아래 탭을 보일지","status":"정할 것","meta":{"출처":"목업 대조 점검 (화면 PR 전체)","이슈":"#30 · #43","기한":"PR #84 머지 전"},"blocks":[{"h":"지금 어긋난 곳","parts":[{"t":"table","head":["어디","지금"],"rows":[["목업","모든 화면에 아래 탭(홈 · 그룹 · AI · 기록), 처음 연 탭이 강조, 탭을 누르면 그 탭 첫 화면으로"],["RN 화면","알람 설정 · 그룹 상세 같은 상세 화면은 탭 위에 쌓여 아래 탭이 없고 \"← 이전\"으로만 돌아감 (Expo Router 기본 Stack)"]]}]},{"h":"선택지","parts":[{"t":"opts","v":[{"key":"A","name":"그대로","tag":"지금 코드","desc":"상세는 이전으로만","sub":[]},{"key":"B","name":"탭마다 Stack","tag":"","desc":"상세에서도 아래 탭이 보임","sub":["할 일: `(tabs)` 아래 탭별 폴더로 상세 화면을 옮김, 주소 · 뒤로 가기 다시 확인"]}]}]}]},{"id":"D33","title":"저장한 루틴을 다시 여는 길","status":"보류","meta":{"출처":"PR #106","이슈":"#48 · #30","보류 이유":"루틴을 어떤 것으로 어떻게 넣을지 아직 안 정해짐 — 프로토타입 단계에 안 넣을 수도 있음 (10/13)"},"blocks":[{"h":"지금 어긋난 곳","parts":[{"t":"table","head":["어디","지금"],"rows":[["목업 홈(저녁)","\"저녁 루틴\" 카드에서 루틴을 엶"],["화면 H01 (#84)","저녁 루틴 카드가 없어 A04는 `/dev/screens`로만 열림"],["아침 루틴","가짜 데이터가 단계 이름뿐이라 A04 모양과 안 맞음"]]}]},{"h":"선택지","parts":[{"t":"opts","v":[{"key":"A","name":"홈 저녁에 루틴 카드 추가","tag":"목업, PR #110에 넣음","desc":"","sub":[]},{"key":"B","name":"기록 · 설정 등 다른 곳에 루틴 목록","tag":"","desc":"","sub":[]}]},{"t":"p","v":"지금 코드: A — 목업대로 홈 저녁에 \"저녁 루틴\" 카드(PR #110). 아침 루틴을 A04로 여는 길은 여전히 없음."}]}]},{"id":"D7","title":"음성 대화: 1턴 vs 실시간","status":"정한 것","meta":{"출처":"결정 탭 (10/7)","이슈":"#37 · #42","결과":"B. 실시간 — Gemini Live 단말 직결, 목소리도 Gemini Live가 냄 (10/13)","반영":"반영 전"},"blocks":[{"h":"지금 어긋난 곳","parts":[{"t":"table","head":["어디","지금"],"rows":[["상세설계서 2장 v3 · 5장","Gemini Live API 단말 직결 = 실시간. 목소리도 Gemini Live가 냄 (TTS 따로 없음)"],["덱 15 · 16쪽","음성 1턴 `/voice/turns` + Gemini TTS"],["D8 (정한 것, 9/28)","알람 음성 안내는 폰 내장 TTS, Gemini TTS 안 씀"],["AI 실험 (ai-lab)","1턴 전제 (받아쓰기 글로 주고받음)"]]}]},{"h":"선택지","parts":[{"t":"opts","v":[{"key":"A","name":"1턴","tag":"","desc":"녹음 → Edge → Gemini → JSON","sub":[]},{"key":"B","name":"실시간","tag":"","desc":"말하는 동안 주고받음","sub":[]}]}]}]},{"id":"D8","title":"알람 음성 안내 TTS: 폰 내장 vs Gemini","status":"정한 것","meta":{"출처":"상세설계서 (9/28)","결과":"폰 내장 — Gemini TTS 안 씀 (9/28)","반영":"반영 전"},"blocks":[]},{"id":"D9","title":"G04 변경 기록 저장 자리","status":"정한 것","meta":{"출처":"`docs/screen-data-map.md` 스키마 보완 3","이슈":"#46","결과":"처음엔 저장 없이 주인에게 푸시만","반영":"반영 전"},"blocks":[]},{"id":"D10","title":"1차 데모 범위 (10/19)","status":"정한 것","meta":{"출처":"10/6 재계획","이슈":"#60","결과":"라벨 `1차 데모` 이슈 + #60 (10/6)","반영":"코드 없음"},"blocks":[]},{"id":"D11","title":"배포 길: 웹 미리보기 · 앱","status":"정한 것","meta":{"출처":"배포 세팅","이슈":"#13","결과":"웹 미리보기 Cloudflare · 앱 APK 태그 릴리스 (10/6)","반영":"반영됨 · #13"},"blocks":[]},{"id":"D14","title":"기상 확정 시각을 언제로 기록할지 (H08)","status":"정한 것","meta":{"출처":"PR #84 (작성자 판단)","이슈":"#35 · #40","결과":"B. θ를 넘은 시각 — 관찰(10분)이 끝난 뒤 누적 사용이 θ를 넘은 시각으로 거꾸로 기록 (10/13, 코드 PR #137)","반영":"반영됨 · PR #137"},"blocks":[{"h":"지금 어긋난 곳","parts":[{"t":"table","head":["어디","지금"],"rows":[["화면 H08 (PR #137 전)","확정 시각 = 알람 해제 + 10분(관찰 끝)"],["판정 규칙","해제 뒤 10분 누적 사용 ≥ θ(목업 1~3분 중 고름) 그리고 뒤쪽 5분 최근 사용 > 0 — 관찰이 끝나야 판정됨"]]}]},{"h":"선택지","parts":[{"t":"opts","v":[{"key":"A","name":"관찰이 끝난 시각 (해제 + 10분)","tag":"PR #137 전 코드","desc":"","sub":[]},{"key":"B","name":"θ를 넘은 시각","tag":"PR #137","desc":"관찰이 끝난 뒤 그 시각을 거꾸로 기록, 실제 일어난 시각에 더 가까움","sub":["할 일: #40 자동 수집에서 사용 시각을 같이 남김"]}]}]}]},{"id":"D36","title":"대화에서 일정을 여러 개 찾았을 때","status":"정한 것","meta":{"출처":"PR #106 리뷰","이슈":"#42","결과":"B. 여러 개 다 받음 — 기상과 이어지는 첫 일정은 자세히 안내하고, 나머지 일정은 시간에 맞춰 가벼운 푸시로 알림 (10/13)","반영":"반영 전"},"blocks":[{"h":"지금 어긋난 곳","parts":[{"t":"table","head":["어디","지금"],"rows":[["화면 A02 · 가짜 api","찾은 일정은 대화당 하나(`Conversation.found`), 카드 한 장"],["DB `conversation_sessions.extracted_data` · #42","\"일정 · 할 일 · 준비물 추출 결과\" — 여러 개가 나올 수 있음"]]}]},{"h":"선택지","parts":[{"t":"opts","v":[{"key":"A","name":"하나만","tag":"지금 코드, 목업","desc":"여러 개면 첫 일정만 카드로","sub":[]},{"key":"B","name":"여러 개","tag":"","desc":"카드마다 저장 · 저장 안 함","sub":["할 일: `found`를 배열로, 카드 메시지에 찾은 항목 id"]}]}]}]}];
 const BUILT = /*BUILT*/"10월 13일";
 const REPO = 'https://github.com/403-forbidden-capstone/respec-alarm-capstone';
 const ORDER = ['정할 것', '보류', '정한 것'];
@@ -398,13 +425,16 @@ function inl(s) {
   }).join('');
 }
 
-function optHtml(o) {
+function optHtml(o, d, bi) {
   const tag = o.tag && !/먼저 고른 안/.test(o.tag) ? `<span class="tag">${esc(o.tag)}</span>` : '';
+  const st = d && states[d.id];
+  const picked = st && st.status === '정한 것' && st.choice && String(st.choice).split(/\s*·\s*/).includes((bi ? bi : '') + o.key);
+  const vrow = d ? `<div class="vrow" data-vrow="${d.id}|${bi}|${o.key}">${voteRow(d.id, bi, o.key, statusOf(d))}</div>` : '';
   const subs = o.sub.length ? '<ul>' + o.sub.map((s) => {
     const todo = /^할 일:\s*/.test(s);
     return `<li${todo ? ' class="todo"' : ''}>${inl(s.replace(/^할 일:\s*/, ''))}</li>`;
   }).join('') + '</ul>' : '';
-  return `<div class="opt"><span class="k">${esc(o.key)}</span><div class="nm">${inl(o.name)}${tag}</div>${o.desc ? `<div class="ds">${inl(o.desc)}</div>` : ''}${subs ? `<div>${subs}</div>` : ''}</div>`;
+  return `<div class="opt${picked ? ' chosen' : ''}"><span class="k">${esc(o.key)}</span><div class="nm">${plain(o.name)}${tag}${picked ? '<span class="pickmark">정한 안</span>' : ''}</div>${o.desc ? `<div class="ds">${plain(o.desc)}</div>` : ''}${subs ? `<div>${subs}</div>` : ''}${vrow}</div>`;
 }
 function partHtml(p) {
   if (p.t === 'table') return `<div class="tbl"><table><thead><tr>${p.head.map((h) => `<th>${inl(h)}</th>`).join('')}</tr></thead><tbody>${p.rows.map((r) => `<tr>${r.map((c) => `<td>${inl(c)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
@@ -412,24 +442,128 @@ function partHtml(p) {
   if (p.t === 'ul') return `<ul class="plain">${p.v.map((x) => `<li>${inl(x)}</li>`).join('')}</ul>`;
   return `<p class="par">${inl(p.v)}</p>`;
 }
-function peekOf(d) {
-  const l = listOf(d.id);
-  if (l.length) { const c = l[l.length - 1]; return `<span class="peek"><b>의견 ${l.length}</b>${esc(c.author)}: ${esc(c.body.split('\n')[0])}</span>`; }
-  if (d.meta['결과']) return `<span class="peek">결과: ${inl(d.meta['결과'])}</span>`;
+// ---- 투표 · 정한 것 · 코드 반영 (decision_votes · decision_states, 실시간) ----
+// 상태는 이 페이지에서 바꾼 것(decision_states)이 문서(docs/decisions.md)보다 먼저. 문서 정리 때 결과를 문서로 옮김
+let votes = {};  // { D2: { 0: { 지형: 'A' } } } — block 0 = 질문 하나짜리, 1 · 2 … = 질문이 여러 개인 안건의 질문 순서
+let states = {}; // { D2: { status, choice, result, via, decided_by, decided_at, code_status, code_ref, updated_by, updated_at } }
+const VOTE_GOAL = 3;
+const CODE = ['반영 전', '반영 중', '반영됨', '코드 없음'];
+const statusOf = (d) => (states[d.id] && states[d.id].status) || d.status;
+const optBlocks = (d) => d.blocks.filter((b) => b.parts.some((p) => p.t === 'opts'));
+const blockNo = (d, b) => { const l = optBlocks(d); return l.length > 1 ? l.indexOf(b) + 1 : 0; };
+const optsOf = (b) => b.parts.filter((p) => p.t === 'opts').flatMap((p) => p.v);
+const votesOf = (id, bi) => (votes[id] && votes[id][bi]) || {};
+const voteCount = (id) => Object.values(votes[id] || {}).reduce((n, v) => n + Object.keys(v).length, 0);
+function codeOf(d) {
+  const st = states[d.id];
+  if (st && (st.code_status !== '반영 전' || st.code_ref)) return { s: st.code_status, ref: st.code_ref };
+  const m = /^(반영 전|반영 중|반영됨|코드 없음)\s*(?:·\s*(.+))?$/.exec(d.meta['반영'] || '');
+  if (m) return { s: m[1], ref: (m[2] || '').trim() };
+  return { s: '반영 전', ref: '' };
+}
+const codeChip = (c) => `<span class="chip code c${CODE.indexOf(c.s)}">${esc(c.s)}${c.ref ? ' · ' + esc(c.ref) : ''}</span>`;
+// 고른 안 글: "B안 — 모두 합쳐 ±30분" · 질문이 여러 개면 "1A · 2B"를 질문마다
+function choiceLabel(d, choice) {
+  const bl = optBlocks(d);
+  return String(choice).split(/\s*·\s*/).map((c) => {
+    const m = /^(\d?)([A-Z])$/.exec(c);
+    if (!m) return c;
+    const b = bl.length > 1 ? bl[+m[1] - 1] : bl[0];
+    const o = b && optsOf(b).find((x) => x.key === m[2]);
+    return `${bl.length > 1 && b ? (b.h.replace(/^선택지\s*/, '').replace(/[()]/g, '') || '질문 ' + m[1]) + ' ' : ''}${m[2]}안${o ? ' — ' + o.name.replace(/\*\*|`/g, '') : ''}`;
+  }).join(' · ');
+}
+function resultHtml(d) {
+  const st = states[d.id];
+  if (st && st.status === '정한 것' && st.via !== '문서') {
+    const how = st.via === '투표' ? `투표 ${VOTE_GOAL}표 (${esc(st.decided_by)})` : esc(st.decided_by || st.updated_by);
+    return `<div class="result"><b>정한 안</b> ${st.choice ? esc(choiceLabel(d, st.choice)) : ''}${st.result ? (st.choice ? ' — ' : '') + esc(st.result) : ''}<div class="rmeta">${how}${st.decided_at ? ' · ' + when(st.decided_at) : ''}</div></div>`;
+  }
+  if (st && st.status === '보류') return `<div class="result hold"><b>보류</b> ${esc(st.result || '')}<div class="rmeta">${esc(st.updated_by)} · ${when(st.updated_at)}</div></div>`;
+  if (statusOf(d) === '정한 것' && d.meta['결과']) return `<div class="result"><b>결과</b> ${plain(d.meta['결과'])}</div>`;
   return '';
 }
+function voteRow(id, bi, key, s) {
+  const v = votesOf(id, bi);
+  const who = Object.keys(v).filter((n) => v[n] === key);
+  const names = who.length ? `<span class="vn">${who.length}표</span><span class="vwho">${who.map(esc).join(' · ')}</span>` : '';
+  if (s === '정한 것') return names;
+  const mine = myName && v[myName] === key;
+  return `<button type="button" class="vbtn${mine ? ' on' : ''}" data-vote="${id}|${bi}|${key}">${mine ? '✓ 내 표' : '투표'}</button>${names}`;
+}
+function refreshVotes(id) {
+  const d = DATA.find((x) => x.id === id);
+  if (!d) return;
+  document.querySelectorAll(`[data-vrow^="${id}|"]`).forEach((el) => { const [, bi, key] = el.dataset.vrow.split('|'); el.innerHTML = voteRow(id, +bi, key, statusOf(d)); });
+  const det = document.getElementById(id);
+  if (det) { const sum = det.querySelector('summary'); const old = sum.querySelector('.chip.vote'); if (old) old.remove(); const n = voteCount(id); if (n && statusOf(d) !== '정한 것') sum.querySelector('.ttl').insertAdjacentHTML('beforeend', `<span class="chip vote">투표 ${n}</span>`); }
+}
+function decideHtml(d) {
+  const s = statusOf(d);
+  if (s === '정한 것') {
+    const c = codeOf(d);
+    return `<div class="decide"><div class="dact code-row"><span class="k">코드 반영</span>
+      <select data-code="${d.id}" aria-label="코드 반영 상태">${CODE.map((x) => `<option${x === c.s ? ' selected' : ''}>${x}</option>`).join('')}</select>
+      <input data-coderef="${d.id}" value="${esc(c.ref)}" maxlength="40" placeholder="PR #번호" aria-label="PR 번호">
+      <button type="button" class="btn" data-codesave="${d.id}">라벨 저장</button><span class="sp"></span>
+      <button type="button" class="btn ghost" data-reopen="${d.id}">다시 정할 것으로</button></div></div>`;
+  }
+  const bl = optBlocks(d);
+  const picks = bl.map((b, i) => {
+    const bi = bl.length > 1 ? i + 1 : 0;
+    const label = bl.length > 1 ? (b.h.replace(/^선택지\s*/, '').replace(/[()]/g, '') || '질문 ' + bi) : '고른 안';
+    return `<label class="pick">${esc(label)} <select data-pick="${d.id}" data-bi="${bi}"><option value="">고르기</option>${optsOf(b).map((o) => `<option value="${o.key}">${o.key}. ${esc(o.name.replace(/\*\*|`/g, ''))}</option>`).join('')}</select></label>`;
+  }).join('');
+  const hint = bl.length === 1 ? `고른 안 · 결과를 적고 이동, 또는 한 안이 ${VOTE_GOAL}표가 되면 자동으로 정한 것` : bl.length > 1 ? '질문마다 고른 안을 적고 이동 (질문이 여러 개라 투표로는 자동 이동 안 함)' : '결과를 적고 이동';
+  return `<div class="decide">
+    <div class="dform" data-dform="${d.id}">${picks}
+      <input data-dresult="${d.id}" maxlength="500" placeholder="결과 한 줄 — 어떻게 정했는지 (보류면 보류 이유)" value="${esc(drafts['r:' + d.id] || '')}"></div>
+    <div class="dact"><button type="button" class="btn" data-decide="${d.id}">정한 것으로 이동</button>${s === '보류' ? `<button type="button" class="btn" data-reopen="${d.id}">다시 정할 것으로</button>` : `<button type="button" class="btn" data-hold="${d.id}">보류로</button>`}<span class="hint">${hint}</span></div></div>`;
+}
+function renderStats() {
+  document.getElementById('stats').innerHTML = ORDER.map((s) => `<div class="stat"><b>${DATA.filter((d) => statusOf(d) === s).length}</b><span>${s}</span></div>`).join('');
+}
+
+function peekOf(d) {
+  const st = states[d.id];
+  if (st && st.status === '정한 것' && st.via !== '문서' && (st.choice || st.result)) return `<span class="peek"><b>정한 안</b>${esc(st.choice ? choiceLabel(d, st.choice) : st.result)}</span>`;
+  const l = listOf(d.id);
+  if (l.length) { const c = l[l.length - 1]; return `<span class="peek"><b>의견 ${l.length}</b>${esc(c.author)}: ${esc(c.body.split('\n')[0])}</span>`; }
+  if (statusOf(d) === '정한 것' && d.meta['결과']) return `<span class="peek">결과: ${plain(d.meta['결과'])}</span>`;
+  return '';
+}
+// ---- 회의 화면에서 뺄 것: 코드 · PR · 이슈 이야기 (전체는 docs/decisions.md 그대로) ----
+const HIDE_BLOCK = /^지금 어긋난 곳$/;
+const hasCode = (t) => /`/.test(String(t || ''));
+// "(PR #104 리뷰)" · "#46 시작 전" · "· #60" 같은 이슈 · PR 번호를 지움
+const noRefs = (t) => String(t || '')
+  .replace(/\s*\([^()]*#\d+[^()]*\)/g, '')
+  .replace(/\s*·?\s*(?:PR\s*)?#\d+(?:\s*·\s*(?:PR\s*)?#\d+)*/g, '')
+  .replace(/\s{2,}/g, ' ').trim();
+const plain = (t) => inl(noRefs(String(t || '').replace(/`/g, '')));
+function cleanPart(p) {
+  if (p.t === 'p') return hasCode(p.v) || /^지금 코드/.test(p.v) ? null : { ...p, v: noRefs(p.v) };
+  if (p.t === 'ul') { const v = p.v.filter((x) => !hasCode(x)).map(noRefs).filter(Boolean); return v.length ? { ...p, v } : null; }
+  if (p.t === 'table') { const rows = p.rows.filter((r) => !r.some(hasCode)).map((r) => r.map(noRefs)); return rows.length ? { ...p, rows } : null; }
+  if (p.t === 'opts') return { ...p, v: p.v.map((o) => ({ ...o, desc: hasCode(o.desc) ? '' : noRefs(o.desc), sub: [], tag: '' })) };
+  return p;
+}
+
 function itemHtml(d) {
-  const metaKeys = Object.keys(d.meta).filter((k) => k !== '결과' && k !== '기한');
-  const meta = metaKeys.map((k) => `<span>${esc(k)} <b>${inl(d.meta[k])}</b></span>`).join('');
   const isOp = (b) => /의견/.test(b.h);
   const cls = (b) => (isOp(b) ? ' class="opinion"' : b.h === '무슨 상황' ? ' class="situ"' : '');
   const head = (b) => (isOp(b) ? '문서에 적은 의견' : b.h);
-  const blocks = d.blocks.map((b) => `<section${cls(b)}>${b.h ? `<h3>${esc(head(b))}</h3>` : ''}${b.parts.map(partHtml).join('')}</section>`).join('');
+  const part = (b) => (p) => (p.t === 'opts' ? `<div class="opts">${p.v.map((o) => optHtml(o, d, blockNo(d, b))).join('')}</div>` : partHtml(p));
+  const view = d.blocks.filter((b) => !HIDE_BLOCK.test(b.h)).map((b) => ({ b, parts: b.parts.map(cleanPart).filter(Boolean) })).filter((x) => x.parts.length);
+  const blocks = view.map(({ b, parts }) => `<section${cls(b)}>${b.h ? `<h3>${esc(head(b))}</h3>` : ''}${parts.map(part(b)).join('')}</section>`).join('');
+  const s = statusOf(d);
+  const n = voteCount(d.id);
+  const badge = s === '정한 것' ? codeChip(codeOf(d)) : n ? `<span class="chip vote">투표 ${n}</span>` : '';
   const op = d.blocks.some(isOp) ? '<span class="op-chip">문서 의견</span>' : '';
   const shot = SCREENS[d.id] ? shotHtml(d) : '';
-  return `<details class="d st-${d.status.replace(/\s/g, '')}" id="${d.id}">
-    <summary><span class="id">${d.id}</span><span class="ttl">${inl(d.title)}${op}</span><span class="due">${d.meta['기한'] ? inl(d.meta['기한']) : ''}</span>${peekOf(d)}</summary>
-    <div class="body${shot ? ' has-shot' : ''}"><div class="txt">${d.meta['결과'] ? `<div class="result"><b>결과</b> ${inl(d.meta['결과'])}</div>` : ''}${meta ? `<div class="meta">${meta}</div>` : ''}${blocks}
+  return `<details class="d st-${s.replace(/\s/g, '')}" id="${d.id}">
+    <summary><span class="id">${d.id}</span><span class="ttl">${plain(d.title)}${op}${badge}</span><span class="due"></span>${peekOf(d)}</summary>
+    <div class="body${shot ? ' has-shot' : ''}"><div class="txt">${resultHtml(d)}${decideHtml(d)}${blocks}
       ${cmtHtml(d.id, '의견')}
     </div>${shot}</div>
   </details>`;
@@ -441,7 +575,7 @@ function render() {
   const openIds = new Set([...document.querySelectorAll('details.d[open]')].map((d) => d.id));
   let html = '';
   for (const s of ORDER) {
-    const items = DATA.filter((d) => d.status === s
+    const items = DATA.filter((d) => statusOf(d) === s
       && (filter === 'all' || filter === s || (filter === 'noted' && listOf(d.id).length))
       && (!q || (JSON.stringify(d) + listOf(d.id).map((c) => c.author + ' ' + c.body).join(' ')).toLowerCase().includes(q)));
     if (!items.length) continue;
@@ -452,6 +586,7 @@ function render() {
   openIds.forEach((id) => { const el = document.getElementById(id); if (el) el.open = true; });
   out.querySelectorAll('textarea').forEach(fit);
   document.getElementById('toggleAll').textContent = '모두 펼치기';
+  renderStats();
 }
 function fit(t) { t.style.height = 'auto'; t.style.height = Math.max(44, t.scrollHeight + 2) + 'px'; }
 
@@ -491,8 +626,19 @@ async function post(k) {
   toast('남겼어요');
 }
 async function fetchAll() {
-  const { data, error } = await sb.from('decision_comments').select('id, decision_id, author, body, created_at').order('created_at').order('id');
-  if (error) throw error;
+  const [cm, vt, stt] = await Promise.all([
+    sb.from('decision_comments').select('id, decision_id, author, body, created_at').order('created_at').order('id'),
+    sb.from('decision_votes').select('decision_id, block, voter, option_key, created_at'),
+    sb.from('decision_states').select('*'),
+  ]);
+  if (cm.error) throw cm.error;
+  // 투표 · 상태 표가 아직 없거나 못 읽어도 의견은 그대로 (투표 · 이동만 안 됨)
+  if (vt.error || stt.error) console.warn('투표 · 상태 못 읽음', vt.error || stt.error);
+  votes = {};
+  for (const v of vt.data || [])((votes[v.decision_id] = votes[v.decision_id] || {})[v.block] = votes[v.decision_id][v.block] || {})[v.voter] = v.option_key;
+  states = {};
+  for (const x of stt.data || []) states[x.decision_id] = x;
+  const data = cm.data;
   comments = {};
   seen.clear();
   for (const c of data) { seen.add(c.id); (comments[c.decision_id] = comments[c.decision_id] || []).push(c); }
@@ -510,8 +656,10 @@ async function connect() {
     online = true;
     refreshAll();
     let first = true;
-    sb.channel('decision-comments')
+    sb.channel('decision-live')
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'decision_comments' }, (p) => addComment(p.new, true))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'decision_votes' }, onVote)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'decision_states' }, onState)
       .subscribe(async (st) => {
         if (st === 'SUBSCRIBED') {
           setSync('live');
@@ -526,6 +674,91 @@ async function connect() {
     setSync('off');
   }
 }
+// 표 · 상태가 바뀜 (실시간)
+function onVote(p) {
+  const v = p.eventType === 'DELETE' ? p.old : p.new;
+  if (!v || !v.decision_id) return;
+  const box = ((votes[v.decision_id] = votes[v.decision_id] || {})[v.block] = votes[v.decision_id][v.block] || {});
+  // 지울 땐 RLS 때문에 키(안건 · 질문 · 이름)만 옴 → 고른 안과 상관없이 그 사람 표를 지움
+  if (p.eventType === 'DELETE') delete box[v.voter]; else box[v.voter] = v.option_key;
+  refreshVotes(v.decision_id);
+}
+function onState(p) {
+  if (!p.new || !p.new.decision_id) return;
+  states[p.new.decision_id] = p.new;
+  if (p.new.status === '정할 것') delete votes[p.new.decision_id]; // 다시 정할 것이면 서버가 표를 비움
+  render();
+}
+function needName() {
+  if (myName) return false;
+  document.getElementById('myName').focus();
+  toast('위 "내 이름"을 먼저 적어 주세요.');
+  return true;
+}
+function needOnline() {
+  if (online) return false;
+  toast('연결이 안 돼서 못 바꿔요. 새로 고침해 주세요.');
+  return true;
+}
+async function castVote(id, bi, key) {
+  if (needName() || needOnline()) return;
+  const box = ((votes[id] = votes[id] || {})[bi] = votes[id][bi] || {});
+  const cancel = box[myName] === key;
+  if (cancel) delete box[myName]; else box[myName] = key;
+  refreshVotes(id);
+  const res = cancel
+    ? await sb.from('decision_votes').delete().match({ decision_id: id, block: bi, voter: myName })
+    : await sb.from('decision_votes').upsert({ decision_id: id, block: bi, voter: myName.slice(0, 30), option_key: key }, { onConflict: 'decision_id,block,voter' });
+  if (res.error) { console.warn('투표 못 함', res.error); toast('투표가 안 됐어요. 잠시 뒤 다시 눌러 주세요.'); try { await fetchAll(); render(); } catch (e) { /* 그대로 */ } return; }
+  toast(cancel ? '투표를 취소했어요' : `${key}안에 투표했어요`);
+}
+async function setState(id, patch, msg) {
+  if (needName() || needOnline()) return false;
+  const { data, error } = await sb.from('decision_states')
+    .upsert({ decision_id: id, updated_by: myName.slice(0, 30), ...patch }, { onConflict: 'decision_id', defaultToNull: false })
+    .select().single();
+  if (error) { console.warn('상태 못 바꿈', error); toast('못 바꿨어요. 잠시 뒤 다시 눌러 주세요.'); return false; }
+  states[id] = data;
+  if (data.status === '정할 것') delete votes[id];
+  delete drafts['r:' + id];
+  saveDrafts();
+  render();
+  toast(msg);
+  return true;
+}
+function decide(id) {
+  const d = DATA.find((x) => x.id === id);
+  const picks = [...document.querySelectorAll(`select[data-pick="${id}"]`)];
+  const result = (drafts['r:' + id] || '').trim();
+  const multi = picks.length > 1;
+  const chosen = picks.map((sel) => (sel.value ? (multi ? sel.dataset.bi : '') + sel.value : ''));
+  if (picks.length && chosen.some((c) => !c)) { toast(multi ? '질문마다 고른 안을 골라 주세요.' : '고른 안을 골라 주세요.'); return; }
+  if (!picks.length && !result) { toast('결과 한 줄을 적어 주세요.'); return; }
+  const choice = chosen.length ? chosen.join(' · ') : null;
+  setState(id, { status: '정한 것', choice, result, via: '직접', decided_by: myName.slice(0, 30) }, `정한 것으로 넘겼어요${choice ? ' — ' + choiceLabel(d, choice) : ''}`);
+}
+function saveCode(id) {
+  const d = DATA.find((x) => x.id === id);
+  const code_status = document.querySelector(`select[data-code="${id}"]`).value;
+  const code_ref = document.querySelector(`input[data-coderef="${id}"]`).value.trim();
+  // upsert라 상태 칸도 같이 보냄(비면 새 줄로 못 넣음) — 이미 줄이 있으면 같은 상태라 바뀌지 않음
+  const patch = states[id] ? { status: statusOf(d), code_status, code_ref } : { status: '정한 것', via: '문서', code_status, code_ref };
+  setState(id, patch, `코드 라벨: ${code_status}${code_ref ? ' · ' + code_ref : ''}`);
+}
+document.addEventListener('click', (e) => {
+  const t = e.target.closest && e.target.closest('[data-vote],[data-dopen],[data-dclose],[data-decide],[data-hold],[data-reopen],[data-codesave]');
+  if (!t) return;
+  const ds = t.dataset;
+  if (ds.vote) { const [id, bi, key] = ds.vote.split('|'); castVote(id, +bi, key); return; }
+  if (ds.dopen) { const f = document.querySelector(`[data-dform="${ds.dopen}"]`); f.hidden = false; const first = f.querySelector('select,input'); if (first) first.focus(); return; }
+  if (ds.dclose) { document.querySelector(`[data-dform="${ds.dclose}"]`).hidden = true; return; }
+  if (ds.decide) { decide(ds.decide); return; }
+  if (ds.hold) { setState(ds.hold, { status: '보류', result: (drafts['r:' + ds.hold] || '').trim() }, '보류로 옮겼어요'); return; }
+  if (ds.reopen) { if (confirm('다시 정할 것으로 돌릴까요? 이 안건의 표는 비워져요.')) setState(ds.reopen, { status: '정할 것', choice: null, result: '' }, '다시 정할 것으로 돌렸어요'); return; }
+  if (ds.codesave) saveCode(ds.codesave);
+});
+document.addEventListener('input', (e) => { if (e.target.dataset && e.target.dataset.dresult) { drafts['r:' + e.target.dataset.dresult] = e.target.value; saveDrafts(); } });
+
 // 화면으로 돌아오면 최신 의견 다시 받기 (폰 잠금 · 탭 전환 사이에 놓친 것)
 document.addEventListener('visibilitychange', async () => {
   if (document.visibilityState !== 'visible' || !online) return;
@@ -535,8 +768,7 @@ document.addEventListener('visibilitychange', async () => {
 let toastTimer;
 function toast(msg) { const t = document.getElementById('toast'); t.textContent = msg; t.classList.add('on'); clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove('on'), 2400); }
 
-document.getElementById('stats').innerHTML = ORDER.map((s) => `<div class="stat"><b>${DATA.filter((d) => d.status === s).length}</b><span>${s}</span></div>`).join('');
-document.getElementById('foot').innerHTML = `<span>원본 <a href="${REPO}/blob/main/docs/decisions.md" target="_blank" rel="noopener">docs/decisions.md</a> · ${esc(BUILT)} 내용 · <a href="${PATHS.web}/board" target="_blank" rel="noopener">개발 보드 /board</a></span><span>의견은 같은 링크를 연 사람 모두에게 바로 보여요. 남긴 의견은 고치거나 지울 수 없어요.</span>`;
+document.getElementById('foot').innerHTML = `<span>원본 <a href="${REPO}/blob/main/docs/decisions.md" target="_blank" rel="noopener">docs/decisions.md</a> · ${esc(BUILT)} 내용 · <a href="${PATHS.web}/board" target="_blank" rel="noopener">개발 보드 /board</a></span><span>의견 · 투표 · 정한 것은 같은 링크를 연 사람 모두에게 바로 보여요. 남긴 의견은 고치거나 지울 수 없고, 상태가 바뀔 때마다 의견 목록에 [정한 것] 같은 줄이 자동으로 남아요.</span>`;
 document.querySelectorAll('.tabs button').forEach((b) => b.addEventListener('click', () => {
   filter = b.dataset.f;
   document.querySelectorAll('.tabs button').forEach((x) => x.setAttribute('aria-pressed', String(x === b)));
