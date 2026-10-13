@@ -679,12 +679,14 @@ function onVote(p) {
   const v = p.eventType === 'DELETE' ? p.old : p.new;
   if (!v || !v.decision_id) return;
   const box = ((votes[v.decision_id] = votes[v.decision_id] || {})[v.block] = votes[v.decision_id][v.block] || {});
-  if (p.eventType === 'DELETE') { if (box[v.voter] === v.option_key) delete box[v.voter]; } else box[v.voter] = v.option_key;
+  // 지울 땐 RLS 때문에 키(안건 · 질문 · 이름)만 옴 → 고른 안과 상관없이 그 사람 표를 지움
+  if (p.eventType === 'DELETE') delete box[v.voter]; else box[v.voter] = v.option_key;
   refreshVotes(v.decision_id);
 }
 function onState(p) {
   if (!p.new || !p.new.decision_id) return;
   states[p.new.decision_id] = p.new;
+  if (p.new.status === '정할 것') delete votes[p.new.decision_id]; // 다시 정할 것이면 서버가 표를 비움
   render();
 }
 function needName() {
@@ -717,6 +719,7 @@ async function setState(id, patch, msg) {
     .select().single();
   if (error) { console.warn('상태 못 바꿈', error); toast('못 바꿨어요. 잠시 뒤 다시 눌러 주세요.'); return false; }
   states[id] = data;
+  if (data.status === '정할 것') delete votes[id];
   delete drafts['r:' + id];
   saveDrafts();
   render();
@@ -738,7 +741,8 @@ function saveCode(id) {
   const d = DATA.find((x) => x.id === id);
   const code_status = document.querySelector(`select[data-code="${id}"]`).value;
   const code_ref = document.querySelector(`input[data-coderef="${id}"]`).value.trim();
-  const patch = states[id] ? { code_status, code_ref } : { status: '정한 것', via: '문서', code_status, code_ref };
+  // upsert라 상태 칸도 같이 보냄(비면 새 줄로 못 넣음) — 이미 줄이 있으면 같은 상태라 바뀌지 않음
+  const patch = states[id] ? { status: statusOf(d), code_status, code_ref } : { status: '정한 것', via: '문서', code_status, code_ref };
   setState(id, patch, `코드 라벨: ${code_status}${code_ref ? ' · ' + code_ref : ''}`);
 }
 document.addEventListener('click', (e) => {
