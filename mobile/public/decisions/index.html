@@ -184,7 +184,6 @@ const SCREENS = {
     { item: '온보딩 2/3 · 아침 준비', cap: '온보딩 2/3' },
     { item: '온보딩 3/3 · 집', cap: '온보딩 3/3' },
     { item: '권한 안내', cap: '권한 안내' },
-    { web: '/onboarding', cap: '앱 지금 온보딩' },
   ],
   D1: [
     { v: 'H03', hl: '알람 강도^', cap: 'H03 알람 강도' },
@@ -217,10 +216,7 @@ const SCREENS = {
     { v: 'H08c', hl: '기상 확정 ·^.done-big', cap: 'H08 기상 확정' },
   ],
   D15: [{ v: 'H01', hl: '5월 22일', cap: 'H01 가짜 데이터 날짜' }],
-  D16: [
-    { web: '/settings', cap: '앱 설정 · 개발 절' },
-    { web: '/dev/screens', cap: '앱 /dev/screens' },
-  ],
+  D16: [{ web: '/dev/screens', cap: '앱 /dev/screens' }], // 설정 화면은 로그인 전이라 홈으로 넘어감 (#117)
   D17: [{ v: 'F02', hl: '관계별 권한을 합치면^', cap: 'F02 친구 권한' }],
   D18: [{ v: 'F03', hl: '권한을 적용할 관계^|알람 조회^', cap: 'F03 그룹 권한' }],
   D19: [{ v: 'F03', hl: '기상 상태 조회^.kv', cap: 'F03 기상 조회 스위치' }],
