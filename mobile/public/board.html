@@ -110,7 +110,7 @@ tr.ck:focus-visible{outline:2px solid var(--teal);outline-offset:-2px}
 @media (prefers-reduced-motion:reduce){.ck-tg{transition:none}}
 @media (max-width:760px){.top{flex-wrap:wrap;height:auto;min-height:46px;padding:6px 12px}#meta{order:9;flex:1 1 100%;white-space:normal;overflow:visible}.top .meta#syncMeta{display:none}.tabs{position:static}
   .card.flush{overflow-x:auto}table.ck .ck-name{min-width:200px}.ck-block{white-space:normal}.matrix-wrap{max-height:none}
-  .dec-row{flex-wrap:wrap}.dec-tg{flex:1 1 100%}.dec-meta{grid-template-columns:1fr}code{word-break:break-all;white-space:normal}}
+  code{word-break:break-all;white-space:normal}}
 table.ck{font-size:14px}table.ck th{font-size:13px;padding:8px 10px}table.ck td{padding:9px 10px;vertical-align:middle}
 table.ck th.st,table.ck td.st{text-align:center;width:64px}
 .ck-name{font-weight:500}.ck-id{font-family:ui-monospace,Consolas,monospace;font-size:12px;color:var(--mute);margin-right:8px}
@@ -184,43 +184,11 @@ details{margin-top:12px}summary{cursor:pointer;color:var(--sub);font-size:13px}
 .filters button.on{background:var(--teal-bg);color:var(--teal-ink);border-color:transparent;font-weight:600}
 .filters .reset{margin-left:4px;font-size:13px}
 td.due{white-space:nowrap;font-variant-numeric:tabular-nums}
-/* 환경 · 결정 */
+/* 환경 */
 .grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
 .check{display:flex;gap:8px;align-items:center;padding:6px 0;border-bottom:1px solid var(--line);font-size:13px}
 .check select{font-size:12px;padding:1px 4px}
 input.tok{font:inherit;font-size:13px;border:1px solid var(--line2);border-radius:var(--r);padding:4px 8px;width:300px}
-/* 결정: 한 줄 = 안건(누르면 펼침), 틸 테두리 = 먼저 고른 안 */
-.dec-head{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;margin-bottom:4px}
-.dec-head h2{margin:0}.dec-head b{color:var(--ink);font-weight:600}
-.dec-head .row{margin-left:auto}
-.dec-g{margin-top:18px}
-.dec-g>.k{padding-bottom:6px;border-bottom:1px solid var(--line2)}
-.dec{border-bottom:1px solid var(--line)}
-.dec-row{display:flex;align-items:center;gap:12px;cursor:pointer;border-radius:6px}
-.dec-row:hover{background:var(--bg)}
-.dec-tg{flex:1;min-width:0;display:flex;align-items:baseline;gap:10px;border:0;background:none;padding:9px 4px;text-align:left;font-size:14px;line-height:1.45}
-.dec-tg:hover{background:none}
-.dec-tg::before{content:"";flex:none;width:6px;height:6px;border-right:1.5px solid var(--mute);border-bottom:1.5px solid var(--mute);transform:translateY(-2px) rotate(-45deg);margin-left:4px;transition:transform .15s}
-.dec.open .dec-tg::before{transform:translateY(-3px) rotate(45deg)}
-.dec-id{flex:none;min-width:28px;font-family:ui-monospace,Consolas,monospace;font-size:12px;color:var(--mute)}
-.dec-q{min-width:0}
-.dec.open .dec-q{font-weight:600}
-.dec-side{display:flex;gap:6px;align-items:center;flex-wrap:wrap;justify-content:flex-end;font-size:13px;padding-right:6px}
-.dec-res{color:var(--teal-ink);font-weight:500}
-.dec-body{display:grid;gap:14px;padding:2px 12px 18px 52px;font-size:13px}
-.dec-body h4{margin:0 0 6px;font-size:12px;font-weight:600;color:var(--sub)}
-.dec-body p{margin:0;max-width:72ch}
-.dec-body ul{margin:0;padding-left:18px}
-.dec-meta{display:grid;grid-template-columns:auto 1fr;gap:3px 14px}
-.dec-meta .k{padding-top:1px}
-table.dec-t{max-width:760px}
-table.dec-t td:first-child{width:34%;color:var(--sub)}
-.dec-opts{display:grid;gap:6px;max-width:760px}
-.dec-opt{display:grid;grid-template-columns:18px minmax(0,1fr);gap:10px;padding:8px 12px;border:1px solid var(--line);border-radius:var(--r);background:#fff;line-height:1.55}
-.dec-opt.pick{border-color:var(--teal);background:var(--teal-bg)}
-.dec-opt .key{font-family:ui-monospace,Consolas,monospace;font-weight:600;color:var(--teal-ink)}
-@media (prefers-reduced-motion:reduce){.dec-tg::before{transition:none}}
-@media (max-width:760px){.dec-row{flex-wrap:wrap;gap:0}.dec-side{justify-content:flex-start;padding:0 0 8px 46px}.dec-body{padding-left:8px}}
 .cp{padding:1px 8px;font-size:12px;color:var(--sub)}
 .wrap:has(.side.show) .grid2{grid-template-columns:1fr}
 .wrap:has(.side.show) .screens{grid-template-columns:176px minmax(0,1fr)}
@@ -547,7 +515,7 @@ const LINKS = [
   ['앱 (웹 미리보기 · 목업 데이터)', SITE.web + '/?mode=mock'], ['화면 목록 /dev/screens', SITE.web + '/dev/screens?mode=mock'], ['UI 부품 /dev/ui', SITE.web + '/dev/ui'],
   ['AI 실험실 /lab', SITE.web + '/lab/'], ['클릭 목업 (구버전 · 참고)', SITE.web + '/mockup.html'],
   ['레포', `https://github.com/${SITE.org}/${SITE.repo}`], ['Pull Requests', `https://github.com/${SITE.org}/${SITE.repo}/pulls`],
-  ['보드 (Projects)', `https://github.com/orgs/${SITE.org}/projects/${SITE.project}`], ['결정 문서 docs/decisions.md', `https://github.com/${SITE.org}/${SITE.repo}/blob/main/docs/decisions.md`],
+  ['보드 (Projects)', `https://github.com/orgs/${SITE.org}/projects/${SITE.project}`], ['결정 안건 /decisions', SITE.web + '/decisions/'], ['결정 문서 docs/decisions.md', `https://github.com/${SITE.org}/${SITE.repo}/blob/main/docs/decisions.md`],
   ['최신 APK (Releases)', `https://github.com/${SITE.org}/${SITE.repo}/releases/latest`],
   ['APK 빌드 버튼 (Actions)', `https://github.com/${SITE.org}/${SITE.repo}/actions/workflows/eas-build.yml`],
   ['EAS 빌드 목록', 'https://expo.dev/accounts/respec-alarm-capstone/projects/respec-alarm/builds'],
@@ -558,7 +526,7 @@ const COMMANDS = [
   ['실기기(개발용 APK)에 바로 반영', 'cd mobile && npx expo start'],
   ['폰 화면 PC 미러링', 'scrcpy --always-on-top --window-width 360'],
   ['로컬 검사', 'cd mobile && npm run typecheck && npm run lint && npm test'],
-  ['결정 문서 → 보드 결정 탭', 'cd mobile && npm run board:decisions'],
+  ['결정 문서 → /decisions · 보드 결정 알약', 'cd mobile && npm run board:decisions'],
   ['개발용 APK 빌드', 'npx eas-cli build -p android --profile development'],
   ['JS 변경만 preview 앱에 배포', 'npx eas-cli update --channel preview --message "변경 내용"'],
   ['데모 릴리스 (APK + QR)', 'git tag v0.1.0 && git push origin v0.1.0'],
@@ -581,7 +549,6 @@ let token = LS.get('ghToken', '');
 let todoFilter = LS.get('todoFilter', { status: '', ms: '', label: '' });
 let syncError = '';
 const envState = LS.get('env', {});
-const decOpen = new Set(LS.get('decOpen', [])); // 펼친 안건 번호(D1 …)
 const ckOpen = new Set(LS.get('ckOpen', []));   // 펼친 동작 줄(C01 …)
 
 const STATUS = { '✅ 완료': 'done', '🏃 진행 중': 'doing', '👀 리뷰': 'review', '📌 이번 주': 'week', '📥 백로그': 'todo' };
@@ -662,14 +629,14 @@ function plan() {
 }
 
 // ───────────────────────────────── 렌더
-const TABDEF = [['checks', '동작'], ['todo', '할 일'], ['dec', '결정'], ['links', '연결'], ['env', '개발']];
+const TABDEF = [['checks', '동작'], ['todo', '할 일'], ['links', '연결'], ['env', '개발']];
 function render() {
   const p = plan();
   const nx = p.next[0];
   document.getElementById('meta').innerHTML = `1차 데모(${fmtDate(SITE.demo1)}) <b>D-${daysTo(SITE.demo1)}</b> · 대회(${fmtDate(SITE.contest)}) <b>D-${daysTo(SITE.contest)}</b>`
     + (nx ? ` · 다음 <a class="in" href="${ghIssue(nx.n)}" target="_blank" rel="noopener">#${nx.n} ${esc(nx.t)}</a> <b>${fmtDate(nx.due)}</b>` : '')
     + (p.late.length ? ` · <span class="late">지연 ${p.late.length}</span>` : '');
-  const R = { checks: rChecks, links: rLinks, todo: rTodo, env: rEnv, dec: rDec };
+  const R = { checks: rChecks, links: rLinks, todo: rTodo, env: rEnv };
   if (!R[tab]) tab = 'checks';
   document.getElementById('tabs').innerHTML = TABDEF.map(([id, name]) => `<button role="tab" aria-selected="${tab === id}" data-tab="${id}" class="${tab === id ? 'on' : ''}">${name}</button>`).join('');
   document.getElementById('main').innerHTML = R[tab]();
@@ -680,13 +647,14 @@ function render() {
   else { sm.classList.remove('late'); if (s && s === live) { sm.textContent = `동기화 ${when(live.at)}`; sm.title = ''; } else if (s) { sm.textContent = `스냅샷 ${when(s.at)}`; sm.title = 'main 빌드 시점. 동기화를 누르면 지금 상태'; } else { sm.textContent = ''; } }
 }
 
-// 글줄 → HTML: #n = 이슈 링크, Dn = 결정 탭의 그 안건
+// 글줄 → HTML: #n = 이슈 링크, Dn = 결정 안건 페이지(/decisions)의 그 안건
+const decHref = (id) => `/decisions/#${id}`;
 const txt = (s) => esc(s)
   .replace(/#(\d+)/g, (m, n) => `<a href="${ghIssue(n)}" target="_blank" rel="noopener">${m}</a>`)
-  .replace(/\bD(\d+)\b/g, (m) => `<a class="in" href="#" data-go="dec:${m}">${m}</a>`);
+  .replace(/\bD(\d+)\b/g, (m) => `<a class="in" href="${decHref(m)}" target="_blank" rel="noopener">${m}</a>`);
 // 결정 안건 알약: 정한 것 = 틸, 보류 = 회색 테두리, 정할 것 = 회색
 const decLink = (id) => { const d = DECISIONS.find(x => x.id === id); const st = !d ? 'wait' : d.status === '정한 것' ? 'done' : d.status === '보류' ? 'wait' : 'todo';
-  const t = d ? d.title : ''; return `<a class="chip ${st}" href="#" data-go="dec:${esc(id)}" title="${esc(t)}">${esc(id)}${t ? ' ' + esc(t.length > 30 ? t.slice(0, 30) + '…' : t) : ''}</a>`; };
+  const t = d ? d.title : ''; return `<a class="chip ${st}" href="${decHref(id)}" target="_blank" rel="noopener" title="${esc(t)}">${esc(id)}${t ? ' ' + esc(t.length > 30 ? t.slice(0, 30) + '…' : t) : ''}</a>`; };
 
 // 진행 중 · 리뷰 · 이번 주 · 지연 + 다음 3개 — 할 일 탭 맨 위
 function nowCard() {
@@ -917,49 +885,6 @@ function rEnv() {
     <tr><td><code>tools/deps-graph/</code></td><td>모듈 의존 그래프</td></tr></table></div>`;
 }
 
-// 결정: 원본 docs/decisions.md → DECISIONS. 한 줄 = 안건, 누르면 세부(지금 어긋난 곳 · 선택지 · 참고)
-const DEC_GROUPS = ['정할 것', '보류', '정한 것'];
-const DEC_DOC = `https://github.com/${SITE.org}/${SITE.repo}/blob/main/docs/decisions.md`;
-// 문서 글줄 → HTML: `코드` · **굵게** · PR #n · #n (links=false면 링크 없이 — 버튼 안 제목용)
-const inl = (s, links = true) => String(s || '').split(/(`[^`]+`)/).map((p) => /^`[^`]+`$/.test(p) ? `<code>${esc(p.slice(1, -1))}</code>`
-  : esc(p).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>').replace(/(PR )?#(\d+)/g, (m, pr, n) => links ? `<a href="${pr ? ghPr(n) : ghIssue(n)}" target="_blank" rel="noopener">${m}</a>` : m)).join('');
-const decIssues = (d) => [...new Set((String(d.meta['이슈'] || '').match(/#\d+/g) || []).map((x) => Number(x.slice(1))))];
-// 기한 = 연결 이슈 중 안 끝난 것의 가장 이른 시작일 (보드 날짜를 따라감)
-const decDue = (d) => decIssues(d).map(issue).filter((it) => it && it.start && it.st !== 'CLOSED').map((it) => it.start).sort()[0] || '';
-function decPart(p) {
-  if (p.t === 'p') return `<p>${inl(p.v)}</p>`;
-  if (p.t === 'ul') return `<ul>${p.v.map((x) => `<li>${inl(x)}</li>`).join('')}</ul>`;
-  if (p.t === 'table') return `<table class="dec-t"><tr>${p.head.map((h) => `<th>${inl(h)}</th>`).join('')}</tr>${p.rows.map((r) => `<tr>${r.map((c) => `<td>${inl(c)}</td>`).join('')}</tr>`).join('')}</table>`;
-  if (p.t === 'opts') return `<div class="dec-opts">${p.v.map((o) => `<div class="dec-opt${o.tag ? ' pick' : ''}"><span class="key">${esc(o.key)}</span><div>
-    <div><b>${inl(o.name)}</b>${o.tag ? ` <span class="chip review">${esc(o.tag)}</span>` : ''}</div>${o.desc ? `<div>${inl(o.desc)}</div>` : ''}${o.sub.map((s) => `<div class="muted">${inl(s)}</div>`).join('')}</div></div>`).join('')}</div>`;
-  return '';
-}
-function decRow(d) {
-  const open = decOpen.has(d.id);
-  const due = d.status === '정할 것' ? decDue(d) : '';
-  const tail = d.status === '정한 것' ? `<span class="dec-res">${inl(d.meta['결과'])}</span>`
-    : d.status === '보류' ? `<span class="muted">${inl(d.meta['보류 이유'])}</span>`
-    : due ? `<span class="num ${due < todayS ? 'late' : 'muted'}" title="연결 이슈 시작일">~${fmtDate(due)}</span>` : '';
-  const meta = Object.entries(d.meta).map(([k, v]) => `<span class="k">${esc(k)}</span><span>${inl(v)}${k === '기한' && due ? ` <span class="muted num">· ${fmtDate(due)}</span>` : ''}</span>`).join('');
-  return `<div class="dec${open ? ' open' : ''}">
-    <div class="dec-row" data-dec="${esc(d.id)}">
-      <button class="dec-tg" aria-expanded="${open}" aria-controls="dec-${esc(d.id)}"><span class="dec-id">${esc(d.id)}</span><span class="dec-q">${inl(d.title, false)}</span></button>
-      <span class="dec-side">${decIssues(d).map(issuePill).join('')}${tail}</span>
-    </div>` +
-    (open ? `<div class="dec-body" id="dec-${esc(d.id)}"><div class="dec-meta">${meta}</div>` +
-      d.blocks.map((b) => `<div>${b.h ? `<h4>${esc(b.h)}</h4>` : ''}${b.parts.map(decPart).join('')}</div>`).join('') + `</div>` : '') +
-    `</div>`;
-}
-function rDec() {
-  const by = Object.fromEntries(DEC_GROUPS.map((g) => [g, DECISIONS.filter((d) => d.status === g)]));
-  const head = `<div class="dec-head"><h2>결정</h2><span class="muted num">${DEC_GROUPS.map((g) => `${g} <b>${by[g].length}</b>`).join(' · ')}</span>
-    <span class="row"><button data-decall="open">모두 펼치기</button><button data-decall="close">모두 접기</button></span></div>
-    <div class="muted">팀 회의 결정 안건. 행을 클릭하면 배경(현재 불일치 지점)과 선택지가 펼쳐지며, 틸 테두리는 우선 선택안. 동작 탭 "관련 결정"의 D번호를 클릭하면 여기로 이동. 원본 <a href="${DEC_DOC}" target="_blank" rel="noopener">docs/decisions.md</a> · 회의에서 결정되면 결과를 적고 "정한 것"으로 이동</div>`;
-  if (!DECISIONS.length) return `<div class="card">${head}<p class="note">안건이 비어 있음 — <code>cd mobile && npm run board:decisions</code></p></div>`;
-  return `<div class="card">${head}` + DEC_GROUPS.filter((g) => by[g].length).map((g) =>
-    `<div class="dec-g"><div class="k">${g} <span class="num">${by[g].length}</span></div>${by[g].map(decRow).join('')}</div>`).join('') + `</div>`;
-}
-
 // ───────────────────────────────── GitHub 동기화
 // 아래 질의 · 매핑은 mobile/scripts/board-snapshot.mjs와 같은 모양이어야 함 — 한쪽을 고치면 둘 다
 const GQL = `query($org:String!,$repo:String!,$num:Int!){
@@ -1007,7 +932,7 @@ async function loadSnapshot() {
 
 // ───────────────────────────────── 이벤트
 document.addEventListener('click', (e) => {
-  const el = e.target.closest('[data-tab],[data-go],[data-sel],[data-f],[data-src],[data-copy],[data-dec],[data-decall],[data-ck],[data-ckall],#btnSync,#btnSide,#btnReload,#tokSave,#tokClear');
+  const el = e.target.closest('[data-tab],[data-go],[data-sel],[data-f],[data-src],[data-copy],[data-ck],[data-ckall],#btnSync,#btnSide,#btnReload,#tokSave,#tokClear');
   if (!el) return;
   if (el.dataset.ckall) { if (el.dataset.ckall === 'open') CHECKS.forEach((c) => ckOpen.add(c.id)); else ckOpen.clear(); LS.set('ckOpen', [...ckOpen]); render(); return; }
   if (el.dataset.ck) {
@@ -1016,14 +941,6 @@ document.addEventListener('click', (e) => {
     LS.set('ckOpen', [...ckOpen]); render(); return;
   }
   if (el.dataset.tab) { tab = el.dataset.tab; LS.set('tab', tab); render(); return; }
-  if (el.dataset.decall) { if (el.dataset.decall === 'open') DECISIONS.forEach((d) => decOpen.add(d.id)); else decOpen.clear(); LS.set('decOpen', [...decOpen]); render(); return; }
-  if (el.dataset.dec) {
-    if (e.target.closest('a')) return; // 줄 안 이슈 링크는 그대로 열림
-    const id = el.dataset.dec; if (decOpen.has(id)) decOpen.delete(id); else decOpen.add(id);
-    LS.set('decOpen', [...decOpen]); render();
-    const b = document.querySelector(`.dec-row[data-dec="${CSS.escape(id)}"] .dec-tg`); if (b) b.focus({ preventScroll: true });
-    return;
-  }
   if (el.dataset.f !== undefined) {
     e.preventDefault();
     if (el.dataset.f === 'reset') todoFilter = { status: '', ms: '', label: '' }; else todoFilter[el.dataset.f] = el.dataset.v;
@@ -1034,10 +951,8 @@ document.addEventListener('click', (e) => {
   if (el.dataset.go !== undefined) {
     e.preventDefault(); const [t, s] = el.dataset.go.split(':'); tab = t; LS.set('tab', tab);
     if (t === 'screens' && s) { sel = s; LS.set('sel', sel); }
-    if (t === 'dec' && s) { decOpen.add(s); LS.set('decOpen', [...decOpen]); }
     render();
-    if (t === 'dec' && s) { const row = document.querySelector(`.dec-row[data-dec="${CSS.escape(s)}"]`); if (row) row.scrollIntoView({ block: 'start' }); }
-    else window.scrollTo(0, 0);
+    window.scrollTo(0, 0);
     return;
   }
   if (el.dataset.sel) { e.preventDefault(); sel = el.dataset.sel; LS.set('sel', sel); render(); const on = document.querySelector('.tree .it.on'); if (on) { on.focus(); on.scrollIntoView({ block: 'nearest' }); } return; }

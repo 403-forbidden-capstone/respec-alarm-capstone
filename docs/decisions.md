@@ -2,7 +2,7 @@
 
 PR · 이슈에서 나온 "정할 것"을 모아 팀 회의에서 정함. 정하면 `결과`를 적고 `## 정한 것`으로 옮긴 뒤 이슈 본문 · docs에 반영함.
 
-개발 보드 `/board` 결정 탭이 이 파일을 그대로 보여 줌 — 웹 빌드 때 자동 반영, 로컬은 `cd mobile && npm run board:decisions`.
+결정 안건 페이지 `/decisions`가 이 파일을 그대로 보여 줌(펼치면 그 안건의 화면), `/board` 동작 표의 결정 알약도 여기서 읽음 — 웹 빌드 때 자동 반영, 로컬은 `cd mobile && npm run board:decisions`.
 
 ## 정할 것
 
