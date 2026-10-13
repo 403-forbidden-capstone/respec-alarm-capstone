@@ -105,24 +105,25 @@ details.d summary::-webkit-details-marker { display: none; }
 .result.hold { background: var(--hold-soft); }
 .result.hold b { color: var(--hold); }
 .rmeta { font-size: 12px; color: var(--muted); margin-top: 2px; }
-/* 코드 반영 라벨: 반영 전(회색) · 반영 중(노랑) · 반영됨(초록) · 코드 없음(테두리) */
-.chip.c0 { background: var(--soft); border-color: var(--soft); color: var(--muted); }
-.chip.c1 { background: var(--hold-soft); border-color: var(--hold-soft); color: var(--hold); }
-.chip.c2 { background: var(--accent-soft); border-color: var(--accent-soft); color: var(--accent); }
-.chip.c3 { background: transparent; border-style: dashed; color: var(--muted); }
-.chip.vote { color: var(--accent); border-color: var(--accent); }
-.chip.pick { background: var(--accent); border-color: var(--accent); color: #fff; }
-.opt.chosen { border-color: var(--accent); background: var(--accent-soft); }
+/* 라벨은 전부 같은 회색 틀 — 코드 반영 상태만 앞의 작은 점 색으로: 반영 전(회색) · 반영 중(주황) · 반영됨(초록) · 코드 없음(빈 점) */
+.chip.code::before { content: ""; width: 6px; height: 6px; border-radius: 50%; margin-right: 5px; background: var(--muted); flex: none; }
+.chip.c1::before { background: #d97706; }
+.chip.c2::before { background: #16a34a; }
+.chip.c3::before { background: transparent; box-shadow: inset 0 0 0 1px var(--muted); }
+.pickmark { font-size: 11.5px; font-weight: 600; color: var(--accent); margin-left: 8px; }
+.opt.chosen { border-color: var(--accent); }
 .vrow { grid-column: 2; display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; margin-top: 6px; min-height: 0; }
 .vrow:empty { display: none; }
-.vbtn { font: inherit; font-size: 12.5px; font-weight: 600; height: 28px; padding: 0 12px; border-radius: 8px; border: 1px solid var(--accent); background: var(--paper); color: var(--accent); cursor: pointer; }
-.vbtn.on { background: var(--accent); color: #fff; }
-.vn { font-size: 12.5px; font-weight: 700; color: var(--ink); font-variant-numeric: tabular-nums; }
+.vbtn { font: inherit; font-size: 12px; font-weight: 500; height: 26px; padding: 0 10px; border-radius: 7px; border: 1px solid var(--line); background: var(--paper); color: var(--ink); cursor: pointer; }
+.vbtn:hover { border-color: var(--muted); }
+.vbtn.on { border-color: var(--accent); color: var(--accent); font-weight: 600; }
+.vn { font-size: 12px; font-weight: 600; color: var(--ink); font-variant-numeric: tabular-nums; }
 .vwho { font-size: 12px; color: var(--muted); }
-.decide { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--soft); }
+.decide { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; }
 .decide .hint { font-size: 12px; color: var(--muted); }
-.dform { flex-basis: 100%; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
-.dform[hidden] { display: none; }
+.dact { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.dact .sp { flex: 1; }
+.dform { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .dform .pick, .code-row .k { font-size: 12px; color: var(--muted); display: inline-flex; gap: 6px; align-items: center; }
 .dform select, .dform input, .code-row select, .code-row input { font: inherit; font-size: 13px; padding: 6px 9px; border: 1px solid var(--line); border-radius: 8px; background: var(--paper); color: var(--ink); }
 .dform input[data-dresult] { flex: 1 1 240px; min-width: 0; }
@@ -196,7 +197,7 @@ footer { margin-top: 36px; color: var(--muted); font-size: 12px; display: flex; 
 <div class="wrap">
   <header>
     <h1>결정 안건</h1>
-    <p>줄을 누르면 지금 어긋난 곳 · 선택지가 펼쳐지고, 오른쪽에 그 안건의 화면이 떠요(노란 테두리 = 안건이 가리키는 곳). 안건마다 아래 "의견"에 이름과 함께 남기면, 같은 링크를 연 사람 모두에게 바로 보여요. 선택지마다 투표할 수 있고, 한 안이 3표가 되면 자동으로 "정한 것"으로 넘어가요. 직접 넘길 땐 "정한 것으로 넘기기"에서 고른 안과 결과를 적어요.</p>
+    <p>줄을 누르면 지금 어긋난 곳 · 선택지가 펼쳐지고, 오른쪽에 그 안건의 화면이 떠요(노란 테두리 = 안건이 가리키는 곳). 안건마다 아래 "의견"에 이름과 함께 남기면, 같은 링크를 연 사람 모두에게 바로 보여요. 선택지마다 투표할 수 있고, 한 안이 3표가 되면 자동으로 "정한 것"으로 옮겨져요. 직접 옮길 땐 고른 안과 결과를 적고 "정한 것으로 이동".</p>
     <div class="stats" id="stats"></div>
   </header>
 
@@ -435,7 +436,7 @@ function optHtml(o, d, bi) {
     const todo = /^할 일:\s*/.test(s);
     return `<li${todo ? ' class="todo"' : ''}>${inl(s.replace(/^할 일:\s*/, ''))}</li>`;
   }).join('') + '</ul>' : '';
-  return `<div class="opt${picked ? ' chosen' : ''}"><span class="k">${esc(o.key)}</span><div class="nm">${inl(o.name)}${tag}${picked ? '<span class="chip pick">정한 안</span>' : ''}</div>${o.desc ? `<div class="ds">${inl(o.desc)}</div>` : ''}${subs ? `<div>${subs}</div>` : ''}${vrow}</div>`;
+  return `<div class="opt${picked ? ' chosen' : ''}"><span class="k">${esc(o.key)}</span><div class="nm">${inl(o.name)}${tag}${picked ? '<span class="pickmark">정한 안</span>' : ''}</div>${o.desc ? `<div class="ds">${inl(o.desc)}</div>` : ''}${subs ? `<div>${subs}</div>` : ''}${vrow}</div>`;
 }
 function partHtml(p) {
   if (p.t === 'table') return `<div class="tbl"><table><thead><tr>${p.head.map((h) => `<th>${inl(h)}</th>`).join('')}</tr></thead><tbody>${p.rows.map((r) => `<tr>${r.map((c) => `<td>${inl(c)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
@@ -462,7 +463,7 @@ function codeOf(d) {
   if (m) return { s: m[1], ref: (m[2] || '').trim() };
   return { s: '반영 전', ref: '' };
 }
-const codeChip = (c) => `<span class="chip c${CODE.indexOf(c.s)}">${esc(c.s)}${c.ref ? ' · ' + esc(c.ref) : ''}</span>`;
+const codeChip = (c) => `<span class="chip code c${CODE.indexOf(c.s)}">${esc(c.s)}${c.ref ? ' · ' + esc(c.ref) : ''}</span>`;
 // 고른 안 글: "B안 — 모두 합쳐 ±30분" · 질문이 여러 개면 "1A · 2B"를 질문마다
 function choiceLabel(d, choice) {
   const bl = optBlocks(d);
@@ -490,7 +491,7 @@ function voteRow(id, bi, key, s) {
   const names = who.length ? `<span class="vn">${who.length}표</span><span class="vwho">${who.map(esc).join(' · ')}</span>` : '';
   if (s === '정한 것') return names;
   const mine = myName && v[myName] === key;
-  return `<button type="button" class="vbtn${mine ? ' on' : ''}" data-vote="${id}|${bi}|${key}">${mine ? '✓ 투표함' : '이 안에 투표'}</button>${names}`;
+  return `<button type="button" class="vbtn${mine ? ' on' : ''}" data-vote="${id}|${bi}|${key}">${mine ? '✓ 내 표' : '투표'}</button>${names}`;
 }
 function refreshVotes(id) {
   const d = DATA.find((x) => x.id === id);
@@ -503,11 +504,11 @@ function decideHtml(d) {
   const s = statusOf(d);
   if (s === '정한 것') {
     const c = codeOf(d);
-    return `<div class="decide"><div class="code-row"><span class="k">코드 반영</span>${codeChip(c)}
+    return `<div class="decide"><div class="dact code-row"><span class="k">코드 반영</span>
       <select data-code="${d.id}" aria-label="코드 반영 상태">${CODE.map((x) => `<option${x === c.s ? ' selected' : ''}>${x}</option>`).join('')}</select>
       <input data-coderef="${d.id}" value="${esc(c.ref)}" maxlength="40" placeholder="PR #번호" aria-label="PR 번호">
-      <button type="button" class="btn" data-codesave="${d.id}">라벨 저장</button></div>
-      <button type="button" class="btn ghost" data-reopen="${d.id}">다시 정할 것으로</button></div>`;
+      <button type="button" class="btn" data-codesave="${d.id}">라벨 저장</button><span class="sp"></span>
+      <button type="button" class="btn ghost" data-reopen="${d.id}">다시 정할 것으로</button></div></div>`;
   }
   const bl = optBlocks(d);
   const picks = bl.map((b, i) => {
@@ -515,11 +516,11 @@ function decideHtml(d) {
     const label = bl.length > 1 ? (b.h.replace(/^선택지\s*/, '').replace(/[()]/g, '') || '질문 ' + bi) : '고른 안';
     return `<label class="pick">${esc(label)} <select data-pick="${d.id}" data-bi="${bi}"><option value="">고르기</option>${optsOf(b).map((o) => `<option value="${o.key}">${o.key}. ${esc(o.name.replace(/\*\*|`/g, ''))}</option>`).join('')}</select></label>`;
   }).join('');
-  const hint = bl.length === 1 ? `한 안이 ${VOTE_GOAL}표가 되면 자동으로 정한 것으로 넘어가요` : bl.length > 1 ? '질문이 여러 개라 투표로는 자동으로 안 넘어가요' : '';
-  return `<div class="decide"><button type="button" class="btn primary" data-dopen="${d.id}">정한 것으로 넘기기</button>${s === '보류' ? `<button type="button" class="btn" data-reopen="${d.id}">다시 정할 것으로</button>` : `<button type="button" class="btn" data-hold="${d.id}">보류로</button>`}<span class="hint">${hint}</span>
-    <div class="dform" data-dform="${d.id}" hidden>${picks}
-      <input data-dresult="${d.id}" maxlength="500" placeholder="결과 한 줄 — 어떻게 정했는지 (보류면 보류 이유)" value="${esc(drafts['r:' + d.id] || '')}">
-      <button type="button" class="btn primary" data-decide="${d.id}">이 안으로 확정</button><button type="button" class="btn" data-dclose="${d.id}">취소</button></div></div>`;
+  const hint = bl.length === 1 ? `고른 안 · 결과를 적고 이동, 또는 한 안이 ${VOTE_GOAL}표가 되면 자동으로 정한 것` : bl.length > 1 ? '질문마다 고른 안을 적고 이동 (질문이 여러 개라 투표로는 자동 이동 안 함)' : '결과를 적고 이동';
+  return `<div class="decide">
+    <div class="dform" data-dform="${d.id}">${picks}
+      <input data-dresult="${d.id}" maxlength="500" placeholder="결과 한 줄 — 어떻게 정했는지 (보류면 보류 이유)" value="${esc(drafts['r:' + d.id] || '')}"></div>
+    <div class="dact"><button type="button" class="btn" data-decide="${d.id}">정한 것으로 이동</button>${s === '보류' ? `<button type="button" class="btn" data-reopen="${d.id}">다시 정할 것으로</button>` : `<button type="button" class="btn" data-hold="${d.id}">보류로</button>`}<span class="hint">${hint}</span></div></div>`;
 }
 function renderStats() {
   document.getElementById('stats').innerHTML = ORDER.map((s) => `<div class="stat"><b>${DATA.filter((d) => statusOf(d) === s).length}</b><span>${s}</span></div>`).join('');
