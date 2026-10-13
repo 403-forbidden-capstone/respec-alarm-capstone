@@ -91,9 +91,7 @@ details.d { background: var(--paper); border: 1px solid var(--line); border-radi
 details.d[open] { border-color: var(--accent); }
 details.d summary { list-style: none; cursor: pointer; padding: 11px 14px; display: grid; grid-template-columns: auto 1fr auto; gap: 4px 12px; align-items: baseline; }
 details.d summary::-webkit-details-marker { display: none; }
-.id { display: inline-flex; align-items: center; justify-content: center; min-width: 46px; height: 22px; font-size: 12px; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--accent); background: var(--accent-soft); border-radius: 6px; padding: 0 8px; }
-.st-보류 .id { color: var(--hold); background: var(--hold-soft); }
-.st-정한것 .id { color: var(--done); background: var(--soft); }
+.id { display: inline-flex; align-items: center; justify-content: center; min-width: 46px; height: 22px; font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; color: var(--muted); background: transparent; border: 1px solid var(--line); border-radius: 6px; padding: 0 8px; }
 .ttl { font-weight: 600; min-width: 0; }
 .due { color: var(--muted); font-size: 12px; white-space: nowrap; }
 .peek { grid-column: 2 / -1; color: var(--muted); font-size: 12.5px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -161,7 +159,7 @@ textarea { width: 100%; min-height: 84px; resize: vertical; font: inherit; font-
 .opinion h3 { color: var(--accent); }
 .situ { background: var(--soft); border-radius: 10px; padding: 10px 12px; }
 .situ p.par, .situ ul.plain { color: var(--ink); }
-.op-chip { color: var(--accent); border-color: var(--accent); }
+.op-chip { }
 
 /* 펼치면 오른쪽에 화면: 목업(목업.html) · 추가 화면 와이어프레임 · 피그마 캡처 · 앱 웹 미리보기 */
 :root { --s: .74; --mark: #f5a524; }
@@ -197,7 +195,7 @@ footer { margin-top: 36px; color: var(--muted); font-size: 12px; display: flex; 
 <div class="wrap">
   <header>
     <h1>결정 안건</h1>
-    <p>줄을 누르면 지금 어긋난 곳 · 선택지가 펼쳐지고, 오른쪽에 그 안건의 화면이 떠요(노란 테두리 = 안건이 가리키는 곳). 안건마다 아래 "의견"에 이름과 함께 남기면, 같은 링크를 연 사람 모두에게 바로 보여요. 선택지마다 투표할 수 있고, 한 안이 3표가 되면 자동으로 "정한 것"으로 옮겨져요. 직접 옮길 땐 고른 안과 결과를 적고 "정한 것으로 이동".</p>
+    <p>줄을 누르면 상황 · 선택지와 그 안건의 화면이 떠요(노란 테두리 = 안건이 가리키는 곳). 안건마다 아래 "의견"에 이름과 함께 남기면, 같은 링크를 연 사람 모두에게 바로 보여요. 선택지마다 투표할 수 있고, 한 안이 3표가 되면 자동으로 "정한 것"으로 옮겨져요. 직접 옮길 땐 고른 안과 결과를 적고 "정한 것으로 이동".</p>
     <div class="stats" id="stats"></div>
   </header>
 
@@ -436,7 +434,7 @@ function optHtml(o, d, bi) {
     const todo = /^할 일:\s*/.test(s);
     return `<li${todo ? ' class="todo"' : ''}>${inl(s.replace(/^할 일:\s*/, ''))}</li>`;
   }).join('') + '</ul>' : '';
-  return `<div class="opt${picked ? ' chosen' : ''}"><span class="k">${esc(o.key)}</span><div class="nm">${inl(o.name)}${tag}${picked ? '<span class="pickmark">정한 안</span>' : ''}</div>${o.desc ? `<div class="ds">${inl(o.desc)}</div>` : ''}${subs ? `<div>${subs}</div>` : ''}${vrow}</div>`;
+  return `<div class="opt${picked ? ' chosen' : ''}"><span class="k">${esc(o.key)}</span><div class="nm">${plain(o.name)}${tag}${picked ? '<span class="pickmark">정한 안</span>' : ''}</div>${o.desc ? `<div class="ds">${plain(o.desc)}</div>` : ''}${subs ? `<div>${subs}</div>` : ''}${vrow}</div>`;
 }
 function partHtml(p) {
   if (p.t === 'table') return `<div class="tbl"><table><thead><tr>${p.head.map((h) => `<th>${inl(h)}</th>`).join('')}</tr></thead><tbody>${p.rows.map((r) => `<tr>${r.map((c) => `<td>${inl(c)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
@@ -482,7 +480,7 @@ function resultHtml(d) {
     return `<div class="result"><b>정한 안</b> ${st.choice ? esc(choiceLabel(d, st.choice)) : ''}${st.result ? (st.choice ? ' — ' : '') + esc(st.result) : ''}<div class="rmeta">${how}${st.decided_at ? ' · ' + when(st.decided_at) : ''}</div></div>`;
   }
   if (st && st.status === '보류') return `<div class="result hold"><b>보류</b> ${esc(st.result || '')}<div class="rmeta">${esc(st.updated_by)} · ${when(st.updated_at)}</div></div>`;
-  if (statusOf(d) === '정한 것' && d.meta['결과']) return `<div class="result"><b>결과</b> ${inl(d.meta['결과'])}</div>`;
+  if (statusOf(d) === '정한 것' && d.meta['결과']) return `<div class="result"><b>결과</b> ${plain(d.meta['결과'])}</div>`;
   return '';
 }
 function voteRow(id, bi, key, s) {
@@ -531,25 +529,41 @@ function peekOf(d) {
   if (st && st.status === '정한 것' && st.via !== '문서' && (st.choice || st.result)) return `<span class="peek"><b>정한 안</b>${esc(st.choice ? choiceLabel(d, st.choice) : st.result)}</span>`;
   const l = listOf(d.id);
   if (l.length) { const c = l[l.length - 1]; return `<span class="peek"><b>의견 ${l.length}</b>${esc(c.author)}: ${esc(c.body.split('\n')[0])}</span>`; }
-  if (statusOf(d) === '정한 것' && d.meta['결과']) return `<span class="peek">결과: ${inl(d.meta['결과'])}</span>`;
+  if (statusOf(d) === '정한 것' && d.meta['결과']) return `<span class="peek">결과: ${plain(d.meta['결과'])}</span>`;
   return '';
 }
+// ---- 회의 화면에서 뺄 것: 코드 · PR · 이슈 이야기 (전체는 docs/decisions.md 그대로) ----
+const HIDE_BLOCK = /^지금 어긋난 곳$/;
+const hasCode = (t) => /`/.test(String(t || ''));
+// "(PR #104 리뷰)" · "#46 시작 전" · "· #60" 같은 이슈 · PR 번호를 지움
+const noRefs = (t) => String(t || '')
+  .replace(/\s*\([^()]*#\d+[^()]*\)/g, '')
+  .replace(/\s*·?\s*(?:PR\s*)?#\d+(?:\s*·\s*(?:PR\s*)?#\d+)*/g, '')
+  .replace(/\s{2,}/g, ' ').trim();
+const plain = (t) => inl(noRefs(String(t || '').replace(/`/g, '')));
+function cleanPart(p) {
+  if (p.t === 'p') return hasCode(p.v) || /^지금 코드/.test(p.v) ? null : { ...p, v: noRefs(p.v) };
+  if (p.t === 'ul') { const v = p.v.filter((x) => !hasCode(x)).map(noRefs).filter(Boolean); return v.length ? { ...p, v } : null; }
+  if (p.t === 'table') { const rows = p.rows.filter((r) => !r.some(hasCode)).map((r) => r.map(noRefs)); return rows.length ? { ...p, rows } : null; }
+  if (p.t === 'opts') return { ...p, v: p.v.map((o) => ({ ...o, desc: hasCode(o.desc) ? '' : noRefs(o.desc), sub: [], tag: '' })) };
+  return p;
+}
+
 function itemHtml(d) {
-  const metaKeys = Object.keys(d.meta).filter((k) => k !== '결과' && k !== '기한' && k !== '반영');
-  const meta = metaKeys.map((k) => `<span>${esc(k)} <b>${inl(d.meta[k])}</b></span>`).join('');
   const isOp = (b) => /의견/.test(b.h);
   const cls = (b) => (isOp(b) ? ' class="opinion"' : b.h === '무슨 상황' ? ' class="situ"' : '');
   const head = (b) => (isOp(b) ? '문서에 적은 의견' : b.h);
   const part = (b) => (p) => (p.t === 'opts' ? `<div class="opts">${p.v.map((o) => optHtml(o, d, blockNo(d, b))).join('')}</div>` : partHtml(p));
-  const blocks = d.blocks.map((b) => `<section${cls(b)}>${b.h ? `<h3>${esc(head(b))}</h3>` : ''}${b.parts.map(part(b)).join('')}</section>`).join('');
+  const view = d.blocks.filter((b) => !HIDE_BLOCK.test(b.h)).map((b) => ({ b, parts: b.parts.map(cleanPart).filter(Boolean) })).filter((x) => x.parts.length);
+  const blocks = view.map(({ b, parts }) => `<section${cls(b)}>${b.h ? `<h3>${esc(head(b))}</h3>` : ''}${parts.map(part(b)).join('')}</section>`).join('');
   const s = statusOf(d);
   const n = voteCount(d.id);
   const badge = s === '정한 것' ? codeChip(codeOf(d)) : n ? `<span class="chip vote">투표 ${n}</span>` : '';
   const op = d.blocks.some(isOp) ? '<span class="op-chip">문서 의견</span>' : '';
   const shot = SCREENS[d.id] ? shotHtml(d) : '';
   return `<details class="d st-${s.replace(/\s/g, '')}" id="${d.id}">
-    <summary><span class="id">${d.id}</span><span class="ttl">${inl(d.title)}${op}${badge}</span><span class="due">${d.meta['기한'] ? inl(d.meta['기한']) : ''}</span>${peekOf(d)}</summary>
-    <div class="body${shot ? ' has-shot' : ''}"><div class="txt">${resultHtml(d)}${decideHtml(d)}${meta ? `<div class="meta">${meta}</div>` : ''}${blocks}
+    <summary><span class="id">${d.id}</span><span class="ttl">${plain(d.title)}${op}${badge}</span><span class="due"></span>${peekOf(d)}</summary>
+    <div class="body${shot ? ' has-shot' : ''}"><div class="txt">${resultHtml(d)}${decideHtml(d)}${blocks}
       ${cmtHtml(d.id, '의견')}
     </div>${shot}</div>
   </details>`;
@@ -617,11 +631,13 @@ async function fetchAll() {
     sb.from('decision_votes').select('decision_id, block, voter, option_key, created_at'),
     sb.from('decision_states').select('*'),
   ]);
-  if (cm.error || vt.error || stt.error) throw cm.error || vt.error || stt.error;
+  if (cm.error) throw cm.error;
+  // 투표 · 상태 표가 아직 없거나 못 읽어도 의견은 그대로 (투표 · 이동만 안 됨)
+  if (vt.error || stt.error) console.warn('투표 · 상태 못 읽음', vt.error || stt.error);
   votes = {};
-  for (const v of vt.data) ((votes[v.decision_id] = votes[v.decision_id] || {})[v.block] = votes[v.decision_id][v.block] || {})[v.voter] = v.option_key;
+  for (const v of vt.data || [])((votes[v.decision_id] = votes[v.decision_id] || {})[v.block] = votes[v.decision_id][v.block] || {})[v.voter] = v.option_key;
   states = {};
-  for (const x of stt.data) states[x.decision_id] = x;
+  for (const x of stt.data || []) states[x.decision_id] = x;
   const data = cm.data;
   comments = {};
   seen.clear();
