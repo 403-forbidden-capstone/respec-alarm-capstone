@@ -109,27 +109,32 @@ const TODAY = `(now() at time zone 'Asia/Seoul')::date`;
 // 3. 구조
 // ---------------------------------------------------------------------
 
-await check('모든 public 테이블(16개)에 RLS가 켜져 있음', async () => {
+// 회의 기록 테이블(결정 안건 페이지 /decisions)은 앱 데이터가 아니라 anon 규칙의 예외 — 아래 "회의 기록"에서 따로 확인
+const MEETING = ['decision_notes', 'decision_note_log'];
+
+await check('모든 public 테이블(앱 16개 + 회의 기록 2개)에 RLS가 켜져 있음', async () => {
   const r = await q(`select c.relname, c.relrowsecurity from pg_class c join pg_namespace n on n.oid = c.relnamespace
                      where n.nspname = 'public' and c.relkind = 'r' order by 1`);
   const off = r.filter((x) => !x.relrowsecurity).map((x) => x.relname);
-  return r.length === 16 && off.length === 0 ? true : { count: r.length, off };
+  const app = r.filter((x) => !MEETING.includes(x.relname)).length;
+  return app === 16 && r.length === 18 && off.length === 0 ? true : { count: r.length, app, off };
 });
-await check('모든 테이블에 정책이 있고 anon용 정책은 없음', async () => {
+await check('모든 앱 테이블에 정책이 있고 anon용 정책은 없음', async () => {
   const r = await q(`select c.relname, count(p.polname) as n,
                        bool_or(p.polroles @> array['anon'::regrole::oid]) as has_anon
                      from pg_class c join pg_namespace n on n.oid = c.relnamespace
                      left join pg_policy p on p.polrelid = c.oid
                      where n.nspname = 'public' and c.relkind = 'r' group by 1`);
-  const bad = r.filter((x) => Number(x.n) === 0 || x.has_anon);
+  const bad = r.filter((x) => !MEETING.includes(x.relname) && (Number(x.n) === 0 || x.has_anon));
   return bad.length === 0 ? true : bad;
 });
-await check('anon은 public 테이블 · 뷰 권한이 없음', async () => {
+await check('anon은 앱 테이블 · 뷰 권한이 없음', async () => {
   const r = await q(`select c.relname from pg_class c join pg_namespace n on n.oid = c.relnamespace
                      where n.nspname = 'public' and c.relkind in ('r', 'v')
                        and (has_table_privilege('anon', c.oid, 'select') or has_table_privilege('anon', c.oid, 'insert')
                          or has_table_privilege('anon', c.oid, 'update') or has_table_privilege('anon', c.oid, 'delete'))`);
-  return r.length === 0 ? true : r;
+  const bad = r.filter((x) => x.relname !== 'decision_notes');
+  return bad.length === 0 ? true : bad;
 });
 await check('public · private 함수는 모두 search_path가 비어 있음', async () => {
   const r = await q(`select n.nspname || '.' || p.proname as fn, p.proconfig from pg_proc p join pg_namespace n on n.oid = p.pronamespace
@@ -713,6 +718,37 @@ await check('그룹 삭제: 그 그룹에서 나온 권한 행이 모두 지워�
   await su();
   const [after] = await q(`select count(*)::int as n from public.sharing_permissions where source_type = 'GROUP' and source_id = $1`, [G]);
   return before.n > 0 && del.length === 1 && after.n === 0 ? true : { before, del, after };
+});
+
+
+// ---------------------------------------------------------------------
+// 회의 기록 (결정 안건 페이지 /decisions) — 링크를 아는 사람은 로그인 없이 읽고 씀, 고친 기록은 따로 쌓임
+// ---------------------------------------------------------------------
+
+const upsertNote = (id, body, by) => q(
+  `insert into public.decision_notes (decision_id, body, updated_by) values ($1, $2, $3)
+   on conflict (decision_id) do update set body = excluded.body, updated_by = excluded.updated_by`, [id, body, by]);
+
+await check('회의 기록: anon이 안건 기록을 쓰고 고치고 읽음', async () => {
+  await as(null, 'anon');
+  await upsertNote('D35', '±1시간', '지형');
+  await upsertNote('D35', '±1시간 내외로', '수연');
+  await upsertNote('_meeting', '10/13 회의', '지형');
+  const r = await q(`select decision_id, body, updated_by from public.decision_notes order by 1`);
+  return r.length === 2 && r[0].decision_id === 'D35' && r[0].body === '±1시간 내외로' && r[0].updated_by === '수연' ? true : r;
+});
+await check('회의 기록: 고칠 때마다 기록이 쌓이고, anon은 그 기록을 못 읽음', async () => {
+  await as(null, 'anon');
+  const hidden = await expectErr(() => q(`select * from public.decision_note_log`), /permission denied/);
+  await su();
+  const r = await q(`select body from public.decision_note_log where decision_id = 'D35' order by id`);
+  return hidden === true && r.length === 2 && r[1].body === '±1시간 내외로' ? true : { hidden, r };
+});
+await check('회의 기록: 안건 번호가 아니면 못 씀 · anon은 지우지 못함', async () => {
+  await as(null, 'anon');
+  const badId = await expectErr(() => upsertNote('profiles', 'x', 'x'), /check constraint/);
+  const del = await expectErr(() => q(`delete from public.decision_notes where decision_id = 'D35'`), /permission denied/);
+  return badId === true && del === true ? true : { badId, del };
 });
 
 report();
