@@ -417,6 +417,11 @@ textarea{width:100%; border:1px solid var(--a-line); border-radius:14px; padding
   .fab{display:block; position:fixed; left:50%; transform:translateX(-50%); top:calc(env(safe-area-inset-top,0px) + 10px); z-index:90; height:30px; padding:0 14px; border-radius:15px; border:0; background:var(--deck); color:#fff; font-size:12.5px; font-weight:600; box-shadow:0 6px 16px -8px rgba(0,0,0,.45); cursor:pointer}
 }
 @media (prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important; transition:none!important}}
+
+/* 결정안건.html에 끼울 때(#v=…): 데모 패널 숨김 · 가리키는 곳 노란 테두리 */
+.embed .panel,.embed .fab{display:none!important}
+.hl-mark{outline:3px solid #f5a524!important; outline-offset:3px; border-radius:12px; animation:hlPulse 1.4s ease-in-out 3}
+@keyframes hlPulse{50%{outline-color:rgba(245,165,36,.25)}}
 </style>
 </head>
 <body>
@@ -1212,7 +1217,82 @@ function fit(){
   wrap.style.width=414*s+'px';wrap.style.height=868*s+'px';dev.style.transform='scale('+s+')';pan.style.maxHeight=Math.max(420,868*s)+'px';
 }
 addEventListener('resize',fit);
-render();fit();
+/* ---------- 결정안건.html에 끼우기: 목업.html#v=화면&hl=가리킬 글자 ---------- */
+// hl: 글자 = 그 글자를 담은 가장 안쪽 요소 · 글자^선택자 = 그 요소를 감싼 상자(선택자 없으면 .card) · @선택자 · 여러 개는 |
+// &full 을 붙이면 데모 패널도 보임 (크게 보기)
+function nightRoutine(){return {title:'회의 전날 준비',goal:'여유로운 아침',days:['수'],active:true,steps:[{t:1290,name:'회의 자료 확인',dur:5,alarm:true},{t:1295,name:'노트북 충전',dur:2,alarm:false},{t:1297,name:'가방에 준비물 넣기',dur:3,alarm:false}]};}
+function fillChat(){
+  const ch=S.chat;ch.msgs=[];
+  SCRIPT.forEach((l,i)=>{if(l.who==='card'){ch.card={status:'pending'};ch.msgs.push({who:'card',t:S.now});}else ch.msgs.push({who:l.who,text:l.text,t:S.now-4+i});});
+  ch.step=SCRIPT.length;
+  S.todos.push({id:'t4',title:'노트북 충전기',day:23,done:false});logE(S.now,'준비물 저장 · 노트북 충전기','AI 대화');
+}
+function morning(){
+  logE(480,'기상 알람 울림','자동');logE(490,'기상 확인','자동 판정');logE(543,'집 출발','자동 · 지오펜스');logE(590,'도착 · 지각 아님','자동 · 지오펜스');
+  S.me={wakeAt:490,departAt:543,arriveAt:590};S.wake={phase:'confirmed',at:480,usage:2.4,recent:1.2,how:'자동 판정'};
+}
+const toWake=()=>[{s:'home'},{s:'wake'}];
+const VIEWS={
+  H01:()=>{},
+  H01e:()=>{S.now=-180;},
+  H01r:()=>{S.now=-180;S.rNight=nightRoutine();},
+  H02:()=>{S.stack=[{s:'home'},{s:'alarms'}];},
+  H03:()=>{S.stack=[{s:'home'},{s:'detail',id:'a1'}];},
+  H03c:()=>{VIEWS.H03();render();S.dDraft.buffer=20;A.detailSave();},
+  H05c:()=>{S.stack=[{s:'home'},{s:'newAppt'}];render();A.naCalc();},
+  H07:()=>{S.now=480;S.ring={aid:'a1',type:'WAKE',snoozed:0};},
+  H07re:()=>{S.now=495;S.ring={aid:'a1',type:'WAKE',re:true};},
+  H08o:()=>{S.now=484;S.wake={phase:'observing',at:480,usage:0.8,recent:0.4,how:null};S.stack=toWake();},
+  H08p:()=>{S.now=490;S.wake={phase:'prompt',at:480,usage:0.6,recent:0,how:null};S.stack=toWake();},
+  H08c:()=>{S.now=490;S.wake={phase:'confirmed',at:480,usage:2.4,recent:1.2,how:'자동 판정'};S.me.wakeAt=490;S.stack=toWake();},
+  G01g:()=>{S.seg.group='group';S.stack=[{s:'group'}];},
+  G02:()=>{S.seg.group='group';S.stack=[{s:'group'},{s:'groupDetail',id:'cap'}];},
+  G03:()=>{S.stack=[{s:'group'},{s:'groupDetail',id:'cap'},{s:'memberWake',pid:'sy'}];},
+  G04:()=>{S.stack=[{s:'group'},{s:'groupDetail',id:'cap'},{s:'sharedAlarm',pid:'sy'}];},
+  G04log:()=>{VIEWS.G04();A.shShift({id:'s1',pid:'sy',d:'-5'});A.shLog();},
+  F02:()=>{S.stack=[{s:'group'},{s:'friendPerm',pid:'sy'}];},
+  F03:()=>{S.permRel='cap';S.stack=[{s:'group'},{s:'permSet'}];},
+  A02:()=>{S.now=1350;S.stack=[{s:'ai'}];},
+  A02c:()=>{S.now=1350;S.stack=[{s:'ai'}];fillChat();},
+  A03:()=>{morning();S.now=1355;S.stack=[{s:'ai'}];fillChat();A.chatSave();A.chatDone();},
+  A04:()=>{S.now=1355;S.rDraft=nightRoutine();S.stack=[{s:'home'},{s:'routine'}];},
+  R02w:()=>{S.seg.rec='week';S.stack=[{s:'rec'}];},
+  R02m:()=>{S.seg.rec='month';S.stack=[{s:'rec'}];},
+  S01:()=>{S.now=1355;S.stack=[{s:'home'},{s:'suggestion'}];},
+  S01a:()=>{VIEWS.S01();A.sugApply({v:10});},
+  S01d:()=>{VIEWS.S01();S.sug.status='dismissed';}
+};
+function mark(hl){
+  let first=null;
+  hl.split('|').filter(Boolean).forEach(x=>{
+    let el=null;
+    if(x.charAt(0)==='@')el=$('#screen').querySelector(x.slice(1));
+    else{
+      const i=x.indexOf('^'), txt=i<0?x:x.slice(0,i), up=i<0?null:(x.slice(i+1)||'.card');
+      for(const r of ['#modal','#overlay','#view','#tabs']){
+        const all=[...$(r).querySelectorAll('*')].filter(e=>e.textContent.indexOf(txt)>=0);
+        el=all.find(e=>!all.some(o=>o!==e&&e.contains(o)));
+        if(el)break;
+      }
+      if(el&&up)el=el.closest(up)||el;
+    }
+    if(el){el.classList.add('hl-mark');first=first||el;}
+  });
+  const v=$('#view');
+  if(first&&v.contains(first)){const r=first.getBoundingClientRect(),vr=v.getBoundingClientRect();v.scrollTop+=r.top-vr.top-Math.max(16,(vr.height-r.height)/3);}
+}
+function fromHash(){
+  const q=new URLSearchParams(location.hash.slice(1)), v=q.get('v');
+  if(!v||!VIEWS[v])return false;
+  document.documentElement.classList.toggle('embed',!q.has('full'));
+  S=initState();closePanel();
+  VIEWS[v]();render();
+  clearTimeout(tT);$('#toast').classList.remove('show');
+  mark(q.get('hl')||'');
+  return true;
+}
+addEventListener('hashchange',fromHash);
+if(!fromHash())render();fit();
 })();
 
 </script>

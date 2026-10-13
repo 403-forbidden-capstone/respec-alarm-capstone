@@ -1,6 +1,6 @@
-// docs/decisions.md(결정 안건)를 읽어 개발 보드의 DECISIONS 자리에 JSON으로 넣습니다.
-//   node scripts/board-decisions.mjs        → public/board.html (커밋용 · 로컬 npm run web)
-//   node scripts/board-decisions.mjs dist   → dist/board.html (웹 빌드 끝에 — 배포된 /board가 늘 문서와 같게)
+// docs/decisions.md(결정 안건)를 읽어 개발 보드의 DECISIONS 자리와 결정 안건 페이지(/decisions)의 DATA 자리에 JSON으로 넣습니다.
+//   node scripts/board-decisions.mjs        → public/board.html · public/decisions/index.html (커밋용 · 로컬 npm run web)
+//   node scripts/board-decisions.mjs dist   → dist/ 같은 두 파일 (웹 빌드 끝에 — 배포된 /board · /decisions가 늘 문서와 같게)
 // 문서 모양은 docs/decisions.md 맨 아래 "쓰는 법". 모르는 줄은 건너뜀.
 // dist는 실패해도 종료 코드 0 — 빌드는 막지 않음 (그때는 커밋된 DECISIONS가 그대로 나감)
 
@@ -12,6 +12,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 const docPath = resolve(here, '..', '..', 'docs', 'decisions.md');
 const toDist = process.argv[2] === 'dist';
 const htmlPath = resolve(here, '..', toDist ? 'dist' : 'public', 'board.html');
+const pagePath = resolve(here, '..', toDist ? 'dist' : 'public', 'decisions', 'index.html');
 const SECTIONS = ['정할 것', '보류', '정한 것'];
 
 export function parseDecisions(md) {
@@ -79,6 +80,21 @@ function main() {
   if (next !== html) writeFileSync(htmlPath, next);
   const n = (s) => list.filter((d) => d.status === s).length;
   console.log(`board-decisions: ${toDist ? 'dist' : 'public'}/board.html ← 정할 것 ${n('정할 것')} · 보류 ${n('보류')} · 정한 것 ${n('정한 것')}${next === html ? ' (그대로)' : ''}`);
+  writePage(json);
+}
+
+// 결정 안건 페이지(/decisions) — 안건이 바뀔 때만 DATA와 날짜(BUILT)를 고침 (내용이 같으면 파일 그대로)
+function writePage(json) {
+  if (!existsSync(pagePath)) { console.warn('board-decisions: decisions/index.html 없음 — 건너뜀'); return; }
+  const html = readFileSync(pagePath, 'utf8');
+  const re = /^const DATA = .*;$/m;
+  if (!re.test(html)) throw new Error('decisions/index.html에 "const DATA = …;" 줄이 없음');
+  const line = `const DATA = /*DATA*/${json};`;
+  if (html.match(re)[0] === line) { console.log(`board-decisions: ${toDist ? 'dist' : 'public'}/decisions/index.html (그대로)`); return; }
+  const built = new Date().toLocaleDateString('ko-KR', { timeZone: 'Asia/Seoul', month: 'long', day: 'numeric' });
+  const next = html.replace(re, () => line).replace(/^const BUILT = .*;$/m, () => `const BUILT = /*BUILT*/${JSON.stringify(built)};`);
+  writeFileSync(pagePath, next);
+  console.log(`board-decisions: ${toDist ? 'dist' : 'public'}/decisions/index.html ← ${built}`);
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

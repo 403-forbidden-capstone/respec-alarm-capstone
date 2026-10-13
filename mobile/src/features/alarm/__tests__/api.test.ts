@@ -111,8 +111,8 @@ describe('H07 · H08 기상 알람 → 해제 → 확인 알림 → 다시 울�
     await dismissRing(WAKE, kst(22, 495));
     await snoozeRing(WAKE, 5, kst(22, 495)); // 확정 뒤에 미뤄도 기록이 붙지 않음
     expect(db.wake.phase).toBe('confirmed');
-    expect(me()).toBe('기상 완료 · 오전 8:10');
-    expect(labels()).toEqual(['오전 8:00 기상 알람 해제', '오전 8:10 기상 확인']);
+    expect(me()).toBe('기상 완료 · 오전 8:01');
+    expect(labels()).toEqual(['오전 8:00 기상 알람 해제', '오전 8:01 기상 확인']);
   });
 
   it('준비 · 출발 알람은 해제만 기록하고 기상 판정은 그대로', async () => {
@@ -158,7 +158,41 @@ describe('H08 기상 확인 화면 데이터', () => {
     await dismissRing(WAKE, kst(22, 480));
     await confirmWake(WAKE, 'auto', kst(22, 490));
     const check = await getWakeCheck(WAKE);
-    expect([check!.usage, check!.recent, formatTime(check!.confirmed!.at)]).toEqual([3.2, 1.4, '오전 8:10']);
+    expect([check!.usage, check!.recent, formatTime(check!.confirmed!.at)]).toEqual([3.2, 1.4, '오전 8:01']);
+  });
+
+  it('자동 판정 기록 시각 = 누적 사용이 θ(1분)를 넘은 해제 1.5분 뒤 — 확정 · 내 상태 · 기록 모두 같은 시각 (D14)', async () => {
+    await dismissRing(WAKE, kst(22, 480));
+    await confirmWake(WAKE, 'auto', kst(22, 490)); // 판정은 관찰이 끝난 8:10
+    const wokeAt = kst(22, 481.5);
+    expect((await getWakeCheck(WAKE))!.confirmed!.at).toEqual(wokeAt);
+    expect(db.me.wakeAt).toEqual(wokeAt);
+    expect(db.events.find((e) => e.label === '기상 확인')!.at).toEqual(wokeAt);
+    expect(me()).toBe('기상 완료 · 오전 8:01');
+  });
+
+  it('직접 응답은 응답한 시각 그대로', async () => {
+    await dismissRing(WAKE, kst(22, 480));
+    await promptWake(WAKE, kst(22, 490));
+    await confirmWake(WAKE, 'self', kst(22, 491));
+    expect(db.me.wakeAt).toEqual(kst(22, 491));
+    expect(formatTime((await getWakeCheck(WAKE))!.confirmed!.at)).toBe('오전 8:11');
+  });
+
+  it('자동 판정이어도 해제 시각을 모르거나 θ를 못 넘으면 넘겨받은 시각', async () => {
+    await confirmWake(WAKE, 'auto', kst(22, 490)); // 해제 기록 없음
+    expect(db.me.wakeAt).toEqual(kst(22, 490));
+
+    delete db.wakeConfirmations[WAKE];
+    const theta = db.wakeThetaMinutes;
+    db.wakeThetaMinutes = 4; // 시연 누적 사용 3.2분보다 큼
+    try {
+      await dismissRing(WAKE, kst(22, 480));
+      await confirmWake(WAKE, 'auto', kst(22, 490));
+      expect(db.me.wakeAt).toEqual(kst(22, 490));
+    } finally {
+      db.wakeThetaMinutes = theta;
+    }
   });
 
   it('이미 확정한 알람은 다시 확정해도 처음 판정 그대로', async () => {
@@ -166,8 +200,8 @@ describe('H08 기상 확인 화면 데이터', () => {
     await confirmWake(WAKE, 'auto', kst(22, 490));
     await confirmWake(WAKE, 'self', kst(22, 500));
     const check = await getWakeCheck(WAKE);
-    expect([check!.confirmed!.how, formatTime(check!.confirmed!.at)]).toEqual(['auto', '오전 8:10']);
-    expect(labels()).toEqual(['오전 8:00 기상 알람 해제', '오전 8:10 기상 확인']);
+    expect([check!.confirmed!.how, formatTime(check!.confirmed!.at)]).toEqual(['auto', '오전 8:01']);
+    expect(labels()).toEqual(['오전 8:00 기상 알람 해제', '오전 8:01 기상 확인']);
   });
 
   it('확정한 판정의 사용 시간은 다른 기상 알람이 울려도 그대로', async () => {

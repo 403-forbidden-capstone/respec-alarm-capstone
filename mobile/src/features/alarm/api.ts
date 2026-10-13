@@ -27,6 +27,7 @@ import {
   type ScheduleItem,
   type WakeCheck,
 } from './types';
+import { thetaReachedAt, usageSummary, type UseSpan } from './wake';
 
 function toAppointment(a: MockAppointment): Appointment {
   return {
@@ -322,8 +323,15 @@ export async function getRing(alarmId: string, again = false): Promise<RingInfo 
 
 // 해제 뒤 화면 사용 시간 (분) — 실데이터는 #35 · #40
 // 지금은 시연 값: 폰을 보며 일어남 · 알람만 끄고 다시 잠듦 (목업 simUse · simSleep)
+// 폰을 보며 일어남 = 해제 뒤 화면을 켠 구간 → 누적 3.2분 · 뒤쪽 5분 1.4분. θ = 1분이면 해제 1.5분 뒤 확정 시각
+const USED_SPANS: UseSpan[] = [
+  [0.5, 1.5],
+  [2.5, 3.3],
+  [6, 7],
+  [8.6, 9],
+];
 const NO_USE = { usage: 0, recent: 0 };
-const USED = { usage: 3.2, recent: 1.4 };
+const USED = usageSummary(USED_SPANS);
 const SLEPT = { usage: 0.4, recent: 0 };
 
 // 울리기 시작 (H07) — 기상 알람이면 내 상태가 '알람 울리는 중'. 실데이터는 알람 코어(#33) · alarm_events TRIGGERED
@@ -404,12 +412,17 @@ export async function missWake(alarmId: string, at: Date) {
 }
 
 // how: self = 확인 알림에 직접 응답(사용 시간은 확인 알림 때 그대로), auto = 화면 사용으로 자동 판정(시연: 폰을 보며 일어남)
+// at = 판정한 시각 (자동은 관찰이 끝난 시각, 직접 응답은 응답 시각)
+// 기록 시각 (D14): 직접 응답은 at 그대로, 자동은 누적 사용이 θ를 넘은 시각 — 해제 시각을 모르거나 못 넘었으면 at
 // 실데이터는 alarm_events WAKE_CONFIRMED
 export async function confirmWake(alarmId: string, how: 'self' | 'auto', at: Date) {
   if (db.wakeConfirmations[alarmId]) return; // 이미 확정한 알람은 처음 판정 그대로
+  const dismissedAt = db.wake.alarmId === alarmId ? db.wake.dismissedAt : null;
+  const reached = how === 'auto' && dismissedAt ? thetaReachedAt(dismissedAt, USED_SPANS, db.wakeThetaMinutes) : null;
+  const wokeAt = reached ?? at;
   if (db.wake.alarmId === alarmId) db.wake = { ...db.wake, phase: 'confirmed', ...(how === 'auto' ? USED : {}) };
   const use = db.wake.alarmId === alarmId ? { usage: db.wake.usage, recent: db.wake.recent } : how === 'auto' ? USED : NO_USE;
-  db.wakeConfirmations[alarmId] = { at, how, ...use };
-  db.me.wakeAt = at;
-  db.events.push({ at, label: '기상 확인', source: how === 'self' ? '직접 응답' : '자동 판정' });
+  db.wakeConfirmations[alarmId] = { at: wokeAt, how, ...use };
+  db.me.wakeAt = wokeAt;
+  db.events.push({ at: wokeAt, label: '기상 확인', source: how === 'self' ? '직접 응답' : '자동 판정' });
 }

@@ -109,27 +109,32 @@ const TODAY = `(now() at time zone 'Asia/Seoul')::date`;
 // 3. 구조
 // ---------------------------------------------------------------------
 
-await check('모든 public 테이블(16개)에 RLS가 켜져 있음', async () => {
+// 회의 의견 테이블(결정 안건 페이지 /decisions)은 앱 데이터가 아니라 anon 규칙의 예외 — 아래 "회의 의견"에서 따로 확인
+const MEETING = ['decision_comments'];
+
+await check('모든 public 테이블(앱 16개 + 회의 의견 1개)에 RLS가 켜져 있음', async () => {
   const r = await q(`select c.relname, c.relrowsecurity from pg_class c join pg_namespace n on n.oid = c.relnamespace
                      where n.nspname = 'public' and c.relkind = 'r' order by 1`);
   const off = r.filter((x) => !x.relrowsecurity).map((x) => x.relname);
-  return r.length === 16 && off.length === 0 ? true : { count: r.length, off };
+  const app = r.filter((x) => !MEETING.includes(x.relname)).length;
+  return app === 16 && r.length === 17 && off.length === 0 ? true : { count: r.length, app, off };
 });
-await check('모든 테이블에 정책이 있고 anon용 정책은 없음', async () => {
+await check('모든 앱 테이블에 정책이 있고 anon용 정책은 없음', async () => {
   const r = await q(`select c.relname, count(p.polname) as n,
                        bool_or(p.polroles @> array['anon'::regrole::oid]) as has_anon
                      from pg_class c join pg_namespace n on n.oid = c.relnamespace
                      left join pg_policy p on p.polrelid = c.oid
                      where n.nspname = 'public' and c.relkind = 'r' group by 1`);
-  const bad = r.filter((x) => Number(x.n) === 0 || x.has_anon);
+  const bad = r.filter((x) => !MEETING.includes(x.relname) && (Number(x.n) === 0 || x.has_anon));
   return bad.length === 0 ? true : bad;
 });
-await check('anon은 public 테이블 · 뷰 권한이 없음', async () => {
+await check('anon은 앱 테이블 · 뷰 권한이 없음', async () => {
   const r = await q(`select c.relname from pg_class c join pg_namespace n on n.oid = c.relnamespace
                      where n.nspname = 'public' and c.relkind in ('r', 'v')
                        and (has_table_privilege('anon', c.oid, 'select') or has_table_privilege('anon', c.oid, 'insert')
                          or has_table_privilege('anon', c.oid, 'update') or has_table_privilege('anon', c.oid, 'delete'))`);
-  return r.length === 0 ? true : r;
+  const bad = r.filter((x) => !MEETING.includes(x.relname));
+  return bad.length === 0 ? true : bad;
 });
 await check('public · private 함수는 모두 search_path가 비어 있음', async () => {
   const r = await q(`select n.nspname || '.' || p.proname as fn, p.proconfig from pg_proc p join pg_namespace n on n.oid = p.pronamespace
@@ -713,6 +718,37 @@ await check('그룹 삭제: 그 그룹에서 나온 권한 행이 모두 지워�
   await su();
   const [after] = await q(`select count(*)::int as n from public.sharing_permissions where source_type = 'GROUP' and source_id = $1`, [G]);
   return before.n > 0 && del.length === 1 && after.n === 0 ? true : { before, del, after };
+});
+
+
+// ---------------------------------------------------------------------
+// 회의 의견 (결정 안건 페이지 /decisions) — 링크를 아는 사람은 로그인 없이 읽고 남김, 고치기 · 지우기 X
+// ---------------------------------------------------------------------
+
+const addComment = (id, author, body) => q(
+  `insert into public.decision_comments (decision_id, author, body) values ($1, $2, $3) returning id, created_at`, [id, author, body]);
+
+await check('회의 의견: anon이 안건마다 의견을 남기고 모두 읽음 (번호 · 시각은 서버)', async () => {
+  await as(null, 'anon');
+  await addComment('D35', '지형', '±1시간 내외');
+  await addComment('D35', '수연', '30분이면 충분할 듯');
+  await addComment('_meeting', '지형', '10/13 회의');
+  const r = await q(`select decision_id, author, body, created_at is not null as t from public.decision_comments order by id`);
+  return r.length === 3 && r[1].author === '수연' && r.every((x) => x.t) ? true : r;
+});
+await check('회의 의견: anon은 시각 · 번호를 직접 못 넣고, 고치거나 지우지 못함', async () => {
+  await as(null, 'anon');
+  const at = await expectErr(() => q(`insert into public.decision_comments (decision_id, author, body, created_at) values ('D1', 'x', 'y', now() - interval '1 day')`), /permission denied/);
+  const upd = await expectErr(() => q(`update public.decision_comments set body = '바꿈'`), /permission denied/);
+  const del = await expectErr(() => q(`delete from public.decision_comments`), /permission denied/);
+  return at === true && upd === true && del === true ? true : { at, upd, del };
+});
+await check('회의 의견: 안건 번호가 아니거나 이름 · 내용이 비면 못 남김', async () => {
+  await as(null, 'anon');
+  const badId = await expectErr(() => addComment('profiles', '지형', 'x'), /check constraint/);
+  const noName = await expectErr(() => addComment('D1', '  ', 'x'), /check constraint/);
+  const noBody = await expectErr(() => addComment('D1', '지형', ' '), /check constraint/);
+  return badId === true && noName === true && noBody === true ? true : { badId, noName, noBody };
 });
 
 report();
