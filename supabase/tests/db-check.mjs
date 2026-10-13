@@ -109,15 +109,15 @@ const TODAY = `(now() at time zone 'Asia/Seoul')::date`;
 // 3. 구조
 // ---------------------------------------------------------------------
 
-// 회의 의견 테이블(결정 안건 페이지 /decisions)은 앱 데이터가 아니라 anon 규칙의 예외 — 아래 "회의 의견"에서 따로 확인
-const MEETING = ['decision_comments'];
+// 회의 도구 테이블(결정 안건 페이지 /decisions — 의견 · 투표 · 상태)은 앱 데이터가 아니라 anon 규칙의 예외 — 아래 "회의 의견"에서 따로 확인
+const MEETING = ['decision_comments', 'decision_votes', 'decision_states'];
 
-await check('모든 public 테이블(앱 16개 + 회의 의견 1개)에 RLS가 켜져 있음', async () => {
+await check('모든 public 테이블(앱 16개 + 회의 도구 3개)에 RLS가 켜져 있음', async () => {
   const r = await q(`select c.relname, c.relrowsecurity from pg_class c join pg_namespace n on n.oid = c.relnamespace
                      where n.nspname = 'public' and c.relkind = 'r' order by 1`);
   const off = r.filter((x) => !x.relrowsecurity).map((x) => x.relname);
   const app = r.filter((x) => !MEETING.includes(x.relname)).length;
-  return app === 16 && r.length === 17 && off.length === 0 ? true : { count: r.length, app, off };
+  return app === 16 && r.length === 19 && off.length === 0 ? true : { count: r.length, app, off };
 });
 await check('모든 앱 테이블에 정책이 있고 anon용 정책은 없음', async () => {
   const r = await q(`select c.relname, count(p.polname) as n,
@@ -749,6 +749,73 @@ await check('회의 의견: 안건 번호가 아니거나 이름 · 내용이 �
   const noName = await expectErr(() => addComment('D1', '  ', 'x'), /check constraint/);
   const noBody = await expectErr(() => addComment('D1', '지형', ' '), /check constraint/);
   return badId === true && noName === true && noBody === true ? true : { badId, noName, noBody };
+});
+
+// 투표 · 정한 것 상태
+const vote = (id, voter, key, block = 0) => q(
+  `insert into public.decision_votes (decision_id, block, voter, option_key) values ($1, $2, $3, $4)
+   on conflict (decision_id, block, voter) do update set option_key = excluded.option_key`, [id, block, voter, key]);
+const stateOf = async (id) => (await q(`select status, choice, via, decided_by, result, decided_at is not null as decided, code_status, code_ref from public.decision_states where decision_id = $1`, [id]))[0];
+const autoLines = async (id) => (await q(`select body from public.decision_comments where decision_id = $1 and author = '자동' order by id`, [id])).map((x) => x.body);
+
+await check('투표: 한 안이 3표가 되면 자동으로 정한 것 + 의견 목록에 [정한 것] 한 줄', async () => {
+  await as(null, 'anon');
+  await vote('D2', '지형', 'A');
+  await vote('D2', '수연', 'B');
+  await vote('D2', '준성', 'A');
+  const before = await stateOf('D2');
+  await vote('D2', '범준', 'A');
+  const after = await stateOf('D2');
+  const lines = await autoLines('D2');
+  return !before && after.status === '정한 것' && after.choice === 'A' && after.via === '투표' && after.decided
+    && ['지형', '준성', '범준'].every((v) => after.decided_by.includes(v)) && !after.decided_by.includes('수연')
+    && lines.length === 1 && lines[0] === `[정한 것] A안 · 투표 (${after.decided_by})`
+    ? true : { before, after, lines };
+});
+await check('투표: 이미 정한 뒤 표를 바꿔도 결과는 그대로, 다시 정할 것으로 돌리면 표가 비워짐', async () => {
+  await as(null, 'anon');
+  await vote('D2', '수연', 'A');
+  await vote('D2', '수연', 'B');
+  const kept = await stateOf('D2');
+  await q(`update public.decision_states set status = '정할 것', choice = null, updated_by = '지형' where decision_id = 'D2'`);
+  const reopened = await stateOf('D2');
+  const [{ n }] = await q(`select count(*)::int as n from public.decision_votes where decision_id = 'D2'`);
+  const lines = await autoLines('D2');
+  return kept.choice === 'A' && reopened.status === '정할 것' && !reopened.decided && n === 0 && lines[lines.length - 1] === '[다시 정할 것] 지형'
+    ? true : { kept, reopened, n, lines };
+});
+await check('투표: 질문이 여러 개인 안건(block 1 이상)은 3표여도 자동으로 안 정함', async () => {
+  await as(null, 'anon');
+  for (const v of ['지형', '수연', '준성']) await vote('D29', v, 'A', 1);
+  return !(await stateOf('D29')) ? true : await stateOf('D29');
+});
+await check('직접 정함: 고른 안 · 결과가 남고, 코드 반영 라벨을 바꾸면 [코드] 한 줄', async () => {
+  await as(null, 'anon');
+  await q(`insert into public.decision_states (decision_id, status, choice, result, via, decided_by, updated_by)
+           values ('D5', '정한 것', 'B', '분만 기록', '직접', '수연', '수연')`);
+  await q(`update public.decision_states set code_status = '반영됨', code_ref = 'PR #150', updated_by = '지형' where decision_id = 'D5'`);
+  const st = await stateOf('D5');
+  const lines = await autoLines('D5');
+  return st.decided && st.code_status === '반영됨' && lines[0] === '[정한 것] B안 · 수연 — 분만 기록' && lines[1] === '[코드] 반영됨 · PR #150 · 지형'
+    ? true : { st, lines };
+});
+await check('문서에서 정한 안건에 코드 라벨만 붙이면 [코드] 한 줄만 (상태 줄 없음) · upsert 됨', async () => {
+  await as(null, 'anon');
+  await q(`insert into public.decision_states (decision_id, status, via, code_status, code_ref, updated_by)
+           values ('D14', '정한 것', '문서', '반영됨', 'PR #137', '지형')
+           on conflict (decision_id) do update set code_status = excluded.code_status, code_ref = excluded.code_ref, updated_by = excluded.updated_by`);
+  await q(`insert into public.decision_states (decision_id, status, via, code_status, code_ref, updated_by)
+           values ('D14', '정한 것', '문서', '반영됨', 'PR #138', '지형')
+           on conflict (decision_id) do update set decision_id = excluded.decision_id, code_ref = excluded.code_ref, updated_by = excluded.updated_by`);
+  const lines = await autoLines('D14');
+  return lines.length === 2 && lines[0] === '[코드] 반영됨 · PR #137 · 지형' && lines[1] === '[코드] 반영됨 · PR #138 · 지형' ? true : lines;
+});
+await check('투표 · 상태: anon은 시각을 직접 못 넣고, 상태를 지우지 못함', async () => {
+  await as(null, 'anon');
+  const at = await expectErr(() => q(`insert into public.decision_states (decision_id, status, decided_at) values ('D6', '정한 것', now())`), /permission denied/);
+  const del = await expectErr(() => q(`delete from public.decision_states where decision_id = 'D5'`), /permission denied/);
+  const badKey = await expectErr(() => vote('D6', '지형', 'AB'), /check constraint/);
+  return at === true && del === true && badKey === true ? true : { at, del, badKey };
 });
 
 report();
