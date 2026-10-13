@@ -442,7 +442,7 @@ let toastTimer;
 function toast(msg) { const t = document.getElementById('toast'); t.textContent = msg; t.classList.add('on'); clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove('on'), 2400); }
 
 document.getElementById('stats').innerHTML = ORDER.map((s) => `<div class="stat"><b>${DATA.filter((d) => d.status === s).length}</b><span>${s}</span></div>`).join('');
-document.getElementById('foot').innerHTML = `<span>원본 <a href="${REPO}/blob/main/docs/decisions.md" target="_blank" rel="noopener">docs/decisions.md</a> · ${esc(BUILT)} 내용</span><span>기록은 이 브라우저에만 저장돼요. 브라우저 기록을 지우기 전에 내보내 두세요.</span>`;
+document.getElementById('foot').innerHTML = `<span>원본 <a href="${REPO}/blob/main/docs/decisions.md" target="_blank" rel="noopener">docs/decisions.md</a> · ${esc(BUILT)} 내용 · <a href="${PATHS.web}/board" target="_blank" rel="noopener">개발 보드 /board</a></span><span>기록은 이 브라우저에만 저장돼요. 브라우저 기록을 지우기 전에 내보내 두세요.</span>`;
 document.querySelectorAll('.tabs button').forEach((b) => b.addEventListener('click', () => {
   filter = b.dataset.f;
   document.querySelectorAll('.tabs button').forEach((x) => x.setAttribute('aria-pressed', String(x === b)));
