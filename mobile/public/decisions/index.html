@@ -53,6 +53,25 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, summary:focus
 
 .meeting { margin-top: 16px; background: var(--paper); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; display: flex; flex-direction: column; gap: 6px; }
 .meeting label { font-size: 12px; color: var(--muted); font-weight: 600; letter-spacing: .04em; }
+.bar .nm { font-size: 12px; color: var(--muted); display: flex; gap: 6px; align-items: center; white-space: nowrap; }
+.bar .nm input { font: inherit; font-size: 13px; padding: 6px 9px; border: 1px solid var(--line); border-radius: 9px; background: var(--paper); color: var(--ink); width: 120px; }
+.cmt { display: flex; flex-direction: column; gap: 8px; border-top: 1px dashed var(--line); padding-top: 12px; }
+.meeting .cmt { border-top: 0; padding-top: 0; }
+.cmt h3 { margin: 0; color: var(--accent); }
+.cnt { font-family: var(--mono); font-size: 11px; color: var(--muted); }
+.thread { display: flex; flex-direction: column; gap: 6px; }
+.c { background: var(--note); border: 1px solid var(--line); border-radius: 10px; padding: 8px 11px; }
+.c.new { animation: cnew 1.6s ease-out; }
+@keyframes cnew { from { background: var(--accent-soft); border-color: var(--accent); } }
+.ch { display: flex; gap: 8px; align-items: baseline; font-size: 12.5px; }
+.ch b { font-weight: 600; }
+.ch time { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.cb { white-space: pre-wrap; word-break: break-word; margin-top: 2px; font-size: 13.5px; }
+.cempty { color: var(--muted); font-size: 12.5px; margin: 0; }
+.compose { display: flex; gap: 8px; align-items: flex-end; }
+.compose textarea { min-height: 44px; flex: 1; }
+.compose .btn { flex: none; padding: 9px 16px; }
+.compose .btn:disabled { opacity: .6; cursor: default; }
 .who { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; }
 .who .sp { flex: 1; }
 .meeting .who .nm { display: flex; gap: 6px; align-items: center; font-weight: 400; letter-spacing: 0; }
@@ -60,7 +79,8 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, summary:focus
 .sync { font-size: 12px; color: var(--muted); display: inline-flex; align-items: center; gap: 6px; }
 .sync::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
 .sync.live::before { background: #16a34a; }
-.sync.local::before { background: var(--hold); }
+.sync.off::before { background: #dc2626; }
+.sync.wait::before { background: var(--hold); }
 .banner { background: var(--hold-soft); border-radius: 9px; padding: 8px 10px; font-size: 13px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .banner[hidden] { display: none; }
 .mstamp { font-size: 11.5px; color: var(--muted); text-align: right; min-height: 1em; }
@@ -148,7 +168,7 @@ footer { margin-top: 36px; color: var(--muted); font-size: 12px; display: flex; 
 <div class="wrap">
   <header>
     <h1>결정 안건</h1>
-    <p>줄을 누르면 지금 어긋난 곳 · 선택지가 펼쳐지고, 오른쪽에 그 안건의 화면이 떠요(노란 테두리 = 안건이 가리키는 곳). 안건마다 아래 "회의 기록" 칸에 적으면 바로 저장되고, 같은 링크를 연 사람 모두에게 실시간으로 보여요. 문서에 반영할 땐 "기록 내보내기".</p>
+    <p>줄을 누르면 지금 어긋난 곳 · 선택지가 펼쳐지고, 오른쪽에 그 안건의 화면이 떠요(노란 테두리 = 안건이 가리키는 곳). 안건마다 아래 "의견"에 이름과 함께 남기면, 같은 링크를 연 사람 모두에게 바로 보여요.</p>
     <div class="stats" id="stats"></div>
   </header>
 
@@ -158,23 +178,15 @@ footer { margin-top: 36px; color: var(--muted); font-size: 12px; display: flex; 
       <button type="button" data-f="정할 것" aria-pressed="false">정할 것</button>
       <button type="button" data-f="보류" aria-pressed="false">보류</button>
       <button type="button" data-f="정한 것" aria-pressed="false">정한 것</button>
-      <button type="button" data-f="noted" aria-pressed="false">기록 있음</button>
+      <button type="button" data-f="noted" aria-pressed="false">의견 있음</button>
     </div>
-    <input id="q" type="search" placeholder="찾기: 번호 · 화면 · 이슈 · 기록 (예: H03, #25)" aria-label="찾기">
+    <input id="q" type="search" placeholder="찾기: 번호 · 화면 · 이슈 · 의견 (예: H03, #25)" aria-label="찾기">
     <button type="button" class="btn" id="toggleAll">모두 펼치기</button>
-    <button type="button" class="btn primary" id="export">기록 내보내기</button>
-    <button type="button" class="btn" id="importBtn">불러오기</button>
-    <input type="file" id="importFile" accept=".md,.txt" hidden>
+    <label class="nm">내 이름 <input id="myName" maxlength="30" placeholder="의견에 남을 이름" autocomplete="nickname"></label>
+    <span class="sync" id="sync" role="status"></span>
   </div>
 
-  <div class="meeting">
-    <div class="who"><label for="note-_meeting">회의 공통 메모</label><span class="sp"></span>
-      <label class="nm">내 이름 <input id="myName" maxlength="30" placeholder="기록에 남을 이름" autocomplete="nickname"></label>
-      <span class="sync" id="sync" role="status"></span></div>
-    <div class="banner" id="upBanner" hidden></div>
-    <textarea id="note-_meeting" data-key="_meeting" maxlength="8000" placeholder="날짜 · 참석자 · 안건 순서 등"></textarea>
-    <span class="mstamp" data-stamp="_meeting"></span>
-  </div>
+  <div class="meeting" id="meetingCmt"></div>
 
   <main id="out"></main>
   <footer id="foot"></footer>
@@ -318,42 +330,62 @@ document.addEventListener('click', (e) => {
   if (b) showShot(b.closest('.shot'), +b.dataset.shot);
 });
 
-// ---- 기록 저장 — 공유(팀 Supabase decision_notes, 실시간) · 연결이 안 되면 이 브라우저(localStorage) ----
-// 공개용(publishable) 키라 페이지에 둬도 됨 — 할 수 있는 건 DB 정책이 정함: 안건 기록 읽기 · 쓰기만, 지우기 X, 고친 내용은 decision_note_log에 쌓임
+// ---- 의견 — 팀 Supabase decision_comments (링크를 아는 사람은 누구나 읽고 남김, 실시간) ----
+// 공개용(publishable) 키라 페이지에 둬도 됨 — 할 수 있는 건 DB 정책이 정함: 의견 읽기 · 남기기만, 고치기 · 지우기 X
 const SB_URL = 'https://gomrhctwjvttoqifxktt.supabase.co';
 const SB_KEY = 'sb_publishable_ivZAVthRG9rYu1szULwzKQ_DPXqOE1X';
 const NAME_KEY = 'respec-decision-name';
-let notes = {};      // 화면에 보이는 기록 { 안건 번호: { text, at, by } }
-let localNotes = {}; // 이 브라우저에만 적은 기록 (공유 전에 적은 것 · 연결이 안 될 때)
-try { localNotes = JSON.parse(localStorage.getItem(KEY) || '{}') || {}; } catch (e) { localNotes = {}; }
+const DRAFT_KEY = 'respec-decision-drafts';
+let comments = {}; // { 안건 번호: [{ id, decision_id, author, body, created_at }] } — 오래된 것부터
+let drafts = {};   // 아직 안 남긴 글 (이 브라우저에만)
+try { drafts = JSON.parse(localStorage.getItem(DRAFT_KEY) || '{}') || {}; } catch (e) { drafts = {}; }
 let myName = '';
 try { myName = localStorage.getItem(NAME_KEY) || ''; } catch (e) { myName = ''; }
 let sb = null;
-let shared = false;
-let nameHinted = false;
-const pending = {};  // 안건 번호 → 저장 대기 타이머 (적는 중이면 다른 사람 고침으로 덮지 않음)
-function persistLocal() { try { localStorage.setItem(KEY, JSON.stringify(localNotes)); } catch (e) { toast('브라우저 저장이 막혀 있어요. 기록 내보내기로 파일에 남겨 주세요.'); } }
-const noteText = (k) => (notes[k] && notes[k].text) || '';
-const stampOf = (k, state) => {
-  if (state) return state;
-  const n = notes[k];
-  if (!n || !n.at) return '';
-  return new Date(n.at).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: 'numeric', minute: '2-digit' }) + (n.by ? ' · ' + n.by : ' 저장');
-};
-function setStamp(k, state) { document.querySelectorAll(`[data-stamp="${k}"]`).forEach((s) => { s.textContent = stampOf(k, state); }); }
-function setPeek(k) {
-  const el = document.getElementById(k);
-  const d = DATA.find((x) => x.id === k);
-  if (!el || !d) return;
-  const sum = el.querySelector('summary');
-  const old = sum.querySelector('.peek');
-  if (old) old.remove();
-  sum.insertAdjacentHTML('beforeend', peekOf(d));
-}
+let online = false;
+const seen = new Set(); // 받은 의견 번호 — 내가 남긴 것이 실시간으로 한 번 더 와도 한 번만
+function saveDrafts() { try { localStorage.setItem(DRAFT_KEY, JSON.stringify(drafts)); } catch (e) { /* 보관 안 됨 */ } }
+const listOf = (k) => comments[k] || [];
+const when = (ts) => new Date(ts).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: 'numeric', minute: '2-digit' });
 function setSync(st) {
   const el = document.getElementById('sync');
   el.className = 'sync ' + st;
-  el.textContent = { live: '공유 저장 · 실시간', saved: '공유 저장 (새로 고침하면 최신)', wait: '연결 중…', local: '이 브라우저에만 저장 (공유 연결 안 됨)' }[st];
+  el.textContent = { live: '실시간 연결됨', wait: '연결 중…', off: '연결 안 됨 · 새로 고침' }[st];
+}
+function cHtml(c) {
+  return `<div class="c" data-cid="${c.id}"><div class="ch"><b>${esc(c.author)}</b><time datetime="${esc(c.created_at)}">${when(c.created_at)}</time></div><div class="cb">${esc(c.body)}</div></div>`;
+}
+function threadInner(k) {
+  const l = listOf(k);
+  return l.length ? l.map(cHtml).join('') : '<p class="cempty">아직 남긴 의견이 없어요.</p>';
+}
+function cmtHtml(k, title) {
+  return `<div class="cmt" data-cmt="${k}"><h3>${title} <span class="cnt" data-count="${k}">${listOf(k).length || ''}</span></h3>
+    <div class="thread" data-thread="${k}">${threadInner(k)}</div>
+    <div class="compose"><textarea data-draft="${k}" maxlength="4000" rows="2" placeholder="의견을 적고 남기기 (Ctrl+Enter)">${esc(drafts[k] || '')}</textarea>
+    <button type="button" class="btn primary" data-post="${k}">남기기</button></div></div>`;
+}
+function refreshThread(k) {
+  document.querySelectorAll(`[data-thread="${k}"]`).forEach((el) => { el.innerHTML = threadInner(k); });
+  document.querySelectorAll(`[data-count="${k}"]`).forEach((el) => { el.textContent = listOf(k).length || ''; });
+  const det = document.getElementById(k);
+  const d = DATA.find((x) => x.id === k);
+  if (det && d) {
+    const sum = det.querySelector('summary');
+    const old = sum.querySelector('.peek');
+    if (old) old.remove();
+    sum.insertAdjacentHTML('beforeend', peekOf(d));
+  }
+}
+function addComment(c, fresh) {
+  if (!c || seen.has(c.id)) return;
+  seen.add(c.id);
+  const l = (comments[c.decision_id] = comments[c.decision_id] || []);
+  l.push(c);
+  l.sort((a, b) => (a.created_at < b.created_at ? -1 : a.created_at > b.created_at ? 1 : a.id - b.id));
+  if (filter === 'noted' && c.decision_id !== '_meeting' && !document.getElementById(c.decision_id)) { render(); return; }
+  refreshThread(c.decision_id);
+  if (fresh) { const el = document.querySelector(`[data-thread="${c.decision_id}"] [data-cid="${c.id}"]`); if (el) el.classList.add('new'); }
 }
 
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -381,8 +413,8 @@ function partHtml(p) {
   return `<p class="par">${inl(p.v)}</p>`;
 }
 function peekOf(d) {
-  const n = noteText(d.id).trim();
-  if (n) return `<span class="peek"><b>기록</b>${esc(n.split('\n')[0])}</span>`;
+  const l = listOf(d.id);
+  if (l.length) { const c = l[l.length - 1]; return `<span class="peek"><b>의견 ${l.length}</b>${esc(c.author)}: ${esc(c.body.split('\n')[0])}</span>`; }
   if (d.meta['결과']) return `<span class="peek">결과: ${inl(d.meta['결과'])}</span>`;
   return '';
 }
@@ -391,15 +423,14 @@ function itemHtml(d) {
   const meta = metaKeys.map((k) => `<span>${esc(k)} <b>${inl(d.meta[k])}</b></span>`).join('');
   const isOp = (b) => /의견/.test(b.h);
   const cls = (b) => (isOp(b) ? ' class="opinion"' : b.h === '무슨 상황' ? ' class="situ"' : '');
-  const blocks = d.blocks.map((b) => `<section${cls(b)}>${b.h ? `<h3>${esc(b.h)}</h3>` : ''}${b.parts.map(partHtml).join('')}</section>`).join('');
-  const op = d.blocks.some(isOp) ? '<span class="op-chip">의견</span>' : '';
-  const n = notes[d.id];
+  const head = (b) => (isOp(b) ? '문서에 적은 의견' : b.h);
+  const blocks = d.blocks.map((b) => `<section${cls(b)}>${b.h ? `<h3>${esc(head(b))}</h3>` : ''}${b.parts.map(partHtml).join('')}</section>`).join('');
+  const op = d.blocks.some(isOp) ? '<span class="op-chip">문서 의견</span>' : '';
   const shot = SCREENS[d.id] ? shotHtml(d) : '';
   return `<details class="d st-${d.status.replace(/\s/g, '')}" id="${d.id}">
     <summary><span class="id">${d.id}</span><span class="ttl">${inl(d.title)}${op}</span><span class="due">${d.meta['기한'] ? inl(d.meta['기한']) : ''}</span>${peekOf(d)}</summary>
     <div class="body${shot ? ' has-shot' : ''}"><div class="txt">${d.meta['결과'] ? `<div class="result"><b>결과</b> ${inl(d.meta['결과'])}</div>` : ''}${meta ? `<div class="meta">${meta}</div>` : ''}${blocks}
-      <div class="notebox"><div class="hd"><h3 style="margin:0">회의 기록</h3><span data-stamp="${d.id}">${stampOf(d.id)}</span></div>
-      <textarea id="note-${d.id}" data-key="${d.id}" maxlength="8000" placeholder="이야기한 것 · 고른 안 · 남은 질문">${esc(noteText(d.id))}</textarea></div>
+      ${cmtHtml(d.id, '의견')}
     </div>${shot}</div>
   </details>`;
 }
@@ -411,8 +442,8 @@ function render() {
   let html = '';
   for (const s of ORDER) {
     const items = DATA.filter((d) => d.status === s
-      && (filter === 'all' || filter === s || (filter === 'noted' && noteText(d.id).trim()))
-      && (!q || (JSON.stringify(d) + noteText(d.id)).toLowerCase().includes(q)));
+      && (filter === 'all' || filter === s || (filter === 'noted' && listOf(d.id).length))
+      && (!q || (JSON.stringify(d) + listOf(d.id).map((c) => c.author + ' ' + c.body).join(' ')).toLowerCase().includes(q)));
     if (!items.length) continue;
     html += `<h2 class="sec">${esc(s)} · ${items.length}</h2><div class="list">${items.map(itemHtml).join('')}</div>`;
   }
@@ -422,159 +453,90 @@ function render() {
   out.querySelectorAll('textarea').forEach(fit);
   document.getElementById('toggleAll').textContent = '모두 펼치기';
 }
-function fit(t) { t.style.height = 'auto'; t.style.height = Math.max(84, t.scrollHeight + 2) + 'px'; }
+function fit(t) { t.style.height = 'auto'; t.style.height = Math.max(44, t.scrollHeight + 2) + 'px'; }
 
-// 기록 입력 → 0.6초 멈추면 공유 저장 (연결이 안 되면 이 브라우저에)
+// 이름 · 남길 글 (남길 글은 이 브라우저에 보관 — 새로 고침해도 그대로)
 document.addEventListener('input', (e) => {
   const t = e.target;
-  if (t.id === 'myName') { myName = t.value.trim(); try { localStorage.setItem(NAME_KEY, myName); } catch (err) { /* 이름은 이번만 */ } return; }
-  if (t.tagName !== 'TEXTAREA' || !t.dataset.key) return;
-  const k = t.dataset.key;
-  const v = t.value;
-  if (v.trim()) notes[k] = { text: v, at: Date.now(), by: myName }; else delete notes[k];
+  if (t.id === 'myName') { myName = t.value.trim(); try { localStorage.setItem(NAME_KEY, myName); } catch (err) { /* 이번만 */ } return; }
+  if (!t.dataset || !t.dataset.draft) return;
+  const k = t.dataset.draft;
+  drafts[k] = t.value;
+  saveDrafts();
   fit(t);
-  if (k !== '_meeting') setPeek(k);
-  if (!shared) { keepLocal(k, v); setStamp(k); return; }
-  if (!myName && !nameHinted) { nameHinted = true; toast('위 "내 이름"을 적으면 누가 적었는지 같이 남아요.'); }
-  setStamp(k, '저장 중…');
-  clearTimeout(pending[k]);
-  const timer = setTimeout(async () => {
-    const ok = await saveShared(k, v);
-    if (pending[k] === timer) { delete pending[k]; setStamp(k, ok ? '' : '저장 안 됨 · 이 브라우저에 보관'); }
-  }, 600);
-  pending[k] = timer;
 });
-function keepLocal(k, v) { if (v.trim()) localNotes[k] = { text: v, at: Date.now() }; else delete localNotes[k]; persistLocal(); }
-async function saveShared(k, v) {
-  try {
-    const { error } = await sb.from('decision_notes').upsert({ decision_id: k, body: v, updated_by: (myName || '이름 없음').slice(0, 30) });
-    if (error) throw error;
-    return true;
-  } catch (err) {
-    console.warn('공유 저장 실패', err);
-    keepLocal(k, v);
-    return false;
-  }
+document.addEventListener('keydown', (e) => {
+  const t = e.target;
+  if (t.dataset && t.dataset.draft && e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); post(t.dataset.draft); }
+});
+document.addEventListener('click', (e) => {
+  const b = e.target.closest && e.target.closest('[data-post]');
+  if (b) post(b.dataset.post);
+});
+async function post(k) {
+  const ta = document.querySelector(`textarea[data-draft="${k}"]`);
+  const btn = document.querySelector(`[data-post="${k}"]`);
+  const body = (drafts[k] || '').trim();
+  if (!body) { if (ta) ta.focus(); return; }
+  if (!myName) { document.getElementById('myName').focus(); toast('위 "내 이름"을 먼저 적어 주세요.'); return; }
+  if (!online) { toast('연결이 안 돼서 못 남겨요. 새로 고침해 주세요. (적은 글은 그대로 있어요)'); return; }
+  if (btn) { btn.disabled = true; btn.textContent = '남기는 중…'; }
+  const { data, error } = await sb.from('decision_comments').insert({ decision_id: k, author: myName.slice(0, 30), body }).select().single();
+  if (btn) { btn.disabled = false; btn.textContent = '남기기'; }
+  if (error) { console.warn('의견 못 남김', error); toast('못 남겼어요. 잠시 뒤 다시 눌러 주세요. (적은 글은 그대로 있어요)'); return; }
+  drafts[k] = '';
+  saveDrafts();
+  document.querySelectorAll(`textarea[data-draft="${k}"]`).forEach((x) => { x.value = ''; fit(x); });
+  addComment(data, true);
+  toast('남겼어요');
 }
-// 다른 사람이 고친 것 (실시간) — 내가 그 칸에 적는 중이면 내 저장이 나중에 덮음
-function applyRemote(r) {
-  if (!r || !r.decision_id || pending[r.decision_id]) return;
-  const k = r.decision_id;
-  const text = r.body || '';
-  if (text.trim()) notes[k] = { text, at: Date.parse(r.updated_at), by: r.updated_by }; else delete notes[k];
-  const t = document.querySelector(`textarea[data-key="${k}"]`);
-  if (t && t.value !== text) {
-    const pos = t.selectionStart;
-    t.value = text;
-    if (document.activeElement === t) t.setSelectionRange(Math.min(pos, text.length), Math.min(pos, text.length));
-    fit(t);
-  }
-  setStamp(k);
-  if (k !== '_meeting') setPeek(k);
+async function fetchAll() {
+  const { data, error } = await sb.from('decision_comments').select('id, decision_id, author, body, created_at').order('created_at').order('id');
+  if (error) throw error;
+  comments = {};
+  seen.clear();
+  for (const c of data) { seen.add(c.id); (comments[c.decision_id] = comments[c.decision_id] || []).push(c); }
+}
+function refreshAll() {
+  document.getElementById('meetingCmt').innerHTML = cmtHtml('_meeting', '회의 전체 의견');
+  render();
 }
 async function connect() {
   setSync('wait');
   try {
-    if (!window.supabase || SB_KEY.indexOf('__') === 0) throw new Error('supabase-js · 키 없음');
+    if (!window.supabase) throw new Error('supabase-js를 못 불러옴');
     sb = window.supabase.createClient(SB_URL, SB_KEY, { auth: { persistSession: false, autoRefreshToken: false } });
-    const { data, error } = await sb.from('decision_notes').select('decision_id, body, updated_by, updated_at');
-    if (error) throw error;
-    shared = true;
-    notes = {};
-    for (const r of data) if (r.body && r.body.trim()) notes[r.decision_id] = { text: r.body, at: Date.parse(r.updated_at), by: r.updated_by };
-    setSync('saved');
-    sb.channel('decision-notes')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'decision_notes' }, (p) => applyRemote(p.new))
-      .subscribe((st) => setSync(st === 'SUBSCRIBED' ? 'live' : 'saved'));
+    await fetchAll();
+    online = true;
+    refreshAll();
+    let first = true;
+    sb.channel('decision-comments')
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'decision_comments' }, (p) => addComment(p.new, true))
+      .subscribe(async (st) => {
+        if (st === 'SUBSCRIBED') {
+          setSync('live');
+          // 끊겼다 다시 붙으면 그사이 남긴 것 받기
+          if (!first) { try { await fetchAll(); refreshAll(); } catch (err) { /* 다음 연결 때 */ } }
+          first = false;
+        } else if (st === 'CHANNEL_ERROR' || st === 'TIMED_OUT' || st === 'CLOSED') setSync('wait');
+      });
   } catch (err) {
-    console.warn('공유 저장 연결 안 됨 — 이 브라우저에만 저장', err);
-    shared = false;
-    notes = { ...localNotes };
-    setSync('local');
+    console.warn('의견 연결 안 됨', err);
+    online = false;
+    setSync('off');
   }
-  meet.value = noteText('_meeting');
-  fit(meet);
-  setStamp('_meeting');
-  render();
-  if (shared) offerUpload();
 }
-// 공유 전에 이 브라우저에만 적어 둔 기록 → 올리기 (공유에 이미 그 안건 기록이 있으면 건너뜀)
-function offerUpload() {
-  const only = Object.entries(localNotes).filter(([k, n]) => n && n.text && n.text.trim() && !noteText(k).trim());
-  const box = document.getElementById('upBanner');
-  if (!only.length) { box.hidden = true; return; }
-  box.innerHTML = `이 브라우저에만 적어 둔 기록 ${only.length}개 (공유 전에 적은 것) <button type="button" class="btn" id="upGo">공유로 올리기</button><button type="button" class="btn" id="upNo">그냥 두기</button>`;
-  box.hidden = false;
-  document.getElementById('upGo').onclick = async () => {
-    let n = 0;
-    for (const [k, v] of only) {
-      if (await saveShared(k, v.text)) { notes[k] = { text: v.text, at: Date.now(), by: myName }; delete localNotes[k]; n++; }
-    }
-    persistLocal();
-    box.hidden = true;
-    meet.value = noteText('_meeting');
-    fit(meet);
-    render();
-    toast(`기록 ${n}개를 올렸어요.`);
-  };
-  document.getElementById('upNo').onclick = () => { box.hidden = true; };
-}
-
-// 내보내기: 기록 있는 안건만 .md로
-function today() { const d = new Date(); return `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`; }
-document.getElementById('export').addEventListener('click', () => {
-  const lines = [`# 결정 안건 회의 기록 (${new Date().toLocaleDateString('ko-KR')})`, ''];
-  if (noteText('_meeting').trim()) lines.push('## 회의 공통 메모', '', noteText('_meeting').trim(), '');
-  let n = 0;
-  for (const d of DATA) {
-    const t = noteText(d.id).trim();
-    if (!t) continue;
-    n++;
-    lines.push(`## ${d.id} ${d.title}`, '', t, '');
-  }
-  if (!n && !noteText('_meeting').trim()) { toast('아직 적은 기록이 없어요.'); return; }
-  const blob = new Blob([lines.join('\n')], { type: 'text/markdown;charset=utf-8' });
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = `결정안건_기록_${today()}.md`;
-  document.body.appendChild(a); a.click(); a.remove();
-  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
-  toast(`안건 ${n}개 기록을 내보냈어요.`);
-});
-
-// 불러오기: 내보낸 .md를 다시 읽음 (같은 번호는 덮어씀)
-document.getElementById('importBtn').addEventListener('click', () => document.getElementById('importFile').click());
-document.getElementById('importFile').addEventListener('change', async (e) => {
-  const f = e.target.files[0];
-  if (!f) return;
-  const text = await f.text();
-  let cur = null, buf = [], n = 0;
-  const got = [];
-  const flush = () => { if (cur) { const v = buf.join('\n').trim(); if (v) { got.push([cur, v]); n++; } } buf = []; };
-  for (const line of text.split(/\r?\n/)) {
-    const m = /^## (D\d+)\b/.exec(line);
-    if (m) { flush(); cur = m[1]; continue; }
-    if (/^## 회의 공통 메모/.test(line)) { flush(); cur = '_meeting'; continue; }
-    if (/^# /.test(line)) continue;
-    if (cur) buf.push(line);
-  }
-  flush();
-  for (const [k, v] of got) {
-    notes[k] = { text: v, at: Date.now(), by: myName };
-    if (!shared || !(await saveShared(k, v))) keepLocal(k, v);
-  }
-  document.getElementById('note-_meeting').value = noteText('_meeting');
-  fit(document.getElementById('note-_meeting'));
-  render();
-  e.target.value = '';
-  toast(n ? `기록 ${n}개를 불러왔어요.` : '불러올 기록을 찾지 못했어요. 이 페이지에서 내보낸 .md 파일인지 확인해 주세요.');
+// 화면으로 돌아오면 최신 의견 다시 받기 (폰 잠금 · 탭 전환 사이에 놓친 것)
+document.addEventListener('visibilitychange', async () => {
+  if (document.visibilityState !== 'visible' || !online) return;
+  try { await fetchAll(); refreshAll(); } catch (err) { /* 그대로 */ }
 });
 
 let toastTimer;
 function toast(msg) { const t = document.getElementById('toast'); t.textContent = msg; t.classList.add('on'); clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove('on'), 2400); }
 
 document.getElementById('stats').innerHTML = ORDER.map((s) => `<div class="stat"><b>${DATA.filter((d) => d.status === s).length}</b><span>${s}</span></div>`).join('');
-document.getElementById('foot').innerHTML = `<span>원본 <a href="${REPO}/blob/main/docs/decisions.md" target="_blank" rel="noopener">docs/decisions.md</a> · ${esc(BUILT)} 내용 · <a href="${PATHS.web}/board" target="_blank" rel="noopener">개발 보드 /board</a></span><span>기록은 같은 링크를 연 사람 모두에게 실시간으로 보여요. 고친 내용은 서버에 따로 쌓여서 지워져도 되살릴 수 있어요.</span>`;
+document.getElementById('foot').innerHTML = `<span>원본 <a href="${REPO}/blob/main/docs/decisions.md" target="_blank" rel="noopener">docs/decisions.md</a> · ${esc(BUILT)} 내용 · <a href="${PATHS.web}/board" target="_blank" rel="noopener">개발 보드 /board</a></span><span>의견은 같은 링크를 연 사람 모두에게 바로 보여요. 남긴 의견은 고치거나 지울 수 없어요.</span>`;
 document.querySelectorAll('.tabs button').forEach((b) => b.addEventListener('click', () => {
   filter = b.dataset.f;
   document.querySelectorAll('.tabs button').forEach((x) => x.setAttribute('aria-pressed', String(x === b)));
@@ -594,10 +556,9 @@ document.addEventListener('toggle', (e) => {
   loadShot(e.target);
 }, true);
 
-const meet = document.getElementById('note-_meeting');
 document.getElementById('myName').value = myName;
+document.getElementById('meetingCmt').innerHTML = cmtHtml('_meeting', '회의 전체 의견');
 render();
-fit(meet);
 connect();
 const h = location.hash.slice(1);
 if (/^D\d+$/.test(h)) { const el = document.getElementById(h); if (el) { el.open = true; el.scrollIntoView({ block: 'start' }); } }
