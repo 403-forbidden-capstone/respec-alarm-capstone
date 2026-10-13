@@ -474,8 +474,8 @@ const CHECKS = [
     issues: [23, 45], dec: [] },
   { id: 'C24', area: '기반 · 서버', name: '웹 배포 · 개발용 APK 빌드', screens: [], start: null,
     web: { st: 'ok', ev: '10/11 확인 — main 머지 시 자동 배포(현재 주소) · PR별 미리보기' }, phone: { st: 'no', ev: 'APK 빌드 0회 — Actions 아티팩트 또는 EAS 개발 빌드 (#20)' },
-    server: { st: 'na', ev: '기능이 아닌 배포 파이프라인 — DB 변경도 머지 시 자동 적용 (#82)' }, test: { st: 'ok', ev: 'CI: 린트 · 단위 테스트 15파일 · 안드로이드 빌드 검사 · DB 검사' },
-    how: ['PR 생성 시 검사 3개(앱 검사 · DB 검사 · 웹 미리보기) 실행, 머지 시 현재 주소가 새 버전으로 교체', 'APK: Actions → "안드로이드 빌드 검사" → Run workflow로 돌린 실행 요약의 아티팩트(3일 보관) 또는 개발 탭 명령'],
+    server: { st: 'na', ev: '기능이 아닌 배포 파이프라인 — DB 변경도 머지 시 자동 적용 (#82)' }, test: { st: 'ok', ev: '린트 · 단위 테스트 16파일(PR 전 로컬 · 앱 검사 손으로) · 안드로이드 빌드 검사(손으로) · DB 검사(자동)' },
+    how: ['PR 생성 시 자동: Claude 리뷰 · 웹 미리보기 · DB 검사(supabase/ 바뀔 때). 앱 · 안드로이드 · 보안 검사는 Actions → Run workflow로 손으로. 머지 시 현재 주소가 새 버전으로 교체', 'APK: Actions → "안드로이드 빌드 검사" → Run workflow로 돌린 실행 요약의 아티팩트(3일 보관) 또는 개발 탭 명령'],
     issues: [20], dec: [] },
 ];
 const KINDS = {

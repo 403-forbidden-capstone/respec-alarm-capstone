@@ -15,7 +15,7 @@ npm run web
 
 패키지는 `npx expo install <이름>`으로 추가합니다. SDK 57에 맞는 버전이 들어갑니다.
 
-PR 전에 `npm run typecheck` · `npm run lint` · `npm test`를 돌립니다. PR에서는 CI(앱 검사)가 같은 걸 돌립니다.
+PR 전에 `npm run typecheck` · `npm run lint` · `npm test`를 꼭 로컬에서 돌립니다. PR에서 앱 검사가 자동으로 돌지 않습니다(Actions 분량, #134). 같은 검사를 서버에서 돌리려면 Actions → 앱 검사 → Run workflow.
 
 ## 폴더
 
