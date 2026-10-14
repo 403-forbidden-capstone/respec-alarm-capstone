@@ -36,7 +36,7 @@ const TIMES = [
 const LINKS = [
   ['/board', '개발 보드'],
   ['/lab/', 'AI 실험실'],
-  ['/dev/ui', 'UI 견본'],
+  ['/dev/ui', 'UI 부품'],
 ] as const;
 
 // 이 앱이 localStorage에 쓰는 키 — 데이터 모드(respec.dataMode) · 로그인 세션(sb-). 기종 선택과 보드 · 결정 페이지 키는 남김
