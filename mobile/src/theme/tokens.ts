@@ -24,6 +24,7 @@ export const colors = {
   // 웹 데모 휴대폰 틀 (PC 브라우저에서만)
   stage: '#E6E9E4',
   device: '#1A1B1A',
+  camera: '#000000', // 카메라 구멍 · 노치
 
   // 로그인 버튼 (카카오 디자인 가이드 색)
   kakao: '#FEE500',
