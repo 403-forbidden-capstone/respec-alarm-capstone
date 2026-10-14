@@ -115,7 +115,8 @@ export function Stepper({ label, value, onChange, step = 5, min = 0, max = 600, 
               onBlur={commit}
               onSubmitEditing={commit}
               autoFocus
-              selectTextOnFocus
+              placeholder={String(value)}
+              placeholderTextColor={colors.faint}
               keyboardType="number-pad"
               returnKeyType="done"
               maxLength={String(max).length}
@@ -127,7 +128,7 @@ export function Stepper({ label, value, onChange, step = 5, min = 0, max = 600, 
         ) : (
           <Pressable
             onPress={() => {
-              setDraft(String(value));
+              setDraft(''); // 빈 칸에서 시작 — 기존 값 뒤에 이어 붙지 않게(지금 값은 placeholder로)
               setEditing(true);
             }}
             disabled={!typeable}

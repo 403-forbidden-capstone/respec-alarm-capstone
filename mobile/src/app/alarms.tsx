@@ -1,6 +1,6 @@
 import { router, useLocalSearchParams } from 'expo-router';
-import { useEffect, useState } from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { useEffect, useRef, useState } from 'react';
+import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
 import { EmptyState, Loading, LoadError, Screen, SectionHeader, Text, TopBar, TopBarButton } from '@/components/ui';
 import { listAppointments } from '@/features/alarm/api';
@@ -23,6 +23,8 @@ export default function AlarmsScreen() {
   const [showPast, setShowPast] = useState(false);
   const [expired, setExpired] = useState<string | null>(null);
   const lit = highlight && highlight !== expired ? highlight : null;
+  const scrollRef = useRef<ScrollView>(null);
+  const scrolledTo = useRef<string | null>(null);
 
   useEffect(() => {
     if (!highlight) return;
@@ -33,7 +35,7 @@ export default function AlarmsScreen() {
   const { upcoming, past } = data ? splitUpcoming(data, current) : { upcoming: [], past: [] };
 
   return (
-    <Screen onRefresh={reload}>
+    <Screen onRefresh={reload} scrollRef={scrollRef}>
       <TopBar
         screenId="H02"
         onBack={backOrHome}
@@ -54,7 +56,15 @@ export default function AlarmsScreen() {
         </View>
       ) : null}
       {groupByDay(upcoming).map((day) => (
-        <View key={day[0].id}>
+        <View
+          key={day[0].id}
+          onLayout={(e) => {
+            // 방금 만든 일정이 든 날로 한 번만 스크롤
+            if (!lit || scrolledTo.current === lit || !day.some((a) => a.id === lit)) return;
+            scrolledTo.current = lit;
+            scrollRef.current?.scrollTo({ y: Math.max(0, e.nativeEvent.layout.y - 12), animated: true });
+          }}
+        >
           <SectionHeader title={dayHeading(day[0].at, current)} />
           {day.map((a) => (
             <AppointmentAlarmCard key={a.id} appointment={a} current={current} onChanged={reload} highlight={a.id === lit} />

@@ -13,6 +13,7 @@ type Props = {
   contentStyle?: ViewStyle;
   onRefresh?: () => Promise<unknown> | void; // 있으면 아래로 당겨 새로고침 (끝날 때까지 돌아가는 표시)
   avoidKeyboard?: boolean; // 키보드가 올라오면 화면을 밀어 올림 (기본 켬). 화면이 이미 직접 처리하면(채팅) 끔
+  scrollRef?: RefObject<ScrollView | null>; // 화면이 직접 스크롤 위치를 옮길 때 (예: 방금 만든 카드로)
 };
 
 // iOS는 padding, Android는 height, 웹은 키보드가 화면을 덮지 않아 없음
@@ -26,8 +27,9 @@ function ScrollToTopOnTabPress({ target }: { target: RefObject<ScrollView | null
 
 // 화면 바탕 · 좌우 여백 · 안전 영역을 맞춘 화면 틀
 // 아래 안전 영역(시스템 내비게이션 막대)은 늘 잡음. 키보드가 올라오면 입력칸 · 아래 고정 버튼(footer)이 키보드 위로 밀려 올라감
-export function Screen({ children, scroll = true, footer, contentStyle, onRefresh, avoidKeyboard = true }: Props) {
-  const scrollRef = useRef<ScrollView>(null);
+export function Screen({ children, scroll = true, footer, contentStyle, onRefresh, avoidKeyboard = true, scrollRef: outerRef }: Props) {
+  const innerRef = useRef<ScrollView>(null);
+  const scrollRef = outerRef ?? innerRef;
   const navigation = use(NavigationContext);
   const route = use(NavigationRouteContext);
   const inNavigation = navigation != null && route != null;
