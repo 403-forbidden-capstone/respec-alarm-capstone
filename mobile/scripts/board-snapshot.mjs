@@ -25,7 +25,7 @@ const GQL = `query($org:String!,$repo:String!,$num:Int!){
     fieldValues(first:20){ nodes{
       ... on ProjectV2ItemFieldSingleSelectValue{ field{ ... on ProjectV2FieldCommon{ name } } name }
       ... on ProjectV2ItemFieldDateValue{ field{ ... on ProjectV2FieldCommon{ name } } date } } }
-    content{ ... on Issue{ number title state milestone{ title } labels(first:10){ nodes{ name } } } } } } } }
+    content{ ... on Issue{ number title state milestone{ title } labels(first:10){ nodes{ name } } assignees(first:5){ nodes{ login } } } } } } } }
   repository(owner:$org,name:$repo){ pullRequests(first:50,states:[OPEN],orderBy:{field:UPDATED_AT,direction:DESC}){ nodes{
     number title isDraft headRefName reviewDecision closingIssuesReferences(first:5){ nodes{ number } }
     commits(last:1){ nodes{ commit{ statusCheckRollup{ state } } } } } } } }`;
@@ -46,7 +46,7 @@ try {
     const c = it.content || {};
     return {
       n: c.number, t: c.title || '', st: c.state || 'DRAFT', status: fv['Status'], ms: c.milestone && c.milestone.title,
-      start: fv['시작일'], due: fv['목표일'], part: fv['파트'], labels: c.labels ? c.labels.nodes.map((l) => l.name) : [],
+      start: fv['시작일'], due: fv['목표일'], part: fv['파트'], labels: c.labels ? c.labels.nodes.map((l) => l.name) : [], who: c.assignees ? c.assignees.nodes.map((a) => a.login) : [], who: c.assignees ? c.assignees.nodes.map((a) => a.login) : [],
     };
   });
   const prs = g.data.repository.pullRequests.nodes.map((p) => ({
