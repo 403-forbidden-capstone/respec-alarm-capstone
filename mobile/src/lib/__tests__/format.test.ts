@@ -30,7 +30,7 @@ describe('시각 표기 (한국 시간)', () => {
 
   it('날짜는 한국 날짜로 바뀜', () => {
     expect(formatDate(morning)).toBe('5월 22일 목요일');
-    expect(formatDateShort(morning)).toBe('5월 22일 목');
+    expect(formatDateShort(morning)).toBe('5월 22일 (목)');
     expect(formatDateParen(morning)).toBe('5월 22일 (목)');
   });
 

@@ -275,7 +275,7 @@ const styles = StyleSheet.create({
   flowOn: { backgroundColor: colors.ink, borderColor: colors.ink },
   meter: { marginVertical: 12 },
   meterHead: { flexDirection: 'row', justifyContent: 'space-between' },
-  sim: { borderWidth: 1, borderStyle: 'dashed', borderColor: colors.faint, borderRadius: 18, padding: 14, marginTop: 14 },
+  sim: { borderWidth: 1, borderStyle: 'dashed', borderColor: colors.faintDecor, borderRadius: 18, padding: 14, marginTop: 14 },
   simText: { marginBottom: 10 },
   simButtons: { gap: 8 },
   notif: {

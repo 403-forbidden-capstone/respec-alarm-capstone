@@ -71,7 +71,7 @@ export function weekRelative(anyDay: Date, today: Date) {
   return n < 0 ? `${-n}주 전` : `${n}주 뒤`;
 }
 
-// 알림 · 안내 문장에 쓰는 날 — 오늘 · 내일 · 그 밖은 5월 23일 금
+// 알림 · 안내 문장에 쓰는 날 — 오늘 · 내일 · 그 밖은 5월 23일 (금)
 export function dayWord(date: Date, today: Date) {
   if (isSameDay(date, today)) return '오늘';
   if (isSameDay(date, addDays(startOfDay(today), 1))) return '내일';

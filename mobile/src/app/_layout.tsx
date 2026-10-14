@@ -6,7 +6,7 @@ import * as WebBrowser from 'expo-web-browser';
 import { useEffect } from 'react';
 
 import { DeviceFrame } from '@/components/dev/DeviceFrame';
-import { SheetHost, ToastHost } from '@/components/ui';
+import { ConfirmHost, SheetHost, ToastHost } from '@/components/ui';
 import { AuthProvider, useAuth } from '@/features/auth/AuthProvider';
 import { ProfileRetryScreen } from '@/features/auth/ProfileRetryScreen';
 import { canUseRealData } from '@/lib/mode';
@@ -31,6 +31,7 @@ export default function RootLayout() {
         <StatusBar style="dark" />
         <RootStack />
         <SheetHost />
+        <ConfirmHost />
         <ToastHost />
       </DeviceFrame>
     </AuthProvider>

@@ -91,17 +91,14 @@ export function formatDate(date: Date) {
   return `${month}월 ${day}일 ${weekday}요일`;
 }
 
-// 5월 22일 목
+// 5월 22일 (목) — 화면 어디서나 짧은 날짜는 이 모양
 export function formatDateShort(date: Date) {
-  const { month, day, weekday } = kst(date);
-  return `${month}월 ${day}일 ${weekday}`;
-}
-
-// 5월 22일 (목)
-export function formatDateParen(date: Date) {
   const { month, day, weekday } = kst(date);
   return `${month}월 ${day}일 (${weekday})`;
 }
+
+// formatDateShort와 같음 (옛 이름)
+export const formatDateParen = formatDateShort;
 
 // 지금 · 5분 뒤 · 1시간 5분 뒤 — 지난 시각도 '지금' (다음 알람처럼 앞으로 올 시각에만 씀)
 export function formatRelative(from: Date, to: Date) {
