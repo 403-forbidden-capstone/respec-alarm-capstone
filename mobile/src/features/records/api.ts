@@ -88,7 +88,7 @@ export async function getWeek(anyDay: Date): Promise<WeekRecord> {
 
 // 주간 요약이 없을 때 문구 — 날짜 줄에 기록 점이 있는데 "기록이 없어요"라고 하면 어긋남
 export function weekEmptyText(week: WeekRecord): string {
-  return week.strip.some((d) => d.recorded) ? '이 주 요약은 이번 목업에 없어요.' : '이 주에는 기록이 없어요.';
+  return week.strip.some((d) => d.recorded) ? '이 주 요약이 아직 없어요.' : '이 주에는 기록이 없어요.';
 }
 
 // 일간 (R02) — 그날 설정한 알람과 실제로 일어난 일. 목업은 5월 22일만 있고 다른 날은 빈 기록

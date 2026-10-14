@@ -131,6 +131,7 @@ export const db = {
     recent: 0, // 최근 사용 · 뒤쪽 5분 (분)
   },
   wakeConfirmations: {} as Record<string, { at: Date; how: 'self' | 'auto'; usage: number; recent: number }>, // 알람 id별 기상 확정 (그때 사용 시간 포함)
+  snoozes: {} as Record<string, { at: Date; minutes: number }>, // 미룬 알람 id별 다시 울릴 시각 (H07 미루기 → H01 표시 · 취소)
   events: [] as { at: Date; label: string; source: string }[], // 오늘 실제로 일어난 일
   journalWritten: false,
   todos: [

@@ -1,10 +1,12 @@
 import { describe, expect, it } from '@jest/globals';
 
-import { getFriendGrant, getMemberWake, getSharedAlarms } from '../api';
+import { db } from '@/mocks/data';
+
+import { getFriendGrant, getGroup, getMemberWake, getSharedAlarms } from '../api';
 
 // 가짜 api가 실데이터(RLS · get_group_wake_status)와 같은 범위만 돌려주는지
 describe('G03 그룹원 기상 상태', () => {
-  it('같은 그룹 · 기상 조회 권한이 있으면 그룹 이름과 함께', async () => {
+  it('같은 그룹 · 기상 상태 조회 권한이 있으면 그룹 이름과 함께', async () => {
     const wake = await getMemberWake('cap', 'sy');
     expect(wake?.groupName).toBe('캡스톤팀');
     expect(wake?.timeline.map((e) => e.label)).toEqual(['알람 울림', '알람 해제', '기상 확인', '준비 시작']); // 오전 7:55까지
@@ -15,8 +17,36 @@ describe('G03 그룹원 기상 상태', () => {
     expect(await getMemberWake('none', 'sy')).toBeNull();
   });
 
-  it('기상 조회 권한을 받지 않았으면 null', async () => {
+  it('기상 상태 조회 권한을 받지 않았으면 null', async () => {
     expect(await getMemberWake('fam', 'mom')).toBeNull();
+  });
+
+  it('권한은 있는데 오늘 알람이 없으면 null이 아니라 알람 없음으로 (권한 오류와 구분)', async () => {
+    db.received.mom = [{ source: '우리 가족', sourceType: 'GROUP', sourceId: 'fam', viewAlarm: false, editAlarm: false, viewWake: true }];
+    try {
+      const wake = await getMemberWake('fam', 'mom');
+      expect([wake?.groupName, wake?.alarm, wake?.timeline, wake?.firstAlarmAt]).toEqual(['우리 가족', null, [], null]);
+    } finally {
+      delete db.received.mom;
+    }
+  });
+});
+
+describe('G02 그룹 상세', () => {
+  it('연결 일정은 그 그룹에 묶인 것 모두, 초대 코드는 그룹마다 정해진 값', async () => {
+    const cap = await getGroup('cap');
+    expect(cap?.appointments.map((a) => a.id)).toEqual(['a1']);
+    const extra = { ...db.appointments[0], id: 'a9', title: '발표 연습', groupId: 'cap' };
+    db.appointments.push(extra);
+    try {
+      expect((await getGroup('cap'))?.appointments.map((a) => a.id)).toEqual(['a1', 'a9']);
+    } finally {
+      db.appointments.pop();
+    }
+    expect((await getGroup('fam'))?.appointments).toEqual([]);
+    expect(cap?.inviteCode).toMatch(/^CAP-[0-9A-Z]{4}$/);
+    expect((await getGroup('cap'))?.inviteCode).toBe(cap?.inviteCode);
+    expect((await getGroup('fam'))?.inviteCode).not.toBe(cap?.inviteCode);
   });
 });
 
