@@ -28,8 +28,8 @@ export function RepeatPicker({ value, onChange }: Props) {
         </Text>
       </View>
       <View style={styles.quick}>
-        <Button small variant={every ? 'primary' : 'ghost'} label="매일" onPress={() => onChange(every ? [] : [...EVERY_DAY])} />
-        <Button small variant={weekdays ? 'primary' : 'ghost'} label="평일" onPress={() => onChange(weekdays ? [] : [...WEEKDAYS_ONLY])} />
+        <Button small selected={every} variant={every ? 'primary' : 'ghost'} label="매일" onPress={() => onChange(every ? [] : [...EVERY_DAY])} />
+        <Button small selected={weekdays} variant={weekdays ? 'primary' : 'ghost'} label="평일" onPress={() => onChange(weekdays ? [] : [...WEEKDAYS_ONLY])} />
       </View>
       <DayPicker value={value} onToggle={(day) => onChange(toggleWeekday(value, day))} />
     </View>
