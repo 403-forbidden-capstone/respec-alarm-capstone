@@ -428,13 +428,13 @@ isOneToOne: false
                   ]
                 },"user_edit_logs": {
                   Row: {
-                    "alarm_id": string | null,"alarm_type": Database["public"]['Enums']["alarm_type"] | null,"appointment_id": string | null,"auto_value": Json | null,"created_at": string,"edit_id": string,"edited_value": NonNullable<Json>,"field": string,"screen": string,"user_id": string
+                    "alarm_id": string | null,"alarm_type": Database["public"]['Enums']["alarm_type"] | null,"appointment_id": string | null,"auto_value": Json | null,"created_at": string,"edit_id": string,"edited_value": Json | null,"field": string,"screen": string,"user_id": string
                   }
                   Insert: {
-                    "alarm_id"?: string | null,"alarm_type"?: Database["public"]['Enums']["alarm_type"] | null,"appointment_id"?: string | null,"auto_value"?: Json | null,"created_at"?: string,"edit_id"?: string,"edited_value": NonNullable<Json>,"field": string,"screen": string,"user_id"?: string
+                    "alarm_id"?: string | null,"alarm_type"?: Database["public"]['Enums']["alarm_type"] | null,"appointment_id"?: string | null,"auto_value"?: Json | null,"created_at"?: string,"edit_id"?: string,"edited_value"?: Json | null,"field": string,"screen": string,"user_id"?: string
                   }
                   Update: {
-                    "alarm_id"?: string | null,"alarm_type"?: Database["public"]['Enums']["alarm_type"] | null,"appointment_id"?: string | null,"auto_value"?: Json | null,"created_at"?: string,"edit_id"?: string,"edited_value"?: NonNullable<Json>,"field"?: string,"screen"?: string,"user_id"?: string
+                    "alarm_id"?: string | null,"alarm_type"?: Database["public"]['Enums']["alarm_type"] | null,"appointment_id"?: string | null,"auto_value"?: Json | null,"created_at"?: string,"edit_id"?: string,"edited_value"?: Json | null,"field"?: string,"screen"?: string,"user_id"?: string
                   }
                   Relationships: [
                     {
