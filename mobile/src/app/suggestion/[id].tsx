@@ -225,7 +225,7 @@ function EditWake({ suggestion: s, minutes, onStep, onApply, onCancel, busy }: E
           onPress={() => onStep(-EDIT_STEP)}
           onLongPress={() => start(-EDIT_STEP)}
           onPressOut={stop}
-          disabled={atLatest}
+          disabled={atLatest || busy}
         />
         <View style={styles.center}>
           <Text variant="caption" align="center">
@@ -243,7 +243,7 @@ function EditWake({ suggestion: s, minutes, onStep, onApply, onCancel, busy }: E
           onPress={() => onStep(EDIT_STEP)}
           onLongPress={() => start(EDIT_STEP)}
           onPressOut={stop}
-          disabled={atEarliest}
+          disabled={atEarliest || busy}
         />
       </View>
       <View style={styles.preview}>

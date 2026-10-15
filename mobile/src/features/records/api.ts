@@ -72,14 +72,17 @@ function weekSummary(days: Date[], relative: string): WeekSummary | null {
   const before = weekRows(weekDays(addDays(days[0], -7)));
   const diff = before.length ? average(before) - avg : null;
   const goal = rows.filter((x) => x.score >= 70).length;
+  const thisWeek = days.some((d) => isSameDay(d, today()));
+  // 견주는 주 이름 — 이번 주는 "지난주"지만, 지난주를 보는 중이면 "지난주보다"가 자기 자신 같아서 "그 전 주"
+  const prev = thisWeek ? '지난주' : '그 전 주';
   return {
     averageWake: addMinutes(days[0], avg),
     averageText:
-      diff == null ? '지난주 기록이 없어 견줄 수 없어요' : diff > 0 ? `지난주보다 ${diff}분 빨라요` : diff < 0 ? `지난주보다 ${-diff}분 늦어요` : '지난주와 같아요',
+      diff == null ? `${prev} 기록이 없어 견줄 수 없어요` : diff > 0 ? `${prev}보다 ${diff}분 빨라요` : diff < 0 ? `${prev}보다 ${-diff}분 늦어요` : `${prev}와 같아요`,
     goalRate: Math.round((goal / rows.length) * 100),
     goalText: `${relative} ${goal}/${rows.length}일`,
     bars: rows.map((x) => ({ label: `${dateParts(kst(x.day, 0)).weekday} ${x.day}`, score: x.score })),
-    todayPending: days.some((d) => isSameDay(d, today())) && db.me.wakeAt == null,
+    todayPending: thisWeek && db.me.wakeAt == null,
     coaching: '회의가 있는 날은 준비가 평균 12분 길었어요. 전날 밤 준비 루틴을 만들면 아침이 여유로워져요.',
   };
 }

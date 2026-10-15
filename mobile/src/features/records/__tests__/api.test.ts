@@ -67,7 +67,7 @@ describe('R02 주간', () => {
     expect(w.summary?.bars.map((b) => b.score)).toEqual([82, 68, 79, 90, 74]);
     expect([w.summary?.goalRate, w.summary?.goalText]).toEqual([80, '지난주 4/5일']); // 70점 이상 4일
     expect(w.summary && formatTime(w.summary.averageWake)).toBe('오전 7:33'); // 이번 주가 견주는 지난주 평균
-    expect(w.summary?.averageText).toBe('지난주보다 2분 늦어요'); // 5월 5일 주 평균 오전 7:31
+    expect(w.summary?.averageText).toBe('그 전 주보다 2분 늦어요'); // 5월 5일 주 평균 오전 7:31 — 지난주를 보는 중이라 "지난주보다"가 아님
     expect(w.summary?.todayPending).toBe(false); // 오늘이 없는 주
     // 주말은 일부 기록(점만) — 막대에는 안 들어감
     expect(w.strip.map((d) => d.recorded)).toEqual([true, true, true, true, true, true, true]);
@@ -76,7 +76,7 @@ describe('R02 주간', () => {
   it('앞 주 기록이 없으면 견주지 않음', async () => {
     const w = await getWeek(kst(1, 0)); // 4월 28일 주 — 5월 1·2일만 있고 그 앞 주는 목업에 없음
     expect(w.summary?.bars.map((b) => b.label)).toEqual(['목 1', '금 2']);
-    expect(w.summary?.averageText).toBe('지난주 기록이 없어 견줄 수 없어요');
+    expect(w.summary?.averageText).toBe('그 전 주 기록이 없어 견줄 수 없어요');
   });
 
   it('기록이 없는 주(앞날 · 목업에 없는 달)는 요약 없음', async () => {
