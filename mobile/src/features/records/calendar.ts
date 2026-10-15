@@ -71,6 +71,15 @@ export function weekRelative(anyDay: Date, today: Date) {
   return n < 0 ? `${-n}주 전` : `${n}주 뒤`;
 }
 
+// 일간 제목 아래 글자 — 오늘 · 어제 · 내일 · 3일 전 · 3일 뒤
+export function dayRelative(date: Date, today: Date) {
+  const n = Math.round(minutesBetween(startOfDay(today), startOfDay(date)) / (24 * 60));
+  if (n === 0) return '오늘';
+  if (n === -1) return '어제';
+  if (n === 1) return '내일';
+  return n < 0 ? `${-n}일 전` : `${n}일 뒤`;
+}
+
 // 알림 · 안내 문장에 쓰는 날 — 오늘 · 내일 · 그 밖은 5월 23일 (금)
 export function dayWord(date: Date, today: Date) {
   if (isSameDay(date, today)) return '오늘';

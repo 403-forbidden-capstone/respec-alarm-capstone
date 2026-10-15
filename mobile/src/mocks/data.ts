@@ -85,13 +85,7 @@ export const memberAlarms: Record<string, MockMemberAlarm[]> = {
   ],
 };
 
-// 지난 사흘 기상 기록 (R02 주간) — 지난주 평균 기상 오전 7:33
-export const pastWakes = [
-  { day: 19, wake: 451, score: 76 },
-  { day: 20, wake: 440, score: 92 },
-  { day: 21, wake: 444, score: 84 },
-];
-export const lastWeekAverageWake = 453;
+// 지난 날 기상 기록 (R02 주간) · 일간 기록은 mocks/records.ts
 
 const off = (): PermissionSet => ({ viewAlarm: false, editAlarm: false, viewWake: false });
 

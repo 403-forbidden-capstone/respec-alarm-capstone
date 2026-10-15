@@ -37,10 +37,27 @@ export function TopBar({ screenId, onBack, left, right }: Props) {
   );
 }
 
+type ButtonProps = {
+  label: string;
+  onPress?: () => void;
+  onLongPress?: () => void; // 길게 누르면 (계속 바뀌는 값 — 누르고 있는 동안 반복은 부르는 쪽이 onPressOut으로 멈춤)
+  onPressOut?: () => void;
+  disabled?: boolean; // 흐리게 · 못 누름
+};
+
 // 위 줄 오른쪽의 작은 테두리 버튼 (.tbtn) — 모양은 32 높이, 누르는 칸은 44
-export function TopBarButton({ label, onPress }: { label: string; onPress?: () => void }) {
+export function TopBarButton({ label, onPress, onLongPress, onPressOut, disabled }: ButtonProps) {
   return (
-    <Pressable onPress={onPress} accessibilityRole="button" style={({ pressed }) => [styles.tbtnHit, pressed && styles.pressed]}>
+    <Pressable
+      onPress={onPress}
+      onLongPress={onLongPress}
+      onPressOut={onPressOut}
+      delayLongPress={400}
+      disabled={disabled}
+      accessibilityRole="button"
+      accessibilityState={{ disabled }}
+      style={({ pressed }) => [styles.tbtnHit, pressed && styles.pressed, disabled && styles.disabled]}
+    >
       <View style={styles.tbtn}>
         <Text variant="small" tone="ink">
           {label}
@@ -55,6 +72,7 @@ const styles = StyleSheet.create({
   left: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   back: { minHeight: size.touch, minWidth: size.touch, justifyContent: 'center' },
   pressed: { opacity: 0.6 },
+  disabled: { opacity: 0.35 },
   tbtnHit: { minHeight: size.touch, minWidth: size.touch, justifyContent: 'center', alignItems: 'flex-end' },
   tbtn: {
     height: 32,
