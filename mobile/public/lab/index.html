@@ -301,7 +301,7 @@ mark.nz.forced{background:rgba(200,85,61,.32);font-weight:600}
   </div>
 </header>
 <main id="app"><p class="empty">불러오는 중…</p></main>
-<footer id="foot">AI 실험실 분석 화면 · 가짜 사람과 가짜 대화만 있어요 · 시험용 사람 · 대화는 최종 시험 전까지 들어 있지 않아요</footer>
+<footer id="foot">AI 실험실 분석 화면 · 가짜 사람과 가짜 대화만 있어요 · 시험용 사람 · 대화는 들어 있지 않아요 (최종 시험은 숫자 표만)</footer>
 
 <script>
 "use strict";
@@ -831,7 +831,7 @@ async function vPeople(q) {
   };
   root.append(title("사람"), h("p", { class: "lead" }, `v3 가상 유저 ${pp.people.length}명 (개발용). 이름을 누르면 진짜 모습과 앱이 보는 기록을 나란히 보고, 14일 기록과 예전 대화도 볼 수 있어요.`),
     filterBar([{ key: "style", label: "말투", seg: true, options: [["", "전부"], ...Object.entries(STYLE_KO)] }], state, draw), box,
-    h("p", { class: "note" }, "시험용 사람 4명은 최종 시험 전까지 이 화면에 없어요."));
+    h("p", { class: "note" }, "시험용 사람 4명은 이 화면에 없어요. 최종 시험은 숫자 표만 실험 화면에 있어요."));
   draw();
   return { node: root, title: "사람" };
 }
@@ -900,7 +900,7 @@ function v3Section(p) {
 async function vPerson(id) {
   const [pp, ci] = await Promise.all([load("people.json"), load("conv-index.json")]);
   const p = pp.people.find((x) => x.id === id);
-  if (!p) throw new Error(`사람 ${id}가 없어요 (시험용은 최종 시험 전에는 안 보여요)`);
+  if (!p) throw new Error(`사람 ${id}가 없어요 (시험용은 이 화면에 안 보여요)`);
   const v3 = p.v3 ? await load("people-v3.json") : null;
   const x3 = v3 ? v3.people.find((x) => x.id === id) : null;
   const mine = ci.rows.filter((r) => r.p === id);
@@ -1409,7 +1409,7 @@ const TERMS_CORE = [
 ];
 const TERMS_MORE = [
   ["T0 ~ T5 (AI가 일하는 자리)", "앱에서 AI가 일하는 자리마다 붙인 이름표예요. T0 받아쓰기 정리 · T1 대화 답 · T2 추출 · T3 사유 분류 · T4 일기 · T5 코칭. 화면에서는 한국어 이름을 앞에 두고 이름표는 뒤에 작게 적어요."],
-  ["개발용 / 시험용", "프롬프트을 고칠 때 보는 사람 8명 / 마지막에 한 번만 확인하는 처음 보는 사람 4명이에요. 시험용은 최종 시험 전까지 이 화면에 없어요."],
+  ["개발용 / 시험용", "프롬프트을 고칠 때 보는 사람 8명 / 마지막에 한 번만 확인하는 처음 보는 사람 4명이에요. 시험용 사람 · 대화는 이 화면에 없고 최종 시험은 숫자 표만 있어요."],
   ["시나리오", "대화가 시작되는 상황 하나예요 (어느 사람의 · 어느 날 · 어떤 일 — 늦잠 지각, 시험 전날, 새 일정 등). 판마다 같은 시나리오를 돌려서 서로 비교해요."],
   ["기준판 (v0)", "비교의 출발점이 되는 첫 프롬프트이에요. 새 판이 기준판보다 나아졌는지를 봐요."],
   ["하려던 말", "가상 유저가 입으로 말하려던 문장 그대로예요. 받아쓰기가 글자로 바꾸는 사이에 틀리는 곳이 생겨요. 검수는 이 문장을 기준으로 해요."],
