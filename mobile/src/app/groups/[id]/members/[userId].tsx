@@ -1,7 +1,7 @@
 import { useLocalSearchParams } from 'expo-router';
 import { StyleSheet, View } from 'react-native';
 
-import { Button, Card, LoadError, Screen, Text, Timeline, toast, TopBar } from '@/components/ui';
+import { Button, Card, EmptyState, LoadError, Loading, Screen, Text, Timeline, toast, TopBar } from '@/components/ui';
 import { getMemberWake, sendWakePing } from '@/features/social/api';
 import { MemberAlarmCard } from '@/features/social/components/MemberAlarmCard';
 import { Note } from '@/features/social/components/Note';
@@ -11,7 +11,7 @@ import { useAction } from '@/lib/useAction';
 import { backOrHome } from '@/lib/nav';
 
 // G03 그룹원 기상 상태 — 오늘 기상 알람 · 지금까지 일어난 일(시나리오 시각까지) · 깨우기 알림
-// 이 그룹 구성원이고 나에게 기상 조회 권한을 줬을 때만 보임 (api가 아니면 null)
+// 이 그룹 구성원이고 나에게 기상 상태 조회 권한을 줬을 때만 보임 (api가 아니면 null). 권한은 있는데 오늘 알람이 없으면 그렇게 알림
 export default function MemberWakeScreen() {
   const { id, userId } = useLocalSearchParams<{ id: string; userId: string }>();
   const { data, error, reload } = useLoad(() => getMemberWake(id, userId));
@@ -21,7 +21,7 @@ export default function MemberWakeScreen() {
     return (
       <Screen>
         <TopBar onBack={backOrHome} screenId="G03" />
-        {error ? <LoadError onRetry={reload} /> : null}
+        {error ? <LoadError onRetry={reload} /> : <Loading />}
       </Screen>
     );
   }
@@ -29,9 +29,7 @@ export default function MemberWakeScreen() {
     return (
       <Screen>
         <TopBar onBack={backOrHome} screenId="G03" />
-        <Text variant="body" tone="sub">
-          기상 상태를 볼 수 없어요.
-        </Text>
+        <EmptyState title="기상 상태를 볼 수 없어요" body="상대가 기상 상태 공유를 허용한 같은 그룹 멤버만 볼 수 있어요." />
       </Screen>
     );
   }
@@ -48,29 +46,35 @@ export default function MemberWakeScreen() {
     <Screen>
       <TopBar onBack={backOrHome} screenId="G03" />
       <Text variant="title" style={styles.title}>
-        {p.short}의 기상 상태
+        {p.short}님의 기상 상태
       </Text>
       <Text variant="lead" style={styles.lead}>
         오늘의 기상 알람
       </Text>
-      <MemberAlarmCard alarm={alarm} />
-      <Note>알람 해제가 아니라 본인이 확인한 기상 기록이에요.</Note>
+      {alarm ? (
+        <>
+          <MemberAlarmCard alarm={alarm} />
+          <Note>알람 해제가 아니라 본인이 확인한 기상 기록이에요.</Note>
 
-      <Card>
-        <Text variant="label" tone="sub" style={styles.label}>
-          오늘의 흐름
-        </Text>
-        {timeline.length ? (
-          <Timeline
-            highlightLast
-            items={timeline.map((e) => ({ time: formatTime(e.at), label: e.label, source: e.source }))}
-          />
-        ) : (
-          <Text variant="note" tone="sub" style={styles.empty}>
-            아직 알람이 울리지 않았어요. {p.short}님의 알람은 {formatTime(firstAlarmAt)}이에요.
-          </Text>
-        )}
-      </Card>
+          <Card>
+            <Text variant="label" tone="sub" style={styles.label}>
+              오늘의 흐름
+            </Text>
+            {timeline.length ? (
+              <Timeline
+                highlightLast
+                items={timeline.map((e) => ({ time: formatTime(e.at), label: e.label, source: e.source }))}
+              />
+            ) : (
+              <Text variant="note" tone="sub" style={styles.empty}>
+                {`아직 알람이 울리지 않았어요.${firstAlarmAt ? ` ${p.short}님의 알람은 ${formatTime(firstAlarmAt)}이에요.` : ''}`}
+              </Text>
+            )}
+          </Card>
+        </>
+      ) : (
+        <EmptyState title="오늘은 알람이 없어요" body={`${p.short}님이 오늘 맞춰 둔 기상 알람이 없어요.`} />
+      )}
 
       <Card>
         <Text variant="label" tone="sub" style={styles.label}>
@@ -83,7 +87,7 @@ export default function MemberWakeScreen() {
       </Card>
 
       <View style={styles.stack}>
-        <Button label={`${p.short}에게 알람 보내기`} variant="ghost" onPress={ping} />
+        <Button label="깨우기" variant="ghost" onPress={ping} />
       </View>
     </Screen>
   );

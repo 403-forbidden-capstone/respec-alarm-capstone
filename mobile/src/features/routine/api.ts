@@ -47,6 +47,8 @@ export async function getJournal(recordDate: string): Promise<Journal | null> {
     coaching: j.coaching,
     encouragement: j.encouragement,
     suggestion: { ...ROUTINE_SUGGESTION, status: j.suggestion },
+    // 같은 일기에서 여러 번 만들었으면 가장 최근 것
+    routineId: [...aiDb.routines].reverse().find((r) => r.sourceJournal === recordDate)?.id ?? null,
   };
 }
 

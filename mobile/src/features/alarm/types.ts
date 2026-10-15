@@ -87,7 +87,17 @@ export type Intensity = {
 
 export type AppointmentDetail = Appointment & { intensity: Intensity };
 
+// 알람 설정(H03)에서 저장 전까지 들고 있는 값 — 저장할 때 한 번에 반영
+export type AlarmSettingsDraft = {
+  bufferMinutes: number;
+  kinds: Partial<Record<AlarmKind, boolean>>; // 종류별 켜기 (기상 · 준비 · 출발)
+  levels: Record<IntensityAxis, Level | null>; // null = 자동
+};
+
 export type NextAlarm = { appointment: Appointment; alarm: AlarmTime };
+
+// 미룬 알람 (H01) — 다시 울릴 때까지 홈에 보이고 취소할 수 있음
+export type Snooze = { alarmId: string; kind: RingKind; appointmentTitle: string; at: Date; minutes: number };
 
 export type Place = { name: string; travelMinutes: number };
 

@@ -1,37 +1,38 @@
 import { useLocalSearchParams } from 'expo-router';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
-import { Button, Card, Chip, KeyValueRow, LoadError, Screen, Sheet, Stepper, Text, toast, Toggle, TopBar } from '@/components/ui';
-import {
-  getAppointment,
-  previewAlarms,
-  resetIntensity,
-  saveBuffer,
-  setAlarmEnabled,
-  setIntensity,
-} from '@/features/alarm/api';
+import { Button, Card, Chip, KeyValueRow, Loading, LoadError, Screen, Sheet, Stepper, Text, toast, Toggle, TopBar } from '@/components/ui';
+import { getAppointment, previewAlarms, saveAlarmSettings } from '@/features/alarm/api';
 import { FormulaBox } from '@/features/alarm/components/FormulaBox';
 import { OptionGrid } from '@/features/alarm/components/OptionGrid';
 import { TextLink } from '@/features/alarm/components/TextLink';
+import { changedAlarms, ringingKinds, type AlarmChange } from '@/features/alarm/schedule';
 import {
   AXES,
   IMPORTANCE_LABEL,
   KIND_LABEL,
   LEVELS,
   TRANSPORT_LABEL,
+  type AlarmKind,
   type AlarmTime,
   type AppointmentDetail,
+  type IntensityAxis,
   type Level,
 } from '@/features/alarm/types';
 import { formatDateShort, formatTime, minutesBetween } from '@/lib/format';
 import { backOrHome } from '@/lib/nav';
+import { useAction } from '@/lib/useAction';
+import { useLeaveGuard } from '@/lib/useLeaveGuard';
 import { useLoad } from '@/lib/useLoad';
 import { colors } from '@/theme';
 
 const LEVEL_OPTIONS = LEVELS.map((l, i) => [i as Level, l.name] as const);
 
+type Levels = Record<IntensityAxis, Level | null>; // null = 자동
+
 // H03 알람 설정 — 연결 일정 · 이동 조건 · 준비 시간 · 여유를 바꾸면 다시 계산 · 강도 직접 고르기
+// 여유 · 종류별 켜기 · 강도는 모두 초안으로 들고 있다가 "저장"에서 한 번에 반영
 export default function AlarmDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { data, error, reload } = useLoad(() => getAppointment(id));
@@ -40,7 +41,7 @@ export default function AlarmDetailScreen() {
     return (
       <Screen>
         <TopBar onBack={backOrHome} screenId="H03" />
-        {error ? <LoadError onRetry={reload} /> : null}
+        {error ? <LoadError onRetry={reload} /> : <Loading text="알람 설정을 불러오는 중" />}
       </Screen>
     );
   }
@@ -57,11 +58,30 @@ export default function AlarmDetailScreen() {
   return <Detail key={data.id} appointment={data} reload={reload} />;
 }
 
-function Detail({ appointment: a, reload }: { appointment: AppointmentDetail; reload: () => void }) {
+// 저장된 값에서 초안의 처음 모양을 만듦
+const savedKinds = (a: AppointmentDetail) => Object.fromEntries(ringingKinds(a.alarms).map((x) => [x.kind, x.enabled])) as Partial<Record<AlarmKind, boolean>>;
+const savedLevels = (a: AppointmentDetail): Levels => ({
+  sound: a.intensity.axes.sound.manual ? a.intensity.axes.sound.level : null,
+  voice: a.intensity.axes.voice.manual ? a.intensity.axes.voice.level : null,
+  vibration: a.intensity.axes.vibration.manual ? a.intensity.axes.vibration.level : null,
+});
+
+function Detail({ appointment: a, reload }: { appointment: AppointmentDetail; reload: () => Promise<boolean> }) {
   const [buffer, setBuffer] = useState(a.bufferMinutes);
+  const [kinds, setKinds] = useState(() => savedKinds(a));
+  const [levels, setLevels] = useState(() => savedLevels(a));
   const [preview, setPreview] = useState<AlarmTime[]>(a.alarms);
-  const [confirm, setConfirm] = useState(false);
-  const saving = useRef(false);
+  const [changes, setChanges] = useState<AlarmChange[] | null>(null); // 확인 시트에 보여 줄 바뀌는 알람
+  const { busy, run } = useAction();
+
+  // 저장된 값과 다른 곳이 있으면 저장 전 — 저장 버튼이 켜지고, 나갈 때 한 번 물음
+  const saved = savedKinds(a);
+  const savedLv = savedLevels(a);
+  const dirty =
+    buffer !== a.bufferMinutes ||
+    ringingKinds(a.alarms).some((x) => kinds[x.kind] !== saved[x.kind]) ||
+    AXES.some(([axis]) => levels[axis] !== savedLv[axis]);
+  useLeaveGuard(dirty);
 
   // 여유 시간을 바꾸면 알람 시각을 다시 계산 (저장 전 미리 보기)
   useEffect(() => {
@@ -75,64 +95,50 @@ function Detail({ appointment: a, reload }: { appointment: AppointmentDetail; re
   }, [a.id, buffer, a.alarms]);
 
   const first = preview[0] ?? a.alarms[0];
-  const before = a.alarms[0];
   const margin = a.predictedPrepMinutes - a.beforePrepMinutes - a.prepMinutes;
-  const anyManual = AXES.some(([axis]) => a.intensity.axes[axis].manual);
-
-  async function save() {
-    if (saving.current) return; // 두 번 눌러도 한 번만 (다시 계산 · 저장이 겹치지 않게)
-    if (buffer === a.bufferMinutes) {
-      toast('바뀐 내용이 없어요');
-      return;
-    }
-    saving.current = true;
-    try {
-      // 기존보다 5분 이상 바뀌면 한 번 더 확인 — 미리 보기가 늦게 올 수 있어(실데이터는 서버 계산) 저장할 때 다시 계산한 값으로 비교
-      const next = (await previewAlarms(a.id, buffer))[0] ?? first;
-      if (Math.abs(minutesBetween(before.at, next.at)) >= 5) setConfirm(true);
-      else await apply();
-    } finally {
-      saving.current = false;
-    }
-  }
+  const anyManual = AXES.some(([axis]) => levels[axis] != null);
 
   async function apply() {
-    await saveBuffer(a.id, buffer);
-    setConfirm(false);
-    toast('알람 시각을 다시 계산했어요');
-    reload();
+    const bufferChanged = buffer !== a.bufferMinutes;
+    const { turnedOff, turnedOn } = await saveAlarmSettings(a.id, { bufferMinutes: buffer, kinds, levels });
+    setChanges(null);
+    toast(
+      turnedOff
+        ? '알람을 모두 꺼서 이 일정 알람이 꺼졌어요'
+        : turnedOn
+          ? '알람을 켜서 이 일정 알람도 다시 켰어요'
+          : bufferChanged
+            ? '알람 시각을 다시 계산했어요'
+            : '저장했어요',
+    );
+    await reload();
+  }
+
+  function save() {
+    if (!dirty) return;
+    void run(async () => {
+      // 알람 시각이 5분 이상 바뀌면 한 번 더 확인 — 미리 보기가 늦게 올 수 있어(실데이터는 서버 계산) 저장할 때 다시 계산한 값으로 비교
+      if (buffer !== a.bufferMinutes) {
+        const moved = changedAlarms(a.alarms, await previewAlarms(a.id, buffer));
+        if (moved.some((c) => Math.abs(minutesBetween(c.from, c.to)) >= 5)) {
+          setChanges(moved);
+          return;
+        }
+      }
+      await apply();
+    }, '저장하지 못했어요');
   }
 
   // 확인 시트 "바꾸기" — 저장과 같은 잠금으로 연타를 막음
-  async function confirmApply() {
-    if (saving.current) return;
-    saving.current = true;
-    try {
-      await apply();
-    } finally {
-      saving.current = false;
-    }
+  function confirmApply() {
+    void run(apply, '저장하지 못했어요');
   }
 
+  // 시트 "그대로 두기" · 바깥 누름 — 알람 시각이 바뀌는 여유 시간만 되돌림 (D34)
   function keep() {
-    if (saving.current) return; // "바꾸기"가 저장하는 중이면 그대로 두기 · 시트 닫기도 기다림
+    if (busy) return; // "바꾸기"가 저장하는 중이면 그대로 두기 · 시트 닫기도 기다림
     setBuffer(a.bufferMinutes);
-    setConfirm(false);
-  }
-
-  async function toggleKind(kind: AlarmTime['kind'], on: boolean) {
-    await setAlarmEnabled(a.id, kind, on);
-    reload();
-  }
-
-  async function pickLevel(axis: (typeof AXES)[number][0], level: Level) {
-    await setIntensity(a.id, axis, level);
-    reload();
-  }
-
-  async function resetLevels() {
-    await resetIntensity(a.id);
-    reload();
+    setChanges(null);
   }
 
   return (
@@ -202,7 +208,11 @@ function Detail({ appointment: a, reload }: { appointment: AppointmentDetail; re
               <View style={styles.timeRow}>
                 <Text variant="bodyStrong">{formatTime(x.at)}</Text>
                 {x.kind === 'ARRIVE' ? null : (
-                  <Toggle value={x.enabled} onChange={(on) => toggleKind(x.kind, on)} label={`${KIND_LABEL[x.kind]} 알람`} />
+                  <Toggle
+                    value={kinds[x.kind] ?? x.enabled}
+                    onChange={(on) => setKinds((k) => ({ ...k, [x.kind]: on }))}
+                    label={`${KIND_LABEL[x.kind]} 알람`}
+                  />
                 )}
               </View>
             }
@@ -219,7 +229,8 @@ function Detail({ appointment: a, reload }: { appointment: AppointmentDetail; re
           지각 {a.intensity.lateCount}회 {a.intensity.latePoint}점
         </Text>
         {AXES.map(([axis, name]) => {
-          const { level, manual } = a.intensity.axes[axis];
+          const picked = levels[axis];
+          const level = picked ?? a.intensity.auto;
           return (
             <View key={axis}>
               <View style={styles.axis}>
@@ -227,7 +238,7 @@ function Detail({ appointment: a, reload }: { appointment: AppointmentDetail; re
                   <Text variant="rowLabel" tone="sub">
                     {name}
                   </Text>
-                  {manual ? (
+                  {picked != null ? (
                     <Text variant="tiny" tone="sub" style={styles.manual}>
                       직접 고름
                     </Text>
@@ -238,12 +249,24 @@ function Detail({ appointment: a, reload }: { appointment: AppointmentDetail; re
                   label={`${name} 강도`}
                   options={LEVEL_OPTIONS}
                   value={level}
-                  onChange={(next) => pickLevel(axis, next)}
+                  onChange={(next) => setLevels((l) => ({ ...l, [axis]: next }))}
                 />
               </View>
-              <Text variant="label" tone="faint" align="right" style={styles.axisDesc}>
-                {LEVELS[level][axis]}
-              </Text>
+              <View style={styles.axisDesc}>
+                {/* 직접 고른 항목만 이 축을 자동으로 되돌리는 링크 */}
+                {picked != null ? (
+                  <TextLink
+                    label="자동으로"
+                    accessibilityLabel={`${name} 자동으로 되돌리기`}
+                    onPress={() => setLevels((l) => ({ ...l, [axis]: null }))}
+                  />
+                ) : (
+                  <View />
+                )}
+                <Text variant="label" tone="faint" align="right" accessibilityLiveRegion="polite">
+                  {LEVELS[level][axis]}
+                </Text>
+              </View>
             </View>
           );
         })}
@@ -252,22 +275,34 @@ function Detail({ appointment: a, reload }: { appointment: AppointmentDetail; re
         </Text>
         {anyManual ? (
           <View style={styles.reset}>
-            <TextLink label="모두 자동으로 되돌리기" onPress={resetLevels} />
+            <TextLink label="모두 자동으로 되돌리기" onPress={() => setLevels({ sound: null, voice: null, vibration: null })} />
           </View>
         ) : null}
       </Card>
 
       <View style={styles.stack}>
-        <Button label="저장" onPress={save} />
+        <Button label="저장" onPress={save} disabled={!dirty} loading={busy && changes == null} />
       </View>
 
-      <Sheet visible={confirm} onClose={keep} title={`${KIND_LABEL[before.kind]} 알람 시각이 바뀌어요`}>
+      {/* 알람 시각이 바뀌는 저장이면 바뀌는 알람을 전부 보여 주고 한 번 더 물음 */}
+      <Sheet visible={changes != null} onClose={keep} title="알람 시각이 바뀌어요">
         <Text variant="small" tone="sub">
-          {formatTime(before.at)} → {formatTime(first.at)}
-          {'\n'}기존보다 5분 이상 바뀌면 한 번 더 확인해요.
+          저장하면 아래 알람이 이렇게 바뀌어요.
         </Text>
+        <View style={styles.changes}>
+          {(changes ?? []).map((c) => (
+            <View key={c.kind} style={styles.change}>
+              <Text variant="body" tone="sub">
+                {KIND_LABEL[c.kind]}
+              </Text>
+              <Text variant="bodyStrong">
+                {formatTime(c.from)} → {formatTime(c.to)}
+              </Text>
+            </View>
+          ))}
+        </View>
         <View style={styles.stack}>
-          <Button label="바꾸기" onPress={confirmApply} />
+          <Button label="바꾸기" onPress={confirmApply} loading={busy} />
           <Button label="그대로 두기" variant="ghost" onPress={keep} />
         </View>
       </Sheet>
@@ -282,11 +317,13 @@ const styles = StyleSheet.create({
   between: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10 },
   sub: { marginTop: 4 },
   timeRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  axis: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 12 },
-  axisName: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  axis: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginTop: 12 },
+  axisName: { flexDirection: 'row', alignItems: 'center', flexShrink: 1, gap: 6 },
   manual: { backgroundColor: colors.chip, borderRadius: 8, paddingHorizontal: 6, overflow: 'hidden' },
-  axisDesc: { marginTop: 4 },
+  axisDesc: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 4 },
   note: { marginTop: 10 },
   reset: { marginTop: 6, alignSelf: 'flex-start' },
   stack: { gap: 10, marginTop: 16 },
+  changes: { marginTop: 12 },
+  change: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 8 },
 });

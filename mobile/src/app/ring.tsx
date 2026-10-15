@@ -1,13 +1,13 @@
 import { router, useLocalSearchParams } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect, useRef, useState } from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { BackHandler, Platform, Pressable, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { Text, toast } from '@/components/ui';
 import { dismissRing, getRing, snoozeRing, startRing, stopRing } from '@/features/alarm/api';
 import { VoiceWave } from '@/features/alarm/components/VoiceWave';
-import type { RingKind } from '@/features/alarm/types';
+import type { Appointment, RingKind } from '@/features/alarm/types';
 import { formatTime, timeParts } from '@/lib/format';
 import { backOrHome } from '@/lib/nav';
 import { useLoad } from '@/lib/useLoad';
@@ -35,7 +35,16 @@ export default function RingScreen() {
   const fromId = params.alarm?.split(':')[1];
   const kind: RingKind = data?.kind ?? (fromId && Object.keys(HEAD).includes(fromId) ? (fromId as RingKind) : 'WAKE');
   const [minutes, setMinutes] = useState<number>(5);
+  const [done, setDone] = useState(false); // 준비 · 출발 알람을 끈 뒤 — 안내를 화면에 남김
   const handled = useRef(false); // 두 번 눌러도 해제 · 미루기는 한 번만 기록
+
+  // 울리는 동안 안드로이드 뒤로 가기는 막음 — 해제 · 미루기 없이 나가면 알람이 그냥 사라짐 (웹은 해당 없음)
+  const ringing = data != null && !done;
+  useEffect(() => {
+    if (Platform.OS === 'web' || !ringing) return;
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => true);
+    return () => sub.remove();
+  }, [ringing]);
 
   // 울림을 읽은 뒤 내 상태를 '알람 울리는 중'으로 (기상 알람만), 미루기 · 해제 없이 나가면(안드로이드 · 웹 뒤로 가기) 그 표시만 지움
   // 불러오는 함수가 아니라 여기서 시작해야, 읽는 도중에 나가도 지우기가 시작보다 먼저 돌지 않음
@@ -58,7 +67,7 @@ export default function RingScreen() {
     backOrHome();
   }
 
-  // 기상 알람을 끄면 기상 확인(H08)으로, 준비 · 출발은 안내만
+  // 기상 알람을 끄면 기상 확인(H08)으로, 준비 · 출발은 결과 안내 화면
   // 끈 시각 = 지금 울리는 시각 (다시 울림이면 그 시각) — 기상 확인이 이 시각부터 10분을 봄
   async function dismiss() {
     if (!data || handled.current) return;
@@ -70,19 +79,16 @@ export default function RingScreen() {
       router.push({ pathname: '/wake', params: { alarm: data.alarmId } });
       return;
     }
-    if (data.kind === 'PREPARE') {
-      const items = data.appointment.items;
-      toast(items.length ? `준비물: ${items.join(', ')}` : '준비를 시작해요');
-    } else {
-      toast('집을 벗어나면 출발이 자동으로 기록돼요');
-    }
-    backOrHome();
+    // 준비 · 출발은 잠깐 뜨는 토스트 대신 화면에 안내를 남기고 "확인"으로 홈에
+    setDone(true);
   }
 
   return (
     <SafeAreaView style={[styles.screen, { backgroundColor: BACKGROUND[kind] }]} edges={['top', 'bottom']}>
       <StatusBar style="light" />
-      {data ? (
+      {data && done && data.kind !== 'WAKE' ? (
+        <DonePanel kind={data.kind} appointment={data.appointment} />
+      ) : data ? (
         <View style={styles.body} accessibilityRole="alert" accessibilityLabel={HEAD[kind]}>
           <View style={styles.top}>
             <Text variant="screenId" tone="inverse" style={styles.faded45}>
@@ -177,6 +183,89 @@ export default function RingScreen() {
   );
 }
 
+// 준비 · 출발 알람을 끈 뒤 안내 — 준비물 체크(준비) · 이동 시간과 도착 목표(출발), "확인"을 누르면 홈
+function DonePanel({ kind, appointment: a }: { kind: Exclude<RingKind, 'WAKE'>; appointment: Appointment }) {
+  const [checked, setChecked] = useState<string[]>([]);
+  const arrive = a.alarms.find((x) => x.kind === 'ARRIVE');
+  return (
+    <View style={styles.body}>
+      <View style={styles.top}>
+        <Text variant="screenId" tone="inverse" style={styles.faded45}>
+          H07
+        </Text>
+      </View>
+      <Text variant="bodyLarge" tone="inverse" align="center" style={styles.head}>
+        {kind === 'PREPARE' ? '준비를 시작해요' : '출발해요'}
+      </Text>
+      <Text variant="big" tone="inverse" align="center" weight={600} style={styles.title}>
+        {a.title}
+      </Text>
+      <Text variant="small" tone="inverse" align="center" style={styles.faded65}>
+        {formatTime(a.at)} · {a.place}
+      </Text>
+
+      <View style={styles.voice}>
+        {kind === 'PREPARE' ? (
+          <>
+            <Text variant="caption" tone="inverse" style={styles.faded60}>
+              챙길 준비물
+            </Text>
+            {a.items.length ? (
+              a.items.map((name) => {
+                const on = checked.includes(name);
+                return (
+                  <Pressable
+                    key={name}
+                    onPress={() => setChecked((list) => (on ? list.filter((x) => x !== name) : [...list, name]))}
+                    accessibilityRole="checkbox"
+                    accessibilityState={{ checked: on }}
+                    style={styles.checkRow}
+                  >
+                    <View style={[styles.checkBox, on && styles.checkBoxOn]}>
+                      {on ? (
+                        <Text variant="label" style={{ color: colors.ringWake }}>
+                          ✓
+                        </Text>
+                      ) : null}
+                    </View>
+                    <Text variant="reading" tone="inverse" style={on && styles.checked}>
+                      {name}
+                    </Text>
+                  </Pressable>
+                );
+              })
+            ) : (
+              <Text variant="reading" tone="inverse" style={styles.voiceText}>
+                챙길 준비물이 없어요. 준비를 시작해요.
+              </Text>
+            )}
+          </>
+        ) : (
+          <>
+            <Text variant="caption" tone="inverse" style={styles.faded60}>
+              이동
+            </Text>
+            <Text variant="reading" tone="inverse" style={styles.voiceText}>
+              이동 {a.travelMinutes}분{arrive ? ` · 도착 목표 ${formatTime(arrive.at)}` : ''}
+            </Text>
+            <Text variant="note" tone="inverse" style={[styles.voiceText, styles.faded65]}>
+              집을 벗어나면 출발이 자동으로 기록돼요.
+            </Text>
+          </>
+        )}
+      </View>
+
+      <View style={styles.bottom}>
+        <Pressable onPress={() => router.dismissTo('/')} accessibilityRole="button" style={[styles.button, styles.closeButton]}>
+          <Text variant="button" style={{ color: colors.ringWake }}>
+            확인
+          </Text>
+        </Pressable>
+      </View>
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   screen: { flex: 1 },
   body: { flex: 1, paddingTop: 10, paddingHorizontal: 22, paddingBottom: 28 },
@@ -205,6 +294,10 @@ const styles = StyleSheet.create({
   button: { height: 54, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
   snooze: { flex: 1, backgroundColor: colors.ringButton },
   main: { flex: 1.3, backgroundColor: colors.inverse },
+  checkRow: { flexDirection: 'row', alignItems: 'center', gap: 12, minHeight: 44 },
+  checkBox: { width: 22, height: 22, borderRadius: 7, borderWidth: 1.5, borderColor: colors.ringLine, alignItems: 'center', justifyContent: 'center' },
+  checkBoxOn: { backgroundColor: colors.inverse, borderColor: colors.inverse },
+  checked: { textDecorationLine: 'line-through', opacity: 0.6 },
   faded45: { opacity: 0.45 },
   faded60: { opacity: 0.6 },
   faded65: { opacity: 0.65 },

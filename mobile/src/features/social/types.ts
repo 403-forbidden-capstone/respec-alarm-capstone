@@ -69,7 +69,7 @@ export type GroupMember = {
   person: Person;
   isMe: boolean;
   state: WakeState;
-  received: FinalGrant; // 이 사람에게서 받은 권한 (기상 확인 · 알람 보기 버튼)
+  received: FinalGrant; // 이 사람에게서 받은 권한 (기상 상태 · 알람 보기 버튼)
 };
 
 export type GroupDetail = {
@@ -77,7 +77,8 @@ export type GroupDetail = {
   name: string;
   since: string; // 2025년 3월부터 함께하는 중
   grants: PermissionSet; // 그룹 공유 범위 (내가 준 권한)
-  appointment: { id: string; title: string; at: Date; place: string; importance: Importance } | null; // 연결 일정
+  appointments: { id: string; title: string; at: Date; place: string; importance: Importance }[]; // 연결 일정 (여러 개일 수 있음)
+  inviteCode: string; // 초대 코드 (G02 "+ 초대")
   members: GroupMember[];
 };
 
@@ -97,9 +98,9 @@ export type TimelineEntry = { at: Date; label: string; source: string };
 export type MemberWake = {
   person: Person;
   groupName: string; // 공유 범위 안내 (캡스톤팀에 허용한 범위만)
-  alarm: MemberAlarm;
+  alarm: MemberAlarm | null; // 오늘 알람이 없으면 null (권한이 없는 것과 다름)
   timeline: TimelineEntry[]; // 지금까지 일어난 일
-  firstAlarmAt: Date;
+  firstAlarmAt: Date | null;
 };
 
 export type SharedAlarms = {

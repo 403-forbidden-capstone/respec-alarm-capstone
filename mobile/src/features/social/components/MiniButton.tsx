@@ -1,25 +1,23 @@
 import { Pressable, StyleSheet } from 'react-native';
 
-import { Text } from '@/components/ui';
+import { Text, toast } from '@/components/ui';
+import { size } from '@/theme';
 
 type Props = {
   label: string;
   onPress: () => void;
-  disabled?: boolean;
-  disabledHint?: string; // 왜 못 누르는지 (기상 상태 조회 권한이 없어요)
+  disabledReason?: string; // 있으면 못 누르는 버튼 — 흐리게 줄을 긋고, 누르면 이 이유를 토스트로 알림 (수연님이 기상 상태 공유를 허용하지 않았어요)
 };
 
-// 멤버 줄 오른쪽 작은 글자 버튼 (.mini) — 못 누르면 흐리게 줄을 그음
-export function MiniButton({ label, onPress, disabled, disabledHint }: Props) {
+// 멤버 줄 오른쪽 작은 글자 버튼 (.mini) — 누르는 칸은 44. 못 누를 때도 눌리고 이유를 알려 줌
+export function MiniButton({ label, onPress, disabledReason }: Props) {
+  const disabled = disabledReason != null;
   return (
     <Pressable
-      onPress={onPress}
-      disabled={disabled}
-      hitSlop={4}
+      onPress={disabled ? () => toast(disabledReason) : onPress}
       accessibilityRole="button"
-      accessibilityState={{ disabled }}
-      accessibilityHint={disabled ? disabledHint : undefined}
-      style={({ pressed }) => [styles.button, pressed && !disabled && styles.pressed]}
+      accessibilityHint={disabledReason}
+      style={({ pressed }) => [styles.button, pressed && styles.pressed]}
     >
       <Text variant="label" tone={disabled ? 'faint' : 'sub'} style={disabled && styles.off}>
         {label}
@@ -29,7 +27,7 @@ export function MiniButton({ label, onPress, disabled, disabledHint }: Props) {
 }
 
 const styles = StyleSheet.create({
-  button: { paddingVertical: 6, paddingHorizontal: 4 },
+  button: { minWidth: size.touch, minHeight: size.touch, paddingHorizontal: 6, alignItems: 'center', justifyContent: 'center' },
   pressed: { opacity: 0.6 },
   off: { textDecorationLine: 'line-through' },
 });

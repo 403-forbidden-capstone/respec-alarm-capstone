@@ -73,6 +73,7 @@ describe('AI 대화 → 하루 기록 → 루틴', () => {
       '회고 · 회의 자료 때문에 샤워 시간을 줄임',
     ]);
     expect(j?.suggestion.status).toBe('PENDING');
+    expect(j?.routineId).toBeNull();
 
     await editJournal(recordDate, '고친 일기');
     await finishConversation();
@@ -89,6 +90,7 @@ describe('AI 대화 → 하루 기록 → 루틴', () => {
     expect(saved.id).toBe('r2');
     expect(saved.steps[3].name).toBe('새 단계'); // 이름을 비우면 새 단계
     expect((await getJournal('2025-05-22'))?.suggestion.status).toBe('APPLIED');
+    expect((await getJournal('2025-05-22'))?.routineId).toBe('r2'); // 일기에서 만든 루틴 열기
     expect((await getRoutine('r2'))?.steps).toHaveLength(4);
     expect(await getRoutine('r1')).toBeNull(); // 아침 루틴은 단계 이름만 있어 편집 대상 아님
 

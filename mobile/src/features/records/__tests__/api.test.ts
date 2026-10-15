@@ -74,7 +74,7 @@ describe('R02 주간', () => {
   });
 
   it('요약이 없는 주: 기록 점이 있으면 "요약 없음", 점도 없으면 "기록 없음"', async () => {
-    expect(weekEmptyText(await getWeek(kst(12, 0)))).toBe('이 주 요약은 이번 목업에 없어요.');
+    expect(weekEmptyText(await getWeek(kst(12, 0)))).toBe('이 주 요약이 아직 없어요.');
     expect(weekEmptyText(await getWeek(kst(40, 0)))).toBe('이 주에는 기록이 없어요.');
   });
 });

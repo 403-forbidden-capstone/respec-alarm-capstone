@@ -5,17 +5,25 @@ import { memberState } from '@/mocks/calc';
 import { db, kst } from '@/mocks/data';
 
 import {
+  cancelSnooze,
   confirmWake,
+  defaultDraft,
   dismissRing,
   draftAt,
+  getAppointment,
+  getNextAlarm,
   getRing,
+  getSnooze,
   getWakeCheck,
+  getWakeInProgress,
   missWake,
   promptWake,
+  saveAlarmSettings,
   snoozeRing,
   startRing,
   stopRing,
 } from '../api';
+import type { AlarmSettingsDraft } from '../types';
 
 const WAKE = 'a1:WAKE'; // 팀 주간회의 기상 오전 8:00
 const morning = kst(22, 475); // 오전 7:55
@@ -23,6 +31,11 @@ const me = () => memberState('me', morning).text;
 const labels = () => db.events.map((e) => `${formatTime(e.at)} ${e.label}`);
 
 afterEach(() => {
+  db.snoozes = {};
+  db.disabledKinds.clear();
+  db.disabledAppointments.clear();
+  db.intensityOverrides = {};
+  db.appointments[0].bufferMinutes = 10;
   db.wake = { alarmId: null, phase: 'idle', ringAt: null, dismissedAt: null, usage: 0, recent: 0 };
   db.events.length = 0;
   db.me.wakeAt = null;
@@ -38,6 +51,116 @@ describe('H05 시간 칸', () => {
   it('비었거나 틀리면 목업처럼 14:00', () => {
     expect(formatTime(draftAt(kst(23, 0), ''))).toBe('오후 2:00');
     expect(formatTime(draftAt(kst(23, 0), '25:99'))).toBe('오후 2:00');
+  });
+
+  it('5분 단위가 아닌 시각(대화에서 찾은 14:07)도 그대로', () => {
+    expect(formatTime(draftAt(kst(23, 0), '14:07'))).toBe('오후 2:07');
+  });
+
+  it('처음 입력값 — 일정명 · 준비물은 비고, 날짜는 넘겨 받은 날 오후 2시 (지났으면 다음 정각)', () => {
+    const d = defaultDraft(kst(22, 0), morning);
+    expect([d.title, d.items, d.time, d.date]).toEqual(['', '', '14:00', kst(22, 0)]);
+    expect(defaultDraft(kst(22, 0), kst(22, 15 * 60 + 20)).time).toBe('16:00');
+  });
+});
+
+describe('H01 다음 알람 · 미루기 · 기상 확인 다시 들어가기', () => {
+  it('다음 알람은 앞으로 울릴 첫 알람 (아침 7:55면 8:00 기상)', async () => {
+    const next = await getNextAlarm();
+    expect([next!.appointment.id, formatTime(next!.alarm.at)]).toEqual(['a1', '오전 8:00']);
+  });
+
+  it('미루면 다시 울릴 시각과 함께 보이고, 취소하면 사라짐', async () => {
+    expect(await getSnooze()).toBeNull();
+    await startRing(WAKE, kst(22, 480));
+    await snoozeRing(WAKE, 5, kst(22, 480));
+    const snooze = await getSnooze();
+    expect([snooze!.alarmId, snooze!.kind, snooze!.appointmentTitle, formatTime(snooze!.at)]).toEqual([WAKE, 'WAKE', '팀 주간회의', '오전 8:05']);
+    await cancelSnooze(WAKE);
+    expect(await getSnooze()).toBeNull();
+  });
+
+  it('다시 울리기 시작하거나 해제하면 미룸 표시가 끝남', async () => {
+    await snoozeRing(WAKE, 5, kst(22, 480));
+    await startRing(WAKE, kst(22, 485));
+    expect(await getSnooze()).toBeNull();
+    await snoozeRing('a1:PREPARE', 10, kst(22, 510));
+    expect((await getSnooze())!.alarmId).toBe('a1:PREPARE');
+    await dismissRing('a1:PREPARE', kst(22, 520));
+    expect(await getSnooze()).toBeNull();
+  });
+
+  it('이미 시각이 지난 미룸은 안 보임', async () => {
+    await snoozeRing(WAKE, 5, kst(22, 460)); // 7:40에 미룸 → 7:45 (지금 7:55)
+    expect(await getSnooze()).toBeNull();
+  });
+
+  it('기상 알람을 끈 뒤 판정 중에만 기상 확인이 진행 중으로 보임', async () => {
+    expect(await getWakeInProgress()).toBeNull();
+    await startRing(WAKE, kst(22, 480));
+    expect(await getWakeInProgress()).toBeNull();
+    await dismissRing(WAKE, kst(22, 480));
+    expect((await getWakeInProgress())!.alarmId).toBe(WAKE);
+    await promptWake(WAKE, kst(22, 490));
+    expect((await getWakeInProgress())!.phase).toBe('prompt');
+    await confirmWake(WAKE, 'self', kst(22, 491));
+    expect(await getWakeInProgress()).toBeNull();
+  });
+});
+
+describe('H03 저장 — 여유 · 종류별 켜기 · 강도를 한 번에', () => {
+  const base = async (): Promise<AlarmSettingsDraft> => {
+    const a = (await getAppointment('a1'))!;
+    return {
+      bufferMinutes: a.bufferMinutes,
+      kinds: { WAKE: true, PREPARE: true, DEPARTURE: true },
+      levels: { sound: null, voice: null, vibration: null },
+    };
+  };
+
+  it('저장 전에는 아무것도 안 바뀌고, 저장하면 한 번에 반영', async () => {
+    const draft = await base();
+    const before = (await getAppointment('a1'))!;
+    expect(before.intensity.axes.sound.manual).toBe(false);
+    const result = await saveAlarmSettings('a1', {
+      bufferMinutes: 5,
+      kinds: { ...draft.kinds, PREPARE: false },
+      levels: { sound: 2, voice: null, vibration: 0 },
+    });
+    expect(result).toEqual({ turnedOff: false, turnedOn: false });
+    const after = (await getAppointment('a1'))!;
+    expect(after.bufferMinutes).toBe(5);
+    expect(after.alarms.find((x) => x.kind === 'PREPARE')!.enabled).toBe(false);
+    expect(after.intensity.axes.sound).toEqual({ level: 2, manual: true });
+    expect(after.intensity.axes.voice.manual).toBe(false);
+    expect(after.intensity.axes.vibration).toEqual({ level: 0, manual: true });
+  });
+
+  it('고른 강도를 자동으로 되돌림 (축별)', async () => {
+    const draft = await base();
+    await saveAlarmSettings('a1', { ...draft, levels: { sound: 2, voice: 1, vibration: null } });
+    await saveAlarmSettings('a1', { ...draft, levels: { sound: null, voice: 1, vibration: null } });
+    const after = (await getAppointment('a1'))!;
+    expect([after.intensity.axes.sound.manual, after.intensity.axes.voice.manual]).toEqual([false, true]);
+  });
+
+  it('종류를 모두 끄면 일정 알람도 꺼지고, 하나를 다시 켜면 일정 알람도 켜짐', async () => {
+    const draft = await base();
+    const off = await saveAlarmSettings('a1', { ...draft, kinds: { WAKE: false, PREPARE: false, DEPARTURE: false } });
+    expect(off).toEqual({ turnedOff: true, turnedOn: false });
+    expect((await getAppointment('a1'))!.enabled).toBe(false);
+    expect(await getNextAlarm()).not.toMatchObject({ appointment: { id: 'a1' } });
+
+    const on = await saveAlarmSettings('a1', { ...draft, kinds: { WAKE: true, PREPARE: false, DEPARTURE: false } });
+    expect(on).toEqual({ turnedOff: false, turnedOn: true });
+    expect((await getAppointment('a1'))!.enabled).toBe(true);
+  });
+
+  it('종류를 안 바꾼 저장은 카드에서 켜고 끈 일정 상태를 건드리지 않음', async () => {
+    const draft = await base();
+    db.disabledAppointments.add('a1');
+    await saveAlarmSettings('a1', { ...draft, bufferMinutes: 15 });
+    expect((await getAppointment('a1'))!.enabled).toBe(false);
   });
 });
 

@@ -1,8 +1,9 @@
-import { useLocalSearchParams } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import { useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
-import { Button, Card, LoadError, Screen, Sheet, Text, toast, TopBar, TopBarButton } from '@/components/ui';
+import { Button, Card, LoadError, Loading, Screen, Sheet, Text, toast, TopBar, TopBarButton } from '@/components/ui';
+import { TextLink } from '@/features/alarm/components/TextLink';
 import { applySuggestion, getSuggestion, ignoreSuggestion, reopenSuggestion, undoSuggestion } from '@/features/records/api';
 import { dayWord } from '@/features/records/calendar';
 import { CompareTimes } from '@/features/records/components/CompareTimes';
@@ -24,7 +25,7 @@ export default function SuggestionScreen() {
     return (
       <Screen>
         <TopBar screenId="S01" onBack={backOrHome} />
-        {error ? <LoadError onRetry={reload} /> : null}
+        {error ? <LoadError onRetry={reload} /> : <Loading />}
       </Screen>
     );
   }
@@ -47,6 +48,11 @@ function Detail({ suggestion: s, reload }: { suggestion: Suggestion; reload: () 
   const { busy, run: act } = useAction();
   const phase = suggestionPhase(s.status);
   const target = `${formatDateShort(s.appointment.at)} ${s.appointment.title}`;
+
+  // 제안이 바꾸는 알람을 확인하러 (H03)
+  const alarmLink = (
+    <TextLink label="알람 설정 보기 ›" onPress={() => router.push({ pathname: '/alarm/[id]', params: { id: s.appointment.id } })} />
+  );
 
   const apply = (minutes: number) =>
     act(async () => {
@@ -116,6 +122,7 @@ function Detail({ suggestion: s, reload }: { suggestion: Suggestion; reload: () 
             <Text variant="small" align="center">
               준비 알람도 {s.minutes}분 앞당겨져요.
             </Text>
+            <View style={[styles.link, styles.linkCenter]}>{alarmLink}</View>
           </Card>
           <View style={styles.stack}>
             <Button label="제안 적용하기" onPress={() => apply(s.minutes)} disabled={busy} />
@@ -139,6 +146,7 @@ function Detail({ suggestion: s, reload }: { suggestion: Suggestion; reload: () 
             <Text variant="small" style={styles.sub}>
               다음 기록에서 성능이 나빠지면 이전 값으로 되돌려요.
             </Text>
+            <View style={styles.link}>{alarmLink}</View>
           </Card>
           <View style={styles.stack}>
             <Button label="이전 값으로 되돌리기" variant="ghost" onPress={undo} disabled={busy} />
@@ -150,6 +158,7 @@ function Detail({ suggestion: s, reload }: { suggestion: Suggestion; reload: () 
         <>
           <Card>
             <Text variant="small">이번 제안을 무시했어요. 같은 제안은 당분간 다시 보이지 않아요.</Text>
+            <View style={styles.link}>{alarmLink}</View>
           </Card>
           <View style={styles.stack}>
             <Button label="제안 다시 보기" variant="ghost" onPress={reopen} disabled={busy} />
@@ -212,5 +221,7 @@ const styles = StyleSheet.create({
   trioItem: { flex: 1 },
   sub: { marginTop: 4 },
   stack: { gap: 10, marginTop: 16 },
+  link: { alignSelf: 'flex-start', marginTop: 10 },
+  linkCenter: { alignSelf: 'center' },
   stepper: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 18, marginBottom: 6 },
 });

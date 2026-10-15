@@ -73,5 +73,5 @@ const styles = StyleSheet.create({
   time: { marginTop: 4 },
   meTime: { opacity: 0.55 },
   typing: { flexDirection: 'row', gap: 4, padding: 16 },
-  dot: { width: 6, height: 6, borderRadius: 3, backgroundColor: colors.faint },
+  dot: { width: 6, height: 6, borderRadius: 3, backgroundColor: colors.faintDecor },
 });

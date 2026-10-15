@@ -2,7 +2,7 @@ import { useLocalSearchParams } from 'expo-router';
 import { useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
-import { Button, Card, Chip, LoadError, Screen, Sheet, Text, Timeline, toast, TopBar } from '@/components/ui';
+import { Button, Card, Chip, LoadError, Loading, Screen, Sheet, Text, Timeline, toast, TopBar } from '@/components/ui';
 import { TextLink } from '@/features/alarm/components/TextLink';
 import { getShareLog, getSharedAlarms, setSharedAlarmEnabled, shiftSharedAlarm } from '@/features/social/api';
 import { MemberAlarmCard } from '@/features/social/components/MemberAlarmCard';
@@ -42,7 +42,7 @@ export default function SharedAlarmsScreen() {
     </Sheet>
   );
 
-  if (data === undefined) return <Screen>{top}{error ? <LoadError onRetry={reload} /> : null}</Screen>;
+  if (data === undefined) return <Screen>{top}{error ? <LoadError onRetry={reload} /> : <Loading />}</Screen>;
   if (data === null) {
     return (
       <Screen>

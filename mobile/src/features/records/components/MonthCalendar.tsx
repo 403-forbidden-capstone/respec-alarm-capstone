@@ -83,7 +83,7 @@ const styles = StyleSheet.create({
   numText: { fontVariant: ['tabular-nums'] },
   dot: { width: 4, height: 4, borderRadius: 2 },
   done: { backgroundColor: colors.ink },
-  partial: { backgroundColor: colors.faint },
+  partial: { backgroundColor: colors.faintDecor },
   none: { backgroundColor: 'transparent' },
   legend: {
     flexDirection: 'row',

@@ -2,7 +2,7 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
-import { Avatar, Button, Card, Chip, LoadError, Screen, SectionHeader, Segmented, Text, toast, TopBar } from '@/components/ui';
+import { Avatar, Button, Card, Chip, EmptyState, LoadError, Loading, Screen, SectionHeader, Segmented, Text, toast, TopBar } from '@/components/ui';
 import { TextLink } from '@/features/alarm/components/TextLink';
 import { acceptFriend, listFriendRequests, listFriends, listGroups } from '@/features/social/api';
 import { ActionTile } from '@/features/social/components/ActionTile';
@@ -43,12 +43,16 @@ export default function GroupScreen() {
   const accept = (p: Person) =>
     run(async () => {
       await acceptFriend(p.id);
-      toast(`${p.name}님과 친구가 됐어요 · 공유는 아직 없어요`);
+      // 공유는 아직 없으므로 바로 범위를 정하러 갈 수 있게
+      toast(`${p.name}님과 친구가 됐어요`, {
+        actionLabel: '공유 범위 정하기',
+        onAction: () => router.push({ pathname: '/permissions', params: { relation: `friend:${p.id}` } }),
+      });
       await reload();
     });
 
   return (
-    <Screen>
+    <Screen onRefresh={reload}>
       <TopBar
         screenId={tab === 'friend' ? 'F01' : 'G01'}
         right={<TextLink label="권한 관리" onPress={() => router.push('/permissions')} />}
@@ -61,7 +65,7 @@ export default function GroupScreen() {
       </Text>
       <Segmented options={TABS} value={tab} onChange={setTab} />
 
-      {!data && error ? <LoadError onRetry={reload} /> : null}
+      {!data ? error ? <LoadError onRetry={reload} /> : <Loading /> : null}
       {data && tab === 'friend' ? <FriendTab friends={data.friends} requests={data.requests} onAccept={accept} /> : null}
       {data && tab === 'group' ? <GroupTab groups={data.groups} /> : null}
     </Screen>
@@ -108,7 +112,9 @@ function FriendTab({ friends, requests, onAccept }: { friends: FriendItem[]; req
             />
           ))}
         </Card>
-      ) : null}
+      ) : (
+        <EmptyState title="아직 친구가 없어요" body="이름이나 사용자 ID로 검색해 친구를 추가해 보세요." />
+      )}
       <Note>친구는 역할이 아닌 관계예요. 친구가 되어도 알람과 기상 상태는 권한을 허용한 뒤에만 볼 수 있어요.</Note>
     </>
   );
@@ -136,6 +142,7 @@ function GroupTab({ groups }: { groups: GroupItem[] }) {
       </View>
 
       <SectionHeader title="참여 중인 그룹" right={`${groups.length}개`} />
+      {groups.length ? null : <EmptyState title="아직 참여한 그룹이 없어요" body="새 그룹을 만들거나 초대 코드로 참여해 보세요." />}
       {groups.map((g) => {
         if (!g.canSeeWake) {
           return (
@@ -147,7 +154,7 @@ function GroupTab({ groups }: { groups: GroupItem[] }) {
                     {g.name}
                   </Text>
                   <Text variant="small" tone="sub">
-                    {g.memberCount}명 · 공유 권한 없음
+                    {g.memberCount}명 · 공유 없음
                   </Text>
                 </View>
                 <Text variant="body" tone="faint">
@@ -173,7 +180,7 @@ function GroupTab({ groups }: { groups: GroupItem[] }) {
               {g.memberCount}명 · 오늘 {g.wokeCount}명 기상 완료
             </Text>
             <View style={styles.chips}>
-              {(names.length ? names : ['공유 권한 없음']).map((name) => (
+              {(names.length ? names : ['공유 없음']).map((name) => (
                 <Chip key={name} label={name} />
               ))}
             </View>
