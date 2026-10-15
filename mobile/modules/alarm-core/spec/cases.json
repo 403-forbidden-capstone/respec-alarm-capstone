@@ -1,0 +1,163 @@
+{
+  "version": 1,
+  "notes": [
+    "같은 입력이면 어느 플랫폼에서도 같은 울림 계획이 나오는지 확인하는 공통 케이스. 지금은 TS 단위 테스트(src/__tests__/plan.test.ts)가 읽음",
+    "네이티브(Kotlin)는 계획을 계산하지 않고 받은 대로만 실행하므로 Kotlin 쪽 테스트는 두지 않음. iOS(Swift)가 생기면 같은 파일을 읽게 함 (#79 · #57)",
+    "시각 단위는 ms. reRingOffsetsMillis는 '첫 울림 시작으로부터의 거리'. 간격 읽기는 plan.ts 주석 참고 (시작-시작, 작성자 판단)"
+  ],
+  "plans": [
+    {
+      "name": "기상 약",
+      "input": { "type": "WAKE", "intensity": "SOFT" },
+      "plan": {
+        "sound": true,
+        "volumePercent": 60,
+        "soundKey": "default",
+        "maxRingMillis": 180000,
+        "reRingOffsetsMillis": [300000],
+        "snoozeMillis": 600000,
+        "heading": "일어날 시간이에요",
+        "oneTapLabel": null,
+        "oneTapEventType": null
+      }
+    },
+    {
+      "name": "기상 보통",
+      "input": { "type": "WAKE", "intensity": "NORMAL" },
+      "plan": {
+        "sound": true,
+        "volumePercent": 80,
+        "soundKey": "default",
+        "maxRingMillis": 180000,
+        "reRingOffsetsMillis": [300000, 600000],
+        "snoozeMillis": 600000,
+        "heading": "일어날 시간이에요",
+        "oneTapLabel": null,
+        "oneTapEventType": null
+      }
+    },
+    {
+      "name": "기상 강",
+      "input": { "type": "WAKE", "intensity": "STRONG" },
+      "plan": {
+        "sound": true,
+        "volumePercent": 100,
+        "soundKey": "default",
+        "maxRingMillis": 180000,
+        "reRingOffsetsMillis": [180000, 360000, 540000],
+        "snoozeMillis": 600000,
+        "heading": "일어날 시간이에요",
+        "oneTapLabel": null,
+        "oneTapEventType": null
+      }
+    },
+    {
+      "name": "소리 키는 그대로 넘김 (폰에 없는 키는 네이티브가 기본 소리로)",
+      "input": { "type": "WAKE", "intensity": "NORMAL", "soundKey": "calm" },
+      "plan": {
+        "sound": true,
+        "volumePercent": 80,
+        "soundKey": "calm",
+        "maxRingMillis": 180000,
+        "reRingOffsetsMillis": [300000, 600000],
+        "snoozeMillis": 600000,
+        "heading": "일어날 시간이에요",
+        "oneTapLabel": null,
+        "oneTapEventType": null
+      }
+    },
+    {
+      "name": "준비 시작 — 무음 알림 + 원탭 (강도 · 볼륨 보정은 안 씀)",
+      "input": { "type": "PREPARE", "intensity": "STRONG", "volumeAdjust": -0.5 },
+      "plan": {
+        "sound": false,
+        "volumePercent": 0,
+        "soundKey": "default",
+        "maxRingMillis": 0,
+        "reRingOffsetsMillis": [],
+        "snoozeMillis": 0,
+        "heading": "준비할 시간이에요",
+        "oneTapLabel": "준비 시작",
+        "oneTapEventType": "ACKNOWLEDGED"
+      }
+    },
+    {
+      "name": "출발",
+      "input": { "type": "DEPARTURE", "intensity": "NORMAL" },
+      "plan": {
+        "sound": false,
+        "volumePercent": 0,
+        "soundKey": "default",
+        "maxRingMillis": 0,
+        "reRingOffsetsMillis": [],
+        "snoozeMillis": 0,
+        "heading": "출발할 시간이에요",
+        "oneTapLabel": "출발했어요",
+        "oneTapEventType": "ACKNOWLEDGED"
+      }
+    },
+    {
+      "name": "도착 — 기록 종류가 ARRIVAL_CONFIRMED",
+      "input": { "type": "ARRIVE", "intensity": "NORMAL" },
+      "plan": {
+        "sound": false,
+        "volumePercent": 0,
+        "soundKey": "default",
+        "maxRingMillis": 0,
+        "reRingOffsetsMillis": [],
+        "snoozeMillis": 0,
+        "heading": "약속 장소에 도착했나요?",
+        "oneTapLabel": "도착했어요",
+        "oneTapEventType": "ARRIVAL_CONFIRMED"
+      }
+    },
+    {
+      "name": "루틴 — 소리 없음 (alarm-core.md 소리 줄, 7장 7.4.1과 다른 점은 문서 보완 목록)",
+      "input": { "type": "ROUTINE", "intensity": "SOFT" },
+      "plan": {
+        "sound": false,
+        "volumePercent": 0,
+        "soundKey": "default",
+        "maxRingMillis": 0,
+        "reRingOffsetsMillis": [],
+        "snoozeMillis": 0,
+        "heading": "루틴 할 시간이에요",
+        "oneTapLabel": "했어요",
+        "oneTapEventType": "ACKNOWLEDGED"
+      }
+    }
+  ],
+  "volumes": [
+    { "name": "보정 없음", "intensity": "SOFT", "volumeAdjust": 0, "volumePercent": 60 },
+    { "name": "약 −10%", "intensity": "SOFT", "volumeAdjust": -0.1, "volumePercent": 54 },
+    { "name": "보통 −10%", "intensity": "NORMAL", "volumeAdjust": -0.1, "volumePercent": 72 },
+    { "name": "강 −10%", "intensity": "STRONG", "volumeAdjust": -0.1, "volumePercent": 90 },
+    { "name": "100%를 넘기지 않음", "intensity": "STRONG", "volumeAdjust": 0.2, "volumePercent": 100 },
+    { "name": "10% 밑으로 안 내림", "intensity": "SOFT", "volumeAdjust": -0.95, "volumePercent": 10 },
+    { "name": "값이 이상하면 보정 없음", "intensity": "NORMAL", "volumeAdjust": null, "volumePercent": 80 }
+  ],
+  "ringStarts": [
+    { "name": "약: 5분 뒤 1번", "type": "WAKE", "intensity": "SOFT", "firstRingAt": 1000000, "starts": [1000000, 1300000], "unansweredSpanMillis": 480000 },
+    { "name": "보통: 5분 간격 2번", "type": "WAKE", "intensity": "NORMAL", "firstRingAt": 1000000, "starts": [1000000, 1300000, 1600000], "unansweredSpanMillis": 780000 },
+    { "name": "강: 3분 간격 3번", "type": "WAKE", "intensity": "STRONG", "firstRingAt": 1000000, "starts": [1000000, 1180000, 1360000, 1540000], "unansweredSpanMillis": 720000 },
+    { "name": "무음 알림은 다시 울림 없음", "type": "PREPARE", "intensity": "STRONG", "firstRingAt": 1000000, "starts": [1000000], "unansweredSpanMillis": 0 }
+  ],
+  "snooze": [
+    { "name": "미루면 10분 뒤 (강도와 상관없음, D3 전까지 고정)", "intensity": "NORMAL", "nowMillis": 1000, "nextRingAt": 601000 },
+    { "name": "강도가 달라도 같음", "intensity": "STRONG", "nowMillis": 1000, "nextRingAt": 601000 }
+  ],
+  "past": [
+    { "atMillis": 99, "nowMillis": 100, "isPast": true },
+    { "atMillis": 100, "nowMillis": 100, "isPast": true },
+    { "atMillis": 101, "nowMillis": 100, "isPast": false }
+  ],
+  "volumeAdjustRules": [
+    { "name": "평가 없음", "ratings": [], "volumeAdjust": 0 },
+    { "name": "시끄럽다 1번", "ratings": ["TOO_LOUD"], "volumeAdjust": 0 },
+    { "name": "시끄럽다 2번", "ratings": ["TOO_LOUD", "GOOD", "TOO_LOUD"], "volumeAdjust": -0.1 },
+    { "name": "최근 5번 밖의 평가는 안 셈", "ratings": ["TOO_LOUD", "TOO_LOUD", "GOOD", "GOOD", "GOOD", "GOOD"], "volumeAdjust": 0 },
+    { "name": "최근 5번 안에 2번", "ratings": ["TOO_QUIET", "TOO_QUIET", "TOO_QUIET", "TOO_LOUD", "TOO_LOUD"], "volumeAdjust": -0.1 },
+    { "name": "5번 다 시끄러워도 −10%만 (쌓이지 않음)", "ratings": ["TOO_LOUD", "TOO_LOUD", "TOO_LOUD", "TOO_LOUD", "TOO_LOUD"], "volumeAdjust": -0.1 },
+    { "name": "다른 평가는 보정 없음", "ratings": ["TOO_QUIET", "VOICE_DISLIKE", "SOUND_DISLIKE", "GOOD"], "volumeAdjust": 0 }
+  ]
+}
