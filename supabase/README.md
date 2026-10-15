@@ -178,14 +178,14 @@ create policy wake_signal_receive on realtime.messages
 
 ### 시험
 
-Deno 없이 Node(24 이상)가 `.ts`를 바로 읽어서 순수 부분은 `node --test`로 돌림 (계산 · 요청 검사 · 오류 · 카카오 응답 읽기 · 이동시간 순서 · 푸시 · 저장 내용 정하기).
+Deno 없이 Node(24 이상)가 `.ts`를 바로 읽어서 `node --test`로 돌림 (계산 · 요청 검사 · 오류 · 카카오 응답 읽기 · 이동시간 순서 · 푸시 · 저장 내용 정하기 · `alarm-commit`의 쓰기 순서와 되돌리기는 메모리 가짜 DB `fake-db.ts`로).
 
 ```bash
 # 레포 맨 위에서
 node --test --disable-warning=MODULE_TYPELESS_PACKAGE_JSON "supabase/functions/**/*.test.ts"
 ```
 
-- DB를 부르는 부분(`plan.ts` · `index.ts`)은 이 시험에 안 들어감. Docker · Deno가 생기면 `supabase functions serve` + 로컬 DB로 확인할 것
+- 진짜 DB를 부르는 읽기(`plan.ts`의 `from(...).select(...)`, 임베드 · 뷰 조회)와 `index.ts`의 연결은 이 시험에 안 들어감. Docker · Deno가 생기면 `supabase functions serve` + 로컬 DB로 확인할 것
 - `deno check`는 이 PC에 Deno가 없어 못 돌림. 대신 `tsc --strict`로 `functions/**` 전체(Deno 전역 · `npm:` · `jsr:` 지정자는 임시 선언으로 대체)를 타입 검사해 통과함
 
 ### 배포 (터미널, Actions 안 씀)
