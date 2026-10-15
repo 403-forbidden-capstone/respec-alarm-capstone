@@ -29,6 +29,8 @@ const as = async (uid, role = 'authenticated') => {
   await db.exec(`set role ${role}`);
 };
 
+const svc = () => as(null, 'service_role');
+
 // 항목 하나를 돌려 true면 PASS, 아니면 받은 값을 함께 FAIL로 남김
 async function check(name, fn) {
   try {
@@ -607,6 +609,8 @@ await check('등록자도 약속을 다른 그룹으로 못 옮김 (group_id 고
 // 12-2. 기상 신호 (Q3 A) — alarm_events에 기상 기록이 들어오면 약속이 있는 그룹의 채널로 "새로 고침" 신호만
 // ---------------------------------------------------------------------
 // 채널 group:<group_id>:wake · 이벤트 refresh · 내용은 날짜뿐. realtime.send는 흉내(realtime.messages에 쌓음)
+// 보내는 조건: 기록한 사람이 그 그룹에 JOINED + 기상 공유 동의(wake_share_opt_in, D19 결정 전 보수 기본값) + 기록한 날 그 그룹에 약속이 있음
+// 지금 상태: B는 G에서 동의함, C는 동의 안 함(11절에서 끔), D는 동의함 → 기록한 사람은 동의한 B로 시험하고 C는 "동의 없음" 시험에 씀
 
 const signals = async () => {
   await su();
@@ -621,17 +625,45 @@ const logEvent = (uid, alarm, type, at = null) => q(
 
 await check('기상 신호: 기상 알람이 울리면 오늘 약속이 있는 그룹 채널로 refresh만 보냄 (날짜만 담고 누구의 기록인지는 안 담음)', async () => {
   await clearSignals();
-  await as(C);
-  await logEvent(C, ids[C].alarm, 'TRIGGERED');
+  await as(B);
+  await logEvent(B, ids[B].alarm, 'TRIGGERED');
   const r = await signals();
   const [{ d }] = await q(`select ${TODAY}::text as d`);
   return r.length === 1 && r[0].topic === `group:${G}:wake` && r[0].event === 'refresh' && r[0].private === true
     && r[0].extension === 'broadcast' && JSON.stringify(r[0].payload) === JSON.stringify({ date: d })
     ? true : r;
 });
-await check('기상 신호: 참여 중이어도 그날 약속이 없는 그룹에는 안 가고, 약속이 없는 날의 기록에도 안 감 (매일 추적하지 않음, F4)', async () => {
+await check('기상 신호: 기상 공유에 동의 안 한 사람의 기록은 신호가 안 가고, 동의하면 가고, 끄면 다시 안 감 (D19 결정 전 보수 기본값)', async () => {
+  const fire = async () => {
+    await clearSignals();
+    await as(C);
+    await logEvent(C, ids[C].alarm, 'TRIGGERED');
+    return (await signals()).length;
+  };
+  const off = await fire();
+  await as(C);
+  await q(`update public.group_members set wake_share_opt_in = true where group_id = $1 and user_id = $2`, [G, C]);
+  const on = await fire();
+  await as(C);
+  await q(`update public.group_members set wake_share_opt_in = false where group_id = $1 and user_id = $2`, [G, C]);
+  const offAgain = await fire();
+  return off === 0 && on === 1 && offAgain === 0 ? true : { off, on, offAgain };
+});
+await check('기상 신호: 서버(service_role)가 넣은 MISSED 기록도 같은 규칙으로 신호가 감 (wake-check)', async () => {
+  await clearSignals();
+  await svc();
+  await q(`insert into public.alarm_events (alarm_id, user_id, event_type) values ($1, $2, 'MISSED')`, [ids[B].alarm, B]);
+  const dongui = await signals();
+  await clearSignals();
+  await svc();
+  await q(`insert into public.alarm_events (alarm_id, user_id, event_type) values ($1, $2, 'MISSED')`, [ids[C].alarm, C]);   // 동의 안 한 C
+  const none = await signals();
+  return dongui.length === 1 && dongui[0].topic === `group:${G}:wake` && none.length === 0 ? true : { dongui, none };
+});
+await check('기상 신호: 동의했어도 그날 약속이 없는 그룹에는 안 가고, 약속이 없는 날의 기록에도 안 감 (매일 추적하지 않음, F4)', async () => {
   await as(B);
   const [{ group_id: G3 }] = await q(`insert into public.groups (group_name, owner_id) values ('약속 없는 그룹', $1) returning group_id`, [B]);
+  await q(`update public.group_members set wake_share_opt_in = true where group_id = $1 and user_id = $2`, [G3, B]);   // 동의는 했지만 약속이 없음
   await clearSignals();
   await as(B);
   await logEvent(B, ids[B].alarm, 'DISMISSED');
@@ -645,23 +677,23 @@ await check('기상 신호: 참여 중이어도 그날 약속이 없는 그룹�
   return today.length === 1 && today[0].topic === `group:${G}:wake` && yesterday.length === 0 ? true : { today, yesterday };
 });
 await check('기상 신호: 기상 알람의 울림 · 미루기 · 해제 · 미확인과 기상 확인만 보내고, 준비 알람 · 원탭 응답 · 도착 확인은 안 보냄', async () => {
-  await as(C);
+  await as(B);
   const [{ alarm_id: prep }] = await q(`insert into public.alarms (participant_id, user_id, alarm_type, scheduled_at)
-                                        values ($1, $2, 'PREPARE', ${KST0} + interval '08:30') returning alarm_id`, [ids[C].part, C]);
+                                        values ($1, $2, 'PREPARE', ${KST0} + interval '08:30') returning alarm_id`, [ids[B].part, B]);
   const sent = {};
   for (const [label, alarm, type] of [
-    ['WAKE 울림', ids[C].alarm, 'TRIGGERED'], ['WAKE 미루기', ids[C].alarm, 'SNOOZED'], ['WAKE 해제', ids[C].alarm, 'DISMISSED'],
-    ['WAKE 미확인', ids[C].alarm, 'MISSED'], ['WAKE 기상 확인', ids[C].alarm, 'WAKE_CONFIRMED'],
-    ['WAKE 원탭 응답', ids[C].alarm, 'ACKNOWLEDGED'], ['WAKE 도착 확인', ids[C].alarm, 'ARRIVAL_CONFIRMED'],
+    ['WAKE 울림', ids[B].alarm, 'TRIGGERED'], ['WAKE 미루기', ids[B].alarm, 'SNOOZED'], ['WAKE 해제', ids[B].alarm, 'DISMISSED'],
+    ['WAKE 미확인', ids[B].alarm, 'MISSED'], ['WAKE 기상 확인', ids[B].alarm, 'WAKE_CONFIRMED'],
+    ['WAKE 원탭 응답', ids[B].alarm, 'ACKNOWLEDGED'], ['WAKE 도착 확인', ids[B].alarm, 'ARRIVAL_CONFIRMED'],
     ['PREPARE 울림', prep, 'TRIGGERED'], ['PREPARE 원탭 응답', prep, 'ACKNOWLEDGED'], ['PREPARE 해제', prep, 'DISMISSED'],
     ['PREPARE 기상 확인', prep, 'WAKE_CONFIRMED'],
   ]) {
     await clearSignals();
-    await as(C);
-    await logEvent(C, alarm, type);
+    await as(B);
+    await logEvent(B, alarm, type);
     sent[label] = (await signals()).length;
   }
-  await as(C);
+  await as(B);
   await q(`delete from public.alarms where alarm_id = $1`, [prep]);
   const expected = { 'WAKE 울림': 1, 'WAKE 미루기': 1, 'WAKE 해제': 1, 'WAKE 미확인': 1, 'WAKE 기상 확인': 1, 'WAKE 원탭 응답': 0, 'WAKE 도착 확인': 0,
     'PREPARE 울림': 0, 'PREPARE 원탭 응답': 0, 'PREPARE 해제': 0, 'PREPARE 기상 확인': 1 };   // 기상 확인은 get_group_wake_status처럼 알람 종류를 안 봄
@@ -669,8 +701,8 @@ await check('기상 신호: 기상 알람의 울림 · 미루기 · 해제 · �
 });
 await check('기상 신호 받기: 그 그룹에 참여 중인 사람만 (비구성원 · 다른 그룹 · 이상한 채널 이름은 못 받음), 앱은 이 채널로 보낼 수 없음', async () => {
   await clearSignals();
-  await as(C);
-  await logEvent(C, ids[C].alarm, 'TRIGGERED');
+  await as(B);
+  await logEvent(B, ids[B].alarm, 'TRIGGERED');
   const seen = async (uid, topic) => {
     await as(uid);
     await q(`select set_config('realtime.topic', $1, false)`, [topic]);
@@ -857,8 +889,6 @@ await check('service_role은 RLS를 무시함 (Edge Function용)', async () => {
 // DB 보완 (10/15 작업 계획 P3) — 일정 없는 알람 · 기록 중복 방지 · 고친 값 기록 · G04 약속 정보 · 푸시 권한 · MISSED 후보 · 배치
 // ---------------------------------------------------------------------
 
-const svc = () => as(null, 'service_role');
-
 // 일정 없는 알람 (D46) — 서버(alarm-commit)만 만듦
 await check('일정 없는 알람: 약속 · 루틴이 둘 다 없는 알람을 서버가 만들고(기본 AUTO · 반복 규칙 저장), 앱의 직접 INSERT는 막고, 둘 다 있으면 막음', async () => {
   await svc();
@@ -909,7 +939,7 @@ await check('울림 기록: 같은 client_event_id는 on conflict do nothing으�
 
 // 고친 값 기록 (F5 · F9)
 let dEditLogs = 0;   // D의 고친 값 기록 수 — 탈퇴 검사에서 CASCADE로 지워졌는지 봄
-await check('고친 값 기록: 본인 이름으로 남기고 본인만 읽고 지움 (남의 이름 · 남의 일정 · 남의 알람은 못 붙임, 고치기 없음) · 지워진 일정 · 알람은 set null', async () => {
+await check('고친 값 기록: 본인 이름으로 남기고 되돌리기(고친 값 NULL)도 받고 본인만 읽고 지움 (남의 이름 · 남의 일정 · 남의 알람은 못 붙임, 고치기 없음) · 지워진 일정 · 알람은 set null', async () => {
   await as(A);
   const [log] = await q(`insert into public.user_edit_logs (appointment_id, alarm_id, screen, field, alarm_type, auto_value, edited_value)
      values ($1, $2, 'H03', 'buffer_minutes', 'WAKE', '10', '15') returning *`, [ids[A].appt, ids[A].alarm]);
@@ -925,7 +955,9 @@ await check('고친 값 기록: 본인 이름으로 남기고 본인만 읽고 �
   // 모양: 화면은 H03 · H05 · S01, 값 이름은 소문자 · 숫자 · _ (목록은 닫지 않음), 고친 값은 필수
   const badScreen = await expectErr(() => q(`insert into public.user_edit_logs (screen, field, edited_value) values ('H99', 'intensity', '1')`), /user_edit_logs_screen_check/);
   const badField = await expectErr(() => q(`insert into public.user_edit_logs (screen, field, edited_value) values ('H03', 'Buffer Minutes', '1')`), /user_edit_logs_field_format/);
-  const noValue = await expectErr(() => q(`insert into public.user_edit_logs (screen, field) values ('H03', 'intensity')`), /edited_value/);
+  // 되돌리기("자동으로 되돌리기")는 고친 값이 NULL — 앱이 JSON null을 보내면 PostgREST가 SQL NULL로 넣음
+  const [revert] = await q(`insert into public.user_edit_logs (screen, field, auto_value, edited_value) values ('H03', 'scheduled_at', '"07:00"', null) returning auto_value, edited_value`);
+  const [bare] = await q(`insert into public.user_edit_logs (screen, field) values ('H03', 'intensity') returning auto_value, edited_value`);
   const fields = ['buffer_minutes', 'prepare_minutes', 'travel_minutes', 'origin', 'transport', 'intensity', 'voice_tone', 'sound_key', 'alarm_enabled', 'scheduled_at'];
   for (const f of fields) await q(`insert into public.user_edit_logs (screen, field, edited_value) values ('H03', $1, '1')`, [f]);
   // 일정 · 알람이 지워져도 기록은 남음
@@ -945,9 +977,10 @@ await check('고친 값 기록: 본인 이름으로 남기고 본인만 읽고 �
     && obj.auto_value === null && obj.edited_value.at === '07:10'
     && others.length === 0 && upd === true && del.length === 0
     && forgeUser === true && forgeAlarm === true && forgeAppt === true
-    && badScreen === true && badField === true && noValue === true
-    && kept.length === 1 && kept[0].alarm_id === null && mine.n === 2 + fields.length + 1 && delMine.length === mine.n
-    ? true : { log, obj, others, upd, del, forgeUser, forgeAlarm, forgeAppt, badScreen, badField, noValue, kept, mine, delMine };
+    && badScreen === true && badField === true
+    && revert.auto_value === '07:00' && revert.edited_value === null && bare.auto_value === null && bare.edited_value === null
+    && kept.length === 1 && kept[0].alarm_id === null && mine.n === 2 + 2 + fields.length + 1 && delMine.length === mine.n
+    ? true : { log, obj, others, upd, del, forgeUser, forgeAlarm, forgeAppt, badScreen, badField, revert, bare, kept, mine, delMine };
 });
 
 // G04 약속 정보 (screen-data-map G04)
@@ -1023,7 +1056,7 @@ await check('푸시 권한 확인(can_send_push): ALARM_CHANGED는 보내는 사
 });
 
 // 기상 미확인 후보 (7.9.2)
-await check('MISSED 후보(find_missed_wake_alarms): 알람 시각 + 다시 울림(약 5 · 보통 10 · 강 9분) + 미루기 누적 + 30분이 지난 켜진 기상 알람만, 기상 확인 · 미확인 기록이 있으면 뺌', async () => {
+await check('MISSED 후보(find_missed_wake_alarms): 알람 시각 + 다시 울림 총 소요(끝난 뒤 간격 기준 약 11 · 보통 19 · 강 21분) + 미루기 누적 + 30분이 지난 켜진 기상 알람만, 기상 확인 · 미확인 기록이 있으면 뺌', async () => {
   const T = '2026-03-01 07:00:00+09';
   const at = (hhmm) => `2026-03-01 ${hhmm}:00+09`;
   await svc();
@@ -1056,7 +1089,13 @@ await check('MISSED 후보(find_missed_wake_alarms): 알람 시각 + 다시 울�
   await mk('disabled', A, { enabled: false });
   await mk('prepare', A, { type: 'PREPARE' });
   await mk('old', A, { when: '2026-02-27 07:00:00+09' });   // 알람 시각이 24시간보다 오래됨
+  // 해제(DISMISSED)만 · 원탭 응답(ACKNOWLEDGED)만 있는 알람은 기상 확인이 아니므로 미확인 대상 (7.9.2 "해제를 전제로 하지 않음" · SD-2)
+  const dismissedOnly = await mk('dismissedOnly', A);
+  await ev(dismissedOnly, A, 'DISMISSED', at('07:02'));
+  const ackOnly = await mk('ackOnly', A);
+  await ev(ackOnly, A, 'ACKNOWLEDGED', at('07:03'));
   await mk('dailyRecord', B);
+  await mk('dailyRecord2', B, { when: at('09:00') });   // 같은 사람의 두 번째 기상 알람 — 생활 기록 하나로 둘 다 확인된 것으로 봄
   await q(`insert into public.daily_records (user_id, record_date, wake_confirmed_at) values ($1, '2026-03-01', $2)`, [B, at('07:10')]);   // 이벤트가 없어도 생활 기록에 기상 확인이 있음
 
   const at_ = async (hhmm) => {
@@ -1064,18 +1103,22 @@ await check('MISSED 후보(find_missed_wake_alarms): 알람 시각 + 다시 울�
     const r = await q(`select * from public.find_missed_wake_alarms($1::timestamptz)`, [at(hhmm)]);
     return { rows: r, names: r.map((x) => label[x.alarm_id]).filter(Boolean).sort().join() };
   };
-  const t34 = await at_('07:34');
-  const t35 = await at_('07:35');
-  const t39 = await at_('07:39');
+  // 다시 울림 총 소요(첫 울림 시작 ~ 마지막 울림 끝): 약 3+5+3=11분 · 보통 3+5+3+5+3=19분 · 강 3×4 + 3×3=21분 (알람 코어와 같은 끝난 뒤 간격 기준)
+  // 판정 시각 = 알람 07:00 + 총 소요 + 미루기 + 30분 → soft 07:41 · normal류 07:49 · strong 07:51 · snoozed(미루기 15분) 07:56
   const t40 = await at_('07:40');
+  const t41 = await at_('07:41');
+  const t48 = await at_('07:48');
   const t49 = await at_('07:49');
-  const t50 = await at_('07:50');
+  const t51 = await at_('07:51');
+  const t55 = await at_('07:55');
+  const t56 = await at_('07:56');
+  const t100 = await at_('10:00');   // 두 번째 기상 알람(09:00)도 판정 시각(09:49)이 지남
   const byName = (res, n) => res.rows.find((x) => label[x.alarm_id] === n);
-  const s = byName(t35, 'soft');
-  const sn = byName(t50, 'snoozed');
-  const ap = byName(t40, 'normal');
-  const keys = t50.rows.map((x) => x.event_key);
-  const again = (await at_('07:50')).rows.map((x) => x.event_key);
+  const s = byName(t41, 'soft');
+  const sn = byName(t56, 'snoozed');
+  const ap = byName(t49, 'normal');
+  const keys = t56.rows.map((x) => x.event_key);
+  const again = (await at_('07:56')).rows.map((x) => x.event_key);
   await svc();
   const noArgs = await q(`select * from public.find_missed_wake_alarms()`);   // 안 주면 지금 기준 — 오류 없이 돎
 
@@ -1083,16 +1126,18 @@ await check('MISSED 후보(find_missed_wake_alarms): 알람 시각 + 다시 울�
   await q(`delete from public.appointments where appointment_id = $1`, [apId]);
   await q(`delete from public.daily_records where record_date = '2026-03-01'`);
   const iso = (t) => new Date(t).toISOString();
-  return t34.names === '' && t35.names === 'soft' && t39.names === 'soft,strong'
-    && t40.names === 'normal,prevDay,soft,strong' && t49.names === 'normal,prevDay,soft,strong' && t50.names === 'normal,prevDay,snoozed,soft,strong'
-    && s.rering_minutes === 5 && s.snooze_minutes === 0 && iso(s.missed_at) === iso(at('07:35')) && s.intensity === 'SOFT'
-    && sn.rering_minutes === 5 && sn.snooze_minutes === 15 && iso(sn.missed_at) === iso(at('07:50'))
-    && byName(t39, 'strong').rering_minutes === 9
+  const normalSet = 'ackOnly,dismissedOnly,normal,prevDay,soft';
+  return t40.names === '' && t41.names === 'soft' && t48.names === 'soft' && t49.names === normalSet
+    && t51.names === 'ackOnly,dismissedOnly,normal,prevDay,soft,strong' && t55.names === t51.names
+    && t56.names === 'ackOnly,dismissedOnly,normal,prevDay,snoozed,soft,strong' && t100.names === t56.names
+    && s.rering_minutes === 11 && s.snooze_minutes === 0 && iso(s.missed_at) === iso(at('07:41')) && s.intensity === 'SOFT'
+    && sn.rering_minutes === 11 && sn.snooze_minutes === 15 && iso(sn.missed_at) === iso(at('07:56'))
+    && byName(t49, 'normal').rering_minutes === 19 && byName(t51, 'strong').rering_minutes === 21
     && ap.appointment_id === apId && ap.group_id === G && iso(ap.appointment_at) === iso(at('10:00')) && ap.participant_id === ptId && ap.user_id === A
     && s.appointment_id === null && s.group_id === null
     && new Set(keys).size === keys.length && keys.every((k) => /^[0-9a-f-]{36}$/.test(k)) && JSON.stringify(keys) === JSON.stringify(again)
     && Array.isArray(noArgs)
-    ? true : { t34: t34.names, t35: t35.names, t39: t39.names, t40: t40.names, t49: t49.names, t50: t50.names, s, sn, ap, keys };
+    ? true : { t40: t40.names, t41: t41.names, t48: t48.names, t49: t49.names, t51: t51.names, t55: t55.names, t56: t56.names, t100: t100.names, normalSet, s, sn, ap, keys };
 });
 
 await check('서버 전용 함수(can_send_push · find_missed_wake_alarms · 배치 호출)는 service_role만 실행하고 앱(authenticated · anon)은 못 부름', async () => {
@@ -1125,15 +1170,16 @@ await check('배치 호출: Vault에 비밀값이 없으면 오류 없이 아무
   await q(`insert into vault.decrypted_secrets (name, decrypted_secret) values ('service_role_key', 'SECRET-KEY')`);
   await svc();
   const sent = (await q(`select private.invoke_edge_function('wake-check', '{"a":1}') as r`))[0].r;
+  const badName = (await q(`select private.invoke_edge_function('../auth/v1/admin') as r`))[0].r;   // 경로에 붙는 이름은 모양을 검사함
   await su();
   const calls = await q(`select url, headers, body from net.calls order by id`);
   await q(`delete from vault.decrypted_secrets`);
   await q(`truncate net.calls`);
   const c = calls[0] ?? {};
-  return none === null && onlyUrl === null && sent !== null && calls.length === 1
+  return none === null && onlyUrl === null && sent !== null && badName === null && calls.length === 1
     && c.url === 'https://abc.supabase.co/functions/v1/wake-check' && c.headers.Authorization === 'Bearer SECRET-KEY' && c.headers.apikey === 'SECRET-KEY'
     && c.headers['Content-Type'] === 'application/json' && c.body.a === 1
-    ? true : { none, onlyUrl, sent, calls };
+    ? true : { none, onlyUrl, sent, badName, calls };
 });
 await check('realtime · cron · Vault가 없는 DB에도 마이그레이션이 그대로 적용됨 (신호 트리거 · 정책 · 예약은 건너뛰고, 배치 호출은 오류 없이 null)', async () => {
   const bare = new PGlite();

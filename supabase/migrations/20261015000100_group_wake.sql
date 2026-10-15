@@ -189,7 +189,9 @@ $$;
 --   보내는 때  기상 알람의 울림 · 미루기 · 해제 · 미확인(MISSED), 알람 종류와 상관없는 기상 확인(WAKE_CONFIRMED)
 --              = get_group_wake_status의 결과가 바뀔 수 있는 기록과 같음
 --   보내는 곳  기록한 사람이 참여 중(JOINED)이고, 기록한 날(그 사람 시간대)에 약속이 있는 그룹만 (F4 — 매일 추적하지 않음)
---   기상 공유 동의(wake_share_opt_in)는 보지 않음 (D19 열림). 신호에는 누구의 기록인지가 없고, 값은 함수가 권한을 보고 줌
+--   기록한 사람이 그 그룹에서 기상 공유에 동의(wake_share_opt_in)했을 때만 (D19 결정 전 보수 기본값 — 신호가 온 시각 자체가 정보라서,
+--   동의 안 한 사람의 울림 · 해제 시각이 작은 그룹에서 새어 나가지 않게). 신호에는 누구의 기록인지가 없고, 값은 함수가 권한을 보고 줌
+--   D19가 정해지면 이 한 줄(아래 gm.wake_share_opt_in)만 고침. 대가: 친구 권한(FRIEND VIEW_WAKE)으로만 보는 사람은 실시간 새로 고침을 못 받음(직접 조회하면 보임)
 -- 받기: realtime.messages 정책 — 그 그룹에 참여 중인 사람만. 클라이언트가 이 채널로 보내는 정책은 없음
 -- 신호는 덤이라 보내기가 실패해도 기록(alarm_events) 저장은 막지 않음
 
@@ -231,6 +233,7 @@ begin
     from public.group_members gm
     where gm.user_id = new.user_id
       and gm.invite_status = 'JOINED'
+      and gm.wake_share_opt_in      -- D19 결정 전 보수 기본값
       and exists (
         select 1
         from public.appointments ap

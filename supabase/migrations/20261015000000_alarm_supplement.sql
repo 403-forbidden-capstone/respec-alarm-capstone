@@ -63,6 +63,7 @@ comment on column public.alarm_events.input_source    is '입력 출처 — 버�
 --   voice_tone · sound_key · alarm_enabled · scheduled_at 등)을 그대로 씀. 값 목록은 CHECK로 닫지 않음
 --   (D42 · D53 범위가 아직 움직이고, 새 값이 생길 때마다 마이그레이션을 내는 것을 피함) — 이름 모양(소문자 · 숫자 · _)만 막음
 -- auto_value · edited_value는 jsonb 한 칸에 값 하나(숫자 · 글자 · 시각 문자열) 또는 {...}를 넣음
+-- edited_value가 NULL이면 "자동으로 되돌림"(D42 C) — 직접 고른 값을 버리고 auto_value로 돌아간 기록
 
 create table public.user_edit_logs (
   edit_id        uuid primary key default gen_random_uuid(),
@@ -73,7 +74,7 @@ create table public.user_edit_logs (
   field          varchar(40) not null,                                -- 무엇을 고쳤는지 (앱 화면의 값 이름)
   alarm_type     public.alarm_type,                                   -- 알람 하나의 값이면 그 종류
   auto_value     jsonb,                                               -- 자동으로 계산했던 값 (없으면 NULL)
-  edited_value   jsonb not null,                                      -- 사용자가 고친 값
+  edited_value   jsonb,                                               -- 사용자가 고친 값 (NULL = 자동으로 되돌림, auto_value로 복귀)
   created_at     timestamptz not null default now(),
   constraint user_edit_logs_screen_check check (screen in ('H03', 'H05', 'S01')),
   constraint user_edit_logs_field_format check (field ~ '^[a-z][a-z0-9_]*$')

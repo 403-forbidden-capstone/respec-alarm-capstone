@@ -23,6 +23,11 @@ declare
   v_url text;
   v_key text;
 begin
+  -- 이름은 경로에 그대로 붙으므로 함수 이름 모양(소문자 · 숫자 · -)만 받음. 아니면 아래 exception에서 경고 + null
+  if p_name !~ '^[a-z0-9-]+$' then
+    raise exception '서버 함수 이름 모양이 아님: %', p_name;
+  end if;
+
   select ds.decrypted_secret into v_url from vault.decrypted_secrets ds where ds.name = 'project_url';
   select ds.decrypted_secret into v_key from vault.decrypted_secrets ds where ds.name = 'service_role_key';
 
@@ -133,9 +138,12 @@ $$;
 -- ---------------------------------------------------------------------
 -- 7장 7.9.2: 미확인 시각 = 알람 시각 + 안 끄면 다시 울림 총 소요(7.4.2) + 미루기 누적 + 30분
 --   같은 알람에 WAKE_CONFIRMED · MISSED가 없으면 MISSED로 기록. 끄지 않았거나 폰이 꺼져 있어도 판정함 (TRIGGERED 여부와 무관)
---   다시 울림 총 소요 (alarm-core.md #29 · 7장 7.4.2): 약(SOFT) 5분 뒤 1번 = 5분, 보통(NORMAL) 5분 간격 2번 = 10분,
---     강(STRONG) 3분 간격 3번 = 9분. (작성자 판단) 첫 울림을 시작한 때부터 마지막 다시 울림이 시작할 때까지의 간격만 더하고,
---     마지막 울림이 도는 최대 3분은 더하지 않음 — 30분 여유 안에 들어가고 문서가 어느 쪽인지 적지 않음
+--   다시 울림 총 소요 (alarm-core.md #29 · 7장 7.4.2): 첫 울림이 시작한 때부터 마지막 울림이 끝날 때까지. 울림은 1회 최대 3분이고,
+--     다시 울림 간격은 알람 코어와 같게 "울림이 끝난 뒤 쉬는 시간"으로 읽음 (지형님께 확인 중 — 바뀌면 아래 case 한 곳만 고침)
+--     약(SOFT)    울림 3 + 쉼 5 + 울림 3                     = 11분
+--     보통(NORMAL) 울림 3 + 쉼 5 + 울림 3 + 쉼 5 + 울림 3     = 19분
+--     강(STRONG)  울림 3 × 4 + 쉼 3 × 3                       = 21분
+--     (작성자 판단) 문서는 "5분 후 1회" · "3분 간격 3회"의 간격을 시작 기준으로 읽을 수도 있음(5 · 10 · 9분) — 30분 여유 안의 차이
 --   미루기 누적 = 그 알람의 SNOOZED 기록 snooze_minutes 합. 확인 알림에 응답이 없을 때의 재울림 항은 D2 결정 뒤에 더함 (지금은 0)
 -- 어느 회차의 기록인지(작성자 판단): 알람 시각 6시간 전부터의 기록만 봄 — 알람 행을 다음 회차로 재사용해도(D4 열림) 전날 기록을 안 섞음
 --   daily_records.wake_confirmed_at도 같은 구간이면 확인한 것으로 봄 (get_group_wake_status가 이벤트가 없으면 쓰는 값과 같게 — 그룹판과 푸시가 다르지 않게)
@@ -153,7 +161,7 @@ returns table (
   appointment_at  timestamptz,
   scheduled_at    timestamptz,
   intensity       public.alarm_intensity,
-  rering_minutes  integer,       -- 안 끄면 다시 울림 총 소요
+  rering_minutes  integer,       -- 안 끄면 다시 울림 총 소요 (첫 울림 시작 ~ 마지막 울림 끝)
   snooze_minutes  integer,       -- 미루기 누적
   missed_at       timestamptz,   -- 미확인 시각
   event_key       uuid
@@ -169,7 +177,7 @@ as $$
            a.participant_id,
            a.scheduled_at,
            a.intensity,
-           case a.intensity when 'SOFT' then 5 when 'NORMAL' then 10 else 9 end as rering_minutes,
+           case a.intensity when 'SOFT' then 11 when 'NORMAL' then 19 else 21 end as rering_minutes,
            coalesce((select sum(e.snooze_minutes)
                      from public.alarm_events e
                      where e.alarm_id = a.alarm_id
