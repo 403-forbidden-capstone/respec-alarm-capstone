@@ -202,11 +202,6 @@ export async function listEditLogs(): Promise<UserEditLog[]> {
   return db.editLogs.map((log) => ({ ...log }));
 }
 
-export async function saveBuffer(id: string, bufferMinutes: number) {
-  const a = find(id);
-  if (a) a.bufferMinutes = bufferMinutes;
-}
-
 // 일정의 알람 전체 켜기 · 끄기 (H01 · H02)
 export async function setAppointmentEnabled(id: string, enabled: boolean) {
   if (enabled) db.disabledAppointments.delete(id);
@@ -246,14 +241,20 @@ export async function saveAlarmSettings(id: string, draft: AlarmSettingsDraft): 
   if (draft.bufferMinutes !== a.bufferMinutes) log('buffer_minutes', a.bufferMinutes, draft.bufferMinutes);
   if (draft.origin !== a.origin) log('origin', a.origin, draft.origin);
   if (draft.transport !== a.transport) log('transport', a.transport, draft.transport);
-  if ((next.manual?.travelMinutes ?? null) !== (a.manual?.travelMinutes ?? null)) log('travel_minutes', autoTravel, next.manual?.travelMinutes ?? null);
-  if ((next.manual?.predictedPrepMinutes ?? null) !== (a.manual?.predictedPrepMinutes ?? null)) {
+  // 직접 고른 값이 새 자동값과 같아져 자동으로 돌아간 것(이동 수단을 바꿔 자동값이 따라온 경우 등)은 사용자가 되돌린 것이 아니라 기록하지 않음 — 초안의 값이 저장된 값과 다를 때만
+  const savedTravel = a.manual?.travelMinutes ?? null;
+  const savedPrepare = a.manual?.predictedPrepMinutes ?? null;
+  if ((next.manual?.travelMinutes ?? null) !== savedTravel && draft.travelMinutes !== savedTravel) {
+    log('travel_minutes', autoTravel, next.manual?.travelMinutes ?? null);
+  }
+  if ((next.manual?.predictedPrepMinutes ?? null) !== savedPrepare && draft.prepareMinutes !== savedPrepare) {
     log('prepare_minutes', autoPrepare, next.manual?.predictedPrepMinutes ?? null);
   }
   for (const kind of RING_KINDS) {
     const before = a.manual?.times?.[kind];
+    const typed = draft.times[kind];
     const picked = next.manual?.times?.[kind];
-    if (before?.getTime() === picked?.getTime()) continue;
+    if (before?.getTime() === picked?.getTime() || before?.getTime() === typed?.getTime()) continue;
     const alarm = after.alarms.find((x) => x.kind === kind);
     if (alarm) log('scheduled_at', alarm.auto ?? alarm.at, picked ?? null, { alarmId: alarm.id, alarmType: kind });
   }

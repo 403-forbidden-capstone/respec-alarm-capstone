@@ -408,6 +408,24 @@ describe('고친 값 기록 (user_edit_logs, 가짜)', () => {
     expect(await listEditLogs()).toEqual([]);
   });
 
+  // 직접 고른 값이 자동값과 같아지면 자동으로 둠 — 이동 수단을 바꿔 자동값이 따라와서 같아진 것은 사용자가 되돌린 것이 아니라 기록하지 않음
+  it('이동 수단을 바꿔 새 자동 기상이 직접 고른 기상과 같아져도 되돌린 기록은 없음', async () => {
+    await edit({ times: { WAKE: kst(22, 495) } }); // 기상 8:15를 직접 고름 (자동은 8:00)
+    db.editLogs.length = 0;
+    await edit({ transport: 'CAR' }); // 자동 이동이 35분이 되어 자동 기상도 8:15
+    expect((await getAppointment('a1'))!.edits.times).toEqual({});
+    expect((await listEditLogs()).map((l) => l.field)).toEqual(['transport']);
+  });
+
+  it('이동 수단을 바꿔 새 자동 이동이 직접 입력한 이동과 같아져도 되돌린 기록은 없음', async () => {
+    await edit({ travelMinutes: 35 }); // 이동 35분을 직접 고름 (자동은 50분)
+    db.editLogs.length = 0;
+    await edit({ transport: 'CAR' }); // 자동 이동이 35분
+    const a = (await getAppointment('a1'))!;
+    expect([a.edits.travelMinutes, a.travelSource]).toEqual([null, '길찾기']);
+    expect((await listEditLogs()).map((l) => l.field)).toEqual(['transport']);
+  });
+
   it('돌려주는 목록을 고쳐도 기록은 그대로, 다른 화면(S01)도 같은 기록 함수를 부름', async () => {
     await recordEdit({ screen: 'S01', field: 'scheduled_at', appointmentId: 'a3', alarmType: 'WAKE', autoValue: 'a', editedValue: 'b' });
     const logs = await listEditLogs();
