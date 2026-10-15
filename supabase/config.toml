@@ -386,6 +386,25 @@ deno_version = 2
 # [edge_runtime.secrets]
 # secret_key = "env(SECRET_VALUE)"
 
+# 서버 함수 (supabase/functions/<이름>/index.ts) — 배포는 터미널에서 (Actions 안 씀, supabase/README.md "서버 함수").
+# verify_jwt = 게이트웨이가 Authorization의 로그인 토큰(JWT)을 먼저 검사함. 앱이 부르는 함수는 켬(코드에서 auth.getUser로 한 번 더 확인).
+[functions.alarm-suggest]
+verify_jwt = true
+
+[functions.alarm-commit]
+verify_jwt = true
+
+[functions.place-search]
+verify_jwt = true
+
+[functions.notify]
+verify_jwt = true
+
+# wake-check는 pg_cron(pg_net)이 서비스 키로 부름. 키 형식이 legacy JWT(eyJ…)와 새 secret 키(sb_secret_…) 둘 다일 수 있어
+# 게이트웨이 검사를 끄고 코드(_shared/auth.ts requireServiceCall)에서 서비스 키와 직접 비교함
+[functions.wake-check]
+verify_jwt = false
+
 [analytics]
 enabled = true
 port = 54327
