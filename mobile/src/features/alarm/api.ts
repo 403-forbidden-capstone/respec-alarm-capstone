@@ -7,9 +7,11 @@ import { alarmChain, autoLevel, axisLevel } from '@/mocks/calc';
 import { db, people, places, timelines, transportFactor, type MockAppointment } from '@/mocks/data';
 
 import {
+  defaultAlarms,
   IMPORTANCE_POINT,
   KIND_LABEL,
   LEVELS,
+  RING_KINDS,
   WAKE_NO_REPLY_MINUTES,
   WAKE_OBSERVE_MINUTES,
   type AlarmKind,
@@ -65,9 +67,12 @@ function find(id: string) {
   return db.appointments.find((a) => a.id === id);
 }
 
-// 모든 일정의 알람 (H02) — 시각 순
+// 모든 일정의 알람 (H02) — 시각 순. 알람 없는 일정(H05에서 알람을 모두 끄고 저장)은 알람 목록에 없고 H01 일정 줄에만 보임
 export async function listAppointments(): Promise<Appointment[]> {
-  return db.appointments.map(toAppointment).sort(byTime);
+  return db.appointments
+    .map(toAppointment)
+    .filter((a) => a.alarms.length > 0)
+    .sort(byTime);
 }
 
 // 지금 이후 가장 먼저 울릴 알람 (H01) — 꺼진 일정 · 꺼진 종류 · 도착 목표는 뺌
@@ -84,21 +89,25 @@ export async function getNextAlarm(): Promise<NextAlarm | null> {
   return best;
 }
 
-// 하루 일정 (H01) — 알람 있는 일정 + 알람 없는 일정
+// 하루 일정 (H01) — 알람 있는 일정 + 알람 없는 일정 (둘 다 일정이고, 알람 없는 쪽은 hasAlarm이 false)
 export async function getDaySchedule(day: Date): Promise<ScheduleItem[]> {
-  const withAlarm = db.appointments
+  return db.appointments
     .filter((a) => isSameDay(a.at, day))
-    .map((a) => ({ appointmentId: a.id, at: a.at, title: a.title, place: a.place, importance: a.importance }));
-  const plain = db.plainSchedule
-    .filter((p) => isSameDay(p.at, day))
-    .map((p) => ({ appointmentId: null, at: p.at, title: p.title, place: null, importance: null }));
-  return [...withAlarm, ...plain].sort(byTime);
+    .map((a) => ({
+      appointmentId: a.id,
+      at: a.at,
+      title: a.title,
+      place: a.place,
+      importance: a.importance,
+      hasAlarm: alarmChain(a).length > 0,
+    }))
+    .sort(byTime);
 }
 
-// 알람 설정 (H03)
+// 알람 설정 (H03) — 알람 없는 일정은 열 알람이 없어 null (일정 수정 · 삭제를 어디서 할지는 D41이 정함)
 export async function getAppointment(id: string): Promise<AppointmentDetail | null> {
   const a = find(id);
-  if (!a) return null;
+  if (!a || !alarmChain(a).length) return null;
   const auto = autoLevel(a);
   const manual = db.intensityOverrides[a.id] ?? {};
   const axis = (key: IntensityAxis) => ({ level: manual[key] ?? auto, manual: manual[key] != null });
@@ -194,6 +203,7 @@ export function defaultDraft(day: Date, current = now()): AppointmentDraft {
     transport: 'TRANSIT',
     importance: 'LOW',
     items: '',
+    alarms: defaultAlarms(),
   };
 }
 
@@ -210,7 +220,8 @@ export async function estimateAppointment(d: AppointmentDraft): Promise<Estimate
   const at = draftAt(d.date, d.time);
   const place = places.find((p) => p.name === d.place) ?? places[0];
   const travel = Math.max(5, Math.round((place.travelMinutes * (transportFactor[d.transport] ?? 1)) / 5) * 5);
-  const sameDayWake = db.appointments.some((a) => isSameDay(a.at, at) && a.withWake && alarmChain(a)[0].at < at);
+  // 같은 날 앞선 일정에 기상 알람이 있으면 — 알람을 만들지 않은 일정(알람 없는 일정)은 기상 알람이 없어 세지 않음
+  const sameDayWake = db.appointments.some((a) => isSameDay(a.at, at) && alarmChain(a).some((x) => x.kind === 'WAKE' && x.at < at));
   const withWake = !sameDayWake;
   const common = withWake ? 50 : 15;
   const n = 10;
@@ -240,6 +251,7 @@ export async function estimateAppointment(d: AppointmentDraft): Promise<Estimate
       .map((s) => s.trim())
       .filter(Boolean),
     withWake,
+    kinds: RING_KINDS.filter((kind) => d.alarms[kind]),
   };
   return {
     appointment: toAppointment(draft),
@@ -276,6 +288,7 @@ export async function createAppointment(estimate: Estimate, source = '직접 입
     groupId: null,
     items: a.items,
     withWake: a.withWake,
+    kinds: ringingKinds(a.alarms).map((x) => x.kind as RingKind), // 만든 알람 종류 — 하나도 없으면 알람 없는 일정
   };
   db.appointments.push(saved);
   db.events.push({ at: now(), label: `일정 저장 · ${saved.title}`, source });
@@ -426,8 +439,10 @@ export async function getWakeCheck(alarmId?: string): Promise<WakeCheck | null> 
   const found = id
     ? findAlarm(id)
     : db.appointments
-        .map((a) => ({ a, alarm: alarmChain(a)[0] }))
-        .filter(({ alarm }) => alarm.kind === 'WAKE')
+        .flatMap((a) => {
+          const alarm = alarmChain(a).find((x) => x.kind === 'WAKE'); // 기상 알람이 없는 일정은 건너뜀
+          return alarm ? [{ a, alarm }] : [];
+        })
         .sort((x, y) => x.alarm.at.getTime() - y.alarm.at.getTime())[0];
   if (!found || found.alarm.kind !== 'WAKE') return null;
   const { a, alarm } = found;

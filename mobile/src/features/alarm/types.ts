@@ -16,6 +16,10 @@ export type IntensityAxis = 'sound' | 'voice' | 'vibration'; // 배경음 · 말
 
 export const KIND_LABEL: Record<AlarmKind, string> = { WAKE: '기상', PREPARE: '준비', DEPARTURE: '출발', ARRIVE: '도착' };
 
+// 새 일정(H05)에서 고르는 알람 종류 — 도착은 울리는 알람이 아니라 목표 시각이라 고르지 않음 (D46)
+export const RING_KINDS: readonly RingKind[] = ['WAKE', 'PREPARE', 'DEPARTURE'];
+export const defaultAlarms = (): Record<RingKind, boolean> => ({ WAKE: true, PREPARE: true, DEPARTURE: true });
+
 // 목업의 보통 · 중요 · 매우 중요 = DB LOW · NORMAL · HIGH
 export const IMPORTANCE_LABEL: Record<Importance, string> = { LOW: '보통', NORMAL: '중요', HIGH: '매우 중요' };
 export const IMPORTANCE_POINT: Record<Importance, number> = { LOW: 0, NORMAL: 1, HIGH: 2 };
@@ -67,16 +71,18 @@ export type Appointment = {
   items: string[]; // 준비물
   withWake: boolean; // 그날 첫 일정이라 기상 알람이 있음
   enabled: boolean; // 이 일정의 알람 전체 켜기
-  alarms: AlarmTime[]; // 기상 · 준비 · 출발 · 도착 목표, 시각 순
+  alarms: AlarmTime[]; // 기상 · 준비 · 출발 · 도착 목표 순 — H05에서 고른 종류만, 하나도 없으면 빈 목록(알람 없는 일정)
   level: Level; // 지금 적용되는 강도 (배경음 기준)
 };
 
+// 하루 일정 한 줄 (H01) — 알람 없는 일정도 일정이라 id가 있음. 알람 없는 줄은 누를 수 없음 (일정 수정 · 삭제는 D41이 정함)
 export type ScheduleItem = {
-  appointmentId: string | null; // 알람 없는 일정이면 null
+  appointmentId: string;
   at: Date;
   title: string;
-  place: string | null;
-  importance: Importance | null;
+  place: string;
+  importance: Importance;
+  hasAlarm: boolean; // 알람이 하나라도 있는 일정 — 없으면 H05에서 알람을 모두 끄고 저장한 일정
 };
 
 export type Intensity = {
@@ -113,6 +119,7 @@ export type AppointmentDraft = {
   transport: Transport;
   importance: Importance;
   items: string; // 쉼표로 구분
+  alarms: Record<RingKind, boolean>; // 만들 알람 종류 (D46) — 모두 끄면 알람 없는 일정
 };
 
 // 새 일정 알람 계산 결과 (H05 확인 시트) — 실데이터는 alarm-suggest Edge Function

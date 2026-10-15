@@ -1,7 +1,7 @@
 // ③ · ⑥ 목업 — 자기 전 AI 대화 대본 · 하루 기록(일기) · 루틴 제안 (AI 대기)
 // mockup.html의 SCRIPT · cardMsg · chatResolve · genJournal · rAccept를 옮김. 실제는 Gemini (voice-* · journal-* Edge, #42 · #48)
 // 화면은 이 파일을 직접 읽지 않고 features/voice/api.ts · features/routine/api.ts를 거침. 바꾼 값은 앱을 다시 열 때까지만 남음
-import type { AppointmentDraft } from '@/features/alarm/types';
+import { defaultAlarms, type AppointmentDraft } from '@/features/alarm/types';
 import type { ApplyStatus, JournalFact, Routine } from '@/features/routine/types';
 import { dateParts, formatTime, isSameDay, josa, minutesBetween } from '@/lib/format';
 
@@ -31,6 +31,7 @@ export const FOUND_DRAFT: AppointmentDraft = {
   transport: 'TRANSIT',
   importance: 'LOW',
   items: '노트북 충전기',
+  alarms: defaultAlarms(),
 };
 export const FOUND_QUESTION = '내일 오후 2시 스터디로 저장할까요?';
 
@@ -95,6 +96,11 @@ export function dayWord(at: Date) {
 // 저장했을 때 AI 답 — 준비(없으면 첫 알람) · 출발 알람 시각
 export function savedReply(at: Date, prepare: Date, depart: Date) {
   return `저장했어요. ${dayWord(at)} ${formatTime(prepare)} 준비, ${formatTime(depart)} 출발 알람을 맞춰 둘게요. 오늘 대화는 여기까지 할까요?`;
+}
+
+// H05에서 알람을 모두 끄고 저장했을 때 (D46) — 맞춰 둘 알람이 없음
+export function savedWithoutAlarmReply(at: Date) {
+  return `저장했어요. ${dayWord(at)} 일정은 알람 없이 저장해 둘게요. 오늘 대화는 여기까지 할까요?`;
 }
 
 export function rejectedReply(title: string) {

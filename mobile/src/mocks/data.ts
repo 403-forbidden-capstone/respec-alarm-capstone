@@ -1,7 +1,7 @@
 // 목업 시나리오 데이터 — mockup.html의 고정 데이터 · initState를 옮김 (2025년 5월 22일 목요일, 10시 팀 주간회의 예시)
 // 화면은 이 폴더를 직접 읽지 않고 features/*/api.ts를 거침. 기능별로 실데이터가 붙으면 그 부분을 지움
 // 바꾼 값(알람 켜기 · 권한 등)은 앱을 다시 열 때까지만 남음
-import type { Importance, IntensityAxis, Level, Transport, WakePhase } from '@/features/alarm/types';
+import type { Importance, IntensityAxis, Level, RingKind, Transport, WakePhase } from '@/features/alarm/types';
 import type { SuggestionStatus } from '@/features/records/types';
 import type { PermissionSet } from '@/features/social/types';
 
@@ -52,6 +52,8 @@ export type MockAppointment = {
   groupId: string | null;
   items: string[];
   withWake: boolean;
+  // 만든 알람 종류 (H05 알람 줄 · D46) — 없으면 계산된 알람 전부. 빈 목록 = 알람 없는 일정 (종류를 만들어 두고 끈 것과 다름)
+  kinds?: RingKind[];
 };
 
 export type MockGroup = { id: string; name: string; initial: string; members: string[]; since: string };
@@ -113,8 +115,13 @@ export const db = {
       travelMinutes: 50, travelSource: '길찾기 + 내 실측 5회', bufferMinutes: 10, beforePrepMinutes: 10, prepMinutes: 20,
       predictedPrepMinutes: 40, importance: 'NORMAL', recurrenceRule: 'FREQ=WEEKLY;BYDAY=FR', groupId: null, items: ['과제 출력물'], withWake: true,
     },
+    {
+      // 알람 없는 일정 — 일정은 있고 알람은 처음부터 만들지 않음 (H05에서 알람을 모두 끄고 저장한 것과 같은 모양)
+      id: 'a4', title: '치과 예약', at: kst(22, 930), place: '동네 치과', origin: '집', transport: 'TRANSIT',
+      travelMinutes: 20, travelSource: '길찾기', bufferMinutes: 10, beforePrepMinutes: 0, prepMinutes: 20,
+      predictedPrepMinutes: 25, importance: 'LOW', recurrenceRule: null, groupId: null, items: [], withWake: false, kinds: [],
+    },
   ] as MockAppointment[],
-  plainSchedule: [{ at: kst(22, 930), title: '치과 예약' }], // 알람 없는 일정
   disabledAppointments: new Set<string>(),
   disabledKinds: new Set<string>(), // `${일정 id}:${종류}`
   intensityOverrides: {} as Record<string, Partial<Record<IntensityAxis, Level>>>,

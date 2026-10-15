@@ -9,6 +9,7 @@ import { db, kst, timelines, TODAY, type MockAppointment } from './data';
 
 // ALG-01: 출발 = 약속 − 여유 − 이동, 기상 = 출발 − 예측 준비(P80)
 // 그날 첫 일정이 아니면(기상 알람 없음) 준비 알람만. 준비 알람은 기상 뒤 준비 전 활동만큼 뒤
+// a.kinds가 있으면 H05에서 고른 종류만 — 도착 목표는 울리는 알람이 하나라도 있을 때만, 하나도 없으면 빈 목록(알람 없는 일정)
 export function alarmChain(a: MockAppointment): AlarmTime[] {
   const depart = addMinutes(a.at, -(a.bufferMinutes + a.travelMinutes));
   const alarm = (kind: AlarmTime['kind'], at: Date): AlarmTime => ({
@@ -27,7 +28,10 @@ export function alarmChain(a: MockAppointment): AlarmTime[] {
   }
   list.push(alarm('DEPARTURE', depart));
   list.push(alarm('ARRIVE', addMinutes(a.at, -a.bufferMinutes)));
-  return list;
+  const kinds = a.kinds;
+  if (!kinds) return list;
+  const made = list.filter((x) => x.kind === 'ARRIVE' || kinds.includes(x.kind));
+  return made.some((x) => x.kind !== 'ARRIVE') ? made : [];
 }
 
 // ALG-02: 중요도 점수 + 최근 4주 늦잠 지각 2회 이상이면 1 → 0~2

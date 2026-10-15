@@ -8,6 +8,7 @@ import {
   rejectedReply,
   resolveFound,
   savedReply,
+  savedWithoutAlarmReply,
   SCRIPT,
   startChat,
   userTurn,
@@ -68,6 +69,10 @@ describe('AI 대화 대본', () => {
       '저장했어요. 내일 오후 12:15 준비, 오후 1:00 출발 알람을 맞춰 둘게요. 오늘 대화는 여기까지 할까요?',
     );
     expect(savedReply(kst(TODAY + 2, 840), kst(TODAY + 2, 735), kst(TODAY + 2, 780))).toMatch(/^저장했어요\. 5월 24일 /);
+  });
+
+  it('H05에서 알람을 모두 끄고 저장한 일정은 알람 시각 없이 답함 (D46)', () => {
+    expect(savedWithoutAlarmReply(kst(TODAY + 1, 840))).toBe('저장했어요. 내일 일정은 알람 없이 저장해 둘게요. 오늘 대화는 여기까지 할까요?');
   });
 });
 

@@ -14,11 +14,13 @@ import {
   draftAt,
   estimateAppointment,
   getAppointment,
+  getDaySchedule,
   getNextAlarm,
   getRing,
   getSnooze,
   getWakeCheck,
   getWakeInProgress,
+  listAppointments,
   missWake,
   promptWake,
   saveAlarmSettings,
@@ -91,6 +93,76 @@ describe('H05 반복 저장 (D44)', () => {
     expect((await getAppointment('a1'))!.repeatLabel).toBe('매주 목요일');
     expect((await getAppointment('a2'))!.repeatLabel).toBe('반복 없음');
     expect((await getAppointment('a3'))!.repeatLabel).toBe('매주 금요일');
+  });
+});
+
+describe('H05 알람 종류 고르기 · 알람 없는 일정 (D46)', () => {
+  const draftWith = (alarms: Partial<AppointmentDraft['alarms']>): AppointmentDraft => ({
+    ...defaultDraft(kst(24, 0), morning),
+    title: '스터디',
+    alarms: { WAKE: true, PREPARE: true, DEPARTURE: true, ...alarms },
+  });
+  const kindsOf = (alarms: { kind: string }[]) => alarms.map((x) => x.kind);
+
+  it('고른 종류만 만들고, 도착 목표는 울리는 알람이 하나라도 있을 때 붙음', async () => {
+    const all = await estimateAppointment(draftWith({}));
+    expect(kindsOf(all.appointment.alarms)).toEqual(['WAKE', 'PREPARE', 'DEPARTURE', 'ARRIVE']);
+
+    const noWake = await estimateAppointment(draftWith({ WAKE: false }));
+    expect(kindsOf(noWake.appointment.alarms)).toEqual(['PREPARE', 'DEPARTURE', 'ARRIVE']);
+    // 고르지 않은 종류가 있어도 나머지 알람 시각은 그대로
+    const time = (e: typeof all, kind: string) => e.appointment.alarms.find((x) => x.kind === kind)!.at;
+    expect(time(noWake, 'PREPARE')).toEqual(time(all, 'PREPARE'));
+    expect(time(noWake, 'DEPARTURE')).toEqual(time(all, 'DEPARTURE'));
+
+    const onlyDepart = await createAppointment(await estimateAppointment(draftWith({ WAKE: false, PREPARE: false })));
+    expect(kindsOf(onlyDepart.alarms)).toEqual(['DEPARTURE', 'ARRIVE']);
+    expect(db.appointments[db.appointments.length - 1].kinds).toEqual(['DEPARTURE']);
+  });
+
+  it('모두 끄면 알람 없는 일정 — 알람 목록 · 알람 설정에는 없고 하루 일정에만 보임', async () => {
+    const saved = await createAppointment(await estimateAppointment(draftWith({ WAKE: false, PREPARE: false, DEPARTURE: false })));
+    expect(saved.alarms).toEqual([]);
+    expect((await listAppointments()).map((a) => a.id)).not.toContain(saved.id);
+    expect(await getAppointment(saved.id)).toBeNull();
+    const day = await getDaySchedule(kst(24, 0));
+    expect(day.map((x) => [x.appointmentId, x.title, x.hasAlarm])).toEqual([[saved.id, '스터디', false]]);
+    expect(await getWakeCheck()).toBeNull(); // 기상 알람 없는 일정이 있어도 기상 확인은 그대로
+  });
+
+  it('시드의 알람 없는 일정(치과 예약)도 같은 모양의 일정 — 하루 일정에는 있고 알람 목록에는 없음', async () => {
+    const day = await getDaySchedule(kst(22, 0));
+    expect(day.map((x) => [x.title, x.hasAlarm])).toEqual([
+      ['팀 주간회의', true],
+      ['치과 예약', false],
+      ['저녁약속', true],
+    ]);
+    expect((await listAppointments()).map((a) => a.title)).toEqual(['팀 주간회의', '저녁약속', '수업']);
+  });
+
+  it('알람 없는 일정은 같은 날 기상 알람으로 세지 않음 — 뒤 일정이 기상 알람을 가짐', async () => {
+    await createAppointment(await estimateAppointment(draftWith({ WAKE: false, PREPARE: false, DEPARTURE: false })));
+    const later = { ...draftWith({}), time: '16:00' };
+    const e = await estimateAppointment(later);
+    expect([e.sameDayWake, kindsOf(e.appointment.alarms)[0]]).toEqual([false, 'WAKE']);
+
+    // 앞 일정에 기상 알람이 있으면 지금처럼 외출 준비만
+    db.appointments.length = SEED_COUNT;
+    await createAppointment(await estimateAppointment(draftWith({})));
+    const e2 = await estimateAppointment(later);
+    expect([e2.sameDayWake, kindsOf(e2.appointment.alarms)[0]]).toEqual([true, 'PREPARE']);
+  });
+
+  it('H03의 "종류를 모두 끔"은 알람을 만들어 둔 채 끈 것 — 알람 목록에 남고 다시 켤 수 있음', async () => {
+    const draft = (await getAppointment('a1'))!;
+    await saveAlarmSettings('a1', {
+      bufferMinutes: draft.bufferMinutes,
+      kinds: { WAKE: false, PREPARE: false, DEPARTURE: false },
+      levels: { sound: null, voice: null, vibration: null },
+    });
+    const off = (await listAppointments()).find((a) => a.id === 'a1')!;
+    expect([off.enabled, off.alarms.length]).toEqual([false, 4]);
+    expect(await getAppointment('a1')).not.toBeNull();
   });
 });
 

@@ -2,7 +2,7 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
-import { Button, Card, Chip, DateRow, Field, LoadError, Screen, Sheet, Text, toast, TopBar } from '@/components/ui';
+import { Button, Card, Chip, DateRow, Field, KeyValueRow, LoadError, Screen, Sheet, Text, toast, Toggle, TopBar } from '@/components/ui';
 import { createAppointment, defaultDraft, draftAt, estimateAppointment, listPlaces } from '@/features/alarm/api';
 import { useNow } from '@/features/alarm/hooks/useNow';
 import { ItemChips } from '@/features/alarm/components/ItemChips';
@@ -17,6 +17,7 @@ import {
   IMPORTANCE_POINT,
   KIND_LABEL,
   LEVELS,
+  RING_KINDS,
   TRANSPORT_LABEL,
   type Estimate,
   type Importance,
@@ -24,7 +25,7 @@ import {
 } from '@/features/alarm/types';
 import { foundScheduleDraft, saveFoundSchedule } from '@/features/voice/api';
 import { now } from '@/lib/clock';
-import { dayKey, formatDateShort, formatTime, formatTime24, startOfDay } from '@/lib/format';
+import { addMinutes, dayKey, formatDateShort, formatTime, formatTime24, startOfDay } from '@/lib/format';
 import { backOrHome } from '@/lib/nav';
 import { useAction } from '@/lib/useAction';
 import { useLeaveGuard } from '@/lib/useLeaveGuard';
@@ -72,11 +73,13 @@ export default function NewScheduleScreen() {
     repeatToRrule(draft.repeat) !== repeatToRrule(initial.repeat) ||
     draft.place !== initial.place ||
     draft.transport !== initial.transport ||
-    draft.importance !== initial.importance;
+    draft.importance !== initial.importance ||
+    RING_KINDS.some((kind) => draft.alarms[kind] !== initial.alarms[kind]);
   const { allowLeave } = useLeaveGuard(dirty, '입력한 일정이 사라져요.');
 
   const at = draftAt(draft.date, draft.time);
   const past = at.getTime() <= current.getTime();
+  const anyAlarm = RING_KINDS.some((kind) => draft.alarms[kind]); // 모두 끄면 알람 없는 일정 (D46)
 
   function calculate() {
     if (!draft.title.trim()) {
@@ -108,9 +111,11 @@ export default function NewScheduleScreen() {
       const rings = upcomingAlarms(saved.alarms, now()).length;
       const skipped = ringingKinds(saved.alarms).filter((x) => isPassed(x, now())).length;
       toast(
-        rings
-          ? `알람 ${rings}개를 맞췄어요${skipped ? ` · 지난 알람 ${skipped}개는 울리지 않아요` : ''}`
-          : '일정을 저장했어요 · 울릴 알람이 없어요',
+        !saved.alarms.length
+          ? '일정을 알람 없이 저장했어요'
+          : rings
+            ? `알람 ${rings}개를 맞췄어요${skipped ? ` · 지난 알람 ${skipped}개는 울리지 않아요` : ''}`
+            : '일정을 저장했어요 · 울릴 알람이 없어요',
       );
       setEstimate(null);
       allowLeave(); // 저장했으니 나가도 묻지 않음 — 나가는 동작보다 먼저
@@ -204,11 +209,34 @@ export default function NewScheduleScreen() {
         />
       </Card>
 
+      <Card>
+        <Text variant="label" tone="sub" style={styles.cardLabel}>
+          알람
+        </Text>
+        {RING_KINDS.map((kind, i) => (
+          <KeyValueRow
+            key={kind}
+            first={i === 0}
+            label={`${KIND_LABEL[kind]} 알람`}
+            value={
+              <Toggle
+                value={draft.alarms[kind]}
+                onChange={(on) => set('alarms', { ...draft.alarms, [kind]: on })}
+                label={`${KIND_LABEL[kind]} 알람`}
+              />
+            }
+          />
+        ))}
+        <Text variant="caption" tone="faint" style={styles.alarmNote}>
+          모두 끄면 알람 없이 일정만 저장해요.
+        </Text>
+      </Card>
+
       <View style={styles.stack}>
-        <Button label="알람 계산하기" onPress={calculate} loading={calculating} disabled={past} />
+        <Button label={anyAlarm ? '알람 계산하기' : '일정만 저장하기'} onPress={calculate} loading={calculating} disabled={past} />
       </View>
 
-      <Sheet visible={estimate != null} onClose={() => setEstimate(null)} title="알람을 이렇게 맞출게요">
+      <Sheet visible={estimate != null} onClose={() => setEstimate(null)} title={estimate && !estimate.appointment.alarms.length ? '일정을 이렇게 저장할게요' : '알람을 이렇게 맞출게요'}>
         {estimate ? <CalcSteps estimate={estimate} current={current} saving={saving} onSave={save} onEdit={() => setEstimate(null)} /> : null}
       </Sheet>
     </Screen>
@@ -230,10 +258,13 @@ function CalcSteps({
   onEdit: () => void;
 }) {
   const a = e.appointment;
-  const first = a.alarms[0];
   const arrive = a.alarms.find((x) => x.kind === 'ARRIVE');
   const rings = ringingKinds(a.alarms);
+  const alarmless = rings.length === 0; // 알람을 모두 끄고 저장하는 일정 (D46)
   const anyPassed = rings.some((x) => isPassed(x, current));
+  // 계산의 기준 시각 — 그날 첫 일정이면 기상, 아니면 준비. 그 알람을 안 만들어도 계산 시각은 같음
+  const baseKind = a.withWake ? 'WAKE' : 'PREPARE';
+  const base = addMinutes(a.at, -(a.bufferMinutes + a.travelMinutes + a.predictedPrepMinutes));
   const steps: [string, string][] = [
     [`이동시간 ${a.travelMinutes}분`, `카카오 길찾기 · ${TRANSPORT_LABEL[a.transport]} 최소 소요시간`],
     [`공통 P80 ${e.commonP80}분`, `분위수 회귀 τ = 0.8 · ${e.sameDayWake ? '같은 날 기상 알람이 있어 외출 준비만' : '기상부터 출발까지'}`],
@@ -242,7 +273,7 @@ function CalcSteps({
       `내 기록 ${e.sampleCount}건 · 가중치 ${e.sampleCount}÷(${e.sampleCount}+${e.prior}) = ${e.weight} × 개인 오차 P80 ${e.residualP80}분`,
     ],
     [
-      `${KIND_LABEL[first.kind]} ${formatTime(first.at)}`,
+      `${KIND_LABEL[baseKind]} ${formatTime(base)}`,
       `${formatTime(a.at)} − 여유 ${a.bufferMinutes} − 이동 ${a.travelMinutes} − 준비 ${a.predictedPrepMinutes}`,
     ],
     [
@@ -256,41 +287,49 @@ function CalcSteps({
       <Text variant="small" tone="sub">
         {a.title} · {formatDateShort(a.at)} {formatTime(a.at)} · {a.place}
       </Text>
-      <View style={styles.steps}>
-        {steps.map(([head, detail], i) => (
-          <View key={head} style={styles.step}>
-            <View style={styles.num}>
-              <Text variant="caption" tone="inverse" weight={600}>
-                {i + 1}
-              </Text>
-            </View>
-            <View style={styles.stepText}>
-              <Text variant="bodyStrong">{head}</Text>
-              <Text variant="label" tone="sub" style={styles.stepDetail}>
-                {detail}
-              </Text>
-            </View>
+      {alarmless ? (
+        <Text variant="note" tone="sub" style={styles.passedNote}>
+          알람 없이 일정만 저장해요.
+        </Text>
+      ) : (
+        <>
+          <View style={styles.steps}>
+            {steps.map(([head, detail], i) => (
+              <View key={head} style={styles.step}>
+                <View style={styles.num}>
+                  <Text variant="caption" tone="inverse" weight={600}>
+                    {i + 1}
+                  </Text>
+                </View>
+                <View style={styles.stepText}>
+                  <Text variant="bodyStrong">{head}</Text>
+                  <Text variant="label" tone="sub" style={styles.stepDetail}>
+                    {detail}
+                  </Text>
+                </View>
+              </View>
+            ))}
           </View>
-        ))}
-      </View>
-      {/* 울리는 알람만 칩으로 — 도착 목표는 알람이 아니라 아래 한 줄. 이미 지난 알람은 지남 */}
-      <View style={styles.chips}>
-        {rings.map((x) => (
-          <Chip key={x.kind} label={`${KIND_LABEL[x.kind]} ${formatTime(x.at)}${isPassed(x, current) ? ' · 지남' : ''}`} variant="fill" />
-        ))}
-      </View>
-      {anyPassed ? (
-        <Text variant="label" tone="warn" style={styles.passedNote}>
-          지난 알람은 울리지 않아요
-        </Text>
-      ) : null}
-      {arrive ? (
-        <Text variant="label" tone="sub" style={styles.passedNote}>
-          도착 목표 {formatTime(arrive.at)}
-        </Text>
-      ) : null}
+          {/* 울리는 알람만 칩으로 — 도착 목표는 알람이 아니라 아래 한 줄. 이미 지난 알람은 지남 */}
+          <View style={styles.chips}>
+            {rings.map((x) => (
+              <Chip key={x.kind} label={`${KIND_LABEL[x.kind]} ${formatTime(x.at)}${isPassed(x, current) ? ' · 지남' : ''}`} variant="fill" />
+            ))}
+          </View>
+          {anyPassed ? (
+            <Text variant="label" tone="warn" style={styles.passedNote}>
+              지난 알람은 울리지 않아요
+            </Text>
+          ) : null}
+          {arrive ? (
+            <Text variant="label" tone="sub" style={styles.passedNote}>
+              도착 목표 {formatTime(arrive.at)}
+            </Text>
+          ) : null}
+        </>
+      )}
       <View style={styles.stack}>
-        <Button label="알람 저장" onPress={onSave} loading={saving} />
+        <Button label={alarmless ? '일정 저장' : '알람 저장'} onPress={onSave} loading={saving} />
         <Button label="돌아가서 수정" variant="plain" onPress={onEdit} disabled={saving} />
       </View>
     </>
@@ -301,6 +340,8 @@ const styles = StyleSheet.create({
   title: { marginTop: 8, marginBottom: 4 },
   lead: { marginBottom: 18 },
   optLabel: { marginTop: 12, marginBottom: 8 },
+  cardLabel: { marginBottom: 8 },
+  alarmNote: { marginTop: 6 },
   error: { marginTop: -4, marginBottom: 6 },
   stack: { gap: 10, marginTop: 16 },
   steps: { marginVertical: 14 },

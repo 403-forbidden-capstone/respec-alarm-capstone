@@ -15,6 +15,7 @@ import {
   rejectedReply,
   resolveFound,
   savedReply,
+  savedWithoutAlarmReply,
   startChat,
   userTurn,
   writeJournal,
@@ -102,7 +103,9 @@ export async function saveFoundSchedule(estimate?: Estimate): Promise<Appointmen
   const saved = await createAppointment(e, estimate ? 'AI 대화 · 수정함' : 'AI 대화 · 확인함');
   const prepare = saved.alarms.find((x) => x.kind === 'PREPARE') ?? saved.alarms[0];
   const depart = saved.alarms.find((x) => x.kind === 'DEPARTURE') ?? prepare;
-  resolveFound(chat(), 'APPLIED', savedReply(saved.at, prepare.at, depart.at), now());
+  // H05 "수정"에서 알람을 모두 끄고 저장했으면 알려 줄 알람 시각이 없음 (D46)
+  const reply = prepare && depart ? savedReply(saved.at, prepare.at, depart.at) : savedWithoutAlarmReply(saved.at);
+  resolveFound(chat(), 'APPLIED', reply, now());
   return saved;
 }
 
