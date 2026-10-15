@@ -1,5 +1,6 @@
 // Supabase 마이그레이션 검사 — Docker 없이 PGlite(WASM Postgres)로 돌림
 //   1) Supabase 흉내: auth 스키마 · auth.uid() · anon / authenticated / service_role 역할 · 새 객체 자동 GRANT
+//      + Realtime · pg_cron · Vault · pg_net 이름 흉내 (마이그레이션이 부르는 realtime.send · cron.schedule · vault.decrypted_secrets · net.http_post)
 //   2) supabase/migrations/*.sql을 이름 순서대로 적용 (CLI처럼 파일 하나 = 트랜잭션 하나)
 //   3) RLS · 권한 · 함수 동작을 확인하고 항목마다 PASS / FAIL을 찍음. 하나라도 FAIL이면 종료 코드 1
 // 실행: npm ci && npm test   (다른 마이그레이션 폴더를 보려면 node db-check.mjs <폴더>)
@@ -18,6 +19,7 @@ const q = async (sql, params = []) => (await db.query(sql, params)).rows;
 const su = async () => {
   await db.exec('reset role');
   await db.query(`select set_config('request.jwt.claim.sub', '', false)`);
+  await db.query(`select set_config('realtime.topic', '', false)`);  // Realtime 채널 흉내도 비움
 };
 
 // uid로 로그인한 요청처럼 역할을 바꿈 (PostgREST가 하는 것과 같음)
@@ -61,7 +63,8 @@ function report() {
 // 1. Supabase 흉내
 // ---------------------------------------------------------------------
 
-await db.exec(`
+// auth 스키마 · 역할 · 기본 권한
+const AUTH_STUBS = `
   create schema auth;
   create table auth.users (id uuid primary key, email text, raw_user_meta_data jsonb default '{}'::jsonb);
   create function auth.uid() returns uuid language sql stable
@@ -77,7 +80,50 @@ await db.exec(`
   alter default privileges in schema public grant all on tables to anon, authenticated, service_role;
   alter default privileges in schema public grant all on sequences to anon, authenticated, service_role;
   alter default privileges in schema public grant all on functions to anon, authenticated, service_role;
-`);
+`;
+
+// Realtime · pg_cron · Vault · pg_net 흉내 — 마이그레이션이 부르는 이름 · 인자만 실제 Supabase와 같게 만듦
+//   realtime.send(payload, event, topic, private) · realtime.topic() · realtime.messages(extension 칸)
+//   cron.schedule(job_name, schedule, command) · vault.decrypted_secrets(name, decrypted_secret) · net.http_post(url, body, params, headers, timeout_milliseconds)
+//   불러 간 기록이 realtime.messages · cron.job · net.calls에 남아 아래 검사가 읽음
+const PLATFORM_STUBS = `
+  create schema realtime;
+  create table realtime.messages (
+    id bigserial primary key,
+    topic text not null,
+    extension text not null,
+    payload jsonb,
+    event text,
+    private boolean default false,
+    inserted_at timestamptz not null default now()
+  );
+  alter table realtime.messages enable row level security;
+  create function realtime.topic() returns text language sql stable
+    as $$ select nullif(current_setting('realtime.topic', true), '') $$;
+  create function realtime.send(payload jsonb, event text, topic text, private boolean default true) returns void language sql
+    as $$ insert into realtime.messages (topic, extension, payload, event, private) values (topic, 'broadcast', payload, event, private) $$;
+  grant usage on schema realtime to anon, authenticated, service_role;
+  grant select, insert on realtime.messages to anon, authenticated, service_role;
+  grant usage, select on sequence realtime.messages_id_seq to anon, authenticated, service_role;
+
+  create schema cron;
+  create table cron.job (jobid bigserial primary key, jobname text unique, schedule text not null, command text not null);
+  create function cron.schedule(job_name text, schedule text, command text) returns bigint language sql
+    as $$ insert into cron.job (jobname, schedule, command) values (job_name, schedule, command)
+          on conflict (jobname) do update set schedule = excluded.schedule, command = excluded.command returning jobid $$;
+
+  create schema vault;
+  create table vault.decrypted_secrets (name text primary key, decrypted_secret text);
+
+  create schema net;
+  create table net.calls (id bigserial primary key, url text, headers jsonb, body jsonb);
+  create function net.http_post(url text, body jsonb default '{}'::jsonb, params jsonb default '{}'::jsonb,
+                                headers jsonb default '{"Content-Type": "application/json"}'::jsonb, timeout_milliseconds integer default 5000)
+    returns bigint language sql
+    as $$ insert into net.calls (url, headers, body) values (url, headers, body) returning id $$;
+`;
+
+await db.exec(AUTH_STUBS + PLATFORM_STUBS);
 const [{ version }] = await q('select version()');
 console.log(version.split(' on ')[0] + '\n');
 
@@ -112,12 +158,12 @@ const TODAY = `(now() at time zone 'Asia/Seoul')::date`;
 // 회의 도구 테이블(결정 안건 페이지 /decisions — 의견 · 투표 · 상태)은 앱 데이터가 아니라 anon 규칙의 예외 — 아래 "회의 의견"에서 따로 확인
 const MEETING = ['decision_comments', 'decision_votes', 'decision_states'];
 
-await check('모든 public 테이블(앱 16개 + 회의 도구 3개)에 RLS가 켜져 있음', async () => {
+await check('모든 public 테이블(앱 17개 + 회의 도구 3개)에 RLS가 켜져 있음', async () => {
   const r = await q(`select c.relname, c.relrowsecurity from pg_class c join pg_namespace n on n.oid = c.relnamespace
                      where n.nspname = 'public' and c.relkind = 'r' order by 1`);
   const off = r.filter((x) => !x.relrowsecurity).map((x) => x.relname);
   const app = r.filter((x) => !MEETING.includes(x.relname)).length;
-  return app === 16 && r.length === 19 && off.length === 0 ? true : { count: r.length, app, off };
+  return app === 17 && r.length === 20 && off.length === 0 ? true : { count: r.length, app, off };
 });
 await check('모든 앱 테이블에 정책이 있고 anon용 정책은 없음', async () => {
   const r = await q(`select c.relname, count(p.polname) as n,
@@ -147,15 +193,17 @@ await check('anon은 함수를 실행할 수 없음', async () => {
                      where n.nspname in ('public', 'private') and has_function_privilege('anon', p.oid, 'execute')`);
   return r.length === 0 ? true : r;
 });
-await check('ENUM 19개 값이 4장과 같음 (NORMAL · DEPARTURE · FEEDBACK) + ACKNOWLEDGED', async () => {
+await check('ENUM 21개 값이 4장과 같음 (NORMAL · DEPARTURE · FEEDBACK) + ACKNOWLEDGED + 값 출처 · 기록 출처', async () => {
   const r = await q(`select t.typname, array_agg(e.enumlabel order by e.enumsortorder)::text as v
                      from pg_type t join pg_enum e on e.enumtypid = t.oid group by 1`);
   const m = Object.fromEntries(r.map((x) => [x.typname, x.v]));
-  const ok = Object.keys(m).length === 19
+  const ok = Object.keys(m).length === 21
     && m.importance_level === '{LOW,NORMAL,HIGH}'
     && m.alarm_type === '{WAKE,PREPARE,DEPARTURE,ARRIVE,ROUTINE}'
     && m.alarm_intensity === '{SOFT,NORMAL,STRONG}'
-    && m.alarm_event_type === '{TRIGGERED,SNOOZED,DISMISSED,WAKE_CONFIRMED,ARRIVAL_CONFIRMED,MISSED,FEEDBACK,ACKNOWLEDGED}';
+    && m.alarm_event_type === '{TRIGGERED,SNOOZED,DISMISSED,WAKE_CONFIRMED,ARRIVAL_CONFIRMED,MISSED,FEEDBACK,ACKNOWLEDGED}'
+    && m.alarm_value_source === '{AUTO,MANUAL}'
+    && m.event_input_source === '{BUTTON,LOCATION,VOICE,MANUAL,USAGE}';
   return ok ? true : m;
 });
 
@@ -382,7 +430,11 @@ await check('최종 권한 = 친구 ∪ 그룹 (그룹을 끄고 친구를 켜�
 // ---------------------------------------------------------------------
 // 오늘(한국) 이벤트: B는 울림 · 미루기 · 해제 · 기상 확인, C는 울림만, D는 울림 · 기상 확인
 // B는 그룹 권한 + 동의, C는 그룹 권한만, D는 동의만
+// 그룹 기상 상태는 그 그룹에 약속이 있는 날에만 나옴 (F4) → 오늘 10시 그룹 약속을 먼저 만들어 둠
 
+await as(A);
+await q(`insert into public.appointments (creator_id, group_id, title, appointment_at, dest_name)
+         values ($1, $2, '팀 모임(오늘)', ${KST0} + interval '10 hours', '세종대학교')`, [A, G]);
 await as(B);
 await q(`insert into public.alarm_events (alarm_id, user_id, event_type, event_at, snooze_minutes) values
   ($1, $2, 'TRIGGERED', ${KST0} + interval '07:30', null),
@@ -472,6 +524,50 @@ await check('WAKE_CONFIRMED 이벤트가 없으면 daily_records의 기상 확�
   return c && c.wake_status === 'CONFIRMED' && c.wake_confirmed_at ? true : c;
 });
 
+// F4: 그 그룹에 약속이 있는 날에만 그룹원 기상 상태가 나옴 (전체작업계획 8.1 F4 · D57)
+const wakeOn = async (uid, groupId, dateExpr) => {
+  await as(uid);
+  return q(`select * from public.get_group_wake_status($1, ${dateExpr})`, [groupId]);
+};
+await check('F4: 그 그룹에 약속이 없는 날(어제 · 내일)은 빈 결과, 약속을 만들면 그날부터 나옴', async () => {
+  const yesterday = await wakeOn(A, G, `${TODAY} - 1`);
+  const tomorrowBefore = await wakeOn(A, G, `${TODAY} + 1`);
+  await as(A);
+  await q(`insert into public.appointments (creator_id, group_id, title, appointment_at, dest_name)
+           values ($1, $2, '팀 모임(내일)', ${KST0} + interval '1 day 15 hours', '세종대학교')`, [A, G]);
+  const tomorrowAfter = await wakeOn(A, G, `${TODAY} + 1`);
+  const today = await wakeOn(A, G, TODAY);
+  return yesterday.length === 0 && tomorrowBefore.length === 0
+    && tomorrowAfter.some((x) => x.user_id === A && x.is_me) && today.some((x) => x.user_id === B)
+    ? true : { yesterday, tomorrowBefore, tomorrowAfter, today };
+});
+await check('F4: 약속이 한 번도 없는 그룹 · 다른 그룹의 약속만 있는 날도 빈 결과', async () => {
+  await as(A);
+  const [{ group_id: G2 }] = await q(`insert into public.groups (group_name, owner_id) values ('약속 없는 그룹', $1) returning group_id`, [A]);
+  const none = await wakeOn(A, G2, TODAY);
+  await as(A);
+  await q(`insert into public.appointments (creator_id, group_id, title, appointment_at, dest_name)
+           values ($1, $2, '다른 그룹 약속', ${KST0} + interval '3 days 10 hours', '세종대학교')`, [A, G2]);
+  const otherGroupOnly = await wakeOn(A, G, `${TODAY} + 3`);
+  const own = await wakeOn(A, G2, `${TODAY} + 3`);
+  await as(A);
+  await q(`delete from public.groups where group_id = $1`, [G2]);
+  return none.length === 0 && otherGroupOnly.length === 0 && own.length === 1 && own[0].wake_status === 'NO_ALARM'
+    ? true : { none, otherGroupOnly, own };
+});
+await check('F4: 약속 날짜는 호출자 시간대 기준 (한국 자정 직전 약속은 그날, 직후 약속은 다음날)', async () => {
+  await as(A);
+  await q(`insert into public.appointments (creator_id, group_id, title, appointment_at, dest_name) values
+    ($1, $2, '밤 약속', ${KST0} + interval '5 days 23 hours 59 minutes', 's'),
+    ($1, $2, '새벽 약속', ${KST0} + interval '7 days 1 minute', 's')`, [A, G]);
+  const d5 = await wakeOn(A, G, `${TODAY} + 5`);
+  const d6 = await wakeOn(A, G, `${TODAY} + 6`);
+  const d7 = await wakeOn(A, G, `${TODAY} + 7`);
+  await as(A);
+  await q(`delete from public.appointments where group_id = $1 and title in ('밤 약속', '새벽 약속')`, [G]);
+  return d5.length > 0 && d6.length === 0 && d7.length > 0 ? true : { d5: d5.length, d6: d6.length, d7: d7.length };
+});
+
 
 // ---------------------------------------------------------------------
 // 12. 공동 약속
@@ -504,6 +600,92 @@ await check('등록자도 약속을 다른 그룹으로 못 옮김 (group_id 고
   const [{ group_id: G2 }] = await q(`insert into public.groups (group_name, owner_id) values ('남의 그룹', $1) returning group_id`, [E]);
   await as(A);
   return expectErr(() => q(`update public.appointments set group_id = $1 where appointment_id = $2`, [G2, ids[A].appt]), /바꿀 수 없음/);
+});
+
+
+// ---------------------------------------------------------------------
+// 12-2. 기상 신호 (Q3 A) — alarm_events에 기상 기록이 들어오면 약속이 있는 그룹의 채널로 "새로 고침" 신호만
+// ---------------------------------------------------------------------
+// 채널 group:<group_id>:wake · 이벤트 refresh · 내용은 날짜뿐. realtime.send는 흉내(realtime.messages에 쌓음)
+
+const signals = async () => {
+  await su();
+  return q(`select topic, event, private, extension, payload from realtime.messages order by id`);
+};
+const clearSignals = async () => {
+  await su();
+  await q(`truncate realtime.messages`);
+};
+const logEvent = (uid, alarm, type, at = null) => q(
+  `insert into public.alarm_events (alarm_id, user_id, event_type${at ? ', event_at' : ''}) values ($1, $2, $3${at ? ', ' + at : ''})`, [alarm, uid, type]);
+
+await check('기상 신호: 기상 알람이 울리면 오늘 약속이 있는 그룹 채널로 refresh만 보냄 (날짜만 담고 누구의 기록인지는 안 담음)', async () => {
+  await clearSignals();
+  await as(C);
+  await logEvent(C, ids[C].alarm, 'TRIGGERED');
+  const r = await signals();
+  const [{ d }] = await q(`select ${TODAY}::text as d`);
+  return r.length === 1 && r[0].topic === `group:${G}:wake` && r[0].event === 'refresh' && r[0].private === true
+    && r[0].extension === 'broadcast' && JSON.stringify(r[0].payload) === JSON.stringify({ date: d })
+    ? true : r;
+});
+await check('기상 신호: 참여 중이어도 그날 약속이 없는 그룹에는 안 가고, 약속이 없는 날의 기록에도 안 감 (매일 추적하지 않음, F4)', async () => {
+  await as(B);
+  const [{ group_id: G3 }] = await q(`insert into public.groups (group_name, owner_id) values ('약속 없는 그룹', $1) returning group_id`, [B]);
+  await clearSignals();
+  await as(B);
+  await logEvent(B, ids[B].alarm, 'DISMISSED');
+  const today = await signals();
+  await clearSignals();
+  await as(B);
+  await logEvent(B, ids[B].alarm, 'DISMISSED', `${KST0} - interval '1 hour'`);   // 어제 밤 11시 — 어제는 이 그룹에 약속이 없음
+  const yesterday = await signals();
+  await as(B);
+  await q(`delete from public.groups where group_id = $1`, [G3]);
+  return today.length === 1 && today[0].topic === `group:${G}:wake` && yesterday.length === 0 ? true : { today, yesterday };
+});
+await check('기상 신호: 기상 알람의 울림 · 미루기 · 해제 · 미확인과 기상 확인만 보내고, 준비 알람 · 원탭 응답 · 도착 확인은 안 보냄', async () => {
+  await as(C);
+  const [{ alarm_id: prep }] = await q(`insert into public.alarms (participant_id, user_id, alarm_type, scheduled_at)
+                                        values ($1, $2, 'PREPARE', ${KST0} + interval '08:30') returning alarm_id`, [ids[C].part, C]);
+  const sent = {};
+  for (const [label, alarm, type] of [
+    ['WAKE 울림', ids[C].alarm, 'TRIGGERED'], ['WAKE 미루기', ids[C].alarm, 'SNOOZED'], ['WAKE 해제', ids[C].alarm, 'DISMISSED'],
+    ['WAKE 미확인', ids[C].alarm, 'MISSED'], ['WAKE 기상 확인', ids[C].alarm, 'WAKE_CONFIRMED'],
+    ['WAKE 원탭 응답', ids[C].alarm, 'ACKNOWLEDGED'], ['WAKE 도착 확인', ids[C].alarm, 'ARRIVAL_CONFIRMED'],
+    ['PREPARE 울림', prep, 'TRIGGERED'], ['PREPARE 원탭 응답', prep, 'ACKNOWLEDGED'], ['PREPARE 해제', prep, 'DISMISSED'],
+    ['PREPARE 기상 확인', prep, 'WAKE_CONFIRMED'],
+  ]) {
+    await clearSignals();
+    await as(C);
+    await logEvent(C, alarm, type);
+    sent[label] = (await signals()).length;
+  }
+  await as(C);
+  await q(`delete from public.alarms where alarm_id = $1`, [prep]);
+  const expected = { 'WAKE 울림': 1, 'WAKE 미루기': 1, 'WAKE 해제': 1, 'WAKE 미확인': 1, 'WAKE 기상 확인': 1, 'WAKE 원탭 응답': 0, 'WAKE 도착 확인': 0,
+    'PREPARE 울림': 0, 'PREPARE 원탭 응답': 0, 'PREPARE 해제': 0, 'PREPARE 기상 확인': 1 };   // 기상 확인은 get_group_wake_status처럼 알람 종류를 안 봄
+  return JSON.stringify(sent) === JSON.stringify(expected) ? true : sent;
+});
+await check('기상 신호 받기: 그 그룹에 참여 중인 사람만 (비구성원 · 다른 그룹 · 이상한 채널 이름은 못 받음), 앱은 이 채널로 보낼 수 없음', async () => {
+  await clearSignals();
+  await as(C);
+  await logEvent(C, ids[C].alarm, 'TRIGGERED');
+  const seen = async (uid, topic) => {
+    await as(uid);
+    await q(`select set_config('realtime.topic', $1, false)`, [topic]);
+    return (await q(`select id from realtime.messages`)).length;
+  };
+  const mine = `group:${G}:wake`;
+  const member = [await seen(A, mine), await seen(B, mine), await seen(C, mine)];
+  const outsider = await seen(E, mine);
+  const otherGroup = await seen(A, 'group:66666666-6666-4666-8666-666666666666:wake');
+  const weird = [await seen(A, 'group:not-a-uuid:wake'), await seen(A, `group:${G}`), await seen(A, 'room1'), await seen(A, '')];
+  await as(A);
+  await q(`select set_config('realtime.topic', $1, false)`, [mine]);
+  const send = await expectErr(() => q(`insert into realtime.messages (topic, extension, payload) values ($1, 'broadcast', '{}')`, [mine]), /row-level security/);
+  return member.every((n) => n === 1) && outsider === 0 && otherGroup === 0 && weird.every((n) => n === 0) && send === true
+    ? true : { member, outsider, otherGroup, weird, send };
 });
 
 
@@ -615,9 +797,8 @@ await check('ACKNOWLEDGED를 쓸 수 있음 · FEEDBACK은 평가 유형이 필�
     /idx_alarm_events_one_feedback|duplicate/);
   return ack.length === 1 && noType === true && twice === true ? true : { ack, noType, twice };
 });
-await check('4장 CHECK 제약 (알람 출처 · 루틴 단계 · 제안 결과 · 범위)', async () => {
+await check('4장 CHECK 제약 (알람 출처 · 루틴 단계 · 제안 결과 · 범위) — 출처 없는 알람(일정 없는 알람)은 D46으로 허용, 아래 "DB 보완"에서 확인', async () => {
   await su();
-  const noSrc = await expectErr(() => q(`insert into public.alarms (user_id, alarm_type, scheduled_at) values ($1, 'WAKE', now())`, [A]), /alarms_one_source/);
   const [{ routine_id: rt }] = await q(`insert into public.routines (user_id, title) values ($1, 't') returning routine_id`, [A]);
   const both = await expectErr(() => q(`insert into public.alarms (participant_id, routine_id, step_order, user_id, alarm_type, scheduled_at)
      values ($1, $2, 1, $3, 'ROUTINE', now())`, [ids[A].part, rt, A]), /alarms_one_source/);
@@ -631,8 +812,8 @@ await check('4장 CHECK 제약 (알람 출처 · 루틴 단계 · 제안 결과 
   const steps = await expectErr(() => q(`insert into public.routines (user_id, title, steps) values ($1, 't', '{}'::jsonb)`, [A]), /routines_steps_is_array/);
   const sat = await expectErr(() => q(`insert into public.daily_records (user_id, record_date, sleep_satisfaction) values ($1, '2026-01-01', 6)`, [A]),
     /daily_records_sleep_satisfaction_range/);
-  return [noSrc, both, noStep, sugg, resp, off, steps, sat].every((x) => x === true)
-    ? true : { noSrc, both, noStep, sugg, resp, off, steps, sat };
+  return [both, noStep, sugg, resp, off, steps, sat].every((x) => x === true)
+    ? true : { both, noStep, sugg, resp, off, steps, sat };
 });
 await check('v_prepare_time_stats는 본인 통계만 보임 (security_invoker)', async () => {
   for (const [u, mins] of [[A, [40, 50, 60]], [B, [30]]]) {
@@ -673,6 +854,302 @@ await check('service_role은 RLS를 무시함 (Edge Function용)', async () => {
 
 
 // ---------------------------------------------------------------------
+// DB 보완 (10/15 작업 계획 P3) — 일정 없는 알람 · 기록 중복 방지 · 고친 값 기록 · G04 약속 정보 · 푸시 권한 · MISSED 후보 · 배치
+// ---------------------------------------------------------------------
+
+const svc = () => as(null, 'service_role');
+
+// 일정 없는 알람 (D46) — 서버(alarm-commit)만 만듦
+await check('일정 없는 알람: 약속 · 루틴이 둘 다 없는 알람을 서버가 만들고(기본 AUTO · 반복 규칙 저장), 앱의 직접 INSERT는 막고, 둘 다 있으면 막음', async () => {
+  await svc();
+  const rule = 'FREQ=WEEKLY;BYDAY=MO,WE,FR';
+  const [made] = await q(`insert into public.alarms (user_id, alarm_type, scheduled_at, recurrence_rule) values ($1, 'WAKE', ${KST0} + interval '1 day 06:00', $2) returning *`, [A, rule]);
+  const [second] = await q(`insert into public.alarms (user_id, alarm_type, scheduled_at) values ($1, 'WAKE', ${KST0} + interval '1 day 06:10') returning alarm_id`, [A]);   // 유니크 제한 없음
+  await as(A);
+  const direct = await expectErr(() => q(`insert into public.alarms (user_id, alarm_type, scheduled_at) values ($1, 'WAKE', now())`, [A]), /row-level security/);
+  await su();
+  const [{ rt }] = await q(`insert into public.routines (user_id, title) values ($1, '일정 없는 알람 시험') returning routine_id as rt`, [A]);
+  const both = await expectErr(() => q(`insert into public.alarms (participant_id, routine_id, step_order, user_id, alarm_type, scheduled_at)
+     values ($1, $2, 1, $3, 'ROUTINE', now())`, [ids[A].part, rt, A]), /alarms_one_source/);
+  const longRule = await expectErr(() => q(`insert into public.alarms (user_id, alarm_type, scheduled_at, recurrence_rule) values ($1, 'WAKE', now(), $2)`, [A, 'x'.repeat(101)]), /value too long/);
+  const badSource = await expectErr(() => q(`insert into public.alarms (user_id, alarm_type, scheduled_at, time_source) values ($1, 'WAKE', now(), 'SOMETIMES')`, [A]), /invalid input value for enum/);
+  // 주인은 읽고 · 직접 고름으로 바꾸고 · 지울 수 있음, 일정에 붙일 수는 없음
+  await as(A);
+  const mine = await q(`select 1 from public.alarms where alarm_id = $1`, [made.alarm_id]);
+  const upd = await q(`update public.alarms set time_source = 'MANUAL', intensity_source = 'MANUAL' where alarm_id = $1 returning time_source, intensity_source`, [made.alarm_id]);
+  const attach = await expectErr(() => q(`update public.alarms set participant_id = $1 where alarm_id = $2`, [ids[A].part, made.alarm_id]), /바꿀 수 없음/);
+  const del = await q(`delete from public.alarms where alarm_id in ($1, $2) returning 1`, [made.alarm_id, second.alarm_id]);
+  await su();
+  await q(`delete from public.routines where routine_id = $1`, [rt]);
+  return made.participant_id === null && made.routine_id === null && made.time_source === 'AUTO' && made.intensity_source === 'AUTO' && made.recurrence_rule === rule
+    && direct === true && both === true && longRule === true && badSource === true
+    && mine.length === 1 && upd[0].time_source === 'MANUAL' && upd[0].intensity_source === 'MANUAL' && attach === true && del.length === 2
+    ? true : { made, direct, both, longRule, badSource, mine, upd, attach, del };
+});
+
+// 울림 기록 중복 방지 (Q11 A) · 입력 출처
+await check('울림 기록: 같은 client_event_id는 on conflict do nothing으로 한 번만 저장되고, 번호가 없는 기록은 여러 개 · 입력 출처는 5가지만', async () => {
+  const X = '99999999-9999-4999-8999-999999999999';
+  await as(A);
+  const ins = (extra = '', params = []) => q(`insert into public.alarm_events (alarm_id, user_id, event_type, client_event_id, input_source)
+    values ($1, $2, 'ACKNOWLEDGED', $3, $4) ${extra}`, [ids[A].alarm, A, ...params]);
+  const first = await ins('on conflict (client_event_id) do nothing returning event_id', [X, 'BUTTON']);
+  const again = await ins('on conflict (client_event_id) do nothing returning event_id', [X, 'LOCATION']);
+  const plain = await expectErr(() => ins('', [X, 'BUTTON']), /alarm_events_client_event_id_key|duplicate/);
+  const count = await q(`select input_source from public.alarm_events where client_event_id = $1`, [X]);
+  const noKey = await ins('returning event_id', [null, null]);
+  const noKey2 = await ins('returning event_id', [null, null]);
+  const sources = [];
+  for (const s of ['BUTTON', 'LOCATION', 'VOICE', 'MANUAL', 'USAGE']) sources.push((await ins('returning input_source', [null, s]))[0].input_source);
+  const bad = await expectErr(() => ins('', [null, 'GPS']), /invalid input value for enum/);
+  return first.length === 1 && again.length === 0 && plain === true && count.length === 1 && count[0].input_source === 'BUTTON'
+    && noKey.length === 1 && noKey2.length === 1 && sources.join() === 'BUTTON,LOCATION,VOICE,MANUAL,USAGE' && bad === true
+    ? true : { first, again, plain, count, noKey, noKey2, sources, bad };
+});
+
+// 고친 값 기록 (F5 · F9)
+let dEditLogs = 0;   // D의 고친 값 기록 수 — 탈퇴 검사에서 CASCADE로 지워졌는지 봄
+await check('고친 값 기록: 본인 이름으로 남기고 본인만 읽고 지움 (남의 이름 · 남의 일정 · 남의 알람은 못 붙임, 고치기 없음) · 지워진 일정 · 알람은 set null', async () => {
+  await as(A);
+  const [log] = await q(`insert into public.user_edit_logs (appointment_id, alarm_id, screen, field, alarm_type, auto_value, edited_value)
+     values ($1, $2, 'H03', 'buffer_minutes', 'WAKE', '10', '15') returning *`, [ids[A].appt, ids[A].alarm]);
+  const [obj] = await q(`insert into public.user_edit_logs (screen, field, edited_value) values ('S01', 'scheduled_at', '{"at":"07:10"}') returning auto_value, edited_value`);
+  await as(B);
+  const others = await q(`select 1 from public.user_edit_logs`);
+  const upd = await expectErr(() => q(`update public.user_edit_logs set field = 'x' where edit_id = $1`, [log.edit_id]), /permission denied/);
+  const del = await q(`delete from public.user_edit_logs where edit_id = $1 returning 1`, [log.edit_id]);
+  await as(A);
+  const forgeUser = await expectErr(() => q(`insert into public.user_edit_logs (user_id, screen, field, edited_value) values ($1, 'H03', 'intensity', '"STRONG"')`, [B]), /row-level security/);
+  const forgeAlarm = await expectErr(() => q(`insert into public.user_edit_logs (alarm_id, screen, field, edited_value) values ($1, 'H03', 'intensity', '"STRONG"')`, [ids[B].alarm]), /row-level security/);
+  const forgeAppt = await expectErr(() => q(`insert into public.user_edit_logs (appointment_id, screen, field, edited_value) values ($1, 'H03', 'intensity', '"STRONG"')`, [ids[B].appt]), /row-level security/);
+  // 모양: 화면은 H03 · H05 · S01, 값 이름은 소문자 · 숫자 · _ (목록은 닫지 않음), 고친 값은 필수
+  const badScreen = await expectErr(() => q(`insert into public.user_edit_logs (screen, field, edited_value) values ('H99', 'intensity', '1')`), /user_edit_logs_screen_check/);
+  const badField = await expectErr(() => q(`insert into public.user_edit_logs (screen, field, edited_value) values ('H03', 'Buffer Minutes', '1')`), /user_edit_logs_field_format/);
+  const noValue = await expectErr(() => q(`insert into public.user_edit_logs (screen, field) values ('H03', 'intensity')`), /edited_value/);
+  const fields = ['buffer_minutes', 'prepare_minutes', 'travel_minutes', 'origin', 'transport', 'intensity', 'voice_tone', 'sound_key', 'alarm_enabled', 'scheduled_at'];
+  for (const f of fields) await q(`insert into public.user_edit_logs (screen, field, edited_value) values ('H03', $1, '1')`, [f]);
+  // 일정 · 알람이 지워져도 기록은 남음
+  await svc();
+  const [{ alarm_id: tmp }] = await q(`insert into public.alarms (user_id, alarm_type, scheduled_at) values ($1, 'WAKE', now()) returning alarm_id`, [A]);
+  await as(A);
+  await q(`insert into public.user_edit_logs (alarm_id, screen, field, edited_value) values ($1, 'H03', 'alarm_enabled', 'false')`, [tmp]);
+  await q(`delete from public.alarms where alarm_id = $1`, [tmp]);
+  const kept = await q(`select alarm_id from public.user_edit_logs where field = 'alarm_enabled' and edited_value = 'false'::jsonb`);
+  const [mine] = await q(`select count(*)::int as n from public.user_edit_logs`);
+  const delMine = await q(`delete from public.user_edit_logs returning 1`);
+  // D의 기록은 탈퇴 검사(아래)에서 CASCADE로 지워지는지 봄
+  await as(D);
+  await q(`insert into public.user_edit_logs (screen, field, edited_value) values ('H05', 'prepare_minutes', '30')`);
+  dEditLogs = (await q(`select count(*)::int as n from public.user_edit_logs`))[0].n;
+  return log.user_id === A && log.auto_value === 10 && log.edited_value === 15 && log.alarm_type === 'WAKE' && log.created_at
+    && obj.auto_value === null && obj.edited_value.at === '07:10'
+    && others.length === 0 && upd === true && del.length === 0
+    && forgeUser === true && forgeAlarm === true && forgeAppt === true
+    && badScreen === true && badField === true && noValue === true
+    && kept.length === 1 && kept[0].alarm_id === null && mine.n === 2 + fields.length + 1 && delMine.length === mine.n
+    ? true : { log, obj, others, upd, del, forgeUser, forgeAlarm, forgeAppt, badScreen, badField, noValue, kept, mine, delMine };
+});
+
+// G04 약속 정보 (screen-data-map G04)
+await check('G04 약속 정보: 조회 권한(친구 · 그룹)을 받은 사람의 알람 약속만 제목 · 장소 · 시각으로 나옴 — 권한 없음 · 외부인 · 약속 없는 알람 · 권한 회수 뒤는 안 나옴', async () => {
+  await svc();
+  await q(`insert into public.alarms (user_id, alarm_type, scheduled_at) values ($1, 'WAKE', ${KST0} + interval '9 hours')`, [B]);   // B의 일정 없는 알람
+  await as(A);
+  const before = await q(`select * from public.get_shared_alarm_appointments()`);
+  await as(B);
+  const [{ permission_id: pf }] = await q(`insert into public.sharing_permissions (owner_id, grantee_id, source_type, source_id, can_view_alarm)
+     values ($1, $2, 'FRIEND', $3, true) returning permission_id`, [B, A, fAB]);
+  await as(A);
+  const all = await q(`select * from public.get_shared_alarm_appointments()`);
+  const byB = await q(`select * from public.get_shared_alarm_appointments($1)`, [B]);
+  const byC = await q(`select * from public.get_shared_alarm_appointments($1)`, [C]);
+  await as(E);
+  const outsider = await q(`select * from public.get_shared_alarm_appointments()`);
+  await as(C);
+  const stranger = await q(`select * from public.get_shared_alarm_appointments()`);   // C는 아무도에게 알람 조회 권한을 못 받음
+  await as(B);
+  await q(`delete from public.sharing_permissions where permission_id = $1`, [pf]);
+  await as(A);
+  const revoked = await q(`select * from public.get_shared_alarm_appointments()`);
+  // 그룹으로 받은 조회 권한도 같음
+  await as(B);
+  await q(`update public.sharing_permissions set can_view_alarm = true where permission_id = $1`, [pGroupBA]);
+  await as(A);
+  const viaGroup = await q(`select * from public.get_shared_alarm_appointments()`);
+  await as(B);
+  await q(`update public.sharing_permissions set can_view_alarm = false where permission_id = $1`, [pGroupBA]);
+  await svc();
+  await q(`delete from public.alarms where user_id = $1 and participant_id is null and routine_id is null`, [B]);
+  const row = all[0] ?? {};
+  return before.length === 0 && all.length === 1 && byB.length === 1 && byC.length === 0
+    && row.alarm_id === ids[B].alarm && row.user_id === B && row.appointment_id === ids[B].appt
+    && row.title === '개인 일정' && row.dest_name === '세종대학교' && row.appointment_at
+    && Object.keys(row).sort().join() === 'alarm_id,appointment_at,appointment_id,dest_name,title,user_id'
+    && outsider.length === 0 && stranger.length === 0 && revoked.length === 0 && viaGroup.length === 1 && viaGroup[0].alarm_id === ids[B].alarm
+    ? true : { before, all, byB, byC, outsider, stranger, revoked, viaGroup };
+});
+
+// 푸시 보내도 되는지 (notify)
+await check('푸시 권한 확인(can_send_push): ALARM_CHANGED는 보내는 사람이 받는 사람 알람의 설정 권한(친구 ∪ 그룹)을 가졌을 때만, WAKE_PING은 D19 뒤라 항상 거절', async () => {
+  const can = async (s, t, k) => {
+    await svc();
+    return (await q(`select public.can_send_push($1, $2, $3) as ok`, [s, t, k]))[0].ok;
+  };
+  const none = await can(A, B, 'ALARM_CHANGED');
+  await as(B);
+  const [{ permission_id: pe }] = await q(`insert into public.sharing_permissions (owner_id, grantee_id, source_type, source_id, can_view_alarm, can_edit_alarm, can_view_wake)
+     values ($1, $2, 'FRIEND', $3, true, true, true) returning permission_id`, [B, A, fAB]);
+  const yes = await can(A, B, 'ALARM_CHANGED');
+  const reverse = await can(B, A, 'ALARM_CHANGED');
+  const stranger = await can(A, C, 'ALARM_CHANGED');
+  const ping = await can(A, B, 'WAKE_PING');
+  const unknown = await can(A, B, 'SOMETHING');
+  const nulls = [await can(null, B, 'ALARM_CHANGED'), await can(A, null, 'ALARM_CHANGED'), await can(A, B, null)];
+  await as(B);
+  await q(`update public.sharing_permissions set can_edit_alarm = false where permission_id = $1`, [pe]);
+  const viewOnly = await can(A, B, 'ALARM_CHANGED');
+  await as(B);
+  await q(`update public.sharing_permissions set can_edit_alarm = true where permission_id = $1`, [pGroupBA]);   // 그룹으로 받은 설정 권한
+  const viaGroup = await can(A, B, 'ALARM_CHANGED');
+  await as(B);
+  await q(`update public.sharing_permissions set can_edit_alarm = false where permission_id = $1`, [pGroupBA]);
+  await q(`delete from public.sharing_permissions where permission_id = $1`, [pe]);
+  const after = await can(A, B, 'ALARM_CHANGED');
+  await as(A);
+  const app = await expectErr(() => q(`select public.can_send_push($1, $2, 'ALARM_CHANGED')`, [A, B]), /permission denied for function/);
+  return none === false && yes === true && reverse === false && stranger === false && ping === false && unknown === false
+    && nulls.every((x) => x === false) && viewOnly === false && viaGroup === true && after === false && app === true
+    ? true : { none, yes, reverse, stranger, ping, unknown, nulls, viewOnly, viaGroup, after, app };
+});
+
+// 기상 미확인 후보 (7.9.2)
+await check('MISSED 후보(find_missed_wake_alarms): 알람 시각 + 다시 울림(약 5 · 보통 10 · 강 9분) + 미루기 누적 + 30분이 지난 켜진 기상 알람만, 기상 확인 · 미확인 기록이 있으면 뺌', async () => {
+  const T = '2026-03-01 07:00:00+09';
+  const at = (hhmm) => `2026-03-01 ${hhmm}:00+09`;
+  await svc();
+  const label = {};
+  const mk = async (name, user, { intensity = 'NORMAL', type = 'WAKE', enabled = true, when = T, participant = null } = {}) => {
+    const [{ alarm_id }] = await q(`insert into public.alarms (participant_id, user_id, alarm_type, scheduled_at, intensity, is_enabled)
+      values ($1, $2, $3, $4, $5, $6) returning alarm_id`, [participant, user, type, when, intensity, enabled]);
+    label[alarm_id] = name;
+    return alarm_id;
+  };
+  const ev = (alarm, user, type, when, snooze = null) => q(
+    `insert into public.alarm_events (alarm_id, user_id, event_type, event_at, snooze_minutes) values ($1, $2, $3, $4, $5)`, [alarm, user, type, when, snooze]);
+  // 공동 약속에 붙은 기상 알람 (약속 정보를 같이 돌려주는지)
+  const [{ appointment_id: apId }] = await q(`insert into public.appointments (creator_id, group_id, title, appointment_at, dest_name)
+     values ($1, $2, '시험 약속', $3, '세종대학교') returning appointment_id`, [A, G, at('10:00')]);
+  const [{ participant_id: ptId }] = await q(`insert into public.appointment_participants (appointment_id, user_id) values ($1, $2) returning participant_id`, [apId, A]);
+
+  const soft = await mk('soft', A, { intensity: 'SOFT' });
+  const strong = await mk('strong', A, { intensity: 'STRONG' });
+  const normal = await mk('normal', A, { participant: ptId });
+  const snoozed = await mk('snoozed', A, { intensity: 'SOFT' });
+  await ev(snoozed, A, 'SNOOZED', at('07:01'), 5);
+  await ev(snoozed, A, 'SNOOZED', at('07:06'), 10);
+  const prevDay = await mk('prevDay', A);   // 전날 기록은 이번 회차로 안 셈
+  await ev(prevDay, A, 'WAKE_CONFIRMED', '2026-02-28 07:05:00+09');
+  const confirmed = await mk('confirmed', A);
+  await ev(confirmed, A, 'WAKE_CONFIRMED', at('07:20'));
+  const missed = await mk('missed', A);
+  await ev(missed, A, 'MISSED', at('07:41'));
+  await mk('disabled', A, { enabled: false });
+  await mk('prepare', A, { type: 'PREPARE' });
+  await mk('old', A, { when: '2026-02-27 07:00:00+09' });   // 알람 시각이 24시간보다 오래됨
+  await mk('dailyRecord', B);
+  await q(`insert into public.daily_records (user_id, record_date, wake_confirmed_at) values ($1, '2026-03-01', $2)`, [B, at('07:10')]);   // 이벤트가 없어도 생활 기록에 기상 확인이 있음
+
+  const at_ = async (hhmm) => {
+    await svc();
+    const r = await q(`select * from public.find_missed_wake_alarms($1::timestamptz)`, [at(hhmm)]);
+    return { rows: r, names: r.map((x) => label[x.alarm_id]).filter(Boolean).sort().join() };
+  };
+  const t34 = await at_('07:34');
+  const t35 = await at_('07:35');
+  const t39 = await at_('07:39');
+  const t40 = await at_('07:40');
+  const t49 = await at_('07:49');
+  const t50 = await at_('07:50');
+  const byName = (res, n) => res.rows.find((x) => label[x.alarm_id] === n);
+  const s = byName(t35, 'soft');
+  const sn = byName(t50, 'snoozed');
+  const ap = byName(t40, 'normal');
+  const keys = t50.rows.map((x) => x.event_key);
+  const again = (await at_('07:50')).rows.map((x) => x.event_key);
+  await svc();
+  const noArgs = await q(`select * from public.find_missed_wake_alarms()`);   // 안 주면 지금 기준 — 오류 없이 돎
+
+  await q(`delete from public.alarms where alarm_id = any($1::uuid[])`, [Object.keys(label)]);
+  await q(`delete from public.appointments where appointment_id = $1`, [apId]);
+  await q(`delete from public.daily_records where record_date = '2026-03-01'`);
+  const iso = (t) => new Date(t).toISOString();
+  return t34.names === '' && t35.names === 'soft' && t39.names === 'soft,strong'
+    && t40.names === 'normal,prevDay,soft,strong' && t49.names === 'normal,prevDay,soft,strong' && t50.names === 'normal,prevDay,snoozed,soft,strong'
+    && s.rering_minutes === 5 && s.snooze_minutes === 0 && iso(s.missed_at) === iso(at('07:35')) && s.intensity === 'SOFT'
+    && sn.rering_minutes === 5 && sn.snooze_minutes === 15 && iso(sn.missed_at) === iso(at('07:50'))
+    && byName(t39, 'strong').rering_minutes === 9
+    && ap.appointment_id === apId && ap.group_id === G && iso(ap.appointment_at) === iso(at('10:00')) && ap.participant_id === ptId && ap.user_id === A
+    && s.appointment_id === null && s.group_id === null
+    && new Set(keys).size === keys.length && keys.every((k) => /^[0-9a-f-]{36}$/.test(k)) && JSON.stringify(keys) === JSON.stringify(again)
+    && Array.isArray(noArgs)
+    ? true : { t34: t34.names, t35: t35.names, t39: t39.names, t40: t40.names, t49: t49.names, t50: t50.names, s, sn, ap, keys };
+});
+
+await check('서버 전용 함수(can_send_push · find_missed_wake_alarms · 배치 호출)는 service_role만 실행하고 앱(authenticated · anon)은 못 부름', async () => {
+  const fns = ['public.can_send_push(uuid,uuid,text)', 'public.find_missed_wake_alarms(timestamptz,integer)',
+    'private.invoke_edge_function(text,jsonb)', 'private.granted_owner_ids_for(uuid,text)'];
+  const r = await q(`select f, has_function_privilege('authenticated', f, 'execute') as a, has_function_privilege('anon', f, 'execute') as n,
+                            has_function_privilege('service_role', f, 'execute') as s from unnest($1::text[]) f`, [fns]);
+  const app = await q(`select has_function_privilege('authenticated', 'public.get_shared_alarm_appointments(uuid)', 'execute') as a,
+                              has_function_privilege('anon', 'public.get_shared_alarm_appointments(uuid)', 'execute') as n`);
+  const bad = r.filter((x) => x.a || x.n || !x.s);
+  return r.length === fns.length && bad.length === 0 && app[0].a === true && app[0].n === false ? true : { bad, app };
+});
+
+// 배치 (Q5 A) — pg_cron · pg_net은 PGlite에 없어 cron.schedule · net.http_post 흉내로 확인
+await check('배치 예약: wake-check를 5분마다 (PGlite에는 pg_cron · pg_net이 없어 확장은 건너뛰고 예약만 흉내에 들어감)', async () => {
+  const jobs = await q(`select jobname, schedule, command from cron.job order by jobname`);
+  const ext = await q(`select extname from pg_extension where extname in ('pg_cron', 'pg_net')`);
+  return jobs.length === 1 && jobs[0].jobname === 'wake-check' && jobs[0].schedule === '*/5 * * * *'
+    && jobs[0].command === `select private.invoke_edge_function('wake-check')` && ext.length === 0
+    ? true : { jobs, ext };
+});
+await check('배치 호출: Vault에 비밀값이 없으면 오류 없이 아무것도 안 하고(null), 둘 다 있으면 프로젝트 주소/functions/v1/wake-check로 service_role 키를 실어 POST', async () => {
+  await svc();
+  const none = (await q(`select private.invoke_edge_function('wake-check') as r`))[0].r;
+  await su();
+  await q(`insert into vault.decrypted_secrets (name, decrypted_secret) values ('project_url', 'https://abc.supabase.co/')`);
+  await svc();
+  const onlyUrl = (await q(`select private.invoke_edge_function('wake-check') as r`))[0].r;
+  await su();
+  await q(`insert into vault.decrypted_secrets (name, decrypted_secret) values ('service_role_key', 'SECRET-KEY')`);
+  await svc();
+  const sent = (await q(`select private.invoke_edge_function('wake-check', '{"a":1}') as r`))[0].r;
+  await su();
+  const calls = await q(`select url, headers, body from net.calls order by id`);
+  await q(`delete from vault.decrypted_secrets`);
+  await q(`truncate net.calls`);
+  const c = calls[0] ?? {};
+  return none === null && onlyUrl === null && sent !== null && calls.length === 1
+    && c.url === 'https://abc.supabase.co/functions/v1/wake-check' && c.headers.Authorization === 'Bearer SECRET-KEY' && c.headers.apikey === 'SECRET-KEY'
+    && c.headers['Content-Type'] === 'application/json' && c.body.a === 1
+    ? true : { none, onlyUrl, sent, calls };
+});
+await check('realtime · cron · Vault가 없는 DB에도 마이그레이션이 그대로 적용됨 (신호 트리거 · 정책 · 예약은 건너뛰고, 배치 호출은 오류 없이 null)', async () => {
+  const bare = new PGlite();
+  try {
+    await bare.exec(AUTH_STUBS);
+    for (const f of readdirSync(MIG_DIR).filter((x) => x.endsWith('.sql')).sort()) await bare.exec(readFileSync(join(MIG_DIR, f), 'utf8'));
+    const [{ n }] = (await bare.query(`select count(*)::int as n from pg_trigger where tgname = 'send_wake_signal'`)).rows;
+    const [{ r }] = (await bare.query(`select private.invoke_edge_function('wake-check') as r`)).rows;
+    return n === 0 && r === null ? true : { n, r };
+  } finally {
+    await bare.close();
+  }
+});
+
+
+// ---------------------------------------------------------------------
 // 17. 관계가 끝날 때 · 탈퇴
 // ---------------------------------------------------------------------
 
@@ -695,6 +1172,13 @@ await check('그룹 나가기(LEFT): 그 그룹에서 받은 · 준 권한 행�
   const r = await wake(A);
   return left.length === 0 && !r.some((x) => x.user_id === B) ? true : { left, r };
 });
+await check('기상 신호: 그룹을 나간(LEFT) 사람의 기상 기록은 그 그룹 채널로 안 감', async () => {
+  await clearSignals();
+  await as(B);
+  await logEvent(B, ids[B].alarm, 'TRIGGERED');
+  const r = await signals();
+  return r.length === 0 ? true : r;
+});
 await check('나간 사람이 코드로 다시 들어오면 JOINED이고 기상 공유 동의는 꺼짐', async () => {
   await as(B);
   const [g] = await q(`select public.join_group_by_invite_code($1) as g`, [code]);
@@ -709,6 +1193,11 @@ await check('탈퇴(auth 계정 삭제)는 CASCADE로 지워지고 초대 코드
                             (select count(*) from public.alarms where user_id = $1)::int as a,
                             (select invite_code from public.groups where group_id = $2) as code`, [D, G]);
   return r[0].p === 0 && r[0].m === 0 && r[0].a === 0 && r[0].code === code ? true : r;
+});
+await check('탈퇴하면 고친 값 기록도 CASCADE로 지워짐', async () => {
+  await su();
+  const [r] = await q(`select count(*)::int as n from public.user_edit_logs where user_id = $1`, [D]);
+  return dEditLogs === 1 && r.n === 0 ? true : { dEditLogs, r };
 });
 await check('그룹 삭제: 그 그룹에서 나온 권한 행이 모두 지워지고 코드 교체 트리거도 오류 없이 넘어감', async () => {
   await su();
