@@ -61,6 +61,9 @@ const INTENSITIES: { value: AlarmIntensity; label: string }[] = [
 
 const USAGE_LOOKBACK_MINUTES = 30;
 
+// 웹 · iOS는 메모리 대체(예약 목록 · 기록)를 눌러 볼 수 있고, 모듈이 없는 Android APK만 막음
+const CAN_TRY = isAvailable || Platform.OS !== 'android';
+
 export default function AlarmTestScreen() {
   const [alarms, setAlarms] = useState<ScheduledAlarm[]>([]);
   const [events, setEvents] = useState<AlarmEvent[]>([]);
@@ -118,7 +121,9 @@ export default function AlarmTestScreen() {
       const status = await schedule(testPackage(type, at, `테스트 ${label} (${minutes}분)`, intensity));
       setMessage(
         status === 'scheduled'
-          ? `${formatTime(at)}에 울림 (${type}${type === 'WAKE' ? ` · ${intensity}` : ''}). 화면을 끄고 기다려 주세요.`
+          ? isAvailable
+            ? `${formatTime(at)}에 울림 (${type}${type === 'WAKE' ? ` · ${intensity}` : ''}). 화면을 끄고 기다려 주세요.`
+            : `${formatTime(at)} 예약을 목록에만 올림 (웹 · iOS 메모리 대체라 울리지 않음)`
           : '시각이 지나서 예약하지 않음 (skipped_past)',
       );
     } catch (error) {
@@ -135,7 +140,7 @@ export default function AlarmTestScreen() {
         return;
       }
       await ringNow(testPackage(type, nowMillis(), `지금 울리기 (${type})`, intensity));
-      setMessage(`${type} 알람을 바로 울림`);
+      setMessage(isAvailable ? `${type} 알람을 바로 울림` : `${type} 울림 기록만 남김 (웹 · iOS 메모리 대체라 소리는 안 남)`);
     } catch (error) {
       setMessage(`울리기 실패: ${errorText(error)}`);
     }
@@ -250,13 +255,13 @@ export default function AlarmTestScreen() {
               key={kind.type}
               title={`1분 뒤: ${kind.label}`}
               onPress={() => scheduleTest(kind.type, 1)}
-              disabled={!isAvailable}
+              disabled={!CAN_TRY}
             />
           ))}
           <Button
             title="5분 뒤 기상 알람 (재부팅 확인용)"
             onPress={() => scheduleTest('WAKE', 5)}
-            disabled={!isAvailable}
+            disabled={!CAN_TRY}
           />
         </View>
 
@@ -267,11 +272,11 @@ export default function AlarmTestScreen() {
               key={kind.type}
               title={`지금: ${kind.label}`}
               onPress={() => ringTest(kind.type)}
-              disabled={!isAvailable}
+              disabled={!CAN_TRY}
             />
           ))}
-          <Button title="울리는 알람 끄기 (해제 처리)" onPress={stopRinging} disabled={!isAvailable} />
-          <Button title="모든 알람 취소" color="#B42318" onPress={cancelEverything} disabled={!isAvailable} />
+          <Button title="울리는 알람 끄기 (해제 처리)" onPress={stopRinging} disabled={!CAN_TRY} />
+          <Button title="모든 알람 취소" color="#B42318" onPress={cancelEverything} disabled={!CAN_TRY} />
           {message ? <Text style={styles.message}>{message}</Text> : null}
         </View>
 
@@ -311,7 +316,7 @@ export default function AlarmTestScreen() {
           <Button
             title="서버에 올렸다 치고 지우기"
             onPress={clearEvents}
-            disabled={!isAvailable || events.length === 0}
+            disabled={!CAN_TRY || events.length === 0}
           />
         </View>
 
