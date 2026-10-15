@@ -35,7 +35,6 @@ const TIMES = [
 
 const LINKS = [
   ['/board', '개발 보드'],
-  ['/lab/', 'AI 실험실'],
   ['/dev/ui', 'UI 부품'],
 ] as const;
 

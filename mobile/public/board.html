@@ -201,7 +201,6 @@ input.tok{font:inherit;font-size:13px;border:1px solid var(--line2);border-radiu
   <h1>Re:Spec 개발 보드</h1>
   <span class="meta" id="meta"></span>
   <span class="meta" id="syncMeta"></span>
-  <a class="in" href="/lab/" target="_blank" rel="noopener" title="AI 프롬프트 실험 · 가상 유저 대화 · 진행 현황" style="white-space:nowrap">AI 실험실</a>
   <button id="btnSync">동기화</button>
   <button id="btnSide">앱 보기</button>
 </div>
@@ -443,7 +442,7 @@ const CHECKS = [
   // ── AI · 루틴
   { id: 'C18', area: 'AI · 루틴', name: 'AI 대화 → 일정 추출 → 알람 저장', screens: ['A02', 'H05'], start: '/ai',
     web: { st: 'part', ev: '10/10 흐름 확인 #106 1 · 2 · 3 — 대본 고정, 입력과 무관하게 같은 응답' }, phone: { st: 'unk', ev: '마이크 · 음성 합성 미구현' },
-    server: { st: 'no', ev: 'AI 호출 · 대화 저장 없음 — AI 대기 (#37 #42). 프롬프트는 AI 실험실에서 실험 중' }, test: { st: 'ok', ev: 'voice/api 대본 흐름 · mocks/ai 대본' },
+    server: { st: 'no', ev: 'AI 호출 · 대화 저장 없음 — AI 대기 (#37 #42)' }, test: { st: 'ok', ev: 'voice/api 대본 흐름 · mocks/ai 대본' },
     how: ['"A02 AI 대화" → "말하기" → 내 발화 → AI 응답', '"텍스트" → 보내기 → 카드 "대화에서 찾은 내용" 스터디 · 5월 23일 오후 2:00 · 학교 도서관 · 노트북 충전기', '"저장" → "스터디 알람을 맞췄어요" → 홈 "알람 전체"에 스터디 12:40 · 1:05 / "수정" → 새 일정 화면에 값 채워짐 / "저장 안 함"'],
     issues: [37, 42], dec: ['D7', 'D32', 'D36'] },
   { id: 'C19', area: 'AI · 루틴', name: '대화 종료 → 일기 · 오늘의 사실 · 루틴 제안', screens: ['A03', 'A02'], start: '/ai',
@@ -513,7 +512,7 @@ const SETUP = [
 ];
 const LINKS = [
   ['앱 (웹 미리보기 · 목업 데이터)', SITE.web + '/?mode=mock'], ['화면 목록 /dev/screens', SITE.web + '/dev/screens?mode=mock'], ['UI 부품 /dev/ui', SITE.web + '/dev/ui'],
-  ['AI 실험실 /lab', SITE.web + '/lab/'], ['클릭 목업 (구버전 · 참고)', SITE.web + '/mockup.html'],
+  ['클릭 목업 (구버전 · 참고)', SITE.web + '/mockup.html'],
   ['레포', `https://github.com/${SITE.org}/${SITE.repo}`], ['Pull Requests', `https://github.com/${SITE.org}/${SITE.repo}/pulls`],
   ['보드 (Projects)', `https://github.com/orgs/${SITE.org}/projects/${SITE.project}`], ['결정 안건 /decisions', SITE.web + '/decisions/'], ['결정 문서 docs/decisions.md', `https://github.com/${SITE.org}/${SITE.repo}/blob/main/docs/decisions.md`],
   ['최신 APK (Releases)', `https://github.com/${SITE.org}/${SITE.repo}/releases/latest`],
