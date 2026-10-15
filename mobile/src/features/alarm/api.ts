@@ -2,21 +2,26 @@
 // 지금은 src/mocks의 가짜 데이터를 돌려주고, Supabase가 붙으면 이 파일 안에서만 바꿉니다.
 //   읽기 · 쓰기 위치는 docs/screen-data-map.md (H01 · H02 · H03 · H05 · H07 · H08)
 import { now } from '@/lib/clock';
+import { UserError } from '@/lib/errors';
 import { addMinutes, isSameDay, josa, joinKo, minuteOfDay, spokenTime, startOfDay } from '@/lib/format';
 import { alarmChain, autoLevel, axisLevel } from '@/mocks/calc';
-import { db, people, places, timelines, transportFactor, type MockAppointment } from '@/mocks/data';
+import { awayFromHomeFactor, db, people, places, timelines, transportFactor, type MockAppointment } from '@/mocks/data';
 
 import {
   defaultAlarms,
   IMPORTANCE_POINT,
   KIND_LABEL,
   LEVELS,
+  MANUAL_SOURCE,
+  ORIGIN_HOME,
   RING_KINDS,
   WAKE_NO_REPLY_MINUTES,
   WAKE_OBSERVE_MINUTES,
+  type AlarmEdits,
   type AlarmKind,
+  type AlarmPreview,
   type AlarmSettingsDraft,
-  type AlarmTime,
+  type EditLogField,
   type Appointment,
   type AppointmentDetail,
   type AppointmentDraft,
@@ -29,8 +34,11 @@ import {
   type RingKind,
   type ScheduleItem,
   type Snooze,
+  type Transport,
+  type UserEditLog,
   type WakeCheck,
 } from './types';
+import { manualTimes, orderError } from './adjust';
 import { repeatLabel, repeatToRrule, rruleToRepeat } from './repeat';
 import { initialTime, ringingKinds } from './schedule';
 import { thetaReachedAt, usageSummary, type UseSpan } from './wake';
@@ -43,12 +51,12 @@ function toAppointment(a: MockAppointment): Appointment {
     place: a.place,
     origin: a.origin,
     transport: a.transport,
-    travelMinutes: a.travelMinutes,
-    travelSource: a.travelSource,
+    travelMinutes: a.manual?.travelMinutes ?? a.travelMinutes, // 직접 입력했으면 그 값 (D42 C)
+    travelSource: a.manual?.travelMinutes != null ? MANUAL_SOURCE : a.travelSource,
     bufferMinutes: a.bufferMinutes,
     beforePrepMinutes: a.beforePrepMinutes,
     prepMinutes: a.prepMinutes,
-    predictedPrepMinutes: a.predictedPrepMinutes,
+    predictedPrepMinutes: a.manual?.predictedPrepMinutes ?? a.predictedPrepMinutes,
     importance: a.importance,
     repeatLabel: repeatLabel(rruleToRepeat(a.recurrenceRule)),
     recurrenceRule: a.recurrenceRule,
@@ -120,13 +128,78 @@ export async function getAppointment(id: string): Promise<AppointmentDetail | nu
       latePoint: db.lateCount4w >= 2 ? 1 : 0,
       axes: { sound: axis('sound'), voice: axis('voice'), vibration: axis('vibration') },
     },
+    edits: {
+      bufferMinutes: a.bufferMinutes,
+      origin: a.origin,
+      transport: a.transport,
+      travelMinutes: a.manual?.travelMinutes ?? null,
+      prepareMinutes: a.manual?.predictedPrepMinutes ?? null,
+      times: { ...a.manual?.times },
+    },
+    auto: { travelMinutes: a.travelMinutes, predictedPrepMinutes: a.predictedPrepMinutes },
   };
 }
 
-// 여유 시간을 바꾸면 알람이 어떻게 되는지 (저장 전 미리 보기) — 실데이터는 alarm-suggest
-export async function previewAlarms(id: string, bufferMinutes: number): Promise<AlarmTime[]> {
+// 가짜 길찾기 — 장소 · 이동 수단 · 출발 위치로 이동시간(분)을 셈 (5분 단위). 실데이터는 alarm-suggest(카카오). 모르는 장소는 null
+function mockTravel(placeName: string, transport: Transport, origin: string): number | null {
+  const place = places.find((p) => p.name === placeName);
+  if (!place) return null;
+  const minutes = place.travelMinutes * (transportFactor[transport] ?? 1) * (origin === ORIGIN_HOME ? 1 : awayFromHomeFactor);
+  return Math.max(5, Math.round(minutes / 5) * 5);
+}
+
+// 고친 값(초안)을 반영한 일정 (H03) — 저장 전 미리 보기와 저장이 같은 계산을 씀
+//   출발 위치 · 이동 수단이 바뀌면 이동시간을 다시 계산(자동값), 직접 입력한 이동 · 준비 · 알람 시각은 자동 계산보다 먼저
+//   자동 계산값과 같은 값은 직접 고른 것이 아니라 자동으로 둠
+function withEdits(a: MockAppointment, e: AlarmEdits) {
+  const moved = e.origin !== a.origin || e.transport !== a.transport;
+  const autoTravel = moved ? (mockTravel(a.place, e.transport, e.origin) ?? a.travelMinutes) : a.travelMinutes;
+  const autoPrepare = a.predictedPrepMinutes;
+  const manual: NonNullable<MockAppointment['manual']> = {};
+  if (e.travelMinutes != null && e.travelMinutes !== autoTravel) manual.travelMinutes = e.travelMinutes;
+  if (e.prepareMinutes != null && e.prepareMinutes !== autoPrepare) manual.predictedPrepMinutes = e.prepareMinutes;
+  const edited: MockAppointment = {
+    ...a,
+    bufferMinutes: e.bufferMinutes,
+    origin: e.origin,
+    transport: e.transport,
+    travelMinutes: autoTravel,
+    travelSource: moved ? '길찾기' : a.travelSource,
+    manual: { ...manual, times: e.times },
+  };
+  const times = manualTimes(alarmChain(edited)); // 자동값과 같아진 시각은 뺌
+  const kept = { ...manual, ...(Object.keys(times).length ? { times } : {}) };
+  return { appointment: { ...edited, manual: Object.keys(kept).length ? kept : undefined }, autoTravel, autoPrepare };
+}
+
+// 값을 바꾸면 알람이 어떻게 되는지 (저장 전 미리 보기) — 실데이터는 alarm-suggest
+export async function previewAlarms(id: string, edits: AlarmEdits): Promise<AlarmPreview> {
   const a = find(id);
-  return a ? alarmChain({ ...a, bufferMinutes }) : [];
+  if (!a) return { alarms: [], travelMinutes: 0, travelSource: '', autoTravelMinutes: 0, predictedPrepMinutes: 0, autoPredictedPrepMinutes: 0 };
+  const { appointment, autoTravel, autoPrepare } = withEdits(a, edits);
+  const view = toAppointment(appointment);
+  return {
+    alarms: view.alarms,
+    travelMinutes: view.travelMinutes,
+    travelSource: view.travelSource,
+    autoTravelMinutes: autoTravel,
+    predictedPrepMinutes: view.predictedPrepMinutes,
+    autoPredictedPrepMinutes: autoPrepare,
+  };
+}
+
+// 고친 값 기록 (user_edit_logs) — 사용자가 자동 값을 직접 고치면 한 줄씩 남김. 개인화(계산 · 제안)에 쓸 자료라 H03 · H05 확인 시트 · S01이 같이 부름
+// 실데이터는 user_edit_logs insert. 앱 안에서 지우는 길은 없음
+function pushEditLog(log: Omit<UserEditLog, 'at'>) {
+  db.editLogs.push({ at: now(), ...log });
+}
+
+export async function recordEdit(log: Omit<UserEditLog, 'at'>) {
+  pushEditLog(log);
+}
+
+export async function listEditLogs(): Promise<UserEditLog[]> {
+  return db.editLogs.map((log) => ({ ...log }));
 }
 
 export async function saveBuffer(id: string, bufferMinutes: number) {
@@ -155,24 +228,59 @@ export async function setIntensity(id: string, axis: IntensityAxis, level: Level
   db.intensityOverrides[id] = current;
 }
 
-// 알람 설정 저장 (H03) — 여유 · 종류별 켜기 · 강도를 한 번에. 화면은 초안으로 들고 있다가 저장할 때만 부름
+// 알람 설정 저장 (H03) — 여유 · 출발 위치 · 이동 수단 · 이동 · 준비 · 알람 시각 · 종류별 켜기 · 강도를 한 번에. 화면은 초안으로 들고 있다가 저장할 때만 부름
+// 직접 고친 값은 하나씩 고친 값 기록(user_edit_logs)에 남김. 알람 순서(기상 ≤ 준비 ≤ 출발 ≤ 도착 목표)가 뒤집히면 저장하지 않고 UserError
 // 종류를 모두 껐으면 일정 알람도 끄고, 껐던 종류를 다시 켜면 일정 알람도 다시 켬 (종류를 안 바꿨으면 일정 켜기 · 끄기는 그대로)
+//   ※ "종류를 모두 끔"은 알람을 만들어 둔 채 끈 것 — H05에서 알람을 처음부터 안 만든 "알람 없는 일정"과 다름
 // 돌려주는 값 = 이번 저장으로 일정 알람이 꺼졌는지 · 켜졌는지. 실데이터는 alarm-commit
 export async function saveAlarmSettings(id: string, draft: AlarmSettingsDraft): Promise<{ turnedOff: boolean; turnedOn: boolean }> {
   const a = find(id);
   if (!a) return { turnedOff: false, turnedOn: false };
-  if (draft.bufferMinutes !== a.bufferMinutes) await saveBuffer(id, draft.bufferMinutes);
+  const { appointment: next, autoTravel, autoPrepare } = withEdits(a, draft);
+  const after = toAppointment(next);
+  const blocked = orderError(after.alarms);
+  if (blocked) throw new UserError(blocked);
+
+  const log = (field: EditLogField, autoValue: unknown, editedValue: unknown, target: { alarmId?: string; alarmType?: AlarmKind } = {}) =>
+    pushEditLog({ screen: 'H03', field, appointmentId: id, ...target, autoValue, editedValue });
+  if (draft.bufferMinutes !== a.bufferMinutes) log('buffer_minutes', a.bufferMinutes, draft.bufferMinutes);
+  if (draft.origin !== a.origin) log('origin', a.origin, draft.origin);
+  if (draft.transport !== a.transport) log('transport', a.transport, draft.transport);
+  if ((next.manual?.travelMinutes ?? null) !== (a.manual?.travelMinutes ?? null)) log('travel_minutes', autoTravel, next.manual?.travelMinutes ?? null);
+  if ((next.manual?.predictedPrepMinutes ?? null) !== (a.manual?.predictedPrepMinutes ?? null)) {
+    log('prepare_minutes', autoPrepare, next.manual?.predictedPrepMinutes ?? null);
+  }
+  for (const kind of RING_KINDS) {
+    const before = a.manual?.times?.[kind];
+    const picked = next.manual?.times?.[kind];
+    if (before?.getTime() === picked?.getTime()) continue;
+    const alarm = after.alarms.find((x) => x.kind === kind);
+    if (alarm) log('scheduled_at', alarm.auto ?? alarm.at, picked ?? null, { alarmId: alarm.id, alarmType: kind });
+  }
+
+  Object.assign(a, {
+    bufferMinutes: next.bufferMinutes,
+    origin: next.origin,
+    transport: next.transport,
+    travelMinutes: next.travelMinutes,
+    travelSource: next.travelSource,
+    manual: next.manual,
+  });
+
   let kindOn = false;
   let kindOff = false;
   for (const alarm of ringingKinds(alarmChain(a))) {
-    const next = draft.kinds[alarm.kind];
-    if (next == null || next === alarm.enabled) continue;
-    await setAlarmEnabled(id, alarm.kind, next);
-    if (next) kindOn = true;
+    const picked = draft.kinds[alarm.kind];
+    if (picked == null || picked === alarm.enabled) continue;
+    await setAlarmEnabled(id, alarm.kind, picked);
+    log('alarm_enabled', alarm.enabled, picked, { alarmId: alarm.id, alarmType: alarm.kind });
+    if (picked) kindOn = true;
     else kindOff = true;
   }
   for (const [axis, level] of Object.entries(draft.levels) as [IntensityAxis, Level | null][]) {
-    if ((db.intensityOverrides[id]?.[axis] ?? null) !== level) await setIntensity(id, axis, level);
+    if ((db.intensityOverrides[id]?.[axis] ?? null) === level) continue;
+    log(LEVEL_FIELD[axis], autoLevel(a), level);
+    await setIntensity(id, axis, level);
   }
   const wasEnabled = !db.disabledAppointments.has(id);
   if (kindOff && wasEnabled && ringingKinds(alarmChain(a)).every((x) => !x.enabled)) {
@@ -185,6 +293,9 @@ export async function saveAlarmSettings(id: string, draft: AlarmSettingsDraft): 
   }
   return { turnedOff: false, turnedOn: false };
 }
+
+// 강도 세 칸은 DB 칸 이름으로 고친 값 기록에 남김 (types.ts UserEditLog): 배경음 = sound_key, 말소리 = voice_tone, 진동 = intensity
+const LEVEL_FIELD: Record<IntensityAxis, EditLogField> = { sound: 'sound_key', voice: 'voice_tone', vibration: 'intensity' };
 
 // 새 일정 (H05) — 장소는 지금 목업 4곳. 실데이터는 place-search(카카오 키워드)
 export async function listPlaces(): Promise<Place[]> {
@@ -219,7 +330,7 @@ let draftSeq = 0; // 새 일정 가짜 id 뒤에 붙이는 번호 — 같은 순
 export async function estimateAppointment(d: AppointmentDraft): Promise<Estimate> {
   const at = draftAt(d.date, d.time);
   const place = places.find((p) => p.name === d.place) ?? places[0];
-  const travel = Math.max(5, Math.round((place.travelMinutes * (transportFactor[d.transport] ?? 1)) / 5) * 5);
+  const travel = mockTravel(place.name, d.transport, ORIGIN_HOME) ?? place.travelMinutes;
   // 같은 날 앞선 일정에 기상 알람이 있으면 — 알람을 만들지 않은 일정(알람 없는 일정)은 기상 알람이 없어 세지 않음
   const sameDayWake = db.appointments.some((a) => isSameDay(a.at, at) && alarmChain(a).some((x) => x.kind === 'WAKE' && x.at < at));
   const withWake = !sameDayWake;
@@ -235,7 +346,7 @@ export async function estimateAppointment(d: AppointmentDraft): Promise<Estimate
     title: d.title.trim() || '새 일정',
     at,
     place: place.name,
-    origin: '집',
+    origin: ORIGIN_HOME,
     transport: d.transport,
     travelMinutes: travel,
     travelSource: '길찾기',
@@ -268,8 +379,12 @@ export async function estimateAppointment(d: AppointmentDraft): Promise<Estimate
 
 // 계산한 일정을 저장 — 실데이터는 alarm-commit (일정 · 참여 조건 · 알람 4개를 한 번에)
 // source = 하루 기록에 남길 출처 (AI 대화에서 찾은 일정이면 'AI 대화 · 확인함' 등)
+// 확인 시트에서 알람 시각을 직접 고쳤으면(D43) 그 시각으로 저장하고 고친 값 기록에 남김. 순서가 뒤집혔으면 저장하지 않고 UserError
 export async function createAppointment(estimate: Estimate, source = '직접 입력'): Promise<Appointment> {
   const a = estimate.appointment;
+  const blocked = orderError(a.alarms);
+  if (blocked) throw new UserError(blocked);
+  const picked = manualTimes(a.alarms);
   const saved: MockAppointment = {
     id: a.id,
     title: a.title,
@@ -289,8 +404,21 @@ export async function createAppointment(estimate: Estimate, source = '직접 입
     items: a.items,
     withWake: a.withWake,
     kinds: ringingKinds(a.alarms).map((x) => x.kind as RingKind), // 만든 알람 종류 — 하나도 없으면 알람 없는 일정
+    ...(Object.keys(picked).length ? { manual: { times: picked } } : {}),
   };
   db.appointments.push(saved);
+  for (const alarm of a.alarms) {
+    if (!alarm.auto) continue;
+    pushEditLog({
+      screen: 'H05',
+      field: 'scheduled_at',
+      appointmentId: saved.id,
+      alarmId: alarm.id,
+      alarmType: alarm.kind,
+      autoValue: alarm.auto,
+      editedValue: alarm.at,
+    });
+  }
   db.events.push({ at: now(), label: `일정 저장 · ${saved.title}`, source });
   return toAppointment(saved);
 }

@@ -1,7 +1,7 @@
 // 목업 시나리오 데이터 — mockup.html의 고정 데이터 · initState를 옮김 (2025년 5월 22일 목요일, 10시 팀 주간회의 예시)
 // 화면은 이 폴더를 직접 읽지 않고 features/*/api.ts를 거침. 기능별로 실데이터가 붙으면 그 부분을 지움
 // 바꾼 값(알람 켜기 · 권한 등)은 앱을 다시 열 때까지만 남음
-import type { Importance, IntensityAxis, Level, RingKind, Transport, WakePhase } from '@/features/alarm/types';
+import type { Importance, IntensityAxis, Level, RingKind, Transport, UserEditLog, WakePhase } from '@/features/alarm/types';
 import type { SuggestionStatus } from '@/features/records/types';
 import type { PermissionSet } from '@/features/social/types';
 
@@ -33,6 +33,8 @@ export const places = [
 
 // 이동 수단별 이동시간 배율 (대중교통 기준)
 export const transportFactor: Partial<Record<Transport, number>> = { TRANSIT: 1, CAR: 0.7, WALK: 1.6 };
+// 집이 아닌 곳에서 출발하면 집 기준 이동시간에 곱하는 값 — 시드 일정 a2(세종대학교 → 강남역 20분 = 집 기준 40분의 절반)와 같은 값. 실데이터는 길찾기가 출발 위치로 계산
+export const awayFromHomeFactor = 0.5;
 
 export type MockAppointment = {
   id: string;
@@ -52,6 +54,9 @@ export type MockAppointment = {
   groupId: string | null;
   items: string[];
   withWake: boolean;
+  // 사용자가 직접 고른 값 (H03 · H05 확인 시트, D42 C) — 있으면 위의 자동 계산값보다 먼저 씀 (강도 intensityOverrides와 같은 규칙)
+  //   travelMinutes = 예상 이동, predictedPrepMinutes = 준비 시간(공통 P80 + 개인 보정 대신), times = 알람 시각
+  manual?: { travelMinutes?: number; predictedPrepMinutes?: number; times?: Partial<Record<RingKind, Date>> };
   // 만든 알람 종류 (H05 알람 줄 · D46) — 없으면 계산된 알람 전부. 빈 목록 = 알람 없는 일정 (종류를 만들어 두고 끈 것과 다름)
   kinds?: RingKind[];
 };
@@ -140,6 +145,7 @@ export const db = {
   wakeConfirmations: {} as Record<string, { at: Date; how: 'self' | 'auto'; usage: number; recent: number }>, // 알람 id별 기상 확정 (그때 사용 시간 포함)
   snoozes: {} as Record<string, { at: Date; minutes: number }>, // 미룬 알람 id별 다시 울릴 시각 (H07 미루기 → H01 표시 · 취소)
   events: [] as { at: Date; label: string; source: string }[], // 오늘 실제로 일어난 일
+  editLogs: [] as UserEditLog[], // 사용자가 자동 값을 직접 고친 기록 (user_edit_logs) — 개인화에 쓸 자료
   journalWritten: false,
   todos: [
     { id: 't1', title: '노트북', day: 22, done: true },
