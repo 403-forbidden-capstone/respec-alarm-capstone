@@ -26,17 +26,27 @@ export const MIN_VOLUME_PERCENT = 10;
 const BASE_VOLUME_PERCENT: Record<AlarmIntensity, number> = { SOFT: 60, NORMAL: 80, STRONG: 100 };
 
 // 안 끄면 다시 울림 — 약 5분 뒤 1번 · 보통 5분 간격 2번 · 강 3분 간격 3번 (alarm-core.md · #29 · 7장 7.4.2)
-// "간격"의 읽기 (작성자 판단 — 되돌리기 쉬움: 이 표만 바꾸면 네이티브는 그대로):
-//   간격 = 한 울림이 시작된 때부터 다음 울림이 시작될 때까지 (배차 간격처럼 시작-시작)
-//   예) 보통: 0분 울림 시작 → 5분 → 10분. 한 울림은 최대 3분이라 사이에 2분씩 쉼
-//       강: 0 → 3 → 6 → 9분. 한 울림이 3분이라 쉬는 틈 없이 이어짐
-//   다른 읽기(울림이 끝난 뒤 쉬는 시간)라면 보통은 8 · 16분, 강은 6 · 12 · 18분 — 이 표의 분 값만 바꾸면 됨
-//   표의 값은 "첫 울림 시작으로부터의 분". 네이티브가 이 거리 그대로 AlarmManager에 걸어 둠
-const RE_RING_START_MINUTES: Record<AlarmIntensity, readonly number[]> = {
+// "간격"의 읽기 (해석 — 문서에 측정 기준 없음, 지형님 확인. 되돌리기 쉬움: 이 표만 바꾸면 네이티브는 그대로):
+//   간격 = 한 울림(최대 3분)이 끝난 뒤 다음 울림이 시작될 때까지 쉬는 시간
+//   약: 울림 → 5분 쉼 → 울림 (첫 울림 시작 0분 → 8분)
+//   보통: 울림 → 5분 쉼 → 울림 → 5분 쉼 → 울림 (0 → 8 → 16분)
+//   강: 울림 → 3분 쉼 → 울림 ×3 (0 → 6 → 12 → 18분)
+//   마지막 울림까지 끝나는 때: 약 11분 · 보통 19분 · 강 21분 (첫 울림 시작 기준, unansweredSpanMillis)
+//   시작-시작으로 읽으면 강은 3분 울림이 쉬는 틈 없이 12분 이어져서 쓰지 않음
+const RE_RING_GAP_MINUTES: Record<AlarmIntensity, readonly number[]> = {
   SOFT: [5],
-  NORMAL: [5, 10],
-  STRONG: [3, 6, 9],
+  NORMAL: [5, 5],
+  STRONG: [3, 3, 3],
 };
+
+// 쉬는 시간 표를 "첫 울림 시작으로부터의 거리"로 바꿈. 네이티브는 이 거리 그대로 AlarmManager에 걸어 둠
+function reRingOffsetsFor(intensity: AlarmIntensity): number[] {
+  let offset = 0;
+  return RE_RING_GAP_MINUTES[intensity].map((gapMinutes) => {
+    offset += MAX_RING_MILLIS + gapMinutes * 60_000;
+    return offset;
+  });
+}
 
 // 알림 · 알람 화면 한 줄. WAKE · PREPARE · DEPARTURE는 ring.tsx(H07)와 같은 문구, ARRIVE · ROUTINE은 목업에 없어 임시 (작성자 판단)
 const HEADING: Record<AlarmType, string> = {
@@ -74,7 +84,7 @@ export function buildRingPlan(
       volumePercent: volumePercentFor(pkg.intensity, pkg.volumeAdjust),
       soundKey,
       maxRingMillis: MAX_RING_MILLIS,
-      reRingOffsetsMillis: RE_RING_START_MINUTES[pkg.intensity].map((minutes) => minutes * 60_000),
+      reRingOffsetsMillis: reRingOffsetsFor(pkg.intensity),
       snoozeMillis: SNOOZE_MILLIS,
       heading: HEADING.WAKE,
       oneTapLabel: null,

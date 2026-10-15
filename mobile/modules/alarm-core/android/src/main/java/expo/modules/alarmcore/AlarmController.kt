@@ -24,13 +24,14 @@ object AlarmController {
   /** JS의 schedule — 꾸러미 + 울림 계획 JSON을 받아 폰에 걸음. 결과는 STATUS_* 글자 */
   fun schedule(context: Context, payload: String): String {
     val incoming = StoredAlarm.fromJson(JSONObject(payload))
-    val existing = AlarmStorage.get(context, incoming.alarmId)
+    // 서비스가 죽어 ringing만 남은 찌꺼기는 먼저 정리 (안 그러면 그 알람이 영영 다시 안 걸림)
+    val existing = AlarmStorage.get(context, incoming.alarmId)?.let { settleStaleRinging(context, it) }
 
-    // 울리는 중인 알람은 건드리지 않음. 같은 시각의 알람이 미룸 · 다시 울림을 기다리는 중일 때도 그대로 둠
+    // 지금 울리는 중인 알람은 건드리지 않음. 같은 시각의 알람이 미룸 · 다시 울림을 기다리는 중일 때도 그대로 둠
     // (서버와 맞추려고 같은 꾸러미를 다시 넘겨도 미루기가 풀리거나 지워지지 않게)
     if (existing != null) {
       val sameOccurrence = existing.atMillis == incoming.atMillis
-      if (existing.ringing || (sameOccurrence && (existing.snoozeCount > 0 || existing.seriesIndex > 0))) {
+      if (isActuallyRinging(existing) || (sameOccurrence && (existing.snoozeCount > 0 || existing.seriesIndex > 0))) {
         return STATUS_SCHEDULED
       }
     }
@@ -206,20 +207,37 @@ object AlarmController {
   /**
    * 재부팅 · 시간 변경 뒤 폰에 걸린 예약을 다시 걸음
    * 꺼져 있는 동안 시각이 지난 알람은 늦게 울리지 않고 지움 (의도한 동작).
-   * rebooted면 울리던 중이던 알람은 울림이 끊긴 것으로 보고 다음 울림만 이어 감
+   * 재부팅 등으로 끊긴 울림(서비스 없이 ringing만 남은 것)은 정리하고 다음 울림만 이어 감.
+   * 시간만 바뀐 경우 지금 정말 울리는 중인 알람은 그대로 둠
    */
-  fun restoreAll(context: Context, rebooted: Boolean) {
+  fun restoreAll(context: Context) {
     val now = System.currentTimeMillis()
     AlarmStorage.all(context).forEach { stored ->
-      val alarm = if (rebooted && stored.ringing) stored.copy(ringing = false) else stored
-      if (alarm.ringing) return@forEach // 시간만 바뀐 경우: 지금 울리는 중이라 그대로 둠
+      val alarm = settleStaleRinging(context, stored) ?: return@forEach
+      if (isActuallyRinging(alarm)) return@forEach
       if (alarm.nextRingAt <= now) {
         AlarmStorage.remove(context, alarm.alarmId)
         return@forEach
       }
-      if (alarm != stored) AlarmStorage.save(context, alarm)
       runCatching { AlarmScheduler.schedule(context, alarm) }
     }
+  }
+
+  // 저장소의 ringing은 서비스가 정리되지 못하고 죽으면(시스템 종료 · 강제 종료 · 재부팅) true로 남을 수 있음
+  // 그래서 이 알람의 소리 서비스가 지금 이 프로세스에서 돌고 있는지도 함께 확인함
+  private fun isActuallyRinging(alarm: StoredAlarm): Boolean =
+    alarm.ringing && AlarmPlaybackService.ringingAlarmId == alarm.alarmId
+
+  // 울림이 끊긴 찌꺼기(ringing=true인데 서비스가 없음)를 정리함. 마지막 울림이었으면 알람을 지우고(null), 아니면 걸어 둔 다시 울림만 남김
+  private fun settleStaleRinging(context: Context, alarm: StoredAlarm): StoredAlarm? {
+    if (!alarm.ringing || isActuallyRinging(alarm)) return alarm
+    if (alarm.isLastRingOfSeries) {
+      AlarmStorage.remove(context, alarm.alarmId)
+      return null
+    }
+    val settled = alarm.copy(ringing = false)
+    AlarmStorage.save(context, settled)
+    return settled
   }
 
   // 해제 뒤 앱 열기: respecalarm://wake?alarmId=<id> (알림 · 알람 화면처럼 사용자가 누른 직후라 막히지 않음)

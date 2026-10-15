@@ -44,7 +44,10 @@ describe('공통 케이스 — 다시 울림 시각', () => {
   for (const item of cases.ringStarts) {
     it(item.name, () => {
       const plan = buildRingPlan({ type: item.type as AlarmType, intensity: item.intensity as AlarmIntensity });
-      expect(ringStartTimes(plan, item.firstRingAt)).toEqual(item.starts);
+      const starts = ringStartTimes(plan, item.firstRingAt);
+      expect(starts).toEqual(item.starts);
+      // 쉬는 시간 = 다음 울림 시작 - (이전 울림 시작 + 최대 울림 시간)
+      expect(starts.slice(1).map((start, index) => start - starts[index] - plan.maxRingMillis)).toEqual(item.silenceGapsMillis);
       expect(unansweredSpanMillis(plan)).toBe(item.unansweredSpanMillis);
     });
   }
@@ -78,15 +81,21 @@ describe('울림 계획 규칙', () => {
     expect(Object.keys(plan)).not.toContain('snoozeCount');
   });
 
-  it('한 번 울림은 최대 3분, 다시 울림 간격은 울림 시간 이상 (겹치지 않음)', () => {
+  it('한 번 울림은 최대 3분이고, 다시 울림 사이에는 늘 쉬는 시간이 있음 (이어 울리지 않음)', () => {
     for (const intensity of ['SOFT', 'NORMAL', 'STRONG'] as const) {
       const plan = buildRingPlan({ type: 'WAKE', intensity });
       expect(plan.maxRingMillis).toBe(180_000);
       const starts = ringStartTimes(plan, 0);
       starts.slice(1).forEach((start, index) => {
-        expect(start - starts[index]).toBeGreaterThanOrEqual(plan.maxRingMillis);
+        expect(start - starts[index] - plan.maxRingMillis).toBeGreaterThan(0);
       });
     }
+  });
+
+  it('마지막 울림이 끝나기까지 약 11분 · 보통 19분 · 강 21분 (서버가 놓침 시각을 셀 때 같은 값을 씀)', () => {
+    const minutes = (intensity: 'SOFT' | 'NORMAL' | 'STRONG') =>
+      unansweredSpanMillis(buildRingPlan({ type: 'WAKE', intensity })) / 60_000;
+    expect([minutes('SOFT'), minutes('NORMAL'), minutes('STRONG')]).toEqual([11, 19, 21]);
   });
 
   it('소리 키가 비어 있으면 기본 소리', () => {

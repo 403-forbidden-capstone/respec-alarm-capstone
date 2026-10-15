@@ -210,8 +210,8 @@ export default function AlarmTestScreen() {
       <ScrollView contentContainerStyle={styles.content}>
         <Text style={styles.title}>알람 테스트 (개발용)</Text>
         <Text style={styles.body}>
-          예약 → 화면 끄기 → 울리는지 확인. 기상 알람은 해제 또는 10분 미루기. 안 끄면 3분 뒤 멈췄다가 강도별로 다시
-          울림 (약 5분 뒤 1번 · 보통 5분 간격 2번 · 강 3분 간격 3번). 소리 없는 알림은 버튼 하나(준비 시작 · 출발했어요 ·
+          예약 → 화면 끄기 → 울리는지 확인. 기상 알람은 해제 또는 10분 미루기. 안 끄면 3분 뒤 멈췄다가 쉬고 다시
+          울림 (약 5분 쉬고 1번 · 보통 5분씩 쉬고 2번 · 강 3분씩 쉬고 3번). 소리 없는 알림은 버튼 하나(준비 시작 · 출발했어요 ·
           도착했어요 · 했어요)를 누르면 기록만 남음.
         </Text>
 

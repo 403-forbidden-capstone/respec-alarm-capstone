@@ -111,7 +111,13 @@ class AlarmPlaybackService : Service() {
     ringToken = alarm?.ringCount ?: 0
 
     // startForegroundService로 시작했으면 알람 정보가 있든 없든 곧바로 startForeground를 불러야 함
-    startForegroundCompat(buildNotification(id, alarm))
+    // 시스템이 막으면(12+ ForegroundServiceStartNotAllowedException · 14+ 타입 SecurityException) 앱이 죽지 않게 이번 울림은 끝난 것으로 처리
+    val foregroundStarted = runCatching { startForegroundCompat(buildNotification(id, alarm)) }.isSuccess
+    if (!foregroundStarted) {
+      AlarmController.onRingTimeout(applicationContext, id, ringToken)
+      stopSelf()
+      return START_NOT_STICKY
+    }
     if (alarm == null) {
       stopSelf()
       return START_NOT_STICKY
@@ -126,8 +132,8 @@ class AlarmPlaybackService : Service() {
         return START_NOT_STICKY
       }
     } else {
-      // 울리는 중에 같은 알람의 다음 울림이 시작됨: 소리는 그대로 두고 볼륨만 이번 계획대로
-      setAlarmVolume(alarm.plan.volumePercent)
+      // 울리는 중에 같은 알람의 다음 울림이 시작됨: 소리는 그대로 두고 볼륨만 이번 계획대로 (볼륨을 못 바꿔도 소리는 계속)
+      runCatching { setAlarmVolume(alarm.plan.volumePercent) }
     }
     // 새 울림이 오면 최대 울림 시간을 다시 잼
     handler.removeCallbacks(autoStop)
@@ -237,9 +243,10 @@ class AlarmPlaybackService : Service() {
     audioManager = getSystemService(AudioManager::class.java)
     remainingSounds = alarmSounds(alarm.plan.soundKey).toMutableList()
 
+    // 오디오 포커스나 볼륨 조정이 실패해도(방해 금지 · 제조사 제한 등) 소리는 내야 함 — 소리를 못 트는 것만 실패로 침
+    runCatching { requestAudioFocus(audioAttributes) }
+    runCatching { setAlarmVolume(alarm.plan.volumePercent) }
     val started = runCatching {
-      requestAudioFocus(audioAttributes)
-      setAlarmVolume(alarm.plan.volumePercent)
       // 우리 알람음이 안 되면 폰 기본 알람음으로 (무음으로 끝나지 않게)
       if (!playNextSound()) throw IllegalStateException("알람음을 재생할 수 없습니다.")
     }.isSuccess

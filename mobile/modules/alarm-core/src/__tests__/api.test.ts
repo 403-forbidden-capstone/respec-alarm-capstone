@@ -174,7 +174,7 @@ describe('공개 함수 (index.ts)', () => {
     const payload = JSON.parse(calls[0].args[0] as string);
     expect(payload.alarmId).toBe(wake.alarmId);
     expect(payload.plan.volumePercent).toBe(72);
-    expect(payload.plan.reRingOffsetsMillis).toEqual([300_000, 600_000]);
+    expect(payload.plan.reRingOffsetsMillis).toEqual([480_000, 960_000]);
     expect(calls[2].args).toEqual([['e1']]);
   });
 
