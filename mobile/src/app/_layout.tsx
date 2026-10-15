@@ -3,10 +3,10 @@ import { Stack } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
 import * as WebBrowser from 'expo-web-browser';
-import { useEffect, type ReactNode } from 'react';
-import { Platform, StyleSheet, useWindowDimensions, View } from 'react-native';
+import { useEffect } from 'react';
 
-import { SheetHost, ToastHost } from '@/components/ui';
+import { DeviceFrame } from '@/components/dev/DeviceFrame';
+import { ConfirmHost, SheetHost, ToastHost } from '@/components/ui';
 import { AuthProvider, useAuth } from '@/features/auth/AuthProvider';
 import { ProfileRetryScreen } from '@/features/auth/ProfileRetryScreen';
 import { canUseRealData } from '@/lib/mode';
@@ -19,9 +19,6 @@ SplashScreen.preventAutoHideAsync();
 // 팝업에서 확실히 실행되는 모듈은 이 루트 레이아웃뿐이라 여기서 부름 (화면 파일은 열릴 때만 읽히고, 폰에서는 아무 일도 안 함)
 WebBrowser.maybeCompleteAuthSession();
 
-// 웹 데모를 PC 브라우저로 열면 휴대폰 크기 화면으로 가운데에 보여 줌
-const PHONE = { width: 390, height: 844 };
-
 export default function RootLayout() {
   const [loaded, error] = useFonts(fontFiles);
 
@@ -30,12 +27,13 @@ export default function RootLayout() {
 
   return (
     <AuthProvider>
-      <PhoneFrame>
+      <DeviceFrame>
         <StatusBar style="dark" />
         <RootStack />
         <SheetHost />
+        <ConfirmHost />
         <ToastHost />
-      </PhoneFrame>
+      </DeviceFrame>
     </AuthProvider>
   );
 }
@@ -90,27 +88,3 @@ function RootStack() {
     </Stack>
   );
 }
-
-function PhoneFrame({ children }: { children: ReactNode }) {
-  const { width, height } = useWindowDimensions();
-  const wide = Platform.OS === 'web' && width > PHONE.width + 80;
-  if (!wide) return <>{children}</>;
-
-  return (
-    <View style={styles.page}>
-      <View style={[styles.phone, { height: Math.min(PHONE.height, height - 48) }]}>{children}</View>
-    </View>
-  );
-}
-
-const styles = StyleSheet.create({
-  page: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.stage },
-  phone: {
-    width: PHONE.width,
-    overflow: 'hidden',
-    borderRadius: 52,
-    borderWidth: 12,
-    borderColor: colors.device,
-    backgroundColor: colors.bg,
-  },
-});

@@ -63,4 +63,5 @@ export type Journal = {
     summary: string; // 수요일 밤 9:30부터 3단계 · 아침 알람은 앞당기지 않아요
     status: ApplyStatus; // 루틴을 저장하면 APPLIED, 괜찮아요 = REJECTED
   };
+  routineId: string | null; // 이 제안으로 만든 루틴 (A04로 다시 열 때). 아직 안 만들었으면 null
 };

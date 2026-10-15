@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 
 import { Button, Card, Screen, SectionHeader, Segmented, Text, toast, TopBar } from '@/components/ui';
+import { SECTIONS } from '@/dev/screenList';
 import { useAuth } from '@/features/auth/AuthProvider';
 import { DataModeToggle, goAfterRender } from '@/features/auth/DataModeToggle';
 import { resetOnboarding } from '@/features/profile/api';
@@ -15,62 +16,6 @@ import { colors } from '@/theme';
 // 목업의 데모 패널 대신 화면 번호로 바로 열고, 시나리오 시각(아침 · 전날 밤)을 바꿔 봄
 // 실데이터를 쓸 수 있을 때만(lib/flags REAL_DATA_READY) 맨 위에서 데이터 모드를 바꿈 — 로그인 · 온보딩부터 E2E로 돌릴 때
 // 목업에 없는 로그인 · 온보딩 · 설정은 목록에 두지 않음 (#116)
-type Row = { id: string; name: string; href: Href };
-
-const SECTIONS: { title: string; issue: string; rows: Row[] }[] = [
-  {
-    title: '홈 · 알람',
-    issue: '#30',
-    rows: [
-      { id: 'H01', name: '홈', href: '/' },
-      { id: 'H02', name: '알람 목록', href: '/alarms' },
-      { id: 'H03', name: '알람 설정 · 팀 주간회의', href: { pathname: '/alarm/[id]', params: { id: 'a1' } } },
-      { id: 'H05', name: '새 일정 만들기', href: '/schedule/new' },
-      { id: 'H07', name: '알람 울림 · 기상', href: { pathname: '/ring', params: { alarm: 'a1:WAKE' } } },
-      { id: 'H07', name: '알람 울림 · 준비', href: { pathname: '/ring', params: { alarm: 'a1:PREPARE' } } },
-      { id: 'H07', name: '알람 울림 · 출발', href: { pathname: '/ring', params: { alarm: 'a1:DEPARTURE' } } },
-      { id: 'H08', name: '기상 확인 · 해제 전 빈 화면 (판정은 H07 기상 → 알람 해제)', href: { pathname: '/wake', params: { alarm: 'a1:WAKE' } } },
-    ],
-  },
-  {
-    title: '그룹 · 친구',
-    issue: '#43',
-    rows: [
-      { id: 'G01', name: '친구와 그룹', href: '/group' },
-      { id: 'F02', name: '친구 권한 · 이수연', href: { pathname: '/friends/[id]', params: { id: 'sy' } } },
-      { id: 'F03', name: '공유 권한 설정 · 캡스톤팀', href: { pathname: '/permissions', params: { relation: 'group:cap' } } },
-      { id: 'G02', name: '그룹 상세 · 캡스톤팀', href: { pathname: '/groups/[id]', params: { id: 'cap' } } },
-      {
-        id: 'G03',
-        name: '그룹원 기상 상태 · 수연',
-        href: { pathname: '/groups/[id]/members/[userId]', params: { id: 'cap', userId: 'sy' } },
-      },
-      { id: 'G04', name: '공유받은 알람 · 수연', href: { pathname: '/friends/[id]/alarms', params: { id: 'sy' } } },
-    ],
-  },
-  {
-    title: '기록 · 제안',
-    issue: '#38',
-    rows: [
-      { id: 'R02', name: '나의 기록', href: '/records' },
-      { id: 'S01', name: '알람 조정 제안', href: { pathname: '/suggestion/[id]', params: { id: 's1' } } },
-    ],
-  },
-  {
-    title: 'AI · 루틴',
-    issue: '#39',
-    rows: [
-      { id: 'A02', name: 'AI 대화', href: '/ai' },
-      { id: 'A03', name: '하루 기록 · 일기', href: { pathname: '/journal/[date]', params: { date: '2025-05-22' } } },
-      {
-        id: 'A04',
-        name: '루틴 편집 · 회의 전날 준비',
-        href: { pathname: '/routine/[id]', params: { id: 'new', journal: '2025-05-22' } },
-      },
-    ],
-  },
-];
-
 const TIMES = [
   ['morning', '아침 오전 7:55'],
   ['evening', '전날 밤 9:00'],

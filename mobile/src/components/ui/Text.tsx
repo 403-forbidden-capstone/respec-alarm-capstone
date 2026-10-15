@@ -20,6 +20,7 @@ const toneColor: Record<Tone, string> = {
 };
 
 // 화면 글자는 모두 이 컴포넌트로 씀 — 글꼴 · 크기 · 색을 목업 값으로 맞춤
+// 시스템 글자 크기를 키워도 1.3배까지만 (레이아웃이 깨지지 않게) — 더 키우려면 maxFontSizeMultiplier를 따로 줌
 export function Text({ variant = 'body', tone, weight, align, style, ...rest }: TextProps) {
   const defaultTone: Tone =
     variant === 'lead' || variant === 'small' || variant === 'label' ? 'sub' : variant === 'caption' || variant === 'screenId' ? 'faint' : 'ink';
@@ -32,6 +33,7 @@ export function Text({ variant = 'body', tone, weight, align, style, ...rest }: 
         align ? { textAlign: align } : null,
         style,
       ]}
+      maxFontSizeMultiplier={1.3}
       {...rest}
     />
   );

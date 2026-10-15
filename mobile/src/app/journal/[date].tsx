@@ -2,13 +2,14 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { useState, type ReactNode } from 'react';
 import { StyleSheet, TextInput, View } from 'react-native';
 
-import { Button, Card, Chip, LoadError, Screen, Text, Timeline, toast, TopBar } from '@/components/ui';
+import { Button, Card, Chip, confirm, LoadError, Loading, Screen, Text, Timeline, toast, TopBar } from '@/components/ui';
 import { TextLink } from '@/features/alarm/components/TextLink';
 import { declineRoutineSuggestion, editJournal, getJournal } from '@/features/routine/api';
 import type { Journal } from '@/features/routine/types';
 import { dateParts, formatTime } from '@/lib/format';
 import { backOrHome } from '@/lib/nav';
 import { useAction } from '@/lib/useAction';
+import { useLeaveGuard } from '@/lib/useLeaveGuard';
 import { useLoad } from '@/lib/useLoad';
 import { colors, typeScale } from '@/theme';
 
@@ -23,7 +24,7 @@ export default function JournalScreen() {
     return (
       <Screen>
         {top}
-        {error ? <LoadError onRetry={reload} /> : null}
+        {error ? <LoadError onRetry={reload} /> : <Loading />}
       </Screen>
     );
   }
@@ -53,6 +54,8 @@ function JournalView({ journal: j, reload, top }: { journal: Journal; reload: ()
   const [editing, setEditing] = useState<string | null>(null); // 고치는 중인 글 (null = 읽기)
   const { busy, run } = useAction(); // 저장 · 괜찮아요는 한 번에 하나씩, 실패하면 토스트
   const { month, day } = dateParts(j.date);
+  useLeaveGuard(editing != null && editing !== j.text); // 고친 글이 저장된 글과 다를 때만 나갈 때 물음
+  const created = j.suggestion.status === 'APPLIED' ? j.routineId : null; // 만든 루틴
 
   const save = () =>
     run(async () => {
@@ -63,12 +66,15 @@ function JournalView({ journal: j, reload, top }: { journal: Journal; reload: ()
       await reload();
     }, '일기를 저장하지 못했어요');
 
-  const decline = () =>
-    run(async () => {
+  // 14일 동안 같은 제안이 사라지므로 한 번 물어봄
+  async function decline() {
+    if (!(await confirm({ title: '이 제안을 14일 동안 숨길까요?', message: '14일 동안은 같은 루틴을 다시 제안하지 않아요.', okLabel: '숨기기' }))) return;
+    await run(async () => {
       await declineRoutineSuggestion(j.recordDate);
       toast('알겠어요 · 14일 동안 같은 루틴은 제안하지 않아요');
       await reload();
     }, '제안을 넘기지 못했어요');
+  }
 
   return (
     <Screen>
@@ -112,17 +118,25 @@ function JournalView({ journal: j, reload, top }: { journal: Journal; reload: ()
             </View>
           </>
         )}
-        <Text variant="caption" tone="faint" style={styles.note}>
-          숫자와 시각은 기록과 대조해 확인했어요.
-        </Text>
+        {/* 대조는 AI가 쓴 글에만 한 것 — 직접 고친 글에는 말하지 않음 */}
+        {j.edited || editing != null ? null : (
+          <Text variant="caption" tone="faint" style={styles.note}>
+            숫자와 시각은 기록과 대조해 확인했어요.
+          </Text>
+        )}
       </Card>
 
       <Card>
         <Text variant="label" tone="sub" style={styles.label}>
-          {'오늘의 사실 · 출처 우선순위 직접 입력 > 자동 > 알림 > AI'}
+          오늘의 사실
         </Text>
         {j.facts.length ? (
-          <Timeline items={j.facts.map((f) => ({ time: formatTime(f.at), label: f.label, source: f.source }))} />
+          <>
+            <Timeline items={j.facts.map((f) => ({ time: formatTime(f.at), label: f.label, source: f.source }))} />
+            <Text variant="caption" tone="faint" style={styles.note}>
+              같은 사실이 여러 곳에 남아 있으면 직접 입력 &gt; 자동 &gt; 알림 &gt; AI 순서로 믿어요.
+            </Text>
+          </>
         ) : (
           <Text variant="body" tone="sub">
             기록된 사실이 없어요.
@@ -173,6 +187,11 @@ function JournalView({ journal: j, reload, top }: { journal: Journal; reload: ()
               ? `${j.suggestion.title} 루틴을 만들었어요.`
               : '이 루틴은 14일 동안 다시 제안하지 않아요.'}
           </Text>
+          {created ? (
+            <View style={[styles.link, styles.gap]}>
+              <TextLink label="루틴 열기 ›" onPress={() => router.push({ pathname: '/routine/[id]', params: { id: created } })} />
+            </View>
+          ) : null}
         </Card>
       )}
     </Screen>

@@ -1,22 +1,22 @@
 import type { ReactNode } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 
-import { colors, radius, space } from '@/theme';
+import { colors, radius, size, space } from '@/theme';
 
 import { Text } from './Text';
 import { Toggle } from './Toggle';
 
 type Props = {
-  dateLabel: string; // 5월 22일 목 · 캡스톤팀 공유
+  dateLabel: string; // 5월 22일 (목) · 캡스톤팀 공유
   time: { ampm: string; hm: string }; // 첫 알람 (큰 글자)
   kindLabel: string; // 기상
   chain: string[]; // 오른쪽 세로 줄 (오전 8:00 기상 …)
   meta: string[]; // 알람 강도 · 중 / 준비 60분 · 이동 50분 · 여유 10분
   foot: string; // 팀 주간회의 · 세종대학교 · 오전 10:00
-  enabled?: boolean; // 끄면 흐리게
+  enabled?: boolean; // 끄면 시각 · 글자만 흐리게 (스위치 · children은 그대로)
   onToggle?: (next: boolean) => void; // 있으면 오른쪽 위에 스위치
   toggleLabel?: string; // 화면 읽기용 (팀 주간회의 알람)
-  onPress?: () => void; // 시각 부분을 누르면 (알람 설정으로)
+  onPress?: () => void; // 카드를 누르면 (알람 설정으로). 스위치 · children의 버튼은 따로 눌림
   pressLabel?: string;
   children?: ReactNode; // 카드 아래 덧붙임 (5분 앞당기기 버튼 등)
 };
@@ -64,37 +64,51 @@ export function AlarmCard({
     </>
   );
 
-  return (
-    <View style={[styles.card, !enabled && styles.off]}>
-      <View style={styles.head}>
-        <Text variant="small" tone="sub">
+  const dim = enabled ? null : styles.dim;
+  const main = (
+    <>
+      <View style={[styles.head, onToggle && styles.headGap]}>
+        <Text variant="small" tone="sub" style={dim}>
           {dateLabel}
         </Text>
-        {onToggle ? <Toggle value={enabled} onChange={onToggle} label={toggleLabel ?? `${foot} 알람`} /> : null}
       </View>
-      {onPress ? (
-        <Pressable
-          onPress={onPress}
-          accessibilityRole="button"
-          accessibilityLabel={pressLabel}
-          style={({ pressed }) => [styles.body, pressed && styles.pressed]}
-        >
-          {body}
-        </Pressable>
-      ) : (
-        <View style={styles.body}>{body}</View>
-      )}
-      <View style={styles.meta}>
+      <View style={[styles.body, dim]}>{body}</View>
+      <View style={[styles.meta, dim]}>
         {meta.map((line) => (
           <Text key={line} variant="caption" tone="faint">
             {line}
           </Text>
         ))}
       </View>
-      <Text variant="small" tone="sub" align="right" style={styles.foot}>
+      <Text variant="small" tone="sub" align="right" style={[styles.foot, dim]}>
         {foot}
       </Text>
-      {children}
+    </>
+  );
+  const mainStyle = [styles.main, children ? styles.mainOpen : null];
+
+  // 카드 전체가 누르는 칸이고, 스위치 · 아래 덧붙임(children)은 그 위에 따로 얹어 서로 영향을 주지 않음
+  // (스위치를 누르는 칸 안에 넣으면 화면 읽기 도구가 스위치를 따로 읽지 못함)
+  return (
+    <View style={styles.card}>
+      {onPress ? (
+        <Pressable
+          onPress={onPress}
+          accessibilityRole="button"
+          accessibilityLabel={pressLabel}
+          style={({ pressed }) => [mainStyle, pressed && styles.pressed]}
+        >
+          {main}
+        </Pressable>
+      ) : (
+        <View style={mainStyle}>{main}</View>
+      )}
+      {onToggle ? (
+        <View style={styles.toggle}>
+          <Toggle value={enabled} onChange={onToggle} label={toggleLabel ?? `${foot} 알람`} />
+        </View>
+      ) : null}
+      {children ? <View style={styles.extra}>{children}</View> : null}
     </View>
   );
 }
@@ -105,12 +119,16 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.line,
     borderRadius: radius.card,
-    paddingVertical: 14,
-    paddingHorizontal: 16,
     marginBottom: space.cardBelow,
   },
-  off: { opacity: 0.45 },
-  head: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', minHeight: 28 },
+  // 안쪽 여백은 누르는 칸(main)이 가져서 카드 가장자리까지 눌림
+  main: { paddingTop: 14, paddingBottom: 14, paddingHorizontal: 16 },
+  mainOpen: { paddingBottom: 0 }, // 아래 덧붙임이 있으면 그 밑에 여백
+  extra: { paddingHorizontal: 16, paddingBottom: 14 },
+  dim: { opacity: 0.45 }, // 끈 알람은 시각 · 글자만 흐리게
+  toggle: { position: 'absolute', top: 14, right: 16 },
+  head: { justifyContent: 'center', minHeight: 28 },
+  headGap: { paddingRight: size.switchW + 12 }, // 스위치가 얹힐 자리
   body: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingTop: 2 },
   pressed: { opacity: 0.7 },
   big: { flexDirection: 'row', alignItems: 'baseline', gap: 6 },

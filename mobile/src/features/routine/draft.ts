@@ -1,5 +1,7 @@
 // 루틴 편집(A04) 초안 고치기 — 저장 전까지 화면이 들고 있는 값을 바꿈 (저장은 api.ts saveRoutine)
 // 모두 새 값을 돌려주고 받은 값은 건드리지 않음
+import { dateParts, minuteOfDay } from '@/lib/format';
+
 import { WEEKDAYS, type Routine, type RoutineStep, type Weekday } from './types';
 
 const pad = (n: number) => String(n).padStart(2, '0');
@@ -51,9 +53,45 @@ export function canSave(r: Routine) {
   return r.days.length > 0 && r.steps.length > 0;
 }
 
-// 저장 안내 (목업 rSave) — 켜 둔 루틴이면 단계 알람 개수 · 첫 요일
-export function savedMessage(r: Routine) {
+// 루틴이 처음 시작되는 날 — from(지금)부터 세어 고른 요일 중 가장 가까운 날. 오늘이 고른 요일이어도 시작 시각이 지났으면 다음 주
+// daysAhead: 0 = 오늘, 1 = 내일 … 7 = 다음 주 같은 요일. 요일을 하나도 안 골랐으면 null
+export function nextStart(r: Pick<Routine, 'days' | 'startMinute'>, from: Date): { weekday: Weekday; daysAhead: number } | null {
+  if (!r.days.length) return null;
+  const today = (dateParts(from).weekdayIndex + 6) % 7; // 월요일 0
+  for (let ahead = minuteOfDay(from) >= r.startMinute ? 1 : 0; ahead <= 7; ahead++) {
+    const weekday = WEEKDAYS[(today + ahead) % 7];
+    if (r.days.includes(weekday)) return { weekday, daysAhead: ahead };
+  }
+  return null;
+}
+
+// 시작하는 날 말 — 오늘 · 내일 · 다음 수요일. 요일이 없으면 빈 글자
+export function startWord(r: Pick<Routine, 'days' | 'startMinute'>, from: Date): string {
+  const next = nextStart(r, from);
+  if (!next) return '';
+  if (next.daysAhead === 0) return '오늘';
+  if (next.daysAhead === 1) return '내일';
+  return `다음 ${next.weekday}요일`;
+}
+
+// 저장 안내 (목업 rSave) — 켜 둔 루틴이면 단계 알람 개수 · 처음 울리는 날 (from = 지금)
+export function savedMessage(r: Routine, from: Date) {
   if (!r.active) return '저장했어요 · 루틴은 꺼 둔 상태예요';
   const alarms = r.steps.filter((s) => s.alarm).length;
-  return `저장했어요 · 루틴 알람 ${alarms}개가 다음 ${r.days[0]}요일부터 울려요`;
+  const when = startWord(r, from);
+  if (!when) return '저장했어요';
+  return alarms ? `저장했어요 · 루틴 알람 ${alarms}개가 ${when}부터 울려요` : `저장했어요 · ${when}부터 시작해요`;
+}
+
+// 불러온 루틴에서 고친 게 있는지 — 나갈 때 확인용
+export function sameRoutine(a: Routine, b: Routine): boolean {
+  return (
+    a.title === b.title &&
+    a.goal === b.goal &&
+    a.startMinute === b.startMinute &&
+    a.active === b.active &&
+    a.days.join() === b.days.join() &&
+    a.steps.length === b.steps.length &&
+    a.steps.every((s, i) => s.id === b.steps[i].id && s.name === b.steps[i].name && s.minutes === b.steps[i].minutes && s.alarm === b.steps[i].alarm)
+  );
 }

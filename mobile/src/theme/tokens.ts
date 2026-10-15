@@ -7,7 +7,8 @@ export const colors = {
   line: '#E6E6E2', // 테두리 · 구분선
   ink: '#151515', // 본문 · 강조 버튼
   sub: '#6B6B67', // 보조 글자
-  faint: '#A5A5A0', // 흐린 글자 · 비활성
+  faint: '#71716C', // 흐린 글자 · 비활성 — 흰 바탕 4.9 : 1 · 화면 바탕(bg) 4.5 : 1 (글자 대비 4.5 : 1 이상). sub보다는 연함
+  faintDecor: '#A5A5A0', // 글자가 아닌 장식(점 · 테두리 · 막대)용 연한 색 — 대비 기준이 없어 예전 faint 값
   chip: '#EFEFEC', // 칩 · 세그먼트 바탕
   dash: '#CFCFCA', // 점선 카드 테두리
   switchOff: '#D8D8D4',
@@ -20,10 +21,12 @@ export const colors = {
   mid: '#7B99E8', // 준비 중
   zz: '#D3A630', // 아직 자는 중
   warn: '#C8553D', // 기준선 · 경고
+  danger: '#B8452E', // 되돌릴 수 없는 버튼(삭제 · 나가기) 바탕 — 흰 글자 5.3 : 1
 
   // 웹 데모 휴대폰 틀 (PC 브라우저에서만)
   stage: '#E6E9E4',
   device: '#1A1B1A',
+  camera: '#000000', // 카메라 구멍 · 노치
 
   // 로그인 버튼 (카카오 디자인 가이드 색)
   kakao: '#FEE500',
@@ -69,6 +72,7 @@ export const size = {
   button: 52,
   buttonSm: 38,
   buttonPlain: 44,
+  touch: 44, // 누르는 칸 최소 크기 (가로 · 세로)
   chip: 26,
   switchW: 46,
   switchH: 28,

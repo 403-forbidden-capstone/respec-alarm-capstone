@@ -4,7 +4,7 @@
 import { now } from '@/lib/clock';
 import { addMinutes, dateParts, isSameDay, josa, joinKo, minuteOfDay, spokenTime, startOfDay } from '@/lib/format';
 import { alarmChain, autoLevel, axisLevel } from '@/mocks/calc';
-import { db, kst, people, places, timelines, TODAY, transportFactor, type MockAppointment } from '@/mocks/data';
+import { db, people, places, timelines, transportFactor, type MockAppointment } from '@/mocks/data';
 
 import {
   IMPORTANCE_POINT,
@@ -13,6 +13,7 @@ import {
   WAKE_NO_REPLY_MINUTES,
   WAKE_OBSERVE_MINUTES,
   type AlarmKind,
+  type AlarmSettingsDraft,
   type AlarmTime,
   type Appointment,
   type AppointmentDetail,
@@ -25,8 +26,11 @@ import {
   type RingInfo,
   type RingKind,
   type ScheduleItem,
+  type Snooze,
   type WakeCheck,
 } from './types';
+import { initialTime, ringingKinds } from './schedule';
+import { thetaReachedAt, usageSummary, type UseSpan } from './wake';
 
 function toAppointment(a: MockAppointment): Appointment {
   return {
@@ -140,8 +144,35 @@ export async function setIntensity(id: string, axis: IntensityAxis, level: Level
   db.intensityOverrides[id] = current;
 }
 
-export async function resetIntensity(id: string) {
-  delete db.intensityOverrides[id];
+// 알람 설정 저장 (H03) — 여유 · 종류별 켜기 · 강도를 한 번에. 화면은 초안으로 들고 있다가 저장할 때만 부름
+// 종류를 모두 껐으면 일정 알람도 끄고, 껐던 종류를 다시 켜면 일정 알람도 다시 켬 (종류를 안 바꿨으면 일정 켜기 · 끄기는 그대로)
+// 돌려주는 값 = 이번 저장으로 일정 알람이 꺼졌는지 · 켜졌는지. 실데이터는 alarm-commit
+export async function saveAlarmSettings(id: string, draft: AlarmSettingsDraft): Promise<{ turnedOff: boolean; turnedOn: boolean }> {
+  const a = find(id);
+  if (!a) return { turnedOff: false, turnedOn: false };
+  if (draft.bufferMinutes !== a.bufferMinutes) await saveBuffer(id, draft.bufferMinutes);
+  let kindOn = false;
+  let kindOff = false;
+  for (const alarm of ringingKinds(alarmChain(a))) {
+    const next = draft.kinds[alarm.kind];
+    if (next == null || next === alarm.enabled) continue;
+    await setAlarmEnabled(id, alarm.kind, next);
+    if (next) kindOn = true;
+    else kindOff = true;
+  }
+  for (const [axis, level] of Object.entries(draft.levels) as [IntensityAxis, Level | null][]) {
+    if ((db.intensityOverrides[id]?.[axis] ?? null) !== level) await setIntensity(id, axis, level);
+  }
+  const wasEnabled = !db.disabledAppointments.has(id);
+  if (kindOff && wasEnabled && ringingKinds(alarmChain(a)).every((x) => !x.enabled)) {
+    await setAppointmentEnabled(id, false);
+    return { turnedOff: true, turnedOn: false };
+  }
+  if (kindOn && !wasEnabled) {
+    await setAppointmentEnabled(id, true);
+    return { turnedOff: false, turnedOn: true };
+  }
+  return { turnedOff: false, turnedOn: false };
 }
 
 // 새 일정 (H05) — 장소는 지금 목업 4곳. 실데이터는 place-search(카카오 키워드)
@@ -149,22 +180,18 @@ export async function listPlaces(): Promise<Place[]> {
   return places;
 }
 
-// 날짜 고르기 — 시나리오의 오늘부터 사흘
-export function draftDates(): Date[] {
-  return [kst(TODAY, 0), kst(TODAY + 1, 0), kst(TODAY + 2, 0)];
-}
-
-// 목업에서 처음 보이는 입력값 (내일 오후 2시 스터디)
-export function defaultDraft(): AppointmentDraft {
+// 새 일정 처음 입력값 — 일정명 · 준비물은 비어 있음, 장소는 첫 곳 선택. 날짜 · 시간은 홈에서 넘어온 날(day)의 오후 2시
+// (그 시각이 이미 지났으면 다음 정각)
+export function defaultDraft(day: Date, current = now()): AppointmentDraft {
   return {
-    title: '스터디',
-    date: kst(TODAY + 1, 0),
-    time: '14:00',
+    title: '',
+    date: startOfDay(day),
+    time: initialTime(day, current),
     repeat: 'NONE',
     place: '학교 도서관',
     transport: 'TRANSIT',
     importance: 'LOW',
-    items: '노트북 충전기',
+    items: '',
   };
 }
 
@@ -322,13 +349,21 @@ export async function getRing(alarmId: string, again = false): Promise<RingInfo 
 
 // 해제 뒤 화면 사용 시간 (분) — 실데이터는 #35 · #40
 // 지금은 시연 값: 폰을 보며 일어남 · 알람만 끄고 다시 잠듦 (목업 simUse · simSleep)
+// 폰을 보며 일어남 = 해제 뒤 화면을 켠 구간 → 누적 3.2분 · 뒤쪽 5분 1.4분. θ = 1분이면 해제 1.5분 뒤 확정 시각
+const USED_SPANS: UseSpan[] = [
+  [0.5, 1.5],
+  [2.5, 3.3],
+  [6, 7],
+  [8.6, 9],
+];
 const NO_USE = { usage: 0, recent: 0 };
-const USED = { usage: 3.2, recent: 1.4 };
+const USED = usageSummary(USED_SPANS);
 const SLEPT = { usage: 0.4, recent: 0 };
 
 // 울리기 시작 (H07) — 기상 알람이면 내 상태가 '알람 울리는 중'. 실데이터는 알람 코어(#33) · alarm_events TRIGGERED
 // 이미 기상 확정한 알람이면 판정을 그대로 둠 (목업은 기상 전에만 S.wake를 비움)
 export async function startRing(alarmId: string, at: Date) {
+  delete db.snoozes[alarmId]; // 다시 울리기 시작하면 미룸 표시는 끝
   if (findAlarm(alarmId)?.alarm.kind !== 'WAKE' || db.wakeConfirmations[alarmId]) return;
   db.wake = { alarmId, phase: 'ringing', ringAt: at, dismissedAt: null, ...NO_USE };
 }
@@ -345,13 +380,35 @@ export async function snoozeRing(alarmId: string, minutes: number, at: Date) {
   // 이미 기상 확정한 알람이면 해제처럼 기록을 그대로 둠 (확정 뒤에 미루기가 붙지 않게)
   if (!found || db.wakeConfirmations[alarmId]) return;
   await stopRing(alarmId);
+  db.snoozes[alarmId] = { at: addMinutes(at, minutes), minutes };
   db.events.push({ at, label: `${KIND_LABEL[found.alarm.kind]} 알람 ${minutes}분 미루기`, source: '자동' });
+}
+
+// 미룬 알람 (H01) — 다시 울릴 시각이 아직 안 된 것 중 가장 빠른 것. 실데이터는 알람 코어가 가진 미루기 예약(#33)
+export async function getSnooze(): Promise<Snooze | null> {
+  const t = now().getTime();
+  const list = Object.entries(db.snoozes)
+    .filter(([, s]) => s.at.getTime() > t)
+    .sort(([, x], [, y]) => x.at.getTime() - y.at.getTime());
+  for (const [alarmId, s] of list) {
+    const found = findAlarm(alarmId);
+    if (found && found.alarm.kind !== 'ARRIVE') {
+      return { alarmId, kind: found.alarm.kind, appointmentTitle: found.a.title, at: s.at, minutes: s.minutes };
+    }
+  }
+  return null;
+}
+
+// 미루기 취소 (H01) — 다시 울리지 않음. 실데이터는 알람 코어의 미루기 예약 취소
+export async function cancelSnooze(alarmId: string) {
+  delete db.snoozes[alarmId];
 }
 
 // 알람 해제 (H07) — at = 실제로 끈 시각(울린 시각). 기상 알람이면 기상 판정(관찰 중)을 시작
 // 이미 기상 확정한 알람이면 판정 · 기록을 그대로 둠 (해제 기록이 겹치지 않게). 실데이터는 alarm_events DISMISSED
 export async function dismissRing(alarmId: string, at: Date) {
   const found = findAlarm(alarmId);
+  delete db.snoozes[alarmId];
   if (!found || db.wakeConfirmations[alarmId]) return;
   db.events.push({ at, label: `${KIND_LABEL[found.alarm.kind]} 알람 해제`, source: '자동' });
   if (found.alarm.kind === 'WAKE') db.wake = { alarmId, phase: 'observing', ringAt: null, dismissedAt: at, ...NO_USE };
@@ -389,6 +446,13 @@ export async function getWakeCheck(alarmId?: string): Promise<WakeCheck | null> 
   };
 }
 
+// 진행 중인 기상 확인 (H01 다시 들어가기) — 기상 알람을 끈 뒤 판정이 끝나기 전이면 H08을 다시 열 수 있게. 없으면 null
+export async function getWakeInProgress(): Promise<WakeCheck | null> {
+  if (!db.wake.alarmId || (db.wake.phase !== 'observing' && db.wake.phase !== 'prompt')) return null;
+  const check = await getWakeCheck(db.wake.alarmId);
+  return check && !check.confirmed ? check : null;
+}
+
 // 확인 알림 (H08) — 해제 뒤 10분 동안 조건을 못 채움 (시연: 알람만 끄고 다시 잠듦). at = 관찰이 끝난 시각. 실데이터는 #35 · #40
 export async function promptWake(alarmId: string, at: Date) {
   const dismissedAt = db.wake.alarmId === alarmId ? db.wake.dismissedAt : null;
@@ -404,12 +468,17 @@ export async function missWake(alarmId: string, at: Date) {
 }
 
 // how: self = 확인 알림에 직접 응답(사용 시간은 확인 알림 때 그대로), auto = 화면 사용으로 자동 판정(시연: 폰을 보며 일어남)
+// at = 판정한 시각 (자동은 관찰이 끝난 시각, 직접 응답은 응답 시각)
+// 기록 시각 (D14): 직접 응답은 at 그대로, 자동은 누적 사용이 θ를 넘은 시각 — 해제 시각을 모르거나 못 넘었으면 at
 // 실데이터는 alarm_events WAKE_CONFIRMED
 export async function confirmWake(alarmId: string, how: 'self' | 'auto', at: Date) {
   if (db.wakeConfirmations[alarmId]) return; // 이미 확정한 알람은 처음 판정 그대로
+  const dismissedAt = db.wake.alarmId === alarmId ? db.wake.dismissedAt : null;
+  const reached = how === 'auto' && dismissedAt ? thetaReachedAt(dismissedAt, USED_SPANS, db.wakeThetaMinutes) : null;
+  const wokeAt = reached ?? at;
   if (db.wake.alarmId === alarmId) db.wake = { ...db.wake, phase: 'confirmed', ...(how === 'auto' ? USED : {}) };
   const use = db.wake.alarmId === alarmId ? { usage: db.wake.usage, recent: db.wake.recent } : how === 'auto' ? USED : NO_USE;
-  db.wakeConfirmations[alarmId] = { at, how, ...use };
-  db.me.wakeAt = at;
-  db.events.push({ at, label: '기상 확인', source: how === 'self' ? '직접 응답' : '자동 판정' });
+  db.wakeConfirmations[alarmId] = { at: wokeAt, how, ...use };
+  db.me.wakeAt = wokeAt;
+  db.events.push({ at: wokeAt, label: '기상 확인', source: how === 'self' ? '직접 응답' : '자동 판정' });
 }

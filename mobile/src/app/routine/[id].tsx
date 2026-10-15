@@ -2,16 +2,29 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
-import { Button, Card, KeyValueRow, LoadError, Screen, Sheet, Text, toast, Toggle, TopBar } from '@/components/ui';
+import { Button, Card, confirm, KeyValueRow, LoadError, Loading, Screen, Sheet, Text, toast, Toggle, TopBar } from '@/components/ui';
 import { TextLink } from '@/features/alarm/components/TextLink';
 import { getRoutine, saveRoutine } from '@/features/routine/api';
 import { DayPicker } from '@/features/routine/components/DayPicker';
 import { RoutineStepRow } from '@/features/routine/components/RoutineStepRow';
 import { StepEditor } from '@/features/routine/components/StepEditor';
-import { addStep, canSave, moveStep, removeStep, savedMessage, stepTimes, toggleDay, updateStep } from '@/features/routine/draft';
+import {
+  addStep,
+  canSave,
+  moveStep,
+  removeStep,
+  sameRoutine,
+  savedMessage,
+  startWord,
+  stepTimes,
+  toggleDay,
+  updateStep,
+} from '@/features/routine/draft';
 import type { Routine } from '@/features/routine/types';
+import { now } from '@/lib/clock';
 import { backOrHome } from '@/lib/nav';
 import { useAction } from '@/lib/useAction';
+import { useLeaveGuard } from '@/lib/useLeaveGuard';
 import { useLoad } from '@/lib/useLoad';
 
 // A04 루틴 편집 — 일기(A03)의 루틴 제안을 내 생활에 맞게 고쳐 저장 (저장해야 루틴 · 단계 알람이 생김)
@@ -24,7 +37,7 @@ export default function RoutineScreen() {
     return (
       <Screen>
         <TopBar onBack={backOrHome} screenId="A04" />
-        {error ? <LoadError onRetry={reload} /> : null}
+        {error ? <LoadError onRetry={reload} /> : <Loading />}
       </Screen>
     );
   }
@@ -43,23 +56,39 @@ export default function RoutineScreen() {
 
 function RoutineEditor({ initial }: { initial: Routine }) {
   const [routine, setRoutine] = useState(initial);
-  const [editing, setEditing] = useState<string | null>(null); // 편집 시트를 연 단계
+  const [editing, setEditing] = useState<{ id: string; fresh: boolean } | null>(null); // 편집 시트를 연 단계 (fresh = 방금 추가해서 이름부터 쓰게)
   const { busy: saving, run: runSave } = useAction(); // 두 번 눌러도 루틴이 한 벌만 생기게
+  const { allowLeave } = useLeaveGuard(!sameRoutine(routine, initial)); // 고친 채로 나가면 물음
   const times = stepTimes(routine);
-  const index = routine.steps.findIndex((s) => s.id === editing);
+  const index = routine.steps.findIndex((s) => s.id === editing?.id);
   const step = index >= 0 ? routine.steps[index] : null;
 
   // 저장 — 제안에서 왔으면 일기로 돌아감. 주소로 바로 열었으면 저장한 루틴 주소로 바꿈. 한 번에 하나씩, 실패하면 토스트 (lib/useAction)
   const save = () =>
     runSave(async () => {
       const saved = await saveRoutine(routine);
-      toast(savedMessage(saved));
+      toast(savedMessage(saved, now()));
+      allowLeave(); // 저장했으니 나가도 물을 것 없음
       if (router.canGoBack()) router.back();
       else if (saved.id) router.replace({ pathname: '/routine/[id]', params: { id: saved.id } });
     }, '루틴을 저장하지 못했어요');
 
-  function removeEditing() {
+  // 단계를 더하면 바로 편집 시트를 열어 이름부터 쓰게
+  function addAndEdit() {
+    const next = addStep(routine);
+    setRoutine(next);
+    setEditing({ id: next.steps[next.steps.length - 1].id, fresh: true });
+  }
+
+  // 시트를 닫을 때 이름이 비어 있으면 기본 이름으로 (저장할 때도 같은 규칙)
+  function closeEditor() {
+    if (step && !step.name.trim()) setRoutine((r) => updateStep(r, step.id, { name: '새 단계' }));
+    setEditing(null);
+  }
+
+  async function removeEditing() {
     if (!step) return;
+    if (!(await confirm({ title: '이 단계를 뺄까요?', okLabel: '빼기', destructive: true }))) return;
     setRoutine((r) => removeStep(r, step.id));
     setEditing(null);
   }
@@ -94,7 +123,7 @@ function RoutineEditor({ initial }: { initial: Routine }) {
           <Text variant="label" tone="sub">
             단계별 실행
           </Text>
-          <TextLink label="+ 단계 추가" onPress={() => setRoutine(addStep)} />
+          <TextLink label="+ 단계 추가" onPress={addAndEdit} />
         </View>
         {routine.steps.map((s, i) => (
           <RoutineStepRow
@@ -102,7 +131,10 @@ function RoutineEditor({ initial }: { initial: Routine }) {
             first={i === 0}
             step={s}
             time={times[i]}
-            onPress={() => setEditing(s.id)}
+            canUp={i > 0}
+            canDown={i < routine.steps.length - 1}
+            onPress={() => setEditing({ id: s.id, fresh: false })}
+            onMove={(by) => setRoutine((r) => moveStep(r, s.id, by))}
             onToggleAlarm={(alarm) => setRoutine((r) => updateStep(r, s.id, { alarm }))}
           />
         ))}
@@ -113,7 +145,7 @@ function RoutineEditor({ initial }: { initial: Routine }) {
           <View style={styles.flex}>
             <Text variant="bodyStrong">루틴 활성화</Text>
             <Text variant="small" tone="sub">
-              {routine.days.length ? `다음 ${routine.days[0]}요일부터 시작해요.` : '반복 요일을 골라 주세요.'}
+              {routine.days.length ? `${startWord(routine, now())}부터 시작해요.` : '반복 요일을 골라 주세요.'}
             </Text>
           </View>
           <Toggle value={routine.active} onChange={(active) => setRoutine((r) => ({ ...r, active }))} label="루틴 활성화" />
@@ -121,20 +153,21 @@ function RoutineEditor({ initial }: { initial: Routine }) {
       </Card>
 
       <View style={styles.stack}>
-        <Button label="루틴 저장" onPress={save} disabled={!canSave(routine) || saving} />
+        <Button label="루틴 저장" onPress={save} disabled={!canSave(routine)} loading={saving} />
       </View>
 
-      <Sheet visible={step != null} onClose={() => setEditing(null)} title="단계 편집">
+      <Sheet visible={step != null} onClose={closeEditor} title="단계 편집">
         {step ? (
           <StepEditor
             step={step}
             time={times[index]}
             index={index}
             count={routine.steps.length}
+            focusName={editing?.fresh}
             onChange={(patch) => setRoutine((r) => updateStep(r, step.id, patch))}
             onMove={(by) => setRoutine((r) => moveStep(r, step.id, by))}
             onRemove={removeEditing}
-            onClose={() => setEditing(null)}
+            onClose={closeEditor}
           />
         ) : null}
       </Sheet>

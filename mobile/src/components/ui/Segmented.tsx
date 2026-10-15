@@ -20,6 +20,7 @@ export function Segmented<T extends string>({ options, value, onChange }: Props<
           <Pressable
             key={v}
             onPress={() => onChange(v)}
+            hitSlop={{ top: 3, bottom: 3 }}
             accessibilityRole="tab"
             accessibilityState={{ selected: on }}
             style={[styles.item, on && styles.on]}

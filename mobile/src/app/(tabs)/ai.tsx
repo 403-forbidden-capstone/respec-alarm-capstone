@@ -1,9 +1,8 @@
 import { router } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
-import { KeyboardAvoidingView, ScrollView, StyleSheet, View } from 'react-native';
+import { ScrollView, StyleSheet, View } from 'react-native';
 
-import { LoadError, Screen, Text, toast, TopBar } from '@/components/ui';
-import { TextLink } from '@/features/alarm/components/TextLink';
+import { LoadError, Loading, Screen, Text, toast, TopBar } from '@/components/ui';
 import { finishConversation, getConversation, rejectFoundSchedule, saveFoundSchedule, say } from '@/features/voice/api';
 import { ChatBubble, TypingBubble } from '@/features/voice/components/ChatBubble';
 import { ChatComposer } from '@/features/voice/components/ChatComposer';
@@ -16,11 +15,11 @@ import { useLoad } from '@/lib/useLoad';
 const LISTEN_MS = 1100; // 말하기를 누른 뒤 듣는 시간 (목업 chatSpeak). AI가 답하는 시간은 api(say)가 기다림
 
 // 03 AI 탭 · A02 AI 대화 — 자기 전 대화. AI 대기라 목업 대본대로 흘러감 (마이크 · 음성 합성 · 서버 호출 없음)
-// 말하기 = 다음 대본 문장을 말한 것으로 침, 텍스트 = 그 문장을 고쳐 보냄. 일정을 찾으면 카드로 확인받고, 완료하면 하루 기록(A03)으로
+// 말하기 = 다음 대본 문장을 말한 것으로 침, 텍스트 = 빈 칸에 쓴 글을 그대로 보냄(AI 답은 대본). 일정을 찾으면 카드로 확인받고, 완료하면 하루 기록(A03)으로
 export default function AiScreen() {
   const { data, error, reload } = useLoad(getConversation);
   const [mode, setMode] = useState<'voice' | 'text'>('voice');
-  const [draftText, setDraftText] = useState<string | null>(null); // 글 모드에서 고친 글 (null = 대본 문장 그대로)
+  const [draftText, setDraftText] = useState(''); // 글 모드에 쓰는 글 — 말하기로 바꿔도 남음
   const [listening, setListening] = useState(false);
   const [thinking, setThinking] = useState(false); // 내 말을 보내고 AI 답을 기다리는 중
   const [pendingText, setPendingText] = useState<string | null>(null); // 보낸 내 말 — 답을 기다리는 동안 먼저 보여 줌
@@ -40,9 +39,9 @@ export default function AiScreen() {
     setThinking(true);
     try {
       await say(text);
-      setDraftText(null);
     } catch (e) {
       toast(userMessage(e, '말을 보내지 못했어요'));
+      if (text) setDraftText((d) => d || text); // 못 보냈으면 쓴 글을 되돌려 놓음
     } finally {
       await reload();
       setThinking(false);
@@ -66,7 +65,7 @@ export default function AiScreen() {
     return (
       <Screen>
         <TopBar screenId="A02" />
-        {error ? <LoadError onRetry={reload} /> : null}
+        {error ? <LoadError onRetry={reload} /> : <Loading />}
       </Screen>
     );
   }
@@ -77,7 +76,9 @@ export default function AiScreen() {
     : thinking
       ? 'AI가 정리하고 있어요'
       : canSay
-        ? '말할 준비가 됐어요'
+        ? mode === 'text'
+          ? '보낼 메시지를 입력해 주세요'
+          : '말할 준비가 됐어요'
         : found?.status === 'PENDING'
           ? '찾은 일정을 확인해 주세요'
           : '대화를 마치려면 완료를 눌러 주세요';
@@ -86,17 +87,19 @@ export default function AiScreen() {
     if (canSay) setListening(true);
   }
 
+  // 쓴 글을 그대로 보냄 — 빈 글은 보내지 않음
   function send() {
-    if (!canSay || next?.who !== 'me') return;
-    talk(draftText ?? next.text);
+    const typed = draftText.trim();
+    if (!canSay || !typed) return;
+    setDraftText('');
+    talk(typed);
   }
 
   function toggleMode() {
     setMode((m) => (m === 'text' ? 'voice' : 'text'));
-    setDraftText(null);
   }
 
-  // 대화 종료 · 완료 — 일기를 만들고 하루 기록으로
+  // 완료 — 일기를 만들고 하루 기록으로
   const finish = () =>
     act(async () => {
       if (thinking) return; // 정리 중에 끝내면 끝난 대화에 답 · 카드가 붙음
@@ -119,61 +122,61 @@ export default function AiScreen() {
     });
 
   return (
+    // 키보드를 피하는 일은 Screen이 맡음 (채팅 목록 + 아래 입력 칸 전체를 밀어 올림)
     <Screen scroll={false} contentStyle={styles.screen}>
-      <KeyboardAvoidingView behavior="padding" style={styles.fill}>
-        <ScrollView
-          ref={scroll}
-          style={styles.fill}
-          contentContainerStyle={styles.content}
-          showsVerticalScrollIndicator={false}
-          keyboardShouldPersistTaps="handled"
-          onContentSizeChange={() => scroll.current?.scrollToEnd({ animated: true })}
-        >
-          <TopBar screenId="A02" right={<TextLink label="대화 종료" onPress={finish} disabled={thinking || busy} />} />
-          <Text variant="title" style={styles.title}>
-            하루를 돌아봐요
-          </Text>
-          <Text variant="lead">기본 AI · 차분한 코치</Text>
+      <ScrollView
+        ref={scroll}
+        style={styles.fill}
+        contentContainerStyle={styles.content}
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+        onContentSizeChange={() => scroll.current?.scrollToEnd({ animated: true })}
+      >
+        <TopBar screenId="A02" />
+        <Text variant="title" style={styles.title}>
+          하루를 돌아봐요
+        </Text>
+        <Text variant="lead">기본 AI · 차분한 코치</Text>
 
-          <View style={styles.chat} accessibilityLiveRegion="polite">
-            {messages.map((m) =>
-              m.who === 'card' ? (
-                found ? (
-                  <FoundScheduleCard
-                    key={m.id}
-                    found={found}
-                    at={m.at}
-                    onSave={saveFound}
-                    onEdit={() => router.push({ pathname: '/schedule/new', params: { from: 'chat' } })}
-                    onReject={rejectFound}
-                    disabled={busy}
-                  />
-                ) : null
-              ) : (
-                <ChatBubble key={m.id} who={m.who} text={m.text} at={m.at} />
-              ),
-            )}
-            {thinking && pendingText ? <ChatBubble who="me" text={pendingText} at={pendingAt ?? now()} /> : null}
-            {thinking ? <TypingBubble /> : null}
-          </View>
-        </ScrollView>
-
-        <View style={styles.composer}>
-          <ChatComposer
-            status={status}
-            mode={mode}
-            canSay={canSay}
-            listening={listening}
-            text={draftText ?? (next?.who === 'me' ? next.text : '')}
-            onChangeText={setDraftText}
-            onSend={send}
-            onToggleMode={toggleMode}
-            onSpeak={speak}
-            onDone={finish}
-            doneDisabled={thinking || busy}
-          />
+        <View style={styles.chat} accessibilityLiveRegion="polite">
+          {messages.map((m) =>
+            m.who === 'card' ? (
+              found ? (
+                <FoundScheduleCard
+                  key={m.id}
+                  found={found}
+                  at={m.at}
+                  onSave={saveFound}
+                  onEdit={() => router.push({ pathname: '/schedule/new', params: { from: 'chat' } })}
+                  onReject={rejectFound}
+                  disabled={busy}
+                />
+              ) : null
+            ) : (
+              <ChatBubble key={m.id} who={m.who} text={m.text} at={m.at} />
+            ),
+          )}
+          {thinking && pendingText ? <ChatBubble who="me" text={pendingText} at={pendingAt ?? now()} /> : null}
+          {thinking ? <TypingBubble /> : null}
         </View>
-      </KeyboardAvoidingView>
+      </ScrollView>
+
+      <View style={styles.composer}>
+        <ChatComposer
+          status={status}
+          mode={mode}
+          inputVisible={next?.who === 'me'}
+          canSay={canSay}
+          listening={listening}
+          text={draftText}
+          onChangeText={setDraftText}
+          onSend={send}
+          onToggleMode={toggleMode}
+          onSpeak={speak}
+          onDone={finish}
+          doneDisabled={thinking || busy}
+        />
+      </View>
     </Screen>
   );
 }

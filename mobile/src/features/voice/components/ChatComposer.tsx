@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Animated, Pressable, StyleSheet, TextInput, View } from 'react-native';
 
 import { Button, Text } from '@/components/ui';
@@ -7,9 +7,10 @@ import { colors, typeScale } from '@/theme';
 type Props = {
   status: string; // 듣고 있어요… · 말할 준비가 됐어요 등
   mode: 'voice' | 'text';
+  inputVisible: boolean; // 글 입력칸을 보임 — 내 차례가 남은 동안은 AI가 답하는 중에도 두어서 키보드가 닫히지 않게
   canSay: boolean; // 내 차례이고 AI가 정리 중이 아님
   listening: boolean;
-  text: string; // 글 모드 입력값
+  text: string; // 글 모드 입력값 (처음엔 빈칸)
   onChangeText: (text: string) => void;
   onSend: () => void;
   onToggleMode: () => void;
@@ -19,24 +20,49 @@ type Props = {
 };
 
 // 대화 아래 입력 칸 (.composer) — 상태 한 줄 · 글 입력(글 모드) · 텍스트 / 말하기 / 완료
-export function ChatComposer({ status, mode, canSay, listening, text, onChangeText, onSend, onToggleMode, onSpeak, onDone, doneDisabled }: Props) {
+export function ChatComposer({
+  status,
+  mode,
+  inputVisible,
+  canSay,
+  listening,
+  text,
+  onChangeText,
+  onSend,
+  onToggleMode,
+  onSpeak,
+  onDone,
+  doneDisabled,
+}: Props) {
+  const input = useRef<TextInput>(null);
+  const sendable = canSay && text.trim().length > 0; // 빈 글 · 공백만은 못 보냄
+
+  function send() {
+    if (!sendable) return;
+    onSend();
+    input.current?.focus(); // 버튼을 눌러도 키보드가 닫히지 않게
+  }
+
   return (
     <View style={styles.box}>
       <Text variant="small" tone="sub" align="center" style={styles.status} accessibilityLiveRegion="polite">
         {status}
       </Text>
-      {mode === 'text' && canSay ? (
+      {mode === 'text' && inputVisible ? (
         <View style={styles.inputRow}>
           <TextInput
+            ref={input}
             value={text}
             onChangeText={onChangeText}
-            onSubmitEditing={onSend}
+            onSubmitEditing={send}
+            submitBehavior="submit"
             returnKeyType="send"
+            placeholder="메시지를 입력하세요"
             accessibilityLabel="보낼 메시지"
             placeholderTextColor={colors.faint}
             style={styles.input}
           />
-          <Button label="보내기" small onPress={onSend} />
+          <Button label="보내기" small onPress={send} disabled={!sendable} />
         </View>
       ) : null}
       <View style={styles.buttons}>

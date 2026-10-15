@@ -3,7 +3,7 @@
 //   읽기 · 쓰기 위치는 docs/screen-data-map.md (G01 · F02 · F03 · G02 · G03 · G04, 권한 합집합은 DB 함수)
 import { now } from '@/lib/clock';
 import { memberState, orGrants } from '@/mocks/calc';
-import { db, kst, memberAlarms, people, timelines, TODAY, type MockMemberAlarm, type MockPerson } from '@/mocks/data';
+import { db, kst, memberAlarms, people, timelines, TODAY, type MockGroup, type MockMemberAlarm, type MockPerson } from '@/mocks/data';
 
 import {
   type FinalGrant,
@@ -50,6 +50,12 @@ function receivedFrom(personId: string): FinalGrant {
 function wokeCount(groupId: string) {
   const t = now();
   return (db.groups[groupId]?.members ?? []).filter((p) => (p === 'me' || timelines[p]) && memberState(p, t).woke).length;
+}
+
+// 초대 코드 — 목업은 그룹 id에서 정해진 글자 (실데이터는 그룹의 초대 코드 칼럼)
+function inviteCodeOf(g: MockGroup) {
+  const hash = [...g.id].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7);
+  return `${g.id.toUpperCase().slice(0, 3)}-${hash.toString(36).toUpperCase().padStart(4, '0').slice(-4)}`;
 }
 
 function toMemberAlarm(a: MockMemberAlarm): MemberAlarm {
@@ -113,15 +119,15 @@ export async function getGroup(groupId: string): Promise<GroupDetail | null> {
   const g = db.groups[groupId];
   if (!g) return null;
   const t = now();
-  const linked = db.appointments.find((a) => a.groupId === g.id);
   return {
     id: g.id,
     name: g.name,
     since: g.since,
     grants: copy(db.grants.group[g.id] ?? none()),
-    appointment: linked
-      ? { id: linked.id, title: linked.title, at: linked.at, place: linked.place, importance: linked.importance }
-      : null,
+    appointments: db.appointments
+      .filter((a) => a.groupId === g.id)
+      .map((a) => ({ id: a.id, title: a.title, at: a.at, place: a.place, importance: a.importance })),
+    inviteCode: inviteCodeOf(g),
     members: g.members.map((id) => ({
       person: person(id),
       isMe: id === 'me',
@@ -206,13 +212,14 @@ const SOURCE: Record<string, string> = {
   도착: '지오펜스',
 };
 
-// 그 그룹의 구성원이고 나에게 기상 조회 권한을 줬을 때만 (get_group_wake_status와 같게), 아니면 null
+// 그 그룹의 구성원이고 나에게 기상 상태 조회 권한을 줬을 때만 (get_group_wake_status와 같게), 아니면 null
+// 권한은 있는데 오늘 알람이 없으면 alarm: null (권한이 없다는 말과 구분)
 export async function getMemberWake(groupId: string, personId: string): Promise<MemberWake | null> {
   const g = db.groups[groupId];
   const tl = timelines[personId];
   const alarms = memberAlarms[personId];
   if (!g?.members.includes(personId) || !receivedFrom(personId).viewWake) return null;
-  if (!tl || !alarms?.length) return null;
+  if (!tl || !alarms?.length) return { person: person(personId), groupName: g.name, alarm: null, timeline: [], firstAlarmAt: null };
   const t = now().getTime();
   const timeline: TimelineEntry[] = tl
     .map(([m, label, source]) => ({ at: kst(TODAY, m), label, source: source ?? SOURCE[label] ?? '' }))

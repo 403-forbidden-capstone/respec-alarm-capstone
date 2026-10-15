@@ -5,6 +5,7 @@ name: 보드 연동
 #   브랜치 생성        → 브랜치 이름의 이슈가 진행 중, 빈 시작일은 오늘, 담당자가 없으면 만든 사람
 #   PR 생성            → 연결된 이슈(Closes #번호)가 리뷰, 이슈의 파트 라벨을 PR에, 빈 담당자는 PR 작성자
 #   PR 머지 · 이슈 닫힘 → 완료 (Not planned로 닫으면 보드에서 보관)
+# PR 본문 · 제목 수정(edited)은 Actions 분량 때문에 안 받음 (#134). Closes #번호는 PR을 만들 때 적습니다.
 # 필요한 것: 레포 Secret PROJECT_TOKEN (repo · project 권한)
 
 on:
@@ -12,7 +13,7 @@ on:
     types: [opened, closed, reopened]
   create:
   pull_request:
-    types: [opened, reopened, edited, ready_for_review, closed]
+    types: [opened, reopened, ready_for_review, closed]
 
 permissions:
   contents: read

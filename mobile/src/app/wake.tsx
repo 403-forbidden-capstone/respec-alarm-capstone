@@ -5,7 +5,8 @@ import { StyleSheet, View } from 'react-native';
 import { Button, Card, LoadError, ProgressBar, Screen, Text, toast, TopBar } from '@/components/ui';
 import { confirmWake, getWakeCheck, missWake, promptWake } from '@/features/alarm/api';
 import { FormulaBox } from '@/features/alarm/components/FormulaBox';
-import { WAKE_NO_REPLY_MINUTES, WAKE_OBSERVE_MINUTES, type WakeCheck } from '@/features/alarm/types';
+import { WAKE_NO_REPLY_MINUTES, WAKE_OBSERVE_MINUTES, WAKE_RECENT_MINUTES, type WakeCheck } from '@/features/alarm/types';
+import { formatUsage, judgeLines } from '@/features/alarm/wake';
 import { addMinutes, formatTime, timeParts } from '@/lib/format';
 import { backOrHome, openGroupDetail } from '@/lib/nav';
 import { useLoad } from '@/lib/useLoad';
@@ -67,7 +68,8 @@ function WakeFlow({ check }: { check: WakeCheck }) {
   const [state, setState] = useState(() => toState(check));
   // 두 번 눌러도 한 단계에서 한 번만 기록 (H07 handled와 같음) — 단계가 바뀌면 다시 누를 수 있음
   const handled = useRef<Phase | null>(null);
-  // 실제로 끈 시각부터 10분 — 다시 울린 뒤 끄면 그 시각부터
+  // 실제로 끈 시각부터 10분 — 다시 울린 뒤 끄면 그 시각부터. 판정 시점(확정 · 확인 알림)으로만 씀
+  // 자동 판정의 기록 시각은 api가 누적 사용이 θ를 넘은 시각으로 남김 (D14)
   const observeEnd = addMinutes(check.dismissedAt, WAKE_OBSERVE_MINUTES);
   // 그룹 일정이 아니면 공유 문구 · 그룹 버튼을 뺌
   const shared = check.groupId != null ? ` · ${check.groupName ?? '그룹'}에 공유했어요` : '';
@@ -108,9 +110,9 @@ function WakeFlow({ check }: { check: WakeCheck }) {
 
   const meters = (
     <>
-      <Meter label="누적 사용 · 해제 후 10분" value={state.usage} threshold={check.thetaMinutes} />
-      <Meter label="최근 사용 · 뒤쪽 5분" value={state.recent} />
-      <FormulaBox lines={[`기상 확정 = 누적 사용 ≥ θ(${check.thetaMinutes}분) 그리고 최근 사용 > 0`]} />
+      <Meter label={`알람 끈 뒤 ${WAKE_OBSERVE_MINUTES}분 동안 폰 사용`} value={state.usage} threshold={check.thetaMinutes} />
+      <Meter label={`최근 ${WAKE_RECENT_MINUTES}분 동안 폰 사용`} value={state.recent} />
+      <FormulaBox lines={judgeLines(state.usage, state.recent, check.thetaMinutes)} />
     </>
   );
 
@@ -129,13 +131,13 @@ function WakeFlow({ check }: { check: WakeCheck }) {
         <>
           <Card>
             <Text variant="label" tone="sub">
-              {formatTime(check.dismissedAt)}에 해제 · 10분 동안 화면 사용을 보고 있어요
+              {formatTime(check.dismissedAt)}에 알람을 껐어요 · {WAKE_OBSERVE_MINUTES}분 동안 폰 사용을 보고 있어요
             </Text>
             {meters}
           </Card>
           <View style={styles.sim}>
             <Text variant="label" tone="sub" style={styles.simText}>
-              시연용 · 해제 후 10분을 어떻게 보낼지 골라 보세요
+              시연용 · 알람을 끈 뒤 {WAKE_OBSERVE_MINUTES}분을 어떻게 보낼지 골라 보세요
             </Text>
             <View style={styles.simButtons}>
               <Button label="폰을 보며 일어나기" onPress={useAndWake} />
@@ -187,7 +189,9 @@ function WakeFlow({ check }: { check: WakeCheck }) {
             </View>
             <Text variant="sheetTitle">기상 확정 · {formatTime(state.at)}</Text>
             <Text variant="small" tone="sub" align="center" style={styles.doneText}>
-              {state.how === 'self' ? '확인 알림에 직접 응답했어요' : '화면 사용으로 자동 판정했어요'}
+              {state.how === 'self'
+                ? '확인 알림에 직접 응답했어요'
+                : `폰 사용으로 자동 판정했어요 · 폰을 ${check.thetaMinutes}분 넘게 쓴 시각으로 기록했어요`}
               {shared}
             </Text>
           </View>
@@ -249,7 +253,7 @@ function Meter({ label, value, threshold }: { label: string; value: number; thre
           {label}
         </Text>
         <Text variant="note" weight={600}>
-          {value.toFixed(1)}분
+          {formatUsage(value)}
         </Text>
       </View>
       <ProgressBar value={value / METER_MAX} threshold={threshold != null ? threshold / METER_MAX : undefined} thick />
@@ -272,7 +276,7 @@ const styles = StyleSheet.create({
   flowOn: { backgroundColor: colors.ink, borderColor: colors.ink },
   meter: { marginVertical: 12 },
   meterHead: { flexDirection: 'row', justifyContent: 'space-between' },
-  sim: { borderWidth: 1, borderStyle: 'dashed', borderColor: colors.faint, borderRadius: 18, padding: 14, marginTop: 14 },
+  sim: { borderWidth: 1, borderStyle: 'dashed', borderColor: colors.faintDecor, borderRadius: 18, padding: 14, marginTop: 14 },
   simText: { marginBottom: 10 },
   simButtons: { gap: 8 },
   notif: {

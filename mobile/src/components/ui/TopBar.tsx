@@ -18,7 +18,7 @@ export function TopBar({ screenId, onBack, left, right }: Props) {
     <View style={styles.row}>
       {onBack ? (
         <View style={styles.left}>
-          <Pressable onPress={onBack} hitSlop={8} accessibilityRole="button" accessibilityLabel="이전 화면">
+          <Pressable onPress={onBack} hitSlop={8} accessibilityRole="button" accessibilityLabel="이전 화면" style={styles.back}>
             <Text variant="body" tone="sub">
               ← 이전
             </Text>
@@ -37,13 +37,15 @@ export function TopBar({ screenId, onBack, left, right }: Props) {
   );
 }
 
-// 위 줄 오른쪽의 작은 테두리 버튼 (.tbtn)
+// 위 줄 오른쪽의 작은 테두리 버튼 (.tbtn) — 모양은 32 높이, 누르는 칸은 44
 export function TopBarButton({ label, onPress }: { label: string; onPress?: () => void }) {
   return (
-    <Pressable onPress={onPress} style={styles.tbtn} accessibilityRole="button">
-      <Text variant="small" tone="ink">
-        {label}
-      </Text>
+    <Pressable onPress={onPress} accessibilityRole="button" style={({ pressed }) => [styles.tbtnHit, pressed && styles.pressed]}>
+      <View style={styles.tbtn}>
+        <Text variant="small" tone="ink">
+          {label}
+        </Text>
+      </View>
     </Pressable>
   );
 }
@@ -51,6 +53,9 @@ export function TopBarButton({ label, onPress }: { label: string; onPress?: () =
 const styles = StyleSheet.create({
   row: { minHeight: size.topBar, marginTop: 2, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   left: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  back: { minHeight: size.touch, minWidth: size.touch, justifyContent: 'center' },
+  pressed: { opacity: 0.6 },
+  tbtnHit: { minHeight: size.touch, minWidth: size.touch, justifyContent: 'center', alignItems: 'flex-end' },
   tbtn: {
     height: 32,
     paddingHorizontal: 12,

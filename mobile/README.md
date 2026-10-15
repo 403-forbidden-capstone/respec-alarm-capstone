@@ -10,12 +10,12 @@ npm install
 npm run web
 ```
 
-브라우저에서 화면을 바로 볼 수 있습니다. PC에서는 휴대폰 크기로 가운데에 보입니다.
+브라우저에서 화면을 바로 볼 수 있습니다. PC에서는 왼쪽 패널에서 고른 기종(기본 Galaxy S24) 크기의 휴대폰 틀로 보입니다. 기종 · 화면 목록 · 시나리오 시각을 패널에서 바꾸고, `?device=s24`로 기종을 지정합니다. 창이 기종 폭 + 100보다 좁으면(실기기 · 개발자 도구 에뮬레이션) 틀 없이 앱만 보입니다.
 폰에서 보려면 개발용 APK가 필요합니다. Expo Go로는 실행되지 않습니다.
 
 패키지는 `npx expo install <이름>`으로 추가합니다. SDK 57에 맞는 버전이 들어갑니다.
 
-PR 전에 `npm run typecheck` · `npm run lint` · `npm test`를 돌립니다. PR에서는 CI(앱 검사)가 같은 걸 돌립니다.
+PR 전에 `npm run typecheck` · `npm run lint` · `npm test`를 꼭 로컬에서 돌립니다. PR에서 앱 검사가 자동으로 돌지 않습니다(Actions 분량, #134). 같은 검사를 서버에서 돌리려면 Actions → 앱 검사 → Run workflow.
 
 ## 폴더
 
