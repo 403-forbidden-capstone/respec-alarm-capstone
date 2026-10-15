@@ -1,15 +1,18 @@
 import { afterEach, describe, expect, it } from '@jest/globals';
 
 import { formatTime } from '@/lib/format';
+import type { Weekday } from '@/lib/weekday';
 import { memberState } from '@/mocks/calc';
 import { db, kst } from '@/mocks/data';
 
 import {
   cancelSnooze,
   confirmWake,
+  createAppointment,
   defaultDraft,
   dismissRing,
   draftAt,
+  estimateAppointment,
   getAppointment,
   getNextAlarm,
   getRing,
@@ -23,14 +26,17 @@ import {
   startRing,
   stopRing,
 } from '../api';
-import type { AlarmSettingsDraft } from '../types';
+import { EVERY_DAY, WEEKDAYS_ONLY } from '../repeat';
+import type { AlarmSettingsDraft, AppointmentDraft } from '../types';
 
+const SEED_COUNT = db.appointments.length; // 시드 일정 수 — 테스트가 새로 만든 일정은 매번 지움
 const WAKE = 'a1:WAKE'; // 팀 주간회의 기상 오전 8:00
 const morning = kst(22, 475); // 오전 7:55
 const me = () => memberState('me', morning).text;
 const labels = () => db.events.map((e) => `${formatTime(e.at)} ${e.label}`);
 
 afterEach(() => {
+  db.appointments.length = SEED_COUNT;
   db.snoozes = {};
   db.disabledKinds.clear();
   db.disabledAppointments.clear();
@@ -61,6 +67,30 @@ describe('H05 시간 칸', () => {
     const d = defaultDraft(kst(22, 0), morning);
     expect([d.title, d.items, d.time, d.date]).toEqual(['', '', '14:00', kst(22, 0)]);
     expect(defaultDraft(kst(22, 0), kst(22, 15 * 60 + 20)).time).toBe('16:00');
+  });
+});
+
+describe('H05 반복 저장 (D44)', () => {
+  const draftOn = (repeat: Weekday[]): AppointmentDraft => ({ ...defaultDraft(kst(24, 0), morning), title: '스터디', repeat });
+
+  it('요일을 고르면 반복 규칙(RRULE)으로 저장되고, 화면 글자는 규칙에서 만든다', async () => {
+    const cases: [Weekday[], string | null, string][] = [
+      [[], null, '반복 없음'],
+      [['수', '월'], 'FREQ=WEEKLY;BYDAY=MO,WE', '매주 월 · 수'],
+      [[...WEEKDAYS_ONLY], 'FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR', '평일'],
+      [[...EVERY_DAY], 'FREQ=DAILY', '매일'],
+    ];
+    for (const [repeat, rule, label] of cases) {
+      const saved = await createAppointment(await estimateAppointment(draftOn(repeat)));
+      expect([saved.recurrenceRule, saved.repeatLabel]).toEqual([rule, label]);
+      expect(db.appointments.find((a) => a.id === saved.id)!.recurrenceRule).toBe(rule);
+    }
+  });
+
+  it('시드 일정은 규칙에서 읽은 글자가 이전과 같음 (매주 목요일 · 반복 없음)', async () => {
+    expect((await getAppointment('a1'))!.repeatLabel).toBe('매주 목요일');
+    expect((await getAppointment('a2'))!.repeatLabel).toBe('반복 없음');
+    expect((await getAppointment('a3'))!.repeatLabel).toBe('매주 금요일');
   });
 });
 

@@ -8,6 +8,7 @@ export { Chip } from './Chip';
 export { confirm, ConfirmHost } from './Confirm';
 export type { ConfirmOptions } from './Confirm';
 export { DateRow } from './DateRow';
+export { DayPicker } from './DayPicker';
 export { EmptyState } from './EmptyState';
 export { Field } from './Field';
 export { KeyValueRow } from './KeyValueRow';

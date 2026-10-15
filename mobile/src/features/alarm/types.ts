@@ -1,5 +1,6 @@
 // ① 약속 기반 알람 — 이 기능에서 쓰는 타입
 // 이름은 DB(supabase/migrations · src/types/database.ts)를 따르고, 화면에 바로 쓰기 좋게 모양만 바꿈
+import type { Weekday } from '@/lib/weekday';
 import type { Enums } from '@/types/database';
 
 export type AlarmKind = Exclude<Enums<'alarm_type'>, 'ROUTINE'>; // 기상 · 준비 · 출발 · 도착
@@ -60,7 +61,8 @@ export type Appointment = {
   prepMinutes: number; // 실제 준비
   predictedPrepMinutes: number; // 예측 준비 (공통 P80 + 개인 보정)
   importance: Importance;
-  repeatLabel: string;
+  repeatLabel: string; // 반복 없음 · 매일 · 평일 · 매주 월 · 수 (repeat.ts repeatLabel)
+  recurrenceRule: string | null; // 반복 규칙 RRULE (appointments.recurrence_rule) — 없으면 반복 없음
   groupName: string | null; // 같이 가는 그룹 (공유 알람)
   items: string[]; // 준비물
   withWake: boolean; // 그날 첫 일정이라 기상 알람이 있음
@@ -106,7 +108,7 @@ export type AppointmentDraft = {
   title: string;
   date: Date; // 날짜 (시각은 time)
   time: string; // 14:00
-  repeat: 'NONE' | 'WEEKLY';
+  repeat: Weekday[]; // 반복 요일 (월요일부터) — 비어 있으면 반복 없음. 저장할 때는 RRULE (repeat.ts)
   place: string;
   transport: Transport;
   importance: Importance;

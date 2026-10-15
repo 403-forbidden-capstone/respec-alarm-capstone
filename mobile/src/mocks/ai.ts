@@ -26,7 +26,7 @@ export const FOUND_DRAFT: AppointmentDraft = {
   title: '스터디',
   date: kst(TODAY + 1, 0),
   time: '14:00',
-  repeat: 'NONE',
+  repeat: [],
   place: '학교 도서관',
   transport: 'TRANSIT',
   importance: 'LOW',

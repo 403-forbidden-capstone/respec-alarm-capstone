@@ -48,7 +48,7 @@ export type MockAppointment = {
   prepMinutes: number;
   predictedPrepMinutes: number;
   importance: Importance;
-  repeatLabel: string;
+  recurrenceRule: string | null; // 반복 규칙 RRULE (appointments.recurrence_rule) — 없으면 반복 없음
   groupId: string | null;
   items: string[];
   withWake: boolean;
@@ -101,17 +101,17 @@ export const db = {
     {
       id: 'a1', title: '팀 주간회의', at: kst(22, 600), place: '세종대학교', origin: '집', transport: 'TRANSIT',
       travelMinutes: 50, travelSource: '길찾기 + 내 실측 3회', bufferMinutes: 10, beforePrepMinutes: 30, prepMinutes: 20,
-      predictedPrepMinutes: 60, importance: 'NORMAL', repeatLabel: '매주 목요일', groupId: 'cap', items: ['노트북', '회의 자료'], withWake: true,
+      predictedPrepMinutes: 60, importance: 'NORMAL', recurrenceRule: 'FREQ=WEEKLY;BYDAY=TH', groupId: 'cap', items: ['노트북', '회의 자료'], withWake: true,
     },
     {
       id: 'a2', title: '저녁약속', at: kst(22, 1080), place: '강남역 2번출구', origin: '세종대학교', transport: 'TRANSIT',
       travelMinutes: 20, travelSource: '길찾기', bufferMinutes: 5, beforePrepMinutes: 0, prepMinutes: 20,
-      predictedPrepMinutes: 25, importance: 'LOW', repeatLabel: '반복 없음', groupId: null, items: [], withWake: false,
+      predictedPrepMinutes: 25, importance: 'LOW', recurrenceRule: null, groupId: null, items: [], withWake: false,
     },
     {
       id: 'a3', title: '수업', at: kst(23, 540), place: '세종대학교', origin: '집', transport: 'TRANSIT',
       travelMinutes: 50, travelSource: '길찾기 + 내 실측 5회', bufferMinutes: 10, beforePrepMinutes: 10, prepMinutes: 20,
-      predictedPrepMinutes: 40, importance: 'NORMAL', repeatLabel: '매주 금요일', groupId: null, items: ['과제 출력물'], withWake: true,
+      predictedPrepMinutes: 40, importance: 'NORMAL', recurrenceRule: 'FREQ=WEEKLY;BYDAY=FR', groupId: null, items: ['과제 출력물'], withWake: true,
     },
   ] as MockAppointment[],
   plainSchedule: [{ at: kst(22, 930), title: '치과 예약' }], // 알람 없는 일정

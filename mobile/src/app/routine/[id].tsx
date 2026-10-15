@@ -2,10 +2,9 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
-import { Button, Card, confirm, KeyValueRow, LoadError, Loading, Screen, Sheet, Text, toast, Toggle, TopBar } from '@/components/ui';
+import { Button, Card, confirm, DayPicker, KeyValueRow, LoadError, Loading, Screen, Sheet, Text, toast, Toggle, TopBar } from '@/components/ui';
 import { TextLink } from '@/features/alarm/components/TextLink';
 import { getRoutine, saveRoutine } from '@/features/routine/api';
-import { DayPicker } from '@/features/routine/components/DayPicker';
 import { RoutineStepRow } from '@/features/routine/components/RoutineStepRow';
 import { StepEditor } from '@/features/routine/components/StepEditor';
 import {

@@ -2,7 +2,7 @@
 // 지금은 src/mocks의 가짜 데이터를 돌려주고, Supabase가 붙으면 이 파일 안에서만 바꿉니다.
 //   읽기 · 쓰기 위치는 docs/screen-data-map.md (H01 · H02 · H03 · H05 · H07 · H08)
 import { now } from '@/lib/clock';
-import { addMinutes, dateParts, isSameDay, josa, joinKo, minuteOfDay, spokenTime, startOfDay } from '@/lib/format';
+import { addMinutes, isSameDay, josa, joinKo, minuteOfDay, spokenTime, startOfDay } from '@/lib/format';
 import { alarmChain, autoLevel, axisLevel } from '@/mocks/calc';
 import { db, people, places, timelines, transportFactor, type MockAppointment } from '@/mocks/data';
 
@@ -29,6 +29,7 @@ import {
   type Snooze,
   type WakeCheck,
 } from './types';
+import { repeatLabel, repeatToRrule, rruleToRepeat } from './repeat';
 import { initialTime, ringingKinds } from './schedule';
 import { thetaReachedAt, usageSummary, type UseSpan } from './wake';
 
@@ -47,7 +48,8 @@ function toAppointment(a: MockAppointment): Appointment {
     prepMinutes: a.prepMinutes,
     predictedPrepMinutes: a.predictedPrepMinutes,
     importance: a.importance,
-    repeatLabel: a.repeatLabel,
+    repeatLabel: repeatLabel(rruleToRepeat(a.recurrenceRule)),
+    recurrenceRule: a.recurrenceRule,
     groupName: a.groupId ? (db.groups[a.groupId]?.name ?? null) : null,
     items: [...a.items],
     withWake: a.withWake,
@@ -187,7 +189,7 @@ export function defaultDraft(day: Date, current = now()): AppointmentDraft {
     title: '',
     date: startOfDay(day),
     time: initialTime(day, current),
-    repeat: 'NONE',
+    repeat: [],
     place: '학교 도서관',
     transport: 'TRANSIT',
     importance: 'LOW',
@@ -200,6 +202,8 @@ export function draftAt(date: Date, time: string): Date {
   const match = /^([01]?\d|2[0-3]):([0-5]\d)$/.exec(time.trim());
   return addMinutes(startOfDay(date), match ? Number(match[1]) * 60 + Number(match[2]) : 14 * 60);
 }
+
+let draftSeq = 0; // 새 일정 가짜 id 뒤에 붙이는 번호 — 같은 순간에 만들어도 겹치지 않게
 
 // 알람 계산 (H05 확인 시트) — 공통 P80 + 개인 보정(n ÷ (n + k) × 개인 오차 P80)
 export async function estimateAppointment(d: AppointmentDraft): Promise<Estimate> {
@@ -216,7 +220,7 @@ export async function estimateAppointment(d: AppointmentDraft): Promise<Estimate
   const correction = Math.round(weight * residual);
   const before = withWake ? 20 : 0;
   const draft: MockAppointment = {
-    id: `n${Date.now()}`,
+    id: `n${Date.now()}_${++draftSeq}`,
     title: d.title.trim() || '새 일정',
     at,
     place: place.name,
@@ -229,7 +233,7 @@ export async function estimateAppointment(d: AppointmentDraft): Promise<Estimate
     prepMinutes: common - before,
     predictedPrepMinutes: common + correction,
     importance: d.importance,
-    repeatLabel: d.repeat === 'WEEKLY' ? `매주 ${dateParts(at).weekday}요일` : '반복 없음',
+    recurrenceRule: repeatToRrule(d.repeat),
     groupId: null,
     items: d.items
       .split(',')
@@ -268,7 +272,7 @@ export async function createAppointment(estimate: Estimate, source = '직접 입
     prepMinutes: a.prepMinutes,
     predictedPrepMinutes: a.predictedPrepMinutes,
     importance: a.importance,
-    repeatLabel: a.repeatLabel,
+    recurrenceRule: a.recurrenceRule,
     groupId: null,
     items: a.items,
     withWake: a.withWake,

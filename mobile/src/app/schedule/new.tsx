@@ -7,8 +7,10 @@ import { createAppointment, defaultDraft, draftAt, estimateAppointment, listPlac
 import { useNow } from '@/features/alarm/hooks/useNow';
 import { ItemChips } from '@/features/alarm/components/ItemChips';
 import { OptionGrid } from '@/features/alarm/components/OptionGrid';
+import { RepeatPicker } from '@/features/alarm/components/RepeatPicker';
 import { SelectRow } from '@/features/alarm/components/SelectRow';
 import { TimeRow } from '@/features/alarm/components/TimeRow';
+import { repeatToRrule } from '@/features/alarm/repeat';
 import { addItems, isPassed, parseDayParam, ringingKinds, tomorrow, upcomingAlarms } from '@/features/alarm/schedule';
 import {
   IMPORTANCE_LABEL,
@@ -29,10 +31,6 @@ import { useLeaveGuard } from '@/lib/useLeaveGuard';
 import { useLoad } from '@/lib/useLoad';
 import { colors } from '@/theme';
 
-const REPEAT_OPTIONS = [
-  ['NONE', '반복 없음'],
-  ['WEEKLY', '매주 같은 요일'],
-] as const;
 const TRANSPORT_OPTIONS = (['TRANSIT', 'CAR', 'WALK'] as const).map((t) => [t, TRANSPORT_LABEL[t]] as const);
 const IMPORTANCE_OPTIONS = (['LOW', 'NORMAL', 'HIGH'] as const).map((v) => [v, IMPORTANCE_LABEL[v]] as const);
 
@@ -71,7 +69,7 @@ export default function NewScheduleScreen() {
     itemText.trim() !== '' ||
     dayKey(draft.date) !== dayKey(initial.date) ||
     draft.time !== initial.time ||
-    draft.repeat !== initial.repeat ||
+    repeatToRrule(draft.repeat) !== repeatToRrule(initial.repeat) ||
     draft.place !== initial.place ||
     draft.transport !== initial.transport ||
     draft.importance !== initial.importance;
@@ -158,7 +156,7 @@ export default function NewScheduleScreen() {
           onChange={(next) => set('time', formatTime24(next))}
           error={past ? '이미 지난 시각이에요' : undefined}
         />
-        <SelectRow label="반복" value={draft.repeat} options={REPEAT_OPTIONS} onChange={(v) => set('repeat', v)} />
+        <RepeatPicker value={draft.repeat} onChange={(next) => set('repeat', next)} />
       </Card>
 
       {/* 장소 목록을 못 읽으면 장소를 고를 수 없으니 이유 + 다시 시도 */}
