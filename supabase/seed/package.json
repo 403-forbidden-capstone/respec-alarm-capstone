@@ -1,0 +1,17 @@
+{
+  "name": "respec-alarm-seed",
+  "private": true,
+  "description": "데모 시드: 이메일 계정 4명 + 친구 · 그룹 · 약속 · 알람 · 지난 4주 기록을 Supabase에 넣거나 지움 (서비스 키 필요, 로컬 .env에서만 읽음)",
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "seed:demo": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON seed.mjs demo",
+    "seed:reset": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON seed.mjs reset",
+    "test": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.117.3"
+  }
+}
