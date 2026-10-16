@@ -2,6 +2,7 @@
 //   DB 직접(RLS 본인) → 그 알람만 폰에 맞춤(reconcile({ alarmIds })). 시각이 바뀌는 저장은 alarm-commit(realPlan.ts)
 //   · 강도를 직접 고르면 intensity_source = MANUAL, 자동으로 되돌리면 AUTO — 안 쓰면 다음 alarm-commit이 직접 고른 값을 자동값으로 덮음 (서버는 MANUAL인 것만 이어받음)
 //   · 시각(time_source)은 이 파일에서 안 바꿈 — 시각을 직접 고르는 길은 alarm-commit의 manual_times뿐
+//   · 켤 때는 아직 안 지난 알람만 켬 — 지난 기상 알람을 켜면 서버 배치(wake-check)가 울린 적 없는 알람을 기상 미확인(MISSED)으로 기록하므로
 //   · 도착 목표(ARRIVE)는 폰에서 "도착했어요" 무음 알림으로 울리므로 울리는 알람이 하나라도 켜져 있을 때만 켜 둠 (화면은 도착 목표를 늘 켜짐으로 그림)
 import { reconcile } from '@/lib/alarmSync';
 import { now } from '@/lib/clock';
@@ -17,6 +18,7 @@ import type { AlarmKind, IntensityAxis, Level } from './types';
 
 const PHONE_FAILED = '폰에 알람을 반영하지 못했어요. 알람 권한을 확인하고 앱을 다시 열어 주세요';
 const NOT_FOUND = '알람을 찾을 수 없어요. 이미 지워졌을 수 있어요';
+const NOTHING_TO_TURN_ON = '켤 수 있는 알람이 없어요. 이미 지난 알람이거나 지워졌을 수 있어요';
 
 // 바꾼 알람을 폰에 맞춤 — 걸거나 지우지 못한 것(정확한 알람 권한 없음 등)이 있으면 알려 줌. DB에는 이미 썼으니 사용자가 고치고 다시 하거나 앱을 다시 열면 맞춰짐
 export async function syncPhone(alarmIds: readonly string[]): Promise<void> {
@@ -49,9 +51,10 @@ export async function setAppointmentEnabled(id: string, enabled: boolean): Promi
   const userId = await requireUserId();
   const participantId = await findParticipantId(userId, id);
   const base = supabase.from('alarms').update({ is_enabled: enabled }).eq('user_id', userId);
-  const { data, error } = await (participantId ? base.eq('participant_id', participantId) : base.eq('alarm_id', id).is('participant_id', null).is('routine_id', null)).select('alarm_id');
+  const target = participantId ? base.eq('participant_id', participantId) : base.eq('alarm_id', id).is('participant_id', null).is('routine_id', null);
+  const { data, error } = await (enabled ? target.gt('scheduled_at', now().toISOString()) : target).select('alarm_id');
   if (error) throw error;
-  if (!data?.length) throw new UserError(NOT_FOUND);
+  if (!data?.length) throw new UserError(enabled ? NOTHING_TO_TURN_ON : NOT_FOUND);
   forgetDetail(id);
   await syncPhone(data.map((r) => r.alarm_id));
 }
@@ -61,9 +64,10 @@ export async function setAlarmEnabled(id: string, kind: AlarmKind, enabled: bool
   const userId = await requireUserId();
   const participantId = await findParticipantId(userId, id);
   if (!participantId) throw new UserError(NOT_FOUND);
-  const { data, error } = await supabase.from('alarms').update({ is_enabled: enabled }).eq('participant_id', participantId).eq('user_id', userId).eq('alarm_type', kind).select('alarm_id');
+  const target = supabase.from('alarms').update({ is_enabled: enabled }).eq('participant_id', participantId).eq('user_id', userId).eq('alarm_type', kind);
+  const { data, error } = await (enabled ? target.gt('scheduled_at', now().toISOString()) : target).select('alarm_id');
   if (error) throw error;
-  if (!data?.length) throw new UserError(NOT_FOUND);
+  if (!data?.length) throw new UserError(enabled ? NOTHING_TO_TURN_ON : NOT_FOUND);
   const arrive = await mirrorArrive(userId, participantId);
   forgetDetail(id);
   await syncPhone([...data.map((r) => r.alarm_id), ...arrive]);

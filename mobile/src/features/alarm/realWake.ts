@@ -40,14 +40,19 @@ export async function dismissRing(): Promise<void> {
 }
 
 // 미룬 알람 (H01) — 폰이 가진 미루기 예약 중 다시 울릴 시각이 아직 안 된 가장 이른 것
+//   홈의 덧붙임 줄이라 폰 예약을 못 읽어도 홈 전체가 막히지 않게 없는 것으로 봄
 export async function getSnooze(): Promise<Snooze | null> {
-  const t = now().getTime();
-  const waiting = (await AlarmCore.list())
-    .filter((a) => a.snoozeCount > 0 && a.nextRingAt > t)
-    .sort((x, y) => x.nextRingAt - y.nextRingAt)
-    .find((a) => a.type === 'WAKE' || a.type === 'PREPARE' || a.type === 'DEPARTURE');
-  if (!waiting || (waiting.type !== 'WAKE' && waiting.type !== 'PREPARE' && waiting.type !== 'DEPARTURE')) return null;
-  return { alarmId: waiting.id, kind: waiting.type, appointmentTitle: waiting.title || STANDALONE_TITLE, at: new Date(waiting.nextRingAt), minutes: SNOOZE_MINUTES };
+  try {
+    const t = now().getTime();
+    const waiting = (await AlarmCore.list())
+      .filter((a) => a.snoozeCount > 0 && a.nextRingAt > t)
+      .sort((x, y) => x.nextRingAt - y.nextRingAt)
+      .find((a) => a.type === 'WAKE' || a.type === 'PREPARE' || a.type === 'DEPARTURE');
+    if (!waiting || (waiting.type !== 'WAKE' && waiting.type !== 'PREPARE' && waiting.type !== 'DEPARTURE')) return null;
+    return { alarmId: waiting.id, kind: waiting.type, appointmentTitle: waiting.title || STANDALONE_TITLE, at: new Date(waiting.nextRingAt), minutes: SNOOZE_MINUTES };
+  } catch {
+    return null;
+  }
 }
 
 // 미루기 취소 (H01) — 폰의 예약을 지움. 서버 알람은 그대로지만 시각이 이미 지나 다시 걸리지 않음
@@ -227,12 +232,17 @@ export async function getWakeCheck(alarmId?: string): Promise<WakeCheck | null> 
 }
 
 // 진행 중인 기상 확인 (H01 다시 들어가기) — 기상 알람을 끈 뒤 관찰 10분 + 응답 여유 30분 안이고 아직 확정 전이면
+//   홈의 덧붙임 줄이라 읽지 못해도(오프라인 등) 홈 전체가 막히지 않게 없는 것으로 봄
 export async function getWakeInProgress(): Promise<WakeCheck | null> {
-  const userId = await requireUserId();
-  const id = await findRecentDismissedWake(userId, (WAKE_OBSERVE_MINUTES + WAKE_PROMPT_WINDOW_MINUTES) * MINUTE_MS);
-  if (!id) return null;
-  const check = await getWakeCheck(id);
-  return check && !check.confirmed ? check : null;
+  try {
+    const userId = await requireUserId();
+    const id = await findRecentDismissedWake(userId, (WAKE_OBSERVE_MINUTES + WAKE_PROMPT_WINDOW_MINUTES) * MINUTE_MS);
+    if (!id) return null;
+    const check = await getWakeCheck(id);
+    return check && !check.confirmed ? check : null;
+  } catch {
+    return null;
+  }
 }
 
 // 확인 알림 · 놓침 단계는 시간과 사용 구간으로 정해지고(getWakeCheck), 놓침(MISSED)은 서버 배치가 기록함 — 앱이 따로 남길 것이 없음

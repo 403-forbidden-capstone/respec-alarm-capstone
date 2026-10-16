@@ -253,6 +253,26 @@ describe('켜기 · 끄기 · 강도 (DB 직접 → 그 알람만 폰에 맞춤)
     expect(mockReconcile).not.toHaveBeenCalled();
   });
 
+  it('켤 때는 아직 안 지난 알람만 켬 (지난 기상 알람을 켜면 서버 배치가 울린 적 없는 알람을 기상 미확인으로 기록함) — 끌 때는 전부', async () => {
+    mockRoutes['appointment_participants:select'] = () => ({ data: { participant_id: 'p-1' } });
+    mockRoutes['alarms:update'] = () => ({ data: [{ alarm_id: 'a-dep' }] });
+    await real.setAppointmentEnabled('appt-1', true);
+    expect(filterArgs(callsTo('alarms', 'update')[0], 'gt', 'scheduled_at')).toEqual(['2025-05-21T22:55:00.000Z']);
+    await real.setAppointmentEnabled('appt-1', false);
+    expect(filterArgs(callsTo('alarms', 'update')[1], 'gt', 'scheduled_at')).toBeUndefined();
+    mockCalls.length = 0;
+    await real.setAlarmEnabled('appt-1', 'WAKE', true);
+    expect(filterArgs(callsTo('alarms', 'update')[0], 'gt', 'scheduled_at')).toEqual(['2025-05-21T22:55:00.000Z']);
+  });
+
+  it('켤 알람이 모두 지났으면 이유를 UserError로 (DB는 안 바뀜)', async () => {
+    mockRoutes['appointment_participants:select'] = () => ({ data: { participant_id: 'p-1' } });
+    mockRoutes['alarms:update'] = () => ({ data: [] });
+    await expect(real.setAppointmentEnabled('appt-1', true)).rejects.toThrow('이미 지난');
+    await expect(real.setAlarmEnabled('appt-1', 'WAKE', true)).rejects.toThrow('이미 지난');
+    expect(mockReconcile).not.toHaveBeenCalled();
+  });
+
   it('폰에 걸지 못한 알람이 있으면(정확한 알람 권한 없음 등) UserError — DB에는 이미 씀', async () => {
     mockRoutes['appointment_participants:select'] = () => ({ data: { participant_id: 'p-1' } });
     mockRoutes['alarms:update'] = () => ({ data: [{ alarm_id: 'a-wake' }] });
@@ -866,6 +886,13 @@ describe('기상 확인 (H08)', () => {
     // 최근에 끈 기상 알람이 없으면 없음
     mockRoutes['alarm_events:select'] = () => ({ data: [] });
     expect(await real.getWakeInProgress()).toBeNull();
+  });
+
+  it('홈의 덧붙임 줄(진행 중인 기상 확인 · 미룬 알람)은 못 읽어도 던지지 않고 없는 것으로 — 홈 전체가 막히지 않게', async () => {
+    mockRoutes['alarm_events:select'] = () => ({ error: { code: '', message: 'offline' } });
+    await expect(real.getWakeInProgress()).resolves.toBeNull();
+    mockCore.list.mockRejectedValue(new Error('폰 예약을 못 읽음'));
+    await expect(real.getSnooze()).resolves.toBeNull();
   });
 
   it('확인 알림 · 놓침은 앱이 기록하지 않음 (놓침 MISSED는 서버 배치)', async () => {
