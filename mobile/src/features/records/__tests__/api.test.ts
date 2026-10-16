@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from '@jest/globals';
 
 import { getJournal } from '@/features/routine/api';
 import { UserError } from '@/lib/errors';
-import { formatTime } from '@/lib/format';
+import { dayKey, formatTime } from '@/lib/format';
 import { db, kst } from '@/mocks/data';
 
 import {
@@ -58,6 +58,22 @@ describe('R02 주간', () => {
     expect(w.summary?.todayPending).toBe(true);
     // 평균 기상 오전 7:25 — 지난주(오전 7:33)보다 8분 빠름
     expect([w.summary && formatTime(w.summary.averageWake), w.summary?.averageText]).toEqual(['오전 7:25', '지난주보다 8분 빨라요']);
+  });
+
+  it('막대에 날짜가 들어 있어 눌러서 그날 일간으로 갈 수 있음 (날짜 칩과 같은 날 · 같은 앞날 표시)', async () => {
+    const w = await getWeek(kst(22, 475));
+    const bars = w.summary!.bars;
+    expect(bars.map((b) => dayKey(b.date))).toEqual(['2025-05-19', '2025-05-20', '2025-05-21']);
+    expect(bars.map((b) => dayKey(b.date))).toEqual(w.strip.slice(0, 3).map((d) => dayKey(d.date)));
+    expect(bars.map((b) => [b.isToday, b.isFuture])).toEqual([[false, false], [false, false], [false, false]]);
+
+    db.me.wakeAt = kst(22, 485); // 오늘 기상을 확인하면 오늘 막대가 더해짐
+    try {
+      const today = (await getWeek(kst(22, 0))).summary!.bars.at(-1)!;
+      expect([dayKey(today.date), today.isToday, today.isFuture]).toEqual(['2025-05-22', true, false]);
+    } finally {
+      db.me.wakeAt = null;
+    }
   });
 
   it('지난주(5월 12일)도 요약이 있음 — 기록된 평일 5일, 평균은 그 앞 주와 견줌', async () => {

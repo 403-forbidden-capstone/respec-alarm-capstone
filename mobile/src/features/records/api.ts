@@ -51,13 +51,13 @@ export async function getMonth(year: number, month: number): Promise<MonthRecord
 function weekRows(days: Date[]) {
   const rows = days.flatMap((date) => {
     const p = pastDay(date);
-    return p?.wake != null && p.score != null ? [{ day: p.day, wake: p.wake, score: p.score }] : [];
+    return p?.wake != null && p.score != null ? [{ day: p.day, date, wake: p.wake, score: p.score }] : [];
   });
   const a1 = db.appointments.find((a) => a.id === 'a1');
   if (db.me.wakeAt && a1 && days.some((d) => isSameDay(d, today()))) {
     const wakeMin = Math.round((db.me.wakeAt.getTime() - kst(TODAY, 0).getTime()) / 60_000);
     const target = Math.round((alarmChain(a1)[0].at.getTime() - kst(TODAY, 0).getTime()) / 60_000);
-    rows.push({ day: TODAY, wake: wakeMin, score: wakeMin <= target + 10 ? 88 : 61 });
+    rows.push({ day: TODAY, date: today(), wake: wakeMin, score: wakeMin <= target + 10 ? 88 : 61 });
   }
   return rows;
 }
@@ -81,7 +81,13 @@ function weekSummary(days: Date[], relative: string): WeekSummary | null {
       diff == null ? `${prev} 기록이 없어 견줄 수 없어요` : diff > 0 ? `${prev}보다 ${diff}분 빨라요` : diff < 0 ? `${prev}보다 ${-diff}분 늦어요` : `${prev}와 같아요`,
     goalRate: Math.round((goal / rows.length) * 100),
     goalText: `${relative} ${goal}/${rows.length}일`,
-    bars: rows.map((x) => ({ label: `${dateParts(kst(x.day, 0)).weekday} ${x.day}`, score: x.score })),
+    bars: rows.map((x) => ({
+      label: `${dateParts(kst(x.day, 0)).weekday} ${x.day}`,
+      score: x.score,
+      date: x.date,
+      isToday: isSameDay(x.date, today()),
+      isFuture: x.date.getTime() > today().getTime(),
+    })),
     todayPending: thisWeek && db.me.wakeAt == null,
     coaching: '회의가 있는 날은 준비가 평균 12분 길었어요. 전날 밤 준비 루틴을 만들면 아침이 여유로워져요.',
   };

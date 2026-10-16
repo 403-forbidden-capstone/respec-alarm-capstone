@@ -27,12 +27,21 @@ export type WeekDay = {
   recorded: boolean; // 그날 기록이 있으면 점
 };
 
+// 주간 실행 흐름 막대 한 줄 — 눌러서 그날 일간으로 (D48, 날짜 칩과 같음)
+export type WeekBar = {
+  label: string; // 월 19
+  score: number; // 0~100
+  date: Date;
+  isToday: boolean;
+  isFuture: boolean; // 막대는 기록이 있는 날만이라 지금은 늘 false — 날짜 칩과 같은 누름 처리를 쓰려고 둠
+};
+
 export type WeekSummary = {
   averageWake: Date;
   averageText: string; // 지난주보다 2분 빨라요
   goalRate: number; // 0~100
   goalText: string; // 이번 주 3/3일
-  bars: { label: string; score: number }[]; // 월 19 · 76
+  bars: WeekBar[];
   todayPending: boolean; // 오늘 기록은 기상 확인 뒤에 더해짐
   coaching: string;
 };

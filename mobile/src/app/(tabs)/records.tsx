@@ -33,11 +33,11 @@ const toItem = (row: TimelineRow): TimelineItem => ({ time: formatTime(row.at), 
 
 type Register = (reload: (() => Promise<unknown>) | null) => void;
 
-// 달력 · 주간 줄의 날짜를 눌렀을 때 — MonthDay · WeekDay가 둘 다 맞음
+// 달력 · 주간 줄의 날짜 · 주간 막대를 눌렀을 때 — MonthDay · WeekDay · WeekBar가 모두 맞음
 type PressDay = (d: { date: Date; isFuture: boolean }) => void;
 
 // 04 기록 탭 · R02 나의 기록 — 월간 달력 · 주간 기상 흐름 · 일간(설정한 값과 실제로 일어난 일)
-// 화살표로 앞뒤 달 · 주 · 날을 넘기고, 달력 · 주간 줄의 날짜를 누르면 그 날의 일간으로 (D48). 일정 추가 · 상세는 src/app/schedule/
+// 화살표로 앞뒤 달 · 주 · 날을 넘기고, 달력 · 주간 줄의 날짜 · 주간 막대를 누르면 그 날의 일간으로 (D48). 일정 추가 · 상세는 src/app/schedule/
 // 보던 달 · 주(period)와 일간으로 보는 날(day)은 따로 — 일간에서 날을 넘겨도 월간 · 주간은 보던 그대로 (규칙은 features/records/navigation.ts)
 export default function RecordsScreen() {
   const today = recordToday();
@@ -48,7 +48,7 @@ export default function RecordsScreen() {
     reloadRef.current = reload;
   }, []);
 
-  // 월간 · 주간의 날짜 → 그 날의 일간. 아직 오지 않은 날은 남은 기록이 없어 열지 않음
+  // 월간 · 주간의 날짜 · 주간 막대 → 그 날의 일간. 아직 오지 않은 날은 남은 기록이 없어 열지 않음
   const pressDay: PressDay = (d) => {
     if (d.isFuture) toast('아직 오지 않은 날이에요');
     else setNav((n) => openDay(n, d.date));
@@ -163,7 +163,7 @@ function WeekSection({ period, onPrev, onNext, onPressDay, register }: WeekProps
     <>
       <WeekStrip record={data} onPrev={onPrev} onNext={onNext} onPressDay={onPressDay} />
       {data.summary ? (
-        <WeekSummaryCards summary={data.summary} relative={data.relative} />
+        <WeekSummaryCards summary={data.summary} relative={data.relative} onPressDay={onPressDay} />
       ) : (
         <Card>
           <Text variant="body" tone="sub">
@@ -175,7 +175,7 @@ function WeekSection({ period, onPrev, onNext, onPressDay, register }: WeekProps
   );
 }
 
-function WeekSummaryCards({ summary: s, relative }: { summary: WeekSummary; relative: string }) {
+function WeekSummaryCards({ summary: s, relative, onPressDay }: { summary: WeekSummary; relative: string; onPressDay: PressDay }) {
   return (
     <>
       <View style={styles.stats}>
@@ -186,7 +186,7 @@ function WeekSummaryCards({ summary: s, relative }: { summary: WeekSummary; rela
         <Text variant="label" style={styles.label}>
           주간 실행 흐름
         </Text>
-        <ScoreBars bars={s.bars} />
+        <ScoreBars bars={s.bars} onPressDay={onPressDay} />
         {s.todayPending ? (
           <Text variant="caption" style={styles.note}>
             오늘 기록은 기상 확인 뒤에 더해져요.
