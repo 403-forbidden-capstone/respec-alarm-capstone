@@ -7,6 +7,7 @@ import { useEffect } from 'react';
 
 import { DeviceFrame } from '@/components/dev/DeviceFrame';
 import { ConfirmHost, SheetHost, ToastHost } from '@/components/ui';
+import { useOneTapFollowUp } from '@/features/alarm/hooks/useOneTapFollowUp';
 import { AuthProvider, useAuth } from '@/features/auth/AuthProvider';
 import { ConfigErrorScreen } from '@/features/auth/ConfigErrorScreen';
 import { ProfileRetryScreen } from '@/features/auth/ProfileRetryScreen';
@@ -55,6 +56,9 @@ function RootStack() {
   useEffect(() => {
     if (!loading) SplashScreen.hideAsync();
   }, [loading]);
+
+  // 알람 기능 훅(원탭 뒤처리 · 로그아웃 정리) — useAlarmSync보다 먼저 등록해야 앱을 열자마자 올리는 원탭 기록도 뒤처리됨
+  useOneTapFollowUp();
 
   // 로그인한 동안 폰 예약 · 울림 기록을 서버와 맞춤 (로그인 직후 · 앱이 앞에 올 때, 실데이터 모드만) — lib/alarmSync
   useAlarmSync({ active: enabled && ready && !loading && profileError == null, userId: session?.user.id ?? null, timeZone: profile?.timezone });

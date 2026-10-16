@@ -1,6 +1,8 @@
 // ① 약속 기반 알람 — 데이터 접근은 이 파일에서만 합니다.
 // 지금은 src/mocks의 가짜 데이터를 돌려주고, Supabase가 붙으면 이 파일 안에서만 바꿉니다.
 //   읽기 · 쓰기 위치는 docs/screen-data-map.md (H01 · H02 · H03 · H05 · H07 · H08)
+import { hasEarlierWake } from '@shared/calc/wake.ts';
+
 import { now } from '@/lib/clock';
 import { UserError } from '@/lib/errors';
 import { isMock } from '@/lib/mode';
@@ -345,8 +347,14 @@ export async function estimateAppointment(d: AppointmentDraft): Promise<Estimate
   const at = draftAt(d.date, d.time);
   const place = places.find((p) => p.name === d.place) ?? places[0];
   const travel = mockTravel(place.name, d.transport, ORIGIN_HOME) ?? place.travelMinutes;
-  // 같은 날 앞선 일정에 기상 알람이 있으면 — 알람을 만들지 않은 일정(알람 없는 일정)은 기상 알람이 없어 세지 않음
-  const sameDayWake = db.appointments.some((a) => isSameDay(a.at, at) && alarmChain(a).some((x) => x.kind === 'WAKE' && x.at < at));
+  // 그날 첫 일정만 기상 알람 — 약속 시각이 이 일정보다 앞선 같은 날 일정에 켜진 기상 알람이 있으면 기상 없이 준비부터 (서버와 같은 함수 hasEarlierWake)
+  //   알람 없는 일정 · 꺼 둔 기상은 세지 않음
+  const sameDayWake = hasEarlierWake(
+    at,
+    db.appointments
+      .filter((a) => isSameDay(a.at, at) && alarmChain(a).some((x) => x.kind === 'WAKE'))
+      .map((a) => ({ appointmentId: a.id, appointmentAt: a.at, isEnabled: !db.disabledAppointments.has(a.id) && !db.disabledKinds.has(`${a.id}:WAKE`) })),
+  );
   const withWake = !sameDayWake;
   const common = withWake ? 50 : 15;
   const n = 10;
