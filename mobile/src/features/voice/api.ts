@@ -100,9 +100,8 @@ export async function saveFoundSchedule(estimate?: Estimate): Promise<Appointmen
   if (aiDb.chat?.found !== 'PENDING') throw new UserError('이미 확인한 일정이에요');
   const e = estimate ?? (await estimateAppointment(FOUND_DRAFT));
   const saved = await createAppointment(e, estimate ? 'AI 대화 · 수정함' : 'AI 대화 · 확인함');
-  const prepare = saved.alarms.find((x) => x.kind === 'PREPARE') ?? saved.alarms[0];
-  const depart = saved.alarms.find((x) => x.kind === 'DEPARTURE') ?? prepare;
-  resolveFound(chat(), 'APPLIED', savedReply(saved.at, prepare.at, depart.at), now());
+  // H05 "수정"에서 알람 종류를 일부만 켰으면 켠 것만 말하고, 모두 껐으면 알람 없이 저장했다고 답함 (D46)
+  resolveFound(chat(), 'APPLIED', savedReply(saved.at, saved.alarms), now());
   return saved;
 }
 

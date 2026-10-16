@@ -1,12 +1,12 @@
 import { Pressable, StyleSheet, View } from 'react-native';
 
-import { Text } from '@/components/ui';
+import { WEEKDAYS, type Weekday } from '@/lib/weekday';
 import { colors } from '@/theme';
 
-import { WEEKDAYS, type Weekday } from '../types';
+import { Text } from './Text';
 
-// 반복 요일 (.days) — 월~일 동그라미, 고른 요일은 검게
-export function DayPicker({ value, onToggle }: { value: Weekday[]; onToggle: (day: Weekday) => void }) {
+// 반복 요일 (.days) — 월~일 동그라미, 고른 요일은 검게. 루틴 반복(A04) · 일정 반복(H05)이 같이 씀
+export function DayPicker({ value, onToggle }: { value: readonly Weekday[]; onToggle: (day: Weekday) => void }) {
   return (
     <View style={styles.row} accessibilityLabel="반복 요일">
       {WEEKDAYS.map((day) => {
