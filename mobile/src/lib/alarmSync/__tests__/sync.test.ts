@@ -117,6 +117,18 @@ describe('reconcile — 서버 ↔ 폰 맞추기', () => {
     expect(scheduled).toEqual([expect.objectContaining({ alarmId: 'server-1', title: '회의', subtitle: '오전 10:00 · 세종대학교' })]);
   });
 
+  it('alarmIds를 주면 그 알람만 맞춤 — 켜기 · 끄기를 DB에 직접 쓴 뒤', async () => {
+    mockAlarmRows = [row('server-1', '2026-10-19T22:30:00.000Z'), row('server-2', '2026-10-19T23:00:00.000Z')];
+    mockCore.list.mockResolvedValue([
+      { id: 'phone-only-1', type: 'WAKE', intensity: 'NORMAL', title: '옛 알람', atMillis: Date.parse('2026-10-20T05:00:00.000Z'), snoozeCount: 0, nextRingAt: Date.parse('2026-10-20T05:00:00.000Z') },
+      { id: 'phone-only-2', type: 'WAKE', intensity: 'NORMAL', title: '옛 알람', atMillis: Date.parse('2026-10-20T06:00:00.000Z'), snoozeCount: 0, nextRingAt: Date.parse('2026-10-20T06:00:00.000Z') },
+    ]);
+    const summary = await reconcile({ nowMs: NOW, alarmIds: ['server-1', 'phone-only-1'] });
+    expect(summary).toMatchObject({ scheduled: ['server-1'], canceled: ['phone-only-1'] });
+    expect(mockCore.cancel).toHaveBeenCalledTimes(1);
+    expect(mockCore.scheduleAll.mock.calls[0][0].map((p) => p.alarmId)).toEqual(['server-1']);
+  });
+
   it('쿼리는 내 켜진 알람 · 지금 이후', async () => {
     await reconcile({ nowMs: NOW });
     expect(mockAlarmQuery.eq).toHaveBeenCalledWith('user_id', 'user-1');

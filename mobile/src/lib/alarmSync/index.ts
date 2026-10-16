@@ -108,6 +108,7 @@ async function fetchServerRows(userId: string, fromMs: number): Promise<SyncRow[
 
 export type ReconcileOptions = {
   timeZone?: string | null; // 부제 "오전 10:00 · 장소"의 시각 기준 — profiles.timezone (없으면 Asia/Seoul)
+  alarmIds?: readonly string[]; // 이 알람만 맞춤 — 켜기 · 끄기 · 강도처럼 DB에 직접 쓴 뒤 그 알람만 폰에 반영할 때. 없으면 전부
   nowMs?: number; // 시험용
 };
 
@@ -127,8 +128,13 @@ export function reconcile(options: ReconcileOptions = {}): Promise<SyncSummary> 
     if (!userId) return emptySummary();
     const nowMs = options.nowMs ?? Date.now();
     const rows = await fetchServerRows(userId, nowMs);
-    const server = buildServerPackages(rows, options.timeZone ?? undefined);
-    const phone = await AlarmCore.list();
+    let server = buildServerPackages(rows, options.timeZone ?? undefined);
+    let phone = await AlarmCore.list();
+    if (options.alarmIds) {
+      const only = new Set(options.alarmIds);
+      server = server.filter((p) => only.has(p.alarmId));
+      phone = phone.filter((a) => only.has(a.id));
+    }
     return executePlan(planReconcile({ server, phone, nowMs }));
   });
 }
