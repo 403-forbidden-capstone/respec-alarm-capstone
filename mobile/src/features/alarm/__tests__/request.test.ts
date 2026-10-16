@@ -115,6 +115,11 @@ describe('기존 약속 요청 (existingBody)', () => {
     });
   });
 
+  it('H03에서 직접 입력한 값도 서버 범위(이동 600 · 여유 240)를 넘지 않게', () => {
+    const body = existingBody(saved(), { ...same(saved()), travelMinutes: 900, bufferMinutes: 500 }) as { participant: Record<string, unknown> };
+    expect(body.participant).toMatchObject({ est_travel_minutes: 600, travel_source: 'MANUAL', buffer_minutes: 240 });
+  });
+
   it('이동시간을 고쳤을 때만 est_travel_minutes + MANUAL을 보냄', () => {
     const body = existingBody(saved(), { ...same(saved()), travelMinutes: 40 }) as { participant: Record<string, unknown> };
     expect(body.participant).toMatchObject({ est_travel_minutes: 40, travel_source: 'MANUAL' });
@@ -340,6 +345,16 @@ describe('새 일정 저장 요청 (createCommitBody)', () => {
     const body = createCommitBody(estimate(), { WAKE: at('07:45') }, edits) as { manual_times: unknown; edits: unknown };
     expect(body.manual_times).toEqual({ WAKE: iso('07:45') });
     expect(body.edits).toEqual(edits);
+  });
+
+  it('서버가 받는 범위(이동 · 준비 600분, 여유 · 준비 전 활동 240분)를 넘는 값은 범위 안으로 — 먼 거리 근사값이 저장을 통째로 거절시키지 않게', () => {
+    const e = estimate();
+    const far = { ...e, appointment: { ...e.appointment, travelMinutes: 845, bufferMinutes: 300, predictedPrepMinutes: 700, beforePrepMinutes: 250 }, commit: { ...e.commit!, travelSource: 'ESTIMATE' as const } };
+    const body = createCommitBody(far, {}, []) as { participant: Record<string, unknown> };
+    expect(body.participant).toMatchObject({ est_travel_minutes: 600, buffer_minutes: 240, prepare_minutes: 600, before_prepare_minutes: 240, travel_source: 'MANUAL' });
+    // 범위 안의 값은 그대로 (소수는 반올림)
+    const ok = { ...e, appointment: { ...e.appointment, travelMinutes: 50, bufferMinutes: 10, predictedPrepMinutes: 60, beforePrepMinutes: 30 } };
+    expect((createCommitBody(ok, {}, []) as { participant: Record<string, unknown> }).participant).toMatchObject({ est_travel_minutes: 50, buffer_minutes: 10, prepare_minutes: 60, before_prepare_minutes: 30 });
   });
 
   it('서버 요청 조각이 없는 계산 결과(가짜 데이터로 만든 것)는 null', () => {

@@ -107,6 +107,14 @@ export type CommitResponse = {
 
 const iso = (d: Date) => d.toISOString();
 
+// 서버가 받는 분 단위 범위 (supabase/functions/_shared/requests.ts · draft.ts) — 넘으면 저장이 통째로 VALIDATION_FAILED로 거절됨
+//   서버가 직선거리로 어림한 이동시간은 상한이 없어(먼 거리 자차 약 800분) 확인 시트의 값이 600을 넘을 수 있으므로 보내는 쪽에서 범위 안으로 맞춤
+const MAX_TRAVEL_MINUTES = 600;
+const MAX_PREPARE_MINUTES = 600;
+const MAX_BUFFER_MINUTES = 240;
+const MAX_BEFORE_PREPARE_MINUTES = 240;
+const within = (minutes: number, max: number) => Math.min(max, Math.max(0, Math.round(minutes)));
+
 // 새 일정 (H05) — 중요도는 늘 보냄 (서버 기본은 NORMAL(중요)이고 초안 기본은 LOW(보통)이라 안 보내면 값이 달라짐)
 //   출발지는 "집" 이름만 (좌표는 서버가 프로필 집에서 채움). 여유는 안 보내서 프로필 기본 여유
 export function newAppointmentBody(d: AppointmentDraft, at: Date): Body {
@@ -140,16 +148,16 @@ export function manualTimesBody(times: AlarmEdits['times']): Partial<Record<Ring
 //   · 준비 시간: 직접 고른 값 → 없으면 저장된 값 (DB에 직접 고름 표시가 없어 저장된 값이 곧 자동 값)
 //   · 준비 전 활동: 기상 · 준비 알람이 둘 다 있으면 지금 간격 (서버가 직접 고른 시각이 있는 약속에서 기본 20분으로 다시 읽지 않게)
 export function existingBody(saved: AppointmentDetail, edits: AlarmEdits): Body {
-  const travel = edits.travelMinutes != null ? { est_travel_minutes: edits.travelMinutes, travel_source: 'MANUAL' } : {};
+  const travel = edits.travelMinutes != null ? { est_travel_minutes: within(edits.travelMinutes, MAX_TRAVEL_MINUTES), travel_source: 'MANUAL' } : {};
   return {
     appointment_id: saved.id,
     participant: {
       origin: toPoint(edits.origin),
       transport_type: edits.transport,
-      buffer_minutes: edits.bufferMinutes,
+      buffer_minutes: within(edits.bufferMinutes, MAX_BUFFER_MINUTES),
       ...travel,
-      prepare_minutes: edits.prepareMinutes ?? saved.predictedPrepMinutes,
-      ...(saved.beforePrepMinutes > 0 ? { before_prepare_minutes: saved.beforePrepMinutes } : {}),
+      prepare_minutes: within(edits.prepareMinutes ?? saved.predictedPrepMinutes, MAX_PREPARE_MINUTES),
+      ...(saved.beforePrepMinutes > 0 ? { before_prepare_minutes: within(saved.beforePrepMinutes, MAX_BEFORE_PREPARE_MINUTES) } : {}),
     },
     manual_times: manualTimesBody(edits.times),
   };
@@ -334,11 +342,11 @@ export function createCommitBody(estimate: Estimate, picked: AlarmEdits['times']
     appointment: { ...base.appointment, title: a.title },
     participant: {
       ...base.participant,
-      buffer_minutes: a.bufferMinutes,
-      est_travel_minutes: a.travelMinutes,
+      buffer_minutes: within(a.bufferMinutes, MAX_BUFFER_MINUTES),
+      est_travel_minutes: within(a.travelMinutes, MAX_TRAVEL_MINUTES),
       travel_source: commit.travelSource === 'API' ? 'API' : 'MANUAL',
-      prepare_minutes: a.predictedPrepMinutes,
-      before_prepare_minutes: a.beforePrepMinutes,
+      prepare_minutes: within(a.predictedPrepMinutes, MAX_PREPARE_MINUTES),
+      before_prepare_minutes: within(a.beforePrepMinutes, MAX_BEFORE_PREPARE_MINUTES),
       with_wake: a.withWake,
     },
     manual_times: manualTimesBody(picked),
