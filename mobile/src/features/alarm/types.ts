@@ -1,5 +1,6 @@
 // ① 약속 기반 알람 — 이 기능에서 쓰는 타입
 // 이름은 DB(supabase/migrations · src/types/database.ts)를 따르고, 화면에 바로 쓰기 좋게 모양만 바꿈
+import type { Weekday } from '@/lib/weekday';
 import type { Enums } from '@/types/database';
 
 export type AlarmKind = Exclude<Enums<'alarm_type'>, 'ROUTINE'>; // 기상 · 준비 · 출발 · 도착
@@ -15,9 +16,16 @@ export type IntensityAxis = 'sound' | 'voice' | 'vibration'; // 배경음 · 말
 
 export const KIND_LABEL: Record<AlarmKind, string> = { WAKE: '기상', PREPARE: '준비', DEPARTURE: '출발', ARRIVE: '도착' };
 
+// 새 일정(H05)에서 고르는 알람 종류 — 도착은 울리는 알람이 아니라 목표 시각이라 고르지 않음 (D46)
+export const RING_KINDS: readonly RingKind[] = ['WAKE', 'PREPARE', 'DEPARTURE'];
+export const defaultAlarms = (): Record<RingKind, boolean> => ({ WAKE: true, PREPARE: true, DEPARTURE: true });
+
 // 목업의 보통 · 중요 · 매우 중요 = DB LOW · NORMAL · HIGH
 export const IMPORTANCE_LABEL: Record<Importance, string> = { LOW: '보통', NORMAL: '중요', HIGH: '매우 중요' };
 export const IMPORTANCE_POINT: Record<Importance, number> = { LOW: 0, NORMAL: 1, HIGH: 2 };
+
+// 출발 위치 기본값 · 이동 수단 고르기 (H05 · H03) — DB에는 BUS · SUBWAY도 있지만 목업 선택지는 이 셋
+export const ORIGIN_HOME = '집';
 
 export const TRANSPORT_LABEL: Record<Transport, string> = {
   TRANSIT: '대중교통',
@@ -26,6 +34,8 @@ export const TRANSPORT_LABEL: Record<Transport, string> = {
   CAR: '자차',
   WALK: '도보',
 };
+
+export const TRANSPORT_OPTIONS: readonly (readonly [Transport, string])[] = (['TRANSIT', 'CAR', 'WALK'] as const).map((t) => [t, TRANSPORT_LABEL[t]] as const);
 
 export const LEVELS: readonly { name: string; sound: string; voice: string; vibration: string }[] = [
   { name: '약', sound: '60% · 부드러운 소리', voice: '차분 · 다정', vibration: '없음' },
@@ -44,7 +54,11 @@ export type AlarmTime = {
   kind: AlarmKind;
   at: Date;
   enabled: boolean; // 종류별로 끈 알람 (도착은 목표 시각이라 항상 true)
+  auto?: Date; // 직접 고른 시각이면 자동 계산값 — "자동으로 되돌리기" · 고친 값 기록에 씀. 없으면 자동 계산 그대로 (D42 C)
 };
+
+// 예상 이동을 직접 입력했을 때의 출처 글자 (DB travel_source = MANUAL)
+export const MANUAL_SOURCE = '직접 입력';
 
 export type Appointment = {
   id: string;
@@ -60,21 +74,24 @@ export type Appointment = {
   prepMinutes: number; // 실제 준비
   predictedPrepMinutes: number; // 예측 준비 (공통 P80 + 개인 보정)
   importance: Importance;
-  repeatLabel: string;
+  repeatLabel: string; // 반복 없음 · 매일 · 평일 · 매주 월 · 수 (repeat.ts repeatLabel)
+  recurrenceRule: string | null; // 반복 규칙 RRULE (appointments.recurrence_rule) — 없으면 반복 없음
   groupName: string | null; // 같이 가는 그룹 (공유 알람)
   items: string[]; // 준비물
   withWake: boolean; // 그날 첫 일정이라 기상 알람이 있음
   enabled: boolean; // 이 일정의 알람 전체 켜기
-  alarms: AlarmTime[]; // 기상 · 준비 · 출발 · 도착 목표, 시각 순
+  alarms: AlarmTime[]; // 기상 · 준비 · 출발 · 도착 목표 순 — H05에서 고른 종류만, 하나도 없으면 빈 목록(알람 없는 일정)
   level: Level; // 지금 적용되는 강도 (배경음 기준)
 };
 
+// 하루 일정 한 줄 (H01) — 알람 없는 일정도 일정이라 id가 있음. 알람 없는 줄은 누를 수 없음 (일정 수정 · 삭제는 D41이 정함)
 export type ScheduleItem = {
-  appointmentId: string | null; // 알람 없는 일정이면 null
+  appointmentId: string;
   at: Date;
   title: string;
-  place: string | null;
-  importance: Importance | null;
+  place: string;
+  importance: Importance;
+  hasAlarm: boolean; // 알람이 하나라도 있는 일정 — 없으면 H05에서 알람을 모두 끄고 저장한 일정
 };
 
 export type Intensity = {
@@ -85,11 +102,35 @@ export type Intensity = {
   axes: Record<IntensityAxis, { level: Level; manual: boolean }>; // manual = 직접 고름
 };
 
-export type AppointmentDetail = Appointment & { intensity: Intensity };
+// 알람 설정(H03)에서 직접 고칠 수 있는 값 (D42 C) — 저장 전에는 화면이 초안으로 들고 있음
+// 직접 고른 값(숫자 · 시각)은 자동 계산보다 먼저 쓰이고(강도와 같은 규칙), null · 없음이면 자동
+export type AlarmEdits = {
+  bufferMinutes: number; // 여유 (appointment_participants.buffer_minutes)
+  origin: string; // 출발 위치 (origin_name)
+  transport: Transport; // 이동 수단 (transport_type)
+  travelMinutes: number | null; // 직접 입력한 예상 이동 (est_travel_minutes, 출처 MANUAL) — null = 길찾기 자동
+  prepareMinutes: number | null; // 직접 고른 준비 시간 (prepare_minutes) — null = 공통 P80 + 개인 보정 자동
+  times: Partial<Record<RingKind, Date>>; // 직접 고른 알람 시각 (alarms.scheduled_at) — 없는 종류는 자동
+};
+
+export type AppointmentDetail = Appointment & {
+  intensity: Intensity;
+  edits: AlarmEdits; // 지금 저장된 값 (초안의 처음 모양 · 바뀐 곳 비교)
+  auto: { travelMinutes: number; predictedPrepMinutes: number }; // 직접 고른 값이 없을 때의 자동 계산값
+};
+
+// 값을 바꿔 보았을 때의 알람 (H03 저장 전 미리 보기) — 실데이터는 alarm-suggest
+export type AlarmPreview = {
+  alarms: AlarmTime[];
+  travelMinutes: number; // 적용될 예상 이동 (직접 입력했으면 그 값)
+  travelSource: string;
+  autoTravelMinutes: number; // 출발 위치 · 이동 수단으로 다시 계산한 자동값
+  predictedPrepMinutes: number; // 적용될 준비 시간
+  autoPredictedPrepMinutes: number;
+};
 
 // 알람 설정(H03)에서 저장 전까지 들고 있는 값 — 저장할 때 한 번에 반영
-export type AlarmSettingsDraft = {
-  bufferMinutes: number;
+export type AlarmSettingsDraft = AlarmEdits & {
   kinds: Partial<Record<AlarmKind, boolean>>; // 종류별 켜기 (기상 · 준비 · 출발)
   levels: Record<IntensityAxis, Level | null>; // null = 자동
 };
@@ -106,11 +147,12 @@ export type AppointmentDraft = {
   title: string;
   date: Date; // 날짜 (시각은 time)
   time: string; // 14:00
-  repeat: 'NONE' | 'WEEKLY';
+  repeat: Weekday[]; // 반복 요일 (월요일부터) — 비어 있으면 반복 없음. 저장할 때는 RRULE (repeat.ts)
   place: string;
   transport: Transport;
   importance: Importance;
   items: string; // 쉼표로 구분
+  alarms: Record<RingKind, boolean>; // 만들 알람 종류 (D46) — 모두 끄면 알람 없는 일정
 };
 
 // 새 일정 알람 계산 결과 (H05 확인 시트) — 실데이터는 alarm-suggest Edge Function
@@ -158,4 +200,34 @@ export type WakeCheck = {
   usage: number; // 누적 사용 · 해제 후 10분 (분) — 지금은 시연 값, 실데이터는 #35 · #40
   recent: number; // 최근 사용 · 뒤쪽 5분 (분)
   confirmed: { at: Date; how: 'self' | 'auto' } | null; // 이미 확정했으면
+};
+
+// 고친 값 기록 (고치기 원칙) — 사용자가 자동 값을 직접 고치면 하나씩 남겨 두고, 나중에 개인화(계산 · 제안)에 씀
+// DB public.user_edit_logs 한 줄과 같은 모양 — 실데이터가 붙으면 api.ts의 recordEdit만 insert로 바뀜
+//   screen: 고친 화면 (S01 = 알람 조정 제안 직접 수정, 다른 담당이 같은 기록 함수를 부름)
+//   autoValue: 고치기 전에 앱이 쓰던 값 — 계산하는 값(이동 · 준비 · 알람 시각 · 강도)은 자동 계산값, 입력하는 값(여유 · 출발 위치 · 이동 수단 · 켜기)은 고치기 전 값
+//   editedValue: 고친 뒤 값. 자동으로 되돌렸으면 null
+//   강도 세 칸은 DB 칸 이름으로 남김 — 배경음 = sound_key, 말소리 = voice_tone, 진동 = intensity (값은 약 · 중 · 강 = 0 · 1 · 2)
+export type EditLogScreen = 'H03' | 'H05' | 'S01';
+export type EditLogField =
+  | 'buffer_minutes'
+  | 'prepare_minutes'
+  | 'travel_minutes'
+  | 'origin'
+  | 'transport'
+  | 'intensity'
+  | 'voice_tone'
+  | 'sound_key'
+  | 'alarm_enabled'
+  | 'scheduled_at';
+
+export type UserEditLog = {
+  at: Date;
+  screen: EditLogScreen;
+  field: EditLogField;
+  appointmentId?: string;
+  alarmId?: string;
+  alarmType?: AlarmKind;
+  autoValue: unknown;
+  editedValue: unknown;
 };

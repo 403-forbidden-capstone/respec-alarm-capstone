@@ -1,5 +1,6 @@
 import { describe, expect, it } from '@jest/globals';
 
+import type { AlarmKind, AlarmTime } from '@/features/alarm/types';
 import { formatTime } from '@/lib/format';
 
 import {
@@ -8,6 +9,7 @@ import {
   rejectedReply,
   resolveFound,
   savedReply,
+  savedWithoutAlarmReply,
   SCRIPT,
   startChat,
   userTurn,
@@ -17,6 +19,9 @@ import {
 import { kst, TODAY } from '../data';
 
 const at = kst(TODAY, 1350); // 밤 10:30
+
+// 일정 알람 한 줄 — 하루(TODAY 기준 날짜 번호)의 분 단위 시각
+const alarm = (kind: AlarmKind, day: number, minute: number): AlarmTime => ({ id: `a:${kind}`, kind, at: kst(day, minute), enabled: true });
 
 // 목업 SCRIPT · userSay · aiTurn · chatResolve와 같은 순서로 흐르는지
 describe('AI 대화 대본', () => {
@@ -64,10 +69,35 @@ describe('AI 대화 대본', () => {
 
   it('저장 답은 준비 · 출발 알람 시각, 내일이면 "내일"', () => {
     const study = kst(TODAY + 1, 840);
-    expect(savedReply(study, kst(TODAY + 1, 735), kst(TODAY + 1, 780))).toBe(
+    const chain = (day: number) => [alarm('WAKE', day, 725), alarm('PREPARE', day, 735), alarm('DEPARTURE', day, 780), alarm('ARRIVE', day, 830)];
+    expect(savedReply(study, chain(TODAY + 1))).toBe(
       '저장했어요. 내일 오후 12:15 준비, 오후 1:00 출발 알람을 맞춰 둘게요. 오늘 대화는 여기까지 할까요?',
     );
-    expect(savedReply(kst(TODAY + 2, 840), kst(TODAY + 2, 735), kst(TODAY + 2, 780))).toMatch(/^저장했어요\. 5월 24일 /);
+    expect(savedReply(kst(TODAY + 2, 840), chain(TODAY + 2))).toMatch(/^저장했어요\. 5월 24일 /);
+  });
+
+  it('H05에서 알람 종류를 일부만 켰으면 켠 것만 말함 — 다른 알람 시각을 준비 · 출발로 읽지 않음 (D46)', () => {
+    const study = kst(TODAY + 1, 840);
+    const day = TODAY + 1;
+    const tail = ' 알람을 맞춰 둘게요. 오늘 대화는 여기까지 할까요?';
+    // 준비만 끔 — 기상 · 출발
+    expect(savedReply(study, [alarm('WAKE', day, 725), alarm('DEPARTURE', day, 780), alarm('ARRIVE', day, 830)])).toBe(`저장했어요. 내일 오후 12:05 기상, 오후 1:00 출발${tail}`);
+    // 기상만 켬
+    expect(savedReply(study, [alarm('WAKE', day, 725), alarm('ARRIVE', day, 830)])).toBe(`저장했어요. 내일 오후 12:05 기상${tail}`);
+    // 출발만 켬 — 출발 시각이 "준비"로 읽히지 않고 한 번만 말함
+    expect(savedReply(study, [alarm('DEPARTURE', day, 780), alarm('ARRIVE', day, 830)])).toBe(`저장했어요. 내일 오후 1:00 출발${tail}`);
+    // 준비만 켬
+    expect(savedReply(study, [alarm('PREPARE', day, 735), alarm('ARRIVE', day, 830)])).toBe(`저장했어요. 내일 오후 12:15 준비${tail}`);
+    // 기상 · 준비만 켬 (출발 끔) — 준비만 말함
+    expect(savedReply(study, [alarm('WAKE', day, 725), alarm('PREPARE', day, 735), alarm('ARRIVE', day, 830)])).toBe(`저장했어요. 내일 오후 12:15 준비${tail}`);
+  });
+
+  it('울리는 알람이 하나도 없으면 알람 없이 저장했다고 답함 (D46)', () => {
+    expect(savedReply(kst(TODAY + 1, 840), [])).toBe(savedWithoutAlarmReply(kst(TODAY + 1, 840)));
+  });
+
+  it('H05에서 알람을 모두 끄고 저장한 일정은 알람 시각 없이 답함 (D46)', () => {
+    expect(savedWithoutAlarmReply(kst(TODAY + 1, 840))).toBe('저장했어요. 내일 일정은 알람 없이 저장해 둘게요. 오늘 대화는 여기까지 할까요?');
   });
 });
 

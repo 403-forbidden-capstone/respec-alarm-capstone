@@ -1,5 +1,10 @@
 // ⑥ AI 일기 · 루틴 — 이 기능에서 쓰는 타입
+import type { Weekday } from '@/lib/weekday';
 import type { Enums } from '@/types/database';
+
+// 요일은 일정 반복(H05)과 같이 쓰려고 lib/weekday로 옮김 — 루틴 쪽 이름은 그대로 쓸 수 있게 다시 내보냄
+export { WEEKDAYS } from '@/lib/weekday';
+export type { Weekday };
 
 // 오늘 루틴 진행 (H01) — 단계를 순서대로 끝냄
 export type RoutineProgress = {
@@ -15,9 +20,6 @@ export type Todo = {
   title: string;
   done: boolean;
 };
-
-export const WEEKDAYS = ['월', '화', '수', '목', '금', '토', '일'] as const; // 월요일 시작
-export type Weekday = (typeof WEEKDAYS)[number];
 
 // 루틴 단계 (routines.steps 한 칸) — 시각은 첫 단계 시각부터 걸리는 시간을 차례로 더해 셈
 export type RoutineStep = {
