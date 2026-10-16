@@ -124,6 +124,28 @@ describe('DB 행 → 약속 (toAppointment)', () => {
     expect(toAppointment(unknownSound).level).toBe(0);
   });
 
+  it('강도 단계는 알람 순서와 상관없이 기상 알람에서 읽음 (DB가 돌려주는 순서에 기대지 않음)', () => {
+    const wake = alarmRow('w', 'WAKE', '08:00', { sound_key: 'theme_urgent', intensity: 'STRONG' });
+    const others = [alarmRow('a', 'ARRIVE', '09:50', { sound_key: 'theme_calm', intensity: 'SOFT' }), alarmRow('p', 'PREPARE', '08:30', { sound_key: 'theme_calm', intensity: 'SOFT' })];
+    expect(toAppointment(meeting({ alarms: [...others, wake] })).level).toBe(2);
+    expect(toAppointment(meeting({ alarms: [wake, ...others] })).level).toBe(2);
+  });
+
+  it('직접 고른 강도가 저장된 알람이 있으면 그 알람에서 읽음 — 제안 적용(S01)이 준비 알람만 바꿨어도 카드 단계가 따라감, H03과 같은 알람', () => {
+    const wake = alarmRow('w', 'WAKE', '08:00');
+    const prepare = alarmRow('p', 'PREPARE', '08:30', { sound_key: 'theme_urgent', intensity: 'STRONG', intensity_source: 'MANUAL' });
+    for (const alarms of [[prepare, wake], [wake, prepare]]) {
+      const rows = meeting({ alarms });
+      expect(toAppointment(rows).level).toBe(2);
+      expect(toIntensity(rows.alarms, 'NORMAL', 0).axes.sound).toEqual({ level: 2, manual: true });
+    }
+  });
+
+  it('기상 알람이 없으면 첫 알람에서 읽음', () => {
+    expect(toAppointment(meeting({ alarms: [alarmRow('p', 'PREPARE', '08:30', { sound_key: 'theme_urgent', intensity: 'STRONG' })] })).level).toBe(2);
+    expect(toAppointment(meeting({ alarms: [] })).level).toBe(1);
+  });
+
   it('루틴 알람은 약속 알람 목록에 넣지 않음', () => {
     expect(toAlarmTime(alarmRow('r', 'ROUTINE', '07:00'))).toBeNull();
   });

@@ -74,11 +74,18 @@ export function toAlarmTime(row: AlarmRow, auto?: Date): AlarmTime | null {
   };
 }
 
-// 강도 단계 — 한 약속의 알람은 강도 세 칸이 같은 값이라 첫 알람의 배경음 칸으로 읽음 (types.ts level = 배경음 기준)
+// 직접 고른 강도(intensity_source = MANUAL)가 저장된 알람 — 기상 알람이 먼저, 없으면 다른 알람. 서버 resolveOverrides와 같은 순서
+//   H02 카드 단계(levelOf)와 H03 직접 고름(storedOverrides)이 같은 알람을 읽게 이 함수 하나로 고름
+const manualIntensityRow = (alarms: readonly AlarmRow[]) =>
+  alarms.find((a) => a.alarm_type === 'WAKE' && a.intensity_source === 'MANUAL') ?? alarms.find((a) => a.intensity_source === 'MANUAL');
+
+// 강도 단계 — 한 약속의 알람은 보통 강도 세 칸이 같은 값이라 한 알람의 배경음 칸으로 읽음 (types.ts level = 배경음 기준)
+//   읽을 알람: 직접 고른 강도가 저장된 알람 → 기상 알람 → 첫 알람. DB가 돌려주는 알람 순서에 기대지 않음
+//   (S01 제안 적용은 대상 알람 하나의 칸만 바꾸므로 순서가 바뀌면 카드 단계가 달라 보일 수 있었음)
 function levelOf(rows: readonly AlarmRow[]): Level {
-  const first = rows[0];
-  if (!first) return 1;
-  return levelOfSoundKey(first.sound_key) ?? levelOfIntensity(first.intensity) ?? 1;
+  const source = manualIntensityRow(rows) ?? rows.find((a) => a.alarm_type === 'WAKE') ?? rows[0];
+  if (!source) return 1;
+  return levelOfSoundKey(source.sound_key) ?? levelOfIntensity(source.intensity) ?? 1;
 }
 
 // 준비 전 활동(기상 뒤 준비 알람까지) — DB에 따로 저장하지 않아 두 알람의 간격으로 읽음. 기상 · 준비가 둘 다 있을 때만
@@ -205,7 +212,7 @@ export const byTime = <T extends { at: Date }>(x: T, y: T) => x.at.getTime() - y
 // 직접 고른 강도 — 서버 resolveOverrides와 같은 규칙: 저장된 알람 중 기상(없으면 아무거나)이 intensity_source = MANUAL이면
 //   그 알람의 세 칸(배경음 sound_key · 말소리 voice_tone · 진동 intensity)이 자동 값과 다른 칸만 직접 고른 것
 export function storedOverrides(alarms: readonly AlarmRow[], auto: Level): Record<IntensityAxis, Level | null> {
-  const stored = alarms.find((a) => a.alarm_type === 'WAKE' && a.intensity_source === 'MANUAL') ?? alarms.find((a) => a.intensity_source === 'MANUAL');
+  const stored = manualIntensityRow(alarms);
   if (!stored) return { sound: null, voice: null, vibration: null };
   const pick = (level: Level | null) => (level != null && level !== auto ? level : null);
   return {
