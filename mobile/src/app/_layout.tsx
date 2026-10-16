@@ -10,6 +10,7 @@ import { ConfirmHost, SheetHost, ToastHost } from '@/components/ui';
 import { AuthProvider, useAuth } from '@/features/auth/AuthProvider';
 import { ConfigErrorScreen } from '@/features/auth/ConfigErrorScreen';
 import { ProfileRetryScreen } from '@/features/auth/ProfileRetryScreen';
+import { useAlarmSync } from '@/lib/alarmSync/useAlarmSync';
 import { canUseRealData, configError } from '@/lib/mode';
 import { colors, fontFiles } from '@/theme';
 
@@ -46,18 +47,21 @@ export default function RootLayout() {
 // 실데이터를 못 쓰면(Supabase 값 없음 · lib/flags REAL_DATA_READY = false) login · onboarding · settings를 아예 뺌 — 주소로 열어도 탭 홈 (#116)
 // dev/* · auth/callback은 어느 쪽에서도 열림. 앱 화면을 새로 만들면 첫 번째 Protected 안에 넣음
 function RootStack() {
-  const { session, loading, enabled, needsOnboarding, profileError, refreshProfile } = useAuth();
+  const { session, profile, loading, enabled, needsOnboarding, profileError, refreshProfile } = useAuth();
+  const needsLogin = enabled && !session;
+  const ready = !needsLogin && !needsOnboarding;
+  const preview = !enabled && canUseRealData; // 가짜 모드에서 login · onboarding을 열어 보기 (실데이터를 쓸 수 있을 때만)
 
   useEffect(() => {
     if (!loading) SplashScreen.hideAsync();
   }, [loading]);
 
+  // 로그인한 동안 폰 예약 · 울림 기록을 서버와 맞춤 (로그인 직후 · 앱이 앞에 올 때, 실데이터 모드만) — lib/alarmSync
+  useAlarmSync({ active: enabled && ready && !loading && profileError == null, userId: session?.user.id ?? null, timeZone: profile?.timezone });
+
   if (configError) return <ConfigErrorScreen />;
   if (loading) return null;
   if (profileError != null) return <ProfileRetryScreen message={profileError} onRetry={refreshProfile} />;
-  const needsLogin = enabled && !session;
-  const ready = !needsLogin && !needsOnboarding;
-  const preview = !enabled && canUseRealData; // 가짜 모드에서 login · onboarding을 열어 보기 (실데이터를 쓸 수 있을 때만)
 
   return (
     <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: colors.bg } }}>
