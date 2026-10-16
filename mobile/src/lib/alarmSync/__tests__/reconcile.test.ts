@@ -111,6 +111,17 @@ describe('폰 예약 맞추기 계획 (planReconcile)', () => {
     expect(plan.schedule).toEqual([]);
   });
 
+  it('forceCancel(서버에서 꺼진 것으로 확인된 알람)은 첫 울림이 지났어도 지움 — 미룸 · 다시 울림 대기 · 울리는 중', () => {
+    const phone = [onPhone('snoozed', at(-5), { snoozeCount: 1, nextRingAt: at(5) }), onPhone('ringing', at(-1)), onPhone('other-past', at(-30))];
+    const plan = planReconcile({ server: [], phone, nowMs: NOW, forceCancel: new Set(['snoozed', 'ringing']) });
+    expect(plan.cancel).toEqual(['snoozed', 'ringing']); // 지정하지 않은 지난 예약은 그대로
+  });
+
+  it('forceCancel에 있어도 서버 켜진 목록에 있으면 지우지 않음', () => {
+    const plan = planReconcile({ server: [pkg('a', at(60))], phone: [onPhone('a', at(60))], nowMs: NOW, forceCancel: new Set(['a']) });
+    expect(plan.cancel).toEqual([]);
+  });
+
   it('지난 시각 꾸러미는 건너뜀 (지금 정각도 지난 것)', () => {
     const plan = planReconcile({ server: [pkg('past', at(-1)), pkg('now', at(0)), pkg('next', at(1))], phone: [], nowMs: NOW });
     expect(plan.schedule.map((p) => p.alarmId)).toEqual(['next']);

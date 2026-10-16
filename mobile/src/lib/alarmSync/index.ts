@@ -106,6 +106,14 @@ async function fetchServerRows(userId: string, fromMs: number): Promise<SyncRow[
   }));
 }
 
+// 이 알람들 중 서버에 켜진 행이 아직 있는 것의 id — 시각은 안 봄 (미룸 · 울리는 중이라 첫 시각이 지난 알람도 서버에는 켜진 채로 있으므로)
+async function fetchEnabledIds(userId: string, ids: readonly string[]): Promise<Set<string>> {
+  if (!ids.length) return new Set();
+  const { data, error } = await supabase.from('alarms').select('alarm_id').eq('user_id', userId).eq('is_enabled', true).in('alarm_id', [...ids]);
+  if (error) throw error;
+  return new Set((data ?? []).map((row) => row.alarm_id));
+}
+
 export type ReconcileOptions = {
   timeZone?: string | null; // 부제 "오전 10:00 · 장소"의 시각 기준 — profiles.timezone (없으면 Asia/Seoul)
   alarmIds?: readonly string[]; // 이 알람만 맞춤 — 켜기 · 끄기 · 강도처럼 DB에 직접 쓴 뒤 그 알람만 폰에 반영할 때. 없으면 전부
@@ -130,12 +138,18 @@ export function reconcile(options: ReconcileOptions = {}): Promise<SyncSummary> 
     const rows = await fetchServerRows(userId, nowMs);
     let server = buildServerPackages(rows, options.timeZone ?? undefined);
     let phone = await AlarmCore.list();
+    let forceCancel: Set<string> | undefined;
     if (options.alarmIds) {
       const only = new Set(options.alarmIds);
       server = server.filter((p) => only.has(p.alarmId));
       phone = phone.filter((a) => only.has(a.id));
+      // 지정한 알람(끄기 · 지우기를 DB에 쓴 직후)은 서버에 켜진 행이 없으면 첫 울림이 지났어도(미룸 · 다시 울림 대기) 폰에서 지움 — 전체 맞추기는 이 규칙을 안 씀 (planReconcile)
+      const future = new Set(server.map((p) => p.alarmId));
+      const candidates = phone.filter((a) => !future.has(a.id)).map((a) => a.id);
+      const stillOn = await fetchEnabledIds(userId, candidates);
+      forceCancel = new Set(candidates.filter((id) => !stillOn.has(id)));
     }
-    return executePlan(planReconcile({ server, phone, nowMs }));
+    return executePlan(planReconcile({ server, phone, nowMs, forceCancel }));
   });
 }
 

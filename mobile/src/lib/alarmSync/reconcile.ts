@@ -73,14 +73,16 @@ export type ReconcilePlan = {
 //   · 폰에 없음 → 더함 (기간 안일 때만). 폰에 있는데 시각(atMillis = 서버 scheduled_at) 또는 강도가 다름 → 다시 걺 (친구의 ±5분 · 제안 적용 · 다른 기기에서 고친 것)
 //   · 서버에 없는 폰 예약 → 지움. 단 첫 울림 시각이 이미 지난 예약(울리는 중 · 미룸 · 다시 울림 대기)은 건드리지 않음 — 서버 행은 울린 뒤 과거가 되어 목록에서 빠지는 것이 정상이고,
 //     울리는 중인 알람을 지우면 안 되므로. 그 알람이 서버에서 지워졌다면 alarm-commit 응답의 canceled_alarm_ids(applyCommit)가 지움
+//     예외 forceCancel: 서버에서 꺼졌거나 지워진 것이 확인된 알람은 시각과 상관없이 지움 — H02 · H03 · S01에서 "끄기"를 누른 직후(reconcile({ alarmIds })) 미룸 중이던 예약이 다시 울리지 않게
 //   · 같은 alarmId가 폰에서 울리거나 미룬 중이면 schedule()이 'deferred'를 돌려주어 다음 맞추기로 넘어감 (여기서는 계획에 넣기만 함)
 export function planReconcile(input: {
   server: readonly PhoneRingPackage[];
   phone: readonly ScheduledAlarm[];
   nowMs: number;
   windowDays?: number;
+  forceCancel?: ReadonlySet<string>; // 서버에 켜진 행이 없다고 확인된 알람 id (있으면 첫 울림이 지났어도 폰에서 지움). 전체 맞추기는 안 넘김
 }): ReconcilePlan {
-  const { server, phone, nowMs } = input;
+  const { server, phone, nowMs, forceCancel } = input;
   const horizon = nowMs + (input.windowDays ?? RECONCILE_WINDOW_DAYS) * DAY_MS;
   const onPhone = new Map(phone.map((a) => [a.id, a]));
   const onServer = new Set(server.map((p) => p.alarmId));
@@ -91,6 +93,6 @@ export function planReconcile(input: {
     if (!existing) return p.atMillis <= horizon;
     return existing.atMillis !== p.atMillis || existing.intensity !== p.intensity;
   });
-  const cancel = phone.filter((a) => !onServer.has(a.id) && a.atMillis > nowMs).map((a) => a.id);
+  const cancel = phone.filter((a) => !onServer.has(a.id) && (a.atMillis > nowMs || forceCancel?.has(a.id) === true)).map((a) => a.id);
   return { schedule, cancel };
 }

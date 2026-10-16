@@ -26,9 +26,11 @@ type DbError = { code: string; message: string } | null;
 let mockUser: string | null = 'user-1';
 const mockUpsert = jest.fn<(rows: { client_event_id: string }[], options: unknown) => Promise<{ error: DbError }>>();
 let mockAlarmRows: unknown[] = [];
+let mockEnabledIds: string[] = []; // 지정한 알람 중 서버에 켜진 행이 있는 것 (.in으로 끝나는 쿼리)
 const mockAlarmQuery: Record<string, unknown> = {};
 for (const method of ['select', 'eq', 'gt', 'order']) mockAlarmQuery[method] = jest.fn(() => mockAlarmQuery);
 mockAlarmQuery.limit = jest.fn(async () => ({ data: mockAlarmRows, error: null }));
+mockAlarmQuery.in = jest.fn(async () => ({ data: mockEnabledIds.map((alarm_id) => ({ alarm_id })), error: null }));
 jest.mock('../../supabase', () => ({
   supabase: {
     auth: { getSession: async () => ({ data: { session: mockUser ? { user: { id: mockUser } } : null } }) },
@@ -46,6 +48,7 @@ beforeEach(() => {
   mockMock = false;
   mockUser = 'user-1';
   mockAlarmRows = [];
+  mockEnabledIds = [];
   mockCore.cancel.mockResolvedValue();
   mockCore.scheduleAll.mockImplementation(scheduledAll);
   mockCore.list.mockResolvedValue([]);
@@ -127,6 +130,33 @@ describe('reconcile — 서버 ↔ 폰 맞추기', () => {
     expect(summary).toMatchObject({ scheduled: ['server-1'], canceled: ['phone-only-1'] });
     expect(mockCore.cancel).toHaveBeenCalledTimes(1);
     expect(mockCore.scheduleAll.mock.calls[0][0].map((p) => p.alarmId)).toEqual(['server-1']);
+  });
+
+  // 첫 울림이 지나 미룸 · 다시 울림 대기 중인 폰 예약 (서버 목록은 "지금 이후"만 읽어서 여기에 안 나옴)
+  const snoozed = (id: string) => ({ id, type: 'WAKE' as const, intensity: 'NORMAL' as const, title: '회의', atMillis: NOW - 5 * 60_000, snoozeCount: 1, nextRingAt: NOW + 5 * 60_000 });
+
+  it('alarmIds로 끈 알람이 미룸 중이어도(서버에서 꺼짐) 폰 예약을 지움 — 안 지우면 10분 뒤 다시 울림', async () => {
+    mockCore.list.mockResolvedValue([snoozed('wake-1')]);
+    mockEnabledIds = []; // 방금 H02에서 꺼서 서버에 켜진 행이 없음
+    const summary = await reconcile({ nowMs: NOW, alarmIds: ['wake-1'] });
+    expect(summary.canceled).toEqual(['wake-1']);
+    expect(mockCore.cancel).toHaveBeenCalledWith('wake-1');
+    expect(mockAlarmQuery.in).toHaveBeenCalledWith('alarm_id', ['wake-1']); // 시각 조건 없이 켜진 행이 있는지만 물음
+  });
+
+  it('alarmIds로 맞출 때 서버에 켜진 채 남아 있는(첫 시각이 지난) 알람은 지우지 않음 — 미룸 중에 강도만 바꾼 경우', async () => {
+    mockCore.list.mockResolvedValue([snoozed('wake-1')]);
+    mockEnabledIds = ['wake-1'];
+    const summary = await reconcile({ nowMs: NOW, alarmIds: ['wake-1'] });
+    expect(summary.canceled).toEqual([]);
+    expect(mockCore.cancel).not.toHaveBeenCalled();
+  });
+
+  it('전체 맞추기는 서버 목록에 없는 미룸 중 예약을 지우지 않음 (울린 뒤 서버 행이 과거가 되는 정상 경우)', async () => {
+    mockCore.list.mockResolvedValue([snoozed('wake-1')]);
+    const summary = await reconcile({ nowMs: NOW });
+    expect(summary.canceled).toEqual([]);
+    expect(mockAlarmQuery.in).not.toHaveBeenCalled();
   });
 
   it('쿼리는 내 켜진 알람 · 지금 이후', async () => {
