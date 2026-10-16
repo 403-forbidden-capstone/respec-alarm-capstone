@@ -272,3 +272,42 @@ test('일정 없는 알람: 이미 지난 시각은 거절(끄는 요청은 허�
     );
   }
 });
+
+test('일정 없는 알람: 시각 없이 강도만 · 켜기만 고치면 저장돼 있던 옛 시각이 지났어도 통과, 새로 보낸 지난 시각은 422', async () => {
+  const { db, ctx } = setup();
+  // 반복 알람의 첫 회차가 지나 옛 시각이 과거로 남은 상태 (D4 전)
+  db.rows('alarms').push({
+    alarm_id: 'old',
+    user_id: USER,
+    participant_id: null,
+    routine_id: null,
+    alarm_type: 'WAKE',
+    scheduled_at: kst(21, 420).toISOString(),
+    intensity: 'NORMAL',
+    voice_tone: 'FRIENDLY',
+    sound_key: 'default',
+    is_enabled: false,
+    recurrence_rule: 'FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR',
+  });
+
+  const strong = await commitStandalone(ctx, { alarm: { alarmId: 'old', levels: { vibration: 2 } }, edits: [], timeZone: 'Asia/Seoul' });
+  assert.deepEqual([db.rows('alarms')[0].intensity, db.rows('alarms')[0].intensity_source], ['STRONG', 'MANUAL']);
+  assert.equal(strong.alarms[0].scheduled_at, kst(21, 420).toISOString()); // 시각은 그대로
+
+  const on = await commitStandalone(ctx, { alarm: { alarmId: 'old', isEnabled: true }, edits: [], timeZone: 'Asia/Seoul' });
+  assert.equal(db.rows('alarms')[0].is_enabled, true);
+  assert.equal(on.alarms[0].scheduled_at, kst(21, 420).toISOString());
+
+  // 새로 보낸 시각이 지났으면 켜는 요청은 거절, 끄는 요청은 받음
+  await assert.rejects(
+    () => commitStandalone(ctx, { alarm: { alarmId: 'old', scheduledAt: kst(22, 300), isEnabled: true }, edits: [], timeZone: 'Asia/Seoul' }),
+    (e: unknown) => e instanceof HttpError && e.code === 'UNPROCESSABLE' && (e.details as { reason: string }).reason === 'PAST_TIME',
+  );
+  await assert.rejects(
+    () => commitStandalone(ctx, { alarm: { alarmId: 'old', scheduledAt: kst(22, 300) }, edits: [], timeZone: 'Asia/Seoul' }),
+    (e: unknown) => e instanceof HttpError && e.code === 'UNPROCESSABLE',
+  );
+  assert.equal(db.rows('alarms')[0].scheduled_at, kst(21, 420).toISOString()); // 거절된 요청은 아무것도 안 바꿈
+  await commitStandalone(ctx, { alarm: { alarmId: 'old', scheduledAt: kst(22, 300), isEnabled: false }, edits: [], timeZone: 'Asia/Seoul' });
+  assert.equal(db.rows('alarms')[0].is_enabled, false);
+});

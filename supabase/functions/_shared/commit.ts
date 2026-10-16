@@ -202,8 +202,10 @@ export async function commitStandalone(ctx: CommitCtx, args: { alarm: Standalone
   const scheduledAt = alarm.scheduledAt ?? (existing ? new Date(existing.scheduled_at) : undefined);
   if (!scheduledAt) throw new HttpError('VALIDATION_FAILED', 'scheduled_at이 필요해요');
   const isEnabled = alarm.isEnabled ?? existing?.is_enabled ?? true;
-  // 켜 둘 알람의 시각이 이미 지났으면 울릴 수 없음. 끄는 요청은 시각과 상관없이 받음
-  if (isEnabled && scheduledAt.getTime() < now.getTime()) {
+  // 요청이 새로 보낸 시각이 이미 지났으면 울릴 수 없음. 끄는 요청은 시각과 상관없이 받음
+  // 시각 없이 강도 · 켜기만 고치는 요청은 저장돼 있던 시각을 검사하지 않음 — 반복 알람은 첫 회차가 지나면 옛 시각이 남는데(D4 전),
+  // 그 알람을 켜도 알람 코어가 지난 시각은 건너뛰므로(skipped_past) 안전함. 회차 넘기기는 D4 뒤
+  if (alarm.scheduledAt != null && isEnabled && alarm.scheduledAt.getTime() < now.getTime()) {
     throw new HttpError('UNPROCESSABLE', '이미 지난 시각이라 알람을 만들 수 없어요', { reason: 'PAST_TIME' });
   }
 
