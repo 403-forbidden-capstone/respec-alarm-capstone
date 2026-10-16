@@ -114,9 +114,12 @@ export default function HomeScreen() {
       destructive: true,
     });
     if (!ok) return;
-    await cancelSnooze(snooze.alarmId);
-    toast('미루기를 취소했어요');
-    reload();
+    // 실데이터에서는 폰 예약을 못 지울 수 있어(네이티브 오류) run으로 — 두 번 누름 막기 · 실패 토스트
+    await run(async () => {
+      await cancelSnooze(snooze.alarmId);
+      toast('미루기를 취소했어요');
+      await reload();
+    }, '미루기를 취소하지 못했어요');
   }
 
   const shownGroups = groups.slice(0, GROUP_ROWS);
