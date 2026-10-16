@@ -72,17 +72,22 @@ async function loadCard(ownerId: string, cardId: string): Promise<SharedCard> {
 }
 
 const NO_EDIT = '이 알람을 바꿀 권한이 없어요';
+const NOTIFY_TIMEOUT_MS = 8_000; // 알림은 덤이라 오래 기다리지 않음 (저장은 이미 끝남)
 
 // 주인에게 알림 — 실패해도 던지지 않음. 보냈으면 true
 async function notifyOwner(s: Snapshot, ownerId: string, card: SharedCard, what: string): Promise<boolean> {
   try {
-    const result = await callEdge<{ sent?: number }>('notify', {
-      kind: 'ALARM_CHANGED',
-      targetUserId: ownerId,
-      alarmId: card.alarms[0].alarm_id,
-      title: '공유한 알람이 바뀌었어요',
-      body: `${profileOf(s, s.me)?.nickname ?? '친구'}님이 '${card.title}' 알람을 ${what}`,
-    });
+    const result = await callEdge<{ sent?: number }>(
+      'notify',
+      {
+        kind: 'ALARM_CHANGED',
+        targetUserId: ownerId,
+        alarmId: card.alarms[0].alarm_id,
+        title: '공유한 알람이 바뀌었어요',
+        body: `${profileOf(s, s.me)?.nickname ?? '친구'}님이 '${card.title}' 알람을 ${what}`,
+      },
+      { timeoutMs: NOTIFY_TIMEOUT_MS },
+    );
     return (result?.sent ?? 0) > 0;
   } catch {
     return false;
