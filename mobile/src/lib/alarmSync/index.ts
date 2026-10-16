@@ -94,10 +94,10 @@ export function cancelAllPhoneAlarms(): Promise<void> {
   return serial(() => AlarmCore.cancelAll());
 }
 
+const SERVER_ROW_LIMIT = 500; // 서버 알람을 한 번에 읽는 줄 수 — 이만큼 오면 목록이 잘렸을 수 있음 (reconcile)
+
 // 내 켜진 알람 중 지금 이후 것을 서버에서 읽음 (RLS가 친구 알람을 줄 수 있어 user_id로 한 번 더 좁힘)
 // 위쪽 기간 제한 없이 읽는 이유: 폰에 이미 있는 먼 알람을 "서버에 없다"고 보고 지우지 않으려고 (planReconcile)
-const SERVER_ROW_LIMIT = 500;
-
 async function fetchServerRows(userId: string, fromMs: number): Promise<SyncRow[]> {
   const { data, error } = await supabase
     .from('alarms')
