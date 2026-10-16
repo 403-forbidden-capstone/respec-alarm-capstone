@@ -4,7 +4,7 @@
 //   · 저장은 중복 키를 서버가 아직 안 읽어서(lib/edge) 자동 재시도하지 않음. 읽기(alarm-suggest · place-search)만 한 번 재시도
 import { applyCommit } from '@/lib/alarmSync';
 import { now } from '@/lib/clock';
-import { callEdge, EdgeError } from '@/lib/edge';
+import { callEdge, EdgeError, messageFor } from '@/lib/edge';
 import { UserError } from '@/lib/errors';
 import { dayKey } from '@/lib/format';
 import { supabase } from '@/lib/supabase';
@@ -12,7 +12,7 @@ import { requireUserId } from '@/lib/user';
 
 import { manualTimes, orderError, sameEdits } from './adjust';
 import { forgetDetail, recallDetail, rememberDetail } from './detailCache';
-import { dropEdits, peekEdits, queueEdit } from './editQueue';
+import { dropEdits, MAX_EDITS_PER_REQUEST, peekEdits, queueEdit } from './editQueue';
 import { createEdits, fromEditRow, settingsEdits, toEditPayloads, type EditLogLine, type SettingsAfter } from './edits';
 import { toStandaloneAppointment } from './map';
 import { rememberPlaces, toPlace, uniqueByName, type PlaceDto } from './places';
@@ -116,7 +116,8 @@ export async function estimateAppointment(d: AppointmentDraft): Promise<Estimate
   const s = await suggest(body);
   // 장소의 좌표가 없으면 길찾기를 못 함 — H05에는 이동시간 입력 칸이 없어 장소를 다시 고르게 안내 (H03에는 "예상 이동" 칸이 있음)
   if (s.travel.manual_required) throw new UserError('이 장소의 위치를 몰라 이동시간을 구하지 못했어요. 장소를 검색해서 다시 골라 주세요');
-  if (!s.check.ok) throw new UserError(s.check.message ?? '이 내용으로는 저장할 수 없어요');
+  // 서버의 check.message는 화면에 보이지 않음 — check.reason(ORDER · DEPARTURE_PASSED 등)으로 앱 문구를 고르고, 모르는 이유는 기본 문구 (lib/edge messageFor)
+  if (!s.check.ok) throw new UserError(messageFor('UNPROCESSABLE', { reason: s.check.reason }));
   return toEstimate(s, d, at, body, ++estimateSeq);
 }
 
@@ -194,8 +195,9 @@ export async function saveAlarmSettings(id: string, draft: AlarmSettingsDraft): 
   }
 
   const lines: EditLogLine[] = settingsEdits(saved, draft, after);
-  const queued = peekEdits(id);
-  const res = await callEdge<CommitResponse>('alarm-commit', settingsCommitBody(base, draft, toEditPayloads([...lines, ...queued])), { timeoutMs: COMMIT_TIMEOUT_MS });
+  // 한 요청의 edits는 50줄까지 (서버 상한) — 이번 저장의 줄을 먼저 담고 남는 자리만큼 쌓아 둔 기록을 실음. 못 보낸 기록은 큐에 남아 다음 저장에
+  const queued = peekEdits(id, MAX_EDITS_PER_REQUEST - lines.length);
+  const res = await callEdge<CommitResponse>('alarm-commit', settingsCommitBody(base, draft, toEditPayloads([...lines, ...queued].slice(0, MAX_EDITS_PER_REQUEST))), { timeoutMs: COMMIT_TIMEOUT_MS });
   dropEdits(queued);
   forgetDetail(id);
 

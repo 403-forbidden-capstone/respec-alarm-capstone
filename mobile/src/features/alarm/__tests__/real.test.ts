@@ -434,6 +434,18 @@ describe('새 일정 계산 · 저장 (H05)', () => {
     await expect(real.estimateAppointment(draft())).rejects.toThrow('출발 시각이 이미 지나서 저장할 수 없어요');
   });
 
+  it('저장할 수 없는 입력이면 서버 check.message 원문 대신 reason으로 앱 문구를 보여 줌, 모르는 이유는 기본 문구', async () => {
+    const english = 'alarms.WAKE must be earlier than alarms.PREPARE';
+    mockCallEdge.mockResolvedValue(suggestion({ check: { ok: false, reason: 'ORDER', message: english } }));
+    const order = await real.estimateAppointment(draft()).catch((e: unknown) => e);
+    expect(order).toBeInstanceOf(UserError);
+    expect((order as UserError).message).toBe('알람 순서가 맞지 않아요. 기상 → 준비 → 출발 순서로 맞춰 주세요');
+
+    mockCallEdge.mockResolvedValue(suggestion({ check: { ok: false, reason: 'NEW_REASON', message: english } }));
+    const unknown = await real.estimateAppointment(draft({ title: '다른 일정' })).catch((e: unknown) => e);
+    expect((unknown as UserError).message).toBe('이 내용으로는 저장할 수 없어요');
+  });
+
   it('같은 계산 요청이 동시에 두 번 가면 서버에는 한 번', async () => {
     mockCallEdge.mockResolvedValue(suggestion());
     await Promise.all([real.estimateAppointment(draft()), real.estimateAppointment(draft())]);
@@ -623,6 +635,25 @@ describe('알람 설정 미리 보기 · 저장 (H03)', () => {
     ]);
     expect(peekEdits('appt-1')).toEqual([]);
     expect(peekEdits('other')).toHaveLength(1); // 다른 일정의 기록은 그 일정의 저장을 기다림
+  });
+});
+
+describe('고친 값 기록 줄 수 상한 (서버 edits 50)', () => {
+  it('쌓인 기록은 50줄까지만 두고, 한 번의 저장에는 이번 줄 + 남는 자리만큼만 실음 — 못 보낸 것은 큐에 남아 다음 저장에', async () => {
+    mockRoutes['appointment_participants:select'] = (call) => (isCount(call) ? { count: 0 } : { data: participantRow() });
+    const detail = (await real.getAppointment('appt-1'))!;
+    for (let i = 0; i < 60; i++) {
+      await real.recordEdit({ screen: 'S01', field: 'scheduled_at', appointmentId: 'appt-1', alarmType: 'WAKE', autoValue: i, editedValue: i + 1 });
+    }
+    expect(peekEdits('appt-1')).toHaveLength(50); // 쌓는 쪽 상한
+    mockRoutes['alarms:select'] = () => ({ data: [] });
+    mockCallEdge.mockResolvedValueOnce(suggestion({ travel: { minutes: 40, source: 'MANUAL', manual_required: false, needs_confirmation: false, note: null, auto_minutes: 55 } }));
+    mockCallEdge.mockResolvedValueOnce(commitResponse());
+    await real.saveAlarmSettings('appt-1', { ...detail.edits, kinds: { WAKE: true, PREPARE: true, DEPARTURE: true }, levels: { sound: null, voice: null, vibration: null }, travelMinutes: 40 });
+    const edits = (mockCallEdge.mock.calls.at(-1)?.[1] as { edits: unknown[] }).edits;
+    expect(edits).toHaveLength(50);
+    expect(edits[0]).toMatchObject({ screen: 'H03', field: 'travel_minutes' }); // 이번 저장의 줄이 먼저
+    expect(peekEdits('appt-1')).toHaveLength(1); // 못 실은 한 줄은 다음 저장에
   });
 });
 

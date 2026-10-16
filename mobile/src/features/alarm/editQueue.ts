@@ -4,7 +4,9 @@
 //   (S01처럼 자기 저장 경로가 있는 화면은 자기 alarm-commit 요청의 edits에 직접 담으면 됨)
 import type { EditLogLine } from './edits';
 
-const MAX_QUEUED = 100;
+// 서버가 한 요청에서 받는 edits 줄 수 (supabase/functions/_shared/requests.ts readEdits max 50 — 넘으면 VALIDATION_FAILED로 저장이 통째로 거절됨)
+export const MAX_EDITS_PER_REQUEST = 50;
+const MAX_QUEUED = MAX_EDITS_PER_REQUEST;
 let queue: EditLogLine[] = [];
 
 const keyOf = (line: Pick<EditLogLine, 'appointmentId'>) => line.appointmentId ?? null;
@@ -14,9 +16,9 @@ export function queueEdit(line: EditLogLine): void {
   if (queue.length > MAX_QUEUED) queue = queue.slice(-MAX_QUEUED);
 }
 
-// 이 일정(없으면 일정 없는 알람)에 실어 보낼 줄 — 빼지는 않음 (저장이 실패하면 다음에 다시)
-export function peekEdits(appointmentId: string | null): EditLogLine[] {
-  return queue.filter((line) => keyOf(line) === appointmentId);
+// 이 일정(없으면 일정 없는 알람)에 실어 보낼 줄 — 빼지는 않음 (저장이 실패하면 다음에 다시). limit이 있으면 오래된 것부터 그만큼만 (나머지는 다음 저장에)
+export function peekEdits(appointmentId: string | null, limit: number = MAX_EDITS_PER_REQUEST): EditLogLine[] {
+  return queue.filter((line) => keyOf(line) === appointmentId).slice(0, Math.max(0, limit));
 }
 
 // 저장이 성공한 뒤 보낸 줄만 뺌
