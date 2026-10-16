@@ -8,15 +8,21 @@ name: DB 검사 · 적용
 #   비밀값 SUPABASE_ACCESS_TOKEN 하나 (supabase/README.md)
 
 on:
+  # 서버 함수(supabase/functions)와 데모 시드(supabase/seed)만 바꾼 PR · push에는 안 돎 — DB 구조와 상관없고 Actions 분량이 아까워서
+  # (그 검사는 node --test로 로컬에서: supabase/README.md "시험")
   pull_request:
     paths:
       - 'supabase/**'
+      - '!supabase/functions/**'
+      - '!supabase/seed/**'
       - 'mobile/src/types/database.ts'
       - '.github/workflows/db-check.yml'
   push:
     branches: [main]
     paths:
       - 'supabase/**'
+      - '!supabase/functions/**'
+      - '!supabase/seed/**'
       - '.github/workflows/db-check.yml'
   workflow_dispatch:
 
