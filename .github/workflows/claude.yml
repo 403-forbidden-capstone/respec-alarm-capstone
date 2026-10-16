@@ -5,6 +5,7 @@ name: Claude
 #       @claude 이 함수 왜 이렇게 했어?  → 질문에 답변
 #       @claude 이거 고쳐줘        → 같은 PR 브랜치에 커밋
 # 필요한 것: Claude GitHub App 설치 + 레포 Secret `CLAUDE_CODE_OAUTH_TOKEN`
+# 아래 `fromJSON` 목록에 있는 사람이 연 PR · 이슈에서는 돌지 않습니다 — 로컬 Claude Code로 대신함 (#164)
 
 on:
   issue_comment:
@@ -17,9 +18,10 @@ on:
 jobs:
   claude:
     if: |
-      (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude')) ||
+      ((github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude')) ||
       (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@claude')) ||
-      (github.event_name == 'pull_request_review' && contains(github.event.review.body, '@claude'))
+      (github.event_name == 'pull_request_review' && contains(github.event.review.body, '@claude'))) &&
+      !contains(fromJSON('["vmgfh878-art"]'), github.event.issue.user.login || github.event.pull_request.user.login)
     runs-on: ubuntu-latest
     timeout-minutes: 45
     # job에 둬야 @claude 없는 댓글이 기다리는 요청을 밀어내지 않습니다
