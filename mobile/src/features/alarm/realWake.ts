@@ -14,7 +14,7 @@ import { requireUserId } from '@/lib/user';
 
 import { STANDALONE_TITLE } from './map';
 import { WAKE_OBSERVE_MINUTES, type RingInfo, type Snooze, type WakeCheck } from './types';
-import { evaluateWake, pickDismissedAt, WAKE_PROMPT_WINDOW_MINUTES, WAKE_THETA_MINUTES, type UseSpan } from './wake';
+import { evaluateWake, pickDismissedAt, thetaReachedAt, WAKE_PROMPT_WINDOW_MINUTES, WAKE_THETA_MINUTES, type UseSpan } from './wake';
 
 // 폰 미루기는 10분 고정 (docs/alarm-core.md, 고르기는 D3 뒤)
 const SNOOZE_MINUTES = 10;
@@ -248,8 +248,8 @@ export async function confirmWake(alarmId: string, how: 'self' | 'auto'): Promis
   const current = now();
   let wokeAt = current;
   if (how === 'auto' && ctx.dismissedAt) {
-    const evaluation = evaluateWake({ dismissedAt: ctx.dismissedAt, now: current, spans: await readSpans(ctx.dismissedAt, current) });
-    if (evaluation.reachedAt) wokeAt = evaluation.reachedAt;
+    const spans = await readSpans(ctx.dismissedAt, current);
+    wokeAt = (spans && thetaReachedAt(ctx.dismissedAt, spans, WAKE_THETA_MINUTES)) || current;
   }
   await settle(userId, ctx, wokeAt, how);
 }
