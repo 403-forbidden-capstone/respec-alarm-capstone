@@ -1,4 +1,4 @@
-import { StyleSheet, View } from 'react-native';
+import { Pressable, StyleSheet, View } from 'react-native';
 
 import { Card, Text } from '@/components/ui';
 import { colors } from '@/theme';
@@ -11,28 +11,30 @@ type Props = {
   record: WeekRecord;
   onPrev: () => void;
   onNext: () => void;
+  onPressDay: (day: WeekDay) => void; // 날짜를 누르면 그 날의 일간 (D48)
 };
 
-// 주간 날짜 줄 (.wstrip) — 오늘은 검게, 지나지 않은 날은 흐리게, 기록 있는 날은 점
-export function WeekStrip({ record, onPrev, onNext }: Props) {
+// 주간 날짜 줄 (.wstrip) — 오늘은 검게, 지나지 않은 날은 흐리게, 기록 있는 날은 점. 날짜를 누를 수 있음
+export function WeekStrip({ record, onPrev, onNext, onPressDay }: Props) {
   return (
     <Card>
       <CalendarHeader title={record.title} sub={record.relative} unit="주" onPrev={onPrev} onNext={onNext} />
       <View style={styles.strip}>
         {record.strip.map((d) => (
-          <DayChip key={d.day} day={d} />
+          <DayChip key={d.day} day={d} onPress={() => onPressDay(d)} />
         ))}
       </View>
     </Card>
   );
 }
 
-function DayChip({ day: d }: { day: WeekDay }) {
+function DayChip({ day: d, onPress }: { day: WeekDay; onPress: () => void }) {
   return (
-    <View
-      style={[styles.day, d.isToday && styles.on, d.isFuture && styles.future]}
-      accessible
-      accessibilityLabel={`${d.weekday}요일 ${d.day}일${d.isToday ? ' 오늘' : ''}${d.recorded ? ' 기록 있음' : ''}`}
+    <Pressable
+      onPress={onPress}
+      style={({ pressed }) => [styles.day, d.isToday && styles.on, d.isFuture && styles.future, pressed && styles.pressed]}
+      accessibilityRole="button"
+      accessibilityLabel={`${d.weekday}요일 ${d.day}일${d.isToday ? ' 오늘' : ''}${d.isFuture ? ' 아직 오지 않은 날' : ''}${d.recorded ? ' 기록 있음' : ''}`}
     >
       <Text variant="tiny" tone={d.isToday ? 'inverse' : 'sub'} style={d.isToday && styles.weekdayOn}>
         {d.weekday}
@@ -41,7 +43,7 @@ function DayChip({ day: d }: { day: WeekDay }) {
         {d.day}
       </Text>
       <View style={[styles.dot, d.recorded && (d.isToday ? styles.dotOn : styles.dotInk)]} />
-    </View>
+    </Pressable>
   );
 }
 
@@ -50,6 +52,7 @@ const styles = StyleSheet.create({
   day: { flex: 1, alignItems: 'center', gap: 2, paddingVertical: 8, borderRadius: 14, backgroundColor: colors.chip },
   on: { backgroundColor: colors.ink },
   future: { opacity: 0.5 },
+  pressed: { opacity: 0.6 },
   weekdayOn: { opacity: 0.7 },
   num: { fontVariant: ['tabular-nums'] },
   dot: { width: 4, height: 4, borderRadius: 2 },
