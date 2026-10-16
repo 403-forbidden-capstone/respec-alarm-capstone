@@ -1,0 +1,229 @@
+// 알람 계획 만들기의 DB 쪽 — 읽기는 부른 사람의 RLS 클라이언트로 (남의 일정 · 기록은 애초에 안 보임)
+// 읽어 온 값을 plan-core.ts의 순수 계산에 넘김. alarm-suggest(미리 보기)와 alarm-commit(저장)이 같이 씀
+import { hasEarlierWake } from './calc/index.ts';
+import type { TravelSample } from './calc/travel.ts';
+import { dbFail, must } from './db.ts';
+import { HttpError } from './errors.ts';
+import { kakaoTravelMinutes, type FetchLike } from './kakao.ts';
+import {
+  computePlan,
+  resolveBasics,
+  sameDayWakesFromRows,
+  type AlarmRow,
+  type AppointmentRow,
+  type ParticipantRow,
+  type Plan,
+  type PlanDraft,
+  type PlanInputs,
+  type PlanMode,
+  type ProfileRow,
+  type SameDayWakeRow,
+} from './plan-core.ts';
+import { resolveTravel, type ResolvedTravel, type TravelDeps } from './route.ts';
+import type { Db } from './supabase.ts';
+import { localDayRange, safeTimeZone } from './tz.ts';
+
+export type PlanContext = {
+  userId: string;
+  db: Db; // 부른 사람의 RLS 클라이언트
+  now: Date;
+  kakaoKey?: string; // KAKAO_REST_API_KEY. 없으면 길찾기 단계를 건너뜀 (F10)
+  fetchImpl?: FetchLike;
+};
+
+const DEFAULT_PROFILE: ProfileRow = {
+  timezone: 'Asia/Seoul',
+  default_buffer_minutes: 10,
+  default_transport: 'TRANSIT',
+  home_name: null,
+  home_lat: null,
+  home_lng: null,
+};
+
+const ALARM_COLUMNS =
+  'alarm_id, participant_id, user_id, alarm_type, scheduled_at, intensity, voice_tone, sound_key, is_enabled, snooze_limit, time_source, intensity_source, recurrence_rule';
+
+export async function loadProfile(db: Db, userId: string): Promise<ProfileRow> {
+  const row = must<ProfileRow | null>(
+    'profiles',
+    await db.from('profiles').select('timezone, default_buffer_minutes, default_transport, home_name, home_lat, home_lng').eq('user_id', userId).maybeSingle(),
+  );
+  return row ?? DEFAULT_PROFILE;
+}
+
+export async function loadAppointment(db: Db, appointmentId: string): Promise<AppointmentRow | null> {
+  return must<AppointmentRow | null>(
+    'appointments',
+    await db
+      .from('appointments')
+      .select('appointment_id, creator_id, group_id, title, appointment_at, dest_name, dest_lat, dest_lng, importance, recurrence_rule')
+      .eq('appointment_id', appointmentId)
+      .maybeSingle(),
+  );
+}
+
+export async function loadParticipant(db: Db, appointmentId: string, userId: string): Promise<ParticipantRow | null> {
+  return must<ParticipantRow | null>(
+    'appointment_participants',
+    await db
+      .from('appointment_participants')
+      .select('participant_id, appointment_id, user_id, origin_name, origin_lat, origin_lng, transport_type, est_travel_minutes, travel_source, prepare_minutes, buffer_minutes')
+      .eq('appointment_id', appointmentId)
+      .eq('user_id', userId)
+      .maybeSingle(),
+  );
+}
+
+export async function loadAlarms(db: Db, participantId: string): Promise<AlarmRow[]> {
+  return must<AlarmRow[]>('alarms', await db.from('alarms').select(ALARM_COLUMNS).eq('participant_id', participantId));
+}
+
+// 예상 준비시간 통계 — 뷰 v_prepare_time_stats (security_invoker라 지금은 RLS로 내 기록만 보이지만, 친구 기록을 읽는 정책이 생겨도 한 줄만 오게 user_id로 걸러 둠). actual_prepare_minutes의 P80
+export async function loadPrepareStats(db: Db, userId: string): Promise<PlanInputs['stats']> {
+  const row = must<{ sample_count: number | string; p80_minutes: number | string | null } | null>(
+    'v_prepare_time_stats',
+    await db.from('v_prepare_time_stats').select('sample_count, p80_minutes').eq('user_id', userId).maybeSingle(),
+  );
+  if (!row) return { sampleCount: 0, p80: null };
+  return { sampleCount: Number(row.sample_count) || 0, p80: row.p80_minutes == null ? null : Number(row.p80_minutes) };
+}
+
+// 최근 4주 지각 횟수 (is_late). 늦잠이 원인인 지각만 세는 late_cause 칸은 DB에 없어서 지각 전체로 셈 — 문서 보완 목록
+async function loadLateCount(db: Db, userId: string, now: Date): Promise<number> {
+  const since = new Date(now.getTime() - 28 * 24 * 3_600_000).toISOString();
+  const { count, error } = await db
+    .from('appointment_participants')
+    .select('participant_id', { count: 'exact', head: true })
+    .eq('user_id', userId)
+    .eq('is_late', true)
+    .gte('arrived_at', since);
+  if (error) dbFail('late count', error);
+  return count ?? 0;
+}
+
+// 그날(내 시간대 0시 기준) 이 약속보다 약속 시각이 앞선 내 참여에 켜진 기상 알람이 있는지 — 있으면 이 약속은 기상 없이 준비부터
+//   내 참여 → 그 약속의 시각 + 기상 알람을 한 번에 읽고(임베드 appointments!inner · alarms!inner), 그날 전체를 가져와서 앞뒤 판정은 calc/wake.ts에 맡김
+//   (알람이 울리는 시각이 아니라 약속 시각으로 가림 — 10시 약속의 8시 기상이 있는 날 8:30 약속은 그날 첫 일정)
+export async function loadSameDayWake(db: Db, userId: string, at: Date, timeZone: string, ownAppointmentId?: string): Promise<boolean> {
+  const { start, end } = localDayRange(at, timeZone);
+  const rows = must<SameDayWakeRow[]>(
+    'same-day wake',
+    await db
+      .from('appointment_participants')
+      .select('appointment_id, appointments!inner(appointment_at), alarms!inner(is_enabled)')
+      .eq('user_id', userId)
+      .eq('alarms.alarm_type', 'WAKE')
+      .gte('appointments.appointment_at', start.toISOString())
+      .lt('appointments.appointment_at', end.toISOString()),
+  );
+  return hasEarlierWake(at, sameDayWakesFromRows(rows), ownAppointmentId);
+}
+
+// 내 지난 이동 기록 (출발 · 도착이 모두 찍힌 것) — 같은 경로 실측 중앙값용 (읽기만, CACHED로 쓰지 않음)
+async function loadTravelSamples(db: Db, userId: string): Promise<TravelSample[]> {
+  type Row = {
+    origin_lat: number | string | null;
+    origin_lng: number | string | null;
+    transport_type: TravelSample['transport'];
+    departed_at: string;
+    arrived_at: string;
+    appointments: { dest_lat: number | string | null; dest_lng: number | string | null } | { dest_lat: number | string | null; dest_lng: number | string | null }[] | null;
+  };
+  const rows = must<Row[]>(
+    'travel samples',
+    await db
+      .from('appointment_participants')
+      .select('origin_lat, origin_lng, transport_type, departed_at, arrived_at, appointments!inner(dest_lat, dest_lng)')
+      .eq('user_id', userId)
+      .not('departed_at', 'is', null)
+      .not('arrived_at', 'is', null)
+      .not('origin_lat', 'is', null)
+      .order('arrived_at', { ascending: false })
+      .limit(100),
+  );
+  const out: TravelSample[] = [];
+  for (const r of rows) {
+    const a = Array.isArray(r.appointments) ? r.appointments[0] : r.appointments;
+    if (!a || r.origin_lat == null || r.origin_lng == null || a.dest_lat == null || a.dest_lng == null) continue;
+    out.push({
+      origin: { lat: Number(r.origin_lat), lng: Number(r.origin_lng) },
+      destination: { lat: Number(a.dest_lat), lng: Number(a.dest_lng) },
+      transport: r.transport_type,
+      departedAt: new Date(r.departed_at),
+      arrivedAt: new Date(r.arrived_at),
+    });
+  }
+  return out;
+}
+
+export type BuiltPlan = { plan: Plan; inputs: PlanInputs; timeZone: string };
+
+// 이동시간을 구할 길이 없을 때(좌표가 없고 직접 입력도 없음) — 7.1.2의 마지막 단계(직접 입력)로 가야 하는 상태
+//   alarm-commit은 이 오류(502 ROUTE_UNAVAILABLE, details.manual_required)를 그대로 돌려주고,
+//   alarm-suggest(미리 보기)는 잡아서 오류 대신 "이동시간만 직접 입력해 주세요"인 200 응답으로 바꿈 (toTravelRequiredSuggestion)
+export class TravelRequiredError extends HttpError {
+  readonly inputs: PlanInputs;
+  readonly travel: ResolvedTravel;
+  readonly timeZone: string;
+
+  constructor(inputs: PlanInputs, travel: ResolvedTravel, timeZone: string) {
+    super('ROUTE_UNAVAILABLE', '이동시간을 구하지 못했어요. 직접 입력해 주세요', { manual_required: true, warnings: travel.warnings });
+    this.name = 'TravelRequiredError';
+    this.inputs = inputs;
+    this.travel = travel;
+    this.timeZone = timeZone;
+  }
+}
+
+// wantAutoTravel: 직접 입력한 이동시간이 있어도 자동 값을 같이 구함 (H03 "자동으로 되돌리기" 미리 보기). 호출이 한 번 늘어남
+// mode: 어느 쪽에서 부르는지. preview(alarm-suggest)는 경고를 "저장할 때 …" 말투로, save(alarm-commit, 기본)는 저장한 뒤 말투로
+export async function buildPlan(ctx: PlanContext, draft: PlanDraft, options: { wantAutoTravel?: boolean; mode?: PlanMode } = {}): Promise<BuiltPlan> {
+  const profile = await loadProfile(ctx.db, ctx.userId);
+  const timeZone = safeTimeZone(profile.timezone);
+
+  let appointment: AppointmentRow | undefined;
+  let participant: ParticipantRow | undefined;
+  let existingAlarms: AlarmRow[] = [];
+  if (draft.appointmentId) {
+    // RLS가 거르므로 내 일정이거나 내가 참여 중인 그룹 일정만 보임
+    appointment = (await loadAppointment(ctx.db, draft.appointmentId)) ?? undefined;
+    if (!appointment) throw new HttpError('NOT_FOUND', '일정을 찾을 수 없어요');
+    participant = (await loadParticipant(ctx.db, appointment.appointment_id, ctx.userId)) ?? undefined;
+    if (participant) existingAlarms = await loadAlarms(ctx.db, participant.participant_id);
+  }
+
+  const basics = resolveBasics({ draft, profile, appointment, participant });
+  const [stats, lateCount4w, sameDayWake] = await Promise.all([
+    loadPrepareStats(ctx.db, ctx.userId),
+    loadLateCount(ctx.db, ctx.userId, ctx.now),
+    draft.withWake != null ? Promise.resolve(!draft.withWake) : loadSameDayWake(ctx.db, ctx.userId, basics.at, timeZone, appointment?.appointment_id),
+  ]);
+
+  const inputs: PlanInputs = { now: ctx.now, draft, profile, appointment, participant, existingAlarms, stats, lateCount4w, sameDayWake };
+
+  // 요청에 이동시간이 없고 저장된 게 직접 입력(MANUAL)이면 그대로 이어받음 — 시각 · 강도의 직접 값과 같은 규칙(D42 C). 길찾기를 다시 안 부름
+  //   API로 저장된 값은 D5(카카오 응답 저장 · 재사용 불허) 때문에 이어받지 않고 다시 구함
+  const keptManualMinutes = draft.travelMinutes == null && participant?.travel_source === 'MANUAL' ? (participant.est_travel_minutes ?? undefined) : undefined;
+
+  let travel: ResolvedTravel;
+  if (draft.travelMinutes != null && draft.travelSource === 'API') {
+    // 앱이 확인 시트에서 보여 준 길찾기 값을 그대로 저장 — 다시 부르지 않음
+    const chosen = { minutes: draft.travelMinutes, source: 'API' as const, needsConfirmation: false, note: '길찾기 기준' };
+    travel = { chosen, auto: chosen, warnings: [] };
+  } else {
+    const deps: TravelDeps = {
+      ...(ctx.kakaoKey ? { kakao: (a) => kakaoTravelMinutes(ctx.kakaoKey as string, a, ctx.fetchImpl) } : {}),
+      samples: () => loadTravelSamples(ctx.db, ctx.userId),
+    };
+    const coords = (p: { lat?: number; lng?: number }) => (p.lat != null && p.lng != null ? { lat: p.lat, lng: p.lng } : undefined);
+    travel = await resolveTravel(
+      { origin: coords(basics.origin), destination: coords(basics.destination), transport: basics.transport, override: draft.travelMinutes ?? keptManualMinutes },
+      deps,
+      { wantAuto: options.wantAutoTravel },
+    );
+  }
+
+  // 길찾기도 같은 경로 기록도 근사값도 없음 → 직접 입력하는 흐름으로 (8장 8.2.2)
+  if (!travel.chosen) throw new TravelRequiredError(inputs, travel, timeZone);
+  return { plan: computePlan(inputs, travel, options.mode), inputs, timeZone };
+}
