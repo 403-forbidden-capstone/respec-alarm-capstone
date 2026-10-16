@@ -64,9 +64,12 @@ export async function signInWithEmail(email: string, password: string) {
 }
 
 // 낮은 층 로그아웃 — 화면에서는 lib/session의 signOutAndCleanup을 부를 것 (폰 알람 · 기록 정리가 먼저)
+//   supabase-js는 서버에 로그아웃을 알리다 네트워크로 실패해도 이 기기의 로그인은 이미 지운 뒤 오류를 돌려줌 —
+//   그대로 던지면 "로그아웃하지 못했어요"가 뜨는데 실제로는 로그아웃돼 로그인 화면으로 넘어감. 이 기기에 로그인이 남았을 때만 오류로 봄
+//   (서버의 로그인 정보는 못 지웠을 수 있지만 이 기기에서는 쓸 수 없음)
 export async function signOut() {
   const { error } = await supabase.auth.signOut();
-  if (error) throw error;
+  if (error && (await hasSession())) throw new UserError('로그아웃하지 못했어요. 다시 해 주세요');
 }
 
 // 저장된 로그인이 있는지 — 가짜 데이터 모드에서 실데이터로 바꿀 때 갈 곳(탭 · 로그인)을 정함 (useAuth는 가짜 모드에서 세션을 숨김)

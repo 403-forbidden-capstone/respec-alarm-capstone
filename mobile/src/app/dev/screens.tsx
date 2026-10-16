@@ -9,6 +9,7 @@ import { DataModeToggle, goAfterRender } from '@/features/auth/DataModeToggle';
 import { DevLoginForm } from '@/features/auth/DevLoginForm';
 import { resetOnboarding } from '@/features/profile/api';
 import { scenarioTime, setScenarioTime, type ScenarioTime } from '@/lib/clock';
+import { userMessage } from '@/lib/errors';
 import { canUseRealData, devLoginVisible, modeLocked, useMode } from '@/lib/mode';
 import { signOutAndCleanup } from '@/lib/session';
 import { colors } from '@/theme';
@@ -38,7 +39,7 @@ export default function ScreenListScreen() {
       toast(done);
       goAfterRender(next);
     } catch (e) {
-      toast(e instanceof Error ? e.message : '하지 못했어요');
+      toast(userMessage(e, '하지 못했어요')); // 로그아웃 오류 원문(영어 · 서버 문구)이 토스트로 새지 않게 — UserError일 때만 이유를 보임
     } finally {
       setBusy(false);
     }
