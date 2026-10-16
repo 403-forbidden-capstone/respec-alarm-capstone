@@ -56,7 +56,8 @@ export function manualTimes(alarms: AlarmTime[]): Partial<Record<RingKind, Date>
 }
 
 // 순서가 뒤집혔으면 사용자에게 보일 짧은 이유, 맞으면 null — 저장을 막을 때 씀
-// 기상 ≤ 준비 ≤ 출발 ≤ 도착 목표 (같은 시각은 허용). 만든 알람만 비교
+// 기상 ≤ 준비 ≤ 출발 ≤ 도착 목표 (같은 시각은 허용). 목록에 있는 알람끼리 비교 — 만들지 않은 종류(H05에서 안 켠 것)는 빠지고,
+//   H03에서 꺼 둔 알람은 다시 켤 수 있어서 시각이 있는 한 같이 비교함 (그래서 꺼 둔 알람의 순서 때문에 저장이 막힐 수 있음)
 export function orderError(alarms: AlarmTime[]): string | null {
   const sorted = ORDER.flatMap((kind) => alarms.filter((x) => x.kind === kind));
   for (let i = 1; i < sorted.length; i++) {

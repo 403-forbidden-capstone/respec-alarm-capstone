@@ -294,6 +294,14 @@ describe('H03 직접 고침 — 출발 위치 · 이동 수단 · 이동 · 준�
     expect([a.origin, a.travelMinutes]).toEqual(['학교 도서관', 25]);
   });
 
+  it('출발 위치가 약속 장소와 같은 곳이면 이동시간이 가장 작은 값 5분 (가짜 길찾기 규칙)', async () => {
+    const draft = await settingsOf('a1'); // a1의 약속 장소는 세종대학교
+    const preview = await previewAlarms('a1', { ...draft, origin: '세종대학교' });
+    expect([preview.travelMinutes, preview.autoTravelMinutes]).toEqual([5, 5]);
+    const car = await previewAlarms('a1', { ...draft, origin: '세종대학교', transport: 'CAR' });
+    expect(car.travelMinutes).toBe(5); // 이동 수단과 상관없이
+  });
+
   it('이동시간을 직접 입력하면 출처가 직접 입력이 되고, 다시 장소 · 수단을 바꿔도 직접 입력이 먼저', async () => {
     const draft = await settingsOf('a1');
     await saveAlarmSettings('a1', { ...draft, travelMinutes: 40 });

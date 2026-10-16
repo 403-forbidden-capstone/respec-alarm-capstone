@@ -144,6 +144,7 @@ export async function getAppointment(id: string): Promise<AppointmentDetail | nu
 function mockTravel(placeName: string, transport: Transport, origin: string): number | null {
   const place = places.find((p) => p.name === placeName);
   if (!place) return null;
+  if (origin === placeName) return 5; // 출발 위치가 약속 장소와 같은 곳이면 가장 작은 값 (가짜 길찾기라 거리를 셀 수 없음 — 아래 최소값과 같음)
   const minutes = place.travelMinutes * (transportFactor[transport] ?? 1) * (origin === ORIGIN_HOME ? 1 : awayFromHomeFactor);
   return Math.max(5, Math.round(minutes / 5) * 5);
 }
