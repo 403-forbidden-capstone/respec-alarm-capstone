@@ -12,6 +12,7 @@ import { pastDay } from '@/mocks/records';
 
 import { leadingBlanks, monthDays, monthTitle, weekDays, weekRelative, weekTitle } from './calendar';
 import { editBounds, shiftLog } from './suggestion';
+import { buildWeekSummary, dayMark, wakeScore, type WakeRow } from './summary';
 import type { DayMark, DayRecord, MonthRecord, Suggestion, WeekRecord, WeekSummary } from './types';
 
 // 기록 화면의 오늘 — 목업은 시나리오 시각(아침 · 전날 밤)과 상관없이 5월 22일
@@ -21,13 +22,14 @@ const today = () => kst(TODAY, 0);
 export const recordToday = today;
 
 // 그날 기록 표시 — 목업은 2025년 5월만 있음: 지난 평일 기록 완료 · 주말 일부 기록, 오늘은 기상 확인 · 일기 뒤에 완료
-// 실데이터는 daily_records가 있는지 · 얼마나 채워졌는지로 정함
+// 규칙은 summary.ts dayMark (실데이터도 같은 함수). 목업 날의 기록(기상 확인 · 집 출발 · 직접 입력 한 줄)을 그 규칙에 넘김
 function markOf(date: Date): DayMark {
-  const { year, month, day, weekdayIndex } = dateParts(date);
+  const { year, month, day } = dateParts(date);
   if (year !== 2025 || month !== 5) return 'none';
-  const weekend = weekdayIndex === 0 || weekdayIndex === 6;
-  if (day < TODAY) return weekend ? 'partial' : 'done';
-  return day === TODAY && (db.me.wakeAt != null || db.journalWritten) ? 'done' : 'none';
+  if (day === TODAY) return dayMark({ woke: db.me.wakeAt != null, prepared: false, journal: db.journalWritten, any: false }, true);
+  const p = pastDay(date);
+  if (!p) return 'none';
+  return dayMark({ woke: p.wake != null, prepared: p.actual.some(([, label]) => label === '집 출발'), journal: false, any: p.actual.length > 0 }, false);
 }
 
 // 월간 (R02) — 실데이터는 daily_records.record_date로 그달을 읽음. 목업에 없는 달은 기록 없이 달력만
@@ -48,49 +50,31 @@ export async function getMonth(year: number, month: number): Promise<MonthRecord
 }
 
 // 그 주의 기상 기록 — 지난 날은 mocks/records, 오늘은 기상이 확인되면 더함
-function weekRows(days: Date[]) {
+function weekRows(days: Date[]): WakeRow[] {
   const rows = days.flatMap((date) => {
     const p = pastDay(date);
-    return p?.wake != null && p.score != null ? [{ day: p.day, date, wake: p.wake, score: p.score }] : [];
+    return p?.wake != null && p.score != null ? [{ date, wake: p.wake, score: p.score }] : [];
   });
   const a1 = db.appointments.find((a) => a.id === 'a1');
   if (db.me.wakeAt && a1 && days.some((d) => isSameDay(d, today()))) {
     const wakeMin = Math.round((db.me.wakeAt.getTime() - kst(TODAY, 0).getTime()) / 60_000);
     const target = Math.round((alarmChain(a1)[0].at.getTime() - kst(TODAY, 0).getTime()) / 60_000);
-    rows.push({ day: TODAY, date: today(), wake: wakeMin, score: wakeMin <= target + 10 ? 88 : 61 });
+    rows.push({ date: today(), wake: wakeMin, score: wakeScore(wakeMin, target) });
   }
   return rows;
 }
 
-const average = (rows: { wake: number }[]) => Math.round(rows.reduce((s, x) => s + x.wake, 0) / rows.length);
-
-// 주간 요약 — 기록이 한 날이라도 있는 주. 평균 기상은 앞 주와 견줌 (앞 주 기록이 없으면 견주지 않음)
+// 주간 요약 — 계산은 summary.ts buildWeekSummary (실데이터도 같은 함수)
 function weekSummary(days: Date[], relative: string): WeekSummary | null {
-  const rows = weekRows(days);
-  if (!rows.length) return null;
-  const avg = average(rows);
-  const before = weekRows(weekDays(addDays(days[0], -7)));
-  const diff = before.length ? average(before) - avg : null;
-  const goal = rows.filter((x) => x.score >= 70).length;
-  const thisWeek = days.some((d) => isSameDay(d, today()));
-  // 견주는 주 이름 — 이번 주는 "지난주"지만, 지난주를 보는 중이면 "지난주보다"가 자기 자신 같아서 "그 전 주"
-  const prev = thisWeek ? '지난주' : '그 전 주';
-  return {
-    averageWake: addMinutes(days[0], avg),
-    averageText:
-      diff == null ? `${prev} 기록이 없어 견줄 수 없어요` : diff > 0 ? `${prev}보다 ${diff}분 빨라요` : diff < 0 ? `${prev}보다 ${-diff}분 늦어요` : `${prev}와 같아요`,
-    goalRate: Math.round((goal / rows.length) * 100),
-    goalText: `${relative} ${goal}/${rows.length}일`,
-    bars: rows.map((x) => ({
-      label: `${dateParts(kst(x.day, 0)).weekday} ${x.day}`,
-      score: x.score,
-      date: x.date,
-      isToday: isSameDay(x.date, today()),
-      isFuture: x.date.getTime() > today().getTime(),
-    })),
-    todayPending: thisWeek && db.me.wakeAt == null,
+  return buildWeekSummary({
+    days,
+    rows: weekRows(days),
+    beforeRows: weekRows(weekDays(addDays(days[0], -7))),
+    relative,
+    today: today(),
+    todayWoke: db.me.wakeAt != null,
     coaching: '회의가 있는 날은 준비가 평균 12분 길었어요. 전날 밤 준비 루틴을 만들면 아침이 여유로워져요.',
-  };
+  });
 }
 
 // 주간 (R02) — anyDay가 든 주 (월요일 시작). 기록이 없는 주는 요약 없이 날짜 줄만
