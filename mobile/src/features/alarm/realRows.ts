@@ -11,6 +11,8 @@ import type { AppointmentDetail } from './types';
 const PARTICIPANT_SELECT =
   'participant_id, origin_name, transport_type, est_travel_minutes, travel_source, prepare_minutes, buffer_minutes, appointments!inner(appointment_id, title, appointment_at, dest_name, importance, recurrence_rule, groups(group_name)), alarms(alarm_id, alarm_type, scheduled_at, intensity, voice_tone, sound_key, is_enabled, time_source, intensity_source)';
 
+// 목록 상한 — 넘으면 가까운 날짜부터 LIST_LIMIT개만 (정렬 없이 limit하면 어느 줄이 오는지 정해지지 않으므로 날짜순으로 정렬한 뒤 자름)
+//   약속 쪽은 PostgREST가 to-one 임베드 칸으로 정렬하는 `appointments(appointment_at)` 형식(PostgREST 11 이상)
 const LIST_LIMIT = 300;
 
 // select 결과 한 줄 (타입 붙은 클라이언트가 만든 모양 중 쓰는 칸)
@@ -81,6 +83,7 @@ export async function loadAppointmentRowsSince(userId: string, since: string): P
     .select(PARTICIPANT_SELECT)
     .eq('user_id', userId)
     .gte('appointments.appointment_at', since)
+    .order('appointments(appointment_at)')
     .limit(LIST_LIMIT);
   if (error) throw error;
   const rows = data ?? [];
@@ -96,6 +99,7 @@ export async function loadDayRows(userId: string, from: string, to: string) {
     .eq('user_id', userId)
     .gte('appointments.appointment_at', from)
     .lt('appointments.appointment_at', to)
+    .order('appointments(appointment_at)')
     .limit(LIST_LIMIT);
   if (error) throw error;
   return data ?? [];
@@ -111,6 +115,7 @@ export async function loadStandaloneRows(userId: string, since: string): Promise
     .is('participant_id', null)
     .is('routine_id', null)
     .gte('scheduled_at', since)
+    .order('scheduled_at')
     .limit(LIST_LIMIT);
   if (error) throw error;
   return data ?? [];

@@ -152,7 +152,10 @@ describe('목록 · 하루 일정 · 알람 설정 읽기', () => {
     const [read] = callsTo('appointment_participants', 'select');
     expect(filterArgs(read, 'eq', 'user_id')).toEqual(['user-1']);
     expect(filterArgs(read, 'gte', 'appointments.appointment_at')).toEqual(['2025-04-21T15:00:00.000Z']); // 5월 22일 0시(한국) − 30일
+    expect(filterArgs(read, 'order', 'appointments(appointment_at)')).toEqual([]); // 상한(300)에 걸려도 가까운 날짜부터
+    expect(read.filters.some(([method, n]) => method === 'limit' && n === 300)).toBe(true);
     const [standalone] = callsTo('alarms', 'select');
+    expect(filterArgs(standalone, 'order', 'scheduled_at')).toEqual([]);
     expect(filterArgs(standalone, 'is', 'participant_id')).toEqual([null]);
     expect(filterArgs(standalone, 'is', 'routine_id')).toEqual([null]);
     expect(filterArgs(standalone, 'eq', 'alarm_type')).toEqual(['WAKE']);
@@ -170,6 +173,7 @@ describe('목록 · 하루 일정 · 알람 설정 읽기', () => {
     const [read] = callsTo('appointment_participants', 'select');
     expect(filterArgs(read, 'gte', 'appointments.appointment_at')).toEqual([new Date(kst('00:00')).toISOString()]);
     expect(filterArgs(read, 'lt', 'appointments.appointment_at')).toEqual([new Date(kst('00:00', 23)).toISOString()]);
+    expect(filterArgs(read, 'order', 'appointments(appointment_at)')).toEqual([]);
   });
 
   it('getAppointment: 저장된 값 + 최근 4주 지각 횟수로 강도 자동 값, 읽은 값은 미리 보기용으로 기억', async () => {
@@ -290,6 +294,44 @@ describe('켜기 · 끄기 · 강도 (DB 직접 → 그 알람만 폰에 맞춤)
     mockCalls.length = 0;
     await real.setAlarmEnabled('00000000-0000-4000-8000-0000000000a1', 'WAKE', true);
     expect(filterArgs(callsTo('alarms', 'update')[0], 'gt', 'scheduled_at')).toEqual(['2025-05-21T22:55:00.000Z']);
+  });
+
+  it('일정 전체를 켤 때는 울리는 알람(기상 · 준비 · 출발)만 켜고 도착 목표는 그 결과에 맞춤 — 도착 목표만 켜진 채 "켰어요"가 되지 않게', async () => {
+    mockRoutes['appointment_participants:select'] = () => ({ data: { participant_id: 'p-1' } });
+    mockRoutes['alarms:update'] = (call) => (filterArgs(call, 'neq', 'alarm_type') ? { data: [{ alarm_id: '00000000-0000-4000-8000-0000000000b2' }, { alarm_id: '00000000-0000-4000-8000-0000000000b3' }] } : { data: [] });
+    // 기상은 이미 지나 꺼진 채, 준비 · 출발은 방금 켜짐, 도착 목표는 꺼져 있음
+    mockRoutes['alarms:select'] = () => ({
+      data: [
+        { alarm_id: '00000000-0000-4000-8000-0000000000b1', alarm_type: 'WAKE', is_enabled: false },
+        { alarm_id: '00000000-0000-4000-8000-0000000000b2', alarm_type: 'PREPARE', is_enabled: true },
+        { alarm_id: '00000000-0000-4000-8000-0000000000b3', alarm_type: 'DEPARTURE', is_enabled: true },
+        { alarm_id: '00000000-0000-4000-8000-0000000000b4', alarm_type: 'ARRIVE', is_enabled: false },
+      ],
+    });
+    await real.setAppointmentEnabled('00000000-0000-4000-8000-0000000000a1', true);
+    const [update, arriveUpdate] = callsTo('alarms', 'update');
+    expect(filterArgs(update, 'neq', 'alarm_type')).toEqual(['ARRIVE']);
+    expect(arriveUpdate.payload).toEqual({ is_enabled: true });
+    expect(filterArgs(arriveUpdate, 'eq', 'alarm_id')).toEqual(['00000000-0000-4000-8000-0000000000b4']);
+    expect(mockReconcile).toHaveBeenCalledWith({
+      alarmIds: ['00000000-0000-4000-8000-0000000000b2', '00000000-0000-4000-8000-0000000000b3', '00000000-0000-4000-8000-0000000000b4'],
+    });
+  });
+
+  it('울리는 알람이 모두 지나고 도착 목표만 남은 일정을 켜면 도착 목표를 켜지 않고 이유를 알림', async () => {
+    mockRoutes['appointment_participants:select'] = () => ({ data: { participant_id: 'p-1' } });
+    mockRoutes['alarms:update'] = () => ({ data: [] });
+    await expect(real.setAppointmentEnabled('00000000-0000-4000-8000-0000000000a1', true)).rejects.toThrow('이미 지난');
+    expect(callsTo('alarms', 'update')).toHaveLength(1); // 도착 목표를 따로 켜는 쓰기가 없음
+    expect(mockReconcile).not.toHaveBeenCalled();
+  });
+
+  it('끌 때는 도착 목표까지 한 번에 (mirrorArrive를 따로 부르지 않음)', async () => {
+    mockRoutes['appointment_participants:select'] = () => ({ data: { participant_id: 'p-1' } });
+    mockRoutes['alarms:update'] = () => ({ data: [{ alarm_id: 'x' }] });
+    await real.setAppointmentEnabled('00000000-0000-4000-8000-0000000000a1', false);
+    expect(filterArgs(callsTo('alarms', 'update')[0], 'neq', 'alarm_type')).toBeUndefined();
+    expect(callsTo('alarms', 'select')).toEqual([]);
   });
 
   it('켤 알람이 모두 지났으면 이유를 UserError로 (DB는 안 바뀜)', async () => {

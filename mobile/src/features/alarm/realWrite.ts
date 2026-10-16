@@ -49,17 +49,20 @@ export async function mirrorArrive(userId: string, participantId: string): Promi
 }
 
 // 일정의 알람 전체 켜기 · 끄기 (H01 · H02) — id는 약속 id, 일정 없는 알람이면 알람 id
+//   끌 때는 도착 목표까지 전부. 켤 때는 아직 안 지난 울리는 알람(기상 · 준비 · 출발)만 켜고, 도착 목표는 그 결과에 맞춤(mirrorArrive) —
+//   도착 목표 시각이 가장 늦어서 전체에 "안 지난 것" 조건을 걸면 울리는 알람이 다 지난 일정에서 도착 목표만 켜지고 "켰어요"로 보임
 export async function setAppointmentEnabled(id: string, enabled: boolean): Promise<void> {
   if (!isUuid(id)) throw new UserError(NOT_FOUND); // 약속 id도 알람 id도 아님 (가짜 데이터 시절 주소)
   const userId = await requireUserId();
   const participantId = await findParticipantId(userId, id);
   const base = supabase.from('alarms').update({ is_enabled: enabled }).eq('user_id', userId);
   const target = participantId ? base.eq('participant_id', participantId) : base.eq('alarm_id', id).is('participant_id', null).is('routine_id', null);
-  const { data, error } = await (enabled ? target.gt('scheduled_at', now().toISOString()) : target).select('alarm_id');
+  const { data, error } = await (enabled ? target.neq('alarm_type', 'ARRIVE').gt('scheduled_at', now().toISOString()) : target).select('alarm_id');
   if (error) throw error;
   if (!data?.length) throw new UserError(enabled ? NOTHING_TO_TURN_ON : NOT_FOUND);
+  const arrive = enabled && participantId ? await mirrorArrive(userId, participantId) : [];
   forgetDetail(id);
-  await syncPhone(data.map((r) => r.alarm_id));
+  await syncPhone([...data.map((r) => r.alarm_id), ...arrive]);
 }
 
 // 종류별 켜기 · 끄기 (H03)
