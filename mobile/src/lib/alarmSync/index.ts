@@ -10,6 +10,7 @@ import type { AlarmEvent, RingPackage, ScheduleOutcome } from '@capstone/alarm-c
 
 import { isMock } from '../mode';
 import { supabase } from '../supabase';
+import { currentUserId } from '../user';
 import { isPermanentInsertError, toEventRow, type EventRow } from './events';
 import { buildServerPackages, planReconcile, type ReconcilePlan, type SyncRow } from './reconcile';
 
@@ -31,11 +32,6 @@ function serial<T>(task: () => Promise<T>): Promise<T> {
   const run = chain.then(task, task);
   chain = run.catch(() => {});
   return run;
-}
-
-async function currentUserId(): Promise<string | null> {
-  const { data } = await supabase.auth.getSession();
-  return data.session?.user.id ?? null;
 }
 
 // ---------------------------------------------------------------------------

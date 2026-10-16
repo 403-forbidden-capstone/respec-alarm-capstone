@@ -3,6 +3,7 @@
 //   읽기 · 쓰기 위치는 docs/screen-data-map.md (H01 · H02 · H03 · H05 · H07 · H08)
 import { now } from '@/lib/clock';
 import { UserError } from '@/lib/errors';
+import { isMock } from '@/lib/mode';
 import { addMinutes, isSameDay, josa, joinKo, minuteOfDay, spokenTime, startOfDay } from '@/lib/format';
 import { alarmChain, autoLevel, axisLevel } from '@/mocks/calc';
 import { awayFromHomeFactor, db, people, places, timelines, transportFactor, type MockAppointment } from '@/mocks/data';
@@ -39,6 +40,7 @@ import {
   type WakeCheck,
 } from './types';
 import { manualTimes, orderError } from './adjust';
+import * as real from './real';
 import { repeatLabel, repeatToRrule, rruleToRepeat } from './repeat';
 import { initialTime, ringingKinds } from './schedule';
 import { thetaReachedAt, usageSummary, type UseSpan } from './wake';
@@ -84,7 +86,9 @@ export async function listAppointments(): Promise<Appointment[]> {
 }
 
 // 지금 이후 가장 먼저 울릴 알람 (H01) — 꺼진 일정 · 꺼진 종류 · 도착 목표는 뺌
+// 실데이터 구현의 본보기: 가짜 구현은 그대로 두고 맨 앞에서 real.ts로 넘김 (docs/screen-data-map.md "실데이터 연결 규칙")
 export async function getNextAlarm(): Promise<NextAlarm | null> {
+  if (!isMock()) return real.getNextAlarm();
   const t = now().getTime();
   let best: NextAlarm | null = null;
   for (const appointment of db.appointments.map(toAppointment)) {

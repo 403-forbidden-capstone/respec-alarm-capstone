@@ -5,6 +5,14 @@ import { addMinutes } from '@/lib/format';
 
 import { WAKE_OBSERVE_MINUTES, WAKE_RECENT_MINUTES } from './types';
 
+// H08이 열린 주소에서 기상 알람 id를 읽음 — 알람 코어가 알람을 끄고 앱을 여는 딥링크는 respecalarm://wake?alarmId=<id> (docs/alarm-core.md "해제 뒤 앱 열기"),
+// 앱 안에서 오는 길(홈 배너 · 울림 화면)은 ?alarm=<id>. 같은 쿼리가 배열로 오면 첫 값, 빈 글자는 없는 것으로 봄
+type Param = string | string[] | undefined;
+const first = (value: Param) => (Array.isArray(value) ? value[0] : value) || undefined;
+export function pickAlarmId(params: { alarmId?: Param; alarm?: Param }): string | undefined {
+  return first(params.alarmId) ?? first(params.alarm);
+}
+
 export type UseSpan = readonly [start: number, end: number]; // 해제 뒤 분 (start ≤ end)
 
 // 관찰 시간(0 ~ limit분) 안으로 자르고, 시각순으로 겹치는 구간을 합침 — 같은 시간을 두 번 세지 않게

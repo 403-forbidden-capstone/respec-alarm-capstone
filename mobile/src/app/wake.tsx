@@ -6,7 +6,8 @@ import { Button, Card, LoadError, ProgressBar, Screen, Text, toast, TopBar } fro
 import { confirmWake, getWakeCheck, missWake, promptWake } from '@/features/alarm/api';
 import { FormulaBox } from '@/features/alarm/components/FormulaBox';
 import { WAKE_NO_REPLY_MINUTES, WAKE_OBSERVE_MINUTES, WAKE_RECENT_MINUTES, type WakeCheck } from '@/features/alarm/types';
-import { formatUsage, judgeLines } from '@/features/alarm/wake';
+import { formatUsage, judgeLines, pickAlarmId } from '@/features/alarm/wake';
+import { uploadEvents } from '@/lib/alarmSync';
 import { addMinutes, formatTime, timeParts } from '@/lib/format';
 import { backOrHome, openGroupDetail } from '@/lib/nav';
 import { useLoad } from '@/lib/useLoad';
@@ -28,9 +29,15 @@ function toState(check: WakeCheck): WakeState {
 
 // H08 기상 확인 — 기상 알람을 끈 뒤 10분 동안 화면 사용으로 판정, 모자라면 확인 알림
 // 실제 판정(사용 정보 접근)은 #35 · #40. 지금은 목업처럼 "시연용" 버튼으로 두 경우를 보여 줌
+//   열리는 길: 알람을 끄면 알람 코어가 respecalarm://wake?alarmId=<id>로 엶(그 알람의 기상 확인), 앱 안에서는 ?alarm=<id> (pickAlarmId가 둘 다 읽음)
+//   실데이터 모드에서는 들어올 때 폰에 쌓인 울림 기록(방금 한 해제 포함)을 먼저 서버에 올림 — 기상 확인 기록이 해제 기록보다 먼저 들어가지 않게 (가짜 모드에서는 아무 일 없음)
 export default function WakeScreen() {
-  const { alarm } = useLocalSearchParams<{ alarm?: string }>();
-  const { data, error, reload } = useLoad(() => getWakeCheck(alarm));
+  const params = useLocalSearchParams<{ alarmId?: string; alarm?: string }>();
+  const alarm = pickAlarmId(params);
+  const { data, error, reload } = useLoad(async () => {
+    await uploadEvents().catch(() => {}); // 못 올려도 화면은 열림 — 다음 기회에 올라감
+    return getWakeCheck(alarm);
+  });
 
   if (data === undefined) {
     return (

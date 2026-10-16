@@ -3,7 +3,7 @@ import { describe, expect, it } from '@jest/globals';
 import { formatTime } from '@/lib/format';
 import { kst } from '@/mocks/data';
 
-import { formatUsage, judgeLines, thetaReachedAt, usedMinutes, usageSummary, type UseSpan } from '../wake';
+import { formatUsage, judgeLines, pickAlarmId, thetaReachedAt, usedMinutes, usageSummary, type UseSpan } from '../wake';
 
 const dismissed = kst(22, 480); // 오전 8:00에 해제
 const demo: UseSpan[] = [
@@ -78,5 +78,20 @@ describe('H08 화면 글자 — 소수 분 대신 분 · 초, 내부 용어 대�
     for (const line of [...judgeLines(0.4, 0, 1), ...judgeLines(3.2, 1.4, 1), formatUsage(3.2)]) {
       expect(line).not.toMatch(/θ|\d\.\d|뒤쪽/);
     }
+  });
+});
+
+describe('H08 주소에서 알람 id 읽기', () => {
+  it('알람 코어 딥링크(alarmId)와 앱 안 길(alarm)을 둘 다 읽고, 둘 다 있으면 딥링크가 먼저', () => {
+    expect(pickAlarmId({ alarmId: 'native-1' })).toBe('native-1');
+    expect(pickAlarmId({ alarm: 'in-app-1' })).toBe('in-app-1');
+    expect(pickAlarmId({ alarmId: 'native-1', alarm: 'in-app-1' })).toBe('native-1');
+  });
+
+  it('배열이면 첫 값, 비었으면 없음', () => {
+    expect(pickAlarmId({ alarmId: ['a', 'b'] })).toBe('a');
+    expect(pickAlarmId({ alarmId: '', alarm: 'in-app-1' })).toBe('in-app-1');
+    expect(pickAlarmId({})).toBeUndefined();
+    expect(pickAlarmId({ alarmId: [] })).toBeUndefined();
   });
 });

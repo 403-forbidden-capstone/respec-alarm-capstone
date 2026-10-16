@@ -59,6 +59,9 @@
     "preset": "jest-expo",
     "modulePaths": [
       "<rootDir>/node_modules"
+    ],
+    "setupFiles": [
+      "<rootDir>/jest.setup.js"
     ]
   }
 }
