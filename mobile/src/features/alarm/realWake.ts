@@ -2,7 +2,8 @@
 //   울림 자체는 폰 알람 코어(네이티브 화면)가 함. 앱의 ring.tsx는 디자인 · 웹 미리 보기용이라 실데이터에서는 열 알람이 없음(getRing = null)
 //   · 해제 → 알람 코어 stop, 미룬 알람 보기 · 취소 → 알람 코어 list · cancel (미루기 예약은 코어가 가짐)
 //   · 기상 확인: 해제 기록(alarm_events DISMISSED) 시각부터 10분의 화면 사용 구간(AlarmCore.getUsageSpans)으로 판정 (features/alarm/wake.ts evaluateWake, D14)
-//     확정하면 alarm_events WAKE_CONFIRMED(event_at = θ를 넘은 시각 · 직접 응답은 응답 시각) + daily_records.wake_confirmed_at
+//     확정하면 daily_records.wake_confirmed_at(빈 칸만) → alarm_events WAKE_CONFIRMED(event_at = θ를 넘은 시각 · 직접 응답은 응답 시각) 순으로 씀
+//     이벤트가 확정의 표지라(이게 있으면 다시 안 씀) 맨 마지막에 쓰고, 번호(client_event_id)는 그 알람의 그 해제로 정해지는 고정 값 — 중간에 끊겨 다시 눌러도 둘 다 한 번씩만 남음
 //     놓침(MISSED)은 서버 배치(wake-check)가 씀 — 앱은 안 씀
 import * as AlarmCore from '@capstone/alarm-core';
 
@@ -10,6 +11,7 @@ import { uploadEvents } from '@/lib/alarmSync';
 import { now } from '@/lib/clock';
 import { parseDbTime } from '@/lib/dbTime';
 import { dayKey } from '@/lib/format';
+import { stableUuid } from '@/lib/stableId';
 import { supabase } from '@/lib/supabase';
 import { requireUserId } from '@/lib/user';
 
@@ -151,21 +153,35 @@ async function findRecentDismissedWake(userId: string, windowMs: number): Promis
   return (pending && (!found || pending.at.getTime() > found.at.getTime()) ? pending.alarmId : found?.alarmId) ?? null;
 }
 
-// 확정 기록: alarm_events WAKE_CONFIRMED + 그날 daily_records.wake_confirmed_at (이미 있으면 처음 값 그대로). 같은 알람의 동시 확정은 한 번만
+// 확정 기록: 그날 daily_records.wake_confirmed_at (이미 있으면 처음 값 그대로) → alarm_events WAKE_CONFIRMED. 같은 알람의 동시 확정은 한 번만
+//   이벤트를 마지막에 쓰는 이유: loadWakeContext가 이 이벤트로 "이미 확정"을 판단하므로, 먼저 쓰면 그날 기록을 쓰다 끊겼을 때
+//   다시 눌러도 확정으로 보고 아무것도 안 해 daily_records(달력 점 · 주간 요약이 읽는 곳)가 영영 안 채워짐
+//   이벤트 번호는 알람 id + 해제 시각으로 정한 고정 값이라 upsert(ignoreDuplicates)가 겹쳐 불려도 한 줄만 남김
 const writing = new Map<string, Promise<void>>();
+
+// 그 알람의 그 해제에 대한 확정 기록 번호. 해제 기록이 없으면(직접 응답만) 확정한 날로
+const confirmEventId = (ctx: WakeContext, wokeAt: Date) => stableUuid('wake-confirmed', ctx.alarmId, ctx.dismissedAt?.getTime() ?? dayKey(wokeAt));
 
 async function writeConfirmation(userId: string, ctx: WakeContext, wokeAt: Date, how: 'self' | 'auto'): Promise<void> {
   const eventAt = wokeAt.toISOString();
-  const event = await supabase.from('alarm_events').insert({
-    user_id: userId,
-    alarm_id: ctx.alarmId,
-    event_type: 'WAKE_CONFIRMED',
-    event_at: eventAt,
-    client_event_id: AlarmCore.makeUuid(),
-    input_source: how === 'self' ? 'BUTTON' : 'USAGE',
-  });
+  await writeDailyRecord(userId, ctx, wokeAt);
+  const event = await supabase.from('alarm_events').upsert(
+    {
+      user_id: userId,
+      alarm_id: ctx.alarmId,
+      event_type: 'WAKE_CONFIRMED',
+      event_at: eventAt,
+      client_event_id: confirmEventId(ctx, wokeAt),
+      input_source: how === 'self' ? 'BUTTON' : 'USAGE',
+    },
+    { onConflict: 'client_event_id', ignoreDuplicates: true },
+  );
   if (event.error) throw event.error;
+}
 
+// 그날 기록의 빈 칸(기상 확인 · 해제 시각)만 채움 — 이미 있는 값은 덮지 않아서 몇 번을 불러도 같은 결과
+async function writeDailyRecord(userId: string, ctx: WakeContext, wokeAt: Date): Promise<void> {
+  const eventAt = wokeAt.toISOString();
   const day = dayKey(wokeAt);
   const record = await supabase.from('daily_records').select('record_id, wake_confirmed_at, wake_reported_at').eq('user_id', userId).eq('record_date', day).maybeSingle();
   if (record.error) throw record.error;

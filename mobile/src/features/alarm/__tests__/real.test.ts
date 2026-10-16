@@ -72,6 +72,8 @@ jest.mock('@capstone/alarm-core', () => ({
     spans.map((s) => [(s.startMillis - dismissedAt) / 60_000, (s.endMillis - dismissedAt) / 60_000]),
 }));
 
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+
 // 5월 22일 한국 시각
 const kst = (hhmm: string, day = 22) => `2025-05-${String(day).padStart(2, '0')}T${hhmm}:00+09:00`;
 
@@ -756,7 +758,7 @@ describe('기상 확인 (H08)', () => {
       data: { alarm_id: 'a-wake', alarm_type: 'WAKE', appointment_participants: { appointments: opts.appointment === undefined ? { title: '팀 주간회의', group_id: 'cap', groups: { group_name: '캡스톤팀' } } : opts.appointment } },
     });
     mockRoutes['alarm_events:select'] = () => ({ data: events });
-    mockRoutes['alarm_events:insert'] = () => undefined;
+    mockRoutes['alarm_events:upsert'] = () => undefined;
     mockRoutes['daily_records:select'] = () => ({ data: null });
     mockRoutes['daily_records:insert'] = () => undefined;
   }
@@ -788,7 +790,7 @@ describe('기상 확인 (H08)', () => {
     expect(check).toMatchObject({ alarmId: 'a-wake', appointmentTitle: '팀 주간회의', groupId: 'cap', groupName: '캡스톤팀', phase: 'observing', usage: 1, recent: 0, thetaMinutes: 1, confirmed: null });
     expect(check?.dismissedAt.getTime()).toBe(min(0));
     expect(mockCore.getUsageSpans).toHaveBeenCalledWith(min(0), min(4)); // 지금까지만 읽음
-    expect(callsTo('alarm_events', 'insert')).toEqual([]);
+    expect(callsTo('alarm_events', 'upsert')).toEqual([]);
   });
 
   it('10분이 끝났고 조건을 채웠으면 자동 확정 — event_at은 θ를 넘은 시각, 입력 출처 USAGE, 그날 기록에도 남김', async () => {
@@ -801,14 +803,16 @@ describe('기상 확인 (H08)', () => {
     const check = await real.getWakeCheck('a-wake');
     expect(check?.confirmed).toEqual({ at: new Date(min(1.5)), how: 'auto' });
     expect(mockCore.getUsageSpans).toHaveBeenCalledWith(min(0), min(10));
-    expect(callsTo('alarm_events', 'insert')[0].payload).toEqual({
+    const [confirmed] = callsTo('alarm_events', 'upsert');
+    expect(confirmed.payload).toEqual({
       user_id: 'user-1',
       alarm_id: 'a-wake',
       event_type: 'WAKE_CONFIRMED',
       event_at: new Date(min(1.5)).toISOString(),
-      client_event_id: 'uuid-fixed',
+      client_event_id: expect.stringMatching(UUID),
       input_source: 'USAGE',
     });
+    expect(confirmed.options).toEqual({ onConflict: 'client_event_id', ignoreDuplicates: true }); // 번호가 같은 기록은 한 줄만
     expect(callsTo('daily_records', 'insert')[0].payload).toEqual({
       user_id: 'user-1',
       record_date: '2025-05-22',
@@ -829,7 +833,7 @@ describe('기상 확인 (H08)', () => {
     mockCore.hasUsageAccess.mockResolvedValue(true);
     mockCore.getUsageSpans.mockRejectedValue(new Error('안드로이드 9 미만'));
     expect(await real.getWakeCheck('a-wake')).toMatchObject({ phase: 'prompt' });
-    expect(callsTo('alarm_events', 'insert')).toEqual([]);
+    expect(callsTo('alarm_events', 'upsert')).toEqual([]);
   });
 
   it('올리지 못한 해제 기록(폰에 남은 것)도 해제 시각으로 씀', async () => {
@@ -848,16 +852,16 @@ describe('기상 확인 (H08)', () => {
     const check = await real.getWakeCheck('a-wake');
     expect(check?.confirmed).toEqual({ at: new Date(min(2)), how: 'self' });
     await real.confirmWake('a-wake', 'self');
-    expect(callsTo('alarm_events', 'insert')).toEqual([]);
+    expect(callsTo('alarm_events', 'upsert')).toEqual([]);
   });
 
   it('confirmWake(self): 지금 시각으로 WAKE_CONFIRMED(BUTTON) + 그날 기록, 두 번 눌러도(동시) 한 번만', async () => {
     setup([{ event_type: 'DISMISSED', event_at: eventAt(0) }]);
     at(12);
     await Promise.all([real.confirmWake('a-wake', 'self'), real.confirmWake('a-wake', 'self')]);
-    const inserts = callsTo('alarm_events', 'insert');
-    expect(inserts).toHaveLength(1);
-    expect(inserts[0].payload).toMatchObject({ event_type: 'WAKE_CONFIRMED', event_at: new Date(min(12)).toISOString(), input_source: 'BUTTON' });
+    const writes = callsTo('alarm_events', 'upsert');
+    expect(writes).toHaveLength(1);
+    expect(writes[0].payload).toMatchObject({ event_type: 'WAKE_CONFIRMED', event_at: new Date(min(12)).toISOString(), input_source: 'BUTTON' });
     expect(callsTo('daily_records', 'insert')).toHaveLength(1);
   });
 
@@ -891,15 +895,65 @@ describe('기상 확인 (H08)', () => {
     at(15);
     mockCore.getUsageSpans.mockResolvedValue([{ startMillis: min(2), endMillis: min(3.5) }]);
     await real.confirmWake('a-wake', 'auto');
-    expect(callsTo('alarm_events', 'insert')[0].payload).toMatchObject({ event_at: new Date(min(3)).toISOString(), input_source: 'USAGE' });
+    expect(callsTo('alarm_events', 'upsert')[0].payload).toMatchObject({ event_at: new Date(min(3)).toISOString(), input_source: 'USAGE' });
   });
 
   it('기록 쓰기가 실패하면 던짐 (화면이 다시 누를 수 있게 풀어 줌)', async () => {
     setup([{ event_type: 'DISMISSED', event_at: eventAt(0) }]);
-    mockRoutes['alarm_events:insert'] = () => ({ error: { code: '', message: 'offline' } });
+    mockRoutes['alarm_events:upsert'] = () => ({ error: { code: '', message: 'offline' } });
     at(12);
     await expect(real.confirmWake('a-wake', 'self')).rejects.toMatchObject({ message: 'offline' });
-    expect(callsTo('daily_records', 'insert')).toEqual([]); // 이벤트가 먼저, 실패하면 그날 기록도 안 씀
+    mockRoutes['alarm_events:upsert'] = () => undefined;
+    mockRoutes['daily_records:select'] = () => ({ data: { record_id: 'r1', wake_confirmed_at: new Date(min(12)).toISOString(), wake_reported_at: new Date(min(0)).toISOString() } });
+    await real.confirmWake('a-wake', 'self');
+    expect(callsTo('alarm_events', 'upsert')).toHaveLength(2); // 이벤트를 다시 씀 (확정으로 보지 않음)
+  });
+
+  it('그날 기록을 쓰다 끊겨도 확정으로 보지 않음 — 그날 기록을 먼저 쓰고 이벤트는 마지막에, 다시 누르면 이벤트만 쓰고 그날 기록은 건너뜀', async () => {
+    setup([{ event_type: 'DISMISSED', event_at: eventAt(0) }]);
+    mockRoutes['daily_records:insert'] = () => ({ error: { code: '', message: 'offline' } });
+    at(12);
+    await expect(real.confirmWake('a-wake', 'self')).rejects.toMatchObject({ message: 'offline' });
+    expect(callsTo('alarm_events', 'upsert')).toEqual([]); // 이벤트(확정의 표지)가 없어야 다음에 다시 시도됨
+
+    // 다시 누름: 그날 기록은 이미 채워짐(앞 시도에서 insert는 됐다고 보고) -> 건너뛰고 이벤트만
+    mockCalls.length = 0;
+    mockRoutes['daily_records:select'] = () => ({ data: { record_id: 'r1', wake_confirmed_at: new Date(min(12)).toISOString(), wake_reported_at: new Date(min(0)).toISOString() } });
+    await real.confirmWake('a-wake', 'self');
+    expect(callsTo('daily_records', 'insert')).toEqual([]);
+    expect(callsTo('daily_records', 'update')).toEqual([]);
+    expect(callsTo('alarm_events', 'upsert')).toHaveLength(1);
+    const order = mockCalls.map((c) => `${c.table}.${c.op}`).filter((x) => x === 'daily_records.select' || x === 'alarm_events.upsert');
+    expect(order).toEqual(['daily_records.select', 'alarm_events.upsert']);
+  });
+
+  it('확정 이벤트 번호는 그 알람의 그 해제로 정해진 고정 값 — 다시 눌러도 겹쳐 불려도 같은 번호(서버가 한 줄만 남김), 다른 해제면 다른 번호', async () => {
+    setup([{ event_type: 'DISMISSED', event_at: eventAt(0) }]);
+    at(12);
+    await real.confirmWake('a-wake', 'self');
+    mockNow = new Date(min(13)); // 한 분 뒤 다시 (앞 시도가 실패했다고 보고) — 시각이 달라도 번호는 같음
+    await real.confirmWake('a-wake', 'self');
+    const [first, second] = callsTo('alarm_events', 'upsert').map((c) => (c.payload as { client_event_id: string }).client_event_id);
+    expect(first).toMatch(UUID);
+    expect(second).toBe(first);
+
+    // 다음 날 같은 알람을 다시 끈 경우(다른 해제 시각)는 다른 번호
+    mockCalls.length = 0;
+    setup([{ event_type: 'DISMISSED', event_at: new Date(min(0) + 24 * 60 * 60_000).toISOString() }]);
+    mockNow = new Date(min(12) + 24 * 60 * 60_000);
+    await real.confirmWake('a-wake', 'self');
+    expect((callsTo('alarm_events', 'upsert')[0].payload as { client_event_id: string }).client_event_id).not.toBe(first);
+  });
+
+  it('읽는 사이에 다른 호출이 먼저 확정해 겹쳐도 같은 번호로 upsert — 이벤트가 둘 생기지 않음', async () => {
+    setup([{ event_type: 'DISMISSED', event_at: eventAt(0) }]);
+    at(12);
+    // 둘 다 "아직 확정 전"으로 읽은 뒤 차례로 쓰는 경우 (settle의 동시 방지는 쓰는 동안만 막음)
+    await real.confirmWake('a-wake', 'self');
+    await real.confirmWake('a-wake', 'self');
+    const ids = callsTo('alarm_events', 'upsert').map((c) => (c.payload as { client_event_id: string }).client_event_id);
+    expect(ids).toHaveLength(2);
+    expect(new Set(ids).size).toBe(1);
   });
 
   it('getWakeCheck: 알람 id가 없으면 가장 최근에 끈 기상 알람 (12시간 안)', async () => {

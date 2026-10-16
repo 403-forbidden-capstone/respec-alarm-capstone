@@ -99,13 +99,17 @@ function WakeFlow({ check }: { check: WakeCheck }) {
     if (!first()) return;
     try {
       await confirmWake(check.alarmId, how, observeEnd);
-      await refresh();
-      toast(`기상을 확인했어요${shared}`);
     } catch {
       // 실데이터에서 기록하지 못했을 때(네트워크 등) — 다시 누를 수 있게 풀어 줌 (가짜 데이터는 실패하지 않음)
       handled.current = null;
       toast('기상을 확인하지 못했어요. 다시 눌러 주세요');
+      return;
     }
+    // 기록은 끝났으니 화면을 다시 읽다 실패해도 "확인하지 못했어요"라고 하지 않음 — 풀어 두면 다시 눌러 새로 읽을 수 있음 (이미 확정이라 기록은 다시 안 씀)
+    await refresh().catch(() => {
+      handled.current = null;
+    });
+    toast(`기상을 확인했어요${shared}`);
   }
 
   // 실데이터: 관찰 10분 동안은 판정을 다시 읽어, 끝나면 확정(자동 판정) 또는 확인 알림 단계로 넘어감. 가짜 데이터는 시연 버튼으로 넘김
