@@ -159,16 +159,23 @@ export function reconcile(options: ReconcileOptions = {}): Promise<SyncSummary> 
     if (options.timeZone) lastTimeZone = options.timeZone;
     let server = buildServerPackages(rows, options.timeZone ?? lastTimeZone ?? undefined);
     let phone = await AlarmCore.list();
-    let forceCancel: Set<string> | undefined;
-    if (options.alarmIds) {
-      const only = new Set(options.alarmIds);
+    const only = options.alarmIds ? new Set(options.alarmIds) : null;
+    if (only) {
       server = server.filter((p) => only.has(p.alarmId));
       phone = phone.filter((a) => only.has(a.id));
-      // 지정한 알람(끄기 · 지우기를 DB에 쓴 직후)은 서버에 켜진 행이 없으면 첫 울림이 지났어도(미룸 · 다시 울림 대기) 폰에서 지움 — 전체 맞추기는 이 규칙을 안 씀 (planReconcile)
-      const future = new Set(server.map((p) => p.alarmId));
-      const candidates = phone.filter((a) => !future.has(a.id)).map((a) => a.id);
+    }
+    // 서버의 지금 이후 목록에 없는 폰 예약 중 서버에 켜진 행이 정말 없는 것(꺼졌거나 지워짐)은 첫 울림이 지났어도(미룸 · 다시 울림 대기 · 울리는 중) 지움 — 안 지우면 꺼진 알람이 미룸으로 다시 울림
+    //   서버에 켜진 행이 남은 것은 울린 뒤 시각이 과거가 되어 목록에서 빠졌을 뿐이라 그대로 둠 (planReconcile)
+    //   지정한 알람(alarmIds, 끄기를 DB에 쓴 직후)은 확인이 실패하면 던져 호출한 쪽이 알게 하고, 전체 맞추기는 확인이 실패하면 안 지움 (조심 쪽, 다음 맞추기에서 다시)
+    const listed = new Set(server.map((p) => p.alarmId));
+    const candidates = phone.filter((a) => !listed.has(a.id) && (only != null || a.atMillis <= nowMs)).map((a) => a.id);
+    let forceCancel: Set<string> | undefined;
+    try {
       const stillOn = await fetchEnabledIds(userId, candidates);
       forceCancel = new Set(candidates.filter((id) => !stillOn.has(id)));
+    } catch (e) {
+      if (only) throw e;
+      if (__DEV__) console.warn('[alarmSync] 서버에 켜진 알람 확인 실패 — 첫 울림이 지난 폰 예약은 이번엔 안 지움', e);
     }
     if (signingOut) return emptySummary(); // 읽는 사이 로그아웃이 시작됐으면 폰을 건드리지 않음
     const plan = planReconcile({ server, phone, nowMs, forceCancel });

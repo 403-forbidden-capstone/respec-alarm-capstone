@@ -156,10 +156,40 @@ describe('reconcile — 서버 ↔ 폰 맞추기', () => {
     expect(mockCore.cancel).not.toHaveBeenCalled();
   });
 
-  it('전체 맞추기는 서버 목록에 없는 미룸 중 예약을 지우지 않음 (울린 뒤 서버 행이 과거가 되는 정상 경우)', async () => {
+  it('전체 맞추기도 서버에서 꺼졌거나 지워진 미룸 중 예약은 지움 — 서버에 켜진 행이 없다고 확인되면 (안 지우면 꺼진 알람이 미룸으로 다시 울림)', async () => {
+    mockCore.list.mockResolvedValue([snoozed('wake-1'), snoozed('wake-2')]);
+    mockEnabledIds = ['wake-2']; // wake-1은 다른 기기에서 꺼짐 · 지워짐
+    const summary = await reconcile({ nowMs: NOW });
+    expect(summary.canceled).toEqual(['wake-1']);
+    expect(mockCore.cancel).toHaveBeenCalledTimes(1);
+    expect(mockAlarmQuery.in).toHaveBeenCalledWith('alarm_id', ['wake-1', 'wake-2']); // 시각 조건 없이 켜진 행만 물음
+  });
+
+  it('전체 맞추기는 서버에 켜진 행이 남은 미룸 중 예약은 지우지 않음 (울린 뒤 서버 행의 시각이 과거가 되어 목록에서 빠지는 정상 경우)', async () => {
     mockCore.list.mockResolvedValue([snoozed('wake-1')]);
+    mockEnabledIds = ['wake-1'];
     const summary = await reconcile({ nowMs: NOW });
     expect(summary.canceled).toEqual([]);
+    expect(mockCore.cancel).not.toHaveBeenCalled();
+  });
+
+  it('전체 맞추기에서 서버 확인이 실패하면 첫 울림이 지난 예약은 지우지 않고(조심 쪽), 나머지 맞추기는 그대로 하며 던지지 않음', async () => {
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {}); // 개발 중 로그
+    mockAlarmRows = [row('server-1', '2026-10-19T22:30:00.000Z')];
+    mockCore.list.mockResolvedValue([snoozed('wake-1')]);
+    (mockAlarmQuery.in as jest.Mock<() => Promise<unknown>>).mockResolvedValueOnce({ data: null, error: { message: 'offline' } });
+    const summary = await reconcile({ nowMs: NOW });
+    expect(summary.canceled).toEqual([]);
+    expect(summary.scheduled).toEqual(['server-1']);
+    // 지정한 알람(alarmIds, 방금 끈 것)은 확인이 실패하면 던져 호출한 쪽이 알게 함
+    (mockAlarmQuery.in as jest.Mock<() => Promise<unknown>>).mockResolvedValueOnce({ data: null, error: { message: 'offline' } });
+    await expect(reconcile({ nowMs: NOW, alarmIds: ['wake-1'] })).rejects.toMatchObject({ message: 'offline' });
+    warn.mockRestore();
+  });
+
+  it('전체 맞추기에서 첫 울림이 지난 예약이 없으면 서버에 켜진 행을 따로 묻지 않음', async () => {
+    mockCore.list.mockResolvedValue([{ id: 'future', type: 'WAKE', intensity: 'NORMAL', title: '회의', atMillis: NOW + 60 * 60_000, snoozeCount: 0, nextRingAt: NOW + 60 * 60_000 }]);
+    await reconcile({ nowMs: NOW });
     expect(mockAlarmQuery.in).not.toHaveBeenCalled();
   });
 
