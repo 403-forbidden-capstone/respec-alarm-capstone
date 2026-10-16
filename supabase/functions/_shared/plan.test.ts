@@ -5,7 +5,7 @@ import { test } from 'node:test';
 import { assertPersistable, persistAppointment, type CommitCtx } from './commit.ts';
 import { HttpError } from './errors.ts';
 import { FakeDb } from './fake-db.ts';
-import { buildPlan, TravelRequiredError, type PlanContext } from './plan.ts';
+import { buildPlan, loadSameDayWake, TravelRequiredError, type PlanContext } from './plan.ts';
 import { toSuggestion, toTravelRequiredSuggestion } from './plan-core.ts';
 import { Reader } from './read.ts';
 import { readCommitRequest, readSuggestRequest } from './requests.ts';
@@ -163,4 +163,71 @@ test('미리 보기 = 저장: 사용자가 끈 알람은 다시 저장해도 꺼
   const turnedOn = await previewAndSave(env, { ...again, enabled: { PREPARE: true } });
   assert.deepEqual(turnedOn.saved, turnedOn.shown);
   assert.match(turnedOn.saved[1], /^PREPARE .* true /);
+});
+
+// ---- 그날 첫 일정 판정: 내 참여 → 약속 시각 + 기상 알람을 읽고 약속 시각이 앞선 것만 셈 ----
+// 가짜 DB는 PostgREST 임베드(`appointments!inner`)를 흉내 못 내서, 부른 쿼리 모양은 기록 도우미로 확인하고 판정은 읽어 온 행으로 시험함
+
+// 쿼리 빌더 호출을 기록하고 준비해 둔 행을 돌려주는 도우미
+function recordingDb(rows: unknown[]) {
+  const calls: unknown[][] = [];
+  const query: unknown = new Proxy(
+    {},
+    {
+      get: (_target, name) => {
+        if (name === 'then') return (resolve: (v: unknown) => unknown) => Promise.resolve({ data: rows, error: null }).then(resolve);
+        return (...args: unknown[]) => {
+          calls.push([name, ...args]);
+          return query;
+        };
+      },
+    },
+  );
+  const db = { from: (table: string) => (calls.push(['from', table]), query) } as unknown as Db;
+  return { db, calls };
+}
+
+// 그날 내 참여 한 줄: 약속 시각 + 기상 알람(켜짐 여부)
+const wakeRow = (appointmentId: string, appointmentMinutes: number, isEnabled = true) => ({
+  appointment_id: appointmentId,
+  appointments: { appointment_at: iso(22, appointmentMinutes) },
+  alarms: [{ is_enabled: isEnabled }],
+});
+
+test('그날 첫 일정: 10시 약속(기상 8:00)이 있는 날 8:30 새 약속은 기상 있음, 8:00 약속이 있는 날 10:00 새 약속은 기상 없음', async () => {
+  const withTen = recordingDb([wakeRow('ap-ten', 600)]);
+  assert.equal(await loadSameDayWake(withTen.db, USER, kst(22, 510), 'Asia/Seoul'), false);
+
+  const withEight = recordingDb([wakeRow('ap-eight', 480)]);
+  assert.equal(await loadSameDayWake(withEight.db, USER, kst(22, 600), 'Asia/Seoul'), true);
+});
+
+test('그날 첫 일정: 같은 시각 약속 둘은 둘 다 기상, 꺼 둔 기상 · 자기 자신의 기상은 안 셈', async () => {
+  assert.equal(await loadSameDayWake(recordingDb([wakeRow('ap-other', 600)]).db, USER, kst(22, 600), 'Asia/Seoul'), false);
+  assert.equal(await loadSameDayWake(recordingDb([wakeRow('ap-other', 480, false)]).db, USER, kst(22, 600), 'Asia/Seoul'), false);
+  assert.equal(await loadSameDayWake(recordingDb([wakeRow('ap-self', 480)]).db, USER, kst(22, 600), 'Asia/Seoul', 'ap-self'), false);
+  assert.equal(await loadSameDayWake(recordingDb([wakeRow('ap-self', 480), wakeRow('ap-other', 540)]).db, USER, kst(22, 600), 'Asia/Seoul', 'ap-self'), true);
+});
+
+test('그날 첫 일정: 임베드가 객체로 와도 배열로 와도 읽음, 약속 시각을 못 읽는 행은 건너뜀', async () => {
+  const mixedShapes = { appointment_id: 'a', appointments: [{ appointment_at: iso(22, 480) }], alarms: { is_enabled: true } };
+  assert.equal(await loadSameDayWake(recordingDb([mixedShapes]).db, USER, kst(22, 600), 'Asia/Seoul'), true);
+  const broken = [{ appointment_id: 'b', appointments: null, alarms: [{ is_enabled: true }] }, { appointment_id: 'c', appointments: { appointment_at: 'x' }, alarms: [{ is_enabled: true }] }];
+  assert.equal(await loadSameDayWake(recordingDb(broken).db, USER, kst(22, 600), 'Asia/Seoul'), false);
+});
+
+test('그날 첫 일정: 내 참여만, 기상 알람만, 내 시간대 하루(0시 ~ 다음 0시)의 약속 시각으로 읽음', async () => {
+  const { db, calls } = recordingDb([]);
+  await loadSameDayWake(db, USER, kst(22, 600), 'Asia/Seoul');
+  assert.deepEqual(calls[0], ['from', 'appointment_participants']);
+  const select = calls.find((c) => c[0] === 'select');
+  assert.match(String(select?.[1]), /appointments!inner\(appointment_at\)/);
+  assert.match(String(select?.[1]), /alarms!inner\(is_enabled\)/);
+  const filters = calls.filter((c) => c[0] !== 'from' && c[0] !== 'select').map((c) => c.join(' '));
+  assert.deepEqual(filters.sort(), [
+    `eq alarms.alarm_type WAKE`,
+    `eq user_id ${USER}`,
+    `gte appointments.appointment_at ${kst(22, 0).toISOString()}`,
+    `lt appointments.appointment_at ${kst(23, 0).toISOString()}`,
+  ]);
 });

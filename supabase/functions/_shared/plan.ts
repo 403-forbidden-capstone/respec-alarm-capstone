@@ -1,5 +1,6 @@
 // 알람 계획 만들기의 DB 쪽 — 읽기는 부른 사람의 RLS 클라이언트로 (남의 일정 · 기록은 애초에 안 보임)
 // 읽어 온 값을 plan-core.ts의 순수 계산에 넘김. alarm-suggest(미리 보기)와 alarm-commit(저장)이 같이 씀
+import { hasEarlierWake } from './calc/index.ts';
 import type { TravelSample } from './calc/travel.ts';
 import { dbFail, must } from './db.ts';
 import { HttpError } from './errors.ts';
@@ -7,6 +8,7 @@ import { kakaoTravelMinutes, type FetchLike } from './kakao.ts';
 import {
   computePlan,
   resolveBasics,
+  sameDayWakesFromRows,
   type AlarmRow,
   type AppointmentRow,
   type ParticipantRow,
@@ -14,6 +16,7 @@ import {
   type PlanDraft,
   type PlanInputs,
   type ProfileRow,
+  type SameDayWakeRow,
 } from './plan-core.ts';
 import { resolveTravel, type ResolvedTravel, type TravelDeps } from './route.ts';
 import type { Db } from './supabase.ts';
@@ -97,24 +100,22 @@ async function loadLateCount(db: Db, userId: string, now: Date): Promise<number>
   return count ?? 0;
 }
 
-// 그날(내 시간대 0시 기준) 이 약속보다 앞에 내 기상 알람이 이미 있는지 — 있으면 이 약속은 기상 없이 준비부터 (목업 estimateAppointment)
-async function loadSameDayWake(db: Db, userId: string, at: Date, timeZone: string, ownAppointmentId?: string): Promise<boolean> {
-  const { start } = localDayRange(at, timeZone);
-  const rows = must<{ appointment_participants: { appointment_id: string } | { appointment_id: string }[] | null }[]>(
+// 그날(내 시간대 0시 기준) 이 약속보다 약속 시각이 앞선 내 참여에 켜진 기상 알람이 있는지 — 있으면 이 약속은 기상 없이 준비부터
+//   내 참여 → 그 약속의 시각 + 기상 알람을 한 번에 읽고(임베드 appointments!inner · alarms!inner), 그날 전체를 가져와서 앞뒤 판정은 calc/wake.ts에 맡김
+//   (알람이 울리는 시각이 아니라 약속 시각으로 가림 — 10시 약속의 8시 기상이 있는 날 8:30 약속은 그날 첫 일정)
+export async function loadSameDayWake(db: Db, userId: string, at: Date, timeZone: string, ownAppointmentId?: string): Promise<boolean> {
+  const { start, end } = localDayRange(at, timeZone);
+  const rows = must<SameDayWakeRow[]>(
     'same-day wake',
     await db
-      .from('alarms')
-      .select('alarm_id, appointment_participants!inner(appointment_id)')
+      .from('appointment_participants')
+      .select('appointment_id, appointments!inner(appointment_at), alarms!inner(is_enabled)')
       .eq('user_id', userId)
-      .eq('alarm_type', 'WAKE')
-      .eq('is_enabled', true)
-      .gte('scheduled_at', start.toISOString())
-      .lt('scheduled_at', at.toISOString()),
+      .eq('alarms.alarm_type', 'WAKE')
+      .gte('appointments.appointment_at', start.toISOString())
+      .lt('appointments.appointment_at', end.toISOString()),
   );
-  return rows.some((r) => {
-    const p = Array.isArray(r.appointment_participants) ? r.appointment_participants[0] : r.appointment_participants;
-    return p != null && p.appointment_id !== ownAppointmentId;
-  });
+  return hasEarlierWake(at, sameDayWakesFromRows(rows), ownAppointmentId);
 }
 
 // 내 지난 이동 기록 (출발 · 도착이 모두 찍힌 것) — 같은 경로 실측 중앙값용 (읽기만, CACHED로 쓰지 않음)

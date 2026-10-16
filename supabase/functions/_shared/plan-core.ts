@@ -29,6 +29,7 @@ import {
   type PrepareBasis,
   type ResolvedIntensity,
   type RingKind,
+  type SameDayWake,
   type Transport,
 } from './calc/index.ts';
 import { resolveEnabled } from './commit-core.ts';
@@ -113,6 +114,29 @@ export type PlanInputs = {
 };
 
 const num = (v: number | string | null | undefined): number | undefined => (v == null ? undefined : Number(v));
+
+// ---- 그날 첫 일정 판정에 쓰는 행 ----
+
+// 내 참여 한 줄 = 약속 시각 + 그 참여의 기상 알람 (PostgREST 임베드: appointments!inner · alarms!inner). 일대다 · 다대일 임베드는 객체 또는 배열로 옴
+export type SameDayWakeRow = {
+  appointment_id: string;
+  appointments: { appointment_at: string } | { appointment_at: string }[] | null;
+  alarms: { is_enabled: boolean } | { is_enabled: boolean }[] | null;
+};
+
+const asList = <T>(v: T | T[] | null | undefined): T[] => (v == null ? [] : Array.isArray(v) ? v : [v]);
+
+// 판정 함수(calc/wake.ts hasEarlierWake)에 넘길 모양으로. 약속 시각을 못 읽는 행은 건너뜀
+export function sameDayWakesFromRows(rows: readonly SameDayWakeRow[]): SameDayWake[] {
+  const out: SameDayWake[] = [];
+  for (const r of rows) {
+    const at = asList(r.appointments)[0]?.appointment_at;
+    const appointmentAt = at ? new Date(at) : undefined;
+    if (!appointmentAt || Number.isNaN(appointmentAt.getTime())) continue;
+    for (const a of asList(r.alarms)) out.push({ appointmentId: r.appointment_id, appointmentAt, isEnabled: a.is_enabled });
+  }
+  return out;
+}
 
 // ---- 기본 값 합치기 ----
 

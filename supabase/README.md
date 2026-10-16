@@ -188,7 +188,7 @@ create policy wake_signal_receive on realtime.messages
 
 ### 공용 계산 (`functions/_shared/calc/`)
 
-기상 시각 역산 · 강도 · 준비 P80 · 순서 확인 · 저장 검증 · 이동시간 폴백 계산. Deno · Node API를 안 쓰는 순수 TS고 import는 상대 경로 + `.ts`라서 앱(P6)이 경로 별칭으로 같은 파일을 가져다 씀 (앱 `tsconfig`에 `allowImportingTsExtensions`, Metro에 `watchFolders` 필요). 규칙은 앱 목업 계산(`mobile/src/mocks/calc.ts` · `features/alarm/adjust.ts`)을 그대로 옮김 — 문서(4장 · 7장)와 다른 곳(낮은 중요도 강도 · 도착 알람 시각 · 준비시간 · 7장의 개인 보정 ±30분 / 예측 15~240분 clamp)은 D56이 정할 때까지 목업을 따름 — 앱이 이 계산을 그대로 가져다 쓰므로 목업과 한 줄도 다르면 안 됨.
+기상 시각 역산 · 강도 · 준비 P80 · 순서 확인 · 저장 검증 · 이동시간 폴백 계산 · 그날 첫 일정 판정(`hasEarlierWake`: 약속 시각이 이 약속보다 앞선 같은 날 약속에 켜진 기상 알람이 있으면 이 약속은 기상 없이 준비부터. 알람이 울리는 시각이 아니라 약속 시각 기준이고, 같은 시각 두 약속은 둘 다 기상을 가짐). Deno · Node API를 안 쓰는 순수 TS고 import는 상대 경로 + `.ts`라서 앱(P6)이 경로 별칭으로 같은 파일을 가져다 씀 (앱 `tsconfig`에 `allowImportingTsExtensions`, Metro에 `watchFolders` 필요). 규칙은 앱 목업 계산(`mobile/src/mocks/calc.ts` · `features/alarm/adjust.ts`)을 그대로 옮김 — 문서(4장 · 7장)와 다른 곳(낮은 중요도 강도 · 도착 알람 시각 · 준비시간 · 7장의 개인 보정 ±30분 / 예측 15~240분 clamp)은 D56이 정할 때까지 목업을 따름 — 앱이 이 계산을 그대로 가져다 쓰므로 목업과 한 줄도 다르면 안 됨.
 
 ### 시험
 
@@ -229,7 +229,7 @@ npx supabase@2.119.0 functions deploy wake-check    --project-ref gomrhctwjvttoq
 
 - Deno에서 `deno check` · 실제 배포 · `Deno.serve` 동작 (타입은 tsc로 확인, 실행은 못 함)
 - 카카오 응답이 공식 문서 모양과 같은지 — 대중교통 · 도보 · 로컬은 2026-10-15 공식 문서(카카오 디벨로퍼스 카카오맵 REST API)에 맞춰 만들었고, 자동차 길찾기(`summary.duration` 단위)는 문서를 못 열어 샘플 값(초)으로 읽음. 키가 오면 한 번 불러서 `kakao-parse.ts` 샘플과 대조
-- PostgREST 임베드(`appointment_participants!inner(...)`), `upsert(..., ignoreDuplicates)` 같은 supabase-js 호출이 실제 DB에서 도는지 (DB 함수 · 시드 데이터는 PGlite로 확인함)
+- PostgREST 임베드(`appointment_participants!inner(...)`, 그날 첫 일정 판정의 `appointments!inner` · `alarms!inner` + 임베드 칸 필터), `upsert(..., ignoreDuplicates)` 같은 supabase-js 호출이 실제 DB에서 도는지 (DB 함수 · 시드 데이터는 PGlite로 확인함)
 - Expo Push 응답 처리, 카카오 키 권한(카카오맵 사용 설정 · 자동차 길찾기 권한)
 
 ## 데모 시드 (`seed/`)
