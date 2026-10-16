@@ -3,7 +3,7 @@
 화면마다 무엇을 읽고 쓰는지, 어디로 부르는지 정리함. 목업 화면을 진짜 데이터로 바꿀 때 이 표를 따라감.
 
 - 화면 기준: 클릭 목업 `mobile/public/mockup.html`의 화면 번호
-- 데이터 기준: `supabase/migrations` (상세설계서 4장 이름 그대로)
+- 데이터 기준: `supabase/migrations` (상세설계서 4장 이름 그대로). (#160) 표시는 PR #160(DB 보완)에서 더하는 칸 · 표 · 함수 — 머지 전엔 아직 없음 (아래 "스키마에 더 필요한 것" 6)
 - 앱에서 데이터는 `mobile/src/features/*/api.ts`에서만 부름 (지금은 목업 데이터, 하나씩 바꿈)
 - 목업 데이터는 `mobile/src/mocks` (목업 기본 상태: 5월 22일 오전 7:55 · 10시 팀 주간회의). 화면 목록은 `/dev/screens`
 
@@ -40,7 +40,7 @@
 ## 화면별 데이터
 
 ### H01 홈
-- 다음 알람: `alarms`(내 것, 켜짐, 지금 이후 가장 이른 것) → `appointment_participants` → `appointments`(제목 · 장소 · 시각) — DB. 루틴 알람이면 `participant_id`가 NULL이라 `routines.title`을 씀. 일정 없는 알람(D46)은 둘 다 NULL → 제목 "알람"
+- 다음 알람: `alarms`(내 것, 켜짐, 지금 이후 가장 이른 것) → `appointment_participants` → `appointments`(제목 · 장소 · 시각) — DB. 루틴 알람이면 `participant_id`가 NULL이라 `routines.title`을 씀. 일정 없는 알람(D46)은 둘 다 NULL(#160) → 제목 "알람"
 - 오늘 일정(저녁엔 내일): `appointment_participants`(나) + `appointments.appointment_at` 날짜 — DB
 - 오늘 루틴 · 진행: `routines`(켜짐, 오늘 요일) + 오늘 `alarm_events` ACKNOWLEDGED(단계 알람) — DB
 - 내일 준비물(저녁): `todos`(ITEM, 내일) 읽기 · 체크(`is_done` · `done_at`) — DB
@@ -50,12 +50,12 @@
 ### H02 알람 목록
 - 날짜별 알람: `alarms` + `appointment_participants` + `appointments` — DB
 - 켜기 · 끄기: `alarms.is_enabled` — DB → 예약 취소 · 다시 예약 — 폰
-- 일정 없는 알람(D46): 반복은 `alarms.recurrence_rule`, 만들기는 `alarm-commit` — 입력 화면(목록 "+")은 새 UI
+- 일정 없는 알람(D46): 반복은 `alarms.recurrence_rule`(#160), 만들기는 `alarm-commit` — 입력 화면(목록 "+")은 새 UI
 
 ### H03 알람 설정
 - 연결 일정 · 이동 조건 · 준비 시간: `appointments` + `appointment_participants`(출발지 · 이동 수단 · 예상 이동 · 출처 · 준비 · 여유) — DB. 출발지 · 이동 수단 · 예상 이동 · 준비 시간도 고침 (D42 C) → 다시 계산 `alarm-suggest` → 저장 `alarm-commit`
-- 알람 시각 직접 고르기 (D42 C): `alarms.scheduled_at` + `time_source` MANUAL, "자동으로 되돌리기" = AUTO. 강도도 같은 규칙(`intensity_source`)
-- 고친 값 기록 (D42 · D43): `user_edit_logs`(화면 · 칸 · 자동값 → 고친 값 · 시각) — DB, 다음 계산 · 제안의 개인화 입력
+- 알람 시각 직접 고르기 (D42 C): `alarms.scheduled_at` + `time_source` MANUAL(#160), "자동으로 되돌리기" = AUTO. 강도도 같은 규칙(`intensity_source`, #160)
+- 고친 값 기록 (D42 · D43): `user_edit_logs`(#160, 화면 · 칸 · 자동값 → 고친 값 · 시각) — DB, 다음 계산 · 제안의 개인화 입력
 - 예측 준비(P80) 근거: `v_prepare_time_stats` — DB
 - 여유 시간을 바꾸면 다시 계산: `alarm-suggest` — Edge → 저장 `alarm-commit` — Edge → 다시 예약 — 폰
 - 강도 직접 고르기: `alarms.intensity` · `voice_tone` · `sound_key` — DB → 다시 예약 — 폰
@@ -69,7 +69,7 @@
 
 ### H07 알람 울림
 - 소리 · 강도 · 미루기 · 해제 — 폰
-- 기록: `alarm_events` TRIGGERED · SNOOZED(`snooze_minutes`) · DISMISSED — DB (오프라인이면 폰에 보관 후 다시 보냄). 기록마다 앱이 만든 번호 `client_event_id`(같으면 무시) · 출처 `input_source`
+- 기록: `alarm_events` TRIGGERED · SNOOZED(`snooze_minutes`) · DISMISSED — DB (오프라인이면 폰에 보관 후 다시 보냄). 기록마다 앱이 만든 번호 `client_event_id`(유니크 — 같으면 무시) · 출처 `input_source` (둘 다 #160)
 - 무음 알림 원탭("준비 시작" · "출발했어요" · "도착했어요"): `alarm_events` ACKNOWLEDGED(PREPARE · DEPARTURE) · ARRIVAL_CONFIRMED(ARRIVE) + `appointment_participants.departed_at` · `arrived_at` — DB. 지각 판정 (D58 · #41): 약속 +5분 넘으면 지각(`is_late` · `late_minutes`), −2~+5분은 원탭으로 확인. 위치를 끈 사용자는 원탭 기준, 지오펜스 자동 수집(#40)은 나중에 같은 자리에 씀
 
 ### H08 기상 확인
@@ -96,7 +96,7 @@
 ### G02 그룹 상세
 - 그룹 · 멤버: `groups` + `group_members` — DB, 기상 공유 동의 `wake_share_opt_in` — DB
 - 연결 일정: `appointments`(`group_id`) — DB
-- 멤버 기상 상태: `get_group_wake_status` — RPC. 그 그룹 일정이 있는 날만 (D57). 누가 일어나면 DB가 그룹 채널에 새로 고침 신호(Realtime 방송) → 앱이 다시 부름
+- 멤버 기상 상태: `get_group_wake_status` — RPC. 그 그룹 일정이 있는 날만 (D57). 누가 일어나면 DB가 그룹 채널에 새로 고침 신호(Realtime 방송, #160) → 앱이 다시 부름 (지형님 10/15 기술 결정 — `capstone/전체작업계획_v1.md` 8절 Q3, 레포 밖)
 - 초대: `groups.invite_code` 공유, 다시 만들기 `regenerate_invite_code` — RPC
 
 ### G03 그룹원 기상 상태
@@ -161,3 +161,4 @@
 | 3 | G04 "변경 기록" | 저장 자리 없음 | 처음엔 주인에게 푸시만 |
 | 4 | — | 카카오 응답은 저장 · 재사용 불가인데 `est_travel_minutes` · `travel_source` CACHED가 있음 | #27에서 계산에 쓴 값만 남기는지 정함 |
 | 5 | G02 · H01 그룹원 상태에 준비 시작 · 출발 · 도착까지 보임 | `get_group_wake_status`는 기상 상태(`wake_status`)와 시각만 돌려줌, MISSED는 목업에 없음 | 기상까지만으로 정함 (D59) — 화면을 실데이터로 바꿀 때 준비 · 출발 · 도착 줄을 뺌 (목업 api는 글자 `WakeState`, 실데이터는 상태 값 + 시각) |
+| 6 | 일정 없는 알람 (D46) · H03 직접 고름 (D42) · 고친 값 기록 (D42 · D43) · 울림 기록 중복 | `alarms_one_source`가 둘 다 NULL을 막음, `alarms.recurrence_rule` · `time_source` · `intensity_source` · `user_edit_logs` · `alarm_events.client_event_id` · `input_source` 없음 | PR #160에서 더함 (제약 풀기 · 칸 · 표 + RLS · `client_event_id` 유니크) |
