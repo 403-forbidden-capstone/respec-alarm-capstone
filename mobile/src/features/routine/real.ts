@@ -171,6 +171,7 @@ export async function getJournal(recordDate: string): Promise<Journal | null> {
 
 // 일기 고치기 — AI 원본(ai_summary)은 그대로 두고 고친 글(edited_summary)만 바꿈. AI 글과 같으면 고치지 않은 것
 export async function editJournal(recordDate: string, text: string) {
+  if (!parseDayParam(recordDate)) throw new UserError('일기를 찾을 수 없어요');
   const userId = await requireUserId();
   const found = await supabase.from('daily_journals').select('journal_id, ai_summary').eq('user_id', userId).eq('record_date', recordDate).maybeSingle();
   if (found.error) throw found.error;
@@ -186,6 +187,7 @@ export async function editJournal(recordDate: string, text: string) {
 
 // 루틴 제안에 "괜찮아요" (suggestion_status = REJECTED) — 기다리는 제안만. 14일 동안 숨기는 기한은 D24가 열려 있어 저장하지 않음
 export async function declineRoutineSuggestion(recordDate: string) {
+  if (!parseDayParam(recordDate)) return; // 일기가 없으면 응답할 제안도 없음
   const userId = await requireUserId();
   const { error } = await supabase.from('daily_journals').update({ suggestion_status: 'REJECTED' }).eq('user_id', userId).eq('record_date', recordDate).eq('suggestion_status', 'PENDING');
   if (error) throw error;
@@ -209,13 +211,14 @@ export async function getEveningRoutine(): Promise<EveningRoutine | null> {
 export async function getRoutine(id: string, sourceJournal?: string): Promise<Routine | null> {
   const userId = await requireUserId();
   if (id === 'new') {
+    const journal = sourceJournal && parseDayParam(sourceJournal) ? sourceJournal : null; // 날짜가 아닌 주소 값은 일기 없이 연 것으로
     let suggestion: string | null = null;
-    if (sourceJournal && parseDayParam(sourceJournal)) {
-      const { data, error } = await supabase.from('daily_journals').select('routine_suggestion').eq('user_id', userId).eq('record_date', sourceJournal).maybeSingle();
+    if (journal) {
+      const { data, error } = await supabase.from('daily_journals').select('routine_suggestion').eq('user_id', userId).eq('record_date', journal).maybeSingle();
       if (error) throw error;
       suggestion = data?.routine_suggestion ?? null;
     }
-    return blankRoutine(sourceJournal ?? null, suggestion);
+    return blankRoutine(journal, suggestion);
   }
   return loadRoutine(userId, id);
 }
@@ -260,7 +263,7 @@ export async function saveRoutine(routine: Routine): Promise<Routine> {
   const draft: Routine = { ...routine, steps };
 
   let journalId: string | null = null;
-  if (routine.sourceJournal) {
+  if (routine.sourceJournal && parseDayParam(routine.sourceJournal)) {
     const { data, error } = await supabase.from('daily_journals').select('journal_id').eq('user_id', userId).eq('record_date', routine.sourceJournal).maybeSingle();
     if (error) throw error;
     journalId = data?.journal_id ?? null;

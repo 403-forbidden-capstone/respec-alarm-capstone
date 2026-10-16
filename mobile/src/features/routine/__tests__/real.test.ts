@@ -231,6 +231,7 @@ describe('H01 저녁 루틴 · A04 읽기', () => {
     expect((await getRoutine('new', '2026-10-15'))?.title).toBe('새 루틴');
     resetFake();
     expect((await getRoutine('new'))?.sourceJournal).toBeNull();
+    expect((await getRoutine('new', '어제'))?.sourceJournal).toBeNull(); // 날짜가 아닌 값도 일기 없이 연 것으로
     expect(calls).toHaveLength(0); // 일기 없이 열면 읽지 않음
   });
 });
@@ -336,6 +337,13 @@ describe('A04 루틴 저장', () => {
     expect(mockReconcile).toHaveBeenCalledWith({ alarmIds: ['old-1'] });
   });
 
+  it('날짜가 아닌 일기 표시는 일기 없이 저장한 것으로 (DB 날짜 오류를 부르지 않음)', async () => {
+    saveDb();
+    await saveRoutine(draft({ sourceJournal: '어제' }));
+    expect(onlyCalls('daily_journals')).toHaveLength(0);
+    expect(onlyCalls('routines', 'insert')[0].payload).toMatchObject({ source_journal_id: null, origin: 'USER' });
+  });
+
   it('고르지 않은 요일이면 알람이 없고, 알람 맞출 것이 없으면 폰도 안 부름', async () => {
     saveDb();
     await saveRoutine(draft({ sourceJournal: null, days: [] }));
@@ -433,6 +441,7 @@ describe('A03 일기', () => {
   it('없는 일기를 고치면 이유와 함께 거절', async () => {
     reply(() => ({ data: null }));
     await expect(editJournal('2026-10-19', '글')).rejects.toBeInstanceOf(UserError);
+    await expect(editJournal('어제', '글')).rejects.toBeInstanceOf(UserError);
     expect(onlyCalls('daily_journals', 'update')).toHaveLength(0);
   });
 
