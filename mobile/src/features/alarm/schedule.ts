@@ -104,3 +104,9 @@ export function addItems(list: string[], text: string) {
   }
   return next;
 }
+
+// 날짜 + 시간 칸('14:00') → 시각. 시간이 비었거나 형식이 틀리면 목업처럼 14:00
+export function draftAt(date: Date, time: string): Date {
+  const match = /^([01]?\d|2[0-3]):([0-5]\d)$/.exec(time.trim());
+  return addMinutes(startOfDay(date), match ? Number(match[1]) * 60 + Number(match[2]) : 14 * 60);
+}

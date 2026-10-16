@@ -76,3 +76,45 @@ export function judgeLines(usage: number, recent: number, thetaMinutes: number):
     recent > 0 ? `최근 ${WAKE_RECENT_MINUTES}분 동안에도 사용했어요` : `최근 ${WAKE_RECENT_MINUTES}분 동안에도 사용해야 해요`,
   ];
 }
+
+// ---------------------------------------------------------------------------
+// 실데이터 판정 (H08) — 사용 구간(알람 코어 getUsageSpans)과 지금 시각으로 단계를 정함. 순수 함수
+// ---------------------------------------------------------------------------
+
+// 기상 판정 기준 θ — 목업 기본값이자 7장 T_active(10분 중 누적 1분 이상). 고르는 화면이 없어 상수로 둠 (D14는 확정 시각만 정함)
+export const WAKE_THETA_MINUTES = 1;
+
+// 확인 알림에 응답이 없을 때 서버가 놓침(MISSED)으로 보기까지의 여유 — 7장 7.9.2 "+30분". 홈이 "기상 확인 중"을 보여 주는 마지막 때를 정함
+export const WAKE_PROMPT_WINDOW_MINUTES = 30;
+
+export type WakeEvaluation = {
+  // observing = 해제 뒤 10분이 안 끝남, prompt = 조건을 못 채웠거나 사용 정보를 못 읽어 "일어났어요" 확인이 필요, auto = 조건을 채워 자동 확정
+  phase: 'observing' | 'prompt' | 'auto';
+  usage: number; // 누적 사용 · 해제 후 10분 (분, 소수 첫째 자리)
+  recent: number; // 최근 사용 · 뒤쪽 5분
+  reachedAt: Date | null; // auto일 때 누적 사용이 θ를 넘은 시각 (D14) — 기록 시각
+};
+
+// spans가 null이면 사용 정보를 읽을 수 없는 것(권한 없음 · 안드로이드 9 미만) → 바로 확인 알림("일어났어요" 버튼만)
+//   판정은 관찰 10분이 끝나야 함 (D14: 끝난 뒤 θ를 넘은 시각으로 거꾸로 기록). 조건 = 누적 사용 ≥ θ 그리고 뒤쪽 5분 사용 > 0
+export function evaluateWake(input: { dismissedAt: Date; now: Date; spans: readonly UseSpan[] | null; theta?: number }): WakeEvaluation {
+  const theta = input.theta ?? WAKE_THETA_MINUTES;
+  if (!input.spans) return { phase: 'prompt', usage: 0, recent: 0, reachedAt: null };
+  const summary = usageSummary(input.spans);
+  const observeEnd = addMinutes(input.dismissedAt, WAKE_OBSERVE_MINUTES);
+  if (input.now.getTime() < observeEnd.getTime()) return { phase: 'observing', ...summary, reachedAt: null };
+  // 소수 첫째 자리로 줄인 값이 아니라 실제 합으로 비교 — 화면 값과 기록 시각이 어긋나지 않게
+  const met = usedMinutes(input.spans, 0, WAKE_OBSERVE_MINUTES) >= theta && usedMinutes(input.spans, WAKE_OBSERVE_MINUTES - WAKE_RECENT_MINUTES, WAKE_OBSERVE_MINUTES) > 0;
+  if (!met) return { phase: 'prompt', ...summary, reachedAt: null };
+  return { phase: 'auto', ...summary, reachedAt: thetaReachedAt(input.dismissedAt, input.spans, theta) ?? observeEnd };
+}
+
+// 해제 기록이 여러 개일 때(미루고 다시 울린 뒤 끈 경우) 기상 판정에 쓸 해제 시각
+//   확정 전이면 마지막 해제(다시 울린 뒤 끄면 그 시각부터 10분), 확정 뒤면 확정 직전의 해제 (확정 뒤 다른 울림이 있어도 판정이 바뀌지 않게). 해제 기록이 없으면 null
+export function pickDismissedAt(dismissals: readonly Date[], confirmedAt: Date | null): Date | null {
+  const sorted = [...dismissals].sort((x, y) => x.getTime() - y.getTime());
+  if (!sorted.length) return null;
+  const pool = confirmedAt ? sorted.filter((d) => d.getTime() <= confirmedAt.getTime()) : sorted;
+  const list = pool.length ? pool : sorted;
+  return list[list.length - 1];
+}
