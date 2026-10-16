@@ -4,16 +4,24 @@ import { StyleSheet, View } from 'react-native';
 
 import { Button, Card, LoadError, Loading, Screen, Segmented, Text, Timeline, toast, TopBar, type TimelineItem } from '@/components/ui';
 import { getDay, getMonth, getWeek, recordToday, weekEmptyText } from '@/features/records/api';
-import { dateOf, daysInMonth, shiftMonth, weekStart } from '@/features/records/calendar';
+import { dayRelative, weekStart } from '@/features/records/calendar';
+import { CalendarHeader } from '@/features/records/components/CalendarHeader';
 import { MonthCalendar } from '@/features/records/components/MonthCalendar';
 import { ScoreBars } from '@/features/records/components/ScoreBars';
 import { WeekStrip } from '@/features/records/components/WeekStrip';
 import { useLoadOn } from '@/features/records/hooks/useLoadOn';
-import type { MonthDay, TimelineRow, WeekSummary } from '@/features/records/types';
-import { addDays, dateParts, dayKey, formatTime, isSameDay, timeParts } from '@/lib/format';
-import { useLoad } from '@/lib/useLoad';
-
-type RecordView = 'month' | 'week' | 'day';
+import {
+  canMoveNextDay,
+  goToday,
+  initialNav,
+  moveDay,
+  moveMonth,
+  moveWeek,
+  openDay,
+  selectView,
+} from '@/features/records/navigation';
+import type { TimelineRow, WeekSummary } from '@/features/records/types';
+import { dateParts, dayKey, formatDate, formatTime, isSameDay, timeParts } from '@/lib/format';
 
 const VIEWS = [
   ['month', '월간'],
@@ -25,40 +33,26 @@ const toItem = (row: TimelineRow): TimelineItem => ({ time: formatTime(row.at), 
 
 type Register = (reload: (() => Promise<unknown>) | null) => void;
 
+// 달력 · 주간 줄의 날짜 · 주간 막대를 눌렀을 때 — MonthDay · WeekDay · WeekBar가 모두 맞음
+type PressDay = (d: { date: Date; isFuture: boolean }) => void;
+
 // 04 기록 탭 · R02 나의 기록 — 월간 달력 · 주간 기상 흐름 · 일간(설정한 값과 실제로 일어난 일)
-// 화살표로 앞뒤 달 · 주를 넘기고, 달력에서 오늘을 누르면 일간으로. 일정 추가 · 상세는 src/app/schedule/
-// 보고 있는 날(anchor)을 월간 · 주간이 같이 씀 — 칸을 바꿔도 보던 기간이 그대로. 일간은 아직 오늘만 열림(D48)
+// 화살표로 앞뒤 달 · 주 · 날을 넘기고, 달력 · 주간 줄의 날짜 · 주간 막대를 누르면 그 날의 일간으로 (D48). 일정 추가 · 상세는 src/app/schedule/
+// 보던 달 · 주(period)와 일간으로 보는 날(day)은 따로 — 일간에서 날을 넘겨도 월간 · 주간은 보던 그대로 (규칙은 features/records/navigation.ts)
 export default function RecordsScreen() {
-  const [view, setView] = useState<RecordView>('week'); // 목업 첫 화면은 주간
-  const [anchor, setAnchor] = useState(() => recordToday());
+  const today = recordToday();
+  const [nav, setNav] = useState(() => initialNav(today));
   // 당겨서 새로고침 — 지금 보이는 구역이 자기 다시 읽기를 맡겨 둠
   const reloadRef = useRef<(() => Promise<unknown>) | null>(null);
   const register = useCallback<Register>((reload) => {
     reloadRef.current = reload;
   }, []);
 
-  // 앞뒤 달 — 같은 날짜로, 그 달에 없으면 말일로 (31일 → 30일)
-  function moveMonth(delta: number) {
-    setAnchor((a) => {
-      const { year, month, day } = dateParts(a);
-      const next = shiftMonth(year, month, delta);
-      return dateOf(next.year, next.month, Math.min(day, daysInMonth(next.year, next.month)));
-    });
-  }
-
-  function openDay(date: Date) {
-    setAnchor(date);
-    setView('day');
-  }
-
-  // 목업은 오늘만 일간 기록이 있음 — 실데이터(#41)가 붙으면 기록 있는 날 모두 openDay로 (D48)
-  function pressDay(d: MonthDay) {
-    const { month } = dateParts(d.date);
-    if (d.isToday) openDay(d.date);
-    else if (d.isFuture) toast('아직 오지 않은 날이에요');
-    else if (d.mark === 'none') toast(`${month}월 ${d.day}일에는 남은 기록이 없어요`);
-    else toast(`${month}월 ${d.day}일 기록은 아직 열 수 없어요`);
-  }
+  // 월간 · 주간의 날짜 · 주간 막대 → 그 날의 일간. 아직 오지 않은 날은 남은 기록이 없어 열지 않음
+  const pressDay: PressDay = (d) => {
+    if (d.isFuture) toast('아직 오지 않은 날이에요');
+    else setNav((n) => openDay(n, d.date));
+  };
 
   return (
     <Screen onRefresh={() => reloadRef.current?.()}>
@@ -69,26 +63,35 @@ export default function RecordsScreen() {
       <Text variant="lead" style={styles.lead}>
         실행 흐름과 하루의 변화를 확인해요.
       </Text>
-      <Segmented options={VIEWS} value={view} onChange={setView} />
+      <Segmented options={VIEWS} value={nav.view} onChange={(view) => setNav((n) => selectView(n, view))} />
 
       <View style={styles.body}>
-        {view === 'month' ? (
+        {nav.view === 'month' ? (
           <MonthSection
-            anchor={anchor}
-            onPrev={() => moveMonth(-1)}
-            onNext={() => moveMonth(1)}
+            period={nav.period}
+            onPrev={() => setNav((n) => moveMonth(n, -1))}
+            onNext={() => setNav((n) => moveMonth(n, 1))}
             onPressDay={pressDay}
             register={register}
           />
-        ) : view === 'week' ? (
+        ) : nav.view === 'week' ? (
           <WeekSection
-            anchor={anchor}
-            onPrev={() => setAnchor((a) => addDays(a, -7))}
-            onNext={() => setAnchor((a) => addDays(a, 7))}
+            period={nav.period}
+            onPrev={() => setNav((n) => moveWeek(n, -1))}
+            onNext={() => setNav((n) => moveWeek(n, 1))}
+            onPressDay={pressDay}
             register={register}
           />
         ) : (
-          <DaySection anchor={anchor} register={register} />
+          <DaySection
+            day={nav.day}
+            today={today}
+            canNext={canMoveNextDay(nav, today)}
+            onPrev={() => setNav((n) => moveDay(n, -1, today))}
+            onNext={() => setNav((n) => moveDay(n, 1, today))}
+            onToday={() => setNav((n) => goToday(n, today))}
+            register={register}
+          />
         )}
       </View>
     </Screen>
@@ -104,16 +107,16 @@ function useRegister(register: Register, reload: () => Promise<unknown>) {
 }
 
 type MonthProps = {
-  anchor: Date;
+  period: Date;
   onPrev: () => void;
   onNext: () => void;
-  onPressDay: (d: MonthDay) => void;
+  onPressDay: PressDay;
   register: Register;
 };
 
 // 월간 — 달력 + 오늘 기록 카드(오늘이 든 달일 때만). 달이 바뀌어도 앞 달력을 둔 채 새로 읽음
-function MonthSection({ anchor, onPrev, onNext, onPressDay, register }: MonthProps) {
-  const { year, month } = dateParts(anchor);
+function MonthSection({ period, onPrev, onNext, onPressDay, register }: MonthProps) {
+  const { year, month } = dateParts(period);
   const { data, error, reload } = useLoadOn(() => getMonth(year, month), `${year}-${month}`);
   useRegister(register, reload);
   if (!data) return error ? <LoadError onRetry={reload} /> : <Loading />;
@@ -148,17 +151,19 @@ function MonthSection({ anchor, onPrev, onNext, onPressDay, register }: MonthPro
   );
 }
 
+type WeekProps = { period: Date; onPrev: () => void; onNext: () => void; onPressDay: PressDay; register: Register };
+
 // 주간 — 날짜 줄 + 평균 기상 · 목표 기상률 · 날마다 실행 점수 · AI 코칭. 주가 바뀌어도 앞 날짜 줄을 둔 채 새로 읽음
-function WeekSection({ anchor, onPrev, onNext, register }: { anchor: Date; onPrev: () => void; onNext: () => void; register: Register }) {
-  const { data, error, reload } = useLoadOn(() => getWeek(anchor), dayKey(weekStart(anchor)));
+function WeekSection({ period, onPrev, onNext, onPressDay, register }: WeekProps) {
+  const { data, error, reload } = useLoadOn(() => getWeek(period), dayKey(weekStart(period)));
   useRegister(register, reload);
   if (!data) return error ? <LoadError onRetry={reload} /> : <Loading />;
 
   return (
     <>
-      <WeekStrip record={data} onPrev={onPrev} onNext={onNext} />
+      <WeekStrip record={data} onPrev={onPrev} onNext={onNext} onPressDay={onPressDay} />
       {data.summary ? (
-        <WeekSummaryCards summary={data.summary} />
+        <WeekSummaryCards summary={data.summary} relative={data.relative} onPressDay={onPressDay} />
       ) : (
         <Card>
           <Text variant="body" tone="sub">
@@ -170,7 +175,7 @@ function WeekSection({ anchor, onPrev, onNext, register }: { anchor: Date; onPre
   );
 }
 
-function WeekSummaryCards({ summary: s }: { summary: WeekSummary }) {
+function WeekSummaryCards({ summary: s, relative, onPressDay }: { summary: WeekSummary; relative: string; onPressDay: PressDay }) {
   return (
     <>
       <View style={styles.stats}>
@@ -181,7 +186,7 @@ function WeekSummaryCards({ summary: s }: { summary: WeekSummary }) {
         <Text variant="label" style={styles.label}>
           주간 실행 흐름
         </Text>
-        <ScoreBars bars={s.bars} />
+        <ScoreBars bars={s.bars} onPressDay={onPressDay} />
         {s.todayPending ? (
           <Text variant="caption" style={styles.note}>
             오늘 기록은 기상 확인 뒤에 더해져요.
@@ -190,7 +195,7 @@ function WeekSummaryCards({ summary: s }: { summary: WeekSummary }) {
       </Card>
       <Card>
         <Text variant="label" style={styles.label}>
-          이번 주 AI 코칭
+          {relative} AI 코칭
         </Text>
         <Text variant="reading">{s.coaching}</Text>
         {/* 일기(A03)의 루틴 제안과 같은 화면(A04) — 오늘 기록을 바탕으로 만든 초안 */}
@@ -220,24 +225,42 @@ function Stat({ label, value, sub }: { label: string; value: string; sub: string
   );
 }
 
-// 일간 — 그날 설정한 알람 · 실제로 일어난 일 (마지막 줄이 지금). 목업은 오늘만 있어서 다른 기간을 보다 와도 오늘을 보여 줌
-function DaySection({ anchor, register }: { anchor: Date; register: Register }) {
-  const date = recordToday();
-  const { data, error, reload } = useLoad(() => getDay(date));
+type DayProps = {
+  day: Date;
+  today: Date;
+  canNext: boolean;
+  onPrev: () => void;
+  onNext: () => void;
+  onToday: () => void;
+  register: Register;
+};
+
+// 일간 — 그날 설정한 알람 · 실제로 일어난 일 (오늘은 마지막 줄이 지금) · 그날 일기 열기. 이전 · 다음 날, 오늘로 돌아가기 (D48)
+// 날이 바뀌어도 앞 기록을 둔 채 새로 읽음
+function DaySection({ day, today, canNext, onPrev, onNext, onToday, register }: DayProps) {
+  const { data, error, reload } = useLoadOn(() => getDay(day), dayKey(day));
   useRegister(register, reload);
   if (!data) return error ? <LoadError onRetry={reload} /> : <Loading />;
-  const { month, day } = dateParts(data.date);
+  const { month, day: d } = dateParts(data.date);
 
   return (
     <>
-      {isSameDay(anchor, date) ? null : (
-        <Text variant="label" tone="sub" style={styles.dayNote}>
-          다른 날 기록은 아직 열 수 없어요. 오늘 기록을 보여 드려요.
-        </Text>
+      <CalendarHeader
+        title={formatDate(data.date)}
+        sub={dayRelative(data.date, today)}
+        unit="날"
+        onPrev={onPrev}
+        onNext={onNext}
+        nextDisabled={!canNext}
+      />
+      {isSameDay(day, today) ? null : (
+        <View style={styles.todayRow}>
+          <Button small variant="ghost" label="오늘" onPress={onToday} />
+        </View>
       )}
       <Card>
         <Text variant="label" style={styles.label}>
-          {month}월 {day}일 · 설정한 값
+          {month}월 {d}일 · 설정한 값
         </Text>
         {data.planned.length ? (
           <Timeline items={data.planned.map(toItem)} />
@@ -252,13 +275,34 @@ function DaySection({ anchor, register }: { anchor: Date; register: Register }) 
           실제로 일어난 일
         </Text>
         {data.actual.length ? (
-          <Timeline items={data.actual.map(toItem)} highlightLast />
+          <Timeline items={data.actual.map(toItem)} highlightLast={data.isToday} />
         ) : (
           <Text variant="body" tone="sub">
-            아직 기록이 없어요.
+            {data.isToday ? '아직 기록이 없어요.' : '이 날은 남은 기록이 없어요.'}
           </Text>
         )}
       </Card>
+      {/* 그날 일기(A03) — 일기가 없는 날도 열려서 이유를 보여 줌 */}
+      {data.isFuture ? null : (
+        <Card
+          onPress={() => router.push({ pathname: '/journal/[date]', params: { date: dayKey(data.date) } })}
+          accessibilityLabel={`${month}월 ${d}일 하루 기록 열기`}
+        >
+          <View style={styles.between}>
+            <View style={styles.grow}>
+              <Text variant="small">
+                {month}월 {d}일 하루 기록
+              </Text>
+              <Text variant="bodyStrong" style={styles.cardMain}>
+                AI 일기 {data.journalWritten ? '작성됨' : data.isToday ? '아직 없음' : '없음'}
+              </Text>
+            </View>
+            <Text variant="big" tone="sub" weight={400}>
+              →
+            </Text>
+          </View>
+        </Card>
+      )}
     </>
   );
 }
@@ -276,5 +320,5 @@ const styles = StyleSheet.create({
   statValue: { marginVertical: 4 },
   note: { marginTop: 10 },
   coachAction: { marginTop: 12 },
-  dayNote: { marginBottom: 10, marginHorizontal: 4 },
+  todayRow: { marginBottom: 12 },
 });

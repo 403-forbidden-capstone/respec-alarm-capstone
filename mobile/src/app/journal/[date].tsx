@@ -4,17 +4,20 @@ import { StyleSheet, TextInput, View } from 'react-native';
 
 import { Button, Card, Chip, confirm, LoadError, Loading, Screen, Text, Timeline, toast, TopBar } from '@/components/ui';
 import { TextLink } from '@/features/alarm/components/TextLink';
+import { parseDayParam } from '@/features/alarm/schedule';
+import { recordToday } from '@/features/records/api';
 import { declineRoutineSuggestion, editJournal, getJournal } from '@/features/routine/api';
 import type { Journal } from '@/features/routine/types';
-import { dateParts, formatTime } from '@/lib/format';
+import { dateParts, formatTime, isSameDay } from '@/lib/format';
 import { backOrHome } from '@/lib/nav';
 import { useAction } from '@/lib/useAction';
 import { useLeaveGuard } from '@/lib/useLeaveGuard';
 import { useLoad } from '@/lib/useLoad';
 import { colors, typeScale } from '@/theme';
 
-// A03 하루 기록 · 일기 — 기록된 사실만 골라 AI가 쓴 일기 · 오늘의 사실 · 회고 코칭 · 루틴 제안
+// A03 하루 기록 · 일기 — 기록된 사실만 골라 AI가 쓴 일기 · 그날의 사실 · 회고 코칭 · 루틴 제안
 // 일기는 AI 대화(A02)를 마치면 생기고, 다시 마치면 다시 씀(고친 글 · 루틴 제안 응답은 그대로). AI 대기라 목업 문장틀로 씀
+// 날짜는 주소(/journal/2025-05-21)로 받음 — 기록(R02) 일간에서 그날 일기를 열 때 (D48)
 export default function JournalScreen() {
   const { date } = useLocalSearchParams<{ date: string }>();
   const { data, error, reload } = useLoad(() => getJournal(date));
@@ -28,26 +31,48 @@ export default function JournalScreen() {
       </Screen>
     );
   }
-  if (data === null) {
-    return (
-      <Screen>
-        {top}
-        <Text variant="title" style={styles.title}>
-          하루 기록
-        </Text>
-        <Card>
-          <Text variant="body" tone="sub">
-            자기 전 AI 대화를 마치면 오늘 기록으로 일기를 만들어요.
-          </Text>
-          <View style={styles.stack}>
-            {/* 탭 루트로 돌아가 AI 탭을 엶 — 일기 화면은 기록에서 빠짐 (목업 A.tab, wake의 dismissTo와 같은 방식) */}
-            <Button label="AI 대화 하러 가기" onPress={() => router.dismissTo('/ai')} />
-          </View>
-        </Card>
-      </Screen>
-    );
-  }
+  if (data === null) return <EmptyJournal date={date} top={top} />;
   return <JournalView journal={data} reload={reload} top={top} />;
+}
+
+// 일기가 없는 날 — 오늘은 AI 대화를 마치면 생기니 거기로 가는 길, 지난 날은 이유만 (그날 대화는 이미 지나감)
+function EmptyJournal({ date, top }: { date: string | undefined; top: ReactNode }) {
+  const day = parseDayParam(date);
+  const today = recordToday();
+  const parts = day && dateParts(day);
+
+  return (
+    <Screen>
+      {top}
+      <Text variant="title" style={styles.title}>
+        {parts ? `${parts.month}월 ${parts.day}일 하루 기록` : '하루 기록'}
+      </Text>
+      <Card>
+        {day && isSameDay(day, today) ? (
+          <>
+            <Text variant="body" tone="sub">
+              자기 전 AI 대화를 마치면 오늘 기록으로 일기를 만들어요.
+            </Text>
+            <View style={styles.stack}>
+              {/* 탭 루트로 돌아가 AI 탭을 엶 — 일기 화면은 기록에서 빠짐 (목업 A.tab, wake의 dismissTo와 같은 방식) */}
+              <Button label="AI 대화 하러 가기" onPress={() => router.dismissTo('/ai')} />
+            </View>
+          </>
+        ) : (
+          <>
+            <Text variant="body" tone="sub">
+              {!day ? '날짜를 알 수 없어요.' : day.getTime() > today.getTime() ? '아직 오지 않은 날이에요.' : '이 날은 일기가 없어요.'}
+            </Text>
+            {day && day.getTime() < today.getTime() ? (
+              <Text variant="small" tone="sub" style={styles.gap}>
+                일기는 그날 자기 전에 AI 대화를 마치면 만들어져요.
+              </Text>
+            ) : null}
+          </>
+        )}
+      </Card>
+    </Screen>
+  );
 }
 
 function JournalView({ journal: j, reload, top }: { journal: Journal; reload: () => Promise<boolean>; top: ReactNode }) {
@@ -56,6 +81,7 @@ function JournalView({ journal: j, reload, top }: { journal: Journal; reload: ()
   const { month, day } = dateParts(j.date);
   useLeaveGuard(editing != null && editing !== j.text); // 고친 글이 저장된 글과 다를 때만 나갈 때 물음
   const created = j.suggestion.status === 'APPLIED' ? j.routineId : null; // 만든 루틴
+  const isToday = isSameDay(j.date, recordToday());
 
   const save = () =>
     run(async () => {
@@ -128,7 +154,7 @@ function JournalView({ journal: j, reload, top }: { journal: Journal; reload: ()
 
       <Card>
         <Text variant="label" tone="sub" style={styles.label}>
-          오늘의 사실
+          {isToday ? '오늘' : '그날'}의 사실
         </Text>
         {j.facts.length ? (
           <>

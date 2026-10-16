@@ -51,6 +51,7 @@ export const SECTIONS: ScreenSection[] = [
     rows: [
       { id: 'A02', name: 'AI 대화', href: '/ai' },
       { id: 'A03', name: '하루 기록 · 일기', href: { pathname: '/journal/[date]', params: { date: '2025-05-22' } } },
+      { id: 'A03', name: '하루 기록 · 일기 · 지난 날 (5월 21일)', href: { pathname: '/journal/[date]', params: { date: '2025-05-21' } } },
       {
         id: 'A04',
         name: '루틴 편집 · 회의 전날 준비',
