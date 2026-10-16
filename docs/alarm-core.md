@@ -117,11 +117,11 @@ type RingPackage = {
 
 - 앱이 켜져 있으면 `addAlarmEventListener`로 새 기록을 바로 받음. 꺼져 있을 때 쌓인 것은 `getPendingEvents()`로 읽음 (오래된 순)
 - 올리기에 성공한 것만 `markEventsUploaded(clientEventIds)`로 지움
-- **폰이 스스로 올리는 길(WorkManager + 네트워크 조건)은 아직 없음**: 로그인 토큰이 네이티브에 있어야 하는데 지금은 JS(Supabase 세션)에만 있음. 앱 연결 PR에서 방법을 정함 (아래 "앞으로 더할 것")
+- **폰이 스스로 올리는 길(WorkManager + 네트워크 조건)은 아직 없음**: 로그인 토큰이 네이티브에 있어야 하는데 지금은 JS(Supabase 세션)에만 있음. 앱 연결(P6)에서는 앱이 올림 — 앱이 앞에 올 때 · 기상 확인 화면에 들어올 때 `lib/alarmSync`의 `uploadEvents()`가 `alarm_events`로 올리고(`client_event_id` 중복 무시) 올린 것만 `markEventsUploaded`로 지움. 로그아웃 때는 올려 본 뒤 남은 기록을 버림 (아래 "앞으로 더할 것")
 
 ## 해제 뒤 앱 열기 (#79)
 
-WAKE를 해제하면(알람 화면 · 알림 버튼 모두) 앱을 `respecalarm://wake?alarmId=<alarmId>`로 엶 → 기상 확인(H08) · 아침 루틴 · 평가가 받음. 잠겨 있으면 잠금을 푼 뒤 열림. 알림의 "해제" 버튼은 보안 잠금이 걸려 있으면 잠금을 푼 뒤에 동작함 (잠금화면 위 알람 화면의 "해제"는 잠근 채로 됨). 알림의 "해제"는 안드로이드 12부터 알림 버튼이 리시버를 거쳐 화면을 열 수 없어 화면 없는 중계 화면(`AlarmActionActivity`)이 맡음. 앱의 `/wake` 화면이 `alarmId` 파라미터를 받는 것은 앱 연결 PR에서.
+WAKE를 해제하면(알람 화면 · 알림 버튼 모두) 앱을 `respecalarm://wake?alarmId=<alarmId>`로 엶 → 기상 확인(H08) · 아침 루틴 · 평가가 받음. 잠겨 있으면 잠금을 푼 뒤 열림. 알림의 "해제" 버튼은 보안 잠금이 걸려 있으면 잠금을 푼 뒤에 동작함 (잠금화면 위 알람 화면의 "해제"는 잠근 채로 됨). 알림의 "해제"는 안드로이드 12부터 알림 버튼이 리시버를 거쳐 화면을 열 수 없어 화면 없는 중계 화면(`AlarmActionActivity`)이 맡음. 앱의 `/wake` 화면은 이 `alarmId`(앱 안에서 오는 길은 `alarm`)를 둘 다 읽음 (`features/alarm/wake.ts` `pickAlarmId`).
 
 ## 기상 확인 — 사용 정보 읽기 (#35 · D14)
 
@@ -145,9 +145,9 @@ WAKE를 해제하면(알람 화면 · 알림 버튼 모두) 앱을 `respecalarm:
 
 | 언제 | 무엇 | 바뀌는 점 |
 |---|---|---|
-| 앱 연결 (P6) | 서버 알람과 폰 예약을 대조 | 앱을 켤 때 `alarms`(켜짐 · 앞으로)와 `list()`를 `alarm_id` + `scheduled_at` + `intensity`로 비교. 빠진 건 `schedule`, 없는 건 `cancel`, 시각 · 강도가 다르면 다시 `schedule`(친구의 ±5분 · 제안 적용 · 설정 수정 뒤 푸시를 못 받았을 때 대비). 지난 시각은 `skipped_past`로 건너뛰고, `deferred`(울리거나 미룬 중)는 해제 뒤 다음 앱 열림 때 다시 넘김 |
-| 앱 연결 (P6) | 울림 기록 올리기 | 앱이 켜지면 `getPendingEvents()` → `alarm_events`(`clientEventId`로 중복 방지) → `markEventsUploaded`. 끄거나 재부팅한 동안의 기록도 이 길로 감. 해제 · 놓침을 바로 올리는 폰 스스로의 길(WorkManager)은 토큰 문제로 따로 정함 |
-| 로그아웃 | 정리 | `cancelAll()` + 폰에 쌓인 기록 지우기 (Q6) |
+| 앱 연결 (P6, `lib/alarmSync` `reconcile` · `applyCommit`) | 서버 알람과 폰 예약을 대조 | 앱을 켤 때 `alarms`(켜짐 · 앞으로)와 `list()`를 `alarm_id` + `scheduled_at` + `intensity`로 비교. 빠진 건 `schedule`, 없는 건 `cancel`, 시각 · 강도가 다르면 다시 `schedule`(친구의 ±5분 · 제안 적용 · 설정 수정 뒤 푸시를 못 받았을 때 대비). 지난 시각은 `skipped_past`로 건너뛰고, `deferred`(울리거나 미룬 중)는 해제 뒤 다음 앱 열림 때 다시 넘김 |
+| 앱 연결 (P6, `lib/alarmSync` `uploadEvents`) | 울림 기록 올리기 | 앱이 켜지면 `getPendingEvents()` → `alarm_events`(`clientEventId`로 중복 방지) → `markEventsUploaded`. 끄거나 재부팅한 동안의 기록도 이 길로 감. 해제 · 놓침을 바로 올리는 폰 스스로의 길(WorkManager)은 토큰 문제로 따로 정함 |
+| 로그아웃 (P6, `lib/session` `signOutAndCleanup`) | 정리 | 기록 올려 보기 → `cancelAll()` → 폰에 남은 기록 지우기 (Q6) → 푸시 토큰 지우기 자리 → 실시간 구독 끊기 → 로그아웃 |
 | D1 | 배경음 · 말소리 · 진동 축별 고르기 | `vibration` 칸을 읽고 진동을 서비스에서 직접 (지금은 알림 채널 진동 하나) |
 | D3 | 미루기 5 · 10 · 15분 고르기 · 횟수 한도 | `snoozeMinutesOptions` · `snoozeLimit`을 읽고 한도면 단축 준비 안내(`departAt`) |
 | D2 | 기상 확인 무응답 시 다시 울림 | 지금은 안 만듦 |

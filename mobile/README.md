@@ -29,12 +29,12 @@ PR 전에 `npm run typecheck` · `npm run lint` · `npm test`를 꼭 로컬에�
 | `src/features/records/` | ④ 일정 · 하루 기록 |
 | `src/features/routine/` | ⑥ AI 일기 · 루틴 |
 | `src/components/ui/` | 여러 화면에서 같이 쓰는 UI (글자 · 카드 · 버튼 · 칩 · 스위치 · 탭 막대 등). 견본은 `/dev/ui` |
-| `src/lib/` | Supabase 클라이언트 같은 공용 코드 |
+| `src/lib/` | Supabase 클라이언트 · 서버 함수 호출(`edge`) · 폰 예약 맞추기(`alarmSync`) · 실시간(`realtime`) 같은 공용 코드 |
 | `src/mocks/` | 목업용 가짜 데이터 |
 | `src/theme/` | 색 · 간격 · 글자 크기 (목업 `mockup.html`의 :root 값). 글꼴은 Pretendard(`assets/fonts`) |
 
 기능 폴더 안에는 `api.ts`(데이터) · `types.ts` · `components/` · `hooks/`가 있습니다.
-`api.ts`는 지금 목업 데이터를 돌려주고, Supabase가 붙으면 이 파일만 바꿉니다.
+`api.ts`는 목업 데이터를 돌려주고, 실데이터는 옆 파일 `real.ts`(쿼리) · `map.ts`(DB 행 → 화면 타입)에 있습니다. 함수 맨 앞의 `if (!isMock()) return real.함수()`가 둘을 나눕니다 (`docs/screen-data-map.md` "실데이터 연결 규칙").
 
 ## 배포
 
@@ -87,3 +87,9 @@ cp .env.example .env
 
 - 값을 받는 곳과 넣는 곳은 루트 README의 "관리자 설정 · 비밀값" 표에 있음. `.env`는 커밋되지 않음
 - `EXPO_PUBLIC_` 값은 빌드할 때 번들에 박힘. 로컬은 `.env`, 웹 미리보기는 Cloudflare 변수, APK는 EAS 환경 변수에 같은 값을 넣음
+
+### 데이터 모드 · 개발 메뉴 로그인
+
+- 폰 출시용 빌드(`__DEV__` false)는 실데이터만 쓰고 로그인이 필수입니다. Supabase 값이 없으면 "앱 설정이 빠져 있어요" 화면이 뜹니다. 웹 · 폰 개발용은 가짜 데이터로 바꿀 수 있고, 웹은 기본이 가짜 데이터이며 주소 `?mode=real`이면 실데이터입니다 (규칙 표: `src/lib/modePolicy.ts`)
+- 시드 계정으로 실데이터를 시험하려면 `/dev/screens`(웹 · 폰 개발용)의 "개발용 이메일 로그인"에 `demo-me@example.com`과 시드 비밀번호(`SEED_PASSWORD`)를 넣습니다. 비밀번호는 코드에 없고 입력 칸에만 넣습니다. 로그아웃은 폰에 걸린 알람 · 쌓인 기록까지 정리합니다
+- 서버 함수와 앱이 같이 쓰는 계산 파일(`supabase/functions/_shared/`)은 경로 별칭 `@shared/*`로 가져옵니다 (`tsconfig.json` paths · `metro.config.js` watchFolders)

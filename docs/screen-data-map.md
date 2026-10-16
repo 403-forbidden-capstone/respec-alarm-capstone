@@ -14,6 +14,43 @@
 | **Edge** | Edge Function — 계산, 외부 API(카카오 · Gemini · 푸시), 비밀 키가 필요할 때 |
 | **폰** | 알람 코어(`@capstone/alarm-core`) · 알림 — 예약 · 울림은 폰에서만 |
 
+## 실데이터 연결 규칙 (P6, #166)
+
+화면은 그대로 두고 `features/*/api.ts` 안에서만 가짜 데이터와 실데이터를 나눔. 아래 화면별 표(읽고 쓰는 곳)가 실데이터 구현의 명세.
+
+**스위치** (`lib/modePolicy.ts`가 표로 정하고 `lib/mode.ts`가 읽음, `lib/flags` `REAL_DATA_READY = true`)
+
+| 빌드 | 모드 | 로그인 | 그 밖 |
+|---|---|---|---|
+| 폰 출시용 (`__DEV__` false) | 실데이터 고정, 가짜로 못 바꿈 | 필수 | Supabase 값이 없으면 가짜로 돌지 않고 "앱 설정이 빠져 있어요" 화면 |
+| 폰 개발용 (`__DEV__` true) | 바꿀 수 있음, 기본 실데이터 | 실데이터 모드에서만 | 값이 없으면 가짜만 |
+| 웹 | 바꿀 수 있음, **기본 가짜**, 주소 `?mode=real`이면 실데이터 | 실데이터 모드에서만 | 값이 없으면 가짜만 |
+
+`/dev/screens` 맨 위 · 설정 "개발" 절의 토글은 모드를 바꿀 수 있는 빌드에서만 보임. 실데이터 모드에서 로그인 전이면 `/dev/screens`에 시드 계정용 이메일 로그인(웹 · 폰 개발용)이 있음.
+
+**읽기** — 함수 맨 앞에서 `if (!isMock()) return real.<함수>(...)`. 쿼리는 `features/<x>/real.ts`에 얇게, DB 행 → 화면 타입(`types.ts`) 변환은 `map.ts`의 순수 함수로 빼서 jest로 시험 (본보기: `features/alarm`의 `getNextAlarm`). "내 것"은 `lib/user`의 `requireUserId()`로 `user_id`를 한 번 더 좁힘(RLS는 친구에게 받은 알람도 보여 줌). DB · 네트워크 원문은 화면에 안 보이고, 이유를 보여 줄 때만 `UserError`.
+
+**쓰기 경로** (위 화면별 표의 DB · Edge 표기와 같음)
+
+| 무엇 | 길 | 폰 |
+|---|---|---|
+| 약속 알람 만들기 · 시각 바꾸기 (H03 · H05 · S01) | `callEdge('alarm-commit')` (`lib/edge`) | 응답을 `applyCommit`: `canceled_alarm_ids` → cancel, `ring_packages` → scheduleAll |
+| 켜기 · 끄기 · 강도 · G04 ±5분 · 루틴 단계 | DB 직접 | `reconcile({ alarmIds })`로 그 알람만 |
+| 울림 기록 (해제 · 미루기 · 원탭) | 폰이 쌓아 둠 → `uploadEvents`가 `alarm_events`에 upsert (`client_event_id`가 같으면 무시) | 올린 것만 폰에서 지움 |
+| 원탭 출발 · 도착 | 위 기록을 올린 뒤 `onEventsUploaded` 훅이 `departed_at` · `arrived_at` · 지각을 씀 | — |
+| 고친 값 (F5 · F9) | 저장이 성공한 뒤 `user_edit_logs` (`alarm-commit`의 `edits` 또는 DB insert) | — |
+
+**맞추는 시점** (`lib/alarmSync`, 실데이터 모드 + 로그인 상태에서만)
+
+- 로그인 직후 · 앱이 앞에 올 때(AppState) — 기록 올리기 → `reconcile()` (루트 레이아웃의 `useAlarmSync`)
+- 기상 확인(H08)에 들어올 때 — `uploadEvents()` (해제 기록이 기상 확인보다 먼저 들어가게)
+- 저장 직후 — `applyCommit(응답)`
+- 로그아웃 — `signOutAndCleanup()` (`lib/session`): 기록 올려 보기 → `AlarmCore.cancelAll()` → 남은 기록 버림 → 푸시 토큰 지우기 자리 → 실시간 구독 끊기 → `signOut`. 데이터 모드 저장값은 그대로
+
+`reconcile`은 내 켜진 알람(지금 이후)을 읽어 서버와 같은 조립(`_shared/ring-package.ts`, 앱은 경로 별칭 `@shared/*`)으로 꾸러미를 만들고 폰 `list()`와 `alarmId` + 시각 + 강도로 비교함. 폰에 없으면 걸고(앞으로 14일 안만), 다르면 다시 걸고, 서버에 없으면 지움. 지난 시각은 건너뛰고, 첫 울림이 이미 지난 예약(울리는 중 · 미룸 · 다시 울림 대기)은 안 지움. `deferred`(울리거나 미룬 중이라 새 꾸러미를 못 받음)는 다음 맞추기에서 다시.
+
+**서버 함수** — 앱은 `callEdge<T>(이름, 본문)`으로만 부름. 오류는 `EdgeError`(= `UserError`)로 오고 문구는 서버 `code`로 고름 (표: `lib/edge.ts`). **그룹 기상 신호** — `subscribeGroupWake(groupId, 콜백)` (`lib/realtime`), 신호의 `date`를 `get_group_wake_status`의 `p_date`로 넘김.
+
 ## 화면 목록
 
 | 번호 | 화면 | 경로 | 이슈 |
