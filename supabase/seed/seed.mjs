@@ -4,11 +4,13 @@
 //   npm run seed:reset -- --yes        데모 계정 4개를 지움 (그 계정의 모든 데이터가 같이 지워짐)
 // SUPABASE_URL · SUPABASE_SERVICE_ROLE_KEY · SEED_PASSWORD는 이 폴더의 .env(깃에 안 올라감) 또는 환경 변수에서 읽음.
 // 서비스 키는 모든 RLS를 건너뛰는 키라서, 어느 프로젝트에 넣는지 출력하고 --yes가 있을 때만 실행함
+// .env에 SEED_PROJECT_REF(주소의 앞부분 ref)를 두면 SUPABASE_URL이 그 프로젝트가 아닐 때 --yes가 있어도 멈춤 (project-ref.mjs)
 import { readFileSync, existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { DEMO_USERS, buildDataset, demoEmails, todayInKst } from './data.mjs';
+import { checkProjectRef } from './project-ref.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const BATCH = 500;
@@ -45,7 +47,6 @@ const need = (name) => {
   return v;
 };
 
-const projectRef = (url) => new URL(url).hostname.split('.')[0];
 const fmtCounts = (counts) => Object.entries(counts).map(([k, v]) => `  ${k.padEnd(26)} ${v}`).join('\n');
 
 // ---- 넣기 · 지우기 ----
@@ -154,7 +155,9 @@ async function main() {
   loadEnv();
   const url = need('SUPABASE_URL');
   const key = need('SUPABASE_SERVICE_ROLE_KEY');
-  console.log(`프로젝트: ${projectRef(url)}  (${url})`);
+  const { ref, checked } = checkProjectRef(url, process.env.SEED_PROJECT_REF); // 다른 프로젝트면 여기서 멈춤
+  console.log(`프로젝트: ${ref}  (${url})`);
+  console.log(checked ? '확인: SEED_PROJECT_REF와 같음' : '확인 안 함: .env에 SEED_PROJECT_REF를 두면 이 프로젝트가 맞는지 확인해요');
   console.log(`작업: ${args.command === 'demo' ? `데모 시드 넣기 (${today} 기준, 기존 데모 계정은 지우고 다시)` : '데모 계정 지우기'}`);
   if (!args.yes) {
     console.log('\n서비스 키로 이 프로젝트를 바꿔요. 맞으면 --yes를 붙여 다시 실행해 주세요 (미리 보기만: --dry-run)');
