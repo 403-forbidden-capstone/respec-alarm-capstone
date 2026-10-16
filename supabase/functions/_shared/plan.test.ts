@@ -231,3 +231,83 @@ test('그날 첫 일정: 내 참여만, 기상 알람만, 내 시간대 하루(0
     `lt appointments.appointment_at ${kst(23, 0).toISOString()}`,
   ]);
 });
+
+// ---- 기존 약속을 다시 저장할 때 직접 입력한 이동시간 이어받기 (시각 · 강도의 직접 값과 같은 규칙) ----
+
+// 카카오로 나가는 호출을 세는 fetch. 부르면 실패 응답을 줘서 다음 단계(기록 → 근사)로 넘어감
+function countingFetch() {
+  const state = { calls: 0 };
+  const fetchImpl = (async () => {
+    state.calls += 1;
+    return new Response('{}', { status: 500 });
+  }) as unknown as NonNullable<PlanContext['fetchImpl']>;
+  return { state, fetchImpl };
+}
+
+const AP = '00000000-0000-4000-8000-0000000000a1';
+
+// 저장된 약속 하나 (10시 · 좌표 있음 · 저장된 이동시간은 travelSource로)
+function storedAppointment(db: FakeDb, over: { source: 'API' | 'MANUAL' | 'CACHED'; minutes: number | null }) {
+  db.rows('appointments').push({
+    appointment_id: AP, creator_id: USER, group_id: null, title: '팀 주간회의', appointment_at: iso(22, 600),
+    dest_name: '세종대학교', dest_lat: 37.55, dest_lng: 127.07, importance: 'NORMAL', recurrence_rule: null,
+  });
+  db.rows('appointment_participants').push({
+    participant_id: 'pt1', appointment_id: AP, user_id: USER, origin_name: '집', origin_lat: 37.5547, origin_lng: 126.9707,
+    transport_type: 'TRANSIT', est_travel_minutes: over.minutes, travel_source: over.source, prepare_minutes: 60, buffer_minutes: 10,
+  });
+}
+
+test('이동시간 이어받기: 요청에 이동시간이 없고 저장된 게 MANUAL이면 저장된 분을 그대로, 길찾기는 안 부름', async () => {
+  const { db, ctx } = setup();
+  storedAppointment(db, { source: 'MANUAL', minutes: 70 });
+  const { fetchImpl, state } = countingFetch();
+  const { plan } = await buildPlan({ ...ctx, kakaoKey: 'k', fetchImpl }, draftOf({ appointment_id: AP }));
+  assert.deepEqual([plan.travel.chosen?.source, plan.travelMinutes, plan.travel.chosen?.needsConfirmation], ['MANUAL', 70, false]);
+  assert.equal(state.calls, 0);
+  assert.deepEqual(plan.chain.map((a) => `${a.kind} ${hm(a.at.toISOString())}`), ['WAKE 07:50', 'PREPARE 08:10', 'DEPARTURE 08:40', 'ARRIVE 09:50']); // 출발 = 10:00 − 여유 10 − 이동 70
+});
+
+test('이동시간 이어받기: 미리 보기도 같은 값(MANUAL 70분)에 "자동으로 되돌리기" 값만 따로 구함', async () => {
+  const { db, ctx } = setup();
+  storedAppointment(db, { source: 'MANUAL', minutes: 70 });
+  const { fetchImpl, state } = countingFetch();
+  const { plan } = await buildPlan({ ...ctx, kakaoKey: 'k', fetchImpl }, draftOf({ appointment_id: AP }), { wantAutoTravel: true });
+  assert.deepEqual([plan.travel.chosen?.source, plan.travelMinutes], ['MANUAL', 70]);
+  assert.ok(plan.travel.auto); // 되돌리기 후보
+  assert.ok(state.calls > 0);
+});
+
+test('이동시간 이어받기: 요청에 이동시간이 있으면 그 값이 먼저 (MANUAL · API 둘 다)', async () => {
+  const { db, ctx } = setup();
+  storedAppointment(db, { source: 'MANUAL', minutes: 70 });
+  const manual = await buildPlan(ctx, draftOf({ appointment_id: AP, participant: { est_travel_minutes: 35, travel_source: 'MANUAL' } }));
+  assert.deepEqual([manual.plan.travel.chosen?.source, manual.plan.travelMinutes], ['MANUAL', 35]);
+  const api = await buildPlan(ctx, draftOf({ appointment_id: AP, participant: { est_travel_minutes: 45, travel_source: 'API' } }));
+  assert.deepEqual([api.plan.travel.chosen?.source, api.plan.travelMinutes], ['API', 45]);
+});
+
+test('이동시간 이어받기: 저장된 게 API · CACHED면 이어받지 않고 다시 구함 (D5), MANUAL인데 분이 비면 이어받을 게 없음', async () => {
+  for (const source of ['API', 'CACHED'] as const) {
+    const { db, ctx } = setup();
+    storedAppointment(db, { source, minutes: 70 });
+    const { fetchImpl, state } = countingFetch();
+    const { plan } = await buildPlan({ ...ctx, kakaoKey: 'k', fetchImpl }, draftOf({ appointment_id: AP }));
+    assert.notEqual(plan.travel.chosen?.source, 'MANUAL');
+    assert.notEqual(plan.travelMinutes, 70);
+    assert.ok(state.calls > 0); // 길찾기를 다시 부름
+  }
+  const { db, ctx } = setup();
+  storedAppointment(db, { source: 'MANUAL', minutes: null });
+  const { plan } = await buildPlan(ctx, draftOf({ appointment_id: AP }));
+  assert.equal(plan.travel.chosen?.source, 'ESTIMATE');
+});
+
+test('이동시간 이어받기: 키 · 기록이 없어도 다시 저장되고 직접 입력은 MANUAL 그대로 남음 (예전에는 502)', async () => {
+  const env = setup();
+  const first = await previewAndSave(env, { ...FULL, participant: { ...FULL.participant, est_travel_minutes: 70, travel_source: 'MANUAL' } });
+  const again = await previewAndSave(env, { appointment_id: first.appointmentId });
+  assert.deepEqual(again.saved, again.shown);
+  const row = env.db.rows('appointment_participants').find((p) => p.appointment_id === first.appointmentId);
+  assert.deepEqual([row?.travel_source, row?.est_travel_minutes], ['MANUAL', 70]);
+});

@@ -199,6 +199,10 @@ export async function buildPlan(ctx: PlanContext, draft: PlanDraft, options: { w
 
   const inputs: PlanInputs = { now: ctx.now, draft, profile, appointment, participant, existingAlarms, stats, lateCount4w, sameDayWake };
 
+  // 요청에 이동시간이 없고 저장된 게 직접 입력(MANUAL)이면 그대로 이어받음 — 시각 · 강도의 직접 값과 같은 규칙(D42 C). 길찾기를 다시 안 부름
+  //   API로 저장된 값은 D5(카카오 응답 저장 · 재사용 불허) 때문에 이어받지 않고 다시 구함
+  const keptManualMinutes = draft.travelMinutes == null && participant?.travel_source === 'MANUAL' ? (participant.est_travel_minutes ?? undefined) : undefined;
+
   let travel: ResolvedTravel;
   if (draft.travelMinutes != null && draft.travelSource === 'API') {
     // 앱이 확인 시트에서 보여 준 길찾기 값을 그대로 저장 — 다시 부르지 않음
@@ -211,7 +215,7 @@ export async function buildPlan(ctx: PlanContext, draft: PlanDraft, options: { w
     };
     const coords = (p: { lat?: number; lng?: number }) => (p.lat != null && p.lng != null ? { lat: p.lat, lng: p.lng } : undefined);
     travel = await resolveTravel(
-      { origin: coords(basics.origin), destination: coords(basics.destination), transport: basics.transport, override: draft.travelMinutes },
+      { origin: coords(basics.origin), destination: coords(basics.destination), transport: basics.transport, override: draft.travelMinutes ?? keptManualMinutes },
       deps,
       { wantAuto: options.wantAutoTravel },
     );
