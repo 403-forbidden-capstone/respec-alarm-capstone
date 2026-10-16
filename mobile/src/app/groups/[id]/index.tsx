@@ -6,12 +6,12 @@ import { Avatar, Button, Card, Chip, LoadError, Loading, Screen, SectionHeader, 
 import { IMPORTANCE_LABEL } from '@/features/alarm/types';
 import { TextLink } from '@/features/alarm/components/TextLink';
 import { getGroup } from '@/features/social/api';
+import { useWakeLoad } from '@/features/social/hooks/useGroupWake';
 import { MiniButton } from '@/features/social/components/MiniButton';
 import { PersonRow } from '@/features/social/components/PersonRow';
 import { permissionNames } from '@/features/social/permissions';
 import type { GroupDetail, GroupMember } from '@/features/social/types';
 import { formatDateShort, formatTime } from '@/lib/format';
-import { useLoad } from '@/lib/useLoad';
 import { backOrHome } from '@/lib/nav';
 import { colors } from '@/theme';
 
@@ -19,7 +19,7 @@ import { colors } from '@/theme';
 // 멤버의 기상 상태(G03) · 알람 보기(G04)는 그 사람에게 받은 권한(친구 · 그룹 합집합)이 있을 때만 열림 — 없으면 이유를 알림
 export default function GroupDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
-  const { data, error, reload } = useLoad(() => getGroup(id));
+  const { data, error, reload } = useWakeLoad((date) => getGroup(id, date), (g) => [g.id]); // 그룹 기상 신호가 오면 멤버 상태를 다시 읽음
 
   if (data === undefined) {
     return (

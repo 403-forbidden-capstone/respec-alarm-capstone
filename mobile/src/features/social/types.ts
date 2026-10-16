@@ -80,6 +80,8 @@ export type GroupDetail = {
   appointments: { id: string; title: string; at: Date; place: string; importance: Importance }[]; // 연결 일정 (여러 개일 수 있음)
   inviteCode: string; // 초대 코드 (G02 "+ 초대")
   members: GroupMember[];
+  isOwner: boolean; // 내가 만든 그룹인지 — 초대 코드 다시 만들기는 만든 사람만 (새 UI용, 화면은 아직 안 씀)
+  wakeShareOptIn: boolean; // 이 그룹에 내 기상 상태 공유를 동의했는지 (group_members.wake_share_opt_in, D19 열림 — 새 UI용)
 };
 
 // 친구 · 그룹원이 공유한 알람 한 건 (G03 · G04)
@@ -101,6 +103,7 @@ export type MemberWake = {
   alarm: MemberAlarm | null; // 오늘 알람이 없으면 null (권한이 없는 것과 다름)
   timeline: TimelineEntry[]; // 지금까지 일어난 일
   firstAlarmAt: Date | null;
+  noGroupAppointment: boolean; // 그날 이 그룹의 약속이 없어 기상 상태를 주지 않는 날 (D57 — 알람이 없는 것과 다름). 가짜 데이터는 늘 false
 };
 
 export type SharedAlarms = {
@@ -112,3 +115,13 @@ export type SharedAlarms = {
 };
 
 export type ShareLogItem = { at: Date; text: string };
+
+// G04에서 알람을 바꾼 결과 — 저장은 됐고 주인에게 알림이 갔는지만 알려 줌 (알림이 실패해도 저장은 그대로, 화면은 조용히 "바꿨어요"만)
+export type SharedChangeResult = { notified: boolean };
+
+// 아이디로 찾은 사람과 나와의 관계 (새 UI용 — 이미 친구인 사람에게 요청을 또 보내지 않게)
+export type FriendRelation = 'SELF' | 'FRIEND' | 'SENT' | 'RECEIVED' | 'NONE';
+export type HandleSearchResult = { person: Person; relation: FriendRelation };
+
+// 그룹을 만든 결과 (새 UI용) — 만들고 바로 초대 코드를 보여 줄 수 있게
+export type CreatedGroup = { id: string; inviteCode: string };

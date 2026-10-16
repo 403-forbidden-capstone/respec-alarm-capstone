@@ -10,10 +10,10 @@ import { GroupIcon } from '@/features/social/components/GroupIcon';
 import { Note } from '@/features/social/components/Note';
 import { PersonRow } from '@/features/social/components/PersonRow';
 import { SearchBox } from '@/features/social/components/SearchBox';
+import { useWakeLoad } from '@/features/social/hooks/useGroupWake';
 import { permissionNames } from '@/features/social/permissions';
 import type { FriendItem, GroupItem, Person } from '@/features/social/types';
 import { josa } from '@/lib/format';
-import { useLoad } from '@/lib/useLoad';
 import { useAction } from '@/lib/useAction';
 
 type Tab = 'friend' | 'group';
@@ -23,8 +23,9 @@ const TABS = [
   ['group', '그룹'],
 ] as const;
 
-async function loadSocial() {
-  const [friends, requests, groups] = await Promise.all([listFriends(), listFriendRequests(), listGroups()]);
+// date = 그룹 기상 신호가 알려 준 날 (오늘 기상 수만 씀, 없으면 오늘)
+async function loadSocial(date: string | null) {
+  const [friends, requests, groups] = await Promise.all([listFriends(), listFriendRequests(), listGroups(date)]);
   return { friends, requests, groups };
 }
 
@@ -37,7 +38,7 @@ export default function GroupScreen() {
   const [picked, setPicked] = useState<{ request: string; tab: Tab } | null>(null);
   const tab: Tab = picked && picked.request === request ? picked.tab : seg === 'group' ? 'group' : 'friend';
   const setTab = (next: Tab) => setPicked({ request, tab: next });
-  const { data, error, reload } = useLoad(loadSocial);
+  const { data, error, reload } = useWakeLoad(loadSocial, (d) => d.groups.map((g) => g.id)); // 그룹 기상 신호가 오면 오늘 기상 수를 다시 읽음
   const { run } = useAction();
 
   const accept = (p: Person) =>

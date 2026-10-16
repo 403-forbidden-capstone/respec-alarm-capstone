@@ -1,0 +1,181 @@
+// DB 행 → 화면 타입(types.ts) 바꾸기 — 순수 함수만 (시험: __tests__/map.test.ts). 쿼리는 real/
+// 그룹 기상 상태는 D59에 따라 기상까지만 (알람 울림 · 해제 · 기상 확인 · 미확인) — 준비 · 출발 · 도착 줄은 실데이터에 없음 (docs/screen-data-map.md "스키마에 더 필요한 것" 5)
+import { KIND_LABEL, LEVELS, type AlarmKind } from '@/features/alarm/types';
+import { dateParts, formatTime, minutesBetween, startOfDay, timeParts } from '@/lib/format';
+import type { Enums } from '@/types/database';
+import { levelOfIntensity, levelOfSoundKey } from '@shared/calc/intensity.ts';
+
+import type { MemberAlarm, Person, TimelineEntry, WakeState } from './types';
+
+// ---------------------------------------------------------------------------
+// 사람
+// ---------------------------------------------------------------------------
+
+// get_public_profiles · find_profile_by_handle가 주는 공개 칸 (닉네임 · 사진 · 아이디)
+export type ProfileRow = { user_id: string; nickname: string; handle: string | null; profile_image_url: string | null };
+
+// 이름 첫 글자 (아바타)
+export const initialOf = (text: string) => [...text.trim()][0] ?? '?';
+
+// 실데이터엔 닉네임 하나뿐이라 name · short가 같음 (목업은 이름 이수연 / 짧은 이름 수연)
+export function personFromProfile(p: ProfileRow): Person {
+  return { id: p.user_id, name: p.nickname, short: p.nickname, initial: initialOf(p.nickname), handle: p.handle ? `@${p.handle}` : null };
+}
+
+// 공개 프로필을 못 읽는 사람 (관계가 끊긴 직후 등) — 가짜 api와 같은 글자
+export const unknownPerson = (id: string): Person => ({ id, name: '알 수 없음', short: '?', initial: '?', handle: null });
+
+// 2025년 3월부터 함께하는 중
+export function sinceLabel(createdAt: string): string {
+  const { year, month } = dateParts(new Date(createdAt));
+  return `${year}년 ${month}월부터 함께하는 중`;
+}
+
+// ---------------------------------------------------------------------------
+// 그룹 기상 상태 (get_group_wake_status)
+// ---------------------------------------------------------------------------
+
+export type WakeRow = {
+  user_id: string;
+  is_me: boolean;
+  wake_alarm_at: string | null; // 그날 첫 기상 알람 시각
+  rang_at: string | null;
+  snooze_count: number;
+  dismissed_at: string | null; // 알람 해제 (기상 확인 아님)
+  wake_confirmed_at: string | null;
+  missed_at: string | null;
+  wake_status: string; // CONFIRMED · MISSED · DISMISSED · RINGING · SCHEDULED · NO_ALARM
+};
+
+export const NO_APPOINTMENT_STATE: WakeState = { text: '오늘은 그룹 약속이 없어요', dot: 'zz', woke: false };
+export const HIDDEN_STATE: WakeState = { text: '기상 상태를 볼 수 없어요', dot: 'zz', woke: false };
+
+const at = (iso: string) => new Date(iso);
+
+// 멤버 한 줄의 기상 상태. dayHasRows = 함수가 그날 행을 하나라도 줬는지 (안 줬으면 그 그룹의 약속이 없는 날, D57)
+// 행이 없는 멤버 = 나에게 기상 상태 조회를 허용하지 않은 사람 (함수가 권한 있는 멤버만 돌려줌)
+export function wakeStateOf(row: WakeRow | undefined, dayHasRows: boolean): WakeState {
+  if (!dayHasRows) return NO_APPOINTMENT_STATE;
+  if (!row) return HIDDEN_STATE;
+  switch (row.wake_status) {
+    case 'CONFIRMED':
+      return { text: row.wake_confirmed_at ? `기상 완료 · ${formatTime(at(row.wake_confirmed_at))}` : '기상 완료', dot: 'ok', woke: true };
+    case 'MISSED':
+      return { text: '기상 미확인', dot: 'zz', woke: false };
+    case 'DISMISSED':
+      return { text: '알람 해제 · 기상 확인 전', dot: 'zz', woke: false };
+    case 'RINGING':
+      return { text: '알람 울리는 중', dot: 'zz', woke: false };
+    case 'SCHEDULED':
+      return { text: row.wake_alarm_at ? `취침 중 · 알람 ${timeParts(at(row.wake_alarm_at)).hm}` : '취침 중', dot: 'zz', woke: false };
+    default:
+      return { text: '오늘은 기상 알람이 없어요', dot: 'zz', woke: false };
+  }
+}
+
+// 오늘 기상한 사람 수 — 기상 확인이 된 사람만 (D59: 기상까지만)
+export const wokeCountOf = (rows: readonly WakeRow[]) => rows.filter((r) => r.wake_status === 'CONFIRMED').length;
+
+// G03 "오늘의 흐름" — 함수가 주는 시각들을 시간순으로. 기상 확인의 출처(본인 응답 · 자동 판정)는 함수가 안 줘서 비워 둠
+export function wakeTimeline(row: WakeRow): TimelineEntry[] {
+  const entries: TimelineEntry[] = [];
+  if (row.rang_at) {
+    entries.push({ at: at(row.rang_at), label: '알람 울림', source: row.snooze_count > 0 ? `자동 기록 · 미루기 ${row.snooze_count}회` : '자동 기록' });
+  }
+  if (row.dismissed_at) entries.push({ at: at(row.dismissed_at), label: '알람 해제', source: '기상 미확정' });
+  if (row.wake_confirmed_at) entries.push({ at: at(row.wake_confirmed_at), label: '기상 확인', source: '' });
+  if (row.missed_at) entries.push({ at: at(row.missed_at), label: '기상 미확인', source: '자동 기록' });
+  return entries.sort((a, b) => a.at.getTime() - b.at.getTime());
+}
+
+// 팀 주간회의 · 세종대학교 · 오전 10:00
+export const appointmentLabel = (title: string, place: string, when: Date) => `${title} · ${place} · ${formatTime(when)}`;
+
+// G03 위쪽 알람 카드 — 그룹원의 오늘 기상 알람 하나. 강도 · 준비 · 이동은 기상 조회 권한으로는 못 읽어서 비움 (알람 조회 권한과 다름)
+export function wakeAlarmCard(row: WakeRow, label: string): MemberAlarm | null {
+  if (!row.wake_alarm_at) return null;
+  const wakeAt = at(row.wake_alarm_at);
+  return {
+    id: `wake:${row.user_id}`,
+    date: startOfDay(wakeAt),
+    chain: [{ at: wakeAt, label: KIND_LABEL.WAKE }],
+    appointmentLabel: label,
+    levelName: '',
+    note: '',
+    enabled: true,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// G04 공유받은 알람 (get_shared_alarm_appointments + alarms)
+// ---------------------------------------------------------------------------
+
+// 약속 하나가 카드 하나 — 기상 · 준비 · 출발 알람을 묶음 (도착 목표는 울리는 알람이 아니라 카드에 안 넣음)
+export const CHAIN_KINDS: readonly AlarmKind[] = ['WAKE', 'PREPARE', 'DEPARTURE'];
+
+export type SharedApptRow = { alarm_id: string; appointment_id: string; title: string; dest_name: string; appointment_at: string };
+export type SharedAlarmRow = {
+  alarm_id: string;
+  alarm_type: Enums<'alarm_type'>;
+  scheduled_at: string;
+  intensity: Enums<'alarm_intensity'>;
+  sound_key: string | null;
+  is_enabled: boolean;
+  time_source: Enums<'alarm_value_source'>;
+};
+
+export type SharedCard = { appointmentId: string; title: string; place: string; appointmentAt: Date; alarms: SharedAlarmRow[] };
+
+// 약속마다 기상 · 준비 · 출발 알람을 시각순으로 묶음. 순서는 약속 시각순(함수가 그렇게 줌), 알람이 하나도 안 읽히면 카드를 만들지 않음
+export function groupSharedCards(appointments: readonly SharedApptRow[], alarms: readonly SharedAlarmRow[]): SharedCard[] {
+  const byId = new Map(alarms.map((a) => [a.alarm_id, a]));
+  const cards = new Map<string, SharedCard>();
+  for (const row of appointments) {
+    const alarm = byId.get(row.alarm_id);
+    if (!alarm || !CHAIN_KINDS.includes(alarm.alarm_type as AlarmKind)) continue;
+    const card = cards.get(row.appointment_id) ?? {
+      appointmentId: row.appointment_id,
+      title: row.title,
+      place: row.dest_name,
+      appointmentAt: at(row.appointment_at),
+      alarms: [],
+    };
+    card.alarms.push(alarm);
+    cards.set(row.appointment_id, card);
+  }
+  for (const card of cards.values()) card.alarms.sort((a, b) => at(a.scheduled_at).getTime() - at(b.scheduled_at).getTime());
+  return [...cards.values()];
+}
+
+// 약속 시각이 지난 카드는 거름 (함수는 지난 알람도 줌 — 작성자 판단: 화면은 앞으로 올 알람만). 꺼진 알람은 다시 켤 수 있게 남김
+export const upcomingCards = (cards: readonly SharedCard[], nowMs: number) => cards.filter((c) => c.appointmentAt.getTime() >= nowMs);
+
+// 준비 · 출발부터 약속까지 — 이동 · 여유 값은 남의 참여 조건이라 못 읽고, 읽을 수 있는 알람 간격으로만 적음
+function noteOf(card: SharedCard): string {
+  const first = card.alarms[0];
+  const departure = card.alarms.find((a) => a.alarm_type === 'DEPARTURE');
+  if (!first || !departure || first === departure) return '';
+  return `준비 ${minutesBetween(at(first.scheduled_at), at(departure.scheduled_at))}분 · 출발부터 약속까지 ${minutesBetween(at(departure.scheduled_at), card.appointmentAt)}분`;
+}
+
+export function toMemberAlarm(card: SharedCard): MemberAlarm {
+  const first = card.alarms[0];
+  // 강도 세 칸이 한 약속에서 같은 값이라 첫 알람의 배경음 칸으로 읽음 (features/alarm/map.ts와 같은 규칙)
+  const level = levelOfSoundKey(first.sound_key) ?? levelOfIntensity(first.intensity) ?? 1;
+  return {
+    id: card.appointmentId,
+    date: startOfDay(at(first.scheduled_at)),
+    chain: card.alarms.map((a) => ({ at: at(a.scheduled_at), label: KIND_LABEL[a.alarm_type as AlarmKind] })),
+    appointmentLabel: appointmentLabel(card.title, card.place, card.appointmentAt),
+    levelName: LEVELS[level].name,
+    note: noteOf(card),
+    enabled: card.alarms.some((a) => a.is_enabled), // 카드 스위치 = 묶음 전체. 하나라도 켜져 있으면 켜짐
+  };
+}
+
+// 권한 꼬리표 (조회 · 친구, 설정 · 캡스톤팀) — 설정은 조회가 있어야 실제로 고칠 수 있어 조회가 없으면 뺌
+export function shareTags(rows: readonly { source: string; viewAlarm: boolean; editAlarm: boolean }[]): string[] {
+  const canView = rows.some((r) => r.viewAlarm);
+  const tags = rows.flatMap((r) => [...(r.viewAlarm ? [`조회 · ${r.source}`] : []), ...(r.editAlarm && canView ? [`설정 · ${r.source}`] : [])]);
+  return [...new Set(tags)];
+}

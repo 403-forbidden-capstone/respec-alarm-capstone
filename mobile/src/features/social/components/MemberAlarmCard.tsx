@@ -14,6 +14,7 @@ type Props = {
 const SHIFT_MINUTES = 5;
 
 // 친구 · 그룹원이 공유한 알람 카드 (목업 memberAlarmCard) — 그룹원 기상 상태(G03) · 공유받은 알람(G04)
+// 강도 · 준비 값은 비어 있을 수 있음 — 실데이터에서 기상 상태 조회(G03)만 허용받으면 알람 강도 · 준비 시간은 못 읽음
 export function MemberAlarmCard({ alarm, onToggle, onShift }: Props) {
   const first = alarm.chain[0];
   return (
@@ -22,7 +23,7 @@ export function MemberAlarmCard({ alarm, onToggle, onShift }: Props) {
       time={timeParts(first.at)}
       kindLabel={first.label}
       chain={alarm.chain.map((x) => `${formatTime(x.at)} ${x.label}`)}
-      meta={[`알람 강도 · ${alarm.levelName}`, alarm.note]}
+      meta={[alarm.levelName ? `알람 강도 · ${alarm.levelName}` : '', alarm.note].filter(Boolean)}
       foot={alarm.appointmentLabel}
       enabled={alarm.enabled}
       onToggle={onToggle}
