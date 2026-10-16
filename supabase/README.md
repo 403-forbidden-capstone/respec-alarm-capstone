@@ -103,7 +103,7 @@ create policy wake_signal_receive on realtime.messages
 | `notify` | 다른 사람 폰에 푸시 (권한은 `can_send_push`) | 앱 G04 · G03 | 켬 | Expo Push |
 | `wake-check` | 기상 미확인(MISSED) 기록 | pg_cron 5분마다 (서비스 키) | 끔 (코드에서 키 비교) | — |
 
-공통 틀은 `functions/_shared/`: `http.ts`(CORS · `X-Request-Id` · 오류) · `auth.ts` · `read.ts`(요청 검사) · `supabase.ts` · `env.ts`. 계산은 `_shared/calc/` ("공용 계산").
+공통 틀은 `functions/_shared/`: `http.ts`(CORS · `X-Request-Id` · 오류. 앱이 보낸 `X-Request-Id`는 영문 · 숫자 · `_` · `-` 64자 이하일 때만 쓰고 아니면 서버가 새로 만듦) · `auth.ts` · `read.ts`(요청 검사) · `supabase.ts` · `env.ts`. 계산은 `_shared/calc/` ("공용 계산").
 
 ### 오류 모양
 
@@ -178,7 +178,7 @@ create policy wake_signal_receive on realtime.messages
 ### place-search · notify · wake-check
 
 - `place-search`: `{ query, lat?, lng?, limit? }` → `{ places: [{ id, name, address, lat, lng, category? }] }`. `lat · lng`를 주면 가까운 순
-- `notify`: `{ kind, targetUserId, alarmId?, title, body, data? }` → `{ sent, failed, reason? }`. `kind`는 `ALARM_CHANGED`(G04) · `WAKE_PING`(G03, D19까지 403). 권한은 `can_send_push`(DB 함수). 푸시 토큰이 없으면 `reason: "NO_TOKENS"`, FCM 키가 없으면 `reason: "PUSH_NOT_CONFIGURED"`, Expo 서버 장애면 `"PUSH_UNAVAILABLE"` — 오류가 아니라 `sent: 0`. 만료된 토큰(`DeviceNotRegistered`)은 `push_tokens`에서 지움
+- `notify`: `{ kind, targetUserId, alarmId?, title, body, data? }` → `{ sent, failed, reason? }`. `kind`는 `ALARM_CHANGED`(G04) · `WAKE_PING`(G03, D19까지 403). 권한은 `can_send_push`(DB 함수). 푸시 토큰이 없으면 `reason: "NO_TOKENS"`, FCM 키가 없거나 `EXPO_ACCESS_TOKEN`이 틀려 Expo가 401 · 403을 주면 `reason: "PUSH_NOT_CONFIGURED"`, Expo 서버 장애면 `"PUSH_UNAVAILABLE"` — 오류가 아니라 `sent: 0`. 만료된 토큰(`DeviceNotRegistered`)은 `push_tokens`에서 지움
 - `wake-check`: 서비스 키만. `find_missed_wake_alarms` 결과를 `alarm_events`에 `MISSED`로 기록 (`client_event_id = event_key`, `ON CONFLICT DO NOTHING`이라 두 번 안 들어감). 응답 `{ checked, recorded, pushed }`. 그룹 미확인 푸시는 `can_send_push('WAKE_MISSED')`가 거절하는 동안(D19) 안 보냄
 
 ### 공용 계산 (`functions/_shared/calc/`)
