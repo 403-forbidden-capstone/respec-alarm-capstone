@@ -11,7 +11,7 @@ import { uploadEvents } from '@/lib/alarmSync';
 import { now } from '@/lib/clock';
 import { parseDbTime } from '@/lib/dbTime';
 import { dayKey } from '@/lib/format';
-import { stableUuid } from '@/lib/stableId';
+import { isUuid, stableUuid } from '@/lib/uuid';
 import { supabase } from '@/lib/supabase';
 import { requireUserId } from '@/lib/user';
 
@@ -88,6 +88,7 @@ async function pendingDismissals(alarmId?: string): Promise<{ alarmId: string; a
 }
 
 async function loadWakeContext(userId: string, alarmId: string): Promise<WakeContext | null> {
+  if (!isUuid(alarmId)) return null; // 가짜 데이터 시절 주소(a1:WAKE)가 남아 있어도 DB 형식 오류 대신 "없음"
   const [alarm, events, pending] = await Promise.all([
     supabase
       .from('alarms')

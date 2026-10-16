@@ -1,6 +1,6 @@
 import { describe, expect, it } from '@jest/globals';
 
-import { stableUuid } from '../stableId';
+import { isUuid, stableUuid } from '../uuid';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
@@ -27,5 +27,16 @@ describe('고정 UUID (stableUuid)', () => {
     const seen = new Set<string>();
     for (let i = 0; i < 5_000; i += 1) seen.add(stableUuid('wake-confirmed', `alarm-${i % 50}`, i));
     expect(seen.size).toBe(5_000);
+  });
+});
+
+describe('UUID 모양 확인 (isUuid)', () => {
+  it('UUID 모양이면 true (대소문자 무관), 가짜 데이터 시절 id나 빈 글자는 false', () => {
+    expect(isUuid('00000000-0000-4000-8000-000000000001')).toBe(true);
+    expect(isUuid('ABCDEF01-2345-6789-ABCD-EF0123456789')).toBe(true);
+    expect(isUuid(stableUuid('x'))).toBe(true);
+    for (const value of ['m1', 'a1:WAKE', '', '00000000-0000-4000-8000-00000000000', '00000000-0000-4000-8000-0000000000012', ' 00000000-0000-4000-8000-000000000001']) {
+      expect(isUuid(value)).toBe(false);
+    }
   });
 });

@@ -9,6 +9,7 @@ import { now } from '@/lib/clock';
 import { UserError } from '@/lib/errors';
 import { supabase } from '@/lib/supabase';
 import { requireUserId } from '@/lib/user';
+import { isUuid } from '@/lib/uuid';
 import { autoLevel, resolveIntensity } from '@shared/calc/intensity.ts';
 
 import { forgetDetail } from './detailCache';
@@ -28,6 +29,7 @@ export async function syncPhone(alarmIds: readonly string[]): Promise<void> {
 }
 
 async function findParticipantId(userId: string, appointmentId: string): Promise<string | null> {
+  if (!isUuid(appointmentId)) return null; // 가짜 데이터 시절 주소가 남아 있어도 DB 형식 오류 대신 "없음"
   const { data, error } = await supabase.from('appointment_participants').select('participant_id').eq('appointment_id', appointmentId).eq('user_id', userId).maybeSingle();
   if (error) throw error;
   return data?.participant_id ?? null;
@@ -48,6 +50,7 @@ export async function mirrorArrive(userId: string, participantId: string): Promi
 
 // 일정의 알람 전체 켜기 · 끄기 (H01 · H02) — id는 약속 id, 일정 없는 알람이면 알람 id
 export async function setAppointmentEnabled(id: string, enabled: boolean): Promise<void> {
+  if (!isUuid(id)) throw new UserError(NOT_FOUND); // 약속 id도 알람 id도 아님 (가짜 데이터 시절 주소)
   const userId = await requireUserId();
   const participantId = await findParticipantId(userId, id);
   const base = supabase.from('alarms').update({ is_enabled: enabled }).eq('user_id', userId);

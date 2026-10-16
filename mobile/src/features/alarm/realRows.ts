@@ -2,6 +2,7 @@
 //   "내 것"은 호출하는 쪽이 넘긴 userId(lib/user requireUserId)로 한 번 더 좁힘 — RLS는 친구에게 받은 알람 · 같은 그룹 약속도 보여 주므로
 //   읽기 실패는 DB 원문 그대로 던지고(화면은 LoadError로 기본 문구), 이유를 보여 줄 때만 UserError
 import { supabase } from '@/lib/supabase';
+import { isUuid } from '@/lib/uuid';
 
 import { toAppointmentDetail, type AlarmRow, type AppointmentRows, type StandaloneRow } from './map';
 import type { AppointmentDetail } from './types';
@@ -66,6 +67,7 @@ export async function loadAppointmentRows(participantId: string, userId: string)
 
 // 같은 것을 약속 id로 (H03 — 화면 주소가 약속 id). 내 것이 아니거나(RLS) 없으면 null
 export async function loadAppointmentRowsByAppointment(appointmentId: string, userId: string): Promise<AppointmentRows | null> {
+  if (!isUuid(appointmentId)) return null; // 가짜 데이터 시절 주소(m1)가 남아 있어도 DB 형식 오류 대신 "없음"
   const { data, error } = await supabase.from('appointment_participants').select(PARTICIPANT_SELECT).eq('appointment_id', appointmentId).eq('user_id', userId).maybeSingle();
   if (error) throw error;
   if (!data) return null;
@@ -145,6 +147,7 @@ export async function fetchLateCount(userId: string, nowMs: number): Promise<num
 
 // 알람 설정(H03)이 읽는 약속 하나 — 저장된 값 · 직접 고른 값 · 강도. 약속이 없거나 내 것이 아니면 null (알람이 없는 약속은 호출하는 쪽이 거름)
 export async function loadDetail(appointmentId: string, userId: string, nowMs: number): Promise<AppointmentDetail | null> {
+  if (!isUuid(appointmentId)) return null; // 지각 횟수까지 묻기 전에 (loadAppointmentRowsByAppointment도 같은 확인을 함)
   const [rows, lateCount] = await Promise.all([loadAppointmentRowsByAppointment(appointmentId, userId), fetchLateCount(userId, nowMs)]);
   return rows ? toAppointmentDetail(rows, lateCount) : null;
 }

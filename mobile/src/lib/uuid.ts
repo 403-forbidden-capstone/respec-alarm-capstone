@@ -1,4 +1,6 @@
-// 같은 입력이면 늘 같은 UUID 모양 글자 — 쓰기가 중간에 끊겨 다시 시도해도 같은 번호가 되게 (서버가 같은 번호의 기록을 무시하는 client_event_id 등)
+// UUID 다루기 — 고정 UUID 만들기(stableUuid)와 UUID 모양 확인(isUuid)
+//
+// stableUuid: 같은 입력이면 늘 같은 UUID 모양 글자 — 쓰기가 중간에 끊겨 다시 시도해도 같은 번호가 되게 (서버가 같은 번호의 기록을 무시하는 client_event_id 등)
 //   무작위 번호(AlarmCore.makeUuid)와 달리 "그 알람의 그 해제 같은 일"로 정해지므로, 두 번 쓰려 해도 한 줄만 남음
 //   암호용이 아님 — 32비트 해시 네 개를 이어 붙인 128비트라 서로 다른 입력이 겹칠 일이 사실상 없는 정도면 충분
 
@@ -26,3 +28,6 @@ export function stableUuid(...parts: readonly (string | number)[]): string {
   const variant = ((parseInt(hex[16], 16) & 0x3) | 0x8).toString(16); // 8 · 9 · a · b
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-5${hex.slice(13, 16)}-${variant}${hex.slice(17, 20)}-${hex.slice(20, 32)}`;
 }
+
+// UUID 모양인지 — DB에 uuid 칸으로 묻기 전에 확인해, 가짜 데이터 시절 주소(m1 · a1:WAKE)가 남아 있어도 DB 형식 오류(22P02) 대신 "없음"으로 처리할 때 씀
+export const isUuid = (value: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);

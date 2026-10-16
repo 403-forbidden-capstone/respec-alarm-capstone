@@ -89,7 +89,7 @@ const alarmRow = (id: string, type: string, hhmm: string, overrides: Record<stri
   intensity_source: 'AUTO',
   ...overrides,
 });
-const meetingAlarms = () => [alarmRow('a-wake', 'WAKE', '08:00'), alarmRow('a-prep', 'PREPARE', '08:30'), alarmRow('a-dep', 'DEPARTURE', '09:00'), alarmRow('a-arrive', 'ARRIVE', '09:50')];
+const meetingAlarms = () => [alarmRow('00000000-0000-4000-8000-0000000000b1', 'WAKE', '08:00'), alarmRow('00000000-0000-4000-8000-0000000000b2', 'PREPARE', '08:30'), alarmRow('00000000-0000-4000-8000-0000000000b3', 'DEPARTURE', '09:00'), alarmRow('00000000-0000-4000-8000-0000000000b4', 'ARRIVE', '09:50')];
 
 const participantRow = (overrides: Record<string, unknown> = {}, appointment: Record<string, unknown> = {}, alarms: unknown[] = meetingAlarms()) => ({
   participant_id: 'p-1',
@@ -99,7 +99,7 @@ const participantRow = (overrides: Record<string, unknown> = {}, appointment: Re
   travel_source: 'API',
   prepare_minutes: 60,
   buffer_minutes: 10,
-  appointments: { appointment_id: 'appt-1', title: '팀 주간회의', appointment_at: kst('10:00'), dest_name: '세종대학교', importance: 'NORMAL', recurrence_rule: null, groups: { group_name: '캡스톤팀' }, ...appointment },
+  appointments: { appointment_id: '00000000-0000-4000-8000-0000000000a1', title: '팀 주간회의', appointment_at: kst('10:00'), dest_name: '세종대학교', importance: 'NORMAL', recurrence_rule: null, groups: { group_name: '캡스톤팀' }, ...appointment },
   alarms,
   ...overrides,
 });
@@ -139,9 +139,9 @@ describe('목록 · 하루 일정 · 알람 설정 읽기', () => {
         participantRow(),
       ],
     });
-    mockRoutes['todos:select'] = () => ({ data: [{ appointment_id: 'appt-1', title: '노트북' }] });
+    mockRoutes['todos:select'] = () => ({ data: [{ appointment_id: '00000000-0000-4000-8000-0000000000a1', title: '노트북' }] });
     mockRoutes['alarms:select'] = () => ({
-      data: [{ ...alarmRow('s-1', 'WAKE', '07:00'), recurrence_rule: null }],
+      data: [{ ...alarmRow('00000000-0000-4000-8000-0000000000c1', 'WAKE', '07:00'), recurrence_rule: null }],
     });
     const list = await real.listAppointments();
 
@@ -162,7 +162,7 @@ describe('목록 · 하루 일정 · 알람 설정 읽기', () => {
     mockRoutes['appointment_participants:select'] = () => ({
       data: [
         { participant_id: 'p-2', appointments: { appointment_id: 'appt-2', title: '치과 예약', appointment_at: kst('15:30'), dest_name: '동네 치과', importance: 'LOW' }, alarms: [] },
-        { participant_id: 'p-1', appointments: { appointment_id: 'appt-1', title: '팀 주간회의', appointment_at: kst('10:00'), dest_name: '세종대학교', importance: 'NORMAL' }, alarms: [{ alarm_id: 'a', alarm_type: 'WAKE' }] },
+        { participant_id: 'p-1', appointments: { appointment_id: '00000000-0000-4000-8000-0000000000a1', title: '팀 주간회의', appointment_at: kst('10:00'), dest_name: '세종대학교', importance: 'NORMAL' }, alarms: [{ alarm_id: 'a', alarm_type: 'WAKE' }] },
       ],
     });
     const items = await real.getDaySchedule(new Date(kst('00:00')));
@@ -174,10 +174,10 @@ describe('목록 · 하루 일정 · 알람 설정 읽기', () => {
 
   it('getAppointment: 저장된 값 + 최근 4주 지각 횟수로 강도 자동 값, 읽은 값은 미리 보기용으로 기억', async () => {
     mockRoutes['appointment_participants:select'] = (call) => (isCount(call) ? { count: 2 } : { data: participantRow() });
-    const detail = await real.getAppointment('appt-1');
-    expect(detail).toMatchObject({ id: 'appt-1', title: '팀 주간회의', level: 1 });
+    const detail = await real.getAppointment('00000000-0000-4000-8000-0000000000a1');
+    expect(detail).toMatchObject({ id: '00000000-0000-4000-8000-0000000000a1', title: '팀 주간회의', level: 1 });
     expect(detail?.intensity).toMatchObject({ lateCount: 2, latePoint: 1, auto: 2 }); // 보통(중요) 1점 + 지각 2번 1점
-    expect(recallDetail('appt-1')).toBe(detail);
+    expect(recallDetail('00000000-0000-4000-8000-0000000000a1')).toBe(detail);
     const count = mockCalls.find(isCount)!;
     expect(filterArgs(count, 'eq', 'is_late')).toEqual([true]);
     expect(filterArgs(count, 'gte', 'arrived_at')).toEqual(['2025-04-23T22:55:00.000Z']); // 지금 − 28일
@@ -185,16 +185,16 @@ describe('목록 · 하루 일정 · 알람 설정 읽기', () => {
 
   it('getAppointment: 알람이 없는 일정 · 내 것이 아닌(없는) 일정 · 일정 없는 알람 id는 null', async () => {
     mockRoutes['appointment_participants:select'] = (call) => (isCount(call) ? { count: 0 } : { data: participantRow({}, {}, []) });
-    expect(await real.getAppointment('appt-1')).toBeNull();
+    expect(await real.getAppointment('00000000-0000-4000-8000-0000000000a1')).toBeNull();
     mockRoutes['appointment_participants:select'] = (call) => (isCount(call) ? { count: 0 } : { data: null });
-    expect(await real.getAppointment('standalone-alarm-id')).toBeNull();
+    expect(await real.getAppointment('00000000-0000-4000-8000-0000000000e1')).toBeNull();
   });
 
   it('getNextAlarm: 가장 이른 켜진 알람이 일정 없는 알람이면 제목 "알람"으로', async () => {
     mockRoutes['alarms:select'] = (call) =>
       call.columns === 'alarm_id, participant_id'
-        ? { data: { alarm_id: 's-1', participant_id: null } }
-        : { data: { ...alarmRow('s-1', 'WAKE', '08:10'), recurrence_rule: null } };
+        ? { data: { alarm_id: '00000000-0000-4000-8000-0000000000c1', participant_id: null } }
+        : { data: { ...alarmRow('00000000-0000-4000-8000-0000000000c1', 'WAKE', '08:10'), recurrence_rule: null } };
     const next = await real.getNextAlarm();
     expect(next?.appointment.title).toBe('알람');
     expect(next && formatTime(next.alarm.at)).toBe('오전 8:10');
@@ -204,7 +204,7 @@ describe('목록 · 하루 일정 · 알람 설정 읽기', () => {
   });
 
   it('getNextAlarm: 약속 알람이면 그 약속을 읽어 다음 알람을 고름 · 알람이 없으면 null', async () => {
-    mockRoutes['alarms:select'] = () => ({ data: { alarm_id: 'a-wake', participant_id: 'p-1' } });
+    mockRoutes['alarms:select'] = () => ({ data: { alarm_id: '00000000-0000-4000-8000-0000000000b1', participant_id: 'p-1' } });
     mockRoutes['appointment_participants:select'] = () => ({ data: participantRow() });
     const next = await real.getNextAlarm();
     expect(next?.appointment.title).toBe('팀 주간회의');
@@ -224,115 +224,139 @@ describe('목록 · 하루 일정 · 알람 설정 읽기', () => {
 // DB 직접 쓰기
 // ---------------------------------------------------------------------------
 
+describe('가짜 데이터 시절 주소(UUID가 아닌 id)', () => {
+  // 실데이터 모드에서 /alarm/m1 · ?alarm=a1:WAKE 같은 옛 주소가 열려도 uuid 칸에 글자를 묻는 DB 형식 오류(22P02) 대신 "없음"으로 처리
+  const old = 'm1';
+
+  it('읽기는 DB에 묻지 않고 없음: getAppointment · previewAlarms · getWakeCheck · confirmWake', async () => {
+    expect(await real.getAppointment(old)).toBeNull();
+    expect(await real.previewAlarms(old, { bufferMinutes: 10, origin: '집', transport: 'TRANSIT', travelMinutes: null, prepareMinutes: null, times: {} })).toMatchObject({ alarms: [], travelMinutes: 0 });
+    expect(await real.getWakeCheck('a1:WAKE')).toBeNull();
+    await expect(real.confirmWake('a1:WAKE', 'self')).resolves.toBeUndefined();
+    expect(mockCalls.filter((c) => c.table === 'appointment_participants' || c.op !== 'select' || c.table === 'alarm_events')).toEqual([]);
+    expect(mockCalls.every((c) => filterArgs(c, 'eq', 'appointment_id') == null && filterArgs(c, 'eq', 'alarm_id') == null)).toBe(true);
+    expect(mockCallEdge).not.toHaveBeenCalled();
+  });
+
+  it('쓰기는 이유를 UserError로 (DB에 쓰지 않음): setAppointmentEnabled · setAlarmEnabled · setIntensity', async () => {
+    await expect(real.setAppointmentEnabled(old, true)).rejects.toBeInstanceOf(UserError);
+    await expect(real.setAlarmEnabled(old, 'WAKE', true)).rejects.toBeInstanceOf(UserError);
+    await expect(real.setIntensity(old, 'sound', 2)).rejects.toBeInstanceOf(UserError);
+    expect(mockCalls.filter((c) => c.op !== 'select')).toEqual([]);
+    expect(mockCalls.every((c) => filterArgs(c, 'eq', 'appointment_id') == null && filterArgs(c, 'eq', 'alarm_id') == null)).toBe(true);
+    expect(mockReconcile).not.toHaveBeenCalled();
+  });
+});
+
 describe('켜기 · 끄기 · 강도 (DB 직접 → 그 알람만 폰에 맞춤)', () => {
   it('setAppointmentEnabled: 약속의 알람 전부(도착 목표 포함)를 바꾸고 그 알람만 reconcile', async () => {
     mockRoutes['appointment_participants:select'] = () => ({ data: { participant_id: 'p-1' } });
-    mockRoutes['alarms:update'] = () => ({ data: [{ alarm_id: 'a-wake' }, { alarm_id: 'a-prep' }, { alarm_id: 'a-dep' }, { alarm_id: 'a-arrive' }] });
-    await real.setAppointmentEnabled('appt-1', false);
+    mockRoutes['alarms:update'] = () => ({ data: [{ alarm_id: '00000000-0000-4000-8000-0000000000b1' }, { alarm_id: '00000000-0000-4000-8000-0000000000b2' }, { alarm_id: '00000000-0000-4000-8000-0000000000b3' }, { alarm_id: '00000000-0000-4000-8000-0000000000b4' }] });
+    await real.setAppointmentEnabled('00000000-0000-4000-8000-0000000000a1', false);
     const [update] = callsTo('alarms', 'update');
     expect(update.payload).toEqual({ is_enabled: false });
     expect(filterArgs(update, 'eq', 'participant_id')).toEqual(['p-1']);
     expect(filterArgs(update, 'eq', 'user_id')).toEqual(['user-1']);
-    expect(mockReconcile).toHaveBeenCalledWith({ alarmIds: ['a-wake', 'a-prep', 'a-dep', 'a-arrive'] });
+    expect(mockReconcile).toHaveBeenCalledWith({ alarmIds: ['00000000-0000-4000-8000-0000000000b1', '00000000-0000-4000-8000-0000000000b2', '00000000-0000-4000-8000-0000000000b3', '00000000-0000-4000-8000-0000000000b4'] });
   });
 
   it('setAppointmentEnabled: 약속이 아니면 일정 없는 알람 id로 (참여 조건 · 루틴 없는 내 알람만)', async () => {
     mockRoutes['appointment_participants:select'] = () => ({ data: null });
-    mockRoutes['alarms:update'] = () => ({ data: [{ alarm_id: 's-1' }] });
-    await real.setAppointmentEnabled('s-1', true);
+    mockRoutes['alarms:update'] = () => ({ data: [{ alarm_id: '00000000-0000-4000-8000-0000000000c1' }] });
+    await real.setAppointmentEnabled('00000000-0000-4000-8000-0000000000c1', true);
     const [update] = callsTo('alarms', 'update');
-    expect(filterArgs(update, 'eq', 'alarm_id')).toEqual(['s-1']);
+    expect(filterArgs(update, 'eq', 'alarm_id')).toEqual(['00000000-0000-4000-8000-0000000000c1']);
     expect(filterArgs(update, 'is', 'participant_id')).toEqual([null]);
     expect(filterArgs(update, 'is', 'routine_id')).toEqual([null]);
-    expect(mockReconcile).toHaveBeenCalledWith({ alarmIds: ['s-1'] });
+    expect(mockReconcile).toHaveBeenCalledWith({ alarmIds: ['00000000-0000-4000-8000-0000000000c1'] });
   });
 
   it('setAppointmentEnabled: 없는 알람이면 이유를 UserError로, DB 오류는 그대로', async () => {
     mockRoutes['appointment_participants:select'] = () => ({ data: null });
     mockRoutes['alarms:update'] = () => ({ data: [] });
-    await expect(real.setAppointmentEnabled('gone', false)).rejects.toBeInstanceOf(UserError);
+    await expect(real.setAppointmentEnabled('00000000-0000-4000-8000-0000000000d1', false)).rejects.toBeInstanceOf(UserError);
     mockRoutes['alarms:update'] = () => ({ error: { code: '', message: 'offline' } });
-    await expect(real.setAppointmentEnabled('gone', false)).rejects.toMatchObject({ message: 'offline' });
+    await expect(real.setAppointmentEnabled('00000000-0000-4000-8000-0000000000d1', false)).rejects.toMatchObject({ message: 'offline' });
     expect(mockReconcile).not.toHaveBeenCalled();
   });
 
   it('켤 때는 아직 안 지난 알람만 켬 (지난 기상 알람을 켜면 서버 배치가 울린 적 없는 알람을 기상 미확인으로 기록함) — 끌 때는 전부', async () => {
     mockRoutes['appointment_participants:select'] = () => ({ data: { participant_id: 'p-1' } });
-    mockRoutes['alarms:update'] = () => ({ data: [{ alarm_id: 'a-dep' }] });
-    await real.setAppointmentEnabled('appt-1', true);
+    mockRoutes['alarms:update'] = () => ({ data: [{ alarm_id: '00000000-0000-4000-8000-0000000000b3' }] });
+    await real.setAppointmentEnabled('00000000-0000-4000-8000-0000000000a1', true);
     expect(filterArgs(callsTo('alarms', 'update')[0], 'gt', 'scheduled_at')).toEqual(['2025-05-21T22:55:00.000Z']);
-    await real.setAppointmentEnabled('appt-1', false);
+    await real.setAppointmentEnabled('00000000-0000-4000-8000-0000000000a1', false);
     expect(filterArgs(callsTo('alarms', 'update')[1], 'gt', 'scheduled_at')).toBeUndefined();
     mockCalls.length = 0;
-    await real.setAlarmEnabled('appt-1', 'WAKE', true);
+    await real.setAlarmEnabled('00000000-0000-4000-8000-0000000000a1', 'WAKE', true);
     expect(filterArgs(callsTo('alarms', 'update')[0], 'gt', 'scheduled_at')).toEqual(['2025-05-21T22:55:00.000Z']);
   });
 
   it('켤 알람이 모두 지났으면 이유를 UserError로 (DB는 안 바뀜)', async () => {
     mockRoutes['appointment_participants:select'] = () => ({ data: { participant_id: 'p-1' } });
     mockRoutes['alarms:update'] = () => ({ data: [] });
-    await expect(real.setAppointmentEnabled('appt-1', true)).rejects.toThrow('이미 지난');
-    await expect(real.setAlarmEnabled('appt-1', 'WAKE', true)).rejects.toThrow('이미 지난');
+    await expect(real.setAppointmentEnabled('00000000-0000-4000-8000-0000000000a1', true)).rejects.toThrow('이미 지난');
+    await expect(real.setAlarmEnabled('00000000-0000-4000-8000-0000000000a1', 'WAKE', true)).rejects.toThrow('이미 지난');
     expect(mockReconcile).not.toHaveBeenCalled();
   });
 
   it('폰에 걸지 못한 알람이 있으면(정확한 알람 권한 없음 등) UserError — DB에는 이미 씀', async () => {
     mockRoutes['appointment_participants:select'] = () => ({ data: { participant_id: 'p-1' } });
-    mockRoutes['alarms:update'] = () => ({ data: [{ alarm_id: 'a-wake' }] });
-    mockReconcile.mockResolvedValue({ failed: [{ alarmId: 'a-wake', error: '정확한 알람 권한 없음' }] });
-    await expect(real.setAppointmentEnabled('appt-1', true)).rejects.toBeInstanceOf(UserError);
+    mockRoutes['alarms:update'] = () => ({ data: [{ alarm_id: '00000000-0000-4000-8000-0000000000b1' }] });
+    mockReconcile.mockResolvedValue({ failed: [{ alarmId: '00000000-0000-4000-8000-0000000000b1', error: '정확한 알람 권한 없음' }] });
+    await expect(real.setAppointmentEnabled('00000000-0000-4000-8000-0000000000a1', true)).rejects.toBeInstanceOf(UserError);
     expect(callsTo('alarms', 'update')).toHaveLength(1);
   });
 
   it('setAlarmEnabled: 그 종류만 바꾸고, 울리는 알람이 모두 꺼지면 도착 목표도 끔', async () => {
     mockRoutes['appointment_participants:select'] = () => ({ data: { participant_id: 'p-1' } });
-    mockRoutes['alarms:update'] = (call) => (call.payload && 'is_enabled' in (call.payload as object) && filterArgs(call, 'eq', 'alarm_type') ? { data: [{ alarm_id: 'a-dep' }] } : undefined);
+    mockRoutes['alarms:update'] = (call) => (call.payload && 'is_enabled' in (call.payload as object) && filterArgs(call, 'eq', 'alarm_type') ? { data: [{ alarm_id: '00000000-0000-4000-8000-0000000000b3' }] } : undefined);
     // 이미 기상 · 준비는 꺼져 있고 출발을 끔 -> 모두 꺼짐
     mockRoutes['alarms:select'] = () => ({
       data: [
-        { alarm_id: 'a-wake', alarm_type: 'WAKE', is_enabled: false },
-        { alarm_id: 'a-prep', alarm_type: 'PREPARE', is_enabled: false },
-        { alarm_id: 'a-dep', alarm_type: 'DEPARTURE', is_enabled: false },
-        { alarm_id: 'a-arrive', alarm_type: 'ARRIVE', is_enabled: true },
+        { alarm_id: '00000000-0000-4000-8000-0000000000b1', alarm_type: 'WAKE', is_enabled: false },
+        { alarm_id: '00000000-0000-4000-8000-0000000000b2', alarm_type: 'PREPARE', is_enabled: false },
+        { alarm_id: '00000000-0000-4000-8000-0000000000b3', alarm_type: 'DEPARTURE', is_enabled: false },
+        { alarm_id: '00000000-0000-4000-8000-0000000000b4', alarm_type: 'ARRIVE', is_enabled: true },
       ],
     });
-    await real.setAlarmEnabled('appt-1', 'DEPARTURE', false);
+    await real.setAlarmEnabled('00000000-0000-4000-8000-0000000000a1', 'DEPARTURE', false);
     const updates = callsTo('alarms', 'update');
     expect(updates[0].payload).toEqual({ is_enabled: false });
     expect(filterArgs(updates[0], 'eq', 'alarm_type')).toEqual(['DEPARTURE']);
     expect(updates[1].payload).toEqual({ is_enabled: false });
-    expect(filterArgs(updates[1], 'eq', 'alarm_id')).toEqual(['a-arrive']);
-    expect(mockReconcile).toHaveBeenCalledWith({ alarmIds: ['a-dep', 'a-arrive'] });
+    expect(filterArgs(updates[1], 'eq', 'alarm_id')).toEqual(['00000000-0000-4000-8000-0000000000b4']);
+    expect(mockReconcile).toHaveBeenCalledWith({ alarmIds: ['00000000-0000-4000-8000-0000000000b3', '00000000-0000-4000-8000-0000000000b4'] });
   });
 
   it('setIntensity: 한 칸을 직접 고르면 세 칸 값을 약속의 모든 알람에 쓰고 intensity_source = MANUAL', async () => {
     mockRoutes['appointment_participants:select'] = (call) => (isCount(call) ? { count: 0 } : { data: participantRow() });
-    mockRoutes['alarms:update'] = () => ({ data: [{ alarm_id: 'a-wake' }, { alarm_id: 'a-prep' }] });
-    await real.setIntensity('appt-1', 'sound', 2);
+    mockRoutes['alarms:update'] = () => ({ data: [{ alarm_id: '00000000-0000-4000-8000-0000000000b1' }, { alarm_id: '00000000-0000-4000-8000-0000000000b2' }] });
+    await real.setIntensity('00000000-0000-4000-8000-0000000000a1', 'sound', 2);
     const [update] = callsTo('alarms', 'update');
     expect(update.payload).toEqual({ intensity: 'NORMAL', voice_tone: 'NEUTRAL', sound_key: 'theme_urgent', intensity_source: 'MANUAL' });
     expect(filterArgs(update, 'eq', 'participant_id')).toEqual(['p-1']);
-    expect(mockReconcile).toHaveBeenCalledWith({ alarmIds: ['a-wake', 'a-prep'] });
+    expect(mockReconcile).toHaveBeenCalledWith({ alarmIds: ['00000000-0000-4000-8000-0000000000b1', '00000000-0000-4000-8000-0000000000b2'] });
   });
 
   it('setIntensity: 다른 칸의 직접 값은 이어 가고, 마지막 직접 값을 자동으로 되돌리면 AUTO', async () => {
-    const manualAlarms = [alarmRow('a-wake', 'WAKE', '08:00', { intensity_source: 'MANUAL', sound_key: 'theme_urgent' })];
+    const manualAlarms = [alarmRow('00000000-0000-4000-8000-0000000000b1', 'WAKE', '08:00', { intensity_source: 'MANUAL', sound_key: 'theme_urgent' })];
     mockRoutes['appointment_participants:select'] = (call) => (isCount(call) ? { count: 0 } : { data: participantRow({}, {}, manualAlarms) });
-    mockRoutes['alarms:update'] = () => ({ data: [{ alarm_id: 'a-wake' }] });
-    await real.setIntensity('appt-1', 'vibration', 0); // 배경음 강 · 진동 약
+    mockRoutes['alarms:update'] = () => ({ data: [{ alarm_id: '00000000-0000-4000-8000-0000000000b1' }] });
+    await real.setIntensity('00000000-0000-4000-8000-0000000000a1', 'vibration', 0); // 배경음 강 · 진동 약
     expect(callsTo('alarms', 'update')[0].payload).toEqual({ intensity: 'SOFT', voice_tone: 'NEUTRAL', sound_key: 'theme_urgent', intensity_source: 'MANUAL' });
     mockCalls.length = 0;
-    await real.setIntensity('appt-1', 'sound', null); // 남은 직접 값이 없음
+    await real.setIntensity('00000000-0000-4000-8000-0000000000a1', 'sound', null); // 남은 직접 값이 없음
     expect(callsTo('alarms', 'update')[0].payload).toEqual({ intensity: 'NORMAL', voice_tone: 'NEUTRAL', sound_key: 'theme_default', intensity_source: 'AUTO' });
   });
 
   it('쓰기 뒤 H03의 기억해 둔 저장 값은 지움', async () => {
     mockRoutes['appointment_participants:select'] = (call) => (isCount(call) ? { count: 0 } : { data: participantRow() });
-    await real.getAppointment('appt-1');
-    expect(recallDetail('appt-1')).toBeDefined();
-    mockRoutes['alarms:update'] = () => ({ data: [{ alarm_id: 'a-wake' }] });
-    await real.setIntensity('appt-1', 'voice', 2);
-    expect(recallDetail('appt-1')).toBeUndefined();
+    await real.getAppointment('00000000-0000-4000-8000-0000000000a1');
+    expect(recallDetail('00000000-0000-4000-8000-0000000000a1')).toBeDefined();
+    mockRoutes['alarms:update'] = () => ({ data: [{ alarm_id: '00000000-0000-4000-8000-0000000000b1' }] });
+    await real.setIntensity('00000000-0000-4000-8000-0000000000a1', 'voice', 2);
+    expect(recallDetail('00000000-0000-4000-8000-0000000000a1')).toBeUndefined();
   });
 });
 
@@ -519,7 +543,7 @@ describe('새 일정 계산 · 저장 (H05)', () => {
 describe('알람 설정 미리 보기 · 저장 (H03)', () => {
   const loaded = async () => {
     mockRoutes['appointment_participants:select'] = (call) => (isCount(call) ? { count: 0 } : { data: participantRow() });
-    return (await real.getAppointment('appt-1'))!;
+    return (await real.getAppointment('00000000-0000-4000-8000-0000000000a1'))!;
   };
   const same = (d: Awaited<ReturnType<typeof loaded>>): AlarmSettingsDraft => ({
     ...d.edits,
@@ -531,18 +555,18 @@ describe('알람 설정 미리 보기 · 저장 (H03)', () => {
     const detail = await loaded();
     mockCalls.length = 0;
     mockCallEdge.mockResolvedValue(suggestion({ travel: { minutes: 40, source: 'MANUAL', manual_required: false, needs_confirmation: false, note: null, auto_minutes: 55 } }));
-    const preview = await real.previewAlarms('appt-1', { ...detail.edits, travelMinutes: 40 });
+    const preview = await real.previewAlarms('00000000-0000-4000-8000-0000000000a1', { ...detail.edits, travelMinutes: 40 });
     expect(mockCalls).toEqual([]);
-    expect(mockCallEdge.mock.calls[0][1]).toMatchObject({ appointment_id: 'appt-1', participant: { est_travel_minutes: 40, travel_source: 'MANUAL' } });
+    expect(mockCallEdge.mock.calls[0][1]).toMatchObject({ appointment_id: '00000000-0000-4000-8000-0000000000a1', participant: { est_travel_minutes: 40, travel_source: 'MANUAL' } });
     expect(preview).toMatchObject({ travelMinutes: 40, travelSource: '직접 입력', autoTravelMinutes: 55 });
   });
 
   it('previewAlarms: 출발 시각까지 지난 일정은 서버가 오류로 줘도 계산 결과로 미리 보기를 보여 줌', async () => {
     const detail = await loaded();
     mockCallEdge.mockRejectedValue(new EdgeError('UNPROCESSABLE', { details: { reason: 'DEPARTURE_PASSED', suggestion: suggestion({ check: { ok: false, reason: 'DEPARTURE_PASSED' } }) } }));
-    await expect(real.previewAlarms('appt-1', detail.edits)).resolves.toMatchObject({ travelMinutes: 50 });
+    await expect(real.previewAlarms('00000000-0000-4000-8000-0000000000a1', detail.edits)).resolves.toMatchObject({ travelMinutes: 50 });
     mockCallEdge.mockRejectedValue(new EdgeError('NETWORK'));
-    await expect(real.previewAlarms('appt-1', detail.edits)).rejects.toBeInstanceOf(UserError);
+    await expect(real.previewAlarms('00000000-0000-4000-8000-0000000000a1', detail.edits)).rejects.toBeInstanceOf(UserError);
   });
 
   it('saveAlarmSettings: 종류만 바꾸면 계산 없이 저장 — enabled · levels · 고친 값 기록(alarm_enabled)', async () => {
@@ -553,15 +577,15 @@ describe('알람 설정 미리 보기 · 저장 (H03)', () => {
         alarms: ['WAKE', 'PREPARE', 'DEPARTURE'].map((t) => ({ ...commitResponse().alarms[0], alarm_id: t, alarm_type: t, is_enabled: t !== 'WAKE' })),
       }),
     );
-    mockRoutes['alarms:select'] = () => ({ data: [{ alarm_id: 'a-wake', alarm_type: 'WAKE', is_enabled: false }, { alarm_id: 'a-arrive', alarm_type: 'ARRIVE', is_enabled: true }] });
+    mockRoutes['alarms:select'] = () => ({ data: [{ alarm_id: '00000000-0000-4000-8000-0000000000b1', alarm_type: 'WAKE', is_enabled: false }, { alarm_id: '00000000-0000-4000-8000-0000000000b4', alarm_type: 'ARRIVE', is_enabled: true }] });
     mockRoutes['alarms:update'] = () => ({ data: [] });
-    const result = await real.saveAlarmSettings('appt-1', { ...same(detail), kinds: { WAKE: false, PREPARE: true, DEPARTURE: true } });
+    const result = await real.saveAlarmSettings('00000000-0000-4000-8000-0000000000a1', { ...same(detail), kinds: { WAKE: false, PREPARE: true, DEPARTURE: true } });
 
     expect(mockCallEdge).toHaveBeenCalledTimes(1);
     const [name, body] = mockCallEdge.mock.calls[0];
     expect(name).toBe('alarm-commit');
     expect(body).toMatchObject({
-      appointment_id: 'appt-1',
+      appointment_id: '00000000-0000-4000-8000-0000000000a1',
       enabled: { WAKE: false, PREPARE: true, DEPARTURE: true },
       levels: { sound: null, voice: null, vibration: null },
       edits: [{ screen: 'H03', field: 'alarm_enabled', alarm_type: 'WAKE', auto_value: true, edited_value: false }],
@@ -575,7 +599,7 @@ describe('알람 설정 미리 보기 · 저장 (H03)', () => {
     mockCallEdge.mockResolvedValueOnce(suggestion({ travel: { minutes: 40, source: 'MANUAL', manual_required: false, needs_confirmation: false, note: null, auto_minutes: 55 } }));
     mockCallEdge.mockResolvedValueOnce(commitResponse());
     mockRoutes['alarms:select'] = () => ({ data: [] });
-    await real.saveAlarmSettings('appt-1', { ...same(detail), travelMinutes: 40 });
+    await real.saveAlarmSettings('00000000-0000-4000-8000-0000000000a1', { ...same(detail), travelMinutes: 40 });
     expect(mockCallEdge.mock.calls.map(([name]) => name)).toEqual(['alarm-suggest', 'alarm-commit']);
     expect((mockCallEdge.mock.calls[1][1] as { edits: unknown }).edits).toEqual([{ screen: 'H03', field: 'travel_minutes', auto_value: 55, edited_value: 40 }]);
   });
@@ -591,11 +615,11 @@ describe('알람 설정 미리 보기 · 저장 (H03)', () => {
         check: { ok: false, reason: 'ORDER' },
       }),
     );
-    await expect(real.saveAlarmSettings('appt-1', { ...same(detail), times: { WAKE: new Date(kst('09:30')) } })).rejects.toThrow('빠를 수 없어요');
+    await expect(real.saveAlarmSettings('00000000-0000-4000-8000-0000000000a1', { ...same(detail), times: { WAKE: new Date(kst('09:30')) } })).rejects.toThrow('빠를 수 없어요');
     expect(mockCallEdge).toHaveBeenCalledTimes(1);
 
     mockCallEdge.mockResolvedValueOnce(suggestion({ alarms: [], travel: { minutes: null, source: null, manual_required: true, needs_confirmation: true, note: null, auto_minutes: null } }));
-    await expect(real.saveAlarmSettings('appt-1', { ...same(detail), origin: '모르는 곳' })).rejects.toThrow('직접 입력');
+    await expect(real.saveAlarmSettings('00000000-0000-4000-8000-0000000000a1', { ...same(detail), origin: '모르는 곳' })).rejects.toThrow('직접 입력');
   });
 
   it('saveAlarmSettings: 종류를 모두 껐으면 turnedOff, 껐던 것을 다시 켜면 turnedOn', async () => {
@@ -603,13 +627,13 @@ describe('알람 설정 미리 보기 · 저장 (H03)', () => {
     const allOff = commitResponse({ alarms: ['WAKE', 'PREPARE', 'DEPARTURE'].map((t) => ({ ...commitResponse().alarms[0], alarm_id: t, alarm_type: t, is_enabled: false })) });
     mockCallEdge.mockResolvedValueOnce(allOff);
     mockRoutes['alarms:select'] = () => ({ data: [] });
-    expect(await real.saveAlarmSettings('appt-1', { ...same(detail), kinds: { WAKE: false, PREPARE: false, DEPARTURE: false } })).toEqual({ turnedOff: true, turnedOn: false });
+    expect(await real.saveAlarmSettings('00000000-0000-4000-8000-0000000000a1', { ...same(detail), kinds: { WAKE: false, PREPARE: false, DEPARTURE: false } })).toEqual({ turnedOff: true, turnedOn: false });
 
     mockRoutes['appointment_participants:select'] = (call) =>
       isCount(call) ? { count: 0 } : { data: participantRow({}, {}, meetingAlarms().map((a) => ({ ...a, is_enabled: false }))) };
-    const offDetail = (await real.getAppointment('appt-1'))!;
+    const offDetail = (await real.getAppointment('00000000-0000-4000-8000-0000000000a1'))!;
     mockCallEdge.mockResolvedValueOnce(commitResponse());
-    expect(await real.saveAlarmSettings('appt-1', { ...same(offDetail), kinds: { WAKE: true, PREPARE: false, DEPARTURE: false } })).toEqual({ turnedOff: false, turnedOn: true });
+    expect(await real.saveAlarmSettings('00000000-0000-4000-8000-0000000000a1', { ...same(offDetail), kinds: { WAKE: true, PREPARE: false, DEPARTURE: false } })).toEqual({ turnedOff: false, turnedOn: true });
   });
 
   it('saveAlarmSettings: 저장은 됐는데 폰에 못 걸었으면 UserError (같은 저장을 다시 해도 같은 상태가 됨)', async () => {
@@ -617,25 +641,25 @@ describe('알람 설정 미리 보기 · 저장 (H03)', () => {
     mockCallEdge.mockResolvedValue(commitResponse());
     mockRoutes['alarms:select'] = () => ({ data: [] });
     mockApplyCommit.mockResolvedValue({ failed: [{ alarmId: 'n-wake', error: '정확한 알람 권한 없음' }] });
-    await expect(real.saveAlarmSettings('appt-1', { ...same(detail), kinds: { WAKE: false, PREPARE: true, DEPARTURE: true } })).rejects.toBeInstanceOf(UserError);
+    await expect(real.saveAlarmSettings('00000000-0000-4000-8000-0000000000a1', { ...same(detail), kinds: { WAKE: false, PREPARE: true, DEPARTURE: true } })).rejects.toBeInstanceOf(UserError);
   });
 
   it('saveAlarmSettings: 저장과 따로 쌓인 고친 값 기록(recordEdit)을 같은 일정의 저장에 실어 보내고, 성공하면 비움', async () => {
     const detail = await loaded();
-    await real.recordEdit({ screen: 'S01', field: 'scheduled_at', appointmentId: 'appt-1', alarmType: 'WAKE', autoValue: new Date(kst('08:00')), editedValue: new Date(kst('07:50')) });
+    await real.recordEdit({ screen: 'S01', field: 'scheduled_at', appointmentId: '00000000-0000-4000-8000-0000000000a1', alarmType: 'WAKE', autoValue: new Date(kst('08:00')), editedValue: new Date(kst('07:50')) });
     await real.recordEdit({ screen: 'S01', field: 'scheduled_at', appointmentId: 'other', alarmType: 'WAKE', autoValue: 1, editedValue: 2 });
     mockRoutes['alarms:select'] = () => ({ data: [] });
 
     mockCallEdge.mockRejectedValueOnce(new EdgeError('NETWORK'));
-    await expect(real.saveAlarmSettings('appt-1', same(detail))).rejects.toBeInstanceOf(UserError);
-    expect(peekEdits('appt-1')).toHaveLength(1); // 저장이 실패하면 큐에 남음
+    await expect(real.saveAlarmSettings('00000000-0000-4000-8000-0000000000a1', same(detail))).rejects.toBeInstanceOf(UserError);
+    expect(peekEdits('00000000-0000-4000-8000-0000000000a1')).toHaveLength(1); // 저장이 실패하면 큐에 남음
 
     mockCallEdge.mockResolvedValueOnce(commitResponse());
-    await real.saveAlarmSettings('appt-1', same(detail));
+    await real.saveAlarmSettings('00000000-0000-4000-8000-0000000000a1', same(detail));
     expect((mockCallEdge.mock.calls.at(-1)?.[1] as { edits: unknown }).edits).toEqual([
       { screen: 'S01', field: 'scheduled_at', alarm_type: 'WAKE', auto_value: new Date(kst('08:00')).toISOString(), edited_value: new Date(kst('07:50')).toISOString() },
     ]);
-    expect(peekEdits('appt-1')).toEqual([]);
+    expect(peekEdits('00000000-0000-4000-8000-0000000000a1')).toEqual([]);
     expect(peekEdits('other')).toHaveLength(1); // 다른 일정의 기록은 그 일정의 저장을 기다림
   });
 });
@@ -643,41 +667,41 @@ describe('알람 설정 미리 보기 · 저장 (H03)', () => {
 describe('고친 값 기록 줄 수 상한 (서버 edits 50)', () => {
   it('쌓인 기록은 50줄까지만 두고, 한 번의 저장에는 이번 줄 + 남는 자리만큼만 실음 — 못 보낸 것은 큐에 남아 다음 저장에', async () => {
     mockRoutes['appointment_participants:select'] = (call) => (isCount(call) ? { count: 0 } : { data: participantRow() });
-    const detail = (await real.getAppointment('appt-1'))!;
+    const detail = (await real.getAppointment('00000000-0000-4000-8000-0000000000a1'))!;
     for (let i = 0; i < 60; i++) {
-      await real.recordEdit({ screen: 'S01', field: 'scheduled_at', appointmentId: 'appt-1', alarmType: 'WAKE', autoValue: i, editedValue: i + 1 });
+      await real.recordEdit({ screen: 'S01', field: 'scheduled_at', appointmentId: '00000000-0000-4000-8000-0000000000a1', alarmType: 'WAKE', autoValue: i, editedValue: i + 1 });
     }
-    expect(peekEdits('appt-1')).toHaveLength(50); // 쌓는 쪽 상한
+    expect(peekEdits('00000000-0000-4000-8000-0000000000a1')).toHaveLength(50); // 쌓는 쪽 상한
     mockRoutes['alarms:select'] = () => ({ data: [] });
     mockCallEdge.mockResolvedValueOnce(suggestion({ travel: { minutes: 40, source: 'MANUAL', manual_required: false, needs_confirmation: false, note: null, auto_minutes: 55 } }));
     mockCallEdge.mockResolvedValueOnce(commitResponse());
-    await real.saveAlarmSettings('appt-1', { ...detail.edits, kinds: { WAKE: true, PREPARE: true, DEPARTURE: true }, levels: { sound: null, voice: null, vibration: null }, travelMinutes: 40 });
+    await real.saveAlarmSettings('00000000-0000-4000-8000-0000000000a1', { ...detail.edits, kinds: { WAKE: true, PREPARE: true, DEPARTURE: true }, levels: { sound: null, voice: null, vibration: null }, travelMinutes: 40 });
     const edits = (mockCallEdge.mock.calls.at(-1)?.[1] as { edits: unknown[] }).edits;
     expect(edits).toHaveLength(50);
     expect(edits[0]).toMatchObject({ screen: 'H03', field: 'travel_minutes' }); // 이번 저장의 줄이 먼저
-    expect(peekEdits('appt-1')).toHaveLength(1); // 못 실은 한 줄은 다음 저장에
+    expect(peekEdits('00000000-0000-4000-8000-0000000000a1')).toHaveLength(1); // 못 실은 한 줄은 다음 저장에
   });
 });
 
 describe('로그아웃 · 계정 전환 때 메모리 비우기 (resetAlarmMemory)', () => {
   it('읽어 둔 알람 설정 · 쌓인 고친 값 기록 · 기억해 둔 장소 좌표를 모두 비움', async () => {
     mockRoutes['appointment_participants:select'] = (call) => (isCount(call) ? { count: 0 } : { data: participantRow() });
-    await real.getAppointment('appt-1');
-    await real.recordEdit({ screen: 'S01', field: 'scheduled_at', appointmentId: 'appt-1', autoValue: 1, editedValue: 2 });
+    await real.getAppointment('00000000-0000-4000-8000-0000000000a1');
+    await real.recordEdit({ screen: 'S01', field: 'scheduled_at', appointmentId: '00000000-0000-4000-8000-0000000000a1', autoValue: 1, editedValue: 2 });
     mockCallEdge.mockResolvedValue({ places: [{ id: '1', name: '세종대학교', lat: 37.55, lng: 127.07 }] });
     await real.listPlaces('세종');
     resetAlarmMemory();
-    expect(recallDetail('appt-1')).toBeUndefined();
-    expect(peekEdits('appt-1')).toEqual([]);
+    expect(recallDetail('00000000-0000-4000-8000-0000000000a1')).toBeUndefined();
+    expect(peekEdits('00000000-0000-4000-8000-0000000000a1')).toEqual([]);
     expect(lookupPlace('세종대학교')).toBeUndefined();
   });
 });
 
 describe('일정 없는 알람 (D46)', () => {
   const standaloneResponse = () => ({
-    alarm_id: 's-1',
-    alarms: [{ alarm_id: 's-1', alarm_type: 'WAKE', scheduled_at: kst('07:00', 23), is_enabled: true, intensity: 'STRONG', voice_tone: 'DIRECT', sound_key: 'theme_urgent', time_source: 'MANUAL', intensity_source: 'MANUAL', recurrence_rule: 'FREQ=WEEKLY;BYDAY=MO' }],
-    ring_packages: [{ alarmId: 's-1' }],
+    alarm_id: '00000000-0000-4000-8000-0000000000c1',
+    alarms: [{ alarm_id: '00000000-0000-4000-8000-0000000000c1', alarm_type: 'WAKE', scheduled_at: kst('07:00', 23), is_enabled: true, intensity: 'STRONG', voice_tone: 'DIRECT', sound_key: 'theme_urgent', time_source: 'MANUAL', intensity_source: 'MANUAL', recurrence_rule: 'FREQ=WEEKLY;BYDAY=MO' }],
+    ring_packages: [{ alarmId: '00000000-0000-4000-8000-0000000000c1' }],
     canceled_alarm_ids: [],
   });
 
@@ -690,13 +714,13 @@ describe('일정 없는 알람 (D46)', () => {
       edits: [],
     });
     expect(mockApplyCommit).toHaveBeenCalledTimes(1);
-    expect(saved).toMatchObject({ id: 's-1', title: '알람', standalone: true, repeatLabel: '매주 월요일', level: 2 });
+    expect(saved).toMatchObject({ id: '00000000-0000-4000-8000-0000000000c1', title: '알람', standalone: true, repeatLabel: '매주 월요일', level: 2 });
   });
 
   it('고치기: 알람 id만 있으면 시각 없이 강도 · 켜기만 보냄, 만들기인데 시각이 없으면 UserError', async () => {
     mockCallEdge.mockResolvedValue(standaloneResponse());
-    await real.saveStandaloneAlarm({ alarmId: 's-1', level: 0 });
-    expect((mockCallEdge.mock.calls[0][1] as { alarm: unknown }).alarm).toEqual({ alarm_id: 's-1', levels: { sound: 0, voice: 0, vibration: 0 } });
+    await real.saveStandaloneAlarm({ alarmId: '00000000-0000-4000-8000-0000000000c1', level: 0 });
+    expect((mockCallEdge.mock.calls[0][1] as { alarm: unknown }).alarm).toEqual({ alarm_id: '00000000-0000-4000-8000-0000000000c1', levels: { sound: 0, voice: 0, vibration: 0 } });
     await expect(real.saveStandaloneAlarm({ level: 1 })).rejects.toBeInstanceOf(UserError);
   });
 });
@@ -705,13 +729,13 @@ describe('고친 값 기록 읽기 (listEditLogs)', () => {
   it('내 기록을 오래된 순으로 화면 모양으로 돌려줌', async () => {
     mockRoutes['user_edit_logs:select'] = () => ({
       data: [
-        { created_at: '2025-05-22T02:00:00+00:00', screen: 'H03', field: 'buffer_minutes', appointment_id: 'appt-1', alarm_id: null, alarm_type: null, auto_value: 10, edited_value: 15 },
-        { created_at: '2025-05-22T01:00:00+00:00', screen: 'H05', field: 'scheduled_at', appointment_id: 'appt-1', alarm_id: 'a-wake', alarm_type: 'WAKE', auto_value: '2025-05-21T23:00:00Z', edited_value: '2025-05-21T22:45:00Z' },
+        { created_at: '2025-05-22T02:00:00+00:00', screen: 'H03', field: 'buffer_minutes', appointment_id: '00000000-0000-4000-8000-0000000000a1', alarm_id: null, alarm_type: null, auto_value: 10, edited_value: 15 },
+        { created_at: '2025-05-22T01:00:00+00:00', screen: 'H05', field: 'scheduled_at', appointment_id: '00000000-0000-4000-8000-0000000000a1', alarm_id: '00000000-0000-4000-8000-0000000000b1', alarm_type: 'WAKE', auto_value: '2025-05-21T23:00:00Z', edited_value: '2025-05-21T22:45:00Z' },
       ],
     });
     const logs = await real.listEditLogs();
     expect(logs.map((l) => l.field)).toEqual(['scheduled_at', 'buffer_minutes']); // 최근순으로 읽은 것을 뒤집어 오래된 순
-    expect(logs[0]).toMatchObject({ screen: 'H05', alarmId: 'a-wake', alarmType: 'WAKE' });
+    expect(logs[0]).toMatchObject({ screen: 'H05', alarmId: '00000000-0000-4000-8000-0000000000b1', alarmType: 'WAKE' });
     const [read] = callsTo('user_edit_logs', 'select');
     expect(filterArgs(read, 'eq', 'user_id')).toEqual(['user-1']);
     expect(mockCalls.some((c) => c.table === 'user_edit_logs' && c.op !== 'select')).toBe(false); // 따로 insert하지 않음
@@ -755,7 +779,7 @@ describe('기상 확인 (H08)', () => {
   // 알람 한 줄 + 그 알람의 DISMISSED / WAKE_CONFIRMED 기록
   function setup(events: { event_type: string; event_at: string; input_source?: string | null }[], opts: { appointment?: Record<string, unknown> | null } = {}) {
     mockRoutes['alarms:select'] = () => ({
-      data: { alarm_id: 'a-wake', alarm_type: 'WAKE', appointment_participants: { appointments: opts.appointment === undefined ? { title: '팀 주간회의', group_id: 'cap', groups: { group_name: '캡스톤팀' } } : opts.appointment } },
+      data: { alarm_id: '00000000-0000-4000-8000-0000000000b1', alarm_type: 'WAKE', appointment_participants: { appointments: opts.appointment === undefined ? { title: '팀 주간회의', group_id: 'cap', groups: { group_name: '캡스톤팀' } } : opts.appointment } },
     });
     mockRoutes['alarm_events:select'] = () => ({ data: events });
     mockRoutes['alarm_events:upsert'] = () => undefined;
@@ -770,24 +794,24 @@ describe('기상 확인 (H08)', () => {
   it('해제 기록이 없으면(아직 울리는 중) null — 먼저 폰의 울림 기록을 올림', async () => {
     setup([]);
     at(1);
-    expect(await real.getWakeCheck('a-wake')).toBeNull();
+    expect(await real.getWakeCheck('00000000-0000-4000-8000-0000000000b1')).toBeNull();
     expect(mockUploadEvents).toHaveBeenCalledTimes(1);
   });
 
   it('기상 알람이 아니거나 없는 알람이면 null', async () => {
-    mockRoutes['alarms:select'] = () => ({ data: { alarm_id: 'a-dep', alarm_type: 'DEPARTURE', appointment_participants: null } });
+    mockRoutes['alarms:select'] = () => ({ data: { alarm_id: '00000000-0000-4000-8000-0000000000b3', alarm_type: 'DEPARTURE', appointment_participants: null } });
     mockRoutes['alarm_events:select'] = () => ({ data: [] });
-    expect(await real.getWakeCheck('a-dep')).toBeNull();
+    expect(await real.getWakeCheck('00000000-0000-4000-8000-0000000000b3')).toBeNull();
     mockRoutes['alarms:select'] = () => ({ data: null });
-    expect(await real.getWakeCheck('gone')).toBeNull();
+    expect(await real.getWakeCheck('00000000-0000-4000-8000-0000000000d1')).toBeNull();
   });
 
   it('해제 뒤 10분 안: 관찰 중 — 지금까지의 사용 시간, 그룹 일정이면 그룹 이름', async () => {
     setup([{ event_type: 'DISMISSED', event_at: eventAt(0) }]);
     at(4);
     mockCore.getUsageSpans.mockResolvedValue([{ startMillis: min(0.5), endMillis: min(1.5) }]);
-    const check = await real.getWakeCheck('a-wake');
-    expect(check).toMatchObject({ alarmId: 'a-wake', appointmentTitle: '팀 주간회의', groupId: 'cap', groupName: '캡스톤팀', phase: 'observing', usage: 1, recent: 0, thetaMinutes: 1, confirmed: null });
+    const check = await real.getWakeCheck('00000000-0000-4000-8000-0000000000b1');
+    expect(check).toMatchObject({ alarmId: '00000000-0000-4000-8000-0000000000b1', appointmentTitle: '팀 주간회의', groupId: 'cap', groupName: '캡스톤팀', phase: 'observing', usage: 1, recent: 0, thetaMinutes: 1, confirmed: null });
     expect(check?.dismissedAt.getTime()).toBe(min(0));
     expect(mockCore.getUsageSpans).toHaveBeenCalledWith(min(0), min(4)); // 지금까지만 읽음
     expect(callsTo('alarm_events', 'upsert')).toEqual([]);
@@ -800,13 +824,13 @@ describe('기상 확인 (H08)', () => {
       { startMillis: min(0.5), endMillis: min(1.5) },
       { startMillis: min(6), endMillis: min(7) },
     ]);
-    const check = await real.getWakeCheck('a-wake');
+    const check = await real.getWakeCheck('00000000-0000-4000-8000-0000000000b1');
     expect(check?.confirmed).toEqual({ at: new Date(min(1.5)), how: 'auto' });
     expect(mockCore.getUsageSpans).toHaveBeenCalledWith(min(0), min(10));
     const [confirmed] = callsTo('alarm_events', 'upsert');
     expect(confirmed.payload).toEqual({
       user_id: 'user-1',
-      alarm_id: 'a-wake',
+      alarm_id: '00000000-0000-4000-8000-0000000000b1',
       event_type: 'WAKE_CONFIRMED',
       event_at: new Date(min(1.5)).toISOString(),
       client_event_id: expect.stringMatching(UUID),
@@ -826,21 +850,21 @@ describe('기상 확인 (H08)', () => {
     setup([{ event_type: 'DISMISSED', event_at: eventAt(0) }]);
     at(12);
     mockCore.getUsageSpans.mockResolvedValue([{ startMillis: min(0.2), endMillis: min(0.4) }]);
-    expect(await real.getWakeCheck('a-wake')).toMatchObject({ phase: 'prompt', usage: 0.2, confirmed: null });
+    expect(await real.getWakeCheck('00000000-0000-4000-8000-0000000000b1')).toMatchObject({ phase: 'prompt', usage: 0.2, confirmed: null });
     mockCore.hasUsageAccess.mockResolvedValue(false);
     at(1);
-    expect(await real.getWakeCheck('a-wake')).toMatchObject({ phase: 'prompt', usage: 0, recent: 0 });
+    expect(await real.getWakeCheck('00000000-0000-4000-8000-0000000000b1')).toMatchObject({ phase: 'prompt', usage: 0, recent: 0 });
     mockCore.hasUsageAccess.mockResolvedValue(true);
     mockCore.getUsageSpans.mockRejectedValue(new Error('안드로이드 9 미만'));
-    expect(await real.getWakeCheck('a-wake')).toMatchObject({ phase: 'prompt' });
+    expect(await real.getWakeCheck('00000000-0000-4000-8000-0000000000b1')).toMatchObject({ phase: 'prompt' });
     expect(callsTo('alarm_events', 'upsert')).toEqual([]);
   });
 
   it('올리지 못한 해제 기록(폰에 남은 것)도 해제 시각으로 씀', async () => {
     setup([]);
     at(2);
-    mockCore.getPendingEvents.mockResolvedValue([{ clientEventId: 'e1', alarmId: 'a-wake', alarmType: 'WAKE', eventType: 'DISMISSED', at: min(0), sequenceNo: 1, inputSource: 'BUTTON' }]);
-    expect((await real.getWakeCheck('a-wake'))?.dismissedAt.getTime()).toBe(min(0));
+    mockCore.getPendingEvents.mockResolvedValue([{ clientEventId: 'e1', alarmId: '00000000-0000-4000-8000-0000000000b1', alarmType: 'WAKE', eventType: 'DISMISSED', at: min(0), sequenceNo: 1, inputSource: 'BUTTON' }]);
+    expect((await real.getWakeCheck('00000000-0000-4000-8000-0000000000b1'))?.dismissedAt.getTime()).toBe(min(0));
   });
 
   it('이미 확정한 알람은 처음 판정 그대로 — 다시 쓰지 않음', async () => {
@@ -849,16 +873,16 @@ describe('기상 확인 (H08)', () => {
       { event_type: 'WAKE_CONFIRMED', event_at: eventAt(2), input_source: 'BUTTON' },
     ]);
     at(60);
-    const check = await real.getWakeCheck('a-wake');
+    const check = await real.getWakeCheck('00000000-0000-4000-8000-0000000000b1');
     expect(check?.confirmed).toEqual({ at: new Date(min(2)), how: 'self' });
-    await real.confirmWake('a-wake', 'self');
+    await real.confirmWake('00000000-0000-4000-8000-0000000000b1', 'self');
     expect(callsTo('alarm_events', 'upsert')).toEqual([]);
   });
 
   it('confirmWake(self): 지금 시각으로 WAKE_CONFIRMED(BUTTON) + 그날 기록, 두 번 눌러도(동시) 한 번만', async () => {
     setup([{ event_type: 'DISMISSED', event_at: eventAt(0) }]);
     at(12);
-    await Promise.all([real.confirmWake('a-wake', 'self'), real.confirmWake('a-wake', 'self')]);
+    await Promise.all([real.confirmWake('00000000-0000-4000-8000-0000000000b1', 'self'), real.confirmWake('00000000-0000-4000-8000-0000000000b1', 'self')]);
     const writes = callsTo('alarm_events', 'upsert');
     expect(writes).toHaveLength(1);
     expect(writes[0].payload).toMatchObject({ event_type: 'WAKE_CONFIRMED', event_at: new Date(min(12)).toISOString(), input_source: 'BUTTON' });
@@ -870,14 +894,14 @@ describe('기상 확인 (H08)', () => {
     mockRoutes['daily_records:select'] = () => ({ data: { record_id: 'r1', wake_confirmed_at: null, wake_reported_at: '2025-05-21T22:59:00Z' } });
     mockRoutes['daily_records:update'] = () => undefined;
     at(12);
-    await real.confirmWake('a-wake', 'self');
+    await real.confirmWake('00000000-0000-4000-8000-0000000000b1', 'self');
     expect(callsTo('daily_records', 'insert')).toEqual([]);
     expect(callsTo('daily_records', 'update')[0].payload).toEqual({ wake_confirmed_at: new Date(min(12)).toISOString() });
 
     mockCalls.length = 0;
     mockRoutes['alarm_events:select'] = () => ({ data: [{ event_type: 'DISMISSED', event_at: eventAt(0) }] });
     mockRoutes['daily_records:select'] = () => ({ data: { record_id: 'r1', wake_confirmed_at: '2025-05-21T23:01:00Z', wake_reported_at: '2025-05-21T22:59:00Z' } });
-    await real.confirmWake('a-wake', 'self');
+    await real.confirmWake('00000000-0000-4000-8000-0000000000b1', 'self');
     expect(callsTo('daily_records', 'update')).toEqual([]); // 처음 확인 시각을 그대로
   });
 
@@ -886,7 +910,7 @@ describe('기상 확인 (H08)', () => {
     mockRoutes['daily_records:insert'] = () => ({ error: { code: '23505', message: 'duplicate key' } });
     mockRoutes['daily_records:update'] = () => undefined;
     at(12);
-    await real.confirmWake('a-wake', 'self');
+    await real.confirmWake('00000000-0000-4000-8000-0000000000b1', 'self');
     expect(callsTo('daily_records', 'update')).toHaveLength(1);
   });
 
@@ -894,7 +918,7 @@ describe('기상 확인 (H08)', () => {
     setup([{ event_type: 'DISMISSED', event_at: eventAt(0) }]);
     at(15);
     mockCore.getUsageSpans.mockResolvedValue([{ startMillis: min(2), endMillis: min(3.5) }]);
-    await real.confirmWake('a-wake', 'auto');
+    await real.confirmWake('00000000-0000-4000-8000-0000000000b1', 'auto');
     expect(callsTo('alarm_events', 'upsert')[0].payload).toMatchObject({ event_at: new Date(min(3)).toISOString(), input_source: 'USAGE' });
   });
 
@@ -902,10 +926,10 @@ describe('기상 확인 (H08)', () => {
     setup([{ event_type: 'DISMISSED', event_at: eventAt(0) }]);
     mockRoutes['alarm_events:upsert'] = () => ({ error: { code: '', message: 'offline' } });
     at(12);
-    await expect(real.confirmWake('a-wake', 'self')).rejects.toMatchObject({ message: 'offline' });
+    await expect(real.confirmWake('00000000-0000-4000-8000-0000000000b1', 'self')).rejects.toMatchObject({ message: 'offline' });
     mockRoutes['alarm_events:upsert'] = () => undefined;
     mockRoutes['daily_records:select'] = () => ({ data: { record_id: 'r1', wake_confirmed_at: new Date(min(12)).toISOString(), wake_reported_at: new Date(min(0)).toISOString() } });
-    await real.confirmWake('a-wake', 'self');
+    await real.confirmWake('00000000-0000-4000-8000-0000000000b1', 'self');
     expect(callsTo('alarm_events', 'upsert')).toHaveLength(2); // 이벤트를 다시 씀 (확정으로 보지 않음)
   });
 
@@ -913,13 +937,13 @@ describe('기상 확인 (H08)', () => {
     setup([{ event_type: 'DISMISSED', event_at: eventAt(0) }]);
     mockRoutes['daily_records:insert'] = () => ({ error: { code: '', message: 'offline' } });
     at(12);
-    await expect(real.confirmWake('a-wake', 'self')).rejects.toMatchObject({ message: 'offline' });
+    await expect(real.confirmWake('00000000-0000-4000-8000-0000000000b1', 'self')).rejects.toMatchObject({ message: 'offline' });
     expect(callsTo('alarm_events', 'upsert')).toEqual([]); // 이벤트(확정의 표지)가 없어야 다음에 다시 시도됨
 
     // 다시 누름: 그날 기록은 이미 채워짐(앞 시도에서 insert는 됐다고 보고) -> 건너뛰고 이벤트만
     mockCalls.length = 0;
     mockRoutes['daily_records:select'] = () => ({ data: { record_id: 'r1', wake_confirmed_at: new Date(min(12)).toISOString(), wake_reported_at: new Date(min(0)).toISOString() } });
-    await real.confirmWake('a-wake', 'self');
+    await real.confirmWake('00000000-0000-4000-8000-0000000000b1', 'self');
     expect(callsTo('daily_records', 'insert')).toEqual([]);
     expect(callsTo('daily_records', 'update')).toEqual([]);
     expect(callsTo('alarm_events', 'upsert')).toHaveLength(1);
@@ -930,9 +954,9 @@ describe('기상 확인 (H08)', () => {
   it('확정 이벤트 번호는 그 알람의 그 해제로 정해진 고정 값 — 다시 눌러도 겹쳐 불려도 같은 번호(서버가 한 줄만 남김), 다른 해제면 다른 번호', async () => {
     setup([{ event_type: 'DISMISSED', event_at: eventAt(0) }]);
     at(12);
-    await real.confirmWake('a-wake', 'self');
+    await real.confirmWake('00000000-0000-4000-8000-0000000000b1', 'self');
     mockNow = new Date(min(13)); // 한 분 뒤 다시 (앞 시도가 실패했다고 보고) — 시각이 달라도 번호는 같음
-    await real.confirmWake('a-wake', 'self');
+    await real.confirmWake('00000000-0000-4000-8000-0000000000b1', 'self');
     const [first, second] = callsTo('alarm_events', 'upsert').map((c) => (c.payload as { client_event_id: string }).client_event_id);
     expect(first).toMatch(UUID);
     expect(second).toBe(first);
@@ -941,7 +965,7 @@ describe('기상 확인 (H08)', () => {
     mockCalls.length = 0;
     setup([{ event_type: 'DISMISSED', event_at: new Date(min(0) + 24 * 60 * 60_000).toISOString() }]);
     mockNow = new Date(min(12) + 24 * 60 * 60_000);
-    await real.confirmWake('a-wake', 'self');
+    await real.confirmWake('00000000-0000-4000-8000-0000000000b1', 'self');
     expect((callsTo('alarm_events', 'upsert')[0].payload as { client_event_id: string }).client_event_id).not.toBe(first);
   });
 
@@ -949,8 +973,8 @@ describe('기상 확인 (H08)', () => {
     setup([{ event_type: 'DISMISSED', event_at: eventAt(0) }]);
     at(12);
     // 둘 다 "아직 확정 전"으로 읽은 뒤 차례로 쓰는 경우 (settle의 동시 방지는 쓰는 동안만 막음)
-    await real.confirmWake('a-wake', 'self');
-    await real.confirmWake('a-wake', 'self');
+    await real.confirmWake('00000000-0000-4000-8000-0000000000b1', 'self');
+    await real.confirmWake('00000000-0000-4000-8000-0000000000b1', 'self');
     const ids = callsTo('alarm_events', 'upsert').map((c) => (c.payload as { client_event_id: string }).client_event_id);
     expect(ids).toHaveLength(2);
     expect(new Set(ids).size).toBe(1);
@@ -958,9 +982,9 @@ describe('기상 확인 (H08)', () => {
 
   it('getWakeCheck: 알람 id가 없으면 가장 최근에 끈 기상 알람 (12시간 안)', async () => {
     setup([{ event_type: 'DISMISSED', event_at: eventAt(0) }]);
-    mockRoutes['alarm_events:select'] = (call) => (call.columns?.includes('alarms!inner') ? { data: [{ alarm_id: 'a-wake', event_at: eventAt(0), alarms: { alarm_type: 'WAKE' } }] } : { data: [{ event_type: 'DISMISSED', event_at: eventAt(0) }] });
+    mockRoutes['alarm_events:select'] = (call) => (call.columns?.includes('alarms!inner') ? { data: [{ alarm_id: '00000000-0000-4000-8000-0000000000b1', event_at: eventAt(0), alarms: { alarm_type: 'WAKE' } }] } : { data: [{ event_type: 'DISMISSED', event_at: eventAt(0) }] });
     at(3);
-    expect((await real.getWakeCheck())?.alarmId).toBe('a-wake');
+    expect((await real.getWakeCheck())?.alarmId).toBe('00000000-0000-4000-8000-0000000000b1');
     const finder = mockCalls.find((c) => c.columns?.includes('alarms!inner'))!;
     expect(filterArgs(finder, 'eq', 'event_type')).toEqual(['DISMISSED']);
     expect(filterArgs(finder, 'eq', 'alarms.alarm_type')).toEqual(['WAKE']);
@@ -969,17 +993,17 @@ describe('기상 확인 (H08)', () => {
 
   it('getWakeInProgress: 해제 뒤 40분(관찰 10 + 응답 여유 30) 안이고 확정 전일 때만', async () => {
     setup([{ event_type: 'DISMISSED', event_at: eventAt(0) }]);
-    mockRoutes['alarm_events:select'] = (call) => (call.columns?.includes('alarms!inner') ? { data: [{ alarm_id: 'a-wake', event_at: eventAt(0), alarms: { alarm_type: 'WAKE' } }] } : { data: [{ event_type: 'DISMISSED', event_at: eventAt(0) }] });
+    mockRoutes['alarm_events:select'] = (call) => (call.columns?.includes('alarms!inner') ? { data: [{ alarm_id: '00000000-0000-4000-8000-0000000000b1', event_at: eventAt(0), alarms: { alarm_type: 'WAKE' } }] } : { data: [{ event_type: 'DISMISSED', event_at: eventAt(0) }] });
     at(20);
     mockCore.getUsageSpans.mockResolvedValue([]);
-    expect(await real.getWakeInProgress()).toMatchObject({ alarmId: 'a-wake', phase: 'prompt' });
+    expect(await real.getWakeInProgress()).toMatchObject({ alarmId: '00000000-0000-4000-8000-0000000000b1', phase: 'prompt' });
     const finder = mockCalls.find((c) => c.columns?.includes('alarms!inner'))!;
     expect(filterArgs(finder, 'gte', 'event_at')).toEqual([new Date(min(20) - 40 * 60_000).toISOString()]);
 
     // 확정한 뒤에는 없음
     mockRoutes['alarm_events:select'] = (call) =>
       call.columns?.includes('alarms!inner')
-        ? { data: [{ alarm_id: 'a-wake', event_at: eventAt(0), alarms: { alarm_type: 'WAKE' } }] }
+        ? { data: [{ alarm_id: '00000000-0000-4000-8000-0000000000b1', event_at: eventAt(0), alarms: { alarm_type: 'WAKE' } }] }
         : { data: [{ event_type: 'DISMISSED', event_at: eventAt(0) }, { event_type: 'WAKE_CONFIRMED', event_at: eventAt(3), input_source: 'BUTTON' }] };
     expect(await real.getWakeInProgress()).toBeNull();
 
