@@ -49,7 +49,7 @@ function DayCell({ day: d, onPress }: { day: MonthDay; onPress: () => void }) {
     <Pressable
       onPress={onPress}
       accessibilityRole="button"
-      accessibilityLabel={`${d.day}일${d.isToday ? ' 오늘' : ''}${d.mark === 'none' ? '' : ` ${MARK_LABEL[d.mark]}`}`}
+      accessibilityLabel={`${d.day}일${d.isToday ? ' 오늘' : ''}${d.isFuture ? ' 아직 오지 않은 날' : ''}${d.mark === 'none' ? '' : ` ${MARK_LABEL[d.mark]}`}`}
       style={({ pressed }) => [styles.cell, pressed && styles.pressed]}
     >
       <View style={[styles.num, d.isToday && styles.today]}>

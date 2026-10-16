@@ -34,7 +34,7 @@ function DayChip({ day: d, onPress }: { day: WeekDay; onPress: () => void }) {
       onPress={onPress}
       style={({ pressed }) => [styles.day, d.isToday && styles.on, d.isFuture && styles.future, pressed && styles.pressed]}
       accessibilityRole="button"
-      accessibilityLabel={`${d.weekday}요일 ${d.day}일${d.isToday ? ' 오늘' : ''}${d.recorded ? ' 기록 있음' : ''}`}
+      accessibilityLabel={`${d.weekday}요일 ${d.day}일${d.isToday ? ' 오늘' : ''}${d.isFuture ? ' 아직 오지 않은 날' : ''}${d.recorded ? ' 기록 있음' : ''}`}
     >
       <Text variant="tiny" tone={d.isToday ? 'inverse' : 'sub'} style={d.isToday && styles.weekdayOn}>
         {d.weekday}
