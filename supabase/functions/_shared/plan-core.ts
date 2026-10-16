@@ -31,6 +31,7 @@ import {
   type RingKind,
   type Transport,
 } from './calc/index.ts';
+import { resolveEnabled } from './commit-core.ts';
 import type { AlarmFields, ParticipantFields, PlaceInput } from './draft.ts';
 import type { ResolvedTravel, Warning } from './route.ts';
 
@@ -291,16 +292,56 @@ const KIND_AT = (chain: readonly ChainAlarm[], kind: ChainAlarm['kind']) => chai
 const LEVEL_NAME = ['약', '중', '강'] as const;
 const IMPORTANCE_NAME: Record<Importance, string> = { LOW: '보통', NORMAL: '중요', HIGH: '매우 중요' };
 
+// 이동시간을 구할 길이 없을 때의 미리 보기 — 오류 대신 "이동시간만 직접 입력해 주세요"를 알리는 200 응답 (7.1.2 마지막 단계)
+//   이동시간에 안 걸리는 칸(준비 · 강도 · 그날 첫 일정 여부)은 그대로 채우고, 이동시간이 있어야 나오는 시각은 비움
+//   check.reason = TRAVEL_REQUIRED. 앱은 travel.manual_required가 true면 입력 칸을 보이고 participant.est_travel_minutes(MANUAL)로 다시 부름
+export function toTravelRequiredSuggestion(i: PlanInputs, travel: ResolvedTravel) {
+  // 이동시간 없이는 시각을 못 구하므로 자리표시 값(0분)으로 계산해서 준비 · 강도 칸만 가져옴 — 시각 · 경고는 아래에서 비움
+  const placeholder = computePlan(i, { chosen: { minutes: 0, source: 'MANUAL', needsConfirmation: true, note: '' }, auto: null, warnings: [] });
+  return {
+    ...toSuggestion(placeholder),
+    wake_at: null,
+    prepare_at: null,
+    departure_at: null,
+    arrive_at: null,
+    alarms: [],
+    check: { ok: false, reason: 'TRAVEL_REQUIRED', message: '이동시간을 구하지 못했어요. 직접 입력해 주세요' },
+    travel: {
+      minutes: null,
+      source: null,
+      manual_required: true,
+      needs_confirmation: true,
+      sample_count: null,
+      note: '이동시간을 구하지 못했어요. 직접 입력해 주세요',
+      auto_minutes: null,
+      auto_source: null,
+      corrected_by: null,
+    },
+    warnings: travel.warnings,
+  };
+}
+
 export function intensityReason(basics: Pick<Basics, 'importance'>, it: ResolvedIntensity): string {
   const lateText = it.latePoint ? ` + 최근 4주 늦잠 지각 ${it.lateCount}회` : '';
   const base = `${IMPORTANCE_NAME[basics.importance]} 일정${lateText} → ${LEVEL_NAME[it.auto]}`;
   return it.manual ? `${base} (직접 고른 칸이 있어요)` : base;
 }
 
-export function toSuggestion(plan: Plan) {
+// inputs를 주면 켜짐 여부도 저장과 같은 규칙으로 보여 줌 (요청의 enabled · 사용자가 끈 알람) — 안 주면 지난 알림 검사 결과만
+export function toSuggestion(plan: Plan, inputs?: Pick<PlanInputs, 'existingAlarms' | 'draft' | 'now'>) {
   const { basics, travel, prepare, intensity } = plan;
   const checked = plan.check.ok ? plan.check.alarms : null;
-  const rows = checked ?? plan.chain.map((a) => ({ ...a, enabled: true, disabledReason: undefined }));
+  const rows = (checked ?? plan.chain.map((a) => ({ ...a, enabled: true, disabledReason: undefined }))).map((a) => ({
+    ...a,
+    enabled: inputs
+      ? resolveEnabled({
+          checkedEnabled: a.enabled,
+          old: inputs.existingAlarms.find((x) => x.alarm_type === a.kind),
+          requested: a.kind === 'ARRIVE' ? undefined : inputs.draft.enabled?.[a.kind],
+          now: inputs.now,
+        })
+      : a.enabled,
+  }));
   return {
     appointment_at: iso(basics.at),
     wake_at: iso(KIND_AT(plan.fullChain, 'WAKE')),
@@ -322,6 +363,7 @@ export function toSuggestion(plan: Plan) {
     travel: {
       minutes: plan.travelMinutes,
       source: travel.chosen?.source,
+      manual_required: false,
       needs_confirmation: travel.chosen?.needsConfirmation ?? false,
       sample_count: travel.chosen?.sampleCount ?? null,
       note: travel.chosen?.note ?? null,

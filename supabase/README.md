@@ -119,7 +119,7 @@ create policy wake_signal_receive on realtime.messages
 | 422 | `UNPROCESSABLE` | 출발 시각까지 지남 · 알람 순서 어긋남 · 지난 시각. `details.reason`: `DEPARTURE_PASSED` · `ORDER` · `PAST_TIME` |
 | 429 | `RATE_LIMITED` | 카카오 호출 한도 |
 | 500 | `INTERNAL` | 그 밖 (원문은 로그에만) |
-| 502 | `ROUTE_UNAVAILABLE` | 이동시간을 구할 길이 없음. `details.manual_required` = 직접 입력으로 이어 가기. `alarm-commit`은 `details.fallback`에 근사값 · 실측 중앙값을 줌 |
+| 502 | `ROUTE_UNAVAILABLE` | 이동시간을 구할 길이 없음(좌표가 없고 직접 입력도 없음). `details.manual_required` = 직접 입력으로 이어 가기 (`alarm-suggest`는 이때 오류 대신 200 + `travel.manual_required`). `alarm-commit`은 `details.fallback`에 근사값 · 실측 중앙값을 줌 |
 | 502 | `PLACE_UNAVAILABLE` | 장소 검색 API 장애 |
 | 503 | `NOT_CONFIGURED` | 비밀값이 아직 없음 (카카오 키 등) |
 
@@ -127,18 +127,21 @@ create policy wake_signal_receive on realtime.messages
 
 ### alarm-suggest
 
-요청 (5.4.1). `appointment_id`가 있으면 시각 · 장소 · 중요도는 DB 값을 쓰고 요청 값은 읽지 않음 (D41).
+요청 — **`alarm-commit`과 같은 초안 모양**이라 앱은 H05 · H03 초안 하나를 두 함수에 그대로 보냄 (계획 7절). 새 약속은 `appointment`, 기존 약속은 `appointment_id` (둘 다 쓰면 400). 기존 약속이면 시각 · 장소 · 중요도는 DB 값을 씀 (D41). 미리 보기에는 `title` · `group_id` · `recurrence_rule` · `replace_existing` · `edits`가 필요 없어 읽기만 하고 안 씀. 예전 모양(루트의 `appointment_at` · `destination` · `travel_minutes_override` · `prepare_minutes_override`)은 받지 않음. 앱은 `place-search`가 준 좌표를 초안의 `destination` · `origin`에 담아 보냄 (좌표가 없으면 길찾기를 못 함).
 
 ```jsonc
 {
-  "appointment_id": "uuid",                  // 선택: 기존 약속 기준 (H03)
-  "appointment_at": "2026-10-20T10:00:00+09:00",   // 새 일정이면 필수
-  "destination": { "name": "세종대학교", "lat": 37.55, "lng": 127.07 },   // 새 일정이면 필수, 좌표는 선택(없으면 길찾기를 못 함)
-  "origin": { "name": "집", "lat": 37.5, "lng": 127.0 },   // 없으면 저장된 출발지 → 프로필 집
-  "transport_type": "TRANSIT", "importance": "NORMAL", "buffer_minutes": 10,
-  "travel_minutes_override": 70,             // 직접 입력한 이동 → source MANUAL
-  "prepare_minutes_override": 40,            // 직접 고른 준비(기상~출발)
-  "before_prepare_minutes": 20, "with_wake": true,   // 선택: 기상 뒤 준비 전 활동 / 그날 첫 일정 여부 (없으면 서버가 정함)
+  "appointment_id": "uuid",                  // 기존 약속 기준 (H03). 새 일정이면 아래 appointment
+  "appointment": { "appointment_at": "2026-10-20T10:00:00+09:00",   // 새 일정이면 필수 (title은 저장할 때만 필수)
+                   "destination": { "name": "세종대학교", "lat": 37.55, "lng": 127.07 },   // 필수. 앱은 place-search로 고른 장소의 좌표(lat · lng)를 담아 보냄
+                   "importance": "NORMAL" },
+  "participant": {
+    "origin": { "name": "집", "lat": 37.5, "lng": 127.0 },   // 없으면 저장된 출발지 → 프로필 집. 앱은 좌표도 같이 보냄
+    "transport_type": "TRANSIT", "buffer_minutes": 10,
+    "est_travel_minutes": 70, "travel_source": "MANUAL",      // 선택: 직접 입력한 이동 (MANUAL), 이미 보여 준 길찾기 값이면 "API" — 둘은 같이 보냄
+    "prepare_minutes": 40,                                    // 선택: 직접 고른 준비(기상~출발)
+    "before_prepare_minutes": 20, "with_wake": true           // 선택: 기상 뒤 준비 전 활동 / 그날 첫 일정 여부 (없으면 서버가 정함)
+  },
   "kinds": ["WAKE", "PREPARE", "DEPARTURE"], // 선택: 만들 알람 종류. 없으면 지금 있는 종류(없으면 전부), [] = 알람 없는 일정
   "enabled": { "WAKE": true },               // 선택: 종류별 켜기 · 끄기
   "manual_times": { "WAKE": "2026-10-20T07:30:00+09:00", "PREPARE": null },   // 직접 고른 알람 시각. 이 칸이 없으면 저장된 직접 값 유지, null = 자동으로 되돌림
@@ -146,11 +149,13 @@ create policy wake_signal_receive on realtime.messages
 }
 ```
 
-응답: `appointment_at` · `wake_at` · `prepare_at` · `departure_at` · `arrive_at` · `alarms[{ alarm_type, scheduled_at, auto_scheduled_at, time_source, is_enabled, disabled_reason }]` · `check{ ok, reason? }` · `travel{ minutes, source(API · CACHED · ESTIMATE · MANUAL), needs_confirmation, auto_minutes, note, sample_count }` · `prepare{ minutes, auto_minutes, source, common_p80, correction, sample_count, prior, weight, residual_p80, before_prepare_minutes }` · `intensity{ level, voice_tone, sound_key, source, reason, auto_level, axes }` · `with_wake` · `confidence` · `warnings[{ code, message }]`.
+응답: `appointment_at` · `wake_at` · `prepare_at` · `departure_at` · `arrive_at` · `alarms[{ alarm_type, scheduled_at, auto_scheduled_at, time_source, is_enabled, disabled_reason }]` · `check{ ok, reason? }` · `travel{ minutes, source(API · CACHED · ESTIMATE · MANUAL), manual_required, needs_confirmation, auto_minutes, note, sample_count }` · `prepare{ minutes, auto_minutes, source, common_p80, correction, sample_count, prior, weight, residual_p80, before_prepare_minutes }` · `intensity{ level, voice_tone, sound_key, source, reason, auto_level, axes }` · `with_wake` · `confidence` · `warnings[{ code, message }]`. 시각은 `Z`(UTC) ISO 8601.
 
-- 이동시간 순서 (7장 7.1.2): 직접 입력 → 카카오(대중교통 · 도보 · 자동차) → 같은 경로(300m) 실측 3건 이상 중앙값 `CACHED` → 좌표 직선거리 근사 `ESTIMATE`(`needs_confirmation`) → 없으면 `ROUTE_UNAVAILABLE`. 중앙값은 내 출발 · 도착 기록을 읽기만 하고 `CACHED`로 저장하지 않음 (D5)
+- 이동시간 순서 (7장 7.1.2): 직접 입력 → 카카오(대중교통 · 도보 · 자동차) → 같은 경로(300m) 실측 3건 이상 중앙값 `CACHED` → 좌표 직선거리 근사 `ESTIMATE`(`needs_confirmation`) → 직접 입력. 중앙값은 내 출발 · 도착 기록을 읽기만 하고 `CACHED`로 저장하지 않음 (D5). 길찾기 · 중앙값 · 근사는 모두 출발지 · 목적지 **좌표가 있어야** 해서, 좌표가 없으면 바로 마지막 단계(직접 입력)로 감
+- 좌표가 없고 직접 입력도 없으면 오류 대신 **200** + `travel{ minutes: null, source: null, manual_required: true }` + `check{ ok: false, reason: "TRAVEL_REQUIRED" }` + `alarms: []`로 "이동시간을 직접 입력해 주세요"를 알림 (준비 · 강도 칸은 채워 줌, `warnings`에 `NO_COORDINATES`). 앱은 입력 칸을 보인 뒤 `participant.est_travel_minutes` + `travel_source: "MANUAL"`로 다시 부름. `alarm-commit`은 같은 상황에서 502 `ROUTE_UNAVAILABLE`(`details.manual_required`)을 그대로 돌려줌
 - 키가 없으면 `warnings`에 `KAKAO_NOT_CONFIGURED`를 남기고 다음 단계로 넘어감
 - 출발 시각까지 지났으면 `UNPROCESSABLE`(`details.suggestion`에 계산 결과), 기상 · 준비만 지났으면 그 알림을 `is_enabled: false` · `disabled_reason: PASSED`로 돌려줌 (8장 8.2.1: 지금 + 5분보다 앞이면). 순서가 어긋나면 200 + `check.ok: false`
+- `alarms[].is_enabled`는 저장될 값과 같음: 요청의 `enabled`가 먼저, 없으면 사용자가 H02에서 끈 상태를 유지 (같은 규칙을 `alarm-commit`이 씀)
 
 ### alarm-commit
 

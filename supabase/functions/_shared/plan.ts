@@ -156,6 +156,23 @@ async function loadTravelSamples(db: Db, userId: string): Promise<TravelSample[]
 
 export type BuiltPlan = { plan: Plan; inputs: PlanInputs; timeZone: string };
 
+// 이동시간을 구할 길이 없을 때(좌표가 없고 직접 입력도 없음) — 7.1.2의 마지막 단계(직접 입력)로 가야 하는 상태
+//   alarm-commit은 이 오류(502 ROUTE_UNAVAILABLE, details.manual_required)를 그대로 돌려주고,
+//   alarm-suggest(미리 보기)는 잡아서 오류 대신 "이동시간만 직접 입력해 주세요"인 200 응답으로 바꿈 (toTravelRequiredSuggestion)
+export class TravelRequiredError extends HttpError {
+  readonly inputs: PlanInputs;
+  readonly travel: ResolvedTravel;
+  readonly timeZone: string;
+
+  constructor(inputs: PlanInputs, travel: ResolvedTravel, timeZone: string) {
+    super('ROUTE_UNAVAILABLE', '이동시간을 구하지 못했어요. 직접 입력해 주세요', { manual_required: true, warnings: travel.warnings });
+    this.name = 'TravelRequiredError';
+    this.inputs = inputs;
+    this.travel = travel;
+    this.timeZone = timeZone;
+  }
+}
+
 // wantAutoTravel: 직접 입력한 이동시간이 있어도 자동 값을 같이 구함 (H03 "자동으로 되돌리기" 미리 보기). 호출이 한 번 늘어남
 export async function buildPlan(ctx: PlanContext, draft: PlanDraft, options: { wantAutoTravel?: boolean } = {}): Promise<BuiltPlan> {
   const profile = await loadProfile(ctx.db, ctx.userId);
@@ -199,12 +216,7 @@ export async function buildPlan(ctx: PlanContext, draft: PlanDraft, options: { w
     );
   }
 
-  if (!travel.chosen) {
-    // 길찾기도 같은 경로 기록도 근사값도 없음 → 직접 입력하는 흐름으로 (8장 8.2.2)
-    throw new HttpError('ROUTE_UNAVAILABLE', '이동시간을 구하지 못했어요. 직접 입력해 주세요', {
-      manual_required: true,
-      warnings: travel.warnings,
-    });
-  }
+  // 길찾기도 같은 경로 기록도 근사값도 없음 → 직접 입력하는 흐름으로 (8장 8.2.2)
+  if (!travel.chosen) throw new TravelRequiredError(inputs, travel, timeZone);
   return { plan: computePlan(inputs, travel), inputs, timeZone };
 }
