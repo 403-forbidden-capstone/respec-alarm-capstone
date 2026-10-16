@@ -32,6 +32,7 @@ export function createMemoryBackend(now: () => number = Date.now): AlarmBackend 
         entries.delete(pkg.alarmId); // 시각이 지난 새 꾸러미는 예전 예약도 거둠 (네이티브와 같게)
         return 'skipped_past';
       }
+      // 울림 · 미루기 상태가 없어서 네이티브와 달리 'deferred'는 돌려주지 않음 (언제나 덮어씀)
       entries.set(pkg.alarmId, { pkg, plan });
       return 'scheduled';
     },

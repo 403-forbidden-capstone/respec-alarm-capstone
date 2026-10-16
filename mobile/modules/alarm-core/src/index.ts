@@ -61,7 +61,8 @@ const backend = chooseBackend();
  * 예약: 꾸러미의 atMillis에 울리게 폰에 걸음. 같은 alarmId면 덮어씀.
  * 시각이 이미 지났으면 던지지 않고 'skipped_past'를 돌려줌 (그 알람만 건너뜀, 8장 8.2.1 · 7장 7.1.4).
  * 꾸러미가 잘못됐거나 정확한 알람 권한이 없으면 reject.
- * 이미 울리는 중이거나 미뤄 둔(또는 다시 울림을 기다리는) 같은 알람은 건드리지 않고 'scheduled' — 서버와 맞추려고 다시 넘겨도 미루기가 풀리지 않게
+ * 이미 울리는 중이거나 미뤄 둔(또는 다시 울림을 기다리는) 같은 알람은 건드리지 않음 — 서버와 맞추려고 다시 넘겨도 미루기가 풀리지 않게.
+ * 이때 시각 · 강도가 이미 같으면 'scheduled', 다르면 새 꾸러미를 받지 않았다는 뜻으로 'deferred' (해제 뒤 다음 앱 맞추기에서 다시 넘김)
  */
 export async function schedule(pkg: RingPackage): Promise<ScheduleStatus> {
   validateRingPackage(pkg);

@@ -90,6 +90,9 @@ class AlarmPlaybackService : Service() {
   private var mediaPlayer: MediaPlayer? = null
   private var audioManager: AudioManager? = null
   private var audioFocusRequest: AudioFocusRequest? = null
+
+  // 안드로이드 8 미만은 포커스를 요청한 리스너를 그대로 넘겨야 반납됨
+  private var legacyFocusListener: AudioManager.OnAudioFocusChangeListener? = null
   private var previousAlarmVolume: Int? = null
   private var wakeLock: PowerManager.WakeLock? = null
 
@@ -109,6 +112,8 @@ class AlarmPlaybackService : Service() {
     }
     ringingAlarmId = id
     ringToken = alarm?.ringCount ?: 0
+    // 겹쳐 울려서 다른 알람으로 넘어왔으면 떠 있는 알람 화면도 이 알람으로 바꿈 (안 바꾸면 해제가 앞 알람 id를 가리킴)
+    AlarmRingingActivity.showCurrentIfShowing()
 
     // startForegroundService로 시작했으면 알람 정보가 있든 없든 곧바로 startForeground를 불러야 함
     // 시스템이 막으면(12+ ForegroundServiceStartNotAllowedException · 14+ 타입 SecurityException) 앱이 죽지 않게 이번 울림은 끝난 것으로 처리
@@ -318,13 +323,20 @@ class AlarmPlaybackService : Service() {
         .build()
       manager.requestAudioFocus(audioFocusRequest!!)
     } else {
-      @Suppress("DEPRECATION")
-      manager.requestAudioFocus(
-        { },
-        AudioManager.STREAM_ALARM,
-        AudioManager.AUDIOFOCUS_GAIN_TRANSIENT,
-      )
+      val listener = AudioManager.OnAudioFocusChangeListener { _ -> }
+      legacyFocusListener = listener
+      requestLegacyAudioFocus(manager, listener)
     }
+  }
+
+  @Suppress("DEPRECATION")
+  private fun requestLegacyAudioFocus(manager: AudioManager, listener: AudioManager.OnAudioFocusChangeListener) {
+    manager.requestAudioFocus(listener, AudioManager.STREAM_ALARM, AudioManager.AUDIOFOCUS_GAIN_TRANSIENT)
+  }
+
+  @Suppress("DEPRECATION")
+  private fun abandonLegacyAudioFocus(manager: AudioManager, listener: AudioManager.OnAudioFocusChangeListener) {
+    manager.abandonAudioFocus(listener)
   }
 
   // 알람 볼륨 스트림을 최대치의 percent%로 맞춤 (울림 계획의 volumePercent). 처음 바꿀 때 원래 볼륨을 기억해 끝나면 되돌림
@@ -355,11 +367,13 @@ class AlarmPlaybackService : Service() {
 
     audioManager?.let { manager ->
       audioFocusRequest?.let { request -> runCatching { manager.abandonAudioFocusRequest(request) } }
+      legacyFocusListener?.let { listener -> runCatching { abandonLegacyAudioFocus(manager, listener) } }
       previousAlarmVolume?.let { volume ->
         runCatching { manager.setStreamVolume(AudioManager.STREAM_ALARM, volume, 0) }
       }
     }
     audioFocusRequest = null
+    legacyFocusListener = null
     previousAlarmVolume = null
 
     wakeLock?.runCatching { if (isHeld) release() }

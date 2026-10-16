@@ -14,6 +14,8 @@ import org.json.JSONObject
 object AlarmController {
   const val STATUS_SCHEDULED = "scheduled"
   const val STATUS_SKIPPED_PAST = "skipped_past"
+  // 지금 울리거나 미룬 중인 같은 알람이라 새 꾸러미를 받지 않음. 앱은 해제 뒤 다음 맞추기(앱을 열 때)에서 다시 넘김
+  const val STATUS_DEFERRED = "deferred"
 
   // 해제 뒤 앱이 열리는 주소 (app.json의 scheme = respecalarm). 기상 확인 · 아침 루틴 · 평가가 받음
   private const val WAKE_LINK = "respecalarm://wake"
@@ -29,10 +31,12 @@ object AlarmController {
 
     // 지금 울리는 중인 알람은 건드리지 않음. 같은 시각의 알람이 미룸 · 다시 울림을 기다리는 중일 때도 그대로 둠
     // (서버와 맞추려고 같은 꾸러미를 다시 넘겨도 미루기가 풀리거나 지워지지 않게)
+    // 서버와 맞추는 기준(시각 · 강도)이 같으면 이미 맞은 것이라 STATUS_SCHEDULED, 다르면 새 꾸러미를 받지 않았다는 뜻으로 STATUS_DEFERRED
     if (existing != null) {
       val sameOccurrence = existing.atMillis == incoming.atMillis
       if (isActuallyRinging(existing) || (sameOccurrence && (existing.snoozeCount > 0 || existing.seriesIndex > 0))) {
-        return STATUS_SCHEDULED
+        val alreadyMatches = sameOccurrence && existing.intensity == incoming.intensity
+        return if (alreadyMatches) STATUS_SCHEDULED else STATUS_DEFERRED
       }
     }
 
@@ -46,7 +50,8 @@ object AlarmController {
     try {
       AlarmScheduler.schedule(context, incoming)
     } catch (error: Exception) {
-      AlarmStorage.remove(context, incoming.alarmId)
+      // 걸지 못해도 AlarmManager의 예전 예약은 남으므로 저장 기록도 예전 것으로 되돌림 (없던 알람이면 지움)
+      if (existing != null) AlarmStorage.save(context, existing) else AlarmStorage.remove(context, incoming.alarmId)
       throw error
     }
     return STATUS_SCHEDULED
@@ -175,6 +180,8 @@ object AlarmController {
       AlarmStorage.remove(context, alarm.alarmId)
       AlarmNotifications.cancelSilent(context, alarm.alarmId)
     }
+    // 이미 울려서 저장소에서 지워진 무음 알림도 지움 (로그아웃 정리 뒤 남은 알림의 원탭이 기록을 쌓지 않게)
+    AlarmNotifications.cancelAllSilent(context)
     AlarmPlaybackService.stop(context)
   }
 

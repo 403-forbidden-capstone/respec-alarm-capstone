@@ -178,6 +178,26 @@ describe('공개 함수 (index.ts)', () => {
     expect(calls[2].args).toEqual([['e1']]);
   });
 
+  it('네이티브가 새 꾸러미를 미루면(deferred) 그대로 돌려주고, scheduleAll도 알람마다 담음', async () => {
+    const fake = new Proxy({} as NativeAlarmCore, {
+      get: (_target, name: string) => (...args: unknown[]) => {
+        if (name !== 'schedule') return Promise.resolve(undefined);
+        const { alarmId } = JSON.parse(args[0] as string) as { alarmId: string };
+        return Promise.resolve(alarmId === 'ringing' ? 'deferred' : 'scheduled');
+      },
+    });
+    jest.doMock('react-native', () => ({ Platform: { OS: 'android' } }));
+    jest.doMock('expo-modules-core', () => ({ requireOptionalNativeModule: () => fake }));
+    const alarmCore = loadIndex();
+
+    expect(await alarmCore.schedule(pkg({ alarmId: 'ringing' }))).toBe('deferred');
+    const outcomes = await alarmCore.scheduleAll([pkg({ alarmId: 'ringing' }), pkg({ alarmId: 'free' })]);
+    expect(outcomes.map((o) => [o.alarmId, o.status])).toEqual([
+      ['ringing', 'deferred'],
+      ['free', 'scheduled'],
+    ]);
+  });
+
   it('Android인데 모듈이 없는 옛 APK는 예약을 거절하고 조회는 빈 값', async () => {
     jest.doMock('react-native', () => ({ Platform: { OS: 'android' } }));
     jest.doMock('expo-modules-core', () => ({ requireOptionalNativeModule: () => null }));

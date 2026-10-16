@@ -124,7 +124,9 @@ export default function AlarmTestScreen() {
           ? isAvailable
             ? `${formatTime(at)}에 울림 (${type}${type === 'WAKE' ? ` · ${intensity}` : ''}). 화면을 끄고 기다려 주세요.`
             : `${formatTime(at)} 예약을 목록에만 올림 (웹 · iOS 메모리 대체라 울리지 않음)`
-          : '시각이 지나서 예약하지 않음 (skipped_past)',
+          : status === 'deferred'
+            ? '울리거나 미룬 중이라 새 예약을 미룸 (deferred). 해제 뒤 다시 맞춰 주세요'
+            : '시각이 지나서 예약하지 않음 (skipped_past)',
       );
     } catch (error) {
       setMessage(`예약 실패: ${errorText(error)}`);

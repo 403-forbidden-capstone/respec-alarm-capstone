@@ -25,6 +25,11 @@ class AlarmRingingActivity : Activity() {
       showing?.get()?.finish()
       showing = null
     }
+
+    // 알람 둘이 겹쳐 서비스가 다른 알람으로 넘어가면 불러서 화면이 지금 울리는 알람을 보이게 함
+    fun showCurrentIfShowing() {
+      showing?.get()?.showCurrentAlarm()
+    }
   }
 
   private var alarmId: String = "alarm"
@@ -53,6 +58,16 @@ class AlarmRingingActivity : Activity() {
     super.onNewIntent(intent)
     setIntent(intent)
     readAlarmDetails(intent)
+    renderAlarmControls()
+  }
+
+  // 지금 울리는 알람이 화면이 든 알람과 다르면 그 알람으로 바꿔 다시 그림 (해제 · 미루기가 보이는 알람에 듣게)
+  fun showCurrentAlarm() {
+    val current = AlarmPlaybackService.ringingAlarmId ?: return
+    if (current == alarmId) return
+    alarmId = current
+    fallbackTitle = "알람"
+    alarm = AlarmStorage.get(this, current)
     renderAlarmControls()
   }
 

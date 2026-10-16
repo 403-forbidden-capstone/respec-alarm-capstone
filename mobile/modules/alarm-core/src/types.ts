@@ -64,8 +64,12 @@ export type RingPlan = {
   oneTapEventType: OneTapEventType | null;
 };
 
-/** 'scheduled' = 폰에 걸림, 'skipped_past' = 시각이 지나서 안 걸었음 (오류 아님) */
-export type ScheduleStatus = 'scheduled' | 'skipped_past';
+/**
+ * 'scheduled' = 폰에 걸림 (이미 같은 시각 · 강도로 걸려 있어도),
+ * 'skipped_past' = 시각이 지나서 안 걸었음 (오류 아님),
+ * 'deferred' = 지금 울리거나 미룬 중인 같은 알람이라 새 꾸러미를 받지 않음 (시각 · 강도가 다를 때만) → 해제 뒤 다음 앱 맞추기(앱을 열 때)에서 다시 넘김
+ */
+export type ScheduleStatus = 'scheduled' | 'skipped_past' | 'deferred';
 
 export type ScheduleOutcome = {
   alarmId: string;
@@ -91,7 +95,7 @@ export type AlarmEventType = 'TRIGGERED' | 'SNOOZED' | 'DISMISSED' | 'ACKNOWLEDG
 
 /**
  * 폰에 쌓이는 울림 기록 한 줄 — 앱이 alarm_events로 보내고 지움
- * clientEventId는 폰이 만든 UUID. DB의 중복 방지 칸에 그대로 넣음 (Q11)
+ * clientEventId는 폰이 만든 UUID. DB의 중복 방지 칸에 그대로 넣음 (Q11, 칸은 #160에서 추가)
  */
 export type AlarmEvent = {
   clientEventId: string;
@@ -104,7 +108,7 @@ export type AlarmEvent = {
   snoozeMinutes?: number;
   /** 울림 회차 (미루기 · 다시 울림마다 늘어남, 1부터) → sequence_no */
   sequenceNo: number;
-  /** → alarm_events.input_source. 폰 안 버튼은 항상 BUTTON (위치 · 사용 정보 자동은 앱이 따로 남김) */
+  /** → alarm_events.input_source (#160에서 추가). 폰 안 버튼은 항상 BUTTON (위치 · 사용 정보 자동은 앱이 따로 남김) */
   inputSource: 'BUTTON';
 };
 

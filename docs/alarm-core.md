@@ -22,9 +22,9 @@ mobile/modules/alarm-core/
 
 | 함수 | 하는 일 |
 |---|---|
-| `schedule(pkg)` | 꾸러미 하나를 폰에 걸음. 같은 `alarmId`면 덮어씀. `'scheduled'` 또는 `'skipped_past'`(시각이 지남, 오류 아님)를 돌려줌. 꾸러미가 틀렸거나 정확한 알람 권한이 없으면 reject. 울리는 중이거나 같은 시각이 미룸 · 다시 울림 대기 중이면 건드리지 않고 `'scheduled'`(서버와 맞추려고 다시 넘겨도 미루기가 안 풀림) |
-| `scheduleAll(pkgs)` | 여러 개를 차례로 `schedule`. 하나가 실패해도 계속하고 알람마다 `{ alarmId, status, error? }`를 돌려줌 (`status`는 `'scheduled'` · `'skipped_past'` · `'failed'`) |
-| `cancel(alarmId)` · `cancelAll()` | 예약 지우기 (미루기 · 다시 울림 대기 포함). 울리는 중이면 멈춤. 해제 기록은 안 남음 |
+| `schedule(pkg)` | 꾸러미 하나를 폰에 걸음. 같은 `alarmId`면 덮어씀. `'scheduled'` · `'skipped_past'`(시각이 지남, 오류 아님) · `'deferred'`를 돌려줌. 꾸러미가 틀렸거나 정확한 알람 권한이 없으면 reject. 울리는 중이거나 같은 시각이 미룸 · 다시 울림 대기 중이면 건드리지 않음(서버와 맞추려고 다시 넘겨도 미루기가 안 풀림): 시각 · 강도가 이미 같으면 `'scheduled'`, 다르면 새 꾸러미를 받지 않았다는 `'deferred'`. **울리거나 미룬 중엔 새 꾸러미를 미루고, 해제 뒤 앱 맞추기(다음 앱 열림)에서 다시 넣음** |
+| `scheduleAll(pkgs)` | 여러 개를 차례로 `schedule`. 하나가 실패해도 계속하고 알람마다 `{ alarmId, status, error? }`를 돌려줌 (`status`는 `'scheduled'` · `'skipped_past'` · `'deferred'` · `'failed'`) |
+| `cancel(alarmId)` · `cancelAll()` | 예약 지우기 (미루기 · 다시 울림 대기 포함). 울리는 중이면 멈춤. 해제 기록은 안 남음. `cancelAll()`은 이미 떠 있는 무음 알림(준비 · 출발 · 도착 · 루틴)도 지워서 로그아웃 뒤 남은 알림의 원탭이 기록을 쌓지 않음 |
 | `list()` | 폰에 걸린 예약. `{ id, type, intensity, title, atMillis, snoozeCount, nextRingAt }` — 서버 `alarms`와 `alarm_id` + `scheduled_at`(=`atMillis`) + `intensity`로 맞춤 |
 | `stop()` | 지금 울리는 알람을 해제 처리 (해제 기록이 남고, 앱이 이미 열려 있으니 앱은 안 엶) |
 | `ringNow(pkg)` | 예약 없이 바로 울림 (시험용). 같은 id가 있으면 덮어씀 |
@@ -67,7 +67,7 @@ type RingPackage = {
 |---|---|
 | 볼륨 | 알람 볼륨 스트림 최대치 × 강도별 60 · 80 · 100%(SOFT · NORMAL · STRONG) × (1 + `volumeAdjust`). 정수 %로 반올림하고 10~100% 안으로 (보정이 커도 소리가 사라지지 않게). 끄면 원래 볼륨으로 되돌림 |
 | 한 번 울림 | 최대 3분 (백그라운드 재생 제한, 7장 7.4.2 · T-6에서 실기기로 확정) |
-| 안 끄면 다시 울림 | 울림이 끝난 뒤 쉬었다가 다시: 약 5분 쉬고 1번 · 보통 5분씩 쉬고 2번 · 강 3분씩 쉬고 3번 (**쉬는 시간 읽기는 해석** — 아래). **미루기 횟수에 안 셈**. 미루고 난 뒤 울림도 같은 묶음으로 다시 셈 |
+| 안 끄면 다시 울림 | 울림이 끝난 뒤 쉬었다가 다시: 약 5분 쉬고 1번 · 보통 5분씩 쉬고 2번 · 강 3분씩 쉬고 3번 (**쉬는 시간 읽기는 해석** — 아래). **미루기 횟수에 안 셈**. 미루기 뒤에는 다시 울림 묶음을 처음부터 (서버 미확인 판정도 같은 기준, #160) |
 | 미루기 | 10분 고정. 5 · 10 · 15분 고르기와 한도(`snoozeLimit`)는 D3이 정해질 때까지 안 읽음 (횟수 제한 없음) |
 | 소리 | 폰에 든 파일 하나(`alarm_siren.wav`). `soundKey`는 칸만 있고 모르는 값은 기본 소리 (소리 3종은 별도 계획, Q7) |
 | 진동 | 알림 채널의 진동 하나 (강도와 상관없음). 강도 · 축별 진동은 D1 뒤 |
@@ -113,7 +113,7 @@ type RingPackage = {
 | `DISMISSED` | 해제 | — |
 | `ACKNOWLEDGED` / `ARRIVAL_CONFIRMED` | 무음 알림의 원탭 | — |
 
-모든 줄에 `clientEventId`(폰이 만든 UUID — DB의 중복 방지 칸에 그대로 들어감, Q11) · `alarmId` · `alarmType` · `eventType` · `at`(epoch ms) · `inputSource`(폰 안 버튼은 늘 `'BUTTON'`). 위치 · 사용 정보로 자동 남기는 기록은 앱이 따로 만듦. `WAKE_CONFIRMED` · `FEEDBACK` · `MISSED`는 폰이 남기지 않음.
+모든 줄에 `clientEventId`(폰이 만든 UUID — DB의 중복 방지 칸(#160에서 추가)에 그대로 들어감, Q11) · `alarmId` · `alarmType` · `eventType` · `at`(epoch ms) · `inputSource`(폰 안 버튼은 늘 `'BUTTON'`). 위치 · 사용 정보로 자동 남기는 기록은 앱이 따로 만듦. `WAKE_CONFIRMED` · `FEEDBACK` · `MISSED`는 폰이 남기지 않음.
 
 - 앱이 켜져 있으면 `addAlarmEventListener`로 새 기록을 바로 받음. 꺼져 있을 때 쌓인 것은 `getPendingEvents()`로 읽음 (오래된 순)
 - 올리기에 성공한 것만 `markEventsUploaded(clientEventIds)`로 지움
@@ -145,7 +145,7 @@ WAKE를 해제하면(알람 화면 · 알림 버튼 모두) 앱을 `respecalarm:
 
 | 언제 | 무엇 | 바뀌는 점 |
 |---|---|---|
-| 앱 연결 (P6) | 서버 알람과 폰 예약을 대조 | 앱을 켤 때 `alarms`(켜짐 · 앞으로)와 `list()`를 `alarm_id` + `scheduled_at` + `intensity`로 비교. 빠진 건 `schedule`, 없는 건 `cancel`, 시각 · 강도가 다르면 다시 `schedule`(친구의 ±5분 · 제안 적용 · 설정 수정 뒤 푸시를 못 받았을 때 대비). 지난 시각은 `skipped_past`로 건너뜀 |
+| 앱 연결 (P6) | 서버 알람과 폰 예약을 대조 | 앱을 켤 때 `alarms`(켜짐 · 앞으로)와 `list()`를 `alarm_id` + `scheduled_at` + `intensity`로 비교. 빠진 건 `schedule`, 없는 건 `cancel`, 시각 · 강도가 다르면 다시 `schedule`(친구의 ±5분 · 제안 적용 · 설정 수정 뒤 푸시를 못 받았을 때 대비). 지난 시각은 `skipped_past`로 건너뛰고, `deferred`(울리거나 미룬 중)는 해제 뒤 다음 앱 열림 때 다시 넘김 |
 | 앱 연결 (P6) | 울림 기록 올리기 | 앱이 켜지면 `getPendingEvents()` → `alarm_events`(`clientEventId`로 중복 방지) → `markEventsUploaded`. 끄거나 재부팅한 동안의 기록도 이 길로 감. 해제 · 놓침을 바로 올리는 폰 스스로의 길(WorkManager)은 토큰 문제로 따로 정함 |
 | 로그아웃 | 정리 | `cancelAll()` + 폰에 쌓인 기록 지우기 (Q6) |
 | D1 | 배경음 · 말소리 · 진동 축별 고르기 | `vibration` 칸을 읽고 진동을 서비스에서 직접 (지금은 알림 채널 진동 하나) |

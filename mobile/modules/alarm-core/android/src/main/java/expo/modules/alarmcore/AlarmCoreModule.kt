@@ -28,7 +28,7 @@ class AlarmCoreModule : Module() {
       AlarmEventLog.listener = null
     }
 
-    // 예약: 'scheduled' 또는 'skipped_past'(시각이 지남). 권한이 없으면 reject
+    // 예약: 'scheduled' · 'skipped_past'(시각이 지남) · 'deferred'(울리거나 미룬 중이라 새 꾸러미를 받지 않음). 권한이 없으면 reject
     AsyncFunction("schedule") { payload: String ->
       AlarmController.schedule(context, payload)
     }

@@ -84,4 +84,14 @@ object AlarmNotifications {
   fun cancelSilent(context: Context, alarmId: String) {
     context.getSystemService(NotificationManager::class.java).cancel(alarmId, SILENT_NOTIFICATION_ID)
   }
+
+  // 이 모듈이 띄운 무음 알림을 전부 지움 (cancelAll용). 울린 무음 알람은 저장소에서 지워지므로 알람 목록이 아니라 시스템에 떠 있는 알림에서 찾음
+  fun cancelAllSilent(context: Context) {
+    val manager = context.getSystemService(NotificationManager::class.java)
+    runCatching {
+      manager.activeNotifications
+        .filter { it.id == SILENT_NOTIFICATION_ID }
+        .forEach { manager.cancel(it.tag, it.id) }
+    }
+  }
 }
