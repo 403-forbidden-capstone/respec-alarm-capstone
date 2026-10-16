@@ -1,15 +1,18 @@
 // ② 공유받은 알람 실데이터 — G04 (docs/screen-data-map.md G04)
 //   읽기: get_shared_alarm_appointments(p_owner_id) — 조회 권한을 받은 사람 알람의 약속 제목 · 장소 · 시각 (appointments RLS는 본인 · 그룹원만이라 함수가 대신 줌)
 //         + alarms(RLS가 조회 권한을 확인). 함수는 지난 알람 · 꺼진 알람도 주므로 앱에서 거름: 약속 시각이 지난 카드는 빼고 꺼진 알람은 다시 켤 수 있게 남김 (작성자 판단)
+//         함수 결과는 날짜 조건이 없어 쌓일수록 길어지므로, 알람을 읽기 전에 오늘 0시 이후 약속만 남겨 .in() 목록(주소 길이)이 이력만큼 커지지 않게 함
 //   쓰기: 켜기 · 끄기 · ±5분은 상대 알람을 DB에 직접 (설정 권한 EDIT_ALARM이면 RLS가 허용). 카드 하나(약속의 기상 · 준비 · 출발)가 한 번에 움직임
+//         켤 때는 아직 안 지난 알람만 켬 (내 알람 realWrite와 같은 규칙) — 지난 기상 알람을 켜면 서버 배치(wake-check)가 울린 적 없는 알람을 기상 미확인(MISSED)으로 기록하고 주인 폰은 걸지도 않음
 //         ±5분은 시각을 사용자가 직접 정한 것이라 time_source = MANUAL로 같이 씀 — 안 그러면 주인이 그 약속을 다시 저장할 때 alarm-commit이 자동 시각으로 덮음
 //   바꾼 뒤 주인에게 notify(ALARM_CHANGED). 푸시가 실패해도 저장은 되돌리지 않고 화면은 조용히 "바꿨어요"만 (푸시 토큰 등록은 Q12 — 붙이기 전엔 대부분 안 감)
 //   주인 폰의 예약은 주인 앱이 푸시를 받거나 다시 켜질 때 맞춤(lib/alarmSync reconcile) — 내 폰에서 걸지 않음
 //   변경 기록(getShareLog)은 DB에 저장 자리가 없음(D9 · 스키마 보완 3): 이번에 앱을 연 동안 내가 바꾼 것만 메모리에 둠 (D20 열림 — 가짜 데이터와 같은 뜻)
 import { now } from '@/lib/clock';
-import { parseDbTime } from '@/lib/dbTime';
+import { dbTimeMs, parseDbTime } from '@/lib/dbTime';
 import { callEdge } from '@/lib/edge';
 import { UserError } from '@/lib/errors';
+import { startOfDay } from '@/lib/format';
 import { supabase } from '@/lib/supabase';
 import { requireUserId } from '@/lib/user';
 
@@ -24,7 +27,9 @@ const ALARM_COLUMNS = 'alarm_id, alarm_type, scheduled_at, intensity, sound_key,
 async function loadCards(ownerId: string): Promise<SharedCard[]> {
   const { data, error } = await supabase.rpc('get_shared_alarm_appointments', { p_owner_id: ownerId });
   if (error) throw error;
-  const appointments: SharedApptRow[] = data ?? [];
+  // 오늘 0시(한국) 이후 약속만 — 화면은 약속 시각이 안 지난 카드만 보이므로(upcomingCards) 그 앞의 이력은 읽을 필요가 없음
+  const todayStart = startOfDay(now()).getTime();
+  const appointments: SharedApptRow[] = (data ?? []).filter((a) => dbTimeMs(a.appointment_at) >= todayStart);
   if (!appointments.length) return [];
   const alarms = await supabase
     .from('alarms')
@@ -73,7 +78,15 @@ async function loadCard(ownerId: string, cardId: string): Promise<SharedCard> {
 }
 
 const NO_EDIT = '이 알람을 바꿀 권한이 없어요';
+const NOTHING_TO_TURN_ON = '켤 수 있는 알람이 없어요. 이미 지난 알람이거나 지워졌을 수 있어요'; // 내 알람(realWrite)과 같은 문구
+const BODY_TITLE_MAX = 40; // notify의 body는 서버가 200자까지 (supabase/functions/_shared/notify.ts) — 약속 제목은 100자까지라 줄여서 넣음
 const NOTIFY_TIMEOUT_MS = 8_000; // 알림은 덤이라 오래 기다리지 않음 (저장은 이미 끝남)
+
+// 알림 본문의 약속 제목 — 길면 줄임표로 (닉네임 30자 + 제목 40자 + 문구라 200자 안)
+const clipTitle = (title: string) => {
+  const chars = Array.from(title);
+  return chars.length > BODY_TITLE_MAX ? `${chars.slice(0, BODY_TITLE_MAX - 1).join('')}…` : title;
+};
 
 // 주인에게 알림 — 실패해도 던지지 않음. 보냈으면 true
 async function notifyOwner(s: Snapshot, ownerId: string, card: SharedCard, what: string): Promise<boolean> {
@@ -85,7 +98,7 @@ async function notifyOwner(s: Snapshot, ownerId: string, card: SharedCard, what:
         targetUserId: ownerId,
         alarmId: card.alarms[0].alarm_id,
         title: '공유한 알람이 바뀌었어요',
-        body: `${profileOf(s, s.me)?.nickname ?? '친구'}님이 '${card.title}' 알람을 ${what}`,
+        body: `${profileOf(s, s.me)?.nickname ?? '친구'}님이 '${clipTitle(card.title)}' 알람을 ${what}`,
       },
       { timeoutMs: NOTIFY_TIMEOUT_MS },
     );
@@ -98,13 +111,15 @@ async function notifyOwner(s: Snapshot, ownerId: string, card: SharedCard, what:
 export async function setSharedAlarmEnabled(personId: string, cardId: string, enabled: boolean): Promise<SharedChangeResult> {
   const s = await loadSnapshot();
   const card = await loadCard(personId, cardId);
-  const { data, error } = await supabase
-    .from('alarms')
-    .update({ is_enabled: enabled })
-    .in('alarm_id', card.alarms.map((a) => a.alarm_id))
-    .select('alarm_id');
+  const nowMs = now().getTime();
+  const nowIso = new Date(nowMs).toISOString();
+  // 켤 때는 아직 안 지난 알람만 (끌 때는 전부)
+  const targets = enabled ? card.alarms.filter((a) => dbTimeMs(a.scheduled_at) > nowMs) : card.alarms;
+  if (!targets.length) throw new UserError(NOTHING_TO_TURN_ON);
+  const update = supabase.from('alarms').update({ is_enabled: enabled }).in('alarm_id', targets.map((a) => a.alarm_id));
+  const { data, error } = await (enabled ? update.gt('scheduled_at', nowIso) : update).select('alarm_id');
   if (error) throw error;
-  if ((data?.length ?? 0) !== card.alarms.length) throw new UserError(NO_EDIT); // RLS는 권한이 없으면 오류 없이 0행을 바꿈
+  if ((data?.length ?? 0) !== targets.length) throw new UserError(NO_EDIT); // RLS는 권한이 없으면 오류 없이 0행을 바꿈
   remember(s.me, `${personOf(s, personId).short}님 알람 ${enabled ? '켬' : '끔'}`);
   return { notified: await notifyOwner(s, personId, card, enabled ? '켰어요' : '껐어요') };
 }

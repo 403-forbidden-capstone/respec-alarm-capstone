@@ -58,6 +58,10 @@ export function createFake() {
       this.op.filters.push(['in', column, value]);
       return this;
     }
+    gt(column: string, value: unknown) {
+      this.op.filters.push(['gt', column, value]);
+      return this;
+    }
     gte(column: string, value: unknown) {
       this.op.filters.push(['gte', column, value]);
       return this;
