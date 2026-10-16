@@ -178,12 +178,22 @@ test('저장된 직접 강도는 유지, 자동과 같은 값이면 자동으로
   assert.equal(computePlan(base({ draft: { appointmentId: 'ap1' }, appointment, participant, existingAlarms: [autoStored], lateCount4w: 3 }), api(30)).intensity.fields.intensity, 'STRONG');
 });
 
-test('기상 · 준비가 둘 다 자동이면 그 간격을 준비 전 활동으로 이어받음', () => {
+test('준비가 자동이면 준비 − 기상 간격을 준비 전 활동으로 이어받음 (기상을 직접 옮겼어도), 준비가 직접이면 읽지 않음', () => {
   assert.equal(inferBeforePrepare([row('WAKE', 450), row('PREPARE', 480)]), 30);
-  assert.equal(inferBeforePrepare([row('WAKE', 450, { time_source: 'MANUAL' }), row('PREPARE', 480)]), undefined);
+  assert.equal(inferBeforePrepare([row('WAKE', 450, { time_source: 'MANUAL' }), row('PREPARE', 480)]), 30); // 기상을 옮기면 자동 준비가 같은 간격으로 따라옴
+  assert.equal(inferBeforePrepare([row('WAKE', 450), row('PREPARE', 480, { time_source: 'MANUAL' })]), undefined);
+  assert.equal(inferBeforePrepare([row('WAKE', 450, { time_source: 'MANUAL' }), row('PREPARE', 480, { time_source: 'MANUAL' })]), undefined);
   assert.equal(inferBeforePrepare([row('WAKE', 450)]), undefined);
   const plan = computePlan(base({ draft: { appointmentId: 'ap1' }, appointment, participant, existingAlarms: [row('WAKE', 450), row('PREPARE', 480)] }), api(30));
   assert.equal(plan.beforePrepareMinutes, 30);
+});
+
+test('기상을 직접 옮긴 약속을 다시 저장해도 준비 알람 간격은 20분으로 돌아가지 않고 준비 전 활동(30분) 그대로', () => {
+  // 자동 기상 8:00이던 걸 7:30으로 옮김 → 자동 준비는 7:30 + 30 = 8:00. 요청에 칸이 없으면 저장된 직접 기상 시각 · 준비 전 활동을 둘 다 이어받음
+  const stored = [row('WAKE', 450, { time_source: 'MANUAL' }), row('PREPARE', 480), row('DEPARTURE', 540), row('ARRIVE', 590)];
+  const plan = computePlan(base({ draft: { appointmentId: 'ap1' }, appointment, participant, existingAlarms: stored, stats: { sampleCount: 0, p80: null } }), api(30));
+  assert.equal(plan.beforePrepareMinutes, 30);
+  assert.deepEqual(text(plan), ['WAKE 07:30*', 'PREPARE 08:00', 'DEPARTURE 09:25', 'ARRIVE 09:55']);
 });
 
 test('응답 모양: 5.4.1 AlarmSuggestionDTO 칸', () => {

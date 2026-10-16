@@ -217,11 +217,13 @@ export function resolveOverrides(draft: PlanDraft['levels'], existing: readonly 
   };
 }
 
-// 기상 · 준비 알람이 둘 다 자동으로 잡힌 약속이면 둘 사이 간격을 "준비 전 활동"으로 읽음 (서버가 다시 계산해도 30분 같은 값이 안 바뀌게)
+// 준비 알람이 자동으로 잡힌 약속이면 준비 − 기상 간격을 "준비 전 활동"으로 읽음 (서버가 다시 계산해도 30분 같은 값이 안 바뀌게)
+//   기상을 직접 옮겼어도 자동 준비 알람은 (옮긴) 기상 + 준비 전 활동이라 간격은 그대로 준비 전 활동 (calc/chain.ts) — 기상이 MANUAL인 건 따지지 않음
+//   준비를 직접 옮겼으면 간격이 준비 전 활동이 아니므로 읽지 않음
 export function inferBeforePrepare(existing: readonly AlarmRow[]): number | undefined {
   const wake = existing.find((a) => a.alarm_type === 'WAKE');
   const prepare = existing.find((a) => a.alarm_type === 'PREPARE');
-  if (!wake || !prepare || wake.time_source === 'MANUAL' || prepare.time_source === 'MANUAL') return undefined;
+  if (!wake || !prepare || prepare.time_source === 'MANUAL') return undefined;
   const minutes = Math.round((Date.parse(prepare.scheduled_at) - Date.parse(wake.scheduled_at)) / 60_000);
   return minutes > 0 && minutes <= 240 ? minutes : undefined;
 }
