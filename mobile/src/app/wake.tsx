@@ -1,5 +1,5 @@
 import { router, useLocalSearchParams } from 'expo-router';
-import { Fragment, useRef, useState } from 'react';
+import { Fragment, useEffect, useRef, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
 import { Button, Card, LoadError, ProgressBar, Screen, Text, toast, TopBar } from '@/components/ui';
@@ -9,6 +9,7 @@ import { WAKE_NO_REPLY_MINUTES, WAKE_OBSERVE_MINUTES, WAKE_RECENT_MINUTES, type 
 import { formatUsage, judgeLines, pickAlarmId } from '@/features/alarm/wake';
 import { uploadEvents } from '@/lib/alarmSync';
 import { addMinutes, formatTime, timeParts } from '@/lib/format';
+import { isMock } from '@/lib/mode';
 import { backOrHome, openGroupDetail } from '@/lib/nav';
 import { useLoad } from '@/lib/useLoad';
 import { colors } from '@/theme';
@@ -18,6 +19,7 @@ type WakeState = { phase: Phase; usage: number; recent: number; at: Date | null;
 type How = WakeState['how'];
 
 const METER_MAX = 5; // 분
+const POLL_MS = 15_000; // 실데이터: 관찰 중에는 이만큼마다 판정을 다시 읽음 (관찰 10분이 끝나면 확정 · 확인 알림으로 넘어감)
 
 // 단계 · 사용 시간은 가짜 db에 있음(api) — 시연 값도 api가 정함
 function toState(check: WakeCheck): WakeState {
@@ -95,10 +97,34 @@ function WakeFlow({ check }: { check: WakeCheck }) {
 
   async function confirm(how: 'self' | 'auto') {
     if (!first()) return;
-    await confirmWake(check.alarmId, how, observeEnd);
-    await refresh();
-    toast(`기상을 확인했어요${shared}`);
+    try {
+      await confirmWake(check.alarmId, how, observeEnd);
+      await refresh();
+      toast(`기상을 확인했어요${shared}`);
+    } catch {
+      // 실데이터에서 기록하지 못했을 때(네트워크 등) — 다시 누를 수 있게 풀어 줌 (가짜 데이터는 실패하지 않음)
+      handled.current = null;
+      toast('기상을 확인하지 못했어요. 다시 눌러 주세요');
+    }
   }
+
+  // 실데이터: 관찰 10분 동안은 판정을 다시 읽어, 끝나면 확정(자동 판정) 또는 확인 알림 단계로 넘어감. 가짜 데이터는 시연 버튼으로 넘김
+  const mock = isMock();
+  useEffect(() => {
+    if (mock || state.phase !== 'observing') return;
+    let stopped = false;
+    const timer = setInterval(() => {
+      getWakeCheck(check.alarmId)
+        .then((next) => {
+          if (!stopped && next) setState(toState(next));
+        })
+        .catch(() => {}); // 못 읽으면 다음 주기에 다시
+    }, POLL_MS);
+    return () => {
+      stopped = true;
+      clearInterval(timer);
+    };
+  }, [mock, state.phase, check.alarmId]);
 
   // 시연용: 폰을 보며 일어나면 누적 사용이 θ를 넘어 자동 판정
   const useAndWake = () => confirm('auto');
@@ -142,15 +168,17 @@ function WakeFlow({ check }: { check: WakeCheck }) {
             </Text>
             {meters}
           </Card>
-          <View style={styles.sim}>
-            <Text variant="label" tone="sub" style={styles.simText}>
-              시연용 · 알람을 끈 뒤 {WAKE_OBSERVE_MINUTES}분을 어떻게 보낼지 골라 보세요
-            </Text>
-            <View style={styles.simButtons}>
-              <Button label="폰을 보며 일어나기" onPress={useAndWake} />
-              <Button label="알람만 끄고 다시 잠들기" variant="ghost" onPress={sleepAgain} />
+          {mock ? (
+            <View style={styles.sim}>
+              <Text variant="label" tone="sub" style={styles.simText}>
+                시연용 · 알람을 끈 뒤 {WAKE_OBSERVE_MINUTES}분을 어떻게 보낼지 골라 보세요
+              </Text>
+              <View style={styles.simButtons}>
+                <Button label="폰을 보며 일어나기" onPress={useAndWake} />
+                <Button label="알람만 끄고 다시 잠들기" variant="ghost" onPress={sleepAgain} />
+              </View>
             </View>
-          </View>
+          ) : null}
         </>
       ) : null}
 
@@ -177,12 +205,14 @@ function WakeFlow({ check }: { check: WakeCheck }) {
             </Text>
             {meters}
           </Card>
-          <View style={styles.sim}>
-            <Text variant="label" tone="sub" style={styles.simText}>
-              시연용
-            </Text>
-            <Button label="응답 없이 5분 지나기" variant="ghost" onPress={noReply} />
-          </View>
+          {mock ? (
+            <View style={styles.sim}>
+              <Text variant="label" tone="sub" style={styles.simText}>
+                시연용
+              </Text>
+              <Button label="응답 없이 5분 지나기" variant="ghost" onPress={noReply} />
+            </View>
+          ) : null}
         </>
       ) : null}
 
