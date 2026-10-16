@@ -40,14 +40,20 @@
 | 원탭 출발 · 도착 | 위 기록을 올린 뒤 `onEventsUploaded` 훅이 `departed_at` · `arrived_at` · 지각을 씀 | — |
 | 고친 값 (F5 · F9) | 저장이 성공한 뒤 `user_edit_logs` (`alarm-commit`의 `edits` 또는 DB insert) | — |
 
+**길찾기 값은 다시 보내지 않음 (D5)** — H03 미리 보기 · 저장 요청(`alarm-suggest` · `alarm-commit`)은 이동시간을 직접 입력(MANUAL)한 값만 `est_travel_minutes`로 보내고, 저장돼 있던 길찾기(API) 값은 출발 위치 · 수단이 그대로여도 다시 보내지 않음. 카카오 응답은 저장 · 재사용이 안 돼서 서버가 길찾기를 새로 구함 (서버도 `API`로 저장된 값은 이어받지 않음). 방금 확인 시트(H05)에서 계산해 보여 준 값을 그대로 저장하는 경우만 `API`로 보냄.
+
 **맞추는 시점** (`lib/alarmSync`, 실데이터 모드 + 로그인 상태에서만)
 
 - 로그인 직후 · 앱이 앞에 올 때(AppState) — 기록 올리기 → `reconcile()` (루트 레이아웃의 `useAlarmSync`)
 - 기상 확인(H08)에 들어올 때 — `uploadEvents()` (해제 기록이 기상 확인보다 먼저 들어가게)
 - 저장 직후 — `applyCommit(응답)`
-- 로그아웃 — `signOutAndCleanup()` (`lib/session`): 기록 올려 보기 → `AlarmCore.cancelAll()` → 남은 기록 버림 → 푸시 토큰 지우기 자리 → 실시간 구독 끊기 → `signOut`. 데이터 모드 저장값은 그대로
+- 로그아웃 — `signOutAndCleanup()` (`lib/session`): 로그아웃 중 표시 켜기(`setSigningOut`) → 기록 올려 보기 → 맞추기와 같은 줄에서 `AlarmCore.cancelAll()`(`cancelAllPhoneAlarms`) → 남은 기록 버림 → 푸시 토큰 지우기 자리 → 실시간 구독 끊기 · 기능 메모리 정리(`onSignOut`) → `signOut`. 데이터 모드 저장값은 그대로
+  - 로그아웃 중 표시가 켜져 있는 동안 `reconcile`은 서버 알람을 폰에 걸지 않고 건너뜀 (로그인 상태가 남은 사이에 맞추기가 끼어 앞 계정 알람을 다시 거는 것을 막음). `cancelAll`이 실패하면 로그아웃을 멈추고 표시를 끔. 로그아웃이 끝까지 가면 켜 둔 채로 두고, 다시 로그인할 때 `useAlarmSync`가 끔
+  - `signOut`은 서버에 알리다 네트워크로 실패해도 이 기기의 로그인이 지워졌으면 끝난 것으로 봄
 
-`reconcile`은 내 켜진 알람(지금 이후)을 읽어 서버와 같은 조립(`_shared/ring-package.ts`, 앱은 경로 별칭 `@shared/*`)으로 꾸러미를 만들고 폰 `list()`와 `alarmId` + 시각 + 강도로 비교함. 폰에 없으면 걸고(앞으로 14일 안만), 다르면 다시 걸고, 서버에 없으면 지움. 지난 시각은 건너뛰고, 첫 울림이 이미 지난 예약(울리는 중 · 미룸 · 다시 울림 대기)은 안 지움. `deferred`(울리거나 미룬 중이라 새 꾸러미를 못 받음)는 다음 맞추기에서 다시.
+`reconcile`은 내 켜진 알람(지금 이후)을 읽어 서버와 같은 조립(`_shared/ring-package.ts`, 앱은 경로 별칭 `@shared/*`)으로 꾸러미를 만들고 폰 `list()`와 `alarmId` + 시각 + 강도로 비교함. 폰에 없으면 걸고(앞으로 14일 안만), 다르면 다시 걸고, 서버에 없으면 지움. 지난 시각은 건너뜀. `deferred`(울리거나 미룬 중이라 새 꾸러미를 못 받음)는 다음 맞추기에서 다시.
+
+첫 울림이 이미 지난 폰 예약(울리는 중 · 미룸 · 다시 울림 대기)은 서버 목록(지금 이후)에 없어도 바로 지우지 않음 — 울린 뒤 서버 행의 시각이 과거가 되어 목록에서 빠지는 것이 정상이기 때문. 대신 **서버에 켜진 행이 없다고 확인된 것만** 지움 (끈 알람이 미룸 중이어도 · 다른 기기나 G04에서 꺼졌거나 지워졌어도, 시각은 안 보고 `is_enabled = true` 행이 있는지만 물음). 끄기 직후의 `reconcile({ alarmIds })`와 전체 맞추기가 같은 규칙이고, 확인 쿼리가 실패하면 전체 맞추기는 안 지움(조심 쪽, 다음 맞추기에서 다시). 서버 알람을 한 번에 읽는 줄 수(500)에서 목록이 잘렸으면 이 확인을 거친 것만 지움.
 
 **서버 함수** — 앱은 `callEdge<T>(이름, 본문)`으로만 부름. 오류는 `EdgeError`(= `UserError`)로 오고 문구는 서버 `code`로 고름 (표: `lib/edge.ts`). **그룹 기상 신호** — `subscribeGroupWake(groupId, 콜백)` (`lib/realtime`), 신호의 `date`를 `get_group_wake_status`의 `p_date`로 넘김.
 
