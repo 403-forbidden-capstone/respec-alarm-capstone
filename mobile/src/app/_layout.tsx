@@ -8,8 +8,9 @@ import { useEffect } from 'react';
 import { DeviceFrame } from '@/components/dev/DeviceFrame';
 import { ConfirmHost, SheetHost, ToastHost } from '@/components/ui';
 import { AuthProvider, useAuth } from '@/features/auth/AuthProvider';
+import { ConfigErrorScreen } from '@/features/auth/ConfigErrorScreen';
 import { ProfileRetryScreen } from '@/features/auth/ProfileRetryScreen';
-import { canUseRealData } from '@/lib/mode';
+import { canUseRealData, configError } from '@/lib/mode';
 import { colors, fontFiles } from '@/theme';
 
 // 글꼴 · 로그인 상태를 다 읽을 때까지 시작 화면을 유지함
@@ -40,8 +41,9 @@ export default function RootLayout() {
 
 // 로그인 전에는 login만, 아이디를 정하기 전에는 onboarding만, 그 뒤에는 탭 · 앱 화면만 열림
 // 로그인은 됐는데 프로필을 못 읽었으면(오프라인 등) 온보딩 대신 다시 시도 화면
-// 가짜 데이터 모드(enabled=false, lib/mode.ts)는 로그인 없이 바로 탭. login · onboarding은 주소로 열어 볼 수만 있음
-// 로그인을 붙이기 전(lib/flags REAL_DATA_READY = false)에는 login · onboarding · settings를 아예 뺌 — 주소로 열어도 탭 홈 (#116)
+// 폰 출시용 빌드(lib/modePolicy.ts)는 실데이터만 — 로그인해야만 탭이 열리고, Supabase 값이 없으면 가짜로 돌지 않고 설정 오류 화면
+// 가짜 데이터 모드(enabled=false, lib/mode.ts)는 웹 · 폰 개발용에서만. 로그인 없이 바로 탭이고 login · onboarding은 주소로 열어 볼 수만 있음
+// 실데이터를 못 쓰면(Supabase 값 없음 · lib/flags REAL_DATA_READY = false) login · onboarding · settings를 아예 뺌 — 주소로 열어도 탭 홈 (#116)
 // dev/* · auth/callback은 어느 쪽에서도 열림. 앱 화면을 새로 만들면 첫 번째 Protected 안에 넣음
 function RootStack() {
   const { session, loading, enabled, needsOnboarding, profileError, refreshProfile } = useAuth();
@@ -50,6 +52,7 @@ function RootStack() {
     if (!loading) SplashScreen.hideAsync();
   }, [loading]);
 
+  if (configError) return <ConfigErrorScreen />;
   if (loading) return null;
   if (profileError != null) return <ProfileRetryScreen message={profileError} onRetry={refreshProfile} />;
   const needsLogin = enabled && !session;

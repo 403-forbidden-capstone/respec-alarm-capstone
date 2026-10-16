@@ -20,7 +20,7 @@ export default function LoginScreen() {
       setError(
         canUseRealData
           ? '가짜 데이터 모드예요. 로그인하려면 /dev/screens나 설정에서 실데이터로 바꿔 주세요'
-          : '로그인은 아직 붙이지 않았어요. 지금은 가짜 데이터로만 돌아요',
+          : '이 빌드에서는 로그인할 수 없어요. 가짜 데이터로만 돌아요',
       );
       return;
     }

@@ -60,11 +60,19 @@ describe('데이터 모드 (웹)', () => {
     expect(store.get('respec.dataMode')).toBe('mock');
   });
 
-  it('주소 값이 없으면 저장값, 그것도 없으면 기본값(연결이면 실데이터)', () => {
-    store.set('respec.dataMode', 'mock');
-    expect(open('').getMode()).toBe('mock');
+  it('주소 값이 없으면 저장값, 그것도 없으면 기본값(웹은 연결돼 있어도 가짜)', () => {
+    store.set('respec.dataMode', 'real');
+    expect(open('').getMode()).toBe('real'); // 전에 실데이터로 바꿔 둔 브라우저
     store.clear();
-    expect(open('').getMode()).toBe('real');
+    expect(open('').getMode()).toBe('mock');
+  });
+
+  it('?mode=real이면 연결돼 있을 때 실데이터이고 저장함 · 모드를 못 잠금', () => {
+    const mode = open('?mode=real');
+    expect(mode.getMode()).toBe('real');
+    expect(store.get('respec.dataMode')).toBe('real');
+    expect(mode.modeLocked).toBe(false);
+    expect(mode.setMode('mock')).toBe('mock'); // 웹은 바꿀 수 있음
   });
 
   it('연결 안 된 빌드에서 ?mode=real이면 가짜로 돌고 가짜로 저장함', () => {

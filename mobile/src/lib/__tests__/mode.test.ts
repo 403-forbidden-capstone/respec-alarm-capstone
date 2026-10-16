@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, jest } from '@jest/globals';
+import { afterEach, beforeEach, describe, expect, it, jest } from '@jest/globals';
 
 // 폰(ios) 기준으로 돎 — 저장소는 메모리 Map, Supabase 연결 여부는 테스트마다 바꿈
 const mockStore = new Map<string, string>();
@@ -39,6 +39,8 @@ function load(): Loaded {
 }
 
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
+const g = globalThis as unknown as { __DEV__: boolean };
+const DEV = g.__DEV__;
 const SCENARIO_MORNING = '2025-05-21T22:55:00.000Z';
 
 describe('데이터 모드', () => {
@@ -46,7 +48,11 @@ describe('데이터 모드', () => {
     mockStore.clear();
     mockConfigured = false;
     mockReady = true;
+    g.__DEV__ = true; // 폰 개발용 빌드가 기본 — 출시용은 따로 확인
     jest.clearAllMocks();
+  });
+  afterEach(() => {
+    g.__DEV__ = DEV;
   });
 
   it('Supabase가 연결 안 됐으면 가짜 모드이고 실데이터로 못 바꿈', async () => {
@@ -113,5 +119,42 @@ describe('데이터 모드', () => {
     const { mode } = load();
     await flush();
     expect(mode.getMode()).toBe('real');
+  });
+  it('폰 출시용 빌드(__DEV__ false)는 실데이터 고정 — 저장값을 읽지 않고 가짜로 못 바꿈', async () => {
+    g.__DEV__ = false;
+    mockConfigured = true;
+    mockStore.set('respec.dataMode', 'mock');
+    const { mode, clock } = load();
+    expect(mode.getMode()).toBe('real'); // 저장값을 기다리지 않고 첫 화면부터
+    expect(mode.modeLocked).toBe(true);
+    expect(mode.configError).toBe(false);
+    expect(mode.devLoginVisible).toBe(false);
+    await flush();
+    expect(mode.getMode()).toBe('real');
+    expect(mockStorage.getItem).not.toHaveBeenCalled();
+    expect(mode.setMode('mock')).toBe('real');
+    expect(mockStorage.setItem).not.toHaveBeenCalled();
+    expect(Math.abs(clock.now().getTime() - Date.now())).toBeLessThan(5_000);
+  });
+
+  it('폰 출시용 빌드인데 Supabase 값이 없으면 설정 오류 — 가짜로 돌지 않음', async () => {
+    g.__DEV__ = false;
+    mockConfigured = false;
+    const { mode, clock } = load();
+    await flush();
+    expect(mode.configError).toBe(true);
+    expect(mode.canUseRealData).toBe(false);
+    expect(mode.getMode()).toBe('real');
+    expect(mode.isMock()).toBe(false);
+    expect(Math.abs(clock.now().getTime() - Date.now())).toBeLessThan(5_000);
+  });
+
+  it('폰 개발용은 모드를 바꿀 수 있고 개발 메뉴 이메일 로그인이 보임', async () => {
+    mockConfigured = true;
+    const { mode } = load();
+    await flush();
+    expect(mode.modeLocked).toBe(false);
+    expect(mode.devLoginVisible).toBe(true);
+    expect(mode.setMode('mock')).toBe('mock');
   });
 });
