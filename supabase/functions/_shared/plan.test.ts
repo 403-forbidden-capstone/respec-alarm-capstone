@@ -5,7 +5,7 @@ import { test } from 'node:test';
 import { assertPersistable, persistAppointment, type CommitCtx } from './commit.ts';
 import { HttpError } from './errors.ts';
 import { FakeDb } from './fake-db.ts';
-import { buildPlan, loadSameDayWake, TravelRequiredError, type PlanContext } from './plan.ts';
+import { buildPlan, loadPrepareStats, loadSameDayWake, TravelRequiredError, type PlanContext } from './plan.ts';
 import { toSuggestion, toTravelRequiredSuggestion } from './plan-core.ts';
 import { Reader } from './read.ts';
 import { readCommitRequest, readSuggestRequest } from './requests.ts';
@@ -319,4 +319,15 @@ test('지난 알림 경고 문구: alarm-suggest(preview)는 "저장할 때 꺼�
   assert.deepEqual(preview.plan.warnings.map((w) => [w.code, w.message]), [['PAST_ALARM_DISABLED', '이미 지난 알림은 저장할 때 꺼져요']]);
   assert.deepEqual(save.plan.warnings.map((w) => [w.code, w.message]), [['PAST_ALARM_DISABLED', '이미 지난 알림은 끄고 저장했어요']]);
   assert.deepEqual(toSuggestion(preview.plan, preview.inputs).warnings, preview.plan.warnings); // 앱이 받는 미리 보기 응답에 그 문구
+});
+
+// ---- 준비 통계: 뷰에 여러 사람의 줄이 보여도 내 줄만 ----
+
+test('준비 통계는 내 user_id 줄만: 뷰에 다른 사람 줄이 같이 보여도 오류 없이 내 값 (친구 기록 조회 정책이 생겨도)', async () => {
+  const { db, ctx } = setup();
+  db.rows('v_prepare_time_stats').push({ user_id: 'u-friend', sample_count: 3, p80_minutes: 100 }, { user_id: USER, sample_count: '12', p80_minutes: '41.5' });
+  assert.deepEqual(await loadPrepareStats(db as unknown as Db, USER), { sampleCount: 12, p80: 41.5 });
+  assert.deepEqual(await loadPrepareStats(db as unknown as Db, 'u-nobody'), { sampleCount: 0, p80: null });
+  const { plan } = await buildPlan(ctx, draftOf(FULL));
+  assert.equal(plan.prepare.sampleCount, 12);
 });

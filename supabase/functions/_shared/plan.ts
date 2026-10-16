@@ -78,11 +78,11 @@ export async function loadAlarms(db: Db, participantId: string): Promise<AlarmRo
   return must<AlarmRow[]>('alarms', await db.from('alarms').select(ALARM_COLUMNS).eq('participant_id', participantId));
 }
 
-// 예상 준비시간 통계 — 뷰 v_prepare_time_stats (security_invoker라 내 기록만). actual_prepare_minutes의 P80
-async function loadPrepareStats(db: Db): Promise<PlanInputs['stats']> {
+// 예상 준비시간 통계 — 뷰 v_prepare_time_stats (security_invoker라 지금은 RLS로 내 기록만 보이지만, 친구 기록을 읽는 정책이 생겨도 한 줄만 오게 user_id로 걸러 둠). actual_prepare_minutes의 P80
+export async function loadPrepareStats(db: Db, userId: string): Promise<PlanInputs['stats']> {
   const row = must<{ sample_count: number | string; p80_minutes: number | string | null } | null>(
     'v_prepare_time_stats',
-    await db.from('v_prepare_time_stats').select('sample_count, p80_minutes').maybeSingle(),
+    await db.from('v_prepare_time_stats').select('sample_count, p80_minutes').eq('user_id', userId).maybeSingle(),
   );
   if (!row) return { sampleCount: 0, p80: null };
   return { sampleCount: Number(row.sample_count) || 0, p80: row.p80_minutes == null ? null : Number(row.p80_minutes) };
@@ -194,7 +194,7 @@ export async function buildPlan(ctx: PlanContext, draft: PlanDraft, options: { w
 
   const basics = resolveBasics({ draft, profile, appointment, participant });
   const [stats, lateCount4w, sameDayWake] = await Promise.all([
-    loadPrepareStats(ctx.db),
+    loadPrepareStats(ctx.db, ctx.userId),
     loadLateCount(ctx.db, ctx.userId, ctx.now),
     draft.withWake != null ? Promise.resolve(!draft.withWake) : loadSameDayWake(ctx.db, ctx.userId, basics.at, timeZone, appointment?.appointment_id),
   ]);
