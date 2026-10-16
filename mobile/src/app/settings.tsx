@@ -5,10 +5,10 @@ import { Button, Card, KeyValueRow, Screen, SectionHeader, Text, TopBar } from '
 import { useAuth } from '@/features/auth/AuthProvider';
 import { DataModeToggle } from '@/features/auth/DataModeToggle';
 import type { TransportType } from '@/features/profile/types';
-import { signOut } from '@/lib/auth';
 import { userMessage } from '@/lib/errors';
 import { canUseRealData, modeLocked } from '@/lib/mode';
 import { backOrHome } from '@/lib/nav';
+import { signOutAndCleanup } from '@/lib/session';
 
 const PROVIDER_NAME: Record<string, string> = { kakao: '카카오', google: 'Google' };
 const TRANSPORT_NAME: Record<TransportType, string> = {
@@ -55,7 +55,7 @@ export default function SettingsScreen() {
           <Button
             label="로그아웃"
             variant="ghost"
-            onPress={() => signOut().catch((e) => setError(userMessage(e, '로그아웃하지 못했어요')))}
+            onPress={() => signOutAndCleanup().catch((e) => setError(userMessage(e, '로그아웃하지 못했어요')))}
           />
           {error ? (
             <Text variant="small" tone="warn">

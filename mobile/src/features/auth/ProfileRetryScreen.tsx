@@ -2,8 +2,8 @@ import { useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
 import { Button, Screen, Text } from '@/components/ui';
-import { signOut } from '@/lib/auth';
 import { userMessage } from '@/lib/errors';
+import { signOutAndCleanup } from '@/lib/session';
 
 type Props = {
   message: string; // 못 읽은 이유 (useAuth().profileError) — UserError일 때만, 아니면 ''
@@ -34,7 +34,7 @@ export function ProfileRetryScreen({ message, onRetry }: Props) {
       footer={
         <View style={styles.actions}>
           <Button label={busy ? '불러오는 중…' : '다시 시도'} onPress={() => run(onRetry)} disabled={busy} />
-          <Button label="로그아웃" variant="ghost" onPress={() => run(signOut)} disabled={busy} />
+          <Button label="로그아웃" variant="ghost" onPress={() => run(signOutAndCleanup)} disabled={busy} />
           {error ? (
             <Text variant="small" tone="warn" align="center">
               {error}

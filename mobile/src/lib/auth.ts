@@ -51,6 +51,19 @@ export async function signInWithProvider(provider: OAuthProvider) {
   return sessionData.session;
 }
 
+// 개발 메뉴(/dev/screens)의 이메일 로그인 — 시드 계정(supabase/seed)으로 카카오 · 구글 없이 들어갈 때 (웹 · 폰 개발용, lib/modePolicy.ts showDevLogin)
+// 비밀번호는 코드에 적지 않고 입력 칸에서만 받음. Supabase Auth Providers에서 이메일 로그인이 켜져 있어야 함
+export async function signInWithEmail(email: string, password: string) {
+  const { data, error } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
+  if (error) {
+    if (error.code === 'invalid_credentials') throw new UserError('이메일이나 비밀번호가 맞지 않아요');
+    if (error.code === 'email_provider_disabled') throw new UserError('이메일 로그인이 꺼져 있어요. Supabase Auth Providers에서 켜 주세요');
+    throw error;
+  }
+  return data.session;
+}
+
+// 낮은 층 로그아웃 — 화면에서는 lib/session의 signOutAndCleanup을 부를 것 (폰 알람 · 기록 정리가 먼저)
 export async function signOut() {
   const { error } = await supabase.auth.signOut();
   if (error) throw error;
