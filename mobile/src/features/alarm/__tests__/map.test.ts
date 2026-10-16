@@ -3,7 +3,21 @@ import { describe, expect, it } from '@jest/globals';
 import { formatTime } from '@/lib/format';
 import { alarmChain } from '@shared/calc/chain.ts';
 
-import { pickNextAlarm, toAlarmTime, toAppointment, type AlarmRow, type AppointmentRows } from '../map';
+import {
+  autoTimesOf,
+  beforePrepareOf,
+  pickNextAlarm,
+  STANDALONE_TITLE,
+  toAlarmTime,
+  toAppointment,
+  toAppointmentDetail,
+  toIntensity,
+  toScheduleItem,
+  toStandaloneAppointment,
+  type AlarmRow,
+  type AppointmentRows,
+  type StandaloneRow,
+} from '../map';
 
 // 목업 첫 화면과 같은 일정: 10시 팀 주간회의 (이동 50 · 여유 10 · 준비 60 · 준비 전 활동 30) -> 기상 8:00 · 준비 8:30 · 출발 9:00 · 도착 목표 9:50 (한국 시각)
 const kstTime = (hhmm: string) => `2025-05-22T${hhmm}:00+09:00`;
@@ -12,21 +26,27 @@ const alarmRow = (id: string, type: AlarmRow['alarm_type'], hhmm: string, overri
   alarm_type: type,
   scheduled_at: kstTime(hhmm),
   intensity: 'NORMAL',
+  voice_tone: 'NEUTRAL',
   sound_key: 'theme_default',
   is_enabled: true,
+  time_source: 'AUTO',
+  intensity_source: 'AUTO',
   ...overrides,
 });
 
 function meeting(overrides: Partial<AppointmentRows> = {}): AppointmentRows {
   return {
     appointment: { appointment_id: 'appt-1', title: '팀 주간회의', appointment_at: kstTime('10:00'), dest_name: '세종대학교', importance: 'NORMAL', recurrence_rule: null },
-    participant: { origin_name: '집', transport_type: 'TRANSIT', est_travel_minutes: 50, travel_source: 'API', prepare_minutes: 60, buffer_minutes: 10 },
+    participant: { participant_id: 'p-1', origin_name: '집', transport_type: 'TRANSIT', est_travel_minutes: 50, travel_source: 'API', prepare_minutes: 60, buffer_minutes: 10 },
     alarms: [alarmRow('a-arrive', 'ARRIVE', '09:50'), alarmRow('a-dep', 'DEPARTURE', '09:00'), alarmRow('a-prep', 'PREPARE', '08:30'), alarmRow('a-wake', 'WAKE', '08:00')],
     groupName: '캡스톤팀',
     items: ['노트북', '회의 자료'],
     ...overrides,
   };
 }
+
+const atOf = (a: ReturnType<typeof toAppointment>, kind: string) => a.alarms.find((x) => x.kind === kind);
+const hm = (d: Date | undefined) => (d ? formatTime(d) : undefined);
 
 describe('DB 행 → 약속 (toAppointment)', () => {
   it('목업의 팀 주간회의와 같은 모양: 알람은 기상 · 준비 · 출발 · 도착 목표 순', () => {
@@ -41,7 +61,6 @@ describe('DB 행 → 약속 (toAppointment)', () => {
       travelSource: '길찾기',
       bufferMinutes: 10,
       beforePrepMinutes: 30,
-      prepMinutes: 60,
       predictedPrepMinutes: 60,
       importance: 'NORMAL',
       repeatLabel: '반복 없음',
@@ -60,10 +79,17 @@ describe('DB 행 → 약속 (toAppointment)', () => {
     ]);
   });
 
+  it('실제 준비는 기상~출발에서 준비 전 활동을 뺀 값 (준비 알람 ~ 출발) — "P80 여유"가 음수로 나오지 않게', () => {
+    const a = toAppointment(meeting());
+    expect(a.prepMinutes).toBe(30);
+    expect(a.prepMinutes + a.beforePrepMinutes).toBe(a.predictedPrepMinutes);
+  });
+
   it('저장된 알람 시각이 공용 계산(alarmChain)과 같은 규칙으로 나온 값임 — 예시 행이 서버 계산과 어긋나지 않는지', () => {
     const a = toAppointment(meeting());
-    const chain = alarmChain({ at: a.at, travelMinutes: a.travelMinutes, bufferMinutes: a.bufferMinutes, prepareMinutes: a.prepMinutes, beforePrepareMinutes: a.beforePrepMinutes, withWake: a.withWake });
+    const chain = alarmChain({ at: a.at, travelMinutes: a.travelMinutes, bufferMinutes: a.bufferMinutes, prepareMinutes: a.predictedPrepMinutes, beforePrepareMinutes: a.beforePrepMinutes, withWake: a.withWake });
     expect(a.alarms.map((x) => [x.kind, x.at.getTime()])).toEqual(chain.map((x) => [x.kind, x.at.getTime()]));
+    expect(a.alarms.every((x) => x.auto == null)).toBe(true); // 직접 고른 시각이 없으면 auto 없음
   });
 
   it('기상 알람이 없으면(그날 첫 일정이 아님) 준비 전 활동 0, 반복 규칙은 화면 글자로', () => {
@@ -100,6 +126,123 @@ describe('DB 행 → 약속 (toAppointment)', () => {
 
   it('루틴 알람은 약속 알람 목록에 넣지 않음', () => {
     expect(toAlarmTime(alarmRow('r', 'ROUTINE', '07:00'))).toBeNull();
+  });
+});
+
+describe('직접 고른 알람 시각의 자동값 (공용 역산으로 채움)', () => {
+  const withRows = (rows: AlarmRow[]) => meeting({ alarms: rows });
+
+  it('기상을 7:45로 직접 골랐으면 auto = 8:00, 따라 움직인 준비(자동)는 auto 없음 · 준비 전 활동은 두 알람 간격', () => {
+    const rows = withRows([
+      alarmRow('a-wake', 'WAKE', '07:45', { time_source: 'MANUAL' }),
+      alarmRow('a-prep', 'PREPARE', '08:15'),
+      alarmRow('a-dep', 'DEPARTURE', '09:00'),
+      alarmRow('a-arrive', 'ARRIVE', '09:50'),
+    ]);
+    const a = toAppointment(rows);
+    expect(hm(atOf(a, 'WAKE')?.auto)).toBe('오전 8:00');
+    expect(hm(atOf(a, 'WAKE')?.at)).toBe('오전 7:45');
+    expect(atOf(a, 'PREPARE')?.auto).toBeUndefined();
+    expect(a.beforePrepMinutes).toBe(30);
+  });
+
+  it('출발을 8:55로 직접 골랐으면 auto = 9:00', () => {
+    const a = toAppointment(
+      withRows([alarmRow('a-wake', 'WAKE', '08:00'), alarmRow('a-prep', 'PREPARE', '08:30'), alarmRow('a-dep', 'DEPARTURE', '08:55', { time_source: 'MANUAL' }), alarmRow('a-arrive', 'ARRIVE', '09:50')]),
+    );
+    expect(hm(atOf(a, 'DEPARTURE')?.auto)).toBe('오전 9:00');
+  });
+
+  it('직접 고른 것으로 저장됐어도 자동값과 같은 시각이면 직접 고름이 아님 (alarmChain 규칙)', () => {
+    const a = toAppointment(withRows([alarmRow('a-wake', 'WAKE', '08:00', { time_source: 'MANUAL' }), alarmRow('a-dep', 'DEPARTURE', '09:00')]));
+    expect(atOf(a, 'WAKE')?.auto).toBeUndefined();
+  });
+
+  it('준비를 직접 골랐으면 간격이 준비 전 활동이 아니므로 기본 20분으로 자동값을 구함', () => {
+    const rows = withRows([alarmRow('a-wake', 'WAKE', '08:00'), alarmRow('a-prep', 'PREPARE', '08:40', { time_source: 'MANUAL' }), alarmRow('a-dep', 'DEPARTURE', '09:00')]);
+    expect(beforePrepareOf(rows.alarms)).toBe(20);
+    expect(hm(autoTimesOf(rows).PREPARE)).toBe('오전 8:20');
+  });
+
+  it('직접 고른 시각이 없으면 계산하지 않음', () => {
+    expect(autoTimesOf(meeting())).toEqual({});
+  });
+
+  it('기상 · 준비 중 하나만 있으면 준비 전 활동 0', () => {
+    expect(beforePrepareOf([alarmRow('a-wake', 'WAKE', '08:00')])).toBe(0);
+    expect(beforePrepareOf([alarmRow('a-prep', 'PREPARE', '08:30')])).toBe(0);
+  });
+});
+
+describe('일정 없는 알람 (D46)', () => {
+  const row = (overrides: Partial<StandaloneRow> = {}): StandaloneRow => ({ ...alarmRow('s-1', 'WAKE', '07:00'), recurrence_rule: 'FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR', ...overrides });
+
+  it('제목은 서버와 같은 "알람", 시각 하나짜리 일정으로 그림', () => {
+    const a = toStandaloneAppointment(row());
+    expect(a).toMatchObject({ id: 's-1', title: '알람', standalone: true, enabled: true, withWake: true, repeatLabel: '평일', travelMinutes: 0, level: 1 });
+    expect(STANDALONE_TITLE).toBe('알람');
+    expect(a.alarms.map((x) => `${x.kind} ${formatTime(x.at)}`)).toEqual(['WAKE 오전 7:00']);
+  });
+
+  it('끈 알람은 일정도 꺼짐, 반복이 없으면 반복 없음', () => {
+    expect(toStandaloneAppointment(row({ is_enabled: false, recurrence_rule: null }))).toMatchObject({ enabled: false, repeatLabel: '반복 없음' });
+  });
+
+  it('다음 알람 고르기에도 들어감', () => {
+    const next = pickNextAlarm([toStandaloneAppointment(row())], Date.parse(kstTime('06:00')));
+    expect(next?.appointment.title).toBe('알람');
+    expect(next && formatTime(next.alarm.at)).toBe('오전 7:00');
+  });
+});
+
+describe('하루 일정 한 줄 (toScheduleItem)', () => {
+  const appointment = meeting().appointment;
+
+  it('알람이 있으면 hasAlarm, 알람 없는 일정도 한 줄', () => {
+    expect(toScheduleItem({ appointment, alarms: [{ alarm_type: 'WAKE' }, { alarm_type: 'ARRIVE' }] })).toMatchObject({ appointmentId: 'appt-1', title: '팀 주간회의', place: '세종대학교', importance: 'NORMAL', hasAlarm: true });
+    expect(toScheduleItem({ appointment, alarms: [] }).hasAlarm).toBe(false);
+  });
+});
+
+describe('알람 설정 읽기 (toAppointmentDetail · toIntensity)', () => {
+  const manualStrong = (overrides: Partial<AlarmRow> = {}) =>
+    alarmRow('a-wake', 'WAKE', '08:00', { intensity_source: 'MANUAL', sound_key: 'theme_urgent', voice_tone: 'NEUTRAL', intensity: 'NORMAL', ...overrides });
+
+  it('직접 고른 강도(intensity_source = MANUAL)에서 자동 값과 다른 칸만 "직접 고름"', () => {
+    const intensity = toIntensity([manualStrong()], 'NORMAL', 0);
+    expect(intensity).toMatchObject({ auto: 1, importancePoint: 1, lateCount: 0, latePoint: 0 });
+    expect(intensity.axes).toEqual({ sound: { level: 2, manual: true }, voice: { level: 1, manual: false }, vibration: { level: 1, manual: false } });
+  });
+
+  it('AUTO로 저장된 강도는 칸이 달라도 자동으로 봄 (지금 자동 값을 따라감)', () => {
+    const intensity = toIntensity([alarmRow('a-wake', 'WAKE', '08:00', { sound_key: 'theme_urgent' })], 'NORMAL', 0);
+    expect(intensity.axes.sound).toEqual({ level: 1, manual: false });
+  });
+
+  it('최근 4주 지각 2번 이상이면 자동 한 단계 위, 점수도 같이', () => {
+    expect(toIntensity([], 'NORMAL', 2)).toMatchObject({ auto: 2, latePoint: 1, lateCount: 2 });
+    expect(toIntensity([], 'LOW', 2)).toMatchObject({ auto: 1 }); // 중요도 보통이어도 지각 2번이면 중 (목업 규칙 D56)
+  });
+
+  it('기상 알람의 직접 값이 먼저, 없으면 다른 알람의 직접 값', () => {
+    const rows = [alarmRow('a-dep', 'DEPARTURE', '09:00', { intensity_source: 'MANUAL', intensity: 'SOFT', sound_key: 'theme_calm', voice_tone: 'CALM' }), alarmRow('a-wake', 'WAKE', '08:00')];
+    expect(toIntensity(rows, 'NORMAL', 0).axes.vibration).toEqual({ level: 0, manual: true });
+  });
+
+  it('H03 초안의 처음 모양: 직접 입력한 이동 · 직접 고른 시각만 값, 준비는 늘 자동(null)', () => {
+    const rows = meeting({
+      participant: { ...meeting().participant, travel_source: 'MANUAL', est_travel_minutes: 40 },
+      alarms: [alarmRow('a-wake', 'WAKE', '07:45', { time_source: 'MANUAL' }), alarmRow('a-prep', 'PREPARE', '08:15'), alarmRow('a-dep', 'DEPARTURE', '09:00'), alarmRow('a-arrive', 'ARRIVE', '09:50')],
+    });
+    const detail = toAppointmentDetail(rows, 0);
+    expect(detail.edits).toMatchObject({ bufferMinutes: 10, origin: '집', transport: 'TRANSIT', travelMinutes: 40, prepareMinutes: null });
+    expect(hm(detail.edits.times.WAKE)).toBe('오전 7:45');
+    expect(detail.edits.times.PREPARE).toBeUndefined();
+    expect(detail.auto).toEqual({ travelMinutes: 40, predictedPrepMinutes: 60 });
+  });
+
+  it('길찾기로 구한 이동은 직접 입력이 아님 (edits.travelMinutes = null)', () => {
+    expect(toAppointmentDetail(meeting(), 0).edits.travelMinutes).toBeNull();
   });
 });
 

@@ -107,9 +107,12 @@ function Detail({ appointment: a, reload }: { appointment: AppointmentDetail; re
   // 값을 바꾸면 알람 시각을 다시 계산 (저장 전 미리 보기)
   useEffect(() => {
     let cancelled = false;
-    previewAlarms(a.id, edits).then((next) => {
-      if (!cancelled) setPreview(next);
-    });
+    previewAlarms(a.id, edits)
+      .then((next) => {
+        if (!cancelled) setPreview(next);
+      })
+      // 실데이터 계산이 실패하면(네트워크 등) 이전 미리 보기를 그대로 둠 — 저장할 때 다시 계산하며 이유를 알려 줌
+      .catch(() => {});
     return () => {
       cancelled = true;
     };
