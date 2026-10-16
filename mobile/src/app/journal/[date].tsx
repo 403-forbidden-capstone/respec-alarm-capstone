@@ -185,15 +185,18 @@ function JournalView({ journal: j, reload, top }: { journal: Journal; reload: ()
         </Text>
       </Card>
 
-      {j.suggestion.status === 'PENDING' ? (
+      {/* 제안 글이 없는 일기(실데이터에서 AI가 루틴을 제안하지 않은 날)는 제안 카드를 접음 — 제목이 빈 글자 */}
+      {j.suggestion.title === '' ? null : j.suggestion.status === 'PENDING' ? (
         <Card>
           <Text variant="label" tone="sub" style={styles.label}>
-            루틴 제안 · {j.suggestion.reason}
+            루틴 제안{j.suggestion.reason ? ` · ${j.suggestion.reason}` : ''}
           </Text>
           <Text variant="big">{j.suggestion.title}</Text>
-          <Text variant="small" tone="sub">
-            {j.suggestion.summary}
-          </Text>
+          {j.suggestion.summary ? (
+            <Text variant="small" tone="sub">
+              {j.suggestion.summary}
+            </Text>
+          ) : null}
           <View style={styles.row}>
             <Button
               label="루틴 만들기"

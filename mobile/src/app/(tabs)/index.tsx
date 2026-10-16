@@ -32,6 +32,7 @@ import { getGroupSummary, listGroups } from '@/features/social/api';
 import { now } from '@/lib/clock';
 import { addDays, dayKey, formatDate, formatMinuteOfDay, formatRelative, formatTime, minuteOfDay, startOfDay } from '@/lib/format';
 import { openGroupDetail } from '@/lib/nav';
+import { useAction } from '@/lib/useAction';
 import { useLoad } from '@/lib/useLoad';
 import { colors } from '@/theme';
 
@@ -68,6 +69,7 @@ function greeting(t: Date) {
 export default function HomeScreen() {
   const { data, error, reload } = useLoad(loadHome);
   const current = useNow(); // 30초마다 다시 읽음 — "N분 뒤" · 인사말이 열 때 값에 멈춰 있지 않게
+  const { run } = useAction(); // 루틴 단계 · 준비물 체크는 한 번에 하나씩, 실패하면 토스트 (실데이터는 네트워크 오류가 있음)
 
   // 저녁으로 넘어갔거나 다음 알람 시각이 지났으면 내용을 다시 읽음
   const stale = data != null && (isEvening(current) !== data.evening || (data.next != null && data.next.alarm.at.getTime() < current.getTime()));
@@ -85,16 +87,20 @@ export default function HomeScreen() {
   // 추가한 일정이 홈이 보여 주는 날(낮 = 오늘, 저녁 = 내일)에 들어가게 날짜를 넘김
   const newSchedule = () => router.push({ pathname: '/schedule/new', params: { from: 'home', date: dayKey(target) } });
 
-  async function tickRoutine() {
+  function tickRoutine() {
     if (!routine) return;
-    const updated = await advanceRoutine(routine.id);
-    if (updated && updated.done === updated.steps.length) toast('오늘 루틴을 모두 마쳤어요');
-    reload();
+    void run(async () => {
+      const updated = await advanceRoutine(routine.id);
+      if (updated && updated.done === updated.steps.length) toast('오늘 루틴을 모두 마쳤어요');
+      await reload();
+    });
   }
 
-  async function tickTodo(id: string) {
-    await toggleTodo(id);
-    reload();
+  function tickTodo(id: string) {
+    void run(async () => {
+      await toggleTodo(id);
+      await reload();
+    });
   }
 
   async function askCancelSnooze() {
