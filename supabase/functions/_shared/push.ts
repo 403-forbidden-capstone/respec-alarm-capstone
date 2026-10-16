@@ -13,7 +13,7 @@ export type PushResult = {
   invalidTokens: string[]; // 더 이상 못 쓰는 토큰 — 부른 쪽이 push_tokens에서 지움
 };
 
-type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
+export type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
 
 export const EXPO_PUSH_URL = 'https://exp.host/--/api/v2/push/send';
 const BATCH = 100;
