@@ -163,6 +163,40 @@ describe('reconcile — 서버 ↔ 폰 맞추기', () => {
     expect(mockAlarmQuery.in).not.toHaveBeenCalled();
   });
 
+  it('서버 목록이 상한(500)에서 잘렸으면 "서버에 없음"으로 보고 폰 예약을 지우지 않음 — 먼 알람이 지워지지 않게', async () => {
+    const full = Array.from({ length: 500 }, (_, i) => row(`s-${i}`, new Date(Date.parse('2026-10-19T22:30:00.000Z') + i * 60_000).toISOString()));
+    mockAlarmRows = full;
+    const far = Date.parse('2026-12-01T00:00:00.000Z');
+    mockCore.list.mockResolvedValue([{ id: 'beyond-limit', type: 'WAKE', intensity: 'NORMAL', title: '먼 알람', atMillis: far, snoozeCount: 0, nextRingAt: far }]);
+    const summary = await reconcile({ nowMs: NOW });
+    expect(summary.canceled).toEqual([]);
+    expect(mockCore.cancel).not.toHaveBeenCalled();
+
+    // 상한보다 적게 왔으면(잘리지 않음) 서버에 없는 폰 예약을 지움
+    mockAlarmRows = full.slice(0, 499);
+    expect((await reconcile({ nowMs: NOW })).canceled).toEqual(['beyond-limit']);
+  });
+
+  it('상한에서 잘려도 서버에 켜진 행이 없다고 확인된 알람(alarmIds로 끈 것)은 지움', async () => {
+    mockAlarmRows = Array.from({ length: 500 }, (_, i) => row(`s-${i}`, new Date(Date.parse('2026-10-19T22:30:00.000Z') + i * 60_000).toISOString()));
+    mockCore.list.mockResolvedValue([{ id: 'turned-off', type: 'WAKE', intensity: 'NORMAL', title: '끈 알람', atMillis: NOW + 60 * 60_000, snoozeCount: 0, nextRingAt: NOW + 60 * 60_000 }]);
+    mockEnabledIds = [];
+    expect((await reconcile({ nowMs: NOW, alarmIds: ['turned-off'] })).canceled).toEqual(['turned-off']);
+  });
+
+  it('시간대를 안 넘긴 호출(alarmIds로 켜기 · 끄기 반영)도 마지막으로 받은 프로필 시간대로 부제를 만듦', async () => {
+    mockAlarmRows = [row('server-1', '2026-10-19T22:30:00.000Z')];
+    await reconcile({ nowMs: NOW, timeZone: 'UTC' }); // 로그인 직후 useAlarmSync
+    expect(mockCore.scheduleAll.mock.calls.at(-1)?.[0][0].subtitle).toBe('오전 1:00 · 세종대학교');
+    await reconcile({ nowMs: NOW, alarmIds: ['server-1'] }); // 시간대 없이
+    expect(mockCore.scheduleAll.mock.calls.at(-1)?.[0][0].subtitle).toBe('오전 1:00 · 세종대학교');
+    // 로그아웃하면 잊음 (다음 계정의 시간대와 섞이지 않게) -> 기본 서울
+    setSigningOut(true);
+    setSigningOut(false);
+    await reconcile({ nowMs: NOW, alarmIds: ['server-1'] });
+    expect(mockCore.scheduleAll.mock.calls.at(-1)?.[0][0].subtitle).toBe('오전 10:00 · 세종대학교');
+  });
+
   it('쿼리는 내 켜진 알람 · 지금 이후', async () => {
     await reconcile({ nowMs: NOW });
     expect(mockAlarmQuery.eq).toHaveBeenCalledWith('user_id', 'user-1');

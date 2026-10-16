@@ -34,11 +34,16 @@ function serial<T>(task: () => Promise<T>): Promise<T> {
   return run;
 }
 
+// 마지막으로 받은 프로필 시간대 — 켜기 · 끄기 · 강도처럼 시간대를 모르는 호출 경로(reconcile({ alarmIds }))도 같은 부제("오전 10:00 · 장소")를 만들게
+//   useAlarmSync가 로그인 직후 넘긴 값을 기억해 둠 (호출 경로마다 부제 시각이 다르면 같은 알람이 경로에 따라 다시 걸림)
+let lastTimeZone: string | null = null;
+
 // 로그아웃 중 — 켜져 있으면 reconcile이 서버 알람을 폰에 걸지 않고 돌아감. 로그아웃 정리(lib/session)가 폰 알람을 다 지우는 동안 맞추기가 끼어들어 앞 계정 알람을 다시 걸지 않게
 // 로그아웃이 끝까지 가면 켜 둔 채로 두고 다시 로그인할 때 useAlarmSync가 끔. 로그아웃이 중간에 멈추면(알람을 못 지움 등) session.ts가 바로 끔
 let signingOut = false;
 export function setSigningOut(value: boolean): void {
   signingOut = value;
+  if (value) lastTimeZone = null; // 다음에 로그인하는 계정의 시간대와 섞이지 않게
 }
 
 // ---------------------------------------------------------------------------
@@ -91,6 +96,8 @@ export function cancelAllPhoneAlarms(): Promise<void> {
 
 // 내 켜진 알람 중 지금 이후 것을 서버에서 읽음 (RLS가 친구 알람을 줄 수 있어 user_id로 한 번 더 좁힘)
 // 위쪽 기간 제한 없이 읽는 이유: 폰에 이미 있는 먼 알람을 "서버에 없다"고 보고 지우지 않으려고 (planReconcile)
+const SERVER_ROW_LIMIT = 500;
+
 async function fetchServerRows(userId: string, fromMs: number): Promise<SyncRow[]> {
   const { data, error } = await supabase
     .from('alarms')
@@ -101,7 +108,7 @@ async function fetchServerRows(userId: string, fromMs: number): Promise<SyncRow[
     .eq('is_enabled', true)
     .gt('scheduled_at', new Date(fromMs).toISOString())
     .order('scheduled_at')
-    .limit(500);
+    .limit(SERVER_ROW_LIMIT);
   if (error) throw error;
   return (data ?? []).map((row) => ({
     alarm_id: row.alarm_id,
@@ -149,7 +156,8 @@ export function reconcile(options: ReconcileOptions = {}): Promise<SyncSummary> 
     if (!userId) return emptySummary();
     const nowMs = options.nowMs ?? Date.now();
     const rows = await fetchServerRows(userId, nowMs);
-    let server = buildServerPackages(rows, options.timeZone ?? undefined);
+    if (options.timeZone) lastTimeZone = options.timeZone;
+    let server = buildServerPackages(rows, options.timeZone ?? lastTimeZone ?? undefined);
     let phone = await AlarmCore.list();
     let forceCancel: Set<string> | undefined;
     if (options.alarmIds) {
@@ -163,7 +171,10 @@ export function reconcile(options: ReconcileOptions = {}): Promise<SyncSummary> 
       forceCancel = new Set(candidates.filter((id) => !stillOn.has(id)));
     }
     if (signingOut) return emptySummary(); // 읽는 사이 로그아웃이 시작됐으면 폰을 건드리지 않음
-    return executePlan(planReconcile({ server, phone, nowMs, forceCancel }));
+    const plan = planReconcile({ server, phone, nowMs, forceCancel });
+    // 서버 목록이 상한에서 잘렸으면 "서버에 없음"이 진짜 없다는 뜻이 아닐 수 있음 — 서버에 없다고 확인된 것(forceCancel)만 지움
+    if (rows.length >= SERVER_ROW_LIMIT) plan.cancel = plan.cancel.filter((id) => forceCancel?.has(id) === true);
+    return executePlan(plan);
   });
 }
 
