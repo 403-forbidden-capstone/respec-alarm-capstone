@@ -60,8 +60,8 @@ export type Journal = {
   coaching: string;
   encouragement: string;
   suggestion: {
-    title: string; // 회의 전날 준비
-    reason: string; // 같은 문제가 최근 7일 중 3일
+    title: string; // 회의 전날 준비 (빈 글자면 루틴 제안이 없는 일기 — 화면이 제안 카드를 접음)
+    reason: string; // 같은 문제가 최근 7일 중 3일 (실데이터는 DB에 칸이 없어 빈 글자 — D30 열림)
     summary: string; // 수요일 밤 9:30부터 3단계 · 아침 알람은 앞당기지 않아요
     status: ApplyStatus; // 루틴을 저장하면 APPLIED, 괜찮아요 = REJECTED
   };
