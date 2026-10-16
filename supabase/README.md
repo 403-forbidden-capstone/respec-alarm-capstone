@@ -184,7 +184,7 @@ create policy wake_signal_receive on realtime.messages
 
 - `place-search`: `{ query, lat?, lng?, limit? }` → `{ places: [{ id, name, address, lat, lng, category? }] }`. `lat · lng`를 주면 가까운 순
 - `notify`: `{ kind, targetUserId, alarmId?, title, body, data? }` → `{ sent, failed, reason? }`. `kind`는 `ALARM_CHANGED`(G04) · `WAKE_PING`(G03, D19까지 403). 권한은 `can_send_push`(DB 함수). 푸시 토큰이 없으면 `reason: "NO_TOKENS"`, FCM 키가 없거나 `EXPO_ACCESS_TOKEN`이 틀려 Expo가 401 · 403을 주면 `reason: "PUSH_NOT_CONFIGURED"`, Expo 서버 장애면 `"PUSH_UNAVAILABLE"` — 오류가 아니라 `sent: 0`. 만료된 토큰(`DeviceNotRegistered`)은 `push_tokens`에서 지움
-- `wake-check`: 서비스 키만. `find_missed_wake_alarms` 결과를 `alarm_events`에 `MISSED`로 기록 (`client_event_id = event_key`, `ON CONFLICT DO NOTHING`이라 두 번 안 들어감). 응답 `{ checked, recorded, pushed }`. 그룹 미확인 푸시는 `can_send_push('WAKE_MISSED')`가 거절하는 동안(D19) 안 보냄
+- `wake-check`: 서비스 키만. `find_missed_wake_alarms` 결과를 `alarm_events`에 `MISSED`로 기록 (`client_event_id = event_key`, `ON CONFLICT DO NOTHING`이라 두 번 안 들어감). 응답 `{ checked, recorded, pushed }`. 그룹 미확인 푸시는 D19가 정해질 때까지 안 보냄(`_shared/wake.ts`의 `PUSH_MISSED_TO_GROUP = false` — 그 전에는 구성원 조회도 `can_send_push` 호출도 안 함). D19 뒤에는 받을 사람 후보를 그룹 참여 구성원(사실)으로만 뽑고 보내도 되는지는 `can_send_push('WAKE_MISSED')` 하나에 맡김 (TS에서 권한 표를 다시 해석하지 않음)
 
 ### 공용 계산 (`functions/_shared/calc/`)
 
@@ -192,14 +192,14 @@ create policy wake_signal_receive on realtime.messages
 
 ### 시험
 
-Deno 없이 Node(24 이상)가 `.ts`를 바로 읽어서 `node --test`로 돌림 (계산 · 요청 검사 · 오류 · 카카오 응답 읽기 · 이동시간 순서 · 푸시 · 저장 내용 정하기 · `alarm-commit`의 쓰기 순서와 되돌리기는 메모리 가짜 DB `fake-db.ts`로).
+Deno 없이 Node(24 이상)가 `.ts`를 바로 읽어서 `node --test`로 돌림 (계산 · 요청 검사 · 오류 · 카카오 응답 읽기 · 이동시간 순서 · 푸시 · 저장 내용 정하기 · `alarm-commit`의 쓰기 순서와 되돌리기 · `notify`(권한 거절 · 허용 · 만료 토큰) · `wake-check`(MISSED 중복 무시 · 이름 인자) · 같은 초안의 미리 보기 = 저장 대조는 메모리 가짜 DB `fake-db.ts`로 — `rpc` · `upsert`도 흉내).
 
 ```bash
 # 레포 맨 위에서
 node --test --disable-warning=MODULE_TYPELESS_PACKAGE_JSON "supabase/functions/**/*.test.ts"
 ```
 
-- 진짜 DB를 부르는 읽기(`plan.ts`의 `from(...).select(...)`, 임베드 · 뷰 조회)와 `index.ts`의 연결은 이 시험에 안 들어감. Docker · Deno가 생기면 `supabase functions serve` + 로컬 DB로 확인할 것
+- 가짜 DB는 쿼리 빌더의 모양만 흉내 내서, 진짜 PostgREST에서의 동작(임베드 `!inner`, 뷰 조회, `upsert … RETURNING`)과 `index.ts`의 연결(로그인 확인 · `Deno.serve`)은 이 시험에 안 들어감. Docker · Deno가 생기면 `supabase functions serve` + 로컬 DB로 확인할 것
 - `deno check`는 이 PC에 Deno가 없어 못 돌림. 대신 `tsc --strict`로 `functions/**` 전체(Deno 전역 · `npm:` · `jsr:` 지정자는 임시 선언으로 대체)를 타입 검사해 통과함
 
 ### 배포 (터미널, Actions 안 씀)
