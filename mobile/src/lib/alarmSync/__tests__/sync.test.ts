@@ -1,11 +1,12 @@
 import { beforeEach, describe, expect, it, jest } from '@jest/globals';
 import type { AlarmEvent, RingPackage, ScheduleOutcome, ScheduledAlarm } from '@capstone/alarm-core';
 
-import { applyCommit, discardPendingEvents, onEventsUploaded, reconcile, uploadEvents } from '../index';
+import { applyCommit, cancelAllPhoneAlarms, discardPendingEvents, onEventsUploaded, reconcile, setSigningOut, syncNow, uploadEvents } from '../index';
 
 // 알람 코어(폰) · supabase · 데이터 모드를 가짜로 — 오케스트레이션(어느 순서로 무엇을 부르는지)만 확인. 계산은 reconcile.test.ts · events.test.ts
 const mockCore = {
   cancel: jest.fn<(id: string) => Promise<void>>(),
+  cancelAll: jest.fn<() => Promise<void>>(),
   scheduleAll: jest.fn<(pkgs: readonly RingPackage[]) => Promise<ScheduleOutcome[]>>(),
   list: jest.fn<() => Promise<ScheduledAlarm[]>>(),
   getPendingEvents: jest.fn<() => Promise<AlarmEvent[]>>(),
@@ -13,6 +14,7 @@ const mockCore = {
 };
 jest.mock('@capstone/alarm-core', () => ({
   cancel: (id: string) => mockCore.cancel(id),
+  cancelAll: () => mockCore.cancelAll(),
   scheduleAll: (pkgs: readonly RingPackage[]) => mockCore.scheduleAll(pkgs),
   list: () => mockCore.list(),
   getPendingEvents: () => mockCore.getPendingEvents(),
@@ -49,7 +51,9 @@ beforeEach(() => {
   mockUser = 'user-1';
   mockAlarmRows = [];
   mockEnabledIds = [];
+  setSigningOut(false);
   mockCore.cancel.mockResolvedValue();
+  mockCore.cancelAll.mockResolvedValue();
   mockCore.scheduleAll.mockImplementation(scheduledAll);
   mockCore.list.mockResolvedValue([]);
   mockCore.getPendingEvents.mockResolvedValue([]);
@@ -256,5 +260,73 @@ describe('discardPendingEvents — 로그아웃 정리', () => {
     mockCore.getPendingEvents.mockResolvedValue([event('e1'), event('e2')]);
     expect(await discardPendingEvents()).toBe(2);
     expect(mockCore.markEventsUploaded).toHaveBeenCalledWith(['e1', 'e2']);
+  });
+});
+
+describe('로그아웃 정리 — 폰 알람 전부 지우기와 맞추기의 경합', () => {
+  const futureRow = {
+    alarm_id: 'server-1',
+    alarm_type: 'WAKE',
+    scheduled_at: '2026-10-19T22:30:00.000Z',
+    intensity: 'NORMAL',
+    sound_key: null,
+    snooze_limit: 3,
+    is_enabled: true,
+    participant_id: 'p1',
+    routine_id: null,
+    appointment_participants: { appointments: { title: '회의', appointment_at: '2026-10-20T01:00:00.000Z', dest_name: null } },
+    routines: null,
+  };
+
+  it('cancelAllPhoneAlarms는 맞추기 · 올리기와 같은 줄 — 앞에 서 있는 맞추기가 끝난 뒤에 지움', async () => {
+    const order: string[] = [];
+    mockAlarmRows = [futureRow];
+    mockCore.list.mockImplementation(async () => {
+      order.push('reconcile:list');
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      return [];
+    });
+    mockCore.scheduleAll.mockImplementation(async (pkgs) => {
+      order.push('reconcile:schedule');
+      return scheduledAll(pkgs);
+    });
+    mockCore.cancelAll.mockImplementation(async () => void order.push('cancelAll'));
+    await Promise.all([reconcile({ nowMs: NOW }), cancelAllPhoneAlarms()]);
+    expect(order).toEqual(['reconcile:list', 'reconcile:schedule', 'cancelAll']); // 거꾸로면 맞추기가 지운 뒤에 다시 걺
+  });
+
+  it('cancelAllPhoneAlarms가 실패하면 던지고, 그 뒤 줄은 계속 돎', async () => {
+    mockCore.cancelAll.mockRejectedValueOnce(new Error('native error'));
+    await expect(cancelAllPhoneAlarms()).rejects.toThrow('native error');
+    mockCore.cancelAll.mockResolvedValue();
+    await expect(cancelAllPhoneAlarms()).resolves.toBeUndefined();
+  });
+
+  it('로그아웃 중에는 맞추기가 서버를 읽지도 폰을 건드리지도 않음 (앱이 앞에 올 때 syncNow가 끼어든 경우)', async () => {
+    mockAlarmRows = [futureRow];
+    setSigningOut(true);
+    const [, summary] = await Promise.all([cancelAllPhoneAlarms(), syncNow({ nowMs: NOW }).then(() => reconcile({ nowMs: NOW }))]);
+    expect(summary).toEqual({ scheduled: [], skippedPast: [], deferred: [], canceled: [], failed: [] });
+    expect(mockCore.list).not.toHaveBeenCalled();
+    expect(mockCore.scheduleAll).not.toHaveBeenCalled();
+  });
+
+  it('읽는 사이에 로그아웃이 시작돼도 폰에 걸지 않음', async () => {
+    mockAlarmRows = [futureRow];
+    mockCore.list.mockImplementation(async () => {
+      setSigningOut(true);
+      return [];
+    });
+    expect(await reconcile({ nowMs: NOW })).toMatchObject({ scheduled: [], canceled: [] });
+    expect(mockCore.scheduleAll).not.toHaveBeenCalled();
+  });
+
+  it('표시를 끄면(다시 로그인) 맞추기가 다시 돎', async () => {
+    mockAlarmRows = [futureRow];
+    setSigningOut(true);
+    await reconcile({ nowMs: NOW });
+    expect(mockCore.scheduleAll).not.toHaveBeenCalled();
+    setSigningOut(false);
+    expect(await reconcile({ nowMs: NOW })).toMatchObject({ scheduled: ['server-1'] });
   });
 });

@@ -2,8 +2,8 @@
 //   · applyCommit(result)  alarm-commit 응답을 폰에 반영 (canceled_alarm_ids → cancel, ring_packages → scheduleAll). 약속 알람 만들기 · 시각 바꾸기 뒤에
 //   · reconcile()          내 켜진 알람을 서버에서 읽어 폰 예약과 맞춤 (없으면 걸고, 다르면 다시 걸고, 서버에 없으면 지움). 로그인 직후 · 앱이 앞에 올 때
 //   · uploadEvents()       폰에 쌓인 울림 기록을 alarm_events로 올림. 앱이 앞에 올 때 · 기상 확인 화면에 들어올 때
-//   · discardPendingEvents() / onEventsUploaded(handler)  로그아웃 정리 · 원탭 뒤처리 훅 (아래)
-// 실데이터 모드에서만 일함 (reconcile · uploadEvents는 가짜 모드면 아무것도 안 함). 세 함수는 한 줄로 차례대로 돎 — 맞추는 도중에 저장 결과가 끼어들어 방금 건 알람을 지우지 않게
+//   · cancelAllPhoneAlarms() / setSigningOut(value) / discardPendingEvents() / onEventsUploaded(handler)  로그아웃 정리 · 원탭 뒤처리 훅 (아래)
+// 실데이터 모드에서만 일함 (reconcile · uploadEvents는 가짜 모드면 아무것도 안 함). 이 함수들은 한 줄로 차례대로 돎 — 맞추는 도중에 저장 결과가 끼어들어 방금 건 알람을 지우지 않게
 // 계산은 reconcile.ts · events.ts(순수 함수)에, 여기는 DB · 폰 호출만
 import * as AlarmCore from '@capstone/alarm-core';
 import type { AlarmEvent, RingPackage, ScheduleOutcome } from '@capstone/alarm-core';
@@ -32,6 +32,13 @@ function serial<T>(task: () => Promise<T>): Promise<T> {
   const run = chain.then(task, task);
   chain = run.catch(() => {});
   return run;
+}
+
+// 로그아웃 중 — 켜져 있으면 reconcile이 서버 알람을 폰에 걸지 않고 돌아감. 로그아웃 정리(lib/session)가 폰 알람을 다 지우는 동안 맞추기가 끼어들어 앞 계정 알람을 다시 걸지 않게
+// 로그아웃이 끝까지 가면 켜 둔 채로 두고 다시 로그인할 때 useAlarmSync가 끔. 로그아웃이 중간에 멈추면(알람을 못 지움 등) session.ts가 바로 끔
+let signingOut = false;
+export function setSigningOut(value: boolean): void {
+  signingOut = value;
 }
 
 // ---------------------------------------------------------------------------
@@ -75,6 +82,11 @@ export function applyCommit(result: CommitResult): Promise<SyncSummary> {
     await scheduleAlarms(result.ring_packages ?? [], summary);
     return summary;
   });
+}
+
+// 로그아웃 정리용 — 폰 알람을 전부 지움 (무음 알림 포함). 맞추기 · 올리기와 같은 줄이라 앞에 서 있는 맞추기가 다 끝난 뒤에 지움
+export function cancelAllPhoneAlarms(): Promise<void> {
+  return serial(() => AlarmCore.cancelAll());
 }
 
 // 내 켜진 알람 중 지금 이후 것을 서버에서 읽음 (RLS가 친구 알람을 줄 수 있어 user_id로 한 번 더 좁힘)
@@ -132,6 +144,7 @@ async function executePlan(plan: ReconcilePlan): Promise<SyncSummary> {
 export function reconcile(options: ReconcileOptions = {}): Promise<SyncSummary> {
   if (isMock()) return Promise.resolve(emptySummary());
   return serial(async () => {
+    if (signingOut) return emptySummary();
     const userId = await currentUserId();
     if (!userId) return emptySummary();
     const nowMs = options.nowMs ?? Date.now();
@@ -149,6 +162,7 @@ export function reconcile(options: ReconcileOptions = {}): Promise<SyncSummary> 
       const stillOn = await fetchEnabledIds(userId, candidates);
       forceCancel = new Set(candidates.filter((id) => !stillOn.has(id)));
     }
+    if (signingOut) return emptySummary(); // 읽는 사이 로그아웃이 시작됐으면 폰을 건드리지 않음
     return executePlan(planReconcile({ server, phone, nowMs, forceCancel }));
   });
 }
