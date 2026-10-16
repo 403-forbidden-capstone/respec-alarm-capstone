@@ -97,8 +97,8 @@ create policy wake_signal_receive on realtime.messages
 
 | 함수 | 하는 일 | 부르는 곳 | `verify_jwt` | 외부 |
 |---|---|---|---|---|
-| `alarm-suggest` | 이동시간 · 기상 · 준비 · 출발 · 도착 시각 · 강도 미리 보기 (DB에 안 씀). 요청은 `alarm-commit`과 같은 초안 모양 | 앱 H05 · H03 | 켬 | 카카오 길찾기 |
-| `alarm-commit` | 약속 · 참여 조건 · 알람을 한 번에 저장 → 예약 꾸러미 + 취소할 알람 id. 일정 없는 알람도 여기서 만듦. 요청은 `alarm-suggest`와 같은 초안 모양 + `title` · `replace_existing` · `edits` | 앱 H05 · H03 · S01 | 켬 | 카카오 길찾기 |
+| `alarm-suggest` | 이동시간 · 기상 · 준비 · 출발 · 도착 시각 · 강도 미리 보기 (DB에 안 씀). 요청은 `alarm-commit`과 같은 초안 모양. 직접 입력 이동은 이어받음 | 앱 H05 · H03 | 켬 | 카카오 길찾기 |
+| `alarm-commit` | 약속 · 참여 조건 · 알람을 한 번에 저장 → 예약 꾸러미 + 취소할 알람 id. 일정 없는 알람도 여기서 만듦. 요청은 `alarm-suggest`와 같은 초안 모양 + `title` · `replace_existing` · `edits`. 직접 입력 이동은 이어받음 | 앱 H05 · H03 · S01 | 켬 | 카카오 길찾기 |
 | `place-search` | 장소 검색 | 앱 H05 · 온보딩 | 켬 | 카카오 로컬 |
 | `notify` | 다른 사람 폰에 푸시 (권한은 `can_send_push`) | 앱 G04 · G03 | 켬 | Expo Push |
 | `wake-check` | 기상 미확인(MISSED) 기록 | pg_cron 5분마다 (서비스 키) | 끔 (코드에서 키 비교) | — |
@@ -151,10 +151,10 @@ create policy wake_signal_receive on realtime.messages
 
 응답: `appointment_at` · `wake_at` · `prepare_at` · `departure_at` · `arrive_at` · `alarms[{ alarm_type, scheduled_at, auto_scheduled_at, time_source, is_enabled, disabled_reason }]` · `check{ ok, reason? }` · `travel{ minutes, source(API · CACHED · ESTIMATE · MANUAL), manual_required, needs_confirmation, auto_minutes, note, sample_count }` · `prepare{ minutes, auto_minutes, source, common_p80, correction, sample_count, prior, weight, residual_p80, before_prepare_minutes }` · `intensity{ level, voice_tone, sound_key, source, reason, auto_level, axes }` · `with_wake` · `confidence` · `warnings[{ code, message }]`. 시각은 `Z`(UTC) ISO 8601.
 
-- 이동시간 순서 (7장 7.1.2): 직접 입력 → 카카오(대중교통 · 도보 · 자동차) → 같은 경로(300m) 실측 3건 이상 중앙값 `CACHED` → 좌표 직선거리 근사 `ESTIMATE`(`needs_confirmation`) → 직접 입력. 중앙값은 내 출발 · 도착 기록을 읽기만 하고 `CACHED`로 저장하지 않음 (D5). 길찾기 · 중앙값 · 근사는 모두 출발지 · 목적지 **좌표가 있어야** 해서, 좌표가 없으면 바로 마지막 단계(직접 입력)로 감
+- 이동시간 순서 (7장 7.1.2): 직접 입력(요청의 값, 없으면 기존 약속에 저장된 `MANUAL` 값) → 카카오(대중교통 · 도보 · 자동차) → 같은 경로(300m) 실측 3건 이상 중앙값 `CACHED` → 좌표 직선거리 근사 `ESTIMATE`(`needs_confirmation`) → 직접 입력. 중앙값은 내 출발 · 도착 기록을 읽기만 하고 `CACHED`로 저장하지 않음 (D5). 길찾기 · 중앙값 · 근사는 모두 출발지 · 목적지 **좌표가 있어야** 해서, 좌표가 없으면 바로 마지막 단계(직접 입력)로 감
 - 좌표가 없고 직접 입력도 없으면 오류 대신 **200** + `travel{ minutes: null, source: null, manual_required: true }` + `check{ ok: false, reason: "TRAVEL_REQUIRED" }` + `alarms: []`로 "이동시간을 직접 입력해 주세요"를 알림 (준비 · 강도 칸은 채워 줌, `warnings`에 `NO_COORDINATES`). 앱은 입력 칸을 보인 뒤 `participant.est_travel_minutes` + `travel_source: "MANUAL"`로 다시 부름. `alarm-commit`은 같은 상황에서 502 `ROUTE_UNAVAILABLE`(`details.manual_required`)을 그대로 돌려줌
 - 키가 없으면 `warnings`에 `KAKAO_NOT_CONFIGURED`를 남기고 다음 단계로 넘어감
-- 출발 시각까지 지났으면 `UNPROCESSABLE`(`details.suggestion`에 계산 결과), 기상 · 준비만 지났으면 그 알림을 `is_enabled: false` · `disabled_reason: PASSED`로 돌려줌 (8장 8.2.1: 지금 + 5분보다 앞이면). 순서가 어긋나면 200 + `check.ok: false`
+- 출발 시각까지 지났으면 `UNPROCESSABLE`(`details.suggestion`에 계산 결과), 기상 · 준비만 지났으면 그 알림을 `is_enabled: false` · `disabled_reason: PASSED`로 돌려줌 (8장 8.2.1: 지금 + 5분보다 앞이면). `warnings`의 `PAST_ALARM_DISABLED` 문구는 미리 보기라 "이미 지난 알림은 저장할 때 꺼져요", `alarm-commit` 응답은 "…끄고 저장했어요" (코드는 같음). 순서가 어긋나면 200 + `check.ok: false`
 - `alarms[].is_enabled`는 저장될 값과 같음: 요청의 `enabled`가 먼저, 없으면 사용자가 H02에서 끈 상태를 유지 (같은 규칙을 `alarm-commit`이 씀)
 
 ### alarm-commit
@@ -174,11 +174,11 @@ create policy wake_signal_receive on realtime.messages
 }
 ```
 
-- `est_travel_minutes` · `travel_source`를 보내면 그 값을 그대로 저장함 (미리 보기와 같은 시각). 없으면 서버가 `alarm-suggest`와 같은 순서로 구하고, `API`가 아닌 값(`CACHED` · `ESTIMATE`)이면 저장하지 않고 `ROUTE_UNAVAILABLE`(`details.fallback`)으로 돌려줌 → 사용자가 확인한 값을 `MANUAL`로 다시 보냄 (7장 7.1.2 단계 4, `CACHED`는 D5)
+- `est_travel_minutes` · `travel_source`를 보내면 그 값을 그대로 저장함 (미리 보기와 같은 시각). **직접 입력한 이동은 이어받음**: 이 칸이 없고 기존 약속에 저장된 `travel_source`가 `MANUAL`이면 저장된 `est_travel_minutes`를 `MANUAL`로 그대로 씀 (길찾기를 다시 안 부르고, 시각 · 강도의 직접 값과 같은 규칙. 미리 보기는 "자동으로 되돌리기" 값만 따로 구함). `API`로 저장된 값은 D5 때문에 이어받지 않고 다시 구함. 이 칸이 없고 이어받을 값도 없으면 서버가 `alarm-suggest`와 같은 순서로 구하고, `API`가 아닌 값(`CACHED` · `ESTIMATE`)이면 저장하지 않고 `ROUTE_UNAVAILABLE`(`details.fallback`)으로 돌려줌 → 사용자가 확인한 값을 `MANUAL`로 다시 보냄 (7장 7.1.2 단계 4, `CACHED`는 D5)
 - 일정 없는 알람: `{ "type": "STANDALONE", "alarm": { "alarm_id"?, "scheduled_at", "recurrence_rule"?, "is_enabled"?, "levels"? } }` — 약속 · 루틴 없는 기상 알람 하나 (D46 · Q10 B). `alarm_id`가 있으면 고침. 이름은 `알람` 고정
 - 응답: `appointment_id` · `participant_id` · `alarms[]` · **`ring_packages[]`**(알람 코어 `RingPackage` 그대로 — `alarmId · type · atMillis · title · subtitle · intensity · snoozeLimit · soundKey · departAt`, 켜진 알람만) · **`canceled_alarm_ids[]`**(폰에서 `cancel()`할 id: 지워졌거나 꺼진 알람) · `warnings`
 - 반복(D44)은 `appointments.recurrence_rule`에 저장만 하고 알람은 첫 회차만 만듦 (D4)
-- 트랜잭션이 아님: 약속 → 참여 조건 → 알람 → 고친 값 기록 순으로 쓰고, 이번 호출이 새로 만든 약속 · 참여 조건은 중간에 실패하면 지움. 같은 요청을 다시 보내면 같은 상태가 됨 (고친 값 기록만 한 번 더 쌓임)
+- 트랜잭션이 아님: 약속 → 참여 조건 → 알람 → 고친 값 기록 순으로 쓰고, 이번 호출이 새로 만든 약속 · 참여 조건은 중간에 실패하면 지움. 같은 요청을 다시 보냈을 때 같은 상태가 되는 건 **기존 약속(`appointment_id`)일 때만** (고친 값 기록만 한 번 더 쌓임). 새 약속(`appointment`)은 응답만 잃고 다시 보내면 약속 · 알람이 두 벌 생기고, 일정 없는 알람도 `alarm_id` 없이 다시 보내면 하나 더 생김 (`Idempotency-Key` 같은 요청 키는 아직 안 받음)
 
 ### place-search · notify · wake-check
 
@@ -188,7 +188,7 @@ create policy wake_signal_receive on realtime.messages
 
 ### 공용 계산 (`functions/_shared/calc/`)
 
-기상 시각 역산 · 강도 · 준비 P80 · 순서 확인 · 저장 검증 · 이동시간 폴백 계산. Deno · Node API를 안 쓰는 순수 TS고 import는 상대 경로 + `.ts`라서 앱(P6)이 경로 별칭으로 같은 파일을 가져다 씀 (앱 `tsconfig`에 `allowImportingTsExtensions`, Metro에 `watchFolders` 필요). 규칙은 앱 목업 계산(`mobile/src/mocks/calc.ts` · `features/alarm/adjust.ts`)을 그대로 옮김 — 문서(4장 · 7장)와 다른 곳(낮은 중요도 강도 · 도착 알람 시각 · 준비시간 · 7장의 개인 보정 ±30분 / 예측 15~240분 clamp)은 D56이 정할 때까지 목업을 따름 — 앱이 이 계산을 그대로 가져다 쓰므로 목업과 한 줄도 다르면 안 됨.
+기상 시각 역산 · 강도 · 준비 P80 · 순서 확인 · 저장 검증 · 이동시간 폴백 계산 · 그날 첫 일정 판정(`hasEarlierWake`: 약속 시각이 이 약속보다 앞선 같은 날 약속에 켜진 기상 알람이 있으면 이 약속은 기상 없이 준비부터. 알람이 울리는 시각이 아니라 약속 시각 기준이고, 같은 시각 두 약속은 둘 다 기상을 가짐). Deno · Node API를 안 쓰는 순수 TS고 import는 상대 경로 + `.ts`라서 앱(P6)이 경로 별칭으로 같은 파일을 가져다 씀 (앱 `tsconfig`에 `allowImportingTsExtensions`, Metro에 `watchFolders` 필요). 규칙은 앱 목업 계산(`mobile/src/mocks/calc.ts` · `features/alarm/adjust.ts`)을 그대로 옮김 — 문서(4장 · 7장)와 다른 곳(낮은 중요도 강도 · 도착 알람 시각 · 준비시간 · 7장의 개인 보정 ±30분 / 예측 15~240분 clamp)은 D56이 정할 때까지 목업을 따름 — 앱이 이 계산을 그대로 가져다 쓰므로 목업과 한 줄도 다르면 안 됨.
 
 ### 시험
 
@@ -229,7 +229,7 @@ npx supabase@2.119.0 functions deploy wake-check    --project-ref gomrhctwjvttoq
 
 - Deno에서 `deno check` · 실제 배포 · `Deno.serve` 동작 (타입은 tsc로 확인, 실행은 못 함)
 - 카카오 응답이 공식 문서 모양과 같은지 — 대중교통 · 도보 · 로컬은 2026-10-15 공식 문서(카카오 디벨로퍼스 카카오맵 REST API)에 맞춰 만들었고, 자동차 길찾기(`summary.duration` 단위)는 문서를 못 열어 샘플 값(초)으로 읽음. 키가 오면 한 번 불러서 `kakao-parse.ts` 샘플과 대조
-- PostgREST 임베드(`appointment_participants!inner(...)`), `upsert(..., ignoreDuplicates)` 같은 supabase-js 호출이 실제 DB에서 도는지 (DB 함수 · 시드 데이터는 PGlite로 확인함)
+- PostgREST 임베드(`appointment_participants!inner(...)`, 그날 첫 일정 판정의 `appointments!inner` · `alarms!inner` + 임베드 칸 필터), `upsert(..., ignoreDuplicates)` 같은 supabase-js 호출이 실제 DB에서 도는지 (DB 함수 · 시드 데이터는 PGlite로 확인함)
 - Expo Push 응답 처리, 카카오 키 권한(카카오맵 사용 설정 · 자동차 길찾기 권한)
 
 ## 데모 시드 (`seed/`)
@@ -239,13 +239,14 @@ npx supabase@2.119.0 functions deploy wake-check    --project-ref gomrhctwjvttoq
 ```bash
 cd supabase/seed
 npm ci
-cp .env.example .env          # SUPABASE_URL · SUPABASE_SERVICE_ROLE_KEY · SEED_PASSWORD 채움 (깃에 안 올라감)
+cp .env.example .env          # SUPABASE_URL · SUPABASE_SERVICE_ROLE_KEY · SEED_PASSWORD 채움, SEED_PROJECT_REF는 예시 그대로 (깃에 안 올라감)
 npm run seed:demo -- --dry-run    # 네트워크 없이 넣을 개수만 보기
-npm run seed:demo -- --yes        # 기존 데모 계정을 지우고 다시 넣음. 어느 프로젝트인지 출력한 뒤 실행
+npm run seed:demo -- --yes        # 기존 데모 계정을 지우고 다시 넣음. 어느 프로젝트인지 출력하고 SEED_PROJECT_REF와 맞는지 확인한 뒤 실행
 npm run seed:reset -- --yes       # 데모 계정만 지움 (그 계정의 모든 데이터가 CASCADE로 같이 지워짐)
-npm test                          # 데이터 모양 확인 (제약 · 외래키 · 상황)
+npm test                          # 데이터 모양 확인 (제약 · 외래키 · 상황) + 프로젝트 ref 확인
 ```
 
+- 프로젝트 확인: `.env`의 `SEED_PROJECT_REF`(주소 `https://<ref>.supabase.co`의 `<ref>`, `.env.example`에 dev 프로젝트 값이 들어 있음)가 `SUPABASE_URL`의 ref와 다르면 `--yes`가 있어도 아무것도 하기 전에 멈춤. 값을 비우면 확인하지 않고 프로젝트를 보여 주기만 함 (이때도 `--yes` 필요)
 - 계정: `demo-me` · `demo-suyeon` · `demo-jihyeong` · `demo-junseong` `@example.com` (비밀번호 = `SEED_PASSWORD`). 이메일 로그인이 켜져 있어야 로그인됨 (Auth Providers)
 - 오늘(D57): 지형이 만든 그룹 `캡스톤팀`(기상 공유 동의: 나 · 수연 · 지형 켬, 준성 끔)의 `팀 주간회의` 10시 + 나의 저녁약속 · 알람 없는 치과 예약 · 내일 수업 · 일정 없는 평일 기상 알람
 - 나의 지난 4주: 생활 기록 28일 + 평일 20일의 약속 · 알람 · 울림 기록(지난 회차에는 반복 규칙을 달지 않음 — 반복 일정은 앞으로 올 두 건뿐), 늦잠 지각 3번 (`v_prepare_time_stats`에 20건, 최근 4주 지각 3회 → 자동 강도 한 단계 위)

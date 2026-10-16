@@ -29,6 +29,7 @@ import {
   type PrepareBasis,
   type ResolvedIntensity,
   type RingKind,
+  type SameDayWake,
   type Transport,
 } from './calc/index.ts';
 import { resolveEnabled } from './commit-core.ts';
@@ -114,6 +115,29 @@ export type PlanInputs = {
 
 const num = (v: number | string | null | undefined): number | undefined => (v == null ? undefined : Number(v));
 
+// ---- 그날 첫 일정 판정에 쓰는 행 ----
+
+// 내 참여 한 줄 = 약속 시각 + 그 참여의 기상 알람 (PostgREST 임베드: appointments!inner · alarms!inner). 일대다 · 다대일 임베드는 객체 또는 배열로 옴
+export type SameDayWakeRow = {
+  appointment_id: string;
+  appointments: { appointment_at: string } | { appointment_at: string }[] | null;
+  alarms: { is_enabled: boolean } | { is_enabled: boolean }[] | null;
+};
+
+const asList = <T>(v: T | T[] | null | undefined): T[] => (v == null ? [] : Array.isArray(v) ? v : [v]);
+
+// 판정 함수(calc/wake.ts hasEarlierWake)에 넘길 모양으로. 약속 시각을 못 읽는 행은 건너뜀
+export function sameDayWakesFromRows(rows: readonly SameDayWakeRow[]): SameDayWake[] {
+  const out: SameDayWake[] = [];
+  for (const r of rows) {
+    const at = asList(r.appointments)[0]?.appointment_at;
+    const appointmentAt = at ? new Date(at) : undefined;
+    if (!appointmentAt || Number.isNaN(appointmentAt.getTime())) continue;
+    for (const a of asList(r.alarms)) out.push({ appointmentId: r.appointment_id, appointmentAt, isEnabled: a.is_enabled });
+  }
+  return out;
+}
+
 // ---- 기본 값 합치기 ----
 
 export type Basics = {
@@ -193,11 +217,13 @@ export function resolveOverrides(draft: PlanDraft['levels'], existing: readonly 
   };
 }
 
-// 기상 · 준비 알람이 둘 다 자동으로 잡힌 약속이면 둘 사이 간격을 "준비 전 활동"으로 읽음 (서버가 다시 계산해도 30분 같은 값이 안 바뀌게)
+// 준비 알람이 자동으로 잡힌 약속이면 준비 − 기상 간격을 "준비 전 활동"으로 읽음 (서버가 다시 계산해도 30분 같은 값이 안 바뀌게)
+//   기상을 직접 옮겼어도 자동 준비 알람은 (옮긴) 기상 + 준비 전 활동이라 간격은 그대로 준비 전 활동 (calc/chain.ts) — 기상이 MANUAL인 건 따지지 않음
+//   준비를 직접 옮겼으면 간격이 준비 전 활동이 아니므로 읽지 않음
 export function inferBeforePrepare(existing: readonly AlarmRow[]): number | undefined {
   const wake = existing.find((a) => a.alarm_type === 'WAKE');
   const prepare = existing.find((a) => a.alarm_type === 'PREPARE');
-  if (!wake || !prepare || wake.time_source === 'MANUAL' || prepare.time_source === 'MANUAL') return undefined;
+  if (!wake || !prepare || prepare.time_source === 'MANUAL') return undefined;
   const minutes = Math.round((Date.parse(prepare.scheduled_at) - Date.parse(wake.scheduled_at)) / 60_000);
   return minutes > 0 && minutes <= 240 ? minutes : undefined;
 }
@@ -222,8 +248,16 @@ export type Plan = {
   warnings: Warning[];
 };
 
+// 어느 쪽에서 부르는지 — preview = alarm-suggest(저장하지 않음), save = alarm-commit(저장). 계산은 같고 경고 문구만 다름
+export type PlanMode = 'preview' | 'save';
+
+const PAST_ALARM_MESSAGE: Record<PlanMode, string> = {
+  preview: '이미 지난 알림은 저장할 때 꺼져요',
+  save: '이미 지난 알림은 끄고 저장했어요',
+};
+
 // travel.chosen이 있는 경우만 부름 (없으면 부르는 쪽이 ROUTE_UNAVAILABLE)
-export function computePlan(i: PlanInputs, travel: ResolvedTravel): Plan {
+export function computePlan(i: PlanInputs, travel: ResolvedTravel, mode: PlanMode = 'save'): Plan {
   const basics = resolveBasics(i);
   const chosen = travel.chosen;
   if (!chosen) throw new Error('이동시간 없이 계획을 만들 수 없어요');
@@ -261,7 +295,7 @@ export function computePlan(i: PlanInputs, travel: ResolvedTravel): Plan {
   if (check.ok) {
     for (const a of check.alarms) {
       if (a.disabledReason === 'PASSED') {
-        warnings.push({ code: 'PAST_ALARM_DISABLED', message: '이미 지난 알림은 끄고 저장했어요', detail: a.kind });
+        warnings.push({ code: 'PAST_ALARM_DISABLED', message: PAST_ALARM_MESSAGE[mode], detail: a.kind });
       }
     }
   }
@@ -297,7 +331,7 @@ const IMPORTANCE_NAME: Record<Importance, string> = { LOW: '보통', NORMAL: '�
 //   check.reason = TRAVEL_REQUIRED. 앱은 travel.manual_required가 true면 입력 칸을 보이고 participant.est_travel_minutes(MANUAL)로 다시 부름
 export function toTravelRequiredSuggestion(i: PlanInputs, travel: ResolvedTravel) {
   // 이동시간 없이는 시각을 못 구하므로 자리표시 값(0분)으로 계산해서 준비 · 강도 칸만 가져옴 — 시각 · 경고는 아래에서 비움
-  const placeholder = computePlan(i, { chosen: { minutes: 0, source: 'MANUAL', needsConfirmation: true, note: '' }, auto: null, warnings: [] });
+  const placeholder = computePlan(i, { chosen: { minutes: 0, source: 'MANUAL', needsConfirmation: true, note: '' }, auto: null, warnings: [] }, 'preview');
   return {
     ...toSuggestion(placeholder),
     wake_at: null,

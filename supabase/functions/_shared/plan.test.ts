@@ -5,7 +5,7 @@ import { test } from 'node:test';
 import { assertPersistable, persistAppointment, type CommitCtx } from './commit.ts';
 import { HttpError } from './errors.ts';
 import { FakeDb } from './fake-db.ts';
-import { buildPlan, TravelRequiredError, type PlanContext } from './plan.ts';
+import { buildPlan, loadPrepareStats, loadSameDayWake, TravelRequiredError, type PlanContext } from './plan.ts';
 import { toSuggestion, toTravelRequiredSuggestion } from './plan-core.ts';
 import { Reader } from './read.ts';
 import { readCommitRequest, readSuggestRequest } from './requests.ts';
@@ -116,7 +116,7 @@ const line = (a: { alarm_type?: unknown; scheduled_at?: unknown; is_enabled?: un
 
 // 앱은 같은 초안 하나를 alarm-suggest와 alarm-commit에 그대로 보냄 → 미리 보여 준 알람과 저장된 알람
 async function previewAndSave({ db, ctx, commitCtx }: Env, body: object) {
-  const preview = await buildPlan(ctx, draftOf(body), { wantAutoTravel: true });
+  const preview = await buildPlan(ctx, draftOf(body), { wantAutoTravel: true, mode: 'preview' });
   const shown = toSuggestion(preview.plan, preview.inputs).alarms.map(line);
 
   const request = readCommitRequest(Reader.root(body));
@@ -163,4 +163,171 @@ test('미리 보기 = 저장: 사용자가 끈 알람은 다시 저장해도 꺼
   const turnedOn = await previewAndSave(env, { ...again, enabled: { PREPARE: true } });
   assert.deepEqual(turnedOn.saved, turnedOn.shown);
   assert.match(turnedOn.saved[1], /^PREPARE .* true /);
+});
+
+// ---- 그날 첫 일정 판정: 내 참여 → 약속 시각 + 기상 알람을 읽고 약속 시각이 앞선 것만 셈 ----
+// 가짜 DB는 PostgREST 임베드(`appointments!inner`)를 흉내 못 내서, 부른 쿼리 모양은 기록 도우미로 확인하고 판정은 읽어 온 행으로 시험함
+
+// 쿼리 빌더 호출을 기록하고 준비해 둔 행을 돌려주는 도우미
+function recordingDb(rows: unknown[]) {
+  const calls: unknown[][] = [];
+  const query: unknown = new Proxy(
+    {},
+    {
+      get: (_target, name) => {
+        if (name === 'then') return (resolve: (v: unknown) => unknown) => Promise.resolve({ data: rows, error: null }).then(resolve);
+        return (...args: unknown[]) => {
+          calls.push([name, ...args]);
+          return query;
+        };
+      },
+    },
+  );
+  const db = { from: (table: string) => (calls.push(['from', table]), query) } as unknown as Db;
+  return { db, calls };
+}
+
+// 그날 내 참여 한 줄: 약속 시각 + 기상 알람(켜짐 여부)
+const wakeRow = (appointmentId: string, appointmentMinutes: number, isEnabled = true) => ({
+  appointment_id: appointmentId,
+  appointments: { appointment_at: iso(22, appointmentMinutes) },
+  alarms: [{ is_enabled: isEnabled }],
+});
+
+test('그날 첫 일정: 10시 약속(기상 8:00)이 있는 날 8:30 새 약속은 기상 있음, 8:00 약속이 있는 날 10:00 새 약속은 기상 없음', async () => {
+  const withTen = recordingDb([wakeRow('ap-ten', 600)]);
+  assert.equal(await loadSameDayWake(withTen.db, USER, kst(22, 510), 'Asia/Seoul'), false);
+
+  const withEight = recordingDb([wakeRow('ap-eight', 480)]);
+  assert.equal(await loadSameDayWake(withEight.db, USER, kst(22, 600), 'Asia/Seoul'), true);
+});
+
+test('그날 첫 일정: 같은 시각 약속 둘은 둘 다 기상, 꺼 둔 기상 · 자기 자신의 기상은 안 셈', async () => {
+  assert.equal(await loadSameDayWake(recordingDb([wakeRow('ap-other', 600)]).db, USER, kst(22, 600), 'Asia/Seoul'), false);
+  assert.equal(await loadSameDayWake(recordingDb([wakeRow('ap-other', 480, false)]).db, USER, kst(22, 600), 'Asia/Seoul'), false);
+  assert.equal(await loadSameDayWake(recordingDb([wakeRow('ap-self', 480)]).db, USER, kst(22, 600), 'Asia/Seoul', 'ap-self'), false);
+  assert.equal(await loadSameDayWake(recordingDb([wakeRow('ap-self', 480), wakeRow('ap-other', 540)]).db, USER, kst(22, 600), 'Asia/Seoul', 'ap-self'), true);
+});
+
+test('그날 첫 일정: 임베드가 객체로 와도 배열로 와도 읽음, 약속 시각을 못 읽는 행은 건너뜀', async () => {
+  const mixedShapes = { appointment_id: 'a', appointments: [{ appointment_at: iso(22, 480) }], alarms: { is_enabled: true } };
+  assert.equal(await loadSameDayWake(recordingDb([mixedShapes]).db, USER, kst(22, 600), 'Asia/Seoul'), true);
+  const broken = [{ appointment_id: 'b', appointments: null, alarms: [{ is_enabled: true }] }, { appointment_id: 'c', appointments: { appointment_at: 'x' }, alarms: [{ is_enabled: true }] }];
+  assert.equal(await loadSameDayWake(recordingDb(broken).db, USER, kst(22, 600), 'Asia/Seoul'), false);
+});
+
+test('그날 첫 일정: 내 참여만, 기상 알람만, 내 시간대 하루(0시 ~ 다음 0시)의 약속 시각으로 읽음', async () => {
+  const { db, calls } = recordingDb([]);
+  await loadSameDayWake(db, USER, kst(22, 600), 'Asia/Seoul');
+  assert.deepEqual(calls[0], ['from', 'appointment_participants']);
+  const select = calls.find((c) => c[0] === 'select');
+  assert.match(String(select?.[1]), /appointments!inner\(appointment_at\)/);
+  assert.match(String(select?.[1]), /alarms!inner\(is_enabled\)/);
+  const filters = calls.filter((c) => c[0] !== 'from' && c[0] !== 'select').map((c) => c.join(' '));
+  assert.deepEqual(filters.sort(), [
+    `eq alarms.alarm_type WAKE`,
+    `eq user_id ${USER}`,
+    `gte appointments.appointment_at ${kst(22, 0).toISOString()}`,
+    `lt appointments.appointment_at ${kst(23, 0).toISOString()}`,
+  ]);
+});
+
+// ---- 기존 약속을 다시 저장할 때 직접 입력한 이동시간 이어받기 (시각 · 강도의 직접 값과 같은 규칙) ----
+
+// 카카오로 나가는 호출을 세는 fetch. 부르면 실패 응답을 줘서 다음 단계(기록 → 근사)로 넘어감
+function countingFetch() {
+  const state = { calls: 0 };
+  const fetchImpl = (async () => {
+    state.calls += 1;
+    return new Response('{}', { status: 500 });
+  }) as unknown as NonNullable<PlanContext['fetchImpl']>;
+  return { state, fetchImpl };
+}
+
+const AP = '00000000-0000-4000-8000-0000000000a1';
+
+// 저장된 약속 하나 (10시 · 좌표 있음 · 저장된 이동시간은 travelSource로)
+function storedAppointment(db: FakeDb, over: { source: 'API' | 'MANUAL' | 'CACHED'; minutes: number | null }) {
+  db.rows('appointments').push({
+    appointment_id: AP, creator_id: USER, group_id: null, title: '팀 주간회의', appointment_at: iso(22, 600),
+    dest_name: '세종대학교', dest_lat: 37.55, dest_lng: 127.07, importance: 'NORMAL', recurrence_rule: null,
+  });
+  db.rows('appointment_participants').push({
+    participant_id: 'pt1', appointment_id: AP, user_id: USER, origin_name: '집', origin_lat: 37.5547, origin_lng: 126.9707,
+    transport_type: 'TRANSIT', est_travel_minutes: over.minutes, travel_source: over.source, prepare_minutes: 60, buffer_minutes: 10,
+  });
+}
+
+test('이동시간 이어받기: 요청에 이동시간이 없고 저장된 게 MANUAL이면 저장된 분을 그대로, 길찾기는 안 부름', async () => {
+  const { db, ctx } = setup();
+  storedAppointment(db, { source: 'MANUAL', minutes: 70 });
+  const { fetchImpl, state } = countingFetch();
+  const { plan } = await buildPlan({ ...ctx, kakaoKey: 'k', fetchImpl }, draftOf({ appointment_id: AP }));
+  assert.deepEqual([plan.travel.chosen?.source, plan.travelMinutes, plan.travel.chosen?.needsConfirmation], ['MANUAL', 70, false]);
+  assert.equal(state.calls, 0);
+  assert.deepEqual(plan.chain.map((a) => `${a.kind} ${hm(a.at.toISOString())}`), ['WAKE 07:50', 'PREPARE 08:10', 'DEPARTURE 08:40', 'ARRIVE 09:50']); // 출발 = 10:00 − 여유 10 − 이동 70
+});
+
+test('이동시간 이어받기: 미리 보기도 같은 값(MANUAL 70분)에 "자동으로 되돌리기" 값만 따로 구함', async () => {
+  const { db, ctx } = setup();
+  storedAppointment(db, { source: 'MANUAL', minutes: 70 });
+  const { fetchImpl, state } = countingFetch();
+  const { plan } = await buildPlan({ ...ctx, kakaoKey: 'k', fetchImpl }, draftOf({ appointment_id: AP }), { wantAutoTravel: true });
+  assert.deepEqual([plan.travel.chosen?.source, plan.travelMinutes], ['MANUAL', 70]);
+  assert.ok(plan.travel.auto); // 되돌리기 후보
+  assert.ok(state.calls > 0);
+});
+
+test('이동시간 이어받기: 요청에 이동시간이 있으면 그 값이 먼저 (MANUAL · API 둘 다)', async () => {
+  const { db, ctx } = setup();
+  storedAppointment(db, { source: 'MANUAL', minutes: 70 });
+  const manual = await buildPlan(ctx, draftOf({ appointment_id: AP, participant: { est_travel_minutes: 35, travel_source: 'MANUAL' } }));
+  assert.deepEqual([manual.plan.travel.chosen?.source, manual.plan.travelMinutes], ['MANUAL', 35]);
+  const api = await buildPlan(ctx, draftOf({ appointment_id: AP, participant: { est_travel_minutes: 45, travel_source: 'API' } }));
+  assert.deepEqual([api.plan.travel.chosen?.source, api.plan.travelMinutes], ['API', 45]);
+});
+
+test('이동시간 이어받기: 저장된 게 API · CACHED면 이어받지 않고 다시 구함 (D5), MANUAL인데 분이 비면 이어받을 게 없음', async () => {
+  for (const source of ['API', 'CACHED'] as const) {
+    const { db, ctx } = setup();
+    storedAppointment(db, { source, minutes: 70 });
+    const { fetchImpl, state } = countingFetch();
+    const { plan } = await buildPlan({ ...ctx, kakaoKey: 'k', fetchImpl }, draftOf({ appointment_id: AP }));
+    assert.notEqual(plan.travel.chosen?.source, 'MANUAL');
+    assert.notEqual(plan.travelMinutes, 70);
+    assert.ok(state.calls > 0); // 길찾기를 다시 부름
+  }
+  const { db, ctx } = setup();
+  storedAppointment(db, { source: 'MANUAL', minutes: null });
+  const { plan } = await buildPlan(ctx, draftOf({ appointment_id: AP }));
+  assert.equal(plan.travel.chosen?.source, 'ESTIMATE');
+});
+
+test('이동시간 이어받기: 키 · 기록이 없어도 다시 저장되고 직접 입력은 MANUAL 그대로 남음 (예전에는 502)', async () => {
+  const env = setup();
+  const first = await previewAndSave(env, { ...FULL, participant: { ...FULL.participant, est_travel_minutes: 70, travel_source: 'MANUAL' } });
+  const again = await previewAndSave(env, { appointment_id: first.appointmentId });
+  assert.deepEqual(again.saved, again.shown);
+  const row = env.db.rows('appointment_participants').find((p) => p.appointment_id === first.appointmentId);
+  assert.deepEqual([row?.travel_source, row?.est_travel_minutes], ['MANUAL', 70]);
+});
+
+test('지난 알림 경고 문구: alarm-suggest(preview)는 "저장할 때 꺼져요", alarm-commit(기본 save)은 "끄고 저장했어요", 코드는 같음', async () => {
+  const now = kst(22, 490); // 기상 8:10이 곧 지나는 때 (지금 + 5분보다 앞)
+  const preview = await buildPlan(setup(now).ctx, draftOf(FULL), { wantAutoTravel: true, mode: 'preview' });
+  const save = await buildPlan(setup(now).ctx, draftOf(FULL));
+  assert.deepEqual(preview.plan.warnings.map((w) => [w.code, w.message]), [['PAST_ALARM_DISABLED', '이미 지난 알림은 저장할 때 꺼져요']]);
+  assert.deepEqual(save.plan.warnings.map((w) => [w.code, w.message]), [['PAST_ALARM_DISABLED', '이미 지난 알림은 끄고 저장했어요']]);
+  assert.deepEqual(toSuggestion(preview.plan, preview.inputs).warnings, preview.plan.warnings); // 앱이 받는 미리 보기 응답에 그 문구
+});
+
+// ---- 준비 통계: 뷰에 여러 사람의 줄이 보여도 내 줄만 ----
+
+test('준비 통계는 내 user_id 줄만: 뷰에 다른 사람 줄이 같이 보여도 오류 없이 내 값 (친구 기록 조회 정책이 생겨도)', async () => {
+  const { db, ctx } = setup();
+  db.rows('v_prepare_time_stats').push({ user_id: 'u-friend', sample_count: 3, p80_minutes: 100 }, { user_id: USER, sample_count: '12', p80_minutes: '41.5' });
+  assert.deepEqual(await loadPrepareStats(db as unknown as Db, USER), { sampleCount: 12, p80: 41.5 });
+  assert.deepEqual(await loadPrepareStats(db as unknown as Db, 'u-nobody'), { sampleCount: 0, p80: null });
+  const { plan } = await buildPlan(ctx, draftOf(FULL));
+  assert.equal(plan.prepare.sampleCount, 12);
 });

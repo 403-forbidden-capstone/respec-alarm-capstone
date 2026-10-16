@@ -1,7 +1,9 @@
 // alarm-commit이 DB에 쓰는 부분 — 쓰기는 service_role 클라이언트로, 읽기는 부른 사람의 RLS 클라이언트로.
 // Deno.serve 없이 모듈로 빼서 가짜 DB로 시험함 (commit.test.ts). 어떤 행을 쓸지는 commit-core.ts(순수)가 정함
 // supabase-js에는 트랜잭션이 없어 순서(약속 → 참여 조건 → 알람 → 고친 값 기록)대로 쓰고, 이번 호출이 새로 만든 약속 · 참여 조건은
-// 중간에 실패하면 지워서(CASCADE) 되돌림. 같은 요청을 다시 보내면 같은 상태가 됨. 근본 해결은 DB 함수(RPC)로 묶는 것
+// 중간에 실패하면 지워서(CASCADE) 되돌림. 같은 요청을 다시 보냈을 때 같은 상태가 되는 건 기존 약속(appointment_id)이 있을 때만 —
+// 새 약속(appointment)은 응답만 잃고 다시 보내면 약속 · 알람이 두 벌 생기고, 일정 없는 알람도 alarm_id 없이 다시 보내면 하나 더 생김 (요청 키는 아직 안 받음).
+// 근본 해결은 DB 함수(RPC)로 묶는 것
 import { resolveIntensity } from './calc/index.ts';
 import { buildEditLogRows, diffAlarms, type AlarmWrite, type EditInput } from './commit-core.ts';
 import { must } from './db.ts';

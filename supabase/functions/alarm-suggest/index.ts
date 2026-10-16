@@ -25,7 +25,7 @@ Deno.serve(
 
     let built: BuiltPlan;
     try {
-      built = await buildPlan({ userId: user.userId, db: user.db, now: new Date(), kakaoKey: getEnv('KAKAO_REST_API_KEY') }, draft, { wantAutoTravel: true });
+      built = await buildPlan({ userId: user.userId, db: user.db, now: new Date(), kakaoKey: getEnv('KAKAO_REST_API_KEY') }, draft, { wantAutoTravel: true, mode: 'preview' });
     } catch (e) {
       // 좌표가 없어 이동시간을 못 구함 → 오류 대신 "직접 입력해 주세요"(travel.manual_required)를 알리는 200 (alarm-commit은 502 그대로)
       if (e instanceof TravelRequiredError) return jsonResponse(toTravelRequiredSuggestion(e.inputs, e.travel));
