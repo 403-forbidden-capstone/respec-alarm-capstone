@@ -5,20 +5,10 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
-import java.util.Calendar
 
+// AlarmManager에 거는 일만 함. 알람마다 걸리는 예약은 하나 — 처음 울림 · 미루기 · 다시 울림 모두 같은 PendingIntent에 시각만 바꿔 다시 걸음
 object AlarmScheduler {
   const val EXTRA_ALARM_ID = "alarm_id"
-  const val EXTRA_ALARM_TITLE = "alarm_title"
-
-  private const val SNOOZE_SUFFIX = "__snooze"
-
-  // 미루기 알람은 원래 알람마다 하나: "<원래 id>__snooze" (미룬 알람을 또 미뤄도 같은 키)
-  fun snoozeId(id: String): String {
-    var baseId = id
-    while (baseId.endsWith(SNOOZE_SUFFIX)) baseId = baseId.removeSuffix(SNOOZE_SUFFIX)
-    return baseId + SNOOZE_SUFFIX
-  }
 
   private fun requestCode(id: String): Int = id.hashCode() and 0x7fffffff
 
@@ -36,90 +26,39 @@ object AlarmScheduler {
     )
   }
 
-  fun scheduleOneShot(context: Context, id: String, title: String, triggerAtMillis: Long) {
-    // setAlarmClock은 지난 시각이면 바로 울림 → 거절함
-    require(triggerAtMillis > System.currentTimeMillis()) { "이미 지난 시각입니다." }
-    AlarmStorage.saveOneShot(context, id, title, triggerAtMillis)
-    runCatching { schedule(context, id, triggerAtMillis) }.onFailure {
-      AlarmStorage.remove(context, id)
-      throw it
-    }
-  }
-
-  fun scheduleDaily(context: Context, id: String, title: String, hour: Int, minute: Int) {
-    require(hour in 0..23) { "시간은 0에서 23 사이여야 합니다." }
-    require(minute in 0..59) { "분은 0에서 59 사이여야 합니다." }
-    val triggerAtMillis = nextDailyMillis(hour, minute)
-    AlarmStorage.saveDaily(context, id, title, hour, minute, triggerAtMillis)
-    runCatching { schedule(context, id, triggerAtMillis) }.onFailure {
-      AlarmStorage.remove(context, id)
-      throw it
-    }
-  }
-
-  // 재부팅 · 시간 변경 · 매일 반복 때 다시 예약함
-  // 한 번짜리 알람이 꺼져 있는 동안 시각이 지났으면 늦게 울리지 않고 지움 (의도한 동작)
-  fun scheduleStored(context: Context, alarm: StoredAlarm) {
-    val triggerAtMillis = if (alarm.repeat == "DAILY") {
-      nextDailyMillis(alarm.hour, alarm.minute)
-    } else {
-      alarm.triggerAtMillis
-    }
-    if (triggerAtMillis <= System.currentTimeMillis()) {
-      AlarmStorage.remove(context, alarm.id)
-      return
-    }
-    AlarmStorage.updateTrigger(context, alarm.id, triggerAtMillis)
-    schedule(context, alarm.id, triggerAtMillis)
-  }
-
   // 12 이상만 권한 확인함 (13 이상은 USE_EXACT_ALARM이라 늘 true)
   fun canScheduleExactAlarms(context: Context): Boolean {
     if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.S) return true
     return context.getSystemService(AlarmManager::class.java).canScheduleExactAlarms()
   }
 
-  private fun schedule(context: Context, id: String, triggerAtMillis: Long) {
+  // alarm.nextRingAt에 AlarmReceiver가 불리게 걸음. 같은 알람의 예전 예약은 이 호출로 바뀜
+  // WAKE만 setAlarmClock(상태 표시줄에 알람 아이콘 · 시계 앱에 다음 알람으로 보임), 나머지는 setExactAndAllowWhileIdle (#79)
+  // 걸지 못하면(정확한 알람 권한 없음 등) 던짐 — 이때 예전 예약은 그대로 남음
+  fun schedule(context: Context, alarm: StoredAlarm) {
     if (!canScheduleExactAlarms(context)) {
       throw IllegalStateException("정확한 알람 권한이 허용되지 않았습니다.")
     }
     val alarmManager = context.getSystemService(AlarmManager::class.java)
-    val operation = alarmIntent(context, id)
-    // 상태 표시줄 · 시계 앱에서 다음 알람을 누르면 열 화면. 런처 화면이 없으면 알람 화면(안 울리면 바로 닫힘)
-    val showIntent = context.packageManager.getLaunchIntentForPackage(context.packageName)
-      ?: Intent(context, AlarmRingingActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-    val showOperation = PendingIntent.getActivity(
-      context,
-      requestCode("show_$id"),
-      showIntent,
-      PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-    )
-    alarmManager.setAlarmClock(AlarmManager.AlarmClockInfo(triggerAtMillis, showOperation), operation)
-  }
-
-  // 그 알람과 딸린 미루기 알람까지 지우고, 지운 id들을 돌려줌
-  fun cancel(context: Context, id: String): List<String> {
-    val ids = listOf(id, snoozeId(id)).distinct()
-    val alarmManager = context.getSystemService(AlarmManager::class.java)
-    ids.forEach { target ->
-      alarmManager.cancel(alarmIntent(context, target))
-      AlarmStorage.remove(context, target)
+    val operation = alarmIntent(context, alarm.alarmId)
+    if (alarm.type == "WAKE") {
+      // 상태 표시줄 · 시계 앱에서 다음 알람을 누르면 열 화면. 런처 화면이 없으면 알람 화면(안 울리면 바로 닫힘)
+      val showIntent = context.packageManager.getLaunchIntentForPackage(context.packageName)
+        ?: Intent(context, AlarmRingingActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+      val showOperation = PendingIntent.getActivity(
+        context,
+        requestCode("show_${alarm.alarmId}"),
+        showIntent,
+        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+      )
+      alarmManager.setAlarmClock(AlarmManager.AlarmClockInfo(alarm.nextRingAt, showOperation), operation)
+    } else {
+      alarmManager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, alarm.nextRingAt, operation)
     }
-    return ids
   }
 
-  fun cancelAll(context: Context) {
-    AlarmStorage.all(context).forEach { cancel(context, it.id) }
-  }
-
-  private fun nextDailyMillis(hour: Int, minute: Int): Long {
-    val calendar = Calendar.getInstance().apply {
-      set(Calendar.HOUR_OF_DAY, hour)
-      set(Calendar.MINUTE, minute)
-      set(Calendar.SECOND, 0)
-      set(Calendar.MILLISECOND, 0)
-      if (timeInMillis <= System.currentTimeMillis()) add(Calendar.DAY_OF_YEAR, 1)
-    }
-    return calendar.timeInMillis
+  // 걸어 둔 예약을 지움 (없어도 됨)
+  fun cancelPending(context: Context, id: String) {
+    context.getSystemService(AlarmManager::class.java).cancel(alarmIntent(context, id))
   }
 }
