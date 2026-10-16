@@ -101,15 +101,13 @@ const saved = (overrides: Partial<AppointmentDetail> = {}): AppointmentDetail =>
 const same = (d: AppointmentDetail): AlarmEdits => ({ ...d.edits });
 
 describe('기존 약속 요청 (existingBody)', () => {
-  it('손대지 않은 저장이면 저장된 길찾기 값 · 준비 · 준비 전 활동을 그대로 이어 보냄 — 서버가 다시 계산해 알람이 슬쩍 움직이지 않게', () => {
+  it('손대지 않은 저장이면 준비 · 준비 전 활동만 이어 보냄 — 저장된 길찾기(API) 값은 이어 보내지 않아 서버가 카카오 값을 새로 구함 (D5: 카카오 응답 저장 · 재사용 불허)', () => {
     expect(existingBody(saved(), same(saved()))).toEqual({
       appointment_id: 'appt-1',
       participant: {
         origin: { name: '집' },
         transport_type: 'TRANSIT',
         buffer_minutes: 10,
-        est_travel_minutes: 50,
-        travel_source: 'API',
         prepare_minutes: 60,
         before_prepare_minutes: 30,
       },
@@ -119,6 +117,12 @@ describe('기존 약속 요청 (existingBody)', () => {
 
   it('이동시간을 고쳤을 때만 est_travel_minutes + MANUAL을 보냄', () => {
     const body = existingBody(saved(), { ...same(saved()), travelMinutes: 40 }) as { participant: Record<string, unknown> };
+    expect(body.participant).toMatchObject({ est_travel_minutes: 40, travel_source: 'MANUAL' });
+  });
+
+  it('직접 입력으로 저장된 이동시간은 손대지 않아도 그대로 MANUAL로 이어 보냄 (길찾기 값과 달리 카카오 응답이 아님)', () => {
+    const detail = saved({ travelMinutes: 40, travelSource: '직접 입력', edits: { ...saved().edits, travelMinutes: 40 } });
+    const body = existingBody(detail, same(detail)) as { participant: Record<string, unknown> };
     expect(body.participant).toMatchObject({ est_travel_minutes: 40, travel_source: 'MANUAL' });
   });
 

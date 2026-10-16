@@ -133,20 +133,13 @@ export function manualTimesBody(times: AlarmEdits['times']): Partial<Record<Ring
   return out;
 }
 
-// 이동 수단 · 출발 위치가 저장된 것과 같은지 (같으면 저장된 길찾기 값을 다시 쓸 수 있음)
-const sameRoute = (a: Pick<AlarmEdits, 'origin' | 'transport'>, b: Pick<AlarmEdits, 'origin' | 'transport'>) => a.origin === b.origin && a.transport === b.transport;
-
 // 기존 약속 (H03) — 화면이 보여 준 값이 서버 계산과 어긋나 알람이 슬쩍 움직이지 않게 저장돼 있던 값은 그대로 이어 보냄
-//   · 이동시간: 직접 입력(MANUAL)은 그 값, 출발 위치 · 수단이 그대로고 길찾기(API) 값이면 그 값(서버가 다시 안 부름), 그 밖에는 안 보내서 서버가 새로 구함
+//   · 이동시간: 직접 입력(MANUAL)한 값만 그 값으로 보내고, 그 밖에는 안 보내서 서버가 새로 구함 (서버는 직접 입력으로 저장된 것은 스스로 이어받음)
+//     저장된 길찾기(API) 값은 다시 보내지 않음 — 카카오 응답은 저장 · 재사용 불허(D5)라 서버가 매번 새로 구하는 것이 규칙 (supabase/README.md alarm-commit, 서버 plan.ts)
 //   · 준비 시간: 직접 고른 값 → 없으면 저장된 값 (DB에 직접 고름 표시가 없어 저장된 값이 곧 자동 값)
 //   · 준비 전 활동: 기상 · 준비 알람이 둘 다 있으면 지금 간격 (서버가 직접 고른 시각이 있는 약속에서 기본 20분으로 다시 읽지 않게)
 export function existingBody(saved: AppointmentDetail, edits: AlarmEdits): Body {
-  const travel =
-    edits.travelMinutes != null
-      ? { est_travel_minutes: edits.travelMinutes, travel_source: 'MANUAL' }
-      : saved.edits.travelMinutes == null && saved.travelSource === TRAVEL_SOURCE_LABEL.API && sameRoute(edits, saved.edits)
-        ? { est_travel_minutes: saved.travelMinutes, travel_source: 'API' }
-        : {};
+  const travel = edits.travelMinutes != null ? { est_travel_minutes: edits.travelMinutes, travel_source: 'MANUAL' } : {};
   return {
     appointment_id: saved.id,
     participant: {
