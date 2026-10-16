@@ -29,27 +29,28 @@ import { advanceRoutine, getEveningRoutine, getTodayRoutine, listTodos, toggleTo
 import { RoutineCard } from '@/features/routine/components/RoutineCard';
 import { TodoList } from '@/features/routine/components/TodoList';
 import { getGroupSummary, listGroups } from '@/features/social/api';
+import { useWakeLoad } from '@/features/social/hooks/useGroupWake';
 import { now } from '@/lib/clock';
 import { addDays, dayKey, formatDate, formatMinuteOfDay, formatRelative, formatTime, minuteOfDay, startOfDay } from '@/lib/format';
 import { openGroupDetail } from '@/lib/nav';
-import { useLoad } from '@/lib/useLoad';
 import { colors } from '@/theme';
 
 const GROUP_ROWS = 3; // 홈에 보이는 그룹 줄 수 — 넘으면 "외 N개"
 
 // 저녁(오후 6시부터 · 전날 밤)에는 내일 일정 · 내일 준비물, 낮에는 오늘 일정 · 오늘 루틴
-async function loadHome() {
+// date = 그룹 기상 신호가 알려 준 날 (그룹 기상 요약만 씀, 없으면 오늘)
+async function loadHome(date: string | null) {
   const today = startOfDay(now());
   const evening = isEvening(now());
   const target = evening ? addDays(today, 1) : today;
-  const groups = await listGroups();
+  const groups = await listGroups(date);
   const [next, schedule, routine, todos, suggestion, groupSummaries, eveningRoutine, snooze, wake] = await Promise.all([
     getNextAlarm(),
     getDaySchedule(target),
     getTodayRoutine(),
     listTodos(target),
     getPendingSuggestion(),
-    Promise.all(groups.map((g) => getGroupSummary(g.id))),
+    Promise.all(groups.map((g) => getGroupSummary(g.id, date))),
     evening ? getEveningRoutine() : Promise.resolve(null),
     getSnooze(),
     getWakeInProgress(),
@@ -66,7 +67,7 @@ function greeting(t: Date) {
 
 // H01 홈 — 다음 알람 · 오늘 일정 · 루틴 · 준비물 · 제안 · 그룹 기상
 export default function HomeScreen() {
-  const { data, error, reload } = useLoad(loadHome);
+  const { data, error, reload } = useWakeLoad(loadHome, (d) => d.groups.map((g) => g.id)); // 그룹 기상 신호가 오면 다시 읽음
   const current = useNow(); // 30초마다 다시 읽음 — "N분 뒤" · 인사말이 열 때 값에 멈춰 있지 않게
 
   // 저녁으로 넘어갔거나 다음 알람 시각이 지났으면 내용을 다시 읽음
