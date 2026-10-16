@@ -30,10 +30,12 @@ test('직접 고른 값이 먼저 (자르지 않음), 자동 예측은 autoMinut
   assert.deepEqual([p.minutes, p.autoMinutes, p.source], [5, 60, 'MANUAL']);
 });
 
-test('개인 보정은 ±30분, 예측은 15~240분 안 (7장 7.0.5 · 7.2.2)', () => {
-  assert.equal(predictPrepare({ commonP80: 50, personalP80: 400, sampleCount: 1000, prior: 10 }).correction, 30);
-  assert.equal(predictPrepare({ commonP80: 50, personalP80: -400, sampleCount: 1000, prior: 10 }).correction, -30);
-  assert.equal(predictPrepare({ commonP80: 15, personalP80: -400, sampleCount: 1000, prior: 10 }).minutes, 15);
+test('목업과 같게 보정 상한 · 예측 범위로 자르지 않음 (7장 7.0.5 ±30분 · 7.2.2 15~240분은 D56 뒤)', () => {
+  // 목업: correction = round(n ÷ (n + k) × 개인 오차 P80), 예측 = 공통 P80 + correction
+  const high = predictPrepare({ commonP80: 50, personalP80: 400, sampleCount: 1000, prior: 10 });
+  assert.deepEqual([high.correction, high.minutes], [Math.round((1000 / 1010) * 350), 50 + Math.round((1000 / 1010) * 350)]);
+  const low = predictPrepare({ commonP80: 15, personalP80: -400, sampleCount: 1000, prior: 10 });
+  assert.deepEqual([low.correction, low.minutes], [Math.round((1000 / 1010) * -415), 15 + Math.round((1000 / 1010) * -415)]);
 });
 
 test('내 준비(출발 − 준비 시작) P80을 기상~출발 기준으로 바꿈', () => {

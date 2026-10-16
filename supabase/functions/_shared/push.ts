@@ -2,6 +2,7 @@
 //   · 요청: 메시지 배열(최대 100개), Authorization: Bearer EXPO_ACCESS_TOKEN은 선택 (Expo의 "강화된 푸시 보안"을 켰을 때)
 //   · 응답: { data: [{ status: 'ok', id } | { status: 'error', message, details: { error } }] } — 요청 순서 그대로
 //       details.error: DeviceNotRegistered(토큰 만료 → 지움, 8장 8.2.3) · MessageTooBig · MessageRateExceeded · InvalidCredentials(FCM 키 없음 → 설정 안 됨)
+//   · HTTP 401 · 403: EXPO_ACCESS_TOKEN이 틀렸거나 Expo에서 "강화된 푸시 보안"을 켰는데 토큰이 없음 → 이것도 설정 문제(PUSH_NOT_CONFIGURED). 장애(PUSH_UNAVAILABLE)로 보이지 않게
 // fetch를 바꿔 끼워 시험함 (push.test.ts). 순수 TS
 export type PushMessage = { title: string; body: string; data?: Record<string, unknown> };
 
@@ -12,7 +13,7 @@ export type PushResult = {
   invalidTokens: string[]; // 더 이상 못 쓰는 토큰 — 부른 쪽이 push_tokens에서 지움
 };
 
-type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
+export type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
 
 export const EXPO_PUSH_URL = 'https://exp.host/--/api/v2/push/send';
 const BATCH = 100;
@@ -34,6 +35,7 @@ export async function sendExpoPush(
     const chunk = valid.slice(i, i + BATCH);
     const body = chunk.map((to) => ({ to, title: message.title, body: message.body, data: message.data ?? {}, sound: 'default', priority: 'high' }));
     let tickets: unknown[] | null = null;
+    let rejectedByAuth = false;
     try {
       const res = await doFetch(EXPO_PUSH_URL, {
         method: 'POST',
@@ -47,12 +49,14 @@ export async function sendExpoPush(
       const json: unknown = await res.json().catch(() => null);
       const data = json && typeof json === 'object' ? (json as { data?: unknown }).data : undefined;
       if (res.ok && Array.isArray(data)) tickets = data;
+      else if (res.status === 401 || res.status === 403) rejectedByAuth = true;
     } catch {
       // 네트워크 오류 — 아래에서 이 묶음을 실패로 셈
     }
     if (!tickets) {
       result.failed += chunk.length;
-      unavailable += chunk.length;
+      if (rejectedByAuth) notConfigured += chunk.length;
+      else unavailable += chunk.length;
       continue;
     }
     chunk.forEach((token, j) => {

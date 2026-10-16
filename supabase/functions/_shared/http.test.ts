@@ -64,3 +64,31 @@ test('HttpError는 그 코드 · 메시지로, 그 밖의 오류는 일반 문�
     console.error = origError;
   }
 });
+
+test('앱이 보낸 X-Request-Id는 짧고 안전한 글자일 때만 그대로 쓰고, 아니면 서버가 새로 만듦', async () => {
+  const handler = serve(async () => jsonResponse({ ok: true }));
+  const withId = (id: string) => call(handler, { method: 'POST', headers: { 'x-request-id': id } });
+
+  assert.equal((await withId('app-1234_ABC')).headers.get('x-request-id'), 'app-1234_ABC');
+  assert.equal((await withId('a'.repeat(64))).headers.get('x-request-id'), 'a'.repeat(64));
+
+  // (헤더 값은 Latin-1까지만 담을 수 있어 한글은 시험하지 않음)
+  for (const bad of ['a'.repeat(65), 'has space', 'a;b', 'a/b', 'a<b>', 'aé']) {
+    const used = (await withId(bad)).headers.get('x-request-id');
+    assert.notEqual(used, bad);
+    assert.match(used ?? '', /^[0-9a-f-]{36}$/); // 서버가 만든 UUID
+  }
+  assert.match((await call(handler)).headers.get('x-request-id') ?? '', /^[0-9a-f-]{36}$/);
+
+  // 오류 응답에도 같은 규칙 — 로그에 찍히는 값이 길이 · 글자 제한을 지킴
+  const failing = serve(async () => {
+    throw new HttpError('FORBIDDEN', '권한이 없어요');
+  });
+  const err = await call(failing, { method: 'POST', headers: { 'x-request-id': 'x'.repeat(200) } });
+  assert.match(err.headers.get('x-request-id') ?? '', /^[0-9a-f-]{36}$/);
+});
+
+test('CORS 허용 헤더에 x-request-id가 있음 (웹에서 보낼 수 있게)', async () => {
+  const pre = await call(serve(async () => jsonResponse({})), { method: 'OPTIONS' });
+  assert.ok(pre.headers.get('access-control-allow-headers')?.split(', ').includes('x-request-id'));
+});

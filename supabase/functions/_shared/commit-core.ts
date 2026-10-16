@@ -26,6 +26,16 @@ export type AlarmDiff = {
 
 const LIFECYCLE_TYPES: readonly AlarmKindDb[] = ['WAKE', 'PREPARE', 'DEPARTURE', 'ARRIVE'];
 
+// 알람이 켜진 채로 저장되는지 — 미리 보기(toSuggestion)와 저장(diffAlarms)이 같은 규칙을 씀
+//   checkedEnabled: 지난 알림 검사(8.2.1)를 통과했는지. 통과 못 하면 꺼서 저장
+//   requested: 요청의 enabled(H03 종류별 켜기 · 끄기). 없으면 지금 상태 → 새 알람이면 켬
+//   지금 꺼져 있어도 옛 시각이 이미 지났다면 지나서 꺼진 것으로 보고 새 시각으로 다시 켬 (사용자가 H02에서 끈 것과 구분)
+export function resolveEnabled(args: { checkedEnabled: boolean; old?: Pick<AlarmRow, 'is_enabled' | 'scheduled_at'>; requested?: boolean; now: Date }): boolean {
+  const graceEnd = addMinutes(args.now, PAST_GRACE_MINUTES).getTime();
+  const wasOn = args.old ? args.old.is_enabled || Date.parse(args.old.scheduled_at) < graceEnd : true;
+  return args.checkedEnabled && (args.requested ?? wasOn);
+}
+
 // 계획(plan.check가 ok인 것)을 DB 행으로. existing = 이 참여 조건의 지금 알람
 //   · 켜짐: 지난 알림이면 꺼서 저장(8.2.1). 아니면 요청의 enabled → 지금 상태 → 켬 순.
 //     지금 꺼져 있어도 옛 시각이 이미 지났다면 지나서 꺼진 것으로 보고 새 시각으로 다시 켬 (사용자가 H02에서 끈 것과 구분)
@@ -38,7 +48,6 @@ export function diffAlarms(
 ): AlarmDiff {
   if (!plan.check.ok) throw new Error('검증을 통과하지 못한 계획은 저장할 수 없어요');
   const nowIso = options.now.toISOString();
-  const graceEnd = addMinutes(options.now, PAST_GRACE_MINUTES).getTime();
   const { fields, manual } = plan.intensity;
   const diff: AlarmDiff = { insert: [], update: [], remove: [] };
   const wanted = new Set<AlarmKindDb>();
@@ -47,14 +56,13 @@ export function diffAlarms(
     wanted.add(a.kind);
     const old = existing.find((x) => x.alarm_type === a.kind);
     const requested = a.kind === 'ARRIVE' ? undefined : options.enabled?.[a.kind];
-    const wasOn = old ? old.is_enabled || Date.parse(old.scheduled_at) < graceEnd : true;
     const write: AlarmWrite = {
       alarm_type: a.kind,
       scheduled_at: a.at.toISOString(),
       intensity: fields.intensity,
       voice_tone: fields.voiceTone,
       sound_key: fields.soundKey,
-      is_enabled: a.enabled && (requested ?? wasOn),
+      is_enabled: resolveEnabled({ checkedEnabled: a.enabled, old, requested, now: options.now }),
       time_source: a.auto ? 'MANUAL' : 'AUTO',
       intensity_source: manual ? 'MANUAL' : 'AUTO',
       last_calculated_at: nowIso,

@@ -53,6 +53,19 @@ test('FCM 키가 없으면(InvalidCredentials) 설정 안 됨으로', async () =
   assert.equal(result.reason, 'PUSH_NOT_CONFIGURED');
 });
 
+test('액세스 토큰이 틀리면(HTTP 401 · 403) 장애가 아니라 설정 안 됨으로', async () => {
+  for (const status of [401, 403]) {
+    const result = await sendExpoPush([T1, T2], message, {
+      accessToken: 'WRONG',
+      fetchImpl: reply({ errors: [{ code: 'UNAUTHORIZED', message: 'bad token' }] }, status),
+    });
+    assert.deepEqual([result.sent, result.failed, result.reason], [0, 2, 'PUSH_NOT_CONFIGURED']);
+  }
+  // 401이어도 본문을 못 읽으면(HTML 등) 마찬가지
+  const html = await sendExpoPush([T1], message, { fetchImpl: async () => new Response('<html>Unauthorized</html>', { status: 401 }) });
+  assert.equal(html.reason, 'PUSH_NOT_CONFIGURED');
+});
+
 test('Expo 서버가 안 되면 PUSH_UNAVAILABLE (네트워크 오류 · 5xx)', async () => {
   const down = await sendExpoPush([T1], message, { fetchImpl: reply({ errors: [{ code: 'X' }] }, 503) });
   assert.deepEqual([down.sent, down.failed, down.reason], [0, 1, 'PUSH_UNAVAILABLE']);

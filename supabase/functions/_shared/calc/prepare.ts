@@ -1,7 +1,9 @@
 // 예측 준비 시간(기상 ~ 출발) — 앱 목업의 "공통 P80 + 개인 보정"(features/alarm/api.ts estimateAppointment)을 그대로 옮김
 //   예측 = 공통 P80 + round(가중치 × 개인 오차 P80),  가중치 = n ÷ (n + k)
 //   n = 내 기록 수, k = 축소 강도(prior), 개인 오차 P80 = 내 P80 − 공통 P80
-//   기록이 없으면(n = 0) 개인 보정 0 → 공통 P80 그대로. 직접 고른 값이 있으면 그 값이 먼저 (자르지 않음)
+//   기록이 없으면(n = 0) 개인 보정 0 → 공통 P80 그대로. 직접 고른 값이 있으면 그 값이 먼저
+//   보정 상한(7장 7.0.5 ADJ_max ±30분)과 예측 범위(7장 7.2.2 clamp(15, 240))는 목업 계산에 없어서 넣지 않음 — 앱이 이 계산을 그대로 가져다 쓰므로
+//   목업과 한 줄도 달라지면 안 됨. 7장 clamp는 D56(계산 규칙) 뒤에 넣음
 // 문서(7장 7.2)는 "조건별 P80과 전체 P80을 n:K로 섞는 축소 추정"이라 같은 모양(공통 ↔ 개인을 n:k로 섞음)이지만
 //   목업 숫자(k = 10, 공통 50 · 15)를 따름. 문서 K = 5 · 학습 대상 = 기상~출발 한 덩어리(R-19)와의 차이는 D56 (F1)
 // 공통 P80 기본값 — 목업의 값. 전체 사용자 통계 칸이 DB에 없어 임시로 고정 (그날 첫 일정이면 기상부터, 아니면 외출 준비만)
@@ -10,8 +12,6 @@ export const DEFAULT_COMMON_P80 = { withWake: 50, sameDay: 15 } as const;
 export const DEFAULT_BEFORE_PREPARE_MINUTES = 20;
 export const PREPARE_PRIOR_K = 10; // 목업 k
 export const PERSONAL_MIN_SAMPLES = 5; // 7장 7.2.1 N_min — 이 아래면 출처를 DEFAULT로 표시
-export const PREPARE_CORRECTION_MAX = 30; // 7장 7.0.5 ADJ_max ±30분
-export const PREPARE_ESTIMATE_RANGE = { min: 15, max: 240 } as const; // 7장 7.2.2 clamp(15, 240) — 추정값에만
 
 export type PrepareSource = 'DEFAULT' | 'PERSONAL' | 'MANUAL';
 export type Confidence = 'LOW' | 'MEDIUM' | 'HIGH';
@@ -37,15 +37,13 @@ export type PrepareBasis = {
   confidence: Confidence; // 7장 7.2.4 — 기록 수 기준 (최근 14일 조건은 안 봄)
 };
 
-const clamp = (v: number, min: number, max: number) => Math.max(min, Math.min(max, v));
-
 export function predictPrepare(input: PrepareInput): PrepareBasis {
   const n = Math.max(0, Math.floor(input.sampleCount));
   const k = input.prior ?? PREPARE_PRIOR_K;
   const weight = n + k > 0 ? n / (n + k) : 0;
   const residual = input.personalP80 != null && n > 0 ? input.personalP80 - input.commonP80 : 0;
-  const correction = clamp(Math.round(weight * residual), -PREPARE_CORRECTION_MAX, PREPARE_CORRECTION_MAX);
-  const auto = clamp(input.commonP80 + correction, PREPARE_ESTIMATE_RANGE.min, PREPARE_ESTIMATE_RANGE.max);
+  const correction = Math.round(weight * residual);
+  const auto = input.commonP80 + correction;
   const manual = input.override != null;
   return {
     minutes: manual ? (input.override as number) : auto,

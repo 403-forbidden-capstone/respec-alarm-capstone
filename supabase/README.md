@@ -97,13 +97,13 @@ create policy wake_signal_receive on realtime.messages
 
 | 함수 | 하는 일 | 부르는 곳 | `verify_jwt` | 외부 |
 |---|---|---|---|---|
-| `alarm-suggest` | 이동시간 · 기상 · 준비 · 출발 · 도착 시각 · 강도 미리 보기 (DB에 안 씀) | 앱 H05 · H03 | 켬 | 카카오 길찾기 |
-| `alarm-commit` | 약속 · 참여 조건 · 알람을 한 번에 저장 → 예약 꾸러미 + 취소할 알람 id. 일정 없는 알람도 여기서 만듦 | 앱 H05 · H03 · S01 | 켬 | 카카오 길찾기 |
+| `alarm-suggest` | 이동시간 · 기상 · 준비 · 출발 · 도착 시각 · 강도 미리 보기 (DB에 안 씀). 요청은 `alarm-commit`과 같은 초안 모양 | 앱 H05 · H03 | 켬 | 카카오 길찾기 |
+| `alarm-commit` | 약속 · 참여 조건 · 알람을 한 번에 저장 → 예약 꾸러미 + 취소할 알람 id. 일정 없는 알람도 여기서 만듦. 요청은 `alarm-suggest`와 같은 초안 모양 + `title` · `replace_existing` · `edits` | 앱 H05 · H03 · S01 | 켬 | 카카오 길찾기 |
 | `place-search` | 장소 검색 | 앱 H05 · 온보딩 | 켬 | 카카오 로컬 |
 | `notify` | 다른 사람 폰에 푸시 (권한은 `can_send_push`) | 앱 G04 · G03 | 켬 | Expo Push |
 | `wake-check` | 기상 미확인(MISSED) 기록 | pg_cron 5분마다 (서비스 키) | 끔 (코드에서 키 비교) | — |
 
-공통 틀은 `functions/_shared/`: `http.ts`(CORS · `X-Request-Id` · 오류) · `auth.ts` · `read.ts`(요청 검사) · `supabase.ts` · `env.ts`. 계산은 `_shared/calc/` ("공용 계산").
+공통 틀은 `functions/_shared/`: `http.ts`(CORS · `X-Request-Id` · 오류. 앱이 보낸 `X-Request-Id`는 영문 · 숫자 · `_` · `-` 64자 이하일 때만 쓰고 아니면 서버가 새로 만듦) · `auth.ts` · `read.ts`(요청 검사) · `supabase.ts` · `env.ts`. 계산은 `_shared/calc/` ("공용 계산").
 
 ### 오류 모양
 
@@ -119,7 +119,7 @@ create policy wake_signal_receive on realtime.messages
 | 422 | `UNPROCESSABLE` | 출발 시각까지 지남 · 알람 순서 어긋남 · 지난 시각. `details.reason`: `DEPARTURE_PASSED` · `ORDER` · `PAST_TIME` |
 | 429 | `RATE_LIMITED` | 카카오 호출 한도 |
 | 500 | `INTERNAL` | 그 밖 (원문은 로그에만) |
-| 502 | `ROUTE_UNAVAILABLE` | 이동시간을 구할 길이 없음. `details.manual_required` = 직접 입력으로 이어 가기. `alarm-commit`은 `details.fallback`에 근사값 · 실측 중앙값을 줌 |
+| 502 | `ROUTE_UNAVAILABLE` | 이동시간을 구할 길이 없음(좌표가 없고 직접 입력도 없음). `details.manual_required` = 직접 입력으로 이어 가기 (`alarm-suggest`는 이때 오류 대신 200 + `travel.manual_required`). `alarm-commit`은 `details.fallback`에 근사값 · 실측 중앙값을 줌 |
 | 502 | `PLACE_UNAVAILABLE` | 장소 검색 API 장애 |
 | 503 | `NOT_CONFIGURED` | 비밀값이 아직 없음 (카카오 키 등) |
 
@@ -127,18 +127,21 @@ create policy wake_signal_receive on realtime.messages
 
 ### alarm-suggest
 
-요청 (5.4.1). `appointment_id`가 있으면 시각 · 장소 · 중요도는 DB 값을 쓰고 요청 값은 읽지 않음 (D41).
+요청 — **`alarm-commit`과 같은 초안 모양**이라 앱은 H05 · H03 초안 하나를 두 함수에 그대로 보냄 (계획 7절). 새 약속은 `appointment`, 기존 약속은 `appointment_id` (둘 다 쓰면 400). 기존 약속이면 시각 · 장소 · 중요도는 DB 값을 씀 (D41). 미리 보기에는 `title` · `group_id` · `recurrence_rule` · `replace_existing` · `edits`가 필요 없어 읽기만 하고 안 씀. 예전 모양(루트의 `appointment_at` · `destination` · `travel_minutes_override` · `prepare_minutes_override`)은 받지 않음. 앱은 `place-search`가 준 좌표를 초안의 `destination` · `origin`에 담아 보냄 (좌표가 없으면 길찾기를 못 함).
 
 ```jsonc
 {
-  "appointment_id": "uuid",                  // 선택: 기존 약속 기준 (H03)
-  "appointment_at": "2026-10-20T10:00:00+09:00",   // 새 일정이면 필수
-  "destination": { "name": "세종대학교", "lat": 37.55, "lng": 127.07 },   // 새 일정이면 필수, 좌표는 선택(없으면 길찾기를 못 함)
-  "origin": { "name": "집", "lat": 37.5, "lng": 127.0 },   // 없으면 저장된 출발지 → 프로필 집
-  "transport_type": "TRANSIT", "importance": "NORMAL", "buffer_minutes": 10,
-  "travel_minutes_override": 70,             // 직접 입력한 이동 → source MANUAL
-  "prepare_minutes_override": 40,            // 직접 고른 준비(기상~출발)
-  "before_prepare_minutes": 20, "with_wake": true,   // 선택: 기상 뒤 준비 전 활동 / 그날 첫 일정 여부 (없으면 서버가 정함)
+  "appointment_id": "uuid",                  // 기존 약속 기준 (H03). 새 일정이면 아래 appointment
+  "appointment": { "appointment_at": "2026-10-20T10:00:00+09:00",   // 새 일정이면 필수 (title은 저장할 때만 필수)
+                   "destination": { "name": "세종대학교", "lat": 37.55, "lng": 127.07 },   // 필수. 앱은 place-search로 고른 장소의 좌표(lat · lng)를 담아 보냄
+                   "importance": "NORMAL" },
+  "participant": {
+    "origin": { "name": "집", "lat": 37.5, "lng": 127.0 },   // 없으면 저장된 출발지 → 프로필 집. 앱은 좌표도 같이 보냄
+    "transport_type": "TRANSIT", "buffer_minutes": 10,
+    "est_travel_minutes": 70, "travel_source": "MANUAL",      // 선택: 직접 입력한 이동 (MANUAL), 이미 보여 준 길찾기 값이면 "API" — 둘은 같이 보냄
+    "prepare_minutes": 40,                                    // 선택: 직접 고른 준비(기상~출발)
+    "before_prepare_minutes": 20, "with_wake": true           // 선택: 기상 뒤 준비 전 활동 / 그날 첫 일정 여부 (없으면 서버가 정함)
+  },
   "kinds": ["WAKE", "PREPARE", "DEPARTURE"], // 선택: 만들 알람 종류. 없으면 지금 있는 종류(없으면 전부), [] = 알람 없는 일정
   "enabled": { "WAKE": true },               // 선택: 종류별 켜기 · 끄기
   "manual_times": { "WAKE": "2026-10-20T07:30:00+09:00", "PREPARE": null },   // 직접 고른 알람 시각. 이 칸이 없으면 저장된 직접 값 유지, null = 자동으로 되돌림
@@ -146,11 +149,13 @@ create policy wake_signal_receive on realtime.messages
 }
 ```
 
-응답: `appointment_at` · `wake_at` · `prepare_at` · `departure_at` · `arrive_at` · `alarms[{ alarm_type, scheduled_at, auto_scheduled_at, time_source, is_enabled, disabled_reason }]` · `check{ ok, reason? }` · `travel{ minutes, source(API · CACHED · ESTIMATE · MANUAL), needs_confirmation, auto_minutes, note, sample_count }` · `prepare{ minutes, auto_minutes, source, common_p80, correction, sample_count, prior, weight, residual_p80, before_prepare_minutes }` · `intensity{ level, voice_tone, sound_key, source, reason, auto_level, axes }` · `with_wake` · `confidence` · `warnings[{ code, message }]`.
+응답: `appointment_at` · `wake_at` · `prepare_at` · `departure_at` · `arrive_at` · `alarms[{ alarm_type, scheduled_at, auto_scheduled_at, time_source, is_enabled, disabled_reason }]` · `check{ ok, reason? }` · `travel{ minutes, source(API · CACHED · ESTIMATE · MANUAL), manual_required, needs_confirmation, auto_minutes, note, sample_count }` · `prepare{ minutes, auto_minutes, source, common_p80, correction, sample_count, prior, weight, residual_p80, before_prepare_minutes }` · `intensity{ level, voice_tone, sound_key, source, reason, auto_level, axes }` · `with_wake` · `confidence` · `warnings[{ code, message }]`. 시각은 `Z`(UTC) ISO 8601.
 
-- 이동시간 순서 (7장 7.1.2): 직접 입력 → 카카오(대중교통 · 도보 · 자동차) → 같은 경로(300m) 실측 3건 이상 중앙값 `CACHED` → 좌표 직선거리 근사 `ESTIMATE`(`needs_confirmation`) → 없으면 `ROUTE_UNAVAILABLE`. 중앙값은 내 출발 · 도착 기록을 읽기만 하고 `CACHED`로 저장하지 않음 (D5)
+- 이동시간 순서 (7장 7.1.2): 직접 입력 → 카카오(대중교통 · 도보 · 자동차) → 같은 경로(300m) 실측 3건 이상 중앙값 `CACHED` → 좌표 직선거리 근사 `ESTIMATE`(`needs_confirmation`) → 직접 입력. 중앙값은 내 출발 · 도착 기록을 읽기만 하고 `CACHED`로 저장하지 않음 (D5). 길찾기 · 중앙값 · 근사는 모두 출발지 · 목적지 **좌표가 있어야** 해서, 좌표가 없으면 바로 마지막 단계(직접 입력)로 감
+- 좌표가 없고 직접 입력도 없으면 오류 대신 **200** + `travel{ minutes: null, source: null, manual_required: true }` + `check{ ok: false, reason: "TRAVEL_REQUIRED" }` + `alarms: []`로 "이동시간을 직접 입력해 주세요"를 알림 (준비 · 강도 칸은 채워 줌, `warnings`에 `NO_COORDINATES`). 앱은 입력 칸을 보인 뒤 `participant.est_travel_minutes` + `travel_source: "MANUAL"`로 다시 부름. `alarm-commit`은 같은 상황에서 502 `ROUTE_UNAVAILABLE`(`details.manual_required`)을 그대로 돌려줌
 - 키가 없으면 `warnings`에 `KAKAO_NOT_CONFIGURED`를 남기고 다음 단계로 넘어감
 - 출발 시각까지 지났으면 `UNPROCESSABLE`(`details.suggestion`에 계산 결과), 기상 · 준비만 지났으면 그 알림을 `is_enabled: false` · `disabled_reason: PASSED`로 돌려줌 (8장 8.2.1: 지금 + 5분보다 앞이면). 순서가 어긋나면 200 + `check.ok: false`
+- `alarms[].is_enabled`는 저장될 값과 같음: 요청의 `enabled`가 먼저, 없으면 사용자가 H02에서 끈 상태를 유지 (같은 규칙을 `alarm-commit`이 씀)
 
 ### alarm-commit
 
@@ -178,23 +183,23 @@ create policy wake_signal_receive on realtime.messages
 ### place-search · notify · wake-check
 
 - `place-search`: `{ query, lat?, lng?, limit? }` → `{ places: [{ id, name, address, lat, lng, category? }] }`. `lat · lng`를 주면 가까운 순
-- `notify`: `{ kind, targetUserId, alarmId?, title, body, data? }` → `{ sent, failed, reason? }`. `kind`는 `ALARM_CHANGED`(G04) · `WAKE_PING`(G03, D19까지 403). 권한은 `can_send_push`(DB 함수). 푸시 토큰이 없으면 `reason: "NO_TOKENS"`, FCM 키가 없으면 `reason: "PUSH_NOT_CONFIGURED"`, Expo 서버 장애면 `"PUSH_UNAVAILABLE"` — 오류가 아니라 `sent: 0`. 만료된 토큰(`DeviceNotRegistered`)은 `push_tokens`에서 지움
-- `wake-check`: 서비스 키만. `find_missed_wake_alarms` 결과를 `alarm_events`에 `MISSED`로 기록 (`client_event_id = event_key`, `ON CONFLICT DO NOTHING`이라 두 번 안 들어감). 응답 `{ checked, recorded, pushed }`. 그룹 미확인 푸시는 `can_send_push('WAKE_MISSED')`가 거절하는 동안(D19) 안 보냄
+- `notify`: `{ kind, targetUserId, alarmId?, title, body, data? }` → `{ sent, failed, reason? }`. `kind`는 `ALARM_CHANGED`(G04) · `WAKE_PING`(G03, D19까지 403). 권한은 `can_send_push`(DB 함수). 푸시 토큰이 없으면 `reason: "NO_TOKENS"`, FCM 키가 없거나 `EXPO_ACCESS_TOKEN`이 틀려 Expo가 401 · 403을 주면 `reason: "PUSH_NOT_CONFIGURED"`, Expo 서버 장애면 `"PUSH_UNAVAILABLE"` — 오류가 아니라 `sent: 0`. 만료된 토큰(`DeviceNotRegistered`)은 `push_tokens`에서 지움
+- `wake-check`: 서비스 키만. `find_missed_wake_alarms` 결과를 `alarm_events`에 `MISSED`로 기록 (`client_event_id = event_key`, `ON CONFLICT DO NOTHING`이라 두 번 안 들어감). 응답 `{ checked, recorded, pushed }`. 그룹 미확인 푸시는 D19가 정해질 때까지 안 보냄(`_shared/wake.ts`의 `PUSH_MISSED_TO_GROUP = false` — 그 전에는 구성원 조회도 `can_send_push` 호출도 안 함). D19 뒤에는 받을 사람 후보를 그룹 참여 구성원(사실)으로만 뽑고 보내도 되는지는 `can_send_push('WAKE_MISSED')` 하나에 맡김 (TS에서 권한 표를 다시 해석하지 않음)
 
 ### 공용 계산 (`functions/_shared/calc/`)
 
-기상 시각 역산 · 강도 · 준비 P80 · 순서 확인 · 저장 검증 · 이동시간 폴백 계산. Deno · Node API를 안 쓰는 순수 TS고 import는 상대 경로 + `.ts`라서 앱(P6)이 경로 별칭으로 같은 파일을 가져다 씀 (앱 `tsconfig`에 `allowImportingTsExtensions`, Metro에 `watchFolders` 필요). 규칙은 앱 목업 계산(`mobile/src/mocks/calc.ts` · `features/alarm/adjust.ts`)을 그대로 옮김 — 문서(4장 · 7장)와 다른 곳(낮은 중요도 강도 · 도착 알람 시각 · 준비시간)은 D56이 정할 때까지 목업을 따름.
+기상 시각 역산 · 강도 · 준비 P80 · 순서 확인 · 저장 검증 · 이동시간 폴백 계산. Deno · Node API를 안 쓰는 순수 TS고 import는 상대 경로 + `.ts`라서 앱(P6)이 경로 별칭으로 같은 파일을 가져다 씀 (앱 `tsconfig`에 `allowImportingTsExtensions`, Metro에 `watchFolders` 필요). 규칙은 앱 목업 계산(`mobile/src/mocks/calc.ts` · `features/alarm/adjust.ts`)을 그대로 옮김 — 문서(4장 · 7장)와 다른 곳(낮은 중요도 강도 · 도착 알람 시각 · 준비시간 · 7장의 개인 보정 ±30분 / 예측 15~240분 clamp)은 D56이 정할 때까지 목업을 따름 — 앱이 이 계산을 그대로 가져다 쓰므로 목업과 한 줄도 다르면 안 됨.
 
 ### 시험
 
-Deno 없이 Node(24 이상)가 `.ts`를 바로 읽어서 `node --test`로 돌림 (계산 · 요청 검사 · 오류 · 카카오 응답 읽기 · 이동시간 순서 · 푸시 · 저장 내용 정하기 · `alarm-commit`의 쓰기 순서와 되돌리기는 메모리 가짜 DB `fake-db.ts`로).
+Deno 없이 Node(24 이상)가 `.ts`를 바로 읽어서 `node --test`로 돌림 (계산 · 요청 검사 · 오류 · 카카오 응답 읽기 · 이동시간 순서 · 푸시 · 저장 내용 정하기 · `alarm-commit`의 쓰기 순서와 되돌리기 · `notify`(권한 거절 · 허용 · 만료 토큰) · `wake-check`(MISSED 중복 무시 · 이름 인자) · 같은 초안의 미리 보기 = 저장 대조는 메모리 가짜 DB `fake-db.ts`로 — `rpc` · `upsert`도 흉내).
 
 ```bash
 # 레포 맨 위에서
 node --test --disable-warning=MODULE_TYPELESS_PACKAGE_JSON "supabase/functions/**/*.test.ts"
 ```
 
-- 진짜 DB를 부르는 읽기(`plan.ts`의 `from(...).select(...)`, 임베드 · 뷰 조회)와 `index.ts`의 연결은 이 시험에 안 들어감. Docker · Deno가 생기면 `supabase functions serve` + 로컬 DB로 확인할 것
+- 가짜 DB는 쿼리 빌더의 모양만 흉내 내서, 진짜 PostgREST에서의 동작(임베드 `!inner`, 뷰 조회, `upsert … RETURNING`)과 `index.ts`의 연결(로그인 확인 · `Deno.serve`)은 이 시험에 안 들어감. Docker · Deno가 생기면 `supabase functions serve` + 로컬 DB로 확인할 것
 - `deno check`는 이 PC에 Deno가 없어 못 돌림. 대신 `tsc --strict`로 `functions/**` 전체(Deno 전역 · `npm:` · `jsr:` 지정자는 임시 선언으로 대체)를 타입 검사해 통과함
 
 ### 배포 (터미널, Actions 안 씀)
@@ -243,7 +248,7 @@ npm test                          # 데이터 모양 확인 (제약 · 외래키
 
 - 계정: `demo-me` · `demo-suyeon` · `demo-jihyeong` · `demo-junseong` `@example.com` (비밀번호 = `SEED_PASSWORD`). 이메일 로그인이 켜져 있어야 로그인됨 (Auth Providers)
 - 오늘(D57): 지형이 만든 그룹 `캡스톤팀`(기상 공유 동의: 나 · 수연 · 지형 켬, 준성 끔)의 `팀 주간회의` 10시 + 나의 저녁약속 · 알람 없는 치과 예약 · 내일 수업 · 일정 없는 평일 기상 알람
-- 나의 지난 4주: 생활 기록 28일 + 평일 20일의 약속 · 알람 · 울림 기록, 늦잠 지각 3번 (`v_prepare_time_stats`에 20건, 최근 4주 지각 3회 → 자동 강도 한 단계 위)
+- 나의 지난 4주: 생활 기록 28일 + 평일 20일의 약속 · 알람 · 울림 기록(지난 회차에는 반복 규칙을 달지 않음 — 반복 일정은 앞으로 올 두 건뿐), 늦잠 지각 3번 (`v_prepare_time_stats`에 20건, 최근 4주 지각 3회 → 자동 강도 한 단계 위)
 - 알람 시각은 서버 함수와 같은 `_shared/calc`로 만들어 서버 계산과 같은 숫자. 날짜는 한국 시각 오늘 기준 (`--date YYYY-MM-DD`로 바꿈)
 - 나의 오늘 기상 알람 시각이 지난 뒤에 시드하면 다음 `wake-check`가 그 알람을 `MISSED`로 기록함 (실제 동작과 같음)
 - 알람 조정 제안(`alarm_suggestions`, "늦잠 지각 3번 → 10분 앞당김")은 시각 조정 종류가 enum에 없어(D6) 안 넣음

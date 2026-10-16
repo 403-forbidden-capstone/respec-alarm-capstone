@@ -155,3 +155,14 @@ test('날짜 칸은 모두 문자열(JSON으로 보낼 수 있음)이고 같은 
   assert.deepEqual(again.counts, first.counts);
   assert.deepEqual(counts, buildDataset({ users, today: TODAY }).counts);
 });
+
+test('반복 일정은 앞으로 올 회차 둘뿐(오늘 팀 주간회의 · 내일 수업) — 지난 4주 "수업" 20건은 반복 규칙 없음', () => {
+  const recurring = t.appointments.filter((a) => a.recurrence_rule != null);
+  assert.deepEqual(recurring.map((a) => a.title).sort(), ['수업', '팀 주간회의']);
+  assert.ok(recurring.every((a) => kstDay(a.appointment_at) >= TODAY));
+  const past = t.appointments.filter((a) => kstDay(a.appointment_at) < TODAY);
+  assert.equal(past.length, 20);
+  assert.ok(past.every((a) => a.recurrence_rule === null));
+  // 일정 없는 기상 알람의 반복(D46)은 그대로
+  assert.equal(t.alarms.filter((a) => a.recurrence_rule != null && a.participant_id === null).length, 1);
+});
