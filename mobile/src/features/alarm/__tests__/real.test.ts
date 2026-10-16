@@ -5,6 +5,7 @@ import { UserError } from '@/lib/errors';
 import { formatTime } from '@/lib/format';
 
 import { recallDetail } from '../detailCache';
+import { resetAlarmMemory } from '../reset';
 import { clearEdits, peekEdits } from '../editQueue';
 import { forgetPlaces, lookupPlace } from '../places';
 import * as real from '../real';
@@ -622,6 +623,20 @@ describe('알람 설정 미리 보기 · 저장 (H03)', () => {
     ]);
     expect(peekEdits('appt-1')).toEqual([]);
     expect(peekEdits('other')).toHaveLength(1); // 다른 일정의 기록은 그 일정의 저장을 기다림
+  });
+});
+
+describe('로그아웃 · 계정 전환 때 메모리 비우기 (resetAlarmMemory)', () => {
+  it('읽어 둔 알람 설정 · 쌓인 고친 값 기록 · 기억해 둔 장소 좌표를 모두 비움', async () => {
+    mockRoutes['appointment_participants:select'] = (call) => (isCount(call) ? { count: 0 } : { data: participantRow() });
+    await real.getAppointment('appt-1');
+    await real.recordEdit({ screen: 'S01', field: 'scheduled_at', appointmentId: 'appt-1', autoValue: 1, editedValue: 2 });
+    mockCallEdge.mockResolvedValue({ places: [{ id: '1', name: '세종대학교', lat: 37.55, lng: 127.07 }] });
+    await real.listPlaces('세종');
+    resetAlarmMemory();
+    expect(recallDetail('appt-1')).toBeUndefined();
+    expect(peekEdits('appt-1')).toEqual([]);
+    expect(lookupPlace('세종대학교')).toBeUndefined();
   });
 });
 
