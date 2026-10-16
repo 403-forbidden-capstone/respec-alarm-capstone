@@ -52,7 +52,7 @@ select vault.create_secret('<service_role 키>', 'service_role_key');
 | 함수 | 쓰는 곳 | 하는 일 |
 |---|---|---|
 | `can_send_push(sender, target, kind)` | `notify` | 푸시를 보내도 되는지. `ALARM_CHANGED`(G04)는 보내는 사람이 받는 사람 알람의 설정 권한을 가졌을 때만 true, `WAKE_PING`(G03 깨우기)은 D19 결정 뒤까지 false |
-| `find_missed_wake_alarms(p_now, p_lookback_hours)` | `wake-check` | 기상 미확인(MISSED)으로 기록할 알람 목록 (7장 7.9.2: 알람 시각 + 다시 울림 총 소요 + 미루기 누적 + 30분, 총 소요는 첫 울림 시작부터 마지막 울림 끝까지로 약 11 · 보통 19 · 강 21분 — 알람 코어와 같은 끝난 뒤 간격 기준). 돌려주는 `event_key`를 `alarm_events.client_event_id`로 넣고 `on conflict do nothing`하면 같은 알람이 두 번 기록되지 않음 |
+| `find_missed_wake_alarms(p_now, p_lookback_hours)` | `wake-check` | 기상 미확인(MISSED)으로 기록할 알람 목록 (7장 7.9.2: 마지막으로 울리기 시작한 때 + 다시 울림 총 소요 + 30분. 총 소요는 첫 울림 시작부터 마지막 울림 끝까지로 약 11 · 보통 19 · 강 21분 — 알람 코어와 같은 끝난 뒤 간격 기준. 폰은 미루면 다시 울림 묶음을 처음부터 새로 시작하므로, 마지막 울림 시작 = 마지막 미루기 시각 + 미루기 시간(미루기가 없으면 알람 시각). 돌려주는 `snooze_minutes`는 미루기 합이라 참고용이고 `missed_at`은 이 합으로 구하지 않음). 기상 확인은 같은 사람의 `WAKE_CONFIRMED`(어느 기상 알람이든) 또는 `daily_records.wake_confirmed_at`이면 인정 — 그룹 현황판이 '기상'으로 세는 기준과 같음. 기록은 알람 시각 6시간 전 ~ 18시간 뒤만 봄. 돌려주는 `event_key`를 `alarm_events.client_event_id`로 넣고 `on conflict do nothing`하면 같은 알람이 두 번 기록되지 않음 |
 
 앱(authenticated)이 부르는 DB 함수 추가분:
 
@@ -67,7 +67,16 @@ select vault.create_secret('<service_role 키>', 'service_role_key');
 - 보내는 때: 기상 알람의 울림 · 미루기 · 해제 · 미확인, 기상 확인. 기록한 사람이 참여 중(JOINED)이고 **그 그룹에서 기상 공유에 동의(`wake_share_opt_in`)했고** 그날 약속이 있는 그룹에만 감 (동의 조건은 D19 결정 전 보수 기본값 — 정해지면 트리거 함수의 한 줄만 고침. 친구 권한으로만 보는 사람은 실시간 새로 고침을 못 받고 직접 조회하면 보임)
 - 받는 쪽: `supabase.channel('group:<id>:wake', { config: { private: true } })` — 그 그룹에 참여 중인 사람만 받을 수 있음 (`realtime.messages` 정책). 앱에서 이 채널로 보내는 것은 막혀 있음
 - `realtime` 스키마가 없는 DB(PGlite 같은 검사용 DB)에서는 트리거 · 정책을 건너뜀 → 검사는 흉내(`tests/db-check.mjs`)로 확인
-- 적용 뒤 확인: `select polname from pg_policy where polrelid = 'realtime.messages'::regclass;`에 `wake_signal_receive`가 있어야 함. 마이그레이션이 "권한이 없음" 경고를 남겼다면 아래를 SQL 편집기에서 직접 실행
+- 적용 뒤 확인: `select polname from pg_policy where polrelid = 'realtime.messages'::regclass;`에 `wake_signal_receive`가 있어야 하고, `select tgname from pg_trigger where tgrelid = 'public.alarm_events'::regclass and not tgisinternal;`에 `send_wake_signal`이 있어야 함. 없으면 아래를 SQL 편집기에서 직접 실행 (정책은 마이그레이션이 "권한이 없음" 경고를 남겼을 때, 트리거는 마이그레이션이 Realtime 스키마가 없다고 건너뛰었을 때. 이미 있으면 "already exists" 오류가 나고 그대로 두면 됨)
+
+트리거 (마이그레이션 `20261015000100_group_wake.sql`의 `create trigger`와 같은 문장):
+
+```sql
+create trigger send_wake_signal after insert on public.alarm_events
+  for each row execute function private.send_wake_signal();
+```
+
+받는 쪽 정책:
 
 ```sql
 create policy wake_signal_receive on realtime.messages
