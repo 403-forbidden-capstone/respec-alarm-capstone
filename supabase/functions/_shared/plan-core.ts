@@ -248,8 +248,16 @@ export type Plan = {
   warnings: Warning[];
 };
 
+// 어느 쪽에서 부르는지 — preview = alarm-suggest(저장하지 않음), save = alarm-commit(저장). 계산은 같고 경고 문구만 다름
+export type PlanMode = 'preview' | 'save';
+
+const PAST_ALARM_MESSAGE: Record<PlanMode, string> = {
+  preview: '이미 지난 알림은 저장할 때 꺼져요',
+  save: '이미 지난 알림은 끄고 저장했어요',
+};
+
 // travel.chosen이 있는 경우만 부름 (없으면 부르는 쪽이 ROUTE_UNAVAILABLE)
-export function computePlan(i: PlanInputs, travel: ResolvedTravel): Plan {
+export function computePlan(i: PlanInputs, travel: ResolvedTravel, mode: PlanMode = 'save'): Plan {
   const basics = resolveBasics(i);
   const chosen = travel.chosen;
   if (!chosen) throw new Error('이동시간 없이 계획을 만들 수 없어요');
@@ -287,7 +295,7 @@ export function computePlan(i: PlanInputs, travel: ResolvedTravel): Plan {
   if (check.ok) {
     for (const a of check.alarms) {
       if (a.disabledReason === 'PASSED') {
-        warnings.push({ code: 'PAST_ALARM_DISABLED', message: '이미 지난 알림은 끄고 저장했어요', detail: a.kind });
+        warnings.push({ code: 'PAST_ALARM_DISABLED', message: PAST_ALARM_MESSAGE[mode], detail: a.kind });
       }
     }
   }
@@ -323,7 +331,7 @@ const IMPORTANCE_NAME: Record<Importance, string> = { LOW: '보통', NORMAL: '�
 //   check.reason = TRAVEL_REQUIRED. 앱은 travel.manual_required가 true면 입력 칸을 보이고 participant.est_travel_minutes(MANUAL)로 다시 부름
 export function toTravelRequiredSuggestion(i: PlanInputs, travel: ResolvedTravel) {
   // 이동시간 없이는 시각을 못 구하므로 자리표시 값(0분)으로 계산해서 준비 · 강도 칸만 가져옴 — 시각 · 경고는 아래에서 비움
-  const placeholder = computePlan(i, { chosen: { minutes: 0, source: 'MANUAL', needsConfirmation: true, note: '' }, auto: null, warnings: [] });
+  const placeholder = computePlan(i, { chosen: { minutes: 0, source: 'MANUAL', needsConfirmation: true, note: '' }, auto: null, warnings: [] }, 'preview');
   return {
     ...toSuggestion(placeholder),
     wake_at: null,

@@ -99,6 +99,12 @@ test('지난 기상은 끄고 저장 + 경고, 출발까지 지나면 막힘 (8.
   assert.equal(dto.alarms[0].disabled_reason, 'PASSED');
   assert.equal(dto.alarms[0].is_enabled, false);
 
+  // 경고 문구: 저장한 뒤(alarm-commit)는 "끄고 저장했어요", 미리 보기(alarm-suggest)는 아직 저장하지 않았으니 "저장할 때 꺼져요"
+  assert.equal(late.warnings[0].message, '이미 지난 알림은 끄고 저장했어요');
+  const preview = computePlan(base({ now: kst(22, 490) }), api(50), 'preview');
+  assert.deepEqual(preview.warnings.map((w) => [w.code, w.detail, w.message]), [['PAST_ALARM_DISABLED', 'WAKE', '이미 지난 알림은 저장할 때 꺼져요']]);
+  assert.equal(computePlan(base({ now: kst(22, 490) }), api(50), 'save').warnings[0].message, late.warnings[0].message);
+
   const gone = computePlan(base({ now: kst(22, 545) }), api(50));
   assert.equal(gone.check.ok, false);
   assert.equal(!gone.check.ok && gone.check.reason, 'DEPARTURE_PASSED');

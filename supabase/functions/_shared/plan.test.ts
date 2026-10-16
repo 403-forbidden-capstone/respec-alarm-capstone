@@ -116,7 +116,7 @@ const line = (a: { alarm_type?: unknown; scheduled_at?: unknown; is_enabled?: un
 
 // 앱은 같은 초안 하나를 alarm-suggest와 alarm-commit에 그대로 보냄 → 미리 보여 준 알람과 저장된 알람
 async function previewAndSave({ db, ctx, commitCtx }: Env, body: object) {
-  const preview = await buildPlan(ctx, draftOf(body), { wantAutoTravel: true });
+  const preview = await buildPlan(ctx, draftOf(body), { wantAutoTravel: true, mode: 'preview' });
   const shown = toSuggestion(preview.plan, preview.inputs).alarms.map(line);
 
   const request = readCommitRequest(Reader.root(body));
@@ -310,4 +310,13 @@ test('이동시간 이어받기: 키 · 기록이 없어도 다시 저장되고 
   assert.deepEqual(again.saved, again.shown);
   const row = env.db.rows('appointment_participants').find((p) => p.appointment_id === first.appointmentId);
   assert.deepEqual([row?.travel_source, row?.est_travel_minutes], ['MANUAL', 70]);
+});
+
+test('지난 알림 경고 문구: alarm-suggest(preview)는 "저장할 때 꺼져요", alarm-commit(기본 save)은 "끄고 저장했어요", 코드는 같음', async () => {
+  const now = kst(22, 490); // 기상 8:10이 곧 지나는 때 (지금 + 5분보다 앞)
+  const preview = await buildPlan(setup(now).ctx, draftOf(FULL), { wantAutoTravel: true, mode: 'preview' });
+  const save = await buildPlan(setup(now).ctx, draftOf(FULL));
+  assert.deepEqual(preview.plan.warnings.map((w) => [w.code, w.message]), [['PAST_ALARM_DISABLED', '이미 지난 알림은 저장할 때 꺼져요']]);
+  assert.deepEqual(save.plan.warnings.map((w) => [w.code, w.message]), [['PAST_ALARM_DISABLED', '이미 지난 알림은 끄고 저장했어요']]);
+  assert.deepEqual(toSuggestion(preview.plan, preview.inputs).warnings, preview.plan.warnings); // 앱이 받는 미리 보기 응답에 그 문구
 });

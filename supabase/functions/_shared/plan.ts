@@ -15,6 +15,7 @@ import {
   type Plan,
   type PlanDraft,
   type PlanInputs,
+  type PlanMode,
   type ProfileRow,
   type SameDayWakeRow,
 } from './plan-core.ts';
@@ -175,7 +176,8 @@ export class TravelRequiredError extends HttpError {
 }
 
 // wantAutoTravel: 직접 입력한 이동시간이 있어도 자동 값을 같이 구함 (H03 "자동으로 되돌리기" 미리 보기). 호출이 한 번 늘어남
-export async function buildPlan(ctx: PlanContext, draft: PlanDraft, options: { wantAutoTravel?: boolean } = {}): Promise<BuiltPlan> {
+// mode: 어느 쪽에서 부르는지. preview(alarm-suggest)는 경고를 "저장할 때 …" 말투로, save(alarm-commit, 기본)는 저장한 뒤 말투로
+export async function buildPlan(ctx: PlanContext, draft: PlanDraft, options: { wantAutoTravel?: boolean; mode?: PlanMode } = {}): Promise<BuiltPlan> {
   const profile = await loadProfile(ctx.db, ctx.userId);
   const timeZone = safeTimeZone(profile.timezone);
 
@@ -223,5 +225,5 @@ export async function buildPlan(ctx: PlanContext, draft: PlanDraft, options: { w
 
   // 길찾기도 같은 경로 기록도 근사값도 없음 → 직접 입력하는 흐름으로 (8장 8.2.2)
   if (!travel.chosen) throw new TravelRequiredError(inputs, travel, timeZone);
-  return { plan: computePlan(inputs, travel), inputs, timeZone };
+  return { plan: computePlan(inputs, travel, options.mode), inputs, timeZone };
 }
