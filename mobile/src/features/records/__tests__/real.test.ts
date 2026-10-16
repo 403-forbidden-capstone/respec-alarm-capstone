@@ -46,15 +46,15 @@ describe('recordToday', () => {
 
 describe('R02 월간', () => {
   it('daily_records(그 달) + 일기로 달력 점, 오늘 카드는 오늘 기록 수 · 일기 여부', async () => {
+    const all = [
+      record('2026-10-12', { wake_confirmed_at: '2026-10-11T22:30:00Z', actual_prepare_minutes: 40 }), // 완료
+      record('2026-10-17', { wake_confirmed_at: '2026-10-17T00:30:00Z' }), // 일부
+      record('2026-10-19', { wake_confirmed_at: '2026-10-18T22:30:00Z' }), // 오늘 — 기상 확인만 있어도 완료
+    ];
     reply((c) => {
       if (c.table === 'daily_records') {
-        return {
-          data: [
-            record('2026-10-12', { wake_confirmed_at: '2026-10-11T22:30:00Z', actual_prepare_minutes: 40 }), // 완료
-            record('2026-10-17', { wake_confirmed_at: '2026-10-17T00:30:00Z' }), // 일부
-            record('2026-10-19', { wake_confirmed_at: '2026-10-18T22:30:00Z' }), // 오늘 — 기상 확인만 있어도 완료
-          ],
-        };
+        const key = filterOf(c, 'eq', 'record_date')?.[1]; // 오늘 기록 줄을 읽는 질의는 날짜 하나
+        return { data: key ? all.find((r) => r.record_date === key) : all };
       }
       if (c.table === 'daily_journals') return c.columns === 'journal_id' ? { data: { journal_id: 'j1' } } : { data: [{ record_date: '2026-10-14', coaching_insight: null }] };
       if (c.table === 'alarm_events') {
@@ -72,7 +72,8 @@ describe('R02 월간', () => {
     expect([m.title, m.leadingBlanks, m.days.length]).toEqual(['2026년 10월', 3, 31]); // 10/1은 목요일
     expect([mark(12), mark(17), mark(14), mark(19), mark(20)]).toEqual(['done', 'partial', 'partial', 'done', 'none']);
     expect([m.days[18].isToday, m.days[19].isFuture, m.days[17].isFuture]).toEqual([true, true, false]);
-    expect([dayKey(m.today.date), m.today.eventCount, m.today.journalWritten]).toEqual(['2026-10-19', 2, true]);
+    // 오늘 기록 수 = 울림 기록 2개 + 생활 기록에만 있는 기상 확인 1개
+    expect([dayKey(m.today.date), m.today.eventCount, m.today.journalWritten]).toEqual(['2026-10-19', 3, true]);
 
     const records = onlyCalls('daily_records')[0];
     expect([filterOf(records, 'eq', 'user_id')?.[1], filterOf(records, 'gte', 'record_date')?.[1], filterOf(records, 'lte', 'record_date')?.[1]]).toEqual(['user-1', '2026-10-01', '2026-10-31']);
@@ -197,6 +198,16 @@ describe('R02 일간', () => {
       '2026-10-19T15:00:00.000Z',
       'user-1',
     ]);
+  });
+
+  it('생활 기록에만 있는 날(달력에 점은 있는데 울림 기록은 없는 주말)도 일간에 기상 확인이 보임', async () => {
+    reply((c) => {
+      if (c.table === 'daily_records') return { data: record('2026-10-17', { wake_confirmed_at: '2026-10-17T00:30:00Z', data_source: 'MANUAL' }) };
+      return { data: [] };
+    });
+    const d = await getDay(new Date('2026-10-17T03:00:00Z'));
+    expect(d.actual.map((a) => `${formatTime(a.at)} ${a.label} · ${a.source}`)).toEqual(['오전 9:30 기상 확인 · 직접 입력']);
+    expect(filterOf(onlyCalls('daily_records')[0], 'eq', 'record_date')?.[1]).toBe('2026-10-17');
   });
 
   it('지난 날은 past 표시 없이, 일기가 있으면 표시', async () => {

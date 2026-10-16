@@ -14,7 +14,7 @@ import type { Suggestion, SuggestionChange, TimelineRow } from './types';
 
 export type RecordRow = Pick<
   Tables<'daily_records'>,
-  'record_date' | 'sleep_at' | 'wake_reported_at' | 'wake_confirmed_at' | 'actual_prepare_minutes' | 'routine_done_rate' | 'sleep_satisfaction' | 'condition_note'
+  'record_date' | 'sleep_at' | 'wake_reported_at' | 'wake_confirmed_at' | 'actual_prepare_minutes' | 'routine_done_rate' | 'sleep_satisfaction' | 'condition_note' | 'data_source'
 >;
 export type JournalDayRow = Pick<Tables<'daily_journals'>, 'record_date' | 'coaching_insight'>;
 
@@ -124,14 +124,32 @@ export function actualRow(e: EventRow): TimelineRow | null {
   }
 }
 
-// 시각순 (같은 시각이면 기록 번호순) — 마지막 줄(지금 강조)이 가장 늦은 일이 되게
-export function actualRows(events: readonly EventRow[]): TimelineRow[] {
-  return [...events]
+const RECORD_SOURCE_TEXT: Record<Enums<'record_source'>, string> = { MANUAL: '직접 입력', ALARM: '자동', AI: 'AI 대화' };
+
+// 그날 생활 기록(daily_records)에만 있고 울림 기록(alarm_events)에는 없는 일 — 달력 점은 생활 기록으로 찍으니, 점이 있는 날 일간에도 그 기록이 보이게
+//   기상 확인 · 알람 해제 시각 두 가지. 울림 기록에 같은 일이 있으면 그쪽을 씀 (두 줄로 겹치지 않게)
+export function recordRows(record: RecordRow | undefined | null, events: readonly EventRow[]): TimelineRow[] {
+  if (!record) return [];
+  const source = RECORD_SOURCE_TEXT[record.data_source];
+  const rows: TimelineRow[] = [];
+  if (record.wake_reported_at && !events.some((e) => e.event_type === 'DISMISSED' && e.alarms?.alarm_type === 'WAKE')) {
+    rows.push({ at: new Date(record.wake_reported_at), label: '기상 알람 해제', source });
+  }
+  if (record.wake_confirmed_at && !events.some((e) => e.event_type === 'WAKE_CONFIRMED')) {
+    rows.push({ at: new Date(record.wake_confirmed_at), label: '기상 확인', source });
+  }
+  return rows;
+}
+
+// 시각순 (같은 시각이면 기록 번호순, 생활 기록에서 온 줄은 같은 시각의 울림 기록 뒤) — 마지막 줄(지금 강조)이 가장 늦은 일이 되게
+export function actualRows(events: readonly EventRow[], record?: RecordRow | null): TimelineRow[] {
+  const fromEvents = [...events]
     .sort((x, y) => Date.parse(x.event_at) - Date.parse(y.event_at) || x.event_id - y.event_id)
     .flatMap((e) => {
       const row = actualRow(e);
       return row ? [row] : [];
     });
+  return [...fromEvents, ...recordRows(record, events)].sort((x, y) => x.at.getTime() - y.at.getTime()); // 정렬은 안정적이라 같은 시각이면 울림 기록이 앞
 }
 
 // ---------------------------------------------------------------------------

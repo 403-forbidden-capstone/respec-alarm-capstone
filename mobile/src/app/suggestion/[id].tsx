@@ -171,7 +171,7 @@ function Detail({ suggestion: s, reload }: { suggestion: Suggestion; reload: () 
                   {change.axis} {change.result}
                 </Text>
                 <Text variant="small" style={styles.sub}>
-                  적용 전에는 {change.current}였어요.
+                  적용 전 값: {change.current}
                 </Text>
               </>
             ) : (

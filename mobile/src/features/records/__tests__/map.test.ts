@@ -6,6 +6,7 @@ import { weekDays } from '../calendar';
 import {
   actualRow,
   actualRows,
+  recordRows,
   alarmPatch,
   factsOf,
   isApplicableValue,
@@ -34,6 +35,7 @@ const record = (date: string, patch: Partial<RecordRow> = {}): RecordRow => ({
   routine_done_rate: null,
   sleep_satisfaction: null,
   condition_note: null,
+  data_source: 'ALARM',
   ...patch,
 });
 
@@ -174,6 +176,30 @@ describe('일간 — 실제로 일어난 일', () => {
   it('평가(FEEDBACK)는 일어난 일에 안 넣고, 알람 정보가 없어도 줄은 만듦', () => {
     expect(actualRow(event({ event_type: 'FEEDBACK' }))).toBeNull();
     expect(text(event({ event_type: 'DISMISSED', alarms: null }))).toBe('오전 7:20 알람 해제 · 자동');
+  });
+
+  it('생활 기록에만 있는 기상 확인 · 알람 해제는 일간에도 보임 (달력 점이 생활 기록으로 찍히니까) — 출처는 data_source', () => {
+    const woke = record('2026-10-17', { wake_confirmed_at: '2026-10-17T00:30:00Z', wake_reported_at: '2026-10-17T00:25:00Z', data_source: 'MANUAL' });
+    expect(recordRows(woke, []).map((r) => `${formatTime(r.at)} ${r.label} · ${r.source}`)).toEqual(['오전 9:25 기상 알람 해제 · 직접 입력', '오전 9:30 기상 확인 · 직접 입력']);
+    expect(recordRows(record('2026-10-17', { wake_confirmed_at: '2026-10-17T00:30:00Z', data_source: 'AI' }), [])[0].source).toBe('AI 대화');
+    expect(recordRows(record('2026-10-17', { wake_confirmed_at: '2026-10-17T00:30:00Z', data_source: 'ALARM' }), [])[0].source).toBe('자동');
+    expect(recordRows(undefined, [])).toEqual([]);
+    expect(recordRows(record('2026-10-17'), [])).toEqual([]); // 시각이 없으면 줄도 없음
+  });
+
+  it('울림 기록에 같은 일이 있으면 생활 기록 줄은 더하지 않음 (두 줄로 겹치지 않게)', () => {
+    const woke = record('2026-10-19', { wake_confirmed_at: '2026-10-18T22:31:00Z', wake_reported_at: '2026-10-18T22:23:00Z' });
+    const rows = actualRows(
+      [
+        event({ event_id: 1, event_type: 'DISMISSED', event_at: '2026-10-18T22:23:00Z' }),
+        event({ event_id: 2, event_type: 'WAKE_CONFIRMED', event_at: '2026-10-18T22:31:00Z', input_source: 'USAGE' }),
+      ],
+      woke,
+    );
+    expect(rows.map((r) => `${r.label} · ${r.source}`)).toEqual(['기상 알람 해제 · 자동', '기상 확인 · 자동 판정']);
+    // 한쪽만 있으면 있는 것만 더하고 시각순으로 섞음
+    const half = actualRows([event({ event_id: 1, event_type: 'DISMISSED', event_at: '2026-10-18T22:23:00Z' })], woke);
+    expect(half.map((r) => r.label)).toEqual(['기상 알람 해제', '기상 확인']);
   });
 
   it('시각순, 같은 시각이면 기록 번호순', () => {

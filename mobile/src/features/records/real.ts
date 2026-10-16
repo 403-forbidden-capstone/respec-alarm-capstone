@@ -40,7 +40,8 @@ export const recordToday = () => startOfDay(now());
 // 읽기 도우미
 // ---------------------------------------------------------------------------
 
-const RECORD_COLUMNS = 'record_date, sleep_at, wake_reported_at, wake_confirmed_at, actual_prepare_minutes, routine_done_rate, sleep_satisfaction, condition_note';
+const RECORD_COLUMNS =
+  'record_date, sleep_at, wake_reported_at, wake_confirmed_at, actual_prepare_minutes, routine_done_rate, sleep_satisfaction, condition_note, data_source';
 
 // 날짜(YYYY-MM-DD) 범위의 생활 기록 — 양 끝 포함
 async function loadRecords(userId: string, fromKey: string, toKey: string): Promise<RecordRow[]> {
@@ -76,17 +77,21 @@ async function hasJournal(userId: string, key: string): Promise<boolean> {
   return data != null;
 }
 
-// 그날 실제로 일어난 일 (alarm_events) — 시각순. 일기 사실(routine/real.ts)도 같은 줄을 씀
+// 그날 실제로 일어난 일 — 울림 기록(alarm_events) + 생활 기록(daily_records)에만 있는 기상 시각, 시각순. 일기 사실(routine/real.ts)도 같은 줄을 씀
 export async function loadActualRows(userId: string, day: Date): Promise<TimelineRow[]> {
   const from = startOfDay(day);
-  const { data, error } = await supabase
-    .from('alarm_events')
-    .select('event_id, event_type, event_at, snooze_minutes, input_source, alarms(alarm_type, appointment_participants(is_late, late_minutes))')
-    .eq('user_id', userId)
-    .gte('event_at', from.toISOString())
-    .lt('event_at', addDays(from, 1).toISOString());
-  if (error) throw error;
-  return actualRows(data ?? []);
+  const [events, record] = await Promise.all([
+    supabase
+      .from('alarm_events')
+      .select('event_id, event_type, event_at, snooze_minutes, input_source, alarms(alarm_type, appointment_participants(is_late, late_minutes))')
+      .eq('user_id', userId)
+      .gte('event_at', from.toISOString())
+      .lt('event_at', addDays(from, 1).toISOString()),
+    supabase.from('daily_records').select(RECORD_COLUMNS).eq('user_id', userId).eq('record_date', dayKey(from)).maybeSingle(),
+  ]);
+  if (events.error) throw events.error;
+  if (record.error) throw record.error;
+  return actualRows(events.data ?? [], record.data);
 }
 
 async function loadPlannedRows(userId: string, day: Date, nowMs: number | null): Promise<TimelineRow[]> {
