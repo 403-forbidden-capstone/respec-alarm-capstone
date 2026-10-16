@@ -136,17 +136,27 @@ $$;
 -- ---------------------------------------------------------------------
 -- ⑨ 기상 미확인(MISSED) 후보 — wake-check가 5분마다 부름
 -- ---------------------------------------------------------------------
--- 7장 7.9.2: 미확인 시각 = 알람 시각 + 안 끄면 다시 울림 총 소요(7.4.2) + 미루기 누적 + 30분
---   같은 알람에 WAKE_CONFIRMED · MISSED가 없으면 MISSED로 기록. 끄지 않았거나 폰이 꺼져 있어도 판정함 (TRIGGERED 여부와 무관)
+-- 7장 7.9.2: 미확인 시각 = (마지막으로 울리기 시작한 때) + 안 끄면 다시 울림 총 소요(7.4.2) + 30분
+--   그 사람의 기상 확인(WAKE_CONFIRMED)도 이 알람의 MISSED 기록도 없으면 MISSED로 기록. 끄지 않았거나 폰이 꺼져 있어도 판정함 (TRIGGERED 여부와 무관)
 --   다시 울림 총 소요 (alarm-core.md #29 · 7장 7.4.2): 첫 울림이 시작한 때부터 마지막 울림이 끝날 때까지. 울림은 1회 최대 3분이고,
 --     다시 울림 간격은 알람 코어와 같게 "울림이 끝난 뒤 쉬는 시간"으로 읽음 (지형님께 확인 중 — 바뀌면 아래 case 한 곳만 고침)
 --     약(SOFT)    울림 3 + 쉼 5 + 울림 3                     = 11분
 --     보통(NORMAL) 울림 3 + 쉼 5 + 울림 3 + 쉼 5 + 울림 3     = 19분
 --     강(STRONG)  울림 3 × 4 + 쉼 3 × 3                       = 21분
 --     (작성자 판단) 문서는 "5분 후 1회" · "3분 간격 3회"의 간격을 시작 기준으로 읽을 수도 있음(5 · 10 · 9분) — 30분 여유 안의 차이
---   미루기 누적 = 그 알람의 SNOOZED 기록 snooze_minutes 합. 확인 알림에 응답이 없을 때의 재울림 항은 D2 결정 뒤에 더함 (지금은 0)
--- 어느 회차의 기록인지(작성자 판단): 알람 시각 6시간 전부터의 기록만 봄 — 알람 행을 다음 회차로 재사용해도(D4 열림) 전날 기록을 안 섞음
---   daily_records.wake_confirmed_at도 같은 구간이면 확인한 것으로 봄 (get_group_wake_status가 이벤트가 없으면 쓰는 값과 같게 — 그룹판과 푸시가 다르지 않게)
+--   "마지막으로 울리기 시작한 때"는 폰과 같게 셈: 폰은 미루면(AlarmController.snooze) 다시 울림 묶음을 처음부터 새로 시작함
+--     (미룬 시각 + 미루기 시간에 울리고, 그때부터 총 소요를 다시 셈). 그래서 보통 강도에서 늦게 두 번 미루면 폰은 알람 시각 + 75분까지 울림
+--     (07:00 알람 → 07:18 미룸 → 07:28 울림 시작 → 07:46 미룸 → 07:56 울림 시작 → 08:15 끝) — 미루기 분을 단순히 더하면 69분에 MISSED가 나가 폰이 아직 울리는 중에 놓침 처리됨
+--     마지막 SNOOZED 기록이 있으면  greatest(알람 시각, 그 기록의 event_at + 그 기록의 snooze_minutes)
+--     없으면                          알람 시각
+--   돌려주는 snooze_minutes는 지금도 SNOOZED 기록 snooze_minutes의 누적 합(참고 값). missed_at은 이 합으로 구하지 않음
+--   확인 알림에 응답이 없을 때의 재울림 항은 D2 결정 뒤에 더함 (지금은 0)
+-- 어느 회차의 기록인지(작성자 판단 — 되돌리기 쉬움): 알람 시각 6시간 전부터 18시간 뒤까지(24시간 폭)의 기록만 봄 [scheduled_at - 6시간, scheduled_at + 18시간)
+--   알람 행을 다음 회차로 재사용해도(D4 열림) 전날 기록을 안 섞고, 배치가 오래 멈췄다 돌아도 다음 날 아침의 확인이 전날 알람을 덮지 않음. 폭을 바꾸려면 아래 interval '18 hours' 세 곳(미루기 · 기상 확인 이벤트 · 생활 기록)을 같이 고침
+-- 기상 확인은 "그 사람" 기준 (get_group_wake_status가 '기상'으로 세는 정의와 같게 — 그룹판과 푸시가 다르지 않게):
+--   같은 사람의 WAKE_CONFIRMED 기록이면 어느 기상 알람에서 눌렀든 인정 (같은 날 기상 알람이 둘이어도 한 번 확인하면 둘 다 확인된 것)
+--   daily_records.wake_confirmed_at도 같은 구간이면 확인한 것으로 봄 (get_group_wake_status가 이벤트가 없으면 쓰는 값)
+--   MISSED는 그 알람의 기록만 봄 (알람마다 한 번씩 기록)
 -- 판정 대상(작성자 판단): 켜져 있는 기상 알람, 알람 시각이 p_lookback_hours(기본 24시간) 안. 오래된 알람이 한꺼번에 MISSED로 쏟아지지 않게
 -- p_now는 시험용(안 주면 지금)
 -- event_key: 이 알람의 MISSED 기록을 서버가 두 번 넣지 않도록 alarm_events.client_event_id에 쓰는 고정 번호 (같은 알람 · 같은 알람 시각이면 같은 값)
@@ -162,7 +172,7 @@ returns table (
   scheduled_at    timestamptz,
   intensity       public.alarm_intensity,
   rering_minutes  integer,       -- 안 끄면 다시 울림 총 소요 (첫 울림 시작 ~ 마지막 울림 끝)
-  snooze_minutes  integer,       -- 미루기 누적
+  snooze_minutes  integer,       -- 미루기 누적 합 (참고 값 — missed_at은 마지막 미루기 기준)
   missed_at       timestamptz,   -- 미확인 시각
   event_key       uuid
 )
@@ -178,12 +188,20 @@ as $$
            a.scheduled_at,
            a.intensity,
            case a.intensity when 'SOFT' then 11 when 'NORMAL' then 19 else 21 end as rering_minutes,
-           coalesce((select sum(e.snooze_minutes)
-                     from public.alarm_events e
-                     where e.alarm_id = a.alarm_id
-                       and e.event_type = 'SNOOZED'
-                       and e.event_at >= a.scheduled_at - interval '6 hours'), 0)::integer as snooze_minutes
+           coalesce(sn.total, 0)::integer as snooze_minutes,
+           -- 마지막 울림 묶음이 시작한 때: 마지막 미루기의 다음 울림 (미루기가 없으면 알람 시각)
+           greatest(a.scheduled_at, sn.last_ring_at) as last_ring_start
     from public.alarms a
+    left join lateral (
+      select sum(e.snooze_minutes) as total,
+             (array_agg(e.event_at + make_interval(mins => coalesce(e.snooze_minutes, 0))
+                        order by e.event_at desc, e.event_id desc))[1] as last_ring_at
+      from public.alarm_events e
+      where e.alarm_id = a.alarm_id
+        and e.event_type = 'SNOOZED'
+        and e.event_at >= a.scheduled_at - interval '6 hours'
+        and e.event_at <  a.scheduled_at + interval '18 hours'
+    ) sn on true
     where a.alarm_type = 'WAKE'
       and a.is_enabled
       and a.scheduled_at <= p_now - interval '30 minutes'
@@ -191,7 +209,7 @@ as $$
   ),
   due as (
     select b.*,
-           b.scheduled_at + make_interval(mins => b.rering_minutes + b.snooze_minutes + 30) as missed_at
+           b.last_ring_start + make_interval(mins => b.rering_minutes + 30) as missed_at
     from base b
   )
   select d.alarm_id,
@@ -213,14 +231,22 @@ as $$
     and not exists (
       select 1
       from public.alarm_events e
+      where e.user_id = d.user_id
+        and e.event_type = 'WAKE_CONFIRMED'
+        and e.event_at >= d.scheduled_at - interval '6 hours'
+        and e.event_at <  d.scheduled_at + interval '18 hours')
+    and not exists (
+      select 1
+      from public.alarm_events e
       where e.alarm_id = d.alarm_id
-        and e.event_type in ('WAKE_CONFIRMED', 'MISSED')
+        and e.event_type = 'MISSED'
         and e.event_at >= d.scheduled_at - interval '6 hours')
     and not exists (
       select 1
       from public.daily_records dr
       where dr.user_id = d.user_id
-        and dr.wake_confirmed_at >= d.scheduled_at - interval '6 hours')
+        and dr.wake_confirmed_at >= d.scheduled_at - interval '6 hours'
+        and dr.wake_confirmed_at <  d.scheduled_at + interval '18 hours')
   order by d.missed_at, d.alarm_id;
 $$;
 
