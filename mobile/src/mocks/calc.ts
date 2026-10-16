@@ -1,9 +1,11 @@
-// 목업의 계산을 그대로 옮김 — 실제 계산은 서버(alarm-suggest Edge Function · DB 함수)가 함 (#32 · #44)
+// 목업 계산 — 알람 역산 · 강도는 서버 함수와 같은 공용 계산(supabase/functions/_shared/calc)을 얇게 감쌈 (전체작업계획 8.1 Q4 A)
 //   ALG-01 알람 역산 · ALG-02 강도 · ALG-03 권한 합집합 · 그룹원 기상 상태
+//   공용 계산이 목업 규칙을 그대로 옮긴 것이라(D56 열림 = 목업 계산이 기준) 결과가 같음. 여기서는 목업 일정(MockAppointment) ↔ 공용 입력만 바꿈
 import type { AlarmTime, IntensityAxis, Level } from '@/features/alarm/types';
-import { IMPORTANCE_POINT } from '@/features/alarm/types';
 import type { FinalGrant, GrantRow, WakeState } from '@/features/social/types';
-import { addMinutes, formatTime, minuteOfDay, timeParts } from '@/lib/format';
+import { formatTime, minuteOfDay, timeParts } from '@/lib/format';
+import { alarmChain as sharedAlarmChain } from '@shared/calc/chain.ts';
+import { autoLevel as sharedAutoLevel, resolveIntensity } from '@shared/calc/intensity.ts';
 
 import { db, kst, timelines, TODAY, type MockAppointment } from './data';
 
@@ -13,45 +15,33 @@ import { db, kst, timelines, TODAY, type MockAppointment } from './data';
 // a.manual이 있으면 직접 고른 이동 · 준비 시간 · 알람 시각이 자동 계산보다 먼저 (D42 C). 직접 고른 알람은 auto에 자동 계산값을 남김
 //   준비 알람은 (직접 고른 시각을 포함한) 기상 시각 뒤 — 기상을 옮기면 준비도 같은 간격으로 따라옴
 export function alarmChain(a: MockAppointment): AlarmTime[] {
-  const travel = a.manual?.travelMinutes ?? a.travelMinutes;
-  const prepare = a.manual?.predictedPrepMinutes ?? a.predictedPrepMinutes;
-  const depart = addMinutes(a.at, -(a.bufferMinutes + travel));
-  const alarm = (kind: AlarmTime['kind'], auto: Date): AlarmTime => {
-    const picked = kind === 'ARRIVE' ? undefined : a.manual?.times?.[kind]; // 도착 목표는 약속에 묶여 직접 고르지 않음
-    const manual = picked != null && picked.getTime() !== auto.getTime();
-    return {
-      id: `${a.id}:${kind}`,
-      kind,
-      at: manual ? picked : auto,
-      enabled: kind === 'ARRIVE' || !db.disabledKinds.has(`${a.id}:${kind}`),
-      ...(manual ? { auto } : {}),
-    };
-  };
-  const list: AlarmTime[] = [];
-  if (a.withWake) {
-    const wake = alarm('WAKE', addMinutes(depart, -prepare));
-    list.push(wake);
-    if (a.beforePrepMinutes > 0) list.push(alarm('PREPARE', addMinutes(wake.at, a.beforePrepMinutes)));
-  } else {
-    list.push(alarm('PREPARE', addMinutes(depart, -prepare)));
-  }
-  list.push(alarm('DEPARTURE', depart));
-  list.push(alarm('ARRIVE', addMinutes(a.at, -a.bufferMinutes)));
-  const kinds = a.kinds;
-  if (!kinds) return list;
-  const made = list.filter((x) => x.kind === 'ARRIVE' || kinds.includes(x.kind));
-  return made.some((x) => x.kind !== 'ARRIVE') ? made : [];
+  const chain = sharedAlarmChain({
+    at: a.at,
+    travelMinutes: a.manual?.travelMinutes ?? a.travelMinutes,
+    bufferMinutes: a.bufferMinutes,
+    prepareMinutes: a.manual?.predictedPrepMinutes ?? a.predictedPrepMinutes,
+    beforePrepareMinutes: a.beforePrepMinutes,
+    withWake: a.withWake,
+    kinds: a.kinds,
+    manualTimes: a.manual?.times,
+  });
+  return chain.map((x) => ({
+    id: `${a.id}:${x.kind}`,
+    kind: x.kind,
+    at: x.at,
+    enabled: x.kind === 'ARRIVE' || !db.disabledKinds.has(`${a.id}:${x.kind}`),
+    ...(x.auto ? { auto: x.auto } : {}),
+  }));
 }
 
 // ALG-02: 중요도 점수 + 최근 4주 늦잠 지각 2회 이상이면 1 → 0~2
 export function autoLevel(a: MockAppointment): Level {
-  const late = db.lateCount4w >= 2 ? 1 : 0;
-  return Math.max(0, Math.min(2, IMPORTANCE_POINT[a.importance] + late)) as Level;
+  return sharedAutoLevel(a.importance, db.lateCount4w);
 }
 
 // 직접 고른 강도가 있으면 그것, 없으면 자동
 export function axisLevel(a: MockAppointment, axis: IntensityAxis): Level {
-  return db.intensityOverrides[a.id]?.[axis] ?? autoLevel(a);
+  return resolveIntensity(a.importance, db.lateCount4w, db.intensityOverrides[a.id]).axes[axis].level;
 }
 
 // ALG-03: 관계별 권한을 항목별로 OR
