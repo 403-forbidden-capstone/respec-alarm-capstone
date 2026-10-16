@@ -326,7 +326,7 @@ export function buildDataset({ users, today, newId = randomUUID }) {
       dest_name: SEJONG.name,
       dest_lat: SEJONG.lat,
       dest_lng: SEJONG.lng,
-      recurrence_rule: 'FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR',
+      // 지난 회차는 반복 규칙 없음(기본 null) — 반복 일정은 앞으로 올 "수업" 한 줄뿐. 회차마다 규칙을 달면 H01 · H02에 반복 일정이 20개로 보이고 D4 배치가 시리즈를 따로 만듦
     });
     const made = participate(appt, 'me', { travel: 50, prepare: 40, buffer: 10, before: 10, withWake: true, lateCount: 0 });
     const wakeAt = new Date(made.byType.WAKE.scheduled_at);
