@@ -1,16 +1,18 @@
 // ④ 캘린더 · 하루 기록 — 데이터 접근은 이 파일에서만 합니다.
-// 지금은 src/mocks의 가짜 데이터를 돌려주고, Supabase가 붙으면 이 파일 안에서만 바꿉니다.
+// 가짜 데이터(src/mocks)는 그대로 두고, 실데이터 모드면 함수 맨 앞에서 real.ts(Supabase)로 넘김 (docs/screen-data-map.md "실데이터 연결 규칙")
 //   읽기 · 쓰기 위치는 docs/screen-data-map.md (R02 · S01, 제안은 alarm_suggestions)
 import { KIND_LABEL } from '@/features/alarm/types';
 import { getJournal } from '@/features/routine/api';
 import { now } from '@/lib/clock';
 import { UserError } from '@/lib/errors';
 import { addDays, addMinutes, dateParts, dayKey, isSameDay, startOfDay } from '@/lib/format';
+import { isMock } from '@/lib/mode';
 import { alarmChain } from '@/mocks/calc';
 import { db, kst, TODAY } from '@/mocks/data';
 import { pastDay } from '@/mocks/records';
 
 import { leadingBlanks, monthDays, monthTitle, weekDays, weekRelative, weekTitle } from './calendar';
+import * as real from './real';
 import { editBounds, shiftLog } from './suggestion';
 import { buildWeekSummary, dayMark, wakeScore, type WakeRow } from './summary';
 import type { DayMark, DayRecord, MonthRecord, Suggestion, WeekRecord, WeekSummary } from './types';
@@ -18,8 +20,8 @@ import type { DayMark, DayRecord, MonthRecord, Suggestion, WeekRecord, WeekSumma
 // 기록 화면의 오늘 — 목업은 시나리오 시각(아침 · 전날 밤)과 상관없이 5월 22일
 const today = () => kst(TODAY, 0);
 
-// 기록 화면이 여는 "오늘" — 목업 기록은 5월 22일 하루라 시나리오가 전날 밤이어도 22일을 보여 줌 (실데이터는 now() 기준으로 바꿈)
-export const recordToday = today;
+// 기록 화면이 여는 "오늘" — 목업 기록은 5월 22일 하루라 시나리오가 전날 밤이어도 22일을 보여 줌, 실데이터는 지금 시각 기준
+export const recordToday = () => (isMock() ? today() : real.recordToday());
 
 // 그날 기록 표시 — 목업은 2025년 5월만 있음: 지난 평일 기록 완료 · 주말 일부 기록, 오늘은 기상 확인 · 일기 뒤에 완료
 // 규칙은 summary.ts dayMark (실데이터도 같은 함수). 목업 날의 기록(기상 확인 · 집 출발 · 직접 입력 한 줄)을 그 규칙에 넘김
@@ -34,6 +36,7 @@ function markOf(date: Date): DayMark {
 
 // 월간 (R02) — 실데이터는 daily_records.record_date로 그달을 읽음. 목업에 없는 달은 기록 없이 달력만
 export async function getMonth(year: number, month: number): Promise<MonthRecord> {
+  if (!isMock()) return real.getMonth(year, month);
   const t = today();
   return {
     title: monthTitle(year, month),
@@ -79,6 +82,7 @@ function weekSummary(days: Date[], relative: string): WeekSummary | null {
 
 // 주간 (R02) — anyDay가 든 주 (월요일 시작). 기록이 없는 주는 요약 없이 날짜 줄만
 export async function getWeek(anyDay: Date): Promise<WeekRecord> {
+  if (!isMock()) return real.getWeek(anyDay);
   const t = today();
   const days = weekDays(anyDay);
   const relative = weekRelative(anyDay, t);
@@ -104,6 +108,7 @@ export function weekEmptyText(week: WeekRecord): string {
 
 // 일간 (R02) — 그날 설정한 알람과 실제로 일어난 일. 오늘은 db, 지난 날은 mocks/records, 기록이 없는 날은 빈 기록
 export async function getDay(date: Date): Promise<DayRecord> {
+  if (!isMock()) return real.getDay(date);
   const day = startOfDay(date);
   const t = today();
   const base = {
@@ -172,10 +177,12 @@ function buildSuggestion(): Suggestion | null {
 
 // 홈 카드에 띄울 제안 — 기다리는 것만
 export async function getPendingSuggestion(): Promise<Suggestion | null> {
+  if (!isMock()) return real.getPendingSuggestion();
   return db.suggestion.status === 'PENDING' ? buildSuggestion() : null;
 }
 
 export async function getSuggestion(id: string): Promise<Suggestion | null> {
+  if (!isMock()) return real.getSuggestion(id);
   return db.suggestion.id === id ? buildSuggestion() : null;
 }
 
@@ -183,6 +190,7 @@ export async function getSuggestion(id: string): Promise<Suggestion | null> {
 // 제안과 다르게 고치면 EDITED. 적용한 뒤에도 다시 고칠 수 있음 — 앞서 적용한 만큼을 걷어내고 새 값으로, 다시 고친 건 늘 EDITED (D53)
 // 다시 고친 값을 어디에 저장하는지는 D6 · D23 · D25가 정한 뒤 (지금은 가짜 데이터)
 export async function applySuggestion(id: string, minutes: number) {
+  if (!isMock()) return real.applySuggestion(id, minutes);
   const s = db.suggestion;
   const a = db.appointments.find((x) => x.id === s.appointmentId);
   // 거절은 한국어 이유로 던짐 — 화면이 토스트로 보여 주고 성공 안내는 안 띄움
@@ -204,6 +212,7 @@ export async function applySuggestion(id: string, minutes: number) {
 
 // 이전 값으로 되돌리기 — 제안은 다시 기다림으로 (목업 A.sugUndo). 적용한 제안이 아니면 거절
 export async function undoSuggestion(id: string) {
+  if (!isMock()) return real.undoSuggestion(id);
   const s = db.suggestion;
   const a = db.appointments.find((x) => x.id === s.appointmentId);
   if (s.id !== id || !a) throw new UserError('제안을 찾을 수 없어요');
@@ -216,12 +225,14 @@ export async function undoSuggestion(id: string) {
 
 // 이번 제안 무시 — 같은 종류 제안은 당분간 다시 만들지 않음 (suppress_until)
 export async function ignoreSuggestion(id: string) {
+  if (!isMock()) return real.ignoreSuggestion(id);
   if (db.suggestion.id !== id) throw new UserError('제안을 찾을 수 없어요');
   if (db.suggestion.status !== 'PENDING') throw new UserError('기다리는 제안만 무시할 수 있어요');
   db.suggestion.status = 'IGNORED';
 }
 
 export async function reopenSuggestion(id: string) {
+  if (!isMock()) return real.reopenSuggestion(id);
   if (db.suggestion.id !== id) throw new UserError('제안을 찾을 수 없어요');
   if (db.suggestion.status !== 'IGNORED') throw new UserError('무시한 제안만 다시 볼 수 있어요');
   db.suggestion.status = 'PENDING';

@@ -66,6 +66,17 @@ export type DayRecord = {
 
 export type SuggestionStatus = Enums<'alarm_suggestion_status'>; // PENDING · APPLIED · EDITED · IGNORED
 
+// 시각이 아닌 제안 — 말소리 · 배경음 · 진동 (DB alarm_suggestion_type VOICE_TONE · SOUND · INTENSITY). 실데이터에서만 있음
+//   시각을 앞당기는 제안은 DB 종류에 아직 없음(D6 열림)이라 가짜 데이터만 시각 칸을 씀
+export type SuggestionChange = {
+  kind: Enums<'alarm_suggestion_type'>;
+  axis: string; // 말소리 · 배경음 · 진동
+  target: string; // 바뀌는 알람 — 5월 22일 (목) 팀 주간회의 · 기상 알람
+  current: string; // 지금 값 글자 (차분 · 다정)
+  suggested: string; // 제안한 값 글자
+  result: string | null; // 적용한 값 글자 (적용 전엔 null)
+};
+
 // 알람 조정 제안 (S01 · H01 카드)
 export type Suggestion = {
   id: string;
@@ -82,6 +93,8 @@ export type Suggestion = {
   proposedWake: Date; // 제안(적용 뒤에는 실제로 적용한) 기상 알람
   status: SuggestionStatus;
   applied: { wake: Date; prepare: Date | null; minutes: number } | null; // 적용한 뒤 시각 · 적용 전보다 일찍(+) 늦게(−)
+  // 시각이 아닌 제안이면 있음 — 시각 칸(currentWake · proposedWake · bounds 등)은 대상 알람 시각으로 채워 두고 화면은 안 씀 (appointment.id가 빈 글자면 연결된 일정 없음)
+  change?: SuggestionChange;
 };
 
 // 직접 고르는 범위 — earlier분 일찍 ~ later분 늦게 (분, 둘 다 0 이상)

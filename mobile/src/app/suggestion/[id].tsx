@@ -7,6 +7,7 @@ import { TextLink } from '@/features/alarm/components/TextLink';
 import { applySuggestion, getSuggestion, ignoreSuggestion, reopenSuggestion, undoSuggestion } from '@/features/records/api';
 import { dayWord } from '@/features/records/calendar';
 import { CompareTimes } from '@/features/records/components/CompareTimes';
+import { CompareValues } from '@/features/records/components/CompareValues';
 import { useHoldRepeat } from '@/features/records/hooks/useHoldRepeat';
 import { EDIT_STEP, previewTimes, shiftText, stepMinutes, suggestionPhase } from '@/features/records/suggestion';
 import type { Suggestion } from '@/features/records/types';
@@ -19,6 +20,7 @@ import { useLoad } from '@/lib/useLoad';
 // S01 알람 조정 제안 — 최근 기록으로 고른 앞당김을 적용 · 직접 수정 · 무시, 적용한 뒤에는 다시 수정하거나 이전 값으로 되돌리기
 // 적용하면 그 일정의 예측 준비가 바뀌어 기상 · 준비 알람이 같이 움직임. 출발은 약속에 맞춰 그대로 (실제 저장 · 다시 예약은 #49)
 // 직접 수정(D53) — 1분씩 일찍 · 늦게, 기상 · 준비 · 출발 미리 보기, 적용한 뒤에도 바로 다시 수정
+// 실데이터의 제안은 DB 종류(말소리 · 배경음 · 진동)뿐이라 s.change가 있음 — 시각 비교 대신 값 비교를 보여 주고 직접 수정은 없음 (시각 조정은 D6이 정하면)
 export default function SuggestionScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { data, error, reload } = useLoad(() => getSuggestion(id));
@@ -49,12 +51,13 @@ function Detail({ suggestion: s, reload }: { suggestion: Suggestion; reload: () 
   // 버튼은 한 번에 하나씩, 다시 읽기가 끝날 때까지 잠금 — 연타 · 옛 화면에서 다시 누르기를 막음 (lib/useAction)
   const { busy, run: act } = useAction();
   const phase = suggestionPhase(s.status);
-  const target = `${formatDateShort(s.appointment.at)} ${s.appointment.title}`;
+  const change = s.change; // 시각이 아닌 제안(실데이터)
+  const target = change ? change.target : `${formatDateShort(s.appointment.at)} ${s.appointment.title}`;
 
-  // 제안이 바꾸는 알람을 확인하러 (H03)
-  const alarmLink = (
+  // 제안이 바꾸는 알람을 확인하러 (H03) — 연결된 일정이 없는 알람(일정 없는 알람 · 루틴)은 열 곳이 없음
+  const alarmLink = s.appointment.id ? (
     <TextLink label="알람 설정 보기 ›" onPress={() => router.push({ pathname: '/alarm/[id]', params: { id: s.appointment.id } })} />
-  );
+  ) : null;
 
   // 시트의 1분 버튼 — 길게 누르면 반복하므로 최신 값에서 이어 가게 함수형 갱신
   const step = (delta: number) => setEditing((m) => (m == null ? m : stepMinutes(m, delta, s.bounds)));
@@ -63,7 +66,11 @@ function Detail({ suggestion: s, reload }: { suggestion: Suggestion; reload: () 
     act(async () => {
       await applySuggestion(s.id, minutes);
       setEditing(null);
-      toast(`${dayWord(s.currentWake, now())} 기상 알람이 ${formatTime(addMinutes(s.currentWake, -minutes))}에 울려요`);
+      toast(
+        change
+          ? `${change.axis} 설정을 바꿨어요 · ${change.suggested}`
+          : `${dayWord(s.currentWake, now())} 기상 알람이 ${formatTime(addMinutes(s.currentWake, -minutes))}에 울려요`,
+      );
       await reload();
     });
 
@@ -103,18 +110,20 @@ function Detail({ suggestion: s, reload }: { suggestion: Suggestion; reload: () 
           제안 이유
         </Text>
         <Text variant="big">{s.reason}</Text>
-        <View style={styles.trio}>
-          {s.deltas.map((d) => (
-            <View key={d.label} style={styles.trioItem}>
-              <Text variant="caption" align="center">
-                {d.label}
-              </Text>
-              <Text variant="bodyLarge" weight={700} align="center">
-                {d.value}
-              </Text>
-            </View>
-          ))}
-        </View>
+        {s.deltas.length ? (
+          <View style={styles.trio}>
+            {s.deltas.map((d) => (
+              <View key={d.label} style={styles.trioItem}>
+                <Text variant="caption" align="center">
+                  {d.label}
+                </Text>
+                <Text variant="bodyLarge" weight={700} align="center">
+                  {d.value}
+                </Text>
+              </View>
+            ))}
+          </View>
+        ) : null}
       </Card>
 
       {phase === 'pending' ? (
@@ -123,15 +132,26 @@ function Detail({ suggestion: s, reload }: { suggestion: Suggestion; reload: () 
             <Text variant="label" style={styles.label}>
               변경 제안 · {target}
             </Text>
-            <CompareTimes before={s.currentWake} after={s.proposedWake} />
-            <Text variant="small" align="center">
-              준비 알람도 {s.minutes}분 앞당겨져요.
-            </Text>
-            <View style={[styles.link, styles.linkCenter]}>{alarmLink}</View>
+            {change ? (
+              <>
+                <Text variant="small" align="center">
+                  {change.axis}
+                </Text>
+                <CompareValues before={change.current} after={change.suggested} />
+              </>
+            ) : (
+              <>
+                <CompareTimes before={s.currentWake} after={s.proposedWake} />
+                <Text variant="small" align="center">
+                  준비 알람도 {s.minutes}분 앞당겨져요.
+                </Text>
+              </>
+            )}
+            {alarmLink ? <View style={[styles.link, styles.linkCenter]}>{alarmLink}</View> : null}
           </Card>
           <View style={styles.stack}>
             <Button label="제안 적용하기" onPress={() => apply(s.minutes)} disabled={busy} />
-            <Button label="직접 수정하기" variant="ghost" onPress={() => setEditing(s.minutes)} disabled={busy} />
+            {change ? null : <Button label="직접 수정하기" variant="ghost" onPress={() => setEditing(s.minutes)} disabled={busy} />}
             <Button label="이번 제안 무시" variant="plain" onPress={ignore} disabled={busy} />
           </View>
         </>
@@ -143,21 +163,36 @@ function Detail({ suggestion: s, reload }: { suggestion: Suggestion; reload: () 
             <Text variant="label" style={styles.label}>
               적용했어요
             </Text>
-            <Text variant="big">
-              {target}
-              {'\n'}기상 {formatTime(s.applied.wake)}
-              {s.applied.prepare ? ` · 준비 ${formatTime(s.applied.prepare)}` : ''}
-            </Text>
-            <Text variant="small" style={styles.sub}>
-              적용 전보다 {shiftText(s.applied.minutes)} 울려요.
-            </Text>
+            {change ? (
+              <>
+                <Text variant="big">
+                  {target}
+                  {'\n'}
+                  {change.axis} {change.result}
+                </Text>
+                <Text variant="small" style={styles.sub}>
+                  적용 전에는 {change.current}였어요.
+                </Text>
+              </>
+            ) : (
+              <>
+                <Text variant="big">
+                  {target}
+                  {'\n'}기상 {formatTime(s.applied.wake)}
+                  {s.applied.prepare ? ` · 준비 ${formatTime(s.applied.prepare)}` : ''}
+                </Text>
+                <Text variant="small" style={styles.sub}>
+                  적용 전보다 {shiftText(s.applied.minutes)} 울려요.
+                </Text>
+              </>
+            )}
             <Text variant="small" style={styles.sub}>
               다음 기록에서 성능이 나빠지면 이전 값으로 되돌려요.
             </Text>
-            <View style={styles.link}>{alarmLink}</View>
+            {alarmLink ? <View style={styles.link}>{alarmLink}</View> : null}
           </Card>
           <View style={styles.stack}>
-            <Button label="다시 수정하기" variant="ghost" onPress={() => setEditing(s.applied?.minutes ?? s.minutes)} disabled={busy} />
+            {change ? null : <Button label="다시 수정하기" variant="ghost" onPress={() => setEditing(s.applied?.minutes ?? s.minutes)} disabled={busy} />}
             <Button label="이전 값으로 되돌리기" variant="plain" onPress={undo} disabled={busy} />
           </View>
         </>
@@ -167,7 +202,7 @@ function Detail({ suggestion: s, reload }: { suggestion: Suggestion; reload: () 
         <>
           <Card>
             <Text variant="small">이번 제안을 무시했어요. 같은 제안은 당분간 다시 보이지 않아요.</Text>
-            <View style={styles.link}>{alarmLink}</View>
+            {alarmLink ? <View style={styles.link}>{alarmLink}</View> : null}
           </Card>
           <View style={styles.stack}>
             <Button label="제안 다시 보기" variant="ghost" onPress={reopen} disabled={busy} />
