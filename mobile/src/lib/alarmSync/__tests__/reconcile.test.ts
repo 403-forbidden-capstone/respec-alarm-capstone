@@ -69,6 +69,12 @@ describe('서버 행 → 예약 꾸러미 (서버 alarm-commit과 같은 조립)
     expect(buildServerPackages([row({ alarm_id: 'off', alarm_type: 'WAKE', scheduled_at: '2026-10-19T22:30:00.000Z', is_enabled: false })])).toEqual([]);
   });
 
+  it('부제를 못 만들어도(시각 서식 실패) 맞추기가 멈추지 않고 장소만 달음', () => {
+    const broken = row({ alarm_id: 'w', alarm_type: 'WAKE', scheduled_at: '2026-10-19T22:30:00.000Z', appointment: { title: '회의', appointment_at: '날짜 아님', dest_name: '세종대학교' } });
+    const [pkg] = buildServerPackages([broken]);
+    expect(pkg).toMatchObject({ alarmId: 'w', title: '회의', subtitle: '세종대학교' });
+  });
+
   it('부제의 시각은 사용자 시간대 기준', () => {
     const rows = [row({ alarm_id: 'w', alarm_type: 'WAKE', scheduled_at: '2026-10-19T22:30:00.000Z' })];
     expect(buildServerPackages(rows, 'Asia/Seoul')[0].subtitle).toBe('오전 10:00 · 세종대학교');

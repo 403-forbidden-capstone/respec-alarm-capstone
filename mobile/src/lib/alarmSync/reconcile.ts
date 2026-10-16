@@ -21,6 +21,15 @@ export type SyncRow = PackageSource & {
 
 export const STANDALONE_TITLE = '알람'; // 일정 없는 알람 — 서버 commitStandalone과 같은 이름
 
+// 부제 글자는 시각 서식(Intl, 시간대 지정)에 기대는데, 이 기기가 못 만들거나 시각 값이 이상해도 맞추기 전체가 멈추지 않게 — 시각을 뺀 장소만 (알람은 그대로 울림)
+function safeSubtitle(at: string, place: string | null, timeZone: string): string | undefined {
+  try {
+    return subtitleFor(new Date(at), place, timeZone);
+  } catch {
+    return place ?? undefined;
+  }
+}
+
 // 서버가 alarm-commit에서 조립하는 것과 같은 꾸러미 (_shared/ring-package.ts) — 약속(참여 조건) · 루틴 · 일정 없는 알람별로 묶어서
 //   · 부제는 약속 알람이면 "오전 10:00 · 장소", 일정 없는 알람이면 알람 시각만 (서버와 같음), 루틴은 없음
 //   · departAt은 같은 약속의 출발 알람 시각 (단축 준비 안내용 — 폰이 아직 안 읽음). 출발 알람이 꺼져 있거나 이 목록에 없으면 빠짐
@@ -43,10 +52,10 @@ export function buildServerPackages(rows: readonly SyncRow[], timeZone: string =
         alarms: group,
         title: appointment?.title ?? first.routine_title ?? STANDALONE_TITLE,
         subtitle: appointment
-          ? subtitleFor(new Date(appointment.appointment_at), appointment.dest_name, tz)
+          ? safeSubtitle(appointment.appointment_at, appointment.dest_name, tz)
           : first.routine_id
             ? undefined
-            : subtitleFor(new Date(first.scheduled_at), null, tz),
+            : safeSubtitle(first.scheduled_at, null, tz),
         departAt: departure ? new Date(departure.scheduled_at) : undefined,
       }),
     );
