@@ -1,6 +1,7 @@
 // ② 그룹원 기상 상태 실데이터 — G03 (docs/screen-data-map.md G03)
 //   get_group_wake_status — 그 그룹 약속이 있는 날만 행을 주고(D57), 기상 관련 값만 줌(D59: 준비 · 출발 · 도착은 실데이터에서 뺌)
 //   date = 기상 신호가 알려 준 날 (없으면 내 시간대의 오늘)
+import { parseDbTime } from '@/lib/dbTime';
 import { UserError } from '@/lib/errors';
 import { supabase } from '@/lib/supabase';
 
@@ -23,7 +24,7 @@ export async function getMemberWake(groupId: string, personId: string, date?: st
   const base = { person: personOf(s, personId), groupName: group.group_name, noGroupAppointment: rows.length === 0 };
   if (!row) return { ...base, alarm: null, timeline: [], firstAlarmAt: null };
 
-  const wakeAt = row.wake_alarm_at ? new Date(row.wake_alarm_at) : null;
+  const wakeAt = row.wake_alarm_at ? parseDbTime(row.wake_alarm_at) : null;
   const label = wakeAt ? await groupAppointmentLabel(groupId, wakeAt) : '';
   return {
     ...base,
@@ -45,7 +46,7 @@ async function groupAppointmentLabel(groupId: string, wakeAt: Date): Promise<str
     .limit(1)
     .maybeSingle();
   if (error) throw error;
-  return data ? appointmentLabel(data.title, data.dest_name, new Date(data.appointment_at)) : '';
+  return data ? appointmentLabel(data.title, data.dest_name, parseDbTime(data.appointment_at)) : '';
 }
 
 // 깨우기 알림 (G03) — D19 열림: 서버 can_send_push가 WAKE_PING을 늘 거절하므로 실데이터에서는 보내지 않음 (D51 간격 제한도 그 뒤)

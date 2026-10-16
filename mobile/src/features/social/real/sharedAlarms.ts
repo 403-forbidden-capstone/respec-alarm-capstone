@@ -7,6 +7,7 @@
 //   주인 폰의 예약은 주인 앱이 푸시를 받거나 다시 켜질 때 맞춤(lib/alarmSync reconcile) — 내 폰에서 걸지 않음
 //   변경 기록(getShareLog)은 DB에 저장 자리가 없음(D9 · 스키마 보완 3): 이번에 앱을 연 동안 내가 바꾼 것만 메모리에 둠 (D20 열림 — 가짜 데이터와 같은 뜻)
 import { now } from '@/lib/clock';
+import { parseDbTime } from '@/lib/dbTime';
 import { callEdge } from '@/lib/edge';
 import { UserError } from '@/lib/errors';
 import { supabase } from '@/lib/supabase';
@@ -116,7 +117,7 @@ export async function shiftSharedAlarm(personId: string, cardId: string, minutes
   const done: SharedAlarmRow[] = [];
   try {
     for (const alarm of card.alarms) {
-      const moved = new Date(new Date(alarm.scheduled_at).getTime() + minutes * 60_000).toISOString();
+      const moved = new Date(parseDbTime(alarm.scheduled_at).getTime() + minutes * 60_000).toISOString();
       const { data, error } = await supabase
         .from('alarms')
         .update({ scheduled_at: moved, time_source: 'MANUAL' })

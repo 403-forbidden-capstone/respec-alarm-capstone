@@ -8,6 +8,7 @@ import * as AlarmCore from '@capstone/alarm-core';
 
 import { uploadEvents } from '@/lib/alarmSync';
 import { now } from '@/lib/clock';
+import { parseDbTime } from '@/lib/dbTime';
 import { dayKey } from '@/lib/format';
 import { supabase } from '@/lib/supabase';
 import { requireUserId } from '@/lib/user';
@@ -108,8 +109,8 @@ async function loadWakeContext(userId: string, alarmId: string): Promise<WakeCon
   const appointment = alarm.data.appointment_participants?.appointments ?? null;
   const rows = events.data ?? [];
   const confirmedRow = rows.find((r) => r.event_type === 'WAKE_CONFIRMED');
-  const confirmed = confirmedRow ? { at: new Date(confirmedRow.event_at), how: confirmedRow.input_source === 'USAGE' ? ('auto' as const) : ('self' as const) } : null;
-  const dismissals = [...rows.filter((r) => r.event_type === 'DISMISSED').map((r) => new Date(r.event_at)), ...pending.map((p) => p.at)];
+  const confirmed = confirmedRow ? { at: parseDbTime(confirmedRow.event_at), how: confirmedRow.input_source === 'USAGE' ? ('auto' as const) : ('self' as const) } : null;
+  const dismissals = [...rows.filter((r) => r.event_type === 'DISMISSED').map((r) => parseDbTime(r.event_at)), ...pending.map((p) => p.at)];
   return {
     alarmId,
     title: appointment?.title ?? STANDALONE_TITLE,
@@ -145,7 +146,7 @@ async function findRecentDismissedWake(userId: string, windowMs: number): Promis
     .order('event_at', { ascending: false })
     .limit(1);
   if (error) throw error;
-  const found = data?.[0] ? { alarmId: data[0].alarm_id, at: new Date(data[0].event_at) } : null;
+  const found = data?.[0] ? { alarmId: data[0].alarm_id, at: parseDbTime(data[0].event_at) } : null;
   const pending = (await pendingDismissals()).filter((p) => p.at.getTime() >= since.getTime()).sort((x, y) => y.at.getTime() - x.at.getTime())[0];
   return (pending && (!found || pending.at.getTime() > found.at.getTime()) ? pending.alarmId : found?.alarmId) ?? null;
 }

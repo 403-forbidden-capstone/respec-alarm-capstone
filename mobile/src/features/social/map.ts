@@ -1,6 +1,7 @@
 // DB 행 → 화면 타입(types.ts) 바꾸기 — 순수 함수만 (시험: __tests__/map.test.ts). 쿼리는 real/
 // 그룹 기상 상태는 D59에 따라 기상까지만 (알람 울림 · 해제 · 기상 확인 · 미확인) — 준비 · 출발 · 도착 줄은 실데이터에 없음 (docs/screen-data-map.md "스키마에 더 필요한 것" 5)
 import { KIND_LABEL, LEVELS, type AlarmKind } from '@/features/alarm/types';
+import { parseDbTime } from '@/lib/dbTime';
 import { dateParts, formatTime, minutesBetween, startOfDay, timeParts } from '@/lib/format';
 import type { Enums } from '@/types/database';
 import { levelOfIntensity, levelOfSoundKey } from '@shared/calc/intensity.ts';
@@ -27,7 +28,7 @@ export const unknownPerson = (id: string): Person => ({ id, name: '알 수 없�
 
 // 2025년 3월부터 함께하는 중
 export function sinceLabel(createdAt: string): string {
-  const { year, month } = dateParts(new Date(createdAt));
+  const { year, month } = dateParts(parseDbTime(createdAt));
   return `${year}년 ${month}월부터 함께하는 중`;
 }
 
@@ -50,7 +51,7 @@ export type WakeRow = {
 export const NO_APPOINTMENT_STATE: WakeState = { text: '오늘은 그룹 약속이 없어요', dot: 'zz', woke: false };
 export const HIDDEN_STATE: WakeState = { text: '기상 상태를 볼 수 없어요', dot: 'zz', woke: false };
 
-const at = (iso: string) => new Date(iso);
+const at = parseDbTime; // DB 시각 글자 (lib/dbTime)
 
 // 멤버 한 줄의 기상 상태. dayHasRows = 함수가 그날 행을 하나라도 줬는지 (안 줬으면 그 그룹의 약속이 없는 날, D57)
 // 행이 없는 멤버 = 나에게 기상 상태 조회를 허용하지 않은 사람 (함수가 권한 있는 멤버만 돌려줌)

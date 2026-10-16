@@ -1,6 +1,7 @@
 // 고친 값 기록(user_edit_logs)에 남길 줄 만들기 — 순수 함수 (시험: __tests__/edits.test.ts)
 // 가짜 데이터의 saveAlarmSettings · createAppointment(api.ts)가 db.editLogs에 쌓는 규칙과 같은 줄을 만듦 (같은 시나리오 대조 시험 있음).
 // 실데이터는 이 줄을 따로 insert하지 않고 alarm-commit 요청의 edits로 보냄 — 저장이 성공해야 기록이 남게 (서버가 user_edit_logs에 씀)
+import { parseDbTime } from '@/lib/dbTime';
 import type { Tables } from '@/types/database';
 
 import { manualTimes } from './adjust';
@@ -96,7 +97,7 @@ export function createEdits(estimate: Estimate): EditLogLine[] {
 // user_edit_logs 한 줄 → 화면 UserEditLog. field는 DB가 열어 둔 글자(앱 화면의 값 이름)라 모양만 맞춰 읽음, ROUTINE 알람은 종류를 비움
 export function fromEditRow(row: Pick<Tables<'user_edit_logs'>, 'created_at' | 'screen' | 'field' | 'appointment_id' | 'alarm_id' | 'alarm_type' | 'auto_value' | 'edited_value'>): UserEditLog {
   return {
-    at: new Date(row.created_at),
+    at: parseDbTime(row.created_at),
     screen: row.screen as UserEditLog['screen'],
     field: row.field as EditLogField,
     ...(row.appointment_id ? { appointmentId: row.appointment_id } : {}),

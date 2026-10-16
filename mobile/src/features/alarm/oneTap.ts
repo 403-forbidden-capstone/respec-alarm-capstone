@@ -7,6 +7,7 @@
 import type { AlarmEvent } from '@capstone/alarm-core';
 
 import { isPermanentInsertError } from '@/lib/alarmSync/events';
+import { dbTimeMs } from '@/lib/dbTime';
 import { supabase } from '@/lib/supabase';
 import { requireUserId } from '@/lib/user';
 
@@ -66,7 +67,7 @@ export function planOneTapUpdates(events: readonly AlarmEvent[], snapshotOf: Rea
     const update: OneTapUpdate = { participantId };
     if (taps.departed != null && snapshot.departedAt == null) update.departedAt = new Date(taps.departed).toISOString();
     if (taps.arrived != null && snapshot.arrivedAt == null) {
-      update.arrival = { arrivedAt: new Date(taps.arrived).toISOString(), ...judgeArrival(taps.arrived, Date.parse(snapshot.appointmentAt)) };
+      update.arrival = { arrivedAt: new Date(taps.arrived).toISOString(), ...judgeArrival(taps.arrived, dbTimeMs(snapshot.appointmentAt)) };
     }
     if (update.departedAt || update.arrival) updates.push(update);
   }

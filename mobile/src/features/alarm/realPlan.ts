@@ -4,6 +4,7 @@
 //   · 저장은 중복 키를 서버가 아직 안 읽어서(lib/edge) 자동 재시도하지 않음. 읽기(alarm-suggest · place-search)만 한 번 재시도
 import { applyCommit } from '@/lib/alarmSync';
 import { now } from '@/lib/clock';
+import { dbTimeMs } from '@/lib/dbTime';
 import { callEdge, EdgeError, messageFor } from '@/lib/edge';
 import { UserError } from '@/lib/errors';
 import { dayKey } from '@/lib/format';
@@ -68,7 +69,7 @@ async function recentPlaces(userId: string): Promise<Place[]> {
     .gte('appointments.appointment_at', since)
     .limit(100);
   if (error) throw error;
-  const rows = [...(data ?? [])].sort((x, y) => Date.parse(y.appointments.appointment_at) - Date.parse(x.appointments.appointment_at));
+  const rows = [...(data ?? [])].sort((x, y) => dbTimeMs(y.appointments.appointment_at) - dbTimeMs(x.appointments.appointment_at));
   const destinations = rows.map((r) => toPlace({ name: r.appointments.dest_name, lat: r.appointments.dest_lat, lng: r.appointments.dest_lng }));
   const origins = rows.flatMap((r) => (r.origin_name && r.origin_name !== ORIGIN_HOME ? [toPlace({ name: r.origin_name, lat: r.origin_lat, lng: r.origin_lng })] : []));
   return uniqueByName([...destinations, ...origins]).slice(0, RECENT_PLACE_COUNT);

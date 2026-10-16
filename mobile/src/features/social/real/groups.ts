@@ -3,6 +3,7 @@
 //   그룹원 기상 상태는 get_group_wake_status — 그 그룹 약속이 있는 날만 행을 줌 (D57), 기상까지만 (D59)
 //   date = 기상 신호(lib/realtime)가 알려 준 날. 없으면 함수가 내 시간대의 오늘
 import { now } from '@/lib/clock';
+import { parseDbTime } from '@/lib/dbTime';
 import { startOfDay } from '@/lib/format';
 import { UserError } from '@/lib/errors';
 import { supabase } from '@/lib/supabase';
@@ -77,7 +78,7 @@ async function loadAppointments(groupId: string): Promise<GroupDetail['appointme
     .order('appointment_at')
     .limit(APPOINTMENT_LIMIT);
   if (error) throw error;
-  return (data ?? []).map((a) => ({ id: a.appointment_id, title: a.title, at: new Date(a.appointment_at), place: a.dest_name, importance: a.importance }));
+  return (data ?? []).map((a) => ({ id: a.appointment_id, title: a.title, at: parseDbTime(a.appointment_at), place: a.dest_name, importance: a.importance }));
 }
 
 // ---------------------------------------------------------------------------

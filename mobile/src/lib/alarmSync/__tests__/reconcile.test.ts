@@ -1,4 +1,4 @@
-import { describe, expect, it } from '@jest/globals';
+import { describe, expect, it, jest } from '@jest/globals';
 import type { RingPackage, ScheduledAlarm } from '@capstone/alarm-core';
 
 import { buildServerPackages, planReconcile, RECONCILE_WINDOW_DAYS, type SyncRow } from '../reconcile';
@@ -63,6 +63,25 @@ describe('서버 행 → 예약 꾸러미 (서버 alarm-commit과 같은 조립)
     expect(byId['routine']).toMatchObject({ type: 'ROUTINE', title: '차분한 출근 준비' });
     expect(byId['routine'].subtitle).toBeUndefined();
     expect(byId['a-wake'].departAt).toBeUndefined(); // 출발 알람이 이 목록에 없으면 빠짐
+  });
+
+  it('DB가 주는 마이크로초 시각(.123456+00:00)은 소수 3자리로 맞춰 읽음 — Date.parse가 6자리를 못 읽는 엔진 대비', () => {
+    const parse = jest.spyOn(Date, 'parse');
+    try {
+      const [wake] = buildServerPackages([
+        row({
+          alarm_id: 'w',
+          alarm_type: 'WAKE',
+          scheduled_at: '2026-10-19T22:30:00.123456+00:00',
+          appointment: { title: '팀 주간회의', appointment_at: '2026-10-20T01:00:00.654321+00:00', dest_name: '세종대학교' },
+        }),
+      ]);
+      expect(wake.atMillis).toBe(Date.UTC(2026, 9, 19, 22, 30, 0, 123));
+      expect(wake.subtitle).toBe('오전 10:00 · 세종대학교');
+      for (const [text] of parse.mock.calls) expect(String(text)).not.toMatch(/\.\d{4,}/);
+    } finally {
+      parse.mockRestore();
+    }
   });
 
   it('꺼진 알람은 꾸러미에 안 넣음', () => {

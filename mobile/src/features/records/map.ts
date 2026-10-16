@@ -1,6 +1,7 @@
 // DB 행 → R02 · S01 화면 타입 바꾸기 — 순수 함수만 (시험: __tests__/map.test.ts). 쿼리는 real.ts
 // 실데이터 구현의 틀(features/alarm/map.ts와 같음): 쿼리는 real.ts에서 얇게, 행 → 화면 모양 변환은 여기서 순수 함수로
 import { KIND_LABEL, LEVELS, type Level } from '@/features/alarm/types';
+import { dbTimeMs, parseDbTime } from '@/lib/dbTime';
 import { dayKey, formatDateShort, josa, minutesBetween, startOfDay } from '@/lib/format';
 import type { Enums, Tables, TablesUpdate } from '@/types/database';
 import { levelOfIntensity, levelOfSoundKey, levelOfVoiceTone } from '@shared/calc/intensity.ts';
@@ -31,7 +32,7 @@ export function factsOf(record: RecordRow | undefined, hasJournal: boolean): Day
 export function wakeRowsOf(days: readonly Date[], records: readonly RecordRow[], wakeAlarmAts: readonly string[]): WakeRow[] {
   const firstWakeAlarm = new Map<string, Date>();
   for (const at of wakeAlarmAts) {
-    const date = new Date(at);
+    const date = parseDbTime(at);
     const key = dayKey(date);
     const known = firstWakeAlarm.get(key);
     if (!known || date.getTime() < known.getTime()) firstWakeAlarm.set(key, date);
@@ -42,7 +43,7 @@ export function wakeRowsOf(days: readonly Date[], records: readonly RecordRow[],
     const target = firstWakeAlarm.get(key);
     if (!record?.wake_confirmed_at || !target) return [];
     const midnight = startOfDay(date);
-    const wake = minutesBetween(midnight, new Date(record.wake_confirmed_at));
+    const wake = minutesBetween(midnight, parseDbTime(record.wake_confirmed_at));
     return [{ date, wake, score: wakeScore(wake, minutesBetween(midnight, target)) }];
   });
 }
@@ -78,7 +79,7 @@ export function isPlanned(row: Pick<PlannedAlarmRow, 'alarm_type' | 'is_enabled'
 
 // 설정한 알람 한 줄. nowMs를 주면(오늘) 이미 지난 알람에 past 표시
 export function plannedRow(row: PlannedAlarmRow, nowMs: number | null): TimelineRow {
-  const at = new Date(row.scheduled_at);
+  const at = parseDbTime(row.scheduled_at);
   const label = row.alarm_type === 'ARRIVE' ? `${KIND_LABEL.ARRIVE} 목표` : alarmName(row.alarm_type);
   const source = row.appointment_participants?.appointments?.title ?? row.routines?.title ?? '일정 없는 알람';
   return nowMs == null ? { at, label, source } : { at, label, source, past: at.getTime() <= nowMs };
@@ -97,7 +98,7 @@ const inputSourceText = (source: EventRow['input_source']) => (source ? INPUT_SO
 // 실제로 일어난 일 한 줄. 일어난 일로 보이지 않는 기록(평가)은 null
 //   울림 · 해제 · 미루기 · 놓침은 폰이 알아서 남긴 것이라 '자동', 기상 확인 · 원탭 응답 · 도착 확인은 input_source로 어떻게 남았는지
 export function actualRow(e: EventRow): TimelineRow | null {
-  const at = new Date(e.event_at);
+  const at = parseDbTime(e.event_at);
   const type = e.alarms?.alarm_type;
   const name = type ? alarmName(type) : '알람';
   const make = (label: string, source: string): TimelineRow => ({ at, label, source });
@@ -133,10 +134,10 @@ export function recordRows(record: RecordRow | undefined | null, events: readonl
   const source = RECORD_SOURCE_TEXT[record.data_source];
   const rows: TimelineRow[] = [];
   if (record.wake_reported_at && !events.some((e) => e.event_type === 'DISMISSED' && e.alarms?.alarm_type === 'WAKE')) {
-    rows.push({ at: new Date(record.wake_reported_at), label: '기상 알람 해제', source });
+    rows.push({ at: parseDbTime(record.wake_reported_at), label: '기상 알람 해제', source });
   }
   if (record.wake_confirmed_at && !events.some((e) => e.event_type === 'WAKE_CONFIRMED')) {
-    rows.push({ at: new Date(record.wake_confirmed_at), label: '기상 확인', source });
+    rows.push({ at: parseDbTime(record.wake_confirmed_at), label: '기상 확인', source });
   }
   return rows;
 }
@@ -144,7 +145,7 @@ export function recordRows(record: RecordRow | undefined | null, events: readonl
 // 시각순 (같은 시각이면 기록 번호순, 생활 기록에서 온 줄은 같은 시각의 울림 기록 뒤) — 마지막 줄(지금 강조)이 가장 늦은 일이 되게
 export function actualRows(events: readonly EventRow[], record?: RecordRow | null): TimelineRow[] {
   const fromEvents = [...events]
-    .sort((x, y) => Date.parse(x.event_at) - Date.parse(y.event_at) || x.event_id - y.event_id)
+    .sort((x, y) => dbTimeMs(x.event_at) - dbTimeMs(y.event_at) || x.event_id - y.event_id)
     .flatMap((e) => {
       const row = actualRow(e);
       return row ? [row] : [];
@@ -204,7 +205,7 @@ export const SUGGESTION_REASON = '최근 알람 반응을 바탕으로\n더 잘 
 export function toSuggestion(row: SuggestionRow, target: SuggestionTarget | null): Suggestion | null {
   if (!target) return null;
   const kind = SUGGESTION_KIND[row.suggestion_type];
-  const at = new Date(target.scheduled_at);
+  const at = parseDbTime(target.scheduled_at);
   const appointment = target.appointment_participants?.appointments ?? null;
   const name = alarmName(target.alarm_type);
   const owner = appointment?.title ?? target.routines?.title ?? null;
@@ -223,7 +224,7 @@ export function toSuggestion(row: SuggestionRow, target: SuggestionTarget | null
     summary: `${change.current} → ${change.suggested}`,
     reason: SUGGESTION_REASON,
     deltas: [],
-    appointment: { id: appointment?.appointment_id ?? '', title: owner ?? name, at: appointment ? new Date(appointment.appointment_at) : at },
+    appointment: { id: appointment?.appointment_id ?? '', title: owner ?? name, at: appointment ? parseDbTime(appointment.appointment_at) : at },
     minutes: 0,
     currentWake: at,
     currentPrepare: null,

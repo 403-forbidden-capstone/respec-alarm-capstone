@@ -5,6 +5,8 @@ import type { RingPackage as PhoneRingPackage, ScheduledAlarm } from '@capstone/
 import { buildRingPackages, subtitleFor, type PackageSource } from '@shared/ring-package.ts';
 import { safeTimeZone } from '@shared/tz.ts';
 
+import { normalizeDbTime, parseDbTime } from '../dbTime';
+
 // 서버 알람을 폰에 미리 걸어 두는 기간. 이보다 먼 알람은 폰에 없어도 더하지 않음 (이미 폰에 있는 것은 이 기간 밖이어도 시각 · 강도를 맞춤)
 // 작성자 판단 — 되돌리기 쉬움. 반복 알람은 서버가 다음 회차 하나만 만들어서(docs/alarm-core.md) 대부분 며칠 안쪽
 export const RECONCILE_WINDOW_DAYS = 14;
@@ -24,7 +26,7 @@ export const STANDALONE_TITLE = '알람'; // 일정 없는 알람 — 서버 com
 // 부제 글자는 시각 서식(Intl, 시간대 지정)에 기대는데, 이 기기가 못 만들거나 시각 값이 이상해도 맞추기 전체가 멈추지 않게 — 시각을 뺀 장소만 (알람은 그대로 울림)
 function safeSubtitle(at: string, place: string | null, timeZone: string): string | undefined {
   try {
-    return subtitleFor(new Date(at), place, timeZone);
+    return subtitleFor(parseDbTime(at), place, timeZone);
   } catch {
     return place ?? undefined;
   }
@@ -36,7 +38,9 @@ function safeSubtitle(at: string, place: string | null, timeZone: string): strin
 export function buildServerPackages(rows: readonly SyncRow[], timeZone: string = DEFAULT_TIME_ZONE): PhoneRingPackage[] {
   const tz = safeTimeZone(timeZone);
   const groups = new Map<string, SyncRow[]>();
-  for (const row of rows) {
+  for (const source of rows) {
+    // 꾸러미 조립(@shared/ring-package)이 Date.parse로 읽으므로 DB 시각 글자를 먼저 밀리초 3자리 모양으로 (lib/dbTime)
+    const row = { ...source, scheduled_at: normalizeDbTime(source.scheduled_at) };
     const key = row.participant_id ?? (row.routine_id ? `routine:${row.routine_id}` : `alarm:${row.alarm_id}`);
     const list = groups.get(key);
     if (list) list.push(row);
@@ -56,7 +60,7 @@ export function buildServerPackages(rows: readonly SyncRow[], timeZone: string =
           : first.routine_id
             ? undefined
             : safeSubtitle(first.scheduled_at, null, tz),
-        departAt: departure ? new Date(departure.scheduled_at) : undefined,
+        departAt: departure ? parseDbTime(departure.scheduled_at) : undefined,
       }),
     );
   }

@@ -1,5 +1,6 @@
 // DB 행 → 화면 타입(types.ts) 바꾸기 — 순수 함수만 (시험: __tests__/map.test.ts). 쿼리는 real.ts
 // 실데이터 구현의 틀 (P6): 쿼리는 real.ts에서 얇게, 행 → 화면 모양 변환은 여기서 순수 함수로 빼서 jest로 시험
+import { parseDbTime } from '@/lib/dbTime';
 import type { Tables } from '@/types/database';
 import { alarmChain } from '@shared/calc/chain.ts';
 import { autoLevel, levelOfIntensity, levelOfSoundKey, levelOfVoiceTone } from '@shared/calc/intensity.ts';
@@ -68,7 +69,7 @@ export function toAlarmTime(row: AlarmRow, auto?: Date): AlarmTime | null {
   return {
     id: row.alarm_id,
     kind: row.alarm_type,
-    at: new Date(row.scheduled_at),
+    at: parseDbTime(row.scheduled_at),
     enabled: row.alarm_type === 'ARRIVE' || row.is_enabled,
     ...(auto ? { auto } : {}),
   };
@@ -95,7 +96,7 @@ export function beforePrepareOf(alarms: readonly AlarmRow[]): number {
   const prepare = alarms.find((x) => x.alarm_type === 'PREPARE');
   if (!wake || !prepare) return 0;
   if (prepare.time_source === 'MANUAL') return DEFAULT_BEFORE_PREPARE_MINUTES;
-  return Math.max(0, minutesBetween(new Date(wake.scheduled_at), new Date(prepare.scheduled_at)));
+  return Math.max(0, minutesBetween(parseDbTime(wake.scheduled_at), parseDbTime(prepare.scheduled_at)));
 }
 
 // 직접 고른 시각(time_source = MANUAL)의 자동 계산값 — 공용 역산(서버와 같은 파일)에 직접 고른 시각을 넣어 auto를 받음
@@ -103,10 +104,10 @@ export function beforePrepareOf(alarms: readonly AlarmRow[]): number {
 export function autoTimesOf(rows: AppointmentRows): Partial<Record<RingKind, Date>> {
   const { appointment, participant } = rows;
   const manualTimes: Partial<Record<RingKind, Date>> = {};
-  for (const row of rows.alarms) if (isRingRow(row) && row.time_source === 'MANUAL') manualTimes[row.alarm_type] = new Date(row.scheduled_at);
+  for (const row of rows.alarms) if (isRingRow(row) && row.time_source === 'MANUAL') manualTimes[row.alarm_type] = parseDbTime(row.scheduled_at);
   if (!Object.keys(manualTimes).length) return {};
   const chain = alarmChain({
-    at: new Date(appointment.appointment_at),
+    at: parseDbTime(appointment.appointment_at),
     travelMinutes: participant.est_travel_minutes ?? 0,
     bufferMinutes: participant.buffer_minutes,
     prepareMinutes: participant.prepare_minutes,
@@ -133,7 +134,7 @@ export function toAppointment(rows: AppointmentRows): Appointment {
   return {
     id: appointment.appointment_id,
     title: appointment.title,
-    at: new Date(appointment.appointment_at),
+    at: parseDbTime(appointment.appointment_at),
     place: appointment.dest_name,
     origin: participant.origin_name ?? ORIGIN_HOME,
     transport: participant.transport_type,
@@ -161,7 +162,7 @@ export function toStandaloneAppointment(row: StandaloneRow): Appointment {
   return {
     id: row.alarm_id,
     title: STANDALONE_TITLE,
-    at: new Date(row.scheduled_at),
+    at: parseDbTime(row.scheduled_at),
     place: '',
     origin: '',
     transport: 'WALK',
@@ -195,7 +196,7 @@ export function toScheduleItem(rows: {
   const { appointment } = rows;
   return {
     appointmentId: appointment.appointment_id,
-    at: new Date(appointment.appointment_at),
+    at: parseDbTime(appointment.appointment_at),
     title: appointment.title,
     place: appointment.dest_name,
     importance: appointment.importance,

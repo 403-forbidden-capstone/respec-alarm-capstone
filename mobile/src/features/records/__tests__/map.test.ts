@@ -145,6 +145,11 @@ describe('일간 — 실제로 일어난 일', () => {
     return r && `${formatTime(r.at)} ${r.label} · ${r.source}`;
   };
 
+  it('서버가 now()로 채운 마이크로초 시각(놓침 기록의 event_at 등)도 읽음', () => {
+    expect(text(event({ event_type: 'TRIGGERED', event_at: '2026-10-18T22:20:30.123456+00:00' }))).toBe('오전 7:20 기상 알람 울림 · 자동');
+    expect(actualRow(event({ event_type: 'TRIGGERED', event_at: '2026-10-18T22:20:30.123456+00:00' }))?.at.getTime()).toBe(Date.UTC(2026, 9, 18, 22, 20, 30, 123));
+  });
+
   it('울림 · 해제 · 미루기 · 놓침은 폰이 남긴 기록이라 자동 (가짜 데이터와 같은 글자)', () => {
     expect(text(event({ event_type: 'TRIGGERED' }))).toBe('오전 7:20 기상 알람 울림 · 자동');
     expect(text(event({ event_type: 'DISMISSED', event_at: '2026-10-18T22:23:00Z', input_source: 'BUTTON' }))).toBe('오전 7:23 기상 알람 해제 · 자동');

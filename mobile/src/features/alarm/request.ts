@@ -4,6 +4,7 @@
 // 서버가 안 읽는 칸을 보내면 거절(VALIDATION_FAILED)하므로 README의 이름 그대로만 보냄
 import type { RingPackage } from '@capstone/alarm-core';
 
+import { parseDbTime } from '@/lib/dbTime';
 import { minutesBetween } from '@/lib/format';
 import type { Weekday } from '@/lib/weekday';
 
@@ -232,9 +233,9 @@ function toTime(a: { alarm_type: AlarmKind | 'ROUTINE'; scheduled_at: string | n
   return {
     id,
     kind: a.alarm_type,
-    at: new Date(a.scheduled_at),
+    at: parseDbTime(a.scheduled_at),
     enabled: a.alarm_type === 'ARRIVE' || a.is_enabled,
-    ...(auto ? { auto: new Date(auto) } : {}),
+    ...(auto ? { auto: parseDbTime(auto) } : {}),
   };
 }
 
@@ -275,7 +276,7 @@ export function toPreview(s: Suggestion, saved: AppointmentDetail, edits: AlarmE
 // 새 일정 계산 결과 (H05 확인 시트). 아직 저장 전이라 일정 id · 알람 id는 자리 값
 export function toEstimate(s: Suggestion, d: AppointmentDraft, at: Date, body: Body, seq: number): Estimate {
   const alarms = suggestionAlarms(s, draftAlarmId);
-  const arrive = s.arrive_at ? new Date(s.arrive_at) : null;
+  const arrive = s.arrive_at ? parseDbTime(s.arrive_at) : null;
   const travelMinutes = s.travel.minutes ?? 0;
   const before = s.prepare.before_prepare_minutes;
   const rule = repeatToRrule(d.repeat);
