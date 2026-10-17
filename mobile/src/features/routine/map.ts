@@ -159,18 +159,22 @@ export function blankRoutine(sourceJournal: string | null, suggestion: string | 
 // ---------------------------------------------------------------------------
 
 // 오늘 루틴 하나 — 켜져 있고 오늘 요일이 든 것 중 저녁 전에 시작하는 것(저녁 루틴은 저녁 홈 카드로), 가장 일찍 시작하는 것
+//   알람 단계가 하나도 없는 루틴은 뺌: 단계를 끝냈다는 확인(alarm_events)은 단계 알람에 붙어서, 알람이 없으면 홈에서 끝낼 방법이 없음
 export function pickTodayRoutine(routines: readonly Routine[], weekday: Weekday, eveningStartMinute: number): Routine | null {
   return (
     routines
-      .filter((r) => r.active && r.days.includes(weekday) && r.startMinute < eveningStartMinute)
+      .filter((r) => r.active && r.days.includes(weekday) && r.startMinute < eveningStartMinute && r.steps.some((s) => s.alarm))
       .sort((a, b) => a.startMinute - b.startMinute)[0] ?? null
   );
 }
 
 // 끝낸 단계 수 = 오늘 확인한 단계 중 가장 뒤 단계 (알람이 없는 단계는 확인할 자리가 없어 뒤 단계를 확인하면 같이 끝난 것으로 봄)
+//   마지막 알람 단계까지 확인했으면 그 뒤의 알람 없는 단계도 확인할 자리가 없으니 모두 끝낸 것 = 단계 수 ("오늘 루틴을 모두 마쳤어요")
 export function routineProgress(routine: Routine, ackedStepOrders: readonly number[]): RoutineProgress | null {
   if (!routine.id) return null;
-  const done = ackedStepOrders.reduce((max, order) => (order >= 1 && order <= routine.steps.length ? Math.max(max, order) : max), 0);
+  const acked = ackedStepOrders.reduce((max, order) => (order >= 1 && order <= routine.steps.length ? Math.max(max, order) : max), 0);
+  const lastAlarmStep = routine.steps.reduce((last, s, i) => (s.alarm ? i + 1 : last), 0);
+  const done = lastAlarmStep > 0 && acked >= lastAlarmStep ? routine.steps.length : acked;
   return { id: routine.id, title: routine.title, steps: routine.steps.map((s) => s.name), done };
 }
 

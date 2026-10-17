@@ -218,12 +218,33 @@ describe('오늘 루틴 진행', () => {
     expect(pickTodayRoutine([], '월', 18 * 60)).toBeNull();
   });
 
+  it('알람 단계가 하나도 없는 루틴은 오늘 루틴에 올리지 않음 (끝냈다는 확인을 달 알람이 없어 홈에서 끝낼 수 없음)', () => {
+    const noAlarm = routine({ id: 'no-alarm', startMinute: 5 * 60, steps: routine().steps.map((s) => ({ ...s, alarm: false })) });
+    expect(pickTodayRoutine([noAlarm], '월', 18 * 60)).toBeNull();
+    expect(pickTodayRoutine([noAlarm, routine({ id: 'later', startMinute: 8 * 60 })], '월', 18 * 60)?.id).toBe('later'); // 더 일찍 시작해도 알람 없는 루틴은 건너뜀
+  });
+
   it('끝낸 단계 수 = 확인한 단계 중 가장 뒤 (알람 없는 단계는 뒤 단계를 확인하면 같이 끝남)', () => {
     expect(routineProgress(routine(), [])).toEqual({ id: 'r-1', title: '출근 준비', steps: ['물 마시기', '스트레칭', '샤워', '출발'], done: 0 });
     expect(routineProgress(routine(), [1])?.done).toBe(1);
-    expect(routineProgress(routine(), [3, 1])?.done).toBe(3);
     expect(routineProgress(routine(), [9, 0])?.done).toBe(0); // 단계 밖 번호는 무시
     expect(routineProgress(routine({ id: null }), [])).toBeNull();
+  });
+
+  it('마지막 알람 단계까지 확인했으면 그 뒤 알람 없는 단계도 끝난 것 = 단계 수 ("오늘 루틴을 모두 마쳤어요")', () => {
+    // 샤워(3)가 마지막 알람 단계 — 출발(4)에는 알람이 없어 확인할 자리가 없음
+    expect(routineProgress(routine(), [3, 1])?.done).toBe(4);
+    expect(routineProgress(routine(), [3])?.done).toBe(4);
+    expect(routineProgress(routine(), [1])?.done).toBe(1); // 마지막 알람 단계 전이면 확인한 만큼
+    // 마지막 단계에 알람이 있으면 그대로 그 단계 수
+    const lastAlarm = routine({ steps: routine().steps.map((s, i) => ({ ...s, alarm: i === 3 })) });
+    expect(routineProgress(lastAlarm, [4])?.done).toBe(4);
+    expect(routineProgress(lastAlarm, [])?.done).toBe(0);
+  });
+
+  it('알람 단계가 하나도 없는 루틴은 확인한 것이 없으니 0 그대로 (모두 끝난 것으로 보지 않음)', () => {
+    const noAlarm = routine({ steps: routine().steps.map((s) => ({ ...s, alarm: false })) });
+    expect(routineProgress(noAlarm, [])?.done).toBe(0);
   });
 
   it('다음에 확인할 단계 = 끝낸 단계 뒤에서 처음 나오는 알람 있는 단계', () => {

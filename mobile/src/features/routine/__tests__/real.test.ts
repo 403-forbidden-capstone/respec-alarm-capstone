@@ -123,6 +123,18 @@ describe('H01 오늘 루틴', () => {
     expect(onlyCalls('alarm_events')).toHaveLength(0);
   });
 
+  it('마지막 알람 단계까지 확인했으면 끝낸 수 = 단계 수 (뒤에 알람 없는 단계가 있어도)', async () => {
+    state(['a-1', 'a-3']); // 샤워(3)까지 확인 — 출발(4)에는 알람이 없음
+    expect((await getTodayRoutine())?.done).toBe(4);
+  });
+
+  it('알람 단계가 하나도 없는 루틴은 오늘 루틴이 아님 (확인을 읽지도 않음)', async () => {
+    reply((c) => (c.table === 'routines' ? { data: [morningRow({ steps: morningRow().steps.map((s) => ({ ...s, is_alarm: false })) })] } : { data: [] }));
+    expect(await getTodayRoutine()).toBeNull();
+    expect(onlyCalls('alarms')).toHaveLength(0);
+    expect(onlyCalls('alarm_events')).toHaveLength(0);
+  });
+
   it('오늘 요일이 아니거나 저녁 루틴이면 null', async () => {
     state([], [morningRow({ repeat_days: 'TUE~FRI' })]);
     expect(await getTodayRoutine()).toBeNull();
@@ -159,13 +171,27 @@ describe('H01 루틴 단계 완료', () => {
     state(['a-1']);
     const progress = await advanceRoutine(ROUTINE_ID);
     expect(onlyCalls('alarm_events', 'insert')[0].payload).toMatchObject({ alarm_id: 'a-3' });
-    expect(progress?.done).toBe(3);
+    // 샤워(3)가 마지막 알람 단계 — 뒤의 출발(4)은 알람이 없어 같이 끝난 것이라 모두 마침 ("오늘 루틴을 모두 마쳤어요")
+    expect(progress?.done).toBe(4);
+    expect(progress?.steps).toHaveLength(4);
   });
 
-  it('남은 단계에 알람이 없으면 이유와 함께 거절 (기록할 곳이 없음)', async () => {
+  it('마지막 알람 단계를 이미 확인했으면 모두 마친 상태 — 한 번 더 누르면 오늘 확인을 지우고 처음부터 (알람 없는 단계가 뒤에 있어도 막히지 않음)', async () => {
     state(['a-1', 'a-3']);
+    const progress = await advanceRoutine(ROUTINE_ID);
+    expect(progress?.done).toBe(0);
+    expect(onlyCalls('alarm_events', 'insert')).toHaveLength(0);
+    expect(filterOf(onlyCalls('alarm_events', 'delete')[0], 'in', 'alarm_id')?.[1]).toEqual(['a-1', 'a-3']);
+  });
+
+  it('다음 알람 단계의 알람 줄이 없으면(알람을 아직 못 걸었음) 이유와 함께 거절 (기록할 곳이 없음)', async () => {
+    reply((c) => {
+      if (c.table === 'routines') return { data: morningRow() };
+      if (c.table === 'alarms') return { data: [{ alarm_id: 'a-1', step_order: 1 }] }; // 샤워(3)의 알람 줄이 없음
+      if (c.table === 'alarm_events' && c.op === 'select') return { data: [{ alarm_id: 'a-1' }] };
+      return undefined;
+    });
     const err = await advanceRoutine(ROUTINE_ID).catch((e: unknown) => e);
-    // 샤워(3)까지 끝냈고 출발(4)에는 알람이 없음
     expect(err).toBeInstanceOf(UserError);
     expect((err as Error).message).toBe('남은 단계에 알람이 없어서 끝낸 것으로 기록할 수 없어요');
     expect(onlyCalls('alarm_events', 'insert')).toHaveLength(0);
