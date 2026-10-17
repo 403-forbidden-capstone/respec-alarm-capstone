@@ -40,19 +40,26 @@ function toRows(row: ParticipantQueryRow, items: ReadonlyMap<string, string[]>):
   };
 }
 
-// 준비물(todos ITEM) — 약속별로 모음
+// .in() 한 번에 넣는 id 수 — PostgREST는 id를 주소(GET 쿼리)에 실어 보내는데 UUID가 36자라 목록 상한(300)만큼이면 약 11,000자로 주소 길이 한도(보통 8KB 안팎)를 넘길 수 있음
+export const IN_CHUNK = 100;
+
+export function chunked<T>(list: readonly T[], size = IN_CHUNK): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < list.length; i += size) out.push(list.slice(i, i + size));
+  return out;
+}
+
+// 준비물(todos ITEM) — 약속별로 모음. 약속 id가 많으면 IN_CHUNK개씩 나눠 읽음 (한 약속의 준비물은 한 묶음 안에 있어 순서는 그대로)
 export async function fetchItems(userId: string, appointmentIds: readonly string[]): Promise<Map<string, string[]>> {
   const byAppointment = new Map<string, string[]>();
-  if (!appointmentIds.length) return byAppointment;
-  const { data, error } = await supabase
-    .from('todos')
-    .select('appointment_id, title')
-    .eq('user_id', userId)
-    .eq('todo_type', 'ITEM')
-    .in('appointment_id', [...appointmentIds])
-    .order('created_at');
-  if (error) throw error;
-  for (const todo of data ?? []) {
+  const pages = await Promise.all(
+    chunked(appointmentIds).map(async (ids) => {
+      const { data, error } = await supabase.from('todos').select('appointment_id, title').eq('user_id', userId).eq('todo_type', 'ITEM').in('appointment_id', ids).order('created_at');
+      if (error) throw error;
+      return data ?? [];
+    }),
+  );
+  for (const todo of pages.flat()) {
     if (!todo.appointment_id) continue;
     byAppointment.set(todo.appointment_id, [...(byAppointment.get(todo.appointment_id) ?? []), todo.title]);
   }

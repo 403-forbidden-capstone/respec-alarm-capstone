@@ -162,6 +162,23 @@ describe('목록 · 하루 일정 · 알람 설정 읽기', () => {
     expect(filterArgs(standalone, 'eq', 'alarm_type')).toEqual(['WAKE']);
   });
 
+  it('listAppointments: 준비물은 약속 id를 100개씩 나눠 읽음 (id를 주소에 실어 보내서 300개면 주소가 너무 길어짐) — 결과는 약속별로 그대로', async () => {
+    const ids = Array.from({ length: 250 }, (_, i) => `00000000-0000-4000-8000-${String(i).padStart(12, '0')}`);
+    mockRoutes['appointment_participants:select'] = () => ({
+      data: ids.map((id, i) => participantRow({ participant_id: `p-${i}` }, { appointment_id: id, title: `일정 ${i}` })),
+    });
+    mockRoutes['todos:select'] = (call) => {
+      const asked = filterArgs(call, 'in', 'appointment_id')?.[0] as string[];
+      return { data: asked.filter((id) => id === ids[0] || id === ids[150] || id === ids[249]).map((id) => ({ appointment_id: id, title: `준비물 ${id.slice(-3)}` })) };
+    };
+    mockRoutes['alarms:select'] = () => ({ data: [] });
+    const list = await real.listAppointments();
+    const asks = callsTo('todos', 'select').map((c) => (filterArgs(c, 'in', 'appointment_id')?.[0] as string[]).length);
+    expect(asks).toEqual([100, 100, 50]);
+    expect(list).toHaveLength(250);
+    expect(list.filter((a) => a.items.length).map((a) => a.items)).toEqual([['준비물 000'], ['준비물 150'], ['준비물 249']]);
+  });
+
   it('getDaySchedule: 그날 0시 ~ 다음 날 0시, 알람 없는 일정도 한 줄', async () => {
     mockRoutes['appointment_participants:select'] = () => ({
       data: [
