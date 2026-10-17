@@ -1,7 +1,8 @@
 // ③ · ⑥ 목업 — 자기 전 AI 대화 대본 · 하루 기록(일기) · 루틴 제안 (AI 대기)
 // mockup.html의 SCRIPT · cardMsg · chatResolve · genJournal · rAccept를 옮김. 실제는 Gemini (voice-* · journal-* Edge, #42 · #48)
 // 화면은 이 파일을 직접 읽지 않고 features/voice/api.ts · features/routine/api.ts를 거침. 바꾼 값은 앱을 다시 열 때까지만 남음
-import type { AppointmentDraft } from '@/features/alarm/types';
+import { ringingKinds } from '@/features/alarm/schedule';
+import { defaultAlarms, KIND_LABEL, type AlarmTime, type AppointmentDraft } from '@/features/alarm/types';
 import type { ApplyStatus, JournalFact, Routine } from '@/features/routine/types';
 import { dateParts, dayKey, formatTime, isSameDay, josa, minutesBetween } from '@/lib/format';
 
@@ -27,11 +28,12 @@ export const FOUND_DRAFT: AppointmentDraft = {
   title: '스터디',
   date: kst(TODAY + 1, 0),
   time: '14:00',
-  repeat: 'NONE',
+  repeat: [],
   place: '학교 도서관',
   transport: 'TRANSIT',
   importance: 'LOW',
   items: '노트북 충전기',
+  alarms: defaultAlarms(),
 };
 export const FOUND_QUESTION = '내일 오후 2시 스터디로 저장할까요?';
 
@@ -93,9 +95,21 @@ export function dayWord(at: Date) {
   return `${month}월 ${day}일`;
 }
 
-// 저장했을 때 AI 답 — 준비(없으면 첫 알람) · 출발 알람 시각
-export function savedReply(at: Date, prepare: Date, depart: Date) {
-  return `저장했어요. ${dayWord(at)} ${formatTime(prepare)} 준비, ${formatTime(depart)} 출발 알람을 맞춰 둘게요. 오늘 대화는 여기까지 할까요?`;
+// 저장했을 때 AI 답 — 울리는 알람 중 준비(없으면 첫 알람) · 출발 시각 (기상 · 준비 · 출발을 다 켜면 목업 그대로 "준비, 출발")
+// H05에서 종류를 일부만 켰으면 켠 것만 말함 (D46) — 준비만 끄면 "기상, 출발", 기상만 켜면 "기상". 하나도 안 켰으면 알람 없이 저장했다고 답함
+export function savedReply(at: Date, alarms: AlarmTime[]) {
+  const ringing = ringingKinds(alarms);
+  if (!ringing.length) return savedWithoutAlarmReply(at);
+  const first = ringing.find((x) => x.kind === 'PREPARE') ?? ringing[0];
+  const depart = ringing.find((x) => x.kind === 'DEPARTURE');
+  const told = depart && depart !== first ? [first, depart] : [first];
+  const times = told.map((x) => `${formatTime(x.at)} ${KIND_LABEL[x.kind]}`).join(', ');
+  return `저장했어요. ${dayWord(at)} ${times} 알람을 맞춰 둘게요. 오늘 대화는 여기까지 할까요?`;
+}
+
+// H05에서 알람을 모두 끄고 저장했을 때 (D46) — 맞춰 둘 알람이 없음
+export function savedWithoutAlarmReply(at: Date) {
+  return `저장했어요. ${dayWord(at)} 일정은 알람 없이 저장해 둘게요. 오늘 대화는 여기까지 할까요?`;
 }
 
 export function rejectedReply(title: string) {

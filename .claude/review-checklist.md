@@ -2,6 +2,17 @@
 
 `pr-review` 스킬로 기본 검수를 한 뒤, 이 레포에서만 필요한 항목을 추가로 확인합니다. 해당 없는 항목은 건너뜁니다.
 
+## 깊이 (스킬 Step 0)
+
+작성자가 아니라 바뀐 내용으로 정함. 아래 위험 경로를 하나라도 건드리거나 파일 15개 · 500줄 이상이면 "깊게", 파일 3개 · 100줄 이하이고 위험 경로가 없으면 "빠름", 그 밖은 "기본". 애매하면 깊은 쪽.
+
+- 로그인 · 세션: `mobile/src/lib/auth*`, `mobile/src/lib/supabase*`, `supabase/functions/_shared/auth.ts`
+- 접근 규칙 · 스키마: `supabase/migrations/**` (RLS · 정책 · 트리거 · `pg_cron`)
+- 서버 함수: `supabase/functions/**`, `supabase/config.toml`
+- 알람 예약: `mobile/modules/alarm-core/**`, `mobile/src/features/alarm/**`, 예약 · 취소 · 기록 올리기를 부르는 앱 코드
+- CI · 배포: `.github/workflows/**`, `.github/scripts/**`, `wrangler.jsonc`, `eas.json`
+- 비밀값 · 환경 변수: `.env*` · `.env.example`, `EXPO_PUBLIC_` 변수를 더하는 코드
+
 ## 규칙
 
 - PR 제목 `[파트] [유형] 작업 내용`, 본문 `Closes #이슈번호`, 브랜치 `유형/이슈번호-파트-설명`
@@ -22,11 +33,13 @@
 - 새 테이블에 RLS가 켜져 있고 정책이 있는지
 - `service_role` 키나 외부 API 키가 앱 코드 · `EXPO_PUBLIC_` 변수에 들어가지 않았는지
 - 테이블 · 칼럼 이름이 설계 문서와 같은지 (설계 문서가 레포에 있을 때)
+- 서버 함수(`supabase/functions/**`)는 `pr-review` 스킬의 `supabase-edge-check.md`로 봄
 
 ## 알람
 
 - 기상 시각 역산 · 알람 강도처럼 시각을 계산하는 로직이 바뀌었으면 테스트가 있는지
 - 시간대(Asia/Seoul), 자정 넘김, 반복 알람, 미루기 횟수 처리
+- 예약 · 폰 ↔ 서버 맞추기 · 울림 기록은 `pr-review` 스킬의 `alarm-scheduling-check.md`로 봄
 - 네이티브 알람 코드(Kotlin · 매니페스트)는 `pr-review` 스킬의 `android-native-check.md` 항목으로 봄
 
 ## 방향성 (스킬 Step 5a에서 읽을 곳)
@@ -75,4 +88,6 @@
 ## 보고
 
 - 한국어로, 심각도 순으로, 파일:줄을 붙여서
+- 첫 줄에 개수: "고칠 것 N · 확인 필요 N · 원래 있던 문제 N · 깊이 …". 없으면 "고칠 것 없음"
+- 스타일만의 지적(줄 바꿈 · 이름 취향 · 주석 말투)은 넣지 않음. 같은 종류는 한 줄에 위치를 모음. 이 PR이 만들지 않은 버그는 [원래 있던 문제]로 따로, 머지 판단에 넣지 않음
 - 순서: 한 줄 요약 → 머지 판단 → (기능 흐름 PR이면) 기능 흐름 · 판단 근거 → 방향성 → 발견 사항 → 자가 검수 → 건너뜀

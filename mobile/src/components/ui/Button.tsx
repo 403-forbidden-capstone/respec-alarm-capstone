@@ -11,13 +11,14 @@ type Props = {
   small?: boolean;
   disabled?: boolean;
   loading?: boolean; // 저장 중 — 글자 대신 돌아가는 표시, 누를 수 없음
+  selected?: boolean; // 켜고 끄는 단추로 쓸 때 지금 켜져 있는지 — 화면 읽기 도구에 알림 (모양은 variant로 따로 바꿈)
 };
 
 // 작은 버튼은 모양(38)은 그대로 두고 누르는 칸만 44로
 const SMALL_SLOP = { top: (size.touch - size.buttonSm) / 2, bottom: (size.touch - size.buttonSm) / 2, left: 4, right: 4 } as const;
 
 // 버튼 (.btn) — 한 화면의 주된 행동은 primary 하나
-export function Button({ label, onPress, variant = 'primary', small, disabled, loading }: Props) {
+export function Button({ label, onPress, variant = 'primary', small, disabled, loading, selected }: Props) {
   const blocked = disabled || loading;
   const filled = variant === 'primary' || variant === 'danger';
   return (
@@ -27,7 +28,7 @@ export function Button({ label, onPress, variant = 'primary', small, disabled, l
       hitSlop={small ? SMALL_SLOP : undefined}
       accessibilityRole="button"
       accessibilityLabel={label}
-      accessibilityState={{ disabled: blocked, busy: loading }}
+      accessibilityState={{ disabled: blocked, busy: loading, selected }}
       style={({ pressed }) => [
         styles.base,
         styles[variant],

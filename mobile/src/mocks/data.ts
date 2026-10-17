@@ -1,7 +1,7 @@
 // 목업 시나리오 데이터 — mockup.html의 고정 데이터 · initState를 옮김 (2025년 5월 22일 목요일, 10시 팀 주간회의 예시)
 // 화면은 이 폴더를 직접 읽지 않고 features/*/api.ts를 거침. 기능별로 실데이터가 붙으면 그 부분을 지움
 // 바꾼 값(알람 켜기 · 권한 등)은 앱을 다시 열 때까지만 남음
-import type { Importance, IntensityAxis, Level, Transport, WakePhase } from '@/features/alarm/types';
+import type { Importance, IntensityAxis, Level, RingKind, Transport, UserEditLog, WakePhase } from '@/features/alarm/types';
 import type { SuggestionStatus } from '@/features/records/types';
 import type { PermissionSet } from '@/features/social/types';
 
@@ -33,6 +33,8 @@ export const places = [
 
 // 이동 수단별 이동시간 배율 (대중교통 기준)
 export const transportFactor: Partial<Record<Transport, number>> = { TRANSIT: 1, CAR: 0.7, WALK: 1.6 };
+// 집이 아닌 곳에서 출발하면 집 기준 이동시간에 곱하는 값 — 시드 일정 a2(세종대학교 → 강남역 20분 = 집 기준 40분의 절반)와 같은 값. 실데이터는 길찾기가 출발 위치로 계산
+export const awayFromHomeFactor = 0.5;
 
 export type MockAppointment = {
   id: string;
@@ -48,10 +50,15 @@ export type MockAppointment = {
   prepMinutes: number;
   predictedPrepMinutes: number;
   importance: Importance;
-  repeatLabel: string;
+  recurrenceRule: string | null; // 반복 규칙 RRULE (appointments.recurrence_rule) — 없으면 반복 없음
   groupId: string | null;
   items: string[];
   withWake: boolean;
+  // 사용자가 직접 고른 값 (H03 · H05 확인 시트, D42 C) — 있으면 위의 자동 계산값보다 먼저 씀 (강도 intensityOverrides와 같은 규칙)
+  //   travelMinutes = 예상 이동, predictedPrepMinutes = 준비 시간(공통 P80 + 개인 보정 대신), times = 알람 시각
+  manual?: { travelMinutes?: number; predictedPrepMinutes?: number; times?: Partial<Record<RingKind, Date>> };
+  // 만든 알람 종류 (H05 알람 줄 · D46) — 없으면 계산된 알람 전부. 빈 목록 = 알람 없는 일정 (종류를 만들어 두고 끈 것과 다름)
+  kinds?: RingKind[];
 };
 
 export type MockGroup = { id: string; name: string; initial: string; members: string[]; since: string };
@@ -95,20 +102,25 @@ export const db = {
     {
       id: 'a1', title: '팀 주간회의', at: kst(22, 600), place: '세종대학교', origin: '집', transport: 'TRANSIT',
       travelMinutes: 50, travelSource: '길찾기 + 내 실측 3회', bufferMinutes: 10, beforePrepMinutes: 30, prepMinutes: 20,
-      predictedPrepMinutes: 60, importance: 'NORMAL', repeatLabel: '매주 목요일', groupId: 'cap', items: ['노트북', '회의 자료'], withWake: true,
+      predictedPrepMinutes: 60, importance: 'NORMAL', recurrenceRule: 'FREQ=WEEKLY;BYDAY=TH', groupId: 'cap', items: ['노트북', '회의 자료'], withWake: true,
     },
     {
       id: 'a2', title: '저녁약속', at: kst(22, 1080), place: '강남역 2번출구', origin: '세종대학교', transport: 'TRANSIT',
       travelMinutes: 20, travelSource: '길찾기', bufferMinutes: 5, beforePrepMinutes: 0, prepMinutes: 20,
-      predictedPrepMinutes: 25, importance: 'LOW', repeatLabel: '반복 없음', groupId: null, items: [], withWake: false,
+      predictedPrepMinutes: 25, importance: 'LOW', recurrenceRule: null, groupId: null, items: [], withWake: false,
     },
     {
       id: 'a3', title: '수업', at: kst(23, 540), place: '세종대학교', origin: '집', transport: 'TRANSIT',
       travelMinutes: 50, travelSource: '길찾기 + 내 실측 5회', bufferMinutes: 10, beforePrepMinutes: 10, prepMinutes: 20,
-      predictedPrepMinutes: 40, importance: 'NORMAL', repeatLabel: '매주 금요일', groupId: null, items: ['과제 출력물'], withWake: true,
+      predictedPrepMinutes: 40, importance: 'NORMAL', recurrenceRule: 'FREQ=WEEKLY;BYDAY=FR', groupId: null, items: ['과제 출력물'], withWake: true,
+    },
+    {
+      // 알람 없는 일정 — 일정은 있고 알람은 처음부터 만들지 않음 (H05에서 알람을 모두 끄고 저장한 것과 같은 모양)
+      id: 'a4', title: '치과 예약', at: kst(22, 930), place: '동네 치과', origin: '집', transport: 'TRANSIT',
+      travelMinutes: 20, travelSource: '길찾기', bufferMinutes: 10, beforePrepMinutes: 0, prepMinutes: 20,
+      predictedPrepMinutes: 25, importance: 'LOW', recurrenceRule: null, groupId: null, items: [], withWake: false, kinds: [],
     },
   ] as MockAppointment[],
-  plainSchedule: [{ at: kst(22, 930), title: '치과 예약' }], // 알람 없는 일정
   disabledAppointments: new Set<string>(),
   disabledKinds: new Set<string>(), // `${일정 id}:${종류}`
   intensityOverrides: {} as Record<string, Partial<Record<IntensityAxis, Level>>>,
@@ -127,6 +139,7 @@ export const db = {
   wakeConfirmations: {} as Record<string, { at: Date; how: 'self' | 'auto'; usage: number; recent: number }>, // 알람 id별 기상 확정 (그때 사용 시간 포함)
   snoozes: {} as Record<string, { at: Date; minutes: number }>, // 미룬 알람 id별 다시 울릴 시각 (H07 미루기 → H01 표시 · 취소)
   events: [] as { at: Date; label: string; source: string }[], // 오늘 실제로 일어난 일
+  editLogs: [] as UserEditLog[], // 사용자가 자동 값을 직접 고친 기록 (user_edit_logs) — 개인화에 쓸 자료
   journalWritten: false,
   todos: [
     { id: 't1', title: '노트북', day: 22, done: true },
