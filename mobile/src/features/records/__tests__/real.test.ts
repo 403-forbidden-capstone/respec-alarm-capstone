@@ -432,6 +432,27 @@ describe('S01 되돌리기 · 무시 · 다시 보기', () => {
     expect(calls.filter((c) => c.op !== 'select')).toHaveLength(0);
   });
 
+  it('배경음 제안은 이전 값이 비어 있어도(기본음이었음) 되돌릴 수 있음 — sound_key를 null로. 말소리 · 진동은 이전 값을 모르면 거절', async () => {
+    const soundApplied = (alarmPatch: Record<string, unknown> = { sound_key: 'theme_urgent' }) =>
+      suggestionRow({ suggestion_type: 'SOUND', status: 'APPLIED', current_value: null, suggested_value: 'theme_urgent', result_value: 'theme_urgent' }, alarmPatch);
+    suggestionDb(soundApplied());
+    await undoSuggestion(SUGGESTION_ID);
+    expect(onlyCalls('alarms', 'update')[0].payload).toEqual({ sound_key: null });
+    expect(onlyCalls('alarm_suggestions', 'update')[0].payload).toEqual({ status: 'PENDING', result_value: null });
+    expect(mockReconcile).toHaveBeenCalledWith({ alarmIds: ['alarm-1'] });
+
+    // 그 사이 직접 다시 고쳤으면 그 값을 지킴
+    resetFake();
+    suggestionDb(soundApplied({ sound_key: 'theme_calm' }));
+    await undoSuggestion(SUGGESTION_ID);
+    expect(onlyCalls('alarms', 'update')).toHaveLength(0);
+
+    resetFake();
+    suggestionDb(suggestionRow({ suggestion_type: 'INTENSITY', status: 'APPLIED', current_value: null, result_value: 'STRONG' }, { intensity: 'STRONG' }));
+    await expect(undoSuggestion(SUGGESTION_ID)).rejects.toThrow('이전 값을 알 수 없어 되돌릴 수 없어요');
+    expect(calls.filter((c) => c.op !== 'select')).toHaveLength(0);
+  });
+
   it('무시: 기다림 → 무시함 (얼마나 안 보여 줄지 suppress_until은 D24가 열려 있어 안 채움)', async () => {
     suggestionDb(suggestionRow());
     await ignoreSuggestion(SUGGESTION_ID);

@@ -318,12 +318,15 @@ export async function undoSuggestion(id: string) {
   if (found.status !== 'APPLIED' && found.status !== 'EDITED') throw new UserError('적용한 제안만 되돌릴 수 있어요');
   const alarm = found.alarms;
   if (!alarm) throw new UserError('바꿀 알람이 없어졌어요');
-  if (found.current_value == null) throw new UserError('이전 값을 알 수 없어 되돌릴 수 없어요');
   const type = found.suggestion_type;
+  const previous = found.current_value;
+  // 이전 값이 비어 있어도(null) 배경음은 "기본음이었다"는 뜻이라 되돌릴 수 있음 (alarms.sound_key는 null 허용). 말소리 · 진동은 DB가 늘 값을 가져서 비면 알 수 없음
+  if (previous == null && type !== 'SOUND') throw new UserError('이전 값을 알 수 없어 되돌릴 수 없어요');
 
   // 그 사이 알람 값을 직접 다시 고쳤다면 그 값을 지킴 (적용한 값 그대로일 때만 되돌림)
-  if (valueOf(alarm, SUGGESTION_KIND[type].column) === found.result_value && isApplicableValue(type, found.current_value)) {
-    await updateAlarm(userId, alarm.alarm_id, alarmPatch(type, found.current_value, false));
+  if (valueOf(alarm, SUGGESTION_KIND[type].column) === found.result_value) {
+    if (previous == null) await updateAlarm(userId, alarm.alarm_id, { sound_key: null });
+    else if (isApplicableValue(type, previous)) await updateAlarm(userId, alarm.alarm_id, alarmPatch(type, previous, false));
   }
   await updateSuggestion(userId, id, ['APPLIED', 'EDITED'], { status: 'PENDING', result_value: null });
   await syncPhone(alarm.alarm_id);
