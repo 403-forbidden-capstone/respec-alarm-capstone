@@ -11,11 +11,19 @@ import {
   PANEL_WIDTH,
   type Device,
 } from '@/dev/devices';
+import { DEV_TOOLS, modeBlock } from '@/dev/panelModel';
 import { SECTIONS } from '@/dev/screenList';
+import { useAuth } from '@/features/auth/AuthProvider';
+import { changeDataMode, goAfterRender } from '@/features/auth/DataModeToggle';
 import type { ScenarioTime } from '@/lib/clock';
+import { REAL_DATA_READY } from '@/lib/flags';
+import { canUseRealData, devLoginVisible, modeLocked, useMode } from '@/lib/mode';
+import { signOutAndCleanup } from '@/lib/session';
+import { useAction } from '@/lib/useAction';
 import { colors, radius } from '@/theme';
 
-// 웹 미리보기 왼쪽 패널 (DeviceFrame.web.tsx만 씀) — 기종 선택 · 화면 목록 · 시나리오 시각 · 세션 · 바로 가기
+// 웹 미리보기 왼쪽 패널 (DeviceFrame.web.tsx만 씀) — 데이터 모드 · 시나리오 시각 · 개발 도구 · 기종 선택 · 화면 목록 · 세션 · 바로 가기
+// 웹 미리보기는 개발 서버처럼 쓰므로 데이터 모드 전환 · 로그인 · 개발 화면(알람 테스트 등)은 /dev/screens까지 안 가고 여기서 바로
 
 type Props = {
   device: Device;
@@ -33,10 +41,14 @@ const TIMES = [
   ['evening', '전날 밤 21:00'],
 ] as const;
 
-const LINKS = [
-  ['/board', '개발 보드'],
-  ['/dev/ui', 'UI 부품'],
+// 데이터 모드 고르기 — 웹 기본이 가짜라 가짜가 왼쪽 (/dev/screens 토글은 실데이터가 왼쪽)
+const MODES = [
+  ['mock', '가짜 데이터'],
+  ['real', '실데이터'],
 ] as const;
+
+// 새 탭에서 여는 곳 — 프레임 안 화면(/dev/*)은 "개발 도구"에 있음
+const LINKS = [['/board', '개발 보드']] as const;
 
 // 이 앱이 localStorage에 쓰는 키 — 데이터 모드(respec.dataMode) · 로그인 세션(sb-). 기종 선택과 보드 · 결정 페이지 키는 남김
 const isSessionKey = (key: string) => key !== DEVICE_STORAGE_KEY && (key.startsWith('respec.') || key.startsWith('sb-'));
@@ -93,6 +105,30 @@ export function DevicePanel({ device, scale, onDevice, collapsed, onToggle, scen
         </Pressable>
       </View>
       <ScrollView contentContainerStyle={styles.body} showsVerticalScrollIndicator={false}>
+        <ModeBlock />
+
+        {canScenario ? (
+          <Block title="시나리오 시각" hint="가짜 데이터 · 5월 22일 목요일">
+            <Segmented options={TIMES} value={scenario} onChange={onScenario} />
+          </Block>
+        ) : null}
+
+        <Block title="개발 도구" hint="누르면 이 프레임 안에서 열림">
+          {DEV_TOOLS.map((tool) => (
+            <Pressable
+              key={tool.name}
+              onPress={() => router.push(tool.href)}
+              accessibilityRole="button"
+              style={({ pressed }) => [styles.item, pressed && styles.pressed]}
+            >
+              <Text variant="rowLabel">{tool.name}</Text>
+              <Text variant="caption" style={styles.note}>
+                {tool.note}
+              </Text>
+            </Pressable>
+          ))}
+        </Block>
+
         <Block title="기종" hint={`${device.width} × ${device.height} · 비율 ${Math.round(scale * 100)}%`}>
           {DEVICES.map((d) => {
             const on = d.id === device.id;
@@ -114,12 +150,6 @@ export function DevicePanel({ device, scale, onDevice, collapsed, onToggle, scen
             );
           })}
         </Block>
-
-        {canScenario ? (
-          <Block title="시나리오 시각" hint="가짜 데이터 · 5월 22일 목요일">
-            <Segmented options={TIMES} value={scenario} onChange={onScenario} />
-          </Block>
-        ) : null}
 
         <Block title="화면 목록" hint="누르면 이 프레임 안에서 열림">
           {SECTIONS.map((section) => (
@@ -173,6 +203,64 @@ export function DevicePanel({ device, scale, onDevice, collapsed, onToggle, scen
   );
 }
 
+// 데이터 모드 — /dev/screens 맨 위 토글과 같은 함수(changeDataMode)로 바꾸고, 실데이터면 로그인한 계정 · 로그아웃 / 로그인 전 이메일 로그인 길
+function ModeBlock() {
+  const { mode } = useMode();
+  const { session, profile } = useAuth();
+  const { busy, run } = useAction();
+  const block = modeBlock({
+    mode,
+    ready: REAL_DATA_READY,
+    canUseReal: canUseRealData,
+    locked: modeLocked,
+    devLogin: devLoginVisible,
+    signedIn: session != null,
+    email: session?.user.email ?? null,
+    nickname: profile?.nickname ?? null,
+  });
+  if (!block) return null;
+  const { account } = block;
+
+  // /dev/screens의 로그아웃 버튼과 같음 — 폰 알람 · 기록 정리까지 하는 signOutAndCleanup, 끝나면 로그인 화면으로
+  const logout = () =>
+    run(async () => {
+      await signOutAndCleanup();
+      toast('로그아웃했어요');
+      goAfterRender('/login');
+    }, '하지 못했어요');
+
+  return (
+    <Block title="데이터 모드" hint={mode === 'real' ? '로그인 · 서버 데이터' : '목업 시나리오'}>
+      <Segmented options={MODES} value={mode} onChange={changeDataMode} disabled={block.realDisabled ? ['real'] : undefined} />
+      {block.reason ? (
+        <Text variant="caption" style={styles.reason}>
+          {block.reason}
+        </Text>
+      ) : null}
+      {account.kind === 'signedIn' ? (
+        <View style={styles.account}>
+          <View style={styles.grow}>
+            <Text variant="rowLabel" numberOfLines={1}>
+              {account.label ?? '로그인됨'}
+            </Text>
+            {account.label ? <Text variant="caption">로그인됨</Text> : null}
+          </View>
+          <Button small variant="ghost" label="로그아웃" loading={busy} onPress={logout} />
+        </View>
+      ) : null}
+      {account.kind === 'signedOut' ? (
+        <View style={styles.account}>
+          <Text variant="rowLabel" tone="sub" style={styles.grow}>
+            로그인 전
+          </Text>
+          {/* 이메일 로그인 폼은 개발 메뉴(/dev/screens)에 있음 — 로그인 화면의 "개발 메뉴에서 이메일로 로그인"과 같은 길 */}
+          {account.devLogin ? <Button small variant="ghost" label="개발용 이메일 로그인" onPress={() => router.push('/dev/screens')} /> : null}
+        </View>
+      ) : null}
+    </Block>
+  );
+}
+
 function Block({ title, hint, children }: { title: string; hint?: string; children: ReactNode }) {
   return (
     <View style={styles.block}>
@@ -211,6 +299,9 @@ const styles = StyleSheet.create({
   itemOn: { backgroundColor: colors.chip },
   pressed: { backgroundColor: colors.chip },
   grow: { flex: 1 },
+  note: { flex: 1, textAlign: 'right' }, // 개발 도구 줄의 짧은 설명 — 이름 오른쪽에 붙고 길면 줄바꿈
+  reason: { marginTop: 2, marginHorizontal: 4 },
+  account: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 6, paddingHorizontal: 4 },
   id: { width: 30 },
   buttons: { flexDirection: 'row', gap: 8 },
 });
