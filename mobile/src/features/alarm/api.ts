@@ -635,6 +635,12 @@ export async function getWakeInProgress(): Promise<WakeCheck | null> {
   return check && !check.confirmed ? check : null;
 }
 
+// 앱이 앞에 올 때 — 최근 12시간에 끈 기상 알람 중 확정이 없는 것을 다시 판정해 조건을 채웠으면 확정 기록 (실데이터만 — 가짜 데이터는 시연 버튼으로 넘기므로 하지 않음). 새로 확정한 알람 id를 돌려줌
+export async function recheckRecentWakes(): Promise<string[]> {
+  if (isMock()) return [];
+  return real.recheckRecentWakes();
+}
+
 // 확인 알림 (H08) — 해제 뒤 10분 동안 조건을 못 채움 (시연: 알람만 끄고 다시 잠듦). at = 관찰이 끝난 시각. 실데이터는 #35 · #40
 export async function promptWake(alarmId: string, at: Date) {
   if (!isMock()) return real.promptWake();

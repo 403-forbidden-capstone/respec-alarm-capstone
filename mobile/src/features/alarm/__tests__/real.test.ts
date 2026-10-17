@@ -1242,4 +1242,121 @@ describe('기상 확인 (H08)', () => {
     await real.missWake();
     expect(mockCalls).toEqual([]);
   });
+
+  describe('recheckRecentWakes — 앱이 앞에 올 때 최근에 끈 기상 알람 중 확정이 없는 것을 다시 판정', () => {
+    const A = '00000000-0000-4000-8000-0000000000b1';
+    const B = '00000000-0000-4000-8000-0000000000b2';
+    const isFinder = (call: FakeCall) => call.columns?.includes('alarms!inner') === true; // 알람 종류를 임베드하는 쿼리 = 최근 해제 · 확정 찾기
+
+    // 알람마다 DISMISSED(해제 시각 오프셋 분) / 확정 여부. finder 쿼리는 모든 알람의 기록을, 알람별 쿼리는 그 알람의 기록을 줌
+    function setupRecheck(alarms: { id: string; dismissedAt: number; confirmedAt?: number }[]) {
+      const eventsOf = (id: string) => {
+        const a = alarms.find((x) => x.id === id)!;
+        return [
+          { event_type: 'DISMISSED', event_at: eventAt(a.dismissedAt) },
+          ...(a.confirmedAt == null ? [] : [{ event_type: 'WAKE_CONFIRMED', event_at: eventAt(a.confirmedAt), input_source: 'USAGE' }]),
+        ];
+      };
+      mockRoutes['alarm_events:select'] = (call) => {
+        if (isFinder(call)) {
+          return {
+            data: alarms.flatMap((a) => [
+              { alarm_id: a.id, event_type: 'DISMISSED', event_at: eventAt(a.dismissedAt), alarms: { alarm_type: 'WAKE' } },
+              ...(a.confirmedAt == null ? [] : [{ alarm_id: a.id, event_type: 'WAKE_CONFIRMED', event_at: eventAt(a.confirmedAt), alarms: { alarm_type: 'WAKE' } }]),
+            ]),
+          };
+        }
+        return { data: eventsOf(filterArgs(call, 'eq', 'alarm_id')?.[0] as string) };
+      };
+      mockRoutes['alarms:select'] = (call) => ({
+        data: { alarm_id: filterArgs(call, 'eq', 'alarm_id')?.[0], alarm_type: 'WAKE', appointment_participants: { appointments: { title: '팀 주간회의', group_id: null, groups: null } } },
+      });
+      mockRoutes['alarm_events:upsert'] = () => undefined;
+      mockRoutes['daily_records:select'] = () => ({ data: null });
+      mockRoutes['daily_records:insert'] = () => undefined;
+    }
+    const usedBothHalves = [
+      { startMillis: min(0.5), endMillis: min(1.5) },
+      { startMillis: min(6), endMillis: min(7) },
+    ];
+    const upserts = () => callsTo('alarm_events', 'upsert').map((c) => c.payload as { alarm_id: string; event_type: string; event_at: string; input_source: string; client_event_id: string });
+
+    it('앱을 안 연 사이에 10분이 지났고 조건을 채웠으면 확정(USAGE)을 기록 — 이미 확정한 알람은 건드리지 않음', async () => {
+      setupRecheck([
+        { id: A, dismissedAt: 0 },
+        { id: B, dismissedAt: -120, confirmedAt: -118 },
+      ]);
+      mockNow = new Date(min(90)); // 해제 한 시간 반 뒤 앱을 엶
+      mockCore.getUsageSpans.mockResolvedValue(usedBothHalves);
+      expect(await real.recheckRecentWakes()).toEqual([A]);
+      expect(upserts()).toEqual([
+        { user_id: 'user-1', alarm_id: A, event_type: 'WAKE_CONFIRMED', event_at: eventAt(1.5), client_event_id: expect.stringMatching(UUID), input_source: 'USAGE' },
+      ]);
+      expect(mockCore.getUsageSpans).toHaveBeenCalledTimes(1); // 확정한 B는 사용 구간을 읽지도 않음
+      expect(mockCore.getUsageSpans).toHaveBeenCalledWith(min(0), min(10));
+      expect(callsTo('daily_records', 'insert')).toHaveLength(1);
+    });
+
+    it('찾는 조건: 최근 12시간의 기상 알람 해제 · 확정 기록, 먼저 폰에 남은 기록을 올림', async () => {
+      setupRecheck([{ id: A, dismissedAt: 0 }]);
+      mockNow = new Date(min(90));
+      mockCore.getUsageSpans.mockResolvedValue([]);
+      await real.recheckRecentWakes();
+      const finder = mockCalls.find(isFinder)!;
+      expect(filterArgs(finder, 'in', 'event_type')).toEqual([['DISMISSED', 'WAKE_CONFIRMED']]);
+      expect(filterArgs(finder, 'eq', 'alarms.alarm_type')).toEqual(['WAKE']);
+      expect(filterArgs(finder, 'eq', 'user_id')).toEqual(['user-1']);
+      expect(filterArgs(finder, 'gte', 'event_at')).toEqual([new Date(min(90) - 12 * 60 * 60_000).toISOString()]);
+      expect(mockUploadEvents).toHaveBeenCalled();
+    });
+
+    it('조건을 못 채웠거나 아직 10분이 안 됐으면 아무것도 쓰지 않음 (확인 알림은 H08에서, 놓침은 서버 배치)', async () => {
+      setupRecheck([{ id: A, dismissedAt: 0 }]);
+      mockNow = new Date(min(90));
+      mockCore.getUsageSpans.mockResolvedValue([{ startMillis: min(0.2), endMillis: min(0.4) }]);
+      expect(await real.recheckRecentWakes()).toEqual([]);
+      mockNow = new Date(min(4)); // 해제 4분 뒤 — 관찰 중
+      mockCore.getUsageSpans.mockResolvedValue(usedBothHalves);
+      expect(await real.recheckRecentWakes()).toEqual([]);
+      mockCore.hasUsageAccess.mockResolvedValue(false); // 사용 정보 접근이 없으면 판정 못 함
+      mockNow = new Date(min(90));
+      expect(await real.recheckRecentWakes()).toEqual([]);
+      expect(upserts()).toEqual([]);
+    });
+
+    it('H08과 같은 확정 기록 — 번호가 같아서 H08에서 먼저 확정했거나 두 번 불려도 서버에는 한 줄만 남음', async () => {
+      setupRecheck([{ id: A, dismissedAt: 0 }]);
+      mockNow = new Date(min(90));
+      mockCore.getUsageSpans.mockResolvedValue(usedBothHalves);
+      await real.recheckRecentWakes();
+      await real.getWakeCheck(A); // H08을 열어도 같은 판정 · 같은 번호
+      await real.recheckRecentWakes();
+      const ids = upserts().map((u) => u.client_event_id);
+      expect(ids).toHaveLength(3);
+      expect(new Set(ids).size).toBe(1);
+    });
+
+    it('한 알람이 실패해도 다른 알람은 이어서 판정', async () => {
+      setupRecheck([
+        { id: A, dismissedAt: 0 },
+        { id: B, dismissedAt: 5 },
+      ]);
+      mockNow = new Date(min(90));
+      // 알람마다 해제 시각이 달라서, 어느 알람이든 해제 뒤 1분 · 6분쯤에 폰을 쓴 것으로
+      mockCore.getUsageSpans.mockImplementation(async (from: number) => [
+        { startMillis: from + 0.5 * 60_000, endMillis: from + 1.5 * 60_000 },
+        { startMillis: from + 6 * 60_000, endMillis: from + 7 * 60_000 },
+      ]);
+      let n = 0;
+      mockRoutes['alarm_events:upsert'] = () => (++n === 1 ? { error: { code: '', message: 'offline' } } : undefined);
+      const confirmed = await real.recheckRecentWakes();
+      expect(confirmed).toHaveLength(1); // 먼저 시도한 알람(가장 최근에 끈 B)이 실패하고 A는 확정
+      expect(upserts()).toHaveLength(2);
+    });
+
+    it('찾는 쿼리가 실패하면 던짐 (부르는 훅이 다음 기회에 다시 — 개발 중에만 로그)', async () => {
+      mockRoutes['alarm_events:select'] = () => ({ error: { code: '', message: 'offline' } });
+      await expect(real.recheckRecentWakes()).rejects.toMatchObject({ message: 'offline' });
+    });
+  });
 });

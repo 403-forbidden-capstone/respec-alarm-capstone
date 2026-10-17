@@ -285,6 +285,47 @@ export async function getWakeInProgress(): Promise<WakeCheck | null> {
   }
 }
 
+// 앱이 앞에 올 때 부름 (hooks/useWakeRecheck) — 최근 12시간에 끈 기상 알람 중 아직 확정이 없는 것을 H08과 같은 판정으로 다시 봄.
+//   알람을 끈 뒤 앱을 안 열었어도(7장 A "판정은 해제 10분 뒤에 나고") 열 때 OS가 보관한 사용 구간으로 같은 결과를 내서, 조건을 채웠으면 확정(USAGE)까지 기록
+//   — 판정 · 쓰기는 getWakeCheck와 같은 함수(evaluateWake · thetaReachedAt → settle)라 H08에서 먼저 확정했거나 두 번 불려도 기록은 한 번뿐 (고정 번호).
+//   조건을 못 채운 것은 아무것도 안 씀: 확인 알림 단계는 H08을 열어야 보이고, 놓침(MISSED)은 서버 배치가 기록함. 네이티브(알람 코어)가 해제 + 10분에 스스로 판정하는 길은 따로 정할 일 (docs/alarm-core.md)
+//   한 알람이 실패해도 다른 알람은 이어서 판정하고, 확정한 알람 id를 돌려줌
+const RECHECK_WINDOW_MS = 12 * 60 * MINUTE_MS;
+const RECHECK_LIMIT = 20;
+
+async function findUnconfirmedDismissedWakes(userId: string, windowMs: number): Promise<string[]> {
+  const since = new Date(now().getTime() - windowMs).toISOString();
+  const { data, error } = await supabase
+    .from('alarm_events')
+    .select('alarm_id, event_type, event_at, alarms!inner(alarm_type)')
+    .eq('user_id', userId)
+    .in('event_type', ['DISMISSED', 'WAKE_CONFIRMED'])
+    .eq('alarms.alarm_type', 'WAKE')
+    .gte('event_at', since)
+    .order('event_at', { ascending: false })
+    .limit(RECHECK_LIMIT * 5);
+  if (error) throw error;
+  const rows = data ?? [];
+  const confirmed = new Set(rows.filter((r) => r.event_type === 'WAKE_CONFIRMED').map((r) => r.alarm_id));
+  const dismissed = rows.filter((r) => r.event_type === 'DISMISSED').map((r) => r.alarm_id); // 최근에 끈 알람부터
+  return [...new Set(dismissed)].filter((id) => !confirmed.has(id)).slice(0, RECHECK_LIMIT);
+}
+
+export async function recheckRecentWakes(): Promise<string[]> {
+  await uploadEvents().catch(() => {}); // 방금 한 해제가 폰에 남아 있으면 먼저 올림 (확정 기록이 해제 기록보다 먼저 들어가지 않게)
+  const userId = await requireUserId();
+  const confirmedIds: string[] = [];
+  for (const id of await findUnconfirmedDismissedWakes(userId, RECHECK_WINDOW_MS)) {
+    try {
+      const check = await getWakeCheck(id);
+      if (check?.confirmed) confirmedIds.push(id);
+    } catch {
+      // 이 알람은 다음 기회에 — 다른 알람은 이어서
+    }
+  }
+  return confirmedIds;
+}
+
 // 확인 알림 · 놓침 단계는 시간과 사용 구간으로 정해지고(getWakeCheck), 놓침(MISSED)은 서버 배치가 기록함 — 앱이 따로 남길 것이 없음
 export async function promptWake(): Promise<void> {}
 export async function missWake(): Promise<void> {}

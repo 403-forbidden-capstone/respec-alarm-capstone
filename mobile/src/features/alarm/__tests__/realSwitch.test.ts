@@ -38,6 +38,7 @@ jest.mock('../real', () => {
     'dismissRing',
     'getWakeCheck',
     'getWakeInProgress',
+    'recheckRecentWakes',
     'promptWake',
     'missWake',
     'confirmWake',
@@ -102,6 +103,7 @@ describe('실데이터 모드: 알람 api 전부가 real.ts로 넘어감', () =>
     ['dismissRing', () => api.dismissRing('a1', at), 'dismissRing', []],
     ['getWakeCheck', () => api.getWakeCheck('a1'), 'getWakeCheck', ['a1']],
     ['getWakeInProgress', () => api.getWakeInProgress(), 'getWakeInProgress', []],
+    ['recheckRecentWakes', () => api.recheckRecentWakes(), 'recheckRecentWakes', []],
     ['promptWake', () => api.promptWake('a1', at), 'promptWake', []],
     ['missWake', () => api.missWake('a1', at), 'missWake', []],
     ['confirmWake', () => api.confirmWake('a1', 'self', at), 'confirmWake', ['a1', 'self']], // 판정 시각(가짜 시나리오 시각)은 실데이터에서 안 씀
@@ -130,6 +132,7 @@ describe('실데이터 모드: 알람 api 전부가 real.ts로 넘어감', () =>
     await api.listPlaces();
     await api.getSnooze();
     await api.getWakeInProgress();
+    await expect(api.recheckRecentWakes()).resolves.toEqual([]); // 가짜 모드는 시연 버튼으로 넘기므로 다시 판정하지 않음
     expect(mockReal).not.toHaveBeenCalled();
   });
 

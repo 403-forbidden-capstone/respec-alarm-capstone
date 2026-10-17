@@ -23,6 +23,14 @@ describe('고정 UUID (stableUuid)', () => {
     expect(stableUuid('1', 2)).not.toBe(stableUuid(1, '2')); // 글자 1과 숫자 1은 다른 입력
   });
 
+  // 네이티브(Kotlin)가 같은 번호를 만들 수 있게 docs/alarm-core.md "기록 번호 공식"에 공식을 적어 둠 — 공식이 바뀌면 이 값도 문서도 같이 바꿔야 함 (바뀌면 이미 올라간 기록과 번호가 달라져 중복 기록이 생김)
+  it('문서에 적은 공식 그대로의 값 (고정 시험값) — 네이티브가 같은 번호를 만들 수 있는지 맞춰 보는 기준', () => {
+    const alarmId = '00000000-0000-4000-8000-0000000000b1';
+    expect(stableUuid('wake-confirmed', alarmId, 1_747_897_200_000)).toBe('4b7f478f-5a2a-542a-92dc-9be071c05742'); // 입력 글자: ["wake-confirmed","00000000-0000-4000-8000-0000000000b1",1747897200000]
+    expect(stableUuid('wake-confirmed', alarmId, '2025-05-22')).toBe('9070d2b1-d569-5c26-acb3-e2e41be9c886');
+    expect(stableUuid('snooze-cancel-dismissed', alarmId, 1_747_897_200_000)).toBe('8ed95bc9-8f44-5f3c-9235-fc997bb707cb');
+  });
+
   it('많은 입력에서도 겹치지 않음', () => {
     const seen = new Set<string>();
     for (let i = 0; i < 5_000; i += 1) seen.add(stableUuid('wake-confirmed', `alarm-${i % 50}`, i));

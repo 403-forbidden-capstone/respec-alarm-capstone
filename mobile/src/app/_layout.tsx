@@ -8,6 +8,7 @@ import { useEffect } from 'react';
 import { DeviceFrame } from '@/components/dev/DeviceFrame';
 import { ConfirmHost, SheetHost, ToastHost } from '@/components/ui';
 import { useOneTapFollowUp } from '@/features/alarm/hooks/useOneTapFollowUp';
+import { useWakeRecheck } from '@/features/alarm/hooks/useWakeRecheck';
 import { AuthProvider, useAuth } from '@/features/auth/AuthProvider';
 import { ConfigErrorScreen } from '@/features/auth/ConfigErrorScreen';
 import { ProfileRetryScreen } from '@/features/auth/ProfileRetryScreen';
@@ -61,7 +62,12 @@ function RootStack() {
   useOneTapFollowUp();
 
   // 로그인한 동안 폰 예약 · 울림 기록을 서버와 맞춤 (로그인 직후 · 앱이 앞에 올 때, 실데이터 모드만) — lib/alarmSync
-  useAlarmSync({ active: enabled && ready && !loading && profileError == null, userId: session?.user.id ?? null, timeZone: profile?.timezone });
+  const syncActive = enabled && ready && !loading && profileError == null;
+  const userId = session?.user.id ?? null;
+  useAlarmSync({ active: syncActive, userId, timeZone: profile?.timezone });
+
+  // 같은 때에 최근에 끈 기상 알람 중 확정이 없는 것을 다시 판정 — 해제 뒤 앱을 안 열었어도 서버가 기상 미확인(MISSED)으로 적기 전에 확정되게
+  useWakeRecheck({ active: syncActive, userId });
 
   if (configError) return <ConfigErrorScreen />;
   if (loading) return null;
