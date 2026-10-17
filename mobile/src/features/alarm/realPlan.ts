@@ -34,6 +34,7 @@ import {
 import { loadDetail } from './realRows';
 import { mirrorArrive, syncPhone } from './realWrite';
 import { draftAt } from './schedule';
+import { TravelConfirmNeeded, travelFallbackOf } from './travelConfirm';
 import {
   ORIGIN_HOME,
   RING_KINDS,
@@ -198,7 +199,16 @@ export async function saveAlarmSettings(id: string, draft: AlarmSettingsDraft): 
   const lines: EditLogLine[] = settingsEdits(saved, draft, after);
   // 한 요청의 edits는 50줄까지 (서버 상한) — 이번 저장의 줄을 먼저 담고 남는 자리만큼 쌓아 둔 기록을 실음. 못 보낸 기록은 큐에 남아 다음 저장에
   const queued = peekEdits(id, MAX_EDITS_PER_REQUEST - lines.length);
-  const res = await callEdge<CommitResponse>('alarm-commit', settingsCommitBody(base, draft, toEditPayloads([...lines, ...queued].slice(0, MAX_EDITS_PER_REQUEST))), { timeoutMs: COMMIT_TIMEOUT_MS });
+  let res: CommitResponse;
+  try {
+    res = await callEdge<CommitResponse>('alarm-commit', settingsCommitBody(base, draft, toEditPayloads([...lines, ...queued].slice(0, MAX_EDITS_PER_REQUEST))), { timeoutMs: COMMIT_TIMEOUT_MS });
+  } catch (e) {
+    // 길찾기를 못 해 서버가 어림값만 가졌으면 저장을 멈추고 화면이 사용자에게 확인받게 함 (7장 7.1.2 "근사값은 사용자 확인 → MANUAL")
+    //   확인하면 화면이 그 분을 예상 이동(직접 입력)으로 넣어 다시 부름 → MANUAL로 저장. 이미 직접 입력한 값을 보냈는데도 같은 오류면 멈추지 않고 그대로 던짐(되풀이 방지)
+    const fallback = draft.travelMinutes == null ? travelFallbackOf(e) : null;
+    if (fallback) throw new TravelConfirmNeeded(fallback);
+    throw e;
+  }
   dropEdits(queued);
   forgetDetail(id);
 

@@ -8,6 +8,7 @@ import { recallDetail } from '../detailCache';
 import { resetAlarmMemory } from '../reset';
 import { clearEdits, peekEdits } from '../editQueue';
 import { forgetPlaces, lookupPlace } from '../places';
+import { TravelConfirmNeeded } from '../travelConfirm';
 import * as real from '../real';
 import { filterArgs, type FakeCall, type FakeResult } from '../testkit/fakeSupabase';
 import { defaultAlarms, type AlarmSettingsDraft, type AppointmentDraft, type Estimate } from '../types';
@@ -662,6 +663,60 @@ describe('알람 설정 미리 보기 · 저장 (H03)', () => {
 
     mockCallEdge.mockResolvedValueOnce(suggestion({ alarms: [], travel: { minutes: null, source: null, manual_required: true, needs_confirmation: true, note: null, auto_minutes: null } }));
     await expect(real.saveAlarmSettings('00000000-0000-4000-8000-0000000000a1', { ...same(detail), origin: '모르는 곳' })).rejects.toThrow('직접 입력');
+  });
+
+  describe('saveAlarmSettings: 길찾기를 못 해 서버가 어림값만 가졌을 때 (7장 7.1.2 "근사값은 사용자 확인 → MANUAL")', () => {
+    const A1 = '00000000-0000-4000-8000-0000000000a1';
+    const fallbackError = (source: string, minutes: number) =>
+      new EdgeError('ROUTE_UNAVAILABLE', { status: 502, details: { manual_required: true, fallback: { minutes, source, needs_confirmation: source === 'ESTIMATE', sample_count: null } } });
+
+    it('종류만 바꿔도 길찾기가 안 되면 저장하지 않고 확인을 요청 — 폰 예약은 안 건드리고 쌓인 고친 값 기록도 그대로', async () => {
+      const detail = await loaded();
+      mockRoutes['alarms:select'] = () => ({ data: [] });
+      await real.recordEdit({ screen: 'S01', field: 'scheduled_at', appointmentId: A1, alarmType: 'WAKE', autoValue: new Date(kst('08:00')), editedValue: new Date(kst('07:50')) });
+      mockCallEdge.mockRejectedValueOnce(fallbackError('ESTIMATE', 63.4));
+      const error = await real.saveAlarmSettings(A1, { ...same(detail), kinds: { WAKE: false, PREPARE: true, DEPARTURE: true } }).catch((e: unknown) => e);
+      expect(error).toBeInstanceOf(TravelConfirmNeeded);
+      expect(error).toBeInstanceOf(UserError);
+      expect(error).toMatchObject({ minutes: 63, source: 'ESTIMATE' });
+      expect(mockApplyCommit).not.toHaveBeenCalled();
+      expect(peekEdits(A1)).toHaveLength(1);
+    });
+
+    it('확인하면 그 분을 직접 입력(MANUAL)으로 다시 보내 저장 — 자동값과 같은 값이라 이동시간 고친 값 기록은 남기지 않음', async () => {
+      const detail = await loaded();
+      mockRoutes['alarms:select'] = () => ({ data: [] });
+      const draftOff = { ...same(detail), kinds: { WAKE: false, PREPARE: true, DEPARTURE: true } };
+      mockCallEdge.mockRejectedValueOnce(fallbackError('ESTIMATE', 63));
+      await expect(real.saveAlarmSettings(A1, draftOff)).rejects.toBeInstanceOf(TravelConfirmNeeded);
+
+      mockCallEdge.mockResolvedValueOnce(suggestion({ travel: { minutes: 63, source: 'MANUAL', manual_required: false, needs_confirmation: false, note: null, auto_minutes: 63 } }));
+      mockCallEdge.mockResolvedValueOnce(commitResponse());
+      await real.saveAlarmSettings(A1, { ...draftOff, travelMinutes: 63 });
+      expect(mockCallEdge.mock.calls.map(([name]) => name)).toEqual(['alarm-commit', 'alarm-suggest', 'alarm-commit']);
+      const body = mockCallEdge.mock.calls[2][1] as { participant: Record<string, unknown>; edits: unknown[] };
+      expect(body.participant).toMatchObject({ est_travel_minutes: 63, travel_source: 'MANUAL' });
+      expect(body.edits).toEqual([expect.objectContaining({ field: 'alarm_enabled' })]);
+      expect(mockApplyCommit).toHaveBeenCalledTimes(1);
+    });
+
+    it('내 지난 이동 기록 중앙값(CACHED)도 같은 길 — 출처를 화면에 알려 줌', async () => {
+      const detail = await loaded();
+      mockCallEdge.mockRejectedValueOnce(fallbackError('CACHED', 45));
+      await expect(real.saveAlarmSettings(A1, same(detail))).rejects.toMatchObject({ minutes: 45, source: 'CACHED' });
+    });
+
+    it('어림값이 없는 ROUTE_UNAVAILABLE(좌표도 없음)이나 이미 직접 입력한 값을 보냈는데 같은 오류면 확인을 되풀이하지 않고 그대로 던짐', async () => {
+      const detail = await loaded();
+      const noFallback = new EdgeError('ROUTE_UNAVAILABLE', { status: 502, details: { manual_required: true, fallback: null } });
+      mockCallEdge.mockRejectedValueOnce(noFallback);
+      await expect(real.saveAlarmSettings(A1, same(detail))).rejects.toBe(noFallback);
+
+      mockCallEdge.mockResolvedValueOnce(suggestion());
+      const again = fallbackError('ESTIMATE', 63);
+      mockCallEdge.mockRejectedValueOnce(again);
+      await expect(real.saveAlarmSettings(A1, { ...same(detail), travelMinutes: 40 })).rejects.toBe(again);
+    });
   });
 
   it('saveAlarmSettings: 종류를 모두 껐으면 turnedOff, 껐던 것을 다시 켜면 turnedOn', async () => {

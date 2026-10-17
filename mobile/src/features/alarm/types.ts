@@ -3,6 +3,8 @@
 import type { Weekday } from '@/lib/weekday';
 import type { Enums } from '@/types/database';
 
+import type { TravelProblem } from './travelConfirm';
+
 export type AlarmKind = Exclude<Enums<'alarm_type'>, 'ROUTINE'>; // 기상 · 준비 · 출발 · 도착
 export type Importance = Enums<'importance_level'>;
 export type Transport = Enums<'transport_type'>;
@@ -128,6 +130,8 @@ export type AlarmPreview = {
   autoTravelMinutes: number; // 출발 위치 · 이동 수단으로 다시 계산한 자동값
   predictedPrepMinutes: number; // 적용될 준비 시간
   autoPredictedPrepMinutes: number;
+  // 실데이터 전용 — 길찾기를 못 해 저장하면 이동시간 확인이 필요한 상태 (ESTIMATE = 직선거리 어림, CACHED = 내 지난 이동 중앙값) 또는 직접 입력이 필요한 상태 (좌표 없음). 없으면 문제 없음
+  travelProblem?: TravelProblem;
 };
 
 // 알람 설정(H03)에서 저장 전까지 들고 있는 값 — 저장할 때 한 번에 반영

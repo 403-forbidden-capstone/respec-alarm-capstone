@@ -11,6 +11,7 @@ import type { Weekday } from '@/lib/weekday';
 import { TRAVEL_SOURCE_LABEL } from './map';
 import { toPoint } from './places';
 import { repeatLabel, repeatToRrule } from './repeat';
+import type { TravelProblem } from './travelConfirm';
 import {
   MANUAL_SOURCE,
   ORIGIN_HOME,
@@ -271,6 +272,7 @@ const travelLabel = (source: TravelSourceCode | null): string => (source ? TRAVE
 export function toPreview(s: Suggestion, saved: AppointmentDetail, edits: AlarmEdits): AlarmPreview {
   const idOf = (kind: AlarmKind) => saved.alarms.find((x) => x.kind === kind)?.id ?? `${saved.id}:${kind}`;
   const travelMinutes = s.travel.minutes ?? edits.travelMinutes ?? saved.travelMinutes;
+  const problem = travelProblemOf(s);
   return {
     alarms: s.travel.manual_required && !s.alarms.length ? saved.alarms : suggestionAlarms(s, idOf),
     travelMinutes,
@@ -278,7 +280,15 @@ export function toPreview(s: Suggestion, saved: AppointmentDetail, edits: AlarmE
     autoTravelMinutes: s.travel.auto_minutes ?? s.travel.minutes ?? saved.auto.travelMinutes,
     predictedPrepMinutes: s.prepare.minutes,
     autoPredictedPrepMinutes: saved.auto.predictedPrepMinutes,
+    ...(problem ? { travelProblem: problem } : {}),
   };
+}
+
+// 길찾기 값(API)이나 직접 입력(MANUAL)이 아니라 저장하면 확인이 필요하거나, 아예 이동시간을 못 구한 미리 보기 (travelConfirm.ts)
+//   저장은 alarm-commit이 정함(길찾기가 다시 되면 확인 없이 저장될 수도 있음) — 여기는 H03 화면에 미리 알려 주는 용도
+export function travelProblemOf(s: Pick<Suggestion, 'travel'>): TravelProblem | null {
+  if (s.travel.manual_required) return 'MANUAL_REQUIRED';
+  return s.travel.source === 'ESTIMATE' || s.travel.source === 'CACHED' ? s.travel.source : null;
 }
 
 // 새 일정 계산 결과 (H05 확인 시트). 아직 저장 전이라 일정 id · 알람 id는 자리 값

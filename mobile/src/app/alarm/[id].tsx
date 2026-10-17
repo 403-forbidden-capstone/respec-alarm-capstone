@@ -12,6 +12,7 @@ import { TextLink } from '@/features/alarm/components/TextLink';
 import { TimeButton } from '@/features/alarm/components/TimeButton';
 import { TimeSheet } from '@/features/alarm/components/TimePicker';
 import { changedAlarms, ringingKinds, type AlarmChange } from '@/features/alarm/schedule';
+import { TRAVEL_CONFIRM_EDIT, TRAVEL_CONFIRM_OK, TRAVEL_PROBLEM_NOTE, TravelConfirmNeeded, travelConfirmMessage, type TravelFallback } from '@/features/alarm/travelConfirm';
 import {
   AXES,
   IMPORTANCE_LABEL,
@@ -90,6 +91,7 @@ function Detail({ appointment: a, reload }: { appointment: AppointmentDetail; re
   const [levels, setLevels] = useState(() => savedLevels(a));
   const [preview, setPreview] = useState<AlarmPreview>(() => savedPreview(a));
   const [changes, setChanges] = useState<AlarmChange[] | null>(null); // 확인 시트에 보여 줄 바뀌는 알람
+  const [travelConfirm, setTravelConfirm] = useState<TravelFallback | null>(null); // 길찾기를 못 해 어림값을 확인받는 시트 (실데이터)
   const [pickKind, setPickKind] = useState<RingKind | null>(null); // 시각을 고르는 시트가 열린 알람
   const { data: places } = useLoad(listPlaces);
   const { busy, run } = useAction();
@@ -133,10 +135,25 @@ function Detail({ appointment: a, reload }: { appointment: AppointmentDetail; re
   const base = addMinutes(a.at, -(edits.bufferMinutes + travel + prepare));
   const picking = pickKind ? preview.alarms.find((x) => x.kind === pickKind) : undefined;
 
-  async function apply() {
-    const moved = timeInputsChanged(edits, a.edits);
-    const { turnedOff, turnedOn } = await saveAlarmSettings(a.id, { ...edits, kinds, levels });
+  // travelMinutes = 확인 시트에서 사용자가 확인한 어림 이동시간 — 예상 이동에 직접 입력한 값으로 넣어 저장(MANUAL)
+  async function apply(travelMinutes?: number) {
+    const draft = { ...edits, ...(travelMinutes != null ? { travelMinutes } : {}), kinds, levels };
+    const moved = timeInputsChanged(draft, a.edits);
+    let result: Awaited<ReturnType<typeof saveAlarmSettings>>;
+    try {
+      result = await saveAlarmSettings(a.id, draft);
+    } catch (e) {
+      // 길찾기를 못 해 서버가 어림값만 가졌음 — 저장하지 않고 이 값으로 할지 물음 (알람 시각 확인 시트가 떠 있었으면 닫고)
+      if (e instanceof TravelConfirmNeeded) {
+        setChanges(null);
+        setTravelConfirm({ minutes: e.minutes, source: e.source });
+        return;
+      }
+      throw e;
+    }
+    const { turnedOff, turnedOn } = result;
     setChanges(null);
+    setTravelConfirm(null);
     toast(
       turnedOff
         ? '알람을 모두 꺼서 이 일정 알람이 꺼졌어요'
@@ -166,7 +183,20 @@ function Detail({ appointment: a, reload }: { appointment: AppointmentDetail; re
 
   // 확인 시트 "바꾸기" — 저장과 같은 잠금으로 연타를 막음
   function confirmApply() {
-    void run(apply, '저장하지 못했어요');
+    void run(() => apply(), '저장하지 못했어요');
+  }
+
+  // 이동시간 확인 시트 "이 값으로 저장" — 보여 준 분을 예상 이동(직접 입력)으로 넣어 저장
+  function confirmTravel() {
+    if (!travelConfirm) return;
+    const { minutes } = travelConfirm;
+    void run(() => apply(minutes), '저장하지 못했어요');
+  }
+
+  // "예상 이동을 직접 고칠게요" · 바깥 누름 — 저장하지 않고 닫음. 예상 이동 칸에는 미리 보기의 같은 값이 보여서 거기서 고치면 됨
+  function editTravel() {
+    if (busy) return;
+    setTravelConfirm(null);
   }
 
   // 시트 "그대로 두기" · 바깥 누름 — 알람 시각을 밀어 움직이는 입력만 되돌림 (D34). 직접 고른 알람 시각은 그대로
@@ -228,6 +258,12 @@ function Detail({ appointment: a, reload }: { appointment: AppointmentDetail; re
             <View />
           )}
         </View>
+        {/* 길찾기를 못 한 미리 보기 (실데이터) — 직접 입력한 값이 있으면 문제가 아님 */}
+        {edits.travelMinutes == null && preview.travelProblem ? (
+          <Text variant="caption" tone="warn" style={styles.note} accessibilityLiveRegion="polite">
+            {TRAVEL_PROBLEM_NOTE[preview.travelProblem]}
+          </Text>
+        ) : null}
       </Card>
 
       <Card>
@@ -375,7 +411,7 @@ function Detail({ appointment: a, reload }: { appointment: AppointmentDetail; re
       </Card>
 
       <View style={styles.stack}>
-        <Button label="저장" onPress={save} disabled={!dirty || blocked != null} loading={busy && changes == null} />
+        <Button label="저장" onPress={save} disabled={!dirty || blocked != null} loading={busy && changes == null && travelConfirm == null} />
       </View>
 
       {/* 알람 시각 직접 고르기 — 기상을 옮기면 준비도 같은 간격으로 따라옴 */}
@@ -390,6 +426,17 @@ function Detail({ appointment: a, reload }: { appointment: AppointmentDetail; re
         note={pickKind === 'WAKE' && preview.alarms.some((x) => x.kind === 'PREPARE') ? '준비 알람도 같은 만큼 같이 움직여요' : undefined}
         error={blocked ?? undefined}
       />
+
+      {/* 길찾기를 못 해 어림값만 있을 때 — 사용자가 확인한 값만 직접 입력(MANUAL)으로 저장 (7장 7.1.2) */}
+      <Sheet visible={travelConfirm != null} onClose={editTravel} title="이동시간을 확인해 주세요">
+        <Text variant="small" tone="sub">
+          {travelConfirm ? travelConfirmMessage(travelConfirm) : ''}
+        </Text>
+        <View style={styles.stack}>
+          <Button label={TRAVEL_CONFIRM_OK} onPress={confirmTravel} loading={busy} />
+          <Button label={TRAVEL_CONFIRM_EDIT} variant="ghost" onPress={editTravel} />
+        </View>
+      </Sheet>
 
       {/* 알람 시각이 바뀌는 저장이면 바뀌는 알람을 전부 보여 주고 한 번 더 물음 */}
       <Sheet visible={changes != null} onClose={keep} title="알람 시각이 바뀌어요">
