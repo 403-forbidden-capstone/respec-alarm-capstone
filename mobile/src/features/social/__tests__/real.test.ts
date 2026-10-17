@@ -512,6 +512,45 @@ describe('G04 공유받은 알람', () => {
     expect(mockCallEdge).toHaveBeenCalledWith('notify', expect.objectContaining({ kind: 'ALARM_CHANGED', targetUserId: SUYEON, body: "나(데모)님이 '팀 주간회의' 알람을 5분 앞당겼어요" }));
   });
 
+  describe('앞당기기 — 옮긴 시각이 지금 + 5분(서버 PAST_GRACE_MINUTES)보다 이르게 되면 거절', () => {
+    // 지금 = 2026-10-19T12:00Z. 기상 알람이 지금 + wakeMin분, 준비는 + 10분 뒤, 출발은 + 90분 뒤
+    const near = (wakeMin: number, over: Record<string, unknown> = {}) => {
+      const at = (min: number) => new Date(Date.parse('2026-10-19T12:00:00.000Z') + min * 60_000).toISOString();
+      const list = [alarmRow('w1', 'WAKE', at(wakeMin), over), alarmRow('p1', 'PREPARE', at(wakeMin + 10)), alarmRow('d1', 'DEPARTURE', at(wakeMin + 90)), alarmRow('a1', 'ARRIVE', at(wakeMin + 180))];
+      mockFake.answerRpc('get_shared_alarm_appointments', ok(list.map((a) => ap(a.alarm_id))));
+      mockFake.answer('alarms.select', ok(list));
+      mockFake.answer('alarms.update', ok([{ alarm_id: 'x' }]));
+    };
+
+    it('5분 앞당기면 지금 + 5분 안쪽이 되는 켜진 알람이 있으면 아무것도 쓰지 않고 이유를 알림', async () => {
+      near(8); // 기상이 8분 뒤 -> 3분 뒤가 됨
+      await expect(real.shiftSharedAlarm(SUYEON, 'ap1', -5)).rejects.toThrow(new UserError('곧 울릴 알람이라 앞당길 수 없어요'));
+      expect(mockFake.opsOf('alarms', 'update')).toHaveLength(0);
+      expect(mockCallEdge).not.toHaveBeenCalled();
+    });
+
+    it('딱 지금 + 5분이 되는 것은 허용 (서버는 지금 + 5분보다 앞인 것만 지난 것으로 봄)', async () => {
+      near(10); // 10분 뒤 -> 정확히 5분 뒤
+      mockCallEdge.mockResolvedValue({ sent: 1 });
+      await expect(real.shiftSharedAlarm(SUYEON, 'ap1', -5)).resolves.toEqual({ notified: true });
+      expect(mockFake.opsOf('alarms', 'update')).toHaveLength(3);
+    });
+
+    it('이미 지난 알람이나 꺼 둔 알람은 걸리지 않음 — 지난 기상은 그대로 두고 나머지만 앞당길 수 있음', async () => {
+      near(-30); // 기상은 30분 전에 지났고 준비는 20분 전, 출발은 60분 뒤
+      mockCallEdge.mockResolvedValue({ sent: 0 });
+      await expect(real.shiftSharedAlarm(SUYEON, 'ap1', -5)).resolves.toEqual({ notified: false });
+      near(8, { is_enabled: false }); // 곧 울릴 수 있어도 꺼 둔 알람
+      await expect(real.shiftSharedAlarm(SUYEON, 'ap1', -5)).resolves.toBeDefined();
+    });
+
+    it('늦추기는 검사하지 않음', async () => {
+      near(1);
+      mockCallEdge.mockResolvedValue({ sent: 1 });
+      await expect(real.shiftSharedAlarm(SUYEON, 'ap1', 5)).resolves.toEqual({ notified: true });
+    });
+  });
+
   it('늦추기는 +분으로 옮기고, 알림이 안 가면 notified: false', async () => {
     shareSetup();
     mockFake.answer('alarms.update', ok([{ alarm_id: 'x' }]));

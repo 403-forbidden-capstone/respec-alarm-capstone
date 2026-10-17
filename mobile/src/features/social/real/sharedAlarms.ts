@@ -5,6 +5,7 @@
 //   쓰기: 켜기 · 끄기 · ±5분은 상대 알람을 DB에 직접 (설정 권한 EDIT_ALARM이면 RLS가 허용). 카드 하나(약속의 기상 · 준비 · 출발)가 한 번에 움직임
 //         켤 때는 아직 안 지난 알람만 켬 (내 알람 realWrite와 같은 규칙) — 지난 기상 알람을 켜면 서버 배치(wake-check)가 울린 적 없는 알람을 기상 미확인(MISSED)으로 기록하고 주인 폰은 걸지도 않음
 //         ±5분은 시각을 사용자가 직접 정한 것이라 time_source = MANUAL로 같이 씀 — 안 그러면 주인이 그 약속을 다시 저장할 때 alarm-commit이 자동 시각으로 덮음
+//         앞당길 때는 옮긴 시각이 지금 + 5분(서버 PAST_GRACE_MINUTES)보다 이르게 되는 켜진 알람이 있으면 거절 — 주인 폰에서는 지난 시각이라 걸리지 않고(기존 예약이 지워짐) 서버에는 켜진 지난 알람이 남음
 //   바꾼 뒤 주인에게 notify(ALARM_CHANGED). 푸시가 실패해도 저장은 되돌리지 않고 화면은 조용히 "바꿨어요"만 (푸시 토큰 등록은 Q12 — 붙이기 전엔 대부분 안 감)
 //   주인 폰의 예약은 주인 앱이 푸시를 받거나 다시 켜질 때 맞춤(lib/alarmSync reconcile) — 내 폰에서 걸지 않음
 //   변경 기록(getShareLog)은 DB에 저장 자리가 없음(D9 · 스키마 보완 3): 이번에 앱을 연 동안 내가 바꾼 것만 메모리에 둠 (D20 열림 — 가짜 데이터와 같은 뜻)
@@ -15,6 +16,7 @@ import { UserError } from '@/lib/errors';
 import { startOfDay } from '@/lib/format';
 import { supabase } from '@/lib/supabase';
 import { requireUserId } from '@/lib/user';
+import { PAST_GRACE_MINUTES } from '@shared/calc/validate.ts';
 
 import { groupSharedCards, shareTags, toMemberAlarm, upcomingCards, type SharedAlarmRow, type SharedApptRow, type SharedCard } from '../map';
 import { personOf, profileOf, receivedFrom, receivedRows, type Snapshot } from '../snapshot';
@@ -78,6 +80,7 @@ async function loadCard(ownerId: string, cardId: string): Promise<SharedCard> {
 }
 
 const NO_EDIT = '이 알람을 바꿀 권한이 없어요';
+const TOO_SOON = '곧 울릴 알람이라 앞당길 수 없어요';
 const NOTHING_TO_TURN_ON = '켤 수 있는 알람이 없어요. 이미 지난 알람이거나 지워졌을 수 있어요'; // 내 알람(realWrite)과 같은 문구
 const BODY_TITLE_MAX = 40; // notify의 body는 서버가 200자까지 (supabase/functions/_shared/notify.ts) — 약속 제목은 100자까지라 줄여서 넣음
 const NOTIFY_TIMEOUT_MS = 8_000; // 알림은 덤이라 오래 기다리지 않음 (저장은 이미 끝남)
@@ -129,6 +132,16 @@ export async function setSharedAlarmEnabled(personId: string, cardId: string, en
 export async function shiftSharedAlarm(personId: string, cardId: string, minutes: number): Promise<SharedChangeResult> {
   const s = await loadSnapshot();
   const card = await loadCard(personId, cardId);
+  // 앞당기면 아직 안 지난 켜진 알람이 지금 + 5분 안쪽으로 들어오는지 — 이미 지난 알람은 더 지나도 바뀌는 게 없고, 늦출 때는 해당 없음
+  if (minutes < 0) {
+    const nowMs = now().getTime();
+    const limit = nowMs + PAST_GRACE_MINUTES * 60_000;
+    const tooSoon = card.alarms.some((a) => {
+      const at = dbTimeMs(a.scheduled_at);
+      return a.is_enabled && at >= nowMs && at + minutes * 60_000 < limit;
+    });
+    if (tooSoon) throw new UserError(TOO_SOON);
+  }
   const done: SharedAlarmRow[] = [];
   try {
     for (const alarm of card.alarms) {
