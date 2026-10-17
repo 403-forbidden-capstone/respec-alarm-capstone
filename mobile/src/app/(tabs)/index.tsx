@@ -116,8 +116,10 @@ export default function HomeScreen() {
     if (!ok) return;
     // 실데이터에서는 폰 예약을 못 지울 수 있어(네이티브 오류) run으로 — 두 번 누름 막기 · 실패 토스트
     await run(async () => {
-      await cancelSnooze(snooze.alarmId);
+      const { wakeCheck } = await cancelSnooze(snooze.alarmId);
       toast('미루기를 취소했어요');
+      // 기상 알람의 미루기 취소는 해제로 기록됨(실데이터) — 알람을 끈 것과 같게 기상 확인으로 이어감
+      if (wakeCheck) router.push({ pathname: '/wake', params: { alarm: snooze.alarmId } });
       await reload();
     }, '미루기를 취소하지 못했어요');
   }

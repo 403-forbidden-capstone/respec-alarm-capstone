@@ -16,7 +16,7 @@ import { supabase } from '@/lib/supabase';
 import { requireUserId } from '@/lib/user';
 
 import { STANDALONE_TITLE } from './map';
-import { WAKE_OBSERVE_MINUTES, type RingInfo, type Snooze, type WakeCheck } from './types';
+import { WAKE_OBSERVE_MINUTES, type CancelSnoozeResult, type RingInfo, type Snooze, type WakeCheck } from './types';
 import { evaluateWake, pickDismissedAt, thetaReachedAt, WAKE_PROMPT_WINDOW_MINUTES, WAKE_THETA_MINUTES, type UseSpan } from './wake';
 
 // 폰 미루기는 10분 고정 (docs/alarm-core.md, 고르기는 D3 뒤)
@@ -59,8 +59,30 @@ export async function getSnooze(): Promise<Snooze | null> {
 }
 
 // 미루기 취소 (H01) — 폰의 예약을 지움. 서버 알람은 그대로지만 시각이 이미 지나 다시 걸리지 않음
-export async function cancelSnooze(alarmId: string): Promise<void> {
+//   기상 알람이면 "미루기를 취소 = 이제 직접 일어남"이라 해제로 봄 (작성자 판단 — 되돌리기 쉬움): 폰 예약만 지우면 코어가 해제 기록을 안 남겨
+//   H08 판정이 시작되지 않고 서버가 약 49분 뒤 놓침(MISSED)으로 적음. 그래서 그 알람의 DISMISSED(입력 출처 MANUAL)를 남기고 기상 확인으로 이어가게 알림
+//   순서: 기록 → 폰 예약 지우기. 기록이 막히면(오프라인) 예약을 그대로 두어 알람이 다시 울리게 하고 던짐 — 반대 순서면 예약만 지워진 채 판정이 영영 없음
+//   기록 번호는 그 알람의 그 회차(처음 예약 시각)로 정한 고정 값이라, 지우기가 중간에 끊겨 다시 눌러도 한 줄만 남음. 기상이 아닌 알람은 지금대로 예약만 지움
+export async function cancelSnooze(alarmId: string): Promise<CancelSnoozeResult> {
+  const scheduled = (await AlarmCore.list()).find((a) => a.id === alarmId);
+  const wake = scheduled?.type === 'WAKE';
+  if (scheduled && wake) {
+    const userId = await requireUserId();
+    const { error } = await supabase.from('alarm_events').upsert(
+      {
+        user_id: userId,
+        alarm_id: alarmId,
+        event_type: 'DISMISSED',
+        event_at: now().toISOString(),
+        client_event_id: stableUuid('snooze-cancel-dismissed', alarmId, scheduled.atMillis),
+        input_source: 'MANUAL',
+      },
+      { onConflict: 'client_event_id', ignoreDuplicates: true },
+    );
+    if (error) throw error;
+  }
   await AlarmCore.cancel(alarmId);
+  return { wakeCheck: wake };
 }
 
 // ---------------------------------------------------------------------------

@@ -811,6 +811,84 @@ describe('울림 (H07) — 알람 코어로 잇거나 실데이터에서는 열 
     mockCore.list.mockResolvedValue([]);
     expect(await real.getSnooze()).toBeNull();
   });
+
+  describe('cancelSnooze — 기상 알람의 미루기 취소는 해제로 기록 (H01 -> H08)', () => {
+    const WAKE_ID = '00000000-0000-4000-8000-0000000000b1';
+    const first = Date.parse(kst('08:00'));
+    const waiting = (type: string, atMillis = first) => ({ id: WAKE_ID, type, title: '팀 주간회의', atMillis, snoozeCount: 1, nextRingAt: first + 10 * 60_000 });
+
+    it('기상 알람: DISMISSED(MANUAL)를 먼저 남기고 폰 예약을 지운 뒤 기상 확인으로 이어가라고 알림', async () => {
+      mockNow = new Date(Date.parse(kst('08:05')));
+      mockCore.list.mockResolvedValue([waiting('WAKE')]);
+      const order: string[] = [];
+      mockCore.cancel.mockImplementation(async () => {
+        order.push('cancel');
+      });
+      mockRoutes['alarm_events:upsert'] = () => {
+        order.push('record');
+        return undefined;
+      };
+      expect(await real.cancelSnooze(WAKE_ID)).toEqual({ wakeCheck: true });
+      expect(order).toEqual(['record', 'cancel']);
+      const [recorded] = callsTo('alarm_events', 'upsert');
+      expect(recorded.payload).toEqual({
+        user_id: 'user-1',
+        alarm_id: WAKE_ID,
+        event_type: 'DISMISSED',
+        event_at: new Date(Date.parse(kst('08:05'))).toISOString(),
+        client_event_id: expect.stringMatching(UUID),
+        input_source: 'MANUAL',
+      });
+      expect(recorded.options).toEqual({ onConflict: 'client_event_id', ignoreDuplicates: true });
+      expect(mockCore.cancel).toHaveBeenCalledWith(WAKE_ID);
+    });
+
+    it('기록 번호는 그 알람의 그 회차로 정한 고정 값 — 다시 눌러도 같고, 다음 회차(처음 예약 시각이 다름)는 다름', async () => {
+      mockCore.list.mockResolvedValue([waiting('WAKE')]);
+      await real.cancelSnooze(WAKE_ID);
+      await real.cancelSnooze(WAKE_ID);
+      mockCore.list.mockResolvedValue([waiting('WAKE', first + 24 * 3_600_000)]);
+      await real.cancelSnooze(WAKE_ID);
+      const ids = callsTo('alarm_events', 'upsert').map((c) => (c.payload as { client_event_id: string }).client_event_id);
+      expect(ids[0]).toBe(ids[1]);
+      expect(ids[2]).not.toBe(ids[0]);
+    });
+
+    it('기록이 막히면(오프라인) 폰 예약을 그대로 두고 던짐 — 알람이 다시 울리고 다시 누를 수 있음', async () => {
+      mockCore.list.mockResolvedValue([waiting('WAKE')]);
+      mockRoutes['alarm_events:upsert'] = () => ({ error: { code: '', message: 'offline' } });
+      await expect(real.cancelSnooze(WAKE_ID)).rejects.toMatchObject({ message: 'offline' });
+      expect(mockCore.cancel).not.toHaveBeenCalled();
+    });
+
+    it('기록은 됐는데 폰 예약 지우기가 실패하면 던짐 — 다시 누르면 같은 번호라 기록은 한 줄', async () => {
+      mockCore.list.mockResolvedValue([waiting('WAKE')]);
+      mockCore.cancel.mockRejectedValueOnce(new Error('native'));
+      await expect(real.cancelSnooze(WAKE_ID)).rejects.toThrow('native');
+      await expect(real.cancelSnooze(WAKE_ID)).resolves.toEqual({ wakeCheck: true });
+      const ids = callsTo('alarm_events', 'upsert').map((c) => (c.payload as { client_event_id: string }).client_event_id);
+      expect(new Set(ids).size).toBe(1);
+    });
+
+    it('기상이 아닌 알람이거나 폰 목록에 없으면 지금대로 예약만 지움 — 기록 없음, 기상 확인으로 이어가지 않음', async () => {
+      mockCore.list.mockResolvedValue([waiting('PREPARE')]);
+      expect(await real.cancelSnooze(WAKE_ID)).toEqual({ wakeCheck: false });
+      mockCore.list.mockResolvedValue([]);
+      expect(await real.cancelSnooze(WAKE_ID)).toEqual({ wakeCheck: false });
+      expect(mockCore.cancel).toHaveBeenCalledTimes(2);
+      expect(callsTo('alarm_events', 'upsert')).toEqual([]);
+    });
+
+    it('이 해제 기록으로 H08 판정이 시작됨 (취소한 시각부터 관찰 10분)', async () => {
+      const cancelledAt = Date.parse(kst('08:05'));
+      mockRoutes['alarms:select'] = () => ({ data: { alarm_id: WAKE_ID, alarm_type: 'WAKE', appointment_participants: { appointments: { title: '팀 주간회의', group_id: null, groups: null } } } });
+      mockRoutes['alarm_events:select'] = () => ({ data: [{ event_type: 'DISMISSED', event_at: new Date(cancelledAt).toISOString(), input_source: 'MANUAL' }] });
+      mockNow = new Date(cancelledAt + 2 * 60_000);
+      const check = await real.getWakeCheck(WAKE_ID);
+      expect(check).toMatchObject({ phase: 'observing', confirmed: null });
+      expect(check?.dismissedAt.getTime()).toBe(cancelledAt);
+    });
+  });
 });
 
 describe('기상 확인 (H08)', () => {

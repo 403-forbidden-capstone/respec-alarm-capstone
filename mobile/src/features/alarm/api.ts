@@ -24,6 +24,7 @@ import {
   type AlarmKind,
   type AlarmPreview,
   type AlarmSettingsDraft,
+  type CancelSnoozeResult,
   type EditLogField,
   type Appointment,
   type AppointmentDetail,
@@ -573,9 +574,11 @@ export async function getSnooze(): Promise<Snooze | null> {
 }
 
 // 미루기 취소 (H01) — 다시 울리지 않음. 실데이터는 알람 코어의 미루기 예약 취소
-export async function cancelSnooze(alarmId: string) {
+// 돌려주는 wakeCheck = 기상 알람의 미루기를 취소해 해제로 기록했으니 기상 확인(H08)으로 이어가라는 뜻 (실데이터만 — 가짜 데이터는 지금처럼 늘 false)
+export async function cancelSnooze(alarmId: string): Promise<CancelSnoozeResult> {
   if (!isMock()) return real.cancelSnooze(alarmId);
   delete db.snoozes[alarmId];
+  return { wakeCheck: false };
 }
 
 // 알람 해제 (H07) — at = 실제로 끈 시각(울린 시각). 기상 알람이면 기상 판정(관찰 중)을 시작

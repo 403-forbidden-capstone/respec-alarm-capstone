@@ -141,6 +141,9 @@ export type NextAlarm = { appointment: Appointment; alarm: AlarmTime };
 // 미룬 알람 (H01) — 다시 울릴 때까지 홈에 보이고 취소할 수 있음
 export type Snooze = { alarmId: string; kind: RingKind; appointmentTitle: string; at: Date; minutes: number };
 
+// 미루기 취소의 결과 — wakeCheck = 기상 알람의 미루기를 취소해 해제로 기록했으니 기상 확인(H08)으로 이어가야 함 (실데이터만, 가짜 데이터는 늘 false)
+export type CancelSnoozeResult = { wakeCheck: boolean };
+
 // 장소 — 가짜 데이터는 이름 + 집 기준 이동시간, 실데이터(place-search)는 이름 + 주소 + 좌표 (좌표가 있어야 길찾기가 됨)
 export type Place = { name: string; travelMinutes?: number; address?: string; lat?: number; lng?: number };
 
