@@ -46,11 +46,11 @@ const PERMISSION_NOTE =
   "꺼짐이 있으면 설정 → 앱 → 특별한 앱 접근에서 '알람 및 리마인더' · '전체 화면 알림' · '사용 정보 접근'을 켜 주세요. (폰마다 이름이 조금 다름)";
 
 const KINDS: { type: AlarmType; label: string }[] = [
-  { type: 'WAKE', label: '기상 (소리 + 잠금화면)' },
-  { type: 'PREPARE', label: '준비 시작 (무음 알림)' },
-  { type: 'DEPARTURE', label: '출발 (무음 알림)' },
-  { type: 'ARRIVE', label: '도착 (무음 알림)' },
-  { type: 'ROUTINE', label: '루틴 (무음 알림)' },
+  { type: 'WAKE', label: '기상 (알람음 + 진동 + 잠금화면)' },
+  { type: 'PREPARE', label: '준비 시작 (일반 알림)' },
+  { type: 'DEPARTURE', label: '출발 (일반 알림)' },
+  { type: 'ARRIVE', label: '도착 (일반 알림)' },
+  { type: 'ROUTINE', label: '루틴 (일반 알림)' },
 ];
 
 const INTENSITIES: { value: AlarmIntensity; label: string }[] = [
@@ -218,8 +218,8 @@ export default function AlarmTestScreen() {
         <Text style={styles.title}>알람 테스트 (개발용)</Text>
         <Text style={styles.body}>
           예약 → 화면 끄기 → 울리는지 확인. 기상 알람은 해제 또는 10분 미루기. 안 끄면 3분 뒤 멈췄다가 쉬고 다시
-          울림 (약 5분 쉬고 1번 · 보통 5분씩 쉬고 2번 · 강 3분씩 쉬고 3번). 소리 없는 알림은 버튼 하나(준비 시작 · 출발했어요 ·
-          도착했어요 · 했어요)를 누르면 기록만 남음.
+          울림 (약 5분 쉬고 1번 · 보통 5분씩 쉬고 2번 · 강 3분씩 쉬고 3번). 준비 · 출발 · 도착 · 루틴은 보통 알림(알림음 ·
+          진동 한 번)이고, 버튼 하나(준비 시작 · 출발했어요 · 도착했어요 · 했어요)를 누르면 기록만 남음.
         </Text>
 
         {!isAvailable ? (

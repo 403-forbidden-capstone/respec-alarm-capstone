@@ -67,7 +67,7 @@
       }
     },
     {
-      "name": "준비 시작 — 무음 알림 + 원탭 (강도 · 볼륨 보정은 안 씀)",
+      "name": "준비 시작 — 보통 알림 + 원탭 (강도 · 볼륨 보정은 안 씀)",
       "input": { "type": "PREPARE", "intensity": "STRONG", "volumeAdjust": -0.5 },
       "plan": {
         "sound": false,
@@ -112,7 +112,7 @@
       }
     },
     {
-      "name": "루틴 — 소리 없음 (alarm-core.md 소리 줄, 7장 7.4.1과 다른 점은 문서 보완 목록)",
+      "name": "루틴 — 알람음 없음, 보통 알림 (alarm-core.md 소리 줄, 7장 7.4.1과 다른 점은 문서 보완 목록)",
       "input": { "type": "ROUTINE", "intensity": "SOFT" },
       "plan": {
         "sound": false,
@@ -140,7 +140,7 @@
     { "name": "약: 5분 쉬고 1번 (마지막 울림이 끝나기까지 11분)", "type": "WAKE", "intensity": "SOFT", "firstRingAt": 1000000, "starts": [1000000, 1480000], "silenceGapsMillis": [300000], "unansweredSpanMillis": 660000 },
     { "name": "보통: 5분씩 쉬고 2번 (19분)", "type": "WAKE", "intensity": "NORMAL", "firstRingAt": 1000000, "starts": [1000000, 1480000, 1960000], "silenceGapsMillis": [300000, 300000], "unansweredSpanMillis": 1140000 },
     { "name": "강: 3분씩 쉬고 3번 (21분)", "type": "WAKE", "intensity": "STRONG", "firstRingAt": 1000000, "starts": [1000000, 1360000, 1720000, 2080000], "silenceGapsMillis": [180000, 180000, 180000], "unansweredSpanMillis": 1260000 },
-    { "name": "무음 알림은 다시 울림 없음", "type": "PREPARE", "intensity": "STRONG", "firstRingAt": 1000000, "starts": [1000000], "silenceGapsMillis": [], "unansweredSpanMillis": 0 }
+    { "name": "보통 알림은 다시 울림 없음", "type": "PREPARE", "intensity": "STRONG", "firstRingAt": 1000000, "starts": [1000000], "silenceGapsMillis": [], "unansweredSpanMillis": 0 }
   ],
   "snooze": [
     { "name": "미루면 10분 뒤 (강도와 상관없음, D3 전까지 고정)", "intensity": "NORMAL", "nowMillis": 1000, "nextRingAt": 601000 },

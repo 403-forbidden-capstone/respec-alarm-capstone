@@ -29,7 +29,7 @@ export type RingPackage = {
   snoozeLimit: number;
   /** 음성 안내 문장 (나중, D8) — 저장만 하고 아직 안 읽음 */
   voiceText?: string;
-  /** 소리 고르기. 폰에 든 소리가 하나뿐이라 지금은 모르는 값이면 기본 소리 */
+  /** 소리 고르기. 지금은 어떤 값이든 기본 소리(폰 기본 알람음). 앱에 든 소리가 늘면 그 키는 앱 파일을 먼저 틂 */
   soundKey?: string;
   /** 평가 보정 비율. -0.1 = 볼륨 10% 줄임 (#81, volumeAdjust.ts) */
   volumeAdjust?: number;
@@ -45,22 +45,22 @@ export type OneTapEventType = 'ACKNOWLEDGED' | 'ARRIVAL_CONFIRMED';
 
 /** 울림 계획 — 공통(TS)이 계산하고 네이티브는 받은 대로만 실행함 (plan.ts) */
 export type RingPlan = {
-  /** true = 소리 + 잠금화면 위 알람 화면(WAKE), false = 소리 없는 알림 + 원탭 버튼 */
+  /** true = 알람음 + 계속 진동 + 잠금화면 위 알람 화면(WAKE), false = 보통 알림(알림음 · 진동 한 번) + 원탭 버튼 */
   sound: boolean;
-  /** 알람 볼륨 최대치의 몇 % (소리 알람만, 평가 보정까지 반영, 10~100). 무음이면 0 */
+  /** 알람 볼륨 최대치의 몇 % (알람음이 나는 알람만, 평가 보정까지 반영, 10~100). 보통 알림이면 0 */
   volumePercent: number;
   soundKey: string;
-  /** 한 번 울리는 최대 시간 (ms). 무음이면 0 */
+  /** 한 번 울리는 최대 시간 (ms). 보통 알림이면 0 */
   maxRingMillis: number;
   /** 안 끄면 다시 울리는 시각 — 첫 울림 시작으로부터의 거리(ms). 비어 있으면 다시 울림 없음 */
   reRingOffsetsMillis: number[];
-  /** 미루기 시간 (ms). 무음이면 0 */
+  /** 미루기 시간 (ms). 보통 알림이면 0 */
   snoozeMillis: number;
   /** 알림 · 알람 화면에 쓰는 한 줄 (예: "일어날 시간이에요") */
   heading: string;
-  /** 무음 알림의 원탭 버튼 글자. 소리 알람이면 null */
+  /** 보통 알림의 원탭 버튼 글자. 알람음이 나는 알람이면 null */
   oneTapLabel: string | null;
-  /** 원탭을 누르면 남기는 기록 종류. 소리 알람이면 null */
+  /** 원탭을 누르면 남기는 기록 종류. 알람음이 나는 알람이면 null */
   oneTapEventType: OneTapEventType | null;
 };
 

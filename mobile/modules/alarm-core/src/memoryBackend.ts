@@ -57,7 +57,7 @@ export function createMemoryBackend(now: () => number = Date.now): AlarmBackend 
     },
     async stop() {},
     async ringNow(pkg) {
-      record(pkg, 'TRIGGERED'); // 소리는 안 나지만 "울렸다"는 기록은 남겨서 기록 흐름을 확인할 수 있게
+      record(pkg, 'TRIGGERED'); // 소리 · 진동은 안 나지만 "울렸다"는 기록은 남겨서 기록 흐름을 확인할 수 있게
     },
     async canScheduleExactAlarms() {
       return false;
