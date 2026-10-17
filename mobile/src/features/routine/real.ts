@@ -223,18 +223,20 @@ export async function getRoutine(id: string, sourceJournal?: string): Promise<Ro
   return loadRoutine(userId, id);
 }
 
-// 단계 알람을 켜 둔 단계마다 alarms(ROUTINE) 한 줄 — 처음 울릴 시각만 (반복의 다음 회차는 서버 배치 몫, D4). 이미 있는 단계는 시각만 고치고, 없어진 단계는 지움
-//   반환: 폰에 맞춰야 할 알람 id (새로 만든 것 · 고친 것 · 지운 것)
-async function syncStepAlarms(userId: string, routineId: string, routine: Routine, from: Date): Promise<string[]> {
-  const existing = await supabase.from('alarms').select('alarm_id, step_order').eq('user_id', userId).eq('routine_id', routineId);
+// 단계 알람을 켜 둔 단계마다 alarms(ROUTINE) 한 줄 — 처음 울릴 시각만 (반복의 다음 회차는 서버 배치 몫, D4). 이미 있는 단계는 시각만 고치고, 없어진 단계는 끔
+//   없어진 단계 알람(루틴을 끄거나 단계 · 알람을 뺌)은 지우지 않고 is_enabled를 끔: 알람을 지우면 그 알람의 울림 · 확인 기록(alarm_events)이 같이 사라짐 (on delete cascade).
+//   단계를 다시 켜면 아래 갱신 길이 같은 줄(루틴 · 단계 번호가 하나뿐인 alarms_routine_step_key)을 다시 켜므로 번호가 겹쳐 새로 못 만드는 일은 없음
+//   touched = 폰에 맞춰야 할 알람 id (이미 있던 것 · 새로 만든 것) — 중간에 실패해도 그때까지 알게 된 id를 부른 쪽이 폰에 맞출 수 있게 밖에서 받음
+async function syncStepAlarms(userId: string, routineId: string, routine: Routine, from: Date, touched: Set<string>): Promise<void> {
+  const existing = await supabase.from('alarms').select('alarm_id, step_order, is_enabled').eq('user_id', userId).eq('routine_id', routineId);
   if (existing.error) throw existing.error;
   const rows = existing.data ?? [];
   const wanted = routine.active ? planRoutineAlarms(routine, from) : []; // 꺼 둔 루틴은 알람을 걸지 않음
-  const touched = rows.map((r) => r.alarm_id);
+  for (const r of rows) touched.add(r.alarm_id);
 
-  const stale = rows.filter((r) => !wanted.some((w) => w.stepOrder === r.step_order));
+  const stale = rows.filter((r) => r.is_enabled && !wanted.some((w) => w.stepOrder === r.step_order));
   if (stale.length) {
-    const { error } = await supabase.from('alarms').delete().eq('user_id', userId).in('alarm_id', stale.map((r) => r.alarm_id));
+    const { error } = await supabase.from('alarms').update({ is_enabled: false }).eq('user_id', userId).in('alarm_id', stale.map((r) => r.alarm_id));
     if (error) throw error;
   }
   const created: { user_id: string; routine_id: string; step_order: number; alarm_type: 'ROUTINE'; scheduled_at: string; is_enabled: boolean }[] = [];
@@ -250,9 +252,8 @@ async function syncStepAlarms(userId: string, routineId: string, routine: Routin
   if (created.length) {
     const { data, error } = await supabase.from('alarms').insert(created).select('alarm_id');
     if (error) throw error;
-    touched.push(...(data ?? []).map((a) => a.alarm_id));
+    for (const a of data ?? []) touched.add(a.alarm_id);
   }
-  return touched;
 }
 
 // 루틴 저장 — routines 한 줄 + 단계 알람 + (제안에서 왔으면) 그 일기의 제안을 수락으로. 저장이 끝나면 바뀐 알람만 폰에 맞춤
@@ -286,9 +287,10 @@ export async function saveRoutine(routine: Routine): Promise<Routine> {
     id = data.routine_id;
   }
 
-  let alarmIds: string[];
+  // 폰에 맞출 알람 — 성공이든 중간에 실패하든 마지막에 맞춤 (알람 몇 개만 바뀐 채 실패하면 폰이 서버와 달라지므로). 실패는 삼킴: 저장 결과(성공 · 원래 오류)를 가리지 않고, 앱이 앞에 올 때 다시 맞춤
+  const touched = new Set<string>();
   try {
-    alarmIds = await syncStepAlarms(userId, id, draft, now());
+    await syncStepAlarms(userId, id, draft, now(), touched);
     if (journalId) {
       const { error } = await supabase.from('daily_journals').update({ suggestion_status: 'APPLIED' }).eq('user_id', userId).eq('journal_id', journalId);
       if (error) throw error;
@@ -296,14 +298,13 @@ export async function saveRoutine(routine: Routine): Promise<Routine> {
   } catch (e) {
     if (created) await supabase.from('routines').delete().eq('user_id', userId).eq('routine_id', id); // 알람도 같이 지워짐 (ON DELETE CASCADE)
     throw e;
-  }
-
-  // 저장은 끝났으니 폰 맞추기가 실패해도 화면에는 성공으로 — 앱이 앞에 올 때 다시 맞춤
-  if (alarmIds.length) {
-    try {
-      await reconcile({ alarmIds });
-    } catch (e) {
-      if (__DEV__) console.warn('[routine] 폰 예약 맞추기 실패', e);
+  } finally {
+    if (touched.size) {
+      try {
+        await reconcile({ alarmIds: [...touched] });
+      } catch (e) {
+        if (__DEV__) console.warn('[routine] 폰 예약 맞추기 실패', e);
+      }
     }
   }
   return { ...draft, id };

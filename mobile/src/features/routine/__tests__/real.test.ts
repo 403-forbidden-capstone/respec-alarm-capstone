@@ -278,7 +278,7 @@ describe('A04 루틴 저장', () => {
     sourceJournal: '2026-10-14',
     ...patch,
   });
-  const saveDb = (existingAlarms: { alarm_id: string; step_order: number }[] = [], extra?: (c: FakeCall) => FakeReply | undefined) =>
+  const saveDb = (existingAlarms: { alarm_id: string; step_order: number; is_enabled?: boolean }[] = [], extra?: (c: FakeCall) => FakeReply | undefined) =>
     reply((c) => {
       const custom = extra?.(c);
       if (custom) return custom;
@@ -335,10 +335,10 @@ describe('A04 루틴 저장', () => {
     expect(onlyCalls('daily_journals')).toHaveLength(0);
   });
 
-  it('이미 있는 루틴 고치기: 시각이 바뀐 알람은 고치고, 없어진 단계 알람은 지우고, 새 단계 알람은 만듦', async () => {
+  it('이미 있는 루틴 고치기: 시각이 바뀐 알람은 고치고, 없어진 단계 알람은 끄고(지우지 않음), 새 단계 알람은 만듦', async () => {
     saveDb([
-      { alarm_id: 'old-1', step_order: 1 },
-      { alarm_id: 'old-2', step_order: 2 }, // 이제 알람 없는 단계
+      { alarm_id: 'old-1', step_order: 1, is_enabled: true },
+      { alarm_id: 'old-2', step_order: 2, is_enabled: true }, // 이제 알람 없는 단계
     ]);
     const saved = await saveRoutine(draft({ id: ROUTINE_ID, sourceJournal: null }));
     expect(saved.id).toBe(ROUTINE_ID);
@@ -347,20 +347,42 @@ describe('A04 루틴 저장', () => {
     expect([filterOf(update, 'eq', 'routine_id')?.[1], filterOf(update, 'eq', 'user_id')?.[1]]).toEqual([ROUTINE_ID, 'user-1']);
     expect(update.payload).not.toHaveProperty('source_journal_id'); // 어느 일기에서 왔는지는 바꾸지 않음
 
-    expect(filterOf(onlyCalls('alarms', 'delete')[0], 'in', 'alarm_id')?.[1]).toEqual(['old-2']);
-    const alarmUpdate = onlyCalls('alarms', 'update')[0];
+    expect(onlyCalls('alarms', 'delete')).toHaveLength(0); // 지우면 그 알람의 울림 · 확인 기록(alarm_events)이 같이 사라짐
+    const [turnOff, alarmUpdate] = onlyCalls('alarms', 'update');
+    expect(turnOff.payload).toEqual({ is_enabled: false });
+    expect(filterOf(turnOff, 'in', 'alarm_id')?.[1]).toEqual(['old-2']);
+    expect(filterOf(turnOff, 'eq', 'user_id')?.[1]).toBe('user-1');
     expect(alarmUpdate.payload).toMatchObject({ scheduled_at: '2026-10-21T12:30:00.000Z', is_enabled: true });
     expect(filterOf(alarmUpdate, 'eq', 'alarm_id')?.[1]).toBe('old-1');
     expect(onlyCalls('alarms', 'insert')[0].payload).toEqual([expect.objectContaining({ step_order: 3, routine_id: ROUTINE_ID })]);
     expect(mockReconcile).toHaveBeenCalledWith({ alarmIds: ['old-1', 'old-2', 'new-1'] });
   });
 
-  it('꺼 둔 루틴이면 단계 알람을 모두 지우고 걸지 않음 (지운 알람은 폰에서도 빼도록 맞춤)', async () => {
-    saveDb([{ alarm_id: 'old-1', step_order: 1 }]);
+  it('꺼 둔 루틴이면 단계 알람을 모두 끄고(지우지 않음) 걸지 않음 (끈 알람은 폰에서도 빼도록 맞춤)', async () => {
+    saveDb([{ alarm_id: 'old-1', step_order: 1, is_enabled: true }]);
     await saveRoutine(draft({ id: ROUTINE_ID, sourceJournal: null, active: false }));
-    expect(filterOf(onlyCalls('alarms', 'delete')[0], 'in', 'alarm_id')?.[1]).toEqual(['old-1']);
+    expect(onlyCalls('alarms', 'delete')).toHaveLength(0);
+    const turnOff = onlyCalls('alarms', 'update')[0];
+    expect([turnOff.payload, filterOf(turnOff, 'in', 'alarm_id')?.[1]]).toEqual([{ is_enabled: false }, ['old-1']]);
     expect(onlyCalls('alarms', 'insert')).toHaveLength(0);
     expect(mockReconcile).toHaveBeenCalledWith({ alarmIds: ['old-1'] });
+  });
+
+  it('이미 꺼 둔 단계 알람은 다시 끄지 않고, 그 단계를 다시 켜면 새로 만들지 않고 같은 줄을 켬 (루틴 · 단계 번호는 하나뿐이라 겹치면 오류)', async () => {
+    saveDb([
+      { alarm_id: 'off-1', step_order: 1, is_enabled: false },
+      { alarm_id: 'off-3', step_order: 3, is_enabled: false },
+      { alarm_id: 'off-7', step_order: 7, is_enabled: false }, // 지금은 없는 단계 번호 — 이미 꺼져 있으니 그대로
+    ]);
+    await saveRoutine(draft({ id: ROUTINE_ID, sourceJournal: null }));
+    const updates = onlyCalls('alarms', 'update');
+    expect(updates.filter((u) => (u.payload as { is_enabled?: boolean }).is_enabled === false)).toHaveLength(0);
+    expect(updates.map((u) => [filterOf(u, 'eq', 'alarm_id')?.[1], (u.payload as { is_enabled: boolean }).is_enabled])).toEqual([
+      ['off-1', true],
+      ['off-3', true],
+    ]);
+    expect(onlyCalls('alarms', 'insert')).toHaveLength(0);
+    expect(mockReconcile).toHaveBeenCalledWith({ alarmIds: ['off-1', 'off-3', 'off-7'] });
   });
 
   it('날짜가 아닌 일기 표시는 일기 없이 저장한 것으로 (DB 날짜 오류를 부르지 않음)', async () => {
@@ -394,6 +416,22 @@ describe('A04 루틴 저장', () => {
     resetFake();
     saveDb([], (c) => (c.table === 'routines' && c.op === 'update' ? { data: [] } : undefined));
     await expect(saveRoutine(draft({ id: ROUTINE_ID }))).rejects.toThrow('루틴을 찾을 수 없어요');
+  });
+
+  it('저장이 중간에 실패해도 그때까지 알게 된 알람(기존 + 새로 만든 것)은 폰에 맞추고, 맞추기가 실패해도 원래 오류를 던짐', async () => {
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    // 기존 알람 하나를 고치고 새 알람을 만든 뒤 일기 제안 수락이 실패
+    saveDb([{ alarm_id: 'old-1', step_order: 1, is_enabled: true }], (c) => (c.table === 'daily_journals' && c.op === 'update' ? { error: { message: 'rls' } } : undefined));
+    await expect(saveRoutine(draft({ id: ROUTINE_ID }))).rejects.toMatchObject({ message: 'rls' });
+    expect(mockReconcile).toHaveBeenCalledWith({ alarmIds: ['old-1', 'new-1'] });
+
+    mockReconcile.mockReset();
+    mockReconcile.mockRejectedValue(new Error('read failed'));
+    resetFake();
+    saveDb([{ alarm_id: 'old-1', step_order: 1, is_enabled: true }], (c) => (c.table === 'alarms' && c.op === 'insert' ? { error: { message: 'insert failed' } } : undefined));
+    await expect(saveRoutine(draft({ id: ROUTINE_ID, sourceJournal: null }))).rejects.toMatchObject({ message: 'insert failed' });
+    expect(mockReconcile).toHaveBeenCalledWith({ alarmIds: ['old-1'] });
+    warn.mockRestore();
   });
 
   it('폰 맞추기가 실패해도 저장은 성공으로', async () => {
