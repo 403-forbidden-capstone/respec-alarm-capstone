@@ -57,7 +57,7 @@ const HEADING: Record<AlarmType, string> = {
   ROUTINE: '루틴 할 시간이에요',
 };
 
-// 소리 없는 알림의 원탭 — alarm-core.md 소리 줄 · screen-data-map H07:
+// 일정 알림(알림음 · 진동 한 번)의 원탭 — alarm-core.md 소리 줄 · screen-data-map H07:
 //   준비 시작 · 출발 · 루틴 단계 = ACKNOWLEDGED, 도착 = ARRIVAL_CONFIRMED
 const ONE_TAP: Record<Exclude<AlarmType, 'WAKE'>, { label: string; eventType: OneTapEventType }> = {
   PREPARE: { label: '준비 시작', eventType: 'ACKNOWLEDGED' },
@@ -93,7 +93,7 @@ export function buildRingPlan(
   }
   const oneTap = ONE_TAP[pkg.type];
   return {
-    sound: false,
+    sound: false, // 알람음 없음 — 보통 알림(알림음 · 진동 한 번)
     volumePercent: 0,
     soundKey,
     maxRingMillis: 0,

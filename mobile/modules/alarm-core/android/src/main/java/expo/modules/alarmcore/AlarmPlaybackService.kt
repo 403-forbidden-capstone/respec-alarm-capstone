@@ -18,9 +18,14 @@ import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.os.PowerManager
+import android.os.VibrationAttributes
+import android.os.VibrationEffect
+import android.os.Vibrator
+import android.os.VibratorManager
+import android.util.Log
 import androidx.core.app.NotificationCompat
 
-// WAKE 알람이 울리는 동안 도는 포그라운드 서비스: 알람 볼륨 스트림으로 소리를 틀고, 잠금화면 위 화면을 띄움
+// WAKE 알람이 울리는 동안 도는 포그라운드 서비스: 알람 볼륨 스트림으로 소리를 틀고, 계속 진동하고, 잠금화면 위 화면을 띄움
 // 볼륨 · 한 번 울리는 최대 시간 · 소리는 알람 저장소의 울림 계획(RingPlan)대로. 다시 울림은 AlarmController가 미리 걸어 둠
 class AlarmPlaybackService : Service() {
   companion object {
@@ -38,8 +43,16 @@ class AlarmPlaybackService : Service() {
     // 웨이크락은 최대 울림 시간보다 1분 길게 잡음 (보통은 그 전에 onDestroy에서 풀림)
     private const val WAKE_LOCK_EXTRA_MILLIS = 60 * 1000L
 
-    // 폰에 든 소리 (res/raw). 소리 키를 더 만들면 여기에 더함. 모르는 키는 기본 소리
-    private val SOUND_RESOURCES = mapOf("default" to R.raw.alarm_siren)
+    private const val TAG = "AlarmCore"
+
+    // 기본 소리 키. 이 키(와 모르는 키)는 폰의 기본 알람음을 먼저 틀고, 우리 앱 파일은 그 다음 예비
+    private const val DEFAULT_SOUND_KEY = "default"
+
+    // 앱에 든 소리 (res/raw). 소리 키를 더 만들면 여기에 더함. 기본이 아닌 키는 이 파일을 먼저 틀음 (Q7)
+    private val SOUND_RESOURCES = mapOf(DEFAULT_SOUND_KEY to R.raw.alarm_siren)
+
+    // 울리는 동안 반복하는 진동 박자 (켜짐 · 꺼짐 ms, 앞의 0은 바로 시작). 시계 앱처럼 일정하게. 강도별로 나누지 않음 (D1 열림)
+    private val VIBRATION_PATTERN = longArrayOf(0, 500, 500)
 
     // 지금 울리는 알람 id. 안 울리면 null
     @Volatile
@@ -84,10 +97,11 @@ class AlarmPlaybackService : Service() {
     .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
     .build()
 
-  // 아직 안 틀어 본 알람음 (우리 알람음 → 폰 기본 알람음 순). 재생 도중 오류가 나면 다음 것으로 넘어감
+  // 아직 안 틀어 본 알람음 (기본 소리 키면 폰 기본 알람음 → 우리 알람음 → 폰 기본 벨소리 · 알림음 순). 재생 도중 오류가 나면 다음 것으로 넘어감
   private var remainingSounds: MutableList<Uri> = mutableListOf()
 
   private var mediaPlayer: MediaPlayer? = null
+  private var vibrator: Vibrator? = null
   private var audioManager: AudioManager? = null
   private var audioFocusRequest: AudioFocusRequest? = null
 
@@ -252,28 +266,51 @@ class AlarmPlaybackService : Service() {
     runCatching { requestAudioFocus(audioAttributes) }
     runCatching { setAlarmVolume(alarm.plan.volumePercent) }
     val started = runCatching {
-      // 우리 알람음이 안 되면 폰 기본 알람음으로 (무음으로 끝나지 않게)
+      // 앞의 알람음이 안 되면 다음 것으로 (무음으로 끝나지 않게)
       if (!playNextSound()) throw IllegalStateException("알람음을 재생할 수 없습니다.")
     }.isSuccess
 
-    if (!started) releasePlayback()
-    return started
+    if (!started) {
+      releasePlayback()
+      return false
+    }
+    // 소리가 나기 시작한 뒤에 진동 시작. 진동을 못 켜도(진동 모터 없음 · 제조사 제한) 소리는 계속
+    runCatching { startVibration() }
+    return true
   }
 
-  // 알람음은 이 모듈 res/raw에 있음. 빌드 때 앱 리소스로 합쳐지므로 앱 패키지 이름으로 찾음
+  // 알람음 후보 (앞에서부터 시도). 기본 소리 키(와 모르는 키)는 폰 기본 알람음이 먼저, 우리 앱 파일이 그 다음 — 안드로이드 기본 알람처럼
+  // 그 밖의 소리 키(Q7)는 우리 앱 파일이 먼저. 마지막은 폰 기본 벨소리 · 알림음 (어느 것도 안 되면 그때서야 실패)
   private fun alarmSounds(soundKey: String): List<Uri> {
-    val resource = SOUND_RESOURCES[soundKey] ?: R.raw.alarm_siren
-    return listOfNotNull(
-      Uri.parse("android.resource://$packageName/$resource"),
-      RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM),
-    )
+    val resource = SOUND_RESOURCES[soundKey]
+    val ownFirst = resource != null && soundKey != DEFAULT_SOUND_KEY
+    // 앱 파일은 이 모듈 res/raw에 있음. 빌드 때 앱 리소스로 합쳐지므로 앱 패키지 이름으로 찾음
+    val own = Uri.parse("android.resource://$packageName/${resource ?: R.raw.alarm_siren}")
+    val phoneAlarm = phoneDefaultSounds(RingtoneManager.TYPE_ALARM)
+    val ordered = if (ownFirst) listOf(own) + phoneAlarm else phoneAlarm + own
+    return (
+      ordered +
+        phoneDefaultSounds(RingtoneManager.TYPE_RINGTONE) +
+        phoneDefaultSounds(RingtoneManager.TYPE_NOTIFICATION)
+      ).distinct()
   }
+
+  // 사용자가 고른 폰의 기본 소리(없으면 안 넣음) 다음에 시스템 기본 주소. 앞의 것이 권한 등으로 안 열려도 뒤의 것으로 한 번 더 시도
+  private fun phoneDefaultSounds(type: Int): List<Uri> = listOfNotNull(
+    runCatching { RingtoneManager.getActualDefaultRingtoneUri(this, type) }.getOrNull(),
+    runCatching { RingtoneManager.getDefaultUri(type) }.getOrNull(),
+  )
 
   // 남은 알람음 중 처음으로 재생되는 것을 틂. 하나도 안 되면 false
   private fun playNextSound(): Boolean {
     while (remainingSounds.isNotEmpty()) {
       releasePlayer()
-      val player = preparePlayer(remainingSounds.removeAt(0)) ?: continue
+      val uri = remainingSounds.removeAt(0)
+      val player = preparePlayer(uri)
+      if (player == null) {
+        Log.w(TAG, "알람음을 열 수 없어 다음 것으로: $uri")
+        continue
+      }
       mediaPlayer = player
       // 재생 도중 오류(오디오 서버 재시작 등)가 나면 다음 알람음으로, 더 없으면 멈추고 볼륨을 되돌림
       // 준비가 끝난 뒤에 붙여서 준비 실패 이벤트가 여기로 오지 않게 함. 지금 플레이어의 오류일 때만 반응
@@ -288,10 +325,57 @@ class AlarmPlaybackService : Service() {
         player.setVolume(1f, 1f)
         player.start()
       }.isSuccess
-      if (playing) return true
+      if (playing) {
+        Log.i(TAG, "알람음 재생: $uri")
+        return true
+      }
     }
     releasePlayer()
     return false
+  }
+
+  // 울리는 동안 계속 진동 — 알람 용도로 걸어서 무음 · 방해 금지에서도 시계 앱처럼 울림. 알림 채널 진동(알림이 뜰 때 한 번)과는 별개
+  private fun startVibration() {
+    val target = vibrator ?: obtainVibrator() ?: return
+    if (!target.hasVibrator()) return
+    vibrator = target
+    when {
+      Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU ->
+        target.vibrate(
+          VibrationEffect.createWaveform(VIBRATION_PATTERN, 0),
+          VibrationAttributes.createForUsage(VibrationAttributes.USAGE_ALARM),
+        )
+      Build.VERSION.SDK_INT >= Build.VERSION_CODES.O -> vibrateWithAudioAttributes(target)
+      else -> vibrateLegacy(target)
+    }
+    Log.i(TAG, "진동 시작")
+  }
+
+  private fun obtainVibrator(): Vibrator? =
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+      getSystemService(VibratorManager::class.java)?.defaultVibrator
+    } else {
+      getVibratorLegacy()
+    }
+
+  @Suppress("DEPRECATION")
+  private fun getVibratorLegacy(): Vibrator? = getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
+
+  // 8 ~ 12: 알람 용도 속성은 AudioAttributes로 넘김 (13부터는 이 방식이 폐지되어 VibrationAttributes로)
+  @Suppress("DEPRECATION")
+  private fun vibrateWithAudioAttributes(target: Vibrator) {
+    target.vibrate(VibrationEffect.createWaveform(VIBRATION_PATTERN, 0), audioAttributes)
+  }
+
+  // 8 미만: 패턴 반복(0번부터)
+  @Suppress("DEPRECATION")
+  private fun vibrateLegacy(target: Vibrator) {
+    target.vibrate(VIBRATION_PATTERN, 0, audioAttributes)
+  }
+
+  private fun stopVibration() {
+    vibrator?.let { target -> runCatching { target.cancel() } }
+    vibrator = null
   }
 
   // 재생 준비까지 끝낸 플레이어. 실패하면 null
@@ -364,6 +448,7 @@ class AlarmPlaybackService : Service() {
     handler.removeCallbacks(autoStop)
     remainingSounds.clear()
     releasePlayer()
+    stopVibration()
 
     audioManager?.let { manager ->
       audioFocusRequest?.let { request -> runCatching { manager.abandonAudioFocusRequest(request) } }

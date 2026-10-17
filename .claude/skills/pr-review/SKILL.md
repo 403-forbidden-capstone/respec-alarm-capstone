@@ -62,9 +62,23 @@ git diff --stat <base>...<head>     # files touched, +/- counts
 git diff --name-only <base>...<head>
 ```
 
+**Pick a depth from what changed, not from who wrote it.** Name it in the report's first line, with the reason.
+
+- **Quick**: at most 3 files and 100 changed lines, and nothing on a risk path. Run the line-by-line angle and only the Step 4 rows that trigger, inline (no subagents). Direction is one line.
+- **Standard** (default): everything below, as written.
+- **Deep**: any file on a risk path, or 15+ files / 500+ changed lines. Split the review by feature area (one subagent per area, at most 3, each handed only its files and its triggered references). End with the `/code-review ultra` suggestion from Step 7.
+
+Risk paths are listed in the repo's checklist (`.claude/review-checklist.md`, "깊이"). Without one, use auth/session, access rules (RLS, permissions), migrations, server functions, payment, scheduling of user-visible time-critical actions, CI workflows, and secrets/env handling. When unsure between two depths, pick the deeper one: a missed category costs more than the check.
+
 **Re-reviewing a fix commit ("I fixed the N things you found, check again") is two different tasks — do both, not just the first:**
 1. Point-verify each originally-reported item against the fix (this is usually enough for a small/mechanical fix — a null check added, an `if` condition corrected).
 2. **Separately, run the normal angle-gating table (Step 1/Step 4) against the fix commit's own diff**, as if it were any other PR — a fix that's itself a non-trivial change (swaps an algorithm, splits a function, reorders effects) can introduce new bugs of its own. Incident (2026-08-30, PR #59's `fb3421a`): a fix that correctly closed a race by splitting one function into two effects introduced a *different* race via the two effects' declaration order — something only a normal correctness pass over the fix's own diff would catch, not a targeted point-check of "did they fix what I said." Skipping step 2 because the fix "only touches the 4 things I flagged" is exactly the gap that let this through — a fix's diff is unreviewed code until it's actually been read the same way as any other diff.
+
+Re-reviews also have to converge. In the Claude Code team's write-up on code review, one PR went through 50+ review-and-fix rounds overnight, and about 59% of what kept being flagged was code that had been there since the first pass. Three rules follow from that:
+
+- **Diff-only.** "The fix commit's own diff" means `git diff <last reviewed commit>..<head>`, using the commit the previous review names. Don't re-scan the whole PR. Read unchanged code only as context for the new lines.
+- **No repeats.** A previous finding gets a status line (고침 / 남음 / 작성자가 닫음), never a second write-up. A new finding about code the previous review already read, and that this fix didn't touch, is tagged **원래 있던 문제** (see Step 6).
+- **Round cap.** If this is the third review of the same PR or later, the summary's first line asks whether the approach itself should change, before listing anything else. Don't keep producing rounds.
 
 ## Step 1 — Correctness & reuse
 
@@ -149,6 +163,8 @@ Don't run every check on every PR — read the diff from Step 0 and pick:
 | A dev/preview script exists and the diff touches rendered UI/routes | Web vitals | `references/web-vitals.md` |
 | A whole sort/search/selection/ordering algorithm is replaced (not just a condition or data source feeding an unchanged one) | Algorithm-swap regression check | `references/angles/algorithm-swap-check.md` |
 | Android native code — `*.kt`/`*.java`, `AndroidManifest.xml`, `android/**`, `modules/**/android/**`, Gradle files, or a config plugin that edits native files | Android native check (the rows above are web/React-centric and mostly won't trigger on this code) | `references/android-native-check.md` |
+| `supabase/functions/**`, a `[functions.*]` block in `supabase/config.toml`, or a migration adding a function/trigger/`pg_cron` job/Vault secret/RLS policy an Edge Function relies on | Supabase Edge Function check (`service_role` writes, `verify_jwt`, idempotency, partial writes, Kakao budget, KST day boundaries) — run alongside the backend & data-layer row, not instead of it | `references/supabase-edge-check.md` |
+| `modules/alarm-core/src/**` or `spec/**`, `features/alarm/**`, app code calling `schedule`/`cancel`/`list`/`getPendingEvents`/`markEventsUploaded`, server code building ring packages or `alarms` rows (`_shared/plan*`, `_shared/commit*`, `_shared/ring-package*`, `_shared/calc/**`), or a migration on `alarms`/`alarm_events`/the MISSED batch | Alarm scheduling check (server ↔ phone sync, past/boundary times, repeats, ring log, MISSED window, undecided D-number fields) — Kotlin-only diffs use the Android row instead | `references/alarm-scheduling-check.md` |
 
 A pure logic change inside an already-imported function (same imports, same exports, just different internal behavior) essentially never moves bundle size — don't spend a double-build on it. Building twice via a worktree costs real time; reserve it for diffs where the import graph or dependency tree actually changed.
 
@@ -159,6 +175,8 @@ Every check must degrade to a one-line "skipped: <reason>" in the final report r
 ## Step 5 — Optional: learnings
 
 If `<repo>/.claude/pr-review-learnings.md` exists, read it before writing findings — it holds things the user has previously told you to stop flagging in this repo (e.g. "we intentionally don't memoize this component, ignore re-render warnings on `<Chart>`"). Skip anything it covers. If the user dismisses a finding as intentional during this session, offer to append it there for next time — don't do it silently.
+
+That file stays short because every review reads it. The per-finding record of how authors responded (고침 / 틀림 / 의도 / 안 고침) goes in a separate log, `<repo>/.claude/review-log.md`, which reviews do not read. It exists to measure noise: if many findings come back 틀림 or 안 고침, the skill or the checklist needs fixing, not the authors.
 
 ## Step 5a — Direction
 
@@ -171,6 +189,14 @@ Read `references/self-check.md` and run it against your draft findings: files no
 ## Step 6 — Report
 
 **Never silently drop a finding you actually confirmed or plausibly suspected, no matter how minor it seemed at the time.** A real incident: this skill found a transient loading-state flash in a component, correctly judged it low severity and self-healing, and then left it out of the report entirely because it seemed too minor to mention — only for the same finding to resurface later, independently, as evidence the skill was "still missing things." The triage was right; the silent omission was the actual bug. Low severity is a reason to put a finding last and keep it to one line, never a reason to cut it — whether something is worth fixing is the user's call, and they can't make it about a finding they never saw. If the report would otherwise get cluttered, compress minor items into a short "Minor / observed, not blocking" list rather than deleting them — one line per item is enough. This applies to every check in this skill, not just the ones diff-triggered this run.
+
+Three rules for what a finding is and how it is written:
+
+- **Style is not a finding.** Formatting, naming taste, comment wording, and import order with no effect on behavior or on a reader's ability to follow the code are left out. A linter or formatter should own those. If the same style point keeps coming up, write one line under Repo process suggesting a lint rule. This does not override the rule above: a real issue that is merely minor stays in, as one line.
+- **Flag the class, not the instance.** When the same mistake appears in several places, write it once with every location: `file:line` for the first, then "같은 종류: `file:line`, `file:line` 외 N곳". Search the rest of the diff (and the files it calls) for the same pattern before writing it, so the fix covers all of them in one round.
+- **원래 있던 문제** (pre-existing). A bug this PR did not introduce, in code it touched or depends on, is tagged `[원래 있던 문제]` and never decides the merge verdict on its own. Check with `git blame` or the base branch when unsure.
+
+The summary starts with counts ("고칠 것 N · 확인 필요 N · 원래 있던 문제 N") and says plainly "고칠 것 없음" when there is nothing to fix.
 
 Group findings by feature area (the files/directories they cluster in), not as a flat file list — a reviewer thinks in "the auth flow changed" not "file 7 of 12 changed". Within each group, rank by severity. Structure:
 
@@ -206,7 +232,7 @@ From Step 5b — what was re-checked, how many findings it added (or none), what
 - <check>: <reason>
 ```
 
-Findings from Steps 1–2 (the correctness angles and the security pass) and the diff-triggered checks in Step 4 (backend/data-layer, lifecycle/cleanup, accessibility-in-code, test coverage, derived-value integrity, interactive-viz scope, error propagation, async migration, Android native) and anything the Step 5b self-check added all fold into the feature-area groups by where they actually are in the code — don't give each check its own separate untouched sub-report. The point of this skill is one merged picture organized the way a reviewer thinks about the change, not a stack of reports stapled together by which pass produced them.
+Findings from Steps 1–2 (the correctness angles and the security pass) and the diff-triggered checks in Step 4 (backend/data-layer, lifecycle/cleanup, accessibility-in-code, test coverage, derived-value integrity, interactive-viz scope, error propagation, async migration, Android native, Supabase Edge Function, alarm scheduling) and anything the Step 5b self-check added all fold into the feature-area groups by where they actually are in the code — don't give each check its own separate untouched sub-report. The point of this skill is one merged picture organized the way a reviewer thinks about the change, not a stack of reports stapled together by which pass produced them.
 
 ## Step 7 — When to suggest `/code-review ultra`
 
