@@ -154,6 +154,8 @@ function Detail({ appointment: a, reload }: { appointment: AppointmentDetail; re
     const { turnedOff, turnedOn } = result;
     setChanges(null);
     setTravelConfirm(null);
+    // 확인한 이동시간은 이제 직접 입력으로 저장됨 — 화면의 초안도 같은 값으로 맞춰 "저장 전" 표시(저장 버튼 · 나갈 때 묻기)가 남지 않게
+    if (travelMinutes != null) setEdit({ travelMinutes });
     toast(
       turnedOff
         ? '알람을 모두 꺼서 이 일정 알람이 꺼졌어요'
