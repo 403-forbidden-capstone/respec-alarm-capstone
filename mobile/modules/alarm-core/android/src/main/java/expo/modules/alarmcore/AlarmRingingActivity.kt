@@ -10,10 +10,14 @@ import android.view.WindowManager
 import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.TextView
+import android.widget.Toast
 import java.lang.ref.WeakReference
 
+// 잠금화면 위에 뜨는 WAKE 알람 화면. 해제 · 미루기는 알람 코어(AlarmController)가 처리하고, 해제하면 앱을 기상 확인 화면으로 엶
 class AlarmRingingActivity : Activity() {
   companion object {
+    const val EXTRA_ALARM_TITLE = "alarm_title"
+
     private var showing: WeakReference<AlarmRingingActivity>? = null
 
     // 소리가 멈추면(해제 · 미루기 · 자동 정지 · 취소) 서비스가 불러서 알람 화면을 닫음
@@ -21,10 +25,16 @@ class AlarmRingingActivity : Activity() {
       showing?.get()?.finish()
       showing = null
     }
+
+    // 알람 둘이 겹쳐 서비스가 다른 알람으로 넘어가면 불러서 화면이 지금 울리는 알람을 보이게 함
+    fun showCurrentIfShowing() {
+      showing?.get()?.showCurrentAlarm()
+    }
   }
 
   private var alarmId: String = "alarm"
-  private var alarmTitle: String = "알람"
+  private var alarm: StoredAlarm? = null
+  private var fallbackTitle: String = "알람"
 
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
@@ -51,9 +61,20 @@ class AlarmRingingActivity : Activity() {
     renderAlarmControls()
   }
 
+  // 지금 울리는 알람이 화면이 든 알람과 다르면 그 알람으로 바꿔 다시 그림 (해제 · 미루기가 보이는 알람에 듣게)
+  fun showCurrentAlarm() {
+    val current = AlarmPlaybackService.ringingAlarmId ?: return
+    if (current == alarmId) return
+    alarmId = current
+    fallbackTitle = "알람"
+    alarm = AlarmStorage.get(this, current)
+    renderAlarmControls()
+  }
+
   private fun readAlarmDetails(source: Intent?) {
     alarmId = source?.getStringExtra(AlarmScheduler.EXTRA_ALARM_ID) ?: "alarm"
-    alarmTitle = source?.getStringExtra(AlarmScheduler.EXTRA_ALARM_TITLE) ?: "알람"
+    fallbackTitle = source?.getStringExtra(EXTRA_ALARM_TITLE) ?: "알람"
+    alarm = AlarmStorage.get(this, alarmId)
   }
 
   private fun showOverLockScreen() {
@@ -69,6 +90,9 @@ class AlarmRingingActivity : Activity() {
   }
 
   private fun renderAlarmControls() {
+    val current = alarm
+    val snoozeMinutes = (((current?.plan?.snoozeMillis ?: 0L).takeIf { it > 0 } ?: (10 * 60 * 1000L)) / 60_000L).toInt()
+
     val root = LinearLayout(this).apply {
       orientation = LinearLayout.VERTICAL
       gravity = Gravity.CENTER
@@ -85,7 +109,7 @@ class AlarmRingingActivity : Activity() {
     root.addView(heading, matchWidth())
 
     val title = TextView(this).apply {
-      text = alarmTitle
+      text = current?.title ?: fallbackTitle
       setTextColor(Color.WHITE)
       textSize = 34f
       gravity = Gravity.CENTER
@@ -94,7 +118,7 @@ class AlarmRingingActivity : Activity() {
     root.addView(title, matchWidth())
 
     val instruction = TextView(this).apply {
-      text = "알람이 울리고 있습니다"
+      text = current?.subtitle ?: current?.plan?.heading?.takeIf { it.isNotEmpty() } ?: "알람이 울리고 있습니다"
       setTextColor(Color.LTGRAY)
       textSize = 18f
       gravity = Gravity.CENTER
@@ -107,14 +131,14 @@ class AlarmRingingActivity : Activity() {
       textSize = 20f
       setTextColor(Color.WHITE)
       setBackgroundColor(Color.rgb(210, 45, 55))
-      setOnClickListener { sendAlarmAction(AlarmPlaybackService.ACTION_DISMISS) }
+      setOnClickListener { dismissAlarm() }
     }
     root.addView(dismissButton, buttonLayoutParams())
 
     val snoozeButton = Button(this).apply {
-      text = "10분 미루기"
+      text = "${snoozeMinutes}분 미루기"
       textSize = 18f
-      setOnClickListener { sendAlarmAction(AlarmPlaybackService.ACTION_SNOOZE) }
+      setOnClickListener { snoozeAlarm() }
     }
     val snoozeParams = buttonLayoutParams().apply { topMargin = dp(12) }
     root.addView(snoozeButton, snoozeParams)
@@ -123,12 +147,14 @@ class AlarmRingingActivity : Activity() {
   }
 
   // 화면은 소리가 멈출 때 서비스가 닫음 (미루기 예약이 실패해 계속 울리면 화면도 남아 해제할 수 있음)
-  private fun sendAlarmAction(action: String) {
-    sendBroadcast(Intent(this, AlarmActionReceiver::class.java).apply {
-      this.action = action
-      putExtra(AlarmScheduler.EXTRA_ALARM_ID, alarmId)
-      putExtra(AlarmScheduler.EXTRA_ALARM_TITLE, alarmTitle)
-    })
+  private fun dismissAlarm() {
+    AlarmController.dismiss(this, alarmId, openApp = true)
+  }
+
+  private fun snoozeAlarm() {
+    if (!AlarmController.snooze(this, alarmId)) {
+      Toast.makeText(this, "미루기를 예약하지 못함. 해제로 꺼 주세요.", Toast.LENGTH_LONG).show()
+    }
   }
 
   private fun matchWidth() = LinearLayout.LayoutParams(

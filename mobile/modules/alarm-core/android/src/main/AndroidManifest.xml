@@ -1,4 +1,5 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+  xmlns:tools="http://schemas.android.com/tools">
   <!-- 정확한 알람: 13 이상은 USE_EXACT_ALARM(설치 때 자동 허용, 사용자가 못 끔), 12는 SCHEDULE_EXACT_ALARM -->
   <!-- 둘 중 하나만 요청하라는 Android 안내대로 SCHEDULE_EXACT_ALARM은 32까지만 씀 -->
   <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
@@ -12,6 +13,11 @@
   <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
   <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
   <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+  <!-- 기상 자동 확인(#35 · D14): 알람을 끈 뒤 화면을 썼는지 읽음. 선언만으로는 안 되고 사용자가 설정 → 사용 정보 접근에서 켜야 함 -->
+  <!-- 일반 권한이 아니라서(시스템 권한) 린트가 ProtectedPermissions를 경고하는데, 이 선언이 있어야 설정 목록에 앱이 나옴 -->
+  <uses-permission
+    android:name="android.permission.PACKAGE_USAGE_STATS"
+    tools:ignore="ProtectedPermissions" />
 
   <application>
     <activity
@@ -21,6 +27,15 @@
       android:showWhenLocked="true"
       android:turnScreenOn="true"
       android:theme="@android:style/Theme.Material.Light.NoActionBar" />
+
+    <!-- 화면 없는 중계 화면: WAKE 알림의 "해제" 버튼 → 해제 처리 + 앱 열기 -->
+    <activity
+      android:name=".AlarmActionActivity"
+      android:exported="false"
+      android:excludeFromRecents="true"
+      android:noHistory="true"
+      android:taskAffinity=""
+      android:theme="@android:style/Theme.NoDisplay" />
 
     <service
       android:name=".AlarmPlaybackService"
