@@ -3,24 +3,33 @@ import { useEffect, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
 import { Button, Card, Chip, KeyValueRow, Loading, LoadError, Screen, Sheet, Stepper, Text, toast, Toggle, TopBar } from '@/components/ui';
-import { getAppointment, previewAlarms, saveAlarmSettings } from '@/features/alarm/api';
+import { getAppointment, listPlaces, previewAlarms, saveAlarmSettings } from '@/features/alarm/api';
+import { isManualTime, manualTimes, moveAlarm, orderError, resetAlarm, sameEdits, timeInputsChanged } from '@/features/alarm/adjust';
 import { FormulaBox } from '@/features/alarm/components/FormulaBox';
 import { OptionGrid } from '@/features/alarm/components/OptionGrid';
+import { SelectRow } from '@/features/alarm/components/SelectRow';
 import { TextLink } from '@/features/alarm/components/TextLink';
+import { TimeButton } from '@/features/alarm/components/TimeButton';
+import { TimeSheet } from '@/features/alarm/components/TimePicker';
 import { changedAlarms, ringingKinds, type AlarmChange } from '@/features/alarm/schedule';
 import {
   AXES,
   IMPORTANCE_LABEL,
   KIND_LABEL,
   LEVELS,
-  TRANSPORT_LABEL,
+  MANUAL_SOURCE,
+  ORIGIN_HOME,
+  TRANSPORT_OPTIONS,
+  type AlarmEdits,
   type AlarmKind,
-  type AlarmTime,
+  type AlarmPreview,
   type AppointmentDetail,
   type IntensityAxis,
   type Level,
+  type RingKind,
+  type Transport,
 } from '@/features/alarm/types';
-import { formatDateShort, formatTime, minutesBetween } from '@/lib/format';
+import { addMinutes, formatDateShort, formatTime, minutesBetween } from '@/lib/format';
 import { backOrHome } from '@/lib/nav';
 import { useAction } from '@/lib/useAction';
 import { useLeaveGuard } from '@/lib/useLeaveGuard';
@@ -31,8 +40,9 @@ const LEVEL_OPTIONS = LEVELS.map((l, i) => [i as Level, l.name] as const);
 
 type Levels = Record<IntensityAxis, Level | null>; // null = 자동
 
-// H03 알람 설정 — 연결 일정 · 이동 조건 · 준비 시간 · 여유를 바꾸면 다시 계산 · 강도 직접 고르기
-// 여유 · 종류별 켜기 · 강도는 모두 초안으로 들고 있다가 "저장"에서 한 번에 반영
+// H03 알람 설정 — 연결 일정 · 이동 조건 · 준비 시간 · 여유 · 알람 시각 · 강도를 바꾸면 알람을 다시 계산
+// 출발 위치 · 이동 수단 · 이동 · 준비 시간 · 알람 시각은 직접 고를 수 있고(D42 C), 직접 고른 값은 "직접 고름"으로 표시하며 자동 계산보다 먼저 씀
+// 모두 초안으로 들고 있다가 "저장"에서 한 번에 반영 (고친 값은 고친 값 기록에 남음)
 export default function AlarmDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { data, error, reload } = useLoad(() => getAppointment(id));
@@ -65,49 +75,71 @@ const savedLevels = (a: AppointmentDetail): Levels => ({
   voice: a.intensity.axes.voice.manual ? a.intensity.axes.voice.level : null,
   vibration: a.intensity.axes.vibration.manual ? a.intensity.axes.vibration.level : null,
 });
+const savedPreview = (a: AppointmentDetail): AlarmPreview => ({
+  alarms: a.alarms,
+  travelMinutes: a.travelMinutes,
+  travelSource: a.travelSource,
+  autoTravelMinutes: a.auto.travelMinutes,
+  predictedPrepMinutes: a.predictedPrepMinutes,
+  autoPredictedPrepMinutes: a.auto.predictedPrepMinutes,
+});
 
 function Detail({ appointment: a, reload }: { appointment: AppointmentDetail; reload: () => Promise<boolean> }) {
-  const [buffer, setBuffer] = useState(a.bufferMinutes);
+  const [edits, setEdits] = useState<AlarmEdits>(a.edits);
   const [kinds, setKinds] = useState(() => savedKinds(a));
   const [levels, setLevels] = useState(() => savedLevels(a));
-  const [preview, setPreview] = useState<AlarmTime[]>(a.alarms);
+  const [preview, setPreview] = useState<AlarmPreview>(() => savedPreview(a));
   const [changes, setChanges] = useState<AlarmChange[] | null>(null); // 확인 시트에 보여 줄 바뀌는 알람
+  const [pickKind, setPickKind] = useState<RingKind | null>(null); // 시각을 고르는 시트가 열린 알람
+  const { data: places } = useLoad(listPlaces);
   const { busy, run } = useAction();
+  const setEdit = (patch: Partial<AlarmEdits>) => setEdits((e) => ({ ...e, ...patch }));
 
   // 저장된 값과 다른 곳이 있으면 저장 전 — 저장 버튼이 켜지고, 나갈 때 한 번 물음
   const saved = savedKinds(a);
   const savedLv = savedLevels(a);
   const dirty =
-    buffer !== a.bufferMinutes ||
+    !sameEdits(edits, a.edits) ||
     ringingKinds(a.alarms).some((x) => kinds[x.kind] !== saved[x.kind]) ||
     AXES.some(([axis]) => levels[axis] !== savedLv[axis]);
   useLeaveGuard(dirty);
 
-  // 여유 시간을 바꾸면 알람 시각을 다시 계산 (저장 전 미리 보기)
+  // 값을 바꾸면 알람 시각을 다시 계산 (저장 전 미리 보기)
   useEffect(() => {
     let cancelled = false;
-    previewAlarms(a.id, buffer).then((list) => {
-      if (!cancelled) setPreview(list);
+    previewAlarms(a.id, edits).then((next) => {
+      if (!cancelled) setPreview(next);
     });
     return () => {
       cancelled = true;
     };
-  }, [a.id, buffer, a.alarms]);
+  }, [a.id, edits, a.alarms]);
 
-  const first = preview[0] ?? a.alarms[0];
-  const margin = a.predictedPrepMinutes - a.beforePrepMinutes - a.prepMinutes;
+  const first = preview.alarms[0] ?? a.alarms[0];
+  const blocked = orderError(preview.alarms); // 순서가 뒤집히면 저장을 막음
+  const manualAny = preview.alarms.some(isManualTime);
   const anyManual = AXES.some(([axis]) => levels[axis] != null);
+  const travel = edits.travelMinutes ?? preview.autoTravelMinutes;
+  const prepare = edits.prepareMinutes ?? preview.autoPredictedPrepMinutes;
+  const margin = a.auto.predictedPrepMinutes - a.beforePrepMinutes - a.prepMinutes;
+  const originOptions = [ORIGIN_HOME, ...(places ?? []).map((p) => p.name), edits.origin]
+    .filter((name, i, all) => all.indexOf(name) === i)
+    .map((name) => [name, name] as const);
+  // 계산식의 기준 알람 — 그날 첫 일정이면 기상, 아니면 준비. 직접 고른 알람 시각이 있어도 식은 자동 계산 그대로
+  const baseKind: AlarmKind = a.withWake ? 'WAKE' : 'PREPARE';
+  const base = addMinutes(a.at, -(edits.bufferMinutes + travel + prepare));
+  const picking = pickKind ? preview.alarms.find((x) => x.kind === pickKind) : undefined;
 
   async function apply() {
-    const bufferChanged = buffer !== a.bufferMinutes;
-    const { turnedOff, turnedOn } = await saveAlarmSettings(a.id, { bufferMinutes: buffer, kinds, levels });
+    const moved = timeInputsChanged(edits, a.edits);
+    const { turnedOff, turnedOn } = await saveAlarmSettings(a.id, { ...edits, kinds, levels });
     setChanges(null);
     toast(
       turnedOff
         ? '알람을 모두 꺼서 이 일정 알람이 꺼졌어요'
         : turnedOn
           ? '알람을 켜서 이 일정 알람도 다시 켰어요'
-          : bufferChanged
+          : moved
             ? '알람 시각을 다시 계산했어요'
             : '저장했어요',
     );
@@ -115,11 +147,11 @@ function Detail({ appointment: a, reload }: { appointment: AppointmentDetail; re
   }
 
   function save() {
-    if (!dirty) return;
+    if (!dirty || blocked) return;
     void run(async () => {
-      // 알람 시각이 5분 이상 바뀌면 한 번 더 확인 — 미리 보기가 늦게 올 수 있어(실데이터는 서버 계산) 저장할 때 다시 계산한 값으로 비교
-      if (buffer !== a.bufferMinutes) {
-        const moved = changedAlarms(a.alarms, await previewAlarms(a.id, buffer));
+      // 여유 · 출발 위치 · 이동 수단 · 이동 · 준비로 알람 시각이 5분 이상 바뀌면 한 번 더 확인 — 미리 보기가 늦게 올 수 있어(실데이터는 서버 계산) 저장할 때 다시 계산한 값으로 비교
+      if (timeInputsChanged(edits, a.edits)) {
+        const moved = changedAlarms(a.alarms, (await previewAlarms(a.id, edits)).alarms);
         if (moved.some((c) => Math.abs(minutesBetween(c.from, c.to)) >= 5)) {
           setChanges(moved);
           return;
@@ -134,10 +166,11 @@ function Detail({ appointment: a, reload }: { appointment: AppointmentDetail; re
     void run(apply, '저장하지 못했어요');
   }
 
-  // 시트 "그대로 두기" · 바깥 누름 — 알람 시각이 바뀌는 여유 시간만 되돌림 (D34)
+  // 시트 "그대로 두기" · 바깥 누름 — 알람 시각을 밀어 움직이는 입력만 되돌림 (D34). 직접 고른 알람 시각은 그대로
   function keep() {
     if (busy) return; // "바꾸기"가 저장하는 중이면 그대로 두기 · 시트 닫기도 기다림
-    setBuffer(a.bufferMinutes);
+    const { bufferMinutes, origin, transport, travelMinutes, prepareMinutes } = a.edits;
+    setEdit({ bufferMinutes, origin, transport, travelMinutes, prepareMinutes });
     setChanges(null);
   }
 
@@ -171,9 +204,27 @@ function Detail({ appointment: a, reload }: { appointment: AppointmentDetail; re
         <Text variant="label" tone="sub" style={styles.label}>
           이동 조건
         </Text>
-        <KeyValueRow first label="출발 위치" value={a.origin} />
-        <KeyValueRow label="이동 수단" value={TRANSPORT_LABEL[a.transport]} />
-        <KeyValueRow label="예상 이동" value={`${a.travelMinutes}분`} sub={a.travelSource} />
+        <SelectRow first label="출발 위치" value={edits.origin} options={originOptions} onChange={(origin) => setEdit({ origin })} />
+        <SelectRow<Transport> label="이동 수단" value={edits.transport} options={TRANSPORT_OPTIONS} onChange={(transport) => setEdit({ transport })} />
+        <Stepper
+          label="예상 이동"
+          value={travel}
+          onChange={(next) => setEdit({ travelMinutes: next === preview.autoTravelMinutes ? null : next })}
+          min={1}
+          max={240}
+          step={1}
+          unit="분"
+        />
+        <View style={styles.axisDesc}>
+          <Text variant="caption" tone="faint">
+            {edits.travelMinutes != null ? MANUAL_SOURCE : preview.travelSource}
+          </Text>
+          {edits.travelMinutes != null ? (
+            <TextLink label="자동으로" accessibilityLabel="예상 이동 자동으로 되돌리기" onPress={() => setEdit({ travelMinutes: null })} />
+          ) : (
+            <View />
+          )}
+        </View>
       </Card>
 
       <Card>
@@ -183,8 +234,33 @@ function Detail({ appointment: a, reload }: { appointment: AppointmentDetail; re
         {a.beforePrepMinutes ? <KeyValueRow first label="준비 전 활동" value={`${a.beforePrepMinutes}분`} /> : null}
         <KeyValueRow first={!a.beforePrepMinutes} label="실제 준비" value={`${a.prepMinutes}분`} />
         <KeyValueRow label="P80 여유" value={`+${margin}분`} sub="열 번 중 여덟 번은 늦지 않게" />
-        <KeyValueRow label="예측 준비" value={`${a.predictedPrepMinutes}분`} sub="공통 P80 + 개인 보정" />
-        <Stepper label="여유 시간" value={buffer} onChange={setBuffer} min={0} max={30} step={5} unit="분" />
+        <KeyValueRow label="예측 준비" value={`${a.auto.predictedPrepMinutes}분`} sub="공통 P80 + 개인 보정" />
+        <Stepper
+          label="준비 시간"
+          value={prepare}
+          onChange={(next) => setEdit({ prepareMinutes: next === preview.autoPredictedPrepMinutes ? null : next })}
+          min={Math.max(5, a.beforePrepMinutes)}
+          max={240}
+          step={1}
+          unit="분"
+        />
+        {edits.prepareMinutes != null ? (
+          <View style={styles.axisDesc}>
+            <Text variant="caption" tone="faint">
+              직접 고름 · 자동은 {preview.autoPredictedPrepMinutes}분
+            </Text>
+            <TextLink label="자동으로" accessibilityLabel="준비 시간 자동으로 되돌리기" onPress={() => setEdit({ prepareMinutes: null })} />
+          </View>
+        ) : null}
+        <Stepper
+          label="여유 시간"
+          value={edits.bufferMinutes}
+          onChange={(bufferMinutes) => setEdit({ bufferMinutes })}
+          min={0}
+          max={30}
+          step={5}
+          unit="분"
+        />
       </Card>
 
       <Card>
@@ -193,31 +269,46 @@ function Detail({ appointment: a, reload }: { appointment: AppointmentDetail; re
         </Text>
         <FormulaBox
           lines={[
-            `${KIND_LABEL[first.kind]} ${formatTime(first.at)} = 약속 ${formatTime(a.at)} − 여유 ${buffer} − 이동 ${a.travelMinutes} − 준비 ${a.predictedPrepMinutes}`,
-            ...(first.kind === 'WAKE' && a.beforePrepMinutes
-              ? [`준비 알람은 기상 후 준비 전 활동 ${a.beforePrepMinutes}분 뒤`]
-              : []),
+            `${KIND_LABEL[baseKind]} ${formatTime(base)} = 약속 ${formatTime(a.at)} − 여유 ${edits.bufferMinutes} − 이동 ${travel} − 준비 ${prepare}`,
+            ...(a.withWake && a.beforePrepMinutes ? [`준비 알람은 기상 후 준비 전 활동 ${a.beforePrepMinutes}분 뒤`] : []),
           ]}
         />
-        {preview.map((x, i) => (
+        {preview.alarms.map((x, i) => (
           <KeyValueRow
             key={x.kind}
             first={i === 0}
             label={`${KIND_LABEL[x.kind]}${x.kind === 'ARRIVE' ? ' 목표' : ''}`}
+            sub={isManualTime(x) ? '직접 고름' : undefined}
             value={
-              <View style={styles.timeRow}>
-                <Text variant="bodyStrong">{formatTime(x.at)}</Text>
-                {x.kind === 'ARRIVE' ? null : (
-                  <Toggle
-                    value={kinds[x.kind] ?? x.enabled}
-                    onChange={(on) => setKinds((k) => ({ ...k, [x.kind]: on }))}
-                    label={`${KIND_LABEL[x.kind]} 알람`}
+              x.kind === 'ARRIVE' ? (
+                formatTime(x.at)
+              ) : (
+                <View style={styles.timeRow}>
+                  <TimeButton
+                    label={formatTime(x.at)}
+                    manual={isManualTime(x)}
+                    accessibilityLabel={`${KIND_LABEL[x.kind]} 시각 ${formatTime(x.at)}, 눌러서 고르기`}
+                    onPress={() => setPickKind(x.kind as RingKind)}
                   />
-                )}
-              </View>
+                  <Toggle value={kinds[x.kind] ?? x.enabled} onChange={(on) => setKinds((k) => ({ ...k, [x.kind]: on }))} label={`${KIND_LABEL[x.kind]} 알람`} />
+                </View>
+              )
             }
           />
         ))}
+        {blocked ? (
+          <Text variant="caption" tone="warn" style={styles.note} accessibilityLiveRegion="polite">
+            {blocked}
+          </Text>
+        ) : null}
+        <Text variant="caption" tone="faint" style={styles.note}>
+          시각을 눌러 직접 고를 수 있어요. 직접 고른 시각은 자동 계산보다 먼저 적용되고, 기상을 옮기면 준비도 같은 만큼 옮겨져요.
+        </Text>
+        {manualAny ? (
+          <View style={styles.reset}>
+            <TextLink label="모두 자동으로 되돌리기" onPress={() => setEdit({ times: {} })} />
+          </View>
+        ) : null}
       </Card>
 
       <Card>
@@ -281,8 +372,21 @@ function Detail({ appointment: a, reload }: { appointment: AppointmentDetail; re
       </Card>
 
       <View style={styles.stack}>
-        <Button label="저장" onPress={save} disabled={!dirty} loading={busy && changes == null} />
+        <Button label="저장" onPress={save} disabled={!dirty || blocked != null} loading={busy && changes == null} />
       </View>
+
+      {/* 알람 시각 직접 고르기 — 기상을 옮기면 준비도 같은 간격으로 따라옴 */}
+      <TimeSheet
+        visible={picking != null}
+        onClose={() => setPickKind(null)}
+        title={pickKind ? `${KIND_LABEL[pickKind]} 시각` : ''}
+        value={picking?.at ?? a.at}
+        onChange={(to) => pickKind && setEdit({ times: manualTimes(moveAlarm(preview.alarms, pickKind, to)) })}
+        autoAt={picking && isManualTime(picking) ? picking.auto : undefined}
+        onReset={() => pickKind && setEdit({ times: manualTimes(resetAlarm(preview.alarms, pickKind)) })}
+        note={pickKind === 'WAKE' && preview.alarms.some((x) => x.kind === 'PREPARE') ? '준비 알람도 같은 만큼 같이 움직여요' : undefined}
+        error={blocked ?? undefined}
+      />
 
       {/* 알람 시각이 바뀌는 저장이면 바뀌는 알람을 전부 보여 주고 한 번 더 물음 */}
       <Sheet visible={changes != null} onClose={keep} title="알람 시각이 바뀌어요">

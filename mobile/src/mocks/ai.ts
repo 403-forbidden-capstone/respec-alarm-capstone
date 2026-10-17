@@ -1,11 +1,13 @@
 // ③ · ⑥ 목업 — 자기 전 AI 대화 대본 · 하루 기록(일기) · 루틴 제안 (AI 대기)
 // mockup.html의 SCRIPT · cardMsg · chatResolve · genJournal · rAccept를 옮김. 실제는 Gemini (voice-* · journal-* Edge, #42 · #48)
 // 화면은 이 파일을 직접 읽지 않고 features/voice/api.ts · features/routine/api.ts를 거침. 바꾼 값은 앱을 다시 열 때까지만 남음
-import type { AppointmentDraft } from '@/features/alarm/types';
+import { ringingKinds } from '@/features/alarm/schedule';
+import { defaultAlarms, KIND_LABEL, type AlarmTime, type AppointmentDraft } from '@/features/alarm/types';
 import type { ApplyStatus, JournalFact, Routine } from '@/features/routine/types';
-import { dateParts, formatTime, isSameDay, josa, minutesBetween } from '@/lib/format';
+import { dateParts, dayKey, formatTime, isSameDay, josa, minutesBetween } from '@/lib/format';
 
 import { kst, TODAY } from './data';
+import { pastDay } from './records';
 
 type ScriptLine = { who: 'ai' | 'me'; text: string } | { who: 'card' };
 
@@ -26,11 +28,12 @@ export const FOUND_DRAFT: AppointmentDraft = {
   title: '스터디',
   date: kst(TODAY + 1, 0),
   time: '14:00',
-  repeat: 'NONE',
+  repeat: [],
   place: '학교 도서관',
   transport: 'TRANSIT',
   importance: 'LOW',
   items: '노트북 충전기',
+  alarms: defaultAlarms(),
 };
 export const FOUND_QUESTION = '내일 오후 2시 스터디로 저장할까요?';
 
@@ -92,9 +95,21 @@ export function dayWord(at: Date) {
   return `${month}월 ${day}일`;
 }
 
-// 저장했을 때 AI 답 — 준비(없으면 첫 알람) · 출발 알람 시각
-export function savedReply(at: Date, prepare: Date, depart: Date) {
-  return `저장했어요. ${dayWord(at)} ${formatTime(prepare)} 준비, ${formatTime(depart)} 출발 알람을 맞춰 둘게요. 오늘 대화는 여기까지 할까요?`;
+// 저장했을 때 AI 답 — 울리는 알람 중 준비(없으면 첫 알람) · 출발 시각 (기상 · 준비 · 출발을 다 켜면 목업 그대로 "준비, 출발")
+// H05에서 종류를 일부만 켰으면 켠 것만 말함 (D46) — 준비만 끄면 "기상, 출발", 기상만 켜면 "기상". 하나도 안 켰으면 알람 없이 저장했다고 답함
+export function savedReply(at: Date, alarms: AlarmTime[]) {
+  const ringing = ringingKinds(alarms);
+  if (!ringing.length) return savedWithoutAlarmReply(at);
+  const first = ringing.find((x) => x.kind === 'PREPARE') ?? ringing[0];
+  const depart = ringing.find((x) => x.kind === 'DEPARTURE');
+  const told = depart && depart !== first ? [first, depart] : [first];
+  const times = told.map((x) => `${formatTime(x.at)} ${KIND_LABEL[x.kind]}`).join(', ');
+  return `저장했어요. ${dayWord(at)} ${times} 알람을 맞춰 둘게요. 오늘 대화는 여기까지 할까요?`;
+}
+
+// H05에서 알람을 모두 끄고 저장했을 때 (D46) — 맞춰 둘 알람이 없음
+export function savedWithoutAlarmReply(at: Date) {
+  return `저장했어요. ${dayWord(at)} 일정은 알람 없이 저장해 둘게요. 오늘 대화는 여기까지 할까요?`;
 }
 
 export function rejectedReply(title: string) {
@@ -171,7 +186,10 @@ export function writeJournal({ date, me, appointment: a, events, saidAt, prev }:
     edited: prev?.edited ?? false,
     facts,
     coaching: COACHING,
-    encouragement: me.arriveAt && !late ? '오늘도 약속 시간 안에 도착했어요. 이 흐름을 이어가요.' : '내일은 조금 더 여유 있게 시작해 봐요.',
+    encouragement:
+      me.arriveAt && !late
+        ? `${isSameDay(date, kst(TODAY, 0)) ? '오늘' : '그날'}도 약속 시간 안에 도착했어요. 이 흐름을 이어가요.` // 지난 날 일기(D48)는 "그날도"
+        : '내일은 조금 더 여유 있게 시작해 봐요.',
     suggestion: prev?.suggestion ?? 'PENDING',
   };
 }
@@ -194,9 +212,36 @@ export function suggestedRoutine(sourceJournal: string | null): Routine {
   };
 }
 
+// 지난 날 일기 (D48 날짜 이동으로 열어 봄) — 지난 날 기록(mocks/records)으로 같은 방식으로 씀. 평일 몇 날만 있고 값은 그날 루틴 제안 상태
+const PAST_JOURNALS: Record<number, ApplyStatus> = { 16: 'REJECTED', 19: 'PENDING', 20: 'PENDING', 21: 'PENDING' };
+
+function pastJournals(): Record<string, MockJournal> {
+  const journals: Record<string, MockJournal> = {};
+  for (const [day, suggestion] of Object.entries(PAST_JOURNALS)) {
+    const date = kst(Number(day), 0);
+    const past = pastDay(date);
+    if (!past) continue;
+    const events = past.actual.map(([minutes, label, source]) => ({ at: kst(past.day, minutes), label, source }));
+    const at = (label: string) => events.find((e) => e.label.startsWith(label))?.at ?? null;
+    const a = past.appointment;
+    journals[dayKey(date)] = {
+      ...writeJournal({
+        date,
+        me: { wakeAt: at('기상 확인'), departAt: at('집 출발'), arriveAt: at('도착') },
+        appointment: a ? { title: a.title, place: a.place, at: kst(past.day, a.at) } : null,
+        events,
+        saidAt: null, // 대본의 말(회의 자료)은 오늘 대화 것이라 지난 날 일기에는 넣지 않음
+        prev: null,
+      }),
+      suggestion,
+    };
+  }
+  return journals;
+}
+
 // 바뀌는 값 — api.ts만 읽고 씀
 export const aiDb = {
   chat: null as MockChat | null, // AI 탭을 처음 열 때 시작
-  journals: {} as Record<string, MockJournal>, // 날짜(2025-05-22)별
+  journals: pastJournals(), // 날짜(2025-05-22)별 — 오늘 일기는 대화를 마쳐야 생김
   routines: [] as Routine[], // 저장한 루틴 (저녁 루틴)
 };

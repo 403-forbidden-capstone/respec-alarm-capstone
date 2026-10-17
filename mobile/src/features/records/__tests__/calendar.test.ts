@@ -6,6 +6,7 @@ import { kst } from '@/mocks/data';
 import {
   calendarRows,
   dateOf,
+  dayRelative,
   dayWord,
   daysInMonth,
   leadingBlanks,
@@ -89,6 +90,18 @@ describe('주 계산', () => {
     expect(weekRelative(kst(26, 0), today)).toBe('다음 주');
     expect(weekRelative(kst(5, 0), today)).toBe('2주 전');
     expect(weekRelative(kst(40, 0), today)).toBe('3주 뒤');
+  });
+});
+
+describe('일간 제목 아래 글자', () => {
+  it('오늘 기준 어제 · 내일 · 며칠 전 · 며칠 뒤 (한국 시간 날짜로)', () => {
+    const today = kst(22, 475);
+    expect(dayRelative(kst(22, 1430), today)).toBe('오늘'); // 밤 11:50도 같은 날
+    expect(dayRelative(kst(21, 1430), today)).toBe('어제');
+    expect(dayRelative(kst(23, 0), today)).toBe('내일');
+    expect(dayRelative(kst(19, 0), today)).toBe('3일 전');
+    expect(dayRelative(kst(0, 0), today)).toBe('22일 전'); // 4월 30일
+    expect(dayRelative(kst(25, 0), today)).toBe('3일 뒤');
   });
 });
 

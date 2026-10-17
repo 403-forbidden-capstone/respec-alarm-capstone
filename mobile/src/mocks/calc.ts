@@ -9,25 +9,38 @@ import { db, kst, timelines, TODAY, type MockAppointment } from './data';
 
 // ALG-01: 출발 = 약속 − 여유 − 이동, 기상 = 출발 − 예측 준비(P80)
 // 그날 첫 일정이 아니면(기상 알람 없음) 준비 알람만. 준비 알람은 기상 뒤 준비 전 활동만큼 뒤
+// a.kinds가 있으면 H05에서 고른 종류만 — 도착 목표는 울리는 알람이 하나라도 있을 때만, 하나도 없으면 빈 목록(알람 없는 일정)
+// a.manual이 있으면 직접 고른 이동 · 준비 시간 · 알람 시각이 자동 계산보다 먼저 (D42 C). 직접 고른 알람은 auto에 자동 계산값을 남김
+//   준비 알람은 (직접 고른 시각을 포함한) 기상 시각 뒤 — 기상을 옮기면 준비도 같은 간격으로 따라옴
 export function alarmChain(a: MockAppointment): AlarmTime[] {
-  const depart = addMinutes(a.at, -(a.bufferMinutes + a.travelMinutes));
-  const alarm = (kind: AlarmTime['kind'], at: Date): AlarmTime => ({
-    id: `${a.id}:${kind}`,
-    kind,
-    at,
-    enabled: kind === 'ARRIVE' || !db.disabledKinds.has(`${a.id}:${kind}`),
-  });
+  const travel = a.manual?.travelMinutes ?? a.travelMinutes;
+  const prepare = a.manual?.predictedPrepMinutes ?? a.predictedPrepMinutes;
+  const depart = addMinutes(a.at, -(a.bufferMinutes + travel));
+  const alarm = (kind: AlarmTime['kind'], auto: Date): AlarmTime => {
+    const picked = kind === 'ARRIVE' ? undefined : a.manual?.times?.[kind]; // 도착 목표는 약속에 묶여 직접 고르지 않음
+    const manual = picked != null && picked.getTime() !== auto.getTime();
+    return {
+      id: `${a.id}:${kind}`,
+      kind,
+      at: manual ? picked : auto,
+      enabled: kind === 'ARRIVE' || !db.disabledKinds.has(`${a.id}:${kind}`),
+      ...(manual ? { auto } : {}),
+    };
+  };
   const list: AlarmTime[] = [];
   if (a.withWake) {
-    const wake = addMinutes(depart, -a.predictedPrepMinutes);
-    list.push(alarm('WAKE', wake));
-    if (a.beforePrepMinutes > 0) list.push(alarm('PREPARE', addMinutes(wake, a.beforePrepMinutes)));
+    const wake = alarm('WAKE', addMinutes(depart, -prepare));
+    list.push(wake);
+    if (a.beforePrepMinutes > 0) list.push(alarm('PREPARE', addMinutes(wake.at, a.beforePrepMinutes)));
   } else {
-    list.push(alarm('PREPARE', addMinutes(depart, -a.predictedPrepMinutes)));
+    list.push(alarm('PREPARE', addMinutes(depart, -prepare)));
   }
   list.push(alarm('DEPARTURE', depart));
   list.push(alarm('ARRIVE', addMinutes(a.at, -a.bufferMinutes)));
-  return list;
+  const kinds = a.kinds;
+  if (!kinds) return list;
+  const made = list.filter((x) => x.kind === 'ARRIVE' || kinds.includes(x.kind));
+  return made.some((x) => x.kind !== 'ARRIVE') ? made : [];
 }
 
 // ALG-02: 중요도 점수 + 최근 4주 늦잠 지각 2회 이상이면 1 → 0~2
