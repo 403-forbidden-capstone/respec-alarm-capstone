@@ -13,6 +13,7 @@ mobile/.gitignore
 
 # 네이티브 폴더 — npx expo prebuild가 매번 새로 만듦
 mobile/android/
+mobile/modules/*/android/build/
 mobile/ios/
 .kotlin/
 
