@@ -5,7 +5,7 @@ import android.content.Context
 import android.content.Intent
 import android.widget.Toast
 
-// 알림 버튼 처리: WAKE 알림의 "미루기", 소리 없는 알림의 원탭 버튼
+// 알림 버튼 처리: WAKE 알림의 "미루기", 일정 알림의 원탭 버튼
 // WAKE 알림의 "해제"는 앱을 열어야 해서(알림 버튼 → 리시버 → 화면은 12부터 막힘) AlarmActionActivity가 맡음
 class AlarmActionReceiver : BroadcastReceiver() {
   companion object {

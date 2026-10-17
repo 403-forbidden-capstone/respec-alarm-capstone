@@ -64,7 +64,7 @@ object AlarmController {
     fire(context, alarm.alarmId)
   }
 
-  /** 알람 시각이 됨 (AlarmReceiver) — 기록을 남기고 WAKE는 소리 서비스, 나머지는 소리 없는 알림 */
+  /** 알람 시각이 됨 (AlarmReceiver) — 기록을 남기고 WAKE는 소리 서비스, 나머지는 일정 알림(알림음 · 진동 한 번) */
   fun fire(context: Context, id: String) {
     val current = AlarmStorage.get(context, id) ?: return
     val plan = current.plan
@@ -82,9 +82,9 @@ object AlarmController {
     AlarmEventLog.append(context, id, current.type, "TRIGGERED", sequenceNo = ringCount)
 
     if (!plan.sound) {
-      // 소리 없는 알림은 한 번 알리면 끝 (미루기 · 다시 울림 없음). 원탭 응답은 알림이 인텐트에 실어 가짐
+      // 일정 알림은 한 번 알리면 끝 (미루기 · 다시 울림 없음). 원탭 응답은 알림이 인텐트에 실어 가짐
       AlarmStorage.remove(context, id)
-      AlarmNotifications.showSilent(context, next)
+      AlarmNotifications.showNotice(context, next)
       return
     }
 
@@ -159,18 +159,18 @@ object AlarmController {
     if (alarm != null && openApp && alarm.type == "WAKE") openWakeScreen(context, id)
   }
 
-  /** 소리 없는 알림의 원탭 버튼 — 기록만 남기고 알림을 지움 */
+  /** 일정 알림의 원탭 버튼 — 기록만 남기고 알림을 지움 */
   fun acknowledge(context: Context, id: String, alarmType: String, eventType: String) {
     // 울림(TRIGGERED)이 1번이었으므로 회차는 1
     AlarmEventLog.append(context, id, alarmType, eventType, sequenceNo = 1)
-    AlarmNotifications.cancelSilent(context, id)
+    AlarmNotifications.cancelNotice(context, id)
   }
 
   /** JS의 cancel — 알람을 없앰(해제 기록은 남기지 않음). 울리는 중이면 멈춤 */
   fun cancel(context: Context, id: String) {
     AlarmScheduler.cancelPending(context, id)
     AlarmStorage.remove(context, id)
-    AlarmNotifications.cancelSilent(context, id)
+    AlarmNotifications.cancelNotice(context, id)
     AlarmPlaybackService.stopIfRinging(context, listOf(id))
   }
 
@@ -178,10 +178,10 @@ object AlarmController {
     AlarmStorage.all(context).forEach { alarm ->
       AlarmScheduler.cancelPending(context, alarm.alarmId)
       AlarmStorage.remove(context, alarm.alarmId)
-      AlarmNotifications.cancelSilent(context, alarm.alarmId)
+      AlarmNotifications.cancelNotice(context, alarm.alarmId)
     }
-    // 이미 울려서 저장소에서 지워진 무음 알림도 지움 (로그아웃 정리 뒤 남은 알림의 원탭이 기록을 쌓지 않게)
-    AlarmNotifications.cancelAllSilent(context)
+    // 이미 울려서 저장소에서 지워진 일정 알림도 지움 (로그아웃 정리 뒤 남은 알림의 원탭이 기록을 쌓지 않게)
+    AlarmNotifications.cancelAllNotices(context)
     AlarmPlaybackService.stop(context)
   }
 
