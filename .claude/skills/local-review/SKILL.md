@@ -20,7 +20,7 @@ Actions의 Claude 자동 리뷰(`.github/workflows/claude-review.yml`)와 같은
 gh pr view <N> --json number,title,isDraft,author,baseRefName,headRefName,headRefOid,files,labels,body,comments,url,additions,deletions
 ```
 
-- 건너뜀 (댓글 없이 채팅에 한 줄): 초안 · 제목 `[WIP]` · 바뀐 파일이 전부 `.md` 또는 `docs/` 아래 (Actions 리뷰와 같은 기준)
+- 건너뜀: 초안 · 제목 `[WIP]` · 바뀐 파일이 전부 `.md` 또는 `docs/` 아래 (Actions 리뷰와 같은 기준). 리뷰를 돌렸는지 PR에서 보이게 한 줄 댓글을 남김: `로컬 리뷰 건너뜀 — <이유>` + `<!-- local-review:skipped -->`. 초안 · `[WIP]`는 준비 완료로 바뀌면 다시 부름
 - `comments`에 로컬 리뷰 댓글(`<!-- local-review -->`)이 이미 있으면 다시 돌리지 않음 (아래 "다시 리뷰")
 - 작성자가 목록에 없으면 하지 않음
 - 깊이를 정함 (`pr-review` Step 0, 위험 경로는 체크리스트 "깊이"). 작성자가 아니라 바뀐 내용으로 정함
