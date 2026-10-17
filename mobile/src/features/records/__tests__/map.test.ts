@@ -124,10 +124,16 @@ describe('일간 — 설정한 값', () => {
     expect('past' in plannedRow(row(), null)).toBe(false);
   });
 
-  it('꺼 둔 알람은 빼고 도착 목표는 늘 넣음', () => {
-    expect(isPlanned({ alarm_type: 'WAKE', is_enabled: false })).toBe(false);
-    expect(isPlanned({ alarm_type: 'WAKE', is_enabled: true })).toBe(true);
-    expect(isPlanned({ alarm_type: 'ARRIVE', is_enabled: false })).toBe(true);
+  it('꺼 둔 알람은 도착 목표까지 빼고 켜진 알람만 넣음 (일정을 통째로 꺼 둔 날 도착 목표만 남지 않게)', () => {
+    expect(isPlanned({ is_enabled: false })).toBe(false);
+    expect(isPlanned({ is_enabled: true })).toBe(true);
+    const rows = [
+      { alarm_type: 'WAKE', is_enabled: false },
+      { alarm_type: 'PREPARE', is_enabled: false },
+      { alarm_type: 'ARRIVE', is_enabled: false },
+    ];
+    expect(rows.filter(isPlanned)).toEqual([]);
+    expect([{ alarm_type: 'WAKE', is_enabled: true }, { alarm_type: 'ARRIVE', is_enabled: true }].filter(isPlanned)).toHaveLength(2);
   });
 });
 

@@ -166,7 +166,7 @@ describe('R02 일간', () => {
             alarm('WAKE', '2026-10-18T22:20:00Z'), // 7:20 — 지난 알람
             alarm('PREPARE', '2026-10-18T22:30:00Z', { is_enabled: false }), // 꺼 둠 — 뺌
             alarm('DEPARTURE', '2026-10-19T02:00:00Z'), // 11:00 — 아직 안 지남
-            alarm('ARRIVE', '2026-10-19T02:50:00Z', { is_enabled: false }), // 도착 목표는 늘 넣음
+            alarm('ARRIVE', '2026-10-19T02:50:00Z'), // 울리는 알람이 켜져 있어 도착 목표도 켜져 있음
           ],
         };
       }
@@ -198,6 +198,17 @@ describe('R02 일간', () => {
       '2026-10-19T15:00:00.000Z',
       'user-1',
     ]);
+  });
+
+  it('일정을 통째로 꺼 둔 날은 도착 목표까지 설정한 값에 없음 (도착 목표만 남지 않게)', async () => {
+    reply((c) => {
+      if (c.table === 'alarms') {
+        return { data: [alarm('WAKE', '2026-10-18T22:20:00Z', { is_enabled: false }), alarm('DEPARTURE', '2026-10-19T02:00:00Z', { is_enabled: false }), alarm('ARRIVE', '2026-10-19T02:50:00Z', { is_enabled: false })] };
+      }
+      return { data: [] };
+    });
+    const d = await getDay(new Date('2026-10-19T05:00:00Z'));
+    expect(d.planned).toEqual([]);
   });
 
   it('생활 기록에만 있는 날(달력에 점은 있는데 울림 기록은 없는 주말)도 일간에 기상 확인이 보임', async () => {

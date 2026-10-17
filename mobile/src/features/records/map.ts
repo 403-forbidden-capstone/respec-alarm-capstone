@@ -72,9 +72,11 @@ export type EventRow = Pick<Tables<'alarm_events'>, 'event_id' | 'event_type' | 
 
 const alarmName = (type: Enums<'alarm_type'>) => (type === 'ROUTINE' ? '루틴 알람' : `${KIND_LABEL[type]} 알람`);
 
-// 울리는 알람과 도착 목표만 "설정한 값"에 넣음 — 꺼 둔 알람은 안 울리니 뺌 (도착 목표는 꺼짐 개념이 없어 항상)
-export function isPlanned(row: Pick<PlannedAlarmRow, 'alarm_type' | 'is_enabled'>): boolean {
-  return row.alarm_type === 'ARRIVE' || row.is_enabled;
+// 켜져 있는 알람만 "설정한 값"에 넣음 — 꺼 둔 알람은 안 울리니 뺌
+//   도착 목표(ARRIVE)도 같은 규칙: 화면(H03)은 도착 목표를 늘 켜짐으로 그리지만 DB 행은 울리는 알람(기상 · 준비 · 출발)이 하나라도 켜져 있을 때만 켜 두므로
+//   (realWrite mirrorArrive) 일정을 통째로 꺼 둔 날에 도착 목표만 "설정한 값"에 남지 않음
+export function isPlanned(row: Pick<PlannedAlarmRow, 'is_enabled'>): boolean {
+  return row.is_enabled;
 }
 
 // 설정한 알람 한 줄. nowMs를 주면(오늘) 이미 지난 알람에 past 표시
