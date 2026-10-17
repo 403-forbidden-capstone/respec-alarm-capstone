@@ -3,6 +3,8 @@
 import type { Weekday } from '@/lib/weekday';
 import type { Enums } from '@/types/database';
 
+import type { TravelProblem } from './travelConfirm';
+
 export type AlarmKind = Exclude<Enums<'alarm_type'>, 'ROUTINE'>; // 기상 · 준비 · 출발 · 도착
 export type Importance = Enums<'importance_level'>;
 export type Transport = Enums<'transport_type'>;
@@ -82,6 +84,7 @@ export type Appointment = {
   enabled: boolean; // 이 일정의 알람 전체 켜기
   alarms: AlarmTime[]; // 기상 · 준비 · 출발 · 도착 목표 순 — H05에서 고른 종류만, 하나도 없으면 빈 목록(알람 없는 일정)
   level: Level; // 지금 적용되는 강도 (배경음 기준)
+  standalone?: true; // 일정 없는 알람 (실데이터 전용, D46) — id는 알람 id, 제목은 "알람". 알람 설정(H03)은 아직 못 엶
 };
 
 // 하루 일정 한 줄 (H01) — 알람 없는 일정도 일정이라 id가 있음. 알람 없는 줄은 누를 수 없음 (일정 수정 · 삭제는 D41이 정함)
@@ -127,6 +130,8 @@ export type AlarmPreview = {
   autoTravelMinutes: number; // 출발 위치 · 이동 수단으로 다시 계산한 자동값
   predictedPrepMinutes: number; // 적용될 준비 시간
   autoPredictedPrepMinutes: number;
+  // 실데이터 전용 — 길찾기를 못 해 저장하면 이동시간 확인이 필요한 상태 (ESTIMATE = 직선거리 어림, CACHED = 내 지난 이동 중앙값) 또는 직접 입력이 필요한 상태 (좌표 없음). 없으면 문제 없음
+  travelProblem?: TravelProblem;
 };
 
 // 알람 설정(H03)에서 저장 전까지 들고 있는 값 — 저장할 때 한 번에 반영
@@ -140,7 +145,11 @@ export type NextAlarm = { appointment: Appointment; alarm: AlarmTime };
 // 미룬 알람 (H01) — 다시 울릴 때까지 홈에 보이고 취소할 수 있음
 export type Snooze = { alarmId: string; kind: RingKind; appointmentTitle: string; at: Date; minutes: number };
 
-export type Place = { name: string; travelMinutes: number };
+// 미루기 취소의 결과 — wakeCheck = 기상 알람의 미루기를 취소해 해제로 기록했으니 기상 확인(H08)으로 이어가야 함 (실데이터만, 가짜 데이터는 늘 false)
+export type CancelSnoozeResult = { wakeCheck: boolean };
+
+// 장소 — 가짜 데이터는 이름 + 집 기준 이동시간, 실데이터(place-search)는 이름 + 주소 + 좌표 (좌표가 있어야 길찾기가 됨)
+export type Place = { name: string; travelMinutes?: number; address?: string; lat?: number; lng?: number };
 
 // 새 일정 입력값 (H05)
 export type AppointmentDraft = {
@@ -149,6 +158,8 @@ export type AppointmentDraft = {
   time: string; // 14:00
   repeat: Weekday[]; // 반복 요일 (월요일부터) — 비어 있으면 반복 없음. 저장할 때는 RRULE (repeat.ts)
   place: string;
+  placeLat?: number; // 고른 장소의 좌표 (place-search) — 가짜 데이터에는 없음. 없으면 listPlaces가 기억해 둔 이름 → 좌표를 씀
+  placeLng?: number;
   transport: Transport;
   importance: Importance;
   items: string; // 쉼표로 구분
@@ -166,6 +177,17 @@ export type Estimate = {
   residualP80: number; // 개인 오차 P80 (분)
   sameDayWake: boolean; // 같은 날 앞선 일정에 기상 알람이 있어 외출 준비만
   latePoint: number; // 최근 4주 늦잠 지각 점수 (강도 계산)
+  // 실데이터 전용 — 서버가 계산한 이동시간의 근거 한 줄 ("길찾기 기준" · "대략적인 값이에요 · 확인이 필요해요")과 확인 필요 여부. 없으면 목업 문구
+  travelNote?: string;
+  travelNeedsConfirm?: boolean;
+  // 실데이터 전용 — 저장(alarm-commit)에 그대로 쓸 요청 조각. 화면은 읽지 않고 adjustEstimate가 펼쳐서 넘기기만 함
+  commit?: EstimateCommit;
+};
+
+// 확인 시트에서 보여 준 값을 그대로 저장하려고 들고 가는 것 — alarm-suggest에 보낸 요청(appointment · participant · kinds)과 서버가 돌려준 이동 출처
+export type EstimateCommit = {
+  body: Record<string, unknown>;
+  travelSource: 'API' | 'MANUAL' | 'CACHED' | 'ESTIMATE';
 };
 
 // 울림 화면 (H07) — 실제 울림은 알람 코어(네이티브)

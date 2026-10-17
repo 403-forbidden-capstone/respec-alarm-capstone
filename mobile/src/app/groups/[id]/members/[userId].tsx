@@ -3,10 +3,10 @@ import { StyleSheet, View } from 'react-native';
 
 import { Button, Card, EmptyState, LoadError, Loading, Screen, Text, Timeline, toast, TopBar } from '@/components/ui';
 import { getMemberWake, sendWakePing } from '@/features/social/api';
+import { useWakeLoad } from '@/features/social/hooks/useGroupWake';
 import { MemberAlarmCard } from '@/features/social/components/MemberAlarmCard';
 import { Note } from '@/features/social/components/Note';
 import { formatTime } from '@/lib/format';
-import { useLoad } from '@/lib/useLoad';
 import { useAction } from '@/lib/useAction';
 import { backOrHome } from '@/lib/nav';
 
@@ -14,7 +14,7 @@ import { backOrHome } from '@/lib/nav';
 // 이 그룹 구성원이고 나에게 기상 상태 조회 권한을 줬을 때만 보임 (api가 아니면 null). 권한은 있는데 오늘 알람이 없으면 그렇게 알림
 export default function MemberWakeScreen() {
   const { id, userId } = useLocalSearchParams<{ id: string; userId: string }>();
-  const { data, error, reload } = useLoad(() => getMemberWake(id, userId));
+  const { data, error, reload } = useWakeLoad((date) => getMemberWake(id, userId, date), () => [id]); // 그룹 기상 신호가 오면 다시 읽음
   const { run } = useAction();
 
   if (data === undefined) {
@@ -34,7 +34,7 @@ export default function MemberWakeScreen() {
     );
   }
 
-  const { person: p, groupName, alarm, timeline, firstAlarmAt } = data;
+  const { person: p, groupName, alarm, timeline, firstAlarmAt, noGroupAppointment } = data;
 
   const ping = () =>
     run(async () => {
@@ -72,6 +72,9 @@ export default function MemberWakeScreen() {
             )}
           </Card>
         </>
+      ) : noGroupAppointment ? (
+        // 그 그룹의 약속이 있는 날에만 기상 상태를 줌 (D57) — 알람이 없는 것과 다름
+        <EmptyState title="오늘은 그룹 약속이 없어요" body={`'${groupName}' 그룹의 약속이 있는 날에만 ${p.short}님의 기상 상태를 볼 수 있어요.`} />
       ) : (
         <EmptyState title="오늘은 알람이 없어요" body={`${p.short}님이 오늘 맞춰 둔 기상 알람이 없어요.`} />
       )}

@@ -5,10 +5,10 @@ import { Button, Card, KeyValueRow, Screen, SectionHeader, Text, TopBar } from '
 import { useAuth } from '@/features/auth/AuthProvider';
 import { DataModeToggle } from '@/features/auth/DataModeToggle';
 import type { TransportType } from '@/features/profile/types';
-import { signOut } from '@/lib/auth';
 import { userMessage } from '@/lib/errors';
-import { canUseRealData } from '@/lib/mode';
+import { canUseRealData, modeLocked } from '@/lib/mode';
 import { backOrHome } from '@/lib/nav';
+import { signOutAndCleanup } from '@/lib/session';
 
 const PROVIDER_NAME: Record<string, string> = { kakao: '카카오', google: 'Google' };
 const TRANSPORT_NAME: Record<TransportType, string> = {
@@ -55,7 +55,7 @@ export default function SettingsScreen() {
           <Button
             label="로그아웃"
             variant="ghost"
-            onPress={() => signOut().catch((e) => setError(userMessage(e, '로그아웃하지 못했어요')))}
+            onPress={() => signOutAndCleanup().catch((e) => setError(userMessage(e, '로그아웃하지 못했어요')))}
           />
           {error ? (
             <Text variant="small" tone="warn">
@@ -65,15 +65,20 @@ export default function SettingsScreen() {
         </View>
       ) : (
         <Text variant="small">
-          {canUseRealData ? '실데이터 모드로 바꾸면 로그인 정보가 여기에 보여요.' : '로그인을 붙이면 로그인 정보가 여기에 보여요.'}
+          {canUseRealData ? '실데이터 모드로 바꾸면 로그인 정보가 여기에 보여요.' : '이 빌드에서는 실데이터를 쓸 수 없어 로그인 정보가 없어요.'}
         </Text>
       )}
 
-      <SectionHeader title="개발" right={canUseRealData ? undefined : '실데이터 아직 안 붙임'} />
-      <DataModeToggle />
-      <Text variant="caption" style={styles.note}>
-        가짜 데이터는 목업 시나리오(5월 22일)로 로그인 없이 돌아요. 화면 목록은 /dev/screens
-      </Text>
+      {/* 폰 출시용 빌드는 실데이터로 고정이라 개발 절이 없음 (lib/modePolicy.ts) */}
+      {modeLocked ? null : (
+        <>
+          <SectionHeader title="개발" right={canUseRealData ? undefined : '실데이터를 쓸 수 없음'} />
+          <DataModeToggle />
+          <Text variant="caption" style={styles.note}>
+            가짜 데이터는 목업 시나리오(5월 22일)로 로그인 없이 돌아요. 화면 목록은 /dev/screens
+          </Text>
+        </>
+      )}
     </Screen>
   );
 }

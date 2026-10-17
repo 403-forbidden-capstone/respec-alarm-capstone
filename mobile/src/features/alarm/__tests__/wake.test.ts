@@ -3,7 +3,7 @@ import { describe, expect, it } from '@jest/globals';
 import { formatTime } from '@/lib/format';
 import { kst } from '@/mocks/data';
 
-import { formatUsage, judgeLines, thetaReachedAt, usedMinutes, usageSummary, type UseSpan } from '../wake';
+import { evaluateWake, formatUsage, judgeLines, pickAlarmId, pickDismissedAt, thetaReachedAt, usedMinutes, usageSummary, WAKE_THETA_MINUTES, type UseSpan } from '../wake';
 
 const dismissed = kst(22, 480); // 오전 8:00에 해제
 const demo: UseSpan[] = [
@@ -78,5 +78,86 @@ describe('H08 화면 글자 — 소수 분 대신 분 · 초, 내부 용어 대�
     for (const line of [...judgeLines(0.4, 0, 1), ...judgeLines(3.2, 1.4, 1), formatUsage(3.2)]) {
       expect(line).not.toMatch(/θ|\d\.\d|뒤쪽/);
     }
+  });
+});
+
+describe('H08 주소에서 알람 id 읽기', () => {
+  it('알람 코어 딥링크(alarmId)와 앱 안 길(alarm)을 둘 다 읽고, 둘 다 있으면 딥링크가 먼저', () => {
+    expect(pickAlarmId({ alarmId: 'native-1' })).toBe('native-1');
+    expect(pickAlarmId({ alarm: 'in-app-1' })).toBe('in-app-1');
+    expect(pickAlarmId({ alarmId: 'native-1', alarm: 'in-app-1' })).toBe('native-1');
+  });
+
+  it('배열이면 첫 값, 비었으면 없음', () => {
+    expect(pickAlarmId({ alarmId: ['a', 'b'] })).toBe('a');
+    expect(pickAlarmId({ alarmId: '', alarm: 'in-app-1' })).toBe('in-app-1');
+    expect(pickAlarmId({})).toBeUndefined();
+    expect(pickAlarmId({ alarmId: [] })).toBeUndefined();
+  });
+});
+
+describe('H08 실데이터 판정 (evaluateWake)', () => {
+  const at = (minutesAfterDismiss: number) => new Date(dismissed.getTime() + minutesAfterDismiss * 60_000);
+
+  it('θ는 1분 (목업 기본값 · 7장 T_active)', () => {
+    expect(WAKE_THETA_MINUTES).toBe(1);
+  });
+
+  it('관찰 10분 동안은 관찰 중 — 조건을 채웠어도 끝나야 판정', () => {
+    const result = evaluateWake({ dismissedAt: dismissed, now: at(6), spans: demo });
+    expect(result).toEqual({ phase: 'observing', usage: 3.2, recent: 1.4, reachedAt: null });
+  });
+
+  it('10분이 끝났고 누적 사용 ≥ θ 그리고 뒤쪽 5분 사용 > 0이면 자동 확정, 기록 시각은 θ를 넘은 시각 (D14)', () => {
+    const result = evaluateWake({ dismissedAt: dismissed, now: at(10), spans: demo });
+    expect(result.phase).toBe('auto');
+    expect(result.reachedAt!.getTime() - dismissed.getTime()).toBe(90_000);
+  });
+
+  it('나중에 열어도 같은 결과 (OS가 보관한 사용 구간으로 판정)', () => {
+    expect(evaluateWake({ dismissedAt: dismissed, now: at(180), spans: demo })).toEqual(evaluateWake({ dismissedAt: dismissed, now: at(10), spans: demo }));
+  });
+
+  it('누적 사용이 모자라면 확인 알림(prompt)', () => {
+    expect(evaluateWake({ dismissedAt: dismissed, now: at(11), spans: [[0.2, 0.6]] })).toMatchObject({ phase: 'prompt', usage: 0.4, recent: 0, reachedAt: null });
+  });
+
+  it('누적은 채웠어도 뒤쪽 5분에 사용이 없으면 확인 알림 (알람 끄고 잠깐 보고 다시 잠든 경우)', () => {
+    expect(evaluateWake({ dismissedAt: dismissed, now: at(11), spans: [[0.5, 2.5]] })).toMatchObject({ phase: 'prompt', usage: 2, recent: 0 });
+  });
+
+  it('사용 구간을 읽을 수 없으면(권한 없음) 바로 확인 알림 — 일어났어요 버튼만', () => {
+    expect(evaluateWake({ dismissedAt: dismissed, now: at(1), spans: null })).toEqual({ phase: 'prompt', usage: 0, recent: 0, reachedAt: null });
+  });
+
+  it('소수 첫째 자리로 줄인 값이 아니라 실제 합으로 θ와 비교', () => {
+    // 0.96분 사용: 화면에는 1.0으로 보여도 θ(1분)에는 못 미침
+    expect(evaluateWake({ dismissedAt: dismissed, now: at(11), spans: [[7, 7.96]] }).phase).toBe('prompt');
+  });
+
+  it('θ를 바꿔 넘길 수 있음', () => {
+    expect(evaluateWake({ dismissedAt: dismissed, now: at(11), spans: demo, theta: 4 }).phase).toBe('prompt');
+  });
+});
+
+describe('H08 해제 기록이 여러 개일 때 (pickDismissedAt)', () => {
+  const t = (m: number) => kst(22, 480 + m);
+
+  it('확정 전이면 마지막 해제 — 다시 울린 뒤 끄면 그 시각부터 10분', () => {
+    expect(pickDismissedAt([t(0), t(8)], null)).toEqual(t(8));
+    expect(pickDismissedAt([t(8), t(0)], null)).toEqual(t(8));
+  });
+
+  it('확정 뒤면 확정 직전의 해제 — 확정 뒤 다른 울림이 있어도 판정이 안 바뀜', () => {
+    expect(pickDismissedAt([t(0), t(8), t(30)], t(12))).toEqual(t(8));
+  });
+
+  it('확정보다 앞선 해제가 없으면 마지막 해제', () => {
+    expect(pickDismissedAt([t(20)], t(5))).toEqual(t(20));
+  });
+
+  it('해제 기록이 없으면 null', () => {
+    expect(pickDismissedAt([], null)).toBeNull();
+    expect(pickDismissedAt([], t(5))).toBeNull();
   });
 });

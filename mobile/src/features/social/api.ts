@@ -1,17 +1,25 @@
 // ② 알람 공유 · 기상 확인 — 데이터 접근은 이 파일에서만 합니다.
-// 지금은 src/mocks의 가짜 데이터를 돌려주고, Supabase가 붙으면 이 파일 안에서만 바꿉니다.
-//   읽기 · 쓰기 위치는 docs/screen-data-map.md (G01 · F02 · F03 · G02 · G03 · G04, 권한 합집합은 DB 함수)
+// 가짜 모드(웹 미리보기 · ?mode=mock)는 src/mocks의 가짜 데이터를 돌려주고, 실데이터 모드는 함수 맨 앞에서 ./real로 넘깁니다 (P6).
+//   읽기 · 쓰기 위치는 docs/screen-data-map.md (G01 · F02 · F03 · G02 · G03 · G04, 권한 합집합은 앱에서 합침 — grants.ts)
+//   date = 그룹 기상 신호(lib/realtime)가 알려 준 날 (YYYY-MM-DD). 실데이터만 씀 — get_group_wake_status의 p_date, 없으면 내 시간대의 오늘
 import { now } from '@/lib/clock';
+import { UserError } from '@/lib/errors';
+import { dateParts } from '@/lib/format';
+import { isMock } from '@/lib/mode';
 import { memberState, orGrants } from '@/mocks/calc';
 import { db, kst, memberAlarms, people, timelines, TODAY, type MockGroup, type MockMemberAlarm, type MockPerson } from '@/mocks/data';
 
+import * as real from './real';
 import {
+  type CreatedGroup,
   type FinalGrant,
   type FriendItem,
+  type FriendRelation,
   type GrantRow,
   type GroupDetail,
   type GroupItem,
   type GroupSummary,
+  type HandleSearchResult,
   type MemberAlarm,
   type MemberWake,
   type PermissionSet,
@@ -20,6 +28,7 @@ import {
   type RelationId,
   type ShareLogItem,
   type SharedAlarms,
+  type SharedChangeResult,
   type TimelineEntry,
 } from './types';
 
@@ -52,8 +61,15 @@ function wokeCount(groupId: string) {
   return (db.groups[groupId]?.members ?? []).filter((p) => (p === 'me' || timelines[p]) && memberState(p, t).woke).length;
 }
 
+// 새 UI용 가짜 상태 — 앱을 다시 열 때까지만 (mocks/data.ts는 안 고침)
+const sentRequests = new Set<string>(); // 내가 친구 요청을 보낸 사람
+const newInviteCodes: Record<string, string> = {}; // 다시 만든 초대 코드
+const wakeOptIns: Record<string, boolean> = {}; // 기상 공유 동의 — 목업 그룹은 이미 공유 중이라 기본 켬
+const ownedGroups = new Set(['fam']); // 내가 만든 그룹 — 목업은 가족 그룹만 내가 만든 것으로
+
 // 초대 코드 — 목업은 그룹 id에서 정해진 글자 (실데이터는 그룹의 초대 코드 칼럼)
 function inviteCodeOf(g: MockGroup) {
+  if (newInviteCodes[g.id]) return newInviteCodes[g.id];
   const hash = [...g.id].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7);
   return `${g.id.toUpperCase().slice(0, 3)}-${hash.toString(36).toUpperCase().padStart(4, '0').slice(-4)}`;
 }
@@ -73,23 +89,27 @@ function toMemberAlarm(a: MockMemberAlarm): MemberAlarm {
 
 // 친구 목록 (G01 친구)
 export async function listFriends(): Promise<FriendItem[]> {
+  if (!isMock()) return real.listFriends();
   return db.friends.map((id) => ({ person: person(id), grantCount: givenTo(id).count }));
 }
 
 // 받은 친구 요청
 export async function listFriendRequests(): Promise<Person[]> {
+  if (!isMock()) return real.listFriendRequests();
   return db.requests.map(person);
 }
 
 // 요청 수락 — 친구가 돼도 공유는 아직 없음
 export async function acceptFriend(id: string) {
+  if (!isMock()) return real.acceptFriend(id);
   db.requests = db.requests.filter((x) => x !== id);
   if (!db.friends.includes(id)) db.friends.push(id);
   db.grants.friend[id] = none();
 }
 
 // 참여 중인 그룹 (G01 그룹)
-export async function listGroups(): Promise<GroupItem[]> {
+export async function listGroups(date?: string | null): Promise<GroupItem[]> {
+  if (!isMock()) return real.listGroups(date);
   return Object.values(db.groups).map((g) => ({
     id: g.id,
     name: g.name,
@@ -102,7 +122,8 @@ export async function listGroups(): Promise<GroupItem[]> {
 }
 
 // 홈(H01)의 그룹 기상 요약
-export async function getGroupSummary(groupId: string): Promise<GroupSummary | null> {
+export async function getGroupSummary(groupId: string, date?: string | null): Promise<GroupSummary | null> {
+  if (!isMock()) return real.getGroupSummary(groupId, date);
   const g = db.groups[groupId];
   if (!g) return null;
   const t = now();
@@ -115,7 +136,8 @@ export async function getGroupSummary(groupId: string): Promise<GroupSummary | n
 }
 
 // 그룹 상세 (G02)
-export async function getGroup(groupId: string): Promise<GroupDetail | null> {
+export async function getGroup(groupId: string, date?: string | null): Promise<GroupDetail | null> {
+  if (!isMock()) return real.getGroup(groupId, date);
   const g = db.groups[groupId];
   if (!g) return null;
   const t = now();
@@ -134,6 +156,8 @@ export async function getGroup(groupId: string): Promise<GroupDetail | null> {
       state: memberState(id, t),
       received: receivedFrom(id),
     })),
+    isOwner: ownedGroups.has(g.id),
+    wakeShareOptIn: wakeOptIns[g.id] ?? true,
   };
 }
 
@@ -141,6 +165,7 @@ export async function getGroup(groupId: string): Promise<GroupDetail | null> {
 export async function getFriendGrant(
   personId: string,
 ): Promise<{ person: Person; final: FinalGrant; groupCount: number } | null> {
+  if (!isMock()) return real.getFriendGrant(personId);
   if (!db.friends.includes(personId)) return null;
   return {
     person: person(personId),
@@ -151,6 +176,7 @@ export async function getFriendGrant(
 
 // 권한을 줄 관계 고르기 (F03) — 그룹 먼저, 그다음 친구
 export async function listRelations(): Promise<Relation[]> {
+  if (!isMock()) return real.listRelations();
   const ids: RelationId[] = [
     ...Object.keys(db.groups).map((id) => `group:${id}` as const),
     ...db.friends.map((id) => `friend:${id}` as const),
@@ -169,17 +195,20 @@ function relationOf(id: RelationId): Relation | null {
 }
 
 export async function getRelation(id: RelationId): Promise<Relation | null> {
+  if (!isMock()) return real.getRelation(id);
   return relationOf(id);
 }
 
 // 이 관계에서 내가 주는 권한 (F03 내가 공유)
 export async function getShareSettings(id: RelationId): Promise<PermissionSet> {
+  if (!isMock()) return real.getShareSettings(id);
   const [kind, key] = id.split(':');
   const set = kind === 'friend' ? db.grants.friend[key] : db.grants.group[key];
   return copy(set ?? none());
 }
 
 export async function saveShareSettings(id: RelationId, next: PermissionSet) {
+  if (!isMock()) return real.saveShareSettings(id, next);
   if (!relationOf(id)) return;
   const [kind, key] = id.split(':');
   if (kind === 'friend') db.grants.friend[key] = copy(next);
@@ -189,6 +218,7 @@ export async function saveShareSettings(id: RelationId, next: PermissionSet) {
 
 // 이 관계에서 받은 권한 (F03 받은 권한)
 export async function getReceived(id: RelationId): Promise<{ person: Person; permissions: PermissionSet }[]> {
+  if (!isMock()) return real.getReceived(id);
   const [kind, key] = id.split(':');
   if (kind === 'friend') {
     return (db.received[key] ?? [])
@@ -214,12 +244,13 @@ const SOURCE: Record<string, string> = {
 
 // 그 그룹의 구성원이고 나에게 기상 상태 조회 권한을 줬을 때만 (get_group_wake_status와 같게), 아니면 null
 // 권한은 있는데 오늘 알람이 없으면 alarm: null (권한이 없다는 말과 구분)
-export async function getMemberWake(groupId: string, personId: string): Promise<MemberWake | null> {
+export async function getMemberWake(groupId: string, personId: string, date?: string | null): Promise<MemberWake | null> {
+  if (!isMock()) return real.getMemberWake(groupId, personId, date);
   const g = db.groups[groupId];
   const tl = timelines[personId];
   const alarms = memberAlarms[personId];
   if (!g?.members.includes(personId) || !receivedFrom(personId).viewWake) return null;
-  if (!tl || !alarms?.length) return { person: person(personId), groupName: g.name, alarm: null, timeline: [], firstAlarmAt: null };
+  if (!tl || !alarms?.length) return { person: person(personId), groupName: g.name, alarm: null, timeline: [], firstAlarmAt: null, noGroupAppointment: false };
   const t = now().getTime();
   const timeline: TimelineEntry[] = tl
     .map(([m, label, source]) => ({ at: kst(TODAY, m), label, source: source ?? SOURCE[label] ?? '' }))
@@ -230,11 +261,13 @@ export async function getMemberWake(groupId: string, personId: string): Promise<
     alarm: toMemberAlarm(alarms[0]),
     timeline,
     firstAlarmAt: kst(TODAY, tl[0][0]),
+    noGroupAppointment: false,
   };
 }
 
 // 공유받은 알람 (G04) — 조회 권한이 없으면 알람은 비워서 줌 (alarms RLS와 같게)
 export async function getSharedAlarms(personId: string): Promise<SharedAlarms | null> {
+  if (!isMock()) return real.getSharedAlarms(personId);
   const alarms = memberAlarms[personId];
   if (!alarms) return null;
   const received = receivedFrom(personId);
@@ -252,25 +285,110 @@ export async function getSharedAlarms(personId: string): Promise<SharedAlarms | 
   };
 }
 
-export async function setSharedAlarmEnabled(personId: string, alarmId: string, enabled: boolean) {
+// 켜기 · 끄기 — 저장되고 주인에게 알림이 갔는지를 돌려줌 (알림이 실패해도 저장은 그대로)
+export async function setSharedAlarmEnabled(personId: string, alarmId: string, enabled: boolean): Promise<SharedChangeResult> {
+  if (!isMock()) return real.setSharedAlarmEnabled(personId, alarmId, enabled);
   const s = (db.sharedAlarms[alarmId] ??= { on: true, shift: 0 });
   s.on = enabled;
   db.shareLog.push({ at: now(), text: `${person(personId).short}님 알람 ${enabled ? '켬' : '끔'}` });
+  return { notified: true };
 }
 
 // 공유받은 알람 시각 옮기기 — minutes가 음수면 앞당김
-export async function shiftSharedAlarm(personId: string, alarmId: string, minutes: number) {
+export async function shiftSharedAlarm(personId: string, alarmId: string, minutes: number): Promise<SharedChangeResult> {
+  if (!isMock()) return real.shiftSharedAlarm(personId, alarmId, minutes);
   const s = (db.sharedAlarms[alarmId] ??= { on: true, shift: 0 });
   s.shift += minutes;
   db.shareLog.push({ at: now(), text: `${person(personId).short}님 알람 ${Math.abs(minutes)}분 ${minutes < 0 ? '앞당김' : '늦춤'}` });
+  return { notified: true };
 }
 
-// 공유 알람 변경 기록 — DB에는 아직 자리가 없음 (screen-data-map의 스키마 보완 후보)
+// 공유 알람 변경 기록 — DB에는 저장 자리가 없음 (D9: 저장 없이 주인에게 푸시만, 스키마 보완 3). 실데이터도 이번 실행 동안 바꾼 것만 보임 (D20 열림)
 export async function getShareLog(): Promise<ShareLogItem[]> {
+  if (!isMock()) return real.getShareLog();
   return db.shareLog.map((l) => ({ ...l }));
 }
 
-// 깨우기 알림 보내기 (G03) — 실데이터는 notify Edge Function
+// 깨우기 알림 보내기 (G03) — 실데이터는 D19가 열려 있어 서버가 거절하므로 아직 보내지 않고 "준비 중" 안내만 (UserError)
 export async function sendWakePing(personId: string) {
+  if (!isMock()) return real.sendWakePing(personId);
   db.shareLog.push({ at: now(), text: `${person(personId).short}님에게 깨우기 알림` });
+}
+
+// ---------------------------------------------------------------------------
+// 새 UI용 — 화면은 나중에 붙음. 가짜 모드는 목업 사람 · 그룹에 맞춰 최소한만 흉내
+// ---------------------------------------------------------------------------
+
+// 아이디로 사람 찾기 — @ 있어도 없어도, 대소문자 무관. 없으면 null
+export async function searchByHandle(handle: string): Promise<HandleSearchResult | null> {
+  if (!isMock()) return real.searchByHandle(handle);
+  const clean = handle.trim().replace(/^@/, '').toLowerCase();
+  const found = Object.values(people).find((p) => p.id !== 'me' && p.handle?.slice(1).toLowerCase() === clean);
+  if (!found) return null;
+  const relation: FriendRelation = db.friends.includes(found.id)
+    ? 'FRIEND'
+    : sentRequests.has(found.id)
+      ? 'SENT'
+      : db.requests.includes(found.id)
+        ? 'RECEIVED'
+        : 'NONE';
+  return { person: toPerson(found), relation };
+}
+
+// 친구 요청 보내기 — 가짜 모드는 보낸 요청으로만 기억함 (상대가 수락하는 흐름은 목업 범위 밖)
+export async function sendFriendRequest(userId: string) {
+  if (!isMock()) return real.sendFriendRequest(userId);
+  if (userId === 'me') throw new UserError('나에게는 친구 요청을 보낼 수 없어요');
+  if (!people[userId]) throw new UserError('사용자를 찾을 수 없어요');
+  if (db.friends.includes(userId) || sentRequests.has(userId) || db.requests.includes(userId)) {
+    throw new UserError('이미 친구이거나 요청이 진행 중이에요');
+  }
+  sentRequests.add(userId);
+}
+
+// 그룹 만들기 — 만든 사람(나)이 바로 참여, 초대 코드가 생김
+export async function createGroup(name: string): Promise<CreatedGroup> {
+  if (!isMock()) return real.createGroup(name);
+  const trimmed = name.trim();
+  if (!trimmed) throw new UserError('그룹 이름을 입력해 주세요');
+  if ([...trimmed].length > 50) throw new UserError('그룹 이름은 50자까지 쓸 수 있어요');
+  let n = Object.keys(db.groups).length + 1;
+  while (db.groups[`g${n}`]) n++;
+  const id = `g${n}`;
+  const { year, month } = dateParts(now());
+  db.groups[id] = { id, name: trimmed, initial: [...trimmed][0], members: ['me'], since: `${year}년 ${month}월부터 함께하는 중` };
+  db.grants.group[id] = none();
+  ownedGroups.add(id);
+  wakeOptIns[id] = false; // 만든 사람도 기상 공유 동의는 꺼진 채로 시작
+  return { id, inviteCode: inviteCodeOf(db.groups[id]) };
+}
+
+// 초대 코드로 참여 — 참여한 그룹 id. 가짜 모드의 그룹은 모두 내가 이미 참여 중이라 그 그룹 id를 돌려줌
+export async function joinGroupByCode(code: string): Promise<string> {
+  if (!isMock()) return real.joinGroupByCode(code);
+  const trimmed = code.trim().toUpperCase();
+  if (!trimmed) throw new UserError('초대 코드를 입력해 주세요');
+  const g = Object.values(db.groups).find((x) => inviteCodeOf(x) === trimmed);
+  if (!g) throw new UserError('초대 코드가 맞지 않아요');
+  if (!g.members.includes('me')) g.members.push('me');
+  return g.id;
+}
+
+// 초대 코드 새로 받기 — 만든 사람만
+export async function regenerateInviteCode(groupId: string): Promise<string> {
+  if (!isMock()) return real.regenerateInviteCode(groupId);
+  const g = db.groups[groupId];
+  if (!g || !ownedGroups.has(groupId)) throw new UserError('그룹을 만든 사람만 초대 코드를 바꿀 수 있어요');
+  const old = inviteCodeOf(g);
+  let code = old;
+  while (code === old) code = `${g.id.toUpperCase().slice(0, 3)}-${Math.random().toString(36).slice(2, 6).toUpperCase().padEnd(4, '0')}`;
+  newInviteCodes[groupId] = code;
+  return code;
+}
+
+// 이 그룹에 내 기상 상태 공유를 동의 / 취소 (D19 열림 — F03 저장은 이 값을 건드리지 않음)
+export async function setWakeShareOptIn(groupId: string, on: boolean) {
+  if (!isMock()) return real.setWakeShareOptIn(groupId, on);
+  if (!db.groups[groupId]?.members.includes('me')) throw new UserError('참여 중인 그룹이 아니에요');
+  wakeOptIns[groupId] = on;
 }

@@ -193,21 +193,24 @@ function WeekSummaryCards({ summary: s, relative, onPressDay }: { summary: WeekS
           </Text>
         ) : null}
       </Card>
-      <Card>
-        <Text variant="label" style={styles.label}>
-          {relative} AI 코칭
-        </Text>
-        <Text variant="reading">{s.coaching}</Text>
-        {/* 일기(A03)의 루틴 제안과 같은 화면(A04) — 오늘 기록을 바탕으로 만든 초안 */}
-        <View style={styles.coachAction}>
-          <Button
-            small
-            variant="ghost"
-            label="루틴 만들기"
-            onPress={() => router.push({ pathname: '/routine/[id]', params: { id: 'new', journal: dayKey(recordToday()) } })}
-          />
-        </View>
-      </Card>
+      {/* AI 코칭 글이 없으면(실데이터에서 그 주 일기가 없을 때) 카드를 접음 */}
+      {s.coaching ? (
+        <Card>
+          <Text variant="label" style={styles.label}>
+            {relative} AI 코칭
+          </Text>
+          <Text variant="reading">{s.coaching}</Text>
+          {/* 일기(A03)의 루틴 제안과 같은 화면(A04) — 오늘 기록을 바탕으로 만든 초안 */}
+          <View style={styles.coachAction}>
+            <Button
+              small
+              variant="ghost"
+              label="루틴 만들기"
+              onPress={() => router.push({ pathname: '/routine/[id]', params: { id: 'new', journal: dayKey(recordToday()) } })}
+            />
+          </View>
+        </Card>
+      ) : null}
     </>
   );
 }

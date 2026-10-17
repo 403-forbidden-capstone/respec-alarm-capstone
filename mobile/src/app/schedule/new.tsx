@@ -57,7 +57,10 @@ export default function NewScheduleScreen() {
     const day = parseDayParam(params.date);
     return defaultDraft(day && dayKey(day) >= dayKey(now()) ? day : tomorrow(now()));
   });
-  const [draft, setDraft] = useState(initial);
+  const [edited, setDraft] = useState(initial);
+  // 실데이터는 장소를 목록에서 골라야 해서 처음 값이 비어 있음 — 아직 안 골랐으면 목록의 첫 곳을 미리 골라 둔 것으로 보여 줌 (처음 값 그대로라 나갈 때 묻지 않음). 가짜 데이터는 처음부터 있음
+  const preset = edited.place === '' ? places?.[0] : undefined;
+  const draft = preset ? { ...edited, place: preset.name, placeLat: preset.lat, placeLng: preset.lng } : edited;
   const [itemList, setItemList] = useState(() => addItems([], initial.items));
   const [itemText, setItemText] = useState('');
   const [titleError, setTitleError] = useState(false);
@@ -77,7 +80,7 @@ export default function NewScheduleScreen() {
     dayKey(draft.date) !== dayKey(initial.date) ||
     draft.time !== initial.time ||
     repeatToRrule(draft.repeat) !== repeatToRrule(initial.repeat) ||
-    draft.place !== initial.place ||
+    edited.place !== initial.place ||
     draft.transport !== initial.transport ||
     draft.importance !== initial.importance ||
     RING_KINDS.some((kind) => draft.alarms[kind] !== initial.alarms[kind]);
@@ -189,7 +192,11 @@ export default function NewScheduleScreen() {
           label="장소"
           value={draft.place}
           options={(places ?? []).map((p) => [p.name, p.name] as const)}
-          onChange={(v) => set('place', v)}
+          onChange={(name) => {
+            // 실데이터는 고른 장소의 좌표도 초안에 담아 계산 · 저장 요청까지 가져감 (가짜 데이터는 좌표가 없음)
+            const picked = places?.find((p) => p.name === name);
+            setDraft((d) => ({ ...d, place: name, placeLat: picked?.lat, placeLng: picked?.lng }));
+          }}
         />
         <SelectRow<Transport>
           label="이동 수단"
@@ -329,7 +336,7 @@ function CalcSteps({
   const baseKind = a.withWake ? 'WAKE' : 'PREPARE';
   const base = addMinutes(a.at, -(a.bufferMinutes + a.travelMinutes + a.predictedPrepMinutes));
   const steps: [string, string][] = [
-    [`이동시간 ${a.travelMinutes}분`, `카카오 길찾기 · ${TRANSPORT_LABEL[a.transport]} 최소 소요시간`],
+    [`이동시간 ${a.travelMinutes}분`, e.travelNote ? `${e.travelNote} · ${TRANSPORT_LABEL[a.transport]}` : `카카오 길찾기 · ${TRANSPORT_LABEL[a.transport]} 최소 소요시간`],
     [`공통 P80 ${e.commonP80}분`, `분위수 회귀 τ = 0.8 · ${e.sameDayWake ? '같은 날 기상 알람이 있어 외출 준비만' : '기상부터 출발까지'}`],
     [
       `개인 보정 +${e.correction}분`,
@@ -382,6 +389,12 @@ function CalcSteps({
           {arrive ? (
             <Text variant="label" tone="sub" style={styles.passedNote}>
               도착 목표 {formatTime(arrive.at)}
+            </Text>
+          ) : null}
+          {/* 실데이터에서 길찾기를 못 해 직선거리로 어림한 이동시간이면 저장 전에 알림 — 저장하면 이 값을 확인한 것으로 보고 저장 */}
+          {e.travelNeedsConfirm ? (
+            <Text variant="label" tone="warn" style={styles.passedNote}>
+              이동시간 {a.travelMinutes}분은 대략적인 값이에요. 저장하면 이 값으로 맞춰요
             </Text>
           ) : null}
           {blocked ? (

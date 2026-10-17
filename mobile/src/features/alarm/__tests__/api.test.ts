@@ -110,6 +110,31 @@ describe('H05 반복 저장 (D44)', () => {
   });
 });
 
+describe('H05 그날 첫 일정만 기상 알람 (약속 시각 기준, 서버와 같은 hasEarlierWake)', () => {
+  const kindsOf = (alarms: { kind: string }[]) => alarms.map((x) => x.kind);
+  const on23 = (time: string): AppointmentDraft => ({ ...defaultDraft(kst(23, 0), morning), title: '스터디', time });
+
+  it('9시 수업(기상 있음)보다 이른 8:30 일정은 그날 첫 일정이라 기상 알람이 있음 — 수업의 기상 알람이 더 일찍 울려도', async () => {
+    const e = await estimateAppointment(on23('08:30'));
+    expect(kindsOf(e.appointment.alarms)).toContain('WAKE');
+  });
+
+  it('9시 수업 뒤의 14:00 일정은 기상 없이 준비부터', async () => {
+    const e = await estimateAppointment(on23('14:00'));
+    expect(kindsOf(e.appointment.alarms)).not.toContain('WAKE');
+  });
+
+  it('앞선 일정의 기상 알람을 꺼 두면 세지 않음', async () => {
+    db.disabledKinds.add('a3:WAKE');
+    try {
+      const e = await estimateAppointment(on23('14:00'));
+      expect(kindsOf(e.appointment.alarms)).toContain('WAKE');
+    } finally {
+      db.disabledKinds.delete('a3:WAKE');
+    }
+  });
+});
+
 describe('H05 알람 종류 고르기 · 알람 없는 일정 (D46)', () => {
   const draftWith = (alarms: Partial<AppointmentDraft['alarms']>): AppointmentDraft => ({
     ...defaultDraft(kst(24, 0), morning),

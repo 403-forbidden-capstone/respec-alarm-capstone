@@ -6,15 +6,19 @@ import { Button, Card, Screen, SectionHeader, Segmented, Text, toast, TopBar } f
 import { SECTIONS } from '@/dev/screenList';
 import { useAuth } from '@/features/auth/AuthProvider';
 import { DataModeToggle, goAfterRender } from '@/features/auth/DataModeToggle';
+import { DevLoginForm } from '@/features/auth/DevLoginForm';
 import { resetOnboarding } from '@/features/profile/api';
-import { signOut } from '@/lib/auth';
 import { scenarioTime, setScenarioTime, type ScenarioTime } from '@/lib/clock';
-import { canUseRealData, useMode } from '@/lib/mode';
+import { userMessage } from '@/lib/errors';
+import { canUseRealData, devLoginVisible, modeLocked, useMode } from '@/lib/mode';
+import { signOutAndCleanup } from '@/lib/session';
 import { colors } from '@/theme';
 
 // 개발용 화면 목록 — 탭에는 없고 주소로만 들어옴: /dev/screens (앱은 respecalarm://dev/screens)
 // 목업의 데모 패널 대신 화면 번호로 바로 열고, 시나리오 시각(아침 · 전날 밤)을 바꿔 봄
-// 실데이터를 쓸 수 있을 때만(lib/flags REAL_DATA_READY) 맨 위에서 데이터 모드를 바꿈 — 로그인 · 온보딩부터 E2E로 돌릴 때
+// 실데이터를 쓸 수 있고 모드를 바꿀 수 있는 빌드(웹 · 폰 개발용, lib/modePolicy.ts)일 때만 맨 위에서 데이터 모드를 바꿈 — 로그인 · 온보딩부터 E2E로 돌릴 때
+// 폰 출시용 빌드는 모드가 실데이터로 고정이라 토글이 없음. 가짜 데이터 시나리오 시각도 가짜 모드에서만 보임
+// 실데이터 모드에서 로그인 전이면 이메일 로그인(시드 계정, 웹 · 폰 개발용만), 로그인 후에는 로그아웃(폰 알람 · 기록 정리 포함)
 // 목업에 없는 로그인 · 온보딩 · 설정은 목록에 두지 않음 (#116)
 const TIMES = [
   ['morning', '아침 오전 7:55'],
@@ -35,7 +39,7 @@ export default function ScreenListScreen() {
       toast(done);
       goAfterRender(next);
     } catch (e) {
-      toast(e instanceof Error ? e.message : '하지 못했어요');
+      toast(userMessage(e, '하지 못했어요')); // 로그아웃 오류 원문(영어 · 서버 문구)이 토스트로 새지 않게 — UserError일 때만 이유를 보임
     } finally {
       setBusy(false);
     }
@@ -53,12 +57,13 @@ export default function ScreenListScreen() {
       <Text variant="title">목업 화면 목록</Text>
       <Text variant="lead">클릭 목업(mockup.html)의 화면 번호로 바로 열어요. 가짜 데이터 모드는 목업과 같은 데이터예요.</Text>
 
-      {canUseRealData ? (
+      {canUseRealData && !modeLocked ? (
         <>
-          <SectionHeader title="데이터 모드" right={mode === 'real' ? (session ? '로그인됨' : '로그인 전') : ''} />
+          <SectionHeader title="데이터 모드" right={mode === 'real' ? (session ? `로그인됨${session.user.email ? ` · ${session.user.email}` : ''}` : '로그인 전') : ''} />
           <DataModeToggle />
         </>
       ) : null}
+      {devLoginVisible && mode === 'real' && !session ? <DevLoginForm /> : null}
       {canUseRealData && mode === 'real' && session ? (
         <View style={styles.actions}>
           <Button
@@ -66,7 +71,7 @@ export default function ScreenListScreen() {
             variant="ghost"
             label="로그아웃"
             disabled={busy}
-            onPress={() => run(signOut, '로그아웃했어요', '/login')}
+            onPress={() => run(signOutAndCleanup, '로그아웃했어요', '/login')}
           />
           <Button
             small
@@ -88,8 +93,12 @@ export default function ScreenListScreen() {
         </Text>
       ) : null}
 
-      <SectionHeader title="시나리오 시각 (가짜 데이터)" right="5월 22일 목요일" />
-      <Segmented options={TIMES} value={time} onChange={changeTime} />
+      {mode === 'mock' ? (
+        <>
+          <SectionHeader title="시나리오 시각 (가짜 데이터)" right="5월 22일 목요일" />
+          <Segmented options={TIMES} value={time} onChange={changeTime} />
+        </>
+      ) : null}
 
       {SECTIONS.map((section) => (
         <View key={section.title}>
