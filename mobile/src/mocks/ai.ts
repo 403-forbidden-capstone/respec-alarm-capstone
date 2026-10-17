@@ -4,9 +4,10 @@
 import { ringingKinds } from '@/features/alarm/schedule';
 import { defaultAlarms, KIND_LABEL, type AlarmTime, type AppointmentDraft } from '@/features/alarm/types';
 import type { ApplyStatus, JournalFact, Routine } from '@/features/routine/types';
-import { dateParts, formatTime, isSameDay, josa, minutesBetween } from '@/lib/format';
+import { dateParts, dayKey, formatTime, isSameDay, josa, minutesBetween } from '@/lib/format';
 
 import { kst, TODAY } from './data';
+import { pastDay } from './records';
 
 type ScriptLine = { who: 'ai' | 'me'; text: string } | { who: 'card' };
 
@@ -185,7 +186,10 @@ export function writeJournal({ date, me, appointment: a, events, saidAt, prev }:
     edited: prev?.edited ?? false,
     facts,
     coaching: COACHING,
-    encouragement: me.arriveAt && !late ? '오늘도 약속 시간 안에 도착했어요. 이 흐름을 이어가요.' : '내일은 조금 더 여유 있게 시작해 봐요.',
+    encouragement:
+      me.arriveAt && !late
+        ? `${isSameDay(date, kst(TODAY, 0)) ? '오늘' : '그날'}도 약속 시간 안에 도착했어요. 이 흐름을 이어가요.` // 지난 날 일기(D48)는 "그날도"
+        : '내일은 조금 더 여유 있게 시작해 봐요.',
     suggestion: prev?.suggestion ?? 'PENDING',
   };
 }
@@ -208,9 +212,36 @@ export function suggestedRoutine(sourceJournal: string | null): Routine {
   };
 }
 
+// 지난 날 일기 (D48 날짜 이동으로 열어 봄) — 지난 날 기록(mocks/records)으로 같은 방식으로 씀. 평일 몇 날만 있고 값은 그날 루틴 제안 상태
+const PAST_JOURNALS: Record<number, ApplyStatus> = { 16: 'REJECTED', 19: 'PENDING', 20: 'PENDING', 21: 'PENDING' };
+
+function pastJournals(): Record<string, MockJournal> {
+  const journals: Record<string, MockJournal> = {};
+  for (const [day, suggestion] of Object.entries(PAST_JOURNALS)) {
+    const date = kst(Number(day), 0);
+    const past = pastDay(date);
+    if (!past) continue;
+    const events = past.actual.map(([minutes, label, source]) => ({ at: kst(past.day, minutes), label, source }));
+    const at = (label: string) => events.find((e) => e.label.startsWith(label))?.at ?? null;
+    const a = past.appointment;
+    journals[dayKey(date)] = {
+      ...writeJournal({
+        date,
+        me: { wakeAt: at('기상 확인'), departAt: at('집 출발'), arriveAt: at('도착') },
+        appointment: a ? { title: a.title, place: a.place, at: kst(past.day, a.at) } : null,
+        events,
+        saidAt: null, // 대본의 말(회의 자료)은 오늘 대화 것이라 지난 날 일기에는 넣지 않음
+        prev: null,
+      }),
+      suggestion,
+    };
+  }
+  return journals;
+}
+
 // 바뀌는 값 — api.ts만 읽고 씀
 export const aiDb = {
   chat: null as MockChat | null, // AI 탭을 처음 열 때 시작
-  journals: {} as Record<string, MockJournal>, // 날짜(2025-05-22)별
+  journals: pastJournals(), // 날짜(2025-05-22)별 — 오늘 일기는 대화를 마쳐야 생김
   routines: [] as Routine[], // 저장한 루틴 (저녁 루틴)
 };

@@ -27,12 +27,21 @@ export type WeekDay = {
   recorded: boolean; // 그날 기록이 있으면 점
 };
 
+// 주간 실행 흐름 막대 한 줄 — 눌러서 그날 일간으로 (D48, 날짜 칩과 같음)
+export type WeekBar = {
+  label: string; // 월 19
+  score: number; // 0~100
+  date: Date;
+  isToday: boolean;
+  isFuture: boolean; // 막대는 기록이 있는 날만이라 지금은 늘 false — 날짜 칩과 같은 누름 처리를 쓰려고 둠
+};
+
 export type WeekSummary = {
   averageWake: Date;
   averageText: string; // 지난주보다 2분 빨라요
   goalRate: number; // 0~100
   goalText: string; // 이번 주 3/3일
-  bars: { label: string; score: number }[]; // 월 19 · 76
+  bars: WeekBar[];
   todayPending: boolean; // 오늘 기록은 기상 확인 뒤에 더해짐
   coaching: string;
 };
@@ -48,8 +57,11 @@ export type TimelineRow = { at: Date; label: string; source: string; past?: bool
 
 export type DayRecord = {
   date: Date;
+  isToday: boolean;
+  isFuture: boolean; // 아직 오지 않은 날 — 기록 없음
   planned: TimelineRow[]; // 설정한 값 (알람)
   actual: TimelineRow[]; // 실제로 일어난 일
+  journalWritten: boolean; // 그날 AI 일기가 있음 (A03로 열기)
 };
 
 export type SuggestionStatus = Enums<'alarm_suggestion_status'>; // PENDING · APPLIED · EDITED · IGNORED
@@ -64,7 +76,13 @@ export type Suggestion = {
   appointment: { id: string; title: string; at: Date };
   minutes: number; // 제안한 앞당김 (분)
   currentWake: Date; // 지금(적용 뒤에는 적용 전) 기상 알람
+  currentPrepare: Date | null; // 지금(적용 뒤에는 적용 전) 준비 알람 — 준비 알람이 없으면 null
+  depart: Date; // 출발 알람 — 약속에 맞춰 정해져서 조정해도 그대로
+  bounds: EditBounds; // 직접 고를 수 있는 범위 (D53)
   proposedWake: Date; // 제안(적용 뒤에는 실제로 적용한) 기상 알람
   status: SuggestionStatus;
-  applied: { wake: Date; prepare: Date | null } | null; // 적용한 뒤 시각
+  applied: { wake: Date; prepare: Date | null; minutes: number } | null; // 적용한 뒤 시각 · 적용 전보다 일찍(+) 늦게(−)
 };
+
+// 직접 고르는 범위 — earlier분 일찍 ~ later분 늦게 (분, 둘 다 0 이상)
+export type EditBounds = { earlier: number; later: number };
