@@ -50,8 +50,6 @@ import {
 
 const COMMIT_TIMEOUT_MS = 30_000; // 카카오 길찾기를 불러서 읽기보다 오래 걸릴 수 있음
 
-const PHONE_FAILED = '저장은 했지만 폰에 알람을 걸지 못했어요. 알람 권한을 확인하고 앱을 다시 열어 주세요';
-
 // ---------------------------------------------------------------------------
 // 장소 (H05 · H03)
 // ---------------------------------------------------------------------------
@@ -212,10 +210,21 @@ export async function saveAlarmSettings(id: string, draft: AlarmSettingsDraft): 
   dropEdits(queued);
   forgetDetail(id);
 
-  const summary = await applyCommit(res);
-  const arrive = res.participant_id ? await mirrorArrive(userId, res.participant_id) : [];
-  await syncPhone(arrive);
-  if (summary.failed.length) throw new UserError(PHONE_FAILED);
+  // 저장(alarm-commit)은 끝났음 — 뒤처리(폰 예약 · 도착 목표 맞추기)가 실패해도 실패로 돌리지 않음 (createAppointment와 같은 방침):
+  //   실패 토스트가 뜨면 저장된 줄 모르고 화면이 저장 전 상태로 남고, 같은 저장을 다시 눌러도 같은 서버 상태일 뿐임.
+  //   폰 예약은 다음 맞추기(앱이 앞에 올 때 reconcile)에서 서버 값으로 다시 걸림. 둘은 서로 영향이 없게 따로 감쌈
+  try {
+    const summary = await applyCommit(res);
+    if (summary.failed.length) warnDev('폰에 못 건 알람', summary.failed);
+  } catch (e) {
+    warnDev('저장 뒤처리 실패 (폰 예약)', e);
+  }
+  try {
+    const arrive = res.participant_id ? await mirrorArrive(userId, res.participant_id) : [];
+    await syncPhone(arrive);
+  } catch (e) {
+    warnDev('저장 뒤처리 실패 (도착 목표 맞추기)', e);
+  }
 
   const nowEnabled = res.alarms.some((x) => x.alarm_type !== 'ARRIVE' && x.alarm_type !== 'ROUTINE' && x.is_enabled);
   const wasOn = (kind: (typeof RING_KINDS)[number]) => saved.alarms.find((x) => x.kind === kind)?.enabled;

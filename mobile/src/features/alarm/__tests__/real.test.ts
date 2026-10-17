@@ -733,12 +733,38 @@ describe('알람 설정 미리 보기 · 저장 (H03)', () => {
     expect(await real.saveAlarmSettings('00000000-0000-4000-8000-0000000000a1', { ...same(offDetail), kinds: { WAKE: true, PREPARE: false, DEPARTURE: false } })).toEqual({ turnedOff: false, turnedOn: true });
   });
 
-  it('saveAlarmSettings: 저장은 됐는데 폰에 못 걸었으면 UserError (같은 저장을 다시 해도 같은 상태가 됨)', async () => {
-    const detail = await loaded();
-    mockCallEdge.mockResolvedValue(commitResponse());
-    mockRoutes['alarms:select'] = () => ({ data: [] });
-    mockApplyCommit.mockResolvedValue({ failed: [{ alarmId: 'n-wake', error: '정확한 알람 권한 없음' }] });
-    await expect(real.saveAlarmSettings('00000000-0000-4000-8000-0000000000a1', { ...same(detail), kinds: { WAKE: false, PREPARE: true, DEPARTURE: true } })).rejects.toBeInstanceOf(UserError);
+  describe('saveAlarmSettings: 저장(alarm-commit)이 끝난 뒤의 뒤처리(폰 예약 · 도착 목표 맞추기)는 실패해도 실패로 돌리지 않음', () => {
+    const turnOffWake = (detail: Awaited<ReturnType<typeof loaded>>): AlarmSettingsDraft => ({ ...same(detail), kinds: { WAKE: false, PREPARE: true, DEPARTURE: true } });
+
+    it('폰에 못 건 알람이 있어도(정확한 알람 권한 없음 등) 저장은 성공 — 다음 맞추기(앱이 앞에 올 때)에서 다시 걸림', async () => {
+      const detail = await loaded();
+      mockCallEdge.mockResolvedValue(commitResponse());
+      mockRoutes['alarms:select'] = () => ({ data: [] });
+      mockApplyCommit.mockResolvedValue({ failed: [{ alarmId: 'n-wake', error: '정확한 알람 권한 없음' }] });
+      await expect(real.saveAlarmSettings('00000000-0000-4000-8000-0000000000a1', turnOffWake(detail))).resolves.toEqual({ turnedOff: false, turnedOn: false });
+    });
+
+    it('폰 예약이 던지거나 도착 목표 맞추기가 실패해도 저장은 성공 — 둘은 서로 영향 없이 각각 시도', async () => {
+      const detail = await loaded();
+      mockCallEdge.mockResolvedValue(commitResponse());
+      mockApplyCommit.mockRejectedValue(new Error('native'));
+      mockRoutes['alarms:select'] = () => ({ error: { message: 'offline' } }); // 도착 목표 맞추기의 읽기가 실패
+      await expect(real.saveAlarmSettings('00000000-0000-4000-8000-0000000000a1', turnOffWake(detail))).resolves.toBeDefined();
+      expect(callsTo('alarms', 'select')).toHaveLength(1); // 폰 예약이 던졌어도 도착 목표 맞추기는 시도함
+
+      mockApplyCommit.mockResolvedValue({ failed: [] });
+      mockRoutes['alarms:select'] = () => ({ data: [{ alarm_id: '00000000-0000-4000-8000-0000000000b4', alarm_type: 'ARRIVE', is_enabled: true }] });
+      mockRoutes['alarms:update'] = () => ({ data: [] });
+      mockReconcile.mockRejectedValue(new Error('read failed'));
+      await expect(real.saveAlarmSettings('00000000-0000-4000-8000-0000000000a1', { ...same(detail), kinds: { WAKE: false, PREPARE: false, DEPARTURE: false } })).resolves.toBeDefined();
+    });
+
+    it('서버가 저장을 거절하면(뒤처리 이전) 그대로 던짐', async () => {
+      const detail = await loaded();
+      mockCallEdge.mockRejectedValue(new EdgeError('UNPROCESSABLE', { details: { reason: 'DEPARTURE_PASSED' } }));
+      await expect(real.saveAlarmSettings('00000000-0000-4000-8000-0000000000a1', turnOffWake(detail))).rejects.toBeInstanceOf(EdgeError);
+      expect(mockApplyCommit).not.toHaveBeenCalled();
+    });
   });
 
   it('saveAlarmSettings: 저장과 따로 쌓인 고친 값 기록(recordEdit)을 같은 일정의 저장에 실어 보내고, 성공하면 비움', async () => {
