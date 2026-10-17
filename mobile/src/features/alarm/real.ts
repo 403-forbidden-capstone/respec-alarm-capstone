@@ -3,7 +3,7 @@
 //   · 돌려주는 모양은 types.ts 그대로 — 화면 파일은 되도록 안 고침. 읽기 실패는 DB 원문 그대로 던지고(화면은 LoadError로 기본 문구), 이유를 보여 줄 때만 UserError
 //   · "내 것"은 lib/user requireUserId()의 user_id로 한 번 더 좁힘 (RLS는 친구에게 받은 알람도 보여 주므로)
 //   · 시각은 lib/clock now() (실데이터 모드에서는 지금 시각)
-//   · 쓰기: 켜기 · 끄기 · 강도 = DB 직접 → 그 알람만 reconcile (realWrite.ts), 계산 · 저장 = alarm-suggest · alarm-commit → applyCommit (realPlan.ts),
+//   · 쓰기: 일정 전체 켜기 · 끄기 = DB 직접 → 그 알람만 reconcile (realWrite.ts), 계산 · 저장(H03의 종류별 켜기 · 강도 포함, H05) = alarm-suggest · alarm-commit → applyCommit (realPlan.ts),
 //     울림 · 기상 확인 = 알람 코어 + alarm_events (realWake.ts). screen-data-map "실데이터 연결 규칙"
 import { now } from '@/lib/clock';
 import { addDays, startOfDay } from '@/lib/format';

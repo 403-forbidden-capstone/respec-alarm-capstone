@@ -34,11 +34,19 @@
 
 | 무엇 | 길 | 폰 |
 |---|---|---|
-| 약속 알람 만들기 · 시각 바꾸기 (H03 · H05 · S01) | `callEdge('alarm-commit')` (`lib/edge`) | 응답을 `applyCommit`: `canceled_alarm_ids` → cancel, `ring_packages` → scheduleAll |
-| 켜기 · 끄기 · 강도 · G04 ±5분 · 루틴 단계 | DB 직접 | `reconcile({ alarmIds })`로 그 알람만 |
+| 새 일정 알람 만들기 (H05) | `callEdge('alarm-commit')` (`lib/edge`) | 응답을 `applyCommit`: `canceled_alarm_ids` → cancel, `ring_packages` → scheduleAll |
+| H03 저장 — 이동 · 준비 · 여유 · 알람 시각 · **종류별 켜기 · 끄기 · 강도**까지 한 번에 | `callEdge('alarm-commit')` (본문의 `enabled` · `levels`). 길찾기를 못 해 서버가 어림값만 가지면(`ROUTE_UNAVAILABLE` + `details.fallback`) 저장을 멈추고 확인 시트 → 확인한 분을 직접 입력(MANUAL)으로 다시 보냄 | `applyCommit` + 도착 목표를 울리는 알람에 맞추는 `mirrorArrive`(DB 직접) 뒤 그 알람만 `reconcile`. 이 뒤처리가 실패해도 저장은 성공으로 (다음 맞추기에서 다시) |
+| 일정 전체 켜기 · 끄기 (H01 · H02 카드) | DB 직접 (`alarms.is_enabled`, 도착 목표는 `mirrorArrive`) | `reconcile({ alarmIds })`로 그 알람만 |
+| S01 제안 적용 · 되돌리기 | DB 직접 — `alarms`(말소리 · 배경음 · 진동 칸) → `alarm_suggestions` → `user_edit_logs` insert. `alarm-commit`은 안 씀 (제안 종류에 시각이 없음) | `reconcile({ alarmIds })`로 그 알람만 |
+| 루틴 저장 (A04) | DB 직접 — `routines` + 단계 알람 `alarms`(없어진 단계는 지우지 않고 `is_enabled` false) | `reconcile({ alarmIds })` — 저장이 중간에 실패해도 바뀌었을 수 있는 알람은 맞춤 |
+| G04 켜기 · 끄기 · ±5분 | DB 직접 — 상대의 `alarms`(설정 권한이면 RLS가 허용) → 주인에게 `notify` (Edge). 앞당길 때 옮긴 시각이 지금 + 5분보다 이르게 되는 켜진 알람이 있으면 거절 | 주인 폰이 푸시를 받거나 앱이 앞에 올 때 맞춤 (내 폰에서 걸지 않음) |
 | 울림 기록 (해제 · 미루기 · 원탭) | 폰이 쌓아 둠 → `uploadEvents`가 `alarm_events`에 upsert (`client_event_id`가 같으면 무시) | 올린 것만 폰에서 지움 |
-| 원탭 출발 · 도착 | 위 기록을 올린 뒤 `onEventsUploaded` 훅이 `departed_at` · `arrived_at` · 지각을 씀 | — |
+| 홈 "미루기 취소" (기상 알람) | `alarm_events`에 `DISMISSED`(`MANUAL`) upsert → `AlarmCore.cancel` → H08. 기록이 먼저 (폰 `cancel`은 해제 기록을 안 남김) | 예약 취소 |
+| 기상 확정 (H08 · 앱이 앞에 올 때 다시 판정) | `alarm_events` `WAKE_CONFIRMED` + `daily_records.wake_confirmed_at` | — |
+| 출발 · 도착 (원탭 · 나중에 위치) | 한 함수 `recordParticipantTimes({ participantId, departedAt?, arrivedAt?, source })` → `appointment_participants.departed_at` · `arrived_at` · `is_late` · `late_minutes`, 출발이 들어오면 `daily_records.actual_prepare_minutes`. 원탭은 위 기록을 올린 뒤 `onEventsUploaded` 훅이 `source: BUTTON`으로 부름 | — |
 | 고친 값 (F5 · F9) | 저장이 성공한 뒤 `user_edit_logs` (`alarm-commit`의 `edits` 또는 DB insert) | — |
+
+`realWrite.setAlarmEnabled` · `setIntensity`(종류별 켜기 · 강도를 DB에 직접 쓰는 함수)는 부르는 화면이 없음 — H03의 켜기 · 강도는 위처럼 `alarm-commit`에 실려 감 (가짜 모드의 `saveAlarmSettings`만 이 이름으로 부름).
 
 **길찾기 값은 다시 보내지 않음 (D5)** — H03 미리 보기 · 저장 요청(`alarm-suggest` · `alarm-commit`)은 이동시간을 직접 입력(MANUAL)한 값만 `est_travel_minutes`로 보내고, 저장돼 있던 길찾기(API) 값은 출발 위치 · 수단이 그대로여도 다시 보내지 않음. 카카오 응답은 저장 · 재사용이 안 돼서 서버가 길찾기를 새로 구함 (서버도 `API`로 저장된 값은 이어받지 않음). 방금 확인 시트(H05)에서 계산해 보여 준 값을 그대로 저장하는 경우만 `API`로 보냄.
 
@@ -46,6 +54,7 @@
 
 - 로그인 직후 · 앱이 앞에 올 때(AppState) — 기록 올리기 → `reconcile()` (루트 레이아웃의 `useAlarmSync`)
 - 기상 확인(H08)에 들어올 때 — `uploadEvents()` (해제 기록이 기상 확인보다 먼저 들어가게)
+- 같은 때(로그인 직후 · 앱이 앞에 올 때) — 최근 12시간에 끈 기상 알람 중 확정이 없는 것을 H08과 같은 판정으로 다시 보고 조건을 채웠으면 확정 기록 (`useWakeRecheck`, 자세히는 `alarm-core.md`)
 - 저장 직후 — `applyCommit(응답)`
 - 로그아웃 — `signOutAndCleanup()` (`lib/session`): 로그아웃 중 표시 켜기(`setSigningOut`) → 기록 올려 보기 → 맞추기와 같은 줄에서 `AlarmCore.cancelAll()`(`cancelAllPhoneAlarms`) → 남은 기록 버림 → 푸시 토큰 지우기 자리 → 실시간 구독 끊기 · 기능 메모리 정리(`onSignOut`) → `signOut`. 데이터 모드 저장값은 그대로
   - 로그아웃 중 표시가 켜져 있는 동안 `reconcile`은 서버 알람을 폰에 걸지 않고 건너뜀 (로그인 상태가 남은 사이에 맞추기가 끼어 앞 계정 알람을 다시 거는 것을 막음). `cancelAll`이 실패하면 로그아웃을 멈추고 표시를 끔. 로그아웃이 끝까지 가면 켜 둔 채로 두고, 다시 로그인할 때 `useAlarmSync`가 끔
@@ -89,16 +98,19 @@
 - 내일 준비물(저녁): `todos`(ITEM, 내일) 읽기 · 체크(`is_done` · `done_at`) — DB
 - 제안 카드: `alarm_suggestions`(PENDING) — DB. `suppress_until`은 "이 시각 전엔 같은 종류 제안을 만들지 않음"이라 `suggestion-generate`에서만 봄
 - 그룹 기상 요약: `get_group_wake_status(group_id)` — RPC
+- 미룬 알람 줄의 "취소": 폰 예약을 지움 — 폰. 기상 알람이면 먼저 `alarm_events` `DISMISSED`(`MANUAL`)를 남기고 기상 확인(H08)으로 이어감 (해제로 봄 — 작성자 판단). 기록이 막히면(오프라인) 예약을 그대로 두고 "미루기를 취소하지 못했어요"
+- 오늘 루틴은 알람 단계가 하나라도 있는 루틴만 보임 (확인을 달 알람이 없으면 홈에서 끝낼 수 없음). 마지막 알람 단계까지 확인하면 뒤의 알람 없는 단계도 끝난 것("오늘 루틴을 모두 마쳤어요")
 
 ### H02 알람 목록
 - 날짜별 알람: `alarms` + `appointment_participants` + `appointments` — DB
-- 켜기 · 끄기: `alarms.is_enabled` — DB → 예약 취소 · 다시 예약 — 폰
+- 카드의 켜기 · 끄기(일정 전체): `alarms.is_enabled` — DB → 예약 취소 · 다시 예약 — 폰
 
 ### H03 알람 설정
 - 연결 일정 · 이동 조건 · 준비 시간: `appointments` + `appointment_participants`(출발지 · 이동 수단 · 예상 이동 · 출처 · 준비 · 여유) — DB
 - 예측 준비(P80) 근거: `v_prepare_time_stats` — DB
 - 여유 시간을 바꾸면 다시 계산: `alarm-suggest` — Edge → 저장 `alarm-commit` — Edge → 다시 예약 — 폰
-- 강도 직접 고르기: `alarms.intensity` · `voice_tone` · `sound_key` — DB → 다시 예약 — 폰
+- 종류별 켜기 · 끄기, 강도 직접 고르기(`alarms.is_enabled` · `intensity` · `voice_tone` · `sound_key`)도 저장 때 `alarm-commit`의 `enabled` · `levels`로 — Edge → 다시 예약 — 폰 (DB에 바로 쓰는 길은 없음)
+- 길찾기를 못 했을 때 (7장 7.1.2): 미리 보기가 어림값(`ESTIMATE` · `CACHED`)이거나 직접 입력이 필요하면(`manual_required`) 이동 조건 칸에 안내가 뜸. 저장 때 서버가 어림값만 있으면(`ROUTE_UNAVAILABLE` + `details.fallback`) "길찾기를 못 해 이동시간을 대략 N분으로 잡았어요. 이 값으로 저장할까요?" → "이 값으로 저장"(그 분을 직접 입력 `MANUAL`로 다시 보냄) / "예상 이동을 직접 고칠게요". 좌표가 없어 어림값도 없으면 예상 이동에 직접 입력
 
 ### H05 새 일정
 - 장소 검색: `place-search`(카카오 키워드) — Edge
@@ -108,11 +120,15 @@
 ### H07 알람 울림
 - 소리 · 강도 · 미루기 · 해제 — 폰
 - 기록: `alarm_events` TRIGGERED · SNOOZED(`snooze_minutes`) · DISMISSED — DB (오프라인이면 폰에 보관 후 다시 보냄)
-- 무음 알림 원탭("준비 시작" · "출발했어요" · "도착했어요"): `alarm_events` ACKNOWLEDGED(PREPARE · DEPARTURE) · ARRIVAL_CONFIRMED(ARRIVE) + `appointment_participants.departed_at` · `arrived_at` — DB. 도착 때 `is_late` · `late_minutes`(`arrived_at` − `appointment_at`)는 앱이 계산해 같이 저장. 지오펜스 자동 수집(#40) · 지각 판정(#41)도 같은 자리에 씀
+- 무음 알림 원탭("준비 시작" · "출발했어요" · "도착했어요"): `alarm_events` ACKNOWLEDGED(PREPARE · DEPARTURE) · ARRIVAL_CONFIRMED(ARRIVE) + `appointment_participants.departed_at` · `arrived_at` — DB. 쓰는 곳은 `recordParticipantTimes` 하나이고 지오펜스 자동 수집(#40)도 같은 함수를 `source: LOCATION`으로 부름
+  - 출처 우선순위: 사용자 응답(원탭 `BUTTON` · 직접 입력 `MANUAL`) > 위치(`LOCATION`). 위치 값이 먼저 있어도 원탭이 덮고, 응답 값이 있으면 위치는 못 덮음 (같은 출처끼리는 먼저 쓴 값). `appointment_participants`에 출처 칸이 없어 같은 시각의 응답 기록(`alarm_events.input_source`)이 있는지로 판단 → 위치 값을 쓰기 전에 같은 시각의 `alarm_events`(`LOCATION`)를 먼저 남길 것
+  - 지각(`is_late` · `late_minutes`): 약속 + 5분 초과면 지각. 응답으로 받은 도착은 그대로 판정하고, 위치로 잡은 도착이 −2 ~ +5분이면 판정 보류(둘 다 NULL)로 두고 도착 확인 원탭을 기다림 (7장 D)
+  - 준비 실측(`daily_records.actual_prepare_minutes`) = 출발 − max(실제 기상 `wake_confirmed_at`, 예정 기상 = 그날 켜 둔 기상 알람 중 가장 이른 시각). 출처와 상관없이 출발이 들어올 때, 기상 기록이 둘 다 없으면 비움, 이미 값이 있으면 덮지 않음(같은 날 두 번째 약속의 출발은 준비 실측이 아님)
 
 ### H08 기상 확인
 - 판정(폰 사용 · 버튼) → `alarm_events` WAKE_CONFIRMED + `daily_records.wake_confirmed_at` — DB
 - 확정 시각 = 해제 뒤 누적 화면 사용이 θ를 넘은 시각 (D14) — 판정은 관찰 10분이 끝나야 되고 기록만 그 시각으로 남김. 확인 알림에 직접 응답하면 응답 시각
+- 해제 뒤 H08을 안 열어도 앱이 앞에 올 때 최근 12시간에 끈 기상 알람 중 확정이 없는 것을 같은 판정으로 다시 보고 확정 기록 (`useWakeRecheck`). 네이티브가 해제 + 10분에 스스로 판정하는 길은 확인 필요
 - 확인 알림 원탭 → ACKNOWLEDGED — DB, 끝까지 안 깨면 MISSED 기록 + 미확인 푸시 — `wake-check` 배치(아래 표)
 
 ### F01 · G01 친구와 그룹
@@ -143,7 +159,7 @@
 
 ### G04 공유받은 알람
 - 친구 알람: `alarms`(주인 = 친구) — DB, 조회 권한은 RLS가 확인. 약속 제목 · 장소까지 보여 주려면 RPC 하나 더 필요(`appointments` RLS는 본인 · 그룹원만) — #46에서
-- 설정 권한이면 켜기 · 끄기 · ±5분: `alarms` — DB → 주인에게 알림 `notify` — Edge → 주인 폰이 다시 예약. RLS는 설정 권한이면 강도 · 소리까지 허용하므로 ±5분 제한은 화면에서 지킴(#46에서 확정)
+- 설정 권한이면 켜기 · 끄기 · ±5분: `alarms` — DB → 주인에게 알림 `notify` — Edge → 주인 폰이 다시 예약. RLS는 설정 권한이면 강도 · 소리까지 허용하므로 ±5분 제한은 앱(`shiftSharedAlarm`)에서 지킴: 앞당길 때 옮긴 시각이 지금 + 5분(서버 `PAST_GRACE_MINUTES`)보다 이르게 되는 켜진 알람이 있으면 "곧 울릴 알람이라 앞당길 수 없어요"로 거절 (이미 지난 알람 · 꺼 둔 알람 · 늦추기는 검사 안 함)
 
 ### A02 AI 대화 (AI 대기)
 - 대화 기록: `conversation_sessions`(`transcript` · `extracted_data` · `apply_status`) — Edge
@@ -155,16 +171,16 @@
 
 ### A04 루틴 편집
 - 루틴: `routines`(이름 · 목표 · 요일 · 단계 `steps` · 켜짐) — DB
-- 단계 알람: `alarms`(`routine_id` · `step_order`) — DB → 예약 — 폰
+- 단계 알람: `alarms`(`routine_id` · `step_order`) — DB → 예약 — 폰. 루틴을 끄거나 단계(알람)를 빼면 알람을 지우지 않고 `is_enabled` false (지우면 울림 · 확인 기록 `alarm_events`가 같이 사라짐). 다시 켜면 같은 줄(루틴 · 단계 번호가 하나뿐)을 켬. 폰 맞추기는 저장이 중간에 실패해도 함
 
 ### R02 나의 기록
-- 월간: `daily_records`(그 달) — DB
+- 월간: `daily_records`(그 달) — DB. 달력 점 "완료"(지난 날) = 기상 확인 `wake_confirmed_at` + 준비 실측 `actual_prepare_minutes` (출발 입력 때 `recordParticipantTimes`가 씀). 서버의 예상 준비시간 P80(`v_prepare_time_stats`)도 이 값을 읽음
 - 주간: `daily_records.wake_confirmed_at` + `appointment_participants.is_late` — DB → 평균 기상 · 목표 기상률은 앱에서 계산
-- 일간: 설정값 `alarms` + 실제 `alarm_events` — DB
+- 일간: 설정값 `alarms`(켜진 것만 — 일정을 통째로 꺼 둔 날은 도착 목표도 없음) + 실제 `alarm_events` — DB
 
 ### S01 알람 조정 제안
 - 제안: `alarm_suggestions`(PENDING) — DB
-- 적용 · 직접 수정 · 무시: `status` · `result_value` · `responded_at` — DB, 시각이 바뀌면 `alarm-commit` — Edge → 다시 예약 — 폰
+- 적용 · 되돌리기 · 무시: `alarms`(말소리 · 배경음 · 진동 칸) + `status` · `result_value` · `responded_at` — DB → 그 알람만 다시 예약 — 폰. 시각을 바꾸는 제안 종류는 아직 없어 `alarm-commit`은 안 씀 (#49). 배경음 제안은 이전 값이 비어 있어도(기본음) 되돌릴 수 있음(`sound_key` null)
 - 제안 만들기: `suggestion-generate`(매일 배치) — Edge
 
 ### 로그인 · 온보딩 · 설정 (#25)
