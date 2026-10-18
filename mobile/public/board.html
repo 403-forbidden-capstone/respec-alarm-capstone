@@ -722,7 +722,7 @@ const CONN_NODES = [
   { t: 'Cloudflare', s: '웹 배포', box: [300, 40, 220, 96], items: [['빌드 변수: Supabase 주소', 'done'], ['빌드 변수: 공개 키', 'done']] },
   { t: 'Expo · EAS', s: '앱 빌드 · 푸시 전달', box: [300, 172, 220, 150], items: [['환경 변수 3곳: 주소 · 공개 키', 'done'], ['Android 서명 키', 'done'], ['FCM 서비스 계정 키', 'todo'], ['google-services.json', 'todo'], ['Expo Push 받는 길', 'todo']] },
   { t: 'Firebase', s: 'Android 푸시 (FCM)', box: [300, 368, 220, 96], items: [['프로젝트 · Android 앱 등록', 'todo'], ['서비스 계정 키 만들기', 'todo']] },
-  { t: 'Supabase', s: 'DB · 로그인 · 서버 함수', box: [600, 40, 240, 370], hub: true, groups: [
+  { t: 'Supabase', s: 'DB · 로그인 · 서버 함수', box: [600, 40, 240, 390], hub: true, groups: [
     ['DB', [['마이그레이션 머지하면 자동 적용', 'done'], ['접근 규칙 (RLS)', 'done']]],
     ['로그인', [['Redirect URLs', 'done'], ['카카오 공급자', 'todo'], ['구글 공급자', 'done'], ['이메일 로그인 (시드 계정만)', 'todo']]],
     ['Edge Functions', [['함수 5개 (#167) · 터미널로 배포', 'todo'], ['비밀값 KAKAO_REST_API_KEY (임시)', 'done'], ['비밀값 GEMINI_API_KEY', 'later']]],
@@ -742,7 +742,7 @@ const CONN_EDGES = [
   ['M600 262 H520', 'todo', '푸시 요청', 560, 254],
   ['M410 322 V368', 'todo', 'FCM 키', 418, 349, 'start'],
   ['M216 470 L300 300', 'later', 'iOS 빌드', 222, 446, 'start'],
-  ['M216 289 H280 V560 H720 V410', 'done', '로컬 개발도 같은 Supabase', 500, 553],
+  ['M216 289 H280 V560 H720 V430', 'done', '로컬 개발도 같은 Supabase', 500, 553],
   ['M840 80 H900', 'todo', '로그인', 870, 72],
   ['M840 122 H900', 'todo', '지도 검색', 870, 114],
   ['M840 230 H900', 'done', '로그인', 870, 222],
