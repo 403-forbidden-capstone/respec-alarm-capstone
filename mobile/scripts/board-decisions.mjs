@@ -21,6 +21,7 @@ export function parseDecisions(md) {
   let cur = null;    // 지금 ### 안건
   let block = null;  // 지금 #### 칸
   let inComment = false;
+  let gap = false;   // 바로 앞이 빈 줄 — 문단을 새로 시작함
   const last = () => block.parts[block.parts.length - 1];
   const ensureBlock = () => { if (!block) { block = { h: '', parts: [] }; cur.blocks.push(block); } };
 
@@ -35,7 +36,10 @@ export function parseDecisions(md) {
       if (!status) { cur = null; continue; }
       cur = { id: m[1], title: m[2].trim(), status, meta: {}, blocks: [] }; block = null; out.push(cur); continue;
     }
-    if (!cur || !line.trim()) continue;
+    if (!cur) continue;
+    if (!line.trim()) { gap = true; continue; }
+    const brk = gap;
+    gap = false;
     if ((m = /^#### (.+)$/.exec(line))) { block = { h: m[1].trim(), parts: [] }; cur.blocks.push(block); continue; }
     // 칸 앞 "- 키: 값" = 안건 머리 정보
     if (!block && (m = /^- ([^:*`]+?):\s*(.*)$/.exec(line))) { cur.meta[m[1].trim()] = m[2].trim(); continue; }
@@ -60,7 +64,7 @@ export function parseDecisions(md) {
       continue;
     }
     if ((m = /^- (.+)$/.exec(line))) { if (last() && last().t === 'ul') last().v.push(m[1].trim()); else block.parts.push({ t: 'ul', v: [m[1].trim()] }); continue; }
-    if (last() && last().t === 'p') last().v += ' ' + line.trim(); else block.parts.push({ t: 'p', v: line.trim() });
+    if (!brk && last() && last().t === 'p') last().v += ' ' + line.trim(); else block.parts.push({ t: 'p', v: line.trim() });
   }
   return out;
 }
