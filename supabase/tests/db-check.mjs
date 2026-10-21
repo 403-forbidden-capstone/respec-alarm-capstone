@@ -1352,6 +1352,12 @@ await check('회의 의견: 안건 번호가 아니거나 이름 · 내용이 �
   const noBody = await expectErr(() => addComment('D1', '지형', ' '), /check constraint/);
   return badId === true && noName === true && noBody === true ? true : { badId, noName, noBody };
 });
+await check('회의 의견: 사람은 "자동" 이름으로 못 남김 (가짜 자동 줄)', async () => {
+  await as(null, 'anon');
+  const exact = await expectErr(() => addComment('D1', '자동', '[정한 것] A안'), /row-level security/);
+  const spaced = await expectErr(() => addComment('D1', ' 자동 ', '[정한 것] A안'), /row-level security/);
+  return exact === true && spaced === true ? true : { exact, spaced };
+});
 await check('회의 의견 지우기: 내 이름으로 남긴 것만 숨김 — 남의 의견 · 자동 줄 · 두 번째는 안 됨, 줄은 남음', async () => {
   await su();
   const [{ id: autoId }] = await q(`insert into public.decision_comments (decision_id, author, body) values ('D35', '자동', '[보류] 지형') returning id`);
