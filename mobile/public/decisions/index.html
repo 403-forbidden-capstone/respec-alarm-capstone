@@ -676,10 +676,10 @@ const noRefs = (t) => String(t || '')
   .replace(/\s*·?\s*(?:PR\s*)?#\d+(?:\s*·\s*(?:PR\s*)?#\d+)*/g, '')
   .replace(/\s{2,}/g, ' ').trim();
 const plain = (t) => inl(noRefs(String(t || '').replace(/`/g, '')));
-// "지금 코드" = 정하기 전 지금 앱이 도는 방식 → 회의 화면엔 "지금 앱"으로 (코드 이름이 든 줄은 그대로 뺌)
+// "지금 코드" = 정하기 전 지금 앱이 도는 방식 → 회의 화면엔 "지금 앱"으로 (코드 표시 ` · PR 번호만 걷어 냄)
 const NOW_RE = /^지금 코드\s*:\s*/;
 function cleanPart(p) {
-  if (p.t === 'p' && NOW_RE.test(p.v)) return hasCode(p.v) ? null : { t: 'now', v: noRefs(p.v.replace(NOW_RE, '')) };
+  if (p.t === 'p' && NOW_RE.test(p.v)) return { t: 'now', v: noRefs(p.v.replace(NOW_RE, '').replace(/`/g, '')) };
   if (p.t === 'p') return hasCode(p.v) ? null : { ...p, v: noRefs(p.v) };
   if (p.t === 'ul') { const v = p.v.filter((x) => !hasCode(x)).map(noRefs).filter(Boolean); return v.length ? { ...p, v } : null; }
   if (p.t === 'table') { const rows = p.rows.filter((r) => !r.some(hasCode)).map((r) => r.map(noRefs)); return rows.length ? { ...p, rows } : null; }
