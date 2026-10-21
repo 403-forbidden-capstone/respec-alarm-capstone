@@ -12,6 +12,8 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { TopBar } from '@/components/ui';
+import { backOrHome } from '@/lib/nav';
 import {
   addAlarmEventListener,
   cancelAll,
@@ -37,8 +39,8 @@ import {
 } from '@capstone/alarm-core';
 
 // 개발용 — 알람 코어를 실기기에서 확인하는 화면 (#26 첫 관문 → #79 새 함수 · #50 시연 버튼 · #35 사용 정보 읽기)
-// 탭에 연결하지 않음. 들어오는 법: respecalarm://dev/alarm-test
-// 출시 빌드에서 이 화면을 보일지는 D16이 정함 (지금은 /dev 안에만 둠)
+// 탭에 연결하지 않음. 들어오는 법: respecalarm://dev/alarm-test, 또는 로그인 화면의 "알람 테스트" 버튼 (출시용 APK에도 보임, #177)
+// 출시 빌드에서 이 화면을 보일지는 D16이 정함 (지금은 /dev 안에만 둠). D16이 정해지면 로그인 화면 버튼도 같이 정리
 
 type Permissions = { exact: boolean; fullScreen: boolean; usage: boolean };
 
@@ -215,6 +217,8 @@ export default function AlarmTestScreen() {
   return (
     <SafeAreaView style={styles.safe}>
       <ScrollView contentContainerStyle={styles.content}>
+        {/* 로그인 화면의 "알람 테스트"에서 들어오므로 돌아갈 길을 둠 (안드로이드 뒤로 버튼과 같음). 앞 화면이 없으면 홈 */}
+        <TopBar onBack={backOrHome} />
         <Text style={styles.title}>알람 테스트 (개발용)</Text>
         <Text style={styles.body}>
           예약 → 화면 끄기 → 울리는지 확인. 기상 알람은 해제 또는 10분 미루기. 안 끄면 3분 뒤 멈췄다가 쉬고 다시

@@ -64,6 +64,9 @@ export default function LoginScreen() {
               {error}
             </Text>
           ) : null}
+          {/* 알람 테스트 바로 가기 — 로그인 전에도 알람이 울리는지 시험해 볼 수 있게 (/dev/alarm-test, 루트 레이아웃 가드 밖). 출시용 APK에도 보임 (10/18 지형님, #177)
+              D16(출시 빌드에서 개발 메뉴를 보일지)이 정해지면 개발 메뉴 버튼과 같이 숨길 대상 */}
+          <Button variant="plain" small label="알람 테스트" onPress={() => router.push('/dev/alarm-test')} />
           {/* 시드 계정으로 들어가는 이메일 로그인은 개발 메뉴에 있음 — 웹 · 폰 개발용에서만 보임 */}
           {devLoginVisible ? <Button variant="plain" small label="개발 메뉴에서 이메일로 로그인" onPress={() => router.push('/dev/screens')} /> : null}
         </View>
