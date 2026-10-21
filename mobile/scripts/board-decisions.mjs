@@ -69,6 +69,19 @@ export function parseDecisions(md) {
   return out;
 }
 
+// "- 기능: 영역 (C05 · C03)" 줄 확인 — /decisions 묶음 · 보드 "관련 결정"의 원본이라 틀리면 조용히 빠짐. 경고만 하고 막지는 않음
+const AREAS = ['알람', '그룹 · 친구', '기록 · 제안', 'AI · 루틴', '기반 · 서버'];
+function checkFeatures(list, html) {
+  const rows = new Set([...html.matchAll(/\{ id: '(C\d\d)'/g)].map((m) => m[1])); // 보드 동작 표 행
+  for (const d of list) {
+    const f = d.meta['기능'] || '';
+    const m = /^(.+?)(?:\s*\(([^)]*)\))?$/.exec(f);
+    if (!m || !AREAS.includes(m[1].trim())) { console.warn(`board-decisions: ${d.id} 기능 줄이 없거나 영역이 다섯 밖: "${f}"`); continue; }
+    const bad = (m[2] || '').split(/\s*·\s*/).filter(Boolean).filter((c) => !rows.has(c));
+    if (bad.length) console.warn(`board-decisions: ${d.id} 기능 줄에 동작 표에 없는 행: ${bad.join(' · ')}`);
+  }
+}
+
 function main() {
   const md = readFileSync(docPath, 'utf8');
   const list = parseDecisions(md);
@@ -76,6 +89,7 @@ function main() {
   for (const d of list) { if (seen.has(d.id)) console.warn(`board-decisions: 번호 ${d.id}가 두 번 나옴`); seen.add(d.id); }
   if (!existsSync(htmlPath)) throw new Error(`${htmlPath} 없음`);
   const html = readFileSync(htmlPath, 'utf8');
+  checkFeatures(list, html);
   // </script>가 끼면 HTML이 깨지므로 <는 <로
   const json = JSON.stringify(list).replace(/</g, '\\u003c');
   const re = /^const DECISIONS = .*;$/m;
