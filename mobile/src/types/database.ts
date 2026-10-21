@@ -207,13 +207,13 @@ isOneToOne: false
                   ]
                 },"decision_comments": {
                   Row: {
-                    "author": string,"body": string,"created_at": string,"decision_id": string,"id": number
+                    "author": string,"body": string,"created_at": string,"decision_id": string,"deleted_at": string | null,"id": number
                   }
                   Insert: {
-                    "author": string,"body": string,"created_at"?: string,"decision_id": string,"id"?: never
+                    "author": string,"body": string,"created_at"?: string,"decision_id": string,"deleted_at"?: string | null,"id"?: never
                   }
                   Update: {
-                    "author"?: string,"body"?: string,"created_at"?: string,"decision_id"?: string,"id"?: never
+                    "author"?: string,"body"?: string,"created_at"?: string,"decision_id"?: string,"deleted_at"?: string | null,"id"?: never
                   }
                   Relationships: [
                     
@@ -478,6 +478,9 @@ isOneToOne: false
           Functions: {
             "can_send_push":
 { Args: { "p_kind": string,"p_sender_id": string,"p_target_id": string }; Returns: boolean
+                           },
+"delete_decision_comment":
+{ Args: { "p_author": string,"p_id": number }; Returns: boolean
                            },
 "find_missed_wake_alarms":
 { Args: { "p_lookback_hours"?: number,"p_now"?: string }; Returns: {

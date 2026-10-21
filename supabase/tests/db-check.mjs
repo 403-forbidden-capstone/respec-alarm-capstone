@@ -190,10 +190,13 @@ await check('public · private 함수는 모두 search_path가 비어 있음', a
   const bad = r.filter((x) => !(x.proconfig || []).some((c) => c === 'search_path=""' || c === 'search_path='));
   return bad.length === 0 && r.length > 0 ? true : bad;
 });
-await check('anon은 함수를 실행할 수 없음', async () => {
+// 회의 도구 함수(의견 지우기)만 anon 예외 — 아래 "회의 의견"에서 따로 확인
+const MEETING_FN = ['delete_decision_comment'];
+await check('anon은 함수를 실행할 수 없음 (회의 의견 지우기 하나만 예외)', async () => {
   const r = await q(`select p.proname from pg_proc p join pg_namespace n on n.oid = p.pronamespace
                      where n.nspname in ('public', 'private') and has_function_privilege('anon', p.oid, 'execute')`);
-  return r.length === 0 ? true : r;
+  const bad = r.filter((x) => !MEETING_FN.includes(x.proname));
+  return bad.length === 0 && r.length === MEETING_FN.length ? true : r;
 });
 await check('ENUM 21개 값이 4장과 같음 (NORMAL · DEPARTURE · FEEDBACK) + ACKNOWLEDGED + 값 출처 · 기록 출처', async () => {
   const r = await q(`select t.typname, array_agg(e.enumlabel order by e.enumsortorder)::text as v
@@ -1320,7 +1323,8 @@ await check('그룹 삭제: 그 그룹에서 나온 권한 행이 모두 지워�
 
 
 // ---------------------------------------------------------------------
-// 회의 의견 (결정 안건 페이지 /decisions) — 링크를 아는 사람은 로그인 없이 읽고 남김, 고치기 · 지우기 X
+// 회의 의견 (결정 안건 페이지 /decisions) — 링크를 아는 사람은 로그인 없이 읽고 남김, 고치기 X,
+// 지우기는 내 이름으로 남긴 것만 함수로 (숨김)
 // ---------------------------------------------------------------------
 
 const addComment = (id, author, body) => q(
@@ -1347,6 +1351,20 @@ await check('회의 의견: 안건 번호가 아니거나 이름 · 내용이 �
   const noName = await expectErr(() => addComment('D1', '  ', 'x'), /check constraint/);
   const noBody = await expectErr(() => addComment('D1', '지형', ' '), /check constraint/);
   return badId === true && noName === true && noBody === true ? true : { badId, noName, noBody };
+});
+await check('회의 의견 지우기: 내 이름으로 남긴 것만 숨김 — 남의 의견 · 자동 줄 · 두 번째는 안 됨, 줄은 남음', async () => {
+  await su();
+  const [{ id: autoId }] = await q(`insert into public.decision_comments (decision_id, author, body) values ('D35', '자동', '[보류] 지형') returning id`);
+  await as(null, 'anon');
+  const [{ id }] = await addComment('D35', '준성', '지울 의견');
+  const del = async (cid, who) => (await q(`select public.delete_decision_comment($1, $2) as ok`, [cid, who]))[0].ok;
+  const other = await del(id, '지형');
+  const mine = await del(id, ' 준성 ');
+  const again = await del(id, '준성');
+  const auto = await del(autoId, '자동');
+  const rows = await q(`select id, deleted_at is not null as gone from public.decision_comments where id = any($1::bigint[]) order by id`, [[autoId, id]]);
+  return other === false && mine === true && again === false && auto === false
+    && rows.length === 2 && rows[0].gone === false && rows[1].gone === true ? true : { other, mine, again, auto, rows };
 });
 
 // 투표 · 정한 것 상태
