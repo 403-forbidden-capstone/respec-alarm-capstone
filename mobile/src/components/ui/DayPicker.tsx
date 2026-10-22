@@ -15,6 +15,7 @@ export function DayPicker({ value, onToggle }: { value: readonly Weekday[]; onTo
           <Pressable
             key={day}
             onPress={() => onToggle(day)}
+            hitSlop={3}
             accessibilityRole="checkbox"
             accessibilityLabel={`${day}요일`}
             accessibilityState={{ checked: on }}
@@ -30,7 +31,7 @@ export function DayPicker({ value, onToggle }: { value: readonly Weekday[]; onTo
   );
 }
 
-const DAY = 38;
+const DAY = 38; // 모양은 38, 누르는 칸은 hitSlop 3을 더해 44
 
 const styles = StyleSheet.create({
   row: { flexDirection: 'row', justifyContent: 'space-between' },

@@ -30,7 +30,7 @@ function shiftMonth(year: number, month: number, delta: number) {
   return { year: Math.floor(index / 12), month: (((index % 12) + 12) % 12) + 1 };
 }
 
-// 날짜 고르는 줄 — 누르면 아래 시트에 달력이 뜨고, 날짜를 누르면 바로 고르고 닫힘
+// 날짜 고르는 줄 — 누르면 아래 시트에 달력이 뜨고, 날짜를 누르면 바로 고르고 닫힘. 누르는 줄이라 오른쪽 끝에 ›
 // 지난 날(minDate 앞)은 흐리게 막아서 못 고름. 오늘은 테두리, 고른 날은 검은 원
 export function DateRow({ label, value, onChange, minDate, maxDate, first }: Props) {
   const [open, setOpen] = useState(false);
@@ -75,7 +75,12 @@ export function DateRow({ label, value, onChange, minDate, maxDate, first }: Pro
         <Text variant="rowLabel" tone="sub">
           {label}
         </Text>
-        <Text variant="bodyStrong">{text}</Text>
+        <View style={styles.value}>
+          <Text variant="bodyStrong">{text}</Text>
+          <Text variant="bodyStrong" tone="faint">
+            ›
+          </Text>
+        </View>
       </Pressable>
       <Sheet visible={open} onClose={() => setOpen(false)} title={label}>
         <View style={styles.header}>
@@ -151,6 +156,7 @@ function Arrow({ label, a11y, disabled, onPress }: { label: string; a11y: string
 const styles = StyleSheet.create({
   row: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, paddingVertical: 14 },
   divider: { borderTopWidth: 1, borderTopColor: colors.line },
+  value: { flexDirection: 'row', alignItems: 'center', gap: 6, flexShrink: 1 },
   pressed: { opacity: 0.6 },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 4, marginBottom: 8 },
   title: { flex: 1 },
