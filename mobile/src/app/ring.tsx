@@ -125,9 +125,6 @@ export default function RingScreen() {
             </Text>
             <VoiceWave />
           </View>
-          <Text variant="caption" tone="inverse" style={styles.levelLine}>
-            {data.levelLine}
-          </Text>
 
           <View style={styles.bottom}>
             <Text variant="label" tone="inverse" style={styles.faded70}>
@@ -285,7 +282,6 @@ const styles = StyleSheet.create({
   title: { marginTop: 14, marginBottom: 2 },
   voice: { marginTop: 22, backgroundColor: colors.ringPanel, borderRadius: 20, paddingVertical: 16, paddingHorizontal: 18 },
   voiceText: { marginTop: 6 },
-  levelLine: { marginTop: 10, marginHorizontal: 2, opacity: 0.55 },
   bottom: { marginTop: 'auto' },
   options: { flexDirection: 'row', gap: 8, marginTop: 8, marginBottom: 16 },
   option: { flex: 1, height: 42, borderRadius: 14, backgroundColor: colors.ringOption, alignItems: 'center', justifyContent: 'center' },

@@ -80,7 +80,7 @@ function FriendTab({ friends, requests, onAccept }: { friends: FriendItem[]; req
       <SearchBox
         placeholder="이름 또는 사용자 ID 검색"
         actionLabel="추가"
-        onAction={() => toast('목업에서는 검색 결과가 없어요')}
+        onAction={() => toast('친구 검색은 곧 열려요')}
       />
 
       {requests.map((p) => (
@@ -121,7 +121,7 @@ function FriendTab({ friends, requests, onAccept }: { friends: FriendItem[]; req
   );
 }
 
-// 그룹 탭 — 만들기 · 참여(목업 범위 밖) · 참여 중인 그룹
+// 그룹 탭 — 만들기 · 참여(아직 없음 — 누르면 "곧 열려요") · 참여 중인 그룹
 // 기상 상태를 볼 수 있는 그룹(받은 권한)만 그룹 상세로 들어가고, 아니면 안내만 (목업 G01 우리 가족)
 function GroupTab({ groups }: { groups: GroupItem[] }) {
   return (
@@ -132,13 +132,13 @@ function GroupTab({ groups }: { groups: GroupItem[] }) {
           icon="+"
           title="새 그룹 만들기"
           sub="이름과 멤버 설정"
-          onPress={() => toast('그룹 만들기는 이번 목업 범위 밖이에요')}
+          onPress={() => toast('그룹 만들기는 곧 열려요')}
         />
         <ActionTile
           icon="↳"
           title="그룹 참여하기"
           sub="초대 코드 입력"
-          onPress={() => toast('초대 코드 입력은 이번 목업 범위 밖이에요')}
+          onPress={() => toast('초대 코드로 참여하기는 곧 열려요')}
         />
       </View>
 

@@ -238,14 +238,22 @@ export default function HomeScreen() {
         </>
       ) : null}
 
+      {/* 제안 카드 — 점선은 목업 · 피그마 그대로, 누르면 제안 상세(S01)로 가니 '보기 ›' 꼬리 */}
       {suggestion ? (
         <Card variant="dash" onPress={() => router.push({ pathname: '/suggestion/[id]', params: { id: suggestion.id } })}>
-          <Text variant="bodyLarge" weight={600}>
-            {suggestion.title}
-          </Text>
-          <Text variant="small" tone="sub" style={styles.cardSub}>
-            {suggestion.summary}
-          </Text>
+          <View style={styles.banner}>
+            <View style={styles.bannerText}>
+              <Text variant="bodyLarge" weight={600}>
+                {suggestion.title}
+              </Text>
+              <Text variant="small" tone="sub" style={styles.cardSub}>
+                {suggestion.summary}
+              </Text>
+            </View>
+            <Text variant="rowLabel" tone="sub">
+              보기 ›
+            </Text>
+          </View>
         </Card>
       ) : null}
 

@@ -2,7 +2,7 @@ import { useLocalSearchParams } from 'expo-router';
 import { useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
-import { Button, Card, Chip, LoadError, Loading, Screen, Sheet, Text, Timeline, toast, TopBar } from '@/components/ui';
+import { Card, Chip, confirm, LoadError, Loading, Screen, Sheet, Text, Timeline, toast, TopBar } from '@/components/ui';
 import { TextLink } from '@/features/alarm/components/TextLink';
 import { getShareLog, getSharedAlarms, setSharedAlarmEnabled, shiftSharedAlarm } from '@/features/social/api';
 import { MemberAlarmCard } from '@/features/social/components/MemberAlarmCard';
@@ -27,6 +27,7 @@ export default function SharedAlarmsScreen() {
   }
 
   const top = <TopBar onBack={backOrHome} screenId="G04" right={<TextLink label="변경 기록" onPress={openLog} />} />;
+  // 닫기는 시트 머리의 "닫기" 하나로 (아래에 또 두지 않음)
   const logSheet = (
     <Sheet visible={log != null} onClose={() => setLog(null)} title="변경 기록">
       {log?.length ? (
@@ -36,9 +37,6 @@ export default function SharedAlarmsScreen() {
           아직 바꾼 내용이 없어요.
         </Text>
       )}
-      <View style={styles.stack}>
-        <Button label="닫기" variant="ghost" onPress={() => setLog(null)} />
-      </View>
     </Sheet>
   );
 
@@ -57,13 +55,24 @@ export default function SharedAlarmsScreen() {
 
   const { person: p, canView, canEdit, tags, alarms } = data;
 
+  // 남의 알람을 끄는 것은 한 번 물음 — 상대가 그 알람으로 못 일어남. 켜는 것은 바로
   // 연타해도 한 번씩 — 실데이터에선 "5분 앞당기기"를 두 번 누르면 두 번 옮겨질 수 있음
-  const toggle = (alarmId: string, next: boolean) =>
-    run(async () => {
+  const toggle = async (alarmId: string, next: boolean) => {
+    if (!next) {
+      const ok = await confirm({
+        title: `${p.short}님의 알람을 끌까요?`,
+        message: `이 알람이 울리지 않아요. ${p.short}님에게 변경 알림이 가요.`,
+        okLabel: '끄기',
+        destructive: true,
+      });
+      if (!ok) return;
+    }
+    await run(async () => {
       const { notified } = await setSharedAlarmEnabled(p.id, alarmId, next);
       toast(changedMessage(p.short, notified));
       await reload();
     });
+  };
 
   const shift = (alarmId: string, minutes: number) =>
     run(async () => {
@@ -129,5 +138,4 @@ const styles = StyleSheet.create({
   summary: { backgroundColor: colors.chip },
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 8 },
   empty: { marginVertical: 6 },
-  stack: { gap: 10, marginTop: 16 },
 });

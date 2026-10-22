@@ -5,7 +5,6 @@ import { Button, Card, EmptyState, LoadError, Loading, Screen, Text, Timeline, t
 import { getMemberWake, sendWakePing } from '@/features/social/api';
 import { useWakeLoad } from '@/features/social/hooks/useGroupWake';
 import { MemberAlarmCard } from '@/features/social/components/MemberAlarmCard';
-import { Note } from '@/features/social/components/Note';
 import { formatTime } from '@/lib/format';
 import { useAction } from '@/lib/useAction';
 import { backOrHome } from '@/lib/nav';
@@ -48,13 +47,13 @@ export default function MemberWakeScreen() {
       <Text variant="title" style={styles.title}>
         {p.short}님의 기상 상태
       </Text>
+      {/* 부제 자리에 기록의 뜻을 한 줄로 (피그마 P04) — 카드 사이에 따로 두지 않음 */}
       <Text variant="lead" style={styles.lead}>
-        오늘의 기상 알람
+        알람 해제가 아니라 본인이 확인한 기상 기록이에요.
       </Text>
       {alarm ? (
         <>
           <MemberAlarmCard alarm={alarm} />
-          <Note>알람 해제가 아니라 본인이 확인한 기상 기록이에요.</Note>
 
           <Card>
             <Text variant="label" tone="sub" style={styles.label}>

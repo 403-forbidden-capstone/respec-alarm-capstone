@@ -64,7 +64,7 @@ function Detail({ group: g, onBack }: { group: GroupDetail; onBack?: () => void 
       <TopBar
         onBack={onBack}
         screenId="G02"
-        right={<TextLink label="···" accessibilityLabel="그룹 메뉴" onPress={() => toast('그룹 메뉴는 이번 목업 범위 밖이에요')} />}
+        right={<TextLink label="···" accessibilityLabel="그룹 메뉴" onPress={() => toast('그룹 메뉴는 곧 열려요')} />}
       />
       <Text variant="title" style={styles.title}>
         {g.name}
@@ -79,7 +79,7 @@ function Detail({ group: g, onBack }: { group: GroupDetail; onBack?: () => void 
             그룹 공유 범위
           </Text>
           <TextLink
-            label="+ 설정"
+            label="공유 권한 설정 ›"
             onPress={() => router.push({ pathname: '/permissions', params: { relation: `group:${g.id}` } })}
           />
         </View>
@@ -127,7 +127,8 @@ function Detail({ group: g, onBack }: { group: GroupDetail; onBack?: () => void 
         ))}
       </Card>
 
-      <Card variant="dash">
+      {/* 안내 카드는 실선 — 점선은 비어 있을 때 쓰는 모양 (피그마 G02) */}
+      <Card>
         <Text variant="label" tone="sub" style={styles.label}>
           권한 안내
         </Text>

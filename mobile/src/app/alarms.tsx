@@ -66,8 +66,9 @@ export default function AlarmsScreen() {
           }}
         >
           <SectionHeader title={dayHeading(day[0].at, current)} />
+          {/* 날짜는 섹션 제목에 있으니 카드 머리줄에는 안 보임 */}
           {day.map((a) => (
-            <AppointmentAlarmCard key={a.id} appointment={a} current={current} onChanged={reload} highlight={a.id === lit} />
+            <AppointmentAlarmCard key={a.id} appointment={a} current={current} onChanged={reload} highlight={a.id === lit} showDate={false} />
           ))}
         </View>
       ))}
@@ -83,7 +84,7 @@ export default function AlarmsScreen() {
               지난 일정 {past.length}개
             </Text>
             <Text variant="rowLabel" tone="sub">
-              {showPast ? '접기' : '펼치기'}
+              {showPast ? '접기 ⌃' : '펼치기 ⌄'}
             </Text>
           </Pressable>
           {showPast
@@ -91,7 +92,7 @@ export default function AlarmsScreen() {
                 <View key={day[0].id}>
                   <SectionHeader title={formatDateShort(day[0].at)} />
                   {day.map((a) => (
-                    <AppointmentAlarmCard key={a.id} appointment={a} current={current} onChanged={reload} />
+                    <AppointmentAlarmCard key={a.id} appointment={a} current={current} onChanged={reload} showDate={false} />
                   ))}
                 </View>
               ))

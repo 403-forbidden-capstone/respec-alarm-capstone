@@ -2,7 +2,7 @@ import { router } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
 import { ScrollView, StyleSheet, View } from 'react-native';
 
-import { LoadError, Loading, Screen, Text, toast, TopBar } from '@/components/ui';
+import { confirm, LoadError, Loading, Screen, Text, toast, TopBar } from '@/components/ui';
 import { finishConversation, getConversation, rejectFoundSchedule, saveFoundSchedule, say } from '@/features/voice/api';
 import { ChatBubble, TypingBubble } from '@/features/voice/components/ChatBubble';
 import { ChatComposer } from '@/features/voice/components/ChatComposer';
@@ -99,14 +99,18 @@ export default function AiScreen() {
     setMode((m) => (m === 'text' ? 'voice' : 'text'));
   }
 
-  // 완료 — 일기를 만들고 하루 기록으로
-  const finish = () =>
-    act(async () => {
-      if (thinking) return; // 정리 중에 끝내면 끝난 대화에 답 · 카드가 붙음
+  // 완료 — 한 번 묻고 일기를 만들어 하루 기록으로. 내가 아직 한 마디도 안 했으면 완료를 막음 (빈 대화로 기록이 생기지 않게)
+  const started = messages.some((m) => m.who === 'me');
+  const finish = async () => {
+    if (thinking) return; // 정리 중에 끝내면 끝난 대화에 답 · 카드가 붙음
+    const ok = await confirm({ title: '대화를 마칠까요?', message: '지금까지 나눈 대화로 하루 기록을 만들어요.', okLabel: '완료' });
+    if (!ok) return;
+    await act(async () => {
       setListening(false);
       const { recordDate } = await finishConversation();
       router.push({ pathname: '/journal/[date]', params: { date: recordDate } });
     });
+  };
 
   const saveFound = () =>
     act(async () => {
@@ -174,7 +178,7 @@ export default function AiScreen() {
           onToggleMode={toggleMode}
           onSpeak={speak}
           onDone={finish}
-          doneDisabled={thinking || busy}
+          doneDisabled={thinking || busy || !started}
         />
       </View>
     </Screen>
