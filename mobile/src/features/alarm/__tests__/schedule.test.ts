@@ -8,6 +8,7 @@ import {
   changedAlarms,
   chainLabel,
   dayHeading,
+  earlierWakeOf,
   groupByDay,
   initialTime,
   isEvening,
@@ -134,5 +135,28 @@ describe('홈 저녁 전환 (D13)', () => {
   it('오후 6시부터 저녁', () => {
     expect(isEvening(kst(22, 17 * 60 + 59))).toBe(false);
     expect(isEvening(kst(22, 18 * 60))).toBe(true);
+  });
+});
+
+describe('H05 같은 날 앞 일정의 기상 알람 (earlierWakeOf)', () => {
+  // 5/22 10:00 팀 주간회의(기상 8:00) · 5/22 18:00 저녁약속(기상 없음)
+  const meeting = { ...appt('a1', kst(22, 600)), title: '팀 주간회의', enabled: true, alarms: chain() } as Appointment;
+  const dinner = { ...appt('a2', kst(22, 1080)), title: '저녁약속', enabled: true, alarms: chain().filter((x) => x.kind !== 'WAKE') } as Appointment;
+
+  it('같은 날 앞 일정의 켜진 기상 알람 — 일정명과 알람 시각', () => {
+    expect(earlierWakeOf(kst(22, 840), [dinner, meeting])).toEqual({ title: '팀 주간회의', at: kst(22, 480) });
+  });
+
+  it('앞 일정이 없거나(같은 시각 포함), 다른 날이면 없음', () => {
+    expect(earlierWakeOf(kst(22, 600), [meeting])).toBeNull();
+    expect(earlierWakeOf(kst(22, 540), [meeting])).toBeNull();
+    expect(earlierWakeOf(kst(23, 840), [meeting])).toBeNull();
+  });
+
+  it('꺼 둔 일정 · 꺼 둔 기상 · 기상 없는 앞 일정 · 자기 자신은 안 셈', () => {
+    expect(earlierWakeOf(kst(22, 840), [{ ...meeting, enabled: false }])).toBeNull();
+    expect(earlierWakeOf(kst(22, 840), [{ ...meeting, alarms: chain({ WAKE: false }) }])).toBeNull();
+    expect(earlierWakeOf(kst(22, 1200), [dinner])).toBeNull();
+    expect(earlierWakeOf(kst(22, 840), [meeting], 'a1')).toBeNull();
   });
 });

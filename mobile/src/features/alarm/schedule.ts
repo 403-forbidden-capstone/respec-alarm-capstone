@@ -110,3 +110,16 @@ export function draftAt(date: Date, time: string): Date {
   const match = /^([01]?\d|2[0-3]):([0-5]\d)$/.exec(time.trim());
   return addMinutes(startOfDay(date), match ? Number(match[1]) * 60 + Number(match[2]) : 14 * 60);
 }
+
+// 같은 날 앞선 일정의 켜진 기상 알람 — 있으면 이 약속은 기상 없이 준비부터 (서버 · 목업 계산의 hasEarlierWake와 같은 기준: 약속 시각이 앞선 것만, 꺼 둔 일정 · 꺼 둔 기상은 안 셈)
+// H05가 "같은 날 수업 기상 알람(오전 7:20)으로 깨워요" 한 줄에 씀. 둘 이상이면 가장 이른 약속의 것
+export function earlierWakeOf(at: Date, appointments: readonly Appointment[], ownId?: string): { title: string; at: Date } | null {
+  const earlier = appointments
+    .filter((a) => a.id !== ownId && a.enabled && dayKey(a.at) === dayKey(at) && a.at.getTime() < at.getTime())
+    .sort((x, y) => x.at.getTime() - y.at.getTime());
+  for (const a of earlier) {
+    const wake = a.alarms.find((x) => x.kind === 'WAKE' && x.enabled);
+    if (wake) return { title: a.title, at: wake.at };
+  }
+  return null;
+}
