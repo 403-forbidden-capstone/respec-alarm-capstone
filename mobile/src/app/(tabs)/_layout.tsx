@@ -3,7 +3,7 @@ import { Tabs } from 'expo-router/js-tabs';
 import { TabBar } from '@/components/ui';
 import { colors } from '@/theme';
 
-// 아래 탭 4개 — 목업과 같은 순서 · 이름 (01 홈 · 02 그룹 · 03 AI · 04 기록)
+// 아래 탭 4개 — 목업과 같은 순서 · 이름 (홈 · 그룹 · AI · 기록). 번호 배지 대신 아이콘 (TabBar, 10/23 지형 결정)
 export default function TabsLayout() {
   return (
     <Tabs
