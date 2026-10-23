@@ -14,7 +14,9 @@ type Props = {
 };
 
 // 준비물 입력 — 적고 추가(또는 엔터)하면 아래에 칩이 쌓이고, × 로 하나씩 지움
+// 입력이 비어 있으면 "추가"를 숨기고 글자도 굵게 하지 않음 — 자리 글자가 값처럼 보이지 않게
 export function ItemChips({ label, items, onRemove, text, onChangeText, onAdd, placeholder }: Props) {
+  const filled = text.trim().length > 0;
   return (
     <View>
       <View style={styles.row}>
@@ -31,9 +33,9 @@ export function ItemChips({ label, items, onRemove, text, onChangeText, onAdd, p
           placeholderTextColor={colors.faint}
           maxLength={20}
           accessibilityLabel={`${label} 이름`}
-          style={styles.input}
+          style={[styles.input, font(filled ? 600 : 400)]}
         />
-        <Button small variant="ghost" label="추가" onPress={onAdd} disabled={!text.trim()} />
+        {filled ? <Button small variant="ghost" label="추가" onPress={onAdd} /> : null}
       </View>
       {items.length ? (
         <View style={styles.chips}>
@@ -44,7 +46,7 @@ export function ItemChips({ label, items, onRemove, text, onChangeText, onAdd, p
               </Text>
               <Pressable
                 onPress={() => onRemove(name)}
-                hitSlop={{ top: 9, bottom: 9, left: 10, right: 10 }}
+                hitSlop={{ top: 14, bottom: 14, left: 18, right: 18 }}
                 accessibilityRole="button"
                 accessibilityLabel={`${name} 지우기`}
                 style={({ pressed }) => pressed && styles.pressed}
@@ -64,7 +66,7 @@ export function ItemChips({ label, items, onRemove, text, onChangeText, onAdd, p
 const styles = StyleSheet.create({
   row: { flexDirection: 'row', alignItems: 'center', gap: 10, minHeight: size.touch },
   label: { fontSize: 13.5, flexShrink: 0 },
-  input: { ...font(600), flex: 1, minWidth: 0, fontSize: 14, color: colors.ink, textAlign: 'right', paddingVertical: 4 },
+  input: { flex: 1, minWidth: 0, fontSize: 14, color: colors.ink, textAlign: 'right', paddingVertical: 4 },
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 6, paddingBottom: 4 },
   chip: {
     flexDirection: 'row',

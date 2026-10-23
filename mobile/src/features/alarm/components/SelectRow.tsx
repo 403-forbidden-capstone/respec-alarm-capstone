@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Pressable, StyleSheet } from 'react-native';
+import { Pressable, StyleSheet, View } from 'react-native';
 
 import { Chip, Sheet, Text } from '@/components/ui';
 import { colors } from '@/theme';
@@ -12,7 +12,7 @@ type Props<T extends string> = {
   first?: boolean; // 묶음의 첫 줄이면 위 구분선을 뺌
 };
 
-// 고르는 칸 한 줄 (목업의 select) — 누르면 아래 시트에서 고름
+// 고르는 칸 한 줄 (목업의 select) — 누르면 아래 시트에서 고름. 읽기만 하는 줄(KeyValueRow)과 구분되게 오른쪽 끝에 ›
 export function SelectRow<T extends string>({ label, value, options, onChange, first }: Props<T>) {
   const [open, setOpen] = useState(false);
   const current = options.find(([v]) => v === value)?.[1] ?? '';
@@ -28,7 +28,12 @@ export function SelectRow<T extends string>({ label, value, options, onChange, f
         <Text variant="rowLabel" tone="sub">
           {label}
         </Text>
-        <Text variant="bodyStrong">{current}</Text>
+        <View style={styles.value}>
+          <Text variant="bodyStrong">{current}</Text>
+          <Text variant="bodyStrong" tone="faint">
+            ›
+          </Text>
+        </View>
       </Pressable>
       <Sheet visible={open} onClose={() => setOpen(false)} title={label}>
         {options.map(([v, text], i) => (
@@ -56,6 +61,7 @@ export function SelectRow<T extends string>({ label, value, options, onChange, f
 const styles = StyleSheet.create({
   row: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, paddingVertical: 14 },
   divider: { borderTopWidth: 1, borderTopColor: colors.line },
+  value: { flexDirection: 'row', alignItems: 'center', gap: 6, flexShrink: 1 },
   pressed: { opacity: 0.6 },
   option: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 14, minHeight: 52 },
 });

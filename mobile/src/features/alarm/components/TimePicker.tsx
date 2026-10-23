@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
-import { Button, Sheet, Stepper, Text } from '@/components/ui';
+import { Button, Segmented, Sheet, Stepper, Text } from '@/components/ui';
 import { addMinutes, formatTime, minuteOfDay, startOfDay } from '@/lib/format';
 
 import { TextLink } from './TextLink';
@@ -12,13 +12,23 @@ type PickerProps = {
   error?: string; // 붉게 (예: 이미 지난 시각이에요)
 };
 
+const AMPM = [
+  ['am', '오전'],
+  ['pm', '오후'],
+] as const;
+
+// 12시간 표기의 시(1~12) + 오전/오후 → 0~23
+const toHour24 = (hour12: number, pm: boolean) => (hour12 % 12) + (pm ? 12 : 0);
+
 // 시 · 분 고르기 (목업의 input type="time") — 시트 안에 놓는 본문. TimeRow(H05 시간 칸) · TimeSheet(H03 알람 시각) · H05 확인 시트가 같이 씀
-// 시는 24시간(23 다음 0), 분은 1분 단위(59 다음 0), 둘 다 숫자를 눌러 직접 적을 수 있음 (범위 밖은 범위 안으로 맞춤)
-// 맨 위 큰 글자는 화면의 시각과 같은 12시간 표기(오후 2:07) — 조절하는 대로 바뀜
+// 맨 위 큰 글자(오후 2:07)와 같은 12시간 표기로 고름: 오전/오후 + 시(1~12, 12 다음 1) + 분(1분 단위, 59 다음 0, D42 C · D53)
+// 시 · 분은 숫자를 눌러 직접 적을 수 있음 (범위 밖은 범위 안으로 맞춤). 큰 글자는 조절하는 대로 바뀜
 export function TimePicker({ value, onChange, error }: PickerProps) {
   const minutes = minuteOfDay(value);
   const hour = Math.floor(minutes / 60);
   const minute = minutes % 60; // 대화에서 찾은 14:07 같은 값도 그대로
+  const pm = hour >= 12;
+  const hour12 = hour % 12 || 12;
   const set = (h: number, m: number) => onChange(addMinutes(startOfDay(value), h * 60 + m));
 
   return (
@@ -26,7 +36,8 @@ export function TimePicker({ value, onChange, error }: PickerProps) {
       <Text variant="stat" align="center" style={styles.preview} accessibilityLiveRegion="polite">
         {formatTime(value)}
       </Text>
-      <Stepper first label="시 (24시간)" value={hour} step={1} min={0} max={23} unit="시" wrap onChange={(h) => set(h, minute)} />
+      <Segmented options={AMPM} value={pm ? 'pm' : 'am'} onChange={(v) => set(toHour24(hour12, v === 'pm'), minute)} />
+      <Stepper first label="시" value={hour12} step={1} min={1} max={12} unit="시" wrap onChange={(h) => set(toHour24(h, pm), minute)} />
       <Stepper label="분" value={minute} step={1} min={0} max={59} unit="분" wrap onChange={(m) => set(hour, m)} />
       {error ? (
         <Text variant="caption" tone="warn" align="center" style={styles.error} accessibilityLiveRegion="polite">

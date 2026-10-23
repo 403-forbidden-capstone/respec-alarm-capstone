@@ -151,7 +151,7 @@ function Editor({
               </Text>
             </View>
           </View>
-          <TextLink label="변경" onPress={() => setPicking(true)} />
+          <TextLink label="변경 ⌄" accessibilityLabel="관계 변경" onPress={() => setPicking(true)} />
         </View>
       </Card>
 

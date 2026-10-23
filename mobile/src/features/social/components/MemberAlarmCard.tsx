@@ -15,6 +15,7 @@ const SHIFT_MINUTES = 5;
 
 // 친구 · 그룹원이 공유한 알람 카드 (목업 memberAlarmCard) — 그룹원 기상 상태(G03) · 공유받은 알람(G04)
 // 강도 · 준비 값은 비어 있을 수 있음 — 실데이터에서 기상 상태 조회(G03)만 허용받으면 알람 강도 · 준비 시간은 못 읽음
+// 꺼 둔 알람은 5분 옮기기 버튼을 숨김 — 울리지 않는 알람을 옮겨 주인에게 알림이 가지 않게
 export function MemberAlarmCard({ alarm, onToggle, onShift }: Props) {
   const first = alarm.chain[0];
   return (
@@ -29,7 +30,7 @@ export function MemberAlarmCard({ alarm, onToggle, onShift }: Props) {
       onToggle={onToggle}
       toggleLabel="공유 알람 켜기"
     >
-      {onShift ? (
+      {onShift && alarm.enabled ? (
         <View style={styles.shift}>
           <TopBarButton label={`${SHIFT_MINUTES}분 앞당기기`} onPress={() => onShift(-SHIFT_MINUTES)} />
           <TopBarButton label={`${SHIFT_MINUTES}분 늦추기`} onPress={() => onShift(SHIFT_MINUTES)} />

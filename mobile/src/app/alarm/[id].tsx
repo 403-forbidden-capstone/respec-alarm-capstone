@@ -209,8 +209,11 @@ function Detail({ appointment: a, reload }: { appointment: AppointmentDetail; re
     setChanges(null);
   }
 
+  // 저장은 화면 아래에 고정 — 폼이 길어 스크롤 끝까지 내려가지 않아도 보이게. 바뀐 게 없거나 순서가 뒤집혔으면 못 누름
+  const footer = <Button label="저장" onPress={save} disabled={!dirty || blocked != null} loading={busy && changes == null && travelConfirm == null} />;
+
   return (
-    <Screen>
+    <Screen footer={footer}>
       <TopBar onBack={backOrHome} screenId="H03" />
       <Text variant="title" style={styles.title}>
         알람 설정
@@ -343,7 +346,7 @@ function Detail({ appointment: a, reload }: { appointment: AppointmentDetail; re
           </Text>
         ) : null}
         <Text variant="caption" tone="faint" style={styles.note}>
-          시각을 눌러 직접 고를 수 있어요. 직접 고른 시각은 자동 계산보다 먼저 적용되고, 기상을 옮기면 준비도 같은 만큼 옮겨져요.
+          직접 고른 시각은 자동 계산보다 먼저 적용되고, 기상을 옮기면 준비도 같은 만큼 옮겨져요.
         </Text>
         {manualAny ? (
           <View style={styles.reset}>
@@ -411,10 +414,6 @@ function Detail({ appointment: a, reload }: { appointment: AppointmentDetail; re
           </View>
         ) : null}
       </Card>
-
-      <View style={styles.stack}>
-        <Button label="저장" onPress={save} disabled={!dirty || blocked != null} loading={busy && changes == null && travelConfirm == null} />
-      </View>
 
       {/* 알람 시각 직접 고르기 — 기상을 옮기면 준비도 같은 간격으로 따라옴 */}
       <TimeSheet

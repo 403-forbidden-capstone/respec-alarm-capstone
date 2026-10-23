@@ -74,16 +74,18 @@ export function ChatComposer({
   );
 }
 
+// 알약 버튼 — 켜짐(글 모드)은 흰 바탕에 검은 테두리로, 검은 원(말하기)과 구분. 모양은 38, 누르는 칸은 hitSlop 3을 더해 44
 function Pill({ label, on, disabled, onPress }: { label: string; on?: boolean; disabled?: boolean; onPress: () => void }) {
   return (
     <Pressable
       onPress={onPress}
       disabled={disabled}
+      hitSlop={3}
       accessibilityRole="button"
       accessibilityState={on != null ? { selected: on, disabled } : { disabled }}
       style={({ pressed }) => [styles.pill, on && styles.pillOn, disabled && styles.pillOff, pressed && styles.pressed]}
     >
-      <Text variant="body" tone={on ? 'inverse' : 'ink'}>
+      <Text variant="body" weight={on ? 600 : 400}>
         {label}
       </Text>
     </Pressable>
@@ -159,8 +161,8 @@ const styles = StyleSheet.create({
     color: colors.ink,
   },
   buttons: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 16 },
-  pill: { height: 38, paddingHorizontal: 16, borderRadius: 19, backgroundColor: colors.chip, justifyContent: 'center' },
-  pillOn: { backgroundColor: colors.ink },
+  pill: { height: 38, paddingHorizontal: 16, borderRadius: 19, borderWidth: 1, borderColor: colors.chip, backgroundColor: colors.chip, justifyContent: 'center' },
+  pillOn: { backgroundColor: colors.card, borderColor: colors.ink },
   pillOff: { opacity: 0.4 },
   micWrap: { width: MIC, height: MIC, alignItems: 'center', justifyContent: 'center' },
   ring: { position: 'absolute', width: MIC, height: MIC, borderRadius: MIC / 2, backgroundColor: colors.ink },

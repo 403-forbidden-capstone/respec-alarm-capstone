@@ -7,7 +7,7 @@ import { Text } from './Text';
 import { Toggle } from './Toggle';
 
 type Props = {
-  dateLabel: string; // 5월 22일 (목) · 캡스톤팀 공유
+  dateLabel: string; // 5월 22일 (목) · 캡스톤팀 공유 — 섹션 제목에 날짜가 있는 목록(H02)에서는 '캡스톤팀 공유'만, 없으면 빈 줄
   time: { ampm: string; hm: string }; // 첫 알람 (큰 글자)
   kindLabel: string; // 기상
   chain: string[]; // 오른쪽 세로 줄 (오전 8:00 기상 …)
@@ -80,9 +80,17 @@ export function AlarmCard({
           </Text>
         ))}
       </View>
-      <Text variant="small" tone="sub" align="right" style={[styles.foot, dim]}>
-        {foot}
-      </Text>
+      {/* 누를 수 있는 카드만 약속 줄 끝에 › (눌리지 않는 공유 알람 카드에는 없음) */}
+      <View style={[styles.foot, dim]}>
+        <Text variant="small" tone="sub" align="right" style={styles.footText}>
+          {foot}
+        </Text>
+        {onPress ? (
+          <Text variant="small" tone="faint">
+            ›
+          </Text>
+        ) : null}
+      </View>
     </>
   );
   const mainStyle = [styles.main, children ? styles.mainOpen : null];
@@ -136,5 +144,6 @@ const styles = StyleSheet.create({
   chainItem: { alignItems: 'flex-end' },
   dash: { lineHeight: 12 },
   meta: { marginTop: 2 },
-  foot: { marginTop: 6 },
+  foot: { marginTop: 6, flexDirection: 'row', justifyContent: 'flex-end', alignItems: 'center', gap: 4 },
+  footText: { flexShrink: 1 },
 });

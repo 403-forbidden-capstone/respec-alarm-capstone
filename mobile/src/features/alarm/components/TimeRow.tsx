@@ -15,7 +15,7 @@ type Props = {
   error?: string; // 줄 바로 아래에 붉게 (예: 이미 지난 시각이에요)
 };
 
-// 시간 고르는 줄 (목업의 input type="time") — 누르면 아래 시트에서 시 · 분을 올리고 내림 (시트 본문은 TimePicker)
+// 시간 고르는 줄 (목업의 input type="time") — 누르면 아래 시트에서 시 · 분을 올리고 내림 (시트 본문은 TimePicker). 누르는 줄이라 오른쪽 끝에 ›
 export function TimeRow({ label, value, onChange, first, error }: Props) {
   const [open, setOpen] = useState(false);
   const text = formatTime(value);
@@ -31,9 +31,14 @@ export function TimeRow({ label, value, onChange, first, error }: Props) {
         <Text variant="rowLabel" tone="sub">
           {label}
         </Text>
-        <Text variant="bodyStrong" tone={error ? 'warn' : 'ink'}>
-          {text}
-        </Text>
+        <View style={styles.value}>
+          <Text variant="bodyStrong" tone={error ? 'warn' : 'ink'}>
+            {text}
+          </Text>
+          <Text variant="bodyStrong" tone="faint">
+            ›
+          </Text>
+        </View>
       </Pressable>
       {error ? (
         <Text variant="caption" tone="warn" align="right" style={styles.error} accessibilityLiveRegion="polite">
@@ -53,6 +58,7 @@ export function TimeRow({ label, value, onChange, first, error }: Props) {
 const styles = StyleSheet.create({
   row: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, paddingVertical: 14 },
   divider: { borderTopWidth: 1, borderTopColor: colors.line },
+  value: { flexDirection: 'row', alignItems: 'center', gap: 6, flexShrink: 1 },
   pressed: { opacity: 0.6 },
   error: { marginTop: -6, marginBottom: 8 },
   done: { marginTop: 16 },

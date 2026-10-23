@@ -1,9 +1,9 @@
 import { router, useLocalSearchParams } from 'expo-router';
-import { useState } from 'react';
+import { Fragment, useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 
 import { Button, Card, DateRow, Field, KeyValueRow, LoadError, Screen, Sheet, Text, toast, Toggle, TopBar } from '@/components/ui';
-import { createAppointment, defaultDraft, draftAt, estimateAppointment, listPlaces } from '@/features/alarm/api';
+import { createAppointment, defaultDraft, draftAt, estimateAppointment, listAppointments, listPlaces } from '@/features/alarm/api';
 import { adjustEstimate, isManualTime, orderError } from '@/features/alarm/adjust';
 import { useNow } from '@/features/alarm/hooks/useNow';
 import { ItemChips } from '@/features/alarm/components/ItemChips';
@@ -14,7 +14,7 @@ import { TimeButton } from '@/features/alarm/components/TimeButton';
 import { TimePickBody } from '@/features/alarm/components/TimePicker';
 import { TimeRow } from '@/features/alarm/components/TimeRow';
 import { repeatToRrule } from '@/features/alarm/repeat';
-import { addItems, isPassed, parseDayParam, ringingKinds, tomorrow, upcomingAlarms } from '@/features/alarm/schedule';
+import { addItems, earlierWakeOf, isPassed, parseDayParam, ringingKinds, tomorrow, upcomingAlarms } from '@/features/alarm/schedule';
 import {
   IMPORTANCE_LABEL,
   IMPORTANCE_POINT,
@@ -39,6 +39,11 @@ import { colors } from '@/theme';
 
 const IMPORTANCE_OPTIONS = (['LOW', 'NORMAL', 'HIGH'] as const).map((v) => [v, IMPORTANCE_LABEL[v]] as const);
 
+type EarlierWake = { title: string; at: Date }; // 같은 날 앞 일정의 기상 알람 (schedule.ts earlierWakeOf)
+
+// 기상 알람이 안 생기는 이유 한 줄 — 같은 날 앞 일정의 기상 알람으로 깨우기 때문 (api.ts hasEarlierWake)
+const wakeNote = (w: EarlierWake) => `같은 날 ${w.title} 기상 알람(${formatTime(w.at)})으로 깨워요`;
+
 // H05 새 일정 만들기 — 입력하면 이동시간 · 준비 시간으로 알람을 계산해 확인 시트로 보여 줌
 // from=chat: AI 대화(A02)에서 찾은 일정을 "수정"으로 연 것 — 찾은 값으로 채우고, 저장하면 대화로 돌아감
 // from=home · from=alarms: 저장하면 온 화면으로 돌아감 (알람 목록이면 새 일정에 테두리), date=2025-05-22: 처음 날짜 (홈이 보여 주는 날)
@@ -48,6 +53,7 @@ export default function NewScheduleScreen() {
   // 대화에서 왔고 찾은 일정이 아직 대기일 때만 — 이미 확인한 카드면 보통 새 일정으로 (두 벌 저장 막기)
   const [fromChat] = useState(() => from === 'chat' && foundScheduleDraft() != null);
   const { data: places, error: placesError, reload: reloadPlaces } = useLoad(listPlaces);
+  const { data: appointments } = useLoad(listAppointments); // 같은 날 앞 일정의 기상 알람을 찾는 데만 씀 — 못 읽어도 폼은 그대로
   const [initial] = useState(() => {
     if (fromChat) {
       const found = foundScheduleDraft();
@@ -89,8 +95,10 @@ export default function NewScheduleScreen() {
   const at = draftAt(draft.date, draft.time);
   const past = at.getTime() <= current.getTime();
   const anyAlarm = RING_KINDS.some((kind) => draft.alarms[kind]); // 모두 끄면 알람 없는 일정 (D46)
+  // 같은 날 앞 일정에 켜진 기상 알람이 있으면 이 일정은 기상 알람 없이 준비부터 — 스위치 아래 · 확인 시트에 그 이유를 한 줄로
+  const earlierWake = appointments ? earlierWakeOf(at, appointments) : null;
 
-  // 확인 시트 닫기 · 돌아가서 수정 — 시트에서 고친 시각은 버림 (다시 계산하면 자동 값부터)
+  // 확인 시트 닫기 · 닫고 수정하기 — 시트에서 고친 시각은 버림 (다시 계산하면 자동 값부터)
   function closeSheet() {
     setEstimate(null);
     setPick(null);
@@ -235,18 +243,24 @@ export default function NewScheduleScreen() {
           알람
         </Text>
         {RING_KINDS.map((kind, i) => (
-          <KeyValueRow
-            key={kind}
-            first={i === 0}
-            label={`${KIND_LABEL[kind]} 알람`}
-            value={
-              <Toggle
-                value={draft.alarms[kind]}
-                onChange={(on) => set('alarms', { ...draft.alarms, [kind]: on })}
-                label={`${KIND_LABEL[kind]} 알람`}
-              />
-            }
-          />
+          <Fragment key={kind}>
+            <KeyValueRow
+              first={i === 0}
+              label={`${KIND_LABEL[kind]} 알람`}
+              value={
+                <Toggle
+                  value={draft.alarms[kind]}
+                  onChange={(on) => set('alarms', { ...draft.alarms, [kind]: on })}
+                  label={`${KIND_LABEL[kind]} 알람`}
+                />
+              }
+            />
+            {kind === 'WAKE' && earlierWake ? (
+              <Text variant="caption" tone="faint" align="right" style={styles.wakeNote}>
+                {wakeNote(earlierWake)}
+              </Text>
+            ) : null}
+          </Fragment>
         ))}
         <Text variant="caption" tone="faint" style={styles.alarmNote}>
           모두 끄면 알람 없이 일정만 저장해요.
@@ -275,6 +289,7 @@ export default function NewScheduleScreen() {
           <CalcSteps
             estimate={estimate}
             current={current}
+            earlierWake={appointments ? earlierWakeOf(estimate.appointment.at, appointments) : null}
             saving={saving}
             showCalc={showCalc}
             onToggleCalc={() => setShowCalc((v) => !v)}
@@ -310,6 +325,7 @@ function PickStep({ estimate, kind, onChange, onDone }: { estimate: Estimate; ki
 function CalcSteps({
   estimate: e,
   current,
+  earlierWake,
   saving,
   showCalc,
   onToggleCalc,
@@ -319,6 +335,7 @@ function CalcSteps({
 }: {
   estimate: Estimate;
   current: Date;
+  earlierWake: EarlierWake | null; // 기상 칩이 빠진 이유에 넣을 앞 일정 (목록을 못 읽었으면 null — 이유는 일반 문구로)
   saving: boolean;
   showCalc: boolean;
   onToggleCalc: () => void;
@@ -378,9 +395,12 @@ function CalcSteps({
               );
             })}
           </View>
-          <Text variant="caption" tone="faint" style={styles.passedNote}>
-            시각을 누르면 직접 고를 수 있어요
-          </Text>
+          {/* 기상 칩이 없는 이유 — 같은 날 앞 일정의 기상 알람으로 깨우기 때문 (오전 · 오후 일정이라서가 아님) */}
+          {e.sameDayWake ? (
+            <Text variant="caption" tone="faint" style={styles.passedNote}>
+              {earlierWake ? wakeNote(earlierWake) : '같은 날 앞 일정의 기상 알람으로 깨워요'}
+            </Text>
+          ) : null}
           {anyPassed ? (
             <Text variant="label" tone="warn" style={styles.passedNote}>
               지난 알람은 울리지 않아요
@@ -405,6 +425,7 @@ function CalcSteps({
           <Pressable
             onPress={onToggleCalc}
             accessibilityRole="button"
+            accessibilityLabel={showCalc ? '계산 근거 접기' : '계산 근거 펼치기'}
             accessibilityState={{ expanded: showCalc }}
             style={({ pressed }) => [styles.calcToggle, pressed && styles.pressed]}
           >
@@ -412,7 +433,7 @@ function CalcSteps({
               계산 근거 자세히
             </Text>
             <Text variant="rowLabel" tone="sub">
-              {showCalc ? '접기' : '펼치기'}
+              {showCalc ? '접기 ⌃' : '펼치기 ⌄'}
             </Text>
           </Pressable>
           {showCalc ? (
@@ -436,9 +457,10 @@ function CalcSteps({
           ) : null}
         </>
       )}
+      {/* 아래 글자 버튼은 시트 머리의 "닫기"와 같은 일(시트를 닫고 폼으로) — 문구도 닫는다는 것이 보이게 */}
       <View style={styles.stack}>
         <Button label={alarmless ? '일정 저장' : '알람 저장'} onPress={onSave} loading={saving} disabled={blocked != null} />
-        <Button label="돌아가서 수정" variant="plain" onPress={onEdit} disabled={saving} />
+        <Button label="닫고 수정하기" variant="plain" onPress={onEdit} disabled={saving} />
       </View>
     </>
   );
@@ -450,6 +472,7 @@ const styles = StyleSheet.create({
   optLabel: { marginTop: 12, marginBottom: 8 },
   cardLabel: { marginBottom: 8 },
   alarmNote: { marginTop: 6 },
+  wakeNote: { marginTop: -4, marginBottom: 8 },
   error: { marginTop: -4, marginBottom: 6 },
   stack: { gap: 10, marginTop: 16 },
   steps: { marginBottom: 4 },

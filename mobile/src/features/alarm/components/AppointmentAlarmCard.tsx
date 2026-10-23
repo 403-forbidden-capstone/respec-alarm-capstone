@@ -15,11 +15,12 @@ type Props = {
   current: Date; // 지금 시각 — 큰 시각은 앞으로 울릴 첫 알람, 지난 알람은 "지남"
   onChanged: () => void; // 켜기 · 끄기 뒤 다시 읽기
   highlight?: boolean; // 방금 만든 일정 등을 잠깐 테두리로 보여 줌 (H02)
+  showDate?: boolean; // 카드 머리줄에 날짜를 보임 (기본 켬). 섹션 제목에 날짜가 있는 알람 목록(H02)에서는 끔
 };
 
 // 일정 하나의 알람 카드 (홈 · 알람 목록) — 카드를 누르면 알람 설정(H03)
 // 일정 없는 알람(실데이터, D46)은 이동 · 준비 줄이 없고 알람 설정(H03)이 아직 없어 눌러도 안 열림
-export function AppointmentAlarmCard({ appointment: a, current, onChanged, highlight }: Props) {
+export function AppointmentAlarmCard({ appointment: a, current, onChanged, highlight, showDate = true }: Props) {
   const list = ringingKinds(a.alarms);
   // 큰 시각 = 앞으로 울릴 첫 알람 (홈 "다음 알람"과 같은 것을 가리키게). 다 지났으면 지남으로, 다 껐으면 첫 알람
   const { alarm: first, passed } = pickCardAlarm(a.alarms, current);
@@ -45,7 +46,7 @@ export function AppointmentAlarmCard({ appointment: a, current, onChanged, highl
 
   const card = (
     <AlarmCard
-      dateLabel={`${formatDateShort(a.at)}${a.groupName ? ` · ${a.groupName} 공유` : ''}`}
+      dateLabel={[showDate ? formatDateShort(a.at) : '', a.groupName ? `${a.groupName} 공유` : ''].filter(Boolean).join(' · ')}
       time={timeParts(first.at)}
       kindLabel={`${KIND_LABEL[first.kind]}${passed ? ' · 지남' : ''}`}
       chain={list.map((x) => chainLabel(x, current, formatTime(x.at)))}
