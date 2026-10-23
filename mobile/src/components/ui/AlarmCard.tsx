@@ -39,11 +39,13 @@ export function AlarmCard({
   const body = (
     <>
       <View style={styles.big}>
-        <Text variant="ampm" tone="sub">
+        <Text variant="ampm" tone="sub" numberOfLines={1} style={styles.noShrink}>
           {time.ampm}
         </Text>
-        <Text variant="number">{time.hm}</Text>
-        <Text variant="small" tone="sub">
+        <Text variant="number" numberOfLines={1} style={styles.noShrink}>
+          {time.hm}
+        </Text>
+        <Text variant="small" tone="sub" numberOfLines={1} style={styles.kind}>
           {kindLabel}
         </Text>
       </View>
@@ -55,7 +57,7 @@ export function AlarmCard({
                 -
               </Text>
             ) : null}
-            <Text variant="label" weight={600}>
+            <Text variant="label" weight={600} numberOfLines={1}>
               {line}
             </Text>
           </View>
@@ -139,8 +141,11 @@ const styles = StyleSheet.create({
   headGap: { paddingRight: size.switchW + 12 }, // 스위치가 얹힐 자리
   body: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingTop: 2 },
   pressed: { opacity: 0.7 },
-  big: { flexDirection: 'row', alignItems: 'baseline', gap: 6 },
-  chain: { alignItems: 'flex-end' },
+  // 줄이 모자라면 큰 시각(오전 · 7:30)이 아니라 종류 글자(kind)가 먼저 줄어듦 — 오른쪽 체인 줄은 한 줄 그대로(글자 중간에서 줄바꿈 안 함)
+  big: { flexDirection: 'row', alignItems: 'baseline', gap: 6, flexShrink: 1, minWidth: 0 },
+  noShrink: { flexShrink: 0 },
+  kind: { flexShrink: 1 },
+  chain: { alignItems: 'flex-end', flexShrink: 0 },
   chainItem: { alignItems: 'flex-end' },
   dash: { lineHeight: 12 },
   meta: { marginTop: 2 },
