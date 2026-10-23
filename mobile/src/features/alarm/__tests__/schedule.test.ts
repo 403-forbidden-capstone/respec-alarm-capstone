@@ -153,10 +153,17 @@ describe('H05 같은 날 앞 일정의 기상 알람 (earlierWakeOf)', () => {
     expect(earlierWakeOf(kst(23, 840), [meeting])).toBeNull();
   });
 
-  it('꺼 둔 일정 · 꺼 둔 기상 · 기상 없는 앞 일정 · 자기 자신은 안 셈', () => {
+  it('꺼 둔 일정 · 꺼 둔 기상 · 기상 없는 앞 일정 · 자기 자신 · 일정 없는 알람(standalone)은 안 셈', () => {
     expect(earlierWakeOf(kst(22, 840), [{ ...meeting, enabled: false }])).toBeNull();
     expect(earlierWakeOf(kst(22, 840), [{ ...meeting, alarms: chain({ WAKE: false }) }])).toBeNull();
     expect(earlierWakeOf(kst(22, 1200), [dinner])).toBeNull();
     expect(earlierWakeOf(kst(22, 840), [meeting], 'a1')).toBeNull();
+    // 실데이터는 일정 없는 기상 알람(제목 '알람')이 목록에 섞여 옴 — 서버는 약속 참여만 세므로 앞 일정으로 치지 않음
+    expect(earlierWakeOf(kst(22, 840), [{ ...meeting, id: 's1', title: '알람', standalone: true }])).toBeNull();
+  });
+
+  it('기상 없는 앞 일정은 건너뛰고 그다음 앞 일정의 기상을 고름', () => {
+    const early = { ...dinner, id: 'a0', title: '아침 산책', at: kst(22, 420) } as Appointment; // 7:00, 기상 없음
+    expect(earlierWakeOf(kst(22, 840), [early, meeting])).toEqual({ title: '팀 주간회의', at: kst(22, 480) });
   });
 });

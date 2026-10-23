@@ -425,6 +425,7 @@ function CalcSteps({
           <Pressable
             onPress={onToggleCalc}
             accessibilityRole="button"
+            accessibilityLabel={showCalc ? '계산 근거 접기' : '계산 근거 펼치기'}
             accessibilityState={{ expanded: showCalc }}
             style={({ pressed }) => [styles.calcToggle, pressed && styles.pressed]}
           >

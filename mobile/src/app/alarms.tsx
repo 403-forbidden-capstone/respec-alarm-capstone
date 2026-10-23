@@ -77,6 +77,7 @@ export default function AlarmsScreen() {
           <Pressable
             onPress={() => setShowPast((v) => !v)}
             accessibilityRole="button"
+            accessibilityLabel={showPast ? `지난 일정 ${past.length}개 접기` : `지난 일정 ${past.length}개 펼치기`}
             accessibilityState={{ expanded: showPast }}
             style={({ pressed }) => [styles.pastToggle, pressed && styles.pressed]}
           >

@@ -27,6 +27,7 @@ export default function AiScreen() {
   // 카드 저장 · 완료 같은 버튼은 한 번에 하나씩, 다시 읽기가 끝날 때까지 — 실패하면 토스트 (lib/useAction)
   const { busy, run: act } = useAction();
   const scroll = useRef<ScrollView>(null);
+  const thinkingRef = useRef(false); // 정리 중인지 — 확인창이 떠 있는 사이 바뀐 값을 읽어야 해서 렌더 값(thinking) 말고 ref로도 둠
 
   const next = data?.next ?? null;
   const canSay = !listening && !thinking && next?.who === 'me';
@@ -34,6 +35,7 @@ export default function AiScreen() {
   // 내 말을 보내고 AI 답까지 기다림 (api say가 한 번에 돌려줌). 보낼 글을 알면 답을 기다리는 동안 내 말을 먼저 그림(목업 userSay)
   // 실데이터에서 next에 대본 문장이 없고 글 모드도 아니면(음성) 보낼 글을 모르니 점 세 개만. 다시 읽은 뒤에 정리 표시를 내림
   async function talk(text?: string) {
+    thinkingRef.current = true;
     setPendingText(text?.trim() || (next?.who === 'me' ? next.text : null));
     setPendingAt(now());
     setThinking(true);
@@ -46,6 +48,7 @@ export default function AiScreen() {
       await reload();
       setThinking(false);
       setPendingText(null);
+      thinkingRef.current = false;
     }
   }
 
@@ -100,13 +103,14 @@ export default function AiScreen() {
   }
 
   // 완료 — 한 번 묻고 일기를 만들어 하루 기록으로. 내가 아직 한 마디도 안 했으면 완료를 막음 (빈 대화로 기록이 생기지 않게)
+  // 정리 중에 끝내면 끝난 대화에 답 · 카드가 붙으므로, 확인창 앞뒤로 두 번 봄 (확인창이 떠 있는 사이 글 모드 보내기로 정리가 시작될 수 있음)
   const started = messages.some((m) => m.who === 'me');
   const finish = async () => {
-    if (thinking) return; // 정리 중에 끝내면 끝난 대화에 답 · 카드가 붙음
+    if (thinkingRef.current) return;
+    setListening(false); // 듣는 중이면 멈춤 — 확인창이 떠 있는 사이 듣기 타이머가 터져 말을 보내지 않게
     const ok = await confirm({ title: '대화를 마칠까요?', message: '지금까지 나눈 대화로 하루 기록을 만들어요.', okLabel: '완료' });
-    if (!ok) return;
+    if (!ok || thinkingRef.current) return;
     await act(async () => {
-      setListening(false);
       const { recordDate } = await finishConversation();
       router.push({ pathname: '/journal/[date]', params: { date: recordDate } });
     });
@@ -178,7 +182,7 @@ export default function AiScreen() {
           onToggleMode={toggleMode}
           onSpeak={speak}
           onDone={finish}
-          doneDisabled={thinking || busy || !started}
+          doneDisabled={thinking || listening || busy || !started}
         />
       </View>
     </Screen>
