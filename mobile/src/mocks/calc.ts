@@ -1,6 +1,7 @@
 // 목업 계산 — 알람 역산 · 강도는 서버 함수와 같은 공용 계산(supabase/functions/_shared/calc)을 얇게 감쌈 (전체작업계획 8.1 Q4 A)
 //   ALG-01 알람 역산 · ALG-02 강도 · 그룹원 기상 상태 (ALG-03 권한 합집합은 features/social/grants.ts의 mergeGrants — 목업 · 실데이터 같이 씀)
-//   공용 계산이 목업 규칙을 그대로 옮긴 것이라(D56 열림 = 목업 계산이 기준) 결과가 같음. 여기서는 목업 일정(MockAppointment) ↔ 공용 입력만 바꿈
+//   공용 계산이 목업 규칙을 그대로 옮긴 것이라(D56 열림 = 목업 계산이 기준) 결과가 같음. 역산 · 강도는 목업 일정(MockAppointment) ↔ 공용 입력만 바꾸고,
+//   그룹원 기상 상태(memberState)는 목업 시나리오(timelines · db.me · db.wake)로 글자를 만드는 목업 전용 로직
 import type { AlarmTime, IntensityAxis, Level } from '@/features/alarm/types';
 import type { WakeState } from '@/features/social/types';
 import { formatTime, minuteOfDay, timeParts } from '@/lib/format';

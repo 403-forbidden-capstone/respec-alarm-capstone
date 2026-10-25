@@ -23,7 +23,8 @@
 - 색 · 간격 · 글자 크기는 `mobile/src/theme`, 공용 부품은 `mobile/src/components/ui`에서 가져옵니다. 화면 파일에 색 값 · 글꼴을 직접 적지 않습니다. 글자는 `Text`로 씁니다.
 - 부품 견본은 `/dev/ui`(앱은 `respecalarm://dev/ui`)에서 봅니다.
 - 화면은 데이터를 `mobile/src/features/*/api.ts`로만 읽습니다. 지금은 `mobile/src/mocks`의 가짜 데이터를 돌려주고, 실데이터가 붙으면 api.ts만 바꿉니다. 옮긴 목업 화면은 `/dev/screens`에서 번호로 엽니다.
-- 부품(`components/`, `features/*/components/`)은 api.ts를 부르지 않고 값 · 콜백만 받습니다. 저장은 화면이나 `features/*/hooks/`가 합니다. 로그인 세션은 `lib/auth.ts`로만 다룹니다(`supabase.auth`를 직접 부르지 않음).
+- 부품(`components/ui`, `features/*/components/`)은 api.ts를 부르지 않고 값 · 콜백만 받습니다. 저장은 화면이나 `features/*/hooks/`가 합니다. 개발 패널(`components/dev`)은 예외입니다.
+- 화면 · `features/` 코드는 `supabase.auth`를 직접 부르지 않습니다. 로그인 · 세션 구독은 `lib/auth`, 지금 사용자 id는 `lib/user`를 씁니다. `lib/`의 낮은 층(`user` · `realtime` · `supabase`)은 가볍게 쓰려고 `supabase.auth`를 직접 부릅니다(`lib/auth`는 불러올 때 expo-linking을 씀).
 - 시각 · 날짜 글자는 `mobile/src/lib/format`(오전 7:55 · 5월 22일 목요일), 지금 시각은 `lib/clock`의 `now()`를 씁니다.
 - 쓰기 버튼은 `lib/useAction`(두 번 누름 막기 · 실패 토스트), 못 읽으면 `components/ui`의 `LoadError`, "← 이전"은 `lib/nav`의 `backOrHome`을 씁니다. 사용자에게 보여 줄 실패 이유는 api.ts가 `lib/errors`의 `UserError`로 던지고, 그 밖의 오류(DB · 네트워크 원문)는 화면이 기본 문구로 바꿔 보여 줍니다.
 - 피그마 화면은 `docs/design/figma/`의 PNG(목업 번호 대응표 포함)를 먼저 봅니다. 피그마 MCP는 한 달 호출 수가 적어서(View 자리 20회) PNG에 없는 걸 꼭 봐야 할 때만 씁니다.
