@@ -21,6 +21,7 @@ import { cancelSnooze, getDaySchedule, getNextAlarm, getSnooze, getWakeInProgres
 import { AppointmentAlarmCard } from '@/features/alarm/components/AppointmentAlarmCard';
 import { ScheduleList } from '@/features/alarm/components/ScheduleList';
 import { TextLink } from '@/features/alarm/components/TextLink';
+import { useAppointmentToggle } from '@/features/alarm/hooks/useAppointmentToggle';
 import { useNow } from '@/features/alarm/hooks/useNow';
 import { isEvening } from '@/features/alarm/schedule';
 import { KIND_LABEL } from '@/features/alarm/types';
@@ -70,6 +71,7 @@ function greeting(t: Date) {
 export default function HomeScreen() {
   const { data, error, reload } = useWakeLoad(loadHome, (d) => d.groups.map((g) => g.id)); // 그룹 기상 신호가 오면 다시 읽음
   const current = useNow(); // 30초마다 다시 읽음 — "N분 뒤" · 인사말이 열 때 값에 멈춰 있지 않게
+  const toggleAppointment = useAppointmentToggle(reload); // 다음 알람 카드 스위치
   const { run } = useAction(); // 루틴 단계 · 준비물 체크는 한 번에 하나씩, 실패하면 토스트 (실데이터는 네트워크 오류가 있음)
 
   // 저녁으로 넘어갔거나 다음 알람 시각이 지났으면 내용을 다시 읽음
@@ -176,7 +178,7 @@ export default function HomeScreen() {
 
       <SectionHeader title="다음 알람" right={next ? formatRelative(current, next.alarm.at) : undefined} />
       {next ? (
-        <AppointmentAlarmCard appointment={next.appointment} current={current} onChanged={reload} />
+        <AppointmentAlarmCard appointment={next.appointment} current={current} onToggle={(on) => toggleAppointment(next.appointment, on)} />
       ) : (
         <EmptyState
           title="예정된 알람이 없어요"

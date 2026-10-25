@@ -1,8 +1,9 @@
 // 목업 계산 — 알람 역산 · 강도는 서버 함수와 같은 공용 계산(supabase/functions/_shared/calc)을 얇게 감쌈 (전체작업계획 8.1 Q4 A)
-//   ALG-01 알람 역산 · ALG-02 강도 · ALG-03 권한 합집합 · 그룹원 기상 상태
-//   공용 계산이 목업 규칙을 그대로 옮긴 것이라(D56 열림 = 목업 계산이 기준) 결과가 같음. 여기서는 목업 일정(MockAppointment) ↔ 공용 입력만 바꿈
+//   ALG-01 알람 역산 · ALG-02 강도 · 그룹원 기상 상태 (ALG-03 권한 합집합은 features/social/grants.ts의 mergeGrants — 목업 · 실데이터 같이 씀)
+//   공용 계산이 목업 규칙을 그대로 옮긴 것이라(D56 열림 = 목업 계산이 기준) 결과가 같음. 역산 · 강도는 목업 일정(MockAppointment) ↔ 공용 입력만 바꾸고,
+//   그룹원 기상 상태(memberState)는 목업 시나리오(timelines · db.me · db.wake)로 글자를 만드는 목업 전용 로직
 import type { AlarmTime, IntensityAxis, Level } from '@/features/alarm/types';
-import type { FinalGrant, GrantRow, WakeState } from '@/features/social/types';
+import type { WakeState } from '@/features/social/types';
 import { formatTime, minuteOfDay, timeParts } from '@/lib/format';
 import { alarmChain as sharedAlarmChain } from '@shared/calc/chain.ts';
 import { autoLevel as sharedAutoLevel, resolveIntensity } from '@shared/calc/intensity.ts';
@@ -42,14 +43,6 @@ export function autoLevel(a: MockAppointment): Level {
 // 직접 고른 강도가 있으면 그것, 없으면 자동
 export function axisLevel(a: MockAppointment, axis: IntensityAxis): Level {
   return resolveIntensity(a.importance, db.lateCount4w, db.intensityOverrides[a.id]).axes[axis].level;
-}
-
-// ALG-03: 관계별 권한을 항목별로 OR
-export function orGrants(rows: GrantRow[]): FinalGrant {
-  const viewAlarm = rows.some((r) => r.viewAlarm);
-  const editAlarm = rows.some((r) => r.editAlarm);
-  const viewWake = rows.some((r) => r.viewWake);
-  return { viewAlarm, editAlarm, viewWake, rows, count: [viewAlarm, editAlarm, viewWake].filter(Boolean).length };
 }
 
 const STATE_TEXT: Record<string, (t: string) => WakeState> = {

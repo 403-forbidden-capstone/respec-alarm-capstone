@@ -5,6 +5,7 @@ import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { EmptyState, Loading, LoadError, Screen, SectionHeader, Text, TopBar, TopBarButton } from '@/components/ui';
 import { listAppointments } from '@/features/alarm/api';
 import { AppointmentAlarmCard } from '@/features/alarm/components/AppointmentAlarmCard';
+import { useAppointmentToggle } from '@/features/alarm/hooks/useAppointmentToggle';
 import { useNow } from '@/features/alarm/hooks/useNow';
 import { dayHeading, groupByDay, splitUpcoming } from '@/features/alarm/schedule';
 import { formatDateShort } from '@/lib/format';
@@ -20,6 +21,7 @@ export default function AlarmsScreen() {
   const { highlight } = useLocalSearchParams<{ highlight?: string }>();
   const { data, error, reload } = useLoad(listAppointments);
   const current = useNow();
+  const toggleAppointment = useAppointmentToggle(reload);
   const [showPast, setShowPast] = useState(false);
   const [expired, setExpired] = useState<string | null>(null);
   const lit = highlight && highlight !== expired ? highlight : null;
@@ -68,7 +70,7 @@ export default function AlarmsScreen() {
           <SectionHeader title={dayHeading(day[0].at, current)} />
           {/* 날짜는 섹션 제목에 있으니 카드 머리줄에는 안 보임 */}
           {day.map((a) => (
-            <AppointmentAlarmCard key={a.id} appointment={a} current={current} onChanged={reload} highlight={a.id === lit} showDate={false} />
+            <AppointmentAlarmCard key={a.id} appointment={a} current={current} onToggle={(on) => toggleAppointment(a, on)} highlight={a.id === lit} showDate={false} />
           ))}
         </View>
       ))}
@@ -93,7 +95,7 @@ export default function AlarmsScreen() {
                 <View key={day[0].id}>
                   <SectionHeader title={formatDateShort(day[0].at)} />
                   {day.map((a) => (
-                    <AppointmentAlarmCard key={a.id} appointment={a} current={current} onChanged={reload} showDate={false} />
+                    <AppointmentAlarmCard key={a.id} appointment={a} current={current} onToggle={(on) => toggleAppointment(a, on)} showDate={false} />
                   ))}
                 </View>
               ))
