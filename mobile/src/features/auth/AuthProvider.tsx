@@ -1,12 +1,11 @@
-import type { Session } from '@supabase/supabase-js';
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react';
 
 import { getMyProfile, MOCK_PROFILE } from '@/features/profile/api';
 import type { Profile } from '@/features/profile/types';
+import { loadSession, watchSession, type Session } from '@/lib/auth';
 import { userMessage } from '@/lib/errors';
 import { ONBOARDING_IN_FLOW } from '@/lib/flags';
 import { canUseRealData, useMode } from '@/lib/mode';
-import { supabase } from '@/lib/supabase';
 
 import { shouldOnboard } from './onboardingGate';
 
@@ -53,13 +52,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!canUseRealData) return;
     // 저장된 세션을 못 읽어도(AsyncStorage 오류 등) 시작 화면에 멈추지 않게 함
-    supabase.auth
-      .getSession()
-      .then(({ data }) => setSession(data.session))
+    loadSession()
+      .then(setSession)
       .catch(() => setSession(null))
       .finally(() => setSessionLoading(false));
-    const { data: listener } = supabase.auth.onAuthStateChange((_event, next) => setSession(next));
-    return () => listener.subscription.unsubscribe();
+    return watchSession(setSession);
   }, []);
 
   // 로그인한 사용자가 바뀌면 프로필을 읽음. 로그아웃하면 비워서 다음 로그인 때 이전 프로필이 잠깐 쓰이지 않게 함

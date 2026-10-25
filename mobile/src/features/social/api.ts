@@ -6,9 +6,10 @@ import { now } from '@/lib/clock';
 import { UserError } from '@/lib/errors';
 import { dateParts } from '@/lib/format';
 import { isMock } from '@/lib/mode';
-import { memberState, orGrants } from '@/mocks/calc';
+import { memberState } from '@/mocks/calc';
 import { db, kst, memberAlarms, people, timelines, TODAY, type MockGroup, type MockMemberAlarm, type MockPerson } from '@/mocks/data';
 
+import { mergeGrants } from './grants';
 import * as real from './real';
 import {
   type CreatedGroup,
@@ -48,12 +49,12 @@ function givenTo(personId: string): FinalGrant {
       rows.push({ source: g.name, sourceType: 'GROUP', sourceId: g.id, ...copy(db.grants.group[g.id] ?? none()) });
     }
   }
-  return orGrants(rows);
+  return mergeGrants(rows);
 }
 
 // 이 사람이 나에게 준 최종 권한
 function receivedFrom(personId: string): FinalGrant {
-  return orGrants((db.received[personId] ?? []).map((r) => ({ ...r })));
+  return mergeGrants((db.received[personId] ?? []).map((r) => ({ ...r })));
 }
 
 function wokeCount(groupId: string) {

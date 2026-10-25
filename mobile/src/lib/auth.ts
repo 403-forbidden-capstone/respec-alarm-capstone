@@ -1,3 +1,4 @@
+import type { Session } from '@supabase/supabase-js';
 import * as Linking from 'expo-linking';
 import * as WebBrowser from 'expo-web-browser';
 
@@ -8,6 +9,7 @@ import { supabase } from './supabase';
 // (화면이 열릴 때만 읽히는 모듈에 두면 /auth/callback으로 돌아온 팝업에서 실행되지 않을 수 있음)
 
 export type OAuthProvider = 'kakao' | 'google';
+export type { Session };
 
 // 로그인 뒤 돌아올 주소 — 앱은 respecalarm://auth/callback, 웹은 지금 사이트의 /auth/callback
 // Supabase 대시보드 → Authentication → URL Configuration의 Redirect URLs에 등록해야 함
@@ -72,8 +74,19 @@ export async function signOut() {
   if (error && (await hasSession())) throw new UserError('로그아웃하지 못했어요. 다시 해 주세요');
 }
 
+// 저장된 로그인(세션)을 읽음 — 앱을 열 때 AuthProvider가 부름
+export async function loadSession(): Promise<Session | null> {
+  const { data } = await supabase.auth.getSession();
+  return data.session;
+}
+
+// 로그인 · 로그아웃 · 토큰 갱신을 알려 줌 — 돌려준 함수를 부르면 그만 들음
+export function watchSession(onChange: (session: Session | null) => void): () => void {
+  const { data } = supabase.auth.onAuthStateChange((_event, next) => onChange(next));
+  return () => data.subscription.unsubscribe();
+}
+
 // 저장된 로그인이 있는지 — 가짜 데이터 모드에서 실데이터로 바꿀 때 갈 곳(탭 · 로그인)을 정함 (useAuth는 가짜 모드에서 세션을 숨김)
 export async function hasSession(): Promise<boolean> {
-  const { data } = await supabase.auth.getSession();
-  return data.session != null;
+  return (await loadSession()) != null;
 }
