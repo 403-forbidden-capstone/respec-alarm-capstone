@@ -41,7 +41,7 @@
 - 이슈 범위 밖 파일은 고치지 않습니다. 꼭 고쳐야 하면 먼저 작업자에게 알리고 PR에 이유를 적습니다.
 - 여럿이 같이 고치는 파일(`package.json`, 잠금 파일, `app.json`, DB 마이그레이션)은 작은 PR로 따로 올립니다. 잠금 파일 충돌은 손으로 고치지 말고 `npm install`로 다시 만듭니다.
 - 작업 시작 전에 main을 받아 오고(`git pull`), PR 전에는 main을 반영합니다(`git pull origin main` 또는 `git rebase origin/main`). rebase했으면 `--force-with-lease`로만 push합니다.
-- PR 전에 `mobile/`에서 `npm run typecheck` · `npm run lint` · `npm test`를 돌립니다. 앱 검사 · 안드로이드 빌드 검사는 PR에서 자동으로 돌지 않습니다(Actions 분량). 네이티브(`app.json` · `package.json` · `modules/` · `plugins/`)를 바꿨으면 Actions → 안드로이드 빌드 검사 → Run workflow로 그 브랜치를 한 번 돌립니다.
+- 앱 검사 · 안드로이드 빌드 검사는 PR에서 자동으로 돌지 않습니다(Actions 분량). 대신 `mobile/`이 바뀐 push마다 push 전 훅(`lefthook.yml`)이 `npm run typecheck` · `npm run lint` · `npm test`를 돌리고 실패하면 막습니다. 막히면 고쳐서 다시 push하고, `--no-verify`는 작업자가 하라고 할 때만 씁니다. 네이티브(`app.json` · `package.json` · `modules/` · `plugins/`)를 바꿨으면 Actions → 안드로이드 빌드 검사 → Run workflow로 그 브랜치를 한 번 돌리고, 성공한 실행 링크를 PR 본문 "검증" 칸에 적습니다.
 - Claude의 기억은 사람마다 따로라 서로 공유되지 않습니다. 팀이 알아야 할 결정은 이 파일이나 문서에 PR로 남깁니다.
 
 ## 비밀값

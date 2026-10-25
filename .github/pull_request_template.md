@@ -43,6 +43,8 @@ Closes #
 <!-- 리뷰어가 그대로 따라 하면 확인되도록 적어 주세요. -->
 
 - 
+- 안드로이드 빌드 검사: 해당 없음
+  <!-- app.json · package.json의 네이티브 패키지 · modules/ · plugins/를 바꿨으면 Actions → 안드로이드 빌드 검사 → 이 브랜치로 Run workflow 후 성공한 실행 링크로 바꿔 주세요 -->
 
 ## 📋 체크리스트
 
