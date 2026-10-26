@@ -73,7 +73,9 @@
       "!src/**/testing/**",
       "!src/**/testkit/**",
       "!src/mocks/data.ts",
-      "!src/app/dev/**"
+      "!src/app/dev/**",
+      "modules/alarm-core/src/**/*.{ts,tsx}",
+      "!modules/**/__tests__/**"
     ],
     "coverageReporters": [
       "json-summary",

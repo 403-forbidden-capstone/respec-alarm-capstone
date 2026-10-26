@@ -1,5 +1,5 @@
 // 커버리지 요약 — jest --coverage가 만든 coverage/coverage-summary.json을 폴더별 표(마크다운)로 찍음 (#198)
-//   폴더 = src/features/<기능> 은 기능 하나씩, 나머지는 src/<폴더> 한 칸 (app · lib · components …)
+//   폴더 = src/features/<기능> 은 기능 하나씩, 나머지는 src/<폴더> · modules/<모듈> 한 칸 (app · lib · components · alarm-core …)
 //   로컬: npm run test:cov / 앱 검사(ci.yml): 실행 요약에 이 표를 붙임
 //   기준선(이하이면 실패)은 아직 없음. 숫자를 보고 정함
 import { readFileSync } from 'node:fs';
