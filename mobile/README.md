@@ -15,7 +15,15 @@ npm run web
 
 패키지는 `npx expo install <이름>`으로 추가합니다. SDK 57에 맞는 버전이 들어갑니다.
 
-PR 전에 `npm run typecheck` · `npm run lint` · `npm test`를 꼭 로컬에서 돌립니다. PR에서 앱 검사가 자동으로 돌지 않습니다(Actions 분량, #134). 같은 검사를 서버에서 돌리려면 Actions → 앱 검사 → Run workflow.
+### push 전 검사
+
+PR에서 앱 검사가 자동으로 돌지 않아서(Actions 분량, #134) push할 때 로컬에서 같은 검사를 돌립니다(#198, 레포 맨 위 `lefthook.yml`).
+
+- `mobile/`에서 `npm ci`(또는 `npm install`)를 하면 git 훅이 자동으로 깔립니다. 따로 할 일 없음
+- `mobile/` 안 파일이 들어간 push마다 `npm run typecheck` · `npm run lint` · `npm test`(전체)를 동시에 돌리고, 하나라도 실패하면 push가 막힙니다. 문서만 바꾼 push는 건너뜁니다. 단, 새 브랜치의 첫 push는 비교할 원격 브랜치가 없어 바뀐 파일과 상관없이 다 돌 수 있습니다
+- 훅이 안 깔린 곳(`npm ci` 전, `CI=true`인 환경)에서는 PR 전에 세 명령을 직접 돌립니다
+- 급할 때 건너뛰기: `git push --no-verify`. 건너뛴 PR은 Actions → 앱 검사 → Run workflow로 서버에서 한 번 돌립니다
+- 커버리지: `npm run test:cov` → 폴더별 줄 · 함수 · 갈래 비율 표 (앱 검사 실행 요약에도 붙음)
 
 ## 폴더
 

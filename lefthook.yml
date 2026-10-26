@@ -1,0 +1,21 @@
+# push 전 검사 (lefthook) — PR에서 앱 검사가 자동으로 돌지 않아서(#134) push 때 로컬에서 같은 검사를 돌림 (#198)
+#   mobile/ 안 파일이 들어간 push만 검사함. 문서 · 워크플로만 바꾼 push는 건너뜀
+#   (새 브랜치의 첫 push는 비교할 원격 브랜치가 없어 다 돌 수 있음)
+#   타입 · 린트 · 단위 테스트(jest 전체)를 동시에 돌리고, 하나라도 실패하면 push가 막힘
+#   설치: mobile/에서 npm ci(또는 npm install)를 하면 git 훅이 자동으로 깔림
+#   급할 때 건너뛰기: git push --no-verify (mobile/README.md "push 전 검사")
+pre-push:
+  parallel: true
+  commands:
+    typecheck:
+      root: mobile/
+      glob: '*'
+      run: npm run typecheck
+    lint:
+      root: mobile/
+      glob: '*'
+      run: npm run lint
+    test:
+      root: mobile/
+      glob: '*'
+      run: npm test -- --ci

@@ -1,11 +1,12 @@
 name: 앱 검사
 
 # 앱이 깨지지 않았는지 확인합니다. 손으로만 돌립니다: Actions → 앱 검사 → Run workflow → 브랜치 선택
-#   Actions 분량 때문에 PR · push 자동 실행은 뺐습니다 (#134). PR 전에 같은 검사를 로컬에서 돌립니다 (mobile/README.md).
+#   Actions 분량 때문에 PR · push 자동 실행은 뺐습니다 (#134). 같은 검사(웹 빌드 빼고)가 push 전 훅으로 로컬에서 돕니다 (lefthook.yml, #198).
 #   웹 빌드는 PR마다 Cloudflare 미리보기 빌드가 따로 확인합니다.
 #   타입 검사: tsc --noEmit
 #   린트: expo lint (ESLint, Expo 기본 규칙 + React Compiler 규칙)
 #   단위 테스트: jest (jest-expo). 계산 · 판정 같은 순수 함수는 테스트를 같이 올립니다
+#            커버리지를 같이 재서 폴더별 표를 실행 요약에 붙입니다 (scripts/coverage-summary.mjs). 기준선은 아직 없음
 #   웹 빌드: expo export --platform web. 웹 데모가 만들어지는지 보고,
 #            폰 전용 기능을 웹에서 그대로 부르면 여기서 깨집니다.
 
@@ -49,7 +50,17 @@ jobs:
       - name: 단위 테스트
         # 린트가 실패해도 테스트 결과를 같이 보려고 (취소된 경우만 건너뜀)
         if: ${{ !cancelled() }}
-        run: npm test -- --ci
+        run: npm test -- --ci --coverage
+
+      - name: 커버리지 요약
+        # 테스트가 실패해도 커버리지 파일이 있으면 붙임
+        if: ${{ !cancelled() && hashFiles('mobile/coverage/coverage-summary.json') != '' }}
+        run: |
+          {
+            echo "### 단위 테스트 커버리지"
+            echo ""
+            node scripts/coverage-summary.mjs
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: 웹 빌드
         run: npx expo export --platform web --output-dir dist

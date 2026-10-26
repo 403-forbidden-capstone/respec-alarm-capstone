@@ -2,7 +2,7 @@ name: 안드로이드 빌드 검사
 
 # Android 앱이 실제로 컴파일되는지 확인합니다. 손으로만 돌립니다: Actions → 안드로이드 빌드 검사 → Run workflow → 브랜치 선택
 #   앱 검사(ci.yml)는 타입 · 린트 · 테스트 · 웹 빌드만 보므로 Kotlin 모듈 · 설정 플러그인 · 네이티브 패키지가 깨져도 잡지 못합니다.
-#   app.json · package.json · modules/ · plugins/ 를 바꾼 PR은 머지 전에 그 브랜치로 한 번 돌립니다.
+#   app.json · package.json의 네이티브 패키지 · modules/ · plugins/ 를 바꾼 PR은 머지 전에 그 브랜치로 한 번 돌립니다.
 #   expo prebuild로 android/ 폴더를 만들고 Gradle 디버그 빌드를 돕니다 (arm64 하나만).
 #   만든 APK는 개발용 APK로 3일 남깁니다. 실행 요약의 링크로 받으면 EAS 무료 횟수(월 15회)를 안 씁니다.
 #   한 번에 10~15분 걸려 Actions 무료 분량(월 2,000분)을 가장 많이 써서 PR · main push 자동 실행은 뺐습니다 (#134).
@@ -29,7 +29,8 @@ jobs:
     env:
       EXPO_NO_TELEMETRY: '1'
     steps:
-      # 기본 러너 디스크로는 Gradle 네이티브 빌드 중 꽉 참(No space left on device) → 안 쓰는 도구를 지움 (Android SDK는 남김)
+      # 기본 러너 디스크로는 Gradle 네이티브 빌드 중 꽉 참(No space left on device, #15) → 안 쓰는 도구를 지움 (Android SDK는 남김)
+      #   체크아웃 전이라 mobile/ 폴더가 없어서 맨 위에서 돌림
       - name: 디스크 비우기
         working-directory: .
         run: |
@@ -39,13 +40,6 @@ jobs:
 
       - name: Checkout
         uses: actions/checkout@v7
-
-      - name: 디스크 확보
-        # 네이티브 빌드가 러너 디스크를 다 써서 실패한 적이 있어(#15), 이 빌드에 안 쓰는 도구를 먼저 지웁니다
-        run: |
-          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/.ghcup /usr/local/share/boost /usr/share/swift /opt/hostedtoolcache/CodeQL
-          sudo docker image prune --all --force > /dev/null 2>&1 || true
-          df -h / | tail -1
 
       - name: Node
         uses: actions/setup-node@v7
