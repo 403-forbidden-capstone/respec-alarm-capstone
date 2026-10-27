@@ -248,6 +248,7 @@ npm test                          # 데이터 모양 확인 (제약 · 외래키
 
 - 프로젝트 확인: `.env`의 `SEED_PROJECT_REF`(주소 `https://<ref>.supabase.co`의 `<ref>`, `.env.example`에 dev 프로젝트 값이 들어 있음)가 `SUPABASE_URL`의 ref와 다르면 `--yes`가 있어도 아무것도 하기 전에 멈춤. 값을 비우면 확인하지 않고 프로젝트를 보여 주기만 함 (이때도 `--yes` 필요)
 - 계정: `demo-me` · `demo-suyeon` · `demo-jihyeong` · `demo-junseong` `@example.com` (비밀번호 = `SEED_PASSWORD`). 이메일 로그인이 켜져 있어야 로그인됨 (Auth Providers)
+- 로그인 설정은 그대로 둠: 이메일 공급자만 켬(10/27 켜짐), 전체 가입 스위치는 끄지 않음(끄면 구글 · 카카오 첫 로그인도 막힘), Confirm email은 켜 둠(공개 키로 가입해도 메일 확인 전엔 못 씀 — 시드 계정은 서버 키로 만들어 상관없음). 10/27 `/auth/v1/settings`: `disable_signup` false · `mailer_autoconfirm` false
 - 오늘(D57): 지형이 만든 그룹 `캡스톤팀`(기상 공유 동의: 나 · 수연 · 지형 켬, 준성 끔)의 `팀 주간회의` 10시 + 나의 저녁약속 · 알람 없는 치과 예약 · 내일 수업 · 일정 없는 평일 기상 알람
 - 나의 지난 4주: 생활 기록 28일 + 평일 20일의 약속 · 알람 · 울림 기록(지난 회차에는 반복 규칙을 달지 않음 — 반복 일정은 앞으로 올 두 건뿐), 늦잠 지각 3번 (`v_prepare_time_stats`에 20건, 최근 4주 지각 3회 → 자동 강도 한 단계 위)
 - 알람 시각은 서버 함수와 같은 `_shared/calc`로 만들어 서버 계산과 같은 숫자. 날짜는 한국 시각 오늘 기준 (`--date YYYY-MM-DD`로 바꿈)
