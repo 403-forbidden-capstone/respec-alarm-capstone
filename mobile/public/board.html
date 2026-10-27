@@ -483,24 +483,26 @@ const KINDS = {
   edge: ['place-search', 'alarm-suggest', 'alarm-commit', 'notify', 'wake-check', 'suggestion-generate', 'voice-*', 'journal-*'],
   phone: ['alarm-core'],
 };
-// 서버 함수 — [코드 이름, 쉬운 이름, 하는 일, 외부 서비스]
+// 서버 함수 — [코드 이름, 쉬운 이름, 하는 일, 외부 서비스]. 10/27: 코드 5개(#167) · 실서버 배포 0 (#212)
 const EDGE = [
-  ['place-search', '장소 검색', '입력한 장소를 검색해 좌표 반환', '카카오'],
-  ['alarm-suggest', '알람 시각 계산', '이동시간 조회 후 기상 · 준비 · 출발 · 도착 시각과 강도 계산 (저장 없음)', '카카오 대중교통'],
-  ['alarm-commit', '약속 · 알람 저장', '약속 · 참여 조건 · 알람 묶음을 한 번에 저장', '—'],
-  ['notify', '푸시 전송', '깨우기 · 변경 알림을 상대 폰으로 전송. 전송 전 권한 확인', 'Expo Push'],
-  ['wake-check', '기상 미확인 검사', '5분마다 미확인 기상을 MISSED 처리 + 푸시 (스케줄 실행)', '—'],
-  ['suggestion-generate', '제안 생성 (새벽 배치)', '매일 03:00 기록 기반 알람 조정 제안 · 반복 알람 다음 회차 생성', '—'],
-  ['voice-* · journal-*', 'AI 대화 · 일기', '대화 답 · 추출 · 일기 (AI 대기)', 'Gemini'],
+  ['place-search', '장소 검색', '입력한 장소를 검색해 좌표 반환 — 코드 있음 · 배포 전', '카카오'],
+  ['alarm-suggest', '알람 시각 계산', '이동시간 조회 후 기상 · 준비 · 출발 · 도착 시각과 강도 계산 (저장 없음) — 배포 전', '카카오 대중교통'],
+  ['alarm-commit', '일정 · 알람 저장', '일정 · 참여 조건 · 알람 묶음 · 고친 값을 한 번에 저장, 폰 예약 꾸러미 돌려줌 — 배포 전', '—'],
+  ['notify', '푸시 전송', '변경 알림을 상대 폰으로(권한 확인 뒤), 깨우기는 D19 전이라 거절 — 배포 전 · 앱 토큰 등록 없음(#213)', 'Expo Push'],
+  ['wake-check', '기상 미확인 검사', '5분마다(pg_cron) 미확인 기상을 MISSED로, 그룹 푸시는 D19 뒤 — 배포 · Vault 키 전', '—'],
+  ['suggestion-generate', '제안 · 반복 다음 회차 (새벽 배치)', '아직 없음 — 알람 조정 제안(#49) · 반복 알람 다음 회차(#209)', '—'],
+  ['voice-* · journal-*', 'AI 대화 · 일기', '아직 없음 — 대화 답 · 추출 · 일기 (AI 대기)', 'Gemini'],
 ];
+// 알람 코어(modules/alarm-core) 함수 — #161 뒤 (웹은 memoryBackend로 같은 함수)
 const NATIVE = [
-  ['scheduleOneShotAlarm(id, title, atMillis)', '그 시각에 한 번 울림, 같은 id면 덮어씀'],
-  ['scheduleDailyAlarm(id, title, hour, minute)', '매일 울림 (테스트용)'],
-  ['cancelAlarm(id) · cancelAllAlarms()', '예약 지우기 (미룬 알람 포함)'],
-  ['getScheduledAlarms()', '폰에 걸린 예약 목록 (시각 · 강도 포함으로 바뀔 것)'],
-  ['canScheduleExactAlarms() · canUseFullScreenIntent()', '권한 확인'],
-  ['startAlarmTest(title) · stopAlarm()', '바로 울리기 · 끄기'],
-  ['isAlarmCoreAvailable', 'Android + 모듈 든 APK인지'],
+  ['schedule(pkg) · scheduleAll(pkgs)', '예약 꾸러미(알람 · 종류 · 강도 · 소리 · 다시 울림) 하나로 예약, 같은 id면 덮어씀'],
+  ['cancel(id) · cancelAll()', '예약 지우기 (미룬 알람 포함)'],
+  ['list()', '폰에 걸린 예약 목록'],
+  ['ringNow(pkg) · stop()', '바로 울리기 · 끄기 (/dev/alarm-test)'],
+  ['canScheduleExactAlarms() · canUseFullScreenIntent() · hasUsageAccess()', '권한 확인 — 정확한 알람 · 잠금화면 위 화면 · 사용 정보'],
+  ['getUsageSpans(from, to)', '화면 사용 구간 — 기상 자동 확인(θ · 관찰 10분)'],
+  ['getPendingEvents() · markEventsUploaded(ids) · addAlarmEventListener()', '울림 · 미루기 · 해제 기록을 앱이 받아 서버로 올림'],
+  ['isAvailable', 'Android + 모듈 든 빌드인지'],
 ];
 // [이름, 기본 상태, 이슈 번호] — 이슈가 있으면 상태는 GitHub 이슈를 그대로 따르고, 없는 줄만 직접 고름
 const SETUP = [
@@ -719,19 +721,19 @@ function rChecks() {
 // 상태: done = 됨 · todo = 할 일 · later = 나중(AI · iOS). 바뀌면 여기 상태만 고침
 const CONN_AS_OF = '10/27';
 const CONN_NODES = [
-  { t: 'GitHub', s: '레포 · Actions 비밀값', box: [16, 40, 214, 132], items: [['SUPABASE_ACCESS_TOKEN', 'done'], ['EXPO_TOKEN', 'done'], ['PROJECT_TOKEN', 'done'], ['CLAUDE_CODE_OAUTH_TOKEN', 'done']] },
-  { t: '각자 PC', s: '로컬 개발', box: [16, 250, 200, 78], items: [['mobile/.env (주소 · 공개 키)', 'done']] },
+  { t: 'GitHub', s: '레포 · Actions 비밀값 · 릴리스', box: [16, 40, 214, 150], items: [['SUPABASE_ACCESS_TOKEN', 'done'], ['EXPO_TOKEN', 'done'], ['PROJECT_TOKEN', 'done'], ['CLAUDE_CODE_OAUTH_TOKEN', 'done'], ['Releases APK · QR (v0.0.1)', 'done']] },
+  { t: '각자 PC', s: '로컬 개발 · 시드', box: [16, 250, 200, 114], items: [['mobile/.env (주소 · 공개 키)', 'done'], ['seed/.env (서비스 키, 이 PC)', 'done'], ['Android SDK · 에뮬레이터', 'done']] },
   { t: 'Apple Developer', s: 'iOS (#55~#59)', box: [16, 420, 200, 96], items: [['개발자 계정 (연 $99)', 'later'], ['iOS 빌드 · 아이폰 설치', 'later']] },
-  { t: 'Cloudflare', s: '웹 배포', box: [300, 40, 220, 96], items: [['빌드 변수: Supabase 주소', 'done'], ['빌드 변수: 공개 키', 'done']] },
-  { t: 'Expo · EAS', s: '앱 빌드 · 푸시 전달', box: [300, 172, 220, 150], items: [['환경 변수 3곳: 주소 · 공개 키', 'done'], ['Android 서명 키', 'done'], ['FCM 서비스 계정 키', 'todo'], ['google-services.json', 'todo'], ['Expo Push 받는 길', 'todo']] },
+  { t: 'Cloudflare', s: '웹 배포', box: [300, 40, 220, 114], items: [['빌드 변수: Supabase 주소', 'done'], ['빌드 변수: 공개 키', 'done'], ['빌드 변수: 보드 토큰 (#102)', 'todo']] },
+  { t: 'Expo · EAS', s: '앱 빌드 · 푸시 전달', box: [300, 172, 220, 168], items: [['환경 변수 3곳: 주소 · 공개 키', 'done'], ['Android 서명 키', 'done'], ['릴리스 APK 빌드 (v0.0.1)', 'done'], ['FCM 서비스 계정 키 (#213)', 'todo'], ['google-services.json', 'todo'], ['Expo Push 받는 길 (#213)', 'todo']] },
   { t: 'Firebase', s: 'Android 푸시 (FCM)', box: [300, 368, 220, 96], items: [['프로젝트 · Android 앱 등록', 'todo'], ['서비스 계정 키 만들기', 'todo']] },
-  { t: 'Supabase', s: 'DB · 로그인 · 서버 함수', box: [600, 40, 240, 390], hub: true, groups: [
-    ['DB', [['마이그레이션 머지하면 자동 적용', 'done'], ['접근 규칙 (RLS)', 'done']]],
+  { t: 'Supabase', s: 'DB · 로그인 · 서버 함수', box: [600, 40, 240, 425], hub: true, groups: [
+    ['DB', [['마이그레이션 머지하면 자동 적용', 'done'], ['접근 규칙 (RLS)', 'done'], ['회의 도구 표 (/decisions)', 'done']]],
     ['로그인', [['Redirect URLs', 'done'], ['카카오 공급자', 'done'], ['구글 공급자', 'done'], ['이메일 로그인 (시드 계정만)', 'done']]],
-    ['Edge Functions', [['함수 5개 (#167) · 터미널로 배포', 'todo'], ['비밀값 KAKAO_REST_API_KEY (임시)', 'done'], ['비밀값 GEMINI_API_KEY', 'later']]],
-    ['예약 · 실시간 · 푸시', [['pg_cron · pg_net 예약 (#160 적용)', 'done'], ['배치 키 2개 (Vault)', 'todo'], ['Realtime 기상 신호 (#160)', 'todo'], ['푸시 토큰 저장 (push_tokens)', 'todo']]],
+    ['서버 함수', [['함수 5개 배포 (#212)', 'todo'], ['비밀값 KAKAO_REST_API_KEY (임시)', 'done'], ['비밀값 GEMINI_API_KEY', 'later']]],
+    ['예약 · 실시간 · 시드 · 푸시', [['pg_cron · pg_net 예약 (#160)', 'done'], ['배치 키 2개 Vault (#212)', 'todo'], ['Realtime 기상 신호 확인 (#212)', 'todo'], ['시드 실행 (#212)', 'todo'], ['푸시 토큰 저장 (#213)', 'todo']]],
   ] },
-  { t: '카카오 디벨로퍼스', s: '로그인 · 지도는 팀원 앱', box: [900, 40, 190, 114], items: [['Redirect URI · Client Secret', 'todo'], ['비즈 앱 전환 · 동의항목', 'todo'], ['지도 키 (팀원 앱에서 받음)', 'todo']] },
+  { t: '카카오 디벨로퍼스', s: '로그인 · 지도는 팀원 앱', box: [900, 40, 190, 114], items: [['로그인 확인 (#212)', 'todo'], ['비즈 앱 전환 · 동의항목', 'todo'], ['지도 키 (팀원 앱에서 받음)', 'todo']] },
   { t: 'Google Cloud', s: '구글 로그인', box: [900, 184, 190, 96], items: [['OAuth 클라이언트 (웹)', 'done'], ['테스트 사용자', 'done']] },
   { t: 'Google AI Studio', s: 'Gemini', box: [900, 304, 190, 78], items: [['API 키 (AI 대기)', 'later']] },
 ];
@@ -743,35 +745,41 @@ const CONN_EDGES = [
   ['M520 86 H600', 'done', '주소 · 키', 560, 78],
   ['M520 214 H600', 'done', '주소 · 키', 560, 206],
   ['M600 262 H520', 'todo', '푸시 요청', 560, 254],
-  ['M410 322 V368', 'todo', 'FCM 키', 418, 349, 'start'],
+  ['M410 340 V368', 'todo', 'FCM 키', 418, 358, 'start'],
   ['M216 470 L300 300', 'later', 'iOS 빌드', 222, 446, 'start'],
-  ['M216 289 H280 V560 H720 V430', 'done', '로컬 개발도 같은 Supabase', 500, 553],
+  ['M216 289 H280 V560 H720 V465', 'done', '로컬 개발도 같은 Supabase', 500, 553],
   ['M840 80 H900', 'todo', '로그인', 870, 72],
   ['M840 122 H900', 'todo', '지도 검색', 870, 114],
   ['M840 230 H900', 'done', '로그인', 870, 222],
   ['M840 343 H900', 'later', 'AI', 870, 335],
 ];
-// 지형님이 대시보드에서 할 것 — 자세한 순서는 PR · 대화 기록
+// 남은 인프라 — 쓰는 순서대로 [이름, 링크, "언제 · 이슈 — 할 일"]. 끝나면 줄을 빼고 그림 항목을 됨으로
 const CONN_TODO = [
-  ['카카오 앱 설정 (내 앱)', 'https://developers.kakao.com/console/app', '계정 설정 → 본인인증 → 앱 → 일반 → 비즈니스 정보 → 개인 개발자 비즈 앱 전환(사업자 정보 등록 아님) → 플랫폼 키 → REST API 키: 리다이렉트 URI = Supabase callback · 클라이언트 시크릿 코드 복사 → 카카오 로그인 → 동의항목: 닉네임 · 프로필 사진 · 이메일(필수)'],
-  ['배치 키 2개 (Vault)', 'https://supabase.com/dashboard/project/gomrhctwjvttoqifxktt/sql/new', 'SQL 편집기에서 project_url · service_role_key 만들기 (#160, supabase/README "배치")'],
-  ['서버 함수 배포 (터미널)', 'https://supabase.com/dashboard/project/gomrhctwjvttoqifxktt/functions', '이 PC에서 functions deploy 5번 (#167, supabase/README "배포")'],
-  ['Edge 비밀값 KAKAO_REST_API_KEY 바꾸기', 'https://supabase.com/dashboard/project/gomrhctwjvttoqifxktt/functions/secrets', '팀원 지도 키를 받으면 같은 이름으로 덮어쓰기 (지금은 임시 값)'],
-  ['Firebase 프로젝트 · Android 앱', 'https://console.firebase.google.com/', '패키지 com.forbidden403.respecalarm → google-services.json · 서비스 계정 키(JSON). 레포에 넣지 않음'],
-  ['EAS에 푸시 키 올리기', 'https://expo.dev/accounts/respec-alarm-capstone/projects/respec-alarm/credentials', 'Android → FCM V1 서비스 계정 키 · google-services.json은 파일 환경 변수'],
-  ['Apple Developer 가입 (iOS 빌드 때)', 'https://developer.apple.com/programs/', '아이폰에 설치하려면 필요 (연 $99) · 앱 화면 · 로그인 · 푸시는 그대로 iOS에서 돌고, 알람 울림만 iOS용으로 따로 (#56~#58)'],
+  ['서버 함수 5개 배포 (터미널)', 'https://supabase.com/dashboard/project/gomrhctwjvttoqifxktt/functions', '11/6 · #212 — 이 PC에서 supabase login 뒤 functions deploy 5번 (supabase/README "배포"). 10/27 확인: 5개 모두 404'],
+  ['배치 키 2개 (Vault)', 'https://supabase.com/dashboard/project/gomrhctwjvttoqifxktt/sql/new', '#212 — SQL 편집기에서 project_url · service_role_key 만들기 (supabase/README "배치"). 없으면 기상 미확인 배치가 경고만 남기고 아무 일도 안 함'],
+  ['Realtime 기상 신호 확인', 'https://supabase.com/dashboard/project/gomrhctwjvttoqifxktt/sql/new', '#212 — 정책 wake_signal_receive · 트리거 send_wake_signal이 있는지 SQL로 확인, 없으면 README "그룹 기상 신호" SQL 실행'],
+  ['시드 실행 (이 PC)', 'https://supabase.com/dashboard/project/gomrhctwjvttoqifxktt/auth/users', '#212 · #50 — cd supabase/seed; npm run seed:demo -- --yes (seed/.env는 10/27 준비됨). 데모 계정 4명 · 친구 · 그룹 · 4주치 기록'],
+  ['카카오 로그인 확인 (내 앱)', 'https://developers.kakao.com/console/app', '#212 — 리다이렉트 URI = Supabase callback · 동의항목(닉네임 · 프로필 사진 · 이메일) · 개인 개발자 비즈 앱 전환. Supabase 공급자는 켜짐(10/27) → 실계정으로 한 번 로그인하면 끝'],
+  ['보드 토큰 BOARD_GITHUB_TOKEN', 'https://dash.cloudflare.com/', '11/2 · #102 — 읽기 전용 GitHub 토큰을 Cloudflare 빌드 변수로 → 보드 할 일이 배포 때마다 갱신 (지금은 PR로 스냅샷)'],
+  ['Firebase 프로젝트 · Android 앱', 'https://console.firebase.google.com/', '11/9 전 · #23 · #213 — 패키지 com.forbidden403.respecalarm → google-services.json · 서비스 계정 키(JSON). 레포에 넣지 않음'],
+  ['EAS에 푸시 키 올리기', 'https://expo.dev/accounts/respec-alarm-capstone/projects/respec-alarm/credentials', '#213 — Android → FCM V1 서비스 계정 키, google-services.json은 파일 환경 변수 → 새 APK'],
+  ['Edge 비밀값 KAKAO_REST_API_KEY 바꾸기', 'https://supabase.com/dashboard/project/gomrhctwjvttoqifxktt/functions/secrets', '#23 — 팀원 지도 키를 받으면 같은 이름으로 덮어쓰기 (지금은 임시 값)'],
+  ['Apple Developer 가입 (iOS 빌드 때)', 'https://developer.apple.com/programs/', '나중 · #55 — 아이폰 설치에 필요(연 $99). 화면 · 로그인 · 푸시는 그대로 iOS에서 돌고 알람 울림만 iOS용으로 따로 (#56~#58)'],
 ];
 // 키가 있는 곳 — [이름, 넣은 곳, 쓰는 곳, 팀원에게]
 const CONN_KEYS = [
   ['EXPO_PUBLIC_SUPABASE_URL · _PUBLISHABLE_KEY', 'mobile/.env · Cloudflare 빌드 변수 · EAS 3곳', '앱 · 웹이 DB · 로그인', '줘도 됨 (공개 값)'],
-  ['SUPABASE_ACCESS_TOKEN', 'GitHub Actions', 'DB 적용 · Edge 배포', '안 줌'],
-  ['EXPO_TOKEN', 'GitHub Actions', 'APK 빌드 버튼', '안 줌'],
-  ['PROJECT_TOKEN · CLAUDE_CODE_OAUTH_TOKEN', 'GitHub Actions', '보드 연동 · 자동 리뷰', '안 줌'],
-  ['카카오 REST 키 · Client Secret (내 앱)', 'Supabase 로그인 공급자', '카카오 로그인', '안 줌'],
+  ['SUPABASE_ACCESS_TOKEN', 'GitHub Actions', '머지 때 DB 적용 · 타입 검사', '안 줌'],
+  ['EXPO_TOKEN', 'GitHub Actions', 'APK 빌드 버튼 · 데모 릴리즈(v0.0.1)', '안 줌'],
+  ['PROJECT_TOKEN · CLAUDE_CODE_OAUTH_TOKEN', 'GitHub Actions', '보드 연동 · 팀원 PR 자동 리뷰 (지형 PR은 로컬 리뷰)', '안 줌'],
+  ['SUPABASE_SERVICE_ROLE_KEY · SEED_PASSWORD', 'supabase/seed/.env (이 PC만)', '데모 시드 넣기 · 지우기', '안 줌 · 레포에 안 넣음'],
+  ['Vault project_url · service_role_key (아직)', 'Supabase Vault', '배치가 서버 함수를 부를 때', '안 줌'],
+  ['BOARD_GITHUB_TOKEN (아직, #102)', 'Cloudflare 빌드 변수', '보드 할 일 자동 갱신 (읽기 전용)', '안 줌'],
+  ['카카오 REST 키 · Client Secret (내 앱)', 'Supabase 로그인 공급자 (10/27 켜짐)', '카카오 로그인', '안 줌'],
   ['구글 Client ID · Secret', 'Supabase 로그인 공급자', '구글 로그인', '안 줌'],
-  ['KAKAO_REST_API_KEY (팀원 앱)', 'Supabase Edge 비밀값', '장소 검색 · 길찾기', '안 줌'],
+  ['KAKAO_REST_API_KEY (지금 임시 · 팀원 앱으로)', 'Supabase Edge 비밀값', '장소 검색 · 길찾기', '안 줌'],
   ['GEMINI_API_KEY', 'Supabase Edge 비밀값', 'AI (대기)', '안 줌'],
-  ['FCM 서비스 계정 키 · google-services.json', 'EAS (credentials · 파일 변수)', '푸시 전달 · 앱 빌드', '안 줌 · 레포에 안 넣음'],
+  ['FCM 서비스 계정 키 · google-services.json (아직)', 'EAS (credentials · 파일 변수)', '푸시 전달 · 앱 빌드', '안 줌 · 레포에 안 넣음'],
 ];
 
 function connSvg() {
@@ -822,14 +830,14 @@ function mappingDetail() {
 
 function rLinks() {
   const count = (st) => CONN_NODES.flatMap((n) => n.groups ? n.groups.flatMap(([, it]) => it) : n.items).filter(([, s]) => s === st).length;
-  const todo = CONN_TODO.map(([t, u, d], i) => `<tr><td class="num muted" style="width:1%">${i + 1}</td><td style="white-space:nowrap"><a href="${u}" target="_blank" rel="noopener">${esc(t)}</a></td><td class="muted">${esc(d)}</td></tr>`).join('');
+  const todo = CONN_TODO.map(([t, u, d], i) => `<tr><td class="num muted" style="width:1%">${i + 1}</td><td style="white-space:nowrap"><a href="${u}" target="_blank" rel="noopener">${esc(t)}</a></td><td class="muted">${txt(d)}</td></tr>`).join('');
   const keys = CONN_KEYS.map(([n, w, use, share]) => `<tr><td>${/[가-힣]/.test(n) ? esc(n) : `<code>${esc(n)}</code>`}</td><td>${esc(w)}</td><td>${esc(use)}</td><td class="${share.startsWith('줘도') ? '' : 'muted'}">${esc(share)}</td></tr>`).join('');
   return `<div class="card">
     <div class="row" style="margin-bottom:6px"><h2 style="margin:0">무엇에 무엇을 연결했나</h2><span class="muted">${CONN_AS_OF} 확인 · 됨 ${count('done')} · 할 일 ${count('todo')} · 나중 ${count('later')}</span></div>
     <div class="conn-wrap">${connSvg()}</div>
     <div class="conn-legend"><span><i></i>됨</span><span><i class="todo"></i>할 일</span><span><i class="later"></i>나중 (AI · iOS)</span><span>틸 테두리 = 가운데 서버 Supabase</span></div>
   </div>
-  <div class="card" style="margin-top:16px"><h2>대시보드에서 할 것</h2><table>${todo}</table><div class="note">Supabase callback = <code>https://gomrhctwjvttoqifxktt.supabase.co/auth/v1/callback</code></div></div>
+  <div class="card" style="margin-top:16px"><h2>남은 인프라 <span class="muted" style="font-weight:500">쓰는 순서대로</span></h2><table>${todo}</table><div class="note">Supabase callback = <code>https://gomrhctwjvttoqifxktt.supabase.co/auth/v1/callback</code></div></div>
   <div class="card" style="margin-top:12px"><h2>키가 있는 곳 <span class="muted" style="font-weight:500">이름만</span></h2><table><tr><th>이름</th><th>넣은 곳</th><th>쓰는 곳</th><th>팀원에게</th></tr>${keys}</table></div>
   ${mappingDetail()}`;
 }
