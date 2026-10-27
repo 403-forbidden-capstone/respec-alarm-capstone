@@ -264,7 +264,7 @@ const SCREENS = [
       { k: 'DB', t: '준비물', r: ['todos'] },
       { k: '폰', t: '예약', r: ['alarm-core'] },
     ] },
-  { code: 'H07', name: '알람 울림', tab: 'home', route: 'ring', ui: [30], link: [26, 33, 79], feat: ['①'],
+  { code: 'H07', name: '알람 울림', tab: 'home', route: 'ring', ui: [30], link: [60, 33, 209], feat: ['①'],
     data: [
       { k: '폰', t: '소리 · 강도 · 미루기 · 해제', r: ['alarm-core'] },
       { k: 'DB', t: '기록(TRIGGERED · SNOOZED · DISMISSED), 오프라인이면 보관 후 전송', r: ['alarm_events'] },
@@ -391,12 +391,12 @@ const CHECKS = [
     web: { st: 'na', ev: '웹에서는 울림 불가 — #161 웹은 메모리 대체(#98)' }, phone: { st: 'part', ev: '10/18 에뮬레이터(새 코어 9de8865): 화면 꺼짐 → 정각 알람 화면 · 폰 기본 알람음 · 진동, 방해 금지(우선순위) 중에도 울림, 재부팅 뒤 예약 유지 · 울림 (1845dee: 최근 앱 닫은 뒤 · release APK도 울림) — 스와이프 잠금 위 · 볼륨 최소에서 시작 · 실제 폰은 아직 (#26)' },
     server: { st: 'na', ev: '폰 단독 동작' }, test: { st: 'part', ev: 'alarm-core 공통 케이스(cases.json) 울림 계획 · 볼륨 · 다시 울림 · alarmSync 폰 예약 맞추기 — Kotlin 시험 없음(정시 · 잠금화면 · 소리 · 진동), 빌드 검사는 손으로' },
     how: ['개발 빌드: 이 PC 에뮬레이터에 로컬 빌드(개발 탭 "④ 빌드 · 설치", EAS 안 씀) 또는 EAS 개발 빌드(#20) → 설치', '앱에서 respecalarm://dev/alarm-test → 권한 3줄(정확한 알람 · 잠금화면 위 알람 화면 · 사용 정보 접근) 확인 → "1분 뒤: 기상 (알람음 + 진동 + 잠금화면)" → 화면 잠그고 대기 → 잠금화면 위로 울림 화면이 뜨면 정상', '앱 알람 저장 → 폰 예약은 #168로 연결(실데이터 모드) — 로그인 · 시드 뒤 확인'],
-    issues: [20, 26, 33, 79, 98] },
+    issues: [60, 20, 33] },
   { id: 'C09', area: '알람', name: '출발 · 도착 자동 기록(지오펜스)', screens: [], start: null,
     web: { st: 'na', ev: '위치 기능은 실기기 전용' }, phone: { st: 'no', ev: '위치 권한 · 지오펜스 미구현 (#36 #40)' },
     server: { st: 'no', ev: '실측 기록 · 지각 판정 미구현 (#41) → #168 원탭 출발 · 도착 · 지각 (위치는 나중에 같은 함수)' }, test: { st: 'part', ev: 'alarm/oneTap 원탭 출발 · 도착 · alarm/participantTimes 지각 판정 · 위치 출처 우선순위 · 준비 실측 — 지오펜스(위치 감지) 미구현 · 테스트 없음' },
     how: ['미구현 — 출발 알람 해제 후 안내 문구만 있음 (C06)'],
-    issues: [36, 40, 41] },
+    issues: [40] },
   // ── 그룹 · 친구
   { id: 'C10', area: '그룹 · 친구', name: '친구 요청 수락 · 친구 · 그룹 목록', screens: ['F01·G01'], start: '/group',
     web: { st: 'part', ev: '10/10 흐름 확인 #104 1 — 검색 · 그룹 생성 · 참여는 안내 문구만' }, phone: { st: 'ok', ev: '10/18 에뮬레이터: 절차대로 (범위 밖 안내 토스트 3개)' },
@@ -464,8 +464,8 @@ const CHECKS = [
   { id: 'C22', area: '기반 · 서버', name: 'Supabase 저장 · 조회', screens: [], start: null,
     web: { st: 'no', ev: '#168 머지: 실데이터 모드(웹 ?mode=real · 폰 개발용 기본)에서 알람 · 기록 · 루틴 · 친구 · 그룹이 Supabase를 부름 — 시드 · 이메일 로그인 전이라 아직 못 봄' }, phone: { st: 'no', ev: '실데이터 로그인 전이라 못 봄 (웹과 같은 코드)' },
     server: { st: 'part', ev: '테이블 · RLS · DB 함수 생성됨(머지 시 자동 적용, 10/22 #193까지 성공) · 서버 함수 5개는 10/27 확인 미배포(404) → #160 마이그레이션 3개 · #167 서버 함수 5개 (배포는 터미널 명령)' }, test: { st: 'ok', ev: 'DB 검사(PGlite 93항목 · 실제 이미지 적용) RLS · 함수 · 기능별 real 테스트(가짜 Supabase) · lib/edge — 앱 쿼리를 실제 DB에 붙이는 테스트 없음' },
-    how: ['Supabase 대시보드 → Table Editor · Database Functions 목록', '실데이터 스위치 켜짐(#168) — 로그인 뒤 화면이 Supabase를 부름. 확인 순서: 서버 함수 배포 → 시드 → 이메일 로그인 → 흐름 (#100)'],
-    issues: [99, 25] },
+    how: ['Supabase 대시보드 → Table Editor · Database Functions 목록', '실데이터 스위치 켜짐(#168) — 로그인 뒤 화면이 Supabase를 부름. 확인 순서: 서버 함수 배포 → 시드 → 이메일 로그인 → 흐름 (#212)'],
+    issues: [212, 25] },
   { id: 'C23', area: '기반 · 서버', name: '푸시 알림(깨우기 · 변경 · 기상 미확인)', screens: [], start: null,
     web: { st: 'na', ev: '실기기 전용' }, phone: { st: 'no', ev: '수신 경로 없음' },
     server: { st: 'no', ev: 'DB에 토큰 테이블 · 등록 함수만 있음 — 앱 토큰 등록 · FCM 키 없음 (#23 #45, 키 10/21) → #167 notify(Expo Push) · #160 보내도 되는지 판정' }, test: { st: 'part', ev: '서버 notify 권한 판정 · 만료 토큰 · push Expo 전송 · DB 검사 can_send_push · 토큰 등록 · social/real 변경 알림 호출 — 앱 토큰 등록 · 수신 · 미확인 푸시 없음' },
@@ -506,9 +506,9 @@ const NATIVE = [
 const SETUP = [
   ['레포 정리 · 앱 뼈대 main', 'done', 10], ['각자 PC: Node 24 · clone · npm ci', 'doing'], ['Android SDK · 에뮬레이터 (이 PC, 10/18)', 'done'],
   ['Expo · EAS 연결 · 개발 빌드 폰 설치', 'todo', 20], ['알람 코어 이전 · 첫 관문', 'todo', 26], ['Supabase 프로젝트 · 스키마 · RLS', 'done', 22],
-  ['외부 키: 카카오 · Gemini · FCM', 'todo', 23], ['로그인 · 온보딩 · 권한 안내', 'todo', 25], ['CI 보강: 린트 · 테스트 · Edge 검사', 'todo', 34],
+  ['남은 외부 키: Firebase(FCM) · Gemini · 카카오 지도', 'todo', 23], ['온보딩 · 권한 안내 · 설정 (새 UI)', 'todo', 25], ['CI 보강: 린트 · 테스트 · Edge 검사', 'todo', 34],
   ['배포: 웹 Cloudflare · APK 태그 릴리스', 'done', 13], ['보드 스냅샷 토큰 (Cloudflare 변수 BOARD_GITHUB_TOKEN)', 'todo', 102],
-  ['Edge Function 공통 틀 · 로컬 실행 · 배포', 'todo', 99], ['알람 모듈 웹 스텁 (웹에서 예약 흐름 끝까지 동작)', 'todo', 98],
+  ['서버 함수 배포 · 실서버 첫 한 바퀴', 'todo', 212], ['알람 모듈 웹 스텁 (웹에서 예약 흐름 끝까지 동작)', 'todo', 98],
 ];
 const LINKS = [
   ['앱 · 가짜 데이터', SITE.web + '/?mode=mock'], ['앱 · 실데이터 (로그인)', SITE.web + '/?mode=real'], ['화면 목록 /dev/screens', SITE.web + '/dev/screens?mode=mock'],
@@ -569,7 +569,8 @@ function issue(n) { return items().find(i => i.n === n); }
 function closesOf(p) { if (p.closes && p.closes.length) return p.closes; const m = /^[a-z]+\/(\d+)-/.exec(p.branch || ''); return m ? [Number(m[1])] : []; }
 function prsOf(n) { return prs().filter(p => closesOf(p).includes(n)); }
 function statusOf(n) {
-  const it = issue(n); if (!it) return 'wait';
+  // 보드에 없는 번호 = 닫혀서 자동 보관된 이슈 (새 이슈는 열 때 보드에 들어감) → 완료로 봄
+  const it = issue(n); if (!it) return 'done';
   if (it.labels && it.labels.includes('AI 대기') && it.st !== 'CLOSED') return 'ai';
   if (it.st === 'CLOSED') return 'done';
   if (prsOf(n).some(p => p.state === 'OPEN')) return 'review';
@@ -837,7 +838,7 @@ function rTodo() {
   const p = plan();
   const all = p.all;
   const mss = [...new Set(all.map(i => i.ms).filter(Boolean))].sort((a, b) => { const da = a.startsWith('창의'), db = b.startsWith('창의'); return da !== db ? (da ? 1 : -1) : a.localeCompare(b); });
-  const labels = ['1차 데모', 'AI 대기', 'iOS', 'FE', 'BE'];
+  const labels = ['프로토타입 1차', 'AI 대기', 'iOS', 'FE', 'BE'];
   const f = todoFilter;
   const list = all.filter(i => (!f.status || p.st[i.n] === f.status) && (!f.ms || i.ms === f.ms) && (!f.label || (i.labels || []).includes(f.label)));
   const grpOf = (i) => { const st = p.st[i.n]; if (st === 'done') return '완료'; if (!i.due) return st === 'ai' ? 'AI 대기' : '날짜 없음'; if (i.due < todayS) return '지연'; if (i.due <= weekEnd) return '이번 주'; if (i.due <= nextWeekEnd) return '다음 주'; return '나중'; };
@@ -867,7 +868,7 @@ function rTodo() {
 function rEnv() {
   const opts = ['done', 'doing', 'review', 'todo'];
   // 이슈가 있는 줄은 GitHub 상태(스냅샷 · 동기화), 없는 줄은 이 브라우저에 저장한 값
-  const stateOf = ([, d, n], i) => (n && issue(n) ? statusOf(n) : (envState[i] || d));
+  const stateOf = ([, d, n], i) => (n ? statusOf(n) : (envState[i] || d));
   const doneN = SETUP.filter((s, i) => stateOf(s, i) === 'done').length;
   const setup = SETUP.map((s, i) => { const [t, , n] = s; const v = stateOf(s, i);
     const right = n ? `<a class="chip ${v}" href="${ghIssue(n)}" target="_blank" rel="noopener">#${n} ${STATUS_KO[v]}</a>` : `<select data-env="${i}">${opts.map(o => `<option value="${o}" ${o === v ? 'selected' : ''}>${STATUS_KO[o]}</option>`).join('')}</select>`;
