@@ -417,7 +417,7 @@ const CHECKS = [
     web: { st: 'part', ev: '10/10 흐름 확인 #104 4-3 — 토스트만, 실제 전송 없음' }, phone: { st: 'no', ev: '10/18 에뮬레이터: 토스트만 — 푸시 수신 경로 없음' },
     server: { st: 'no', ev: '토큰 테이블 · 등록 함수는 DB에 있음(앱 미호출) · FCM V1 키는 EAS에 있음(10/27) · 앱 토큰 등록 없음 (#213) → #167 notify, 깨우기(WAKE_PING)는 D19까지 거절' }, test: { st: 'part', ev: '서버 notify WAKE_PING 거절(D19) · push Expo 전송 · DB 검사 can_send_push · 토큰 등록 · social/real 준비 중 안내 — 실제 깨우기 전송 · 앱 토큰 등록 · 수신 없음' },
     how: ['수연 기상 상태 → "깨우기" → "수연님에게 깨우기 알림을 보냈어요" (여기까지)'],
-    issues: [23, 45] },
+    issues: [213, 45] },
   { id: 'C14', area: '그룹 · 친구', name: '공유받은 알람 ON/OFF · 5분 조정 · 변경 기록', screens: ['G04'], start: '/friends/sy/alarms',
     web: { st: 'ok', ev: '10/10 흐름 확인 #104 4-5~9 · 10/27 끄기 확인 창(#197)' }, phone: { st: 'ok', ev: '10/18 에뮬레이터: 5분 앞당기기 · 끄기 · 변경 기록 됨 — 좁은 폭(Pixel 7) 시각 줄 줄바꿈(#183)은 #197로 고침, 다음 APK에서 다시 볼 것' },
     server: { st: 'no', ev: '소유자 알림 · 소유자 폰 재예약 미구현 (#46 #80) → #160 · #167 · #168 G04 약속 정보 · 변경 알림 권한 확인 · 쓰기, 소유자 폰 재예약은 푸시 키 뒤' }, test: { st: 'ok', ev: 'social/real G04 켜기 · 끄기 · ±5분(지금+5분 거절 · 실패 시 되돌림) · 주인 알림 · 변경 기록 · alarmSync 시각 바뀌면 다시 걸음 · DB 검사 설정 권한' },
@@ -468,9 +468,9 @@ const CHECKS = [
     issues: [212, 25] },
   { id: 'C23', area: '기반 · 서버', name: '푸시 알림(깨우기 · 변경 · 기상 미확인)', screens: [], start: null,
     web: { st: 'na', ev: '실기기 전용' }, phone: { st: 'no', ev: '수신 경로 없음' },
-    server: { st: 'no', ev: 'DB에 토큰 테이블 · 등록 함수만 있음 — FCM V1 키는 EAS에 있음(10/27), 앱 토큰 등록 · google-services.json 없음 (#213) → #167 notify(Expo Push) · #160 보내도 되는지 판정' }, test: { st: 'part', ev: '서버 notify 권한 판정 · 만료 토큰 · push Expo 전송 · DB 검사 can_send_push · 토큰 등록 · social/real 변경 알림 호출 — 앱 토큰 등록 · 수신 · 미확인 푸시 없음' },
-    how: ['미구현 — 연결 탭 "남은 인프라"의 google-services.json부터, 앱 토큰 등록은 #213'],
-    issues: [23, 45] },
+    server: { st: 'no', ev: '서버 쪽 준비됨 — notify 배포 · 토큰 테이블 · 등록 함수 · FCM V1 키(EAS, 10/27). 앱 토큰 등록 · google-services.json이 없어 실제 전송 0 (#213) → #167 notify(Expo Push) · #160 보내도 되는지 판정' }, test: { st: 'part', ev: '서버 notify 권한 판정 · 만료 토큰 · push Expo 전송 · DB 검사 can_send_push · 토큰 등록 · social/real 변경 알림 호출 — 앱 토큰 등록 · 수신 · 미확인 푸시 없음' },
+    how: ['미구현 — 연결 탭 "남은 연결"의 google-services.json부터, 앱 토큰 등록은 #213'],
+    issues: [213, 45] },
   { id: 'C24', area: '기반 · 서버', name: '웹 배포 · 개발용 APK 빌드', screens: [], start: null,
     web: { st: 'ok', ev: '10/11 확인 — main 머지 시 자동 배포(현재 주소) · PR별 미리보기' }, phone: { st: 'part', ev: '10/18 이 PC 로컬 빌드로 에뮬레이터 설치 · 실행, 10/21 첫 릴리스 v0.0.1 APK(EAS · Releases · README QR) — 실기기 설치 · 실행 기록은 아직' },
     server: { st: 'na', ev: '기능이 아닌 배포 파이프라인 — DB 변경도 머지 시 자동 적용 (#82)' }, test: { st: 'ok', ev: 'push 전 훅(lefthook) tsc · 린트 · jest 전체 · PR에 Cloudflare 빌드 · DB 검사 자동 · 앱 검사 · 안드로이드 빌드 검사는 손으로 · 서버 함수 시험은 자동 없음' },
@@ -718,7 +718,7 @@ function rChecks() {
 }
 
 // 연결 — 서비스 사이를 무엇으로 이어 놨는지 (10/10 확인). 키는 이름 · 넣은 곳만 적고 값은 적지 않음
-// 상태: done = 됨 · todo = 할 일 · later = 나중(AI · iOS). 바뀌면 여기 상태만 고침
+// 상태: done = 됨 · todo = 남음 · later = 나중(AI · iOS · 개발용). 바뀌면 여기 상태만 고침
 const CONN_AS_OF = '10/28';
 const CONN_NODES = [
   { t: 'GitHub', s: '레포 · Actions 비밀값 · 릴리스', box: [16, 40, 214, 150], items: [['SUPABASE_ACCESS_TOKEN', 'done'], ['EXPO_TOKEN', 'done'], ['PROJECT_TOKEN', 'done'], ['CLAUDE_CODE_OAUTH_TOKEN', 'done'], ['Releases APK · QR (v0.0.1)', 'done']] },
@@ -755,11 +755,11 @@ const CONN_EDGES = [
 ];
 // 남은 연결 — [이름, 링크, 설명]. 핵심 기능을 막지 않는 것만 남음 (끝나면 줄을 빼고 그림 항목을 됨으로)
 const CONN_TODO = [
-  ['google-services.json 바꿔 올리기', 'https://expo.dev/accounts/respec-alarm-capstone/projects/respec-alarm/environment-variables', '#213 푸시 붙일 때 — EAS 파일 변수 GOOGLE_SERVICES_JSON(3곳)에 지금은 서비스 계정 키(비밀 키 포함, 보기 일반 텍스트)가 들어 있음 → Firebase 콘솔 → 프로젝트 설정 → Android 앱(com.forbidden403.respecalarm)에서 받은 google-services.json으로 바꾸고 보기는 비밀로. 서비스 계정 키는 credentials에만'],
+  ['google-services.json 바꿔 올리기', 'https://expo.dev/accounts/respec-alarm-capstone/projects/respec-alarm/environment-variables', '#213 푸시 붙일 때 — EAS 파일 변수 GOOGLE_SERVICES_JSON(3곳)에 지금은 서비스 계정 키(비밀 키 포함, 보기 일반 텍스트)가 들어 있음 → Firebase 콘솔 → 프로젝트 설정 → Android 앱(com.forbidden403.respecalarm, 없으면 등록)에서 받은 google-services.json으로 바꾸고 보기는 비밀로 (비밀 키가 일반 텍스트로 있으니 보기 바꾸기는 지금 바로). 서비스 계정 키는 credentials에만'],
   ['보드 토큰 BOARD_GITHUB_TOKEN (개발용)', 'https://dash.cloudflare.com/', '#102 — Workers → Settings → Build → Variables(빌드 변수)에 읽기 전용 GitHub 토큰 → 보드 할 일이 배포 때마다 갱신. 없어도 앱과는 상관없음 (지금은 PR로 스냅샷)'],
   ['Apple Developer 가입 (iOS 빌드 때)', 'https://developer.apple.com/programs/', '나중 · #55 — 아이폰 설치에 필요(연 $99). 화면 · 로그인 · 푸시는 그대로 iOS에서 돌고 알람 울림만 iOS용으로 따로 (#56~#58)'],
 ];
-// 다음 — 실서버에 핵심 기능 붙이기 [이슈 번호, 한 줄]. 날짜 · 상태는 할 일 스냅샷(GitHub 보드)에서 읽음
+// 다음 — 실서버에 핵심 기능 붙이기 [이슈 번호, 한 줄]. 날짜 · 상태는 할 일 스냅샷(GitHub 보드)에서 읽고 줄은 시작일 순
 const CONN_NEXT = [
   [208, '친구 · 그룹 함수 완성 · 버그 3개 (거절 · 끊기 · 나가기 · 아이디)'],
   [44, '친구 요청 · 그룹 만들기 · 코드 참여 화면 초안'],
@@ -767,7 +767,9 @@ const CONN_NEXT = [
   [210, '실제 흐름에서 권한 요청 · 꺼짐 안내'],
   [211, '일정 수정 · 삭제'],
   [31, '장소 검색 화면 — 처음 쓰는 계정도 일정을 만들게'],
-  [45, '그룹 기상 실시간 (실서버)'],
+  [45, '그룹 기상 실시간 (실서버, 안 일어난 사람 푸시는 #213 뒤)'],
+  [27, '카카오 대중교통 실호출 확인 (서울 3구간)'],
+  [50, '시드 데모 계정 · 데모 모드'],
   [212, '실서버 한 바퀴 — 시드 계정 로그인 → 일정 → 폰 예약 → 울림 → 기상 확인 → 기록 → 그룹'],
   [60, '프로토타입 1차 빌드 · 점검'],
   [213, '푸시 — 앱 토큰 등록 · google-services.json · 받기'],
@@ -837,14 +839,15 @@ function mappingDetail() {
 
 function rLinks() {
   const count = (st) => CONN_NODES.flatMap((n) => n.groups ? n.groups.flatMap(([, it]) => it) : n.items).filter(([, s]) => s === st).length;
-  const next = CONN_NEXT.map(([num, what]) => { const it = issue(num); const when = it && (it.start || it.due) ? `${fmtDate(it.start)}~${fmtDate(it.due)}` : ''; return `<tr><td style="width:1%;white-space:nowrap">${issuePill(num)}</td><td>${esc(what)}</td><td class="num muted" style="white-space:nowrap">${when}</td></tr>`; }).join('');
+  const startOf = (num) => (issue(num) && issue(num).start) || '9999';
+  const next = [...CONN_NEXT].sort((a, b) => startOf(a[0]).localeCompare(startOf(b[0]))).map(([num, what]) => { const it = issue(num); const when = it && (it.start || it.due) ? `${fmtDate(it.start)}~${fmtDate(it.due)}` : ''; return `<tr><td style="width:1%;white-space:nowrap">${issuePill(num)}</td><td>${esc(what)}</td><td class="num muted" style="white-space:nowrap">${when}</td></tr>`; }).join('');
   const todo = CONN_TODO.map(([t, u, d], i) => `<tr><td class="num muted" style="width:1%">${i + 1}</td><td style="white-space:nowrap"><a href="${u}" target="_blank" rel="noopener">${esc(t)}</a></td><td class="muted">${txt(d)}</td></tr>`).join('');
   const keys = CONN_KEYS.map(([n, w, use, share]) => `<tr><td>${/[가-힣]/.test(n) ? esc(n) : `<code>${esc(n)}</code>`}</td><td>${esc(w)}</td><td>${esc(use)}</td><td class="${share.startsWith('줘도') ? '' : 'muted'}">${esc(share)}</td></tr>`).join('');
   return `<div class="card">
     <div class="row" style="margin-bottom:4px"><h2 style="margin:0">외부 연결 — 핵심 기능 전 준비 끝</h2><span class="muted">${CONN_AS_OF} 확인 · 됨 ${count('done')} · 남음 ${count('todo')} · 나중 ${count('later')}</span></div>
     <div class="note" style="margin:0 0 6px">로그인(카카오 · 구글 · 이메일) · DB · 서버 함수 5개 · 5분 배치 · 실시간 · 시드 · 지도(길찾기) · 푸시 키(FCM)까지 연결됨 → 이제 실서버에 핵심 기능을 붙일 차례 (아래 "다음"). 남은 google-services.json은 푸시(#213) 붙일 때</div>
     <div class="conn-wrap">${connSvg()}</div>
-    <div class="conn-legend"><span><i></i>됨</span><span><i class="todo"></i>할 일</span><span><i class="later"></i>나중 (AI · iOS · 개발용)</span><span>틸 테두리 = 가운데 서버 Supabase</span></div>
+    <div class="conn-legend"><span><i></i>됨</span><span><i class="todo"></i>남음</span><span><i class="later"></i>나중 (AI · iOS · 개발용)</span><span>틸 테두리 = 가운데 서버 Supabase</span></div>
   </div>
   <div class="card" style="margin-top:16px"><h2>다음 — 실서버에 핵심 기능 붙이기 <span class="muted" style="font-weight:500">날짜 · 상태는 GitHub 보드</span></h2><table>${next}</table></div>
   <div class="card" style="margin-top:12px"><h2>남은 연결 <span class="muted" style="font-weight:500">핵심 기능을 막지 않는 것</span></h2><table>${todo}</table><div class="note">Supabase callback = <code>https://gomrhctwjvttoqifxktt.supabase.co/auth/v1/callback</code></div></div>
