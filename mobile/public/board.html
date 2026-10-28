@@ -458,7 +458,7 @@ const CHECKS = [
   // ── 기반 · 서버
   { id: 'C21', area: '기반 · 서버', name: '로그인 · 온보딩', screens: ['L01', 'L02'], start: null,
     web: { st: 'part', ev: '10/27 배포 웹: ?mode=real → 로그인 화면(카카오 · Google · 알람 테스트 · 개발 메뉴 이메일), 가짜 모드(기본)는 로그인 없이 홈' }, phone: { st: 'part', ev: '10/18 에뮬레이터: 로그인 화면(카카오 · Google · 개발 메뉴 이메일)까지 — 계정 로그인은 안 해 봄' },
-    server: { st: 'part', ev: '10/27 확인 — 로그인 공급자 구글 · 카카오 · 이메일 켜짐, 카카오 실계정 첫 로그인 · 시드 데모 계정 4명 — 로그인 뒤 흐름 한 바퀴는 아직(#212) → #168 폰은 로그인 필수 · 개발 메뉴 이메일 로그인 · #180 로그인 뒤 바로 홈' }, test: { st: 'part', ev: 'lib/mode · modePolicy 모드 · 이메일 로그인 · 로그아웃 정리(session) · onboardingGate · DB 검사 가입 → 프로필 생성 — 카카오 · 구글 OAuth 로그인 테스트 없음' },
+    server: { st: 'part', ev: '10/27 확인 — 로그인 공급자 구글 · 카카오 · 이메일 켜짐, 구글 · 카카오 실계정 로그인 됨 · 시드 데모 계정 4명 — 로그인 뒤 흐름 한 바퀴는 아직(#212) → #168 폰은 로그인 필수 · 개발 메뉴 이메일 로그인 · #180 로그인 뒤 바로 홈' }, test: { st: 'part', ev: 'lib/mode · modePolicy 모드 · 이메일 로그인 · 로그아웃 정리(session) · onboardingGate · DB 검사 가입 → 프로필 생성 — 카카오 · 구글 OAuth 로그인 테스트 없음' },
     how: ['배포 웹 주소 끝에 "?mode=real" → "/login" — "카카오로 시작하기" · "Google로 시작하기" · "알람 테스트"(#180) · "개발 메뉴에서 이메일로 로그인"', '가짜 모드(기본 · ?mode=mock)는 로그인 없이 홈 — ?mode=real은 이 브라우저에 남아 다음에도 실데이터, 돌아갈 땐 ?mode=mock', '이메일 로그인은 시드 계정 만든 뒤(이메일 공급자는 켜짐) · 로그인하면 바로 홈(#180, 임시 온보딩 뺌), 온보딩 새 화면은 #25'],
     issues: [25] },
   { id: 'C22', area: '기반 · 서버', name: 'Supabase 저장 · 조회', screens: [], start: null,
@@ -719,21 +719,21 @@ function rChecks() {
 
 // 연결 — 서비스 사이를 무엇으로 이어 놨는지 (10/10 확인). 키는 이름 · 넣은 곳만 적고 값은 적지 않음
 // 상태: done = 됨 · todo = 할 일 · later = 나중(AI · iOS). 바뀌면 여기 상태만 고침
-const CONN_AS_OF = '10/27';
+const CONN_AS_OF = '10/28';
 const CONN_NODES = [
   { t: 'GitHub', s: '레포 · Actions 비밀값 · 릴리스', box: [16, 40, 214, 150], items: [['SUPABASE_ACCESS_TOKEN', 'done'], ['EXPO_TOKEN', 'done'], ['PROJECT_TOKEN', 'done'], ['CLAUDE_CODE_OAUTH_TOKEN', 'done'], ['Releases APK · QR (v0.0.1)', 'done']] },
   { t: '각자 PC', s: '로컬 개발 · 시드', box: [16, 250, 200, 114], items: [['mobile/.env (주소 · 공개 키)', 'done'], ['seed/.env (서비스 키, 이 PC)', 'done'], ['Android SDK · 에뮬레이터', 'done']] },
   { t: 'Apple Developer', s: 'iOS (#55~#59)', box: [16, 420, 200, 96], items: [['개발자 계정 (연 $99)', 'later'], ['iOS 빌드 · 아이폰 설치', 'later']] },
   { t: 'Cloudflare', s: '웹 배포', box: [300, 40, 220, 114], items: [['빌드 변수: Supabase 주소', 'done'], ['빌드 변수: 공개 키', 'done'], ['빌드 변수: 보드 토큰 (#102)', 'todo']] },
-  { t: 'Expo · EAS', s: '앱 빌드 · 푸시 전달', box: [300, 172, 220, 168], items: [['환경 변수 3곳: 주소 · 공개 키', 'done'], ['Android 서명 키', 'done'], ['릴리스 APK 빌드 (v0.0.1)', 'done'], ['FCM 서비스 계정 키 (#213)', 'todo'], ['google-services.json', 'todo'], ['Expo Push 받는 길 (#213)', 'todo']] },
-  { t: 'Firebase', s: 'Android 푸시 (FCM)', box: [300, 368, 220, 96], items: [['프로젝트 · Android 앱 등록', 'todo'], ['서비스 계정 키 만들기', 'todo']] },
+  { t: 'Expo · EAS', s: '앱 빌드 · 푸시 전달', box: [300, 172, 220, 168], items: [['환경 변수 3곳: 주소 · 공개 키', 'done'], ['Android 서명 키', 'done'], ['릴리스 APK 빌드 (v0.0.1)', 'done'], ['FCM V1 서비스 계정 키 (10/27)', 'done'], ['google-services.json (다시 올림)', 'todo'], ['Expo Push 받는 길 (#213)', 'todo']] },
+  { t: 'Firebase', s: 'Android 푸시 (FCM)', box: [300, 368, 220, 96], items: [['프로젝트 · Android 앱 등록', 'done'], ['서비스 계정 키 만들기', 'done']] },
   { t: 'Supabase', s: 'DB · 로그인 · 서버 함수', box: [600, 40, 240, 425], hub: true, groups: [
     ['DB', [['마이그레이션 머지하면 자동 적용', 'done'], ['접근 규칙 (RLS)', 'done'], ['회의 도구 표 (/decisions)', 'done']]],
     ['로그인', [['Redirect URLs', 'done'], ['카카오 공급자', 'done'], ['구글 공급자', 'done'], ['이메일 로그인 (시드 계정만)', 'done']]],
-    ['서버 함수', [['함수 5개 배포 (10/27)', 'done'], ['비밀값 KAKAO_REST_API_KEY (임시)', 'done'], ['비밀값 GEMINI_API_KEY', 'later']]],
+    ['서버 함수', [['함수 5개 배포 (10/27)', 'done'], ['비밀값 KAKAO_REST_API_KEY (지도 키)', 'done'], ['비밀값 GEMINI_API_KEY', 'later']]],
     ['예약 · 실시간 · 시드 · 푸시', [['pg_cron · pg_net 예약 (#160)', 'done'], ['배치 키 2개 (Vault) · 5분 배치 돎', 'done'], ['Realtime 기상 신호 정책 · 트리거', 'done'], ['시드 (데모 계정 4명)', 'done'], ['푸시 토큰 저장 (#213)', 'todo']]],
   ] },
-  { t: '카카오 디벨로퍼스', s: '로그인 · 지도는 팀원 앱', box: [900, 40, 190, 96], items: [['카카오 로그인 (10/27 첫 로그인)', 'done'], ['지도 키 (팀원 앱에서 받음)', 'todo']] },
+  { t: '카카오 디벨로퍼스', s: '로그인 · 지도는 팀원 앱', box: [900, 40, 190, 96], items: [['카카오 로그인 (실계정 됨)', 'done'], ['지도 키 (10/28, 길찾기 됨)', 'done']] },
   { t: 'Google Cloud', s: '구글 로그인', box: [900, 184, 190, 96], items: [['OAuth 클라이언트 (웹)', 'done'], ['테스트 사용자', 'done']] },
   { t: 'Google AI Studio', s: 'Gemini', box: [900, 304, 190, 78], items: [['API 키 (AI 대기)', 'later']] },
 ];
@@ -745,20 +745,18 @@ const CONN_EDGES = [
   ['M520 86 H600', 'done', '주소 · 키', 560, 78],
   ['M520 214 H600', 'done', '주소 · 키', 560, 206],
   ['M600 262 H520', 'todo', '푸시 요청', 560, 254],
-  ['M410 340 V368', 'todo', 'FCM 키', 418, 358, 'start'],
+  ['M410 340 V368', 'done', 'FCM 키', 418, 358, 'start'],
   ['M216 470 L300 300', 'later', 'iOS 빌드', 222, 446, 'start'],
   ['M216 289 H280 V560 H720 V465', 'done', '로컬 개발도 같은 Supabase', 500, 553],
   ['M840 80 H900', 'done', '로그인', 870, 72],
-  ['M840 122 H900', 'todo', '지도 검색', 870, 114],
+  ['M840 122 H900', 'done', '지도 검색', 870, 114],
   ['M840 230 H900', 'done', '로그인', 870, 222],
   ['M840 343 H900', 'later', 'AI', 870, 335],
 ];
 // 남은 인프라 — 쓰는 순서대로 [이름, 링크, "언제 · 이슈 — 할 일"]. 끝나면 줄을 빼고 그림 항목을 됨으로
 const CONN_TODO = [
   ['보드 토큰 BOARD_GITHUB_TOKEN', 'https://dash.cloudflare.com/', '11/2 · #102 — 읽기 전용 GitHub 토큰을 Cloudflare 빌드 변수로 → 보드 할 일이 배포 때마다 갱신 (지금은 PR로 스냅샷)'],
-  ['Firebase 프로젝트 · Android 앱', 'https://console.firebase.google.com/', '11/9 전 · #23 · #213 — 패키지 com.forbidden403.respecalarm → google-services.json · 서비스 계정 키(JSON). 레포에 넣지 않음'],
-  ['EAS에 푸시 키 올리기', 'https://expo.dev/accounts/respec-alarm-capstone/projects/respec-alarm/credentials', '#213 — Android → FCM V1 서비스 계정 키, google-services.json은 파일 환경 변수 → 새 APK'],
-  ['Edge 비밀값 KAKAO_REST_API_KEY 바꾸기', 'https://supabase.com/dashboard/project/gomrhctwjvttoqifxktt/functions/secrets', '#23 — 팀원 지도 키를 받으면 같은 이름으로 덮어쓰기 (지금은 임시 값)'],
+  ['google-services.json 바꿔 올리기', 'https://expo.dev/accounts/respec-alarm-capstone/projects/respec-alarm/environment-variables', '#213 — EAS 파일 변수 GOOGLE_SERVICES_JSON(3곳)에 지금은 서비스 계정 키가 들어 있음 → Firebase 콘솔 → 프로젝트 설정 → Android 앱에서 받은 google-services.json으로 바꾸고 보기는 비밀로. 서비스 계정 키는 credentials에만 (10/28 확인)'],
   ['Apple Developer 가입 (iOS 빌드 때)', 'https://developer.apple.com/programs/', '나중 · #55 — 아이폰 설치에 필요(연 $99). 화면 · 로그인 · 푸시는 그대로 iOS에서 돌고 알람 울림만 iOS용으로 따로 (#56~#58)'],
 ];
 // 키가 있는 곳 — [이름, 넣은 곳, 쓰는 곳, 팀원에게]
@@ -772,9 +770,10 @@ const CONN_KEYS = [
   ['BOARD_GITHUB_TOKEN (아직, #102)', 'Cloudflare 빌드 변수', '보드 할 일 자동 갱신 (읽기 전용)', '안 줌'],
   ['카카오 REST 키 · Client Secret (내 앱)', 'Supabase 로그인 공급자 (10/27 켜짐)', '카카오 로그인', '안 줌'],
   ['구글 Client ID · Secret', 'Supabase 로그인 공급자', '구글 로그인', '안 줌'],
-  ['KAKAO_REST_API_KEY (지금 임시 · 팀원 앱으로)', 'Supabase Edge 비밀값', '장소 검색 · 길찾기', '안 줌'],
+  ['KAKAO_REST_API_KEY (지도 키, 10/28)', 'Supabase Edge 비밀값', '장소 검색 · 길찾기', '안 줌'],
   ['GEMINI_API_KEY', 'Supabase Edge 비밀값', 'AI (대기)', '안 줌'],
-  ['FCM 서비스 계정 키 · google-services.json (아직)', 'EAS (credentials · 파일 변수)', '푸시 전달 · 앱 빌드', '안 줌 · 레포에 안 넣음'],
+  ['FCM V1 서비스 계정 키', 'EAS credentials (10/27)', '푸시 전달', '안 줌 · 레포에 안 넣음'],
+  ['google-services.json (지금 다른 파일)', 'EAS 파일 변수 GOOGLE_SERVICES_JSON', '앱 빌드 — FCM 연결', '안 줌 · 레포에 안 넣음'],
 ];
 
 function connSvg() {
