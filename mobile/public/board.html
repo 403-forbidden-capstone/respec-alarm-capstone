@@ -755,7 +755,7 @@ const CONN_EDGES = [
 ];
 // 남은 인프라 — 쓰는 순서대로 [이름, 링크, "언제 · 이슈 — 할 일"]. 끝나면 줄을 빼고 그림 항목을 됨으로
 const CONN_TODO = [
-  ['보드 토큰 BOARD_GITHUB_TOKEN', 'https://dash.cloudflare.com/', '11/2 · #102 — 읽기 전용 GitHub 토큰을 Cloudflare 빌드 변수로 → 보드 할 일이 배포 때마다 갱신 (지금은 PR로 스냅샷)'],
+  ['보드 토큰 BOARD_GITHUB_TOKEN', 'https://dash.cloudflare.com/', '11/2 · #102 — 읽기 전용 GitHub 토큰을 Workers → Settings → Build → Variables(빌드 변수, 런타임 변수 아님)에 → 보드 할 일이 배포 때마다 갱신. 10/28 PR 미리보기 빌드에도 아직 없음 (지금은 PR로 스냅샷)'],
   ['google-services.json 바꿔 올리기', 'https://expo.dev/accounts/respec-alarm-capstone/projects/respec-alarm/environment-variables', '#213 — EAS 파일 변수 GOOGLE_SERVICES_JSON(3곳)에 지금은 서비스 계정 키가 들어 있음 → Firebase 콘솔 → 프로젝트 설정 → Android 앱에서 받은 google-services.json으로 바꾸고 보기는 비밀로. 서비스 계정 키는 credentials에만 (10/28 확인)'],
   ['Apple Developer 가입 (iOS 빌드 때)', 'https://developer.apple.com/programs/', '나중 · #55 — 아이폰 설치에 필요(연 $99). 화면 · 로그인 · 푸시는 그대로 iOS에서 돌고 알람 울림만 iOS용으로 따로 (#56~#58)'],
 ];
