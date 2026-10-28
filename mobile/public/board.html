@@ -415,7 +415,7 @@ const CHECKS = [
     issues: [44, 45] },
   { id: 'C13', area: '그룹 · 친구', name: '깨우기 알림 전송', screens: ['G03'], start: '/groups/cap/members/sy',
     web: { st: 'part', ev: '10/10 흐름 확인 #104 4-3 — 토스트만, 실제 전송 없음' }, phone: { st: 'no', ev: '10/18 에뮬레이터: 토스트만 — 푸시 수신 경로 없음' },
-    server: { st: 'no', ev: '토큰 테이블 · 등록 함수는 DB에 있음(앱 미호출) · FCM 키 없음 (#23 #45) → #167 notify, 깨우기(WAKE_PING)는 D19까지 거절' }, test: { st: 'part', ev: '서버 notify WAKE_PING 거절(D19) · push Expo 전송 · DB 검사 can_send_push · 토큰 등록 · social/real 준비 중 안내 — 실제 깨우기 전송 · 앱 토큰 등록 · 수신 없음' },
+    server: { st: 'no', ev: '토큰 테이블 · 등록 함수는 DB에 있음(앱 미호출) · FCM V1 키는 EAS에 있음(10/27) · 앱 토큰 등록 없음 (#213) → #167 notify, 깨우기(WAKE_PING)는 D19까지 거절' }, test: { st: 'part', ev: '서버 notify WAKE_PING 거절(D19) · push Expo 전송 · DB 검사 can_send_push · 토큰 등록 · social/real 준비 중 안내 — 실제 깨우기 전송 · 앱 토큰 등록 · 수신 없음' },
     how: ['수연 기상 상태 → "깨우기" → "수연님에게 깨우기 알림을 보냈어요" (여기까지)'],
     issues: [23, 45] },
   { id: 'C14', area: '그룹 · 친구', name: '공유받은 알람 ON/OFF · 5분 조정 · 변경 기록', screens: ['G04'], start: '/friends/sy/alarms',
@@ -458,7 +458,7 @@ const CHECKS = [
   // ── 기반 · 서버
   { id: 'C21', area: '기반 · 서버', name: '로그인 · 온보딩', screens: ['L01', 'L02'], start: null,
     web: { st: 'part', ev: '10/27 배포 웹: ?mode=real → 로그인 화면(카카오 · Google · 알람 테스트 · 개발 메뉴 이메일), 가짜 모드(기본)는 로그인 없이 홈' }, phone: { st: 'part', ev: '10/18 에뮬레이터: 로그인 화면(카카오 · Google · 개발 메뉴 이메일)까지 — 계정 로그인은 안 해 봄' },
-    server: { st: 'part', ev: '10/27 확인 — 로그인 공급자 구글 · 카카오 · 이메일 켜짐, 구글 · 카카오 실계정 로그인 됨 · 시드 데모 계정 4명 — 로그인 뒤 흐름 한 바퀴는 아직(#212) → #168 폰은 로그인 필수 · 개발 메뉴 이메일 로그인 · #180 로그인 뒤 바로 홈' }, test: { st: 'part', ev: 'lib/mode · modePolicy 모드 · 이메일 로그인 · 로그아웃 정리(session) · onboardingGate · DB 검사 가입 → 프로필 생성 — 카카오 · 구글 OAuth 로그인 테스트 없음' },
+    server: { st: 'part', ev: '10/28 확인 — 로그인 공급자 구글 · 카카오 · 이메일 켜짐, 구글 · 카카오 실계정 로그인 됨 · 시드 데모 계정 4명 — 로그인 뒤 흐름 한 바퀴는 아직(#212) → #168 폰은 로그인 필수 · 개발 메뉴 이메일 로그인 · #180 로그인 뒤 바로 홈' }, test: { st: 'part', ev: 'lib/mode · modePolicy 모드 · 이메일 로그인 · 로그아웃 정리(session) · onboardingGate · DB 검사 가입 → 프로필 생성 — 카카오 · 구글 OAuth 로그인 테스트 없음' },
     how: ['배포 웹 주소 끝에 "?mode=real" → "/login" — "카카오로 시작하기" · "Google로 시작하기" · "알람 테스트"(#180) · "개발 메뉴에서 이메일로 로그인"', '가짜 모드(기본 · ?mode=mock)는 로그인 없이 홈 — ?mode=real은 이 브라우저에 남아 다음에도 실데이터, 돌아갈 땐 ?mode=mock', '이메일 로그인은 시드 계정 만든 뒤(이메일 공급자는 켜짐) · 로그인하면 바로 홈(#180, 임시 온보딩 뺌), 온보딩 새 화면은 #25'],
     issues: [25] },
   { id: 'C22', area: '기반 · 서버', name: 'Supabase 저장 · 조회', screens: [], start: null,
@@ -468,8 +468,8 @@ const CHECKS = [
     issues: [212, 25] },
   { id: 'C23', area: '기반 · 서버', name: '푸시 알림(깨우기 · 변경 · 기상 미확인)', screens: [], start: null,
     web: { st: 'na', ev: '실기기 전용' }, phone: { st: 'no', ev: '수신 경로 없음' },
-    server: { st: 'no', ev: 'DB에 토큰 테이블 · 등록 함수만 있음 — 앱 토큰 등록 · FCM 키 없음 (#23 #45, 키 10/21) → #167 notify(Expo Push) · #160 보내도 되는지 판정' }, test: { st: 'part', ev: '서버 notify 권한 판정 · 만료 토큰 · push Expo 전송 · DB 검사 can_send_push · 토큰 등록 · social/real 변경 알림 호출 — 앱 토큰 등록 · 수신 · 미확인 푸시 없음' },
-    how: ['미구현 — 연결 탭 "대시보드에서 할 것"의 Firebase · EAS 푸시 키부터 (10/21)'],
+    server: { st: 'no', ev: 'DB에 토큰 테이블 · 등록 함수만 있음 — FCM V1 키는 EAS에 있음(10/27), 앱 토큰 등록 · google-services.json 없음 (#213) → #167 notify(Expo Push) · #160 보내도 되는지 판정' }, test: { st: 'part', ev: '서버 notify 권한 판정 · 만료 토큰 · push Expo 전송 · DB 검사 can_send_push · 토큰 등록 · social/real 변경 알림 호출 — 앱 토큰 등록 · 수신 · 미확인 푸시 없음' },
+    how: ['미구현 — 연결 탭 "남은 인프라"의 google-services.json부터, 앱 토큰 등록은 #213'],
     issues: [23, 45] },
   { id: 'C24', area: '기반 · 서버', name: '웹 배포 · 개발용 APK 빌드', screens: [], start: null,
     web: { st: 'ok', ev: '10/11 확인 — main 머지 시 자동 배포(현재 주소) · PR별 미리보기' }, phone: { st: 'part', ev: '10/18 이 PC 로컬 빌드로 에뮬레이터 설치 · 실행, 10/21 첫 릴리스 v0.0.1 APK(EAS · Releases · README QR) — 실기기 설치 · 실행 기록은 아직' },
@@ -726,7 +726,7 @@ const CONN_NODES = [
   { t: 'Apple Developer', s: 'iOS (#55~#59)', box: [16, 420, 200, 96], items: [['개발자 계정 (연 $99)', 'later'], ['iOS 빌드 · 아이폰 설치', 'later']] },
   { t: 'Cloudflare', s: '웹 배포', box: [300, 40, 220, 114], items: [['빌드 변수: Supabase 주소', 'done'], ['빌드 변수: 공개 키', 'done'], ['빌드 변수: 보드 토큰 (#102)', 'todo']] },
   { t: 'Expo · EAS', s: '앱 빌드 · 푸시 전달', box: [300, 172, 220, 168], items: [['환경 변수 3곳: 주소 · 공개 키', 'done'], ['Android 서명 키', 'done'], ['릴리스 APK 빌드 (v0.0.1)', 'done'], ['FCM V1 서비스 계정 키 (10/27)', 'done'], ['google-services.json (다시 올림)', 'todo'], ['Expo Push 받는 길 (#213)', 'todo']] },
-  { t: 'Firebase', s: 'Android 푸시 (FCM)', box: [300, 368, 220, 96], items: [['프로젝트 · Android 앱 등록', 'done'], ['서비스 계정 키 만들기', 'done']] },
+  { t: 'Firebase', s: 'Android 푸시 (FCM)', box: [300, 368, 220, 114], items: [['프로젝트 (respec-alarm-b0a1a)', 'done'], ['서비스 계정 키 만들기', 'done'], ['Android 앱 등록 · json 받기', 'todo']] },
   { t: 'Supabase', s: 'DB · 로그인 · 서버 함수', box: [600, 40, 240, 425], hub: true, groups: [
     ['DB', [['마이그레이션 머지하면 자동 적용', 'done'], ['접근 규칙 (RLS)', 'done'], ['회의 도구 표 (/decisions)', 'done']]],
     ['로그인', [['Redirect URLs', 'done'], ['카카오 공급자', 'done'], ['구글 공급자', 'done'], ['이메일 로그인 (시드 계정만)', 'done']]],
@@ -756,7 +756,7 @@ const CONN_EDGES = [
 // 남은 인프라 — 쓰는 순서대로 [이름, 링크, "언제 · 이슈 — 할 일"]. 끝나면 줄을 빼고 그림 항목을 됨으로
 const CONN_TODO = [
   ['보드 토큰 BOARD_GITHUB_TOKEN', 'https://dash.cloudflare.com/', '11/2 · #102 — 읽기 전용 GitHub 토큰을 Workers → Settings → Build → Variables(빌드 변수, 런타임 변수 아님)에 → 보드 할 일이 배포 때마다 갱신. 10/28 PR 미리보기 빌드에도 아직 없음 (지금은 PR로 스냅샷)'],
-  ['google-services.json 바꿔 올리기', 'https://expo.dev/accounts/respec-alarm-capstone/projects/respec-alarm/environment-variables', '#213 — EAS 파일 변수 GOOGLE_SERVICES_JSON(3곳)에 지금은 서비스 계정 키가 들어 있음 → Firebase 콘솔 → 프로젝트 설정 → Android 앱에서 받은 google-services.json으로 바꾸고 보기는 비밀로. 서비스 계정 키는 credentials에만 (10/28 확인)'],
+  ['google-services.json 바꿔 올리기', 'https://expo.dev/accounts/respec-alarm-capstone/projects/respec-alarm/environment-variables', '#213 — EAS 파일 변수 GOOGLE_SERVICES_JSON(3곳)에 지금은 서비스 계정 키가 들어 있음 → Firebase 콘솔 → 프로젝트 설정 → Android 앱(com.forbidden403.respecalarm, 없으면 등록)에서 받은 google-services.json으로 바꾸고 보기는 비밀로. 서비스 계정 키는 credentials에만 (10/28 확인)'],
   ['Apple Developer 가입 (iOS 빌드 때)', 'https://developer.apple.com/programs/', '나중 · #55 — 아이폰 설치에 필요(연 $99). 화면 · 로그인 · 푸시는 그대로 iOS에서 돌고 알람 울림만 iOS용으로 따로 (#56~#58)'],
 ];
 // 키가 있는 곳 — [이름, 넣은 곳, 쓰는 곳, 팀원에게]
