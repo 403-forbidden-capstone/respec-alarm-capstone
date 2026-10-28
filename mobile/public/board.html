@@ -733,7 +733,7 @@ const CONN_NODES = [
     ['서버 함수', [['함수 5개 배포 (10/27)', 'done'], ['비밀값 KAKAO_REST_API_KEY (임시)', 'done'], ['비밀값 GEMINI_API_KEY', 'later']]],
     ['예약 · 실시간 · 시드 · 푸시', [['pg_cron · pg_net 예약 (#160)', 'done'], ['배치 키 2개 (Vault) · 5분 배치 돎', 'done'], ['Realtime 기상 신호 정책 · 트리거', 'done'], ['시드 (데모 계정 4명)', 'done'], ['푸시 토큰 저장 (#213)', 'todo']]],
   ] },
-  { t: '카카오 디벨로퍼스', s: '로그인 · 지도는 팀원 앱', box: [900, 40, 190, 114], items: [['카카오 로그인 (10/27 첫 로그인)', 'done'], ['비즈 앱 전환 · 동의항목', 'todo'], ['지도 키 (팀원 앱에서 받음)', 'todo']] },
+  { t: '카카오 디벨로퍼스', s: '로그인 · 지도는 팀원 앱', box: [900, 40, 190, 96], items: [['카카오 로그인 (10/27 첫 로그인)', 'done'], ['지도 키 (팀원 앱에서 받음)', 'todo']] },
   { t: 'Google Cloud', s: '구글 로그인', box: [900, 184, 190, 96], items: [['OAuth 클라이언트 (웹)', 'done'], ['테스트 사용자', 'done']] },
   { t: 'Google AI Studio', s: 'Gemini', box: [900, 304, 190, 78], items: [['API 키 (AI 대기)', 'later']] },
 ];
@@ -756,7 +756,6 @@ const CONN_EDGES = [
 // 남은 인프라 — 쓰는 순서대로 [이름, 링크, "언제 · 이슈 — 할 일"]. 끝나면 줄을 빼고 그림 항목을 됨으로
 const CONN_TODO = [
   ['보드 토큰 BOARD_GITHUB_TOKEN', 'https://dash.cloudflare.com/', '11/2 · #102 — 읽기 전용 GitHub 토큰을 Cloudflare 빌드 변수로 → 보드 할 일이 배포 때마다 갱신 (지금은 PR로 스냅샷)'],
-  ['카카오 동의항목 · 비즈 앱 확인', 'https://developers.kakao.com/console/app', '#212 — 첫 로그인은 됨(10/27, 이메일 받음). 동의항목(닉네임 · 프로필 사진 · 이메일)과 개인 개발자 비즈 앱 전환이 맞는지 콘솔에서 한 번'],
   ['Firebase 프로젝트 · Android 앱', 'https://console.firebase.google.com/', '11/9 전 · #23 · #213 — 패키지 com.forbidden403.respecalarm → google-services.json · 서비스 계정 키(JSON). 레포에 넣지 않음'],
   ['EAS에 푸시 키 올리기', 'https://expo.dev/accounts/respec-alarm-capstone/projects/respec-alarm/credentials', '#213 — Android → FCM V1 서비스 계정 키, google-services.json은 파일 환경 변수 → 새 APK'],
   ['Edge 비밀값 KAKAO_REST_API_KEY 바꾸기', 'https://supabase.com/dashboard/project/gomrhctwjvttoqifxktt/functions/secrets', '#23 — 팀원 지도 키를 받으면 같은 이름으로 덮어쓰기 (지금은 임시 값)'],
