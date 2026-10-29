@@ -4,13 +4,15 @@
 // 시각은 ISO 8601 + 오프셋, 값 이름은 DB와 같음. 순수 TS — node --test로 시험 (draft.test.ts)
 import type { Importance, IntensityAxis, Level, RingKind, Transport } from './calc/types.ts';
 import { INTENSITY_AXES, RING_KINDS } from './calc/types.ts';
+import { RRULE_PATTERN } from './calc/recur.ts';
 import type { Reader } from './read.ts';
 
 export const TRANSPORTS = ['WALK', 'TRANSIT', 'BUS', 'SUBWAY', 'CAR'] as const satisfies readonly Transport[];
 export const IMPORTANCES = ['LOW', 'NORMAL', 'HIGH'] as const satisfies readonly Importance[];
 
-// 일정 반복 규칙 (D44) — appointments.recurrence_rule · alarms.recurrence_rule. RFC 5545 RRULE의 FREQ로 시작하는 글자만
-export const RRULE_PATTERN = /^FREQ=(DAILY|WEEKLY|MONTHLY|YEARLY)(;[A-Z]+=[A-Z0-9,+-]+)*$/;
+// 일정 반복 규칙 (D44) — appointments.recurrence_rule · alarms.recurrence_rule. 두 모양만 받음: FREQ=DAILY · FREQ=WEEKLY;BYDAY=MO,… (앱이 만드는 모양, repeat.ts repeatToRrule).
+// MONTHLY · INTERVAL · COUNT 같은 그 밖은 VALIDATION_FAILED — 앱 표시와 alarm-roll이 만드는 회차가 어긋나지 않게 (정의는 calc/recur.ts, 설계 메모 L1 PR 3 2절)
+export { RRULE_PATTERN };
 
 export type PlaceInput = { name?: string; lat?: number; lng?: number };
 

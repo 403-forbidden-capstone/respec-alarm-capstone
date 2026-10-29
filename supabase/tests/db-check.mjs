@@ -159,21 +159,23 @@ const TODAY = `(now() at time zone 'Asia/Seoul')::date`;
 
 // 회의 도구 테이블(결정 안건 페이지 /decisions — 의견 · 투표 · 상태)은 앱 데이터가 아니라 anon 규칙의 예외 — 아래 "회의 의견"에서 따로 확인
 const MEETING = ['decision_comments', 'decision_votes', 'decision_states'];
+// 서버 전용 표 — RLS는 켜고 정책은 없음 (앱은 못 읽고 못 씀, service_role만). 아래 "반복 다음 회차"에서 따로 확인
+const SERVER_ONLY = ['roll_attempts'];
 
-await check('모든 public 테이블(앱 17개 + 회의 도구 3개)에 RLS가 켜져 있음', async () => {
+await check('모든 public 테이블(앱 18개 — 서버 전용 1개 포함 + 회의 도구 3개)에 RLS가 켜져 있음', async () => {
   const r = await q(`select c.relname, c.relrowsecurity from pg_class c join pg_namespace n on n.oid = c.relnamespace
                      where n.nspname = 'public' and c.relkind = 'r' order by 1`);
   const off = r.filter((x) => !x.relrowsecurity).map((x) => x.relname);
   const app = r.filter((x) => !MEETING.includes(x.relname)).length;
-  return app === 17 && r.length === 20 && off.length === 0 ? true : { count: r.length, app, off };
+  return app === 18 && r.length === 21 && off.length === 0 ? true : { count: r.length, app, off };
 });
-await check('모든 앱 테이블에 정책이 있고 anon용 정책은 없음', async () => {
+await check('모든 앱 테이블에 정책이 있고(서버 전용 표 제외) anon용 정책은 없음', async () => {
   const r = await q(`select c.relname, count(p.polname) as n,
                        bool_or(p.polroles @> array['anon'::regrole::oid]) as has_anon
                      from pg_class c join pg_namespace n on n.oid = c.relnamespace
                      left join pg_policy p on p.polrelid = c.oid
                      where n.nspname = 'public' and c.relkind = 'r' group by 1`);
-  const bad = r.filter((x) => !MEETING.includes(x.relname) && (Number(x.n) === 0 || x.has_anon));
+  const bad = r.filter((x) => !MEETING.includes(x.relname) && ((Number(x.n) === 0 && !SERVER_ONLY.includes(x.relname)) || x.has_anon));
   return bad.length === 0 ? true : bad;
 });
 await check('anon은 앱 테이블 · 뷰 권한이 없음', async () => {
@@ -1218,11 +1220,14 @@ await check('서버 전용 함수(can_send_push · find_missed_wake_alarms · �
 });
 
 // 배치 (Q5 A) — pg_cron · pg_net은 PGlite에 없어 cron.schedule · net.http_post 흉내로 확인
-await check('배치 예약: wake-check를 5분마다 (PGlite에는 pg_cron · pg_net이 없어 확장은 건너뛰고 예약만 흉내에 들어감)', async () => {
+await check('배치 예약: wake-check · alarm-roll(반복 다음 회차)을 5분마다 (PGlite에는 pg_cron · pg_net이 없어 확장은 건너뛰고 예약만 흉내에 들어감)', async () => {
   const jobs = await q(`select jobname, schedule, command from cron.job order by jobname`);
   const ext = await q(`select extname from pg_extension where extname in ('pg_cron', 'pg_net')`);
-  return jobs.length === 1 && jobs[0].jobname === 'wake-check' && jobs[0].schedule === '*/5 * * * *'
-    && jobs[0].command === `select private.invoke_edge_function('wake-check')` && ext.length === 0
+  return jobs.length === 2 && ext.length === 0
+    && ['wake-check', 'alarm-roll'].every((name) => {
+      const j = jobs.find((x) => x.jobname === name);
+      return j && j.schedule === '*/5 * * * *' && j.command === `select private.invoke_edge_function('${name}')`;
+    })
     ? true : { jobs, ext };
 });
 await check('배치 호출: Vault에 비밀값이 없으면 오류 없이 아무것도 안 하고(null), 둘 다 있으면 프로젝트 주소/functions/v1/wake-check로 service_role 키를 실어 POST', async () => {
@@ -1454,6 +1459,469 @@ await check('백필: 마이그레이션 전에 들어 있던 출발 · 도착 �
   } finally {
     await staged.close();
   }
+});
+
+
+// ---------------------------------------------------------------------
+// 반복 다음 회차 (L1 #209, PR 3a-1) — 묶음 칸 · 열쇠 칸 · 앱 쓰기 제한 · 회차 하나 쓰기 · 할 일 목록 · 재시도 기록 · 예약
+// ---------------------------------------------------------------------
+// 시험 값은 모두 고정 날짜(2026-11-03 화 · 11-04 수 · 11-05 목 · 11-10 화 · 11-11 수 · 11-12 목)와 한국 시각이라 지금 시각과 상관없음
+// alarm-roll(서버 함수)은 다음 PR — 여기서는 DB가 약속하는 것(칸 · 유니크 · 열쇠 · 권한 · 함수)만 확인함
+
+const F = '66666666-6666-4666-8666-666666666666';   // 지난 회차 읽기 시험
+const H1 = '77777777-7777-4777-8777-777777777777';  // 할 일 목록 시험 (약속 · 일정 없는 알람)
+const H2 = '88888888-8888-4888-8888-888888888888';  // 할 일 목록 시험 (루틴 · 다른 사람)
+const Z = '99999999-9999-4999-8999-aaaaaaaaaaaa';   // 재시도 기록 CASCADE 시험
+const mkUser = async (id, email) => {
+  await as(null, 'supabase_auth_admin');
+  await q(`insert into auth.users (id, email) values ($1, $2)`, [id, email]);
+  await su();
+};
+for (const [id, email] of [[F, 'f@example.com'], [H1, 'h1@example.com'], [H2, 'h2@example.com'], [Z, 'z@example.com']]) await mkUser(id, email);
+
+const kst = (col) => `to_char(${col} at time zone 'Asia/Seoul', 'MM-DD HH24:MI')`;   // 시각을 한국 "월-일 시:분" 글자로
+const DAWN = '2026-11-11T01:00:00+09:00';   // 한국 새벽 1시 = UTC로는 11-10 16:00
+
+// 서비스 키로 약속 한 줄 (series · on을 안 주면 DB가 채움)
+const insAppt = async (creator, { at, title = '수업', rule = null, series = null, on = null, group = null }) =>
+  (await q(`insert into public.appointments (creator_id, group_id, series_id, occurrence_on, title, appointment_at, dest_name, recurrence_rule)
+            values ($1, $2, $3, $4, $5, $6, '세종대학교', $7)
+            returning appointment_id, series_id, occurrence_on::text as occurrence_on`, [creator, group, series, on, title, at, rule]))[0];
+
+// 일정 없는 알람 한 줄
+const insStandalone = async (user, { at, rule = null, series = null, on = null, enabled = true }) =>
+  (await q(`insert into public.alarms (user_id, alarm_type, scheduled_at, recurrence_rule, is_enabled, series_id, occurrence_on)
+            values ($1, 'WAKE', $2, $3, $4, $5, $6)
+            returning alarm_id, series_id, occurrence_on::text as occurrence_on`, [user, at, rule, enabled, series, on]))[0];
+
+// roll_insert_occurrence에 넣는 회차 한 벌 (alarm-commit이 넣는 칸과 같음)
+const rollArgs = (creator, series, on, over = {}) => [
+  {
+    creator_id: creator, series_id: series, occurrence_on: on, title: '수업', appointment_at: `${on}T10:00:00+09:00`, dest_name: '세종대학교',
+    dest_lat: 37.5503, dest_lng: 127.0731, dest_radius_m: 150, importance: 'HIGH', recurrence_rule: 'FREQ=WEEKLY;BYDAY=WE', memo: '3층 강의실', ...over.appointment,
+  },
+  { origin_name: '집', origin_lat: 37.5, origin_lng: 127.0, transport_type: 'SUBWAY', est_travel_minutes: 47, travel_source: 'ESTIMATE', prepare_minutes: 55, buffer_minutes: 12, ...over.participant },
+  over.alarms ?? [
+    { alarm_type: 'WAKE', scheduled_at: `${on}T07:30:00+09:00`, intensity: 'STRONG', voice_tone: 'DIRECT', sound_key: 'theme_urgent', time_source: 'MANUAL', intensity_source: 'MANUAL', last_calculated_at: '2026-11-04T01:00:00Z' },
+    { alarm_type: 'PREPARE', scheduled_at: `${on}T08:25:00+09:00`, is_enabled: false },
+    { alarm_type: 'DEPARTURE', scheduled_at: `${on}T09:00:00+09:00` },
+    { alarm_type: 'ARRIVE', scheduled_at: `${on}T09:50:00+09:00` },
+  ],
+  over.items ?? [{ title: '노트북' }, { title: '   ' }, { title: '긴 준비물'.padEnd(120, '가'), due_date: '2026-11-10' }],
+];
+const rollCall = async (...args) =>
+  (await q(`select public.roll_insert_occurrence($1::jsonb, $2::jsonb, $3::jsonb, $4::jsonb) as id`, rollArgs(...args).map((x) => JSON.stringify(x))))[0].id;
+
+// ---- ① 묶음 칸 채우기 --------------------------------------------------
+
+await check('묶음 칸 채우기: 약속 · 일정 없는 알람은 series_id = 자기 id, 날짜는 만든 사람 시간대의 날짜(새벽 1시 약속 = 한국 날짜) · 약속 · 루틴 알람은 비워 둠 · 준 값은 그대로', async () => {
+  await svc();
+  const kr = await insAppt(A, { at: DAWN });
+  await su();
+  await q(`update public.profiles set timezone = 'America/Los_Angeles' where user_id = $1`, [B]);
+  await svc();
+  const la = await insAppt(B, { at: DAWN });   // 같은 순간이 LA에서는 11-10 08:00
+  await su();
+  await q(`update public.profiles set timezone = 'Asia/Seoul' where user_id = $1`, [B]);
+  await svc();
+  const given = await insAppt(A, { at: DAWN, series: kr.series_id, on: '2026-11-18' });   // alarm-roll이 이렇게 넣음 — 준 번호 · 날짜를 안 덮음
+  const sa = await insStandalone(A, { at: DAWN });
+  const saLa = await insStandalone(B, { at: DAWN });   // B는 이미 서울로 돌아옴 → 서울 날짜
+  const [part] = await q(`select series_id, occurrence_on from public.alarms where alarm_id = $1`, [ids[A].alarm]);   // 약속 알람 (앞 절에서 앱이 넣음)
+  const [{ rt }] = await q(`insert into public.routines (user_id, title) values ($1, '묶음 칸 시험') returning routine_id as rt`, [A]);
+  const [rout] = await q(`insert into public.alarms (routine_id, step_order, user_id, alarm_type, scheduled_at) values ($1, 1, $2, 'ROUTINE', $3) returning series_id, occurrence_on`, [rt, A, DAWN]);
+  // 앞 절에서 앱(authenticated)이 넣은 약속 — 오늘 10시 약속이라 서울 오늘 날짜
+  const [mine] = await q(`select appointment_id, series_id, occurrence_on::text as occurrence_on, ${TODAY}::text as today from public.appointments where appointment_id = $1`, [ids[A].appt]);
+  const [nulls] = await q(`select count(*)::int as n from public.appointments where series_id is null or occurrence_on is null`);
+  await q(`delete from public.routines where routine_id = $1`, [rt]);
+  return kr.series_id === kr.appointment_id && kr.occurrence_on === '2026-11-11'
+    && la.series_id === la.appointment_id && la.occurrence_on === '2026-11-10'
+    && given.series_id === kr.series_id && given.occurrence_on === '2026-11-18'
+    && sa.series_id === sa.alarm_id && sa.occurrence_on === '2026-11-11' && saLa.occurrence_on === '2026-11-11'
+    && part.series_id === null && part.occurrence_on === null && rout.series_id === null && rout.occurrence_on === null
+    && mine.series_id === mine.appointment_id && mine.occurrence_on === mine.today && nulls.n === 0
+    ? true : { kr, la, given, sa, saLa, part, rout, mine, nulls };
+});
+await check('지금 있던 행 채우기: 마이그레이션 전에 들어 있던 약속 · 일정 없는 알람이 묶음 1개짜리가 되고(새벽 1시 약속 = 시간대 날짜) 약속 · 루틴 알람은 비어 있음 · 약속 칸은 NOT NULL · 이후 insert도 DB가 채움', async () => {
+  const staged = new PGlite();
+  try {
+    await staged.exec(AUTH_STUBS);
+    const files = readdirSync(MIG_DIR).filter((x) => x.endsWith('.sql')).sort();
+    const i = files.findIndex((x) => x.endsWith('_alarm_roll.sql'));
+    if (i < 0) return '_alarm_roll.sql 마이그레이션이 없음';
+    for (const f of files.slice(0, i)) await staged.exec(readFileSync(join(MIG_DIR, f), 'utf8'));   // 새 칸이 생기기 전까지만
+    const sq = async (sql, params = []) => (await staged.query(sql, params)).rows;
+    await sq(`insert into auth.users (id, email) values ($1, 'old1@example.com'), ($2, 'old2@example.com')`, [A, B]);
+    await sq(`update public.profiles set timezone = 'America/Los_Angeles' where user_id = $1`, [B]);   // B만 LA
+    const made = {};
+    for (const [u, key] of [[A, 'seoul'], [B, 'la']]) {
+      const [{ appointment_id: ap }] = await sq(`insert into public.appointments (creator_id, title, appointment_at, dest_name) values ($1, '옛 약속', $2, '세종대학교') returning appointment_id`, [u, DAWN]);
+      const [{ participant_id: pt }] = await sq(`insert into public.appointment_participants (appointment_id, user_id) values ($1, $2) returning participant_id`, [ap, u]);
+      await sq(`insert into public.alarms (participant_id, user_id, alarm_type, scheduled_at) values ($1, $2, 'WAKE', $3)`, [pt, u, DAWN]);
+      const [{ rt }] = await sq(`insert into public.routines (user_id, title) values ($1, '옛 루틴') returning routine_id as rt`, [u]);
+      await sq(`insert into public.alarms (routine_id, step_order, user_id, alarm_type, scheduled_at) values ($1, 1, $2, 'ROUTINE', $3)`, [rt, u, DAWN]);
+      const [{ alarm_id: sa }] = await sq(`insert into public.alarms (user_id, alarm_type, scheduled_at) values ($1, 'WAKE', $2) returning alarm_id`, [u, DAWN]);
+      made[key] = { ap, sa };
+    }
+    for (const f of files.slice(i)) await staged.exec(readFileSync(join(MIG_DIR, f), 'utf8'));
+    const out = {};
+    for (const key of ['seoul', 'la']) {
+      const [a] = await sq(`select series_id = appointment_id as own, occurrence_on::text as on from public.appointments where appointment_id = $1`, [made[key].ap]);
+      const [s] = await sq(`select series_id = alarm_id as own, occurrence_on::text as on from public.alarms where alarm_id = $1`, [made[key].sa]);
+      out[key] = { appt: `${a.own}/${a.on}`, standalone: `${s.own}/${s.on}` };
+    }
+    const [others] = await sq(`select count(*)::int as n from public.alarms where (participant_id is not null or routine_id is not null) and (series_id is not null or occurrence_on is not null)`);
+    const cols = Object.fromEntries((await sq(`select table_name || '.' || column_name as col, is_nullable from information_schema.columns
+      where table_schema = 'public' and column_name in ('series_id', 'occurrence_on') and table_name in ('appointments', 'alarms')`)).map((x) => [x.col, x.is_nullable]));
+    const [fresh] = await sq(`insert into public.appointments (creator_id, title, appointment_at, dest_name) values ($1, '새 약속', $2, '강남역') returning series_id = appointment_id as own, occurrence_on::text as on`, [B, DAWN]);
+    const ok = out.seoul.appt === 'true/2026-11-11' && out.seoul.standalone === 'true/2026-11-11'
+      && out.la.appt === 'true/2026-11-10' && out.la.standalone === 'true/2026-11-10'
+      && others.n === 0 && cols['appointments.series_id'] === 'NO' && cols['appointments.occurrence_on'] === 'NO'
+      && cols['alarms.series_id'] === 'YES' && cols['alarms.occurrence_on'] === 'YES'
+      && fresh.own === true && fresh.on === '2026-11-10';
+    return ok ? true : { out, others, cols, fresh };
+  } finally {
+    await staged.close();
+  }
+});
+
+// ---- ② 날짜 유니크 · roll_insert_occurrence --------------------------------
+
+let rollBase;   // E의 매주 수 10시 수업 첫 회차 (11-04) — 아래 검사들이 이어 씀
+await check('날짜 유니크 · 회차 하나 쓰기: 같은 (만든 사람, 묶음, 날짜)는 두 번 못 만들고, roll_insert_occurrence는 두 번 불러도 한 벌 — 약속 · 참여 · 알람 4 · 준비물 칸이 alarm-commit과 같음', async () => {
+  await svc();
+  rollBase = await insAppt(E, { at: '2026-11-04T10:00:00+09:00', rule: 'FREQ=WEEKLY;BYDAY=WE' });
+  const S = rollBase.series_id;
+  const id1 = await rollCall(E, S, '2026-11-11');
+  const again = await rollCall(E, S, '2026-11-11');   // 같은 요청 두 번 → 아무것도 안 쓰고 null
+  const count = async (sql) => (await q(sql, [E, S]))[0].n;
+  const [appt] = await q(`select title, dest_name, dest_lat::float as lat, dest_lng::float as lng, dest_radius_m, importance, recurrence_rule, memo, group_id, creator_id,
+                                 series_id, occurrence_on::text as on, ${kst('appointment_at')} as at from public.appointments where appointment_id = $1`, [id1]);
+  const [part] = await q(`select user_id, origin_name, origin_lat::float as lat, origin_lng::float as lng, transport_type, est_travel_minutes, travel_source::text as src,
+                                 prepare_minutes, buffer_minutes, participant_id, departed_at, arrived_at from public.appointment_participants where appointment_id = $1`, [id1]);
+  const alarms = Object.fromEntries((await q(`select alarm_type::text as t, user_id, participant_id, series_id, occurrence_on, ${kst('scheduled_at')} as at, intensity::text as intensity, voice_tone::text as voice,
+                                                     sound_key, is_enabled, time_source::text as ts, intensity_source::text as isrc, snooze_limit, last_calculated_at is not null as calc
+                                              from public.alarms where participant_id = $1`, [part.participant_id])).map((x) => [x.t, x]));
+  const todos = await q(`select title, todo_type::text as type, due_date::text as due, is_done, user_id, length(title) as len from public.todos where appointment_id = $1 order by due_date desc`, [id1]);
+  const counts = {
+    appts: await count(`select count(*)::int as n from public.appointments where creator_id = $1 and series_id = $2`),
+    parts: (await q(`select count(*)::int as n from public.appointment_participants where appointment_id = $1`, [id1]))[0].n,
+    alarms: (await q(`select count(*)::int as n from public.alarms where participant_id = $1`, [part.participant_id]))[0].n,
+    todos: (await q(`select count(*)::int as n from public.todos where appointment_id = $1`, [id1]))[0].n,
+  };
+  const enumLabels = (await q(`select enum_range(null::public.travel_source)::text as v`))[0].v;
+  // 날짜 유니크 — 직접 넣어도 같은 (만든 사람, 묶음, 날짜)는 거절, 만든 사람이 다르면 같은 번호도 받음
+  const dupAppt = await expectErr(() => insAppt(E, { at: '2026-11-11T11:00:00+09:00', series: S, on: '2026-11-11' }), /appointments_series_occurrence_key/);
+  const otherCreator = await insAppt(B, { at: '2026-11-11T11:00:00+09:00', series: S, on: '2026-11-11' });
+  const sa1 = await insStandalone(E, { at: '2026-11-11T07:30:00+09:00', rule: 'FREQ=DAILY' });
+  const dupAlarm = await expectErr(() => insStandalone(E, { at: '2026-11-11T07:45:00+09:00', series: sa1.series_id, on: sa1.occurrence_on }), /alarms_series_occurrence_key/);
+  const nextDay = await insStandalone(E, { at: '2026-11-12T07:30:00+09:00', series: sa1.series_id, on: '2026-11-12' });
+  // 한 트랜잭션 — 알람 칸이 틀리면 약속 · 참여 조건도 안 남음 / 필수 칸이 없으면 오류
+  const before = await count(`select count(*)::int as n from public.appointments where creator_id = $1 and series_id = $2`);
+  const partsBefore = (await q(`select count(*)::int as n from public.appointment_participants where user_id = $1`, [E]))[0].n;
+  const rolledBack = await expectErr(() => rollCall(E, S, '2026-11-18', { alarms: [{ alarm_type: 'WAKE', scheduled_at: '2026-11-18T07:30:00+09:00' }, { alarm_type: 'NOPE', scheduled_at: '2026-11-18T08:00:00+09:00' }] }), /invalid input value for enum/);
+  const after = await count(`select count(*)::int as n from public.appointments where creator_id = $1 and series_id = $2`);
+  const partsAfter = (await q(`select count(*)::int as n from public.appointment_participants where user_id = $1`, [E]))[0].n;
+  const noSeries = await expectErr(() => q(`select public.roll_insert_occurrence('{"creator_id":"${E}","occurrence_on":"2026-11-18"}'::jsonb, '{}'::jsonb, '[]'::jsonb, '[]'::jsonb)`), /series_id/);
+  const noTitle = await expectErr(() => rollCall(E, S, '2026-11-25', { appointment: { title: null } }), /null value in column "title"/);
+  const w = alarms.WAKE ?? {};
+  const p = alarms.PREPARE ?? {};
+  const ok = typeof id1 === 'string' && again === null
+    && counts.appts === 2 && counts.parts === 1 && counts.alarms === 4 && counts.todos === 2
+    && appt.title === '수업' && appt.dest_name === '세종대학교' && appt.lat === 37.5503 && appt.lng === 127.0731 && appt.dest_radius_m === 150 && appt.importance === 'HIGH'
+    && appt.recurrence_rule === 'FREQ=WEEKLY;BYDAY=WE' && appt.memo === '3층 강의실' && appt.group_id === null && appt.creator_id === E
+    && appt.series_id === S && appt.on === '2026-11-11' && appt.at === '11-11 10:00'
+    && part.user_id === E && part.origin_name === '집' && part.lat === 37.5 && part.lng === 127 && part.transport_type === 'SUBWAY' && part.est_travel_minutes === 47
+    && part.src === 'ESTIMATE' && part.prepare_minutes === 55 && part.buffer_minutes === 12 && part.departed_at === null && part.arrived_at === null
+    && Object.keys(alarms).sort().join() === 'ARRIVE,DEPARTURE,PREPARE,WAKE'
+    && w.user_id === E && w.participant_id === part.participant_id && w.series_id === null && w.occurrence_on === null && w.at === '11-11 07:30'
+    && w.intensity === 'STRONG' && w.voice === 'DIRECT' && w.sound_key === 'theme_urgent' && w.is_enabled === true && w.ts === 'MANUAL' && w.isrc === 'MANUAL' && w.snooze_limit === 3 && w.calc === true
+    && p.is_enabled === false && p.intensity === 'NORMAL' && p.voice === 'NEUTRAL' && p.sound_key === null && p.ts === 'AUTO' && p.isrc === 'AUTO'
+    && todos.length === 2 && todos[0].title === '노트북' && todos[0].due === '2026-11-11' && todos[0].type === 'ITEM' && todos[0].is_done === false && todos[0].user_id === E
+    && todos[1].len === 100 && todos[1].due === '2026-11-10'
+    && enumLabels === '{API,CACHED,MANUAL,ESTIMATE}'
+    && dupAppt === true && otherCreator.series_id === S && dupAlarm === true && nextDay.occurrence_on === '2026-11-12'
+    && rolledBack === true && after === before && partsAfter === partsBefore && noSeries === true && noTitle === true;
+  return ok ? true : { id1, again, counts, appt, part, alarms, todos, enumLabels, dupAppt, otherCreator, dupAlarm, nextDay, rolledBack, before, after, partsBefore, partsAfter, noSeries, noTitle };
+});
+
+// ---- ③ 열쇠 칸 ---------------------------------------------------------
+
+await check('열쇠 칸: 묶음 · 날짜는 한 번 정하면 못 바꿈(service_role · 주인도, NULL → 값도) — 제목 · 시각을 바꿔도 날짜는 그대로', async () => {
+  await svc();
+  const S = rollBase.series_id;
+  const key = (table, set, id, idCol) => () => q(`update public.${table} set ${set} where ${idCol} = $1`, [id]);
+  const sa = await insStandalone(E, { at: '2026-11-13T07:30:00+09:00', rule: 'FREQ=DAILY' });
+  const [{ pid }] = await q(`select participant_id as pid from public.appointment_participants where user_id = $1 limit 1`, [E]);
+  const [{ part_alarm }] = await q(`select alarm_id as part_alarm from public.alarms where participant_id = $1 limit 1`, [pid]);
+  const re = /바꿀 수 없음/;
+  const svcErrs = [
+    await expectErr(key('appointments', `series_id = gen_random_uuid()`, rollBase.appointment_id, 'appointment_id'), re),
+    await expectErr(key('appointments', `occurrence_on = '2030-01-01'`, rollBase.appointment_id, 'appointment_id'), re),
+    await expectErr(key('alarms', `series_id = gen_random_uuid()`, sa.alarm_id, 'alarm_id'), re),
+    await expectErr(key('alarms', `occurrence_on = '2030-01-01'`, sa.alarm_id, 'alarm_id'), re),
+    await expectErr(key('alarms', `series_id = '${S}'`, part_alarm, 'alarm_id'), re),   // 약속 알람: NULL → 값도 막힘
+    await expectErr(key('alarms', `occurrence_on = '2026-11-11'`, part_alarm, 'alarm_id'), re),
+  ];
+  await as(E);   // 주인(앱)도 같음
+  const ownerErrs = [
+    await expectErr(key('appointments', `series_id = gen_random_uuid()`, rollBase.appointment_id, 'appointment_id'), re),
+    await expectErr(key('appointments', `occurrence_on = '2030-01-01'`, rollBase.appointment_id, 'appointment_id'), re),
+  ];
+  const okTitle = await q(`update public.appointments set title = '바뀐 제목' where appointment_id = $1 returning title, series_id, occurrence_on::text as on`, [rollBase.appointment_id]);
+  await svc();
+  const moved = await q(`update public.alarms set scheduled_at = '2026-11-20T07:00:00+09:00' where alarm_id = $1 returning occurrence_on::text as on, series_id`, [sa.alarm_id]);   // 이번만 시각을 바꿔도 날짜 칸은 그대로
+  const movedAppt = await q(`update public.appointments set appointment_at = '2026-11-04T11:30:00+09:00' where appointment_id = $1 returning occurrence_on::text as on`, [rollBase.appointment_id]);
+  const def = Object.fromEntries((await q(`select c.relname, pg_get_triggerdef(t.oid) as def from pg_trigger t join pg_class c on c.oid = t.tgrelid where t.tgname = 'keep_keys' and c.relname in ('appointments', 'alarms')`)).map((d) => [d.relname, d.def]));
+  const ok = svcErrs.every((x) => x === true) && ownerErrs.every((x) => x === true)
+    && okTitle.length === 1 && okTitle[0].title === '바뀐 제목' && okTitle[0].series_id === S && okTitle[0].on === '2026-11-04'
+    && moved.length === 1 && moved[0].on === '2026-11-13' && moved[0].series_id === sa.series_id && movedAppt[0].on === '2026-11-04'
+    && def.appointments?.includes(`prevent_key_change('creator_id', 'group_id', 'series_id', 'occurrence_on')`)
+    && def.alarms?.includes(`prevent_key_change('user_id', 'participant_id', 'routine_id', 'series_id', 'occurrence_on')`);
+  return ok ? true : { svcErrs, ownerErrs, okTitle, moved, movedAppt, def };
+});
+
+// ---- ④ 앱 쓰기 제한 -----------------------------------------------------
+
+await check('앱 쓰기 제한: 앱은 남의 묶음 · 임의 번호 · 자기 묶음의 둘째 회차를 못 넣고, 새 묶음(번호 없음 · 자기 id)만 넣음 — 약속 · 루틴 알람에 묶음 번호는 달 수 없음', async () => {
+  await as(A);
+  const into = (series, id = null) => q(`insert into public.appointments (appointment_id, creator_id, series_id, title, appointment_at, dest_name)
+                                         values (coalesce($1::uuid, gen_random_uuid()), $2, $3, '쓰기 제한 시험', '2026-11-20T10:00:00+09:00', '역') returning appointment_id, series_id`, [id, A, series]);
+  const inOthers = await expectErr(() => into(ids[B].appt), /row-level security/);   // B의 묶음
+  const random = await expectErr(() => into('abababab-abab-4bab-8bab-abababababab'), /row-level security/);
+  const [own] = await into(null);   // 번호 없음 → 트리거가 자기 id
+  const X = 'cdcdcdcd-cdcd-4dcd-8dcd-cdcdcdcdcdcd';
+  const [explicit] = await into(X, X);
+  const second = await expectErr(() => into(own.appointment_id), /row-level security/);   // 자기 묶음에도 둘째 회차는 못 넣음 (alarm-roll만)
+  const directAlarm = await expectErr(() => q(`insert into public.alarms (user_id, alarm_type, scheduled_at, series_id, occurrence_on) values ($1, 'WAKE', now(), gen_random_uuid(), current_date)`, [A]), /row-level security/);
+  await q(`delete from public.appointments where title = '쓰기 제한 시험'`);
+  await svc();
+  const withPartAlarm = await expectErr(() => q(`insert into public.alarms (participant_id, user_id, alarm_type, scheduled_at, series_id, occurrence_on) values ($1, $2, 'PREPARE', now(), gen_random_uuid(), current_date)`, [ids[A].part, A]), /alarms_series_standalone/);
+  const [{ rt }] = await q(`insert into public.routines (user_id, title) values ($1, '쓰기 제한 시험') returning routine_id as rt`, [A]);
+  const withRoutine = await expectErr(() => q(`insert into public.alarms (routine_id, step_order, user_id, alarm_type, scheduled_at, series_id, occurrence_on) values ($1, 1, $2, 'ROUTINE', now(), gen_random_uuid(), current_date)`, [rt, A]), /alarms_series_standalone/);
+  await q(`delete from public.routines where routine_id = $1`, [rt]);
+  return inOthers === true && random === true && own.series_id === own.appointment_id && explicit.series_id === X && second === true && directAlarm === true
+    && withPartAlarm === true && withRoutine === true
+    ? true : { inOthers, random, own, explicit, second, directAlarm, withPartAlarm, withRoutine };
+});
+
+// ---- ⑤ 서버 전용 권한 ----------------------------------------------------
+
+await check('서버 전용 권한: roll_insert_occurrence · roll_due_series는 service_role만(앱 · anon은 못 부름) · fill_series 트리거 함수는 실행 권한 없이도 돎', async () => {
+  const fns = ['public.roll_insert_occurrence(jsonb,jsonb,jsonb,jsonb)', 'public.roll_due_series(timestamptz,integer)'];
+  const r = await q(`select f, has_function_privilege('authenticated', f, 'execute') as a, has_function_privilege('anon', f, 'execute') as n,
+                            has_function_privilege('service_role', f, 'execute') as s from unnest($1::text[]) f`, [fns]);
+  const trigFn = (await q(`select has_function_privilege('authenticated', 'private.fill_series()', 'execute') as a, has_function_privilege('anon', 'private.fill_series()', 'execute') as n`))[0];
+  await as(A);
+  const callDue = await expectErr(() => q(`select * from public.roll_due_series(now(), 10)`), /permission denied/);
+  const callRoll = await expectErr(() => q(`select public.roll_insert_occurrence('{}'::jsonb, '{}'::jsonb, '[]'::jsonb, '[]'::jsonb)`), /permission denied/);
+  await as(null, 'anon');
+  const anonDue = await expectErr(() => q(`select * from public.roll_due_series(now(), 10)`), /permission denied/);
+  await svc();
+  const svcDue = await q(`select * from public.roll_due_series(now(), 1)`);
+  return r.length === fns.length && r.every((x) => !x.a && !x.n && x.s) && trigFn.a === false && trigFn.n === false
+    && callDue === true && callRoll === true && anonDue === true && Array.isArray(svcDue)
+    ? true : { r, trigFn, callDue, callRoll, anonDue };
+});
+await check('roll_attempts: RLS만 켜고 정책 없음 · 앱(authenticated · anon)은 읽고 쓰지 못함 · 날짜마다 한 줄 · updated_at 갱신 · 탈퇴하면 CASCADE', async () => {
+  const [t] = await q(`select c.relrowsecurity as rls, (select count(*)::int from pg_policy p where p.polrelid = c.oid) as policies,
+                              has_table_privilege('authenticated', c.oid, 'select') as a, has_table_privilege('anon', c.oid, 'select') as n,
+                              has_table_privilege('service_role', c.oid, 'insert') as s
+                       from pg_class c where c.oid = 'public.roll_attempts'::regclass`);
+  await as(A);
+  const readDenied = await expectErr(() => q(`select * from public.roll_attempts`), /permission denied/);
+  const writeDenied = await expectErr(() => q(`insert into public.roll_attempts (user_id, series_id, occurrence_on, next_try_at) values ($1, gen_random_uuid(), current_date, now())`, [A]), /permission denied/);
+  await as(null, 'anon');
+  const anonDenied = await expectErr(() => q(`select * from public.roll_attempts`), /permission denied/);
+  await svc();
+  const series = 'efefefef-efef-4fef-8fef-efefefefefef';
+  const [row] = await q(`insert into public.roll_attempts (user_id, series_id, occurrence_on, next_try_at, updated_at) values ($1, $2, '2026-11-18', '2026-11-05T13:00:00Z', '2020-01-01') returning tries, skipped, last_error`, [Z, series]);
+  const dup = await expectErr(() => q(`insert into public.roll_attempts (user_id, series_id, occurrence_on, next_try_at) values ($1, $2, '2026-11-18', now())`, [Z, series]), /roll_attempts_pkey|duplicate key/);
+  await q(`insert into public.roll_attempts (user_id, series_id, occurrence_on, next_try_at) values ($1, $2, '2026-11-25', now())`, [Z, series]);   // 다른 날짜는 따로
+  const [upd] = await q(`update public.roll_attempts set tries = tries + 1, last_error = 'TIMEOUT' where user_id = $1 and series_id = $2 and occurrence_on = '2026-11-18' returning tries, updated_at > '2021-01-01' as touched`, [Z, series]);
+  const longError = await expectErr(() => q(`update public.roll_attempts set last_error = $3 where user_id = $1 and series_id = $2`, [Z, series, 'x'.repeat(41)]), /value too long/);
+  await su();
+  await q(`delete from auth.users where id = $1`, [Z]);
+  const [left] = await q(`select count(*)::int as n from public.roll_attempts where user_id = $1`, [Z]);
+  return t.rls === true && t.policies === 0 && t.a === false && t.n === false && t.s === true
+    && readDenied === true && writeDenied === true && anonDenied === true
+    && row.tries === 0 && row.skipped === false && row.last_error === null && dup === true && upd.tries === 1 && upd.touched === true && longError === true && left.n === 0
+    ? true : { t, readDenied, writeDenied, anonDenied, row, dup, upd, longError, left };
+});
+
+// ---- ⑥ 지난 회차는 그대로 (설계 메모 M4) -----------------------------------
+
+await check('지난 회차가 그대로: 다음 회차(화 11-10)를 만든 뒤에도 MISSED 후보 · 그룹 기상 상태 · R02 계획 쿼리가 지난 회차(화 11-03)의 알람 행을 같은 id · 같은 시각으로 읽고, 새 회차는 새 날짜에만 보임', async () => {
+  // 매주 화 10시 수업 — 지난 회차(11-03): 기상 07:30 · 준비 08:30 · 출발 09:10. 기상은 울리고 끄기만 함 (기상 확인 없음)
+  await svc();
+  const past = await insAppt(F, { at: '2026-11-03T10:00:00+09:00', rule: 'FREQ=WEEKLY;BYDAY=TU' });
+  const [{ participant_id: pt }] = await q(`insert into public.appointment_participants (appointment_id, user_id) values ($1, $2) returning participant_id`, [past.appointment_id, F]);
+  const ring = {};
+  for (const [type, hhmm] of [['WAKE', '07:30'], ['PREPARE', '08:30'], ['DEPARTURE', '09:10']]) {
+    [{ alarm_id: ring[type] }] = await q(`insert into public.alarms (participant_id, user_id, alarm_type, scheduled_at) values ($1, $2, $3, $4) returning alarm_id`, [pt, F, type, `2026-11-03T${hhmm}:00+09:00`]);
+  }
+  await q(`insert into public.alarm_events (alarm_id, user_id, event_type, event_at) values ($1, $2, 'TRIGGERED', '2026-11-03T07:30:05+09:00'), ($1, $2, 'DISMISSED', '2026-11-03T07:31:00+09:00')`, [ring.WAKE, F]);
+  // 그룹 — 공동 약속은 반복해도 첫 회차만이라 11-03 · 11-10 단발 약속을 따로 둠
+  await as(F);
+  const [{ group_id: G2 }] = await q(`insert into public.groups (group_name, owner_id) values ('반복 시험 그룹', $1) returning group_id`, [F]);
+  await svc();
+  await insAppt(F, { at: '2026-11-03T15:00:00+09:00', title: '팀 회의', group: G2 });
+  await insAppt(F, { at: '2026-11-10T15:00:00+09:00', title: '팀 회의', group: G2 });
+
+  const snap = async () => {
+    await svc();
+    const missed = await q(`select alarm_id, ${kst('scheduled_at')} as at, ${kst('missed_at')} as missed from public.find_missed_wake_alarms('2026-11-04T03:00:00+09:00', 24) where user_id = $1`, [F]);
+    await as(F);
+    const group = (day) => q(`select is_me, ${kst('wake_alarm_at')} as at, wake_status from public.get_group_wake_status($1, $2)`, [G2, day]);
+    // R02: 그날 계획 줄(loadPlannedRows)과 목표 기상(loadWakeAlarmAts)과 같은 조건
+    const day = (from, to) => [F, `${from}T00:00:00+09:00`, `${to}T00:00:00+09:00`];
+    const plan = (from, to) => q(`select alarm_id, alarm_type::text as t, ${kst('scheduled_at')} as at, is_enabled from public.alarms where user_id = $1 and scheduled_at >= $2 and scheduled_at < $3 order by scheduled_at`, day(from, to));
+    const wakes = (from, to) => q(`select ${kst('scheduled_at')} as at from public.alarms where user_id = $1 and alarm_type = 'WAKE' and is_enabled and scheduled_at >= $2 and scheduled_at < $3`, day(from, to));
+    return {
+      missed, g3: await group('2026-11-03'), g10: await group('2026-11-10'),
+      p3: await plan('2026-11-03', '2026-11-04'), p10: await plan('2026-11-10', '2026-11-11'),
+      w3: await wakes('2026-11-03', '2026-11-04'), w10: await wakes('2026-11-10', '2026-11-11'),
+    };
+  };
+  const before = await snap();
+  await svc();   // 다음 회차 (화 11-10)
+  const nextId = await rollCall(F, past.series_id, '2026-11-10', {
+    appointment: { recurrence_rule: 'FREQ=WEEKLY;BYDAY=TU' }, participant: { travel_source: 'API' },
+    alarms: [
+      { alarm_type: 'WAKE', scheduled_at: '2026-11-10T07:30:00+09:00' },
+      { alarm_type: 'PREPARE', scheduled_at: '2026-11-10T08:30:00+09:00' },
+      { alarm_type: 'DEPARTURE', scheduled_at: '2026-11-10T09:10:00+09:00' },
+    ],
+    items: [],
+  });
+  const after = await snap();
+  const same = (k) => JSON.stringify(before[k]) === JSON.stringify(after[k]);
+  const ok = typeof nextId === 'string'
+    // MISSED 후보: 지난 회차 기상(11-03 07:30 + 다시 울림 19 + 30분 = 08:19)이 그대로
+    && before.missed.length === 1 && before.missed[0].alarm_id === ring.WAKE && before.missed[0].at === '11-03 07:30' && before.missed[0].missed === '11-03 08:19' && same('missed')
+    // 그룹 기상 상태: 11-03은 지난 회차 그대로(끄기만 함 = DISMISSED), 11-10은 새 회차가 생긴 뒤에 생김
+    && before.g3.length === 1 && before.g3[0].is_me === true && before.g3[0].at === '11-03 07:30' && before.g3[0].wake_status === 'DISMISSED' && same('g3')
+    && before.g10[0].wake_status === 'NO_ALARM' && after.g10[0].at === '11-10 07:30' && after.g10[0].wake_status === 'SCHEDULED'
+    // R02: 지난 날 계획 줄 3개 · 목표 기상이 같은 알람 id로 남고, 새 날짜에는 새 회차 알람이 생김
+    && before.p3.length === 3 && before.p3[0].alarm_id === ring.WAKE && before.p3.map((x) => x.at).join() === '11-03 07:30,11-03 08:30,11-03 09:10' && same('p3') && same('w3')
+    && before.p10.length === 0 && after.p10.map((x) => x.at).join() === '11-10 07:30,11-10 08:30,11-10 09:10' && before.w10.length === 0 && after.w10.length === 1;
+  return ok ? true : { nextId, before, after };
+});
+
+// ---- ⑦ roll_due_series --------------------------------------------------
+
+await check('roll_due_series: 묶음마다 가장 늦은 회차 기준 · 다음 회차가 14일 안(끝 시각은 포함 안 함, 14일치가 차 있으면 빠짐) · 못 읽는 규칙 · 공동 약속 · 규칙 없는 묶음 · 재시도 대기는 빠지고 도래한 재시도는 포함 · 일정 없는 반복 알람 · 켜 둔 루틴 · 급한 순 · p_limit', async () => {
+  const N = '2026-11-05T12:00:00+09:00';   // 목요일. 창은 11-19(목) 12:00 앞까지
+  await as(H1);
+  const [{ group_id: G3 }] = await q(`insert into public.groups (group_name, owner_id) values ('목록 시험 그룹', $1) returning group_id`, [H1]);
+  await svc();
+  const name = new Map();     // series_id → 이름
+  const latest = new Map();   // 이름 → 기대하는 template_id
+  // 약속 묶음: ats[0]을 먼저 넣고(묶음 번호가 됨) 나머지는 같은 번호로. 기준 회차 = 날짜(occurrence_on)가 가장 늦은 행
+  const apptSeries = async (label, user, ats, over = {}) => {
+    const rows = [];
+    for (const at of ats) {
+      const row = await insAppt(user, { at, rule: over.rule === undefined ? 'FREQ=WEEKLY;BYDAY=TH' : over.rule, group: over.group ?? null, series: rows[0]?.series_id ?? null, on: rows[0] ? at.slice(0, 10) : null });
+      rows.push(row);
+    }
+    name.set(rows[0].series_id, label);
+    latest.set(label, rows.reduce((a, b) => (b.occurrence_on > a.occurrence_on ? b : a)).appointment_id);
+    return rows[0].series_id;
+  };
+  const attempt = (user, series, on, nextTry, skipped = false) =>
+    q(`insert into public.roll_attempts (user_id, series_id, occurrence_on, tries, next_try_at, skipped) values ($1, $2, $3, 1, $4, $5)`, [user, series, on, nextTry, skipped]);
+
+  await apptSeries('ok', H1, ['2026-11-12T10:00:00+09:00', '2026-11-05T10:00:00+09:00']);   // 늦은 회차를 먼저 넣음 — 마지막으로 넣은 행이 아니라 날짜가 늦은 행이 기준
+  await apptSeries('ok_other_user', H2, ['2026-11-12T10:00:00+09:00']);
+  await apptSeries('edge_in', H1, ['2026-11-12T11:59:00+09:00']);    // 다음 회차 11-19 11:59 — 창 안
+  await apptSeries('edge_out', H1, ['2026-11-12T12:00:00+09:00']);   // 다음 회차 11-19 12:00 — 창 끝은 포함 안 함
+  await apptSeries('filled', H1, ['2026-11-19T10:00:00+09:00']);     // 기준 회차는 창 안이지만 다음 회차(11-26)가 창 밖 — 14일치가 이미 참
+  await apptSeries('far', H1, ['2026-11-26T10:00:00+09:00']);
+  await apptSeries('multi_in', H1, ['2026-11-16T10:00:00+09:00'], { rule: 'FREQ=WEEKLY;BYDAY=MO,TH' });      // 월 → 다음은 목 11-19 10:00
+  await apptSeries('multi_filled', H1, ['2026-11-19T10:00:00+09:00'], { rule: 'FREQ=WEEKLY;BYDAY=MO,TH' });  // 목 → 다음은 월 11-23
+  await apptSeries('lenient', H1, ['2026-11-12T10:00:00+09:00'], { rule: 'rrule:byday=th;freq=weekly' });   // recur.ts parseRecurrence처럼 접두사 · 소문자 · 순서 상관없이 읽음
+  await apptSeries('bad_monthly', H1, ['2026-11-01T10:00:00+09:00'], { rule: 'FREQ=MONTHLY;BYMONTHDAY=1' }); // 두 모양 밖 — 오래된 회차라도 빠짐
+  await apptSeries('bad_interval', H1, ['2026-11-12T10:00:00+09:00'], { rule: 'FREQ=WEEKLY;INTERVAL=2;BYDAY=TH' });
+  await apptSeries('no_rule', H1, ['2026-11-12T10:00:00+09:00'], { rule: null });
+  await apptSeries('group', H1, ['2026-11-12T10:00:00+09:00'], { group: G3 });
+  const wait = await apptSeries('wait', H1, ['2026-11-12T10:30:00+09:00']);
+  await attempt(H1, wait, '2026-11-12', '2026-11-05T13:00:00+09:00');                // 1시간 뒤 재시도 → 대기
+  const retry = await apptSeries('retry', H1, ['2026-11-12T11:00:00+09:00']);
+  await attempt(H1, retry, '2026-11-12', '2026-11-05T11:59:00+09:00');               // 재시도 때가 지남 → 포함
+  const mixed = await apptSeries('wait_and_retry', H1, ['2026-11-12T12:00:00+09:00']);
+  await attempt(H1, mixed, '2026-11-12', '2026-11-05T11:00:00+09:00');
+  await attempt(H1, mixed, '2026-11-13', '2026-11-05T15:00:00+09:00');               // 하나라도 대기면 묶음 전체가 빠짐
+  const farRetry = await apptSeries('far_retry', H1, ['2026-11-26T10:00:00+09:00']);
+  await attempt(H1, farRetry, '2026-11-19', '2026-11-05T11:00:00+09:00');            // 가장 늦은 회차는 창 밖이어도, 미뤄 둔 날짜의 재시도 때가 오면 포함
+  const farSkipped = await apptSeries('far_skipped', H1, ['2026-11-26T10:00:00+09:00']);
+  await attempt(H1, farSkipped, '2026-11-19', '2026-11-05T11:00:00+09:00', true);    // 건너뛴 날짜는 재시도가 아님
+  const farStale = await apptSeries('far_stale', H1, ['2026-11-26T10:00:00+09:00']);
+  await attempt(H1, farStale, '2026-11-02', '2026-11-05T11:00:00+09:00');            // 어제 이전 날짜의 재시도는 무시
+
+  // 일정 없는 알람: 마지막 행이 기준 (규칙 있고 14일 안)
+  const standalone = async (label, user, rows, rule, enabled = true) => {
+    const made = [];
+    for (const at of rows) made.push(await insStandalone(user, { at, rule, enabled, series: made[0]?.series_id ?? null, on: made[0] ? at.slice(0, 10) : null }));
+    name.set(made[0].series_id, label);
+    latest.set(label, made[made.length - 1].alarm_id);
+  };
+  await standalone('sa_ok', H1, ['2026-11-05T07:30:00+09:00', '2026-11-06T07:30:00+09:00'], 'FREQ=DAILY');
+  await standalone('sa_off', H1, ['2026-11-06T08:00:00+09:00'], 'FREQ=DAILY', false);   // 꺼 둔 반복 알람도 줌
+  await standalone('sa_no_rule', H1, ['2026-11-06T09:00:00+09:00'], null);
+  await standalone('sa_far', H1, ['2026-11-26T07:30:00+09:00'], 'FREQ=DAILY');
+  await standalone('sa_filled', H1, ['2026-11-19T07:30:00+09:00'], 'FREQ=DAILY');   // 다음 회차 11-20 — 창 밖
+  await standalone('sa_bad', H1, ['2026-11-06T07:30:00+09:00'], 'FREQ=MONTHLY');
+
+  // 루틴: 켜 둔 루틴의 켜진 단계 알람 중 시각이 지난 것이 있을 때
+  const routine = async (label, { active = true, days = 'MON~FRI', alarms }) => {
+    const [{ routine_id: rid }] = await q(`insert into public.routines (user_id, title, repeat_days, is_active) values ($1, $2, $3, $4) returning routine_id`, [H2, label, days, active]);
+    let order = 0;
+    for (const [at, enabled] of alarms) await q(`insert into public.alarms (routine_id, step_order, user_id, alarm_type, scheduled_at, is_enabled) values ($1, $2, $3, 'ROUTINE', $4, $5)`, [rid, ++order, H2, at, enabled]);
+    name.set(rid, label);
+    latest.set(label, rid);
+  };
+  await routine('r_ok', { alarms: [['2026-11-05T08:00:00+09:00', true], ['2026-11-06T08:30:00+09:00', true]] });
+  await routine('r_off', { active: false, alarms: [['2026-11-05T08:00:00+09:00', true]] });
+  await routine('r_future', { alarms: [['2026-11-06T08:00:00+09:00', true]] });
+  await routine('r_alarm_off', { alarms: [['2026-11-05T08:00:00+09:00', false]] });
+  await routine('r_no_days', { days: '', alarms: [['2026-11-05T08:00:00+09:00', true]] });
+  await routine('r_bad_days', { days: 'EVERYDAY', alarms: [['2026-11-05T08:00:00+09:00', true]] });   // 읽을 요일이 없음
+  await routine('r_range', { days: 'sat~mon', alarms: [['2026-11-05T07:00:00+09:00', true]] });       // 소문자 · 일요일을 넘는 범위도 읽음
+
+  const rows = await q(`select user_id, series_id, kind, template_id from public.roll_due_series($1, 1000)`, [N]);
+  const mine = rows.filter((r) => name.has(r.series_id));
+  const got = mine.map((r) => name.get(r.series_id));
+  const expected = ['ok', 'ok_other_user', 'edge_in', 'multi_in', 'lenient', 'retry', 'far_retry', 'sa_ok', 'sa_off', 'r_ok', 'r_range'];
+  const kinds = Object.fromEntries(mine.map((r) => [name.get(r.series_id), r.kind]));
+  const templates = mine.every((r) => r.template_id === latest.get(name.get(r.series_id)));
+  const users = Object.fromEntries(mine.map((r) => [name.get(r.series_id), r.user_id]));
+  const order = ['r_ok', 'sa_ok', 'sa_off', 'ok', 'retry', 'edge_in', 'far_retry'].map((n) => got.indexOf(n));
+  const sortedOrder = order.every((v, i) => v >= 0 && (i === 0 || v > order[i - 1]));
+  const top3 = await q(`select series_id from public.roll_due_series($1, 3)`, [N]);
+  const none = await q(`select series_id from public.roll_due_series($1, 0)`, [N]);
+  const ok = [...got].sort().join() === [...expected].sort().join()
+    && kinds.ok === 'APPOINTMENT' && kinds.sa_ok === 'STANDALONE' && kinds.r_ok === 'ROUTINE' && templates
+    && users.ok === H1 && users.ok_other_user === H2 && users.r_ok === H2
+    && sortedOrder
+    && top3.length === 3 && top3.map((r) => r.series_id).join() === rows.slice(0, 3).map((r) => r.series_id).join() && none.length === 0;
+  return ok ? true : { got, expected, kinds, templates, users, order, top3: top3.length, none: none.length };
+});
+
+// ---- ⑧ 예약 --------------------------------------------------------------
+
+await check('배치 예약: alarm-roll을 5분마다 부름 (pg_cron은 PGlite에 없어 cron.schedule 흉내에 들어간 것을 봄) — 호출은 /functions/v1/alarm-roll로 서비스 키를 실어 POST', async () => {
+  const [job] = await q(`select jobname, schedule, command from cron.job where jobname = 'alarm-roll'`);
+  await su();
+  await q(`insert into vault.decrypted_secrets (name, decrypted_secret) values ('project_url', 'https://abc.supabase.co'), ('service_role_key', 'SECRET-KEY')`);
+  await svc();
+  await q(`select private.invoke_edge_function('alarm-roll')`);
+  await su();
+  const calls = await q(`select url, headers from net.calls order by id`);
+  await q(`delete from vault.decrypted_secrets`);
+  await q(`truncate net.calls`);
+  return job && job.schedule === '*/5 * * * *' && job.command === `select private.invoke_edge_function('alarm-roll')`
+    && calls.length === 1 && calls[0].url === 'https://abc.supabase.co/functions/v1/alarm-roll' && calls[0].headers.Authorization === 'Bearer SECRET-KEY'
+    ? true : { job, calls };
 });
 
 
