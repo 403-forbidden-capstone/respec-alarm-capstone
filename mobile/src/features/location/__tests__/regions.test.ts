@@ -70,10 +70,21 @@ describe('감시 목록 (planRegions)', () => {
     expect(planRegions({ home: HOME, participants: [participant()], now: at('06:19'), aheadMinutes: 60 }).regions).toHaveLength(1);
   });
 
-  it('좌표가 없으면 뺌 — 목적지 좌표 없음, 출발지 좌표 없음 = 집', () => {
-    const plan = planRegions({ home: HOME, participants: [participant({ dest: { lat: null, lng: null }, origin: { lat: null, lng: null } })], now: at('08:00') });
-    expect(plan.regions.map((r) => r.id)).toEqual([HOME_REGION_ID]);
+  it('출발지 좌표가 없으면 집에서 출발', () => {
+    const plan = planRegions({ home: HOME, participants: [participant({ origin: { lat: null, lng: null } })], now: at('08:00') });
+    expect(plan.regions.map((r) => r.destOf)).toEqual([[], ['p1']]);
     expect(plan.participants[0]).toMatchObject({ fromHome: true, near: false });
+  });
+
+  it('목적지 좌표가 없으면 그 약속은 감지하지 않음 — 집 아닌 출발지도 감시 안 함, 판정 목록 대신 untracked (7.13.7)', () => {
+    const noDest = participant({ participantId: 'nodest', dest: { lat: null, lng: null }, origin: GANGNAM, departedAt: at('08:20') });
+    const plan = planRegions({ home: HOME, participants: [noDest, participant({ participantId: 'home', dest: null })], now: at('08:00') });
+    expect(plan.regions.map((r) => r.id)).toEqual([HOME_REGION_ID]);
+    expect(plan.participants).toEqual([]);
+    expect(plan.untracked.map((p) => [p.participantId, p.fromHome, p.departedAt])).toEqual([
+      ['home', true, null],
+      ['nodest', false, at('08:20')],
+    ]);
   });
 
   it('저장된 출발지가 집 좌표(집 반경 안)면 집에서 출발 — 영역을 따로 만들지 않음', () => {
@@ -98,7 +109,7 @@ describe('감시 목록 (planRegions)', () => {
     expect(plan.regions.map((r) => r.originOf.length + r.destOf.length)).toEqual([1, 1]);
   });
 
-  it('출발지 ~ 목적지 500m 안이면 목적지를 감시하지 않음, 출발은 살림 (D78)', () => {
+  it('출발지 ~ 목적지 500m 안이면 목적지를 감시하지 않음, 출발은 살림 (L6 안건후보: 가까운 약속 감지 기본안 A)', () => {
     const plan = planRegions({ home: HOME, participants: [participant({ dest: NEAR_HOME })], now: at('08:00') });
     expect(plan.regions.map((r) => r.id)).toEqual([HOME_REGION_ID]);
     expect(plan.participants[0]).toMatchObject({ fromHome: true, near: true });

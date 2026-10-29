@@ -1,6 +1,6 @@
 import { describe, expect, it } from '@jest/globals';
 
-import { attachDestEnter, attachHomeExit, attachOriginExit, type Taken } from '../attach';
+import { attachDestEnter, attachHomeExit, attachOriginExit, isSameTrip, type Taken } from '../attach';
 import type { MonitoredRegion, TrackedParticipant } from '../regions';
 
 // 한국 시각 (날짜 · 시각)
@@ -22,7 +22,7 @@ const none: Taken = { departed: new Set(), arrived: new Set() };
 const taken = (departed: string[] = [], arrived: string[] = []): Taken => ({ departed: new Set(departed), arrived: new Set(arrived) });
 const region = (over: Partial<MonitoredRegion>): MonitoredRegion => ({ id: 'r1', lat: 37.5, lng: 127, radiusM: 200, home: false, originOf: [], destOf: [], ...over });
 
-describe('집 이탈 → 오늘 첫 약속 (D79 기본안 A)', () => {
+describe('집 이탈 → 오늘 첫 약속 (L6 안건후보: 집 이탈 약속 붙이기 기본안 A)', () => {
   const morning = tracked('class', at('09:00'));
   const lunch = tracked('lunch', at('13:00'));
   const list = [lunch, morning];
@@ -97,7 +97,34 @@ describe('목적지 진입 → 그곳이 목적지인 약속', () => {
     expect(attachDestEnter(hall, [first], at('08:19'), none)).toEqual([]);
   });
 
-  it('가까운 약속(D78)은 도착 감지 안 함', () => {
+  it('가까운 약속(L6 안건후보: 가까운 약속 감지)은 도착 감지 안 함', () => {
     expect(attachDestEnter(hall, [tracked('first', at('10:00'), { near: true })], at('09:50'), none)).toEqual([]);
+  });
+});
+
+describe('같은 길 (isSameTrip) — 그 출발지 약속의 출발이 이탈 앞뒤 30분 안에 이미 있음', () => {
+  const home = region({ id: 'home', home: true });
+  const morning = tracked('class', at('09:00'));
+  const lunch = tracked('lunch', at('13:00'));
+  const dep = (participantId: string, hhmm: string) => ({ participantId, at: at(hhmm) });
+
+  it('집: 오늘 약속 중 출발지 = 집의 출발이 앞뒤 30분 안이면 같은 길 — 양 끝 포함', () => {
+    expect(isSameTrip(home, [morning, lunch], [dep('class', '08:20')], at('08:24'))).toBe(true);
+    expect(isSameTrip(home, [morning, lunch], [dep('class', '08:20')], at('08:50'))).toBe(true);
+    expect(isSameTrip(home, [morning, lunch], [dep('class', '08:20')], at('08:51'))).toBe(false);
+    expect(isSameTrip(home, [morning, lunch], [dep('class', '08:20')], at('07:50'))).toBe(true); // 출발을 누른 게 이탈보다 뒤
+    expect(isSameTrip(home, [morning, lunch], [], at('08:24'))).toBe(false);
+  });
+
+  it('집: 집 아닌 곳에서 출발하는 약속의 출발은 안 셈', () => {
+    const fromSchool = tracked('fromSchool', at('09:00'), { fromHome: false });
+    expect(isSameTrip(home, [fromSchool, lunch], [dep('fromSchool', '08:20')], at('08:24'))).toBe(false);
+  });
+
+  it('집 아닌 출발지: 그곳에서 출발하는 참여 조건만', () => {
+    const school = region({ originOf: ['study'] });
+    const study = tracked('study', at('15:00'), { fromHome: false });
+    expect(isSameTrip(school, [study, morning], [dep('study', '14:00')], at('14:10'))).toBe(true);
+    expect(isSameTrip(school, [study, morning], [dep('class', '14:00')], at('14:10'))).toBe(false);
   });
 });

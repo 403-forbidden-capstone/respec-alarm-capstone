@@ -1,8 +1,9 @@
-// 감시 목록 — 지금 등록해 둘 지오펜스 영역 (7.13.7 · D68 · D77 · D78)
+// 감시 목록 — 지금 등록해 둘 지오펜스 영역 (7.13.7 · D68 · L6 안건후보: 지오펜스 반경 · 가까운 약속 감지)
 //   · 집은 좌표가 있으면 늘 감시 (D68 집 상시), 반경 = home_radius_m → 없으면 200m
 //   · 목적지 · 집 아닌 출발지는 감시 시간창(W_geo: 출발 예정 60분 전 ~ 약속 60분 후) 안에서만, 도착이 기록되면 뺌
 //   · 출발지가 비었거나 집 반경 안이면 집에서 출발 — 따로 영역을 만들지 않고 집 이탈로 잡음
-//   · 출발지 ~ 목적지 500m 안이면 목적지를 감시하지 않음 — 출발만 살림 (D78 기본안 A)
+//   · 목적지 좌표가 없는 약속은 감지하지 않음 — 출발도 (7.13.7 따름). 판정 목록(participants)에서 빼고 untracked에 둠
+//   · 출발지 ~ 목적지 500m 안이면 목적지를 감시하지 않음 — 출발만 살림 (L6 안건후보: 가까운 약속 감지 기본안 A)
 //   · 같은 좌표(소수 5자리)는 한 영역으로 합침, 반경은 큰 쪽. id = 좌표로 만든 짧은 고정 글자 → 다시 계획해도 같은 id
 //     (등록 층은 바뀐 영역만 다시 등록 — 다시 등록하면 "이미 안" 신호가 또 옴)
 //   · 상한 20개 — 집 먼저, 나머지는 쓰이는 시각(출발지 = 출발 예정, 목적지 = 약속) 이른 순
@@ -44,7 +45,7 @@ export type TrackedParticipant = {
   appointmentAt: number;
   departAt: number;
   fromHome: boolean; // 집에서 출발 (출발지가 비었거나 집 반경 안)
-  near: boolean; // 출발지 ~ 목적지 500m 안 — 도착 감지 · 이동시간 끔 (D78)
+  near: boolean; // 출발지 ~ 목적지 500m 안 — 도착 감지 · 이동시간 끔 (L6 안건후보: 가까운 약속 감지)
   departedAt: number | null;
   arrivedAt: number | null;
 };
@@ -54,12 +55,15 @@ export type MonitoredRegion = {
   lat: number;
   lng: number;
   radiusM: number;
-  home: boolean; // 집 — 이탈은 오늘 첫 약속에 붙임 (attach.ts, D79)
+  home: boolean; // 집 — 이탈은 오늘 첫 약속에 붙임 (attach.ts, L6 안건후보: 집 이탈 약속 붙이기)
   originOf: string[]; // 여기서 출발하는 참여 조건 (집 아닌 출발지)
   destOf: string[]; // 여기가 목적지인 참여 조건
 };
 
-export type RegionPlan = { regions: MonitoredRegion[]; participants: TrackedParticipant[] };
+// participants = 판정하는 참여 조건
+// untracked = 감지하지 않는 참여 조건 (목적지 좌표 없음, 7.13.7) — 판정은 안 함. 집 이탈 붙이기 · 같은 길 판정에만 씀
+//   (그 약속 몫의 집 이탈 · 원탭 출발 뒤 이탈이 다음 약속에 잘못 붙지 않게)
+export type RegionPlan = { regions: MonitoredRegion[]; participants: TrackedParticipant[]; untracked: TrackedParticipant[] };
 
 export type PlanInput = {
   home?: HomeInput;
@@ -98,6 +102,7 @@ export function planRegions(input: PlanInput): RegionPlan {
   const ahead = minutesMs(Math.max(0, input.aheadMinutes ?? 0));
   const drafts = new Map<string, Draft>();
   const participants: TrackedParticipant[] = [];
+  const untracked: TrackedParticipant[] = [];
 
   const addUse = (point: LatLng, radiusM: number, role: 'originOf' | 'destOf', participantId: string, at: number) => {
     const center = { lat: round5(point.lat), lng: round5(point.lng) };
@@ -121,13 +126,19 @@ export function planRegions(input: PlanInput): RegionPlan {
     const start = fromHome ? homePoint : origin;
     const near = start != null && dest != null && isNearTrip(start, dest);
     const arrivedAt = p.arrivedAt ?? null;
-    participants.push({ participantId: p.participantId, appointmentAt: p.appointmentAt, departAt: p.departAt, fromHome, near, departedAt: p.departedAt ?? null, arrivedAt });
+    const tracked: TrackedParticipant = { participantId: p.participantId, appointmentAt: p.appointmentAt, departAt: p.departAt, fromHome, near, departedAt: p.departedAt ?? null, arrivedAt };
+    // 목적지 좌표 없음 — 그 약속은 감지하지 않음, 출발지도 감시하지 않음 (7.13.7 따름)
+    if (!dest) {
+      untracked.push(tracked);
+      continue;
+    }
+    participants.push(tracked);
 
     const span = detectionWindow(p);
     if (arrivedAt != null || input.now < span.start - ahead || input.now > span.end) continue;
-    // 집 아닌 출발지 — 반경 칸이 없어 모르는 곳 기본값. 출발 뒤에도 도착 전까지 둠 (도착 전 귀가 = 출발 취소, D79)
+    // 집 아닌 출발지 — 반경 칸이 없어 모르는 곳 기본값. 출발 뒤에도 도착 전까지 둠 (도착 전 귀가 = 출발 취소, 7.13.7 따름)
     if (!fromHome && origin) addUse(origin, UNKNOWN_RADIUS_M, 'originOf', p.participantId, p.departAt);
-    if (dest && !near) addUse(dest, radiusOr(p.dest?.radiusM, UNKNOWN_RADIUS_M), 'destOf', p.participantId, p.appointmentAt);
+    if (!near) addUse(dest, radiusOr(p.dest?.radiusM, UNKNOWN_RADIUS_M), 'destOf', p.participantId, p.appointmentAt);
   }
 
   const others = [...drafts.values()]
@@ -136,7 +147,7 @@ export function planRegions(input: PlanInput): RegionPlan {
   const home: MonitoredRegion[] = homePoint
     ? [{ id: HOME_REGION_ID, lat: round5(homePoint.lat), lng: round5(homePoint.lng), radiusM: homeRadius, home: true, originOf: [], destOf: [] }]
     : [];
-  return { regions: [...home, ...others].slice(0, MAX_REGIONS), participants };
+  return { regions: [...home, ...others].slice(0, MAX_REGIONS), participants, untracked };
 }
 
 export type RegionDiff = { add: MonitoredRegion[]; remove: string[] };

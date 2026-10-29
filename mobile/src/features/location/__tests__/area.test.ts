@@ -53,24 +53,27 @@ describe('대표 좌표 판정 (isAreaPlace, D68)', () => {
   });
 });
 
-describe('기본 반경 (defaultRadiusFor, D77 기본안 A)', () => {
+describe('기본 반경 (defaultRadiusFor, L6 안건후보: 지오펜스 반경 기본안 A)', () => {
   it('건물 · 가게 150, 역 · 공원 · 대형 시설 · 캠퍼스 300, 분류 없음 200', () => {
-    expect(defaultRadiusFor('음식점 > 카페')).toBe(150);
-    expect(defaultRadiusFor('교통,수송 > 지하철,전철 > 수도권2호선')).toBe(300);
-    expect(defaultRadiusFor('여행 > 공원')).toBe(300);
-    expect(defaultRadiusFor('쇼핑 > 백화점')).toBe(300);
-    expect(defaultRadiusFor(UNIV)).toBe(300);
-    expect(defaultRadiusFor(null)).toBe(200);
-    expect(defaultRadiusFor('')).toBe(200);
+    expect(defaultRadiusFor('음식점 > 카페', '카페 온')).toBe(150);
+    expect(defaultRadiusFor('교통,수송 > 지하철,전철 > 수도권2호선', '건대입구역 2호선')).toBe(300);
+    expect(defaultRadiusFor('여행 > 공원', '서울숲')).toBe(300);
+    expect(defaultRadiusFor('쇼핑 > 백화점', '롯데백화점 본점')).toBe(300);
+    expect(defaultRadiusFor(UNIV, '세종대학교')).toBe(300);
+    expect(defaultRadiusFor(null, '동네 치과')).toBe(200);
+    expect(defaultRadiusFor('', '동네 치과')).toBe(200);
   });
 
-  it('이름을 주면 캠퍼스 안 건물은 150', () => {
-    expect(defaultRadiusFor(UNIV, '세종대학교')).toBe(300);
+  it('이름은 꼭 받음 — 분류가 대학교여도 캠퍼스 안 건물은 150', () => {
     expect(defaultRadiusFor(UNIV, '세종대학교 광개토관')).toBe(150);
+    expect(defaultRadiusFor(UNIV, '서울대학교 관악캠퍼스')).toBe(300);
+    // 이름 없이 부르면 타입 오류, 억지로 불러도 조용히 캠퍼스 300을 주지 않음
+    // @ts-expect-error 이름 빠짐
+    expect(() => defaultRadiusFor(UNIV)).toThrow();
   });
 });
 
-describe('위치 도착 지각 보류 구간 (D76 기본안 A)', () => {
+describe('위치 도착 지각 보류 구간 (L6 안건후보: 위치 도착 지각 경계 폭 기본안 A)', () => {
   it('−2 ~ +11분 = 원탭 지각 기준 +5분 + 최대 감지 지연 6분', () => {
     expect([LOCATION_HOLD_BEFORE_MINUTES, LOCATION_HOLD_AFTER_MINUTES]).toEqual([2, 11]);
     expect(LOCATION_HOLD_AFTER_MINUTES).toBe(LATE_AFTER_MINUTES + DETECTION_DELAY_MAX_MINUTES);
