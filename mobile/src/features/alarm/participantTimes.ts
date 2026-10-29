@@ -14,15 +14,15 @@
 //     더 늦은 위치 출발로 바뀐 앞 출발의 줄도 남김 — 7.13.7 "앞의 출발은 '확인할 기록'으로 남겨 대화에서 확인" (features/location listEarlierDepartures가 읽음)
 //   · 준비 실측 — 출발 시각이 들어오면 daily_records.actual_prepare_minutes = 출발 − max(실제 기상 wake_confirmed_at, 예정 기상 = 그날 기상 알람 시각) (#41, B). 출처와 상관없이
 //     하루에 한 번만(이미 값이 있으면 덮지 않음 — 같은 날 약속이 여러 개여도 먼저 들어온 출발이 준비 실측). 단 같은 참여 조건의 출발이 바뀌어(응답 · 더 늦은 위치 출발) 그 출발로 셈한 값이면 새 출발로 다시 셈
-//   · 실제 이동시간 — 출발 · 도착이 둘 다 있으면(출처 무관) actual_travel_minutes = 도착 − 출발(분). 쓰기만 하고 이동 보정 학습(7.3.1)은 L1 몫
+//   · 실제 이동시간 — 출발 · 도착이 둘 다 있으면 actual_travel_minutes = 도착 − 출발(분). 둘 다 위치로 잰 값이면 반경 보정 4분을 더함(7.13.7 반경 보정 · TRAVEL_CORRECTION_MINUTES), 한쪽이라도 응답이면 그대로. 쓰기만 하고 이동 보정 학습(7.3.1)은 L1 몫
 //     출발 · 도착이 바뀌면 그 값으로 셈한 이동시간을 같이 비우고 새 값으로 다시 셈 (clearLocationTime과 같은 규칙)
 //     출발지(비면 집) · 목적지 좌표가 없거나 500m 안이면 안 씀 — D68 "500m 안이면 이동 측정을 끄고 기본값" (features/location/geo isNearTrip과 같은 규칙)
 //     출발이 출발 예정 60분 전보다 이르면 안 씀 — 근거 없음, 작성자 판단 (7.13.7 감시 창 W_geo를 표본 범위로 씀. 집 이탈은 오늘 첫 약속에 시간 제한 없이 붙어 출발 · 도착이 몇 시간 떨어질 수 있음)
 //   · 위치 값 지우기(clearLocationTime) — 사용자 정정 [아니에요](D61)만 씀. 출처가 LOCATION일 때만. 지운 뒤는 다음 자동 감지를 기다림
 //     (원탭은 자동 값이 없을 때만 대신 쓰는 길 — 원탭 알림 건너뛰기는 PR 6)
-//   · 같은 입력으로 다시 불려도 같은 결과 (onEventsUploaded 훅 · 위치 보관함이 던지면 다시 넘어오므로)
+//   · 같은 입력으로 다시 불려도 같은 결과 (onEventsUploaded 훅 · 위치 보관함이 던지면 다시 넘어오므로). 쓰는 순서는 시각 → 준비 실측 · 이동시간 → 위치 기록 (recordParticipantTimes 끝)
 // 판정은 순수 함수(시험: __tests__/participantTimes.test.ts), 아래 recordParticipantTimes · clearLocationTime이 DB를 읽고 씀
-import { DETECTION_DELAY_MAX_MINUTES } from '@/features/location/constants';
+import { DETECTION_DELAY_MAX_MINUTES, TRAVEL_CORRECTION_MINUTES } from '@/features/location/constants';
 import { isNearTrip, toLatLng, type LatLng } from '@/features/location/geo';
 import { detectionWindow, plannedDepartAt } from '@/features/location/regions';
 import { dbTimeMs } from '@/lib/dbTime';
@@ -93,9 +93,12 @@ export function mayWritePrepare(existing: number | null, computedFromPreviousDep
 
 // 실제 이동시간(분) — 못 쓰면 null: 좌표 없음 · 500m 안(가까운 약속) · 출발이 감시 창(출발 예정 60분 전)보다 이름 · 도착이 출발보다 빠름
 //   departAtMs = 출발 예정 (출발 알람 시각, 없으면 약속 − 여유 − 이동 — features/location/regions와 같은 정의)
+//   반경 보정 — 출발 · 도착이 둘 다 위치(LOCATION)로 잰 값이면 도착 − 출발에 4분을 더함 (7장 7.13.7 반경 보정). 한쪽이라도 응답(원탭 · 직접 입력)이면 사용자가 말한 시각이라 더하지 않음
 export function travelMinutesOf(t: {
   departedAtMs: number;
   arrivedAtMs: number;
+  departedSource: Enums<'event_input_source'>;
+  arrivedSource: Enums<'event_input_source'>;
   origin: LatLng | null;
   dest: LatLng | null;
   departAtMs: number;
@@ -105,7 +108,8 @@ export function travelMinutesOf(t: {
   // 근거 없음 — 작성자 판단 (7.13.7 감시 창 W_geo를 표본 범위로 씀): 창이 열리기 전 출발(오전에 집을 나가 저녁 약속에 붙은 이탈 등)은 이동시간이 아님
   if (t.departedAtMs < detectionWindow({ departAt: t.departAtMs, appointmentAt: t.appointmentAtMs }).start) return null;
   const minutes = Math.round((t.arrivedAtMs - t.departedAtMs) / 60_000);
-  return minutes > 0 ? minutes : null;
+  if (minutes <= 0) return null; // 보정은 어긋난 기록(도착이 출발보다 빠름)을 살리지 않음
+  return t.departedSource === 'LOCATION' && t.arrivedSource === 'LOCATION' ? minutes + TRAVEL_CORRECTION_MINUTES : minutes;
 }
 
 // 위치 기록(alarm_events)의 번호 — 같은 참여 조건 · 종류 · 시각이면 같은 번호 (다시 불려도 한 줄, 지울 때도 이 번호로 찾음)
@@ -246,8 +250,16 @@ async function loadHome(userId: string): Promise<LatLng | null> {
 }
 
 // 실제 이동시간을 씀. 쓴 값(분)을 돌려주고, 못 쓰거나 이미 같은 값이면 null. 출발 · 도착이 읽은 값 그대로일 때만
-//   currentMinutes = 지금 들어 있는 값 (이번에 출발 · 도착을 바꾸며 비웠으면 null)
-async function recordTravelMinutes(userId: string, row: ParticipantRow, departedAtMs: number, arrivedAtMs: number, currentMinutes: number | null): Promise<number | null> {
+//   currentMinutes = 지금 들어 있는 값 (이번에 출발 · 도착을 바꾸며 비웠으면 null), 출처 = 지금 출발 · 도착의 출처 (반경 보정을 더할지 가름)
+async function recordTravelMinutes(
+  userId: string,
+  row: ParticipantRow,
+  departed: { atMs: number; source: Enums<'event_input_source'> },
+  arrived: { atMs: number; source: Enums<'event_input_source'> },
+  currentMinutes: number | null,
+): Promise<number | null> {
+  const departedAtMs = departed.atMs;
+  const arrivedAtMs = arrived.atMs;
   const appointment = row.appointments;
   if (!appointment?.appointment_at) return null;
   const dest = toLatLng({ lat: appointment.dest_lat, lng: appointment.dest_lng });
@@ -258,7 +270,7 @@ async function recordTravelMinutes(userId: string, row: ParticipantRow, departed
   const departAtMs = departureAlarm
     ? dbTimeMs(departureAlarm.scheduled_at)
     : plannedDepartAt({ appointmentAt: appointmentAtMs, travelMinutes: row.est_travel_minutes, bufferMinutes: row.buffer_minutes });
-  const minutes = travelMinutesOf({ departedAtMs, arrivedAtMs, origin, dest, departAtMs, appointmentAtMs });
+  const minutes = travelMinutesOf({ departedAtMs, arrivedAtMs, departedSource: departed.source, arrivedSource: arrived.source, origin, dest, departAtMs, appointmentAtMs });
   if (minutes == null || minutes === currentMinutes) return null;
   const { data, error } = await supabase
     .from('appointment_participants')
@@ -291,6 +303,7 @@ export async function recordParticipantTimes(input: RecordTimesInput): Promise<R
   const departedSource = storedSource(row.departed_at, row.departed_source);
   const storedDepartedMs = row.departed_at == null ? null : dbTimeMs(row.departed_at);
   let finalDepartedMs = storedDepartedMs;
+  let finalDepartedSource = departedSource; // 지금 출발의 출처 (이번에 썼으면 받은 출처)
   let replacedDepartedMs: number | null = null;
   let travelCleared = false; // 이번에 출발 · 도착을 바꾸며 그 값으로 셈한 이동시간을 같이 비움
   // 바꿀 때(override)는 그 값으로 셈한 이동시간도 같은 줄에서 비움 — clearLocationTime과 같은 규칙, 아래에서 새 값으로 다시 셈
@@ -312,8 +325,10 @@ export async function recordParticipantTimes(input: RecordTimesInput): Promise<R
         lost = true;
         decision = 'keep';
         finalDepartedMs = null;
+        finalDepartedSource = null;
       } else {
         finalDepartedMs = departedMs;
+        finalDepartedSource = input.source;
         if (decision === 'override') {
           replacedDepartedMs = storedDepartedMs;
           travelCleared = true;
@@ -329,6 +344,7 @@ export async function recordParticipantTimes(input: RecordTimesInput): Promise<R
   const arrivedSource = storedSource(row.arrived_at, row.arrived_source);
   const storedArrivedMs = row.arrived_at == null ? null : dbTimeMs(row.arrived_at);
   let finalArrivedMs = storedArrivedMs;
+  let finalArrivedSource = arrivedSource;
   if (arrivedMs != null) {
     let decision = decideWrite('ARRIVE', { source: input.source, atMs: arrivedMs }, { atMs: storedArrivedMs, byResponse: byResponse(arrivedSource) });
     let lost = false; // 출발과 같음 — 쓰려 했지만 그 사이 다른 곳이 바꿔서 못 씀
@@ -347,8 +363,10 @@ export async function recordParticipantTimes(input: RecordTimesInput): Promise<R
         lost = true;
         decision = 'keep';
         finalArrivedMs = null;
+        finalArrivedSource = null;
       } else {
         finalArrivedMs = arrivedMs;
+        finalArrivedSource = input.source;
         if (decision === 'override') travelCleared = true;
       }
     }
@@ -356,11 +374,21 @@ export async function recordParticipantTimes(input: RecordTimesInput): Promise<R
     if (isLocation && !lost && (decision !== 'keep' || (arrivedSource === 'LOCATION' && storedArrivedMs === arrivedMs))) geo.push({ kind: 'ARRIVE', atMs: arrivedMs });
   }
 
-  if (geo.length) await recordGeoEvents(userId, row, geo);
+  // 순서 — 시각(위 쓰기) → 준비 실측 · 이동시간 다시 셈 → 위치 기록(alarm_events) 맨 나중
+  //   까닭: 귀가 뒤 재출발(override)은 다시 불렀을 때 저장값 == 새 출발이라 keep이 되어 앞 출발(replacedDepartedMs)을 더는 모름.
+  //   위치 기록을 먼저 하다 끊기면 준비 실측이 앞 출발 값으로 남음. 위치 기록은 번호(client_event_id)가 같아 다시 불러도 중복이 안 되므로 마지막에 두면,
+  //   끊겨도 다시 불렀을 때 위치 기록만 다시 시도됨 (위 geo.push 조건)
   if (departedMs != null && finalDepartedMs != null) result.prepareMinutes = await recordPrepareMinutes(userId, finalDepartedMs, replacedDepartedMs);
-  if (finalDepartedMs != null && finalArrivedMs != null) {
-    result.travelMinutes = await recordTravelMinutes(userId, row, finalDepartedMs, finalArrivedMs, travelCleared ? null : row.actual_travel_minutes);
+  if (finalDepartedMs != null && finalArrivedMs != null && finalDepartedSource != null && finalArrivedSource != null) {
+    result.travelMinutes = await recordTravelMinutes(
+      userId,
+      row,
+      { atMs: finalDepartedMs, source: finalDepartedSource },
+      { atMs: finalArrivedMs, source: finalArrivedSource },
+      travelCleared ? null : row.actual_travel_minutes,
+    );
   }
+  if (geo.length) await recordGeoEvents(userId, row, geo);
   return result;
 }
 
@@ -390,6 +418,8 @@ export async function hasResponseTime(participantId: string, kind: TimeKind): Pr
 // 위치 값 지우기 ([아니에요], D61) — 그 출발로 셈한 준비 실측 · 그 값의 위치 기록(alarm_events) 한 줄을 먼저 지우고, 시각 · 출처(도착이면 지각 판정도) · 실제 이동시간을 맨 나중에 비움
 //   앞 출발의 위치 기록 줄('확인할 기록')은 그대로 — 지운 뒤 다음 자동 감지를 기다림
 //   순서 까닭: 중간에 끊겨도 시각이 남아 다시 부를 수 있게 (시각을 먼저 비우면 다시 불러도 위치 값이 아니라서 학습에 들어가는 준비 실측이 남음)
+//   위치 기록 줄을 지운 뒤 시각 비우기가 조건부(읽은 값 그대로 · 출처 LOCATION)라서, 그 사이 응답이 덮으면 시각은 남고 위치 기록 줄만 사라질 수 있음
+//   (창은 밀리초 수준, 줄이 남고 시각이 사라지는 것보다 끊김 뒤 다시 부를 수 있는 쪽이 낫다고 보고 이 순서)
 //   시각은 읽은 값 그대로 · 출처 LOCATION일 때만 비움 — 그 사이 원탭이 덮었으면 그대로 두고 false. 위치 기록 지우기는 RLS alarm_events_delete_own(본인 기록)
 export async function clearLocationTime(found: LocationTime): Promise<boolean> {
   const userId = await requireUserId();

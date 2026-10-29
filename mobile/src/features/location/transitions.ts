@@ -13,7 +13,8 @@
 //       → participantTimes가 더 늦은 위치 출발로 바꾸고, 앞 출발의 위치 기록 줄은 '확인할 기록'으로 남음
 //       7.13.7 "출발이 여러 번 잡힘 — 약속 전 마지막 출발을 진짜 출발로, 앞의 출발은 '확인할 기록'" + 지형님 10/29 흐름 확인(#240). 귀가 자체는 알림 · 기록 없음
 //       약속 시작 뒤 귀가는 다녀온 것으로 보고 그대로 — 그 뒤 외출이 지난 약속의 출발을 바꾸지 않고 다음 약속에 붙게
-//   · [아니에요]로 지운 판정(forgetDetection)도 voided — 다음 이탈 · 진입을 다시 받음. 원탭은 자동 값이 없을 때만 대신 쓰는 길 (원탭 알림 건너뛰기는 PR 6)
+//   · [아니에요]로 지운 판정(forgetDetection)도 voided — 다음 이탈 · 진입을 다시 받음. 5초 안에 되돌리면(undoReject) restoreDetection이 voided에서 뺌
+//     (안 빼면 되돌린 값이 없는 것으로 보여, 약속 전 한 번 더 나갈 때 되돌린 출발을 더 늦은 값으로 덮음). 원탭은 자동 값이 없을 때만 대신 쓰는 길 (원탭 알림 건너뛰기는 PR 6)
 //   · 판정 시각 = 신호 시각 (받는 쪽이 신호를 받은 때 — OS 전달 지연 포함, 보통 2분 · 최대 6분). 출발 = 이탈 시각, 도착 = 진입 시각 (7.13.7)
 //   · 신호 거르기 — 영역별로 마지막으로 본 신호보다 이른 신호 · 같은 신호 되풀이는 버림. 같은 시각이면 이탈 → 진입 순
 //       이미 안인데 또 진입은 상태만(새 정보 없음), 이미 밖인데 또 이탈은 그사이 진입을 놓친 것 → 새 이탈로 받음
@@ -137,6 +138,15 @@ export function forgetDetection(state: GeoState, detection: VoidedDetection): Ge
     next.arrived = next.arrived.filter(other);
   }
   addVoided(next, detection);
+  return next;
+}
+
+// [아니에요]를 5초 안에 되돌렸을 때(undoReject) — 그 판정을 voided에서 뺌. DB 값이 돌아왔으니 다시 "있는 것"으로 셈 (PR6 되돌리기 뒤 부름)
+//   voided만 고침: 돌아온 값은 DB를 다시 읽은 계획(planRegions)에 들어 있어 takenOf · departuresOf가 셈 — 계획을 새로 읽은 뒤 부르고, 안 읽었으면 다음 읽기까지 이탈이 새 출발로 붙을 수 있음
+//   없는 판정이거나 두 번 불러도 같은 결과 (voided에 없으면 그대로)
+export function restoreDetection(state: GeoState, detection: VoidedDetection): GeoState {
+  const next = parseGeoState(state);
+  next.voided = next.voided.filter((v) => !(v.kind === detection.kind && v.participantId === detection.participantId && v.at === detection.at));
   return next;
 }
 

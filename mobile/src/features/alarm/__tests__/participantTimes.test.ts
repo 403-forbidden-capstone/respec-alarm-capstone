@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, jest } from '@jest/globals';
 
-import { DETECTION_DELAY_MAX_MINUTES } from '@/features/location/constants';
+import { DETECTION_DELAY_MAX_MINUTES, TRAVEL_CORRECTION_MINUTES } from '@/features/location/constants';
 
 import { filterArgs, type FakeCall, type FakeResult } from '../testkit/fakeSupabase';
 import {
@@ -153,10 +153,25 @@ describe('준비 실측 (prepareMinutesOf, #41 · 7장 B) — 출발 − max(실
 });
 
 describe('실제 이동시간 (travelMinutesOf) — 도착 − 출발, 7.3.1 학습은 L1', () => {
-  const base = { departedAtMs: at('08:50'), arrivedAtMs: at('09:42'), origin: HOME, dest: SEJONG, departAtMs: at('08:50'), appointmentAtMs: APPOINTMENT };
+  const base: Parameters<typeof travelMinutesOf>[0] = { departedAtMs: at('08:50'), arrivedAtMs: at('09:42'), departedSource: 'BUTTON', arrivedSource: 'BUTTON', origin: HOME, dest: SEJONG, departAtMs: at('08:50'), appointmentAtMs: APPOINTMENT };
 
   it('출발지 ~ 목적지가 500m를 넘으면 분 단위로', () => {
     expect(travelMinutesOf(base)).toBe(52);
+  });
+
+  it('반경 보정 — 출발 · 도착이 둘 다 위치(LOCATION)로 잰 값일 때만 4분을 더함, 한쪽이라도 응답(원탭 · 직접 입력)이면 그대로 (7장 7.13.7 반경 보정)', () => {
+    expect(TRAVEL_CORRECTION_MINUTES).toBe(4);
+    expect(travelMinutesOf({ ...base, departedSource: 'LOCATION', arrivedSource: 'LOCATION' })).toBe(56);
+    expect(travelMinutesOf({ ...base, departedSource: 'LOCATION', arrivedSource: 'BUTTON' })).toBe(52);
+    expect(travelMinutesOf({ ...base, departedSource: 'MANUAL', arrivedSource: 'LOCATION' })).toBe(52);
+    expect(travelMinutesOf({ ...base, departedSource: 'BUTTON', arrivedSource: 'MANUAL' })).toBe(52);
+  });
+
+  it('보정이 있어도 500m 안은 null, 도착이 출발보다 빠르거나 같으면 null (보정으로 살리지 않음)', () => {
+    const location: typeof base = { ...base, departedSource: 'LOCATION', arrivedSource: 'LOCATION' };
+    expect(travelMinutesOf({ ...location, dest: NEAR_HOME })).toBeNull();
+    expect(travelMinutesOf({ ...location, arrivedAtMs: at('08:50') })).toBeNull();
+    expect(travelMinutesOf({ ...location, arrivedAtMs: at('08:48') })).toBeNull();
   });
 
   it('500m 안(가까운 약속) · 좌표가 없으면 안 셈 (D68 · L6 안건후보: 가까운 약속 감지 기본안)', () => {
@@ -443,15 +458,15 @@ describe('DB에 쓰기 (recordParticipantTimes)', () => {
     it('출발 · 도착이 다 있고 출발지(비면 집) ~ 목적지 500m 밖이면 도착 − 출발 — 출발 · 도착이 읽은 값 그대로일 때만', async () => {
       setup({ participant: participantRow({ dest: SEJONG, departed_at: iso('08:50'), departed_source: 'LOCATION' }) });
       const result = await run({ arrivedAt: min(-8), source: 'LOCATION' });
-      expect(result.travelMinutes).toBe(62);
+      expect(result.travelMinutes).toBe(66); // 도착 9:52 − 출발 8:50 = 62분 + 반경 보정 4분 (둘 다 위치)
       const [write] = travelWrites();
-      expect(write.payload).toEqual({ actual_travel_minutes: 62 });
+      expect(write.payload).toEqual({ actual_travel_minutes: 66 });
       expect(filterArgs(write, 'eq', 'departed_at')).toEqual([iso('08:50')]);
       expect(filterArgs(write, 'eq', 'arrived_at')).toEqual([isoMs(min(-8))]);
       expect(only('profiles', 'select')).toHaveLength(1); // 출발지가 비어 집 좌표를 읽음
     });
 
-    it('출처와 상관없이 (원탭 도착 + 위치 출발), 출발지 좌표가 있으면 집을 안 읽음', async () => {
+    it('한쪽이라도 응답이면 반경 보정을 안 더함 (원탭 도착 + 위치 출발 = 도착 − 출발 그대로), 출발지 좌표가 있으면 집을 안 읽음', async () => {
       setup({ participant: participantRow({ dest: SEJONG, origin: HOME, departed_at: iso('08:50'), departed_source: 'LOCATION' }) });
       expect((await run({ arrivedAt: min(-5), source: 'BUTTON' })).travelMinutes).toBe(65);
       expect(only('profiles', 'select')).toEqual([]);
@@ -481,13 +496,13 @@ describe('DB에 쓰기 (recordParticipantTimes)', () => {
 
     it('출발 알람이 없으면 출발 예정 = 약속 − 여유 − 예상 이동 (10:00 − 10 − 50 = 9:00) → 8:00부터 셈', async () => {
       setup({ participant: participantRow({ dest: SEJONG, departed_at: iso('08:00'), departed_source: 'LOCATION' }) });
-      expect((await run({ arrivedAt: min(-8), source: 'LOCATION' })).travelMinutes).toBe(112);
+      expect((await run({ arrivedAt: min(-8), source: 'LOCATION' })).travelMinutes).toBe(116);
       setup({ participant: participantRow({ dest: SEJONG, departed_at: iso('07:59'), departed_source: 'LOCATION' }) });
       expect((await run({ arrivedAt: min(-8), source: 'LOCATION' })).travelMinutes).toBeNull();
     });
 
     it('이미 같은 값이면 다시 안 씀, 출발이 원탭으로 바뀌면 새 출발로 다시 씀', async () => {
-      setup({ participant: participantRow({ dest: SEJONG, departed_at: iso('08:50'), departed_source: 'LOCATION', arrived_at: isoMs(min(-8)), arrived_source: 'LOCATION', actual_travel_minutes: 62 }) });
+      setup({ participant: participantRow({ dest: SEJONG, departed_at: iso('08:50'), departed_source: 'LOCATION', arrived_at: isoMs(min(-8)), arrived_source: 'LOCATION', actual_travel_minutes: 66 }) });
       expect((await run({ arrivedAt: min(-8), source: 'LOCATION' })).travelMinutes).toBeNull();
       expect(travelWrites()).toEqual([]);
 
@@ -497,18 +512,58 @@ describe('DB에 쓰기 (recordParticipantTimes)', () => {
     });
 
     it('출발이 바뀌면 그 출발로 셈한 이동시간을 같은 줄에서 비우고 새 출발로 다시 셈 — 지금 값과 같아도 씀(비웠으므로)', async () => {
-      // 출발 알람 8:50 → 감시 창 7:50부터. 위치 출발 7:55 → 도착 9:52 = 117분, 더 늦은 위치 출발 8:30으로 바뀌면 82분
+      // 출발 알람 8:50 → 감시 창 7:50부터. 위치 출발 7:55 → 도착 9:52 = 117분 + 반경 보정 4분 = 121분, 더 늦은 위치 출발 8:30으로 바뀌면 82 + 4 = 86분
       const row = (travel: number) =>
         participantRow({ dest: SEJONG, alarms: ALARMS, departed_at: iso('07:55'), departed_source: 'LOCATION', arrived_at: isoMs(min(-8)), arrived_source: 'LOCATION', actual_travel_minutes: travel });
-      setup({ participant: row(117) });
-      expect((await run({ departedAt: at('08:30'), source: 'LOCATION' })).travelMinutes).toBe(82);
+      setup({ participant: row(121) });
+      expect((await run({ departedAt: at('08:30'), source: 'LOCATION' })).travelMinutes).toBe(86);
       expect(only('appointment_participants', 'update')[0].payload).toMatchObject({ departed_at: iso('08:30'), actual_travel_minutes: null });
-      expect(travelWrites()[0].payload).toEqual({ actual_travel_minutes: 82 });
+      expect(travelWrites()[0].payload).toEqual({ actual_travel_minutes: 86 });
       expect(filterArgs(travelWrites()[0], 'eq', 'departed_at')).toEqual([iso('08:30')]);
 
       mockCalls.length = 0;
-      setup({ participant: row(82) });
-      expect((await run({ departedAt: at('08:30'), source: 'LOCATION' })).travelMinutes).toBe(82);
+      setup({ participant: row(86) });
+      expect((await run({ departedAt: at('08:30'), source: 'LOCATION' })).travelMinutes).toBe(86);
+    });
+
+    describe('반경 보정 +4분 (7장 7.13.7 반경 보정) — 둘 다 위치일 때만', () => {
+      const located = { dest: SEJONG, departed_at: iso('08:50'), departed_source: 'LOCATION' as const };
+
+      it('출발 · 도착이 둘 다 위치면 +4, 한쪽이라도 응답이면 +0', async () => {
+        setup({ participant: participantRow(located) });
+        expect((await run({ arrivedAt: min(-8), source: 'LOCATION' })).travelMinutes).toBe(66);
+
+        setup({ participant: participantRow(located) });
+        expect((await run({ arrivedAt: min(-8), source: 'BUTTON' })).travelMinutes).toBe(62);
+
+        setup({ participant: participantRow({ dest: SEJONG, departed_at: iso('08:50'), departed_source: 'MANUAL' }) });
+        expect((await run({ arrivedAt: min(-8), source: 'LOCATION' })).travelMinutes).toBe(62);
+      });
+
+      it('500m 안이면 보정이 있어도 여전히 안 씀', async () => {
+        setup({ participant: participantRow({ ...located, dest: NEAR_HOME }) });
+        expect((await run({ arrivedAt: min(-8), source: 'LOCATION' })).travelMinutes).toBeNull();
+        expect(travelWrites()).toEqual([]);
+      });
+
+      it('출처 조합이 바뀌면 비우고 다시 셈 — 위치 도착을 원탭이 덮으면 +4가 빠짐 (같은 시각이어도)', async () => {
+        setup({ participant: participantRow({ ...located, arrived_at: isoMs(min(-8)), arrived_source: 'LOCATION', actual_travel_minutes: 66 }) });
+        const result = await run({ arrivedAt: min(-8), source: 'BUTTON' });
+        expect(result).toMatchObject({ arrived: 'override', travelMinutes: 62 });
+        expect(only('appointment_participants', 'update')[0].payload).toMatchObject({ arrived_source: 'BUTTON', actual_travel_minutes: null });
+        expect(travelWrites()[0].payload).toEqual({ actual_travel_minutes: 62 });
+      });
+
+      it('위치 값을 응답이 덮은 값으로 위치 도착이 다시 와도(keep) 보정을 안 더함', async () => {
+        setup({ participant: participantRow({ ...located, arrived_at: isoMs(min(-8)), arrived_source: 'BUTTON', actual_travel_minutes: 62 }) });
+        expect((await run({ arrivedAt: min(-9), source: 'LOCATION' })).travelMinutes).toBeNull();
+        expect(travelWrites()).toEqual([]);
+      });
+
+      it('앞서 보정 없이 쓴 둘 다 위치의 이동시간은 다시 불리면 보정 값으로 바뀜', async () => {
+        setup({ participant: participantRow({ ...located, arrived_at: isoMs(min(-8)), arrived_source: 'LOCATION', actual_travel_minutes: 62 }) });
+        expect((await run({ arrivedAt: min(-8), source: 'LOCATION' })).travelMinutes).toBe(66);
+      });
     });
 
     it('새 출발로는 셀 수 없으면(감시 창 전) 비운 채로 둠 — 앞 출발로 셈한 값을 남기지 않음', async () => {
@@ -662,12 +717,12 @@ describe('DB에 쓰기 (recordParticipantTimes)', () => {
     it('위치 값 두 번 — 처음 쓴 결과(시각 · 지각 · 기록 · 이동시간)가 두 번째에 그대로 남고 새로 쓰는 것 없음 (기록은 같은 번호라 한 줄)', async () => {
       setup({ participant: participantRow({ dest: SEJONG, alarms: ALARMS, departed_at: iso('08:50'), departed_source: 'LOCATION' }) });
       const first = await run({ arrivedAt: min(4), source: 'LOCATION' });
-      expect(first).toMatchObject({ arrived: 'new', travelMinutes: 74 });
+      expect(first).toMatchObject({ arrived: 'new', travelMinutes: 78 });
       const firstEvent = only('alarm_events', 'upsert')[0].payload;
 
       mockCalls.length = 0;
       setup({
-        participant: participantRow({ dest: SEJONG, alarms: ALARMS, departed_at: iso('08:50'), departed_source: 'LOCATION', arrived_at: isoMs(min(4)), arrived_source: 'LOCATION', actual_travel_minutes: 74 }),
+        participant: participantRow({ dest: SEJONG, alarms: ALARMS, departed_at: iso('08:50'), departed_source: 'LOCATION', arrived_at: isoMs(min(4)), arrived_source: 'LOCATION', actual_travel_minutes: 78 }),
       });
       const second = await run({ arrivedAt: min(4), source: 'LOCATION' });
       expect(second).toEqual({ departed: null, arrived: 'keep', prepareMinutes: null, travelMinutes: null });
@@ -680,6 +735,31 @@ describe('DB에 쓰기 (recordParticipantTimes)', () => {
       const result = await run({ departedAt: at('09:00'), source: 'BUTTON' });
       expect(result).toMatchObject({ departed: 'keep', prepareMinutes: 60 });
       expect(only('appointment_participants', 'update')).toEqual([]);
+    });
+
+    it('귀가 뒤 재출발(override) 직후 위치 기록이 던져도 준비 실측 · 이동시간은 새 출발 기준으로 이미 들어가 있고, 같은 입력으로 다시 부르면 위치 기록만 남음', async () => {
+      // 위치 출발 8:20 · 위치 도착 있음 · 준비 실측 20분 · 이동시간 있음 → 더 늦은 위치 출발 8:50으로 바뀜 (예정 기상 8:00 → 준비 50분, 8:50 → 9:52 = 62 + 4)
+      const departedRow = (patch: { departed_at: string; actual_travel_minutes: number | null }) =>
+        participantRow({ dest: SEJONG, alarms: ALARMS, departed_source: 'LOCATION', arrived_at: isoMs(min(-8)), arrived_source: 'LOCATION', ...patch });
+      setup({ participant: departedRow({ departed_at: iso('08:20'), actual_travel_minutes: 94 }), record: { record_id: 'r1', wake_confirmed_at: null, actual_prepare_minutes: 20 } });
+      mockRoutes['alarm_events:upsert'] = respond(() => ({ error: { code: '', message: 'event failed' } }));
+      await expect(run({ departedAt: at('08:50'), source: 'LOCATION' })).rejects.toMatchObject({ message: 'event failed' });
+
+      // 던지기 전에 시각 · 준비 실측 · 이동시간이 새 출발 기준으로 이미 쓰임 (위치 기록이 맨 나중)
+      const [stamp] = only('appointment_participants', 'update');
+      expect(stamp.payload).toEqual({ departed_at: iso('08:50'), departed_source: 'LOCATION', actual_travel_minutes: null });
+      expect(only('daily_records', 'update')[0].payload).toEqual({ actual_prepare_minutes: 50 });
+      expect(only('appointment_participants', 'update')[1].payload).toEqual({ actual_travel_minutes: 66 });
+      const order = mockCalls.filter((c) => c.op !== 'select').map((c) => `${c.table}:${c.op}`);
+      expect(order.at(-1)).toBe('alarm_events:upsert');
+
+      // 다시 부름 — DB는 이제 새 출발 · 새 준비 실측 · 새 이동시간. 위치 기록만 다시 시도되고 나머지는 안 바뀜
+      mockCalls.length = 0;
+      setup({ participant: departedRow({ departed_at: iso('08:50'), actual_travel_minutes: 66 }), record: { record_id: 'r1', wake_confirmed_at: null, actual_prepare_minutes: 50 } });
+      const again = await run({ departedAt: at('08:50'), source: 'LOCATION' });
+      expect(again).toEqual({ departed: 'keep', arrived: null, prepareMinutes: null, travelMinutes: null });
+      expect(mockCalls.filter((c) => c.op !== 'select').map((c) => `${c.table}:${c.op}`)).toEqual(['alarm_events:upsert']);
+      expect((only('alarm_events', 'upsert')[0].payload as { client_event_id: string }[]).map((r) => r.client_event_id)).toEqual([geoEventId('p-1', 'DEPART', at('08:50'))]);
     });
 
     it('받은 시각이 없거나 참여 조건이 없으면(지워짐) 아무것도 안 함', async () => {
