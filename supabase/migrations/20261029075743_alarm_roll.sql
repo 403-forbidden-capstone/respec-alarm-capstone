@@ -270,15 +270,64 @@ $$;
 -- ---------------------------------------------------------------------
 -- 8. 오늘 넘겨야 할 묶음 목록 — alarm-roll 배치가 5분마다 부름
 -- ---------------------------------------------------------------------
--- 돌려주는 줄: (user_id, series_id, kind, template_id) — 가장 급한 순(아래 due_at)으로 p_limit개
+-- 다음 회차까지 며칠 — 기준 회차 날짜(occurrence_on, 내 시간대) 다음 날부터 7일 안에서 규칙에 맞는 첫 날. 두 모양 밖(못 읽는 규칙)이면 null
+--   읽는 해석은 _shared/calc/recur.ts parseRecurrence와 같음 (RRULE: 접두사 · 소문자 · 순서 상관없음, 같은 키 두 번 · 모르는 키 · 모르는 요일이면 못 읽음)
+--   목록 거르기에만 씀 — 회차 날짜 · 시각을 정확히 세는 곳은 alarm-roll(recur.ts)
+
+create function private.roll_next_gap(p_rule text, p_on date)
+returns integer
+language sql
+stable
+set search_path = ''
+as $$
+  with parts as (
+    select x.p, upper(split_part(x.p, '=', 1)) as k, upper(split_part(x.p, '=', 2)) as v
+    from unnest(string_to_array(regexp_replace(btrim(coalesce(p_rule, '')), '^RRULE:', '', 'i'), ';')) as x(p)
+  ),
+  summary as (
+    select count(*) as n,
+           count(distinct k) as nk,
+           coalesce(bool_and(p ~ '^[^=]+=[^=]*$'), false) as shaped,
+           max(v) filter (where k = 'FREQ') as freq,
+           max(v) filter (where k = 'BYDAY') as byday
+    from parts
+  )
+  select case
+    when not shaped or n <> nk then null
+    when freq = 'DAILY' and n = 1 then 1
+    when freq = 'WEEKLY' and n = 2 and byday ~ '^(MO|TU|WE|TH|FR|SA|SU)(,(MO|TU|WE|TH|FR|SA|SU))*$' then (
+      select min(g) from generate_series(1, 7) as g
+      where left(to_char(p_on + g, 'DY'), 2) = any (string_to_array(byday, ','))
+    )
+  end
+  from summary
+$$;
+
+-- 루틴 반복 요일을 읽을 수 있는지 — 'MON,WED' · 'MON~FRI' 중 하나라도 읽히면 true (recur.ts parseRepeatDays와 같은 해석, 모르는 글자는 건너뜀)
+
+create function private.roll_has_days(p_days text)
+returns boolean
+language sql
+immutable
+set search_path = ''
+as $$
+  select coalesce(bool_or(t ~ '^(MON|TUE|WED|THU|FRI|SAT|SUN)$' or t ~ '^(MON|TUE|WED|THU|FRI|SAT|SUN)[~-](MON|TUE|WED|THU|FRI|SAT|SUN)$'), false)
+  from regexp_split_to_table(upper(coalesce(p_days, '')), '[,\s]+') as t
+$$;
+
+-- 돌려주는 줄: (user_id, series_id, kind, template_id) — 가장 급한 순(다음 회차 시각 due_at)으로 p_limit개
+--   후보만 거름: 넘길 회차가 정말 있는지(그 날짜를 건너뛰었는지 등)는 alarm-roll이 다시 봄
 --   APPOINTMENT  약속 묶음. series_id = 묶음 번호, template_id = 기준 회차(묶음에서 occurrence_on이 가장 늦은 약속)의 appointment_id
---                조건: 기준 회차에 recurrence_rule이 있고 개인 약속(group_id 없음 — 공동 약속 반복은 첫 회차만) · 기준 회차 약속 시각 < p_now + 14일(폰 맞추기 창과 같은 시각 기준)
+--                조건: 기준 회차에 읽을 수 있는 recurrence_rule(두 모양)이 있고 개인 약속(group_id 없음 — 공동 약속 반복은 첫 회차만)
+--                      · 다음 회차 시각(기준 회차 시각 + roll_next_gap일) < p_now + 14일(폰 맞추기 창과 같은 시각 기준) — 14일치가 이미 차 있는 묶음은 안 줌
 --                      · 재시도 대기 아님(roll_attempts에 next_try_at이 아직 안 온 줄이 없음)
+--                다음 회차 시각은 기준 회차 시각에 날수를 더한 값이라 일광절약 시간대에서는 한 시간쯤 어긋날 수 있음 — 경계의 묶음은 다음 실행이 채움 (한국은 해당 없음)
+--                못 읽는 규칙(두 모양 밖 — 예전에 받던 MONTHLY · INTERVAL 등)은 목록에서 뺌 (alarm-roll이 못 읽어 건너뛰는 묶음이 매번 앞자리를 차지하지 않게)
 --                L6 안건후보: 재시도 도래 묶음 포함 기본안 — 가장 늦은 회차가 이미 14일 뒤여도, 길찾기 실패로 미뤄 둔 날짜(next_try_at이 지남)가 있으면 그 묶음도 줌
 --                (가까운 회차만 실패하고 먼 회차는 만들어진 경우 그 빈 날짜가 영영 안 채워지는 일을 막음). 날짜가 어제 이전인 줄은 무시
---   STANDALONE   일정 없는 반복 알람. series_id = 묶음 번호, template_id = 기준 회차(가장 늦은 행)의 alarm_id. 조건: 기준 회차에 recurrence_rule · 시각 < p_now + 14일
+--   STANDALONE   일정 없는 반복 알람. series_id = 묶음 번호, template_id = 기준 회차(가장 늦은 행)의 alarm_id. 조건: 기준 회차에 읽을 수 있는 recurrence_rule · 다음 회차 시각 < p_now + 14일
 --                L6 안건후보: 꺼 둔 반복 알람도 회차 유지 기본안 — 꺼진 채로도 줌 (새 회차가 꺼진 상태를 이어받음, 켜는 순간 다음 회차가 이미 있음)
---   ROUTINE      루틴. series_id = template_id = routine_id. 조건: 켜 둔 루틴(is_active) · 반복 요일이 있음 · 켜진 단계 알람 중 시각이 p_now 전인 것이 있음
+--   ROUTINE      루틴. series_id = template_id = routine_id. 조건: 켜 둔 루틴(is_active) · 읽을 수 있는 반복 요일이 있음(roll_has_days) · 켜진 단계 알람 중 시각이 p_now 전인 것이 있음
 --                루틴은 회차 행을 따로 만들지 않고 같은 알람 행의 시각만 다음 발생으로 옮김
 -- p_now는 시험용(안 주면 지금)
 
@@ -296,13 +345,13 @@ set search_path = ''
 as $$
   with latest_appointment as (
     select distinct on (a.creator_id, a.series_id)
-           a.creator_id, a.series_id, a.appointment_id, a.appointment_at, a.recurrence_rule, a.group_id
+           a.creator_id, a.series_id, a.appointment_id, a.appointment_at, a.occurrence_on, a.recurrence_rule, a.group_id
     from public.appointments a
     order by a.creator_id, a.series_id, a.occurrence_on desc, a.appointment_at desc, a.appointment_id
   ),
   latest_standalone as (
     select distinct on (al.user_id, al.series_id)
-           al.user_id, al.series_id, al.alarm_id, al.scheduled_at, al.recurrence_rule
+           al.user_id, al.series_id, al.alarm_id, al.scheduled_at, al.occurrence_on, al.recurrence_rule
     from public.alarms al
     where al.series_id is not null   -- 일정 없는 알람만 series_id를 가짐
     order by al.user_id, al.series_id, al.occurrence_on desc, al.scheduled_at desc, al.alarm_id
@@ -321,13 +370,14 @@ as $$
            a.series_id,
            'APPOINTMENT'::text as kind,
            a.appointment_id as template_id,
-           a.appointment_at as due_at
+           a.appointment_at + g.gap * interval '1 day' as due_at
     from latest_appointment a
+    cross join lateral (select private.roll_next_gap(a.recurrence_rule, a.occurrence_on) as gap) g
     left join pending pd on pd.user_id = a.creator_id and pd.series_id = a.series_id
-    where a.recurrence_rule is not null
+    where g.gap is not null
       and a.group_id is null
       and not coalesce(pd.waiting, false)
-      and (a.appointment_at < p_now + interval '14 days' or coalesce(pd.retry_due, false))
+      and (a.appointment_at + g.gap * interval '1 day' < p_now + interval '14 days' or coalesce(pd.retry_due, false))
 
     union all
 
@@ -335,10 +385,11 @@ as $$
            s.series_id,
            'STANDALONE'::text,
            s.alarm_id,
-           s.scheduled_at
+           s.scheduled_at + g.gap * interval '1 day'
     from latest_standalone s
-    where s.recurrence_rule is not null
-      and s.scheduled_at < p_now + interval '14 days'
+    cross join lateral (select private.roll_next_gap(s.recurrence_rule, s.occurrence_on) as gap) g
+    where g.gap is not null
+      and s.scheduled_at + g.gap * interval '1 day' < p_now + interval '14 days'
 
     union all
 
@@ -350,7 +401,7 @@ as $$
     from public.routines r
     join public.alarms al on al.routine_id = r.routine_id
     where r.is_active
-      and nullif(btrim(r.repeat_days), '') is not null
+      and private.roll_has_days(r.repeat_days)
       and al.is_enabled
       and al.scheduled_at < p_now
     group by r.user_id, r.routine_id
@@ -368,6 +419,8 @@ $$;
 -- fill_series는 트리거 함수라 실행 권한이 없어도 트리거로는 돎
 
 revoke execute on function private.fill_series() from public, anon, authenticated;
+revoke execute on function private.roll_next_gap(text, date) from public, anon, authenticated;
+revoke execute on function private.roll_has_days(text) from public, anon, authenticated;
 revoke execute on function public.roll_insert_occurrence(jsonb, jsonb, jsonb, jsonb) from public, anon, authenticated;
 revoke execute on function public.roll_due_series(timestamptz, integer) from public, anon, authenticated;
 

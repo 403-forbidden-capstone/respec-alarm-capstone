@@ -1810,8 +1810,8 @@ await check('지난 회차가 그대로: 다음 회차(화 11-10)를 만든 뒤�
 
 // ---- ⑦ roll_due_series --------------------------------------------------
 
-await check('roll_due_series: 묶음마다 가장 늦은 회차 기준 · 14일 안(끝 시각은 포함 안 함) · 공동 약속 · 규칙 없는 묶음 · 재시도 대기는 빠지고 도래한 재시도는 포함 · 일정 없는 반복 알람 · 켜 둔 루틴 · 급한 순 · p_limit', async () => {
-  const N = '2026-11-05T12:00:00+09:00';   // 창은 11-19 12:00 앞까지
+await check('roll_due_series: 묶음마다 가장 늦은 회차 기준 · 다음 회차가 14일 안(끝 시각은 포함 안 함, 14일치가 차 있으면 빠짐) · 못 읽는 규칙 · 공동 약속 · 규칙 없는 묶음 · 재시도 대기는 빠지고 도래한 재시도는 포함 · 일정 없는 반복 알람 · 켜 둔 루틴 · 급한 순 · p_limit', async () => {
+  const N = '2026-11-05T12:00:00+09:00';   // 목요일. 창은 11-19(목) 12:00 앞까지
   await as(H1);
   const [{ group_id: G3 }] = await q(`insert into public.groups (group_name, owner_id) values ('목록 시험 그룹', $1) returning group_id`, [H1]);
   await svc();
@@ -1833,9 +1833,15 @@ await check('roll_due_series: 묶음마다 가장 늦은 회차 기준 · 14일 
 
   await apptSeries('ok', H1, ['2026-11-12T10:00:00+09:00', '2026-11-05T10:00:00+09:00']);   // 늦은 회차를 먼저 넣음 — 마지막으로 넣은 행이 아니라 날짜가 늦은 행이 기준
   await apptSeries('ok_other_user', H2, ['2026-11-12T10:00:00+09:00']);
-  await apptSeries('edge_in', H1, ['2026-11-19T11:59:00+09:00']);
-  await apptSeries('edge_out', H1, ['2026-11-19T12:00:00+09:00']);
+  await apptSeries('edge_in', H1, ['2026-11-12T11:59:00+09:00']);    // 다음 회차 11-19 11:59 — 창 안
+  await apptSeries('edge_out', H1, ['2026-11-12T12:00:00+09:00']);   // 다음 회차 11-19 12:00 — 창 끝은 포함 안 함
+  await apptSeries('filled', H1, ['2026-11-19T10:00:00+09:00']);     // 기준 회차는 창 안이지만 다음 회차(11-26)가 창 밖 — 14일치가 이미 참
   await apptSeries('far', H1, ['2026-11-26T10:00:00+09:00']);
+  await apptSeries('multi_in', H1, ['2026-11-16T10:00:00+09:00'], { rule: 'FREQ=WEEKLY;BYDAY=MO,TH' });      // 월 → 다음은 목 11-19 10:00
+  await apptSeries('multi_filled', H1, ['2026-11-19T10:00:00+09:00'], { rule: 'FREQ=WEEKLY;BYDAY=MO,TH' });  // 목 → 다음은 월 11-23
+  await apptSeries('lenient', H1, ['2026-11-12T10:00:00+09:00'], { rule: 'rrule:byday=th;freq=weekly' });   // recur.ts parseRecurrence처럼 접두사 · 소문자 · 순서 상관없이 읽음
+  await apptSeries('bad_monthly', H1, ['2026-11-01T10:00:00+09:00'], { rule: 'FREQ=MONTHLY;BYMONTHDAY=1' }); // 두 모양 밖 — 오래된 회차라도 빠짐
+  await apptSeries('bad_interval', H1, ['2026-11-12T10:00:00+09:00'], { rule: 'FREQ=WEEKLY;INTERVAL=2;BYDAY=TH' });
   await apptSeries('no_rule', H1, ['2026-11-12T10:00:00+09:00'], { rule: null });
   await apptSeries('group', H1, ['2026-11-12T10:00:00+09:00'], { group: G3 });
   const wait = await apptSeries('wait', H1, ['2026-11-12T10:30:00+09:00']);
@@ -1863,6 +1869,8 @@ await check('roll_due_series: 묶음마다 가장 늦은 회차 기준 · 14일 
   await standalone('sa_off', H1, ['2026-11-06T08:00:00+09:00'], 'FREQ=DAILY', false);   // 꺼 둔 반복 알람도 줌
   await standalone('sa_no_rule', H1, ['2026-11-06T09:00:00+09:00'], null);
   await standalone('sa_far', H1, ['2026-11-26T07:30:00+09:00'], 'FREQ=DAILY');
+  await standalone('sa_filled', H1, ['2026-11-19T07:30:00+09:00'], 'FREQ=DAILY');   // 다음 회차 11-20 — 창 밖
+  await standalone('sa_bad', H1, ['2026-11-06T07:30:00+09:00'], 'FREQ=MONTHLY');
 
   // 루틴: 켜 둔 루틴의 켜진 단계 알람 중 시각이 지난 것이 있을 때
   const routine = async (label, { active = true, days = 'MON~FRI', alarms }) => {
@@ -1877,11 +1885,13 @@ await check('roll_due_series: 묶음마다 가장 늦은 회차 기준 · 14일 
   await routine('r_future', { alarms: [['2026-11-06T08:00:00+09:00', true]] });
   await routine('r_alarm_off', { alarms: [['2026-11-05T08:00:00+09:00', false]] });
   await routine('r_no_days', { days: '', alarms: [['2026-11-05T08:00:00+09:00', true]] });
+  await routine('r_bad_days', { days: 'EVERYDAY', alarms: [['2026-11-05T08:00:00+09:00', true]] });   // 읽을 요일이 없음
+  await routine('r_range', { days: 'sat~mon', alarms: [['2026-11-05T07:00:00+09:00', true]] });       // 소문자 · 일요일을 넘는 범위도 읽음
 
   const rows = await q(`select user_id, series_id, kind, template_id from public.roll_due_series($1, 1000)`, [N]);
   const mine = rows.filter((r) => name.has(r.series_id));
   const got = mine.map((r) => name.get(r.series_id));
-  const expected = ['ok', 'ok_other_user', 'edge_in', 'retry', 'far_retry', 'sa_ok', 'sa_off', 'r_ok'];
+  const expected = ['ok', 'ok_other_user', 'edge_in', 'multi_in', 'lenient', 'retry', 'far_retry', 'sa_ok', 'sa_off', 'r_ok', 'r_range'];
   const kinds = Object.fromEntries(mine.map((r) => [name.get(r.series_id), r.kind]));
   const templates = mine.every((r) => r.template_id === latest.get(name.get(r.series_id)));
   const users = Object.fromEntries(mine.map((r) => [name.get(r.series_id), r.user_id]));
