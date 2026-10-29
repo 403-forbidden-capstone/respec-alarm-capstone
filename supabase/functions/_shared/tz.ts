@@ -47,6 +47,22 @@ export function formatKoTime(d: Date, timeZone: string): string {
   return `${period} ${hour12}:${String(p.minute).padStart(2, '0')}`;
 }
 
+// 음성 안내용 "오전 10시" · "오후 2시 30분" — 앱 lib/format의 spokenTime과 같은 모양 (voiceText에 씀)
+// 숫자 시각(10:00)은 읽는 쪽이 오전 · 오후를 틀리기 쉬워서 말로 풀어 넘김 (회사 제안 2: 서버 변환 뒤 오류 0건)
+export function formatKoSpokenTime(d: Date, timeZone: string): string {
+  const p = partsIn(d, timeZone);
+  const hour12 = p.hour % 12 === 0 ? 12 : p.hour % 12;
+  return `${p.hour < 12 ? '오전' : '오후'} ${hour12}시${p.minute ? ` ${p.minute}분` : ''}`;
+}
+
+// 시간 길이 글자 "30분" · "1시간" · "1시간 10분" (분은 정수)
+export function formatKoDuration(minutes: number): string {
+  const total = Math.max(0, Math.round(minutes));
+  const h = Math.floor(total / 60);
+  const m = total % 60;
+  return [h ? `${h}시간` : '', m || !h ? `${m}분` : ''].filter(Boolean).join(' ');
+}
+
 // 모르는 시간대 이름이면 기본값 (profiles.timezone은 DB 트리거가 검사하지만 방어)
 export function safeTimeZone(timeZone: string | null | undefined): string {
   const tz = timeZone || 'Asia/Seoul';

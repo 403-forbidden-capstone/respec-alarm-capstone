@@ -167,6 +167,8 @@ export async function persistAppointment(
         title: appointment.title,
         subtitle: subtitleFor(new Date(appointment.appointment_at), place.name, args.timeZone),
         departAt: plan.departure,
+        // 준비 · 출발 알림 문구와 기상 음성 문장 (앱 reconcile이 같은 값으로 같은 문구를 만듦 — 이동은 저장한 est_travel_minutes)
+        appointment: { appointmentAt: new Date(appointment.appointment_at), travelMinutes: plan.travelMinutes, timeZone: args.timeZone },
       }),
       canceled_alarm_ids: canceledAlarmIds({ before: inputs.existingAlarms, after }),
       warnings: plan.warnings,

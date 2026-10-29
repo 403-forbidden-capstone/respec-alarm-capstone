@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { formatKoTime, localDayRange, offsetMinutes, safeTimeZone } from './tz.ts';
+import { formatKoDuration, formatKoSpokenTime, formatKoTime, localDayRange, offsetMinutes, safeTimeZone } from './tz.ts';
 
 test('서울은 UTC보다 540분 앞섬', () => {
   assert.equal(offsetMinutes(new Date('2026-10-20T00:00:00Z'), 'Asia/Seoul'), 540);
@@ -12,6 +12,18 @@ test('시각 글자: 오전 10:00 · 오후 6:05 · 낮 12시 · 자정', () => 
   assert.equal(formatKoTime(new Date('2026-10-20T09:05:00Z'), 'Asia/Seoul'), '오후 6:05');
   assert.equal(formatKoTime(new Date('2026-10-20T03:00:00Z'), 'Asia/Seoul'), '오후 12:00');
   assert.equal(formatKoTime(new Date('2026-10-19T15:00:00Z'), 'Asia/Seoul'), '오전 12:00');
+});
+
+test('말로 읽는 시각: 오전 10시 · 오후 2시 30분 · 낮 12시 · 자정 (오전 · 오후를 글자로)', () => {
+  assert.equal(formatKoSpokenTime(new Date('2026-10-20T01:00:00Z'), 'Asia/Seoul'), '오전 10시');
+  assert.equal(formatKoSpokenTime(new Date('2026-10-19T23:40:00Z'), 'Asia/Seoul'), '오전 8시 40분');
+  assert.equal(formatKoSpokenTime(new Date('2026-10-20T05:30:00Z'), 'Asia/Seoul'), '오후 2시 30분');
+  assert.equal(formatKoSpokenTime(new Date('2026-10-20T03:00:00Z'), 'Asia/Seoul'), '오후 12시');
+  assert.equal(formatKoSpokenTime(new Date('2026-10-19T15:20:00Z'), 'Asia/Seoul'), '오전 12시 20분');
+});
+
+test('시간 길이: 30분 · 1시간 · 1시간 10분 · 0분', () => {
+  assert.deepEqual([0, 5, 30, 59, 60, 70, 120, 125.4, -5].map(formatKoDuration), ['0분', '5분', '30분', '59분', '1시간', '1시간 10분', '2시간', '2시간 5분', '0분']);
 });
 
 test('그날의 0시 ~ 다음 날 0시 (서울)', () => {

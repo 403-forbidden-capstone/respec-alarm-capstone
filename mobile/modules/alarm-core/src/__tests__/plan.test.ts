@@ -26,7 +26,7 @@ const basePackage: RingPackage = {
 describe('공통 케이스 (spec/cases.json) — 울림 계획', () => {
   for (const item of cases.plans) {
     it(item.name, () => {
-      const input = item.input as { type: AlarmType; intensity: AlarmIntensity; soundKey?: string; volumeAdjust?: number };
+      const input = item.input as { type: AlarmType; intensity: AlarmIntensity; soundKey?: string; volumeAdjust?: number; notice?: string };
       expect(buildRingPlan(input)).toEqual(item.plan);
     });
   }
@@ -100,6 +100,43 @@ describe('울림 계획 규칙', () => {
 
   it('소리 키가 비어 있으면 기본 소리', () => {
     expect(buildRingPlan({ type: 'WAKE', intensity: 'SOFT', soundKey: '  ' }).soundKey).toBe('default');
+  });
+});
+
+describe('알림 문구(notice)', () => {
+  it('notice가 있으면 heading이 되고, 알림음 여부 · 원탭 버튼은 종류대로 그대로', () => {
+    const plan = buildRingPlan({ type: 'DEPARTURE', intensity: 'NORMAL', notice: '지금 나가면 오전 9:50 도착 · 여유 10분' });
+    expect(plan.heading).toBe('지금 나가면 오전 9:50 도착 · 여유 10분');
+    expect([plan.sound, plan.oneTapLabel, plan.oneTapEventType]).toEqual([false, '출발했어요', 'ACKNOWLEDGED']);
+  });
+
+  it('기상 알람은 서버가 notice를 안 줘서 화면 줄이 그대로 (voiceText는 저장만)', () => {
+    expect(buildRingPlan({ type: 'WAKE', intensity: 'NORMAL' }).heading).toBe('일어날 시간이에요');
+  });
+
+  it('notice는 plan.heading에 담겨 네이티브로 가고, 꾸러미 칸으로는 따로 안 넘어감 (voiceText는 넘어감)', () => {
+    const pkg: RingPackage = { ...basePackage, type: 'PREPARE', notice: '오전 8:40 출발까지 30분', voiceText: '좋은 아침이에요.' };
+    const payload = JSON.parse(toNativePayload(pkg, buildRingPlan(pkg)));
+    expect(payload.plan.heading).toBe('오전 8:40 출발까지 30분');
+    expect(payload).not.toHaveProperty('notice');
+    expect(payload.voiceText).toBe('좋은 아침이에요.');
+  });
+
+  it('앱 쪽에서만 쓰는 칸(맞추기용 묶음 키 groupKey)이 꾸러미에 붙어 있어도 네이티브 글자에는 안 들어감', () => {
+    const pkg = { ...basePackage, groupKey: 'participant-1' } as RingPackage;
+    const payload = JSON.parse(toNativePayload(pkg, buildRingPlan(pkg)));
+    expect(payload).not.toHaveProperty('groupKey');
+    expect(JSON.stringify(payload)).not.toContain('participant-1');
+  });
+});
+
+describe('알림 문구(notice) — 글자가 아닌 값', () => {
+  it('notice가 글자가 아니거나 비어 있으면 던지지 않고 종류별 기본 줄 (알람은 걸려야 함)', () => {
+    for (const notice of [5, null, {}, ['a'], true, '', '   ']) {
+      for (const [type, heading] of [['WAKE', '일어날 시간이에요'], ['PREPARE', '준비할 시간이에요'], ['DEPARTURE', '출발할 시간이에요']] as const) {
+        expect(buildRingPlan({ type, intensity: 'NORMAL', notice: notice as unknown as string }).heading).toBe(heading);
+      }
+    }
   });
 });
 

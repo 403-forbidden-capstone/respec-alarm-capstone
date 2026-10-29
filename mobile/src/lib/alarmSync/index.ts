@@ -1,6 +1,6 @@
 // 폰 예약 맞추기 — 서버(alarms · alarm_events)와 폰(알람 코어 @capstone/alarm-core)을 이어 주는 곳 (전체작업계획 7절, docs/alarm-core.md "앞으로 더할 것")
 //   · applyCommit(result)  alarm-commit 응답을 폰에 반영 (canceled_alarm_ids → cancel, ring_packages → scheduleAll). 약속 알람 만들기 · 시각 바꾸기 뒤에
-//   · reconcile()          내 켜진 알람을 서버에서 읽어 폰 예약과 맞춤 (없으면 걸고, 다르면 다시 걸고, 서버에 없으면 지움). 로그인 직후 · 앱이 앞에 올 때
+//   · reconcile()          내 켜진 알람을 서버에서 읽어 폰 예약과 맞춤 (없으면 걸고, 다르면 다시 걸고, 서버에 없으면 지움. 출발 알람이 바뀌면 그 약속의 준비 · 기상 글자도 다시 걺). 로그인 직후 · 앱이 앞에 올 때
 //   · uploadEvents()       폰에 쌓인 울림 기록을 alarm_events로 올림. 앱이 앞에 올 때 · 기상 확인 화면에 들어올 때
 //   · cancelAllPhoneAlarms() / setSigningOut(value) / discardPendingEvents() / onEventsUploaded(handler)  로그아웃 정리 · 원탭 뒤처리 훅 (아래)
 // 실데이터 모드에서만 일함 (reconcile · uploadEvents는 가짜 모드면 아무것도 안 함). 이 함수들은 한 줄로 차례대로 돎 — 맞추는 도중에 저장 결과가 끼어들어 방금 건 알람을 지우지 않게
@@ -12,7 +12,7 @@ import { isMock } from '../mode';
 import { supabase } from '../supabase';
 import { currentUserId } from '../user';
 import { isPermanentInsertError, toEventRow, type EventRow } from './events';
-import { buildServerPackages, planReconcile, type ReconcilePlan, type SyncRow } from './reconcile';
+import { buildServerPackages, expandWithTextSiblings, planReconcile, type ReconcilePlan, type ServerPackage, type SyncRow } from './reconcile';
 
 export type SyncSummary = {
   scheduled: string[]; // 폰에 걸린 alarmId
@@ -102,7 +102,7 @@ async function fetchServerRows(userId: string, fromMs: number): Promise<SyncRow[
   const { data, error } = await supabase
     .from('alarms')
     .select(
-      'alarm_id, alarm_type, scheduled_at, intensity, sound_key, snooze_limit, is_enabled, participant_id, routine_id, appointment_participants(appointments(title, appointment_at, dest_name)), routines(title)',
+      'alarm_id, alarm_type, scheduled_at, intensity, sound_key, snooze_limit, is_enabled, participant_id, routine_id, appointment_participants(est_travel_minutes, appointments(title, appointment_at, dest_name)), routines(title)',
     )
     .eq('user_id', userId)
     .eq('is_enabled', true)
@@ -121,6 +121,7 @@ async function fetchServerRows(userId: string, fromMs: number): Promise<SyncRow[
     participant_id: row.participant_id,
     routine_id: row.routine_id,
     appointment: row.appointment_participants?.appointments ?? null,
+    travel_minutes: row.appointment_participants?.est_travel_minutes ?? null,
     routine_title: row.routines?.title ?? null,
   }));
 }
@@ -131,6 +132,17 @@ async function fetchEnabledIds(userId: string, ids: readonly string[]): Promise<
   const { data, error } = await supabase.from('alarms').select('alarm_id').eq('user_id', userId).eq('is_enabled', true).in('alarm_id', [...ids]);
   if (error) throw error;
   return new Set((data ?? []).map((row) => row.alarm_id));
+}
+
+// 이 알람들(폰에 있는 출발 알람)이 속한 약속의 키(participant_id) — 켜짐 여부는 안 봄 (꺼진 행도 약속은 알려 줌). 지워진 행이나 약속 없는 알람은 빠짐
+//   서버에 없어서 폰에서 지울 출발 알람의 약속을 알아야 같은 약속의 준비 · 기상 글자를 다시 걸 수 있음 (planReconcile). 읽기에 실패하면 던짐
+async function fetchParticipantIds(userId: string, ids: readonly string[]): Promise<Map<string, string>> {
+  const groups = new Map<string, string>();
+  if (!ids.length) return groups;
+  const { data, error } = await supabase.from('alarms').select('alarm_id, participant_id').eq('user_id', userId).in('alarm_id', [...ids]);
+  if (error) throw error;
+  for (const row of data ?? []) if (row.participant_id) groups.set(row.alarm_id, row.participant_id);
+  return groups;
 }
 
 export type ReconcileOptions = {
@@ -157,12 +169,24 @@ export function reconcile(options: ReconcileOptions = {}): Promise<SyncSummary> 
     const nowMs = options.nowMs ?? Date.now();
     const rows = await fetchServerRows(userId, nowMs);
     if (options.timeZone) lastTimeZone = options.timeZone;
-    let server = buildServerPackages(rows, options.timeZone ?? lastTimeZone ?? undefined);
-    let phone = await AlarmCore.list();
+    const allServer = buildServerPackages(rows, options.timeZone ?? lastTimeZone ?? undefined);
+    const allPhone = await AlarmCore.list();
     const only = options.alarmIds ? new Set(options.alarmIds) : null;
+    const truncated = rows.length >= SERVER_ROW_LIMIT;
+    // 준비 알림 글자 · 기상 음성 문장은 같은 약속의 출발 알람에서 나옴 — 폰에서 지울(서버에 없는) 앞으로 울릴 출발 알람의 약속을 알아 두면 같은 약속의 준비 · 기상을 다시 걸 수 있음 (planReconcile)
+    //   목록이 상한에서 잘렸으면 "서버에 없음"을 못 믿어 건너뜀 (그때는 서버에 없다고 확인된 것만 지우므로 아래)
+    const serverIds = new Set(allServer.map((p) => p.alarmId));
+    const goneDepartures = truncated
+      ? []
+      : allPhone.filter((a) => a.type === 'DEPARTURE' && a.atMillis > nowMs && !serverIds.has(a.id) && (only == null || only.has(a.id))).map((a) => a.id);
+    const departureGroups = await fetchParticipantIds(userId, goneDepartures);
+    let server: readonly ServerPackage[] = allServer;
+    let phone = allPhone;
     if (only) {
-      server = server.filter((p) => only.has(p.alarmId));
-      phone = phone.filter((a) => only.has(a.id));
+      // 지정한 출발 알람(걸리거나 · 바뀌거나 · 꺼진)의 약속은 준비 · 기상도 같이 맞춤 — 안 넣으면 위 필터에서 빠져 새 글자로 못 걸림
+      const withSiblings = expandWithTextSiblings(only, allServer, departureGroups);
+      server = allServer.filter((p) => withSiblings.has(p.alarmId));
+      phone = allPhone.filter((a) => withSiblings.has(a.id));
     }
     // 서버의 지금 이후 목록에 없는 폰 예약 중 서버에 켜진 행이 정말 없는 것(꺼졌거나 지워짐)은 첫 울림이 지났어도(미룸 · 다시 울림 대기 · 울리는 중) 지움 — 안 지우면 꺼진 알람이 미룸으로 다시 울림
     //   서버에 켜진 행이 남은 것은 울린 뒤 시각이 과거가 되어 목록에서 빠졌을 뿐이라 그대로 둠 (planReconcile)
@@ -178,9 +202,9 @@ export function reconcile(options: ReconcileOptions = {}): Promise<SyncSummary> 
       if (__DEV__) console.warn('[alarmSync] 서버에 켜진 알람 확인 실패 — 첫 울림이 지난 폰 예약은 이번엔 안 지움', e);
     }
     if (signingOut) return emptySummary(); // 읽는 사이 로그아웃이 시작됐으면 폰을 건드리지 않음
-    const plan = planReconcile({ server, phone, nowMs, forceCancel });
+    const plan = planReconcile({ server, phone, nowMs, forceCancel, departureGroups });
     // 서버 목록이 상한에서 잘렸으면 "서버에 없음"이 진짜 없다는 뜻이 아닐 수 있음 — 서버에 없다고 확인된 것(forceCancel)만 지움
-    if (rows.length >= SERVER_ROW_LIMIT) plan.cancel = plan.cancel.filter((id) => forceCancel?.has(id) === true);
+    if (truncated) plan.cancel = plan.cancel.filter((id) => forceCancel?.has(id) === true);
     return executePlan(plan);
   });
 }
