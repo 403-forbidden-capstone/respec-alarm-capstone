@@ -225,7 +225,7 @@ export type WakeCheck = {
   confirmed: { at: Date; how: 'self' | 'auto' } | null; // 이미 확정했으면
 };
 
-// 기상 후 아침 흐름 (이슈 #230) — 기상을 확인한 뒤 H08 한 줄과 홈 아침 카드가 읽는 "오늘 첫 일정"
+// 기상 후 아침 흐름 (이슈 #230) — H08(기상 확정 뒤) 한 줄과 홈 아침 카드(기상 알람 시각부터)가 읽는 "오늘 첫 일정"
 // 오늘 첫 일정 = 그날 켜진 기상 알람이 붙은 약속 중 가장 이른 것 (서버 calc/wake.ts hasEarlierWake와 같은 기준). 저녁(18시~)에는 홈처럼 내일
 // 준비 · 출발 · 도착 목표는 켜진 알람의 시각 — 꺼져 있거나 없으면 null
 export type MorningPlan = {
@@ -234,12 +234,13 @@ export type MorningPlan = {
   at: Date; // 약속 시각
   place: string;
   wakeAlarmId: string;
+  wakeAt: Date; // 기상 알람 시각 — 홈 아침 카드가 이 시각부터 보임
   prepareAt: Date | null;
   departAt: Date | null;
   arriveAt: Date | null; // 도착 목표
   travelMinutes: number; // 저장된 예상 이동
   travelSource: string; // 예상 이동의 출처 글자 (길찾기 · 대략적인 값 · 직접 입력 …)
-  wakeConfirmedAt: Date | null; // 이 기상 알람의 기상 확정 시각 — 없으면 아직 기상 확인 전
+  wakeConfirmedAt: Date | null; // 이 기상 알람의 기상 확정 시각 — 없으면 아직 확정 전 (카드는 확정을 기다리지 않음)
   departedAt: Date | null; // 출발 기록 (appointment_participants.departed_at) — 있으면 이미 나선 것
 };
 

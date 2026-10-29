@@ -55,6 +55,7 @@ export function toMorningPlan(source: MorningSource, wakeConfirmedAt: Date | nul
     at: source.at,
     place: source.place,
     wakeAlarmId: wake.id,
+    wakeAt: wake.at,
     prepareAt: when('PREPARE'),
     departAt: when('DEPARTURE'),
     arriveAt: when('ARRIVE'),
@@ -68,12 +69,15 @@ export function toMorningPlan(source: MorningSource, wakeConfirmedAt: Date | nul
 // 출발 한계 시각 — 출발 알람이 있으면 그 시각, 없으면(꺼 둠) 약속 − 이동
 export const departReference = (plan: Pick<MorningPlan, 'at' | 'departAt' | 'travelMinutes'>) => plan.departAt ?? addMinutes(plan.at, -plan.travelMinutes);
 
-// 홈 아침 카드가 보이는 때: 오늘(저녁이 아님) · 기상을 확인한 뒤 · 출발 시각 + 30분까지 · 출발 기록이 있으면 숨김
-//   기상 확인 시각이 지금보다 뒤여도(가짜 모드의 시나리오 시계) 확인했으면 보임 — 확인 여부만 봄
+// 홈 아침 카드가 보이는 때: 오늘(저녁이 아님) · 기상 알람 시각부터 · 출발 시각 + 30분까지 · 출발 기록이 있으면 숨김
+//   기상 확정(자동 판정 · "일어났어요")을 기다리지 않음 — 원탭을 기다리는 '확인 중' 상태를 만들지 않고 알람이 울린 때부터 바로 보여 줌
+//     (지형님 10/29 흐름 확인(#240) + 7장 A~F 자동 수집 우선. 지시서의 "기상 확인 ~"을 알람 시각으로 넓힘)
+//   알람 시각 전이라도 확정 기록이 있으면 보임 (가짜 모드의 시나리오 시계)
+//   출발은 위치 감지 · 원탭 중 먼저 들어온 기록으로 숨기고, 기록이 없어도 출발 + 30분이 지나면 스스로 사라짐
 export function morningCardVisible(plan: MorningPlan | null, current: Date): boolean {
-  if (!plan || isEvening(current)) return false;
-  if (plan.wakeConfirmedAt == null || plan.departedAt != null) return false;
-  return current.getTime() <= addMinutes(departReference(plan), MORNING_CARD_GRACE_MINUTES).getTime();
+  if (!plan || isEvening(current) || plan.departedAt != null) return false;
+  const started = plan.wakeConfirmedAt != null || current.getTime() >= plan.wakeAt.getTime();
+  return started && current.getTime() <= addMinutes(departReference(plan), MORNING_CARD_GRACE_MINUTES).getTime();
 }
 
 // 아직 안 울린 준비 · 출발 알림 (H08 "다음 알림")

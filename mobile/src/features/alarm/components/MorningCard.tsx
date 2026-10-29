@@ -16,7 +16,7 @@ type Props = {
   onPress: () => void; // 카드를 누르면 알람 설정(H03)
 };
 
-// 홈 아침 카드 (H01, 이슈 #230) — 기상을 확인한 뒤 출발까지: 첫 일정 · 출발까지 남은 시간 · 지금 나가면 도착 · 여유 · 상태
+// 홈 아침 카드 (H01, 이슈 #230) — 기상 알람 시각부터 출발까지: 첫 일정 · 출발까지 남은 시간 · 지금 나가면 도착 · 여유 · 상태
 // 보이는 때는 morning.ts morningCardVisible이 정함 (이 부품은 그리기만)
 export function MorningCard({ plan, current, check, busy, onRecheck, onPress }: Props) {
   const view = morningCardView(plan, check, current);

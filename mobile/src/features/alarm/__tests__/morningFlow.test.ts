@@ -149,14 +149,16 @@ describe('하루 재생: 폰 알림 → 기상 해제 → 기상 확정(H08) →
     expect((await getRing('a1:DEPARTURE'))!.notice).toBe(packages.dep.notice);
   });
 
-  it('정시 기상: 해제 → 확정 전에는 카드가 없고 확정하면 생김 → 다시 확인 → 출발하면 사라짐', async () => {
-    // 8:00 알람 울림 → 해제. 기상 확인 전이라 카드는 아직 없음
+  it('정시 기상: 알람 시각부터 카드(확정을 기다리지 않음) → 다시 확인 → 출발하면 사라짐', async () => {
+    // 알람 전에는 카드 없음
+    expect(await homeCard('7:55')).toBeNull();
+    // 8:00 알람 울림 → 해제. 기상 확정 전이어도 홈 인사 아래에 카드 (원탭 확인 줄이기, #240)
     clock('8:00');
     await startRing(WAKE, at('8:00'));
     await dismissRing(WAKE, at('8:00'));
-    expect(await homeCard('8:05')).toBeNull();
+    expect(await homeCard('8:05')).not.toBeNull();
 
-    // 폰을 보며 일어남 → 해제 1.5분 뒤 확정 (D14). 홈 인사 아래에 카드
+    // 폰을 보며 일어남 → 해제 1.5분 뒤 확정 (D14). 카드 글자는 확정과 상관없이 같음
     await confirmWake(WAKE, 'auto', at('8:10'));
     const plan = (await getMorningPlan())!;
     expect(formatTime(plan.wakeConfirmedAt!)).toBe('오전 8:01');

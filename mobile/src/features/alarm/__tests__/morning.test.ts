@@ -76,7 +76,7 @@ describe('오늘 첫 일정 고르기', () => {
 
   it('칸: 준비 · 출발 · 도착 목표는 켜진 알람의 시각, 꺼졌거나 없으면 null', () => {
     const p = toMorningPlan(source({ alarms: [alarm('WAKE', '8:00'), alarm('PREPARE', '8:30', false), alarm('DEPARTURE', '9:00')] }), null)!;
-    expect(p).toMatchObject({ appointmentId: 'a1', wakeAlarmId: 'a1:WAKE', title: '팀 주간회의', place: '세종대학교', travelMinutes: 50, travelSource: '길찾기', wakeConfirmedAt: null, departedAt: null });
+    expect(p).toMatchObject({ appointmentId: 'a1', wakeAlarmId: 'a1:WAKE', wakeAt: at('8:00'), title: '팀 주간회의', place: '세종대학교', travelMinutes: 50, travelSource: '길찾기', wakeConfirmedAt: null, departedAt: null });
     expect([p.prepareAt, p.departAt, p.arriveAt]).toEqual([null, at('9:00'), null]);
     expect(wakeAlarmOf(source({ alarms: [alarm('PREPARE', '8:30')] }))).toBeUndefined();
     expect(toMorningPlan(source({ alarms: [alarm('PREPARE', '8:30')] }), null)).toBeNull();
@@ -86,12 +86,14 @@ describe('오늘 첫 일정 고르기', () => {
 describe('홈 아침 카드가 보이는 때', () => {
   const seen = (p: MorningPlan | null, hhmm: string) => morningCardVisible(p, at(hhmm));
 
-  it('기상을 확인한 뒤부터 보임 — 확인 전에는 숨김', () => {
-    expect(seen(plan({ wakeConfirmedAt: null }), '8:05')).toBe(false);
+  it('기상 알람 시각부터 보임 — 기상 확정을 기다리지 않음 (원탭 확인 줄이기, #240)', () => {
+    expect(seen(plan({ wakeConfirmedAt: null }), '7:59')).toBe(false);
+    expect(seen(plan({ wakeConfirmedAt: null }), '8:00')).toBe(true);
+    expect(seen(plan({ wakeConfirmedAt: null }), '8:05')).toBe(true);
     expect(seen(plan(), '8:05')).toBe(true);
   });
 
-  it('확인 시각이 지금보다 뒤여도(가짜 모드의 시나리오 시계) 확인했으면 보임', () => {
+  it('알람 시각 전이라도 확정 기록이 있으면(가짜 모드의 시나리오 시계) 보임', () => {
     expect(seen(plan({ wakeConfirmedAt: at('8:30') }), '7:55')).toBe(true);
   });
 

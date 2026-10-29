@@ -96,8 +96,8 @@
 ### H01 홈
 - 다음 알람: `alarms`(내 것, 켜짐, 지금 이후 가장 이른 것) → `appointment_participants` → `appointments`(제목 · 장소 · 시각) — DB. 루틴 알람이면 `participant_id`가 NULL이라 `routines.title`을 씀. 일정 없는 알람(D46)은 둘 다 NULL(#160) → 제목 "알람"
 - 오늘 일정(저녁엔 내일): `appointment_participants`(나) + `appointments.appointment_at` 날짜 — DB
-- **아침 카드** (기상 확인 뒤 ~ 출발 + 30분, 이슈 #230): `getMorningPlan()` — 오늘(저녁엔 내일) 첫 일정 = 켜진 기상 알람이 붙은 가장 이른 약속(서버 `calc/wake.ts` `hasEarlierWake`와 같은 기준). 하루 일정과 **같은 읽기**(`realRows loadDayRows`, 동시에 부르면 쿼리 한 번)에서 약속 · 알람(준비 · 출발 · 도착 목표 시각, 꺼진 알람은 빈 값) · `est_travel_minutes` · `travel_source` · `departed_at`을 읽고, 기상 확인은 그 기상 알람의 `alarm_events` `WAKE_CONFIRMED` — DB. 가짜 모드는 `db.wakeConfirmations` · `db.me.departAt`
-  - 보이는 때 (`features/alarm/morning.ts` `morningCardVisible`): 저녁(18시~)이 아님 · 기상을 확인함 · 출발 알람 시각 + 30분까지(출발 알람이 없으면 약속 − 이동) · 출발 기록(`departed_at`)이 없음. 못 읽으면 카드만 없음(홈 전체는 그대로)
+- **아침 카드** (기상 알람 시각 ~ 출발 + 30분, 이슈 #230): `getMorningPlan()` — 오늘(저녁엔 내일) 첫 일정 = 켜진 기상 알람이 붙은 가장 이른 약속(서버 `calc/wake.ts` `hasEarlierWake`와 같은 기준). 하루 일정과 **같은 읽기**(`realRows loadDayRows`, 동시에 부르면 쿼리 한 번)에서 약속 · 알람(준비 · 출발 · 도착 목표 시각, 꺼진 알람은 빈 값) · `est_travel_minutes` · `travel_source` · `departed_at`을 읽고, 기상 확인은 그 기상 알람의 `alarm_events` `WAKE_CONFIRMED` — DB. 가짜 모드는 `db.wakeConfirmations` · `db.me.departAt`
+  - 보이는 때 (`features/alarm/morning.ts` `morningCardVisible`): 저녁(18시~)이 아님 · 기상 알람 시각이 지남(기상 확정을 기다리지 않음 — 원탭 확인 줄이기, #240) · 출발 알람 시각 + 30분까지(출발 알람이 없으면 약속 − 이동) · 출발 기록(`departed_at`)이 없음. 못 읽으면 카드만 없음(홈 전체는 그대로)
   - 글자: 첫 일정 · "출발까지 1시간 10분" · "지금 나가면 오전 9:47 도착 · 여유 13분" · 여유 / 빠듯 / 지각 위험 · 이동 출처. 도착 · 여유는 늘 지금 시각 기준으로 다시 셈 (`departNow`, 7장 7.5.2). 카드를 누르면 H03
   - [다시 확인]: `checkDepartNow(appointmentId)` — **Edge** `alarm-suggest { appointment_id }` 미리 보기에서 이동시간만 새로 구함 (저장 안 함, 출발 시각이 지나 `UNPROCESSABLE`이어도 `details.suggestion`을 씀). 카카오 응답은 DB · 앱 메모리에 담지 않음(D5) — 숫자(이동분 · 출처)만 화면 상태로 들고 있고 같은 요청이 겹치면 한 번만. 가짜 모드는 일정에 적힌 이동분
 - 오늘 루틴 · 진행: `routines`(켜짐, 오늘 요일) + 오늘 `alarm_events` ACKNOWLEDGED(단계 알람) — DB

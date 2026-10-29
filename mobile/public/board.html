@@ -237,7 +237,7 @@ const SCREENS = [
     data: [
       { k: 'DB', t: '다음 알람 (루틴 알람이면 routines.title)', r: ['alarms', 'appointment_participants', 'appointments'] },
       { k: 'DB', t: '오늘 일정(저녁엔 내일)', r: ['appointment_participants', 'appointments'] },
-      { k: 'DB', t: '아침 카드: 오늘 첫 일정 · 기상 확인 · 출발 기록 (기상 확인 뒤 ~ 출발 + 30분)', r: ['appointment_participants', 'alarms', 'alarm_events'] },
+      { k: 'DB', t: '아침 카드: 오늘 첫 일정 · 기상 확인 · 출발 기록 (기상 알람 시각 ~ 출발 + 30분, 확정을 기다리지 않음)', r: ['appointment_participants', 'alarms', 'alarm_events'] },
       { k: 'Edge', t: '아침 카드 다시 확인: 지금 나가면 도착 · 여유 (이동시간만 새로 구함, 저장 안 함)', r: ['alarm-suggest'] },
       { k: 'DB', t: '오늘 루틴 · 진행', r: ['routines', 'alarm_events'] },
       { k: 'DB', t: '내일 준비물 체크', r: ['todos'] },
