@@ -31,7 +31,17 @@
           "image": "./assets/images/splash-icon.png",
           "imageWidth": 76
         }
-      ]
+      ],
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "약속 출발 · 도착을 자동으로 기록하려고 위치를 써요",
+          "locationWhenInUsePermission": "약속 출발 · 도착을 자동으로 기록하려고 위치를 써요",
+          "isAndroidBackgroundLocationEnabled": true,
+          "isAndroidForegroundServiceEnabled": false
+        }
+      ],
+      "expo-notifications"
     ],
     "experiments": {
       "typedRoutes": true,
