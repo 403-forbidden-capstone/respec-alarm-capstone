@@ -118,7 +118,7 @@
 - 길찾기를 못 했을 때 (7장 7.1.2): 미리 보기가 어림값(`ESTIMATE` · `CACHED`)이거나 직접 입력이 필요하면(`manual_required`) 이동 조건 칸에 안내가 뜸. 저장 때 서버가 어림값만 있으면(`ROUTE_UNAVAILABLE` + `details.fallback`) "길찾기를 못 해 이동시간을 대략 N분으로 잡았어요. 이 값으로 저장할까요?" → "이 값으로 저장"(그 분을 직접 입력 `MANUAL`로 다시 보냄) / "예상 이동을 직접 고칠게요". 좌표가 없어 어림값도 없으면 예상 이동에 직접 입력
 
 ### H05 새 일정
-- 장소 검색: `place-search`(카카오 키워드) — Edge
+- 장소 검색 시트("장소" 줄을 누르면 열림): 0.3초 입력이 멈추면 `listPlaces(query, near)` → `place-search`(카카오 키워드) — Edge. `near` = 프로필 집 좌표(`profiles.home_lat` · `home_lng`)가 있으면 가까운 순, 검색어가 비면 최근 장소(최근 90일 약속의 도착지 · 출발지, `near` 안 씀). 줄 아래 글자는 주소 · 분류(`category`, 카카오 값 그대로 통과 — 저장 안 함, D5). 가짜 모드는 목업 대학가 장소에서 거름
 - 이동시간 · 알람 시각 · 강도 미리 보기: `alarm-suggest`(카카오 대중교통 포함) — Edge
 - 저장: `appointments` + `appointment_participants` + `alarms`("알람" 줄에서 고른 종류 — 기상 · 준비 · 출발, 다 끄면 알람 없는 일정, D46)를 한 번에 `alarm-commit` — Edge, 준비물 `todos`(ITEM) — DB → 예약 — 폰
 - 반복: 요일 칩 · 매일 · 평일 → `appointments.recurrence_rule` RRULE (D44). 다음 회차 만들기는 D4

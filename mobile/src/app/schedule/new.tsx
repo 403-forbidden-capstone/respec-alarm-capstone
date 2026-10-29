@@ -8,11 +8,13 @@ import { adjustEstimate, isManualTime, orderError } from '@/features/alarm/adjus
 import { useNow } from '@/features/alarm/hooks/useNow';
 import { ItemChips } from '@/features/alarm/components/ItemChips';
 import { OptionGrid } from '@/features/alarm/components/OptionGrid';
+import { PlaceSearchSheet } from '@/features/alarm/components/PlaceSearchSheet';
 import { RepeatPicker } from '@/features/alarm/components/RepeatPicker';
 import { SelectRow } from '@/features/alarm/components/SelectRow';
 import { TimeButton } from '@/features/alarm/components/TimeButton';
 import { TimePickBody } from '@/features/alarm/components/TimePicker';
 import { TimeRow } from '@/features/alarm/components/TimeRow';
+import { homeOf } from '@/features/alarm/placeSheet';
 import { repeatToRrule } from '@/features/alarm/repeat';
 import { addItems, earlierWakeOf, isPassed, parseDayParam, ringingKinds, tomorrow, upcomingAlarms } from '@/features/alarm/schedule';
 import {
@@ -27,6 +29,7 @@ import {
   type RingKind,
   type Transport,
 } from '@/features/alarm/types';
+import { useAuth } from '@/features/auth/AuthProvider';
 import { foundScheduleDraft, saveFoundSchedule } from '@/features/voice/api';
 import { now } from '@/lib/clock';
 import { addMinutes, dayKey, formatDateShort, formatTime, formatTime24, startOfDay } from '@/lib/format';
@@ -71,6 +74,8 @@ export default function NewScheduleScreen() {
   const [titleError, setTitleError] = useState(false);
   const [estimate, setEstimate] = useState<Estimate | null>(null);
   const [pick, setPick] = useState<RingKind | null>(null); // 확인 시트에서 시각을 고르는 알람 (D43)
+  const [placeOpen, setPlaceOpen] = useState(false); // 장소 검색 시트
+  const home = homeOf(useAuth().profile); // 프로필의 집 좌표 — 있으면 검색 결과를 집에서 가까운 순으로 (가짜 데이터의 가짜 프로필은 좌표가 없음)
   const [showCalc, setShowCalc] = useState(false); // 계산 근거 "자세히"를 펼침
   const { busy: calculating, run: runCalculate } = useAction();
   const { busy: saving, run: runSave } = useAction();
@@ -188,21 +193,38 @@ export default function NewScheduleScreen() {
         <RepeatPicker value={draft.repeat} onChange={(next) => set('repeat', next)} />
       </Card>
 
-      {/* 장소 목록을 못 읽으면 장소를 고를 수 없으니 이유 + 다시 시도 */}
+      {/* 처음 장소 목록(최근 장소)을 못 읽었으면 이유 + 다시 시도 — 장소 검색 시트로는 그래도 고를 수 있음 */}
       {!places && placesError ? <LoadError onRetry={reloadPlaces} /> : null}
       <Card>
         <Text variant="label" tone="sub">
           장소와 중요도
         </Text>
-        <SelectRow
-          first
-          label="장소"
-          value={draft.place}
-          options={(places ?? []).map((p) => [p.name, p.name] as const)}
-          onChange={(name) => {
-            // 실데이터는 고른 장소의 좌표도 초안에 담아 계산 · 저장 요청까지 가져감 (가짜 데이터는 좌표가 없음)
-            const picked = places?.find((p) => p.name === name);
-            setDraft((d) => ({ ...d, place: name, placeLat: picked?.lat, placeLng: picked?.lng }));
+        {/* SelectRow와 같은 모양 — 누르면 목록 대신 검색 시트. 실데이터는 고른 장소의 좌표도 초안에 담아 계산 · 저장 요청까지 가져감 (가짜 데이터는 좌표가 없음) */}
+        <Pressable
+          onPress={() => setPlaceOpen(true)}
+          accessibilityRole="button"
+          accessibilityLabel={`장소 ${draft.place || '고르기'}`}
+          style={({ pressed }) => [styles.placeRow, pressed && styles.pressed]}
+        >
+          <Text variant="rowLabel" tone="sub">
+            장소
+          </Text>
+          <View style={styles.placeValue}>
+            <Text variant="bodyStrong" tone={draft.place ? 'ink' : 'faint'} numberOfLines={1} style={styles.placeName}>
+              {draft.place || '장소 고르기'}
+            </Text>
+            <Text variant="bodyStrong" tone="faint">
+              ›
+            </Text>
+          </View>
+        </Pressable>
+        <PlaceSearchSheet
+          visible={placeOpen}
+          onClose={() => setPlaceOpen(false)}
+          search={(query) => listPlaces(query, home)}
+          onPick={(picked) => {
+            setDraft((d) => ({ ...d, place: picked.name, placeLat: picked.lat, placeLng: picked.lng }));
+            setPlaceOpen(false);
           }}
         />
         <SelectRow<Transport>
@@ -482,6 +504,9 @@ const styles = StyleSheet.create({
     borderTopColor: colors.line,
   },
   pressed: { opacity: 0.6 },
+  placeRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, paddingVertical: 14 },
+  placeValue: { flexDirection: 'row', alignItems: 'center', gap: 6, flexShrink: 1 },
+  placeName: { flexShrink: 1 },
   step: { flexDirection: 'row', gap: 10, paddingVertical: 8 },
   num: { width: 22, height: 22, borderRadius: 11, backgroundColor: colors.ink, alignItems: 'center', justifyContent: 'center' },
   stepText: { flex: 1 },
