@@ -6,7 +6,8 @@ import { Button, Card, LoadError, ProgressBar, Screen, Text, toast, TopBar } fro
 import { confirmWake, getWakeCheck, missWake, promptWake } from '@/features/alarm/api';
 import { FormulaBox } from '@/features/alarm/components/FormulaBox';
 import { WAKE_NO_REPLY_MINUTES, WAKE_OBSERVE_MINUTES, WAKE_RECENT_MINUTES, type WakeCheck } from '@/features/alarm/types';
-import { formatUsage, judgeLines, pickAlarmId } from '@/features/alarm/wake';
+import { useNow } from '@/features/alarm/hooks/useNow';
+import { formatUsage, judgeLines, pickAlarmId, WAKE_RECENT_RANGE } from '@/features/alarm/wake';
 import { uploadEvents } from '@/lib/alarmSync';
 import { addMinutes, formatTime, timeParts } from '@/lib/format';
 import { isMock } from '@/lib/mode';
@@ -80,6 +81,9 @@ function WakeFlow({ check }: { check: WakeCheck }) {
   // 실제로 끈 시각부터 10분 — 다시 울린 뒤 끄면 그 시각부터. 판정 시점(확정 · 확인 알림)으로만 씀
   // 자동 판정의 기록 시각은 api가 누적 사용이 θ를 넘은 시각으로 남김 (D14)
   const observeEnd = addMinutes(check.dismissedAt, WAKE_OBSERVE_MINUTES);
+  // 두 번째 막대 구간(해제 5~10분 뒤)이 아직 안 왔으면 0초 대신 "아직" (#225)
+  const current = useNow(POLL_MS);
+  const recentPending = state.phase === 'observing' && state.recent === 0 && current < addMinutes(check.dismissedAt, WAKE_OBSERVE_MINUTES - WAKE_RECENT_MINUTES);
   // 그룹 일정이 아니면 공유 문구 · 그룹 버튼을 뺌
   const shared = check.groupId != null ? ` · ${check.groupName ?? '그룹'}에 공유했어요` : '';
 
@@ -148,7 +152,7 @@ function WakeFlow({ check }: { check: WakeCheck }) {
   const meters = (
     <>
       <Meter label={`알람 끈 뒤 ${WAKE_OBSERVE_MINUTES}분 동안 폰 사용`} value={state.usage} threshold={check.thetaMinutes} />
-      <Meter label={`최근 ${WAKE_RECENT_MINUTES}분 동안 폰 사용`} value={state.recent} />
+      <Meter label={`알람 끈 뒤 ${WAKE_RECENT_RANGE}분 폰 사용`} value={state.recent} pending={recentPending} />
       <FormulaBox lines={judgeLines(state.usage, state.recent, check.thetaMinutes)} />
     </>
   );
@@ -286,15 +290,15 @@ function Flow({ phase, how }: { phase: Phase | 'idle'; how: How }) {
 }
 
 // 사용 시간 막대 (.meter) — threshold는 기상 판정 기준 θ
-function Meter({ label, value, threshold }: { label: string; value: number; threshold?: number }) {
+function Meter({ label, value, threshold, pending }: { label: string; value: number; threshold?: number; pending?: boolean }) {
   return (
     <View style={styles.meter}>
       <View style={styles.meterHead}>
         <Text variant="note">
           {label}
         </Text>
-        <Text variant="note" weight={600}>
-          {formatUsage(value)}
+        <Text variant="note" weight={600} tone={pending ? 'faint' : undefined}>
+          {pending ? '아직' : formatUsage(value)}
         </Text>
       </View>
       <ProgressBar value={value / METER_MAX} threshold={threshold != null ? threshold / METER_MAX : undefined} thick />

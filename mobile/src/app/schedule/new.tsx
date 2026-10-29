@@ -17,7 +17,6 @@ import { repeatToRrule } from '@/features/alarm/repeat';
 import { addItems, earlierWakeOf, isPassed, parseDayParam, ringingKinds, tomorrow, upcomingAlarms } from '@/features/alarm/schedule';
 import {
   IMPORTANCE_LABEL,
-  IMPORTANCE_POINT,
   KIND_LABEL,
   LEVELS,
   RING_KINDS,
@@ -321,7 +320,8 @@ function PickStep({ estimate, kind, onChange, onDone }: { estimate: Estimate; ki
   );
 }
 
-// 계산 순서 (.calc) — 이동 → 공통 P80 → 개인 보정 → 알람 시각 → 강도. 알람 시각 칩은 눌러서 고침 (D43)
+// 계산 순서 (.calc) — 이동 → 준비 → 알람 시각 → 강도. 알람 시각 칩은 눌러서 고침 (D43)
+// 통계 식(P80 · 가중치 · 점수)은 사용자에게 안 보임 — 결과와 쉬운 말만 (#220, D47)
 function CalcSteps({
   estimate: e,
   current,
@@ -354,19 +354,15 @@ function CalcSteps({
   const base = addMinutes(a.at, -(a.bufferMinutes + a.travelMinutes + a.predictedPrepMinutes));
   const steps: [string, string][] = [
     [`이동시간 ${a.travelMinutes}분`, e.travelNote ? `${e.travelNote} · ${TRANSPORT_LABEL[a.transport]}` : `카카오 길찾기 · ${TRANSPORT_LABEL[a.transport]} 최소 소요시간`],
-    [`공통 P80 ${e.commonP80}분`, `분위수 회귀 τ = 0.8 · ${e.sameDayWake ? '같은 날 기상 알람이 있어 외출 준비만' : '기상부터 출발까지'}`],
     [
-      `개인 보정 +${e.correction}분`,
-      `내 기록 ${e.sampleCount}건 · 가중치 ${e.sampleCount}÷(${e.sampleCount}+${e.prior}) = ${e.weight} × 개인 오차 P80 ${e.residualP80}분`,
+      `준비시간 ${a.predictedPrepMinutes}분`,
+      `${e.sameDayWake ? '같은 날 기상 알람이 있어 외출 준비만' : '기상부터 출발까지'} · ${e.sampleCount > 0 ? `내 기록 ${e.sampleCount}건 반영` : '아직 내 기록이 없어 기본값'}`,
     ],
     [
       `${KIND_LABEL[baseKind]} ${formatTime(base)}`,
       `${formatTime(a.at)} − 여유 ${a.bufferMinutes} − 이동 ${a.travelMinutes} − 준비 ${a.predictedPrepMinutes}`,
     ],
-    [
-      `알람 강도 ${LEVELS[a.level].name}`,
-      `중요도 ${IMPORTANCE_LABEL[a.importance]} ${IMPORTANCE_POINT[a.importance]}점 + 최근 4주 늦잠 지각 ${e.latePoint}점`,
-    ],
+    [`알람 강도 ${LEVELS[a.level].name}`, `중요도 ${IMPORTANCE_LABEL[a.importance]}${e.latePoint > 0 ? ' · 최근 4주 늦잠 지각 2번 이상' : ''}`],
   ];
 
   return (

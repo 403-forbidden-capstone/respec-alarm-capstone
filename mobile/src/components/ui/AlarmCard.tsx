@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 
+import { keepWords } from '@/lib/format';
 import { colors, radius, size, space } from '@/theme';
 
 import { Text } from './Text';
@@ -47,16 +48,18 @@ export function AlarmCard({
           {kindLabel}
         </Text>
       </View>
+      {/* 오른쪽 줄은 남은 폭을 다 받고 오른쪽 정렬 — 글자 폭으로 칸을 재면 Android에서 "기 / 상"처럼 끝 글자가 넘어감 (#222)
+          좁은 화면에서 넘치면 단어 사이에서만 줄을 바꿈 ("오후 12:28 / 기상 · 지남") */}
       <View style={styles.chain}>
         {chain.map((line, i) => (
-          <View key={line} style={styles.chainItem}>
+          <View key={line}>
             {i > 0 ? (
-              <Text variant="label" tone="faint" style={styles.dash}>
+              <Text variant="label" tone="faint" align="right" style={styles.dash}>
                 -
               </Text>
             ) : null}
-            <Text variant="label" weight={600}>
-              {line}
+            <Text variant="label" weight={600} align="right">
+              {keepWords(line)}
             </Text>
           </View>
         ))}
@@ -140,8 +143,7 @@ const styles = StyleSheet.create({
   body: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingTop: 2 },
   pressed: { opacity: 0.7 },
   big: { flexDirection: 'row', alignItems: 'baseline', gap: 6 },
-  chain: { alignItems: 'flex-end' },
-  chainItem: { alignItems: 'flex-end' },
+  chain: { flex: 1, marginLeft: 12 },
   dash: { lineHeight: 12 },
   meta: { marginTop: 2 },
   foot: { marginTop: 6, flexDirection: 'row', justifyContent: 'flex-end', alignItems: 'center', gap: 4 },

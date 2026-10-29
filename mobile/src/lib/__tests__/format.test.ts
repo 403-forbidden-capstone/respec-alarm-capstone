@@ -10,6 +10,7 @@ import {
   formatTime24,
   josa,
   joinKo,
+  keepWords,
   minuteOfDay,
   spokenTime,
   timeParts,
@@ -62,5 +63,14 @@ describe('formatMinuteOfDay', () => {
     expect(formatMinuteOfDay(1290)).toBe('21:30');
     expect(formatMinuteOfDay(5)).toBe('00:05');
     expect(formatMinuteOfDay(1440 + 30)).toBe('00:30');
+  });
+});
+
+describe('keepWords', () => {
+  it('줄은 시각과 종류 사이 · 상태 앞에서만 바뀜, 보이는 글자는 그대로', () => {
+    const out = keepWords('오후 12:28 기상 · 지남');
+    expect(out.replace(/\u2060/g, '').replace(/\u00A0/g, ' ')).toBe('오후 12:28 기상 · 지남');
+    expect(out).toBe('오\u2060후\u00A012:28 기\u2060상 ·\u00A0지\u2060남');
+    expect(keepWords('7:00 AM')).toBe('7:00 AM');
   });
 });
