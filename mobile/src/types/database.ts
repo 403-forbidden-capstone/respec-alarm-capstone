@@ -5,7 +5,32 @@ export type Database = {
   
   "public": {
           Tables: {
-            "alarm_events": {
+            "ai_calls": {
+                  Row: {
+                    "attempts": number,"cache_read_tokens": number | null,"cache_write_tokens": number | null,"call_id": string,"cost_usd": number | null,"created_at": string,"error_code": string | null,"flags": (string)[],"input_tokens": number | null,"io": Json | null,"latency_ms": number,"model": string,"ok": boolean,"output_tokens": number | null,"point": string,"prompt_id": string,"prompt_version": string,"request_id": string | null,"session_id": string | null,"stop_reason": string | null,"thinking_tokens": number | null,"user_id": string
+                  }
+                  Insert: {
+                    "attempts"?: number,"cache_read_tokens"?: number | null,"cache_write_tokens"?: number | null,"call_id"?: string,"cost_usd"?: number | null,"created_at"?: string,"error_code"?: string | null,"flags"?: (string)[],"input_tokens"?: number | null,"io"?: Json | null,"latency_ms": number,"model": string,"ok": boolean,"output_tokens"?: number | null,"point": string,"prompt_id": string,"prompt_version": string,"request_id"?: string | null,"session_id"?: string | null,"stop_reason"?: string | null,"thinking_tokens"?: number | null,"user_id": string
+                  }
+                  Update: {
+                    "attempts"?: number,"cache_read_tokens"?: number | null,"cache_write_tokens"?: number | null,"call_id"?: string,"cost_usd"?: number | null,"created_at"?: string,"error_code"?: string | null,"flags"?: (string)[],"input_tokens"?: number | null,"io"?: Json | null,"latency_ms"?: number,"model"?: string,"ok"?: boolean,"output_tokens"?: number | null,"point"?: string,"prompt_id"?: string,"prompt_version"?: string,"request_id"?: string | null,"session_id"?: string | null,"stop_reason"?: string | null,"thinking_tokens"?: number | null,"user_id"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "ai_calls_session_id_fkey"
+      columns: ["session_id"]
+isOneToOne: false
+      referencedRelation: "conversation_sessions"
+      referencedColumns: ["session_id"]
+    },{
+      foreignKeyName: "ai_calls_user_id_fkey"
+      columns: ["user_id"]
+isOneToOne: false
+      referencedRelation: "profiles"
+      referencedColumns: ["user_id"]
+    }
+                  ]
+                },"alarm_events": {
                   Row: {
                     "alarm_id": string,"client_event_id": string | null,"created_at": string,"event_at": string,"event_id": number,"event_type": Database["public"]['Enums']["alarm_event_type"],"feedback_type": Database["public"]['Enums']["alarm_feedback_type"] | null,"input_source": Database["public"]['Enums']["event_input_source"] | null,"sequence_no": number,"snooze_minutes": number | null,"user_id": string
                   }
@@ -144,13 +169,13 @@ isOneToOne: false
                   ]
                 },"conversation_sessions": {
                   Row: {
-                    "apply_status": Database["public"]['Enums']["apply_status"],"created_at": string,"ended_at": string | null,"extracted_data": Json | null,"input_mode": Database["public"]['Enums']["input_mode"],"session_id": string,"session_type": Database["public"]['Enums']["session_type"],"started_at": string,"transcript": string | null,"user_id": string
+                    "apply_status": Database["public"]['Enums']["apply_status"],"created_at": string,"ended_at": string | null,"extracted_data": Json | null,"input_mode": Database["public"]['Enums']["input_mode"],"server_state": NonNullable<Json>,"session_id": string,"session_type": Database["public"]['Enums']["session_type"],"started_at": string,"transcript": string | null,"turns": NonNullable<Json>,"user_id": string
                   }
                   Insert: {
-                    "apply_status"?: Database["public"]['Enums']["apply_status"],"created_at"?: string,"ended_at"?: string | null,"extracted_data"?: Json | null,"input_mode"?: Database["public"]['Enums']["input_mode"],"session_id"?: string,"session_type": Database["public"]['Enums']["session_type"],"started_at"?: string,"transcript"?: string | null,"user_id": string
+                    "apply_status"?: Database["public"]['Enums']["apply_status"],"created_at"?: string,"ended_at"?: string | null,"extracted_data"?: Json | null,"input_mode"?: Database["public"]['Enums']["input_mode"],"server_state"?: NonNullable<Json>,"session_id"?: string,"session_type": Database["public"]['Enums']["session_type"],"started_at"?: string,"transcript"?: string | null,"turns"?: NonNullable<Json>,"user_id": string
                   }
                   Update: {
-                    "apply_status"?: Database["public"]['Enums']["apply_status"],"created_at"?: string,"ended_at"?: string | null,"extracted_data"?: Json | null,"input_mode"?: Database["public"]['Enums']["input_mode"],"session_id"?: string,"session_type"?: Database["public"]['Enums']["session_type"],"started_at"?: string,"transcript"?: string | null,"user_id"?: string
+                    "apply_status"?: Database["public"]['Enums']["apply_status"],"created_at"?: string,"ended_at"?: string | null,"extracted_data"?: Json | null,"input_mode"?: Database["public"]['Enums']["input_mode"],"server_state"?: NonNullable<Json>,"session_id"?: string,"session_type"?: Database["public"]['Enums']["session_type"],"started_at"?: string,"transcript"?: string | null,"turns"?: NonNullable<Json>,"user_id"?: string
                   }
                   Relationships: [
                     {
@@ -470,6 +495,31 @@ isOneToOne: false
       referencedColumns: ["appointment_id"]
     },{
       foreignKeyName: "user_edit_logs_user_id_fkey"
+      columns: ["user_id"]
+isOneToOne: false
+      referencedRelation: "profiles"
+      referencedColumns: ["user_id"]
+    }
+                  ]
+                },"user_questions": {
+                  Row: {
+                    "answer": string | null,"answered_at": string | null,"asked_at": string,"channel": string,"kind": string,"question_id": string,"session_id": string | null,"subject_key": string,"user_id": string
+                  }
+                  Insert: {
+                    "answer"?: string | null,"answered_at"?: string | null,"asked_at"?: string,"channel": string,"kind": string,"question_id"?: string,"session_id"?: string | null,"subject_key": string,"user_id": string
+                  }
+                  Update: {
+                    "answer"?: string | null,"answered_at"?: string | null,"asked_at"?: string,"channel"?: string,"kind"?: string,"question_id"?: string,"session_id"?: string | null,"subject_key"?: string,"user_id"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "user_questions_session_id_fkey"
+      columns: ["session_id"]
+isOneToOne: false
+      referencedRelation: "conversation_sessions"
+      referencedColumns: ["session_id"]
+    },{
+      foreignKeyName: "user_questions_user_id_fkey"
       columns: ["user_id"]
 isOneToOne: false
       referencedRelation: "profiles"
