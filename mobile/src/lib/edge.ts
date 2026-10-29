@@ -33,6 +33,8 @@ export const EDGE_MESSAGES: Partial<Record<EdgeFailure, string>> = {
   INTERNAL: '서버에 문제가 생겼어요. 잠시 뒤에 다시 해 주세요',
   ROUTE_UNAVAILABLE: '이동시간을 구하지 못했어요. 직접 입력해 주세요',
   PLACE_UNAVAILABLE: '장소 검색이 잠시 안 돼요. 잠시 뒤에 다시 해 주세요',
+  LLM_UNAVAILABLE: 'AI가 지금 답하지 못해요. 잠시 뒤에 다시 해 주세요',
+  VOICE_UNAVAILABLE: '음성 대화를 지금은 쓸 수 없어요. 글로 입력해 주세요',
   NOT_CONFIGURED: '서버 설정이 아직 끝나지 않았어요. 개발자에게 알려 주세요',
   NETWORK: '인터넷 연결을 확인해 주세요',
   TIMEOUT: '서버 응답이 늦어요. 잠시 뒤에 다시 해 주세요',
