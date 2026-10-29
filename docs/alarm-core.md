@@ -57,7 +57,7 @@ type RingPackage = {
 };
 ```
 
-반복은 폰이 하지 않음. 루틴(`routines.repeat_days`)과 반복 약속(`recurrence_rule`)은 서버가 **다음 회차 하나만** `alarms` 행으로 만들고(`scheduled_at`은 시각 하나), 울린 뒤 해제 · MISSED 기록이 들어오면 다음 회차를 다시 만듦(기록이 안 들어오면 매일 03:00 배치가 메움). 그래서 꾸러미에는 `atMillis` 하나면 됨 (회차 수는 D4가 정함, 폰 쪽에 가정하지 않음). 예전 `scheduleDailyAlarm`(매일 반복)은 없앰.
+반복은 폰이 하지 않음. 반복 약속(`recurrence_rule`)과 일정 없는 반복 알람은 서버가 **앞으로 14일치 회차를 회차마다 한 줄씩 미리 만들고**(약속 · 참여 조건 · 알람이 새 행, `series_id` · `occurrence_on`으로 묶음 · 날짜 구분, `alarm-roll`이 5분마다 보충), 지난 회차 행은 기록으로 그대로 남김. 폰은 앱이 열릴 때 그 행들을 reconcile로 읽어 14일 안 알람을 걸음. 루틴(`routines.repeat_days`)은 회차 행을 따로 만들지 않고 같은 알람 행의 시각만 다음 발생으로 옮김. 그래서 꾸러미에는 `atMillis` 하나면 됨 (회차 수는 폰 쪽에 가정하지 않음). 예전 `scheduleDailyAlarm`(매일 반복)은 없앰. 서버 함수 `alarm-roll`(3a-2)과 앱 맞추기(3b)가 머지된 뒤부터 동작 — 그 전에는 DB 칸(`supabase/README.md` "반복 다음 회차")만 있고 첫 회차만 만들어짐.
 
 ## 울림 계획 (#29)
 

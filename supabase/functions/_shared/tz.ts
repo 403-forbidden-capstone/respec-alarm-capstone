@@ -39,6 +39,36 @@ export function localDayRange(d: Date, timeZone: string): { start: Date; end: Da
   return { start: zonedMidnight(p.year, p.month, p.day, timeZone), end: zonedMidnight(p.year, p.month, p.day + 1, timeZone) };
 }
 
+// d가 그 시간대에서 몇 월 며칠인지 — 'YYYY-MM-DD' (DB date 칸 appointments.occurrence_on과 같은 글자)
+export function localDateKey(d: Date, timeZone: string): string {
+  const p = partsIn(d, timeZone);
+  return `${String(p.year).padStart(4, '0')}-${String(p.month).padStart(2, '0')}-${String(p.day).padStart(2, '0')}`;
+}
+
+// d가 그 시간대의 0시부터 몇 분째인지 (자정 0 · 오전 7:30은 450)
+export function localMinuteOfDay(d: Date, timeZone: string): number {
+  const p = partsIn(d, timeZone);
+  return p.hour * 60 + p.minute;
+}
+
+const DAY_MS = 86_400_000;
+
+// 그 시간대의 날짜('YYYY-MM-DD') + 0시부터 분 → 시각. localMinuteOfDay의 반대 (같은 벽시계 시:분을 다른 날짜에 놓을 때)
+//   분이 1440 이상이면 다음 날로 넘어감 (자정을 넘는 루틴 단계처럼)
+//   일광절약시간이 있는 시간대: 두 번 있는 시각(가을에 시계가 되돌아가는 때)은 먼저 오는 쪽, 없는 시각(봄에 시계가 건너뛰는 때)은 건너뛴 만큼 뒤로 밂
+//   (작성자 판단 — 한국은 일광절약시간이 없어 영향 없음)
+export function zonedTime(dateKey: string, minuteOfDay: number, timeZone: string): Date {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateKey);
+  if (!m) throw new RangeError(`날짜는 YYYY-MM-DD 모양이어야 해요: ${dateKey}`);
+  // 벽시계 글자를 UTC로 읽은 값. 실제 시각은 여기서 그 시간대의 UTC 오프셋만큼 앞으로 당긴 값
+  const naive = Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]), 0, minuteOfDay);
+  // 오프셋이 바뀌는 날(일광절약시간)에도 맞게 — 하루 전 · 하루 뒤의 오프셋을 둘 다 써 보고 벽시계가 맞아떨어지는 쪽을 고름
+  const offsets = [...new Set([offsetMinutes(new Date(naive - DAY_MS), timeZone), offsetMinutes(new Date(naive + DAY_MS), timeZone)])];
+  const fits = offsets.map((o) => naive - o * 60_000).filter((t) => t + offsetMinutes(new Date(t), timeZone) * 60_000 === naive);
+  if (fits.length) return new Date(Math.min(...fits));
+  return new Date(naive - offsets[0] * 60_000); // 건너뛴 시각 — 바뀌기 전 오프셋으로 읽어 건너뛴 만큼 뒤로 밂
+}
+
 // "오전 10:00" — 앱 lib/format의 시각 글자와 같은 모양 (RingPackage.subtitle에 씀)
 export function formatKoTime(d: Date, timeZone: string): string {
   const p = partsIn(d, timeZone);
