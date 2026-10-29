@@ -32,6 +32,10 @@ export const UNKNOWN_RADIUS_M = 200;
 export const MIN_RADIUS_M = 100;
 export const MAX_RADIUS_M = 500;
 
+// 반경 보정 — 위치로 잰 이동시간(도착 − 출발)에 더하는 분. 지오펜스는 반경 안쪽 경계로 잡혀 문 앞 ~ 문 앞보다 짧게 잰 만큼 (약 300m 걷기)
+//   출발 · 도착이 둘 다 위치일 때만 더함 (participantTimes travelMinutesOf). 7장 7.13.7 반경 보정(10/10), 실기기 측정으로 조정
+export const TRAVEL_CORRECTION_MINUTES = 4;
+
 // 감지 지연 — 안드로이드 보통 2분 이내 · 최대 6분 (핵심선별 A)
 //   위치로 잡은 도착의 지각 경계를 이만큼 넓힘 (D61) — participantTimes LOCATION_LATE_AFTER_MINUTES = +5 + 6 = +11분
 export const DETECTION_DELAY_MAX_MINUTES = 6;

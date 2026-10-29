@@ -1,6 +1,6 @@
 // 위치 감지 기록 — 실데이터 (Supabase). 화면은 api.ts를 거침
 //   쓰기는 모두 participantTimes.ts(출발 · 도착을 쓰는 한 곳)를 거침: 지우기 clearLocationTime, 되돌리기 recordParticipantTimes(LOCATION)
-//   폰의 판정 기억(transitions forgetDetection)은 부르는 쪽(감지 안내 · 홈 정정 줄)이 맞춤
+//   폰의 판정 기억(transitions forgetDetection)은 부르는 쪽(감지 안내 · 홈 정정 줄)이 맞춤 — 되돌리기는 restoreDetection (PR 6이 부름)
 import { clearLocationTime, hasResponseTime, isResponse, readLocationTime, recordParticipantTimes, storedSource } from '@/features/alarm/participantTimes';
 import { now } from '@/lib/clock';
 import { dbTimeMs, parseDbTime } from '@/lib/dbTime';

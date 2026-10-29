@@ -8,6 +8,7 @@ import {
   noteRegistered,
   parseGeoState,
   resolvePending,
+  restoreDetection,
   type GeoAction,
   type GeoSignal,
   type GeoState,
@@ -243,6 +244,41 @@ describe("도착 전 귀가 → DB 출발은 그대로, 다음 이탈이 오면 
     const detection = { kind: 'DEPART' as const, participantId: 'class', at: at('07:00'), appointmentAt: at('09:00') };
     const twice = forgetDetection(forgetDetection(booted(), detection), detection);
     expect(twice.voided).toEqual([detection]);
+  });
+});
+
+describe('[아니에요] 되돌리기 (restoreDetection)', () => {
+  const detection = { kind: 'DEPART' as const, participantId: 'class', at: at('07:00'), appointmentAt: at('09:00') };
+  // 07:00 출발을 [아니에요]로 지웠다 5초 안에 되돌려 DB 출발이 돌아온 뒤 다시 읽은 계획
+  const classOnly = (departedAt?: number) => planRegions({ home: HOME, participants: [{ ...CLASS, departedAt }], now: at('07:50') });
+
+  it('forgetDetection → restoreDetection — 이후 약속 전 한 번 더 나가도 이미 출발이 있어 새 DEPART를 안 냄', () => {
+    const plan = classOnly(at('07:00'));
+    const confirmed = run(booted(plan), [[[sig(HOME_REGION_ID, 'EXIT', '07:00')], '07:10']], plan).state;
+    const forgotten = forgetDetection(confirmed, detection);
+    const restored = restoreDetection(forgotten, detection);
+    expect(restored.voided).toEqual([]);
+
+    // 지운 채로는 되돌린 출발이 없는 것으로 보여 약속 전 외출이 다시 붙음 (이 시험이 막으려는 것)
+    expect(run(forgotten, [[[sig(HOME_REGION_ID, 'EXIT', '08:00')], '08:10']], plan).actions).toEqual([act('DEPART_PENDING', 'class', '08:00'), act('DEPART', 'class', '08:00')]);
+    // 되돌렸으면 이미 출발이 있음 — 이탈은 아무 약속에도 안 붙음
+    expect(run(restored, [[[sig(HOME_REGION_ID, 'EXIT', '08:00')], '08:10']], plan).actions).toEqual([]);
+  });
+
+  it('두 번 불러도 · 없는 판정이어도 같은 결과, 다른 항목은 그대로, 넣은 상태는 안 고침', () => {
+    const other = { kind: 'ARRIVE' as const, participantId: 'class', at: at('08:45'), appointmentAt: at('09:00') };
+    const both = forgetDetection(forgetDetection(booted(), detection), other);
+    const once = restoreDetection(both, detection);
+    expect(once.voided).toEqual([other]);
+    expect(restoreDetection(once, detection)).toEqual(once);
+    expect(both.voided).toHaveLength(2);
+    expect(restoreDetection(booted(), detection)).toEqual(booted());
+  });
+
+  it('보관한 값이 깨졌으면 parseGeoState처럼 거름', () => {
+    expect(restoreDetection({ v: 2 } as unknown as GeoState, detection)).toEqual(initialGeoState());
+    const dirty = { ...booted(), voided: [detection, { kind: 'OTHER', participantId: 'x', at: 1, appointmentAt: 2 }] } as unknown as GeoState;
+    expect(restoreDetection(dirty, detection).voided).toEqual([]);
   });
 });
 
