@@ -66,7 +66,7 @@ export default function NewScheduleScreen() {
     return defaultDraft(day && dayKey(day) >= dayKey(now()) ? day : tomorrow(now()));
   });
   const [edited, setDraft] = useState(initial);
-  // 실데이터는 장소를 목록에서 골라야 해서 처음 값이 비어 있음 — 아직 안 골랐으면 목록의 첫 곳을 미리 골라 둔 것으로 보여 줌 (처음 값 그대로라 나갈 때 묻지 않음). 가짜 데이터는 처음부터 있음
+  // 실데이터는 장소를 골라야(최근 장소 · 검색 시트) 해서 처음 값이 비어 있음 — 아직 안 골랐으면 최근 장소의 첫 곳을 미리 골라 둔 것으로 보여 줌 (처음 값 그대로라 나갈 때 묻지 않음). 가짜 데이터는 처음부터 있음
   const preset = edited.place === '' ? places?.[0] : undefined;
   const draft = preset ? { ...edited, place: preset.name, placeLat: preset.lat, placeLng: preset.lng } : edited;
   const [itemList, setItemList] = useState(() => addItems([], initial.items));
