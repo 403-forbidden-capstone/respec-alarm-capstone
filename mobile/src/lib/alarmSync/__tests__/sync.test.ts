@@ -29,10 +29,19 @@ let mockUser: string | null = 'user-1';
 const mockUpsert = jest.fn<(rows: { client_event_id: string }[], options: unknown) => Promise<{ error: DbError }>>();
 let mockAlarmRows: unknown[] = [];
 let mockEnabledIds: string[] = []; // 지정한 알람 중 서버에 켜진 행이 있는 것 (.in으로 끝나는 쿼리)
+let mockParticipantRows: { alarm_id: string; participant_id: string | null }[] = []; // 지정한 알람의 약속 (participant_id를 고르는 .in 쿼리 — 켜짐 여부와 상관없음)
+let mockSelected = '';
 const mockAlarmQuery: Record<string, unknown> = {};
-for (const method of ['select', 'eq', 'gt', 'order']) mockAlarmQuery[method] = jest.fn(() => mockAlarmQuery);
+for (const method of ['eq', 'gt', 'order']) mockAlarmQuery[method] = jest.fn(() => mockAlarmQuery);
+mockAlarmQuery.select = jest.fn((columns: string) => {
+  mockSelected = columns;
+  return mockAlarmQuery;
+});
 mockAlarmQuery.limit = jest.fn(async () => ({ data: mockAlarmRows, error: null }));
-mockAlarmQuery.in = jest.fn(async () => ({ data: mockEnabledIds.map((alarm_id) => ({ alarm_id })), error: null }));
+mockAlarmQuery.in = jest.fn(async () => ({
+  data: mockSelected.includes('participant_id') ? mockParticipantRows : mockEnabledIds.map((alarm_id) => ({ alarm_id })),
+  error: null,
+}));
 jest.mock('../../supabase', () => ({
   supabase: {
     auth: { getSession: async () => ({ data: { session: mockUser ? { user: { id: mockUser } } : null } }) },
@@ -51,6 +60,7 @@ beforeEach(() => {
   mockUser = 'user-1';
   mockAlarmRows = [];
   mockEnabledIds = [];
+  mockParticipantRows = [];
   setSigningOut(false);
   mockCore.cancel.mockResolvedValue();
   mockCore.cancelAll.mockResolvedValue();
@@ -241,6 +251,112 @@ describe('reconcile — 서버 ↔ 폰 맞추기', () => {
     mockUser = null;
     expect(await reconcile({ nowMs: NOW })).toMatchObject({ scheduled: [], canceled: [] });
     expect(mockCore.list).not.toHaveBeenCalled();
+    expect(mockCore.scheduleAll).not.toHaveBeenCalled();
+  });
+});
+
+// 준비 알림 글자 · 기상 음성 문장은 같은 약속의 출발 알람에서 나오는데 폰 list()는 글자를 안 돌려줌 — 출발 알람이 바뀌면 준비 · 기상도 다시 걸어야 함
+describe('reconcile — 출발 알람이 바뀌면 같은 약속의 준비 · 기상도 다시 걸림', () => {
+  const NOW_DAY_BEFORE = Date.parse('2025-05-21T12:00:00.000Z');
+  const lesson = { title: '전공 수업', appointment_at: '2025-05-22T01:00:00.000Z', dest_name: '광개토관' }; // 한국 시각 10:00
+  const TIMES = { wake: '2025-05-21T23:00:00.000Z', prep: '2025-05-21T23:30:00.000Z', dep: '2025-05-22T00:00:00.000Z', arr: '2025-05-22T00:50:00.000Z' }; // 8:00 · 8:30 · 9:00 · 9:50
+  const typeOf = { wake: 'WAKE', prep: 'PREPARE', dep: 'DEPARTURE', arr: 'ARRIVE' } as const;
+  type Kind = keyof typeof TIMES;
+  const serverRow = (kind: Kind, scheduledAt = TIMES[kind], participant = 'p1') => ({
+    alarm_id: kind,
+    alarm_type: typeOf[kind],
+    scheduled_at: scheduledAt,
+    intensity: 'NORMAL',
+    sound_key: null,
+    snooze_limit: 3,
+    is_enabled: true,
+    participant_id: participant,
+    routine_id: null,
+    appointment_participants: { est_travel_minutes: 50, appointments: lesson },
+    routines: null,
+  });
+  const onPhoneAt = (kind: Kind, scheduledAt = TIMES[kind]): ScheduledAlarm => {
+    const atMillis = Date.parse(scheduledAt);
+    return { id: kind, type: typeOf[kind], intensity: 'NORMAL', title: '전공 수업', atMillis, snoozeCount: 0, nextRingAt: atMillis };
+  };
+  const allKinds: Kind[] = ['wake', 'prep', 'dep', 'arr'];
+  const scheduledIds = () => mockCore.scheduleAll.mock.calls.flatMap(([packages]) => packages.map((p) => p.alarmId));
+
+  it('아무것도 안 바뀌면 다시 걸지 않고 약속도 따로 묻지 않음', async () => {
+    mockAlarmRows = allKinds.map((kind) => serverRow(kind));
+    mockCore.list.mockResolvedValue(allKinds.map((kind) => onPhoneAt(kind)));
+    const summary = await reconcile({ nowMs: NOW_DAY_BEFORE });
+    expect(summary).toMatchObject({ scheduled: [], canceled: [], failed: [] });
+    expect(mockCore.scheduleAll).not.toHaveBeenCalled();
+    expect(mockCore.cancel).not.toHaveBeenCalled();
+    expect(mockAlarmQuery.in).not.toHaveBeenCalled();
+  });
+
+  it('다른 기기에서 출발만 옮기면 준비 · 기상도 새 글자로 다시 걸고, 알람 코어에는 앱 안 묶음 키(groupKey)를 안 넘김', async () => {
+    const movedDep = '2025-05-21T23:50:00.000Z'; // 8:50
+    mockAlarmRows = [serverRow('wake'), serverRow('prep'), serverRow('dep', movedDep), serverRow('arr')];
+    mockCore.list.mockResolvedValue(allKinds.map((kind) => onPhoneAt(kind))); // 폰에는 옛 출발 9:00
+    await reconcile({ nowMs: NOW_DAY_BEFORE });
+    expect(scheduledIds()).toEqual(['wake', 'prep', 'dep']);
+    const packages = mockCore.scheduleAll.mock.calls[0][0];
+    expect(packages.find((p) => p.alarmId === 'prep')?.notice).toBe('오전 8:50 출발까지 20분');
+    for (const p of packages) expect(Object.keys(p)).not.toContain('groupKey');
+  });
+
+  it('출발 알람을 지정해(alarmIds) 켜면 지정하지 않은 같은 약속의 준비 · 기상도 다시 걺 — 켜기 직후 호출 경로', async () => {
+    mockAlarmRows = allKinds.map((kind) => serverRow(kind));
+    mockCore.list.mockResolvedValue(['wake', 'prep', 'arr'].map((kind) => onPhoneAt(kind as Kind))); // 출발만 폰에 없음
+    await reconcile({ nowMs: NOW_DAY_BEFORE, alarmIds: ['dep'] });
+    expect(scheduledIds()).toEqual(['wake', 'prep', 'dep']); // 도착은 지정도 약속 묶음도 아니라 그대로
+  });
+
+  it('다른 기기에서 출발만 끄면(전체 맞추기) 출발은 지우고 준비 · 기상은 다시 걸어 기본 줄로 돌아감', async () => {
+    mockAlarmRows = [serverRow('wake'), serverRow('prep'), serverRow('arr')]; // 서버에는 켜진 출발 행이 없음
+    mockCore.list.mockResolvedValue(allKinds.map((kind) => onPhoneAt(kind)));
+    mockParticipantRows = [{ alarm_id: 'dep', participant_id: 'p1' }]; // 꺼진 행도 약속은 알려 줌
+    const summary = await reconcile({ nowMs: NOW_DAY_BEFORE });
+    expect(summary.canceled).toEqual(['dep']);
+    expect(scheduledIds()).toEqual(['wake', 'prep']);
+    const packages = mockCore.scheduleAll.mock.calls[0][0];
+    expect(packages.find((p) => p.alarmId === 'prep')?.notice).toBeUndefined(); // 출발이 없으니 "출발까지 N분" 글자가 빠짐
+    // 지울 출발 알람의 약속을 DB에서 읽음 — 약속 열(participant_id)만 보고 켜짐은 거르지 않음
+    expect(mockAlarmQuery.select).toHaveBeenCalledWith('alarm_id, participant_id');
+    expect(mockAlarmQuery.in).toHaveBeenCalledWith('alarm_id', ['dep']);
+  });
+
+  it('출발만 끈 직후 그 출발 알람만 지정해도(alarmIds) 같은 약속의 준비 · 기상이 다시 걸림', async () => {
+    mockAlarmRows = [serverRow('wake'), serverRow('prep'), serverRow('arr')];
+    mockCore.list.mockResolvedValue(allKinds.map((kind) => onPhoneAt(kind)));
+    mockParticipantRows = [{ alarm_id: 'dep', participant_id: 'p1' }];
+    mockEnabledIds = []; // 방금 꺼서 서버에 켜진 행이 없음
+    const summary = await reconcile({ nowMs: NOW_DAY_BEFORE, alarmIds: ['dep', 'arr'] });
+    expect(summary.canceled).toEqual(['dep']);
+    expect(scheduledIds()).toEqual(['wake', 'prep']);
+  });
+
+  it('지우는 출발 알람이 지난 알람이면(약속 알람이 이미 울림) 약속을 묻지 않고 준비 · 기상도 안 걺', async () => {
+    const afterDeparture = Date.parse('2025-05-22T00:10:00.000Z'); // 9:10
+    mockAlarmRows = [serverRow('arr')];
+    mockCore.list.mockResolvedValue([onPhoneAt('dep'), onPhoneAt('arr')]);
+    await reconcile({ nowMs: afterDeparture });
+    expect(mockAlarmQuery.select).not.toHaveBeenCalledWith('alarm_id, participant_id');
+    expect(mockCore.scheduleAll).not.toHaveBeenCalled();
+  });
+
+  it('서버 목록이 상한에서 잘렸으면 "서버에 없음"을 못 믿어 출발 알람의 약속을 묻지 않고 준비 · 기상도 안 걺', async () => {
+    mockAlarmRows = Array.from({ length: 500 }, (_, i) => ({ ...serverRow('arr'), alarm_id: `s-${i}`, participant_id: `q-${i}` }));
+    mockCore.list.mockResolvedValue([onPhoneAt('dep')]);
+    const summary = await reconcile({ nowMs: NOW_DAY_BEFORE });
+    expect(mockAlarmQuery.select).not.toHaveBeenCalledWith('alarm_id, participant_id');
+    expect(summary.canceled).toEqual([]);
+  });
+
+  it('지울 출발 알람의 약속을 읽는 데 실패하면 던짐 — 폰 예약은 그대로 두고 다음 맞추기에서 다시', async () => {
+    mockAlarmRows = [serverRow('wake'), serverRow('prep')];
+    mockCore.list.mockResolvedValue(allKinds.map((kind) => onPhoneAt(kind)));
+    (mockAlarmQuery.in as jest.Mock<() => Promise<unknown>>).mockResolvedValueOnce({ data: null, error: { message: 'offline' } });
+    await expect(reconcile({ nowMs: NOW_DAY_BEFORE })).rejects.toMatchObject({ message: 'offline' });
+    expect(mockCore.cancel).not.toHaveBeenCalled();
     expect(mockCore.scheduleAll).not.toHaveBeenCalled();
   });
 });
