@@ -49,6 +49,7 @@ function reRingOffsetsFor(intensity: AlarmIntensity): number[] {
 }
 
 // 알림 · 알람 화면 한 줄. WAKE · PREPARE · DEPARTURE는 ring.tsx(H07)와 같은 문구, ARRIVE · ROUTINE은 목업에 없어 임시 (작성자 판단)
+// 서버가 꾸러미에 notice를 주면(약속의 준비 · 출발 알림) 이 줄 대신 그 글자를 씀 — buildRingPlan. 기상(WAKE)은 서버가 notice를 안 줘서 이 줄 그대로
 const HEADING: Record<AlarmType, string> = {
   WAKE: '일어날 시간이에요',
   PREPARE: '준비할 시간이에요',
@@ -73,11 +74,12 @@ export function volumePercentFor(intensity: AlarmIntensity, volumeAdjust = 0): n
   return Math.min(100, Math.max(MIN_VOLUME_PERCENT, percent));
 }
 
-/** 꾸러미 한 개의 울림 계획 */
+/** 꾸러미 한 개의 울림 계획. 꾸러미에 notice가 있으면 그 글자가 heading, 없거나 비면 종류별 HEADING */
 export function buildRingPlan(
-  pkg: Pick<RingPackage, 'type' | 'intensity'> & Partial<Pick<RingPackage, 'soundKey' | 'volumeAdjust'>>,
+  pkg: Pick<RingPackage, 'type' | 'intensity'> & Partial<Pick<RingPackage, 'soundKey' | 'volumeAdjust' | 'notice'>>,
 ): RingPlan {
   const soundKey = pkg.soundKey?.trim() || DEFAULT_SOUND_KEY;
+  const heading = (fallback: string) => pkg.notice?.trim() || fallback;
   if (pkg.type === 'WAKE') {
     return {
       sound: true,
@@ -86,7 +88,7 @@ export function buildRingPlan(
       maxRingMillis: MAX_RING_MILLIS,
       reRingOffsetsMillis: reRingOffsetsFor(pkg.intensity),
       snoozeMillis: SNOOZE_MILLIS,
-      heading: HEADING.WAKE,
+      heading: heading(HEADING.WAKE),
       oneTapLabel: null,
       oneTapEventType: null,
     };
@@ -99,7 +101,7 @@ export function buildRingPlan(
     maxRingMillis: 0,
     reRingOffsetsMillis: [],
     snoozeMillis: 0,
-    heading: HEADING[pkg.type],
+    heading: heading(HEADING[pkg.type]),
     oneTapLabel: oneTap.label,
     oneTapEventType: oneTap.eventType,
   };
@@ -151,6 +153,7 @@ export function validateRingPackage(pkg: RingPackage): void {
 /**
  * 네이티브에 넘기는 글자 — 꾸러미 + 울림 계획을 JSON 하나로
  * 안 읽는 자리(vibration · snoozeMinutesOptions)는 넘기지 않음. 값이 없는 칸은 빠짐
+ * notice도 따로 안 넘김 — buildRingPlan이 plan.heading에 이미 넣었고, 네이티브는 plan.heading만 저장해 알림에 씀
  */
 export function toNativePayload(pkg: RingPackage, plan: RingPlan): string {
   return JSON.stringify({

@@ -48,7 +48,8 @@ type RingPackage = {
   subtitle?: string;      // "오전 10:00 · 세종대학교"
   intensity: 'SOFT' | 'NORMAL' | 'STRONG';
   snoozeLimit: number;    // 기본 3 — 저장만 함, 아직 안 셈 (D3)
-  voiceText?: string;     // 음성 안내 문장 — 저장만 함 (D8, 나중)
+  voiceText?: string;     // 음성 안내 문장 — 저장만 함 (D8, 나중). 서버가 약속의 기상 알람에 채움
+  notice?: string;        // 알림 한 줄 — 있으면 울림 계획의 heading이 이 글자. 서버가 약속의 준비 · 출발 알림에 채움
   soundKey?: string;      // 소리 고르기. 지금은 어떤 값이든 기본 소리(폰 기본 알람음)
   volumeAdjust?: number;  // 평가 보정 비율, -0.1 = 볼륨 10% 줄임 (#81)
   departAt?: number;      // 출발 시각 (단축 준비 안내용) — 저장만 함
@@ -56,6 +57,21 @@ type RingPackage = {
   snoozeMinutesOptions?: readonly number[];                  // 자리만, 안 읽음 (D3)
 };
 ```
+
+### 알림 문구 (`notice` · `voiceText`)
+
+약속 알람만 서버가 문구를 채움. 새 알림을 늘리지 않고 기존 준비 · 출발 알림 문구에 출발 안내를 합침 (D65 기본안). 일정 없는 알람 · 루틴 · 도착은 문구 없이 `HEADING` 그대로.
+
+| 종류 | 알림에 보이는 줄 (`plan.heading`) | `voiceText` (저장만, 읽어 주기는 D8) |
+|---|---|---|
+| PREPARE | `notice`: `오전 8:40 출발까지 30분` (출발 알람 시각 − 준비 알람 시각, 60분 이상이면 `1시간 10분`) | — |
+| DEPARTURE | `notice`: `지금 나가면 오전 9:50 도착 · 여유 10분` (도착 = 출발 알람 시각 + 이동분, 여유 = 약속 − 도착. 0이면 `여유 없음`, 늦으면 `10분 늦어요`) | — |
+| WAKE | 그대로 `일어날 시간이에요` | `좋은 아침이에요. 오늘 첫 일정은 오전 10시 전공 수업이에요. 오전 9시에 나가면 돼요.` (출발 알람이 없으면 마지막 문장 없음) |
+
+- 글자는 서버 `_shared/ring-package.ts`가 만들고 앱 `lib/alarmSync/reconcile.ts`(`buildServerPackages`)가 **같은 함수**로 만듦 — 서버 `alarm-commit`이 돌려준 꾸러미와 앱이 서버 행으로 다시 만든 꾸러미가 같은 글자. 도착 · 여유 계산은 `_shared/calc/depart.ts`(7장 7.5.2)
+- 나르는 길: `notice`가 있으면 `buildRingPlan`이 그 글자를 `plan.heading`에 넣음. 네이티브는 `notice` 칸을 몰라도 되고 `plan.heading`만 저장해(`StoredAlarm`에 `plan`이 통째로 들어감) 알림 본문 `heading · subtitle`에 씀(`AlarmNotifications.showNotice`). 재부팅 뒤 다시 걸기(`AlarmBootReceiver` → `restoreAll`)도 저장된 값을 그대로 다시 걸어서 글자가 유지됨 → **Kotlin 변경 없음, APK 다시 받을 필요 없음**
+- 글자는 저장(`alarm-commit`)할 때 정해짐. 알람 시각이 그대로면 앱 맞추기(`planReconcile`)가 다시 걸지 않으므로(시각 · 강도만 비교), 같은 약속의 다른 알람 시각만 다른 기기에서 바뀐 경우 준비 알림 글자가 옛 값일 수 있음 — 약속을 다시 저장하면 새로 걸림
+- 이동 시간이 비어 있으면 출발 문구가 빠지고, 시각 서식이 실패하면 문구만 빠지고 알람은 그대로 걸림
 
 반복은 폰이 하지 않음. 루틴(`routines.repeat_days`)과 반복 약속(`recurrence_rule`)은 서버가 **다음 회차 하나만** `alarms` 행으로 만들고(`scheduled_at`은 시각 하나), 울린 뒤 해제 · MISSED 기록이 들어오면 다음 회차를 다시 만듦(기록이 안 들어오면 매일 03:00 배치가 메움). 그래서 꾸러미에는 `atMillis` 하나면 됨 (회차 수는 D4가 정함, 폰 쪽에 가정하지 않음). 예전 `scheduleDailyAlarm`(매일 반복)은 없앰.
 
@@ -185,7 +201,7 @@ WAKE를 해제하면(알람 화면 · 알림 버튼 모두) 앱을 `respecalarm:
 | D3 | 미루기 5 · 10 · 15분 고르기 · 횟수 한도 | `snoozeMinutesOptions` · `snoozeLimit`을 읽고 한도면 단축 준비 안내(`departAt`) |
 | D2 | 기상 확인 무응답 시 다시 울림 | 지금은 안 만듦 |
 | Q7 | 소리 3종 | `soundKey`로 앱에 든 파일을 고름 (기본 키만 폰 기본 알람음) |
-| D8 | 음성 안내 | 알람 소리 채널로 폰 TTS가 `voiceText`를 읽음 (실패해도 사이렌은 울림) |
+| D8 | 음성 안내 | 알람 소리 채널로 폰 TTS가 `voiceText`를 읽음 (실패해도 사이렌은 울림). 문장은 지금 서버가 약속의 기상 알람에 채워 둠 — 읽는 것만 네이티브 PR |
 | 나중 | iOS | AlarmKit 구현은 안드로이드 뒤 (Q9) |
 
 ## 지킬 것

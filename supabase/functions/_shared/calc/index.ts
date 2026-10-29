@@ -3,6 +3,7 @@
 export * from './types.ts';
 export * from './time.ts';
 export * from './chain.ts';
+export * from './depart.ts';
 export * from './order.ts';
 export * from './intensity.ts';
 export * from './prepare.ts';

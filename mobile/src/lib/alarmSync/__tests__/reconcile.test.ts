@@ -46,6 +46,7 @@ describe('서버 행 → 예약 꾸러미 (서버 alarm-commit과 같은 조립)
       snoozeLimit: 3,
       soundKey: 'theme_urgent',
       departAt: Date.parse('2026-10-20T00:00:00.000Z'),
+      voiceText: '좋은 아침이에요. 오늘 첫 일정은 오전 10시 팀 주간회의예요. 오전 9시에 나가면 돼요.', // 약속 기상 알람이라 출발 알람(9:00)을 읽어 줌
     });
   });
 
@@ -92,6 +93,47 @@ describe('서버 행 → 예약 꾸러미 (서버 alarm-commit과 같은 조립)
     const broken = row({ alarm_id: 'w', alarm_type: 'WAKE', scheduled_at: '2026-10-19T22:30:00.000Z', appointment: { title: '회의', appointment_at: '날짜 아님', dest_name: '세종대학교' } });
     const [pkg] = buildServerPackages([broken]);
     expect(pkg).toMatchObject({ alarmId: 'w', title: '회의', subtitle: '세종대학교' });
+  });
+
+  // 서버 supabase/functions/_shared/morning-flow.test.ts의 "하루 재생"과 같은 입력 · 같은 글자 — 둘 중 한쪽만 바뀌면 여기서 잡힘
+  describe('알림 문구 (준비 · 출발 notice, 기상 voiceText) — 서버 alarm-commit과 같은 글자', () => {
+    const lesson = { title: '전공 수업', appointment_at: '2025-05-22T01:00:00.000Z', dest_name: '광개토관' }; // 한국 시각 10:00
+    const chain = (over: Partial<SyncRow> = {}) => [
+      row({ alarm_id: 'wake', alarm_type: 'WAKE', scheduled_at: '2025-05-21T23:00:00.000Z', appointment: lesson, travel_minutes: 50, ...over }), // 8:00
+      row({ alarm_id: 'prep', alarm_type: 'PREPARE', scheduled_at: '2025-05-21T23:30:00.000Z', appointment: lesson, travel_minutes: 50, ...over }), // 8:30
+      row({ alarm_id: 'dep', alarm_type: 'DEPARTURE', scheduled_at: '2025-05-22T00:00:00.000Z', appointment: lesson, travel_minutes: 50, ...over }), // 9:00
+      row({ alarm_id: 'arr', alarm_type: 'ARRIVE', scheduled_at: '2025-05-22T00:50:00.000Z', appointment: lesson, travel_minutes: 50, ...over }), // 9:50
+    ];
+    const byId = (packages: RingPackage[]) => Object.fromEntries(packages.map((p) => [p.alarmId, p]));
+
+    it('약속 알람: 준비 · 출발은 notice, 기상은 voiceText, 도착은 그대로', () => {
+      const packages = byId(buildServerPackages(chain()));
+      expect(packages.prep.notice).toBe('오전 9:00 출발까지 30분');
+      expect(packages.dep.notice).toBe('지금 나가면 오전 9:50 도착 · 여유 10분');
+      expect(packages.wake.voiceText).toBe('좋은 아침이에요. 오늘 첫 일정은 오전 10시 전공 수업이에요. 오전 9시에 나가면 돼요.');
+      expect(packages.wake.notice).toBeUndefined();
+      expect([packages.arr.notice, packages.arr.voiceText]).toEqual([undefined, undefined]);
+    });
+
+    it('이동 시간을 모르면(칸이 비어 있음) 출발 문구만 빠지고 나머지는 그대로', () => {
+      const packages = byId(buildServerPackages(chain({ travel_minutes: null })));
+      expect(packages.dep.notice).toBeUndefined();
+      expect(packages.prep.notice).toBe('오전 9:00 출발까지 30분');
+    });
+
+    it('약속 시각을 못 읽으면 문구는 모두 빠지고 알람은 그대로', () => {
+      const packages = byId(buildServerPackages(chain({ appointment: { ...lesson, appointment_at: '날짜 아님' } })));
+      expect(Object.keys(packages)).toHaveLength(4);
+      expect([packages.dep.notice, packages.wake.voiceText, packages.prep.notice]).toEqual([undefined, undefined, undefined]);
+    });
+
+    it('일정 없는 알람 · 루틴 알람은 문구가 없음', () => {
+      const packages = buildServerPackages([
+        row({ alarm_id: 'solo', alarm_type: 'WAKE', scheduled_at: '2026-10-21T21:30:00.000Z', participant_id: null, appointment: null }),
+        row({ alarm_id: 'routine', alarm_type: 'ROUTINE', scheduled_at: '2026-10-22T21:30:00.000Z', participant_id: null, appointment: null, routine_id: 'r1', routine_title: '출근 준비' }),
+      ]);
+      for (const p of packages) expect(Object.keys(p).filter((k) => k === 'notice' || k === 'voiceText')).toEqual([]);
+    });
   });
 
   it('부제의 시각은 사용자 시간대 기준', () => {

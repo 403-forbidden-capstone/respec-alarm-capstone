@@ -18,6 +18,7 @@ export type SyncRow = PackageSource & {
   participant_id: string | null;
   routine_id: string | null;
   appointment: { title: string; appointment_at: string; dest_name: string | null } | null; // 약속 알람이면
+  travel_minutes?: number | null; // 약속 알람이면 내 참여 조건의 est_travel_minutes — 출발 알림의 도착 시각 · 여유 (없으면 그 줄이 빠짐)
   routine_title: string | null; // 루틴 알람이면
 };
 
@@ -32,9 +33,15 @@ function safeSubtitle(at: string, place: string | null, timeZone: string): strin
   }
 }
 
+function safeDate(value: string): Date | undefined {
+  const date = parseDbTime(value);
+  return Number.isNaN(date.getTime()) ? undefined : date;
+}
+
 // 서버가 alarm-commit에서 조립하는 것과 같은 꾸러미 (_shared/ring-package.ts) — 약속(참여 조건) · 루틴 · 일정 없는 알람별로 묶어서
 //   · 부제는 약속 알람이면 "오전 10:00 · 장소", 일정 없는 알람이면 알람 시각만 (서버와 같음), 루틴은 없음
 //   · departAt은 같은 약속의 출발 알람 시각 (단축 준비 안내용 — 폰이 아직 안 읽음). 출발 알람이 꺼져 있거나 이 목록에 없으면 빠짐
+//   · 약속 알람은 준비 · 출발 알림 문구(notice)와 기상 음성 문장(voiceText)도 서버와 같은 함수로 만듦 (_shared/ring-package.ts). 일정 없는 알람 · 루틴은 없음
 export function buildServerPackages(rows: readonly SyncRow[], timeZone: string = DEFAULT_TIME_ZONE): PhoneRingPackage[] {
   const tz = safeTimeZone(timeZone);
   const groups = new Map<string, SyncRow[]>();
@@ -51,6 +58,7 @@ export function buildServerPackages(rows: readonly SyncRow[], timeZone: string =
     const first = group[0];
     const appointment = first.appointment;
     const departure = group.find((row) => row.alarm_type === 'DEPARTURE');
+    const appointmentAt = appointment ? safeDate(appointment.appointment_at) : undefined;
     packages.push(
       ...buildRingPackages({
         alarms: group,
@@ -61,6 +69,8 @@ export function buildServerPackages(rows: readonly SyncRow[], timeZone: string =
             ? undefined
             : safeSubtitle(first.scheduled_at, null, tz),
         departAt: departure ? parseDbTime(departure.scheduled_at) : undefined,
+        // 약속 시각을 못 읽으면 문구만 빼고 꾸러미는 그대로 (알람은 울려야 함)
+        appointment: appointmentAt ? { appointmentAt, travelMinutes: first.travel_minutes, timeZone: tz } : undefined,
       }),
     );
   }

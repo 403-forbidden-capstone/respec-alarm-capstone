@@ -176,7 +176,7 @@ create policy wake_signal_receive on realtime.messages
 
 - `est_travel_minutes` · `travel_source`를 보내면 그 값을 그대로 저장함 (미리 보기와 같은 시각). **직접 입력한 이동은 이어받음**: 이 칸이 없고 기존 약속에 저장된 `travel_source`가 `MANUAL`이면 저장된 `est_travel_minutes`를 `MANUAL`로 그대로 씀 (길찾기를 다시 안 부르고, 시각 · 강도의 직접 값과 같은 규칙. 미리 보기는 "자동으로 되돌리기" 값만 따로 구함). `API`로 저장된 값은 D5 때문에 이어받지 않고 다시 구함. 이 칸이 없고 이어받을 값도 없으면 서버가 `alarm-suggest`와 같은 순서로 구하고, `API`가 아닌 값(`CACHED` · `ESTIMATE`)이면 저장하지 않고 `ROUTE_UNAVAILABLE`(`details.fallback`)으로 돌려줌 → 사용자가 확인한 값을 `MANUAL`로 다시 보냄 (7장 7.1.2 단계 4, `CACHED`는 D5)
 - 일정 없는 알람: `{ "type": "STANDALONE", "alarm": { "alarm_id"?, "scheduled_at", "recurrence_rule"?, "is_enabled"?, "levels"? } }` — 약속 · 루틴 없는 기상 알람 하나 (D46 · Q10 B). `alarm_id`가 있으면 고침. 이름은 `알람` 고정
-- 응답: `appointment_id` · `participant_id` · `alarms[]` · **`ring_packages[]`**(알람 코어 `RingPackage` 그대로 — `alarmId · type · atMillis · title · subtitle · intensity · snoozeLimit · soundKey · departAt`, 켜진 알람만) · **`canceled_alarm_ids[]`**(폰에서 `cancel()`할 id: 지워졌거나 꺼진 알람) · `warnings`
+- 응답: `appointment_id` · `participant_id` · `alarms[]` · **`ring_packages[]`**(알람 코어 `RingPackage` 그대로 — `alarmId · type · atMillis · title · subtitle · intensity · snoozeLimit · soundKey · departAt` + 약속 알람은 `notice`(준비 · 출발 알림 한 줄) · `voiceText`(기상 음성 문장), 켜진 알람만. 문구 규칙은 `docs/alarm-core.md` "알림 문구") · **`canceled_alarm_ids[]`**(폰에서 `cancel()`할 id: 지워졌거나 꺼진 알람) · `warnings`
 - 반복(D44)은 `appointments.recurrence_rule`에 저장만 하고 알람은 첫 회차만 만듦 (D4)
 - 트랜잭션이 아님: 약속 → 참여 조건 → 알람 → 고친 값 기록 순으로 쓰고, 이번 호출이 새로 만든 약속 · 참여 조건은 중간에 실패하면 지움. 같은 요청을 다시 보냈을 때 같은 상태가 되는 건 **기존 약속(`appointment_id`)일 때만** (고친 값 기록만 한 번 더 쌓임). 새 약속(`appointment`)은 응답만 잃고 다시 보내면 약속 · 알람이 두 벌 생기고, 일정 없는 알람도 `alarm_id` 없이 다시 보내면 하나 더 생김 (`Idempotency-Key` 같은 요청 키는 아직 안 받음)
 
@@ -188,7 +188,7 @@ create policy wake_signal_receive on realtime.messages
 
 ### 공용 계산 (`functions/_shared/calc/`)
 
-기상 시각 역산 · 강도 · 준비 P80 · 순서 확인 · 저장 검증 · 이동시간 폴백 계산 · 그날 첫 일정 판정(`hasEarlierWake`: 약속 시각이 이 약속보다 앞선 같은 날 약속에 켜진 기상 알람이 있으면 이 약속은 기상 없이 준비부터. 알람이 울리는 시각이 아니라 약속 시각 기준이고, 같은 시각 두 약속은 둘 다 기상을 가짐). Deno · Node API를 안 쓰는 순수 TS고 import는 상대 경로 + `.ts`라서 앱(P6)이 경로 별칭으로 같은 파일을 가져다 씀 (앱 `tsconfig`에 `allowImportingTsExtensions`, Metro에 `watchFolders` 필요). 규칙은 앱 목업 계산(`mobile/src/mocks/calc.ts` · `features/alarm/adjust.ts`)을 그대로 옮김 — 문서(4장 · 7장)와 다른 곳(낮은 중요도 강도 · 도착 알람 시각 · 준비시간 · 7장의 개인 보정 ±30분 / 예측 15~240분 clamp)은 D56이 정할 때까지 목업을 따름 — 앱이 이 계산을 그대로 가져다 쓰므로 목업과 한 줄도 다르면 안 됨.
+기상 시각 역산 · 강도 · 준비 P80 · 순서 확인 · 저장 검증 · 이동시간 폴백 계산 · 출발 여유(`departSlack` · `departNow`: 약속 − 이동으로 구한 출발 한계와 지금 + 남은 준비를 비교해 여유 · 빠듯 · 지각 위험, 7장 7.5.2. 출발 알림 글자의 도착 · 여유도 이 계산) · 그날 첫 일정 판정(`hasEarlierWake`: 약속 시각이 이 약속보다 앞선 같은 날 약속에 켜진 기상 알람이 있으면 이 약속은 기상 없이 준비부터. 알람이 울리는 시각이 아니라 약속 시각 기준이고, 같은 시각 두 약속은 둘 다 기상을 가짐). Deno · Node API를 안 쓰는 순수 TS고 import는 상대 경로 + `.ts`라서 앱(P6)이 경로 별칭으로 같은 파일을 가져다 씀 (앱 `tsconfig`에 `allowImportingTsExtensions`, Metro에 `watchFolders` 필요). 규칙은 앱 목업 계산(`mobile/src/mocks/calc.ts` · `features/alarm/adjust.ts`)을 그대로 옮김 — 문서(4장 · 7장)와 다른 곳(낮은 중요도 강도 · 도착 알람 시각 · 준비시간 · 7장의 개인 보정 ±30분 / 예측 15~240분 clamp)은 D56이 정할 때까지 목업을 따름 — 앱이 이 계산을 그대로 가져다 쓰므로 목업과 한 줄도 다르면 안 됨.
 
 ### 시험
 

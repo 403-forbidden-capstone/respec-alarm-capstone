@@ -102,7 +102,7 @@ async function fetchServerRows(userId: string, fromMs: number): Promise<SyncRow[
   const { data, error } = await supabase
     .from('alarms')
     .select(
-      'alarm_id, alarm_type, scheduled_at, intensity, sound_key, snooze_limit, is_enabled, participant_id, routine_id, appointment_participants(appointments(title, appointment_at, dest_name)), routines(title)',
+      'alarm_id, alarm_type, scheduled_at, intensity, sound_key, snooze_limit, is_enabled, participant_id, routine_id, appointment_participants(est_travel_minutes, appointments(title, appointment_at, dest_name)), routines(title)',
     )
     .eq('user_id', userId)
     .eq('is_enabled', true)
@@ -121,6 +121,7 @@ async function fetchServerRows(userId: string, fromMs: number): Promise<SyncRow[
     participant_id: row.participant_id,
     routine_id: row.routine_id,
     appointment: row.appointment_participants?.appointments ?? null,
+    travel_minutes: row.appointment_participants?.est_travel_minutes ?? null,
     routine_title: row.routines?.title ?? null,
   }));
 }
