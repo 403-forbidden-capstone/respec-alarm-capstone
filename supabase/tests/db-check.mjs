@@ -162,12 +162,12 @@ const MEETING = ['decision_comments', 'decision_votes', 'decision_states'];
 // 서버 전용 표 — RLS는 켜고 정책은 없음 (앱은 못 읽고 못 씀, service_role만). 아래 "반복 다음 회차"에서 따로 확인
 const SERVER_ONLY = ['roll_attempts'];
 
-await check('모든 public 테이블(앱 18개 — 서버 전용 1개 포함 + 회의 도구 3개)에 RLS가 켜져 있음', async () => {
+await check('모든 public 테이블(앱 20개 — 서버 전용 1개 포함 + 회의 도구 3개)에 RLS가 켜져 있음', async () => {
   const r = await q(`select c.relname, c.relrowsecurity from pg_class c join pg_namespace n on n.oid = c.relnamespace
                      where n.nspname = 'public' and c.relkind = 'r' order by 1`);
   const off = r.filter((x) => !x.relrowsecurity).map((x) => x.relname);
   const app = r.filter((x) => !MEETING.includes(x.relname)).length;
-  return app === 18 && r.length === 21 && off.length === 0 ? true : { count: r.length, app, off };
+  return app === 20 && r.length === 23 && off.length === 0 ? true : { count: r.length, app, off };
 });
 await check('모든 앱 테이블에 정책이 있고(서버 전용 표 제외) anon용 정책은 없음', async () => {
   const r = await q(`select c.relname, count(p.polname) as n,
@@ -1267,6 +1267,291 @@ await check('realtime · cron · Vault가 없는 DB에도 마이그레이션이 
 
 
 // ---------------------------------------------------------------------
+// AI 대화 상태 · 호출 기록 (L4 PR 2) — conversation_sessions.turns · server_state, ai_calls
+// ---------------------------------------------------------------------
+
+// 호출 기록 한 줄 — 서버 함수(service_role)가 넣는 모양. 필요한 칸만 덮어씀
+const CALL = { point: 'T1', prompt_id: 'T1', prompt_version: 'v1.3', model: 'test-model', ok: true, latency_ms: 1200 };
+const insCall = (uid, over = {}, tail = 'returning *') => {
+  const row = { user_id: uid, ...CALL, ...over };
+  const cols = Object.keys(row);
+  return q(`insert into public.ai_calls (${cols.join(', ')}) values (${cols.map((_, i) => '$' + (i + 1)).join(', ')}) ${tail}`, Object.values(row));
+};
+const dAi = { calls: 0, sessions: 0, questions: 0 };   // D의 호출 기록 · 대화 · 질문 기록 수 — 탈퇴 검사에서 CASCADE로 지워졌는지 봄
+const NO_USER = '99999999-0000-4000-8000-000000000000';
+
+await check('대화 칸: turns · server_state 기본값은 [] · {} 이고, 배열 · 객체가 아니거나 NULL이면 못 넣음 (기본값은 앱 역할로, 종류 · NULL 제약은 서버 키로 확인)', async () => {
+  await as(A);
+  const [s] = await q(`insert into public.conversation_sessions (user_id, session_type, input_mode) values ($1, 'BEFORE_SLEEP', 'TEXT') returning turns, server_state`, [A]);
+  await svc();   // 앱 역할은 값을 넣는 순간 아래 서버 전용 트리거가 먼저 막으므로, 제약은 서버 키로 확인함
+  const badTurns = await expectErr(() => q(`insert into public.conversation_sessions (user_id, session_type, turns) values ($1, 'ANYTIME', '{}')`, [A]), /conversation_sessions_turns_is_array/);
+  const badState = await expectErr(() => q(`insert into public.conversation_sessions (user_id, session_type, server_state) values ($1, 'ANYTIME', '[]')`, [A]), /conversation_sessions_server_state_is_object/);
+  const nullTurns = await expectErr(() => q(`insert into public.conversation_sessions (user_id, session_type, turns) values ($1, 'ANYTIME', null)`, [A]), /not-null|null value/);
+  const nullState = await expectErr(() => q(`insert into public.conversation_sessions (user_id, session_type, server_state) values ($1, 'ANYTIME', null)`, [A]), /not-null|null value/);
+  return Array.isArray(s.turns) && s.turns.length === 0 && Object.keys(s.server_state).length === 0 && !Array.isArray(s.server_state)
+    && badTurns === true && badState === true && nullTurns === true && nullState === true
+    ? true : { s, badTurns, badState, nullTurns, nullState };
+});
+await check('대화 칸: 서버 키(service_role)가 턴을 덧붙이고 서버 상태를 고쳐 쓰면 그대로 읽힘 · 본인만 읽음', async () => {
+  await as(B);
+  const [{ session_id: sb }] = await q(`insert into public.conversation_sessions (user_id, session_type) values ($1, 'AFTER_WAKE') returning session_id`, [B]);
+  await svc();
+  const turns = [{ role: 'user', text: '내일 10시 강남 발표', at: '2026-10-29T14:00:00Z' }, { role: 'ai', text: '저장할까요?', at: '2026-10-29T14:00:03Z', card: 'c1' }];
+  await q(`update public.conversation_sessions set turns = $1::jsonb, server_state = $2::jsonb where session_id = $3`,
+    [JSON.stringify(turns), JSON.stringify({ pending: ['c1'], silence: 0, crisis_shown: false, asked_server_question: true, utterances: 1 }), sb]);
+  const [after] = await q(`select turns, server_state from public.conversation_sessions where session_id = $1`, [sb]);
+  await as(A);
+  const hidden = await q(`select 1 from public.conversation_sessions where session_id = $1`, [sb]);
+  await as(B);
+  const [mine] = await q(`select turns, server_state from public.conversation_sessions where session_id = $1`, [sb]);
+  return after.turns.length === 2 && after.turns[1].card === 'c1' && after.server_state.pending[0] === 'c1' && after.server_state.utterances === 1
+    && hidden.length === 0 && mine.turns[0].role === 'user' && mine.server_state.asked_server_question === true
+    ? true : { after, hidden, mine };
+});
+// turns · server_state는 서버 키만 씀 — 본인 insert · update 정책이 있어도 앱이 말 수 같은 서버 상태를 되돌리지 못하게 (트리거 server_only_columns)
+await check('대화 칸 서버 전용(만들 때): 앱이 두 칸에 값을 넣어 만들면 거부(42501) · 기본값을 적거나 다른 칸만 넣는 것은 통과 · upsert로도 못 넣음', async () => {
+  await as(A);
+  const ins = (cols, vals) => q(`insert into public.conversation_sessions (user_id, session_type, ${cols}) values ($1, 'ANYTIME', ${vals}) returning session_id`, [A]);
+  const turnsVal = await expectErr(() => ins('turns', `'[{"role":"user","text":"x"}]'`), /서버 함수만 쓸 수 있음/);
+  const stateVal = await expectErr(() => ins('server_state', `'{"utterances":0,"crisis_shown":true}'`), /서버 함수만 쓸 수 있음/);
+  const bothVal = await expectErr(() => ins('turns, server_state', `'[1]', '{"a":1}'`), /서버 함수만 쓸 수 있음/);
+  const code = await ins('turns', `'[1]'`).then(() => null, (e) => e.code);
+  // 기본값 그대로이거나 두 칸을 안 쓰면 됨 (오류가 아니라 기본값으로 덮지는 않음 — 값을 넣으면 위처럼 오류)
+  const dflt = await ins('turns, server_state', `'[]', '{}'`);
+  const other = await ins('transcript, extracted_data, apply_status', `'안녕', '{"a":1}', 'APPLIED'`);
+  // upsert 우회: 새 줄을 값과 함께 넣거나 · 있는 줄을 두 칸 값으로 덮기
+  const upNew = await expectErr(() => q(`insert into public.conversation_sessions (session_id, user_id, session_type, turns) values (gen_random_uuid(), $1, 'ANYTIME', '[1]'::jsonb)
+                                         on conflict (session_id) do nothing`, [A]), /서버 함수만 쓸 수 있음/);
+  const upSet = await expectErr(() => q(`insert into public.conversation_sessions (session_id, user_id, session_type, server_state) values ($1, $2, 'ANYTIME', '{}'::jsonb)
+                                         on conflict (session_id) do update set server_state = '{"x":1}'::jsonb`, [dflt[0].session_id, A]), /서버 함수만 바꿀 수 있음/);
+  const made = [dflt[0].session_id, other[0].session_id];
+  const [row] = await q(`select turns, server_state from public.conversation_sessions where session_id = $1`, [made[0]]);
+  await q(`delete from public.conversation_sessions where session_id = any($1::uuid[])`, [made]);
+  return turnsVal === true && stateVal === true && bothVal === true && code === '42501' && dflt.length === 1 && other.length === 1
+    && upNew === true && upSet === true && row.turns.length === 0 && Object.keys(row.server_state).length === 0
+    ? true : { turnsVal, stateVal, bothVal, code, dflt, other, upNew, upSet, row };
+});
+await check('대화 칸 서버 전용(고칠 때): 앱이 두 칸을 바꾸면 거부(덧붙이기 · jsonb_set · 지우기 · upsert) · 값이 그대로이거나 다른 칸을 고치는 update는 통과 · 남의 줄은 RLS가 0행', async () => {
+  await as(A);
+  const [{ session_id: sid }] = await q(`insert into public.conversation_sessions (user_id, session_type) values ($1, 'BEFORE_SLEEP') returning session_id`, [A]);
+  await svc();
+  await q(`update public.conversation_sessions set turns = '[{"role":"user","text":"안녕"}]', server_state = '{"utterances":3,"pending":["c1"]}' where session_id = $1`, [sid]);
+  await as(A);
+  const rej = (sql) => expectErr(() => q(sql, [sid]), /서버 함수만 바꿀 수 있음/);
+  const append = await rej(`update public.conversation_sessions set turns = turns || '[{"role":"user","text":"끼워 넣기"}]'::jsonb where session_id = $1`);
+  const setPath = await rej(`update public.conversation_sessions set server_state = jsonb_set(server_state, '{utterances}', '0') where session_id = $1`);
+  const wipeTurns = await rej(`update public.conversation_sessions set turns = '[]'::jsonb where session_id = $1`);
+  const wipeState = await rej(`update public.conversation_sessions set server_state = '{}'::jsonb where session_id = $1`);
+  const withOther = await rej(`update public.conversation_sessions set transcript = '끼어듦', server_state = '{}'::jsonb where session_id = $1`);   // 다른 칸을 같이 고쳐도 통째로 거부
+  const upsert = await expectErr(() => q(`insert into public.conversation_sessions (session_id, user_id, session_type) values ($1, $2, 'BEFORE_SLEEP')
+                                          on conflict (session_id) do update set turns = '[]'::jsonb, server_state = '{}'::jsonb`, [sid, A]), /서버 함수만 바꿀 수 있음/);
+  // 값을 그대로 두거나(같은 값을 다시 씀) 두 칸이 아닌 칸을 고치는 건 막지 않음
+  const same = await q(`update public.conversation_sessions set turns = turns, server_state = server_state where session_id = $1 returning 1`, [sid]);
+  const sameLit = await q(`update public.conversation_sessions set server_state = '{"utterances":3,"pending":["c1"]}'::jsonb where session_id = $1 returning 1`, [sid]);
+  const other = await q(`update public.conversation_sessions set transcript = '안녕', apply_status = 'APPLIED', ended_at = now(), extracted_data = '{"a":1}' where session_id = $1 returning transcript, apply_status`, [sid]);
+  // 남의 줄은 RLS가 행을 가려 0행 (트리거까지 가지 않음)
+  await as(B);
+  const foreign = await q(`update public.conversation_sessions set turns = '[]'::jsonb where session_id = $1 returning 1`, [sid]);
+  await svc();
+  const [kept] = await q(`select turns, server_state, transcript from public.conversation_sessions where session_id = $1`, [sid]);
+  await as(A);
+  await q(`delete from public.conversation_sessions where session_id = $1`, [sid]);
+  return append === true && setPath === true && wipeTurns === true && wipeState === true && withOther === true && upsert === true
+    && same.length === 1 && sameLit.length === 1 && other.length === 1 && other[0].transcript === '안녕' && other[0].apply_status === 'APPLIED'
+    && foreign.length === 0 && kept.turns.length === 1 && kept.turns[0].text === '안녕' && kept.server_state.utterances === 3 && kept.transcript === '안녕'
+    ? true : { append, setPath, wipeTurns, wipeState, withOther, upsert, same, sameLit, other, foreign, kept };
+});
+await check('대화 칸 서버 전용: service_role · postgres는 두 칸을 넣고 고침 · 트리거 함수는 SECURITY INVOKER이고 앱 역할은 실행 권한이 없음', async () => {
+  await svc();
+  const [a] = await q(`insert into public.conversation_sessions (user_id, session_type, turns, server_state) values ($1, 'ANYTIME', '[{"role":"ai","text":"네"}]', '{"utterances":9}') returning session_id, turns, server_state`, [A]);
+  const upd = await q(`update public.conversation_sessions set turns = '[]'::jsonb, server_state = jsonb_set(server_state, '{utterances}', '0') where session_id = $1 returning turns, server_state`, [a.session_id]);
+  await su();   // 마이그레이션 · 대시보드가 쓰는 postgres
+  const [{ cu }] = await q(`select current_user as cu`);
+  const pgUpd = await q(`update public.conversation_sessions set turns = '[1]'::jsonb, server_state = '{"by":"postgres"}'::jsonb where session_id = $1 returning turns, server_state`, [a.session_id]);
+  const [pgIns] = await q(`insert into public.conversation_sessions (user_id, session_type, turns) values ($1, 'ANYTIME', '[2]') returning session_id, turns`, [A]);
+  await q(`delete from public.conversation_sessions where session_id in ($1, $2)`, [a.session_id, pgIns.session_id]);
+  const [fn] = await q(`select p.prosecdef, has_function_privilege('authenticated', p.oid, 'execute') as auth_x, has_function_privilege('anon', p.oid, 'execute') as anon_x,
+                               has_function_privilege('public', p.oid, 'execute') as public_x
+                        from pg_proc p where p.oid = 'private.server_only_session_columns()'::regprocedure`);
+  const trg = await q(`select tgname, tgenabled from pg_trigger where tgrelid = 'public.conversation_sessions'::regclass and not tgisinternal and tgname = 'server_only_columns'`);
+  return a.turns[0].text === '네' && a.server_state.utterances === 9 && upd.length === 1 && upd[0].turns.length === 0 && upd[0].server_state.utterances === 0
+    && cu === 'postgres' && pgUpd.length === 1 && pgUpd[0].server_state.by === 'postgres' && pgIns.turns[0] === 2
+    && fn.prosecdef === false && fn.auth_x === false && fn.anon_x === false && fn.public_x === false && trg.length === 1 && trg[0].tgenabled === 'O'
+    ? true : { a, upd, cu, pgUpd, pgIns, fn, trg };
+});
+
+await check('호출 기록: 칸 기본값(시도 1회 · 규칙 걸림 [] · 호출 글 NULL · 시각)과 토큰 · 비용 · 걸림 코드 · 모든 지점을 서버 키로 넣고 고치고 지움', async () => {
+  await svc();
+  const [r] = await insCall(A);
+  const [full] = await insCall(A, { point: 'T2F', ok: false, error_code: 'RATE_LIMITED', attempts: 2, input_tokens: 1800, output_tokens: 120, cache_read_tokens: 900, cache_write_tokens: 0,
+    thinking_tokens: 40, cost_usd: 0.003421, stop_reason: 'max_tokens', request_id: 'req_abc', flags: ['promises_save', 'alarm_relay_missing'], io: JSON.stringify({ input: '내일 10시', output: { ok: 1 } }) });
+  const points = [];
+  for (const p of ['T1', 'T2F', 'T2', 'T3', 'T4', 'T5', 'E4']) points.push((await insCall(A, { point: p }, 'returning point'))[0].point);
+  const upd = await q(`update public.ai_calls set ok = false, error_code = 'TIMEOUT' where call_id = $1 returning ok, error_code`, [r.call_id]);
+  const del = await q(`delete from public.ai_calls where call_id = $1 returning 1`, [r.call_id]);
+  await q(`delete from public.ai_calls where user_id = $1 and call_id <> $2`, [A, full.call_id]);   // 아래 검사가 쓸 한 줄만 남김
+  return r.attempts === 1 && Array.isArray(r.flags) && r.flags.length === 0 && r.io === null && r.error_code === null && r.input_tokens === null && r.cost_usd === null
+    && r.thinking_tokens === null && r.stop_reason === null && r.request_id === null && r.session_id === null && r.created_at && r.call_id
+    && full.attempts === 2 && full.flags.join() === 'promises_save,alarm_relay_missing' && full.error_code === 'RATE_LIMITED' && full.input_tokens === 1800 && full.cache_read_tokens === 900 && full.thinking_tokens === 40
+    && String(full.cost_usd) === '0.003421' && full.io.output.ok === 1 && full.stop_reason === 'max_tokens'
+    && points.join() === 'T1,T2F,T2,T3,T4,T5,E4' && upd.length === 1 && upd[0].error_code === 'TIMEOUT' && del.length === 1
+    ? true : { r, full, points, upd, del };
+});
+await check('호출 기록: 지점은 7가지만 · 지연 · 시도(0 = 보내기 전 실패는 가능, 음수 불가) · 토큰 · 비용은 음수 불가 · 필수 칸 · 없는 사용자 거부', async () => {
+  await svc();
+  const bad = (over, re) => expectErr(() => insCall(A, over, ''), re);
+  const point = await bad({ point: 'T9' }, /ai_calls_point_check/);
+  const lower = await bad({ point: 't1' }, /ai_calls_point_check/);
+  const latency = await bad({ latency_ms: -1 }, /ai_calls_latency_ms_check/);
+  const attempts = await bad({ attempts: -1 }, /ai_calls_attempts_check/);
+  const tokens = await bad({ output_tokens: -5 }, /ai_calls_tokens_check/);
+  const cost = await bad({ cost_usd: -0.01 }, /ai_calls_cost_usd_check/);
+  const noVersion = await bad({ prompt_version: null }, /not-null|null value/);
+  const noOk = await bad({ ok: null }, /not-null|null value/);
+  const ghost = await bad({ user_id: NO_USER }, /foreign key|violates/);
+  const zero = await insCall(A, { latency_ms: 0, attempts: 0, input_tokens: 0, cost_usd: 0 }, 'returning latency_ms, attempts');
+  await q(`delete from public.ai_calls where latency_ms = 0 and user_id = $1`, [A]);
+  return point === true && lower === true && latency === true && attempts === true && tokens === true && cost === true
+    && noVersion === true && noOk === true && ghost === true && zero.length === 1 && zero[0].attempts === 0
+    ? true : { point, lower, latency, attempts, tokens, cost, noVersion, noOk, ghost, zero };
+});
+await check('호출 기록: 사용자는 자기 것만 읽고 남의 것은 못 읽음 · anon은 못 읽음', async () => {
+  await svc();
+  await insCall(B, { point: 'T5' });
+  await insCall(B, { point: 'T4' });
+  const [{ n: total }] = await q(`select count(*)::int as n from public.ai_calls`);
+  await as(A);
+  const mine = await q(`select user_id, point from public.ai_calls`);
+  const peek = await q(`select 1 from public.ai_calls where user_id = $1`, [B]);
+  await as(B);
+  const theirs = await q(`select user_id from public.ai_calls`);
+  await as(C);
+  const none = await q(`select 1 from public.ai_calls`);
+  await as(null, 'anon');
+  const anon = await expectErr(() => q(`select * from public.ai_calls`), /permission denied/);
+  return total === 3 && mine.length === 1 && mine[0].user_id === A && peek.length === 0
+    && theirs.length === 2 && theirs.every((x) => x.user_id === B) && none.length === 0 && anon === true
+    ? true : { total, mine, peek, theirs, none, anon };
+});
+await check('호출 기록: 로그인 사용자는 넣기 · 고치기 · 지우기 모두 못 함 (자기 것도) · 정책은 읽기 하나뿐', async () => {
+  await as(A);
+  const ins = await expectErr(() => insCall(A, {}, ''), /permission denied/);
+  const forge = await expectErr(() => insCall(B, {}, ''), /permission denied/);
+  const upd = await expectErr(() => q(`update public.ai_calls set ok = false where user_id = $1`, [A]), /permission denied/);
+  const del = await expectErr(() => q(`delete from public.ai_calls where user_id = $1`, [A]), /permission denied/);
+  const upsert = await expectErr(() => insCall(A, {}, 'on conflict (call_id) do nothing'), /permission denied/);
+  await su();
+  const pol = await q(`select polname, polcmd from pg_policy where polrelid = 'public.ai_calls'::regclass`);
+  const [p] = await q(`select has_table_privilege('authenticated', 'public.ai_calls', 'select') as s, has_table_privilege('authenticated', 'public.ai_calls', 'insert') as i,
+                              has_table_privilege('authenticated', 'public.ai_calls', 'update') as u, has_table_privilege('authenticated', 'public.ai_calls', 'delete') as d,
+                              has_table_privilege('anon', 'public.ai_calls', 'select') as a`);
+  const [{ n }] = await q(`select count(*)::int as n from public.ai_calls where user_id = $1`, [A]);
+  return ins === true && forge === true && upd === true && del === true && upsert === true
+    && pol.length === 1 && pol[0].polname === 'ai_calls_select_own' && pol[0].polcmd === 'r'
+    && p.s === true && p.i === false && p.u === false && p.d === false && p.a === false && n === 1
+    ? true : { ins, forge, upd, del, upsert, pol, p, n };
+});
+await check('호출 기록: 대화를 지워도 호출 기록은 남고 대화 연결만 비워짐 · 대화별로 모아 볼 수 있음 · 없는 대화는 거부', async () => {
+  await svc();
+  const [{ session_id: sid }] = await q(`insert into public.conversation_sessions (user_id, session_type) values ($1, 'BEFORE_SLEEP') returning session_id`, [A]);
+  const [c1] = await insCall(A, { session_id: sid, point: 'T1' });
+  const [c2] = await insCall(A, { session_id: sid, point: 'T2F' });
+  const bySession = await q(`select call_id from public.ai_calls where session_id = $1`, [sid]);
+  const badSession = await expectErr(() => insCall(A, { session_id: NO_USER }, ''), /foreign key|violates/);
+  await as(A);   // 실제 경로: 사용자가 RLS로 자기 대화를 지움 (앱 역할에 ai_calls 수정 권한이 없어도 FK의 SET NULL은 돎)
+  const delSession = await q(`delete from public.conversation_sessions where session_id = $1 returning 1`, [sid]);
+  await svc();
+  const kept = await q(`select call_id, session_id from public.ai_calls where call_id in ($1, $2)`, [c1.call_id, c2.call_id]);
+  await q(`delete from public.ai_calls where call_id in ($1, $2)`, [c1.call_id, c2.call_id]);
+  return bySession.length === 2 && badSession === true && delSession.length === 1 && kept.length === 2 && kept.every((x) => x.session_id === null)
+    ? true : { bySession, badSession, delSession, kept };
+});
+
+// 질문 예산 공용 셈 자리 (헤드 10/29 H2) — user_questions
+const insQ = (uid, over = {}, tail = 'returning *') => {
+  const row = { user_id: uid, channel: 'CHAT', kind: 'PREP_CHECK', subject_key: 'PREP_CHECK:appt-1', ...over };
+  const cols = Object.keys(row);
+  return q(`insert into public.user_questions (${cols.join(', ')}) values (${cols.map((_, i) => '$' + (i + 1)).join(', ')}) ${tail}`, Object.values(row));
+};
+await check('질문 기록: 서버 키로 넣고(기본값: 물은 시각 · 답 없음) 답을 적고 지움 · 채널은 CHIP · CARD · CHAT만 · 필수 칸 · 없는 사용자 거부', async () => {
+  await svc();
+  const [r] = await insQ(A);
+  const chans = [];
+  for (const c of ['CHIP', 'CARD', 'CHAT']) chans.push((await insQ(A, { channel: c }, 'returning channel'))[0].channel);
+  const upd = await q(`update public.user_questions set answered_at = now(), answer = '챙겼어요' where question_id = $1 returning answered_at, answer`, [r.question_id]);
+  const bad = (over, re) => expectErr(() => insQ(A, over, ''), re);
+  const channel = await bad({ channel: 'VOICE' }, /user_questions_channel_check/);
+  const lower = await bad({ channel: 'chat' }, /user_questions_channel_check/);
+  const noKind = await bad({ kind: null }, /not-null|null value/);
+  const noSubject = await bad({ subject_key: null }, /not-null|null value/);
+  const ghost = await bad({ user_id: NO_USER }, /foreign key|violates/);
+  const ghostSession = await bad({ session_id: NO_USER }, /foreign key|violates/);
+  const del = await q(`delete from public.user_questions where user_id = $1 returning 1`, [A]);
+  return r.channel === 'CHAT' && r.asked_at && r.answered_at === null && r.answer === null && r.session_id === null && r.question_id
+    && chans.join() === 'CHIP,CARD,CHAT' && upd.length === 1 && upd[0].answer === '챙겼어요' && upd[0].answered_at
+    && channel === true && lower === true && noKind === true && noSubject === true && ghost === true && ghostSession === true && del.length === 4
+    ? true : { r, chans, upd, channel, lower, noKind, noSubject, ghost, ghostSession, del: del.length };
+});
+await check('질문 기록: 사용자는 자기 것만 읽고 남의 것은 못 읽음 · 넣기 · 고치기 · 지우기는 못 함(자기 것도) · anon은 못 읽음 · 정책은 읽기 하나뿐', async () => {
+  await svc();
+  const [qa] = await insQ(A);
+  await insQ(B, { channel: 'CARD', subject_key: 'PREP_CHECK:appt-2' });
+  await insQ(B, { channel: 'CHIP', kind: 'SLEEP_TIME', subject_key: 'SLEEP_TIME' });
+  await as(A);
+  const mine = await q(`select user_id from public.user_questions`);
+  const peek = await q(`select 1 from public.user_questions where user_id = $1`, [B]);
+  const ins = await expectErr(() => insQ(A, {}, ''), /permission denied/);
+  const forge = await expectErr(() => insQ(B, {}, ''), /permission denied/);
+  const upd = await expectErr(() => q(`update public.user_questions set answer = '조작' where question_id = $1`, [qa.question_id]), /permission denied/);
+  const del = await expectErr(() => q(`delete from public.user_questions where question_id = $1`, [qa.question_id]), /permission denied/);
+  await as(B);
+  const theirs = await q(`select user_id from public.user_questions`);
+  await as(C);
+  const none = await q(`select 1 from public.user_questions`);
+  await as(null, 'anon');
+  const anon = await expectErr(() => q(`select * from public.user_questions`), /permission denied/);
+  await su();
+  const pol = await q(`select polname, polcmd from pg_policy where polrelid = 'public.user_questions'::regclass`);
+  const [p] = await q(`select has_table_privilege('authenticated', 'public.user_questions', 'select') as s, has_table_privilege('authenticated', 'public.user_questions', 'insert') as i,
+                              has_table_privilege('authenticated', 'public.user_questions', 'update') as u, has_table_privilege('authenticated', 'public.user_questions', 'delete') as d,
+                              has_table_privilege('anon', 'public.user_questions', 'select') as a`);
+  return mine.length === 1 && mine[0].user_id === A && peek.length === 0 && ins === true && forge === true && upd === true && del === true
+    && theirs.length === 2 && theirs.every((x) => x.user_id === B) && none.length === 0 && anon === true
+    && pol.length === 1 && pol[0].polname === 'user_questions_select_own' && pol[0].polcmd === 'r'
+    && p.s === true && p.i === false && p.u === false && p.d === false && p.a === false
+    ? true : { mine, peek, ins, forge, upd, del, theirs, none, anon, pol, p };
+});
+await check('질문 기록: 같은 사람 · 같은 질문 키의 24시간 안 기록을 색인 키로 찾을 수 있고, 대화를 지워도 질문 기록은 남고 대화 연결만 비워짐 (예산 셈이 안 줄어듦)', async () => {
+  await svc();
+  const [{ session_id: sid }] = await q(`insert into public.conversation_sessions (user_id, session_type) values ($1, 'BEFORE_SLEEP') returning session_id`, [A]);
+  const [recent] = await insQ(A, { session_id: sid, subject_key: 'PREP_CHECK:appt-9' });
+  await insQ(A, { subject_key: 'PREP_CHECK:appt-9', asked_at: new Date(Date.now() - 30 * 3600 * 1000).toISOString() });   // 30시간 전은 24시간 밖
+  await insQ(B, { subject_key: 'PREP_CHECK:appt-9' });   // 다른 사람의 같은 키는 안 셈
+  const within = await q(`select question_id from public.user_questions where user_id = $1 and subject_key = $2 and asked_at > now() - interval '24 hours'`, [A, 'PREP_CHECK:appt-9']);
+  const [{ n: week }] = await q(`select count(*)::int as n from public.user_questions where user_id = $1 and asked_at > now() - interval '7 days'`, [A]);
+  await as(A);
+  const delSession = await q(`delete from public.conversation_sessions where session_id = $1 returning 1`, [sid]);
+  await svc();
+  const [kept] = await q(`select session_id from public.user_questions where question_id = $1`, [recent.question_id]);
+  await q(`delete from public.user_questions where subject_key = 'PREP_CHECK:appt-9'`);
+  return within.length === 1 && within[0].question_id === recent.question_id && week >= 2 && delSession.length === 1 && kept.session_id === null
+    ? true : { within, week, delSession, kept };
+});
+await check('호출 기록 · 대화 · 질문: D의 기록을 만들어 둠 (탈퇴 검사에서 CASCADE로 지워지는지 봄)', async () => {
+  await svc();
+  const [{ session_id: sid }] = await q(`insert into public.conversation_sessions (user_id, session_type, turns) values ($1, 'BEFORE_SLEEP', '[{"role":"user","text":"안녕","at":"2026-10-29T14:00:00Z"}]') returning session_id`, [D]);
+  await insCall(D, { session_id: sid });
+  await insCall(D, { point: 'T5' });
+  await insQ(D, { session_id: sid });
+  await insQ(D, { channel: 'CARD', subject_key: 'PREP_CHECK:appt-2' });
+  dAi.calls = (await q(`select count(*)::int as n from public.ai_calls where user_id = $1`, [D]))[0].n;
+  dAi.sessions = (await q(`select count(*)::int as n from public.conversation_sessions where user_id = $1`, [D]))[0].n;
+  dAi.questions = (await q(`select count(*)::int as n from public.user_questions where user_id = $1`, [D]))[0].n;
+  return dAi.calls === 2 && dAi.sessions === 1 && dAi.questions === 2 ? true : dAi;
+});
+
+
+// ---------------------------------------------------------------------
 // 17. 관계가 끝날 때 · 탈퇴
 // ---------------------------------------------------------------------
 
@@ -1315,6 +1600,17 @@ await check('탈퇴하면 고친 값 기록도 CASCADE로 지워짐', async () =
   await su();
   const [r] = await q(`select count(*)::int as n from public.user_edit_logs where user_id = $1`, [D]);
   return dEditLogs === 1 && r.n === 0 ? true : { dEditLogs, r };
+});
+await check('탈퇴하면 AI 호출 기록 · 질문 기록 · 대화(턴 · 서버 상태 포함)도 CASCADE로 지워지고 다른 사람 기록은 그대로 (Q7)', async () => {
+  await su();
+  const [r] = await q(`select (select count(*) from public.ai_calls where user_id = $1)::int as calls,
+                              (select count(*) from public.conversation_sessions where user_id = $1)::int as sessions,
+                              (select count(*) from public.user_questions where user_id = $1)::int as questions,
+                              (select count(*) from public.ai_calls where user_id = $2)::int as a_calls,
+                              (select count(*) from public.ai_calls where user_id = $3)::int as b_calls,
+                              (select count(*) from public.user_questions where user_id = $3)::int as b_questions`, [D, A, B]);
+  return dAi.calls === 2 && dAi.sessions === 1 && dAi.questions === 2 && r.calls === 0 && r.sessions === 0 && r.questions === 0
+    && r.a_calls === 1 && r.b_calls === 2 && r.b_questions === 2 ? true : { dAi, r };
 });
 await check('그룹 삭제: 그 그룹에서 나온 권한 행이 모두 지워지고 코드 교체 트리거도 오류 없이 넘어감', async () => {
   await su();
@@ -1432,6 +1728,16 @@ await check('고친 값 기록 화면: H01 · H03 · H05 · H08 · NTF · S01만
   for (const s of ['H99', 'H02', 'h01', 'ntf', '']) bad.push(await expectErr(() => q(`insert into public.user_edit_logs (screen, field, edited_value) values ($1, 'departed_at', '1')`, [s]), /user_edit_logs_screen_check/));
   const del = await q(`delete from public.user_edit_logs where field = 'departed_at' returning 1`);
   return ok.join() === 'H01,H03,H05,H08,NTF,S01' && bad.every((x) => x === true) && del.length === 6 ? true : { ok, bad, del: del.length };
+});
+// L4 PR 2: AI 대화(A02)에서 고친 값. 제약을 다시 정의하면서 기존 화면 값이 빠지지 않았는지도 함께 봄
+await check('고친 값 기록 화면: A02(AI 대화에서 고친 값)도 받고 기존 화면 값은 그대로 받음 · 비슷한 값(a02 · A01 · A022)은 거부', async () => {
+  await as(A);
+  const ok = [];
+  for (const s of ['A02', 'H01', 'H03', 'H05', 'H08', 'NTF', 'S01']) ok.push((await q(`insert into public.user_edit_logs (screen, field, edited_value) values ($1, 'departed_at', '1') returning screen`, [s]))[0].screen);
+  const bad = [];
+  for (const s of ['a02', 'A01', 'A022']) bad.push(await expectErr(() => q(`insert into public.user_edit_logs (screen, field, edited_value) values ($1, 'departed_at', '1')`, [s]), /user_edit_logs_screen_check/));
+  const del = await q(`delete from public.user_edit_logs where field = 'departed_at' returning 1`);
+  return ok.join() === 'A02,H01,H03,H05,H08,NTF,S01' && bad.every((x) => x === true) && del.length === 7 ? true : { ok, bad, del: del.length };
 });
 await check('백필: 마이그레이션 전에 들어 있던 출발 · 도착 시각은 BUTTON으로 채워지고 시각 없는 칸은 NULL로 남음 (반경은 NULL · 기존 고친 값 기록 유지)', async () => {
   const staged = new PGlite();
