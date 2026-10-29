@@ -2,7 +2,7 @@
 //   · 집은 좌표가 있으면 늘 감시 (D68 집 상시), 반경 = home_radius_m → 없으면 200m
 //   · 목적지 · 집 아닌 출발지는 감시 시간창(W_geo: 출발 예정 60분 전 ~ 약속 60분 후) 안에서만, 도착이 기록되면 뺌
 //   · 출발지가 비었거나 집 반경 안이면 집에서 출발 — 따로 영역을 만들지 않고 집 이탈로 잡음
-//   · 목적지 좌표가 없는 약속은 감지하지 않음 — 출발도 (7.13.7 따름). 판정 목록(participants)에서 빼고 untracked에 둠
+//   · 목적지 좌표나 출발 좌표(집 출발인데 집 좌표 없음)가 없는 약속은 감지하지 않음 — 출발도 (7.13.7 따름). 판정 목록(participants)에서 빼고 untracked에 둠
 //   · 출발지 ~ 목적지 500m 안이면 목적지를 감시하지 않음 — 출발만 살림 (L6 안건후보: 가까운 약속 감지 기본안 A)
 //   · 같은 좌표(소수 5자리)는 한 영역으로 합침, 반경은 큰 쪽. id = 좌표로 만든 짧은 고정 글자 → 다시 계획해도 같은 id
 //     (등록 층은 바뀐 영역만 다시 등록 — 다시 등록하면 "이미 안" 신호가 또 옴)
@@ -127,8 +127,8 @@ export function planRegions(input: PlanInput): RegionPlan {
     const near = start != null && dest != null && isNearTrip(start, dest);
     const arrivedAt = p.arrivedAt ?? null;
     const tracked: TrackedParticipant = { participantId: p.participantId, appointmentAt: p.appointmentAt, departAt: p.departAt, fromHome, near, departedAt: p.departedAt ?? null, arrivedAt };
-    // 목적지 좌표 없음 — 그 약속은 감지하지 않음, 출발지도 감시하지 않음 (7.13.7 따름)
-    if (!dest) {
+    // 목적지 좌표 없음 · 출발 좌표 없음(집에서 출발인데 집 좌표가 없음) — 그 약속은 감지하지 않음, 출발지도 감시하지 않음 (7.13.7 따름)
+    if (!dest || !start) {
       untracked.push(tracked);
       continue;
     }

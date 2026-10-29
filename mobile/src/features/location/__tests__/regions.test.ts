@@ -87,6 +87,13 @@ describe('감시 목록 (planRegions)', () => {
     ]);
   });
 
+  it('출발 좌표가 없으면(집 좌표 없음 · 출발지 비움) 그 약속은 감지하지 않음 — 도착도 (7.13.7)', () => {
+    const plan = planRegions({ participants: [participant({ participantId: 'noorigin' }), participant({ participantId: 'away', origin: GANGNAM })], now: at('08:00') });
+    expect(plan.untracked.map((p) => p.participantId)).toEqual(['noorigin']);
+    expect(plan.participants.map((p) => p.participantId)).toEqual(['away']);
+    expect(plan.regions.some((r) => r.destOf.includes('noorigin'))).toBe(false);
+  });
+
   it('저장된 출발지가 집 좌표(집 반경 안)면 집에서 출발 — 영역을 따로 만들지 않음', () => {
     const plan = planRegions({ home: HOME, participants: [participant({ origin: { lat: HOME.lat + 0.0005, lng: HOME.lng } })], now: at('08:00') });
     expect(plan.regions.filter((r) => r.originOf.length)).toEqual([]);
