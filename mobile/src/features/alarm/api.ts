@@ -43,7 +43,7 @@ import {
   type WakeCheck,
 } from './types';
 import { manualTimes, orderError } from './adjust';
-import { LEVEL_FIELD } from './edits';
+import { LEVEL_FIELD, type EditLogLine } from './edits';
 import * as real from './real';
 import { repeatLabel, repeatToRrule, rruleToRepeat } from './repeat';
 import { draftAt, initialTime, ringingKinds } from './schedule';
@@ -208,7 +208,7 @@ function pushEditLog(log: Omit<UserEditLog, 'at'>) {
   db.editLogs.push({ at: now(), ...log });
 }
 
-export async function recordEdit(log: Omit<UserEditLog, 'at'>) {
+export async function recordEdit(log: EditLogLine) {
   if (!isMock()) return real.recordEdit(log);
   pushEditLog(log);
 }
