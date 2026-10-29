@@ -18,7 +18,7 @@ import { ONBOARDING_IN_FLOW } from '@/lib/flags';
 import { canUseRealData, configError } from '@/lib/mode';
 import { ensureNotificationChannels } from '@/lib/push/channels';
 import { colors, fontFiles } from '@/theme';
-// 지오펜스 신호를 받는 작업 정의 — 앱이 백그라운드 신호로 깨면 이 루트 모듈만 읽히므로 최상위에서 불러옴 (features/location/task)
+// 지오펜스 신호를 받는 작업 정의 — 최상위에서 불러옴 (features/location/task). 지금은 앱이 켜져 있을 때 신호를 받음. 앱이 꺼진 상태 수신은 진입 파일에서 불러야 함 — 후속 작은 PR (package.json main)
 import '@/features/location/task';
 
 // 글꼴 · 로그인 상태를 다 읽을 때까지 시작 화면을 유지함

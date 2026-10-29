@@ -4,6 +4,7 @@
 //   · startGeofencingAsync는 목록을 통째로 바꿈 → 바뀐 게 있을 때만(diffRegions) 부름. 안드로이드는 목록을 바꿀 때마다 영역마다 "이미 안 · 밖" 첫 신호를 다시 보냄(INITIAL_TRIGGER)
 //     → 바뀐 것만이 아니라 등록한 영역 전부를 "새로 등록함"으로 기록(noteRegistered) — 안 바뀐 영역의 첫 "이미 밖"을 출발로 읽는 일이 없게
 //   · 읽기(네트워크)는 줄 밖에서, 비교 · 등록 · 상태 저장은 줄(lock.ts) 안에서 — 신호 해석(task.ts)과 겹치지 않게. 겹쳐 불러도 한 번만 등록
+//   · 자동 기록 스위치가 꺼졌거나 위치 권한이 빠졌으면 이미 등록한 지오펜스도 끄고 등록 목록을 비움 (stopGeofences) — 스위치만 끄고 기록은 계속되는 일이 없게
 //   · 던지지 않음 — 앱 시작을 막지 않게. 실패는 개발 중에만 콘솔에 (좌표는 안 남김)
 import type { LocationRegion } from 'expo-location';
 import { Platform } from 'react-native';
@@ -124,39 +125,85 @@ async function applyPlan(plan: RegionPlan, force: boolean, epoch: number): Promi
   return commitStep(resolvePending(state, now().getTime()), { regions: registered });
 }
 
-// 감시 목록을 읽어 등록 — force = 바뀐 게 없어도 다시 등록 (예: 권한을 방금 허용). 끝까지 갔으면 true, 읽기 · 등록 실패면 false (일 안 하는 조건은 true)
-export async function refreshGeofences(options: { force?: boolean } = {}): Promise<boolean> {
-  if (Platform.OS !== 'android' || isMock()) return true;
+// 폰 OS에 등록한 지오펜스를 끔 (켜진 게 없으면 아무것도 안 함). 줄 안에서 부름. 던질 수 있음 — 부르는 쪽이 잡음
+async function stopNative(): Promise<void> {
+  const { hasStartedGeofencingAsync, stopGeofencingAsync } = nativeLocation();
+  if (await hasStartedGeofencingAsync(GEOFENCE_TASK)) await stopGeofencingAsync(GEOFENCE_TASK);
+}
+
+// 등록한 지오펜스를 끄고 등록 목록을 비움 — 자동 기록 스위치를 끌 때 · 권한이 빠졌을 때 (PR 5의 스위치 화면도 스위치를 끄면 이 함수를 부름)
+//   등록 목록이 비어 있으면 네이티브를 안 부름. 못 껐으면 목록을 남겨 다음에 다시 시도. 네이티브 오류는 던지지 않음 (저장소 오류만 던짐)
+export async function stopGeofences(): Promise<void> {
+  if (Platform.OS !== 'android') return;
+  await withLock(async () => {
+    const stored = await loadRegions();
+    if (stored.length === 0) return;
+    try {
+      await stopNative();
+    } catch (e) {
+      if (__DEV__) console.warn('[location] 지오펜스 끄기 실패 — 다음에 다시', errorText(e));
+      return;
+    }
+    await commit({ regions: [], state: noteRegistered(await loadState(), { add: [], remove: stored.map((r) => r.id) }, now().getTime()) });
+  });
+}
+
+// 감시 목록을 읽어 등록 — force = 바뀐 게 없어도 다시 등록 (예: 권한을 방금 허용).
+//   'ran' = 끝까지 감, 'failed' = 읽기 · 등록 실패, 'skipped' = 일 안 하는 조건 (안드로이드 아님 · 가짜 모드 · 로그인 없음 · 스위치 끔 · 권한 없음)
+//   syncLocation은 'ran'일 때만 5분 제한을 검 — 권한을 방금 허용하고 앱으로 돌아와도 바로 등록되게
+export type RefreshResult = 'ran' | 'skipped' | 'failed';
+
+export async function refreshGeofences(options: { force?: boolean } = {}): Promise<RefreshResult> {
+  if (Platform.OS !== 'android' || isMock()) return 'skipped';
   const epoch = currentEpoch();
   try {
     const userId = await currentUserId();
-    if (!userId) return true;
-    if (!(await getLocationAuto())) return true;
-    if (!(await hasLocationPermissions())) return true;
+    if (!userId) return 'skipped';
+    if (!(await getLocationAuto()) || !(await hasLocationPermissions())) {
+      await stopGeofences(); // 스위치를 껐거나 권한이 빠졌는데 등록이 남아 있으면 같이 끔
+      return 'skipped';
+    }
     const nowMs = now().getTime();
     const source = await readPlanSource(userId, nowMs);
     const plan = planRegions({ ...source, now: nowMs, aheadMinutes: PLAN_AHEAD_MINUTES });
     announce(await withLock(() => applyPlan(plan, options.force === true, epoch)));
   } catch (e) {
     if (__DEV__) console.warn('[location] 지오펜스 등록 실패 — 다음에 다시', errorText(e));
-    return false;
+    return 'failed';
   }
   await flushActions(); // 대기 중이던 출발 확정 같은 새 기록을 바로 씀
-  return true;
+  return 'ran';
 }
 
 // 앱을 열 때 · 앞에 올 때 부르는 한 묶음 — 못 쓴 기록 쓰기 → 감시 목록 등록. SYNC_INTERVAL_MINUTES 안에 또 부르면 건너뜀 (ignoreThrottle로 건너뛰지 않기)
+//   5분 제한은 등록이 끝까지 간 때('ran')만 검 — 실패 · 일 안 한 때는 다음에 앞에 올 때 바로 다시
 //   부르는 곳: useLocationSync. L1의 알람 맞추기 끝 훅(onAlarmsSynced, L1 PR 3b)이 생기면 그것도 여기를 부름 (약속이 바뀐 직후 감시 목록을 새로 짜려고)
 let lastSyncAt = 0;
 let inFlight: Promise<void> | null = null;
+let rerun = false; // 돌고 있는 중에 ignoreThrottle로 또 불렀음 — 끝난 뒤 한 번 더 돎 (몇 번을 겹쳐 불러도 한 번만)
+
+async function syncOnce(): Promise<void> {
+  const startedAt = now().getTime();
+  await flushActions();
+  if ((await refreshGeofences()) === 'ran') lastSyncAt = startedAt;
+}
 
 export function syncLocation(options: { ignoreThrottle?: boolean } = {}): Promise<void> {
-  if (inFlight) return inFlight;
-  const startedAt = now().getTime();
-  if (!options.ignoreThrottle && startedAt - lastSyncAt < minutesMs(SYNC_INTERVAL_MINUTES)) return Promise.resolve();
+  if (inFlight) {
+    // 돌고 있는 일은 이미 읽기 시작한 값으로 가는 중 — 그 뒤에 바뀐 것(예: 로그인 직후)을 반영하려면 끝난 뒤 한 번 더
+    if (options.ignoreThrottle) rerun = true;
+    return inFlight;
+  }
+  if (!options.ignoreThrottle && now().getTime() - lastSyncAt < minutesMs(SYNC_INTERVAL_MINUTES)) return Promise.resolve();
   inFlight = (async () => {
-    await flushActions();
-    if (await refreshGeofences()) lastSyncAt = startedAt;
+    try {
+      do {
+        rerun = false;
+        await syncOnce();
+      } while (rerun);
+    } finally {
+      rerun = false;
+    }
   })().finally(() => {
     inFlight = null;
   });
@@ -165,14 +212,16 @@ export function syncLocation(options: { ignoreThrottle?: boolean } = {}): Promis
 
 // 로그아웃 정리 — 등록한 지오펜스를 끄고 폰에 둔 위치 기억을 지움 (앞 계정의 집 · 약속 위치가 남거나 다음 계정에 섞이지 않게). 던지지 않음
 //   lib/session onSignOut에 useLocationSync가 등록. 줄 안에서 하므로 돌고 있던 등록 · 신호 해석이 끝난 뒤에 지움
+//   기기 확인 항목 (코드로 못 막음):
+//     · 아직 서버에 못 쓴 기록(오프라인 보관함)은 로그아웃에서 마지막 쓰기 시도 없이 지워짐 — 로그아웃 콜백이 동기라 기다릴 수 없음
+//     · 신호 시각은 폰 OS가 알려 준 때 — JobScheduler 작업이라 Doze · 배터리 최적화에서는 최대 6분보다 늦을 수 있음
 export async function clearOnSignOut(): Promise<void> {
   bumpEpoch();
   try {
     await withLock(async () => {
       if (Platform.OS === 'android') {
         try {
-          const { hasStartedGeofencingAsync, stopGeofencingAsync } = nativeLocation();
-          if (await hasStartedGeofencingAsync(GEOFENCE_TASK)) await stopGeofencingAsync(GEOFENCE_TASK);
+          await stopNative();
         } catch (e) {
           if (__DEV__) console.warn('[location] 로그아웃 때 지오펜스 끄기 실패', errorText(e));
         }

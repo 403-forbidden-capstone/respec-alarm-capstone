@@ -1,7 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { beforeEach, describe, expect, it, jest } from '@jest/globals';
 
-import { MAX_QUEUED_ACTIONS, commit, loadActions, loadState, type WriteAction } from '../store';
+import { MAX_QUEUED_ACTIONS, commit, loadActions, loadState, setLocationAuto, type WriteAction } from '../store';
 import { GEOFENCE_TASK, handleGeofenceEvent } from '../task';
 import type { GeoAction, GeoState } from '../transitions';
 import { initialGeoState } from '../transitions';
@@ -200,6 +200,26 @@ describe('지오펜스 신호 받기 (handleGeofenceEvent)', () => {
     await run(exit('home'), '08:45');
     expect(await loadState()).toEqual(seededState());
     expect(mockNotice).not.toHaveBeenCalled();
+  });
+
+  it('자동 기록 스위치가 꺼져 있으면 신호를 버림 — 기록도 안내도 없고 상태도 그대로, 켜면 다시 받음', async () => {
+    await setLocationAuto(false);
+    await run(exit('home'), '08:45');
+    expect(await loadState()).toEqual(seededState());
+    expect(mockNotice).not.toHaveBeenCalled();
+    expect(mockRecord).not.toHaveBeenCalled();
+
+    await setLocationAuto(true);
+    await run(exit('home'), '08:46');
+    expect(mockNotice).toHaveBeenCalledWith({ type: 'DEPART_PENDING', participantId: 'p1', at: at('08:46') });
+  });
+
+  it('스위치가 꺼져 있어도 앞서 못 쓴 기록은 계속 씀 (이미 잡은 기록은 서버에)', async () => {
+    await commit({ actions: [{ type: 'ARRIVE', participantId: 'p1', at: at('07:30') }] });
+    await setLocationAuto(false);
+    await run(exit('home'), '08:45');
+    expect(mockRecord).toHaveBeenCalledTimes(1);
+    expect(await loadActions()).toEqual([]);
   });
 
   it('보관한 계획이 비었거나 깨졌어도(로그아웃 뒤 · 옛 값) 던지지 않고 무시', async () => {

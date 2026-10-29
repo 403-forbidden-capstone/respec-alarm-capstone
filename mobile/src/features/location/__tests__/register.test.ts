@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, jest } from '@jest/globals';
 
 import type { FakeCall, FakeResult } from '@/features/alarm/testkit/fakeSupabase';
 
-import { clearOnSignOut, refreshGeofences, syncLocation } from '../register';
+import { clearOnSignOut, refreshGeofences, stopGeofences, syncLocation } from '../register';
 import { commit, getLocationAuto, loadActions, loadPlan, loadRegions, loadState, setLocationAuto } from '../store';
 import { GEOFENCE_TASK } from '../task';
 import { initialGeoState } from '../transitions';
@@ -129,7 +129,7 @@ describe('등록 조건 (refreshGeofences)', () => {
     ['항상 허용(백그라운드) 위치 권한 없음', () => mockBg.mockResolvedValue({ granted: false })],
   ])('%s: 네이티브 등록을 안 부르고, 서버도 안 읽고, 보관함도 안 건드림', async (_name, arrange) => {
     await arrange();
-    await expect(refreshGeofences()).resolves.toBe(true);
+    await expect(refreshGeofences()).resolves.toBe('skipped');
     expect(nativeCalls()).toBe(0);
     expect(mockCalls).toEqual([]);
     expect(await loadPlan()).toEqual({ regions: [], participants: [], untracked: [] });
@@ -145,9 +145,61 @@ describe('등록 조건 (refreshGeofences)', () => {
   });
 });
 
+describe('스위치를 끄거나 권한이 빠지면 등록을 끔 (stopGeofences)', () => {
+  it.each([
+    ['자동 기록 스위치 끔', () => setLocationAuto(false)],
+    ['항상 허용 권한 빠짐', () => mockBg.mockResolvedValue({ granted: false })],
+    ['앱 사용 중 권한 빠짐', () => mockFg.mockResolvedValue({ granted: false })],
+  ])('%s: 이미 등록한 지오펜스를 끄고 등록 목록 · 영역 상태를 비움, 다시 켜면 새로 등록', async (_name, arrange) => {
+    await refreshGeofences();
+    expect(await loadRegions()).toHaveLength(2);
+    await arrange();
+    await expect(refreshGeofences()).resolves.toBe('skipped');
+    expect(mockStop).toHaveBeenCalledTimes(1);
+    expect(mockStop).toHaveBeenCalledWith(GEOFENCE_TASK);
+    expect(await loadRegions()).toEqual([]);
+    expect((await loadState()).regions).toEqual({});
+
+    mockStop.mockClear();
+    await refreshGeofences(); // 아직 꺼진 채 — 등록이 없으니 또 끄지 않음
+    expect(mockStop).not.toHaveBeenCalled();
+
+    await setLocationAuto(true);
+    mockFg.mockResolvedValue({ granted: true });
+    mockBg.mockResolvedValue({ granted: true });
+    await expect(refreshGeofences()).resolves.toBe('ran');
+    expect(mockStart).toHaveBeenCalledTimes(2);
+    expect(await loadRegions()).toHaveLength(2);
+  });
+
+  it('폰 OS 쪽 등록은 이미 없는데 목록만 남아 있으면 stop은 안 부르고 목록만 비움', async () => {
+    await refreshGeofences();
+    mockHasStarted.mockResolvedValue(false);
+    await stopGeofences();
+    expect(mockStop).not.toHaveBeenCalled();
+    expect(await loadRegions()).toEqual([]);
+  });
+
+  it('끄기가 실패하면 던지지 않고 목록을 남겨 다음에 다시 시도', async () => {
+    await refreshGeofences();
+    mockStop.mockRejectedValueOnce(new Error('native'));
+    await setLocationAuto(false);
+    await expect(refreshGeofences()).resolves.toBe('skipped');
+    expect(await loadRegions()).toHaveLength(2);
+    await refreshGeofences();
+    expect(mockStop).toHaveBeenCalledTimes(2);
+    expect(await loadRegions()).toEqual([]);
+  });
+
+  it('등록한 게 없으면 stopGeofences는 네이티브를 안 부름', async () => {
+    await stopGeofences();
+    expect(nativeCalls()).toBe(0);
+  });
+});
+
 describe('등록 (refreshGeofences)', () => {
   it('처음: 집 + 목적지를 한 번에 등록 (이름 · 중심 · 반경 · 들어옴 · 나감), 계획 · 등록 목록 · 영역 상태를 폰에 저장', async () => {
-    await expect(refreshGeofences()).resolves.toBe(true);
+    await expect(refreshGeofences()).resolves.toBe('ran');
     expect(mockStart).toHaveBeenCalledTimes(1);
     const [task, regions] = mockStart.mock.calls[0];
     expect(task).toBe(GEOFENCE_TASK);
@@ -190,7 +242,7 @@ describe('등록 (refreshGeofences)', () => {
     await refreshGeofences();
     mockStart.mockClear();
     mockNowMs = at('08:10');
-    await expect(refreshGeofences()).resolves.toBe(true);
+    await expect(refreshGeofences()).resolves.toBe('ran');
     expect(mockStart).not.toHaveBeenCalled();
     expect(mockStop).not.toHaveBeenCalled();
   });
@@ -258,17 +310,17 @@ describe('등록 (refreshGeofences)', () => {
 
   it('계획은 늘 저장 — 등록이 실패해도 (던지지 않고 false), 등록 목록은 그대로라 다음에 다시 시도', async () => {
     mockStart.mockRejectedValueOnce(new Error('Location permission is required'));
-    await expect(refreshGeofences()).resolves.toBe(false);
+    await expect(refreshGeofences()).resolves.toBe('failed');
     expect((await loadPlan()).regions).toHaveLength(2);
     expect(await loadRegions()).toEqual([]);
-    await expect(refreshGeofences()).resolves.toBe(true);
+    await expect(refreshGeofences()).resolves.toBe('ran');
     expect(mockStart).toHaveBeenCalledTimes(2);
     expect(await loadRegions()).toHaveLength(2);
   });
 
   it('서버 읽기 실패: 던지지 않고 false, 등록은 그대로', async () => {
     mockRoutes['appointment_participants:select'] = () => ({ error: { code: 'PGRST000', message: 'Failed to fetch' } });
-    await expect(refreshGeofences()).resolves.toBe(false);
+    await expect(refreshGeofences()).resolves.toBe('failed');
     expect(mockStart).not.toHaveBeenCalled();
   });
 
@@ -334,19 +386,56 @@ describe('앱을 열 때 · 앞에 올 때 (syncLocation)', () => {
   });
 
   it('실패한 뒤에는 5분을 기다리지 않고 다음 앞에 올 때 다시 함', async () => {
+    // 앞 시험이 모듈 변수 lastSyncAt을 08:05에 남김 — 이 시험은 그보다 5분 뒤부터
     mockRoutes['appointment_participants:select'] = () => ({ error: { code: 'PGRST000', message: 'Failed to fetch' } });
-    mockNowMs = at('08:00');
+    mockNowMs = at('08:10');
     await syncLocation({ ignoreThrottle: true });
     serve();
-    mockNowMs = at('08:01');
+    mockNowMs = at('08:11');
     await syncLocation();
     expect(mockStart).toHaveBeenCalledTimes(1);
   });
 
-  it('돌고 있는 중에 또 부르면 같은 일을 기다림 (한 번만 읽음)', async () => {
-    mockNowMs = at('08:00');
-    await Promise.all([syncLocation({ ignoreThrottle: true }), syncLocation({ ignoreThrottle: true })]);
+  it('권한이 없어 일을 안 한 때는 5분 제한을 걸지 않음 — 권한을 방금 허용하고 돌아오면 바로 등록', async () => {
+    mockBg.mockResolvedValue({ granted: false });
+    mockNowMs = at('23:00'); // 앞 시험이 남긴 마지막 동기화 시각(모듈 변수)보다 뒤
+    await syncLocation({ ignoreThrottle: true });
+    expect(mockStart).not.toHaveBeenCalled();
+
+    mockBg.mockResolvedValue({ granted: true });
+    mockNowMs = at('23:01'); // 5분 안
+    await syncLocation();
+    expect(mockStart).toHaveBeenCalledTimes(1);
+    expect(await loadRegions()).toHaveLength(1); // 23시라 약속(10시)은 지나 집만
+
+    mockNowMs = at('23:02'); // 등록까지 갔으니 이제는 5분 제한
+    await syncLocation();
     expect(mockCalls.filter((c) => c.table === 'profiles')).toHaveLength(1);
+  });
+
+  it('돌고 있는 중에 제한 있는 호출이 또 오면 같은 일을 기다림 (한 번만 읽음)', async () => {
+    mockNowMs = at('08:00');
+    await Promise.all([syncLocation({ ignoreThrottle: true }), syncLocation()]);
+    expect(mockCalls.filter((c) => c.table === 'profiles')).toHaveLength(1);
+  });
+
+  it('돌고 있는 중에 ignoreThrottle 호출이 오면 끝난 뒤 한 번 더 돎 — 몇 번을 겹쳐도 한 번만 더', async () => {
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    let reads = 0;
+    mockRoutes['profiles:select'] = async () => {
+      reads += 1;
+      if (reads === 1) await gate; // 첫 읽기는 붙잡아 둠
+      return { data: profile };
+    };
+    mockNowMs = at('08:00');
+    const first = syncLocation({ ignoreThrottle: true });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const second = syncLocation({ ignoreThrottle: true });
+    const third = syncLocation({ ignoreThrottle: true });
+    release();
+    await Promise.all([first, second, third]);
+    expect(reads).toBe(2);
   });
 });
 
