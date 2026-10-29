@@ -15,6 +15,8 @@ export type ErrorCode =
   | 'INTERNAL' // 500
   | 'ROUTE_UNAVAILABLE' // 502 경로 API 장애 · 이동시간을 구할 길이 없음
   | 'PLACE_UNAVAILABLE' // 502 (추가) 장소 검색 API 장애
+  | 'LLM_UNAVAILABLE' // 502 생성 API(AI) 호출 실패 · 키 없음 · 출력 검사 탈락 → 앱은 AI 칸만 비우고 기록은 그대로 보여 줌
+  | 'VOICE_UNAVAILABLE' // 503 음성 세션을 못 만듦 → 앱은 텍스트 입력 모드로
   | 'NOT_CONFIGURED'; // 503 (추가) 비밀값(카카오 키 등)이 아직 없음
 
 export const ERROR_STATUS: Record<ErrorCode, number> = {
@@ -29,6 +31,8 @@ export const ERROR_STATUS: Record<ErrorCode, number> = {
   INTERNAL: 500,
   ROUTE_UNAVAILABLE: 502,
   PLACE_UNAVAILABLE: 502,
+  LLM_UNAVAILABLE: 502,
+  VOICE_UNAVAILABLE: 503,
   NOT_CONFIGURED: 503,
 };
 

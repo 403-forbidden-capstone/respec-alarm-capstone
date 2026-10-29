@@ -1,0 +1,28 @@
+{
+  "$id": "t3-reason.v1",
+  "title": "T3Output",
+  "type": "object",
+  "properties": {
+    "tags": {
+      "type": "array",
+      "items": {
+        "enum": [
+          "MORE_TASKS",
+          "OVERSLEPT",
+          "HAIR_WASH",
+          "TRAFFIC",
+          "UNEXPECTED",
+          "ESTIMATE_SHORT",
+          "ETC",
+          "MAKEUP",
+          "PRESENTATION",
+          "NONE"
+        ]
+      }
+    }
+  },
+  "required": [
+    "tags"
+  ],
+  "additionalProperties": false
+}
