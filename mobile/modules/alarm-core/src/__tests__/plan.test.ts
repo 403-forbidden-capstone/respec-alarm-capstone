@@ -121,6 +121,23 @@ describe('알림 문구(notice)', () => {
     expect(payload).not.toHaveProperty('notice');
     expect(payload.voiceText).toBe('좋은 아침이에요.');
   });
+
+  it('앱 쪽에서만 쓰는 칸(맞추기용 묶음 키 groupKey)이 꾸러미에 붙어 있어도 네이티브 글자에는 안 들어감', () => {
+    const pkg = { ...basePackage, groupKey: 'participant-1' } as RingPackage;
+    const payload = JSON.parse(toNativePayload(pkg, buildRingPlan(pkg)));
+    expect(payload).not.toHaveProperty('groupKey');
+    expect(JSON.stringify(payload)).not.toContain('participant-1');
+  });
+});
+
+describe('알림 문구(notice) — 글자가 아닌 값', () => {
+  it('notice가 글자가 아니거나 비어 있으면 던지지 않고 종류별 기본 줄 (알람은 걸려야 함)', () => {
+    for (const notice of [5, null, {}, ['a'], true, '', '   ']) {
+      for (const [type, heading] of [['WAKE', '일어날 시간이에요'], ['PREPARE', '준비할 시간이에요'], ['DEPARTURE', '출발할 시간이에요']] as const) {
+        expect(buildRingPlan({ type, intensity: 'NORMAL', notice: notice as unknown as string }).heading).toBe(heading);
+      }
+    }
+  });
 });
 
 describe('꾸러미 확인', () => {

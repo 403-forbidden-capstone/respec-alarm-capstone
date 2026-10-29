@@ -59,10 +59,40 @@ export function departureNotice(args: { departAt: Date; appointmentAt: Date; tra
   return `지금 나가면 ${formatKoTime(arriveAt, args.timeZone)} 도착 · ${slack}`;
 }
 
-// 받침 있는 말 뒤에는 "이에요", 없으면 "예요" (앱 lib/format josa와 같은 기준 — 한글이 아닌 끝 글자는 받침 없음으로 봄)
+// 닫는 괄호로 끝나면 괄호 안을 빼고 그 앞 글자만 ("자료구조(월)" → "자료구조"). 짝이 없거나 제목 전체가 괄호면 그대로
+const OPEN_BRACKETS = '([{（［｛';
+const CLOSE_BRACKETS = ')]}）］｝';
+function stripTrailingBrackets(text: string): string {
+  let rest = text.trimEnd();
+  while (rest && CLOSE_BRACKETS.includes(rest[rest.length - 1])) {
+    let depth = 0;
+    let start = -1;
+    for (let i = rest.length - 1; i >= 0; i -= 1) {
+      if (CLOSE_BRACKETS.includes(rest[i])) {
+        depth += 1;
+      } else if (OPEN_BRACKETS.includes(rest[i])) {
+        depth -= 1;
+        if (depth === 0) {
+          start = i;
+          break;
+        }
+      }
+    }
+    if (start <= 0) return rest;
+    rest = rest.slice(0, start).trimEnd();
+  }
+  return rest;
+}
+
+// 읽을 때 받침이 있는 숫자: 0 영 · 1 일 · 3 삼 · 6 육 · 7 칠 · 8 팔 (2 이 · 4 사 · 5 오 · 9 구는 받침 없음)
+const BATCHIM_DIGITS = new Set(['0', '1', '3', '6', '7', '8']);
+
+// 받침 있는 말 뒤에는 "이에요", 없으면 "예요". 끝이 숫자면 읽는 소리로("영어 1" → 일 → 이에요), 닫는 괄호면 괄호 앞 글자로. 영문 · 기타는 받침 없음으로 봄
+// 앱 lib/format josa는 한글 끝글자만 보므로 이 규칙이 없음 — 이 문구에는 이 함수를 씀
 function copula(word: string): string {
-  const code = word.charCodeAt(word.length - 1);
-  const hasBatchim = code >= 0xac00 && code <= 0xd7a3 && (code - 0xac00) % 28 !== 0;
+  const last = stripTrailingBrackets(word).slice(-1);
+  const code = last.charCodeAt(0);
+  const hasBatchim = BATCHIM_DIGITS.has(last) || (code >= 0xac00 && code <= 0xd7a3 && (code - 0xac00) % 28 !== 0);
   return hasBatchim ? '이에요' : '예요';
 }
 
@@ -79,10 +109,12 @@ export function wakeVoiceText(args: { title: string; appointmentAt: Date; depart
 }
 
 // 문구는 덧붙임일 뿐 — 시각 서식(Intl)이 못 만들거나 값이 이상해도 꾸러미(알람 예약)는 그대로 만들어야 하므로 문구만 빼고 넘어감
-function tryText<T>(make: () => T): T | undefined {
+// 다만 조용히 삼키면 문구가 왜 없는지 알 수 없으므로 무엇이 실패했는지(알람 종류 · id · 오류)만 한 줄 남김. 제목 · 장소 같은 사용자 글자는 안 남김
+function tryText<T>(what: RingPackage['type'], alarmId: string, make: () => T): T | undefined {
   try {
     return make();
-  } catch {
+  } catch (e) {
+    console.warn(`[ring-package] ${what} 문구를 못 만들어 빼고 알람만 걸어요 (알람 ${alarmId}): ${e instanceof Error ? `${e.name}: ${e.message}` : 'unknown error'}`);
     return undefined;
   }
 }
@@ -113,16 +145,16 @@ export function buildRingPackages(args: {
     if (!appointment) return {};
     const at = new Date(Date.parse(a.scheduled_at));
     if (a.alarm_type === 'PREPARE' && departureAt) {
-      const notice = tryText(() => prepareNotice({ prepareAt: at, departAt: departureAt, timeZone: appointment.timeZone }));
+      const notice = tryText(a.alarm_type, a.alarm_id, () => prepareNotice({ prepareAt: at, departAt: departureAt, timeZone: appointment.timeZone }));
       return notice ? { notice } : {};
     }
     if (a.alarm_type === 'DEPARTURE' && appointment.travelMinutes != null && Number.isFinite(appointment.travelMinutes)) {
       const travelMinutes = appointment.travelMinutes;
-      const notice = tryText(() => departureNotice({ departAt: at, appointmentAt: appointment.appointmentAt, travelMinutes, timeZone: appointment.timeZone }));
+      const notice = tryText(a.alarm_type, a.alarm_id, () => departureNotice({ departAt: at, appointmentAt: appointment.appointmentAt, travelMinutes, timeZone: appointment.timeZone }));
       return notice ? { notice } : {};
     }
     if (a.alarm_type === 'WAKE') {
-      const voiceText = tryText(() => wakeVoiceText({ title: args.title, appointmentAt: appointment.appointmentAt, departAt: departureAt, timeZone: appointment.timeZone }));
+      const voiceText = tryText(a.alarm_type, a.alarm_id, () => wakeVoiceText({ title: args.title, appointmentAt: appointment.appointmentAt, departAt: departureAt, timeZone: appointment.timeZone }));
       return voiceText ? { voiceText } : {};
     }
     return {};

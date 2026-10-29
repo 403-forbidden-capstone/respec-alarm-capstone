@@ -70,8 +70,14 @@ type RingPackage = {
 
 - 글자는 서버 `_shared/ring-package.ts`가 만들고 앱 `lib/alarmSync/reconcile.ts`(`buildServerPackages`)가 **같은 함수**로 만듦 — 서버 `alarm-commit`이 돌려준 꾸러미와 앱이 서버 행으로 다시 만든 꾸러미가 같은 글자. 도착 · 여유 계산은 `_shared/calc/depart.ts`(7장 7.5.2)
 - 나르는 길: `notice`가 있으면 `buildRingPlan`이 그 글자를 `plan.heading`에 넣음. 네이티브는 `notice` 칸을 몰라도 되고 `plan.heading`만 저장해(`StoredAlarm`에 `plan`이 통째로 들어감) 알림 본문 `heading · subtitle`에 씀(`AlarmNotifications.showNotice`). 재부팅 뒤 다시 걸기(`AlarmBootReceiver` → `restoreAll`)도 저장된 값을 그대로 다시 걸어서 글자가 유지됨 → **Kotlin 변경 없음, APK 다시 받을 필요 없음**
-- 글자는 저장(`alarm-commit`)할 때 정해짐. 알람 시각이 그대로면 앱 맞추기(`planReconcile`)가 다시 걸지 않으므로(시각 · 강도만 비교), 같은 약속의 다른 알람 시각만 다른 기기에서 바뀐 경우 준비 알림 글자가 옛 값일 수 있음 — 약속을 다시 저장하면 새로 걸림
-- 이동 시간이 비어 있으면 출발 문구가 빠지고, 시각 서식이 실패하면 문구만 빠지고 알람은 그대로 걸림
+- 글자는 저장(`alarm-commit`)할 때 정해지고, 앱 맞추기(`planReconcile`)는 시각 · 강도만 비교함(폰 `list()`는 글자를 안 돌려줘서 글자로는 못 비교). 그런데 준비 알림 글자와 기상 `voiceText`는 **같은 약속의 출발 알람 시각 · 켜짐**에서 나오므로, 출발 알람이 바뀌면 그 약속의 준비 · 기상을 시각 · 강도가 같아도 같이 다시 걸어 새 글자로 덮음:
+  - 출발 알람이 새로 걸리거나 시각이 바뀌어 `schedule`에 들어갈 때 → 폰에 이미 있는 같은 약속의 켜진 준비 · 기상 꾸러미도 `schedule`에 넣음 (이미 지난 것은 제외). 강도만 바뀐 출발은 글자가 같아 해당 없음
+  - 출발 알람이 폰에서 지워질 때(서버에서 꺼졌거나 지워짐 → `cancel`) → 같은 약속의 준비 · 기상을 다시 걸어 출발 줄이 빠진 글자(`준비할 시간이에요`)로 돌아감. 폰은 지울 알람의 약속을 몰라서 `reconcile`이 그때만 `alarms`에서 `participant_id`를 한 번 읽어 `planReconcile`에 넘김(`departureGroups`). 알람 일부만 맞추는 `reconcile({ alarmIds })`도 출발 알람이 들어 있으면 같은 약속의 준비 · 기상 id를 대상에 더함(`expandWithTextSiblings`)
+  - 같은 약속을 묶는 키는 `buildServerPackages`가 이미 쓰는 그룹 키(`participant_id`)를 앱 쪽 꾸러미 타입 `ServerPackage.groupKey`에만 실음. `planReconcile`이 `schedule`에 담을 때 떼어 내고 `toNativePayload`도 정해진 칸만 담아서 **네이티브로는 안 감** (시험으로 확인)
+  - 아무것도 안 바뀌면 다시 걸지 않음. 서버 목록이 상한(500)에서 잘렸을 때는 "서버에 없음"을 못 믿어 출발 알람이 지워지는 쪽은 건너뜀
+- 이동 시간이 비어 있으면 출발 문구가 빠지고, 시각 서식이 실패하면 문구만 빠지고 알람은 그대로 걸림 (빠진 문구는 `console.warn`으로 알람 종류 · id · 오류만 한 줄 남김). `notice`가 글자가 아니면 `buildRingPlan`이 무시하고 기본 줄을 씀. 기상 문장의 `이에요/예요`는 제목 끝이 숫자면 읽는 소리(`영어 1이에요` · `캡스톤 2예요`), 닫는 괄호면 괄호 앞 글자(`자료구조(월)`은 `예요`)로 고름
+- 남는 한계: 제목 · 부제만 바뀐 경우(시각 · 강도 그대로)는 여전히 폰에 옛 글자가 남음 — 원래 있던 문제이고 약속을 다시 저장하면 새로 걸림
+- 남는 한계: 알림이 한 줄이라 문구가 길면 잘릴 수 있음 — `AlarmNotifications.kt`에 `BigTextStyle`이 없음. 다음 네이티브 PR에서 함
 
 반복은 폰이 하지 않음. 루틴(`routines.repeat_days`)과 반복 약속(`recurrence_rule`)은 서버가 **다음 회차 하나만** `alarms` 행으로 만들고(`scheduled_at`은 시각 하나), 울린 뒤 해제 · MISSED 기록이 들어오면 다음 회차를 다시 만듦(기록이 안 들어오면 매일 03:00 배치가 메움). 그래서 꾸러미에는 `atMillis` 하나면 됨 (회차 수는 D4가 정함, 폰 쪽에 가정하지 않음). 예전 `scheduleDailyAlarm`(매일 반복)은 없앰.
 

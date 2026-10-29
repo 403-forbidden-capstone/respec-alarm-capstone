@@ -79,7 +79,8 @@ export function buildRingPlan(
   pkg: Pick<RingPackage, 'type' | 'intensity'> & Partial<Pick<RingPackage, 'soundKey' | 'volumeAdjust' | 'notice'>>,
 ): RingPlan {
   const soundKey = pkg.soundKey?.trim() || DEFAULT_SOUND_KEY;
-  const heading = (fallback: string) => pkg.notice?.trim() || fallback;
+  // notice는 서버가 준 JSON 값이라 글자가 아닐 수도 있음(숫자 · null 등) — trim에서 던져 알람이 안 걸리면 안 되므로 글자일 때만 보고, 아니면 기본 줄
+  const heading = (fallback: string) => (typeof pkg.notice === 'string' ? pkg.notice.trim() : '') || fallback;
   if (pkg.type === 'WAKE') {
     return {
       sound: true,

@@ -1,6 +1,6 @@
 // 예약 꾸러미의 알림 문구 — 준비("출발까지 N분") · 출발("지금 나가면 … 도착 · 여유") · 기상(voiceText). 서버와 앱이 같은 함수를 씀
 import assert from 'node:assert/strict';
-import { test } from 'node:test';
+import { mock, test } from 'node:test';
 
 import { buildRingPackages, departureNotice, prepareNotice, wakeVoiceText, type AppointmentNotice, type PackageSource, type RingPackage } from './ring-package.ts';
 
@@ -78,11 +78,62 @@ test('기상 음성 문장: 받침에 따라 이에요 · 예요, 분이 있으�
   assert.equal(wakeVoiceText({ title: '  ', appointmentAt: kst(600), timeZone: TZ }), '좋은 아침이에요. 오늘 첫 일정은 오전 10시 일정이에요.');
 });
 
-test('문구를 못 만들어도(이상한 시각) 꾸러미는 그대로 만들어짐', () => {
-  const pkgs = byType(build(CHAIN, { ...APPOINTMENT, appointmentAt: new Date(Number.NaN) }));
-  assert.equal(Object.keys(pkgs).length, 4);
-  assert.deepEqual([pkgs.DEPARTURE.notice, pkgs.WAKE.voiceText], [undefined, undefined]);
-  assert.equal(pkgs.PREPARE.notice, '오전 9:00 출발까지 30분'); // 약속 시각과 상관없는 문구는 남음
+test('문구를 못 만들어도(이상한 시각) 꾸러미는 그대로 만들어지고, 무엇이 실패했는지 한 줄 남김', () => {
+  const warn = mock.method(console, 'warn', () => {});
+  try {
+    const pkgs = byType(build(CHAIN, { ...APPOINTMENT, appointmentAt: new Date(Number.NaN) }));
+    assert.equal(Object.keys(pkgs).length, 4);
+    assert.deepEqual([pkgs.DEPARTURE.notice, pkgs.WAKE.voiceText], [undefined, undefined]);
+    assert.equal(pkgs.PREPARE.notice, '오전 9:00 출발까지 30분'); // 약속 시각과 상관없는 문구는 남음
+    // 던진 문구(시각 서식 실패 = 기상 음성 문장)만 한 줄 — 알람 종류 · id · 오류만, 제목 · 장소 같은 사용자 글자는 없음.
+    // 출발 문구는 값을 못 읽으면 던지지 않고 빠지므로 경고 없음
+    const lines = warn.mock.calls.map((call) => String(call.arguments[0]));
+    assert.equal(lines.length, 1);
+    assert.match(lines[0], /^\[ring-package\] WAKE 문구를 못 만들어/);
+    assert.match(lines[0], /알람 a-WAKE\)/);
+    assert.match(lines[0], /RangeError/);
+    assert.doesNotMatch(lines[0], /전공 수업|광개토관/);
+  } finally {
+    warn.mock.restore();
+  }
+});
+
+test('문구가 잘 만들어지면 경고를 남기지 않음', () => {
+  const warn = mock.method(console, 'warn', () => {});
+  try {
+    build(CHAIN);
+    assert.equal(warn.mock.calls.length, 0);
+  } finally {
+    warn.mock.restore();
+  }
+});
+
+test('기상 음성 문장의 이에요 · 예요: 제목 끝이 숫자면 읽는 소리, 닫는 괄호면 괄호 앞 글자, 영문 · 기타는 받침 없음', () => {
+  const sentence = (title: string) => wakeVoiceText({ title, appointmentAt: kst(600), timeZone: TZ }).split('오전 10시 ')[1].replace(/\.$/, '');
+  // 숫자: 0 영 · 1 일 · 3 삼 · 6 육 · 7 칠 · 8 팔은 받침 있음, 2 · 4 · 5 · 9는 없음
+  assert.equal(sentence('영어 1'), '영어 1이에요');
+  assert.equal(sentence('캡스톤 2'), '캡스톤 2예요');
+  for (const [digit, batchim] of Object.entries({ 0: true, 1: true, 2: false, 3: true, 4: false, 5: false, 6: true, 7: true, 8: true, 9: false })) {
+    assert.equal(sentence(`실습 ${digit}`), `실습 ${digit}${batchim ? '이에요' : '예요'}`);
+  }
+  assert.equal(sentence('실습 10'), '실습 10이에요'); // 십 · 끝자리 0은 늘 받침
+  // 닫는 괄호: 괄호 안은 빼고 그 앞 글자로
+  assert.equal(sentence('자료구조(월)'), '자료구조(월)예요');
+  assert.equal(sentence('전공 수업(월)'), '전공 수업(월)이에요');
+  assert.equal(sentence('영어 (3)'), '영어 (3)예요'); // 괄호 앞은 "영어"
+  assert.equal(sentence('영어 2 (3)'), '영어 2 (3)예요'); // 괄호 앞 글자는 2
+  assert.equal(sentence('영어 1 (월)'), '영어 1 (월)이에요');
+  assert.equal(sentence('자료구조[월]'), '자료구조[월]예요');
+  assert.equal(sentence('자료구조（월）'), '자료구조（월）예요');
+  assert.equal(sentence('자료구조 (A반(월))'), '자료구조 (A반(월))예요'); // 겹친 괄호도 통째로 뺌
+  assert.equal(sentence('자료구조(월)(화)'), '자료구조(월)(화)예요'); // 괄호가 이어져도 앞 글자로
+  assert.equal(sentence('밥(월)(화)'), '밥(월)(화)이에요'); // 앞 글자 밥은 받침
+  // 영문 · 기타는 지금처럼 받침 없음
+  assert.equal(sentence('Capstone'), 'Capstone예요');
+  assert.equal(sentence('팀 회의!'), '팀 회의!예요');
+  // 괄호만 있거나 짝이 안 맞으면 있는 그대로
+  assert.equal(sentence('(월)'), '(월)예요');
+  assert.equal(sentence('밥)'), '밥)예요');
 });
 
 test('문구가 붙어도 제목 · 부제 · 출발 시각 칸은 그대로이고, 들어온 순서와 상관없이 같은 꾸러미 (시각순)', () => {
