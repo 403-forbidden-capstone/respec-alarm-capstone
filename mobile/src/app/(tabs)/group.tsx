@@ -2,18 +2,33 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
-import { Avatar, Button, Card, Chip, EmptyState, LoadError, Loading, Screen, SectionHeader, Segmented, Text, toast, TopBar } from '@/components/ui';
+import { Avatar, Button, Card, Chip, EmptyState, LoadError, Loading, Screen, SectionHeader, Segmented, Sheet, Text, toast, TopBar } from '@/components/ui';
 import { TextLink } from '@/features/alarm/components/TextLink';
-import { acceptFriend, listFriendRequests, listFriends, listGroups } from '@/features/social/api';
+import { useAuth } from '@/features/auth/AuthProvider';
+import { HandleChangeSheet } from '@/features/profile/components/HandleChangeSheet';
+import {
+  acceptFriend,
+  createGroup,
+  joinGroupByCode,
+  listFriendRequests,
+  listFriends,
+  listGroups,
+  searchByHandle,
+  sendFriendRequest,
+} from '@/features/social/api';
 import { ActionTile } from '@/features/social/components/ActionTile';
+import { CreateGroupSheet } from '@/features/social/components/CreateGroupSheet';
 import { GroupIcon } from '@/features/social/components/GroupIcon';
+import { HandleSearchResult } from '@/features/social/components/HandleSearchResult';
+import { JoinGroupSheet } from '@/features/social/components/JoinGroupSheet';
+import { MyHandleRow } from '@/features/social/components/MyHandleRow';
 import { Note } from '@/features/social/components/Note';
 import { PersonRow } from '@/features/social/components/PersonRow';
 import { SearchBox } from '@/features/social/components/SearchBox';
+import { cleanHandle, HANDLE_RULE, isValidHandle } from '@/features/social/draft';
 import { useWakeLoad } from '@/features/social/hooks/useGroupWake';
 import { permissionNames } from '@/features/social/permissions';
-import type { FriendItem, GroupItem, Person } from '@/features/social/types';
-import { josa } from '@/lib/format';
+import type { FriendItem, GroupItem, HandleSearchResult as SearchHit, Person } from '@/features/social/types';
 import { useAction } from '@/lib/useAction';
 
 type Tab = 'friend' | 'group';
@@ -39,18 +54,18 @@ export default function GroupScreen() {
   const tab: Tab = picked && picked.request === request ? picked.tab : seg === 'group' ? 'group' : 'friend';
   const setTab = (next: Tab) => setPicked({ request, tab: next });
   const { data, error, reload } = useWakeLoad(loadSocial, (d) => d.groups.map((g) => g.id)); // 그룹 기상 신호가 오면 오늘 기상 수를 다시 읽음
-  const { run } = useAction();
+  const { profile } = useAuth();
 
-  const accept = (p: Person) =>
-    run(async () => {
-      await acceptFriend(p.id);
-      // 공유는 아직 없으므로 바로 범위를 정하러 갈 수 있게
-      toast(`${p.name}님과 친구가 됐어요`, {
-        actionLabel: '공유 범위 정하기',
-        onAction: () => router.push({ pathname: '/permissions', params: { relation: `friend:${p.id}` } }),
-      });
-      await reload();
+  // 받은 요청 목록 · 친구 추가 시트의 [수락]이 같이 씀 (실패는 부른 쪽의 useAction이 토스트로)
+  const acceptRequest = async (p: Person) => {
+    await acceptFriend(p.id);
+    // 공유는 아직 없으므로 바로 범위를 정할 수 있게
+    toast(`${p.name}님과 친구가 됐어요`, {
+      actionLabel: '공유 범위 정하기',
+      onAction: () => router.push({ pathname: '/permissions', params: { relation: `friend:${p.id}` } }),
     });
+    await reload();
+  };
 
   return (
     <Screen onRefresh={reload}>
@@ -67,21 +82,64 @@ export default function GroupScreen() {
       <Segmented options={TABS} value={tab} onChange={setTab} />
 
       {!data ? error ? <LoadError onRetry={reload} /> : <Loading /> : null}
-      {data && tab === 'friend' ? <FriendTab friends={data.friends} requests={data.requests} onAccept={accept} /> : null}
-      {data && tab === 'group' ? <GroupTab groups={data.groups} /> : null}
+      {data && tab === 'friend' ? (
+        <FriendTab friends={data.friends} requests={data.requests} handle={profile?.handle ?? null} onAcceptRequest={acceptRequest} />
+      ) : null}
+      {data && tab === 'group' ? <GroupTab groups={data.groups} onChanged={reload} /> : null}
     </Screen>
   );
 }
 
-// 친구 탭 — 검색 · 받은 요청 · 내 친구(내가 준 권한 수)
-function FriendTab({ friends, requests, onAccept }: { friends: FriendItem[]; requests: Person[]; onAccept: (p: Person) => void }) {
+type FriendTabProps = {
+  friends: FriendItem[];
+  requests: Person[];
+  handle: string | null; // 내 아이디 (@ 없이)
+  onAcceptRequest: (p: Person) => Promise<void>;
+};
+
+// 친구 탭 — 내 아이디 · 아이디로 찾기 (U01) · 받은 요청 · 내 친구(내가 준 권한 수)
+// 찾은 사람은 "친구 추가" 시트에 칸으로 보임 — 나중에 초대 링크 칸 등을 이 시트 안에 더 붙일 수 있게 칸마다 부품으로 나눔
+function FriendTab({ friends, requests, handle, onAcceptRequest }: FriendTabProps) {
+  const [changingHandle, setChangingHandle] = useState(false);
+  const [found, setFound] = useState<{ result: SearchHit | null } | null>(null); // null = 시트 닫힘, result null = 못 찾음
+  const [hint, setHint] = useState<string | null>(null); // 아이디 모양이 틀렸을 때 검색칸 아래 안내
+  const finder = useAction(); // 찾기 (읽기지만 두 번 누름 · 실패 토스트는 같이 막음)
+  const writer = useAction(); // 받은 요청 수락 · 친구 요청 보내기
+
+  const find = (text: string) => {
+    const clean = cleanHandle(text);
+    if (!isValidHandle(clean)) {
+      setHint(HANDLE_RULE); // DB에 물을 필요가 없는 모양이면 부르지 않음
+      return;
+    }
+    setHint(null);
+    void finder.run(async () => {
+      setFound({ result: await searchByHandle(clean) });
+    }, '아이디를 찾지 못했어요. 다시 해 주세요');
+  };
+
+  // 보낸 요청으로 바꿔 보임 (가짜 모드는 앱을 다시 열면 사라짐)
+  const request = (p: Person) =>
+    writer.run(async () => {
+      await sendFriendRequest(p.id);
+      setFound((f) => (f?.result ? { result: { ...f.result, relation: 'SENT' } } : f));
+    }, '친구 요청을 보내지 못했어요');
+
+  const acceptFound = (p: Person) =>
+    writer.run(async () => {
+      await onAcceptRequest(p);
+      setFound((f) => (f?.result ? { result: { ...f.result, relation: 'FRIEND' } } : f));
+    });
+
   return (
     <>
-      <SearchBox
-        placeholder="이름 또는 사용자 ID 검색"
-        actionLabel="추가"
-        onAction={() => toast('친구 검색은 곧 열려요')}
-      />
+      <MyHandleRow handle={handle} onChange={() => setChangingHandle(true)} />
+      <SearchBox placeholder="아이디로 찾기" actionLabel="찾기" onAction={find} />
+      {hint ? (
+        <Text variant="caption" tone="warn" style={styles.hint}>
+          {hint}
+        </Text>
+      ) : null}
 
       {requests.map((p) => (
         <Card key={p.id}>
@@ -93,7 +151,7 @@ function FriendTab({ friends, requests, onAccept }: { friends: FriendItem[]; req
                 {p.handle ?? p.name}의 친구 요청
               </Text>
             </View>
-            <Button label="수락" small onPress={() => onAccept(p)} />
+            <Button label="수락" small onPress={() => writer.run(() => onAcceptRequest(p))} />
           </View>
         </Card>
       ))}
@@ -114,32 +172,58 @@ function FriendTab({ friends, requests, onAccept }: { friends: FriendItem[]; req
           ))}
         </Card>
       ) : (
-        <EmptyState title="아직 친구가 없어요" body="이름이나 사용자 ID로 검색해 친구를 추가해 보세요." />
+        <EmptyState title="아직 친구가 없어요" body="친구의 아이디로 찾아 친구를 추가해 보세요." />
       )}
       <Note>친구는 역할이 아닌 관계예요. 친구가 되어도 알람과 기상 상태는 권한을 허용한 뒤에만 볼 수 있어요.</Note>
+
+      <Sheet visible={found != null} onClose={() => setFound(null)} title="친구 추가">
+        <View style={styles.sections}>
+          <HandleSearchResult result={found?.result ?? null} busy={writer.busy} onRequest={request} onAccept={acceptFound} />
+        </View>
+      </Sheet>
+      <HandleChangeSheet
+        visible={changingHandle}
+        onClose={() => setChangingHandle(false)}
+        current={handle}
+        onSubmit={async () => {
+          // L3 changeHandle 머지 뒤 연결 — 지금은 아이디를 바꾸는 함수가 없어 안내만
+          toast('아이디 바꾸기는 곧 열려요');
+          setChangingHandle(false);
+        }}
+      />
     </>
   );
 }
 
-// 그룹 탭 — 만들기 · 참여(아직 없음 — 누르면 "곧 열려요") · 참여 중인 그룹
-// 기상 상태를 볼 수 있는 그룹(받은 권한)만 그룹 상세로 들어가고, 아니면 안내만 (목업 G01 우리 가족)
-function GroupTab({ groups }: { groups: GroupItem[] }) {
+// 그룹 탭 — 새 그룹 만들기 (U06) · 코드로 참여 (U07) · 참여 중인 그룹
+// D21 기본안 B: 그룹 카드는 늘 상세로 들어감. 기상 상태를 볼 수 없는 그룹(받은 권한 없음)은 상세에서 기상 칸만 숨기고 이유를 알림
+function GroupTab({ groups, onChanged }: { groups: GroupItem[]; onChanged: () => Promise<boolean> }) {
+  const [creating, setCreating] = useState(false);
+  const [joining, setJoining] = useState(false);
+
+  // 만들거나 참여한 직후의 그룹은 상세가 기상 공유 동의를 바로 물음 (D89 기본안 A — ?consent=1)
+  const openNewGroup = (id: string) => {
+    setCreating(false);
+    setJoining(false);
+    router.push({ pathname: '/groups/[id]', params: { id, consent: '1' } });
+  };
+
+  const create = async (name: string) => {
+    const created = await createGroup(name);
+    void onChanged(); // 시트 뒤 목록에도 바로 보이게
+    return created;
+  };
+
+  const join = async (code: string) => {
+    const groupId = await joinGroupByCode(code);
+    openNewGroup(groupId); // 목록은 돌아올 때 다시 읽음
+  };
+
   return (
     <>
       <View style={styles.tiles}>
-        <ActionTile
-          dark
-          icon="+"
-          title="새 그룹 만들기"
-          sub="이름과 멤버 설정"
-          onPress={() => toast('그룹 만들기는 곧 열려요')}
-        />
-        <ActionTile
-          icon="↳"
-          title="그룹 참여하기"
-          sub="초대 코드 입력"
-          onPress={() => toast('초대 코드로 참여하기는 곧 열려요')}
-        />
+        <ActionTile dark icon="+" title="새 그룹 만들기" sub="이름과 멤버 설정" onPress={() => setCreating(true)} />
+        <ActionTile icon="↳" title="그룹 참여하기" sub="초대 코드 입력" onPress={() => setJoining(true)} />
       </View>
 
       <SectionHeader title="참여 중인 그룹" right={`${groups.length}개`} />
@@ -147,7 +231,7 @@ function GroupTab({ groups }: { groups: GroupItem[] }) {
       {groups.map((g) => {
         if (!g.canSeeWake) {
           return (
-            <Card key={g.id} onPress={() => toast(`${josa(g.name, '은', '는')} 공유 권한이 없어 기상 상태를 볼 수 없어요`)}>
+            <Card key={g.id} onPress={() => router.push({ pathname: '/groups/[id]', params: { id: g.id } })}>
               <View style={styles.row}>
                 <GroupIcon label={g.initial} light />
                 <View style={styles.grow}>
@@ -188,6 +272,9 @@ function GroupTab({ groups }: { groups: GroupItem[] }) {
           </Card>
         );
       })}
+
+      <CreateGroupSheet visible={creating} onClose={() => setCreating(false)} onCreate={create} onOpenGroup={openNewGroup} />
+      <JoinGroupSheet visible={joining} onClose={() => setJoining(false)} onJoin={join} />
     </>
   );
 }
@@ -213,6 +300,8 @@ const styles = StyleSheet.create({
   grow: { flex: 1, minWidth: 0 },
   between: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between' },
   trailing: { alignItems: 'flex-end' },
+  hint: { marginTop: -4, marginBottom: 12, marginHorizontal: 4 },
+  sections: { gap: 12 },
   tiles: { flexDirection: 'row', gap: 10, marginTop: 14 },
   groupNameTop: { marginTop: 10 },
   groupSub: { marginTop: 2, marginBottom: 10 },
