@@ -148,8 +148,12 @@ export type Snooze = { alarmId: string; kind: RingKind; appointmentTitle: string
 // 미루기 취소의 결과 — wakeCheck = 기상 알람의 미루기를 취소해 해제로 기록했으니 기상 확인(H08)으로 이어가야 함 (실데이터만, 가짜 데이터는 늘 false)
 export type CancelSnoozeResult = { wakeCheck: boolean };
 
+// 위도 · 경도 (장소 검색의 기준점 등)
+export type LatLng = { lat: number; lng: number };
+
 // 장소 — 가짜 데이터는 이름 + 집 기준 이동시간, 실데이터(place-search)는 이름 + 주소 + 좌표 (좌표가 있어야 길찾기가 됨)
-export type Place = { name: string; travelMinutes?: number; address?: string; lat?: number; lng?: number };
+//   category = 카카오 category_name 그대로('교육,학문 > 대학교') — 서버가 주는 값을 통과시킬 뿐 DB에 저장하지 않음 (D5)
+export type Place = { name: string; travelMinutes?: number; address?: string; lat?: number; lng?: number; category?: string };
 
 // 새 일정 입력값 (H05)
 export type AppointmentDraft = {

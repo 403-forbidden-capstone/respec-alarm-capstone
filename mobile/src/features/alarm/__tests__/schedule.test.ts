@@ -12,6 +12,7 @@ import {
   groupByDay,
   initialTime,
   isEvening,
+  needsMoveConfirm,
   parseDayParam,
   pickCardAlarm,
   splitUpcoming,
@@ -100,6 +101,13 @@ describe('H03 바뀌는 알람', () => {
       ['PREPARE', '오전 8:30', '오전 8:25'],
     ]);
     expect(changedAlarms(chain(), chain())).toEqual([]);
+  });
+
+  it('5분 이상 움직이는 알람이 하나라도 있으면 저장 전에 한 번 더 확인 (앞당겨도 뒤로 미뤄도)', () => {
+    const shift = (minutes: number) => changedAlarms(chain(), [alarm('WAKE', 480 + minutes), alarm('PREPARE', 510), alarm('DEPARTURE', 540), alarm('ARRIVE', 590)]);
+    expect([1, 4, -4].map((m) => needsMoveConfirm(shift(m)))).toEqual([false, false, false]);
+    expect([5, -5, 20].map((m) => needsMoveConfirm(shift(m)))).toEqual([true, true, true]);
+    expect(needsMoveConfirm([])).toBe(false);
   });
 });
 
