@@ -69,11 +69,12 @@ export function formatUsage(minutes: number) {
   return [m ? `${m}분` : '', s ? `${s}초` : ''].filter(Boolean).join(' ');
 }
 
-// 기상 확정 조건을 일상 말로 — 채웠으면 "썼어요", 아직이면 "써야 해요" (조건: 누적 사용 ≥ θ 그리고 최근 사용 > 0)
+// 기상 확정 조건을 일상 말로 — 채웠으면 "썼어요", 아직이면 "써야 해요" (조건: 누적 사용 ≥ θ 그리고 뒤쪽 5분 사용 > 0)
 export function judgeLines(usage: number, recent: number, thetaMinutes: number): string[] {
+  const late = `${WAKE_OBSERVE_MINUTES - WAKE_RECENT_MINUTES}~${WAKE_OBSERVE_MINUTES}`; // 최근 사용 = 관찰 뒤쪽 5분 (해제 5~10분 뒤, #225)
   return [
     usage >= thetaMinutes ? `알람 뒤 ${thetaMinutes}분 넘게 폰을 썼어요` : `알람 뒤 ${thetaMinutes}분 넘게 폰을 써야 해요`,
-    recent > 0 ? `최근 ${WAKE_RECENT_MINUTES}분 동안에도 사용했어요` : `최근 ${WAKE_RECENT_MINUTES}분 동안에도 사용해야 해요`,
+    recent > 0 ? `알람 끈 뒤 ${late}분 사이에도 폰을 썼어요` : `알람 끈 뒤 ${late}분 사이에도 폰을 써야 해요`,
   ];
 }
 

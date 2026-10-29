@@ -148,7 +148,7 @@ function WakeFlow({ check }: { check: WakeCheck }) {
   const meters = (
     <>
       <Meter label={`알람 끈 뒤 ${WAKE_OBSERVE_MINUTES}분 동안 폰 사용`} value={state.usage} threshold={check.thetaMinutes} />
-      <Meter label={`최근 ${WAKE_RECENT_MINUTES}분 동안 폰 사용`} value={state.recent} />
+      <Meter label={`알람 끈 뒤 ${WAKE_OBSERVE_MINUTES - WAKE_RECENT_MINUTES}~${WAKE_OBSERVE_MINUTES}분 폰 사용`} value={state.recent} />
       <FormulaBox lines={judgeLines(state.usage, state.recent, check.thetaMinutes)} />
     </>
   );
