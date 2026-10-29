@@ -508,6 +508,14 @@ describe('오늘 첫 일정 (getMorningPlan)', () => {
     expect(callsTo('appointment_participants', 'select')).toHaveLength(2);
   });
 
+  it('기상 확정 기록만 못 읽으면 확정 전으로 보고 계획은 그대로 줌', async () => {
+    mockRoutes['appointment_participants:select'] = () => ({ data: [dayRow()] });
+    mockRoutes['alarm_events:select'] = () => ({ error: { code: '', message: 'offline' } });
+    const plan = await real.getMorningPlan();
+    expect(plan?.wakeConfirmedAt).toBeNull();
+    expect(plan?.appointmentId).toBeTruthy();
+  });
+
   it('읽기가 실패하면 그대로 던짐 (홈이 없는 것으로 보고 넘어감)', async () => {
     mockRoutes['appointment_participants:select'] = () => ({ error: { code: '', message: 'offline' } });
     await expect(real.getMorningPlan()).rejects.toMatchObject({ message: 'offline' });

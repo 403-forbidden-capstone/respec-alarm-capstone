@@ -35,5 +35,7 @@ export async function getMorningPlan(): Promise<MorningPlan | null> {
   const source = pickMorningSource(rows.map(toMorningSource));
   const wake = source ? wakeAlarmOf(source) : undefined;
   if (!source || !wake) return null;
-  return toMorningPlan(source, await loadWakeConfirmedAt(userId, wake.id));
+  // 기상 확정은 카드가 알람 시각 전에 보이게 하는 가짜 시계용 보조 값이라 못 읽어도 일정 줄 · 카드는 그대로 (null = 아직 확정 전으로 봄)
+  const confirmedAt = await loadWakeConfirmedAt(userId, wake.id).catch(() => null);
+  return toMorningPlan(source, confirmedAt);
 }
