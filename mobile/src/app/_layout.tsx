@@ -15,10 +15,14 @@ import { ProfileRetryScreen } from '@/features/auth/ProfileRetryScreen';
 import { useAlarmSync } from '@/lib/alarmSync/useAlarmSync';
 import { ONBOARDING_IN_FLOW } from '@/lib/flags';
 import { canUseRealData, configError } from '@/lib/mode';
+import { ensureNotificationChannels } from '@/lib/push/channels';
 import { colors, fontFiles } from '@/theme';
 
 // 글꼴 · 로그인 상태를 다 읽을 때까지 시작 화면을 유지함
 SplashScreen.preventAutoHideAsync();
+
+// 알림 채널 만들기 (감지 안내 등, 안드로이드만 — 웹 · iOS는 아무 일도 안 함, 실패해도 앱은 계속) — lib/push/channels
+void ensureNotificationChannels();
 
 // 웹 로그인 팝업이 /auth/callback으로 돌아오면 팝업 주소(토큰 포함)를 원래 창에 넘기고 팝업이 닫힘
 // 팝업에서 확실히 실행되는 모듈은 이 루트 레이아웃뿐이라 여기서 부름 (화면 파일은 열릴 때만 읽히고, 폰에서는 아무 일도 안 함)

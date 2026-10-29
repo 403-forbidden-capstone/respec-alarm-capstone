@@ -32,6 +32,7 @@ import {
 } from '../api';
 import { adjustEstimate } from '../adjust';
 import { EVERY_DAY, WEEKDAYS_ONLY } from '../repeat';
+import { changedAlarms, needsMoveConfirm } from '../schedule';
 import type { AlarmSettingsDraft, AppointmentDraft } from '../types';
 
 const SEEDS = db.appointments.map((a) => ({ ...a })); // 시드 일정 — 테스트가 고치거나 새로 만든 일정은 매번 되돌림
@@ -290,6 +291,29 @@ describe('H03 저장 — 여유 · 종류별 켜기 · 강도를 한 번에', ()
     db.disabledAppointments.add('a1');
     await saveAlarmSettings('a1', { ...draft, bufferMinutes: 15 });
     expect((await getAppointment('a1'))!.enabled).toBe(false);
+  });
+});
+
+describe('H03 여유 시간 1분 단위 (D12)', () => {
+  it('여유를 1분 바꾸면 알람도 1분 움직여(5분 단위로 뭉치지 않음), 5분 미만이면 확인 없이 저장하고 5분부터 확인을 물음', async () => {
+    const a = (await getAppointment('a1'))!; // 여유 10분 · 기상 오전 8:00
+    const draft = await settingsOf('a1');
+    const moved = async (bufferMinutes: number) => changedAlarms(a.alarms, (await previewAlarms('a1', { ...draft, bufferMinutes })).alarms);
+
+    const one = await moved(11);
+    expect(one.map((c) => [c.kind, formatTime(c.to)])).toEqual([['WAKE', '오전 7:59'], ['PREPARE', '오전 8:29'], ['DEPARTURE', '오전 8:59']]);
+    expect(needsMoveConfirm(one)).toBe(false);
+    expect(needsMoveConfirm(await moved(14))).toBe(false); // 4분
+    expect(needsMoveConfirm(await moved(15))).toBe(true); // 5분
+    expect(needsMoveConfirm(await moved(5))).toBe(true); // 줄여도 5분
+    expect(needsMoveConfirm(await moved(7))).toBe(false); // 3분
+    expect(await moved(10)).toEqual([]);
+  });
+
+  it('저장도 1분 단위 그대로 — 여유 13분이면 기상 오전 7:57', async () => {
+    await saveAlarmSettings('a1', { ...(await settingsOf('a1')), bufferMinutes: 13 });
+    const a = (await getAppointment('a1'))!;
+    expect([a.bufferMinutes, formatTime(a.alarms[0].at)]).toEqual([13, '오전 7:57']);
   });
 });
 

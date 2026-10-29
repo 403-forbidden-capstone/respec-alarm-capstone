@@ -7,7 +7,7 @@ import { formatTime } from '@/lib/format';
 import { recallDetail } from '../detailCache';
 import { resetAlarmMemory } from '../reset';
 import { clearEdits, peekEdits } from '../editQueue';
-import { forgetPlaces, lookupPlace } from '../places';
+import { forgetPlaces, lookupPlace, toPoint } from '../places';
 import { TravelConfirmNeeded } from '../travelConfirm';
 import * as real from '../real';
 import { filterArgs, type FakeCall, type FakeResult } from '../testkit/fakeSupabase';
@@ -619,6 +619,24 @@ describe('장소 (listPlaces)', () => {
     expect(places).toEqual([{ name: '세종대학교', address: '서울 광진구', lat: 37.55, lng: 127.07 }, { name: '주소만' }]); // 같은 이름은 먼저 나온 것만, 좌표 없으면 좌표 칸 없음
     expect(lookupPlace('세종대학교')).toMatchObject({ lat: 37.55, lng: 127.07 });
     expect(lookupPlace('주소만')).toBeUndefined();
+  });
+
+  it('near(집 좌표)를 주면 place-search의 lat · lng로 넘겨 가까운 순으로 받음, 둘 중 하나라도 숫자가 아니면 안 넘김', async () => {
+    mockCallEdge.mockResolvedValue({ places: [] });
+    await real.listPlaces('세종', { lat: 37.5, lng: 127.0 });
+    expect(mockCallEdge).toHaveBeenLastCalledWith('place-search', { query: '세종', lat: 37.5, lng: 127.0, limit: 10 }, { retry: 1 });
+    await real.listPlaces('세종', { lat: Number.NaN, lng: 127.0 });
+    expect(mockCallEdge).toHaveBeenLastCalledWith('place-search', { query: '세종', limit: 10 }, { retry: 1 });
+  });
+
+  it('서버가 준 category는 그대로 통과 (없으면 칸 없음) — 기억해 두는 좌표 쪽은 이름 · 좌표만 씀', async () => {
+    mockCallEdge.mockResolvedValue({ places: [{ id: '1', name: '세종대학교', lat: 37.55, lng: 127.07, category: '교육,학문 > 대학교' }, { id: '2', name: '건대 앞 카페', lat: 37.54, lng: 127.07 }] });
+    const places = await real.listPlaces('대', { lat: 37.5, lng: 127.0 });
+    expect(places).toEqual([
+      { name: '세종대학교', lat: 37.55, lng: 127.07, category: '교육,학문 > 대학교' },
+      { name: '건대 앞 카페', lat: 37.54, lng: 127.07 },
+    ]);
+    expect(toPoint('세종대학교')).toEqual({ name: '세종대학교', lat: 37.55, lng: 127.07 }); // 길찾기 요청에는 category가 실리지 않음
   });
 
   it('검색어가 없으면 최근에 쓴 곳(최근 약속의 도착지 · 출발지, "집" 제외) — 서버 함수를 부르지 않음', async () => {
