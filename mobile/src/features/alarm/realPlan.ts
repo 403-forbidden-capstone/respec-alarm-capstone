@@ -4,7 +4,7 @@
 //   · 저장은 중복 키를 서버가 아직 안 읽어서(lib/edge) 자동 재시도하지 않음. 읽기(alarm-suggest · place-search)만 한 번 재시도
 import { applyCommit } from '@/lib/alarmSync';
 import { now } from '@/lib/clock';
-import { dbTimeMs } from '@/lib/dbTime';
+import { dbTimeMs, parseDbTime } from '@/lib/dbTime';
 import { callEdge, EdgeError, messageFor } from '@/lib/edge';
 import { UserError } from '@/lib/errors';
 import { dayKey } from '@/lib/format';
@@ -15,7 +15,8 @@ import { manualTimes, orderError, sameEdits } from './adjust';
 import { forgetDetail, recallDetail, rememberDetail } from './detailCache';
 import { dropEdits, MAX_EDITS_PER_REQUEST, peekEdits, queueEdit } from './editQueue';
 import { createEdits, fromEditRow, settingsEdits, toEditPayloads, type EditLogLine, type SettingsAfter } from './edits';
-import { toStandaloneAppointment } from './map';
+import { toStandaloneAppointment, TRAVEL_SOURCE_LABEL } from './map';
+import { toDepartCheck } from './morning';
 import { rememberPlaces, toPlace, uniqueByName, type PlaceDto } from './places';
 import {
   createCommitBody,
@@ -43,6 +44,7 @@ import {
   type AlarmSettingsDraft,
   type Appointment,
   type AppointmentDraft,
+  type DepartCheck,
   type Estimate,
   type Place,
   type UserEditLog,
@@ -134,6 +136,21 @@ async function readDetail(id: string) {
   const detail = await loadDetail(id, await requireUserId(), now().getTime());
   if (detail) rememberDetail(detail);
   return detail;
+}
+
+// 지금 나가면 (홈 아침 카드 [다시 확인], 이슈 #230) — 저장된 약속으로 alarm-suggest 미리 보기를 불러 이동시간만 새로 구함 (저장 안 함)
+//   도착 = 지금 + 이동, 여유 · 상태는 departNow (morning.ts toDepartCheck). 출발 시각이 지나 서버가 UNPROCESSABLE을 줘도 suggest()가 계산 결과(details.suggestion)를 꺼내 줌
+//   카카오 응답은 앱 메모리에도 담지 않음(D5): 이동분(숫자)만 꺼내 쓰고, 같은 요청이 동시에 겹치면 한 번만(suggest) — 결과를 기억해 두지는 않음
+export async function checkDepartNow(appointmentId: string): Promise<DepartCheck> {
+  const s = await suggest({ appointment_id: appointmentId });
+  const minutes = s.travel.minutes;
+  if (minutes == null) throw new UserError('이동시간을 구하지 못했어요. 알람 설정에서 예상 이동을 직접 입력해 주세요');
+  return toDepartCheck({
+    appointmentAt: parseDbTime(s.appointment_at),
+    travelMinutes: minutes,
+    source: s.travel.source ? TRAVEL_SOURCE_LABEL[s.travel.source] : '',
+    now: now(),
+  });
 }
 
 // ---------------------------------------------------------------------------
