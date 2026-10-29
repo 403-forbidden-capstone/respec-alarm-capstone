@@ -23,9 +23,11 @@ export function toPlace(dto: PlaceDto): Place {
   };
 }
 
-// 기준점은 위도 · 경도가 둘 다 숫자일 때만 씀 (서버 place-search도 lat · lng가 같이 있어야 받음)
+// 기준점은 위도 · 경도가 둘 다 범위 안 숫자일 때만 씀 (서버 place-search는 lat · lng가 같이 있고 범위 안이어야 받음 — 아니면 검색이 통째로 실패)
+const inRange = (v: number, limit: number) => Number.isFinite(v) && Math.abs(v) <= limit;
+
 export function validNear(near?: LatLng): LatLng | undefined {
-  return near && Number.isFinite(near.lat) && Number.isFinite(near.lng) ? { lat: near.lat, lng: near.lng } : undefined;
+  return near && inRange(near.lat, 90) && inRange(near.lng, 180) ? { lat: near.lat, lng: near.lng } : undefined;
 }
 
 // 두 점 사이 직선거리(m) — 가까운 순 정렬용이라 지구를 구로 본 근사면 충분

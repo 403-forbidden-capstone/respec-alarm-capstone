@@ -66,6 +66,8 @@ describe('장소 도우미', () => {
     expect(validNear(undefined)).toBeUndefined();
     expect(validNear({ lat: Number.NaN, lng: 127 })).toBeUndefined();
     expect(validNear({ lat: 37.5, lng: Number.POSITIVE_INFINITY })).toBeUndefined();
+    expect(validNear({ lat: 91, lng: 127 })).toBeUndefined();
+    expect(validNear({ lat: 37.5, lng: -181 })).toBeUndefined();
   });
 
   it('distanceMeters: 같은 점은 0, 세종대 ↔ 건국대는 약 1.7km', () => {
