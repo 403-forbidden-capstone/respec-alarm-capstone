@@ -125,7 +125,7 @@ test('같은 참여 조건에 같은 종류 알람이 둘 이상 없음 (alarms_
   }
 });
 
-test('출발 · 도착 시각은 출처와 짝 (appointment_participants_*_source_pair) — 시각이 있으면 BUTTON, 없으면 NULL', () => {
+test('출발 · 도착 시각은 출처와 같이 (appointment_participants_*_source_needs_time) — 시각이 있으면 BUTTON, 없으면 NULL', () => {
   assert.ok(t.appointment_participants.some((p) => p.departed_at !== null), '시각이 있는 참여 조건이 하나도 없음');
   for (const p of t.appointment_participants) {
     assert.equal(p.departed_source, p.departed_at === null ? null : 'BUTTON', p.participant_id);

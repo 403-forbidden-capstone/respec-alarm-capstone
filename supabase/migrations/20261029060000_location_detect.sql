@@ -14,30 +14,34 @@
 -- ---------------------------------------------------------------------
 -- 지금은 응답 시각과 같은 alarm_events 기록이 있는지로 응답/위치를 짐작함 (participantTimes loadResponseTimes) —
 -- 지오펜스가 붙으면 위치 값과 응답 값이 섞이므로 시각 옆에 출처를 같이 둠
--- NULL = 기록 없음 (시각이 NULL일 때만 NULL — 아래 짝 제약). 출처 값은 alarm_events.input_source와 같은 enum
+-- 출처 값은 alarm_events.input_source와 같은 enum. NULL = 기록 없음, 또는 출처 칸을 모르는 옛 앱이 쓴 원탭 값(시각만 있음 → BUTTON으로 읽음)
 
 alter table public.appointment_participants
   add column departed_source public.event_input_source,
   add column arrived_source  public.event_input_source;
 
-comment on column public.appointment_participants.departed_source is '출발 시각(departed_at)의 출처 — 원탭 BUTTON · 위치 LOCATION · 직접 MANUAL. 응답이 위치를 덮음(participantTimes decideWrite). 시각과 같이 NULL이거나 같이 있음';
-comment on column public.appointment_participants.arrived_source  is '도착 시각(arrived_at)의 출처 — 원탭 BUTTON · 위치 LOCATION · 직접 MANUAL. 응답이 위치를 덮음(participantTimes decideWrite). 시각과 같이 NULL이거나 같이 있음';
+comment on column public.appointment_participants.departed_source is '출발 시각(departed_at)의 출처 — 원탭 BUTTON · 위치 LOCATION · 직접 MANUAL. 응답이 위치를 덮음(participantTimes decideWrite). 시각 없이 출처만은 안 됨, 시각만 있으면 옛 앱 원탭 값(BUTTON으로 읽음)';
+comment on column public.appointment_participants.arrived_source  is '도착 시각(arrived_at)의 출처 — 원탭 BUTTON · 위치 LOCATION · 직접 MANUAL. 응답이 위치를 덮음(participantTimes decideWrite). 시각 없이 출처만은 안 됨, 시각만 있으면 옛 앱 원탭 값(BUTTON으로 읽음)';
 
 -- 이미 들어 있는 시각은 원탭 흐름(oneTap.ts)만 썼으므로 BUTTON으로 채움 (updated_at 트리거가 같이 돎 — 영향 없음)
 update public.appointment_participants set departed_source = 'BUTTON' where departed_at is not null;
 update public.appointment_participants set arrived_source  = 'BUTTON' where arrived_at  is not null;
 
--- 시각과 출처는 짝: 시각만 있거나 출처만 있는 행을 막음 (채운 뒤에 걸어야 기존 행이 통과)
+-- 출처는 시각이 있을 때만: 시각을 지우면 출처도 같이 지움 (위치 값 정정 · 귀가로 출발 취소)
+--   시각만 있는 행은 막지 않음 — 출처 칸을 모르는 옛 앱이 departed_at만 쓰면 짝 제약(23514)에 걸리는데,
+--   앱은 이 오류를 "다시 해도 안 되는 오류"로 보고 폰 기록을 지워 원탭 출발 · 도착이 조용히 사라짐
+--   (oneTap.ts isPermanentInsertError · lib/alarmSync/events.ts PERMANENT_CODES, #231 리뷰). 그런 행은 원탭 값이라 BUTTON으로 읽음
 alter table public.appointment_participants
-  add constraint appointment_participants_departed_source_pair check ((departed_at is null) = (departed_source is null)),
-  add constraint appointment_participants_arrived_source_pair  check ((arrived_at  is null) = (arrived_source  is null));
+  add constraint appointment_participants_departed_source_needs_time check (departed_source is null or departed_at is not null),
+  add constraint appointment_participants_arrived_source_needs_time  check (arrived_source  is null or arrived_at  is not null);
 
 
 -- ---------------------------------------------------------------------
 -- 2. 위치 반경 — 도착지(약속) · 집(프로필)
 -- ---------------------------------------------------------------------
 -- 지오펜스 반지름(미터), 100~500. NULL = 기본값 (D77 기본안: 카카오 분류로 자동 — 건물 · 가게 150, 역 · 공원 · 대형 시설 300, 집 200 /
---   D68 장소별 150~300m). 기본값은 앱이 정하고 DB에는 직접 고른 값만 남김
+--   D68 장소별 150~300m). 도착지 반경은 장소를 고를 때 카카오 분류로 정해 저장함(분류 자체는 저장 안 함 — D5).
+--   NULL = 이 칸 전에 만든 약속 · 분류를 모를 때 → 앱 기본값. 집 아닌 출발지(appointment_participants.origin_*)는 칸 없이 앱 기본값
 -- 도착지 반경은 dest_lat · dest_lng와 같은 권한 (약속을 고칠 수 있는 사람), 집 반경은 home_lat · home_lng와 같이 본인만
 
 alter table public.appointments
@@ -48,7 +52,7 @@ alter table public.profiles
   add column home_radius_m smallint,
   add constraint profiles_home_radius_m_range check (home_radius_m between 100 and 500);
 
-comment on column public.appointments.dest_radius_m is '도착지 지오펜스 반경(미터, 100~500). NULL = 기본값 — D77 기본안: 카카오 분류로 자동(건물 · 가게 150, 역 · 공원 · 대형 시설 300), D68 장소별 150~300m';
+comment on column public.appointments.dest_radius_m is '도착지 지오펜스 반경(미터, 100~500). 장소를 고를 때 카카오 분류로 정함 — D77 기본안: 건물 · 가게 150, 역 · 공원 · 대형 시설 300 (D68 장소별 150~300m). NULL = 앱 기본값';
 comment on column public.profiles.home_radius_m     is '집 지오펜스 반경(미터, 100~500). NULL = 기본값 — D77 기본안 집 200m (D68 장소별 150~300m)';
 
 

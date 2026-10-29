@@ -1,7 +1,7 @@
 // 출발 · 도착 시각을 appointment_participants에 쓰는 한 곳 (7장 A · B · D, #40 · #41 · #36 지오펜스)
 //   부르는 곳은 둘: 지금은 원탭 뒤처리(oneTap.ts, source BUTTON), 지오펜스(위치)가 붙으면 같은 함수를 source LOCATION으로 부름.
 //   · 출처 우선순위 — 사용자 응답(원탭 BUTTON · 직접 입력 MANUAL) > 위치(LOCATION). 위치 값이 먼저 있어도 응답이 덮고, 응답 값이 있으면 위치는 못 덮음. 같은 출처끼리는 먼저 쓴 값을 유지
-//     시각을 쓸 때 출처도 같이 씀(appointment_participants.departed_source · arrived_source = source, 시각과 같이 NULL이거나 같이 있어야 하는 짝 제약).
+//     시각을 쓸 때 출처도 같이 씀(appointment_participants.departed_source · arrived_source = source, 출처는 시각이 있을 때만 — 시각을 지우면 출처도 같이 지움. 시각만 있고 출처가 비면 옛 앱이 쓴 원탭 값).
 //     다만 지금 들어 있는 값이 응답인지 읽는 쪽은 아직 alarm_events.input_source로 판단함(출처 칸으로 바꾸는 건 다음 PR): 지금 들어 있는 값의 시각과 같은 시각의 응답 기록(출발 알람의 ACKNOWLEDGED · 도착 알람의 ARRIVAL_CONFIRMED,
 //     input_source BUTTON · MANUAL)이 있으면 응답으로 쓴 값. → 부르는 쪽은 값을 쓰기 전에 같은 시각의 기록을 alarm_events에 남겨야 함 (원탭은 폰이 남기고 올린 뒤에 이 함수를 부름)
 //   · 지각 — 약속 + 5분을 넘으면 지각, 응답으로 받은 도착은 그대로 판정. 위치로 잡은 도착은 −2 ~ +5분이 경계 구간이라 판정을 보류(is_late NULL)하고 도착 확인 원탭을 기다림 (D)

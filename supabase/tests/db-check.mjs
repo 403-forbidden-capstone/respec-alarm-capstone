@@ -1349,31 +1349,31 @@ await check('위치 감지 칸: 출발 · 도착 출처는 event_input_source(NU
     && m['profiles.home_radius_m'] === 'int2/YES'
     ? true : m;
 });
-await check('출발 · 도착 출처는 시각과 짝: 시각만 · 출처만 있는 행(고치기 · 넣기 모두)은 거부, 둘 다 있거나 둘 다 없으면 받음, 시각을 비우려면 출처도 같이 비움', async () => {
+await check('출발 · 도착 출처는 시각이 있을 때만: 출처만 있는 행 · 시각만 지우기는 거부, 시각만 있는 행(옛 앱 원탭 값)은 받음', async () => {
   const { part } = await mkPart(A);
   const upd = (set) => q(`update public.appointment_participants set ${set} where participant_id = $1 returning departed_source, arrived_source`, [part]);
-  const depTimeOnly = await expectErr(() => upd(`departed_at = now()`), /appointment_participants_departed_source_pair/);
-  const depSrcOnly = await expectErr(() => upd(`departed_source = 'BUTTON'`), /appointment_participants_departed_source_pair/);
-  const arrTimeOnly = await expectErr(() => upd(`arrived_at = now()`), /appointment_participants_arrived_source_pair/);
-  const arrSrcOnly = await expectErr(() => upd(`arrived_source = 'LOCATION'`), /appointment_participants_arrived_source_pair/);
+  const depSrcOnly = await expectErr(() => upd(`departed_source = 'BUTTON'`), /appointment_participants_departed_source_needs_time/);
+  const arrSrcOnly = await expectErr(() => upd(`arrived_source = 'LOCATION'`), /appointment_participants_arrived_source_needs_time/);
   const nothing = await upd(`is_late = null`);   // 둘 다 비어 있으면 다른 칸만 고쳐도 통과
-  const both = await upd(`departed_at = now(), departed_source = 'LOCATION', arrived_at = now(), arrived_source = 'MANUAL'`);
-  const clearTimeOnly = await expectErr(() => upd(`departed_at = null`), /appointment_participants_departed_source_pair/);
-  const override = await upd(`departed_source = 'BUTTON'`);   // 위치로 쓴 값을 응답으로 덮을 때 (출처만 바꿔도 짝은 유지)
+  const legacy = await upd(`departed_at = now(), arrived_at = now()`);   // 출처 칸을 모르는 옛 앱이 시각만 씀 → 막지 않음 (BUTTON으로 읽음)
+  const both = await upd(`departed_source = 'LOCATION', arrived_source = 'MANUAL'`);
+  const clearTimeOnly = await expectErr(() => upd(`departed_at = null`), /appointment_participants_departed_source_needs_time/);
+  const override = await upd(`departed_source = 'BUTTON'`);   // 위치로 쓴 값을 응답으로 덮을 때 (출처만 바꿈)
   const cleared = await upd(`departed_at = null, departed_source = null, arrived_at = null, arrived_source = null`);
   const badEnum = await expectErr(() => upd(`departed_source = 'GPS'`), /invalid input value for enum/);
   // 넣을 때도 같은 제약
   const second = await q(`insert into public.appointments (creator_id, title, appointment_at, dest_name) values ($1, '시험 2', now() + interval '2 days', '강남역') returning appointment_id`, [A]);
-  const insTimeOnly = await expectErr(() => q(`insert into public.appointment_participants (appointment_id, user_id, arrived_at) values ($1, $2, now())`, [second[0].appointment_id, A]),
-    /appointment_participants_arrived_source_pair/);
+  const insSrcOnly = await expectErr(() => q(`insert into public.appointment_participants (appointment_id, user_id, arrived_source) values ($1, $2, 'BUTTON')`, [second[0].appointment_id, A]),
+    /appointment_participants_arrived_source_needs_time/);
   const [insBoth] = await q(`insert into public.appointment_participants (appointment_id, user_id, arrived_at, arrived_source) values ($1, $2, now(), 'BUTTON') returning arrived_source, departed_source`,
     [second[0].appointment_id, A]);
-  return depTimeOnly === true && depSrcOnly === true && arrTimeOnly === true && arrSrcOnly === true && nothing.length === 1
+  return depSrcOnly === true && arrSrcOnly === true && nothing.length === 1
+    && legacy.length === 1 && legacy[0].departed_source === null && legacy[0].arrived_source === null
     && both.length === 1 && both[0].departed_source === 'LOCATION' && both[0].arrived_source === 'MANUAL'
     && clearTimeOnly === true && override[0].departed_source === 'BUTTON'
     && cleared[0].departed_source === null && cleared[0].arrived_source === null && badEnum === true
-    && insTimeOnly === true && insBoth.arrived_source === 'BUTTON' && insBoth.departed_source === null
-    ? true : { depTimeOnly, depSrcOnly, arrTimeOnly, arrSrcOnly, nothing, both, clearTimeOnly, override, cleared, badEnum, insTimeOnly, insBoth };
+    && insSrcOnly === true && insBoth.arrived_source === 'BUTTON' && insBoth.departed_source === null
+    ? true : { depSrcOnly, arrSrcOnly, nothing, legacy, both, clearTimeOnly, override, cleared, badEnum, insSrcOnly, insBoth };
 });
 await check('반경: 약속 도착지(dest_radius_m)와 집(home_radius_m)은 100~500이고 NULL(기본값)도 받음 — 99 · 501은 거부', async () => {
   const { appt } = await mkPart(A);
@@ -1428,7 +1428,7 @@ await check('고친 값 기록 화면: H01 · H03 · H05 · H08 · NTF · S01만
   const del = await q(`delete from public.user_edit_logs where field = 'departed_at' returning 1`);
   return ok.join() === 'H01,H03,H05,H08,NTF,S01' && bad.every((x) => x === true) && del.length === 6 ? true : { ok, bad, del: del.length };
 });
-await check('백필: 마이그레이션 전에 들어 있던 출발 · 도착 시각은 BUTTON으로 채워지고 시각 없는 칸은 NULL로 남음 (기존 행 때문에 짝 제약이 안 막힘 · 반경은 NULL · 기존 고친 값 기록 유지)', async () => {
+await check('백필: 마이그레이션 전에 들어 있던 출발 · 도착 시각은 BUTTON으로 채워지고 시각 없는 칸은 NULL로 남음 (반경은 NULL · 기존 고친 값 기록 유지)', async () => {
   const staged = new PGlite();
   try {
     await staged.exec(AUTH_STUBS);
