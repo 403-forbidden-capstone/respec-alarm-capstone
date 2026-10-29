@@ -1,11 +1,14 @@
 import { beforeEach, describe, expect, it, jest } from '@jest/globals';
 
+import { DETECTION_DELAY_MAX_MINUTES } from '@/features/location/constants';
+
 import { filterArgs, type FakeCall, type FakeResult } from '../testkit/fakeSupabase';
 import {
   decideWrite,
   geoEventId,
   judgeArrival,
   LATE_AFTER_MINUTES,
+  LOCATION_LATE_AFTER_MINUTES,
   mayWritePrepare,
   prepareMinutesOf,
   recordParticipantTimes,
@@ -59,15 +62,20 @@ describe('지각 판정 (judgeArrival, D58 · #41)', () => {
     }
   });
 
-  it('위치로 잡은 도착: −2 ~ +11분 보류(null), +11분 넘으면 지각, −2분보다 일찍이면 제시간 (D61 · L6 안건후보: 위치 도착 지각 경계 폭 기본안)', () => {
-    expect(judgeArrival(min(-2) - 1000, APPOINTMENT, 'LOCATION')).toEqual({ isLate: false, lateMinutes: 0 });
-    expect(judgeArrival(min(-3), APPOINTMENT, 'LOCATION')).toEqual({ isLate: false, lateMinutes: 0 });
-    expect(judgeArrival(min(-2), APPOINTMENT, 'LOCATION')).toEqual({ isLate: null, lateMinutes: null });
-    expect(judgeArrival(min(0), APPOINTMENT, 'LOCATION')).toEqual({ isLate: null, lateMinutes: null });
-    expect(judgeArrival(min(8), APPOINTMENT, 'LOCATION')).toEqual({ isLate: null, lateMinutes: null }); // 원탭이면 지각인 +8분도 보류
-    expect(judgeArrival(min(11), APPOINTMENT, 'LOCATION')).toEqual({ isLate: null, lateMinutes: null });
-    expect(judgeArrival(min(11) + 1000, APPOINTMENT, 'LOCATION')).toEqual({ isLate: true, lateMinutes: 11 });
-    expect(judgeArrival(min(11.6), APPOINTMENT, 'LOCATION')).toEqual({ isLate: true, lateMinutes: 12 });
+  it('위치 도착 지각 경계 +11분 = 응답 경계 +5분 + 감지 지연 최대 6분 (D61)', () => {
+    expect(LOCATION_LATE_AFTER_MINUTES).toBe(11);
+    expect(LOCATION_LATE_AFTER_MINUTES).toBe(LATE_AFTER_MINUTES + DETECTION_DELAY_MAX_MINUTES);
+  });
+
+  it('위치로 잡은 도착은 바로 확정 — 보류(null) 없음: +11분까지 지각 아님, 넘으면 지각 (D61 + 지형님 10/29 흐름 확인)', () => {
+    for (const m of [-30, -2, 0, 8, 11]) expect(judgeArrival(min(m), APPOINTMENT, 'LOCATION')).toEqual({ isLate: false, lateMinutes: 0 }); // 원탭이면 지각인 +8분도 지각 아님
+    expect(judgeArrival(min(11) + 1000, APPOINTMENT, 'LOCATION').isLate).toBe(true);
+  });
+
+  it('위치 도착의 지각 분은 감지 지연(6분)을 뺀 값 — 지각이면 늘 5분 이상이라 응답 기준과 맞음', () => {
+    expect(judgeArrival(min(11) + 1000, APPOINTMENT, 'LOCATION')).toEqual({ isLate: true, lateMinutes: 5 });
+    expect(judgeArrival(min(11.6), APPOINTMENT, 'LOCATION')).toEqual({ isLate: true, lateMinutes: 6 });
+    expect(judgeArrival(min(20), APPOINTMENT, 'LOCATION')).toEqual({ isLate: true, lateMinutes: 14 });
   });
 });
 
@@ -80,28 +88,42 @@ describe('지금 값의 출처 (storedSource) — 출처 칸, 비어 있으면 �
   });
 });
 
-describe('출처 우선순위 (decideWrite) — 응답(BUTTON · MANUAL) > 위치(LOCATION), 같은 출처끼리는 먼저 쓴 값', () => {
-  const empty = { present: false, byResponse: false };
-  const byLocation = { present: true, byResponse: false };
-  const byTap = { present: true, byResponse: true };
+describe('출처 우선순위 (decideWrite) — 응답(BUTTON · MANUAL) > 위치(LOCATION)', () => {
+  const STORED = at('08:20');
+  const empty = { atMs: null, byResponse: false };
+  const byLocation = { atMs: STORED, byResponse: false };
+  const byTap = { atMs: STORED, byResponse: true };
+  const incoming = (source: 'BUTTON' | 'MANUAL' | 'LOCATION', hhmm = '08:50') => ({ source, atMs: at(hhmm) });
 
   it('빈 칸이면 어떤 출처든 씀', () => {
-    for (const source of ['BUTTON', 'MANUAL', 'LOCATION'] as const) expect(decideWrite(source, empty)).toBe('new');
+    for (const kind of ['DEPART', 'ARRIVE'] as const) {
+      for (const source of ['BUTTON', 'MANUAL', 'LOCATION'] as const) expect(decideWrite(kind, incoming(source), empty)).toBe('new');
+    }
   });
 
-  it('위치로 쓴 값은 응답이 덮음 (원탭 · 직접 입력)', () => {
-    expect(decideWrite('BUTTON', byLocation)).toBe('override');
-    expect(decideWrite('MANUAL', byLocation)).toBe('override');
+  it('위치로 쓴 값은 응답이 덮음 (원탭 · 직접 입력) — 시각이 이르든 늦든', () => {
+    for (const kind of ['DEPART', 'ARRIVE'] as const) {
+      expect(decideWrite(kind, incoming('BUTTON'), byLocation)).toBe('override');
+      expect(decideWrite(kind, incoming('MANUAL', '08:00'), byLocation)).toBe('override');
+    }
   });
 
   it('응답으로 쓴 값은 위치가 못 덮고, 응답끼리도 먼저 쓴 값을 유지', () => {
-    expect(decideWrite('LOCATION', byTap)).toBe('keep');
-    expect(decideWrite('BUTTON', byTap)).toBe('keep');
-    expect(decideWrite('MANUAL', byTap)).toBe('keep');
+    for (const source of ['LOCATION', 'BUTTON', 'MANUAL'] as const) {
+      expect(decideWrite('DEPART', incoming(source), byTap)).toBe('keep');
+      expect(decideWrite('ARRIVE', incoming(source), byTap)).toBe('keep');
+    }
   });
 
-  it('위치끼리도 먼저 쓴 값을 유지', () => {
-    expect(decideWrite('LOCATION', byLocation)).toBe('keep');
+  it('위치 출발끼리는 더 늦은 출발로 바꿈 — 약속 전 마지막 출발 (7.13.7), 같거나 이른 출발(재전송 · 순서 뒤바뀜)은 그대로', () => {
+    expect(decideWrite('DEPART', incoming('LOCATION', '08:50'), byLocation)).toBe('override');
+    expect(decideWrite('DEPART', incoming('LOCATION', '08:20'), byLocation)).toBe('keep');
+    expect(decideWrite('DEPART', incoming('LOCATION', '08:00'), byLocation)).toBe('keep');
+  });
+
+  it('위치 도착끼리는 먼저 쓴 값 유지 (도착 = 처음 들어온 시각)', () => {
+    expect(decideWrite('ARRIVE', incoming('LOCATION', '08:50'), byLocation)).toBe('keep');
+    expect(decideWrite('ARRIVE', incoming('LOCATION', '08:00'), byLocation)).toBe('keep');
   });
 });
 
@@ -194,9 +216,11 @@ describe('DB에 쓰기 (recordParticipantTimes)', () => {
   const only = (table: string, op: FakeCall['op']) => mockCalls.filter((c) => c.table === table && c.op === op);
 
   // 기본: 참여 조건 하나 + 그날 예정 기상 8:00, 아직 그날 기록 행 없음, 집 좌표 있음
+  // 쓰기(update ... select)는 기본으로 한 줄을 바꿈 — 0줄(그 사이 다른 곳이 바꿈)은 시험마다 따로
   function setup(opts: { participant?: ReturnType<typeof participantRow>; record?: Record<string, unknown> | null; wakeAt?: string | null; home?: { lat: number; lng: number } | null } = {}) {
     mockRoutes = {
       'appointment_participants:select': respond(() => ({ data: opts.participant ?? participantRow() })),
+      'appointment_participants:update': respond(() => ({ data: [{ participant_id: 'p-1' }] })),
       'daily_records:select': respond(() => ({ data: opts.record === undefined ? null : opts.record })),
       'alarms:select': respond(() => ({ data: opts.wakeAt === null ? [] : [{ scheduled_at: opts.wakeAt ?? iso('08:00') }] })),
       'profiles:select': respond(() => ({ data: opts.home === null ? { home_lat: null, home_lng: null } : { home_lat: (opts.home ?? HOME).lat, home_lng: (opts.home ?? HOME).lng } })),
@@ -237,14 +261,15 @@ describe('DB에 쓰기 (recordParticipantTimes)', () => {
       const result = await run({ departedAt: at('09:00'), source: 'BUTTON' });
       expect(result.departed).toBe('override');
       const [write] = only('appointment_participants', 'update');
-      expect(write.payload).toEqual({ departed_at: iso('09:00'), departed_source: 'BUTTON' });
+      // 바뀐 출발로 셈한 이동시간은 같은 줄에서 비움 (clearLocationTime과 같은 규칙)
+      expect(write.payload).toEqual({ departed_at: iso('09:00'), departed_source: 'BUTTON', actual_travel_minutes: null });
       expect(filterArgs(write, 'eq', 'departed_at')).toEqual([stored]);
     });
 
     it('직접 입력(MANUAL)도 위치 값을 덮음', async () => {
       setup({ participant: participantRow({ departed_at: iso('08:50'), departed_source: 'LOCATION' }) });
       expect((await run({ departedAt: at('09:00'), source: 'MANUAL' })).departed).toBe('override');
-      expect(only('appointment_participants', 'update')[0].payload).toEqual({ departed_at: iso('09:00'), departed_source: 'MANUAL' });
+      expect(only('appointment_participants', 'update')[0].payload).toEqual({ departed_at: iso('09:00'), departed_source: 'MANUAL', actual_travel_minutes: null });
     });
 
     it('응답으로 쓴 값(출처 BUTTON)은 위치도 다른 원탭도 못 덮음', async () => {
@@ -262,14 +287,37 @@ describe('DB에 쓰기 (recordParticipantTimes)', () => {
       expect(only('appointment_participants', 'update')).toEqual([]);
     });
 
-    it('위치끼리는 먼저 쓴 값 유지, 빈 칸이면 씀', async () => {
-      setup({ participant: participantRow({ departed_at: iso('08:50'), departed_source: 'LOCATION' }) });
-      expect((await run({ departedAt: at('09:00'), source: 'LOCATION' })).departed).toBe('keep');
+    it('위치 출발 위에 더 이른 · 같은 위치 출발이 늦게 오면(재전송 · 순서 뒤바뀜) 그대로, 빈 칸이면 씀', async () => {
+      setup({ participant: participantRow({ departed_at: iso('08:50'), departed_source: 'LOCATION' }), record: { record_id: 'r1', wake_confirmed_at: null, actual_prepare_minutes: 50 } });
+      expect((await run({ departedAt: at('08:20'), source: 'LOCATION' })).departed).toBe('keep');
+      expect((await run({ departedAt: at('08:50'), source: 'LOCATION' })).departed).toBe('keep');
       expect(only('appointment_participants', 'update')).toEqual([]);
 
       setup();
       expect((await run({ departedAt: at('09:00'), source: 'LOCATION' })).departed).toBe('new');
       expect(only('appointment_participants', 'update')[0].payload).toEqual({ departed_at: iso('09:00'), departed_source: 'LOCATION' });
+    });
+
+    it('위치 출발 위에 더 늦은 위치 출발 — 귀가 뒤 다시 나간 출발로 바꿈 (7.13.7 약속 전 마지막 출발), 읽은 값 그대로일 때만', async () => {
+      setup({ participant: participantRow({ alarms: ALARMS, departed_at: iso('08:20'), departed_source: 'LOCATION' }), record: { record_id: 'r1', wake_confirmed_at: null, actual_prepare_minutes: 20 } });
+      const result = await run({ departedAt: at('08:50'), source: 'LOCATION' });
+      expect(result).toMatchObject({ departed: 'override', prepareMinutes: 50 });
+      const [write] = only('appointment_participants', 'update');
+      expect(write.payload).toEqual({ departed_at: iso('08:50'), departed_source: 'LOCATION', actual_travel_minutes: null });
+      expect(filterArgs(write, 'eq', 'departed_at')).toEqual([iso('08:20')]);
+      // 새 출발은 새 위치 기록 줄, 앞 출발 줄(8:20)은 지우지 않음 — '확인할 기록'
+      expect((only('alarm_events', 'upsert')[0].payload as { client_event_id: string }[]).map((r) => r.client_event_id)).toEqual([geoEventId('p-1', 'DEPART', at('08:50'))]);
+      expect(only('alarm_events', 'delete')).toEqual([]);
+      // 앞 출발(8:20 − 예정 기상 8:00 = 20분)로 셈한 준비 실측이면 새 출발로 다시 셈
+      const [prepare] = only('daily_records', 'update');
+      expect(prepare.payload).toEqual({ actual_prepare_minutes: 50 });
+      expect(filterArgs(prepare, 'eq', 'actual_prepare_minutes')).toEqual([20]);
+    });
+
+    it('응답 출발은 더 늦은 위치 출발도 못 덮음', async () => {
+      setup({ participant: participantRow({ departed_at: iso('08:20'), departed_source: 'BUTTON' }) });
+      expect((await run({ departedAt: at('08:50'), source: 'LOCATION' })).departed).toBe('keep');
+      expect(only('appointment_participants', 'update')).toEqual([]);
     });
 
     it('출발 · 도착을 같이 받으면 각각 자기 출처를 씀, 안 받은 쪽 출처는 건드리지 않음', async () => {
@@ -299,25 +347,31 @@ describe('DB에 쓰기 (recordParticipantTimes)', () => {
       expect(only('appointment_participants', 'update')[0].payload).toEqual({ arrived_at: isoMs(min(-3)), arrived_source: 'BUTTON', is_late: false, late_minutes: 0 });
     });
 
-    it('위치로 잡은 도착이 보류 구간(−2 ~ +11분)이면 지각 판정 보류, +11분을 넘으면 지각', async () => {
+    it('위치로 잡은 도착은 바로 판정 — +9분은 지각 아님(보류 없음), +13분은 지각 7분 (감지 지연 6분을 뺌)', async () => {
       setup();
       await run({ arrivedAt: min(9), source: 'LOCATION' });
-      expect(only('appointment_participants', 'update')[0].payload).toEqual({ arrived_at: isoMs(min(9)), arrived_source: 'LOCATION', is_late: null, late_minutes: null });
+      expect(only('appointment_participants', 'update')[0].payload).toEqual({ arrived_at: isoMs(min(9)), arrived_source: 'LOCATION', is_late: false, late_minutes: 0 });
 
       mockCalls.length = 0;
       setup();
       await run({ arrivedAt: min(13), source: 'LOCATION' });
-      expect(only('appointment_participants', 'update')[0].payload).toEqual({ arrived_at: isoMs(min(13)), arrived_source: 'LOCATION', is_late: true, late_minutes: 13 });
+      expect(only('appointment_participants', 'update')[0].payload).toEqual({ arrived_at: isoMs(min(13)), arrived_source: 'LOCATION', is_late: true, late_minutes: 7 });
     });
 
-    it('보류로 남은 위치 도착을 나중에 원탭이 덮어 확정 — 읽은 값 그대로일 때만, 응답 기준(+5분)으로 다시 판정', async () => {
+    it('위치 도착을 원탭이 덮으면(사용자가 고친 값) 응답 기준(+5분)으로 다시 판정 — 읽은 값 그대로일 때만, 그 도착으로 셈한 이동시간도 비움', async () => {
       const stored = isoMs(min(3));
       setup({ participant: participantRow({ arrived_at: stored, arrived_source: 'LOCATION' }) });
       const result = await run({ arrivedAt: min(7), source: 'BUTTON' });
       expect(result.arrived).toBe('override');
       const [write] = only('appointment_participants', 'update');
-      expect(write.payload).toEqual({ arrived_at: isoMs(min(7)), arrived_source: 'BUTTON', is_late: true, late_minutes: 7 });
+      expect(write.payload).toEqual({ arrived_at: isoMs(min(7)), arrived_source: 'BUTTON', is_late: true, late_minutes: 7, actual_travel_minutes: null });
       expect(filterArgs(write, 'eq', 'arrived_at')).toEqual([stored]);
+    });
+
+    it('위치 도착 위에 다른 위치 도착은 그대로 (먼저 들어온 시각)', async () => {
+      setup({ participant: participantRow({ arrived_at: isoMs(min(3)), arrived_source: 'LOCATION' }) });
+      expect((await run({ arrivedAt: min(9), source: 'LOCATION' })).arrived).toBe('keep');
+      expect(only('appointment_participants', 'update')).toEqual([]);
     });
 
     it('원탭 도착이 있으면 위치 도착은 못 덮음', async () => {
@@ -369,8 +423,8 @@ describe('DB에 쓰기 (recordParticipantTimes)', () => {
       await run({ departedAt: at('09:00'), source: 'BUTTON' });
       setup({ participant: participantRow({ alarms: ALARMS, departed_at: iso('09:00'), departed_source: 'BUTTON' }) });
       await run({ departedAt: at('08:52'), source: 'LOCATION' });
-      setup({ participant: participantRow({ alarms: ALARMS, departed_at: iso('08:40'), departed_source: 'LOCATION' }) });
-      await run({ departedAt: at('08:52'), source: 'LOCATION' });
+      setup({ participant: participantRow({ alarms: ALARMS, departed_at: iso('09:00'), departed_source: 'LOCATION' }) });
+      await run({ departedAt: at('08:52'), source: 'LOCATION' }); // 지금 위치 출발보다 이름
       expect(only('alarm_events', 'upsert')).toEqual([]);
     });
 
@@ -383,7 +437,8 @@ describe('DB에 쓰기 (recordParticipantTimes)', () => {
   });
 
   describe('실제 이동시간 (actual_travel_minutes) — 쓰기만', () => {
-    const travelWrites = () => only('appointment_participants', 'update').filter((c) => (c.payload as Record<string, unknown>).actual_travel_minutes !== undefined);
+    // 이동시간을 쓴 줄 (출발 · 도착을 바꾸며 같이 비운 null은 뺌)
+    const travelWrites = () => only('appointment_participants', 'update').filter((c) => typeof (c.payload as Record<string, unknown>).actual_travel_minutes === 'number');
 
     it('출발 · 도착이 다 있고 출발지(비면 집) ~ 목적지 500m 밖이면 도착 − 출발 — 출발 · 도착이 읽은 값 그대로일 때만', async () => {
       setup({ participant: participantRow({ dest: SEJONG, departed_at: iso('08:50'), departed_source: 'LOCATION' }) });
@@ -439,6 +494,28 @@ describe('DB에 쓰기 (recordParticipantTimes)', () => {
       expect((await run({ departedAt: at('08:55'), source: 'BUTTON' })).travelMinutes).toBe(57);
       expect(travelWrites()[0].payload).toEqual({ actual_travel_minutes: 57 });
       expect(filterArgs(travelWrites()[0], 'eq', 'departed_at')).toEqual([iso('08:55')]);
+    });
+
+    it('출발이 바뀌면 그 출발로 셈한 이동시간을 같은 줄에서 비우고 새 출발로 다시 셈 — 지금 값과 같아도 씀(비웠으므로)', async () => {
+      // 출발 알람 8:50 → 감시 창 7:50부터. 위치 출발 7:55 → 도착 9:52 = 117분, 더 늦은 위치 출발 8:30으로 바뀌면 82분
+      const row = (travel: number) =>
+        participantRow({ dest: SEJONG, alarms: ALARMS, departed_at: iso('07:55'), departed_source: 'LOCATION', arrived_at: isoMs(min(-8)), arrived_source: 'LOCATION', actual_travel_minutes: travel });
+      setup({ participant: row(117) });
+      expect((await run({ departedAt: at('08:30'), source: 'LOCATION' })).travelMinutes).toBe(82);
+      expect(only('appointment_participants', 'update')[0].payload).toMatchObject({ departed_at: iso('08:30'), actual_travel_minutes: null });
+      expect(travelWrites()[0].payload).toEqual({ actual_travel_minutes: 82 });
+      expect(filterArgs(travelWrites()[0], 'eq', 'departed_at')).toEqual([iso('08:30')]);
+
+      mockCalls.length = 0;
+      setup({ participant: row(82) });
+      expect((await run({ departedAt: at('08:30'), source: 'LOCATION' })).travelMinutes).toBe(82);
+    });
+
+    it('새 출발로는 셀 수 없으면(감시 창 전) 비운 채로 둠 — 앞 출발로 셈한 값을 남기지 않음', async () => {
+      setup({ participant: participantRow({ dest: SEJONG, alarms: ALARMS, departed_at: iso('08:30'), departed_source: 'LOCATION', arrived_at: isoMs(min(-8)), arrived_source: 'LOCATION', actual_travel_minutes: 82 }) });
+      expect((await run({ departedAt: at('07:30'), source: 'MANUAL' })).travelMinutes).toBeNull();
+      expect(only('appointment_participants', 'update')[0].payload).toEqual({ departed_at: iso('07:30'), departed_source: 'MANUAL', actual_travel_minutes: null });
+      expect(travelWrites()).toEqual([]);
     });
 
     it('한쪽만 있으면 안 셈', async () => {
@@ -537,6 +614,37 @@ describe('DB에 쓰기 (recordParticipantTimes)', () => {
       setup();
       await run({ arrivedAt: min(3), source: 'BUTTON' });
       expect(mockCalls.filter((c) => c.table === 'daily_records' || c.table === 'alarms')).toEqual([]);
+    });
+  });
+
+  describe('그 사이 다른 곳이 바꿈 — 조건이 안 맞아 바뀐 줄 0 (낙관 갱신)', () => {
+    const zeroRows = () => {
+      mockRoutes['appointment_participants:update'] = respond(() => ({ data: [] }));
+    };
+
+    it('출발을 못 썼으면 keep — 딸린 위치 기록 · 준비 실측 · 이동시간도 안 씀 (지금 값을 모르니 바꾼 쪽이 자기 값으로 함)', async () => {
+      setup({ participant: participantRow({ dest: SEJONG, alarms: ALARMS, arrived_at: isoMs(min(-8)), arrived_source: 'LOCATION' }), record: null });
+      zeroRows();
+      expect(await run({ departedAt: at('08:50'), source: 'LOCATION' })).toEqual({ departed: 'keep', arrived: null, prepareMinutes: null, travelMinutes: null });
+      expect(only('appointment_participants', 'update')).toHaveLength(1);
+      expect(only('alarm_events', 'upsert')).toEqual([]);
+      expect(mockCalls.filter((c) => c.table === 'daily_records')).toEqual([]);
+    });
+
+    it('도착을 못 썼으면 keep — 위치 기록 · 이동시간도 안 씀', async () => {
+      setup({ participant: participantRow({ dest: SEJONG, alarms: ALARMS, departed_at: iso('08:50'), departed_source: 'LOCATION' }) });
+      zeroRows();
+      expect(await run({ arrivedAt: min(-8), source: 'LOCATION' })).toEqual({ departed: null, arrived: 'keep', prepareMinutes: null, travelMinutes: null });
+      expect(only('appointment_participants', 'update')).toHaveLength(1);
+      expect(only('alarm_events', 'upsert')).toEqual([]);
+    });
+
+    it('이동시간을 쓰는 사이 출발 · 도착이 바뀌었으면(0줄) 쓴 값 없음', async () => {
+      setup({ participant: participantRow({ dest: SEJONG, departed_at: iso('08:50'), departed_source: 'LOCATION' }) });
+      mockRoutes['appointment_participants:update'] = respond((call) => ({ data: (call.payload as Record<string, unknown>).actual_travel_minutes === undefined ? [{ participant_id: 'p-1' }] : [] }));
+      const result = await run({ arrivedAt: min(-8), source: 'LOCATION' });
+      expect(result).toMatchObject({ arrived: 'new', travelMinutes: null });
+      expect(only('appointment_participants', 'update')).toHaveLength(2); // 도착 쓰기 + 이동시간 시도
     });
   });
 

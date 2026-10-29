@@ -4,7 +4,7 @@ import { geoEventId } from '@/features/alarm/participantTimes';
 import { filterArgs, type FakeCall, type FakeResult } from '@/features/alarm/testkit/fakeSupabase';
 import { db, kst } from '@/mocks/data';
 
-import { listDetections, rejectDetection, retractDeparture, undoReject } from '../api';
+import { listDetections, listEarlierDepartures, rejectDetection, undoReject } from '../api';
 import { REJECTED_VALUE, SETTLE_AFTER_MINUTES } from '../detections';
 
 // 실데이터는 가짜 Supabase로 쿼리 모양 · 쓰는 순서만 확인 (진짜 RLS는 실제 Supabase에서), 가짜 모드는 목업 기록에서 만든 감지
@@ -78,11 +78,11 @@ describe('listDetections — 그날 위치로 잡은 출발 · 도착', () => {
     mockRoutes['appointment_participants:select'] = (call) =>
       call.columns?.includes('departed_at')
         ? { data: [{ participant_id: 'p-2', departed_at: iso('13:10') }, { participant_id: 'p-1', departed_at: iso('08:50') }] }
-        : { data: [{ participant_id: 'p-1', arrived_at: iso('09:58'), is_late: null }] };
+        : { data: [{ participant_id: 'p-1', arrived_at: iso('09:58'), is_late: false }] };
     const list = await listDetections(new Date(at('15:00')));
     expect(list.map((d) => [d.participantId, d.kind, d.at.toISOString(), d.source, d.isLate])).toEqual([
       ['p-1', 'DEPART', iso('08:50'), 'LOCATION', null],
-      ['p-1', 'ARRIVE', iso('09:58'), 'LOCATION', null],
+      ['p-1', 'ARRIVE', iso('09:58'), 'LOCATION', false],
       ['p-2', 'DEPART', iso('13:10'), 'LOCATION', null],
     ]);
     const [departed, arrived] = only('appointment_participants', 'select');
@@ -106,9 +106,57 @@ describe('listDetections — 그날 위치로 잡은 출발 · 도착', () => {
     ]);
   });
 
+  it('도착은 늘 지각 / 아님 — 판정이 비어 있으면(약속 시각을 못 읽음) 지각 아님으로 (사용자에게 유리한 쪽), 출발은 null', async () => {
+    mockRoutes['appointment_participants:select'] = (call) =>
+      call.columns?.includes('departed_at') ? { data: [] } : { data: [{ participant_id: 'p-1', arrived_at: iso('10:20'), is_late: null }] };
+    expect((await listDetections(new Date(at('15:00')))).map((d) => d.isLate)).toEqual([false]);
+  });
+
   it('읽기 오류는 던짐', async () => {
     mockRoutes['appointment_participants:select'] = () => ({ error: { code: '', message: 'offline' } });
     await expect(listDetections(new Date(at('09:00')))).rejects.toMatchObject({ message: 'offline' });
+  });
+});
+
+describe("listEarlierDepartures — '확인할 기록' (7.13.7 출발이 여러 번 잡힘)", () => {
+  // 위치 기록 한 줄 — 출발 알람(그 참여 조건의 지금 출발 · 출처)
+  const event = (hhmm: string, current: { departed_at: string | null; departed_source: Source }, over: { alarm_type?: string; participant_id?: string | null } = {}) => ({
+    event_at: iso(hhmm),
+    alarms: { alarm_type: over.alarm_type ?? 'DEPARTURE', participant_id: over.participant_id === undefined ? 'p-1' : over.participant_id, appointment_participants: current },
+  });
+  const nowLocation = { departed_at: iso('08:40'), departed_source: 'LOCATION' as const };
+
+  it('지금 출발보다 앞선 위치 출발 줄만, 시각순 — 그날 내 위치 출발 기록(ACKNOWLEDGED · LOCATION)만 읽음', async () => {
+    mockRoutes['alarm_events:select'] = () => ({
+      data: [event('08:40', nowLocation), event('08:10', nowLocation), event('07:30', nowLocation), event('08:00', nowLocation, { alarm_type: 'PREPARE' })],
+    });
+    expect(await listEarlierDepartures(new Date(at('22:00')))).toEqual([
+      { participantId: 'p-1', at: new Date(at('07:30')) },
+      { participantId: 'p-1', at: new Date(at('08:10')) },
+    ]);
+    const [read] = only('alarm_events', 'select');
+    expect(filterArgs(read, 'eq', 'user_id')).toEqual(['user-1']);
+    expect(filterArgs(read, 'eq', 'event_type')).toEqual(['ACKNOWLEDGED']);
+    expect(filterArgs(read, 'eq', 'input_source')).toEqual(['LOCATION']);
+    expect(filterArgs(read, 'gte', 'event_at')).toEqual([new Date(at('00:00')).toISOString()]);
+    expect(filterArgs(read, 'lt', 'event_at')).toEqual([new Date(at('00:00') + 24 * 3_600_000).toISOString()]);
+  });
+
+  it('지금 출발이 응답(원탭 · 직접 입력 · 옛 앱 원탭)이면 이미 답한 것이라 뺌, 지금 출발이 비었으면([아니에요]) 남은 줄 모두', async () => {
+    mockRoutes['alarm_events:select'] = () => ({
+      data: [
+        event('08:10', { departed_at: iso('08:40'), departed_source: 'BUTTON' }),
+        event('08:15', { departed_at: iso('08:40'), departed_source: null }, { participant_id: 'p-2' }),
+        event('12:10', { departed_at: null, departed_source: null }, { participant_id: 'p-3' }),
+        event('12:20', { departed_at: null, departed_source: null }, { participant_id: null }), // 참여 조건 없는 알람
+      ],
+    });
+    expect(await listEarlierDepartures(new Date(at('22:00')))).toEqual([{ participantId: 'p-3', at: new Date(at('12:10')) }]);
+  });
+
+  it('읽기 오류는 던짐', async () => {
+    mockRoutes['alarm_events:select'] = () => ({ error: { code: '', message: 'offline' } });
+    await expect(listEarlierDepartures(new Date(at('22:00')))).rejects.toMatchObject({ message: 'offline' });
   });
 });
 
@@ -181,12 +229,32 @@ describe('rejectDetection — [아니에요] 1탭 정정 (D61)', () => {
     expect(only('daily_records', 'update')).toEqual([]);
   });
 
-  it('그 사이 원탭이 덮어 못 지웠으면(바뀐 줄 0) 남긴 고친 값 기록도 지우고 null', async () => {
+  // 지우기 직전까지는 위치 값, 지우기가 0줄로 끝난 뒤 다시 읽으면 then 값
+  const changedBeforeClear = (then: ReturnType<typeof participantRow>) => {
     setup({ cleared: false });
+    let reads = 0;
+    mockRoutes['appointment_participants:select'] = () => ({ data: reads++ === 0 ? participantRow({ departed_at: iso('08:50') }) : then });
+  };
+
+  it('그 사이 원탭이 덮어 못 지웠으면(바뀐 줄 0) 남긴 고친 값 기록도 지우고 null', async () => {
+    changedBeforeClear(participantRow({ departed_at: iso('08:53'), departed_source: 'BUTTON' }));
     expect(await rejectDetection({ participantId: 'p-1', kind: 'DEPART', screen: 'H01' })).toBeNull();
     const [logged] = only('user_edit_logs', 'insert');
     const [dropped] = only('user_edit_logs', 'delete');
     expect(filterArgs(dropped, 'eq', 'edit_id')).toEqual([(logged.payload as { edit_id: string }).edit_id]);
+  });
+
+  it('동시에 두 번 눌러 다른 호출이 먼저 지웠으면(값이 비었음) null — 고친 값 기록은 그 호출 몫이라 둠 (이 호출이 줄을 만들었어도)', async () => {
+    changedBeforeClear(participantRow());
+    expect(await rejectDetection({ participantId: 'p-1', kind: 'DEPART', screen: 'H01' })).toBeNull();
+    expect(only('user_edit_logs', 'insert')).toHaveLength(1);
+    expect(only('user_edit_logs', 'delete')).toEqual([]);
+
+    // 다른 호출이 줄을 먼저 만들었어도(23505) 같음
+    changedBeforeClear(participantRow());
+    mockRoutes['user_edit_logs:insert'] = () => ({ error: { code: '23505', message: 'duplicate key' } });
+    expect(await rejectDetection({ participantId: 'p-1', kind: 'DEPART', screen: 'H01' })).toBeNull();
+    expect(only('user_edit_logs', 'delete')).toEqual([]);
   });
 
   it('앞 시도가 기록만 남기고 끊겼으면(같은 번호 23505) 이어서 지움 — 기록은 한 줄', async () => {
@@ -239,29 +307,16 @@ describe('undoReject — 5초 되돌리기 (L6 안건후보: 감지 안내 정�
     expect(only('user_edit_logs', 'delete')).toHaveLength(1);
   });
 
-  it('도착을 되돌리면 지각 판정도 다시 (보류 구간이면 보류)', async () => {
+  it('도착을 되돌리면 지각 판정도 바로 다시 (위치 도착 +3분은 지각 아님 — 보류 없음)', async () => {
     setup({ participant: participantRow() });
     expect(await undoReject({ ...snapshot, kind: 'ARRIVE', at: new Date(at('10:03')) })).toBe(true);
-    expect(only('appointment_participants', 'update')[0].payload).toEqual({ arrived_at: iso('10:03'), arrived_source: 'LOCATION', is_late: null, late_minutes: null });
-  });
-});
-
-describe('retractDeparture — 도착 전 귀가로 출발 지우기 (L6 안건후보: 집 이탈 약속 붙이기 기본안)', () => {
-  it('저장된 위치 출발이 그 시각 그대로면 같은 길로 지움 — 고친 값 기록 없음', async () => {
-    setup();
-    expect(await retractDeparture({ participantId: 'p-1', at: at('08:50') })).toBe(true);
-    expect(only('appointment_participants', 'update')[0].payload).toEqual({ departed_at: null, departed_source: null, actual_travel_minutes: null });
-    expect(only('daily_records', 'update')).toHaveLength(1);
-    expect(only('alarm_events', 'delete')).toHaveLength(1);
-    expect(mockCalls.filter((c) => c.table === 'user_edit_logs')).toEqual([]);
+    expect(only('appointment_participants', 'update')[0].payload).toEqual({ arrived_at: iso('10:03'), arrived_source: 'LOCATION', is_late: false, late_minutes: 0 });
   });
 
-  it('시각이 다르거나(다음 이탈이 이미 씀) 응답 값이면 그대로 false', async () => {
-    setup();
-    expect(await retractDeparture({ participantId: 'p-1', at: new Date(at('08:40')) })).toBe(false);
-    setup({ participant: participantRow({ departed_at: iso('08:50'), departed_source: 'BUTTON' }) });
-    expect(await retractDeparture({ participantId: 'p-1', at: at('08:50') })).toBe(false);
-    expect(writes()).toEqual([]);
+  it('그 사이 더 이른 위치 출발이 들어왔으면 되돌린 출발(더 늦음)로 바꿈 — 위치 출발끼리는 늦은 쪽 (participantTimes)', async () => {
+    setup({ participant: participantRow({ departed_at: iso('08:40') }), prepare: null });
+    expect(await undoReject(snapshot)).toBe(true);
+    expect(only('appointment_participants', 'update')[0].payload).toMatchObject({ departed_at: iso('08:50'), departed_source: 'LOCATION' });
   });
 });
 
@@ -297,10 +352,16 @@ describe('가짜 데이터 모드 — 위치 감지는 안 돎, 화면 초안용
     expect(mockCalls).toEqual([]);
   });
 
-  it('없는 감지는 null · 귀가 취소는 시각이 같을 때만', async () => {
+  it('없는 감지는 null', async () => {
     expect(await rejectDetection({ participantId: 'a1', kind: 'DEPART', screen: 'H01' })).toBeNull();
-    expect(await retractDeparture({ participantId: 'mock-19', at: kst(19, 470) })).toBe(false);
-    expect(await retractDeparture({ participantId: 'mock-19', at: kst(19, 482) })).toBe(true);
-    expect((await listDetections(kst(19, 0))).map((d) => d.kind)).toEqual(['ARRIVE']);
+  });
+
+  it("확인할 기록 — 지각한 5월 13일에만 앞 출발 하나(오전 7:45), 그 밖의 날은 없음 · Supabase를 부르지 않음", async () => {
+    expect(await listEarlierDepartures(kst(13, 0))).toEqual([{ participantId: 'mock-13', at: kst(13, 465) }]);
+    const [departed] = (await listDetections(kst(13, 0))).filter((d) => d.kind === 'DEPART');
+    expect(departed.at.getTime()).toBeGreaterThan(kst(13, 465).getTime()); // 지금 출발(8:08)보다 앞
+    expect(await listEarlierDepartures(kst(21, 0))).toEqual([]);
+    expect(await listEarlierDepartures(kst(22, 0))).toEqual([]);
+    expect(mockCalls).toEqual([]);
   });
 });

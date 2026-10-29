@@ -45,7 +45,7 @@
 | 울림 기록 (해제 · 미루기 · 원탭) | 폰이 쌓아 둠 → `uploadEvents`가 `alarm_events`에 upsert (`client_event_id`가 같으면 무시) | 올린 것만 폰에서 지움 |
 | 홈 "미루기 취소" (기상 알람) | `alarm_events`에 `DISMISSED`(`MANUAL`) upsert → `AlarmCore.cancel` → H08. 기록이 먼저 (폰 `cancel`은 해제 기록을 안 남김) | 예약 취소 |
 | 기상 확정 (H08 · 앱이 앞에 올 때 다시 판정) | `alarm_events` `WAKE_CONFIRMED` + `daily_records.wake_confirmed_at` | — |
-| 출발 · 도착 (원탭 · 위치) | 한 함수 `recordParticipantTimes({ participantId, departedAt?, arrivedAt?, source })` → `appointment_participants.departed_at` · `arrived_at`과 출처 칸 `departed_source` · `arrived_source`, `is_late` · `late_minutes`, 둘 다 있으면 `actual_travel_minutes`, 출발이 들어오면 `daily_records.actual_prepare_minutes`. 위치(`LOCATION`)면 `alarm_events`(`input_source LOCATION`)도. 원탭은 위 기록을 올린 뒤 `onEventsUploaded` 훅이 `source: BUTTON`으로 부름. 위치 값 [아니에요] · 귀가 취소는 `features/location/api.ts`(`rejectDetection` · `retractDeparture`)가 `features/alarm/participantTimes.ts`의 `clearLocationTime`으로 지움 + `user_edit_logs`(H01 · NTF) | — |
+| 출발 · 도착 (원탭 · 위치) | 한 함수 `recordParticipantTimes({ participantId, departedAt?, arrivedAt?, source })` → `appointment_participants.departed_at` · `arrived_at`과 출처 칸 `departed_source` · `arrived_source`, `is_late` · `late_minutes`, 둘 다 있으면 `actual_travel_minutes`, 출발이 들어오면 `daily_records.actual_prepare_minutes`. 위치(`LOCATION`)면 `alarm_events`(`input_source LOCATION`)도. 원탭은 위 기록을 올린 뒤 `onEventsUploaded` 훅이 `source: BUTTON`으로 부름. 위치 값 [아니에요]는 `features/location/api.ts`(`rejectDetection`)가 `features/alarm/participantTimes.ts`의 `clearLocationTime`으로 지움 + `user_edit_logs`(H01 · NTF) — 지운 뒤는 다음 자동 감지를 기다림. 귀가 뒤 다시 나간 출발은 같은 함수가 더 늦은 위치 출발로 바꾸고, 앞 출발의 `alarm_events` 줄은 '확인할 기록'으로 남김 → `listEarlierDepartures(day)`가 읽음 | — |
 | 고친 값 (F5 · F9) | 저장이 성공한 뒤 `user_edit_logs` (`alarm-commit`의 `edits` 또는 DB insert) | — |
 
 `realWrite.setAlarmEnabled` · `setIntensity`(종류별 켜기 · 강도를 DB에 직접 쓰는 함수)는 부르는 화면이 없음 — H03의 켜기 · 강도는 위처럼 `alarm-commit`에 실려 감 (가짜 모드의 `saveAlarmSettings`만 이 이름으로 부름).
@@ -128,8 +128,10 @@
 - 소리 · 강도 · 미루기 · 해제 — 폰
 - 기록: `alarm_events` TRIGGERED · SNOOZED(`snooze_minutes`) · DISMISSED — DB (오프라인이면 폰에 보관 후 다시 보냄). 기록마다 앱이 만든 번호 `client_event_id`(유니크 — 같으면 무시) · 출처 `input_source` (둘 다 #160)
 - 알림 원탭("준비 시작" · "출발했어요" · "도착했어요"): `alarm_events` ACKNOWLEDGED(PREPARE · DEPARTURE) · ARRIVAL_CONFIRMED(ARRIVE) + `appointment_participants.departed_at` · `arrived_at` — DB. 쓰는 곳은 `recordParticipantTimes` 하나이고 지오펜스 자동 수집(#40)도 같은 함수를 `source: LOCATION`으로 부름
-  - 출처 우선순위: 사용자 응답(원탭 `BUTTON` · 직접 입력 `MANUAL`) > 위치(`LOCATION`). 위치 값이 먼저 있어도 원탭이 덮고(출처도 응답 것으로 바뀜), 응답 값이 있으면 위치는 못 덮음 (같은 출처끼리는 먼저 쓴 값). 지금 값의 출처는 출처 칸 `departed_source` · `arrived_source`로 읽음 — 시각만 있고 출처가 비면 옛 앱 원탭 값이라 `BUTTON`. 위치 값을 쓰면 그 출발 · 도착 알람에 `alarm_events`(`input_source LOCATION`, 번호 고정)를 같이 남겨 기록 화면 "자동 · 지오펜스" 줄이 됨 (알람 행이 없으면 안 남김)
-  - 지각(`is_late` · `late_minutes`, D58 · #41): 응답으로 받은 도착은 약속 + 5분 초과면 지각. 위치로 잡은 도착은 −2 ~ +11분이면 판정 보류(둘 다 NULL)로 두고 도착 확인 원탭을 기다림, +11분 넘으면 지각 (7장 D · D61 감지 지연만큼 넓힘)
+  - 위치 자동 우선 (지형님 10/29 흐름 확인 #240 + 7장 A~F 자동 수집 우선): 자동으로 잡은 값은 그대로 확정('확인 중' 상태 없음), 경계가 애매하면 사용자에게 유리한 쪽, 원탭은 자동 값이 없을 때 대신 쓰는 길(원탭 알림 건너뛰기는 PR 6), [아니에요]는 틀렸을 때만 누르는 정정
+  - 출처 우선순위: 사용자 응답(원탭 `BUTTON` · 직접 입력 `MANUAL`) > 위치(`LOCATION`). 위치 값이 먼저 있어도 원탭이 덮고(출처도 응답 것으로 바뀜), 응답 값이 있으면 위치는 못 덮음 (응답끼리는 먼저 쓴 값). 위치 출발끼리는 더 늦은 출발로 바꿈 — 귀가 뒤 다시 나가면 그쪽이 출발(7.13.7 "약속 전 마지막 출발"), 앞 출발의 위치 기록 줄은 지우지 않고 '확인할 기록'으로 남겨 자기 전 대화(L4)가 확인. 위치 도착끼리는 먼저 쓴 값. 출발 · 도착이 바뀌면 그 값으로 셈한 `actual_travel_minutes`를 같은 줄에서 비우고 다시 셈. 지금 값의 출처는 출처 칸 `departed_source` · `arrived_source`로 읽음 — 시각만 있고 출처가 비면 옛 앱 원탭 값이라 `BUTTON`. 위치 값을 쓰면 그 출발 · 도착 알람에 `alarm_events`(`input_source LOCATION`, 번호 고정)를 같이 남겨 기록 화면 "자동 · 지오펜스" 줄이 됨 (알람 행이 없으면 안 남김)
+  - 지각(`is_late` · `late_minutes`, D58 · #41): 응답으로 받은 도착은 약속 + 5분 초과면 지각. 위치로 잡은 도착은 바로 판정(보류 없음) — +11분(응답 경계 5분 + 감지 지연 최대 6분) 초과면 지각, 지각 분은 감지 지연 6분을 뺀 값 (D61 감지 지연만큼 넓힘, 지연 빼기는 작성자 판단). 둘 다 NULL은 약속 시각을 못 읽었을 때뿐
+  - 500m 안 가까운 약속: 출발 · 도착 감지는 그대로, `actual_travel_minutes`만 안 씀 (D68 "500m 안이면 이동 측정을 끄고 기본값" — 끄는 것은 이동시간만, 안건후보 D78 정리)
   - 준비 실측(`daily_records.actual_prepare_minutes`) = 출발 − max(실제 기상 `wake_confirmed_at`, 예정 기상 = 그날 켜 둔 기상 알람 중 가장 이른 시각). 출처와 상관없이 출발이 들어올 때, 기상 기록이 둘 다 없으면 비움, 이미 값이 있으면 덮지 않음(같은 날 두 번째 약속의 출발은 준비 실측이 아님)
 
 ### H08 기상 확인

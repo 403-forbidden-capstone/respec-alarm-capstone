@@ -1,12 +1,6 @@
-import { describe, expect, it, jest } from '@jest/globals';
+import { describe, expect, it } from '@jest/globals';
 
-import { LATE_AFTER_MINUTES, ON_TIME_BEFORE_MINUTES } from '../../alarm/participantTimes';
 import { defaultRadiusFor, isAreaPlace, placeKind } from '../area';
-import { DETECTION_DELAY_MAX_MINUTES, LOCATION_HOLD_AFTER_MINUTES, LOCATION_HOLD_BEFORE_MINUTES } from '../constants';
-
-// participantTimes의 상수만 읽음 — DB 클라이언트는 가짜
-jest.mock('@/lib/supabase', () => ({ supabase: {} }));
-jest.mock('@/lib/user', () => ({ requireUserId: async () => 'user-1' }));
 
 // 카카오 category_name 모양 (kakao-parse.ts) — 실제 응답은 "교육,학문 > 학교 > 대학교", 시험 샘플은 "교육 > 대학교"
 const UNIV = '교육,학문 > 학교 > 대학교';
@@ -70,13 +64,5 @@ describe('기본 반경 (defaultRadiusFor, L6 안건후보: 지오펜스 반경 
     // 이름 없이 부르면 타입 오류, 억지로 불러도 조용히 캠퍼스 300을 주지 않음
     // @ts-expect-error 이름 빠짐
     expect(() => defaultRadiusFor(UNIV)).toThrow();
-  });
-});
-
-describe('위치 도착 지각 보류 구간 (L6 안건후보: 위치 도착 지각 경계 폭 기본안 A)', () => {
-  it('−2 ~ +11분 = 원탭 지각 기준 +5분 + 최대 감지 지연 6분', () => {
-    expect([LOCATION_HOLD_BEFORE_MINUTES, LOCATION_HOLD_AFTER_MINUTES]).toEqual([2, 11]);
-    expect(LOCATION_HOLD_AFTER_MINUTES).toBe(LATE_AFTER_MINUTES + DETECTION_DELAY_MAX_MINUTES);
-    expect(LOCATION_HOLD_BEFORE_MINUTES).toBe(ON_TIME_BEFORE_MINUTES);
   });
 });

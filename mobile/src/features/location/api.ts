@@ -1,6 +1,7 @@
 // 위치 감지 출발 · 도착 — 화면(홈 감지 정정 줄 · 감지 안내) · 백그라운드 작업 · 일기가 부르는 곳. 데이터 접근은 이 파일에서만 합니다
 // 가짜 데이터는 아래, 실데이터 모드면 함수 맨 앞에서 real.ts(Supabase)로 넘김 (docs/screen-data-map.md "실데이터 연결 규칙")
-//   함수 이름 · 인자는 레인 L2 지시서 6절 "홈 감지 정정 줄"과 같음: listDetections · rejectDetection · undoReject (+ 귀가 취소 retractDeparture)
+//   함수 이름 · 인자는 레인 L2 지시서 6절 "홈 감지 정정 줄"과 같음: listDetections · rejectDetection · undoReject (+ 확인할 기록 listEarlierDepartures)
+//   [아니에요]는 틀렸을 때만 누르는 정정 — 지운 뒤 다음 자동 감지를 기다림. 원탭은 자동 값이 없을 때만 대신 쓰는 길 (원탭 알림 건너뛰기는 PR 6)
 import { now } from '@/lib/clock';
 import { isMock } from '@/lib/mode';
 import { db, kst } from '@/mocks/data';
@@ -13,22 +14,25 @@ import {
   isSettled,
   REJECTED_VALUE,
   type DetectionKind,
+  type EarlierDeparture,
   type LocationDetection,
   type RejectInput,
   type RejectSnapshot,
 } from './detections';
 import * as real from './real';
 
-export type { DetectionKind, LocationDetection, RejectInput, RejectScreen, RejectSnapshot } from './detections';
+export type { DetectionKind, EarlierDeparture, LocationDetection, RejectInput, RejectScreen, RejectSnapshot } from './detections';
 
 // ---------------------------------------------------------------------------
 // 가짜 데이터 — 위치 감지는 돌지 않음(가짜 모드는 원탭 그대로, 레인 L2 1절). 화면 초안(L5 · 웹 미리보기)이 볼 수 있게
 //   지난 평일 기록(mocks/records)에 "자동 · 지오펜스"로 남은 출발 · 도착을 감지로 돌려줌. 참여 조건 id = mock-<5월 날짜>
-//   [아니에요] · 되돌리기 · 귀가 취소는 앱을 다시 열 때까지 메모리에서만 (기록 화면 목업 줄은 그대로). 고친 값 기록은 가짜 db.editLogs에 쌓음
+//   [아니에요] · 되돌리기는 앱을 다시 열 때까지 메모리에서만 (기록 화면 목업 줄은 그대로). 고친 값 기록은 가짜 db.editLogs에 쌓음
 //   (가짜 값을 지난 평일 기록에서 만드는 것은 근거 없음 — 작성자 판단: 기록 화면 목업과 같은 값을 보이려고)
+//   확인할 기록은 지각한 평일 하루(5월 13일)에만 앞 출발 하나를 둠 — 자기 전 대화(L4) 초안이 볼 수 있게 (근거 없음 — 작성자 판단, 기록 화면 목업에는 없음)
 // ---------------------------------------------------------------------------
 
 const MOCK_GEO_SOURCE = '자동 · 지오펜스'; // mocks/records 출처 글자
+const MOCK_EARLIER_DEPARTURES: Record<number, number[]> = { 13: [465] }; // 5월 날짜 → 앞 출발 시각(0시부터 분) — 오전 7:45에 나갔다 들어옴
 const mockVoided = new Set<string>();
 const mockLogs = new Map<string, UserEditLog>();
 const mockKey = (participantId: string, kind: DetectionKind) => `${participantId}:${kind}`;
@@ -41,8 +45,8 @@ function mockDetectionsOf(day: Date): LocationDetection[] {
     const kind: DetectionKind | null = source !== MOCK_GEO_SOURCE ? null : label === '집 출발' ? 'DEPART' : label.startsWith('도착') ? 'ARRIVE' : null;
     if (!kind) return [];
     const at = kst(p.day, minutes);
-    const isLate = kind === 'ARRIVE' ? label.endsWith('분 지각') : null;
-    return [{ participantId: `mock-${p.day}`, kind, at, source: 'LOCATION', settled: isSettled(at, nowMs), isLate }];
+    const base = { participantId: `mock-${p.day}`, at, source: 'LOCATION' as const, settled: isSettled(at, nowMs) };
+    return [kind === 'ARRIVE' ? { ...base, kind, isLate: label.endsWith('분 지각') } : { ...base, kind, isLate: null }];
   });
 }
 
@@ -62,8 +66,18 @@ export async function listDetections(day: Date): Promise<LocationDetection[]> {
   return mockDetectionsOf(day).filter((d) => !mockVoided.has(mockKey(d.participantId, d.kind)));
 }
 
-// [아니에요] 1탭 정정 (D61) — 위치 값만 지움(시각 · 출처 · 지각 판정 · 이동시간 · 그 출발로 셈한 준비 실측 · 기록 화면 위치 줄) + 고친 값 기록 한 줄
+// 그날 '확인할 기록' — 더 늦은 위치 출발로 바뀐 앞 위치 출발 {참여 조건, 시각}, 시각순 (7.13.7 "출발이 여러 번 잡힘")
+//   자기 전 대화(레인 L4)가 "8:10에 나갔다 들어왔죠?"로 확인할 때 씀. 지금 출발이 응답(원탭 · 직접 입력)인 약속은 이미 답했으니 뺌
+export async function listEarlierDepartures(day: Date): Promise<EarlierDeparture[]> {
+  if (!isMock()) return real.listEarlierDepartures(day);
+  const p = pastDay(day);
+  if (!p) return [];
+  return (MOCK_EARLIER_DEPARTURES[p.day] ?? []).map((minutes) => ({ participantId: `mock-${p.day}`, at: kst(p.day, minutes) }));
+}
+
+// [아니에요] 1탭 정정 (D61) — 위치 값만 지움(시각 · 출처 · 지각 판정 · 이동시간 · 그 출발로 셈한 준비 실측 · 그 값의 기록 화면 위치 줄) + 고친 값 기록 한 줄
 //   지금 값이 위치가 아니면(원탭 값 · 이미 지움) 아무것도 안 하고 null. 돌려준 값을 5초 안에 undoReject로 넘기면 되돌림
+//   지운 뒤는 다음 자동 감지(다음 이탈 · 진입)를 기다림 — 원탭은 자동 값이 없을 때만 대신 쓰는 길 (원탭 알림 건너뛰기는 PR 6)
 export async function rejectDetection(input: RejectInput): Promise<RejectSnapshot | null> {
   if (!isMock()) return real.rejectDetection(input);
   const found = mockFind(input.participantId, input.kind);
@@ -94,15 +108,4 @@ export async function undoReject(snapshot: RejectSnapshot): Promise<boolean> {
     mockLogs.delete(snapshot.editId);
   }
   return restored;
-}
-
-// 도착 전 귀가 — 위치로 쓴 출발을 지움 (transitions RETRACT_DEPART, L6 안건후보: 집 이탈 약속 붙이기 기본안). 사용자 정정이 아니라 고친 값 기록 없음
-//   저장된 출발이 at과 같고 출처가 위치일 때만. 지웠으면 true
-export async function retractDeparture(input: { participantId: string; at: Date | number }): Promise<boolean> {
-  if (!isMock()) return real.retractDeparture(input);
-  const found = mockFind(input.participantId, 'DEPART');
-  const atMs = typeof input.at === 'number' ? input.at : input.at.getTime();
-  if (!found || found.at.getTime() !== atMs) return false;
-  mockVoided.add(mockKey(input.participantId, 'DEPART'));
-  return true;
 }
