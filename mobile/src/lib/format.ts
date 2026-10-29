@@ -123,6 +123,15 @@ export function joinKo(words: string[]) {
   return head.join('') + words[words.length - 1];
 }
 
+// 좁은 칸에서 단어 사이에서만 줄이 바뀌게 — Android · 웹은 한글 음절 사이에서도 줄을 바꿔 "기 / 상"이 됨
+// 음절 사이는 단어 잇기(U+2060), "오후 12:28" · "· 지남"은 줄 안 바뀌는 공백(U+00A0)으로 묶음. 보이는 글자는 그대로
+export function keepWords(text: string) {
+  return text
+    .replace(/(오전|오후) /g, '$1\u00A0')
+    .replace(/· /g, '·\u00A0')
+    .replace(/([가-힣])(?=[가-힣])/g, '$1\u2060');
+}
+
 // 0시부터 분 → '21:30' (루틴 시작 시각 등). 하루를 넘으면 다음 날 시각으로 (목업 h24)
 export function formatMinuteOfDay(minutes: number) {
   const m = ((minutes % 1440) + 1440) % 1440;

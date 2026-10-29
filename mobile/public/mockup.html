@@ -986,10 +986,9 @@ function calcHtml(){
   const e=S.calc, a=e.a, L=alarmsOf(a), f=L[0], lv=autoLv(a);
   return `<h3>알람을 이렇게 맞출게요</h3><p class="small">${esc(a.title)} · ${dShort(a.day)} ${fmt(a.at)} · ${esc(a.place)}</p>
   <ol class="calc"><li><span>이동시간 ${a.travel}분<small>카카오 길찾기 · ${esc(a.transport)} 최소 소요시간</small></span></li>
-  <li><span>공통 P80 ${e.common}분<small>분위수 회귀 τ = 0.8 · ${a.wake?'기상부터 출발까지':'같은 날 기상 알람이 있어 외출 준비만'}</small></span></li>
-  <li><span>개인 보정 +${e.corr}분<small>내 기록 ${e.n}건 · 가중치 ${e.n}÷(${e.n}+${e.k}) = ${e.w} × 개인 오차 P80 ${e.resid}분</small></span></li>
+  <li><span>준비시간 ${a.p80}분<small>${a.wake?'기상부터 출발까지':'같은 날 기상 알람이 있어 외출 준비만'} · ${e.n?`내 기록 ${e.n}건 반영`:'아직 내 기록이 없어 기본값'}</small></span></li>
   <li><span>${TYPE[f.type]} ${fmt(f.t)}<small>${fmt(a.at)} − 여유 ${a.buffer} − 이동 ${a.travel} − 준비 ${a.p80}</small></span></li>
-  <li><span>알람 강도 ${LV[lv].name}<small>중요도 ${IMP[a.imp].label} ${IMP[a.imp].base}점 + 최근 4주 늦잠 지각 ${S.late4w>=2?1:0}점</small></span></li></ol>
+  <li><span>알람 강도 ${LV[lv].name}<small>중요도 ${IMP[a.imp].label}${S.late4w>=2?' · 최근 4주 늦잠 지각 2번 이상':''}</small></span></li></ol>
   <div class="chips">${L.map(x=>`<span class="chip fill">${TYPE[x.type]} ${fmt(x.t)}</span>`).join('')}</div>
   <div class="stack"><button class="btn" data-act="calcSave">알람 저장</button><button class="btn plain" data-act="mClose">돌아가서 수정</button></div>`;
 }

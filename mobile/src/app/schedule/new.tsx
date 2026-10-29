@@ -356,7 +356,7 @@ function CalcSteps({
     [`이동시간 ${a.travelMinutes}분`, e.travelNote ? `${e.travelNote} · ${TRANSPORT_LABEL[a.transport]}` : `카카오 길찾기 · ${TRANSPORT_LABEL[a.transport]} 최소 소요시간`],
     [
       `준비시간 ${a.predictedPrepMinutes}분`,
-      `${e.sameDayWake ? '같은 날 기상 알람이 있어 외출 준비만' : '기상부터 출발까지'} · ${e.sampleCount > 0 ? `내 기록 ${e.sampleCount}건 반영` : '아직 내 기록이 없어 평균값'}`,
+      `${e.sameDayWake ? '같은 날 기상 알람이 있어 외출 준비만' : '기상부터 출발까지'} · ${e.sampleCount > 0 ? `내 기록 ${e.sampleCount}건 반영` : '아직 내 기록이 없어 기본값'}`,
     ],
     [
       `${KIND_LABEL[baseKind]} ${formatTime(base)}`,

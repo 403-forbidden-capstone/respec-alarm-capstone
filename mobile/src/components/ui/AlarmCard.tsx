@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 
+import { keepWords } from '@/lib/format';
 import { colors, radius, size, space } from '@/theme';
 
 import { Text } from './Text';
@@ -47,7 +48,8 @@ export function AlarmCard({
           {kindLabel}
         </Text>
       </View>
-      {/* 오른쪽 줄은 남은 폭을 다 받고 오른쪽 정렬 · 한 줄 — 글자 폭으로 칸을 재면 Android에서 "기 / 상"처럼 끝 글자가 넘어감 (#222) */}
+      {/* 오른쪽 줄은 남은 폭을 다 받고 오른쪽 정렬 — 글자 폭으로 칸을 재면 Android에서 "기 / 상"처럼 끝 글자가 넘어감 (#222)
+          좁은 화면에서 넘치면 단어 사이에서만 줄을 바꿈 ("오후 12:28 / 기상 · 지남") */}
       <View style={styles.chain}>
         {chain.map((line, i) => (
           <View key={line}>
@@ -56,8 +58,8 @@ export function AlarmCard({
                 -
               </Text>
             ) : null}
-            <Text variant="label" weight={600} align="right" numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>
-              {line}
+            <Text variant="label" weight={600} align="right">
+              {keepWords(line)}
             </Text>
           </View>
         ))}
