@@ -1,0 +1,313 @@
+{
+  "$id": "extract-fast.v1",
+  "title": "ExtractFast",
+  "type": "object",
+  "properties": {
+    "appointments": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "title": {
+            "type": "string"
+          },
+          "date": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "time": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "place": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "importance": {
+            "anyOf": [
+              {
+                "enum": [
+                  "LOW",
+                  "NORMAL",
+                  "HIGH"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "transport": {
+            "anyOf": [
+              {
+                "enum": [
+                  "WALK",
+                  "TRANSIT",
+                  "BUS",
+                  "SUBWAY",
+                  "CAR"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "repeat": {
+            "anyOf": [
+              {
+                "enum": [
+                  "NONE",
+                  "WEEKLY"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "save": {
+            "enum": [
+              "CONFIRMED",
+              "DECLINED",
+              "UNCONFIRMED"
+            ]
+          },
+          "unclear": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "ref",
+          "title",
+          "date",
+          "time",
+          "place",
+          "importance",
+          "transport",
+          "repeat",
+          "save",
+          "unclear"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "alarm_changes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "target": {
+            "type": "string"
+          },
+          "appointment_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "type": {
+            "enum": [
+              "WAKE",
+              "PREPARE",
+              "DEPARTURE",
+              "ARRIVE"
+            ]
+          },
+          "date": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "time": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "intensity": {
+            "anyOf": [
+              {
+                "enum": [
+                  "SOFT",
+                  "NORMAL",
+                  "STRONG"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "save": {
+            "enum": [
+              "CONFIRMED",
+              "DECLINED",
+              "UNCONFIRMED"
+            ]
+          }
+        },
+        "required": [
+          "target",
+          "appointment_ref",
+          "type",
+          "date",
+          "time",
+          "intensity",
+          "enabled",
+          "save"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "fact_feedback": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "fact_id": {
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "CONFIRMED",
+              "CORRECTED",
+              "DENIED",
+              "UNCLEAR"
+            ]
+          },
+          "value_time": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "approx": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "fact_id",
+          "status",
+          "value_time",
+          "approx"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "prep_adjustment": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "direction": {
+              "enum": [
+                "MORE",
+                "LESS",
+                "OK"
+              ]
+            },
+            "minutes": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 120
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "direction",
+            "minutes"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "safety_flag": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "appointments",
+    "alarm_changes",
+    "fact_feedback",
+    "prep_adjustment",
+    "safety_flag"
+  ],
+  "additionalProperties": false
+}

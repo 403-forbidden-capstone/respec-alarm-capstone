@@ -1,0 +1,85 @@
+{
+  "$id": "t5-journal.v1",
+  "title": "T5Output",
+  "type": "object",
+  "properties": {
+    "diary": {
+      "type": "string"
+    },
+    "coaching": {
+      "type": "string"
+    },
+    "encouragement": {
+      "type": "string"
+    },
+    "mood": {
+      "anyOf": [
+        {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 5
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "routine_intent": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "time": {
+              "enum": [
+                "MORNING",
+                "EVENING",
+                "NIGHT_BEFORE"
+              ]
+            },
+            "problem": {
+              "type": "string"
+            },
+            "goal": {
+              "type": "string"
+            },
+            "keywords": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "time",
+            "problem",
+            "goal",
+            "keywords"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "routine_reason": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  },
+  "required": [
+    "diary",
+    "coaching",
+    "encouragement",
+    "mood",
+    "routine_intent",
+    "routine_reason"
+  ],
+  "additionalProperties": false
+}

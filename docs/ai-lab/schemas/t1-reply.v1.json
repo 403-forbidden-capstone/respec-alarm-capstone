@@ -1,0 +1,51 @@
+{
+  "$id": "t1-reply.v1",
+  "title": "T1Output",
+  "type": "object",
+  "properties": {
+    "reply": {
+      "type": "string"
+    },
+    "acts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "enum": [
+              "SERVER_Q",
+              "CONFIRM",
+              "CLARIFY",
+              "REFLECT",
+              "OTHER_Q"
+            ]
+          },
+          "ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "type",
+          "ref"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "end": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "reply",
+    "acts",
+    "end"
+  ],
+  "additionalProperties": false
+}
