@@ -6,15 +6,14 @@ export type DetectionKind = TimeKind;
 
 // 위치로 잡은 출발 · 도착 하나
 //   settled: 친구 화면 · 일기에 반영해도 되는지 (D61 반영 유예 — 아래 isSettled)
-//   isLate: 도착의 지각 판정 — null이면 보류 중("지각 확인 중", 보류 구간 −2 ~ +11분). 출발은 늘 null
-export type LocationDetection = {
-  participantId: string;
-  kind: DetectionKind;
-  at: Date;
-  source: 'LOCATION';
-  settled: boolean;
-  isLate: boolean | null;
-};
+//   isLate: 도착은 늘 지각 / 아님 (위치 도착은 바로 확정, 보류 없음 — participantTimes judgeArrival), 출발은 늘 null
+//     DB에 판정이 비어 있으면(약속 시각을 못 읽음) 지각 아님으로 — 사용자에게 유리한 쪽 (지형님 10/29 흐름 확인(#240))
+type DetectionBase = { participantId: string; at: Date; source: 'LOCATION'; settled: boolean };
+export type LocationDetection = (DetectionBase & { kind: 'DEPART'; isLate: null }) | (DetectionBase & { kind: 'ARRIVE'; isLate: boolean });
+
+// 출발 중 '확인할 기록' — 더 늦은 위치 출발로 바뀐 앞 위치 출발 (7.13.7 "출발이 여러 번 잡힘 — 앞의 출발은 '확인할 기록'으로 남겨 대화에서 사용자에게 확인받음")
+//   자기 전 대화(레인 L4)가 "8:10에 나갔다 들어왔죠?"로 확인할 때 씀
+export type EarlierDeparture = { participantId: string; at: Date };
 
 // [아니에요]를 누른 곳 — H01 홈 감지 정정 줄, NTF 감지 안내 알림 (user_edit_logs.screen)
 export type RejectScreen = 'H01' | 'NTF';

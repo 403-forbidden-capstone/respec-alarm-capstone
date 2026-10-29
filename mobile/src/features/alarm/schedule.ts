@@ -72,6 +72,13 @@ export function changedAlarms(before: AlarmTime[], after: AlarmTime[]): AlarmCha
   });
 }
 
+// 저장 전에 한 번 더 묻는 기준 — 알람이 이만큼(분) 이상 움직일 때. 여유 시간을 1분 단위로 고쳐 이보다 덜 움직이면 확인 없이 저장 (D12)
+export const CONFIRM_MOVE_MINUTES = 5;
+
+export function needsMoveConfirm(changes: readonly AlarmChange[]): boolean {
+  return changes.some((c) => Math.abs(minutesBetween(c.from, c.to)) >= CONFIRM_MOVE_MINUTES);
+}
+
 // ?date=2025-05-22 → 그날 0시. 형식이 틀리거나 없는 날짜면 null
 export function parseDayParam(value: string | undefined): Date | null {
   const m = value ? /^(\d{4})-(\d{2})-(\d{2})$/.exec(value) : null;

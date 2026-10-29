@@ -5,10 +5,15 @@
 //   · 집 · 출발지 이탈 → 출발 후보 DEPART_PENDING(감지 안내만 바로) → 5분(T_dwell) 안에 다시 들어오면 버림 DEPART_CANCEL, 지나면 확정 DEPART
 //     받는 쪽 A(JS 작업)는 타이머가 없어서 다음 신호 · 앱 열 때(resolvePending) 확정
 //     같은 길(그 출발지 약속의 출발이 이탈 앞뒤 30분 안에 이미 있음, 원탭 "출발했어요" 등)이면 아무 약속에도 안 붙임 — attach.ts isSameTrip
-//   · 목적지 진입 → 도착 ARRIVE. 그 참여 조건의 출발이 대기 중이면 먼저 확정 (도착했으면 나간 것)
-//   · 위치로 확정한 출발 뒤 도착 전 · 약속 시작 전에 그 출발지(집 · 집 아닌 출발지)에 다시 들어오면 그 출발을 지움 RETRACT_DEPART → 다음 이탈을 기다림
-//       7.13.7 따름 (잠깐 나갔다 돌아오면 출발로 보지 않음을 넓힘). 약속 시작 뒤 귀가는 다녀온 것으로 보고 지우지 않음
-//       — 가까운 약속은 도착 감지가 없어 저녁 귀가가 아침 출발을 지우지 않게
+//     출발 후보는 붙일 약속(오늘 · 그 출발지에서 출발 · 아직 출발이 없음 · 창이 안 끝남 · 감지하는 약속)이 있을 때만 — 없으면 상태만 (attach.ts)
+//   · 목적지 진입 → 도착 ARRIVE, 바로 확정 (지각도 바로 판정 — participantTimes). 그 참여 조건의 출발이 대기 중이면 먼저 확정 (도착했으면 나간 것)
+//     500m 안 가까운 약속도 도착을 잡음 — 끄는 것은 이동시간만 (D68, regions.ts)
+//   · 위치로 확정한 출발 뒤 도착 전 · 약속 시작 전에 그 출발지(집 · 집 아닌 출발지)에 다시 들어오면(귀가) DB 출발은 그대로 둠 — 그 뒤 다시 안 나가면 그게 출발
+//       폰 상태에서만 그 출발을 "다음 이탈로 바뀔 수 있음"(voided)으로 두어 다음 이탈을 같은 약속에 다시 붙임 → DEPART_PENDING → DEPART
+//       → participantTimes가 더 늦은 위치 출발로 바꾸고, 앞 출발의 위치 기록 줄은 '확인할 기록'으로 남음
+//       7.13.7 "출발이 여러 번 잡힘 — 약속 전 마지막 출발을 진짜 출발로, 앞의 출발은 '확인할 기록'" + 지형님 10/29 흐름 확인(#240). 귀가 자체는 알림 · 기록 없음
+//       약속 시작 뒤 귀가는 다녀온 것으로 보고 그대로 — 그 뒤 외출이 지난 약속의 출발을 바꾸지 않고 다음 약속에 붙게
+//   · [아니에요]로 지운 판정(forgetDetection)도 voided — 다음 이탈 · 진입을 다시 받음. 원탭은 자동 값이 없을 때만 대신 쓰는 길 (원탭 알림 건너뛰기는 PR 6)
 //   · 판정 시각 = 신호 시각 (받는 쪽이 신호를 받은 때 — OS 전달 지연 포함, 보통 2분 · 최대 6분). 출발 = 이탈 시각, 도착 = 진입 시각 (7.13.7)
 //   · 신호 거르기 — 영역별로 마지막으로 본 신호보다 이른 신호 · 같은 신호 되풀이는 버림. 같은 시각이면 이탈 → 진입 순
 //       이미 안인데 또 진입은 상태만(새 정보 없음), 이미 밖인데 또 이탈은 그사이 진입을 놓친 것 → 새 이탈로 받음
@@ -22,10 +27,9 @@ export type GeoSignal = { regionId: string; type: 'ENTER' | 'EXIT'; at: number }
 
 // DEPART_PENDING  이탈 순간 — 소리 없는 감지 안내만, DB 안 씀 (at = 이탈 시각)
 // DEPART_CANCEL   5분 안 재진입 — 안내 지움 (at = 그 이탈 시각)
-// DEPART          출발 확정 — departed_at = at(이탈 시각), 출처 LOCATION
+// DEPART          출발 확정 — departed_at = at(이탈 시각), 출처 LOCATION. 같은 약속에 위치 출발이 이미 있으면 더 늦은 쪽으로 바뀜 (participantTimes)
 // ARRIVE          도착 — arrived_at = at(진입 시각), 출처 LOCATION
-// RETRACT_DEPART  도착 전 귀가 — 위치로 쓴 출발 지움 (at = 지울 출발 시각. 저장된 값이 같고 출처가 LOCATION일 때만 지움)
-export type GeoActionType = 'DEPART_PENDING' | 'DEPART_CANCEL' | 'DEPART' | 'ARRIVE' | 'RETRACT_DEPART';
+export type GeoActionType = 'DEPART_PENDING' | 'DEPART_CANCEL' | 'DEPART' | 'ARRIVE';
 export type GeoAction = { type: GeoActionType; participantId: string; at: number };
 
 // inside null = 모름 (등록 직후 첫 신호 전). lastAt = 마지막으로 본 신호 시각 — 있으면 inside도 앎
@@ -40,7 +44,9 @@ export type GeoState = {
   pending: DepartureDetection[]; // 5분 대기 중인 출발 후보
   departed: DepartureDetection[]; // 위치로 확정한 출발
   arrived: Detection[]; // 위치로 잡은 도착
-  voided: VoidedDetection[]; // 지운 판정 — 계획(DB를 읽은 때)에 아직 남아 있어도 없는 것으로 봄
+  // 없는 것으로 볼 판정 — 계획(DB를 읽은 때)에 남아 있어도 붙이기 · 같은 길 판정에서 셈하지 않음
+  //   [아니에요]로 지운 판정(DB에서도 지움) · 귀가로 다음 이탈에 자리를 내준 출발(DB에는 남음 — 다음 이탈이 오면 그쪽으로 바뀜)
+  voided: VoidedDetection[];
 };
 
 export type StepResult = { state: GeoState; actions: GeoAction[] };
@@ -120,7 +126,7 @@ export function noteRegistered(state: GeoState, diff: RegionDiff, at: number): G
   return next;
 }
 
-// 사용자가 [아니에요]로 지운 판정 — 폰 기억에서도 지우고 다음 이탈 · 진입을 다시 받음 (PR6 정정 뒤 부름). 두 번 불러도 한 번만 기록
+// 사용자가 [아니에요]로 지운 판정 — 폰 기억에서도 지우고 그 판정만 voided로 둠, 다음 이탈 · 진입을 다시 받아 자동으로 채움 (PR6 정정 뒤 부름). 두 번 불러도 한 번만 기록
 export function forgetDetection(state: GeoState, detection: VoidedDetection): GeoState {
   const next = parseGeoState(state);
   const other = (x: Detection) => x.participantId !== detection.participantId;
@@ -168,15 +174,16 @@ function moved(state: GeoState, signal: GeoSignal, planned: boolean): boolean {
 // 판정 목록 + 감지 안 하는 약속 (붙이기 · 같은 길 판정용)
 const everyone = (plan: RegionPlan): TrackedParticipant[] => [...plan.participants, ...plan.untracked];
 
+// 이미 출발 · 도착이 있는 참여 조건 — 계획 때 DB 값(지운 것 빼고) + 위치로 잡은 것 · 대기 중인 것. 도착은 시각도 (attach.ts 출발 붙이기)
 function takenOf(state: GeoState, plan: RegionPlan): Taken {
   const departed = new Set<string>();
-  const arrived = new Set<string>();
+  const arrived = new Map<string, number>();
   for (const p of everyone(plan)) {
     if (p.departedAt != null && !isVoided(state, 'DEPART', p.participantId, p.departedAt)) departed.add(p.participantId);
-    if (p.arrivedAt != null && !isVoided(state, 'ARRIVE', p.participantId, p.arrivedAt)) arrived.add(p.participantId);
+    if (p.arrivedAt != null && !isVoided(state, 'ARRIVE', p.participantId, p.arrivedAt)) arrived.set(p.participantId, p.arrivedAt);
   }
   for (const x of [...state.pending, ...state.departed]) departed.add(x.participantId);
-  for (const x of state.arrived) arrived.add(x.participantId);
+  for (const x of state.arrived) arrived.set(x.participantId, x.at);
   return { departed, arrived };
 }
 
@@ -218,14 +225,12 @@ function onEnter(state: GeoState, region: MonitoredRegion, at: number, plan: Reg
   }
   state.pending = state.pending.filter((x) => x.regionId !== region.id);
 
-  // 도착 전 · 약속 시작 전 귀가 — 위치로 잡은 출발 지움 (7.13.7 따름, 잠깐 나갔다 돌아오면 출발로 보지 않음을 넓힘)
+  // 도착 전 · 약속 시작 전 귀가 — DB 출발은 그대로, 폰에서만 다음 이탈로 바뀔 수 있게 둠 (7.13.7 약속 전 마지막 출발 · 앞 출발은 '확인할 기록')
+  //   액션 없음 — DB를 안 바꾸고, 새 알림도 없음 (답에 따라 결과가 바뀌지 않으므로, 지형님 10/29 흐름 확인(#240))
   const { arrived } = takenOf(state, plan);
-  const retracted = state.departed.filter((d) => d.regionId === region.id && at < d.appointmentAt && !arrived.has(d.participantId));
-  for (const d of retracted) {
-    actions.push({ type: 'RETRACT_DEPART', participantId: d.participantId, at: d.at });
-    addVoided(state, { kind: 'DEPART', participantId: d.participantId, at: d.at, appointmentAt: d.appointmentAt });
-  }
-  state.departed = state.departed.filter((d) => !retracted.includes(d));
+  const returned = state.departed.filter((d) => d.regionId === region.id && at < d.appointmentAt && !arrived.has(d.participantId));
+  for (const d of returned) addVoided(state, { kind: 'DEPART', participantId: d.participantId, at: d.at, appointmentAt: d.appointmentAt });
+  state.departed = state.departed.filter((d) => !returned.includes(d));
 
   for (const participantId of attachDestEnter(region, plan.participants, at, takenOf(state, plan))) {
     const participant = plan.participants.find((p) => p.participantId === participantId);

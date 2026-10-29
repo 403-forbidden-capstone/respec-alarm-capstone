@@ -16,7 +16,7 @@ import { forgetDetail, recallDetail, rememberDetail } from './detailCache';
 import { dropEdits, MAX_EDITS_PER_REQUEST, peekEdits, queueEdit } from './editQueue';
 import { createEdits, fromEditRow, settingsEdits, toEditPayloads, type EditLogLine, type SettingsAfter } from './edits';
 import { toStandaloneAppointment } from './map';
-import { rememberPlaces, toPlace, uniqueByName, type PlaceDto } from './places';
+import { rememberPlaces, toPlace, uniqueByName, validNear, type PlaceDto } from './places';
 import {
   createCommitBody,
   existingBody,
@@ -44,6 +44,7 @@ import {
   type Appointment,
   type AppointmentDraft,
   type Estimate,
+  type LatLng,
   type Place,
   type UserEditLog,
 } from './types';
@@ -74,10 +75,11 @@ async function recentPlaces(userId: string): Promise<Place[]> {
   return uniqueByName([...destinations, ...origins]).slice(0, RECENT_PLACE_COUNT);
 }
 
-export async function listPlaces(query?: string): Promise<Place[]> {
+export async function listPlaces(query?: string, near?: LatLng): Promise<Place[]> {
   const text = query?.trim();
+  const from = validNear(near); // 기준점(보통 집)을 주면 서버가 가까운 순으로 줌. 최근 장소에는 안 씀
   const places = text
-    ? uniqueByName(((await callEdge<{ places: PlaceDto[] }>('place-search', { query: text, limit: 10 }, { retry: 1 })).places ?? []).map(toPlace))
+    ? uniqueByName(((await callEdge<{ places: PlaceDto[] }>('place-search', { query: text, ...from, limit: 10 }, { retry: 1 })).places ?? []).map(toPlace))
     : await recentPlaces(await requireUserId());
   rememberPlaces(places);
   return places;

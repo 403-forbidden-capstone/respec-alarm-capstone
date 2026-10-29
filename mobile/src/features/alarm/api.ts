@@ -8,7 +8,7 @@ import { UserError } from '@/lib/errors';
 import { isMock } from '@/lib/mode';
 import { addMinutes, isSameDay, josa, joinKo, minuteOfDay, spokenTime, startOfDay } from '@/lib/format';
 import { alarmChain, autoLevel, axisLevel } from '@/mocks/calc';
-import { awayFromHomeFactor, db, people, places, timelines, transportFactor, type MockAppointment } from '@/mocks/data';
+import { awayFromHomeFactor, db, people, places, recentMockPlaces, timelines, transportFactor, type MockAppointment } from '@/mocks/data';
 
 import {
   defaultAlarms,
@@ -31,6 +31,7 @@ import {
   type AppointmentDraft,
   type Estimate,
   type IntensityAxis,
+  type LatLng,
   type Level,
   type NextAlarm,
   type Place,
@@ -44,6 +45,7 @@ import {
 } from './types';
 import { manualTimes, orderError } from './adjust';
 import { LEVEL_FIELD, type EditLogLine } from './edits';
+import { filterPlaces } from './places';
 import * as real from './real';
 import { repeatLabel, repeatToRrule, rruleToRepeat } from './repeat';
 import { draftAt, initialTime, ringingKinds } from './schedule';
@@ -315,10 +317,15 @@ export async function saveAlarmSettings(id: string, draft: AlarmSettingsDraft): 
   return { turnedOff: false, turnedOn: false };
 }
 
-// 새 일정 (H05) — 장소는 지금 목업 4곳. 실데이터는 검색어가 있으면 place-search(카카오 키워드), 없으면 최근에 쓴 곳 (realPlan.ts)
-export async function listPlaces(query?: string): Promise<Place[]> {
-  if (!isMock()) return real.listPlaces(query);
-  return places;
+// 장소 목록 (H05 · H03) — 검색어가 없으면 최근에 쓴 곳, 있으면 이름 · 주소에 검색어가 든 곳 (실데이터는 place-search 카카오 키워드, 가짜는 목업 장소에서 거름)
+//   near = 보통 집 좌표, 부르는 화면이 넘김 — 주면 검색 결과를 가까운 순으로 (최근 장소에는 안 씀)
+//   category는 서버 값 그대로 통과 (저장하지 않음, D5)
+export async function listPlaces(query?: string, near?: LatLng): Promise<Place[]> {
+  if (!isMock()) return real.listPlaces(query, near);
+  const text = query?.trim();
+  // 가짜 모드의 "최근 장소" = 처음부터 있던 4곳 (이전 동작 그대로), 검색은 대학가 장소 전체에서
+  if (!text) return recentMockPlaces.map((p) => ({ ...p }));
+  return filterPlaces(places, text, near).map((p) => ({ ...p }));
 }
 
 // 새 일정 처음 입력값 — 일정명 · 준비물은 비어 있음, 장소는 첫 곳 선택. 날짜 · 시간은 홈에서 넘어온 날(day)의 오후 2시

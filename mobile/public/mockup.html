@@ -695,8 +695,8 @@ function calcInner(a){
   return `<p class="lbl">알람 시각</p><p class="formula">${TYPE[f.type]} ${fmt(f.t)} = 약속 ${fmt(a.at)} − 여유 ${a.buffer} − 이동 ${a.travel} − 준비 ${a.p80}${f.type==='WAKE'&&a.pre?`<br>준비 알람은 기상 후 준비 전 활동 ${a.pre}분 뒤`:''}</p>${L.map(x=>`<div class="kv"><span class="k">${TYPE[x.type]}${x.type==='ARRIVE'?' 목표':''}</span><span class="v row-r">${fmt(x.t)}${x.type==='ARRIVE'?'':sw(typeOn(a.id,x.type),'toggleType',{id:a.id,type:x.type},TYPE[x.type]+' 알람')}</span></div>`).join('')}`;
 }
 function lvCard(a){
-  const base=IMP[a.imp].base, late=S.late4w>=2?1:0, auto=autoLv(a), o=S.over[a.id]||{};
-  return `<div class="card"><p class="lbl">알람 강도</p><p class="small">자동 ${LV[auto].name} · 중요도 ${IMP[a.imp].label} ${base}점 + 최근 4주 늦잠 지각 ${S.late4w}회 ${late}점</p>
+  const late=S.late4w>=2, auto=autoLv(a), o=S.over[a.id]||{};
+  return `<div class="card"><p class="lbl">알람 강도</p><p class="small">자동 ${LV[auto].name} · 중요도 ${IMP[a.imp].label}${late?` · 최근 4주 늦잠 지각 ${S.late4w}번`:''}</p>
   ${AXES.map(([ax,name])=>{const c=axLv(a,ax);return `<div class="axis"><span class="k">${name}${o[ax]!=null?'<em>직접 고름</em>':''}</span><span class="lvopts" role="group" aria-label="${name} 강도">${LV.map((l,i)=>`<button class="${i===c?'on':''}" data-act="axis" data-id="${a.id}" data-ax="${ax}" data-lv="${i}" aria-pressed="${i===c}">${l.name}</button>`).join('')}</span></div><p class="axdesc">${LV[c][ax]}</p>`;}).join('')}
   <p class="note sm">직접 고른 항목은 자동 계산보다 항상 먼저 적용돼요.</p>
   ${Object.keys(o).length?`<button class="tlink" data-act="axisReset" data-id="${a.id}">모두 자동으로 되돌리기</button>`:''}</div>`;
@@ -708,7 +708,7 @@ SCR.detail=c=>{
   let h=top(backBtn)+`<h1 class="ttl">알람 설정</h1><p class="lead">${dShort(a.day)} · <b class="ink" id="leadT">${fmt(f.t)} ${TYPE[f.type]}</b></p>`;
   h+=`<div class="card"><p class="lbl">연결 일정</p><div class="between"><b class="big2">${esc(a.title)}</b><span class="chip fill">${IMP[a.imp].label}</span></div><p class="small">${fmt(a.at)} · ${esc(a.place)} · ${esc(a.repeat)}</p></div>`;
   h+=`<div class="card"><p class="lbl">이동 조건</p>${kv('출발 위치',esc(a.origin))}${kv('이동 수단',esc(a.transport))}${kv('예상 이동',a.travel+'분',a.travelSrc)}</div>`;
-  h+=`<div class="card"><p class="lbl">준비 시간</p>${a.pre?kv('준비 전 활동',a.pre+'분'):''}${kv('실제 준비',a.prep+'분')}${kv('P80 여유','+'+margin+'분','열 번 중 여덟 번은 늦지 않게')}${kv('예측 준비',a.p80+'분','공통 P80 + 개인 보정')}<div class="kv"><span class="k">여유 시간</span><b class="v" id="bufVal">${b}분</b></div><input type="range" min="0" max="30" step="5" value="${b}" data-input="buffer" aria-label="여유 시간"></div>`;
+  h+=`<div class="card"><p class="lbl">준비 시간</p>${a.pre?kv('준비 전 활동',a.pre+'분'):''}${kv('실제 준비',a.prep+'분')}${kv('넉넉히 더한 시간','+'+margin+'분','늦지 않도록 실제 준비에 더했어요')}${kv('예측 준비',a.p80+'분','내 기록이 쌓일수록 나에게 맞춰져요')}<div class="kv"><span class="k">여유 시간</span><b class="v" id="bufVal">${b}분</b></div><input type="range" min="0" max="30" step="1" value="${b}" data-input="buffer" aria-label="여유 시간"></div>`;
   h+=`<div class="card" id="calcBox">${calcInner(tmp)}</div>`+lvCard(a);
   h+='<div class="stack"><button class="btn" data-act="detailSave">저장</button></div>';
   return h;

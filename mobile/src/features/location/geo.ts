@@ -25,7 +25,7 @@ export function toLatLng(p: MaybeLatLng): LatLng | null {
   return { lat, lng };
 }
 
-// 가까운 이동 — 도착 감지 · 실제 이동시간 끔 (L6 안건후보: 가까운 약속 감지 기본안 A)
+// 가까운 이동 — 실제 이동시간만 끔, 출발 · 도착 감지는 그대로 (D68 "500m 안이면 이동 측정을 끄고 기본값", 안건후보 D78 정리)
 export function isNearTrip(from: LatLng, to: LatLng): boolean {
   return distanceM(from, to) < NEAR_TRIP_M;
 }
