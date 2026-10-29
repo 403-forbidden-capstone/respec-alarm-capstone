@@ -25,6 +25,7 @@ import { useAppointmentToggle } from '@/features/alarm/hooks/useAppointmentToggl
 import { useNow } from '@/features/alarm/hooks/useNow';
 import { isEvening } from '@/features/alarm/schedule';
 import { KIND_LABEL } from '@/features/alarm/types';
+import { bannerLines, bannerSummary, PermissionBanner, useFailedAlarmCount, usePermissions } from '@/features/permissions';
 import { getPendingSuggestion } from '@/features/records/api';
 import { advanceRoutine, getEveningRoutine, getTodayRoutine, listTodos, toggleTodo } from '@/features/routine/api';
 import { RoutineCard } from '@/features/routine/components/RoutineCard';
@@ -33,6 +34,7 @@ import { getGroupSummary, listGroups } from '@/features/social/api';
 import { useWakeLoad } from '@/features/social/hooks/useGroupWake';
 import { now } from '@/lib/clock';
 import { addDays, dayKey, formatDate, formatMinuteOfDay, formatRelative, formatTime, minuteOfDay, startOfDay } from '@/lib/format';
+import { canUseRealData } from '@/lib/mode';
 import { openGroupDetail } from '@/lib/nav';
 import { useAction } from '@/lib/useAction';
 import { colors } from '@/theme';
@@ -73,6 +75,8 @@ export default function HomeScreen() {
   const current = useNow(); // 30초마다 다시 읽음 — "N분 뒤" · 인사말이 열 때 값에 멈춰 있지 않게
   const toggleAppointment = useAppointmentToggle(reload); // 다음 알람 카드 스위치
   const { run } = useAction(); // 루틴 단계 · 준비물 체크는 한 번에 하나씩, 실패하면 토스트 (실데이터는 네트워크 오류가 있음)
+  const permissions = usePermissions(); // 홈 빨간 줄 — 알림 · 전체화면 알림이 꺼짐, 폰에 못 건 알람
+  const failedAlarms = useFailedAlarmCount();
 
   // 저녁으로 넘어갔거나 다음 알람 시각이 지났으면 내용을 다시 읽음
   const stale = data != null && (isEvening(current) !== data.evening || (data.next != null && data.next.alarm.at.getTime() < current.getTime()));
@@ -129,6 +133,7 @@ export default function HomeScreen() {
   const shownGroups = groups.slice(0, GROUP_ROWS);
   const moreGroups = groups.length - shownGroups.length;
   const snoozed = snooze != null && snooze.at.getTime() > current.getTime();
+  const permissionSummary = bannerSummary(bannerLines(permissions.snapshot, { failedCount: failedAlarms, hasAlarm: next != null }));
 
   return (
     <Screen onRefresh={reload}>
@@ -138,11 +143,19 @@ export default function HomeScreen() {
             {formatDate(current)}
           </Text>
         }
-        right={<TopBarButton label="알람 전체" onPress={() => router.push('/alarms')} />}
+        right={
+          // D90 기본안 A — 홈 위 오른쪽 '알람 전체' 옆. 설정은 실데이터를 쓸 수 있을 때만 (아니면 _layout에서 settings가 빠져 막다른 길)
+          <View style={styles.topActions}>
+            <TopBarButton label="알람 전체" onPress={() => router.push('/alarms')} />
+            {canUseRealData ? <TopBarButton label="설정" onPress={() => router.push('/settings')} /> : null}
+          </View>
+        }
       />
       <Text variant="title" style={styles.title}>
         {greeting(current)}
       </Text>
+
+      {permissionSummary ? <PermissionBanner text={permissionSummary} onPress={() => router.push('/ring-check')} /> : null}
 
       {/* 기상 알람을 끈 뒤 판정 중이면 H08로 다시 들어가는 길 */}
       {wake ? (
@@ -302,6 +315,7 @@ export default function HomeScreen() {
 
 const styles = StyleSheet.create({
   title: { marginTop: 8, marginBottom: 4 },
+  topActions: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   ctaText: { marginTop: 4 },
   ctaButton: { marginTop: 12 },
   cardSub: { marginTop: 2 },

@@ -11,6 +11,7 @@ import { useOneTapFollowUp } from '@/features/alarm/hooks/useOneTapFollowUp';
 import { useWakeRecheck } from '@/features/alarm/hooks/useWakeRecheck';
 import { AuthProvider, useAuth } from '@/features/auth/AuthProvider';
 import { ConfigErrorScreen } from '@/features/auth/ConfigErrorScreen';
+import { PermissionPromptHost } from '@/features/permissions';
 import { ProfileRetryScreen } from '@/features/auth/ProfileRetryScreen';
 import { useAlarmSync } from '@/lib/alarmSync/useAlarmSync';
 import { ONBOARDING_IN_FLOW } from '@/lib/flags';
@@ -36,6 +37,7 @@ export default function RootLayout() {
         <StatusBar style="dark" />
         <RootStack />
         <SheetHost />
+        <PermissionPromptHost />
         <ConfirmHost />
         <ToastHost />
       </DeviceFrame>
@@ -88,6 +90,8 @@ function RootStack() {
         <Stack.Screen name="friends/[id]/index" />
         <Stack.Screen name="friends/[id]/alarms" />
         <Stack.Screen name="permissions" />
+        {/* 목업에 없는 화면(L04 알람이 안 울릴 때)이지만 홈 빨간 줄에서 가짜 모드에서도 열려야 해서 여기에 둠 */}
+        <Stack.Screen name="ring-check" />
         <Stack.Screen name="groups/[id]/index" />
         <Stack.Screen name="groups/[id]/members/[userId]" />
         <Stack.Screen name="suggestion/[id]" />

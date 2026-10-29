@@ -3,6 +3,7 @@
 //   · reconcile()          내 켜진 알람을 서버에서 읽어 폰 예약과 맞춤 (없으면 걸고, 다르면 다시 걸고, 서버에 없으면 지움). 로그인 직후 · 앱이 앞에 올 때
 //   · uploadEvents()       폰에 쌓인 울림 기록을 alarm_events로 올림. 앱이 앞에 올 때 · 기상 확인 화면에 들어올 때
 //   · cancelAllPhoneAlarms() / setSigningOut(value) / discardPendingEvents() / onEventsUploaded(handler)  로그아웃 정리 · 원탭 뒤처리 훅 (아래)
+//   · failedAlarmCount() / onFailedAlarmsChange(listener)  폰에 못 건 알람 수 (홈 빨간 줄용)
 // 실데이터 모드에서만 일함 (reconcile · uploadEvents는 가짜 모드면 아무것도 안 함). 이 함수들은 한 줄로 차례대로 돎 — 맞추는 도중에 저장 결과가 끼어들어 방금 건 알람을 지우지 않게
 // 계산은 reconcile.ts · events.ts(순수 함수)에, 여기는 DB · 폰 호출만
 import * as AlarmCore from '@capstone/alarm-core';
@@ -43,7 +44,51 @@ let lastTimeZone: string | null = null;
 let signingOut = false;
 export function setSigningOut(value: boolean): void {
   signingOut = value;
-  if (value) lastTimeZone = null; // 다음에 로그인하는 계정의 시간대와 섞이지 않게
+  if (value) {
+    lastTimeZone = null; // 다음에 로그인하는 계정의 시간대와 섞이지 않게
+    setFailed(new Set()); // 못 건 알람 목록도 앞 계정 것이라 비움
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 폰에 못 건 알람 — 홈 빨간 줄 ("알람 N개를 폰에 걸지 못했어요")이 읽음
+// ---------------------------------------------------------------------------
+
+let failedIds = new Set<string>();
+const failedListeners = new Set<() => void>();
+
+// 목록이 달라졌을 때만 구독자에게 알림 (맞출 때마다 홈이 다시 그려지지 않게)
+function setFailed(next: Set<string>): void {
+  const changed = next.size !== failedIds.size || [...next].some((id) => !failedIds.has(id));
+  failedIds = next;
+  if (changed) for (const listener of [...failedListeners]) listener();
+}
+
+export function failedAlarmCount(): number {
+  return failedIds.size;
+}
+
+export function onFailedAlarmsChange(listener: () => void): () => void {
+  failedListeners.add(listener);
+  return () => {
+    failedListeners.delete(listener);
+  };
+}
+
+// 맞춘 결과로 못 건 알람 목록을 고침
+//   whole = 서버 알람 전체를 맞춘 경우 → 이번 결과로 목록을 새로 정함 (이번에 안 건드린 알람은 폰에 이미 걸려 있거나 서버에 없는 것)
+//   일부 맞추기 · 저장 결과 반영은 이번 결과에 나온 알람만 고침: 걸렸거나 지운 것은 빼고 실패한 것은 넣음
+//   summary.failed에는 지우지 못한 것도 섞여 있음 (SyncSummary가 구분하지 않아 같이 셈)
+function noteFailures(summary: SyncSummary, whole: boolean): void {
+  const failedNow = summary.failed.map((f) => f.alarmId).filter((id) => id !== '');
+  if (whole) {
+    setFailed(new Set(failedNow));
+    return;
+  }
+  const next = new Set(failedIds);
+  for (const id of [...summary.scheduled, ...summary.skippedPast, ...summary.deferred, ...summary.canceled]) next.delete(id);
+  for (const id of failedNow) next.add(id);
+  setFailed(next);
 }
 
 // ---------------------------------------------------------------------------
@@ -85,6 +130,7 @@ export function applyCommit(result: CommitResult): Promise<SyncSummary> {
     const summary = emptySummary();
     await cancelAlarms(result.canceled_alarm_ids ?? [], summary);
     await scheduleAlarms(result.ring_packages ?? [], summary);
+    noteFailures(summary, false);
     return summary;
   });
 }
@@ -181,7 +227,9 @@ export function reconcile(options: ReconcileOptions = {}): Promise<SyncSummary> 
     const plan = planReconcile({ server, phone, nowMs, forceCancel });
     // 서버 목록이 상한에서 잘렸으면 "서버에 없음"이 진짜 없다는 뜻이 아닐 수 있음 — 서버에 없다고 확인된 것(forceCancel)만 지움
     if (rows.length >= SERVER_ROW_LIMIT) plan.cancel = plan.cancel.filter((id) => forceCancel?.has(id) === true);
-    return executePlan(plan);
+    const summary = await executePlan(plan);
+    noteFailures(summary, options.alarmIds == null);
+    return summary;
   });
 }
 
