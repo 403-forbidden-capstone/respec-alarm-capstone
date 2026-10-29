@@ -1,5 +1,5 @@
 // 해석 결과(GeoAction) 적용 — 상태와 함께 쓸 기록을 보관함에 먼저 남기고, 서버에 쓰고, 못 쓴 것은 보관해 둔 채 다음에 다시
-//   · 쓸 기록(DEPART · ARRIVE · RETRACT_DEPART)은 상태를 저장할 때 같이 보관함(location:v1:actions)에 올림 → 앱이 중간에 꺼져도 상태만 앞서 나가 기록이 사라지는 일이 없음
+//   · 쓸 기록(DEPART · ARRIVE)은 상태를 저장할 때 같이 보관함(location:v1:actions)에 올림 → 앱이 중간에 꺼져도 상태만 앞서 나가 기록이 사라지는 일이 없음
 //   · flushActions가 보관함 앞에서부터 차례로 서버에 씀: 성공하면 뺌, 일시 오류(네트워크 · 로그인 없음 · 5xx)는 거기서 멈추고 다음에,
 //     다시 해도 소용없는 오류(lib/alarmSync/events isPermanentInsertError)는 버림. 쓰기는 같은 입력이면 같은 결과라 두 번 가도 안전 (participantTimes)
 //   · 안내만 하는 것(DEPART_PENDING · DEPART_CANCEL)은 보관하지 않고 notice.ts를 바로 부름
@@ -7,7 +7,6 @@ import { recordParticipantTimes } from '@/features/alarm/participantTimes';
 import { isPermanentInsertError } from '@/lib/alarmSync/events';
 import { isMock } from '@/lib/mode';
 
-import { retractDeparture } from './api';
 import { withLock } from './lock';
 import { errorText } from './native';
 import { onDetectionNotice } from './notice';
@@ -37,8 +36,7 @@ type Outcome = 'done' | 'drop' | 'retry';
 async function send(action: WriteAction): Promise<Outcome> {
   try {
     if (action.type === 'DEPART') await recordParticipantTimes({ participantId: action.participantId, departedAt: action.at, source: 'LOCATION' });
-    else if (action.type === 'ARRIVE') await recordParticipantTimes({ participantId: action.participantId, arrivedAt: action.at, source: 'LOCATION' });
-    else await retractDeparture({ participantId: action.participantId, at: action.at });
+    else await recordParticipantTimes({ participantId: action.participantId, arrivedAt: action.at, source: 'LOCATION' });
     return 'done';
   } catch (e) {
     if (isPermanentInsertError(e as { code?: string | null })) {

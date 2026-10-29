@@ -28,10 +28,8 @@ jest.mock('expo-task-manager', () => {
 jest.mock('expo-location', () => ({ GeofencingEventType: { Enter: 1, Exit: 2 } }));
 
 const mockRecord = jest.fn<(input: Record<string, unknown>) => Promise<unknown>>();
-const mockRetract = jest.fn<(input: Record<string, unknown>) => Promise<boolean>>();
 const mockNotice = jest.fn<(action: GeoAction) => void>();
 jest.mock('@/features/alarm/participantTimes', () => ({ recordParticipantTimes: (input: Record<string, unknown>) => mockRecord(input) }));
-jest.mock('../api', () => ({ retractDeparture: (input: Record<string, unknown>) => mockRetract(input) }));
 jest.mock('../notice', () => ({ onDetectionNotice: (action: GeoAction) => mockNotice(action) }));
 let mockIsMock = false;
 jest.mock('@/lib/mode', () => ({ isMock: () => mockIsMock }));
@@ -65,8 +63,6 @@ beforeEach(async () => {
   mockIsMock = false;
   mockRecord.mockReset();
   mockRecord.mockResolvedValue({});
-  mockRetract.mockReset();
-  mockRetract.mockResolvedValue(true);
   consoleLogs.length = 0;
   for (const method of ['log', 'info', 'warn', 'error', 'debug'] as const) {
     jest.spyOn(console, method).mockImplementation((...args: unknown[]) => void consoleLogs.push(JSON.stringify(args.map((a) => (a instanceof Error ? a.message : a)))));
@@ -105,7 +101,7 @@ describe('지오펜스 신호 받기 (handleGeofenceEvent)', () => {
     expect((await loadState()).pending).toEqual([]);
   });
 
-  it('도착 전 귀가: 위치로 쓴 출발을 지움 (retractDeparture, 출발 시각 그대로)', async () => {
+  it('도착 전 귀가: 출발은 지우지 않고, 다시 나가면 더 늦은 출발을 씀 (7.13.7 약속 전 마지막 출발 — 앞 출발은 확인할 기록)', async () => {
     await commit({
       state: seededState({
         regions: { home: known(false), rdest: known(false) },
@@ -113,8 +109,13 @@ describe('지오펜스 신호 받기 (handleGeofenceEvent)', () => {
       }),
     });
     await run(enter('home'), '09:00');
-    expect(mockRetract).toHaveBeenCalledWith({ participantId: 'p1', at: at('08:45') });
     expect(mockRecord).not.toHaveBeenCalled();
+    await run(exit('home'), '09:10');
+    await run(enter('rdest'), '09:40'); // 도착하면 대기 중인 출발부터 확정
+    expect(mockRecord.mock.calls.map(([input]) => input)).toEqual([
+      { participantId: 'p1', departedAt: at('09:10'), source: 'LOCATION' },
+      { participantId: 'p1', arrivedAt: at('09:40'), source: 'LOCATION' },
+    ]);
   });
 
   it('쓰기가 실패하면 보관함에 남김 (상태는 이미 앞서 나가 있으므로 기록이 사라지지 않게)', async () => {
@@ -134,8 +135,7 @@ describe('지오펜스 신호 받기 (handleGeofenceEvent)', () => {
     await run(enter('rdest'), '09:10'); // 출발 · 도착이 보관됨
     mockRecord.mockReset();
     mockRecord.mockResolvedValue({});
-    mockRetract.mockResolvedValue(true);
-    // 아무 기록도 새로 안 만드는 신호(집 재진입 — 이미 도착했으니 출발을 지우지 않음)로 보관함 비우기만 확인
+    // 아무 기록도 새로 안 만드는 신호(도착 뒤 집 재진입)로 보관함 비우기만 확인
     await run(enter('home'), '09:30');
     expect(mockRecord.mock.calls.map(([input]) => input)).toEqual([
       { participantId: 'p1', departedAt: at('08:45'), source: 'LOCATION' },

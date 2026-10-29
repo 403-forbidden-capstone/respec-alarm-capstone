@@ -37,7 +37,6 @@ jest.mock('expo-task-manager', () => ({ defineTask: () => {} }));
 
 const mockRecord = jest.fn<(input: Record<string, unknown>) => Promise<unknown>>();
 jest.mock('@/features/alarm/participantTimes', () => ({ recordParticipantTimes: (input: Record<string, unknown>) => mockRecord(input) }));
-jest.mock('../api', () => ({ retractDeparture: async () => true }));
 jest.mock('../notice', () => ({ onDetectionNotice: () => {} }));
 let mockIsMock = false;
 jest.mock('@/lib/mode', () => ({ isMock: () => mockIsMock }));

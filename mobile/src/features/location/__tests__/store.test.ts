@@ -39,7 +39,7 @@ describe('읽기 — 깨진 값은 빈 값으로', () => {
       'location:v1:actions',
       JSON.stringify([{ type: 'DEPART', participantId: 'p1', at: 1 }, { type: 'DEPART_PENDING', participantId: 'p1', at: 2 }, { type: 'ARRIVE', at: 3 }, { type: 'RETRACT_DEPART', participantId: 'p1', at: 4 }]),
     );
-    expect((await loadActions()).map((a) => a.type)).toEqual(['DEPART', 'RETRACT_DEPART']); // 안내용 · 모양 틀린 것은 뺌
+    expect((await loadActions()).map((a) => a.type)).toEqual(['DEPART']); // 안내용 · 모양 틀린 것 · 없어진 종류(RETRACT_DEPART)는 뺌
   });
 
   it('저장소 자체 오류는 던짐 — 못 읽은 걸 빈 값으로 보고 덮어쓰지 않게', async () => {

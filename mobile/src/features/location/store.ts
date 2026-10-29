@@ -11,15 +11,15 @@ const DATA_KEYS = {
   state: 'location:v1:state', // 판정 기억 (transitions GeoState)
   plan: 'location:v1:plan', // 지금 감시 중인 계획 (RegionPlan) — 신호를 해석할 때 씀
   regions: 'location:v1:regions', // 폰 OS에 실제로 등록한 영역 — 다음 등록 때 바뀐 것만 가리려고 (diffRegions)
-  actions: 'location:v1:actions', // 서버에 아직 못 쓴 기록 (DEPART · ARRIVE · RETRACT_DEPART)
+  actions: 'location:v1:actions', // 서버에 아직 못 쓴 기록 (DEPART · ARRIVE)
 } as const;
 // 자동 기록 켬 · 끔 — 로그아웃해도 그대로 둠 (꺼 둔 스위치가 다시 로그인하면 켜지지 않게). 스위치 화면은 뒤 PR
 const AUTO_KEY = 'location:v1:auto';
 
 // 서버에 쓰는 기록만 보관 (DEPART_PENDING · DEPART_CANCEL은 안내용이라 보관하지 않음)
-export type WriteAction = GeoAction & { type: 'DEPART' | 'ARRIVE' | 'RETRACT_DEPART' };
+export type WriteAction = GeoAction & { type: 'DEPART' | 'ARRIVE' };
 export const isWriteAction = (action: GeoAction): action is WriteAction =>
-  action.type === 'DEPART' || action.type === 'ARRIVE' || action.type === 'RETRACT_DEPART';
+  action.type === 'DEPART' || action.type === 'ARRIVE';
 
 // 오래 못 쓴 기록이 끝없이 쌓이지 않게 — 넘으면 오래된 것부터 버림 (근거 없음 — 작성자 판단, 하루 한두 건이라 넉넉한 값)
 export const MAX_QUEUED_ACTIONS = 100;
