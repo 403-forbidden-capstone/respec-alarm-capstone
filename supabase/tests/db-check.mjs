@@ -955,7 +955,7 @@ await check('고친 값 기록: 본인 이름으로 남기고 되돌리기(고�
   const forgeUser = await expectErr(() => q(`insert into public.user_edit_logs (user_id, screen, field, edited_value) values ($1, 'H03', 'intensity', '"STRONG"')`, [B]), /row-level security/);
   const forgeAlarm = await expectErr(() => q(`insert into public.user_edit_logs (alarm_id, screen, field, edited_value) values ($1, 'H03', 'intensity', '"STRONG"')`, [ids[B].alarm]), /row-level security/);
   const forgeAppt = await expectErr(() => q(`insert into public.user_edit_logs (appointment_id, screen, field, edited_value) values ($1, 'H03', 'intensity', '"STRONG"')`, [ids[B].appt]), /row-level security/);
-  // 모양: 화면은 H03 · H05 · S01, 값 이름은 소문자 · 숫자 · _ (목록은 닫지 않음), 고친 값은 필수
+  // 모양: 화면은 허용 목록 안의 값만(목록 전체는 아래 "위치 감지 칸" 검사), 값 이름은 소문자 · 숫자 · _ (목록은 닫지 않음), 고친 값은 필수
   const badScreen = await expectErr(() => q(`insert into public.user_edit_logs (screen, field, edited_value) values ('H99', 'intensity', '1')`), /user_edit_logs_screen_check/);
   const badField = await expectErr(() => q(`insert into public.user_edit_logs (screen, field, edited_value) values ('H03', 'Buffer Minutes', '1')`), /user_edit_logs_field_format/);
   // 되돌리기("자동으로 되돌리기")는 고친 값이 NULL — 앱이 JSON null을 보내면 PostgREST가 SQL NULL로 넣음
@@ -1319,6 +1319,141 @@ await check('그룹 삭제: 그 그룹에서 나온 권한 행이 모두 지워�
   await su();
   const [after] = await q(`select count(*)::int as n from public.sharing_permissions where source_type = 'GROUP' and source_id = $1`, [G]);
   return before.n > 0 && del.length === 1 && after.n === 0 ? true : { before, del, after };
+});
+
+
+// ---------------------------------------------------------------------
+// 위치 감지 칸 (L2, #40) — 출발 · 도착 출처 · 반경 · 고친 값 화면
+// ---------------------------------------------------------------------
+
+// 시험용 약속 + 참여 조건 하나 (그 사람 이름으로)
+const mkPart = async (u) => {
+  await as(u);
+  const [ap] = await q(`insert into public.appointments (creator_id, title, appointment_at, dest_name)
+                        values ($1, '위치 감지 시험', now() + interval '1 day', '세종대학교') returning appointment_id`, [u]);
+  const [pt] = await q(`insert into public.appointment_participants (appointment_id, user_id) values ($1, $2) returning participant_id`, [ap.appointment_id, u]);
+  return { appt: ap.appointment_id, part: pt.participant_id };
+};
+
+await check('위치 감지 칸: 출발 · 도착 출처는 event_input_source(NULL 허용), 반경은 smallint(NULL 허용)', async () => {
+  const r = await q(`select table_name || '.' || column_name as col, udt_name, is_nullable from information_schema.columns
+                     where table_schema = 'public'
+                       and (table_name, column_name) in (('appointment_participants', 'departed_source'), ('appointment_participants', 'arrived_source'),
+                                                         ('appointments', 'dest_radius_m'), ('profiles', 'home_radius_m'))
+                     order by 1`);
+  const m = Object.fromEntries(r.map((x) => [x.col, `${x.udt_name}/${x.is_nullable}`]));
+  return r.length === 4
+    && m['appointment_participants.departed_source'] === 'event_input_source/YES'
+    && m['appointment_participants.arrived_source'] === 'event_input_source/YES'
+    && m['appointments.dest_radius_m'] === 'int2/YES'
+    && m['profiles.home_radius_m'] === 'int2/YES'
+    ? true : m;
+});
+await check('출발 · 도착 출처는 시각과 짝: 시각만 · 출처만 있는 행(고치기 · 넣기 모두)은 거부, 둘 다 있거나 둘 다 없으면 받음, 시각을 비우려면 출처도 같이 비움', async () => {
+  const { part } = await mkPart(A);
+  const upd = (set) => q(`update public.appointment_participants set ${set} where participant_id = $1 returning departed_source, arrived_source`, [part]);
+  const depTimeOnly = await expectErr(() => upd(`departed_at = now()`), /appointment_participants_departed_source_pair/);
+  const depSrcOnly = await expectErr(() => upd(`departed_source = 'BUTTON'`), /appointment_participants_departed_source_pair/);
+  const arrTimeOnly = await expectErr(() => upd(`arrived_at = now()`), /appointment_participants_arrived_source_pair/);
+  const arrSrcOnly = await expectErr(() => upd(`arrived_source = 'LOCATION'`), /appointment_participants_arrived_source_pair/);
+  const nothing = await upd(`is_late = null`);   // 둘 다 비어 있으면 다른 칸만 고쳐도 통과
+  const both = await upd(`departed_at = now(), departed_source = 'LOCATION', arrived_at = now(), arrived_source = 'MANUAL'`);
+  const clearTimeOnly = await expectErr(() => upd(`departed_at = null`), /appointment_participants_departed_source_pair/);
+  const override = await upd(`departed_source = 'BUTTON'`);   // 위치로 쓴 값을 응답으로 덮을 때 (출처만 바꿔도 짝은 유지)
+  const cleared = await upd(`departed_at = null, departed_source = null, arrived_at = null, arrived_source = null`);
+  const badEnum = await expectErr(() => upd(`departed_source = 'GPS'`), /invalid input value for enum/);
+  // 넣을 때도 같은 제약
+  const second = await q(`insert into public.appointments (creator_id, title, appointment_at, dest_name) values ($1, '시험 2', now() + interval '2 days', '강남역') returning appointment_id`, [A]);
+  const insTimeOnly = await expectErr(() => q(`insert into public.appointment_participants (appointment_id, user_id, arrived_at) values ($1, $2, now())`, [second[0].appointment_id, A]),
+    /appointment_participants_arrived_source_pair/);
+  const [insBoth] = await q(`insert into public.appointment_participants (appointment_id, user_id, arrived_at, arrived_source) values ($1, $2, now(), 'BUTTON') returning arrived_source, departed_source`,
+    [second[0].appointment_id, A]);
+  return depTimeOnly === true && depSrcOnly === true && arrTimeOnly === true && arrSrcOnly === true && nothing.length === 1
+    && both.length === 1 && both[0].departed_source === 'LOCATION' && both[0].arrived_source === 'MANUAL'
+    && clearTimeOnly === true && override[0].departed_source === 'BUTTON'
+    && cleared[0].departed_source === null && cleared[0].arrived_source === null && badEnum === true
+    && insTimeOnly === true && insBoth.arrived_source === 'BUTTON' && insBoth.departed_source === null
+    ? true : { depTimeOnly, depSrcOnly, arrTimeOnly, arrSrcOnly, nothing, both, clearTimeOnly, override, cleared, badEnum, insTimeOnly, insBoth };
+});
+await check('반경: 약속 도착지(dest_radius_m)와 집(home_radius_m)은 100~500이고 NULL(기본값)도 받음 — 99 · 501은 거부', async () => {
+  const { appt } = await mkPart(A);
+  const setAppt = (v) => q(`update public.appointments set dest_radius_m = $1 where appointment_id = $2 returning dest_radius_m`, [v, appt]);
+  const setHome = (v) => q(`update public.profiles set home_radius_m = $1 where user_id = $2 returning home_radius_m`, [v, A]);
+  const out = {};
+  for (const [name, set, re] of [['dest', setAppt, /appointments_dest_radius_m_range/], ['home', setHome, /profiles_home_radius_m_range/]]) {
+    out[name] = {
+      low: await expectErr(() => set(99), re),
+      high: await expectErr(() => set(501), re),
+      min: (await set(100))[0],
+      max: (await set(500))[0],
+      none: (await set(null))[0],
+    };
+  }
+  // 넣을 때도 같은 제약 (집 반경은 profiles가 가입 트리거로 생기므로 약속만)
+  const insLow = await expectErr(() => q(`insert into public.appointments (creator_id, title, appointment_at, dest_name, dest_radius_m)
+                                          values ($1, '반경 시험', now(), '역', 50)`, [A]), /appointments_dest_radius_m_range/);
+  const [insOk] = await q(`insert into public.appointments (creator_id, title, appointment_at, dest_name, dest_radius_m)
+                           values ($1, '반경 시험', now(), '역', 300) returning dest_radius_m`, [A]);
+  return ['dest', 'home'].every((k) => out[k].low === true && out[k].high === true && out[k].min[`${k}_radius_m`] === 100
+      && out[k].max[`${k}_radius_m`] === 500 && out[k].none[`${k}_radius_m`] === null)
+    && insLow === true && insOk.dest_radius_m === 300
+    ? true : { out, insLow, insOk };
+});
+await check('새 칸의 권한: 본인 참여 조건의 출처 · 본인 프로필의 반경 · 본인 약속의 반경은 본인이 고치고 남은 못 고침 (칼럼 권한 · 트리거에 막히지 않음)', async () => {
+  const { appt, part } = await mkPart(A);
+  await as(A);
+  const mine = await q(`update public.appointment_participants set departed_at = now(), departed_source = 'BUTTON' where participant_id = $1 returning departed_source`, [part]);
+  const home = await q(`update public.profiles set home_radius_m = 250 where user_id = $1 returning home_radius_m`, [A]);
+  const dest = await q(`update public.appointments set dest_radius_m = 150 where appointment_id = $1 returning dest_radius_m`, [appt]);
+  await as(B);   // 약속 · 그룹을 같이 쓰지 않는 남 — 행이 안 보여서 0행이 고쳐짐
+  const otherPart = await q(`update public.appointment_participants set departed_at = now(), departed_source = 'MANUAL' where participant_id = $1 returning 1`, [part]);
+  const otherSrc = await q(`update public.appointment_participants set departed_source = 'MANUAL' where participant_id = $1 returning 1`, [part]);
+  const otherHome = await q(`update public.profiles set home_radius_m = 500 where user_id = $1 returning 1`, [A]);
+  const otherDest = await q(`update public.appointments set dest_radius_m = 500 where appointment_id = $1 returning 1`, [appt]);
+  await su();
+  const [after] = await q(`select (select departed_source from public.appointment_participants where participant_id = $1) as src,
+                                  (select home_radius_m from public.profiles where user_id = $2) as home,
+                                  (select dest_radius_m from public.appointments where appointment_id = $3) as dest`, [part, A, appt]);
+  return mine.length === 1 && mine[0].departed_source === 'BUTTON' && home[0].home_radius_m === 250 && dest[0].dest_radius_m === 150
+    && otherPart.length === 0 && otherSrc.length === 0 && otherHome.length === 0 && otherDest.length === 0
+    && after.src === 'BUTTON' && after.home === 250 && after.dest === 150
+    ? true : { mine, home, dest, otherPart, otherSrc, otherHome, otherDest, after };
+});
+await check('고친 값 기록 화면: H01 · H03 · H05 · H08 · NTF · S01만 받고 그 밖(H99 · H02 · 소문자 · 빈 값)은 거부', async () => {
+  await as(A);
+  const ok = [];
+  for (const s of ['H01', 'H03', 'H05', 'H08', 'NTF', 'S01']) ok.push((await q(`insert into public.user_edit_logs (screen, field, edited_value) values ($1, 'departed_at', '1') returning screen`, [s]))[0].screen);
+  const bad = [];
+  for (const s of ['H99', 'H02', 'h01', 'ntf', '']) bad.push(await expectErr(() => q(`insert into public.user_edit_logs (screen, field, edited_value) values ($1, 'departed_at', '1')`, [s]), /user_edit_logs_screen_check/));
+  const del = await q(`delete from public.user_edit_logs where field = 'departed_at' returning 1`);
+  return ok.join() === 'H01,H03,H05,H08,NTF,S01' && bad.every((x) => x === true) && del.length === 6 ? true : { ok, bad, del: del.length };
+});
+await check('백필: 마이그레이션 전에 들어 있던 출발 · 도착 시각은 BUTTON으로 채워지고 시각 없는 칸은 NULL로 남음 (기존 행 때문에 짝 제약이 안 막힘 · 반경은 NULL · 기존 고친 값 기록 유지)', async () => {
+  const staged = new PGlite();
+  try {
+    await staged.exec(AUTH_STUBS);
+    const files = readdirSync(MIG_DIR).filter((x) => x.endsWith('.sql')).sort();
+    const i = files.findIndex((x) => x.endsWith('_location_detect.sql'));
+    if (i < 0) return '_location_detect.sql 마이그레이션이 없음';
+    for (const f of files.slice(0, i)) await staged.exec(readFileSync(join(MIG_DIR, f), 'utf8'));   // 새 칸이 생기기 전까지만
+    const sq = async (sql, params = []) => (await staged.query(sql, params)).rows;
+    await sq(`insert into auth.users (id, email) values ($1, 'old@example.com')`, [A]);
+    for (const [n, dep, arr] of [[1, `'2026-10-20 09:00+09'`, `'2026-10-20 10:00+09'`], [2, `'2026-10-21 09:00+09'`, 'null'], [3, 'null', `'2026-10-22 10:00+09'`], [4, 'null', 'null']]) {
+      const [{ appointment_id: ap }] = await sq(`insert into public.appointments (creator_id, title, appointment_at, dest_name) values ($1, $2, now(), '세종대학교') returning appointment_id`, [A, `옛 약속 ${n}`]);
+      await sq(`insert into public.appointment_participants (appointment_id, user_id, departed_at, arrived_at) values ($1, $2, ${dep}, ${arr})`, [ap, A]);
+    }
+    await sq(`insert into public.user_edit_logs (user_id, screen, field, edited_value) values ($1, 'H03', 'buffer_minutes', '15')`, [A]);
+    for (const f of files.slice(i)) await staged.exec(readFileSync(join(MIG_DIR, f), 'utf8'));
+    const rows = await sq(`select a.title, p.departed_source, p.arrived_source from public.appointment_participants p
+                           join public.appointments a using (appointment_id) order by a.title`);
+    const [radius] = await sq(`select (select count(*) from public.appointments where dest_radius_m is not null)::int as dest,
+                                      (select count(*) from public.profiles where home_radius_m is not null)::int as home,
+                                      (select count(*) from public.user_edit_logs where screen = 'H03')::int as logs`);
+    const src = rows.map((x) => `${x.departed_source ?? '-'}/${x.arrived_source ?? '-'}`).join();
+    return src === 'BUTTON/BUTTON,BUTTON/-,-/BUTTON,-/-' && radius.dest === 0 && radius.home === 0 && radius.logs === 1 ? true : { src, radius };
+  } finally {
+    await staged.close();
+  }
 });
 
 

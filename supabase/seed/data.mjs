@@ -171,7 +171,9 @@ export function buildDataset({ users, today, newId = randomUUID }) {
       prepare_minutes: opts.prepare,
       buffer_minutes: opts.buffer,
       departed_at: null,
+      departed_source: null,
       arrived_at: null,
+      arrived_source: null,
       is_late: null,
       late_minutes: null,
     };
@@ -259,7 +261,7 @@ export function buildDataset({ users, today, newId = randomUUID }) {
     event(made.byType.PREPARE, 'ACKNOWLEDGED', minuteOfToday(tl.prep), { input_source: 'BUTTON' });
     event(made.byType.DEPARTURE, 'ACKNOWLEDGED', minuteOfToday(tl.depart), { input_source: 'BUTTON' });
     event(made.byType.ARRIVE, 'ARRIVAL_CONFIRMED', minuteOfToday(tl.arrive), { input_source: 'BUTTON' });
-    Object.assign(made.participant, { departed_at: minuteOfToday(tl.depart).toISOString(), arrived_at: minuteOfToday(tl.arrive).toISOString(), is_late: false });
+    Object.assign(made.participant, { departed_at: minuteOfToday(tl.depart).toISOString(), departed_source: 'BUTTON', arrived_at: minuteOfToday(tl.arrive).toISOString(), arrived_source: 'BUTTON', is_late: false });
   }
 
   // 나의 개인 약속 (목업 a2 · a3 · a4)
@@ -365,7 +367,7 @@ export function buildDataset({ users, today, newId = randomUUID }) {
     event(made.byType.PREPARE, 'ACKNOWLEDGED', prepAck, { input_source: 'BUTTON' });
     event(made.byType.DEPARTURE, 'ACKNOWLEDGED', departed, { input_source: 'BUTTON' });
     event(made.byType.ARRIVE, 'ARRIVAL_CONFIRMED', arrived, { input_source: 'BUTTON' });
-    Object.assign(made.participant, { departed_at: departed.toISOString(), arrived_at: arrived.toISOString() });
+    Object.assign(made.participant, { departed_at: departed.toISOString(), departed_source: 'BUTTON', arrived_at: arrived.toISOString(), arrived_source: 'BUTTON' });
 
     t.daily_records.push({
       user_id: users.me,
