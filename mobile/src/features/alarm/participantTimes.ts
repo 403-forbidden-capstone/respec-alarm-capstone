@@ -12,7 +12,7 @@
 //     하루에 한 번만(이미 값이 있으면 덮지 않음 — 같은 날 약속이 여러 개여도 먼저 들어온 출발이 준비 실측). 단 같은 참여 조건의 출발이 응답으로 바뀌어 그 출발로 셈한 값이면 새 출발로 다시 셈
 //   · 실제 이동시간 — 출발 · 도착이 둘 다 있으면(출처 무관) actual_travel_minutes = 도착 − 출발(분). 쓰기만 하고 이동 보정 학습(7.3.1)은 L1 몫
 //     출발지(비면 집) · 목적지 좌표가 없거나 500m 안이면 안 씀 (D68 · L6 안건후보: 가까운 약속 감지 기본안 — features/location/geo isNearTrip과 같은 규칙)
-//     출발이 출발 예정 60분 전보다 이르면 안 씀 — 7.13.7 감시 창 따름 (집 이탈은 오늘 첫 약속에 시간 제한 없이 붙어 출발 · 도착이 몇 시간 떨어질 수 있음)
+//     출발이 출발 예정 60분 전보다 이르면 안 씀 — 근거 없음, 작성자 판단 (7.13.7 감시 창 W_geo를 표본 범위로 씀. 집 이탈은 오늘 첫 약속에 시간 제한 없이 붙어 출발 · 도착이 몇 시간 떨어질 수 있음)
 //   · 위치 값 지우기(clearLocationTime) — 사용자 정정 [아니에요](D61)와 귀가 취소(L6 안건후보: 집 이탈 약속 붙이기 기본안)가 같은 길을 씀. 출처가 LOCATION일 때만
 //   · 같은 입력으로 다시 불려도 같은 결과 (onEventsUploaded 훅 · 위치 보관함이 던지면 다시 넘어오므로)
 // 판정은 순수 함수(시험: __tests__/participantTimes.test.ts), 아래 recordParticipantTimes · clearLocationTime이 DB를 읽고 씀
@@ -89,7 +89,7 @@ export function travelMinutesOf(t: {
   appointmentAtMs: number;
 }): number | null {
   if (!t.origin || !t.dest || isNearTrip(t.origin, t.dest)) return null;
-  // 7.13.7 감시 창 따름 — 창이 열리기 전 출발(오전에 집을 나가 저녁 약속에 붙은 이탈 등)은 이동시간이 아님
+  // 근거 없음 — 작성자 판단 (7.13.7 감시 창 W_geo를 표본 범위로 씀): 창이 열리기 전 출발(오전에 집을 나가 저녁 약속에 붙은 이탈 등)은 이동시간이 아님
   if (t.departedAtMs < detectionWindow({ departAt: t.departAtMs, appointmentAt: t.appointmentAtMs }).start) return null;
   const minutes = Math.round((t.arrivedAtMs - t.departedAtMs) / 60_000);
   return minutes > 0 ? minutes : null;
@@ -246,15 +246,17 @@ async function recordTravelMinutes(userId: string, row: ParticipantRow, departed
     : plannedDepartAt({ appointmentAt: appointmentAtMs, travelMinutes: row.est_travel_minutes, bufferMinutes: row.buffer_minutes });
   const minutes = travelMinutesOf({ departedAtMs, arrivedAtMs, origin, dest, departAtMs, appointmentAtMs });
   if (minutes == null || minutes === row.actual_travel_minutes) return null;
-  const { error } = await supabase
+  const { data, error } = await supabase
     .from('appointment_participants')
     .update({ actual_travel_minutes: minutes })
     .eq('participant_id', row.participant_id)
     .eq('user_id', userId)
     .eq('departed_at', iso(departedAtMs))
-    .eq('arrived_at', iso(arrivedAtMs));
+    .eq('arrived_at', iso(arrivedAtMs))
+    .select('participant_id');
   if (error) throw error;
-  return minutes;
+  // 바뀐 줄이 0이면 그 사이 출발 · 도착이 바뀐 것 — 못 썼으니 쓴 값 없음 (바꾼 쪽이 새 값으로 다시 셈)
+  return (data ?? []).length > 0 ? minutes : null;
 }
 
 // 출발 · 도착 시각 기록. 일시 오류(네트워크 등)는 던짐 — 부르는 쪽이 다시 부를 수 있게 (같은 입력이면 같은 결과)
@@ -277,26 +279,34 @@ export async function recordParticipantTimes(input: RecordTimesInput): Promise<R
   let finalDepartedMs = storedDepartedMs;
   let replacedDepartedMs: number | null = null;
   if (departedMs != null) {
-    const decision = decideWrite(input.source, { present: row.departed_at != null, byResponse: byResponse(departedSource) });
-    result.departed = decision;
+    let decision = decideWrite(input.source, { present: row.departed_at != null, byResponse: byResponse(departedSource) });
+    let lost = false; // 쓰려 했지만 그 사이 다른 곳이 바꿔서 못 씀
     if (decision !== 'keep') {
       const update = supabase.from('appointment_participants').update({ departed_at: iso(departedMs), departed_source: input.source }).eq('participant_id', input.participantId).eq('user_id', userId);
-      // 읽은 뒤 그 사이 다른 곳이 쓴 값을 덮지 않게 읽은 값 그대로일 때만
-      const { error } = await (decision === 'new' ? update.is('departed_at', null) : update.eq('departed_at', row.departed_at as string));
+      // 읽은 뒤 그 사이 다른 곳이 쓴 값을 덮지 않게 읽은 값 그대로일 때만. 바뀐 줄이 0이면 못 쓴 것
+      const { data, error } = await (decision === 'new' ? update.is('departed_at', null) : update.eq('departed_at', row.departed_at as string)).select('participant_id');
       if (error) throw error;
-      finalDepartedMs = departedMs;
-      if (decision === 'override') replacedDepartedMs = storedDepartedMs;
+      if ((data ?? []).length === 0) {
+        // 지금 값을 모르니(읽은 값은 낡음) 내 쓰기에 딸린 위치 기록 · 준비 실측 · 이동시간은 안 함 — 바꾼 쪽이 자기 값으로 함
+        lost = true;
+        decision = 'keep';
+        finalDepartedMs = null;
+      } else {
+        finalDepartedMs = departedMs;
+        if (decision === 'override') replacedDepartedMs = storedDepartedMs;
+      }
     }
+    result.departed = decision;
     // 이번에 쓴 위치 값, 또는 앞 시도가 쓰고 기록을 남기기 전에 끊긴 같은 값 (다시 불려도 같은 결과)
-    if (isLocation && (decision !== 'keep' || (departedSource === 'LOCATION' && storedDepartedMs === departedMs))) geo.push({ kind: 'DEPART', atMs: departedMs });
+    if (isLocation && !lost && (decision !== 'keep' || (departedSource === 'LOCATION' && storedDepartedMs === departedMs))) geo.push({ kind: 'DEPART', atMs: departedMs });
   }
 
   const arrivedSource = storedSource(row.arrived_at, row.arrived_source);
   const storedArrivedMs = row.arrived_at == null ? null : dbTimeMs(row.arrived_at);
   let finalArrivedMs = storedArrivedMs;
   if (arrivedMs != null) {
-    const decision = decideWrite(input.source, { present: row.arrived_at != null, byResponse: byResponse(arrivedSource) });
-    result.arrived = decision;
+    let decision = decideWrite(input.source, { present: row.arrived_at != null, byResponse: byResponse(arrivedSource) });
+    let lost = false; // 출발과 같음 — 쓰려 했지만 그 사이 다른 곳이 바꿔서 못 씀
     const appointmentAt = row.appointments?.appointment_at;
     if (decision !== 'keep') {
       // 약속 시각을 못 읽으면 지각은 보류 (도착 시각만 남김)
@@ -306,11 +316,18 @@ export async function recordParticipantTimes(input: RecordTimesInput): Promise<R
         .update({ arrived_at: iso(arrivedMs), arrived_source: input.source, is_late: isLate, late_minutes: lateMinutes })
         .eq('participant_id', input.participantId)
         .eq('user_id', userId);
-      const { error } = await (decision === 'new' ? update.is('arrived_at', null) : update.eq('arrived_at', row.arrived_at as string));
+      const { data, error } = await (decision === 'new' ? update.is('arrived_at', null) : update.eq('arrived_at', row.arrived_at as string)).select('participant_id');
       if (error) throw error;
-      finalArrivedMs = arrivedMs;
+      if ((data ?? []).length === 0) {
+        lost = true;
+        decision = 'keep';
+        finalArrivedMs = null;
+      } else {
+        finalArrivedMs = arrivedMs;
+      }
     }
-    if (isLocation && (decision !== 'keep' || (arrivedSource === 'LOCATION' && storedArrivedMs === arrivedMs))) geo.push({ kind: 'ARRIVE', atMs: arrivedMs });
+    result.arrived = decision;
+    if (isLocation && !lost && (decision !== 'keep' || (arrivedSource === 'LOCATION' && storedArrivedMs === arrivedMs))) geo.push({ kind: 'ARRIVE', atMs: arrivedMs });
   }
 
   if (geo.length) await recordGeoEvents(userId, row, geo);
@@ -331,6 +348,15 @@ export async function readLocationTime(participantId: string, kind: TimeKind): P
   const source = kind === 'DEPART' ? row.departed_source : row.arrived_source;
   if (time == null || storedSource(time, source) !== 'LOCATION') return null;
   return { participantId, kind, at: dbTimeMs(time), appointmentId: row.appointment_id, alarmId: alarmOf(row, kind)?.alarm_id ?? null };
+}
+
+// 지금 값이 응답(원탭 · 직접 입력, 옛 앱 원탭 포함)이 쓴 것인지 — 위치 값을 못 지웠을 때 까닭을 가름 ("응답이 덮음" = true, "이미 지워짐 · 빈 칸" = false)
+export async function hasResponseTime(participantId: string, kind: TimeKind): Promise<boolean> {
+  const userId = await requireUserId();
+  const row = await loadParticipant(userId, participantId);
+  if (!row) return false;
+  const source = kind === 'DEPART' ? storedSource(row.departed_at, row.departed_source) : storedSource(row.arrived_at, row.arrived_source);
+  return source != null && isResponse(source);
 }
 
 // 위치 값 지우기 — 그 출발로 셈한 준비 실측 · 위치 기록(alarm_events)을 먼저 지우고, 시각 · 출처(도착이면 지각 판정도) · 실제 이동시간을 맨 나중에 비움

@@ -1,7 +1,7 @@
 // 위치 감지 기록 — 실데이터 (Supabase). 화면은 api.ts를 거침
 //   쓰기는 모두 participantTimes.ts(출발 · 도착을 쓰는 한 곳)를 거침: 지우기 clearLocationTime, 되돌리기 recordParticipantTimes(LOCATION)
 //   폰의 판정 기억(transitions forgetDetection)은 부르는 쪽(감지 안내 · 홈 정정 줄)이 맞춤
-import { clearLocationTime, readLocationTime, recordParticipantTimes } from '@/features/alarm/participantTimes';
+import { clearLocationTime, hasResponseTime, readLocationTime, recordParticipantTimes } from '@/features/alarm/participantTimes';
 import { now } from '@/lib/clock';
 import { parseDbTime } from '@/lib/dbTime';
 import { addDays, startOfDay } from '@/lib/format';
@@ -57,7 +57,7 @@ async function deleteEditLog(userId: string, editId: string): Promise<void> {
 }
 
 // [아니에요] — 지금 값이 위치일 때만 지움(응답 값 · 빈 칸이면 null). 고친 값 기록 한 줄을 먼저 남기고 지움
-//   그 사이 원탭이 덮어 못 지웠으면 기록도 지우고 null
+//   그 사이 원탭이 덮어 못 지웠으면 기록도 지우고 null. 동시에 두 번 눌러 다른 호출이 먼저 지웠으면(값이 비었음) 그 호출이 쓰는 기록이라 둠
 export async function rejectDetection(input: RejectInput): Promise<RejectSnapshot | null> {
   const found = await readLocationTime(input.participantId, input.kind);
   if (!found) return null;
@@ -74,10 +74,11 @@ export async function rejectDetection(input: RejectInput): Promise<RejectSnapsho
     auto_value: new Date(found.at).toISOString(),
     edited_value: REJECTED_VALUE,
   });
-  // 23505 = 앞 시도가 이미 남긴 같은 줄
+  // 23505 = 앞 시도(또는 동시에 누른 다른 호출)가 이미 남긴 같은 줄
   if (logged.error && logged.error.code !== '23505') throw logged.error;
   if (!(await clearLocationTime(found))) {
-    await deleteEditLog(userId, editId);
+    // 못 지운 까닭이 "원탭이 덮음"일 때만 기록을 지움 — 누가 줄을 만들었든 상관없이 지금 값으로 가름 (먼저 지운 호출의 정정은 유효하므로 그 기록은 둠)
+    if (await hasResponseTime(found.participantId, found.kind)) await deleteEditLog(userId, editId);
     return null;
   }
   return { participantId: found.participantId, kind: found.kind, at: new Date(found.at), editId };

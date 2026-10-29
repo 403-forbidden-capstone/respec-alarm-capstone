@@ -143,7 +143,7 @@ describe('실제 이동시간 (travelMinutesOf) — 도착 − 출발, 7.3.1 학
     expect(travelMinutesOf({ ...base, dest: null })).toBeNull();
   });
 
-  it('출발이 출발 예정 60분 전보다 이르면 안 셈 — 7.13.7 감시 창 따름 (60분 전 그 시각은 셈)', () => {
+  it('출발이 출발 예정 60분 전보다 이르면 안 셈 — 감시 창 W_geo를 표본 범위로 씀, 작성자 판단 (60분 전 그 시각은 셈)', () => {
     expect(travelMinutesOf({ ...base, departedAtMs: at('07:50') - 1000 })).toBeNull();
     expect(travelMinutesOf({ ...base, departedAtMs: at('07:50') })).toBe(112);
   });
@@ -418,7 +418,7 @@ describe('DB에 쓰기 (recordParticipantTimes)', () => {
       expect(travelWrites()).toEqual([]);
     });
 
-    it('출발이 출발 예정(출발 알람 8:50) 60분 전보다 이르면 안 씀 — 7.13.7 감시 창 따름 (오전 이탈이 늦은 약속에 붙은 경우)', async () => {
+    it('출발이 출발 예정(출발 알람 8:50) 60분 전보다 이르면 안 씀 — 감시 창 W_geo를 표본 범위로 씀, 작성자 판단 (오전 이탈이 늦은 약속에 붙은 경우)', async () => {
       setup({ participant: participantRow({ dest: SEJONG, alarms: ALARMS, departed_at: iso('07:30'), departed_source: 'LOCATION' }) });
       expect((await run({ arrivedAt: min(-8), source: 'LOCATION' })).travelMinutes).toBeNull();
       expect(travelWrites()).toEqual([]);
