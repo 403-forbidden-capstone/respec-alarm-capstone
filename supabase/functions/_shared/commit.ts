@@ -103,7 +103,7 @@ export async function persistAppointment(
             dest_lat: place.lat ?? null,
             dest_lng: place.lng ?? null,
             importance: plan.basics.importance,
-            recurrence_rule: created.recurrenceRule ?? null, // D44. 알람은 첫 회차만 (D4)
+            recurrence_rule: created.recurrenceRule ?? null, // D44. 이 호출은 첫 회차만 만듦 — 다음 회차는 alarm-roll이 14일치를 미리 만듦 (D4 A, roll.ts)
           })
           .select(APPOINTMENT_COLUMNS)
           .single(),
@@ -224,7 +224,7 @@ export async function commitStandalone(ctx: CommitCtx, args: { alarm: Standalone
     intensity_source: intensity.manual ? 'MANUAL' : 'AUTO',
     last_calculated_at: now.toISOString(),
   };
-  const recurrence = alarm.recurrenceRule !== undefined ? alarm.recurrenceRule : (existing?.recurrence_rule ?? null); // D46 · Q10: 반복은 RRULE, 다음 회차 만들기는 D4 뒤
+  const recurrence = alarm.recurrenceRule !== undefined ? alarm.recurrenceRule : (existing?.recurrence_rule ?? null); // D46 · Q10: 반복은 RRULE, 다음 회차는 alarm-roll이 새 행으로 (일정 없는 알람은 series_id · occurrence_on, D4 A)
 
   const saved = existing
     ? must<AlarmRow>('alarms update', await service.from('alarms').update({ ...write, recurrence_rule: recurrence }).eq('alarm_id', existing.alarm_id).eq('user_id', userId).select(ALARM_COLUMNS).single())

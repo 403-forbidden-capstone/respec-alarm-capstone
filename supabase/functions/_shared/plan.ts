@@ -40,7 +40,7 @@ const DEFAULT_PROFILE: ProfileRow = {
   home_lng: null,
 };
 
-const ALARM_COLUMNS =
+export const ALARM_COLUMNS =
   'alarm_id, participant_id, user_id, alarm_type, scheduled_at, intensity, voice_tone, sound_key, is_enabled, snooze_limit, time_source, intensity_source, recurrence_rule';
 
 export async function loadProfile(db: Db, userId: string): Promise<ProfileRow> {
@@ -62,6 +62,29 @@ export async function loadAppointment(db: Db, appointmentId: string): Promise<Ap
   );
 }
 
+// 반복 회차의 기준이 되는 약속 (alarm-roll) — 묶음 · 날짜 · 메모 · 장소 반경까지 읽고, 만든 사람(creator_id)으로 좁힘
+//   loadAppointment는 id만으로 읽어서 RLS가 거르는 부른 사람 클라이언트 전용. alarm-roll 배치는 service_role이라 RLS를 안 타므로 여기서 직접 좁힘
+export type SeriesAppointmentRow = AppointmentRow & { series_id: string; occurrence_on: string; memo: string | null; dest_radius_m: number | null };
+
+export const SERIES_APPOINTMENT_COLUMNS =
+  'appointment_id, creator_id, group_id, title, appointment_at, dest_name, dest_lat, dest_lng, importance, recurrence_rule, series_id, occurrence_on, memo, dest_radius_m';
+
+export async function loadSeriesAppointment(db: Db, creatorId: string, appointmentId: string): Promise<SeriesAppointmentRow | null> {
+  return must<SeriesAppointmentRow | null>(
+    'appointments',
+    await db.from('appointments').select(SERIES_APPOINTMENT_COLUMNS).eq('appointment_id', appointmentId).eq('creator_id', creatorId).maybeSingle(),
+  );
+}
+
+// 한 사람의 약속 여러 개를 한 번에 (배치가 이번에 볼 묶음의 기준 회차를 사람별로 묶어 읽음)
+export async function loadSeriesAppointments(db: Db, creatorId: string, appointmentIds: readonly string[]): Promise<SeriesAppointmentRow[]> {
+  if (!appointmentIds.length) return [];
+  return must<SeriesAppointmentRow[]>(
+    'appointments',
+    await db.from('appointments').select(SERIES_APPOINTMENT_COLUMNS).eq('creator_id', creatorId).in('appointment_id', [...appointmentIds]),
+  );
+}
+
 export async function loadParticipant(db: Db, appointmentId: string, userId: string): Promise<ParticipantRow | null> {
   return must<ParticipantRow | null>(
     'appointment_participants',
@@ -74,8 +97,10 @@ export async function loadParticipant(db: Db, appointmentId: string, userId: str
   );
 }
 
-export async function loadAlarms(db: Db, participantId: string): Promise<AlarmRow[]> {
-  return must<AlarmRow[]>('alarms', await db.from('alarms').select(ALARM_COLUMNS).eq('participant_id', participantId));
+// userId를 주면 그 사람의 알람으로 한 번 더 좁힘 (service_role로 읽는 alarm-roll 배치가 남의 행에 닿지 않게)
+export async function loadAlarms(db: Db, participantId: string, userId?: string): Promise<AlarmRow[]> {
+  const query = db.from('alarms').select(ALARM_COLUMNS).eq('participant_id', participantId);
+  return must<AlarmRow[]>('alarms', await (userId ? query.eq('user_id', userId) : query));
 }
 
 // 예상 준비시간 통계 — 뷰 v_prepare_time_stats (security_invoker라 지금은 RLS로 내 기록만 보이지만, 친구 기록을 읽는 정책이 생겨도 한 줄만 오게 user_id로 걸러 둠). actual_prepare_minutes의 P80
@@ -89,7 +114,7 @@ export async function loadPrepareStats(db: Db, userId: string): Promise<PlanInpu
 }
 
 // 최근 4주 지각 횟수 (is_late). 늦잠이 원인인 지각만 세는 late_cause 칸은 DB에 없어서 지각 전체로 셈 — 문서 보완 목록
-async function loadLateCount(db: Db, userId: string, now: Date): Promise<number> {
+export async function loadLateCount(db: Db, userId: string, now: Date): Promise<number> {
   const since = new Date(now.getTime() - 28 * 24 * 3_600_000).toISOString();
   const { count, error } = await db
     .from('appointment_participants')
@@ -119,21 +144,25 @@ export async function loadSameDayWake(db: Db, userId: string, at: Date, timeZone
   return hasEarlierWake(at, sameDayWakesFromRows(rows), ownAppointmentId);
 }
 
-// 내 지난 이동 기록 (출발 · 도착이 모두 찍힌 것) — 같은 경로 실측 중앙값용 (읽기만, CACHED로 쓰지 않음)
-async function loadTravelSamples(db: Db, userId: string): Promise<TravelSample[]> {
+// 내 지난 이동 기록 (출발 · 도착이 모두 찍힌 것) — 같은 경로 실측 중앙값용. alarm-suggest · alarm-commit은 읽기만 하고(CACHED로 쓰지 않음, D5),
+// alarm-roll은 회차 길찾기가 12시간 전까지 안 될 때 이 중앙값을 CACHED로 저장함
+//   이동 분은 appointment_participants.actual_travel_minutes(L2가 채움)가 있으면 그 값, 없으면 도착 − 출발 (calc/travel.ts는 두 시각의 차를 쓰므로
+//   실측 분이 있는 줄은 도착을 출발 + 그 분으로 바꿔 넘김). 출발 · 도착이 모두 찍힌 줄만 읽는 조건은 그대로
+export async function loadTravelSamples(db: Db, userId: string): Promise<TravelSample[]> {
   type Row = {
     origin_lat: number | string | null;
     origin_lng: number | string | null;
     transport_type: TravelSample['transport'];
     departed_at: string;
     arrived_at: string;
+    actual_travel_minutes: number | string | null;
     appointments: { dest_lat: number | string | null; dest_lng: number | string | null } | { dest_lat: number | string | null; dest_lng: number | string | null }[] | null;
   };
   const rows = must<Row[]>(
     'travel samples',
     await db
       .from('appointment_participants')
-      .select('origin_lat, origin_lng, transport_type, departed_at, arrived_at, appointments!inner(dest_lat, dest_lng)')
+      .select('origin_lat, origin_lng, transport_type, departed_at, arrived_at, actual_travel_minutes, appointments!inner(dest_lat, dest_lng)')
       .eq('user_id', userId)
       .not('departed_at', 'is', null)
       .not('arrived_at', 'is', null)
@@ -145,12 +174,14 @@ async function loadTravelSamples(db: Db, userId: string): Promise<TravelSample[]
   for (const r of rows) {
     const a = Array.isArray(r.appointments) ? r.appointments[0] : r.appointments;
     if (!a || r.origin_lat == null || r.origin_lng == null || a.dest_lat == null || a.dest_lng == null) continue;
+    const departedAt = new Date(r.departed_at);
+    const actual = r.actual_travel_minutes == null ? NaN : Number(r.actual_travel_minutes);
     out.push({
       origin: { lat: Number(r.origin_lat), lng: Number(r.origin_lng) },
       destination: { lat: Number(a.dest_lat), lng: Number(a.dest_lng) },
       transport: r.transport_type,
-      departedAt: new Date(r.departed_at),
-      arrivedAt: new Date(r.arrived_at),
+      departedAt,
+      arrivedAt: Number.isFinite(actual) ? new Date(departedAt.getTime() + actual * 60_000) : new Date(r.arrived_at),
     });
   }
   return out;
