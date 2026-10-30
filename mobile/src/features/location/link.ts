@@ -6,6 +6,9 @@ import type { DetectionKind } from './detections';
 export const DETECTION_SCHEME = 'respecalarm';
 export const DETECTION_PATH = 'detection';
 
+// 참여 조건 번호는 uuid 모양(8-4-4-4-12 16진수) — 낯선 값이 주소로 들어와 조회에 쓰이지 않게
+const UUID_SHAPE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 export type DetectionLink = { kind: DetectionKind; participantId: string; at: number };
 
 export function buildDetectionLink({ kind, participantId, at }: DetectionLink): string {
@@ -24,7 +27,7 @@ export function parseDetectionParams(params: Record<string, string | string[] | 
   const participantId = one(params.participantId);
   const atText = one(params.at);
   if (kind !== 'DEPART' && kind !== 'ARRIVE') return null;
-  if (!participantId || !atText || !/^\d+$/.test(atText)) return null;
+  if (!participantId || !UUID_SHAPE.test(participantId) || !atText || !/^\d+$/.test(atText)) return null;
   const at = Number(atText);
   return Number.isSafeInteger(at) ? { kind, participantId, at } : null;
 }

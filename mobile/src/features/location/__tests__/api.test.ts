@@ -223,6 +223,19 @@ describe('rejectDetection — [아니에요] 1탭 정정 (D61)', () => {
     expect(writes()).toEqual([]);
   });
 
+  it('at을 주면 지금 위치 값의 시각과 같을 때만 지움 — 다르면(더 새 판정으로 바뀜) 아무것도 안 쓰고 null, 없으면 예전 동작', async () => {
+    setup();
+    expect(await rejectDetection({ participantId: 'p-1', kind: 'DEPART', screen: 'NTF', at: at('08:40') })).toBeNull(); // 오래된 알림
+    expect(writes()).toEqual([]);
+
+    setup();
+    expect(await rejectDetection({ participantId: 'p-1', kind: 'DEPART', screen: 'NTF', at: at('08:50') })).toMatchObject({ at: new Date(at('08:50')) });
+    expect(only('appointment_participants', 'update')).toHaveLength(1);
+
+    setup();
+    expect(await rejectDetection({ participantId: 'p-1', kind: 'DEPART', screen: 'NTF' })).not.toBeNull(); // at 없음
+  });
+
   it('준비 실측이 다른 출발로 셈한 값이면(같은 날 다른 약속) 그대로', async () => {
     setup({ prepare: 35 });
     expect(await rejectDetection({ participantId: 'p-1', kind: 'DEPART', screen: 'H01' })).not.toBeNull();
@@ -350,6 +363,14 @@ describe('가짜 데이터 모드 — 위치 감지는 안 돎, 화면 초안용
     expect((await listDetections(kst(20, 0))).map((d) => d.kind)).toEqual(['DEPART', 'ARRIVE']);
     expect(db.editLogs.length).toBe(before);
     expect(mockCalls).toEqual([]);
+  });
+
+  it('at을 주면 목업도 같은 규칙 — 다르면 지우지 않음, 같으면 지움', async () => {
+    expect(await rejectDetection({ participantId: 'mock-20', kind: 'DEPART', screen: 'NTF', at: kst(20, 400).getTime() })).toBeNull();
+    expect((await listDetections(kst(20, 0))).map((d) => d.kind)).toEqual(['DEPART', 'ARRIVE']);
+    const snapshot = await rejectDetection({ participantId: 'mock-20', kind: 'DEPART', screen: 'NTF', at: kst(20, 482).getTime() });
+    expect(snapshot).toMatchObject({ at: kst(20, 482) });
+    await undoReject(snapshot!);
   });
 
   it('없는 감지는 null', async () => {

@@ -13,6 +13,7 @@ type Response = import('expo-notifications').NotificationResponse;
 
 // 앱 전체에서 하나 — 훅이 다시 그려져도 · 두 번 붙어도 같은 응답을 한 번만 처리
 const handled = new Set<string>(); // 이미 이동한 응답 — 알림 번호 + 누른 알림의 시각
+const retried = new Set<string>(); // 이동에 한 번 실패해 다시 시도한 응답 — 두 번째도 실패하면 포기 (무한 반복 막기)
 let pending: Response | null = null; // 누른 뒤 아직 이동하지 못한 응답
 let canOpen = false;
 
@@ -25,20 +26,36 @@ function flush() {
   pending = null;
   const key = keyOf(response);
   if (handled.has(key)) return;
+  const link = parseDetectionLink(response.notification.request.content.data?.url);
+  if (!link) return; // 감지 안내가 아닌 알림 — 이동하지 않고, 폰 쪽 마지막 응답도 건드리지 않음 (다른 알림 처리가 읽을 수 있게)
+  try {
+    router.push({ pathname: '/detection', params: { kind: link.kind, participantId: link.participantId, at: String(link.at) } });
+  } catch (e) {
+    if (__DEV__) console.warn('[location] 정정 화면으로 이동하지 못함', errorText(e));
+    // 한 번은 다음 기회(화면이 다시 열릴 수 있게 된 때)에 다시 시도, 두 번째도 실패하면 포기하고 폰 쪽 응답을 지워 앱을 다시 켜도 되풀이하지 않음
+    if (!retried.has(key)) {
+      retried.add(key);
+      pending = response;
+      return;
+    }
+  }
   handled.add(key);
+  clearLast();
+}
+
+// 처리한 응답은 폰 쪽 "마지막 응답"도 지워서 JS가 다시 켜져도 되풀이되지 않게 — 지우지 못해도 handled가 같은 실행 안에서는 막아 줌
+function clearLast() {
   try {
     nativeNotifications().clearLastNotificationResponse();
   } catch {
-    // 지우지 못해도 handled가 같은 실행 안에서는 막아 줌
+    // 무시
   }
-  const link = parseDetectionLink(response.notification.request.content.data?.url);
-  if (!link) return; // 감지 안내가 아닌 알림 — 이동하지 않음
-  router.push({ pathname: '/detection', params: { kind: link.kind, participantId: link.participantId, at: String(link.at) } });
 }
 
 // 시험용 — 모듈 값 되돌리기
 export function resetDetectionLinks() {
   handled.clear();
+  retried.clear();
   pending = null;
   canOpen = false;
 }

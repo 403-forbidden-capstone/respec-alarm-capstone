@@ -23,7 +23,8 @@ jest.mock('expo-router', () => ({ router: { push: (href: unknown) => mockPush(hr
 
 type Response = { notification: { date: number; request: { identifier: string; content: { data?: { url?: unknown } } } } };
 const response = (url: unknown, id = 'detect-DEPART-p1-1', date = 1000): Response => ({ notification: { date, request: { identifier: id, content: { data: { url } } } } });
-const URL_DEPART = 'respecalarm://detection?kind=DEPART&participantId=p1&at=1';
+const ID = '3f2b8c1e-5a4d-4e7b-9c10-0a1b2c3d4e5f';
+const URL_DEPART = `respecalarm://detection?kind=DEPART&participantId=${ID}&at=1`;
 
 let mockLast: Response | null = null;
 let mockListener: ((r: Response) => void) | null = null;
@@ -53,9 +54,11 @@ beforeEach(() => {
   mockOS = 'android';
   mockLast = null;
   mockListener = null;
+  mockPush.mockReset();
+  jest.spyOn(console, 'warn').mockImplementation(() => {}); // 이동 실패 시험의 개발용 경고를 조용히
 });
 
-const ROUTE = { pathname: '/detection', params: { kind: 'DEPART', participantId: 'p1', at: '1' } };
+const ROUTE = { pathname: '/detection', params: { kind: 'DEPART', participantId: ID, at: '1' } };
 
 describe('useDetectionLinks', () => {
   it('앱이 꺼진 채 알림으로 열림: 마지막 응답을 읽어 정정 화면으로, 한 번만', () => {
@@ -93,6 +96,63 @@ describe('useDetectionLinks', () => {
     mockListener?.(response(undefined, 'other-2'));
     mockListener?.(response(42, 'other-3'));
     expect(mockPush).not.toHaveBeenCalled();
+  });
+
+  it('감지 안내가 아닌 알림 응답은 폰 쪽 마지막 응답도 지우지 않음 (L3 푸시 탭 보존), 감지 안내만 지움', () => {
+    mockLast = response('respecalarm://alarm/1', 'other-1');
+    mount(true);
+    mockListener?.(response(undefined, 'other-2'));
+    expect(mockClear).not.toHaveBeenCalled();
+    mockListener?.(response(URL_DEPART));
+    expect(mockClear).toHaveBeenCalledTimes(1);
+  });
+
+  it('주소의 참여 조건 번호가 uuid 모양이 아니면 감지 안내로 보지 않음 — 이동도 지우기도 안 함', () => {
+    mount(true);
+    mockListener?.(response('respecalarm://detection?kind=DEPART&participantId=p1&at=1'));
+    expect(mockPush).not.toHaveBeenCalled();
+    expect(mockClear).not.toHaveBeenCalled();
+  });
+
+  it('이동이 실패하면 처리한 것으로 치지 않고 다음 기회에 한 번만 다시 — 성공하면 그때 지움', () => {
+    mockLast = response(URL_DEPART);
+    mockPush.mockImplementationOnce(() => {
+      throw new Error('navigator not ready');
+    });
+    mount(true);
+    expect(mockPush).toHaveBeenCalledTimes(1);
+    expect(mockClear).not.toHaveBeenCalled(); // 아직 못 갔으니 폰 쪽 응답도 둠
+    mount(true); // 다음 기회
+    expect(mockPush).toHaveBeenCalledTimes(2);
+    expect(mockClear).toHaveBeenCalledTimes(1);
+    mount(true);
+    expect(mockPush).toHaveBeenCalledTimes(2); // 성공했으니 더는 안 함
+  });
+
+  it('다시 시도도 실패하면 포기 — 더 반복하지 않고 폰 쪽 응답을 지워 앱을 다시 켜도 되풀이하지 않음', () => {
+    mockLast = response(URL_DEPART);
+    mockPush.mockImplementation(() => {
+      throw new Error('navigator not ready');
+    });
+    mount(true);
+    mount(true);
+    expect(mockPush).toHaveBeenCalledTimes(2);
+    expect(mockClear).toHaveBeenCalledTimes(1);
+    mount(true);
+    mount(true);
+    expect(mockPush).toHaveBeenCalledTimes(2);
+    mockPush.mockReset();
+  });
+
+  it('리스너로 받은 응답이 실패해도 화면이 다시 열릴 수 있게 된 때(active 변화) 한 번 다시', () => {
+    mount(true);
+    mockPush.mockImplementationOnce(() => {
+      throw new Error('navigator not ready');
+    });
+    mockListener?.(response(URL_DEPART));
+    expect(mockPush).toHaveBeenCalledTimes(1);
+    mount(true);
+    expect(mockPush).toHaveBeenCalledTimes(2);
   });
 
   it('정리 함수는 리스너를 뗌', () => {

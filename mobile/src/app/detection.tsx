@@ -8,6 +8,8 @@ import { formatTime } from '@/lib/format';
 import { backOrHome } from '@/lib/nav';
 
 const KIND_LABEL = { DEPART: '출발', ARRIVE: '도착' } as const;
+// 지운 뒤 안내 — 출발은 다음 이탈, 도착은 다시 들어갈 때 자동으로 채워짐
+const AFTER_ERASE = { DEPART: '다음에 위치가 다시 잡히면 그 시각으로 기록해요.', ARRIVE: '목적지에 다시 들어가면 그때 시각으로 기록해요.' } as const;
 
 // 감지 안내 알림("출발 오전 8:30 감지")을 눌러 열리는 1탭 정정 화면 — 목업에 없는 화면 (docs/screen-data-map.md "NTF 감지 안내")
 //   주소: /detection?kind=DEPART&participantId=…&at=<ms> — 열자마자 위치로 잡은 그 값을 지우고, 5초 안에는 되돌릴 수 있음
@@ -69,7 +71,7 @@ function Body({ phase, busy, onUndo, onRetry }: { phase: FixPhase; busy: boolean
           {KIND_LABEL[phase.kind]} {formatTime(phase.at)} 기록을 지웠어요
         </Text>
         <Text variant="small" style={styles.sub}>
-          다음에 위치가 다시 잡히면 그 시각으로 기록해요.
+          {AFTER_ERASE[phase.kind]}
         </Text>
       </Card>
       {phase.undoable ? (

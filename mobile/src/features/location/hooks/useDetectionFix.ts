@@ -44,8 +44,8 @@ export function useDetectionFix(link: DetectionLink | null) {
       run(async () => {
         setPhase({ name: 'working' });
         try {
-          const snapshot = await rejectDetection({ participantId: target.participantId, kind: target.kind, screen: 'NTF' });
-          // 서버에서 지운 값의 시각 기준으로 폰 기억도 맞춤 (서버 값이 없으면 5분 대기 중이던 출발 등 폰에만 있는 판정을 찾아 잊음)
+          const snapshot = await rejectDetection({ participantId: target.participantId, kind: target.kind, screen: 'NTF', at: target.at });
+          // 서버에서 지운 값의 시각 기준으로 폰 기억도 맞춤 (서버 값이 없거나 알림의 시각과 달라 못 지웠으면 같은 시각(target.at)으로 — 5분 대기 중이던 출발 등 폰에만 있는 판정을 찾아 잊음)
           const at = snapshot ? snapshot.at.getTime() : target.at;
           const forgot = await forgetGeoDetection({ participantId: target.participantId, kind: target.kind, at }, { voidAlways: snapshot != null });
           if (!snapshot && !forgot) {
