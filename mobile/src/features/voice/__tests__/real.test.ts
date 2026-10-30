@@ -733,8 +733,60 @@ describe('서버 응답 모양 맞춤', () => {
   });
 });
 
+// ---- 계산 중 앱이 꺼졌다 켜짐 ----
+describe('⑫ 다시 열었더니 계산이 안 끝난 카드(NEEDS_ESTIMATE) — 이어서 계산', () => {
+  it('estimateAppointment로 계산해 새 client_turn_id로 results만 보내고 카드는 READY', async () => {
+    script = [
+      session({ resumed: true, rev: 4, cards: [apptCard()] }),
+      turn({ rev: 5, reply: { text: '오전 7시 40분에 깨울게요. 저장할까요?' }, cards: [apptCard({ status: 'READY' })] }),
+    ];
+    const c = await getConversation();
+    expect(mEstimate).toHaveBeenCalledTimes(1);
+    expect(bodies().map((x) => x.name)).toEqual(['voice-session', 'voice-turn']);
+    const sent = turnBodies()[0];
+    expect(sent).toMatchObject({ session_id: 's1', rev: 4 });
+    expect(typeof sent.client_turn_id).toBe('string');
+    expect(sent.text).toBeUndefined();
+    expect((sent.results as { cards: { id: string; status: string }[] }).cards).toEqual([expect.objectContaining({ id: 'c1', status: 'READY' })]);
+    expect(c.cards[0]).toMatchObject({ id: 'c1', status: 'READY' });
+    expect(c.cards[0].alarms.map((a) => a.kind)).toEqual(['WAKE', 'PREPARE', 'DEPARTURE']);
+    expect(c.messages.at(-1)?.text).toContain('저장할까요');
+    await getConversation(); // 다시 읽어도 또 계산하지 않음
+    expect(mEstimate).toHaveBeenCalledTimes(1);
+    expect(edge).toHaveBeenCalledTimes(2);
+  });
+
+  it('장소가 필요한 카드는 NEEDS_PLACE로 알리고 그대로 둠 (계산 안 함)', async () => {
+    mPlaces.mockImplementation(async () => []);
+    script = [session({ resumed: true, rev: 4, cards: [apptCard()] }), turn({ rev: 5, reply: { text: '장소를 골라 주세요.' }, cards: [apptCard({ status: 'NEEDS_PLACE' })] })];
+    const c = await getConversation();
+    expect(mEstimate).not.toHaveBeenCalled();
+    expect((turnBodies()[0].results as { cards: { status: string }[] }).cards[0]).toMatchObject({ status: 'NEEDS_PLACE', estimate: null });
+    expect(c.cards[0].status).toBe('NEEDS_PLACE');
+  });
+
+  it('results를 못 보내도 계산한 결과는 남고 [다시 시도]가 같은 요청을 다시 보냄', async () => {
+    script = [session({ resumed: true, rev: 4, cards: [apptCard()] }), new EdgeError('LLM_UNAVAILABLE')];
+    let c = await getConversation();
+    expect(c.unavailable?.code).toBe('LLM_UNAVAILABLE');
+    expect(c.cards[0].status).toBe('READY');
+    script = [turn({ rev: 5, reply: { text: '저장할까요?' }, cards: [apptCard({ status: 'READY' })] })];
+    c = await retry();
+    expect(turnBodies()[1]).toEqual(turnBodies()[0]);
+    expect(mEstimate).toHaveBeenCalledTimes(1);
+    expect(c.unavailable).toBeNull();
+  });
+
+  it('계산이 끝난 카드(READY)만 있으면 서버를 더 부르지 않음', async () => {
+    script = [session({ resumed: true, rev: 4, cards: [apptCard({ status: 'READY' })] })];
+    await getConversation();
+    expect(mEstimate).not.toHaveBeenCalled();
+    expect(edge).toHaveBeenCalledTimes(1);
+  });
+});
+
 // ---- 실패한 요청(pending)을 카드 버튼이 덮어쓰지 않음 — 큐 ----
-describe('⑫ pending이 있을 때 카드 동작은 큐에서 기다림', () => {
+describe('⑬ pending이 있을 때 카드 동작은 큐에서 기다림', () => {
   // READY 카드 c1이 있는 대화에서 다음 말이 LLM_UNAVAILABLE로 실패한 상태 (state.rev = 3)
   async function textFailed() {
     script = [session(), turn({ next: 'APP_TASKS', reply: null, cards: [apptCard()] }), turn({ rev: 3, cards: [apptCard({ status: 'READY' })] })];

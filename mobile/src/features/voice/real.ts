@@ -571,10 +571,27 @@ async function readSession(resume: boolean): Promise<void> {
   }
 }
 
+// 앱을 다시 열었더니 계산이 안 끝난 카드(NEEDS_ESTIMATE)가 있으면 — 계산 중에 앱이 꺼져 서버는 results를 기다리는 중 — 이어서 계산해
+//   새 client_turn_id로 results만 보냄 (장소 고른 뒤와 같은 길). 장소가 필요한 카드는 NEEDS_PLACE로 알려 카드의 [장소 고르기]가 이어 감
+//   서버가 계산 요청에 정정(fixes)도 기다리면 results 응답이 next = APP_TASKS로 그 정정을 다시 줌 — drive가 이어서 함
+async function continueAfterOpen(): Promise<void> {
+  const results: ResultCard[] = [];
+  for (const [id, rec] of state.cards) {
+    if (rec.status !== 'NEEDS_ESTIMATE') continue;
+    rec.status = 'ESTIMATING';
+    const outcome = await runCard(rec);
+    applyOutcome(rec, outcome);
+    results.push(resultCard(id, outcome));
+  }
+  if (results.length > 0) await sendResults(results);
+  else if (state.queue.length > 0 && !state.pending) await drive();
+}
+
 // 대화 시작 — 오늘 안 끝난 세션이 있으면 그대로(resume), 없으면 새로. 첫 마디는 서버 템플릿이라 messages에 옴. 하루 한도면 세션 없이 limits.reached = DAY
 export async function startConversation(_opts: { type: 'BEFORE_SLEEP' } = { type: 'BEFORE_SLEEP' }): Promise<void> {
   try {
     await readSession(true);
+    await continueAfterOpen();
   } catch (e) {
     await onError(e);
   }
