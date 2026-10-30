@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import { toast } from '@/components/ui';
 import { now } from '@/lib/clock';
@@ -16,8 +16,17 @@ export function useCalendarImport(onBatch: (batch: ImportBatch) => void) {
   const [phase, setPhase] = useState<Phase>('idle');
   const [calendars, setCalendars] = useState<CalendarChoice[]>([]);
   const [picked, setPicked] = useState<ReadonlySet<string>>(new Set());
+  const alive = useRef(true);
+  useEffect(() => {
+    alive.current = true;
+    return () => {
+      alive.current = false;
+    };
+  }, []);
 
+  // 읽는 사이 화면이 사라졌으면(설정을 나감 등) 결과로 다른 화면을 건드리지 않음
   const fail = (e: unknown) => {
+    if (!alive.current) return;
     toast(userMessage(e, '캘린더를 읽지 못했어요. 다시 해 주세요'));
     setPhase('idle');
   };
@@ -25,7 +34,9 @@ export function useCalendarImport(onBatch: (batch: ImportBatch) => void) {
   async function load(ids: readonly string[]) {
     setPhase('loading');
     try {
-      onBatch(await loadCandidates(ids, now()));
+      const batch = await loadCandidates(ids, now());
+      if (!alive.current) return;
+      onBatch(batch);
       setPhase('idle');
     } catch (e) {
       fail(e);
@@ -37,12 +48,14 @@ export function useCalendarImport(onBatch: (batch: ImportBatch) => void) {
     setPhase('asking');
     try {
       const access = await ensureCalendarAccess();
+      if (!alive.current) return;
       if (access !== 'granted') {
         toast(access === 'blocked' ? '캘린더 권한이 꺼져 있어요. 폰 설정에서 허용하거나 직접 넣어 주세요' : '캘린더를 읽을 수 없어요. 직접 넣어 주세요');
         setPhase('idle');
         return;
       }
       const list = await listCalendars();
+      if (!alive.current) return;
       if (list.length === 0) {
         toast('가져올 캘린더가 없어요. 직접 넣어 주세요');
         setPhase('idle');

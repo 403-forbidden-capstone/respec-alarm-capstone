@@ -3,7 +3,7 @@
 import { callEdge } from '@/lib/edge';
 import { isMock } from '@/lib/mode';
 
-import { photoFailure, toBatch, type ExtractResponse, type PickedPhoto } from './photo';
+import { extractBody, photoFailure, toBatch, type ExtractResponse, type PickedPhoto } from './photo';
 import type { ImportBatch } from './timetableImport';
 
 // 서버 마감 28초 — 앱은 그보다 길게 기다림 (lib/edge 기본 20초로는 모자람)
@@ -25,7 +25,7 @@ export async function extractTimetable(photo: PickedPhoto): Promise<ImportBatch>
     return toBatch(MOCK_RESPONSE);
   }
   try {
-    const res = await callEdge<ExtractResponse>('timetable-extract', { media_type: photo.mediaType, image_base64: photo.base64 }, { timeoutMs: EXTRACT_TIMEOUT_MS });
+    const res = await callEdge<ExtractResponse>('timetable-extract', extractBody(photo), { timeoutMs: EXTRACT_TIMEOUT_MS });
     return toBatch(res);
   } catch (e) {
     throw photoFailure(e);

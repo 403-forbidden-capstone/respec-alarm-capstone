@@ -79,8 +79,9 @@ export default function OnboardingScreen() {
   });
   const homeStep = useHomeStep(profile, userId);
   const photoImport = usePhotoImport();
-  const timetable = useTimetableStep(prepare.transport);
-  const calendarImport = useCalendarImport(timetable.addImported); // 수업은 '아침 준비'에서 고른 이동 수단으로 계산
+  const timetable = useTimetableStep(prepare.transport); // 수업은 '아침 준비'에서 고른 이동 수단으로 계산
+  const calendarImport = useCalendarImport(timetable.addImported);
+  const importing = photoImport.reading || calendarImport.busy; // 사진을 읽거나 캘린더를 가져오는 동안 시간표 단계를 막음
   // 집 좌표가 없으면 서버가 출발지 '집'을 못 채워 이동시간을 못 구함 — 실데이터만 (가짜 데이터는 집 없이도 계산)
   const noHome = userId != null && !hasHome(homeStep.saved, profile);
   const [finished, setFinished] = useState(false); // 온보딩 끝난 시각을 이미 적었음 (다시 읽기만 실패해 한 번 더 누를 때 또 적지 않게)
@@ -269,7 +270,7 @@ export default function OnboardingScreen() {
             onRemoveRow={timetable.onRemoveRow}
             onPickPlace={timetable.onPickPlace}
             onPickTime={timetable.onPickTime}
-            saving={busy}
+            saving={busy || importing}
           />
           <PlaceSearchSheet
             visible={timetable.campusOpen}
@@ -297,10 +298,10 @@ export default function OnboardingScreen() {
         </>
       ),
       primaryLabel: '저장하고 다음',
-      primaryDisabled: !timetable.canSave || noHome,
+      primaryDisabled: !timetable.canSave || noHome || importing,
       onPrimary: next,
       secondaryLabel: '건너뛰기',
-      onSecondary: advance, // 저장 없이 다음
+      onSecondary: importing ? undefined : advance, // 저장 없이 다음 (사진 · 캘린더를 읽는 동안은 막음 — 뒤늦게 온 결과가 다음 단계에 쌓이지 않게)
     },
     consent: {
       title: '개인정보 안내',

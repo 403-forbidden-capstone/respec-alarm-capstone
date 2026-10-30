@@ -3,34 +3,47 @@ import { describe, expect, it } from '@jest/globals';
 import { EdgeError } from '@/lib/edge';
 import { UserError } from '@/lib/errors';
 
-import { MAX_PHOTO_BYTES, mediaTypeOf, photoFailure, photoProblem, toBatch, type ExtractResponse } from '../photo';
+import { extractBody, MAX_PHOTO_BYTES, photoFailure, preparePhoto, sniffMediaType, toBatch, type ExtractResponse } from '../photo';
 
-const B64 = 'A'.repeat(400);
+const JPEG_B64 = '/9j/' + 'A'.repeat(400);
+const PNG_B64 = 'iVBOR' + 'A'.repeat(400);
+const WEBP_B64 = 'UklGR' + 'A'.repeat(400);
 
-describe('photoProblem — 고른 사진 검사', () => {
-  it('base64가 없으면 읽지 못한 것', () => {
-    expect(photoProblem({ mimeType: 'image/jpeg', base64: null })).toMatch(/읽지 못했어요/);
+describe('sniffMediaType — 바이트로 종류 판별', () => {
+  it('jpeg · png · webp', () => {
+    expect(sniffMediaType(JPEG_B64)).toBe('image/jpeg');
+    expect(sniffMediaType(PNG_B64)).toBe('image/png');
+    expect(sniffMediaType(WEBP_B64)).toBe('image/webp');
   });
 
-  it('jpeg · png · webp(image/jpg도)만', () => {
-    expect(photoProblem({ mimeType: 'image/png', base64: B64 })).toBeNull();
-    expect(photoProblem({ mimeType: 'image/jpg', base64: B64 })).toBeNull();
-    expect(photoProblem({ mimeType: 'image/gif', base64: B64 })).toMatch(/jpg · png · webp/);
-    expect(photoProblem({ base64: B64 })).toMatch(/jpg · png · webp/);
-  });
-
-  it('원본 크기 상한 — fileSize가 있으면 그 값, 없으면 base64 길이로 어림', () => {
-    expect(photoProblem({ mimeType: 'image/jpeg', base64: B64, fileSize: MAX_PHOTO_BYTES })).toBeNull();
-    expect(photoProblem({ mimeType: 'image/jpeg', base64: B64, fileSize: MAX_PHOTO_BYTES + 1 })).toMatch(/너무 커요/);
-    expect(photoProblem({ mimeType: 'image/jpeg', base64: 'A'.repeat(Math.ceil((MAX_PHOTO_BYTES * 4) / 3) + 8) })).toMatch(/너무 커요/);
+  it('그 밖(gif · 텍스트)은 null', () => {
+    expect(sniffMediaType('R0lGOD' + 'A'.repeat(100))).toBeNull();
+    expect(sniffMediaType('hello')).toBeNull();
   });
 });
 
-describe('mediaTypeOf', () => {
-  it('대소문자 · image/jpg를 맞춤', () => {
-    expect(mediaTypeOf('IMAGE/JPG')).toBe('image/jpeg');
-    expect(mediaTypeOf('image/webp')).toBe('image/webp');
-    expect(mediaTypeOf(undefined)).toBeNull();
+describe('preparePhoto — 고른 사진을 서버로 보낼 수 있게', () => {
+  it('종류는 mimeType이 아니라 바이트로: PNG 파일이 JPEG로 다시 압축돼 와도 JPEG로 보냄', () => {
+    expect(preparePhoto({ base64: JPEG_B64 })).toEqual({ photo: { base64: JPEG_B64, mediaType: 'image/jpeg' } });
+    expect(preparePhoto({ base64: PNG_B64 })).toEqual({ photo: { base64: PNG_B64, mediaType: 'image/png' } });
+  });
+
+  it('base64가 없으면 읽지 못한 것, 모르는 종류는 안내', () => {
+    expect(preparePhoto({ base64: null })).toEqual({ problem: expect.stringMatching(/읽지 못했어요/) });
+    expect(preparePhoto({ base64: 'R0lGOD' + 'A'.repeat(100) })).toEqual({ problem: expect.stringMatching(/jpg · png · webp/) });
+  });
+
+  it('크기는 fileSize와 base64 길이로 어림한 값 중 큰 쪽이 상한 이하여야 함', () => {
+    expect(preparePhoto({ base64: JPEG_B64, fileSize: MAX_PHOTO_BYTES })).toHaveProperty('photo');
+    expect(preparePhoto({ base64: JPEG_B64, fileSize: MAX_PHOTO_BYTES + 1 })).toEqual({ problem: expect.stringMatching(/너무 커요/) });
+    // 원본은 작다고 하는데 다시 압축돼 base64가 커진 경우
+    expect(preparePhoto({ base64: '/9j/' + 'A'.repeat(Math.ceil((MAX_PHOTO_BYTES * 4) / 3) + 8), fileSize: 100 })).toEqual({ problem: expect.stringMatching(/너무 커요/) });
+  });
+});
+
+describe('extractBody — 서버 계약 필드 이름', () => {
+  it('media_type · image_base64 (supabase/functions/_shared/timetable/extract.ts parseRequest)', () => {
+    expect(extractBody({ base64: 'QUJD', mediaType: 'image/png' })).toEqual({ media_type: 'image/png', image_base64: 'QUJD' });
   });
 });
 
