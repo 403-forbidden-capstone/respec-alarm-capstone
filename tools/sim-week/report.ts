@@ -1,6 +1,8 @@
 // 보고서 (마크다운) — 사람 × 날짜 줄마다 PR 코드 · 쓴 씨앗 · 상황 이름, 밤 대화, 위치 조정 표, 기능 확인 표, 질문 예산, 버그 후보
 import type { AdjustRow } from './adjust-runs.ts';
 import { BUDGET_PER_DAY, BUDGET_PER_WEEK } from './coach.ts';
+import { isOversleeper, oversleepDayNumber } from './day.ts';
+import { scheduledDays } from './persona.ts';
 import type { BugCandidate, ChecksOutput } from './checks.ts';
 import type { LedgerSummary } from './ledger.ts';
 import { hm } from './time.ts';
@@ -125,6 +127,19 @@ export function renderReport(input: ReportInput): string {
     const maxDay = Math.max(0, ...nights.map((n) => n.questionsAsked));
     const bad = nights.flatMap((n) => n.budget.violations);
     L.push(`- ${w.persona.id}: 질문 ${total}개 (하루 최대 ${maxDay}, 한도 ${BUDGET_PER_DAY}/${BUDGET_PER_WEEK}) → ${bad.length ? `위반 ${bad.length}건` : '위반 없음'} · 원탭이 필요했던 수 ${w.days.reduce((s, d) => s + d.record.oneTapCount, 0)}`);
+  }
+  L.push('');
+
+  L.push('## 늦잠 (자격 인물 주 1회, 그 사람의 일정이 있는 날 중)');
+  L.push('');
+  for (const w of input.weeks) {
+    const p = w.persona;
+    if (!isOversleeper(p)) { L.push(`- ${p.id}: 대상 아님 (chronotype ${p.chronotype} · 취침 ${p.sleep_pattern})`); continue; }
+    const target = oversleepDayNumber(p);
+    if (target == null) { L.push(`- ${p.id}: 주 0회(일정 없음)`); continue; }
+    const hit = w.days.filter((d) => d.truth.overslept > 0).map((d) => `${d.world.day}일차 ${d.world.date}(${d.world.weekday})`);
+    const note = hit.length ? hit.join(', ') : target > w.days.length ? `${target}일차 예정 — 이번 실행(${w.days.length}일)에 안 닿음` : `${target}일차 예정인데 그날 앱 알람이 없어 안 걸림`;
+    L.push(`- ${p.id}: 주 1회 (일정 있는 날 ${scheduledDays(p).join('·')}일차 중 ${target}일차) → ${note}`);
   }
   L.push('');
 

@@ -98,7 +98,7 @@ export async function runChecks(opts: { days: number }): Promise<ChecksOutput> {
       no: 2, situation: '매일 실제 85분 (온보딩 70분)', input: '매일 기상~출발 85분 기록, 회차마다 prepareBound ±10 로 다시 계산 (alarm-roll 과 같은 입력)',
       expected: '매 회차 +10분 넘게 안 움직임, 5일차부터 "내 기록 기반 5건"',
       result: `준비 ${series.map((x) => x.minutes).join(' → ')}분 (최대 ${maxStep}분 움직임) · 기록 5건 뒤 계산부터 "${series[5].label}"`, ok,
-      note: '"5일차부터"는 기록 5건이 쌓인 뒤 첫 계산(6번째 알람)으로 읽음 — 문서가 날 번호를 안 정함',
+      note: '"5일차부터" = 기록 5건이 쌓인 뒤의 알람(하루 1건이면 6일차 알람) — 헤드 확정(10/30)',
     });
     if (!ok) bugs.push({ where: 'supabase/functions/_shared/plan-core.ts clampPrepareToBound · calc/prepare.ts predictPrepare', what: `회차 변화 최대 ${maxStep}분 / 내 기록 출처 시작 인덱스 ${firstPersonal}`, source: '표 2줄' });
   }
