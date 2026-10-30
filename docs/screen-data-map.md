@@ -28,7 +28,7 @@
 
 `/dev/screens` 맨 위 · 설정 "개발" 절의 토글은 모드를 바꿀 수 있는 빌드에서만 보임. 실데이터 모드에서 로그인 전이면 `/dev/screens`에 시드 계정용 이메일 로그인(웹 · 폰 개발용)이 있음.
 
-**첫 화면** (`lib/flags` `ONBOARDING_IN_FLOW = false`, #177) — 앱을 처음 켜면 로그인 화면 하나만 나오고, 로그인하면 아이디가 없어도 바로 홈. UI 쪽에서 새 온보딩 화면을 받기 전에는 임시 온보딩(`onboarding`)을 흐름에서 뺌 (#117과 같은 뜻, 10/18 지형님). 로그인 화면 아래에 "알람 테스트" 바로 가기가 있어 로그인 전에도 `/dev/alarm-test`로 갈 수 있음 (출시용 APK에도 보임 — D16이 정해지면 같이 정리).
+**첫 화면** (`lib/flags` `ONBOARDING_IN_FLOW = true`, #25) — 앱을 처음 켜면 로그인 화면 하나만 나오고, 로그인한 뒤 프로필의 `onboarded_at`이 비어 있으면 단계 온보딩(`onboarding`)이 먼저, 끝내면 홈. 켜진 단계는 `lib/flags` `ONBOARDING_STEPS`. 로그인 화면 아래에 "알람 테스트" 바로 가기가 있어 로그인 전에도 `/dev/alarm-test`로 갈 수 있음 (출시용 APK에도 보임 — D16이 정해지면 같이 정리).
 
 **읽기** — 함수 맨 앞에서 `if (!isMock()) return real.<함수>(...)`. 쿼리는 `features/<x>/real.ts`에 얇게, DB 행 → 화면 타입(`types.ts`) 변환은 `map.ts`의 순수 함수로 빼서 jest로 시험 (본보기: `features/alarm`의 `getNextAlarm`). "내 것"은 `lib/user`의 `requireUserId()`로 `user_id`를 한 번 더 좁힘(RLS는 친구에게 받은 알람도 보여 줌). DB · 네트워크 원문은 화면에 안 보이고, 이유를 보여 줄 때만 `UserError`.
 
@@ -229,9 +229,9 @@
 
 ### 로그인 · 온보딩 · 설정 (#25)
 - 로그인: Supabase Auth 카카오 · 구글 → 가입하면 `profiles` 자동 생성. 화면 아래의 "알람 테스트" 버튼은 `/dev/alarm-test`로 바로 감 (로그인 전에도 열림, 화면 위 "← 이전"으로 돌아옴, #177)
-- 온보딩: `profiles` 아이디(`handle`) · 집(`home_name` · `home_lat` · `home_lng`) · 기본 준비 · 여유 시간 · 이동 수단 — DB, 집 검색 `place-search` — Edge
-  - **지금은 흐름에서 뺌** (`lib/flags` `ONBOARDING_IN_FLOW = false`, #177): 로그인하면 아이디가 없어도 바로 홈. 임시 화면 파일은 두고 길만 막음 (주소로도 안 열리고 `/dev/screens`의 "온보딩부터 다시"도 숨김). 새 온보딩 UI를 받으면 true로 바꾸고 화면을 바꿈
-  - 건너뛰는 동안의 프로필: 닉네임 = 가입 때 카카오 · 구글에서 가져온 값(DB 트리거), 준비 60분 · 여유 10분 · 이동 수단 대중교통 = DB 기본값(온보딩 입력칸 기본값과 같음), 집 = 비어 있음(서버가 "집"으로 씀, 온보딩도 이름만 저장해 좌표는 어차피 없음), 아이디 = 비어 있음(친구가 @아이디로 나를 못 찾을 뿐, 내가 남을 찾는 것과 나머지 화면은 그대로)
+- 온보딩: `profiles` 아이디(`handle`) · 닉네임 · 잠귀(`wake_sensitivity`) · 집(`home_name` · `home_lat` · `home_lng`) · 기본 준비 · 여유 시간 · 이동 수단 · 깨우는 여유(`wake_margin`) · 개인정보 동의(`privacy_agreed_at` · `privacy_version`) · 온보딩 끝낸 시각(`onboarded_at`) — DB, 집 검색 `place-search` — Edge
+  - **단계 온보딩** (`lib/flags` `ONBOARDING_IN_FLOW = true`, #25): 순서는 `features/onboarding/steps.ts`, 단계마다 켜고 끄는 표는 `ONBOARDING_STEPS`(아이디 → 닉네임 → 잠귀 → [집] → 아침 준비 → [시간표] → 동의 → [권한 안내] → 기상 공유 → 첫 일정, [ ]는 화면이 아직 없어 끔). 단계마다 [다음]에서 `saveProfileFields`로 저장하고 마지막에 `finishOnboarding`이 `onboarded_at`을 적음. 판정은 `onboarded_at`이 비었는지(`features/auth/onboardingGate.ts`). 가짜 데이터 모드 미리 보기는 저장 없이 단계만 넘김. `/dev/screens`의 "온보딩부터 다시"로 처음부터 다시 봄
+  - 가입 직후 프로필: 닉네임 = 카카오 · 구글에서 가져온 값(DB 트리거), 준비 60분 · 여유 10분 · 이동 수단 대중교통 · 잠귀 보통 · 깨우는 여유 보통 = DB 기본값(온보딩 입력칸 처음 값), 집 · 아이디 = 비어 있음
 - 온보딩 단계 부품 초안(`features/onboarding/components/`): `OnboardingFrame`(틀) · `HomePlaceStep` · `TimetableStep` · `PermissionsStep` · `OnboardingDoneStep` — 값 · 콜백만 받고 api · 라우터를 부르지 않음(L7이 함수를 붙임). `/dev/onboarding?mode=mock`에서 가짜 값으로 넘겨 봄 (`/dev/screens` 목록에는 없음, #116)
 - 권한 안내: 알림 · 정확한 알람 · 잠금화면 알람 화면 — 폰
 - 푸시 토큰: 앱 켤 때 `register_push_token` — RPC
