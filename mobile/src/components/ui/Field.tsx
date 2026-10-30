@@ -18,7 +18,13 @@ export function Field({ label, first, ...input }: Props) {
       <Text variant="body" tone="sub" style={styles.label}>
         {label}
       </Text>
-      <TextInput placeholderTextColor={colors.faint} style={[styles.input, font(filled ? 600 : 400)]} accessibilityLabel={label} {...input} />
+      <TextInput
+        placeholderTextColor={colors.faint}
+        maxFontSizeMultiplier={1.3} // 입력칸도 일반 글자(Text)와 같이 1.3배까지만
+        style={[styles.input, font(filled ? 600 : 400)]}
+        accessibilityLabel={label}
+        {...input}
+      />
     </View>
   );
 }

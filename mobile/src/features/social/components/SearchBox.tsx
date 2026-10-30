@@ -31,6 +31,7 @@ export function SearchBox({ placeholder, actionLabel, onAction }: Props) {
         placeholderTextColor={colors.faint}
         accessibilityLabel={placeholder}
         returnKeyType="search"
+        maxFontSizeMultiplier={1.3}
         style={styles.input}
       />
       <TextLink label={actionLabel} onPress={() => onAction(text)} />
@@ -43,7 +44,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    height: 48,
+    minHeight: 48,
     paddingHorizontal: 14,
     borderRadius: radius.field,
     borderWidth: 1,

@@ -34,7 +34,7 @@ export function TimeButton({ label, onPress, accessibilityLabel, manual }: Props
 
 const styles = StyleSheet.create({
   base: {
-    height: 36,
+    minHeight: 36,
     paddingHorizontal: 12,
     borderRadius: radius.chip,
     backgroundColor: colors.chip,

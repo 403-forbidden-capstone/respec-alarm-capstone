@@ -4,6 +4,9 @@ import * as AlarmCore from '@capstone/alarm-core';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { PermissionsAndroid, Platform } from 'react-native';
 
+import { isMock } from '@/lib/mode';
+
+import { sampleSnapshot, type PermissionSample } from './sample';
 import type { Allowed, NotifyReason, PermissionSnapshot } from './types';
 
 // 실제로 읽을 수 있는 폰인지 (Android + 알람 코어 모듈이 든 APK)
@@ -98,8 +101,22 @@ function readNotifications(): Promise<Allowed> {
   return allowed(() => PermissionsAndroid.check(PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS));
 }
 
+// 웹 미리보기에서 고른 샘플 상태 (/dev/screens) — 웹에서만 적용해 폰의 진짜 권한을 가리지 않음. 새로고침하면 사라짐
+let sample: PermissionSample = 'none';
+
+export function setPermissionSample(next: PermissionSample): void {
+  if (Platform.OS !== 'web') return;
+  sample = next;
+  notifyPermissionsChanged(); // 열려 있는 점검표 · 홈 빨간 줄이 바로 다시 읽게
+}
+
+// 가짜 데이터 모드에서만 — 실데이터 모드로 바꾼 뒤에도 샘플이 남아 진짜 상태를 가리지 않게
+export const permissionSample = (): PermissionSample => (Platform.OS === 'web' && isMock() ? sample : 'none');
+
 // 던지지 않음 — 항목마다 실패하면 'unknown'
 export async function readPermissions(): Promise<PermissionSnapshot> {
+  const sampled = sampleSnapshot(permissionSample());
+  if (sampled) return sampled;
   const record = await readNotifyRecord();
   const notificationsAsked = record.blocked || Object.keys(record.prompted).length > 0;
   if (!canReadPhone()) {
