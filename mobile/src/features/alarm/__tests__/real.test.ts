@@ -338,6 +338,30 @@ describe('목록 · 하루 일정 · 알람 설정 읽기', () => {
     expect(await real.getNextAlarm()).toBeNull();
   });
 
+  it('이번만 지운 회차(exception_kind = CANCELED)는 약속 목록 · 하루 일정 · 다음 알람 · 회차 목록 쿼리에서 거름 (NULL은 남김 — 약속 쪽 칸 필터)', async () => {
+    const id = '00000000-0000-4000-8000-0000000000a1';
+    const notCanceled = (call: FakeCall) => call.filters.find(([method]) => method === 'or');
+    const EXPECTED = ['or', 'exception_kind.is.null,exception_kind.neq.CANCELED', { referencedTable: 'appointments' }];
+
+    mockRoutes['appointment_participants:select'] = () => ({ data: [] });
+    mockRoutes['alarms:select'] = () => ({ data: [] });
+    await real.listAppointments();
+    await real.getDaySchedule(new Date(kst('00:00')));
+    expect(callsTo('appointment_participants', 'select').map(notCanceled)).toEqual([EXPECTED, EXPECTED]);
+
+    mockCalls.length = 0;
+    mockRoutes['alarms:select'] = () => ({ data: { alarm_id: '00000000-0000-4000-8000-0000000000b1', participant_id: 'p-1' } });
+    mockRoutes['appointment_participants:select'] = () => ({ data: participantRow() });
+    await real.getNextAlarm();
+    expect(callsTo('appointment_participants', 'select').map(notCanceled)).toEqual([EXPECTED]);
+
+    mockCalls.length = 0;
+    mockRoutes['appointments:select'] = () => ({ data: { series_id: 'S1' } });
+    mockRoutes['appointment_participants:select'] = () => ({ data: [] });
+    await real.listOccurrences(id);
+    expect(callsTo('appointment_participants', 'select').map(notCanceled)).toEqual([EXPECTED]);
+  });
+
   it('읽기 실패는 DB 원문 그대로 던짐 (화면이 LoadError로 기본 문구)', async () => {
     mockRoutes['appointment_participants:select'] = () => ({ error: { code: '', message: 'Network request failed' } });
     mockRoutes['alarms:select'] = () => ({ data: [] });
