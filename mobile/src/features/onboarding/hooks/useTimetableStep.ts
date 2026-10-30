@@ -6,10 +6,12 @@ import type { LatLng, Place, Transport } from '@/features/alarm/types';
 import { askNotifications } from '@/features/permissions';
 import { now } from '@/lib/clock';
 import { UserError, userMessage } from '@/lib/errors';
+import { useLoad } from '@/lib/useLoad';
 
 import type { ClassRow } from '../components/TimetableStep';
+import { loadExistingKeys } from '../existingApi';
 import { firstDate, MAX_CLASS_ROWS, needsRetry, rowStatus, toDraft } from '../timetable';
-import { campusCoords, campusPlaceText, campusTargets, classRowOf, importNotice, missingCoords, planImport, startImport, type ImportBatch, type ImportNotice } from '../timetableImport';
+import { campusCoords, campusPlaceText, campusTargets, classRowOf, importNotice, isExistingClass, missingCoords, planImport, startImport, type ImportBatch, type ImportNotice } from '../timetableImport';
 
 const DEFAULT_START = 9 * 60; // 시각 시트를 처음 열 때 보여 주는 시각 (오전 9:00)
 const SOURCE = '온보딩 시간표'; // createAppointment의 출처 글자
@@ -31,6 +33,8 @@ export function useTimetableStep(transport: Transport, initial?: ImportBatch | n
   const [fromCampus, setFromCampus] = useState<ReadonlySet<string>>(new Set()); // 학교 위치로 맞춘 줄 id — 학교를 바꾸면 이 줄들도 새 학교로. 직접 장소를 고른 줄은 빠짐
   const [imported, setImported] = useState(start != null); // 가져온 수업이 있었음 — 좌표 없는 줄 저장 막기 · 학교 위치 카드를 보여 줄지
   const [notice, setNotice] = useState<ImportNotice | null>(start?.notice ?? null); // 가져온 직후 확인 안내 (사진 · 캘린더 길)
+  const [included, setIncluded] = useState<ReadonlySet<string>>(new Set()); // 이미 있는 수업인데 사용자가 "그래도 넣기"를 고른 줄 id
+  const existing = useLoad(loadExistingKeys).data; // 이미 저장한 반복 일정 열쇠 (못 읽으면 undefined → 중복 표시 없이 지금처럼)
   const seq = useRef(start?.rows.length ?? 0);
   const asked = useRef(false);
 
@@ -97,17 +101,22 @@ export function useTimetableStep(transport: Transport, initial?: ImportBatch | n
     setRows((list) => list.map((row) => (ids.has(row.id) ? { ...row, place: campusPlaceText(row.place, previous, place) } : row)));
   }
 
-  const filled = rows.filter((row) => rowStatus(row) !== 'empty');
+  // 가져온 수업 중 이미 저장한 수업과 같은 줄은 기본으로 저장에서 뺌(existing 'skip') — 제목 · 요일 · 시각을 고치면 바로 다시 판정됨. 직접 입력만 쓴 단계는 표시하지 않음
+  const shown: ClassRow[] = rows.map((row) =>
+    imported && existing && row.result !== 'ok' && isExistingClass(row, existing) ? { ...row, existing: included.has(row.id) ? 'include' : 'skip' } : row,
+  );
+  const active = shown.filter((row) => row.existing !== 'skip'); // 저장 · 검사 대상
+  const filled = active.filter((row) => rowStatus(row) !== 'empty');
   // 가져온 수업은 장소 글자뿐이라 좌표가 없으면 이동시간을 못 구함 → 학교(또는 줄마다 장소)를 정해야 저장할 수 있음. 직접 입력만 쓴 단계는 그대로
-  const missing = imported ? missingCoords(rows, (id) => coords[id] != null) : 0;
+  const missing = imported ? missingCoords(active, (id) => coords[id] != null) : 0;
   const canSave = filled.some((row) => rowStatus(row) === 'complete') && filled.every((row) => rowStatus(row) === 'complete') && missing === 0;
 
   // [저장하고 다음] — false면 그 단계에 머묾 (실패한 줄은 줄 옆에 이유가 보임)
   async function save(): Promise<boolean> {
     let made = 0;
     let failed = false;
-    for (const row of rows) {
-      if (row.result === 'ok' || rowStatus(row) !== 'complete' || row.startMinutes == null) continue;
+    for (const row of shown) {
+      if (row.existing === 'skip' || row.result === 'ok' || rowStatus(row) !== 'complete' || row.startMinutes == null) continue;
       try {
         const date = firstDate(row.days, row.startMinutes, now());
         const estimate = await estimateAppointment(toDraft(row, coords[row.id], transport, date));
@@ -132,8 +141,16 @@ export function useTimetableStep(transport: Transport, initial?: ImportBatch | n
   }
 
   return {
-    rows,
+    rows: shown,
+    count: filled.filter((row) => rowStatus(row) === 'complete').length, // 저장할 수업 수 (이미 있는 수업으로 뺀 줄 제외, 이 화면에서 저장한 줄 포함)
     canSave,
+    onToggleExisting: (id: string) =>
+      setIncluded((set) => {
+        const next = new Set(set);
+        if (next.has(id)) next.delete(id);
+        else next.add(id);
+        return next;
+      }),
     onChangeRow: change,
     onAddRow: () => {
       if (rows.length >= MAX_CLASS_ROWS) {
