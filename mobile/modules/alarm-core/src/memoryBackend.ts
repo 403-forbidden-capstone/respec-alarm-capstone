@@ -1,7 +1,7 @@
 // 웹 · 네이티브가 없는 곳의 대체 (#98) — 예약을 메모리에만 두고 울리지는 않음
 // 웹 미리보기에서 "약속 만들기 → 알람 예약 → 목록"이 폰 없이 끝까지 보이게 하려는 것
 // 새로고침하면 사라짐. isAvailable은 false로 남아 있어서 화면은 "실제로 울리지 않음"을 알 수 있음
-import { isPastRing } from './plan';
+import { isPastRing, soundKeyOf, vibrationOf } from './plan';
 import type { AlarmBackend, AlarmEvent, RingPackage, RingPlan, ScheduledAlarm, ScheduleStatus } from './types';
 import { makeUuid } from './uuid';
 
@@ -48,6 +48,8 @@ export function createMemoryBackend(now: () => number = Date.now): AlarmBackend 
           id: pkg.alarmId,
           type: pkg.type,
           intensity: pkg.intensity,
+          soundKey: soundKeyOf(pkg),
+          vibration: vibrationOf(pkg),
           title: pkg.title,
           atMillis: pkg.atMillis,
           snoozeCount: 0,

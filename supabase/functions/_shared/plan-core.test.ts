@@ -123,7 +123,7 @@ const participant: ParticipantRow = {
 };
 const row = (type: AlarmRow['alarm_type'], minutes: number, over: Partial<AlarmRow> = {}): AlarmRow => ({
   alarm_id: `al-${type}`, participant_id: 'pt1', user_id: 'u1', alarm_type: type, scheduled_at: kst(22, minutes).toISOString(),
-  intensity: 'NORMAL', voice_tone: 'NEUTRAL', sound_key: 'theme_default', is_enabled: true, snooze_limit: 3,
+  intensity: 'NORMAL', voice_tone: 'NEUTRAL', sound_key: 'theme_default', vibration: null, is_enabled: true, snooze_limit: 3,
   time_source: 'AUTO', intensity_source: 'AUTO', recurrence_rule: null, ...over,
 });
 
@@ -173,13 +173,16 @@ test('부분 알람 일정(기상만)을 다시 저장해도 종류가 늘지 �
 });
 
 test('저장된 직접 강도는 유지, 자동과 같은 값이면 자동으로 (자동 값이 바뀌면 같이 바뀜)', () => {
-  // 중요도 NORMAL · 늦잠 1회 → 자동 중(1). 저장: 배경음 약(0) 직접, 말소리 중(= 자동), 진동 강(2) 직접
-  const stored = row('WAKE', 480, { intensity: 'STRONG', voice_tone: 'NEUTRAL', sound_key: 'theme_calm', intensity_source: 'MANUAL' });
+  // 중요도 NORMAL · 늦잠 1회 → 자동 중(1). 저장: 배경음 약(0) 직접, 말소리 중(= 자동), 진동 강(2) 직접 (진동은 vibration 칸 — intensity는 전체 세기라 자동 중)
+  const stored = row('WAKE', 480, { intensity: 'NORMAL', voice_tone: 'NEUTRAL', sound_key: 'theme_calm', vibration: 'STRONG_CONTINUOUS', intensity_source: 'MANUAL' });
   const keep = computePlan(base({ draft: { appointmentId: 'ap1' }, appointment, participant, existingAlarms: [stored] }), api(30));
   assert.deepEqual(keep.intensity.axes, { sound: { level: 0, manual: true }, voice: { level: 1, manual: false }, vibration: { level: 2, manual: true } });
   // 요청이 levels를 주면 그 칸이 전부 — null은 자동으로 되돌림
   const reset = computePlan(base({ draft: { appointmentId: 'ap1', levels: { sound: null, voice: null, vibration: null } }, appointment, participant, existingAlarms: [stored] }), api(30));
   assert.equal(reset.intensity.manual, false);
+  assert.equal(reset.intensity.fields.vibration, null); // 진동도 "자동으로" → vibration null
+  assert.equal(keep.intensity.fields.vibration, 'STRONG_CONTINUOUS');
+  assert.equal(keep.intensity.fields.intensity, 'NORMAL'); // 전체 세기는 직접 고른 진동과 상관없이 자동 단계
   // 자동으로 저장된 강도는 늦잠 횟수가 바뀌면 같이 바뀜
   const autoStored = row('WAKE', 480);
   assert.equal(computePlan(base({ draft: { appointmentId: 'ap1' }, appointment, participant, existingAlarms: [autoStored], lateCount4w: 3 }), api(30)).intensity.fields.intensity, 'STRONG');
@@ -314,6 +317,21 @@ test('강도 이유: 중요도 낮음은 보통(중), 매우 중요는 한 단�
   const lowLate = toSuggestion(computePlan(base({ draft: { ...draft, importance: 'LOW' }, lateCount4w: 2 }), api(50)));
   assert.equal(lowLate.intensity.level, 'STRONG'); // 낮음 + 늦잠 지각 2회 = 보통에서 한 단계 올림
   assert.equal(lowLate.intensity.reason, '보통 일정 + 최근 4주 늦잠 지각 2회 → 강');
+});
+
+test('옛 알람(vibration 칸이 비어 있고 intensity만 STRONG인 직접 알람)은 진동을 직접 고른 것으로 안 읽음 — 강도를 따르는 칸이라 자동', () => {
+  const legacy = row('WAKE', 480, { intensity: 'STRONG', vibration: null, intensity_source: 'MANUAL' });
+  const plan = computePlan(base({ draft: { appointmentId: 'ap1' }, appointment, participant, existingAlarms: [legacy] }), api(30));
+  assert.equal(plan.intensity.axes.vibration.manual, false);
+  assert.equal(plan.intensity.fields.vibration, null);
+});
+
+test('미리 보기 응답의 intensity 블록에 vibration이 실림 (직접 고른 진동만 값, 자동이면 null)', () => {
+  const auto = toSuggestion(computePlan(base({ draft: { at: kst(22, 600), destination: { name: '세종대학교' } } }), api(50)));
+  assert.equal(auto.intensity.vibration, null);
+  const picked = toSuggestion(computePlan(base({ draft: { at: kst(22, 600), destination: { name: '세종대학교' }, levels: { vibration: 0 } } }), api(50)));
+  assert.equal(picked.intensity.vibration, 'NONE');
+  assert.equal(picked.intensity.level, 'NORMAL');
 });
 
 // ---- 학습 루프 기초 b (이슈 #272) — 잠귀 · 깨우는 여유 · 최근 5번 ----

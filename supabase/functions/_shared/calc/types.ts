@@ -8,10 +8,12 @@ export type Importance = 'LOW' | 'NORMAL' | 'HIGH';
 export type Transport = 'WALK' | 'TRANSIT' | 'BUS' | 'SUBWAY' | 'CAR';
 export type AlarmIntensity = 'SOFT' | 'NORMAL' | 'STRONG';
 export type VoiceTone = 'CALM' | 'NEUTRAL' | 'DIRECT';
+// 진동 — DB alarms.vibration 값 (text + check, 알람 코어 vibration 칸 값 이름과 같음). 약 NONE · 보통 SHORT_REPEAT · 강 STRONG_CONTINUOUS
+export type AlarmVibration = 'NONE' | 'SHORT_REPEAT' | 'STRONG_CONTINUOUS';
 
 // 약 · 중 · 강 (0 · 1 · 2)
 export type Level = 0 | 1 | 2;
-// 배경음 · 말소리 · 진동 — DB 칸: sound = sound_key, voice = voice_tone, vibration = intensity (앱 고친 값 기록과 같은 대응)
+// 배경음 · 말소리 · 진동 — DB 칸: sound = sound_key, voice = voice_tone, vibration = vibration (intensity는 세 축이 아니라 "전체 세기" — 볼륨 · 다시 울림)
 export type IntensityAxis = 'sound' | 'voice' | 'vibration';
 
 export const RING_KINDS: readonly RingKind[] = ['WAKE', 'PREPARE', 'DEPARTURE'];

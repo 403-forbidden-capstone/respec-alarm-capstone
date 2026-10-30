@@ -12,7 +12,7 @@ import {
   autoLevel,
   checkAlarms,
   departureAt,
-  levelOfIntensity,
+  levelOfVibration,
   levelOfSoundKey,
   levelOfVoiceTone,
   personalPrepareOf,
@@ -21,6 +21,7 @@ import {
   resolveIntensity,
   RING_KINDS,
   type AlarmIntensity,
+  type AlarmVibration,
   type ChainAlarm,
   type CheckResult,
   type Importance,
@@ -90,6 +91,7 @@ export type AlarmRow = {
   intensity: AlarmIntensity;
   voice_tone: 'CALM' | 'NEUTRAL' | 'DIRECT';
   sound_key: string | null;
+  vibration: AlarmVibration | null; // 진동 축을 직접 고른 값. NULL = 강도(intensity)를 따름
   is_enabled: boolean;
   snooze_limit: number;
   time_source: 'AUTO' | 'MANUAL';
@@ -239,7 +241,7 @@ export function resolveOverrides(draft: PlanDraft['levels'], existing: readonly 
   return {
     sound: pick(levelOfSoundKey(stored.sound_key)),
     voice: pick(levelOfVoiceTone(stored.voice_tone)),
-    vibration: pick(levelOfIntensity(stored.intensity)),
+    vibration: pick(levelOfVibration(stored.vibration)),
   };
 }
 
@@ -461,6 +463,7 @@ export function toSuggestion(plan: Plan, inputs?: Pick<PlanInputs, 'existingAlar
       level: intensity.fields.intensity,
       voice_tone: intensity.fields.voiceTone,
       sound_key: intensity.fields.soundKey,
+      vibration: intensity.fields.vibration, // 직접 고른 진동만 값, 자동이면 null (강도를 따름)
       source: intensity.manual ? 'MANUAL' : 'AUTO',
       reason: intensityReason(basics, intensity),
       auto_level: intensity.auto,

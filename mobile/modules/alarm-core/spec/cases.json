@@ -320,5 +320,13 @@
     { "name": "최근 5번 안에 2번", "ratings": ["TOO_QUIET", "TOO_QUIET", "TOO_QUIET", "TOO_LOUD", "TOO_LOUD"], "volumeAdjust": -0.1 },
     { "name": "5번 다 시끄러워도 −10%만 (쌓이지 않음)", "ratings": ["TOO_LOUD", "TOO_LOUD", "TOO_LOUD", "TOO_LOUD", "TOO_LOUD"], "volumeAdjust": -0.1 },
     { "name": "다른 평가는 보정 없음", "ratings": ["TOO_QUIET", "VOICE_DISLIKE", "SOUND_DISLIKE", "GOOD"], "volumeAdjust": 0 }
+  ],
+  "axisDefaults": [
+    { "name": "칸이 없으면 약은 차분한 소리 · 진동 없음", "input": { "intensity": "SOFT" }, "soundKey": "theme_calm", "vibration": "NONE" },
+    { "name": "칸이 없으면 보통은 기본 소리 · 짧게 반복", "input": { "intensity": "NORMAL" }, "soundKey": "theme_default", "vibration": "SHORT_REPEAT" },
+    { "name": "칸이 없으면 강은 급한 소리 · 강하게 연속", "input": { "intensity": "STRONG" }, "soundKey": "theme_urgent", "vibration": "STRONG_CONTINUOUS" },
+    { "name": "서버가 준 칸은 강도와 달라도 그대로 (축별 고르기)", "input": { "intensity": "NORMAL", "soundKey": "theme_urgent", "vibration": "NONE" }, "soundKey": "theme_urgent", "vibration": "NONE" },
+    { "name": "빈 글자 · 모르는 진동은 강도에서, 모르는 소리 키는 그대로", "input": { "intensity": "STRONG", "soundKey": "  ", "vibration": "WILD" }, "soundKey": "theme_urgent", "vibration": "STRONG_CONTINUOUS" },
+    { "name": "모르는 소리 키는 그대로 (폰이 기본 알람음으로 틂)", "input": { "intensity": "SOFT", "soundKey": "calm" }, "soundKey": "calm", "vibration": "NONE" }
   ]
 }

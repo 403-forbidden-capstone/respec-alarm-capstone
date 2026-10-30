@@ -85,11 +85,11 @@ describe('H03 고친 값 기록 — 가짜 saveAlarmSettings와 같은 줄', () 
     expect(lines.map((l) => [l.field, l.alarmType, l.autoValue, l.editedValue])).toEqual([['alarm_enabled', 'WAKE', true, false]]);
   });
 
-  it('강도 직접 고르기 (DB 칸 이름: 배경음 sound_key · 말소리 voice_tone · 진동 intensity)', async () => {
+  it('강도 직접 고르기 (DB 칸 이름: 배경음 sound_key · 말소리 voice_tone · 진동 vibration)', async () => {
     const lines = await expectSame((d) => ({ ...d, levels: { sound: 2, voice: null, vibration: 0 } }));
     expect(lines.map((l) => [l.field, l.autoValue, l.editedValue])).toEqual([
       ['sound_key', 1, 2],
-      ['intensity', 1, 0],
+      ['vibration', 1, 0],
     ]);
   });
 
