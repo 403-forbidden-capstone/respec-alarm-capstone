@@ -236,6 +236,7 @@
 - 온보딩 단계 부품 초안(`features/onboarding/components/`): `OnboardingFrame`(틀) · `HomePlaceStep` · `TimetableStep` · `PermissionsStep` · `OnboardingDoneStep` — 값 · 콜백만 받고 api · 라우터를 부르지 않음(L7이 함수를 붙임). `/dev/onboarding?mode=mock`에서 가짜 값으로 넘겨 봄 (`/dev/screens` 목록에는 없음, #116)
 - 설정에서 값 바꾸기: 닉네임 · 아이디 · 잠귀 · 깨우는 여유 · 준비 시간 · 여유 시간 · 이동 수단 · 집 줄을 누르면 편집 시트(`features/profile/components/ProfileEditors`, 온보딩 단계 부품 재사용) → [저장]이 `saveProfileFields` → `profiles` — DB. 집은 장소 검색 시트(`place-search` — Edge). 실데이터 + 로그인일 때만 열리고 가짜 모드는 보기만. 아이디는 중복 확인(`isHandleTaken`) 뒤 저장 (L3 `changeHandle`이 오면 교체)
 - 권한 안내: 알림 · 정확한 알람 · 잠금화면 알람 화면 — 폰
+- 설정 "출발 · 도착 자동 기록" 카드(`features/location/LocationAutoSection`, 안드로이드 + 실데이터에서만): 스위치 = 폰 저장 `location:v1:auto`(기본 켬) + 위치 권한 상태(`permissions.ts` `getLocationStatus`: 켜짐 · 위치 꺼짐 · 앱 사용 중에만 · 정확한 위치 꺼짐) — 폰, DB 없음. 앞 권한만 시스템 창으로 묻고 "항상 허용" · "정확한 위치"는 앱 설정 화면으로 안내(안드로이드 11+). 권한이 모자라도 스위치는 켜 둠 — 권한이 생기면 바로 등록. 끄면 등록한 지오펜스를 멈춤
 - 푸시 토큰: 앱 켤 때 `register_push_token` — RPC
 
 ## Edge Function — 만들 것만

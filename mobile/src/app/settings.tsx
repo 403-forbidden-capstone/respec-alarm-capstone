@@ -8,6 +8,7 @@ import { PlaceSearchSheet } from '@/features/alarm/components/PlaceSearchSheet';
 import type { Place } from '@/features/alarm/types';
 import { useAuth } from '@/features/auth/AuthProvider';
 import { DataModeToggle } from '@/features/auth/DataModeToggle';
+import { LocationAutoSection } from '@/features/location/LocationAutoSection';
 import { openAppNotificationSettings } from '@/features/permissions';
 import { shouldSaveHandle } from '@/features/onboarding/validate';
 import { isHandleTaken, saveProfileFields } from '@/features/profile/api';
@@ -89,6 +90,8 @@ export default function SettingsScreen() {
         <EditRow label="닉네임" value={profile?.nickname ?? '-'} onPress={open('nickname')} />
         <EditRow label="아이디" value={profile?.handle ? `@${profile.handle}` : '-'} onPress={open('handle')} />
       </Card>
+
+      <LocationAutoSection />
 
       {profile ? (
         <>
