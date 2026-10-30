@@ -11,12 +11,14 @@ import { hasHome } from '@/features/onboarding/home';
 import { CampusCard } from '@/features/onboarding/components/CampusCard';
 import { ImportNoticeCard } from '@/features/onboarding/components/ImportNoticeCard';
 import { HomePlaceStep } from '@/features/onboarding/components/HomePlaceStep';
-import { CONSENT_ITEMS, PRIVACY_VERSION, TIMETABLE_PHOTO_CONSENT } from '@/features/onboarding/consent';
+import { consentItems, PRIVACY_VERSION } from '@/features/onboarding/consent';
 import { OnboardingDoneStep } from '@/features/onboarding/components/OnboardingDoneStep';
 import { OnboardingFrame } from '@/features/onboarding/components/OnboardingFrame';
+import { CalendarPickSheet } from '@/features/onboarding/components/CalendarPickSheet';
 import { ImportEntryCard } from '@/features/onboarding/components/ImportEntryCard';
 import { TimetableStep } from '@/features/onboarding/components/TimetableStep';
 import { useHomeStep } from '@/features/onboarding/hooks/useHomeStep';
+import { useCalendarImport } from '@/features/onboarding/hooks/useCalendarImport';
 import { usePhotoImport } from '@/features/onboarding/hooks/usePhotoImport';
 import { useTimetableStep } from '@/features/onboarding/hooks/useTimetableStep';
 import { activeSteps, nextStep, ONBOARDING_ORDER, prevStep, stepNumber, type OnboardingStepId, type StepFlags } from '@/features/onboarding/steps';
@@ -77,7 +79,8 @@ export default function OnboardingScreen() {
   });
   const homeStep = useHomeStep(profile, userId);
   const photoImport = usePhotoImport();
-  const timetable = useTimetableStep(prepare.transport); // 수업은 '아침 준비'에서 고른 이동 수단으로 계산
+  const timetable = useTimetableStep(prepare.transport);
+  const calendarImport = useCalendarImport(timetable.addImported); // 수업은 '아침 준비'에서 고른 이동 수단으로 계산
   // 집 좌표가 없으면 서버가 출발지 '집'을 못 채워 이동시간을 못 구함 — 실데이터만 (가짜 데이터는 집 없이도 계산)
   const noHome = userId != null && !hasHome(homeStep.saved, profile);
   const [finished, setFinished] = useState(false); // 온보딩 끝난 시각을 이미 적었음 (다시 읽기만 실패해 한 번 더 누를 때 또 적지 않게)
@@ -240,8 +243,17 @@ export default function OnboardingScreen() {
                   }
                 : undefined
             }
-            busy={busy || photoImport.reading}
-            reading={photoImport.reading ? 'photo' : null}
+            onCalendar={TIMETABLE_PATHS.calendar ? calendarImport.start : undefined}
+            busy={busy || photoImport.reading || calendarImport.busy}
+            reading={photoImport.reading ? 'photo' : calendarImport.reading ? 'calendar' : null}
+          />
+          <CalendarPickSheet
+            visible={calendarImport.pickerOpen}
+            calendars={calendarImport.calendars}
+            picked={calendarImport.picked}
+            onToggle={calendarImport.toggle}
+            onConfirm={calendarImport.confirm}
+            onClose={calendarImport.closePicker}
           />
           {timetable.notice ? <ImportNoticeCard notice={timetable.notice} onDismiss={timetable.dismissNotice} /> : null}
           {timetable.missingCoords > 0 ? (
@@ -293,7 +305,7 @@ export default function OnboardingScreen() {
     consent: {
       title: '개인정보 안내',
       lead: '앱이 읽는 것과 읽지 않는 것이에요',
-      body: <ConsentStep items={TIMETABLE_PATHS.photo ? [...CONSENT_ITEMS, TIMETABLE_PHOTO_CONSENT] : CONSENT_ITEMS} />,
+      body: <ConsentStep items={consentItems(TIMETABLE_PATHS)} />,
       primaryLabel: '동의하고 계속',
       onPrimary: next,
     },

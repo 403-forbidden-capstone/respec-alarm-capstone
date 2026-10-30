@@ -3,7 +3,7 @@
 export const PRIVACY_VERSION = 1;
 
 export type ConsentItem = {
-  key: 'location' | 'screen' | 'voice' | 'wake-share' | 'timetable-photo';
+  key: 'location' | 'screen' | 'voice' | 'wake-share' | 'timetable-photo' | 'timetable-calendar';
   title: string;
   reads: string; // 읽는 것
   doesNotRead: string; // 안 읽는 것
@@ -16,6 +16,15 @@ export const TIMETABLE_PHOTO_CONSENT: ConsentItem = {
   title: '시간표 사진',
   reads: '고른 시간표 사진 한 장을 AI가 읽어 수업 목록으로 바꿈',
   doesNotRead: '그 밖의 사진 (사진은 저장하지 않고 읽은 뒤 버림)',
+  friends: '안 보임',
+};
+
+// 폰 캘린더에서 가져오기(TIMETABLE_PATHS.calendar)를 켰을 때만 동의 단계에 더함 — 캘린더 읽기는 폰 안에서만 하고 사용자가 확인한 수업만 저장
+export const TIMETABLE_CALENDAR_CONSENT: ConsentItem = {
+  key: 'timetable-calendar',
+  title: '캘린더',
+  reads: '고른 캘린더의 앞으로 2주 일정(제목 · 시각 · 장소)에서 매주 반복되는 수업',
+  doesNotRead: '고르지 않은 캘린더, 일정 메모 · 참석자 (확인한 수업만 저장)',
   friends: '안 보임',
 };
 
@@ -49,3 +58,8 @@ export const CONSENT_ITEMS: readonly ConsentItem[] = [
     friends: '그룹에서 허락한 사람에게만 기상 단계가 보임',
   },
 ];
+
+// 동의 단계에 보일 항목 — 켜 둔 시간표 가져오기 길의 항목을 뒤에 더함
+export function consentItems(paths: { photo: boolean; calendar: boolean }): readonly ConsentItem[] {
+  return [...CONSENT_ITEMS, ...(paths.photo ? [TIMETABLE_PHOTO_CONSENT] : []), ...(paths.calendar ? [TIMETABLE_CALENDAR_CONSENT] : [])];
+}
