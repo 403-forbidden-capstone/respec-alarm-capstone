@@ -5,7 +5,7 @@ import { supabase } from '@/lib/supabase';
 import type { OnboardingInput, Profile } from './types';
 
 const COLUMNS =
-  'user_id, nickname, handle, profile_image_url, default_prepare_minutes, default_buffer_minutes, home_name, home_lat, home_lng, default_transport, timezone';
+  'user_id, nickname, handle, profile_image_url, default_prepare_minutes, default_buffer_minutes, home_name, home_lat, home_lng, default_transport, timezone, onboarded_at, wake_sensitivity, wake_margin, privacy_agreed_at, privacy_version';
 
 // 내 프로필 한 행 — 가입하면 DB 트리거가 만들어 둠
 export async function getMyProfile(userId: string): Promise<Profile | null> {
@@ -35,9 +35,15 @@ export const MOCK_PROFILE: Profile = {
   home_lng: null,
   default_transport: 'TRANSIT',
   timezone: 'Asia/Seoul',
+  // 가짜 모드는 온보딩을 거치지 않으므로 이미 끝낸 것으로 둠 (null이면 온보딩 판정에 걸림)
+  onboarded_at: '2026-05-22T00:00:00+09:00',
+  wake_sensitivity: 'NORMAL',
+  wake_margin: 'NORMAL',
+  privacy_agreed_at: null,
+  privacy_version: null,
 };
 
-// 온보딩부터 다시 (개발용, /dev/screens) — 아이디 · 집을 비우고 기본값을 DB 기본값으로. 계정은 그대로
+// 온보딩부터 다시 (개발용, /dev/screens) — 아이디 · 집 · 온보딩 칸을 비우고 기본값을 DB 기본값으로. 계정은 그대로
 export async function resetOnboarding(userId: string): Promise<void> {
   const { data, error } = await supabase
     .from('profiles')
@@ -49,6 +55,11 @@ export async function resetOnboarding(userId: string): Promise<void> {
       default_prepare_minutes: 60,
       default_buffer_minutes: 10,
       default_transport: 'TRANSIT',
+      onboarded_at: null,
+      wake_sensitivity: 'NORMAL',
+      wake_margin: 'NORMAL',
+      privacy_agreed_at: null,
+      privacy_version: null,
     })
     .eq('user_id', userId)
     .select('user_id');
