@@ -16,11 +16,14 @@ import { OnboardingDoneStep } from '@/features/onboarding/components/OnboardingD
 import { OnboardingFrame } from '@/features/onboarding/components/OnboardingFrame';
 import { CalendarPickSheet } from '@/features/onboarding/components/CalendarPickSheet';
 import { ImportEntryCard } from '@/features/onboarding/components/ImportEntryCard';
+import { PermissionsStep } from '@/features/onboarding/components/PermissionsStep';
 import { TimetableStep } from '@/features/onboarding/components/TimetableStep';
+import { useLocationRow } from '@/features/onboarding/hooks/useLocationRow';
 import { useHomeStep } from '@/features/onboarding/hooks/useHomeStep';
 import { useCalendarImport } from '@/features/onboarding/hooks/useCalendarImport';
 import { usePhotoImport } from '@/features/onboarding/hooks/usePhotoImport';
 import { useTimetableStep } from '@/features/onboarding/hooks/useTimetableStep';
+import { permissionRows } from '@/features/onboarding/permissionRows';
 import { activeSteps, nextStep, ONBOARDING_ORDER, prevStep, stepNumber, type OnboardingStepId, type StepFlags } from '@/features/onboarding/steps';
 import { cleanHandle, cleanNickname, isHandleFormat, isNicknameOk, NICKNAME_MAX, shouldSaveHandle } from '@/features/onboarding/validate';
 import { ConsentStep } from '@/features/onboarding/views/ConsentStep';
@@ -29,6 +32,14 @@ import { NicknameStep } from '@/features/onboarding/views/NicknameStep';
 import { PrepareStep, type PrepareValues } from '@/features/onboarding/views/PrepareStep';
 import { ShareStep } from '@/features/onboarding/views/ShareStep';
 import { SleepStep } from '@/features/onboarding/views/SleepStep';
+import {
+  askNotifications,
+  openBatterySettings,
+  openExactAlarmSettings,
+  openFullScreenSettings,
+  openUsageAccessSettings,
+  usePermissions,
+} from '@/features/permissions';
 import { finishOnboarding, isHandleTaken, saveProfileFields } from '@/features/profile/api';
 import type { WakeSensitivity } from '@/features/profile/types';
 import { setAfterOnboarding } from '@/lib/afterOnboarding';
@@ -39,8 +50,8 @@ import { addMinutes, minuteOfDay, startOfDay } from '@/lib/format';
 import { useAction } from '@/lib/useAction';
 
 // 이 화면에 단계 화면이 있는 단계 — 켜 놓았어도 여기 없으면 건너뜀 (진행 표시의 전체 수에서도 빠짐)
-// 자리: permissions(PR 7 — 권한 안내), mic(L4 뒤). 화면을 만들면 여기에 더함
-const SCREEN_STEPS: ReadonlySet<OnboardingStepId> = new Set(['handle', 'nickname', 'sleep', 'home', 'prepare', 'timetable', 'consent', 'share', 'first']);
+// 자리: mic(L4 뒤). 화면을 만들면 여기에 더함
+const SCREEN_STEPS: ReadonlySet<OnboardingStepId> = new Set(['handle', 'nickname', 'sleep', 'home', 'prepare', 'timetable', 'consent', 'permissions', 'share', 'first']);
 const FLAGS = Object.fromEntries(ONBOARDING_ORDER.map((id) => [id, ONBOARDING_STEPS[id] && SCREEN_STEPS.has(id)])) as StepFlags;
 
 // 단계에 따라 틀(OnboardingFrame)에 넣을 것
@@ -85,6 +96,8 @@ export default function OnboardingScreen() {
   // 집 좌표가 없으면 서버가 출발지 '집'을 못 채워 이동시간을 못 구함 — 실데이터만 (가짜 데이터는 집 없이도 계산)
   const noHome = userId != null && !hasHome(homeStep.saved, profile);
   const [finished, setFinished] = useState(false); // 온보딩 끝난 시각을 이미 적었음 (다시 읽기만 실패해 한 번 더 누를 때 또 적지 않게)
+  const location = useLocationRow();
+  const { snapshot: permissionSnapshot } = usePermissions(); // 설정에서 돌아오면 다시 읽어 줄이 갱신됨
   const [consentSaved, setConsentSaved] = useState(false); // 이 화면에서 이미 동의를 저장했음 (뒤로 갔다 와도 다시 저장하지 않게)
 
   const changeHandle = (next: string) => {
@@ -143,7 +156,7 @@ export default function OnboardingScreen() {
         return true;
       }
       default:
-        return true; // share 등 저장할 것이 없는 단계
+        return true; // permissions · share 등 저장할 것이 없는 단계
     }
   }
 
@@ -174,6 +187,30 @@ export default function OnboardingScreen() {
         throw new UserError('저장했어요 · 다시 불러오지 못했어요. 한 번 더 눌러 주세요');
       }
     }, '저장하지 못했어요');
+
+  // 줄의 [켜기] · [설정 열기] — 사용자가 누를 때만 시스템 창 · 설정을 엶 (안건 2 A). 돌아오면 usePermissions가 다시 읽음
+  const openPermission = (key: string) => {
+    switch (key) {
+      case 'notifications':
+        void askNotifications('onboarding');
+        break;
+      case 'fullScreen':
+        void openFullScreenSettings();
+        break;
+      case 'exactAlarm':
+        void openExactAlarmSettings();
+        break;
+      case 'usageAccess':
+        void openUsageAccessSettings();
+        break;
+      case 'battery':
+        void openBatterySettings();
+        break;
+      case 'location':
+        void location.request(); // 고지 → 앱 사용 중 → 항상 허용 설정 화면. 거절 · 나중에는 설정 카드로
+        break;
+    }
+  };
 
   const views: Partial<Record<OnboardingStepId, StepView>> = {
     handle: {
@@ -309,6 +346,13 @@ export default function OnboardingScreen() {
       lead: '앱이 읽는 것과 읽지 않는 것이에요',
       body: <ConsentStep items={consentItems(TIMETABLE_PATHS)} />,
       primaryLabel: '동의하고 계속',
+      onPrimary: next,
+    },
+    permissions: {
+      title: '권한 안내',
+      lead: '알람이 확실히 울리도록 켜 두면 좋은 것들이에요',
+      body: <PermissionsStep rows={permissionRows(permissionSnapshot, location.status)} onAction={openPermission} />,
+      primaryLabel: '다음', // 안 켜도 통과
       onPrimary: next,
     },
     share: {

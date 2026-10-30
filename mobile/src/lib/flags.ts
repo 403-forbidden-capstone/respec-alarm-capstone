@@ -32,7 +32,7 @@ export type OnboardingStepId =
 
 // 단계마다 켜고 끄는 표 — 10/29 지형님: 일단 다 넣고 보면서 뺌 → 단계마다 flag (D38 기본안 C)
 //   끈 단계는 건너뛰고 진행 표시(n / 전체)도 켠 단계만 셈. 화면을 만들면 켬
-//   permissions: 권한 안내 단계 화면이 아직 없음 (PR 7)
+//   permissions: 권한 안내 단계 — PR 7에서 켬. 위치 줄은 아래 ONBOARDING_LOCATION_ROWS로 따로
 //   mic: 마이크 권한 — L4(음성) 뒤에 켬. 매니페스트에 RECORD_AUDIO가 아직 없음
 export const ONBOARDING_STEPS: Record<OnboardingStepId, boolean> = {
   handle: true,
@@ -42,7 +42,7 @@ export const ONBOARDING_STEPS: Record<OnboardingStepId, boolean> = {
   prepare: true,
   timetable: true,
   consent: true,
-  permissions: false,
+  permissions: true,
   share: true,
   first: true,
   mic: false,
@@ -55,3 +55,6 @@ export const TIMETABLE_PATHS = {
   photo: true,
   calendar: true,
 };
+
+// 권한 안내 단계에 위치 줄(전경 · 항상)을 넣을지 — L2 permissions.ts가 들어와서 켬 (안건 2 A)
+export const ONBOARDING_LOCATION_ROWS = true;
