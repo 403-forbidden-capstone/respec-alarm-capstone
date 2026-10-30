@@ -5,6 +5,8 @@
 //   · 카드 버튼: 저장 = createAppointment(estimate, '자기 전 대화') → voice-turn {card_action: SAVED, appointment_id, alarms}. 준비 +N · 강도는 실제로 바뀐 때만 saveAlarmSettings 한 번 더(L1 답 L1-1 — alarm-commit이 길찾기를 다시 부름)
 //   · 실패(LLM_UNAVAILABLE · NOT_CONFIGURED · 네트워크 · 시간 초과)면 대화 · 카드는 남기고 같은 요청을 [다시 시도] (같은 client_turn_id라 말이 두 번 쌓이지 않음). CONFLICT면 세션을 다시 읽음
 //   · 대화 상태(세션 번호 · rev · 카드 · 계산한 Estimate)는 이 모듈 메모리에만 — 앱을 다시 열면 voice-session resume으로 말 · 카드 상태를 서버에서 받음 (Estimate는 안 남으니 저장 때 다시 계산)
+//     다시 열 때 계산이 안 끝난 카드(NEEDS_ESTIMATE)는 이어서 계산해 results만 보냄. 저장한 카드는 서버에 SAVED를 알리기 전에 로컬(savedMarks.ts)에 적어 두어, 알림이 안 가고 꺼져도 일정이 두 벌 생기지 않게 함
+//   · 서버 요청은 pending 하나 + 카드 요청 큐 — 실패한 요청(pending)이 있으면 카드 동작은 앱 일만 바로 하고 서버 알림은 큐에서 기다렸다가 그 요청이 성공한 뒤 차례로 보냄
 import { adjustEstimate, orderError } from '@/features/alarm/adjust';
 import { createAppointment, createStandaloneAlarm, estimateAppointment, getAppointment, listPlaces, previewAlarms, saveAlarmSettings } from '@/features/alarm/api';
 import { draftAt } from '@/features/alarm/schedule';
@@ -30,6 +32,7 @@ import { currentUserId } from '@/lib/user';
 import type { Weekday } from '@/lib/weekday';
 
 import { applyFix, type Fix } from './fixes';
+import { clearSaved, markSaved, pruneOtherSessions, readSavedMarks } from './savedMarks';
 import type { ChatMessage, CardAlarm, CardKind, CardStatus, Conversation, ConversationCard, FixResult, Limits, Unavailable } from './types';
 
 // ---------------------------------------------------------------------------
@@ -127,7 +130,14 @@ type CardRec = {
 };
 
 // 카드 동작(저장 · 반려 · 장소 고른 뒤 results)이 서버에 알릴 요청 — 앞 요청이 끝나야 rev를 알 수 있어 보낼 때 body를 만듦
-type Queued = { phase: 'RESULTS' | 'CARD'; turnId: string; make: (sessionId: string, rev: number) => Record<string, unknown>; retried?: boolean };
+//   saved = 저장됨 로컬 표시를 달고 있는 SAVED 알림 — 서버가 받으면(또는 카드를 모르면) 그 표시를 지움
+type Queued = {
+  phase: 'RESULTS' | 'CARD';
+  turnId: string;
+  make: (sessionId: string, rev: number) => Record<string, unknown>;
+  retried?: boolean;
+  saved?: { sessionId: string; cardId: string };
+};
 
 // quiet = 카드에서 시작한 요청 — 서버가 거절해도 던지지 않음(앱에서 한 일은 그대로). src = 그 요청의 큐 항목(CONFLICT 때 새 rev로 한 번 더)
 type Pending = { phase: 'TEXT' | 'RESULTS' | 'CARD'; body: Record<string, unknown>; turnId: string; quiet?: boolean; src?: Queued };
@@ -480,6 +490,7 @@ async function onError(e: unknown, p: Pending | null = null): Promise<void> {
   }
   state.pending = null;
   state.unavailable = null;
+  if (e.code === 'NOT_FOUND' && p?.src?.saved) await clearSaved(p.src.saved.sessionId, p.src.saved.cardId); // 서버가 모르는 카드 — 다시 알릴 수 없음
   // CONFLICT = rev 어긋남, NOT_FOUND = 세션 · 카드를 모름 — 서버 상태를 다시 읽음 (세션이 없어졌으면 resume이 새로 시작). 기다리는 큐는 그대로 — 새 rev로 보냄
   if (e.code === 'CONFLICT' || e.code === 'NOT_FOUND') await readSession(true);
   // 카드 요청이 rev 어긋남으로 거절됐으면 서버가 받지 않았으니 새 rev로 한 번 더 (같은 client_turn_id)
@@ -523,6 +534,7 @@ async function drive(): Promise<void> {
     }
     state.unavailable = null;
     state.pending = null;
+    if (p.src?.saved) await clearSaved(p.src.saved.sessionId, p.src.saved.cardId); // 서버가 SAVED를 받음 — 로컬 표시는 이제 필요 없음
     const next = await absorb(res, p.turnId);
     if (next && p.quiet) next.quiet = true;
     state.pending = next;
@@ -546,7 +558,41 @@ async function submitCard(item: Queued): Promise<void> {
 // 세션
 // ---------------------------------------------------------------------------
 
-async function readSession(resume: boolean): Promise<void> {
+// 저장은 했는데 서버에 SAVED를 못 알린 카드(로컬 '저장됨' 표시)를 저장됨으로 복원 — 서버가 READY · NEEDS_*로 줘도 createAppointment를 또 부르지 않게.
+//   서버가 이미 SAVED · REJECTED로 알면 표시를 지움. renotify(앱을 다시 연 때)면 서버에 SAVED만 다시 알림(큐). 서버가 모르는 카드는 건드리지 않음
+async function restoreSaved(sessionId: string, renotify: boolean): Promise<void> {
+  await pruneOtherSessions(sessionId);
+  const marks = await readSavedMarks(sessionId);
+  for (const [cardId, mark] of Object.entries(marks)) {
+    const rec = state.cards.get(cardId);
+    if (!rec) continue;
+    if (rec.status === 'SAVED' || rec.status === 'REJECTED') {
+      await clearSaved(sessionId, cardId);
+      continue;
+    }
+    rec.status = 'SAVED';
+    rec.estimate = null;
+    rec.error = null;
+    rec.appointmentId = mark.appointmentId;
+    rec.alarms = mark.alarms.map((a) => ({ kind: a.kind as AlarmKind, at: new Date(a.at), enabled: a.enabled }));
+    if (!renotify || state.queue.some((q) => q.saved?.cardId === cardId) || state.pending?.src?.saved?.cardId === cardId) continue;
+    const turnId = newId();
+    state.queue.push({
+      phase: 'CARD',
+      turnId,
+      saved: { sessionId, cardId },
+      make: (session_id, rev) => ({
+        session_id,
+        rev,
+        client_turn_id: turnId,
+        card_action: { id: cardId, action: 'SAVED', appointment_id: mark.appointmentId, alarms: mark.alarms },
+      }),
+    });
+  }
+}
+
+// fresh = 앱을 (다시) 열어 시작하는 읽기 — 저장 표시가 남은 카드는 서버에 SAVED를 다시 알림. 오류 뒤 다시 읽기(CONFLICT · NOT_FOUND)는 복원만
+async function readSession(resume: boolean, fresh = false): Promise<void> {
   const res = await callEdge<SessionResponse>('voice-session', { session_type: 'BEFORE_SLEEP', input_mode: 'TEXT', resume });
   const at = now();
   // 앱에서 이미 저장 · 저장 안 함으로 끝낸 카드는 서버가 아직 몰라도 그대로 — 다시 저장해 일정이 두 벌 생기지 않게
@@ -561,6 +607,7 @@ async function readSession(resume: boolean): Promise<void> {
   state.cards = new Map();
   for (const m of res.messages ?? []) pushMessage(m.role === 'ai' ? 'ai' : 'me', m.text, m.at ? new Date(m.at) : at);
   mergeCards(res.cards, at);
+  if (res.session_id) await restoreSaved(res.session_id, fresh);
   for (const [id, old] of done) {
     const rec = state.cards.get(id);
     if (rec && res.session_id && rec.status !== 'SAVED' && rec.status !== 'REJECTED') {
@@ -590,7 +637,7 @@ async function continueAfterOpen(): Promise<void> {
 // 대화 시작 — 오늘 안 끝난 세션이 있으면 그대로(resume), 없으면 새로. 첫 마디는 서버 템플릿이라 messages에 옴. 하루 한도면 세션 없이 limits.reached = DAY
 export async function startConversation(_opts: { type: 'BEFORE_SLEEP' } = { type: 'BEFORE_SLEEP' }): Promise<void> {
   try {
-    await readSession(true);
+    await readSession(true, true);
     await continueAfterOpen();
   } catch (e) {
     await onError(e);
@@ -664,9 +711,21 @@ function recOf(id: string): CardRec {
 
 // 카드 상태를 서버에 알림 — 이미 저장한 일은 되돌리지 않으므로 실패해도 던지지 않음. 앞에 못 끝난 요청이 있으면 큐에서 기다림
 //   서버가 거절해도(CONFLICT는 세션을 다시 읽고 새 rev로 한 번 더) 앱에서 한 저장은 그대로
-async function notifyCard(action: Record<string, unknown>): Promise<void> {
+//   saved = 저장됨 로컬 표시를 지울 카드 (SAVED 알림 — 서버가 받으면 지움)
+async function notifyCard(action: Record<string, unknown>, saved?: { cardId: string }): Promise<void> {
   const turnId = newId();
-  await submitCard({ phase: 'CARD', turnId, make: (session_id, rev) => ({ session_id, rev, client_turn_id: turnId, card_action: action }) });
+  await submitCard({
+    phase: 'CARD',
+    turnId,
+    make: (session_id, rev) => ({ session_id, rev, client_turn_id: turnId, card_action: action }),
+    ...(saved && state.sessionId ? { saved: { sessionId: state.sessionId, cardId: saved.cardId } } : {}),
+  });
+}
+
+// 저장한 카드를 '저장됨'으로 로컬에 적음 — 서버에 알리기 전에. 앱이 꺼져 알림이 안 가도 다시 열면 이 표시로 일정이 두 벌 생기지 않게 (저장소 오류는 삼킴)
+async function rememberSaved(cardId: string, cardKind: CardKind, appointmentId: string, alarms: readonly { kind: AlarmKind; at: Date; enabled: boolean }[], level: number): Promise<void> {
+  if (!state.sessionId) return;
+  await markSaved(state.sessionId, cardId, { appointmentId, cardKind, alarms: alarmSummary(alarms, level), savedAt: now().toISOString() });
 }
 
 // 저장 뒤 알람 한 줄씩 — 서버가 말할 숫자 (종류 · 시각 · 켜짐 · 강도만, 이동 분은 안 보냄 — D5)
@@ -714,11 +773,13 @@ export function saveCard(cardId: string): Promise<string> {
       toast = `${saved.title} 알람을 맞췄어요`;
       rec.status = 'SAVED'; // 일정은 저장됨 — 아래 두 번째 저장이 실패해도 카드는 저장으로
       rec.appointmentId = saved.id;
+      await rememberSaved(cardId, kind, saved.id, alarms, level); // 서버에 알리기 전에 — 앱이 꺼져도 다시 저장되지 않게
       try {
         const after = await adjustAfterSave(saved.id, rec.server.edit);
         if (after) {
           alarms = after.alarms;
           level = after.level;
+          await rememberSaved(cardId, kind, saved.id, alarms, level); // 바뀐 알람으로 갱신
         }
       } catch {
         partial = `${saved.title}은 저장했지만 준비 시간 · 강도는 바꾸지 못했어요. 알람 설정에서 바꿔 주세요`;
@@ -735,6 +796,7 @@ export function saveCard(cardId: string): Promise<string> {
       toast = '알람을 바꿨어요';
       rec.status = 'SAVED';
       rec.appointmentId = id;
+      await rememberSaved(cardId, kind, id, alarms, level);
     } else if (kind === 'ALARM_NEW') {
       const at = rec.server.edit?.at ? new Date(rec.server.edit.at) : null;
       if (!at || Number.isNaN(at.getTime())) throw new UserError('알람 시각을 알 수 없어요');
@@ -745,11 +807,12 @@ export function saveCard(cardId: string): Promise<string> {
       level = saved.level;
       rec.status = 'SAVED';
       rec.appointmentId = saved.id;
+      await rememberSaved(cardId, kind, saved.id, alarms, level);
     } else {
       throw new UserError('이 카드는 저장할 게 없어요');
     }
 
-    await notifyCard({ id: cardId, action: 'SAVED', appointment_id: appointmentId, alarms: alarmSummary(alarms, level) });
+    await notifyCard({ id: cardId, action: 'SAVED', appointment_id: appointmentId, alarms: alarmSummary(alarms, level) }, { cardId });
     return partial ?? toast;
   });
 }
