@@ -14,7 +14,7 @@ import { autoLevel, resolveIntensity } from '@shared/calc/intensity.ts';
 
 import { forgetDetail } from './detailCache';
 import { storedOverrides } from './map';
-import { fetchLateCount, loadAppointmentRowsByAppointment } from './realRows';
+import { fetchLateCount, fetchWakeSensitivity, loadAppointmentRowsByAppointment } from './realRows';
 import type { AlarmKind, IntensityAxis, Level } from './types';
 
 const PHONE_FAILED = '폰에 알람을 반영하지 못했어요. 알람 권한을 확인하고 앱을 다시 열어 주세요';
@@ -87,10 +87,10 @@ export async function setIntensity(id: string, axis: IntensityAxis, level: Level
   const userId = await requireUserId();
   const rows = await loadAppointmentRowsByAppointment(id, userId);
   if (!rows) throw new UserError(NOT_FOUND);
-  const lateCount = await fetchLateCount(userId, now().getTime());
+  const [lateCount, wakeSensitivity] = await Promise.all([fetchLateCount(userId, now().getTime()), fetchWakeSensitivity(userId)]);
   const importance = rows.appointment.importance;
-  const picked = { ...storedOverrides(rows.alarms, autoLevel(importance, lateCount)), [axis]: level };
-  const { fields, manual } = resolveIntensity(importance, lateCount, picked);
+  const picked = { ...storedOverrides(rows.alarms, autoLevel(importance, lateCount, wakeSensitivity)), [axis]: level };
+  const { fields, manual } = resolveIntensity(importance, lateCount, picked, wakeSensitivity);
   const { data, error } = await supabase
     .from('alarms')
     .update({ intensity: fields.intensity, voice_tone: fields.voiceTone, sound_key: fields.soundKey, intensity_source: manual ? 'MANUAL' : 'AUTO' })

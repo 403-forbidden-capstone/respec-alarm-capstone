@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { autoLevel, LATE_COUNT_THRESHOLD, levelOfIntensity, levelOfSoundKey, levelOfVoiceTone, resolveIntensity, type WakeSensitivity } from './intensity.ts';
+import { autoLevel, LATE_COUNT_THRESHOLD, levelOfIntensity, levelOfSoundKey, levelOfVoiceTone, resolveIntensity, wakeSensitivityOf, type WakeSensitivity } from './intensity.ts';
 import type { Importance, Level } from './types.ts';
 
 // D69 규칙 표 — 기본 보통(1), 매우 중요(HIGH) +1, 최근 4주 늦잠 지각 2회 이상 +1, 잠귀 HEAVY면 강, 상한 강(2)
@@ -95,4 +95,10 @@ test('저장된 DB 값에서 단계 읽기', () => {
   assert.equal(levelOfSoundKey('theme_default'), 1);
   assert.equal(levelOfSoundKey('theme_focus'), null);
   assert.equal(levelOfIntensity(null), null);
+});
+
+test('wakeSensitivityOf: DB 값 HEAVY만 HEAVY, LIGHT · NORMAL · 모르는 값 · 빈 값은 NORMAL (약은 직접 고를 때만, D69)', () => {
+  assert.deepEqual(['HEAVY', 'LIGHT', 'NORMAL', 'x', '', null, undefined].map(wakeSensitivityOf), ['HEAVY', 'NORMAL', 'NORMAL', 'NORMAL', 'NORMAL', 'NORMAL', 'NORMAL']);
+  // 가벼움 + 보통 일정 → 보통 (약 아님)
+  assert.equal(autoLevel('NORMAL', 0, wakeSensitivityOf('LIGHT')), 1);
 });
