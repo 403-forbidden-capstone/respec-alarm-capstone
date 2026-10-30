@@ -196,6 +196,7 @@ export default function SettingsScreen() {
         locate={locateOnce}
         center={homeOf(profile)}
         suggestedNames={['집']}
+        areaWarning="캠퍼스 대표 위치예요. 건물을 고르면 더 정확해요"
         title="집 찾기"
       />
     </Screen>

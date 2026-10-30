@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Keyboard, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
+import { Keyboard, Platform, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 
 import { Button, EmptyState, LoadError, Loading, Sheet, Text, toast } from '@/components/ui';
 import { userMessage } from '@/lib/errors';
@@ -10,9 +10,11 @@ import {
   ADDRESS_FAILED,
   AREA_WARNING,
   DEFAULT_CENTER,
+  isSamePin,
   namingPick,
   placeFromPin,
   REVERSE_DELAY_MS,
+  REVERSE_TIMEOUT_MS,
   showsAreaWarning,
   type PickedPlace,
 } from '../mapPicker';
@@ -32,6 +34,7 @@ type Props = {
   locate: () => Promise<LatLng | null>; // 지금 위치 한 번 (location/currentPosition locateOnce). 거절 · 실패는 null
   center?: LatLng; // 처음 중심 — 지금 집 같은 곳. 없으면 서울 시청에서 열고, 핀을 놓기 전에는 [이 위치로 정하기]가 막힘
   suggestedNames?: string[]; // 이름 칩 (기본 집 · 학교 · 회사)
+  areaWarning?: string | null; // 캠퍼스 대표 좌표를 골랐을 때 문구 (기본은 캠퍼스 안내, null이면 안 보임). 캠퍼스가 아닌 곳(집)에서는 중립 문구나 null
   title?: string;
 };
 
@@ -51,7 +54,7 @@ type PinResult = { lat: number; lng: number; address: PinAddress | null } | { la
 type Pin = { kind: 'loading' } | { kind: 'done'; address: PinAddress | null } | { kind: 'failed' };
 
 // 시트 안에서 그려지는 본문 — 시트가 열릴 때마다 새로 떠서 상태가 초기화됨 (시트 내용은 루트에서 그려지므로 상태를 여기에 둠)
-function MapPlaceBody({ onPick, search, reverse, locate, center, suggestedNames }: Omit<Props, 'visible' | 'onClose' | 'title'>) {
+function MapPlaceBody({ onPick, search, reverse, locate, center, suggestedNames, areaWarning = AREA_WARNING }: Omit<Props, 'visible' | 'onClose' | 'title'>) {
   const [text, setText] = useState(''); // 검색 칸
   const [listOpen, setListOpen] = useState(false); // 검색 결과 목록이 지도 위에 뜸 (글자를 칠 때 열리고, 결과를 고르면 닫힘)
   const [point, setPoint] = useState<LatLng | null>(center ?? null); // 핀이 놓인 자리
@@ -77,7 +80,12 @@ function MapPlaceBody({ onPick, search, reverse, locate, center, suggestedNames 
   useEffect(() => {
     if (lat == null || lng == null) return;
     let stale = false;
+    let giveUp: ReturnType<typeof setTimeout> | undefined;
     const timer = setTimeout(() => {
+      // 응답이 영영 안 와도 [이 위치로 정하기]가 막혀 있지 않게 — 시간이 지나면 못 구한 것으로 처리
+      giveUp = setTimeout(() => {
+        if (!stale) setPinResult({ lat, lng, failed: true });
+      }, REVERSE_TIMEOUT_MS);
       Promise.resolve()
         .then(() => reverseRef.current(lat, lng))
         .then(
@@ -92,6 +100,7 @@ function MapPlaceBody({ onPick, search, reverse, locate, center, suggestedNames 
     return () => {
       stale = true;
       clearTimeout(timer);
+      clearTimeout(giveUp);
     };
   }, [lat, lng]);
 
@@ -100,8 +109,16 @@ function MapPlaceBody({ onPick, search, reverse, locate, center, suggestedNames 
     setMoveTo({ lat: to.lat, lng: to.lng, nonce: ++nonce.current });
   }, []);
 
-  // 지도를 끌어 멈춤 — 핀 자리가 바뀜
-  const onCenter = useCallback((la: number, ln: number) => setPoint({ lat: la, lng: ln }), []);
+  // 지도를 끌어 멈춤 — 핀 자리가 바뀜. 5m 안이면 같은 자리(검색 결과로 옮긴 뒤 지도가 알려 주는 좌표가 소수점 끝만 다른 경우)라 그대로 둠 → 주소를 다시 찾지 않음
+  const onCenter = useCallback(
+    (la: number, ln: number) => setPoint((prev) => (prev && isSamePin(prev, { lat: la, lng: ln }) ? prev : { lat: la, lng: ln })),
+    [],
+  );
+
+  const clearSearch = () => {
+    setText('');
+    setListOpen(false);
+  };
 
   const pickResult = (place: Place) => {
     if (typeof place.lat !== 'number' || typeof place.lng !== 'number') {
@@ -139,12 +156,15 @@ function MapPlaceBody({ onPick, search, reverse, locate, center, suggestedNames 
     !pinResult || pinResult.lat !== lat || pinResult.lng !== lng ? { kind: 'loading' } : 'failed' in pinResult ? { kind: 'failed' } : { kind: 'done', address: pinResult.address };
   const pinAddress = pin.kind === 'done' ? pin.address : null;
   const naming = namingPick(picked, point);
+  // 핀 자리 주소를 찾는 중이면 정하기를 막음 (이름이 주소로 정해질 수 있어서). 검색 결과를 눌러 정한 자리(naming)는 그 이름 · 주소를 쓰므로 기다리지 않음. 실패 · 못 구함은 막지 않음
+  const waitingAddress = pin.kind === 'loading' && !naming;
   const confirm = () => {
-    if (!point) return;
+    if (!point || waitingAddress) return;
     onPick(placeFromPin({ point, typedName: name, picked: naming, pinAddress }));
   };
 
   const names = suggestedNames ?? DEFAULT_NAMES;
+  const canLocate = Platform.OS !== 'web'; // 웹 미리보기는 위치를 못 읽음 — 눌러서 실패하게 하지 않고 처음부터 흐리게
   return (
     <>
       <View style={[styles.box, listOpen && styles.focused]}>
@@ -166,24 +186,41 @@ function MapPlaceBody({ onPick, search, reverse, locate, center, suggestedNames 
           accessibilityLabel="장소 검색"
           style={styles.input}
         />
+        {text ? (
+          <Pressable onPress={clearSearch} accessibilityRole="button" accessibilityLabel="검색어 지우기" hitSlop={10} style={({ pressed }) => pressed && styles.pressed}>
+            <Text variant="body" tone="sub">
+              ✕
+            </Text>
+          </Pressable>
+        ) : null}
       </View>
 
       <View style={styles.map}>
         <MapView center={center ?? DEFAULT_CENTER} onCenter={onCenter} moveTo={moveTo} onStatus={setMapStatus} />
         {listOpen && query ? (
           <View style={styles.results}>
-            <ScrollView nestedScrollEnabled keyboardShouldPersistTaps="handled">
+            <ScrollView nestedScrollEnabled keyboardShouldPersistTaps="handled" style={styles.resultList}>
               <SearchResults result={result} onPick={pickResult} onRetry={retry} />
             </ScrollView>
+            {/* 목록 아래 빈 자리를 누르면 목록을 닫고 지도를 보여 줌 */}
+            <Pressable
+              onPress={() => {
+                Keyboard.dismiss();
+                setListOpen(false);
+              }}
+              accessibilityElementsHidden
+              importantForAccessibility="no"
+              style={styles.resultsRest}
+            />
           </View>
         ) : (
           <Pressable
             onPress={onLocate}
-            disabled={locating}
+            disabled={locating || !canLocate}
             accessibilityRole="button"
             accessibilityLabel="현재 위치"
-            accessibilityState={{ disabled: locating || locateFailed, busy: locating }}
-            style={({ pressed }) => [styles.locate, (locateFailed || locating) && styles.dim, pressed && styles.pressed]}
+            accessibilityState={{ disabled: locating || locateFailed || !canLocate, busy: locating }}
+            style={({ pressed }) => [styles.locate, (locateFailed || locating || !canLocate) && styles.dim, pressed && styles.pressed]}
           >
             <Text variant="label" tone="ink">
               ◎ 현재 위치
@@ -211,12 +248,12 @@ function MapPlaceBody({ onPick, search, reverse, locate, center, suggestedNames 
           </>
         ) : (
           <Text variant="body" tone="sub">
-            {picked?.address ?? '주소를 찾는 중…'}
+            {naming?.address ?? '주소 찾는 중…'}
           </Text>
         )}
-        {showsAreaWarning(picked, point) ? (
+        {areaWarning && showsAreaWarning(picked, point) ? (
           <Text variant="small" tone="warn" style={styles.warn}>
-            {AREA_WARNING}
+            {areaWarning}
           </Text>
         ) : null}
       </View>
@@ -257,7 +294,7 @@ function MapPlaceBody({ onPick, search, reverse, locate, center, suggestedNames 
         />
       </View>
 
-      <Button label="이 위치로 정하기" onPress={confirm} disabled={!point} />
+      <Button label={waitingAddress ? '주소 찾는 중…' : '이 위치로 정하기'} onPress={confirm} disabled={!point || waitingAddress} />
     </>
   );
 }
@@ -310,7 +347,9 @@ const styles = StyleSheet.create({
   focused: { borderColor: colors.ink },
   input: { ...typeScale.body, flex: 1, minWidth: 0, color: colors.ink, paddingVertical: 0 },
   map: { height: MAP_HEIGHT, borderRadius: radius.card, overflow: 'hidden', borderWidth: 1, borderColor: colors.line, backgroundColor: colors.chip },
-  results: { position: 'absolute', top: 0, right: 0, bottom: 0, left: 0, backgroundColor: colors.card, paddingHorizontal: 14 },
+  results: { position: 'absolute', top: 0, right: 0, bottom: 0, left: 0, backgroundColor: colors.card },
+  resultList: { flexGrow: 0, flexShrink: 1, paddingHorizontal: 14 },
+  resultsRest: { flex: 1, minHeight: 0 },
   row: { paddingVertical: 12, minHeight: 52, justifyContent: 'center' },
   divider: { borderTopWidth: 1, borderTopColor: colors.line },
   sub: { marginTop: 2 },

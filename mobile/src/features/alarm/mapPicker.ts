@@ -74,9 +74,43 @@ export function moveToMessage(lat: number, lng: number): string | null {
   return inRange(lat, 90) && inRange(lng, 180) ? JSON.stringify({ type: 'moveTo', lat, lng }) : null;
 }
 
-// 핀 둘레에 반경 원 — 0 이하면 지움. 반경 고르기(다음 PR)가 부름
+// 반경 원의 상한(m) — 지도에 터무니없이 큰 원을 그리지 않게
+export const MAX_RADIUS_M = 5000;
+
+// 핀 둘레에 반경 원 — 0 이하면 지움, 상한(MAX_RADIUS_M)을 넘으면 상한으로. 반경 고르기(다음 PR)가 부름
 export function setRadiusMessage(meters: number): string {
-  return JSON.stringify({ type: 'setRadius', meters: Number.isFinite(meters) && meters > 0 ? meters : 0 });
+  return JSON.stringify({ type: 'setRadius', meters: Number.isFinite(meters) && meters > 0 ? Math.min(meters, MAX_RADIUS_M) : 0 });
+}
+
+// ---------------------------------------------------------------------------
+// WebView 이동 · 지도 안 뜸 감시
+// ---------------------------------------------------------------------------
+
+// 지도 페이지가 이 안에 ready를 안 보내면 못 띄운 것으로 봄 — 페이지의 SDK 불러오기 제한(10초)보다 길게 둠 (SDK는 떴는데 타일이 안 오는 경우까지 잡음)
+export const MAP_READY_TIMEOUT_MS = 12000;
+
+// ready 감시 타이머 시작 — 돌려주는 함수를 부르면 해제 (ready가 오면 · 다시 시도 · 닫힘)
+export function startReadyTimer(onTimeout: () => void, ms: number = MAP_READY_TIMEOUT_MS): () => void {
+  const timer = setTimeout(onTimeout, ms);
+  return () => clearTimeout(timer);
+}
+
+// 지도 페이지 자신의 주소인지 — origin이 같고 경로가 /map-picker.html(Cloudflare가 .html을 떼고 /map-picker로 넘기기도 함)일 때만.
+//   WebView가 다른 곳으로 이동하려 할 때 막는 기준. URL 클래스는 RN에서 origin을 못 믿어 글자로 비교 (WebView 허용 목록은 앞부분만 맞춰서 도메인 뒤에 글자를 붙인 주소도 통과하므로 여기서 경로 끝까지 확인)
+export function isAllowedMapRequest(url: string, origin: string): boolean {
+  const base = origin.trim().replace(/\/+$/, '').toLowerCase();
+  const target = url.trim().toLowerCase();
+  const page = MAP_PICKER_PATH.replace(/\.html$/, '');
+  return [MAP_PICKER_PATH, page].some((path) => {
+    if (!target.startsWith(base + path)) return false;
+    const rest = target.slice(base.length + path.length);
+    return rest === '' || rest[0] === '?' || rest[0] === '#';
+  });
+}
+
+// 바깥 브라우저로 넘겨도 되는 주소 — http · https만 (intent: · file: 등은 열지 않음)
+export function isWebLink(url: string): boolean {
+  return /^https?:\/\//i.test(url.trim());
 }
 
 // ---------------------------------------------------------------------------
@@ -121,6 +155,9 @@ export const REVERSE_DELAY_MS = 400;
 
 // 캠퍼스 대표 좌표 경고 문구 (D68)
 export const AREA_WARNING = '캠퍼스 대표 위치예요. 건물을 고르면 도착이 정확해요';
+
+// 핀 자리 주소를 이 안에 못 받으면 못 구한 것으로 봄 — [이 위치로 정하기]가 주소를 기다리다 영영 막히지 않게
+export const REVERSE_TIMEOUT_MS = 8000;
 
 // 핀이 검색 결과에서 이만큼(m) 안이면 그 결과의 이름 · 주소를 [이 위치로 정하기]에 씀 — 미세 조정은 같은 장소, 멀리 옮기면 다른 장소
 export const NEAR_PICK_METERS = 100;

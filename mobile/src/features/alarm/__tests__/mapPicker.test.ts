@@ -1,16 +1,21 @@
-import { describe, expect, it } from '@jest/globals';
+import { afterEach, describe, expect, it, jest } from '@jest/globals';
 
 import {
   DEFAULT_CENTER,
+  isAllowedMapRequest,
   isSamePin,
+  isWebLink,
+  MAP_READY_TIMEOUT_MS,
   mapPickerUrl,
   moveToMessage,
   namingPick,
   parsePageMessage,
   placeFromPin,
   resolveOrigin,
+  MAX_RADIUS_M,
   setRadiusMessage,
   showsAreaWarning,
+  startReadyTimer,
   UNNAMED_PLACE,
 } from '../mapPicker';
 
@@ -77,6 +82,8 @@ describe('앱 → 페이지 메시지', () => {
     expect(moveToMessage(37, Number.NaN)).toBeNull();
     expect(JSON.parse(setRadiusMessage(-5))).toEqual({ type: 'setRadius', meters: 0 });
     expect(JSON.parse(setRadiusMessage(Number.NaN))).toEqual({ type: 'setRadius', meters: 0 });
+    expect(JSON.parse(setRadiusMessage(9_999_999))).toEqual({ type: 'setRadius', meters: MAX_RADIUS_M }); // 상한
+    expect(JSON.parse(setRadiusMessage(MAX_RADIUS_M))).toEqual({ type: 'setRadius', meters: MAX_RADIUS_M });
   });
 });
 
@@ -120,5 +127,84 @@ describe('핀과 검색 결과', () => {
     expect(namingPick(null, { lat: 1, lng: 2 })).toBeNull();
     expect(namingPick({ name: '좌표 없는 곳' }, { lat: 1, lng: 2 })).toBeNull();
     expect(namingPick(BUILDING, null)).toBeNull();
+  });
+});
+
+describe('isAllowedMapRequest', () => {
+  const origin = 'https://respec.example';
+  const url = mapPickerUrl({ origin, key: 'k', center: DEFAULT_CENTER });
+
+  it('지도 페이지 주소(인자 포함)와 Cloudflare가 .html을 뗀 주소는 허용', () => {
+    expect(isAllowedMapRequest(url, origin)).toBe(true);
+    expect(isAllowedMapRequest('https://respec.example/map-picker.html', origin)).toBe(true);
+    expect(isAllowedMapRequest('https://respec.example/map-picker?key=k&lat=1&lng=2', origin)).toBe(true);
+    expect(isAllowedMapRequest('https://RESPEC.example/map-picker.html#x', origin)).toBe(true);
+    expect(isAllowedMapRequest(url, 'https://respec.example/')).toBe(true); // 끝 /는 무시
+  });
+
+  it('같은 origin의 다른 경로 · 다른 도메인 · 도메인 뒤에 글자를 붙인 주소 · 다른 scheme은 막음', () => {
+    expect(isAllowedMapRequest('https://respec.example/', origin)).toBe(false);
+    expect(isAllowedMapRequest('https://respec.example/mockup.html', origin)).toBe(false);
+    expect(isAllowedMapRequest('https://respec.example/map-picker.html.evil', origin)).toBe(false);
+    expect(isAllowedMapRequest('https://respec.example/map-pickerx', origin)).toBe(false);
+    expect(isAllowedMapRequest('https://other.example/map-picker.html', origin)).toBe(false);
+    expect(isAllowedMapRequest('https://respec.example.evil.com/map-picker.html', origin)).toBe(false);
+    expect(isAllowedMapRequest('http://respec.example/map-picker.html', origin)).toBe(false);
+    expect(isAllowedMapRequest('intent://scan#Intent;end', origin)).toBe(false);
+    expect(isAllowedMapRequest('about:blank', origin)).toBe(false);
+  });
+
+  it('개발용 http origin(포트 포함)도 그 origin만 허용', () => {
+    const dev = 'http://192.168.0.5:8081';
+    expect(isAllowedMapRequest(mapPickerUrl({ origin: dev, key: 'k', center: DEFAULT_CENTER }), dev)).toBe(true);
+    expect(isAllowedMapRequest('http://192.168.0.5:80810/map-picker.html', dev)).toBe(false);
+    expect(isAllowedMapRequest('http://192.168.0.5:3000/map-picker.html', dev)).toBe(false);
+  });
+});
+
+describe('isWebLink', () => {
+  it('http · https만 바깥 브라우저로 넘김', () => {
+    expect(isWebLink('https://a.example/x')).toBe(true);
+    expect(isWebLink('HTTP://a.example')).toBe(true);
+    expect(isWebLink('intent://x#Intent;end')).toBe(false);
+    expect(isWebLink('file:///sdcard/a')).toBe(false);
+    expect(isWebLink('javascript:alert(1)')).toBe(false);
+    expect(isWebLink('')).toBe(false);
+  });
+});
+
+describe('startReadyTimer', () => {
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
+  it('12초 안에 풀지 않으면 실패를 알림', () => {
+    jest.useFakeTimers();
+    const onTimeout = jest.fn();
+    startReadyTimer(onTimeout);
+    jest.advanceTimersByTime(MAP_READY_TIMEOUT_MS - 1);
+    expect(onTimeout).not.toHaveBeenCalled();
+    jest.advanceTimersByTime(1);
+    expect(onTimeout).toHaveBeenCalledTimes(1);
+    jest.advanceTimersByTime(60_000);
+    expect(onTimeout).toHaveBeenCalledTimes(1); // 한 번만
+  });
+
+  it('ready가 와서(또는 다시 시도 · 닫힘으로) 풀면 알리지 않음', () => {
+    jest.useFakeTimers();
+    const onTimeout = jest.fn();
+    const stop = startReadyTimer(onTimeout);
+    jest.advanceTimersByTime(5000);
+    stop();
+    jest.advanceTimersByTime(60_000);
+    expect(onTimeout).not.toHaveBeenCalled();
+  });
+
+  it('시간을 따로 줄 수 있음', () => {
+    jest.useFakeTimers();
+    const onTimeout = jest.fn();
+    startReadyTimer(onTimeout, 100);
+    jest.advanceTimersByTime(100);
+    expect(onTimeout).toHaveBeenCalledTimes(1);
   });
 });

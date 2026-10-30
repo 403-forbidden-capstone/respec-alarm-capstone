@@ -1,6 +1,6 @@
-import { beforeEach, describe, expect, it, jest } from '@jest/globals';
+import { afterEach, beforeEach, describe, expect, it, jest } from '@jest/globals';
 
-import { locateOnce } from '../currentPosition';
+import { LOCATE_TIMEOUT_MS, locateOnce } from '../currentPosition';
 
 // 지금 위치 한 번 — 안드로이드에서만 expo-location을 부름. 권한은 앞(앱 사용 중)만 물음
 let mockOS = 'android';
@@ -17,11 +17,13 @@ jest.mock('react-native/Libraries/Utilities/Platform', () => ({
 const mockAsk = jest.fn<() => Promise<{ granted: boolean }>>();
 const mockBackground = jest.fn<() => Promise<{ granted: boolean }>>();
 const mockPosition = jest.fn<(options: { accuracy: number }) => Promise<{ coords: { latitude: number; longitude: number } }>>();
+const mockLastKnown = jest.fn<(options: { maxAge: number }) => Promise<{ coords: { latitude: number; longitude: number } } | null>>();
 jest.mock('expo-location', () => ({
   Accuracy: { Balanced: 3 },
   requestForegroundPermissionsAsync: () => mockAsk(),
   requestBackgroundPermissionsAsync: () => mockBackground(),
   getCurrentPositionAsync: (options: { accuracy: number }) => mockPosition(options),
+  getLastKnownPositionAsync: (options: { maxAge: number }) => mockLastKnown(options),
 }));
 
 beforeEach(() => {
@@ -29,6 +31,11 @@ beforeEach(() => {
   mockAsk.mockReset().mockResolvedValue({ granted: true });
   mockBackground.mockReset();
   mockPosition.mockReset().mockResolvedValue({ coords: { latitude: 37.55, longitude: 127.07 } });
+  mockLastKnown.mockReset().mockResolvedValue(null);
+});
+
+afterEach(() => {
+  jest.useRealTimers();
 });
 
 describe('locateOnce', () => {
@@ -49,6 +56,29 @@ describe('locateOnce', () => {
     await expect(locateOnce()).resolves.toBeNull();
     mockPosition.mockResolvedValue({ coords: { latitude: Number.NaN, longitude: 127 } });
     await expect(locateOnce()).resolves.toBeNull();
+  });
+
+  it('현재 위치 읽기가 실패하면 5분 안의 마지막 위치로 대신함', async () => {
+    mockPosition.mockRejectedValue(new Error('location unavailable'));
+    mockLastKnown.mockResolvedValue({ coords: { latitude: 37.5, longitude: 127.0 } });
+    await expect(locateOnce()).resolves.toEqual({ lat: 37.5, lng: 127.0 });
+    expect(mockLastKnown).toHaveBeenCalledWith({ maxAge: 5 * 60 * 1000 });
+  });
+
+  it('8초 안에 현재 위치가 안 오면 마지막 위치로 (그것도 없으면 null)', async () => {
+    jest.useFakeTimers();
+    mockPosition.mockReturnValue(new Promise(() => {})); // 영영 안 옴
+    mockLastKnown.mockResolvedValue({ coords: { latitude: 37.5, longitude: 127.0 } });
+    const found = locateOnce();
+    await jest.advanceTimersByTimeAsync(LOCATE_TIMEOUT_MS - 1);
+    expect(mockLastKnown).not.toHaveBeenCalled(); // 아직 기다리는 중
+    await jest.advanceTimersByTimeAsync(1);
+    await expect(found).resolves.toEqual({ lat: 37.5, lng: 127.0 });
+
+    mockLastKnown.mockResolvedValue(null);
+    const none = locateOnce();
+    await jest.advanceTimersByTimeAsync(LOCATE_TIMEOUT_MS);
+    await expect(none).resolves.toBeNull();
   });
 
   it('웹 · iOS는 null (권한도 묻지 않음)', async () => {

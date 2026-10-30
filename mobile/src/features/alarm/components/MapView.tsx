@@ -1,26 +1,38 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Platform, StyleSheet, View } from 'react-native';
+import { Linking, Platform, StyleSheet, View } from 'react-native';
 import type { WebView as WebViewClass } from 'react-native-webview';
 
-import { Text } from '@/components/ui';
+import { Button, Text } from '@/components/ui';
 import { colors } from '@/theme';
 
-import { KAKAO_JS_KEY, MAP_PICKER_ORIGIN, mapPickerUrl, moveToMessage, parsePageMessage } from '../mapPicker';
+import {
+  isAllowedMapRequest,
+  isWebLink,
+  KAKAO_JS_KEY,
+  MAP_PICKER_ORIGIN,
+  mapPickerUrl,
+  moveToMessage,
+  parsePageMessage,
+  startReadyTimer,
+} from '../mapPicker';
 import type { LatLng } from '../types';
 
 type Props = {
   center: LatLng; // 처음 중심 — 주소는 한 번만 정해서 쓰므로 나중에 바뀌어도 지도를 다시 열지 않음 (옮기려면 moveTo)
   onCenter: (lat: number, lng: number) => void; // 지도를 움직여 멈춘 뒤 가운데(핀) 좌표
   moveTo?: { lat: number; lng: number; nonce: number }; // 바뀔 때마다 그 좌표로 옮김 (같은 좌표를 또 보내려면 nonce를 올림)
-  onStatus: (status: 'ready' | 'error') => void; // 지도가 떴음 · 못 띄움
+  onStatus: (status: 'loading' | 'ready' | 'error') => void; // 지도가 떴음 · 못 띄움 (다시 시도하면 loading)
 };
 
 // 카카오맵 지도 칸 — public/map-picker.html을 웹은 iframe, 앱은 WebView로 열고 postMessage로 주고받음 (형식은 mapPicker.ts)
 // 가운데 핀은 페이지가 그림. 카카오 JavaScript 키(EXPO_PUBLIC_KAKAO_JS_KEY)가 없으면 열지 않고 "지도 준비 중" 문구만
+// 키가 있는데 12초 안에 지도가 안 뜨면(허용 도메인이 틀려 빈 지도 · 네트워크 막힘) 못 띄운 것으로 보고 [다시 시도]를 보여 줌
 // 부모가 크기를 정함 (이 칸은 주어진 자리를 가득 채움)
 export function MapView({ center, onCenter, moveTo, onStatus }: Props) {
   const [url] = useState(() => (KAKAO_JS_KEY ? mapPickerUrl({ origin: MAP_PICKER_ORIGIN, key: KAKAO_JS_KEY, center }) : null));
   const [failure, setFailure] = useState<'no-key' | 'failed' | null>(url ? null : 'no-key');
+  const [loaded, setLoaded] = useState(false); // 페이지가 ready를 보냄
+  const [attempt, setAttempt] = useState(0); // 다시 시도할 때마다 올려 웹 · 앱 조각을 새로 띄움
   const post = useRef<((text: string) => void) | null>(null); // 페이지에 글자를 보내는 함수 — 아래 웹 · 앱 조각이 register로 채움
   const ready = useRef(false);
   const queued = useRef<string | null>(null); // 지도가 뜨기 전에 온 moveTo (마지막 것만)
@@ -40,6 +52,21 @@ export function MapView({ center, onCenter, moveTo, onStatus }: Props) {
     callbacks.current.onStatus('error');
   }, []);
 
+  // 지도가 안 뜨는 채로 12초가 지나면 실패 — ready가 오면 · 다시 시도 · 언마운트 때 타이머를 풂
+  const waiting = !!url && !failure && !loaded;
+  useEffect(() => {
+    if (!waiting) return;
+    return startReadyTimer(fail);
+  }, [waiting, attempt, fail]);
+
+  const retry = useCallback(() => {
+    ready.current = false;
+    setLoaded(false);
+    setFailure(null);
+    setAttempt((n) => n + 1);
+    callbacks.current.onStatus('loading');
+  }, []);
+
   const onPageMessage = useCallback(
     (raw: unknown) => {
       const message = parsePageMessage(raw);
@@ -48,6 +75,7 @@ export function MapView({ center, onCenter, moveTo, onStatus }: Props) {
         callbacks.current.onCenter(message.lat, message.lng);
       } else if (message.type === 'ready') {
         ready.current = true;
+        setLoaded(true);
         if (queued.current) post.current?.(queued.current);
         queued.current = null;
         callbacks.current.onStatus('ready');
@@ -80,15 +108,16 @@ export function MapView({ center, onCenter, moveTo, onStatus }: Props) {
         <Text variant="caption" align="center">
           위에서 장소를 검색해 고를 수 있어요
         </Text>
+        {failure === 'failed' ? <Button label="다시 시도" variant="ghost" small onPress={retry} /> : null}
       </View>
     );
   }
   return (
     <View style={styles.fill}>
       {Platform.OS === 'web' ? (
-        <WebFrame url={url} register={register} onMessage={onPageMessage} />
+        <WebFrame key={attempt} url={url} register={register} onMessage={onPageMessage} />
       ) : (
-        <AppFrame url={url} register={register} onMessage={onPageMessage} onFail={fail} />
+        <AppFrame key={attempt} url={url} register={register} onMessage={onPageMessage} onFail={fail} />
       )}
     </View>
   );
@@ -119,7 +148,9 @@ function WebFrame({ url, register, onMessage }: FrameProps) {
       ref={frame}
       src={url}
       title="지도"
-      sandbox="allow-scripts allow-same-origin" // 지도 페이지는 스크립트만 필요 (이동 · 팝업 · 폼은 막음)
+      // 페이지가 같은 origin이라 allow-scripts와 allow-same-origin을 함께 줘야 동작함 → 이 조합은 페이지 스크립트가 sandbox를 벗어날 수 있어 격리는 약함(이동 · 팝업 · 폼만 막음).
+      // 우리 페이지(public/map-picker.html)만 열고 주소는 우리가 정하므로 위험을 알고 감. 바깥 페이지를 열게 되면 바꿔야 함
+      sandbox="allow-scripts allow-same-origin"
       style={{ border: 0, width: '100%', height: '100%', display: 'block' }}
     />
   );
@@ -136,6 +167,19 @@ function AppFrame({ url, register, onMessage, onFail }: FrameProps & { onFail: (
     return () => register(null);
   }, [register]);
 
+  // 지도 페이지 말고는 WebView가 가지 못하게 막음 — 다른 주소(광고 · 카카오 약관 링크 등)는 http · https만 바깥 브라우저로 넘김
+  const onShouldStart = useCallback((request: { url: string }) => {
+    if (isAllowedMapRequest(request.url, MAP_PICKER_ORIGIN)) return true;
+    if (isWebLink(request.url)) {
+      try {
+        Promise.resolve(Linking.openURL(request.url)).catch(() => {});
+      } catch {
+        /* 열 수 없는 주소면 조용히 */
+      }
+    }
+    return false;
+  }, []);
+
   return (
     <WebView
       ref={view}
@@ -143,7 +187,8 @@ function AppFrame({ url, register, onMessage, onFail }: FrameProps & { onFail: (
       onMessage={(event) => onMessage(event.nativeEvent.data)}
       onError={onFail}
       onHttpError={onFail}
-      originWhitelist={['https://*', 'http://*']}
+      originWhitelist={[MAP_PICKER_ORIGIN.replace(/\/+$/, '')]} // 지도 페이지 origin 하나 (개발 중 http 주소면 그 주소)
+      onShouldStartLoadWithRequest={onShouldStart}
       javaScriptEnabled
       domStorageEnabled
       nestedScrollEnabled // 시트(스크롤) 안에서도 지도를 끌 수 있게
@@ -157,5 +202,5 @@ function AppFrame({ url, register, onMessage, onFail }: FrameProps & { onFail: (
 const styles = StyleSheet.create({
   fill: { flex: 1, overflow: 'hidden', backgroundColor: colors.chip },
   web: { flex: 1, backgroundColor: colors.chip },
-  placeholder: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 4, paddingHorizontal: 24, backgroundColor: colors.chip },
+  placeholder: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 6, paddingHorizontal: 24, backgroundColor: colors.chip },
 });
