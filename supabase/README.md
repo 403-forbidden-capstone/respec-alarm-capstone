@@ -115,6 +115,7 @@ create policy wake_signal_receive on realtime.messages
 | `alarm-suggest` | 이동시간 · 기상 · 준비 · 출발 · 도착 시각 · 강도 미리 보기 (DB에 안 씀). 요청은 `alarm-commit`과 같은 초안 모양. 직접 입력 이동은 이어받음 | 앱 H05 · H03 | 켬 | 카카오 길찾기 |
 | `alarm-commit` | 약속 · 참여 조건 · 알람을 한 번에 저장 → 예약 꾸러미 + 취소할 알람 id. 일정 없는 알람도 여기서 만듦. 요청은 `alarm-suggest`와 같은 초안 모양 + `title` · `replace_existing` · `edits`. 직접 입력 이동은 이어받음 | 앱 H05 · H03 · S01 | 켬 | 카카오 길찾기 |
 | `place-search` | 장소 검색 | 앱 H05 · 온보딩 | 켬 | 카카오 로컬 |
+| `place-reverse` | 지도 핀 좌표 → 주소 | 앱 지도 핀 | 켬 | 카카오 로컬 |
 | `notify` | 다른 사람 폰에 푸시 (권한은 `can_send_push`) | 앱 G04 · G03 | 켬 | Expo Push |
 | `appointment-edit` | 일정 수정 · 삭제 (N6, D41): 한 번짜리와 반복의 **이번만 / 이후 모두** 고치기 · 지우기, 이번만 지운 회차 되돌리기, 공동 약속에서 나만 빠지기. 알람은 다시 계산해 `ring_packages` · `canceled_alarm_ids`를 `alarm-commit`과 같은 모양으로 돌려줌(앱이 `applyCommit`에 그대로). 7장 7.1.3: 앞 일정이 바뀌거나 지워지면 같은 날 다른 일정의 기상을 다시 판정. 요청 `{ action: UPDATE|DELETE|RESTORE|LEAVE, appointment_id, scope?: this|following, patch?, confirmed? }`. 이번만 고친 / 지운 회차는 `appointments.exception_kind`(EDITED / CANCELED)로 표시 — alarm-roll이 다시 안 만들고 기준 회차에서 뺌. **배포는 `20261030150000_appointment_edit.sql` 적용 뒤, `alarm-roll` 재배포도 같이** | 앱 H03 편집 시트 (4c 뒤) | 켬 | 카카오 길찾기 (장소를 바꿀 때) |
 | `wake-check` | 기상 미확인(MISSED) 기록 | pg_cron 5분마다 (서비스 키) | 끔 (코드에서 키 비교) | — |
@@ -199,9 +200,10 @@ create policy wake_signal_receive on realtime.messages
 - 반복(D44)은 `appointments.recurrence_rule`에 저장하고 알람은 첫 회차만 만듦. 다음 회차는 `alarm-roll`이 14일치를 미리 만듦 (D4 A, 위 "반복 다음 회차" — `alarm-roll` 배포 전까지는 첫 회차만). 규칙은 `FREQ=DAILY` · `FREQ=WEEKLY;BYDAY=…` 두 모양만 받고 그 밖(MONTHLY · INTERVAL · COUNT …)은 400 `VALIDATION_FAILED`
 - 트랜잭션이 아님: 약속 → 참여 조건 → 알람 → 고친 값 기록 순으로 쓰고, 이번 호출이 새로 만든 약속 · 참여 조건은 중간에 실패하면 지움. 같은 요청을 다시 보냈을 때 같은 상태가 되는 건 **기존 약속(`appointment_id`)일 때만** (고친 값 기록만 한 번 더 쌓임). 새 약속(`appointment`)은 응답만 잃고 다시 보내면 약속 · 알람이 두 벌 생기고, 일정 없는 알람도 `alarm_id` 없이 다시 보내면 하나 더 생김 (`Idempotency-Key` 같은 요청 키는 아직 안 받음)
 
-### place-search · notify · wake-check
+### place-search · place-reverse · notify · wake-check
 
 - `place-search`: `{ query, lat?, lng?, limit? }` → `{ places: [{ id, name, address, lat, lng, category? }] }`. `lat · lng`를 주면 가까운 순
+- `place-reverse`: `{ lat, lng }`(필수) → `{ place: { address, roadAddress, buildingName } | null }`. `address`는 도로명이 있으면 도로명, 없으면 지번. 주소가 없는 곳(바다 · 국외)은 `place: null`. 카카오 응답은 저장하지 않고 좌표도 로그에 안 남김. 비밀값은 `place-search`와 같은 `KAKAO_REST_API_KEY`
 - `notify`: `{ kind, targetUserId, alarmId?, title, body, data? }` → `{ sent, failed, reason? }`. `kind`는 `ALARM_CHANGED`(G04) · `WAKE_PING`(G03, D19까지 403). 권한은 `can_send_push`(DB 함수). 푸시 토큰이 없으면 `reason: "NO_TOKENS"`, FCM 키가 없거나 `EXPO_ACCESS_TOKEN`이 틀려 Expo가 401 · 403을 주면 `reason: "PUSH_NOT_CONFIGURED"`, Expo 서버 장애면 `"PUSH_UNAVAILABLE"` — 오류가 아니라 `sent: 0`. 만료된 토큰(`DeviceNotRegistered`)은 `push_tokens`에서 지움
 - `wake-check`: 서비스 키만. `find_missed_wake_alarms` 결과를 `alarm_events`에 `MISSED`로 기록 (`client_event_id = event_key`, `ON CONFLICT DO NOTHING`이라 두 번 안 들어감). 응답 `{ checked, recorded, pushed }`. 그룹 미확인 푸시는 D19가 정해질 때까지 안 보냄(`_shared/wake.ts`의 `PUSH_MISSED_TO_GROUP = false` — 그 전에는 구성원 조회도 `can_send_push` 호출도 안 함). D19 뒤에는 받을 사람 후보를 그룹 참여 구성원(사실)으로만 뽑고 보내도 되는지는 `can_send_push('WAKE_MISSED')` 하나에 맡김 (TS에서 권한 표를 다시 해석하지 않음)
 
@@ -237,6 +239,7 @@ npx supabase@2.119.0 secrets set EXPO_ACCESS_TOKEN=<토큰> --project-ref gomrhc
 npx supabase@2.119.0 functions deploy alarm-suggest --project-ref gomrhctwjvttoqifxktt --use-api
 npx supabase@2.119.0 functions deploy alarm-commit  --project-ref gomrhctwjvttoqifxktt --use-api
 npx supabase@2.119.0 functions deploy place-search  --project-ref gomrhctwjvttoqifxktt --use-api
+npx supabase@2.119.0 functions deploy place-reverse --project-ref gomrhctwjvttoqifxktt --use-api
 npx supabase@2.119.0 functions deploy notify        --project-ref gomrhctwjvttoqifxktt --use-api
 npx supabase@2.119.0 functions deploy wake-check    --project-ref gomrhctwjvttoqifxktt --use-api
 npx supabase@2.119.0 functions deploy alarm-roll    --project-ref gomrhctwjvttoqifxktt --use-api   # 앱 맞추기(3b) 머지 뒤에. appointment_edit 마이그레이션 적용 뒤에 다시 배포
