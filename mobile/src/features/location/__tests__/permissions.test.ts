@@ -1,15 +1,28 @@
 import { beforeEach, describe, expect, it, jest } from '@jest/globals';
 import { Linking } from 'react-native';
 
-import { getLocationStatus, openLocationSettings, requestLocationAccess, setLocationAuto, statusOf } from '../permissions';
+import { hintFor } from '../components/LocationAutoCard';
+import {
+  getLocationStatus,
+  LOCATION_DISCLOSURE,
+  openLocationSettings,
+  requestLocationAccess,
+  requestLocationAccessFlow,
+  setLocationAuto,
+  statusOf,
+} from '../permissions';
 
 // 위치 권한 2단계 — expo-location · 등록(register) · 저장(store)은 가짜로 두고 부른 내용을 확인
 let mockOS = 'android';
+let mockVersion = 34;
 jest.mock('react-native/Libraries/Utilities/Platform', () => ({
   __esModule: true,
   default: {
     get OS() {
       return mockOS;
+    },
+    get Version() {
+      return mockVersion;
     },
     select: (o: Record<string, unknown>) => o[mockOS] ?? o.default,
   },
@@ -43,10 +56,12 @@ beforeEach(() => {
   jest.clearAllMocks();
   jest.spyOn(console, 'warn').mockImplementation(() => {}); // 실패 경로의 개발용 로그가 시험 출력에 안 섞이게
   mockOS = 'android';
+  mockVersion = 34;
   mockIsMock = false;
   mockFg.mockResolvedValue({ granted: true, android: { accuracy: 'fine' } });
   mockBg.mockResolvedValue({ granted: true });
   mockRequestFg.mockResolvedValue({ granted: true });
+  mockRequestBg.mockResolvedValue({ granted: true });
   mockSync.mockResolvedValue(undefined);
   mockStopGeofences.mockResolvedValue(undefined);
   mockSave.mockResolvedValue(undefined);
@@ -135,6 +150,72 @@ describe('requestLocationAccess', () => {
     mockIsMock = true;
     expect(await requestLocationAccess()).toEqual({ foreground: false, background: false });
     expect(mockRequestFg).not.toHaveBeenCalled();
+  });
+});
+
+describe('requestLocationAccessFlow', () => {
+  it('앞 권한을 거절하면 뒤 단계를 부르지 않음', async () => {
+    mockRequestFg.mockResolvedValue({ granted: false });
+    mockFg.mockResolvedValue({ granted: false });
+    mockBg.mockResolvedValue({ granted: false });
+    expect(await requestLocationAccessFlow()).toEqual({ foreground: false, background: false, status: 'off', openedSettings: false, needsSettings: true });
+    expect(mockRequestBg).not.toHaveBeenCalled();
+  });
+
+  it('안드로이드 11+: 앞 권한 허용 뒤 항상 허용 요청 — 설정 화면이 열림', async () => {
+    mockRequestBg.mockResolvedValue({ granted: false });
+    mockBg.mockResolvedValue({ granted: false });
+    const result = await requestLocationAccessFlow();
+    expect(mockRequestBg).toHaveBeenCalledTimes(1);
+    expect(result).toEqual({ foreground: true, background: false, status: 'foreground-only', openedSettings: true, needsSettings: true });
+  });
+
+  it('안드로이드 10 이하: 팝업 결과가 허용이면 켜짐 · 설정 안내 없음', async () => {
+    mockVersion = 29;
+    const result = await requestLocationAccessFlow();
+    expect(result).toEqual({ foreground: true, background: true, status: 'on', openedSettings: false, needsSettings: false });
+  });
+
+  it('대략적 위치만 허용하면 coarse — 설정 안내가 필요', async () => {
+    mockFg.mockResolvedValue({ granted: true, android: { accuracy: 'coarse' } });
+    const result = await requestLocationAccessFlow();
+    expect(result.status).toBe('coarse');
+    expect(result.needsSettings).toBe(true);
+  });
+
+  it('웹 · 가짜 데이터 · 안드로이드 아님이면 아무것도 안 하고 unsupported', async () => {
+    mockOS = 'web';
+    expect((await requestLocationAccessFlow()).status).toBe('unsupported');
+    mockOS = 'android';
+    mockIsMock = true;
+    expect((await requestLocationAccessFlow()).status).toBe('unsupported');
+    expect(mockRequestFg).not.toHaveBeenCalled();
+    expect(mockRequestBg).not.toHaveBeenCalled();
+  });
+
+  it('던지면 던지지 않고 꺼짐 상태로', async () => {
+    mockRequestFg.mockRejectedValue(new Error('boom'));
+    mockFg.mockRejectedValue(new Error('boom'));
+    const result = await requestLocationAccessFlow();
+    expect(result).toMatchObject({ foreground: false, background: false, status: 'off', needsSettings: true });
+  });
+});
+
+describe('LOCATION_DISCLOSURE', () => {
+  it('제목 · 본문 · 항목이 비지 않음', () => {
+    expect(LOCATION_DISCLOSURE.title.length).toBeGreaterThan(0);
+    expect(LOCATION_DISCLOSURE.body.length).toBeGreaterThan(0);
+    expect(LOCATION_DISCLOSURE.bullets.length).toBeGreaterThan(0);
+  });
+});
+
+describe('hintFor', () => {
+  it('상태별 안내 · 버튼 종류', () => {
+    expect(hintFor('off')).toMatchObject({ action: 'enable' });
+    expect(hintFor('foreground-only')).toMatchObject({ action: 'settings' });
+    expect(hintFor('coarse')?.text).toContain('정확한 위치');
+    expect(hintFor('on')).toBeNull();
+    expect(hintFor('unsupported')).toBeNull();
   });
 });
 

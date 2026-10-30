@@ -58,6 +58,45 @@ export async function requestLocationAccess(): Promise<{ foreground: boolean; ba
   }
 }
 
+// 온보딩이 권한을 요청하기 "전에" 눈에 띄게 보여 줄 고지 (구글 정책: 백그라운드 위치는 사용 이유를 먼저 알려야 함)
+//   저장 범위는 7장 7.13.7 — 시각만 저장, 경로 · 지금 위치는 저장 안 함
+export const LOCATION_DISCLOSURE = {
+  title: '출발 · 도착을 자동으로 기록해요',
+  body: "집을 나서거나 약속 장소에 들어간 시각만 기록해요. 이동 경로나 지금 위치는 저장하지 않고 누구에게도 공유하지 않아요. 앱이 꺼져 있어도 감지하려면 '항상 허용'이 필요해요.",
+  bullets: ['기록하는 것: 출발 · 도착 시각', '기록하지 않는 것: 이동 경로 · 지금 위치', "앱이 꺼져 있어도 쓰려면 '항상 허용'"],
+} as const;
+
+export type LocationAccessResult = {
+  foreground: boolean;
+  background: boolean;
+  status: LocationStatus; // 끝난 뒤 다시 읽은 상태
+  openedSettings: boolean; // 항상 허용을 받으려고 설정 화면이 열렸는지 (안드로이드 11+)
+  needsSettings: boolean; // status가 'on'이 아님 — 호출 쪽이 설정 안내를 보여 줄 것 ('coarse'면 설정에서 정확한 위치)
+};
+
+// 위치 권한 두 단계를 끊김 없이 이어 받음 — 온보딩(L7 #277)은 LOCATION_DISCLOSURE를 보여 준 뒤 이걸 부르고, 설정 카드 "위치 허용하기"도 부름
+//   ① 앞 권한 시스템 창 → ② 허용이면 이어서 항상 허용 요청 (안드로이드 11+는 창이 아니라 앱 설정 화면이 열림 → openedSettings, 10 이하는 팝업)
+//   ③ 현재 상태를 다시 읽어 status로. 앞 권한이 거절이면 ②는 안 함. 던지지 않음 (실패는 꺼짐 상태로)
+//   설정 화면에서 돌아온 뒤의 상태는 호출 쪽이 getLocationStatus()로 다시 읽을 것 (설정 카드는 useLocationAuto가 AppState로 함)
+export async function requestLocationAccessFlow(): Promise<LocationAccessResult> {
+  if (!supported()) return { foreground: false, background: false, status: 'unsupported', openedSettings: false, needsSettings: false };
+  let foreground = false;
+  let background = false;
+  let openedSettings = false;
+  try {
+    foreground = (await requestLocationAccess()).foreground;
+    if (foreground) {
+      const { requestBackgroundPermissionsAsync } = nativeLocation();
+      openedSettings = Number(Platform.Version) >= 30;
+      background = (await requestBackgroundPermissionsAsync()).granted;
+    }
+  } catch (e) {
+    if (__DEV__) console.warn('[location] 위치 권한 두 단계 요청 실패', errorText(e));
+  }
+  const status = await getLocationStatus();
+  return { foreground, background, status, openedSettings: openedSettings && foreground, needsSettings: status !== 'on' };
+}
+
 // 이 앱의 폰 설정 화면 열기 — 항상 허용 · 정확한 위치는 여기서 켬
 export async function openLocationSettings(): Promise<void> {
   await Linking.openSettings();

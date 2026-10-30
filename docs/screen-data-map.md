@@ -243,7 +243,8 @@
 - 설정에서 값 바꾸기: 닉네임 · 아이디 · 잠귀 · 깨우는 여유 · 준비 시간 · 여유 시간 · 이동 수단 · 집 줄을 누르면 편집 시트(`features/profile/components/ProfileEditors`, 온보딩 단계 부품 재사용) → [저장]이 `saveProfileFields` → `profiles` — DB. 집은 지도 고르기 시트(아래). 실데이터 + 로그인일 때만 열리고 가짜 모드는 보기만. 아이디는 중복 확인(`isHandleTaken`) 뒤 저장 (L3 `changeHandle`이 오면 교체)
 - 지도 고르기 시트(`features/alarm/components/MapPlaceSheet`, 지금은 설정의 집 바꾸기에서 열림): 카카오맵 지도(`public/map-picker.html`을 웹은 iframe · 앱은 WebView로 열고 JavaScript 키 `EXPO_PUBLIC_KAKAO_JS_KEY`는 공개 값) + 검색 `listPlaces`(`place-search` — Edge) + 핀 자리 주소 `reverseAddress`(`place-reverse` — Edge, 핀이 멈춘 0.4초 뒤) + 폰 위치 한 번 `locateOnce`(앞 권한만, 폰). 고른 값은 시트가 저장하지 않고 `onPick`으로 돌려줌(집은 `profiles` — DB). 카카오 응답은 저장하지 않음(D5). 키가 없으면 지도 칸이 "지도 준비 중"이고 검색 결과로만 정함
 - 권한 안내: 알림 · 정확한 알람 · 잠금화면 알람 화면 — 폰
-- 설정 "출발 · 도착 자동 기록" 카드(`features/location/LocationAutoSection`, 안드로이드 + 실데이터에서만): 스위치 = 폰 저장 `location:v1:auto`(기본 켬) + 위치 권한 상태(`permissions.ts` `getLocationStatus`: 켜짐 · 위치 꺼짐 · 앱 사용 중에만 · 정확한 위치 꺼짐) — 폰, DB 없음. 앞 권한만 시스템 창으로 묻고 "항상 허용" · "정확한 위치"는 앱 설정 화면으로 안내(안드로이드 11+). 권한이 모자라도 스위치는 켜 둠 — 권한이 생기면 바로 등록. 끄면 등록한 지오펜스를 멈춤
+- 설정 "출발 · 도착 자동 기록" 카드(`features/location/LocationAutoSection`, 안드로이드 + 실데이터에서만): 스위치 = 폰 저장 `location:v1:auto`(기본 켬) + 위치 권한 상태(`permissions.ts` `getLocationStatus`: 켜짐 · 위치 꺼짐 · 앱 사용 중에만 · 정확한 위치 꺼짐) — 폰, DB 없음. 앞 권한만 시스템 창으로 묻고 "항상 허용" · "정확한 위치"는 앱 설정 화면으로 안내(안드로이드 11+). 온보딩에서 못 켰다면 여기서(위치 허용하기 → 앞 권한 → 항상 허용 설정). 권한이 모자라도 스위치는 켜 둠 — 권한이 생기면 바로 등록. 끄면 등록한 지오펜스를 멈춤
+- 온보딩은 `LOCATION_DISCLOSURE`를 보여 준 뒤 `requestLocationAccessFlow()`를 부름(L7 #277)
 - 푸시 토큰: 앱 켤 때 `register_push_token` — RPC
 
 ## Edge Function — 만들 것만
