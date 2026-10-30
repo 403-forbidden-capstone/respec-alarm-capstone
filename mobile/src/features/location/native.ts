@@ -17,3 +17,9 @@ export function errorText(e: unknown): string {
   if (typeof e === 'object' && e !== null && 'message' in e) return String((e as { message: unknown }).message);
   return String(e);
 }
+
+// 알림(expo-notifications)도 안드로이드에서만 — 웹은 불러오기만 해도 경고 로그가 나므로 (lib/push/channels와 같은 방식)
+export function nativeNotifications(): typeof import('expo-notifications') {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports -- 안드로이드일 때만 읽음
+  return require('expo-notifications') as typeof import('expo-notifications');
+}

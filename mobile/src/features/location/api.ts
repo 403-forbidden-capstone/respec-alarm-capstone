@@ -76,12 +76,13 @@ export async function listEarlierDepartures(day: Date): Promise<EarlierDeparture
 }
 
 // [아니에요] 1탭 정정 (D61) — 위치 값만 지움(시각 · 출처 · 지각 판정 · 이동시간 · 그 출발로 셈한 준비 실측 · 그 값의 기록 화면 위치 줄) + 고친 값 기록 한 줄
-//   지금 값이 위치가 아니면(원탭 값 · 이미 지움) 아무것도 안 하고 null. 돌려준 값을 5초 안에 undoReject로 넘기면 되돌림
+//   지금 값이 위치가 아니면(원탭 값 · 이미 지움) 또는 input.at이 지금 위치 값의 시각과 다르면(오래된 알림) 아무것도 안 하고 null. 돌려준 값을 5초 안에 undoReject로 넘기면 되돌림
 //   지운 뒤는 다음 자동 감지(다음 이탈 · 진입)를 기다림 — 원탭은 자동 값이 없을 때만 대신 쓰는 길 (원탭 알림 건너뛰기는 PR 6)
 export async function rejectDetection(input: RejectInput): Promise<RejectSnapshot | null> {
   if (!isMock()) return real.rejectDetection(input);
   const found = mockFind(input.participantId, input.kind);
   if (!found) return null;
+  if (input.at != null && found.at.getTime() !== input.at) return null; // 오래된 알림 — real.ts와 같게
   const editId = `mock-reject:${mockKey(input.participantId, input.kind)}`;
   const log: UserEditLog = {
     at: now(),

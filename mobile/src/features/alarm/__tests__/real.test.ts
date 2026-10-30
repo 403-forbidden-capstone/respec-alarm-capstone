@@ -308,6 +308,30 @@ describe('목록 · 하루 일정 · 알람 설정 읽기', () => {
     expect(filterArgs(count, 'gte', 'arrived_at')).toEqual(['2025-04-23T22:55:00.000Z']); // 지금 − 28일
   });
 
+  it('getAppointment: 내 잠귀(profiles.wake_sensitivity)를 읽어 강도 자동 값에 넣음 — 무거움이면 지각이 없어도 강, 프로필이 없거나 가벼움은 보통', async () => {
+    mockRoutes['appointment_participants:select'] = (call) => (isCount(call) ? { count: 0 } : { data: participantRow() });
+    mockRoutes['profiles:select'] = () => ({ data: { wake_sensitivity: 'HEAVY' } });
+    const heavy = await real.getAppointment('00000000-0000-4000-8000-0000000000a1');
+    expect(heavy?.intensity).toMatchObject({ auto: 2, lateCount: 0 });
+    const [read] = callsTo('profiles', 'select');
+    expect(filterArgs(read, 'eq', 'user_id')).toEqual(['user-1']);
+    for (const data of [{ wake_sensitivity: 'LIGHT' }, { wake_sensitivity: 'NORMAL' }, null]) {
+      mockRoutes['profiles:select'] = () => ({ data });
+      expect((await real.getAppointment('00000000-0000-4000-8000-0000000000a1'))?.intensity.auto).toBe(1);
+    }
+  });
+
+  it('setIntensity: 잠귀가 무거우면 자동 값(강)을 기준으로 — 진동만 약으로 고르면 나머지 두 칸은 자동 강', async () => {
+    mockRoutes['appointment_participants:select'] = (call) => (isCount(call) ? { count: 0 } : { data: participantRow() });
+    mockRoutes['profiles:select'] = () => ({ data: { wake_sensitivity: 'HEAVY' } });
+    mockRoutes['alarms:update'] = () => ({ data: [{ alarm_id: '00000000-0000-4000-8000-0000000000b1' }] });
+    await real.setIntensity('00000000-0000-4000-8000-0000000000a1', 'vibration', 0);
+    expect(callsTo('alarms', 'update')[0].payload).toEqual({ intensity: 'SOFT', voice_tone: 'DIRECT', sound_key: 'theme_urgent', intensity_source: 'MANUAL' });
+    mockCalls.length = 0;
+    await real.setIntensity('00000000-0000-4000-8000-0000000000a1', 'vibration', null); // 다시 자동 = 강
+    expect(callsTo('alarms', 'update')[0].payload).toEqual({ intensity: 'STRONG', voice_tone: 'DIRECT', sound_key: 'theme_urgent', intensity_source: 'AUTO' });
+  });
+
   it('getAppointment: 알람이 없는 일정 · 내 것이 아닌(없는) 일정 · 일정 없는 알람 id는 null', async () => {
     mockRoutes['appointment_participants:select'] = (call) => (isCount(call) ? { count: 0 } : { data: participantRow({}, {}, []) });
     expect(await real.getAppointment('00000000-0000-4000-8000-0000000000a1')).toBeNull();
@@ -336,6 +360,30 @@ describe('목록 · 하루 일정 · 알람 설정 읽기', () => {
     expect(next?.alarm.kind).toBe('WAKE');
     mockRoutes['alarms:select'] = () => ({ data: null });
     expect(await real.getNextAlarm()).toBeNull();
+  });
+
+  it('이번만 지운 회차(exception_kind = CANCELED)는 약속 목록 · 하루 일정 · 다음 알람 · 회차 목록 쿼리에서 거름 (NULL은 남김 — 약속 쪽 칸 필터)', async () => {
+    const id = '00000000-0000-4000-8000-0000000000a1';
+    const notCanceled = (call: FakeCall) => call.filters.find(([method]) => method === 'or');
+    const EXPECTED = ['or', 'exception_kind.is.null,exception_kind.neq.CANCELED', { referencedTable: 'appointments' }];
+
+    mockRoutes['appointment_participants:select'] = () => ({ data: [] });
+    mockRoutes['alarms:select'] = () => ({ data: [] });
+    await real.listAppointments();
+    await real.getDaySchedule(new Date(kst('00:00')));
+    expect(callsTo('appointment_participants', 'select').map(notCanceled)).toEqual([EXPECTED, EXPECTED]);
+
+    mockCalls.length = 0;
+    mockRoutes['alarms:select'] = () => ({ data: { alarm_id: '00000000-0000-4000-8000-0000000000b1', participant_id: 'p-1' } });
+    mockRoutes['appointment_participants:select'] = () => ({ data: participantRow() });
+    await real.getNextAlarm();
+    expect(callsTo('appointment_participants', 'select').map(notCanceled)).toEqual([EXPECTED]);
+
+    mockCalls.length = 0;
+    mockRoutes['appointments:select'] = () => ({ data: { series_id: 'S1' } });
+    mockRoutes['appointment_participants:select'] = () => ({ data: [] });
+    await real.listOccurrences(id);
+    expect(callsTo('appointment_participants', 'select').map(notCanceled)).toEqual([EXPECTED]);
   });
 
   it('읽기 실패는 DB 원문 그대로 던짐 (화면이 LoadError로 기본 문구)', async () => {
@@ -761,6 +809,36 @@ describe('장소 (listPlaces)', () => {
     expect(mockCallEdge).not.toHaveBeenCalled();
     expect(places.map((p) => p.name)).toEqual(['강남역', '학교 도서관', '세종대학교']); // 최근 약속의 도착지 먼저
     expect(lookupPlace('강남역')).toMatchObject({ lat: 37.49 });
+  });
+});
+
+describe('핀 자리 주소 (reverseAddress)', () => {
+  it('place-reverse에 좌표를 보내고 도로명 주소를 우선, 건물 이름이 있으면 같이 돌려줌 — 기억해 두지 않음', async () => {
+    mockCallEdge.mockResolvedValue({ place: { address: '서울 광진구 화양동 1', roadAddress: '서울 광진구 능동로 209', buildingName: '세종대학교 광개토관' } });
+    await expect(real.reverseAddress(37.55, 127.07)).resolves.toEqual({ address: '서울 광진구 능동로 209', name: '세종대학교 광개토관' });
+    expect(mockCallEdge).toHaveBeenCalledWith('place-reverse', { lat: 37.55, lng: 127.07 }, { retry: 1 });
+    expect(lookupPlace('세종대학교 광개토관')).toBeUndefined();
+  });
+
+  it('도로명 주소가 없으면 지번 주소, 건물 이름이 비면 이름 칸 없음', async () => {
+    mockCallEdge.mockResolvedValue({ place: { address: '서울 광진구 화양동 1', roadAddress: ' ', buildingName: '' } });
+    await expect(real.reverseAddress(37.55, 127.07)).resolves.toEqual({ address: '서울 광진구 화양동 1' });
+  });
+
+  it('주소를 못 구한 자리(place null · 빈 주소)와 범위 밖 좌표는 null — 범위 밖은 서버를 부르지 않음', async () => {
+    mockCallEdge.mockResolvedValue({ place: null });
+    await expect(real.reverseAddress(33, 124)).resolves.toBeNull();
+    mockCallEdge.mockResolvedValue({ place: { address: null, roadAddress: null } });
+    await expect(real.reverseAddress(33, 124)).resolves.toBeNull();
+    mockCallEdge.mockClear();
+    await expect(real.reverseAddress(95, 127)).resolves.toBeNull();
+    await expect(real.reverseAddress(Number.NaN, 127)).resolves.toBeNull();
+    expect(mockCallEdge).not.toHaveBeenCalled();
+  });
+
+  it('서버 오류는 그대로 던짐 (화면이 "주소를 못 불러왔어요"로 바꿈)', async () => {
+    mockCallEdge.mockRejectedValue(new Error('PLACE_UNAVAILABLE'));
+    await expect(real.reverseAddress(37.55, 127.07)).rejects.toThrow();
   });
 });
 

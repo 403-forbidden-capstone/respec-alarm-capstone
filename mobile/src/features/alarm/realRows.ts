@@ -1,6 +1,8 @@
 // ① 약속 기반 알람 — 실데이터 읽기 쿼리 모음 (얇게). 행 → 화면 타입 변환은 map.ts
 //   "내 것"은 호출하는 쪽이 넘긴 userId(lib/user requireUserId)로 한 번 더 좁힘 — RLS는 친구에게 받은 알람 · 같은 그룹 약속도 보여 주므로
 //   읽기 실패는 DB 원문 그대로 던지고(화면은 LoadError로 기본 문구), 이유를 보여 줄 때만 UserError
+import { wakeSensitivityOf, type WakeSensitivity } from '@shared/calc/intensity.ts';
+
 import { supabase } from '@/lib/supabase';
 import { isUuid } from '@/lib/uuid';
 
@@ -10,6 +12,12 @@ import type { AppointmentDetail } from './types';
 // 참여 조건 하나 + 약속 + 그룹 이름 + 이 참여 조건의 알람 전부 (꺼진 것 · 도착 목표 포함). appointments!inner = 약속이 있는 참여 조건만, 약속 날짜로 거를 수 있음
 const PARTICIPANT_SELECT =
   'participant_id, origin_name, transport_type, est_travel_minutes, travel_source, prepare_minutes, buffer_minutes, appointments!inner(appointment_id, series_id, title, appointment_at, dest_name, dest_lat, dest_lng, importance, recurrence_rule, groups(group_name)), alarms(alarm_id, alarm_type, scheduled_at, intensity, voice_tone, sound_key, is_enabled, time_source, intensity_source)';
+
+// 이번만 지운 회차(appointments.exception_kind = 'CANCELED', 서버 appointment-edit)는 행은 남아 있고 알람만 지워져 있음 — H01 하루 일정(알람 없는 일정 줄) · H02 · 회차 목록에 안 보여야 함.
+//   NULL은 `neq`에 안 걸려서 is.null을 같이 씀. 약속 쪽 칸이라 `appointments!inner` 임베드에 referencedTable로 걺 (그래야 참여 조건 줄이 통째로 빠짐).
+//   database.ts(Actions가 만드는 파일)에 exception_kind가 아직 없어도 타입 오류가 없게 문자열 필터로 씀
+export const NOT_CANCELED = 'exception_kind.is.null,exception_kind.neq.CANCELED';
+const EMBED = { referencedTable: 'appointments' } as const;
 
 // 목록 상한 — 넘으면 가까운 날짜부터 LIST_LIMIT개만 (정렬 없이 limit하면 어느 줄이 오는지 정해지지 않으므로 날짜순으로 정렬한 뒤 자름)
 //   약속 쪽은 PostgREST가 to-one 임베드 칸으로 정렬하는 `appointments(appointment_at)` 형식(PostgREST 11 이상)
@@ -69,7 +77,7 @@ export async function fetchItems(userId: string, appointmentIds: readonly string
 
 // 내 참여 조건 하나의 약속 · 알람 전부 · 그룹 이름 · 준비물 — 참여 조건 id로 (홈 다음 알람이 알람에서 거슬러 올라올 때)
 export async function loadAppointmentRows(participantId: string, userId: string): Promise<AppointmentRows | null> {
-  const { data, error } = await supabase.from('appointment_participants').select(PARTICIPANT_SELECT).eq('participant_id', participantId).eq('user_id', userId).maybeSingle();
+  const { data, error } = await supabase.from('appointment_participants').select(PARTICIPANT_SELECT).eq('participant_id', participantId).eq('user_id', userId).or(NOT_CANCELED, EMBED).maybeSingle();
   if (error) throw error;
   if (!data) return null;
   return toRows(data, await fetchItems(userId, [data.appointments.appointment_id]));
@@ -91,6 +99,7 @@ export async function loadAppointmentRowsSince(userId: string, since: string): P
     .select(PARTICIPANT_SELECT)
     .eq('user_id', userId)
     .gte('appointments.appointment_at', since)
+    .or(NOT_CANCELED, EMBED)
     .order('appointments(appointment_at)')
     .limit(LIST_LIMIT);
   if (error) throw error;
@@ -110,6 +119,7 @@ async function fetchDayRows(userId: string, from: string, to: string) {
     .eq('user_id', userId)
     .gte('appointments.appointment_at', from)
     .lt('appointments.appointment_at', to)
+    .or(NOT_CANCELED, EMBED)
     .order('appointments(appointment_at)')
     .limit(LIST_LIMIT);
   if (error) throw error;
@@ -171,6 +181,7 @@ export async function loadOccurrenceRows(appointmentId: string, userId: string, 
     .eq('user_id', userId)
     .eq('appointments.series_id', own.series_id)
     .gte('appointments.appointment_at', since)
+    .or(NOT_CANCELED, EMBED)
     .order('appointments(appointment_at)')
     .limit(OCCURRENCE_LIMIT);
   if (error) throw error;
@@ -192,9 +203,16 @@ export async function fetchLateCount(userId: string, nowMs: number): Promise<num
   return count ?? 0;
 }
 
+// 내 잠귀 (온보딩 한 문항, profiles.wake_sensitivity) — 강도 자동 값에 씀. 서버 plan.ts loadProfile + wakeSensitivityOf와 같은 규칙: 무거움이면 HEAVY, 가벼움 · 보통 · 프로필 없음은 NORMAL
+export async function fetchWakeSensitivity(userId: string): Promise<WakeSensitivity> {
+  const { data, error } = await supabase.from('profiles').select('wake_sensitivity').eq('user_id', userId).maybeSingle();
+  if (error) throw error;
+  return wakeSensitivityOf(data?.wake_sensitivity);
+}
+
 // 알람 설정(H03)이 읽는 약속 하나 — 저장된 값 · 직접 고른 값 · 강도. 약속이 없거나 내 것이 아니면 null (알람이 없는 약속은 호출하는 쪽이 거름)
 export async function loadDetail(appointmentId: string, userId: string, nowMs: number): Promise<AppointmentDetail | null> {
   if (!isUuid(appointmentId)) return null; // 지각 횟수까지 묻기 전에 (loadAppointmentRowsByAppointment도 같은 확인을 함)
-  const [rows, lateCount] = await Promise.all([loadAppointmentRowsByAppointment(appointmentId, userId), fetchLateCount(userId, nowMs)]);
-  return rows ? toAppointmentDetail(rows, lateCount) : null;
+  const [rows, lateCount, wakeSensitivity] = await Promise.all([loadAppointmentRowsByAppointment(appointmentId, userId), fetchLateCount(userId, nowMs), fetchWakeSensitivity(userId)]);
+  return rows ? toAppointmentDetail(rows, lateCount, wakeSensitivity) : null;
 }
