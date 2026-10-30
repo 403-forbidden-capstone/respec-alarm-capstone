@@ -10,6 +10,7 @@ import type { Place } from '@/features/alarm/types';
 import { useAuth } from '@/features/auth/AuthProvider';
 import { DataModeToggle } from '@/features/auth/DataModeToggle';
 import { locateOnce } from '@/features/location/currentPosition';
+import { FrequentPlacesSection } from '@/features/location/FrequentPlacesSection';
 import { openAppNotificationSettings } from '@/features/permissions';
 import { shouldSaveHandle } from '@/features/onboarding/validate';
 import { isHandleTaken, saveProfileFields } from '@/features/profile/api';
@@ -109,6 +110,8 @@ export default function SettingsScreen() {
           </Card>
         </>
       ) : null}
+
+      {profile ? <FrequentPlacesSection center={homeOf(profile)} /> : null}
 
       {/* 알람이 잘 울리게 하는 폰 설정 — 값이 아니라 길이라 프로필 값(위 "알람" 절)과 나눔. 가짜 모드에서도 보임 */}
       <SectionHeader title="알람 점검" />

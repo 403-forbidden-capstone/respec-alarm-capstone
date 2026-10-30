@@ -74,6 +74,14 @@ select vault.create_secret('<service_role 키>', 'service_role_key');
 - DB 함수 `roll_insert_occurrence` · `roll_due_series`는 위 "서버 함수가 쓰는 DB 함수" 표. pg_cron 예약은 "배치"
 - 반복 규칙은 `FREQ=DAILY` · `FREQ=WEEKLY;BYDAY=MO,…` 두 모양만 받음(`_shared/draft.ts` `RRULE_PATTERN`, 그 밖은 400) — 해석은 `_shared/calc/recur.ts`
 
+## 자주 가는 곳 (`user_places`, `20261030190000_user_places.sql`, 이슈 #31)
+
+학교 · 회사 · 알바 등 한 사람 **최대 5개** (헤드 설계 10/30 "집 · 회사 위치를 지도로"). 집은 `profiles.home_*` 그대로.
+
+- 칸: `label`(이름표 1~20자, 사람 안에서 유일 — 같은 이름표로 저장하면 덮어씀) · `name` · `address` · `lat` · `lng`(`numeric(9,6)`, ±90 · ±180) · `radius_m`(100~500, NULL = 앱 기본값)
+- 5개 제한은 BEFORE INSERT 트리거(`private.enforce_user_places_limit`): 6번째 새 이름표는 `54000`. 이미 있는 이름표를 덮어쓰는 upsert는 개수가 늘지 않아 통과
+- RLS는 본인만 읽고 쓰기. 친구 · 그룹 읽기 정책 없음 (위치는 공유 안 함, Q13 · D59). 앱은 `features/location/api.ts`의 `listUserPlaces` · `saveUserPlace` · `deleteUserPlace`
+
 ## 그룹 기상 신호 (Realtime)
 
 `alarm_events`는 본인만 읽을 수 있어서 남의 기상 기록은 Realtime으로 직접 못 받음 → 기상 기록이 들어오면 DB가 그룹 채널에 "새로 고침" 신호만 보내고, 받은 앱이 `get_group_wake_status`를 다시 부름 (권한은 그 함수가 봄).
