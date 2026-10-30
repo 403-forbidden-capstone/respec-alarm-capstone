@@ -1,4 +1,4 @@
-import { StyleSheet, View } from 'react-native';
+import { Platform, StyleSheet, View } from 'react-native';
 
 import { Button, Card, Screen, Text, toast, TopBar } from '@/components/ui';
 import {
@@ -35,7 +35,9 @@ export default function RingCheckScreen() {
       {snapshot && !live ? (
         <Card variant="dash">
           <Text variant="small" tone="sub">
-            폰에서 확인해요 — 웹 미리 보기에서는 권한 상태를 읽지 못해요
+            {Platform.OS === 'web'
+              ? '폰에서 확인해요 — 웹 미리 보기에서는 권한 상태를 읽지 못해요'
+              : '이 환경에서는 권한 상태를 읽지 못해요 — 폰(개발용 APK)에서 확인해 주세요'}
           </Text>
         </Card>
       ) : null}

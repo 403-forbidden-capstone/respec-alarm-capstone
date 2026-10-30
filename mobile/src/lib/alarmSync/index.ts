@@ -79,14 +79,15 @@ export function onFailedAlarmsChange(listener: () => void): () => void {
 //   whole = 서버 알람 전체를 맞춘 경우 → 이번 결과로 목록을 새로 정함 (이번에 안 건드린 알람은 폰에 이미 걸려 있거나 서버에 없는 것)
 //   일부 맞추기 · 저장 결과 반영은 이번 결과에 나온 알람만 고침: 걸렸거나 지운 것은 빼고 실패한 것은 넣음
 //   summary.failed에는 지우지 못한 것도 섞여 있음 (SyncSummary가 구분하지 않아 같이 셈)
-function noteFailures(summary: SyncSummary, whole: boolean): void {
+//   dropIds = 일부 맞추기에서 지정했는데 서버 목록에 없고 폰에도 없어 summary에 안 나온 알람 (끄거나 지운 알람) — 더 걸 게 없으니 목록에서 뺌
+function noteFailures(summary: SyncSummary, whole: boolean, dropIds: readonly string[] = []): void {
   const failedNow = summary.failed.map((f) => f.alarmId).filter((id) => id !== '');
   if (whole) {
     setFailed(new Set(failedNow));
     return;
   }
   const next = new Set(failedIds);
-  for (const id of [...summary.scheduled, ...summary.skippedPast, ...summary.deferred, ...summary.canceled]) next.delete(id);
+  for (const id of [...summary.scheduled, ...summary.skippedPast, ...summary.deferred, ...summary.canceled, ...dropIds]) next.delete(id);
   for (const id of failedNow) next.add(id);
   setFailed(next);
 }
@@ -252,7 +253,8 @@ export function reconcile(options: ReconcileOptions = {}): Promise<SyncSummary> 
     // 서버 목록이 상한에서 잘렸으면 "서버에 없음"이 진짜 없다는 뜻이 아닐 수 있음 — 서버에 없다고 확인된 것(forceCancel)만 지움
     if (truncated) plan.cancel = plan.cancel.filter((id) => forceCancel?.has(id) === true);
     const summary = await executePlan(plan);
-    noteFailures(summary, options.alarmIds == null);
+    // 정리가 시작된 뒤 끝난 맞추기는 앞 계정의 못 건 목록을 다시 채우지 않음 (setSigningOut이 비운 목록)
+    if (!signingOut) noteFailures(summary, only == null, only ? [...only].filter((id) => !listed.has(id)) : []);
     return summary;
   });
 }

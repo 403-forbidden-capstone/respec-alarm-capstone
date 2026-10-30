@@ -572,4 +572,27 @@ describe('폰에 못 건 알람 수 — 홈 빨간 줄', () => {
     expect(failedAlarmCount()).toBe(0);
     off();
   });
+
+  it('못 건 알람을 지정해 맞췄는데 서버에 켜진 행이 없으면(끄거나 지움) 목록에서 빠짐', async () => {
+    mockAlarmRows = [futureRow('a')];
+    mockCore.scheduleAll.mockResolvedValue([{ alarmId: 'a', status: 'failed', error: '정확한 알람 권한이 없어요' }]);
+    await reconcile({ nowMs: NOW });
+    expect(failedAlarmCount()).toBe(1);
+
+    // 서버에서 꺼짐 — 서버 목록에도 폰에도 없어 취소 대상으로 안 잡힘
+    mockAlarmRows = [];
+    mockEnabledIds = [];
+    await reconcile({ alarmIds: ['a'], nowMs: NOW });
+    expect(failedAlarmCount()).toBe(0);
+  });
+
+  it('로그아웃이 시작된 뒤 끝나는 맞추기는 못 건 목록을 다시 채우지 않음', async () => {
+    mockAlarmRows = [futureRow('a')];
+    mockCore.scheduleAll.mockImplementation(async () => {
+      setSigningOut(true); // 거는 도중 로그아웃이 시작됨
+      return [{ alarmId: 'a', status: 'failed' as const, error: 'x' }];
+    });
+    await reconcile({ nowMs: NOW });
+    expect(failedAlarmCount()).toBe(0);
+  });
 });
