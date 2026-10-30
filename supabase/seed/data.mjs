@@ -271,7 +271,9 @@ export function buildDataset({ users, today, newId = randomUUID }) {
   participate(dinner, 'me', { origin: SEJONG, travel: 20, prepare: 25, buffer: 5, before: 0, withWake: false, lateCount: 3 });
   const dentist = appointment('me', { title: '치과 예약', appointment_at: at(today, 15, 30).toISOString(), dest_name: DENTIST.name, dest_lat: DENTIST.lat, dest_lng: DENTIST.lng, importance: 'LOW' });
   participate(dentist, 'me', { travel: 20, prepare: 25, buffer: 10, before: 0, withWake: false, kinds: [], lateCount: 3 }); // 알람 없는 일정 (D46)
-  const tomorrow = addDays(today, 1);
+  // 앞으로 올 수업 · 평일 알람의 날짜 = 내일이 평일이면 내일, 주말이면 다음 월요일 (평일 반복 규칙이 토 · 일 회차로 만들어지지 않게, #50)
+  let tomorrow = addDays(today, 1);
+  while (weekdayOf(tomorrow) === 0 || weekdayOf(tomorrow) === 6) tomorrow = addDays(tomorrow, 1);
   const lecture = appointment('me', {
     title: '수업',
     appointment_at: at(tomorrow, 9, 0).toISOString(),

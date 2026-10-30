@@ -175,3 +175,15 @@ test('반복 일정은 앞으로 올 회차 둘뿐(오늘 팀 주간회의 · �
   // 일정 없는 기상 알람의 반복(D46)은 그대로
   assert.equal(t.alarms.filter((a) => a.recurrence_rule != null && a.participant_id === null).length, 1);
 });
+
+test('금 · 토 · 일에 넣어도 앞으로 올 수업 · 평일 알람은 평일(월~금)에 걸림', () => {
+  for (const [today, expectDay] of [['2026-10-30', '2026-11-02'], ['2026-10-31', '2026-11-02'], ['2026-11-01', '2026-11-02'], ['2026-10-29', '2026-10-30']]) {
+    let n = 0;
+    const { tables } = buildDataset({ users, today, newId: () => `00000000-0000-4000-8000-${String(++n).padStart(12, '0')}` });
+    const lecture = tables.appointments.find((a) => a.title === '수업' && a.recurrence_rule);
+    assert.equal(kstDay(lecture.appointment_at), expectDay, today);
+    assert.match(lecture.recurrence_rule, /BYDAY=(MO|TU|WE|TH|FR)$/);
+    const standalone = tables.alarms.find((a) => a.participant_id === null && a.alarm_type === 'WAKE');
+    assert.equal(kstDay(standalone.scheduled_at), expectDay, today);
+  }
+});
