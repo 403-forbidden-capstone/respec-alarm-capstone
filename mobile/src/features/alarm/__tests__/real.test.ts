@@ -322,15 +322,15 @@ describe('목록 · 하루 일정 · 알람 설정 읽기', () => {
     }
   });
 
-  it('setIntensity: 잠귀가 무거우면 자동 값(강)을 기준으로 — 진동만 약으로 고르면 나머지 두 칸은 자동 강', async () => {
+  it('setIntensity: 잠귀가 무거우면 자동 값(강)을 기준으로 — 진동만 없음으로 고르면 vibration 칸만 NONE, 전체 세기와 나머지 두 칸은 자동 강 (D1 A)', async () => {
     mockRoutes['appointment_participants:select'] = (call) => (isCount(call) ? { count: 0 } : { data: participantRow() });
     mockRoutes['profiles:select'] = () => ({ data: { wake_sensitivity: 'HEAVY' } });
     mockRoutes['alarms:update'] = () => ({ data: [{ alarm_id: '00000000-0000-4000-8000-0000000000b1' }] });
     await real.setIntensity('00000000-0000-4000-8000-0000000000a1', 'vibration', 0);
-    expect(callsTo('alarms', 'update')[0].payload).toEqual({ intensity: 'SOFT', voice_tone: 'DIRECT', sound_key: 'theme_urgent', intensity_source: 'MANUAL' });
+    expect(callsTo('alarms', 'update')[0].payload).toEqual({ intensity: 'STRONG', vibration: 'NONE', voice_tone: 'DIRECT', sound_key: 'theme_urgent', intensity_source: 'MANUAL' });
     mockCalls.length = 0;
     await real.setIntensity('00000000-0000-4000-8000-0000000000a1', 'vibration', null); // 다시 자동 = 강
-    expect(callsTo('alarms', 'update')[0].payload).toEqual({ intensity: 'STRONG', voice_tone: 'DIRECT', sound_key: 'theme_urgent', intensity_source: 'AUTO' });
+    expect(callsTo('alarms', 'update')[0].payload).toEqual({ intensity: 'STRONG', vibration: null, voice_tone: 'DIRECT', sound_key: 'theme_urgent', intensity_source: 'AUTO' }); // 다시 자동이면 vibration도 NULL(강도를 따름)
   });
 
   it('getAppointment: 알람이 없는 일정 · 내 것이 아닌(없는) 일정 · 일정 없는 알람 id는 null', async () => {
