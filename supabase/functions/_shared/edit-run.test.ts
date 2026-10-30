@@ -752,6 +752,22 @@ test('이후 모두 고치기 중간에 실패해도(뒤 회차는 이미 지움
   assert.equal(lines(env.db, ids[0]).find((l) => l.startsWith('DEPARTURE')), 'DEPARTURE 07:30 on');
 });
 
+test('되돌리기 중간에 실패해도(알람은 만들었는데 표시 쓰기 실패) 다시 보내면 이어서 끝남 — 같은 알람을 또 넣다 CONFLICT가 나지 않음 (로컬 리뷰 반영)', async () => {
+  const env = setup();
+  const ids = rawSeries(env.db, A, { ats: ['2026-10-29T09:00', '2026-11-03T09:00'], rule: 'FREQ=WEEKLY;BYDAY=TU,TH' });
+  await deleteAppointment(ctxFor(env, A), del(ids[1], 'this'));
+  env.db.failOn.push({ table: 'appointments', op: 'update' });
+  await expectHttp(() => restoreAppointment(ctxFor(env, A), restore(ids[1])), 'INTERNAL');
+  assert.equal(row(env.db, ids[1])!.exception_kind, 'CANCELED'); // 표시는 그대로, 알람은 이미 만들어 둔 상태
+  assert.equal(kinds(env.db, ids[1]), 'ARRIVE,DEPARTURE,PREPARE,WAKE');
+
+  env.db.failOn.length = 0;
+  const res = await restoreAppointment(ctxFor(env, A), restore(ids[1]));
+  assert.deepEqual([res.restored, res.reason], [true, undefined]);
+  assert.equal(row(env.db, ids[1])!.exception_kind, 'EDITED');
+  assert.equal(kinds(env.db, ids[1]), 'ARRIVE,DEPARTURE,PREPARE,WAKE'); // 알람이 두 벌이 되지 않음
+});
+
 test('runEdit이 action에 맞는 함수를 부름', async () => {
   const env = setup();
   const id = await single(env, A, '2026-10-29T09:00');

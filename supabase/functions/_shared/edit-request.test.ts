@@ -84,3 +84,7 @@ test('patch 칸 검사: 빈 제목 · 오프셋 없는 시각 · 모르는 중�
 test('본문이 객체가 아니면 VALIDATION_FAILED', () => {
   assert.throws(() => Reader.root([]), (e: unknown) => e instanceof HttpError && e.code === 'VALIDATION_FAILED');
 });
+
+test('patch.destination 이름이 비거나 공백이면 조용히 무시하지 않고 거절 (로컬 리뷰 반영)', () => {
+  assert.deepEqual(issuesOf({ action: 'UPDATE', appointment_id: ID, patch: { destination: { name: '   ' } } }), ['patch.destination.name']);
+});

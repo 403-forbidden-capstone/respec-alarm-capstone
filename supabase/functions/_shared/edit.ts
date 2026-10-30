@@ -106,9 +106,11 @@ export function applyPatch(row: PatchableRow, patch: AppointmentPatch): PatchRes
   const at = patch.at ?? new Date(row.appointment_at);
   const place = patch.destination;
   const destName = place ? place.name.trim() : row.dest_name;
-  // 장소 이름만 바뀌고 좌표가 없으면 옛 좌표는 다른 곳이므로 비움 (길찾기를 새로 구하려면 좌표가 있어야 함)
-  const destLat = place ? (place.lat ?? null) : row.dest_lat == null ? null : Number(row.dest_lat);
-  const destLng = place ? (place.lng ?? null) : row.dest_lng == null ? null : Number(row.dest_lng);
+  // 이름이 바뀌었는데 좌표가 없으면 옛 좌표는 다른 곳이므로 비움 (길찾기를 새로 구하려면 좌표가 있어야 함)
+  // 이름이 그대로면 옛 좌표를 유지 (편집 시트가 장소 문자열을 매번 보내도 제목만 고친 요청이 막히지 않게)
+  const keepCoord = !place || (place.lat == null && place.lng == null && destName === row.dest_name);
+  const destLat = keepCoord ? (row.dest_lat == null ? null : Number(row.dest_lat)) : (place?.lat ?? null);
+  const destLng = keepCoord ? (row.dest_lng == null ? null : Number(row.dest_lng)) : (place?.lng ?? null);
   const importance = patch.importance ?? row.importance;
   const changed = {
     title: title !== row.title,

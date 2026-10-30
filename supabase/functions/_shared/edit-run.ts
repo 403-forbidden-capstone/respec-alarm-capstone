@@ -590,7 +590,7 @@ export async function restoreAppointment(ctx: EditCtx, req: Extract<EditRequest,
   const target = await loadTarget(ctx, req.appointmentId);
   if (!target) return { ...common(req.appointmentId), restored: false, reason: 'NOT_FOUND' };
   assertEditor(target, ctx, '고칠');
-  const { appointment: row, participant } = target;
+  const { appointment: row, participant, alarms: existingAlarms } = target;
   if (row.exception_kind !== 'CANCELED') return { ...common(row.appointment_id), restored: false, reason: 'NOT_DELETED' }; // 지운 적 없음 — 아무것도 안 함 (같은 요청을 두 번 보내면 두 번째)
 
   const env = new Env(ctx);
@@ -611,10 +611,11 @@ export async function restoreAppointment(ctx: EditCtx, req: Extract<EditRequest,
   const sameDayWake = hasEarlierWake(at, wakesOfRows(day.map(dayWakeRow)), row.appointment_id);
   const [profile, stats, lateCount4w] = await Promise.all([env.profile(), env.stats(), env.late()]);
   // 지운 알람의 종류 · 직접 고른 시각은 남아 있지 않음 → 계산된 알람 전부를 자동 값으로 다시 만듦
-  const plan = computePlan({ now: ctx.now, draft: {}, profile, appointment: row, participant, existingAlarms: [], stats, lateCount4w, sameDayWake }, resolvedTravelOf(travel), 'save');
+  // 이미 만들다 만 알람이 있으면(알람은 만들었는데 표시 쓰기가 실패한 뒤 다시 보낸 경우) 그 알람을 기준으로 이어서 맞춤 — 없는 것처럼 다시 넣으면 유일 제약에 걸려 영영 CONFLICT
+  const plan = computePlan({ now: ctx.now, draft: {}, profile, appointment: row, participant, existingAlarms, stats, lateCount4w, sameDayWake }, resolvedTravelOf(travel), 'save');
   if (!plan.check.ok) throw new HttpError('UNPROCESSABLE', plan.check.message, { reason: plan.check.reason, ...(plan.check.detail ?? {}) });
-  const diff = diffAlarms(plan, [], { now: ctx.now, replaceExisting: false });
-  const after = await applyAlarmDiff(ctx, participant.participant_id, diff, []);
+  const diff = diffAlarms(plan, existingAlarms, { now: ctx.now, replaceExisting: false });
+  const after = await applyAlarmDiff(ctx, participant.participant_id, diff, existingAlarms);
   await updateRow(ctx, row.appointment_id, { exception_kind: 'EDITED' });
 
   result.ring_packages = packagesOf({ alarms: after, appointment: row, at, tz, travelMinutes: plan.travelMinutes, departAt: plan.departure });

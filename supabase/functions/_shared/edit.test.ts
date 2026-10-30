@@ -67,6 +67,15 @@ test('editorVerdict: 만든 사람만 · 못 찾음 · 공동 약속의 참여�
 
 const ROW = { title: '세미나', appointment_at: iso('2026-10-29T09:00'), dest_name: '세종대학교', dest_lat: '37.550000', dest_lng: 127.07, importance: 'NORMAL' as const };
 
+test('applyPatch: 장소 이름만 같은 걸 보내면 옛 좌표 유지, 이름이 바뀌면 좌표를 비움 (로컬 리뷰 반영)', () => {
+  const same = applyPatch(ROW, { destination: { name: '세종대학교' }, title: '바꿈' });
+  assert.deepEqual([same.next.dest_name, same.next.dest_lat, same.next.dest_lng, same.changed.place], ['세종대학교', 37.55, 127.07, false]);
+  const renamed = applyPatch(ROW, { destination: { name: '건국대학교' } });
+  assert.deepEqual([renamed.next.dest_lat, renamed.next.dest_lng, renamed.changed.place], [null, null, true]);
+  const moved = applyPatch(ROW, { destination: { name: '세종대학교', lat: 37.6, lng: 127.1 } });
+  assert.deepEqual([moved.next.dest_lat, moved.changed.place], [37.6, true]);
+});
+
 test('applyPatch: 안 넣은 칸은 그대로, 같은 값은 바뀐 것이 아님 (numeric이 글자로 와도 같은 좌표로 봄)', () => {
   const same = applyPatch(ROW, { title: '  세미나 ', at: kst('2026-10-29T09:00'), destination: { name: '세종대학교', lat: 37.55, lng: 127.07 }, importance: 'NORMAL' });
   assert.equal(same.any, false);

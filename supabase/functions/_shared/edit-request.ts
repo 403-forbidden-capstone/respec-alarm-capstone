@@ -9,7 +9,7 @@
 //   scope: 'this' | 'following' (앱 EditScope와 같은 글자, 안 보내면 'this'). 반복이 아니면 둘 다 그 일정 하나
 //   confirmed: 확인 시트에서 "바꾸기"를 눌렀거나 되돌리기처럼 확인 없이 바로 저장 (앱 UpdateOptions.confirmed) — 아니면 늦춰지는 알람이 있을 때 저장하지 않고 needs_confirm으로 돌려줌
 import { EDIT_SCOPES, type AppointmentPatch, type EditScope } from './edit.ts';
-import { IMPORTANCES, readPlace, readRecurrence } from './draft.ts';
+import { IMPORTANCES, readRecurrence } from './draft.ts';
 import type { Reader } from './read.ts';
 
 export const EDIT_ACTIONS = ['UPDATE', 'DELETE', 'RESTORE', 'LEAVE'] as const;
@@ -21,18 +21,29 @@ export type EditRequest =
   | { action: 'RESTORE'; appointmentId: string }
   | { action: 'LEAVE'; appointmentId: string };
 
+// 장소는 이름이 있어야 함 — readPlace(draft.ts)는 공백 이름을 조용히 빼서 "고쳤다고 응답했는데 안 바뀜"이 되므로 제목처럼 min 1을 검, 좌표는 둘이 같이
+function readDestination(parent: Reader): { name: string; lat?: number; lng?: number } | undefined {
+  const r = parent.object('destination');
+  if (!r) return undefined;
+  const name = r.string('name', { min: 1, max: 200, required: true });
+  const lat = r.number('lat', { min: -90, max: 90 });
+  const lng = r.number('lng', { min: -180, max: 180 });
+  if ((lat == null) !== (lng == null)) r.problemAt(lat == null ? 'lat' : 'lng', 'lat · lng는 같이 있어야 해요');
+  return name ? { name, ...(lat != null && lng != null ? { lat, lng } : {}) } : undefined;
+}
+
 function readPatch(r: Reader): AppointmentPatch {
   const p = r.object('patch', { required: true });
   if (!p) return {};
   const title = p.string('title', { min: 1, max: 100 });
   const at = p.date('appointment_at');
-  const destination = readPlace(p, 'destination', { nameRequired: true });
+  const destination = readDestination(p);
   const importance = p.oneOf('importance', IMPORTANCES);
   const recurrenceRule = readRecurrence(p);
   return {
     ...(title !== undefined ? { title } : {}),
     ...(at ? { at } : {}),
-    ...(destination?.name ? { destination: { name: destination.name, ...(destination.lat != null && destination.lng != null ? { lat: destination.lat, lng: destination.lng } : {}) } } : {}),
+    ...(destination ? { destination } : {}),
     ...(importance ? { importance } : {}),
     ...(recurrenceRule !== undefined ? { recurrenceRule } : {}),
   };
