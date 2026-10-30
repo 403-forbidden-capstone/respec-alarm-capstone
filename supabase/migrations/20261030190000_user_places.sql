@@ -2,7 +2,7 @@
 -- 자주 가는 곳 (user_places) — 학교 · 회사 · 알바 등 최대 5개 (지도에서 위치 고르기 ②, 이슈 #31)
 --   헤드 설계 10/30 "집 · 회사 위치를 지도로": 집은 지금처럼 profiles(home_*), 학교 · 회사 · 알바 등은 이 표
 --   위치는 누구에게도 공유하지 않음 (Q13 · D59): 친구 · 그룹 읽기 정책 없음, 본인만 읽고 씀
---   앱이 읽는 쪽(features/alarm/api.ts의 listUserPlaces · saveUserPlace · deleteUserPlace)은 같은 PR
+--   앱이 읽는 쪽(features/location/api.ts의 listUserPlaces · saveUserPlace · deleteUserPlace)은 같은 PR
 -- 번호: 20261030180000은 열린 PR #293(dev_reset_my_data)이 쓰고 있어 그 다음 칸을 씀
 -- =====================================================================
 

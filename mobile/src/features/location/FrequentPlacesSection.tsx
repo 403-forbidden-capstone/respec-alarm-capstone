@@ -56,12 +56,12 @@ export function FrequentPlacesSection({ center }: Props) {
   const remove = async () => {
     if (!target) return;
     const label = target.label;
-    if (!(await confirm({ title: `${josa(label, '을', '를')} 지울까요?`, message: '새 일정 장소 칩에서도 사라져요.', okLabel: '지우기', destructive: true }))) return;
+    if (!(await confirm({ title: `${josa(label, '을', '를')} 지울까요?`, okLabel: '지우기', destructive: true }))) return;
     void run(async () => {
       await deleteUserPlace(label);
-      await reload();
+      const fresh = await reload();
       setActing(null);
-      toast('지웠어요');
+      toast(fresh ? '지웠어요' : '지웠어요 · 목록을 새로 불러오지 못했어요'); // 지우기는 됐음 — 실패로 보이지 않게
     }, '지우지 못했어요');
   };
 
@@ -78,7 +78,7 @@ export function FrequentPlacesSection({ center }: Props) {
             places.map((p, i) => <EditRow key={p.label} first={i === 0} label={p.label} value={p.name} onPress={() => setActing(p.label)} />)
           ) : (
             <Text variant="body" tone="sub">
-              학교나 회사를 저장해 두면 새 일정에서 한 번에 고를 수 있어요
+              학교나 회사를 지도에서 골라 저장해 두세요
             </Text>
           )}
           <View style={styles.add}>
