@@ -4,6 +4,8 @@ import * as AlarmCore from '@capstone/alarm-core';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { PermissionsAndroid, Platform } from 'react-native';
 
+import { isMock } from '@/lib/mode';
+
 import { sampleSnapshot, type PermissionSample } from './sample';
 import type { Allowed, NotifyReason, PermissionSnapshot } from './types';
 
@@ -108,7 +110,8 @@ export function setPermissionSample(next: PermissionSample): void {
   notifyPermissionsChanged(); // 열려 있는 점검표 · 홈 빨간 줄이 바로 다시 읽게
 }
 
-export const permissionSample = (): PermissionSample => (Platform.OS === 'web' ? sample : 'none');
+// 가짜 데이터 모드에서만 — 실데이터 모드로 바꾼 뒤에도 샘플이 남아 진짜 상태를 가리지 않게
+export const permissionSample = (): PermissionSample => (Platform.OS === 'web' && isMock() ? sample : 'none');
 
 // 던지지 않음 — 항목마다 실패하면 'unknown'
 export async function readPermissions(): Promise<PermissionSnapshot> {
