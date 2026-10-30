@@ -1,7 +1,7 @@
 // ③ 자기 전 대화 — '저장됨' 로컬 표시 (폰 AsyncStorage · 웹 localStorage)
 //   카드 [저장]이 L1 함수로 일정을 만든 직후, 서버에 SAVED를 알리기 전에 적어 둠. 서버에 못 알리고 앱이 꺼져도(서버는 카드를 READY로 기억)
 //   다시 열었을 때 이 표시로 카드를 저장됨으로 복원해 createAppointment가 또 불리지 않게 하고, SAVED 알림만 다시 보냄
-//   서버가 SAVED로 확인하면(알림 성공 · 다시 열었더니 서버가 이미 SAVED · 서버가 카드를 모름) 지움
+//   서버가 SAVED로 확인하면(알림 성공 · 다시 열었더니 서버가 이미 SAVED · REJECTED · 알림이 NOT_FOUND) 지움. 서버가 모르는 카드의 표시는 하루 뒤 정리(pruneOtherSessions)까지 남음
 //   저장소가 막히거나 값이 깨져도 대화를 못 하게 만들지 않음 — 못 읽으면 표시 없음(지금 동작), 못 쓰면 이번 실행에만
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
