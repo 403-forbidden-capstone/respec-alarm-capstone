@@ -5,7 +5,7 @@ import type { PlanDraft } from './plan-core.ts';
 import type { Reader } from './read.ts';
 
 // ---- 약속 알람 초안 — alarm-suggest(5.4.1)와 alarm-commit(5.4.2)이 같은 모양으로 받음 (계획 7절 "alarm-commit 입력 = H05 초안 모양 그대로 + 기존 약속 id") ----
-//   appointment_id(기존 약속) 또는 appointment{ title, appointment_at, destination{name,lat,lng}, importance, group_id, recurrence_rule }(새 약속)
+//   appointment_id(기존 약속) 또는 appointment{ title, appointment_at, destination{name,lat,lng,radius_m(선택, 100~500)}, importance, group_id, recurrence_rule }(새 약속)
 //   participant{ origin, transport_type, est_travel_minutes + travel_source(API · MANUAL), prepare_minutes, buffer_minutes, before_prepare_minutes, with_wake }
 //   + 루트의 kinds · enabled · manual_times · levels
 //   앱은 H05 초안 하나를 두 함수에 그대로 보내면 됨. 미리 보기에는 title · group_id · recurrence_rule · replace_existing · edits가 필요 없어 읽기만 하고 안 씀
@@ -24,7 +24,7 @@ function readAppointmentDraft(r: Reader, opts: { titleRequired: boolean }): { dr
   if (rawNew && !appointmentId) {
     const title = rawNew.string('title', { required: opts.titleRequired, min: 1, max: 100 });
     at = rawNew.date('appointment_at', { required: true });
-    destination = readPlace(rawNew, 'destination', { required: true, nameRequired: true });
+    destination = readPlace(rawNew, 'destination', { required: true, nameRequired: true, radius: true });
     importance = rawNew.oneOf('importance', IMPORTANCES);
     const groupId = rawNew.uuid('group_id');
     const recurrenceRule = readRecurrence(rawNew);

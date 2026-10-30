@@ -15,6 +15,21 @@ test('장소: 이름 · 좌표(둘이 같이)', () => {
   assert.equal(r.issues[0].path, 'bad.lng');
 });
 
+test('목적지 감지 반경 radius_m: 목적지만 읽음(100~500 정수), 출발지는 와도 무시', () => {
+  const r = Reader.root({ destination: { name: '세종대학교', radius_m: 250 }, origin: { name: '집', radius_m: 9999 } });
+  assert.deepEqual(readPlace(r, 'destination', { radius: true }), { name: '세종대학교', radiusM: 250 });
+  assert.deepEqual(readPlace(r, 'origin'), { name: '집' });
+  assert.equal(r.issues.length, 0);
+  assert.deepEqual(readPlace(Reader.root({ p: { name: 'a', radius_m: 100 } }), 'p', { radius: true }), { name: 'a', radiusM: 100 });
+  assert.deepEqual(readPlace(Reader.root({ p: { name: 'a', radius_m: 500 } }), 'p', { radius: true }), { name: 'a', radiusM: 500 });
+  assert.deepEqual(readPlace(Reader.root({ p: { name: 'a' } }), 'p', { radius: true }), { name: 'a' });
+  for (const bad of [99, 501, 1.5, 150.5, 'abc', '200', true]) {
+    const b = Reader.root({ p: { name: 'a', radius_m: bad } });
+    readPlace(b, 'p', { radius: true });
+    assert.deepEqual(b.issues.map((i) => i.path), ['p.radius_m'], String(bad));
+  }
+});
+
 test('범위를 벗어난 좌표는 문제', () => {
   const r = Reader.root({ p: { lat: 91, lng: 127 } });
   readPlace(r, 'p');

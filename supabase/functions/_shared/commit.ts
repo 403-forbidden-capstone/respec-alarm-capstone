@@ -102,6 +102,7 @@ export async function persistAppointment(
             dest_name: place.name,
             dest_lat: place.lat ?? null,
             dest_lng: place.lng ?? null,
+            dest_radius_m: draft.destination?.radiusM ?? null, // 목적지 감지 반경 (D68). 새 약속일 때만 — 기존 약속은 안 고침
             importance: plan.basics.importance,
             recurrence_rule: created.recurrenceRule ?? null, // D44. 이 호출은 첫 회차만 만듦 — 다음 회차는 alarm-roll이 14일치를 미리 만듦 (D4 A, roll.ts)
           })
