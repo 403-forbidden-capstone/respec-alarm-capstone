@@ -3,6 +3,11 @@
 
 export type TransportType = 'WALK' | 'TRANSIT' | 'BUS' | 'SUBWAY' | 'CAR';
 
+// 잠귀 한 문항 (D69) — 가벼움 · 보통 · 깊음. 계산 반영은 L1
+export type WakeSensitivity = 'LIGHT' | 'NORMAL' | 'HEAVY';
+// 깨우는 여유 (D63) — 빠듯 · 보통 · 넉넉 = 기록의 0.7 · 0.8 · 0.9 분위수. 계산 반영은 L1
+export type WakeMargin = 'TIGHT' | 'NORMAL' | 'LOOSE';
+
 export type Profile = {
   user_id: string;
   nickname: string;
@@ -15,6 +20,11 @@ export type Profile = {
   home_lng: number | null;
   default_transport: TransportType;
   timezone: string;
+  onboarded_at: string | null; // null = 아직 온보딩 안 끝남
+  wake_sensitivity: WakeSensitivity;
+  wake_margin: WakeMargin;
+  privacy_agreed_at: string | null; // privacy_version과 같이 있거나 같이 없음
+  privacy_version: number | null;
 };
 
 export type OnboardingInput = Pick<

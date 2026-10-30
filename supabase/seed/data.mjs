@@ -71,7 +71,7 @@ export function buildDataset({ users, today, newId = randomUUID }) {
   };
   const now = new Date();
 
-  // 프로필 — 이메일 계정은 닉네임만 있으므로 아이디 · 집 · 기본값을 채움
+  // 프로필 — 이메일 계정은 닉네임만 있으므로 아이디 · 집 · 기본값 · 온보딩 끝낸 시각을 채움
   for (const u of DEMO_USERS) {
     t.profiles.push({
       user_id: users[u.key],
@@ -84,6 +84,7 @@ export function buildDataset({ users, today, newId = randomUUID }) {
       default_buffer_minutes: 10,
       default_transport: 'TRANSIT',
       timezone: 'Asia/Seoul',
+      onboarded_at: now.toISOString(), // 데모 계정은 온보딩을 끝낸 상태 (나머지 새 칸은 DB 기본값)
     });
   }
 

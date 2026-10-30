@@ -79,7 +79,7 @@ type RingPackage = {
 - 남는 한계: 제목 · 부제만 바뀐 경우(시각 · 강도 그대로)는 여전히 폰에 옛 글자가 남음 — 원래 있던 문제이고 약속을 다시 저장하면 새로 걸림
 - 남는 한계: 알림이 한 줄이라 문구가 길면 잘릴 수 있음 — `AlarmNotifications.kt`에 `BigTextStyle`이 없음. 다음 네이티브 PR에서 함
 
-반복은 폰이 하지 않음. 반복 약속(`recurrence_rule`)과 일정 없는 반복 알람은 서버가 **앞으로 14일치 회차를 회차마다 한 줄씩 미리 만들고**(약속 · 참여 조건 · 알람이 새 행, `series_id` · `occurrence_on`으로 묶음 · 날짜 구분, `alarm-roll`이 5분마다 보충), 지난 회차 행은 기록으로 그대로 남김. 폰은 앱이 열릴 때 그 행들을 reconcile로 읽어 14일 안 알람을 걸음. 루틴(`routines.repeat_days`)은 회차 행을 따로 만들지 않고 같은 알람 행의 시각만 다음 발생으로 옮김. 그래서 꾸러미에는 `atMillis` 하나면 됨 (회차 수는 폰 쪽에 가정하지 않음). 예전 `scheduleDailyAlarm`(매일 반복)은 없앰. 서버 함수 `alarm-roll`(3a-2)과 앱 맞추기(3b)가 머지된 뒤부터 동작 — 그 전에는 DB 칸(`supabase/README.md` "반복 다음 회차")만 있고 첫 회차만 만들어짐.
+반복은 폰이 하지 않음. 반복 약속(`recurrence_rule`)과 일정 없는 반복 알람은 서버가 **앞으로 14일치 회차를 회차마다 한 줄씩 미리 만들고**(약속 · 참여 조건 · 알람이 새 행, `series_id` · `occurrence_on`으로 묶음 · 날짜 구분, `alarm-roll`이 5분마다 보충), 지난 회차 행은 기록으로 그대로 남김. 폰은 앱이 열릴 때(`syncNow`: 기록 올리기 → `alarm-roll` 부르기 → reconcile) 그 행들을 reconcile로 읽어 14일 안 알람을 걸음. `alarm-roll` 호출은 10분에 한 번, 8초 안에 안 끝나면 기다리지 않고 실패는 삼킴(반복 일정을 방금 저장했으면 제한 없이 그 묶음을 먼저 넘김). reconcile은 출발 기록(`departed_at`)이 있는 약속의 준비 · 출발 알람, 도착 기록(`arrived_at`)이 있는 약속의 준비 · 출발 · 도착 목표 알람을 서버 행에서 빼므로 이미 폰에 걸린 것은 "서버에 없음"으로 지워짐(기상은 그대로). 맞춘 뒤에는 `onAlarmsSynced` 훅(`source` · `whole` · `summary` · `upcoming` · `nowMs`)이 불림 — 기다리지 않고, 던져도 맞추기는 성공. 루틴(`routines.repeat_days`)은 회차 행을 따로 만들지 않고 같은 알람 행의 시각만 다음 발생으로 옮김. 그래서 꾸러미에는 `atMillis` 하나면 됨 (회차 수는 폰 쪽에 가정하지 않음). 예전 `scheduleDailyAlarm`(매일 반복)은 없앰. 서버 함수 `alarm-roll`(3a-2)과 앱 맞추기(3b)가 머지되고 `alarm-roll`이 배포된 뒤부터 동작 — 그 전에는 DB 칸(`supabase/README.md` "반복 다음 회차")만 있고 첫 회차만 만들어짐.
 
 ## 울림 계획 (#29)
 

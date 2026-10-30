@@ -38,6 +38,7 @@
 |---|---|---|
 | 새 일정 알람 만들기 (H05) | `callEdge('alarm-commit')` (`lib/edge`) | 응답을 `applyCommit`: `canceled_alarm_ids` → cancel, `ring_packages` → scheduleAll |
 | H03 저장 — 이동 · 준비 · 여유 · 알람 시각 · **종류별 켜기 · 끄기 · 강도**까지 한 번에 | `callEdge('alarm-commit')` (본문의 `enabled` · `levels`). 길찾기를 못 해 서버가 어림값만 가지면(`ROUTE_UNAVAILABLE` + `details.fallback`) 저장을 멈추고 확인 시트 → 확인한 분을 직접 입력(MANUAL)으로 다시 보냄 | `applyCommit` + 도착 목표를 울리는 알람에 맞추는 `mirrorArrive`(DB 직접) 뒤 그 알람만 `reconcile`. 이 뒤처리가 실패해도 저장은 성공으로 (다음 맞추기에서 다시) |
+| 반복 회차 넘기기 (앱이 앞에 올 때 · 반복 일정 저장 직후) | `callEdge('alarm-roll')` — `syncNow`가 기록 올리기 뒤 · 맞추기 앞에서 부름 (10분에 한 번, 8초, 실패는 삼킴) | 응답 꾸러미는 안 쓰고 이어서 도는 `reconcile`이 DB에서 읽어 걺. 맞춘 뒤 `onAlarmsSynced` 훅 |
 | 일정 전체 켜기 · 끄기 (H01 · H02 카드) | DB 직접 (`alarms.is_enabled`, 도착 목표는 `mirrorArrive`) | `reconcile({ alarmIds })`로 그 알람만 |
 | S01 제안 적용 · 되돌리기 | DB 직접 — `alarms`(말소리 · 배경음 · 진동 칸) → `alarm_suggestions` → `user_edit_logs` insert. `alarm-commit`은 안 씀 (제안 종류에 시각이 없음) | `reconcile({ alarmIds })`로 그 알람만 |
 | 루틴 저장 (A04) | DB 직접 — `routines` + 단계 알람 `alarms`(없어진 단계는 지우지 않고 `is_enabled` false) | `reconcile({ alarmIds })` — 저장이 중간에 실패해도 바뀌었을 수 있는 알람은 맞춤 |
@@ -111,21 +112,28 @@
 - 날짜별 알람: `alarms` + `appointment_participants` + `appointments` — DB
 - 카드의 켜기 · 끄기(일정 전체): `alarms.is_enabled` — DB → 예약 취소 · 다시 예약 — 폰
 - 일정 없는 알람(D46): 반복은 `alarms.recurrence_rule`(#160), 만들기는 `alarm-commit` — 입력 화면(목록 "+")은 새 UI
+- 반복 일정 · 반복 알람은 묶음(`series_id`)당 한 장 — 지금 이후 가장 가까운 회차 하나 (서버가 14일치 회차를 미리 만들어 둠, 지난 회차는 안 보임). 묶음이 전부 지났으면 가장 최근 지난 회차 하나. 반복이 아닌 약속은 그대로. H01 · R02 · H03은 회차 행 그대로
+  - 카드에는 한 줄 "다음 회차 5월 26일 (월) 오전 9:00 · 매주 월 · 수"(`seriesInfo`)만 더하고, 앞으로 회차가 둘 이상 걸려 있으면 작은 글자 "2주치 알람 걸림"(`upcomingCount` ≥ 2). 회차 목록은 목록 · 홈에 안 나오고 H03에서만
+  - 홈 "오늘 일정"(`getDaySchedule`)은 그날 회차만, "다음 알람"(`getNextAlarm`)은 가장 가까운 켜진 알람 하나만 (회차 줄줄이 없음). G04 친구 카드는 그대로 (L3 2차)
 
 ### H03 알람 설정
+- 반복 일정의 앞으로 회차: `listOccurrences(id)` — 이 약속의 `series_id`를 읽고 같은 묶음의 내 참여 조건 중 지금 이후 · 날짜순 (`appointment_participants` + `appointments` + `alarms`) — DB. 둘 이상일 때만 "앞으로 회차" 카드가 뜨고, 다음 3회만 보이고 나머지는 "더 보기"(누르면 펼침, 화면 상태). 읽지 못해도 화면은 그대로
 - 연결 일정 · 이동 조건 · 준비 시간: `appointments` + `appointment_participants`(출발지 · 이동 수단 · 예상 이동 · 출처 · 준비 · 여유) — DB. 출발지 · 이동 수단 · 예상 이동 · 준비 시간도 고침 (D42 C) → 다시 계산 `alarm-suggest` → 저장 `alarm-commit`
 - 알람 시각 직접 고르기 (D42 C): `alarms.scheduled_at` + `time_source` MANUAL(#160), "자동으로 되돌리기" = AUTO. 강도도 같은 규칙(`intensity_source`, #160)
+- 자동 강도 (D69, `_shared/calc/intensity.ts`): 기본 보통 — 매우 중요(HIGH)면 한 단계 올림 · 최근 4주 늦잠 지각 2회 이상이면 한 단계 올림 · 잠귀 무거움이면 강(`profiles.wake_sensitivity` 칸이 생기면, 지금은 안 읽음) · 상한 강. 약은 직접 고를 때만. 이미 저장된 자동 약은 `20261030130000_intensity_default.sql`이 보통으로 올림
 - 고친 값 기록 (D42 · D43): `user_edit_logs`(#160, 화면 · 칸 · 자동값 → 고친 값 · 시각) — DB, 다음 계산 · 제안의 개인화 입력
 - 예측 준비(P80) 근거: `v_prepare_time_stats` — DB
 - 여유 시간을 바꾸면 다시 계산: `alarm-suggest` — Edge → 저장 `alarm-commit` — Edge → 다시 예약 — 폰
 - 종류별 켜기 · 끄기, 강도 직접 고르기(`alarms.is_enabled` · `intensity` · `voice_tone` · `sound_key`)도 저장 때 `alarm-commit`의 `enabled` · `levels`로 — Edge → 다시 예약 — 폰 (DB에 바로 쓰는 길은 없음)
+- 일정 편집 · 삭제 함수 (이슈 #211, D41 A · N6): `updateAppointment(id, patch, scope, { confirmed? })` → `{ changes, needsConfirm }`(앞당김은 바로 저장 + 토스트 [되돌리기] = 이전 값을 `confirmed: true`로 같은 함수에, 5분 이상 늦춤은 저장 전에 `needsConfirm`으로 돌려줘 기존 확인 시트 뒤 `confirmed: true`로 저장, D67) · `deleteAppointment(id, scope)` · `restoreAppointment(id)`(삭제 토스트 [되돌리기]) · `leaveSharedAppointment(id)`([나는 빠지기]) — 공동 약속은 만든 사람만(`UserError`). **가짜 모드만 구현**, 실서버는 4b(`appointment-edit`)까지 `UserError('아직 실서버에서는 쓸 수 없어요')`
+  - 삭제 되돌리기 계약: 화면은 삭제 확인 뒤 5초 토스트를 띄우고, **5초가 지나거나 화면을 떠날 때** `deleteAppointment`를 부름. 5초 안에 [되돌리기]를 누르면 아무것도 부르지 않음. 가짜 모드는 부르는 즉시 숨기고 `restoreAppointment`로 되살리지만, 실서버(4b)는 5초 안에는 서버로 안 보내므로 L5는 "5초 안 = 부르지 않음" 기준으로 짬 (`restoreAppointment`는 이미 지운 뒤의 되돌리기)
 - 길찾기를 못 했을 때 (7장 7.1.2): 미리 보기가 어림값(`ESTIMATE` · `CACHED`)이거나 직접 입력이 필요하면(`manual_required`) 이동 조건 칸에 안내가 뜸. 저장 때 서버가 어림값만 있으면(`ROUTE_UNAVAILABLE` + `details.fallback`) "길찾기를 못 해 이동시간을 대략 N분으로 잡았어요. 이 값으로 저장할까요?" → "이 값으로 저장"(그 분을 직접 입력 `MANUAL`로 다시 보냄) / "예상 이동을 직접 고칠게요". 좌표가 없어 어림값도 없으면 예상 이동에 직접 입력
 
 ### H05 새 일정
 - 장소 검색 시트("장소" 줄을 누르면 열림): 0.3초 입력이 멈추면 `listPlaces(query, near)` → `place-search`(카카오 키워드) — Edge. `near` = 프로필 집 좌표(`profiles.home_lat` · `home_lng`)가 있으면 가까운 순, 검색어가 비면 최근 장소(최근 90일 약속의 도착지 · 출발지, `near` 안 씀). 줄 아래 글자는 주소 · 분류(`category`, 카카오 값 그대로 통과 — 저장 안 함, 카카오 약관 "응답 저장 · 재사용 불가"는 D5 참고). 가짜 모드는 목업 대학가 장소에서 거름
 - 이동시간 · 알람 시각 · 강도 미리 보기: `alarm-suggest`(카카오 대중교통 포함) — Edge
 - 저장: `appointments` + `appointment_participants` + `alarms`("알람" 줄에서 고른 종류 — 기상 · 준비 · 출발, 다 끄면 알람 없는 일정, D46)를 한 번에 `alarm-commit` — Edge, 준비물 `todos`(ITEM) — DB → 예약 — 폰
-- 반복: 요일 칩 · 매일 · 평일 → `appointments.recurrence_rule` RRULE (D44, `FREQ=DAILY` · `FREQ=WEEKLY;BYDAY=…` 두 모양만). 저장은 첫 회차만 만들고, 다음 회차는 `alarm-roll`이 앞으로 14일치를 회차마다 새 행(약속 · 참여 · 알람 · 준비물)으로 미리 만듦 (D4 A, 5분마다 보충 · 앱 맞추기 때 본인 몫). 공동 약속은 첫 회차만
+- 반복: 요일 칩 · 매일 · 평일 → `appointments.recurrence_rule` RRULE (D44, `FREQ=DAILY` · `FREQ=WEEKLY;BYDAY=…` 두 모양만). 저장은 첫 회차만 만들고, 다음 회차는 `alarm-roll`이 앞으로 14일치를 회차마다 새 행(약속 · 참여 · 알람 · 준비물)으로 미리 만듦 (D4 A, 5분마다 보충 · 앱 맞추기 때 본인 몫). 공동 약속은 첫 회차만 · 저장 직후 앱이 `syncNow({ rollSeriesId })`로 바로 넘기고(준비물 저장 뒤), 평소엔 앱이 앞에 올 때 10분에 한 번
 - 확인 시트에서 시각 고치기 (D43): 기상을 옮기면 나머지도 따라 움직이되 순서가 뒤집히면 막음, 고친 값은 `user_edit_logs`
 
 ### H07 알람 울림
@@ -180,6 +188,7 @@
 - 대화: Gemini Live 단말 직결 (D7) — 임시 토큰 `voice-session` · 결과 반영 `voice-commit` — Edge
 - 대화 기록: `conversation_sessions`(`transcript` · `extracted_data` · `apply_status`) — Edge
 - 찾은 일정 · 준비물 저장: `appointments` · `todos` — Edge. 일정을 여러 개 찾으면 다 받음 (D36) — 기상과 이어지는 첫 일정만 자세히, 나머지는 시간에 맞춰 가벼운 알림. 카드별 상태 저장 자리는 D32와 같이 정함
+- 실패 · 한도 안내 부품 `ChatNotice`(값 · 콜백, L4가 붙임)
 
 ### A03 하루 기록 · 일기 (AI 대기)
 - 일기: `daily_journals`(AI 글 · 고친 글 · 코칭 · 격려 · 루틴 제안) 읽기 · 고치기 — DB, 만들기 — Edge. 날짜별로 엶 (R02 일간에서, D48)
@@ -206,6 +215,7 @@
 - 온보딩: `profiles` 아이디(`handle`) · 집(`home_name` · `home_lat` · `home_lng`) · 기본 준비 · 여유 시간 · 이동 수단 — DB, 집 검색 `place-search` — Edge
   - **지금은 흐름에서 뺌** (`lib/flags` `ONBOARDING_IN_FLOW = false`, #177): 로그인하면 아이디가 없어도 바로 홈. 임시 화면 파일은 두고 길만 막음 (주소로도 안 열리고 `/dev/screens`의 "온보딩부터 다시"도 숨김). 새 온보딩 UI를 받으면 true로 바꾸고 화면을 바꿈
   - 건너뛰는 동안의 프로필: 닉네임 = 가입 때 카카오 · 구글에서 가져온 값(DB 트리거), 준비 60분 · 여유 10분 · 이동 수단 대중교통 = DB 기본값(온보딩 입력칸 기본값과 같음), 집 = 비어 있음(서버가 "집"으로 씀, 온보딩도 이름만 저장해 좌표는 어차피 없음), 아이디 = 비어 있음(친구가 @아이디로 나를 못 찾을 뿐, 내가 남을 찾는 것과 나머지 화면은 그대로)
+- 온보딩 단계 부품 초안(`features/onboarding/components/`): `OnboardingFrame`(틀) · `HomePlaceStep` · `TimetableStep` · `PermissionsStep` · `OnboardingDoneStep` — 값 · 콜백만 받고 api · 라우터를 부르지 않음(L7이 함수를 붙임). `/dev/onboarding?mode=mock`에서 가짜 값으로 넘겨 봄 (`/dev/screens` 목록에는 없음, #116)
 - 권한 안내: 알림 · 정확한 알람 · 잠금화면 알람 화면 — 폰
 - 푸시 토큰: 앱 켤 때 `register_push_token` — RPC
 
@@ -220,7 +230,9 @@
 | `wake-check` | 5분마다 기상 미확인 알람을 MISSED로 기록하고 미확인 푸시(`notify`) — pg_cron 배치 | — | H08 · G03 |
 | `alarm-roll` | 반복 약속 · 일정 없는 반복 알람의 다음 회차를 14일치 미리 만들고(`series_id` · `occurrence_on`), 루틴 알람 시각을 다음 발생으로 옮김 — pg_cron 5분마다(서비스 키) + 앱 맞추기 때 본인 몫(로그인 토큰) | 카카오 대중교통 | H01 · H02 · H03 · R02 |
 | `suggestion-generate` | 매일 03:00 제안 만들기 (배치) | — | S01 |
-| `voice-session` · `voice-commit` · `journal-*` | AI 대화(Gemini Live 단말 직결용 임시 토큰 · 결과 반영) · 일기 | Gemini | A02 · A03 (AI 대기) |
+| `voice-session` | 자기 전 대화 시작 · 이어 받기(텍스트). 첫 마디는 서버 템플릿(모델 호출 없음), 하루 5대화 상한. 응답 `{ session_id, resumed, rev, turn_seq, day, messages, cards, limits }` (L4 AI 묶음) | — | A02 |
+| `voice-turn` | 자기 전 대화 한 턴: 말(`text`) · 앱 일 결과(`results`) · 카드 버튼(`card_action`). 빠른 추출(T2F)과 대화 답(T1) 동시 호출 → 턴 처리 → 가드. 응답 `{ rev, turn_seq, next: USER \| APP_TASKS, reply, cards(전체), fixes, limits }`, 서버 마감 18초 (L4 AI 묶음) | Claude | A02 |
+| `voice-commit` · `journal-*` | AI 대화 끝 정리(할 일 · 준비물) · 일기 | Claude | A02 · A03 (AI 대기) |
 
 나머지(목록 · 체크 · 권한 · 기록 화면)는 Edge 없이 DB · RPC로 함.
 
