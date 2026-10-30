@@ -43,11 +43,11 @@ const record = (date: string, patch: Partial<RecordRow> = {}): RecordRow => ({
 
 describe('factsOf — daily_records 한 줄 → 달력 점 사실', () => {
   it('기상 확인 · 그 밖의 기록(준비 실측 포함)을 나눠 봄, 일정 수는 그대로 실음', () => {
-    expect(factsOf(record('2026-10-19', { wake_confirmed_at: '2026-10-18T22:30:00Z', actual_prepare_minutes: 40 }), false, { total: 1, departed: 1, arrived: 0 })).toEqual({
+    expect(factsOf(record('2026-10-19', { wake_confirmed_at: '2026-10-18T22:30:00Z', actual_prepare_minutes: 40 }), false, { total: 1, departed: 1, arrived: 0, firstDeparted: true })).toEqual({
       woke: true,
       journal: false,
       any: true,
-      appointments: { total: 1, departed: 1, arrived: 0 },
+      appointments: { total: 1, departed: 1, arrived: 0, firstDeparted: true },
     });
     expect(factsOf(record('2026-10-17', { wake_confirmed_at: '2026-10-17T00:30:00Z' }), false)).toMatchObject({ woke: true, any: true });
     expect(factsOf(record('2026-10-17', { condition_note: '피곤' }), false)).toMatchObject({ woke: false, any: true });
@@ -55,7 +55,7 @@ describe('factsOf — daily_records 한 줄 → 달력 점 사실', () => {
   });
 
   it('행이 없거나 빈 행이면 기록 없음 · 일정 없는 날, 일기만 있어도 일기 표시', () => {
-    expect(factsOf(undefined, false)).toEqual({ woke: false, journal: false, any: false, appointments: { total: 0, departed: 0, arrived: 0 } });
+    expect(factsOf(undefined, false)).toEqual({ woke: false, journal: false, any: false, appointments: { total: 0, departed: 0, arrived: 0, firstDeparted: false } });
     expect(factsOf(record('2026-10-17'), false).any).toBe(false);
     expect(factsOf(undefined, true).journal).toBe(true);
   });
@@ -74,15 +74,25 @@ describe('appointmentCountsByDay — 일정 행 → 날짜별 일정 · 출발 �
       row('2026-10-19T08:00:00.123456+00:00', { departed_at: '2026-10-19T07:00:00Z' }), // 10/19 17:00
       row('2026-10-19T15:00:00Z'), // 10/20 0:00 — 다음 날
     ]);
-    expect(counts.get('2026-10-19')).toEqual({ total: 2, departed: 2, arrived: 1 });
-    expect(counts.get('2026-10-20')).toEqual({ total: 1, departed: 0, arrived: 0 });
+    expect(counts.get('2026-10-19')).toEqual({ total: 2, departed: 2, arrived: 1, firstDeparted: true }); // 첫 일정(0:30)에 출발 기록이 있음
+    expect(counts.get('2026-10-20')).toEqual({ total: 1, departed: 0, arrived: 0, firstDeparted: false });
     expect(counts.get('2026-10-18')).toBeUndefined();
   });
 
   it('이번만 지운 회차(CANCELED)는 일정이 아님 — 고친 회차(EDITED)는 일정', () => {
     const counts = appointmentCountsByDay([row('2026-10-19T01:00:00Z', { exception_kind: 'CANCELED' }), row('2026-10-19T03:00:00Z', { exception_kind: 'EDITED' })]);
-    expect(counts.get('2026-10-19')).toEqual({ total: 1, departed: 0, arrived: 0 });
+    expect(counts.get('2026-10-19')).toEqual({ total: 1, departed: 0, arrived: 0, firstDeparted: false });
     expect(appointmentCountsByDay([row('2026-10-19T01:00:00Z', { exception_kind: 'CANCELED', departed_at: '2026-10-19T00:00:00Z' })]).size).toBe(0);
+  });
+
+  it('첫 일정(가장 이른 약속 시각)의 출발만 firstDeparted로 봄 — 행 순서와 상관없음', () => {
+    // 10/19 오전 9시(첫 일정, 출발 없음) · 오후 2시(둘째, 출발 있음) — 둘째 행이 먼저 와도 첫 일정은 오전 9시
+    const later = row('2026-10-19T05:00:00Z', { departed_at: '2026-10-19T04:00:00Z' }); // 14:00
+    const first = row('2026-10-19T00:00:00Z'); // 09:00
+    expect(appointmentCountsByDay([later, first]).get('2026-10-19')).toEqual({ total: 2, departed: 1, arrived: 0, firstDeparted: false });
+    expect(appointmentCountsByDay([first, later]).get('2026-10-19')?.firstDeparted).toBe(false);
+    const firstWith = row('2026-10-19T00:00:00Z', { departed_at: '2026-10-18T23:30:00Z' });
+    expect(appointmentCountsByDay([later, firstWith]).get('2026-10-19')?.firstDeparted).toBe(true);
   });
 
   it('약속 시각을 못 읽는 행은 거름', () => {

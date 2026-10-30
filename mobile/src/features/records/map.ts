@@ -24,17 +24,22 @@ export type AppointmentDayRow = Pick<Tables<'appointment_participants'>, 'depart
   appointments: Pick<Tables<'appointments'>, 'appointment_at' | 'exception_kind'>;
 };
 
-// 일정 행 → 날짜(YYYY-MM-DD, 한국 시간)별 일정 · 출발 · 도착 수. 이번만 지운 회차(exception_kind CANCELED)는 그날 일정이 아니라서 뺌
+// 일정 행 → 날짜(YYYY-MM-DD, 한국 시간)별 일정 · 출발 · 도착 수 + 첫 일정의 출발 여부. 이번만 지운 회차(exception_kind CANCELED)는 그날 일정이 아니라서 뺌
 //   (지워도 참여 조건 행은 남으므로 읽은 뒤 여기서 거름). 약속 시각을 못 읽는 행도 뺌
 export function appointmentCountsByDay(rows: readonly AppointmentDayRow[]): Map<string, AppointmentCounts> {
   const byDay = new Map<string, AppointmentCounts>();
+  const firstAt = new Map<string, number>(); // 날짜별 가장 이른 약속 시각
   for (const row of rows) {
     if (row.appointments.exception_kind === 'CANCELED') continue;
     const at = dbTimeMs(row.appointments.appointment_at);
     if (Number.isNaN(at)) continue;
     const key = dayKey(new Date(at));
-    const counts = byDay.get(key) ?? { total: 0, departed: 0, arrived: 0 };
+    const counts = byDay.get(key) ?? { total: 0, departed: 0, arrived: 0, firstDeparted: false };
     counts.total += 1;
+    if (at < (firstAt.get(key) ?? Infinity)) {
+      firstAt.set(key, at);
+      counts.firstDeparted = row.departed_at != null;
+    }
     if (row.departed_at != null) counts.departed += 1;
     if (row.arrived_at != null) counts.arrived += 1;
     byDay.set(key, counts);

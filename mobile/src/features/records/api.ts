@@ -35,6 +35,7 @@ function markOf(date: Date): DayMark {
   const appointments = {
     total: p.appointment ? 1 : 0,
     departed: p.actual.some(([, label]) => label === '집 출발') ? 1 : 0,
+    firstDeparted: p.actual.some(([, label]) => label === '집 출발'), // 목업은 하루 일정 하나라 그 일정이 첫 일정
     arrived: p.actual.some(([, label]) => label.startsWith('도착')) ? 1 : 0, // '도착 · 지각 아님' · '도착 · N분 지각'
   };
   return dayMark({ woke: p.wake != null, journal: false, any: p.actual.length > 0, appointments }, false);
