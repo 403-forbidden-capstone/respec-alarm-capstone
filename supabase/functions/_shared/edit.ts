@@ -18,7 +18,7 @@ import type { AlarmRow } from './plan-core.ts';
 export type EditScope = 'this' | 'following';
 export const EDIT_SCOPES = ['this', 'following'] as const satisfies readonly EditScope[];
 
-// appointments.exception_kind (마이그레이션 20261031000000_appointment_edit.sql)
+// appointments.exception_kind (마이그레이션 20261030150000_appointment_edit.sql)
 export type ExceptionKind = 'EDITED' | 'CANCELED';
 
 // 알람이 이만큼(분) 이상 늦춰지면 저장 전에 확인 (앱 schedule.ts CONFIRM_MOVE_MINUTES와 같은 값 · D67). 앞당김은 묻지 않음

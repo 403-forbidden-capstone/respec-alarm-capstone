@@ -492,7 +492,7 @@ function rollDueSeries(db: FakeDb, args: Record<string, unknown>) {
     };
   };
 
-  // 기준 회차(template_id · 규칙 · 공동 약속)는 예외 아닌 행 중 가장 늦은 것 → 없으면 EDITED 중 가장 늦은 것, CANCELED는 기준이 아님 (20261031000000_appointment_edit.sql의 base_appointment)
+  // 기준 회차(template_id · 규칙 · 공동 약속)는 예외 아닌 행 중 가장 늦은 것 → 없으면 EDITED 중 가장 늦은 것, CANCELED는 기준이 아님 (20261030150000_appointment_edit.sql의 base_appointment)
   //   다음 회차 시각(due_at)을 세는 기준은 예외까지 포함한 가장 늦은 행
   const baseOf = (latest: Row): Row | undefined => {
     const mine = db.rows('appointments').filter((x) => x.creator_id === latest.creator_id && x.series_id === latest.series_id && x.exception_kind !== 'CANCELED');
