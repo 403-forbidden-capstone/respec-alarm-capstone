@@ -558,6 +558,25 @@ test('장소 고르기 뒤 text 없이 새 client_turn_id로 results만 와도 �
   assert.equal(claude!.left('T1'), 0);
 });
 
+test('장소를 고른 뒤(READY) T1 화면에서 앞서 낸 "장소 되물을 것" 줄이 사라지고 확인 필요 줄만 남음 (L8 버그 1)', async () => {
+  const db = seed();
+  const { deps, claude } = depsOf(db, { T2F: [t2f('place_pending_appt')], T1: [t1('preview'), t1('place_ask'), t1('place_ready')] });
+  const s = await handleVoiceSession(deps, { session_type: 'BEFORE_SLEEP', input_mode: 'TEXT' });
+  const sid = s.session_id as string;
+  const id = cid();
+  const r1 = await handleVoiceTurn(deps, text(sid, 1, '내일 저녁 6시 반에 학생회관에서 동아리 모임', id));
+  const needPlace = { cards: [{ id: 'c1', status: 'NEEDS_PLACE', estimate: null, error: '위치를 골라 주세요' }], fixes: [] };
+  const r2 = await handleVoiceTurn(deps, { session_id: sid, rev: r1.rev, client_turn_id: id, results: needPlace });
+  assert.match(claude!.seen.T1[1], /- 되물을 것: '동아리 모임' 장소/);
+  const est = { alarms: [{ kind: 'DEPARTURE', at: '2026-10-30T17:30:00+09:00', enabled: true }], level: 1, with_wake: false };
+  await handleVoiceTurn(deps, { session_id: sid, rev: r2.rev, client_turn_id: cid(), results: { cards: [{ id: 'c1', status: 'READY', estimate: est, error: null }], fixes: [] } });
+  const view = claude!.seen.T1[2];
+  assert.doesNotMatch(view, /되물을 것/);
+  assert.match(view, /확인 필요/);
+  // 서버 상태에도 해소된 되물을 것이 남지 않음
+  assert.equal(stateOf(db, sid).events.flatMap((e) => e.clarify).length, 0);
+});
+
 test('모르는 카드 · 남의 세션은 NOT_FOUND, 남의 세션에 닿지 못함', async () => {
   const db = seed();
   db.rows('profiles').push({ user_id: OTHER, nickname: '서연', timezone: 'Asia/Seoul' });
