@@ -1,6 +1,9 @@
 // 목업 시나리오 데이터 — mockup.html의 고정 데이터 · initState를 옮김 (2025년 5월 22일 목요일, 10시 팀 주간회의 예시)
 // 화면은 이 폴더를 직접 읽지 않고 features/*/api.ts를 거침. 기능별로 실데이터가 붙으면 그 부분을 지움
 // 바꾼 값(알람 켜기 · 권한 등)은 앱을 다시 열 때까지만 남음
+import type { WakeSensitivity } from '@shared/calc/intensity.ts';
+import type { WakeMargin } from '@shared/calc/prepare.ts';
+
 import type { Importance, IntensityAxis, Level, Place, RingKind, Transport, UserEditLog, WakePhase } from '@/features/alarm/types';
 import type { SuggestionStatus } from '@/features/records/types';
 import type { PermissionSet } from '@/features/social/types';
@@ -155,6 +158,8 @@ export const db = {
   disabledKinds: new Set<string>(), // `${일정 id}:${종류}`
   intensityOverrides: {} as Record<string, Partial<Record<IntensityAxis, Level>>>,
   lateCount4w: 1, // 최근 4주 늦잠 지각
+  wakeSensitivity: 'NORMAL' as WakeSensitivity, // 가짜 모드 프로필의 잠귀 (MOCK_PROFILE과 같은 보통) — 무거움(HEAVY)이면 강도 자동 값이 강. 서버와 같은 규칙
+  wakeMargin: 'NORMAL' as WakeMargin, // 가짜 모드 프로필의 깨우는 여유 (보통 = 기록의 0.8 분위수)
   wakeThetaMinutes: 1, // 기상 판정 기준 θ
   me: { wakeAt: null as Date | null, departAt: null as Date | null, arriveAt: null as Date | null },
   // 지금 진행 중인 기상 판정 (목업 S.wake · S.ring) — 기상 알람 하나만. 홈 · 그룹의 내 상태가 읽음

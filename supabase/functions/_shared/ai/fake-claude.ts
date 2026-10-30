@@ -37,7 +37,8 @@ export function fakeClaude(script: FakeScript): FakeClaude {
     create(params): Promise<LlmResponse> {
       const point = bySystem.get(systemText(params.system));
       if (point === undefined) return Promise.reject(new Error('가짜 Claude: 모르는 프롬프트'));
-      const screen = params.messages[0]?.content ?? '';
+      const content = params.messages[0]?.content ?? '';
+      const screen = typeof content === 'string' ? content : content.map((b) => (b.type === 'text' ? b.text : '')).join('');
       (seen[point] ??= []).push(screen);
       order.push(point);
       const step = (queues[point] ??= []).shift();

@@ -6,8 +6,8 @@ import { activeSteps, nextStep, ONBOARDING_ORDER, prevStep, stepNumber, type Ste
 
 // 모두 켠 표 — 순서 배열 그대로
 const ALL_ON = Object.fromEntries(ONBOARDING_ORDER.map((id) => [id, true])) as StepFlags;
-// PR 4에서 만드는 단계만 켠 표 (lib/flags 기본값) — 집 · 시간표 · 권한 안내 · 마이크는 끔
-const PR4 = ['handle', 'nickname', 'sleep', 'prepare', 'consent', 'share', 'first'];
+// 화면을 만든 단계만 켠 표 (lib/flags 기본값) — 권한 안내 · 마이크는 끔
+const DEFAULT_ON = ['handle', 'nickname', 'sleep', 'home', 'prepare', 'timetable', 'consent', 'share', 'first'];
 
 describe('온보딩 단계 순서', () => {
   it('순서는 레인 정의 그대로, 중복 없음', () => {
@@ -29,8 +29,8 @@ describe('activeSteps', () => {
     expect(activeSteps({ ...ALL_ON, home: false, mic: false })).toEqual(ONBOARDING_ORDER.filter((id) => id !== 'home' && id !== 'mic'));
   });
 
-  it('기본 표(PR 4)는 만든 단계만 켬', () => {
-    expect(activeSteps()).toEqual(PR4);
+  it('기본 표는 만든 단계만 켬', () => {
+    expect(activeSteps()).toEqual(DEFAULT_ON);
   });
 
   it('모두 끄면 빈 목록', () => {
@@ -52,12 +52,10 @@ describe('nextStep · prevStep', () => {
   });
 
   it('기본 표: 꺼진 단계를 건너뛰고 이어짐', () => {
-    expect(nextStep('sleep')).toBe('prepare'); // home 건너뜀
-    expect(nextStep('prepare')).toBe('consent'); // timetable 건너뜀
+    expect(nextStep('timetable')).toBe('consent');
     expect(nextStep('consent')).toBe('share'); // permissions 건너뜀
-    expect(prevStep('prepare')).toBe('sleep');
-    expect(prevStep('consent')).toBe('prepare');
     expect(prevStep('share')).toBe('consent');
+    expect(prevStep('consent')).toBe('timetable');
   });
 
   it('기본 표: 끝은 first(그 뒤 mic은 꺼져 있어 null), 첫 단계는 앞이 없음', () => {
@@ -66,8 +64,8 @@ describe('nextStep · prevStep', () => {
   });
 
   it('꺼진 단계에서 부르면 null — 현재 단계가 목록에 없음', () => {
-    expect(nextStep('home')).toBeNull();
-    expect(prevStep('home')).toBeNull();
+    expect(nextStep('permissions')).toBeNull();
+    expect(prevStep('permissions')).toBeNull();
   });
 });
 
@@ -78,13 +76,13 @@ describe('stepNumber — 진행 표시', () => {
     expect(stepNumber('mic', ALL_ON)).toEqual({ step: 11, total: 11 });
   });
 
-  it('기본 표: 켠 단계만 셈 — 전체 7', () => {
-    expect(stepNumber('handle')).toEqual({ step: 1, total: 7 });
-    expect(stepNumber('prepare')).toEqual({ step: 4, total: 7 });
-    expect(stepNumber('first')).toEqual({ step: 7, total: 7 });
+  it('기본 표: 켠 단계만 셈 — 전체 9', () => {
+    expect(stepNumber('handle')).toEqual({ step: 1, total: 9 });
+    expect(stepNumber('prepare')).toEqual({ step: 5, total: 9 });
+    expect(stepNumber('first')).toEqual({ step: 9, total: 9 });
   });
 
   it('꺼진 단계는 step 0', () => {
-    expect(stepNumber('home').step).toBe(0);
+    expect(stepNumber('permissions').step).toBe(0);
   });
 });

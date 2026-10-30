@@ -274,7 +274,10 @@ async function reevaluateWake(ctx: EditCtx, env: Env, snapshot: Snapshot): Promi
       let finalWake: boolean | null = wakeOf(row.alarms)?.is_enabled ?? null;
       const hasRing = row.alarms.some((a) => a.alarm_type !== 'ROUTINE');
       if (hasRing) {
-        const { action, earlierAfter } = wakeAction({ id: row_id, at, hasWake: wakeOf(row.alarms) != null, beforeWakes, sim });
+        // 울릴 시각이 이미 지난 기상 알람은 REMOVE 대상에서 뺌 — 울린 기록이 학습 · 미루기 근거라 알람 행을 지우지 않음 (edit.ts wakeAction)
+        const wake = wakeOf(row.alarms);
+        const wakeRung = wake != null && Date.parse(wake.scheduled_at) <= ctx.now.getTime();
+        const { action, earlierAfter } = wakeAction({ id: row_id, at, hasWake: wake != null, wakeRung, beforeWakes, sim });
         if (action !== 'NONE') {
           const done = await replanForWake(ctx, env, row, earlierAfter);
           if (done.ok) {
