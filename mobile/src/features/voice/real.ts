@@ -48,7 +48,7 @@ type ServerDraft = {
   alarms?: Partial<Record<RingKind, boolean>>;
 };
 
-// 카드의 고칠 값 — ALARM_EDIT는 설계 2.2 그대로. APPT_NEW에도 같은 칸(times · levels · prepare_delta)이 올 수 있다고 가정 (서버 PR이 맞출 것)
+// 카드의 고칠 값 — ALARM_EDIT는 설계 2.2 그대로. APPT_NEW 카드도 서버가 같은 칸(times · levels · prepare_delta)을 채움 (#265)
 type ServerEdit = {
   appointment_id?: string | null; // DB 약속 id (서버가 별칭을 풀어 줌, 모르면 null)
   times?: Partial<Record<RingKind, string>>;
@@ -703,7 +703,7 @@ export function rejectCard(cardId: string): Promise<void> {
   });
 }
 
-// 카드 [장소 고르기] — 고른 곳으로 다시 계산해 READY로, 결과를 서버에 알림 (새 client_turn_id로 results만 — 서버가 받아 줘야 함, 서버 PR이 맞출 것)
+// 카드 [장소 고르기] — 고른 곳으로 다시 계산해 READY로, 결과를 서버에 알림 (새 client_turn_id로 results만 보냄 — 서버(#265)가 받음)
 export function pickCardPlace(cardId: string, place: { name: string; lat?: number; lng?: number }): Promise<void> {
   return serial(async () => {
     const rec = recOf(cardId);

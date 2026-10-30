@@ -10,7 +10,7 @@ import { useAuth } from '@/features/auth/AuthProvider';
 import { finishConversation, getConversation, pickCardPlace, rejectCard, retryConversation, saveCard, say } from '@/features/voice/api';
 import { ChatBubble, TypingBubble } from '@/features/voice/components/ChatBubble';
 import { ChatComposer } from '@/features/voice/components/ChatComposer';
-import { ChatNotice } from '@/features/voice/components/ChatNotice'; // L5 부품 — 실패 · 한도 안내 (먼저 머지: L5 ChatNotice PR)
+import { ChatNotice } from '@/features/voice/components/ChatNotice'; // L5 부품 — 실패 · 한도 안내
 import { FoundScheduleCard } from '@/features/voice/components/FoundScheduleCard';
 import { now } from '@/lib/clock';
 import { userMessage } from '@/lib/errors';

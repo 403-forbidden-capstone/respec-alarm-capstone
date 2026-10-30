@@ -186,7 +186,7 @@
   - 시작: `voice-session {session_type: BEFORE_SLEEP, input_mode: TEXT, resume: true}` — 오늘 안 끝난 세션이 있으면 이어서(A02를 다시 열어도 대화 유지), 첫 마디는 서버 템플릿. 하루 한도면 `session_id: null` · `limits.reached: DAY`
   - 말: `voice-turn {session_id, rev, client_turn_id, text}` (25초 timeout, `lib/edge`). 응답 `next: APP_TASKS`면 앱이 카드마다 일을 하고 `voice-turn {results}`(같은 client_turn_id · rev는 응답의 rev)로 돌려준 뒤 마지막 `reply`를 받음
   - 앱 일: 새 약속 카드(`APPT_NEW`) = 장소 이름이 `listPlaces(이름)`에 똑같이 하나면 그 좌표로 `estimateAppointment`, 아니면 `NEEDS_PLACE`(카드의 [장소 고르기] = 장소 검색 시트) · 시각 고침 `adjustEstimate` / 알람 고치기(`ALARM_EDIT`) = `getAppointment` + `previewAlarms`(시각 · 준비가 바뀔 때만) / 정정 `fixes` = `features/voice/fixes.ts` — 새 시각 `recordParticipantTimes(MANUAL)` + 고친 값 기록(user_edit_logs, 화면 A02) 한 줄, 부정(위치 값 지우기)은 L2 PR 6 뒤 연결
-  - 카드 버튼: [저장] = `createAppointment(estimate, '자기 전 대화')`(준비물 같이) · 약속 없는 알람 = `createStandaloneAlarm` · [바꾸기] = `saveAlarmSettings` · 준비 +N · 강도는 **실제로 바뀐 때만** 저장 뒤 `saveAlarmSettings` 한 번 더(alarm-commit이 길찾기를 또 부르므로) → `voice-turn {card_action: SAVED, appointment_id, alarms}` / [저장 안 함] = `card_action: REJECTED`(서버는 답 없음)
+  - 카드 버튼: [저장] = `createAppointment(estimate, '자기 전 대화')`(준비물 같이) · 약속 없는 알람 = `createStandaloneAlarm` · [바꾸기] = `saveAlarmSettings` · 준비 ±N(줄이기 · 0 = 자동으로) · 강도(null = 보통으로 → 자동)는 **실제로 바뀐 때만** 저장 뒤 `saveAlarmSettings` 한 번 더(alarm-commit이 길찾기를 또 부르므로) → `voice-turn {card_action: SAVED, appointment_id, alarms}` / [저장 안 함] = `card_action: REJECTED`(서버는 답 없음)
   - 완료: 대화를 그대로 남기고 홈으로 (대화 끝 정리 `voice-commit` · 할 일 · 준비물 · 일기는 이번 범위 밖)
   - 대화 상태(세션 · rev · 카드 · 계산한 Estimate)는 앱 메모리. 앱을 다시 열면 voice-session resume으로 말 · 카드 상태를 받고, 저장 전 Estimate는 다시 계산 (D5 — 이동 분을 서버에 안 남김)
 - 오류 · 상태 (화면 문구는 `lib/edge`의 code → 문구):
