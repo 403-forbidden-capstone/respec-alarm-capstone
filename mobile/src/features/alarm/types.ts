@@ -132,6 +132,8 @@ export type AppointmentPatch = {
   title?: string;
   at?: Date;
   place?: string;
+  placeLat?: number; // 고른 장소의 좌표 (place-search) — 실서버(4b)가 길찾기를 새로 구하는 데 씀. 가짜 모드는 안 읽음 (AppointmentDraft와 같음)
+  placeLng?: number;
   importance?: Importance;
   repeatDays?: Weekday[];
 };

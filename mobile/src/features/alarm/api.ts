@@ -431,7 +431,7 @@ function applyPatch(a: MockAppointment, patch: AppointmentPatch, delta: number, 
 
 // 일정 고치기 (H03 편집 시트) — 제목 · 날짜 시각 · 장소 · 중요도 · 반복 요일. 알람 시각 · 강도는 고친 값으로 다시 계산됨
 //   changes = 시각이 바뀌는 기상 · 준비 · 출발의 전 → 후 (제목만 바꾸면 빈 목록)
-//   needsConfirm = 5분(CONFIRM_MOVE_MINUTES) 이상 늦춰지는 알람이 있음 (D67). true면 저장하지 않고 돌려줌 → 화면이 기존 확인 시트로 묻고, 확인하면 { confirmed: true }로 같은 값을 다시 부름
+//   needsConfirm = 5분(CONFIRM_MOVE_MINUTES) 이상 늦춰지는 알람이 있음 (D67, 앞당김은 묻지 않음 — H03 기존 확인 시트 needsMoveConfirm은 앞당김도 묻는 쪽이라 다름). true면 저장하지 않고 돌려줌 → 화면이 기존 확인 시트로 묻고, 확인하면 { confirmed: true }로 같은 값을 다시 부름
 //   앞당김 · 5분 미만 늦춤은 바로 저장하고 needsConfirm false → 화면이 토스트 [되돌리기]. 되돌리기 = 이전 값을 { confirmed: true }로 넣어 같은 함수를 다시 부름 (늦춤이어도 묻지 않게)
 //   공동 약속은 만든 사람만 (UserError). 알람 순서(기상 ≤ 준비 ≤ 출발 ≤ 도착 목표)가 뒤집히면 저장하지 않고 UserError — saveAlarmSettings와 같은 검사
 export async function updateAppointment(id: string, patch: AppointmentPatch, scope: EditScope, options: UpdateOptions = {}): Promise<UpdateResult> {
