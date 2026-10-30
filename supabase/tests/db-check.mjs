@@ -2232,6 +2232,54 @@ await check('배치 예약: alarm-roll을 5분마다 부름 (pg_cron은 PGlite�
 
 
 // ---------------------------------------------------------------------
+// 기본 강도 = 보통 (D69, 이슈 #262) — 이미 저장된 자동 약 알람을 보통으로
+// ---------------------------------------------------------------------
+
+await check('기본 강도 백필: 자동(AUTO) 약(SOFT)은 세 칸 같이 보통으로(소리 칸이 비어 있어도 됨), 직접 고른(MANUAL) 약 · 자동 보통 · 자동 강은 그대로 — 시각 · 켜짐은 유지, 바뀐 행만 updated_at 갱신', async () => {
+  const staged = new PGlite();
+  try {
+    await staged.exec(AUTH_STUBS);
+    const files = readdirSync(MIG_DIR).filter((x) => x.endsWith('.sql')).sort();
+    const i = files.findIndex((x) => x.endsWith('_intensity_default.sql'));
+    if (i < 0) return '_intensity_default.sql 마이그레이션이 없음';
+    for (const f of files.slice(0, i)) await staged.exec(readFileSync(join(MIG_DIR, f), 'utf8'));   // 값을 올리기 전까지만
+    const sq = async (sql, params = []) => (await staged.query(sql, params)).rows;
+    await sq(`insert into auth.users (id, email) values ($1, 'old@example.com')`, [A]);
+    // 일정 없는 알람으로 시험 — 약속 알람과 같은 칸 (alarms_one_source는 둘 다 비어도 받음)
+    const rowsIn = [
+      ['SOFT', 'CALM', 'theme_calm', 'AUTO', true],
+      ['SOFT', 'CALM', null, 'AUTO', false],
+      ['SOFT', 'CALM', 'theme_calm', 'MANUAL', true],
+      ['NORMAL', 'NEUTRAL', 'theme_default', 'AUTO', true],
+      ['STRONG', 'DIRECT', 'theme_urgent', 'AUTO', true],
+      ['STRONG', 'DIRECT', 'theme_urgent', 'MANUAL', true],
+    ];
+    for (const [n, [inten, tone, sound, src, enabled]] of rowsIn.entries()) {
+      await sq(`insert into public.alarms (user_id, alarm_type, scheduled_at, intensity, voice_tone, sound_key, intensity_source, is_enabled, snooze_limit, updated_at, last_calculated_at)
+                values ($1, 'WAKE', $2, $3, $4, $5, $6, $7, 2, '2026-10-01T00:00:00Z', '2026-10-01T00:00:00Z')`,
+        [A, `2026-11-03T0${n}:00:00+09:00`, inten, tone, sound, src, enabled]);
+    }
+    for (const f of files.slice(i)) await staged.exec(readFileSync(join(MIG_DIR, f), 'utf8'));
+    const out = await sq(`select to_char(scheduled_at at time zone 'Asia/Seoul', 'HH24') as hh, intensity, voice_tone, sound_key, intensity_source, is_enabled, snooze_limit,
+                                 (updated_at > '2026-10-01T00:00:00Z') as touched, (last_calculated_at = '2026-10-01T00:00:00Z') as calc_kept
+                            from public.alarms order by scheduled_at`);
+    const text = out.map((x) => [x.hh, x.intensity, x.voice_tone, x.sound_key ?? '-', x.intensity_source, x.is_enabled, x.snooze_limit, x.touched, x.calc_kept].join('/'));
+    const want = [
+      '00/NORMAL/NEUTRAL/theme_default/AUTO/true/2/true/true',   // 자동 약 → 보통 (세 칸 같이)
+      '01/NORMAL/NEUTRAL/-/AUTO/false/2/true/true',              // 소리 칸이 비어 있어도 올림, 꺼짐 유지
+      '02/SOFT/CALM/theme_calm/MANUAL/true/2/false/true',        // 직접 고른 약은 그대로
+      '03/NORMAL/NEUTRAL/theme_default/AUTO/true/2/false/true',
+      '04/STRONG/DIRECT/theme_urgent/AUTO/true/2/false/true',
+      '05/STRONG/DIRECT/theme_urgent/MANUAL/true/2/false/true',
+    ];
+    return JSON.stringify(text) === JSON.stringify(want) ? true : { text };
+  } finally {
+    await staged.close();
+  }
+});
+
+
+// ---------------------------------------------------------------------
 // 회의 의견 (결정 안건 페이지 /decisions) — 링크를 아는 사람은 로그인 없이 읽고 남김, 고치기 X,
 // 지우기는 내 이름으로 남긴 것만 함수로 (숨김)
 // ---------------------------------------------------------------------

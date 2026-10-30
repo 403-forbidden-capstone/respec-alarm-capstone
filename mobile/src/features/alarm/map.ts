@@ -18,6 +18,7 @@ import {
   type AlarmTime,
   type Appointment,
   type AppointmentDetail,
+  IMPORTANCE_POINT,
   type Importance,
   type Intensity,
   type IntensityAxis,
@@ -258,7 +259,7 @@ export function toIntensity(alarms: readonly AlarmRow[], importance: Importance,
   const axis = (key: IntensityAxis) => ({ level: picked[key] ?? auto, manual: picked[key] != null });
   return {
     auto,
-    importancePoint: { LOW: 0, NORMAL: 1, HIGH: 2 }[importance],
+    importancePoint: IMPORTANCE_POINT[importance],
     lateCount: lateCount4w,
     latePoint: lateCount4w >= 2 ? 1 : 0,
     axes: { sound: axis('sound'), voice: axis('voice'), vibration: axis('vibration') },

@@ -1,6 +1,6 @@
 // 목업 계산 — 알람 역산 · 강도는 서버 함수와 같은 공용 계산(supabase/functions/_shared/calc)을 얇게 감쌈 (전체작업계획 8.1 Q4 A)
 //   ALG-01 알람 역산 · ALG-02 강도 · 그룹원 기상 상태 (ALG-03 권한 합집합은 features/social/grants.ts의 mergeGrants — 목업 · 실데이터 같이 씀)
-//   공용 계산이 목업 규칙을 그대로 옮긴 것이라(D56 열림 = 목업 계산이 기준) 결과가 같음. 역산 · 강도는 목업 일정(MockAppointment) ↔ 공용 입력만 바꾸고,
+//   역산 · 강도는 목업 일정(MockAppointment) ↔ 공용 입력만 바꿔 그대로 부름. 강도는 D69 규칙(기본 보통) — 옛 목업 규칙 "중요도 낮음 = 약"은 바뀜.
 //   그룹원 기상 상태(memberState)는 목업 시나리오(timelines · db.me · db.wake)로 글자를 만드는 목업 전용 로직
 import type { AlarmTime, IntensityAxis, Level } from '@/features/alarm/types';
 import type { WakeState } from '@/features/social/types';
@@ -35,7 +35,7 @@ export function alarmChain(a: MockAppointment): AlarmTime[] {
   }));
 }
 
-// ALG-02: 중요도 점수 + 최근 4주 늦잠 지각 2회 이상이면 1 → 0~2
+// ALG-02: 기본 보통 + 매우 중요면 한 단계 + 최근 4주 늦잠 지각 2회 이상이면 한 단계 (상한 강, D69) — 약은 직접 고를 때만
 export function autoLevel(a: MockAppointment): Level {
   return sharedAutoLevel(a.importance, db.lateCount4w);
 }
