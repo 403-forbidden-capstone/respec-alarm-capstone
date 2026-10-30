@@ -30,7 +30,7 @@ afterEach(() => {
 });
 
 const times = async (id: string) => Object.fromEntries((await getAppointment(id))!.alarms.map((x) => [x.kind, formatTime(x.at)]));
-const listed = async () => (await listAppointments()).map((a) => a.id);
+const listed = async () => (await listAppointments({ everyOccurrence: true })).map((a) => a.id);
 
 // a1을 매일 같은 시각의 3회차 묶음으로 — 5월 22일(목) · 29일 · 6월 5일 오전 10:00
 function makeSeries() {
