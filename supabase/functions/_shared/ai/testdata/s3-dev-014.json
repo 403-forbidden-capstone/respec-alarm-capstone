@@ -1,0 +1,59 @@
+{
+  "_note": "voice.flow.test.ts의 가짜 Claude 출력. 실험실 개발용 대화 s3-dev-014(태오 — 발표 · 머리 감기 · 준비 15분, runs/e1-b1/conv · runs/e2-t2f4-b1/t2.jsonl)는 이미 있는 약속의 준비 시간 늘리기 흐름이라, 시험 한 바퀴(새 약속 카드 → 계산 → 응 → 저장 → 도착 정정)와 모양이 안 맞아 T2F · T1 출력은 같은 모양(extract-fast.v1 · t1-reply.v1)으로 손으로 짰다. 실험실에서 그대로 가져온 것은 recorded: true인 줄뿐(T1 마지막 답 · T2F 빈 추출). 품질이 아니라 흐름 시험용.",
+  "T2F": {
+    "new_appt": {
+      "_recorded": false,
+      "appointments": [{ "ref": null, "title": "캡스톤 발표", "date": "2026-10-30", "time": "10:00", "place": "강남역", "importance": null, "transport": null, "repeat": null, "save": "UNCONFIRMED", "unclear": null }],
+      "alarm_changes": [], "fact_feedback": [], "prep_adjustment": null, "safety_flag": false
+    },
+    "yes": {
+      "_recorded": false,
+      "appointments": [{ "ref": null, "title": "캡스톤 발표", "date": "2026-10-30", "time": "10:00", "place": "강남역", "importance": null, "transport": null, "repeat": null, "save": "CONFIRMED", "unclear": null }],
+      "alarm_changes": [], "fact_feedback": [], "prep_adjustment": null, "safety_flag": false
+    },
+    "arrive_fix": {
+      "_recorded": false,
+      "appointments": [], "alarm_changes": [],
+      "fact_feedback": [{ "fact_id": "f4", "status": "CORRECTED", "value_time": "10:20", "approx": false }],
+      "prep_adjustment": null, "safety_flag": false
+    },
+    "empty": {
+      "_recorded": true,
+      "appointments": [], "alarm_changes": [], "fact_feedback": [], "prep_adjustment": null, "safety_flag": false
+    },
+    "crisis": {
+      "_recorded": false,
+      "appointments": [], "alarm_changes": [], "fact_feedback": [], "prep_adjustment": null, "safety_flag": true
+    },
+    "place_pending_appt": {
+      "_recorded": false,
+      "appointments": [{ "ref": null, "title": "동아리 모임", "date": "2026-10-30", "time": "18:30", "place": "학생회관", "importance": null, "transport": null, "repeat": null, "save": "UNCONFIRMED", "unclear": null }],
+      "alarm_changes": [], "fact_feedback": [], "prep_adjustment": null, "safety_flag": false
+    }
+  },
+  "T1": {
+    "preview": { "_recorded": false, "reply": "네, 알겠어요.", "acts": [], "end": false },
+    "propose": { "_recorded": false, "reply": "발표라 오전 7시 40분에 강하게 깨우는 알람으로 저장할까요?", "acts": [{ "type": "CONFIRM", "ref": "c1" }], "end": false },
+    "claims_saved": { "_recorded": false, "reply": "네, 저장했어요.", "acts": [], "end": false },
+    "ask_card": { "_recorded": false, "reply": "알겠어요. 카드의 저장 버튼을 눌러 주세요.", "acts": [], "end": false },
+    "saved": { "_recorded": false, "reply": "저장했어요. 내일 오전 7시 40분에 강하게 깨울게요.", "acts": [], "end": false },
+    "arrive_fixed": { "_recorded": false, "reply": "도착 시각을 10시 20분으로 고쳤어요.", "acts": [], "end": false },
+    "crisis": { "_recorded": false, "reply": "많이 힘드셨겠어요. 힘들 땐 109(자살예방 상담전화)에 언제든 전화할 수 있어요.", "acts": [], "end": false },
+    "crisis_repeat": { "_recorded": false, "reply": "푹 쉬어요. 많이 힘드셨겠어요. 힘들 땐 109(자살예방 상담전화)에 언제든 전화할 수 있어요.", "acts": [], "end": false },
+    "chat": { "_recorded": true, "reply": "좋은 하루였다니 다행이에요. 푹 주무시고 내일 발표도 잘 준비해요.", "acts": [], "end": false },
+    "place_ready": { "_recorded": false, "reply": "알람이 준비됐어요. 카드의 저장 버튼을 눌러 주세요.", "acts": [], "end": false },
+    "place_ask": { "_recorded": false, "reply": "동아리 모임 장소를 카드에서 골라 주세요.", "acts": [], "end": false },
+    "server_q": { "_recorded": false, "reply": "내일 오전 10시 캡스톤 발표 준비가 평소보다 더 걸릴 것 같아요?", "acts": [{ "type": "SERVER_Q", "ref": "q1" }], "end": false }
+  },
+  "results": {
+    "wake_0740": {
+      "alarms": [
+        { "kind": "WAKE", "at": "2026-10-30T07:40:00+09:00", "enabled": true },
+        { "kind": "PREPARE", "at": "2026-10-30T07:50:00+09:00", "enabled": true },
+        { "kind": "DEPARTURE", "at": "2026-10-30T08:50:00+09:00", "enabled": true }
+      ],
+      "level": 2,
+      "with_wake": true
+    }
+  }
+}

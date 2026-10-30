@@ -418,13 +418,13 @@ describe("alarmRelayMissing · hotlineWithoutRisk", () => {
     assert.deepEqual(alarmRelayMissing("기상은 7시 20분이에요.", ctx, [deferred, again], 2), []);
     // autoCheckT1: 위기 턴(latestUser) 다음 답이면 safety.deferredTurns로 미룬 결과까지
     const turns = [ai(0, "힘들 땐 109에 언제든 전화할 수 있어요."), user(1, "네")];
-    const next = autoCheckT1("푹 쉬세요.", [], ctx, [deferred, latest], turns, { safety: { conveyed: true, latestUser: false, deferredTurns: 1 } });
+    const next = autoCheckT1("푹 쉬세요.", [], ctx, [deferred, latest], turns, { safety: { conveyed: true, latestUser: false, riskThisTurn: false, deferredTurns: 1 } });
     assert.deepEqual(next.alarm_relay_missing, ["기상 07:10"]);
     const plain = autoCheckT1("푹 쉬세요.", [], ctx, [deferred, latest], turns, { safety: { conveyed: true, latestUser: false } });
     assert.deepEqual(plain.alarm_relay_missing, []);
     // 위기 턴이 (규칙을 어기고) 이미 시각을 전했으면 다음 답에 다시 요구하지 않음
     const told = [ai(0, "힘들 땐 109에 언제든 전화할 수 있어요. 기상 알람은 7시 10분이에요."), user(1, "네")];
-    assert.deepEqual(autoCheckT1("푹 쉬세요.", [], ctx, [deferred, latest], told, { safety: { conveyed: true, latestUser: false, deferredTurns: 1 } }).alarm_relay_missing, []);
+    assert.deepEqual(autoCheckT1("푹 쉬세요.", [], ctx, [deferred, latest], told, { safety: { conveyed: true, latestUser: false, riskThisTurn: false, deferredTurns: 1 } }).alarm_relay_missing, []);
   });
 
   it("109 뒤에 호 · 동 · 층 같은 단위가 붙으면 상담전화가 아님 (위기 지점 109 재현율이 부풀지 않게)", () => {
@@ -646,7 +646,7 @@ describe("applyGuards — 서버 조치", () => {
     c.events = [ev({ after_turn: 1, crisis: true, alarms: [{ ref: "al9", owner: "u0", type: "WAKE", date: "2026-10-09", time: "07:40", intensity: "STRONG", appointment_ref: "a9", enabled: true, change: "NEW" }] })];
     c.ctx.events = c.events;
     const safety = safetyInfoFrom(c.events, 1);
-    assert.deepEqual(safety, { conveyed: true, latestUser: true, deferredTurns: 0 });
+    assert.deepEqual(safety, { conveyed: true, latestUser: true, riskThisTurn: true, deferredTurns: 0 });
     const r = applyGuards({ reply: "많이 힘드셨겠어요. 109에 전화해 볼 수 있어요.", acts: [], end: false }, { ctx: c.ctx, eventsVisible: c.events, turnsBefore: c.turns, safety });
     assert.deepEqual(r.actions, []);
     assert.ok(r.reply.includes("109"));
@@ -666,8 +666,30 @@ describe("applyGuards — 서버 조치", () => {
     });
     assert.ok(again.flags.includes("hotline_repeat"));
     assert.equal(again.reply, "내일 일정은 그대로예요.");
-    assert.deepEqual(safetyInfoFrom(evs, 2), { conveyed: true, latestUser: false, deferredTurns: 1 });
-    assert.deepEqual(safetyInfoFrom([], 3), { conveyed: false, latestUser: false, deferredTurns: 0 });
+    assert.deepEqual(safetyInfoFrom(evs, 2), { conveyed: true, latestUser: false, riskThisTurn: false, deferredTurns: 1 });
+    assert.deepEqual(safetyInfoFrom([], 3), { conveyed: false, latestUser: false, riskThisTurn: false, deferredTurns: 0 });
+  });
+
+  it("109 (헤드 10/30 B안): 위기 말이 두 턴 이어지면 두 턴 다 109 통과, 위기 말 한 번 뒤 평범한 말에는 109를 되풀이하지 않음(지움)", () => {
+    const c = cardCtx();
+    const hotline = "많이 힘드셨겠어요. 힘들 땐 109(자살예방 상담전화)에 언제든 전화할 수 있어요.";
+    // 사용자 말 1 · 2 모두 위험 표시가 켜진 턴 — 서버가 둘째 턴에도 위기 안내 필요 줄을 넘김(crisis 이벤트가 두 턴 모두)
+    const evs = [ev({ after_turn: 1, crisis: true }), ev({ after_turn: 2, crisis: true })];
+    const turns2 = [...c.turns, ai(2, hotline), user(3, "계속 힘들어")];
+    const second = applyGuards({ reply: hotline, acts: [], end: false }, { ctx: c.ctx, eventsVisible: evs, turnsBefore: turns2, safety: safetyInfoFrom(evs, 2) });
+    assert.equal(safetyInfoFrom(evs, 2).riskThisTurn, true);
+    assert.deepEqual(second.flags, [], "위기가 이어지는 둘째 턴의 109는 되풀이가 아님");
+    assert.equal(second.reply, hotline);
+    // 위기 말 한 번(사용자 말 1) 뒤 평범한 말(2): 위험 판단이 꺼져 있고 이미 안내했으니 109 문장은 지움
+    const once = [ev({ after_turn: 1, crisis: true }), ev({ after_turn: 2 })];
+    const plain = applyGuards({ reply: `푹 쉬어요. ${hotline}`, acts: [], end: false }, { ctx: c.ctx, eventsVisible: once, turnsBefore: turns2, safety: safetyInfoFrom(once, 2) });
+    assert.equal(safetyInfoFrom(once, 2).riskThisTurn, false);
+    assert.ok(plain.flags.includes("hotline_repeat"));
+    assert.equal(plain.reply, "푹 쉬어요. 많이 힘드셨겠어요."); // 109가 든 문장만 지움
+    assert.ok(plain.actions.includes("drop_sentence"));
+    // riskThisTurn 칸이 없는 옛 SafetyInfo는 latestUser를 따름
+    const legacy = applyGuards({ reply: hotline, acts: [], end: false }, { ctx: c.ctx, eventsVisible: evs, turnsBefore: turns2, safety: { conveyed: true, latestUser: true } });
+    assert.deepEqual(legacy.flags, []);
   });
 
   it("지어낸 숫자: 처음엔 다시, 또 걸리면 그 숫자가 든 문장만 지움 — 지금 시각 · 카드 요약 시각은 허용", () => {
