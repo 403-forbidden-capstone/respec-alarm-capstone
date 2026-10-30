@@ -8,7 +8,7 @@ import { now } from '@/lib/clock';
 import { UserError } from '@/lib/errors';
 import { isMock } from '@/lib/mode';
 import { addMinutes, isSameDay, josa, joinKo, minuteOfDay, minutesBetween, spokenTime, startOfDay } from '@/lib/format';
-import { alarmChain, autoLevel, axisLevel } from '@/mocks/calc';
+import { alarmChain, autoLevel, axisLevel, departAtOf } from '@/mocks/calc';
 import { awayFromHomeFactor, db, people, places, recentMockPlaces, timelines, transportFactor, type MockAppointment } from '@/mocks/data';
 
 import {
@@ -37,6 +37,7 @@ import {
   type Level,
   type MorningPlan,
   type NextAlarm,
+  type Occurrence,
   type Place,
   type RingInfo,
   type RingKind,
@@ -50,6 +51,7 @@ import {
 } from './types';
 import { manualTimes, orderError } from './adjust';
 import { LEVEL_FIELD, type EditLogLine } from './edits';
+import { hasAlarms, listOnePerSeries, toOccurrences } from './map';
 import { filterPlaces } from './places';
 import * as real from './real';
 import { repeatLabel, repeatToRrule, rruleToRepeat } from './repeat';
@@ -58,6 +60,8 @@ import { ringNotice } from './notice';
 import { changedAlarms, CONFIRM_MOVE_MINUTES, draftAt, initialTime, ringingKinds } from './schedule';
 import type { StandaloneInput } from './request';
 import { thetaReachedAt, usageSummary, type UseSpan } from './wake';
+// 알람 코어의 순수 계산 파일만 직접 가져옴 (index는 네이티브 모듈을 찾으므로 — 같은 선례: lib/alarmSync 시험)
+import { canSnooze, DEFAULT_SNOOZE_LIMIT } from '../../../modules/alarm-core/src/plan';
 
 function toAppointment(a: MockAppointment): Appointment {
   return {
@@ -92,12 +96,27 @@ function find(id: string) {
 }
 
 // 모든 일정의 알람 (H02) — 시각 순. 알람 없는 일정(H05에서 알람을 모두 끄고 저장)은 알람 목록에 없고 H01 일정 줄에만 보임
-export async function listAppointments(): Promise<Appointment[]> {
-  if (!isMock()) return real.listAppointments();
-  return db.appointments
-    .map(toAppointment)
-    .filter((a) => a.alarms.length > 0)
-    .sort(byTime);
+//   반복은 묶음(series_id)당 지금 이후 가장 가까운 회차 하나 — 실데이터와 같은 규칙. everyOccurrence = 묶음을 줄이지 않고 모든 회차 (H05가 같은 날 앞 일정의 기상을 찾을 때)
+export async function listAppointments(options: { everyOccurrence?: boolean } = {}): Promise<Appointment[]> {
+  if (!isMock()) return real.listAppointments(options);
+  const entries = db.appointments
+    .map((a) => ({ seriesId: a.seriesId, item: toAppointment(a) }))
+    .filter((entry) => hasAlarms(entry.item));
+  return options.everyOccurrence ? entries.map((entry) => entry.item).sort(byTime) : listOnePerSeries(entries, now().getTime());
+}
+
+// 반복 일정의 앞으로 회차 (H03 회차 목록) — 같은 묶음의 지금 이후 회차, 시각 순. 반복이 아니면 빈 목록. 화면은 다음 3회만 보이고 나머지는 접음
+export async function listOccurrences(id: string): Promise<Occurrence[]> {
+  if (!isMock()) return real.listOccurrences(id);
+  const own = find(id);
+  if (!own?.seriesId) return [];
+  const rows = db.appointments
+    .filter((a) => a.seriesId === own.seriesId)
+    .map((a) => ({
+      appointment: { appointment_id: a.id, appointment_at: a.at.toISOString() },
+      alarms: alarmChain(a).map((x) => ({ alarm_type: x.kind, scheduled_at: x.at.toISOString(), is_enabled: x.enabled && !db.disabledAppointments.has(a.id) })),
+    }));
+  return toOccurrences(rows, now().getTime());
 }
 
 // 지금 이후 가장 먼저 울릴 알람 (H01) — 꺼진 일정 · 꺼진 종류 · 도착 목표는 뺌
@@ -714,6 +733,10 @@ export async function getRing(alarmId: string): Promise<RingInfo | null> {
     notice: ringNotice(appointment, kind, at),
     levelLine: `알람 강도 ${sound.name} · 배경음 ${sound.sound} · 진동 ${vibration.vibration}`,
     important: a.importance !== 'LOW',
+    // 미루기 한도 (D3 기본안 A) — 실데이터는 알람 코어의 snoozeCount · 꾸러미 snoozeLimit · departAt (네이티브 화면이 보여 줌)
+    snoozeCount: db.snoozeCounts[alarm.id] ?? 0,
+    snoozeLimit: DEFAULT_SNOOZE_LIMIT,
+    departAt: departAtOf(a) ?? null,
   };
 }
 
@@ -745,14 +768,17 @@ export async function stopRing(alarmId: string) {
   if (db.wake.alarmId === alarmId && db.wake.phase === 'ringing') db.wake = { ...db.wake, phase: 'idle' };
 }
 
-// 미루기 (H07) — 울리는 중 표시를 지우고 기록 (목업 A.snooze). at = 미룬 시각
-// 미룬 뒤 다시 울림 · 3번 제한 · SNOOZED 기록은 알람 코어(#33)
+// 미루기 (H07) — 울리는 중 표시를 지우고 기록 (목업 A.snooze). at = 미룬 시각, minutes = 고른 분 (5 · 10 · 15)
+// 3번까지 (한도에 닿으면 아무것도 안 함 — 화면이 이미 버튼을 끔). 실데이터의 다시 울림 · 한도 · SNOOZED 기록은 알람 코어(#33)
 export async function snoozeRing(alarmId: string, minutes: number, at: Date) {
   if (!isMock()) return real.snoozeRing();
   const found = findAlarm(alarmId);
   // 이미 기상 확정한 알람이면 해제처럼 기록을 그대로 둠 (확정 뒤에 미루기가 붙지 않게)
   if (!found || db.wakeConfirmations[alarmId]) return;
+  const count = db.snoozeCounts[alarmId] ?? 0;
+  if (!canSnooze(count, DEFAULT_SNOOZE_LIMIT)) return;
   await stopRing(alarmId);
+  db.snoozeCounts[alarmId] = count + 1;
   db.snoozes[alarmId] = { at: addMinutes(at, minutes), minutes };
   db.events.push({ at, label: `${KIND_LABEL[found.alarm.kind]} 알람 ${minutes}분 미루기`, source: '자동' });
 }
@@ -778,6 +804,7 @@ export async function getSnooze(): Promise<Snooze | null> {
 export async function cancelSnooze(alarmId: string): Promise<CancelSnoozeResult> {
   if (!isMock()) return real.cancelSnooze(alarmId);
   delete db.snoozes[alarmId];
+  delete db.snoozeCounts[alarmId];
   return { wakeCheck: false };
 }
 
@@ -787,6 +814,7 @@ export async function dismissRing(alarmId: string, at: Date) {
   if (!isMock()) return real.dismissRing();
   const found = findAlarm(alarmId);
   delete db.snoozes[alarmId];
+  delete db.snoozeCounts[alarmId]; // 해제하면 미룬 횟수는 끝
   if (!found || db.wakeConfirmations[alarmId]) return;
   db.events.push({ at, label: `${KIND_LABEL[found.alarm.kind]} 알람 해제`, source: '자동' });
   if (found.alarm.kind === 'WAKE') db.wake = { alarmId, phase: 'observing', ringAt: null, dismissedAt: at, ...NO_USE };

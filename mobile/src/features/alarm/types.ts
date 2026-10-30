@@ -90,6 +90,14 @@ export type Appointment = {
   alarms: AlarmTime[]; // 기상 · 준비 · 출발 · 도착 목표 순 — H05에서 고른 종류만, 하나도 없으면 빈 목록(알람 없는 일정)
   level: Level; // 지금 적용되는 강도 (배경음 기준)
   standalone?: true; // 일정 없는 알람 (실데이터 전용, D46) — id는 알람 id, 제목은 "알람". 알람 설정(H03)은 아직 못 엶
+  upcomingCount?: number; // 같은 반복 묶음에서 지금 이후 남은 회차 수(이 회차 포함) — 알람 목록(H02)만 채움. 2 이상이면 앞으로 회차가 폰에 미리 걸려 있음
+};
+
+// 반복 일정의 앞으로 회차 한 줄 (H03 회차 목록) — 같은 묶음(series_id)의 지금 이후 회차, 시각 순
+export type Occurrence = {
+  id: string; // 약속 id (실데이터는 appointment_id)
+  at: Date; // 약속 시각
+  alarmAt: Date | null; // 이 회차에서 가장 먼저 울릴 켜진 알람 시각(기상 · 준비 · 출발). 알람이 없거나 다 껐으면 null
 };
 
 // 하루 일정 한 줄 (H01) — 알람 없는 일정도 일정이라 id가 있음. 알람 없는 줄은 누를 수 없음 (일정 수정 · 삭제는 D41이 정함)
@@ -235,6 +243,9 @@ export type RingInfo = {
   notice?: string; // 알림 한 줄 — 준비 · 출발 알람이 알림 · 울림 화면 머리글로 보여 주는 글자 (서버 꾸러미 notice와 같은 글자, features/alarm/notice.ts). 없으면 종류별 기본 머리글
   levelLine: string; // 알람 강도 중 · 배경음 80% · 진동 짧게 반복
   important: boolean;
+  snoozeCount: number; // 이미 미룬 횟수 (알람 코어의 snoozeCount) — "미루기 N/한도회"
+  snoozeLimit: number; // 미루기 한도 (알람 코어 RingPlan.snoozeLimit, 서버 alarms.snooze_limit 기본 3)
+  departAt: Date | null; // 출발 시각 (꾸러미 departAt) — 한도 안내 · "이만큼 미루면 늦어요" 판단. 모르면 null
 };
 
 // 기상 판정 단계 (목업 S.wake.phase + 기상 알람 울림) — 울림 → 해제 뒤 관찰 → 확인 알림 → 확정

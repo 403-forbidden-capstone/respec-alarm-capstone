@@ -15,7 +15,7 @@ type AuthState = {
   profileError: string | null; // 프로필을 못 읽었으면 문자열(보여 줄 이유, 없으면 ''), 읽었으면 null. 못 읽었을 때는 온보딩으로 보내지 않고 다시 시도
   loading: boolean; // 저장된 세션 · 프로필을 읽는 중
   enabled: boolean; // 실데이터 모드라 로그인이 필요한지 (false면 가짜 데이터 모드 — 로그인 없이 가짜 프로필로 탭)
-  needsOnboarding: boolean; // 로그인했고 프로필도 읽었는데 아이디를 아직 안 정함. 온보딩을 흐름에서 뺀 동안(lib/flags ONBOARDING_IN_FLOW = false)은 늘 false
+  needsOnboarding: boolean; // 로그인했고 프로필도 읽었는데 온보딩을 아직 안 끝냄(onboarded_at이 비어 있음). 온보딩을 흐름에서 뺀 동안(lib/flags ONBOARDING_IN_FLOW = false)은 늘 false
   refreshProfile: () => Promise<void>; // 다시 읽음. 실패하면 기존 프로필은 그대로 두고 오류를 던짐
 };
 
@@ -30,7 +30,7 @@ const AuthContext = createContext<AuthState>({
 });
 
 // 어느 사용자의 프로필인지 같이 들고 있어야, 로그인 직후 프로필을 읽기 전에 온보딩이 잠깐 뜨지 않음
-// "못 읽음"(error)과 "읽었는데 아이디가 없음"(profile.handle이 null)은 다른 상태 — 못 읽었을 때 온보딩으로 보내면 저장해 둔 기본값을 덮어씀
+// "못 읽음"(error)과 "읽었는데 온보딩 안 끝남"(profile.onboarded_at이 null)은 다른 상태 — 못 읽었을 때 온보딩으로 보내면 저장해 둔 기본값을 덮어씀
 type Loaded = { userId: string | null; profile: Profile | null; error: string | null };
 const EMPTY: Loaded = { userId: null, profile: null, error: null };
 
@@ -95,13 +95,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         profileError: current.error,
         loading: !modeReady || sessionLoading || !profileReady,
         enabled: true,
-        // 읽기에 성공했는데 아이디가 없을 때만 온보딩 — 못 읽은 경우는 루트 레이아웃이 다시 시도 화면을 보여 줌 (판단은 onboardingGate.ts)
+        // 읽기에 성공했는데 온보딩을 안 끝냈을 때만 온보딩 — 못 읽은 경우는 루트 레이아웃이 다시 시도 화면을 보여 줌 (판단은 onboardingGate.ts)
         needsOnboarding: shouldOnboard({
           inFlow: ONBOARDING_IN_FLOW,
           signedIn: session != null,
           profileReady,
           profileFailed: current.error != null,
-          handle: current.profile?.handle,
+          onboardedAt: current.profile?.onboarded_at,
         }),
         refreshProfile,
       }

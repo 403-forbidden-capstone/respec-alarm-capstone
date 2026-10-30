@@ -7,7 +7,7 @@ import { listAppointments } from '@/features/alarm/api';
 import { AppointmentAlarmCard } from '@/features/alarm/components/AppointmentAlarmCard';
 import { useAppointmentToggle } from '@/features/alarm/hooks/useAppointmentToggle';
 import { useNow } from '@/features/alarm/hooks/useNow';
-import { dayHeading, groupByDay, splitUpcoming } from '@/features/alarm/schedule';
+import { dayHeading, groupByDay, seriesInfo, splitUpcoming } from '@/features/alarm/schedule';
 import { formatDateShort } from '@/lib/format';
 import { backOrHome } from '@/lib/nav';
 import { useLoad } from '@/lib/useLoad';
@@ -16,6 +16,7 @@ import { colors } from '@/theme';
 const HIGHLIGHT_MS = 2600; // 방금 만든 일정 테두리가 남는 시간
 
 // H02 알람 목록 — 오늘부터의 일정마다 기상 · 준비 · 출발 알람. 지난 일정은 맨 아래에 접어 둠
+// 반복 일정은 하나당 한 장 (지금 이후 가장 가까운 회차) — 카드에 "다음 회차 · 반복 요일"만, 회차 목록은 알람 설정(H03)에서
 // ?highlight=<일정 id>: 새 일정(H05)을 저장하고 돌아왔을 때 그 카드에 잠깐 테두리
 export default function AlarmsScreen() {
   const { highlight } = useLocalSearchParams<{ highlight?: string }>();
@@ -70,7 +71,7 @@ export default function AlarmsScreen() {
           <SectionHeader title={dayHeading(day[0].at, current)} />
           {/* 날짜는 섹션 제목에 있으니 카드 머리줄에는 안 보임 */}
           {day.map((a) => (
-            <AppointmentAlarmCard key={a.id} appointment={a} current={current} onToggle={(on) => toggleAppointment(a, on)} highlight={a.id === lit} showDate={false} />
+            <AppointmentAlarmCard key={a.id} appointment={a} current={current} onToggle={(on) => toggleAppointment(a, on)} highlight={a.id === lit} showDate={false} {...seriesInfo(a, current)} />
           ))}
         </View>
       ))}
@@ -95,7 +96,7 @@ export default function AlarmsScreen() {
                 <View key={day[0].id}>
                   <SectionHeader title={formatDateShort(day[0].at)} />
                   {day.map((a) => (
-                    <AppointmentAlarmCard key={a.id} appointment={a} current={current} onToggle={(on) => toggleAppointment(a, on)} showDate={false} />
+                    <AppointmentAlarmCard key={a.id} appointment={a} current={current} onToggle={(on) => toggleAppointment(a, on)} showDate={false} {...seriesInfo(a, current)} />
                   ))}
                 </View>
               ))

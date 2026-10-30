@@ -211,7 +211,7 @@ describe("확인할 기록 — 서버 규칙 (설계 메모 4.2)", () => {
     const ctx = sampleContext("BEFORE_SLEEP");
     ctx.today.facts = [fact("f1", "SLEEP"), fact("f2", "WAKE"), fact("f3", "SNOOZE", { time: null, minutes: 2 })];
     assert.deepEqual(pickConfirmFacts(ctx), ["f1", "f2"]); // 실험실 규칙(채움)은 그대로
-    assert.deepEqual(srv(ctx), ["f2"]); // 서버: 기상만
+    assert.deepEqual(srv(ctx), []); // 서버: 기상도 안 읽음(고칠 길이 생기면 켬, 헤드 10/30) — 읽을 게 없음
     ctx.today.facts = [fact("f1", "ROUTINE_DONE", { source: "ONE_TAP" }), fact("f2", "SLEEP"), fact("f3", "LATE", { minutes: 10 })];
     assert.deepEqual(srv(ctx), []);
   });
@@ -227,30 +227,41 @@ describe("확인할 기록 — 서버 규칙 (설계 메모 4.2)", () => {
     assert.deepEqual(srv(ctx), ["f3"]);
   });
 
-  it("기상 1 + 출발 · 도착 2, 3개 상한 — 취침 · 미루기는 아예 안 넣음", () => {
+  it("출발 → 도착 → 앞 출발 3개 상한 — 기상 · 취침 · 미루기는 안 넣음, 앞 출발이 도착을 밀어내지 않음 (헤드 10/30)", () => {
     const ctx = sampleContext("BEFORE_SLEEP");
     ctx.today.facts = [
       fact("f1", "SLEEP"), fact("f2", "SNOOZE", { time: null, minutes: 3 }), fact("f3", "WAKE", { time: "08:12" }),
       fact("f4", "DEPART", { time: "07:45", earlier: true, text: "잠깐 나갔다 들어옴" }), fact("f5", "DEPART", { time: "08:40" }), fact("f6", "ARRIVE", { time: "10:07" }),
       fact("f7", "LATE", { time: null, minutes: 7 }),
     ];
-    assert.deepEqual(srv(ctx), ["f3", "f4", "f5"]);
+    assert.deepEqual(srv(ctx), ["f4", "f5", "f6"]);
     assert.deepEqual(FIXABLE_FACT_KINDS, ["DEPART", "ARRIVE"]);
+    // 후보가 넘치면 출발 → 도착 → 앞 출발 차례로 3개: 출발 둘 + 도착이 들어가고 앞 출발이 밀림
+    ctx.today.facts = [
+      fact("f1", "DEPART", { time: "07:45", earlier: true, text: "잠깐 나갔다 들어옴" }), fact("f2", "DEPART", { time: "08:00" }),
+      fact("f3", "DEPART", { time: "08:40" }), fact("f4", "ARRIVE", { time: "10:07" }),
+    ];
+    assert.deepEqual(srv(ctx), ["f2", "f3", "f4"]);
+    // 출발이 셋이면 도착이 밀림(출발 우선)
+    ctx.today.facts = [fact("f1", "DEPART", { time: "08:00" }), fact("f2", "DEPART", { time: "08:20" }), fact("f3", "DEPART", { time: "08:40" }), fact("f4", "ARRIVE", { time: "10:07" })];
+    assert.deepEqual(srv(ctx), ["f1", "f2", "f3"]);
+    // 실험실 규칙(departFirst 없음)은 그대로 시각 순서
+    assert.deepEqual(pickConfirmFacts(ctx, { wakeAlways: false, fill: false, kinds: ["DEPART", "ARRIVE"] }), ["f1", "f2", "f3"]);
   });
 
   it("지각 NULL = 지각 아님: 사실에 LATE가 없으면 지각 줄도 확인할 기록도 없다", () => {
     const ctx = sampleContext("BEFORE_SLEEP");
     ctx.today.facts = [fact("f1", "WAKE"), fact("f2", "ARRIVE", { time: "10:07" })]; // is_late NULL → context-core가 LATE 사실을 안 만듦
     assert.ok(!viewFacts(ctx).includes("지각"));
-    assert.deepEqual(srv(ctx), ["f1", "f2"]);
+    assert.deepEqual(srv(ctx), ["f2"]); // 기상(f1)은 안 읽음
   });
 
   it("viewContext confirmFacts: true는 서버 규칙으로 고름 (채우기 없음)", () => {
     const ctx = sampleContext("BEFORE_SLEEP");
     ctx.today.facts = [fact("f1", "SLEEP"), fact("f2", "WAKE")];
     const out = block(viewContext(ctx, { confirmFacts: true }), "오늘 기록");
-    assert.ok(out.includes("확인할 기록(서버가 고름): f2\n") || out.endsWith("확인할 기록(서버가 고름): f2"), out);
-    assert.equal(contextVars(ctx).confirm_facts, "확인할 기록(서버가 고름): f2");
+    assert.ok(out.includes("확인할 기록(서버가 고름): 없음\n") || out.endsWith("확인할 기록(서버가 고름): 없음"), out);
+    assert.equal(contextVars(ctx).confirm_facts, "확인할 기록(서버가 고름): 없음");
   });
 });
 

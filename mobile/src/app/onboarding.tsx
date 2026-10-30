@@ -1,121 +1,230 @@
-import { useState } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { router } from 'expo-router';
+import { useState, type ReactNode } from 'react';
 
-import { Button, Card, Field, Screen, SectionHeader, Segmented, Stepper, Text } from '@/components/ui';
 import { useAuth } from '@/features/auth/AuthProvider';
-import { isHandleTaken, saveOnboarding } from '@/features/profile/api';
-import { HANDLE_PATTERN, type TransportType } from '@/features/profile/types';
-import { userMessage } from '@/lib/errors';
+import { CONSENT_ITEMS, PRIVACY_VERSION } from '@/features/onboarding/consent';
+import { OnboardingDoneStep } from '@/features/onboarding/components/OnboardingDoneStep';
+import { OnboardingFrame } from '@/features/onboarding/components/OnboardingFrame';
+import { activeSteps, nextStep, ONBOARDING_ORDER, prevStep, stepNumber, type OnboardingStepId, type StepFlags } from '@/features/onboarding/steps';
+import { cleanHandle, cleanNickname, isHandleFormat, isNicknameOk, NICKNAME_MAX, shouldSaveHandle } from '@/features/onboarding/validate';
+import { ConsentStep } from '@/features/onboarding/views/ConsentStep';
+import { HandleStep } from '@/features/onboarding/views/HandleStep';
+import { NicknameStep } from '@/features/onboarding/views/NicknameStep';
+import { PrepareStep, type PrepareValues } from '@/features/onboarding/views/PrepareStep';
+import { ShareStep } from '@/features/onboarding/views/ShareStep';
+import { SleepStep } from '@/features/onboarding/views/SleepStep';
+import { finishOnboarding, isHandleTaken, saveProfileFields } from '@/features/profile/api';
+import type { WakeSensitivity } from '@/features/profile/types';
+import { setAfterOnboarding } from '@/lib/afterOnboarding';
+import { UserError } from '@/lib/errors';
+import { ONBOARDING_STEPS } from '@/lib/flags';
+import { useAction } from '@/lib/useAction';
 
-const TRANSPORTS = [
-  ['TRANSIT', '대중교통'],
-  ['CAR', '자차'],
-  ['WALK', '도보'],
-] as const;
+// 이 화면에 단계 화면이 있는 단계 — 켜 놓았어도 여기 없으면 건너뜀 (진행 표시의 전체 수에서도 빠짐)
+// 자리: home · timetable(PR 5 — 집 검색 · 시간표 입력), permissions(PR 7 — 권한 안내), mic(L4 뒤). 화면을 만들면 여기에 더함
+const SCREEN_STEPS: ReadonlySet<OnboardingStepId> = new Set(['handle', 'nickname', 'sleep', 'prepare', 'consent', 'share', 'first']);
+const FLAGS = Object.fromEntries(ONBOARDING_ORDER.map((id) => [id, ONBOARDING_STEPS[id] && SCREEN_STEPS.has(id)])) as StepFlags;
 
-// 처음 설정 — 아이디 · 아침 준비 기본값 · 집. 저장하면 루트 레이아웃이 탭으로 보냄
+// 단계에 따라 틀(OnboardingFrame)에 넣을 것
+type StepView = {
+  title: string;
+  lead?: string;
+  body: ReactNode;
+  primaryLabel: string;
+  primaryDisabled?: boolean;
+  onPrimary: () => void;
+  secondaryLabel?: string;
+  onSecondary?: () => void;
+};
+
+// 처음 설정 — 켜진 단계를 순서대로 한 번에 하나씩 (단계 표 · 켜고 끄기: features/onboarding/steps.ts, lib/flags ONBOARDING_STEPS)
+// 단계마다 [다음]에서 그 단계 값을 저장하고, 마지막 단계에서 온보딩 끝낸 시각(onboarded_at)을 적은 뒤 프로필을 다시 읽음
+// 다시 읽어 온보딩 판정이 꺼지면 이 화면은 사라지고 루트(_layout.tsx)가 홈으로 보냄 — 첫 일정으로 갈지는 lib/afterOnboarding에 적어 둠
+// 앱을 껐다 켜면 처음 단계부터 다시지만, 저장해 둔 값은 미리 채워져 있음
+// 가짜 데이터 모드(미리 보기)는 저장 없이 단계만 넘김
 export default function OnboardingScreen() {
   const { session, profile, enabled, refreshProfile } = useAuth();
+  const { busy, run } = useAction();
+  const userId = enabled ? (session?.user.id ?? null) : null; // null = 저장하지 않음
+
+  const [step, setStep] = useState<OnboardingStepId>(() => activeSteps(FLAGS)[0]);
+  const [handle, setHandle] = useState(profile?.handle ?? '');
+  const [savedHandle, setSavedHandle] = useState<string | null>(profile?.handle ?? null); // 지금까지 저장한 아이디 — profile은 단계 사이에 안 바뀌어서 따로 둠
+  const [handleError, setHandleError] = useState<string | null>(null);
   const [nickname, setNickname] = useState(profile?.nickname ?? '');
-  const [handle, setHandle] = useState('');
-  const [prepare, setPrepare] = useState(profile?.default_prepare_minutes ?? 60);
-  const [buffer, setBuffer] = useState(profile?.default_buffer_minutes ?? 10);
-  const [transport, setTransport] = useState<TransportType>(
-    profile?.default_transport === 'CAR' || profile?.default_transport === 'WALK' ? profile.default_transport : 'TRANSIT',
-  );
-  const [home, setHome] = useState(profile?.home_name ?? '');
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [sleep, setSleep] = useState<WakeSensitivity>(profile?.wake_sensitivity ?? 'NORMAL');
+  const [prepare, setPrepare] = useState<PrepareValues>({
+    prepare: Math.min(300, Math.max(5, profile?.default_prepare_minutes ?? 60)),
+    buffer: Math.min(60, Math.max(0, profile?.default_buffer_minutes ?? 10)),
+    transport: profile?.default_transport ?? 'TRANSIT',
+    margin: profile?.wake_margin ?? 'NORMAL',
+  });
+  const [finished, setFinished] = useState(false); // 온보딩 끝난 시각을 이미 적었음 (다시 읽기만 실패해 한 번 더 누를 때 또 적지 않게)
+  const [consentSaved, setConsentSaved] = useState(false); // 이 화면에서 이미 동의를 저장했음 (뒤로 갔다 와도 다시 저장하지 않게)
 
-  const cleanHandle = handle.trim().replace(/^@/, '').toLowerCase();
-  const handleOk = HANDLE_PATTERN.test(cleanHandle);
-  const canSave = handleOk && nickname.trim().length > 0 && !saving;
+  const changeHandle = (next: string) => {
+    setHandle(next);
+    setHandleError(null);
+  };
 
-  async function save() {
-    if (!enabled || !session) {
-      setError('가짜 데이터 모드라 저장하지 않아요'); // /dev/screens에서 화면만 열어 본 경우
-      return;
-    }
-    setSaving(true);
-    setError(null);
-    try {
-      if (await isHandleTaken(cleanHandle, session.user.id)) {
-        setError('이미 쓰는 아이디예요');
-        return;
+  function advance() {
+    const to = nextStep(step, FLAGS);
+    if (to) setStep(to);
+  }
+
+  // 지금 단계 값 저장. false면 막혀서 다음 단계로 못 감
+  async function save(): Promise<boolean> {
+    switch (step) {
+      case 'handle': {
+        const clean = cleanHandle(handle);
+        // 이미 저장한 아이디 그대로면 중복 확인도 저장도 건너뜀
+        if (!userId || !shouldSaveHandle(clean, savedHandle)) return true;
+        if (await isHandleTaken(clean, userId)) {
+          setHandleError('이미 쓰는 아이디예요');
+          return false;
+        }
+        await saveProfileFields(userId, { handle: clean });
+        setSavedHandle(clean);
+        return true;
       }
-      await saveOnboarding(session.user.id, {
-        nickname: nickname.trim(),
-        handle: cleanHandle,
-        home_name: home.trim() || null,
-        default_prepare_minutes: prepare,
-        default_buffer_minutes: buffer,
-        default_transport: transport,
-      });
-      await refreshProfile();
-    } catch (e) {
-      setError(userMessage(e, '저장하지 못했어요'));
-    } finally {
-      setSaving(false);
+      case 'nickname':
+        if (userId) await saveProfileFields(userId, { nickname: cleanNickname(nickname) });
+        return true;
+      case 'sleep':
+        if (userId) await saveProfileFields(userId, { wake_sensitivity: sleep });
+        return true;
+      case 'prepare':
+        if (userId) {
+          await saveProfileFields(userId, {
+            default_prepare_minutes: prepare.prepare,
+            default_buffer_minutes: prepare.buffer,
+            default_transport: prepare.transport,
+            wake_margin: prepare.margin,
+          });
+        }
+        return true;
+      case 'consent': {
+        // 이미 이 판에 동의한 계정이면 다시 저장하지 않고 통과
+        const agreed = (profile?.privacy_version ?? 0) >= PRIVACY_VERSION;
+        if (userId && !agreed && !consentSaved) {
+          await saveProfileFields(userId, { privacy_agreed_at: new Date().toISOString(), privacy_version: PRIVACY_VERSION });
+          setConsentSaved(true);
+        }
+        return true;
+      }
+      default:
+        return true; // share 등 저장할 것이 없는 단계
     }
   }
 
-  return (
-    <Screen footer={<Button label={saving ? '저장하는 중…' : '시작하기'} onPress={save} disabled={!canSave} />}>
-      <Text variant="title" style={styles.title}>
-        처음 설정
-      </Text>
-      <Text variant="lead">친구가 찾을 아이디와 아침 준비 기본값을 정해요. 나중에 설정에서 바꿀 수 있어요.</Text>
+  const next = () =>
+    run(async () => {
+      if (await save()) advance();
+    }, '저장하지 못했어요');
 
-      <SectionHeader title="프로필" />
-      <Card>
-        <Field first label="닉네임" value={nickname} onChangeText={setNickname} maxLength={30} placeholder="이름" />
-        <Field
-          label="아이디"
-          value={handle}
-          onChangeText={setHandle}
-          autoCapitalize="none"
-          autoCorrect={false}
-          maxLength={21}
-          placeholder="respec_kim"
+  // 마지막 단계 — 끝낸 시각을 적고 프로필을 다시 읽음. 온보딩 중에는 앱 화면이 막혀 있어서(_layout.tsx RootStack ready) 여기서는 이동하지 않고,
+  // 다시 읽어 판정이 꺼지면 이 화면이 사라지고 루트가 홈으로 보냄 (첫 일정이면 lib/afterOnboarding에 적어 둔 걸 루트가 읽고 일정 화면을 엶)
+  const finish = (to: 'schedule' | 'home') =>
+    run(async () => {
+      if (!userId) {
+        // 가짜 데이터 모드(미리 보기)는 가드가 안 막으니 바로 이동
+        router.replace('/');
+        if (to === 'schedule') router.push({ pathname: '/schedule/new', params: { from: 'home' } });
+        return;
+      }
+      if (!finished) {
+        await finishOnboarding(userId);
+        setFinished(true);
+      }
+      setAfterOnboarding(to === 'schedule' ? 'schedule' : null);
+      try {
+        await refreshProfile();
+      } catch {
+        // 적는 건 끝났고 다시 읽기만 실패 — 저장 실패로 보이지 않게
+        throw new UserError('저장했어요 · 다시 불러오지 못했어요. 한 번 더 눌러 주세요');
+      }
+    }, '저장하지 못했어요');
+
+  const views: Partial<Record<OnboardingStepId, StepView>> = {
+    handle: {
+      title: '내 아이디',
+      lead: '친구가 @아이디로 나를 찾아요',
+      body: <HandleStep value={handle} onChange={changeHandle} error={handleError} />,
+      primaryLabel: '다음',
+      primaryDisabled: !isHandleFormat(handle),
+      onPrimary: next,
+    },
+    nickname: {
+      title: '닉네임',
+      lead: '친구에게 보이는 이름이에요',
+      body: <NicknameStep value={nickname} onChange={setNickname} max={NICKNAME_MAX} />,
+      primaryLabel: '다음',
+      primaryDisabled: !isNicknameOk(nickname),
+      onPrimary: next,
+    },
+    sleep: {
+      title: '잠귀',
+      body: <SleepStep value={sleep} onChange={setSleep} />,
+      primaryLabel: '다음',
+      onPrimary: next,
+    },
+    prepare: {
+      title: '아침 준비',
+      lead: '알람 계산의 처음 값이에요',
+      body: <PrepareStep values={prepare} onChange={(patch) => setPrepare((prev) => ({ ...prev, ...patch }))} />,
+      primaryLabel: '다음',
+      onPrimary: next,
+    },
+    consent: {
+      title: '개인정보 안내',
+      lead: '앱이 읽는 것과 읽지 않는 것이에요',
+      body: <ConsentStep items={CONSENT_ITEMS} />,
+      primaryLabel: '동의하고 계속',
+      onPrimary: next,
+    },
+    share: {
+      title: '기상 공유 안내',
+      body: <ShareStep />,
+      primaryLabel: '다음',
+      onPrimary: next,
+    },
+    first: {
+      title: '첫 일정',
+      body: (
+        <OnboardingDoneStep
+          summary={[
+            { label: '아이디', value: `@${cleanHandle(handle)}` },
+            { label: '닉네임', value: cleanNickname(nickname) },
+          ]}
         />
-      </Card>
-      <Text variant="caption" tone={handle && !handleOk ? 'warn' : 'faint'} style={styles.help}>
-        영문 소문자 · 숫자 · 밑줄(_) 3~20자, @는 빼고 적어요. 친구가 @아이디로 나를 찾아요.
-      </Text>
+      ),
+      primaryLabel: '첫 일정 만들기',
+      onPrimary: () => finish('schedule'),
+      secondaryLabel: '나중에',
+      onSecondary: () => finish('home'),
+    },
+  };
 
-      <SectionHeader title="아침 준비" right="알람 계산의 처음 값" />
-      <Card>
-        <Stepper first label="준비 시간" value={prepare} onChange={setPrepare} min={10} max={180} unit="분" />
-        <Stepper label="여유 시간" value={buffer} onChange={setBuffer} min={0} max={30} unit="분" />
-      </Card>
-      <Text variant="caption" style={styles.help}>
-        기록이 쌓이면 준비 시간은 실제 준비한 시간으로 맞춰져요.
-      </Text>
+  const view = views[step];
+  if (!view) return null; // 화면이 없는 단계 — SCREEN_STEPS로 이미 걸러져 여기 오지 않음
+  const prev = prevStep(step, FLAGS);
+  const { step: n, total } = stepNumber(step, FLAGS);
 
-      <SectionHeader title="이동 수단" />
-      <Segmented options={TRANSPORTS} value={transport} onChange={setTransport} />
-
-      <SectionHeader title="집" />
-      <Card>
-        <Field first label="출발지" value={home} onChangeText={setHome} maxLength={200} placeholder="예: 집 · 자취방 동네" />
-      </Card>
-      <Text variant="caption" style={styles.help}>
-        지금은 이름만 저장해요. 장소 검색이 붙으면 위치로 바꿀 수 있어요.
-      </Text>
-
-      {error ? (
-        <View style={styles.error}>
-          <Text variant="small" tone="warn">
-            {error}
-          </Text>
-        </View>
-      ) : null}
-    </Screen>
+  return (
+    <OnboardingFrame
+      step={n}
+      total={total}
+      title={view.title}
+      lead={view.lead}
+      primaryLabel={view.primaryLabel}
+      onPrimary={view.onPrimary}
+      primaryDisabled={view.primaryDisabled}
+      primaryBusy={busy}
+      secondaryLabel={view.secondaryLabel}
+      onSecondary={view.onSecondary}
+      onBack={prev ? () => setStep(prev) : undefined}
+    >
+      {view.body}
+    </OnboardingFrame>
   );
 }
-
-const styles = StyleSheet.create({
-  title: { marginTop: 16 },
-  help: { marginTop: -4, marginHorizontal: 4 },
-  error: { marginTop: 16 },
-});

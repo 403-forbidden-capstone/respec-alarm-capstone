@@ -4,9 +4,10 @@ import { useEffect, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
 import { Button, Card, Chip, KeyValueRow, Loading, LoadError, Screen, Sheet, Stepper, Text, toast, Toggle, TopBar } from '@/components/ui';
-import { getAppointment, listPlaces, previewAlarms, saveAlarmSettings } from '@/features/alarm/api';
+import { getAppointment, listOccurrences, listPlaces, previewAlarms, saveAlarmSettings } from '@/features/alarm/api';
 import { isManualTime, manualTimes, moveAlarm, orderError, resetAlarm, sameEdits, timeInputsChanged } from '@/features/alarm/adjust';
 import { FormulaBox } from '@/features/alarm/components/FormulaBox';
+import { OccurrenceList } from '@/features/alarm/components/OccurrenceList';
 import { OptionGrid } from '@/features/alarm/components/OptionGrid';
 import { SelectRow } from '@/features/alarm/components/SelectRow';
 import { TextLink } from '@/features/alarm/components/TextLink';
@@ -95,6 +96,9 @@ function Detail({ appointment: a, reload }: { appointment: AppointmentDetail; re
   const [travelConfirm, setTravelConfirm] = useState<TravelFallback | null>(null); // 길찾기를 못 해 어림값을 확인받는 시트 (실데이터)
   const [pickKind, setPickKind] = useState<RingKind | null>(null); // 시각을 고르는 시트가 열린 알람
   const { data: places } = useLoad(listPlaces);
+  // 반복 일정의 앞으로 회차 — 덧붙임 줄이라 못 읽어도 화면은 그대로 (없는 것으로). 둘 이상일 때만 보임
+  const { data: occurrences, reload: reloadOccurrences } = useLoad(() => listOccurrences(a.id));
+  const [showAllOccurrences, setShowAllOccurrences] = useState(false);
   const { busy, run } = useAction();
   const setEdit = (patch: Partial<AlarmEdits>) => setEdits((e) => ({ ...e, ...patch }));
 
@@ -166,7 +170,7 @@ function Detail({ appointment: a, reload }: { appointment: AppointmentDetail; re
             ? '알람 시각을 다시 계산했어요'
             : '저장했어요',
     );
-    await reload();
+    await Promise.all([reload(), reloadOccurrences()]); // 저장으로 알람이 바뀌면 회차 목록의 첫 알람 시각도 다시
   }
 
   function save() {
@@ -239,6 +243,15 @@ function Detail({ appointment: a, reload }: { appointment: AppointmentDetail; re
           {formatTime(a.at)} · {a.place} · {a.repeatLabel}
         </Text>
       </Card>
+
+      {occurrences && occurrences.length > 1 ? (
+        <OccurrenceList
+          occurrences={occurrences}
+          currentId={a.id}
+          expanded={showAllOccurrences}
+          onToggleExpanded={() => setShowAllOccurrences((v) => !v)}
+        />
+      ) : null}
 
       <Card>
         <Text variant="label" tone="sub" style={styles.label}>

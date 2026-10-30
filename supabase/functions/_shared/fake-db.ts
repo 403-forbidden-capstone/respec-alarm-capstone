@@ -7,6 +7,8 @@
 //   failOn으로 특정 표 · 동작을 실패시켜 되돌리기를 시험함
 //   upsert(…, { onConflict, ignoreDuplicates: true })는 PostgREST처럼 새로 들어간 행만 돌려줌 (ON CONFLICT DO NOTHING … RETURNING). onConflict는 'a,b,c'처럼 여러 칸도 됨
 //   임베드: appointment_participants를 읽을 때 `appointments!inner(…)` · `alarms!inner(…)`와 'alarms.alarm_type' 같은 점 붙은 거르기만 흉내 (그날 첫 일정 · 이동 기록 읽기용)
+//   (L4) jsonb 칸 거르기: eq('server_state->>rev', '3') 같은 `->` · `->>` 경로 (낙관적 잠금 비교용). alarm_events를 읽을 때 `alarms(…, appointment_participants(…))` 왼쪽 임베드(앞 출발 읽기용).
+//   (L4) 표: conversation_sessions · ai_calls · user_questions — 기본키 · 시각 기본값. 서버 키만 쓰는 두 칸 트리거(turns · server_state)는 흉내 안 냄
 import { localDateKey } from './tz.ts';
 
 type Row = Record<string, unknown>;
@@ -21,6 +23,9 @@ const PK: Record<string, string> = {
   user_edit_logs: 'edit_id',
   alarm_events: 'event_id',
   todos: 'todo_id',
+  conversation_sessions: 'session_id',
+  ai_calls: 'call_id',
+  user_questions: 'question_id',
 };
 
 const DEFAULTS: Record<string, Row> = {
@@ -153,7 +158,16 @@ class FakeQuery implements PromiseLike<Result> {
   // 'alarms.alarm_type'처럼 점이 붙은 칸은 임베드한 쪽의 칸 (PostgREST 임베드 거르기)
   private where(col: string, test: (value: unknown) => boolean) {
     const dot = col.indexOf('.');
-    if (dot < 0) this.filters.push((r) => test(r[col]));
+    if (col.includes('->')) {
+      // jsonb 경로: `a->b->>c` (->> 는 글자로 꺼냄, 없으면 null)
+      const parts = col.split(/->>?/);
+      const asText = col.includes('->>');
+      this.filters.push((r) => {
+        let v: unknown = r[parts[0]];
+        for (const key of parts.slice(1)) v = v !== null && typeof v === 'object' ? (v as Record<string, unknown>)[key] : undefined;
+        return test(asText ? (v == null ? null : String(v)) : v);
+      });
+    } else if (dot < 0) this.filters.push((r) => test(r[col]));
     else {
       const field = col.slice(dot + 1);
       this.embedFilters.push({ rel: col.slice(0, dot), test: (embedded) => test(embedded[field]) });
@@ -242,6 +256,38 @@ class FakeQuery implements PromiseLike<Result> {
     }
   }
 
+  // L4 표의 칸 기본값 (init_schema · ai_conversation_state.sql) — 시각은 db.now
+  private fillDefaults(row: Row) {
+    const stamp = this.db.now.toISOString();
+    if (this.table === 'conversation_sessions') {
+      row.started_at ??= stamp;
+      row.created_at ??= stamp;
+      row.ended_at ??= null;
+      row.apply_status ??= 'PENDING';
+      row.turns ??= [];
+      row.server_state ??= {};
+    } else if (this.table === 'ai_calls') {
+      row.created_at ??= stamp;
+      row.flags ??= [];
+      row.io ??= null;
+    } else if (this.table === 'user_questions') {
+      row.asked_at ??= stamp;
+      row.answered_at ??= null;
+    }
+  }
+
+  // alarm_events를 읽을 때 `alarms(…, appointment_participants(…))` 왼쪽 임베드 — 없는 쪽은 null (PostgREST 왼쪽 조인). 거른 뒤에 붙임
+  private withLeftEmbeds(rows: Row[]): Row[] {
+    if (this.table !== 'alarm_events' || !/(^|[,\s])alarms\(/.test(this.columns)) return rows;
+    const nested = /appointment_participants\(/.test(this.columns);
+    return rows.map((r) => {
+      const alarm = this.db.rows('alarms').find((a) => a.alarm_id === r.alarm_id);
+      if (!alarm) return { ...r, alarms: null };
+      const part = nested ? this.db.rows('appointment_participants').find((p) => p.participant_id === alarm.participant_id) : undefined;
+      return { ...r, alarms: { ...alarm, ...(nested ? { appointment_participants: part ? { ...part } : null } : {}) } };
+    });
+  }
+
   // 기본키 · 기본값을 채워 넣음. alarms는 (참여 조건, 종류) 유일 제약을 지킴. 반복 회차는 (만든 사람, 묶음, 날짜) 유일 제약.
   // 어기면 이번에 넣은 것을 모두 되돌리고 오류 결과
   private insertRows(incoming: Row[], made: Row[]): Result | null {
@@ -253,8 +299,9 @@ class FakeQuery implements PromiseLike<Result> {
       return { data: null, error: { message: `duplicate key value violates unique constraint "${name}"`, code: '23505' } };
     };
     for (const r of incoming) {
-      const row: Row = { ...DEFAULTS[table], ...r };
+      const row: Row = { ...DEFAULTS[table], ...structuredClone(r) }; // jsonb 칸을 DB처럼 복사해 담음 (넣은 쪽이 나중에 고쳐도 표는 안 변함)
       if (PK[table] && row[PK[table]] === undefined) row[PK[table]] = db.newId();
+      this.fillDefaults(row);
       this.fillSeries(row);
       if (table === 'alarms' && row.participant_id != null && all.some((a) => a.participant_id === row.participant_id && a.alarm_type === row.alarm_type)) {
         return duplicate('alarms_participant_type_key');
@@ -303,7 +350,7 @@ class FakeQuery implements PromiseLike<Result> {
       data = made;
     } else if (this.op === 'update') {
       data = all.filter((r) => this.filters.every((f) => f(r)));
-      for (const r of data) Object.assign(r, this.payload);
+      for (const r of data) Object.assign(r, structuredClone(this.payload));
     } else if (this.op === 'delete') {
       const gone = all.filter((r) => this.filters.every((f) => f(r)));
       db.tables[table] = all.filter((r) => !gone.includes(r));
@@ -313,7 +360,7 @@ class FakeQuery implements PromiseLike<Result> {
       const rels = [...this.columns.matchAll(/(\w+)!inner\(/g)].map((m) => m[1]);
       for (const f of this.embedFilters) if (!rels.includes(f.rel)) throw new Error(`FakeDb: ${f.rel}.… 거르기는 select에 ${f.rel}!inner(…)가 있어야 해요`);
       const source: Row[] = rels.length ? all.flatMap((r): Row[] => { const joined = this.withEmbeds(r, rels); return joined ? [joined] : []; }) : all;
-      data = source.filter((r) => this.filters.every((f) => f(r)));
+      data = this.withLeftEmbeds(source.filter((r) => this.filters.every((f) => f(r))));
       if (this.ordering) {
         const { col, ascending } = this.ordering;
         data = [...data].sort((x, y) => (compare(x[col], y[col]) ?? 0) * (ascending ? 1 : -1));
@@ -321,7 +368,7 @@ class FakeQuery implements PromiseLike<Result> {
       if (this.max != null) data = data.slice(0, this.max);
     }
 
-    const copy = data.map((r) => ({ ...r }));
+    const copy = data.map((r) => structuredClone(r)); // 읽은 쪽이 jsonb 칸을 고쳐도 표는 안 변함
     const count = this.countMode ? copy.length : undefined;
     if (this.op !== 'select' && !this.returning) return { data: null, error: null };
     if (this.headOnly) return { data: null, error: null, count };

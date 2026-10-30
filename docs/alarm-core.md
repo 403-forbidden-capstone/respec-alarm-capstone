@@ -33,7 +33,7 @@ mobile/modules/alarm-core/
 | `getPendingEvents()` · `markEventsUploaded(ids)` · `addAlarmEventListener(fn)` | 폰에 쌓인 울림 기록 읽기 · 올린 것 지우기 · 앱이 켜져 있을 때 새 기록 받기 (아래 울림 기록) |
 | `isAvailable` | Android + 모듈이 든 APK인지. 웹이면 false |
 
-순수 함수(네이티브 없이 씀): `buildRingPlan` · `volumePercentFor` · `ringStartTimes` · `snoozeRingAt` · `unansweredSpanMillis` · `isPastRing` · `volumeAdjustFromRatings` · `toUseSpans` · `makeUuid`.
+순수 함수(네이티브 없이 씀): `buildRingPlan` · `volumePercentFor` · `ringStartTimes` · `snoozeRingAt` · `canSnooze` · `isSnoozeLate` · `snoozeCountLabel` · `snoozeLimitNotice` · `unansweredSpanMillis` · `isPastRing` · `volumeAdjustFromRatings` · `toUseSpans` · `makeUuid`.
 
 ## 예약 꾸러미
 
@@ -47,14 +47,14 @@ type RingPackage = {
   title: string;          // 약속 제목
   subtitle?: string;      // "오전 10:00 · 세종대학교"
   intensity: 'SOFT' | 'NORMAL' | 'STRONG';
-  snoozeLimit: number;    // 기본 3 — 저장만 함, 아직 안 셈 (D3)
+  snoozeLimit: number;    // 미루기 한도, 기본 3 — 울림 계획(plan.snoozeLimit)에 실려 네이티브가 셈 (D3 기본안 A)
   voiceText?: string;     // 음성 안내 문장 — 저장만 함 (D8, 나중). 서버가 약속의 기상 알람에 채움
   notice?: string;        // 알림 한 줄 — 있으면 울림 계획의 heading이 이 글자. 서버가 약속의 준비 · 출발 알림에 채움
   soundKey?: string;      // 소리 고르기. 지금은 어떤 값이든 기본 소리(폰 기본 알람음)
   volumeAdjust?: number;  // 평가 보정 비율, -0.1 = 볼륨 10% 줄임 (#81)
-  departAt?: number;      // 출발 시각 (단축 준비 안내용) — 저장만 함
+  departAt?: number;      // 출발 시각 — 미루기 한도 안내 · "이만큼 미루면 늦어요" 판단에 씀 (D3 기본안 A)
   vibration?: 'NONE' | 'SHORT_REPEAT' | 'STRONG_CONTINUOUS'; // 자리만, 안 읽음 (D1)
-  snoozeMinutesOptions?: readonly number[];                  // 자리만, 안 읽음 (D3)
+  snoozeMinutesOptions?: readonly number[];                  // 자리만, 안 읽음 — 미루기 시간은 5 · 10 · 15분 고정(D3 기본안 A)이라 plan이 정함
 };
 ```
 
@@ -79,7 +79,7 @@ type RingPackage = {
 - 남는 한계: 제목 · 부제만 바뀐 경우(시각 · 강도 그대로)는 여전히 폰에 옛 글자가 남음 — 원래 있던 문제이고 약속을 다시 저장하면 새로 걸림
 - 남는 한계: 알림이 한 줄이라 문구가 길면 잘릴 수 있음 — `AlarmNotifications.kt`에 `BigTextStyle`이 없음. 다음 네이티브 PR에서 함
 
-반복은 폰이 하지 않음. 반복 약속(`recurrence_rule`)과 일정 없는 반복 알람은 서버가 **앞으로 14일치 회차를 회차마다 한 줄씩 미리 만들고**(약속 · 참여 조건 · 알람이 새 행, `series_id` · `occurrence_on`으로 묶음 · 날짜 구분, `alarm-roll`이 5분마다 보충), 지난 회차 행은 기록으로 그대로 남김. 폰은 앱이 열릴 때 그 행들을 reconcile로 읽어 14일 안 알람을 걸음. 루틴(`routines.repeat_days`)은 회차 행을 따로 만들지 않고 같은 알람 행의 시각만 다음 발생으로 옮김. 그래서 꾸러미에는 `atMillis` 하나면 됨 (회차 수는 폰 쪽에 가정하지 않음). 예전 `scheduleDailyAlarm`(매일 반복)은 없앰. 서버 함수 `alarm-roll`(3a-2)과 앱 맞추기(3b)가 머지된 뒤부터 동작 — 그 전에는 DB 칸(`supabase/README.md` "반복 다음 회차")만 있고 첫 회차만 만들어짐.
+반복은 폰이 하지 않음. 반복 약속(`recurrence_rule`)과 일정 없는 반복 알람은 서버가 **앞으로 14일치 회차를 회차마다 한 줄씩 미리 만들고**(약속 · 참여 조건 · 알람이 새 행, `series_id` · `occurrence_on`으로 묶음 · 날짜 구분, `alarm-roll`이 5분마다 보충), 지난 회차 행은 기록으로 그대로 남김. 폰은 앱이 열릴 때(`syncNow`: 기록 올리기 → `alarm-roll` 부르기 → reconcile) 그 행들을 reconcile로 읽어 14일 안 알람을 걸음. `alarm-roll` 호출은 10분에 한 번, 8초 안에 안 끝나면 기다리지 않고 실패는 삼킴(반복 일정을 방금 저장했으면 제한 없이 그 묶음을 먼저 넘김). reconcile은 출발 기록(`departed_at`)이 있는 약속의 준비 · 출발 알람, 도착 기록(`arrived_at`)이 있는 약속의 준비 · 출발 · 도착 목표 알람을 서버 행에서 빼므로 이미 폰에 걸린 것은 "서버에 없음"으로 지워짐(기상은 그대로). 맞춘 뒤에는 `onAlarmsSynced` 훅(`source` · `whole` · `summary` · `upcoming` · `nowMs`)이 불림 — 기다리지 않고, 던져도 맞추기는 성공. 루틴(`routines.repeat_days`)은 회차 행을 따로 만들지 않고 같은 알람 행의 시각만 다음 발생으로 옮김. 그래서 꾸러미에는 `atMillis` 하나면 됨 (회차 수는 폰 쪽에 가정하지 않음). 예전 `scheduleDailyAlarm`(매일 반복)은 없앰. 서버 함수 `alarm-roll`(3a-2)과 앱 맞추기(3b)가 머지되고 `alarm-roll`이 배포된 뒤부터 동작 — 그 전에는 DB 칸(`supabase/README.md` "반복 다음 회차")만 있고 첫 회차만 만들어짐.
 
 ## 울림 계획 (#29)
 
@@ -90,7 +90,7 @@ type RingPackage = {
 | 볼륨 | 알람 볼륨 스트림 최대치 × 강도별 60 · 80 · 100%(SOFT · NORMAL · STRONG) × (1 + `volumeAdjust`). 정수 %로 반올림하고 10~100% 안으로 (보정이 커도 소리가 사라지지 않게). 끄면 원래 볼륨으로 되돌림 |
 | 한 번 울림 | 최대 3분 (백그라운드 재생 제한, 7장 7.4.2 · T-6에서 실기기로 확정) |
 | 안 끄면 다시 울림 | 울림이 끝난 뒤 쉬었다가 다시: 약 5분 쉬고 1번 · 보통 5분씩 쉬고 2번 · 강 3분씩 쉬고 3번 (**쉬는 시간 읽기는 해석** — 아래). **미루기 횟수에 안 셈**. 미루기 뒤에는 다시 울림 묶음을 처음부터 (서버 미확인 판정도 같은 기준, #160) |
-| 미루기 | 10분 고정. 5 · 10 · 15분 고르기와 한도(`snoozeLimit`)는 D3이 정해질 때까지 안 읽음 (횟수 제한 없음) |
+| 미루기 | **5 · 10 · 15분 중 고르기, 알람 한 개당 최대 3번** (D3 기본안 A). 울림 화면에 시간 3개(기본 선택 5분) + "미루기 N/3회"(N = 이미 미룬 횟수). **한도에 닿으면**(`snoozeCount >= snoozeLimit`) 시간 · 미루기 버튼을 끄고 "지금 바로 준비 · {출발 시각} 출발"(`departAt`이 없으면 "지금 바로 준비"). **다시 울릴 시각(지금 + 고른 분)이 출발 시각(`departAt`)을 넘으면 "늦어요"를 눈에 띄게 보이되 막지는 않음** — 늦는 칩은 경고색 + 칩 안 "늦어요", 고른 칩이 늦으면 미루기 버튼 바로 위 굵은 경고 한 줄 "15분 미루면 9:00 출발보다 5분 늦어요"(늦는 분 = 다시 울릴 시각 − 출발 시각, 올림) + 버튼 "15분 미루기 · 늦어요"와 경고 테두리, 5분만 미뤄도 늦으면 맨 위 경고 띠 "지금 일어나야 9:00 출발에 맞아요" (남은 준비 시간은 안 뺌). 목록(`plan.snoozeMinutesOptions`) · 한도(`plan.snoozeLimit`)는 `plan.ts`가 계획에 실어 보내고, 한도 · 늦어요 판단은 지금 시각이 필요해 네이티브(`SnoozeRules.kt`)가 같은 식으로 함 (`spec/cases.json`이 TS 쪽을 고정). 한도 · 목록에 없는 분은 `AlarmController.snooze`도 거절. 알림의 "미루기" 버튼은 기본 10분(`plan.snoozeMillis`) 하나 — 한도면 버튼이 빠지고 본문에 안내, 늦으면 알림을 올릴 때 한 번 정해 "10분 미루기 · 늦어요"(알림은 올라온 뒤 문구를 못 바꿔 분 수 · 경고 줄은 없음). 한도는 미루기만 셈(다시 울림은 안 셈). **네이티브(Kotlin)가 바뀌어 새 개발용 APK가 필요함** |
 | 소리 | 기본 소리 키(`default`)는 **폰 기본 알람음**을 알람 스트림으로 반복해서 틂 — 안 되면 앱 파일(`alarm_siren.wav`) → 폰 기본 벨소리 → 기본 알림음 순으로 넘어감 (10/18 지형님 — 안드로이드 기본 알람 정도는 되게). 모르는 키도 기본 소리. 그 밖의 소리 키가 생기면(소리 3종은 별도 계획, Q7) 앱 파일을 먼저 틂 |
 | 진동 | 울리는 동안 계속 (켜짐 0.5초 · 꺼짐 0.5초 반복, 시계 앱처럼). 알람 용도로 걸어서 무음 · 방해 금지에서도 울림. 해제 · 미루기 · 3분 끝 · 서비스 끝에 소리와 같이 멈춤. 강도와 상관없는 하나뿐 (작성자 판단 — 강도 · 축별 진동은 D1 뒤) |
 
@@ -131,7 +131,7 @@ type RingPackage = {
 | 기록 | 언제 | 칸 |
 |---|---|---|
 | `TRIGGERED` | 울릴 때마다 (처음 · 미루고 난 뒤 · 다시 울림) | `sequenceNo`(울림 회차, 1부터) |
-| `SNOOZED` | 미룰 때 | `snoozeMinutes`(지금 10) |
+| `SNOOZED` | 미룰 때 | `snoozeMinutes`(고른 분 — 5 · 10 · 15, 알림 버튼은 10) |
 | `DISMISSED` | 해제 | — |
 | `ACKNOWLEDGED` / `ARRIVAL_CONFIRMED` | 일정 알림의 원탭 | — |
 
@@ -204,7 +204,6 @@ WAKE를 해제하면(알람 화면 · 알림 버튼 모두) 앱을 `respecalarm:
 | 로그아웃 (P6, `lib/session` `signOutAndCleanup`) | 정리 | 로그아웃 중 표시 켜기(`reconcile`이 서버 알람을 폰에 걸지 않게) → 기록 올려 보기 → 맞추기와 같은 한 줄에서 `cancelAll()`(앞에 서 있던 맞추기가 끝난 뒤) → 폰에 남은 기록 지우기 (Q6) → 푸시 토큰 지우기 자리 → 실시간 구독 끊기 · 기능 메모리 정리 → 로그아웃. `cancelAll`이 실패하면 로그아웃을 멈추고 표시를 끔 |
 | 앱 연결 (P6, `useWakeRecheck`) | 기상 판정 다시 보기 | 앱이 앞에 올 때 최근 12시간에 끈 기상 알람 중 확정이 없는 것을 H08과 같은 판정으로 다시 보고 조건을 채웠으면 확정(`USAGE`) 기록 — 위 "앱이 앞에 올 때 다시 판정". 네이티브가 해제 + 10분에 스스로 판정하는 길은 확인 필요 |
 | D1 | 배경음 · 말소리 · 진동 축별 고르기 | `vibration` 칸을 읽고 진동을 고름 (지금은 서비스가 일정한 반복 하나를 직접 틂, 강도와 상관없음) |
-| D3 | 미루기 5 · 10 · 15분 고르기 · 횟수 한도 | `snoozeMinutesOptions` · `snoozeLimit`을 읽고 한도면 단축 준비 안내(`departAt`) |
 | D2 | 기상 확인 무응답 시 다시 울림 | 지금은 안 만듦 |
 | Q7 | 소리 3종 | `soundKey`로 앱에 든 파일을 고름 (기본 키만 폰 기본 알람음) |
 | D8 | 음성 안내 | 알람 소리 채널로 폰 TTS가 `voiceText`를 읽음 (실패해도 사이렌은 울림). 문장은 지금 서버가 약속의 기상 알람에 채워 둠 — 읽는 것만 네이티브 PR |
