@@ -26,8 +26,9 @@ describe('AI 대화 → 하루 기록 → 루틴', () => {
 
     expect(c.messages.map((m) => m.who)).toEqual(['ai', 'me', 'ai', 'me', 'card']);
     expect(c.next).toBeNull();
-    expect(c.found).toMatchObject({ title: '스터디', place: '학교 도서관', items: ['노트북 충전기'], status: 'PENDING' });
-    expect(formatTime(c.found!.at)).toBe('오후 2:00');
+    expect(c.cards).toHaveLength(1);
+    expect(c.cards[0]).toMatchObject({ id: 'c1', kind: 'APPT_NEW', title: '스터디', place: '학교 도서관', items: ['노트북 충전기'], status: 'READY', firstOfDay: true });
+    expect(formatTime(c.cards[0].at!)).toBe('오후 2:00');
     expect(db.todos.filter((t) => t.title === '노트북 충전기' && t.day === 23)).toHaveLength(1);
     expect(db.events.map((e) => `${e.label} · ${e.source}`)).toContain('준비물 저장 · 노트북 충전기 · AI 대화');
     expect(foundScheduleDraft()?.title).toBe('스터디');
@@ -45,7 +46,7 @@ describe('AI 대화 → 하루 기록 → 루틴', () => {
       'ARRIVE 오후 1:50',
     ]);
     const c = await getConversation();
-    expect(c.found?.status).toBe('APPLIED');
+    expect(c.cards[0]?.status).toBe('SAVED');
     expect(c.messages[c.messages.length - 1].text).toBe(
       '저장했어요. 내일 오후 12:40 준비, 오후 1:05 출발 알람을 맞춰 둘게요. 오늘 대화는 여기까지 할까요?',
     );
@@ -54,7 +55,7 @@ describe('AI 대화 → 하루 기록 → 루틴', () => {
     // 이미 확인한 카드는 다시 저장되지 않음 (두 번 누르기 · H05 다시 열기)
     await expect(saveFoundSchedule()).rejects.toThrow('이미 확인한 일정이에요');
     await rejectFoundSchedule();
-    expect((await getConversation()).found?.status).toBe('APPLIED');
+    expect((await getConversation()).cards[0]?.status).toBe('SAVED');
     expect(foundScheduleDraft()).toBeNull();
   });
 
@@ -64,7 +65,7 @@ describe('AI 대화 → 하루 기록 → 루틴', () => {
     expect(recordDate).toBe('2025-05-22');
     expect(db.journalWritten).toBe(true);
 
-    const j = await getJournal(recordDate);
+    const j = await getJournal(recordDate!);
     expect(j?.text).toBe('오늘은 기록이 많지 않아 짧게 남겨요. 회의 자료를 챙기느라 샤워 시간을 줄인 게 아쉬웠다고 했어요.');
     // 시나리오 시각이 멈춰 있어 모두 같은 시각 — 기록된 순서, 대화에서 한 말은 맨 뒤
     expect(j?.facts.map((f) => f.label)).toEqual([
@@ -75,9 +76,9 @@ describe('AI 대화 → 하루 기록 → 루틴', () => {
     expect(j?.suggestion.status).toBe('PENDING');
     expect(j?.routineId).toBeNull();
 
-    await editJournal(recordDate, '고친 일기');
+    await editJournal(recordDate!, '고친 일기');
     await finishConversation();
-    const again = await getJournal(recordDate);
+    const again = await getJournal(recordDate!);
     expect(again?.text).toBe('고친 일기');
     expect(again?.edited).toBe(true);
   });

@@ -4,16 +4,17 @@
 import { supabase } from '@/lib/supabase';
 import { isUuid } from '@/lib/uuid';
 
-import { toAppointmentDetail, type AlarmRow, type AppointmentRows, type StandaloneRow } from './map';
+import { toAppointmentDetail, type AlarmRow, type AppointmentRows, type OccurrenceRow, type StandaloneRow } from './map';
 import type { AppointmentDetail } from './types';
 
 // 참여 조건 하나 + 약속 + 그룹 이름 + 이 참여 조건의 알람 전부 (꺼진 것 · 도착 목표 포함). appointments!inner = 약속이 있는 참여 조건만, 약속 날짜로 거를 수 있음
 const PARTICIPANT_SELECT =
-  'participant_id, origin_name, transport_type, est_travel_minutes, travel_source, prepare_minutes, buffer_minutes, appointments!inner(appointment_id, title, appointment_at, dest_name, importance, recurrence_rule, groups(group_name)), alarms(alarm_id, alarm_type, scheduled_at, intensity, voice_tone, sound_key, is_enabled, time_source, intensity_source)';
+  'participant_id, origin_name, transport_type, est_travel_minutes, travel_source, prepare_minutes, buffer_minutes, appointments!inner(appointment_id, series_id, title, appointment_at, dest_name, importance, recurrence_rule, groups(group_name)), alarms(alarm_id, alarm_type, scheduled_at, intensity, voice_tone, sound_key, is_enabled, time_source, intensity_source)';
 
 // 목록 상한 — 넘으면 가까운 날짜부터 LIST_LIMIT개만 (정렬 없이 limit하면 어느 줄이 오는지 정해지지 않으므로 날짜순으로 정렬한 뒤 자름)
 //   약속 쪽은 PostgREST가 to-one 임베드 칸으로 정렬하는 `appointments(appointment_at)` 형식(PostgREST 11 이상)
 const LIST_LIMIT = 300;
+const OCCURRENCE_LIMIT = 60; // 회차 목록 상한 — 서버가 14일치만 미리 만들어서 넉넉한 값 (매일 반복이어도 14줄)
 
 // select 결과 한 줄 (타입 붙은 클라이언트가 만든 모양 중 쓰는 칸)
 type ParticipantQueryRow = {
@@ -127,11 +128,11 @@ export function loadDayRows(userId: string, from: string, to: string) {
   return task;
 }
 
-// 일정 없는 알람(D46) — 약속 · 루틴과 안 이어진 기상 알람. since(ISO)보다 이전 시각은 안 읽음
+// 일정 없는 알람(D46) — 약속 · 루틴과 안 이어진 기상 알람. since(ISO)보다 이전 시각은 안 읽음. 목록(H02)이 반복 묶음당 하나만 보이려고 series_id도 읽음
 export async function loadStandaloneRows(userId: string, since: string): Promise<StandaloneRow[]> {
   const { data, error } = await supabase
     .from('alarms')
-    .select('alarm_id, alarm_type, scheduled_at, intensity, voice_tone, sound_key, is_enabled, time_source, intensity_source, recurrence_rule')
+    .select('alarm_id, series_id, alarm_type, scheduled_at, intensity, voice_tone, sound_key, is_enabled, time_source, intensity_source, recurrence_rule')
     .eq('user_id', userId)
     .eq('alarm_type', 'WAKE')
     .is('participant_id', null)
@@ -155,6 +156,25 @@ export async function loadStandaloneRow(userId: string, alarmId: string): Promis
     .maybeSingle();
   if (error) throw error;
   return data;
+}
+
+// 반복 일정의 앞으로 회차 (H03) — 이 약속과 같은 묶음(series_id)의 내 참여 조건 중 since(ISO) 이후. 묶음 번호가 없으면(반복이 아님) 빈 목록
+//   회차 하나는 알람 시각만 있으면 되어 알람은 종류 · 시각 · 켜짐만 읽음. 서버가 앞으로 14일치만 미리 만들어 두므로 많아야 14줄
+export async function loadOccurrenceRows(appointmentId: string, userId: string, since: string): Promise<OccurrenceRow[]> {
+  if (!isUuid(appointmentId)) return []; // 가짜 데이터 시절 주소가 남아 있어도 DB 형식 오류 대신 "없음"
+  const { data: own, error: ownError } = await supabase.from('appointments').select('series_id').eq('appointment_id', appointmentId).maybeSingle();
+  if (ownError) throw ownError;
+  if (!own?.series_id) return [];
+  const { data, error } = await supabase
+    .from('appointment_participants')
+    .select('appointments!inner(appointment_id, series_id, appointment_at), alarms(alarm_type, scheduled_at, is_enabled)')
+    .eq('user_id', userId)
+    .eq('appointments.series_id', own.series_id)
+    .gte('appointments.appointment_at', since)
+    .order('appointments(appointment_at)')
+    .limit(OCCURRENCE_LIMIT);
+  if (error) throw error;
+  return (data ?? []).map((row) => ({ appointment: row.appointments, alarms: row.alarms }));
 }
 
 const FOUR_WEEKS_MS = 28 * 24 * 60 * 60 * 1000;

@@ -338,14 +338,19 @@ const SCREENS = [
     ] },
   { code: 'L01', name: '로그인', tab: 'common', route: 'login', ui: [25], link: [], feat: ['기반'], off: true,
     data: [{ k: 'Auth', t: '카카오 · 구글 → 가입하면 profiles 자동 생성', r: ['profiles'] }] },
-  { code: 'L02', name: '온보딩', tab: 'common', route: 'onboarding', ui: [25], link: [], feat: ['기반'], off: true,
+  { code: 'L02', name: '온보딩', tab: 'common', route: 'onboarding', ui: [25], link: [], feat: ['기반'],
     data: [
-      { k: 'DB', t: '아이디 · 집 · 기본 준비 · 여유 · 이동 수단', r: ['profiles'] },
-      { k: 'Edge', t: '집 검색', r: ['place-search'] },
-      { k: '폰', t: '권한 안내(알림 · 정확한 알람 · 잠금화면)', r: ['alarm-core'] },
+      { k: 'DB', t: '아이디 · 닉네임 · 잠귀 · 아침 준비 · 깨우는 여유 · 동의 · 온보딩 끝낸 시각', r: ['profiles'] },
+      { k: 'Edge', t: '집 검색(PR 5)', r: ['place-search'] },
+      { k: '폰', t: '권한 안내(PR 7)', r: ['alarm-core'] },
     ] },
-  { code: 'L03', name: '설정', tab: 'common', route: 'settings', ui: [25], link: [], feat: ['기반'], off: true,
-    data: [{ k: 'RPC', t: '푸시 토큰 등록', r: ['register_push_token', 'push_tokens'] }] },
+  { code: 'L03', name: '설정', tab: 'common', route: 'settings', ui: [25], link: [], feat: ['기반'],
+    data: [
+      { k: 'RPC', t: '푸시 토큰 등록', r: ['register_push_token', 'push_tokens'] },
+      { k: '폰', t: '알림 설정 열기 · 점검표 들어가는 길', r: ['alarm-core'] },
+    ] },
+  { code: 'L04', name: '알람이 안 울릴 때', tab: 'common', route: 'ring-check', ui: [210], link: [], feat: ['기반'],
+    data: [{ k: '폰', t: '권한 상태(알림 · 전체화면 · 정확한 알람 · 사용 정보) 읽기 · 설정 열기', r: ['alarm-core'] }] },
 ];
 for (const s of SCREENS) s.issues = [...s.ui, ...s.link]; // 할 일 · 상태 계산용
 
@@ -450,7 +455,7 @@ const CHECKS = [
   // ── AI · 루틴
   { id: 'C18', area: 'AI · 루틴', name: 'AI 대화 → 일정 추출 → 알람 저장', screens: ['A02', 'H05'], start: '/ai',
     web: { st: 'part', ev: '10/10 흐름 확인 #106 1 · 2 · 3 — 대본 고정, 입력과 무관하게 같은 응답' }, phone: { st: 'part', ev: '10/18 에뮬레이터: 대본 흐름 됨(입력과 무관), "수정"은 새 일정에 값 채움 — 마이크 · 음성은 없음 (AI 대기)' },
-    server: { st: 'no', ev: 'AI 호출 · 대화 저장 없음 — AI 대기 (#37 #42)' }, test: { st: 'ok', ev: 'voice/api 대본 → 일정 카드 → 저장 · voice/alarmless 알람 일부 · 없이 저장(D46) · mocks/ai 대본 — 실제 AI 호출 없음(AI 대기)' },
+    server: { st: 'part', ev: '앱은 실데이터 텍스트 대화 연결됨(voice/real — 카드 여러 장 · 저장 → 알람 · 정정 반영 · 실패 · 한도) — 서버 함수 voice-session · voice-turn은 main에 머지됨(#265). 실서버 흐름은 서버 함수 배포 뒤 확인' }, test: { st: 'ok', ev: 'voice/api 대본 → 일정 카드 → 저장 · voice/alarmless 알람 일부 · 없이 저장(D46) · voice/real 가짜 서버 응답으로 2단 턴 · 카드 2장 · 장소 고르기 · 저장 · 준비 ±N · 강도 보통으로 · 실패 · 한도 · rev 어긋남 · 재시도 · voice/fixes 정정 — 실제 AI 호출 없음' },
     how: ['"A02 AI 대화" → "말하기" → 내 발화 → AI 응답', '"텍스트" → 보내기 → 카드 "대화에서 찾은 내용" 스터디 · 5월 23일 오후 2:00 · 학교 도서관 · 노트북 충전기', '"저장" → "스터디 알람을 맞췄어요" → 홈 "알람 전체"에 스터디 12:40 · 1:05 / "수정" → 새 일정 화면에 값 채워짐 / "저장 안 함"'],
     issues: [37, 42] },
   { id: 'C19', area: 'AI · 루틴', name: '대화 종료 → 일기 · 오늘의 사실 · 루틴 제안', screens: ['A03', 'A02'], start: '/ai',
@@ -465,10 +470,15 @@ const CHECKS = [
     issues: [48, 33] },
   // ── 기반 · 서버
   { id: 'C21', area: '기반 · 서버', name: '로그인 · 온보딩', screens: ['L01', 'L02'], start: null,
-    web: { st: 'part', ev: '10/27 배포 웹: ?mode=real → 로그인 화면(카카오 · Google · 알람 테스트 · 개발 메뉴 이메일), 가짜 모드(기본)는 로그인 없이 홈' }, phone: { st: 'part', ev: '10/18 에뮬레이터: 로그인 화면(카카오 · Google · 개발 메뉴 이메일)까지 — 계정 로그인은 안 해 봄' },
+    web: { st: 'part', ev: '10/27 배포 웹: ?mode=real → 로그인 화면(카카오 · Google · 알람 테스트 · 개발 메뉴 이메일), 가짜 모드(기본)는 로그인 없이 홈. 온보딩 7단계(아이디 → 닉네임 → 잠귀 → 아침 준비 → 동의 → 기상 공유 → 첫 일정)는 코드만 들어감 — 아직 화면으로 확인 안 함' }, phone: { st: 'part', ev: '10/18 에뮬레이터: 로그인 화면(카카오 · Google · 개발 메뉴 이메일)까지 — 계정 로그인은 안 해 봄' },
     server: { st: 'part', ev: '10/28 확인 — 로그인 공급자 구글 · 카카오 · 이메일 켜짐, 구글 · 카카오 실계정 로그인 됨 · 시드 데모 계정 4명 — 로그인 뒤 흐름 한 바퀴는 아직(#212) → #168 폰은 로그인 필수 · 개발 메뉴 이메일 로그인 · #180 로그인 뒤 바로 홈' }, test: { st: 'part', ev: 'lib/mode · modePolicy 모드 · 이메일 로그인 · 로그아웃 정리(session) · onboardingGate · DB 검사 가입 → 프로필 생성 — 카카오 · 구글 OAuth 로그인 테스트 없음' },
-    how: ['배포 웹 주소 끝에 "?mode=real" → "/login" — "카카오로 시작하기" · "Google로 시작하기" · "알람 테스트"(#180) · "개발 메뉴에서 이메일로 로그인"', '가짜 모드(기본 · ?mode=mock)는 로그인 없이 홈 — ?mode=real은 이 브라우저에 남아 다음에도 실데이터, 돌아갈 땐 ?mode=mock', '이메일 로그인은 시드 계정 만든 뒤(이메일 공급자는 켜짐) · 로그인하면 바로 홈(#180, 임시 온보딩 뺌), 온보딩 새 화면은 #25'],
+    how: ['배포 웹 주소 끝에 "?mode=real" → "/login" — "카카오로 시작하기" · "Google로 시작하기" · "알람 테스트"(#180) · "개발 메뉴에서 이메일로 로그인"', '가짜 모드(기본 · ?mode=mock)는 로그인 없이 홈 — ?mode=real은 이 브라우저에 남아 다음에도 실데이터, 돌아갈 땐 ?mode=mock', '이메일 로그인은 시드 계정 만든 뒤(이메일 공급자는 켜짐) · 로그인하면 온보딩 끝낸 시각(onboarded_at)이 비어 있을 때 온보딩 7단계(아이디 → 닉네임 → 잠귀 → 아침 준비 → 동의 → 기상 공유 → 첫 일정)부터, 끝내면 홈(#25) — 집 · 시간표 · 권한 안내 단계는 flag 꺼 둠(PR 5 · 7)'],
     issues: [25] },
+  { id: 'C26', area: '기반 · 서버', name: '권한 안내 · 홈 빨간 줄 · 점검표', screens: ['H01', 'H05', 'L03', 'L04'], start: null,
+    web: { st: 'part', ev: '웹은 폰 권한 상태를 못 읽어 홈 줄 없음 · L04는 "폰에서 확인해요" 안내' }, phone: { st: 'no', ev: '에뮬레이터 확인 전' },
+    server: { st: 'na', ev: '폰 상태만' }, test: { st: 'ok', ev: 'features/permissions banner · notify · alarmSync 못 건 알람 수' },
+    how: ['H05 새 일정 저장 → "알람이 잠금화면에 뜨려면 알림이 필요해요" 시트 → [알림 켜기] → 시스템 허용 창', '거절 → 홈 인사 아래 빨간 줄 → 누르면 L04 점검표', '홈 위 오른쪽 "설정" → L03 → "알람이 안 울릴 때" → L04'],
+    issues: [210] },
   { id: 'C22', area: '기반 · 서버', name: 'Supabase 저장 · 조회', screens: [], start: null,
     web: { st: 'no', ev: '#168 머지: 실데이터 모드(웹 ?mode=real · 폰 개발용 기본)에서 알람 · 기록 · 루틴 · 친구 · 그룹이 Supabase를 부름 — 시드 · 이메일 로그인 전이라 아직 못 봄' }, phone: { st: 'no', ev: '실데이터 로그인 전이라 못 봄 (웹과 같은 코드)' },
     server: { st: 'part', ev: '테이블 · RLS · DB 함수(머지 시 자동 적용) · 10/27 밤 서버 함수 5개 배포 · Vault 키 · 기상 미확인 배치(5분마다) · 시드 — 앱 흐름 한 바퀴는 아직(#212) → #160 마이그레이션 · #167 서버 함수' }, test: { st: 'ok', ev: 'DB 검사(PGlite 93항목 · 실제 이미지 적용) RLS · 함수 · 기능별 real 테스트(가짜 Supabase) · lib/edge — 앱 쿼리를 실제 DB에 붙이는 테스트 없음' },
@@ -499,7 +509,8 @@ const EDGE = [
   ['notify', '푸시 전송', '변경 알림을 상대 폰으로(권한 확인 뒤), 깨우기는 D19 전이라 거절 — 앱 토큰 등록 없어 실제로는 안 감(#213)', 'Expo Push'],
   ['wake-check', '기상 미확인 검사', '5분마다(pg_cron, 10/27 밤부터 돎) 미확인 기상을 MISSED로, 그룹 푸시는 D19 뒤', '—'],
   ['suggestion-generate', '제안 · 반복 다음 회차 (새벽 배치)', '아직 없음 — 알람 조정 제안(#49) · 반복 알람 다음 회차(#209)', '—'],
-  ['voice-* · journal-*', 'AI 대화 · 일기', '아직 없음 — 대화 답 · 추출 · 일기 (AI 대기)', 'Gemini'],
+  ['voice-session · voice-turn', 'AI 대화(텍스트)', '앱 연결됨(voice/real) — 서버 함수는 main에 머지됨(#265), 배포 뒤 실서버 흐름 확인', 'Claude'],
+  ['voice-commit · journal-*', '대화 끝 정리 · 일기', '아직 없음 — 할 일 · 준비물 추출 · 일기 (AI 대기)', 'Claude'],
 ];
 // 알람 코어(modules/alarm-core) 함수 — #161 뒤 (웹은 memoryBackend로 같은 함수)
 const NATIVE = [

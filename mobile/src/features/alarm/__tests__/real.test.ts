@@ -47,10 +47,12 @@ jest.mock('@/lib/edge', () => ({ ...jest.requireActual<object>('@/lib/edge'), ca
 const mockApplyCommit = jest.fn<(result: unknown) => Promise<{ failed: unknown[] }>>();
 const mockReconcile = jest.fn<(options?: { alarmIds?: string[] }) => Promise<{ failed: unknown[] }>>();
 const mockUploadEvents = jest.fn<() => Promise<unknown>>();
+const mockSyncNow = jest.fn<(options?: { rollSeriesId?: string }) => Promise<void>>();
 jest.mock('@/lib/alarmSync', () => ({
   applyCommit: (r: unknown) => mockApplyCommit(r),
   reconcile: (o?: { alarmIds?: string[] }) => mockReconcile(o),
   uploadEvents: () => mockUploadEvents(),
+  syncNow: (o?: { rollSeriesId?: string }) => mockSyncNow(o),
 }));
 
 const mockCore = {
@@ -117,6 +119,7 @@ beforeEach(() => {
   mockApplyCommit.mockResolvedValue({ failed: [] });
   mockReconcile.mockResolvedValue({ failed: [] });
   mockUploadEvents.mockResolvedValue({});
+  mockSyncNow.mockResolvedValue();
   mockCore.stop.mockResolvedValue();
   mockCore.cancel.mockResolvedValue();
   mockCore.list.mockResolvedValue([]);
@@ -160,6 +163,106 @@ describe('목록 · 하루 일정 · 알람 설정 읽기', () => {
     expect(filterArgs(standalone, 'is', 'participant_id')).toEqual([null]);
     expect(filterArgs(standalone, 'is', 'routine_id')).toEqual([null]);
     expect(filterArgs(standalone, 'eq', 'alarm_type')).toEqual(['WAKE']);
+  });
+
+  it('listAppointments: 반복 묶음(series_id)은 지금 이후 가장 가까운 회차 하나 — 지난 회차 · 먼 회차는 안 보이고, 묶음이 하나뿐인 일정 · 일정 없는 알람은 그대로', async () => {
+    const A = '00000000-0000-4000-8000-0000000000a1';
+    // 지금 = 5월 22일 07:55. 묶음 S1(매주 목요일 스터디): 22일 10:00(지금 이후 가장 가까움) · 29일 · 15일(지난 회차)
+    const occurrence = (id: string, day: number, series: string) =>
+      participantRow({ participant_id: `p-${id}` }, { appointment_id: id, series_id: series, title: '스터디', appointment_at: kst('10:00', day), recurrence_rule: 'FREQ=WEEKLY;BYDAY=TH' });
+    mockRoutes['appointment_participants:select'] = () => ({
+      data: [
+        occurrence('s1-0515', 15, 'S1'),
+        occurrence('s1-0529', 29, 'S1'),
+        occurrence('s1-0522', 22, 'S1'),
+        participantRow({ participant_id: 'p-one' }, { appointment_id: A, series_id: A, title: '팀 주간회의', appointment_at: kst('11:00', 23) }), // 반복 아닌 약속 = 묶음 1개짜리
+        participantRow({ participant_id: 'p-old' }, { appointment_id: 'old-1', series_id: 'old-1', title: '지난 약속', appointment_at: kst('10:00', 20) }), // 묶음 1개짜리 지난 약속은 지금처럼 목록에 있음
+      ],
+    });
+    mockRoutes['alarms:select'] = () => ({
+      data: [
+        { ...alarmRow('00000000-0000-4000-8000-0000000000d1', 'WAKE', '06:00', {}), series_id: 'W', recurrence_rule: 'FREQ=DAILY', scheduled_at: kst('06:00', 23) },
+        { ...alarmRow('00000000-0000-4000-8000-0000000000d2', 'WAKE', '06:00', {}), series_id: 'W', recurrence_rule: 'FREQ=DAILY', scheduled_at: kst('06:00', 24) },
+      ],
+    });
+    const list = await real.listAppointments();
+    expect(list.map((a) => `${a.id} ${formatTime(a.at)}`)).toEqual(['old-1 오전 10:00', 's1-0522 오전 10:00', '00000000-0000-4000-8000-0000000000d1 오전 6:00', `${A} 오전 11:00`]);
+  });
+
+  it('listAppointments({ everyOccurrence }): H05가 같은 날 앞 일정의 기상을 찾을 때는 묶음을 줄이지 않고 모든 회차 (그날의 회차가 가장 가까운 회차가 아닐 수 있음)', async () => {
+    const occurrence = (id: string, day: number) =>
+      participantRow({ participant_id: `p-${id}` }, { appointment_id: id, series_id: 'S1', title: '스터디', appointment_at: kst('10:00', day), recurrence_rule: 'FREQ=WEEKLY;BYDAY=TH' });
+    mockRoutes['appointment_participants:select'] = () => ({ data: [occurrence('s1-0522', 22), occurrence('s1-0529', 29), occurrence('s1-0605', 36)] });
+    mockRoutes['alarms:select'] = () => ({ data: [] });
+    expect((await real.listAppointments()).map((a) => a.id)).toEqual(['s1-0522']);
+    expect((await real.listAppointments({ everyOccurrence: true })).map((a) => a.id)).toEqual(['s1-0522', 's1-0529', 's1-0605']);
+  });
+
+  it('listAppointments: 앞으로 회차가 둘 이상인 묶음의 한 장에만 남은 회차 수(upcomingCount) — 지난 회차는 안 셈', async () => {
+    const occurrence = (id: string, day: number, series: string) =>
+      participantRow({ participant_id: `p-${id}` }, { appointment_id: id, series_id: series, title: '스터디', appointment_at: kst('10:00', day), recurrence_rule: 'FREQ=WEEKLY;BYDAY=TH' });
+    mockRoutes['appointment_participants:select'] = () => ({
+      data: [occurrence('s1-0515', 15, 'S1'), occurrence('s1-0522', 22, 'S1'), occurrence('s1-0529', 29, 'S1'), occurrence('s1-0530', 30, 'S1'), occurrence('s2-0529', 29, 'S2')],
+    });
+    mockRoutes['alarms:select'] = () => ({ data: [] });
+    const list = await real.listAppointments();
+    expect(list.map((a) => [a.id, a.upcomingCount])).toEqual([
+      ['s1-0522', 3],
+      ['s2-0529', undefined], // 앞으로 한 장뿐인 묶음
+    ]);
+  });
+
+  it('listOccurrences: 이 약속의 묶음(series_id)을 읽고, 같은 묶음의 지금 이후 내 참여 조건만 날짜순으로 — 회차마다 앞으로 첫 알람 시각', async () => {
+    const id = '00000000-0000-4000-8000-0000000000a1';
+    mockRoutes['appointments:select'] = () => ({ data: { series_id: 'S1' } });
+    const row = (apptId: string, day: number, alarms: unknown[]) => ({
+      appointments: { appointment_id: apptId, series_id: 'S1', appointment_at: kst('10:00', day) },
+      alarms,
+    });
+    mockRoutes['appointment_participants:select'] = () => ({
+      data: [row(id, 22, meetingAlarms()), row('s1-0529', 29, [{ alarm_type: 'WAKE', scheduled_at: kst('08:00', 29), is_enabled: false }])],
+    });
+    const list = await real.listOccurrences(id);
+    expect(list.map((o) => [o.id, o.alarmAt && formatTime(o.alarmAt)])).toEqual([
+      [id, '오전 8:00'],
+      ['s1-0529', null], // 알람을 꺼 둔 회차
+    ]);
+
+    const [own] = callsTo('appointments', 'select');
+    expect(filterArgs(own, 'eq', 'appointment_id')).toEqual([id]);
+    const [read] = callsTo('appointment_participants', 'select');
+    expect(filterArgs(read, 'eq', 'user_id')).toEqual(['user-1']);
+    expect(filterArgs(read, 'eq', 'appointments.series_id')).toEqual(['S1']);
+    expect(filterArgs(read, 'gte', 'appointments.appointment_at')).toEqual(['2025-05-21T22:55:00.000Z']); // 지금(5월 22일 7:55 한국) 이후
+    expect(filterArgs(read, 'order', 'appointments(appointment_at)')).toEqual([]);
+  });
+
+  it('listOccurrences: 지난 회차는 빼고, 묶음 번호가 없거나 UUID가 아닌 옛 주소는 빈 목록 (참여 조건은 읽지 않음)', async () => {
+    const id = '00000000-0000-4000-8000-0000000000a1';
+    mockRoutes['appointments:select'] = () => ({ data: { series_id: null } });
+    expect(await real.listOccurrences(id)).toEqual([]);
+    expect(await real.listOccurrences('m1')).toEqual([]);
+    expect(callsTo('appointment_participants', 'select')).toHaveLength(0);
+
+    mockRoutes['appointments:select'] = () => ({ data: { series_id: 'S1' } });
+    mockRoutes['appointment_participants:select'] = () => ({
+      data: [{ appointments: { appointment_id: 'old', series_id: 'S1', appointment_at: kst('10:00', 15) }, alarms: [] }],
+    });
+    expect(await real.listOccurrences(id)).toEqual([]);
+  });
+
+  it('listAppointments: 가장 가까운 회차의 알람이 모두 없으면(목록에서 빠짐) 그 다음 회차가 대신 보임 — 묶음 전체가 사라지지 않음', async () => {
+    const occurrence = (id: string, day: number, alarms: unknown[]) =>
+      participantRow({ participant_id: `p-${id}` }, { appointment_id: id, series_id: 'S1', title: '스터디', appointment_at: kst('10:00', day) }, alarms);
+    mockRoutes['appointment_participants:select'] = () => ({ data: [occurrence('s1-0522', 22, []), occurrence('s1-0529', 29, meetingAlarms())] });
+    const list = await real.listAppointments();
+    expect(list.map((a) => a.id)).toEqual(['s1-0529']);
+  });
+
+  it('listAppointments: 묶음이 전부 지났으면 가장 최근 지난 회차 하나', async () => {
+    const occurrence = (id: string, day: number) => participantRow({ participant_id: `p-${id}` }, { appointment_id: id, series_id: 'S1', title: '스터디', appointment_at: kst('10:00', day) });
+    mockRoutes['appointment_participants:select'] = () => ({ data: [occurrence('s1-0508', 8), occurrence('s1-0515', 15)] });
+    expect((await real.listAppointments()).map((a) => a.id)).toEqual(['s1-0515']);
   });
 
   it('listAppointments: 준비물은 약속 id를 100개씩 나눠 읽음 (id를 주소에 실어 보내서 300개면 주소가 너무 길어짐) — 결과는 약속별로 그대로', async () => {
@@ -734,6 +837,48 @@ describe('새 일정 계산 · 저장 (H05)', () => {
     expect(saved.alarms.map((a) => a.id)).toEqual(['n-wake', 'n-arrive']);
   });
 
+  it('createAppointment: 반복 일정이면 준비물 저장 뒤에 그 묶음(= 약속 id)의 회차를 넘기라고 syncNow를 부름, 반복이 아니면 안 부름', async () => {
+    const order: string[] = [];
+    mockRoutes['todos:insert'] = () => {
+      order.push('todos');
+      return undefined;
+    };
+    mockSyncNow.mockImplementation(async () => {
+      order.push('syncNow');
+    });
+    const repeating = await estimateOf(draft({ repeat: ['목'] }));
+    mockCallEdge.mockResolvedValueOnce(commitResponse());
+    await real.createAppointment(repeating);
+    expect(mockSyncNow).toHaveBeenCalledTimes(1);
+    expect(mockSyncNow).toHaveBeenCalledWith({ rollSeriesId: 'new-appt' });
+    expect(order).toEqual(['todos', 'syncNow']); // 서버가 회차를 만들며 복사할 준비물이 먼저 저장돼 있어야 함
+
+    mockSyncNow.mockClear();
+    const once = await estimateOf();
+    mockCallEdge.mockResolvedValueOnce(commitResponse());
+    await real.createAppointment(once);
+    expect(mockSyncNow).not.toHaveBeenCalled();
+  });
+
+  it('createAppointment: 회차 넘기기가 실패해도(던져도) 저장은 성공 — 기다리지도 않음', async () => {
+    const repeating = await estimateOf(draft({ repeat: ['목'] }));
+    mockSyncNow.mockImplementation(() => new Promise(() => {})); // 끝나지 않아도 저장이 안 막힘
+    mockCallEdge.mockResolvedValueOnce(commitResponse());
+    await expect(real.createAppointment(repeating)).resolves.toMatchObject({ id: 'new-appt' });
+    mockSyncNow.mockImplementation(() => {
+      throw new Error('동기 오류');
+    });
+    mockCallEdge.mockResolvedValueOnce(commitResponse());
+    await expect(real.createAppointment(repeating)).resolves.toMatchObject({ id: 'new-appt' });
+  });
+
+  it('createAppointment: applyCommit에 약속 시각을 같이 넘김 (맞춘 뒤 훅의 upcoming용)', async () => {
+    const estimate = await estimateOf();
+    mockCallEdge.mockResolvedValueOnce(commitResponse());
+    await real.createAppointment(estimate);
+    expect(mockApplyCommit).toHaveBeenCalledWith(expect.objectContaining({ participant_id: 'new-part', appointment_at: new Date(kst('10:00', 23)).toISOString() }));
+  });
+
   it('저장 뒤처리(폰 예약 · 준비물)가 실패해도 오류로 돌리지 않음 — 다시 보내면 일정이 하나 더 생김', async () => {
     const estimate = await estimateOf();
     mockCallEdge.mockResolvedValueOnce(commitResponse());
@@ -1023,6 +1168,18 @@ describe('일정 없는 알람 (D46)', () => {
     });
     expect(mockApplyCommit).toHaveBeenCalledTimes(1);
     expect(saved).toMatchObject({ id: '00000000-0000-4000-8000-0000000000c1', title: '알람', standalone: true, repeatLabel: '매주 월요일', level: 2 });
+  });
+
+  it('새로 만든 반복 알람이면 그 묶음(= 첫 알람 id)의 회차를 넘기라고 syncNow를 부름 — 반복이 아니거나 고치기면 안 부름', async () => {
+    mockCallEdge.mockResolvedValue(standaloneResponse());
+    await real.saveStandaloneAlarm({ at: new Date(kst('07:00', 23)), repeat: ['월'] });
+    expect(mockSyncNow).toHaveBeenCalledWith({ rollSeriesId: '00000000-0000-4000-8000-0000000000c1' });
+
+    mockSyncNow.mockClear();
+    await real.saveStandaloneAlarm({ alarmId: '00000000-0000-4000-8000-0000000000c1', level: 0 }); // 고치기: 어느 회차인지 몰라 건너뜀
+    mockCallEdge.mockResolvedValue({ ...standaloneResponse(), alarms: [{ ...standaloneResponse().alarms[0], recurrence_rule: null }] });
+    await real.saveStandaloneAlarm({ at: new Date(kst('07:00', 23)) });
+    expect(mockSyncNow).not.toHaveBeenCalled();
   });
 
   it('고치기: 알람 id만 있으면 시각 없이 강도 · 켜기만 보냄, 만들기인데 시각이 없으면 UserError', async () => {

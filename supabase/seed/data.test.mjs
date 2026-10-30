@@ -22,6 +22,7 @@ test('계정 4명, 닉네임 · 아이디 모양 (handle ^[a-z0-9_]{3,20}$)', ()
   for (const p of t.profiles) {
     assert.match(p.handle, /^[a-z0-9_]{3,20}$/);
     assert.ok(p.nickname.length <= 30);
+    assert.ok(!Number.isNaN(Date.parse(p.onboarded_at)), '데모 계정은 온보딩을 끝낸 상태');
   }
   assert.equal(new Set(t.profiles.map((p) => p.handle)).size, 4);
 });

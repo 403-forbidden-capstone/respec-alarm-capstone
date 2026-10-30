@@ -32,8 +32,9 @@ import {
   type RingKind,
   type Transport,
 } from '@/features/alarm/types';
+import { askNotifications } from '@/features/permissions';
 import { useAuth } from '@/features/auth/AuthProvider';
-import { saveHome } from '@/features/profile/home';
+import { saveProfileFields } from '@/features/profile/api';
 import { foundScheduleDraft, saveFoundSchedule } from '@/features/voice/api';
 import { now } from '@/lib/clock';
 import { addMinutes, dayKey, formatDateShort, formatTime, formatTime24, startOfDay } from '@/lib/format';
@@ -60,7 +61,7 @@ export default function NewScheduleScreen() {
   // 대화에서 왔고 찾은 일정이 아직 대기일 때만 — 이미 확인한 카드면 보통 새 일정으로 (두 벌 저장 막기)
   const [fromChat] = useState(() => from === 'chat' && foundScheduleDraft() != null);
   const { data: places, error: placesError, reload: reloadPlaces } = useLoad(listPlaces);
-  const { data: appointments } = useLoad(listAppointments); // 같은 날 앞 일정의 기상 알람을 찾는 데만 씀 — 못 읽어도 폼은 그대로
+  const { data: appointments } = useLoad(() => listAppointments({ everyOccurrence: true })); // 같은 날 앞 일정의 기상 알람을 찾는 데만 씀 — 못 읽어도 폼은 그대로
   const [initial] = useState(() => {
     if (fromChat) {
       const found = foundScheduleDraft();
@@ -143,13 +144,14 @@ export default function NewScheduleScreen() {
 
   // 고른 곳을 집으로 저장 → 프로필 다시 읽기 → 바로 다시 계산 (서버가 계산할 때마다 프로필에서 집을 읽으므로 새 집이 바로 쓰임)
   function pickHome(place: Place) {
+    // 좌표 없는 장소는 집으로 저장하지 않음 — 있던 집 좌표를 지우지 않으려고 (#271 리뷰 규칙)
     if (place.lat == null || place.lng == null) {
       toast('이 장소는 위치를 몰라 집으로 정할 수 없어요');
       return;
     }
     const { name, lat, lng } = place;
     void runSaveHome(async () => {
-      await saveHome(await requireUserId(), { name, lat, lng });
+      await saveProfileFields(await requireUserId(), { home_name: name, home_lat: lat, home_lng: lng });
       await auth.refreshProfile().catch(() => {}); // 못 읽어도 집은 저장됨 — 서버는 계산할 때 프로필을 직접 읽음
       setHomeMissing(false);
       setHomeSheetOpen(false);
@@ -181,6 +183,9 @@ export default function NewScheduleScreen() {
             ? `알람 ${rings}개를 맞췄어요${skipped ? ` · 지난 알람 ${skipped}개는 울리지 않아요` : ''}`
             : '일정을 저장했어요 · 울릴 알람이 없어요',
       );
+      // N3: 첫 알람 저장 직후 알림 안내 (한 번만, 거절 뒤엔 홈 빨간 줄 · 점검표) — L7
+      // 울릴 알람이 없는 저장(전부 지난 알람)에는 안 물음 — 답이 결과를 안 바꿈(#240 원칙 ④)
+      if (rings > 0) void askNotifications('alarm');
       closeSheet();
       allowLeave(); // 저장했으니 나가도 묻지 않음 — 나가는 동작보다 먼저
       leave(saved.id);
