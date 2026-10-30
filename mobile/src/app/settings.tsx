@@ -20,7 +20,7 @@ import { TRANSPORT_NAME, WAKE_MARGIN_NAME, WAKE_SENSITIVITY_NAME } from '@/featu
 import type { ProfileFields } from '@/features/profile/types';
 import { UserError, userMessage } from '@/lib/errors';
 import { TIMETABLE_PATHS } from '@/lib/flags';
-import { setImportBatch } from '@/lib/importHandoff';
+import { setImportBatch } from '@/features/onboarding/importHandoff';
 import { canUseRealData, modeLocked } from '@/lib/mode';
 import { backOrHome } from '@/lib/nav';
 import { signOutAndCleanup } from '@/lib/session';

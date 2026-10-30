@@ -9,7 +9,7 @@ import { UserError, userMessage } from '@/lib/errors';
 
 import type { ClassRow } from '../components/TimetableStep';
 import { firstDate, MAX_CLASS_ROWS, needsRetry, rowStatus, toDraft } from '../timetable';
-import { campusCoords, campusTargets, classRowOf, importNotice, planImport, startImport, type ImportBatch, type ImportNotice } from '../timetableImport';
+import { campusCoords, campusPlaceText, campusTargets, classRowOf, importNotice, missingCoords, planImport, startImport, type ImportBatch, type ImportNotice } from '../timetableImport';
 
 const DEFAULT_START = 9 * 60; // 시각 시트를 처음 열 때 보여 주는 시각 (오전 9:00)
 const SOURCE = '온보딩 시간표'; // createAppointment의 출처 글자
@@ -28,7 +28,8 @@ export function useTimetableStep(transport: Transport, initial?: ImportBatch | n
   const [timeFor, setTimeFor] = useState<string | null>(null); // 시각 시트가 열려 있는 줄
   const [campus, setCampus] = useState<Place | null>(null); // 가져온 수업 전체에 맞출 학교 위치 (한 번 고르면 뒤에 가져오는 줄에도 적용)
   const [campusOpen, setCampusOpen] = useState(false);
-  const [imported, setImported] = useState(start != null); // 가져온 수업이 있었음 — 학교 위치 카드를 보여 줄지
+  const [fromCampus, setFromCampus] = useState<ReadonlySet<string>>(new Set()); // 학교 위치로 맞춘 줄 id — 학교를 바꾸면 이 줄들도 새 학교로. 직접 장소를 고른 줄은 빠짐
+  const [imported, setImported] = useState(start != null); // 가져온 수업이 있었음 — 좌표 없는 줄 저장 막기 · 학교 위치 카드를 보여 줄지
   const [notice, setNotice] = useState<ImportNotice | null>(start?.notice ?? null); // 가져온 직후 확인 안내 (사진 · 캘린더 길)
   const seq = useRef(start?.rows.length ?? 0);
   const asked = useRef(false);
@@ -50,6 +51,7 @@ export function useTimetableStep(transport: Transport, initial?: ImportBatch | n
     const id = placeFor;
     if (!id) return;
     change(id, { place: place.name });
+    setFromCampus((set) => new Set([...set].filter((x) => x !== id))); // 직접 고른 장소는 학교를 바꿔도 그대로
     setCoords((all) => {
       const { [id]: _old, ...rest } = all;
       return Number.isFinite(place.lat) && Number.isFinite(place.lng) ? { ...rest, [id]: { lat: place.lat as number, lng: place.lng as number } } : rest;
@@ -57,23 +59,28 @@ export function useTimetableStep(transport: Transport, initial?: ImportBatch | n
     setPlaceFor(null);
   }
 
-  // 가져온 수업(사진 · 캘린더)을 줄로 더함 — 비어 있는 줄은 치우고, 이미 있는 수업은 건너뛰고, 상한(MAX_CLASS_ROWS)을 넘으면 앞에서부터만. 학교를 이미 골랐으면 새 줄에도 그 위치를 적용
+  // 가져온 수업(사진 · 캘린더)을 줄로 더함 — 비어 있는 줄은 치우고, 이미 있는 수업은 건너뛰고, 상한(MAX_CLASS_ROWS)을 넘으면 앞에서부터만. 학교를 이미 골랐으면 새 줄에도 그 위치를 적용(장소 글자가 비면 학교 이름)
+  // 지금 렌더의 rows를 기준으로 하므로 한 렌더 안에서 두 번 부르지 않음 (사진 읽기는 한 번에 한 장 — usePhotoImport가 읽는 동안 막음)
   function addImported(batch: ImportBatch) {
     const kept = rows.filter((row) => rowStatus(row) !== 'empty');
     const plan = planImport(kept, batch.classes, MAX_CLASS_ROWS);
     const added = plan.accepted.map((c) => {
       seq.current += 1;
-      return classRowOf(c, `class-${seq.current}`);
+      const row = classRowOf(c, `class-${seq.current}`);
+      return campus ? { ...row, place: campusPlaceText(row.place, null, campus) } : row;
     });
     setRows([...kept, ...added]);
-    const at = campusCoords(campus);
-    if (at && added.length) setCoords((all) => ({ ...all, ...Object.fromEntries(added.map((row) => [row.id, at])) }));
-    setNotice(importNotice(batch, plan, MAX_CLASS_ROWS));
     setImported(true);
+    const at = campusCoords(campus);
+    if (at && added.length) {
+      setCoords((all) => ({ ...all, ...Object.fromEntries(added.map((row) => [row.id, at])) }));
+      setFromCampus((set) => new Set([...set, ...added.map((row) => row.id)]));
+    }
+    setNotice(importNotice(batch, plan, MAX_CLASS_ROWS));
     return plan.accepted.length;
   }
 
-  // 학교 위치를 고름 — 좌표가 아직 없는 줄 모두에 적용 (장소 글자는 그대로 두고, 비어 있는 줄만 학교 이름으로). 좌표가 없는 장소는 못 씀
+  // 학교 위치를 고르거나 바꿈 — 좌표가 없는 줄과 지난 학교로 맞춘 줄 모두에 적용 (건물 · 강의실 글자는 그대로 두고, 비었거나 지난 학교 이름이면 새 학교 이름). 직접 고른 줄 · 저장한 줄은 그대로. 좌표가 없는 장소는 못 씀
   function pickCampus(place: Place) {
     const at = campusCoords(place);
     if (!at) {
@@ -82,14 +89,18 @@ export function useTimetableStep(transport: Transport, initial?: ImportBatch | n
     }
     setCampus(place);
     setCampusOpen(false);
-    const ids = new Set(campusTargets(rows, (id) => coords[id] != null));
+    const ids = new Set(campusTargets(rows, (id) => coords[id] != null, fromCampus));
     if (!ids.size) return;
+    const previous = campus;
     setCoords((all) => ({ ...all, ...Object.fromEntries([...ids].map((id) => [id, at])) }));
-    setRows((list) => list.map((row) => (ids.has(row.id) && !row.place.trim() ? { ...row, place: place.name } : row)));
+    setFromCampus((set) => new Set([...set, ...ids]));
+    setRows((list) => list.map((row) => (ids.has(row.id) ? { ...row, place: campusPlaceText(row.place, previous, place) } : row)));
   }
 
   const filled = rows.filter((row) => rowStatus(row) !== 'empty');
-  const canSave = filled.some((row) => rowStatus(row) === 'complete') && filled.every((row) => rowStatus(row) === 'complete');
+  // 가져온 수업은 장소 글자뿐이라 좌표가 없으면 이동시간을 못 구함 → 학교(또는 줄마다 장소)를 정해야 저장할 수 있음. 직접 입력만 쓴 단계는 그대로
+  const missing = imported ? missingCoords(rows, (id) => coords[id] != null) : 0;
+  const canSave = filled.some((row) => rowStatus(row) === 'complete') && filled.every((row) => rowStatus(row) === 'complete') && missing === 0;
 
   // [저장하고 다음] — false면 그 단계에 머묾 (실패한 줄은 줄 옆에 이유가 보임)
   async function save(): Promise<boolean> {
@@ -160,6 +171,7 @@ export function useTimetableStep(transport: Transport, initial?: ImportBatch | n
     addImported,
     notice,
     imported,
+    missingCoords: missing,
     dismissNotice: () => setNotice(null),
     campus,
     campusOpen,

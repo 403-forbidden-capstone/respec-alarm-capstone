@@ -1,7 +1,7 @@
 import { describe, expect, it } from '@jest/globals';
 
 import type { ClassRow } from '../components/TimetableStep';
-import { campusCoords, campusTargets, classRowOf, importNotice, planImport, type ImportBatch, type ImportedClass } from '../timetableImport';
+import { campusCoords, campusPlaceText, campusTargets, classRowOf, importNotice, missingCoords, planImport, type ImportBatch, type ImportedClass } from '../timetableImport';
 
 const row = (patch: Partial<ClassRow> = {}): ClassRow => ({ id: 'r1', name: '자료구조', days: ['월', '수'], startMinutes: 630, place: '공학관 301', ...patch });
 const cls = (patch: Partial<ImportedClass> = {}): ImportedClass => ({ title: '운영체제', weekdays: ['화', '목'], startMinutes: 780, place: '정보관 B102', ...patch });
@@ -45,6 +45,27 @@ describe('학교 위치 맞추기', () => {
   it('좌표 없는 줄만 · 이미 저장한 줄(ok)은 건드리지 않음', () => {
     const rows = [row({ id: 'a' }), row({ id: 'b' }), row({ id: 'c', result: 'ok' })];
     expect(campusTargets(rows, (id) => id === 'b')).toEqual(['a']);
+  });
+
+  it('학교를 바꾸면 지난 학교로 맞춘 줄도 대상, 직접 장소를 고른 줄(fromCampus에 없음)은 제외', () => {
+    const rows = [row({ id: 'a' }), row({ id: 'b' }), row({ id: 'c' })];
+    const all = () => true; // 모두 좌표 있음
+    expect(campusTargets(rows, all, new Set(['a', 'c']))).toEqual(['a', 'c']);
+    expect(campusTargets(rows, all)).toEqual([]);
+  });
+
+  it('장소 글자: 비었거나 지난 학교 이름이면 새 학교 이름, 건물 글자는 그대로', () => {
+    const old = { name: '세종대학교', lat: 1, lng: 2 };
+    const next = { name: '서울대학교', lat: 3, lng: 4 };
+    expect(campusPlaceText('', null, next)).toBe('서울대학교');
+    expect(campusPlaceText('세종대학교', old, next)).toBe('서울대학교');
+    expect(campusPlaceText('공학관 301', old, next)).toBe('공학관 301');
+  });
+
+  it('이동시간을 못 구하는 줄 수: 채운 줄 중 좌표 없는 것만 (비어 있는 줄 · 저장한 줄 제외)', () => {
+    const rows = [row({ id: 'a' }), row({ id: 'b' }), row({ id: 'c', result: 'ok' }), row({ id: 'd', name: '', days: [], startMinutes: null, place: '' })];
+    expect(missingCoords(rows, (id) => id === 'a')).toBe(1);
+    expect(missingCoords(rows, () => true)).toBe(0);
   });
 
   it('좌표가 둘 다 있을 때만 쓸 수 있음', () => {

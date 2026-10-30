@@ -5,6 +5,7 @@ import type { Place } from '@/features/alarm/types';
 import type { Weekday } from '@/lib/weekday';
 
 import type { ClassRow } from './components/TimetableStep';
+import { rowStatus } from './timetable';
 
 export type ImportSource = 'photo' | 'calendar';
 export type ImportConfidence = 'HIGH' | 'MEDIUM' | 'LOW';
@@ -59,9 +60,20 @@ export function classRowOf(c: ImportedClass, id: string): ClassRow {
   return { id, name: c.title, days: sortDays([...c.weekdays]), startMinutes: c.startMinutes, place: c.place ?? '' };
 }
 
-// 학교 위치를 줄에 맞춤 — 좌표가 아직 없고 이미 저장하지 않은 줄의 id. 장소 글자는 그대로 두고(건물 · 강의실), 비어 있는 줄만 학교 이름으로 채움
-export function campusTargets(rows: readonly ClassRow[], hasCoords: (id: string) => boolean): string[] {
-  return rows.filter((row) => row.result !== 'ok' && !hasCoords(row.id)).map((row) => row.id);
+// 학교 위치를 줄에 맞춤(처음 고를 때 · 바꿀 때) — 덮을 줄의 id: 좌표가 아직 없는 줄 + 지난 학교로 맞춘 줄(fromCampus). 이미 저장한 줄(ok)과 직접 장소를 고른 줄은 건드리지 않음
+export function campusTargets(rows: readonly ClassRow[], hasCoords: (id: string) => boolean, fromCampus: ReadonlySet<string> = new Set()): string[] {
+  return rows.filter((row) => row.result !== 'ok' && (!hasCoords(row.id) || fromCampus.has(row.id))).map((row) => row.id);
+}
+
+// 학교를 고른 뒤 줄에 보일 장소 글자 — 건물 · 강의실 글자는 그대로 두고, 비어 있거나 지난 학교 이름 그대로면 새 학교 이름
+export function campusPlaceText(current: string, previous: Place | null, next: Place): string {
+  const text = current.trim();
+  return !text || (previous != null && text === previous.name) ? next.name : current;
+}
+
+// 이동시간을 구할 수 없는 줄 수 — 가져온 줄은 장소 글자뿐이고 좌표가 없으면 서버가 길찾기를 못 함(ROUTE_UNAVAILABLE). 채운 줄만 셈 (이미 저장한 줄 제외)
+export function missingCoords(rows: readonly ClassRow[], hasCoords: (id: string) => boolean): number {
+  return rows.filter((row) => row.result !== 'ok' && rowStatus(row) !== 'empty' && !hasCoords(row.id)).length;
 }
 
 export const campusCoords = (place: Place | null): { lat: number; lng: number } | null =>
