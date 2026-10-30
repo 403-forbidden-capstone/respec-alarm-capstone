@@ -46,6 +46,6 @@ export const ONBOARDING_STEPS: Record<OnboardingStepId, boolean> = {
 //   photo: [시간표 사진으로 넣기] — 사진 고르기 → 서버 함수 timetable-extract(Claude가 읽음) → 확인 화면
 //   calendar: [폰 캘린더에서 가져오기] — 캘린더 읽기 → 앞으로 2주 매주 반복 일정 후보(규칙, AI 없음) → 확인 화면
 export const TIMETABLE_PATHS = {
-  photo: false,
+  photo: true,
   calendar: false,
 };
