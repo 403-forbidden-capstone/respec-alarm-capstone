@@ -28,6 +28,7 @@ export function useTimetableStep(transport: Transport, initial?: ImportBatch | n
   const [timeFor, setTimeFor] = useState<string | null>(null); // 시각 시트가 열려 있는 줄
   const [campus, setCampus] = useState<Place | null>(null); // 가져온 수업 전체에 맞출 학교 위치 (한 번 고르면 뒤에 가져오는 줄에도 적용)
   const [campusOpen, setCampusOpen] = useState(false);
+  const [imported, setImported] = useState(start != null); // 가져온 수업이 있었음 — 학교 위치 카드를 보여 줄지
   const [notice, setNotice] = useState<ImportNotice | null>(start?.notice ?? null); // 가져온 직후 확인 안내 (사진 · 캘린더 길)
   const seq = useRef(start?.rows.length ?? 0);
   const asked = useRef(false);
@@ -68,6 +69,7 @@ export function useTimetableStep(transport: Transport, initial?: ImportBatch | n
     const at = campusCoords(campus);
     if (at && added.length) setCoords((all) => ({ ...all, ...Object.fromEntries(added.map((row) => [row.id, at])) }));
     setNotice(importNotice(batch, plan, MAX_CLASS_ROWS));
+    setImported(true);
     return plan.accepted.length;
   }
 
@@ -157,6 +159,7 @@ export function useTimetableStep(transport: Transport, initial?: ImportBatch | n
     save,
     addImported,
     notice,
+    imported,
     dismissNotice: () => setNotice(null),
     campus,
     campusOpen,

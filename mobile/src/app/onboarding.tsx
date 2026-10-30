@@ -8,12 +8,16 @@ import { PlaceSearchSheet } from '@/features/alarm/components/PlaceSearchSheet';
 import { TimeSheet } from '@/features/alarm/components/TimePicker';
 import { useAuth } from '@/features/auth/AuthProvider';
 import { hasHome } from '@/features/onboarding/home';
+import { CampusCard } from '@/features/onboarding/components/CampusCard';
+import { ImportNoticeCard } from '@/features/onboarding/components/ImportNoticeCard';
 import { HomePlaceStep } from '@/features/onboarding/components/HomePlaceStep';
-import { CONSENT_ITEMS, PRIVACY_VERSION } from '@/features/onboarding/consent';
+import { CONSENT_ITEMS, PRIVACY_VERSION, TIMETABLE_PHOTO_CONSENT } from '@/features/onboarding/consent';
 import { OnboardingDoneStep } from '@/features/onboarding/components/OnboardingDoneStep';
 import { OnboardingFrame } from '@/features/onboarding/components/OnboardingFrame';
+import { ImportEntryCard } from '@/features/onboarding/components/ImportEntryCard';
 import { TimetableStep } from '@/features/onboarding/components/TimetableStep';
 import { useHomeStep } from '@/features/onboarding/hooks/useHomeStep';
+import { usePhotoImport } from '@/features/onboarding/hooks/usePhotoImport';
 import { useTimetableStep } from '@/features/onboarding/hooks/useTimetableStep';
 import { activeSteps, nextStep, ONBOARDING_ORDER, prevStep, stepNumber, type OnboardingStepId, type StepFlags } from '@/features/onboarding/steps';
 import { cleanHandle, cleanNickname, isHandleFormat, isNicknameOk, NICKNAME_MAX, shouldSaveHandle } from '@/features/onboarding/validate';
@@ -28,7 +32,7 @@ import type { WakeSensitivity } from '@/features/profile/types';
 import { setAfterOnboarding } from '@/lib/afterOnboarding';
 import { now } from '@/lib/clock';
 import { UserError } from '@/lib/errors';
-import { ONBOARDING_STEPS } from '@/lib/flags';
+import { ONBOARDING_STEPS, TIMETABLE_PATHS } from '@/lib/flags';
 import { addMinutes, minuteOfDay, startOfDay } from '@/lib/format';
 import { useAction } from '@/lib/useAction';
 
@@ -72,6 +76,7 @@ export default function OnboardingScreen() {
     margin: profile?.wake_margin ?? 'NORMAL',
   });
   const homeStep = useHomeStep(profile, userId);
+  const photoImport = usePhotoImport();
   const timetable = useTimetableStep(prepare.transport); // 수업은 '아침 준비'에서 고른 이동 수단으로 계산
   // 집 좌표가 없으면 서버가 출발지 '집'을 못 채워 이동시간을 못 구함 — 실데이터만 (가짜 데이터는 집 없이도 계산)
   const noHome = userId != null && !hasHome(homeStep.saved, profile);
@@ -226,6 +231,20 @@ export default function OnboardingScreen() {
               집 위치를 정하지 않아서 이동시간을 구하지 못해요. 이전으로 돌아가 집을 정하거나 건너뛰어 주세요
             </Text>
           ) : null}
+          <ImportEntryCard
+            onPhoto={
+              TIMETABLE_PATHS.photo
+                ? async () => {
+                    const batch = await photoImport.pick();
+                    if (batch) timetable.addImported(batch);
+                  }
+                : undefined
+            }
+            busy={busy || photoImport.reading}
+            reading={photoImport.reading ? 'photo' : null}
+          />
+          {timetable.notice ? <ImportNoticeCard notice={timetable.notice} onDismiss={timetable.dismissNotice} /> : null}
+          {timetable.imported && timetable.rows.length > 0 ? <CampusCard campus={timetable.campus} onOpen={timetable.openCampus} disabled={busy} /> : null}
           <TimetableStep
             rows={timetable.rows}
             onChangeRow={timetable.onChangeRow}
@@ -234,6 +253,13 @@ export default function OnboardingScreen() {
             onPickPlace={timetable.onPickPlace}
             onPickTime={timetable.onPickTime}
             saving={busy}
+          />
+          <PlaceSearchSheet
+            visible={timetable.campusOpen}
+            onClose={timetable.closeCampus}
+            onPick={timetable.pickCampus}
+            search={(query) => listPlaces(query)}
+            title="학교 찾기"
           />
           <PlaceSearchSheet
             visible={timetable.placeOpen}
@@ -262,7 +288,7 @@ export default function OnboardingScreen() {
     consent: {
       title: '개인정보 안내',
       lead: '앱이 읽는 것과 읽지 않는 것이에요',
-      body: <ConsentStep items={CONSENT_ITEMS} />,
+      body: <ConsentStep items={TIMETABLE_PATHS.photo ? [...CONSENT_ITEMS, TIMETABLE_PHOTO_CONSENT] : CONSENT_ITEMS} />,
       primaryLabel: '동의하고 계속',
       onPrimary: next,
     },

@@ -3,11 +3,20 @@
 export const PRIVACY_VERSION = 1;
 
 export type ConsentItem = {
-  key: 'location' | 'screen' | 'voice' | 'wake-share';
+  key: 'location' | 'screen' | 'voice' | 'wake-share' | 'timetable-photo';
   title: string;
   reads: string; // 읽는 것
   doesNotRead: string; // 안 읽는 것
   friends: string; // 친구에게 보이는 것
+};
+
+// 시간표 사진으로 넣기(TIMETABLE_PATHS.photo)를 켰을 때만 동의 단계에 더함 — 사진은 AI(Claude)에게 보내져 읽히고 저장하지 않음 (서버 timetable-extract)
+export const TIMETABLE_PHOTO_CONSENT: ConsentItem = {
+  key: 'timetable-photo',
+  title: '시간표 사진',
+  reads: '고른 시간표 사진 한 장을 AI가 읽어 수업 목록으로 바꿈',
+  doesNotRead: '그 밖의 사진 (사진은 저장하지 않고 읽은 뒤 버림)',
+  friends: '안 보임',
 };
 
 export const CONSENT_ITEMS: readonly ConsentItem[] = [
