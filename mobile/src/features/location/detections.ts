@@ -17,7 +17,8 @@ export type EarlierDeparture = { participantId: string; at: Date };
 
 // [아니에요]를 누른 곳 — H01 홈 감지 정정 줄, NTF 감지 안내 알림 (user_edit_logs.screen)
 export type RejectScreen = 'H01' | 'NTF';
-export type RejectInput = { participantId: string; kind: DetectionKind; screen: RejectScreen };
+// at = 지우려는 값의 시각(ms) — 알림 · 화면이 "그 판정"만 지우게 함. 지금 위치 값의 시각과 다르면(그 뒤 더 새 판정으로 바뀜) 아무것도 지우지 않고 null. 없으면 지금 위치 값을 지움
+export type RejectInput = { participantId: string; kind: DetectionKind; screen: RejectScreen; at?: number };
 // 5초 되돌리기에 넘길 것 — 지운 값(at)과 남긴 고친 값 기록 번호(editId)
 export type RejectSnapshot = { participantId: string; kind: DetectionKind; at: Date; editId: string };
 

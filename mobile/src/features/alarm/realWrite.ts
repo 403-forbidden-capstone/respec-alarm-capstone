@@ -14,7 +14,7 @@ import { autoLevel, resolveIntensity } from '@shared/calc/intensity.ts';
 
 import { forgetDetail } from './detailCache';
 import { storedOverrides } from './map';
-import { fetchLateCount, loadAppointmentRowsByAppointment } from './realRows';
+import { fetchLateCount, fetchWakeSensitivity, loadAppointmentRowsByAppointment } from './realRows';
 import type { AlarmKind, IntensityAxis, Level } from './types';
 
 const PHONE_FAILED = '폰에 알람을 반영하지 못했어요. 알람 권한을 확인하고 앱을 다시 열어 주세요';
@@ -81,19 +81,20 @@ export async function setAlarmEnabled(id: string, kind: AlarmKind, enabled: bool
 }
 
 // 부르는 화면 없음 — H03의 켜기 · 강도는 alarm-commit (setAlarmEnabled 주석 참고)
-// 강도 직접 고르기 — level이 null이면 그 칸만 자동으로 되돌림. 서버가 같은 규칙으로 쓰는 세 칸(진동 intensity · 말소리 voice_tone · 배경음 sound_key)을
-// 약속의 모든 알람에 같은 값으로 씀 (한 일정의 강도). 다른 칸은 지금 직접 고른 값을 이어서 자동 값과 다른 칸만 MANUAL로 남김
+// 강도 직접 고르기 — level이 null이면 그 칸만 자동으로 되돌림. 서버가 같은 규칙으로 쓰는 칸(전체 세기 intensity · 말소리 voice_tone · 배경음 sound_key · 진동 vibration)을
+// 약속의 모든 알람에 같은 값으로 씀 (한 일정의 강도). intensity는 늘 자동 세기고 진동은 직접 고를 때만 값(자동이면 null).
+// 다른 축은 지금 직접 고른 값을 이어서 자동 값과 다른 축만 MANUAL로 남김
 export async function setIntensity(id: string, axis: IntensityAxis, level: Level | null): Promise<void> {
   const userId = await requireUserId();
   const rows = await loadAppointmentRowsByAppointment(id, userId);
   if (!rows) throw new UserError(NOT_FOUND);
-  const lateCount = await fetchLateCount(userId, now().getTime());
+  const [lateCount, wakeSensitivity] = await Promise.all([fetchLateCount(userId, now().getTime()), fetchWakeSensitivity(userId)]);
   const importance = rows.appointment.importance;
-  const picked = { ...storedOverrides(rows.alarms, autoLevel(importance, lateCount)), [axis]: level };
-  const { fields, manual } = resolveIntensity(importance, lateCount, picked);
+  const picked = { ...storedOverrides(rows.alarms, autoLevel(importance, lateCount, wakeSensitivity)), [axis]: level };
+  const { fields, manual } = resolveIntensity(importance, lateCount, picked, wakeSensitivity);
   const { data, error } = await supabase
     .from('alarms')
-    .update({ intensity: fields.intensity, voice_tone: fields.voiceTone, sound_key: fields.soundKey, intensity_source: manual ? 'MANUAL' : 'AUTO' })
+    .update({ intensity: fields.intensity, voice_tone: fields.voiceTone, sound_key: fields.soundKey, vibration: fields.vibration, intensity_source: manual ? 'MANUAL' : 'AUTO' })
     .eq('participant_id', rows.participant.participant_id)
     .eq('user_id', userId)
     .select('alarm_id');

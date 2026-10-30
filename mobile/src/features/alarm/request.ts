@@ -70,6 +70,7 @@ export type Suggestion = {
     weight: number;
     residual_p80: number;
     before_prepare_minutes: number;
+    recent?: number[]; // 내 기상~출발 기록 최근 5개, 최신순 (서버 학습 기초 b부터. 옛 서버 응답에는 없음)
   };
   intensity: {
     level: AlarmIntensity;
@@ -89,6 +90,7 @@ export type CommitAlarm = {
   intensity: AlarmIntensity;
   voice_tone: 'CALM' | 'NEUTRAL' | 'DIRECT';
   sound_key: string | null;
+  vibration: string | null; // 직접 고른 진동만 값, 자동이면 null (강도를 따름)
   time_source: 'AUTO' | 'MANUAL';
   intensity_source: 'AUTO' | 'MANUAL';
   recurrence_rule: string | null;
@@ -282,6 +284,7 @@ export function toPreview(s: Suggestion, saved: AppointmentDetail, edits: AlarmE
     predictedPrepMinutes: s.prepare.minutes,
     autoPredictedPrepMinutes: saved.auto.predictedPrepMinutes,
     prepareSampleCount: s.prepare.sample_count,
+    ...(s.prepare.recent ? { prepareRecent: s.prepare.recent } : {}),
     ...(problem ? { travelProblem: problem } : {}),
   };
 }

@@ -12,6 +12,7 @@ export type AlarmWrite = {
   intensity: AlarmRow['intensity'];
   voice_tone: AlarmRow['voice_tone'];
   sound_key: string;
+  vibration: AlarmRow['vibration']; // 직접 고른 진동만 값, 자동이면 null (강도를 따름)
   is_enabled: boolean;
   time_source: 'AUTO' | 'MANUAL';
   intensity_source: 'AUTO' | 'MANUAL';
@@ -40,7 +41,7 @@ export function resolveEnabled(args: { checkedEnabled: boolean; old?: Pick<Alarm
 //   · 켜짐: 지난 알림이면 꺼서 저장(8.2.1). 아니면 요청의 enabled → 지금 상태 → 켬 순.
 //     지금 꺼져 있어도 옛 시각이 이미 지났다면 지나서 꺼진 것으로 보고 새 시각으로 다시 켬 (사용자가 H02에서 끈 것과 구분)
 //   · 시각 출처: 직접 고른 시각이면 MANUAL, 아니면 AUTO (기상을 직접 옮겨서 따라온 준비는 AUTO)
-//   · 강도 3칸은 같은 값을 모든 종류에 씀 (한 일정의 강도 — H03이 어느 알람에서든 읽을 수 있게)
+//   · 강도 4칸(전체 세기 · 배경음 · 말소리 · 진동)은 같은 값을 모든 종류에 씀 (한 일정의 강도 — H03이 어느 알람에서든 읽을 수 있게). 진동은 직접 고를 때만 값, 자동이면 null
 export function diffAlarms(
   plan: Plan,
   existing: readonly AlarmRow[],
@@ -62,6 +63,7 @@ export function diffAlarms(
       intensity: fields.intensity,
       voice_tone: fields.voiceTone,
       sound_key: fields.soundKey,
+      vibration: fields.vibration,
       is_enabled: resolveEnabled({ checkedEnabled: a.enabled, old, requested, now: options.now }),
       time_source: a.auto ? 'MANUAL' : 'AUTO',
       intensity_source: manual ? 'MANUAL' : 'AUTO',

@@ -3,7 +3,7 @@
 import { parseDbTime } from '@/lib/dbTime';
 import type { Tables } from '@/types/database';
 import { alarmChain } from '@shared/calc/chain.ts';
-import { autoLevel, levelOfIntensity, levelOfSoundKey, levelOfVoiceTone } from '@shared/calc/intensity.ts';
+import { autoLevel, levelOfIntensity, levelOfSoundKey, levelOfVibration, levelOfVoiceTone, type WakeSensitivity } from '@shared/calc/intensity.ts';
 import { DEFAULT_BEFORE_PREPARE_MINUTES } from '@shared/calc/prepare.ts';
 import { minutesBetween } from '@shared/calc/time.ts';
 import type { RingKind } from '@shared/calc/types.ts';
@@ -28,7 +28,7 @@ import {
   type ScheduleItem,
 } from './types';
 
-export type AlarmRow = Pick<Tables<'alarms'>, 'alarm_id' | 'alarm_type' | 'scheduled_at' | 'intensity' | 'voice_tone' | 'sound_key' | 'is_enabled' | 'time_source' | 'intensity_source'>;
+export type AlarmRow = Pick<Tables<'alarms'>, 'alarm_id' | 'alarm_type' | 'scheduled_at' | 'intensity' | 'voice_tone' | 'sound_key' | 'vibration' | 'is_enabled' | 'time_source' | 'intensity_source'>;
 export type ParticipantRow = Pick<
   Tables<'appointment_participants'>,
   'participant_id' | 'origin_name' | 'transport_type' | 'est_travel_minutes' | 'travel_source' | 'prepare_minutes' | 'buffer_minutes'
@@ -305,7 +305,8 @@ export function toOccurrences(rows: readonly OccurrenceRow[], nowMs: number): Oc
 // ---------------------------------------------------------------------------
 
 // 직접 고른 강도 — 서버 resolveOverrides와 같은 규칙: 저장된 알람 중 기상(없으면 아무거나)이 intensity_source = MANUAL이면
-//   그 알람의 세 칸(배경음 sound_key · 말소리 voice_tone · 진동 intensity)이 자동 값과 다른 칸만 직접 고른 것
+//   그 알람의 세 칸(배경음 sound_key · 말소리 voice_tone · 진동 vibration)이 자동 값과 다른 칸만 직접 고른 것 (D1 A, 이슈 #312)
+//   intensity는 세 축이 아니라 "전체 세기"(볼륨 · 다시 울림)라 여기서 안 읽음. 진동은 직접 고른 값만 vibration 칸에 있고 NULL이면 강도를 따름 = 자동
 export function storedOverrides(alarms: readonly AlarmRow[], auto: Level): Record<IntensityAxis, Level | null> {
   const stored = manualIntensityRow(alarms);
   if (!stored) return { sound: null, voice: null, vibration: null };
@@ -313,12 +314,13 @@ export function storedOverrides(alarms: readonly AlarmRow[], auto: Level): Recor
   return {
     sound: pick(levelOfSoundKey(stored.sound_key)),
     voice: pick(levelOfVoiceTone(stored.voice_tone)),
-    vibration: pick(levelOfIntensity(stored.intensity)),
+    vibration: pick(levelOfVibration(stored.vibration)),
   };
 }
 
-export function toIntensity(alarms: readonly AlarmRow[], importance: Importance, lateCount4w: number): Intensity {
-  const auto = autoLevel(importance, lateCount4w);
+// wakeSensitivity = 내 프로필 잠귀를 wakeSensitivityOf로 읽은 값 (무거움이면 강). 서버 plan-core · realWrite setIntensity · 가짜 모드와 같은 값을 넘김. 안 주면 보통
+export function toIntensity(alarms: readonly AlarmRow[], importance: Importance, lateCount4w: number, wakeSensitivity?: WakeSensitivity): Intensity {
+  const auto = autoLevel(importance, lateCount4w, wakeSensitivity);
   const picked = storedOverrides(alarms, auto);
   const axis = (key: IntensityAxis) => ({ level: picked[key] ?? auto, manual: picked[key] != null });
   return {
@@ -345,11 +347,11 @@ export function toEdits(appointment: Appointment, rows: AppointmentRows): AlarmE
   };
 }
 
-export function toAppointmentDetail(rows: AppointmentRows, lateCount4w: number): AppointmentDetail {
+export function toAppointmentDetail(rows: AppointmentRows, lateCount4w: number, wakeSensitivity?: WakeSensitivity): AppointmentDetail {
   const appointment = toAppointment(rows);
   return {
     ...appointment,
-    intensity: toIntensity(rows.alarms, appointment.importance, lateCount4w),
+    intensity: toIntensity(rows.alarms, appointment.importance, lateCount4w, wakeSensitivity),
     edits: toEdits(appointment, rows),
     // 직접 입력한 이동은 자동값을 모름 — 저장된 값을 자리에 두고, 미리 보기(alarm-suggest)가 오면 서버의 자동값으로 바뀜
     auto: { travelMinutes: appointment.travelMinutes, predictedPrepMinutes: appointment.predictedPrepMinutes },

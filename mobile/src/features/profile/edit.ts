@@ -2,9 +2,7 @@
 import { cleanHandle, cleanNickname, isHandleFormat, isNicknameOk, shouldSaveHandle } from '@/features/onboarding/validate';
 import type { PrepareValues } from '@/features/onboarding/views/PrepareStep';
 
-import type { Place } from '@/features/alarm/types';
-
-import type { Profile, ProfileFields } from './types';
+import type { Profile } from './types';
 
 // 프로필의 아침 준비 값 — 편집기의 처음 값. 범위는 편집기(Stepper)와 같게 맞춤
 export function prepareValuesOf(profile: Pick<Profile, 'default_prepare_minutes' | 'default_buffer_minutes' | 'default_transport' | 'wake_margin'>): PrepareValues {
@@ -30,11 +28,4 @@ export function isPrepareChanged(initial: PrepareValues, draft: PrepareValues): 
   return (
     initial.prepare !== draft.prepare || initial.buffer !== draft.buffer || initial.transport !== draft.transport || initial.margin !== draft.margin
   );
-}
-
-// 집으로 고른 장소를 프로필 칸으로 — 좌표가 없는 장소(최근 장소 등)는 null.
-// 서버가 출발지 '집'의 좌표를 프로필에서 채우므로 좌표 없이 이름만 바꾸면 새 일정 계산이 막힘 → 부르는 쪽이 거절함
-export function homePatch(place: Pick<Place, 'name' | 'lat' | 'lng'>): ProfileFields | null {
-  if (typeof place.lat !== 'number' || typeof place.lng !== 'number') return null;
-  return { home_name: place.name, home_lat: place.lat, home_lng: place.lng };
 }

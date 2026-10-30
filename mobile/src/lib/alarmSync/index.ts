@@ -213,7 +213,7 @@ async function fetchServerRows(userId: string, fromMs: number): Promise<{ rows: 
   const { data, error } = await supabase
     .from('alarms')
     .select(
-      'alarm_id, alarm_type, scheduled_at, intensity, sound_key, snooze_limit, is_enabled, participant_id, routine_id, appointment_participants(est_travel_minutes, departed_at, arrived_at, appointments(title, appointment_at, dest_name)), routines(title)',
+      'alarm_id, alarm_type, scheduled_at, intensity, voice_tone, sound_key, vibration, snooze_limit, is_enabled, participant_id, routine_id, appointment_participants(est_travel_minutes, departed_at, arrived_at, appointments(title, appointment_at, dest_name)), routines(title)',
     )
     .eq('user_id', userId)
     .eq('is_enabled', true)
@@ -226,7 +226,9 @@ async function fetchServerRows(userId: string, fromMs: number): Promise<{ rows: 
     alarm_type: row.alarm_type,
     scheduled_at: row.scheduled_at,
     intensity: row.intensity,
+    voice_tone: row.voice_tone,
     sound_key: row.sound_key,
+    vibration: row.vibration,
     snooze_limit: row.snooze_limit,
     is_enabled: row.is_enabled,
     participant_id: row.participant_id,

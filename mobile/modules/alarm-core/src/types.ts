@@ -7,12 +7,13 @@ export type AlarmType = (typeof ALARM_TYPES)[number];
 export const ALARM_INTENSITIES = ['SOFT', 'NORMAL', 'STRONG'] as const;
 export type AlarmIntensity = (typeof ALARM_INTENSITIES)[number];
 
-/** 진동 자리 — 아직 안 읽음 (D1 정해질 때까지 값 모양도 임시) */
-export type AlarmVibration = 'NONE' | 'SHORT_REPEAT' | 'STRONG_CONTINUOUS';
+/** 진동 3종 — 서버 alarms.vibration · 네이티브 AlarmVibration과 같은 이름 (D1 A: 약 NONE · 보통 SHORT_REPEAT · 강 STRONG_CONTINUOUS) */
+export const ALARM_VIBRATIONS = ['NONE', 'SHORT_REPEAT', 'STRONG_CONTINUOUS'] as const;
+export type AlarmVibration = (typeof ALARM_VIBRATIONS)[number];
 
 /**
  * 예약 꾸러미 — 서버 alarm-commit이 돌려주는 값을 그대로 폰에 넘기는 모양 (docs/alarm-core.md)
- * 앞 8칸이 alarm-core.md, 그 뒤 3칸이 #79에서 더한 칸, `notice`가 알림 문구 칸, 마지막 2칸은 타입 자리만 있고 아직 안 읽음
+ * 앞 8칸이 alarm-core.md, 그 뒤 3칸이 #79에서 더한 칸, `notice`가 알림 문구 칸, `soundKey` · `vibration`이 축별 강도 칸(D1 A, 서버가 늘 채움), 마지막 칸은 타입 자리만 있고 아직 안 읽음
  */
 export type RingPackage = {
   /** 서버 alarms.alarm_id (UUID). 알람 종류는 id에서 읽지 않고 type으로 정함 */
@@ -35,13 +36,19 @@ export type RingPackage = {
    * 네이티브는 이 칸을 모르고 plan.heading만 읽어 저장하므로 재부팅 뒤 다시 걸어도 그대로 남음
    */
   notice?: string;
-  /** 소리 고르기. 지금은 어떤 값이든 기본 소리(폰 기본 알람음). 앱에 든 소리가 늘면 그 키는 앱 파일을 먼저 틂 */
+  /**
+   * 배경음 — 서버가 `sound_key ?? 강도에서`로 풀어 늘 채움 (약 theme_calm · 보통 theme_default · 강 theme_urgent).
+   * 없으면(예전 서버 · 손으로 만든 꾸러미) 네이티브에 넘길 때 강도에서 정함. 앱에 든 소리 키는 앱 파일을 먼저 틀고, 모르는 키는 폰 기본 알람음
+   */
   soundKey?: string;
   /** 평가 보정 비율. -0.1 = 볼륨 10% 줄임 (#81, volumeAdjust.ts) */
   volumeAdjust?: number;
   /** 출발 시각 (epoch ms) — 미루기 한도 안내("지금 바로 준비 · 출발 시각")와 "이만큼 미루면 늦어요" 판단에 씀 (D3 기본안 A) */
   departAt?: number;
-  /** 자리만 — 안 읽음 (D1) */
+  /**
+   * 진동 — 서버가 `vibration ?? 강도에서`로 풀어 늘 채움. 없거나 모르는 값이면 네이티브에 넘길 때 강도에서 정함
+   * (약 NONE · 보통 SHORT_REPEAT · 강 STRONG_CONTINUOUS). 볼륨 · 다시 울림은 이 칸이 아니라 intensity가 정함
+   */
   vibration?: AlarmVibration;
   /** 자리만 — 안 읽음. 미루기 시간은 5 · 10 · 15분 고정(D3 기본안 A, SNOOZE_MINUTES_OPTIONS)이라 이 칸으로 바꾸지 않음 */
   snoozeMinutesOptions?: readonly number[];
@@ -93,6 +100,9 @@ export type ScheduledAlarm = {
   id: string;
   type: AlarmType;
   intensity: AlarmIntensity;
+  /** 폰에 걸린 배경음 · 진동 (서버 꾸러미의 soundKey · vibration). 이 칸을 모르는 예전 APK는 안 돌려줌 → 없으면 강도를 따른 것으로 봄 */
+  soundKey?: string;
+  vibration?: AlarmVibration;
   title: string;
   /** 처음 예약한 시각 = 서버 scheduled_at */
   atMillis: number;
