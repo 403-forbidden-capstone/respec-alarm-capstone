@@ -117,7 +117,8 @@ export default function NewScheduleScreen() {
     setPick(null);
   }
 
-  function calculate() {
+  // homeJustSaved: 방금 집을 저장한 재계산 — 이 렌더의 home은 아직 낡은 값(없음)이라 집이 있는 것으로 봄. 그래도 "위치를 몰라"면 집 탓이 아님
+  function calculate(homeJustSaved = false) {
     if (!draft.title.trim()) {
       setTitleError(true);
       return;
@@ -130,7 +131,7 @@ export default function NewScheduleScreen() {
         setEstimate(await estimateAppointment({ ...draft, title: draft.title.trim(), items: items.join(',') }));
       } catch (e) {
         // 원인이 집이면 토스트 대신 안내 카드 (장소를 다시 골라도 안 풀림)
-        if (!isHomeMissing({ error: e, hasHome: home != null, placeHasCoords: draft.placeLat != null && draft.placeLng != null })) throw e;
+        if (!isHomeMissing({ error: e, hasHome: homeJustSaved || home != null, placeHasCoords: draft.placeLat != null && draft.placeLng != null })) throw e;
         setHomeMissing(true);
         return;
       }
@@ -153,7 +154,7 @@ export default function NewScheduleScreen() {
       setHomeMissing(false);
       setHomeSheetOpen(false);
       toast('집을 저장했어요');
-      calculate();
+      calculate(true);
     }, '집을 저장하지 못했어요');
   }
 
@@ -332,7 +333,7 @@ export default function NewScheduleScreen() {
       />
 
       <View style={styles.stack}>
-        <Button label={anyAlarm ? '알람 계산하기' : '일정만 저장하기'} onPress={calculate} loading={calculating} disabled={past} />
+        <Button label={anyAlarm ? '알람 계산하기' : '일정만 저장하기'} onPress={() => calculate()} loading={calculating} disabled={past} />
       </View>
 
       {/* 확인 시트 — 알람 시각 칩을 누르면 같은 시트 안에서 시각을 고름 (시트는 한 번에 하나만 뜸), 계산 근거는 "자세히"로 접음 (D43) */}
