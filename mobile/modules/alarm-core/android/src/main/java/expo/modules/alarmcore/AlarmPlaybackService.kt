@@ -195,8 +195,18 @@ class AlarmPlaybackService : Service() {
   private fun buildNotification(id: String, alarm: StoredAlarm?): Notification {
     val title = alarm?.title ?: "알람"
     val heading = alarm?.plan?.heading?.takeIf { it.isNotEmpty() } ?: "기상 시간입니다"
-    val text = listOfNotNull(heading, alarm?.subtitle).joinToString(" · ")
-    val snoozeMinutes = ((alarm?.plan?.snoozeMillis?.takeIf { it > 0 } ?: FALLBACK_SNOOZE_MILLIS) / 60_000L).toInt()
+    // 미루기 규칙은 알람 화면과 같음 (D3 A): 한도에 닿으면 "미루기" 버튼을 빼고 안내, 아니면 기본 미루기 분 버튼 (늦으면 "늦어요" 표시)
+    // 알람 화면에서 5 · 10 · 15분을 고르는 것과 달리 알림 버튼은 기본 미루기 시간 하나만 둠
+    val snoozeMinutes = if (alarm != null) SnoozeRules.defaultMinutes(alarm.plan) else (FALLBACK_SNOOZE_MILLIS / 60_000L).toInt()
+    val snoozeAllowed = alarm == null || SnoozeRules.canSnooze(alarm.snoozeCount, alarm.plan.snoozeLimit)
+    val snoozeLate = alarm != null && snoozeAllowed && SnoozeRules.isLate(System.currentTimeMillis(), snoozeMinutes, alarm.departAt)
+    val snoozeNote = when {
+      alarm == null -> null
+      !snoozeAllowed -> SnoozeRules.limitNotice(alarm.departAt)
+      alarm.snoozeCount > 0 -> SnoozeRules.countLabel(alarm.snoozeCount, alarm.plan.snoozeLimit)
+      else -> null
+    }
+    val text = listOfNotNull(heading, alarm?.subtitle, snoozeNote).joinToString(" · ")
 
     val fullScreenActivityIntent = Intent(this, AlarmRingingActivity::class.java).apply {
       addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
@@ -219,6 +229,7 @@ class AlarmPlaybackService : Service() {
     val snoozeIntent = Intent(this, AlarmActionReceiver::class.java).apply {
       action = ACTION_SNOOZE
       putExtra(AlarmScheduler.EXTRA_ALARM_ID, id)
+      putExtra(AlarmActionReceiver.EXTRA_SNOOZE_MINUTES, snoozeMinutes)
     }
 
     val builder = NotificationCompat.Builder(this, CHANNEL_ID)
@@ -232,16 +243,20 @@ class AlarmPlaybackService : Service() {
       .setOngoing(true)
       .setAutoCancel(false)
       .setVibrate(longArrayOf(700, 300, 700, 300, 700, 900))
-      .addAction(
-        0,
-        "${snoozeMinutes}분 미루기",
-        PendingIntent.getBroadcast(
-          this,
-          id.hashCode() + 1,
-          snoozeIntent,
-          PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-        ),
-      )
+      .apply {
+        if (snoozeAllowed) {
+          addAction(
+            0,
+            if (snoozeLate) "${snoozeMinutes}분 미루기 · 늦어요" else "${snoozeMinutes}분 미루기",
+            PendingIntent.getBroadcast(
+              this@AlarmPlaybackService,
+              id.hashCode() + 1,
+              snoozeIntent,
+              PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+            ),
+          )
+        }
+      }
       .addAction(
         0,
         "해제",

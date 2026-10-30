@@ -3,8 +3,17 @@ import { describe, expect, it } from '@jest/globals';
 import cases from '../../spec/cases.json';
 import {
   buildRingPlan,
+  canSnooze,
+  DEFAULT_SNOOZE_LIMIT,
   isPastRing,
+  isSnoozeLate,
+  isSnoozeMinutesAllowed,
   ringStartTimes,
+  SNOOZE_LATE_LABEL,
+  SNOOZE_MILLIS,
+  SNOOZE_MINUTES_OPTIONS,
+  snoozeCountLabel,
+  snoozeLimitNotice,
   snoozeRingAt,
   toNativePayload,
   unansweredSpanMillis,
@@ -26,7 +35,7 @@ const basePackage: RingPackage = {
 describe('공통 케이스 (spec/cases.json) — 울림 계획', () => {
   for (const item of cases.plans) {
     it(item.name, () => {
-      const input = item.input as { type: AlarmType; intensity: AlarmIntensity; soundKey?: string; volumeAdjust?: number; notice?: string };
+      const input = item.input as { type: AlarmType; intensity: AlarmIntensity; soundKey?: string; volumeAdjust?: number; notice?: string; snoozeLimit?: number };
       expect(buildRingPlan(input)).toEqual(item.plan);
     });
   }
@@ -57,7 +66,7 @@ describe('공통 케이스 — 미루기 · 지난 시각 · 평가 보정', () 
   for (const item of cases.snooze) {
     it(item.name, () => {
       const plan = buildRingPlan({ type: 'WAKE', intensity: item.intensity as AlarmIntensity });
-      expect(snoozeRingAt(plan, item.nowMillis)).toBe(item.nextRingAt);
+      expect(snoozeRingAt(plan, item.nowMillis, (item as { snoozeMinutes?: number }).snoozeMinutes)).toBe(item.nextRingAt);
     });
   }
 
@@ -72,6 +81,55 @@ describe('공통 케이스 — 미루기 · 지난 시각 · 평가 보정', () 
       expect(volumeAdjustFromRatings(item.ratings as AlarmFeedback[])).toBe(item.volumeAdjust);
     });
   }
+});
+
+describe('공통 케이스 — 미루기 횟수 한도 · 시간 고르기 (D3 A)', () => {
+  for (const item of cases.snoozeLimits) {
+    it(item.name, () => {
+      expect(canSnooze(item.snoozeCount, item.snoozeLimit)).toBe(item.canSnooze);
+    });
+  }
+
+  for (const item of cases.snoozeLate) {
+    it(item.name, () => {
+      expect(isSnoozeLate(item.nowMillis, item.snoozeMinutes, item.departAtMillis)).toBe(item.late);
+    });
+  }
+
+  it('글자 · 고를 수 있는 분이 spec과 같음', () => {
+    expect([...SNOOZE_MINUTES_OPTIONS]).toEqual(cases.snoozeTexts.options);
+    expect(SNOOZE_LATE_LABEL).toBe(cases.snoozeTexts.lateLabel);
+    for (const item of cases.snoozeTexts.counts) expect(snoozeCountLabel(item.snoozeCount, item.snoozeLimit)).toBe(item.label);
+    for (const item of cases.snoozeTexts.limitNotices) expect(snoozeLimitNotice(item.departLabel)).toBe(item.text);
+  });
+
+  it('기상 알람 계획에 고를 분 목록과 한도가 실리고, 기본 미루기(10분)는 목록 안에 있음', () => {
+    const plan = buildRingPlan({ type: 'WAKE', intensity: 'NORMAL', snoozeLimit: 3 });
+    expect(plan.snoozeMinutesOptions).toEqual([5, 10, 15]);
+    expect(plan.snoozeLimit).toBe(3);
+    expect(plan.snoozeMinutesOptions).toContain(plan.snoozeMillis / 60_000);
+    expect(SNOOZE_MILLIS).toBe(600_000);
+    expect(DEFAULT_SNOOZE_LIMIT).toBe(3);
+  });
+
+  it('보통 알림은 미루기가 없어 목록 · 한도가 비어 있음', () => {
+    const plan = buildRingPlan({ type: 'DEPARTURE', intensity: 'NORMAL', snoozeLimit: 3 });
+    expect([plan.snoozeMillis, plan.snoozeMinutesOptions, plan.snoozeLimit]).toEqual([0, [], 0]);
+  });
+
+  it('목록에 없는 분은 못 고름', () => {
+    const plan = buildRingPlan({ type: 'WAKE', intensity: 'NORMAL' });
+    expect([5, 10, 15].map((m) => isSnoozeMinutesAllowed(plan, m))).toEqual([true, true, true]);
+    expect([0, 7, 20].map((m) => isSnoozeMinutesAllowed(plan, m))).toEqual([false, false, false]);
+  });
+
+  it('plan에 담긴 한도가 네이티브 글자로 그대로 감', () => {
+    const pkg: RingPackage = { ...basePackage, snoozeLimit: 2, departAt: 2_000_000 };
+    const payload = JSON.parse(toNativePayload(pkg, buildRingPlan(pkg)));
+    expect(payload.plan.snoozeLimit).toBe(2);
+    expect(payload.plan.snoozeMinutesOptions).toEqual([5, 10, 15]);
+    expect(payload.departAt).toBe(2_000_000);
+  });
 });
 
 describe('울림 계획 규칙', () => {

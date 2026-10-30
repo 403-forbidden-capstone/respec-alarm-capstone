@@ -16,8 +16,17 @@ export const DEFAULT_SOUND_KEY = 'default';
 /** 한 번 울리는 최대 시간 — 백그라운드 재생 제한 때문, 실기기로 확정 예정 (7장 7.4.2 · T-6) */
 export const MAX_RING_MILLIS = 3 * 60_000;
 
-/** 미루기 시간. 5 · 10 · 15분 고르기와 한도는 D3이 정해질 때까지 10분 고정 */
+/** 기본 미루기 시간 — 알림의 "미루기" 버튼이 씀 (알람 화면은 아래 목록에서 고름). 호환을 위해 10분 유지 */
 export const SNOOZE_MILLIS = 10 * 60_000;
+
+/** 알람 화면에서 고르는 미루기 시간 (분) — D3 A (10/29): 5 · 10 · 15분 */
+export const SNOOZE_MINUTES_OPTIONS: readonly number[] = [5, 10, 15];
+
+/** 미루기 한도 기본값 (알람 한 개당 3번) — 꾸러미의 snoozeLimit이 틀렸을 때만 씀 */
+export const DEFAULT_SNOOZE_LIMIT = 3;
+
+/** 미룬 시각이 출발 한계를 넘을 때 해당 시간 버튼 아래에 보이는 글자 (네이티브 · 웹 미리보기 같음) */
+export const SNOOZE_LATE_LABEL = '이만큼 미루면 늦어요';
 
 /** 평가 보정을 아무리 크게 줘도 이 밑으로는 안 내림 (소리가 안 나는 알람이 되지 않게) */
 export const MIN_VOLUME_PERCENT = 10;
@@ -76,7 +85,7 @@ export function volumePercentFor(intensity: AlarmIntensity, volumeAdjust = 0): n
 
 /** 꾸러미 한 개의 울림 계획. 꾸러미에 notice가 있으면 그 글자가 heading, 없거나 비면 종류별 HEADING */
 export function buildRingPlan(
-  pkg: Pick<RingPackage, 'type' | 'intensity'> & Partial<Pick<RingPackage, 'soundKey' | 'volumeAdjust' | 'notice'>>,
+  pkg: Pick<RingPackage, 'type' | 'intensity'> & Partial<Pick<RingPackage, 'soundKey' | 'volumeAdjust' | 'notice' | 'snoozeLimit'>>,
 ): RingPlan {
   const soundKey = pkg.soundKey?.trim() || DEFAULT_SOUND_KEY;
   // notice는 서버가 준 JSON 값이라 글자가 아닐 수도 있음(숫자 · null 등) — trim에서 던져 알람이 안 걸리면 안 되므로 글자일 때만 보고, 아니면 기본 줄
@@ -89,6 +98,8 @@ export function buildRingPlan(
       maxRingMillis: MAX_RING_MILLIS,
       reRingOffsetsMillis: reRingOffsetsFor(pkg.intensity),
       snoozeMillis: SNOOZE_MILLIS,
+      snoozeMinutesOptions: [...SNOOZE_MINUTES_OPTIONS],
+      snoozeLimit: Number.isInteger(pkg.snoozeLimit) && (pkg.snoozeLimit as number) >= 0 ? (pkg.snoozeLimit as number) : DEFAULT_SNOOZE_LIMIT,
       heading: heading(HEADING.WAKE),
       oneTapLabel: null,
       oneTapEventType: null,
@@ -102,6 +113,8 @@ export function buildRingPlan(
     maxRingMillis: 0,
     reRingOffsetsMillis: [],
     snoozeMillis: 0,
+    snoozeMinutesOptions: [],
+    snoozeLimit: 0,
     heading: heading(HEADING[pkg.type]),
     oneTapLabel: oneTap.label,
     oneTapEventType: oneTap.eventType,
@@ -119,9 +132,39 @@ export function unansweredSpanMillis(plan: RingPlan): number {
   return last + plan.maxRingMillis;
 }
 
-/** 미루면 다시 울릴 시각 — 다시 울림이 아니라 미루기라 횟수(snoozeCount)에 셈 */
-export function snoozeRingAt(plan: RingPlan, nowMillis: number): number {
-  return nowMillis + plan.snoozeMillis;
+/** 미루면 다시 울릴 시각 — 다시 울림이 아니라 미루기라 횟수(snoozeCount)에 셈. snoozeMinutes를 주면 그 분 뒤, 안 주면 기본 미루기 시간 뒤 */
+export function snoozeRingAt(plan: RingPlan, nowMillis: number, snoozeMinutes?: number): number {
+  return nowMillis + (snoozeMinutes == null ? plan.snoozeMillis : snoozeMinutes * 60_000);
+}
+
+/** 아직 더 미룰 수 있는지 — snoozeCount(이미 미룬 횟수)가 한도에 닿으면 false. 한도가 이상한 값이면 못 미룸 */
+export function canSnooze(snoozeCount: number, snoozeLimit: number): boolean {
+  return Number.isFinite(snoozeCount) && Number.isFinite(snoozeLimit) && snoozeCount < snoozeLimit;
+}
+
+/** 고른 분이 고를 수 있는 미루기 시간인지 */
+export function isSnoozeMinutesAllowed(plan: RingPlan, snoozeMinutes: number): boolean {
+  return plan.snoozeMinutesOptions.includes(snoozeMinutes);
+}
+
+/**
+ * 이만큼 미루면 늦는지 — 다시 울릴 시각(지금 + 미룰 분)이 출발 시각(departAt)을 넘으면 true. 출발 시각과 같으면 아직 안 늦음
+ * departAt이 없으면 판단할 수 없어 false (표시 안 함).
+ * L6 안건후보: 늦어요 기준 = 기본안은 "다시 울릴 시각 > departAt" (남은 준비 시간은 안 뺌 — 꾸러미에 준비 시간이 없음)
+ */
+export function isSnoozeLate(nowMillis: number, snoozeMinutes: number, departAtMillis: number | null | undefined): boolean {
+  if (departAtMillis == null || !Number.isFinite(departAtMillis) || !Number.isFinite(nowMillis)) return false;
+  return nowMillis + snoozeMinutes * 60_000 > departAtMillis;
+}
+
+/** "미루기 1/3회" — 이미 미룬 횟수 / 한도 */
+export function snoozeCountLabel(snoozeCount: number, snoozeLimit: number): string {
+  return `미루기 ${snoozeCount}/${snoozeLimit}회`;
+}
+
+/** 한도에 닿았을 때 미루기 버튼 대신 보이는 안내. departLabel = 출발 시각 글자(예: "오전 8:40"), 없으면 시각 없이 */
+export function snoozeLimitNotice(departLabel?: string | null): string {
+  return departLabel ? `지금 바로 준비 · ${departLabel} 출발` : '지금 바로 준비';
 }
 
 /** 예약 시각이 이미 지났는지 (같은 순간도 지난 것으로 봄) — schedule()이 안 걸고 skipped_past를 돌려주는 기준 */
@@ -153,7 +196,7 @@ export function validateRingPackage(pkg: RingPackage): void {
 
 /**
  * 네이티브에 넘기는 글자 — 꾸러미 + 울림 계획을 JSON 하나로
- * 안 읽는 자리(vibration · snoozeMinutesOptions)는 넘기지 않음. 값이 없는 칸은 빠짐
+ * 안 읽는 자리(vibration · 꾸러미의 snoozeMinutesOptions)는 넘기지 않음 — 미루기 시간 목록과 한도는 plan에 실려 감. 값이 없는 칸은 빠짐
  * notice도 따로 안 넘김 — buildRingPlan이 plan.heading에 이미 넣었고, 네이티브는 plan.heading만 저장해 알림에 씀
  */
 export function toNativePayload(pkg: RingPackage, plan: RingPlan): string {

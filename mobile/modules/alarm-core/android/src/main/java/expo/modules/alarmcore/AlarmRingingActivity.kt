@@ -6,9 +6,11 @@ import android.graphics.Color
 import android.os.Build
 import android.os.Bundle
 import android.view.Gravity
+import android.view.ViewGroup
 import android.view.WindowManager
 import android.widget.Button
 import android.widget.LinearLayout
+import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
 import java.lang.ref.WeakReference
@@ -35,6 +37,9 @@ class AlarmRingingActivity : Activity() {
   private var alarmId: String = "alarm"
   private var alarm: StoredAlarm? = null
   private var fallbackTitle: String = "알람"
+
+  // 고른 미루기 분 (칩). 알람이 바뀌면 비워서 기본(목록 첫 값)으로
+  private var selectedMinutes: Int? = null
 
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
@@ -68,6 +73,7 @@ class AlarmRingingActivity : Activity() {
     alarmId = current
     fallbackTitle = "알람"
     alarm = AlarmStorage.get(this, current)
+    selectedMinutes = null
     renderAlarmControls()
   }
 
@@ -75,6 +81,7 @@ class AlarmRingingActivity : Activity() {
     alarmId = source?.getStringExtra(AlarmScheduler.EXTRA_ALARM_ID) ?: "alarm"
     fallbackTitle = source?.getStringExtra(EXTRA_ALARM_TITLE) ?: "알람"
     alarm = AlarmStorage.get(this, alarmId)
+    selectedMinutes = null
   }
 
   private fun showOverLockScreen() {
@@ -91,7 +98,15 @@ class AlarmRingingActivity : Activity() {
 
   private fun renderAlarmControls() {
     val current = alarm
-    val snoozeMinutes = (((current?.plan?.snoozeMillis ?: 0L).takeIf { it > 0 } ?: (10 * 60 * 1000L)) / 60_000L).toInt()
+    // 미루기 규칙 (D3 A): 5 · 10 · 15분 중 고르기, 알람 한 개당 한도까지. 목록 · 한도는 TS가 계획에 실어 보낸 값
+    val options = current?.plan?.snoozeMinutesOptions?.takeIf { it.isNotEmpty() } ?: SnoozeRules.DEFAULT_OPTIONS
+    val snoozeCount = current?.snoozeCount ?: 0
+    val snoozeLimit = current?.plan?.snoozeLimit ?: 0
+    val canSnooze = current != null && SnoozeRules.canSnooze(snoozeCount, snoozeLimit)
+    val departAt = current?.departAt
+    val now = System.currentTimeMillis()
+    // L6 안건후보: 미루기 기본 선택 분 = 기본안은 목록의 첫 값(5분, 목업 H07). 알림의 "미루기" 버튼은 기본 10분(plan.snoozeMillis)
+    val selected = selectedMinutes?.takeIf { it in options } ?: options.first()
 
     val root = LinearLayout(this).apply {
       orientation = LinearLayout.VERTICAL
@@ -135,15 +150,80 @@ class AlarmRingingActivity : Activity() {
     }
     root.addView(dismissButton, buttonLayoutParams())
 
+    // 미루기 N/한도회 — N = 이미 미룬 횟수
+    val countLabel = TextView(this).apply {
+      text = SnoozeRules.countLabel(snoozeCount, snoozeLimit)
+      setTextColor(Color.LTGRAY)
+      textSize = 16f
+      gravity = Gravity.CENTER
+      setPadding(0, dp(24), 0, dp(8))
+    }
+    root.addView(countLabel, matchWidth())
+
+    // 한도에 닿으면 미루기 버튼을 끄고 (흐리게) 바로 준비하라는 안내
+    if (!canSnooze) {
+      val limitNotice = TextView(this).apply {
+        text = SnoozeRules.limitNotice(departAt)
+        setTextColor(Color.WHITE)
+        textSize = 18f
+        gravity = Gravity.CENTER
+        setPadding(0, 0, 0, dp(8))
+      }
+      root.addView(limitNotice, matchWidth())
+    }
+
+    // 미루기 시간 3개 (5 · 10 · 15분). 미룬 시각이 출발 시각을 넘으면 그 버튼 아래에 "이만큼 미루면 늦어요"
+    val optionRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+    options.forEachIndexed { index, minutes ->
+      val isSelected = minutes == selected
+      val column = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_HORIZONTAL }
+      val chip = Button(this).apply {
+        text = "${minutes}분"
+        textSize = 18f
+        setTextColor(if (isSelected) Color.rgb(11, 26, 58) else Color.WHITE)
+        setBackgroundColor(if (isSelected) Color.WHITE else Color.rgb(36, 56, 98))
+        isEnabled = canSnooze
+        alpha = if (canSnooze) 1f else 0.35f
+        setOnClickListener {
+          selectedMinutes = minutes
+          renderAlarmControls()
+        }
+      }
+      column.addView(chip, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(52)))
+      if (canSnooze && SnoozeRules.isLate(now, minutes, departAt)) {
+        val lateLabel = TextView(this).apply {
+          text = SnoozeRules.LATE_LABEL
+          setTextColor(Color.rgb(255, 190, 92))
+          textSize = 12f
+          gravity = Gravity.CENTER
+          setPadding(0, dp(4), 0, 0)
+        }
+        column.addView(lateLabel, matchWidth())
+      }
+      val params = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
+        if (index > 0) marginStart = dp(8)
+      }
+      optionRow.addView(column, params)
+    }
+    root.addView(optionRow, matchWidth())
+
     val snoozeButton = Button(this).apply {
-      text = "${snoozeMinutes}분 미루기"
+      text = "${selected}분 미루기"
       textSize = 18f
-      setOnClickListener { snoozeAlarm() }
+      isEnabled = canSnooze
+      alpha = if (canSnooze) 1f else 0.35f
+      setOnClickListener { snoozeAlarm(selected) }
     }
     val snoozeParams = buttonLayoutParams().apply { topMargin = dp(12) }
     root.addView(snoozeButton, snoozeParams)
 
-    setContentView(root)
+    // 내용이 길어 작은 화면에서 넘치면 스크롤됨
+    val scroll = ScrollView(this).apply {
+      isFillViewport = true
+      setBackgroundColor(Color.rgb(11, 26, 58))
+      addView(root, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+    }
+    setContentView(scroll)
   }
 
   // 화면은 소리가 멈출 때 서비스가 닫음 (미루기 예약이 실패해 계속 울리면 화면도 남아 해제할 수 있음)
@@ -151,8 +231,9 @@ class AlarmRingingActivity : Activity() {
     AlarmController.dismiss(this, alarmId, openApp = true)
   }
 
-  private fun snoozeAlarm() {
-    if (!AlarmController.snooze(this, alarmId)) {
+  // minutes = 고른 미루기 분 → SNOOZED 기록의 snooze_minutes로 남음
+  private fun snoozeAlarm(minutes: Int) {
+    if (!AlarmController.snooze(this, alarmId, minutes)) {
       Toast.makeText(this, "미루기를 예약하지 못함. 해제로 꺼 주세요.", Toast.LENGTH_LONG).show()
     }
   }

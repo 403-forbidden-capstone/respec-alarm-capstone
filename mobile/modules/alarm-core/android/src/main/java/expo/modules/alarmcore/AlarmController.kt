@@ -124,16 +124,21 @@ object AlarmController {
     return true
   }
 
-  /** 미루기 — 같은 알람의 상태를 바꿈 (새 알람을 만들지 않음). 예약을 못 걸면 false이고 아무것도 안 바뀜(계속 울림) */
-  fun snooze(context: Context, id: String): Boolean {
+  /**
+   * 미루기 — 같은 알람의 상태를 바꿈 (새 알람을 만들지 않음). 예약을 못 걸면 false이고 아무것도 안 바뀜(계속 울림)
+   * minutes = 고른 미루기 분 (계획의 5 · 10 · 15분 중 하나). null이면 계획의 기본 미루기 시간(알림의 "미루기" 버튼)
+   * 한도(plan.snoozeLimit)에 닿았거나 목록에 없는 분이면 false (D3 A) — 화면이 이미 막지만 알림이 오래 남아 눌릴 때를 위해 여기서도 막음
+   */
+  fun snooze(context: Context, id: String, minutes: Int? = null): Boolean {
     val alarm = AlarmStorage.get(context, id) ?: return false
-    // 한도(snoozeLimit)는 아직 안 셈 — D3 정해질 때까지 횟수 제한 없음
-    val minutes = (alarm.plan.snoozeMillis / 60_000L).toInt()
+    if (!SnoozeRules.canSnooze(alarm.snoozeCount, alarm.plan.snoozeLimit)) return false
+    val chosenMinutes = minutes ?: SnoozeRules.defaultMinutes(alarm.plan)
+    if (chosenMinutes !in alarm.plan.snoozeMinutesOptions) return false
     val updated = alarm.copy(
       ringing = false,
       snoozeCount = alarm.snoozeCount + 1,
       seriesIndex = 0,
-      nextRingAt = System.currentTimeMillis() + alarm.plan.snoozeMillis,
+      nextRingAt = System.currentTimeMillis() + chosenMinutes * 60_000L,
     )
     // 걸어 둔 다시 울림이 있으면 이 예약이 그 자리를 바꿈
     try {
@@ -142,7 +147,7 @@ object AlarmController {
       return false
     }
     AlarmStorage.save(context, updated)
-    AlarmEventLog.append(context, id, alarm.type, "SNOOZED", sequenceNo = alarm.ringCount, snoozeMinutes = minutes)
+    AlarmEventLog.append(context, id, alarm.type, "SNOOZED", sequenceNo = alarm.ringCount, snoozeMinutes = chosenMinutes)
     AlarmPlaybackService.stopIfRinging(context, listOf(id))
     return true
   }

@@ -13,6 +13,16 @@ import { backOrHome } from '@/lib/nav';
 import { useLoad } from '@/lib/useLoad';
 import { colors } from '@/theme';
 
+// 알람 코어의 순수 계산 파일만 직접 가져옴 (index는 네이티브 모듈을 찾으므로 — 같은 선례: lib/alarmSync 시험)
+import {
+  canSnooze,
+  isSnoozeLate,
+  SNOOZE_LATE_LABEL,
+  SNOOZE_MINUTES_OPTIONS,
+  snoozeCountLabel,
+  snoozeLimitNotice,
+} from '../../modules/alarm-core/src/plan';
+
 const HEAD: Record<RingKind, string> = {
   WAKE: '일어날 시간이에요',
   PREPARE: '준비할 시간이에요',
@@ -23,10 +33,11 @@ const BACKGROUND: Record<RingKind, string> = {
   PREPARE: colors.ringPrepare,
   DEPARTURE: colors.ringDepart,
 };
-const SNOOZE_MINUTES = [5, 10, 15] as const;
 
 // H07 알람 울림 — 실제 울림은 알람 코어의 네이티브 화면이 띄움 (#33에서 이 디자인과 맞춤)
 // 이 화면은 디자인 · 웹 미리 보기용: /ring?alarm=a1:WAKE
+// 미루기 규칙(D3 A)은 네이티브 화면과 같음 — 5 · 10 · 15분 중 고르기, 알람 한 개당 3번까지 ("미루기 N/3회"),
+//   한도에 닿으면 미루기를 끄고 "지금 바로 준비 · 출발 시각", 다시 울릴 시각이 출발 시각을 넘는 분은 "이만큼 미루면 늦어요" (계산은 알람 코어의 순수 함수)
 // 준비 · 출발 알람의 머리글은 폰 알림과 같은 글자(data.notice, 서버 알림 문구 함수) — 없으면 종류별 기본 머리글
 export default function RingScreen() {
   const params = useLocalSearchParams<{ alarm?: string }>();
@@ -35,7 +46,7 @@ export default function RingScreen() {
   // 읽는 동안에도 맞는 배경이 보이게 알람 id(<일정>:<종류>)의 종류를 먼저 씀
   const fromId = params.alarm?.split(':')[1];
   const kind: RingKind = data?.kind ?? (fromId && Object.keys(HEAD).includes(fromId) ? (fromId as RingKind) : 'WAKE');
-  const [minutes, setMinutes] = useState<number>(5);
+  const [minutes, setMinutes] = useState<number>(SNOOZE_MINUTES_OPTIONS[0]);
   const [done, setDone] = useState(false); // 준비 · 출발 알람을 끈 뒤 — 안내를 화면에 남김
   const handled = useRef(false); // 두 번 눌러도 해제 · 미루기는 한 번만 기록
 
@@ -59,9 +70,10 @@ export default function RingScreen() {
     };
   }, [ringId, ringAt]);
 
-  // 미루기는 3번까지 — 횟수는 #33에서 알람 코어가 셀 예정 (지금 코어는 안 셈, docs/alarm-core.md)
+  // 미루기는 3번까지 — 실데이터에서는 알람 코어가 셈 (이 화면은 미리 보기라 가짜 데이터가 셈)
+  const snoozeAllowed = data != null && canSnooze(data.snoozeCount, data.snoozeLimit);
   async function snooze() {
-    if (!data || handled.current) return;
+    if (!data || handled.current || !canSnooze(data.snoozeCount, data.snoozeLimit)) return;
     handled.current = true;
     await snoozeRing(data.alarmId, minutes, data.at);
     toast(`${minutes}분 뒤 다시 울려요`);
@@ -128,29 +140,55 @@ export default function RingScreen() {
           </View>
 
           <View style={styles.bottom}>
-            <Text variant="label" tone="inverse" style={styles.faded70}>
-              미루기 시간
-            </Text>
+            <View style={styles.optionsHead}>
+              <Text variant="label" tone="inverse" style={styles.faded70}>
+                미루기 시간
+              </Text>
+              <Text variant="label" tone="inverse" style={styles.faded70}>
+                {snoozeCountLabel(data.snoozeCount, data.snoozeLimit)}
+              </Text>
+            </View>
+            {snoozeAllowed ? null : (
+              <Text variant="bodyStrong" tone="inverse" style={styles.limitNotice}>
+                {snoozeLimitNotice(data.departAt ? formatTime(data.departAt) : null)}
+              </Text>
+            )}
             <View style={styles.options} accessibilityRole="radiogroup" accessibilityLabel="미루기 시간">
-              {SNOOZE_MINUTES.map((m) => {
+              {SNOOZE_MINUTES_OPTIONS.map((m) => {
                 const on = m === minutes;
+                // 울리는 시각 기준으로 다시 울릴 시각이 출발 시각을 넘으면 늦음 (네이티브는 지금 시각 기준)
+                const late = snoozeAllowed && isSnoozeLate(data.at.getTime(), m, data.departAt?.getTime());
                 return (
-                  <Pressable
-                    key={m}
-                    onPress={() => setMinutes(m)}
-                    accessibilityRole="radio"
-                    accessibilityState={{ selected: on }}
-                    style={[styles.option, on && styles.optionOn]}
-                  >
-                    <Text variant="body" weight={on ? 600 : 400} style={{ color: on ? colors.ringWake : colors.inverse }}>
-                      {m}분
-                    </Text>
-                  </Pressable>
+                  <View key={m} style={styles.optionColumn}>
+                    <Pressable
+                      onPress={() => setMinutes(m)}
+                      disabled={!snoozeAllowed}
+                      accessibilityRole="radio"
+                      accessibilityState={{ selected: on, disabled: !snoozeAllowed }}
+                      accessibilityHint={late ? SNOOZE_LATE_LABEL : undefined}
+                      style={[styles.option, on && styles.optionOn, !snoozeAllowed && styles.disabled]}
+                    >
+                      <Text variant="body" weight={on ? 600 : 400} style={{ color: on ? colors.ringWake : colors.inverse }}>
+                        {m}분
+                      </Text>
+                    </Pressable>
+                    {late ? (
+                      <Text variant="caption" tone="inverse" weight={600} align="center" style={styles.lateLabel}>
+                        {SNOOZE_LATE_LABEL}
+                      </Text>
+                    ) : null}
+                  </View>
                 );
               })}
             </View>
             <View style={styles.buttons}>
-              <Pressable onPress={snooze} accessibilityRole="button" style={[styles.button, styles.snooze]}>
+              <Pressable
+                onPress={snooze}
+                disabled={!snoozeAllowed}
+                accessibilityRole="button"
+                accessibilityState={{ disabled: !snoozeAllowed }}
+                style={[styles.button, styles.snooze, !snoozeAllowed && styles.disabled]}
+              >
                 <Text variant="button" tone="inverse">
                   {minutes}분 미루기
                 </Text>
@@ -284,8 +322,13 @@ const styles = StyleSheet.create({
   voice: { marginTop: 22, backgroundColor: colors.ringPanel, borderRadius: 20, paddingVertical: 16, paddingHorizontal: 18 },
   voiceText: { marginTop: 6 },
   bottom: { marginTop: 'auto' },
-  options: { flexDirection: 'row', gap: 8, marginTop: 8, marginBottom: 16 },
-  option: { flex: 1, height: 42, borderRadius: 14, backgroundColor: colors.ringOption, alignItems: 'center', justifyContent: 'center' },
+  optionsHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  limitNotice: { marginTop: 8 },
+  options: { flexDirection: 'row', alignItems: 'flex-start', gap: 8, marginTop: 8, marginBottom: 16 },
+  optionColumn: { flex: 1 },
+  lateLabel: { marginTop: 4 },
+  disabled: { opacity: 0.35 },
+  option: { height: 42, borderRadius: 14, backgroundColor: colors.ringOption, alignItems: 'center', justifyContent: 'center' },
   optionOn: { backgroundColor: colors.inverse },
   buttons: { flexDirection: 'row', gap: 10 },
   button: { height: 54, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
