@@ -555,10 +555,10 @@ export async function getRing(alarmId: string): Promise<RingInfo | null> {
     notice: ringNotice(appointment, kind, at),
     levelLine: `알람 강도 ${sound.name} · 배경음 ${sound.sound} · 진동 ${vibration.vibration}`,
     important: a.importance !== 'LOW',
-    // 미루기 한도 (D3 A) — 실데이터는 알람 코어의 snoozeCount · 꾸러미 snoozeLimit · departAt (네이티브 화면이 보여 줌)
+    // 미루기 한도 (D3 기본안 A) — 실데이터는 알람 코어의 snoozeCount · 꾸러미 snoozeLimit · departAt (네이티브 화면이 보여 줌)
     snoozeCount: db.snoozeCounts[alarm.id] ?? 0,
     snoozeLimit: DEFAULT_SNOOZE_LIMIT,
-    departAt: departAtOf(a),
+    departAt: departAtOf(a) ?? null,
   };
 }
 

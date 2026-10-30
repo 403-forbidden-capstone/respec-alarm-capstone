@@ -41,6 +41,12 @@ class AlarmRingingActivity : Activity() {
   // 고른 미루기 분 (칩). 알람이 바뀌면 비워서 기본(목록 첫 값)으로
   private var selectedMinutes: Int? = null
 
+  // 지금 그려진 스크롤 칸 — 다시 그릴 때 스크롤 위치를 이어 가려고 들고 있음
+  private var scrollView: ScrollView? = null
+
+  // 미루기를 누른 뒤 서비스가 멈춰 화면이 닫히기까지 사이에 또 눌려 두 번 세어지지 않게. 예약이 실패하면 풀어 다시 누를 수 있음
+  private var snoozing = false
+
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
     // 이미 멈춘 뒤에 늦게 열리면 바로 닫음
@@ -74,6 +80,7 @@ class AlarmRingingActivity : Activity() {
     fallbackTitle = "알람"
     alarm = AlarmStorage.get(this, current)
     selectedMinutes = null
+    snoozing = false
     renderAlarmControls()
   }
 
@@ -82,6 +89,7 @@ class AlarmRingingActivity : Activity() {
     fallbackTitle = source?.getStringExtra(EXTRA_ALARM_TITLE) ?: "알람"
     alarm = AlarmStorage.get(this, alarmId)
     selectedMinutes = null
+    snoozing = false
   }
 
   private fun showOverLockScreen() {
@@ -98,7 +106,7 @@ class AlarmRingingActivity : Activity() {
 
   private fun renderAlarmControls() {
     val current = alarm
-    // 미루기 규칙 (D3 A): 5 · 10 · 15분 중 고르기, 알람 한 개당 한도까지. 목록 · 한도는 TS가 계획에 실어 보낸 값
+    // 미루기 규칙 (D3 기본안 A): 5 · 10 · 15분 중 고르기, 알람 한 개당 한도까지. 목록 · 한도는 TS가 계획에 실어 보낸 값
     val options = current?.plan?.snoozeMinutesOptions?.takeIf { it.isNotEmpty() } ?: SnoozeRules.DEFAULT_OPTIONS
     val snoozeCount = current?.snoozeCount ?: 0
     val snoozeLimit = current?.plan?.snoozeLimit ?: 0
@@ -108,10 +116,13 @@ class AlarmRingingActivity : Activity() {
     // L6 안건후보: 미루기 기본 선택 분 = 기본안은 목록의 첫 값(5분, 목업 H07). 알림의 "미루기" 버튼은 기본 10분(plan.snoozeMillis)
     val selected = selectedMinutes?.takeIf { it in options } ?: options.first()
 
+    // 칩을 눌러 다시 그릴 때 작은 화면에서 스크롤이 맨 위로 돌아가지 않게 지금 위치를 기억함
+    val savedScrollY = scrollView?.scrollY ?: 0
+
     val root = LinearLayout(this).apply {
       orientation = LinearLayout.VERTICAL
       gravity = Gravity.CENTER
-      setPadding(dp(28), dp(36), dp(28), dp(36))
+      setPadding(dp(28), dp(36), dp(28), dp(12))
       setBackgroundColor(Color.rgb(11, 26, 58))
     }
 
@@ -140,15 +151,6 @@ class AlarmRingingActivity : Activity() {
       setPadding(0, 0, 0, dp(36))
     }
     root.addView(instruction, matchWidth())
-
-    val dismissButton = Button(this).apply {
-      text = "해제"
-      textSize = 20f
-      setTextColor(Color.WHITE)
-      setBackgroundColor(Color.rgb(210, 45, 55))
-      setOnClickListener { dismissAlarm() }
-    }
-    root.addView(dismissButton, buttonLayoutParams())
 
     // 미루기 N/한도회 — N = 이미 미룬 횟수
     val countLabel = TextView(this).apply {
@@ -217,13 +219,33 @@ class AlarmRingingActivity : Activity() {
     val snoozeParams = buttonLayoutParams().apply { topMargin = dp(12) }
     root.addView(snoozeButton, snoozeParams)
 
+    // 해제 버튼은 스크롤 밖 맨 아래에 고정 — 내용이 길어 작은 화면에서 스크롤돼도 늘 보이고 눌림
+    val dismissButton = Button(this).apply {
+      text = "해제"
+      textSize = 20f
+      setTextColor(Color.WHITE)
+      setBackgroundColor(Color.rgb(210, 45, 55))
+      setOnClickListener { dismissAlarm() }
+    }
+    val dismissBar = LinearLayout(this).apply {
+      setPadding(dp(28), dp(8), dp(28), dp(24))
+      addView(dismissButton, buttonLayoutParams())
+    }
+
     // 내용이 길어 작은 화면에서 넘치면 스크롤됨
     val scroll = ScrollView(this).apply {
       isFillViewport = true
-      setBackgroundColor(Color.rgb(11, 26, 58))
       addView(root, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
     }
-    setContentView(scroll)
+    val screen = LinearLayout(this).apply {
+      orientation = LinearLayout.VERTICAL
+      setBackgroundColor(Color.rgb(11, 26, 58))
+      addView(scroll, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f))
+      addView(dismissBar, matchWidth())
+    }
+    scrollView = scroll
+    setContentView(screen)
+    if (savedScrollY > 0) scroll.post { scroll.scrollTo(0, savedScrollY) }
   }
 
   // 화면은 소리가 멈출 때 서비스가 닫음 (미루기 예약이 실패해 계속 울리면 화면도 남아 해제할 수 있음)
@@ -233,8 +255,14 @@ class AlarmRingingActivity : Activity() {
 
   // minutes = 고른 미루기 분 → SNOOZED 기록의 snooze_minutes로 남음
   private fun snoozeAlarm(minutes: Int) {
+    if (snoozing) return
+    snoozing = true
     if (!AlarmController.snooze(this, alarmId, minutes)) {
-      Toast.makeText(this, "미루기를 예약하지 못함. 해제로 꺼 주세요.", Toast.LENGTH_LONG).show()
+      snoozing = false
+      // 이미 미룬 직후(더 안 울림)에 들어온 두 번째 누름이면 알리지 않음 — 아직 울리는 중일 때만 진짜 실패
+      if (AlarmController.isRinging(this, alarmId)) {
+        Toast.makeText(this, "미루기를 예약하지 못함. 해제로 꺼 주세요.", Toast.LENGTH_LONG).show()
+      }
     }
   }
 

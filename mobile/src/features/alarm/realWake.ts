@@ -20,7 +20,7 @@ import { WAKE_OBSERVE_MINUTES, type CancelSnoozeResult, type RingInfo, type Snoo
 import { evaluateWake, pickDismissedAt, thetaReachedAt, WAKE_PROMPT_WINDOW_MINUTES, WAKE_THETA_MINUTES, type UseSpan } from './wake';
 
 // 미룬 알람의 Snooze.minutes에 넣는 참고 값 — 폰 list()는 고른 분을 안 돌려줘서 기본 미루기 시간(10분)을 넣음.
-// 홈은 다시 울릴 시각(at)만 읽음. 5 · 10 · 15분 고르기와 3번 한도는 알람 코어 화면이 처리 (docs/alarm-core.md, D3 A)
+// 홈은 다시 울릴 시각(at)만 읽음. 5 · 10 · 15분 고르기와 3번 한도는 알람 코어 화면이 처리 (docs/alarm-core.md, D3 기본안 A)
 const SNOOZE_MINUTES = 10;
 const MINUTE_MS = 60_000;
 

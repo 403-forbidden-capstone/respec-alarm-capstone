@@ -263,7 +263,7 @@
   "snooze": [
     { "name": "분을 안 고르면 기본 10분 뒤 (알림의 미루기 버튼, 강도와 상관없음)", "intensity": "NORMAL", "nowMillis": 1000, "nextRingAt": 601000 },
     { "name": "강도가 달라도 같음", "intensity": "STRONG", "nowMillis": 1000, "nextRingAt": 601000 },
-    { "name": "5분을 고르면 5분 뒤 (D3 A)", "intensity": "NORMAL", "nowMillis": 1000, "snoozeMinutes": 5, "nextRingAt": 301000 },
+    { "name": "5분을 고르면 5분 뒤 (D3 기본안 A)", "intensity": "NORMAL", "nowMillis": 1000, "snoozeMinutes": 5, "nextRingAt": 301000 },
     { "name": "15분을 고르면 15분 뒤", "intensity": "NORMAL", "nowMillis": 1000, "snoozeMinutes": 15, "nextRingAt": 901000 }
   ],
   "snoozeLimits": [

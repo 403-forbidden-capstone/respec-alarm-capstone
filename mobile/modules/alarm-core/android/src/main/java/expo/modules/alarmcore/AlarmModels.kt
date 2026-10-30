@@ -16,7 +16,7 @@ internal fun JSONObject.optDoubleOrNull(name: String): Double? =
 /**
  * 공통(TS)이 계산해 넘긴 울림 계획. 네이티브는 판단하지 않고 이 값대로만 실행함
  * 칸은 src/plan.ts의 RingPlan과 같음
- * snoozeMinutesOptions · snoozeLimit은 미루기 시간 고르기와 횟수 한도 (D3 A) — 보통 알림이면 빈 목록 · 0
+ * snoozeMinutesOptions · snoozeLimit은 미루기 시간 고르기와 횟수 한도 (D3 기본안 A) — 보통 알림이면 빈 목록 · 0
  */
 data class RingPlan(
   val sound: Boolean,
@@ -84,7 +84,7 @@ data class RingPlan(
  * 폰에 걸려 있는 알람 한 개 — 예약 꾸러미(RingPackage) + 울림 계획 + 지금 상태
  * 상태 칸은 JS가 넘기는 JSON에는 없고(기본값), 울림 · 미루기 · 다시 울림 때 네이티브가 바꿈
  * voiceText는 저장만 하고 아직 읽지 않음 (D8). snoozeLimit은 계획(plan.snoozeLimit)이 실어 나르므로 여기 칸은 저장만 하고,
- * departAt은 미루기 한도 안내 · "늦어요" 판단에 씀 (D3 A)
+ * departAt은 미루기 한도 안내 · "늦어요" 판단에 씀 (D3 기본안 A)
  */
 data class StoredAlarm(
   val alarmId: String,

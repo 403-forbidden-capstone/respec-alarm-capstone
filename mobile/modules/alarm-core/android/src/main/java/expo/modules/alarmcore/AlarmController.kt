@@ -127,10 +127,14 @@ object AlarmController {
   /**
    * 미루기 — 같은 알람의 상태를 바꿈 (새 알람을 만들지 않음). 예약을 못 걸면 false이고 아무것도 안 바뀜(계속 울림)
    * minutes = 고른 미루기 분 (계획의 5 · 10 · 15분 중 하나). null이면 계획의 기본 미루기 시간(알림의 "미루기" 버튼)
-   * 한도(plan.snoozeLimit)에 닿았거나 목록에 없는 분이면 false (D3 A) — 화면이 이미 막지만 알림이 오래 남아 눌릴 때를 위해 여기서도 막음
+   * 한도(plan.snoozeLimit)에 닿았거나 목록에 없는 분이면 false (D3 기본안 A) — 화면이 이미 막지만 알림이 오래 남아 눌릴 때를 위해 여기서도 막음
    */
   fun snooze(context: Context, id: String, minutes: Int? = null): Boolean {
     val alarm = AlarmStorage.get(context, id) ?: return false
+    // 울리는 중(ringing)에만 미룸 — 서비스가 비동기로 멈추기 전에 같은 버튼을 두 번 눌러도 한 번만 셈.
+    // ringing은 울림이 시작될 때(fire) 서비스를 띄우기 전에 true로 저장되고, 미루기 · 해제 · 최대 시간 끝에서 false가 됨.
+    // 알림의 미루기 버튼과 울림 화면은 서비스가 울리는 동안에만 보이므로 정상 누름은 늘 true
+    if (!alarm.ringing) return false
     if (!SnoozeRules.canSnooze(alarm.snoozeCount, alarm.plan.snoozeLimit)) return false
     val chosenMinutes = minutes ?: SnoozeRules.defaultMinutes(alarm.plan)
     if (chosenMinutes !in alarm.plan.snoozeMinutesOptions) return false
@@ -151,6 +155,9 @@ object AlarmController {
     AlarmPlaybackService.stopIfRinging(context, listOf(id))
     return true
   }
+
+  /** 지금 이 알람이 울리는 중인지 (저장된 ringing 값) — 미루기 실패가 "이미 미룸"인지 진짜 실패인지 가릴 때 씀 */
+  fun isRinging(context: Context, id: String): Boolean = AlarmStorage.get(context, id)?.ringing == true
 
   /** 해제 — 소리를 끄고, 걸어 둔 다시 울림을 지우고, 기록을 남김. WAKE는 openApp이면 기상 확인 화면으로 앱을 엶 */
   fun dismiss(context: Context, id: String, openApp: Boolean) {

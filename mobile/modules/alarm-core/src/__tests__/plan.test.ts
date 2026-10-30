@@ -83,7 +83,7 @@ describe('공통 케이스 — 미루기 · 지난 시각 · 평가 보정', () 
   }
 });
 
-describe('공통 케이스 — 미루기 횟수 한도 · 시간 고르기 (D3 A)', () => {
+describe('공통 케이스 — 미루기 횟수 한도 · 시간 고르기 (D3 기본안 A)', () => {
   for (const item of cases.snoozeLimits) {
     it(item.name, () => {
       expect(canSnooze(item.snoozeCount, item.snoozeLimit)).toBe(item.canSnooze);

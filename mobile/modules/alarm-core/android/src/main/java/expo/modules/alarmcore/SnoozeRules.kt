@@ -2,7 +2,7 @@ package expo.modules.alarmcore
 
 import java.util.Calendar
 
-// 미루기 규칙 (D3 A, 10/29): 5 · 10 · 15분 중 고르기, 알람 한 개당 최대 3번 (한도는 RingPlan.snoozeLimit)
+// 미루기 규칙 (D3 기본안 A): 5 · 10 · 15분 중 고르기, 알람 한 개당 최대 3번 (한도는 RingPlan.snoozeLimit)
 // 네이티브는 계획을 계산하지 않지만, 아래 판단은 "지금 시각"에 달려 있어 폰에서 해야 함. 식은 src/plan.ts의
 // canSnooze · isSnoozeLate · snoozeCountLabel · snoozeLimitNotice와 같고, TS 쪽을 spec/cases.json이 고정함 (바꾸면 둘 다 바꿈)
 internal object SnoozeRules {

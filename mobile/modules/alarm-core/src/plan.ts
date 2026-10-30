@@ -19,7 +19,7 @@ export const MAX_RING_MILLIS = 3 * 60_000;
 /** 기본 미루기 시간 — 알림의 "미루기" 버튼이 씀 (알람 화면은 아래 목록에서 고름). 호환을 위해 10분 유지 */
 export const SNOOZE_MILLIS = 10 * 60_000;
 
-/** 알람 화면에서 고르는 미루기 시간 (분) — D3 A (10/29): 5 · 10 · 15분 */
+/** 알람 화면에서 고르는 미루기 시간 (분) — D3 기본안 A: 5 · 10 · 15분 */
 export const SNOOZE_MINUTES_OPTIONS: readonly number[] = [5, 10, 15];
 
 /** 미루기 한도 기본값 (알람 한 개당 3번) — 꾸러미의 snoozeLimit이 틀렸을 때만 씀 */

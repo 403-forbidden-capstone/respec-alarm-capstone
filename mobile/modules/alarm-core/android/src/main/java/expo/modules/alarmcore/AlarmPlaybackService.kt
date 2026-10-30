@@ -195,7 +195,7 @@ class AlarmPlaybackService : Service() {
   private fun buildNotification(id: String, alarm: StoredAlarm?): Notification {
     val title = alarm?.title ?: "알람"
     val heading = alarm?.plan?.heading?.takeIf { it.isNotEmpty() } ?: "기상 시간입니다"
-    // 미루기 규칙은 알람 화면과 같음 (D3 A): 한도에 닿으면 "미루기" 버튼을 빼고 안내, 아니면 기본 미루기 분 버튼 (늦으면 "늦어요" 표시)
+    // 미루기 규칙은 알람 화면과 같음 (D3 기본안 A): 한도에 닿으면 "미루기" 버튼을 빼고 안내, 아니면 기본 미루기 분 버튼 (늦으면 "늦어요" 표시)
     // 알람 화면에서 5 · 10 · 15분을 고르는 것과 달리 알림 버튼은 기본 미루기 시간 하나만 둠
     val snoozeMinutes = if (alarm != null) SnoozeRules.defaultMinutes(alarm.plan) else (FALLBACK_SNOOZE_MILLIS / 60_000L).toInt()
     val snoozeAllowed = alarm == null || SnoozeRules.canSnooze(alarm.snoozeCount, alarm.plan.snoozeLimit)

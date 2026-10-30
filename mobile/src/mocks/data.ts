@@ -151,7 +151,7 @@ export const db = {
   },
   wakeConfirmations: {} as Record<string, { at: Date; how: 'self' | 'auto'; usage: number; recent: number }>, // 알람 id별 기상 확정 (그때 사용 시간 포함)
   snoozes: {} as Record<string, { at: Date; minutes: number }>, // 미룬 알람 id별 다시 울릴 시각 (H07 미루기 → H01 표시 · 취소)
-  snoozeCounts: {} as Record<string, number>, // 알람 id별 이미 미룬 횟수 (한도 3번, D3 A) — 다시 울려도 해제하기 전까지 남음
+  snoozeCounts: {} as Record<string, number>, // 알람 id별 이미 미룬 횟수 (한도 3번, D3 기본안 A) — 다시 울려도 해제하기 전까지 남음
   events: [] as { at: Date; label: string; source: string }[], // 오늘 실제로 일어난 일
   editLogs: [] as UserEditLog[], // 사용자가 자동 값을 직접 고친 기록 (user_edit_logs) — 개인화에 쓸 자료
   journalWritten: false,

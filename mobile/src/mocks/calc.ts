@@ -5,7 +5,7 @@
 import type { AlarmTime, IntensityAxis, Level } from '@/features/alarm/types';
 import type { WakeState } from '@/features/social/types';
 import { formatTime, minuteOfDay, timeParts } from '@/lib/format';
-import { alarmChain as sharedAlarmChain, departureAt as sharedDepartureAt } from '@shared/calc/chain.ts';
+import { alarmChain as sharedAlarmChain } from '@shared/calc/chain.ts';
 import { autoLevel as sharedAutoLevel, resolveIntensity } from '@shared/calc/intensity.ts';
 
 import { db, kst, timelines, TODAY, type MockAppointment } from './data';
@@ -15,8 +15,8 @@ import { db, kst, timelines, TODAY, type MockAppointment } from './data';
 // a.kinds가 있으면 H05에서 고른 종류만 — 도착 목표는 울리는 알람이 하나라도 있을 때만, 하나도 없으면 빈 목록(알람 없는 일정)
 // a.manual이 있으면 직접 고른 이동 · 준비 시간 · 알람 시각이 자동 계산보다 먼저 (D42 C). 직접 고른 알람은 auto에 자동 계산값을 남김
 //   준비 알람은 (직접 고른 시각을 포함한) 기상 시각 뒤 — 기상을 옮기면 준비도 같은 간격으로 따라옴
-function chainInput(a: MockAppointment) {
-  return {
+export function alarmChain(a: MockAppointment): AlarmTime[] {
+  const chain = sharedAlarmChain({
     at: a.at,
     travelMinutes: a.manual?.travelMinutes ?? a.travelMinutes,
     bufferMinutes: a.bufferMinutes,
@@ -25,11 +25,7 @@ function chainInput(a: MockAppointment) {
     withWake: a.withWake,
     kinds: a.kinds,
     manualTimes: a.manual?.times,
-  };
-}
-
-export function alarmChain(a: MockAppointment): AlarmTime[] {
-  const chain = sharedAlarmChain(chainInput(a));
+  });
   return chain.map((x) => ({
     id: `${a.id}:${x.kind}`,
     kind: x.kind,
@@ -39,9 +35,10 @@ export function alarmChain(a: MockAppointment): AlarmTime[] {
   }));
 }
 
-// 출발 시각 — 출발 알람을 안 골랐어도 계산됨 (서버 꾸러미의 departAt과 같은 값, 미루기 "늦어요" 판단에 씀)
-export function departAtOf(a: MockAppointment): Date {
-  return sharedDepartureAt(chainInput(a));
+// 켜진 출발(DEPARTURE) 알람의 시각 — 꺼져 있거나 고르지 않았으면 undefined.
+// 실제 폰 꾸러미의 departAt도 같은 규칙임 (lib/alarmSync/reconcile.ts: 출발 알람 행이 있을 때만 넣음). 미루기 "늦어요" 판단에 씀
+export function departAtOf(a: MockAppointment): Date | undefined {
+  return alarmChain(a).find((x) => x.kind === 'DEPARTURE' && x.enabled)?.at;
 }
 
 // ALG-02: 중요도 점수 + 최근 4주 늦잠 지각 2회 이상이면 1 → 0~2
