@@ -66,6 +66,7 @@ export const POINTS: Record<PointId, PointConfig> = {
 export interface PointExtra {
   model?: string; // 기본 DEFAULT_MODEL. 서버 함수는 anthropic.ts의 model()(ANTHROPIC_MODEL)을 넘김
   timeoutMs?: number;
+  deadlineMs?: number; // 전체 마감(callLlm 참고) — 기본 없음
   sleep?: (ms: number) => Promise<void>;
   now?: () => number;
 }
@@ -93,6 +94,7 @@ export async function callPoint<T = unknown>(
     cacheSystem: cfg.cacheSystem,
     timeoutMs: extra.timeoutMs ?? cfg.timeoutMs,
     retryOnTimeout: cfg.retryOnTimeout,
+    deadlineMs: extra.deadlineMs,
     sleep: extra.sleep,
     now: extra.now,
   });

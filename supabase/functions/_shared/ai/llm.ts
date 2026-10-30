@@ -224,6 +224,8 @@ export interface CallOpts {
   cacheSystem?: boolean; // 기본 true
   timeoutMs: number; // 시도 하나마다
   retryOnTimeout: boolean;
+  // 전체 마감(ms, 첫 시도 시작부터). 다시 시도하면 마감을 넘길 것 같을 때(지난 시간 + 기다림 + 시도 시간 > 마감) 다시 시도하지 않음. 없으면 제한 없음
+  deadlineMs?: number;
   // 시험에서 바꿔 끼움
   sleep?: (ms: number) => Promise<void>;
   now?: () => number; // ms 단위 단조 시계 (기본 performance.now)
@@ -252,6 +254,7 @@ function setupProblems(opts: CallOpts): string[] {
   const out: string[] = [];
   if (!Number.isInteger(opts.maxTokens) || opts.maxTokens < 1) out.push(`max_tokens는 1 이상 정수 (${opts.maxTokens})`);
   if (!(opts.timeoutMs > 0)) out.push(`timeoutMs는 양수 (${opts.timeoutMs})`);
+  if (opts.deadlineMs !== undefined && !(opts.deadlineMs > 0)) out.push(`deadlineMs는 양수 (${opts.deadlineMs})`);
   if (!opts.user.trim()) out.push('user 글이 비어 있음');
   if (opts.cacheSystem !== false && !opts.system.trim()) out.push('system 글이 비어 있음');
   for (const p of apiLimitProblems(apiSchemaInfo(opts.schema).schema)) out.push(`${p} (400)`);
@@ -319,7 +322,9 @@ export async function callLlm<T = unknown>(client: LlmClient | null, opts: CallO
     } catch (e) {
       lastError = asClientError(e);
       if (attempts >= MAX_ATTEMPTS || !isRetryable(lastError, opts.retryOnTimeout)) break;
-      await sleep(retryDelayMs(lastError));
+      const wait = retryDelayMs(lastError);
+      if (opts.deadlineMs !== undefined && now() - t0 + wait + opts.timeoutMs > opts.deadlineMs) break;
+      await sleep(wait);
     }
   }
   const latency_ms = Math.max(0, Math.round(now() - t0));
@@ -346,8 +351,8 @@ export async function callLlm<T = unknown>(client: LlmClient | null, opts: CallO
   let parsed: unknown;
   try {
     parsed = JSON.parse(text);
-  } catch (e) {
-    return fail('BAD_OUTPUT', `JSON 파싱 실패: ${e instanceof Error ? e.message : String(e)}`, done);
+  } catch {
+    return fail('BAD_OUTPUT', 'JSON 파싱 실패 (모델 출력이 JSON이 아님)', done);
   }
   // API 변형(대신 값 · 선택 칸)을 기준 모양으로 되돌린 뒤 기준 스키마 전체로 검증 — pattern · 범위 등 API가 못 거는 것도 여기서 잡힘
   const data = fromApiOutput(opts.schema, parsed);
@@ -388,13 +393,16 @@ function makeCall(
 // 연결
 // ---------------------------------------------------------------------------
 
-// 키가 없으면 null(호출 0번 → NOT_CONFIGURED), 있으면 make로 만든 클라이언트. 키가 없을 때 make(SDK 불러오기 · 생성)를 부르지 않음
+// 키가 없으면 null(호출 0번 → NOT_CONFIGURED), 있으면 make로 만든 클라이언트. 키가 없을 때 make(SDK 클라이언트 생성)를 부르지 않음.
+// 단, anthropic.ts는 정적 import라 키가 없어도 SDK 모듈은 로드됨 — 줄이는 것은 호출이지 로드가 아님
 export function llmClientFrom(key: string | null | undefined, make: (key: string) => LlmClient): LlmClient | null {
   const k = key?.trim();
   return k ? make(k) : null;
 }
 
-// 실패를 서버 오류 LLM_UNAVAILABLE(502)로. details.reason은 개발자가 원인을 볼 수 있게 (프롬프트 · 사용자 글은 안 넣음)
-export function toHttpError(f: LlmFailure): HttpError {
-  return new HttpError('LLM_UNAVAILABLE', f.message, { reason: f.reason });
+// 실패를 서버 오류 LLM_UNAVAILABLE(502)로. 앱 응답 details에는 세분 코드와 요청 번호만 — 공급자 오류 원문(reason)은 앱에 보내지 않고
+// 서버 로그(console.error)에만 남김 (요청 번호 · 지점 · 코드와 같이. 프롬프트 · 키 · 사용자 글은 reason에 없음)
+export function toHttpError(f: LlmFailure, log: (...args: unknown[]) => void = console.error): HttpError {
+  log(`[ai] ${f.call.point} ${f.code} request_id=${f.call.request_id ?? '-'} attempts=${f.call.attempts}: ${f.reason}`);
+  return new HttpError('LLM_UNAVAILABLE', f.message, { code: f.code, requestId: f.call.request_id });
 }

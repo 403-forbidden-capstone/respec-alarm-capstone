@@ -62,7 +62,8 @@ describe('프롬프트 모듈 = md 원본', () => {
     });
 
     it(`${name}: 생성기가 지금 만드는 글과 커밋된 모듈 파일이 같음 (손으로 고치지 않았음)`, () => {
-      assert.equal(readModule(name), promptModuleSource(name, readMd(name)));
+      // 윈도 CRLF 체크아웃이어도 같게 양쪽을 LF로 맞춰 비교 (.gitattributes는 eol=lf라 보통 필요 없음)
+      assert.equal(normalizeNewlines(readModule(name)), normalizeNewlines(promptModuleSource(name, readMd(name))));
     });
 
     it(`${name}: 지문이 실험실 장부와 같음 (${LEDGER[name]})`, () => {

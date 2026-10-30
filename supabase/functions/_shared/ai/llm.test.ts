@@ -275,6 +275,7 @@ describe('응답 해석 — 던지지 않고 코드로', () => {
       const r = mustFail(await callPoint(t.client, 'T1', dummyVars('T1'), t.extra));
       assert.equal(r.code, 'BAD_OUTPUT');
       assert.match(r.reason, /JSON 파싱 실패/);
+      assert.doesNotMatch(r.reason, /reply|여기 있어요|음…|json/); // 모델 출력이 reason으로 새지 않음
     }
   });
 
@@ -443,6 +444,26 @@ describe('시간 초과 — Promise.race로 직접', () => {
     assert.deepEqual(Object.fromEntries(POINT_IDS.map((p) => [p, POINTS[p].timeoutMs])), { T1: 13_000, T2F: 5_000, T2: 19_000, T3: 4_000, T4: 11_000, T5: 26_000, E4: 28_000 });
   });
 
+  it('deadlineMs: 다시 시도하면 전체 마감을 넘길 것 같으면 재시도 안 함', async () => {
+    // 시도 100ms 걸림 + 기다림 500ms + 시도 시간(timeoutMs 1000) = 1600 > 마감 1500 → 다시 시도 안 함
+    const t = setup([server(), response([text(T1_OK)])]);
+    const r = mustFail(await callPoint(t.client, 'T1', dummyVars('T1'), { ...t.extra, timeoutMs: 1000, deadlineMs: 1500 }));
+    assert.equal(r.code, 'UPSTREAM');
+    assert.equal(r.call.attempts, 1);
+    assert.deepEqual(t.sleeps, []);
+  });
+
+  it('deadlineMs: 시간이 넉넉하면 다시 시도하고, 없으면 기존 동작 그대로', async () => {
+    const a = setup([server(), response([text(T1_OK)])]);
+    const ra = await callPoint(a.client, 'T1', dummyVars('T1'), { ...a.extra, timeoutMs: 1000, deadlineMs: 5000 });
+    assert.equal(ra.ok, true);
+    assert.equal(ra.call.attempts, 2);
+    const b = setup([server(), response([text(T1_OK)])]);
+    assert.equal((await callPoint(b.client, 'T1', dummyVars('T1'), b.extra)).call.attempts, 2);
+    const c = setup([]);
+    assert.equal(mustFail(await callLlm(c.client, baseOpts({ deadlineMs: 0 }))).code, 'BAD_REQUEST');
+  });
+
   it('T1: signal을 무시하는 클라이언트라도 시간이 되면 끊고, 한 번 다시 시도한 뒤 TIMEOUT', async () => {
     const t = setup(['hang', 'hang']);
     const started = Date.now();
@@ -559,14 +580,29 @@ describe('키 없음 → 호출 0번', () => {
     });
   }
 
-  it('toHttpError: LLM_UNAVAILABLE(502) + 짧은 한국어 + details.reason', async () => {
-    const f = mustFail(await callLlm(null, baseOpts()));
-    const e = toHttpError(f);
+  it('toHttpError: LLM_UNAVAILABLE(502) + 짧은 한국어, details에는 세분 코드와 요청 번호만 (원문은 서버 로그로)', async () => {
+    const t = setup([new LlmClientError('bad_request', '400 {"error":{"message":"공급자 원문 비밀스러운 내용"}}', { status: 400, requestId: 'req_400' })]);
+    const f = mustFail(await callPoint(t.client, 'T1', dummyVars('T1'), t.extra));
+    const logs: unknown[][] = [];
+    const e = toHttpError(f, (...a) => logs.push(a));
     assert.ok(e instanceof HttpError);
     assert.equal(e.code, 'LLM_UNAVAILABLE');
     assert.equal(e.status, 502);
+    assert.equal(e.message, FAIL_MESSAGES.BAD_REQUEST);
+    assert.deepEqual(e.details, { code: 'BAD_REQUEST', requestId: 'req_400' });
+    // 앱 응답에 원문이 없음
+    assert.doesNotMatch(JSON.stringify({ message: e.message, details: e.details }), /비밀스러운|reason/);
+    // 서버 로그에는 원문 · 요청 번호 · 지점 · 코드
+    assert.equal(logs.length, 1);
+    assert.match(String(logs[0][0]), /T1 BAD_REQUEST request_id=req_400 attempts=1: .*비밀스러운/);
+    assert.ok(String(logs[0][0]).includes(f.reason));
+  });
+
+  it('키 없음도 같은 모양 (requestId는 null)', async () => {
+    const f = mustFail(await callLlm(null, baseOpts()));
+    const e = toHttpError(f, () => {});
     assert.equal(e.message, 'AI가 아직 준비되지 않았어요');
-    assert.deepEqual(e.details, { reason: f.reason });
+    assert.deepEqual(e.details, { code: 'NOT_CONFIGURED', requestId: null });
   });
 
   it('실패 코드마다 한국어 문구가 있고 비어 있지 않음', () => {
@@ -622,7 +658,8 @@ function baseOpts(over: Partial<CallOpts> = {}): CallOpts {
 // ---------------------------------------------------------------------------
 
 describe('call 기록 — ai_calls 표 칸과 같은 이름', () => {
-  // supabase/migrations의 ai_calls (user_id · session_id · io · created_at은 부르는 쪽이 붙임)
+  // DB 칸 · 제약과 수동 대조한 하드코딩 목록 — 마이그레이션이 바뀌면 여기도 같이 (#245 20261029141531_ai_conversation_state.sql)
+  // (user_id · session_id · io · created_at은 부르는 쪽이 붙임)
   const COLUMNS = [
     'point', 'prompt_id', 'prompt_version', 'model', 'ok', 'error_code', 'latency_ms', 'attempts', 'input_tokens', 'output_tokens',
     'cache_read_tokens', 'cache_write_tokens', 'thinking_tokens', 'cost_usd', 'stop_reason', 'request_id', 'flags',
