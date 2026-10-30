@@ -15,10 +15,12 @@ import {
   Segmented,
   Stepper,
   Text,
+  toast,
   Toggle,
   TopBar,
   TopBarButton,
 } from '@/components/ui';
+import { HomeMissingNotice } from '@/features/alarm/components/HomeMissingNotice';
 import { colors, radius } from '@/theme';
 
 // 개발용 UI 견본 — 탭에는 없고 주소로만 들어옴: /dev/ui (앱은 respecalarm://dev/ui)
@@ -139,6 +141,10 @@ export default function UiSampleScreen() {
         <Chip label="길찾기" variant="fill" />
         <Chip label="강" variant="ink" />
       </View>
+
+      <SectionHeader title="집 위치 안내" />
+      <HomeMissingNotice onPickHome={() => toast('집 찾기 시트가 열려요')} />
+      <HomeMissingNotice onPickHome={() => {}} busy />
     </Screen>
   );
 }

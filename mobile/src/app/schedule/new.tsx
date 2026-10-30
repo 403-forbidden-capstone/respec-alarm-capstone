@@ -6,6 +6,7 @@ import { Button, Card, DateRow, Field, KeyValueRow, LoadError, Screen, Sheet, Te
 import { createAppointment, defaultDraft, draftAt, estimateAppointment, listAppointments, listPlaces } from '@/features/alarm/api';
 import { adjustEstimate, isManualTime, orderError } from '@/features/alarm/adjust';
 import { useNow } from '@/features/alarm/hooks/useNow';
+import { HomeMissingNotice } from '@/features/alarm/components/HomeMissingNotice';
 import { ItemChips } from '@/features/alarm/components/ItemChips';
 import { OptionGrid } from '@/features/alarm/components/OptionGrid';
 import { PlaceSearchSheet } from '@/features/alarm/components/PlaceSearchSheet';
@@ -14,6 +15,7 @@ import { SelectRow } from '@/features/alarm/components/SelectRow';
 import { TimeButton } from '@/features/alarm/components/TimeButton';
 import { TimePickBody } from '@/features/alarm/components/TimePicker';
 import { TimeRow } from '@/features/alarm/components/TimeRow';
+import { isHomeMissing } from '@/features/alarm/homeMissing';
 import { homeOf } from '@/features/alarm/placeSheet';
 import { repeatToRrule } from '@/features/alarm/repeat';
 import { addItems, earlierWakeOf, isPassed, parseDayParam, ringingKinds, tomorrow, upcomingAlarms } from '@/features/alarm/schedule';
@@ -26,15 +28,18 @@ import {
   TRANSPORT_OPTIONS,
   type Estimate,
   type Importance,
+  type Place,
   type RingKind,
   type Transport,
 } from '@/features/alarm/types';
 import { useAuth } from '@/features/auth/AuthProvider';
+import { saveHome } from '@/features/profile/home';
 import { foundScheduleDraft, saveFoundSchedule } from '@/features/voice/api';
 import { now } from '@/lib/clock';
 import { addMinutes, dayKey, formatDateShort, formatTime, formatTime24, startOfDay } from '@/lib/format';
 import { backOrHome } from '@/lib/nav';
 import { useAction } from '@/lib/useAction';
+import { requireUserId } from '@/lib/user';
 import { useLeaveGuard } from '@/lib/useLeaveGuard';
 import { useLoad } from '@/lib/useLoad';
 import { colors } from '@/theme';
@@ -75,9 +80,13 @@ export default function NewScheduleScreen() {
   const [estimate, setEstimate] = useState<Estimate | null>(null);
   const [pick, setPick] = useState<RingKind | null>(null); // 확인 시트에서 시각을 고르는 알람 (D43)
   const [placeOpen, setPlaceOpen] = useState(false); // 장소 검색 시트
-  const home = homeOf(useAuth().profile); // 프로필의 집 좌표 — 있으면 검색 결과를 집에서 가까운 순으로 (가짜 데이터의 가짜 프로필은 좌표가 없음)
+  const auth = useAuth();
+  const home = homeOf(auth.profile); // 프로필의 집 좌표 — 있으면 검색 결과를 집에서 가까운 순으로 (가짜 데이터의 가짜 프로필은 좌표가 없음)
   const [showCalc, setShowCalc] = useState(false); // 계산 근거 "자세히"를 펼침
+  const [homeMissing, setHomeMissing] = useState(false); // 계산이 집 위치를 몰라 막힘 — 안내 카드 [집 정하기]
+  const [homeSheetOpen, setHomeSheetOpen] = useState(false); // 집 찾기 시트
   const { busy: calculating, run: runCalculate } = useAction();
+  const { busy: savingHome, run: runSaveHome } = useAction();
   const { busy: saving, run: runSave } = useAction();
   const current = useNow();
   const set = <K extends keyof typeof draft>(key: K, value: (typeof draft)[K]) => setDraft((d) => ({ ...d, [key]: value }));
@@ -117,10 +126,35 @@ export default function NewScheduleScreen() {
       const items = addItems(itemList, itemText); // 적어 두고 추가를 안 누른 준비물도 함께
       setItemList(items);
       setItemText('');
-      setEstimate(await estimateAppointment({ ...draft, title: draft.title.trim(), items: items.join(',') }));
+      try {
+        setEstimate(await estimateAppointment({ ...draft, title: draft.title.trim(), items: items.join(',') }));
+      } catch (e) {
+        // 원인이 집이면 토스트 대신 안내 카드 (장소를 다시 골라도 안 풀림)
+        if (!isHomeMissing({ error: e, hasHome: home != null, placeHasCoords: draft.placeLat != null && draft.placeLng != null })) throw e;
+        setHomeMissing(true);
+        return;
+      }
+      setHomeMissing(false);
       setShowCalc(false);
       setPick(null);
     }, '알람을 계산하지 못했어요');
+  }
+
+  // 고른 곳을 집으로 저장 → 프로필 다시 읽기 → 바로 다시 계산 (서버가 계산할 때마다 프로필에서 집을 읽으므로 새 집이 바로 쓰임)
+  function pickHome(place: Place) {
+    if (place.lat == null || place.lng == null) {
+      toast('이 장소는 위치를 몰라 집으로 정할 수 없어요');
+      return;
+    }
+    const { name, lat, lng } = place;
+    void runSaveHome(async () => {
+      await saveHome(await requireUserId(), { name, lat, lng });
+      await auth.refreshProfile().catch(() => {}); // 못 읽어도 집은 저장됨 — 서버는 계산할 때 프로필을 직접 읽음
+      setHomeMissing(false);
+      setHomeSheetOpen(false);
+      toast('집을 저장했어요');
+      calculate();
+    }, '집을 저장하지 못했어요');
   }
 
   // 저장한 뒤 온 곳으로 — 대화 · 홈은 그대로 돌아가고, 알람 목록(또는 모르는 곳)은 목록에서 새 일정에 테두리
@@ -287,6 +321,15 @@ export default function NewScheduleScreen() {
           모두 끄면 알람 없이 일정만 저장해요.
         </Text>
       </Card>
+
+      {homeMissing ? <HomeMissingNotice onPickHome={() => setHomeSheetOpen(true)} busy={savingHome} /> : null}
+      <PlaceSearchSheet
+        visible={homeSheetOpen}
+        onClose={() => setHomeSheetOpen(false)}
+        title="집 찾기"
+        search={(query) => listPlaces(query, home)}
+        onPick={pickHome}
+      />
 
       <View style={styles.stack}>
         <Button label={anyAlarm ? '알람 계산하기' : '일정만 저장하기'} onPress={calculate} loading={calculating} disabled={past} />
