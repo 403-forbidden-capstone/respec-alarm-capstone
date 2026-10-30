@@ -56,6 +56,7 @@ afterEach(() => {
   db.appointments.splice(0, db.appointments.length, ...SEEDS.map((a) => ({ ...a })));
   db.editLogs.length = 0;
   db.snoozes = {};
+  db.snoozeCounts = {};
   db.disabledKinds.clear();
   db.disabledAppointments.clear();
   db.intensityOverrides = {};
@@ -570,6 +571,41 @@ describe('H07 · H08 기상 알람 → 해제 → 확인 알림 → 직접 응�
     await snoozeRing(WAKE, 10, kst(22, 480));
     expect(me()).toBe('취침 중 · 알람 8:00');
     expect(labels()).toEqual(['오전 8:00 기상 알람 10분 미루기']);
+  });
+
+  it('미루기는 3번까지 — 횟수를 getRing이 돌려주고, 한도에 닿으면 4번째는 기록 없이 무시 (D3 기본안 A)', async () => {
+    expect(await getRing(WAKE)).toMatchObject({ snoozeCount: 0, snoozeLimit: 3 });
+    for (const [index, minutes] of [5, 10, 15].entries()) {
+      await startRing(WAKE, kst(22, 480 + index * 10));
+      await snoozeRing(WAKE, minutes, kst(22, 480 + index * 10));
+      expect((await getRing(WAKE))!.snoozeCount).toBe(index + 1);
+    }
+    expect(labels()).toEqual(['오전 8:00 기상 알람 5분 미루기', '오전 8:10 기상 알람 10분 미루기', '오전 8:20 기상 알람 15분 미루기']);
+    const snoozedUntil = (await getSnooze())!.at;
+    await startRing(WAKE, kst(22, 515));
+    await snoozeRing(WAKE, 5, kst(22, 515)); // 한도 — 무시
+    expect(db.events).toHaveLength(3);
+    expect((await getRing(WAKE))!.snoozeCount).toBe(3);
+    expect(snoozedUntil.getTime()).toBe(kst(22, 515).getTime()); // 마지막 미루기(8:20 + 15분)가 그대로
+  });
+
+  it('해제하면 미룬 횟수는 새로 시작', async () => {
+    await snoozeRing(WAKE, 10, kst(22, 480));
+    expect((await getRing(WAKE))!.snoozeCount).toBe(1);
+    await dismissRing(WAKE, kst(22, 490));
+    expect((await getRing(WAKE))!.snoozeCount).toBe(0);
+  });
+
+  it('울림에 출발 시각이 실려 "이만큼 미루면 늦어요" 판단에 씀 (서버 꾸러미 departAt과 같은 계산)', async () => {
+    const ring = (await getRing(WAKE))!;
+    expect(formatTime(ring.departAt!)).toBe('오전 9:00'); // 약속 10:00 − 이동 50분 − 여유 10분
+  });
+
+  it('출발 알람이 꺼져 있거나 없으면 departAt은 null — 폰 꾸러미가 출발 알람 행이 있을 때만 departAt을 넣는 것과 같음', async () => {
+    db.disabledKinds.add('a1:DEPARTURE');
+    expect((await getRing(WAKE))!.departAt).toBeNull();
+    db.disabledKinds.delete('a1:DEPARTURE');
+    expect((await getRing(WAKE))!.departAt).not.toBeNull();
   });
 
   it('미루기 · 해제 없이 나가면 울리는 중 표시만 지우고 기록은 없음', async () => {
