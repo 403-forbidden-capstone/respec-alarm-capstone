@@ -22,6 +22,11 @@ export function ImportEntryCard({ onPhoto, onCalendar, busy, reading }: Props) {
           시간표 사진은 AI(Claude)가 읽고, 우리 서버에는 저장하지 않아요
         </Text>
       ) : null}
+      {onCalendar ? (
+        <Text variant="small" tone="sub" style={styles.note}>
+          캘린더는 폰에서 읽고, 확인한 수업만 저장해요
+        </Text>
+      ) : null}
       <View style={styles.buttons}>
         {onPhoto ? <Button variant="ghost" small label="시간표 사진으로 넣기" onPress={onPhoto} disabled={busy} loading={reading === 'photo'} /> : null}
         {onCalendar ? <Button variant="ghost" small label="폰 캘린더에서 가져오기" onPress={onCalendar} disabled={busy} loading={reading === 'calendar'} /> : null}

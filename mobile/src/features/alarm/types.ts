@@ -95,6 +95,9 @@ export type Appointment = {
   alarms: AlarmTime[]; // 기상 · 준비 · 출발 · 도착 목표 순 — H05에서 고른 종류만, 하나도 없으면 빈 목록(알람 없는 일정)
   level: Level; // 지금 적용되는 강도 (배경음 기준)
   standalone?: true; // 일정 없는 알람 (실데이터 전용, D46) — id는 알람 id, 제목은 "알람". 알람 설정(H03)은 아직 못 엶
+  placeLat?: number; // 장소 좌표(DB dest_lat · dest_lng) — 실데이터 H03만 채움. 편집 시트가 장소를 바꾼 뒤 되돌리기에 원래 좌표를 같이 보내려고 씀 (#275)
+  placeLng?: number;
+  canEdit?: false; // 남이 만든 공동 약속이라 고치거나 지울 수 없음 (N6, H03 편집 시트가 읽기 전용으로 열림). 없으면 고칠 수 있음
   upcomingCount?: number; // 같은 반복 묶음에서 지금 이후 남은 회차 수(이 회차 포함) — 알람 목록(H02)만 채움. 2 이상이면 앞으로 회차가 폰에 미리 걸려 있음
 };
 

@@ -28,6 +28,7 @@ import { useNow } from '@/features/alarm/hooks/useNow';
 import { morningCardVisible } from '@/features/alarm/morning';
 import { isEvening } from '@/features/alarm/schedule';
 import { KIND_LABEL } from '@/features/alarm/types';
+import { DetectionRows } from '@/features/location/DetectionRows';
 import { bannerLines, bannerSummary, PermissionBanner, useFailedAlarmCount, usePermissions } from '@/features/permissions';
 import { getPendingSuggestion } from '@/features/records/api';
 import { advanceRoutine, getEveningRoutine, getTodayRoutine, listTodos, toggleTodo } from '@/features/routine/api';
@@ -173,6 +174,7 @@ export default function HomeScreen() {
           onPress={() => router.push({ pathname: '/alarm/[id]', params: { id: morning.appointmentId } })}
         />
       ) : null}
+      <DetectionRows reloadOn={data} onChanged={reload} /> {/* 위치로 잡은 출발 · 도착 — 출발하면 아침 카드가 빠지고 이 줄이 그 자리를 이음 */}
 
       {/* 기상 알람을 끈 뒤 판정 중이면 H08로 다시 들어가는 길 */}
       {wake ? (

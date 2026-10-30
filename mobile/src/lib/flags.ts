@@ -53,5 +53,5 @@ export const ONBOARDING_STEPS: Record<OnboardingStepId, boolean> = {
 //   calendar: [폰 캘린더에서 가져오기] — 캘린더 읽기 → 앞으로 2주 매주 반복 일정 후보(규칙, AI 없음) → 확인 화면
 export const TIMETABLE_PATHS = {
   photo: true,
-  calendar: false,
+  calendar: true,
 };
