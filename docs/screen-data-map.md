@@ -235,6 +235,7 @@
   - 개발 화면 `/dev/screens`의 **내 시험 데이터 지우기** (실데이터 + 로그인 + 모드를 바꿀 수 있는 빌드에서만, 출시 빌드에서는 숨김 D16): 확인 창 → `features/dev/api` `resetMyTestData`(DB 함수 `dev_reset_my_data` — 내 일정 · 알람 · 기록 · 일기 · AI 대화 · 고친 값 기록 · 제안을 지우고 프로필을 온보딩 전으로, 그룹 일정은 내 참여 행만, 친구 · 그룹 · 푸시 토큰 · `ai_calls` · 루틴은 그대로) → `lib/session` `cleanupAfterDataReset`(폰 알람 전부 취소 · 못 올린 울림 기록 버림, 로그아웃 없음) → 프로필 다시 읽기 → 온보딩. 가짜 데이터 모드에서는 "지울 게 없어요"
   - 가입 직후 프로필: 닉네임 = 카카오 · 구글에서 가져온 값(DB 트리거), 준비 60분 · 여유 10분 · 이동 수단 대중교통 · 잠귀 보통 · 깨우는 여유 보통 = DB 기본값(온보딩 입력칸 처음 값), 집 · 아이디 = 비어 있음
 - 온보딩 단계 부품 초안(`features/onboarding/components/`): `OnboardingFrame`(틀) · `HomePlaceStep` · `TimetableStep` · `PermissionsStep` · `OnboardingDoneStep` — 값 · 콜백만 받고 api · 라우터를 부르지 않음(L7이 함수를 붙임). `/dev/onboarding?mode=mock`에서 가짜 값으로 넘겨 봄 (`/dev/screens` 목록에는 없음, #116)
+- 설정에서 값 바꾸기: 닉네임 · 아이디 · 잠귀 · 깨우는 여유 · 준비 시간 · 여유 시간 · 이동 수단 · 집 줄을 누르면 편집 시트(`features/profile/components/ProfileEditors`, 온보딩 단계 부품 재사용) → [저장]이 `saveProfileFields` → `profiles` — DB. 집은 장소 검색 시트(`place-search` — Edge). 실데이터 + 로그인일 때만 열리고 가짜 모드는 보기만. 아이디는 중복 확인(`isHandleTaken`) 뒤 저장 (L3 `changeHandle`이 오면 교체)
 - 권한 안내: 알림 · 정확한 알람 · 잠금화면 알람 화면 — 폰
 - 푸시 토큰: 앱 켤 때 `register_push_token` — RPC
 
@@ -243,6 +244,7 @@
 | 이름 | 하는 일 | 외부 | 화면 |
 |---|---|---|---|
 | `place-search` | 장소 검색 | 카카오 로컬 | H05 · 온보딩 |
+| `place-reverse` | 지도 핀 좌표 → 주소 | 카카오 로컬 | 지도 핀 |
 | `alarm-suggest` | 이동시간 · 기상 · 준비 · 출발 · 도착 시각 · 강도 계산 (저장 안 함) | 카카오 대중교통 | H05 · H03 · H01(아침 카드 다시 확인) |
 | `alarm-commit` | 약속 · 참여 조건 · 알람을 한 번에 저장 | — | H05 · H03 · S01 |
 | `notify` | 다른 사람 폰에 푸시. 보내기 전에 권한 확인: G03은 같은 그룹 + `wake_share_opt_in`(D19에서 확정), G04는 `can_edit_alarm`일 때만 | Expo Push | G03 · G04 · 미확인 알림 |

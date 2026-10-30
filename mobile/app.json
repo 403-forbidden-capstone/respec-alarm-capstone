@@ -41,7 +41,29 @@
           "isAndroidForegroundServiceEnabled": false
         }
       ],
-      "expo-notifications"
+      "expo-notifications",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "시간표 사진을 읽어 수업을 채우려고 사진을 골라요",
+          "cameraPermission": false,
+          "microphonePermission": "대화를 음성으로 하려고 마이크를 써요"
+        }
+      ],
+      [
+        "expo-calendar",
+        {
+          "calendarPermission": "폰 캘린더의 매주 반복 일정을 가져오려고 캘린더를 읽어요",
+          "remindersPermission": false
+        }
+      ],
+      [
+        "expo-audio",
+        {
+          "microphonePermission": "대화를 음성으로 하려고 마이크를 써요",
+          "enableBackgroundPlayback": false
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,

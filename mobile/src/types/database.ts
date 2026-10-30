@@ -144,13 +144,13 @@ isOneToOne: false
                   ]
                 },"appointments": {
                   Row: {
-                    "appointment_at": string,"appointment_id": string,"created_at": string,"creator_id": string,"dest_lat": number | null,"dest_lng": number | null,"dest_name": string,"dest_radius_m": number | null,"group_id": string | null,"importance": Database["public"]['Enums']["importance_level"],"memo": string | null,"occurrence_on": string,"recurrence_rule": string | null,"series_id": string,"title": string,"updated_at": string
+                    "appointment_at": string,"appointment_id": string,"created_at": string,"creator_id": string,"dest_lat": number | null,"dest_lng": number | null,"dest_name": string,"dest_radius_m": number | null,"exception_kind": string | null,"group_id": string | null,"importance": Database["public"]['Enums']["importance_level"],"memo": string | null,"occurrence_on": string,"recurrence_rule": string | null,"series_id": string,"title": string,"updated_at": string
                   }
                   Insert: {
-                    "appointment_at": string,"appointment_id"?: string,"created_at"?: string,"creator_id": string,"dest_lat"?: number | null,"dest_lng"?: number | null,"dest_name": string,"dest_radius_m"?: number | null,"group_id"?: string | null,"importance"?: Database["public"]['Enums']["importance_level"],"memo"?: string | null,"occurrence_on": string,"recurrence_rule"?: string | null,"series_id": string,"title": string,"updated_at"?: string
+                    "appointment_at": string,"appointment_id"?: string,"created_at"?: string,"creator_id": string,"dest_lat"?: number | null,"dest_lng"?: number | null,"dest_name": string,"dest_radius_m"?: number | null,"exception_kind"?: string | null,"group_id"?: string | null,"importance"?: Database["public"]['Enums']["importance_level"],"memo"?: string | null,"occurrence_on": string,"recurrence_rule"?: string | null,"series_id": string,"title": string,"updated_at"?: string
                   }
                   Update: {
-                    "appointment_at"?: string,"appointment_id"?: string,"created_at"?: string,"creator_id"?: string,"dest_lat"?: number | null,"dest_lng"?: number | null,"dest_name"?: string,"dest_radius_m"?: number | null,"group_id"?: string | null,"importance"?: Database["public"]['Enums']["importance_level"],"memo"?: string | null,"occurrence_on"?: string,"recurrence_rule"?: string | null,"series_id"?: string,"title"?: string,"updated_at"?: string
+                    "appointment_at"?: string,"appointment_id"?: string,"created_at"?: string,"creator_id"?: string,"dest_lat"?: number | null,"dest_lng"?: number | null,"dest_name"?: string,"dest_radius_m"?: number | null,"exception_kind"?: string | null,"group_id"?: string | null,"importance"?: Database["public"]['Enums']["importance_level"],"memo"?: string | null,"occurrence_on"?: string,"recurrence_rule"?: string | null,"series_id"?: string,"title"?: string,"updated_at"?: string
                   }
                   Relationships: [
                     {

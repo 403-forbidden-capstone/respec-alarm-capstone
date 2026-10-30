@@ -281,6 +281,7 @@ export function toPreview(s: Suggestion, saved: AppointmentDetail, edits: AlarmE
     autoTravelMinutes: s.travel.auto_minutes ?? s.travel.minutes ?? saved.auto.travelMinutes,
     predictedPrepMinutes: s.prepare.minutes,
     autoPredictedPrepMinutes: saved.auto.predictedPrepMinutes,
+    prepareSampleCount: s.prepare.sample_count,
     ...(problem ? { travelProblem: problem } : {}),
   };
 }

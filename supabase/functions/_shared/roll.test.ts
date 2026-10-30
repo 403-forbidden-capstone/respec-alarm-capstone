@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { RING_KINDS, type RingKind } from './calc/index.ts';
+import { prepareSourceLabel, prepareStatsOf, RING_KINDS, type RingKind } from './calc/index.ts';
 import { commitStandalone, persistAppointment } from './commit.ts';
 import { deleteAppointment, updateAppointment, type EditCtx } from './edit-run.ts';
 import { FakeDb } from './fake-db.ts';
@@ -238,7 +238,7 @@ test('본인 길 · 배치가 동시에 같은 회차를 보면 회차는 한 �
 // 쿼리마다 사용자(creator_id · user_id)로 좁혔는지 지켜보는 껍데기
 function guarded(db: FakeDb, users: string[], violations: string[]) {
   const USER_COLUMN: Record<string, string> = {
-    appointments: 'creator_id', appointment_participants: 'user_id', alarms: 'user_id', todos: 'user_id', roll_attempts: 'user_id', routines: 'user_id', profiles: 'user_id', v_prepare_time_stats: 'user_id',
+    appointments: 'creator_id', appointment_participants: 'user_id', alarms: 'user_id', todos: 'user_id', roll_attempts: 'user_id', routines: 'user_id', profiles: 'user_id', daily_records: 'user_id',
   };
   const watch = (query: any, table: string) => {
     const eqs: Record<string, unknown> = {};
@@ -402,7 +402,7 @@ test('이어받기: 만들 종류 · 끈 종류 · 직접 시각(같은 시:분)
 
 test('이어받기: 길찾기로 구한 이동시간(API)은 안 이어받고 회차마다 새로 구함, 준비시간도 새로 계산 (공통 P80 + 개인 보정)', async () => {
   const env = setup(MON_10);
-  env.db.rows('v_prepare_time_stats').push({ user_id: A, sample_count: 20, p80_minutes: 90 });
+  for (let d = 1; d <= 20; d += 1) env.db.rows('daily_records').push({ record_id: `r${d}`, user_id: A, record_date: `2026-10-${String(d).padStart(2, '0')}`, actual_prepare_minutes: 90 }); // 내 기상~출발 기록 20건 (P80 90)
   const series = await seed(env, A, slot(), MON_10);
   const basePrepare = participantOf(env.db, env.db.rows('appointments')[0].appointment_id).prepare_minutes as number;
   const kakao = fakeKakao();
@@ -1055,6 +1055,58 @@ test('카카오 partial(앞뒤 도보 구간 빠짐)은 API가 아니라 ESTIMAT
   assert.equal(participant.travel_source, 'ESTIMATE');
   assert.equal(participant.est_travel_minutes, 40);
   assert.equal(env.db.rows('roll_attempts').length, 0);
+});
+
+// ---- 학습 루프 기초 a (이슈 #266): 반복 다음 회차는 직전 회차 준비값 ±10분 안에서만 (D62 처음 2주 몫) ----
+
+// 회차를 이어서 계산 — 매 회차 직전 회차의 준비값을 기준으로 삼고(planOccurrence의 기준 참여 조건), 그날까지 쌓인 기록으로 통계를 다시 냄
+function simulate(days: number, options: { onboarding: number; recordsBefore?: number[]; actual: number }) {
+  const records: number[] = [...(options.recordsBefore ?? [])]; // 쌓인 순서 — 아래에서 뒤집어 최신순으로 넘김
+  let previous = options.onboarding;
+  const out: { day: number; prepare: number; source: string; n: number; label: string }[] = [];
+  for (let day = 0; day < days; day += 1) {
+    const stats = prepareStatsOf([...records].reverse());
+    const ctx: RollPlanCtx = { ...ctxAt(MON_10), profile: { ...profile, default_prepare_minutes: options.onboarding }, stats };
+    const base: RollBase = { ...baseOf(fullAlarms()), participant: { ...baseParticipant, prepare_minutes: previous } };
+    const planned = planOccurrence(ctx, base, THU, { travel: API_50, sameDayWake: false });
+    assert.ok(planned.ok);
+    if (!planned.ok) throw new Error('unreachable');
+    previous = planned.plan.prepare.minutes;
+    out.push({ day, prepare: previous, source: planned.plan.prepare.source, n: planned.plan.prepare.sampleCount, label: prepareSourceLabel(planned.plan.prepare.sampleCount) });
+    records.push(options.actual);
+  }
+  return out;
+}
+const steps = (rows: { prepare: number }[], first: number) => rows.map((r, i) => Math.abs(r.prepare - (i === 0 ? first : rows[i - 1].prepare)));
+
+test('[5절] 매일 실제 85분 (온보딩 70분): 매 회차 직전 값에서 ±10분 넘게 안 움직이고, 5건부터 "내 기록 기반 5건"', () => {
+  const rows = simulate(12, { onboarding: 70, actual: 85 });
+  assert.equal(rows[0].prepare, 70); // 기록 0건 = 첫 값 그대로
+  assert.deepEqual([rows[0].source, rows[0].label], ['DEFAULT', '배우는 중 0/5']);
+  assert.ok(steps(rows, 70).every((d) => d <= 10), `하루 폭: ${steps(rows, 70)}`);
+  assert.deepEqual([rows[4].label, rows[5].label, rows[5].source], ['배우는 중 4/5', '내 기록 기반 5건', 'PERSONAL']);
+  assert.ok(rows.every((r, i) => i === 0 || r.prepare >= rows[i - 1].prepare), '85분 쪽으로만 천천히 당겨짐');
+  assert.ok(rows[11].prepare > 70 && rows[11].prepare <= 85);
+});
+
+test('상한이 실제로 걸리는 경우: 기록 30건(120분)이 한꺼번에 있는 사람이 첫 값 50에서 시작하면 회차마다 10분씩만 올라 목표(103)에 닿음', () => {
+  const rows = simulate(7, { onboarding: 50, recordsBefore: Array.from({ length: 30 }, () => 120), actual: 120 });
+  assert.deepEqual(rows.map((r) => r.prepare), [60, 70, 80, 90, 100, 103, 103]); // 상한이 없으면 첫 회차부터 103
+  assert.ok(steps(rows, 50).every((d) => d <= 10));
+  assert.equal(rows[0].label, '내 기록 기반 30건');
+});
+
+test('기준 회차에 기상 알람이 없으면 상한을 걸지 않고, 새 회차가 기상 없는 일정(15분)이면 그대로 15분', () => {
+  const noWake = [baseAlarm('PREPARE', '2026-10-27T07:40'), baseAlarm('DEPARTURE', '2026-10-27T08:00')];
+  const stats = prepareStatsOf(Array.from({ length: 30 }, () => 120));
+  const ctx: RollPlanCtx = { ...ctxAt(MON_10), stats };
+  const base: RollBase = { ...baseOf(noWake), participant: { ...baseParticipant, prepare_minutes: 15 } };
+  // 새 회차에 기상이 생기는 경우(기준은 기상 없는 회차, 그날 다른 기상에 밀렸던 것) — 비교 대상이 다른 종류(15분)라 상한을 안 걸어 기록 보정이 그대로 반영됨
+  const withWake = planOccurrence(ctx, base, THU, { travel: API_50, sameDayWake: false, baseHadEarlierWake: true });
+  assert.ok(withWake.ok && withWake.plan.withWake && withWake.plan.prepare.minutes > 25);
+  // 새 회차가 그날 두 번째 일정이면 15분
+  const second = planOccurrence(ctx, baseOf(fullAlarms()), THU, { travel: API_50, sameDayWake: true });
+  assert.ok(second.ok && !second.plan.withWake && second.plan.prepare.minutes === 15);
 });
 
 // ===========================================================================
