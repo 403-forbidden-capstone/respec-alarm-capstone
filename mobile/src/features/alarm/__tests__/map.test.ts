@@ -236,7 +236,7 @@ describe('알람 설정 읽기 (toAppointmentDetail · toIntensity)', () => {
 
   it('직접 고른 강도(intensity_source = MANUAL)에서 자동 값과 다른 칸만 "직접 고름"', () => {
     const intensity = toIntensity([manualStrong()], 'NORMAL', 0);
-    expect(intensity).toMatchObject({ auto: 1, importancePoint: 1, lateCount: 0, latePoint: 0 });
+    expect(intensity).toMatchObject({ auto: 1, importancePoint: 0, lateCount: 0, latePoint: 0 }); // 중요(NORMAL)는 올림 없음 (D69)
     expect(intensity.axes).toEqual({ sound: { level: 2, manual: true }, voice: { level: 1, manual: false }, vibration: { level: 1, manual: false } });
   });
 
@@ -247,7 +247,20 @@ describe('알람 설정 읽기 (toAppointmentDetail · toIntensity)', () => {
 
   it('최근 4주 지각 2번 이상이면 자동 한 단계 위, 점수도 같이', () => {
     expect(toIntensity([], 'NORMAL', 2)).toMatchObject({ auto: 2, latePoint: 1, lateCount: 2 });
-    expect(toIntensity([], 'LOW', 2)).toMatchObject({ auto: 1 }); // 중요도 보통이어도 지각 2번이면 중 (목업 규칙 D56)
+    expect(toIntensity([], 'LOW', 2)).toMatchObject({ auto: 2, latePoint: 1 }); // 기본 보통에서 한 단계 올림 (D69)
+  });
+
+  it('D69 기본 보통: 중요도 보통(LOW)도 중, 매우 중요(HIGH)만 한 단계 올려 강 — 중요도 올림 점수도 같이', () => {
+    expect(toIntensity([], 'LOW', 0)).toMatchObject({ auto: 1, importancePoint: 0 });
+    expect(toIntensity([], 'NORMAL', 0)).toMatchObject({ auto: 1, importancePoint: 0 });
+    expect(toIntensity([], 'HIGH', 0)).toMatchObject({ auto: 2, importancePoint: 1 });
+  });
+
+  it('직접 고른 약은 중요도 보통이어도 그대로 약(직접 고름) — 약은 직접 고를 때만 나옴', () => {
+    const soft = alarmRow('a-wake', 'WAKE', '08:00', { intensity_source: 'MANUAL', intensity: 'SOFT', sound_key: 'theme_calm', voice_tone: 'CALM' });
+    const intensity = toIntensity([soft], 'LOW', 0);
+    expect(intensity.auto).toBe(1);
+    expect(intensity.axes).toEqual({ sound: { level: 0, manual: true }, voice: { level: 0, manual: true }, vibration: { level: 0, manual: true } });
   });
 
   it('기상 알람의 직접 값이 먼저, 없으면 다른 알람의 직접 값', () => {

@@ -120,10 +120,13 @@
 - 반복 일정의 앞으로 회차: `listOccurrences(id)` — 이 약속의 `series_id`를 읽고 같은 묶음의 내 참여 조건 중 지금 이후 · 날짜순 (`appointment_participants` + `appointments` + `alarms`) — DB. 둘 이상일 때만 "앞으로 회차" 카드가 뜨고, 다음 3회만 보이고 나머지는 "더 보기"(누르면 펼침, 화면 상태). 읽지 못해도 화면은 그대로
 - 연결 일정 · 이동 조건 · 준비 시간: `appointments` + `appointment_participants`(출발지 · 이동 수단 · 예상 이동 · 출처 · 준비 · 여유) — DB. 출발지 · 이동 수단 · 예상 이동 · 준비 시간도 고침 (D42 C) → 다시 계산 `alarm-suggest` → 저장 `alarm-commit`
 - 알람 시각 직접 고르기 (D42 C): `alarms.scheduled_at` + `time_source` MANUAL(#160), "자동으로 되돌리기" = AUTO. 강도도 같은 규칙(`intensity_source`, #160)
+- 자동 강도 (D69, `_shared/calc/intensity.ts`): 기본 보통 — 매우 중요(HIGH)면 한 단계 올림 · 최근 4주 늦잠 지각 2회 이상이면 한 단계 올림 · 잠귀 무거움이면 강(`profiles.wake_sensitivity` 칸이 생기면, 지금은 안 읽음) · 상한 강. 약은 직접 고를 때만. 이미 저장된 자동 약은 `20261030130000_intensity_default.sql`이 보통으로 올림
 - 고친 값 기록 (D42 · D43): `user_edit_logs`(#160, 화면 · 칸 · 자동값 → 고친 값 · 시각) — DB, 다음 계산 · 제안의 개인화 입력
 - 예측 준비(P80) 근거: `v_prepare_time_stats` — DB
 - 여유 시간을 바꾸면 다시 계산: `alarm-suggest` — Edge → 저장 `alarm-commit` — Edge → 다시 예약 — 폰
 - 종류별 켜기 · 끄기, 강도 직접 고르기(`alarms.is_enabled` · `intensity` · `voice_tone` · `sound_key`)도 저장 때 `alarm-commit`의 `enabled` · `levels`로 — Edge → 다시 예약 — 폰 (DB에 바로 쓰는 길은 없음)
+- 일정 편집 · 삭제 함수 (이슈 #211, D41 A · N6): `updateAppointment(id, patch, scope, { confirmed? })` → `{ changes, needsConfirm }`(앞당김은 바로 저장 + 토스트 [되돌리기] = 이전 값을 `confirmed: true`로 같은 함수에, 5분 이상 늦춤은 저장 전에 `needsConfirm`으로 돌려줘 기존 확인 시트 뒤 `confirmed: true`로 저장, D67) · `deleteAppointment(id, scope)` · `restoreAppointment(id)`(삭제 토스트 [되돌리기]) · `leaveSharedAppointment(id)`([나는 빠지기]) — 공동 약속은 만든 사람만(`UserError`). **가짜 모드만 구현**, 실서버는 4b(`appointment-edit`)까지 `UserError('아직 실서버에서는 쓸 수 없어요')`
+  - 삭제 되돌리기 계약: 화면은 삭제 확인 뒤 5초 토스트를 띄우고, **5초가 지나거나 화면을 떠날 때** `deleteAppointment`를 부름. 5초 안에 [되돌리기]를 누르면 아무것도 부르지 않음. 가짜 모드는 부르는 즉시 숨기고 `restoreAppointment`로 되살리지만, 실서버(4b)는 5초 안에는 서버로 안 보내므로 L5는 "5초 안 = 부르지 않음" 기준으로 짬 (`restoreAppointment`는 이미 지운 뒤의 되돌리기)
 - 길찾기를 못 했을 때 (7장 7.1.2): 미리 보기가 어림값(`ESTIMATE` · `CACHED`)이거나 직접 입력이 필요하면(`manual_required`) 이동 조건 칸에 안내가 뜸. 저장 때 서버가 어림값만 있으면(`ROUTE_UNAVAILABLE` + `details.fallback`) "길찾기를 못 해 이동시간을 대략 N분으로 잡았어요. 이 값으로 저장할까요?" → "이 값으로 저장"(그 분을 직접 입력 `MANUAL`로 다시 보냄) / "예상 이동을 직접 고칠게요". 좌표가 없어 어림값도 없으면 예상 이동에 직접 입력
 
 ### H05 새 일정
@@ -185,6 +188,7 @@
 - 대화: Gemini Live 단말 직결 (D7) — 임시 토큰 `voice-session` · 결과 반영 `voice-commit` — Edge
 - 대화 기록: `conversation_sessions`(`transcript` · `extracted_data` · `apply_status`) — Edge
 - 찾은 일정 · 준비물 저장: `appointments` · `todos` — Edge. 일정을 여러 개 찾으면 다 받음 (D36) — 기상과 이어지는 첫 일정만 자세히, 나머지는 시간에 맞춰 가벼운 알림. 카드별 상태 저장 자리는 D32와 같이 정함
+- 실패 · 한도 안내 부품 `ChatNotice`(값 · 콜백, L4가 붙임)
 
 ### A03 하루 기록 · 일기 (AI 대기)
 - 일기: `daily_journals`(AI 글 · 고친 글 · 코칭 · 격려 · 루틴 제안) 읽기 · 고치기 — DB, 만들기 — Edge. 날짜별로 엶 (R02 일간에서, D48)
@@ -211,6 +215,7 @@
 - 온보딩: `profiles` 아이디(`handle`) · 집(`home_name` · `home_lat` · `home_lng`) · 기본 준비 · 여유 시간 · 이동 수단 — DB, 집 검색 `place-search` — Edge
   - **지금은 흐름에서 뺌** (`lib/flags` `ONBOARDING_IN_FLOW = false`, #177): 로그인하면 아이디가 없어도 바로 홈. 임시 화면 파일은 두고 길만 막음 (주소로도 안 열리고 `/dev/screens`의 "온보딩부터 다시"도 숨김). 새 온보딩 UI를 받으면 true로 바꾸고 화면을 바꿈
   - 건너뛰는 동안의 프로필: 닉네임 = 가입 때 카카오 · 구글에서 가져온 값(DB 트리거), 준비 60분 · 여유 10분 · 이동 수단 대중교통 = DB 기본값(온보딩 입력칸 기본값과 같음), 집 = 비어 있음(서버가 "집"으로 씀, 온보딩도 이름만 저장해 좌표는 어차피 없음), 아이디 = 비어 있음(친구가 @아이디로 나를 못 찾을 뿐, 내가 남을 찾는 것과 나머지 화면은 그대로)
+- 온보딩 단계 부품 초안(`features/onboarding/components/`): `OnboardingFrame`(틀) · `HomePlaceStep` · `TimetableStep` · `PermissionsStep` · `OnboardingDoneStep` — 값 · 콜백만 받고 api · 라우터를 부르지 않음(L7이 함수를 붙임). `/dev/onboarding?mode=mock`에서 가짜 값으로 넘겨 봄 (`/dev/screens` 목록에는 없음, #116)
 - 권한 안내: 알림 · 정확한 알람 · 잠금화면 알람 화면 — 폰
 - 푸시 토큰: 앱 켤 때 `register_push_token` — RPC
 

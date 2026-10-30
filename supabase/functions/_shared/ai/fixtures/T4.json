@@ -1,0 +1,28 @@
+{
+  "point": "T4",
+  "source": "runs/e3-t4-v11-a/t4.json e3-t4-p01-d07 / usage: 장부 T4@v1.1#b597fc65 정상 호출 84건 중 출력 토큰 중앙값 (run e3-t4-v11-b:t4)",
+  "api_mode": "union",
+  "response": {
+    "model": "claude-haiku-5-5",
+    "stop_reason": "end_turn",
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"diary\":\"어젯밤 23:44에 잠들었고 오늘 08:31에 일어났어요. 알람을 미루기 2번 했어요. 재무관리 일정 기준으로 09:20에 출발해서 10:34에 도착했어요. 이 일정은 10:30에 시작하고 장소는 경영관이며, 중요도는 중요, 이동은 대중교통 65분으로 기록되어 있고 매주 반복돼요. 오늘 할 일은 따로 없었어요.\"}"
+      }
+    ],
+    "usage": {
+      "input_tokens": 250,
+      "output_tokens": 163,
+      "cache_creation_input_tokens": 0,
+      "cache_read_input_tokens": 883,
+      "output_tokens_details": {
+        "thinking_tokens": 0
+      }
+    },
+    "request_id": "req_fixture_T4"
+  },
+  "expect": {
+    "diary": "어젯밤 23:44에 잠들었고 오늘 08:31에 일어났어요. 알람을 미루기 2번 했어요. 재무관리 일정 기준으로 09:20에 출발해서 10:34에 도착했어요. 이 일정은 10:30에 시작하고 장소는 경영관이며, 중요도는 중요, 이동은 대중교통 65분으로 기록되어 있고 매주 반복돼요. 오늘 할 일은 따로 없었어요."
+  }
+}

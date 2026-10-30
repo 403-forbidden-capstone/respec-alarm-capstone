@@ -4,7 +4,10 @@ import type { Weekday } from '@/lib/weekday';
 import type { Enums } from '@/types/database';
 import type { DepartStatus } from '@shared/calc/depart.ts';
 
+import type { AlarmChange } from './schedule';
 import type { TravelProblem } from './travelConfirm';
+
+export type { AlarmChange }; // 저장하면 시각이 바뀌는 알람 한 줄 { kind, from, to } — 정의는 schedule.ts (H03 확인 시트와 같은 것)
 
 export type AlarmKind = Exclude<Enums<'alarm_type'>, 'ROUTINE'>; // 기상 · 준비 · 출발 · 도착
 export type Importance = Enums<'importance_level'>;
@@ -25,7 +28,8 @@ export const defaultAlarms = (): Record<RingKind, boolean> => ({ WAKE: true, PRE
 
 // 목업의 보통 · 중요 · 매우 중요 = DB LOW · NORMAL · HIGH
 export const IMPORTANCE_LABEL: Record<Importance, string> = { LOW: '보통', NORMAL: '중요', HIGH: '매우 중요' };
-export const IMPORTANCE_POINT: Record<Importance, number> = { LOW: 0, NORMAL: 1, HIGH: 2 };
+// 중요도로 올리는 단계 수 — 매우 중요(HIGH)만 1 (D69, 공용 IMPORTANCE_POINT와 같아야 함: mocks/__tests__/shared.test.ts)
+export const IMPORTANCE_POINT: Record<Importance, number> = { LOW: 0, NORMAL: 0, HIGH: 1 };
 
 // 출발 위치 기본값 · 이동 수단 고르기 (H05 · H03) — DB에는 BUS · SUBWAY도 있지만 목업 선택지는 이 셋
 export const ORIGIN_HOME = '집';
@@ -107,8 +111,8 @@ export type ScheduleItem = {
 };
 
 export type Intensity = {
-  auto: Level; // 중요도 + 최근 4주 늦잠 지각으로 정한 값
-  importancePoint: number;
+  auto: Level; // 기본 보통 + 중요도(매우 중요) · 최근 4주 늦잠 지각으로 올린 값 (D69)
+  importancePoint: number; // 중요도로 올린 단계 (매우 중요면 1)
   lateCount: number; // 최근 4주 늦잠 지각 횟수
   latePoint: number; // 2회 이상이면 1
   axes: Record<IntensityAxis, { level: Level; manual: boolean }>; // manual = 직접 고름
@@ -129,6 +133,28 @@ export type AppointmentDetail = Appointment & {
   intensity: Intensity;
   edits: AlarmEdits; // 지금 저장된 값 (초안의 처음 모양 · 바뀐 곳 비교)
   auto: { travelMinutes: number; predictedPrepMinutes: number }; // 직접 고른 값이 없을 때의 자동 계산값
+};
+
+// 일정 수정 · 삭제 (H03 편집 시트, 이슈 #211 · D41 A · N6) — 고칠 수 있는 값. 안 넣은 칸은 그대로
+//   at = 약속 날짜 · 시각, place = 장소 이름(H05와 같은 글자), repeatDays = 반복 요일(빈 목록 = 반복 없음). 반복 요일은 scope가 'following'일 때만 먹음
+export type AppointmentPatch = {
+  title?: string;
+  at?: Date;
+  place?: string;
+  placeLat?: number; // 고른 장소의 좌표 (place-search) — 실서버(4b)가 길찾기를 새로 구하는 데 씀. 가짜 모드는 안 읽음 (AppointmentDraft와 같음)
+  placeLng?: number;
+  importance?: Importance;
+  repeatDays?: Weekday[];
+};
+
+// 반복 일정의 고치기 · 지우기 범위 — this = 이번 회차만, following = 이번 회차와 그 뒤 모두. 반복이 아니면 둘 다 그 일정 하나
+export type EditScope = 'this' | 'following';
+
+// updateAppointment 결과 — changes = 바뀌는 알람의 전 → 후(시각이 바뀌는 기상 · 준비 · 출발만, 도착 목표는 안 셈),
+//   needsConfirm = 늦춰지는 알람이 있어 확인이 먼저인 상태. true면 아직 저장하지 않았음 (D67): 확인 시트 → { confirmed: true }로 다시 부름
+export type UpdateResult = { changes: AlarmChange[]; needsConfirm: boolean };
+export type UpdateOptions = {
+  confirmed?: boolean; // 확인 시트에서 "바꾸기"를 눌렀거나, 되돌리기처럼 확인 없이 바로 저장할 때
 };
 
 // 값을 바꿔 보았을 때의 알람 (H03 저장 전 미리 보기) — 실데이터는 alarm-suggest

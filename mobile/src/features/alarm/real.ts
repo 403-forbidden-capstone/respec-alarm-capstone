@@ -15,6 +15,7 @@ import { byTime, hasAlarms, listOnePerSeries, pickNextAlarm, toAppointment, toOc
 import { loadAppointmentRows, loadAppointmentRowsSince, loadDayRows, loadDetail, loadOccurrenceRows, loadStandaloneRow, loadStandaloneRows } from './realRows';
 import type { Appointment, AppointmentDetail, NextAlarm, Occurrence, ScheduleItem } from './types';
 
+export * from './realEdit';
 export * from './realMorning';
 export * from './realPlan';
 export * from './realWake';
