@@ -94,6 +94,7 @@ async function deleteEditLog(userId: string, editId: string): Promise<void> {
 export async function rejectDetection(input: RejectInput): Promise<RejectSnapshot | null> {
   const found = await readLocationTime(input.participantId, input.kind);
   if (!found) return null;
+  if (input.at != null && found.at !== input.at) return null; // 오래된 알림 — 그 뒤 더 새 위치 값으로 바뀌었으니 건드리지 않음
   const userId = await requireUserId();
   const editId = rejectEditId(found.participantId, found.kind, found.at);
   const logged = await supabase.from('user_edit_logs').insert({

@@ -201,12 +201,13 @@ export function wakesOfRows(rows: readonly DayWakeRow[]): SameDayWake[] {
 //   · 전에는 앞 기상에 밀려 기상이 없었는데(displaced) 이제 앞 기상이 없고 기상 알람도 없음 → ADD (첫 일정이 지워지면 둘째 일정에 기상)
 //   · 전에는 첫 일정이라 기상이 있었는데 이제 앞 기상이 생김 → REMOVE (앞 일정이 새로 생기거나 시각이 앞으로 옮겨짐)
 //   · 그 밖은 NONE — 사용자가 일부러 기상을 안 만든 약속(밀려서가 아님)을 멋대로 되살리지 않음
+//   · 이미 울린 기상 알람(wakeRung = 울릴 시각이 지남)은 떼지 않음 → NONE. 울린 기록(미루기 · 끄기)이 학습 · 미루기 판정의 근거라, 알람을 지우면 그 기록도 사라짐 (헤드 확정)
 //   earlierAfter = 지금 기준으로 앞 기상이 있는지 (다시 계산할 때 sameDayWake로 넘김)
-export function wakeAction(args: { id: string; at: Date; hasWake: boolean; beforeWakes: readonly SameDayWake[]; sim: readonly SameDayWake[] }): { action: 'ADD' | 'REMOVE' | 'NONE'; earlierAfter: boolean } {
+export function wakeAction(args: { id: string; at: Date; hasWake: boolean; wakeRung?: boolean; beforeWakes: readonly SameDayWake[]; sim: readonly SameDayWake[] }): { action: 'ADD' | 'REMOVE' | 'NONE'; earlierAfter: boolean } {
   const displacedBefore = hasEarlierWake(args.at, args.beforeWakes, args.id);
   const earlierAfter = hasEarlierWake(args.at, args.sim, args.id);
   if (displacedBefore && !earlierAfter && !args.hasWake) return { action: 'ADD', earlierAfter };
-  if (!displacedBefore && earlierAfter && args.hasWake) return { action: 'REMOVE', earlierAfter };
+  if (!displacedBefore && earlierAfter && args.hasWake && !args.wakeRung) return { action: 'REMOVE', earlierAfter };
   return { action: 'NONE', earlierAfter };
 }
 

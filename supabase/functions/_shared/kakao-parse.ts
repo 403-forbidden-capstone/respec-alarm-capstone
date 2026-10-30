@@ -2,6 +2,9 @@
 // 근거 (2026-10-15 공식 문서 확인):
 //   · 장소 키워드 검색  GET https://dapi.kakao.com/v2/local/search/keyword.json  (카카오 로컬)
 //       documents[]: id · place_name · address_name(지번) · road_address_name(도로명) · x(경도) · y(위도) · category_name
+//   · 좌표 → 주소      GET https://dapi.kakao.com/v2/local/geo/coord2address.json?x=경도&y=위도  (카카오 로컬)
+//       documents[0]: road_address{ address_name, building_name, ... } (도로명, 없으면 null) · address{ address_name, ... } (지번)
+//       바다 · 국외 등 주소가 없는 곳은 documents가 빈 배열 (오류 아님)
 //   · 대중교통 경로    GET https://dapi.kakao.com/v2/routing/publictraffic  (카카오맵 REST API, 2026-07 추가)
 //       status(OK · STARTNODES_NULL · ENDNODES_NULL · EQUAL_POINTS · INVALID_REQUEST · NO_RESULTS), routes[].properties{ type, totalTime(초), ... }
 //       routes[].steps[]{ properties{ type: BUS|SUBWAY|WALKING, time(초) }, path.points[[x,y]] }
@@ -41,6 +44,23 @@ export function parsePlaces(json: unknown): KakaoPlace[] {
     });
   }
   return out;
+}
+
+export type ReversePlace = { address: string; roadAddress: string | null; buildingName: string | null };
+
+// 좌표 → 주소 응답. 첫 결과만 읽고, 도로명이 있으면 address도 도로명 (지번만 있으면 지번). 주소가 없으면 null
+export function parseReverse(json: unknown): ReversePlace | null {
+  const docs = isObject(json) && Array.isArray(json.documents) ? json.documents : [];
+  const first = docs.find(isObject);
+  if (!first) return null;
+  const road = isObject(first.road_address) ? first.road_address : null;
+  const jibun = isObject(first.address) ? first.address : null;
+  const roadAddress = road ? text(road.address_name) : '';
+  const jibunAddress = jibun ? text(jibun.address_name) : '';
+  const address = roadAddress || jibunAddress;
+  if (!address) return null;
+  const buildingName = road ? text(road.building_name) : '';
+  return { address, roadAddress: roadAddress || null, buildingName: buildingName || null };
 }
 
 export type ParseFailure = { ok: false; reason: 'NO_ROUTE' | 'BAD_RESPONSE'; detail?: string };

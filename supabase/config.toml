@@ -400,6 +400,9 @@ verify_jwt = true
 [functions.place-search]
 verify_jwt = true
 
+[functions.place-reverse]
+verify_jwt = true
+
 [functions.notify]
 verify_jwt = true
 
@@ -447,4 +450,8 @@ enabled = true
 verify_jwt = true
 
 [functions.voice-turn]
+verify_jwt = true
+
+# L9 시간표 채우기 — 사진(base64) → Claude → 수업 줄. 앱이 로그인 토큰으로 부름
+[functions.timetable-extract]
 verify_jwt = true

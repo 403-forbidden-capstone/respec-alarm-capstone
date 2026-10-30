@@ -13,6 +13,7 @@ import { AuthProvider, useAuth } from '@/features/auth/AuthProvider';
 import { ConfigErrorScreen } from '@/features/auth/ConfigErrorScreen';
 import { PermissionPromptHost } from '@/features/permissions';
 import { ProfileRetryScreen } from '@/features/auth/ProfileRetryScreen';
+import { useDetectionLinks } from '@/features/location/hooks/useDetectionLinks';
 import { useLocationSync } from '@/features/location/useLocationSync';
 import { useAlarmSync } from '@/lib/alarmSync/useAlarmSync';
 import { takeAfterOnboarding } from '@/lib/afterOnboarding';
@@ -20,7 +21,7 @@ import { ONBOARDING_IN_FLOW } from '@/lib/flags';
 import { canUseRealData, configError } from '@/lib/mode';
 import { ensureNotificationChannels } from '@/lib/push/channels';
 import { colors, fontFiles } from '@/theme';
-// 지오펜스 신호를 받는 작업 정의 — 최상위에서 불러옴 (features/location/task). 지금은 앱이 켜져 있을 때 신호를 받음. 앱이 꺼진 상태 수신은 진입 파일에서 불러야 함 — 후속 작은 PR (package.json main)
+// 지오펜스 신호를 받는 작업 정의 — 앱이 꺼진 채 받는 길은 진입 파일(index.js)이 먼저 불러 줌. 여기 import는 같은 모듈이라 한 번만 평가됨 (features/location/task)
 import '@/features/location/task';
 
 // 글꼴 · 로그인 상태를 다 읽을 때까지 시작 화면을 유지함
@@ -81,6 +82,9 @@ function RootStack() {
   // 출발 · 도착 자동 기록용 지오펜스 등록 (로그인 직후 · 앱이 앞에 올 때, 안드로이드 · 실데이터 · 위치 권한이 있을 때만) — features/location
   useLocationSync({ active: syncActive, userId });
 
+  // 감지 안내 알림("출발 8:30 감지")을 누르면 정정 화면(/detection)으로 — 앱이 꺼진 채 알림으로 열린 경우도. 화면이 열릴 수 있을 때까지 기억해 둠
+  useDetectionLinks({ active: ready && !loading && profileError == null });
+
   // 같은 때에 최근에 끈 기상 알람 중 확정이 없는 것을 다시 판정 — 해제 뒤 앱을 안 열었어도 서버가 기상 미확인(MISSED)으로 적기 전에 확정되게
   useWakeRecheck({ active: syncActive, userId });
 
@@ -115,6 +119,8 @@ function RootStack() {
         <Stack.Screen name="suggestion/[id]" />
         <Stack.Screen name="journal/[date]" />
         <Stack.Screen name="routine/[id]" />
+        {/* 감지 안내 알림에서 열리는 1탭 정정 (목업에 없는 화면) — features/location/hooks/useDetectionLinks */}
+        <Stack.Screen name="detection" />
       </Stack.Protected>
       {/* 목업에 없는 설정 · 로그인 · 온보딩 — 실데이터를 못 쓰면 빠짐. 온보딩은 ONBOARDING_IN_FLOW가 꺼져도 따로 빠짐 */}
       <Stack.Protected guard={ready && canUseRealData}>

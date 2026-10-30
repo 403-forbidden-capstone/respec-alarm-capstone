@@ -6,7 +6,7 @@ import type { AlarmTime, IntensityAxis, Level } from '@/features/alarm/types';
 import type { WakeState } from '@/features/social/types';
 import { formatTime, minuteOfDay, timeParts } from '@/lib/format';
 import { alarmChain as sharedAlarmChain } from '@shared/calc/chain.ts';
-import { autoLevel as sharedAutoLevel, resolveIntensity } from '@shared/calc/intensity.ts';
+import { autoLevel as sharedAutoLevel, resolveIntensity, wakeSensitivityOf } from '@shared/calc/intensity.ts';
 
 import { db, kst, timelines, TODAY, type MockAppointment } from './data';
 
@@ -41,14 +41,14 @@ export function departAtOf(a: MockAppointment): Date | undefined {
   return alarmChain(a).find((x) => x.kind === 'DEPARTURE' && x.enabled)?.at;
 }
 
-// ALG-02: 기본 보통 + 매우 중요면 한 단계 + 최근 4주 늦잠 지각 2회 이상이면 한 단계 (상한 강, D69) — 약은 직접 고를 때만
+// ALG-02: 기본 보통 + 매우 중요면 한 단계 + 최근 4주 늦잠 지각 2회 이상이면 한 단계, 잠귀가 무거우면 곧바로 강 (상한 강, D69) — 약은 직접 고를 때만
 export function autoLevel(a: MockAppointment): Level {
-  return sharedAutoLevel(a.importance, db.lateCount4w);
+  return sharedAutoLevel(a.importance, db.lateCount4w, wakeSensitivityOf(db.wakeSensitivity));
 }
 
 // 직접 고른 강도가 있으면 그것, 없으면 자동
 export function axisLevel(a: MockAppointment, axis: IntensityAxis): Level {
-  return resolveIntensity(a.importance, db.lateCount4w, db.intensityOverrides[a.id]).axes[axis].level;
+  return resolveIntensity(a.importance, db.lateCount4w, db.intensityOverrides[a.id], wakeSensitivityOf(db.wakeSensitivity)).axes[axis].level;
 }
 
 const STATE_TEXT: Record<string, (t: string) => WakeState> = {
