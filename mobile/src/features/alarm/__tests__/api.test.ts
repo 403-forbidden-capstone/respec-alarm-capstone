@@ -22,7 +22,6 @@ import {
   getWakeInProgress,
   listAppointments,
   listEditLogs,
-  missWake,
   previewAlarms,
   promptWake,
   recordEdit,
@@ -532,8 +531,8 @@ describe('H05 확인 시트에서 알람 시각 고치기 (D43)', () => {
   });
 });
 
-describe('H07 · H08 기상 알람 → 해제 → 확인 알림 → 다시 울림', () => {
-  it('울림 · 해제 · 확인 중이 내 상태에 보이고, 다시 울린 시각부터 다시 판정', async () => {
+describe('H07 · H08 기상 알람 → 해제 → 확인 알림 → 직접 응답', () => {
+  it('울림 · 해제 · 확인 중이 내 상태에 보이고, 확인 알림에 직접 응답하면 응답 시각에 확정', async () => {
     const first = await getRing(WAKE);
     expect(formatTime(first!.at)).toBe('오전 8:00');
     await startRing(WAKE, first!.at);
@@ -549,25 +548,20 @@ describe('H07 · H08 기상 알람 → 해제 → 확인 알림 → 다시 울�
     check = await getWakeCheck();
     expect([check!.phase, formatTime(check!.dismissedAt)]).toEqual(['prompt', '오전 8:00']);
 
-    await missWake(WAKE, kst(22, 495));
-    expect(me()).toBe('알람 울리는 중');
-    const again = await getRing(WAKE, true);
-    expect(formatTime(again!.at)).toBe('오전 8:15');
-
-    await dismissRing(WAKE, again!.at);
-    check = await getWakeCheck(WAKE);
-    expect([check!.phase, formatTime(check!.dismissedAt)]).toEqual(['observing', '오전 8:15']);
-
-    await confirmWake(WAKE, 'self', kst(22, 505));
-    expect(me()).toBe('기상 완료 · 오전 8:25');
+    await confirmWake(WAKE, 'self', kst(22, 492));
+    expect(me()).toBe('기상 완료 · 오전 8:12');
     expect(db.wake.phase).toBe('confirmed');
-    expect(labels()).toEqual([
-      '오전 8:00 기상 알람 해제',
-      '오전 8:10 확인 알림 발송',
-      '오전 8:15 재알람',
-      '오전 8:15 기상 알람 해제',
-      '오전 8:25 기상 확인',
-    ]);
+    expect(labels()).toEqual(['오전 8:00 기상 알람 해제', '오전 8:10 확인 알림 발송', '오전 8:12 기상 확인']);
+  });
+
+  it('확인 알림에 응답이 없어도 기상 알람을 다시 울리지 않음 (D2 = B) — 확인 알림 단계에 남고, 놓침은 서버 배치가 기록', async () => {
+    await startRing(WAKE, kst(22, 480));
+    await dismissRing(WAKE, kst(22, 480));
+    await promptWake(WAKE, kst(22, 490));
+    expect(db.wake.phase).toBe('prompt');
+    expect(me()).toBe('알람 해제 · 기상 확인 중');
+    expect((await getWakeCheck())!.phase).toBe('prompt');
+    expect(labels()).toEqual(['오전 8:00 기상 알람 해제', '오전 8:10 확인 알림 발송']); // 재알람 기록 없음
   });
 
   it('미루면 울리는 중 표시를 지우고 미루기를 기록 (목업 A.snooze)', async () => {
@@ -585,12 +579,18 @@ describe('H07 · H08 기상 알람 → 해제 → 확인 알림 → 다시 울�
     expect(db.events).toHaveLength(0);
   });
 
-  it('again은 기상 알람만 — 준비 · 출발은 원래 시각과 문장', async () => {
-    const prepare = await getRing('a1:PREPARE', true);
-    expect(formatTime(prepare!.at)).toBe('오전 8:30');
-    expect(prepare!.voiceLine).toBe((await getRing('a1:PREPARE'))!.voiceLine);
-    const depart = await getRing('a1:DEPARTURE', true);
-    expect(depart!.at).toEqual((await getRing('a1:DEPARTURE'))!.at);
+  it('준비 · 출발 울림의 머리글은 폰 알림과 같은 글자, 기상은 기본 머리글 (이슈 #230)', async () => {
+    expect((await getRing('a1:PREPARE'))!.notice).toBe('오전 9:00 출발까지 30분');
+    expect((await getRing('a1:DEPARTURE'))!.notice).toBe('지금 나가면 오전 9:50 도착 · 여유 10분');
+    expect((await getRing(WAKE))!.notice).toBeUndefined();
+  });
+
+  it('출발 알람을 꺼 두면 준비 알림은 출발까지 몇 분인지 모르므로 기본 머리글, 직접 입력한 이동분은 출발 문구에 반영', async () => {
+    db.disabledKinds.add('a1:DEPARTURE');
+    expect((await getRing('a1:PREPARE'))!.notice).toBeUndefined();
+    db.disabledKinds.delete('a1:DEPARTURE');
+    db.appointments.find((x) => x.id === 'a1')!.manual = { travelMinutes: 60, times: { DEPARTURE: kst(22, 540) } }; // 출발 알람은 9:00 그대로 + 이동 60분 → 도착 10:00
+    expect((await getRing('a1:DEPARTURE'))!.notice).toBe('지금 나가면 오전 10:00 도착 · 여유 없음');
   });
 
   it('기상 확정한 알람은 다시 울려도 판정 · 기록을 그대로 둠', async () => {
@@ -611,11 +611,6 @@ describe('H07 · H08 기상 알람 → 해제 → 확인 알림 → 다시 울�
     await dismissRing('a1:PREPARE', kst(22, 510));
     expect(db.wake.phase).toBe('idle');
     expect(labels()).toEqual(['오전 8:30 준비 알람 해제']);
-  });
-
-  it('주소로 바로 연 다시 울림은 알람 + 관찰 10분 + 응답 없음 5분', async () => {
-    const again = await getRing(WAKE, true);
-    expect(formatTime(again!.at)).toBe('오전 8:15');
   });
 });
 

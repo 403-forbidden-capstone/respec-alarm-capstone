@@ -405,6 +405,11 @@ verify_jwt = true
 [functions.wake-check]
 verify_jwt = false
 
+# alarm-roll은 두 길이 한 함수: pg_cron(pg_net)이 서비스 키로 부르는 배치 길 + 앱이 로그인 토큰으로 부르는 본인 길.
+# 키 형식이 둘이라 게이트웨이 검사를 끄고 코드(_shared/auth.ts isServiceCall · requireUser)에서 가름. 로그인 토큰 확인은 본인 길에서 auth.getUser로 함
+[functions.alarm-roll]
+verify_jwt = false
+
 [analytics]
 enabled = true
 port = 54327

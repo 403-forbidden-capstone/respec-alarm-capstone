@@ -117,6 +117,7 @@ create policy wake_signal_receive on realtime.messages
 | `place-search` | 장소 검색 | 앱 H05 · 온보딩 | 켬 | 카카오 로컬 |
 | `notify` | 다른 사람 폰에 푸시 (권한은 `can_send_push`) | 앱 G04 · G03 | 켬 | Expo Push |
 | `wake-check` | 기상 미확인(MISSED) 기록 | pg_cron 5분마다 (서비스 키) | 끔 (코드에서 키 비교) | — |
+| `alarm-roll` | 반복 약속 · 일정 없는 반복 알람의 다음 회차를 앞으로 14일치 미리 만들고(회차마다 약속 · 참여 · 알람 새 행, 회차마다 길찾기 1번), 루틴 알람 시각을 다음 발생으로 옮김. 길찾기가 안 되면 1 · 3 · 6시간 뒤 재시도 → 첫 알람 12시간 전까지 안 되면 내 실측 중앙값(`CACHED`) → 직선 근사(`ESTIMATE`). 응답 `{ created, moved_alarm_ids, pending, ring_packages, canceled_alarm_ids, kakao_calls }` (`pending`은 `{ series_id, occurrence_on, reason }` 목록, `reason`은 `ROUTE_RETRY`(길찾기 재시도 대기) · `DAILY_BUDGET`(하루 길찾기 몫) · `ALARM_CAP`(앞으로 켜진 알람 상한) · `RUN_LIMIT`(이번 실행 한도 · 시간)). 길찾기를 쓴 뒤 계산 · 저장이 던져도 재시도 기록(1 · 3 · 6시간)을 남겨서 다음 5분 실행이 같은 회차로 카카오를 또 부르지 않음. **배포는 앱 맞추기(3b) 머지 뒤** | 배치: pg_cron 5분마다 (서비스 키, 길찾기 20번 · 50묶음 · 40초) / 본인: 앱 `syncNow`·반복 일정 저장 직후 (로그인 토큰, 길찾기 최대 4회차) | 끔 (코드에서 길을 가름) | 카카오 길찾기 |
 
 공통 틀은 `functions/_shared/`: `http.ts`(CORS · `X-Request-Id` · 오류. 앱이 보낸 `X-Request-Id`는 영문 · 숫자 · `_` · `-` 64자 이하일 때만 쓰고 아니면 서버가 새로 만듦) · `auth.ts` · `read.ts`(요청 검사) · `supabase.ts` · `env.ts`. 계산은 `_shared/calc/` ("공용 계산").
 
@@ -235,11 +236,12 @@ npx supabase@2.119.0 functions deploy alarm-commit  --project-ref gomrhctwjvttoq
 npx supabase@2.119.0 functions deploy place-search  --project-ref gomrhctwjvttoqifxktt --use-api
 npx supabase@2.119.0 functions deploy notify        --project-ref gomrhctwjvttoqifxktt --use-api
 npx supabase@2.119.0 functions deploy wake-check    --project-ref gomrhctwjvttoqifxktt --use-api
+npx supabase@2.119.0 functions deploy alarm-roll    --project-ref gomrhctwjvttoqifxktt --use-api   # 앱 맞추기(3b) 머지 뒤에
 ```
 
-- `verify_jwt`는 `config.toml`의 `[functions.<이름>]`이 정함 (`wake-check`만 끔). 배포 때 따라감
+- `verify_jwt`는 `config.toml`의 `[functions.<이름>]`이 정함 (`wake-check` · `alarm-roll` 둘만 끔). 배포 때 따라감
 - `_shared/`는 함수 폴더 밖이어도 상대 import라 같이 묶임. 공용 파일을 고치면 쓰는 함수를 다시 배포해야 함
-- 배치 키(Vault `project_url` · `service_role_key`)를 만든 뒤 `wake-check`를 배포하면 5분마다 돔. 배포 전에는 404가 나도 정상 ("배치")
+- 배치 키(Vault `project_url` · `service_role_key`)를 만든 뒤 `wake-check`를 배포하면 5분마다 돔. 배포 전에는 404가 나도 정상 ("배치"). `alarm-roll`도 같지만 **앱 맞추기(3b) 머지 뒤에 배포**함
 
 ### 확인 못 한 것 (이 PC에 Deno · Docker · 카카오 키가 없음)
 

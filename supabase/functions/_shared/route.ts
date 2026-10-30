@@ -1,6 +1,7 @@
 // 이동시간 정하기 — 상세설계서 7장 7.1.2 폴백 순서 (전체작업계획 4.1 Q1 표 "이동시간 폴백")
 //   직접 입력(MANUAL)이 있으면 그 값 → 1 카카오 길찾기(API) → 2 같은 경로 실측 3건 이상의 중앙값(CACHED) → 3 좌표 직선거리 근사값 → 없음
-//   · CACHED는 계산해서 "보여 주기만" 함. DB에 travel_source = CACHED로 쓰지 않음 (alarm-commit이 막음, D5 열림)
+//   · alarm-commit 길은 CACHED를 계산해서 "보여 주기만" 함. DB에 travel_source = CACHED로 쓰지 않음 (alarm-commit이 막음, D5 열림)
+//     단 alarm-roll(roll.ts)은 길찾기가 안 되고 첫 알람이 12시간 안이면 내 실측 중앙값을 CACHED로 저장함
 //   · 근사값(ESTIMATE)은 사용자 확인 필수 — 저장은 확인한 값을 MANUAL로 (7.1.2 단계 4)
 //   · 카카오 키가 없으면(F10: 키는 받는다고 보고 만듦) 경고만 남기고 다음 단계로
 // 부르는 곳을 deps로 받아서 Deno 없이 시험함 (route.test.ts)

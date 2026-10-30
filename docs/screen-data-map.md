@@ -46,7 +46,7 @@
 | 울림 기록 (해제 · 미루기 · 원탭) | 폰이 쌓아 둠 → `uploadEvents`가 `alarm_events`에 upsert (`client_event_id`가 같으면 무시) | 올린 것만 폰에서 지움 |
 | 홈 "미루기 취소" (기상 알람) | `alarm_events`에 `DISMISSED`(`MANUAL`) upsert → `AlarmCore.cancel` → H08. 기록이 먼저 (폰 `cancel`은 해제 기록을 안 남김) | 예약 취소 |
 | 기상 확정 (H08 · 앱이 앞에 올 때 다시 판정) | `alarm_events` `WAKE_CONFIRMED` + `daily_records.wake_confirmed_at` | — |
-| 출발 · 도착 (원탭 · 나중에 위치) | 한 함수 `recordParticipantTimes({ participantId, departedAt?, arrivedAt?, source })` → `appointment_participants.departed_at` · `arrived_at` · `is_late` · `late_minutes`, 출발이 들어오면 `daily_records.actual_prepare_minutes`. 원탭은 위 기록을 올린 뒤 `onEventsUploaded` 훅이 `source: BUTTON`으로 부름 | — |
+| 출발 · 도착 (원탭 · 위치) | 한 함수 `recordParticipantTimes({ participantId, departedAt?, arrivedAt?, source })` → `appointment_participants.departed_at` · `arrived_at`과 출처 칸 `departed_source` · `arrived_source`, `is_late` · `late_minutes`, 둘 다 있으면 `actual_travel_minutes`, 출발이 들어오면 `daily_records.actual_prepare_minutes`. 위치(`LOCATION`)면 `alarm_events`(`input_source LOCATION`)도. 원탭은 위 기록을 올린 뒤 `onEventsUploaded` 훅이 `source: BUTTON`으로 부름. 위치 값 [아니에요]는 `features/location/api.ts`(`rejectDetection`)가 `features/alarm/participantTimes.ts`의 `clearLocationTime`으로 지움 + `user_edit_logs`(H01 · NTF) — 지운 뒤는 다음 자동 감지를 기다림. 귀가 뒤 다시 나간 출발은 같은 함수가 더 늦은 위치 출발로 바꾸고, 앞 출발의 `alarm_events` 줄은 '확인할 기록'으로 남김 → `listEarlierDepartures(day)`가 읽음 | — |
 | 고친 값 (F5 · F9) | 저장이 성공한 뒤 `user_edit_logs` (`alarm-commit`의 `edits` 또는 DB insert) | — |
 
 `realWrite.setAlarmEnabled` · `setIntensity`(종류별 켜기 · 강도를 DB에 직접 쓰는 함수)는 부르는 화면이 없음 — H03의 켜기 · 강도는 위처럼 `alarm-commit`에 실려 감 (가짜 모드의 `saveAlarmSettings`만 이 이름으로 부름).
@@ -97,6 +97,10 @@
 ### H01 홈
 - 다음 알람: `alarms`(내 것, 켜짐, 지금 이후 가장 이른 것) → `appointment_participants` → `appointments`(제목 · 장소 · 시각) — DB. 루틴 알람이면 `participant_id`가 NULL이라 `routines.title`을 씀. 일정 없는 알람(D46)은 둘 다 NULL(#160) → 제목 "알람"
 - 오늘 일정(저녁엔 내일): `appointment_participants`(나) + `appointments.appointment_at` 날짜 — DB
+- **아침 카드** (기상 알람 시각 ~ 출발 + 30분, 이슈 #230): `getMorningPlan()` — 오늘(저녁엔 내일) 첫 일정 = 켜진 기상 알람이 붙은 가장 이른 약속(서버 `calc/wake.ts` `hasEarlierWake`와 같은 기준). 하루 일정과 **같은 읽기**(`realRows loadDayRows`, 동시에 부르면 쿼리 한 번)에서 약속 · 알람(준비 · 출발 · 도착 목표 시각, 꺼진 알람은 빈 값) · `est_travel_minutes` · `travel_source` · `departed_at`을 읽고, 기상 확인은 그 기상 알람의 `alarm_events` `WAKE_CONFIRMED` — DB. 가짜 모드는 `db.wakeConfirmations` · `db.me.departAt`
+  - 보이는 때 (`features/alarm/morning.ts` `morningCardVisible`): 저녁(18시~)이 아님 · 기상 알람 시각이 지남(기상 확정을 기다리지 않음 — 원탭 확인 줄이기, #240) · 출발 알람 시각 + 30분까지(출발 알람이 없으면 약속 − 이동) · 출발 기록(`departed_at`)이 없음. 못 읽으면 카드만 없음(홈 전체는 그대로)
+  - 글자: 첫 일정 · "출발까지 1시간 10분" · "지금 나가면 오전 9:47 도착 · 여유 13분" · 여유 / 빠듯 / 지각 위험 · 이동 출처. 도착 · 여유는 늘 지금 시각 기준으로 다시 셈 (`departNow`, 7장 7.5.2). 카드를 누르면 H03
+  - [다시 확인]: `checkDepartNow(appointmentId)` — **Edge** `alarm-suggest { appointment_id }` 미리 보기에서 이동시간만 새로 구함 (저장 안 함, 출발 시각이 지나 `UNPROCESSABLE`이어도 `details.suggestion`을 씀). 카카오 응답은 DB · 앱 메모리에 담지 않음(D5) — 숫자(이동분 · 출처)만 화면 상태로 들고 있고 같은 요청이 겹치면 한 번만. 가짜 모드는 일정에 적힌 이동분
 - 오늘 루틴 · 진행: `routines`(켜짐, 오늘 요일) + 오늘 `alarm_events` ACKNOWLEDGED(단계 알람) — DB
 - 내일 준비물(저녁): `todos`(ITEM, 내일) 읽기 · 체크(`is_done` · `done_at`) — DB
 - 제안 카드: `alarm_suggestions`(PENDING) — DB. `suppress_until`은 "이 시각 전엔 같은 종류 제안을 만들지 않음"이라 `suggestion-generate`에서만 봄
@@ -123,22 +127,26 @@
 - 장소 검색 시트("장소" 줄을 누르면 열림): 0.3초 입력이 멈추면 `listPlaces(query, near)` → `place-search`(카카오 키워드) — Edge. `near` = 프로필 집 좌표(`profiles.home_lat` · `home_lng`)가 있으면 가까운 순, 검색어가 비면 최근 장소(최근 90일 약속의 도착지 · 출발지, `near` 안 씀). 줄 아래 글자는 주소 · 분류(`category`, 카카오 값 그대로 통과 — 저장 안 함, 카카오 약관 "응답 저장 · 재사용 불가"는 D5 참고). 가짜 모드는 목업 대학가 장소에서 거름
 - 이동시간 · 알람 시각 · 강도 미리 보기: `alarm-suggest`(카카오 대중교통 포함) — Edge
 - 저장: `appointments` + `appointment_participants` + `alarms`("알람" 줄에서 고른 종류 — 기상 · 준비 · 출발, 다 끄면 알람 없는 일정, D46)를 한 번에 `alarm-commit` — Edge, 준비물 `todos`(ITEM) — DB → 예약 — 폰
-- 반복: 요일 칩 · 매일 · 평일 → `appointments.recurrence_rule` RRULE (D44). 다음 회차는 서버 `alarm-roll`이 앞으로 14일치를 미리 만듦 — 저장 직후 앱이 `syncNow({ rollSeriesId })`로 바로 넘기게 하고(준비물 저장 뒤), 평소엔 앱이 앞에 올 때 10분에 한 번
+- 반복: 요일 칩 · 매일 · 평일 → `appointments.recurrence_rule` RRULE (D44, `FREQ=DAILY` · `FREQ=WEEKLY;BYDAY=…` 두 모양만). 저장은 첫 회차만 만들고, 다음 회차는 `alarm-roll`이 앞으로 14일치를 회차마다 새 행(약속 · 참여 · 알람 · 준비물)으로 미리 만듦 (D4 A, 5분마다 보충 · 앱 맞추기 때 본인 몫). 공동 약속은 첫 회차만 · 저장 직후 앱이 `syncNow({ rollSeriesId })`로 바로 넘기고(준비물 저장 뒤), 평소엔 앱이 앞에 올 때 10분에 한 번
 - 확인 시트에서 시각 고치기 (D43): 기상을 옮기면 나머지도 따라 움직이되 순서가 뒤집히면 막음, 고친 값은 `user_edit_logs`
 
 ### H07 알람 울림
 - 소리 · 강도 · 미루기 · 해제 — 폰
+- 알림 글자 (이슈 #230): 준비 = `오전 8:40 출발까지 30분`, 출발 = `지금 나가면 오전 9:50 도착 · 여유 10분`을 새 알림 없이 기존 준비 · 출발 알림 한 줄에 합침(D65 기본안) — 서버 `_shared/ring-package.ts`가 만들어 꾸러미 `notice`로 줌. 웹 미리 보기 `ring`은 같은 함수(`features/alarm/notice.ts`)로 머리글을 그림. 기상 알람의 음성 문장(`voiceText`)은 읽어 주기(D8)가 붙기 전까지 폰이 저장만 함
 - 기록: `alarm_events` TRIGGERED · SNOOZED(`snooze_minutes`) · DISMISSED — DB (오프라인이면 폰에 보관 후 다시 보냄). 기록마다 앱이 만든 번호 `client_event_id`(유니크 — 같으면 무시) · 출처 `input_source` (둘 다 #160)
 - 알림 원탭("준비 시작" · "출발했어요" · "도착했어요"): `alarm_events` ACKNOWLEDGED(PREPARE · DEPARTURE) · ARRIVAL_CONFIRMED(ARRIVE) + `appointment_participants.departed_at` · `arrived_at` — DB. 쓰는 곳은 `recordParticipantTimes` 하나이고 지오펜스 자동 수집(#40)도 같은 함수를 `source: LOCATION`으로 부름
-  - 출처 우선순위: 사용자 응답(원탭 `BUTTON` · 직접 입력 `MANUAL`) > 위치(`LOCATION`). 위치 값이 먼저 있어도 원탭이 덮고, 응답 값이 있으면 위치는 못 덮음 (같은 출처끼리는 먼저 쓴 값). `appointment_participants`에 출처 칸이 없어 같은 시각의 응답 기록(`alarm_events.input_source`)이 있는지로 판단 → 위치 값을 쓰기 전에 같은 시각의 `alarm_events`(`LOCATION`)를 먼저 남길 것
-  - 지각(`is_late` · `late_minutes`, D58 · #41): 약속 + 5분 초과면 지각. 응답으로 받은 도착은 그대로 판정하고, 위치로 잡은 도착이 −2 ~ +5분이면 판정 보류(둘 다 NULL)로 두고 도착 확인 원탭을 기다림 (7장 D)
-  - 준비 실측(`daily_records.actual_prepare_minutes`) = 출발 − max(실제 기상 `wake_confirmed_at`, 예정 기상 = 그날 켜 둔 기상 알람 중 가장 이른 시각). 출처와 상관없이 출발이 들어올 때, 기상 기록이 둘 다 없으면 비움, 이미 값이 있으면 덮지 않음(같은 날 두 번째 약속의 출발은 준비 실측이 아님)
+  - 위치 자동 우선 (지형님 10/29 흐름 확인 #240 + 7장 A~F 자동 수집 우선): 자동으로 잡은 값은 그대로 확정('확인 중' 상태 없음), 경계가 애매하면 사용자에게 유리한 쪽, 원탭은 자동 값이 없을 때 대신 쓰는 길(원탭 알림 건너뛰기는 PR 6), [아니에요]는 틀렸을 때만 누르는 정정
+  - 출처 우선순위: 사용자 응답(원탭 `BUTTON` · 직접 입력 `MANUAL`) > 위치(`LOCATION`). 위치 값이 먼저 있어도 원탭이 덮고(출처도 응답 것으로 바뀜), 응답 값이 있으면 위치는 못 덮음 (응답끼리는 먼저 쓴 값). 위치 출발끼리는 더 늦은 출발로 바꿈 — 귀가 뒤 다시 나가면 그쪽이 출발(7.13.7 "약속 전 마지막 출발"), 앞 출발의 위치 기록 줄은 지우지 않고 '확인할 기록'으로 남겨 자기 전 대화(L4)가 확인. 위치 도착끼리는 먼저 쓴 값. 출발 · 도착이 바뀌면 그 값으로 셈한 `actual_travel_minutes`를 같은 줄에서 비우고 다시 셈. 출발 · 도착이 둘 다 위치(`LOCATION`)로 잰 값이면 도착 − 출발에 반경 보정 4분을 더함(7장 7.13.7 반경 보정, `TRAVEL_CORRECTION_MINUTES`, 실기기 측정으로 조정) — 한쪽이라도 응답이면 안 더함. 지금 값의 출처는 출처 칸 `departed_source` · `arrived_source`로 읽음 — 시각만 있고 출처가 비면 옛 앱 원탭 값이라 `BUTTON`. 위치 값을 쓰면 그 출발 · 도착 알람에 `alarm_events`(`input_source LOCATION`, 번호 고정)를 같이 남겨 기록 화면 "자동 · 지오펜스" 줄이 됨 (알람 행이 없으면 안 남김)
+  - 지각(`is_late` · `late_minutes`, D58 · #41): 응답으로 받은 도착은 약속 + 5분 초과면 지각. 위치로 잡은 도착은 바로 판정(보류 없음) — +11분(응답 경계 5분 + 감지 지연 최대 6분) 초과면 지각, 지각 분은 감지 지연 6분을 뺀 값 (D61 감지 지연만큼 넓힘, 지연 빼기는 작성자 판단). 둘 다 NULL은 약속 시각을 못 읽었을 때뿐
+  - 500m 안 가까운 약속: 출발 · 도착 감지는 그대로, `actual_travel_minutes`만 안 씀 (D68 "500m 안이면 이동 측정을 끄고 기본값" — 끄는 것은 이동시간만, 안건후보 D78 정리)
+  - 준비 실측(`daily_records.actual_prepare_minutes`) = 출발 − max(실제 기상 `wake_confirmed_at`, 예정 기상 = 그날 켜 둔 기상 알람 중 가장 이른 시각). 출처와 상관없이 출발이 들어올 때, 기상 기록이 둘 다 없으면 비움, 이미 값이 있으면 덮지 않음(같은 날 두 번째 약속의 출발은 준비 실측이 아님). 예외: 같은 참여 조건의 출발이 바뀌어(응답이 덮음 · 더 늦은 위치 출발) 그 출발로 셈한 값이면 새 출발로 다시 셈
 
 ### H08 기상 확인
 - 판정(폰 사용 · 버튼) → `alarm_events` WAKE_CONFIRMED + `daily_records.wake_confirmed_at` — DB
 - 확정 시각 = 해제 뒤 누적 화면 사용이 θ를 넘은 시각 (D14) — 판정은 관찰 10분이 끝나야 되고 기록만 그 시각으로 남김. 확인 알림에 직접 응답하면 응답 시각
 - 해제 뒤 H08을 안 열어도 앱이 앞에 올 때 최근 12시간에 끈 기상 알람 중 확정이 없는 것을 같은 판정으로 다시 보고 확정 기록 (`useWakeRecheck`). 네이티브가 해제 + 10분에 스스로 판정하는 길은 확인 필요
-- 확인 알림 원탭 → WAKE_CONFIRMED(알림 응답) — DB, 끝까지 안 깨면 MISSED 기록 + 미확인 푸시 — `wake-check` 배치(아래 표, 기준은 상세설계서 7장 7.9.2)
+- 확인 알림 원탭 → WAKE_CONFIRMED(알림 응답) — DB, 끝까지 안 깨면 MISSED 기록 + 미확인 푸시 — `wake-check` 배치(아래 표, 기준은 상세설계서 7장 7.9.2). **다시 울림 없음** (D2 = B) — 앱의 가짜 시연 `missWake` · "응답 없이 5분 지나기"는 뺌
+- 기상 확정 뒤 "오늘 첫 일정" 한 줄 (이슈 #230): `getMorningPlan()`(H01 아침 카드와 같은 함수) — "오늘 첫 일정 오전 10:00 전공 수업 · 세종대학교" · "오전 8:40에 나가면 돼요" · "다음 알림 · 준비 오전 8:10 · 출발 오전 8:40"(아직 안 울린 것만). 일정 줄을 누르면 H03. 켜진 기상 알람이 붙은 일정이 없으면 "오늘은 기상 알람이 걸린 일정이 없어요". 못 읽어도 확정 화면은 그대로 (덧붙임 줄)
 
 ### F01 · G01 친구와 그룹
 - 친구 목록: `friends`(ACCEPTED) + 이름 · 사진 `get_public_profiles` — DB · RPC
@@ -208,11 +216,12 @@
 | 이름 | 하는 일 | 외부 | 화면 |
 |---|---|---|---|
 | `place-search` | 장소 검색 | 카카오 로컬 | H05 · 온보딩 |
-| `alarm-suggest` | 이동시간 · 기상 · 준비 · 출발 · 도착 시각 · 강도 계산 (저장 안 함) | 카카오 대중교통 | H05 · H03 |
+| `alarm-suggest` | 이동시간 · 기상 · 준비 · 출발 · 도착 시각 · 강도 계산 (저장 안 함) | 카카오 대중교통 | H05 · H03 · H01(아침 카드 다시 확인) |
 | `alarm-commit` | 약속 · 참여 조건 · 알람을 한 번에 저장 | — | H05 · H03 · S01 |
 | `notify` | 다른 사람 폰에 푸시. 보내기 전에 권한 확인: G03은 같은 그룹 + `wake_share_opt_in`(D19에서 확정), G04는 `can_edit_alarm`일 때만 | Expo Push | G03 · G04 · 미확인 알림 |
 | `wake-check` | 5분마다 기상 미확인 알람을 MISSED로 기록하고 미확인 푸시(`notify`) — pg_cron 배치 | — | H08 · G03 |
-| `suggestion-generate` | 매일 03:00 제안 만들기, 반복 알람 다음 회차 메우기 (배치) | — | S01 |
+| `alarm-roll` | 반복 약속 · 일정 없는 반복 알람의 다음 회차를 14일치 미리 만들고(`series_id` · `occurrence_on`), 루틴 알람 시각을 다음 발생으로 옮김 — pg_cron 5분마다(서비스 키) + 앱 맞추기 때 본인 몫(로그인 토큰) | 카카오 대중교통 | H01 · H02 · H03 · R02 |
+| `suggestion-generate` | 매일 03:00 제안 만들기 (배치) | — | S01 |
 | `voice-session` · `voice-commit` · `journal-*` | AI 대화(Gemini Live 단말 직결용 임시 토큰 · 결과 반영) · 일기 | Gemini | A02 · A03 (AI 대기) |
 
 나머지(목록 · 체크 · 권한 · 기록 화면)는 Edge 없이 DB · RPC로 함.

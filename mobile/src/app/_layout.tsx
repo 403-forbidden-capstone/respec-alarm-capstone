@@ -12,11 +12,14 @@ import { useWakeRecheck } from '@/features/alarm/hooks/useWakeRecheck';
 import { AuthProvider, useAuth } from '@/features/auth/AuthProvider';
 import { ConfigErrorScreen } from '@/features/auth/ConfigErrorScreen';
 import { ProfileRetryScreen } from '@/features/auth/ProfileRetryScreen';
+import { useLocationSync } from '@/features/location/useLocationSync';
 import { useAlarmSync } from '@/lib/alarmSync/useAlarmSync';
 import { ONBOARDING_IN_FLOW } from '@/lib/flags';
 import { canUseRealData, configError } from '@/lib/mode';
 import { ensureNotificationChannels } from '@/lib/push/channels';
 import { colors, fontFiles } from '@/theme';
+// 지오펜스 신호를 받는 작업 정의 — 최상위에서 불러옴 (features/location/task). 지금은 앱이 켜져 있을 때 신호를 받음. 앱이 꺼진 상태 수신은 진입 파일에서 불러야 함 — 후속 작은 PR (package.json main)
+import '@/features/location/task';
 
 // 글꼴 · 로그인 상태를 다 읽을 때까지 시작 화면을 유지함
 SplashScreen.preventAutoHideAsync();
@@ -71,6 +74,9 @@ function RootStack() {
   const syncActive = enabled && ready && !loading && profileError == null;
   const userId = session?.user.id ?? null;
   useAlarmSync({ active: syncActive, userId, timeZone: profile?.timezone });
+
+  // 출발 · 도착 자동 기록용 지오펜스 등록 (로그인 직후 · 앱이 앞에 올 때, 안드로이드 · 실데이터 · 위치 권한이 있을 때만) — features/location
+  useLocationSync({ active: syncActive, userId });
 
   // 같은 때에 최근에 끈 기상 알람 중 확정이 없는 것을 다시 판정 — 해제 뒤 앱을 안 열었어도 서버가 기상 미확인(MISSED)으로 적기 전에 확정되게
   useWakeRecheck({ active: syncActive, userId });

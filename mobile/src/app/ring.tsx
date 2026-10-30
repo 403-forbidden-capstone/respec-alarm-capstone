@@ -26,11 +26,12 @@ const BACKGROUND: Record<RingKind, string> = {
 const SNOOZE_MINUTES = [5, 10, 15] as const;
 
 // H07 알람 울림 — 실제 울림은 알람 코어의 네이티브 화면이 띄움 (#33에서 이 디자인과 맞춤)
-// 이 화면은 디자인 · 웹 미리 보기용: /ring?alarm=a1:WAKE (again=1이면 기상 확인 실패 뒤 다시 울림)
+// 이 화면은 디자인 · 웹 미리 보기용: /ring?alarm=a1:WAKE
+// 준비 · 출발 알람의 머리글은 폰 알림과 같은 글자(data.notice, 서버 알림 문구 함수) — 없으면 종류별 기본 머리글
 export default function RingScreen() {
-  const params = useLocalSearchParams<{ alarm?: string; again?: string }>();
+  const params = useLocalSearchParams<{ alarm?: string }>();
   const alarmId = params.alarm ?? 'a1:WAKE';
-  const { data, error } = useLoad(() => getRing(alarmId, params.again === '1'));
+  const { data, error } = useLoad(() => getRing(alarmId));
   // 읽는 동안에도 맞는 배경이 보이게 알람 id(<일정>:<종류>)의 종류를 먼저 씀
   const fromId = params.alarm?.split(':')[1];
   const kind: RingKind = data?.kind ?? (fromId && Object.keys(HEAD).includes(fromId) ? (fromId as RingKind) : 'WAKE');
@@ -68,7 +69,7 @@ export default function RingScreen() {
   }
 
   // 기상 알람을 끄면 기상 확인(H08)으로, 준비 · 출발은 결과 안내 화면
-  // 끈 시각 = 지금 울리는 시각 (다시 울림이면 그 시각) — 기상 확인이 이 시각부터 10분을 봄
+  // 끈 시각 = 지금 울리는 시각 — 기상 확인이 이 시각부터 10분을 봄
   async function dismiss() {
     if (!data || handled.current) return;
     handled.current = true;
@@ -89,7 +90,7 @@ export default function RingScreen() {
       {data && done && data.kind !== 'WAKE' ? (
         <DonePanel kind={data.kind} appointment={data.appointment} />
       ) : data ? (
-        <View style={styles.body} accessibilityRole="alert" accessibilityLabel={HEAD[kind]}>
+        <View style={styles.body} accessibilityRole="alert" accessibilityLabel={data.notice ?? HEAD[kind]}>
           <View style={styles.top}>
             <Text variant="screenId" tone="inverse" style={styles.faded45}>
               H07
@@ -104,7 +105,7 @@ export default function RingScreen() {
           </View>
 
           <Text variant="bodyLarge" tone="inverse" align="center" style={styles.head}>
-            {HEAD[kind]}
+            {data.notice ?? HEAD[kind]}
           </Text>
           <Text variant="ringTime" tone="inverse" align="center" style={styles.time}>
             {timeParts(data.at).hm}

@@ -6,8 +6,10 @@ import { IMPORTANCE_POINT as SHARED_IMPORTANCE_POINT, LEVEL_FIELDS } from '@shar
 import { KIND_LABEL as SHARED_KIND_LABEL } from '@shared/calc/types.ts';
 import { departNow, departSlack } from '@shared/calc/depart.ts';
 import { parseRecurrence, parseRepeatDays as parseServerRepeatDays } from '@shared/calc/recur.ts';
+import { formatKoDuration } from '@shared/tz.ts';
 import { repeatToRrule, rruleToRepeat } from '@/features/alarm/repeat';
 import { parseRepeatDays as parseRoutineRepeatDays } from '@/features/routine/map';
+import { formatDuration } from '@/lib/format';
 import { WEEKDAYS, type Weekday } from '@/lib/weekday';
 
 // 서버 함수와 같이 쓰는 공용 계산(supabase/functions/_shared) 경로 별칭이 앱 · jest에서 풀리는지,
@@ -39,6 +41,13 @@ describe('공용 계산 경로 별칭 (@shared)', () => {
     ]);
     const leave = departNow({ ...base, now: new Date('2025-05-22T00:00:00.000Z') }); // 9:00 출발
     expect([leave.arriveAt.toISOString(), leave.slackMinutes, leave.status]).toEqual(['2025-05-22T00:50:00.000Z', 10, 'COMFORT']);
+  });
+
+  it('앱의 시간 길이 글자(lib/format formatDuration)가 서버 알림 문구의 formatKoDuration과 같음', () => {
+    for (const minutes of [0, 1, 30, 59, 60, 61, 70, 90, 125, 600, 0.4, 29.6, -5]) {
+      expect(formatDuration(minutes)).toBe(formatKoDuration(minutes));
+    }
+    expect(formatDuration(70)).toBe('1시간 10분');
   });
 
   it('앱에 적어 둔 값이 공용 값과 같음', () => {
