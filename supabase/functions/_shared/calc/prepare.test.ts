@@ -50,12 +50,12 @@ test('P80은 percentile_cont(0.8)과 같은 선형 보간', () => {
   assert.equal(percentile([5, 1, 3], 0.5), 3);
 });
 
-test('prepareStatsOf: 10~300분만, 앞(최신)에서 30건 — 31번째 오래된 기록과 5분 · 400분 · 빈 값은 무시', () => {
+test('prepareStatsOf: 10~240분만, 앞(최신)에서 30건 — 31번째 오래된 기록과 5분 · 400분 · 빈 값은 무시', () => {
   const recent30 = Array.from({ length: 30 }, () => 60);
-  const stats = prepareStatsOf([5, 400, null, undefined, ...recent30, 250, 250]); // 범위 밖 · 빈 값은 창을 차지하지 않고, 31번째부터(250)는 버림
+  const stats = prepareStatsOf([5, 400, null, undefined, ...recent30, 200, 200]); // 범위 밖 · 빈 값은 창을 차지하지 않고, 31번째부터(250)는 버림
   assert.deepEqual(stats, { sampleCount: 30, p80: 60 });
-  assert.deepEqual(prepareStatsOf([10, 300]), { sampleCount: 2, p80: 242 }); // 경계값 포함
-  assert.deepEqual(prepareStatsOf([9, 301, 0, -5, Number.NaN]), { sampleCount: 0, p80: null });
+  assert.deepEqual(prepareStatsOf([10, 240]), { sampleCount: 2, p80: 194 }); // 경계값 포함
+  assert.deepEqual(prepareStatsOf([9, 241, 0, -5, Number.NaN]), { sampleCount: 0, p80: null });
   assert.deepEqual(prepareStatsOf(['60', '80']), { sampleCount: 2, p80: 76 }); // numeric 칸이 글자로 와도
 });
 

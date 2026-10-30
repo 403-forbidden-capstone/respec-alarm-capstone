@@ -321,7 +321,7 @@ test('지난 알림 경고 문구: alarm-suggest(preview)는 "저장할 때 꺼�
   assert.deepEqual(toSuggestion(preview.plan, preview.inputs).warnings, preview.plan.warnings); // 앱이 받는 미리 보기 응답에 그 문구
 });
 
-// ---- 준비 통계: 내 기상~출발 기록 최근 30건 · 10~300분만 (학습 루프 기초 ③) ----
+// ---- 준비 통계: 내 기상~출발 기록 최근 30건 · 10~240분만 (학습 루프 기초 ③) ----
 
 // 날짜(record_date)만 다른 기록 줄들 — daysAgo가 클수록 오래됨
 const record = (user: string, daysAgo: number, minutes: number | null) => ({
@@ -342,19 +342,19 @@ test('준비 통계는 내 user_id 줄만: 다른 사람 기록이 같이 보여
   assert.equal(plan.prepare.sampleCount, 5);
 });
 
-test('준비 통계는 최근 30건만, 10~300분만: 31번째 오래된 기록과 5분 · 400분 · 빈 값은 무시', async () => {
+test('준비 통계는 최근 30건만, 10~240분만: 31번째 오래된 기록과 5분 · 400분 · 빈 값은 무시', async () => {
   const { db } = setup();
-  // 최근 30일은 60분, 그 전 31번째 날(daysAgo 30)은 250분 — 30건 창 밖이라 무시돼야 함
+  // 최근 30일은 60분, 그 전 31번째 날(daysAgo 30)은 200분 — 30건 창 밖이라 무시돼야 함
   for (let d = 0; d < 30; d += 1) db.rows('daily_records').push(record(USER, d, 60));
-  db.rows('daily_records').push(record(USER, 30, 250));
+  db.rows('daily_records').push(record(USER, 30, 200));
   // 범위 밖 · 빈 값 — 가장 최근 날짜(-1 ~ -5일 전)에 있어도 30건 창을 차지하지 않고 무시
-  db.rows('daily_records').push(record(USER, -1, 5), record(USER, -2, 400), record(USER, -3, null), record(USER, -4, 9), record(USER, -5, 301));
+  db.rows('daily_records').push(record(USER, -1, 5), record(USER, -2, 400), record(USER, -3, null), record(USER, -4, 9), record(USER, -5, 241));
   const stats = await loadPrepareStats(db as unknown as Db, USER);
   assert.deepEqual(stats, { sampleCount: 30, p80: 60 });
-  // 경계값 10 · 300은 쓴다
+  // 경계값 10 · 240은 쓴다
   const edge = setup().db;
-  edge.rows('daily_records').push(record(USER, 0, 10), record(USER, 1, 300));
-  assert.deepEqual(await loadPrepareStats(edge as unknown as Db, USER), { sampleCount: 2, p80: 242 });
+  edge.rows('daily_records').push(record(USER, 0, 10), record(USER, 1, 240));
+  assert.deepEqual(await loadPrepareStats(edge as unknown as Db, USER), { sampleCount: 2, p80: 194 });
 });
 
 test('뷰 v_prepare_time_stats는 더 읽지 않음: 뷰에 값이 있어도 기록이 없으면 0건', async () => {

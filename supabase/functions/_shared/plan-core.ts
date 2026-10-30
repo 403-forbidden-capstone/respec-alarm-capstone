@@ -8,8 +8,6 @@
 import {
   DEFAULT_BEFORE_PREPARE_MINUTES,
   DEFAULT_COMMON_P80,
-  PREPARE_RECORD_MAX,
-  PREPARE_RECORD_MIN,
   alarmChain,
   autoLevel,
   checkAlarms,
@@ -110,7 +108,7 @@ export type PlanInputs = {
   appointment?: AppointmentRow;
   participant?: ParticipantRow;
   existingAlarms: AlarmRow[];
-  stats: { sampleCount: number; p80: number | null }; // 내 기상~출발 기록 최근 30건 중 10~300분 (plan.ts loadPrepareStats, 이미 기상~출발이라 준비 전 활동을 더하지 않음)
+  stats: { sampleCount: number; p80: number | null }; // 내 기상~출발 기록 최근 30건 중 10~240분 (plan.ts loadPrepareStats, 이미 기상~출발이라 준비 전 활동을 더하지 않음)
   lateCount4w: number;
   sameDayWake: boolean;
   // 반복 다음 회차용 — 자동 준비시간이 이 값에서 `within`분 넘게 벗어나면 그 범위로 (D62 처음 2주 몫). 직접 고른 준비시간(draft.prepareMinutes)은 건드리지 않음
@@ -118,11 +116,12 @@ export type PlanInputs = {
 };
 
 // 기상~출발 첫 값 — 온보딩 값이 있으면 그것, 없으면(null · 프로필 없음 · 범위 밖) 목업의 50
-//   L6 안건후보: 첫 값 범위 기본안 = 5~300분만 믿음 (온보딩 · 설정 입력 화면 범위와 같음. 기록 범위 10~300과는 따로 — 첫 값은 사용자가 직접 답한 값이라 짧게 답한 것도 인정. DB 제약은 0~600)
+//   L6 안건후보: 첫 값 범위 기본안 = 5~300분만 믿음 (온보딩 · 설정 입력 화면 범위와 같음. 기록 범위 10~240(D107 기본안 A)과는 따로 — 첫 값은 사용자가 직접 답한 값이라 짧게 답한 것도 인정. DB 제약은 0~600)
 const FIRST_PREPARE_MIN = 5;
+const FIRST_PREPARE_MAX = 300;
 export function firstPrepareMinutes(profile: Pick<ProfileRow, 'default_prepare_minutes'>): number {
   const v = profile.default_prepare_minutes;
-  return v != null && Number.isFinite(Number(v)) && Number(v) >= FIRST_PREPARE_MIN && Number(v) <= PREPARE_RECORD_MAX ? Math.round(Number(v)) : DEFAULT_COMMON_P80.withWake;
+  return v != null && Number.isFinite(Number(v)) && Number(v) >= FIRST_PREPARE_MIN && Number(v) <= FIRST_PREPARE_MAX ? Math.round(Number(v)) : DEFAULT_COMMON_P80.withWake;
 }
 
 // 자동 준비시간을 기준 값 ±within분 안으로 — 직접 고른 값(MANUAL)은 그대로. 설명용 칸(개인 보정)은 합이 맞게 같이 바꿈

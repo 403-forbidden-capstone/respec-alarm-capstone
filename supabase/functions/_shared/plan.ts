@@ -104,7 +104,7 @@ export async function loadAlarms(db: Db, participantId: string, userId?: string)
   return must<AlarmRow[]>('alarms', await (userId ? query.eq('user_id', userId) : query));
 }
 
-// 예상 준비시간 통계 — 내 기상~출발 기록(daily_records.actual_prepare_minutes) 중 10~300분인 최근 30건 (학습 루프 기초 ③)
+// 예상 준비시간 통계 — 내 기상~출발 기록(daily_records.actual_prepare_minutes) 중 10~240분인 최근 30건 (학습 루프 기초 ③)
 //   예전에는 뷰 v_prepare_time_stats(전체 기간 · 거르기 없음)를 읽었음. 뷰와 마이그레이션은 그대로 두고 쓰지 않음
 //   기록은 하루 한 줄(record_date)이라 날짜 최신순 = 출발 최신순. 부른 사람의 RLS 클라이언트라 내 기록만 보이지만, 친구 기록을 읽는 정책이 생겨도 내 줄만 오게 user_id로 좁힘
 //   n(sampleCount)도 같은 30건 기준 — P80은 calc의 percentile (선형 보간, 뷰의 percentile_cont(0.8)과 같은 방식)

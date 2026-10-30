@@ -13,10 +13,10 @@ export const DEFAULT_COMMON_P80 = { withWake: 50, sameDay: 15 } as const;
 export const DEFAULT_BEFORE_PREPARE_MINUTES = 20;
 export const PREPARE_PRIOR_K = 10; // 목업 k
 export const PERSONAL_MIN_SAMPLES = 5; // 7장 7.2.1 N_min — 이 아래면 출처를 DEFAULT(첫 값)로 표시
-// 학습에 쓰는 기록 범위 (학습 루프 기초 ③, 7장 7.0.5 N_win) — 최근 30건, 기상~출발 10~300분만 (잘못 찍힌 5분 · 400분 같은 값은 버림)
+// 학습에 쓰는 기록 범위 (학습 루프 기초 ③, 7장 7.0.5 N_win) — 최근 30건, 기상~출발 10~240분만 (잘못 찍힌 5분 · 400분 같은 값은 버림). 상한 240 = D107 기본안 A(4시간 넘으면 학습에 안 씀, 기록은 남김)
 export const PREPARE_WINDOW = 30;
 export const PREPARE_RECORD_MIN = 10;
-export const PREPARE_RECORD_MAX = 300;
+export const PREPARE_RECORD_MAX = 240;
 
 export type PrepareSource = 'DEFAULT' | 'PERSONAL' | 'MANUAL';
 export type Confidence = 'LOW' | 'MEDIUM' | 'HIGH';
@@ -81,7 +81,7 @@ export function percentile(values: readonly number[], p: number): number | null 
   return sorted[lo] + (sorted[hi] - sorted[lo]) * (pos - lo);
 }
 
-// 기록 목록(최신순)에서 학습에 쓸 것만 — 10~300분, 앞에서 30건. 개수(n)와 P80이 같은 30건 기준 (학습 루프 기초 ③)
+// 기록 목록(최신순)에서 학습에 쓸 것만 — 10~240분, 앞에서 30건. 개수(n)와 P80이 같은 30건 기준 (학습 루프 기초 ③)
 //   뷰 v_prepare_time_stats(전체 기간 · 거르기 없음)를 대신함. 값이 소수 · 문자여도 숫자로 읽고 유한한 값만 셈
 export function prepareStatsOf(minutesNewestFirst: readonly (number | string | null | undefined)[]): { sampleCount: number; p80: number | null } {
   const used: number[] = [];
