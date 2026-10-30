@@ -24,15 +24,21 @@ describe('ALG-01 알람 역산', () => {
 });
 
 describe('ALG-02 강도', () => {
-  it('중요 일정은 중, 최근 4주 늦잠 지각이 2회 이상이면 한 단계 올림', () => {
+  // D69: 기본 보통 — 중요도 보통(LOW)인 a2도 약이 아니라 중. 규칙 표 전체는 supabase/functions/_shared/calc/intensity.test.ts
+  it('기본은 보통, 최근 4주 늦잠 지각이 2회 이상이면 한 단계 올림', () => {
     expect(autoLevel(appointment('a1'))).toBe(1);
-    expect(autoLevel(appointment('a2'))).toBe(0);
+    expect(autoLevel(appointment('a2'))).toBe(1);
     db.lateCount4w = 2;
     try {
       expect(autoLevel(appointment('a1'))).toBe(2);
+      expect(autoLevel(appointment('a2'))).toBe(2);
     } finally {
       db.lateCount4w = 1;
     }
+  });
+
+  it('매우 중요(HIGH)는 한 단계 올려 강', () => {
+    expect(autoLevel({ ...appointment('a1'), importance: 'HIGH' })).toBe(2);
   });
 });
 

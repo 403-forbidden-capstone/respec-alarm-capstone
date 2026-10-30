@@ -296,6 +296,7 @@ export function computePlan(i: PlanInputs, travel: ResolvedTravel, mode: PlanMod
   });
   const prepare = i.prepareBound && withWake ? clampPrepareToBound(predicted, i.prepareBound) : predicted;
 
+  // 잠귀(profiles.wake_sensitivity) 칸은 아직 DB에 없어 안 넘김(NORMAL 취급) — L7 PR 3이 칸을 만들면 loadProfile에서 읽어 여기 · map.ts toIntensity · realWrite setIntensity에 같이 넘김
   const auto = autoLevel(basics.importance, i.lateCount4w);
   const intensity = resolveIntensity(basics.importance, i.lateCount4w, resolveOverrides(i.draft.levels, i.existingAlarms, auto));
 
@@ -379,9 +380,12 @@ export function toTravelRequiredSuggestion(i: PlanInputs, travel: ResolvedTravel
   };
 }
 
+// 기본 강도는 보통(D69) — 매우 중요 · 늦잠 지각 · 잠귀가 있을 때만 "올림"이 문구에 붙음. 중요도 낮음이어도 약이라고 쓰지 않음
 export function intensityReason(basics: Pick<Basics, 'importance'>, it: ResolvedIntensity): string {
+  const upText = it.importancePoint ? ' (한 단계 올림)' : '';
   const lateText = it.latePoint ? ` + 최근 4주 늦잠 지각 ${it.lateCount}회` : '';
-  const base = `${IMPORTANCE_NAME[basics.importance]} 일정${lateText} → ${LEVEL_NAME[it.auto]}`;
+  const heavyText = it.heavySleeper ? ' + 잠귀가 무거움' : '';
+  const base = `${IMPORTANCE_NAME[basics.importance]} 일정${upText}${lateText}${heavyText} → ${LEVEL_NAME[it.auto]}`;
   return it.manual ? `${base} (직접 고른 칸이 있어요)` : base;
 }
 
