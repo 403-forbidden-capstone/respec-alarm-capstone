@@ -3,6 +3,7 @@
 import { Platform } from 'react-native';
 
 import { isAreaPlace } from '@/features/location/area';
+import { clampRadius } from '@/features/location/radius';
 
 import { distanceMeters } from './places';
 import type { LatLng, PinAddress, Place } from './types';
@@ -77,7 +78,7 @@ export function moveToMessage(lat: number, lng: number): string | null {
 // 반경 원의 상한(m) — 지도에 터무니없이 큰 원을 그리지 않게
 export const MAX_RADIUS_M = 5000;
 
-// 핀 둘레에 반경 원 — 0 이하면 지움, 상한(MAX_RADIUS_M)을 넘으면 상한으로. 반경 고르기(다음 PR)가 부름
+// 핀 둘레에 반경 원 — 0 이하면 지움, 상한(MAX_RADIUS_M)을 넘으면 상한으로. 감지 범위 고르기(MapView의 radiusMeters)가 부름
 export function setRadiusMessage(meters: number): string {
   return JSON.stringify({ type: 'setRadius', meters: Number.isFinite(meters) && meters > 0 ? Math.min(meters, MAX_RADIUS_M) : 0 });
 }
@@ -120,7 +121,7 @@ export function isWebLink(url: string): boolean {
 // 이름도 주소도 구하지 못한 자리의 이름
 export const UNNAMED_PLACE = '지정한 위치';
 
-// 고른 장소 — Place와 같은 모양 (집 바꾸기 homePatch · 일정 장소가 그대로 받음). radiusM은 반경 고르기(다음 PR)가 채움
+// 고른 장소 — Place와 같은 모양 (집 바꾸기 homePatchOf · 일정 장소가 그대로 받음). radiusM은 시트에 radius를 줬을 때만 채움(100~500m)
 export type PickedPlace = Place & { radiusM?: number };
 
 // 핀이 이 거리(m) 안에서만 움직였으면 같은 자리로 봄 — 검색 결과로 지도를 옮긴 뒤 지도가 알려 주는 가운데 좌표가 소수점 끝만 달라도 "캠퍼스 대표 위치" 경고를 지우지 않으려고
@@ -136,15 +137,17 @@ export function placeFromPin({
   typedName,
   picked,
   pinAddress,
+  radiusM,
 }: {
   point: LatLng;
   typedName: string;
   picked?: Pick<Place, 'name' | 'address'> | null;
   pinAddress?: PinAddress | null;
+  radiusM?: number; // 고른 감지 범위 — 있으면 100~500m으로 맞춰 실음
 }): PickedPlace {
   const address = pinAddress?.address.trim() || picked?.address?.trim() || undefined;
   const name = typedName.trim() || picked?.name.trim() || pinAddress?.name?.trim() || address || UNNAMED_PLACE;
-  return { name, ...(address ? { address } : {}), lat: point.lat, lng: point.lng };
+  return { name, ...(address ? { address } : {}), lat: point.lat, lng: point.lng, ...(radiusM != null ? { radiusM: clampRadius(radiusM) } : {}) };
 }
 
 // 핀 자리 주소를 못 구했을 때 문구

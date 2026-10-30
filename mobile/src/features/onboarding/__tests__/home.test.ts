@@ -27,6 +27,13 @@ describe('homePatchOf — 고른 장소를 집으로 정할 수 있나', () => {
     expect(homePatchOf({ name: '  ', lat: 37, lng: 127 })).toBeNull();
     expect(homePatchOf({ name: ' 우리 집 ', lat: 37, lng: 127 })?.home_name).toBe('우리 집');
   });
+
+  it('지도 시트가 고른 감지 범위가 있으면 home_radius_m도 100~500으로 맞춰 같이 담고, 없으면 칸을 건드리지 않음', () => {
+    expect(homePatchOf({ name: '우리집', lat: 37.5, lng: 127.0, radiusM: 300 })).toEqual({ home_name: '우리집', home_lat: 37.5, home_lng: 127.0, home_radius_m: 300 });
+    expect(homePatchOf({ name: '우리집', lat: 37.5, lng: 127.0, radiusM: 900 })?.home_radius_m).toBe(500);
+    expect(homePatchOf({ name: '우리집', lat: 37.5, lng: 127.0 })).not.toHaveProperty('home_radius_m');
+    expect(homePatchOf({ name: '최근 장소', radiusM: 200 })).toBeNull();
+  });
 });
 
 describe('hasHome — 시간표 단계가 이동시간을 구할 수 있나', () => {
