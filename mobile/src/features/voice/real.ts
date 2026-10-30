@@ -717,7 +717,9 @@ export function finishConversation(): Promise<{ recordDate: string | null }> {
   return serial(async () => {
     await guardUser();
     if (!state.started) return { recordDate: null };
-    if (state.userId && state.sessionId) await markFinished(state.userId, state.sessionId);
+    // 한 마디도 안 한 대화는 끝남으로 적지 않음 — 다음 [대화 시작]이 같은 세션을 이어 받아 하루 5대화 한도만 닳지 않게
+    const spoke = state.messages.some((m) => m.who === 'me');
+    if (spoke && state.userId && state.sessionId) await markFinished(state.userId, state.sessionId);
     if (state.sessionId && !state.pending && state.queue.length > 0) {
       try {
         await drive();
@@ -725,10 +727,7 @@ export function finishConversation(): Promise<{ recordDate: string | null }> {
         // 이미 앱에서 한 일은 그대로
       }
     }
-    state.started = false;
-    state.unavailable = null;
-    state.pending = null;
-    state.queue = [];
+    state = freshState(state.userId); // 세션 · 말 · 카드까지 비움 — 다음 열기가 실패해도 끝난 세션으로 말이 가지 않고 [다시 시도]가 새로 읽음
     return { recordDate: null };
   });
 }
