@@ -103,6 +103,7 @@
   - 보이는 때 (`features/alarm/morning.ts` `morningCardVisible`): 저녁(18시~)이 아님 · 기상 알람 시각이 지남(기상 확정을 기다리지 않음 — 원탭 확인 줄이기, #240) · 출발 알람 시각 + 30분까지(출발 알람이 없으면 약속 − 이동) · 출발 기록(`departed_at`)이 없음. 못 읽으면 카드만 없음(홈 전체는 그대로)
   - 글자: 첫 일정 · "출발까지 1시간 10분" · "지금 나가면 오전 9:47 도착 · 여유 13분" · 여유 / 빠듯 / 지각 위험 · 이동 출처. 도착 · 여유는 늘 지금 시각 기준으로 다시 셈 (`departNow`, 7장 7.5.2). 카드를 누르면 H03
   - [다시 확인]: `checkDepartNow(appointmentId)` — **Edge** `alarm-suggest { appointment_id }` 미리 보기에서 이동시간만 새로 구함 (저장 안 함, 출발 시각이 지나 `UNPROCESSABLE`이어도 `details.suggestion`을 씀). 카카오 응답은 DB · 앱 메모리에 담지 않음(D5) — 숫자(이동분 · 출처)만 화면 상태로 들고 있고 같은 요청이 겹치면 한 번만. 가짜 모드는 일정에 적힌 이동분
+- **감지 정정 줄** (이슈 #40, 인사 아래 · 아침 카드 자리 바로 뒤): `listDetections(오늘)` — 오늘 위치로 잡힌 출발 · 도착(`departed_source`/`arrived_source` = LOCATION)만. 없으면 제목도 줄도 안 그림. 줄 글자는 "출발 오전 8:30 · 자동 감지"(지각 문구 없음, D61). 읽기는 홈이 앞에 올 때 · 앱이 다시 앞에 올 때 · 홈이 다시 읽힐 때. [아니에요]: `rejectDetection(screen 'H01')` → 폰 판정 기억 잊음(`forgetGeoDetection`) → 폰 예약 · 감시 계획 다시 맞춤 → 토스트 "출발 오전 8:30 기록을 지웠어요" + [되돌리기](5초, `undoReject` → `restoreGeoDetection`). 지운 순서는 감지 안내(NTF)와 같은 `features/location/fix.ts`. 출발을 지우면 아침 카드가 다시 보일 수 있어 홈도 다시 읽음. 못 읽어도 홈 전체는 그대로. 가짜 모드는 저녁 시나리오(5월 21일)에서만 줄이 보임(아침 시나리오의 오늘은 감지가 없음)
 - 오늘 루틴 · 진행: `routines`(켜짐, 오늘 요일) + 오늘 `alarm_events` ACKNOWLEDGED(단계 알람) — DB
 - 내일 준비물(저녁): `todos`(ITEM, 내일) 읽기 · 체크(`is_done` · `done_at`) — DB
 - 제안 카드: `alarm_suggestions`(PENDING) — DB. `suppress_until`은 "이 시각 전엔 같은 종류 제안을 만들지 않음"이라 `suggestion-generate`에서만 봄
