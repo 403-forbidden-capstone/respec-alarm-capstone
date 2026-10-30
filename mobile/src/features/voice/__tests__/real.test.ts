@@ -732,3 +732,90 @@ describe('서버 응답 모양 맞춤', () => {
     expect(mCreate).toHaveBeenCalledTimes(1);
   });
 });
+
+// ---- 실패한 요청(pending)을 카드 버튼이 덮어쓰지 않음 — 큐 ----
+describe('⑫ pending이 있을 때 카드 동작은 큐에서 기다림', () => {
+  // READY 카드 c1이 있는 대화에서 다음 말이 LLM_UNAVAILABLE로 실패한 상태 (state.rev = 3)
+  async function textFailed() {
+    script = [session(), turn({ next: 'APP_TASKS', reply: null, cards: [apptCard()] }), turn({ rev: 3, cards: [apptCard({ status: 'READY' })] })];
+    await getConversation();
+    await say('발표 있어');
+    script = [new EdgeError('LLM_UNAVAILABLE')];
+    const c = await say('그리고 하나 더');
+    expect(c.unavailable?.code).toBe('LLM_UNAVAILABLE');
+    edge.mockClear();
+  }
+
+  it('[저장]은 앱 일(createAppointment)을 바로 하고 서버 알림만 큐에 — unavailable · [다시 시도]는 그대로, 성공하면 순서대로 flush', async () => {
+    await textFailed();
+    const toast = await saveCard('c1');
+    expect(toast).toBe('캡스톤 발표 알람을 맞췄어요');
+    expect(mCreate).toHaveBeenCalledTimes(1); // 앱 쪽 일은 바로
+    expect(edge).not.toHaveBeenCalled(); // 서버에는 아직 안 보냄 (말 요청을 덮어쓰지 않음)
+    let c = await getConversation();
+    expect(c.cards[0].status).toBe('SAVED');
+    expect(c.unavailable?.code).toBe('LLM_UNAVAILABLE'); // 안내 · [다시 시도] 살아 있음
+    expect(c.next).toBeNull();
+
+    script = [turn({ rev: 4, reply: { text: '네, 하나 더요.' } }), turn({ rev: 5, reply: { text: '저장했어요.' }, cards: [apptCard({ status: 'SAVED' })] })];
+    c = await retry();
+    const [text, card] = turnBodies();
+    expect(text).toMatchObject({ text: '그리고 하나 더', rev: 3 }); // 실패한 말을 같은 요청으로
+    expect(card).toMatchObject({ rev: 4 }); // 말 답의 rev로 이어서
+    expect(card.card_action).toMatchObject({ id: 'c1', action: 'SAVED', appointment_id: 'ap1' });
+    expect(c.unavailable).toBeNull();
+    expect(c.messages.at(-1)?.text).toBe('저장했어요.');
+    expect(c.next).toEqual({ who: 'me', text: '' });
+  });
+
+  it('말이 다시 실패하면 큐는 그대로 두고 unavailable 유지, 다음 [다시 시도]에서 보냄 (죽은 안내 없음)', async () => {
+    await textFailed();
+    await rejectCard('c1');
+    script = [new EdgeError('LLM_UNAVAILABLE')];
+    let c = await retry();
+    expect(c.unavailable?.code).toBe('LLM_UNAVAILABLE');
+    expect(turnBodies()).toHaveLength(1); // 카드 요청은 아직
+    script = [turn({ rev: 4 }), turn({ rev: 5, reply: null, cards: [apptCard({ status: 'REJECTED' })] })];
+    c = await retry();
+    expect(turnBodies()).toHaveLength(3);
+    expect(turnBodies()[2].card_action).toEqual({ id: 'c1', action: 'REJECTED' });
+    expect(c.unavailable).toBeNull();
+    expect(c.cards[0].status).toBe('REJECTED');
+  });
+
+  it('큐의 카드 요청이 CONFLICT면 세션을 다시 읽고 같은 번호로 새 rev에 한 번 더 보냄 — 저장은 그대로', async () => {
+    await textFailed();
+    await saveCard('c1');
+    script = [
+      turn({ rev: 4 }),
+      new EdgeError('CONFLICT'),
+      session({ resumed: true, rev: 9, cards: [apptCard({ status: 'READY' })] }),
+      turn({ rev: 10, reply: { text: '저장했어요.' }, cards: [apptCard({ status: 'SAVED' })] }),
+    ];
+    const c = await retry();
+    expect(bodies().map((x) => x.name)).toEqual(['voice-turn', 'voice-turn', 'voice-session', 'voice-turn']);
+    const cardBodies = turnBodies().slice(1);
+    expect(cardBodies[0]).toMatchObject({ rev: 4 });
+    expect(cardBodies[1]).toMatchObject({ rev: 9, client_turn_id: cardBodies[0].client_turn_id });
+    expect(c.unavailable).toBeNull();
+    expect(c.cards[0].status).toBe('SAVED');
+    expect(mCreate).toHaveBeenCalledTimes(1);
+  });
+
+  it('장소 고르기 뒤 results도 큐에서 기다림 (앱 계산은 바로)', async () => {
+    script = [session(), turn({ cards: [apptCard({ status: 'NEEDS_PLACE' })] })];
+    await getConversation();
+    await say('발표');
+    script = [new EdgeError('LLM_UNAVAILABLE')];
+    await say('다음');
+    edge.mockClear();
+    await pickCardPlace('c1', { name: '강남역 2번 출구', lat: 37.5, lng: 127.03 });
+    expect(mEstimate).toHaveBeenCalledTimes(1);
+    expect(edge).not.toHaveBeenCalled();
+    expect((await getConversation()).cards[0].status).toBe('READY');
+    expect((await getConversation()).unavailable).not.toBeNull();
+    script = [turn({ rev: 4 }), turn({ rev: 5 })];
+    await retry();
+    expect((turnBodies()[1].results as { cards: { status: string }[] }).cards[0].status).toBe('READY');
+  });
+});
