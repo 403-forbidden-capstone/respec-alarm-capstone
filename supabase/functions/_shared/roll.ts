@@ -816,7 +816,10 @@ class RollRun {
         user.addLookup();
         try {
           const r = await (this.deps.lookup as TravelLookup)({ origin, destination, transport: basics.transport });
-          travel = { minutes: r.minutes, source: 'API', needsConfirmation: false, note: '길찾기 기준' };
+          // 앞뒤 도보 구간이 빠진 결과(partial)는 API로 저장하지 않고 출처를 대략(ESTIMATE)으로 둠 — 7장 7.1.2 대체 순서와 같은 취급, 화면의 "대략적인 값이에요" 줄을 그대로 씀 (새 확인 단계 없음, 헤드 10/30)
+          travel = r.partial
+            ? { minutes: r.minutes, source: 'ESTIMATE', needsConfirmation: true, note: '대략적인 값이에요 · 확인이 필요해요' }
+            : { minutes: r.minutes, source: 'API', needsConfirmation: false, note: '길찾기 기준' };
         } catch (e) {
           const kind = e instanceof KakaoError ? e.kind : 'HTTP';
           if (kind === 'RATE_LIMIT' || kind === 'AUTH') {

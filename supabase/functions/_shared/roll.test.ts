@@ -56,12 +56,12 @@ function setup(now: Date, users: string[] = [A]): Env {
 
 // 가짜 카카오 — 분 고정, 부른 수를 셈. script에 실패 이름이나 분을 줄 세우면 부를 때마다 하나씩 꺼내 씀 (다 쓰면 fail 또는 minutes)
 function fakeKakao(minutes = 50) {
-  const state = { calls: 0, minutes, fail: null as KakaoFailure | null, script: [] as (KakaoFailure | number)[] };
+  const state = { calls: 0, minutes, partial: false, fail: null as KakaoFailure | null, script: [] as (KakaoFailure | number)[] };
   const lookup: TravelLookup = async () => {
     state.calls += 1;
     const next = state.script.shift() ?? state.fail;
     if (typeof next === 'string') throw new KakaoError(next, '시험용 실패');
-    return { minutes: next ?? state.minutes, partial: false };
+    return { minutes: next ?? state.minutes, partial: state.partial };
   };
   return { state, lookup };
 }
@@ -1040,4 +1040,18 @@ test('inheritedKinds: 기준 회차에 기상이 없어도 그날 다른 기상�
   assert.deepEqual(kinds([], true, true), []); // 알람 없는 일정
   assert.deepEqual(kinds([baseAlarm('WAKE', '2026-10-27T07:10')], true, false), ['WAKE']);
   assert.deepEqual([...RING_KINDS], ['WAKE', 'PREPARE', 'DEPARTURE']);
+});
+
+test('카카오 partial(앞뒤 도보 구간 빠짐)은 API가 아니라 ESTIMATE로 저장 — 분은 그대로, 재시도 기록 없음', async () => {
+  const env = setup(MON_10);
+  const series = await seed(env, A, slot({ appointment: { title: '세미나', appointment_at: iso('2026-10-27T09:00'), destination: { name: '세종대학교', ...SCHOOL }, importance: 'NORMAL', recurrence_rule: 'FREQ=WEEKLY;BYDAY=TU' } }), MON_10);
+  const kakao = fakeKakao(40);
+  kakao.state.partial = true;
+  const result = await roll(env, 'own', MON_10, { lookup: kakao.lookup });
+  assert.ok(result.created.length >= 1);
+  const second = occurrence(env.db, series, '2026-11-03')!;
+  const participant = participantOf(env.db, second.appointment_id);
+  assert.equal(participant.travel_source, 'ESTIMATE');
+  assert.equal(participant.est_travel_minutes, 40);
+  assert.equal(env.db.rows('roll_attempts').length, 0);
 });
