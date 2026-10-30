@@ -542,7 +542,7 @@ describe("applyGuards — 서버 조치", () => {
     return { ctx, events: ctx.events, turns: [ai(0, "안녕하세요.", []), user(1, "내일 10시에 강남역에서 캡스톤 발표 있어")] };
   };
   const run = (reply: string, acts: Act[], c = cardCtx(), over: { end?: boolean; retried?: boolean } = {}) =>
-    applyGuards({ reply, acts, end: over.end ?? false }, { ctx: c.ctx, eventsVisible: c.events, turnsBefore: c.turns, retried: over.retried ?? false });
+    applyGuards({ reply, acts, end: over.end ?? false }, { ctx: c.ctx, eventsVisible: c.events, turnsBefore: c.turns, safety: safetyInfoFrom(c.events, c.turns.filter((t) => t.role === "user").length), retried: over.retried ?? false });
 
   it("깨끗한 답은 그대로 (조치 없음, acts 같음)", () => {
     const r = run("발표라 오전 7시 40분에 강하게 깨우는 알람으로 저장할까요?", [{ type: "CONFIRM", ref: "c1" }]);
@@ -682,16 +682,16 @@ describe("applyGuards — 서버 조치", () => {
     assert.deepEqual(run("지금 오후 10시 30분이니 일찍 주무세요.", []).flags, []);
     // 카드 요약에만 있는 시각(06:50)은 cardSummaries로 허용
     const text = "카드 시간은 오전 6시 50분이에요.";
-    const noSummary = applyGuards({ reply: text, acts: [], end: false }, { ctx: c.ctx, eventsVisible: c.events, turnsBefore: c.turns });
+    const noSummary = applyGuards({ reply: text, acts: [], end: false }, { ctx: c.ctx, eventsVisible: c.events, turnsBefore: c.turns, safety: safetyInfoFrom(c.events, 1) });
     assert.ok(noSummary.flags.includes("unsupported_numbers"));
-    const withSummary = applyGuards({ reply: text, acts: [], end: false }, { ctx: c.ctx, eventsVisible: c.events, turnsBefore: c.turns, cardSummaries: ["10/9(금) 10:00 발표 · 알람 기상 06:50"] });
+    const withSummary = applyGuards({ reply: text, acts: [], end: false }, { ctx: c.ctx, eventsVisible: c.events, turnsBefore: c.turns, safety: safetyInfoFrom(c.events, 1), cardSummaries: ["10/9(금) 10:00 발표 · 알람 기상 06:50"] });
     assert.deepEqual(withSummary.flags, []);
   });
 
   it("시각 표기 섞임: HH:MM을 말로 바꿈 (mixed_time_format)", () => {
     const c = cardCtx();
     const r = applyGuards({ reply: "오전 10시 발표고 알람은 07:40이에요.", acts: [], end: false }, {
-      ctx: c.ctx, eventsVisible: c.events, turnsBefore: c.turns, cardSummaries: [c.events[0]!.pending[0]!.summary],
+      ctx: c.ctx, eventsVisible: c.events, turnsBefore: c.turns, safety: safetyInfoFrom(c.events, 1), cardSummaries: [c.events[0]!.pending[0]!.summary],
     });
     assert.ok(r.flags.includes("mixed_time_format"));
     assert.equal(r.reply, "오전 10시 발표고 알람은 오전 7시 40분이에요.");
@@ -725,5 +725,70 @@ describe("applyGuards — 서버 조치", () => {
     const b = run("네, 저장했어요. 카드의 저장 버튼으로 마무리해 주세요.", [], c);
     assert.deepEqual(a, b);
     assert.deepEqual(c, before);
+  });
+});
+
+// ───────── 리뷰 #261: 저장 주장 · 약속 보강 / 덧붙임 뒤 시각 표기 ─────────
+
+describe("저장 주장 · 약속 패턴 보강 (리뷰 #261)", () => {
+  it("저장 주장: 맞췄 · 띄어 쓴 했 · 상태로 말하는 되어 있어요 · 이 됐어요 · 넣었 · 변경 완료 · 바꾸어 두었 · 수정 · 반영 · 조정", () => {
+    for (const s of [
+      "알람을 7시로 맞췄어요.", "저장 했어요.", "저장되어 있어요.", "저장이 됐어요.", "저장돼 있어요.", "설정되어 있어요.", "7시 40분으로 넣었어요.",
+      "변경 완료했어요.", "바꾸어 두었어요.", "수정 했어요.", "반영 했어요.", "조정했어요.",
+      // 같은 뜻의 이웃 꼴
+      "저장이 되어 있어요.", "저장이 돼 있어요.", "변경 완료됐어요.", "바꿔 뒀어요.", "저장 됐어요.", "설정 되었어요.",
+    ]) assert.equal(claimsSaved(s), true, s);
+  });
+
+  it("저장 주장이 아닌 것: 확인 대기를 전하는 '저장돼요' · 물음 · 지금 있던 알람 이야기", () => {
+    for (const s of [
+      "카드의 저장 버튼을 누르면 저장돼요.", "누르면 저장돼요.", "저장 버튼을 누르시면 일정이 저장돼요.", "저장할까요?", "카드의 [저장]으로 저장할 수 있어요.",
+      "그대로 맞춰 두었어요.",
+      "충전기를 가방에 넣었나요?", "기상은 오전 7시 40분이에요.",
+    ]) assert.equal(claimsSaved(s), false, s);
+  });
+
+  it("저장 약속: 저장하겠어요 · 저장하겠습니다 · 바꾸겠어요 · 맞출게요 · 바꿔 줄게요 · 저장 할게요 · 조정할게요 · 처리해 둘게요", () => {
+    for (const s of [
+      "저장하겠어요.", "저장하겠습니다.", "바꾸겠어요.", "7시로 맞출게요.", "바꿔 줄게요.", "저장 할게요.", "조정할게요.", "처리해 둘게요.",
+      "알람을 맞추겠어요.", "고쳐 줄게요.", "변경하겠습니다.", "조정 할게요.",
+    ]) assert.equal(promisesSave(s), true, s);
+  });
+
+  it("저장 약속이 아닌 것: 물음 · 지난 일 · 확인 대기를 전하는 말", () => {
+    for (const s of ["저장할까요?", "바꿀까요?", "누르면 저장돼요.", "카드의 [저장]을 눌러 주세요.", "맞춰 두었으니 걱정 마세요.", "처리 결과가 있어요."]) {
+      assert.equal(promisesSave(s), false, s);
+    }
+  });
+
+  it("applyGuards: 보강한 말도 문장째 지움 (처리 결과 없는 턴)", () => {
+    const base = bs0();
+    const r = applyGuards({ reply: "알람을 맞췄어요. 내일 일정도 확인해 주세요.", acts: [], end: false }, {
+      ctx: base, eventsVisible: [], turnsBefore: [], safety: safetyInfoFrom([], 0),
+    });
+    assert.ok(r.flags.includes("claims_saved_without_event"));
+    assert.equal(r.reply, "내일 일정도 확인해 주세요.");
+    const p = applyGuards({ reply: "일정을 확인했어요. 알람은 제가 조정할게요.", acts: [], end: false }, {
+      ctx: base, eventsVisible: [], turnsBefore: [], safety: safetyInfoFrom([], 0),
+    });
+    assert.ok(p.flags.includes("promises_save"));
+    assert.equal(p.reply, "일정을 확인했어요.");
+  });
+
+  it("덧붙인 '기상 알람은 …' 문장 때문에 새로 시각 표기가 섞이면 다시 검사해 HH:MM을 말로 바꿈", () => {
+    const ctx = bs0();
+    const events = [ev({
+      after_turn: 1,
+      alarms: [{ ref: "al9", owner: "u0", type: "WAKE", date: "2026-10-09", time: "07:40", intensity: "STRONG", appointment_ref: "a1", enabled: true, change: "NEW" }],
+    })];
+    const r = applyGuards({ reply: "내일 일정은 10:00에 있어요.", acts: [], end: false }, {
+      ctx, eventsVisible: events, turnsBefore: [user(0, "응")], safety: safetyInfoFrom(events, 1),
+    });
+    assert.ok(r.actions.includes("append_alarm"));
+    assert.ok(r.actions.includes("spoken_times"), r.actions.join());
+    assert.ok(!r.reply.includes("10:00"), r.reply);
+    assert.equal(r.reply, "내일 일정은 오전 10시에 있어요. 기상 알람은 오전 7시 40분이에요.");
+    // 원래 flags에는 안 걸렸던 것 (덧붙이기 전 답은 한 가지 표기)
+    assert.ok(!r.flags.includes("mixed_time_format"));
   });
 });

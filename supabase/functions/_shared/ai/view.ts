@@ -165,7 +165,7 @@ export function spokenizeTimes(text: string): string {
 }
 
 export interface SeoulTime {
-  date: LocalDate; // 달력 날짜 (04:00 경계 적용 전)
+  date: LocalDate; // 달력 날짜 (서울, 0시 기준 — 대화 기준일과 다를 수 있음)
   time: LocalTime;
   hour: number;
   month: number;

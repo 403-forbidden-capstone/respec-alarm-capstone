@@ -207,6 +207,14 @@ const SAVE_CLAIM_RE = new RegExp(
     "(?:바꿨|변경했|추가했|변경됐|변경되었|추가됐|추가되었)",
     "(?:고쳤|수정했|수정됐|수정되었)",
     "(?:뺐|지웠|삭제했|제거했|삭제됐|삭제되었|제거됐|제거되었|정정했|정정됐|정정되었|바로잡았)",
+    // 리뷰 #261 보강: 띄어 쓴 '저장 했어요' · 상태로 말하는 '저장되어 있어요' · '저장이 됐어요' · '저장돼 있어요'
+    //   ('저장돼요'만은 주장이 아님 — 확인 대기를 전하는 "카드의 [저장]을 누르면 저장돼요"가 통과해야 해서 '돼'는 '있'이 뒤따를 때만)
+    "(?:저장|설정|등록|반영|수정|변경|조정)\\s*(?:했|됐|되었|되어|돼\\s*있)",
+    "(?:저장|설정|등록|반영|수정|변경|조정)이\\s*(?:됐|되었|되어|돼\\s*있)",
+    "변경\\s*완료",
+    "(?<!그대로\\s)맞췄(?:어요|습니다|죠|네요|고요|구요)",
+    "(?:넣었|바꿨)(?:어요|습니다|죠|네요|고요|구요)",
+    "(?:바꾸어|바꿔|넣어|옮겨|조정해)\\s*(?:두었|뒀)",
   ].join("|"),
   "u",
 );
@@ -227,6 +235,13 @@ const SAVE_PROMISE_RE = new RegExp(
     "(?:저장|설정|등록|반영|추가|변경|기록|수정|삭제|제거|정정)할게요",
     "(?:바꿀|고칠|뺄|지울|바로잡을)게요",
     "알고\\s*있을게요",
+    // 리뷰 #261 보강: '저장하겠어요' · '바꾸겠습니다' · '맞출게요' · '바꿔 줄게요' · '저장 할게요' · '조정할게요' · '처리해 둘게요'
+    "(?:저장|설정|등록|반영|추가|변경|기억|기록|수정|조정|처리|삭제|제거|정정)\\s*하겠(?:어요|습니다)",
+    "(?:바꾸|고치|맞추|넣|옮기|빼|지우)겠(?:어요|습니다)",
+    "(?:저장|설정|등록|반영|추가|변경|기록|수정|조정|처리|삭제|제거|정정)\\s*할게요",
+    "(?:바꿀|고칠|뺄|지울|바로잡을|맞출|넣을|옮길)\\s*게요",
+    "(?:맞춰|바꿔|고쳐|넣어|옮겨|적어|빼|지워|바로잡아)\\s*줄게요",
+    "(?:조정|처리)해\\s*(?:둘게요|놓을게요|두겠|놓겠|드릴게요|드리겠)",
   ].join("|"),
   "u",
 );
@@ -482,8 +497,11 @@ export interface GuardView {
   numberEvents?: ServerEvent[];
   /** 이 답 앞까지의 대화 */
   turnsBefore: Turn[];
-  /** 위기 정보 — safetyInfoFrom으로 채움 */
-  safety?: SafetyInfo;
+  /**
+   * 위기 정보 — safetyInfoFrom으로 채움. 필수 칸: 빠뜨리면 '위험한 말 없이 109'(hotline_without_risk)와 위기 턴 예외를 못 봐서
+   * 가드가 조용히 약해지므로 타입 오류로 막는다 (리뷰 #261).
+   */
+  safety: SafetyInfo;
   /** 카드 요약 글 (그 안의 시각 · 길이를 허용 숫자에 더함) */
   cardSummaries?: string[];
   /** 이미 한 번 다시 부른 뒤인지 — 같은 걸림이면 다시 안 부르고 문장을 지우거나 템플릿으로 */
@@ -626,7 +644,7 @@ export function applyGuards(input: GuardInput, view: GuardView): GuardResult {
   const allowed = guardAllowed(view);
   const check = autoCheckT1(input.reply, input.acts, ctx, eventsVisible, turnsBefore, {
     allowed,
-    ...(view.safety ? { safety: view.safety } : {}),
+    safety: view.safety,
     ...(view.maxChars !== undefined ? { maxChars: view.maxChars } : {}),
   });
   const flags = autoFlags(check);
@@ -665,8 +683,8 @@ export function applyGuards(input: GuardInput, view: GuardView): GuardResult {
   }
 
   // 4) 바뀐 기상 알람 시각 덧붙임 (위기 턴은 알람 이야기를 하지 않는 게 규칙 — 다음 턴에 전함)
-  if (!view.safety?.latestUser) {
-    const missing = relayWithDeferred(sents.join(" "), ctx, eventsVisible, turnsBefore, view.safety?.deferredTurns ?? 0);
+  if (!view.safety.latestUser) {
+    const missing = relayWithDeferred(sents.join(" "), ctx, eventsVisible, turnsBefore, view.safety.deferredTurns ?? 0);
     const wakes = [...new Set(missing.filter((m) => m.startsWith("기상 ")).map((m) => m.slice(3)))];
     if (wakes.length > 0) {
       const add = wakes.map(wakeAlarmSentence);
@@ -677,9 +695,10 @@ export function applyGuards(input: GuardInput, view: GuardView): GuardResult {
     }
   }
 
-  // 5) 시각 표기 섞임 — HH:MM을 말로
+  // 5) 시각 표기 섞임 — HH:MM을 말로. 덧붙인 "기상 알람은 오전 7시 40분이에요." 때문에 새로 섞인 경우도 잡으려고
+  //    조치를 마친 글을 다시 검사한다 (모델 답의 "10:00"이 서버 문장의 말 시각과 섞이는 경우, 리뷰 #261)
   let reply = sents.join(" ").trim();
-  if (check.mixed_time_format) {
+  if (check.mixed_time_format || mixedTimeFormat(reply)) {
     const spoken = spokenizeTimes(reply);
     if (spoken !== reply) {
       reply = spoken;
