@@ -8,7 +8,7 @@ import type { AlarmChange } from './schedule';
 import type { Appointment, AppointmentPatch, EditScope, Importance } from './types';
 
 // 편집 시트가 들고 있는 값 — 날짜와 시각은 at 하나 (날짜를 고르면 시각은 그대로, 시각을 고르면 날짜는 그대로)
-// placeLat · placeLng = 장소를 새로 골랐을 때만 있음 (처음 값에는 없음)
+// placeLat · placeLng = 장소의 좌표 — 처음 값(실데이터는 DB 좌표, 가짜 데이터는 없음)이거나 새로 고른 장소의 좌표
 export type ScheduleEditValue = {
   title: string;
   at: Date;
@@ -22,8 +22,16 @@ export type ScheduleEditValue = {
 // 삭제 되돌리기 토스트가 떠 있는 시간 — 지나면 그때 지움 (삭제 되돌리기 계약: docs/screen-data-map.md H03)
 export const UNDO_MS = 5000;
 
-export function editValueOf(a: Pick<Appointment, 'title' | 'at' | 'place' | 'importance' | 'recurrenceRule'>): ScheduleEditValue {
-  return { title: a.title, at: a.at, place: a.place, repeatDays: rruleToRepeat(a.recurrenceRule), importance: a.importance };
+export function editValueOf(a: Pick<Appointment, 'title' | 'at' | 'place' | 'importance' | 'recurrenceRule' | 'placeLat' | 'placeLng'>): ScheduleEditValue {
+  // 처음 장소의 좌표도 들고 있다가 되돌리기 patch에 같이 실음 — 이름만 보내면 서버가 장소가 바뀐 걸로 보고 좌표를 비움(L1 #285 리뷰)
+  return {
+    title: a.title,
+    at: a.at,
+    place: a.place,
+    ...(a.placeLat !== undefined && a.placeLng !== undefined ? { placeLat: a.placeLat, placeLng: a.placeLng } : {}),
+    repeatDays: rruleToRepeat(a.recurrenceRule),
+    importance: a.importance,
+  };
 }
 
 // 바뀐 칸 — 제목은 앞뒤 공백을 뺀 값으로 비교, 장소는 이름으로 (좌표만 다른 같은 이름은 그대로)

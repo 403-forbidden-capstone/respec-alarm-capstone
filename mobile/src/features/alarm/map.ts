@@ -34,6 +34,8 @@ export type ParticipantRow = Pick<
   'participant_id' | 'origin_name' | 'transport_type' | 'est_travel_minutes' | 'travel_source' | 'prepare_minutes' | 'buffer_minutes'
 >;
 export type AppointmentRow = Pick<Tables<'appointments'>, 'appointment_id' | 'title' | 'appointment_at' | 'dest_name' | 'importance' | 'recurrence_rule'> & {
+  dest_lat?: number | null; // 장소 좌표 — 편집 시트가 되돌리기에 같이 보내려고 읽음(H03만 채움, #275). 안 읽은 쿼리에는 없음
+  dest_lng?: number | null;
   series_id?: string; // 반복 묶음 번호 — 같은 반복의 회차는 같은 값 (H02 목록이 묶음당 하나만 보일 때 씀). 안 읽은 쿼리(H03 등)에는 없음
 };
 
@@ -141,6 +143,7 @@ export function toAppointment(rows: AppointmentRows): Appointment {
     title: appointment.title,
     at: parseDbTime(appointment.appointment_at),
     place: appointment.dest_name,
+    ...(appointment.dest_lat != null && appointment.dest_lng != null ? { placeLat: appointment.dest_lat, placeLng: appointment.dest_lng } : {}),
     origin: participant.origin_name ?? ORIGIN_HOME,
     transport: participant.transport_type,
     travelMinutes: participant.est_travel_minutes ?? 0,

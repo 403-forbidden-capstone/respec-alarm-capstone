@@ -46,6 +46,24 @@ describe('H03 일정 편집 시트 — 값', () => {
   });
 });
 
+describe('H03 일정 편집 시트 — 장소를 바꾼 뒤 되돌리기 (L1 #285 리뷰)', () => {
+  it('처음 장소의 좌표를 들고 있다가 되돌리기 patch에 이름과 같이 실음', () => {
+    const start = editValueOf({ title: '수업', at, place: '세종대학교', importance: 'LOW', recurrenceRule: null, placeLat: 37.55, placeLng: 127.07 });
+    expect(start).toMatchObject({ place: '세종대학교', placeLat: 37.55, placeLng: 127.07 });
+    const edited: ScheduleEditValue = { ...start, place: '강남역', placeLat: 37.5, placeLng: 127.03 };
+    expect(toPatch(start, edited)).toEqual({ place: '강남역', placeLat: 37.5, placeLng: 127.03 });
+    // 되돌리기 = 값을 거꾸로 비교 — 원래 이름 + 원래 좌표 (이름만 보내면 서버가 좌표를 비움)
+    expect(toPatch(edited, start)).toEqual({ place: '세종대학교', placeLat: 37.55, placeLng: 127.07 });
+  });
+
+  it('좌표를 모르는 일정(가짜 데이터)은 이름만, 좌표만 있고 장소를 안 바꾸면 patch에 안 넣음', () => {
+    const noCoords = editValueOf({ title: '수업', at, place: '강의동', importance: 'LOW', recurrenceRule: null });
+    expect('placeLat' in noCoords).toBe(false);
+    const withCoords = editValueOf({ title: '수업', at, place: '강의동', importance: 'LOW', recurrenceRule: null, placeLat: 37.5, placeLng: 127 });
+    expect(toPatch(withCoords, { ...withCoords, title: '다른 수업' })).toEqual({ title: '다른 수업' });
+  });
+});
+
 describe('H03 일정 편집 시트 — 반복 범위', () => {
   it('반복 일정이면 범위를 먼저 물음, 반복이 아니면 안 물음', () => {
     expect(needsScope(true)).toBe(true);
