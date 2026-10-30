@@ -26,7 +26,7 @@ describe('AI 대화 → H05 수정 → 알람 없이 저장', () => {
     expect(db.appointments.some((a) => a.id === saved.id)).toBe(true); // 일정으로는 있음
 
     const c = await getConversation();
-    expect(c.found?.status).toBe('APPLIED');
+    expect(c.cards[0]?.status).toBe('SAVED');
     expect(c.messages[c.messages.length - 1].text).toBe('저장했어요. 내일 일정은 알람 없이 저장해 둘게요. 오늘 대화는 여기까지 할까요?');
     expect(db.events.map((e) => `${e.label} · ${e.source}`)).toContain('일정 저장 · 스터디 · AI 대화 · 수정함');
   });

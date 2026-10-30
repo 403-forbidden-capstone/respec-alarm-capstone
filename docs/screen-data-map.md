@@ -179,11 +179,28 @@
 - 친구 알람: `alarms`(주인 = 친구) — DB, 조회 권한은 RLS가 확인. 약속 제목 · 장소까지 보여 주려면 RPC 하나 더 필요(`appointments` RLS는 본인 · 그룹원만) — #46에서
 - 설정 권한이면 켜기 · 끄기 · ±5분: `alarms` — DB → 주인에게 알림 `notify` — Edge → 주인 폰이 다시 예약. RLS는 설정 권한이면 강도 · 소리까지 허용하므로 ±5분 제한은 앱(`shiftSharedAlarm`)에서 지킴: 앞당길 때 옮긴 시각이 지금 + 5분(서버 `PAST_GRACE_MINUTES`)보다 이르게 되는 켜진 알람이 있으면 "곧 울릴 알람이라 앞당길 수 없어요"로 거절 (이미 지난 알람 · 꺼 둔 알람 · 늦추기는 검사 안 함)
 
-### A02 AI 대화 (AI 대기)
-- 대화: Gemini Live 단말 직결 (D7) — 임시 토큰 `voice-session` · 결과 반영 `voice-commit` — Edge
-- 대화 기록: `conversation_sessions`(`transcript` · `extracted_data` · `apply_status`) — Edge
-- 찾은 일정 · 준비물 저장: `appointments` · `todos` — Edge. 일정을 여러 개 찾으면 다 받음 (D36) — 기상과 이어지는 첫 일정만 자세히, 나머지는 시간에 맞춰 가벼운 알림. 카드별 상태 저장 자리는 D32와 같이 정함
-- 실패 · 한도 안내 부품 `ChatNotice`(값 · 콜백, L4가 붙임)
+### A02 AI 대화 (실데이터는 텍스트 대화 — 서버 함수 voice-session · voice-turn과 같이 배포돼야 동작)
+- 실패 · 한도 안내 부품 `ChatNotice`(값 · 콜백) — `ai.tsx`가 실패(`unavailable`) · 한도(`limits.reached`)일 때 마지막 말풍선 아래에 붙임
+- 가짜 데이터: 목업 대본(`mocks/ai.ts`) 그대로. 카드는 찾은 일정 한 장(`cards[0]`, 번호 c1)
+- 실데이터(`features/voice/real.ts`, 설계 `L4_자기전_설계메모.md` 1 · 2 · 5절): 글로만 대화 — 말하기 버튼 없음("키보드 마이크로 말해도 돼요")
+  - 시작: `voice-session {session_type: BEFORE_SLEEP, input_mode: TEXT, resume: true}` — 오늘 안 끝난 세션이 있으면 이어서(A02를 다시 열어도 대화 유지), 첫 마디는 서버 템플릿. 하루 한도면 `session_id: null` · `limits.reached: DAY`
+  - 말: `voice-turn {session_id, rev, client_turn_id, text}` (25초 timeout, `lib/edge`). 응답 `next: APP_TASKS`면 앱이 카드마다 일을 하고 `voice-turn {results}`(같은 client_turn_id · rev는 응답의 rev)로 돌려준 뒤 마지막 `reply`를 받음
+  - 앱 일: 새 약속 카드(`APPT_NEW`) = 장소 이름이 `listPlaces(이름)`에 똑같이 하나면 그 좌표로 `estimateAppointment`, 아니면 `NEEDS_PLACE`(카드의 [장소 고르기] = 장소 검색 시트) · 시각 고침 `adjustEstimate` / 알람 고치기(`ALARM_EDIT`) = `getAppointment` + `previewAlarms`(시각 · 준비가 바뀔 때만) / 정정 `fixes` = `features/voice/fixes.ts` — 새 시각 `recordParticipantTimes(MANUAL)` + 고친 값 기록(user_edit_logs, 화면 A02) 한 줄, 부정(위치 값 지우기)은 L2 PR 6 뒤 연결
+  - 카드 버튼: [저장] = `createAppointment(estimate, '자기 전 대화')`(준비물 같이) · 약속 없는 알람 = `createStandaloneAlarm` · [바꾸기] = `saveAlarmSettings` · 준비 +N · 강도는 **실제로 바뀐 때만** 저장 뒤 `saveAlarmSettings` 한 번 더(alarm-commit이 길찾기를 또 부르므로) → `voice-turn {card_action: SAVED, appointment_id, alarms}` / [저장 안 함] = `card_action: REJECTED`(서버는 답 없음)
+  - 완료: 대화를 그대로 남기고 홈으로 (대화 끝 정리 `voice-commit` · 할 일 · 준비물 · 일기는 이번 범위 밖)
+  - 대화 상태(세션 · rev · 카드 · 계산한 Estimate)는 앱 메모리. 앱을 다시 열면 voice-session resume으로 말 · 카드 상태를 받고, 저장 전 Estimate는 다시 계산 (D5 — 이동 분을 서버에 안 남김)
+- 오류 · 상태 (화면 문구는 `lib/edge`의 code → 문구):
+
+| 상황 | 앱이 하는 일 |
+|---|---|
+| `LLM_UNAVAILABLE` · `NOT_CONFIGURED` · `NETWORK` · `TIMEOUT` · `INTERNAL` | 던지지 않음. 대화 · 카드는 남기고 마지막 말풍선 아래에 "AI가 지금 답하지 못해요" + [다시 시도](같은 요청 · 같은 client_turn_id) · [직접 일정 만들기] · [대화 마치기]. `details.cards`가 오면 카드 상태만 받음 |
+| `CONFLICT` (rev 어긋남) | `voice-session` resume으로 다시 읽고 오류 안내(보낸 말은 입력칸으로) |
+| `NOT_FOUND` (세션 · 카드) | 앞 대화를 버리고 다음에 다시 시작 |
+| `limits.reached` TURN · DAY | 오류가 아님 — "오늘 대화는 여기까지예요" + [대화 마치기] · [직접 일정 만들기], 입력 막음 |
+| 그 밖 (`VALIDATION_FAILED` · `AUTH_REQUIRED` …) | 던짐 → 토스트, 보낸 말은 입력칸으로 |
+
+- 대화 기록: `conversation_sessions`(`turns` · `server_state`) — 서버만 씀(앱은 읽기만)
+- 일정 · 알람 저장: 앱이 L1 함수로(`appointments` · `alarms`), 준비물은 카드와 같이. 대화 끝 정리의 할 일 · 준비물(`todos`)은 서버 PR 5 (D32). 일정을 여러 개 찾으면 다 받음 (D36) — 기상과 이어지는 첫 일정(`first_of_day`)만 알람 줄을 자세히, 나머지는 "출발 알림" 한 줄. 카드별 상태는 서버 `server_state.cards`
 
 ### A03 하루 기록 · 일기 (AI 대기)
 - 일기: `daily_journals`(AI 글 · 고친 글 · 코칭 · 격려 · 루틴 제안) 읽기 · 고치기 — DB, 만들기 — Edge. 날짜별로 엶 (R02 일간에서, D48)
@@ -225,7 +242,8 @@
 | `wake-check` | 5분마다 기상 미확인 알람을 MISSED로 기록하고 미확인 푸시(`notify`) — pg_cron 배치 | — | H08 · G03 |
 | `alarm-roll` | 반복 약속 · 일정 없는 반복 알람의 다음 회차를 14일치 미리 만들고(`series_id` · `occurrence_on`), 루틴 알람 시각을 다음 발생으로 옮김 — pg_cron 5분마다(서비스 키) + 앱 맞추기 때 본인 몫(로그인 토큰) | 카카오 대중교통 | H01 · H02 · H03 · R02 |
 | `suggestion-generate` | 매일 03:00 제안 만들기 (배치) | — | S01 |
-| `voice-session` · `voice-commit` · `journal-*` | AI 대화(Gemini Live 단말 직결용 임시 토큰 · 결과 반영) · 일기 | Gemini | A02 · A03 (AI 대기) |
+| `voice-session` · `voice-turn` | AI 대화(텍스트) — 첫 마디 · 말 · 앱 일 결과 · 카드 버튼. 서버는 카드 재료와 말만, 계산 · 저장은 앱 | Claude | A02 (서버 함수는 별도 PR, 배포 전엔 가짜 응답 시험) |
+| `voice-commit` · `journal-*` | 대화 끝 정리(할 일 · 준비물) · 일기 | Claude | A02 · A03 (AI 대기) |
 
 나머지(목록 · 체크 · 권한 · 기록 화면)는 Edge 없이 DB · RPC로 함.
 

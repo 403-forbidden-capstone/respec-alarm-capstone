@@ -17,6 +17,7 @@ type Props = {
   onSpeak: () => void;
   onDone: () => void;
   doneDisabled?: boolean; // AI가 정리 중이면 완료를 막음 — 끝난 대화에 답 · 카드가 붙지 않게
+  textOnly?: boolean; // 실데이터 대화 — 글로만. 텍스트 · 말하기 버튼을 숨기고 "키보드 마이크로 말해도 돼요" 한 줄
 };
 
 // 대화 아래 입력 칸 (.composer) — 상태 한 줄 · 글 입력(글 모드) · 텍스트 / 말하기 / 완료
@@ -33,6 +34,7 @@ export function ChatComposer({
   onSpeak,
   onDone,
   doneDisabled,
+  textOnly,
 }: Props) {
   const input = useRef<TextInput>(null);
   const sendable = canSay && text.trim().length > 0; // 빈 글 · 공백만은 못 보냄
@@ -65,9 +67,14 @@ export function ChatComposer({
           <Button label="보내기" small onPress={send} disabled={!sendable} />
         </View>
       ) : null}
+      {textOnly && inputVisible ? (
+        <Text variant="caption" tone="faint" align="center" style={styles.hint}>
+          키보드 마이크로 말해도 돼요
+        </Text>
+      ) : null}
       <View style={styles.buttons}>
-        <Pill label="텍스트" on={mode === 'text'} onPress={onToggleMode} />
-        <MicButton listening={listening} disabled={!canSay} onPress={onSpeak} />
+        {textOnly ? null : <Pill label="텍스트" on={mode === 'text'} onPress={onToggleMode} />}
+        {textOnly ? null : <MicButton listening={listening} disabled={!canSay} onPress={onSpeak} />}
         <Pill label="완료" onPress={onDone} disabled={doneDisabled} />
       </View>
     </View>
@@ -147,6 +154,7 @@ const styles = StyleSheet.create({
     boxShadow: `0 10px 30px -18px ${colors.shadow}40`,
   },
   status: { marginBottom: 8 },
+  hint: { marginBottom: 10 },
   inputRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 10 },
   input: {
     ...typeScale.body,
