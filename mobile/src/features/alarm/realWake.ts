@@ -327,8 +327,8 @@ export async function recheckRecentWakes(): Promise<string[]> {
 }
 
 // 확인 알림 · 놓침 단계는 시간과 사용 구간으로 정해지고(getWakeCheck), 놓침(MISSED)은 서버 배치가 기록함 — 앱이 따로 남길 것이 없음
+// 확인 알림에도 응답이 없으면 알람을 다시 울리지 않고 MISSED만 (D2 = B)
 export async function promptWake(): Promise<void> {}
-export async function missWake(): Promise<void> {}
 
 // 기상 확정 기록. how = self(확인 알림에 직접 응답) → 응답한 지금 시각, auto → 누적 사용이 θ를 넘은 시각 (D14, 못 구하면 지금)
 //   이미 확정한 알람이면 처음 판정 그대로 (두 번 눌러도 한 번만). 화면이 넘기는 판정 시각(at)은 가짜 시나리오 시각이라 쓰지 않음

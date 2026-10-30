@@ -8,6 +8,7 @@ import { DEFAULT_BEFORE_PREPARE_MINUTES } from '@shared/calc/prepare.ts';
 import { minutesBetween } from '@shared/calc/time.ts';
 import type { RingKind } from '@shared/calc/types.ts';
 
+import type { MorningSource } from './morning';
 import { repeatLabel, rruleToRepeat } from './repeat';
 import {
   MANUAL_SOURCE,
@@ -64,7 +65,7 @@ const isRingRow = (row: AlarmRow): row is AlarmRow & { alarm_type: RingKind } =>
 
 // 알람 한 줄. ROUTINE 알람은 약속에 속하지 않아 여기 오지 않음 (호출하는 쪽이 participant_id로 거름)
 //   auto(직접 고른 시각이면 자동 계산값)는 DB에 값이 없어서 toAppointment가 공용 계산(@shared/calc/chain)으로 구해 넘김
-export function toAlarmTime(row: AlarmRow, auto?: Date): AlarmTime | null {
+export function toAlarmTime(row: Pick<AlarmRow, 'alarm_id' | 'alarm_type' | 'scheduled_at' | 'is_enabled'>, auto?: Date): AlarmTime | null {
   if (row.alarm_type === 'ROUTINE') return null;
   return {
     id: row.alarm_id,
@@ -201,6 +202,34 @@ export function toScheduleItem(rows: {
     place: appointment.dest_name,
     importance: appointment.importance,
     hasAlarm: rows.alarms.some((x) => x.alarm_type !== 'ROUTINE'),
+  };
+}
+
+// 하루 일정 읽기 한 줄 (realRows loadDayRows) — 하루 일정(H01)과 오늘 첫 일정(아침 흐름)이 같이 읽는 칸
+export type DayRow = {
+  participant_id: string;
+  est_travel_minutes: number | null;
+  travel_source: ParticipantRow['travel_source'];
+  departed_at: string | null;
+  appointments: Pick<AppointmentRow, 'appointment_id' | 'title' | 'appointment_at' | 'dest_name'>;
+  alarms: readonly Pick<AlarmRow, 'alarm_id' | 'alarm_type' | 'scheduled_at' | 'is_enabled'>[];
+};
+
+// 오늘 첫 일정을 고를 약속 한 줄 (features/alarm/morning.ts) — 루틴 알람은 약속에 속하지 않아 거름
+export function toMorningSource(row: DayRow): MorningSource {
+  const { appointments: appointment } = row;
+  return {
+    appointmentId: appointment.appointment_id,
+    title: appointment.title,
+    at: parseDbTime(appointment.appointment_at),
+    place: appointment.dest_name,
+    travelMinutes: row.est_travel_minutes ?? 0,
+    travelSource: TRAVEL_SOURCE_LABEL[row.travel_source],
+    alarms: row.alarms.flatMap((alarm) => {
+      const time = toAlarmTime(alarm);
+      return time ? [time] : [];
+    }),
+    departedAt: row.departed_at ? parseDbTime(row.departed_at) : null,
   };
 }
 

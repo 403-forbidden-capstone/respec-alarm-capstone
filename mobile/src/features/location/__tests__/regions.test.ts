@@ -116,16 +116,21 @@ describe('감시 목록 (planRegions)', () => {
     expect(plan.regions.map((r) => r.originOf.length + r.destOf.length)).toEqual([1, 1]);
   });
 
-  it('출발지 ~ 목적지 500m 안이면 목적지를 감시하지 않음, 출발은 살림 (L6 안건후보: 가까운 약속 감지 기본안 A)', () => {
+  it('출발지 ~ 목적지 500m 안이어도 목적지를 감시 — 도착 감지를 살림, near는 이동시간만 끔 (D68 · 안건후보 D78 정리)', () => {
     const plan = planRegions({ home: HOME, participants: [participant({ dest: NEAR_HOME })], now: at('08:00') });
-    expect(plan.regions.map((r) => r.id)).toEqual([HOME_REGION_ID]);
+    expect(plan.regions.map((r) => [r.id === HOME_REGION_ID, r.destOf])).toEqual([
+      [true, []],
+      [false, ['p1']],
+    ]);
     expect(plan.participants[0]).toMatchObject({ fromHome: true, near: true });
-    // 집 아닌 출발지끼리 가까워도 같음 — 출발지는 감시
-    const far = planRegions({ home: HOME, participants: [participant({ origin: GANGNAM, dest: { lat: GANGNAM.lat + 0.002, lng: GANGNAM.lng } })], now: at('08:00') });
-    expect(far.regions.map((r) => [r.originOf, r.destOf])).toEqual([
+    // 집 아닌 출발지끼리 가까워도 같음 — 출발지 · 목적지 다 감시
+    const close = planRegions({ home: HOME, participants: [participant({ origin: GANGNAM, dest: { lat: GANGNAM.lat + 0.002, lng: GANGNAM.lng } })], now: at('08:00') });
+    expect(close.regions.map((r) => [r.originOf, r.destOf])).toEqual([
       [[], []],
       [['p1'], []],
+      [[], ['p1']],
     ]);
+    expect(close.participants[0].near).toBe(true);
   });
 
   it('반경은 저장된 칸 값(dest_radius_m), 없으면 200m', () => {
