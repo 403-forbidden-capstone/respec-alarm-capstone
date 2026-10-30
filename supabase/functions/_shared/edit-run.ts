@@ -35,7 +35,7 @@ import { buildRingPackages, canceledAlarmIds, subtitleFor, type RingPackage } fr
 import { resolveTravel, type TravelChoice, type TravelDeps } from './route.ts';
 import { inheritedKinds, resolvedTravelOf, shiftManualTimes } from './roll.ts';
 import type { Db } from './supabase.ts';
-import { localDateKey, localDayRange, safeTimeZone } from './tz.ts';
+import { localDateKey, localDayRange, localMinuteOfDay, safeTimeZone } from './tz.ts';
 
 export type EditCtx = {
   userId: string; // 검증한 로그인 사용자 (요청 본문에서 받지 않음)
@@ -391,7 +391,10 @@ export async function updateAppointment(ctx: EditCtx, req: Extract<EditRequest, 
     const newDay = snapshot.days.get(localDateKey(newAt, tz)) ?? [];
     const oldDay = snapshot.days.get(localDateKey(oldAt, tz)) ?? [];
     const sameDayWake = hasEarlierWake(newAt, wakesOfRows(newDay.filter((r) => !excluded.has(r.appointment.appointment_id)).map(dayWakeRow)), row.appointment_id);
-    const hadEarlierWake = hasEarlierWake(oldAt, wakesOfRows(oldDay.map(dayWakeRow)), row.appointment_id);
+    // 기상이 없던 이유가 "앞 기상에 밀려서"만이 아님 — 저녁 일정은 계산된 기상이 낮 12시 이후라 기상을 안 만듦(plan-core.ts, #320). 저녁 일정을 아침으로 옮기면 기상이 붙어야 하므로 같이 "밀려서 없던 것"으로 봄
+    //   L6 안건후보: 기상 없는 저녁 일정을 낮 12시 전으로 옮길 때 기본안 = 옛 시각이 낮 12시 이후이고 알람은 있는데 기상만 없으면 규칙 때문에 없던 것으로 보고 기상을 더함 (사용자가 일부러 뺀 경우와 구별 못 함)
+    const hadNoWakeInEvening = alarms.some((a) => a.alarm_type === 'PREPARE' || a.alarm_type === 'DEPARTURE') && !alarms.some((a) => a.alarm_type === 'WAKE') && localMinuteOfDay(oldAt, tz) >= 12 * 60;
+    const hadEarlierWake = hasEarlierWake(oldAt, wakesOfRows(oldDay.map(dayWakeRow)), row.appointment_id) || hadNoWakeInEvening;
 
     const { travel, warnings } = await travelFor(ctx, env, { row: patchedRow, participant, placeChanged: patched.changed.place });
     result.warnings.push(...warnings);

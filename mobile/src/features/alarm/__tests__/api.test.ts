@@ -148,7 +148,7 @@ describe('H05 그날 첫 일정만 기상 알람 (약속 시각 기준, 서버�
   it('앞선 일정의 기상 알람을 꺼 두면 세지 않음', async () => {
     db.disabledKinds.add('a3:WAKE');
     try {
-      const e = await estimateAppointment(on23('14:00'));
+      const e = await estimateAppointment(on23('11:00')); // 14:00이면 계산된 기상이 낮 12시 이후라 기상이 안 생김(#320)
       expect(kindsOf(e.appointment.alarms)).toContain('WAKE');
     } finally {
       db.disabledKinds.delete('a3:WAKE');
@@ -217,6 +217,7 @@ describe('H05 알람 종류 고르기 · 알람 없는 일정 (D46)', () => {
   const draftWith = (alarms: Partial<AppointmentDraft['alarms']>): AppointmentDraft => ({
     ...defaultDraft(kst(24, 0), morning),
     title: '스터디',
+    time: '10:00', // 기본 14:00은 계산된 기상이 낮 12시 이후라 기상이 안 생김(#320) → 기상이 있는 오전 일정으로
     alarms: { WAKE: true, PREPARE: true, DEPARTURE: true, ...alarms },
   });
   const kindsOf = (alarms: { kind: string }[]) => alarms.map((x) => x.kind);
@@ -259,7 +260,7 @@ describe('H05 알람 종류 고르기 · 알람 없는 일정 (D46)', () => {
 
   it('알람 없는 일정은 같은 날 기상 알람으로 세지 않음 — 뒤 일정이 기상 알람을 가짐', async () => {
     await createAppointment(await estimateAppointment(draftWith({ WAKE: false, PREPARE: false, DEPARTURE: false })));
-    const later = { ...draftWith({}), time: '16:00' };
+    const later = { ...draftWith({}), time: '12:00' }; // 16:00이면 기상이 낮 12시 이후라 기상 자체가 안 생김(#320)
     const e = await estimateAppointment(later);
     expect([e.sameDayWake, kindsOf(e.appointment.alarms)[0]]).toEqual([false, 'WAKE']);
 
@@ -570,7 +571,7 @@ describe('고친 값 기록 (user_edit_logs, 가짜)', () => {
 });
 
 describe('H05 확인 시트에서 알람 시각 고치기 (D43)', () => {
-  const draft = (): AppointmentDraft => ({ ...defaultDraft(kst(24, 0), morning), title: '스터디' });
+  const draft = (): AppointmentDraft => ({ ...defaultDraft(kst(24, 0), morning), title: '스터디', time: '10:00' }); // 14:00이면 기상이 낮 12시 이후라 안 생김(#320)
 
   it('고친 시각으로 저장되고(직접 고름 표시), 고친 값 기록에 H05로 남음', async () => {
     const estimate = await estimateAppointment(draft());

@@ -2,7 +2,7 @@
 // 지금은 src/mocks의 가짜 데이터를 돌려주고, Supabase가 붙으면 이 파일 안에서만 바꿉니다.
 //   읽기 · 쓰기 위치는 docs/screen-data-map.md (H01 · H02 · H03 · H05 · H07 · H08)
 import { DEFAULT_COMMON_P80, personalPrepareOf, predictPrepare, prepareStatsOf, recentPrepareOf, wakeMarginOf } from '@shared/calc/prepare.ts';
-import { hasEarlierWake } from '@shared/calc/wake.ts';
+import { hasEarlierWake, isEveningWake } from '@shared/calc/wake.ts';
 
 import { now } from '@/lib/clock';
 import { UserError } from '@/lib/errors';
@@ -409,7 +409,9 @@ function wakeFlags(list: readonly MockAppointment[], days: readonly Date[]): Map
   for (const day of days) {
     let taken = false;
     for (const a of list.filter((x) => isSameDay(x.at, day)).sort(byTime)) {
-      const canWake = alarmChain({ ...a, withWake: true }).some((x) => x.kind === 'WAKE');
+      // 계산된 기상이 낮 12시 이후(저녁 일정)면 기상을 울릴 수 없음 — 서버 computePlan과 같은 함수 (#320). 직접 고른 기상 시각은 존중
+      const wake = alarmChain({ ...a, withWake: true }).find((x) => x.kind === 'WAKE');
+      const canWake = wake != null && (a.manual?.times?.WAKE != null || !isEveningWake(wake.at, 'Asia/Seoul', a.at));
       flags.set(a.id, canWake && !taken);
       if (canWake && !db.disabledAppointments.has(a.id) && !db.disabledKinds.has(`${a.id}:WAKE`)) taken = true;
     }
@@ -588,13 +590,20 @@ export async function estimateAppointment(d: AppointmentDraft): Promise<Estimate
       .filter((a) => isSameDay(a.at, at) && alarmChain(a).some((x) => x.kind === 'WAKE'))
       .map((a) => ({ appointmentId: a.id, appointmentAt: a.at, isEnabled: !db.disabledAppointments.has(a.id) && !db.disabledKinds.has(`${a.id}:WAKE`) })),
   );
-  const withWake = !sameDayWake;
   // 예전에는 여기에 같은 식을 따로 적어 두고 두 번째 일정(15분)에도 개인 보정 +10을 붙였음 → 서버와 같은 함수로 (두 번째 일정은 15분 그대로)
-  const prepare = predictPrepare({
-    commonP80: withWake ? DEFAULT_COMMON_P80.withWake : DEFAULT_COMMON_P80.sameDay,
-    personalP80: withWake ? personalPrepareOf(MOCK_PREPARE_STATS, wakeMarginOf(db.wakeMargin), d.importance) : null,
-    sampleCount: withWake ? MOCK_PREPARE_STATS.sampleCount : 0,
-  });
+  const prepareOf = (wake: boolean) =>
+    predictPrepare({
+      commonP80: wake ? DEFAULT_COMMON_P80.withWake : DEFAULT_COMMON_P80.sameDay,
+      personalP80: wake ? personalPrepareOf(MOCK_PREPARE_STATS, wakeMarginOf(db.wakeMargin), d.importance) : null,
+      sampleCount: wake ? MOCK_PREPARE_STATS.sampleCount : 0,
+    });
+  // 계산된 기상이 낮 12시 이후(저녁에만 일정이 있는 날)면 기상 없이 준비부터 — 서버 computePlan과 같은 함수 isEveningWake (#320). 여유 10분은 이 가짜 모드의 고정값
+  let withWake = !sameDayWake;
+  let prepare = prepareOf(withWake);
+  if (withWake && isEveningWake(new Date(at.getTime() - (10 + travel + prepare.minutes) * 60_000), 'Asia/Seoul', at)) {
+    withWake = false;
+    prepare = prepareOf(false);
+  }
   const common = prepare.commonP80;
   const before = withWake ? 20 : 0;
   const draft: MockAppointment = {
