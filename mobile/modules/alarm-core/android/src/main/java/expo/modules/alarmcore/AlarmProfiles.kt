@@ -52,6 +52,10 @@ object AlarmSoundKeys {
     else -> NORMAL
   }
 
-  /** 앱 파일을 먼저 틀 키인지 — 파일이 있는 키 중 기본 키가 아닌 것. 모르는 키 · 기본 키는 폰 기본 알람음이 먼저 */
-  fun playsOwnFileFirst(soundKey: String, hasOwnFile: Boolean): Boolean = hasOwnFile && soundKey != DEFAULT
+  /**
+   * 앱 파일을 먼저 틀 키인지 — 파일이 있는 키 중 약(`theme_calm`) · 강(`theme_urgent`)만.
+   * 기본 키(`default`) · 보통(`theme_default`) · 모르는 키는 폰 기본 알람음이 먼저이고 앱 파일은 예비
+   * (지형님 10/30 — 10/18 "안드로이드 기본 알람 정도는" 결정: 보통 알람은 폰 기본 알람음)
+   */
+  fun playsOwnFileFirst(soundKey: String, hasOwnFile: Boolean): Boolean = hasOwnFile && soundKey != DEFAULT && soundKey != NORMAL
 }

@@ -249,6 +249,8 @@
 - 시간표 가져오기 확인(`app/timetable-import.tsx`, 목업 번호 없음, D66-1, #291): 사진(A) · 폰 캘린더(D)에서 읽어 온 수업을 줄마다 고치고 빼고 → [수업 N개 저장]. 줄 편집 · 저장은 온보딩 시간표 단계와 같은 `TimetableStep` · `useTimetableStep`(줄마다 `estimateAppointment` → `createAppointment(…, '온보딩 시간표')`), 가져온 수업은 `lib/importHandoff`로 받음. 학교 위치를 한 번 정하면 좌표 없는 모든 줄에 적용(`CampusCard`). 길 입구는 `lib/flags` `TIMETABLE_PATHS`(photo · calendar, 아직 끔) — 입구 · 서버 함수(`timetable-extract`)는 뒤 PR
 - 시간표 가져오기 확인(`app/timetable-import.tsx`, 목업 번호 없음, D66-1, #291): 사진(A) · 폰 캘린더(D)에서 읽어 온 수업을 줄마다 고치고 빼고 → [수업 N개 저장]. 줄 편집 · 저장은 온보딩 시간표 단계와 같은 `TimetableStep` · `useTimetableStep`(줄마다 `estimateAppointment` → `createAppointment(…, '온보딩 시간표')`), 가져온 수업은 `lib/importHandoff`로 받음. 학교 위치를 한 번 정하면 좌표 없는 모든 줄에 적용(`CampusCard`). 길 입구는 `lib/flags` `TIMETABLE_PATHS`(photo · calendar 켬 — 온보딩 시간표 단계 · 설정 "수업 시간표" 구역 입구, 끄면 입구 · 동의 항목 · 이 화면 진입이 함께 사라짐). 사진 읽기는 서버 함수 `timetable-extract`(Claude), 캘린더는 폰 안에서만(`expo-calendar`, 앞으로 2주 매주 반복 일정 후보)
 - 권한 안내: 알림 · 정확한 알람 · 잠금화면 알람 화면 — 폰
+- 설정 "출발 · 도착 자동 기록" 카드(`features/location/LocationAutoSection`, 안드로이드 + 실데이터에서만): 스위치 = 폰 저장 `location:v1:auto`(기본 켬) + 위치 권한 상태(`permissions.ts` `getLocationStatus`: 켜짐 · 위치 꺼짐 · 앱 사용 중에만 · 정확한 위치 꺼짐) — 폰, DB 없음. 앞 권한만 시스템 창으로 묻고 "항상 허용" · "정확한 위치"는 앱 설정 화면으로 안내(안드로이드 11+). 온보딩에서 못 켰다면 여기서(위치 허용하기 → 앞 권한 → 항상 허용 설정). 권한이 모자라도 스위치는 켜 둠 — 권한이 생기면 바로 등록. 끄면 등록한 지오펜스를 멈춤
+- 온보딩은 `LOCATION_DISCLOSURE`를 보여 준 뒤 `requestLocationAccessFlow()`를 부름(L7 #277)
 - 푸시 토큰: 앱 켤 때 `register_push_token` — RPC
 
 ## Edge Function — 만들 것만
