@@ -75,7 +75,7 @@ const styles = StyleSheet.create({
   disabled: { opacity: 0.35 },
   tbtnHit: { minHeight: size.touch, minWidth: size.touch, justifyContent: 'center', alignItems: 'flex-end' },
   tbtn: {
-    height: 32,
+    minHeight: 32,
     paddingHorizontal: 12,
     borderRadius: 16,
     borderWidth: 1,

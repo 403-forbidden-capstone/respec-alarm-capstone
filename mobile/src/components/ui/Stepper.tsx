@@ -121,6 +121,7 @@ export function Stepper({ label, value, onChange, step = 5, min = 0, max = 600, 
               returnKeyType="done"
               maxLength={String(max).length}
               accessibilityLabel={`${label} 직접 입력`}
+              maxFontSizeMultiplier={1.3}
               style={styles.input}
             />
             {unit ? <Text variant="bodyStrong">{unit}</Text> : null}
@@ -170,7 +171,7 @@ const styles = StyleSheet.create({
   hit: { width: size.touch, height: size.touch, alignItems: 'center', justifyContent: 'center' },
   button: {
     width: 36,
-    height: 32,
+    minHeight: 32,
     borderRadius: 16,
     borderWidth: 1,
     borderColor: colors.line,

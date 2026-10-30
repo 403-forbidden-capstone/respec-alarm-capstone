@@ -63,6 +63,7 @@ export function ChatComposer({
             accessibilityLabel="보낼 메시지"
             maxLength={1000} // 서버가 받는 한 말의 최대 글자 수 (voice-turn MAX_TEXT_CHARS)
             placeholderTextColor={colors.faint}
+            maxFontSizeMultiplier={1.3}
             style={styles.input}
           />
           <Button label="보내기" small onPress={send} disabled={!sendable} />
@@ -161,7 +162,7 @@ const styles = StyleSheet.create({
     ...typeScale.body,
     flex: 1,
     minWidth: 0,
-    height: 38,
+    minHeight: 38,
     paddingVertical: 0,
     paddingHorizontal: 12,
     borderWidth: 1,
@@ -170,7 +171,7 @@ const styles = StyleSheet.create({
     color: colors.ink,
   },
   buttons: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 16 },
-  pill: { height: 38, paddingHorizontal: 16, borderRadius: 19, borderWidth: 1, borderColor: colors.chip, backgroundColor: colors.chip, justifyContent: 'center' },
+  pill: { minHeight: 38, paddingHorizontal: 16, borderRadius: 19, borderWidth: 1, borderColor: colors.chip, backgroundColor: colors.chip, justifyContent: 'center' },
   pillOn: { backgroundColor: colors.card, borderColor: colors.ink },
   pillOff: { opacity: 0.4 },
   micWrap: { width: MIC, height: MIC, alignItems: 'center', justifyContent: 'center' },

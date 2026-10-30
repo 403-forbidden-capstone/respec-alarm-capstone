@@ -33,6 +33,7 @@ export function ItemChips({ label, items, onRemove, text, onChangeText, onAdd, p
           placeholderTextColor={colors.faint}
           maxLength={20}
           accessibilityLabel={`${label} 이름`}
+          maxFontSizeMultiplier={1.3}
           style={[styles.input, font(filled ? 600 : 400)]}
         />
         {filled ? <Button small variant="ghost" label="추가" onPress={onAdd} /> : null}
@@ -72,7 +73,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    height: size.chip,
+    minHeight: size.chip,
     paddingHorizontal: 10,
     borderRadius: radius.chip,
     backgroundColor: colors.chip,

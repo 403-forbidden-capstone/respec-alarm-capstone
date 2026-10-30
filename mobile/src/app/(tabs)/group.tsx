@@ -2,8 +2,7 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
-import { Avatar, Button, Card, Chip, EmptyState, LoadError, Loading, Screen, SectionHeader, Segmented, Text, toast, TopBar } from '@/components/ui';
-import { TextLink } from '@/features/alarm/components/TextLink';
+import { Avatar, Button, Card, Chip, EmptyState, LoadError, Loading, Screen, SectionHeader, Segmented, Text, toast, TopBar, TopBarButton } from '@/components/ui';
 import { acceptFriend, listFriendRequests, listFriends, listGroups } from '@/features/social/api';
 import { ActionTile } from '@/features/social/components/ActionTile';
 import { GroupIcon } from '@/features/social/components/GroupIcon';
@@ -56,7 +55,7 @@ export default function GroupScreen() {
     <Screen onRefresh={reload}>
       <TopBar
         screenId={tab === 'friend' ? 'F01' : 'G01'}
-        right={<TextLink label="권한 관리" onPress={() => router.push('/permissions')} />}
+        right={<TopBarButton label="권한 관리" onPress={() => router.push('/permissions')} />}
       />
       <Text variant="title" style={styles.title}>
         친구와 그룹

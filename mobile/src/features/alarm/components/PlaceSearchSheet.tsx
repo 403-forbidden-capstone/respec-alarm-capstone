@@ -89,6 +89,7 @@ function PlaceSearchBody({ search, onPick }: Pick<Props, 'search' | 'onPick'>) {
           placeholder="장소 이름으로 찾기"
           placeholderTextColor={colors.faint}
           accessibilityLabel="장소 검색"
+          maxFontSizeMultiplier={1.3}
           style={styles.input}
         />
       </View>
@@ -147,7 +148,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    height: 48,
+    minHeight: 48,
     paddingHorizontal: 14,
     borderRadius: radius.field,
     borderWidth: 1,
