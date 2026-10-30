@@ -244,9 +244,11 @@ export const byTime = <T extends { at: Date }>(x: T, y: T) => x.at.getTime() - y
 //   L6 안건후보: H02 묶음이 전부 지난 경우 기본안 = 가장 최근 지난 회차 하나를 "지난 일정"에 둠
 //   알람이 있는 회차만 넘길 것 (hasAlarms로 거른 뒤) — 가장 가까운 회차의 알람이 모두 꺼졌다고 묶음 전체가 사라지지 않게
 //   upcoming = 같은 묶음에서 지금 이후 남은 회차 수(보여 주는 회차 포함) — 카드의 "2주치 알람 걸림" 표시에 씀. 묶음 번호가 없으면 0
+//   counted를 주면 그 조건에 맞는 회차만 셈 (켜진 알람이 있는 회차만 — 꺼 둔 회차는 폰에 안 걸려 있음). 보여 줄 회차를 고르는 데는 안 씀
 export function listBySeries<T extends { at: Date }>(
   entries: readonly { seriesId: string | null | undefined; item: T }[],
   nowMs: number,
+  counted: (item: T) => boolean = () => true,
 ): { item: T; upcoming: number }[] {
   const bySeries = new Map<string, T[]>();
   const out: { item: T; upcoming: number }[] = [];
@@ -261,7 +263,7 @@ export function listBySeries<T extends { at: Date }>(
   }
   for (const list of bySeries.values()) {
     const upcoming = list.filter((x) => x.at.getTime() >= nowMs).sort(byTime);
-    if (upcoming.length) out.push({ item: upcoming[0], upcoming: upcoming.length });
+    if (upcoming.length) out.push({ item: upcoming[0], upcoming: upcoming.filter(counted).length });
     else out.push({ item: list.reduce((latest, x) => (x.at.getTime() > latest.at.getTime() ? x : latest)), upcoming: 0 });
   }
   return out;
@@ -273,7 +275,7 @@ export function onePerSeries<T extends { at: Date }>(entries: readonly { seriesI
 
 // 알람 목록(H02)용 — 묶음당 하나로 줄이고, 앞으로 회차가 둘 이상인 묶음의 카드에 남은 회차 수(upcomingCount)를 붙임. 시각 순
 export function listOnePerSeries(entries: readonly { seriesId: string | null | undefined; item: Appointment }[], nowMs: number): Appointment[] {
-  return listBySeries(entries, nowMs)
+  return listBySeries(entries, nowMs, (a) => a.enabled)
     .map(({ item, upcoming }) => (upcoming > 1 ? { ...item, upcomingCount: upcoming } : item))
     .sort(byTime);
 }

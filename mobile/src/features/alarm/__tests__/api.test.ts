@@ -710,6 +710,11 @@ describe('반복 묶음 (가짜 데이터: 매주 월 · 수 영어 스터디 4�
     expect(list.filter((a) => a.id !== 'st1').every((a) => a.upcomingCount === undefined)).toBe(true);
   });
 
+  it('H02: 꺼 둔 회차는 남은 회차 수에서 빠짐 (st2를 끄면 4가 3으로)', async () => {
+    db.disabledAppointments.add('st2');
+    expect((await listAppointments()).find((a) => a.id === 'st1')?.upcomingCount).toBe(3);
+  });
+
   it('H02 everyOccurrence(H05가 같은 날 앞 일정을 찾을 때)는 묶음을 줄이지 않고 모든 회차', async () => {
     const all = await listAppointments({ everyOccurrence: true });
     expect(all.filter((a) => a.title === '영어 스터디').map((a) => a.id)).toEqual(STUDY);

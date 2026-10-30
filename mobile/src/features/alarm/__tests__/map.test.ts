@@ -352,6 +352,18 @@ describe('listBySeries · listOnePerSeries — 카드의 "앞으로 회차가 �
     ]);
   });
 
+  it('counted를 주면 그 조건의 회차만 셈 — 보여 줄 회차 고르기는 그대로', () => {
+    const out = listBySeries([22, 23, 24, 25].map((d) => ({ seriesId: 'S', item: at(d) })), now, (x) => x.day !== 23);
+    expect(out.map((x) => [x.item.day, x.upcoming])).toEqual([[22, 3]]);
+  });
+
+  it('listOnePerSeries: 켜진 알람이 있는 회차만 세어 upcomingCount (꺼 둔 회차는 안 셈)', () => {
+    const base = toAppointment(meeting());
+    const row = (id: string, day: number, enabled: boolean) => ({ ...base, id, at: at(day).at, enabled });
+    const out = listOnePerSeries([23, 24, 25].map((d) => ({ seriesId: 'S', item: row(`s-${d}`, d, d !== 24) })), now);
+    expect(out.map((a) => [a.id, a.upcomingCount])).toEqual([['s-23', 2]]);
+  });
+
   it('listOnePerSeries: 앞으로 회차가 둘 이상인 묶음에만 upcomingCount를 붙이고 시각 순으로', () => {
     const base = toAppointment(meeting());
     const row = (id: string, day: number) => ({ ...base, id, at: at(day).at });

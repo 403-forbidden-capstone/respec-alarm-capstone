@@ -64,19 +64,20 @@ export function groupByDay(list: Appointment[]) {
 }
 
 // 반복 일정 한 장 (H02 카드) — 목록에는 반복 하나당 한 장만 나오고, 그 카드가 "다음 회차 · 반복 요일"과 앞으로 회차가 폰에 걸렸다는 사실을 한 줄씩 보여 줌
-//   반복이 아니면 null. 서버가 앞으로 14일치 회차를 미리 만들어 폰에 걸어 둠 — 앞으로 회차가 둘 이상일 때만 ahead
+//   반복이 아니거나 카드의 회차가 이미 지났으면 null. 서버가 앞으로 14일치 회차를 미리 만들어 폰에 걸어 둠 — 앞으로 회차가 둘 이상일 때만 ahead
 //   nextOccurrence = 카드가 가리키는(지금 이후 가장 가까운) 회차 날짜 · 시각. 회차 목록 전체는 H03에서만 보임
 export const AHEAD_NOTE = '2주치 알람 걸림';
 
 export type SeriesInfo = { nextOccurrence: string; repeatSummary: string; ahead: boolean };
 
-export function seriesInfo(a: Pick<Appointment, 'at' | 'recurrenceRule' | 'upcomingCount'>): SeriesInfo | null {
+export function seriesInfo(a: Pick<Appointment, 'at' | 'recurrenceRule' | 'upcomingCount' | 'enabled'>, current: Date): SeriesInfo | null {
   const days = rruleToRepeat(a.recurrenceRule);
   if (!days.length) return null;
+  if (a.at.getTime() < current.getTime()) return null; // 지난 회차(지난 일정으로 접힌 묶음)는 "다음 회차"가 아니라 줄을 안 붙임
   return {
     nextOccurrence: `${formatDateShort(a.at)} ${formatTime(a.at)}`,
     repeatSummary: repeatLabel(days),
-    ahead: (a.upcomingCount ?? 0) > 1,
+    ahead: a.enabled && (a.upcomingCount ?? 0) > 1, // 꺼 둔 카드에는 "알람 걸림"을 안 보임
   };
 }
 

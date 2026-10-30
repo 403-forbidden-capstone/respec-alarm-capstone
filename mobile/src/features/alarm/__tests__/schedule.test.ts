@@ -180,20 +180,31 @@ describe('H05 같은 날 앞 일정의 기상 알람 (earlierWakeOf)', () => {
 });
 
 describe('반복 일정 한 장 (H02 카드) — seriesInfo · seriesLines', () => {
-  const study = { at: kst(26, 540), recurrenceRule: 'FREQ=WEEKLY;BYDAY=MO,WE' };
+  const study = { at: kst(26, 540), recurrenceRule: 'FREQ=WEEKLY;BYDAY=MO,WE', enabled: true };
+  const current = kst(22, 475); // 5월 22일 오전 7:55
 
   it('반복 일정은 다음 회차(날짜 · 시각) · 반복 요일 · 앞으로 회차가 걸렸는지', () => {
-    expect(seriesInfo({ ...study, upcomingCount: 4 })).toEqual({ nextOccurrence: '5월 26일 (월) 오전 9:00', repeatSummary: '매주 월 · 수', ahead: true });
+    expect(seriesInfo({ ...study, upcomingCount: 4 }, current)).toEqual({ nextOccurrence: '5월 26일 (월) 오전 9:00', repeatSummary: '매주 월 · 수', ahead: true });
   });
 
   it('앞으로 회차가 하나뿐이거나 모르면 ahead 아님', () => {
-    expect(seriesInfo({ ...study, upcomingCount: 1 })?.ahead).toBe(false);
-    expect(seriesInfo(study)?.ahead).toBe(false);
+    expect(seriesInfo({ ...study, upcomingCount: 1 }, current)?.ahead).toBe(false);
+    expect(seriesInfo(study, current)?.ahead).toBe(false);
+  });
+
+  it('꺼 둔 카드는 "알람 걸림"을 안 보임 (다음 회차 줄은 그대로)', () => {
+    const info = seriesInfo({ ...study, enabled: false, upcomingCount: 4 }, current);
+    expect([info?.ahead, info?.nextOccurrence]).toEqual([false, '5월 26일 (월) 오전 9:00']);
   });
 
   it('반복이 아니면 null — 카드에 줄이 안 붙음', () => {
-    expect(seriesInfo({ at: kst(22, 600), recurrenceRule: null })).toBeNull();
-    expect(seriesInfo({ at: kst(22, 600), recurrenceRule: 'FREQ=WEEKLY' })).toBeNull(); // 요일 없는 규칙은 반복 없음으로 읽음 (repeat.ts)
+    expect(seriesInfo({ at: kst(22, 600), recurrenceRule: null, enabled: true }, current)).toBeNull();
+    expect(seriesInfo({ at: kst(22, 600), recurrenceRule: 'FREQ=WEEKLY', enabled: true }, current)).toBeNull(); // 요일 없는 규칙은 반복 없음으로 읽음 (repeat.ts)
+  });
+
+  it('카드의 회차가 이미 지났으면(지난 일정으로 접힌 묶음) null — "다음 회차 <지난 날짜>"를 안 붙임', () => {
+    expect(seriesInfo({ ...study, at: kst(15, 540), upcomingCount: 0 }, current)).toBeNull();
+    expect(seriesInfo({ ...study, at: kst(22, 475) }, current)).not.toBeNull(); // 지금 시각과 같으면 지난 것이 아님
   });
 
   it('카드 줄: "다음 회차 …" 한 줄 + 걸렸으면 작은 글자 "2주치 알람 걸림" 한 줄', () => {

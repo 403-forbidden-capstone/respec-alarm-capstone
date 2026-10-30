@@ -96,7 +96,7 @@ function Detail({ appointment: a, reload }: { appointment: AppointmentDetail; re
   const [pickKind, setPickKind] = useState<RingKind | null>(null); // 시각을 고르는 시트가 열린 알람
   const { data: places } = useLoad(listPlaces);
   // 반복 일정의 앞으로 회차 — 덧붙임 줄이라 못 읽어도 화면은 그대로 (없는 것으로). 둘 이상일 때만 보임
-  const { data: occurrences } = useLoad(() => listOccurrences(a.id));
+  const { data: occurrences, reload: reloadOccurrences } = useLoad(() => listOccurrences(a.id));
   const [showAllOccurrences, setShowAllOccurrences] = useState(false);
   const { busy, run } = useAction();
   const setEdit = (patch: Partial<AlarmEdits>) => setEdits((e) => ({ ...e, ...patch }));
@@ -169,7 +169,7 @@ function Detail({ appointment: a, reload }: { appointment: AppointmentDetail; re
             ? '알람 시각을 다시 계산했어요'
             : '저장했어요',
     );
-    await reload();
+    await Promise.all([reload(), reloadOccurrences()]); // 저장으로 알람이 바뀌면 회차 목록의 첫 알람 시각도 다시
   }
 
   function save() {

@@ -71,7 +71,7 @@ export default function AlarmsScreen() {
           <SectionHeader title={dayHeading(day[0].at, current)} />
           {/* 날짜는 섹션 제목에 있으니 카드 머리줄에는 안 보임 */}
           {day.map((a) => (
-            <AppointmentAlarmCard key={a.id} appointment={a} current={current} onToggle={(on) => toggleAppointment(a, on)} highlight={a.id === lit} showDate={false} {...seriesInfo(a)} />
+            <AppointmentAlarmCard key={a.id} appointment={a} current={current} onToggle={(on) => toggleAppointment(a, on)} highlight={a.id === lit} showDate={false} {...seriesInfo(a, current)} />
           ))}
         </View>
       ))}
@@ -96,7 +96,7 @@ export default function AlarmsScreen() {
                 <View key={day[0].id}>
                   <SectionHeader title={formatDateShort(day[0].at)} />
                   {day.map((a) => (
-                    <AppointmentAlarmCard key={a.id} appointment={a} current={current} onToggle={(on) => toggleAppointment(a, on)} showDate={false} {...seriesInfo(a)} />
+                    <AppointmentAlarmCard key={a.id} appointment={a} current={current} onToggle={(on) => toggleAppointment(a, on)} showDate={false} {...seriesInfo(a, current)} />
                   ))}
                 </View>
               ))
