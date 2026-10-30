@@ -7,12 +7,24 @@ import assert from "node:assert/strict";
 import type { AlarmPlan, Appointment, Card, CardAction, Context, Fact, FastExtract, ServerEvent, TaskResults } from "./types.ts";
 import { datesFor } from "./testing.ts";
 import {
-  appointmentSummary, applyCardAction, applyFast, applyTaskResults, checkDigest, dateKo, dayOf, eventAt, expandFast, initTurnState, isoToLocal, itemKey,
+  appointmentSummary, applyCardAction as applyCardActionRaw, applyFast, applyTaskResults as applyTaskResultsRaw, checkDigest, dateKo, dayOf, eventAt, expandFast, initTurnState, isoToLocal, itemKey,
   keywordImportance, needKinds, normTitle, pickServerQuestion, questionSubjectKey, titleMatch,
 } from "./turn-core.ts";
-import type { QuestionHistory, TurnState } from "./turn-core.ts";
+import type { CardOutcome, QuestionHistory, TaskOutcome, TurnState } from "./turn-core.ts";
 import { eventsForView } from "./guards.ts";
 import { viewEvents } from "./view.ts";
+
+// 순수 함수는 입력 모양이 이상하면 던지지 않고 { ok: false, reason }을 돌려준다 — 정상 사례에서는 ok를 확인하고 꺼내 쓴다
+function applyTaskResults(...args: Parameters<typeof applyTaskResultsRaw>): TaskOutcome {
+  const r = applyTaskResultsRaw(...args);
+  assert.equal(r.ok, true, r.ok ? "" : r.reason);
+  return r as TaskOutcome;
+}
+function applyCardAction(...args: Parameters<typeof applyCardActionRaw>): CardOutcome {
+  const r = applyCardActionRaw(...args);
+  assert.equal(r.ok, true, r.ok ? "" : r.reason);
+  return r as CardOutcome;
+}
 
 // ───────── 고정 데이터 ─────────
 
@@ -831,8 +843,14 @@ describe("앱이 보낸 요약은 믿지 않음 (설계 메모 5절)", () => {
     assert.match(checkDigest({ ...ok, level: 3 }, now, at) ?? "", /강도/);
     assert.match(checkDigest({ ...ok, alarms: [{ kind: "WAKE", at: "내일 아침", enabled: true }] }, now, at) ?? "", /시각 형식/);
     assert.match(checkDigest(null, now, at) ?? "", /요약이 없음/);
-    // 약속을 모르면 약속 기준 검사는 건너뜀
-    assert.equal(checkDigest({ ...ok, alarms: [{ kind: "WAKE", at: iso("2026-10-12", "07:40"), enabled: true }] }, now, null), null);
+    // 약속을 모르면 약속 기준 검사 대신 지금부터 48시간 상한
+    assert.equal(checkDigest({ ...ok, alarms: [{ kind: "WAKE", at: iso("2026-10-10", "07:40"), enabled: true }] }, now, null), null);
+    assert.match(checkDigest({ ...ok, alarms: [{ kind: "WAKE", at: iso("2026-10-12", "07:40"), enabled: true }] }, now, null) ?? "", /48시간 밖/);
+    // 모양이 이상해도 던지지 않고 이유를 돌려줌
+    assert.match(checkDigest({ ...ok, alarms: [null as never] }, now, at) ?? "", /객체가 아님/);
+    assert.match(checkDigest({ ...ok, alarms: "x" as never }, now, at) ?? "", /요약이 없음/);
+    assert.match(checkDigest("x" as never, now, at) ?? "", /요약이 없음/);
+    assert.match(checkDigest({ ...ok, alarms: [{ kind: "WAKE", at: 5 as never, enabled: true }] }, now, at) ?? "", /시각 형식/);
   });
 
   it("범위 밖 요약(종류 · 지난 시각 · 약속 뒤 · 24시간 밖 · 강도 0~2 밖)이면 카드를 READY로 만들지 않고 FAILED + 되물음", () => {
@@ -955,6 +973,181 @@ describe("모호 메모 · 지난 시각 순서 · 겹침 거절", () => {
     const { events } = run(ctx(), [fast({ appointments: [study({ time: null, place: null, unclear: "'점심 먹고' 오후 18:30?" })] })]);
     assert.deepEqual(events[0]?.clarify, ["'스터디'의 정확한 시각 · 장소"]);
     assert.ok(!events[0]?.clarify[0]?.includes("점심"));
+  });
+});
+
+// ───────── 리뷰 #261: 입력 모양 · 요약 검사 보강 · 합치기 ─────────
+
+describe("입력 모양이 이상하면 던지지 않고 { ok: false, reason } (리뷰 #261)", () => {
+  const start = () => {
+    const c = ctx({ tomorrow: [] });
+    return { c, s: applyFast(initTurnState(c), fast({ appointments: [study({ title: "캡스톤 발표", time: "10:00", place: "강남역" })] }), c, 1).state };
+  };
+
+  it("results가 객체가 아니거나 cards · fixes가 배열이 아니거나 원소가 id 없는 객체면 거절", () => {
+    const { c, s } = start();
+    for (const bad of [null, "x", [], { cards: "x" }, { fixes: 3 }, { cards: [null] }, { cards: [{ status: "READY" }] }, { fixes: [{ ok: true }] }, { cards: [1] }]) {
+      const r = applyTaskResultsRaw(s, bad as never, c, 1);
+      assert.equal(r.ok, false, JSON.stringify(bad));
+      assert.match((r as { reason: string }).reason, /results/);
+    }
+    // 거절은 상태를 안 바꿈 — 정상 입력은 그대로 처리
+    assert.equal(applyTaskResultsRaw(s, { cards: [ready("c1", "07:40")], fixes: [] }, c, 1).ok, true);
+    assert.equal(applyTaskResultsRaw(s, {} as never, c, 1).ok, true, "cards · fixes가 없는 빈 results는 받음");
+  });
+
+  it("요약의 알람 원소가 null이면 그 카드만 FAILED (던지지 않음)", () => {
+    const { c, s } = start();
+    const t = applyTaskResults(s, { cards: [{ id: "c1", status: "READY", estimate: { alarms: [null as never], level: 2, with_wake: true } }], fixes: [] }, c, 1);
+    assert.equal(card(t.state, "c1").status, "FAILED");
+    assert.match(t.invalid["c1"] ?? "", /객체가 아님/);
+    const noEst = applyTaskResults(s, { cards: [{ id: "c1", status: "READY", estimate: "x" as never }], fixes: [] }, c, 1);
+    assert.ok(noEst.invalid["c1"]);
+  });
+
+  it("card_action: 모양이 이상하면 거절, alarms 원소가 null이면 일정은 저장 처리하고 그 알람만 안 씀", () => {
+    const { c, s } = start();
+    const r0 = applyTaskResults(s, { cards: [ready("c1", "07:40")], fixes: [] }, c, 1).state;
+    for (const bad of [null, "x", {}, { id: "c1" }, { id: "c1", action: "SAVE" }, { id: 1, action: "SAVED" }, { id: "c1", action: "SAVED", alarms: "x" }]) {
+      const r = applyCardActionRaw(r0, bad as never, c, 2);
+      assert.equal(r.ok, false, JSON.stringify(bad));
+      assert.match((r as { reason: string }).reason, /card_action/);
+    }
+    const ok = applyCardAction(r0, { id: "c1", action: "SAVED", appointment_id: "u1", alarms: [null as never] }, c, 2);
+    assert.equal(ok.card?.status, "SAVED");
+    assert.match(ok.invalid ?? "", /객체가 아님/);
+    assert.deepEqual(ok.event.alarms, []);
+    assert.equal(ok.state.alarms.length, 0);
+  });
+});
+
+describe("앱 요약 검사 보강 (리뷰 #261)", () => {
+  it("약속이 없는 카드(ALARM_NEW)의 알람은 지금부터 48시간 안, 카드가 요청한 시각과 같아야 함", () => {
+    const c = ctx({ tomorrow: [] });
+    const r = applyFast(initTurnState(c), fast({ alarm_changes: [alarm({ time: "07:00" })] }), c, 1);
+    const save = (alarms: CardAction["alarms"]) => applyCardAction(r.state, { id: "c1", action: "SAVED", appointment_id: "x", alarms }, c, 2);
+    const good = save([{ kind: "WAKE", at: iso("2026-10-09", "07:00"), enabled: true, level: null }]);
+    assert.equal(good.invalid, null);
+    assert.deepEqual(good.event.alarms.map((a) => a.time), ["07:00"]);
+    // 요청한 7시가 아닌 시각 → 안 씀, 서버가 만든 요청 시각(edit.at)으로 저장 처리
+    const diff = save([{ kind: "WAKE", at: iso("2026-10-09", "09:00"), enabled: true, level: null }]);
+    assert.match(diff.invalid ?? "", /요청한 시각과 다름/);
+    assert.deepEqual(diff.event.alarms.map((a) => a.time), ["07:00"]);
+    // 기상이 아닌 종류
+    assert.match(save([{ kind: "PREPARE", at: iso("2026-10-09", "07:00"), enabled: true, level: null }]).invalid ?? "", /다른 알람 종류/);
+    // 48시간 밖
+    assert.match(save([{ kind: "WAKE", at: iso("2026-10-12", "07:00"), enabled: true, level: null }]).invalid ?? "", /48시간 밖/);
+  });
+
+  it("ALARM_EDIT: 앱이 계산한 알람 시각이 카드의 edit.times와 다르면 처리 결과로 쓰지 않음 (미리 보기 · 저장 둘 다)", () => {
+    const c = ctx();
+    const r = applyFast(initTurnState(c), fast({ alarm_changes: [alarm({ time: "08:30" })] }), c, 1);
+    const wrong = applyTaskResults(r.state, { cards: [ready("c1", "08:40")], fixes: [] }, c, 1);
+    assert.equal(card(wrong.state, "c1").status, "FAILED");
+    assert.match(wrong.invalid["c1"] ?? "", /요청한 시각과 다름/);
+    assert.deepEqual(wrong.event.pending, []);
+    const right = applyTaskResults(r.state, { cards: [ready("c1", "08:30")], fixes: [] }, c, 1);
+    assert.equal(card(right.state, "c1").status, "READY");
+    // 준비 · 출발은 요청 칸이 아니라 앱 계산 그대로
+    const saved = applyCardAction(right.state, { id: "c1", action: "SAVED", alarms: [{ kind: "WAKE", at: iso("2026-10-09", "08:45"), enabled: true, level: null }] }, c, 2);
+    assert.match(saved.invalid ?? "", /요청한 시각과 다름/);
+    assert.equal(saved.state.alarms.find((a) => a.ref === "al1")?.time, "08:00", "다른 시각은 반영 안 함");
+    const fine = applyCardAction(right.state, { id: "c1", action: "SAVED", alarms: [{ kind: "WAKE", at: iso("2026-10-09", "08:30"), enabled: true, level: null }, { kind: "PREPARE", at: iso("2026-10-09", "08:50"), enabled: true, level: null }] }, c, 2);
+    assert.equal(fine.invalid, null);
+  });
+
+  it("FAILED의 앱 문구는 한 줄 80자까지 (줄바꿈 제거, 빈 문구는 기본 문구)", () => {
+    const c = ctx({ tomorrow: [] });
+    const s = applyFast(initTurnState(c), fast({ appointments: [study({ title: "캡스톤 발표", time: "10:00", place: "강남역" })] }), c, 1).state;
+    const long = `기상이 준비 시작보다 늦을 수 없어요\n${"가".repeat(200)}\r\n끝`;
+    const t = applyTaskResults(s, { cards: [{ id: "c1", status: "FAILED", error: long }], fixes: [] }, c, 1);
+    const msg = t.event.clarify[0] as string;
+    assert.equal([...msg].length, 80);
+    assert.ok(!/[\r\n]/.test(msg));
+    assert.ok(msg.startsWith("기상이 준비 시작보다 늦을 수 없어요 가가"));
+    assert.equal(card(t.state, "c1").error, msg);
+    const blank = applyTaskResults(s, { cards: [{ id: "c1", status: "FAILED", error: " \n " }], fixes: [] }, c, 1);
+    assert.deepEqual(blank.event.clarify, ["'캡스톤 발표' 알람 계산"]);
+  });
+});
+
+describe("거절 순서 · 준비 가감과 합치기 (리뷰 #261)", () => {
+  it("DECLINED는 약속 없는 비기상 알람의 NOT_FOUND 거절보다 먼저 — 거절한 건 알릴 것 없음", () => {
+    const c = ctx();
+    const dep = (save: "UNCONFIRMED" | "DECLINED") => alarm({ type: "DEPARTURE", appointment_ref: null, date: "2026-10-10", time: "08:00", save });
+    assert.deepEqual(run(c, [fast({ alarm_changes: [dep("UNCONFIRMED")] })]).events[0]?.rejected.map((r) => r.reason), ["NOT_FOUND"]);
+    assert.ok(isEmpty(run(c, [fast({ alarm_changes: [dep("DECLINED")] })]).events[0] as ServerEvent));
+  });
+
+  it("실험실 test-015: 같은 턴의 준비시간 가감으로 이미 그 시각이 되는 기상 · 준비 알람 변경은 카드로 만들지 않음", () => {
+    const c = ctx(); // 내일 기상 08:00 · 준비 08:10
+    const r = run(c, [
+      fast({ prep_adjustment: { direction: "MORE", minutes: 10 } }),
+      fast({ prep_adjustment: { direction: "MORE", minutes: 15 }, alarm_changes: [alarm({ time: "07:45", save: "UNCONFIRMED" }), alarm({ type: "PREPARE", time: "07:55", save: "UNCONFIRMED" })] }),
+      fast({ prep_adjustment: { direction: "MORE", minutes: 15 }, alarm_changes: [alarm({ time: "07:45" }), alarm({ type: "PREPARE", time: "07:55" })] }),
+    ]);
+    assert.deepEqual(r.state.cards.map((x) => [x.id, x.kind, x.summary, x.edit?.prepare_delta]), [["c1", "ALARM_EDIT", "내일만 준비시간 +15분", 15]]);
+    assert.ok(isEmpty(r.events[1] as ServerEvent));
+    assert.ok(isEmpty(r.events[2] as ServerEvent));
+    assert.deepEqual(Object.keys(r.state.pending), ["c1"]);
+    // 값이 다른 진짜 요청은 그대로 카드
+    const real = run(c, [fast({ prep_adjustment: { direction: "MORE", minutes: 15 }, alarm_changes: [alarm({ time: "07:30", save: "UNCONFIRMED" })] })]);
+    assert.deepEqual(real.state.cards.map((x) => [x.id, x.summary]), [["c1", "10/9(금) 기상 알람 07:30으로"], ["c2", "내일만 준비시간 +15분"]]);
+    // 준비 가감이 없으면 같은 시각 변경도 그냥 카드
+    assert.equal(run(c, [fast({ alarm_changes: [alarm({ time: "07:45" })] })]).state.cards.length, 1);
+    // 가감을 거절(DECLINED)한 턴이면 합치지 않음
+    assert.equal(run(c, [fast({ prep_adjustment: { direction: "MORE", minutes: 15, save: "DECLINED" }, alarm_changes: [alarm({ time: "07:45" })] })]).state.cards.filter((x) => x.status !== "REJECTED").length, 1);
+  });
+});
+
+describe("분 경계 · 상태 왕복 (리뷰 #261)", () => {
+  it("23:59 세션: 23:58 약속은 지남 · 23:59와 자정(00:00)은 받음 (실험실 stub.test.ts 경계 사례)", () => {
+    const late = ctx({ now: "2026-10-08T23:59:00+09:00" });
+    const r = run(late, [fast({
+      appointments: [
+        study({ title: "야식", date: "2026-10-08", time: "23:58", place: null }),
+        study({ title: "통화", date: "2026-10-08", time: "23:59", place: null }),
+        study({ title: "게임", date: "2026-10-09", time: "00:00", place: null }),
+      ],
+    })]);
+    assert.deepEqual(r.events[0]?.rejected, [{ target: "10/8(목) 23:58 야식", reason: "PAST_TIME" }]);
+    assert.deepEqual(r.state.cards.map((x) => [x.id, x.summary]), [["c1", "10/8(목) 23:59 통화"], ["c2", "10/9(금) 00:00 게임"]]);
+  });
+
+  it("자정 뒤 03:59 대화(기준일 전날): 03:58은 지남 · 04:00은 받음, 날짜 없는 알람 변경은 '내일'(10/9) 아침 알람", () => {
+    const dawn = ctx({ now: "2026-10-09T03:59:00+09:00" });
+    assert.equal(dawn.session.record_date, "2026-10-08");
+    const r = run(dawn, [fast({ appointments: [study({ time: "03:58" }), study({ title: "운동", time: "04:00", place: null })] })]);
+    assert.deepEqual(r.events[0]?.rejected.map((x) => x.target), ["10/9(금) 03:58 스터디 · 학교 도서관"]);
+    assert.deepEqual(r.state.cards.map((x) => x.summary), ["10/9(금) 04:00 운동"]);
+    const w = run(dawn, [fast({ alarm_changes: [alarm({ date: null, time: "07:30" })] })]);
+    assert.equal(w.state.cards[0]?.summary, "10/9(금) 기상 알람 07:30으로");
+  });
+
+  it("TurnState JSON 왕복: 정정(fixes) · 기다리는 앱 일(awaiting) 든 상태도 같은 결과", () => {
+    const c = ctx();
+    const r = applyFast(initTurnState(c), fast({
+      appointments: [study()], fact_feedback: [{ fact_id: "f4", status: "CORRECTED", value_time: "10:20", approx: false }],
+    }), c, 1);
+    assert.ok(r.state.fixes.length > 0 && r.state.awaiting !== null);
+    const revived = JSON.parse(JSON.stringify(r.state)) as TurnState;
+    assert.deepEqual(revived, r.state);
+    const results: TaskResults = { cards: [ready("c1", "08:00", { depart: "13:00", with_wake: false })], fixes: [{ id: "x1", ok: true }] };
+    assert.deepEqual(applyTaskResultsRaw(revived, results, c, 1), applyTaskResultsRaw(r.state, results, c, 1));
+  });
+
+  it("TurnState JSON 왕복: 위기(crisis) 이벤트 · 미룬 정정(PENDING)이 든 상태도 같은 결과", () => {
+    const c = ctx();
+    const r = applyFast(initTurnState(c), fast({
+      appointments: [study()], fact_feedback: [{ fact_id: "f4", status: "CORRECTED", value_time: "10:20", approx: false }], safety_flag: true,
+    }), c, 1);
+    assert.equal(r.event.crisis, true);
+    assert.equal(r.state.fixes[0]?.status, "PENDING");
+    const revived = JSON.parse(JSON.stringify(r.state)) as TurnState;
+    assert.deepEqual(revived, r.state);
+    const next = fast({ appointments: [study()], safety_flag: true });
+    assert.deepEqual(applyFast(revived, next, c, 2), applyFast(r.state, next, c, 2));
+    assert.equal(applyFast(revived, next, c, 2).event.crisis, undefined, "위기 안내는 대화당 1번");
   });
 });
 

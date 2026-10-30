@@ -153,6 +153,12 @@ export const PREP_ADJUST_DEFAULT = 10;
 /** 대화 한 번으로 바꿀 수 있는 준비시간 상한 (설계 가정) */
 export const PREP_ADJUST_MAX = 60;
 
+/** 준비시간 가감 분 (부호 포함): '좀 더'(분 없음) 10, 상한 60, 원래대로 0 */
+function prepDeltaOf(pa: XPrep): number {
+  const size = Math.min(PREP_ADJUST_MAX, Math.max(1, pa.minutes ?? PREP_ADJUST_DEFAULT));
+  return pa.direction === "OK" ? 0 : pa.direction === "MORE" ? size : -size;
+}
+
 const refNum = (ref: string, prefix: string): number => {
   const m = new RegExp(`^${prefix}(\\d+)$`).exec(ref);
   return m ? Number(m[1]) : 0;
@@ -371,21 +377,27 @@ export interface RawDigest {
   with_wake?: boolean;
 }
 
+/** 약속이 없는 카드(ALARM_NEW 등)의 알람은 지금부터 이 시간(분) 안이어야 함 (리뷰 #261) */
+export const NO_APPT_MAX_AHEAD_MINUTES = 48 * 60;
+
+const isObj = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
+
 /**
- * 앱이 보낸 알람 요약이 받을 만한지 — 종류 ∈ RING_KINDS · 시각이 지금 뒤 · 약속 앞 · 약속 24시간 안 · 강도 0~2(또는 null).
- * apptAt이 null이면 약속 기준 검사는 건너뜀. 받을 수 있으면 null, 아니면 이유 글.
+ * 앱이 보낸 알람 요약이 받을 만한지 — 모양(객체 · 배열) · 종류 ∈ RING_KINDS · 시각이 지금 뒤 · 약속 앞 · 약속 24시간 안 · 강도 0~2(또는 null).
+ * 약속이 없으면(apptAt null) 약속 기준 검사 대신 지금부터 48시간 상한. 받을 수 있으면 null, 아니면 이유 글. 예외를 던지지 않는다.
  */
 export function checkDigest(d: RawDigest | null | undefined, now: LocalDateTime, apptAt: LocalDateTime | null): string | null {
-  if (d === null || d === undefined || !Array.isArray(d.alarms)) return "계산 요약이 없음";
+  if (!isObj(d) || !Array.isArray(d.alarms)) return "계산 요약이 없음";
   const okLevel = (v: unknown): boolean => v === null || v === undefined || v === 0 || v === 1 || v === 2;
   if (!okLevel(d.level)) return "강도가 0~2 밖";
-  for (const a of d.alarms) {
-    if (!(RING_KINDS as readonly string[]).includes(a.kind)) return `알람 종류 ${String(a.kind)}는 울리는 알람이 아님`;
-    if (typeof a.enabled !== "boolean") return "켜짐 값이 이상함";
-    if (!okLevel(a.level)) return "강도가 0~2 밖";
+  for (const a of d.alarms as unknown[]) {
+    if (!isObj(a)) return "알람 요약 원소가 객체가 아님";
+    if (!(RING_KINDS as readonly string[]).includes(a["kind"] as string)) return `알람 종류 ${String(a["kind"])}는 울리는 알람이 아님`;
+    if (typeof a["enabled"] !== "boolean") return "켜짐 값이 이상함";
+    if (!okLevel(a["level"])) return "강도가 0~2 밖";
     let at: LocalDateTime;
     try {
-      at = isoToLocal(a.at);
+      at = isoToLocal(a["at"] as string);
     } catch {
       return "시각 형식이 이상함";
     }
@@ -393,9 +405,75 @@ export function checkDigest(d: RawDigest | null | undefined, now: LocalDateTime,
     if (apptAt !== null) {
       if (minutesBetween(at, apptAt) <= 0) return "약속 뒤 시각";
       if (minutesBetween(at, apptAt) > 24 * 60) return "약속 24시간 밖";
+    } else if (minutesBetween(now, at) > NO_APPT_MAX_AHEAD_MINUTES) {
+      return "지금부터 48시간 밖";
     }
   }
   return null;
+}
+
+/** 앱이 보낸 알람 시각이 카드가 요청한 시각(edit.times · edit.at)과 같은지 — 다르면 처리 결과로 쓰지 않음. 같거나 요청이 없으면 null */
+function checkAgainstCard(c: Card, alarms: unknown): string | null {
+  if (!Array.isArray(alarms)) return null;
+  const same = (x: string, y: string): boolean => {
+    try {
+      const a = isoToLocal(x);
+      const b = isoToLocal(y);
+      return a.date === b.date && a.time === b.time;
+    } catch {
+      return false;
+    }
+  };
+  if (c.kind === "ALARM_NEW" && c.edit?.at !== undefined) {
+    for (const a of alarms) {
+      if (!isObj(a)) continue;
+      if (a["kind"] !== "WAKE") return "요청과 다른 알람 종류";
+      if (!same(a["at"] as string, c.edit.at)) return "요청한 시각과 다름";
+    }
+  }
+  if (c.kind === "ALARM_EDIT" && c.edit?.times !== undefined) {
+    for (const a of alarms) {
+      if (!isObj(a)) continue;
+      const want = c.edit.times[a["kind"] as AlarmType];
+      if (want !== undefined && !same(a["at"] as string, want)) return "요청한 시각과 다름";
+    }
+  }
+  return null;
+}
+
+/** 순수 함수가 받은 입력 모양이 이상할 때 던지지 않고 돌려주는 거절 (voice-turn이 VALIDATION_FAILED로 바꿈) */
+export interface Rejected {
+  ok: false;
+  reason: string;
+}
+
+function resultsShapeProblem(results: unknown): string | null {
+  if (!isObj(results)) return "results가 객체가 아님";
+  for (const k of ["cards", "fixes"]) {
+    const v = results[k];
+    if (v === undefined) continue;
+    if (!Array.isArray(v)) return `results.${k}가 배열이 아님`;
+    for (let i = 0; i < v.length; i++) {
+      const e: unknown = v[i];
+      if (!isObj(e) || typeof e["id"] !== "string") return `results.${k}[${i}]가 id 있는 객체가 아님`;
+    }
+  }
+  return null;
+}
+
+function actionShapeProblem(action: unknown): string | null {
+  if (!isObj(action) || typeof action["id"] !== "string") return "card_action이 id 있는 객체가 아님";
+  if (action["action"] !== "SAVED" && action["action"] !== "REJECTED") return "card_action.action이 SAVED · REJECTED가 아님";
+  if (action["alarms"] !== undefined && !Array.isArray(action["alarms"])) return "card_action.alarms가 배열이 아님";
+  return null;
+}
+
+/** 앱이 준 오류 문구 — 한 줄, 80자까지 (DB · 네트워크 원문이 그대로 화면에 가지 않게) */
+export const APP_ERROR_MAX_CHARS = 80;
+function cleanAppError(v: unknown): string | null {
+  if (typeof v !== "string") return null;
+  const t = v.replace(/[\r\n\v\f\u0085\u2028\u2029]+/gu, " ").replace(/\s+/gu, " ").trim();
+  return t === "" ? null : [...t].slice(0, APP_ERROR_MAX_CHARS).join("");
 }
 
 // ───────── 빠른 추출 처리 ─────────
@@ -675,6 +753,23 @@ export function applyFast(state: TurnState, fast: FastExtract, ctx: Context, aft
   const candsOf = (c: XAlarm, day: LocalDate): AlarmPlan[] =>
     s.alarms.filter((a) => a.owner === c.target && a.type === c.type && (c.appointment_ref !== null ? a.appointment_ref === c.appointment_ref : alarmDay(a) === day));
 
+  // 내일 기상 기준 일정의 기상 알람 (준비시간 가감의 대상) · 이번 말의 준비 가감 분
+  const prepAnchorWake = (): AlarmPlan | undefined =>
+    s.alarms
+      .filter((a) => a.owner === "u0" && a.type === "WAKE" && a.enabled && a.appointment_ref !== null && apptDateOf(a.appointment_ref) === ctx.dates.tomorrow)
+      .sort((x, y) => dayNumber(x.date) - dayNumber(y.date) || toMinutes(x.time) - toMinutes(y.time) || cmpRef(x.ref, y.ref))[0];
+  const prepDelta = (() => {
+    const p = extract.prep_adjustment;
+    return p && p.save !== "DECLINED" ? prepDeltaOf(p) : null;
+  })();
+  const impliedByPrep = (cur: AlarmPlan, to: LocalDateTime): boolean => {
+    if (prepDelta === null || prepDelta === 0) return false;
+    if (cur.type !== "WAKE" && cur.type !== "PREPARE") return false;
+    if (prepAnchorWake()?.appointment_ref !== cur.appointment_ref) return false;
+    const want = addMinutes(cur.date, cur.time, -prepDelta);
+    return want.date === to.date && want.time === to.time;
+  };
+
   for (const c of extract.alarm_changes) {
     const key = `alarm:${c.target}|${c.type}|${c.appointment_ref ?? ""}|${c.date ?? ""}`;
     if (!once(key, JSON.stringify([c.time, c.intensity, c.enabled, c.save]))) continue;
@@ -737,12 +832,19 @@ export function applyFast(state: TurnState, fast: FastExtract, ctx: Context, aft
       reject(label, "NOT_FOUND");
       continue;
     }
+    // 사용자가 거절한 것은 알릴 것 없음 — 약속 없는 비기상 알람의 NOT_FOUND 거절보다 먼저 봄 (실험실과 같은 순서, 리뷰 #261)
+    if (c.save === "DECLINED") {
+      dropPending(key);
+      continue;
+    }
     // 약속 없이 새로 만드는 알람은 기상만 — 약속에 딸린 알람이 없는 약속을 가리키면 그 약속의 알람 계산은 L1 몫 (카드 [수정])
     if (!cur && (c.type !== "WAKE" || c.appointment_ref !== null)) {
       reject(label, "NOT_FOUND");
       continue;
     }
-    if (c.save === "DECLINED") {
+    // 같은 턴의 준비시간 가감으로 이미 그 시각이 되는 본인 알람 시각 변경은 카드로 만들지 않음 — T2가 서버 계산 결과를 알람 변경으로 함께 적은 것
+    //   (실험실 test-015: '+15분'과 '기상 07:45으로'가 같이 나옴). 기상 · 준비 알람은 같이 일러지므로 둘 다 지금 시각 − 가감이면 같은 말
+    if (cur && newAt && wantIntensity === null && wantEnabled === null && impliedByPrep(cur, newAt)) {
       dropPending(key);
       continue;
     }
@@ -780,11 +882,8 @@ export function applyFast(state: TurnState, fast: FastExtract, ctx: Context, aft
   // ── 내일만 준비시간 가감 ── (준비시간 범위는 day 고정: 내일 기상 기준 일정 — 그날 가장 이른 켜진 기상 알람의 약속)
   const pa = extract.prep_adjustment;
   if (pa && once("prep", JSON.stringify([pa.direction, pa.minutes, pa.save ?? null]))) {
-    const size = Math.min(PREP_ADJUST_MAX, Math.max(1, pa.minutes ?? PREP_ADJUST_DEFAULT));
-    const delta = pa.direction === "OK" ? 0 : pa.direction === "MORE" ? size : -size;
-    const tomorrowWake = s.alarms
-      .filter((a) => a.owner === "u0" && a.type === "WAKE" && a.enabled && a.appointment_ref !== null && apptDateOf(a.appointment_ref) === ctx.dates.tomorrow)
-      .sort((x, y) => dayNumber(x.date) - dayNumber(y.date) || toMinutes(x.time) - toMinutes(y.time) || cmpRef(x.ref, y.ref))[0];
+    const delta = prepDeltaOf(pa);
+    const tomorrowWake = prepAnchorWake();
     // 저장 전 카드가 내일 첫 일정이면 그 카드에 붙인다 (저장 뒤 앱이 saveAlarmSettings로 한 번 더, 설계 메모 5절)
     const firstCard = s.cards.find((c) => c.kind === "APPT_NEW" && OPEN_STATUS.includes(c.status) && c.draft?.date === ctx.dates.tomorrow && c.first_of_day);
     if (pa.save === "DECLINED") {
@@ -875,6 +974,7 @@ export function applyFast(state: TurnState, fast: FastExtract, ctx: Context, aft
 // ───────── 앱 일 결과 ─────────
 
 export interface TaskOutcome {
+  ok: true;
   state: TurnState;
   event: ServerEvent;
   cards: Card[];
@@ -901,7 +1001,9 @@ function apptAtOf(c: Card, s: TurnState): LocalDateTime | null {
  *   정정 ok → '저장됨: 도착 시각 10:20으로 정정' / '저장됨: 기록 정정: 출발 09:33 → 아님' · 실패 → '거절: 도착 기록 정정 (대상 없음)'
  * 앱이 보낸 요약은 믿지 않고 범위를 검사한다(checkDigest) — 범위 밖이면 그 카드는 FAILED로 두고 '되물을 것'만 낸다.
  */
-export function applyTaskResults(state: TurnState, results: TaskResults, ctx: Context, afterTurn: number): TaskOutcome {
+export function applyTaskResults(state: TurnState, results: TaskResults, ctx: Context, afterTurn: number): TaskOutcome | Rejected {
+  const problem = resultsShapeProblem(results);
+  if (problem !== null) return { ok: false, reason: problem };
   const s: TurnState = structuredClone(state);
   const ev = eventFor(s, afterTurn);
   const now = isoToLocal(ctx.session.now);
@@ -921,7 +1023,7 @@ export function applyTaskResults(state: TurnState, results: TaskResults, ctx: Co
     c.first_of_day = c.kind === "APPT_NEW" ? isFirstOfDay(s, c) : c.first_of_day;
     const title = c.draft?.title ?? c.summary;
     if (r.status === "READY") {
-      const reason = checkDigest(r.estimate as RawDigest | null | undefined, now, apptAtOf(c, s));
+      const reason = checkDigest(r.estimate as RawDigest | null | undefined, now, apptAtOf(c, s)) ?? checkAgainstCard(c, (r.estimate as RawDigest).alarms);
       if (reason !== null) {
         invalid[c.id] = reason;
         c.status = "FAILED";
@@ -941,7 +1043,7 @@ export function applyTaskResults(state: TurnState, results: TaskResults, ctx: Co
       ev.clarify.push(`'${title}' 장소 (카드의 [장소 고르기])`);
     } else if (r.status === "FAILED") {
       c.status = "FAILED";
-      const msg = typeof r.error === "string" && r.error.trim() !== "" ? r.error.trim() : `'${title}' 알람 계산`;
+      const msg = cleanAppError(r.error) ?? `'${title}' 알람 계산`;
       c.error = msg;
       ev.clarify.push(msg);
     } else {
@@ -974,7 +1076,7 @@ export function applyTaskResults(state: TurnState, results: TaskResults, ctx: Co
   const stillFixes = s.fixes.filter((x) => x.status === "SENT").map((x) => x.id);
   s.awaiting = stillCards.length + stillFixes.length > 0 ? { after_turn: afterTurn, cards: stillCards, fixes: stillFixes } : null;
   s.applied.push(...ev.applied.filter((l) => !s.applied.includes(l)));
-  return { state: s, event: ev, cards: touchedCards, fixes: touchedFixes.map(toFix), unknown, invalid, done: s.awaiting === null };
+  return { ok: true, state: s, event: ev, cards: touchedCards, fixes: touchedFixes.map(toFix), unknown, invalid, done: s.awaiting === null };
 }
 
 function factTime(ctx: Context, factId: string): string {
@@ -985,6 +1087,7 @@ function factTime(ctx: Context, factId: string): string {
 // ───────── 카드 버튼 ─────────
 
 export interface CardOutcome {
+  ok: true;
   state: TurnState;
   event: ServerEvent;
   card: Card | null;
@@ -1005,10 +1108,12 @@ const nextAlarmRef = (s: TurnState): string => `al${++s.alarmSeq}`;
  *   SAVED: 앱이 이미 저장한 값(action.alarms)을 믿되 범위를 검사해 받고(checkDigest), 처리 결과에 '저장됨: 일정 저장: …'과 새 알람(기상만 — 그 밖은 '그 밖의 알람(준비 · 출발)도 같이 맞춤')을 담는다.
  * 같은 사용자 말 j 뒤 처리 결과에 이어 쓴다(없으면 새로 만듦).
  */
-export function applyCardAction(state: TurnState, action: CardAction, ctx: Context, afterTurn: number): CardOutcome {
+export function applyCardAction(state: TurnState, action: CardAction, ctx: Context, afterTurn: number): CardOutcome | Rejected {
+  const problem = actionShapeProblem(action);
+  if (problem !== null) return { ok: false, reason: problem };
   const s: TurnState = structuredClone(state);
   const c = s.cards.find((x) => x.id === action.id) ?? null;
-  const none = (status: CardOutcome["status"]): CardOutcome => ({ state: s, event: eventFor(s, afterTurn), card: c, needsReply: false, status, invalid: null });
+  const none = (status: CardOutcome["status"]): CardOutcome => ({ ok: true, state: s, event: eventFor(s, afterTurn), card: c, needsReply: false, status, invalid: null });
   if (c === null) return none("NOT_FOUND");
   if (!OPEN_STATUS.includes(c.status)) return none("NOOP");
 
@@ -1017,14 +1122,14 @@ export function applyCardAction(state: TurnState, action: CardAction, ctx: Conte
     c.highlight = false;
     delete s.pending[c.id];
     // 같은 말(T2F가 현재 상태를 되풀이)이 다시 와도 카드를 또 만들지 않음 — seen 서명이 같으면 건너뛰고, 재료가 바뀌면 새 카드
-    return { state: s, event: eventFor(s, afterTurn), card: c, needsReply: false, status: "OK", invalid: null };
+    return { ok: true, state: s, event: eventFor(s, afterTurn), card: c, needsReply: false, status: "OK", invalid: null };
   }
   if (c.kind === "APPT_OPEN") return none("NOOP"); // 저장 없는 카드 — [일정 열기]만
 
   const ev = eventFor(s, afterTurn);
   const now = isoToLocal(ctx.session.now);
   const rawAlarms = action.alarms ?? [];
-  const reason = checkDigest({ alarms: rawAlarms }, now, apptAtOf(c, s));
+  const reason = checkDigest({ alarms: rawAlarms }, now, apptAtOf(c, s)) ?? checkAgainstCard(c, rawAlarms);
   const alarms = reason === null ? rawAlarms : [];
   const entry = s.pending[c.id];
   const base = entry?.summary ?? c.summary;
@@ -1091,7 +1196,7 @@ export function applyCardAction(state: TurnState, action: CardAction, ctx: Conte
   c.highlight = false;
   delete s.pending[c.id];
   s.applied.push(...ev.applied.filter((l) => !s.applied.includes(l)));
-  return { state: s, event: ev, card: c, needsReply: true, status: "OK", invalid: reason };
+  return { ok: true, state: s, event: ev, card: c, needsReply: true, status: "OK", invalid: reason };
 }
 
 // ───────── 서버 질문 고르기 (설계 메모 4.3) ─────────
