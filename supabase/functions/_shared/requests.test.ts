@@ -41,6 +41,34 @@ test('suggest: 새 일정은 시각 · 장소가 필수, 이동 · 준비 직접
   assert.equal(d.transport, 'TRANSIT');
 });
 
+test('commit: 새 약속 destination의 radius_m(선택)을 초안에 실음 — 없으면 칸 없음, 범위 밖 · 정수 아님 · 글자는 문제', () => {
+  const withRadius = Reader.root({ ...NEW_BODY, appointment: { ...NEW_BODY.appointment, destination: { name: '세종대학교', lat: 37.55, lng: 127.07, radius_m: 300 } } });
+  const d = readCommitRequest(withRadius);
+  withRadius.finish();
+  assert.deepEqual(d.draft.destination, { name: '세종대학교', lat: 37.55, lng: 127.07, radiusM: 300 });
+
+  const without = Reader.root(NEW_BODY);
+  const d0 = readCommitRequest(without);
+  without.finish();
+  assert.deepEqual(d0.draft.destination, { name: '세종대학교', lat: 37.55, lng: 127.07 });
+
+  for (const bad of [99, 501, 1.5, 'abc']) {
+    const r = Reader.root({ ...NEW_BODY, appointment: { ...NEW_BODY.appointment, destination: { name: '세종대학교', lat: 37.55, lng: 127.07, radius_m: bad } } });
+    readCommitRequest(r);
+    assert.throws(
+      () => r.finish(),
+      (e: unknown) => e instanceof HttpError && e.code === 'VALIDATION_FAILED' && (e.details as { issues: { path: string }[] }).issues.map((i) => i.path).join() === 'appointment.destination.radius_m',
+      String(bad),
+    );
+  }
+
+  // 출발지의 radius_m은 저장 칸이 없어 와도 무시 (오류도 안 냄)
+  const originRadius = Reader.root({ ...NEW_BODY, participant: { ...NEW_BODY.participant, origin: { name: '집', lat: 37.5, lng: 127, radius_m: 9999 } } });
+  const d1 = readCommitRequest(originRadius);
+  originRadius.finish();
+  assert.deepEqual(d1.draft.origin, { name: '집', lat: 37.5, lng: 127 });
+});
+
 test('suggest: 필수 값이 없으면 어느 칸인지 알려 줌 (제목은 미리 보기에 필요 없음)', () => {
   const none = Reader.root({});
   readSuggestRequest(none);
