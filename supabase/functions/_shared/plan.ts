@@ -1,6 +1,6 @@
 // 알람 계획 만들기의 DB 쪽 — 읽기는 부른 사람의 RLS 클라이언트로 (남의 일정 · 기록은 애초에 안 보임)
 // 읽어 온 값을 plan-core.ts의 순수 계산에 넘김. alarm-suggest(미리 보기)와 alarm-commit(저장)이 같이 씀
-import { hasEarlierWake } from './calc/index.ts';
+import { hasEarlierWake, PREPARE_RECORD_MAX, PREPARE_RECORD_MIN, PREPARE_WINDOW, prepareStatsOf } from './calc/index.ts';
 import type { TravelSample } from './calc/travel.ts';
 import { dbFail, must } from './db.ts';
 import { HttpError } from './errors.ts';
@@ -38,6 +38,7 @@ const DEFAULT_PROFILE: ProfileRow = {
   home_name: null,
   home_lat: null,
   home_lng: null,
+  default_prepare_minutes: null,
 };
 
 export const ALARM_COLUMNS =
@@ -46,7 +47,7 @@ export const ALARM_COLUMNS =
 export async function loadProfile(db: Db, userId: string): Promise<ProfileRow> {
   const row = must<ProfileRow | null>(
     'profiles',
-    await db.from('profiles').select('timezone, default_buffer_minutes, default_transport, home_name, home_lat, home_lng').eq('user_id', userId).maybeSingle(),
+    await db.from('profiles').select('timezone, default_buffer_minutes, default_transport, home_name, home_lat, home_lng, default_prepare_minutes').eq('user_id', userId).maybeSingle(),
   );
   return row ?? DEFAULT_PROFILE;
 }
@@ -103,14 +104,23 @@ export async function loadAlarms(db: Db, participantId: string, userId?: string)
   return must<AlarmRow[]>('alarms', await (userId ? query.eq('user_id', userId) : query));
 }
 
-// 예상 준비시간 통계 — 뷰 v_prepare_time_stats (security_invoker라 지금은 RLS로 내 기록만 보이지만, 친구 기록을 읽는 정책이 생겨도 한 줄만 오게 user_id로 걸러 둠). actual_prepare_minutes의 P80
+// 예상 준비시간 통계 — 내 기상~출발 기록(daily_records.actual_prepare_minutes) 중 10~240분인 최근 30건 (학습 루프 기초 ③)
+//   예전에는 뷰 v_prepare_time_stats(전체 기간 · 거르기 없음)를 읽었음. 뷰와 마이그레이션은 그대로 두고 쓰지 않음
+//   기록은 하루 한 줄(record_date)이라 날짜 최신순 = 출발 최신순. 부른 사람의 RLS 클라이언트라 내 기록만 보이지만, 친구 기록을 읽는 정책이 생겨도 내 줄만 오게 user_id로 좁힘
+//   n(sampleCount)도 같은 30건 기준 — P80은 calc의 percentile (선형 보간, 뷰의 percentile_cont(0.8)과 같은 방식)
 export async function loadPrepareStats(db: Db, userId: string): Promise<PlanInputs['stats']> {
-  const row = must<{ sample_count: number | string; p80_minutes: number | string | null } | null>(
-    'v_prepare_time_stats',
-    await db.from('v_prepare_time_stats').select('sample_count, p80_minutes').eq('user_id', userId).maybeSingle(),
+  const rows = must<{ actual_prepare_minutes: number | string | null }[]>(
+    'daily_records',
+    await db
+      .from('daily_records')
+      .select('actual_prepare_minutes')
+      .eq('user_id', userId)
+      .gte('actual_prepare_minutes', PREPARE_RECORD_MIN)
+      .lte('actual_prepare_minutes', PREPARE_RECORD_MAX)
+      .order('record_date', { ascending: false })
+      .limit(PREPARE_WINDOW),
   );
-  if (!row) return { sampleCount: 0, p80: null };
-  return { sampleCount: Number(row.sample_count) || 0, p80: row.p80_minutes == null ? null : Number(row.p80_minutes) };
+  return prepareStatsOf(rows.map((r) => r.actual_prepare_minutes));
 }
 
 // 최근 4주 지각 횟수 (is_late). 늦잠이 원인인 지각만 세는 late_cause 칸은 DB에 없어서 지각 전체로 셈 — 문서 보완 목록

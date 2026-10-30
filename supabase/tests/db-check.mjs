@@ -1386,7 +1386,7 @@ await check('호출 기록: 칸 기본값(시도 1회 · 규칙 걸림 [] · 호
   const [full] = await insCall(A, { point: 'T2F', ok: false, error_code: 'RATE_LIMITED', attempts: 2, input_tokens: 1800, output_tokens: 120, cache_read_tokens: 900, cache_write_tokens: 0,
     thinking_tokens: 40, cost_usd: 0.003421, stop_reason: 'max_tokens', request_id: 'req_abc', flags: ['promises_save', 'alarm_relay_missing'], io: JSON.stringify({ input: '내일 10시', output: { ok: 1 } }) });
   const points = [];
-  for (const p of ['T1', 'T2F', 'T2', 'T3', 'T4', 'T5', 'E4']) points.push((await insCall(A, { point: p }, 'returning point'))[0].point);
+  for (const p of ['T1', 'T2F', 'T2', 'T3', 'T4', 'T5', 'E4', 'TT']) points.push((await insCall(A, { point: p }, 'returning point'))[0].point);
   const upd = await q(`update public.ai_calls set ok = false, error_code = 'TIMEOUT' where call_id = $1 returning ok, error_code`, [r.call_id]);
   const del = await q(`delete from public.ai_calls where call_id = $1 returning 1`, [r.call_id]);
   await q(`delete from public.ai_calls where user_id = $1 and call_id <> $2`, [A, full.call_id]);   // 아래 검사가 쓸 한 줄만 남김
@@ -1394,10 +1394,10 @@ await check('호출 기록: 칸 기본값(시도 1회 · 규칙 걸림 [] · 호
     && r.thinking_tokens === null && r.stop_reason === null && r.request_id === null && r.session_id === null && r.created_at && r.call_id
     && full.attempts === 2 && full.flags.join() === 'promises_save,alarm_relay_missing' && full.error_code === 'RATE_LIMITED' && full.input_tokens === 1800 && full.cache_read_tokens === 900 && full.thinking_tokens === 40
     && String(full.cost_usd) === '0.003421' && full.io.output.ok === 1 && full.stop_reason === 'max_tokens'
-    && points.join() === 'T1,T2F,T2,T3,T4,T5,E4' && upd.length === 1 && upd[0].error_code === 'TIMEOUT' && del.length === 1
+    && points.join() === 'T1,T2F,T2,T3,T4,T5,E4,TT' && upd.length === 1 && upd[0].error_code === 'TIMEOUT' && del.length === 1
     ? true : { r, full, points, upd, del };
 });
-await check('호출 기록: 지점은 7가지만 · 지연 · 시도(0 = 보내기 전 실패는 가능, 음수 불가) · 토큰 · 비용은 음수 불가 · 필수 칸 · 없는 사용자 거부', async () => {
+await check('호출 기록: 지점은 8가지만 · 지연 · 시도(0 = 보내기 전 실패는 가능, 음수 불가) · 토큰 · 비용은 음수 불가 · 필수 칸 · 없는 사용자 거부', async () => {
   await svc();
   const bad = (over, re) => expectErr(() => insCall(A, over, ''), re);
   const point = await bad({ point: 'T9' }, /ai_calls_point_check/);
@@ -2228,6 +2228,79 @@ await check('배치 예약: alarm-roll을 5분마다 부름 (pg_cron은 PGlite�
   return job && job.schedule === '*/5 * * * *' && job.command === `select private.invoke_edge_function('alarm-roll')`
     && calls.length === 1 && calls[0].url === 'https://abc.supabase.co/functions/v1/alarm-roll' && calls[0].headers.Authorization === 'Bearer SECRET-KEY'
     ? true : { job, calls };
+});
+
+
+// ---------------------------------------------------------------------
+// 일정 수정 · 삭제 ① 회차 예외 표시 (L1 PR 4b, 이슈 #276) — appointments.exception_kind · roll_due_series의 기준 회차
+// ---------------------------------------------------------------------
+// appointment-edit(서버 함수)이 "이번만 고친 · 지운" 회차에 표시를 남기고, alarm-roll이 그 회차를 기준 회차로 안 씀. 여기서는 DB가 약속하는 것(칸 · 값 · 권한 · 함수)만 확인함
+
+await check('예외 칸: exception_kind는 기본 NULL(기존 행은 영향 없음) · EDITED / CANCELED만 받음 · 주인은 고치고 남은 못 고침 · 묶음 / 날짜 열쇠 칸은 여전히 못 바꿈', async () => {
+  const [{ n: before }] = await q(`select count(*)::int as n from public.appointments where exception_kind is not null`);
+  await svc();
+  const a = await insAppt(H1, { at: '2026-12-03T10:00:00+09:00', rule: 'FREQ=WEEKLY;BYDAY=TH' });
+  const [col] = await q(`select data_type, is_nullable, column_default from information_schema.columns where table_schema = 'public' and table_name = 'appointments' and column_name = 'exception_kind'`);
+  const [fresh] = await q(`select exception_kind from public.appointments where appointment_id = $1`, [a.appointment_id]);
+  const badValue = await expectErr(() => q(`update public.appointments set exception_kind = 'DONE' where appointment_id = $1`, [a.appointment_id]), /appointments_exception_kind_check|check constraint/);
+  await as(H1);
+  const edited = await q(`update public.appointments set exception_kind = 'EDITED' where appointment_id = $1 returning exception_kind`, [a.appointment_id]);
+  const canceled = await q(`update public.appointments set exception_kind = 'CANCELED' where appointment_id = $1 returning exception_kind`, [a.appointment_id]);
+  const keys = await expectErr(() => q(`update public.appointments set occurrence_on = occurrence_on + 1 where appointment_id = $1`, [a.appointment_id]), /바꿀 수 없음/);
+  const cleared = await q(`update public.appointments set exception_kind = null where appointment_id = $1 returning exception_kind`, [a.appointment_id]);
+  await as(H2);
+  const others = await q(`update public.appointments set exception_kind = 'EDITED' where appointment_id = $1 returning appointment_id`, [a.appointment_id]);
+  const seen = await q(`select exception_kind from public.appointments where appointment_id = $1`, [a.appointment_id]);
+  await svc();
+  const [after] = await q(`select exception_kind from public.appointments where appointment_id = $1`, [a.appointment_id]);
+  return before === 0 && col?.data_type === 'text' && col.is_nullable === 'YES' && col.column_default === null && fresh.exception_kind === null
+    && badValue === true && edited[0]?.exception_kind === 'EDITED' && canceled[0]?.exception_kind === 'CANCELED' && keys === true && cleared[0]?.exception_kind === null
+    && others.length === 0 && seen.length === 0 && after.exception_kind === null
+    ? true : { before, col, fresh, badValue, edited, canceled, keys, cleared, others, seen, after };
+});
+
+await check('roll_due_series의 기준 회차: 예외 아닌 회차 중 가장 늦은 행(이번만 고친 값이 안 번짐) → 예외뿐이면 이번만 고친 행 중 가장 늦은 것 → 이번만 지운 행은 기준이 아님. 다음 회차 시각은 예외까지 포함한 가장 늦은 행에서 셈(14일치가 이미 참이면 빠짐)', async () => {
+  const N = '2026-12-02T12:00:00+09:00';   // 수요일. 창은 12-16(수) 12:00 앞까지, 규칙은 매주 목
+  await svc();
+  const name = new Map();      // series_id → 이름
+  const expectTemplate = new Map();   // 이름 → 기대하는 template_id (null = 목록에 없어야 함)
+  const series = async (label, rows, expectedIndex) => {
+    const made = [];
+    for (const [at, kind] of rows) {
+      const r = await insAppt(H1, { at, rule: 'FREQ=WEEKLY;BYDAY=TH', series: made[0]?.series_id ?? null, on: made[0] ? at.slice(0, 10) : null });
+      if (kind) await q(`update public.appointments set exception_kind = $1 where appointment_id = $2`, [kind, r.appointment_id]);
+      made.push(r);
+    }
+    name.set(made[0].series_id, label);
+    expectTemplate.set(label, expectedIndex == null ? null : made[expectedIndex].appointment_id);
+  };
+  await series('normal', [['2026-12-03T10:00:00+09:00', null]], 0);                                                    // 예외 없음 — 이전과 같음
+  await series('edited_newest', [['2026-11-26T10:00:00+09:00', null], ['2026-12-03T10:00:00+09:00', 'EDITED']], 0);     // 이번만 고친 회차가 가장 늦어도 기준은 보통 회차
+  await series('canceled_newest', [['2026-11-26T10:00:00+09:00', null], ['2026-12-03T10:00:00+09:00', 'CANCELED']], 0); // 지운 회차도 기준이 아님
+  await series('only_edited', [['2026-12-03T10:00:00+09:00', 'EDITED']], 0);                                           // 예외뿐 — 이번만 고친 행이 기준
+  await series('two_edited', [['2026-11-26T10:00:00+09:00', 'EDITED'], ['2026-12-03T10:00:00+09:00', 'EDITED']], 1);    // 이번만 고친 행 중 가장 늦은 것
+  await series('edited_vs_canceled', [['2026-11-26T10:00:00+09:00', 'EDITED'], ['2026-12-03T10:00:00+09:00', 'CANCELED']], 0); // 지운 행은 빼고 이번만 고친 행
+  await series('all_canceled', [['2026-12-03T10:00:00+09:00', 'CANCELED']], null);                                    // 기준이 될 행이 없음 — 목록에 없음
+  await series('filled', [['2026-12-03T10:00:00+09:00', null], ['2026-12-10T10:00:00+09:00', 'EDITED']], null);         // 가장 늦은 행(예외)의 다음 회차 12-17이 창 밖 — 보통 회차만 봤다면 12-10이 창 안이라 줬을 것
+  const rows = await q(`select user_id, series_id, kind, template_id from public.roll_due_series($1, 1000)`, [N]);
+  const mine = rows.filter((r) => name.has(r.series_id));
+  const got = Object.fromEntries(mine.map((r) => [name.get(r.series_id), r.template_id]));
+  const wanted = Object.fromEntries([...expectTemplate].filter(([, id]) => id != null));
+  return JSON.stringify(Object.entries(got).sort()) === JSON.stringify(Object.entries(wanted).sort()) && mine.every((r) => r.kind === 'APPOINTMENT' && r.user_id === H1)
+    ? true : { got, wanted };
+});
+
+await check('roll_due_series: 규칙을 비운(반복 끔) 묶음은 이번만 고친 회차가 남아 있어도 목록에서 빠짐 (appointment-edit의 이후 모두 지우기 · 반복 끔)', async () => {
+  const N = '2026-12-02T12:00:00+09:00';
+  await svc();
+  const first = await insAppt(H1, { at: '2026-11-26T10:00:00+09:00', rule: 'FREQ=WEEKLY;BYDAY=TH' });
+  const edited = await insAppt(H1, { at: '2026-12-03T10:00:00+09:00', rule: 'FREQ=WEEKLY;BYDAY=TH', series: first.series_id, on: '2026-12-03' });
+  await q(`update public.appointments set exception_kind = 'EDITED' where appointment_id = $1`, [edited.appointment_id]);
+  const listed = async () => (await q(`select series_id from public.roll_due_series($1, 1000)`, [N])).some((r) => r.series_id === first.series_id);
+  const before = await listed();
+  await q(`update public.appointments set recurrence_rule = null where series_id = $1`, [first.series_id]);
+  const after = await listed();
+  return before === true && after === false ? true : { before, after };
 });
 
 
