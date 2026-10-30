@@ -56,7 +56,7 @@ export default function NewScheduleScreen() {
   // 대화에서 왔고 찾은 일정이 아직 대기일 때만 — 이미 확인한 카드면 보통 새 일정으로 (두 벌 저장 막기)
   const [fromChat] = useState(() => from === 'chat' && foundScheduleDraft() != null);
   const { data: places, error: placesError, reload: reloadPlaces } = useLoad(listPlaces);
-  const { data: appointments } = useLoad(listAppointments); // 같은 날 앞 일정의 기상 알람을 찾는 데만 씀 — 못 읽어도 폼은 그대로
+  const { data: appointments } = useLoad(() => listAppointments({ everyOccurrence: true })); // 같은 날 앞 일정의 기상 알람을 찾는 데만 씀 — 못 읽어도 폼은 그대로
   const [initial] = useState(() => {
     if (fromChat) {
       const found = foundScheduleDraft();

@@ -1,0 +1,31 @@
+{
+  "point": "T3",
+  "source": "runs/e2-t3/t3.jsonl r17-a|clean|r0 / usage: 장부 T3@v1#5dd07ef4 정상 호출 594건 중 출력 토큰 중앙값 (run e2-t3)",
+  "api_mode": "union",
+  "response": {
+    "model": "claude-haiku-5-5",
+    "stop_reason": "end_turn",
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"tags\":[\"OVERSLEPT\",\"TRAFFIC\"]}"
+      }
+    ],
+    "usage": {
+      "input_tokens": 59,
+      "output_tokens": 19,
+      "cache_creation_input_tokens": 0,
+      "cache_read_input_tokens": 1504,
+      "output_tokens_details": {
+        "thinking_tokens": 0
+      }
+    },
+    "request_id": "req_fixture_T3"
+  },
+  "expect": {
+    "tags": [
+      "OVERSLEPT",
+      "TRAFFIC"
+    ]
+  }
+}

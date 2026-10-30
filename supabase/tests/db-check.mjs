@@ -2232,6 +2232,54 @@ await check('배치 예약: alarm-roll을 5분마다 부름 (pg_cron은 PGlite�
 
 
 // ---------------------------------------------------------------------
+// 기본 강도 = 보통 (D69, 이슈 #262) — 이미 저장된 자동 약 알람을 보통으로
+// ---------------------------------------------------------------------
+
+await check('기본 강도 백필: 자동(AUTO) 약(SOFT)은 세 칸 같이 보통으로(소리 칸이 비어 있어도 됨), 직접 고른(MANUAL) 약 · 자동 보통 · 자동 강은 그대로 — 시각 · 켜짐은 유지, 바뀐 행만 updated_at 갱신', async () => {
+  const staged = new PGlite();
+  try {
+    await staged.exec(AUTH_STUBS);
+    const files = readdirSync(MIG_DIR).filter((x) => x.endsWith('.sql')).sort();
+    const i = files.findIndex((x) => x.endsWith('_intensity_default.sql'));
+    if (i < 0) return '_intensity_default.sql 마이그레이션이 없음';
+    for (const f of files.slice(0, i)) await staged.exec(readFileSync(join(MIG_DIR, f), 'utf8'));   // 값을 올리기 전까지만
+    const sq = async (sql, params = []) => (await staged.query(sql, params)).rows;
+    await sq(`insert into auth.users (id, email) values ($1, 'old@example.com')`, [A]);
+    // 일정 없는 알람으로 시험 — 약속 알람과 같은 칸 (alarms_one_source는 둘 다 비어도 받음)
+    const rowsIn = [
+      ['SOFT', 'CALM', 'theme_calm', 'AUTO', true],
+      ['SOFT', 'CALM', null, 'AUTO', false],
+      ['SOFT', 'CALM', 'theme_calm', 'MANUAL', true],
+      ['NORMAL', 'NEUTRAL', 'theme_default', 'AUTO', true],
+      ['STRONG', 'DIRECT', 'theme_urgent', 'AUTO', true],
+      ['STRONG', 'DIRECT', 'theme_urgent', 'MANUAL', true],
+    ];
+    for (const [n, [inten, tone, sound, src, enabled]] of rowsIn.entries()) {
+      await sq(`insert into public.alarms (user_id, alarm_type, scheduled_at, intensity, voice_tone, sound_key, intensity_source, is_enabled, snooze_limit, updated_at, last_calculated_at)
+                values ($1, 'WAKE', $2, $3, $4, $5, $6, $7, 2, '2026-10-01T00:00:00Z', '2026-10-01T00:00:00Z')`,
+        [A, `2026-11-03T0${n}:00:00+09:00`, inten, tone, sound, src, enabled]);
+    }
+    for (const f of files.slice(i)) await staged.exec(readFileSync(join(MIG_DIR, f), 'utf8'));
+    const out = await sq(`select to_char(scheduled_at at time zone 'Asia/Seoul', 'HH24') as hh, intensity, voice_tone, sound_key, intensity_source, is_enabled, snooze_limit,
+                                 (updated_at > '2026-10-01T00:00:00Z') as touched, (last_calculated_at = '2026-10-01T00:00:00Z') as calc_kept
+                            from public.alarms order by scheduled_at`);
+    const text = out.map((x) => [x.hh, x.intensity, x.voice_tone, x.sound_key ?? '-', x.intensity_source, x.is_enabled, x.snooze_limit, x.touched, x.calc_kept].join('/'));
+    const want = [
+      '00/NORMAL/NEUTRAL/theme_default/AUTO/true/2/true/true',   // 자동 약 → 보통 (세 칸 같이)
+      '01/NORMAL/NEUTRAL/-/AUTO/false/2/true/true',              // 소리 칸이 비어 있어도 올림, 꺼짐 유지
+      '02/SOFT/CALM/theme_calm/MANUAL/true/2/false/true',        // 직접 고른 약은 그대로
+      '03/NORMAL/NEUTRAL/theme_default/AUTO/true/2/false/true',
+      '04/STRONG/DIRECT/theme_urgent/AUTO/true/2/false/true',
+      '05/STRONG/DIRECT/theme_urgent/MANUAL/true/2/false/true',
+    ];
+    return JSON.stringify(text) === JSON.stringify(want) ? true : { text };
+  } finally {
+    await staged.close();
+  }
+});
+
+
+// ---------------------------------------------------------------------
 // 회의 의견 (결정 안건 페이지 /decisions) — 링크를 아는 사람은 로그인 없이 읽고 남김, 고치기 X,
 // 지우기는 내 이름으로 남긴 것만 함수로 (숨김)
 // ---------------------------------------------------------------------
@@ -2347,6 +2395,70 @@ await check('투표 · 상태: anon은 시각을 직접 못 넣고, 상태를 �
   const del = await expectErr(() => q(`delete from public.decision_states where decision_id = 'D5'`), /permission denied/);
   const badKey = await expectErr(() => vote('D6', '지형', 'AB'), /check constraint/);
   return at === true && del === true && badKey === true ? true : { at, del, badKey };
+});
+
+// ---------------------------------------------------------------------
+// 프로필 온보딩 칸 5개 (L7 PR 3) — onboarded_at · wake_sensitivity · wake_margin · privacy_agreed_at · privacy_version
+// ---------------------------------------------------------------------
+// 채움(backfill)이 없으므로 기존 줄도 기본값 · NULL로 시작함. 새 칸은 칼럼 권한 · 트리거 없이 기존 profiles RLS를 따름
+
+await check('프로필 온보딩 칸: 기본값은 wake_sensitivity · wake_margin NORMAL, onboarded_at · privacy 둘은 NULL', async () => {
+  await su();
+  const [r] = await q(`select onboarded_at, wake_sensitivity, wake_margin, privacy_agreed_at, privacy_version from public.profiles where user_id = $1`, [A]);
+  return r.onboarded_at === null && r.wake_sensitivity === 'NORMAL' && r.wake_margin === 'NORMAL'
+    && r.privacy_agreed_at === null && r.privacy_version === null ? true : r;
+});
+await check('프로필 온보딩 칸: wake_sensitivity는 LIGHT · NORMAL · HEAVY만 (DEEP · 소문자 · 빈 값 거부), wake_margin은 TIGHT · NORMAL · LOOSE만 (WIDE · 소문자 · 빈 값 거부)', async () => {
+  await as(A);
+  const okS = [];
+  for (const v of ['LIGHT', 'HEAVY', 'NORMAL']) okS.push((await q(`update public.profiles set wake_sensitivity = $1 where user_id = $2 returning wake_sensitivity`, [v, A]))[0].wake_sensitivity);
+  const okM = [];
+  for (const v of ['TIGHT', 'LOOSE', 'NORMAL']) okM.push((await q(`update public.profiles set wake_margin = $1 where user_id = $2 returning wake_margin`, [v, A]))[0].wake_margin);
+  const badS = [];
+  for (const v of ['DEEP', 'light', '']) badS.push(await expectErr(() => q(`update public.profiles set wake_sensitivity = $1 where user_id = $2`, [v, A]), /profiles_wake_sensitivity_check/));
+  const badM = [];
+  for (const v of ['WIDE', 'tight', '']) badM.push(await expectErr(() => q(`update public.profiles set wake_margin = $1 where user_id = $2`, [v, A]), /profiles_wake_margin_check/));
+  const nullS = await expectErr(() => q(`update public.profiles set wake_sensitivity = null where user_id = $1`, [A]), /not-null|null value/);
+  const nullM = await expectErr(() => q(`update public.profiles set wake_margin = null where user_id = $1`, [A]), /not-null|null value/);
+  return okS.join() === 'LIGHT,HEAVY,NORMAL' && okM.join() === 'TIGHT,LOOSE,NORMAL'
+    && badS.every((x) => x === true) && badM.every((x) => x === true) && nullS === true && nullM === true
+    ? true : { okS, okM, badS, badM, nullS, nullM };
+});
+await check('프로필 온보딩 칸: 개인정보 동의 시각과 판 번호는 같이 있거나 같이 없음 (하나만 넣으면 거부, 둘 다 넣으면 통과, 둘 다 비우면 통과)', async () => {
+  await as(A);
+  const onlyAt = await expectErr(() => q(`update public.profiles set privacy_agreed_at = now() where user_id = $1`, [A]), /profiles_privacy_agreed_pair/);
+  const onlyVer = await expectErr(() => q(`update public.profiles set privacy_version = 1 where user_id = $1`, [A]), /profiles_privacy_agreed_pair/);
+  const both = await q(`update public.profiles set privacy_agreed_at = now(), privacy_version = 1 where user_id = $1 returning privacy_version`, [A]);
+  const dropOne = await expectErr(() => q(`update public.profiles set privacy_version = null where user_id = $1`, [A]), /profiles_privacy_agreed_pair/);
+  const clear = await q(`update public.profiles set privacy_agreed_at = null, privacy_version = null where user_id = $1 returning privacy_version`, [A]);
+  return onlyAt === true && onlyVer === true && both.length === 1 && both[0].privacy_version === 1 && dropOne === true
+    && clear.length === 1 && clear[0].privacy_version === null ? true : { onlyAt, onlyVer, both, dropOne, clear };
+});
+await check('프로필 온보딩 칸: 본인은 5칸을 한 번에 고칠 수 있고 남(다른 사용자)의 행은 못 고침 (칼럼 권한 · 트리거에 막히지 않음)', async () => {
+  await as(A);
+  const mine = await q(`update public.profiles set onboarded_at = '2026-10-30 09:00+09', wake_sensitivity = 'HEAVY', wake_margin = 'LOOSE',
+                                                   privacy_agreed_at = '2026-10-30 09:00+09', privacy_version = 2
+                        where user_id = $1 returning wake_sensitivity, wake_margin, privacy_version, onboarded_at is not null as done`, [A]);
+  await as(B);
+  const other = await q(`update public.profiles set onboarded_at = now(), wake_sensitivity = 'LIGHT', wake_margin = 'TIGHT',
+                                                    privacy_agreed_at = now(), privacy_version = 9
+                         where user_id = $1 returning 1`, [A]);
+  const seen = await q(`select 1 from public.profiles where user_id = $1`, [A]);   // 남의 행은 읽히지도 않음
+  await su();
+  const [after] = await q(`select wake_sensitivity, wake_margin, privacy_version from public.profiles where user_id = $1`, [A]);
+  // 다음 항목이 기본값을 기대할 수 있게 되돌림
+  await q(`update public.profiles set onboarded_at = null, wake_sensitivity = 'NORMAL', wake_margin = 'NORMAL', privacy_agreed_at = null, privacy_version = null where user_id = $1`, [A]);
+  return mine.length === 1 && mine[0].wake_sensitivity === 'HEAVY' && mine[0].wake_margin === 'LOOSE' && mine[0].privacy_version === 2 && mine[0].done === true
+    && other.length === 0 && seen.length === 0
+    && after.wake_sensitivity === 'HEAVY' && after.wake_margin === 'LOOSE' && after.privacy_version === 2
+    ? true : { mine, other, seen, after };
+});
+await check('프로필 온보딩 칸: 공개 함수(find_profile_by_handle · get_public_profiles)는 새 칸을 돌려주지 않음', async () => {
+  const cols = await q(`select p.proname, pg_get_function_result(p.oid) as res from pg_proc p
+                        join pg_namespace n on n.oid = p.pronamespace
+                        where n.nspname = 'public' and p.proname in ('find_profile_by_handle', 'get_public_profiles') order by p.proname`);
+  const leaked = cols.filter((c) => /onboarded_at|wake_sensitivity|wake_margin|privacy_/.test(c.res));
+  return cols.length === 2 && leaked.length === 0 ? true : { cols, leaked };
 });
 
 report();

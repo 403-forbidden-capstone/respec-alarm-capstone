@@ -15,10 +15,12 @@ import {
   Segmented,
   Stepper,
   Text,
+  toast,
   Toggle,
   TopBar,
   TopBarButton,
 } from '@/components/ui';
+import { ChatNotice } from '@/features/voice/components/ChatNotice';
 import { colors, radius } from '@/theme';
 
 // 개발용 UI 견본 — 탭에는 없고 주소로만 들어옴: /dev/ui (앱은 respecalarm://dev/ui)
@@ -138,6 +140,18 @@ export default function UiSampleScreen() {
         <Chip label="매주 목요일" />
         <Chip label="길찾기" variant="fill" />
         <Chip label="강" variant="ink" />
+      </View>
+
+      <SectionHeader title="AI 대화 안내" right="A02" />
+      <View style={styles.stack}>
+        <ChatNotice
+          kind="failed"
+          onRetry={() => toast('다시 시도')}
+          onManual={() => toast('직접 일정 만들기')}
+          onDone={() => toast('대화 마치기')}
+        />
+        <ChatNotice kind="failed" busy onRetry={() => {}} onManual={() => {}} onDone={() => {}} />
+        <ChatNotice kind="limit" onManual={() => toast('직접 일정 만들기')} onDone={() => toast('대화 마치기')} />
       </View>
     </Screen>
   );
