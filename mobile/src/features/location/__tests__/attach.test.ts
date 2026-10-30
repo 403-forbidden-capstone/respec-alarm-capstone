@@ -18,8 +18,9 @@ const tracked = (participantId: string, appointmentAt: number, over: Partial<Tra
   ...over,
 });
 
-const none: Taken = { departed: new Set(), arrived: new Set() };
-const taken = (departed: string[] = [], arrived: string[] = []): Taken => ({ departed: new Set(departed), arrived: new Set(arrived) });
+const none: Taken = { departed: new Set(), arrived: new Map() };
+// arrived = [참여 조건, 도착 시각]
+const taken = (departed: string[] = [], arrived: [string, number][] = []): Taken => ({ departed: new Set(departed), arrived: new Map(arrived) });
 const region = (over: Partial<MonitoredRegion>): MonitoredRegion => ({ id: 'r1', lat: 37.5, lng: 127, radiusM: 200, home: false, originOf: [], destOf: [], ...over });
 
 describe('집 이탈 → 오늘 첫 약속 (L6 안건후보: 집 이탈 약속 붙이기 기본안 A)', () => {
@@ -34,8 +35,17 @@ describe('집 이탈 → 오늘 첫 약속 (L6 안건후보: 집 이탈 약속 �
 
   it('이미 출발 · 도착한 약속은 건너뜀', () => {
     expect(attachHomeExit(list, at('08:20'), taken(['class']))).toBe('lunch');
-    expect(attachHomeExit(list, at('10:30'), taken([], ['class']))).toBe('lunch');
+    expect(attachHomeExit(list, at('10:30'), taken([], [['class', at('08:45')]]))).toBe('lunch');
+    expect(attachHomeExit(list, at('09:00'), taken(['class'], [['class', at('08:45')]]))).toBe('lunch');
     expect(attachHomeExit(list, at('12:00'), taken(['class', 'lunch']))).toBeNull();
+  });
+
+  it('도착만 있고 출발이 없는 약속 — 이탈이 도착 전이거나 도착 뒤 30분 안이면 그 약속의 출발 (가까운 약속 반경 겹침 · 신호 늦음 · 원탭 도착이 먼저)', () => {
+    const arrived = taken([], [['class', at('08:45')]]);
+    expect(attachHomeExit(list, at('08:20'), arrived)).toBe('class'); // 원탭 "도착했어요"가 이탈 신호보다 먼저 들어옴
+    expect(attachHomeExit(list, at('08:47'), arrived)).toBe('class'); // 목적지 진입이 집 이탈보다 먼저 옴
+    expect(attachHomeExit(list, at('09:15'), arrived)).toBe('class'); // 30분 끝 포함
+    expect(attachHomeExit(list, at('09:16'), arrived)).toBe('lunch');
   });
 
   it('창이 끝난 약속(약속 60분 후 지남)은 건너뜀 — 끝 시각은 포함', () => {
@@ -88,7 +98,7 @@ describe('목적지 진입 → 그곳이 목적지인 약속', () => {
 
   it('창 안 · 아직 도착 안 한 것 모두 (같은 건물 연달아 있는 약속)', () => {
     expect(attachDestEnter(hall, [later, second, first], at('09:40'), none)).toEqual(['first', 'second']);
-    expect(attachDestEnter(hall, [later, second, first], at('09:40'), taken([], ['first']))).toEqual(['second']);
+    expect(attachDestEnter(hall, [later, second, first], at('09:40'), taken([], [['first', at('09:35')]]))).toEqual(['second']);
     expect(attachDestEnter(hall, [later, second, first], at('14:00'), none)).toEqual(['later']);
   });
 
@@ -97,8 +107,8 @@ describe('목적지 진입 → 그곳이 목적지인 약속', () => {
     expect(attachDestEnter(hall, [first], at('08:19'), none)).toEqual([]);
   });
 
-  it('가까운 약속(L6 안건후보: 가까운 약속 감지)은 도착 감지 안 함', () => {
-    expect(attachDestEnter(hall, [tracked('first', at('10:00'), { near: true })], at('09:50'), none)).toEqual([]);
+  it('가까운 약속(500m 안)도 도착을 받음 — D68은 이동 측정만 끔 (안건후보 D78 정리)', () => {
+    expect(attachDestEnter(hall, [tracked('first', at('10:00'), { near: true })], at('09:50'), none)).toEqual(['first']);
   });
 });
 
@@ -119,6 +129,13 @@ describe('같은 길 (isSameTrip) — 그 출발지 약속의 출발이 이탈 �
   it('집: 집 아닌 곳에서 출발하는 약속의 출발은 안 셈', () => {
     const fromSchool = tracked('fromSchool', at('09:00'), { fromHome: false });
     expect(isSameTrip(home, [fromSchool, lunch], [dep('fromSchool', '08:20')], at('08:24'))).toBe(false);
+  });
+
+  it('출발지 이탈도 도착만 있는 약속은 도착 뒤 30분 안이면 그 약속에', () => {
+    const school = region({ originOf: ['study'] });
+    const study = tracked('study', at('15:00'), { fromHome: false, departAt: at('14:30') });
+    expect(attachOriginExit(school, [study], at('14:40'), taken([], [['study', at('14:35')]]))).toBe('study');
+    expect(attachOriginExit(school, [study], at('15:10'), taken([], [['study', at('14:35')]]))).toBeNull();
   });
 
   it('집 아닌 출발지: 그곳에서 출발하는 참여 조건만', () => {

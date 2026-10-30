@@ -279,7 +279,7 @@ export async function saveStandaloneAlarm(input: StandaloneInput): Promise<Appoi
 // ---------------------------------------------------------------------------
 
 // 저장과 따로 부르는 곳(S01 등)의 기록 — 같은 일정의 다음 alarm-commit에 실어 보냄 (editQueue.ts). 앱 안에서 지우는 길은 없음
-export async function recordEdit(log: Omit<UserEditLog, 'at'>): Promise<void> {
+export async function recordEdit(log: EditLogLine): Promise<void> {
   queueEdit(log);
 }
 

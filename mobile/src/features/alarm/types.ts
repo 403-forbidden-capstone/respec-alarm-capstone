@@ -261,11 +261,16 @@ export type DepartCheck = {
 // 고친 값 기록 (고치기 원칙) — 사용자가 자동 값을 직접 고치면 하나씩 남겨 두고, 나중에 개인화(계산 · 제안)에 씀
 // DB public.user_edit_logs 한 줄과 같은 모양 — 실데이터가 붙으면 api.ts의 recordEdit만 insert로 바뀜
 //   screen: 고친 화면 (S01 = 알람 조정 제안 직접 수정, 다른 담당이 같은 기록 함수를 부름)
+//     H03 · H05 · S01은 저장(alarm-commit edits)과 같이 남김. H01 홈 감지 정정 줄 · NTF 감지 안내 알림 · H08 기상 정정(D61)은 앱이 user_edit_logs에 바로 남김
 //   autoValue: 고치기 전에 앱이 쓰던 값 — 계산하는 값(이동 · 준비 · 알람 시각 · 강도)은 자동 계산값, 입력하는 값(여유 · 출발 위치 · 이동 수단 · 켜기)은 고치기 전 값
-//   editedValue: 고친 뒤 값. 자동으로 되돌렸으면 null
+//   editedValue: 고친 뒤 값. 자동으로 되돌렸으면 null. 위치 감지를 [아니에요]로 지웠으면 { rejected: true } (features/location/detections.ts)
 //   강도 세 칸은 DB 칸 이름으로 남김 — 배경음 = sound_key, 말소리 = voice_tone, 진동 = intensity (값은 약 · 중 · 강 = 0 · 1 · 2)
-export type EditLogScreen = 'H03' | 'H05' | 'S01';
+// alarm-commit이 받는 화면 (서버 supabase/functions/_shared/requests.ts SCREENS와 같음)
+export type CommitEditScreen = 'H03' | 'H05' | 'S01';
+export type EditLogScreen = CommitEditScreen | 'H01' | 'H08' | 'NTF';
 export type EditLogField =
+  | 'departed_at' // 위치로 잡은 출발 · 도착 정정 (H01 · NTF)
+  | 'arrived_at'
   | 'buffer_minutes'
   | 'prepare_minutes'
   | 'travel_minutes'

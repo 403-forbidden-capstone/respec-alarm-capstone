@@ -3,7 +3,10 @@
 //   · 목적지 · 집 아닌 출발지는 감시 시간창(W_geo: 출발 예정 60분 전 ~ 약속 60분 후) 안에서만, 도착이 기록되면 뺌
 //   · 출발지가 비었거나 집 반경 안이면 집에서 출발 — 따로 영역을 만들지 않고 집 이탈로 잡음
 //   · 목적지 좌표나 출발 좌표(집 출발인데 집 좌표 없음)가 없는 약속은 감지하지 않음 — 출발도 (7.13.7 따름). 판정 목록(participants)에서 빼고 untracked에 둠
-//   · 출발지 ~ 목적지 500m 안이면 목적지를 감시하지 않음 — 출발만 살림 (L6 안건후보: 가까운 약속 감지 기본안 A)
+//   · 출발지 ~ 목적지 500m 안(가까운 약속)이어도 출발 · 도착을 다 감시 — 끄는 것은 실제 이동시간만 (participantTimes travelMinutesOf)
+//       D68 "500m 안이면 이동 측정을 끄고 기본값" — 끄는 것은 이동시간만 (안건후보 D78 정리). L6 안건후보: 가까운 약속 감지 기본안에서 도착 감지를 살림
+//       반경이 겹치면(거리 < 두 반경 합) 도착이 조금 일찍 잡힐 수 있음 — 사용자에게 유리한 쪽. 목적지 진입이 출발지 이탈보다 먼저 와도 그 이탈은 그 약속의 출발 (attach.ts)
+//       출발지가 목적지 반경 안이면(거리 < 목적지 반경) 등록 때 "이미 안"이라 도착이 안 잡히고, 목적지가 출발지 반경 안이면 출발이 안 잡힘 — 그때는 원탭이 대신함
 //   · 같은 좌표(소수 5자리)는 한 영역으로 합침, 반경은 큰 쪽. id = 좌표로 만든 짧은 고정 글자 → 다시 계획해도 같은 id
 //     (등록 층은 바뀐 영역만 다시 등록 — 다시 등록하면 "이미 안" 신호가 또 옴)
 //   · 상한 20개 — 집 먼저, 나머지는 쓰이는 시각(출발지 = 출발 예정, 목적지 = 약속) 이른 순
@@ -45,7 +48,7 @@ export type TrackedParticipant = {
   appointmentAt: number;
   departAt: number;
   fromHome: boolean; // 집에서 출발 (출발지가 비었거나 집 반경 안)
-  near: boolean; // 출발지 ~ 목적지 500m 안 — 도착 감지 · 이동시간 끔 (L6 안건후보: 가까운 약속 감지)
+  near: boolean; // 출발지 ~ 목적지 500m 안 — 실제 이동시간만 끔, 감지는 그대로 (D68 · 안건후보 D78 정리)
   departedAt: number | null;
   arrivedAt: number | null;
 };
@@ -136,9 +139,9 @@ export function planRegions(input: PlanInput): RegionPlan {
 
     const span = detectionWindow(p);
     if (arrivedAt != null || input.now < span.start - ahead || input.now > span.end) continue;
-    // 집 아닌 출발지 — 반경 칸이 없어 모르는 곳 기본값. 출발 뒤에도 도착 전까지 둠 (도착 전 귀가 = 출발 취소, 7.13.7 따름)
+    // 집 아닌 출발지 — 반경 칸이 없어 모르는 곳 기본값. 출발 뒤에도 도착 전까지 둠 (도착 전 귀가 뒤 다시 나간 출발을 받게, 7.13.7 약속 전 마지막 출발)
     if (!fromHome && origin) addUse(origin, UNKNOWN_RADIUS_M, 'originOf', p.participantId, p.departAt);
-    if (!near) addUse(dest, radiusOr(p.dest?.radiusM, UNKNOWN_RADIUS_M), 'destOf', p.participantId, p.appointmentAt);
+    addUse(dest, radiusOr(p.dest?.radiusM, UNKNOWN_RADIUS_M), 'destOf', p.participantId, p.appointmentAt);
   }
 
   const others = [...drafts.values()]
