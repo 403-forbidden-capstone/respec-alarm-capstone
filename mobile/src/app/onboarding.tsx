@@ -244,6 +244,11 @@ export default function OnboardingScreen() {
             reading={photoImport.reading ? 'photo' : null}
           />
           {timetable.notice ? <ImportNoticeCard notice={timetable.notice} onDismiss={timetable.dismissNotice} /> : null}
+          {timetable.missingCoords > 0 ? (
+            <Text variant="small" tone="warn" style={styles.noHome}>
+              {timetable.campus ? '장소를 못 찾은 줄이 있어요. 그 줄의 [장소]에서 직접 골라 주세요' : '학교를 먼저 정해 주세요. 이동시간을 구하려면 수업 장소의 위치가 필요해요'}
+            </Text>
+          ) : null}
           {timetable.imported && timetable.rows.length > 0 ? <CampusCard campus={timetable.campus} onOpen={timetable.openCampus} disabled={busy} /> : null}
           <TimetableStep
             rows={timetable.rows}
