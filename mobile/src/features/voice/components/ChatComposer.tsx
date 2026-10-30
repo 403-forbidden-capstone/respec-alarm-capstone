@@ -61,6 +61,7 @@ export function ChatComposer({
             returnKeyType="send"
             placeholder="메시지를 입력하세요"
             accessibilityLabel="보낼 메시지"
+            maxLength={1000} // 서버가 받는 한 말의 최대 글자 수 (voice-turn MAX_TEXT_CHARS)
             placeholderTextColor={colors.faint}
             style={styles.input}
           />

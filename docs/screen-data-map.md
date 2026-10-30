@@ -193,10 +193,10 @@
 
 | 상황 | 앱이 하는 일 |
 |---|---|
-| `LLM_UNAVAILABLE` · `NOT_CONFIGURED` · `NETWORK` · `TIMEOUT` · `INTERNAL` | 던지지 않음. 대화 · 카드는 남기고 마지막 말풍선 아래에 "AI가 지금 답하지 못해요" + [다시 시도](같은 요청 · 같은 client_turn_id) · [직접 일정 만들기] · [대화 마치기]. `details.cards`가 오면 카드 상태만 받음 |
-| `CONFLICT` (rev 어긋남) | `voice-session` resume으로 다시 읽고 오류 안내(보낸 말은 입력칸으로) |
-| `NOT_FOUND` (세션 · 카드) | 앞 대화를 버리고 다음에 다시 시작 |
-| `limits.reached` TURN · DAY | 오류가 아님 — "오늘 대화는 여기까지예요" + [대화 마치기] · [직접 일정 만들기], 입력 막음 |
+| `LLM_UNAVAILABLE` · `NOT_CONFIGURED` · `NETWORK` · `TIMEOUT` · `INTERNAL` | 던지지 않음. 대화 · 카드는 남기고 마지막 말풍선 아래에 "AI가 지금 답하지 못해요" + [다시 시도](같은 요청 · 같은 client_turn_id) · [직접 일정 만들기] · [대화 마치기]. `details`의 `cards` · `rev` · `limits`로 상태를 복원. 키가 없으면 `voice-session`은 첫 마디까지 주고 `voice-turn`만 `NOT_CONFIGURED`(보낸 말은 서버에 안 쌓이고 같은 요청을 다시 보내면 됨) |
+| `CONFLICT` (rev 어긋남) | `voice-session` resume으로 다시 읽고 오류 안내(보낸 말은 입력칸으로). 앱에서 이미 저장한 카드는 서버가 몰라도 저장으로 둠 |
+| `NOT_FOUND` (세션 · 카드 · 정정 번호) | 같은 방식으로 세션을 다시 읽음 |
+| `limits.reached` TURN · DAY | 오류가 아님 — 20번째 답은 정상 reply로 보이고 그 뒤 입력만 막음. "오늘 대화는 여기까지예요" + [대화 마치기] · [직접 일정 만들기] |
 | 그 밖 (`VALIDATION_FAILED` · `AUTH_REQUIRED` …) | 던짐 → 토스트, 보낸 말은 입력칸으로 |
 
 - 대화 기록: `conversation_sessions`(`turns` · `server_state`) — 서버만 씀(앱은 읽기만)

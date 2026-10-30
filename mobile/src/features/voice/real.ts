@@ -33,14 +33,14 @@ import { applyFix, type Fix } from './fixes';
 import type { ChatMessage, CardAlarm, CardKind, CardStatus, Conversation, ConversationCard, FixResult, Limits, Unavailable } from './types';
 
 // ---------------------------------------------------------------------------
-// 서버 응답 모양 (설계 메모 2절)
+// 서버 응답 모양 (설계 메모 2절 · 14절) — 서버: supabase/functions/_shared/ai/voice-state.ts(응답) · voice-requests.ts(요청 검사)
 // ---------------------------------------------------------------------------
 
 type ServerDraft = {
   title: string;
   date: string; // 2026-10-30
   time: string; // 10:00
-  place: string;
+  place: string; // 서버가 늘 글자로 줌 — 장소를 못 들었으면 ''
   importance?: Importance | null;
   transport?: Transport | null;
   repeat?: Weekday[];
@@ -50,13 +50,13 @@ type ServerDraft = {
 
 // 카드의 고칠 값 — ALARM_EDIT는 설계 2.2 그대로. APPT_NEW에도 같은 칸(times · levels · prepare_delta)이 올 수 있다고 가정 (서버 PR이 맞출 것)
 type ServerEdit = {
-  appointment_id?: string;
+  appointment_id?: string | null; // DB 약속 id (서버가 별칭을 풀어 줌, 모르면 null)
   times?: Partial<Record<RingKind, string>>;
-  levels?: Partial<Record<IntensityAxis, number>>;
+  levels?: Partial<Record<IntensityAxis, number | null>>;
   enabled?: Partial<Record<RingKind, boolean>>;
   prepare_delta?: number;
   at?: string; // ALARM_NEW
-  level?: number; // ALARM_NEW
+  level?: number | null; // ALARM_NEW
 };
 
 type ServerCard = {
@@ -68,9 +68,11 @@ type ServerCard = {
   summary?: string;
   draft?: ServerDraft | null;
   edit?: ServerEdit | null;
+  appointment_id?: string | null; // 저장한 약속 (서버가 SAVED 뒤 채움)
+  error?: string | null;
 };
 
-type ServerFix = { id: string; fact?: string; kind: string; participant_id: string; action: 'CORRECT' | 'DENY'; to: string | null };
+type ServerFix = { id: string; fact?: string; kind: string; participant_id: string /* 늘 글자 (모르면 '') */; action: 'CORRECT' | 'DENY'; to: string | null };
 
 type ServerLimits = { turns_left?: number | null; sessions_left_today?: number | null; reached?: 'TURN' | 'DAY' | null };
 
@@ -203,8 +205,8 @@ function cardView(id: string, rec: CardRec): ConversationCard {
     items: d?.items ?? [],
     alarms: rec.alarms,
     question: null,
-    error: rec.error,
-    appointmentId: rec.appointmentId ?? s.edit?.appointment_id ?? null,
+    error: rec.error ?? s.error ?? null,
+    appointmentId: rec.appointmentId ?? s.appointment_id ?? s.edit?.appointment_id ?? null,
   };
 }
 
@@ -288,8 +290,10 @@ async function estimateNew(rec: CardRec): Promise<Outcome> {
   const day = dayOf(d.date);
   if (!day || !TIME.test(d.time)) return { status: 'FAILED', error: '날짜나 시각을 알 수 없어요' };
   try {
-    const place = rec.place ?? (await placeByName(d.place));
-    if (!place) return { status: 'NEEDS_PLACE', error: `'${d.place}'의 위치를 골라 주세요` };
+    // 장소를 못 들었으면('') 찾아 보지 않고 바로 장소 필요
+    const heard = d.place.trim();
+    const place = rec.place ?? (heard ? await placeByName(heard) : null);
+    if (!place) return { status: 'NEEDS_PLACE', error: heard ? `'${heard}'의 위치를 골라 주세요` : '장소를 골라 주세요' };
     const draft: AppointmentDraft = {
       title: d.title,
       date: day,
@@ -374,8 +378,8 @@ function resultCard(id: string, o: Outcome): ResultCard {
     id,
     status: o.status,
     estimate:
-      o.status === 'READY' && o.alarms
-        ? { alarms: o.alarms.map((a) => ({ kind: a.kind, at: a.at.toISOString(), enabled: a.enabled })), level: o.level ?? 1, with_wake: o.withWake ?? false }
+      o.status === 'READY'
+        ? { alarms: (o.alarms ?? []).map((a) => ({ kind: a.kind, at: a.at.toISOString(), enabled: a.enabled })), level: o.level ?? 1, with_wake: o.withWake ?? false }
         : null,
     error: o.error ?? null,
   };
@@ -401,6 +405,10 @@ async function runTasks(res: TurnResponse): Promise<{ cards: ResultCard[]; fixes
   }
   const fixes: FixResult[] = [];
   for (const f of res.fixes ?? []) {
+    if (!f.participant_id) {
+      fixes.push({ id: f.id, ok: false, error: '대상 없음' }); // 서버가 대상을 못 풀었음
+      continue;
+    }
     const fix: Fix = { id: f.id, kind: f.kind, participantId: f.participant_id, action: f.action, to: f.to ? new Date(f.to) : null };
     try {
       fixes.push(await applyFix(fix));
@@ -421,15 +429,18 @@ const unavailableOf = (e: EdgeError): Unavailable => ({ code: e.code, message: e
 async function onError(e: unknown): Promise<void> {
   if (!(e instanceof EdgeError)) throw e;
   if (UNAVAILABLE_CODES.includes(e.code)) {
-    // LLM 실패는 서버가 카드 · 정정 상태를 details로 줌 (설계 2.2) — 카드 상태만 받음
-    const cards = (e.details as { cards?: ServerCard[] } | null | undefined)?.cards;
-    if (Array.isArray(cards)) mergeCards(cards, now());
+    // LLM 실패는 서버가 상태를 details로 줌 ({ cards, fixes, rev, turn_seq, limits }) — 카드 · rev · 한도를 받아 둠
+    //   rev가 올라가 있어도 [다시 시도]는 처음 보낸 rev · client_turn_id 그대로 (서버가 같은 client_turn_id는 rev를 안 봄)
+    const d = e.details as { cards?: ServerCard[]; rev?: number; limits?: ServerLimits } | null | undefined;
+    if (Array.isArray(d?.cards)) mergeCards(d.cards, now());
+    if (typeof d?.rev === 'number') state.rev = d.rev;
+    state.limits = limitsOf(d?.limits) ?? state.limits;
     state.unavailable = unavailableOf(e);
     return;
   }
   state.pending = null;
-  if (e.code === 'CONFLICT') await readSession(true);
-  if (e.code === 'NOT_FOUND') state = freshState(state.userId); // 세션이 없어짐 — 다음에 다시 시작
+  // CONFLICT = rev 어긋남, NOT_FOUND = 세션 · 카드를 모름 — 서버 상태를 다시 읽음 (세션이 없어졌으면 resume이 새로 시작)
+  if (e.code === 'CONFLICT' || e.code === 'NOT_FOUND') await readSession(true);
   throw e;
 }
 
@@ -457,6 +468,8 @@ async function drive(): Promise<void> {
 async function readSession(resume: boolean): Promise<void> {
   const res = await callEdge<SessionResponse>('voice-session', { session_type: 'BEFORE_SLEEP', input_mode: 'TEXT', resume });
   const at = now();
+  // 앱에서 이미 저장 · 저장 안 함으로 끝낸 카드는 서버가 아직 몰라도 그대로 — 다시 저장해 일정이 두 벌 생기지 않게
+  const done = [...state.cards].filter(([, rec]) => rec.status === 'SAVED' || rec.status === 'REJECTED');
   state.sessionId = res.session_id ?? null;
   state.rev = res.rev ?? 0;
   state.limits = limitsOf(res.limits);
@@ -467,6 +480,14 @@ async function readSession(resume: boolean): Promise<void> {
   state.cards = new Map();
   for (const m of res.messages ?? []) pushMessage(m.role === 'ai' ? 'ai' : 'me', m.text, m.at ? new Date(m.at) : at);
   mergeCards(res.cards, at);
+  for (const [id, old] of done) {
+    const rec = state.cards.get(id);
+    if (rec && res.session_id && rec.status !== 'SAVED' && rec.status !== 'REJECTED') {
+      rec.status = old.status;
+      rec.appointmentId = old.appointmentId;
+      rec.alarms = old.alarms;
+    }
+  }
 }
 
 // 대화 시작 — 오늘 안 끝난 세션이 있으면 그대로(resume), 없으면 새로. 첫 마디는 서버 템플릿이라 messages에 옴. 하루 한도면 세션 없이 limits.reached = DAY

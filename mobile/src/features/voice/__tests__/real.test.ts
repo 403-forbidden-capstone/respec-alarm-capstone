@@ -563,3 +563,101 @@ describe('⑪ 같은 client_turn_id 재시도', () => {
     expect(b).toMatchObject({ text: '시간 초과 말', rev: 1 });
   });
 });
+
+// ---- 서버 PR(voice-state.ts · voice-turn)이 설계 14절에서 다르게 한 곳 ----
+describe('서버 응답 모양 맞춤', () => {
+  it('draft.place가 빈 글자면 좌표를 찾지 않고 바로 NEEDS_PLACE', async () => {
+    script = [session(), turn({ next: 'APP_TASKS', reply: null, cards: [apptCard({ draft: draftOf({ place: '' }) })] }), turn({ rev: 3, cards: [apptCard({ status: 'NEEDS_PLACE', draft: draftOf({ place: '' }) })] })];
+    await getConversation();
+    const c = await say('내일 10시 발표 있어');
+    expect(mPlaces).not.toHaveBeenCalled();
+    expect(mEstimate).not.toHaveBeenCalled();
+    expect((turnBodies()[1].results as { cards: { status: string; error: string }[] }).cards[0]).toMatchObject({ status: 'NEEDS_PLACE', error: '장소를 골라 주세요' });
+    expect(c.cards[0]).toMatchObject({ status: 'NEEDS_PLACE', place: '' });
+  });
+
+  it('카드에 내려온 appointment_id · error를 그대로 보임', async () => {
+    script = [session({ cards: [apptCard({ status: 'FAILED', error: '이미 지난 시각이에요' }), apptCard({ id: 'c2', status: 'SAVED', appointment_id: 'ap-9' })] })];
+    const c = await getConversation();
+    expect(c.cards.map((x) => [x.id, x.error, x.appointmentId])).toEqual([
+      ['c1', '이미 지난 시각이에요', null],
+      ['c2', null, 'ap-9'],
+    ]);
+  });
+
+  it('알람 고치기 카드의 appointment_id가 null(모르는 약속)이면 FAILED로 서버에 알림', async () => {
+    const card = { id: 'c2', kind: 'ALARM_EDIT', status: 'NEEDS_ESTIMATE', first_of_day: true, highlight: false, summary: '알람 변경', draft: null, edit: { appointment_id: null, prepare_delta: 10 } };
+    script = [session(), turn({ next: 'APP_TASKS', reply: null, cards: [card] }), turn({ rev: 3 })];
+    await getConversation();
+    await say('준비 10분 더');
+    expect(mGet).not.toHaveBeenCalled();
+    expect((turnBodies()[1].results as { cards: { status: string }[] }).cards[0].status).toBe('FAILED');
+  });
+
+  it('정정 대상(participant_id)이 빈 글자면 L2 함수를 안 부르고 대상 없음', async () => {
+    script = [
+      session(),
+      turn({ next: 'APP_TASKS', reply: null, fixes: [{ id: 'x1', fact: 'f2', kind: 'ARRIVE', participant_id: '', action: 'CORRECT', to: at(10, 20).toISOString() }] }),
+      turn({ rev: 3 }),
+    ];
+    await getConversation();
+    await say('도착은 10시 20분이었어');
+    expect(mFix).not.toHaveBeenCalled();
+    expect(turnBodies()[1].results).toEqual({ cards: [], fixes: [{ id: 'x1', ok: false, error: '대상 없음' }] });
+  });
+
+  it('20번째 답에서 이미 limits.reached TURN — 그 답은 그대로 보이고 입력만 막힘', async () => {
+    script = [session(), turn({ reply: { text: '네, 20번째 답이에요.' }, limits: { turns_left: 0, sessions_left_today: 4, reached: 'TURN' } })];
+    await getConversation();
+    const c = await say('스무 번째 말');
+    expect(c.messages.at(-1)).toMatchObject({ who: 'ai', text: '네, 20번째 답이에요.' });
+    expect(c.limits?.reached).toBe('TURN');
+    expect(c.next).toBeNull();
+    expect(c.unavailable).toBeNull();
+  });
+
+  it('LLM_UNAVAILABLE details의 cards · rev · limits로 상태를 복원 (재시도는 처음 rev · 번호 그대로)', async () => {
+    const details = { cards: [apptCard({ status: 'READY' })], fixes: [], rev: 2, turn_seq: 1, limits: { turns_left: 19, sessions_left_today: 4, reached: null } };
+    script = [session(), new EdgeError('LLM_UNAVAILABLE', { details })];
+    await getConversation();
+    const c = await say('내일 10시 발표');
+    expect(c.cards[0].status).toBe('READY');
+    expect(c.limits).toEqual({ turnsLeft: 19, sessionsLeftToday: 4, reached: null });
+    script = [turn({ rev: 3 })];
+    await retry();
+    expect(turnBodies()[1]).toEqual(turnBodies()[0]);
+    expect(turnBodies()[1]).toMatchObject({ rev: 1 });
+    script = [turn({ rev: 4 })];
+    await say('다음 말');
+    expect(turnBodies()[2]).toMatchObject({ rev: 3 });
+  });
+
+  it('키 없음: voice-session은 첫 마디까지 주고 voice-turn만 NOT_CONFIGURED → 대화 · 말은 남고 다시 시도', async () => {
+    script = [session(), new EdgeError('NOT_CONFIGURED')];
+    let c = await getConversation();
+    expect(c.messages).toHaveLength(1);
+    c = await say('안녕하세요');
+    expect(c.unavailable).toMatchObject({ code: 'NOT_CONFIGURED', canRetry: true });
+    expect(c.messages.map((m) => m.who)).toEqual(['ai', 'me']);
+    script = [turn()];
+    c = await retry();
+    expect(c.unavailable).toBeNull();
+    expect(turnBodies()[1]).toEqual(turnBodies()[0]);
+    expect(c.messages.at(-1)?.text).toBe('네, 알겠어요.');
+  });
+
+  it('NOT_FOUND(카드 · 세션)는 세션을 다시 읽되, 앱에서 이미 저장한 카드는 서버가 몰라도 저장으로 둠', async () => {
+    script = [session(), turn({ next: 'APP_TASKS', reply: null, cards: [apptCard()] }), turn({ rev: 3, cards: [apptCard({ status: 'READY' })] })];
+    await getConversation();
+    await say('발표 있어');
+    // 저장 알림이 NOT_FOUND로 거절되면 세션을 다시 읽음 — 서버는 아직 READY로 알고 있어도 저장은 그대로
+    script = [new EdgeError('NOT_FOUND'), session({ resumed: true, rev: 5, cards: [apptCard({ status: 'READY' })] })];
+    await saveCard('c1');
+    expect(bodies().map((x) => x.name).slice(-2)).toEqual(['voice-turn', 'voice-session']);
+    expect(mCreate).toHaveBeenCalledTimes(1);
+    const c = await getConversation();
+    expect(c.cards[0]).toMatchObject({ status: 'SAVED', appointmentId: 'ap1' });
+    await expect(saveCard('c1')).rejects.toThrow('이미 확인한 카드예요');
+    expect(mCreate).toHaveBeenCalledTimes(1);
+  });
+});
