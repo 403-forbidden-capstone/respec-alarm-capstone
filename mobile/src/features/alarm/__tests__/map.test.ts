@@ -6,6 +6,8 @@ import { alarmChain } from '@shared/calc/chain.ts';
 import {
   autoTimesOf,
   beforePrepareOf,
+  listBySeries,
+  listOnePerSeries,
   onePerSeries,
   pickNextAlarm,
   STANDALONE_TITLE,
@@ -13,6 +15,7 @@ import {
   toAppointment,
   toAppointmentDetail,
   toIntensity,
+  toOccurrences,
   toScheduleItem,
   toStandaloneAppointment,
   type AlarmRow,
@@ -316,5 +319,75 @@ describe('onePerSeries — H02 목록은 반복 묶음당 하나', () => {
 
   it('지금 시각과 같은 회차는 "이후"로 침', () => {
     expect(onePerSeries([{ seriesId: 'S', item: { at: new Date(now) } }, { seriesId: 'S', item: { at: new Date(now + 86_400_000) } }], now)).toEqual([{ at: new Date(now) }]);
+  });
+});
+
+describe('listBySeries · listOnePerSeries — 카드의 "앞으로 회차가 걸림" 표시에 쓰는 남은 회차 수', () => {
+  const at = (day: number) => ({ at: new Date(`2025-05-${String(day).padStart(2, '0')}T10:00:00+09:00`), day });
+  const now = Date.parse('2025-05-22T07:55:00+09:00');
+
+  it('묶음마다 가장 가까운 회차 하나와 지금 이후 남은 회차 수 — 지난 회차는 세지 않음', () => {
+    const out = listBySeries([15, 22, 29, 30].map((d) => ({ seriesId: 'S', item: at(d) })), now);
+    expect(out.map((x) => [x.item.day, x.upcoming])).toEqual([[22, 3]]);
+  });
+
+  it('묶음 번호가 없으면 0, 전부 지난 묶음도 0 (가장 최근 지난 회차 하나)', () => {
+    const out = listBySeries([{ seriesId: null, item: at(10) }, ...[8, 15].map((d) => ({ seriesId: 'S', item: at(d) }))], now);
+    expect(out.map((x) => [x.item.day, x.upcoming])).toEqual([
+      [10, 0],
+      [15, 0],
+    ]);
+  });
+
+  it('listOnePerSeries: 앞으로 회차가 둘 이상인 묶음에만 upcomingCount를 붙이고 시각 순으로', () => {
+    const base = toAppointment(meeting());
+    const row = (id: string, day: number) => ({ ...base, id, at: at(day).at });
+    const out = listOnePerSeries(
+      [
+        { seriesId: 'S', item: row('s-29', 29) },
+        { seriesId: 'S', item: row('s-26', 26) },
+        { seriesId: 'S', item: row('s-23', 23) },
+        { seriesId: 'T', item: row('t-24', 24) }, // 앞으로 한 장뿐인 묶음
+        { seriesId: null, item: row('one', 25) },
+      ],
+      now,
+    );
+    expect(out.map((a) => [a.id, a.upcomingCount])).toEqual([
+      ['s-23', 3],
+      ['t-24', undefined],
+      ['one', undefined],
+    ]);
+  });
+});
+
+describe('toOccurrences — H03 회차 목록 (지금 이후, 시각 순)', () => {
+  const now = Date.parse('2025-05-22T07:55:00+09:00');
+  const dayText = (day: number) => `2025-05-${String(day).padStart(2, '0')}`;
+  const row = (id: string, day: number, alarms: [AlarmRow['alarm_type'], string, boolean?][]) => ({
+    appointment: { appointment_id: id, appointment_at: `${dayText(day)}T10:00:00+09:00` },
+    alarms: alarms.map(([alarm_type, hhmm, is_enabled = true]) => ({ alarm_type, scheduled_at: `${dayText(day)}T${hhmm}:00+09:00`, is_enabled })),
+  });
+
+  it('지난 회차는 빼고 시각 순, 회차마다 앞으로 가장 먼저 울릴 켜진 알람 시각', () => {
+    const out = toOccurrences(
+      [
+        row('o-29', 29, [['WAKE', '08:00'], ['DEPARTURE', '09:00']]),
+        row('o-15', 15, [['WAKE', '08:00']]),
+        row('o-22', 22, [['WAKE', '07:30'], ['PREPARE', '08:30'], ['ARRIVE', '09:50']]), // 기상은 지났고 준비가 다음
+      ],
+      now,
+    );
+    expect(out.map((x) => [x.id, x.alarmAt ? formatTime(x.alarmAt) : null])).toEqual([
+      ['o-22', '오전 8:30'],
+      ['o-29', '오전 8:00'],
+    ]);
+  });
+
+  it('도착 목표 · 꺼진 알람만 있으면 alarmAt은 null', () => {
+    const out = toOccurrences([row('o-23', 23, [['WAKE', '08:00', false], ['ARRIVE', '09:50']]), row('o-24', 24, [])], now);
+    expect(out.map((x) => [x.id, x.alarmAt])).toEqual([
+      ['o-23', null],
+      ['o-24', null],
+    ]);
   });
 });

@@ -34,6 +34,7 @@ import {
   type Level,
   type MorningPlan,
   type NextAlarm,
+  type Occurrence,
   type Place,
   type RingInfo,
   type RingKind,
@@ -45,6 +46,7 @@ import {
 } from './types';
 import { manualTimes, orderError } from './adjust';
 import { LEVEL_FIELD, type EditLogLine } from './edits';
+import { hasAlarms, listOnePerSeries, toOccurrences } from './map';
 import { filterPlaces } from './places';
 import * as real from './real';
 import { repeatLabel, repeatToRrule, rruleToRepeat } from './repeat';
@@ -87,12 +89,27 @@ function find(id: string) {
 }
 
 // 모든 일정의 알람 (H02) — 시각 순. 알람 없는 일정(H05에서 알람을 모두 끄고 저장)은 알람 목록에 없고 H01 일정 줄에만 보임
+//   반복은 묶음(series_id)당 지금 이후 가장 가까운 회차 하나 — 실데이터와 같은 규칙. everyOccurrence = 묶음을 줄이지 않고 모든 회차 (H05가 같은 날 앞 일정의 기상을 찾을 때)
 export async function listAppointments(options: { everyOccurrence?: boolean } = {}): Promise<Appointment[]> {
   if (!isMock()) return real.listAppointments(options);
-  return db.appointments
-    .map(toAppointment)
-    .filter((a) => a.alarms.length > 0)
-    .sort(byTime);
+  const entries = db.appointments
+    .map((a) => ({ seriesId: a.seriesId, item: toAppointment(a) }))
+    .filter((entry) => hasAlarms(entry.item));
+  return options.everyOccurrence ? entries.map((entry) => entry.item).sort(byTime) : listOnePerSeries(entries, now().getTime());
+}
+
+// 반복 일정의 앞으로 회차 (H03 회차 목록) — 같은 묶음의 지금 이후 회차, 시각 순. 반복이 아니면 빈 목록. 화면은 다음 3회만 보이고 나머지는 접음
+export async function listOccurrences(id: string): Promise<Occurrence[]> {
+  if (!isMock()) return real.listOccurrences(id);
+  const own = find(id);
+  if (!own?.seriesId) return [];
+  const rows = db.appointments
+    .filter((a) => a.seriesId === own.seriesId)
+    .map((a) => ({
+      appointment: { appointment_id: a.id, appointment_at: a.at.toISOString() },
+      alarms: alarmChain(a).map((x) => ({ alarm_type: x.kind, scheduled_at: x.at.toISOString(), is_enabled: x.enabled && !db.disabledAppointments.has(a.id) })),
+    }));
+  return toOccurrences(rows, now().getTime());
 }
 
 // 지금 이후 가장 먼저 울릴 알람 (H01) — 꺼진 일정 · 꺼진 종류 · 도착 목표는 뺌

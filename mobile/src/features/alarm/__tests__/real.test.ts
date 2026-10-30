@@ -198,6 +198,59 @@ describe('목록 · 하루 일정 · 알람 설정 읽기', () => {
     expect((await real.listAppointments({ everyOccurrence: true })).map((a) => a.id)).toEqual(['s1-0522', 's1-0529', 's1-0605']);
   });
 
+  it('listAppointments: 앞으로 회차가 둘 이상인 묶음의 한 장에만 남은 회차 수(upcomingCount) — 지난 회차는 안 셈', async () => {
+    const occurrence = (id: string, day: number, series: string) =>
+      participantRow({ participant_id: `p-${id}` }, { appointment_id: id, series_id: series, title: '스터디', appointment_at: kst('10:00', day), recurrence_rule: 'FREQ=WEEKLY;BYDAY=TH' });
+    mockRoutes['appointment_participants:select'] = () => ({
+      data: [occurrence('s1-0515', 15, 'S1'), occurrence('s1-0522', 22, 'S1'), occurrence('s1-0529', 29, 'S1'), occurrence('s1-0530', 30, 'S1'), occurrence('s2-0529', 29, 'S2')],
+    });
+    mockRoutes['alarms:select'] = () => ({ data: [] });
+    const list = await real.listAppointments();
+    expect(list.map((a) => [a.id, a.upcomingCount])).toEqual([
+      ['s1-0522', 3],
+      ['s2-0529', undefined], // 앞으로 한 장뿐인 묶음
+    ]);
+  });
+
+  it('listOccurrences: 이 약속의 묶음(series_id)을 읽고, 같은 묶음의 지금 이후 내 참여 조건만 날짜순으로 — 회차마다 앞으로 첫 알람 시각', async () => {
+    const id = '00000000-0000-4000-8000-0000000000a1';
+    mockRoutes['appointments:select'] = () => ({ data: { series_id: 'S1' } });
+    const row = (apptId: string, day: number, alarms: unknown[]) => ({
+      appointments: { appointment_id: apptId, series_id: 'S1', appointment_at: kst('10:00', day) },
+      alarms,
+    });
+    mockRoutes['appointment_participants:select'] = () => ({
+      data: [row(id, 22, meetingAlarms()), row('s1-0529', 29, [{ alarm_type: 'WAKE', scheduled_at: kst('08:00', 29), is_enabled: false }])],
+    });
+    const list = await real.listOccurrences(id);
+    expect(list.map((o) => [o.id, o.alarmAt && formatTime(o.alarmAt)])).toEqual([
+      [id, '오전 8:00'],
+      ['s1-0529', null], // 알람을 꺼 둔 회차
+    ]);
+
+    const [own] = callsTo('appointments', 'select');
+    expect(filterArgs(own, 'eq', 'appointment_id')).toEqual([id]);
+    const [read] = callsTo('appointment_participants', 'select');
+    expect(filterArgs(read, 'eq', 'user_id')).toEqual(['user-1']);
+    expect(filterArgs(read, 'eq', 'appointments.series_id')).toEqual(['S1']);
+    expect(filterArgs(read, 'gte', 'appointments.appointment_at')).toEqual(['2025-05-21T22:55:00.000Z']); // 지금(5월 22일 7:55 한국) 이후
+    expect(filterArgs(read, 'order', 'appointments(appointment_at)')).toEqual([]);
+  });
+
+  it('listOccurrences: 지난 회차는 빼고, 묶음 번호가 없거나 UUID가 아닌 옛 주소는 빈 목록 (참여 조건은 읽지 않음)', async () => {
+    const id = '00000000-0000-4000-8000-0000000000a1';
+    mockRoutes['appointments:select'] = () => ({ data: { series_id: null } });
+    expect(await real.listOccurrences(id)).toEqual([]);
+    expect(await real.listOccurrences('m1')).toEqual([]);
+    expect(callsTo('appointment_participants', 'select')).toHaveLength(0);
+
+    mockRoutes['appointments:select'] = () => ({ data: { series_id: 'S1' } });
+    mockRoutes['appointment_participants:select'] = () => ({
+      data: [{ appointments: { appointment_id: 'old', series_id: 'S1', appointment_at: kst('10:00', 15) }, alarms: [] }],
+    });
+    expect(await real.listOccurrences(id)).toEqual([]);
+  });
+
   it('listAppointments: 가장 가까운 회차의 알람이 모두 없으면(목록에서 빠짐) 그 다음 회차가 대신 보임 — 묶음 전체가 사라지지 않음', async () => {
     const occurrence = (id: string, day: number, alarms: unknown[]) =>
       participantRow({ participant_id: `p-${id}` }, { appointment_id: id, series_id: 'S1', title: '스터디', appointment_at: kst('10:00', day) }, alarms);

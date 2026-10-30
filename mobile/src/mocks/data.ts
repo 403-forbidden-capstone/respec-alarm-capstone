@@ -51,6 +51,7 @@ export const awayFromHomeFactor = 0.5;
 
 export type MockAppointment = {
   id: string;
+  seriesId?: string; // 반복 묶음 번호 (appointments.series_id) — 같은 반복의 회차는 같은 값. 없으면 한 번뿐인 일정
   title: string;
   at: Date;
   place: string;
@@ -109,6 +110,15 @@ export const memberAlarms: Record<string, MockMemberAlarm[]> = {
 
 const off = (): PermissionSet => ({ viewAlarm: false, editAlarm: false, viewWake: false });
 
+// 반복 묶음 예시 — 매주 월 · 수 오전 9시 영어 스터디. 서버(alarm-roll)가 앞으로 14일치 회차를 회차마다 새 약속으로 미리 만들어 두는 모양을 흉내 (시나리오 시각 5월 22일 아침부터 4회)
+//   day는 5월 기준 일(32 = 6월 1일). 오늘(22일)·내일(23일)에는 회차가 없어 홈 오늘 일정 · 아침 흐름은 그대로
+const STUDY_SERIES = 'series-study';
+const studyOccurrence = (id: string, day: number): MockAppointment => ({
+  id, seriesId: STUDY_SERIES, title: '영어 스터디', at: kst(day, 540), place: '학교 도서관', origin: '집', transport: 'TRANSIT',
+  travelMinutes: 45, travelSource: '길찾기', bufferMinutes: 10, beforePrepMinutes: 20, prepMinutes: 20,
+  predictedPrepMinutes: 40, importance: 'LOW', recurrenceRule: 'FREQ=WEEKLY;BYDAY=MO,WE', groupId: null, items: [], withWake: true,
+});
+
 // 바뀌는 값 — api.ts만 읽고 씀
 export const db = {
   appointments: [
@@ -133,6 +143,10 @@ export const db = {
       travelMinutes: 20, travelSource: '길찾기', bufferMinutes: 10, beforePrepMinutes: 0, prepMinutes: 20,
       predictedPrepMinutes: 25, importance: 'LOW', recurrenceRule: null, groupId: null, items: [], withWake: false, kinds: [],
     },
+    studyOccurrence('st1', 26),
+    studyOccurrence('st2', 28),
+    studyOccurrence('st3', 33),
+    studyOccurrence('st4', 35),
   ] as MockAppointment[],
   disabledAppointments: new Set<string>(),
   disabledKinds: new Set<string>(), // `${일정 id}:${종류}`

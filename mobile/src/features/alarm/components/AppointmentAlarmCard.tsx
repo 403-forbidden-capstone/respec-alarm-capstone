@@ -5,7 +5,7 @@ import { AlarmCard } from '@/components/ui';
 import { formatDateShort, formatTime, timeParts } from '@/lib/format';
 import { colors, radius, space } from '@/theme';
 
-import { chainLabel, pickCardAlarm, ringingKinds } from '../schedule';
+import { chainLabel, pickCardAlarm, ringingKinds, seriesLines } from '../schedule';
 import { KIND_LABEL, LEVELS, type Appointment } from '../types';
 
 type Props = {
@@ -14,11 +14,15 @@ type Props = {
   onToggle: (next: boolean) => void; // 스위치 — 저장은 화면이 hooks/useAppointmentToggle로 함
   highlight?: boolean; // 방금 만든 일정 등을 잠깐 테두리로 보여 줌 (H02)
   showDate?: boolean; // 카드 머리줄에 날짜를 보임 (기본 켬). 섹션 제목에 날짜가 있는 알람 목록(H02)에서는 끔
+  // 반복 일정 한 장 (H02) — 값은 화면이 schedule.ts seriesInfo로 만들어 넘김. 없으면 줄이 없음
+  nextOccurrence?: string; // 다음 회차 날짜 · 시각 (5월 26일 (월) 오전 9:00)
+  repeatSummary?: string; // 반복 요일 (매주 월 · 수)
+  ahead?: boolean; // 앞으로 회차가 폰에 미리 걸려 있음 — 작은 글자 한 줄
 };
 
 // 일정 하나의 알람 카드 (홈 · 알람 목록) — 카드를 누르면 알람 설정(H03)
 // 일정 없는 알람(실데이터, D46)은 이동 · 준비 줄이 없고 알람 설정(H03)이 아직 없어 눌러도 안 열림
-export function AppointmentAlarmCard({ appointment: a, current, onToggle, highlight, showDate = true }: Props) {
+export function AppointmentAlarmCard({ appointment: a, current, onToggle, highlight, showDate = true, nextOccurrence, repeatSummary, ahead }: Props) {
   const list = ringingKinds(a.alarms);
   // 큰 시각 = 앞으로 울릴 첫 알람 (홈 "다음 알람"과 같은 것을 가리키게). 다 지났으면 지남으로, 다 껐으면 첫 알람
   const { alarm: first, passed } = pickCardAlarm(a.alarms, current);
@@ -29,11 +33,11 @@ export function AppointmentAlarmCard({ appointment: a, current, onToggle, highli
       time={timeParts(first.at)}
       kindLabel={`${KIND_LABEL[first.kind]}${passed ? ' · 지남' : ''}`}
       chain={list.map((x) => chainLabel(x, current, formatTime(x.at)))}
-      meta={
-        a.standalone
-          ? [`알람 강도 · ${LEVELS[a.level].name}`]
-          : [`알람 강도 · ${LEVELS[a.level].name}`, `준비 ${a.predictedPrepMinutes}분 · 이동 ${a.travelMinutes}분 · 여유 ${a.bufferMinutes}분`]
-      }
+      meta={[
+        `알람 강도 · ${LEVELS[a.level].name}`,
+        ...(a.standalone ? [] : [`준비 ${a.predictedPrepMinutes}분 · 이동 ${a.travelMinutes}분 · 여유 ${a.bufferMinutes}분`]),
+        ...seriesLines({ nextOccurrence, repeatSummary, ahead }),
+      ]}
       foot={a.standalone ? `${a.title} · ${a.repeatLabel} · ${formatTime(a.at)}` : `${a.title} · ${a.place} · ${formatTime(a.at)}`}
       enabled={a.enabled}
       onToggle={onToggle}

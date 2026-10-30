@@ -113,8 +113,11 @@
 - 카드의 켜기 · 끄기(일정 전체): `alarms.is_enabled` — DB → 예약 취소 · 다시 예약 — 폰
 - 일정 없는 알람(D46): 반복은 `alarms.recurrence_rule`(#160), 만들기는 `alarm-commit` — 입력 화면(목록 "+")은 새 UI
 - 반복 일정 · 반복 알람은 묶음(`series_id`)당 한 장 — 지금 이후 가장 가까운 회차 하나 (서버가 14일치 회차를 미리 만들어 둠, 지난 회차는 안 보임). 묶음이 전부 지났으면 가장 최근 지난 회차 하나. 반복이 아닌 약속은 그대로. H01 · R02 · H03은 회차 행 그대로
+  - 카드에는 한 줄 "다음 회차 5월 26일 (월) 오전 9:00 · 매주 월 · 수"(`seriesInfo`)만 더하고, 앞으로 회차가 둘 이상 걸려 있으면 작은 글자 "2주치 알람 걸림"(`upcomingCount` ≥ 2). 회차 목록은 목록 · 홈에 안 나오고 H03에서만
+  - 홈 "오늘 일정"(`getDaySchedule`)은 그날 회차만, "다음 알람"(`getNextAlarm`)은 가장 가까운 켜진 알람 하나만 (회차 줄줄이 없음). G04 친구 카드는 그대로 (L3 2차)
 
 ### H03 알람 설정
+- 반복 일정의 앞으로 회차: `listOccurrences(id)` — 이 약속의 `series_id`를 읽고 같은 묶음의 내 참여 조건 중 지금 이후 · 날짜순 (`appointment_participants` + `appointments` + `alarms`) — DB. 둘 이상일 때만 "앞으로 회차" 카드가 뜨고, 다음 3회만 보이고 나머지는 "더 보기"(누르면 펼침, 화면 상태). 읽지 못해도 화면은 그대로
 - 연결 일정 · 이동 조건 · 준비 시간: `appointments` + `appointment_participants`(출발지 · 이동 수단 · 예상 이동 · 출처 · 준비 · 여유) — DB. 출발지 · 이동 수단 · 예상 이동 · 준비 시간도 고침 (D42 C) → 다시 계산 `alarm-suggest` → 저장 `alarm-commit`
 - 알람 시각 직접 고르기 (D42 C): `alarms.scheduled_at` + `time_source` MANUAL(#160), "자동으로 되돌리기" = AUTO. 강도도 같은 규칙(`intensity_source`, #160)
 - 고친 값 기록 (D42 · D43): `user_edit_logs`(#160, 화면 · 칸 · 자동값 → 고친 값 · 시각) — DB, 다음 계산 · 제안의 개인화 입력

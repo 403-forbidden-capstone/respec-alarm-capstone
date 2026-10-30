@@ -23,6 +23,7 @@ import {
   type IntensityAxis,
   type Level,
   type NextAlarm,
+  type Occurrence,
   type ScheduleItem,
 } from './types';
 
@@ -241,12 +242,16 @@ export const byTime = <T extends { at: Date }>(x: T, y: T) => x.at.getTime() - y
 //   한 묶음의 회차가 모두 지났으면 가장 최근 지난 회차 하나 (다음 회차가 아직 안 만들어진 반복이 목록에서 사라지지 않게)
 //   L6 안건후보: H02 묶음이 전부 지난 경우 기본안 = 가장 최근 지난 회차 하나를 "지난 일정"에 둠
 //   알람이 있는 회차만 넘길 것 (hasAlarms로 거른 뒤) — 가장 가까운 회차의 알람이 모두 꺼졌다고 묶음 전체가 사라지지 않게
-export function onePerSeries<T extends { at: Date }>(entries: readonly { seriesId: string | null | undefined; item: T }[], nowMs: number): T[] {
+//   upcoming = 같은 묶음에서 지금 이후 남은 회차 수(보여 주는 회차 포함) — 카드의 "2주치 알람 걸림" 표시에 씀. 묶음 번호가 없으면 0
+export function listBySeries<T extends { at: Date }>(
+  entries: readonly { seriesId: string | null | undefined; item: T }[],
+  nowMs: number,
+): { item: T; upcoming: number }[] {
   const bySeries = new Map<string, T[]>();
-  const out: T[] = [];
+  const out: { item: T; upcoming: number }[] = [];
   for (const { seriesId, item } of entries) {
     if (!seriesId) {
-      out.push(item);
+      out.push({ item, upcoming: 0 });
       continue;
     }
     const list = bySeries.get(seriesId);
@@ -255,9 +260,41 @@ export function onePerSeries<T extends { at: Date }>(entries: readonly { seriesI
   }
   for (const list of bySeries.values()) {
     const upcoming = list.filter((x) => x.at.getTime() >= nowMs).sort(byTime);
-    out.push(upcoming.length ? upcoming[0] : list.reduce((latest, x) => (x.at.getTime() > latest.at.getTime() ? x : latest)));
+    if (upcoming.length) out.push({ item: upcoming[0], upcoming: upcoming.length });
+    else out.push({ item: list.reduce((latest, x) => (x.at.getTime() > latest.at.getTime() ? x : latest)), upcoming: 0 });
   }
   return out;
+}
+
+export function onePerSeries<T extends { at: Date }>(entries: readonly { seriesId: string | null | undefined; item: T }[], nowMs: number): T[] {
+  return listBySeries(entries, nowMs).map((x) => x.item);
+}
+
+// 알람 목록(H02)용 — 묶음당 하나로 줄이고, 앞으로 회차가 둘 이상인 묶음의 카드에 남은 회차 수(upcomingCount)를 붙임. 시각 순
+export function listOnePerSeries(entries: readonly { seriesId: string | null | undefined; item: Appointment }[], nowMs: number): Appointment[] {
+  return listBySeries(entries, nowMs)
+    .map(({ item, upcoming }) => (upcoming > 1 ? { ...item, upcomingCount: upcoming } : item))
+    .sort(byTime);
+}
+
+// 반복 일정의 앞으로 회차 (H03) — 지금 이후만, 시각 순. 회차마다 가장 먼저 울릴 켜진 알람(기상 · 준비 · 출발) 시각을 같이 (도착 목표는 울리지 않아 뺌)
+export type OccurrenceRow = {
+  appointment: Pick<AppointmentRow, 'appointment_id' | 'appointment_at'>;
+  alarms: readonly Pick<AlarmRow, 'alarm_type' | 'scheduled_at' | 'is_enabled'>[];
+};
+
+export function toOccurrences(rows: readonly OccurrenceRow[], nowMs: number): Occurrence[] {
+  return rows
+    .map((row): Occurrence => {
+      const times = row.alarms
+        .filter((x) => x.alarm_type !== 'ARRIVE' && x.alarm_type !== 'ROUTINE' && x.is_enabled)
+        .map((x) => parseDbTime(x.scheduled_at))
+        .filter((at) => at.getTime() >= nowMs)
+        .sort((x, y) => x.getTime() - y.getTime());
+      return { id: row.appointment.appointment_id, at: parseDbTime(row.appointment.appointment_at), alarmAt: times[0] ?? null };
+    })
+    .filter((x) => x.at.getTime() >= nowMs)
+    .sort(byTime);
 }
 
 // ---------------------------------------------------------------------------
