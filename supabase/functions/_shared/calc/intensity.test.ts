@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { autoLevel, LATE_COUNT_THRESHOLD, levelOfIntensity, levelOfSoundKey, levelOfVoiceTone, resolveIntensity, type WakeSensitivity } from './intensity.ts';
+import { autoLevel, LATE_COUNT_THRESHOLD, levelOfIntensity, levelOfSoundKey, levelOfVibration, levelOfVoiceTone, resolveIntensity, soundKeyOf, vibrationOf, wakeSensitivityOf, type WakeSensitivity } from './intensity.ts';
 import type { Importance, Level } from './types.ts';
 
 // D69 규칙 표 — 기본 보통(1), 매우 중요(HIGH) +1, 최근 4주 늦잠 지각 2회 이상 +1, 잠귀 HEAVY면 강, 상한 강(2)
@@ -45,11 +45,11 @@ test('지각 올림은 2회부터, 상한 강', () => {
   assert.equal(autoLevel('HIGH', 5), 2);
 });
 
-test('직접 고른 칸만 그 값, 나머지는 자동 — 진동 칸이 intensity, 말소리가 voice_tone, 배경음이 sound_key', () => {
+test('직접 고른 칸만 그 값, 나머지는 자동 — intensity는 전체 세기(자동), 진동 칸이 vibration(자동이면 null), 말소리가 voice_tone, 배경음이 sound_key', () => {
   const auto = resolveIntensity('NORMAL', 1);
   assert.equal(auto.auto, 1);
   assert.equal(auto.manual, false);
-  assert.deepEqual(auto.fields, { intensity: 'NORMAL', voiceTone: 'NEUTRAL', soundKey: 'theme_default' });
+  assert.deepEqual(auto.fields, { intensity: 'NORMAL', voiceTone: 'NEUTRAL', soundKey: 'theme_default', vibration: null });
 
   const picked = resolveIntensity('NORMAL', 1, { sound: 0, vibration: 2, voice: null });
   assert.equal(picked.manual, true);
@@ -58,7 +58,8 @@ test('직접 고른 칸만 그 값, 나머지는 자동 — 진동 칸이 intens
     voice: { level: 1, manual: false },
     vibration: { level: 2, manual: true },
   });
-  assert.deepEqual(picked.fields, { intensity: 'STRONG', voiceTone: 'NEUTRAL', soundKey: 'theme_calm' });
+  // 진동을 강으로 직접 골라도 전체 세기(intensity)는 자동(보통) 그대로 — 진동은 vibration 칸
+  assert.deepEqual(picked.fields, { intensity: 'NORMAL', voiceTone: 'NEUTRAL', soundKey: 'theme_calm', vibration: 'STRONG_CONTINUOUS' });
 });
 
 test('직접 고른 칸 사례: 약은 직접 고를 때만 — 나머지 칸은 자동(보통)', () => {
@@ -67,12 +68,13 @@ test('직접 고른 칸 사례: 약은 직접 고를 때만 — 나머지 칸은
   assert.equal(soft.auto, 1);
   assert.equal(soft.manual, true);
   assert.deepEqual(soft.axes, { sound: { level: 1, manual: false }, voice: { level: 0, manual: true }, vibration: { level: 1, manual: false } });
-  assert.deepEqual(soft.fields, { intensity: 'NORMAL', voiceTone: 'CALM', soundKey: 'theme_default' });
+  assert.deepEqual(soft.fields, { intensity: 'NORMAL', voiceTone: 'CALM', soundKey: 'theme_default', vibration: null });
 
   // 세 칸 모두 약으로 직접 고르면 약 (매우 중요 · 잠귀 무거움이어도 직접 고른 값이 먼저)
   const allSoft = resolveIntensity('HIGH', 3, { sound: 0, voice: 0, vibration: 0 }, 'HEAVY');
   assert.equal(allSoft.auto, 2);
-  assert.deepEqual(allSoft.fields, { intensity: 'SOFT', voiceTone: 'CALM', soundKey: 'theme_calm' });
+  // 전체 세기는 직접 고른 축과 상관없이 자동 단계(매우 중요 · 지각 · 잠귀 → 강)
+  assert.deepEqual(allSoft.fields, { intensity: 'STRONG', voiceTone: 'CALM', soundKey: 'theme_calm', vibration: 'NONE' });
   assert.equal(allSoft.manual, true);
 
   // 고르지 않은 칸(null · 없음)은 자동 — 올림이 반영된 값
@@ -95,4 +97,43 @@ test('저장된 DB 값에서 단계 읽기', () => {
   assert.equal(levelOfSoundKey('theme_default'), 1);
   assert.equal(levelOfSoundKey('theme_focus'), null);
   assert.equal(levelOfIntensity(null), null);
+  assert.equal(levelOfVibration('SHORT_REPEAT'), 1);
+  assert.equal(levelOfVibration('NONE'), 0);
+  assert.equal(levelOfVibration('WOBBLE'), null);
+  assert.equal(levelOfVibration(null), null);
+});
+
+test('진동 칸: 자동이면 null, 직접 고르면 그 값 — 세 값 모두, 다른 축·전체 세기는 안 바뀜', () => {
+  const values = [0, 1, 2].map((level) => resolveIntensity('NORMAL', 0, { vibration: level as 0 | 1 | 2 }).fields.vibration);
+  assert.deepEqual(values, ['NONE', 'SHORT_REPEAT', 'STRONG_CONTINUOUS']);
+  const strong = resolveIntensity('NORMAL', 0, { vibration: 2 });
+  assert.equal(strong.manual, true);
+  assert.deepEqual([strong.fields.intensity, strong.fields.voiceTone, strong.fields.soundKey], ['NORMAL', 'NEUTRAL', 'theme_default']);
+  // null · 없음 = 자동으로 → vibration null (직접 고른 뒤 "자동으로" 되돌리는 경우)
+  assert.equal(resolveIntensity('NORMAL', 0, { vibration: null }).fields.vibration, null);
+  assert.equal(resolveIntensity('NORMAL', 0, { vibration: null }).manual, false);
+  // 말소리만 직접 골라도 진동은 null(강도를 따름) — MANUAL이어도 진동 칸은 비어 있음
+  const voiceOnly = resolveIntensity('NORMAL', 0, { voice: 2 });
+  assert.equal(voiceOnly.manual, true);
+  assert.equal(voiceOnly.fields.vibration, null);
+  // 전체 세기는 자동 단계만 따라감 (중요 일정 → 강)
+  assert.equal(resolveIntensity('HIGH', 0, { sound: 0, voice: 0, vibration: 0 }).fields.intensity, 'STRONG');
+});
+
+test('꾸러미에 실을 값 풀기: 진동 vibration ?? 강도에서, 배경음 sound_key ?? 강도에서', () => {
+  assert.deepEqual((['SOFT', 'NORMAL', 'STRONG'] as const).map((i) => vibrationOf(null, i)), ['NONE', 'SHORT_REPEAT', 'STRONG_CONTINUOUS']);
+  assert.deepEqual((['SOFT', 'NORMAL', 'STRONG'] as const).map((i) => soundKeyOf(null, i)), ['theme_calm', 'theme_default', 'theme_urgent']);
+  // 직접 고른 값이 먼저 (강도와 달라도)
+  assert.equal(vibrationOf('NONE', 'STRONG'), 'NONE');
+  assert.equal(soundKeyOf('theme_focus', 'SOFT'), 'theme_focus');
+  // 모르는 진동 값 · 빈 글자는 강도를 따름
+  assert.equal(vibrationOf('WOBBLE', 'STRONG'), 'STRONG_CONTINUOUS');
+  assert.equal(vibrationOf(undefined, 'SOFT'), 'NONE');
+  assert.equal(soundKeyOf('', 'STRONG'), 'theme_urgent');
+});
+
+test('wakeSensitivityOf: DB 값 HEAVY만 HEAVY, LIGHT · NORMAL · 모르는 값 · 빈 값은 NORMAL (약은 직접 고를 때만, D69)', () => {
+  assert.deepEqual(['HEAVY', 'LIGHT', 'NORMAL', 'x', '', null, undefined].map(wakeSensitivityOf), ['HEAVY', 'NORMAL', 'NORMAL', 'NORMAL', 'NORMAL', 'NORMAL', 'NORMAL']);
+  // 가벼움 + 보통 일정 → 보통 (약 아님)
+  assert.equal(autoLevel('NORMAL', 0, wakeSensitivityOf('LIGHT')), 1);
 });

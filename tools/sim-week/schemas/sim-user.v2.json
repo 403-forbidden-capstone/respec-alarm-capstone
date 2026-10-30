@@ -1,0 +1,78 @@
+{
+  "$id": "sim-user.v2",
+  "title": "UserTurnReportSpoken",
+  "type": "object",
+  "properties": {
+    "intended": {
+      "type": "string"
+    },
+    "conveyed": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "CLEAR",
+              "VAGUE",
+              "CORRECTED",
+              "NOT_SAID"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "status"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "confirm_answers": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "pending_id": {
+            "type": "string"
+          },
+          "answer": {
+            "enum": [
+              "YES",
+              "NO",
+              "EDIT"
+            ]
+          }
+        },
+        "required": [
+          "pending_id",
+          "answer"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "improvised": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "wants_to_end": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "intended",
+    "conveyed",
+    "confirm_answers",
+    "improvised",
+    "wants_to_end"
+  ],
+  "additionalProperties": false
+}
