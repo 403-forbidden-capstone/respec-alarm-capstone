@@ -17,7 +17,7 @@ import { useDetectionLinks } from '@/features/location/hooks/useDetectionLinks';
 import { useLocationSync } from '@/features/location/useLocationSync';
 import { useAlarmSync } from '@/lib/alarmSync/useAlarmSync';
 import { takeAfterOnboarding } from '@/lib/afterOnboarding';
-import { ONBOARDING_IN_FLOW } from '@/lib/flags';
+import { ONBOARDING_IN_FLOW, TIMETABLE_PATHS } from '@/lib/flags';
 import { canUseRealData, configError } from '@/lib/mode';
 import { ensureNotificationChannels } from '@/lib/push/channels';
 import { colors, fontFiles } from '@/theme';
@@ -125,6 +125,10 @@ function RootStack() {
       {/* 목업에 없는 설정 · 로그인 · 온보딩 — 실데이터를 못 쓰면 빠짐. 온보딩은 ONBOARDING_IN_FLOW가 꺼져도 따로 빠짐 */}
       <Stack.Protected guard={ready && canUseRealData}>
         <Stack.Screen name="settings" />
+      </Stack.Protected>
+      {/* 시간표 가져오기 확인 — 사진 · 캘린더 길이 둘 다 꺼져 있으면 주소로도 안 열림 (TIMETABLE_PATHS) */}
+      <Stack.Protected guard={ready && canUseRealData && (TIMETABLE_PATHS.photo || TIMETABLE_PATHS.calendar)}>
+        <Stack.Screen name="timetable-import" />
       </Stack.Protected>
       <Stack.Protected guard={needsLogin || preview}>
         <Stack.Screen name="login" />

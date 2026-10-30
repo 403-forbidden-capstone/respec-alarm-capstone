@@ -1,13 +1,22 @@
 // 개인정보 안내 문구 — 온보딩 동의 단계(views/ConsentStep)가 그림
 // D93 기본안 A — 온보딩 1장 + 판 번호, 문구 초안은 L7, 확정은 팀. 문구를 고쳐 다시 동의받아야 하면 PRIVACY_VERSION을 올림
-export const PRIVACY_VERSION = 1;
+export const PRIVACY_VERSION = 2; // 2: 시간표 사진 항목 추가(사진 길 켬) — 동의 화면이 새 문구로 다시 뜨게 올림 (헤드 결정 10/30, 지금은 시험 계정뿐). 문구 최종은 팀 확인 필요
 
 export type ConsentItem = {
-  key: 'location' | 'screen' | 'voice' | 'wake-share';
+  key: 'location' | 'screen' | 'voice' | 'wake-share' | 'timetable-photo';
   title: string;
   reads: string; // 읽는 것
   doesNotRead: string; // 안 읽는 것
   friends: string; // 친구에게 보이는 것
+};
+
+// 시간표 사진으로 넣기(TIMETABLE_PATHS.photo)를 켰을 때만 동의 단계에 더함 — 사진은 AI(Claude)에게 보내져 읽히고 저장하지 않음 (서버 timetable-extract)
+export const TIMETABLE_PHOTO_CONSENT: ConsentItem = {
+  key: 'timetable-photo',
+  title: '시간표 사진',
+  reads: '고른 시간표 사진 한 장을 AI가 읽어 수업 목록으로 바꿈',
+  doesNotRead: '그 밖의 사진 (사진은 저장하지 않고 읽은 뒤 버림)',
+  friends: '안 보임',
 };
 
 export const CONSENT_ITEMS: readonly ConsentItem[] = [

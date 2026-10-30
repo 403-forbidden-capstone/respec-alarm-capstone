@@ -731,6 +731,7 @@ export async function getRing(alarmId: string): Promise<RingInfo | null> {
   if (!found || found.alarm.kind === 'ARRIVE') return null;
   const { a, alarm } = found;
   const kind = alarm.kind as RingKind;
+  const overall = LEVELS[autoLevel(a)]; // 전체 세기(볼륨) — 배경음 · 진동은 축별로 따로 고를 수 있음
   const sound = LEVELS[axisLevel(a, 'sound')];
   const vibration = LEVELS[axisLevel(a, 'vibration')];
   const at = alarm.at;
@@ -743,7 +744,7 @@ export async function getRing(alarmId: string): Promise<RingInfo | null> {
     voiceTone: LEVELS[axisLevel(a, 'voice')].voice,
     voiceLine: voiceLine(a, kind, at),
     notice: ringNotice(appointment, kind, at),
-    levelLine: `알람 강도 ${sound.name} · 배경음 ${sound.sound} · 진동 ${vibration.vibration}`,
+    levelLine: `알람 강도 ${overall.name} · 볼륨 ${overall.volume} · 배경음 ${sound.sound} · 진동 ${vibration.vibration}`,
     important: a.importance !== 'LOW',
     // 미루기 한도 (D3 기본안 A) — 실데이터는 알람 코어의 snoozeCount · 꾸러미 snoozeLimit · departAt (네이티브 화면이 보여 줌)
     snoozeCount: db.snoozeCounts[alarm.id] ?? 0,

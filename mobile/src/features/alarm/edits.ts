@@ -22,8 +22,8 @@ import { toEditPayload, type EditPayload } from './request';
 // 저장(alarm-commit edits)에 실어 보내는 줄 — 서버가 받는 화면만 (H01 · NTF · H08은 앱이 user_edit_logs에 바로 남김)
 export type EditLogLine = Omit<UserEditLog, 'at'> & { screen: CommitEditScreen };
 
-// 강도 세 칸은 DB 칸 이름으로 고친 값 기록에 남김 (types.ts UserEditLog): 배경음 = sound_key, 말소리 = voice_tone, 진동 = intensity
-export const LEVEL_FIELD: Record<IntensityAxis, EditLogField> = { sound: 'sound_key', voice: 'voice_tone', vibration: 'intensity' };
+// 강도 세 칸은 DB 칸 이름으로 고친 값 기록에 남김 (types.ts UserEditLog): 배경음 = sound_key, 말소리 = voice_tone, 진동 = vibration (D1 A: intensity는 세 축이 아니라 전체 세기라 안 남김. 예전 기록의 진동은 'intensity')
+export const LEVEL_FIELD: Record<IntensityAxis, EditLogField> = { sound: 'sound_key', voice: 'voice_tone', vibration: 'vibration' };
 
 // 저장 뒤의 알람과, 그 알람이 나온 자동 계산값 (alarm-suggest 응답에서)
 export type SettingsAfter = {

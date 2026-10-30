@@ -12,7 +12,7 @@ import { Platform } from 'react-native';
 
 import { setRealTime } from './clock';
 import { REAL_DATA_READY } from './flags';
-import { modePolicy, resolveMode, showDevLogin, type DataMode, type ModeEnv } from './modePolicy';
+import { modePolicy, resolveMode, showDevLogin, showScreenIds, type DataMode, type ModeEnv } from './modePolicy';
 import { isSupabaseConfigured } from './supabase';
 
 export type { DataMode } from './modePolicy';
@@ -32,6 +32,8 @@ export const modeLocked = policy.locked;
 export const configError = policy.configError;
 // 개발 메뉴의 이메일 로그인을 보일지
 export const devLoginVisible = showDevLogin(env);
+// 화면 번호(H01 등)를 보일지 — 출시용 폰 빌드에선 숨김 (components/ui/ScreenId)
+export const screenIdVisible = showScreenIds(env);
 
 const parse = (v: unknown): DataMode | null => (v === 'real' || v === 'mock' ? v : null);
 

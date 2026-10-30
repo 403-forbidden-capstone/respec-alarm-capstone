@@ -90,6 +90,7 @@ export type CommitAlarm = {
   intensity: AlarmIntensity;
   voice_tone: 'CALM' | 'NEUTRAL' | 'DIRECT';
   sound_key: string | null;
+  vibration: string | null; // 직접 고른 진동만 값, 자동이면 null (강도를 따름)
   time_source: 'AUTO' | 'MANUAL';
   intensity_source: 'AUTO' | 'MANUAL';
   recurrence_rule: string | null;

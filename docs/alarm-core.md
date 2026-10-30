@@ -5,7 +5,7 @@
 ```text
 화면 → alarm-core(JS) → 울림 계획 계산(TS, plan.ts) → 네이티브(Kotlin)는 받은 계획대로만 실행
      → AlarmManager → 시각이 되면 BroadcastReceiver
-        ├ WAKE            → 포그라운드 서비스 → 알람 볼륨 채널로 폰 기본 알람음 + 계속 진동 + 잠금화면 위 알람 화면
+        ├ WAKE            → 포그라운드 서비스 → 알람 볼륨 채널로 배경음(soundKey) + 진동(vibration 3종) + 잠금화면 위 알람 화면
         └ 그 밖(준비 · 출발 · 도착 · 루틴) → 보통 알림(알림음 · 진동 한 번) + 원탭 버튼
 ```
 
@@ -22,10 +22,10 @@ mobile/modules/alarm-core/
 
 | 함수 | 하는 일 |
 |---|---|
-| `schedule(pkg)` | 꾸러미 하나를 폰에 걸음. 같은 `alarmId`면 덮어씀. `'scheduled'` · `'skipped_past'`(시각이 지남, 오류 아님) · `'deferred'`를 돌려줌. 꾸러미가 틀렸거나 정확한 알람 권한이 없으면 reject. 울리는 중이거나 같은 시각이 미룸 · 다시 울림 대기 중이면 건드리지 않음(서버와 맞추려고 다시 넘겨도 미루기가 안 풀림): 시각 · 강도가 이미 같으면 `'scheduled'`, 다르면 새 꾸러미를 받지 않았다는 `'deferred'`. **울리거나 미룬 중엔 새 꾸러미를 미루고, 해제 뒤 앱 맞추기(다음 앱 열림)에서 다시 넣음** |
+| `schedule(pkg)` | 꾸러미 하나를 폰에 걸음. 같은 `alarmId`면 덮어씀. `'scheduled'` · `'skipped_past'`(시각이 지남, 오류 아님) · `'deferred'`를 돌려줌. 꾸러미가 틀렸거나 정확한 알람 권한이 없으면 reject. 울리는 중이거나 같은 시각이 미룸 · 다시 울림 대기 중이면 건드리지 않음(서버와 맞추려고 다시 넘겨도 미루기가 안 풀림): 시각 · 강도 · `soundKey` · `vibration`이 이미 같으면 `'scheduled'`, 다르면 새 꾸러미를 받지 않았다는 `'deferred'`. **울리거나 미룬 중엔 새 꾸러미를 미루고, 해제 뒤 앱 맞추기(다음 앱 열림)에서 다시 넣음** |
 | `scheduleAll(pkgs)` | 여러 개를 차례로 `schedule`. 하나가 실패해도 계속하고 알람마다 `{ alarmId, status, error? }`를 돌려줌 (`status`는 `'scheduled'` · `'skipped_past'` · `'deferred'` · `'failed'`) |
 | `cancel(alarmId)` · `cancelAll()` | 예약 지우기 (미루기 · 다시 울림 대기 포함). 울리는 중이면 멈춤. 해제 기록은 안 남음. `cancelAll()`은 이미 떠 있는 일정 알림(준비 · 출발 · 도착 · 루틴)도 지워서 로그아웃 뒤 남은 알림의 원탭이 기록을 쌓지 않음 |
-| `list()` | 폰에 걸린 예약. `{ id, type, intensity, title, atMillis, snoozeCount, nextRingAt }` — 서버 `alarms`와 `alarm_id` + `scheduled_at`(=`atMillis`) + `intensity`로 맞춤 |
+| `list()` | 폰에 걸린 예약. `{ id, type, intensity, soundKey, vibration, title, atMillis, snoozeCount, nextRingAt }` — 서버 `alarms`와 `alarm_id` + `scheduled_at`(=`atMillis`) + `intensity` + `soundKey` + `vibration`으로 맞춤 (`soundKey` · `vibration`은 칸이 없는 예전 저장 알람이면 아래 기본값) |
 | `stop()` | 지금 울리는 알람을 해제 처리 (해제 기록이 남고, 앱이 이미 열려 있으니 앱은 안 엶) |
 | `ringNow(pkg)` | 예약 없이 바로 울림 (시험용). 같은 id가 있으면 덮어씀 |
 | `canScheduleExactAlarms()` · `canUseFullScreenIntent()` | 정확한 알람 · 잠금화면 알람 화면 권한 |
@@ -50,13 +50,15 @@ type RingPackage = {
   snoozeLimit: number;    // 미루기 한도, 기본 3 — 울림 계획(plan.snoozeLimit)에 실려 네이티브가 셈 (D3 기본안 A)
   voiceText?: string;     // 음성 안내 문장 — 저장만 함 (D8, 나중). 서버가 약속의 기상 알람에 채움
   notice?: string;        // 알림 한 줄 — 있으면 울림 계획의 heading이 이 글자. 서버가 약속의 준비 · 출발 알림에 채움
-  soundKey?: string;      // 소리 고르기. 지금은 어떤 값이든 기본 소리(폰 기본 알람음)
+  soundKey?: string;      // 배경음 고르기: 'theme_calm' · 'theme_default' · 'theme_urgent'(앱에 든 파일). 없거나 모르는 키는 폰 기본 알람음 (D1 A)
   volumeAdjust?: number;  // 평가 보정 비율, -0.1 = 볼륨 10% 줄임 (#81)
   departAt?: number;      // 출발 시각 — 미루기 한도 안내 · "이만큼 미루면 늦어요" 판단에 씀 (D3 기본안 A)
-  vibration?: 'NONE' | 'SHORT_REPEAT' | 'STRONG_CONTINUOUS'; // 자리만, 안 읽음 (D1)
+  vibration?: 'NONE' | 'SHORT_REPEAT' | 'STRONG_CONTINUOUS'; // 진동 패턴 3개 (D1 A). 칸이 없으면 강도에서: SOFT → NONE · NORMAL → SHORT_REPEAT · STRONG → STRONG_CONTINUOUS
   snoozeMinutesOptions?: readonly number[];                  // 자리만, 안 읽음 — 미루기 시간은 5 · 10 · 15분 고정(D3 기본안 A)이라 plan이 정함
 };
 ```
+
+앱은 `soundKey` · `vibration`을 알람마다 항상 넣어 보냄(`toNativePayload`). 네이티브는 칸이 없는 예전 저장 알람(예전 APK가 저장) 때문에 기본값을 둠: `vibration`은 `intensity`에서(위), `soundKey`는 꾸러미 칸 → 계획(`plan.soundKey`) 칸 → `intensity`(SOFT → `theme_calm` · NORMAL → `theme_default` · STRONG → `theme_urgent`) 순. 모르는 `vibration` 값도 `intensity`에서 정함. 계획의 `soundKey`는 꾸러미의 것과 같은 값으로 맞춰 저장함 (`StoredAlarm.fromJson`).
 
 ### 알림 문구 (`notice` · `voiceText`)
 
@@ -87,12 +89,20 @@ type RingPackage = {
 
 | 항목 | 규칙 |
 |---|---|
-| 볼륨 | 알람 볼륨 스트림 최대치 × 강도별 60 · 80 · 100%(SOFT · NORMAL · STRONG) × (1 + `volumeAdjust`). 정수 %로 반올림하고 10~100% 안으로 (보정이 커도 소리가 사라지지 않게). 끄면 원래 볼륨으로 되돌림 |
+| 볼륨 | 소리·진동 축과 별개로 **전체 세기(`intensity`)**가 정함: 알람 볼륨 스트림 최대치 × 강도별 60 · 80 · 100%(SOFT · NORMAL · STRONG) × (1 + `volumeAdjust`). 정수 %로 반올림하고 10~100% 안으로 (보정이 커도 소리가 사라지지 않게). 끄면 원래 볼륨으로 되돌림 |
 | 한 번 울림 | 최대 3분 (백그라운드 재생 제한, 7장 7.4.2 · T-6에서 실기기로 확정) |
 | 안 끄면 다시 울림 | 울림이 끝난 뒤 쉬었다가 다시: 약 5분 쉬고 1번 · 보통 5분씩 쉬고 2번 · 강 3분씩 쉬고 3번 (**쉬는 시간 읽기는 해석** — 아래). **미루기 횟수에 안 셈**. 미루기 뒤에는 다시 울림 묶음을 처음부터 (서버 미확인 판정도 같은 기준, #160) |
 | 미루기 | **5 · 10 · 15분 중 고르기, 알람 한 개당 최대 3번** (D3 기본안 A). 울림 화면에 시간 3개(기본 선택 5분) + "미루기 N/3회"(N = 이미 미룬 횟수). **한도에 닿으면**(`snoozeCount >= snoozeLimit`) 시간 · 미루기 버튼을 끄고 "지금 바로 준비 · {출발 시각} 출발"(`departAt`이 없으면 "지금 바로 준비"). **다시 울릴 시각(지금 + 고른 분)이 출발 시각(`departAt`)을 넘으면 "늦어요"를 눈에 띄게 보이되 막지는 않음** — 늦는 칩은 경고색 + 칩 안 "늦어요", 고른 칩이 늦으면 미루기 버튼 바로 위 굵은 경고 한 줄 "15분 미루면 9:00 출발보다 5분 늦어요"(늦는 분 = 다시 울릴 시각 − 출발 시각, 올림) + 버튼 "15분 미루기 · 늦어요"와 경고 테두리, 5분만 미뤄도 늦으면 맨 위 경고 띠 "지금 일어나야 9:00 출발에 맞아요" (남은 준비 시간은 안 뺌). 목록(`plan.snoozeMinutesOptions`) · 한도(`plan.snoozeLimit`)는 `plan.ts`가 계획에 실어 보내고, 한도 · 늦어요 판단은 지금 시각이 필요해 네이티브(`SnoozeRules.kt`)가 같은 식으로 함 (`spec/cases.json`이 TS 쪽을 고정). 한도 · 목록에 없는 분은 `AlarmController.snooze`도 거절. 알림의 "미루기" 버튼은 기본 10분(`plan.snoozeMillis`) 하나 — 한도면 버튼이 빠지고 본문에 안내, 늦으면 알림을 올릴 때 한 번 정해 "10분 미루기 · 늦어요"(알림은 올라온 뒤 문구를 못 바꿔 분 수 · 경고 줄은 없음). 한도는 미루기만 셈(다시 울림은 안 셈). **네이티브(Kotlin)가 바뀌어 새 개발용 APK가 필요함** |
-| 소리 | 기본 소리 키(`default`)는 **폰 기본 알람음**을 알람 스트림으로 반복해서 틂 — 안 되면 앱 파일(`alarm_siren.wav`) → 폰 기본 벨소리 → 기본 알림음 순으로 넘어감 (10/18 지형님 — 안드로이드 기본 알람 정도는 되게). 모르는 키도 기본 소리. 그 밖의 소리 키가 생기면(소리 3종은 별도 계획, Q7) 앱 파일을 먼저 틂 |
-| 진동 | 울리는 동안 계속 (켜짐 0.5초 · 꺼짐 0.5초 반복, 시계 앱처럼). 알람 용도로 걸어서 무음 · 방해 금지에서도 울림. 해제 · 미루기 · 3분 끝 · 서비스 끝에 소리와 같이 멈춤. 강도와 상관없는 하나뿐 (작성자 판단 — 강도 · 축별 진동은 D1 뒤) |
+| 소리 | `soundKey`가 정하는 **배경음 파일**을 알람 스트림으로 반복해서 틂 (D1 A · Q7). `theme_calm`(약) · `theme_default`(보통) · `theme_urgent`(강) 세 파일이 `res/raw`에 있고, 앱 파일을 먼저 틀며 안 되면 폰 기본 알람음 → 폰 기본 벨소리 → 기본 알림음 순으로 넘어감. 기본 키(`default`)와 모르는 키는 **폰 기본 알람음**이 먼저고 앱 파일(`alarm_siren.wav`)이 그 다음 예비 (10/18 지형님 — 안드로이드 기본 알람 정도는 되게). 파일은 `mobile/scripts/make-alarm-sounds.mjs`가 직접 합성한 것이라 외부 소리 · 라이선스 없음 (아래 표) |
+| 진동 | `vibration`이 정하는 **패턴 3개**를 울리는 동안 반복 (알람 용도로 걸어서 무음 · 방해 금지에서도 울림): `NONE` = 진동 없음(진동을 건너뛰고, 알림이 뜰 때의 진동 한 번도 없는 알림 채널을 씀) · `SHORT_REPEAT` = 0.2초 켜짐 · 0.3초 꺼짐 · `STRONG_CONTINUOUS` = 0.8초 켜짐 · 0.1초 꺼짐(거의 연속). 진동 없음이어도 소리 볼륨은 위 전체 세기가 정한 값 그대로. 해제 · 미루기 · 3분 끝 · 서비스 끝에 소리와 같이 멈춤. 패턴 상수는 `AlarmProfiles.kt` |
+
+배경음 파일 (PCM 16bit · 모노 · 44.1kHz, 반복 재생에 이음매가 안 들리게 처음 · 끝이 무음). `node scripts/make-alarm-sounds.mjs`(`mobile/`에서)로 다시 만들 수 있고 만든 파일을 커밋함:
+
+| 파일 | 길이 | 소리 | 최대 진폭 |
+|---|---|---|---|
+| `theme_calm.wav` | 2.0초 | 낮은 음(G4 392Hz 사인) 한 번을 0.35초에 걸쳐 부드럽게 시작 → 천천히 사라짐, 0.7초 쉬고 반복 | 0.7 |
+| `theme_default.wav` | 1.0초 | 기본 비프(A5 880Hz) 0.22초 × 2번 | 0.8 |
+| `theme_urgent.wav` | 1.0초 | 높은 음(A6 1760Hz 사각파) 0.09초 × 8번을 0.125초마다 | 0.8 |
 
 **"간격"의 읽기 (해석 — 문서에 측정 기준 없음, 지형님 확인)**: 문서(#29 · 7장 7.4.2)는 "5분 후 1회 / 5분 간격 2회 / 3분 간격 3회"만 적고 어디서부터 재는지 없음. 한 울림(최대 3분)이 끝난 뒤 다음 울림이 시작될 때까지 쉬는 시간으로 읽음. 시작부터 시작까지로 읽으면 강은 3분 울림이 쉬는 틈 없이 12분 이어져서 "1회 최대 3분"이 의미가 없어짐.
 
@@ -203,14 +213,14 @@ WAKE를 해제하면(알람 화면 · 알림 버튼 모두) 앱을 `respecalarm:
 | 앱 연결 (P6, `lib/alarmSync` `uploadEvents`) | 울림 기록 올리기 | 앱이 켜지면 `getPendingEvents()` → `alarm_events`(`clientEventId`로 중복 방지) → `markEventsUploaded`. 끄거나 재부팅한 동안의 기록도 이 길로 감. 해제 · 놓침을 바로 올리는 폰 스스로의 길(WorkManager)은 토큰 문제로 따로 정함 |
 | 로그아웃 (P6, `lib/session` `signOutAndCleanup`) | 정리 | 로그아웃 중 표시 켜기(`reconcile`이 서버 알람을 폰에 걸지 않게) → 기록 올려 보기 → 맞추기와 같은 한 줄에서 `cancelAll()`(앞에 서 있던 맞추기가 끝난 뒤) → 폰에 남은 기록 지우기 (Q6) → 푸시 토큰 지우기 자리 → 실시간 구독 끊기 · 기능 메모리 정리 → 로그아웃. `cancelAll`이 실패하면 로그아웃을 멈추고 표시를 끔 |
 | 앱 연결 (P6, `useWakeRecheck`) | 기상 판정 다시 보기 | 앱이 앞에 올 때 최근 12시간에 끈 기상 알람 중 확정이 없는 것을 H08과 같은 판정으로 다시 보고 조건을 채웠으면 확정(`USAGE`) 기록 — 위 "앱이 앞에 올 때 다시 판정". 네이티브가 해제 + 10분에 스스로 판정하는 길은 확인 필요 |
-| D1 | 배경음 · 말소리 · 진동 축별 고르기 | `vibration` 칸을 읽고 진동을 고름 (지금은 서비스가 일정한 반복 하나를 직접 틂, 강도와 상관없음) |
+| D1 | 배경음 · 말소리 · 진동 축별 고르기 | **배경음 3개 · 진동 패턴 3개는 반영됨**(#312, D1 A). 말소리(TTS)는 D8 |
 | D2 | 기상 확인 무응답 시 다시 울림 | 지금은 안 만듦 |
-| Q7 | 소리 3종 | `soundKey`로 앱에 든 파일을 고름 (기본 키만 폰 기본 알람음) |
+| Q7 | 소리 3종 | **반영됨**(#312): `soundKey`로 앱에 든 파일을 고름 (`default` · 모르는 키만 폰 기본 알람음). 파일은 지금 합성음이라 나중에 실제 소리로 바꿔도 키 · 이름은 그대로 |
 | D8 | 음성 안내 | 알람 소리 채널로 폰 TTS가 `voiceText`를 읽음 (실패해도 사이렌은 울림). 문장은 지금 서버가 약속의 기상 알람에 채워 둠 — 읽는 것만 네이티브 PR |
 | 나중 | iOS | AlarmKit 구현은 안드로이드 뒤 (Q9) |
 
 ## 지킬 것
 
 - 알람은 서버 · 인터넷 없이도 울려야 함. 계산 · 저장은 서버, 울리는 건 폰
-- 네이티브 코드가 바뀌면 모두 개발용 APK를 다시 받음 (PR에 적기)
+- 네이티브 코드가 바뀌면 모두 개발용 APK를 다시 받음 (PR에 적기). 진동 3개 · 배경음 3개(#312)도 Kotlin · `res/raw`가 바뀌어 새 APK가 필요함 — 옛 APK는 `soundKey` · `vibration`을 몰라서 예전처럼(폰 기본 알람음 + 0.5초 진동) 울리고, `list()`에도 두 칸이 없음
 - 실기기 확인 6개(잠금화면 · 볼륨 0 · 최근 앱에서 닫기 · 재부팅 · 방해 금지 · 미루기)는 알람 코어를 바꿀 때마다 다시 봄 — `respecalarm://dev/alarm-test`. 이번에 더해 볼 것: 강도 3단계 볼륨 · 3분 뒤 멈춤과 쉬었다가 다시 울림 · 일정 알림 원탭 · 해제 뒤 앱이 `wake?alarmId=`로 열림 · 사용 구간 읽기
