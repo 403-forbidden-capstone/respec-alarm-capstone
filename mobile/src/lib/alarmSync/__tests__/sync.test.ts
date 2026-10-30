@@ -1,7 +1,20 @@
 import { afterEach, beforeEach, describe, expect, it, jest } from '@jest/globals';
 import type { AlarmEvent, RingPackage, ScheduleOutcome, ScheduledAlarm } from '@capstone/alarm-core';
 
-import { applyCommit, cancelAllPhoneAlarms, discardPendingEvents, onAlarmsSynced, onEventsUploaded, reconcile, setSigningOut, syncNow, uploadEvents, type AlarmsSyncedInfo } from '../index';
+import {
+  applyCommit,
+  cancelAllPhoneAlarms,
+  discardPendingEvents,
+  failedAlarmCount,
+  onAlarmsSynced,
+  onEventsUploaded,
+  onFailedAlarmsChange,
+  reconcile,
+  setSigningOut,
+  syncNow,
+  uploadEvents,
+  type AlarmsSyncedInfo,
+} from '../index';
 
 // 알람 코어(폰) · supabase · 데이터 모드를 가짜로 — 오케스트레이션(어느 순서로 무엇을 부르는지)만 확인. 계산은 reconcile.test.ts · events.test.ts
 const mockCore = {
@@ -820,5 +833,67 @@ describe('syncNow — 기록 올리기 → 내 반복 회차 넘기기(alarm-rol
     setSigningOut(false);
     await syncNow({ nowMs: NOW + 1_000 });
     expect(mockCallEdge).toHaveBeenCalledTimes(2);
+  });
+});
+
+// 폰에 못 건 알람 수 — 맞춘 뒤 훅(onAlarmsSynced)에 붙어 목록을 고침 (홈 빨간 줄이 읽음)
+describe('폰에 못 건 알람 수 — 홈 빨간 줄', () => {
+  beforeEach(() => {
+    setSigningOut(true); // 앞 시험이 남긴 목록을 비움
+    setSigningOut(false);
+  });
+
+  it('전체 맞추기가 목록을 새로 정하고, 저장 결과(applyCommit)가 성공하면 그 알람만 뺌', async () => {
+    const onChange = jest.fn();
+    const off = onFailedAlarmsChange(onChange);
+    mockAlarmRows = [dbRow('a', 'WAKE', WAKE_AT, 'pa'), dbRow('b', 'WAKE', WAKE_AT, 'pb')];
+    mockCore.scheduleAll.mockResolvedValue([
+      { alarmId: 'a', status: 'failed', error: '정확한 알람 권한이 없어요' },
+      { alarmId: 'b', status: 'failed', error: '정확한 알람 권한이 없어요' },
+    ]);
+    await reconcile({ nowMs: NOW });
+    expect(failedAlarmCount()).toBe(2);
+    expect(onChange).toHaveBeenCalledTimes(1);
+
+    // 저장 결과는 나온 알람만 고침 — b는 이번에 걸렸고 a는 그대로
+    mockCore.scheduleAll.mockImplementation(scheduledAll);
+    await applyCommit({ ring_packages: [pkg('b', NOW + 60_000)] });
+    expect(failedAlarmCount()).toBe(1);
+
+    // 전체 맞추기는 이번 결과로 목록을 새로 정함 — a도 이번에 걸리면 비어 있음
+    await reconcile({ nowMs: NOW });
+    expect(failedAlarmCount()).toBe(0);
+    expect(onChange).toHaveBeenCalledTimes(3);
+
+    // 로그아웃하면 비움
+    mockCore.scheduleAll.mockResolvedValue([{ alarmId: 'a', status: 'failed', error: 'x' }]);
+    await reconcile({ nowMs: NOW });
+    expect(failedAlarmCount()).toBe(1);
+    setSigningOut(true);
+    expect(failedAlarmCount()).toBe(0);
+    off();
+  });
+
+  it('못 건 알람을 지정해 맞췄는데 서버에 켜진 행이 없으면(끄거나 지움) 목록에서 빠짐', async () => {
+    mockAlarmRows = [dbRow('a', 'WAKE', WAKE_AT, 'pa')];
+    mockCore.scheduleAll.mockResolvedValue([{ alarmId: 'a', status: 'failed', error: '정확한 알람 권한이 없어요' }]);
+    await reconcile({ nowMs: NOW });
+    expect(failedAlarmCount()).toBe(1);
+
+    // 서버에서 꺼짐 — 서버 목록에도 폰에도 없어 취소 대상으로 안 잡힘
+    mockAlarmRows = [];
+    mockEnabledIds = [];
+    await reconcile({ alarmIds: ['a'], nowMs: NOW });
+    expect(failedAlarmCount()).toBe(0);
+  });
+
+  it('로그아웃이 시작된 뒤 끝나는 맞추기는 못 건 목록을 다시 채우지 않음', async () => {
+    mockAlarmRows = [dbRow('a', 'WAKE', WAKE_AT, 'pa')];
+    mockCore.scheduleAll.mockImplementation(async () => {
+      setSigningOut(true); // 거는 도중 로그아웃이 시작됨
+      return [{ alarmId: 'a', status: 'failed' as const, error: 'x' }];
+    });
+    await reconcile({ nowMs: NOW });
+    expect(failedAlarmCount()).toBe(0);
   });
 });
