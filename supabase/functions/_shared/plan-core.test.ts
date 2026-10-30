@@ -301,12 +301,12 @@ test('computePlan의 prepareBound: 직접 고른 준비시간은 안 자름, 기
   assert.equal(second.prepare.minutes, 15);
 });
 
-// D69: 기본 보통 — 중요도 낮음(앱 라벨 '보통')이어도 약이 아니고, 매우 중요(HIGH)만 한 단계 올림
+// D69: 기본 보통 — 중요도 낮음(앱 라벨 '평소')이어도 약이 아니고, 매우 중요(HIGH)만 한 단계 올림
 test('강도 이유: 중요도 낮음은 보통(중), 매우 중요는 한 단계 올려 강 — 약이라는 문구는 안 나옴', () => {
   const draft = { at: kst(22, 600), destination: { name: '세종대학교', lat: 37.55, lng: 127.07 } };
   const low = toSuggestion(computePlan(base({ draft: { ...draft, importance: 'LOW' }, lateCount4w: 0 }), api(50)));
   assert.equal(low.intensity.level, 'NORMAL');
-  assert.equal(low.intensity.reason, '보통 일정 → 중');
+  assert.equal(low.intensity.reason, '평소 일정 → 중');
   assert.deepEqual([low.intensity.auto_level, low.intensity.importance_point, low.intensity.late_point], [1, 0, 0]);
 
   const high = toSuggestion(computePlan(base({ draft: { ...draft, importance: 'HIGH' }, lateCount4w: 0 }), api(50)));
@@ -316,7 +316,7 @@ test('강도 이유: 중요도 낮음은 보통(중), 매우 중요는 한 단�
 
   const lowLate = toSuggestion(computePlan(base({ draft: { ...draft, importance: 'LOW' }, lateCount4w: 2 }), api(50)));
   assert.equal(lowLate.intensity.level, 'STRONG'); // 낮음 + 늦잠 지각 2회 = 보통에서 한 단계 올림
-  assert.equal(lowLate.intensity.reason, '보통 일정 + 최근 4주 늦잠 지각 2회 → 강');
+  assert.equal(lowLate.intensity.reason, '평소 일정 + 최근 4주 늦잠 지각 2회 → 강');
 });
 
 test('옛 알람(vibration 칸이 비어 있고 intensity만 STRONG인 직접 알람)은 진동을 직접 고른 것으로 안 읽음 — 강도를 따르는 칸이라 자동', () => {

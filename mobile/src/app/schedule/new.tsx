@@ -7,6 +7,7 @@ import { Button, Card, DateRow, Field, KeyValueRow, LoadError, Screen, Sheet, Te
 import { createAppointment, defaultDraft, draftAt, estimateAppointment, listAppointments, listPlaces } from '@/features/alarm/api';
 import { adjustEstimate, isManualTime, orderError } from '@/features/alarm/adjust';
 import { useNow } from '@/features/alarm/hooks/useNow';
+import { AreaPlaceNote } from '@/features/alarm/components/AreaPlaceNote';
 import { HomeMissingNotice } from '@/features/alarm/components/HomeMissingNotice';
 import { ItemChips } from '@/features/alarm/components/ItemChips';
 import { OptionGrid } from '@/features/alarm/components/OptionGrid';
@@ -33,6 +34,7 @@ import {
   type RingKind,
   type Transport,
 } from '@/features/alarm/types';
+import { isAreaPlace } from '@/features/location/area';
 import { askNotifications } from '@/features/permissions';
 import { useAuth } from '@/features/auth/AuthProvider';
 import { saveProfileFields } from '@/features/profile/api';
@@ -82,6 +84,8 @@ export default function NewScheduleScreen() {
   const [estimate, setEstimate] = useState<Estimate | null>(null);
   const [pick, setPick] = useState<RingKind | null>(null); // 확인 시트에서 시각을 고르는 알람 (D43)
   const [placeOpen, setPlaceOpen] = useState(false); // 장소 검색 시트
+  const [placeQuery, setPlaceQuery] = useState(''); // 시트를 열 때 채워 둘 검색어 (캠퍼스 [건물 검색]이면 그 이름)
+  const [pickedPlace, setPickedPlace] = useState<Place | null>(null); // 방금 고른 장소의 분류(category)를 경고 판정에만 잠깐 들고 있음 — 저장하지 않음 (D5)
   const auth = useAuth();
   const home = homeOf(auth.profile); // 프로필의 집 좌표 — 있으면 검색 결과를 집에서 가까운 순으로 (가짜 데이터의 가짜 프로필은 좌표가 없음)
   const [showCalc, setShowCalc] = useState(false); // 계산 근거 "자세히"를 펼침
@@ -107,6 +111,10 @@ export default function NewScheduleScreen() {
     RING_KINDS.some((kind) => draft.alarms[kind] !== initial.alarms[kind]);
   const { allowLeave } = useLeaveGuard(dirty, '입력한 일정이 사라져요.');
 
+  // 대표 좌표 장소(캠퍼스 · 공원)면 장소 줄 아래 경고 — 분류는 방금 고른 장소나 최근 장소 목록에서, 없으면 이름만으로 (area.ts)
+  const placeCategory = pickedPlace?.name === draft.place ? pickedPlace.category : places?.find((p) => p.name === draft.place)?.category;
+  const areaPlace = draft.place !== '' && isAreaPlace({ name: draft.place, category: placeCategory });
+
   const at = draftAt(draft.date, draft.time);
   const past = at.getTime() <= current.getTime();
   const anyAlarm = RING_KINDS.some((kind) => draft.alarms[kind]); // 모두 끄면 알람 없는 일정 (D46)
@@ -123,6 +131,7 @@ export default function NewScheduleScreen() {
   function calculate(homeJustSaved = false) {
     if (!draft.title.trim()) {
       setTitleError(true);
+      toast('일정명을 적어 주세요'); // 버튼이 아래에 고정이라 일정명 칸이 화면 밖일 수 있음
       return;
     }
     void runCalculate(async () => {
@@ -193,8 +202,11 @@ export default function NewScheduleScreen() {
     }, '저장하지 못했어요');
   }
 
+  // 계산 버튼은 화면 아래에 고정 — 폼이 길어 스크롤 끝까지 내려가지 않아도 보이게 (H03 저장과 같음). 키보드가 올라오면 같이 올라감
+  const footer = <Button label={anyAlarm ? '알람 계산하기' : '일정만 저장하기'} onPress={calculate} loading={calculating} disabled={past} />;
+
   return (
-    <Screen>
+    <Screen footer={footer}>
       <TopBar onBack={backOrHome} screenId="H05" />
       <Text variant="title" style={styles.title}>
         새 일정 만들기
@@ -242,7 +254,10 @@ export default function NewScheduleScreen() {
         </Text>
         {/* SelectRow와 같은 모양 — 누르면 목록 대신 검색 시트. 실데이터는 고른 장소의 좌표도 초안에 담아 계산 · 저장 요청까지 가져감 (가짜 데이터는 좌표가 없음) */}
         <Pressable
-          onPress={() => setPlaceOpen(true)}
+          onPress={() => {
+            setPlaceQuery('');
+            setPlaceOpen(true);
+          }}
           accessibilityRole="button"
           accessibilityLabel={`장소 ${draft.place || '고르기'}`}
           style={({ pressed }) => [styles.placeRow, pressed && styles.pressed]}
@@ -259,12 +274,22 @@ export default function NewScheduleScreen() {
             </Text>
           </View>
         </Pressable>
+        {areaPlace ? (
+          <AreaPlaceNote
+            onSearch={() => {
+              setPlaceQuery(draft.place);
+              setPlaceOpen(true);
+            }}
+          />
+        ) : null}
         <PlaceSearchSheet
           visible={placeOpen}
           onClose={() => setPlaceOpen(false)}
           search={(query) => listPlaces(query, home)}
+          initialQuery={placeQuery}
           onPick={(picked) => {
             setDraft((d) => ({ ...d, place: picked.name, placeLat: picked.lat, placeLng: picked.lng }));
+            setPickedPlace(picked);
             setPlaceOpen(false);
           }}
         />
@@ -337,10 +362,6 @@ export default function NewScheduleScreen() {
         search={(query) => listPlaces(query, home)}
         onPick={pickHome}
       />
-
-      <View style={styles.stack}>
-        <Button label={anyAlarm ? '알람 계산하기' : '일정만 저장하기'} onPress={() => calculate()} loading={calculating} disabled={past} />
-      </View>
 
       {/* 확인 시트 — 알람 시각 칩을 누르면 같은 시트 안에서 시각을 고름 (시트는 한 번에 하나만 뜸), 계산 근거는 "자세히"로 접음 (D43) */}
       <Sheet

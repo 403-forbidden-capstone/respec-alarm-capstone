@@ -385,7 +385,7 @@ export function computePlan(i: PlanInputs, travel: ResolvedTravel, mode: PlanMod
 const iso = (d: Date | undefined | null) => (d ? d.toISOString() : null);
 const KIND_AT = (chain: readonly ChainAlarm[], kind: ChainAlarm['kind']) => chain.find((x) => x.kind === kind)?.at;
 const LEVEL_NAME = ['약', '중', '강'] as const;
-const IMPORTANCE_NAME: Record<Importance, string> = { LOW: '보통', NORMAL: '중요', HIGH: '매우 중요' };
+const IMPORTANCE_NAME: Record<Importance, string> = { LOW: '평소', NORMAL: '중요', HIGH: '매우 중요' };
 
 // 이동시간을 구할 길이 없을 때의 미리 보기 — 오류 대신 "이동시간만 직접 입력해 주세요"를 알리는 200 응답 (7.1.2 마지막 단계)
 //   이동시간에 안 걸리는 칸(준비 · 강도 · 그날 첫 일정 여부)은 그대로 채우고, 이동시간이 있어야 나오는 시각은 비움

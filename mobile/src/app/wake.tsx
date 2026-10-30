@@ -2,7 +2,7 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { Fragment, useEffect, useRef, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
-import { Button, Card, LoadError, ProgressBar, Screen, Text, toast, TopBar } from '@/components/ui';
+import { Button, Card, LoadError, Loading, ProgressBar, Screen, Text, toast, TopBar } from '@/components/ui';
 import { confirmWake, getMorningPlan, getWakeCheck, promptWake } from '@/features/alarm/api';
 import { FormulaBox } from '@/features/alarm/components/FormulaBox';
 import { MorningPlanLine } from '@/features/alarm/components/MorningPlanLine';
@@ -47,7 +47,7 @@ export default function WakeScreen() {
     return (
       <Screen>
         <TopBar onBack={backOrHome} screenId="H08" />
-        {error ? <LoadError onRetry={reload} /> : null}
+        {error ? <LoadError onRetry={reload} /> : <Loading text="기상 확인을 불러오는 중" />}
       </Screen>
     );
   }
@@ -79,6 +79,7 @@ function WakeFlow({ check }: { check: WakeCheck }) {
   const [state, setState] = useState(() => toState(check));
   // 두 번 눌러도 한 단계에서 한 번만 기록 (H07 handled와 같음) — 단계가 바뀌면 다시 누를 수 있음
   const handled = useRef<Phase | null>(null);
+  const [confirming, setConfirming] = useState(false); // '일어났어요' 기록 중 — 버튼에 돌아가는 표시
   // 실제로 끈 시각부터 10분 — 미룬 뒤 다시 울려 끄면 그 시각부터. 판정 시점(확정 · 확인 알림)으로만 씀
   // 자동 판정의 기록 시각은 api가 누적 사용이 θ를 넘은 시각으로 남김 (D14)
   const observeEnd = addMinutes(check.dismissedAt, WAKE_OBSERVE_MINUTES);
@@ -102,11 +103,13 @@ function WakeFlow({ check }: { check: WakeCheck }) {
 
   async function confirm(how: 'self' | 'auto') {
     if (!first()) return;
+    setConfirming(true);
     try {
       await confirmWake(check.alarmId, how, observeEnd);
     } catch {
       // 실데이터에서 기록하지 못했을 때(네트워크 등) — 다시 누를 수 있게 풀어 줌 (가짜 데이터는 실패하지 않음)
       handled.current = null;
+      setConfirming(false);
       toast('기상을 확인하지 못했어요. 다시 눌러 주세요');
       return;
     }
@@ -114,6 +117,7 @@ function WakeFlow({ check }: { check: WakeCheck }) {
     await refresh().catch(() => {
       handled.current = null;
     });
+    setConfirming(false);
     toast(`기상을 확인했어요${shared}`);
   }
 
@@ -199,7 +203,7 @@ function WakeFlow({ check }: { check: WakeCheck }) {
             <Text variant="note" tone="sub" style={styles.notifText}>
               {check.groupId != null ? `응답하면 ${check.groupName ?? '그룹'}에 기상 완료로 표시돼요.` : '응답하면 기상 완료로 기록돼요.'}
             </Text>
-            <Button label="일어났어요" small onPress={() => confirm('self')} />
+            <Button label="일어났어요" small loading={confirming} onPress={() => confirm('self')} />
           </View>
           <Card>
             <Text variant="label" tone="sub">

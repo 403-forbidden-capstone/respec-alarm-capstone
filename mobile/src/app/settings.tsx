@@ -44,6 +44,7 @@ type Editing = 'nickname' | 'handle' | 'sleep' | 'prepare' | null;
 export default function SettingsScreen() {
   const { session, profile, enabled, refreshProfile } = useAuth();
   const { run } = useAction();
+  const logout = useAction(); // 로그아웃 연타 막기 · 돌아가는 표시 — 프로필 저장 중에 로그아웃 버튼이 같이 돌지 않게 따로
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState<Editing>(null);
   const [placeOpen, setPlaceOpen] = useState(false);
@@ -192,7 +193,13 @@ export default function SettingsScreen() {
           <Button
             label="로그아웃"
             variant="ghost"
-            onPress={() => signOutAndCleanup().catch((e) => setError(userMessage(e, '로그아웃하지 못했어요')))}
+            loading={logout.busy}
+            onPress={() =>
+              logout.run(async () => {
+                setError(null);
+                await signOutAndCleanup().catch((e) => setError(userMessage(e, '로그아웃하지 못했어요')));
+              })
+            }
           />
           {error ? (
             <Text variant="small" tone="warn">

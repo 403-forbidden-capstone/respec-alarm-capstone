@@ -26,8 +26,8 @@ export const KIND_LABEL: Record<AlarmKind, string> = { WAKE: '기상', PREPARE: 
 export const RING_KINDS: readonly RingKind[] = ['WAKE', 'PREPARE', 'DEPARTURE'];
 export const defaultAlarms = (): Record<RingKind, boolean> => ({ WAKE: true, PREPARE: true, DEPARTURE: true });
 
-// 목업의 보통 · 중요 · 매우 중요 = DB LOW · NORMAL · HIGH
-export const IMPORTANCE_LABEL: Record<Importance, string> = { LOW: '보통', NORMAL: '중요', HIGH: '매우 중요' };
+// 화면 글자 평소 · 중요 · 매우 중요 = DB LOW · NORMAL · HIGH (강도 이름 약 · 보통 · 강과 안 겹치게 '보통'을 '평소'로, 10/30)
+export const IMPORTANCE_LABEL: Record<Importance, string> = { LOW: '평소', NORMAL: '중요', HIGH: '매우 중요' };
 // 중요도로 올리는 단계 수 — 매우 중요(HIGH)만 1 (D69, 공용 IMPORTANCE_POINT와 같아야 함: mocks/__tests__/shared.test.ts)
 export const IMPORTANCE_POINT: Record<Importance, number> = { LOW: 0, NORMAL: 0, HIGH: 1 };
 

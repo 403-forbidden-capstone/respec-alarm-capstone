@@ -670,7 +670,7 @@ SCR.home=()=>{
   const target=eve?d+1:d, nx=nextAlarm();
   let h=top(`<span class="small">${dLabel(d)}</span>`,'<button class="tbtn" data-act="go" data-to="alarms">알람 전체</button>')+`<h1 class="ttl">${greet}</h1>`;
   if(nx)h+=`<div class="h2">다음 알람<small>${relTime(nx.abs-S.now)}</small></div>`+alarmCard(nx.a);
-  h+=`<div class="h2">${eve?'내일 일정':'오늘 일정'}<button class="tlink" data-act="newAppt">+ 일정 추가</button></div><div class="card">${schedRows(target)}</div>`;
+  h+=`<div class="h2">${eve?'내일 일정':'오늘 일정'}<button class="tlink" data-act="newAppt">+ 새 일정</button></div><div class="card">${schedRows(target)}</div>`;
   if(!eve){
     const r=S.rMorning;
     h+=`<div class="h2">오늘 루틴<small>${r.done}/${r.steps.length} 완료</small></div><button class="card rcard" data-act="rTick" aria-label="${r.title} 다음 단계 완료"><b>${r.title}</b><small>${r.steps.map((s,i)=>i<r.done?`<s>${s}</s>`:s).join(' · ')}</small><span class="prog"><b style="width:${r.done/r.steps.length*100}%"></b></span></button>`;
