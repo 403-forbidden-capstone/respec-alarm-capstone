@@ -45,16 +45,28 @@ describe('recordToday', () => {
 });
 
 describe('R02 월간', () => {
-  it('daily_records(그 달) + 일기로 달력 점, 오늘 카드는 오늘 기록 수 · 일기 여부', async () => {
+  it('daily_records(그 달) + 일기 + 그 달 일정의 출발 · 도착으로 달력 점 (D27 C), 오늘 카드는 오늘 기록 수 · 일기 여부', async () => {
     const all = [
-      record('2026-10-12', { wake_confirmed_at: '2026-10-11T22:30:00Z', actual_prepare_minutes: 40 }), // 완료
-      record('2026-10-17', { wake_confirmed_at: '2026-10-17T00:30:00Z' }), // 일부
+      record('2026-10-12', { wake_confirmed_at: '2026-10-11T22:30:00Z', actual_prepare_minutes: 40 }), // 일정 1개 · 출발 + 도착 → 완료
+      record('2026-10-15', { wake_confirmed_at: '2026-10-14T22:30:00Z' }), // 이번만 지운 일정뿐 → 일정 없는 날, 기상 확인만 → 완료
+      record('2026-10-16', { wake_confirmed_at: '2026-10-15T22:30:00Z' }), // 일정 1개 · 출발만 → 일부
+      record('2026-10-17', { wake_confirmed_at: '2026-10-17T00:30:00Z' }), // 일정 없음 · 기상 확인만 → 완료
       record('2026-10-19', { wake_confirmed_at: '2026-10-18T22:30:00Z' }), // 오늘 — 기상 확인만 있어도 완료
     ];
     reply((c) => {
       if (c.table === 'daily_records') {
         const key = filterOf(c, 'eq', 'record_date')?.[1]; // 오늘 기록 줄을 읽는 질의는 날짜 하나
         return { data: key ? all.find((r) => r.record_date === key) : all };
+      }
+      if (c.table === 'appointment_participants') {
+        return {
+          data: [
+            { departed_at: '2026-10-12T00:00:00Z', arrived_at: '2026-10-12T00:50:00Z', appointments: { appointment_at: '2026-10-12T01:00:00Z', exception_kind: null } }, // 10/12 10:00 출발 + 도착
+            { departed_at: null, arrived_at: null, appointments: { appointment_at: '2026-10-15T01:00:00Z', exception_kind: 'CANCELED' } }, // 10/15 이번만 지움
+            { departed_at: '2026-10-16T00:00:00Z', arrived_at: null, appointments: { appointment_at: '2026-10-16T01:00:00Z', exception_kind: null } }, // 10/16 출발만
+            { departed_at: '2026-10-13T00:00:00Z', arrived_at: '2026-10-13T00:50:00Z', appointments: { appointment_at: '2026-10-13T01:00:00Z', exception_kind: 'EDITED' } }, // 10/13 기록 행 없이 출발 + 도착만
+          ],
+        };
       }
       if (c.table === 'daily_journals') return c.columns === 'journal_id' ? { data: { journal_id: 'j1' } } : { data: [{ record_date: '2026-10-14', coaching_insight: null }] };
       if (c.table === 'alarm_events') {
@@ -70,7 +82,7 @@ describe('R02 월간', () => {
     const m = await getMonth(2026, 10);
     const mark = (d: number) => m.days[d - 1].mark;
     expect([m.title, m.leadingBlanks, m.days.length]).toEqual(['2026년 10월', 3, 31]); // 10/1은 목요일
-    expect([mark(12), mark(17), mark(14), mark(19), mark(20)]).toEqual(['done', 'partial', 'partial', 'done', 'none']);
+    expect([mark(12), mark(15), mark(16), mark(17), mark(14), mark(13), mark(19), mark(20)]).toEqual(['done', 'done', 'partial', 'done', 'partial', 'partial', 'done', 'none']);
     expect([m.days[18].isToday, m.days[19].isFuture, m.days[17].isFuture]).toEqual([true, true, false]);
     // 오늘 기록 수 = 울림 기록 2개 + 생활 기록에만 있는 기상 확인 1개
     expect([dayKey(m.today.date), m.today.eventCount, m.today.journalWritten]).toEqual(['2026-10-19', 3, true]);
@@ -79,6 +91,15 @@ describe('R02 월간', () => {
     expect([filterOf(records, 'eq', 'user_id')?.[1], filterOf(records, 'gte', 'record_date')?.[1], filterOf(records, 'lte', 'record_date')?.[1]]).toEqual(['user-1', '2026-10-01', '2026-10-31']);
     const events = onlyCalls('alarm_events')[0];
     expect([filterOf(events, 'gte', 'event_at')?.[1], filterOf(events, 'lt', 'event_at')?.[1]]).toEqual(['2026-10-18T15:00:00.000Z', '2026-10-19T15:00:00.000Z']);
+    // 그 달 일정은 날마다가 아니라 한 번에 — 내 참여 조건 × 약속 시각이 10/1 0시 ~ 11/1 0시(한국 시간)
+    const appointments = onlyCalls('appointment_participants');
+    expect(appointments).toHaveLength(1);
+    expect([filterOf(appointments[0], 'eq', 'user_id')?.[1], filterOf(appointments[0], 'gte', 'appointments.appointment_at')?.[1], filterOf(appointments[0], 'lt', 'appointments.appointment_at')?.[1]]).toEqual([
+      'user-1',
+      '2026-09-30T15:00:00.000Z',
+      '2026-10-31T15:00:00.000Z',
+    ]);
+    expect(appointments[0].columns).toBe('departed_at, arrived_at, appointments!inner(appointment_at, exception_kind)');
   });
 
   it('기록이 없는 달은 달력만', async () => {
@@ -91,6 +112,11 @@ describe('R02 월간', () => {
   it('읽기 실패는 그대로 던짐 (화면이 LoadError)', async () => {
     reply((c) => (c.table === 'daily_records' ? { error: { message: 'boom' } } : { data: [] }));
     await expect(getMonth(2026, 10)).rejects.toMatchObject({ message: 'boom' });
+  });
+
+  it('일정을 못 읽어도 그대로 던짐 — 일정 없는 날로 잘못 셈하지 않음', async () => {
+    reply((c) => (c.table === 'appointment_participants' ? { error: { message: 'no-appts' } } : { data: [] }));
+    await expect(getMonth(2026, 10)).rejects.toMatchObject({ message: 'no-appts' });
   });
 });
 
@@ -125,6 +151,25 @@ describe('R02 주간', () => {
     expect([filterOf(records, 'gte', 'record_date')?.[1], filterOf(records, 'lte', 'record_date')?.[1]]).toEqual(['2026-10-12', '2026-10-25']);
     const alarms = onlyCalls('alarms')[0];
     expect([filterOf(alarms, 'eq', 'alarm_type')?.[1], filterOf(alarms, 'eq', 'is_enabled')?.[1], filterOf(alarms, 'eq', 'user_id')?.[1]]).toEqual(['WAKE', true, 'user-1']);
+  });
+
+  it('날짜 줄의 점은 월간처럼 그 주 일정의 출발 · 도착도 봄 (기록 행이 없어도 출발만 있으면 점, 이번만 지운 일정은 점 아님)', async () => {
+    reply((c) => {
+      if (c.table === 'appointment_participants') {
+        return {
+          data: [
+            { departed_at: '2026-10-21T00:00:00Z', arrived_at: null, appointments: { appointment_at: '2026-10-21T01:00:00Z', exception_kind: null } }, // 수 21
+            { departed_at: null, arrived_at: null, appointments: { appointment_at: '2026-10-22T01:00:00Z', exception_kind: 'CANCELED' } }, // 목 22
+          ],
+        };
+      }
+      return undefined;
+    });
+    const w = await getWeek(new Date('2026-10-21T03:00:00Z'));
+    expect(w.strip.map((d) => d.recorded)).toEqual([false, false, true, false, false, false, false]);
+    const appointments = onlyCalls('appointment_participants');
+    expect(appointments).toHaveLength(1);
+    expect([filterOf(appointments[0], 'gte', 'appointments.appointment_at')?.[1], filterOf(appointments[0], 'lt', 'appointments.appointment_at')?.[1]]).toEqual(['2026-10-18T15:00:00.000Z', '2026-10-25T15:00:00.000Z']);
   });
 
   it('오늘 기상 확인 전이면 기록 대기, 앞 주 기록이 없으면 견주지 않음, 코칭 일기가 없으면 빈 글자', async () => {

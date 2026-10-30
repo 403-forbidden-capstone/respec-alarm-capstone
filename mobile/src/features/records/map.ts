@@ -6,7 +6,7 @@ import { dayKey, formatDateShort, josa, minutesBetween, startOfDay } from '@/lib
 import type { Enums, Tables, TablesUpdate } from '@/types/database';
 import { levelOfIntensity, levelOfSoundKey, levelOfVoiceTone } from '@shared/calc/intensity.ts';
 
-import { wakeScore, type DayFacts, type WakeRow } from './summary';
+import { NO_APPOINTMENTS, wakeScore, type AppointmentCounts, type DayFacts, type WakeRow } from './summary';
 import type { Suggestion, SuggestionChange, TimelineRow } from './types';
 
 // ---------------------------------------------------------------------------
@@ -19,12 +19,36 @@ export type RecordRow = Pick<
 >;
 export type JournalDayRow = Pick<Tables<'daily_journals'>, 'record_date' | 'coaching_insight'>;
 
-// 그날 기록 → 달력 점을 정하는 사실 (summary.ts dayMark에 넘김). 행이 없으면 일기만 봄
-export function factsOf(record: RecordRow | undefined, hasJournal: boolean): DayFacts {
+// 그날 일정과 그 출발 · 도착 기록 — appointment_participants(내 참여 조건) × appointments. 달력 점이 "그날 있어야 할 기록"을 셈 (D27 C)
+export type AppointmentDayRow = Pick<Tables<'appointment_participants'>, 'departed_at' | 'arrived_at'> & {
+  appointments: Pick<Tables<'appointments'>, 'appointment_at' | 'exception_kind'>;
+};
+
+// 일정 행 → 날짜(YYYY-MM-DD, 한국 시간)별 일정 · 출발 · 도착 수. 이번만 지운 회차(exception_kind CANCELED)는 그날 일정이 아니라서 뺌
+//   (지워도 참여 조건 행은 남으므로 읽은 뒤 여기서 거름). 약속 시각을 못 읽는 행도 뺌
+export function appointmentCountsByDay(rows: readonly AppointmentDayRow[]): Map<string, AppointmentCounts> {
+  const byDay = new Map<string, AppointmentCounts>();
+  for (const row of rows) {
+    if (row.appointments.exception_kind === 'CANCELED') continue;
+    const at = dbTimeMs(row.appointments.appointment_at);
+    if (Number.isNaN(at)) continue;
+    const key = dayKey(new Date(at));
+    const counts = byDay.get(key) ?? { total: 0, departed: 0, arrived: 0 };
+    counts.total += 1;
+    if (row.departed_at != null) counts.departed += 1;
+    if (row.arrived_at != null) counts.arrived += 1;
+    byDay.set(key, counts);
+  }
+  return byDay;
+}
+
+// 그날 기록 → 달력 점을 정하는 사실 (summary.ts dayMark에 넘김). 행이 없으면 일기만 봄. appointments = 그날 일정과 출발 · 도착 수 (안 넘기면 일정 없는 날)
+export function factsOf(record: RecordRow | undefined, hasJournal: boolean, appointments: AppointmentCounts = NO_APPOINTMENTS): DayFacts {
   const woke = record?.wake_confirmed_at != null;
-  const prepared = record?.actual_prepare_minutes != null;
-  const other = record != null && (record.sleep_at != null || record.wake_reported_at != null || record.routine_done_rate != null || record.sleep_satisfaction != null || record.condition_note != null);
-  return { woke, prepared, journal: hasJournal, any: woke || prepared || other };
+  const other =
+    record != null &&
+    (record.actual_prepare_minutes != null || record.sleep_at != null || record.wake_reported_at != null || record.routine_done_rate != null || record.sleep_satisfaction != null || record.condition_note != null);
+  return { woke, journal: hasJournal, any: woke || other, appointments };
 }
 
 // 주간 요약의 한 줄 — 기상 확인(daily_records)이 있고 그날 켜진 기상 알람이 있어 점수를 낼 수 있는 날

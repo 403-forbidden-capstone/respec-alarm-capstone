@@ -26,6 +26,11 @@ describe('R02 월간', () => {
     const day = (n: number) => m.days[n - 1];
     expect(day(21).mark).toBe('done'); // 수
     expect(day(18).mark).toBe('partial'); // 일
+    // 평일은 수업 + 기상 확인 + 집 출발 + 도착이 다 있어 완료, 주말은 일정 없이 직접 입력 한 줄뿐이라 일부 (D27 C — 목업 기록은 그대로)
+    const marks = Object.fromEntries(m.days.filter((d) => d.day < 22).map((d) => [d.day, d.mark]));
+    const weekend = [3, 4, 10, 11, 17, 18];
+    for (const [n, mark] of Object.entries(marks)) expect([n, mark]).toEqual([n, weekend.includes(Number(n)) ? 'partial' : 'done']);
+    expect(Object.keys(marks)).toHaveLength(21);
     expect([day(22).isToday, day(22).mark]).toEqual([true, 'none']); // 기상 확인 전
     expect([day(23).isFuture, day(23).mark]).toEqual([true, 'none']);
   });
@@ -38,7 +43,7 @@ describe('R02 월간', () => {
     expect(april.days.some((d) => d.isFuture)).toBe(false);
   });
 
-  it('달력에 점이 있는 날은 일간을 열면 기록이 있음 (점 규칙 markOf는 D27이 열려 있어 그대로)', async () => {
+  it('달력에 점이 있는 날은 일간을 열면 기록이 있음 (점 규칙 markOf = D27 C)', async () => {
     const m = await getMonth(2025, 5);
     for (const d of m.days.filter((x) => x.mark !== 'none')) {
       const record = await getDay(d.date);

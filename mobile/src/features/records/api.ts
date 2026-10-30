@@ -14,7 +14,7 @@ import { pastDay } from '@/mocks/records';
 import { leadingBlanks, monthDays, monthTitle, weekDays, weekRelative, weekTitle } from './calendar';
 import * as real from './real';
 import { editBounds, shiftLog } from './suggestion';
-import { buildWeekSummary, dayMark, wakeScore, type WakeRow } from './summary';
+import { buildWeekSummary, dayMark, NO_APPOINTMENTS, wakeScore, type WakeRow } from './summary';
 import type { DayMark, DayRecord, MonthRecord, Suggestion, WeekRecord, WeekSummary } from './types';
 
 // 기록 화면의 오늘 — 목업은 시나리오 시각(아침 · 전날 밤)과 상관없이 5월 22일
@@ -24,14 +24,20 @@ const today = () => kst(TODAY, 0);
 export const recordToday = () => (isMock() ? today() : real.recordToday());
 
 // 그날 기록 표시 — 목업은 2025년 5월만 있음: 지난 평일 기록 완료 · 주말 일부 기록, 오늘은 기상 확인 · 일기 뒤에 완료
-// 규칙은 summary.ts dayMark (실데이터도 같은 함수). 목업 날의 기록(기상 확인 · 집 출발 · 직접 입력 한 줄)을 그 규칙에 넘김
+// 규칙은 summary.ts dayMark (실데이터도 같은 함수, D27 C). 목업 날의 기록(기상 확인 · 그날 약속 · 집 출발 · 도착 · 직접 입력 한 줄)을 그 규칙에 넘김
+//   평일은 수업 1개 + 기상 확인 + 집 출발 + 도착이 다 있어 완료, 주말은 일정 없이 직접 입력 한 줄만 있어 일부 (목업 데이터를 고치지 않아도 같은 모양)
 function markOf(date: Date): DayMark {
   const { year, month, day } = dateParts(date);
   if (year !== 2025 || month !== 5) return 'none';
-  if (day === TODAY) return dayMark({ woke: db.me.wakeAt != null, prepared: false, journal: db.journalWritten, any: false }, true);
+  if (day === TODAY) return dayMark({ woke: db.me.wakeAt != null, journal: db.journalWritten, any: false, appointments: NO_APPOINTMENTS }, true);
   const p = pastDay(date);
   if (!p) return 'none';
-  return dayMark({ woke: p.wake != null, prepared: p.actual.some(([, label]) => label === '집 출발'), journal: false, any: p.actual.length > 0 }, false);
+  const appointments = {
+    total: p.appointment ? 1 : 0,
+    departed: p.actual.some(([, label]) => label === '집 출발') ? 1 : 0,
+    arrived: p.actual.some(([, label]) => label.startsWith('도착')) ? 1 : 0, // '도착 · 지각 아님' · '도착 · N분 지각'
+  };
+  return dayMark({ woke: p.wake != null, journal: false, any: p.actual.length > 0, appointments }, false);
 }
 
 // 월간 (R02) — 실데이터는 daily_records.record_date로 그달을 읽음. 목업에 없는 달은 기록 없이 달력만

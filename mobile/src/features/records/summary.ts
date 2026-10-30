@@ -1,6 +1,6 @@
 // R02 기록 계산 — 점수 · 목표 기상 · 달력 점 · 주간 요약. 순수 함수 (시험: __tests__/summary.test.ts)
 // 가짜 데이터(api.ts)와 실데이터(real.ts)가 같은 함수를 써서 두 모드의 뜻이 어긋나지 않게 함
-//   점수식(D26) · 달력 점 기준(D27)은 열린 안건이라 목업 계산 그대로 — 바꾸려면 이 파일만 고침
+//   점수식(D26)은 열린 안건이라 목업 계산 그대로, 달력 점은 D27 C(10/29 투표) 기준 — 바꾸려면 이 파일만 고침
 import { addMinutes, dateParts, isSameDay } from '@/lib/format';
 
 import type { DayMark, WeekBar, WeekSummary } from './types';
@@ -19,16 +19,25 @@ export function wakeScore(wakeMinute: number, targetMinute: number): number {
 
 export const isGoalScore = (score: number) => score >= GOAL_SCORE;
 
-// 달력 점을 정하는 그날의 기록 — woke = 기상 확인이 있음, prepared = 준비 시작 · 출발까지 이어진 준비 실측이 있음, journal = 그날 일기가 있음,
-// any = 위 말고도 뭐든 기록이 하나라도 있음 (목업: 주말에 직접 입력한 한 줄)
-export type DayFacts = { woke: boolean; prepared: boolean; journal: boolean; any: boolean };
+// 그날 내 일정(이번만 지운 회차는 뺌)과 그 일정들의 출발 · 도착 기록 수 — total = 일정 수, departed · arrived = 출발 · 도착 기록이 있는 일정 수
+export type AppointmentCounts = { total: number; departed: number; arrived: number };
+export const NO_APPOINTMENTS: AppointmentCounts = { total: 0, departed: 0, arrived: 0 };
 
-// 지난 날은 기상 확인 + 준비 실측이 다 있으면 완료, 일부만 있으면 일부, 없으면 없음. 오늘은 하루가 안 끝났으니 기상 확인(또는 일기)만 있어도 완료
-//   (목업 markOf와 같은 뜻 — 평일은 완료, 주말은 일부. D27 열림)
+// 달력 점을 정하는 그날의 기록 — woke = 기상 확인이 있음, journal = 그날 일기가 있음, appointments = 그날 일정과 출발 · 도착 기록 수,
+// any = 위 말고도 뭐든 기록이 하나라도 있음 (목업: 주말에 직접 입력한 한 줄 · 준비 실측 · 수면 기록 등)
+export type DayFacts = { woke: boolean; journal: boolean; any: boolean; appointments: AppointmentCounts };
+
+// 지난 날은 그날 있어야 할 기록이 다 있으면 완료 (D27 C, 10/29 투표) — 일정 있는 날은 기상 확인 + 일정마다 출발 · 도착, 일정 없는 날은 기상 확인만.
+//   일부만 있으면 일부, 기록이 하나도 없으면 없음 (일정만 있고 기록이 없는 날도 없음 — 점은 기록이 있어야 찍힘)
+//   L6 안건후보: 일정이 여럿인 날 기본안 = 일정마다 출발 · 도착이 다 있어야 완료 (하나라도 빠지면 일부)
+// 오늘은 하루가 안 끝났으니 기상 확인(또는 일기)만 있어도 완료 — D27은 지난 날 기준만 정함
+//   L6 안건후보: 오늘 규칙 기본안 = 지금 규칙 그대로 (기상 확인이나 일기만 있어도 완료)
 export function dayMark(facts: DayFacts, isToday: boolean): DayMark {
-  const done = isToday ? facts.woke || facts.journal : facts.woke && facts.prepared;
+  const { total, departed, arrived } = facts.appointments;
+  const complete = facts.woke && departed >= total && arrived >= total; // 일정이 없으면 total이 0이라 기상 확인만 봄
+  const done = isToday ? facts.woke || facts.journal : complete;
   if (done) return 'done';
-  return facts.any || facts.woke || facts.journal ? 'partial' : 'none';
+  return facts.any || facts.woke || facts.journal || departed > 0 || arrived > 0 ? 'partial' : 'none';
 }
 
 // 주간 요약의 한 줄 — 기상 확인이 있고 점수를 낼 수 있는 날. wake = 그날 0시부터 분

@@ -4,11 +4,12 @@ import { addDays, dayKey, formatTime } from '@/lib/format';
 import { kst } from '@/mocks/data';
 
 import { weekDays } from '../calendar';
-import { buildWeekSummary, dayMark, GOAL_SCORE, isGoalScore, SCORE_LATE, SCORE_ON_TIME, wakeScore, type DayFacts } from '../summary';
+import { buildWeekSummary, dayMark, GOAL_SCORE, isGoalScore, NO_APPOINTMENTS, SCORE_LATE, SCORE_ON_TIME, wakeScore, type DayFacts } from '../summary';
 
-const facts = (f: Partial<DayFacts> = {}): DayFacts => ({ woke: false, prepared: false, journal: false, any: false, ...f });
+const facts = (f: Partial<DayFacts> = {}): DayFacts => ({ woke: false, journal: false, any: false, appointments: NO_APPOINTMENTS, ...f });
+const appts = (total: number, departed: number, arrived: number) => ({ total, departed, arrived });
 
-// 가짜(api.ts)와 실데이터(real.ts)가 같이 쓰는 계산 — 점수식(D26) · 달력 점(D27)은 목업 뜻 그대로
+// 가짜(api.ts)와 실데이터(real.ts)가 같이 쓰는 계산 — 점수식(D26)은 목업 뜻 그대로, 달력 점은 D27 C(그날 있어야 할 기록)
 describe('wakeScore — 기상 알람 + 10분 안이면 88점, 넘으면 61점', () => {
   it('경계는 10분까지 포함', () => {
     expect(wakeScore(435, 435)).toBe(SCORE_ON_TIME);
@@ -25,26 +26,38 @@ describe('wakeScore — 기상 알람 + 10분 안이면 88점, 넘으면 61점',
   });
 });
 
-describe('dayMark — 달력 점', () => {
-  it('지난 날: 기상 확인 + 준비 실측이 다 있으면 완료', () => {
-    expect(dayMark(facts({ woke: true, prepared: true, any: true }), false)).toBe('done');
+describe('dayMark — 달력 점 (D27 C: 그날 있어야 할 기록)', () => {
+  // 표: 일정 수 · 출발 · 도착 · 기상 확인 · 일기 → 지난 날 점
+  it.each([
+    // 일정 없는 날 — 기상 확인만 있으면 완료
+    ['일정 없음 · 기상 확인만', { woke: true, any: true }, 'done'],
+    ['일정 없음 · 기상 확인 + 일기', { woke: true, journal: true, any: true }, 'done'],
+    ['일정 없음 · 기상 확인 없이 직접 입력 한 줄만', { any: true }, 'partial'],
+    ['일정 없음 · 일기만', { journal: true }, 'partial'],
+    ['일정 없음 · 기록 없음', {}, 'none'],
+    // 일정 1개
+    ['일정 1 · 기상 확인만', { woke: true, any: true, appointments: appts(1, 0, 0) }, 'partial'],
+    ['일정 1 · 기상 확인 + 출발만', { woke: true, any: true, appointments: appts(1, 1, 0) }, 'partial'],
+    ['일정 1 · 기상 확인 + 도착만', { woke: true, any: true, appointments: appts(1, 0, 1) }, 'partial'],
+    ['일정 1 · 기상 확인 + 출발 + 도착', { woke: true, any: true, appointments: appts(1, 1, 1) }, 'done'],
+    ['일정 1 · 출발 + 도착인데 기상 확인 없음', { any: true, appointments: appts(1, 1, 1) }, 'partial'],
+    ['일정 1 · 출발만 있고 daily_records 없음', { appointments: appts(1, 1, 0) }, 'partial'],
+    ['일정 1 · 일기만', { journal: true, appointments: appts(1, 0, 0) }, 'partial'],
+    ['일정 1 · 기록 없음', { appointments: appts(1, 0, 0) }, 'none'],
+    // 일정 2개 — 일정마다 출발 · 도착이 다 있어야 완료
+    ['일정 2 · 둘 다 출발 + 도착', { woke: true, any: true, appointments: appts(2, 2, 2) }, 'done'],
+    ['일정 2 · 출발은 둘 다, 도착은 하나만', { woke: true, any: true, appointments: appts(2, 2, 1) }, 'partial'],
+    ['일정 2 · 하나만 출발 + 도착', { woke: true, any: true, appointments: appts(2, 1, 1) }, 'partial'],
+  ] as [string, Partial<DayFacts>, string][])('지난 날: %s → %s', (_name, f, mark) => {
+    expect(dayMark(facts(f), false)).toBe(mark);
   });
 
-  it('지난 날: 일부만 있으면 일부 (기상 확인만 · 직접 입력 한 줄만 · 일기만)', () => {
-    expect(dayMark(facts({ woke: true, any: true }), false)).toBe('partial');
-    expect(dayMark(facts({ prepared: true, any: true }), false)).toBe('partial');
-    expect(dayMark(facts({ any: true }), false)).toBe('partial');
-    expect(dayMark(facts({ journal: true }), false)).toBe('partial'); // 일기가 있는 날은 기록 있음
-  });
-
-  it('지난 날: 아무것도 없으면 없음', () => {
-    expect(dayMark(facts(), false)).toBe('none');
-  });
-
-  it('오늘: 하루가 안 끝났으니 기상 확인만 있어도 완료, 일기만 있어도 완료 (목업 오늘 규칙)', () => {
+  it('오늘: 하루가 안 끝났으니 기상 확인만 있어도 완료, 일기만 있어도 완료 (일정이 있어도 같음)', () => {
     expect(dayMark(facts({ woke: true }), true)).toBe('done');
     expect(dayMark(facts({ journal: true }), true)).toBe('done');
-    expect(dayMark(facts({ prepared: true, any: true }), true)).toBe('partial');
+    expect(dayMark(facts({ woke: true, appointments: appts(1, 0, 0) }), true)).toBe('done');
+    expect(dayMark(facts({ any: true }), true)).toBe('partial'); // 기상 확인 · 일기가 아닌 기록만
+    expect(dayMark(facts({ appointments: appts(1, 1, 0) }), true)).toBe('partial');
     expect(dayMark(facts(), true)).toBe('none');
   });
 });

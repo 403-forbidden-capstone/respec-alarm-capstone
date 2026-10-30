@@ -8,6 +8,7 @@ import {
   actualRows,
   recordRows,
   alarmPatch,
+  appointmentCountsByDay,
   factsOf,
   isApplicableValue,
   isPlanned,
@@ -18,6 +19,7 @@ import {
   toSuggestion,
   valueText,
   wakeRowsOf,
+  type AppointmentDayRow,
   type EventRow,
   type PlannedAlarmRow,
   type RecordRow,
@@ -40,21 +42,51 @@ const record = (date: string, patch: Partial<RecordRow> = {}): RecordRow => ({
 });
 
 describe('factsOf — daily_records 한 줄 → 달력 점 사실', () => {
-  it('기상 확인 · 준비 실측 · 그 밖의 기록을 나눠 봄', () => {
-    expect(factsOf(record('2026-10-19', { wake_confirmed_at: '2026-10-18T22:30:00Z', actual_prepare_minutes: 40 }), false)).toEqual({
+  it('기상 확인 · 그 밖의 기록(준비 실측 포함)을 나눠 봄, 일정 수는 그대로 실음', () => {
+    expect(factsOf(record('2026-10-19', { wake_confirmed_at: '2026-10-18T22:30:00Z', actual_prepare_minutes: 40 }), false, { total: 1, departed: 1, arrived: 0 })).toEqual({
       woke: true,
-      prepared: true,
       journal: false,
       any: true,
+      appointments: { total: 1, departed: 1, arrived: 0 },
     });
-    expect(factsOf(record('2026-10-17', { wake_confirmed_at: '2026-10-17T00:30:00Z' }), false)).toMatchObject({ woke: true, prepared: false, any: true });
-    expect(factsOf(record('2026-10-17', { condition_note: '피곤' }), false)).toMatchObject({ woke: false, prepared: false, any: true });
+    expect(factsOf(record('2026-10-17', { wake_confirmed_at: '2026-10-17T00:30:00Z' }), false)).toMatchObject({ woke: true, any: true });
+    expect(factsOf(record('2026-10-17', { condition_note: '피곤' }), false)).toMatchObject({ woke: false, any: true });
+    expect(factsOf(record('2026-10-17', { actual_prepare_minutes: 30 }), false)).toMatchObject({ woke: false, any: true });
   });
 
-  it('행이 없거나 빈 행이면 기록 없음, 일기만 있어도 일기 표시', () => {
-    expect(factsOf(undefined, false)).toEqual({ woke: false, prepared: false, journal: false, any: false });
+  it('행이 없거나 빈 행이면 기록 없음 · 일정 없는 날, 일기만 있어도 일기 표시', () => {
+    expect(factsOf(undefined, false)).toEqual({ woke: false, journal: false, any: false, appointments: { total: 0, departed: 0, arrived: 0 } });
     expect(factsOf(record('2026-10-17'), false).any).toBe(false);
     expect(factsOf(undefined, true).journal).toBe(true);
+  });
+});
+
+describe('appointmentCountsByDay — 일정 행 → 날짜별 일정 · 출발 · 도착 수', () => {
+  const row = (at: string, patch: Partial<AppointmentDayRow['appointments']> & { departed_at?: string | null; arrived_at?: string | null } = {}): AppointmentDayRow => ({
+    departed_at: patch.departed_at ?? null,
+    arrived_at: patch.arrived_at ?? null,
+    appointments: { appointment_at: at, exception_kind: patch.exception_kind ?? null },
+  });
+
+  it('한국 시간 날짜로 묶음 — UTC로는 전날이어도 한국 시간 날짜에 셈', () => {
+    const counts = appointmentCountsByDay([
+      row('2026-10-18T15:30:00+00:00', { departed_at: '2026-10-18T23:00:00Z', arrived_at: '2026-10-19T00:10:00Z' }), // 10/19 0:30
+      row('2026-10-19T08:00:00.123456+00:00', { departed_at: '2026-10-19T07:00:00Z' }), // 10/19 17:00
+      row('2026-10-19T15:00:00Z'), // 10/20 0:00 — 다음 날
+    ]);
+    expect(counts.get('2026-10-19')).toEqual({ total: 2, departed: 2, arrived: 1 });
+    expect(counts.get('2026-10-20')).toEqual({ total: 1, departed: 0, arrived: 0 });
+    expect(counts.get('2026-10-18')).toBeUndefined();
+  });
+
+  it('이번만 지운 회차(CANCELED)는 일정이 아님 — 고친 회차(EDITED)는 일정', () => {
+    const counts = appointmentCountsByDay([row('2026-10-19T01:00:00Z', { exception_kind: 'CANCELED' }), row('2026-10-19T03:00:00Z', { exception_kind: 'EDITED' })]);
+    expect(counts.get('2026-10-19')).toEqual({ total: 1, departed: 0, arrived: 0 });
+    expect(appointmentCountsByDay([row('2026-10-19T01:00:00Z', { exception_kind: 'CANCELED', departed_at: '2026-10-19T00:00:00Z' })]).size).toBe(0);
+  });
+
+  it('약속 시각을 못 읽는 행은 거름', () => {
+    expect(appointmentCountsByDay([row('모름')]).size).toBe(0);
   });
 });
 

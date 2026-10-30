@@ -15,6 +15,7 @@ import { leadingBlanks, monthDays, monthTitle, weekDays, weekRelative, weekTitle
 import {
   actualRows,
   alarmPatch,
+  appointmentCountsByDay,
   factsOf,
   isApplicableValue,
   isPlanned,
@@ -30,7 +31,7 @@ import {
   type SuggestionRow,
   type SuggestionTarget,
 } from './map';
-import { buildWeekSummary, dayMark } from './summary';
+import { buildWeekSummary, dayMark, NO_APPOINTMENTS, type AppointmentCounts } from './summary';
 import type { DayRecord, MonthRecord, Suggestion, SuggestionStatus, TimelineRow, WeekRecord } from './types';
 
 // 기록 화면의 오늘 (한국 시간 0시)
@@ -55,6 +56,19 @@ async function loadJournalDays(userId: string, fromKey: string, toKey: string): 
   const { data, error } = await supabase.from('daily_journals').select('record_date, coaching_insight').eq('user_id', userId).gte('record_date', fromKey).lte('record_date', toKey);
   if (error) throw error;
   return data ?? [];
+}
+
+// 두 날(한국 시간 하루, 양 끝 포함) 사이의 내 일정과 출발 · 도착 기록을 날짜별로 센 것 — 달력 점의 "그날 있어야 할 기록" (D27 C).
+//   한 번의 읽기: 내 참여 조건(RLS로 내 것만) × 약속 시각이 그 구간인 약속. 이번만 지운 회차는 map.ts가 거름
+async function loadAppointmentCounts(userId: string, firstDay: Date, lastDay: Date): Promise<Map<string, AppointmentCounts>> {
+  const { data, error } = await supabase
+    .from('appointment_participants')
+    .select('departed_at, arrived_at, appointments!inner(appointment_at, exception_kind)')
+    .eq('user_id', userId)
+    .gte('appointments.appointment_at', startOfDay(firstDay).toISOString())
+    .lt('appointments.appointment_at', addDays(startOfDay(lastDay), 1).toISOString());
+  if (error) throw error;
+  return appointmentCountsByDay(data ?? []);
 }
 
 // 구간 안 켜진 기상 알람 시각 (목표 시각 — 하루의 첫 기상 알람)
@@ -112,14 +126,15 @@ async function loadPlannedRows(userId: string, day: Date, nowMs: number | null):
 // R02 월간 · 주간 · 일간
 // ---------------------------------------------------------------------------
 
-// 월간 — daily_records(그 달) + 일기 있는 날로 달력 점. 오늘 카드의 기록 수는 오늘 alarm_events
+// 월간 — daily_records(그 달) + 일기 있는 날 + 그 달 일정의 출발 · 도착으로 달력 점 (D27 C, 읽기는 달마다 한 번씩). 오늘 카드의 기록 수는 오늘 alarm_events
 export async function getMonth(year: number, month: number): Promise<MonthRecord> {
   const userId = await requireUserId();
   const t = recordToday();
   const days = monthDays(year, month);
-  const [records, journals, todayRows, todayJournal] = await Promise.all([
+  const [records, journals, appointments, todayRows, todayJournal] = await Promise.all([
     loadRecords(userId, dayKey(days[0]), dayKey(days[days.length - 1])),
     loadJournalDays(userId, dayKey(days[0]), dayKey(days[days.length - 1])),
+    loadAppointmentCounts(userId, days[0], days[days.length - 1]),
     loadActualRows(userId, t),
     hasJournal(userId, dayKey(t)),
   ]);
@@ -136,6 +151,7 @@ export async function getMonth(year: number, month: number): Promise<MonthRecord
           factsOf(
             records.find((r) => r.record_date === key),
             journals.some((j) => j.record_date === key),
+            appointments.get(key) ?? NO_APPOINTMENTS,
           ),
           isToday,
         ),
@@ -156,10 +172,12 @@ export async function getWeek(anyDay: Date): Promise<WeekRecord> {
   const relative = weekRelative(anyDay, t);
   const fromKey = dayKey(before[0]);
   const toKey = dayKey(days[6]);
-  const [records, journals, wakeAlarmAts] = await Promise.all([
+  // 날짜 줄의 점은 월간 달력의 점이 있는 날과 같아야 해서, 월간처럼 그 주 일정의 출발 · 도착도 읽음 (출발 · 도착만 있는 날도 기록 있음)
+  const [records, journals, wakeAlarmAts, appointments] = await Promise.all([
     loadRecords(userId, fromKey, toKey),
     loadJournalDays(userId, fromKey, toKey),
     loadWakeAlarmAts(userId, before[0], addDays(days[6], 1)),
+    loadAppointmentCounts(userId, days[0], days[6]),
   ]);
   const todayKey = dayKey(t);
   const thisWeekJournals = journals.filter((j) => j.record_date >= dayKey(days[0]));
@@ -171,6 +189,7 @@ export async function getWeek(anyDay: Date): Promise<WeekRecord> {
       const facts = factsOf(
         records.find((r) => r.record_date === key),
         journals.some((j) => j.record_date === key),
+        appointments.get(key) ?? NO_APPOINTMENTS,
       );
       return {
         date,

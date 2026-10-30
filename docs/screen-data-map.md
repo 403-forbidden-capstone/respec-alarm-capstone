@@ -217,7 +217,7 @@
 - 단계 알람: `alarms`(`routine_id` · `step_order`) — DB → 예약 — 폰. 루틴을 끄거나 단계(알람)를 빼면 알람을 지우지 않고 `is_enabled` false (지우면 울림 · 확인 기록 `alarm_events`가 같이 사라짐). 다시 켜면 같은 줄(루틴 · 단계 번호가 하나뿐)을 켬. 폰 맞추기는 저장이 중간에 실패해도 함
 
 ### R02 나의 기록
-- 월간: `daily_records`(그 달) — DB. 달력 점 "완료"(지난 날) = 기상 확인 `wake_confirmed_at` + 준비 실측 `actual_prepare_minutes` (출발 입력 때 `recordParticipantTimes`가 씀). 서버의 예상 준비시간 P80(`v_prepare_time_stats`)도 이 값을 읽음
+- 월간: `daily_records`(그 달) + `appointment_participants`(그 달 내 일정의 `departed_at` · `arrived_at`, 이번만 지운 회차 `exception_kind = CANCELED` 제외) — DB. 달력 점 "완료"(지난 날) = **그날 있어야 할 기록이 다 찬 날** (D27 C): 일정 없는 날은 기상 확인 `wake_confirmed_at`만, 일정 있는 날은 기상 확인 + 일정마다 출발 · 도착. 하나라도 있으면 "일부". 오늘은 기상 확인이나 일기만 있어도 완료(D27은 지난 날 기준). 서버의 예상 준비시간은 `daily_records.actual_prepare_minutes` 최근 30건을 읽음
 - 주간: `daily_records.wake_confirmed_at` + `appointment_participants.is_late` — DB → 평균 기상 · 목표 기상률은 앱에서 계산
 - 일간: 설정값 `alarms`(켜진 것만 — 일정을 통째로 꺼 둔 날은 도착 목표도 없음) + 실제 `alarm_events` — DB
 - 날짜 이동 (D48): 월간 · 주간 날짜를 누르면 그날 일간, 일간 이전 · 다음 · 오늘, 일간에서 그날 일기(A03). 점수 · 달력 점 규칙은 D26 · D27
