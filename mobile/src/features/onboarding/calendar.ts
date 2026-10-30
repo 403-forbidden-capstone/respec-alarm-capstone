@@ -49,6 +49,8 @@ export function candidatesFromEvents(events: readonly CalendarEventLike[]): Impo
     const startMinutes = minuteOfDay(start);
     const endMinutes = minuteOfDay(end);
     if (dateParts(start).day !== dateParts(end).day || endMinutes <= startMinutes) continue; // 자정을 넘거나 끝이 시작보다 빠름
+    // 반복 규칙이 붙었는데 주간 간격 1이 아니면(매일 · 격주 · 월간 · 연간) 수업 후보가 아님 — 매일 반복이 14건이 와서 "같은 요일 2번"으로 오판되지 않게 이 일정은 통째로 뺌
+    if (e.recurrenceRule?.frequency && !isWeeklyRule(e)) continue;
     const place = e.location?.replace(/\s+/g, ' ').trim() || null;
     const weekday = ORDER[(dateParts(start).weekdayIndex + 6) % 7]; // 0 = 일요일 → 월요일부터 순서로
     const key = `${title}|${startMinutes}|${endMinutes}|${place ?? ''}`;

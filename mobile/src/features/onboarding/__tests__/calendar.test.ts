@@ -85,3 +85,18 @@ describe('toBatch', () => {
     expect(toBatch([])).toEqual({ source: 'calendar', classes: [] });
   });
 });
+
+describe('candidatesFromEvents — 반복 종류', () => {
+  it('매일 반복(14건)은 같은 요일 2번으로 오판하지 않고 후보에서 뺌 — 격주 · 월간도', () => {
+    const daily = Array.from({ length: 14 }, (_, i) => {
+      const md = i < 7 ? `11-0${i + 1}` : `11-${String(i + 1).padStart(2, '0')}`;
+      return ev({ title: '매일 약', d: md, s: '08:00', e: '08:10', recurrenceRule: { frequency: 'daily', interval: 1 } });
+    });
+    const monthly = [ev({ title: '월간 모임', d: '11-02', s: '19:00', e: '20:00', recurrenceRule: { frequency: 'monthly' } }), ev({ title: '월간 모임', d: '11-09', s: '19:00', e: '20:00', recurrenceRule: { frequency: 'monthly' } })];
+    expect(candidatesFromEvents([...daily, ...monthly])).toEqual([]);
+  });
+
+  it('규칙 없는 복사 일정은 그대로 후보 (같은 요일 2번)', () => {
+    expect(candidatesFromEvents([ev({ d: '11-03', s: '09:00', e: '10:00' }), ev({ d: '11-10', s: '09:00', e: '10:00' })])).toHaveLength(1);
+  });
+});

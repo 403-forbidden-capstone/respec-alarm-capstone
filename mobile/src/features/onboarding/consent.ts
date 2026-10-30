@@ -24,7 +24,7 @@ export const TIMETABLE_CALENDAR_CONSENT: ConsentItem = {
   key: 'timetable-calendar',
   title: '캘린더',
   reads: '고른 캘린더의 앞으로 2주 일정(제목 · 시각 · 장소)에서 매주 반복되는 수업',
-  doesNotRead: '고르지 않은 캘린더, 일정 메모 · 참석자 (확인한 수업만 저장)',
+  doesNotRead: '고르지 않은 캘린더, 일정 메모 · 참석자 (확인한 수업만 저장). 폰이 쓰기 권한도 같이 묻지만 일정을 바꾸지 않아요',
   friends: '안 보임',
 };
 

@@ -31,6 +31,8 @@ export function useCalendarImport(onBatch: (batch: ImportBatch) => void) {
     setPhase('idle');
   };
 
+  const busyRef = useRef(false); // 같은 프레임의 연타까지 막음 (phase는 렌더 값이라 늦음)
+
   async function load(ids: readonly string[]) {
     setPhase('loading');
     try {
@@ -40,11 +42,14 @@ export function useCalendarImport(onBatch: (batch: ImportBatch) => void) {
       setPhase('idle');
     } catch (e) {
       fail(e);
+    } finally {
+      busyRef.current = false;
     }
   }
 
   async function start() {
-    if (phase !== 'idle') return;
+    if (phase !== 'idle' || busyRef.current) return;
+    busyRef.current = true;
     setPhase('asking');
     try {
       const access = await ensureCalendarAccess();
@@ -70,6 +75,8 @@ export function useCalendarImport(onBatch: (batch: ImportBatch) => void) {
       setPhase('picking');
     } catch (e) {
       fail(e);
+    } finally {
+      busyRef.current = false;
     }
   }
 
@@ -94,6 +101,8 @@ export function useCalendarImport(onBatch: (batch: ImportBatch) => void) {
         toast('가져올 캘린더를 하나 이상 골라 주세요');
         return;
       }
+      if (busyRef.current) return;
+      busyRef.current = true;
       void load([...picked]);
     },
   };

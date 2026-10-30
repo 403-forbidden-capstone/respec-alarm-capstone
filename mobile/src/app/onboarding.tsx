@@ -80,7 +80,7 @@ export default function OnboardingScreen() {
   const homeStep = useHomeStep(profile, userId);
   const photoImport = usePhotoImport();
   const timetable = useTimetableStep(prepare.transport); // 수업은 '아침 준비'에서 고른 이동 수단으로 계산
-  const calendarImport = useCalendarImport(timetable.addImported);
+  const calendarImport = useCalendarImport(timetable.addImported); // 캘린더에서 가져온 수업도 같은 시간표 단계 줄로 들어감
   const importing = photoImport.reading || calendarImport.busy; // 사진을 읽거나 캘린더를 가져오는 동안 시간표 단계를 막음
   // 집 좌표가 없으면 서버가 출발지 '집'을 못 채워 이동시간을 못 구함 — 실데이터만 (가짜 데이터는 집 없이도 계산)
   const noHome = userId != null && !hasHome(homeStep.saved, profile);
