@@ -42,7 +42,7 @@ node --test "tools/sim-week/**/*.test.ts"
 | `adjust-runs.ts` | 위치 조정 표(집 150/200/300 · 목적지 100/150/300 · 지연 1/3/6 · 지각 +11/+5) |
 | `checks.ts` | 기능 확인 표(학습루프_기초_1030.md 5절 6줄 + 5b) |
 | `report.ts` `run.ts` | 보고서 · 실행기 |
-| `*.test.ts` | 시험 28건 (모델 호출 없음) |
+| `*.test.ts` | 시험 29건 (모델 호출 없음) |
 
 ## 되는 것 / 아직 안 하는 것
 
@@ -59,4 +59,4 @@ node --test "tools/sim-week/**/*.test.ts"
 - ~~`plan-core.ts` 준비 20분 이중 가산~~ — #269에서 고침. ~~`participantTimes` 도착 전 귀가 RETRACT~~ — #240 · #247에서 설계가 바뀜(귀가는 DB를 안 바꾸고 다음 이탈이 덮음).
 - `calc/prepare.ts`: 기록 1~4건이어도 개인 보정이 이미 적용되고(n:(n+10)) 출처 이름만 DEFAULT (L1, 의도일 수 있음)
 - `location/area.ts:28` `namesWholeSchool`: 대학교 분류에 한 낱말 이름("경영관")이면 학교 전체(CAMPUS 300m)로 분류 (L2, 카카오는 보통 "○○대학교 경영관"이라 영향 작음)
-- 새로 보인 것(기능 확인 표 · 밤 대화): `plan-core.ts:291-301` 깨우는 여유 · 잠귀 입력이 계산에 안 닿음(학습 기초 b 미머지) / `voice/fixes.ts:27` 대화 정정 DENY가 아직 안 됨(L2 PR 6 대기)
+- 새로 보인 것(대화): 기능 확인 표 3 · 5b(깨우는 여유 · 잠귀)는 #274(학습 기초 b)가 들어와 실제 값으로 판정됨 — 결과는 보고서 확인 / `voice/fixes.ts:27` 대화 정정 DENY가 아직 안 됨(L2 PR 6 대기)

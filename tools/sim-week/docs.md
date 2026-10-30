@@ -12,12 +12,12 @@
 | 이동 시간 | 출발 · 기상이 그만큼 이동. 길찾기(카카오) → 안 되면 같은 길 실측 3건↑ 중앙값 → 좌표 근사(확인 필요) | `route.ts` `resolveAutoTravel` | 카카오 대역: 인물 `api_estimate_min`(평소보다 짧게 나오는 사정) 그대로. 카카오가 켜져 있으니 실측은 안 쓰임(`learnedAt`이 모으기만 함) |
 | 준비 첫 값(온보딩 "일어나서 나가기까지") | 기록이 없을 때 기상~출발 = 이 값 (5~300분, 밖이면 50) | `plan-core.ts` `firstPrepareMinutes` | `prep_minutes`를 5분 단위로 (`app-state.ts onboardingPrepareOf`) |
 | 내 기록(최근 30건, 10~240분) | 준비 = 첫 값 + n/(n+10) × (내 P80 − 첫 값). 5건부터 출처 "내 기록 기반 N건", 4건까지 "배우는 중 N/5" | `calc/prepare.ts` `predictPrepare` · `prepareStatsOf` | 하루 기록 `actual_prepare_minutes`(출발 − max(실제 기상, 예정 기상))를 날마다 쌓음 → `learnedAt` |
-| 그날 두 번째 일정 | 기상 없음, 개인 보정 없음(기록 수와 상관없이 15분) | `plan-core.ts:291-294` | 카드 저장 때 그날 이미 저장된 기상 알람을 보고 다시 판단(서버 alarm-commit과 같음) |
+| 그날 두 번째 일정 | 기상 없음, 개인 보정 없음(기록 수와 상관없이 15분) | `plan-core.ts` computePlan의 withWake 분기 | 카드 저장 때 그날 이미 저장된 기상 알람을 보고 다시 판단(서버 alarm-commit과 같음) |
 | 반복 다음 회차 | 직전 회차 준비값 ±10분 안에서만 움직임 | `plan-core.ts` `clampPrepareToBound` · `roll.ts:182 · 240` | 인물 일정은 한 주 안에서 되풀이되지 않아 안 쓰임. 확인 표 2줄만 같은 입력으로 합성 |
 | 중요도 | 매우 중요(HIGH)면 강도 +1 | `calc/intensity.ts:37` | 인물이 말한 값 → 서버 키워드 사전(시험 · 면접 · 발표 …) → 기본 NORMAL |
 | 최근 4주 지각 수 | 2번 이상이면 강도 +1 (최대 강) | `calc/intensity.ts:37` | 앱이 지각이라 판정한(밤 대화 정정 반영) 도착 수 |
 | 직접 고른 준비 · 시각 | 그 값이 먼저(출처 MANUAL) | `plan-core.ts` `override` | 서버 질문 답("내일은 더 걸려요 +N분") → 앱이 자동 준비 + N을 직접 값으로 (`voice/real.ts prepareOf`와 같음) |
-| 잠귀 · 깨우는 여유 | (설계) 잠귀 깊음 → 강, 빠듯 · 보통 · 넉넉 = 0.7 · 0.8 · 0.9 분위수 | **지금 계산이 안 읽음**(학습 기초 b 미머지) | 기능 확인 표 3 · 5b가 이 빈틈을 봄 |
+| 잠귀 · 깨우는 여유 | 잠귀 깊음(HEAVY) → 강, 빠듯 · 보통 · 넉넉 = 기록의 0.7 · 0.8 · 0.9 분위수(매우 중요 일정은 한 단계 위) | `plan-core.ts` computePlan(#274가 `profile.wake_sensitivity` · `wake_margin`을 읽음) · `calc/prepare.ts` `personalPrepareOf` | `l1.ts`가 `profile.wakeSensitivity` · `wakeMargin`으로 넘김. 기능 확인 표 3 · 5b가 봄 |
 
 ### 학습이 알람을 바꾸는 길 (하네스에서 도는 한 바퀴)
 

@@ -33,7 +33,7 @@ export interface ChecksOutput {
 const PREPARE_DAILY_STEP_MAX = 10;
 const NIGHT_BEFORE = (a: AppAppt) => addMin(a.at, -12 * 60);
 
-async function planWith(o: { importance?: Importance; sameDayWake?: boolean; records?: readonly number[]; lateCount4w?: number; defaultPrepare?: number | null; prepareBound?: { around: number; within: number }; wakeSensitivity?: 'HEAVY' | 'NORMAL' }): Promise<PlanSummary> {
+async function planWith(o: { importance?: Importance; sameDayWake?: boolean; records?: readonly number[]; lateCount4w?: number; defaultPrepare?: number | null; prepareBound?: { around: number; within: number }; wakeSensitivity?: 'LIGHT' | 'NORMAL' | 'HEAVY'; wakeMargin?: 'TIGHT' | 'NORMAL' | 'LOOSE' }): Promise<PlanSummary> {
   const p = loadPersonas(['p01'])[0];
   const world = worldDay(p, 0);
   const wa = world.appts[0];
@@ -43,7 +43,7 @@ async function planWith(o: { importance?: Importance; sameDayWake?: boolean; rec
   };
   const { summary } = await planAppt(appt, {
     now: NIGHT_BEFORE(appt),
-    profile: { bufferMinutes: 15, defaultTransport: 'TRANSIT', home: world.home, defaultPrepareMinutes: o.defaultPrepare === undefined ? null : o.defaultPrepare, wakeSensitivity: o.wakeSensitivity ?? null },
+    profile: { bufferMinutes: 15, defaultTransport: 'TRANSIT', home: world.home, defaultPrepareMinutes: o.defaultPrepare === undefined ? null : o.defaultPrepare, wakeSensitivity: o.wakeSensitivity ?? null, wakeMargin: o.wakeMargin ?? null },
     learned: { stats: statsFrom([...(o.records ?? [])].reverse()), lateCount4w: o.lateCount4w ?? 0, travelSamples: [] },
     sameDayWake: o.sameDayWake ?? false,
     kakaoMinutes: 58,
@@ -70,7 +70,7 @@ export async function runChecks(opts: { days: number }): Promise<ChecksOutput> {
       expected: '기상~출발 70분, 출처 첫 값(DEFAULT), "배우는 중 0/5"',
       result: `기상~출발 ${mins}분 · 출처 ${s.prepareSource} · "${label}" · 강도 ${LEVEL_NAME[s.level]}`, ok, note: null,
     });
-    if (!ok) bugs.push({ where: 'supabase/functions/_shared/plan-core.ts:291-297', what: `온보딩 첫 값 70분이 계산에 안 닿음 (기상~출발 ${mins}분)`, source: '표 1줄' });
+    if (!ok) bugs.push({ where: 'supabase/functions/_shared/plan-core.ts computePlan의 predictPrepare 입력 · firstPrepareMinutes', what: `온보딩 첫 값 70분이 계산에 안 닿음 (기상~출발 ${mins}분)`, source: '표 1줄' });
   }
 
   // 2. 매일 실제 85분 (온보딩 70분) — 여러 날 필요
@@ -100,24 +100,26 @@ export async function runChecks(opts: { days: number }): Promise<ChecksOutput> {
       result: `준비 ${series.map((x) => x.minutes).join(' → ')}분 (최대 ${maxStep}분 움직임) · 기록 5건 뒤 계산부터 "${series[5].label}"`, ok,
       note: '"5일차부터"는 기록 5건이 쌓인 뒤 첫 계산(6번째 알람)으로 읽음 — 문서가 날 번호를 안 정함',
     });
-    if (!ok) bugs.push({ where: 'supabase/functions/_shared/plan-core.ts:127-133 · calc/prepare.ts', what: `회차 변화 최대 ${maxStep}분 / 내 기록 출처 시작 인덱스 ${firstPersonal}`, source: '표 2줄' });
+    if (!ok) bugs.push({ where: 'supabase/functions/_shared/plan-core.ts clampPrepareToBound · calc/prepare.ts predictPrepare', what: `회차 변화 최대 ${maxStep}분 / 내 기록 출처 시작 인덱스 ${firstPersonal}`, source: '표 2줄' });
   }
 
   // 3. 같은 기록, 빠듯 / 넉넉
   {
     const records = [60, 70, 80, 90, 100, 75, 85];
-    const s = await planWith({ defaultPrepare: 70, records });
     const q = [0.7, 0.8, 0.9].map((p) => Math.round(calc.percentile(records, p) as number));
-    // 깨우는 여유(빠듯 · 보통 · 넉넉)를 계산에 넘길 칸이 없어 세 입력이 같은 계산 — 하네스가 부른 결과를 그대로 적음
-    const same = [await planWith({ defaultPrepare: 70, records }), await planWith({ defaultPrepare: 70, records }), await planWith({ defaultPrepare: 70, records })].map((x) => x.prepareMinutes);
-    const increasing = same[0] < same[1] && same[1] < same[2];
+    // 깨우는 여유(profiles.wake_margin) TIGHT · NORMAL · LOOSE를 계산 입력(profile.wake_margin)으로 실제로 바꿔 세 번 부름 (#274)
+    const margins = ['TIGHT', 'NORMAL', 'LOOSE'] as const;
+    const plans = [] as PlanSummary[];
+    for (const m of margins) plans.push(await planWith({ defaultPrepare: 70, records, wakeMargin: m }));
+    const mins = plans.map((x) => x.prepareMinutes);
+    const increasing = mins[0] < mins[1] && mins[1] < mins[2];
     rows.push({
-      no: 3, situation: '같은 기록, 빠듯 / 넉넉', input: `같은 기록 ${records.join(' · ')}분(7건), 깨우는 여유 빠듯 · 보통 · 넉넉`,
+      no: 3, situation: '같은 기록, 빠듯 / 넉넉', input: `같은 기록 ${records.join(' · ')}분(7건), 깨우는 여유 빠듯(TIGHT) · 보통(NORMAL) · 넉넉(LOOSE)`,
       expected: '넉넉이 더 이름 (0.7 < 0.8 < 0.9 분위수 → 준비 시간 빠듯 < 보통 < 넉넉)',
-      result: `세 입력 모두 준비 ${same.join(' · ')}분 (깨우는 여유를 넘길 칸이 없음). 참고: 분위수 0.7 · 0.8 · 0.9 = ${q.join(' · ')}분 (계산은 0.8 고정 → ${s.prepareMinutes}분)`,
-      ok: increasing, note: '학습 기초 b(문서 3절: L7 PR 3 머지 뒤) 미구현 — 버그라기보다 아직 안 만든 것',
+      result: `빠듯 ${mins[0]} · 보통 ${mins[1]} · 넉넉 ${mins[2]}분 (기상~출발 ${plans.map((x) => wakeToDepart(x)).join(' · ')}분). 참고: 기록 분위수 0.7 · 0.8 · 0.9 = ${q.join(' · ')}분, 개인 보정은 기록 7건이라 7/17 비중으로 섞임`,
+      ok: increasing, note: null,
     });
-    if (!increasing) bugs.push({ where: 'supabase/functions/_shared/plan-core.ts:291-297 (PlanInputs에 깨우는 여유 칸 없음 · 개인 P80 고정)', what: '빠듯/보통/넉넉이 같은 알람 — 문서 D63 3단계 미반영 (학습 기초 b 미머지)', source: '표 3줄' });
+    if (!increasing) bugs.push({ where: 'supabase/functions/_shared/plan-core.ts computePlan의 predictPrepare 입력 (personalPrepareOf · wakeMarginOf) · calc/prepare.ts personalPrepareOf', what: `빠듯/보통/넉넉이 빠듯 < 보통 < 넉넉으로 안 나옴 (${mins.join(' · ')}분)`, source: '표 3줄' });
   }
 
   // 4. 그날 두 번째 일정
@@ -130,7 +132,7 @@ export async function runChecks(opts: { days: number }): Promise<ChecksOutput> {
       expected: '준비 15분 그대로 (기록 수와 상관없음)',
       result: `기록 0건 → ${a.prepareMinutes}분(${a.prepareSource}) · 기록 12건 → ${b.prepareMinutes}분(${b.prepareSource}, n=${b.prepareBasis.n})`, ok, note: null,
     });
-    if (!ok) bugs.push({ where: 'supabase/functions/_shared/plan-core.ts:291-294', what: '두 번째 일정 준비가 기록에 따라 변함', source: '표 4줄' });
+    if (!ok) bugs.push({ where: 'supabase/functions/_shared/plan-core.ts computePlan의 withWake 분기(commonP80 · personalPrepareOf)', what: '두 번째 일정 준비가 기록에 따라 변함', source: '표 4줄' });
   }
 
   // 5. 잠귀 깊음 · 매우 중요 · 최근 지각 2번
@@ -142,9 +144,9 @@ export async function runChecks(opts: { days: number }): Promise<ChecksOutput> {
       no: 5, situation: '잠귀 깊음 · 매우 중요 · 최근 지각 2번', input: '잠귀 깊음(HEAVY) · 중요도 매우 중요 · 4주 지각 2번 (5번도 봄)',
       expected: '강 (최대 강에서 멈춤)',
       result: `강도 ${LEVEL_NAME[strong.level]} (지각 5번이어도 ${LEVEL_NAME[stronger.level]})`, ok,
-      note: '이 줄의 "강"은 매우 중요 + 지각 2번만으로도 나옴 — 잠귀 입력은 계산이 읽지 않아 효과를 못 봄 (5b 참고)',
+      note: '이 줄의 "강"은 매우 중요 + 지각 2번만으로도 나옴 — 잠귀만의 효과는 5b에서 따로 봄',
     });
-    if (!ok) bugs.push({ where: 'supabase/functions/_shared/calc/intensity.ts:37-43', what: '강도가 최대 강으로 안 멈추거나 올림 규칙 어긋남', source: '표 5줄' });
+    if (!ok) bugs.push({ where: 'supabase/functions/_shared/calc/intensity.ts autoLevel', what: '강도가 최대 강으로 안 멈추거나 올림 규칙 어긋남', source: '표 5줄' });
 
     // 5b: 잠귀 깊음 단독 — 문서 D69: 가벼움 · 보통 → 보통, 깊음 → 강
     const heavy = await planWith({ importance: 'LOW', lateCount4w: 0, wakeSensitivity: 'HEAVY' });
@@ -152,9 +154,9 @@ export async function runChecks(opts: { days: number }): Promise<ChecksOutput> {
     rows.push({
       no: 5.5, situation: '(5b) 잠귀 깊음만, 보통 일정 · 지각 없음', input: '잠귀 깊음(HEAVY) · 중요도 보통 · 지각 0번',
       expected: '강 (D69 · 학습루프 1절 ①: 깊음 → 기본 강도 강)',
-      result: `강도 ${LEVEL_NAME[heavy.level]}`, ok: okB, note: '표 5절 6줄 밖의 추가 확인 — 잠귀 칸은 있으나(L7 #267) 계산이 안 읽음',
+      result: `강도 ${LEVEL_NAME[heavy.level]}`, ok: okB, note: '표 5절 6줄 밖의 추가 확인 — 잠귀 입력은 #274(학습 기초 b)부터 계산이 읽음',
     });
-    if (!okB) bugs.push({ where: 'supabase/functions/_shared/plan-core.ts:300-301 (autoLevel · resolveIntensity에 wakeSensitivity를 안 넘김; calc/intensity.ts:37 · 57은 받을 줄 앎)', what: '잠귀 깊음만으로는 강으로 안 올라감 (학습 기초 b 미머지)', source: '표 5b' });
+    if (!okB) bugs.push({ where: 'supabase/functions/_shared/plan-core.ts computePlan의 wakeSensitivityOf → autoLevel · resolveIntensity 입력 · calc/intensity.ts autoLevel', what: '잠귀 깊음만으로는 강으로 안 올라감', source: '표 5b' });
   }
 
   // 6. 잠귀 가벼움 · 보통 일정
@@ -167,7 +169,7 @@ export async function runChecks(opts: { days: number }): Promise<ChecksOutput> {
       expected: '보통 (약 아님)',
       result: `보통 일정 → ${LEVEL_NAME[low.level]} · 중요 일정 → ${LEVEL_NAME[normal.level]}`, ok, note: null,
     });
-    if (!ok) bugs.push({ where: 'supabase/functions/_shared/calc/intensity.ts:37-43', what: '기본 강도가 보통이 아님', source: '표 6줄' });
+    if (!ok) bugs.push({ where: 'supabase/functions/_shared/calc/intensity.ts autoLevel', what: '기본 강도가 보통이 아님', source: '표 6줄' });
   }
 
   return { rows, bugs };

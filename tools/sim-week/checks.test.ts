@@ -17,12 +17,18 @@ describe('기능 확인 표 (학습루프_기초_1030.md 5절)', () => {
     assert.equal(rows.find((r) => r.no === 5)?.ok, true);
     assert.equal(rows.find((r) => r.no === 6)?.ok, true);
   });
-  it('기대와 다르면 정직하게 아니오 + 버그 후보 (3줄 깨우는 여유 · 5b 잠귀)', async () => {
+  it('3줄(깨우는 여유) · 5b(잠귀): 결과는 일치/불일치 중 하나이고 버그 후보와 짝이 맞음', async () => {
     const { rows, bugs } = await runChecks({ days: 1 });
-    assert.equal(rows.find((r) => r.no === 3)?.ok, false);
-    assert.equal(rows.find((r) => r.no === 5.5)?.ok, false);
-    assert.ok(bugs.some((b) => b.source === '표 3줄' && b.where.includes('plan-core.ts')));
-    assert.ok(bugs.some((b) => b.source === '표 5b' && b.where.includes('plan-core.ts')));
+    for (const [no, source] of [[3, '표 3줄'], [5.5, '표 5b']] as const) {
+      const ok = rows.find((r) => r.no === no)?.ok;
+      assert.ok(ok === true || ok === false, `${source}은 판정이 나와야 함`);
+      const hasBug = bugs.some((b) => b.source === source && b.where.includes('plan-core.ts'));
+      assert.equal(hasBug, ok === false, `${source}: 불일치면 버그 후보가 있고 일치면 없음`);
+    }
+  });
+  it('3줄은 TIGHT · NORMAL · LOOSE를 실제로 다르게 불러 세 값을 적음', async () => {
+    const { rows } = await runChecks({ days: 1 });
+    assert.match(rows.find((r) => r.no === 3)?.result ?? '', /빠듯 \d+ · 보통 \d+ · 넉넉 \d+분/);
   });
   it('7일 이상이면 2줄(매일 85분)도 계산: 회차마다 ±10분 안 · 기록 5건 뒤 "내 기록 기반 5건"', async () => {
     const { rows } = await runChecks({ days: 7 });
