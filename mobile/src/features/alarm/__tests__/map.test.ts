@@ -6,6 +6,7 @@ import { alarmChain } from '@shared/calc/chain.ts';
 import {
   autoTimesOf,
   beforePrepareOf,
+  onePerSeries,
   pickNextAlarm,
   STANDALONE_TITLE,
   toAlarmTime,
@@ -293,5 +294,27 @@ describe('다음 알람 고르기 (pickNextAlarm)', () => {
   it('여러 약속 중 가장 이른 알람', () => {
     const later = meeting({ appointment: { ...meeting().appointment, appointment_id: 'appt-2', title: '저녁 약속' }, alarms: [alarmRow('b-wake', 'WAKE', '07:58')] });
     expect(pickNextAlarm([toAppointment(meeting()), toAppointment(later)], morning)?.appointment.title).toBe('저녁 약속');
+  });
+});
+
+describe('onePerSeries — H02 목록은 반복 묶음당 하나', () => {
+  const at = (day: number) => ({ at: new Date(`2025-05-${String(day).padStart(2, '0')}T10:00:00+09:00`), day });
+  const now = Date.parse('2025-05-22T07:55:00+09:00');
+  const days = (entries: Parameters<typeof onePerSeries<ReturnType<typeof at>>>[0]) => onePerSeries(entries, now).map((x) => x.day).sort((a, b) => a - b);
+
+  it('같은 묶음은 지금 이후 가장 가까운 회차 하나 — 지난 회차 · 먼 회차는 빠짐', () => {
+    expect(days([15, 29, 22, 23].map((d) => ({ seriesId: 'S', item: at(d) })))).toEqual([22]);
+  });
+
+  it('묶음 번호가 없거나 서로 다르면 모두 그대로, 한 장뿐인 묶음은 지난 것도 그대로', () => {
+    expect(days([{ seriesId: null, item: at(10) }, { seriesId: undefined, item: at(11) }, { seriesId: 'A', item: at(12) }, { seriesId: 'B', item: at(25) }])).toEqual([10, 11, 12, 25]);
+  });
+
+  it('묶음의 회차가 전부 지났으면 가장 최근 지난 회차 하나', () => {
+    expect(days([8, 15, 12].map((d) => ({ seriesId: 'S', item: at(d) })))).toEqual([15]);
+  });
+
+  it('지금 시각과 같은 회차는 "이후"로 침', () => {
+    expect(onePerSeries([{ seriesId: 'S', item: { at: new Date(now) } }, { seriesId: 'S', item: { at: new Date(now + 86_400_000) } }], now)).toEqual([{ at: new Date(now) }]);
   });
 });

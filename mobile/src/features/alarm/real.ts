@@ -11,7 +11,7 @@ import { supabase } from '@/lib/supabase';
 import { requireUserId } from '@/lib/user';
 
 import { rememberDetail } from './detailCache';
-import { byTime, hasAlarms, pickNextAlarm, toAppointment, toScheduleItem, toStandaloneAppointment } from './map';
+import { byTime, hasAlarms, onePerSeries, pickNextAlarm, toAppointment, toScheduleItem, toStandaloneAppointment } from './map';
 import { loadAppointmentRows, loadAppointmentRowsSince, loadDayRows, loadDetail, loadStandaloneRow, loadStandaloneRows } from './realRows';
 import type { Appointment, AppointmentDetail, NextAlarm, ScheduleItem } from './types';
 
@@ -49,11 +49,17 @@ export async function getNextAlarm(): Promise<NextAlarm | null> {
 }
 
 // 모든 일정의 알람 (H02) — 시각 순. 알람 없는 일정은 목록에 없고 H01 일정 줄에만 보임. 일정 없는 알람은 같이 섞여 나옴
+//   반복은 묶음(series_id)당 지금 이후 가장 가까운 회차 하나 — 서버가 14일치 회차를 미리 만들어 두므로 다 보이면 같은 일정이 14장 (지난 회차도 안 보임). H01 · R02 · H03은 회차 행 그대로
 export async function listAppointments(): Promise<Appointment[]> {
   const userId = await requireUserId();
-  const since = addDays(startOfDay(now()), -LIST_PAST_DAYS).toISOString();
+  const at = now();
+  const since = addDays(startOfDay(at), -LIST_PAST_DAYS).toISOString();
   const [rows, standalone] = await Promise.all([loadAppointmentRowsSince(userId, since), loadStandaloneRows(userId, since)]);
-  return [...rows.map(toAppointment), ...standalone.map(toStandaloneAppointment)].filter(hasAlarms).sort(byTime);
+  const entries = [
+    ...rows.map((row) => ({ seriesId: row.appointment.series_id, item: toAppointment(row) })),
+    ...standalone.map((row) => ({ seriesId: row.series_id, item: toStandaloneAppointment(row) })),
+  ].filter((entry) => hasAlarms(entry.item));
+  return onePerSeries(entries, at.getTime()).sort(byTime);
 }
 
 // 하루 일정 (H01) — 알람 있는 일정 + 알람 없는 일정 (알람 없는 쪽은 hasAlarm이 false)

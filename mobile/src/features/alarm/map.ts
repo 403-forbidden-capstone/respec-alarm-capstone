@@ -30,7 +30,9 @@ export type ParticipantRow = Pick<
   Tables<'appointment_participants'>,
   'participant_id' | 'origin_name' | 'transport_type' | 'est_travel_minutes' | 'travel_source' | 'prepare_minutes' | 'buffer_minutes'
 >;
-export type AppointmentRow = Pick<Tables<'appointments'>, 'appointment_id' | 'title' | 'appointment_at' | 'dest_name' | 'importance' | 'recurrence_rule'>;
+export type AppointmentRow = Pick<Tables<'appointments'>, 'appointment_id' | 'title' | 'appointment_at' | 'dest_name' | 'importance' | 'recurrence_rule'> & {
+  series_id?: string; // 반복 묶음 번호 — 같은 반복의 회차는 같은 값 (H02 목록이 묶음당 하나만 보일 때 씀). 안 읽은 쿼리(H03 등)에는 없음
+};
 
 // 한 약속(내 참여 조건)을 화면에 그리는 데 필요한 행 묶음. alarms는 이 참여 조건의 알람 전부 (꺼진 것 · 도착 목표 포함)
 export type AppointmentRows = {
@@ -42,7 +44,7 @@ export type AppointmentRows = {
 };
 
 // 일정 없는 알람 한 줄 (participant_id · routine_id가 모두 NULL인 기상 알람, D46)
-export type StandaloneRow = AlarmRow & Pick<Tables<'alarms'>, 'recurrence_rule'>;
+export type StandaloneRow = AlarmRow & Pick<Tables<'alarms'>, 'recurrence_rule'> & { series_id?: string | null }; // series_id = 반복 묶음 번호 (목록 쿼리만 읽음)
 
 // 일정 없는 알람의 제목 — 서버 commitStandalone · 폰 예약(lib/alarmSync/reconcile STANDALONE_TITLE)과 같은 글자
 export const STANDALONE_TITLE = '알람';
@@ -205,6 +207,29 @@ export function toScheduleItem(rows: {
 }
 
 export const byTime = <T extends { at: Date }>(x: T, y: T) => x.at.getTime() - y.at.getTime();
+
+// 알람 목록(H02)은 반복 묶음(series_id)당 한 장 — 지금 이후 가장 가까운 회차 (지난 회차는 안 보임). 묶음 번호가 없거나 한 장뿐인 묶음(반복이 아닌 약속)은 그대로
+//   한 묶음의 회차가 모두 지났으면 가장 최근 지난 회차 하나 (다음 회차가 아직 안 만들어진 반복이 목록에서 사라지지 않게)
+//   L6 안건후보: H02 묶음이 전부 지난 경우 기본안 = 가장 최근 지난 회차 하나를 "지난 일정"에 둠
+//   알람이 있는 회차만 넘길 것 (hasAlarms로 거른 뒤) — 가장 가까운 회차의 알람이 모두 꺼졌다고 묶음 전체가 사라지지 않게
+export function onePerSeries<T extends { at: Date }>(entries: readonly { seriesId: string | null | undefined; item: T }[], nowMs: number): T[] {
+  const bySeries = new Map<string, T[]>();
+  const out: T[] = [];
+  for (const { seriesId, item } of entries) {
+    if (!seriesId) {
+      out.push(item);
+      continue;
+    }
+    const list = bySeries.get(seriesId);
+    if (list) list.push(item);
+    else bySeries.set(seriesId, [item]);
+  }
+  for (const list of bySeries.values()) {
+    const upcoming = list.filter((x) => x.at.getTime() >= nowMs).sort(byTime);
+    out.push(upcoming.length ? upcoming[0] : list.reduce((latest, x) => (x.at.getTime() > latest.at.getTime() ? x : latest)));
+  }
+  return out;
+}
 
 // ---------------------------------------------------------------------------
 // H03 알람 설정

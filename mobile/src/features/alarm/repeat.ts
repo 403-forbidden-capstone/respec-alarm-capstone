@@ -1,6 +1,6 @@
 // 일정 반복 (H05 · D44) — 요일 집합 ⇄ 반복 규칙 글자(RRULE, appointments.recurrence_rule) · 화면 글자
 // 순수 계산만 — 단위 테스트는 __tests__/repeat.test.ts
-// 다음 회차를 만드는 규칙(몇 회차까지)은 D4(열림)라 여기에 없음. 이 파일은 "무슨 요일에 반복하는지"만 다룸
+// 회차를 만드는 일은 서버(alarm-roll, 앞으로 14일치 미리 · _shared/calc/recur.ts)가 하고 여기에 없음. 이 파일은 "무슨 요일에 반복하는지"만 다룸 (서버와 같은 요일 해석인지는 mocks/__tests__/shared.test.ts)
 import { WEEKDAYS, type Weekday } from '@/lib/weekday';
 
 const BYDAY: Record<Weekday, string> = { 월: 'MO', 화: 'TU', 수: 'WE', 목: 'TH', 금: 'FR', 토: 'SA', 일: 'SU' };
