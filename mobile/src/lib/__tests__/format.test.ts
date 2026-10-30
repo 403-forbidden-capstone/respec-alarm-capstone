@@ -90,4 +90,8 @@ describe('dropRepeatedAmpm', () => {
     expect(dropRepeatedAmpm(['08:00 기상', '08:30 준비'])).toEqual(['08:00 기상', '08:30 준비']);
     expect(dropRepeatedAmpm([])).toEqual([]);
   });
+  it('하루를 넘기는 체인은 바뀌는 곳을 남김, 뒤에 붙은 표시(지남 · 꺼짐)는 영향 없음', () => {
+    expect(dropRepeatedAmpm(['오후 11:30 준비', '오전 12:10 출발'])).toEqual(['오후 11:30 준비', '오전 12:10 출발']);
+    expect(dropRepeatedAmpm(['오전 8:00 기상 · 지남', '오전 8:30 준비 · 꺼짐'])).toEqual(['오전 8:00 기상 · 지남', '8:30 준비 · 꺼짐']);
+  });
 });

@@ -132,7 +132,7 @@ const styles = StyleSheet.create({
   head: { justifyContent: 'center', minHeight: 28 },
   headGap: { paddingRight: size.switchW + 12 }, // 스위치가 얹힐 자리
   pressed: { opacity: 0.7 },
-  big: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'baseline', columnGap: 6, paddingTop: 2 },
+  big: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'baseline', columnGap: 6, rowGap: 2, paddingTop: 2 }, // 큰 글자에서 종류 글자가 아래 줄로 내려가도 줄이 붙지 않게 rowGap
   chain: { flexDirection: 'row', flexWrap: 'wrap', columnGap: 12, rowGap: 2, marginTop: 2 },
   foot: { marginTop: 8, flexDirection: 'row', alignItems: 'center', gap: 4 },
   footText: { flex: 1 },
