@@ -10,7 +10,7 @@ type Props = {
   onRetry?: () => void; // 다시 시도 (failed만)
   onManual?: () => void; // 직접 일정 만들기
   onDone?: () => void; // 대화 마치기
-  busy?: boolean; // onRetry 처리 중 — 다시 시도 버튼이 돌아감
+  busy?: boolean; // 1차 버튼 처리 중 — 1차 버튼이 돌아가고 나머지는 눌리지 않음
 };
 
 const LABEL: Record<NoticeAction, string> = { retry: '다시 시도', manual: '직접 일정 만들기', done: '대화 마치기' };
@@ -34,7 +34,7 @@ export function ChatNotice({ kind, onRetry, onManual, onDone, busy }: Props) {
           <View style={styles.actions}>
             {actions.map((key) =>
               key === primary ? (
-                <Button key={key} label={LABEL[key]} onPress={handlers[key]} loading={key === 'retry' && busy} />
+                <Button key={key} label={LABEL[key]} onPress={handlers[key]} loading={busy} />
               ) : (
                 <Button key={key} label={LABEL[key]} variant="plain" onPress={handlers[key]} disabled={busy} />
               ),
