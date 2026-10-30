@@ -4,6 +4,11 @@
 //   false로 되돌리면 Supabase가 연결된 빌드도 가짜 데이터로만 돌고, 목업에 없는 로그인 · 온보딩 · 설정 화면으로 가지 않음 (#116)
 export const REAL_DATA_READY = true;
 
+// ALARM_AXES_PICKER: 알람 설정(H03)에서 배경음 · 말소리 · 진동을 따로 고르게 보일지 (D1 A, #312 · #316)
+//   지형님 10/30: "강도를 다 설정하게 하면 UX가 과함" → 결정 안건(투표)으로 올림. 결과가 나올 때까지는 켜 둠(true)
+//   false: H03 "알람 강도" 카드가 자동 강도 한 줄만 보임. 서버 · 폰 동작(축별 소리 · 진동 해석)은 그대로이고 안 고른 알람은 강도를 따름 — 화면만 숨김
+export const ALARM_AXES_PICKER = true;
+
 // ONBOARDING_IN_FLOW: 단계 온보딩(app/onboarding.tsx)을 앱 흐름에 넣을지 (임시 온보딩을 단계 온보딩으로 바꿈, #25)
 //   true: 로그인한 뒤 프로필의 onboarded_at이 비어 있으면 온보딩부터 (판정은 features/auth/onboardingGate.ts). 어느 단계를 거칠지는 아래 ONBOARDING_STEPS
 //   false로 되돌리면 온보딩 없이 바로 홈 — 화면 파일은 그대로 두고 길만 막음 (주소로도 안 열림)

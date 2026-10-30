@@ -32,6 +32,7 @@ import {
   type RingKind,
   type Transport,
 } from '@/features/alarm/types';
+import { ALARM_AXES_PICKER } from '@/lib/flags';
 import { addMinutes, formatDateShort, formatTime } from '@/lib/format';
 import { backOrHome } from '@/lib/nav';
 import { useAction } from '@/lib/useAction';
@@ -386,7 +387,8 @@ function Detail({ appointment: a, reload }: { appointment: AppointmentDetail; re
           자동 {LEVELS[a.intensity.auto].name} · 중요도 {IMPORTANCE_LABEL[a.importance]}
           {a.intensity.latePoint > 0 ? ` · 최근 4주 늦잠 지각 ${a.intensity.lateCount}번` : ''}
         </Text>
-        {AXES.map(([axis, name]) => {
+        {/* 축별 선택(배경음 · 말소리 · 진동)은 flag로 숨길 수 있음 — 결정 안건(투표) 결과 대기 (lib/flags.ts ALARM_AXES_PICKER) */}
+        {(ALARM_AXES_PICKER ? AXES : []).map(([axis, name]) => {
           const picked = levels[axis];
           const level = picked ?? a.intensity.auto;
           return (
@@ -428,10 +430,12 @@ function Detail({ appointment: a, reload }: { appointment: AppointmentDetail; re
             </View>
           );
         })}
-        <Text variant="caption" tone="faint" style={styles.note}>
-          직접 고른 항목은 자동 계산보다 항상 먼저 적용돼요.
-        </Text>
-        {anyManual ? (
+        {ALARM_AXES_PICKER ? (
+          <Text variant="caption" tone="faint" style={styles.note}>
+            직접 고른 항목은 자동 계산보다 항상 먼저 적용돼요.
+          </Text>
+        ) : null}
+        {ALARM_AXES_PICKER && anyManual ? (
           <View style={styles.reset}>
             <TextLink label="모두 자동으로 되돌리기" onPress={() => setLevels({ sound: null, voice: null, vibration: null })} />
           </View>
