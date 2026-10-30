@@ -9,12 +9,16 @@ import {
   isSnoozeLate,
   isSnoozeMinutesAllowed,
   ringStartTimes,
-  SNOOZE_LATE_LABEL,
+  SNOOZE_LATE_CHIP,
   SNOOZE_MILLIS,
   SNOOZE_MINUTES_OPTIONS,
   snoozeCountLabel,
+  snoozeButtonLabel,
+  snoozeLateLine,
+  snoozeLateMinutes,
   snoozeLimitNotice,
   snoozeRingAt,
+  wakeNowBanner,
   toNativePayload,
   unansweredSpanMillis,
   validateRingPackage,
@@ -93,12 +97,16 @@ describe('공통 케이스 — 미루기 횟수 한도 · 시간 고르기 (D3 �
   for (const item of cases.snoozeLate) {
     it(item.name, () => {
       expect(isSnoozeLate(item.nowMillis, item.snoozeMinutes, item.departAtMillis)).toBe(item.late);
+      expect(snoozeLateMinutes(item.nowMillis, item.snoozeMinutes, item.departAtMillis)).toBe(item.lateMinutes);
     });
   }
 
   it('글자 · 고를 수 있는 분이 spec과 같음', () => {
     expect([...SNOOZE_MINUTES_OPTIONS]).toEqual(cases.snoozeTexts.options);
-    expect(SNOOZE_LATE_LABEL).toBe(cases.snoozeTexts.lateLabel);
+    expect(SNOOZE_LATE_CHIP).toBe(cases.snoozeTexts.lateChip);
+    for (const item of cases.snoozeTexts.buttonLabels) expect(snoozeButtonLabel(item.snoozeMinutes, item.late)).toBe(item.label);
+    for (const item of cases.snoozeTexts.lateLines) expect(snoozeLateLine(item.snoozeMinutes, item.departClock, item.lateMinutes)).toBe(item.text);
+    for (const item of cases.snoozeTexts.wakeNowBanners) expect(wakeNowBanner(item.departClock)).toBe(item.text);
     for (const item of cases.snoozeTexts.counts) expect(snoozeCountLabel(item.snoozeCount, item.snoozeLimit)).toBe(item.label);
     for (const item of cases.snoozeTexts.limitNotices) expect(snoozeLimitNotice(item.departLabel)).toBe(item.text);
   });

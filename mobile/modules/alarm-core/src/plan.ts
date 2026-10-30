@@ -25,8 +25,7 @@ export const SNOOZE_MINUTES_OPTIONS: readonly number[] = [5, 10, 15];
 /** 미루기 한도 기본값 (알람 한 개당 3번) — 꾸러미의 snoozeLimit이 틀렸을 때만 씀 */
 export const DEFAULT_SNOOZE_LIMIT = 3;
 
-/** 미룬 시각이 출발 한계를 넘을 때 해당 시간 버튼 아래에 보이는 글자 (네이티브 · 웹 미리보기 같음) */
-export const SNOOZE_LATE_LABEL = '이만큼 미루면 늦어요';
+
 
 /** 평가 보정을 아무리 크게 줘도 이 밑으로는 안 내림 (소리가 안 나는 알람이 되지 않게) */
 export const MIN_VOLUME_PERCENT = 10;
@@ -148,13 +147,39 @@ export function isSnoozeMinutesAllowed(plan: RingPlan, snoozeMinutes: number): b
 }
 
 /**
- * 이만큼 미루면 늦는지 — 다시 울릴 시각(지금 + 미룰 분)이 출발 시각(departAt)을 넘으면 true. 출발 시각과 같으면 아직 안 늦음
- * departAt이 없으면 판단할 수 없어 false (표시 안 함).
+ * 이만큼 미루면 출발 시각보다 몇 분 늦는지 — (다시 울릴 시각 = 지금 + 미룰 분) − 출발 시각(departAt)을 분으로 올림. 안 늦으면 0
+ * 출발 시각과 같으면 아직 안 늦음(0), 1ms라도 넘으면 1분. departAt이 없으면 판단할 수 없어 0 (표시 안 함).
  * L6 안건후보: 늦어요 기준 = 기본안은 "다시 울릴 시각 > departAt" (남은 준비 시간은 안 뺌 — 꾸러미에 준비 시간이 없음)
  */
+export function snoozeLateMinutes(nowMillis: number, snoozeMinutes: number, departAtMillis: number | null | undefined): number {
+  if (departAtMillis == null || !Number.isFinite(departAtMillis) || !Number.isFinite(nowMillis)) return 0;
+  const overMillis = nowMillis + snoozeMinutes * 60_000 - departAtMillis;
+  return overMillis > 0 ? Math.ceil(overMillis / 60_000) : 0;
+}
+
+/** 이만큼 미루면 늦는지 — snoozeLateMinutes가 1분 이상이면 true */
 export function isSnoozeLate(nowMillis: number, snoozeMinutes: number, departAtMillis: number | null | undefined): boolean {
-  if (departAtMillis == null || !Number.isFinite(departAtMillis) || !Number.isFinite(nowMillis)) return false;
-  return nowMillis + snoozeMinutes * 60_000 > departAtMillis;
+  return snoozeLateMinutes(nowMillis, snoozeMinutes, departAtMillis) > 0;
+}
+
+// 늦어요 표시 글자 — 막지 않고 보여 주기만 함 (네이티브 · 웹 미리보기 같음). 출발 시각 글자(departClock)는 "9:00"처럼 오전 · 오후 없이 시:분 (화면이 서식을 만듦)
+
+/** 늦게 되는 시간 칩 안에 들어가는 글자 */
+export const SNOOZE_LATE_CHIP = '늦어요';
+
+/** 미루기 버튼 글자 — 고른 분이 늦으면 "15분 미루기 · 늦어요" (알림의 미루기 버튼도 같은 글자) */
+export function snoozeButtonLabel(snoozeMinutes: number, late: boolean): string {
+  return late ? `${snoozeMinutes}분 미루기 · ${SNOOZE_LATE_CHIP}` : `${snoozeMinutes}분 미루기`;
+}
+
+/** 미루기 버튼 바로 위 굵은 경고 한 줄 — "15분 미루면 9:00 출발보다 5분 늦어요" */
+export function snoozeLateLine(snoozeMinutes: number, departClock: string, lateMinutes: number): string {
+  return `${snoozeMinutes}분 미루면 ${departClock} 출발보다 ${lateMinutes}분 늦어요`;
+}
+
+/** 가장 짧은 미루기(5분)도 늦을 때 큰 시각 위에 뜨는 경고 띠 */
+export function wakeNowBanner(departClock: string): string {
+  return `지금 일어나야 ${departClock} 출발에 맞아요`;
 }
 
 /** "미루기 1/3회" — 이미 미룬 횟수 / 한도 */

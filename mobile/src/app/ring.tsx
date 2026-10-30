@@ -7,6 +7,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Text, toast } from '@/components/ui';
 import { dismissRing, getRing, snoozeRing, startRing, stopRing } from '@/features/alarm/api';
 import { VoiceWave } from '@/features/alarm/components/VoiceWave';
+import { snoozeView } from '@/features/alarm/snooze';
 import type { Appointment, RingKind } from '@/features/alarm/types';
 import { formatTime, timeParts } from '@/lib/format';
 import { backOrHome } from '@/lib/nav';
@@ -16,11 +17,13 @@ import { colors } from '@/theme';
 // 알람 코어의 순수 계산 파일만 직접 가져옴 (index는 네이티브 모듈을 찾으므로 — 같은 선례: lib/alarmSync 시험)
 import {
   canSnooze,
-  isSnoozeLate,
-  SNOOZE_LATE_LABEL,
+  SNOOZE_LATE_CHIP,
   SNOOZE_MINUTES_OPTIONS,
+  snoozeButtonLabel,
   snoozeCountLabel,
+  snoozeLateLine,
   snoozeLimitNotice,
+  wakeNowBanner,
 } from '../../modules/alarm-core/src/plan';
 
 const HEAD: Record<RingKind, string> = {
@@ -37,7 +40,9 @@ const BACKGROUND: Record<RingKind, string> = {
 // H07 알람 울림 — 실제 울림은 알람 코어의 네이티브 화면이 띄움 (#33에서 이 디자인과 맞춤)
 // 이 화면은 디자인 · 웹 미리 보기용: /ring?alarm=a1:WAKE
 // 미루기 규칙(D3 기본안 A)은 네이티브 화면과 같음 — 5 · 10 · 15분 중 고르기, 알람 한 개당 3번까지 ("미루기 N/3회"),
-//   한도에 닿으면 미루기를 끄고 "지금 바로 준비 · 출발 시각", 다시 울릴 시각이 출발 시각을 넘는 분은 "이만큼 미루면 늦어요" (계산은 알람 코어의 순수 함수)
+//   한도에 닿으면 미루기를 끄고 "지금 바로 준비 · 출발 시각".
+//   늦어요는 막지 않고 보여 주기만 함: 늦는 칩은 경고색 + 칩 안 "늦어요", 고른 칩이 늦으면 미루기 버튼 위에 경고 한 줄 · 버튼 "N분 미루기 · 늦어요",
+//   5분만 미뤄도 늦으면 시각 위에 "지금 일어나야 9:00 출발에 맞아요" 띠 (계산은 알람 코어의 순수 함수 → features/alarm/snooze.ts)
 // 준비 · 출발 알람의 머리글은 폰 알림과 같은 글자(data.notice, 서버 알림 문구 함수) — 없으면 종류별 기본 머리글
 export default function RingScreen() {
   const params = useLocalSearchParams<{ alarm?: string }>();
@@ -72,6 +77,9 @@ export default function RingScreen() {
 
   // 미루기는 3번까지 — 실데이터에서는 알람 코어가 셈 (이 화면은 미리 보기라 가짜 데이터가 셈)
   const snoozeAllowed = data != null && canSnooze(data.snoozeCount, data.snoozeLimit);
+  const view = data ? snoozeView(data) : null;
+  const departClock = data?.departAt ? timeParts(data.departAt).hm : null; // "9:00"
+  const selectedLate = view?.chips.find((chip) => chip.minutes === minutes)?.lateMinutes ?? 0;
   async function snooze() {
     if (!data || handled.current || !canSnooze(data.snoozeCount, data.snoozeLimit)) return;
     handled.current = true;
@@ -119,6 +127,13 @@ export default function RingScreen() {
           <Text variant="bodyLarge" tone="inverse" align="center" style={styles.head}>
             {data.notice ?? HEAD[kind]}
           </Text>
+          {view?.wakeNow && departClock ? (
+            <View style={styles.warnStrip} accessibilityRole="alert">
+              <Text variant="bodyStrong" tone="inverse" align="center">
+                {wakeNowBanner(departClock)}
+              </Text>
+            </View>
+          ) : null}
           <Text variant="ringTime" tone="inverse" align="center" style={styles.time}>
             {timeParts(data.at).hm}
           </Text>
@@ -157,40 +172,47 @@ export default function RingScreen() {
               {SNOOZE_MINUTES_OPTIONS.map((m) => {
                 const on = m === minutes;
                 // 울리는 시각 기준으로 다시 울릴 시각이 출발 시각을 넘으면 늦음 (네이티브는 지금 시각 기준)
-                const late = snoozeAllowed && isSnoozeLate(data.at.getTime(), m, data.departAt?.getTime());
+                const late = (view?.chips.find((chip) => chip.minutes === m)?.lateMinutes ?? 0) > 0;
+                const textColor = late ? (on ? colors.danger : colors.inverse) : on ? colors.ringWake : colors.inverse;
                 return (
-                  <View key={m} style={styles.optionColumn}>
-                    <Pressable
-                      onPress={() => setMinutes(m)}
-                      disabled={!snoozeAllowed}
-                      accessibilityRole="radio"
-                      accessibilityState={{ selected: on, disabled: !snoozeAllowed }}
-                      accessibilityHint={late ? SNOOZE_LATE_LABEL : undefined}
-                      style={[styles.option, on && styles.optionOn, !snoozeAllowed && styles.disabled]}
-                    >
-                      <Text variant="body" weight={on ? 600 : 400} style={{ color: on ? colors.ringWake : colors.inverse }}>
-                        {m}분
-                      </Text>
-                    </Pressable>
+                  <Pressable
+                    key={m}
+                    onPress={() => setMinutes(m)}
+                    disabled={!snoozeAllowed}
+                    accessibilityRole="radio"
+                    accessibilityState={{ selected: on, disabled: !snoozeAllowed }}
+                    accessibilityHint={late ? SNOOZE_LATE_CHIP : undefined}
+                    style={[styles.option, late ? (on ? styles.optionLateOn : styles.optionLate) : on && styles.optionOn, !snoozeAllowed && styles.disabled]}
+                  >
+                    <Text variant="body" weight={on || late ? 600 : 400} style={{ color: textColor }}>
+                      {m}분
+                    </Text>
                     {late ? (
-                      <Text variant="caption" tone="inverse" weight={600} align="center" style={styles.lateLabel}>
-                        {SNOOZE_LATE_LABEL}
+                      <Text variant="caption" weight={700} style={{ color: textColor }}>
+                        {SNOOZE_LATE_CHIP}
                       </Text>
                     ) : null}
-                  </View>
+                  </Pressable>
                 );
               })}
             </View>
+            {selectedLate > 0 && departClock ? (
+              <View style={styles.warnLine} accessibilityRole="alert">
+                <Text variant="bodyStrong" tone="inverse" align="center">
+                  {snoozeLateLine(minutes, departClock, selectedLate)}
+                </Text>
+              </View>
+            ) : null}
             <View style={styles.buttons}>
               <Pressable
                 onPress={snooze}
                 disabled={!snoozeAllowed}
                 accessibilityRole="button"
                 accessibilityState={{ disabled: !snoozeAllowed }}
-                style={[styles.button, styles.snooze, !snoozeAllowed && styles.disabled]}
+                style={[styles.button, styles.snooze, selectedLate > 0 && styles.snoozeLate, !snoozeAllowed && styles.disabled]}
               >
                 <Text variant="button" tone="inverse">
-                  {minutes}분 미루기
+                  {snoozeButtonLabel(minutes, selectedLate > 0)}
                 </Text>
               </Pressable>
               <Pressable onPress={dismiss} accessibilityRole="button" style={[styles.button, styles.main]}>
@@ -324,15 +346,28 @@ const styles = StyleSheet.create({
   bottom: { marginTop: 'auto' },
   optionsHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   limitNotice: { marginTop: 8 },
-  options: { flexDirection: 'row', alignItems: 'flex-start', gap: 8, marginTop: 8, marginBottom: 16 },
-  optionColumn: { flex: 1 },
-  lateLabel: { marginTop: 4 },
+  options: { flexDirection: 'row', alignItems: 'stretch', gap: 8, marginTop: 8, marginBottom: 16 },
+  warnStrip: { marginTop: 14, borderRadius: 12, paddingVertical: 10, paddingHorizontal: 14, backgroundColor: colors.danger },
+  warnLine: { marginBottom: 12, borderRadius: 12, paddingVertical: 10, paddingHorizontal: 12, backgroundColor: colors.danger },
   disabled: { opacity: 0.35 },
-  option: { height: 42, borderRadius: 14, backgroundColor: colors.ringOption, alignItems: 'center', justifyContent: 'center' },
+  option: {
+    flex: 1,
+    minHeight: 42,
+    paddingVertical: 4,
+    borderRadius: 14,
+    borderWidth: 2,
+    borderColor: 'transparent',
+    backgroundColor: colors.ringOption,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   optionOn: { backgroundColor: colors.inverse },
+  optionLate: { backgroundColor: colors.danger }, // 늦게 되는 칩 — 경고 바탕
+  optionLateOn: { backgroundColor: colors.inverse, borderColor: colors.warn }, // 고른 늦는 칩 — 흰 바탕 + 경고 테두리
   buttons: { flexDirection: 'row', gap: 10 },
   button: { height: 54, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
-  snooze: { flex: 1, backgroundColor: colors.ringButton },
+  snooze: { flex: 1, backgroundColor: colors.ringButton, borderWidth: 2, borderColor: 'transparent' },
+  snoozeLate: { borderColor: colors.warn }, // 늦는 분을 골랐을 때 경고 테두리 (눌림 — 막지 않음)
   main: { flex: 1.3, backgroundColor: colors.inverse },
   checkRow: { flexDirection: 'row', alignItems: 'center', gap: 12, minHeight: 44 },
   checkBox: { width: 22, height: 22, borderRadius: 7, borderWidth: 1.5, borderColor: colors.ringLine, alignItems: 'center', justifyContent: 'center' },

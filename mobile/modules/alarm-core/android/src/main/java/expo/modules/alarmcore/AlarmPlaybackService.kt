@@ -247,7 +247,8 @@ class AlarmPlaybackService : Service() {
         if (snoozeAllowed) {
           addAction(
             0,
-            if (snoozeLate) "${snoozeMinutes}분 미루기 · 늦어요" else "${snoozeMinutes}분 미루기",
+            // 알림은 이미 올라온 뒤라 그때그때 못 바꿈 — 알림을 올릴 때 한 번 정한 "늦어요"가 그대로 남음 (분 수는 안 넣음)
+            SnoozeRules.buttonLabel(snoozeMinutes, snoozeLate),
             PendingIntent.getBroadcast(
               this@AlarmPlaybackService,
               id.hashCode() + 1,

@@ -3,6 +3,8 @@ package expo.modules.alarmcore
 import android.app.Activity
 import android.content.Intent
 import android.graphics.Color
+import android.graphics.Typeface
+import android.graphics.drawable.GradientDrawable
 import android.os.Build
 import android.os.Bundle
 import android.view.Gravity
@@ -19,6 +21,12 @@ import java.lang.ref.WeakReference
 class AlarmRingingActivity : Activity() {
   companion object {
     const val EXTRA_ALARM_TITLE = "alarm_title"
+
+    // "늦어요" 경고색 — 앱 theme 토큰과 같은 값 (warn #C8553D = 칩 테두리, danger #B8452E = 경고 줄 · 늦는 칩 바탕, 흰 글자 5.3 : 1)
+    private val WARN_COLOR = Color.rgb(200, 85, 61)
+    private val DANGER_COLOR = Color.rgb(184, 69, 46)
+    private val NAVY = Color.rgb(11, 26, 58)
+    private val CHIP_COLOR = Color.rgb(36, 56, 98)
 
     private var showing: WeakReference<AlarmRingingActivity>? = null
 
@@ -115,6 +123,9 @@ class AlarmRingingActivity : Activity() {
     val now = System.currentTimeMillis()
     // L6 안건후보: 미루기 기본 선택 분 = 기본안은 목록의 첫 값(5분, 목업 H07). 알림의 "미루기" 버튼은 기본 10분(plan.snoozeMillis)
     val selected = selectedMinutes?.takeIf { it in options } ?: options.first()
+    // 늦어요 표시 — 막지 않고 보여 주기만 함. 고른 분이 늦는지 · 가장 짧은 분(5분)도 늦는지
+    val selectedLateMinutes = if (canSnooze) SnoozeRules.lateMinutes(now, selected, departAt) else 0
+    val wakeNow = canSnooze && departAt != null && SnoozeRules.isLate(now, options.first(), departAt)
 
     // 칩을 눌러 다시 그릴 때 작은 화면에서 스크롤이 맨 위로 돌아가지 않게 지금 위치를 기억함
     val savedScrollY = scrollView?.scrollY ?: 0
@@ -133,6 +144,20 @@ class AlarmRingingActivity : Activity() {
       gravity = Gravity.CENTER
     }
     root.addView(heading, matchWidth())
+
+    // 5분만 미뤄도 늦으면 큰 알람 내용 위에 경고 띠
+    if (wakeNow && departAt != null) {
+      val banner = TextView(this).apply {
+        text = SnoozeRules.wakeNowBanner(departAt)
+        setTextColor(Color.WHITE)
+        setTypeface(typeface, Typeface.BOLD)
+        textSize = 17f
+        gravity = Gravity.CENTER
+        setPadding(dp(14), dp(10), dp(14), dp(10))
+        background = box(DANGER_COLOR)
+      }
+      root.addView(banner, matchWidth().apply { topMargin = dp(16) })
+    }
 
     val title = TextView(this).apply {
       text = current?.title ?: fallbackTitle
@@ -174,16 +199,24 @@ class AlarmRingingActivity : Activity() {
       root.addView(limitNotice, matchWidth())
     }
 
-    // 미루기 시간 3개 (5 · 10 · 15분). 미룬 시각이 출발 시각을 넘으면 그 버튼 아래에 "이만큼 미루면 늦어요"
+    // 미루기 시간 3개 (5 · 10 · 15분). 미룬 시각이 출발 시각을 넘는 칩은 경고색 + 칩 안에 "늦어요"
     val optionRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
     options.forEachIndexed { index, minutes ->
       val isSelected = minutes == selected
-      val column = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_HORIZONTAL }
+      val late = canSnooze && SnoozeRules.isLate(now, minutes, departAt)
       val chip = Button(this).apply {
-        text = "${minutes}분"
-        textSize = 18f
-        setTextColor(if (isSelected) Color.rgb(11, 26, 58) else Color.WHITE)
-        setBackgroundColor(if (isSelected) Color.WHITE else Color.rgb(36, 56, 98))
+        text = if (late) "${minutes}분\n${SnoozeRules.LATE_CHIP}" else "${minutes}분"
+        textSize = if (late) 16f else 18f
+        isAllCaps = false
+        if (late) setTypeface(typeface, Typeface.BOLD)
+        // 늦는 칩: 안 고르면 경고 바탕 + 흰 글자, 고르면 흰 바탕 + 경고 글자 + 굵은 경고 테두리. 안 늦는 칩은 전과 같음
+        setTextColor(if (isSelected) (if (late) DANGER_COLOR else NAVY) else Color.WHITE)
+        background = when {
+          late && isSelected -> box(Color.WHITE, WARN_COLOR, 3)
+          late -> box(DANGER_COLOR)
+          isSelected -> box(Color.WHITE)
+          else -> box(CHIP_COLOR)
+        }
         isEnabled = canSnooze
         alpha = if (canSnooze) 1f else 0.35f
         setOnClickListener {
@@ -191,27 +224,36 @@ class AlarmRingingActivity : Activity() {
           renderAlarmControls()
         }
       }
-      column.addView(chip, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(52)))
-      if (canSnooze && SnoozeRules.isLate(now, minutes, departAt)) {
-        val lateLabel = TextView(this).apply {
-          text = SnoozeRules.LATE_LABEL
-          setTextColor(Color.rgb(255, 190, 92))
-          textSize = 12f
-          gravity = Gravity.CENTER
-          setPadding(0, dp(4), 0, 0)
-        }
-        column.addView(lateLabel, matchWidth())
-      }
-      val params = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
+      val params = LinearLayout.LayoutParams(0, dp(64), 1f).apply {
         if (index > 0) marginStart = dp(8)
       }
-      optionRow.addView(column, params)
+      optionRow.addView(chip, params)
     }
     root.addView(optionRow, matchWidth())
 
+    // 고른 분이 늦으면 미루기 버튼 바로 위에 굵은 경고 한 줄 ("15분 미루면 9:00 출발보다 5분 늦어요")
+    if (selectedLateMinutes > 0 && departAt != null) {
+      val lateLine = TextView(this).apply {
+        text = SnoozeRules.lateLine(selected, departAt, selectedLateMinutes)
+        setTextColor(Color.WHITE)
+        setTypeface(typeface, Typeface.BOLD)
+        textSize = 16f
+        gravity = Gravity.CENTER
+        setPadding(dp(12), dp(10), dp(12), dp(10))
+        background = box(DANGER_COLOR)
+      }
+      root.addView(lateLine, matchWidth().apply { topMargin = dp(12) })
+    }
+
     val snoozeButton = Button(this).apply {
-      text = "${selected}분 미루기"
+      text = SnoozeRules.buttonLabel(selected, selectedLateMinutes > 0)
       textSize = 18f
+      isAllCaps = false
+      // 늦는 분을 골랐으면 경고 테두리 (눌림 — 막지는 않음)
+      if (selectedLateMinutes > 0) {
+        setTextColor(Color.WHITE)
+        background = box(CHIP_COLOR, WARN_COLOR, 3)
+      }
       isEnabled = canSnooze
       alpha = if (canSnooze) 1f else 0.35f
       setOnClickListener { snoozeAlarm(selected) }
@@ -265,6 +307,14 @@ class AlarmRingingActivity : Activity() {
       }
     }
   }
+
+  // 둥근 사각 바탕 (strokeDp > 0이면 테두리)
+  private fun box(fill: Int, stroke: Int = Color.TRANSPARENT, strokeDp: Int = 0): GradientDrawable =
+    GradientDrawable().apply {
+      setColor(fill)
+      cornerRadius = dp(8).toFloat()
+      if (strokeDp > 0) setStroke(dp(strokeDp), stroke)
+    }
 
   private fun matchWidth() = LinearLayout.LayoutParams(
     LinearLayout.LayoutParams.MATCH_PARENT,
