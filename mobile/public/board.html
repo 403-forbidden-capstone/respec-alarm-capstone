@@ -450,7 +450,7 @@ const CHECKS = [
   // ── AI · 루틴
   { id: 'C18', area: 'AI · 루틴', name: 'AI 대화 → 일정 추출 → 알람 저장', screens: ['A02', 'H05'], start: '/ai',
     web: { st: 'part', ev: '10/10 흐름 확인 #106 1 · 2 · 3 — 대본 고정, 입력과 무관하게 같은 응답' }, phone: { st: 'part', ev: '10/18 에뮬레이터: 대본 흐름 됨(입력과 무관), "수정"은 새 일정에 값 채움 — 마이크 · 음성은 없음 (AI 대기)' },
-    server: { st: 'no', ev: 'AI 호출 · 대화 저장 없음 — AI 대기 (#37 #42)' }, test: { st: 'ok', ev: 'voice/api 대본 → 일정 카드 → 저장 · voice/alarmless 알람 일부 · 없이 저장(D46) · mocks/ai 대본 — 실제 AI 호출 없음(AI 대기)' },
+    server: { st: 'part', ev: '앱은 실데이터 텍스트 대화 연결됨(voice/real — 카드 여러 장 · 저장 → 알람 · 정정 반영 · 실패 · 한도) — 서버 함수 voice-session · voice-turn은 main에 머지됨(#265). 실서버 흐름은 서버 함수 배포 뒤 확인' }, test: { st: 'ok', ev: 'voice/api 대본 → 일정 카드 → 저장 · voice/alarmless 알람 일부 · 없이 저장(D46) · voice/real 가짜 서버 응답으로 2단 턴 · 카드 2장 · 장소 고르기 · 저장 · 준비 ±N · 강도 보통으로 · 실패 · 한도 · rev 어긋남 · 재시도 · voice/fixes 정정 — 실제 AI 호출 없음' },
     how: ['"A02 AI 대화" → "말하기" → 내 발화 → AI 응답', '"텍스트" → 보내기 → 카드 "대화에서 찾은 내용" 스터디 · 5월 23일 오후 2:00 · 학교 도서관 · 노트북 충전기', '"저장" → "스터디 알람을 맞췄어요" → 홈 "알람 전체"에 스터디 12:40 · 1:05 / "수정" → 새 일정 화면에 값 채워짐 / "저장 안 함"'],
     issues: [37, 42] },
   { id: 'C19', area: 'AI · 루틴', name: '대화 종료 → 일기 · 오늘의 사실 · 루틴 제안', screens: ['A03', 'A02'], start: '/ai',
@@ -499,7 +499,8 @@ const EDGE = [
   ['notify', '푸시 전송', '변경 알림을 상대 폰으로(권한 확인 뒤), 깨우기는 D19 전이라 거절 — 앱 토큰 등록 없어 실제로는 안 감(#213)', 'Expo Push'],
   ['wake-check', '기상 미확인 검사', '5분마다(pg_cron, 10/27 밤부터 돎) 미확인 기상을 MISSED로, 그룹 푸시는 D19 뒤', '—'],
   ['suggestion-generate', '제안 · 반복 다음 회차 (새벽 배치)', '아직 없음 — 알람 조정 제안(#49) · 반복 알람 다음 회차(#209)', '—'],
-  ['voice-* · journal-*', 'AI 대화 · 일기', '아직 없음 — 대화 답 · 추출 · 일기 (AI 대기)', 'Gemini'],
+  ['voice-session · voice-turn', 'AI 대화(텍스트)', '앱 연결됨(voice/real) — 서버 함수는 main에 머지됨(#265), 배포 뒤 실서버 흐름 확인', 'Claude'],
+  ['voice-commit · journal-*', '대화 끝 정리 · 일기', '아직 없음 — 할 일 · 준비물 추출 · 일기 (AI 대기)', 'Claude'],
 ];
 // 알람 코어(modules/alarm-core) 함수 — #161 뒤 (웹은 memoryBackend로 같은 함수)
 const NATIVE = [

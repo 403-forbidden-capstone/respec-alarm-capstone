@@ -1,45 +1,103 @@
 import { StyleSheet, View } from 'react-native';
 
 import { Button, Text } from '@/components/ui';
+import { IMPORTANCE_LABEL, KIND_LABEL } from '@/features/alarm/types';
 import { formatDateParen, formatTime } from '@/lib/format';
 import { colors } from '@/theme';
 
-import type { FoundSchedule } from '../types';
+import type { ConversationCard } from '../types';
 import { Bubble, BubbleTime } from './ChatBubble';
 
 type Props = {
-  found: FoundSchedule;
+  card: ConversationCard;
   at: Date; // 카드를 띄운 시각
-  onSave: () => void;
-  onEdit: () => void; // 새 일정(H05)에서 고쳐서 저장
+  onSave: () => void; // [저장] · [바꾸기]
   onReject: () => void;
+  onEdit?: () => void; // 새 일정(H05)에서 고쳐서 저장 — 목업 카드만 (실데이터는 말로 고침)
+  onPickPlace?: () => void; // [장소 고르기] — 장소 검색 시트
+  onOpen?: () => void; // [일정 열기] (APPT_OPEN)
+  onManual?: () => void; // [직접 만들기] — 계산이 안 될 때 H05로
   disabled?: boolean; // 저장 · 저장 안 함이 도는 중
 };
 
-// 대화에서 찾은 일정 카드 (.xcard) — 저장 · 수정 · 저장 안 함, 고른 뒤에는 결과만
-export function FoundScheduleCard({ found, at, onSave, onEdit, onReject, disabled }: Props) {
+const HEAD: Record<ConversationCard['kind'], string> = {
+  APPT_NEW: '대화에서 찾은 내용',
+  ALARM_EDIT: '알람 바꾸기',
+  ALARM_NEW: '알람 만들기',
+  APPT_OPEN: '일정 바꾸기',
+};
+
+// 대화에서 찾은 카드 (.xcard) — 여러 장이 대화 줄에 하나씩 놓임. 상태에 따라 계산 중 · 장소 고르기 · 저장 · 바꾸기 · 저장 안 함, 고른 뒤에는 결과만
+// 그날 첫 일정(firstOfDay)만 알람 줄을 자세히, 나머지는 "출발 알림" 한 줄 (D36)
+export function FoundScheduleCard({ card, at, onSave, onReject, onEdit, onPickPlace, onOpen, onManual, disabled }: Props) {
+  const { status, kind } = card;
+  const calculating = status === 'NEEDS_ESTIMATE' || status === 'ESTIMATING';
+  const done = status === 'SAVED' || status === 'REJECTED';
+  const departure = card.alarms.find((a) => a.kind === 'DEPARTURE' && a.enabled);
+
   return (
     <Bubble who="ai" wide>
       <Text variant="caption" tone="faint" style={styles.head}>
-        대화에서 찾은 내용
+        {HEAD[kind]}
       </Text>
-      <Row label="일정" value={found.title} />
-      <Row label="날짜 · 시간" value={`${formatDateParen(found.at)} ${formatTime(found.at)}`} />
-      <Row label="장소" value={found.place} />
-      {found.items.length ? <Row label="준비물" value={found.items.join(', ')} note="바로 추가함" /> : null}
-      <Text variant="bodyStrong" style={styles.question}>
-        “{found.question}”
-      </Text>
-      {found.status === 'PENDING' ? (
-        <View style={styles.buttons}>
-          <Button label="저장" small onPress={onSave} disabled={disabled} />
-          <Button label="수정" small variant="ghost" onPress={onEdit} disabled={disabled} />
-          <Button label="저장 안 함" small variant="plain" onPress={onReject} disabled={disabled} />
-        </View>
+      {kind === 'APPT_NEW' ? (
+        <>
+          <Row label="일정" value={card.title} />
+          {card.at ? <Row label="날짜 · 시간" value={`${formatDateParen(card.at)} ${formatTime(card.at)}`} /> : null}
+          {card.place ? <Row label="장소" value={card.place} /> : null}
+          {card.importance && card.importance !== 'LOW' ? <Row label="중요도" value={IMPORTANCE_LABEL[card.importance]} /> : null}
+          {card.items.length ? <Row label="준비물" value={card.items.join(', ')} note="같이 저장" /> : null}
+          {status === 'READY' || status === 'SAVED' ? (
+            card.firstOfDay && card.alarms.length ? (
+              card.alarms.filter((a) => a.enabled).map((a) => <Row key={a.kind} label={`${KIND_LABEL[a.kind]} 알람`} value={formatTime(a.at)} />)
+            ) : card.alarms.length ? (
+              <Row label="알람" value={departure ? `출발 알림 ${formatTime(departure.at)}` : '출발 알림'} />
+            ) : null
+          ) : null}
+        </>
       ) : (
-        <Text variant="small" tone="sub" style={styles.result}>
-          {found.status === 'APPLIED' ? '저장했어요' : '저장하지 않았어요'}
+        <>
+          <Text variant="note" weight={600} style={styles.summary}>
+            {card.summary}
+          </Text>
+          {card.alarms.length && status === 'READY' ? card.alarms.map((a) => <Row key={a.kind} label={`${KIND_LABEL[a.kind]} 알람`} value={a.enabled ? formatTime(a.at) : '꺼짐'} />) : null}
+        </>
+      )}
+
+      {card.question ? (
+        <Text variant="bodyStrong" style={styles.question}>
+          “{card.question}”
         </Text>
+      ) : null}
+      {calculating ? (
+        <Text variant="small" tone="sub" style={styles.note} accessibilityLiveRegion="polite">
+          알람을 계산하고 있어요…
+        </Text>
+      ) : null}
+      {status === 'NEEDS_PLACE' || status === 'FAILED' ? (
+        <Text variant="small" tone="sub" style={styles.note} accessibilityLiveRegion="polite">
+          {card.error ?? (status === 'NEEDS_PLACE' ? '장소를 골라 주세요' : '알람을 계산하지 못했어요')}
+        </Text>
+      ) : null}
+      {card.highlight && status === 'READY' ? (
+        <Text variant="small" tone="sub" style={styles.note}>
+          저장하려면 아래 [{kind === 'ALARM_EDIT' ? '바꾸기' : '저장'}]을 눌러 주세요
+        </Text>
+      ) : null}
+
+      {done ? (
+        <Text variant="small" tone="sub" style={styles.result}>
+          {status === 'SAVED' ? (kind === 'ALARM_EDIT' ? '바꿨어요' : '저장했어요') : '저장하지 않았어요'}
+        </Text>
+      ) : (
+        <View style={styles.buttons}>
+          {status === 'READY' && kind !== 'APPT_OPEN' ? <Button label={kind === 'ALARM_EDIT' ? '바꾸기' : '저장'} small onPress={onSave} disabled={disabled} /> : null}
+          {status === 'READY' && kind === 'APPT_OPEN' && onOpen ? <Button label="일정 열기" small onPress={onOpen} disabled={disabled} /> : null}
+          {status === 'NEEDS_PLACE' && onPickPlace ? <Button label="장소 고르기" small onPress={onPickPlace} disabled={disabled} /> : null}
+          {status === 'FAILED' && onManual ? <Button label="직접 만들기" small variant="ghost" onPress={onManual} disabled={disabled} /> : null}
+          {status === 'READY' && kind === 'APPT_NEW' && onEdit ? <Button label="수정" small variant="ghost" onPress={onEdit} disabled={disabled} /> : null}
+          {!calculating ? <Button label={kind === 'APPT_OPEN' ? '닫기' : '저장 안 함'} small variant="plain" onPress={onReject} disabled={disabled} /> : null}
+        </View>
       )}
       <BubbleTime who="ai" at={at} />
     </Bubble>
@@ -67,6 +125,7 @@ function Row({ label, value, note }: { label: string; value: string; note?: stri
 
 const styles = StyleSheet.create({
   head: { marginBottom: 6 },
+  summary: { marginBottom: 6 },
   row: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -77,6 +136,7 @@ const styles = StyleSheet.create({
   },
   value: { flexShrink: 1 },
   question: { marginVertical: 10 },
-  buttons: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+  note: { marginTop: 8 },
+  buttons: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 8 },
   result: { marginTop: 6 },
 });
