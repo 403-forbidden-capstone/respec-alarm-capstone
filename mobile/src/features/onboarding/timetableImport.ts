@@ -116,7 +116,6 @@ export function importNotice(batch: ImportBatch, plan: ImportPlan, limit: number
   const details: string[] = [];
   const unsure = batch.confidence === 'LOW';
   details.push(unsure ? '또렷하게 읽지 못했어요. 한 줄씩 꼼꼼히 확인해 주세요' : batch.confidence === 'MEDIUM' ? '일부는 짐작해서 읽었어요. 시각과 요일을 확인해 주세요' : '맞는지 확인하고, 틀린 줄은 고치거나 빼 주세요');
-  if (batch.source === 'calendar' && added > 0) details.push('이미 저장한 수업이 있다면 빼 주세요');
   if (plan.skipped > 0) details.push(`이미 있는 수업 ${plan.skipped}개는 뺐어요`);
   if (plan.overflow > 0) details.push(`수업은 ${limit}개까지 넣을 수 있어서 ${plan.overflow}개는 못 넣었어요. 나머지는 일정 화면에서 추가해 주세요`);
   if (added === 0 && plan.skipped > 0 && plan.overflow === 0) details[0] = '모두 이미 있는 수업이에요';

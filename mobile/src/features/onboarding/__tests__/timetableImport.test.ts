@@ -111,7 +111,6 @@ describe('importNotice', () => {
     const n = importNotice(c, planOf(c), 10);
     expect(n.headline).toBe('캘린더에서 매주 반복 일정 1개를 찾았어요');
     expect(n.warn).toBe(false);
-    expect(n.details).toContain('이미 저장한 수업이 있다면 빼 주세요');
   });
 
   it('이미 있는 수업 · 상한 초과를 알려 줌, 상한 초과는 경고', () => {
