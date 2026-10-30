@@ -116,7 +116,7 @@
 - 연결 일정 · 이동 조건 · 준비 시간: `appointments` + `appointment_participants`(출발지 · 이동 수단 · 예상 이동 · 출처 · 준비 · 여유) — DB. 출발지 · 이동 수단 · 예상 이동 · 준비 시간도 고침 (D42 C) → 다시 계산 `alarm-suggest` → 저장 `alarm-commit`
 - 알람 시각 직접 고르기 (D42 C): `alarms.scheduled_at` + `time_source` MANUAL(#160), "자동으로 되돌리기" = AUTO. 강도도 같은 규칙(`intensity_source`, #160)
 - 고친 값 기록 (D42 · D43): `user_edit_logs`(#160, 화면 · 칸 · 자동값 → 고친 값 · 시각) — DB, 다음 계산 · 제안의 개인화 입력
-- 예측 준비(P80) 근거: `v_prepare_time_stats` — DB
+- 예측 준비(P80) 근거: `v_prepare_time_stats` — DB (기상~출발 240분 넘는 실측은 학습 표본에서 뺌, 기록은 그대로 — D107 A)
 - 여유 시간을 바꾸면 다시 계산: `alarm-suggest` — Edge → 저장 `alarm-commit` — Edge → 다시 예약 — 폰
 - 종류별 켜기 · 끄기, 강도 직접 고르기(`alarms.is_enabled` · `intensity` · `voice_tone` · `sound_key`)도 저장 때 `alarm-commit`의 `enabled` · `levels`로 — Edge → 다시 예약 — 폰 (DB에 바로 쓰는 길은 없음)
 - 길찾기를 못 했을 때 (7장 7.1.2): 미리 보기가 어림값(`ESTIMATE` · `CACHED`)이거나 직접 입력이 필요하면(`manual_required`) 이동 조건 칸에 안내가 뜸. 저장 때 서버가 어림값만 있으면(`ROUTE_UNAVAILABLE` + `details.fallback`) "길찾기를 못 해 이동시간을 대략 N분으로 잡았어요. 이 값으로 저장할까요?" → "이 값으로 저장"(그 분을 직접 입력 `MANUAL`로 다시 보냄) / "예상 이동을 직접 고칠게요". 좌표가 없어 어림값도 없으면 예상 이동에 직접 입력

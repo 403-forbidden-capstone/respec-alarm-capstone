@@ -865,6 +865,19 @@ await check('v_prepare_time_stats는 본인 통계만 보임 (security_invoker)'
   const r = await q(`select user_id, sample_count::int as n from public.v_prepare_time_stats`);
   return r.length === 1 && r[0].user_id === A && r[0].n === 3 ? true : r;
 });
+await check('v_prepare_time_stats: 기상~출발 240분 넘는 실측은 학습 표본에서만 빠지고 기록(daily_records)은 남음 (D107)', async () => {
+  await as(C);
+  for (const [i, m] of [60, 240, 241, 600].entries()) {
+    await q(`insert into public.daily_records (user_id, record_date, actual_prepare_minutes) values ($1, $2::date, $3)
+             on conflict (user_id, record_date) do update set actual_prepare_minutes = excluded.actual_prepare_minutes`,
+      [C, `2026-08-0${i + 1}`, m]);
+  }
+  const stat = await q(`select sample_count::int as n, p80_minutes::float8 as p80 from public.v_prepare_time_stats where user_id = $1`, [C]);
+  const rec = await q(`select actual_prepare_minutes as m from public.daily_records where user_id = $1 and actual_prepare_minutes is not null order by m`, [C]);
+  const kept = rec.map((x) => x.m).join(',');
+  // 60 · 240 두 건만 셈 → P80 = 60 + (240 − 60) × 0.8 = 204
+  return stat.length === 1 && stat[0].n === 2 && Math.abs(stat[0].p80 - 204) < 0.001 && kept === '60,240,241,600' ? true : { stat, kept };
+});
 await check('updated_at 트리거가 authenticated 요청에서도 돎', async () => {
   await su();
   await q(`update public.profiles set updated_at = now() - interval '1 day' where user_id = $1`, [A]);
