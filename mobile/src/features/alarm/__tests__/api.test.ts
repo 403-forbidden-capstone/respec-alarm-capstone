@@ -26,6 +26,7 @@ import {
   listEditLogs,
   listOccurrences,
   previewAlarms,
+  reverseAddress,
   promptWake,
   recordEdit,
   saveAlarmSettings,
@@ -66,6 +67,20 @@ afterEach(() => {
   db.events.length = 0;
   db.me.wakeAt = null;
   for (const id of Object.keys(db.wakeConfirmations)) delete db.wakeConfirmations[id];
+});
+
+describe('reverseAddress (가짜 모드)', () => {
+  it('좌표로 만든 광진구 주소를 돌려줌 — 같은 좌표면 같은 주소, 건물 이름은 없음', async () => {
+    const a = await reverseAddress(37.5509, 127.0734);
+    expect(a?.address).toMatch(/^서울 광진구 능동로 \d+ \(가짜\)$/);
+    expect(a).not.toHaveProperty('name');
+    await expect(reverseAddress(37.5509, 127.0734)).resolves.toEqual(a);
+  });
+
+  it('범위 밖이거나 숫자가 아닌 좌표는 null', async () => {
+    await expect(reverseAddress(100, 127)).resolves.toBeNull();
+    await expect(reverseAddress(37.5, Number.NaN)).resolves.toBeNull();
+  });
 });
 
 describe('H05 시간 칸', () => {

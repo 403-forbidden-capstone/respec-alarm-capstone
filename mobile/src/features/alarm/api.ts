@@ -39,6 +39,7 @@ import {
   type NextAlarm,
   type Occurrence,
   type Place,
+  type PinAddress,
   type RingInfo,
   type RingKind,
   type ScheduleItem,
@@ -540,6 +541,15 @@ export async function listPlaces(query?: string, near?: LatLng): Promise<Place[]
   // 가짜 모드의 "최근 장소" = 처음부터 있던 4곳 (이전 동작 그대로), 검색은 대학가 장소 전체에서
   if (!text) return recentMockPlaces.map((p) => ({ ...p }));
   return filterPlaces(places, text, near).map((p) => ({ ...p }));
+}
+
+// 지도 핀 자리의 주소 (지도 고르기 시트) — 핀이 멈춘 뒤 부름. 못 구하면 null (바다 · 해외), 서버 오류는 던짐 (실데이터는 place-reverse 카카오 좌표→주소, 저장 안 함)
+//   가짜 모드는 좌표로 만든 그럴듯한 광진구 주소 (같은 좌표면 같은 주소)
+export async function reverseAddress(lat: number, lng: number): Promise<PinAddress | null> {
+  if (!isMock()) return real.reverseAddress(lat, lng);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180) return null;
+  const number = 1 + (Math.round(Math.abs(lat * 1e4 + lng * 1e4)) % 300);
+  return { address: `서울 광진구 능동로 ${number} (가짜)` };
 }
 
 // 새 일정 처음 입력값 — 일정명 · 준비물은 비어 있음, 장소는 첫 곳 선택. 날짜 · 시간은 홈에서 넘어온 날(day)의 오후 2시

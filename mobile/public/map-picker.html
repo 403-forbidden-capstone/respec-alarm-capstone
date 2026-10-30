@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>지도에서 위치 고르기</title>
+<!--
+  지도 고르기 시트(features/alarm/components/MapPlaceSheet)가 WebView(앱) · iframe(웹 미리보기)으로 여는 정적 페이지.
+  번들러 없이 이 파일 한 장으로 돌고, Expo 웹 빌드가 public/을 루트에 그대로 서빙함 (/map-picker.html).
+  주소 인자: ?key=카카오 JavaScript 키 &lat=처음 중심 위도 &lng=처음 중심 경도
+  통신은 JSON 글자 하나를 postMessage로 주고받음 (앱 쪽 해석은 features/alarm/mapPicker.ts)
+    이 페이지 → 앱  {type:'ready'}                            지도가 떴음
+                     {type:'center', lat, lng}                 지도를 움직여 멈춘 뒤 가운데(핀) 좌표 — 0.3초 디바운스
+                     {type:'error', reason:'no-key'|'sdk-failed'}  지도를 못 띄움
+    앱 → 이 페이지  {type:'moveTo', lat, lng}                 그 좌표로 지도를 옮김
+                     {type:'setRadius', meters}                핀 둘레에 원 하나 (0 이하면 지움) — 반경 고르기(다음 PR)용
+  보내는 길: RN WebView면 window.ReactNativeWebView.postMessage, iframe이면 window.parent.postMessage (받는 쪽이 origin 확인)
+  카카오 JavaScript 키는 공개 값(허용 도메인으로 막음)이라 주소에 실려도 됨. REST 키는 여기에 쓰지 않음
+-->
+<style>
+/* 앱 theme/tokens.ts의 색과 같은 값 — 이 페이지는 앱 번들 밖이라 직접 적음 */
+:root{ --bg:#efefec; --ink:#151515; --sub:#6b6b67; --card:#ffffff; --font:Pretendard,"Apple SD Gothic Neo","Malgun Gothic","Noto Sans KR",system-ui,sans-serif }
+*{ box-sizing:border-box }
+html,body{ margin:0; height:100%; overflow:hidden; background:var(--bg); font-family:var(--font); -webkit-tap-highlight-color:transparent }
+#map{ position:absolute; top:0; right:0; bottom:0; left:0 }
+/* 가운데 핀 — 끝(아래 가운데)이 지도 중심에 오게 위로 높이만큼 올림. 지도 끌기를 막지 않게 눌림 통과 */
+#pin{ position:absolute; left:50%; top:50%; width:30px; height:42px; margin:-42px 0 0 -15px; z-index:5; pointer-events:none; display:none; filter:drop-shadow(0 2px 2px rgba(0,0,0,.28)) }
+#msg{ position:absolute; top:50%; left:0; right:0; transform:translateY(-50%); text-align:center; color:var(--sub); font-size:14px; line-height:20px; display:none }
+</style>
+</head>
+<body>
+<div id="map"></div>
+<svg id="pin" viewBox="0 0 30 42" aria-hidden="true">
+  <path d="M15 1C7.3 1 1 7.2 1 14.8 1 25 15 41 15 41s14-16 14-26.2C29 7.2 22.7 1 15 1z" fill="#151515"/>
+  <circle cx="15" cy="14.5" r="5" fill="#ffffff"/>
+</svg>
+<div id="msg" role="status">지도 준비 중</div>
+<script>
+(function () {
+  'use strict';
+
+  var params = new URLSearchParams(location.search);
+  var key = (params.get('key') || '').trim();
+  var DEFAULT = { lat: 37.5665, lng: 126.978 }; // 서울 시청 — 인자가 없어도 열리게
+  var initial = {
+    lat: inRange(Number(params.get('lat')), 90, params.get('lat')) ? Number(params.get('lat')) : DEFAULT.lat,
+    lng: inRange(Number(params.get('lng')), 180, params.get('lng')) ? Number(params.get('lng')) : DEFAULT.lng
+  };
+  var SEND_DELAY_MS = 300; // 지도가 멈추고 이만큼 지나야 가운데 좌표를 보냄
+  var LOAD_TIMEOUT_MS = 10000; // 카카오 SDK가 이 안에 안 뜨면 sdk-failed
+
+  var inApp = !!window.ReactNativeWebView; // RN WebView
+  var inFrame = !inApp && window.parent !== window; // iframe (웹 미리보기)
+
+  var map = null;
+  var circle = null;
+  var radius = 0;
+  var failed = false;
+  var sent = false; // center를 한 번이라도 보냈는지 — 처음 idle(우리가 둔 처음 중심)은 건너뛰려고
+  var sendTimer = 0;
+  var pending = []; // 지도가 뜨기 전에 온 moveTo · setRadius
+
+  function inRange(n, limit, raw) {
+    return raw !== null && raw !== '' && isFinite(n) && Math.abs(n) <= limit;
+  }
+
+  function send(msg) {
+    var text = JSON.stringify(msg);
+    try {
+      if (inApp) window.ReactNativeWebView.postMessage(text);
+      else if (inFrame) window.parent.postMessage(text, '*');
+    } catch (e) { /* 보낼 곳이 없으면(브라우저로 직접 열기) 조용히 */ }
+  }
+
+  function fail(reason) {
+    if (failed || map) return;
+    failed = true;
+    document.getElementById('msg').style.display = 'block';
+    send({ type: 'error', reason: reason });
+  }
+
+  // ---- 앱 → 페이지 ----
+  function apply(msg) {
+    if (!map) { pending.push(msg); return; }
+    if (msg.type === 'moveTo') {
+      map.setCenter(new kakao.maps.LatLng(msg.lat, msg.lng));
+    } else if (msg.type === 'setRadius') {
+      radius = msg.meters > 0 && isFinite(msg.meters) ? msg.meters : 0;
+      drawCircle();
+    }
+  }
+
+  function onMessage(event) {
+    // iframe이면 위쪽 창에서 온 것만 (다른 창이 보낸 글자는 무시)
+    if (inFrame && event.source !== window.parent) return;
+    var data = event.data;
+    if (typeof data === 'string') {
+      try { data = JSON.parse(data); } catch (e) { return; }
+    }
+    if (!data || typeof data !== 'object') return;
+    if (data.type === 'moveTo' && typeof data.lat === 'number' && typeof data.lng === 'number' && Math.abs(data.lat) <= 90 && Math.abs(data.lng) <= 180) {
+      apply({ type: 'moveTo', lat: data.lat, lng: data.lng });
+    } else if (data.type === 'setRadius' && typeof data.meters === 'number') {
+      apply({ type: 'setRadius', meters: data.meters });
+    }
+  }
+  window.addEventListener('message', onMessage);
+  document.addEventListener('message', onMessage); // 안드로이드 WebView는 document로 보냄
+
+  // ---- 반경 원 (다음 PR에서 반경 고르기가 씀) ----
+  function drawCircle() {
+    if (!map) return;
+    if (!radius) {
+      if (circle) { circle.setMap(null); circle = null; }
+      return;
+    }
+    if (!circle) {
+      circle = new kakao.maps.Circle({
+        center: map.getCenter(),
+        radius: radius,
+        strokeWeight: 2,
+        strokeColor: '#151515',
+        strokeOpacity: 0.6,
+        fillColor: '#151515',
+        fillOpacity: 0.08
+      });
+      circle.setMap(map);
+    } else {
+      circle.setPosition(map.getCenter());
+      circle.setRadius(radius);
+    }
+  }
+
+  // ---- 지도 ----
+  function sendCenter() {
+    var c = map.getCenter();
+    var lat = c.getLat();
+    var lng = c.getLng();
+    // 처음 idle은 우리가 둔 처음 중심이라 사용자가 고른 자리가 아님
+    if (!sent && Math.abs(lat - initial.lat) < 1e-7 && Math.abs(lng - initial.lng) < 1e-7) return;
+    sent = true;
+    send({ type: 'center', lat: lat, lng: lng });
+  }
+
+  function init() {
+    if (failed) return;
+    try {
+      map = new kakao.maps.Map(document.getElementById('map'), {
+        center: new kakao.maps.LatLng(initial.lat, initial.lng),
+        level: 3
+      });
+    } catch (e) {
+      map = null;
+      fail('sdk-failed');
+      return;
+    }
+    document.getElementById('pin').style.display = 'block';
+    kakao.maps.event.addListener(map, 'center_changed', function () {
+      if (circle) circle.setPosition(map.getCenter());
+    });
+    kakao.maps.event.addListener(map, 'idle', function () {
+      clearTimeout(sendTimer);
+      sendTimer = setTimeout(sendCenter, SEND_DELAY_MS);
+    });
+    var queued = pending;
+    pending = [];
+    queued.forEach(apply);
+    send({ type: 'ready' });
+  }
+
+  function loadSdk() {
+    if (!key) { fail('no-key'); return; }
+    var script = document.createElement('script');
+    script.src = 'https://dapi.kakao.com/v2/maps/sdk.js?appkey=' + encodeURIComponent(key) + '&autoload=false';
+    script.async = true;
+    script.onload = function () {
+      if (!window.kakao || !kakao.maps || !kakao.maps.load) { fail('sdk-failed'); return; }
+      kakao.maps.load(init);
+    };
+    script.onerror = function () { fail('sdk-failed'); };
+    document.head.appendChild(script);
+    setTimeout(function () { if (!map) fail('sdk-failed'); }, LOAD_TIMEOUT_MS);
+  }
+
+  loadSdk();
+})();
+</script>
+</body>
+</html>
