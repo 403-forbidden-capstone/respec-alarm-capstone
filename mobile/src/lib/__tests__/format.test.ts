@@ -1,6 +1,7 @@
 import { describe, expect, it } from '@jest/globals';
 
 import {
+  dropRepeatedAmpm,
   formatDate,
   formatDateParen,
   formatDateShort,
@@ -72,5 +73,21 @@ describe('keepWords', () => {
     expect(out.replace(/\u2060/g, '').replace(/\u00A0/g, ' ')).toBe('오후 12:28 기상 · 지남');
     expect(out).toBe('오\u2060후\u00A012:28 기\u2060상 ·\u00A0지\u2060남');
     expect(keepWords('7:00 AM')).toBe('7:00 AM');
+  });
+});
+
+describe('dropRepeatedAmpm', () => {
+  it('앞 줄과 같은 오전 · 오후만 빼고, 바뀌는 곳은 남김', () => {
+    expect(dropRepeatedAmpm(['오전 8:00 기상', '오전 8:30 준비', '오후 1:10 출발', '오후 1:40 도착'])).toEqual([
+      '오전 8:00 기상',
+      '8:30 준비',
+      '오후 1:10 출발',
+      '1:40 도착',
+    ]);
+  });
+  it('오전 · 오후가 없는 줄은 그대로, 하나뿐이면 그대로', () => {
+    expect(dropRepeatedAmpm(['오전 8:00 기상'])).toEqual(['오전 8:00 기상']);
+    expect(dropRepeatedAmpm(['08:00 기상', '08:30 준비'])).toEqual(['08:00 기상', '08:30 준비']);
+    expect(dropRepeatedAmpm([])).toEqual([]);
   });
 });

@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 
-import { keepWords } from '@/lib/format';
+import { dropRepeatedAmpm, keepWords } from '@/lib/format';
 import { colors, radius, size, space } from '@/theme';
 
 import { Text } from './Text';
@@ -11,9 +11,9 @@ type Props = {
   dateLabel: string; // 5월 22일 (목) · 캡스톤팀 공유 — 섹션 제목에 날짜가 있는 목록(H02)에서는 '캡스톤팀 공유'만, 없으면 빈 줄
   time: { ampm: string; hm: string }; // 첫 알람 (큰 글자)
   kindLabel: string; // 기상
-  chain: string[]; // 오른쪽 세로 줄 (오전 8:00 기상 …)
-  meta: string[]; // 알람 강도 · 중 / 준비 60분 · 이동 50분 · 여유 10분
-  foot: string; // 팀 주간회의 · 세종대학교 · 오전 10:00
+  chain: string[]; // 큰 시각 아래 한 줄 (오전 8:00 기상 · 8:30 준비 …) — 오전 · 오후는 바뀔 때만 보임, 한 줄이 넘으면 항목 단위로 아래 줄로
+  meta: string[]; // 약속 줄 아래 작은 글자 — 알람 강도 · 중 / 준비 60분 · 이동 50분 · 여유 10분
+  foot: string; // 약속 줄: 팀 주간회의 · 세종대학교 · 오전 10:00
   enabled?: boolean; // 끄면 시각 · 글자만 흐리게 (스위치 · children은 그대로)
   onToggle?: (next: boolean) => void; // 있으면 오른쪽 위에 스위치
   toggleLabel?: string; // 화면 읽기용 (팀 주간회의 알람)
@@ -37,37 +37,8 @@ export function AlarmCard({
   pressLabel,
   children,
 }: Props) {
-  const body = (
-    <>
-      <View style={styles.big}>
-        <Text variant="ampm" tone="sub">
-          {time.ampm}
-        </Text>
-        <Text variant="number">{time.hm}</Text>
-        <Text variant="small" tone="sub">
-          {kindLabel}
-        </Text>
-      </View>
-      {/* 오른쪽 줄은 남은 폭을 다 받고 오른쪽 정렬 — 글자 폭으로 칸을 재면 Android에서 "기 / 상"처럼 끝 글자가 넘어감 (#222)
-          좁은 화면에서 넘치면 단어 사이에서만 줄을 바꿈 ("오후 12:28 / 기상 · 지남") */}
-      <View style={styles.chain}>
-        {chain.map((line, i) => (
-          <View key={line}>
-            {i > 0 ? (
-              <Text variant="label" tone="faint" align="right" style={styles.dash}>
-                -
-              </Text>
-            ) : null}
-            <Text variant="label" weight={600} align="right">
-              {keepWords(line)}
-            </Text>
-          </View>
-        ))}
-      </View>
-    </>
-  );
-
   const dim = enabled ? null : styles.dim;
+  // 4단 왼쪽 정렬 — [날짜 · 스위치] / [큰 시각 + 종류] / [체인 한 줄] / [약속 줄] 그 아래 작은 글자(meta)
   const main = (
     <>
       <View style={[styles.head, onToggle && styles.headGap]}>
@@ -75,23 +46,43 @@ export function AlarmCard({
           {dateLabel}
         </Text>
       </View>
-      <View style={[styles.body, dim]}>{body}</View>
-      <View style={[styles.meta, dim]}>
-        {meta.map((line) => (
-          <Text key={line} variant="caption" tone="faint">
-            {line}
+      <View style={dim}>
+        <View style={styles.big}>
+          <Text variant="ampm" tone="sub">
+            {time.ampm}
           </Text>
-        ))}
-      </View>
-      {/* 누를 수 있는 카드만 약속 줄 끝에 › (눌리지 않는 공유 알람 카드에는 없음) */}
-      <View style={[styles.foot, dim]}>
-        <Text variant="small" tone="sub" align="right" style={styles.footText}>
-          {foot}
-        </Text>
-        {onPress ? (
-          <Text variant="small" tone="faint">
-            ›
+          <Text variant="number">{time.hm}</Text>
+          <Text variant="small" tone="sub">
+            {kindLabel}
           </Text>
+        </View>
+        {/* 항목은 줄 안에서 쪼개지지 않고, 좁으면 항목 단위로 다음 줄로 내려감 — 글자 폭으로 칸을 재면 Android에서 "기 / 상"처럼 끝 글자가 넘어감 (#222) */}
+        <View style={styles.chain}>
+          {dropRepeatedAmpm(chain).map((line, i) => (
+            <Text key={`${i}-${line}`} variant="label" weight={600}>
+              {keepWords(line)}
+            </Text>
+          ))}
+        </View>
+        {/* 누를 수 있는 카드만 약속 줄 끝에 › (눌리지 않는 공유 알람 카드에는 없음) */}
+        <View style={styles.foot}>
+          <Text variant="small" tone="sub" style={styles.footText}>
+            {foot}
+          </Text>
+          {onPress ? (
+            <Text variant="small" tone="faint">
+              ›
+            </Text>
+          ) : null}
+        </View>
+        {meta.length ? (
+          <View style={styles.meta}>
+            {meta.map((line) => (
+              <Text key={line} variant="caption" tone="faint">
+                {line}
+              </Text>
+            ))}
+          </View>
         ) : null}
       </View>
     </>
@@ -140,12 +131,10 @@ const styles = StyleSheet.create({
   toggle: { position: 'absolute', top: 14, right: 16 },
   head: { justifyContent: 'center', minHeight: 28 },
   headGap: { paddingRight: size.switchW + 12 }, // 스위치가 얹힐 자리
-  body: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingTop: 2 },
   pressed: { opacity: 0.7 },
-  big: { flexDirection: 'row', alignItems: 'baseline', gap: 6 },
-  chain: { flex: 1, marginLeft: 12 },
-  dash: { lineHeight: 12 },
+  big: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'baseline', columnGap: 6, paddingTop: 2 },
+  chain: { flexDirection: 'row', flexWrap: 'wrap', columnGap: 12, rowGap: 2, marginTop: 2 },
+  foot: { marginTop: 8, flexDirection: 'row', alignItems: 'center', gap: 4 },
+  footText: { flex: 1 },
   meta: { marginTop: 2 },
-  foot: { marginTop: 6, flexDirection: 'row', justifyContent: 'flex-end', alignItems: 'center', gap: 4 },
-  footText: { flexShrink: 1 },
 });
