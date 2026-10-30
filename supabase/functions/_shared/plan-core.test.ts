@@ -456,6 +456,70 @@ test('응답의 prepare.recent: 그날 두 번째 일정은 기록을 안 쓰므
   assert.deepEqual([dto.prepare.recent, dto.prepare.sample_count], [[], 0]);
 });
 
+// ---- 저녁에만 일정이 있는 날은 기상 알람 없음 (#320, 헤드 10/30) ----
+
+test('저녁 단일 일정 18:00(이동 30 · 여유 10): 기상 없음 · 준비 · 출발 · 도착만, 준비 15분', () => {
+  const plan = computePlan(base({ draft: { at: kst(22, 1080), destination: { name: '강남역' } }, now: kst(22, 600) }), api(30));
+  assert.equal(plan.withWake, false);
+  assert.equal(plan.prepare.minutes, 15);
+  assert.equal(plan.beforePrepareMinutes, 0);
+  assert.deepEqual(text(plan), ['PREPARE 17:05', 'DEPARTURE 17:20', 'ARRIVE 17:50']);
+  const s = toSuggestion(plan);
+  assert.equal(s.with_wake, false);
+  assert.equal(s.wake_at, null);
+});
+
+test('경계: 계산된 기상이 11:59면 기상 있음, 12:00이면 기상 없음', () => {
+  // 기록 없음: 준비 50 + 이동 30 + 여유 10 = 90분 전이 기상 → 약속 13:29면 기상 11:59, 13:30이면 12:00
+  const at = (minutes: number) => computePlan(base({ stats: { sampleCount: 0, p80: null }, draft: { at: kst(22, minutes), destination: { name: '강남역' } }, now: kst(22, 400) }), api(30));
+  const before = at(13 * 60 + 29);
+  assert.equal(before.withWake, true);
+  assert.equal(hm(before.chain[0].at.toISOString()), '11:59');
+  const exact = at(13 * 60 + 30);
+  assert.equal(exact.withWake, false);
+  assert.deepEqual(text(exact), ['PREPARE 12:35', 'DEPARTURE 12:50', 'ARRIVE 13:20']); // 기상 없이 준비 15분으로 다시 계산
+});
+
+test('낮 일정 14:00에서 계산된 기상이 오전이면 기상 있음', () => {
+  // 첫 값(온보딩) 90분 · 이동 30 · 여유 10 → 기상 14:00 − 10 − 30 − 90 = 11:50. 기본 50분이면 12:30이라 기상 없음
+  const draft = { at: kst(22, 14 * 60), destination: { name: '강남역' } };
+  const long = computePlan(base({ profile: { ...profile, default_prepare_minutes: 90 }, stats: { sampleCount: 0, p80: null }, draft, now: kst(22, 400) }), api(30));
+  assert.equal(long.withWake, true);
+  assert.equal(hm(long.chain[0].at.toISOString()), '11:50');
+  const short = computePlan(base({ stats: { sampleCount: 0, p80: null }, draft, now: kst(22, 400) }), api(30));
+  assert.equal(short.withWake, false);
+});
+
+test('직접 지정은 존중: with_wake true · 직접 고른 기상 시각은 12시 이후여도 기상 있음', () => {
+  const draft = { at: kst(22, 1080), destination: { name: '강남역' } };
+  const forced = computePlan(base({ draft: { ...draft, withWake: true }, now: kst(22, 400) }), api(30));
+  assert.equal(forced.withWake, true);
+  assert.equal(forced.chain[0].kind, 'WAKE');
+  const manual = computePlan(base({ draft: { ...draft, manualTimes: { WAKE: kst(22, 15 * 60) } }, now: kst(22, 400) }), api(30));
+  assert.equal(manual.withWake, true);
+  assert.deepEqual(text(manual).slice(0, 1), ['WAKE 15:00*']);
+  // with_wake false는 원래대로 기상 없음 (오전 일정이어도)
+  const off = computePlan(base({ draft: { at: kst(22, 600), destination: { name: '세종대학교' }, withWake: false } }), api(50));
+  assert.equal(off.withWake, false);
+});
+
+test('kinds에 WAKE가 있어도 저녁이면 기상은 안 만들어짐 (kinds는 거르기만, L6 안건후보 기본안)', () => {
+  const plan = computePlan(base({ draft: { at: kst(22, 1080), destination: { name: '강남역' }, kinds: ['WAKE', 'PREPARE', 'DEPARTURE'] }, now: kst(22, 400) }), api(30));
+  assert.equal(plan.withWake, false);
+  assert.deepEqual(plan.chain.map((x) => x.kind), ['PREPARE', 'DEPARTURE', 'ARRIVE']);
+});
+
+test('시간대: 같은 순간도 profile.timezone의 낮으로 판정 (서울이면 오후 → 기상 없음, 뉴욕이면 새벽 → 기상 있음)', () => {
+  // 약속 UTC 08:00 (서울 17:00 · 뉴욕 04:00), 기록 없음 · 이동 30 · 여유 10 · 준비 50 → 기상 UTC 06:30 (서울 15:30 · 뉴욕 02:30)
+  const at = new Date('2025-05-22T08:00:00Z');
+  const input = (timezone: string) => base({ profile: { ...profile, timezone }, stats: { sampleCount: 0, p80: null }, draft: { at, destination: { name: '강남역' } }, now: new Date('2025-05-21T00:00:00Z') });
+  assert.equal(computePlan(input('Asia/Seoul'), api(30)).withWake, false);
+  assert.equal(computePlan(input('America/New_York'), api(30)).withWake, true);
+  // 시간대가 비었거나 틀리면 서울
+  assert.equal(computePlan(input(''), api(30)).withWake, false);
+  assert.equal(computePlan(input('No/Such_Zone'), api(30)).withWake, false);
+});
+
 test('축별 선택을 끄면(axesEnabled false) 요청 · 저장된 축 값을 모두 무시하고 자동(강도 따름) — 켜면 요청 값이 우선 (D1 A flag, 헤드 확정 10/30)', () => {
   const stored = row('WAKE', 480, { intensity_source: 'MANUAL', sound_key: 'theme_urgent', vibration: 'NONE' });
   assert.deepEqual(resolveOverrides({ sound: 2 }, [stored], 1, true), { sound: 2 });

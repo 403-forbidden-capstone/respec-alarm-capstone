@@ -51,7 +51,7 @@ describe('AI 대화 → H05 수정 → 알람 일부만 켜고 저장', () => {
     await say();
     await say(); // 찾은 일정 카드
     const draft = foundScheduleDraft()!;
-    const estimate = await estimateAppointment({ ...draft, date: kst(TODAY + 2, 0), alarms });
+    const estimate = await estimateAppointment({ ...draft, date: kst(TODAY + 2, 0), time: '12:00', alarms }); // 기본 14:00은 계산된 기상이 낮 12시 이후라 기상이 안 생김(#320) → 기상이 오전인 12:00 일정으로
     const saved = await saveFoundSchedule(estimate);
     const c = await getConversation();
     return { saved, reply: c.messages[c.messages.length - 1].text };
@@ -60,23 +60,23 @@ describe('AI 대화 → H05 수정 → 알람 일부만 켜고 저장', () => {
 
   it('모두 켜면 준비 · 출발 시각으로 답함 (그대로)', async () => {
     const { reply } = await saveOnly({ WAKE: true, PREPARE: true, DEPARTURE: true });
-    expect(reply).toBe(`저장했어요. 5월 24일 오후 12:25 준비, 오후 1:05 출발${tail}`);
+    expect(reply).toBe(`저장했어요. 5월 24일 오전 10:25 준비, 오전 11:05 출발${tail}`);
   });
 
   it('준비만 끄면 기상 · 출발 시각으로 답함 (기상 시각이 "준비"로 나오지 않음)', async () => {
     const { saved, reply } = await saveOnly({ WAKE: true, PREPARE: false, DEPARTURE: true });
     expect(saved.alarms.map((x) => x.kind)).toEqual(['WAKE', 'DEPARTURE', 'ARRIVE']);
-    expect(reply).toBe(`저장했어요. 5월 24일 오후 12:05 기상, 오후 1:05 출발${tail}`);
+    expect(reply).toBe(`저장했어요. 5월 24일 오전 10:05 기상, 오전 11:05 출발${tail}`);
   });
 
-  it('기상만 켜면 기상 시각 하나로 답함 ("12:05 준비, 12:05 출발"로 나오지 않음)', async () => {
+  it('기상만 켜면 기상 시각 하나로 답함 ("10:05 준비, 10:05 출발"로 나오지 않음)', async () => {
     const { saved, reply } = await saveOnly({ WAKE: true, PREPARE: false, DEPARTURE: false });
     expect(saved.alarms.map((x) => x.kind)).toEqual(['WAKE', 'ARRIVE']);
-    expect(reply).toBe(`저장했어요. 5월 24일 오후 12:05 기상${tail}`);
+    expect(reply).toBe(`저장했어요. 5월 24일 오전 10:05 기상${tail}`);
   });
 
   it('출발만 켜면 출발 시각이 "준비"로 읽히지 않음', async () => {
     const { reply } = await saveOnly({ WAKE: false, PREPARE: false, DEPARTURE: true });
-    expect(reply).toBe(`저장했어요. 5월 24일 오후 1:05 출발${tail}`);
+    expect(reply).toBe(`저장했어요. 5월 24일 오전 11:05 출발${tail}`);
   });
 });

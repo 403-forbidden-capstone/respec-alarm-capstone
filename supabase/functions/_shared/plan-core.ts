@@ -13,6 +13,7 @@ import {
   autoLevel,
   checkAlarms,
   departureAt,
+  isEveningWake,
   levelOfVibration,
   levelOfSoundKey,
   levelOfVoiceTone,
@@ -39,6 +40,7 @@ import {
   wakeSensitivityOf,
 } from './calc/index.ts';
 import { resolveEnabled } from './commit-core.ts';
+import { safeTimeZone } from './tz.ts';
 import type { AlarmFields, ParticipantFields, PlaceInput } from './draft.ts';
 import type { ResolvedTravel, Warning } from './route.ts';
 
@@ -293,21 +295,41 @@ export function computePlan(i: PlanInputs, travel: ResolvedTravel, mode: PlanMod
   const chosen = travel.chosen;
   if (!chosen) throw new Error('이동시간 없이 계획을 만들 수 없어요');
 
-  const withWake = i.draft.withWake ?? !i.sameDayWake;
-  const beforePrepareMinutes = i.draft.beforePrepareMinutes ?? (withWake ? inferBeforePrepare(i.existingAlarms) ?? DEFAULT_BEFORE_PREPARE_MINUTES : 0);
+  const derive = (withWake: boolean) => {
+    const beforePrepareMinutes = i.draft.beforePrepareMinutes ?? (withWake ? inferBeforePrepare(i.existingAlarms) ?? DEFAULT_BEFORE_PREPARE_MINUTES : 0);
 
-  // 기록(stats.p80)은 이미 "기상 ~ 출발"이라 그대로 씀 — 예전에는 준비 전 활동 20분을 또 더해서 기록이 쌓일수록 알람이 일찍 당겨졌음 (학습 루프 기초 2절 1)
-  // 개인 보정은 그날 첫 일정(기상 알람 있음)에만 — 두 번째 일정(기상 없음, 공통 15분)에 기상~출발 기록을 붙이면 준비가 부풀어서 15분 그대로 (2절 2, 기록 수와 상관없음)
-  //   두 번째 일정은 기록 수도 0으로 넘김 → 출처 DEFAULT · 보정 0. 화면 문구는 sameDayWake일 때 기록 줄을 안 보임
-  // 깨우는 여유(wake_margin)는 내 기록의 0.7 · 0.8 · 0.9 분위수 — 보통이 예전 P80 고정과 같음. 매우 중요 일정은 한 단계 위(빠듯 → 보통 → 넉넉, calc/prepare.ts marginForImportance). 직접 고른 준비 시간이 있으면 그 값이 먼저
-  // 첫 값(공통)은 온보딩 "일어나서 나가기까지" (2절 3). 반복 다음 회차는 prepareBound로 직전 회차 ±10분 안에서만 움직임 (1절 ④)
-  const predicted = predictPrepare({
-    commonP80: withWake ? firstPrepareMinutes(i.profile) : DEFAULT_COMMON_P80.sameDay,
-    personalP80: withWake ? personalPrepareOf(i.stats, wakeMarginOf(i.profile.wake_margin), basics.importance) : null,
-    sampleCount: withWake ? i.stats.sampleCount : 0,
-    override: i.draft.prepareMinutes,
-  });
-  const prepare = i.prepareBound && withWake ? clampPrepareToBound(predicted, i.prepareBound) : predicted;
+    // 기록(stats.p80)은 이미 "기상 ~ 출발"이라 그대로 씀 — 예전에는 준비 전 활동 20분을 또 더해서 기록이 쌓일수록 알람이 일찍 당겨졌음 (학습 루프 기초 2절 1)
+    // 개인 보정은 그날 첫 일정(기상 알람 있음)에만 — 두 번째 일정(기상 없음, 공통 15분)에 기상~출발 기록을 붙이면 준비가 부풀어서 15분 그대로 (2절 2, 기록 수와 상관없음)
+    //   두 번째 일정은 기록 수도 0으로 넘김 → 출처 DEFAULT · 보정 0. 화면 문구는 sameDayWake일 때 기록 줄을 안 보임
+    // 깨우는 여유(wake_margin)는 내 기록의 0.7 · 0.8 · 0.9 분위수 — 보통이 예전 P80 고정과 같음. 매우 중요 일정은 한 단계 위(빠듯 → 보통 → 넉넉, calc/prepare.ts marginForImportance). 직접 고른 준비 시간이 있으면 그 값이 먼저
+    // 첫 값(공통)은 온보딩 "일어나서 나가기까지" (2절 3). 반복 다음 회차는 prepareBound로 직전 회차 ±10분 안에서만 움직임 (1절 ④)
+    const predicted = predictPrepare({
+      commonP80: withWake ? firstPrepareMinutes(i.profile) : DEFAULT_COMMON_P80.sameDay,
+      personalP80: withWake ? personalPrepareOf(i.stats, wakeMarginOf(i.profile.wake_margin), basics.importance) : null,
+      sampleCount: withWake ? i.stats.sampleCount : 0,
+      override: i.draft.prepareMinutes,
+    });
+    const prepare = i.prepareBound && withWake ? clampPrepareToBound(predicted, i.prepareBound) : predicted;
+    return { beforePrepareMinutes, prepare };
+  };
+
+  const manualTimes = resolveManualTimes(i.draft.manualTimes, i.existingAlarms);
+  const timeZone = safeTimeZone(i.profile.timezone);
+  // 그날 첫 일정이면 기상 알람 — 단 계산된 기상이 그날 낮 12시 이후(저녁에만 일정이 있는 날)면 기상 없이 준비 · 출발(+ 도착)만 (B1 버그 후보 4, 헤드 10/30)
+  //   먼저 기상 있는 계산으로 기상 시각을 구해 보고, 12:00 이후면 기상 없는 계산(준비 15분)으로 다시 함. 둘 다 순수 계산
+  //   직접 정한 값은 존중: 요청의 with_wake · 직접 고른 기상 시각(manualTimes.WAKE)이 있으면 자동 규칙을 건너뜀
+  //   L6 안건후보: 저녁 기상 자동 제외와 직접 지정 우선순위 기본안 = with_wake 직접 지정 · 직접 고른 기상 시각은 존중(12시 이후여도 기상 있음), 그 밖은 자동 규칙.
+  //     kinds에 WAKE가 들어 있는 것만으로는 존중하지 않음 — 반복 · 일정 수정이 지금 있는 알람 종류를 kinds로 이어받아서 사용자가 고른 것인지 알 수 없고, kinds는 원래 거르기만 할 뿐 기상을 만들지 못함(그날 두 번째 일정과 같음)
+  let withWake = i.draft.withWake ?? !i.sameDayWake;
+  let derived = derive(withWake);
+  if (i.draft.withWake == null && withWake && manualTimes.WAKE == null) {
+    const depart = departureAt({ at: basics.at, travelMinutes: chosen.minutes, bufferMinutes: basics.bufferMinutes, prepareMinutes: derived.prepare.minutes, beforePrepareMinutes: derived.beforePrepareMinutes, withWake: true, manualTimes: {} });
+    if (isEveningWake(new Date(depart.getTime() - derived.prepare.minutes * 60_000), timeZone, basics.at)) {
+      withWake = false;
+      derived = derive(false);
+    }
+  }
+  const { beforePrepareMinutes, prepare } = derived;
 
   // 잠귀(profiles.wake_sensitivity): 무거움(HEAVY)이면 강, 가벼움 · 보통은 기본 보통 (D69). 앱 map.ts toIntensity · realWrite setIntensity도 같은 값을 넘김
   const wakeSensitivity = wakeSensitivityOf(i.profile.wake_sensitivity);
@@ -315,7 +337,6 @@ export function computePlan(i: PlanInputs, travel: ResolvedTravel, mode: PlanMod
   const intensity = resolveIntensity(basics.importance, i.lateCount4w, resolveOverrides(i.draft.levels, i.existingAlarms, auto), wakeSensitivity);
 
   const kinds = resolveKinds(i.draft.kinds, i.existingAlarms);
-  const manualTimes = resolveManualTimes(i.draft.manualTimes, i.existingAlarms);
   const input = {
     at: basics.at,
     travelMinutes: chosen.minutes,

@@ -1175,3 +1175,15 @@ test('예외 회차뿐인 묶음: 이번만 고친 회차만 남아 있으면 �
     assert.equal(kakao.state.calls, 0, path);
   }
 });
+
+test('#320: 저녁 반복(18:00)은 기상 없이 준비 · 출발 · 도착만 만들어짐 (아침 반복의 기상은 위 기존 시험들이 확인)', async () => {
+  const env = setup(MON_10);
+  const evening = await seed(env, A, slot({ appointment: { title: '저녁 스터디', appointment_at: iso('2026-10-27T18:00'), destination: { name: '세종대학교', ...SCHOOL }, importance: 'NORMAL', recurrence_rule: 'FREQ=WEEKLY;BYDAY=TU,TH' } }), MON_10);
+  const base = env.db.rows('appointments').find((x) => x.series_id === evening)!;
+  assert.deepEqual(lines(env.db, base.appointment_id).map((l) => l.split(' ')[0]), ['PREPARE', 'DEPARTURE', 'ARRIVE']);
+  const kakao = fakeKakao();
+  await roll(env, 'own', MON_10, { lookup: kakao.lookup });
+  for (const d of ['2026-10-29', '2026-11-03', '2026-11-05']) {
+    assert.deepEqual(lines(env.db, occurrence(env.db, evening, d)!.appointment_id).map((l) => l.split(' ')[0]), ['PREPARE', 'DEPARTURE', 'ARRIVE'], d);
+  }
+});
