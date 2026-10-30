@@ -235,7 +235,8 @@ test('[5절] 기록 0건 · 온보딩 70분: 기상~출발 70분, 출처 첫 값
 test('온보딩 값이 없거나 범위 밖이면 50 (프로필 없음 · null · 5분 · 400분)', () => {
   assert.equal(firstPrepareMinutes({}), 50);
   assert.equal(firstPrepareMinutes({ default_prepare_minutes: null }), 50);
-  assert.equal(firstPrepareMinutes({ default_prepare_minutes: 5 }), 50);
+  assert.equal(firstPrepareMinutes({ default_prepare_minutes: 4 }), 50);
+  assert.equal(firstPrepareMinutes({ default_prepare_minutes: 5 }), 5);
   assert.equal(firstPrepareMinutes({ default_prepare_minutes: 400 }), 50);
   assert.equal(firstPrepareMinutes({ default_prepare_minutes: 10 }), 10);
   assert.equal(firstPrepareMinutes({ default_prepare_minutes: 300 }), 300);

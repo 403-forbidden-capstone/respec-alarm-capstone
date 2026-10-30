@@ -118,10 +118,11 @@ export type PlanInputs = {
 };
 
 // 기상~출발 첫 값 — 온보딩 값이 있으면 그것, 없으면(null · 프로필 없음 · 범위 밖) 목업의 50
-//   L6 안건후보: 첫 값 범위 기본안 = 기록 범위와 같은 10~300분만 믿음 (DB 제약은 0~600, 온보딩 화면은 10~180)
+//   L6 안건후보: 첫 값 범위 기본안 = 5~300분만 믿음 (온보딩 · 설정 입력 화면 범위와 같음. 기록 범위 10~300과는 따로 — 첫 값은 사용자가 직접 답한 값이라 짧게 답한 것도 인정. DB 제약은 0~600)
+const FIRST_PREPARE_MIN = 5;
 export function firstPrepareMinutes(profile: Pick<ProfileRow, 'default_prepare_minutes'>): number {
   const v = profile.default_prepare_minutes;
-  return v != null && Number.isFinite(Number(v)) && Number(v) >= PREPARE_RECORD_MIN && Number(v) <= PREPARE_RECORD_MAX ? Math.round(Number(v)) : DEFAULT_COMMON_P80.withWake;
+  return v != null && Number.isFinite(Number(v)) && Number(v) >= FIRST_PREPARE_MIN && Number(v) <= PREPARE_RECORD_MAX ? Math.round(Number(v)) : DEFAULT_COMMON_P80.withWake;
 }
 
 // 자동 준비시간을 기준 값 ±within분 안으로 — 직접 고른 값(MANUAL)은 그대로. 설명용 칸(개인 보정)은 합이 맞게 같이 바꿈
@@ -296,7 +297,7 @@ export function computePlan(i: PlanInputs, travel: ResolvedTravel, mode: PlanMod
   });
   const prepare = i.prepareBound && withWake ? clampPrepareToBound(predicted, i.prepareBound) : predicted;
 
-  // 잠귀(profiles.wake_sensitivity) 칸은 아직 DB에 없어 안 넘김(NORMAL 취급) — L7 PR 3이 칸을 만들면 loadProfile에서 읽어 여기 · map.ts toIntensity · realWrite setIntensity에 같이 넘김
+  // 잠귀(profiles.wake_sensitivity) 칸은 있으나(L7 #267) 아직 안 넘김(NORMAL 취급) — 학습 기초 b에서 loadProfile이 읽어 여기 · map.ts toIntensity · realWrite setIntensity에 같이 넘김
   const auto = autoLevel(basics.importance, i.lateCount4w);
   const intensity = resolveIntensity(basics.importance, i.lateCount4w, resolveOverrides(i.draft.levels, i.existingAlarms, auto));
 
