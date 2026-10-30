@@ -32,5 +32,24 @@ export type OnboardingInput = Pick<
   'nickname' | 'handle' | 'home_name' | 'default_prepare_minutes' | 'default_buffer_minutes' | 'default_transport'
 >;
 
+// 한 번에 바꿀 수 있는 칸 — 온보딩 단계마다 · 설정에서 쓰는 만큼만 저장 (profile/api.ts saveProfileFields)
+export type ProfileFields = Partial<
+  Pick<
+    Profile,
+    | 'nickname'
+    | 'handle'
+    | 'home_name'
+    | 'home_lat'
+    | 'home_lng'
+    | 'default_prepare_minutes'
+    | 'default_buffer_minutes'
+    | 'default_transport'
+    | 'wake_sensitivity'
+    | 'wake_margin'
+    | 'privacy_agreed_at'
+    | 'privacy_version'
+  >
+>;
+
 // 아이디 규칙 — DB 제약과 같음 (^[a-z0-9_]{3,20}$, 대소문자 무시 유일)
 export const HANDLE_PATTERN = /^[a-z0-9_]{3,20}$/;

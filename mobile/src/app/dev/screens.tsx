@@ -21,7 +21,7 @@ import { colors } from '@/theme';
 // 폰 출시용 빌드는 모드가 실데이터로 고정이라 토글이 없음. 가짜 데이터 시나리오 시각도 가짜 모드에서만 보임
 // 실데이터 모드에서 로그인 전이면 이메일 로그인(시드 계정, 웹 · 폰 개발용만), 로그인 후에는 로그아웃(폰 알람 · 기록 정리 포함)
 // 목업에 없는 로그인 · 온보딩 · 설정은 목록에 두지 않음 (#116)
-// "온보딩부터 다시"는 온보딩이 흐름에 있을 때(lib/flags ONBOARDING_IN_FLOW)만 보임 — 지금은 빠져 있어 로그아웃만 있음 (#177)
+// "온보딩부터 다시"는 온보딩이 흐름에 있을 때(lib/flags ONBOARDING_IN_FLOW)만 보임 — 아이디 · 집 · 기본값 · 온보딩 끝난 시각을 비워 처음 단계부터 다시 함
 const TIMES = [
   ['morning', '아침 오전 7:55'],
   ['evening', '전날 밤 9:00'],
@@ -75,7 +75,7 @@ export default function ScreenListScreen() {
             disabled={busy}
             onPress={() => run(signOutAndCleanup, '로그아웃했어요', '/login')}
           />
-          {/* 온보딩을 흐름에서 뺀 동안은 가면 막다른 곳이라 버튼을 숨김 (lib/flags ONBOARDING_IN_FLOW) */}
+          {/* 온보딩을 흐름에서 빼면(ONBOARDING_IN_FLOW = false) 가면 막다른 곳이라 버튼을 숨김 */}
           {ONBOARDING_IN_FLOW ? (
             <Button
               small
@@ -86,7 +86,7 @@ export default function ScreenListScreen() {
                 run(async () => {
                   await resetOnboarding(session.user.id);
                   await refreshProfile();
-                }, '아이디 · 집 · 기본값을 비웠어요', '/onboarding')
+                }, '아이디 · 집 · 기본값 · 온보딩 기록을 비웠어요', '/onboarding')
               }
             />
           ) : null}
