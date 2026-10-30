@@ -287,7 +287,7 @@ describe('S01 제안 (DB 종류: 말소리 · 배경음 · 진동)', () => {
     expect(toSuggestion(row(), null)).toBeNull();
     expect(valueText('SOUND', 'my_sound')).toBe('my_sound');
     expect(valueText('SOUND', null)).toBe('정해지지 않음');
-    expect(valueText('SOUND', 'theme_urgent')).toBe('100% · 강한 소리');
+    expect(valueText('SOUND', 'theme_urgent')).toBe('강한 소리');
   });
 
   it('적용할 수 있는 값: 말소리 · 진동은 DB 선택지 안, 배경음은 아무 이름', () => {

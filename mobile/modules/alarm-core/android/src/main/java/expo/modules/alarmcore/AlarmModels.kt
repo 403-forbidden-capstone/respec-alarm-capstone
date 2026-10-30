@@ -96,7 +96,10 @@ data class StoredAlarm(
   val intensity: String,
   val snoozeLimit: Int,
   val voiceText: String?,
-  val soundKey: String?,
+  // 배경음 파일 고르기 — 앱이 넘긴 값. 칸이 없으면 계획의 소리 키, 그것도 없으면 강도에서 (fromJson). RingPlan.soundKey와 같은 값으로 맞춰 둠
+  val soundKey: String,
+  // 진동 3종(AlarmVibration). 칸이 없거나 모르는 값이면 강도에서 (fromJson)
+  val vibration: String,
   val volumeAdjust: Double?,
   val departAt: Long?,
   val plan: RingPlan,
@@ -126,7 +129,8 @@ data class StoredAlarm(
     put("intensity", intensity)
     put("snoozeLimit", snoozeLimit)
     put("voiceText", voiceText ?: JSONObject.NULL)
-    put("soundKey", soundKey ?: JSONObject.NULL)
+    put("soundKey", soundKey)
+    put("vibration", vibration)
     put("volumeAdjust", volumeAdjust ?: JSONObject.NULL)
     put("departAt", departAt ?: JSONObject.NULL)
     put("plan", plan.toJson())
@@ -141,19 +145,26 @@ data class StoredAlarm(
   companion object {
     fun fromJson(json: JSONObject): StoredAlarm {
       val atMillis = json.getLong("atMillis")
+      val intensity = json.optStringOrNull("intensity") ?: "NORMAL"
+      val planJson = json.getJSONObject("plan")
+      // 소리 키: 꾸러미 칸 → 계획의 칸 → 강도 순 (예전 APK가 저장한 알람은 칸이 없을 수 있음)
+      val soundKey = json.optStringOrNull("soundKey")?.trim()?.takeIf { it.isNotEmpty() }
+        ?: planJson.optStringOrNull("soundKey")?.trim()?.takeIf { it.isNotEmpty() }
+        ?: AlarmSoundKeys.defaultFor(intensity)
       return StoredAlarm(
         alarmId = json.getString("alarmId"),
         type = json.getString("type"),
         atMillis = atMillis,
         title = json.optStringOrNull("title") ?: "알람",
         subtitle = json.optStringOrNull("subtitle"),
-        intensity = json.optStringOrNull("intensity") ?: "NORMAL",
+        intensity = intensity,
         snoozeLimit = json.optInt("snoozeLimit", 3),
         voiceText = json.optStringOrNull("voiceText"),
-        soundKey = json.optStringOrNull("soundKey"),
+        soundKey = soundKey,
+        vibration = AlarmVibration.normalize(json.optStringOrNull("vibration"), intensity),
         volumeAdjust = json.optDoubleOrNull("volumeAdjust"),
         departAt = json.optLongOrNull("departAt"),
-        plan = RingPlan.fromJson(json.getJSONObject("plan"), json.optInt("snoozeLimit", SnoozeRules.FALLBACK_LIMIT)),
+        plan = RingPlan.fromJson(planJson, json.optInt("snoozeLimit", SnoozeRules.FALLBACK_LIMIT)).copy(soundKey = soundKey),
         snoozeCount = json.optInt("snoozeCount", 0),
         nextRingAt = json.optLongOrNull("nextRingAt") ?: atMillis,
         ringCount = json.optInt("ringCount", 0),

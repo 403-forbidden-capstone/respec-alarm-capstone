@@ -18,6 +18,8 @@ import {
   snoozeLateMinutes,
   snoozeLimitNotice,
   snoozeRingAt,
+  soundKeyOf,
+  vibrationOf,
   wakeNowBanner,
   toNativePayload,
   unansweredSpanMillis,
@@ -41,6 +43,16 @@ describe('공통 케이스 (spec/cases.json) — 울림 계획', () => {
     it(item.name, () => {
       const input = item.input as { type: AlarmType; intensity: AlarmIntensity; soundKey?: string; volumeAdjust?: number; notice?: string; snoozeLimit?: number };
       expect(buildRingPlan(input)).toEqual(item.plan);
+    });
+  }
+});
+
+describe('공통 케이스 — 배경음 · 진동 (D1 A)', () => {
+  for (const item of cases.axisDefaults) {
+    it(item.name, () => {
+      const input = item.input as { intensity: AlarmIntensity; soundKey?: string; vibration?: string };
+      expect(soundKeyOf(input)).toBe(item.soundKey);
+      expect(vibrationOf(input as Pick<RingPackage, 'intensity' | 'vibration'>)).toBe(item.vibration);
     });
   }
 });
@@ -232,7 +244,8 @@ describe('네이티브로 넘기는 글자', () => {
       subtitle: '오전 10:00 · 세종대학교',
       volumeAdjust: -0.1,
       departAt: 2_000_000,
-      vibration: 'SHORT_REPEAT',
+      soundKey: 'theme_calm',
+      vibration: 'NONE',
       snoozeMinutesOptions: [5, 10, 15],
     };
     const plan = buildRingPlan(pkg);
@@ -245,13 +258,22 @@ describe('네이티브로 넘기는 글자', () => {
       subtitle: '오전 10:00 · 세종대학교',
       intensity: 'NORMAL',
       snoozeLimit: 3,
+      soundKey: 'theme_calm',
+      vibration: 'NONE',
       volumeAdjust: -0.1,
       departAt: 2_000_000,
-      plan,
+      plan: { ...plan, soundKey: 'theme_calm' },
     });
     expect(payload.plan.volumePercent).toBe(72);
-    expect(payload).not.toHaveProperty('vibration');
     expect(payload).not.toHaveProperty('snoozeMinutesOptions');
     expect(payload).not.toHaveProperty('voiceText');
+  });
+
+  it('soundKey · vibration은 꾸러미에 없어도 늘 들어감 — 강도에서 정함, 계획의 소리 키도 같은 값', () => {
+    const pkg: RingPackage = { ...basePackage, intensity: 'STRONG' };
+    const payload = JSON.parse(toNativePayload(pkg, buildRingPlan(pkg)));
+    expect(payload.soundKey).toBe('theme_urgent');
+    expect(payload.vibration).toBe('STRONG_CONTINUOUS');
+    expect(payload.plan.soundKey).toBe('theme_urgent');
   });
 });

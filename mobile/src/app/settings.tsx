@@ -3,20 +3,27 @@ import { useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 
 import { Button, Card, KeyValueRow, Screen, SectionHeader, Sheet, Text, toast, TopBar } from '@/components/ui';
-import { listPlaces } from '@/features/alarm/api';
-import { PlaceSearchSheet } from '@/features/alarm/components/PlaceSearchSheet';
+import { listPlaces, reverseAddress } from '@/features/alarm/api';
+import { MapPlaceSheet } from '@/features/alarm/components/MapPlaceSheet';
+import { homeOf } from '@/features/alarm/placeSheet';
 import type { Place } from '@/features/alarm/types';
 import { useAuth } from '@/features/auth/AuthProvider';
 import { DataModeToggle } from '@/features/auth/DataModeToggle';
+import { locateOnce } from '@/features/location/currentPosition';
 import { openAppNotificationSettings } from '@/features/permissions';
+import { homePatchOf } from '@/features/onboarding/home';
+import { ImportEntryCard } from '@/features/onboarding/components/ImportEntryCard';
+import { usePhotoImport } from '@/features/onboarding/hooks/usePhotoImport';
 import { shouldSaveHandle } from '@/features/onboarding/validate';
 import { isHandleTaken, saveProfileFields } from '@/features/profile/api';
 import { EditRow } from '@/features/profile/components/EditRow';
 import { HandleEditor, NicknameEditor, PrepareEditor, SleepEditor } from '@/features/profile/components/ProfileEditors';
-import { homePatch, prepareValuesOf } from '@/features/profile/edit';
+import { prepareValuesOf } from '@/features/profile/edit';
 import { TRANSPORT_NAME, WAKE_MARGIN_NAME, WAKE_SENSITIVITY_NAME } from '@/features/profile/labels';
 import type { ProfileFields } from '@/features/profile/types';
 import { UserError, userMessage } from '@/lib/errors';
+import { TIMETABLE_PATHS } from '@/lib/flags';
+import { setImportBatch } from '@/features/onboarding/importHandoff';
 import { canUseRealData, modeLocked } from '@/lib/mode';
 import { backOrHome } from '@/lib/nav';
 import { signOutAndCleanup } from '@/lib/session';
@@ -25,7 +32,7 @@ import { colors, size } from '@/theme';
 
 const PROVIDER_NAME: Record<string, string> = { kakao: '카카오', google: 'Google' };
 
-// 열려 있는 편집 시트 — 집은 장소 검색 시트(placeOpen)가 따로 맡음
+// 열려 있는 편집 시트 — 집은 지도 고르기 시트(placeOpen)가 따로 맡음
 type Editing = 'nickname' | 'handle' | 'sleep' | 'prepare' | null;
 
 // 설정 — 계정 · 아침 준비 기본값 · 알람 · 로그아웃 · 개발(데이터 모드)
@@ -37,6 +44,7 @@ export default function SettingsScreen() {
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState<Editing>(null);
   const [placeOpen, setPlaceOpen] = useState(false);
+  const photoImport = usePhotoImport();
   const user = session?.user;
   const provider = (user?.app_metadata?.provider as string | undefined) ?? '';
   const userId = enabled ? user?.id : undefined;
@@ -70,7 +78,7 @@ export default function SettingsScreen() {
     }, '저장하지 못했어요');
 
   const pickHome = (place: Place) => {
-    const patch = homePatch(place);
+    const patch = homePatchOf(place);
     // 좌표가 없는 장소는 집으로 못 정함 — 이름만 바꾸면 이전 좌표와 어긋나고, 지우면 새 일정의 이동시간 계산이 막힘 (시트는 열어 둠)
     if (!patch) {
       toast('이 장소는 위치를 몰라 집으로 정할 수 없어요. 다른 장소를 골라 주세요');
@@ -100,6 +108,27 @@ export default function SettingsScreen() {
             <EditRow label="이동 수단" value={TRANSPORT_NAME[profile.default_transport]} onPress={open('prepare')} />
             <EditRow label="집(출발지)" value={profile.home_name ?? '정하지 않았어요'} onPress={canEdit ? () => setPlaceOpen(true) : undefined} />
           </Card>
+
+          {canEdit && (TIMETABLE_PATHS.photo || TIMETABLE_PATHS.calendar) ? (
+            <>
+              <SectionHeader title="수업 시간표" />
+              <ImportEntryCard
+                onPhoto={
+                  TIMETABLE_PATHS.photo
+                    ? async () => {
+                        const batch = await photoImport.pick();
+                        if (batch) {
+                          setImportBatch(batch);
+                          router.push('/timetable-import');
+                        }
+                      }
+                    : undefined
+                }
+                busy={photoImport.reading}
+                reading={photoImport.reading ? 'photo' : null}
+              />
+            </>
+          ) : null}
 
           <SectionHeader title="알람" />
           <Card>
@@ -191,7 +220,19 @@ export default function SettingsScreen() {
           </Sheet>
         </>
       ) : null}
-      <PlaceSearchSheet visible={placeOpen} onClose={() => setPlaceOpen(false)} onPick={pickHome} search={(query) => listPlaces(query, profile?.home_lat != null && profile.home_lng != null ? { lat: profile.home_lat, lng: profile.home_lng } : undefined)} title="집 찾기" />
+      {/* 집 — 지도에서 핀으로 고름 (검색 · 현재 위치도 됨). 첫 중심은 지금 집, 없으면 서울 시청 */}
+      <MapPlaceSheet
+        visible={placeOpen}
+        onClose={() => setPlaceOpen(false)}
+        onPick={pickHome}
+        search={(query) => listPlaces(query, homeOf(profile))}
+        reverse={reverseAddress}
+        locate={locateOnce}
+        center={homeOf(profile)}
+        suggestedNames={['집']}
+        areaWarning="캠퍼스 대표 위치예요. 건물을 고르면 더 정확해요"
+        title="집 찾기"
+      />
     </Screen>
   );
 }

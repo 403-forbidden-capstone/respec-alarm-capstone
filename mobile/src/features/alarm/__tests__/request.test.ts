@@ -247,6 +247,14 @@ describe('H03 미리 보기 읽기 (toPreview)', () => {
     expect(toPreview(withCount(12), saved(), same(saved())).prepareSampleCount).toBe(12);
   });
 
+  it('서버가 준 최근 기록 값(최신순 최대 5개)을 그대로 실음 — 없으면(옛 서버) 칸 자체가 없음', () => {
+    const base = suggestion({});
+    const withRecent = (recent?: number[]) => suggestion({ prepare: { ...base.prepare, ...(recent ? { recent } : {}) } });
+    expect(toPreview(withRecent([75, 70, 62, 55, 48]), saved(), same(saved())).prepareRecent).toEqual([75, 70, 62, 55, 48]);
+    expect(toPreview(withRecent([]), saved(), same(saved())).prepareRecent).toEqual([]);
+    expect('prepareRecent' in toPreview(withRecent(), saved(), same(saved()))).toBe(false);
+  });
+
   it('알람 시각은 서버 값으로, 알람 id는 저장된 알람에서, 직접 고른 시각은 auto 포함', () => {
     const s = suggestion({
       alarms: [
@@ -376,8 +384,8 @@ describe('저장 결과 → 일정 (toCreatedAppointment)', () => {
     appointment_id: 'new-appt',
     participant_id: 'new-part',
     alarms: [
-      { alarm_id: 'n-wake', alarm_type: 'WAKE', scheduled_at: iso('07:45'), is_enabled: true, intensity: 'NORMAL', voice_tone: 'NEUTRAL', sound_key: 'theme_default', time_source: 'MANUAL', intensity_source: 'AUTO', recurrence_rule: null },
-      { alarm_id: 'n-arrive', alarm_type: 'ARRIVE', scheduled_at: iso('09:50'), is_enabled: true, intensity: 'NORMAL', voice_tone: 'NEUTRAL', sound_key: 'theme_default', time_source: 'AUTO', intensity_source: 'AUTO', recurrence_rule: null },
+      { alarm_id: 'n-wake', alarm_type: 'WAKE', scheduled_at: iso('07:45'), is_enabled: true, intensity: 'NORMAL', voice_tone: 'NEUTRAL', sound_key: 'theme_default', vibration: null, time_source: 'MANUAL', intensity_source: 'AUTO', recurrence_rule: null },
+      { alarm_id: 'n-arrive', alarm_type: 'ARRIVE', scheduled_at: iso('09:50'), is_enabled: true, intensity: 'NORMAL', voice_tone: 'NEUTRAL', sound_key: 'theme_default', vibration: null, time_source: 'AUTO', intensity_source: 'AUTO', recurrence_rule: null },
     ],
     ring_packages: [],
     canceled_alarm_ids: [],

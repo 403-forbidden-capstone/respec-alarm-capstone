@@ -48,6 +48,7 @@ import {
   type Estimate,
   type LatLng,
   type Place,
+  type PinAddress,
   type UserEditLog,
 } from './types';
 
@@ -85,6 +86,17 @@ export async function listPlaces(query?: string, near?: LatLng): Promise<Place[]
     : await recentPlaces(await requireUserId());
   rememberPlaces(places);
   return places;
+}
+
+// 지도 핀 자리의 주소 (place-reverse, 카카오 좌표 → 주소) — 도로명 주소 우선. 주소를 못 구한 자리(바다 · 해외)는 null. 카카오 응답은 저장하지 않음 (rememberPlaces에도 안 넣음)
+export async function reverseAddress(lat: number, lng: number): Promise<PinAddress | null> {
+  if (!validNear({ lat, lng })) return null; // 서버는 범위 안 좌표만 받음
+  type Dto = { address?: string | null; roadAddress?: string | null; buildingName?: string | null };
+  const { place } = await callEdge<{ place: Dto | null }>('place-reverse', { lat, lng }, { retry: 1 });
+  const address = place?.roadAddress?.trim() || place?.address?.trim();
+  if (!address) return null;
+  const name = place?.buildingName?.trim();
+  return { address, ...(name ? { name } : {}) };
 }
 
 // ---------------------------------------------------------------------------

@@ -26,19 +26,26 @@ export type OnboardingStepId =
 
 // 단계마다 켜고 끄는 표 — 10/29 지형님: 일단 다 넣고 보면서 뺌 → 단계마다 flag (D38 기본안 C)
 //   끈 단계는 건너뛰고 진행 표시(n / 전체)도 켠 단계만 셈. 화면을 만들면 켬
-//   home · timetable: 집 검색 · 시간표 입력 화면이 아직 없음 (PR 5)
 //   permissions: 권한 안내 단계 화면이 아직 없음 (PR 7)
 //   mic: 마이크 권한 — L4(음성) 뒤에 켬. 매니페스트에 RECORD_AUDIO가 아직 없음
 export const ONBOARDING_STEPS: Record<OnboardingStepId, boolean> = {
   handle: true,
   nickname: true,
   sleep: true,
-  home: false,
+  home: true,
   prepare: true,
-  timetable: false,
+  timetable: true,
   consent: true,
   permissions: false,
   share: true,
   first: true,
   mic: false,
+};
+
+// 시간표 채우기 길 (D66-1) — 직접 입력은 위 ONBOARDING_STEPS.timetable, 아래 둘은 그 단계 · 설정에서 쓰는 가져오기 입구. "되게 해 놓고 빼면 된다"(지형님 10/30) → 길마다 끄고 켬
+//   photo: [시간표 사진으로 넣기] — 사진 고르기 → 서버 함수 timetable-extract(Claude가 읽음) → 확인 화면
+//   calendar: [폰 캘린더에서 가져오기] — 캘린더 읽기 → 앞으로 2주 매주 반복 일정 후보(규칙, AI 없음) → 확인 화면
+export const TIMETABLE_PATHS = {
+  photo: true,
+  calendar: false,
 };

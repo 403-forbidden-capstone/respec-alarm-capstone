@@ -1,2 +1,5 @@
 /*
   X-Robots-Tag: noindex
+
+/map-picker*
+  Content-Security-Policy: frame-ancestors 'self'

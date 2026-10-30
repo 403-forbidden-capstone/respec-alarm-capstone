@@ -634,12 +634,12 @@ class RollRun {
     const tz = await this.user(task.user_id).timeZone();
     const starts = routineStepStarts(routine.steps);
     if (!starts) return;
-    type Past = Pick<AlarmRow, 'alarm_id' | 'alarm_type' | 'scheduled_at' | 'intensity' | 'sound_key' | 'snooze_limit' | 'is_enabled'> & { step_order: number | null };
+    type Past = Pick<AlarmRow, 'alarm_id' | 'alarm_type' | 'scheduled_at' | 'intensity' | 'voice_tone' | 'sound_key' | 'vibration' | 'snooze_limit' | 'is_enabled'> & { step_order: number | null };
     const past = must<Past[]>(
       'routine alarms',
       await read
         .from('alarms')
-        .select('alarm_id, step_order, alarm_type, scheduled_at, intensity, sound_key, snooze_limit, is_enabled')
+        .select('alarm_id, step_order, alarm_type, scheduled_at, intensity, voice_tone, sound_key, vibration, snooze_limit, is_enabled')
         .eq('user_id', task.user_id)
         .eq('routine_id', routine.routine_id)
         .eq('is_enabled', true)
@@ -774,6 +774,7 @@ class RollRun {
       intensity: s.intensity,
       voice_tone: s.voice_tone,
       sound_key: s.sound_key,
+      vibration: s.vibration, // 직접 고른 진동도 이어받음 (NULL이면 강도를 따름)
       is_enabled: s.is_enabled, // 꺼 둔 반복 알람은 새 회차도 꺼진 채 (켜는 순간 다음 회차가 이미 있게)
       snooze_limit: s.snooze_limit,
       time_source: s.time_source,

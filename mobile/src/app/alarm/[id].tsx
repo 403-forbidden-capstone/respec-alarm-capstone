@@ -1,4 +1,4 @@
-import { prepareSourceLabel } from '@shared/calc/prepare.ts';
+import { prepareRecentLabel, prepareSourceLabel } from '@shared/calc/prepare.ts';
 import { useLocalSearchParams } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
@@ -131,6 +131,7 @@ function Detail({ appointment: a, reload }: { appointment: AppointmentDetail; re
   const anyManual = AXES.some(([axis]) => levels[axis] != null);
   const travel = edits.travelMinutes ?? preview.autoTravelMinutes;
   const prepare = edits.prepareMinutes ?? preview.autoPredictedPrepMinutes;
+  const recentLine = preview.prepareSampleCount != null ? prepareRecentLabel(preview.prepareRecent ?? []) : null;
   const margin = a.auto.predictedPrepMinutes - a.beforePrepMinutes - a.prepMinutes;
   const originOptions = [ORIGIN_HOME, ...(places ?? []).map((p) => p.name), edits.origin]
     .filter((name, i, all) => all.indexOf(name) === i)
@@ -334,6 +335,8 @@ function Detail({ appointment: a, reload }: { appointment: AppointmentDetail; re
             // 준비 시간이 어디서 왔는지 한 줄 — 4건까지 "배우는 중 N/5", 5건부터 "내 기록 기반 N건" (학습 루프 기초 ⑦, 통계 식은 안 보임 D47)
             //   기록으로 맞추는 건 그날 첫 일정(기상 있음)뿐이고, 직접 고른 준비 시간이면 기록 기반이 아니라서 줄을 뺌. 서버가 기록 수를 주기 전(처음 그릴 때)에도 뺌
             ...(a.withWake && edits.prepareMinutes == null && preview.prepareSampleCount != null ? [`준비 ${prepare}분 · ${prepareSourceLabel(preview.prepareSampleCount)}`] : []),
+            // 그 아래 한 줄 — 최근 기록 값 (학습 루프 기초 ⑦). 위 줄과 같은 조건이고, 기록이 없으면 줄이 없음
+            ...(a.withWake && edits.prepareMinutes == null && recentLine ? [recentLine] : []),
           ]}
         />
         {preview.alarms.map((x, i) => (

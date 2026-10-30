@@ -20,6 +20,7 @@ import {
   TopBar,
   TopBarButton,
 } from '@/components/ui';
+import { HomeMissingNotice } from '@/features/alarm/components/HomeMissingNotice';
 import { ChatNotice } from '@/features/voice/components/ChatNotice';
 import { colors, radius } from '@/theme';
 
@@ -153,6 +154,10 @@ export default function UiSampleScreen() {
         <ChatNotice kind="failed" busy onRetry={() => {}} onManual={() => {}} onDone={() => {}} />
         <ChatNotice kind="limit" onManual={() => toast('직접 일정 만들기')} onDone={() => toast('대화 마치기')} />
       </View>
+
+      <SectionHeader title="집 위치 안내" />
+      <HomeMissingNotice onPickHome={() => toast('집 찾기 시트가 열려요')} />
+      <HomeMissingNotice onPickHome={() => {}} busy />
     </Screen>
   );
 }
