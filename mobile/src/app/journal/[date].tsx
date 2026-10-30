@@ -117,7 +117,11 @@ function JournalView({ journal: j, reload, top }: { journal: Journal; reload: ()
           <Text variant="label" tone="sub">
             AI 일기
           </Text>
-          <Chip label={j.edited ? '직접 수정함' : 'AI 작성'} variant="fill" />
+          <View style={styles.titleEnd}>
+            <Chip label={j.edited ? '직접 수정함' : 'AI 작성'} variant="fill" />
+            {/* 읽기 중일 때만 — 고치는 중에는 아래 저장 · 취소가 있음 */}
+            {editing == null ? <TextLink label="수정 ›" onPress={() => setEditing(j.text)} /> : null}
+          </View>
         </View>
         {editing != null ? (
           <>
@@ -127,6 +131,7 @@ function JournalView({ journal: j, reload, top }: { journal: Journal; reload: ()
               multiline
               textAlignVertical="top"
               accessibilityLabel="일기 수정"
+              maxFontSizeMultiplier={1.3}
               style={styles.input}
             />
             <View style={styles.row}>
@@ -135,14 +140,9 @@ function JournalView({ journal: j, reload, top }: { journal: Journal; reload: ()
             </View>
           </>
         ) : (
-          <>
-            <Text variant="reading" style={styles.text}>
-              {j.text}
-            </Text>
-            <View style={styles.link}>
-              <TextLink label="수정" onPress={() => setEditing(j.text)} />
-            </View>
-          </>
+          <Text variant="reading" style={styles.text}>
+            {j.text}
+          </Text>
         )}
         {/* 대조는 AI가 쓴 글에만 한 것 — 직접 고친 글에는 말하지 않음 */}
         {j.edited || editing != null ? null : (
@@ -157,12 +157,7 @@ function JournalView({ journal: j, reload, top }: { journal: Journal; reload: ()
           {isToday ? '오늘' : '그날'}의 사실
         </Text>
         {j.facts.length ? (
-          <>
-            <Timeline items={j.facts.map((f) => ({ time: formatTime(f.at), label: f.label, source: f.source }))} />
-            <Text variant="caption" tone="faint" style={styles.note}>
-              같은 사실이 여러 곳에 남아 있으면 직접 입력 &gt; 자동 &gt; 알림 &gt; AI 순서로 믿어요.
-            </Text>
-          </>
+          <Timeline items={j.facts.map((f) => ({ time: formatTime(f.at), label: f.label, source: f.source }))} />
         ) : (
           <Text variant="body" tone="sub">
             기록된 사실이 없어요.
@@ -233,6 +228,7 @@ const styles = StyleSheet.create({
   label: { marginBottom: 8 },
   gap: { marginTop: 10 },
   between: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginBottom: 4 },
+  titleEnd: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   text: { marginTop: 4, marginBottom: 6 },
   link: { alignSelf: 'flex-start' },
   note: { marginTop: 10 },

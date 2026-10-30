@@ -4,11 +4,12 @@
 // 중간에 실패하면 지워서(CASCADE) 되돌림. 같은 요청을 다시 보냈을 때 같은 상태가 되는 건 기존 약속(appointment_id)이 있을 때만 —
 // 새 약속(appointment)은 응답만 잃고 다시 보내면 약속 · 알람이 두 벌 생기고, 일정 없는 알람도 alarm_id 없이 다시 보내면 하나 더 생김 (요청 키는 아직 안 받음).
 // 근본 해결은 DB 함수(RPC)로 묶는 것
-import { resolveIntensity } from './calc/index.ts';
+import { autoLevel, resolveIntensity, wakeSensitivityOf } from './calc/index.ts';
 import { buildEditLogRows, diffAlarms, type AlarmWrite, type EditInput } from './commit-core.ts';
 import { must } from './db.ts';
 import { HttpError } from './errors.ts';
 import { resolveOverrides, type AlarmRow, type AppointmentRow, type Plan, type PlanDraft, type PlanInputs } from './plan-core.ts';
+import { loadProfile } from './plan.ts';
 import type { NewAppointment, StandaloneInput } from './requests.ts';
 import { buildRingPackages, canceledAlarmIds, subtitleFor } from './ring-package.ts';
 import type { Db } from './supabase.ts';
@@ -21,7 +22,7 @@ export type CommitCtx = {
 };
 
 export const ALARM_COLUMNS =
-  'alarm_id, participant_id, user_id, alarm_type, scheduled_at, intensity, voice_tone, sound_key, is_enabled, snooze_limit, time_source, intensity_source, recurrence_rule';
+  'alarm_id, participant_id, user_id, alarm_type, scheduled_at, intensity, voice_tone, sound_key, vibration, is_enabled, snooze_limit, time_source, intensity_source, recurrence_rule';
 const APPOINTMENT_COLUMNS = 'appointment_id, creator_id, group_id, title, appointment_at, dest_name, dest_lat, dest_lng, importance, recurrence_rule';
 
 // 응답에 싣는 알람 요약
@@ -33,6 +34,7 @@ export const summarize = (a: AlarmRow) => ({
   intensity: a.intensity,
   voice_tone: a.voice_tone,
   sound_key: a.sound_key,
+  vibration: a.vibration,
   time_source: a.time_source,
   intensity_source: a.intensity_source,
   recurrence_rule: a.recurrence_rule,
@@ -102,6 +104,7 @@ export async function persistAppointment(
             dest_name: place.name,
             dest_lat: place.lat ?? null,
             dest_lng: place.lng ?? null,
+            dest_radius_m: draft.destination?.radiusM ?? null, // 목적지 감지 반경 (D68). 새 약속일 때만 — 기존 약속은 안 고침
             importance: plan.basics.importance,
             recurrence_rule: created.recurrenceRule ?? null, // D44. 이 호출은 첫 회차만 만듦 — 다음 회차는 alarm-roll이 14일치를 미리 만듦 (D4 A, roll.ts)
           })
@@ -214,13 +217,16 @@ export async function commitStandalone(ctx: CommitCtx, args: { alarm: Standalone
   }
 
   // 일정이 없으니 중요도 점수도 늦잠 보정도 없음 → 중(NORMAL)이 자동 값 (작성자 판단 — 화면 입력이 정해지면 바뀔 수 있음). 고른 칸만 직접 값
-  const intensity = resolveIntensity('NORMAL', 0, resolveOverrides(alarm.levels, existing ? [existing] : [], 1));
+  //   잠귀(profiles.wake_sensitivity)는 일정이 아니라 사람 기준이라 여기도 적용 — 깊음이면 자동 강 (헤드 확정 10/30, 학습 기초 b)
+  const wakeSensitivity = wakeSensitivityOf((await loadProfile(userDb, userId)).wake_sensitivity);
+  const intensity = resolveIntensity('NORMAL', 0, resolveOverrides(alarm.levels, existing ? [existing] : [], autoLevel('NORMAL', 0, wakeSensitivity)), wakeSensitivity);
   const write: AlarmWrite = {
     alarm_type: 'WAKE',
     scheduled_at: scheduledAt.toISOString(),
     intensity: intensity.fields.intensity,
     voice_tone: intensity.fields.voiceTone,
     sound_key: intensity.fields.soundKey,
+    vibration: intensity.fields.vibration,
     is_enabled: isEnabled,
     time_source: 'MANUAL', // 시각 전부를 사용자가 정함
     intensity_source: intensity.manual ? 'MANUAL' : 'AUTO',

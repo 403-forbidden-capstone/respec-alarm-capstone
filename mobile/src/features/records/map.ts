@@ -161,14 +161,15 @@ export function actualRows(events: readonly EventRow[], record?: RecordRow | nul
 
 export type SuggestionType = Enums<'alarm_suggestion_type'>;
 
-// 제안 종류 → 화면 이름 · 바뀌는 alarms 칸 · 값 읽기. 진동 = alarms.intensity, 말소리 = voice_tone, 배경음 = sound_key (features/alarm 고친 값 기록과 같은 이름)
+// 제안 종류 → 화면 이름 · 바뀌는 alarms 칸 · 값 읽기. 알람 세기 = alarms.intensity(전체 세기: 볼륨 · 다시 울림, 진동은 vibration 칸이 따로 — D1 A), 말소리 = voice_tone, 배경음 = sound_key
+//   INTENSITY는 예전엔 "진동"으로 보였지만 적용 칸은 전체 세기라 화면 문구를 "알람 세기"로 맞춤 (지형님 10/30)
 export const SUGGESTION_KIND: Record<
   SuggestionType,
   { axis: string; column: 'voice_tone' | 'sound_key' | 'intensity'; levelOf: (v: string | null | undefined) => Level | null; text: (level: Level) => string }
 > = {
   VOICE_TONE: { axis: '말소리', column: 'voice_tone', levelOf: levelOfVoiceTone, text: (l) => LEVELS[l].voice },
   SOUND: { axis: '배경음', column: 'sound_key', levelOf: levelOfSoundKey, text: (l) => LEVELS[l].sound },
-  INTENSITY: { axis: '진동', column: 'intensity', levelOf: levelOfIntensity, text: (l) => LEVELS[l].vibration },
+  INTENSITY: { axis: '알람 세기', column: 'intensity', levelOf: levelOfIntensity, text: (l) => `${LEVELS[l].name} · 볼륨 ${LEVELS[l].volume}` },
 };
 
 // DB 값 → 화면 글자 (모르는 값이면 값 그대로)

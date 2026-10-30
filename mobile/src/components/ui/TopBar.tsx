@@ -3,10 +3,11 @@ import { Pressable, StyleSheet, View } from 'react-native';
 
 import { colors, size } from '@/theme';
 
+import { ScreenId } from './ScreenId';
 import { Text } from './Text';
 
 type Props = {
-  screenId?: string; // 목업 화면 번호(H01 등). 개발 중 확인용, 없으면 숨김
+  screenId?: string; // 목업 화면 번호(H01 등). 개발 중 확인용 — 출시용 폰 빌드에선 숨김(ScreenId), 없으면 안 그림
   onBack?: () => void; // 있으면 왼쪽에 "← 이전"
   left?: ReactNode; // 이전 · 화면 번호 대신 왼쪽에 둘 것 (홈의 날짜)
   right?: ReactNode;
@@ -23,12 +24,14 @@ export function TopBar({ screenId, onBack, left, right }: Props) {
               ← 이전
             </Text>
           </Pressable>
-          {screenId ? <Text variant="screenId">{screenId}</Text> : null}
+          {screenId ? <ScreenId id={screenId} /> : null}
         </View>
       ) : left ? (
         left
       ) : screenId ? (
-        <Text variant="screenId">{screenId}</Text>
+        <View>
+          <ScreenId id={screenId} />
+        </View>
       ) : (
         <View />
       )}
@@ -75,7 +78,7 @@ const styles = StyleSheet.create({
   disabled: { opacity: 0.35 },
   tbtnHit: { minHeight: size.touch, minWidth: size.touch, justifyContent: 'center', alignItems: 'flex-end' },
   tbtn: {
-    height: 32,
+    minHeight: 32,
     paddingHorizontal: 12,
     borderRadius: 16,
     borderWidth: 1,

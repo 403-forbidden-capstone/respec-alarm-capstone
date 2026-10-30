@@ -1,12 +1,15 @@
 import { router, type Href } from 'expo-router';
 import { useState } from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { Platform, Pressable, StyleSheet, View } from 'react-native';
 
 import { Button, Card, Screen, SectionHeader, Segmented, Text, toast, TopBar } from '@/components/ui';
 import { SECTIONS } from '@/dev/screenList';
 import { useAuth } from '@/features/auth/AuthProvider';
 import { DataModeToggle, goAfterRender } from '@/features/auth/DataModeToggle';
 import { DevLoginForm } from '@/features/auth/DevLoginForm';
+import { showNotifyPrompt } from '@/features/permissions/components/PermissionPromptHost';
+import { PERMISSION_SAMPLES, type PermissionSample } from '@/features/permissions/sample';
+import { permissionSample, setPermissionSample } from '@/features/permissions/read';
 import { resetOnboarding } from '@/features/profile/api';
 import { scenarioTime, setScenarioTime, type ScenarioTime } from '@/lib/clock';
 import { userMessage } from '@/lib/errors';
@@ -32,6 +35,7 @@ export default function ScreenListScreen() {
   const { mode } = useMode();
   const { session, refreshProfile } = useAuth();
   const [busy, setBusy] = useState(false);
+  const [sample, setSample] = useState<PermissionSample>(permissionSample());
 
   // E2E 반복용 — 계정은 그대로, 다음 화면에서 로그인 또는 온보딩으로 감
   async function run(task: () => Promise<void>, done: string, next: Href) {
@@ -45,6 +49,11 @@ export default function ScreenListScreen() {
     } finally {
       setBusy(false);
     }
+  }
+
+  function changeSample(next: PermissionSample) {
+    setPermissionSample(next);
+    setSample(next);
   }
 
   function changeTime(next: ScenarioTime) {
@@ -102,6 +111,29 @@ export default function ScreenListScreen() {
         <>
           <SectionHeader title="시나리오 시각 (가짜 데이터)" right="5월 22일 목요일" />
           <Segmented options={TIMES} value={time} onChange={changeTime} />
+        </>
+      ) : null}
+
+      {/* 웹은 폰 권한을 못 읽어 점검표(L04) · 홈 빨간 줄이 비어 보임 — 샘플 상태를 골라 봄. 웹 · 가짜 모드에서만 (폰의 진짜 권한을 가리지 않게) */}
+      {Platform.OS === 'web' && !modeLocked && mode === 'mock' ? (
+        <>
+          <SectionHeader title="샘플 권한 상태 (웹)" right="L04 · 홈 빨간 줄" />
+          <Segmented options={PERMISSION_SAMPLES} value={sample} onChange={changeSample} />
+          <View style={styles.actions}>
+            <Button
+              small
+              variant="ghost"
+              label="안내 시트 열어 보기"
+              onPress={() =>
+                void showNotifyPrompt({
+                  title: '알람이 잠금화면에 뜨려면 알림이 필요해요',
+                  message: "알림을 켜야 기상 알람 화면과 준비 · 출발 알림이 떠요. 다음 화면에서 '허용'을 눌러 주세요.",
+                  okLabel: '알림 켜기',
+                  cancelLabel: '나중에',
+                })
+              }
+            />
+          </View>
         </>
       ) : null}
 

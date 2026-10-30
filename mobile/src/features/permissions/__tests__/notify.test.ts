@@ -37,6 +37,7 @@ jest.mock('@capstone/alarm-core', () => ({
     return mockAvailable;
   },
 }));
+jest.mock('@/lib/mode', () => ({ isMock: () => false })); // read.ts가 가져옴 — supabase 클라이언트를 끌어오지 않게
 jest.mock('expo-constants', () => ({ __esModule: true, default: { expoConfig: { android: { package: 'com.example.app' } } } }));
 
 const mockPrompt = jest.fn<(opts: { title: string; message: string; okLabel: string; cancelLabel: string }) => Promise<boolean>>();

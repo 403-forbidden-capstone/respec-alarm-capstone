@@ -45,14 +45,18 @@ class AlarmPlaybackService : Service() {
 
     private const val TAG = "AlarmCore"
 
-    // 기본 소리 키. 이 키(와 모르는 키)는 폰의 기본 알람음을 먼저 틀고, 우리 앱 파일은 그 다음 예비
-    private const val DEFAULT_SOUND_KEY = "default"
+    // 알림 채널 — 진동 없음(NONE)이면 알림이 뜰 때의 진동 한 번도 없애려고 진동이 꺼진 채널을 따로 씀 (채널은 만든 뒤 바꿀 수 없음)
+    private const val CHANNEL_ID_NO_VIBRATION = "wake_alarm_native_quiet_v1"
+    private val NOTIFICATION_VIBRATION = longArrayOf(700, 300, 700, 300, 700, 900)
 
-    // 앱에 든 소리 (res/raw). 소리 키를 더 만들면 여기에 더함. 기본이 아닌 키는 이 파일을 먼저 틀음 (Q7)
-    private val SOUND_RESOURCES = mapOf(DEFAULT_SOUND_KEY to R.raw.alarm_siren)
-
-    // 울리는 동안 반복하는 진동 박자 (켜짐 · 꺼짐 ms, 앞의 0은 바로 시작). 시계 앱처럼 일정하게. 강도별로 나누지 않음 (D1 열림)
-    private val VIBRATION_PATTERN = longArrayOf(0, 500, 500)
+    // 앱에 든 소리 (res/raw, mobile/scripts/make-alarm-sounds.mjs가 합성한 배경음 3개 + 기본 사이렌). 파일이 있는 키는 이 파일을 먼저 틀음 (Q7, D1 A)
+    // 기본 키(default)와 모르는 키는 폰의 기본 알람음을 먼저 틀고, 우리 앱 파일은 그 다음 예비
+    private val SOUND_RESOURCES = mapOf(
+      AlarmSoundKeys.DEFAULT to R.raw.alarm_siren,
+      AlarmSoundKeys.CALM to R.raw.theme_calm,
+      AlarmSoundKeys.NORMAL to R.raw.theme_default,
+      AlarmSoundKeys.URGENT to R.raw.theme_urgent,
+    )
 
     // 지금 울리는 알람 id. 안 울리면 null
     @Volatile
@@ -186,10 +190,22 @@ class AlarmPlaybackService : Service() {
       description = "기상 알람 표시와 진동"
       setSound(null, null)
       enableVibration(true)
-      vibrationPattern = longArrayOf(700, 300, 700, 300, 700, 900)
+      vibrationPattern = NOTIFICATION_VIBRATION
       lockscreenVisibility = Notification.VISIBILITY_PUBLIC
     }
     manager.createNotificationChannel(channel)
+    // L6 안건후보: 진동 없음(NONE) 알림 채널 기본안 = 진동이 꺼진 채널을 하나 더 둠(설정 앱에 "기상 알람(진동 없음)"으로 보임). 알림 뜰 때 진동 한 번도 없애려는 것
+    val quietChannel = NotificationChannel(
+      CHANNEL_ID_NO_VIBRATION,
+      "기상 알람 (진동 없음)",
+      NotificationManager.IMPORTANCE_HIGH,
+    ).apply {
+      description = "진동 없이 표시만 하는 기상 알람"
+      setSound(null, null)
+      enableVibration(false)
+      lockscreenVisibility = Notification.VISIBILITY_PUBLIC
+    }
+    manager.createNotificationChannel(quietChannel)
   }
 
   private fun buildNotification(id: String, alarm: StoredAlarm?): Notification {
@@ -232,7 +248,8 @@ class AlarmPlaybackService : Service() {
       putExtra(AlarmActionReceiver.EXTRA_SNOOZE_MINUTES, snoozeMinutes)
     }
 
-    val builder = NotificationCompat.Builder(this, CHANNEL_ID)
+    val vibrates = alarm == null || AlarmVibration.patternFor(alarm.vibration) != null
+    val builder = NotificationCompat.Builder(this, if (vibrates) CHANNEL_ID else CHANNEL_ID_NO_VIBRATION)
       .setSmallIcon(android.R.drawable.ic_lock_idle_alarm)
       .setContentTitle("알람: $title")
       .setContentText(text)
@@ -242,8 +259,9 @@ class AlarmPlaybackService : Service() {
       .setContentIntent(fullScreenIntent)
       .setOngoing(true)
       .setAutoCancel(false)
-      .setVibrate(longArrayOf(700, 300, 700, 300, 700, 900))
       .apply {
+        // 8 미만은 채널이 없어 알림이 직접 진동함. 진동 없음이면 안 건다
+        if (vibrates) setVibrate(NOTIFICATION_VIBRATION)
         if (snoozeAllowed) {
           addAction(
             0,
@@ -276,7 +294,7 @@ class AlarmPlaybackService : Service() {
   // 실패하면 바꾼 볼륨 · 포커스 · 웨이크락을 바로 되돌리고 false
   private fun startPlayback(alarm: StoredAlarm): Boolean {
     audioManager = getSystemService(AudioManager::class.java)
-    remainingSounds = alarmSounds(alarm.plan.soundKey).toMutableList()
+    remainingSounds = alarmSounds(alarm.soundKey).toMutableList()
 
     // 오디오 포커스나 볼륨 조정이 실패해도(방해 금지 · 제조사 제한 등) 소리는 내야 함 — 소리를 못 트는 것만 실패로 침
     runCatching { requestAudioFocus(audioAttributes) }
@@ -291,15 +309,16 @@ class AlarmPlaybackService : Service() {
       return false
     }
     // 소리가 나기 시작한 뒤에 진동 시작. 진동을 못 켜도(진동 모터 없음 · 제조사 제한) 소리는 계속
-    runCatching { startVibration() }
+    // 진동 없음(NONE)이면 건너뜀 — 볼륨은 진동과 상관없이 계획이 정한 값 그대로
+    AlarmVibration.patternFor(alarm.vibration)?.let { pattern -> runCatching { startVibration(pattern) } }
     return true
   }
 
-  // 알람음 후보 (앞에서부터 시도). 기본 소리 키(와 모르는 키)는 폰 기본 알람음이 먼저, 우리 앱 파일이 그 다음 — 안드로이드 기본 알람처럼
-  // 그 밖의 소리 키(Q7)는 우리 앱 파일이 먼저. 마지막은 폰 기본 벨소리 · 알림음 (어느 것도 안 되면 그때서야 실패)
+  // 알람음 후보 (앞에서부터 시도). 기본 키(default) · 보통(theme_default) · 모르는 키는 폰 기본 알람음이 먼저, 우리 앱 파일이 그 다음 — 안드로이드 기본 알람처럼
+  // 약(theme_calm) · 강(theme_urgent)만 우리 앱 파일이 먼저 (AlarmSoundKeys.playsOwnFileFirst). 마지막은 폰 기본 벨소리 · 알림음 (어느 것도 안 되면 그때서야 실패)
   private fun alarmSounds(soundKey: String): List<Uri> {
     val resource = SOUND_RESOURCES[soundKey]
-    val ownFirst = resource != null && soundKey != DEFAULT_SOUND_KEY
+    val ownFirst = AlarmSoundKeys.playsOwnFileFirst(soundKey, resource != null)
     // 앱 파일은 이 모듈 res/raw에 있음. 빌드 때 앱 리소스로 합쳐지므로 앱 패키지 이름으로 찾음
     val own = Uri.parse("android.resource://$packageName/${resource ?: R.raw.alarm_siren}")
     val phoneAlarm = phoneDefaultSounds(RingtoneManager.TYPE_ALARM)
@@ -351,18 +370,18 @@ class AlarmPlaybackService : Service() {
   }
 
   // 울리는 동안 계속 진동 — 알람 용도로 걸어서 무음 · 방해 금지에서도 시계 앱처럼 울림. 알림 채널 진동(알림이 뜰 때 한 번)과는 별개
-  private fun startVibration() {
+  private fun startVibration(pattern: LongArray) {
     val target = vibrator ?: obtainVibrator() ?: return
     if (!target.hasVibrator()) return
     vibrator = target
     when {
       Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU ->
         target.vibrate(
-          VibrationEffect.createWaveform(VIBRATION_PATTERN, 0),
+          VibrationEffect.createWaveform(pattern, 0),
           VibrationAttributes.createForUsage(VibrationAttributes.USAGE_ALARM),
         )
-      Build.VERSION.SDK_INT >= Build.VERSION_CODES.O -> vibrateWithAudioAttributes(target)
-      else -> vibrateLegacy(target)
+      Build.VERSION.SDK_INT >= Build.VERSION_CODES.O -> vibrateWithAudioAttributes(target, pattern)
+      else -> vibrateLegacy(target, pattern)
     }
     Log.i(TAG, "진동 시작")
   }
@@ -379,14 +398,14 @@ class AlarmPlaybackService : Service() {
 
   // 8 ~ 12: 알람 용도 속성은 AudioAttributes로 넘김 (13부터는 이 방식이 폐지되어 VibrationAttributes로)
   @Suppress("DEPRECATION")
-  private fun vibrateWithAudioAttributes(target: Vibrator) {
-    target.vibrate(VibrationEffect.createWaveform(VIBRATION_PATTERN, 0), audioAttributes)
+  private fun vibrateWithAudioAttributes(target: Vibrator, pattern: LongArray) {
+    target.vibrate(VibrationEffect.createWaveform(pattern, 0), audioAttributes)
   }
 
   // 8 미만: 패턴 반복(0번부터)
   @Suppress("DEPRECATION")
-  private fun vibrateLegacy(target: Vibrator) {
-    target.vibrate(VIBRATION_PATTERN, 0, audioAttributes)
+  private fun vibrateLegacy(target: Vibrator, pattern: LongArray) {
+    target.vibrate(pattern, 0, audioAttributes)
   }
 
   private fun stopVibration() {

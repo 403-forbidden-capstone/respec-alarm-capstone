@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from '@jest/globals';
 
-import { prepareSourceLabel } from '@shared/calc/prepare.ts';
+import { prepareRecentLabel, prepareSourceLabel } from '@shared/calc/prepare.ts';
 
 import { formatTime } from '@/lib/format';
 import type { Weekday } from '@/lib/weekday';
@@ -26,6 +26,7 @@ import {
   listEditLogs,
   listOccurrences,
   previewAlarms,
+  reverseAddress,
   promptWake,
   recordEdit,
   saveAlarmSettings,
@@ -62,10 +63,26 @@ afterEach(() => {
   db.disabledKinds.clear();
   db.disabledAppointments.clear();
   db.intensityOverrides = {};
+  db.wakeSensitivity = 'NORMAL';
+  db.wakeMargin = 'NORMAL';
   db.wake = { alarmId: null, phase: 'idle', ringAt: null, dismissedAt: null, usage: 0, recent: 0 };
   db.events.length = 0;
   db.me.wakeAt = null;
   for (const id of Object.keys(db.wakeConfirmations)) delete db.wakeConfirmations[id];
+});
+
+describe('reverseAddress (가짜 모드)', () => {
+  it('좌표로 만든 광진구 주소를 돌려줌 — 같은 좌표면 같은 주소, 건물 이름은 없음', async () => {
+    const a = await reverseAddress(37.5509, 127.0734);
+    expect(a?.address).toMatch(/^서울 광진구 능동로 \d+ \(가짜\)$/);
+    expect(a).not.toHaveProperty('name');
+    await expect(reverseAddress(37.5509, 127.0734)).resolves.toEqual(a);
+  });
+
+  it('범위 밖이거나 숫자가 아닌 좌표는 null', async () => {
+    await expect(reverseAddress(100, 127)).resolves.toBeNull();
+    await expect(reverseAddress(37.5, Number.NaN)).resolves.toBeNull();
+  });
 });
 
 describe('H05 시간 칸', () => {
@@ -131,7 +148,7 @@ describe('H05 그날 첫 일정만 기상 알람 (약속 시각 기준, 서버�
   it('앞선 일정의 기상 알람을 꺼 두면 세지 않음', async () => {
     db.disabledKinds.add('a3:WAKE');
     try {
-      const e = await estimateAppointment(on23('14:00'));
+      const e = await estimateAppointment(on23('11:00')); // 14:00이면 계산된 기상이 낮 12시 이후라 기상이 안 생김(#320)
       expect(kindsOf(e.appointment.alarms)).toContain('WAKE');
     } finally {
       db.disabledKinds.delete('a3:WAKE');
@@ -160,10 +177,47 @@ describe('H05 · H03 준비 시간 계산 (학습 루프 기초 a — 서버 cal
   });
 });
 
+describe('학습 루프 기초 b — 가짜 모드도 서버와 같은 잠귀 · 깨우는 여유 규칙 (#272)', () => {
+  const on23 = (time: string, importance: AppointmentDraft['importance'] = 'NORMAL'): AppointmentDraft => ({ ...defaultDraft(kst(23, 0), morning), title: '스터디', time, importance });
+  const prepareOf = async (margin: 'TIGHT' | 'NORMAL' | 'LOOSE', importance: AppointmentDraft['importance'] = 'NORMAL', time = '08:30') => {
+    db.wakeMargin = margin;
+    return (await estimateAppointment(on23(time, importance))).appointment.predictedPrepMinutes;
+  };
+
+  it('프로필 값이 없으면(기본) 잠귀 · 여유 모두 보통 — 예전과 같은 60분', async () => {
+    expect(await prepareOf('NORMAL')).toBe(60);
+  });
+
+  it('같은 기록에서 빠듯 < 보통 < 넉넉, 매우 중요는 한 단계 위, 두 번째 일정은 15분 그대로', async () => {
+    const [tight, normal, loose] = [await prepareOf('TIGHT'), await prepareOf('NORMAL'), await prepareOf('LOOSE')];
+    expect(tight).toBeLessThan(normal);
+    expect(normal).toBeLessThan(loose);
+    expect(await prepareOf('TIGHT', 'HIGH')).toBe(normal);
+    expect(await prepareOf('NORMAL', 'HIGH')).toBe(loose);
+    expect(await prepareOf('LOOSE', 'HIGH')).toBe(loose);
+    for (const margin of ['TIGHT', 'LOOSE'] as const) expect(await prepareOf(margin, 'HIGH', '14:00')).toBe(15);
+  });
+
+  it('잠귀 무거움(HEAVY)이면 보통 일정도 강도 자동 값이 강, 가벼움 · 보통이면 보통(약 아님)', async () => {
+    expect((await getAppointment('a2'))!.intensity.auto).toBe(1); // 보통 일정 + 지각 1회
+    db.wakeSensitivity = 'HEAVY';
+    expect((await getAppointment('a2'))!.intensity.auto).toBe(2);
+    expect((await getAppointment('a1'))!.intensity.axes.sound.level).toBe(2);
+  });
+
+  it('H03 미리 보기: 최근 5번(최신순) — 기상 있는 일정만, 문구는 오래된 것 → 최신', async () => {
+    const preview = await previewAlarms('a1', (await getAppointment('a1'))!.edits);
+    expect(preview.prepareRecent).toEqual([90, 70, 62, 55, 48]);
+    expect(prepareRecentLabel(preview.prepareRecent ?? [])).toBe('최근 5번 48 · 55 · 62 · 70 · 90분');
+    expect((await previewAlarms('a2', (await getAppointment('a2'))!.edits)).prepareRecent).toEqual([]);
+  });
+});
+
 describe('H05 알람 종류 고르기 · 알람 없는 일정 (D46)', () => {
   const draftWith = (alarms: Partial<AppointmentDraft['alarms']>): AppointmentDraft => ({
     ...defaultDraft(kst(24, 0), morning),
     title: '스터디',
+    time: '10:00', // 기본 14:00은 계산된 기상이 낮 12시 이후라 기상이 안 생김(#320) → 기상이 있는 오전 일정으로
     alarms: { WAKE: true, PREPARE: true, DEPARTURE: true, ...alarms },
   });
   const kindsOf = (alarms: { kind: string }[]) => alarms.map((x) => x.kind);
@@ -206,7 +260,7 @@ describe('H05 알람 종류 고르기 · 알람 없는 일정 (D46)', () => {
 
   it('알람 없는 일정은 같은 날 기상 알람으로 세지 않음 — 뒤 일정이 기상 알람을 가짐', async () => {
     await createAppointment(await estimateAppointment(draftWith({ WAKE: false, PREPARE: false, DEPARTURE: false })));
-    const later = { ...draftWith({}), time: '16:00' };
+    const later = { ...draftWith({}), time: '12:00' }; // 16:00이면 기상이 낮 12시 이후라 기상 자체가 안 생김(#320)
     const e = await estimateAppointment(later);
     expect([e.sameDayWake, kindsOf(e.appointment.alarms)[0]]).toEqual([false, 'WAKE']);
 
@@ -470,7 +524,7 @@ describe('고친 값 기록 (user_edit_logs, 가짜)', () => {
     expect(logs).toHaveLength(2); // 따라온 준비 알람은 사용자가 고른 값이 아니라 기록하지 않음
   });
 
-  it('종류별 켜기 · 강도 — 켜기는 알람마다, 강도 세 칸은 DB 칸 이름(배경음 sound_key · 말소리 voice_tone · 진동 intensity)으로', async () => {
+  it('종류별 켜기 · 강도 — 켜기는 알람마다, 강도 세 칸은 DB 칸 이름(배경음 sound_key · 말소리 voice_tone · 진동 vibration)으로', async () => {
     await edit({ kinds: { WAKE: true, PREPARE: false, DEPARTURE: true }, levels: { sound: 2, voice: 0, vibration: 1 } });
     await edit({ levels: { sound: null, voice: 0, vibration: 1 } });
     const logs = await listEditLogs();
@@ -478,7 +532,7 @@ describe('고친 값 기록 (user_edit_logs, 가짜)', () => {
       ['alarm_enabled', 'PREPARE', true, false],
       ['sound_key', '', 1, 2], // 자동 강도 = 중요도 중요 1점 → 중(1)
       ['voice_tone', '', 1, 0],
-      ['intensity', '', 1, 1],
+      ['vibration', '', 1, 1],
       ['sound_key', '', 1, null],
     ]);
     expect(logs[0]).toMatchObject({ alarmId: 'a1:PREPARE', appointmentId: 'a1' });
@@ -517,7 +571,7 @@ describe('고친 값 기록 (user_edit_logs, 가짜)', () => {
 });
 
 describe('H05 확인 시트에서 알람 시각 고치기 (D43)', () => {
-  const draft = (): AppointmentDraft => ({ ...defaultDraft(kst(24, 0), morning), title: '스터디' });
+  const draft = (): AppointmentDraft => ({ ...defaultDraft(kst(24, 0), morning), title: '스터디', time: '10:00' }); // 14:00이면 기상이 낮 12시 이후라 안 생김(#320)
 
   it('고친 시각으로 저장되고(직접 고름 표시), 고친 값 기록에 H05로 남음', async () => {
     const estimate = await estimateAppointment(draft());

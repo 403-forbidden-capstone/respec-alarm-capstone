@@ -37,7 +37,7 @@ const plan = (draft: Partial<PlanDraft> = {}, over: Partial<PlanInputs> = {}): P
   );
 const row = (type: AlarmRow['alarm_type'], minutes: number, over: Partial<AlarmRow> = {}): AlarmRow => ({
   alarm_id: `id-${type}`, participant_id: 'pt', user_id: 'u', alarm_type: type, scheduled_at: kst(22, minutes).toISOString(),
-  intensity: 'NORMAL', voice_tone: 'NEUTRAL', sound_key: 'theme_default', is_enabled: true, snooze_limit: 3,
+  intensity: 'NORMAL', voice_tone: 'NEUTRAL', sound_key: 'theme_default', vibration: null, is_enabled: true, snooze_limit: 3,
   time_source: 'AUTO', intensity_source: 'AUTO', recurrence_rule: null, ...over,
 });
 
@@ -52,6 +52,7 @@ test('새 약속: 4개 알람을 만듦 (기상 · 준비 · 출발 · 도착 �
   assert.deepEqual(diff.update, []);
   assert.deepEqual(diff.remove, []);
   assert.deepEqual([diff.insert[0].intensity, diff.insert[0].voice_tone, diff.insert[0].sound_key], ['NORMAL', 'NEUTRAL', 'theme_default']);
+  assert.ok(diff.insert.every((a) => a.vibration === null)); // 진동은 자동이면 null (강도를 따름)
 });
 
 test('직접 고른 시각 · 강도는 MANUAL 출처로 (따라온 준비는 AUTO)', () => {
@@ -61,7 +62,8 @@ test('직접 고른 시각 · 강도는 MANUAL 출처로 (따라온 준비는 AU
   assert.equal(by.WAKE.time_source, 'MANUAL');
   assert.equal(by.PREPARE.time_source, 'AUTO');
   assert.equal(hm(by.PREPARE.scheduled_at), '08:00');
-  assert.ok(diff.insert.every((a) => a.intensity_source === 'MANUAL' && a.intensity === 'STRONG'));
+  // 진동을 강으로 직접 골랐다: 진동 칸만 STRONG_CONTINUOUS, 전체 세기(intensity)는 자동 단계(보통) 그대로
+  assert.ok(diff.insert.every((a) => a.intensity_source === 'MANUAL' && a.intensity === 'NORMAL' && a.vibration === 'STRONG_CONTINUOUS'));
 });
 
 test('알람 없는 일정(kinds [])은 아무것도 만들지 않고 있던 알람은 지움', () => {
@@ -114,14 +116,14 @@ test('검증을 통과 못 한 계획은 쓰지 않음', () => {
 
 test('예약 꾸러미: 켜진 알람만, 알람 코어 RingPackage 칸 이름, 시각순', () => {
   const alarms = [
-    { alarm_id: 'a2', alarm_type: 'DEPARTURE' as const, scheduled_at: kst(22, 540).toISOString(), intensity: 'NORMAL' as const, sound_key: 'theme_default', snooze_limit: 3, is_enabled: true },
-    { alarm_id: 'a1', alarm_type: 'WAKE' as const, scheduled_at: kst(22, 480).toISOString(), intensity: 'STRONG' as const, sound_key: 'theme_urgent', snooze_limit: 3, is_enabled: true },
-    { alarm_id: 'a3', alarm_type: 'PREPARE' as const, scheduled_at: kst(22, 510).toISOString(), intensity: 'NORMAL' as const, sound_key: null, snooze_limit: 3, is_enabled: false },
+    { alarm_id: 'a2', alarm_type: 'DEPARTURE' as const, scheduled_at: kst(22, 540).toISOString(), intensity: 'NORMAL' as const, sound_key: 'theme_default', vibration: null, voice_tone: 'NEUTRAL', snooze_limit: 3, is_enabled: true },
+    { alarm_id: 'a1', alarm_type: 'WAKE' as const, scheduled_at: kst(22, 480).toISOString(), intensity: 'STRONG' as const, sound_key: 'theme_urgent', vibration: null, voice_tone: 'DIRECT', snooze_limit: 3, is_enabled: true },
+    { alarm_id: 'a3', alarm_type: 'PREPARE' as const, scheduled_at: kst(22, 510).toISOString(), intensity: 'NORMAL' as const, sound_key: null, vibration: null, voice_tone: 'NEUTRAL', snooze_limit: 3, is_enabled: false },
   ];
   const pkgs = buildRingPackages({ alarms, title: '팀 주간회의', subtitle: '오전 10:00 · 세종대학교', departAt: kst(22, 540) });
   assert.deepEqual(pkgs, [
-    { alarmId: 'a1', type: 'WAKE', atMillis: kst(22, 480).getTime(), title: '팀 주간회의', subtitle: '오전 10:00 · 세종대학교', intensity: 'STRONG', snoozeLimit: 3, soundKey: 'theme_urgent', departAt: kst(22, 540).getTime() },
-    { alarmId: 'a2', type: 'DEPARTURE', atMillis: kst(22, 540).getTime(), title: '팀 주간회의', subtitle: '오전 10:00 · 세종대학교', intensity: 'NORMAL', snoozeLimit: 3, soundKey: 'theme_default', departAt: kst(22, 540).getTime() },
+    { alarmId: 'a1', type: 'WAKE', atMillis: kst(22, 480).getTime(), title: '팀 주간회의', subtitle: '오전 10:00 · 세종대학교', intensity: 'STRONG', snoozeLimit: 3, soundKey: 'theme_urgent', vibration: 'STRONG_CONTINUOUS', departAt: kst(22, 540).getTime() },
+    { alarmId: 'a2', type: 'DEPARTURE', atMillis: kst(22, 540).getTime(), title: '팀 주간회의', subtitle: '오전 10:00 · 세종대학교', intensity: 'NORMAL', snoozeLimit: 3, soundKey: 'theme_default', vibration: 'SHORT_REPEAT', departAt: kst(22, 540).getTime() },
   ]);
 });
 

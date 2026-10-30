@@ -14,7 +14,8 @@ export const IMPORTANCES = ['LOW', 'NORMAL', 'HIGH'] as const satisfies readonly
 // MONTHLY · INTERVAL · COUNT 같은 그 밖은 VALIDATION_FAILED — 앱 표시와 alarm-roll이 만드는 회차가 어긋나지 않게 (정의는 calc/recur.ts, 설계 메모 L1 PR 3 2절)
 export { RRULE_PATTERN };
 
-export type PlaceInput = { name?: string; lat?: number; lng?: number };
+// radiusM: 목적지 감지 반경(m, 100~500) — 새 약속의 destination에만 읽음 (appointments.dest_radius_m, D68). 출발지에는 저장 칸이 없어 읽지 않음
+export type PlaceInput = { name?: string; lat?: number; lng?: number; radiusM?: number };
 
 export type ParticipantFields = {
   origin?: PlaceInput;
@@ -33,14 +34,15 @@ export type AlarmFields = {
   levels?: Partial<Record<IntensityAxis, Level | null>>;
 };
 
-export function readPlace(parent: Reader, key: string, opts: { required?: boolean; nameRequired?: boolean } = {}): PlaceInput | undefined {
+export function readPlace(parent: Reader, key: string, opts: { required?: boolean; nameRequired?: boolean; radius?: boolean } = {}): PlaceInput | undefined {
   const r = parent.object(key, { required: opts.required });
   if (!r) return undefined;
   const name = r.string('name', { max: 200, required: opts.nameRequired });
   const lat = r.number('lat', { min: -90, max: 90 });
   const lng = r.number('lng', { min: -180, max: 180 });
   if ((lat == null) !== (lng == null)) r.problemAt(lat == null ? 'lat' : 'lng', 'lat · lng는 같이 있어야 해요');
-  return { ...(name ? { name } : {}), ...(lat != null && lng != null ? { lat, lng } : {}) };
+  const radiusM = opts.radius ? r.int('radius_m', { min: 100, max: 500 }) : undefined;
+  return { ...(name ? { name } : {}), ...(lat != null && lng != null ? { lat, lng } : {}), ...(radiusM != null ? { radiusM } : {}) };
 }
 
 export function readParticipantFields(r: Reader): ParticipantFields {

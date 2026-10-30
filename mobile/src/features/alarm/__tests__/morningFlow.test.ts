@@ -132,6 +132,7 @@ describe('하루 재생: 폰 알림 → 기상 해제 → 기상 확정(H08) →
       scheduled_at: at.toISOString(),
       intensity: 'NORMAL',
       sound_key: null,
+      vibration: null,
       snooze_limit: 3,
       is_enabled: true,
       participant_id: 'p1',

@@ -593,6 +593,31 @@ test('7.1.3: 일정을 앞으로 옮기면 새 첫 일정에 기상이 붙고 �
   assert.equal(kinds(env.db, a2), 'ARRIVE,DEPARTURE,PREPARE');
 });
 
+test('7.1.3: 이미 울린 기상 알람은 앞 일정이 생겨도 떼지 않음 (울린 기록 = 학습 · 미루기 근거), 아직 안 울린 것은 떼짐', async () => {
+  const env = setup();
+  const a1 = await single(env, A, '2026-10-29T13:00', { title: 'A1' });
+  const a2 = await single(env, A, '2026-10-29T20:00', { title: 'A2' });
+  const a1Wake = alarmsOf(env.db, a1).find((x) => x.alarm_type === 'WAKE')!;
+  const wakeAt = new Date(a1Wake.scheduled_at as string);
+  // 시험 전제: 기상은 낮 12시 전(12시 이후면 저녁 기상이라 아예 안 생김, #320)이고 11시 반 전에 울림
+  assert.ok(wakeAt.getTime() < kst('2026-10-29T11:30').getTime());
+
+  // 아직 안 울렸을 때(지금 = 월요일) — A2를 A1 앞으로 옮기면 A1의 기상은 떼짐
+  const early = await updateAppointment(ctxFor(env, A), upd(a2, { at: kst('2026-10-29T12:45') }, 'this', true));
+  assert.ok(early.canceled_alarm_ids.includes(a1Wake.alarm_id as string));
+  assert.equal(kinds(env.db, a1), 'ARRIVE,DEPARTURE,PREPARE');
+  await updateAppointment(ctxFor(env, A), upd(a2, { at: kst('2026-10-29T20:00') }, 'this', true)); // 원래대로 (A1이 다시 기상을 받음)
+  assert.equal(kinds(env.db, a1), 'ARRIVE,DEPARTURE,PREPARE,WAKE');
+  const wakeAgain = alarmsOf(env.db, a1).find((x) => x.alarm_type === 'WAKE')!;
+
+  // 이미 울린 뒤(지금 = 11:30) — 같은 변경에도 A1의 기상 알람은 그대로 남음
+  const late = await updateAppointment(ctxFor(env, A, { now: kst('2026-10-29T11:30') }), upd(a2, { at: kst('2026-10-29T12:45') }, 'this', true));
+  assert.equal(late.saved, true);
+  assert.equal(kinds(env.db, a1), 'ARRIVE,DEPARTURE,PREPARE,WAKE');
+  assert.ok(!late.canceled_alarm_ids.includes(wakeAgain.alarm_id as string));
+  assert.equal(alarmsOf(env.db, a1).find((x) => x.alarm_type === 'WAKE')!.is_enabled, true);
+});
+
 test('7.1.3: 셋째 일정은 밀려 있던 대로 — 둘째가 기상을 받으면 셋째는 그대로, 일부러 기상을 안 고른 일정은 되살리지 않음', async () => {
   const env = setup();
   const a1 = await single(env, A, '2026-10-29T10:00');
@@ -775,4 +800,69 @@ test('runEdit이 action에 맞는 함수를 부름', async () => {
   assert.equal(((await runEdit(ctx, upd(id, { title: '바꿈' }))) as { saved: boolean }).saved, true);
   assert.equal(((await runEdit(ctx, restore(id))) as { restored: boolean }).restored, false);
   assert.equal(((await runEdit(ctx, del(id))) as { deleted: boolean }).deleted, true);
+});
+
+// ===========================================================================
+// 저녁에만 일정이 있는 날은 기상 알람 없음 (#320) — 계산된 기상이 낮 12시 이후면 준비 · 출발 · 도착만
+// ===========================================================================
+
+test('#320: 저녁 단일 일정은 기상 없이 준비 · 출발 · 도착만, 저녁 일정 둘도 둘 다 기상 없음 (첫 일정이 기상 없다고 둘째가 기상을 얻지 않음)', async () => {
+  const env = setup();
+  const e1 = await single(env, A, '2026-10-29T17:00');
+  const e2 = await single(env, A, '2026-10-29T19:00');
+  assert.equal(kinds(env.db, e1), 'ARRIVE,DEPARTURE,PREPARE');
+  assert.equal(kinds(env.db, e2), 'ARRIVE,DEPARTURE,PREPARE');
+  assert.equal(participantOf(env.db, e1)!.prepare_minutes, 15);
+});
+
+test('#320: 오전 일정 + 저녁 일정 — 오전은 기상, 저녁은 기상 없음. 오전 일정을 지워도 저녁 일정에 기상을 되살리지 않음', async () => {
+  const env = setup();
+  const morning = await single(env, A, '2026-10-29T09:00');
+  const evening = await single(env, A, '2026-10-29T18:00');
+  assert.equal(kinds(env.db, morning), 'ARRIVE,DEPARTURE,PREPARE,WAKE');
+  assert.equal(kinds(env.db, evening), 'ARRIVE,DEPARTURE,PREPARE');
+  const before = JSON.stringify(alarmsOf(env.db, evening));
+  await deleteAppointment(ctxFor(env, A), del(morning));
+  assert.equal(JSON.stringify(alarmsOf(env.db, evening)), before);
+});
+
+test('#320: 아침 일정을 저녁으로 옮기면 기상이 떨어지고, 다시 아침으로 옮기면 기상이 붙음', async () => {
+  const env = setup();
+  const a = await single(env, A, '2026-10-29T09:00');
+  const wake = alarmsOf(env.db, a).find((x) => x.alarm_type === 'WAKE')!;
+  assert.ok(wake);
+  const res = await updateAppointment(ctxFor(env, A), upd(a, { at: kst('2026-10-29T20:00') }, 'this', true));
+  assert.equal(kinds(env.db, a), 'ARRIVE,DEPARTURE,PREPARE');
+  assert.ok(res.canceled_alarm_ids.includes(wake.alarm_id as string));
+  await updateAppointment(ctxFor(env, A), upd(a, { at: kst('2026-10-29T09:00') }, 'this', true));
+  assert.equal(kinds(env.db, a), 'ARRIVE,DEPARTURE,PREPARE,WAKE');
+});
+
+test('#320: 저녁 일정 둘 중 앞 일정을 지워도 다른 저녁 일정에 기상이 붙지 않음', async () => {
+  const env = setup();
+  const e1 = await single(env, A, '2026-10-29T17:00');
+  const e2 = await single(env, A, '2026-10-29T19:00');
+  await deleteAppointment(ctxFor(env, A), del(e1));
+  assert.equal(kinds(env.db, e2), 'ARRIVE,DEPARTURE,PREPARE');
+});
+
+test('#320 F1: 13:00 일정에서 사용자가 일부러 끈 기상은 장소 · 중요도만 고쳐도 되살아나지 않음 (계산된 기상이 낮 12시 전이었으므로)', async () => {
+  const env = setup();
+  const a = await single(env, A, '2026-10-29T13:00');
+  assert.ok(alarmsOf(env.db, a).some((x) => x.alarm_type === 'WAKE')); // 계산된 기상이 12시 전이라 처음엔 기상이 있음
+  // 사용자가 H05에서 기상을 끔 — 기상 행만 지움
+  const rows = env.db.rows('alarms');
+  const wakeIdx = rows.findIndex((x) => x.participant_id === participantOf(env.db, a)!.participant_id && x.alarm_type === 'WAKE');
+  rows.splice(wakeIdx, 1);
+  assert.equal(kinds(env.db, a), 'ARRIVE,DEPARTURE,PREPARE');
+  await updateAppointment(ctxFor(env, A), upd(a, { importance: 'HIGH' }, 'this', true));
+  assert.equal(kinds(env.db, a), 'ARRIVE,DEPARTURE,PREPARE'); // 일부러 끈 기상이 그대로
+});
+
+test('#320 F1: 저녁 일정(규칙으로 기상 없음)을 아침으로 옮기면 기상이 생김', async () => {
+  const env = setup();
+  const a = await single(env, A, '2026-10-29T20:00');
+  assert.equal(kinds(env.db, a), 'ARRIVE,DEPARTURE,PREPARE');
+  await updateAppointment(ctxFor(env, A), upd(a, { at: kst('2026-10-29T09:00') }, 'this', true));
+  assert.equal(kinds(env.db, a), 'ARRIVE,DEPARTURE,PREPARE,WAKE');
 });

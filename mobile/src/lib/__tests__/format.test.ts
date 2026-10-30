@@ -12,6 +12,7 @@ import {
   josa,
   joinKo,
   keepWords,
+  keepWordsIfWrappable,
   minuteOfDay,
   spokenTime,
   timeParts,
@@ -73,6 +74,26 @@ describe('keepWords', () => {
     expect(out.replace(/\u2060/g, '').replace(/\u00A0/g, ' ')).toBe('오후 12:28 기상 · 지남');
     expect(out).toBe('오\u2060후\u00A012:28 기\u2060상 ·\u00A0지\u2060남');
     expect(keepWords('7:00 AM')).toBe('7:00 AM');
+  });
+
+  it('두 번 걸어도 결과가 같음 (공통 Text와 화면이 겹쳐도 안전)', () => {
+    const once = keepWords('오후 12:28 기상 · 지남');
+    expect(keepWords(once)).toBe(once);
+  });
+});
+
+describe('keepWordsIfWrappable', () => {
+  it('띄어쓰기가 있는 한글 글에만 걸고, 숫자 · 한 단어 · 영문은 그대로', () => {
+    expect(keepWordsIfWrappable('기상 확인')).toBe(keepWords('기상 확인'));
+    expect(keepWordsIfWrappable('기상')).toBe('기상');
+    expect(keepWordsIfWrappable('7:55')).toBe('7:55');
+    expect(keepWordsIfWrappable('Re:Spec Alarm')).toBe('Re:Spec Alarm');
+    expect(keepWordsIfWrappable('https://example.com/가나다')).toBe('https://example.com/가나다');
+  });
+
+  it('이미 keepWords를 건 글에 다시 걸어도 같음', () => {
+    const done = keepWords('집에서 나서는 시각');
+    expect(keepWordsIfWrappable(done)).toBe(done);
   });
 });
 

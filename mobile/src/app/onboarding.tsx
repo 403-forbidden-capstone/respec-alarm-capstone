@@ -1,10 +1,26 @@
 import { router } from 'expo-router';
 import { useState, type ReactNode } from 'react';
+import { StyleSheet } from 'react-native';
 
+import { Text } from '@/components/ui';
+import { listPlaces } from '@/features/alarm/api';
+import { PlaceSearchSheet } from '@/features/alarm/components/PlaceSearchSheet';
+import { TimeSheet } from '@/features/alarm/components/TimePicker';
 import { useAuth } from '@/features/auth/AuthProvider';
-import { CONSENT_ITEMS, PRIVACY_VERSION } from '@/features/onboarding/consent';
+import { hasHome } from '@/features/onboarding/home';
+import { CampusCard } from '@/features/onboarding/components/CampusCard';
+import { ImportNoticeCard } from '@/features/onboarding/components/ImportNoticeCard';
+import { HomePlaceStep } from '@/features/onboarding/components/HomePlaceStep';
+import { consentItems, PRIVACY_VERSION } from '@/features/onboarding/consent';
 import { OnboardingDoneStep } from '@/features/onboarding/components/OnboardingDoneStep';
 import { OnboardingFrame } from '@/features/onboarding/components/OnboardingFrame';
+import { CalendarPickSheet } from '@/features/onboarding/components/CalendarPickSheet';
+import { ImportEntryCard } from '@/features/onboarding/components/ImportEntryCard';
+import { TimetableStep } from '@/features/onboarding/components/TimetableStep';
+import { useHomeStep } from '@/features/onboarding/hooks/useHomeStep';
+import { useCalendarImport } from '@/features/onboarding/hooks/useCalendarImport';
+import { usePhotoImport } from '@/features/onboarding/hooks/usePhotoImport';
+import { useTimetableStep } from '@/features/onboarding/hooks/useTimetableStep';
 import { activeSteps, nextStep, ONBOARDING_ORDER, prevStep, stepNumber, type OnboardingStepId, type StepFlags } from '@/features/onboarding/steps';
 import { cleanHandle, cleanNickname, isHandleFormat, isNicknameOk, NICKNAME_MAX, shouldSaveHandle } from '@/features/onboarding/validate';
 import { ConsentStep } from '@/features/onboarding/views/ConsentStep';
@@ -16,13 +32,15 @@ import { SleepStep } from '@/features/onboarding/views/SleepStep';
 import { finishOnboarding, isHandleTaken, saveProfileFields } from '@/features/profile/api';
 import type { WakeSensitivity } from '@/features/profile/types';
 import { setAfterOnboarding } from '@/lib/afterOnboarding';
+import { now } from '@/lib/clock';
 import { UserError } from '@/lib/errors';
-import { ONBOARDING_STEPS } from '@/lib/flags';
+import { ONBOARDING_STEPS, TIMETABLE_PATHS } from '@/lib/flags';
+import { addMinutes, minuteOfDay, startOfDay } from '@/lib/format';
 import { useAction } from '@/lib/useAction';
 
 // 이 화면에 단계 화면이 있는 단계 — 켜 놓았어도 여기 없으면 건너뜀 (진행 표시의 전체 수에서도 빠짐)
-// 자리: home · timetable(PR 5 — 집 검색 · 시간표 입력), permissions(PR 7 — 권한 안내), mic(L4 뒤). 화면을 만들면 여기에 더함
-const SCREEN_STEPS: ReadonlySet<OnboardingStepId> = new Set(['handle', 'nickname', 'sleep', 'prepare', 'consent', 'share', 'first']);
+// 자리: permissions(PR 7 — 권한 안내), mic(L4 뒤). 화면을 만들면 여기에 더함
+const SCREEN_STEPS: ReadonlySet<OnboardingStepId> = new Set(['handle', 'nickname', 'sleep', 'home', 'prepare', 'timetable', 'consent', 'share', 'first']);
 const FLAGS = Object.fromEntries(ONBOARDING_ORDER.map((id) => [id, ONBOARDING_STEPS[id] && SCREEN_STEPS.has(id)])) as StepFlags;
 
 // 단계에 따라 틀(OnboardingFrame)에 넣을 것
@@ -59,6 +77,13 @@ export default function OnboardingScreen() {
     transport: profile?.default_transport ?? 'TRANSIT',
     margin: profile?.wake_margin ?? 'NORMAL',
   });
+  const homeStep = useHomeStep(profile, userId);
+  const photoImport = usePhotoImport();
+  const timetable = useTimetableStep(prepare.transport); // 수업은 '아침 준비'에서 고른 이동 수단으로 계산
+  const calendarImport = useCalendarImport(timetable.addImported); // 캘린더에서 가져온 수업도 같은 시간표 단계 줄로 들어감
+  const importing = photoImport.reading || calendarImport.busy; // 사진을 읽거나 캘린더를 가져오는 동안 시간표 단계를 막음
+  // 집 좌표가 없으면 서버가 출발지 '집'을 못 채워 이동시간을 못 구함 — 실데이터만 (가짜 데이터는 집 없이도 계산)
+  const noHome = userId != null && !hasHome(homeStep.saved, profile);
   const [finished, setFinished] = useState(false); // 온보딩 끝난 시각을 이미 적었음 (다시 읽기만 실패해 한 번 더 누를 때 또 적지 않게)
   const [consentSaved, setConsentSaved] = useState(false); // 이 화면에서 이미 동의를 저장했음 (뒤로 갔다 와도 다시 저장하지 않게)
 
@@ -93,6 +118,9 @@ export default function OnboardingScreen() {
       case 'sleep':
         if (userId) await saveProfileFields(userId, { wake_sensitivity: sleep });
         return true;
+      case 'home':
+        await homeStep.save();
+        return true;
       case 'prepare':
         if (userId) {
           await saveProfileFields(userId, {
@@ -103,6 +131,8 @@ export default function OnboardingScreen() {
           });
         }
         return true;
+      case 'timetable':
+        return timetable.save(); // 줄 하나라도 못 만들면 false — 그 단계에 머묾
       case 'consent': {
         // 이미 이 판에 동의한 계정이면 다시 저장하지 않고 통과
         const agreed = (profile?.privacy_version ?? 0) >= PRIVACY_VERSION;
@@ -168,6 +198,26 @@ export default function OnboardingScreen() {
       primaryLabel: '다음',
       onPrimary: next,
     },
+    home: {
+      title: '집 위치',
+      body: (
+        <>
+          <HomePlaceStep homeName={homeStep.homeName} onOpenSearch={homeStep.openSearch} onClear={homeStep.clear} />
+          <PlaceSearchSheet
+            visible={homeStep.searchOpen}
+            onClose={homeStep.closeSearch}
+            onPick={homeStep.pick}
+            search={(query) => listPlaces(query)}
+            title="집 찾기"
+          />
+        </>
+      ),
+      primaryLabel: '다음',
+      primaryDisabled: !homeStep.picked,
+      onPrimary: next,
+      secondaryLabel: '나중에',
+      onSecondary: advance, // 저장 없이 다음
+    },
     prepare: {
       title: '아침 준비',
       lead: '알람 계산의 처음 값이에요',
@@ -175,10 +225,89 @@ export default function OnboardingScreen() {
       primaryLabel: '다음',
       onPrimary: next,
     },
+    timetable: {
+      title: '수업 시간표',
+      lead: '수업 전 알람을 자동으로 맞춰요',
+      body: (
+        <>
+          {noHome ? (
+            <Text variant="small" tone="warn" style={styles.noHome}>
+              집 위치를 정하지 않아서 이동시간을 구하지 못해요. 이전으로 돌아가 집을 정하거나 건너뛰어 주세요
+            </Text>
+          ) : null}
+          <ImportEntryCard
+            onPhoto={
+              TIMETABLE_PATHS.photo
+                ? async () => {
+                    const batch = await photoImport.pick();
+                    if (batch) timetable.addImported(batch);
+                  }
+                : undefined
+            }
+            onCalendar={TIMETABLE_PATHS.calendar ? calendarImport.start : undefined}
+            busy={busy || photoImport.reading || calendarImport.busy}
+            reading={photoImport.reading ? 'photo' : calendarImport.reading ? 'calendar' : null}
+          />
+          <CalendarPickSheet
+            visible={calendarImport.pickerOpen}
+            calendars={calendarImport.calendars}
+            picked={calendarImport.picked}
+            onToggle={calendarImport.toggle}
+            onConfirm={calendarImport.confirm}
+            onClose={calendarImport.closePicker}
+          />
+          {timetable.notice ? <ImportNoticeCard notice={timetable.notice} onDismiss={timetable.dismissNotice} /> : null}
+          {timetable.missingCoords > 0 ? (
+            <Text variant="small" tone="warn" style={styles.noHome}>
+              {timetable.campus ? '장소를 못 찾은 줄이 있어요. 그 줄의 [장소]에서 직접 골라 주세요' : '학교를 먼저 정해 주세요. 이동시간을 구하려면 수업 장소의 위치가 필요해요'}
+            </Text>
+          ) : null}
+          {timetable.imported && timetable.rows.length > 0 ? <CampusCard campus={timetable.campus} onOpen={timetable.openCampus} disabled={busy} /> : null}
+          <TimetableStep
+            rows={timetable.rows}
+            onChangeRow={timetable.onChangeRow}
+            onAddRow={timetable.onAddRow}
+            onRemoveRow={timetable.onRemoveRow}
+            onPickPlace={timetable.onPickPlace}
+            onPickTime={timetable.onPickTime}
+            onToggleExisting={timetable.onToggleExisting}
+            saving={busy || importing}
+          />
+          <PlaceSearchSheet
+            visible={timetable.campusOpen}
+            onClose={timetable.closeCampus}
+            onPick={timetable.pickCampus}
+            search={(query) => listPlaces(query)}
+            title="학교 찾기"
+          />
+          <PlaceSearchSheet
+            visible={timetable.placeOpen}
+            onClose={timetable.closePlace}
+            onPick={timetable.pickPlace}
+            search={(query) => listPlaces(query)}
+            title="수업 장소 찾기"
+          />
+          {timetable.timeRow?.startMinutes != null ? (
+            <TimeSheet
+              visible
+              onClose={timetable.closeTime}
+              title="시작 시각"
+              value={addMinutes(startOfDay(now()), timetable.timeRow.startMinutes)}
+              onChange={(at) => timetable.changeTime(minuteOfDay(at))}
+            />
+          ) : null}
+        </>
+      ),
+      primaryLabel: '저장하고 다음',
+      primaryDisabled: !timetable.canSave || noHome || importing,
+      onPrimary: next,
+      secondaryLabel: '건너뛰기',
+      onSecondary: importing ? undefined : advance, // 저장 없이 다음 (사진 · 캘린더를 읽는 동안은 막음 — 뒤늦게 온 결과가 다음 단계에 쌓이지 않게)
+    },
     consent: {
       title: '개인정보 안내',
       lead: '앱이 읽는 것과 읽지 않는 것이에요',
-      body: <ConsentStep items={CONSENT_ITEMS} />,
+      body: <ConsentStep items={consentItems(TIMETABLE_PATHS)} />,
       primaryLabel: '동의하고 계속',
       onPrimary: next,
     },
@@ -228,3 +357,7 @@ export default function OnboardingScreen() {
     </OnboardingFrame>
   );
 }
+
+const styles = StyleSheet.create({
+  noHome: { marginBottom: 12 },
+});

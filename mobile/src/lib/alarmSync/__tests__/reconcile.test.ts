@@ -46,6 +46,7 @@ describe('서버 행 → 예약 꾸러미 (서버 alarm-commit과 같은 조립)
       intensity: 'STRONG',
       snoozeLimit: 3,
       soundKey: 'theme_urgent',
+      vibration: 'STRONG_CONTINUOUS', // 칸이 비어 있어 강도에서
       departAt: Date.parse('2026-10-20T00:00:00.000Z'),
       groupKey: 'p1', // 같은 약속의 알람을 묶는 키 (맞추기 계산용 — planReconcile이 폰에 걸 때 뗌)
       voiceText: '좋은 아침이에요. 오늘 첫 일정은 오전 10시 팀 주간회의예요. 오전 9시에 나가면 돼요.', // 약속 기상 알람이라 출발 알람(9:00)을 읽어 줌
@@ -160,6 +161,22 @@ describe('폰 예약 맞추기 계획 (planReconcile)', () => {
     const server = [pkg('time', at(65)), pkg('strong', at(60), { intensity: 'STRONG' }), pkg('same', at(70))];
     const phone = [onPhone('time', at(60)), onPhone('strong', at(60)), onPhone('same', at(70))];
     expect(planReconcile({ server, phone, nowMs: NOW }).schedule.map((p) => p.alarmId)).toEqual(['time', 'strong']);
+  });
+
+  it('배경음 · 진동이 폰과 다르면 다시 걸고, 폰이 안 돌려주는 칸(예전 APK)은 비교하지 않음 (D1 A)', () => {
+    const server = [
+      pkg('sound', at(60), { soundKey: 'theme_urgent', vibration: 'SHORT_REPEAT' }),
+      pkg('vibration', at(60), { soundKey: 'theme_default', vibration: 'NONE' }),
+      pkg('same', at(60), { soundKey: 'theme_default', vibration: 'SHORT_REPEAT' }),
+      pkg('unknown', at(60), { soundKey: 'theme_urgent', vibration: 'NONE' }),
+    ];
+    const phone = [
+      onPhone('sound', at(60), { soundKey: 'theme_default', vibration: 'SHORT_REPEAT' }),
+      onPhone('vibration', at(60), { soundKey: 'theme_default', vibration: 'SHORT_REPEAT' }),
+      onPhone('same', at(60), { soundKey: 'theme_default', vibration: 'SHORT_REPEAT' }),
+      onPhone('unknown', at(60)),
+    ];
+    expect(planReconcile({ server, phone, nowMs: NOW }).schedule.map((p) => p.alarmId)).toEqual(['sound', 'vibration']);
   });
 
   it('울린 뒤 미룬 알람(첫 울림이 지남)은 서버 목록(지금 이후)에 없어도 지우지 않음', () => {

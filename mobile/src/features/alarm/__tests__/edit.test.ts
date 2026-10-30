@@ -7,8 +7,20 @@ import { db, kst } from '@/mocks/data';
 import { deleteAppointment, getAppointment, getDaySchedule, getNextAlarm, leaveSharedAppointment, listAppointments, restoreAppointment, updateAppointment } from '../api';
 import type { AppointmentPatch } from '../types';
 
-// 일정 수정 · 삭제 앱 함수 (이슈 #211, D41 A) — 가짜 모드. 실서버는 4b라 자리(realEdit.ts)가 UserError를 던지는지만 봄
+// 일정 수정 · 삭제 앱 함수 (이슈 #211, D41 A) — 가짜 모드. 실서버(4c)는 realEdit.ts로 넘기는지만 봄 (요청 · 응답 변환은 realEdit.test.ts)
 let mockIsMock = true;
+const mockRealEdit = {
+  updateAppointment: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
+  deleteAppointment: jest.fn<(...args: unknown[]) => Promise<void>>(),
+  restoreAppointment: jest.fn<(...args: unknown[]) => Promise<void>>(),
+  leaveSharedAppointment: jest.fn<(...args: unknown[]) => Promise<void>>(),
+};
+jest.mock('../realEdit', () => ({
+  updateAppointment: (...args: unknown[]) => mockRealEdit.updateAppointment(...args),
+  deleteAppointment: (...args: unknown[]) => mockRealEdit.deleteAppointment(...args),
+  restoreAppointment: (...args: unknown[]) => mockRealEdit.restoreAppointment(...args),
+  leaveSharedAppointment: (...args: unknown[]) => mockRealEdit.leaveSharedAppointment(...args),
+}));
 jest.mock('@/lib/mode', () => ({ ...jest.requireActual<object>('@/lib/mode'), isMock: () => mockIsMock }));
 
 const SEEDS = db.appointments.map((a) => ({ ...a }));
@@ -187,7 +199,13 @@ describe('deleteAppointment · restoreAppointment', () => {
     expect(db.trash).toEqual([]);
   });
 
+  it('그날 첫 일정을 지워도 저녁 일정(계산된 기상이 낮 12시 이후)에는 기상 알람이 붙지 않음 (#320)', async () => {
+    await deleteAppointment(ID, 'this');
+    expect((await times('a2')).WAKE).toBeUndefined();
+  });
+
   it('그날 첫 일정을 지우면 다음 일정에 기상 알람이 붙고, 되살리면 다시 준비부터', async () => {
+    db.appointments.find((a) => a.id === 'a2')!.at = kst(22, 720); // 저녁약속을 낮 12시로 — 기상이 낮 12시 전이어야 붙음(#320)
     expect((await times('a2')).WAKE).toBeUndefined();
     await deleteAppointment(ID, 'this');
     expect((await times('a2')).WAKE).toBeDefined();
@@ -247,14 +265,24 @@ describe('공동 약속', () => {
   });
 });
 
-describe('실데이터 모드 (4b 전)', () => {
-  it('네 함수 모두 토스트로 보일 UserError를 던짐', async () => {
+describe('실데이터 모드 (4c)', () => {
+  it('네 함수 모두 realEdit(서버 appointment-edit)로 넘김 — 가짜 db는 안 건드림', async () => {
     mockIsMock = false;
-    const message = '아직 실서버에서는 쓸 수 없어요';
-    await expect(updateAppointment(ID, { title: 'x' }, 'this')).rejects.toThrow(message);
-    await expect(deleteAppointment(ID, 'this')).rejects.toThrow(message);
-    await expect(restoreAppointment(ID)).rejects.toThrow(message);
-    await expect(leaveSharedAppointment(ID)).rejects.toThrow(message);
-    await expect(deleteAppointment(ID, 'this')).rejects.toBeInstanceOf(UserError);
+    mockRealEdit.updateAppointment.mockResolvedValueOnce({ changes: [], needsConfirm: true });
+    await expect(updateAppointment(ID, { title: 'x' }, 'following', { confirmed: true })).resolves.toEqual({ changes: [], needsConfirm: true });
+    expect(mockRealEdit.updateAppointment).toHaveBeenCalledWith(ID, { title: 'x' }, 'following', { confirmed: true });
+    await deleteAppointment(ID, 'this');
+    expect(mockRealEdit.deleteAppointment).toHaveBeenCalledWith(ID, 'this');
+    await restoreAppointment(ID);
+    expect(mockRealEdit.restoreAppointment).toHaveBeenCalledWith(ID);
+    await leaveSharedAppointment(ID);
+    expect(mockRealEdit.leaveSharedAppointment).toHaveBeenCalledWith(ID);
+    expect(db.appointments.map((x) => x.id)).toContain(ID);
+  });
+
+  it('realEdit의 UserError는 그대로 화면까지 올라감', async () => {
+    mockIsMock = false;
+    mockRealEdit.restoreAppointment.mockRejectedValueOnce(new UserError('이 일정은 되돌릴 수 없어요. 새로 만들어 주세요'));
+    await expect(restoreAppointment(ID)).rejects.toBeInstanceOf(UserError);
   });
 });

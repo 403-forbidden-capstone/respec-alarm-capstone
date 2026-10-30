@@ -3,6 +3,7 @@
 //   함수 이름 · 인자는 레인 L2 지시서 6절 "홈 감지 정정 줄"과 같음: listDetections · rejectDetection · undoReject (+ 확인할 기록 listEarlierDepartures)
 //   [아니에요]는 틀렸을 때만 누르는 정정 — 지운 뒤 다음 자동 감지를 기다림. 원탭은 자동 값이 없을 때만 대신 쓰는 길 (원탭 알림 건너뛰기는 PR 6)
 import { now } from '@/lib/clock';
+import { UserError } from '@/lib/errors';
 import { isMock } from '@/lib/mode';
 import { db, kst } from '@/mocks/data';
 import { pastDay } from '@/mocks/records';
@@ -20,8 +21,18 @@ import {
   type RejectSnapshot,
 } from './detections';
 import * as real from './real';
+import * as realPlaces from './realPlaces';
+import {
+  cleanLabel,
+  LIMIT_MESSAGE,
+  normalizeInput,
+  wouldExceedLimit,
+  type UserPlace,
+  type UserPlaceInput,
+} from './userPlaces';
 
 export type { DetectionKind, EarlierDeparture, LocationDetection, RejectInput, RejectScreen, RejectSnapshot } from './detections';
+export type { UserPlace, UserPlaceInput } from './userPlaces';
 
 // ---------------------------------------------------------------------------
 // 가짜 데이터 — 위치 감지는 돌지 않음(가짜 모드는 원탭 그대로, 레인 L2 1절). 화면 초안(L5 · 웹 미리보기)이 볼 수 있게
@@ -76,12 +87,13 @@ export async function listEarlierDepartures(day: Date): Promise<EarlierDeparture
 }
 
 // [아니에요] 1탭 정정 (D61) — 위치 값만 지움(시각 · 출처 · 지각 판정 · 이동시간 · 그 출발로 셈한 준비 실측 · 그 값의 기록 화면 위치 줄) + 고친 값 기록 한 줄
-//   지금 값이 위치가 아니면(원탭 값 · 이미 지움) 아무것도 안 하고 null. 돌려준 값을 5초 안에 undoReject로 넘기면 되돌림
+//   지금 값이 위치가 아니면(원탭 값 · 이미 지움) 또는 input.at이 지금 위치 값의 시각과 다르면(오래된 알림) 아무것도 안 하고 null. 돌려준 값을 5초 안에 undoReject로 넘기면 되돌림
 //   지운 뒤는 다음 자동 감지(다음 이탈 · 진입)를 기다림 — 원탭은 자동 값이 없을 때만 대신 쓰는 길 (원탭 알림 건너뛰기는 PR 6)
 export async function rejectDetection(input: RejectInput): Promise<RejectSnapshot | null> {
   if (!isMock()) return real.rejectDetection(input);
   const found = mockFind(input.participantId, input.kind);
   if (!found) return null;
+  if (input.at != null && found.at.getTime() !== input.at) return null; // 오래된 알림 — real.ts와 같게
   const editId = `mock-reject:${mockKey(input.participantId, input.kind)}`;
   const log: UserEditLog = {
     at: now(),
@@ -108,4 +120,45 @@ export async function undoReject(snapshot: RejectSnapshot): Promise<boolean> {
     mockLogs.delete(snapshot.editId);
   }
   return restored;
+}
+
+// ---------------------------------------------------------------------------
+// 자주 가는 곳 (학교 · 회사 · 알바 등 최대 5개) — 설정 "자주 가는 곳" 줄 · 새 일정 장소 칩 · 온보딩 시간표 장소 기본값이 읽음
+//   헤드 설계 10/30: 집은 profiles, 나머지는 표 user_places. 본인만 읽고 씀 (위치는 공유 안 함, Q13 · D59)
+//   가짜 모드는 메모리 배열 — 앱을 다시 열면 처음 두 곳으로 돌아감
+// ---------------------------------------------------------------------------
+
+const MOCK_USER_PLACES: readonly UserPlace[] = [
+  { label: '학교', name: '서울 광진구 능동로 209', address: '서울 광진구 능동로 209', lat: 37.5509, lng: 127.0736 },
+  { label: '회사', name: '홍대입구역', address: '서울 마포구 양화로 160', lat: 37.5572, lng: 126.9245, radiusM: 300 },
+];
+let mockUserPlaces: UserPlace[] = MOCK_USER_PLACES.map((p) => ({ ...p }));
+
+// 가짜 자리를 처음으로 되돌림 (시험 · 개발 화면)
+export function resetMockUserPlaces(): void {
+  mockUserPlaces = MOCK_USER_PLACES.map((p) => ({ ...p }));
+}
+
+// 내 자주 가는 곳 — 만든 순서
+export async function listUserPlaces(): Promise<UserPlace[]> {
+  if (!isMock()) return realPlaces.listUserPlaces();
+  return mockUserPlaces.map((p) => ({ ...p }));
+}
+
+// 저장 — 같은 이름표가 있으면 덮어씀 (자리는 그대로, 값만 바뀜), 새 이름표인데 이미 5개면 UserError
+export async function saveUserPlace(input: UserPlaceInput): Promise<UserPlace> {
+  if (!isMock()) return realPlaces.saveUserPlace(input);
+  const place = normalizeInput(input);
+  const index = mockUserPlaces.findIndex((p) => p.label === place.label);
+  if (index < 0 && wouldExceedLimit(mockUserPlaces, place.label)) throw new UserError(LIMIT_MESSAGE);
+  if (index >= 0) mockUserPlaces[index] = place;
+  else mockUserPlaces.push(place);
+  return { ...place };
+}
+
+// 지우기 — 없는 이름표면 아무 일도 안 함
+export async function deleteUserPlace(label: string): Promise<void> {
+  if (!isMock()) return realPlaces.deleteUserPlace(label);
+  const key = cleanLabel(label);
+  mockUserPlaces = mockUserPlaces.filter((p) => p.label !== key);
 }

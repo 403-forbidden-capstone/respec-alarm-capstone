@@ -26,8 +26,8 @@ export const KIND_LABEL: Record<AlarmKind, string> = { WAKE: '기상', PREPARE: 
 export const RING_KINDS: readonly RingKind[] = ['WAKE', 'PREPARE', 'DEPARTURE'];
 export const defaultAlarms = (): Record<RingKind, boolean> => ({ WAKE: true, PREPARE: true, DEPARTURE: true });
 
-// 목업의 보통 · 중요 · 매우 중요 = DB LOW · NORMAL · HIGH
-export const IMPORTANCE_LABEL: Record<Importance, string> = { LOW: '보통', NORMAL: '중요', HIGH: '매우 중요' };
+// 화면 글자 평소 · 중요 · 매우 중요 = DB LOW · NORMAL · HIGH (강도 이름 약 · 보통 · 강과 안 겹치게 '보통'을 '평소'로, 10/30)
+export const IMPORTANCE_LABEL: Record<Importance, string> = { LOW: '평소', NORMAL: '중요', HIGH: '매우 중요' };
 // 중요도로 올리는 단계 수 — 매우 중요(HIGH)만 1 (D69, 공용 IMPORTANCE_POINT와 같아야 함: mocks/__tests__/shared.test.ts)
 export const IMPORTANCE_POINT: Record<Importance, number> = { LOW: 0, NORMAL: 0, HIGH: 1 };
 
@@ -44,10 +44,15 @@ export const TRANSPORT_LABEL: Record<Transport, string> = {
 
 export const TRANSPORT_OPTIONS: readonly (readonly [Transport, string])[] = (['TRANSIT', 'CAR', 'WALK'] as const).map((t) => [t, TRANSPORT_LABEL[t]] as const);
 
-export const LEVELS: readonly { name: string; sound: string; voice: string; vibration: string }[] = [
-  { name: '약', sound: '60% · 부드러운 소리', voice: '차분 · 다정', vibration: '없음' },
-  { name: '중', sound: '80% · 기본 소리', voice: '일정 안내형', vibration: '짧게 반복' },
-  { name: '강', sound: '100% · 강한 소리', voice: '직설형', vibration: '강하게 연속' },
+// 약 · 중 · 강 한 단계가 가리키는 것 (D1 A, 실제 동작과 같게):
+//   volume    전체 세기(alarms.intensity)가 정하는 알람 볼륨 — 배경음 축을 따로 골라도 안 바뀜 (알람 코어 BASE_VOLUME_PERCENT)
+//   sound     배경음 축 = 소리 파일 (sound_key theme_calm · theme_default · theme_urgent)
+//   voice     말소리 축 = 기상 알람 음성 문장의 말투 (voice_tone CALM · NEUTRAL · DIRECT, 읽어 주는 것은 D8 · 나중)
+//   vibration 진동 축 = 진동 패턴 (alarms.vibration NONE · SHORT_REPEAT · STRONG_CONTINUOUS)
+export const LEVELS: readonly { name: string; volume: string; sound: string; voice: string; vibration: string }[] = [
+  { name: '약', volume: '60%', sound: '부드러운 소리', voice: '차분 · 다정', vibration: '없음' },
+  { name: '중', volume: '80%', sound: '기본 소리', voice: '일정 안내형', vibration: '짧게 반복' },
+  { name: '강', volume: '100%', sound: '강한 소리', voice: '직설형', vibration: '강하게 연속' },
 ];
 
 export const AXES: readonly (readonly [IntensityAxis, string])[] = [
@@ -90,6 +95,9 @@ export type Appointment = {
   alarms: AlarmTime[]; // 기상 · 준비 · 출발 · 도착 목표 순 — H05에서 고른 종류만, 하나도 없으면 빈 목록(알람 없는 일정)
   level: Level; // 지금 적용되는 강도 (배경음 기준)
   standalone?: true; // 일정 없는 알람 (실데이터 전용, D46) — id는 알람 id, 제목은 "알람". 알람 설정(H03)은 아직 못 엶
+  placeLat?: number; // 장소 좌표(DB dest_lat · dest_lng) — 실데이터 H03만 채움. 편집 시트가 장소를 바꾼 뒤 되돌리기에 원래 좌표를 같이 보내려고 씀 (#275)
+  placeLng?: number;
+  canEdit?: false; // 남이 만든 공동 약속이라 고치거나 지울 수 없음 (N6, H03 편집 시트가 읽기 전용으로 열림). 없으면 고칠 수 있음
   upcomingCount?: number; // 같은 반복 묶음에서 지금 이후 남은 회차 수(이 회차 포함) — 알람 목록(H02)만 채움. 2 이상이면 앞으로 회차가 폰에 미리 걸려 있음
 };
 
@@ -166,6 +174,7 @@ export type AlarmPreview = {
   predictedPrepMinutes: number; // 적용될 준비 시간
   autoPredictedPrepMinutes: number;
   prepareSampleCount?: number; // 준비 시간 계산에 쓴 내 기록 수 (최근 30건 기준) — "배우는 중 N/5" · "내 기록 기반 N건" 한 줄에 (calc prepareSourceLabel). 모르면 없음
+  prepareRecent?: number[]; // 준비 시간 계산에 쓴 내 기록 중 최근 값, 최신순 최대 5개(분) — "최근 5번 48 · 55 · 62 · 70 · 75분" 줄 (calc prepareRecentLabel). 없거나 비면 줄을 안 보임
   // 실데이터 전용 — 길찾기를 못 해 저장하면 이동시간 확인이 필요한 상태 (ESTIMATE = 직선거리 어림, CACHED = 내 지난 이동 중앙값) 또는 직접 입력이 필요한 상태 (좌표 없음). 없으면 문제 없음
   travelProblem?: TravelProblem;
 };
@@ -190,6 +199,9 @@ export type LatLng = { lat: number; lng: number };
 // 장소 — 가짜 데이터는 이름 + 집 기준 이동시간(검색용 주소 · 좌표도 있지만 계산엔 안 씀), 실데이터(place-search)는 이름 + 주소 + 좌표 (좌표가 있어야 길찾기가 됨)
 //   category = 카카오 category_name 그대로('교육,학문 > 대학교') — 서버가 주는 값을 통과시킬 뿐 DB에 저장하지 않음 (D5)
 export type Place = { name: string; travelMinutes?: number; address?: string; lat?: number; lng?: number; category?: string };
+
+// 지도 핀 자리의 주소 (place-reverse) — 주소 한 줄(도로명 우선) + 있으면 건물 이름. 화면에 보일 뿐 저장하지 않음 (카카오 응답, D5)
+export type PinAddress = { address: string; name?: string };
 
 // 새 일정 입력값 (H05)
 export type AppointmentDraft = {
@@ -241,7 +253,7 @@ export type RingInfo = {
   voiceTone: string; // 말소리 강도 설명
   voiceLine: string; // 음성 안내 문장
   notice?: string; // 알림 한 줄 — 준비 · 출발 알람이 알림 · 울림 화면 머리글로 보여 주는 글자 (서버 꾸러미 notice와 같은 글자, features/alarm/notice.ts). 없으면 종류별 기본 머리글
-  levelLine: string; // 알람 강도 중 · 배경음 80% · 진동 짧게 반복
+  levelLine: string; // 알람 강도 중 · 볼륨 80% · 배경음 기본 소리 · 진동 짧게 반복
   important: boolean;
   snoozeCount: number; // 이미 미룬 횟수 (알람 코어의 snoozeCount) — "미루기 N/한도회"
   snoozeLimit: number; // 미루기 한도 (알람 코어 RingPlan.snoozeLimit, 서버 alarms.snooze_limit 기본 3)
@@ -302,7 +314,7 @@ export type DepartCheck = {
 //     H03 · H05 · S01은 저장(alarm-commit edits)과 같이 남김. H01 홈 감지 정정 줄 · NTF 감지 안내 알림 · H08 기상 정정(D61)은 앱이 user_edit_logs에 바로 남김
 //   autoValue: 고치기 전에 앱이 쓰던 값 — 계산하는 값(이동 · 준비 · 알람 시각 · 강도)은 자동 계산값, 입력하는 값(여유 · 출발 위치 · 이동 수단 · 켜기)은 고치기 전 값
 //   editedValue: 고친 뒤 값. 자동으로 되돌렸으면 null. 위치 감지를 [아니에요]로 지웠으면 { rejected: true } (features/location/detections.ts)
-//   강도 세 칸은 DB 칸 이름으로 남김 — 배경음 = sound_key, 말소리 = voice_tone, 진동 = intensity (값은 약 · 중 · 강 = 0 · 1 · 2)
+//   강도 세 칸은 DB 칸 이름으로 남김 — 배경음 = sound_key, 말소리 = voice_tone, 진동 = vibration (예전 기록은 intensity, 값은 약 · 중 · 강 = 0 · 1 · 2)
 // alarm-commit이 받는 화면 (서버 supabase/functions/_shared/requests.ts SCREENS와 같음)
 export type CommitEditScreen = 'H03' | 'H05' | 'S01';
 export type EditLogScreen = CommitEditScreen | 'H01' | 'H08' | 'NTF';
@@ -314,7 +326,8 @@ export type EditLogField =
   | 'travel_minutes'
   | 'origin'
   | 'transport'
-  | 'intensity'
+  | 'intensity' // 예전 기록의 진동 (D1 A 전) — 지금은 쓰지 않음
+  | 'vibration'
   | 'voice_tone'
   | 'sound_key'
   | 'alarm_enabled'

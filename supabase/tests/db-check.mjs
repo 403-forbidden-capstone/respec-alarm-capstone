@@ -162,12 +162,12 @@ const MEETING = ['decision_comments', 'decision_votes', 'decision_states'];
 // 서버 전용 표 — RLS는 켜고 정책은 없음 (앱은 못 읽고 못 씀, service_role만). 아래 "반복 다음 회차"에서 따로 확인
 const SERVER_ONLY = ['roll_attempts'];
 
-await check('모든 public 테이블(앱 20개 — 서버 전용 1개 포함 + 회의 도구 3개)에 RLS가 켜져 있음', async () => {
+await check('모든 public 테이블(앱 21개 — 서버 전용 1개 포함 + 회의 도구 3개)에 RLS가 켜져 있음', async () => {
   const r = await q(`select c.relname, c.relrowsecurity from pg_class c join pg_namespace n on n.oid = c.relnamespace
                      where n.nspname = 'public' and c.relkind = 'r' order by 1`);
   const off = r.filter((x) => !x.relrowsecurity).map((x) => x.relname);
   const app = r.filter((x) => !MEETING.includes(x.relname)).length;
-  return app === 20 && r.length === 23 && off.length === 0 ? true : { count: r.length, app, off };
+  return app === 21 && r.length === 24 && off.length === 0 ? true : { count: r.length, app, off };
 });
 await check('모든 앱 테이블에 정책이 있고(서버 전용 표 제외) anon용 정책은 없음', async () => {
   const r = await q(`select c.relname, count(p.polname) as n,
@@ -1951,6 +1951,74 @@ await check('날짜 유니크 · 회차 하나 쓰기: 같은 (만든 사람, �
   return ok ? true : { id1, again, counts, appt, part, alarms, todos, enumLabels, dupAppt, otherCreator, dupAlarm, nextDay, rolledBack, before, after, partsBefore, partsAfter, noSeries, noTitle };
 });
 
+// ---- ②-1 진동 칸 (alarms.vibration, 이슈 #312 · D1 A) -----------------------
+
+await check('진동 칸: 기본 NULL(강도를 따름) · 세 값만 받는 check · 주인은 고치고 남은 못 고침 · roll_insert_occurrence가 넘긴 vibration을 그대로 이어 씀(없으면 NULL)', async () => {
+  await svc();
+  const sa = await insStandalone(E, { at: '2026-12-02T07:30:00+09:00' });
+  const col = (await q(`select data_type, is_nullable, column_default from information_schema.columns where table_schema = 'public' and table_name = 'alarms' and column_name = 'vibration'`))[0];
+  const dflt = (await q(`select vibration from public.alarms where alarm_id = $1`, [sa.alarm_id]))[0].vibration;
+  const bad = await expectErr(() => q(`update public.alarms set vibration = 'LOUD' where alarm_id = $1`, [sa.alarm_id]), /alarms_vibration_check/);
+  const badInsert = await expectErr(() => q(`insert into public.alarms (user_id, alarm_type, scheduled_at, vibration) values ($1, 'WAKE', now(), 'strong')`, [E]), /alarms_vibration_check/);
+  const allowed = [];
+  for (const v of ['NONE', 'SHORT_REPEAT', 'STRONG_CONTINUOUS']) {
+    allowed.push((await q(`update public.alarms set vibration = $2 where alarm_id = $1 returning vibration`, [sa.alarm_id, v]))[0].vibration);
+  }
+  // 주인은 직접 고름 / 자동(NULL)으로 되돌림, 권한 없는 다른 사람은 0행
+  await as(E);
+  const mine = await q(`update public.alarms set vibration = 'NONE', intensity_source = 'MANUAL' where alarm_id = $1 returning vibration`, [sa.alarm_id]);
+  const back = await q(`update public.alarms set vibration = null where alarm_id = $1 returning vibration`, [sa.alarm_id]);
+  await as(D);
+  const stranger = await q(`update public.alarms set vibration = 'STRONG_CONTINUOUS' where alarm_id = $1 returning 1`, [sa.alarm_id]);
+  await su();
+  const kept = (await q(`select vibration from public.alarms where alarm_id = $1`, [sa.alarm_id]))[0].vibration;
+  // 반복 다음 회차: 직전 회차의 vibration을 서버가 실어 보내면 그대로 들어가고, 안 실으면(자동) NULL
+  await svc();
+  const S = rollBase.series_id;
+  const picked = await rollCall(E, S, '2026-12-02', {
+    alarms: [{ alarm_type: 'WAKE', scheduled_at: '2026-12-02T07:30:00+09:00', intensity: 'NORMAL', sound_key: 'theme_calm', vibration: 'STRONG_CONTINUOUS', intensity_source: 'MANUAL' }, { alarm_type: 'DEPARTURE', scheduled_at: '2026-12-02T09:00:00+09:00' }],
+  });
+  const auto = await rollCall(E, S, '2026-12-09');
+  const badRoll = await expectErr(() => rollCall(E, S, '2026-12-16', { alarms: [{ alarm_type: 'WAKE', scheduled_at: '2026-12-16T07:30:00+09:00', vibration: 'LOUD' }] }), /alarms_vibration_check/);
+  const rolled = await q(`select a.alarm_type::text as t, a.vibration, a.intensity::text as intensity, a.sound_key from public.alarms a
+                          join public.appointment_participants ap on ap.participant_id = a.participant_id where ap.appointment_id = any($1::uuid[]) order by a.alarm_type::text`, [[picked, auto]]);
+  const byType = (id) => rolled.filter((x) => x.t === 'WAKE').map((x) => x.vibration);
+  const wakes = rolled.filter((x) => x.t === 'WAKE');
+  const gone = await q(`select 1 from public.appointments where creator_id = $1 and series_id = $2 and occurrence_on = '2026-12-16'`, [E, S]);   // 틀린 값이면 회차 전체가 안 남음
+  const ok = col.data_type === 'text' && col.is_nullable === 'YES' && col.column_default === null && dflt === null
+    && bad === true && badInsert === true && allowed.join() === 'NONE,SHORT_REPEAT,STRONG_CONTINUOUS'
+    && mine.length === 1 && mine[0].vibration === 'NONE' && back.length === 1 && back[0].vibration === null && stranger.length === 0 && kept === null
+    && wakes.length === 2 && wakes.filter((x) => x.vibration === 'STRONG_CONTINUOUS').length === 1 && wakes.filter((x) => x.vibration === null).length === 1
+    && rolled.filter((x) => x.t === 'DEPARTURE').every((x) => x.vibration === null) && badRoll === true && gone.length === 0;
+  return ok ? true : { col, dflt, bad, badInsert, allowed, mine, back, stranger, kept, rolled, badRoll, gone, byType: byType() };
+});
+
+await check('진동 칸 백필: 예전에 진동을 직접 고른(MANUAL) 알람의 intensity 단계가 vibration으로 옮겨지고, 자동(AUTO) 행과 이미 vibration이 있는 행은 그대로 · 두 번 돌려도 같음', async () => {
+  await svc();
+  const mk = async (at, intensity, source, vibration = null) => {
+    const row = await insStandalone(E, { at });
+    await q(`update public.alarms set intensity = $2::public.alarm_intensity, intensity_source = $3::public.alarm_value_source, vibration = $4 where alarm_id = $1`, [row.alarm_id, intensity, source, vibration]);
+    return row.alarm_id;
+  };
+  const soft = await mk('2027-01-04T07:30:00+09:00', 'SOFT', 'MANUAL');
+  const normal = await mk('2027-01-05T07:30:00+09:00', 'NORMAL', 'MANUAL');
+  const strong = await mk('2027-01-06T07:30:00+09:00', 'STRONG', 'MANUAL');
+  const autoStrong = await mk('2027-01-07T07:30:00+09:00', 'STRONG', 'AUTO');
+  const already = await mk('2027-01-08T07:30:00+09:00', 'STRONG', 'MANUAL', 'NONE');
+  // 마이그레이션 파일의 "3. 백필" 문장을 그대로 읽어 다시 돌림 (이미 한 번 적용된 DB라 새로 만든 위 행들만 대상)
+  const sql = readFileSync(join(MIG_DIR, '20261030200000_alarm_vibration.sql'), 'utf8');
+  const start = sql.indexOf('update public.alarms');
+  if (start < 0) return { error: 'backfill sql not found' };
+  const backfill = sql.slice(start);
+  await db.exec(backfill);
+  const first = (await q(`select alarm_id, vibration, intensity::text as intensity from public.alarms where alarm_id = any($1::uuid[]) order by scheduled_at`, [[soft, normal, strong, autoStrong, already]]));
+  await db.exec(backfill);
+  const second = (await q(`select alarm_id, vibration, intensity::text as intensity from public.alarms where alarm_id = any($1::uuid[]) order by scheduled_at`, [[soft, normal, strong, autoStrong, already]]));
+  const vibs = first.map((r) => r.vibration);
+  const ok = vibs.join() === 'NONE,SHORT_REPEAT,STRONG_CONTINUOUS,,NONE' && JSON.stringify(first) === JSON.stringify(second) && first.map((r) => r.intensity).join() === 'SOFT,NORMAL,STRONG,STRONG,STRONG';
+  return ok ? true : { first, second };
+});
+
 // ---- ③ 열쇠 칸 ---------------------------------------------------------
 
 await check('열쇠 칸: 묶음 · 날짜는 한 번 정하면 못 바꿈(service_role · 주인도, NULL → 값도) — 제목 · 시각을 바꿔도 날짜는 그대로', async () => {
@@ -2332,7 +2400,8 @@ await check('기본 강도 백필: 자동(AUTO) 약(SOFT)은 세 칸 같이 보�
                 values ($1, 'WAKE', $2, $3, $4, $5, $6, $7, 2, '2026-10-01T00:00:00Z', '2026-10-01T00:00:00Z')`,
         [A, `2026-11-03T0${n}:00:00+09:00`, inten, tone, sound, src, enabled]);
     }
-    for (const f of files.slice(i)) await staged.exec(readFileSync(join(MIG_DIR, f), 'utf8'));
+    // 이 마이그레이션 하나만 적용 — 뒤 마이그레이션(예: 진동 칸 백필이 MANUAL 행의 updated_at을 건드림)이 이 검사의 "바뀐 행만 갱신"을 흐리지 않게
+    await staged.exec(readFileSync(join(MIG_DIR, files[i]), 'utf8'));
     const out = await sq(`select to_char(scheduled_at at time zone 'Asia/Seoul', 'HH24') as hh, intensity, voice_tone, sound_key, intensity_source, is_enabled, snooze_limit,
                                  (updated_at > '2026-10-01T00:00:00Z') as touched, (last_calculated_at = '2026-10-01T00:00:00Z') as calc_kept
                             from public.alarms order by scheduled_at`);
@@ -2532,6 +2601,127 @@ await check('프로필 온보딩 칸: 공개 함수(find_profile_by_handle · ge
                         where n.nspname = 'public' and p.proname in ('find_profile_by_handle', 'get_public_profiles') order by p.proname`);
   const leaked = cols.filter((c) => /onboarded_at|wake_sensitivity|wake_margin|privacy_/.test(c.res));
   return cols.length === 2 && leaked.length === 0 ? true : { cols, leaked };
+});
+
+// ---- 자주 가는 곳 user_places (지도에서 위치 고르기 ②, 헤드 설계 10/30 · Q13 · D59) ----------
+
+const PL1 = 'a1a1a1a1-a1a1-4a1a-8a1a-a1a1a1a1a1a1';   // 자주 가는 곳 시험 (친구 · 그룹으로 엮은 두 사람)
+const PL2 = 'a2a2a2a2-a2a2-4a2a-8a2a-a2a2a2a2a2a2';
+const PL3 = 'a3a3a3a3-a3a3-4a3a-8a3a-a3a3a3a3a3a3';   // CASCADE 시험
+for (const [id, email] of [[PL1, 'pl1@example.com'], [PL2, 'pl2@example.com'], [PL3, 'pl3@example.com']]) await mkUser(id, email);
+
+const place = (label, extra = {}) => ({ label, name: label + ' 정문', address: '서울 어딘가 1', lat: 37.5665, lng: 126.978, radius_m: 200, ...extra });
+const insPlace = (uid, row) => q(`insert into public.user_places (user_id, label, name, address, lat, lng, radius_m)
+                                  values ($1, $2, $3, $4, $5, $6, $7) returning place_id, label`,
+                                 [uid, row.label, row.name, row.address, row.lat, row.lng, row.radius_m]);
+
+await check('user_places: 본인은 넣고 읽고 고치고 지움 — 남(B)은 행이 보이지 않고 고치지도 지우지도 못하며, 남의 user_id로 넣는 것도 거부', async () => {
+  await as(A);
+  const [mine] = await insPlace(A, place('학교'));
+  const seenA = await q(`select label from public.user_places`);
+  const upd = await q(`update public.user_places set name = '정문 앞', radius_m = 300 where place_id = $1 returning name, radius_m`, [mine.place_id]);
+  await as(B);
+  const seenB = await q(`select 1 from public.user_places where place_id = $1`, [mine.place_id]);
+  const updB = await q(`update public.user_places set name = '가로챔' where place_id = $1 returning 1`, [mine.place_id]);
+  const delB = await q(`delete from public.user_places where place_id = $1 returning 1`, [mine.place_id]);
+  const forged = await expectErr(() => insPlace(A, place('남의 이름으로')), /row-level security/);
+  await as(A);
+  const moveOut = await expectErr(() => q(`update public.user_places set user_id = $2 where place_id = $1`, [mine.place_id, B]), /row-level security/);
+  const del = await q(`delete from public.user_places where place_id = $1 returning 1`, [mine.place_id]);
+  await su();
+  const [left] = await q(`select count(*)::int as n from public.user_places`);
+  return seenA.length === 1 && upd[0].name === '정문 앞' && upd[0].radius_m === 300
+    && seenB.length === 0 && updB.length === 0 && delB.length === 0 && forged === true && moveOut === true
+    && del.length === 1 && left.n === 0
+    ? true : { seenA, upd, seenB, updB, delB, forged, moveOut, del, left };
+});
+await check('user_places: 친구 · 같은 그룹 사람도 볼 수 없음 (공유 안 함, Q13 · D59) — 읽기 정책은 본인 하나뿐이고 anon은 권한 없음', async () => {
+  await su();
+  await insPlace(PL1, place('회사'));
+  // 두 사람이 친구(ACCEPTED)이고 같은 그룹(JOINED)이어도 위치는 안 보임
+  const [f] = await q(`insert into public.friends (requester_id, addressee_id) values ($1, $2) returning friend_id`, [PL1, PL2]);
+  await q(`update public.friends set status = 'ACCEPTED', accepted_at = now() where friend_id = $1`, [f.friend_id]);
+  const [g] = await q(`insert into public.groups (group_name, owner_id) values ('장소 시험', $1) returning group_id`, [PL1]);
+  await q(`insert into public.group_members (group_id, user_id, invite_status) values ($1, $2, 'JOINED')`, [g.group_id, PL2]);
+  await as(PL2);
+  const viaFriend = await q(`select 1 from public.user_places where user_id = $1`, [PL1]);
+  await as(null, 'anon');
+  const anon = await expectErr(() => q(`select * from public.user_places`), /permission denied/);
+  await su();
+  const pol = await q(`select polcmd, pg_get_expr(polqual, polrelid) as expr from pg_policy where polrelid = 'public.user_places'::regclass order by polcmd`);
+  const selectPols = pol.filter((p) => p.polcmd === 'r');
+  await q(`delete from public.groups where group_id = $1`, [g.group_id]);
+  await q(`delete from public.friends where friend_id = $1`, [f.friend_id]);
+  await q(`delete from public.user_places where user_id = $1`, [PL1]);
+  return viaFriend.length === 0 && anon === true && pol.length === 4 && selectPols.length === 1
+    && /auth\.uid/.test(selectPols[0].expr) && !/friend|group|granted/.test(selectPols[0].expr)
+    ? true : { viaFriend, anon, pol };
+});
+await check('user_places: 한 사람 최대 5개 — 6번째 새 label은 거부(54000), 이미 있는 label을 덮어쓰는 upsert는 5개일 때도 통과, 지운 뒤에는 다시 넣을 수 있고, 남의 개수는 영향 없음', async () => {
+  await as(A);
+  for (const l of ['학교', '회사', '알바', '도서관', '동아리방']) await insPlace(A, place(l));
+  let sixth;
+  try { await insPlace(A, place('여섯째')); sixth = '오류가 나야 하는데 성공함'; } catch (e) { sixth = e.code === '54000' && /5개/.test(e.message) ? true : '다른 오류: ' + e.code + ' ' + e.message; }
+  const upsert = await q(`insert into public.user_places (user_id, label, name, lat, lng) values ($1, '학교', '새 정문', 37.5, 127.0)
+                          on conflict (user_id, label) do update set name = excluded.name, lat = excluded.lat, lng = excluded.lng
+                          returning name`, [A]);
+  const [cnt] = await q(`select count(*)::int as n from public.user_places`);
+  await as(B);
+  const otherUser = await insPlace(B, place('학교'));   // B는 0개에서 시작 — A의 5개와 무관, 같은 label이어도 사람이 다르면 따로
+  await as(A);
+  await q(`delete from public.user_places where label = '동아리방'`);
+  const again = await insPlace(A, place('여섯째'));
+  await su();
+  await q(`delete from public.user_places where user_id in ($1, $2)`, [A, B]);
+  return sixth === true && upsert.length === 1 && upsert[0].name === '새 정문' && cnt.n === 5 && otherUser.length === 1 && again.length === 1
+    ? true : { sixth, upsert, cnt, otherUser, again };
+});
+await check('user_places: 같은 label 중복은 거부(unique) · label은 1~20자 · 이름은 빈 값 불가', async () => {
+  await as(A);
+  await insPlace(A, place('학교'));
+  const dup = await expectErr(() => insPlace(A, place('학교', { name: '다른 곳' })), /user_places_user_label_key/);
+  const empty = await expectErr(() => insPlace(A, place('')), /user_places_label_length/);
+  const long = await expectErr(() => insPlace(A, place('가'.repeat(21))), /user_places_label_length/);
+  const max = await insPlace(A, place('나'.repeat(20)));
+  const blank = await expectErr(() => insPlace(A, place('공백', { name: '   ' })), /user_places_name_not_blank/);
+  const noName = await expectErr(() => q(`insert into public.user_places (user_id, label, name, lat, lng) values ($1, '이름없음', null, 1, 1)`, [A]), /null value/);
+  // label을 고쳐서 겹치게 하는 것도 거부
+  const clash = await expectErr(() => q(`update public.user_places set label = '학교' where label = $1`, ['나'.repeat(20)]), /user_places_user_label_key/);
+  await su();
+  await q(`delete from public.user_places where user_id = $1`, [A]);
+  return dup === true && empty === true && long === true && max.length === 1 && blank === true && noName === true && clash === true
+    ? true : { dup, empty, long, max, blank, noName, clash };
+});
+await check('user_places: radius_m은 100~500(NULL 허용, 99 · 501 거부) · lat은 ±90 · lng은 ±180 (경계 값은 통과, 넘으면 거부) · 좌표는 필수', async () => {
+  await as(A);
+  const ins = (extra) => insPlace(A, place('범위', extra));
+  const out = {
+    r99: await expectErr(() => ins({ radius_m: 99 }), /user_places_radius_m_range/),
+    r501: await expectErr(() => ins({ radius_m: 501 }), /user_places_radius_m_range/),
+    latHi: await expectErr(() => ins({ lat: 90.5 }), /user_places_lat_range/),
+    latLo: await expectErr(() => ins({ lat: -91 }), /user_places_lat_range/),
+    lngHi: await expectErr(() => ins({ lng: 180.5 }), /user_places_lng_range/),
+    lngLo: await expectErr(() => ins({ lng: -181 }), /user_places_lng_range/),
+    noLat: await expectErr(() => ins({ lat: null }), /null value/),
+    noLng: await expectErr(() => ins({ lng: null }), /null value/),
+  };
+  const edge = await q(`insert into public.user_places (user_id, label, name, lat, lng, radius_m) values
+                          ($1, '끝1', '북동', 90, 180, 100), ($1, '끝2', '남서', -90, -180, 500), ($1, '끝3', '반경없음', 0, 0, null)
+                        returning label, radius_m`, [A]);
+  const setBad = await expectErr(() => q(`update public.user_places set radius_m = 50 where label = '끝3'`), /user_places_radius_m_range/);
+  await su();
+  await q(`delete from public.user_places where user_id = $1`, [A]);
+  return Object.values(out).every((v) => v === true) && edge.length === 3 && setBad === true ? true : { out, edge, setBad };
+});
+await check('user_places: updated_at이 고칠 때 갱신됨 · 계정을 지우면 같이 지워짐 · 5개 제한 함수는 앱 역할이 직접 실행할 수 없음', async () => {
+  await su();
+  const [row] = await q(`insert into public.user_places (user_id, label, name, lat, lng, updated_at) values ($1, '학교', '정문', 37, 127, '2020-01-01') returning place_id`, [PL3]);
+  const [upd] = await q(`update public.user_places set name = '후문' where place_id = $1 returning updated_at > '2021-01-01' as touched`, [row.place_id]);
+  const [fnPriv] = await q(`select has_function_privilege('authenticated', 'private.enforce_user_places_limit()', 'execute') as a,
+                                   has_function_privilege('anon', 'private.enforce_user_places_limit()', 'execute') as n`);
+  await q(`delete from auth.users where id = $1`, [PL3]);
+  const [left] = await q(`select count(*)::int as n from public.user_places where user_id = $1`, [PL3]);
+  return upd.touched === true && fnPriv.a === false && fnPriv.n === false && left.n === 0 ? true : { upd, fnPriv, left };
 });
 
 report();
