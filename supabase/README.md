@@ -43,6 +43,7 @@ select vault.create_secret('<service_role 키>', 'service_role_key');
 
 - 둘 중 하나라도 없으면 오류 없이 경고만 남기고 끝남 → 키를 넣기 전에도 배치가 5분마다 돌지만 아무 일도 안 함
 - 예약 확인: `select * from cron.job;` · 실행 기록 `select * from cron.job_run_details order by start_time desc limit 10;`
+- `20261029075743_alarm_roll.sql`(반복 다음 회차)이 같은 방식으로 `alarm-roll`도 5분마다 부르게 예약함. **`alarm-roll` 함수 배포는 앱 맞추기 PR(3b) 머지 뒤** — 그 전엔 호출이 404로 끝남 (해롭지 않음)
 - `wake-check`는 `config.toml`에서 `verify_jwt = false`로 두고, 코드(`_shared/auth.ts` `requireServiceCall`)가 `apikey` · `Authorization` 머리글의 키를 `SUPABASE_SERVICE_ROLE_KEY`(legacy JWT) 또는 `SUPABASE_SECRET_KEYS`(`sb_secret_…`)와 직접 비교함 → Vault에 어느 형식을 넣어도 됨
 
 ## 서버 함수가 쓰는 DB 함수 (service_role 전용)
@@ -53,11 +54,25 @@ select vault.create_secret('<service_role 키>', 'service_role_key');
 |---|---|---|
 | `can_send_push(sender, target, kind)` | `notify` | 푸시를 보내도 되는지. `ALARM_CHANGED`(G04)는 보내는 사람이 받는 사람 알람의 설정 권한을 가졌을 때만 true, `WAKE_PING`(G03 깨우기)은 D19 결정 뒤까지 false |
 | `find_missed_wake_alarms(p_now, p_lookback_hours)` | `wake-check` | 기상 미확인(MISSED)으로 기록할 알람 목록 (7장 7.9.2: 마지막으로 울리기 시작한 때 + 다시 울림 총 소요 + 30분. 총 소요는 첫 울림 시작부터 마지막 울림 끝까지로 약 11 · 보통 19 · 강 21분 — 알람 코어와 같은 끝난 뒤 간격 기준. 폰은 미루면 다시 울림 묶음을 처음부터 새로 시작하므로, 마지막 울림 시작 = 마지막 미루기 시각 + 미루기 시간(미루기가 없으면 알람 시각). 돌려주는 `snooze_minutes`는 미루기 합이라 참고용이고 `missed_at`은 이 합으로 구하지 않음). 기상 확인은 같은 사람의 `WAKE_CONFIRMED`(어느 기상 알람이든) 또는 `daily_records.wake_confirmed_at`이면 인정 — 그룹 현황판이 '기상'으로 세는 기준과 같음. 기록은 알람 시각 6시간 전 ~ 18시간 뒤만 봄. 돌려주는 `event_key`를 `alarm_events.client_event_id`로 넣고 `on conflict do nothing`하면 같은 알람이 두 번 기록되지 않음 |
+| `roll_insert_occurrence(p_appointment, p_participant, p_alarms, p_items)` | `alarm-roll` (다음 PR) | 반복 회차 하나를 약속 · 참여 조건 · 알람 · 준비물(`todos` ITEM)까지 **한 트랜잭션**으로 씀. 같은 (만든 사람, 묶음, 날짜)가 이미 있으면 아무것도 안 쓰고 `null`(같은 요청 두 번 = 같은 결과), 새로 만들면 `appointment_id`. 넣는 칸은 `alarm-commit`(`_shared/commit.ts` persistAppointment)과 같고 약속에 `memo` · `dest_radius_m`만 더 이어받음. 입력은 jsonb(`series_id` · `occurrence_on` 필수) |
+| `roll_due_series(p_now, p_limit)` | `alarm-roll` 배치 (다음 PR) | 회차를 넘길 후보 묶음 `(user_id, series_id, kind, template_id)`, 다음 회차가 급한 순 (정말 만들 날짜가 있는지는 `alarm-roll`이 다시 봄). `APPOINTMENT`: 묶음에서 날짜가 가장 늦은 회차에 읽을 수 있는 `recurrence_rule`(두 모양)이 있고 개인 약속이며 **다음 회차** 시각이 `p_now + 14일` 앞(14일치가 차 있으면 안 줌) · 재시도 대기 아님(`roll_attempts.next_try_at`이 안 온 줄 없음) · 미뤄 둔 날짜의 재시도 때가 지났으면 창 밖이어도 포함. `STANDALONE`: 일정 없는 반복 알람(같은 기준). `ROUTINE`: 켜 둔 루틴(읽을 수 있는 요일)의 켜진 단계 알람 시각이 지난 것. 못 읽는 규칙 · 요일(예전 MONTHLY · INTERVAL 등)은 빼서 매번 앞자리를 차지하지 않게 |
 
 앱(authenticated)이 부르는 DB 함수 추가분:
 
 - `get_shared_alarm_appointments(p_owner_id)` (G04) — 조회 권한(친구 ∪ 그룹)을 받은 사람 알람의 약속 제목 · 장소 · 시각. 본인 알람과 약속 없는 알람(일정 없는 알람 · 루틴)은 안 나옴
 - `get_group_wake_status`는 그 그룹에 그날 약속이 있을 때만 행을 줌 (D57)
+
+## 반복 다음 회차 (`20261029075743_alarm_roll.sql`, 이슈 #209)
+
+반복 약속 · 일정 없는 반복 알람은 **회차마다 한 줄**씩 지금 ~ 14일 뒤까지 미리 만들고, 지난 회차는 기록으로 남김 (D4 A). 이 마이그레이션은 그 저장 모양과 DB 함수만 — 회차를 만드는 서버 함수 `alarm-roll`(3a-2)과 앱 맞추기(3b)가 머지돼야 실제로 회차가 생김. 그 전에는 모든 약속이 묶음 1개짜리라 지금 동작은 그대로.
+
+- 칸: `appointments` · `alarms`(일정 없는 알람만)의 `series_id`(같은 반복의 묶음 번호, 첫 회차는 자기 id) · `occurrence_on`(회차 날짜 = 만든 사람 `profiles.timezone`, 없으면 Asia/Seoul의 0시 기준 — 새벽 1시 약속은 UTC로는 전날이어도 한국 날짜). insert 전에 DB가 채움(`private.fill_series`)
+- (만든 사람, 묶음, 날짜)가 유일(`appointments_series_occurrence_key` · `alarms_series_occurrence_key`) → 같은 회차를 두 번 안 만듦. 묶음 · 날짜는 열쇠 칸(`keep_keys`)이라 service_role도 못 바꿈 → "이번만 시각 바꾸기"를 해도 날짜는 그대로
+- 앱은 남의 묶음에 회차를 못 넣음: `appointments_insert`는 `series_id = appointment_id`(새 묶음)만 받음. 회차를 이어 붙이는 건 service_role(`roll_insert_occurrence`)뿐
+- `travel_source`에 `ESTIMATE` (회차 길찾기가 첫 알람 12시간 전까지 안 될 때의 근사값, H03에서 "대략")
+- `roll_attempts`: 회차 길찾기 실패 재시도 기록 — 날짜마다 한 줄, RLS만 켜고 정책 없음(service_role 전용)
+- DB 함수 `roll_insert_occurrence` · `roll_due_series`는 위 "서버 함수가 쓰는 DB 함수" 표. pg_cron 예약은 "배치"
+- 반복 규칙은 `FREQ=DAILY` · `FREQ=WEEKLY;BYDAY=MO,…` 두 모양만 받음(`_shared/draft.ts` `RRULE_PATTERN`, 그 밖은 400) — 해석은 `_shared/calc/recur.ts`
 
 ## 그룹 기상 신호 (Realtime)
 
@@ -102,6 +117,9 @@ create policy wake_signal_receive on realtime.messages
 | `place-search` | 장소 검색 | 앱 H05 · 온보딩 | 켬 | 카카오 로컬 |
 | `notify` | 다른 사람 폰에 푸시 (권한은 `can_send_push`) | 앱 G04 · G03 | 켬 | Expo Push |
 | `wake-check` | 기상 미확인(MISSED) 기록 | pg_cron 5분마다 (서비스 키) | 끔 (코드에서 키 비교) | — |
+| `alarm-roll` | 반복 약속 · 일정 없는 반복 알람의 다음 회차를 앞으로 14일치 미리 만들고(회차마다 약속 · 참여 · 알람 새 행, 회차마다 길찾기 1번), 루틴 알람 시각을 다음 발생으로 옮김. 길찾기가 안 되면 1 · 3 · 6시간 뒤 재시도 → 첫 알람 12시간 전까지 안 되면 내 실측 중앙값(`CACHED`) → 직선 근사(`ESTIMATE`). 응답 `{ created, moved_alarm_ids, pending, ring_packages, canceled_alarm_ids, kakao_calls }` (`pending`은 `{ series_id, occurrence_on, reason }` 목록, `reason`은 `ROUTE_RETRY`(길찾기 재시도 대기) · `DAILY_BUDGET`(하루 길찾기 몫) · `ALARM_CAP`(앞으로 켜진 알람 상한) · `RUN_LIMIT`(이번 실행 한도 · 시간)). 길찾기를 쓴 뒤 계산 · 저장이 던져도 재시도 기록(1 · 3 · 6시간)을 남겨서 다음 5분 실행이 같은 회차로 카카오를 또 부르지 않음. **배포는 앱 맞추기(3b) 머지 뒤** | 배치: pg_cron 5분마다 (서비스 키, 길찾기 20번 · 50묶음 · 40초) / 본인: 앱 `syncNow`·반복 일정 저장 직후 (로그인 토큰, 길찾기 최대 4회차) | 끔 (코드에서 길을 가름) | 카카오 길찾기 |
+| `voice-session` | 자기 전 대화 시작 · 이어 받기(텍스트, 첫 마디는 서버 템플릿 — 모델 호출 없어 `ANTHROPIC_API_KEY` 없이도 동작). 오늘 안 끝난 세션은 그대로(resume), 하루 5대화 넘으면 `session_id: null` + `limits.reached: DAY`. L4 AI 묶음 — **첫 배포 전 헤드에 알림** | 앱 A02 | 켬 | — |
+| `voice-turn` | 자기 전 대화 한 턴(`text` · `results` · `card_action`). 빠른 추출(T2F) ∥ 대화 답(T1) → 턴 처리 → 가드, 모델 호출마다 `ai_calls` 한 줄. `rev` 비교(`CONFLICT`) · `client_turn_id` 재시도, 키 없으면 `NOT_CONFIGURED`, T1 실패는 `LLM_UNAVAILABLE`(`details: { cards, fixes }`), 서버 마감 18초(앱 25초). 비밀값 `ANTHROPIC_API_KEY` · `ANTHROPIC_MODEL`(선택) · `AI_LOG_IO_USER_IDS`(선택, 호출 입력 · 출력 글을 `ai_calls.io`에 남길 사용자 id 쉼표 목록 — 비면 아무도 안 남김). L4 AI 묶음 — **첫 배포 전 헤드에 알림** | 앱 A02 | 켬 | Claude |
 
 공통 틀은 `functions/_shared/`: `http.ts`(CORS · `X-Request-Id` · 오류. 앱이 보낸 `X-Request-Id`는 영문 · 숫자 · `_` · `-` 64자 이하일 때만 쓰고 아니면 서버가 새로 만듦) · `auth.ts` · `read.ts`(요청 검사) · `supabase.ts` · `env.ts`. 계산은 `_shared/calc/` ("공용 계산").
 
@@ -164,7 +182,7 @@ create policy wake_signal_receive on realtime.messages
 ```jsonc
 {
   "appointment": { "title": "팀 주간회의", "appointment_at": "…+09:00", "destination": { "name": "…", "lat": 0, "lng": 0 },
-                   "importance": "NORMAL", "recurrence_rule": "FREQ=WEEKLY;BYDAY=TH", "group_id": "uuid" },   // 새 약속 (rule · group_id 선택)
+                   "importance": "NORMAL", "recurrence_rule": "FREQ=WEEKLY;BYDAY=TH", "group_id": "uuid" },   // 새 약속 (rule · group_id 선택. rule은 FREQ=DAILY 또는 FREQ=WEEKLY;BYDAY=… 두 모양만)
   "appointment_id": "uuid",                  // 또는 기존 약속
   "participant": { "origin": {…}, "transport_type": "TRANSIT", "est_travel_minutes": 50, "travel_source": "API",   // API | MANUAL
                    "prepare_minutes": 60, "buffer_minutes": 10, "before_prepare_minutes": 30, "with_wake": true },
@@ -176,8 +194,8 @@ create policy wake_signal_receive on realtime.messages
 
 - `est_travel_minutes` · `travel_source`를 보내면 그 값을 그대로 저장함 (미리 보기와 같은 시각). **직접 입력한 이동은 이어받음**: 이 칸이 없고 기존 약속에 저장된 `travel_source`가 `MANUAL`이면 저장된 `est_travel_minutes`를 `MANUAL`로 그대로 씀 (길찾기를 다시 안 부르고, 시각 · 강도의 직접 값과 같은 규칙. 미리 보기는 "자동으로 되돌리기" 값만 따로 구함). `API`로 저장된 값은 D5 때문에 이어받지 않고 다시 구함. 이 칸이 없고 이어받을 값도 없으면 서버가 `alarm-suggest`와 같은 순서로 구하고, `API`가 아닌 값(`CACHED` · `ESTIMATE`)이면 저장하지 않고 `ROUTE_UNAVAILABLE`(`details.fallback`)으로 돌려줌 → 사용자가 확인한 값을 `MANUAL`로 다시 보냄 (7장 7.1.2 단계 4, `CACHED`는 D5)
 - 일정 없는 알람: `{ "type": "STANDALONE", "alarm": { "alarm_id"?, "scheduled_at", "recurrence_rule"?, "is_enabled"?, "levels"? } }` — 약속 · 루틴 없는 기상 알람 하나 (D46 · Q10 B). `alarm_id`가 있으면 고침. 이름은 `알람` 고정
-- 응답: `appointment_id` · `participant_id` · `alarms[]` · **`ring_packages[]`**(알람 코어 `RingPackage` 그대로 — `alarmId · type · atMillis · title · subtitle · intensity · snoozeLimit · soundKey · departAt`, 켜진 알람만) · **`canceled_alarm_ids[]`**(폰에서 `cancel()`할 id: 지워졌거나 꺼진 알람) · `warnings`
-- 반복(D44)은 `appointments.recurrence_rule`에 저장만 하고 알람은 첫 회차만 만듦 (D4)
+- 응답: `appointment_id` · `participant_id` · `alarms[]` · **`ring_packages[]`**(알람 코어 `RingPackage` 그대로 — `alarmId · type · atMillis · title · subtitle · intensity · snoozeLimit · soundKey · departAt` + 약속 알람은 `notice`(준비 · 출발 알림 한 줄) · `voiceText`(기상 음성 문장), 켜진 알람만. 문구 규칙은 `docs/alarm-core.md` "알림 문구") · **`canceled_alarm_ids[]`**(폰에서 `cancel()`할 id: 지워졌거나 꺼진 알람) · `warnings`
+- 반복(D44)은 `appointments.recurrence_rule`에 저장하고 알람은 첫 회차만 만듦. 다음 회차는 `alarm-roll`이 14일치를 미리 만듦 (D4 A, 위 "반복 다음 회차" — `alarm-roll` 배포 전까지는 첫 회차만). 규칙은 `FREQ=DAILY` · `FREQ=WEEKLY;BYDAY=…` 두 모양만 받고 그 밖(MONTHLY · INTERVAL · COUNT …)은 400 `VALIDATION_FAILED`
 - 트랜잭션이 아님: 약속 → 참여 조건 → 알람 → 고친 값 기록 순으로 쓰고, 이번 호출이 새로 만든 약속 · 참여 조건은 중간에 실패하면 지움. 같은 요청을 다시 보냈을 때 같은 상태가 되는 건 **기존 약속(`appointment_id`)일 때만** (고친 값 기록만 한 번 더 쌓임). 새 약속(`appointment`)은 응답만 잃고 다시 보내면 약속 · 알람이 두 벌 생기고, 일정 없는 알람도 `alarm_id` 없이 다시 보내면 하나 더 생김 (`Idempotency-Key` 같은 요청 키는 아직 안 받음)
 
 ### place-search · notify · wake-check
@@ -188,7 +206,7 @@ create policy wake_signal_receive on realtime.messages
 
 ### 공용 계산 (`functions/_shared/calc/`)
 
-기상 시각 역산 · 강도 · 준비 P80 · 순서 확인 · 저장 검증 · 이동시간 폴백 계산 · 그날 첫 일정 판정(`hasEarlierWake`: 약속 시각이 이 약속보다 앞선 같은 날 약속에 켜진 기상 알람이 있으면 이 약속은 기상 없이 준비부터. 알람이 울리는 시각이 아니라 약속 시각 기준이고, 같은 시각 두 약속은 둘 다 기상을 가짐). Deno · Node API를 안 쓰는 순수 TS고 import는 상대 경로 + `.ts`라서 앱(P6)이 경로 별칭으로 같은 파일을 가져다 씀 (앱 `tsconfig`에 `allowImportingTsExtensions`, Metro에 `watchFolders` 필요). 규칙은 앱 목업 계산(`mobile/src/mocks/calc.ts` · `features/alarm/adjust.ts`)을 그대로 옮김 — 문서(4장 · 7장)와 다른 곳(낮은 중요도 강도 · 도착 알람 시각 · 준비시간 · 7장의 개인 보정 ±30분 / 예측 15~240분 clamp)은 D56이 정할 때까지 목업을 따름 — 앱이 이 계산을 그대로 가져다 쓰므로 목업과 한 줄도 다르면 안 됨.
+기상 시각 역산 · 강도 · 준비 P80 · 순서 확인 · 저장 검증 · 이동시간 폴백 계산 · 반복 규칙 읽기 · 다음 회차 날짜(`recur.ts`: 두 모양만, 요일은 내 시간대 날짜 기준, 창 지금 ~ 14일) · 출발 여유(`departSlack` · `departNow`: 약속 − 이동으로 구한 출발 한계와 지금 + 남은 준비를 비교해 여유 · 빠듯 · 지각 위험, 7장 7.5.2. 출발 알림 글자의 도착 · 여유도 이 계산) · 그날 첫 일정 판정(`hasEarlierWake`: 약속 시각이 이 약속보다 앞선 같은 날 약속에 켜진 기상 알람이 있으면 이 약속은 기상 없이 준비부터. 알람이 울리는 시각이 아니라 약속 시각 기준이고, 같은 시각 두 약속은 둘 다 기상을 가짐). Deno · Node API를 안 쓰는 순수 TS고 import는 상대 경로 + `.ts`라서 앱(P6)이 경로 별칭으로 같은 파일을 가져다 씀 (앱 `tsconfig`에 `allowImportingTsExtensions`, Metro에 `watchFolders` 필요). 규칙은 앱 목업 계산(`mobile/src/mocks/calc.ts` · `features/alarm/adjust.ts`)을 그대로 옮김 — 문서(4장 · 7장)와 다른 곳(낮은 중요도 강도 · 도착 알람 시각 · 준비시간 · 7장의 개인 보정 ±30분 / 예측 15~240분 clamp)은 D56이 정할 때까지 목업을 따름 — 앱이 이 계산을 그대로 가져다 쓰므로 목업과 한 줄도 다르면 안 됨.
 
 ### 시험
 
@@ -201,6 +219,7 @@ node --test --disable-warning=MODULE_TYPELESS_PACKAGE_JSON "supabase/functions/*
 
 - 가짜 DB는 쿼리 빌더의 모양만 흉내 내서, 진짜 PostgREST에서의 동작(임베드 `!inner`, 뷰 조회, `upsert … RETURNING`)과 `index.ts`의 연결(로그인 확인 · `Deno.serve`)은 이 시험에 안 들어감. Docker · Deno가 생기면 `supabase functions serve` + 로컬 DB로 확인할 것
 - `deno check`는 이 PC에 Deno가 없어 못 돌림. 대신 `tsc --strict`로 `functions/**` 전체(Deno 전역 · `npm:` · `jsr:` 지정자는 임시 선언으로 대체)를 타입 검사해 통과함
+- 시험 수 (10/29 반복 다음 회차 3a-1 기준): node 시험 229개(`calc/recur.test.ts` 23 · `tz.test.ts` 4 새로 늘림) · DB 검사 111줄(`supabase/tests`, 마이그레이션 적용 11줄 포함, 반복 다음 회차 새 묶음 10항목)
 
 ### 배포 (터미널, Actions 안 씀)
 
@@ -219,11 +238,12 @@ npx supabase@2.119.0 functions deploy alarm-commit  --project-ref gomrhctwjvttoq
 npx supabase@2.119.0 functions deploy place-search  --project-ref gomrhctwjvttoqifxktt --use-api
 npx supabase@2.119.0 functions deploy notify        --project-ref gomrhctwjvttoqifxktt --use-api
 npx supabase@2.119.0 functions deploy wake-check    --project-ref gomrhctwjvttoqifxktt --use-api
+npx supabase@2.119.0 functions deploy alarm-roll    --project-ref gomrhctwjvttoqifxktt --use-api   # 앱 맞추기(3b) 머지 뒤에
 ```
 
-- `verify_jwt`는 `config.toml`의 `[functions.<이름>]`이 정함 (`wake-check`만 끔). 배포 때 따라감
+- `verify_jwt`는 `config.toml`의 `[functions.<이름>]`이 정함 (`wake-check` · `alarm-roll` 둘만 끔). 배포 때 따라감
 - `_shared/`는 함수 폴더 밖이어도 상대 import라 같이 묶임. 공용 파일을 고치면 쓰는 함수를 다시 배포해야 함
-- 배치 키(Vault `project_url` · `service_role_key`)를 만든 뒤 `wake-check`를 배포하면 5분마다 돔. 배포 전에는 404가 나도 정상 ("배치")
+- 배치 키(Vault `project_url` · `service_role_key`)를 만든 뒤 `wake-check`를 배포하면 5분마다 돔. 배포 전에는 404가 나도 정상 ("배치"). `alarm-roll`도 같지만 **앱 맞추기(3b) 머지 뒤에 배포**함
 
 ### 확인 못 한 것 (이 PC에 Deno · Docker · 카카오 키가 없음)
 

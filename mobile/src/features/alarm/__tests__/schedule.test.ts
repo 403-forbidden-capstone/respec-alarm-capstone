@@ -12,10 +12,14 @@ import {
   groupByDay,
   initialTime,
   isEvening,
+  needsMoveConfirm,
   parseDayParam,
   pickCardAlarm,
+  seriesInfo,
+  seriesLines,
   splitUpcoming,
   upcomingAlarms,
+  visibleOccurrences,
 } from '../schedule';
 import type { AlarmKind, AlarmTime, Appointment } from '../types';
 
@@ -101,6 +105,13 @@ describe('H03 바뀌는 알람', () => {
     ]);
     expect(changedAlarms(chain(), chain())).toEqual([]);
   });
+
+  it('5분 이상 움직이는 알람이 하나라도 있으면 저장 전에 한 번 더 확인 (앞당겨도 뒤로 미뤄도)', () => {
+    const shift = (minutes: number) => changedAlarms(chain(), [alarm('WAKE', 480 + minutes), alarm('PREPARE', 510), alarm('DEPARTURE', 540), alarm('ARRIVE', 590)]);
+    expect([1, 4, -4].map((m) => needsMoveConfirm(shift(m)))).toEqual([false, false, false]);
+    expect([5, -5, 20].map((m) => needsMoveConfirm(shift(m)))).toEqual([true, true, true]);
+    expect(needsMoveConfirm([])).toBe(false);
+  });
 });
 
 describe('H05 처음 날짜 · 시각', () => {
@@ -165,5 +176,60 @@ describe('H05 같은 날 앞 일정의 기상 알람 (earlierWakeOf)', () => {
   it('기상 없는 앞 일정은 건너뛰고 그다음 앞 일정의 기상을 고름', () => {
     const early = { ...dinner, id: 'a0', title: '아침 산책', at: kst(22, 420) } as Appointment; // 7:00, 기상 없음
     expect(earlierWakeOf(kst(22, 840), [early, meeting])).toEqual({ title: '팀 주간회의', at: kst(22, 480) });
+  });
+});
+
+describe('반복 일정 한 장 (H02 카드) — seriesInfo · seriesLines', () => {
+  const study = { at: kst(26, 540), recurrenceRule: 'FREQ=WEEKLY;BYDAY=MO,WE', enabled: true };
+  const current = kst(22, 475); // 5월 22일 오전 7:55
+
+  it('반복 일정은 다음 회차(날짜 · 시각) · 반복 요일 · 앞으로 회차가 걸렸는지', () => {
+    expect(seriesInfo({ ...study, upcomingCount: 4 }, current)).toEqual({ nextOccurrence: '5월 26일 (월) 오전 9:00', repeatSummary: '매주 월 · 수', ahead: true });
+  });
+
+  it('앞으로 회차가 하나뿐이거나 모르면 ahead 아님', () => {
+    expect(seriesInfo({ ...study, upcomingCount: 1 }, current)?.ahead).toBe(false);
+    expect(seriesInfo(study, current)?.ahead).toBe(false);
+  });
+
+  it('꺼 둔 카드는 "알람 걸림"을 안 보임 (다음 회차 줄은 그대로)', () => {
+    const info = seriesInfo({ ...study, enabled: false, upcomingCount: 4 }, current);
+    expect([info?.ahead, info?.nextOccurrence]).toEqual([false, '5월 26일 (월) 오전 9:00']);
+  });
+
+  it('반복이 아니면 null — 카드에 줄이 안 붙음', () => {
+    expect(seriesInfo({ at: kst(22, 600), recurrenceRule: null, enabled: true }, current)).toBeNull();
+    expect(seriesInfo({ at: kst(22, 600), recurrenceRule: 'FREQ=WEEKLY', enabled: true }, current)).toBeNull(); // 요일 없는 규칙은 반복 없음으로 읽음 (repeat.ts)
+  });
+
+  it('카드의 회차가 이미 지났으면(지난 일정으로 접힌 묶음) null — "다음 회차 <지난 날짜>"를 안 붙임', () => {
+    expect(seriesInfo({ ...study, at: kst(15, 540), upcomingCount: 0 }, current)).toBeNull();
+    expect(seriesInfo({ ...study, at: kst(22, 475) }, current)).not.toBeNull(); // 지금 시각과 같으면 지난 것이 아님
+  });
+
+  it('카드 줄: "다음 회차 …" 한 줄 + 걸렸으면 작은 글자 "2주치 알람 걸림" 한 줄', () => {
+    expect(seriesLines({ nextOccurrence: '5월 26일 (월) 오전 9:00', repeatSummary: '매주 월 · 수', ahead: true })).toEqual([
+      '다음 회차 5월 26일 (월) 오전 9:00 · 매주 월 · 수',
+      '2주치 알람 걸림',
+    ]);
+    expect(seriesLines({ nextOccurrence: '5월 26일 (월) 오전 9:00', repeatSummary: '매주 월 · 수' })).toEqual(['다음 회차 5월 26일 (월) 오전 9:00 · 매주 월 · 수']);
+    expect(seriesLines({})).toEqual([]); // 반복이 아닌 카드는 줄이 없음
+  });
+});
+
+describe('H03 회차 목록 — 다음 3회만, 나머지는 더 보기 (visibleOccurrences)', () => {
+  const list = [1, 2, 3, 4, 5];
+
+  it('접으면 앞의 3회만, 접힌 개수를 알려 줌', () => {
+    expect(visibleOccurrences(list, false)).toEqual({ shown: [1, 2, 3], hidden: 2 });
+  });
+
+  it('펼치면 전부 (접힌 개수는 그대로라 "접기" 링크가 남음)', () => {
+    expect(visibleOccurrences(list, true)).toEqual({ shown: list, hidden: 2 });
+  });
+
+  it('3회 이하면 접을 것이 없음', () => {
+    expect(visibleOccurrences([1, 2, 3], false)).toEqual({ shown: [1, 2, 3], hidden: 0 });
+    expect(visibleOccurrences([], false)).toEqual({ shown: [], hidden: 0 });
   });
 });

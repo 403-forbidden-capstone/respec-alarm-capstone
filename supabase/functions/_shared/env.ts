@@ -1,7 +1,7 @@
 // 환경 변수 읽기 — Supabase가 넣어 주는 값과 `supabase secrets set`으로 넣는 값 (supabase/functions/.env.example)
 //   기본 제공: SUPABASE_URL · SUPABASE_ANON_KEY · SUPABASE_SERVICE_ROLE_KEY (legacy),
 //              SUPABASE_PUBLISHABLE_KEYS · SUPABASE_SECRET_KEYS (새 키, JSON 사전). 이름이 SUPABASE_로 시작하는 비밀값은 직접 못 만듦
-//   직접 넣는 것: KAKAO_REST_API_KEY · EXPO_ACCESS_TOKEN (선택)
+//   직접 넣는 것: KAKAO_REST_API_KEY · ANTHROPIC_API_KEY · ANTHROPIC_MODEL (선택) · EXPO_ACCESS_TOKEN (선택)
 import { HttpError } from './errors.ts';
 import { parseKeyDictionary } from './keys.ts';
 

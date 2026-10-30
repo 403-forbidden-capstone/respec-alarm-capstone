@@ -405,6 +405,11 @@ verify_jwt = true
 [functions.wake-check]
 verify_jwt = false
 
+# alarm-roll은 두 길이 한 함수: pg_cron(pg_net)이 서비스 키로 부르는 배치 길 + 앱이 로그인 토큰으로 부르는 본인 길.
+# 키 형식이 둘이라 게이트웨이 검사를 끄고 코드(_shared/auth.ts isServiceCall · requireUser)에서 가름. 로그인 토큰 확인은 본인 길에서 auth.getUser로 함
+[functions.alarm-roll]
+verify_jwt = false
+
 [analytics]
 enabled = true
 port = 54327
@@ -432,3 +437,11 @@ enabled = true
 # formatted with uppercase keywords, indent 2, max width 180, trailing commas,
 # and column/key alignment. Set to "null" to emit raw, unformatted SQL.
 # format_options = "{\"keywordCase\":\"upper\",\"indent\":2,\"maxWidth\":180,\"commaStyle\":\"trailing\"}"
+
+# L4 AI 묶음 — 자기 전 대화 (voice-session은 모델을 안 부르고, voice-turn이 Claude를 부름).
+# 앱이 로그인 토큰으로 부르는 함수라 게이트웨이 검사를 켬 (코드에서 auth.getUser로 한 번 더 확인)
+[functions.voice-session]
+verify_jwt = true
+
+[functions.voice-turn]
+verify_jwt = true

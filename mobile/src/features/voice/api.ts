@@ -1,11 +1,12 @@
 // ③ 수면 전후 음성 AI — 데이터 접근은 이 파일에서만 합니다.
-// 지금은 src/mocks의 가짜 데이터를 돌려주고, Supabase가 붙으면 이 파일 안에서만 바꿉니다.
+// 가짜 데이터 모드는 src/mocks의 대본(mocks/ai.ts)대로 흘러가고, 실데이터 모드면 함수 맨 앞에서 real.ts(서버 함수 voice-session · voice-turn)로 넘김 (docs/screen-data-map.md "실데이터 연결 규칙")
 //   읽기 · 쓰기 위치는 docs/screen-data-map.md (A02 AI 대화 · A03 하루 기록)
-// AI 대기 — 대화는 목업 대본(mocks/ai.ts)대로 흘러감. 마이크 · 음성 합성 · 서버 호출 없음 (실제는 Gemini Live 직결 + voice-* Edge, #42 · D7 실시간)
+// 실데이터 대화는 텍스트만 (설계: L4_자기전_설계메모.md) — 마이크 · 음성 합성 없음. 하루 기록(일기)은 아직 AI 대기
 import { createAppointment, draftAt, estimateAppointment } from '@/features/alarm/api';
 import type { Appointment, AppointmentDraft, Estimate } from '@/features/alarm/types';
 import { now } from '@/lib/clock';
 import { dateParts, dayKey } from '@/lib/format';
+import { isMock } from '@/lib/mode';
 import {
   aiDb,
   aiTurn,
@@ -23,7 +24,8 @@ import {
 import { db, kst, TODAY } from '@/mocks/data';
 import { UserError } from '@/lib/errors';
 
-import type { Conversation, FoundSchedule } from './types';
+import * as real from './real';
+import type { ChatMessage, Conversation, ConversationCard } from './types';
 
 // AI 탭을 처음 열면 대화가 시작됨 (conversation_sessions 한 줄, session_type = BEFORE_SLEEP)
 function chat(): MockChat {
@@ -31,33 +33,51 @@ function chat(): MockChat {
   return aiDb.chat;
 }
 
-function foundOf(c: MockChat): FoundSchedule | null {
-  if (!c.found) return null;
-  return {
-    title: FOUND_DRAFT.title,
-    at: draftAt(FOUND_DRAFT.date, FOUND_DRAFT.time), // H05 계산과 같은 함수 (틀린 시간은 14:00)
-    place: FOUND_DRAFT.place,
-    importance: FOUND_DRAFT.importance,
-    items: FOUND_DRAFT.items
-      .split(',')
-      .map((s) => s.trim())
-      .filter(Boolean),
-    question: FOUND_QUESTION,
-    status: c.found,
-  };
+// 목업의 찾은 일정 카드 한 장 — 상태는 PENDING = 준비(READY) · APPLIED = 저장 · REJECTED = 저장 안 함
+const MOCK_CARD_ID = 'c1';
+const MOCK_STATUS = { PENDING: 'READY', APPLIED: 'SAVED', REJECTED: 'REJECTED' } as const;
+
+function cardsOf(c: MockChat): ConversationCard[] {
+  if (!c.found) return [];
+  return [
+    {
+      id: MOCK_CARD_ID,
+      kind: 'APPT_NEW',
+      status: MOCK_STATUS[c.found],
+      firstOfDay: true,
+      highlight: false,
+      summary: '',
+      title: FOUND_DRAFT.title,
+      at: draftAt(FOUND_DRAFT.date, FOUND_DRAFT.time), // H05 계산과 같은 함수 (틀린 시간은 14:00)
+      place: FOUND_DRAFT.place,
+      importance: FOUND_DRAFT.importance,
+      items: FOUND_DRAFT.items
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean),
+      alarms: [],
+      question: FOUND_QUESTION,
+      error: null,
+      appointmentId: null,
+    },
+  ];
 }
 
 function toConversation(c: MockChat): Conversation {
   const line = nextLine(c);
   return {
-    messages: c.messages.map((m, i) => ({ id: `m${i}`, ...m })),
+    source: 'MOCK',
+    messages: c.messages.map((m, i): ChatMessage => ({ id: `m${i}`, ...m, ...(m.who === 'card' ? { cardId: MOCK_CARD_ID } : {}) })),
     next: !line ? null : line.who === 'me' ? { who: 'me', text: line.text } : { who: 'ai' },
-    found: foundOf(c),
+    cards: cardsOf(c),
+    limits: null,
+    unavailable: null,
   };
 }
 
-// A02 대화 — 지금까지 주고받은 말 · 다음 차례 · 찾은 일정
+// A02 대화 — 지금까지 주고받은 말 · 다음 차례 · 찾은 카드들 (실데이터는 서버 대화 — 오늘 안 끝난 세션이 있으면 이어서)
 export async function getConversation(): Promise<Conversation> {
+  if (!isMock()) return real.getConversation();
   return toConversation(chat());
 }
 
@@ -66,8 +86,9 @@ export const mockTiming = { replyMs: 800 };
 const pause = (ms: number) => (ms > 0 ? new Promise<void>((resolve) => setTimeout(resolve, ms)) : Promise.resolve());
 
 // 내 차례에 말하고 AI 답까지 받아 같이 돌려줌 — text가 없거나 비면 대본 문장 (말하기 버튼). 내 차례가 아니면 그대로
-// 실데이터(D7 실시간)는 폰이 Gemini Live에 바로 붙어(voice-session 단기 토큰) 내 말 · AI 답이 흘러 들어옴 — 붙일 때 이 함수 자리가 대화 연결로 바뀌고, 저장은 대화 뒤 voice-commit
+// 실데이터는 글을 voice-turn으로 보내고 AI 답(카드 계산이 있으면 앱 일을 한 뒤 마지막 답)까지 받음. 서버가 답하지 못하면 던지지 않고 Conversation.unavailable
 export async function say(text?: string): Promise<Conversation> {
+  if (!isMock()) return real.say(text);
   const c = chat();
   if (!userTurn(c, now(), text)) return toConversation(c);
   await pause(mockTiming.replyMs);
@@ -78,8 +99,8 @@ export async function say(text?: string): Promise<Conversation> {
 // AI 차례 — 대본의 다음 말. 일정을 찾으면 카드를 띄우고 준비물은 바로 준비물 목록에 넣음
 function aiReply(c: MockChat) {
   if (aiTurn(c, now()) === 'card') {
-    const found = foundOf(c);
-    const day = found ? dateParts(found.at).day : TODAY + 1;
+    const found = cardsOf(c)[0];
+    const day = found?.at ? dateParts(found.at).day : TODAY + 1;
     for (const title of found?.items ?? []) {
       if (db.todos.some((t) => t.title === title && t.day === day)) continue;
       db.todos.push({ id: `t${db.todos.length + 1}`, title, day, done: false });
@@ -90,6 +111,7 @@ function aiReply(c: MockChat) {
 
 // 찾은 일정의 새 일정 입력값 — "수정"으로 H05를 열 때 채움 (카드가 아직 안 나왔으면 null)
 export function foundScheduleDraft(): AppointmentDraft | null {
+  if (!isMock()) return null; // 실데이터 카드는 [수정] 없이 말로 고침 (카드 값을 H05로 넘기는 길은 아직 없음)
   return aiDb.chat?.found === 'PENDING' ? { ...FOUND_DRAFT } : null;
 }
 
@@ -111,9 +133,35 @@ export async function rejectFoundSchedule() {
   resolveFound(chat(), 'REJECTED', rejectedReply(FOUND_DRAFT.title), now());
 }
 
-// 대화 끝 — 기록된 사실과 대화로 그날 일기를 만들고(다시 누르면 다시 만듦) 일기 날짜를 돌려줌
-// 목업은 하루(5월 22일)만 있어서 일기 날짜는 시나리오의 오늘. 실데이터는 journal-* Edge
-export async function finishConversation(): Promise<{ recordDate: string }> {
+// 카드 [저장] · [바꾸기] — 돌려주는 글은 토스트. 목업은 찾은 일정 하나(saveFoundSchedule), 실데이터는 카드 종류대로 L1 함수로 저장한 뒤 서버에 알림
+export async function saveCard(cardId: string): Promise<string> {
+  if (!isMock()) return real.saveCard(cardId);
+  const saved = await saveFoundSchedule();
+  return `${saved.title} 알람을 맞췄어요`;
+}
+
+// 카드 [저장 안 함]
+export async function rejectCard(cardId: string): Promise<void> {
+  if (!isMock()) return real.rejectCard(cardId);
+  await rejectFoundSchedule();
+}
+
+// 카드 [장소 고르기]로 고른 곳으로 다시 계산 — 실데이터만 (목업 카드는 장소가 늘 있음)
+export async function pickCardPlace(cardId: string, place: { name: string; lat?: number; lng?: number }): Promise<void> {
+  if (!isMock()) return real.pickCardPlace(cardId, place);
+}
+
+// [다시 시도] — 서버가 답하지 못했을 때 같은 요청을 다시 (목업은 늘 답함)
+export async function retryConversation(): Promise<Conversation> {
+  if (!isMock()) return real.retry();
+  return toConversation(chat());
+}
+
+// 대화 끝 — 목업: 기록된 사실과 대화로 그날 일기를 만들고(다시 누르면 다시 만듦) 일기 날짜를 돌려줌
+// 목업은 하루(5월 22일)만 있어서 일기 날짜는 시나리오의 오늘.
+// 실데이터: 대화를 그대로 남기고 recordDate null — 화면은 홈으로만 돌아감 (대화 끝 정리 voice-commit · 일기는 이번 범위 밖, 서버 PR 5)
+export async function finishConversation(): Promise<{ recordDate: string | null }> {
+  if (!isMock()) return { recordDate: null };
   const c = chat();
   const date = kst(TODAY, 0);
   const recordDate = dayKey(date);

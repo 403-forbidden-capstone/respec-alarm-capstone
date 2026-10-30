@@ -1,0 +1,40 @@
+{
+  "point": "T1",
+  "source": "runs/e1-b1/conv/s3-dev-001.json 턴 0 (end는 기록에 없어 마지막 AI 턴인지로 채움) / usage: 장부 T1@v1.3#1a1d234b 정상 호출 1530건 중 출력 토큰 중앙값 (run e2-t1-b1)",
+  "api_mode": "union",
+  "response": {
+    "model": "claude-haiku-5-5",
+    "stop_reason": "end_turn",
+    "content": [
+      {
+        "type": "thinking",
+        "thinking": "Since this is the first turn and it's bedtime, I should mention 2-3 facts from today's record, using the unconfirmed departure facts: departure at 11:15am, 11:31am, and 4:14pm, each tied to their respective sources.\n\nI want to keep the reply to about two short sentences, ending with a soft invitation for the user to correct anything that's wrong, without asking about the date ambiguity or any server-related question.",
+        "signature": "fixture-signature"
+      },
+      {
+        "type": "text",
+        "text": "{\"reply\":\"오늘 기록을 보면 출발이 오전 11시 15분, 오전 11시 31분, 오후 4시 14분으로 남아 있어요. 틀린 게 있으면 말해 주세요.\",\"acts\":[{\"type\":\"OTHER_Q\",\"ref\":null}],\"end\":false}"
+      }
+    ],
+    "usage": {
+      "input_tokens": 1480,
+      "output_tokens": 476,
+      "cache_creation_input_tokens": 0,
+      "cache_read_input_tokens": 3282,
+      "output_tokens_details": {
+        "thinking_tokens": 402
+      }
+    },
+    "request_id": "req_fixture_T1"
+  },
+  "expect": {
+    "reply": "오늘 기록을 보면 출발이 오전 11시 15분, 오전 11시 31분, 오후 4시 14분으로 남아 있어요. 틀린 게 있으면 말해 주세요.",
+    "acts": [
+      {
+        "type": "OTHER_Q",
+        "ref": null
+      }
+    ],
+    "end": false
+  }
+}

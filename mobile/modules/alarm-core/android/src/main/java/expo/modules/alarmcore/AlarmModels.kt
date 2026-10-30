@@ -16,6 +16,7 @@ internal fun JSONObject.optDoubleOrNull(name: String): Double? =
 /**
  * 공통(TS)이 계산해 넘긴 울림 계획. 네이티브는 판단하지 않고 이 값대로만 실행함
  * 칸은 src/plan.ts의 RingPlan과 같음
+ * snoozeMinutesOptions · snoozeLimit은 미루기 시간 고르기와 횟수 한도 (D3 기본안 A) — 보통 알림이면 빈 목록 · 0
  */
 data class RingPlan(
   val sound: Boolean,
@@ -25,6 +26,8 @@ data class RingPlan(
   // 첫 울림 시작으로부터의 거리 (ms). 비어 있으면 다시 울림 없음
   val reRingOffsetsMillis: List<Long>,
   val snoozeMillis: Long,
+  val snoozeMinutesOptions: List<Int>,
+  val snoozeLimit: Int,
   val heading: String,
   val oneTapLabel: String?,
   val oneTapEventType: String?,
@@ -36,17 +39,29 @@ data class RingPlan(
     put("maxRingMillis", maxRingMillis)
     put("reRingOffsetsMillis", JSONArray().also { array -> reRingOffsetsMillis.forEach { array.put(it) } })
     put("snoozeMillis", snoozeMillis)
+    put("snoozeMinutesOptions", JSONArray().also { array -> snoozeMinutesOptions.forEach { array.put(it) } })
+    put("snoozeLimit", snoozeLimit)
     put("heading", heading)
     put("oneTapLabel", oneTapLabel ?: JSONObject.NULL)
     put("oneTapEventType", oneTapEventType ?: JSONObject.NULL)
   }
 
   companion object {
-    fun fromJson(json: JSONObject): RingPlan {
+    // defaultSnoozeLimit: 계획에 한도 칸이 없던 때(예전 APK가 저장한 알람)에 쓰는 한도 — 꾸러미의 snoozeLimit
+    fun fromJson(json: JSONObject, defaultSnoozeLimit: Int = SnoozeRules.FALLBACK_LIMIT): RingPlan {
       val offsets = json.optJSONArray("reRingOffsetsMillis")
       val offsetList = mutableListOf<Long>()
       if (offsets != null) {
         for (index in 0 until offsets.length()) offsetList.add(offsets.getLong(index))
+      }
+      val snoozeMillis = json.optLong("snoozeMillis", 0L)
+      // 목록 칸이 없으면(예전에 저장된 알람) 미루기가 있는 알람(snoozeMillis > 0)만 5 · 10 · 15분
+      val optionsArray = json.optJSONArray("snoozeMinutesOptions")
+      val optionList = mutableListOf<Int>()
+      if (optionsArray != null) {
+        for (index in 0 until optionsArray.length()) optionList.add(optionsArray.getInt(index))
+      } else if (snoozeMillis > 0) {
+        optionList.addAll(SnoozeRules.DEFAULT_OPTIONS)
       }
       return RingPlan(
         sound = json.optBoolean("sound", false),
@@ -54,7 +69,9 @@ data class RingPlan(
         soundKey = json.optStringOrNull("soundKey") ?: "default",
         maxRingMillis = json.optLong("maxRingMillis", 0L),
         reRingOffsetsMillis = offsetList,
-        snoozeMillis = json.optLong("snoozeMillis", 0L),
+        snoozeMillis = snoozeMillis,
+        snoozeMinutesOptions = optionList,
+        snoozeLimit = json.optInt("snoozeLimit", if (snoozeMillis > 0) defaultSnoozeLimit else 0),
         heading = json.optStringOrNull("heading") ?: "",
         oneTapLabel = json.optStringOrNull("oneTapLabel"),
         oneTapEventType = json.optStringOrNull("oneTapEventType"),
@@ -66,7 +83,8 @@ data class RingPlan(
 /**
  * 폰에 걸려 있는 알람 한 개 — 예약 꾸러미(RingPackage) + 울림 계획 + 지금 상태
  * 상태 칸은 JS가 넘기는 JSON에는 없고(기본값), 울림 · 미루기 · 다시 울림 때 네이티브가 바꿈
- * snoozeLimit · voiceText · departAt은 저장만 하고 아직 읽지 않음 (D3 · D8)
+ * voiceText는 저장만 하고 아직 읽지 않음 (D8). snoozeLimit은 계획(plan.snoozeLimit)이 실어 나르므로 여기 칸은 저장만 하고,
+ * departAt은 미루기 한도 안내 · "늦어요" 판단에 씀 (D3 기본안 A)
  */
 data class StoredAlarm(
   val alarmId: String,
@@ -135,7 +153,7 @@ data class StoredAlarm(
         soundKey = json.optStringOrNull("soundKey"),
         volumeAdjust = json.optDoubleOrNull("volumeAdjust"),
         departAt = json.optLongOrNull("departAt"),
-        plan = RingPlan.fromJson(json.getJSONObject("plan")),
+        plan = RingPlan.fromJson(json.getJSONObject("plan"), json.optInt("snoozeLimit", SnoozeRules.FALLBACK_LIMIT)),
         snoozeCount = json.optInt("snoozeCount", 0),
         nextRingAt = json.optLongOrNull("nextRingAt") ?: atMillis,
         ringCount = json.optInt("ringCount", 0),

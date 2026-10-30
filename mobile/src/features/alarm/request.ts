@@ -25,6 +25,7 @@ import {
   type Appointment,
   type AppointmentDetail,
   type AppointmentDraft,
+  type CommitEditScreen,
   type Estimate,
   type IntensityAxis,
   type Level,
@@ -206,7 +207,7 @@ export function standaloneBody(input: StandaloneInput): Body {
 // ---------------------------------------------------------------------------
 
 export type EditPayload = {
-  screen: 'H03' | 'H05' | 'S01';
+  screen: CommitEditScreen;
   field: string;
   alarm_type?: AlarmKind;
   auto_value: unknown;

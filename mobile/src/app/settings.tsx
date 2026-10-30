@@ -1,5 +1,6 @@
+import { router } from 'expo-router';
 import { useState } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { Pressable, StyleSheet, View } from 'react-native';
 
 import { Button, Card, KeyValueRow, Screen, SectionHeader, Text, TopBar } from '@/components/ui';
 import { useAuth } from '@/features/auth/AuthProvider';
@@ -9,6 +10,7 @@ import { userMessage } from '@/lib/errors';
 import { canUseRealData, modeLocked } from '@/lib/mode';
 import { backOrHome } from '@/lib/nav';
 import { signOutAndCleanup } from '@/lib/session';
+import { size } from '@/theme';
 
 const PROVIDER_NAME: Record<string, string> = { kakao: '카카오', google: 'Google' };
 const TRANSPORT_NAME: Record<TransportType, string> = {
@@ -28,7 +30,7 @@ export default function SettingsScreen() {
 
   return (
     <Screen>
-      <TopBar onBack={backOrHome} />
+      <TopBar onBack={backOrHome} screenId="L03" />
       <Text variant="title">설정</Text>
 
       <SectionHeader title="계정" />
@@ -49,6 +51,21 @@ export default function SettingsScreen() {
           </Card>
         </>
       ) : null}
+
+      <SectionHeader title="알람" />
+      <Card>
+        <Pressable
+          onPress={() => router.push('/ring-check')}
+          accessibilityRole="button"
+          accessibilityLabel="알람이 안 울릴 때"
+          style={({ pressed }) => [styles.linkRow, pressed && styles.pressed]}
+        >
+          <Text variant="body">알람이 안 울릴 때</Text>
+          <Text variant="body" tone="sub">
+            ›
+          </Text>
+        </Pressable>
+      </Card>
 
       {enabled && user ? (
         <View style={styles.stack}>
@@ -86,4 +103,6 @@ export default function SettingsScreen() {
 const styles = StyleSheet.create({
   stack: { gap: 8, marginTop: 16 },
   note: { marginTop: 4, marginHorizontal: 4 },
+  linkRow: { minHeight: size.touch, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
+  pressed: { opacity: 0.6 },
 });

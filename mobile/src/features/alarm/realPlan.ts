@@ -2,9 +2,9 @@
 //   계산(미리 보기)은 DB에 안 쓰고, 저장은 alarm-commit → 응답을 폰에 반영(applyCommit). 요청 · 응답 모양은 request.ts (서버의 H05 초안 모양 하나)
 //   · 고친 값 기록은 따로 insert하지 않고 alarm-commit의 edits로 보냄 — 저장이 성공해야 user_edit_logs에 남음
 //   · 저장은 중복 키를 서버가 아직 안 읽어서(lib/edge) 자동 재시도하지 않음. 읽기(alarm-suggest · place-search)만 한 번 재시도
-import { applyCommit } from '@/lib/alarmSync';
+import { applyCommit, syncNow } from '@/lib/alarmSync';
 import { now } from '@/lib/clock';
-import { dbTimeMs } from '@/lib/dbTime';
+import { dbTimeMs, parseDbTime } from '@/lib/dbTime';
 import { callEdge, EdgeError, messageFor } from '@/lib/edge';
 import { UserError } from '@/lib/errors';
 import { dayKey } from '@/lib/format';
@@ -15,8 +15,9 @@ import { manualTimes, orderError, sameEdits } from './adjust';
 import { forgetDetail, recallDetail, rememberDetail } from './detailCache';
 import { dropEdits, MAX_EDITS_PER_REQUEST, peekEdits, queueEdit } from './editQueue';
 import { createEdits, fromEditRow, settingsEdits, toEditPayloads, type EditLogLine, type SettingsAfter } from './edits';
-import { toStandaloneAppointment } from './map';
-import { rememberPlaces, toPlace, uniqueByName, type PlaceDto } from './places';
+import { toStandaloneAppointment, TRAVEL_SOURCE_LABEL } from './map';
+import { toDepartCheck } from './morning';
+import { rememberPlaces, toPlace, uniqueByName, validNear, type PlaceDto } from './places';
 import {
   createCommitBody,
   existingBody,
@@ -43,7 +44,9 @@ import {
   type AlarmSettingsDraft,
   type Appointment,
   type AppointmentDraft,
+  type DepartCheck,
   type Estimate,
+  type LatLng,
   type Place,
   type UserEditLog,
 } from './types';
@@ -74,10 +77,11 @@ async function recentPlaces(userId: string): Promise<Place[]> {
   return uniqueByName([...destinations, ...origins]).slice(0, RECENT_PLACE_COUNT);
 }
 
-export async function listPlaces(query?: string): Promise<Place[]> {
+export async function listPlaces(query?: string, near?: LatLng): Promise<Place[]> {
   const text = query?.trim();
+  const from = validNear(near); // 기준점(보통 집)을 주면 서버가 가까운 순으로 줌. 최근 장소에는 안 씀
   const places = text
-    ? uniqueByName(((await callEdge<{ places: PlaceDto[] }>('place-search', { query: text, limit: 10 }, { retry: 1 })).places ?? []).map(toPlace))
+    ? uniqueByName(((await callEdge<{ places: PlaceDto[] }>('place-search', { query: text, ...from, limit: 10 }, { retry: 1 })).places ?? []).map(toPlace))
     : await recentPlaces(await requireUserId());
   rememberPlaces(places);
   return places;
@@ -136,6 +140,21 @@ async function readDetail(id: string) {
   return detail;
 }
 
+// 지금 나가면 (홈 아침 카드 [다시 확인], 이슈 #230) — 저장된 약속으로 alarm-suggest 미리 보기를 불러 이동시간만 새로 구함 (저장 안 함)
+//   도착 = 지금 + 이동, 여유 · 상태는 departNow (morning.ts toDepartCheck). 출발 시각이 지나 서버가 UNPROCESSABLE을 줘도 suggest()가 계산 결과(details.suggestion)를 꺼내 줌
+//   카카오 응답은 앱 메모리에도 담지 않음(D5): 이동분(숫자)만 꺼내 쓰고, 같은 요청이 동시에 겹치면 한 번만(suggest) — 결과를 기억해 두지는 않음
+export async function checkDepartNow(appointmentId: string): Promise<DepartCheck> {
+  const s = await suggest({ appointment_id: appointmentId });
+  const minutes = s.travel.minutes;
+  if (minutes == null) throw new UserError('이동시간을 구하지 못했어요. 알람 설정에서 예상 이동을 직접 입력해 주세요');
+  return toDepartCheck({
+    appointmentAt: parseDbTime(s.appointment_at),
+    travelMinutes: minutes,
+    source: s.travel.source ? TRAVEL_SOURCE_LABEL[s.travel.source] : '',
+    now: now(),
+  });
+}
+
 // ---------------------------------------------------------------------------
 // 저장 (alarm-commit)
 // ---------------------------------------------------------------------------
@@ -160,7 +179,7 @@ export async function createAppointment(estimate: Estimate, source?: string): Pr
   const saved = toCreatedAppointment(res, estimate);
 
   try {
-    const summary = await applyCommit(res);
+    const summary = await applyCommit({ ...res, appointment_at: a.at.toISOString() }); // 약속 시각은 맞춘 뒤 훅(onAlarmsSynced)의 upcoming용
     if (summary.failed.length) warnDev('폰에 못 건 알람', summary.failed);
     const items = a.items.map((x) => x.trim()).filter(Boolean);
     if (items.length && res.appointment_id) {
@@ -169,6 +188,10 @@ export async function createAppointment(estimate: Estimate, source?: string): Pr
         .insert(items.map((title) => ({ user_id: userId, appointment_id: res.appointment_id, title: title.slice(0, 100), todo_type: 'ITEM' as const, due_date: dayKey(a.at) })));
       if (error) warnDev('준비물 저장 실패', error);
     }
+    // 반복 일정이면 서버가 다음 회차들(앞으로 14일치)을 만들어 폰에 걸게 함 — 첫 회차는 위에서 이미 걸었고, 나머지는 몇 초 뒤 맞추기가 끝나면 걸림.
+    //   준비물 저장 뒤에 불러야 서버가 회차를 만들 때 준비물을 복사함. 기다리지 않음 — 실패해도 저장 흐름은 그대로 (syncNow는 던지지 않고, 못 건 회차는 다음 앱 열림 때 걸림)
+    //   묶음 번호(series_id)는 새 약속이면 appointment_id (DB가 채움, 설계메모 1절)
+    if (a.recurrenceRule && res.appointment_id) void syncNow({ rollSeriesId: res.appointment_id });
   } catch (e) {
     warnDev('저장 뒤처리 실패', e);
   }
@@ -214,7 +237,7 @@ export async function saveAlarmSettings(id: string, draft: AlarmSettingsDraft): 
   //   실패 토스트가 뜨면 저장된 줄 모르고 화면이 저장 전 상태로 남고, 같은 저장을 다시 눌러도 같은 서버 상태일 뿐임.
   //   폰 예약은 다음 맞추기(앱이 앞에 올 때 reconcile)에서 서버 값으로 다시 걸림. 둘은 서로 영향이 없게 따로 감쌈
   try {
-    const summary = await applyCommit(res);
+    const summary = await applyCommit({ ...res, appointment_at: saved.at.toISOString() });
     if (summary.failed.length) warnDev('폰에 못 건 알람', summary.failed);
   } catch (e) {
     warnDev('저장 뒤처리 실패 (폰 예약)', e);
@@ -249,6 +272,8 @@ export async function saveStandaloneAlarm(input: StandaloneInput): Promise<Appoi
   try {
     const summary = await applyCommit(res);
     if (summary.failed.length) warnDev('폰에 못 건 알람', summary.failed);
+    // 새로 만든 반복 알람이면 다음 회차들도 바로 넘김 (createAppointment와 같음). 묶음 번호 = 첫 회차의 alarm_id. 고치기(alarmId 있음)는 어느 회차인지 몰라 건너뜀 — 다음 앱 열림 때 넘김
+    if (!input.alarmId && row.recurrence_rule) void syncNow({ rollSeriesId: row.alarm_id });
   } catch (e) {
     warnDev('저장 뒤처리 실패', e);
   }
@@ -260,7 +285,7 @@ export async function saveStandaloneAlarm(input: StandaloneInput): Promise<Appoi
 // ---------------------------------------------------------------------------
 
 // 저장과 따로 부르는 곳(S01 등)의 기록 — 같은 일정의 다음 alarm-commit에 실어 보냄 (editQueue.ts). 앱 안에서 지우는 길은 없음
-export async function recordEdit(log: Omit<UserEditLog, 'at'>): Promise<void> {
+export async function recordEdit(log: EditLogLine): Promise<void> {
   queueEdit(log);
 }
 

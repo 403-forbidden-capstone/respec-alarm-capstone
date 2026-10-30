@@ -6,9 +6,9 @@ import { hasEarlierWake } from '@shared/calc/wake.ts';
 import { now } from '@/lib/clock';
 import { UserError } from '@/lib/errors';
 import { isMock } from '@/lib/mode';
-import { addMinutes, isSameDay, josa, joinKo, minuteOfDay, spokenTime, startOfDay } from '@/lib/format';
-import { alarmChain, autoLevel, axisLevel } from '@/mocks/calc';
-import { awayFromHomeFactor, db, people, places, timelines, transportFactor, type MockAppointment } from '@/mocks/data';
+import { addMinutes, isSameDay, josa, joinKo, minuteOfDay, minutesBetween, spokenTime, startOfDay } from '@/lib/format';
+import { alarmChain, autoLevel, axisLevel, departAtOf } from '@/mocks/calc';
+import { awayFromHomeFactor, db, people, places, recentMockPlaces, timelines, transportFactor, type MockAppointment } from '@/mocks/data';
 
 import {
   defaultAlarms,
@@ -18,8 +18,6 @@ import {
   MANUAL_SOURCE,
   ORIGIN_HOME,
   RING_KINDS,
-  WAKE_NO_REPLY_MINUTES,
-  WAKE_OBSERVE_MINUTES,
   type AlarmEdits,
   type AlarmKind,
   type AlarmPreview,
@@ -29,26 +27,40 @@ import {
   type Appointment,
   type AppointmentDetail,
   type AppointmentDraft,
+  type AppointmentPatch,
+  type DepartCheck,
+  type EditScope,
   type Estimate,
   type IntensityAxis,
+  type LatLng,
   type Level,
+  type MorningPlan,
   type NextAlarm,
+  type Occurrence,
   type Place,
   type RingInfo,
   type RingKind,
   type ScheduleItem,
   type Snooze,
   type Transport,
+  type UpdateOptions,
+  type UpdateResult,
   type UserEditLog,
   type WakeCheck,
 } from './types';
 import { manualTimes, orderError } from './adjust';
-import { LEVEL_FIELD } from './edits';
+import { LEVEL_FIELD, type EditLogLine } from './edits';
+import { hasAlarms, listOnePerSeries, toOccurrences } from './map';
+import { filterPlaces } from './places';
 import * as real from './real';
 import { repeatLabel, repeatToRrule, rruleToRepeat } from './repeat';
-import { draftAt, initialTime, ringingKinds } from './schedule';
+import { pickMorningSource, toDepartCheck, toMorningPlan, morningDay, wakeAlarmOf, type MorningSource } from './morning';
+import { ringNotice } from './notice';
+import { changedAlarms, CONFIRM_MOVE_MINUTES, draftAt, initialTime, ringingKinds } from './schedule';
 import type { StandaloneInput } from './request';
 import { thetaReachedAt, usageSummary, type UseSpan } from './wake';
+// 알람 코어의 순수 계산 파일만 직접 가져옴 (index는 네이티브 모듈을 찾으므로 — 같은 선례: lib/alarmSync 시험)
+import { canSnooze, DEFAULT_SNOOZE_LIMIT } from '../../../modules/alarm-core/src/plan';
 
 function toAppointment(a: MockAppointment): Appointment {
   return {
@@ -83,12 +95,27 @@ function find(id: string) {
 }
 
 // 모든 일정의 알람 (H02) — 시각 순. 알람 없는 일정(H05에서 알람을 모두 끄고 저장)은 알람 목록에 없고 H01 일정 줄에만 보임
-export async function listAppointments(): Promise<Appointment[]> {
-  if (!isMock()) return real.listAppointments();
-  return db.appointments
-    .map(toAppointment)
-    .filter((a) => a.alarms.length > 0)
-    .sort(byTime);
+//   반복은 묶음(series_id)당 지금 이후 가장 가까운 회차 하나 — 실데이터와 같은 규칙. everyOccurrence = 묶음을 줄이지 않고 모든 회차 (H05가 같은 날 앞 일정의 기상을 찾을 때)
+export async function listAppointments(options: { everyOccurrence?: boolean } = {}): Promise<Appointment[]> {
+  if (!isMock()) return real.listAppointments(options);
+  const entries = db.appointments
+    .map((a) => ({ seriesId: a.seriesId, item: toAppointment(a) }))
+    .filter((entry) => hasAlarms(entry.item));
+  return options.everyOccurrence ? entries.map((entry) => entry.item).sort(byTime) : listOnePerSeries(entries, now().getTime());
+}
+
+// 반복 일정의 앞으로 회차 (H03 회차 목록) — 같은 묶음의 지금 이후 회차, 시각 순. 반복이 아니면 빈 목록. 화면은 다음 3회만 보이고 나머지는 접음
+export async function listOccurrences(id: string): Promise<Occurrence[]> {
+  if (!isMock()) return real.listOccurrences(id);
+  const own = find(id);
+  if (!own?.seriesId) return [];
+  const rows = db.appointments
+    .filter((a) => a.seriesId === own.seriesId)
+    .map((a) => ({
+      appointment: { appointment_id: a.id, appointment_at: a.at.toISOString() },
+      alarms: alarmChain(a).map((x) => ({ alarm_type: x.kind, scheduled_at: x.at.toISOString(), is_enabled: x.enabled && !db.disabledAppointments.has(a.id) })),
+    }));
+  return toOccurrences(rows, now().getTime());
 }
 
 // 지금 이후 가장 먼저 울릴 알람 (H01) — 꺼진 일정 · 꺼진 종류 · 도착 목표는 뺌
@@ -121,6 +148,39 @@ export async function getDaySchedule(day: Date): Promise<ScheduleItem[]> {
       hasAlarm: alarmChain(a).length > 0,
     }))
     .sort(byTime);
+}
+
+// 오늘 첫 일정 (H08 기상 확정 뒤 한 줄 · H01 아침 카드, 이슈 #230) — 켜진 기상 알람이 붙은 그날 가장 이른 약속. 저녁(18시~)에는 홈처럼 내일. 없으면 null
+//   칸: 약속 · 준비 · 출발 · 도착 목표 시각(켜진 알람만) · 이동분과 출처 · 기상 확인 시각 · 출발 기록. 실데이터는 하루 일정(getDaySchedule)과 같은 읽기를 같이 씀 (realMorning.ts)
+export async function getMorningPlan(): Promise<MorningPlan | null> {
+  if (!isMock()) return real.getMorningPlan();
+  const day = morningDay(now());
+  const sources: MorningSource[] = db.appointments
+    .filter((a) => isSameDay(a.at, day))
+    .map(toAppointment)
+    .map((a) => ({
+      appointmentId: a.id,
+      title: a.title,
+      at: a.at,
+      place: a.place,
+      travelMinutes: a.travelMinutes,
+      travelSource: a.travelSource,
+      alarms: a.enabled ? a.alarms : a.alarms.map((x) => ({ ...x, enabled: false })), // 일정 전체를 끈 가짜 일정은 알람도 꺼진 것으로 (실데이터는 알람마다 꺼짐)
+      departedAt: db.me.departAt,
+    }));
+  const source = pickMorningSource(sources);
+  const wake = source ? wakeAlarmOf(source) : undefined;
+  return source && wake ? toMorningPlan(source, db.wakeConfirmations[wake.id]?.at ?? null) : null;
+}
+
+// 지금 나가면 (H01 아침 카드 [다시 확인]) — 도착 = 지금 + 이동, 여유 · 상태는 서버와 같은 departNow. 저장하지 않음
+//   실데이터는 alarm-suggest 미리 보기로 이동시간을 새로 구함 (realPlan.ts). 가짜 모드는 일정에 적힌 이동분
+export async function checkDepartNow(appointmentId: string): Promise<DepartCheck> {
+  if (!isMock()) return real.checkDepartNow(appointmentId);
+  const a = find(appointmentId);
+  if (!a) throw new UserError('일정을 찾을 수 없어요');
+  const view = toAppointment(a);
+  return toDepartCheck({ appointmentAt: view.at, travelMinutes: view.travelMinutes, source: view.travelSource, now: now() });
 }
 
 // 알람 설정 (H03) — 알람 없는 일정은 열 알람이 없어 null (일정 수정 · 삭제를 어디서 할지는 D41이 정함)
@@ -208,7 +268,7 @@ function pushEditLog(log: Omit<UserEditLog, 'at'>) {
   db.editLogs.push({ at: now(), ...log });
 }
 
-export async function recordEdit(log: Omit<UserEditLog, 'at'>) {
+export async function recordEdit(log: EditLogLine) {
   if (!isMock()) return real.recordEdit(log);
   pushEditLog(log);
 }
@@ -315,10 +375,164 @@ export async function saveAlarmSettings(id: string, draft: AlarmSettingsDraft): 
   return { turnedOff: false, turnedOn: false };
 }
 
-// 새 일정 (H05) — 장소는 지금 목업 4곳. 실데이터는 검색어가 있으면 place-search(카카오 키워드), 없으면 최근에 쓴 곳 (realPlan.ts)
-export async function listPlaces(query?: string): Promise<Place[]> {
-  if (!isMock()) return real.listPlaces(query);
-  return places;
+// ── 일정 수정 · 삭제 (H03 편집 시트 · 이슈 #211 · D41 A · N6) ──
+//   가짜 모드만 — 실서버는 4b(서버 함수 appointment-edit)에서 realEdit.ts를 채움. 화면(L5)은 이 4개 함수와 types.ts의 AppointmentPatch · EditScope · UpdateResult만 앎
+
+const NOT_CREATOR = '공동 약속은 만든 사람만 고칠 수 있어요';
+
+// 공동 약속은 만든 사람만 고치고 지움 (N6). 만든 사람 칸이 없으면 나
+const isMine = (a: MockAppointment) => (a.creatorId ?? 'me') === 'me';
+
+function assertEditable(a: MockAppointment) {
+  if (a.groupId && !isMine(a)) throw new UserError(NOT_CREATOR);
+}
+
+// 고치기 · 지우기가 닿는 일정들 — this = 그 일정만, following = 같은 반복 묶음(seriesId)의 이 일정과 그 뒤 일정. 묶음이 없으면(반복이 아니거나 가짜 데이터에 묶음이 없음) scope와 상관없이 그 일정 하나
+function scopeTargets(a: MockAppointment, scope: EditScope): MockAppointment[] {
+  if (scope === 'this' || !a.seriesId) return [a];
+  return db.appointments.filter((x) => x.seriesId === a.seriesId && x.at.getTime() >= a.at.getTime()).sort(byTime);
+}
+
+// 그날 첫 일정만 기상 알람 — 같은 날 일정 중 기상을 울릴 수 있는 가장 이른 일정에 붙이고 나머지는 준비부터 (서버 hasEarlierWake와 같은 기준: 꺼 둔 기상 · 알람 없는 일정은 안 셈)
+//   시각이 옮겨지거나 일정이 지워지고 되살아날 때 그날 첫 일정이 바뀌므로 다시 판정 (실서버는 4b가 7.1.3대로). days = 다시 볼 날짜들
+function wakeFlags(list: readonly MockAppointment[], days: readonly Date[]): Map<string, boolean> {
+  const flags = new Map<string, boolean>();
+  for (const day of days) {
+    let taken = false;
+    for (const a of list.filter((x) => isSameDay(x.at, day)).sort(byTime)) {
+      const canWake = alarmChain({ ...a, withWake: true }).some((x) => x.kind === 'WAKE');
+      flags.set(a.id, canWake && !taken);
+      if (canWake && !db.disabledAppointments.has(a.id) && !db.disabledKinds.has(`${a.id}:WAKE`)) taken = true;
+    }
+  }
+  return flags;
+}
+
+function reassignWake(days: readonly Date[]) {
+  const flags = wakeFlags(db.appointments, days);
+  for (const a of db.appointments) if (flags.has(a.id)) a.withWake = flags.get(a.id)!;
+}
+
+// 일정 하나에 고친 값을 반영한 새 일정 (저장 전) — 알람 시각 · 강도는 alarmChain · axisLevel이 일정 값에서 다시 셈
+//   · at: 'following'은 고른 일정이 옮겨진 만큼(delta) 뒤 회차도 같이 옮김 (회차마다 날짜가 다르니 같은 시각으로 맞추지 않고 같은 간격으로)
+//   · place: 목업 장소표에 있는 곳이면 이동시간을 다시 구함(자동값). 직접 입력한 이동시간은 그대로 (D42 C)
+//   · 직접 고른 알람 시각은 그대로 두되, 날짜가 바뀌면 같은 시:분으로 따라감
+//     // L6 안건후보: 일정 시각을 옮길 때 직접 고른 알람 시각 기본안 = 같은 날이면 유지 · 날짜가 바뀌면 날짜만 따라감
+//   · repeatDays: 'following'일 때만 (한 회차만 고치면서 반복 규칙을 바꾸는 건 뜻이 없음)
+//     // L6 안건후보: 이번만 고칠 때 반복 요일 기본안 = 무시
+function applyPatch(a: MockAppointment, patch: AppointmentPatch, delta: number, scope: EditScope): MockAppointment {
+  const next: MockAppointment = { ...a };
+  if (patch.title !== undefined) next.title = patch.title.trim();
+  if (patch.at) {
+    next.at = new Date(a.at.getTime() + delta);
+    if (!isSameDay(a.at, next.at) && a.manual?.times) {
+      const days = startOfDay(next.at).getTime() - startOfDay(a.at).getTime();
+      const times: Partial<Record<RingKind, Date>> = {};
+      for (const kind of RING_KINDS) {
+        const picked = a.manual.times[kind];
+        if (picked) times[kind] = new Date(picked.getTime() + days);
+      }
+      next.manual = { ...a.manual, times };
+    }
+  }
+  if (patch.place !== undefined && patch.place !== a.place) {
+    next.place = patch.place;
+    const travel = mockTravel(patch.place, a.transport, a.origin);
+    if (travel != null) {
+      next.travelMinutes = travel;
+      next.travelSource = '길찾기';
+    }
+  }
+  if (patch.importance) next.importance = patch.importance;
+  if (patch.repeatDays && scope === 'following') next.recurrenceRule = repeatToRrule(patch.repeatDays);
+  return next;
+}
+
+// 일정 고치기 (H03 편집 시트) — 제목 · 날짜 시각 · 장소 · 중요도 · 반복 요일. 알람 시각 · 강도는 고친 값으로 다시 계산됨
+//   changes = 시각이 바뀌는 기상 · 준비 · 출발의 전 → 후 (제목만 바꾸면 빈 목록)
+//   needsConfirm = 5분(CONFIRM_MOVE_MINUTES) 이상 늦춰지는 알람이 있음 (D67, 앞당김은 묻지 않음 — H03 기존 확인 시트 needsMoveConfirm은 앞당김도 묻는 쪽이라 다름). true면 저장하지 않고 돌려줌 → 화면이 기존 확인 시트로 묻고, 확인하면 { confirmed: true }로 같은 값을 다시 부름
+//   앞당김 · 5분 미만 늦춤은 바로 저장하고 needsConfirm false → 화면이 토스트 [되돌리기]. 되돌리기 = 이전 값을 { confirmed: true }로 넣어 같은 함수를 다시 부름 (늦춤이어도 묻지 않게)
+//   공동 약속은 만든 사람만 (UserError). 알람 순서(기상 ≤ 준비 ≤ 출발 ≤ 도착 목표)가 뒤집히면 저장하지 않고 UserError — saveAlarmSettings와 같은 검사
+export async function updateAppointment(id: string, patch: AppointmentPatch, scope: EditScope, options: UpdateOptions = {}): Promise<UpdateResult> {
+  if (!isMock()) return real.updateAppointment(id, patch, scope, options);
+  const a = find(id);
+  if (!a) throw new UserError('일정을 찾을 수 없어요');
+  assertEditable(a);
+  if (patch.title !== undefined && !patch.title.trim()) throw new UserError('일정 이름을 입력해 주세요');
+
+  const targets = scopeTargets(a, scope);
+  const delta = patch.at ? patch.at.getTime() - a.at.getTime() : 0;
+  const edited = targets.map((t) => applyPatch(t, patch, delta, scope));
+  // 그날 첫 일정을 다시 판정해 기상 알람이 붙는 일정을 정함 — 옮기기 전 날 · 옮긴 뒤 날 모두
+  const after = db.appointments.map((x) => edited.find((e) => e.id === x.id) ?? x);
+  const flags = wakeFlags(after, [...targets, ...edited].map((x) => x.at));
+  const next = after.map((x) => (flags.has(x.id) && x.withWake !== flags.get(x.id) ? { ...x, withWake: flags.get(x.id)! } : x));
+
+  for (const e of edited) {
+    const blocked = orderError(alarmChain(next.find((x) => x.id === e.id)!));
+    if (blocked) throw new UserError(blocked);
+  }
+  const changes = changedAlarms(alarmChain(a), alarmChain(next.find((x) => x.id === id)!));
+  const needsConfirm = changes.some((c) => minutesBetween(c.from, c.to) >= CONFIRM_MOVE_MINUTES);
+  if (needsConfirm && !options.confirmed) return { changes, needsConfirm: true };
+
+  db.appointments.forEach((x, i) => Object.assign(x, next[i]));
+  return { changes, needsConfirm: false };
+}
+
+let trashBatch = 0; // 한 번에 지운 일정들을 묶는 번호
+
+// 일정 지우기 (H03 · H01) — 가짜 db에서 숨김(휴지통)으로 옮겨 목록 · 하루 일정 · 다음 알람에서 안 보임. restoreAppointment로 되살림
+//   scope: 반복이면 this = 이번 회차만 · following = 이번 회차와 그 뒤 모두. 반복이 아니면 scope를 안 봄 (그 일정 하나)
+//   지운 일정이 그날 첫 일정이었으면 그날 다음 일정에 기상 알람이 붙음. 공동 약속은 만든 사람만 (UserError)
+export async function deleteAppointment(id: string, scope: EditScope): Promise<void> {
+  if (!isMock()) return real.deleteAppointment(id, scope);
+  const a = find(id);
+  if (!a) throw new UserError('일정을 찾을 수 없어요');
+  assertEditable(a);
+  const targets = scopeTargets(a, scope);
+  const batch = ++trashBatch;
+  const rows = targets.map((t) => ({ batch, index: db.appointments.indexOf(t), appointment: t }));
+  for (const row of [...rows].sort((x, y) => y.index - x.index)) db.appointments.splice(row.index, 1);
+  db.trash.push(...rows);
+  reassignWake(targets.map((t) => t.at));
+}
+
+// 지운 일정 되살리기 (삭제 토스트 [되돌리기], 앱이 5초 안에 부름) — 같이 지운 반복 회차도 함께, 원래 자리로. 지운 적 없으면 아무것도 안 함
+//   실데이터(4b)는 5초 안에는 서버로 안 보내서 되살릴 것이 서버에 없음 — 가짜 모드만 지운 것을 되살림
+export async function restoreAppointment(id: string): Promise<void> {
+  if (!isMock()) return real.restoreAppointment(id);
+  const hit = db.trash.filter((t) => t.appointment.id === id).pop();
+  if (!hit) return;
+  const batch = db.trash.filter((t) => t.batch === hit.batch).sort((x, y) => x.index - y.index);
+  db.trash = db.trash.filter((t) => t.batch !== hit.batch);
+  for (const row of batch) db.appointments.splice(Math.min(row.index, db.appointments.length), 0, row.appointment);
+  reassignWake(batch.map((t) => t.appointment.at));
+}
+
+// 공동 약속에서 나만 빠지기 ([나는 빠지기]) — 내 참여 행 · 알람만 사라지고 약속은 다른 참여자에게 그대로 (가짜 모드는 내 목록에서만 뺌, 되살리기 없음)
+//   공동 약속이 아니거나 내가 만든 약속이면 UserError (만든 사람은 지우기를 써야 함)
+//   // L6 안건후보: 만든 사람이 빠지려 할 때 기본안 = 막고 "지워 주세요" 안내
+export async function leaveSharedAppointment(id: string): Promise<void> {
+  if (!isMock()) return real.leaveSharedAppointment(id);
+  const a = find(id);
+  if (!a) throw new UserError('일정을 찾을 수 없어요');
+  if (!a.groupId) throw new UserError('공동 약속이 아니에요');
+  if (isMine(a)) throw new UserError('내가 만든 공동 약속은 빠질 수 없어요. 지워 주세요');
+  db.appointments.splice(db.appointments.indexOf(a), 1);
+  db.left.push(a);
+  reassignWake([a.at]);
+}
+
+// 장소 목록 (H05 · H03) — 검색어가 없으면 최근에 쓴 곳, 있으면 이름 · 주소에 검색어가 든 곳 (실데이터는 place-search 카카오 키워드, 가짜는 목업 장소에서 거름)
+//   near = 보통 집 좌표, 부르는 화면이 넘김 — 주면 검색 결과를 가까운 순으로 (최근 장소에는 안 씀)
+//   category는 서버 값 그대로 통과 (저장하지 않음, D5)
+export async function listPlaces(query?: string, near?: LatLng): Promise<Place[]> {
+  if (!isMock()) return real.listPlaces(query, near);
+  const text = query?.trim();
+  // 가짜 모드의 "최근 장소" = 처음부터 있던 4곳 (이전 동작 그대로), 검색은 대학가 장소 전체에서
+  if (!text) return recentMockPlaces.map((p) => ({ ...p }));
+  return filterPlaces(places, text, near).map((p) => ({ ...p }));
 }
 
 // 새 일정 처음 입력값 — 일정명 · 준비물은 비어 있음, 장소는 첫 곳 선택. 날짜 · 시간은 홈에서 넘어온 날(day)의 오후 2시
@@ -448,13 +662,11 @@ export async function createAppointment(estimate: Estimate, source = '직접 입
 }
 
 // 음성 안내 문장 — 강도(말소리)에 따라 말투가 바뀜. 출발 알람은 같이 가는 그룹원 상황을 알려 줌
-// again = 기상 확인이 안 돼 다시 울림
-function voiceLine(a: MockAppointment, kind: RingKind, at: Date, again: boolean) {
+function voiceLine(a: MockAppointment, kind: RingKind, at: Date) {
   const chain = alarmChain(a);
   const depart = chain.find((x) => x.kind === 'DEPARTURE')?.at ?? a.at;
   const when = spokenTime(a.at);
   if (kind === 'WAKE') {
-    if (again) return `아직 기상 확인이 안 됐어요. ${a.title}에 늦지 않게 지금 일어나 주세요.`;
     const subject = josa(a.title, '이', '가');
     const late = db.lateCount4w ? ` 최근 4주에 ${db.lateCount4w}번 늦었어요.` : '';
     return [
@@ -492,28 +704,31 @@ function findAlarm(alarmId: string) {
 }
 
 // 울림 화면 (H07) — 실제 울림은 알람 코어(네이티브). 이 화면은 디자인 · 웹 미리 보기용
-// again = 확인 알림에 응답이 없어 다시 울림 → 큰 시각은 다시 울린 시각 (목업 ring-time = S.now). 기상 알람만, 다른 종류는 무시
-export async function getRing(alarmId: string, again = false): Promise<RingInfo | null> {
+// 준비 · 출발 알람의 머리글(notice)은 폰 알림과 같은 글자 (서버 알림 문구 함수 — features/alarm/notice.ts)
+export async function getRing(alarmId: string): Promise<RingInfo | null> {
   if (!isMock()) return real.getRing();
   const found = findAlarm(alarmId);
   if (!found || found.alarm.kind === 'ARRIVE') return null;
   const { a, alarm } = found;
   const kind = alarm.kind as RingKind;
-  const re = again && kind === 'WAKE';
   const sound = LEVELS[axisLevel(a, 'sound')];
   const vibration = LEVELS[axisLevel(a, 'vibration')];
-  const rang = db.wake.alarmId === alarm.id && db.wake.phase === 'ringing' ? db.wake.ringAt : null;
-  // 기록이 없으면(주소로 바로 열기) 알람 시각에 끈 것으로 보고 관찰 10분 + 응답 없음 5분 뒤
-  const at = re ? (rang ?? addMinutes(alarm.at, WAKE_OBSERVE_MINUTES + WAKE_NO_REPLY_MINUTES)) : alarm.at;
+  const at = alarm.at;
+  const appointment = toAppointment(a);
   return {
     alarmId: alarm.id,
     kind,
-    appointment: toAppointment(a),
+    appointment,
     at,
     voiceTone: LEVELS[axisLevel(a, 'voice')].voice,
-    voiceLine: voiceLine(a, kind, at, re),
+    voiceLine: voiceLine(a, kind, at),
+    notice: ringNotice(appointment, kind, at),
     levelLine: `알람 강도 ${sound.name} · 배경음 ${sound.sound} · 진동 ${vibration.vibration}`,
     important: a.importance !== 'LOW',
+    // 미루기 한도 (D3 기본안 A) — 실데이터는 알람 코어의 snoozeCount · 꾸러미 snoozeLimit · departAt (네이티브 화면이 보여 줌)
+    snoozeCount: db.snoozeCounts[alarm.id] ?? 0,
+    snoozeLimit: DEFAULT_SNOOZE_LIMIT,
+    departAt: departAtOf(a) ?? null,
   };
 }
 
@@ -545,14 +760,17 @@ export async function stopRing(alarmId: string) {
   if (db.wake.alarmId === alarmId && db.wake.phase === 'ringing') db.wake = { ...db.wake, phase: 'idle' };
 }
 
-// 미루기 (H07) — 울리는 중 표시를 지우고 기록 (목업 A.snooze). at = 미룬 시각
-// 미룬 뒤 다시 울림 · 3번 제한 · SNOOZED 기록은 알람 코어(#33)
+// 미루기 (H07) — 울리는 중 표시를 지우고 기록 (목업 A.snooze). at = 미룬 시각, minutes = 고른 분 (5 · 10 · 15)
+// 3번까지 (한도에 닿으면 아무것도 안 함 — 화면이 이미 버튼을 끔). 실데이터의 다시 울림 · 한도 · SNOOZED 기록은 알람 코어(#33)
 export async function snoozeRing(alarmId: string, minutes: number, at: Date) {
   if (!isMock()) return real.snoozeRing();
   const found = findAlarm(alarmId);
   // 이미 기상 확정한 알람이면 해제처럼 기록을 그대로 둠 (확정 뒤에 미루기가 붙지 않게)
   if (!found || db.wakeConfirmations[alarmId]) return;
+  const count = db.snoozeCounts[alarmId] ?? 0;
+  if (!canSnooze(count, DEFAULT_SNOOZE_LIMIT)) return;
   await stopRing(alarmId);
+  db.snoozeCounts[alarmId] = count + 1;
   db.snoozes[alarmId] = { at: addMinutes(at, minutes), minutes };
   db.events.push({ at, label: `${KIND_LABEL[found.alarm.kind]} 알람 ${minutes}분 미루기`, source: '자동' });
 }
@@ -578,6 +796,7 @@ export async function getSnooze(): Promise<Snooze | null> {
 export async function cancelSnooze(alarmId: string): Promise<CancelSnoozeResult> {
   if (!isMock()) return real.cancelSnooze(alarmId);
   delete db.snoozes[alarmId];
+  delete db.snoozeCounts[alarmId];
   return { wakeCheck: false };
 }
 
@@ -587,6 +806,7 @@ export async function dismissRing(alarmId: string, at: Date) {
   if (!isMock()) return real.dismissRing();
   const found = findAlarm(alarmId);
   delete db.snoozes[alarmId];
+  delete db.snoozeCounts[alarmId]; // 해제하면 미룬 횟수는 끝
   if (!found || db.wakeConfirmations[alarmId]) return;
   db.events.push({ at, label: `${KIND_LABEL[found.alarm.kind]} 알람 해제`, source: '자동' });
   if (found.alarm.kind === 'WAKE') db.wake = { alarmId, phase: 'observing', ringAt: null, dismissedAt: at, ...NO_USE };
@@ -647,14 +867,6 @@ export async function promptWake(alarmId: string, at: Date) {
   const dismissedAt = db.wake.alarmId === alarmId ? db.wake.dismissedAt : null;
   db.wake = { alarmId, phase: 'prompt', ringAt: null, dismissedAt, ...SLEPT };
   db.events.push({ at, label: '확인 알림 발송', source: '알림' });
-}
-
-// 확인 알림에도 응답이 없음 → 기상 알람이 다시 울림 (H07 again=1). at = 다시 울리는 시각
-// 다시 울릴지는 D2에서 정함 — 안 울리기로 하면 이 함수와 재알람 기록을 같이 뺌
-export async function missWake(alarmId: string, at: Date) {
-  if (!isMock()) return real.missWake();
-  db.wake = { alarmId, phase: 'ringing', ringAt: at, dismissedAt: null, ...NO_USE };
-  db.events.push({ at, label: '재알람', source: '자동' });
 }
 
 // how: self = 확인 알림에 직접 응답(사용 시간은 확인 알림 때 그대로), auto = 화면 사용으로 자동 판정(시연: 폰을 보며 일어남)

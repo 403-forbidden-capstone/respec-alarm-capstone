@@ -22,6 +22,7 @@ test('계정 4명, 닉네임 · 아이디 모양 (handle ^[a-z0-9_]{3,20}$)', ()
   for (const p of t.profiles) {
     assert.match(p.handle, /^[a-z0-9_]{3,20}$/);
     assert.ok(p.nickname.length <= 30);
+    assert.ok(!Number.isNaN(Date.parse(p.onboarded_at)), '데모 계정은 온보딩을 끝낸 상태');
   }
   assert.equal(new Set(t.profiles.map((p) => p.handle)).size, 4);
 });
@@ -122,6 +123,14 @@ test('같은 참여 조건에 같은 종류 알람이 둘 이상 없음 (alarms_
   for (const p of t.appointment_participants) {
     const times = t.alarms.filter((a) => a.participant_id === p.participant_id).sort((x, y) => order.indexOf(x.alarm_type) - order.indexOf(y.alarm_type)).map((a) => a.scheduled_at);
     assert.deepEqual([...times].sort(), times);
+  }
+});
+
+test('출발 · 도착 시각은 출처와 같이 (appointment_participants_*_source_needs_time) — 시각이 있으면 BUTTON, 없으면 NULL', () => {
+  assert.ok(t.appointment_participants.some((p) => p.departed_at !== null), '시각이 있는 참여 조건이 하나도 없음');
+  for (const p of t.appointment_participants) {
+    assert.equal(p.departed_source, p.departed_at === null ? null : 'BUTTON', p.participant_id);
+    assert.equal(p.arrived_source, p.arrived_at === null ? null : 'BUTTON', p.participant_id);
   }
 });
 

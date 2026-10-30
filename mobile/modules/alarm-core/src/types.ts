@@ -12,7 +12,7 @@ export type AlarmVibration = 'NONE' | 'SHORT_REPEAT' | 'STRONG_CONTINUOUS';
 
 /**
  * 예약 꾸러미 — 서버 alarm-commit이 돌려주는 값을 그대로 폰에 넘기는 모양 (docs/alarm-core.md)
- * 앞 8칸이 alarm-core.md, 그 뒤 3칸이 #79에서 더한 칸, 마지막 2칸은 타입 자리만 있고 아직 안 읽음
+ * 앞 8칸이 alarm-core.md, 그 뒤 3칸이 #79에서 더한 칸, `notice`가 알림 문구 칸, 마지막 2칸은 타입 자리만 있고 아직 안 읽음
  */
 export type RingPackage = {
   /** 서버 alarms.alarm_id (UUID). 알람 종류는 id에서 읽지 않고 type으로 정함 */
@@ -25,19 +25,25 @@ export type RingPackage = {
   /** 예: "오전 10:00 · 세종대학교" */
   subtitle?: string;
   intensity: AlarmIntensity;
-  /** 미루기 한도 — 저장만 하고 아직 안 읽음 (D3 정해질 때까지 횟수 제한 없음) */
+  /** 미루기 한도 (알람 한 개당, 서버 alarms.snooze_limit 기본 3). 울림 계획(RingPlan.snoozeLimit)에 실려 네이티브가 셈 (D3 기본안 A) */
   snoozeLimit: number;
-  /** 음성 안내 문장 (나중, D8) — 저장만 하고 아직 안 읽음 */
+  /** 음성 안내 문장 (나중, D8) — 저장만 하고 아직 안 읽음. 서버가 약속의 기상 알람에 채움 ("좋은 아침이에요. 오늘 첫 일정은 …") */
   voiceText?: string;
+  /**
+   * 알림 한 줄 — 있으면 RingPlan.heading(알림 · 알람 화면의 줄)이 이 글자가 되고, 없으면 종류별 기본 줄.
+   * 서버가 약속의 준비 · 출발 알림에 채움 (예: "오전 8:40 출발까지 30분" · "지금 나가면 오전 9:50 도착 · 여유 10분").
+   * 네이티브는 이 칸을 모르고 plan.heading만 읽어 저장하므로 재부팅 뒤 다시 걸어도 그대로 남음
+   */
+  notice?: string;
   /** 소리 고르기. 지금은 어떤 값이든 기본 소리(폰 기본 알람음). 앱에 든 소리가 늘면 그 키는 앱 파일을 먼저 틂 */
   soundKey?: string;
   /** 평가 보정 비율. -0.1 = 볼륨 10% 줄임 (#81, volumeAdjust.ts) */
   volumeAdjust?: number;
-  /** 출발 시각 (epoch ms) — 단축 준비 안내용, 아직 안 읽음 */
+  /** 출발 시각 (epoch ms) — 미루기 한도 안내("지금 바로 준비 · 출발 시각")와 "이만큼 미루면 늦어요" 판단에 씀 (D3 기본안 A) */
   departAt?: number;
   /** 자리만 — 안 읽음 (D1) */
   vibration?: AlarmVibration;
-  /** 자리만 — 안 읽음 (D3). 지금은 10분 고정 */
+  /** 자리만 — 안 읽음. 미루기 시간은 5 · 10 · 15분 고정(D3 기본안 A, SNOOZE_MINUTES_OPTIONS)이라 이 칸으로 바꾸지 않음 */
   snoozeMinutesOptions?: readonly number[];
 };
 
@@ -54,8 +60,12 @@ export type RingPlan = {
   maxRingMillis: number;
   /** 안 끄면 다시 울리는 시각 — 첫 울림 시작으로부터의 거리(ms). 비어 있으면 다시 울림 없음 */
   reRingOffsetsMillis: number[];
-  /** 미루기 시간 (ms). 보통 알림이면 0 */
+  /** 기본 미루기 시간 (ms) — 알림의 "미루기" 버튼이 쓰는 값. 보통 알림이면 0 */
   snoozeMillis: number;
+  /** 알람 화면에서 고를 수 있는 미루기 시간 (분). 보통 알림이면 빈 목록 */
+  snoozeMinutesOptions: number[];
+  /** 미루기 한도 (횟수, 다시 울림은 안 셈). 보통 알림이면 0 */
+  snoozeLimit: number;
   /** 알림 · 알람 화면에 쓰는 한 줄 (예: "일어날 시간이에요") */
   heading: string;
   /** 보통 알림의 원탭 버튼 글자. 알람음이 나는 알람이면 null */

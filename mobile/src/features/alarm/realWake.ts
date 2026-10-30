@@ -19,7 +19,8 @@ import { STANDALONE_TITLE } from './map';
 import { WAKE_OBSERVE_MINUTES, type CancelSnoozeResult, type RingInfo, type Snooze, type WakeCheck } from './types';
 import { evaluateWake, pickDismissedAt, thetaReachedAt, WAKE_PROMPT_WINDOW_MINUTES, WAKE_THETA_MINUTES, type UseSpan } from './wake';
 
-// 폰 미루기는 10분 고정 (docs/alarm-core.md, 고르기는 D3 뒤)
+// 미룬 알람의 Snooze.minutes에 넣는 참고 값 — 폰 list()는 고른 분을 안 돌려줘서 기본 미루기 시간(10분)을 넣음.
+// 홈은 다시 울릴 시각(at)만 읽음. 5 · 10 · 15분 고르기와 3번 한도는 알람 코어 화면이 처리 (docs/alarm-core.md, D3 기본안 A)
 const SNOOZE_MINUTES = 10;
 const MINUTE_MS = 60_000;
 
@@ -327,8 +328,8 @@ export async function recheckRecentWakes(): Promise<string[]> {
 }
 
 // 확인 알림 · 놓침 단계는 시간과 사용 구간으로 정해지고(getWakeCheck), 놓침(MISSED)은 서버 배치가 기록함 — 앱이 따로 남길 것이 없음
+// 확인 알림에도 응답이 없으면 알람을 다시 울리지 않고 MISSED만 (D2 = B)
 export async function promptWake(): Promise<void> {}
-export async function missWake(): Promise<void> {}
 
 // 기상 확정 기록. how = self(확인 알림에 직접 응답) → 응답한 지금 시각, auto → 누적 사용이 θ를 넘은 시각 (D14, 못 구하면 지금)
 //   이미 확정한 알람이면 처음 판정 그대로 (두 번 눌러도 한 번만). 화면이 넘기는 판정 시각(at)은 가짜 시나리오 시각이라 쓰지 않음

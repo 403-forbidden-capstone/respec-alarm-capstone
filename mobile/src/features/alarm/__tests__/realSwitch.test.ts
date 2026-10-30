@@ -40,8 +40,9 @@ jest.mock('../real', () => {
     'getWakeInProgress',
     'recheckRecentWakes',
     'promptWake',
-    'missWake',
     'confirmWake',
+    'getMorningPlan',
+    'checkDepartNow',
   ];
   return Object.fromEntries(names.map((name) => [name, (...args: unknown[]) => mockReal(name, ...args)]));
 });
@@ -81,7 +82,7 @@ describe('실데이터 모드: 알람 api 전부가 real.ts로 넘어감', () =>
 
   // [api 함수 이름, 부르는 법, real.ts 함수 이름, real.ts가 받아야 할 인자]
   const cases: [string, () => Promise<unknown>, string, unknown[]][] = [
-    ['listAppointments', () => api.listAppointments(), 'listAppointments', []],
+    ['listAppointments', () => api.listAppointments(), 'listAppointments', [{}]],
     ['getDaySchedule', () => api.getDaySchedule(at), 'getDaySchedule', [at]],
     ['getAppointment', () => api.getAppointment('a1'), 'getAppointment', ['a1']],
     ['previewAlarms', () => api.previewAlarms('a1', edits), 'previewAlarms', ['a1', edits]],
@@ -91,10 +92,11 @@ describe('실데이터 모드: 알람 api 전부가 real.ts로 넘어감', () =>
     ['setAlarmEnabled', () => api.setAlarmEnabled('a1', 'WAKE', true), 'setAlarmEnabled', ['a1', 'WAKE', true]],
     ['setIntensity', () => api.setIntensity('a1', 'sound', 2), 'setIntensity', ['a1', 'sound', 2]],
     ['saveAlarmSettings', () => api.saveAlarmSettings('a1', settings), 'saveAlarmSettings', ['a1', settings]],
-    ['listPlaces', () => api.listPlaces('세종'), 'listPlaces', ['세종']],
+    ['listPlaces', () => api.listPlaces('세종'), 'listPlaces', ['세종', undefined]],
+    ['listPlaces (near)', () => api.listPlaces('세종', { lat: 37.5, lng: 127 }), 'listPlaces', ['세종', { lat: 37.5, lng: 127 }]],
     ['estimateAppointment', () => api.estimateAppointment(api.defaultDraft(at)), 'estimateAppointment', [expect.objectContaining({ place: '' })]], // 실데이터는 장소를 목록에서 고름
     ['createAppointment', () => api.createAppointment(estimate, 'AI 대화'), 'createAppointment', [estimate, 'AI 대화']],
-    ['getRing', () => api.getRing('a1:WAKE', true), 'getRing', []],
+    ['getRing', () => api.getRing('a1:WAKE'), 'getRing', []],
     ['startRing', () => api.startRing('a1', at), 'startRing', []],
     ['stopRing', () => api.stopRing('a1'), 'stopRing', []],
     ['snoozeRing', () => api.snoozeRing('a1', 5, at), 'snoozeRing', []],
@@ -105,8 +107,9 @@ describe('실데이터 모드: 알람 api 전부가 real.ts로 넘어감', () =>
     ['getWakeInProgress', () => api.getWakeInProgress(), 'getWakeInProgress', []],
     ['recheckRecentWakes', () => api.recheckRecentWakes(), 'recheckRecentWakes', []],
     ['promptWake', () => api.promptWake('a1', at), 'promptWake', []],
-    ['missWake', () => api.missWake('a1', at), 'missWake', []],
     ['confirmWake', () => api.confirmWake('a1', 'self', at), 'confirmWake', ['a1', 'self']], // 판정 시각(가짜 시나리오 시각)은 실데이터에서 안 씀
+    ['getMorningPlan', () => api.getMorningPlan(), 'getMorningPlan', []],
+    ['checkDepartNow', () => api.checkDepartNow('a1'), 'checkDepartNow', ['a1']],
     ['createStandaloneAlarm', () => api.createStandaloneAlarm({ at, level: 1 }), 'saveStandaloneAlarm', [{ at, level: 1 }]],
     ['updateStandaloneAlarm', () => api.updateStandaloneAlarm('s1', { enabled: false }), 'saveStandaloneAlarm', [{ enabled: false, alarmId: 's1' }]],
   ];
@@ -132,6 +135,8 @@ describe('실데이터 모드: 알람 api 전부가 real.ts로 넘어감', () =>
     await api.listPlaces();
     await api.getSnooze();
     await api.getWakeInProgress();
+    await api.getMorningPlan();
+    await api.checkDepartNow('a1');
     await expect(api.recheckRecentWakes()).resolves.toEqual([]); // 가짜 모드는 시연 버튼으로 넘기므로 다시 판정하지 않음
     expect(mockReal).not.toHaveBeenCalled();
   });

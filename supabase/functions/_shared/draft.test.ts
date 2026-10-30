@@ -61,12 +61,24 @@ test('도착은 직접 고르는 종류가 아님 · 강도는 0~2', () => {
   assert.equal(r.issues.length, 3);
 });
 
-test('반복 규칙 (D44): 요일 칩 · 매일 · 평일', () => {
-  for (const ok of ['FREQ=DAILY', 'FREQ=WEEKLY;BYDAY=MO,WE', 'FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR', 'FREQ=WEEKLY;INTERVAL=2;BYDAY=TH']) {
+test('반복 규칙 (D44): 요일 칩 · 매일 · 평일 — 앱이 만드는 두 모양만', () => {
+  for (const ok of ['FREQ=DAILY', 'FREQ=WEEKLY;BYDAY=TH', 'FREQ=WEEKLY;BYDAY=MO,WE', 'FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR', 'FREQ=WEEKLY;BYDAY=SA,SU']) {
     assert.ok(RRULE_PATTERN.test(ok), ok);
   }
-  for (const bad of ['', 'DAILY', 'FREQ=HOURLY', 'FREQ=DAILY;DROP TABLE', 'BYDAY=MO']) assert.ok(!RRULE_PATTERN.test(bad), bad);
+  // 두 모양 밖은 거절: 월간 · 연간 · 간격(INTERVAL) · 횟수 · 요일 없는 주간 · 모르는 요일 코드 · 소문자 · RRULE: 접두사
+  const bad = ['', 'DAILY', 'FREQ=HOURLY', 'FREQ=DAILY;DROP TABLE', 'BYDAY=MO', 'FREQ=MONTHLY', 'FREQ=MONTHLY;BYMONTHDAY=3', 'FREQ=YEARLY', 'FREQ=WEEKLY',
+    'FREQ=WEEKLY;INTERVAL=2;BYDAY=TH', 'FREQ=WEEKLY;BYDAY=TH;COUNT=3', 'FREQ=DAILY;INTERVAL=2', 'FREQ=DAILY;BYDAY=MO', 'FREQ=WEEKLY;BYDAY=XX', 'FREQ=WEEKLY;BYDAY=MO,',
+    'freq=daily', 'RRULE:FREQ=DAILY', 'FREQ=DAILY ', ' FREQ=DAILY'];
+  for (const rule of bad) assert.ok(!RRULE_PATTERN.test(rule), rule);
   assert.equal(readRecurrence(Reader.root({ recurrence_rule: 'FREQ=DAILY' })), 'FREQ=DAILY');
+  assert.equal(readRecurrence(Reader.root({ recurrence_rule: 'FREQ=WEEKLY;BYDAY=MO,WE' })), 'FREQ=WEEKLY;BYDAY=MO,WE');
   assert.equal(readRecurrence(Reader.root({ recurrence_rule: null })), null);
   assert.equal(readRecurrence(Reader.root({})), undefined);
+  // 두 모양 밖은 읽는 쪽에서 문제로 기록됨 → 요청 전체가 VALIDATION_FAILED
+  for (const rule of ['FREQ=MONTHLY', 'FREQ=WEEKLY;INTERVAL=2;BYDAY=TH']) {
+    const r = Reader.root({ recurrence_rule: rule });
+    readRecurrence(r);
+    assert.throws(() => r.finish(), HttpError);
+    assert.deepEqual(r.issues.map((i) => i.path), ['recurrence_rule']);
+  }
 });
