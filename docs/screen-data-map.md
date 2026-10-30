@@ -180,6 +180,7 @@
 - 대화: Gemini Live 단말 직결 (D7) — 임시 토큰 `voice-session` · 결과 반영 `voice-commit` — Edge
 - 대화 기록: `conversation_sessions`(`transcript` · `extracted_data` · `apply_status`) — Edge
 - 찾은 일정 · 준비물 저장: `appointments` · `todos` — Edge. 일정을 여러 개 찾으면 다 받음 (D36) — 기상과 이어지는 첫 일정만 자세히, 나머지는 시간에 맞춰 가벼운 알림. 카드별 상태 저장 자리는 D32와 같이 정함
+- 실패 · 한도 안내 부품 `ChatNotice`(값 · 콜백, L4가 붙임)
 
 ### A03 하루 기록 · 일기 (AI 대기)
 - 일기: `daily_journals`(AI 글 · 고친 글 · 코칭 · 격려 · 루틴 제안) 읽기 · 고치기 — DB, 만들기 — Edge. 날짜별로 엶 (R02 일간에서, D48)
