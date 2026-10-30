@@ -9,7 +9,7 @@ import { test } from 'node:test';
 import { HttpError } from '../errors.ts';
 import { FakeDb } from '../fake-db.ts';
 import type { Db } from '../supabase.ts';
-import { fakeClaude, type FakeScript } from './fake-claude.ts';
+import { fakeClaude, upstreamError, type FakeScript } from './fake-claude.ts';
 import { handleVoiceTurn, type VoiceDeps, type VoiceTurnOut } from './turn.ts';
 import { handleVoiceSession, type VoiceSessionOut } from './voice-session.ts';
 import type { ServerState } from './session.ts';
@@ -408,6 +408,38 @@ test('위기 (헤드 10/30 B안): 위기 말 한 번 뒤 평범한 말에는 109
   const line = turnsOf(db, sid).at(-1) as { guard?: string[]; flags?: string[] };
   assert.ok(line.flags?.includes('hotline_repeat'));
   assert.ok(line.guard?.includes('drop_sentence'));
+});
+
+test("위기 (헤드 10/30): T2F 실패 턴은 위험 판단 '모름' — 이미 안내한 대화에서도 모델이 낸 109 문장을 안 지움", async () => {
+  const db = seed();
+  const { deps } = depsOf(db, { T2F: [t2f('crisis'), upstreamError(), upstreamError()], T1: [t1('preview'), t1('crisis'), t1('crisis_repeat')] });
+  const s = await handleVoiceSession(deps, { session_type: 'BEFORE_SLEEP', input_mode: 'TEXT' });
+  const sid = s.session_id as string;
+  const r1 = await handleVoiceTurn(deps, text(sid, 1, '다 의미 없는 것 같아'));
+  assert.match(r1.reply?.text ?? '', /109/);
+  const r2 = await handleVoiceTurn(deps, text(sid, r1.rev, '아무것도 하기 싫어')); // 이 턴 T2F 실패
+  assert.equal(r2.reply?.text, '푹 쉬어요. 많이 힘드셨겠어요. 힘들 땐 109(자살예방 상담전화)에 언제든 전화할 수 있어요.'); // 109 문장이 남음
+  const line = turnsOf(db, sid).at(-1) as { source?: string; guard?: string[]; flags?: string[] };
+  assert.equal(line.source, 't1');
+  assert.ok(!(line.flags ?? []).includes('hotline_repeat'));
+  assert.ok(!(line.guard ?? []).includes('drop_sentence'));
+  // 모름은 위기 안내 줄이 아님 — 이벤트에 표시만 남음
+  const ev2 = stateOf(db, sid).events.find((e) => e.after_turn === 2);
+  assert.equal(ev2?.risk_unknown, true);
+  assert.notEqual(ev2?.crisis, true);
+});
+
+test("위기 (헤드 10/30): T2F 실패 턴에 모델 답에 109가 없으면 서버가 109를 새로 붙이지 않음", async () => {
+  const db = seed();
+  const { deps } = depsOf(db, { T2F: [upstreamError(), upstreamError()], T1: [t1('chat')] });
+  const s = await handleVoiceSession(deps, { session_type: 'BEFORE_SLEEP', input_mode: 'TEXT' });
+  const sid = s.session_id as string;
+  const r = await handleVoiceTurn(deps, text(sid, 1, '오늘 하루 괜찮았어'));
+  assert.equal(r.reply?.text, '좋은 하루였다니 다행이에요. 푹 주무시고 내일 발표도 잘 준비해요.');
+  assert.doesNotMatch(r.reply?.text ?? '', /109/);
+  const line = turnsOf(db, sid).at(-1) as { guard?: string[]; flags?: string[] };
+  assert.deepEqual(line.guard ?? [], []);
+  assert.deepEqual(line.flags ?? [], []);
 });
 
 // ───────── 질문 예산 ─────────

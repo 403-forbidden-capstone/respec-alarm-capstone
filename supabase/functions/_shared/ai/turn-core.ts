@@ -946,6 +946,7 @@ export function applyFast(state: TurnState, fast: FastExtract, ctx: Context, aft
   // ── 안전 — 위기 안내 판단은 서버가: 이 턴 사용자 말에서 위험 표시(T2F safety_flag)가 켜진 턴마다 `위기 안내 필요` 줄을 넘김 (헤드 10/30 B안).
   //   예전엔 대화당 1번만 넘겨서, 위기 말이 이어지는 둘째 턴의 109 문장을 가드가 '되풀이'로 지웠음. 새 위험 말에 다시 안내하는 건 되풀이가 아님.
   //   가드가 109를 지우는 건 이 턴 위험 판단이 꺼져 있고 이미 안내한 대화일 때뿐 (guards.ts hotline_repeat · hotline_without_risk)
+  //   T2F가 실패 · 5초 초과로 이 턴 판단이 아예 없으면 '모름'(turn.ts가 이벤트에 risk_unknown) — 가드는 모델의 109를 지우지 않음
   //   crisisNotified는 '한 번이라도 안내했는지'로 남김(상태 기록 · 시험용). 안내 줄 자체는 이 턴 위험 표시만 따른다
   s.safetyFlag = s.safetyFlag || extract.safety_flag;
   const crisis = extract.safety_flag;
