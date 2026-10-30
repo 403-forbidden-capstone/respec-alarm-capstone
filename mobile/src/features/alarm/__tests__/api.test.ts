@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it } from '@jest/globals';
 
+import { prepareSourceLabel } from '@shared/calc/prepare.ts';
+
 import { formatTime } from '@/lib/format';
 import type { Weekday } from '@/lib/weekday';
 import { memberState } from '@/mocks/calc';
@@ -134,6 +136,27 @@ describe('H05 그날 첫 일정만 기상 알람 (약속 시각 기준, 서버�
     } finally {
       db.disabledKinds.delete('a3:WAKE');
     }
+  });
+});
+
+describe('H05 · H03 준비 시간 계산 (학습 루프 기초 a — 서버 calc와 같은 규칙)', () => {
+  const on23 = (time: string): AppointmentDraft => ({ ...defaultDraft(kst(23, 0), morning), title: '스터디', time });
+
+  it('그날 첫 일정은 첫 값 50 + 개인 보정 10 = 60분, 내 기록 10건 → "내 기록 기반 10건"', async () => {
+    const e = await estimateAppointment(on23('08:30'));
+    expect([e.commonP80, e.correction, e.appointment.predictedPrepMinutes, e.sampleCount, e.sameDayWake]).toEqual([50, 10, 60, 10, false]);
+    expect(prepareSourceLabel(e.sampleCount)).toBe('내 기록 기반 10건');
+  });
+
+  it('같은 날 두 번째 일정은 개인 보정 없이 공통 15분 그대로 (예전에는 가짜 기록 보정 +10분이 붙어 25분)', async () => {
+    const e = await estimateAppointment(on23('14:00'));
+    expect([e.commonP80, e.correction, e.appointment.predictedPrepMinutes, e.sampleCount, e.sameDayWake]).toEqual([15, 0, 15, 0, true]);
+  });
+
+  it('H03 미리 보기도 같은 기록 수를 줌: 기상 있는 일정은 10건, 기상 없는 일정은 0건', async () => {
+    const edits = (await getAppointment('a1'))!.edits;
+    expect((await previewAlarms('a1', edits)).prepareSampleCount).toBe(10);
+    expect((await previewAlarms('a2', (await getAppointment('a2'))!.edits)).prepareSampleCount).toBe(0);
   });
 });
 

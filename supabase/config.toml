@@ -394,7 +394,13 @@ verify_jwt = true
 [functions.alarm-commit]
 verify_jwt = true
 
+[functions.appointment-edit]
+verify_jwt = true
+
 [functions.place-search]
+verify_jwt = true
+
+[functions.place-reverse]
 verify_jwt = true
 
 [functions.notify]
