@@ -20,6 +20,7 @@ import {
 } from './calc/index.ts';
 import { diffAlarms, resolveEnabled, type AlarmWrite } from './commit-core.ts';
 import { dbFail, must } from './db.ts';
+import { pickBaseRow, type ExceptionKind } from './edit.ts';
 import { HttpError } from './errors.ts';
 import { KakaoError } from './kakao.ts';
 import {
@@ -311,6 +312,16 @@ function newestPerSeries<T extends { series_id: string }>(rows: readonly T[]): T
   return rows.filter((r) => (seen.has(r.series_id) ? false : (seen.add(r.series_id), true)));
 }
 
+// 묶음마다 기준 회차 (edit.ts pickBaseRow) — 예외 아닌 행이 우선, 예외뿐이면 이번만 고친 행, 지운 행은 기준이 아님
+function baseRowsPerSeries<T extends { series_id: string; occurrence_on: string; appointment_at: string; appointment_id: string; exception_kind?: ExceptionKind | null }>(rows: readonly T[]): T[] {
+  const bySeries = new Map<string, T[]>();
+  for (const r of rows) bySeries.set(r.series_id, [...(bySeries.get(r.series_id) ?? []), r]);
+  return [...bySeries.values()].flatMap((list) => {
+    const base = pickBaseRow(list);
+    return base ? [base] : [];
+  });
+}
+
 const attemptKey = (seriesId: string, date: string) => `${seriesId}|${date}`;
 
 // 사람 하나에 대해 이번 실행 동안 들고 있는 값 — 처음 쓸 때 읽음
@@ -522,10 +533,17 @@ class RollRun {
 
     // 본인 길 — 내 묶음을 RLS 클라이언트로 직접 읽음 (roll_due_series는 service_role 전용이고 모든 사람의 줄을 줌)
     const userId = this.scope.userId as string;
-    const appointments = newestPerSeries(
-      must<SeriesAppointmentRow[]>(
+    // 기준 회차는 예외(이번만 고친 · 지운 회차, exception_kind)가 아닌 행 중 가장 늦은 것 — 이번만 고친 값이 다음 회차들로 번지지 않게 (edit.ts pickBaseRow = DB 함수 roll_due_series와 같은 규칙)
+    const appointments = baseRowsPerSeries(
+      must<(SeriesAppointmentRow & { exception_kind: ExceptionKind | null })[]>(
         'appointments',
-        await read.from('appointments').select(SERIES_APPOINTMENT_COLUMNS).eq('creator_id', userId).not('recurrence_rule', 'is', null).order('occurrence_on', { ascending: false }).limit(500),
+        await read
+          .from('appointments')
+          .select(`${SERIES_APPOINTMENT_COLUMNS}, exception_kind`)
+          .eq('creator_id', userId)
+          .not('recurrence_rule', 'is', null)
+          .order('occurrence_on', { ascending: false })
+          .limit(500),
       ),
     ).map((a): Task => ({ user_id: userId, series_id: a.series_id, kind: 'APPOINTMENT', template_id: a.appointment_id, appointment: a }));
     const standalones = newestPerSeries(

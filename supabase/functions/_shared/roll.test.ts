@@ -4,6 +4,7 @@ import { test } from 'node:test';
 
 import { RING_KINDS, type RingKind } from './calc/index.ts';
 import { commitStandalone, persistAppointment } from './commit.ts';
+import { deleteAppointment, updateAppointment, type EditCtx } from './edit-run.ts';
 import { FakeDb } from './fake-db.ts';
 import { KakaoError, type KakaoFailure } from './kakao.ts';
 import { buildPlan } from './plan.ts';
@@ -1054,4 +1055,71 @@ test('카카오 partial(앞뒤 도보 구간 빠짐)은 API가 아니라 ESTIMAT
   assert.equal(participant.travel_source, 'ESTIMATE');
   assert.equal(participant.est_travel_minutes, 40);
   assert.equal(env.db.rows('roll_attempts').length, 0);
+});
+
+// ===========================================================================
+// 일정 수정 · 삭제(appointment-edit, PR 4b)와 맞물림 — 예외 회차(exception_kind)는 기준 회차에서 빠지고 날짜 자리는 그대로
+// ===========================================================================
+
+const editCtx = (env: Env, over: Partial<EditCtx> = {}): EditCtx => ({ userId: A, userDb: env.db as unknown as Db, service: env.db as unknown as Db, now: MON_10, ...over });
+const THU_1105 = kst('2026-11-05T10:30');
+const AFTER_WEEK = kst('2026-11-02T10:00'); // 이때의 창 = 11/16 10:00 앞까지 → 11/10 화 · 11/12 목 09:00이 새로 들어옴
+
+test('이번만 고친 회차는 기준 회차에서 빠짐: 다음 회차는 이번만 고치기 전의 시각 · 제목으로 만들어짐 (본인 길 · 배치 모두), 고친 회차의 날짜 자리는 그대로라 다시 안 만듦', async () => {
+  for (const path of ['own', 'batch'] as const) {
+    const env = setup(MON_10);
+    const series = await seed(env, A, slot(), MON_10);
+    await roll(env, 'own', MON_10, { lookup: fakeKakao().lookup }); // 10/29 · 11/03 · 11/05
+    const last = occurrence(env.db, series, '2026-11-05')!;
+    const edited = await updateAppointment(editCtx(env), { action: 'UPDATE', appointmentId: last.appointment_id as string, scope: 'this', confirmed: true, patch: { at: THU_1105, title: '특강' } });
+    assert.ok(edited.saved);
+    assert.equal(last.exception_kind, 'EDITED');
+
+    const kakao = fakeKakao();
+    const res = await roll(env, path, AFTER_WEEK, { lookup: kakao.lookup });
+    assert.deepEqual(res.created.map((c) => c.occurrence_on), ['2026-11-10', '2026-11-12'], path);
+    assert.deepEqual(res.created.map((c) => hm(occurrence(env.db, series, c.occurrence_on)!.appointment_at)), ['09:00', '09:00'], path); // 10:30이 아님
+    assert.deepEqual(res.created.map((c) => occurrence(env.db, series, c.occurrence_on)!.title), ['세미나', '세미나'], path); // 특강이 아님
+    assert.deepEqual([hm(last.appointment_at), last.title, last.occurrence_on], ['10:30', '특강', '2026-11-05'], path); // 고친 회차는 그대로
+    assert.deepEqual(datesOf(env.db, series), ['2026-10-27', '2026-10-29', '2026-11-03', '2026-11-05', '2026-11-10', '2026-11-12'], path);
+  }
+});
+
+test('이번만 지운 날짜는 roll이 다시 안 만듦 (행을 두므로) — 본인 길 · 배치 모두 길찾기도 0번. 행을 진짜 지우면 다시 만들어짐(그래서 행을 두는 것)', async () => {
+  const env = setup(MON_10);
+  const series = await seed(env, A, slot(), MON_10);
+  await roll(env, 'own', MON_10, { lookup: fakeKakao().lookup });
+  const tue = occurrence(env.db, series, '2026-11-03')!;
+  const res = await deleteAppointment(editCtx(env), { action: 'DELETE', appointmentId: tue.appointment_id as string, scope: 'this' });
+  assert.equal(res.mode, 'CANCEL_THIS');
+  assert.deepEqual(res.canceled_alarm_ids.length, 4);
+
+  const kakao = fakeKakao();
+  for (const path of ['own', 'batch', 'own'] as const) assert.deepEqual((await roll(env, path, MON_10, { lookup: kakao.lookup })).created, [], path);
+  assert.equal(kakao.state.calls, 0);
+  assert.deepEqual(datesOf(env.db, series), ['2026-10-27', '2026-10-29', '2026-11-03', '2026-11-05']);
+
+  // 대조: 행을 진짜 지우면 roll이 그 날짜를 다시 만듦
+  env.db.tables.appointments = env.db.rows('appointments').filter((a) => a.appointment_id !== tue.appointment_id);
+  const again = await roll(env, 'own', MON_10, { lookup: kakao.lookup });
+  assert.deepEqual(again.created.map((c) => c.occurrence_on), ['2026-11-03']);
+});
+
+test('예외 회차뿐인 묶음: 이번만 고친 회차만 남아 있으면 그 회차가 기준이 되어 묶음이 멈추지 않음, 이번만 지운 회차뿐이면 다음 회차를 안 만듦', async () => {
+  for (const path of ['own', 'batch'] as const) {
+    const edited = setup(MON_10);
+    const series = await seed(edited, A, slot(), MON_10);
+    const first = occurrence(edited.db, series, '2026-10-27')!;
+    await updateAppointment(editCtx(edited), { action: 'UPDATE', appointmentId: first.appointment_id as string, scope: 'this', confirmed: true, patch: { at: kst('2026-10-27T09:30') } });
+    const res = await roll(edited, path, MON_10, { lookup: fakeKakao().lookup });
+    assert.deepEqual(res.created.map((c) => c.occurrence_on), ['2026-10-29', '2026-11-03', '2026-11-05'], path);
+    assert.deepEqual(res.created.map((c) => hm(occurrence(edited.db, series, c.occurrence_on)!.appointment_at)), ['09:30', '09:30', '09:30'], path); // 예외뿐이라 그 회차의 시각을 이어받음 (작성자 판단)
+
+    const canceled = setup(MON_10);
+    const series2 = await seed(canceled, A, slot(), MON_10);
+    await deleteAppointment(editCtx(canceled), { action: 'DELETE', appointmentId: occurrence(canceled.db, series2, '2026-10-27')!.appointment_id as string, scope: 'this' });
+    const kakao = fakeKakao();
+    assert.deepEqual((await roll(canceled, path, MON_10, { lookup: kakao.lookup })).created, [], path);
+    assert.equal(kakao.state.calls, 0, path);
+  }
 });
