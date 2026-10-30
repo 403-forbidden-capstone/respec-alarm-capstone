@@ -51,7 +51,8 @@ export async function getNextAlarm(): Promise<NextAlarm | null> {
 
 // 모든 일정의 알람 (H02) — 시각 순. 알람 없는 일정은 목록에 없고 H01 일정 줄에만 보임. 일정 없는 알람은 같이 섞여 나옴
 //   반복은 묶음(series_id)당 지금 이후 가장 가까운 회차 하나 — 서버가 14일치 회차를 미리 만들어 두므로 다 보이면 같은 일정이 14장 (지난 회차도 안 보임). H01 · R02 · H03은 회차 행 그대로
-export async function listAppointments(): Promise<Appointment[]> {
+//   everyOccurrence = 묶음을 줄이지 않고 모든 회차 (H05가 "같은 날 앞 일정의 기상"을 찾을 때 — 그날의 회차가 가장 가까운 회차가 아닐 수 있음)
+export async function listAppointments(options: { everyOccurrence?: boolean } = {}): Promise<Appointment[]> {
   const userId = await requireUserId();
   const at = now();
   const since = addDays(startOfDay(at), -LIST_PAST_DAYS).toISOString();
@@ -60,7 +61,7 @@ export async function listAppointments(): Promise<Appointment[]> {
     ...rows.map((row) => ({ seriesId: row.appointment.series_id, item: toAppointment(row) })),
     ...standalone.map((row) => ({ seriesId: row.series_id, item: toStandaloneAppointment(row) })),
   ].filter((entry) => hasAlarms(entry.item));
-  return onePerSeries(entries, at.getTime()).sort(byTime);
+  return (options.everyOccurrence ? entries.map((entry) => entry.item) : onePerSeries(entries, at.getTime())).sort(byTime);
 }
 
 // 하루 일정 (H01) — 알람 있는 일정 + 알람 없는 일정 (알람 없는 쪽은 hasAlarm이 false)

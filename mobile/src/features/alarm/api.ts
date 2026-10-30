@@ -87,8 +87,8 @@ function find(id: string) {
 }
 
 // 모든 일정의 알람 (H02) — 시각 순. 알람 없는 일정(H05에서 알람을 모두 끄고 저장)은 알람 목록에 없고 H01 일정 줄에만 보임
-export async function listAppointments(): Promise<Appointment[]> {
-  if (!isMock()) return real.listAppointments();
+export async function listAppointments(options: { everyOccurrence?: boolean } = {}): Promise<Appointment[]> {
+  if (!isMock()) return real.listAppointments(options);
   return db.appointments
     .map(toAppointment)
     .filter((a) => a.alarms.length > 0)

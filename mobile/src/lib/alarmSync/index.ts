@@ -280,7 +280,7 @@ export function reconcile(options: ReconcileOptions = {}): Promise<SyncSummary> 
     const summary = await executePlan(plan);
     // 맞춘 뒤 훅 — 기다리지 않음. 전체 맞추기가 아니면(alarmIds) whole = false, upcoming은 이번에 맞춘 알람의 참여 행만
     const scope = scopeIds;
-    afterSync({ source: 'reconcile', whole: only == null, summary, upcoming: upcomingParticipants(scope ? rows.filter((row) => scope.has(row.alarm_id)) : rows), nowMs });
+    afterSync({ source: 'reconcile', whole: only == null && !truncated, summary, upcoming: upcomingParticipants(scope ? rows.filter((row) => scope.has(row.alarm_id)) : rows), nowMs });
     return summary;
   });
 }

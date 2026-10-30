@@ -595,6 +595,20 @@ describe('reconcile — 출발 · 도착 기록이 있는 약속은 알림을 �
   });
 });
 
+describe('onAlarmsSynced — 상한에서 잘린 목록', () => {
+  it('서버 목록이 상한(500)에서 잘렸으면 whole = false — 빠진 것을 "사라졌다"로 읽지 않게', async () => {
+    const infos: AlarmsSyncedInfo[] = [];
+    const off = onAlarmsSynced((info) => {
+      infos.push(info);
+    });
+    mockAlarmRows = Array.from({ length: 500 }, (_, i) => dbRow(`t-${i}`, 'WAKE', new Date(Date.parse('2026-10-19T22:30:00.000Z') + i * 60_000).toISOString(), `p-${i}`));
+    await reconcile({ nowMs: NOW });
+    off();
+    expect(infos).toHaveLength(1);
+    expect(infos[0].whole).toBe(false);
+  });
+});
+
 describe('onAlarmsSynced — 맞춘 뒤 훅', () => {
   let infos: AlarmsSyncedInfo[];
   let off: () => void;

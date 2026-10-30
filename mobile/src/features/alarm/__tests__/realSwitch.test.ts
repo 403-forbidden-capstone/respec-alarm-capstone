@@ -82,7 +82,7 @@ describe('실데이터 모드: 알람 api 전부가 real.ts로 넘어감', () =>
 
   // [api 함수 이름, 부르는 법, real.ts 함수 이름, real.ts가 받아야 할 인자]
   const cases: [string, () => Promise<unknown>, string, unknown[]][] = [
-    ['listAppointments', () => api.listAppointments(), 'listAppointments', []],
+    ['listAppointments', () => api.listAppointments(), 'listAppointments', [{}]],
     ['getDaySchedule', () => api.getDaySchedule(at), 'getDaySchedule', [at]],
     ['getAppointment', () => api.getAppointment('a1'), 'getAppointment', ['a1']],
     ['previewAlarms', () => api.previewAlarms('a1', edits), 'previewAlarms', ['a1', edits]],

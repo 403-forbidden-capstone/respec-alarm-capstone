@@ -189,6 +189,15 @@ describe('목록 · 하루 일정 · 알람 설정 읽기', () => {
     expect(list.map((a) => `${a.id} ${formatTime(a.at)}`)).toEqual(['old-1 오전 10:00', 's1-0522 오전 10:00', '00000000-0000-4000-8000-0000000000d1 오전 6:00', `${A} 오전 11:00`]);
   });
 
+  it('listAppointments({ everyOccurrence }): H05가 같은 날 앞 일정의 기상을 찾을 때는 묶음을 줄이지 않고 모든 회차 (그날의 회차가 가장 가까운 회차가 아닐 수 있음)', async () => {
+    const occurrence = (id: string, day: number) =>
+      participantRow({ participant_id: `p-${id}` }, { appointment_id: id, series_id: 'S1', title: '스터디', appointment_at: kst('10:00', day), recurrence_rule: 'FREQ=WEEKLY;BYDAY=TH' });
+    mockRoutes['appointment_participants:select'] = () => ({ data: [occurrence('s1-0522', 22), occurrence('s1-0529', 29), occurrence('s1-0605', 36)] });
+    mockRoutes['alarms:select'] = () => ({ data: [] });
+    expect((await real.listAppointments()).map((a) => a.id)).toEqual(['s1-0522']);
+    expect((await real.listAppointments({ everyOccurrence: true })).map((a) => a.id)).toEqual(['s1-0522', 's1-0529', 's1-0605']);
+  });
+
   it('listAppointments: 가장 가까운 회차의 알람이 모두 없으면(목록에서 빠짐) 그 다음 회차가 대신 보임 — 묶음 전체가 사라지지 않음', async () => {
     const occurrence = (id: string, day: number, alarms: unknown[]) =>
       participantRow({ participant_id: `p-${id}` }, { appointment_id: id, series_id: 'S1', title: '스터디', appointment_at: kst('10:00', day) }, alarms);
