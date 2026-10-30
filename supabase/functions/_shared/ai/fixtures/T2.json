@@ -1,0 +1,75 @@
+{
+  "point": "T2",
+  "source": "runs/e2-t2-v2-b1/t2.jsonl s3-dev-014|v2|r0 (null 칸은 API가 돌려주는 대신 값 \"\" · \"NULL\" · 0으로 인코딩) / usage: 장부 T2@v2#d5dff11c 정상 호출 724건 중 출력 토큰 중앙값 (run e2-t2f2-b1)",
+  "api_mode": "sentinel",
+  "response": {
+    "model": "claude-haiku-5-5",
+    "stop_reason": "end_turn",
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"schema_version\":\"2.0-lab.0\",\"appointments\":[],\"todos\":[{\"title\":\"머리 감기\",\"type\":\"TASK\",\"due_date\":\"\",\"appointment_ref\":\"a3\"}],\"importance_updates\":[],\"alarm_changes\":[],\"fact_feedback\":[{\"fact_id\":\"f1\",\"status\":\"CONFIRMED\",\"value_time\":\"\",\"approx\":false},{\"fact_id\":\"f2\",\"status\":\"CONFIRMED\",\"value_time\":\"\",\"approx\":false}],\"reason_tags\":[{\"tag\":\"PRESENTATION\",\"applies_to\":\"TOMORROW\",\"always\":false},{\"tag\":\"HAIR_WASH\",\"applies_to\":\"TOMORROW\",\"always\":false}],\"prep_adjustment\":{\"direction\":\"MORE\",\"minutes\":15},\"daily_record\":{\"sleep_time\":\"00:00\",\"sleep_satisfaction\":0,\"condition_note\":\"오늘 하루 괜찮았고 기분 좋았음\"},\"safety_flag\":false}"
+      }
+    ],
+    "usage": {
+      "input_tokens": 1085,
+      "output_tokens": 1080,
+      "cache_creation_input_tokens": 0,
+      "cache_read_input_tokens": 7249,
+      "output_tokens_details": {
+        "thinking_tokens": 842
+      }
+    },
+    "request_id": "req_fixture_T2"
+  },
+  "expect": {
+    "schema_version": "2.0-lab.0",
+    "appointments": [],
+    "todos": [
+      {
+        "title": "머리 감기",
+        "type": "TASK",
+        "due_date": null,
+        "appointment_ref": "a3"
+      }
+    ],
+    "importance_updates": [],
+    "alarm_changes": [],
+    "fact_feedback": [
+      {
+        "fact_id": "f1",
+        "status": "CONFIRMED",
+        "value_time": null,
+        "approx": false
+      },
+      {
+        "fact_id": "f2",
+        "status": "CONFIRMED",
+        "value_time": null,
+        "approx": false
+      }
+    ],
+    "reason_tags": [
+      {
+        "tag": "PRESENTATION",
+        "applies_to": "TOMORROW",
+        "always": false
+      },
+      {
+        "tag": "HAIR_WASH",
+        "applies_to": "TOMORROW",
+        "always": false
+      }
+    ],
+    "prep_adjustment": {
+      "direction": "MORE",
+      "minutes": 15
+    },
+    "daily_record": {
+      "sleep_time": "00:00",
+      "sleep_satisfaction": null,
+      "condition_note": "오늘 하루 괜찮았고 기분 좋았음"
+    },
+    "safety_flag": false
+  }
+}

@@ -1,0 +1,57 @@
+{
+  "point": "E4",
+  "source": "runs/final-e4-a/e4.json p09#0|H14|HYBRID|r0 / usage: 장부 ASSIST_E4@v1.1#71eed0db 정상 호출 132건 중 출력 토큰 중앙값 (run final-e4-b:assist)",
+  "api_mode": "union",
+  "response": {
+    "model": "claude-haiku-5-5",
+    "stop_reason": "end_turn",
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"morning_minutes\":63,\"wake_offset\":10,\"travel_extra\":0,\"patterns\":[{\"kind\":\"PREP_DRIFT\",\"weekday\":null,\"tag\":null,\"effect_minutes\":8,\"evidence_ids\":[\"r0930\",\"r1001\",\"r1002\"]},{\"kind\":\"WAKE_DELAY\",\"weekday\":null,\"tag\":null,\"effect_minutes\":10,\"evidence_ids\":[\"r0923\",\"r0925\",\"r0928\",\"r1001\",\"r1002\"]}],\"message\":\"최근 기록에서 기상 뒤 출발 준비가 점점 길어져서 9/30, 10/1, 10/2 기준으로 8분 더 일찍 알람을 맞췄어요. 알람이 울린 뒤 일어나기까지 평소 10분 정도 늦어지는 편이라 그만큼 앞당겨 두었어요.\"}"
+      }
+    ],
+    "usage": {
+      "input_tokens": 4223,
+      "output_tokens": 1627,
+      "cache_creation_input_tokens": 0,
+      "cache_read_input_tokens": 4024,
+      "output_tokens_details": {
+        "thinking_tokens": 1403
+      }
+    },
+    "request_id": "req_fixture_E4"
+  },
+  "expect": {
+    "morning_minutes": 63,
+    "wake_offset": 10,
+    "travel_extra": 0,
+    "patterns": [
+      {
+        "kind": "PREP_DRIFT",
+        "weekday": null,
+        "tag": null,
+        "effect_minutes": 8,
+        "evidence_ids": [
+          "r0930",
+          "r1001",
+          "r1002"
+        ]
+      },
+      {
+        "kind": "WAKE_DELAY",
+        "weekday": null,
+        "tag": null,
+        "effect_minutes": 10,
+        "evidence_ids": [
+          "r0923",
+          "r0925",
+          "r0928",
+          "r1001",
+          "r1002"
+        ]
+      }
+    ],
+    "message": "최근 기록에서 기상 뒤 출발 준비가 점점 길어져서 9/30, 10/1, 10/2 기준으로 8분 더 일찍 알람을 맞췄어요. 알람이 울린 뒤 일어나기까지 평소 10분 정도 늦어지는 편이라 그만큼 앞당겨 두었어요."
+  }
+}
