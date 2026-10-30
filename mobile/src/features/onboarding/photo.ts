@@ -9,7 +9,6 @@ import type { ImportBatch, ImportConfidence, ImportedClass } from './timetableIm
 export const MAX_PHOTO_BYTES = 4_000_000;
 
 export type PhotoMediaType = 'image/jpeg' | 'image/png' | 'image/webp';
-const MEDIA_TYPES: readonly PhotoMediaType[] = ['image/jpeg', 'image/png', 'image/webp'];
 
 // timetable-extract 응답 — 요일은 앱 Weekday 그대로, 시각은 HH:MM
 export type ExtractedRow = { title: string; weekdays: string[]; start: string; end: string; place: string | null };
@@ -17,20 +16,28 @@ export type ExtractResponse = { rows: ExtractedRow[]; confidence: ImportConfiden
 
 export type PickedPhoto = { base64: string; mediaType: PhotoMediaType };
 
-// 갤러리에서 고른 사진이 서버로 보낼 수 있는지. 문제가 있으면 사용자에게 보일 이유, 괜찮으면 null
-//   fileSize가 없으면(웹 등) base64 길이로 원본 크기를 어림
-export function photoProblem(asset: { fileSize?: number; mimeType?: string; base64?: string | null }): string | null {
-  if (!asset.base64) return '사진을 읽지 못했어요. 다른 사진으로 다시 골라 주세요';
-  if (!mediaTypeOf(asset.mimeType)) return 'jpg · png · webp 사진만 쓸 수 있어요. 시간표 화면을 캡처한 사진을 골라 주세요';
-  const bytes = asset.fileSize ?? Math.floor((asset.base64.length * 3) / 4);
-  if (bytes > MAX_PHOTO_BYTES) return '사진이 너무 커요. 시간표 화면만 캡처한 사진을 골라 주세요';
+// base64 앞부분으로 실제 파일 종류를 앎 — asset.mimeType은 원본 파일 것이라, 고르기 창이 다시 압축하면(iOS는 늘 JPEG) 바이트와 어긋남. 서버도 첫 바이트가 말한 종류와 다르면 거절함
+//   /9j/ = JPEG(FF D8 FF), iVBOR = PNG(89 'PNG'), UklGR = RIFF(WebP)
+export function sniffMediaType(base64: string): PhotoMediaType | null {
+  if (base64.startsWith('/9j/')) return 'image/jpeg';
+  if (base64.startsWith('iVBOR')) return 'image/png';
+  if (base64.startsWith('UklGR')) return 'image/webp';
   return null;
 }
 
-export function mediaTypeOf(mime?: string): PhotoMediaType | null {
-  const m = mime?.toLowerCase() === 'image/jpg' ? 'image/jpeg' : mime?.toLowerCase();
-  return MEDIA_TYPES.find((t) => t === m) ?? null;
+// 갤러리에서 고른 사진을 서버로 보낼 수 있게 다듬음. 못 보내면 사용자에게 보일 이유
+//   종류는 바이트로 판별(sniffMediaType), 크기는 fileSize(원본)와 base64 길이로 어림한 값 중 큰 쪽 — 다시 압축된 쪽이 더 클 수도 있어서
+export function preparePhoto(asset: { fileSize?: number; base64?: string | null }): { photo: PickedPhoto } | { problem: string } {
+  if (!asset.base64) return { problem: '사진을 읽지 못했어요. 다른 사진으로 다시 골라 주세요' };
+  const mediaType = sniffMediaType(asset.base64);
+  if (!mediaType) return { problem: 'jpg · png · webp 사진만 쓸 수 있어요. 시간표 화면을 캡처한 사진을 골라 주세요' };
+  const bytes = Math.max(asset.fileSize ?? 0, Math.floor((asset.base64.length * 3) / 4));
+  if (bytes > MAX_PHOTO_BYTES) return { problem: '사진이 너무 커요. 시간표 화면만 캡처한 사진을 골라 주세요' };
+  return { photo: { base64: asset.base64, mediaType } };
 }
+
+// 서버 요청 본문 (timetable-extract: media_type · image_base64)
+export const extractBody = (photo: PickedPhoto) => ({ media_type: photo.mediaType, image_base64: photo.base64 });
 
 const minutesOf = (hhmm: string): number | null => {
   const m = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(hhmm);

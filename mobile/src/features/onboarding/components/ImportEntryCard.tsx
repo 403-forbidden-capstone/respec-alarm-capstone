@@ -19,7 +19,7 @@ export function ImportEntryCard({ onPhoto, onCalendar, busy, reading }: Props) {
       </Text>
       {onPhoto ? (
         <Text variant="small" tone="sub" style={styles.note}>
-          시간표 사진은 AI가 읽고 저장하지 않아요
+          시간표 사진은 AI(Claude)가 읽고, 우리 서버에는 저장하지 않아요
         </Text>
       ) : null}
       <View style={styles.buttons}>
