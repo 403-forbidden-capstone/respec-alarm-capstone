@@ -211,6 +211,7 @@
   - **단계 온보딩** (`lib/flags` `ONBOARDING_IN_FLOW = true`, #25): 순서는 `features/onboarding/steps.ts`, 단계마다 켜고 끄는 표는 `ONBOARDING_STEPS`(아이디 → 닉네임 → 잠귀 → [집] → 아침 준비 → [시간표] → 동의 → [권한 안내] → 기상 공유 → 첫 일정, [ ]는 화면이 아직 없어 끔). 단계마다 [다음]에서 `saveProfileFields`로 저장하고 마지막에 `finishOnboarding`이 `onboarded_at`을 적음. 판정은 `onboarded_at`이 비었는지(`features/auth/onboardingGate.ts`). 가짜 데이터 모드 미리 보기는 저장 없이 단계만 넘김. `/dev/screens`의 "온보딩부터 다시"로 처음부터 다시 봄
   - 가입 직후 프로필: 닉네임 = 카카오 · 구글에서 가져온 값(DB 트리거), 준비 60분 · 여유 10분 · 이동 수단 대중교통 · 잠귀 보통 · 깨우는 여유 보통 = DB 기본값(온보딩 입력칸 처음 값), 집 · 아이디 = 비어 있음
 - 온보딩 단계 부품 초안(`features/onboarding/components/`): `OnboardingFrame`(틀) · `HomePlaceStep` · `TimetableStep` · `PermissionsStep` · `OnboardingDoneStep` — 값 · 콜백만 받고 api · 라우터를 부르지 않음(L7이 함수를 붙임). `/dev/onboarding?mode=mock`에서 가짜 값으로 넘겨 봄 (`/dev/screens` 목록에는 없음, #116)
+- 설정에서 값 바꾸기: 닉네임 · 아이디 · 잠귀 · 깨우는 여유 · 준비 시간 · 여유 시간 · 이동 수단 · 집 줄을 누르면 편집 시트(`features/profile/components/ProfileEditors`, 온보딩 단계 부품 재사용) → [저장]이 `saveProfileFields` → `profiles` — DB. 집은 장소 검색 시트(`place-search` — Edge). 실데이터 + 로그인일 때만 열리고 가짜 모드는 보기만. 아이디는 중복 확인(`isHandleTaken`) 뒤 저장 (L3 `changeHandle`이 오면 교체)
 - 권한 안내: 알림 · 정확한 알람 · 잠금화면 알람 화면 — 폰
 - 푸시 토큰: 앱 켤 때 `register_push_token` — RPC
 

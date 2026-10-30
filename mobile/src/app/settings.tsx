@@ -1,30 +1,74 @@
 import { useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
-import { Button, Card, KeyValueRow, Screen, SectionHeader, Text, TopBar } from '@/components/ui';
+import { Button, Card, KeyValueRow, Screen, SectionHeader, Sheet, Text, toast, TopBar } from '@/components/ui';
+import { listPlaces } from '@/features/alarm/api';
+import { PlaceSearchSheet } from '@/features/alarm/components/PlaceSearchSheet';
+import type { Place } from '@/features/alarm/types';
 import { useAuth } from '@/features/auth/AuthProvider';
 import { DataModeToggle } from '@/features/auth/DataModeToggle';
-import type { TransportType } from '@/features/profile/types';
-import { userMessage } from '@/lib/errors';
+import { shouldSaveHandle } from '@/features/onboarding/validate';
+import { isHandleTaken, saveProfileFields } from '@/features/profile/api';
+import { EditRow } from '@/features/profile/components/EditRow';
+import { HandleEditor, NicknameEditor, PrepareEditor, SleepEditor } from '@/features/profile/components/ProfileEditors';
+import { prepareValuesOf } from '@/features/profile/edit';
+import { TRANSPORT_NAME, WAKE_MARGIN_NAME, WAKE_SENSITIVITY_NAME } from '@/features/profile/labels';
+import type { ProfileFields } from '@/features/profile/types';
+import { UserError, userMessage } from '@/lib/errors';
 import { canUseRealData, modeLocked } from '@/lib/mode';
 import { backOrHome } from '@/lib/nav';
 import { signOutAndCleanup } from '@/lib/session';
+import { useAction } from '@/lib/useAction';
 
 const PROVIDER_NAME: Record<string, string> = { kakao: '카카오', google: 'Google' };
-const TRANSPORT_NAME: Record<TransportType, string> = {
-  TRANSIT: '대중교통',
-  BUS: '버스',
-  SUBWAY: '지하철',
-  CAR: '자차',
-  WALK: '도보',
-};
 
-// 설정 — 계정 · 아침 준비 기본값 · 로그아웃 · 개발(데이터 모드). 값 바꾸기는 화면을 옮길 때(#30~) 붙임
+// 열려 있는 편집 시트 — 집은 장소 검색 시트(placeOpen)가 따로 맡음
+type Editing = 'nickname' | 'handle' | 'sleep' | 'prepare' | null;
+
+// 설정 — 계정 · 아침 준비 기본값 · 알람 · 로그아웃 · 개발(데이터 모드)
+// 값 줄을 누르면 편집 시트가 열리고 [저장]하면 profiles에 씀 (실데이터 + 로그인일 때만, 가짜 모드는 보기만)
 export default function SettingsScreen() {
-  const { session, profile, enabled } = useAuth();
+  const { session, profile, enabled, refreshProfile } = useAuth();
+  const { run } = useAction();
   const [error, setError] = useState<string | null>(null);
+  const [editing, setEditing] = useState<Editing>(null);
+  const [placeOpen, setPlaceOpen] = useState(false);
   const user = session?.user;
   const provider = (user?.app_metadata?.provider as string | undefined) ?? '';
+  const userId = enabled ? user?.id : undefined;
+  const canEdit = userId != null && profile != null;
+
+  const closeEditor = () => setEditing(null);
+  const open = (which: Exclude<Editing, null>) => (canEdit ? () => setEditing(which) : undefined);
+
+  // 편집기의 [저장] — 쓰고, 프로필을 다시 읽고, 시트를 닫고, 토스트. 실패하면 시트를 열어 둔 채 토스트 (useAction)
+  const saveEdit = (fields: ProfileFields) =>
+    run(async () => {
+      if (!userId) return;
+      if (fields.handle != null) {
+        // L3 changeHandle 오면 교체 (30일에 한 번 바꾸는 제한 D95도 L3 몫)
+        if (!shouldSaveHandle(fields.handle, profile?.handle)) {
+          closeEditor();
+          return;
+        }
+        if (await isHandleTaken(fields.handle, userId)) throw new UserError('이미 쓰는 아이디예요');
+      }
+      await saveProfileFields(userId, fields);
+      let note = '바꿨어요';
+      try {
+        await refreshProfile();
+      } catch {
+        note = '바꿨어요 · 화면을 새로 불러오지 못했어요'; // 저장은 됐음 — 실패로 보이지 않게
+      }
+      closeEditor();
+      setPlaceOpen(false);
+      toast(note);
+    }, '저장하지 못했어요');
+
+  const pickHome = (place: Place) => {
+    // 좌표가 없는 장소면 이전 좌표가 남지 않게 null로 덮어씀
+    void saveEdit({ home_name: place.name, home_lat: place.lat ?? null, home_lng: place.lng ?? null });
+  };
 
   return (
     <Screen>
@@ -34,19 +78,26 @@ export default function SettingsScreen() {
       <SectionHeader title="계정" />
       <Card>
         <KeyValueRow first label="로그인" value={enabled ? (PROVIDER_NAME[provider] ?? (provider || '-')) : '가짜 데이터 모드'} />
-        <KeyValueRow label="닉네임" value={profile?.nickname ?? '-'} />
-        <KeyValueRow label="아이디" value={profile?.handle ? `@${profile.handle}` : '-'} />
+        <EditRow label="닉네임" value={profile?.nickname ?? '-'} onPress={open('nickname')} />
+        <EditRow label="아이디" value={profile?.handle ? `@${profile.handle}` : '-'} onPress={open('handle')} />
       </Card>
 
       {profile ? (
         <>
           <SectionHeader title="아침 준비 기본값" />
           <Card>
-            <KeyValueRow first label="준비 시간" value={`${profile.default_prepare_minutes}분`} />
-            <KeyValueRow label="여유 시간" value={`${profile.default_buffer_minutes}분`} />
-            <KeyValueRow label="이동 수단" value={TRANSPORT_NAME[profile.default_transport]} />
-            <KeyValueRow label="출발지" value={profile.home_name ?? '-'} />
+            <EditRow first label="준비 시간" value={`${profile.default_prepare_minutes}분`} onPress={open('prepare')} />
+            <EditRow label="여유 시간" value={`${profile.default_buffer_minutes}분`} onPress={open('prepare')} />
+            <EditRow label="이동 수단" value={TRANSPORT_NAME[profile.default_transport]} onPress={open('prepare')} />
+            <EditRow label="집(출발지)" value={profile.home_name ?? '정하지 않았어요'} onPress={canEdit ? () => setPlaceOpen(true) : undefined} />
           </Card>
+
+          <SectionHeader title="알람" />
+          <Card>
+            <EditRow first label="잠귀" value={WAKE_SENSITIVITY_NAME[profile.wake_sensitivity]} onPress={open('sleep')} />
+            <EditRow label="깨우는 여유" value={WAKE_MARGIN_NAME[profile.wake_margin]} onPress={open('prepare')} />
+          </Card>
+          {/* TODO #233 머지 뒤: "알림" 줄 → openAppNotificationSettings (features/permissions) */}
         </>
       ) : null}
 
@@ -79,6 +130,25 @@ export default function SettingsScreen() {
           </Text>
         </>
       )}
+
+      {/* 편집 시트 — 내용은 루트에서 그려지므로 편집기가 자기 draft를 가짐. 한 번에 하나만 열림 */}
+      {profile ? (
+        <>
+          <Sheet visible={editing === 'nickname'} onClose={closeEditor} title="닉네임">
+            <NicknameEditor initial={profile.nickname} onSave={saveEdit} onCancel={closeEditor} />
+          </Sheet>
+          <Sheet visible={editing === 'handle'} onClose={closeEditor} title="아이디">
+            <HandleEditor initial={profile.handle} onSave={saveEdit} onCancel={closeEditor} />
+          </Sheet>
+          <Sheet visible={editing === 'sleep'} onClose={closeEditor} title="잠귀">
+            <SleepEditor initial={profile.wake_sensitivity} onSave={saveEdit} onCancel={closeEditor} />
+          </Sheet>
+          <Sheet visible={editing === 'prepare'} onClose={closeEditor} title="아침 준비">
+            <PrepareEditor initial={prepareValuesOf(profile)} onSave={saveEdit} onCancel={closeEditor} />
+          </Sheet>
+        </>
+      ) : null}
+      <PlaceSearchSheet visible={placeOpen} onClose={() => setPlaceOpen(false)} onPick={pickHome} search={(query) => listPlaces(query)} title="집 찾기" />
     </Screen>
   );
 }
