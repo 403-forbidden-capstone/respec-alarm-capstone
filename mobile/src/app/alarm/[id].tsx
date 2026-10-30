@@ -228,7 +228,7 @@ function Detail({ appointment: a, reload }: { appointment: AppointmentDetail; re
     return (
       <Screen>
         <TopBar onBack={backOrHome} screenId="H03" />
-        <EmptyState title="일정을 지웠어요" body="5초 안에 되돌릴 수 있어요" />
+        <EmptyState title="일정을 지웠어요" body="5초 안에 되돌릴 수 있어요" action={{ label: '되돌리기', onPress: edit.undoDelete }} />
       </Screen>
     );
   }
@@ -493,7 +493,14 @@ function Detail({ appointment: a, reload }: { appointment: AppointmentDetail; re
         onLeave={edit.shared ? edit.leave : undefined}
       />
       <DateSheet visible={edit.step === 'date'} onClose={edit.back} title="날짜" value={edit.value.at} onChange={(at) => edit.change({ at })} minDate={startOfDay(now())} />
-      <TimeSheet visible={edit.step === 'time'} onClose={edit.back} title="시간" value={edit.value.at} onChange={(at) => edit.change({ at })} />
+      <TimeSheet
+        visible={edit.step === 'time'}
+        onClose={edit.back}
+        title="시간"
+        value={edit.value.at}
+        onChange={(at) => edit.change({ at })}
+        error={edit.value.at.getTime() !== edit.initial.at.getTime() && edit.value.at.getTime() <= now().getTime() ? '이미 지난 시각이에요' : undefined}
+      />
       <PlaceSearchSheet
         visible={edit.step === 'place'}
         onClose={edit.back}

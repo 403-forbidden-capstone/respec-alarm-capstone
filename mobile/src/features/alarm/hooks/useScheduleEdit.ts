@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { confirm, toast } from '@/components/ui';
 import { useAuth } from '@/features/auth/AuthProvider';
+import { now } from '@/lib/clock';
 import { userMessage } from '@/lib/errors';
 import { backOrHome } from '@/lib/nav';
 import { useAction } from '@/lib/useAction';
@@ -67,10 +68,8 @@ export function useScheduleEdit({ appointment: a, reload }: Args) {
       const scope = pendingDelete.current;
       if (!scope) return;
       pendingDelete.current = null;
-      deleteAppointment(id, scope).then(
-        () => toast('일정을 지웠어요'), // 떠 있던 [되돌리기] 토스트를 바꿈 — 이미 보낸 뒤라 눌러도 안 되므로
-        (e: unknown) => toast(userMessage(e, '일정을 지우지 못했어요')),
-      );
+      toast('일정을 지웠어요'); // 떠 있던 [되돌리기] 토스트를 먼저 바꿈 — 보내는 동안 눌러도 안 되는 단추가 남지 않게
+      deleteAppointment(id, scope).catch((e: unknown) => toast(userMessage(e, '일정을 지우지 못했어요')));
     };
   }, [id]);
 
@@ -115,6 +114,11 @@ export function useScheduleEdit({ appointment: a, reload }: Args) {
     if (!canEdit || !isEditChanged(initial, value)) return;
     if (!value.title.trim()) {
       toast('일정명을 입력해 주세요');
+      return;
+    }
+    // 시각을 옮겼는데 이미 지난 시각이면 저장하지 않음 (H05와 같은 기준 — 시각을 안 바꾼 편집은 그대로 저장)
+    if (value.at.getTime() !== initial.at.getTime() && value.at.getTime() <= now().getTime()) {
+      toast('이미 지난 시각이에요');
       return;
     }
     if (needsScope(repeated, toPatch(initial, value))) setStep('scopeSave');
@@ -214,6 +218,7 @@ export function useScheduleEdit({ appointment: a, reload }: Args) {
     canEdit,
     shared,
     deleted,
+    undoDelete,
     move,
     open,
     close,
