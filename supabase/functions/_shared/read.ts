@@ -9,9 +9,10 @@ const MAX_BODY_CHARS = 100_000;
 const ISO_8601 = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d{1,6})?)?(Z|[+-]\d{2}:\d{2})$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-export async function readJson(req: Request): Promise<unknown> {
+// maxChars: 사진 base64처럼 큰 본문을 받는 함수만 키움 (기본 10만 자)
+export async function readJson(req: Request, maxChars: number = MAX_BODY_CHARS): Promise<unknown> {
   const text = await req.text();
-  if (text.length > MAX_BODY_CHARS) throw new HttpError('VALIDATION_FAILED', '요청이 너무 커요');
+  if (text.length > maxChars) throw new HttpError('VALIDATION_FAILED', '요청이 너무 커요');
   if (!text.trim()) throw new HttpError('VALIDATION_FAILED', '요청 본문(JSON)이 비어 있어요');
   try {
     return JSON.parse(text);

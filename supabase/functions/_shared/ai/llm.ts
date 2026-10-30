@@ -21,12 +21,22 @@ export const DEFAULT_MODEL = 'claude-haiku-5-5';
 
 export type Effort = 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 
+// 사진 한 장 (base64, 앞의 data:… 머리말 없이). 시간표 사진 읽기처럼 사진을 보는 지점만 씀
+export interface LlmImage {
+  media_type: 'image/jpeg' | 'image/png' | 'image/webp' | 'image/gif';
+  data: string;
+}
+
+export type LlmContentBlock =
+  | { type: 'text'; text: string }
+  | { type: 'image'; source: { type: 'base64'; media_type: LlmImage['media_type']; data: string } };
+
 export interface LlmRequest {
   model: string;
   max_tokens: number;
   // 글 하나짜리 system에 캐시 표시(5분)를 붙임 — 같은 지점의 두 번째 호출부터 캐시 읽기 단가
   system: string | { type: 'text'; text: string; cache_control?: { type: 'ephemeral' } }[];
-  messages: { role: 'user'; content: string }[];
+  messages: { role: 'user'; content: string | LlmContentBlock[] }[];
   output_config: { effort: Effort; format: { type: 'json_schema'; schema: JsonSchema } };
   thinking?: { type: 'adaptive' };
 }
@@ -217,6 +227,7 @@ export interface CallOpts {
   model: string;
   system: string; // 모델에 보내는 그대로
   user: string; // 템플릿을 채운 글
+  images?: LlmImage[]; // 사진을 같이 보낼 때 (user 글 앞에 붙음). 호출 기록(io)에는 남기지 않는 것이 부르는 쪽 약속
   schema: JsonSchema; // 기준 스키마 (API 변형 · 검증은 여기서)
   effort: Effort;
   maxTokens: number;
@@ -236,13 +247,15 @@ const defaultSleep = (ms: number): Promise<void> => new Promise((resolve) => set
 const REASON_MAX = 300;
 const clip = (s: string): string => (s.length > REASON_MAX ? `${s.slice(0, REASON_MAX - 1)}…` : s);
 
+const imageBlock = (img: LlmImage): LlmContentBlock => ({ type: 'image', source: { type: 'base64', media_type: img.media_type, data: img.data } });
+
 // 요청 본문. temperature · top_p · prefill은 보내지 않는다 (Haiku 5.5는 effort로 조절, 마지막이 assistant면 400)
 export function buildRequest(opts: CallOpts): LlmRequest {
   const request: LlmRequest = {
     model: opts.model,
     max_tokens: opts.maxTokens,
     system: opts.cacheSystem === false ? opts.system : [{ type: 'text', text: opts.system, cache_control: { type: 'ephemeral' } }],
-    messages: [{ role: 'user', content: opts.user }],
+    messages: [{ role: 'user', content: opts.images?.length ? [...opts.images.map(imageBlock), { type: 'text', text: opts.user }] : opts.user }],
     output_config: { effort: opts.effort, format: { type: 'json_schema', schema: apiSchemaInfo(opts.schema).schema } },
   };
   if (opts.thinking) request.thinking = opts.thinking;
