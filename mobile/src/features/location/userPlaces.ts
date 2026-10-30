@@ -1,5 +1,5 @@
 // 자주 가는 곳 (학교 · 회사 · 알바 등 최대 5개) — 모양 · 검사 · 행 변환의 순수 함수. 읽고 쓰는 곳은 api.ts (가짜) · realPlaces.ts (Supabase)
-//   헤드 설계 10/30 "집 · 회사 위치를 지도로": 집은 profiles(home_*), 나머지는 표 user_places (supabase/migrations/20261030190000_user_places.sql)
+//   헤드 설계 10/30 "집 · 회사 위치를 지도로": 집은 profiles(home_*), 나머지는 표 user_places (supabase/migrations/20261030210000_user_places.sql)
 //   위치는 누구에게도 공유하지 않음 (Q13 · D59) — 본인만 읽고 씀. 좌표는 로그에 남기지 않음
 import { UserError } from '@/lib/errors';
 
@@ -23,7 +23,7 @@ export type UserPlace = {
 
 export type UserPlaceInput = UserPlace;
 
-// user_places 행 (supabase/migrations 20261030190000) — numeric은 숫자로 옴
+// user_places 행 (supabase/migrations 20261030210000) — numeric은 숫자로 옴
 export type UserPlaceRow = {
   label: string;
   name: string;

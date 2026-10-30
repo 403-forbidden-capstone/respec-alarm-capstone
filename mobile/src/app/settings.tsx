@@ -13,6 +13,8 @@ import { locateOnce } from '@/features/location/currentPosition';
 import { FrequentPlacesSection } from '@/features/location/FrequentPlacesSection';
 import { openAppNotificationSettings } from '@/features/permissions';
 import { homePatchOf } from '@/features/onboarding/home';
+import { ImportEntryCard } from '@/features/onboarding/components/ImportEntryCard';
+import { usePhotoImport } from '@/features/onboarding/hooks/usePhotoImport';
 import { shouldSaveHandle } from '@/features/onboarding/validate';
 import { isHandleTaken, saveProfileFields } from '@/features/profile/api';
 import { EditRow } from '@/features/profile/components/EditRow';
@@ -21,6 +23,8 @@ import { prepareValuesOf } from '@/features/profile/edit';
 import { TRANSPORT_NAME, WAKE_MARGIN_NAME, WAKE_SENSITIVITY_NAME } from '@/features/profile/labels';
 import type { ProfileFields } from '@/features/profile/types';
 import { UserError, userMessage } from '@/lib/errors';
+import { TIMETABLE_PATHS } from '@/lib/flags';
+import { setImportBatch } from '@/features/onboarding/importHandoff';
 import { canUseRealData, modeLocked } from '@/lib/mode';
 import { backOrHome } from '@/lib/nav';
 import { signOutAndCleanup } from '@/lib/session';
@@ -40,6 +44,7 @@ export default function SettingsScreen() {
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState<Editing>(null);
   const [placeOpen, setPlaceOpen] = useState(false);
+  const photoImport = usePhotoImport();
   const user = session?.user;
   const provider = (user?.app_metadata?.provider as string | undefined) ?? '';
   const userId = enabled ? user?.id : undefined;
@@ -103,6 +108,27 @@ export default function SettingsScreen() {
             <EditRow label="이동 수단" value={TRANSPORT_NAME[profile.default_transport]} onPress={open('prepare')} />
             <EditRow label="집(출발지)" value={profile.home_name ?? '정하지 않았어요'} onPress={canEdit ? () => setPlaceOpen(true) : undefined} />
           </Card>
+
+          {canEdit && (TIMETABLE_PATHS.photo || TIMETABLE_PATHS.calendar) ? (
+            <>
+              <SectionHeader title="수업 시간표" />
+              <ImportEntryCard
+                onPhoto={
+                  TIMETABLE_PATHS.photo
+                    ? async () => {
+                        const batch = await photoImport.pick();
+                        if (batch) {
+                          setImportBatch(batch);
+                          router.push('/timetable-import');
+                        }
+                      }
+                    : undefined
+                }
+                busy={photoImport.reading}
+                reading={photoImport.reading ? 'photo' : null}
+              />
+            </>
+          ) : null}
 
           <SectionHeader title="알람" />
           <Card>

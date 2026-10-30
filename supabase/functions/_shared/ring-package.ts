@@ -1,11 +1,14 @@
 // 예약 꾸러미(RingPackage) 조립 — alarm-commit이 돌려주고 앱이 그대로 알람 코어 schedule(pkg)에 넘김
 // 모양은 mobile/modules/alarm-core/src/types.ts RingPackage와 같음 (docs/alarm-core.md "예약 꾸러미"):
-//   alarmId · type · atMillis · title · subtitle? · intensity · snoozeLimit · soundKey? · departAt? · notice? · voiceText? (volumeAdjust · vibration · snoozeMinutesOptions는 아직 안 채움)
+//   alarmId · type · atMillis · title · subtitle? · intensity · snoozeLimit · soundKey · vibration · departAt? · notice? · voiceText? (volumeAdjust · snoozeMinutesOptions는 아직 안 채움)
+//   soundKey · vibration은 "해석된 값"을 모든 알람에 항상 실음 (D1 A): sound_key / vibration 칸이 비어 있으면 강도(intensity)에서 풀어 씀 (calc/intensity.ts soundKeyOf · vibrationOf)
 //   notice = 준비 · 출발 알림의 한 줄, voiceText = 기상 알람의 음성 문장 — 약속 알람만 (docs/alarm-core.md "예약 꾸러미")
 // 5장 5.4.2는 snake_case 응답이지만 이 꾸러미 안쪽은 알람 코어 타입(camelCase) 그대로 — 앱이 변환 없이 넘기려고
 // 순수 TS — node --test로 시험
 import { departNow } from './calc/depart.ts';
+import { soundKeyOf, vibrationOf } from './calc/intensity.ts';
 import { minutesBetween } from './calc/time.ts';
+import type { AlarmVibration } from './calc/types.ts';
 import { formatKoDuration, formatKoSpokenTime, formatKoTime } from './tz.ts';
 
 export type RingPackage = {
@@ -16,7 +19,8 @@ export type RingPackage = {
   subtitle?: string;
   intensity: 'SOFT' | 'NORMAL' | 'STRONG';
   snoozeLimit: number;
-  soundKey?: string;
+  soundKey: string; // 배경음 — sound_key ?? 강도에서 (약 theme_calm · 보통 theme_default · 강 theme_urgent)
+  vibration: AlarmVibration; // 진동 — vibration ?? 강도에서 (약 NONE · 보통 SHORT_REPEAT · 강 STRONG_CONTINUOUS)
   departAt?: number;
   voiceText?: string; // 기상 알람의 음성 문장 (읽어 주는 것은 D8 · 나중 — 지금은 폰이 저장만 함)
   notice?: string; // 준비 · 출발 알림 한 줄 — 알람 코어가 화면 줄(HEADING) 대신 보여 줌
@@ -29,6 +33,8 @@ export type PackageSource = {
   scheduled_at: string;
   intensity: RingPackage['intensity'];
   sound_key: string | null;
+  vibration?: string | null; // 진동 축을 직접 고른 값 (null · 없음 = 강도를 따름)
+  voice_tone?: string | null; // 말소리 — 기상 알람의 voiceText 문구를 정함 (null · 없음 = 일정 안내형)
   snooze_limit: number;
   is_enabled: boolean;
 };
@@ -98,13 +104,23 @@ function copula(word: string): string {
 
 // 기상 알람의 음성 문장 — 회사 제안 2 speech_text의 틀: 인사 → 오늘 첫 일정 한 줄 → 나갈 시각.
 // 시각은 "오전 10시"로 풀어 씀. 출발 알람이 없으면 나갈 시각 문장을 뺌
-export function wakeVoiceText(args: { title: string; appointmentAt: Date; departAt?: Date; timeZone: string }): string {
+// 말투는 말소리 축(alarms.voice_tone)이 정함 — 인사 · 나갈 시각 문장만 다르고 일정 한 줄은 같음
+//   NEUTRAL(일정 안내형)이 원래 문구 그대로. 비었거나 모르는 값이면 NEUTRAL
+// L6 안건후보: 말소리별 기상 문구 기본안 = CALM "천천히 일어나 볼까요? … 쯤 나가면 여유로워요" · DIRECT "일어날 시간이에요. … 나가야 해요" (읽어 주는 것은 D8 · 나중이라 글자만 정함)
+const WAKE_TONES: Record<'CALM' | 'NEUTRAL' | 'DIRECT', { greeting: string; depart: (time: string) => string }> = {
+  CALM: { greeting: '좋은 아침이에요. 천천히 일어나 볼까요?', depart: (time) => `${time}쯤 나가면 여유로워요.` },
+  NEUTRAL: { greeting: '좋은 아침이에요.', depart: (time) => `${time}에 나가면 돼요.` },
+  DIRECT: { greeting: '일어날 시간이에요.', depart: (time) => `${time}에 나가야 해요.` },
+};
+
+export function wakeVoiceText(args: { title: string; appointmentAt: Date; departAt?: Date; timeZone: string; voiceTone?: string | null }): string {
   const title = args.title.trim() || '일정';
+  const tone = args.voiceTone === 'CALM' ? WAKE_TONES.CALM : args.voiceTone === 'DIRECT' ? WAKE_TONES.DIRECT : WAKE_TONES.NEUTRAL;
   const sentences = [
-    '좋은 아침이에요.',
+    tone.greeting,
     `오늘 첫 일정은 ${formatKoSpokenTime(args.appointmentAt, args.timeZone)} ${title}${copula(title)}.`,
   ];
-  if (args.departAt) sentences.push(`${formatKoSpokenTime(args.departAt, args.timeZone)}에 나가면 돼요.`);
+  if (args.departAt) sentences.push(tone.depart(formatKoSpokenTime(args.departAt, args.timeZone)));
   return sentences.join(' ');
 }
 
@@ -154,7 +170,7 @@ export function buildRingPackages(args: {
       return notice ? { notice } : {};
     }
     if (a.alarm_type === 'WAKE') {
-      const voiceText = tryText(a.alarm_type, a.alarm_id, () => wakeVoiceText({ title: args.title, appointmentAt: appointment.appointmentAt, departAt: departureAt, timeZone: appointment.timeZone }));
+      const voiceText = tryText(a.alarm_type, a.alarm_id, () => wakeVoiceText({ title: args.title, appointmentAt: appointment.appointmentAt, departAt: departureAt, timeZone: appointment.timeZone, voiceTone: a.voice_tone }));
       return voiceText ? { voiceText } : {};
     }
     return {};
@@ -169,7 +185,8 @@ export function buildRingPackages(args: {
       ...(args.subtitle ? { subtitle: args.subtitle } : {}),
       intensity: a.intensity,
       snoozeLimit: a.snooze_limit,
-      ...(a.sound_key ? { soundKey: a.sound_key } : {}),
+      soundKey: soundKeyOf(a.sound_key, a.intensity),
+      vibration: vibrationOf(a.vibration, a.intensity),
       ...(args.departAt ? { departAt: args.departAt.getTime() } : {}),
       ...textFor(a),
     }))

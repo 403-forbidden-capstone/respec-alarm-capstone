@@ -123,10 +123,11 @@
 - 연결 일정 · 이동 조건 · 준비 시간: `appointments` + `appointment_participants`(출발지 · 이동 수단 · 예상 이동 · 출처 · 준비 · 여유) — DB. 출발지 · 이동 수단 · 예상 이동 · 준비 시간도 고침 (D42 C) → 다시 계산 `alarm-suggest` → 저장 `alarm-commit`
 - 알람 시각 직접 고르기 (D42 C): `alarms.scheduled_at` + `time_source` MANUAL(#160), "자동으로 되돌리기" = AUTO. 강도도 같은 규칙(`intensity_source`, #160)
 - 자동 강도 (D69, `_shared/calc/intensity.ts`): 기본 보통 — 매우 중요(HIGH)면 한 단계 올림 · 최근 4주 늦잠 지각 2회 이상이면 한 단계 올림 · 잠귀 무거움이면 강(`profiles.wake_sensitivity`, 일정 없는 단독 알람도 같음) · 상한 강. 약은 직접 고를 때만. 이미 저장된 자동 약은 `20261030130000_intensity_default.sql`이 보통으로 올림
+- 강도의 세 축 (D1 A, 이슈 #312): `alarms.intensity` = **전체 세기**(볼륨 · 다시 울림 — 늘 자동 단계, 잠귀 깊음 → 강). 배경음 축 = `sound_key`(`theme_calm` · `theme_default` · `theme_urgent`), 말소리 축 = `voice_tone`(기상 음성 문장의 말투), 진동 축 = `vibration`(`NONE` · `SHORT_REPEAT` · `STRONG_CONTINUOUS`, **직접 고른 값만** 저장하고 자동이면 NULL = 전체 세기를 따름). 직접 고른 축이 하나라도 있으면 `intensity_source` = MANUAL. 폰에 넘기는 꾸러미(`ring_packages[]`)에는 해석된 `soundKey`(`sound_key ?? 강도에서`)와 `vibration`(`vibration ?? 강도에서`)을 늘 실음(`calc/intensity.ts soundKeyOf · vibrationOf`) — 앱은 `lib/alarmSync`가 폰 `list()`의 두 값과 비교해 다르면 다시 걸고, 고친 값 기록의 진동 칸 이름은 `vibration`(예전 기록은 `intensity`)
 - 고친 값 기록 (D42 · D43): `user_edit_logs`(#160, 화면 · 칸 · 자동값 → 고친 값 · 시각) — DB, 다음 계산 · 제안의 개인화 입력
 - 예측 준비 근거: 내 기상~출발 기록 `daily_records.actual_prepare_minutes`의 최근 30건(10~240분) — DB. 깨우는 여유(`profiles.wake_margin`) 빠듯 · 보통 · 넉넉 = 0.7 · 0.8 · 0.9 분위수, 매우 중요는 한 단계 위. H03 "준비 N분 · 내 기록 기반 N건" 아래 "최근 5번 …분"(`alarm-suggest` 응답 `prepare.recent`)
 - 여유 시간을 바꾸면 다시 계산: `alarm-suggest` — Edge → 저장 `alarm-commit` — Edge → 다시 예약 — 폰
-- 종류별 켜기 · 끄기, 강도 직접 고르기(`alarms.is_enabled` · `intensity` · `voice_tone` · `sound_key`)도 저장 때 `alarm-commit`의 `enabled` · `levels`로 — Edge → 다시 예약 — 폰 (DB에 바로 쓰는 길은 없음)
+- 종류별 켜기 · 끄기, 강도 직접 고르기(`alarms.is_enabled` · `intensity` · `voice_tone` · `sound_key` · `vibration`)도 저장 때 `alarm-commit`의 `enabled` · `levels`로 — Edge → 다시 예약 — 폰 (DB에 바로 쓰는 길은 없음)
 - 일정 편집 · 삭제 함수 (이슈 #211, D41 A · N6): `updateAppointment(id, patch, scope, { confirmed? })` → `{ changes, needsConfirm }`(앞당김은 바로 저장 + 토스트 [되돌리기] = 이전 값을 `confirmed: true`로 같은 함수에, 5분 이상 늦춤은 저장 전에 `needsConfirm`으로 돌려줘 기존 확인 시트 뒤 `confirmed: true`로 저장, D67) · `deleteAppointment(id, scope)` · `restoreAppointment(id)`(삭제 토스트 [되돌리기]) · `leaveSharedAppointment(id)`([나는 빠지기]) — 공동 약속은 만든 사람만(`UserError`). **가짜 모드만 구현**, 실서버는 4b(`appointment-edit`)까지 `UserError('아직 실서버에서는 쓸 수 없어요')`
   - 삭제 되돌리기 계약: 화면은 삭제 확인 뒤 5초 토스트를 띄우고, **5초가 지나거나 화면을 떠날 때** `deleteAppointment`를 부름. 5초 안에 [되돌리기]를 누르면 아무것도 부르지 않음. 가짜 모드는 부르는 즉시 숨기고 `restoreAppointment`로 되살리지만, 실서버(4b)는 5초 안에는 서버로 안 보내므로 L5는 "5초 안 = 부르지 않음" 기준으로 짬 (`restoreAppointment`는 이미 지운 뒤의 되돌리기)
 - 길찾기를 못 했을 때 (7장 7.1.2): 미리 보기가 어림값(`ESTIMATE` · `CACHED`)이거나 직접 입력이 필요하면(`manual_required`) 이동 조건 칸에 안내가 뜸. 저장 때 서버가 어림값만 있으면(`ROUTE_UNAVAILABLE` + `details.fallback`) "길찾기를 못 해 이동시간을 대략 N분으로 잡았어요. 이 값으로 저장할까요?" → "이 값으로 저장"(그 분을 직접 입력 `MANUAL`로 다시 보냄) / "예상 이동을 직접 고칠게요". 좌표가 없어 어림값도 없으면 예상 이동에 직접 입력
@@ -243,6 +244,7 @@
 - 설정에서 값 바꾸기: 닉네임 · 아이디 · 잠귀 · 깨우는 여유 · 준비 시간 · 여유 시간 · 이동 수단 · 집 줄을 누르면 편집 시트(`features/profile/components/ProfileEditors`, 온보딩 단계 부품 재사용) → [저장]이 `saveProfileFields` → `profiles` — DB. 집은 지도 고르기 시트(아래). 실데이터 + 로그인일 때만 열리고 가짜 모드는 보기만. 아이디는 중복 확인(`isHandleTaken`) 뒤 저장 (L3 `changeHandle`이 오면 교체)
 - 지도 고르기 시트(`features/alarm/components/MapPlaceSheet`, 지금은 설정의 집 바꾸기에서 열림): 카카오맵 지도(`public/map-picker.html`을 웹은 iframe · 앱은 WebView로 열고 JavaScript 키 `EXPO_PUBLIC_KAKAO_JS_KEY`는 공개 값) + 검색 `listPlaces`(`place-search` — Edge) + 핀 자리 주소 `reverseAddress`(`place-reverse` — Edge, 핀이 멈춘 0.4초 뒤) + 폰 위치 한 번 `locateOnce`(앞 권한만, 폰). 고른 값은 시트가 저장하지 않고 `onPick`으로 돌려줌(집은 `profiles` — DB). 카카오 응답은 저장하지 않음(D5). 키가 없으면 지도 칸이 "지도 준비 중"이고 검색 결과로만 정함
 - 자주 가는 곳 (설정 "자주 가는 곳" 절, 지도에서 위치 고르기 ②, 이슈 #31): 학교 · 회사 · 알바 등 최대 5개 — `user_places`(이름표 `label` · 장소 이름 `name` · `address` · 좌표 · 반경 `radius_m`) — DB. 집은 위 `profiles` 그대로. **본인만 읽고 씀, 친구 · 그룹에 공유하지 않음**(Q13 · D59), 한 사람 5개까지(DB 트리거 + 앱 `UserError`). 함수: `features/location/api.ts` `listUserPlaces()` · `saveUserPlace({ label, name, address?, lat, lng, radiusM? })`(같은 이름표면 덮어씀) · `deleteUserPlace(label)`. 저장 규칙: 지도 시트 "이름" 칸이 이름표, 장소 이름은 핀 자리 주소(없으면 검색 이름). 칩 부품 `features/location/components/FrequentPlaceChips`(값 `places` + `onPick`만 받음)은 새 일정 장소 줄(H05)과 온보딩 시간표 장소 기본값(L7) 위에 꽂아 씀 — 이 PR은 부품만 내보냄. 가짜 모드는 메모리 배열(학교 · 회사)
+- 시간표 가져오기 확인(`app/timetable-import.tsx`, 목업 번호 없음, D66-1, #291): 사진(A) · 폰 캘린더(D)에서 읽어 온 수업을 줄마다 고치고 빼고 → [수업 N개 저장]. 줄 편집 · 저장은 온보딩 시간표 단계와 같은 `TimetableStep` · `useTimetableStep`(줄마다 `estimateAppointment` → `createAppointment(…, '온보딩 시간표')`), 가져온 수업은 `lib/importHandoff`로 받음. 학교 위치를 한 번 정하면 좌표 없는 모든 줄에 적용(`CampusCard`). 길 입구는 `lib/flags` `TIMETABLE_PATHS`(photo · calendar, 아직 끔) — 입구 · 서버 함수(`timetable-extract`)는 뒤 PR
 - 권한 안내: 알림 · 정확한 알람 · 잠금화면 알람 화면 — 폰
 - 푸시 토큰: 앱 켤 때 `register_push_token` — RPC
 
@@ -269,7 +271,7 @@
 | | 목업 | 지금 DB | 할 때 |
 |---|---|---|---|
 | 1 | S01 "다음 알람 10분 앞당김" | `alarm_suggestion_type`이 VOICE_TONE · SOUND · INTENSITY뿐 | #49에서 시각 조정 종류 추가 |
-| 2 | H03 강도를 배경음 · 말소리 · 진동 따로 고름 | `intensity` 하나 + `voice_tone` · `sound_key`, 진동 칸 없음 | #29에서 축별로 둘지 정함 |
+| 2 | H03 강도를 배경음 · 말소리 · 진동 따로 고름 | `intensity`(전체 세기) · `voice_tone`(말소리) · `sound_key`(배경음) · `vibration`(진동, `20261030200000_alarm_vibration.sql` — 직접 고른 값만, NULL = 강도를 따름) | D1 A로 정함 (이슈 #312) |
 | 3 | G04 "변경 기록" | 저장 자리 없음 | 처음엔 주인에게 푸시만 |
 | 4 | — | 카카오 응답은 저장 · 재사용 불가인데 `est_travel_minutes` · `travel_source` CACHED가 있음 | #27에서 계산에 쓴 값만 남기는지 정함 |
 | 5 | G02 · H01 그룹원 상태에 준비 시작 · 출발 · 도착까지 보임 | `get_group_wake_status`는 기상 상태(`wake_status`)와 시각만 돌려줌, MISSED는 목업에 없음 | 기상까지만으로 정함 (D59) — 화면을 실데이터로 바꿀 때 준비 · 출발 · 도착 줄을 뺌 (목업 api는 글자 `WakeState`, 실데이터는 상태 값 + 시각) |

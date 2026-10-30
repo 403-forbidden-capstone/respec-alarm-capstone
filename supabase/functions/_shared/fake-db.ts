@@ -30,7 +30,7 @@ const PK: Record<string, string> = {
 };
 
 const DEFAULTS: Record<string, Row> = {
-  alarms: { routine_id: null, step_order: null, snooze_limit: 3, recurrence_rule: null },
+  alarms: { routine_id: null, step_order: null, snooze_limit: 3, recurrence_rule: null, vibration: null },
   appointments: { memo: null, exception_kind: null },
 };
 
@@ -445,6 +445,7 @@ function rollInsertOccurrence(db: FakeDb, args: Record<string, unknown>): string
       intensity: a.intensity ?? 'NORMAL',
       voice_tone: a.voice_tone ?? 'NEUTRAL',
       sound_key: a.sound_key ?? null,
+      vibration: a.vibration ?? null,
       is_enabled: a.is_enabled ?? true,
       time_source: a.time_source ?? 'AUTO',
       intensity_source: a.intensity_source ?? 'AUTO',

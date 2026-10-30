@@ -22,7 +22,7 @@ export type CommitCtx = {
 };
 
 export const ALARM_COLUMNS =
-  'alarm_id, participant_id, user_id, alarm_type, scheduled_at, intensity, voice_tone, sound_key, is_enabled, snooze_limit, time_source, intensity_source, recurrence_rule';
+  'alarm_id, participant_id, user_id, alarm_type, scheduled_at, intensity, voice_tone, sound_key, vibration, is_enabled, snooze_limit, time_source, intensity_source, recurrence_rule';
 const APPOINTMENT_COLUMNS = 'appointment_id, creator_id, group_id, title, appointment_at, dest_name, dest_lat, dest_lng, importance, recurrence_rule';
 
 // 응답에 싣는 알람 요약
@@ -34,6 +34,7 @@ export const summarize = (a: AlarmRow) => ({
   intensity: a.intensity,
   voice_tone: a.voice_tone,
   sound_key: a.sound_key,
+  vibration: a.vibration,
   time_source: a.time_source,
   intensity_source: a.intensity_source,
   recurrence_rule: a.recurrence_rule,
@@ -224,6 +225,7 @@ export async function commitStandalone(ctx: CommitCtx, args: { alarm: Standalone
     intensity: intensity.fields.intensity,
     voice_tone: intensity.fields.voiceTone,
     sound_key: intensity.fields.soundKey,
+    vibration: intensity.fields.vibration,
     is_enabled: isEnabled,
     time_source: 'MANUAL', // 시각 전부를 사용자가 정함
     intensity_source: intensity.manual ? 'MANUAL' : 'AUTO',
