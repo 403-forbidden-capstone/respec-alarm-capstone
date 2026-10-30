@@ -551,6 +551,9 @@ isOneToOne: false
 "delete_decision_comment":
 { Args: { "p_author": string,"p_id": number }; Returns: boolean
                            },
+"dev_reset_my_data":
+{ Args: never; Returns: Json
+                           },
 "find_missed_wake_alarms":
 { Args: { "p_lookback_hours"?: number,"p_now"?: string }; Returns: {
               "alarm_id": string,"appointment_at": string,"appointment_id": string,"event_key": string,"group_id": string,"intensity": Database["public"]['Enums']["alarm_intensity"],"missed_at": string,"participant_id": string,"rering_minutes": number,"scheduled_at": string,"snooze_minutes": number,"user_id": string

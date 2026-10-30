@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, jest } from '@jest/globals';
 
 import { UserError } from '../errors';
-import { signOutAndCleanup } from '../session';
+import { cleanupAfterDataReset, onSignOut, signOutAndCleanup } from '../session';
 
 // 정리 단계가 정해진 순서로 불리는지 — 각 단계는 가짜로 두고 호출 순서만 기록
 const mockCalls: string[] = [];
@@ -63,5 +63,38 @@ describe('로그아웃 정리', () => {
     mockSignOut.mockRejectedValue(new Error('network'));
     await expect(signOutAndCleanup()).rejects.toThrow('network');
     expect(mockCalls.at(-1)).toBe('로그아웃 중 끄기');
+  });
+});
+
+describe('시험 데이터 지운 뒤 폰 정리 (로그아웃 없이)', () => {
+  it('알람 전부 취소 → 남은 기록 버림 → 구독 끊기까지만 하고, 올리기 · 로그아웃 · 로그아웃 중 표시는 건드리지 않음', async () => {
+    await cleanupAfterDataReset();
+    expect(mockCalls).toEqual(['알람 취소', '남은 기록 버림', '구독 끊기']);
+    expect(mockSignOut).not.toHaveBeenCalled();
+    expect(mockUpload).not.toHaveBeenCalled();
+    expect(mockSigningOut).not.toHaveBeenCalled();
+  });
+
+  it('남은 기록을 못 버려도 계속하고 기능이 등록한 메모리 정리도 부름 (하나가 실패해도 나머지는 계속)', async () => {
+    const cleanups: string[] = [];
+    const offBad = onSignOut(() => {
+      throw new Error('정리 실패');
+    });
+    const offGood = onSignOut(() => void cleanups.push('메모리 정리'));
+    mockDiscard.mockRejectedValue(new Error('폰 저장소 오류'));
+    await expect(cleanupAfterDataReset()).resolves.toBeUndefined();
+    expect(cleanups).toEqual(['메모리 정리']);
+    expect(mockUnsubscribeAll).toHaveBeenCalledTimes(1);
+    offBad();
+    offGood();
+  });
+
+  it('폰 알람을 못 지우면 서버는 지웠다는 것과 함께 이유를 보여 주고 뒤 단계는 하지 않음', async () => {
+    mockCancelAll.mockRejectedValue(new Error('native error'));
+    const error = await cleanupAfterDataReset().catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(UserError);
+    expect((error as UserError).message).toBe('서버의 시험 데이터는 지웠지만 폰에 걸린 알람은 지우지 못했어요. 다시 눌러 주세요');
+    expect(mockUnsubscribeAll).not.toHaveBeenCalled();
+    expect(mockSignOut).not.toHaveBeenCalled();
   });
 });

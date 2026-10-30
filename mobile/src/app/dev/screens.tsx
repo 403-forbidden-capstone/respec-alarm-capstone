@@ -2,17 +2,19 @@ import { router, type Href } from 'expo-router';
 import { useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 
-import { Button, Card, Screen, SectionHeader, Segmented, Text, toast, TopBar } from '@/components/ui';
+import { Button, Card, confirm, Screen, SectionHeader, Segmented, Text, toast, TopBar } from '@/components/ui';
 import { SECTIONS } from '@/dev/screenList';
 import { useAuth } from '@/features/auth/AuthProvider';
 import { DataModeToggle, goAfterRender } from '@/features/auth/DataModeToggle';
 import { DevLoginForm } from '@/features/auth/DevLoginForm';
+import { resetMyTestData } from '@/features/dev/api';
 import { resetOnboarding } from '@/features/profile/api';
 import { scenarioTime, setScenarioTime, type ScenarioTime } from '@/lib/clock';
 import { userMessage } from '@/lib/errors';
 import { ONBOARDING_IN_FLOW } from '@/lib/flags';
 import { canUseRealData, devLoginVisible, modeLocked, useMode } from '@/lib/mode';
-import { signOutAndCleanup } from '@/lib/session';
+import { cleanupAfterDataReset, signOutAndCleanup } from '@/lib/session';
+import { useAction } from '@/lib/useAction';
 import { colors } from '@/theme';
 
 // 개발용 화면 목록 — 탭에는 없고 주소로만 들어옴: /dev/screens (앱은 respecalarm://dev/screens)
@@ -21,6 +23,7 @@ import { colors } from '@/theme';
 // 폰 출시용 빌드는 모드가 실데이터로 고정이라 토글이 없음. 가짜 데이터 시나리오 시각도 가짜 모드에서만 보임
 // 실데이터 모드에서 로그인 전이면 이메일 로그인(시드 계정, 웹 · 폰 개발용만), 로그인 후에는 로그아웃(폰 알람 · 기록 정리 포함)
 // 목업에 없는 로그인 · 온보딩 · 설정은 목록에 두지 않음 (#116)
+// "내 시험 데이터 지우기"는 실데이터 + 로그인 + 모드를 바꿀 수 있는 빌드(폰 출시용이 아님, D16)에서만 보임 — 내 일정 · 알람 · 기록 · AI 대화를 서버에서 지우고 폰 알람도 정리한 뒤 온보딩부터 다시 함. 계정 · 친구 · 그룹은 그대로
 // "온보딩부터 다시"는 온보딩이 흐름에 있을 때(lib/flags ONBOARDING_IN_FLOW)만 보임 — 아이디 · 집 · 기본값 · 온보딩 끝난 시각을 비워 처음 단계부터 다시 함
 const TIMES = [
   ['morning', '아침 오전 7:55'],
@@ -32,6 +35,7 @@ export default function ScreenListScreen() {
   const { mode } = useMode();
   const { session, refreshProfile } = useAuth();
   const [busy, setBusy] = useState(false);
+  const { busy: resetting, run: runReset } = useAction();
 
   // E2E 반복용 — 계정은 그대로, 다음 화면에서 로그인 또는 온보딩으로 감
   async function run(task: () => Promise<void>, done: string, next: Href) {
@@ -45,6 +49,24 @@ export default function ScreenListScreen() {
     } finally {
       setBusy(false);
     }
+  }
+
+  // 지우기 → 서버 → 폰 정리 → 프로필 다시 읽기 → 온보딩. 서버 함수는 두 번 불러도 같으므로 중간에 실패해도 다시 누르면 됨
+  async function resetMyData() {
+    const ok = await confirm({
+      title: '내 시험 데이터를 지울까요?',
+      message: '일정 · 알람 · 기록 · AI 대화를 지우고 온보딩부터 다시 해요. 친구 · 그룹은 그대로예요.',
+      okLabel: '지우기',
+      destructive: true,
+    });
+    if (!ok) return;
+    await runReset(async () => {
+      await resetMyTestData();
+      await cleanupAfterDataReset();
+      await refreshProfile();
+      toast('지웠어요');
+      goAfterRender('/onboarding');
+    });
   }
 
   function changeTime(next: ScenarioTime) {
@@ -72,7 +94,7 @@ export default function ScreenListScreen() {
             small
             variant="ghost"
             label="로그아웃"
-            disabled={busy}
+            disabled={busy || resetting}
             onPress={() => run(signOutAndCleanup, '로그아웃했어요', '/login')}
           />
           {/* 온보딩을 흐름에서 빼면(ONBOARDING_IN_FLOW = false) 가면 막다른 곳이라 버튼을 숨김 */}
@@ -81,7 +103,7 @@ export default function ScreenListScreen() {
               small
               variant="ghost"
               label="온보딩부터 다시"
-              disabled={busy}
+              disabled={busy || resetting}
               onPress={() =>
                 run(async () => {
                   await resetOnboarding(session.user.id);
@@ -90,6 +112,8 @@ export default function ScreenListScreen() {
               }
             />
           ) : null}
+          {/* 출시용 빌드(모드 고정)에서는 숨김 — 토글과 같은 가드 */}
+          {!modeLocked ? <Button small variant="danger" label="내 시험 데이터 지우기" disabled={busy || resetting} loading={resetting} onPress={resetMyData} /> : null}
         </View>
       ) : null}
       {canUseRealData ? (
@@ -145,5 +169,5 @@ const styles = StyleSheet.create({
   id: { width: 36 },
   name: { flex: 1 },
   note: { marginTop: 4, marginHorizontal: 4 },
-  actions: { flexDirection: 'row', gap: 8, marginTop: 8 },
+  actions: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 8 },
 });
