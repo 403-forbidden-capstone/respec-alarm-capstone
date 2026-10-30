@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { BackHandler, Platform, Pressable, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { Text, toast } from '@/components/ui';
+import { ScreenId, Text, toast } from '@/components/ui';
 import { dismissRing, getRing, snoozeRing, startRing, stopRing } from '@/features/alarm/api';
 import { VoiceWave } from '@/features/alarm/components/VoiceWave';
 import { snoozeView } from '@/features/alarm/snooze';
@@ -112,9 +112,7 @@ export default function RingScreen() {
       ) : data ? (
         <View style={styles.body} accessibilityRole="alert" accessibilityLabel={data.notice ?? HEAD[kind]}>
           <View style={styles.top}>
-            <Text variant="screenId" tone="inverse" style={styles.faded45}>
-              H07
-            </Text>
+            <ScreenId id="H07" tone="inverse" style={styles.faded45} />
             {data.important ? (
               <View style={styles.chip}>
                 <Text variant="label" tone="inverse">
@@ -248,9 +246,7 @@ function DonePanel({ kind, appointment: a }: { kind: Exclude<RingKind, 'WAKE'>; 
   return (
     <View style={styles.body}>
       <View style={styles.top}>
-        <Text variant="screenId" tone="inverse" style={styles.faded45}>
-          H07
-        </Text>
+        <ScreenId id="H07" tone="inverse" style={styles.faded45} />
       </View>
       <Text variant="bodyLarge" tone="inverse" align="center" style={styles.head}>
         {kind === 'PREPARE' ? '준비를 시작해요' : '출발해요'}
