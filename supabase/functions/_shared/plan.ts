@@ -39,6 +39,8 @@ const DEFAULT_PROFILE: ProfileRow = {
   home_lat: null,
   home_lng: null,
   default_prepare_minutes: null,
+  wake_sensitivity: 'NORMAL',
+  wake_margin: 'NORMAL',
 };
 
 export const ALARM_COLUMNS =
@@ -47,7 +49,7 @@ export const ALARM_COLUMNS =
 export async function loadProfile(db: Db, userId: string): Promise<ProfileRow> {
   const row = must<ProfileRow | null>(
     'profiles',
-    await db.from('profiles').select('timezone, default_buffer_minutes, default_transport, home_name, home_lat, home_lng, default_prepare_minutes').eq('user_id', userId).maybeSingle(),
+    await db.from('profiles').select('timezone, default_buffer_minutes, default_transport, home_name, home_lat, home_lng, default_prepare_minutes, wake_sensitivity, wake_margin').eq('user_id', userId).maybeSingle(),
   );
   return row ?? DEFAULT_PROFILE;
 }

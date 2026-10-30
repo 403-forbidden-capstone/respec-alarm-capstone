@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { autoLevel, LATE_COUNT_THRESHOLD, levelOfIntensity, levelOfSoundKey, levelOfVibration, levelOfVoiceTone, resolveIntensity, soundKeyOf, vibrationOf, type WakeSensitivity } from './intensity.ts';
+import { autoLevel, LATE_COUNT_THRESHOLD, levelOfIntensity, levelOfSoundKey, levelOfVibration, levelOfVoiceTone, resolveIntensity, soundKeyOf, vibrationOf, wakeSensitivityOf, type WakeSensitivity } from './intensity.ts';
 import type { Importance, Level } from './types.ts';
 
 // D69 규칙 표 — 기본 보통(1), 매우 중요(HIGH) +1, 최근 4주 늦잠 지각 2회 이상 +1, 잠귀 HEAVY면 강, 상한 강(2)
@@ -130,4 +130,10 @@ test('꾸러미에 실을 값 풀기: 진동 vibration ?? 강도에서, 배경�
   assert.equal(vibrationOf('WOBBLE', 'STRONG'), 'STRONG_CONTINUOUS');
   assert.equal(vibrationOf(undefined, 'SOFT'), 'NONE');
   assert.equal(soundKeyOf('', 'STRONG'), 'theme_urgent');
+});
+
+test('wakeSensitivityOf: DB 값 HEAVY만 HEAVY, LIGHT · NORMAL · 모르는 값 · 빈 값은 NORMAL (약은 직접 고를 때만, D69)', () => {
+  assert.deepEqual(['HEAVY', 'LIGHT', 'NORMAL', 'x', '', null, undefined].map(wakeSensitivityOf), ['HEAVY', 'NORMAL', 'NORMAL', 'NORMAL', 'NORMAL', 'NORMAL', 'NORMAL']);
+  // 가벼움 + 보통 일정 → 보통 (약 아님)
+  assert.equal(autoLevel('NORMAL', 0, wakeSensitivityOf('LIGHT')), 1);
 });

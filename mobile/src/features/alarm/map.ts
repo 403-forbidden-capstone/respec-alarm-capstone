@@ -3,7 +3,7 @@
 import { parseDbTime } from '@/lib/dbTime';
 import type { Tables } from '@/types/database';
 import { alarmChain } from '@shared/calc/chain.ts';
-import { autoLevel, levelOfIntensity, levelOfSoundKey, levelOfVibration, levelOfVoiceTone } from '@shared/calc/intensity.ts';
+import { autoLevel, levelOfIntensity, levelOfSoundKey, levelOfVibration, levelOfVoiceTone, type WakeSensitivity } from '@shared/calc/intensity.ts';
 import { DEFAULT_BEFORE_PREPARE_MINUTES } from '@shared/calc/prepare.ts';
 import { minutesBetween } from '@shared/calc/time.ts';
 import type { RingKind } from '@shared/calc/types.ts';
@@ -318,8 +318,9 @@ export function storedOverrides(alarms: readonly AlarmRow[], auto: Level): Recor
   };
 }
 
-export function toIntensity(alarms: readonly AlarmRow[], importance: Importance, lateCount4w: number): Intensity {
-  const auto = autoLevel(importance, lateCount4w);
+// wakeSensitivity = 내 프로필 잠귀를 wakeSensitivityOf로 읽은 값 (무거움이면 강). 서버 plan-core · realWrite setIntensity · 가짜 모드와 같은 값을 넘김. 안 주면 보통
+export function toIntensity(alarms: readonly AlarmRow[], importance: Importance, lateCount4w: number, wakeSensitivity?: WakeSensitivity): Intensity {
+  const auto = autoLevel(importance, lateCount4w, wakeSensitivity);
   const picked = storedOverrides(alarms, auto);
   const axis = (key: IntensityAxis) => ({ level: picked[key] ?? auto, manual: picked[key] != null });
   return {
@@ -346,11 +347,11 @@ export function toEdits(appointment: Appointment, rows: AppointmentRows): AlarmE
   };
 }
 
-export function toAppointmentDetail(rows: AppointmentRows, lateCount4w: number): AppointmentDetail {
+export function toAppointmentDetail(rows: AppointmentRows, lateCount4w: number, wakeSensitivity?: WakeSensitivity): AppointmentDetail {
   const appointment = toAppointment(rows);
   return {
     ...appointment,
-    intensity: toIntensity(rows.alarms, appointment.importance, lateCount4w),
+    intensity: toIntensity(rows.alarms, appointment.importance, lateCount4w, wakeSensitivity),
     edits: toEdits(appointment, rows),
     // 직접 입력한 이동은 자동값을 모름 — 저장된 값을 자리에 두고, 미리 보기(alarm-suggest)가 오면 서버의 자동값으로 바뀜
     auto: { travelMinutes: appointment.travelMinutes, predictedPrepMinutes: appointment.predictedPrepMinutes },

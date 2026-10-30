@@ -241,6 +241,25 @@ test('일정 없는 알람(D46): 약속 · 루틴 없이 기상 알람 하나 + 
   assert.deepEqual(body.canceled_alarm_ids, []);
 });
 
+test('일정 없는 알람도 잠귀를 따름: 깊음이면 자동 강(STRONG), 가벼움이면 보통, 고른 칸은 그대로 (학습 기초 b)', async () => {
+  const heavy = setup();
+  heavy.db.rows('profiles').push({ user_id: USER, ...profile, wake_sensitivity: 'HEAVY' });
+  await commitStandalone(heavy.ctx, { alarm: { scheduledAt: kst(23, 420) }, edits: [], timeZone: 'Asia/Seoul' });
+  assert.deepEqual([heavy.db.rows('alarms')[0].intensity, heavy.db.rows('alarms')[0].intensity_source], ['STRONG', 'AUTO']);
+
+  const light = setup();
+  light.db.rows('profiles').push({ user_id: USER, ...profile, wake_sensitivity: 'LIGHT' });
+  await commitStandalone(light.ctx, { alarm: { scheduledAt: kst(23, 420) }, edits: [], timeZone: 'Asia/Seoul' });
+  assert.equal(light.db.rows('alarms')[0].intensity, 'NORMAL'); // 약이 아니라 보통 (D69)
+
+  const picked = setup();
+  picked.db.rows('profiles').push({ user_id: USER, ...profile, wake_sensitivity: 'HEAVY' });
+  await commitStandalone(picked.ctx, { alarm: { scheduledAt: kst(23, 420), levels: { vibration: 0 } }, edits: [], timeZone: 'Asia/Seoul' });
+  // D1 A: 진동 축을 직접 고르면 vibration 칸만 바뀌고 intensity는 전체 세기라 잠귀대로(강) 그대로
+  const [pickedRow] = picked.db.rows('alarms');
+  assert.deepEqual([pickedRow.intensity, pickedRow.vibration, pickedRow.intensity_source], ['STRONG', 'NONE', 'MANUAL']);
+});
+
 test('일정 없는 알람 고치기: 끄면 꾸러미에서 빠지고 canceled_alarm_ids에, 반복 규칙은 안 보내면 유지', async () => {
   const { db, ctx } = setup();
   const created = await commitStandalone(ctx, { alarm: { scheduledAt: kst(23, 420), recurrenceRule: 'FREQ=DAILY' }, edits: [], timeZone: 'Asia/Seoul' });

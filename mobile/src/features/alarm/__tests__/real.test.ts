@@ -309,6 +309,30 @@ describe('목록 · 하루 일정 · 알람 설정 읽기', () => {
     expect(filterArgs(count, 'gte', 'arrived_at')).toEqual(['2025-04-23T22:55:00.000Z']); // 지금 − 28일
   });
 
+  it('getAppointment: 내 잠귀(profiles.wake_sensitivity)를 읽어 강도 자동 값에 넣음 — 무거움이면 지각이 없어도 강, 프로필이 없거나 가벼움은 보통', async () => {
+    mockRoutes['appointment_participants:select'] = (call) => (isCount(call) ? { count: 0 } : { data: participantRow() });
+    mockRoutes['profiles:select'] = () => ({ data: { wake_sensitivity: 'HEAVY' } });
+    const heavy = await real.getAppointment('00000000-0000-4000-8000-0000000000a1');
+    expect(heavy?.intensity).toMatchObject({ auto: 2, lateCount: 0 });
+    const [read] = callsTo('profiles', 'select');
+    expect(filterArgs(read, 'eq', 'user_id')).toEqual(['user-1']);
+    for (const data of [{ wake_sensitivity: 'LIGHT' }, { wake_sensitivity: 'NORMAL' }, null]) {
+      mockRoutes['profiles:select'] = () => ({ data });
+      expect((await real.getAppointment('00000000-0000-4000-8000-0000000000a1'))?.intensity.auto).toBe(1);
+    }
+  });
+
+  it('setIntensity: 잠귀가 무거우면 자동 값(강)을 기준으로 — 진동만 약으로 고르면 나머지 두 칸은 자동 강', async () => {
+    mockRoutes['appointment_participants:select'] = (call) => (isCount(call) ? { count: 0 } : { data: participantRow() });
+    mockRoutes['profiles:select'] = () => ({ data: { wake_sensitivity: 'HEAVY' } });
+    mockRoutes['alarms:update'] = () => ({ data: [{ alarm_id: '00000000-0000-4000-8000-0000000000b1' }] });
+    await real.setIntensity('00000000-0000-4000-8000-0000000000a1', 'vibration', 0);
+    expect(callsTo('alarms', 'update')[0].payload).toEqual({ intensity: 'SOFT', voice_tone: 'DIRECT', sound_key: 'theme_urgent', intensity_source: 'MANUAL' });
+    mockCalls.length = 0;
+    await real.setIntensity('00000000-0000-4000-8000-0000000000a1', 'vibration', null); // 다시 자동 = 강
+    expect(callsTo('alarms', 'update')[0].payload).toEqual({ intensity: 'STRONG', voice_tone: 'DIRECT', sound_key: 'theme_urgent', intensity_source: 'AUTO' });
+  });
+
   it('getAppointment: 알람이 없는 일정 · 내 것이 아닌(없는) 일정 · 일정 없는 알람 id는 null', async () => {
     mockRoutes['appointment_participants:select'] = (call) => (isCount(call) ? { count: 0 } : { data: participantRow({}, {}, []) });
     expect(await real.getAppointment('00000000-0000-4000-8000-0000000000a1')).toBeNull();
