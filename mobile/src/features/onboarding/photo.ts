@@ -8,6 +8,16 @@ import type { ImportBatch, ImportConfidence, ImportedClass } from './timetableIm
 // 서버가 받는 원본 크기 상한 (supabase/functions/_shared/timetable/extract.ts MAX_IMAGE_BYTES와 같게)
 export const MAX_PHOTO_BYTES = 4_000_000;
 
+// 올리기 전에 줄임 (헤드 결정 10/30): 긴 변 1600px 이하, JPEG 0.8 — 시간표 글자는 읽히고 파일은 수백 KB. Claude도 긴 변 1568px 넘는 사진은 어차피 줄여서 읽음
+export const MAX_LONG_SIDE = 1600;
+export const JPEG_QUALITY = 0.8;
+
+// 긴 변이 MAX_LONG_SIDE를 넘으면 그 변만 지정해 줄이기(다른 변은 비율대로), 아니면 null(크기는 그대로, JPEG로만 다시 저장)
+export function resizeFor(width: number, height: number): { width: number } | { height: number } | null {
+  if (!(width > 0) || !(height > 0) || Math.max(width, height) <= MAX_LONG_SIDE) return null;
+  return width >= height ? { width: MAX_LONG_SIDE } : { height: MAX_LONG_SIDE };
+}
+
 export type PhotoMediaType = 'image/jpeg' | 'image/png' | 'image/webp';
 
 // timetable-extract 응답 — 요일은 앱 Weekday 그대로, 시각은 HH:MM

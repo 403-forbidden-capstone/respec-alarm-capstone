@@ -85,6 +85,16 @@ export function startImport(batch: ImportBatch, limit: number): { rows: ClassRow
   return { rows: plan.accepted.map((c, i) => classRowOf(c, `class-${i + 1}`)), notice: importNotice(batch, plan, limit) };
 }
 
+// 이미 저장한 반복 일정 — 제목 · 요일 · 시작 시각이 같은 수업이 있으면 같은 수업으로 봄 (새 DB 칸 없이 화면에서 비교, 헤드 결정 10/30)
+export type ExistingClass = { title: string; days: readonly Weekday[]; startMinutes: number };
+
+export const existingKey = (e: ExistingClass) => keyOf(e.title, e.days, e.startMinutes);
+
+// 지금 줄이 이미 저장한 수업과 같은가. 요일 없는 반복 없음 일정은 비교 대상이 아님
+export function isExistingClass(row: Pick<ClassRow, 'name' | 'days' | 'startMinutes'>, existing: ReadonlySet<string>): boolean {
+  return row.startMinutes != null && row.days.length > 0 && existing.has(keyOf(row.name, row.days, row.startMinutes));
+}
+
 export type ImportNotice = {
   headline: string;
   details: string[];

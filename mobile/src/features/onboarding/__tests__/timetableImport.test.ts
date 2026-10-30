@@ -1,7 +1,7 @@
 import { describe, expect, it } from '@jest/globals';
 
 import type { ClassRow } from '../components/TimetableStep';
-import { campusCoords, campusPlaceText, campusTargets, classRowOf, importNotice, missingCoords, planImport, type ImportBatch, type ImportedClass } from '../timetableImport';
+import { campusCoords, campusPlaceText, campusTargets, classRowOf, existingKey, importNotice, isExistingClass, missingCoords, planImport, type ImportBatch, type ImportedClass } from '../timetableImport';
 
 const row = (patch: Partial<ClassRow> = {}): ClassRow => ({ id: 'r1', name: '자료구조', days: ['월', '수'], startMinutes: 630, place: '공학관 301', ...patch });
 const cls = (patch: Partial<ImportedClass> = {}): ImportedClass => ({ title: '운영체제', weekdays: ['화', '목'], startMinutes: 780, place: '정보관 B102', ...patch });
@@ -127,5 +127,24 @@ describe('importNotice', () => {
     const n = importNotice(b, planImport([row()], b.classes, 10), 10);
     expect(n.details[0]).toBe('모두 이미 있는 수업이에요');
     expect(n.details).toContain('이미 있는 수업 1개는 뺐어요');
+  });
+});
+
+describe('이미 저장한 수업 (isExistingClass)', () => {
+  const saved = new Set([existingKey({ title: '자료구조', days: ['월', '수'], startMinutes: 630 })]);
+
+  it('제목 공백 · 요일 순서가 달라도 제목 · 요일 · 시작 시각이 같으면 같은 수업', () => {
+    expect(isExistingClass(row({ name: '자료 구조', days: ['수', '월'] }), saved)).toBe(true);
+  });
+
+  it('시각 · 요일 · 제목 중 하나라도 다르면 다른 수업', () => {
+    expect(isExistingClass(row({ startMinutes: 700 }), saved)).toBe(false);
+    expect(isExistingClass(row({ days: ['월'] }), saved)).toBe(false);
+    expect(isExistingClass(row({ name: '운영체제' }), saved)).toBe(false);
+  });
+
+  it('시각을 아직 안 골랐거나 요일이 없는 줄은 비교하지 않음', () => {
+    expect(isExistingClass(row({ startMinutes: null }), saved)).toBe(false);
+    expect(isExistingClass(row({ days: [] }), saved)).toBe(false);
   });
 });

@@ -270,6 +270,7 @@ export default function OnboardingScreen() {
             onRemoveRow={timetable.onRemoveRow}
             onPickPlace={timetable.onPickPlace}
             onPickTime={timetable.onPickTime}
+            onToggleExisting={timetable.onToggleExisting}
             saving={busy || importing}
           />
           <PlaceSearchSheet

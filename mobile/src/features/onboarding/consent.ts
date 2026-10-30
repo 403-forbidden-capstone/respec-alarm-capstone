@@ -1,6 +1,6 @@
 // 개인정보 안내 문구 — 온보딩 동의 단계(views/ConsentStep)가 그림
 // D93 기본안 A — 온보딩 1장 + 판 번호, 문구 초안은 L7, 확정은 팀. 문구를 고쳐 다시 동의받아야 하면 PRIVACY_VERSION을 올림
-export const PRIVACY_VERSION = 1;
+export const PRIVACY_VERSION = 2; // 2: 시간표 사진 항목 추가(사진 길 켬) — 동의 화면이 새 문구로 다시 뜨게 올림 (헤드 결정 10/30, 지금은 시험 계정뿐). 문구 최종은 팀 확인 필요
 
 export type ConsentItem = {
   key: 'location' | 'screen' | 'voice' | 'wake-share' | 'timetable-photo' | 'timetable-calendar';

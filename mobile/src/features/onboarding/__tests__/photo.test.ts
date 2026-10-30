@@ -3,7 +3,7 @@ import { describe, expect, it } from '@jest/globals';
 import { EdgeError } from '@/lib/edge';
 import { UserError } from '@/lib/errors';
 
-import { extractBody, MAX_PHOTO_BYTES, photoFailure, preparePhoto, sniffMediaType, toBatch, type ExtractResponse } from '../photo';
+import { extractBody, MAX_PHOTO_BYTES, photoFailure, preparePhoto, resizeFor, sniffMediaType, toBatch, type ExtractResponse } from '../photo';
 
 const JPEG_B64 = '/9j/' + 'A'.repeat(400);
 const PNG_B64 = 'iVBOR' + 'A'.repeat(400);
@@ -98,5 +98,19 @@ describe('photoFailure — 서버 오류 → 사용자 문구', () => {
     expect(msg(photoFailure(new EdgeError('NOT_CONFIGURED')))).toMatch(/직접 넣어 주세요/);
     const other = new Error('x');
     expect(photoFailure(other)).toBe(other);
+  });
+});
+
+describe('resizeFor — 올리기 전 줄이기 (긴 변 1600)', () => {
+  it('가로가 길면 가로를, 세로가 길면 세로를 1600으로', () => {
+    expect(resizeFor(3200, 1800)).toEqual({ width: 1600 });
+    expect(resizeFor(1080, 2400)).toEqual({ height: 1600 });
+    expect(resizeFor(2000, 2000)).toEqual({ width: 1600 });
+  });
+
+  it('이미 1600 이하이거나 크기를 모르면 줄이지 않음 (JPEG로만 다시 저장)', () => {
+    expect(resizeFor(1600, 900)).toBeNull();
+    expect(resizeFor(800, 1200)).toBeNull();
+    expect(resizeFor(0, 0)).toBeNull();
   });
 });
