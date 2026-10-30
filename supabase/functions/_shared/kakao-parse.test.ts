@@ -2,8 +2,8 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { KakaoError, kakaoTravelMinutes, searchPlaces, type FetchLike } from './kakao.ts';
-import { parseCarDirections, parsePlaces, parseTransit, parseWalk } from './kakao-parse.ts';
+import { KakaoError, kakaoTravelMinutes, reverseAddress, searchPlaces, type FetchLike } from './kakao.ts';
+import { parseCarDirections, parsePlaces, parseReverse, parseTransit, parseWalk } from './kakao-parse.ts';
 
 const ORIGIN = { lat: 37.5547, lng: 126.9707 };
 const DEST = { lat: 37.4979, lng: 127.0276 };
@@ -159,4 +159,65 @@ test('장소 검색: 기준 좌표를 주면 가까운 순 (x = 경도, y = 위�
   const fetchImpl = fakeFetch({ 'https://dapi.kakao.com/v2/local/search/keyword.json': ok({ documents: [] }) }, calls);
   assert.deepEqual(await searchPlaces('KEY', { query: '세종대', near: { lat: 37.5, lng: 127 }, size: 99 }, fetchImpl), []);
   assert.ok(calls[0].includes('x=127') && calls[0].includes('y=37.5') && calls[0].includes('sort=distance') && calls[0].includes('size=15'));
+});
+
+test('좌표 → 주소 응답: 도로명 우선 + 건물 이름, 지번만 있으면 지번, 빈 결과 · 깨진 응답은 null', () => {
+  assert.deepEqual(
+    parseReverse({
+      meta: { total_count: 1 },
+      documents: [
+        {
+          road_address: { address_name: '서울 광진구 능동로 209', building_name: '세종대학교 광개토관', region_1depth_name: '서울' },
+          address: { address_name: '서울 광진구 군자동 98' },
+        },
+      ],
+    }),
+    { address: '서울 광진구 능동로 209', roadAddress: '서울 광진구 능동로 209', buildingName: '세종대학교 광개토관' },
+  );
+  // 도로명은 있고 건물 이름이 빈 글자
+  assert.deepEqual(
+    parseReverse({ documents: [{ road_address: { address_name: '서울 광진구 능동로 209', building_name: '' }, address: { address_name: '서울 광진구 군자동 98' } }] }),
+    { address: '서울 광진구 능동로 209', roadAddress: '서울 광진구 능동로 209', buildingName: null },
+  );
+  // 지번만 있음 (road_address: null)
+  assert.deepEqual(parseReverse({ documents: [{ road_address: null, address: { address_name: '서울 광진구 군자동 98' } }] }), {
+    address: '서울 광진구 군자동 98',
+    roadAddress: null,
+    buildingName: null,
+  });
+  // 주소가 없는 곳 (바다 · 국외) · 깨진 응답
+  assert.equal(parseReverse({ meta: { total_count: 0 }, documents: [] }), null);
+  assert.equal(parseReverse({ documents: [{ road_address: null, address: null }] }), null);
+  assert.equal(parseReverse({ documents: [{ road_address: { address_name: ' ' }, address: { address_name: '' } }] }), null);
+  assert.equal(parseReverse({ documents: 'x' }), null);
+  assert.equal(parseReverse(null), null);
+  assert.equal(parseReverse('oops'), null);
+});
+
+test('좌표 → 주소 호출: x = 경도 · y = 위도, 키 헤더, 결과 없음은 null', async () => {
+  const calls: string[] = [];
+  const url = 'https://dapi.kakao.com/v2/local/geo/coord2address.json';
+  const hit = fakeFetch({ [url]: ok({ documents: [{ road_address: { address_name: '서울 광진구 능동로 209', building_name: '' }, address: null }] }) }, calls);
+  assert.deepEqual(await reverseAddress('KEY', { lat: 37.5509, lng: 127.0736 }, hit), {
+    address: '서울 광진구 능동로 209',
+    roadAddress: '서울 광진구 능동로 209',
+    buildingName: null,
+  });
+  assert.ok(calls[0].includes('x=127.0736') && calls[0].includes('y=37.5509') && calls[0].endsWith('|KakaoAK KEY'));
+  assert.equal(await reverseAddress('KEY', { lat: 0, lng: 0 }, fakeFetch({ [url]: ok({ documents: [] }) })), null);
+});
+
+test('좌표 → 주소 실패는 종류별 KakaoError로 (오류 글에 좌표가 없음)', async () => {
+  const url = 'https://dapi.kakao.com/v2/local/geo/coord2address.json';
+  const at = { lat: 37.5509, lng: 127.0736 };
+  const run = (status: number) => reverseAddress('KEY', at, fakeFetch({ [url]: () => new Response('{}', { status }) }));
+  await assert.rejects(() => run(401), (e: unknown) => e instanceof KakaoError && e.kind === 'AUTH');
+  await assert.rejects(() => run(429), (e: unknown) => e instanceof KakaoError && e.kind === 'RATE_LIMIT');
+  await assert.rejects(() => run(500), (e: unknown) => e instanceof KakaoError && e.kind === 'HTTP' && !e.message.includes('37.55'));
+  const abort: FetchLike = async () => {
+    throw Object.assign(new Error('aborted'), { name: 'AbortError' });
+  };
+  await assert.rejects(() => reverseAddress('KEY', at, abort), (e: unknown) => e instanceof KakaoError && e.kind === 'TIMEOUT');
+  const bad = fakeFetch({ [url]: () => new Response('not json', { status: 200 }) });
+  await assert.rejects(() => reverseAddress('KEY', at, bad), (e: unknown) => e instanceof KakaoError && e.kind === 'BAD_RESPONSE');
 });
