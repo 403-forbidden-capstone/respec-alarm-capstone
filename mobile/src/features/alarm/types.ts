@@ -192,6 +192,9 @@ export type LatLng = { lat: number; lng: number };
 //   category = 카카오 category_name 그대로('교육,학문 > 대학교') — 서버가 주는 값을 통과시킬 뿐 DB에 저장하지 않음 (D5)
 export type Place = { name: string; travelMinutes?: number; address?: string; lat?: number; lng?: number; category?: string };
 
+// 지도 핀 자리의 주소 (place-reverse) — 주소 한 줄(도로명 우선) + 있으면 건물 이름. 화면에 보일 뿐 저장하지 않음 (카카오 응답, D5)
+export type PinAddress = { address: string; name?: string };
+
 // 새 일정 입력값 (H05)
 export type AppointmentDraft = {
   title: string;

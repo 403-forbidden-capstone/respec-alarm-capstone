@@ -812,6 +812,36 @@ describe('장소 (listPlaces)', () => {
   });
 });
 
+describe('핀 자리 주소 (reverseAddress)', () => {
+  it('place-reverse에 좌표를 보내고 도로명 주소를 우선, 건물 이름이 있으면 같이 돌려줌 — 기억해 두지 않음', async () => {
+    mockCallEdge.mockResolvedValue({ place: { address: '서울 광진구 화양동 1', roadAddress: '서울 광진구 능동로 209', buildingName: '세종대학교 광개토관' } });
+    await expect(real.reverseAddress(37.55, 127.07)).resolves.toEqual({ address: '서울 광진구 능동로 209', name: '세종대학교 광개토관' });
+    expect(mockCallEdge).toHaveBeenCalledWith('place-reverse', { lat: 37.55, lng: 127.07 }, { retry: 1 });
+    expect(lookupPlace('세종대학교 광개토관')).toBeUndefined();
+  });
+
+  it('도로명 주소가 없으면 지번 주소, 건물 이름이 비면 이름 칸 없음', async () => {
+    mockCallEdge.mockResolvedValue({ place: { address: '서울 광진구 화양동 1', roadAddress: ' ', buildingName: '' } });
+    await expect(real.reverseAddress(37.55, 127.07)).resolves.toEqual({ address: '서울 광진구 화양동 1' });
+  });
+
+  it('주소를 못 구한 자리(place null · 빈 주소)와 범위 밖 좌표는 null — 범위 밖은 서버를 부르지 않음', async () => {
+    mockCallEdge.mockResolvedValue({ place: null });
+    await expect(real.reverseAddress(33, 124)).resolves.toBeNull();
+    mockCallEdge.mockResolvedValue({ place: { address: null, roadAddress: null } });
+    await expect(real.reverseAddress(33, 124)).resolves.toBeNull();
+    mockCallEdge.mockClear();
+    await expect(real.reverseAddress(95, 127)).resolves.toBeNull();
+    await expect(real.reverseAddress(Number.NaN, 127)).resolves.toBeNull();
+    expect(mockCallEdge).not.toHaveBeenCalled();
+  });
+
+  it('서버 오류는 그대로 던짐 (화면이 "주소를 못 불러왔어요"로 바꿈)', async () => {
+    mockCallEdge.mockRejectedValue(new Error('PLACE_UNAVAILABLE'));
+    await expect(real.reverseAddress(37.55, 127.07)).rejects.toThrow();
+  });
+});
+
 describe('새 일정 계산 · 저장 (H05)', () => {
   it('estimateAppointment: alarm-suggest에 새 일정 요청을 보내고 확인 시트 값을 만듦', async () => {
     mockCallEdge.mockResolvedValue(suggestion());
