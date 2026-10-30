@@ -6,10 +6,12 @@ import { Button, Card, KeyValueRow, Screen, SectionHeader, Sheet, Text, toast, T
 import { listPlaces, reverseAddress } from '@/features/alarm/api';
 import { MapPlaceSheet } from '@/features/alarm/components/MapPlaceSheet';
 import { homeOf } from '@/features/alarm/placeSheet';
-import type { Place } from '@/features/alarm/types';
+import type { PickedPlace } from '@/features/alarm/mapPicker';
 import { useAuth } from '@/features/auth/AuthProvider';
 import { DataModeToggle } from '@/features/auth/DataModeToggle';
+import { HOME_RADIUS_M } from '@/features/location/constants';
 import { locateOnce } from '@/features/location/currentPosition';
+import { HOME_RADIUS_PRESETS } from '@/features/location/radius';
 import { FrequentPlacesSection } from '@/features/location/FrequentPlacesSection';
 import { LocationAutoSection } from '@/features/location/LocationAutoSection';
 import { openAppNotificationSettings } from '@/features/permissions';
@@ -85,7 +87,7 @@ export default function SettingsScreen() {
       toast(note);
     }, '저장하지 못했어요');
 
-  const pickHome = (place: Place) => {
+  const pickHome = (place: PickedPlace) => {
     const patch = homePatchOf(place);
     // 좌표가 없는 장소는 집으로 못 정함 — 이름만 바꾸면 이전 좌표와 어긋나고, 지우면 새 일정의 이동시간 계산이 막힘 (시트는 열어 둠)
     if (!patch) {
@@ -251,6 +253,7 @@ export default function SettingsScreen() {
         locate={locateOnce}
         center={homeOf(profile)}
         suggestedNames={['집']}
+        radius={{ initial: profile?.home_radius_m ?? HOME_RADIUS_M, presets: HOME_RADIUS_PRESETS, hint: '이 원을 벗어나면 집에서 출발한 것으로 기록해요', followPlace: false }}
         areaWarning="캠퍼스 대표 위치예요. 건물을 고르면 더 정확해요"
         title="집 찾기"
       />

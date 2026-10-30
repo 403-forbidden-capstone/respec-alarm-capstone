@@ -30,6 +30,13 @@ describe('saveProfileFields', () => {
     expect(filterOf(calls[0], 'eq', 'user_id')).toEqual(['user_id', 'user-1']);
   });
 
+  it('집과 감지 범위(home_radius_m)를 한 번에 저장하고, 돌려받는 칸에도 읽어 옴', async () => {
+    onCall(() => ({ data: [row] }));
+    await saveProfileFields('user-1', { home_name: '우리집', home_lat: 37.5, home_lng: 127, home_radius_m: 300 });
+    expect(calls[0].payload).toEqual({ home_name: '우리집', home_lat: 37.5, home_lng: 127, home_radius_m: 300 });
+    expect(calls[0].columns).toContain('home_radius_m');
+  });
+
   it('아이디는 소문자로 저장', async () => {
     onCall(() => ({ data: [row] }));
     await saveProfileFields('user-1', { handle: 'Respec_KIM' });

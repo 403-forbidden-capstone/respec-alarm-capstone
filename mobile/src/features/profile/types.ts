@@ -18,6 +18,7 @@ export type Profile = {
   home_name: string | null;
   home_lat: number | null;
   home_lng: number | null;
+  home_radius_m: number | null; // 집 감지 범위(m, 100~500). 비었으면 앱 기본값 200 (location/constants HOME_RADIUS_M)
   default_transport: TransportType;
   timezone: string;
   onboarded_at: string | null; // null = 아직 온보딩 안 끝남
@@ -36,6 +37,7 @@ export type ProfileFields = Partial<
     | 'home_name'
     | 'home_lat'
     | 'home_lng'
+    | 'home_radius_m'
     | 'default_prepare_minutes'
     | 'default_buffer_minutes'
     | 'default_transport'

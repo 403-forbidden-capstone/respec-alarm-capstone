@@ -11,13 +11,18 @@ import { josa } from '@/lib/format';
 import { useAction } from '@/lib/useAction';
 import { useLoad } from '@/lib/useLoad';
 
+import { BUILDING_RADIUS_M } from './constants';
 import { deleteUserPlace, listUserPlaces, saveUserPlace } from './api';
 import { locateOnce } from './currentPosition';
+import { DESTINATION_RADIUS_PRESETS } from './radius';
 import { cleanLabel, inputFromPick, MAX_USER_PLACES, unusedLabels } from './userPlaces';
 
 type Props = {
   center?: LatLng; // 지도를 처음 열 중심이자 검색 기준점 — 보통 집 (없으면 서울 시청)
 };
+
+// 새로 추가할 때 감지 범위의 처음 값(m) — 건물 · 가게 기본값 (area.ts BUILDING_RADIUS_M). 바꾸기는 저장돼 있던 값에서 시작
+const PLACE_RADIUS_M = BUILDING_RADIUS_M;
 
 // 지도 시트의 용도 — 새로 추가(replacing 없음) · 이미 있는 곳의 위치 바꾸기(replacing = 그 이름표)
 type MapFor = { replacing?: string };
@@ -34,7 +39,8 @@ export function FrequentPlacesSection({ center }: Props) {
   const full = places.length >= MAX_USER_PLACES;
   const target = places.find((p) => p.label === acting);
   const replacing = mapFor?.replacing;
-  const mapCenter = replacing ? (places.find((p) => p.label === replacing) ?? center) : center; // 바꾸기는 지금 그 곳에서 열림
+  const replacingPlace = replacing ? places.find((p) => p.label === replacing) : undefined;
+  const mapCenter = replacingPlace ?? center; // 바꾸기는 지금 그 곳에서 열림
 
   const pick = (picked: PickedPlace) => {
     const input = inputFromPick(picked, replacing);
@@ -119,6 +125,7 @@ export function FrequentPlacesSection({ center }: Props) {
         locate={locateOnce}
         center={mapCenter}
         suggestedNames={replacing ? [replacing] : unusedLabels(places)}
+        radius={{ initial: replacingPlace?.radiusM ?? PLACE_RADIUS_M, presets: DESTINATION_RADIUS_PRESETS, hint: '이 원 안에 들어오면 도착으로 기록해요' }}
         areaWarning="캠퍼스 대표 위치예요. 건물을 고르면 더 정확해요"
         title={replacing ? `${replacing} 위치 바꾸기` : '자주 가는 곳 추가'}
       />

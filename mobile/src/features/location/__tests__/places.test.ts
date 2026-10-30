@@ -50,6 +50,14 @@ describe('가짜 모드', () => {
     await expect(deleteUserPlace('없음')).resolves.toBeUndefined();
   });
 
+  it('반경을 저장하고, 같은 이름표를 반경 없이 다시 저장하면 옛 반경이 남지 않음', async () => {
+    expect((await saveUserPlace(spot('알바', { radiusM: 300 }))).radiusM).toBe(300);
+    expect((await listUserPlaces()).find((p) => p.label === '알바')?.radiusM).toBe(300);
+    expect((await saveUserPlace(spot('회사', { radiusM: 100 }))).radiusM).toBe(100); // 처음 값 300을 덮음
+    await saveUserPlace(spot('회사'));
+    expect((await listUserPlaces()).find((p) => p.label === '회사')).not.toHaveProperty('radiusM');
+  });
+
   it('같은 이름표로 저장하면 덮어씀 (자리 그대로, 옛 반경 · 주소는 남지 않음)', async () => {
     await saveUserPlace(spot('회사', { name: '새 회사', lat: 37.5, lng: 127.0 }));
     const list = await listUserPlaces();
@@ -102,6 +110,15 @@ describe('실데이터', () => {
     expect(call.op).toBe('upsert');
     expect(call.options).toEqual({ onConflict: 'user_id,label' });
     expect(call.payload).toEqual({ user_id: 'user-1', label: '학교', name: '정문', address: null, lat: 37.55, lng: 127.07, radius_m: null });
+  });
+
+  it('저장: 고른 반경은 radius_m으로 100~500에 맞춰 보냄', async () => {
+    mockRoutes['user_places:upsert'] = (call) => ({ data: call.payload });
+    const saved = await saveUserPlace(spot('학교', { radiusM: 300 }));
+    expect(saved.radiusM).toBe(300);
+    expect(mockCalls[0].payload).toMatchObject({ label: '학교', radius_m: 300 });
+    await saveUserPlace(spot('학교', { radiusM: 900 }));
+    expect(mockCalls[1].payload).toMatchObject({ radius_m: 500 });
   });
 
   it('저장: 5개 제한 트리거(54000)는 이유 문구, 그 밖의 오류는 원문 그대로', async () => {
