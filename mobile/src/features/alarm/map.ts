@@ -24,6 +24,7 @@ import {
   type IntensityAxis,
   type Level,
   type NextAlarm,
+  type Occurrence,
   type ScheduleItem,
 } from './types';
 
@@ -32,7 +33,9 @@ export type ParticipantRow = Pick<
   Tables<'appointment_participants'>,
   'participant_id' | 'origin_name' | 'transport_type' | 'est_travel_minutes' | 'travel_source' | 'prepare_minutes' | 'buffer_minutes'
 >;
-export type AppointmentRow = Pick<Tables<'appointments'>, 'appointment_id' | 'title' | 'appointment_at' | 'dest_name' | 'importance' | 'recurrence_rule'>;
+export type AppointmentRow = Pick<Tables<'appointments'>, 'appointment_id' | 'title' | 'appointment_at' | 'dest_name' | 'importance' | 'recurrence_rule'> & {
+  series_id?: string; // 반복 묶음 번호 — 같은 반복의 회차는 같은 값 (H02 목록이 묶음당 하나만 보일 때 씀). 안 읽은 쿼리(H03 등)에는 없음
+};
 
 // 한 약속(내 참여 조건)을 화면에 그리는 데 필요한 행 묶음. alarms는 이 참여 조건의 알람 전부 (꺼진 것 · 도착 목표 포함)
 export type AppointmentRows = {
@@ -44,7 +47,7 @@ export type AppointmentRows = {
 };
 
 // 일정 없는 알람 한 줄 (participant_id · routine_id가 모두 NULL인 기상 알람, D46)
-export type StandaloneRow = AlarmRow & Pick<Tables<'alarms'>, 'recurrence_rule'>;
+export type StandaloneRow = AlarmRow & Pick<Tables<'alarms'>, 'recurrence_rule'> & { series_id?: string | null }; // series_id = 반복 묶음 번호 (목록 쿼리만 읽음)
 
 // 일정 없는 알람의 제목 — 서버 commitStandalone · 폰 예약(lib/alarmSync/reconcile STANDALONE_TITLE)과 같은 글자
 export const STANDALONE_TITLE = '알람';
@@ -235,6 +238,67 @@ export function toMorningSource(row: DayRow): MorningSource {
 }
 
 export const byTime = <T extends { at: Date }>(x: T, y: T) => x.at.getTime() - y.at.getTime();
+
+// 알람 목록(H02)은 반복 묶음(series_id)당 한 장 — 지금 이후 가장 가까운 회차 (지난 회차는 안 보임). 묶음 번호가 없거나 한 장뿐인 묶음(반복이 아닌 약속)은 그대로
+//   한 묶음의 회차가 모두 지났으면 가장 최근 지난 회차 하나 (다음 회차가 아직 안 만들어진 반복이 목록에서 사라지지 않게)
+//   L6 안건후보: H02 묶음이 전부 지난 경우 기본안 = 가장 최근 지난 회차 하나를 "지난 일정"에 둠
+//   알람이 있는 회차만 넘길 것 (hasAlarms로 거른 뒤) — 가장 가까운 회차의 알람이 모두 꺼졌다고 묶음 전체가 사라지지 않게
+//   upcoming = 같은 묶음에서 지금 이후 남은 회차 수(보여 주는 회차 포함) — 카드의 "2주치 알람 걸림" 표시에 씀. 묶음 번호가 없으면 0
+//   counted를 주면 그 조건에 맞는 회차만 셈 (켜진 알람이 있는 회차만 — 꺼 둔 회차는 폰에 안 걸려 있음). 보여 줄 회차를 고르는 데는 안 씀
+export function listBySeries<T extends { at: Date }>(
+  entries: readonly { seriesId: string | null | undefined; item: T }[],
+  nowMs: number,
+  counted: (item: T) => boolean = () => true,
+): { item: T; upcoming: number }[] {
+  const bySeries = new Map<string, T[]>();
+  const out: { item: T; upcoming: number }[] = [];
+  for (const { seriesId, item } of entries) {
+    if (!seriesId) {
+      out.push({ item, upcoming: 0 });
+      continue;
+    }
+    const list = bySeries.get(seriesId);
+    if (list) list.push(item);
+    else bySeries.set(seriesId, [item]);
+  }
+  for (const list of bySeries.values()) {
+    const upcoming = list.filter((x) => x.at.getTime() >= nowMs).sort(byTime);
+    if (upcoming.length) out.push({ item: upcoming[0], upcoming: upcoming.filter(counted).length });
+    else out.push({ item: list.reduce((latest, x) => (x.at.getTime() > latest.at.getTime() ? x : latest)), upcoming: 0 });
+  }
+  return out;
+}
+
+export function onePerSeries<T extends { at: Date }>(entries: readonly { seriesId: string | null | undefined; item: T }[], nowMs: number): T[] {
+  return listBySeries(entries, nowMs).map((x) => x.item);
+}
+
+// 알람 목록(H02)용 — 묶음당 하나로 줄이고, 앞으로 회차가 둘 이상인 묶음의 카드에 남은 회차 수(upcomingCount)를 붙임. 시각 순
+export function listOnePerSeries(entries: readonly { seriesId: string | null | undefined; item: Appointment }[], nowMs: number): Appointment[] {
+  return listBySeries(entries, nowMs, (a) => a.enabled)
+    .map(({ item, upcoming }) => (upcoming > 1 ? { ...item, upcomingCount: upcoming } : item))
+    .sort(byTime);
+}
+
+// 반복 일정의 앞으로 회차 (H03) — 지금 이후만, 시각 순. 회차마다 가장 먼저 울릴 켜진 알람(기상 · 준비 · 출발) 시각을 같이 (도착 목표는 울리지 않아 뺌)
+export type OccurrenceRow = {
+  appointment: Pick<AppointmentRow, 'appointment_id' | 'appointment_at'>;
+  alarms: readonly Pick<AlarmRow, 'alarm_type' | 'scheduled_at' | 'is_enabled'>[];
+};
+
+export function toOccurrences(rows: readonly OccurrenceRow[], nowMs: number): Occurrence[] {
+  return rows
+    .map((row): Occurrence => {
+      const times = row.alarms
+        .filter((x) => x.alarm_type !== 'ARRIVE' && x.alarm_type !== 'ROUTINE' && x.is_enabled)
+        .map((x) => parseDbTime(x.scheduled_at))
+        .filter((at) => at.getTime() >= nowMs)
+        .sort((x, y) => x.getTime() - y.getTime());
+      return { id: row.appointment.appointment_id, at: parseDbTime(row.appointment.appointment_at), alarmAt: times[0] ?? null };
+    })
+    .filter((x) => x.at.getTime() >= nowMs)
+    .sort(byTime);
+}
 
 // ---------------------------------------------------------------------------
 // H03 알람 설정

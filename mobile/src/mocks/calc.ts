@@ -35,6 +35,12 @@ export function alarmChain(a: MockAppointment): AlarmTime[] {
   }));
 }
 
+// 켜진 출발(DEPARTURE) 알람의 시각 — 꺼져 있거나 고르지 않았으면 undefined.
+// 실제 폰 꾸러미의 departAt도 같은 규칙임 (lib/alarmSync/reconcile.ts: 출발 알람 행이 있을 때만 넣음). 미루기 "늦어요" 판단에 씀
+export function departAtOf(a: MockAppointment): Date | undefined {
+  return alarmChain(a).find((x) => x.kind === 'DEPARTURE' && x.enabled)?.at;
+}
+
 // ALG-02: 기본 보통 + 매우 중요면 한 단계 + 최근 4주 늦잠 지각 2회 이상이면 한 단계 (상한 강, D69) — 약은 직접 고를 때만
 export function autoLevel(a: MockAppointment): Level {
   return sharedAutoLevel(a.importance, db.lateCount4w);

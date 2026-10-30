@@ -2,7 +2,7 @@
 //   계산(미리 보기)은 DB에 안 쓰고, 저장은 alarm-commit → 응답을 폰에 반영(applyCommit). 요청 · 응답 모양은 request.ts (서버의 H05 초안 모양 하나)
 //   · 고친 값 기록은 따로 insert하지 않고 alarm-commit의 edits로 보냄 — 저장이 성공해야 user_edit_logs에 남음
 //   · 저장은 중복 키를 서버가 아직 안 읽어서(lib/edge) 자동 재시도하지 않음. 읽기(alarm-suggest · place-search)만 한 번 재시도
-import { applyCommit } from '@/lib/alarmSync';
+import { applyCommit, syncNow } from '@/lib/alarmSync';
 import { now } from '@/lib/clock';
 import { dbTimeMs, parseDbTime } from '@/lib/dbTime';
 import { callEdge, EdgeError, messageFor } from '@/lib/edge';
@@ -179,7 +179,7 @@ export async function createAppointment(estimate: Estimate, source?: string): Pr
   const saved = toCreatedAppointment(res, estimate);
 
   try {
-    const summary = await applyCommit(res);
+    const summary = await applyCommit({ ...res, appointment_at: a.at.toISOString() }); // 약속 시각은 맞춘 뒤 훅(onAlarmsSynced)의 upcoming용
     if (summary.failed.length) warnDev('폰에 못 건 알람', summary.failed);
     const items = a.items.map((x) => x.trim()).filter(Boolean);
     if (items.length && res.appointment_id) {
@@ -188,6 +188,10 @@ export async function createAppointment(estimate: Estimate, source?: string): Pr
         .insert(items.map((title) => ({ user_id: userId, appointment_id: res.appointment_id, title: title.slice(0, 100), todo_type: 'ITEM' as const, due_date: dayKey(a.at) })));
       if (error) warnDev('준비물 저장 실패', error);
     }
+    // 반복 일정이면 서버가 다음 회차들(앞으로 14일치)을 만들어 폰에 걸게 함 — 첫 회차는 위에서 이미 걸었고, 나머지는 몇 초 뒤 맞추기가 끝나면 걸림.
+    //   준비물 저장 뒤에 불러야 서버가 회차를 만들 때 준비물을 복사함. 기다리지 않음 — 실패해도 저장 흐름은 그대로 (syncNow는 던지지 않고, 못 건 회차는 다음 앱 열림 때 걸림)
+    //   묶음 번호(series_id)는 새 약속이면 appointment_id (DB가 채움, 설계메모 1절)
+    if (a.recurrenceRule && res.appointment_id) void syncNow({ rollSeriesId: res.appointment_id });
   } catch (e) {
     warnDev('저장 뒤처리 실패', e);
   }
@@ -233,7 +237,7 @@ export async function saveAlarmSettings(id: string, draft: AlarmSettingsDraft): 
   //   실패 토스트가 뜨면 저장된 줄 모르고 화면이 저장 전 상태로 남고, 같은 저장을 다시 눌러도 같은 서버 상태일 뿐임.
   //   폰 예약은 다음 맞추기(앱이 앞에 올 때 reconcile)에서 서버 값으로 다시 걸림. 둘은 서로 영향이 없게 따로 감쌈
   try {
-    const summary = await applyCommit(res);
+    const summary = await applyCommit({ ...res, appointment_at: saved.at.toISOString() });
     if (summary.failed.length) warnDev('폰에 못 건 알람', summary.failed);
   } catch (e) {
     warnDev('저장 뒤처리 실패 (폰 예약)', e);
@@ -268,6 +272,8 @@ export async function saveStandaloneAlarm(input: StandaloneInput): Promise<Appoi
   try {
     const summary = await applyCommit(res);
     if (summary.failed.length) warnDev('폰에 못 건 알람', summary.failed);
+    // 새로 만든 반복 알람이면 다음 회차들도 바로 넘김 (createAppointment와 같음). 묶음 번호 = 첫 회차의 alarm_id. 고치기(alarmId 있음)는 어느 회차인지 몰라 건너뜀 — 다음 앱 열림 때 넘김
+    if (!input.alarmId && row.recurrence_rule) void syncNow({ rollSeriesId: row.alarm_id });
   } catch (e) {
     warnDev('저장 뒤처리 실패', e);
   }

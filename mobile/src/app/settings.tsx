@@ -1,5 +1,6 @@
+import { router } from 'expo-router';
 import { useState } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { Pressable, StyleSheet, View } from 'react-native';
 
 import { Button, Card, KeyValueRow, Screen, SectionHeader, Sheet, Text, toast, TopBar } from '@/components/ui';
 import { listPlaces } from '@/features/alarm/api';
@@ -7,6 +8,7 @@ import { PlaceSearchSheet } from '@/features/alarm/components/PlaceSearchSheet';
 import type { Place } from '@/features/alarm/types';
 import { useAuth } from '@/features/auth/AuthProvider';
 import { DataModeToggle } from '@/features/auth/DataModeToggle';
+import { openAppNotificationSettings } from '@/features/permissions';
 import { shouldSaveHandle } from '@/features/onboarding/validate';
 import { isHandleTaken, saveProfileFields } from '@/features/profile/api';
 import { EditRow } from '@/features/profile/components/EditRow';
@@ -19,6 +21,7 @@ import { canUseRealData, modeLocked } from '@/lib/mode';
 import { backOrHome } from '@/lib/nav';
 import { signOutAndCleanup } from '@/lib/session';
 import { useAction } from '@/lib/useAction';
+import { colors, size } from '@/theme';
 
 const PROVIDER_NAME: Record<string, string> = { kakao: '카카오', google: 'Google' };
 
@@ -72,7 +75,7 @@ export default function SettingsScreen() {
 
   return (
     <Screen>
-      <TopBar onBack={backOrHome} />
+      <TopBar onBack={backOrHome} screenId="L03" />
       <Text variant="title">설정</Text>
 
       <SectionHeader title="계정" />
@@ -97,9 +100,37 @@ export default function SettingsScreen() {
             <EditRow first label="잠귀" value={WAKE_SENSITIVITY_NAME[profile.wake_sensitivity]} onPress={open('sleep')} />
             <EditRow label="깨우는 여유" value={WAKE_MARGIN_NAME[profile.wake_margin]} onPress={open('prepare')} />
           </Card>
-          {/* TODO #233 머지 뒤: "알림" 줄 → openAppNotificationSettings (features/permissions) */}
         </>
       ) : null}
+
+      {/* 알람이 잘 울리게 하는 폰 설정 — 값이 아니라 길이라 프로필 값(위 "알람" 절)과 나눔. 가짜 모드에서도 보임 */}
+      <SectionHeader title="알람 점검" />
+      <Card>
+        {profile ? (
+          <Pressable
+            onPress={() => void openAppNotificationSettings()}
+            accessibilityRole="button"
+            accessibilityLabel="알림 설정 열기"
+            style={({ pressed }) => [styles.linkRow, pressed && styles.pressed]}
+          >
+            <Text variant="body">알림 설정 열기</Text>
+            <Text variant="body" tone="sub">
+              ›
+            </Text>
+          </Pressable>
+        ) : null}
+        <Pressable
+          onPress={() => router.push('/ring-check')}
+          accessibilityRole="button"
+          accessibilityLabel="알람이 안 울릴 때"
+          style={({ pressed }) => [styles.linkRow, profile && styles.linkDivider, pressed && styles.pressed]}
+        >
+          <Text variant="body">알람이 안 울릴 때</Text>
+          <Text variant="body" tone="sub">
+            ›
+          </Text>
+        </Pressable>
+      </Card>
 
       {enabled && user ? (
         <View style={styles.stack}>
@@ -156,4 +187,7 @@ export default function SettingsScreen() {
 const styles = StyleSheet.create({
   stack: { gap: 8, marginTop: 16 },
   note: { marginTop: 4, marginHorizontal: 4 },
+  linkRow: { minHeight: size.touch, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
+  linkDivider: { borderTopWidth: 1, borderTopColor: colors.line },
+  pressed: { opacity: 0.6 },
 });

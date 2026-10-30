@@ -5,10 +5,10 @@ import type { RingPackage as PhoneRingPackage, ScheduledAlarm } from '@capstone/
 import { buildRingPackages, subtitleFor, type PackageSource } from '@shared/ring-package.ts';
 import { safeTimeZone } from '@shared/tz.ts';
 
-import { normalizeDbTime, parseDbTime } from '../dbTime';
+import { dbTimeMs, normalizeDbTime, parseDbTime } from '../dbTime';
 
 // 서버 알람을 폰에 미리 걸어 두는 기간. 이보다 먼 알람은 폰에 없어도 더하지 않음 (이미 폰에 있는 것은 이 기간 밖이어도 시각 · 강도를 맞춤)
-// 작성자 판단 — 되돌리기 쉬움. 반복 알람은 서버가 다음 회차 하나만 만들어서(docs/alarm-core.md) 대부분 며칠 안쪽
+// 작성자 판단 — 되돌리기 쉬움. 반복 일정은 서버(alarm-roll)가 14일치 회차를 미리 만들어 두므로(docs/alarm-core.md) 이 기간과 같은 길이
 export const RECONCILE_WINDOW_DAYS = 14;
 export const DEFAULT_TIME_ZONE = 'Asia/Seoul';
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -20,7 +20,41 @@ export type SyncRow = PackageSource & {
   appointment: { title: string; appointment_at: string; dest_name: string | null } | null; // 약속 알람이면
   travel_minutes?: number | null; // 약속 알람이면 내 참여 조건의 est_travel_minutes — 출발 알림의 도착 시각 · 여유 (없으면 그 줄이 빠짐)
   routine_title: string | null; // 루틴 알람이면
+  departed_at?: string | null; // 약속 알람이면 내 참여 조건의 출발 기록 시각 (dropRecorded가 봄)
+  arrived_at?: string | null; // 〃 도착 기록 시각
 };
+
+// 출발 · 도착 기록이 있으면 폰에 걸지 않을 알람 (L2 요청, 원탭 줄이기 #240) — 기상(WAKE)은 그대로
+//   · 출발 기록(departed_at) → 준비 · 출발 알람 (이미 나섰으니 "곧 출발하세요"가 필요 없음)
+//   · 도착 기록(arrived_at) → 준비 · 출발 · 도착 목표 알람
+//   서버 행은 지우지 않고 폰 예약 대상에서만 뺌. 이미 폰에 걸린 것은 "서버에 없음"으로 지워짐 (planReconcile)
+const DONE_BY_DEPARTURE: ReadonlySet<string> = new Set(['PREPARE', 'DEPARTURE']);
+const DONE_BY_ARRIVAL: ReadonlySet<string> = new Set(['PREPARE', 'DEPARTURE', 'ARRIVE']);
+
+export function dropRecorded(rows: readonly SyncRow[]): { kept: SyncRow[]; dropped: SyncRow[] } {
+  const kept: SyncRow[] = [];
+  const dropped: SyncRow[] = [];
+  for (const row of rows) {
+    const done = (row.arrived_at != null && DONE_BY_ARRIVAL.has(row.alarm_type)) || (row.departed_at != null && DONE_BY_DEPARTURE.has(row.alarm_type));
+    (done ? dropped : kept).push(row);
+  }
+  return { kept, dropped };
+}
+
+// 이번에 본 앞으로 알람의 참여 행 — 약속 알람의 참여 조건(participant_id)마다 하나, 약속 시각 빠른 순 (onAlarmsSynced의 upcoming)
+//   일정 없는 알람 · 루틴 알람은 약속이 없어 빠짐. 약속 시각을 못 읽는 행도 뺌. 시각은 toISOString 글자
+export type UpcomingParticipant = { participantId: string; appointmentAt: string };
+
+export function upcomingParticipants(rows: readonly SyncRow[]): UpcomingParticipant[] {
+  const seen = new Map<string, UpcomingParticipant>();
+  for (const row of rows) {
+    if (!row.participant_id || !row.appointment || seen.has(row.participant_id)) continue;
+    const ms = dbTimeMs(row.appointment.appointment_at);
+    if (Number.isNaN(ms)) continue;
+    seen.set(row.participant_id, { participantId: row.participant_id, appointmentAt: new Date(ms).toISOString() });
+  }
+  return [...seen.values()].sort((a, b) => Date.parse(a.appointmentAt) - Date.parse(b.appointmentAt));
+}
 
 export const STANDALONE_TITLE = '알람'; // 일정 없는 알람 — 서버 commitStandalone과 같은 이름
 

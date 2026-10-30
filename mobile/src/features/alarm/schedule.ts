@@ -1,7 +1,8 @@
 // 알람 화면이 같이 쓰는 순수 계산 — 데이터를 읽지 않고 시각만 받음 (단위 테스트)
 //   H01 다음 알람 카드 · H02 날짜 묶음 · H03 바뀌는 알람 · H05 처음 시각 · 울릴 알람 수
-import { addDays, addMinutes, dayKey, formatDateShort, minuteOfDay, minutesBetween, startOfDay } from '@/lib/format';
+import { addDays, addMinutes, dayKey, formatDateShort, formatTime, minuteOfDay, minutesBetween, startOfDay } from '@/lib/format';
 
+import { repeatLabel, rruleToRepeat } from './repeat';
 import { KIND_LABEL, type AlarmKind, type AlarmTime, type Appointment } from './types';
 
 // 저녁(오후 6시부터)에는 홈이 내일을 보여 줌 — 홈이 18시에 바뀌는 것은 D13
@@ -60,6 +61,38 @@ export function groupByDay(list: Appointment[]) {
   const days = new Map<string, Appointment[]>();
   for (const a of list) days.set(dayKey(a.at), [...(days.get(dayKey(a.at)) ?? []), a]);
   return [...days.values()];
+}
+
+// 반복 일정 한 장 (H02 카드) — 목록에는 반복 하나당 한 장만 나오고, 그 카드가 "다음 회차 · 반복 요일"과 앞으로 회차가 폰에 걸렸다는 사실을 한 줄씩 보여 줌
+//   반복이 아니거나 카드의 회차가 이미 지났으면 null. 서버가 앞으로 14일치 회차를 미리 만들어 폰에 걸어 둠 — 앞으로 회차가 둘 이상일 때만 ahead
+//   nextOccurrence = 카드가 가리키는(지금 이후 가장 가까운) 회차 날짜 · 시각. 회차 목록 전체는 H03에서만 보임
+export const AHEAD_NOTE = '2주치 알람 걸림';
+
+export type SeriesInfo = { nextOccurrence: string; repeatSummary: string; ahead: boolean };
+
+export function seriesInfo(a: Pick<Appointment, 'at' | 'recurrenceRule' | 'upcomingCount' | 'enabled'>, current: Date): SeriesInfo | null {
+  const days = rruleToRepeat(a.recurrenceRule);
+  if (!days.length) return null;
+  if (a.at.getTime() < current.getTime()) return null; // 지난 회차(지난 일정으로 접힌 묶음)는 "다음 회차"가 아니라 줄을 안 붙임
+  return {
+    nextOccurrence: `${formatDateShort(a.at)} ${formatTime(a.at)}`,
+    repeatSummary: repeatLabel(days),
+    ahead: a.enabled && (a.upcomingCount ?? 0) > 1, // 꺼 둔 카드에는 "알람 걸림"을 안 보임
+  };
+}
+
+// 카드 아래 줄 (AppointmentAlarmCard) — "다음 회차 5월 26일 (월) 오전 9:00 · 매주 월 · 수" + (앞으로 회차가 걸려 있으면) 작은 글자 한 줄. 다음 회차 값이 없으면 줄 없음
+export function seriesLines(p: { nextOccurrence?: string; repeatSummary?: string; ahead?: boolean }): string[] {
+  if (!p.nextOccurrence) return [];
+  return [`다음 회차 ${[p.nextOccurrence, p.repeatSummary].filter(Boolean).join(' · ')}`, ...(p.ahead ? [AHEAD_NOTE] : [])];
+}
+
+// H03 회차 목록에 처음 보이는 회차 수 — 나머지는 "더 보기"로 접음
+export const OCCURRENCES_SHOWN = 3;
+
+// 접었으면 앞의 OCCURRENCES_SHOWN개만, 펼쳤으면 전부. hidden = 접힌 회차 수 (0이면 "더 보기"가 필요 없음)
+export function visibleOccurrences<T>(list: readonly T[], expanded: boolean): { shown: readonly T[]; hidden: number } {
+  return { shown: expanded ? list : list.slice(0, OCCURRENCES_SHOWN), hidden: Math.max(0, list.length - OCCURRENCES_SHOWN) };
 }
 
 // 저장하면 시각이 바뀌는 알람 (기상 · 준비 · 출발) — 확인 시트에 전부 보여 줌

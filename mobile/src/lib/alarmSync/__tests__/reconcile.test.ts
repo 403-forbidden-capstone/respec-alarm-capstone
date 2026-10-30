@@ -2,7 +2,7 @@ import { describe, expect, it, jest } from '@jest/globals';
 import type { RingPackage, ScheduledAlarm } from '@capstone/alarm-core';
 
 import { buildRingPlan } from '../../../../modules/alarm-core/src/plan'; // 폰 꾸러미가 알림에 쓰는 줄(heading) 확인용 — 알람 코어 본체는 jest에서 네이티브를 찾으므로 계산 파일만
-import { buildServerPackages, expandWithTextSiblings, planReconcile, RECONCILE_WINDOW_DAYS, type ServerPackage, type SyncRow } from '../reconcile';
+import { buildServerPackages, dropRecorded, expandWithTextSiblings, planReconcile, RECONCILE_WINDOW_DAYS, upcomingParticipants, type ServerPackage, type SyncRow } from '../reconcile';
 
 const NOW = Date.parse('2026-10-19T12:00:00.000Z'); // 한국 시각 21:00
 const MIN = 60_000;
@@ -325,5 +325,73 @@ describe('일부 알람만 맞출 때 출발 알람의 약속 알람을 대상�
     const withoutDeparture = server.filter((x) => x.type !== 'DEPARTURE');
     const expanded = expandWithTextSiblings(new Set(['p1-dep']), withoutDeparture, new Map([['p1-dep', 'p1']]));
     expect([...expanded].sort()).toEqual(['p1-dep', 'p1-prep', 'p1-wake']);
+  });
+});
+
+describe('출발 · 도착 기록이 있는 약속의 알람은 폰 예약 대상에서 뺌 (dropRecorded)', () => {
+  const rows = [
+    row({ alarm_id: 'wake', alarm_type: 'WAKE', scheduled_at: '2026-10-19T22:30:00.000Z' }),
+    row({ alarm_id: 'prep', alarm_type: 'PREPARE', scheduled_at: '2026-10-19T23:00:00.000Z' }),
+    row({ alarm_id: 'dep', alarm_type: 'DEPARTURE', scheduled_at: '2026-10-20T00:00:00.000Z' }),
+    row({ alarm_id: 'arr', alarm_type: 'ARRIVE', scheduled_at: '2026-10-20T00:50:00.000Z' }),
+  ];
+  const ids = (list: readonly SyncRow[]) => list.map((r) => r.alarm_id);
+  const withRecord = (record: Pick<SyncRow, 'departed_at' | 'arrived_at'>) => rows.map((r) => ({ ...r, ...record }));
+
+  it('기록이 없으면(null · 칸 없음) 그대로', () => {
+    expect(ids(dropRecorded(rows).kept)).toEqual(['wake', 'prep', 'dep', 'arr']);
+    expect(ids(dropRecorded(withRecord({ departed_at: null, arrived_at: null })).kept)).toEqual(['wake', 'prep', 'dep', 'arr']);
+  });
+
+  it('출발 기록 → 준비 · 출발 알람을 뺌 (기상 · 도착 목표는 남김)', () => {
+    const { kept, dropped } = dropRecorded(withRecord({ departed_at: '2026-10-20T00:01:00.000Z', arrived_at: null }));
+    expect(ids(kept)).toEqual(['wake', 'arr']);
+    expect(ids(dropped)).toEqual(['prep', 'dep']);
+  });
+
+  it('도착 기록 → 준비 · 출발 · 도착 목표를 뺌 (기상은 남김)', () => {
+    const { kept } = dropRecorded(withRecord({ departed_at: '2026-10-20T00:01:00.000Z', arrived_at: '2026-10-20T00:40:00.000Z' }));
+    expect(ids(kept)).toEqual(['wake']);
+    expect(ids(dropRecorded(withRecord({ departed_at: null, arrived_at: '2026-10-20T00:40:00.000Z' })).kept)).toEqual(['wake']); // 출발 기록 없이 도착만 있어도
+  });
+
+  it('참여 행마다 따로 — 다른 약속(다른 참여 행)의 알람은 그대로', () => {
+    const other = row({ alarm_id: 'other-dep', alarm_type: 'DEPARTURE', scheduled_at: '2026-10-21T00:00:00.000Z', participant_id: 'p2' });
+    const mixed = [...withRecord({ departed_at: '2026-10-20T00:01:00.000Z' }), other];
+    expect(ids(dropRecorded(mixed).kept)).toEqual(['wake', 'arr', 'other-dep']);
+  });
+
+  it('빼고 계획하면 폰에 이미 걸린 준비 · 출발은 "서버에 없음"으로 지워지고, 기상은 그대로 둠 (planReconcile)', () => {
+    const { kept } = dropRecorded(withRecord({ departed_at: '2026-10-20T00:01:00.000Z' }));
+    const server = buildServerPackages(kept);
+    const phone = [
+      onPhone('wake', Date.parse('2026-10-19T22:30:00.000Z')),
+      onPhone('prep', Date.parse('2026-10-19T23:00:00.000Z'), { type: 'PREPARE' }),
+      onPhone('dep', Date.parse('2026-10-20T00:00:00.000Z'), { type: 'DEPARTURE' }),
+    ];
+    const plan = planReconcile({ server, phone, nowMs: NOW });
+    expect(plan.cancel.sort()).toEqual(['dep', 'prep']);
+    expect(plan.schedule.map((p) => p.alarmId)).toEqual(['arr']); // 폰에 없는 도착 목표는 새로 걺 (이 시험의 폰에 없어서)
+  });
+});
+
+describe('이번에 본 앞으로 알람의 참여 행 (upcomingParticipants)', () => {
+  it('참여 행마다 하나, 약속 시각 빠른 순 — 일정 없는 알람 · 루틴 알람은 빠짐', () => {
+    const late = { title: '저녁', appointment_at: '2026-10-21T10:00:00.123456+00:00', dest_name: null };
+    const list = upcomingParticipants([
+      row({ alarm_id: 'a1', alarm_type: 'WAKE', scheduled_at: '2026-10-21T08:00:00.000Z', participant_id: 'late', appointment: late }),
+      row({ alarm_id: 'a2', alarm_type: 'DEPARTURE', scheduled_at: '2026-10-21T09:00:00.000Z', participant_id: 'late', appointment: late }),
+      row({ alarm_id: 'b1', alarm_type: 'WAKE', scheduled_at: '2026-10-19T22:30:00.000Z', participant_id: 'early' }),
+      row({ alarm_id: 'c1', alarm_type: 'WAKE', scheduled_at: '2026-10-20T22:30:00.000Z', participant_id: null, appointment: null }),
+      row({ alarm_id: 'd1', alarm_type: 'ROUTINE', scheduled_at: '2026-10-20T22:30:00.000Z', participant_id: null, routine_id: 'r1', appointment: null, routine_title: '저녁 루틴' }),
+    ]);
+    expect(list).toEqual([
+      { participantId: 'early', appointmentAt: '2026-10-20T01:00:00.000Z' },
+      { participantId: 'late', appointmentAt: '2026-10-21T10:00:00.123Z' }, // 마이크로초는 밀리초 3자리로
+    ]);
+  });
+
+  it('약속 시각을 읽을 수 없는 행은 뺌', () => {
+    expect(upcomingParticipants([row({ alarm_id: 'x', alarm_type: 'WAKE', scheduled_at: '2026-10-19T22:30:00.000Z', appointment: { title: '?', appointment_at: '이상한 글자', dest_name: null } })])).toEqual([]);
   });
 });
