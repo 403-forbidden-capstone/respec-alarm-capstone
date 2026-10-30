@@ -98,7 +98,9 @@ test('직접 고른 시각 · 강도는 MANUAL로, 고친 값 기록에 알람 i
   await persistAppointment(ctx, commitArgs(draft, { edits: [{ screen: 'H05', field: 'scheduled_at', alarmType: 'WAKE', autoValue: 'a', editedValue: 'b' }, { screen: 'H05', field: 'buffer_minutes', autoValue: 10, editedValue: 15 }] }));
 
   const wake = db.rows('alarms').find((a) => a.alarm_type === 'WAKE')!;
-  assert.deepEqual([hm(wake.scheduled_at), wake.time_source, wake.intensity_source, wake.intensity], ['07:30', 'MANUAL', 'MANUAL', 'STRONG']);
+  // 진동을 직접 고르면 vibration 칸에, intensity(전체 세기)는 자동(보통) 그대로
+  assert.deepEqual([hm(wake.scheduled_at), wake.time_source, wake.intensity_source, wake.intensity, wake.vibration], ['07:30', 'MANUAL', 'MANUAL', 'NORMAL', 'STRONG_CONTINUOUS']);
+  assert.equal(db.rows('alarms').find((a) => a.alarm_type === 'PREPARE')!.vibration, 'STRONG_CONTINUOUS'); // 한 일정의 강도라 모든 종류에 같은 값
   assert.equal(db.rows('alarms').find((a) => a.alarm_type === 'PREPARE')!.time_source, 'AUTO');
 
   const logs = db.rows('user_edit_logs');
@@ -249,8 +251,9 @@ test('일정 없는 알람 고치기: 끄면 꾸러미에서 빠지고 canceled_
   assert.deepEqual([off.ring_packages, off.canceled_alarm_ids], [[], [id]]);
 
   const on = await commitStandalone(ctx, { alarm: { alarmId: id, isEnabled: true, scheduledAt: kst(23, 450), recurrenceRule: null, levels: { vibration: 2 } }, edits: [], timeZone: 'Asia/Seoul' });
-  assert.deepEqual([db.rows('alarms')[0].recurrence_rule, db.rows('alarms')[0].intensity, db.rows('alarms')[0].intensity_source], [null, 'STRONG', 'MANUAL']);
+  assert.deepEqual([db.rows('alarms')[0].recurrence_rule, db.rows('alarms')[0].intensity, db.rows('alarms')[0].vibration, db.rows('alarms')[0].intensity_source], [null, 'NORMAL', 'STRONG_CONTINUOUS', 'MANUAL']);
   assert.deepEqual(on.ring_packages.map((p) => p.alarmId), [id]);
+  assert.deepEqual([on.ring_packages[0].intensity, on.ring_packages[0].vibration, on.ring_packages[0].soundKey], ['NORMAL', 'STRONG_CONTINUOUS', 'theme_default']); // 꾸러미에는 해석된 값
   assert.equal(db.rows('alarms').length, 1);
 });
 
@@ -291,7 +294,8 @@ test('일정 없는 알람: 시각 없이 강도만 · 켜기만 고치면 저�
   });
 
   const strong = await commitStandalone(ctx, { alarm: { alarmId: 'old', levels: { vibration: 2 } }, edits: [], timeZone: 'Asia/Seoul' });
-  assert.deepEqual([db.rows('alarms')[0].intensity, db.rows('alarms')[0].intensity_source], ['STRONG', 'MANUAL']);
+  // 진동을 강으로 직접 고르면 vibration 칸에 — 전체 세기(intensity)는 자동 단계(보통) 그대로
+  assert.deepEqual([db.rows('alarms')[0].intensity, db.rows('alarms')[0].vibration, db.rows('alarms')[0].intensity_source], ['NORMAL', 'STRONG_CONTINUOUS', 'MANUAL']);
   assert.equal(strong.alarms[0].scheduled_at, kst(21, 420).toISOString()); // 시각은 그대로
 
   const on = await commitStandalone(ctx, { alarm: { alarmId: 'old', isEnabled: true }, edits: [], timeZone: 'Asia/Seoul' });

@@ -9,7 +9,7 @@ import type { AppointmentDetail } from './types';
 
 // 참여 조건 하나 + 약속 + 그룹 이름 + 이 참여 조건의 알람 전부 (꺼진 것 · 도착 목표 포함). appointments!inner = 약속이 있는 참여 조건만, 약속 날짜로 거를 수 있음
 const PARTICIPANT_SELECT =
-  'participant_id, origin_name, transport_type, est_travel_minutes, travel_source, prepare_minutes, buffer_minutes, appointments!inner(appointment_id, series_id, title, appointment_at, dest_name, importance, recurrence_rule, groups(group_name)), alarms(alarm_id, alarm_type, scheduled_at, intensity, voice_tone, sound_key, is_enabled, time_source, intensity_source)';
+  'participant_id, origin_name, transport_type, est_travel_minutes, travel_source, prepare_minutes, buffer_minutes, appointments!inner(appointment_id, series_id, title, appointment_at, dest_name, importance, recurrence_rule, groups(group_name)), alarms(alarm_id, alarm_type, scheduled_at, intensity, voice_tone, sound_key, vibration, is_enabled, time_source, intensity_source)';
 
 // 목록 상한 — 넘으면 가까운 날짜부터 LIST_LIMIT개만 (정렬 없이 limit하면 어느 줄이 오는지 정해지지 않으므로 날짜순으로 정렬한 뒤 자름)
 //   약속 쪽은 PostgREST가 to-one 임베드 칸으로 정렬하는 `appointments(appointment_at)` 형식(PostgREST 11 이상)
@@ -132,7 +132,7 @@ export function loadDayRows(userId: string, from: string, to: string) {
 export async function loadStandaloneRows(userId: string, since: string): Promise<StandaloneRow[]> {
   const { data, error } = await supabase
     .from('alarms')
-    .select('alarm_id, series_id, alarm_type, scheduled_at, intensity, voice_tone, sound_key, is_enabled, time_source, intensity_source, recurrence_rule')
+    .select('alarm_id, series_id, alarm_type, scheduled_at, intensity, voice_tone, sound_key, vibration, is_enabled, time_source, intensity_source, recurrence_rule')
     .eq('user_id', userId)
     .eq('alarm_type', 'WAKE')
     .is('participant_id', null)
@@ -148,7 +148,7 @@ export async function loadStandaloneRows(userId: string, since: string): Promise
 export async function loadStandaloneRow(userId: string, alarmId: string): Promise<StandaloneRow | null> {
   const { data, error } = await supabase
     .from('alarms')
-    .select('alarm_id, alarm_type, scheduled_at, intensity, voice_tone, sound_key, is_enabled, time_source, intensity_source, recurrence_rule')
+    .select('alarm_id, alarm_type, scheduled_at, intensity, voice_tone, sound_key, vibration, is_enabled, time_source, intensity_source, recurrence_rule')
     .eq('user_id', userId)
     .eq('alarm_id', alarmId)
     .is('participant_id', null)

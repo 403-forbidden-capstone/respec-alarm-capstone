@@ -43,6 +43,8 @@ export {
   snoozeLateMinutes,
   snoozeLimitNotice,
   snoozeRingAt,
+  soundKeyOf,
+  vibrationOf,
   wakeNowBanner,
   unansweredSpanMillis,
   volumePercentFor,
@@ -108,7 +110,7 @@ export async function cancelAll(): Promise<void> {
   await backend.cancelAll();
 }
 
-/** 폰에 걸린 예약 목록 (다음 울릴 시각 순) — 서버 alarms와 id · atMillis · intensity로 맞춰 봄 */
+/** 폰에 걸린 예약 목록 (다음 울릴 시각 순) — 서버 alarms와 id · atMillis · intensity · soundKey · vibration으로 맞춰 봄 */
 export async function list(): Promise<ScheduledAlarm[]> {
   return backend.list();
 }

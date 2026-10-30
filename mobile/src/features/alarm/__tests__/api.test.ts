@@ -470,7 +470,7 @@ describe('고친 값 기록 (user_edit_logs, 가짜)', () => {
     expect(logs).toHaveLength(2); // 따라온 준비 알람은 사용자가 고른 값이 아니라 기록하지 않음
   });
 
-  it('종류별 켜기 · 강도 — 켜기는 알람마다, 강도 세 칸은 DB 칸 이름(배경음 sound_key · 말소리 voice_tone · 진동 intensity)으로', async () => {
+  it('종류별 켜기 · 강도 — 켜기는 알람마다, 강도 세 칸은 DB 칸 이름(배경음 sound_key · 말소리 voice_tone · 진동 vibration)으로', async () => {
     await edit({ kinds: { WAKE: true, PREPARE: false, DEPARTURE: true }, levels: { sound: 2, voice: 0, vibration: 1 } });
     await edit({ levels: { sound: null, voice: 0, vibration: 1 } });
     const logs = await listEditLogs();
@@ -478,7 +478,7 @@ describe('고친 값 기록 (user_edit_logs, 가짜)', () => {
       ['alarm_enabled', 'PREPARE', true, false],
       ['sound_key', '', 1, 2], // 자동 강도 = 중요도 중요 1점 → 중(1)
       ['voice_tone', '', 1, 0],
-      ['intensity', '', 1, 1],
+      ['vibration', '', 1, 1],
       ['sound_key', '', 1, null],
     ]);
     expect(logs[0]).toMatchObject({ alarmId: 'a1:PREPARE', appointmentId: 'a1' });

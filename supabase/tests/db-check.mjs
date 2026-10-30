@@ -1951,6 +1951,48 @@ await check('날짜 유니크 · 회차 하나 쓰기: 같은 (만든 사람, �
   return ok ? true : { id1, again, counts, appt, part, alarms, todos, enumLabels, dupAppt, otherCreator, dupAlarm, nextDay, rolledBack, before, after, partsBefore, partsAfter, noSeries, noTitle };
 });
 
+// ---- ②-1 진동 칸 (alarms.vibration, 이슈 #312 · D1 A) -----------------------
+
+await check('진동 칸: 기본 NULL(강도를 따름) · 세 값만 받는 check · 주인은 고치고 남은 못 고침 · roll_insert_occurrence가 넘긴 vibration을 그대로 이어 씀(없으면 NULL)', async () => {
+  await svc();
+  const sa = await insStandalone(E, { at: '2026-12-02T07:30:00+09:00' });
+  const col = (await q(`select data_type, is_nullable, column_default from information_schema.columns where table_schema = 'public' and table_name = 'alarms' and column_name = 'vibration'`))[0];
+  const dflt = (await q(`select vibration from public.alarms where alarm_id = $1`, [sa.alarm_id]))[0].vibration;
+  const bad = await expectErr(() => q(`update public.alarms set vibration = 'LOUD' where alarm_id = $1`, [sa.alarm_id]), /alarms_vibration_check/);
+  const badInsert = await expectErr(() => q(`insert into public.alarms (user_id, alarm_type, scheduled_at, vibration) values ($1, 'WAKE', now(), 'strong')`, [E]), /alarms_vibration_check/);
+  const allowed = [];
+  for (const v of ['NONE', 'SHORT_REPEAT', 'STRONG_CONTINUOUS']) {
+    allowed.push((await q(`update public.alarms set vibration = $2 where alarm_id = $1 returning vibration`, [sa.alarm_id, v]))[0].vibration);
+  }
+  // 주인은 직접 고름 / 자동(NULL)으로 되돌림, 권한 없는 다른 사람은 0행
+  await as(E);
+  const mine = await q(`update public.alarms set vibration = 'NONE', intensity_source = 'MANUAL' where alarm_id = $1 returning vibration`, [sa.alarm_id]);
+  const back = await q(`update public.alarms set vibration = null where alarm_id = $1 returning vibration`, [sa.alarm_id]);
+  await as(D);
+  const stranger = await q(`update public.alarms set vibration = 'STRONG_CONTINUOUS' where alarm_id = $1 returning 1`, [sa.alarm_id]);
+  await su();
+  const kept = (await q(`select vibration from public.alarms where alarm_id = $1`, [sa.alarm_id]))[0].vibration;
+  // 반복 다음 회차: 직전 회차의 vibration을 서버가 실어 보내면 그대로 들어가고, 안 실으면(자동) NULL
+  await svc();
+  const S = rollBase.series_id;
+  const picked = await rollCall(E, S, '2026-12-02', {
+    alarms: [{ alarm_type: 'WAKE', scheduled_at: '2026-12-02T07:30:00+09:00', intensity: 'NORMAL', sound_key: 'theme_calm', vibration: 'STRONG_CONTINUOUS', intensity_source: 'MANUAL' }, { alarm_type: 'DEPARTURE', scheduled_at: '2026-12-02T09:00:00+09:00' }],
+  });
+  const auto = await rollCall(E, S, '2026-12-09');
+  const badRoll = await expectErr(() => rollCall(E, S, '2026-12-16', { alarms: [{ alarm_type: 'WAKE', scheduled_at: '2026-12-16T07:30:00+09:00', vibration: 'LOUD' }] }), /alarms_vibration_check/);
+  const rolled = await q(`select a.alarm_type::text as t, a.vibration, a.intensity::text as intensity, a.sound_key from public.alarms a
+                          join public.appointment_participants ap on ap.participant_id = a.participant_id where ap.appointment_id = any($1::uuid[]) order by a.alarm_type::text`, [[picked, auto]]);
+  const byType = (id) => rolled.filter((x) => x.t === 'WAKE').map((x) => x.vibration);
+  const wakes = rolled.filter((x) => x.t === 'WAKE');
+  const gone = await q(`select 1 from public.appointments where creator_id = $1 and series_id = $2 and occurrence_on = '2026-12-16'`, [E, S]);   // 틀린 값이면 회차 전체가 안 남음
+  const ok = col.data_type === 'text' && col.is_nullable === 'YES' && col.column_default === null && dflt === null
+    && bad === true && badInsert === true && allowed.join() === 'NONE,SHORT_REPEAT,STRONG_CONTINUOUS'
+    && mine.length === 1 && mine[0].vibration === 'NONE' && back.length === 1 && back[0].vibration === null && stranger.length === 0 && kept === null
+    && wakes.length === 2 && wakes.filter((x) => x.vibration === 'STRONG_CONTINUOUS').length === 1 && wakes.filter((x) => x.vibration === null).length === 1
+    && rolled.filter((x) => x.t === 'DEPARTURE').every((x) => x.vibration === null) && badRoll === true && gone.length === 0;
+  return ok ? true : { col, dflt, bad, badInsert, allowed, mine, back, stranger, kept, rolled, badRoll, gone, byType: byType() };
+});
+
 // ---- ③ 열쇠 칸 ---------------------------------------------------------
 
 await check('열쇠 칸: 묶음 · 날짜는 한 번 정하면 못 바꿈(service_role · 주인도, NULL → 값도) — 제목 · 시각을 바꿔도 날짜는 그대로', async () => {

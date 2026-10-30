@@ -376,8 +376,8 @@ describe('저장 결과 → 일정 (toCreatedAppointment)', () => {
     appointment_id: 'new-appt',
     participant_id: 'new-part',
     alarms: [
-      { alarm_id: 'n-wake', alarm_type: 'WAKE', scheduled_at: iso('07:45'), is_enabled: true, intensity: 'NORMAL', voice_tone: 'NEUTRAL', sound_key: 'theme_default', time_source: 'MANUAL', intensity_source: 'AUTO', recurrence_rule: null },
-      { alarm_id: 'n-arrive', alarm_type: 'ARRIVE', scheduled_at: iso('09:50'), is_enabled: true, intensity: 'NORMAL', voice_tone: 'NEUTRAL', sound_key: 'theme_default', time_source: 'AUTO', intensity_source: 'AUTO', recurrence_rule: null },
+      { alarm_id: 'n-wake', alarm_type: 'WAKE', scheduled_at: iso('07:45'), is_enabled: true, intensity: 'NORMAL', voice_tone: 'NEUTRAL', sound_key: 'theme_default', vibration: null, time_source: 'MANUAL', intensity_source: 'AUTO', recurrence_rule: null },
+      { alarm_id: 'n-arrive', alarm_type: 'ARRIVE', scheduled_at: iso('09:50'), is_enabled: true, intensity: 'NORMAL', voice_tone: 'NEUTRAL', sound_key: 'theme_default', vibration: null, time_source: 'AUTO', intensity_source: 'AUTO', recurrence_rule: null },
     ],
     ring_packages: [],
     canceled_alarm_ids: [],

@@ -32,6 +32,7 @@ const alarmRow = (id: string, type: AlarmRow['alarm_type'], hhmm: string, overri
   intensity: 'NORMAL',
   voice_tone: 'NEUTRAL',
   sound_key: 'theme_default',
+  vibration: null,
   is_enabled: true,
   time_source: 'AUTO',
   intensity_source: 'AUTO',
@@ -257,15 +258,24 @@ describe('알람 설정 읽기 (toAppointmentDetail · toIntensity)', () => {
   });
 
   it('직접 고른 약은 중요도 보통이어도 그대로 약(직접 고름) — 약은 직접 고를 때만 나옴', () => {
-    const soft = alarmRow('a-wake', 'WAKE', '08:00', { intensity_source: 'MANUAL', intensity: 'SOFT', sound_key: 'theme_calm', voice_tone: 'CALM' });
+    const soft = alarmRow('a-wake', 'WAKE', '08:00', { intensity_source: 'MANUAL', intensity: 'SOFT', sound_key: 'theme_calm', voice_tone: 'CALM', vibration: 'NONE' });
     const intensity = toIntensity([soft], 'LOW', 0);
     expect(intensity.auto).toBe(1);
     expect(intensity.axes).toEqual({ sound: { level: 0, manual: true }, voice: { level: 0, manual: true }, vibration: { level: 0, manual: true } });
   });
 
   it('기상 알람의 직접 값이 먼저, 없으면 다른 알람의 직접 값', () => {
-    const rows = [alarmRow('a-dep', 'DEPARTURE', '09:00', { intensity_source: 'MANUAL', intensity: 'SOFT', sound_key: 'theme_calm', voice_tone: 'CALM' }), alarmRow('a-wake', 'WAKE', '08:00')];
+    const rows = [alarmRow('a-dep', 'DEPARTURE', '09:00', { intensity_source: 'MANUAL', intensity: 'SOFT', sound_key: 'theme_calm', voice_tone: 'CALM', vibration: 'NONE' }), alarmRow('a-wake', 'WAKE', '08:00')];
     expect(toIntensity(rows, 'NORMAL', 0).axes.vibration).toEqual({ level: 0, manual: true });
+  });
+
+  it('진동 축은 vibration 칸만 읽음 — intensity(전체 세기)가 자동과 달라도 vibration이 비었으면 진동은 자동 (D1 A)', () => {
+    const soundOnly = manualStrong({ intensity: 'STRONG' }); // 전체 세기만 강, 진동 칸은 NULL
+    expect(toIntensity([soundOnly], 'NORMAL', 0).axes.vibration).toEqual({ level: 1, manual: false });
+    const picked = manualStrong({ vibration: 'STRONG_CONTINUOUS' });
+    expect(toIntensity([picked], 'NORMAL', 0).axes).toEqual({ sound: { level: 2, manual: true }, voice: { level: 1, manual: false }, vibration: { level: 2, manual: true } });
+    // 고른 진동이 자동과 같은 단계면 자동으로 봄 (다른 축과 같은 규칙)
+    expect(toIntensity([manualStrong({ vibration: 'SHORT_REPEAT' })], 'NORMAL', 0).axes.vibration).toEqual({ level: 1, manual: false });
   });
 
   it('H03 초안의 처음 모양: 직접 입력한 이동 · 직접 고른 시각만 값, 준비는 늘 자동(null)', () => {

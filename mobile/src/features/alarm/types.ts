@@ -44,10 +44,15 @@ export const TRANSPORT_LABEL: Record<Transport, string> = {
 
 export const TRANSPORT_OPTIONS: readonly (readonly [Transport, string])[] = (['TRANSIT', 'CAR', 'WALK'] as const).map((t) => [t, TRANSPORT_LABEL[t]] as const);
 
-export const LEVELS: readonly { name: string; sound: string; voice: string; vibration: string }[] = [
-  { name: '약', sound: '60% · 부드러운 소리', voice: '차분 · 다정', vibration: '없음' },
-  { name: '중', sound: '80% · 기본 소리', voice: '일정 안내형', vibration: '짧게 반복' },
-  { name: '강', sound: '100% · 강한 소리', voice: '직설형', vibration: '강하게 연속' },
+// 약 · 중 · 강 한 단계가 가리키는 것 (D1 A, 실제 동작과 같게):
+//   volume    전체 세기(alarms.intensity)가 정하는 알람 볼륨 — 배경음 축을 따로 골라도 안 바뀜 (알람 코어 BASE_VOLUME_PERCENT)
+//   sound     배경음 축 = 소리 파일 (sound_key theme_calm · theme_default · theme_urgent)
+//   voice     말소리 축 = 기상 알람 음성 문장의 말투 (voice_tone CALM · NEUTRAL · DIRECT, 읽어 주는 것은 D8 · 나중)
+//   vibration 진동 축 = 진동 패턴 (alarms.vibration NONE · SHORT_REPEAT · STRONG_CONTINUOUS)
+export const LEVELS: readonly { name: string; volume: string; sound: string; voice: string; vibration: string }[] = [
+  { name: '약', volume: '60%', sound: '부드러운 소리', voice: '차분 · 다정', vibration: '없음' },
+  { name: '중', volume: '80%', sound: '기본 소리', voice: '일정 안내형', vibration: '짧게 반복' },
+  { name: '강', volume: '100%', sound: '강한 소리', voice: '직설형', vibration: '강하게 연속' },
 ];
 
 export const AXES: readonly (readonly [IntensityAxis, string])[] = [
@@ -241,7 +246,7 @@ export type RingInfo = {
   voiceTone: string; // 말소리 강도 설명
   voiceLine: string; // 음성 안내 문장
   notice?: string; // 알림 한 줄 — 준비 · 출발 알람이 알림 · 울림 화면 머리글로 보여 주는 글자 (서버 꾸러미 notice와 같은 글자, features/alarm/notice.ts). 없으면 종류별 기본 머리글
-  levelLine: string; // 알람 강도 중 · 배경음 80% · 진동 짧게 반복
+  levelLine: string; // 알람 강도 중 · 볼륨 80% · 배경음 기본 소리 · 진동 짧게 반복
   important: boolean;
   snoozeCount: number; // 이미 미룬 횟수 (알람 코어의 snoozeCount) — "미루기 N/한도회"
   snoozeLimit: number; // 미루기 한도 (알람 코어 RingPlan.snoozeLimit, 서버 alarms.snooze_limit 기본 3)
@@ -302,7 +307,7 @@ export type DepartCheck = {
 //     H03 · H05 · S01은 저장(alarm-commit edits)과 같이 남김. H01 홈 감지 정정 줄 · NTF 감지 안내 알림 · H08 기상 정정(D61)은 앱이 user_edit_logs에 바로 남김
 //   autoValue: 고치기 전에 앱이 쓰던 값 — 계산하는 값(이동 · 준비 · 알람 시각 · 강도)은 자동 계산값, 입력하는 값(여유 · 출발 위치 · 이동 수단 · 켜기)은 고치기 전 값
 //   editedValue: 고친 뒤 값. 자동으로 되돌렸으면 null. 위치 감지를 [아니에요]로 지웠으면 { rejected: true } (features/location/detections.ts)
-//   강도 세 칸은 DB 칸 이름으로 남김 — 배경음 = sound_key, 말소리 = voice_tone, 진동 = intensity (값은 약 · 중 · 강 = 0 · 1 · 2)
+//   강도 세 칸은 DB 칸 이름으로 남김 — 배경음 = sound_key, 말소리 = voice_tone, 진동 = vibration (예전 기록은 intensity, 값은 약 · 중 · 강 = 0 · 1 · 2)
 // alarm-commit이 받는 화면 (서버 supabase/functions/_shared/requests.ts SCREENS와 같음)
 export type CommitEditScreen = 'H03' | 'H05' | 'S01';
 export type EditLogScreen = CommitEditScreen | 'H01' | 'H08' | 'NTF';
@@ -314,7 +319,8 @@ export type EditLogField =
   | 'travel_minutes'
   | 'origin'
   | 'transport'
-  | 'intensity'
+  | 'intensity' // 예전 기록의 진동 (D1 A 전) — 지금은 쓰지 않음
+  | 'vibration'
   | 'voice_tone'
   | 'sound_key'
   | 'alarm_enabled'

@@ -4,14 +4,30 @@
 import {
   ALARM_INTENSITIES,
   ALARM_TYPES,
+  ALARM_VIBRATIONS,
   type AlarmIntensity,
   type AlarmType,
+  type AlarmVibration,
   type OneTapEventType,
   type RingPackage,
   type RingPlan,
 } from './types';
 
 export const DEFAULT_SOUND_KEY = 'default';
+
+/** 강도에서 정하는 배경음 키 · 진동 (D1 A) — 서버 calc/intensity.ts LEVEL_FIELDS · 네이티브 AlarmSoundKeys / AlarmVibration.defaultFor와 같은 대응 */
+const SOUND_KEY_OF_INTENSITY: Record<AlarmIntensity, string> = { SOFT: 'theme_calm', NORMAL: 'theme_default', STRONG: 'theme_urgent' };
+const VIBRATION_OF_INTENSITY: Record<AlarmIntensity, AlarmVibration> = { SOFT: 'NONE', NORMAL: 'SHORT_REPEAT', STRONG: 'STRONG_CONTINUOUS' };
+
+/** 꾸러미에 배경음이 없거나 비면 강도에서 */
+export function soundKeyOf(pkg: Pick<RingPackage, 'intensity'> & Partial<Pick<RingPackage, 'soundKey'>>): string {
+  return (typeof pkg.soundKey === 'string' ? pkg.soundKey.trim() : '') || SOUND_KEY_OF_INTENSITY[pkg.intensity] || SOUND_KEY_OF_INTENSITY.NORMAL;
+}
+
+/** 꾸러미에 진동이 없거나 모르는 값이면 강도에서 */
+export function vibrationOf(pkg: Pick<RingPackage, 'intensity'> & Partial<Pick<RingPackage, 'vibration'>>): AlarmVibration {
+  return ALARM_VIBRATIONS.includes(pkg.vibration as AlarmVibration) ? (pkg.vibration as AlarmVibration) : VIBRATION_OF_INTENSITY[pkg.intensity] ?? 'SHORT_REPEAT';
+}
 
 /** 한 번 울리는 최대 시간 — 백그라운드 재생 제한 때문, 실기기로 확정 예정 (7장 7.4.2 · T-6) */
 export const MAX_RING_MILLIS = 3 * 60_000;
@@ -221,10 +237,12 @@ export function validateRingPackage(pkg: RingPackage): void {
 
 /**
  * 네이티브에 넘기는 글자 — 꾸러미 + 울림 계획을 JSON 하나로
- * 안 읽는 자리(vibration · 꾸러미의 snoozeMinutesOptions)는 넘기지 않음 — 미루기 시간 목록과 한도는 plan에 실려 감. 값이 없는 칸은 빠짐
+ * soundKey · vibration은 늘 넣음(D1 A) — 서버가 채워 준 값 그대로, 없으면 강도에서. plan.soundKey도 같은 값으로 맞춰 보냄(네이티브가 최상위 값을 우선 읽음)
+ * 안 읽는 자리(꾸러미의 snoozeMinutesOptions)는 넘기지 않음 — 미루기 시간 목록과 한도는 plan에 실려 감. 값이 없는 칸은 빠짐
  * notice도 따로 안 넘김 — buildRingPlan이 plan.heading에 이미 넣었고, 네이티브는 plan.heading만 저장해 알림에 씀
  */
 export function toNativePayload(pkg: RingPackage, plan: RingPlan): string {
+  const soundKey = soundKeyOf(pkg);
   return JSON.stringify({
     alarmId: pkg.alarmId,
     type: pkg.type,
@@ -234,9 +252,10 @@ export function toNativePayload(pkg: RingPackage, plan: RingPlan): string {
     intensity: pkg.intensity,
     snoozeLimit: pkg.snoozeLimit,
     voiceText: pkg.voiceText,
-    soundKey: pkg.soundKey,
+    soundKey,
+    vibration: vibrationOf(pkg),
     volumeAdjust: pkg.volumeAdjust,
     departAt: pkg.departAt,
-    plan,
+    plan: { ...plan, soundKey },
   });
 }
