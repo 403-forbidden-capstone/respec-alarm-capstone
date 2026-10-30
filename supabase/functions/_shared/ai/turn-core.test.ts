@@ -786,13 +786,13 @@ describe("기록 정정(fixes) · 앞 출발 · 위기", () => {
     assert.deepEqual(fix.fixes.map((x) => [x.fact, x.kind, x.action, x.to]), [["f3", "DEPART", "CORRECT", iso("2026-10-08", "07:45")]]);
   });
 
-  it("위기: 위험 표시가 처음 켜진 턴에만 crisis (대화당 1회), 기본은 칸 없음", () => {
+  it("위기: 위험 표시가 켜진 턴마다 crisis (헤드 10/30 B안 — 이어지는 위기 말에도 다시 안내), 꺼진 턴과 기본은 칸 없음", () => {
     const turns = [fast(), fast({ safety_flag: true }), fast({ safety_flag: true }), fast(), fast({ safety_flag: true })];
     const on = run(ctx(), turns);
-    assert.deepEqual(on.events.map((e) => e.crisis === true), [false, true, false, false, false]);
+    assert.deepEqual(on.events.map((e) => e.crisis === true), [false, true, true, false, true]);
     assert.equal(on.state.crisisNotified, true);
     assert.equal(on.state.safetyFlag, true);
-    assert.ok(on.events.every((e, i) => (i === 1 ? "crisis" in e : !("crisis" in e))));
+    assert.ok(on.events.every((e, i) => ([1, 2, 4].includes(i) ? "crisis" in e : !("crisis" in e))));
   });
 
   it("위기 턴은 앱 일을 다음 턴으로 미룸 — 그 턴엔 tasks false · deferred true, 다음 턴에 다시 내보냄", () => {
@@ -803,14 +803,17 @@ describe("기록 정정(fixes) · 앞 출발 · 위기", () => {
     assert.equal(r1.state.awaiting, null);
     assert.equal(r1.cards.length, 1);
     assert.equal(r1.state.fixes[0]?.status, "PENDING");
-    const r2 = applyFast(r1.state, fast({ appointments: [cap], safety_flag: true }), c, 2);
+    // 위험 표시가 계속 켜져 있으면 앱 일도 계속 미룸(안내가 먼저), 꺼진 턴에 내보냄
+    const stay = applyFast(r1.state, fast({ appointments: [cap], safety_flag: true }), c, 2);
+    assert.deepEqual([stay.tasks, stay.deferred, stay.event.crisis], [false, true, true]);
+    const r2 = applyFast(stay.state, fast({ appointments: [cap] }), c, 3);
     assert.deepEqual([r2.tasks, r2.deferred, r2.event.crisis], [true, false, undefined]);
     assert.deepEqual(r2.cards.map((x) => [x.id, x.status]), [["c1", "NEEDS_ESTIMATE"]]);
     assert.deepEqual(r2.fixes.map((x) => x.id), ["x1"]);
-    assert.deepEqual(r2.state.awaiting, { after_turn: 2, cards: ["c1"], fixes: ["x1"] });
-    // 미뤘던 결과는 다음 턴(2) 처리 결과 뒤에 붙는다
-    const t = applyTaskResults(r2.state, { cards: [ready("c1", "07:40", { date: "2026-10-09", depart: "13:00" })], fixes: [{ id: "x1", ok: true }] }, c, 2);
-    assert.deepEqual(t.event.after_turn, 2);
+    assert.deepEqual(r2.state.awaiting, { after_turn: 3, cards: ["c1"], fixes: ["x1"] });
+    // 미뤘던 결과는 앱 일을 내보낸 턴(3) 처리 결과 뒤에 붙는다
+    const t = applyTaskResults(r2.state, { cards: [ready("c1", "07:40", { date: "2026-10-09", depart: "13:00" })], fixes: [{ id: "x1", ok: true }] }, c, 3);
+    assert.deepEqual(t.event.after_turn, 3);
     assert.deepEqual(t.event.applied, ["도착 시각 10:20으로 정정"]);
   });
 });
@@ -1147,7 +1150,7 @@ describe("분 경계 · 상태 왕복 (리뷰 #261)", () => {
     assert.deepEqual(revived, r.state);
     const next = fast({ appointments: [study()], safety_flag: true });
     assert.deepEqual(applyFast(revived, next, c, 2), applyFast(r.state, next, c, 2));
-    assert.equal(applyFast(revived, next, c, 2).event.crisis, undefined, "위기 안내는 대화당 1번");
+    assert.equal(applyFast(revived, next, c, 2).event.crisis, true, "새 위험 말에는 다시 안내");
   });
 });
 
@@ -1274,6 +1277,19 @@ describe("pickServerQuestion — PREP_CHECK 하나, 질문 예산", () => {
     assert.ok(pickServerQuestion(hot(), { askedInConversation: false, recent: [{ ...today, asked_at: "2026-10-07T23:59:00+09:00" }] }, NOW));
     // 원탭 칩 · 카드의 질문도 같은 예산 (헤드 H2 A 공용)
     assert.equal(pickServerQuestion(hot(), { askedInConversation: false, recent: [{ ...today, kind: "CAUSE" }] }, NOW), null);
+  });
+
+  it("예산: 하루 = 대화 기준일(같은 밤) — 23:50에 물은 뒤 00:20 같은 밤 대화에서 또 못 묻고, 다음 기준일엔 물음 (헤드 10/30)", () => {
+    const asked = { kind: "PREP_CHECK" as const, subject_key: "x", asked_at: "2026-10-08T23:50:00+09:00" };
+    const tmr = (day: string, now: string, review: string): Context =>
+      ctx({ now, review, tomorrow: [appt({ ref: "a2", title: "캡스톤 발표", date: day, time: "10:00", importance: "HIGH", place: "강남역" })], alarms: [al("al1", "WAKE", "07:40", "STRONG", { appointment_ref: "a2", date: day })] });
+    // 10/9 00:20에 연 대화 — 달력은 10/9지만 아직 안 잔 밤이라 대화 기준일(돌아볼 날)은 10/8
+    const midnight = tmr("2026-10-09", "2026-10-09T00:20:00+09:00", "2026-10-08");
+    assert.equal(pickServerQuestion(midnight, { askedInConversation: false, recent: [asked] }, midnight.session.now), null, "같은 밤이라 오늘 몫을 이미 씀");
+    assert.ok(pickServerQuestion(midnight, { askedInConversation: false, recent: [{ ...asked, asked_at: "2026-10-07T23:50:00+09:00" }] }, midnight.session.now), "그 앞 기준일에 물은 것은 셈에 안 듦");
+    // 다음 기준일(돌아볼 날 10/9, 10/9 저녁 대화)에는 새로 물을 수 있음
+    const next = tmr("2026-10-10", "2026-10-09T22:30:00+09:00", "2026-10-09");
+    assert.ok(pickServerQuestion(next, { askedInConversation: false, recent: [asked] }, next.session.now));
   });
 
   it("예산: 7일 3개 — 일주일 안에 3개를 물었으면 안 물음, 8일 전 것은 셈에 안 듦", () => {
