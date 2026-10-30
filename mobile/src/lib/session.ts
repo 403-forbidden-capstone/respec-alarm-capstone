@@ -29,9 +29,13 @@ export function onSignOut(cleanup: () => void): () => void {
 }
 
 // 로그아웃 없이 하는 폰 · 메모리 정리 (위 2~5단계) — 로그아웃 정리와 개발용 "내 시험 데이터 지우기"(cleanupAfterDataReset)가 같이 씀
-// 폰 알람을 못 지우면 그 오류를 그대로 던지고 뒤 단계는 하지 않음 (부르는 쪽이 자기 문구로 바꿈). 나머지 단계는 실패해도 계속
-async function cleanupLocalUserState(): Promise<void> {
-  await cancelAllPhoneAlarms();
+// 폰 알람을 못 지우면 cancelFailed 문구의 UserError를 던지고 뒤 단계는 하지 않음 (부르는 쪽이 자기 문구를 줌). 그 뒤 단계의 예외는 문구를 바꾸지 않고 그대로 전파
+async function cleanupLocalUserState(cancelFailed: string): Promise<void> {
+  try {
+    await cancelAllPhoneAlarms();
+  } catch {
+    throw new UserError(cancelFailed);
+  }
   await discardPendingEvents().catch(() => {});
   await clearPushToken().catch(() => {});
   unsubscribeAll();
@@ -48,11 +52,7 @@ export async function signOutAndCleanup(): Promise<void> {
   setSigningOut(true);
   try {
     await uploadEvents().catch(() => {});
-    try {
-      await cleanupLocalUserState();
-    } catch {
-      throw new UserError('폰에 걸린 알람을 지우지 못해 로그아웃하지 못했어요. 다시 해 주세요');
-    }
+    await cleanupLocalUserState('폰에 걸린 알람을 지우지 못해 로그아웃하지 못했어요. 다시 해 주세요');
     await signOut();
   } catch (e) {
     setSigningOut(false); // 로그아웃이 안 됐으니 로그인 상태 그대로 — 맞추기를 다시 돌게
@@ -66,9 +66,5 @@ export async function signOutAndCleanup(): Promise<void> {
 //   · "로그아웃 중" 표시를 켜지 않음 — 맞추기(reconcile)는 계속 돌아야 하고, 폰 알람 취소가 맞추기와 같은 줄에서 돌아 끼어들지 못하며
 //     지운 뒤의 맞추기는 서버에서 빈 목록을 읽음 (표시를 켰다 끄면 시간대 · 반복 회차 시각 기억도 같이 비워져 로그인 상태에서는 오히려 해로움)
 export async function cleanupAfterDataReset(): Promise<void> {
-  try {
-    await cleanupLocalUserState();
-  } catch {
-    throw new UserError('서버의 시험 데이터는 지웠지만 폰에 걸린 알람은 지우지 못했어요. 다시 눌러 주세요');
-  }
+  await cleanupLocalUserState('서버의 시험 데이터는 지웠지만 폰에 걸린 알람은 지우지 못했어요. 다시 눌러 주세요');
 }

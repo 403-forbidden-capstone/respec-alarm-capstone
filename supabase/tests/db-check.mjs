@@ -2564,6 +2564,12 @@ const mkAppt = async (creator, title, { group = null, series = null, on = null, 
 };
 
 // 사용자 한 명이 가진 줄을 표별로 지문(md5)으로 — 앞뒤가 같으면 한 줄도 안 바뀐 것 (줄 수 + 내용)
+// 지우개 목록 — public 표 중 사용자 칸이 있는 것을 전부 "지움/되돌림" 아니면 "둠"으로 나눠 적음 (migration 머리 주석의 표와 같은 이름)
+//   RESET_DELETES = dev_reset_my_data()가 내 줄을 지우거나(profiles는 제자리에서 되돌림) 하는 표, RESET_KEEPS = 안 건드리는 표
+//   새 표가 생기면 함수를 고치고 여기에 적어야 아래 가드 항목이 통과함
+const RESET_DELETES = ['alarm_events', 'alarm_suggestions', 'alarms', 'appointment_participants', 'appointments', 'conversation_sessions',
+                       'daily_journals', 'daily_records', 'profiles', 'user_edit_logs'];
+const RESET_KEEPS = ['ai_calls', 'friends', 'group_members', 'groups', 'push_tokens', 'roll_attempts', 'routines', 'sharing_permissions', 'todos', 'user_questions'];
 const MINE = {
   appointments: `select * from public.appointments where creator_id = $1`,
   appointment_participants: `select * from public.appointment_participants where user_id = $1`,
@@ -2586,6 +2592,21 @@ const MINE = {
   sharing_permissions: `select * from public.sharing_permissions where $1 in (owner_id, grantee_id)`,
   groups: `select * from public.groups where owner_id = $1`,
 };
+await check('내 시험 데이터 지우기 가드: 사용자 칸(user_id · creator_id · owner_id · requester_id · addressee_id · grantee_id)이 있는 public 표는 모두 지움/둠 목록에 있음 (새 표를 더하면 실패)', async () => {
+  await su();
+  const known = new Set([...RESET_DELETES, ...RESET_KEEPS]);
+  const tables = (await q(`select distinct c.table_name from information_schema.columns c
+                           join information_schema.tables t on t.table_schema = c.table_schema and t.table_name = c.table_name and t.table_type = 'BASE TABLE'
+                           where c.table_schema = 'public'
+                             and c.column_name in ('user_id', 'creator_id', 'owner_id', 'requester_id', 'addressee_id', 'grantee_id')
+                           order by 1`)).map((x) => x.table_name);
+  const missing = tables.filter((n) => !known.has(n));
+  const stale = [...known].filter((n) => !tables.includes(n));   // 목록에만 있고 DB에는 없는 이름
+  const noSnap = [...known].filter((n) => !(n in MINE));   // MINE 지문 맵과 이름이 같아야 함
+  const mineExtra = Object.keys(MINE).filter((n) => !known.has(n));
+  if (missing.length) return `새 표 ${missing.join(', ')}이 dev_reset_my_data의 지움/둠 목록에 없음 — 함수와 목록에 추가하세요`;
+  return stale.length === 0 && mineExtra.length === 0 && noSnap.length === 0 ? true : { stale, mineExtra, noSnap };
+});
 const snapOf = async (u, only = Object.keys(MINE)) => {
   await su();
   const out = {};
@@ -2623,6 +2644,8 @@ await check('내 시험 데이터 지우기 준비: RA(지우는 사람) · RB(�
   RS.shared = await mkAppt(RA, 'RA가 만든 공동', { group: RS.g, who: [RA, RB] });
   RS.mixed1 = await mkAppt(RA, 'RA 혼자지만 RB의 할 일이 걸림', { group: RS.g });
   RS.mixed2 = await mkAppt(RA, 'RA 혼자지만 RB의 고친 값 기록이 걸림', { group: RS.g });
+  // RB는 같은 그룹 멤버일 뿐 참여 행 · 할 일이 없음 — 그래도 appointments_select가 RB에게 보여 주는 그룹 일정 (A가 만들고 A만 참여)
+  RS.groupOnly = await mkAppt(RA, 'RA가 만들고 RA만 참여한 그룹 일정', { group: RS.g });
   // RB: 혼자 · RB가 만들고 RA가 참여한 공동
   RS.soloB = await mkAppt(RB, 'RB 혼자', {});
   RS.fromB = await mkAppt(RB, 'RB가 만든 공동', { group: RS.g, who: [RB, RA] });
@@ -2651,7 +2674,7 @@ await check('내 시험 데이터 지우기 준비: RA(지우는 사람) · RB(�
   await q(`insert into public.user_edit_logs (user_id, appointment_id, screen, field) values ($1, $2, 'H03', 'buffer_minutes')`, [RB, RS.mixed2.appt]);
   const mine = await countOf(`select 1 from public.appointments where creator_id = $1`, [RA]);
   const parts = await countOf(`select 1 from public.appointment_participants where user_id = $1`, [RA]);
-  return mine === 6 && parts === 7 ? true : { mine, parts };
+  return mine === 7 && parts === 8 ? true : { mine, parts };
 });
 
 // 지우기 전 기준값 — RB(전부)와 RA가 둔다고 한 것들
@@ -2661,10 +2684,10 @@ await check('내 시험 데이터 지우기: RA가 부르면 지운 줄 수를 j
   beforeAKept = await snapOf(RA, ['push_tokens', 'friends', 'sharing_permissions', 'groups', 'group_members', 'routines', 'user_questions']);
   beforeAKept.callIds = (await q(`select string_agg(call_id::text, ',' order by call_id) as ids from public.ai_calls where user_id = $1`, [RA]))[0].ids;
   beforeAKept.sharedRows = (await q(`select md5(string_agg(a::text, '|' order by a.appointment_id::text)) as h from public.appointments a where appointment_id = any($1::uuid[])`,
-    [[RS.shared.appt, RS.mixed1.appt, RS.mixed2.appt, RS.fromB.appt]]))[0].h;
+    [[RS.shared.appt, RS.mixed1.appt, RS.mixed2.appt, RS.groupOnly.appt, RS.fromB.appt]]))[0].h;
   await as(RA);
   [{ r: resetResult }] = await q(`select public.dev_reset_my_data() as r`);
-  const expected = { appointments: 3, appointments_kept: 3, participants: 7, alarms: 16, alarm_events: 7, alarm_suggestions: 1, daily_records: 1,
+  const expected = { appointments: 3, appointments_kept: 4, participants: 8, alarms: 18, alarm_events: 8, alarm_suggestions: 1, daily_records: 1,
                      daily_journals: 1, conversation_sessions: 1, user_edit_logs: 1, profile: 1 };
   return JSON.stringify(Object.entries(resetResult).sort()) === JSON.stringify(Object.entries(expected).sort()) ? true : resetResult;
 });
@@ -2689,6 +2712,17 @@ await check('내 시험 데이터 지우기 ②: 다른 사람이 참여 중인 
   const bEvents = await countOf(`select 1 from public.alarm_events where alarm_id = any($1::uuid[])`, [[RS.shared.wake[RB], RS.fromB.wake[RB]]]);
   return appts.length === 2 && aParts === 0 && aAlarms === 0 && bParts.length === 2 && bAlarms === 4 && bEvents === 2 ? true : { appts, aParts, aAlarms, bParts, bAlarms, bEvents };
 });
+await check('내 시험 데이터 지우기 ②-2: RB가 같은 그룹 멤버일 뿐 참여 행 · 할 일이 없는 그룹 일정(RA가 만들고 RA만 참여)은 RA가 지워도 남고 RB가 그대로 조회함 (RA의 참여 행 · 알람만 사라짐)', async () => {
+  await su();
+  const [row] = await q(`select group_id, creator_id, title from public.appointments where appointment_id = $1`, [RS.groupOnly.appt]);
+  const aParts = await countOf(`select 1 from public.appointment_participants where appointment_id = $1`, [RS.groupOnly.appt]);
+  const aAlarms = await countOf(`select 1 from public.alarms where alarm_id = any($1::uuid[])`, [RS.groupOnly.alarms[RA]]);
+  const bLinks = await countOf(`select 1 from public.todos where appointment_id = $1 union all select 1 from public.user_edit_logs where appointment_id = $1`, [RS.groupOnly.appt]);
+  await as(RB);
+  const seen = await q(`select appointment_id, title from public.appointments where appointment_id = $1`, [RS.groupOnly.appt]);   // RLS를 거친 RB의 조회
+  return row && row.group_id === RS.g && row.creator_id === RA && aParts === 0 && aAlarms === 0 && bLinks === 0 && seen.length === 1 && seen[0].title === row.title
+    ? true : { row, aParts, aAlarms, bLinks, seen };
+});
 await check('내 시험 데이터 지우기 ③: RB의 모든 줄이 한 줄도 안 바뀜 (표별 줄 수 · 내용 지문) · RB가 만든 일정은 그대로 · RB의 할 일 · 고친 값 기록이 걸린 RA 일정도 남음', async () => {
   const afterB = await snapOf(RB);
   const changed = diffSnap(beforeB, afterB);
@@ -2702,7 +2736,7 @@ await check('내 시험 데이터 지우기 ④: 친구 · 공유 권한 · 그�
   const changed = keep.filter((k) => (k === 'user_questions' ? after[k].split(':')[0] !== beforeAKept[k].split(':')[0] : after[k] !== beforeAKept[k]));
   const calls = await q(`select string_agg(call_id::text, ',' order by call_id) as ids, count(*)::int as n, bool_and(session_id is null) as nulled from public.ai_calls where user_id = $1`, [RA]);
   const shared = (await q(`select md5(string_agg(a::text, '|' order by a.appointment_id::text)) as h from public.appointments a where appointment_id = any($1::uuid[])`,
-    [[RS.shared.appt, RS.mixed1.appt, RS.mixed2.appt, RS.fromB.appt]]))[0].h;
+    [[RS.shared.appt, RS.mixed1.appt, RS.mixed2.appt, RS.groupOnly.appt, RS.fromB.appt]]))[0].h;
   const todos = await q(`select count(*)::int as n, bool_and(appointment_id is null) as cut from public.todos where user_id = $1`, [RA]);   // 둔 표 — 지운 일정에 달린 연결만 끊김
   return changed.length === 0 && calls[0].ids === beforeAKept.callIds && calls[0].n === 1 && calls[0].nulled === true
     && shared === beforeAKept.sharedRows && todos[0].n === 1 && todos[0].cut === true
@@ -2741,17 +2775,18 @@ await check('내 시험 데이터 지우기 ⑦: 두 번 불러도 오류 없음
   const afterB = await snapOf(RB);
   const zeros = ['appointments', 'participants', 'alarms', 'alarm_events', 'alarm_suggestions', 'daily_records', 'daily_journals', 'conversation_sessions', 'user_edit_logs']
     .every((k) => r[k] === 0);
-  return zeros && r.appointments_kept === 3 && r.profile === 1 && diffSnap(beforeB, afterB).length === 0 ? true : { r, changed: diffSnap(beforeB, afterB) };
+  return zeros && r.appointments_kept === 4 && r.profile === 1 && diffSnap(beforeB, afterB).length === 0 ? true : { r, changed: diffSnap(beforeB, afterB) };
 });
-await check('내 시험 데이터 지우기 ⑧: 반대로 RB가 지워도 RA의 남은 줄은 한 줄도 안 바뀜 (RB 혼자가 된 RB 일정은 RB 것이라 지워짐)', async () => {
+await check('내 시험 데이터 지우기 ⑧: 반대로 RB가 지워도 RA의 남은 줄은 한 줄도 안 바뀜 (RB 혼자인 개인 일정만 지워지고 RB가 만든 그룹 일정은 남음)', async () => {
   const beforeA = await snapOf(RA);
   await as(RB);
   const [{ r }] = await q(`select public.dev_reset_my_data() as r`);
   const afterA = await snapOf(RA);
   const changed = diffSnap(beforeA, afterA);
-  const aKept = await countOf(`select 1 from public.appointments where appointment_id = any($1::uuid[])`, [[RS.shared.appt, RS.mixed1.appt, RS.mixed2.appt]]);
-  const bGone = await countOf(`select 1 from public.appointments where appointment_id = any($1::uuid[])`, [[RS.soloB.appt, RS.fromB.appt]]);
-  return changed.length === 0 && aKept === 3 && bGone === 0 && r.appointments === 2 ? true : { changed, aKept, bGone, r };
+  const aKept = await countOf(`select 1 from public.appointments where appointment_id = any($1::uuid[])`, [[RS.shared.appt, RS.mixed1.appt, RS.mixed2.appt, RS.groupOnly.appt]]);
+  const bGone = await countOf(`select 1 from public.appointments where appointment_id = $1`, [RS.soloB.appt]);
+  const bGroupKept = await countOf(`select 1 from public.appointments where appointment_id = $1`, [RS.fromB.appt]);   // 그룹 일정은 RB 혼자여도 안 지움
+  return changed.length === 0 && aKept === 4 && bGone === 0 && bGroupKept === 1 && r.appointments === 1 && r.appointments_kept === 1 ? true : { changed, aKept, bGone, bGroupKept, r };
 });
 
 report();

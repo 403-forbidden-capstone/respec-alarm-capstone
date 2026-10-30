@@ -98,3 +98,26 @@ describe('시험 데이터 지운 뒤 폰 정리 (로그아웃 없이)', () => {
     expect(mockSignOut).not.toHaveBeenCalled();
   });
 });
+
+describe('알람 취소 이후 단계의 예외', () => {
+  it('로그아웃 정리: 알람 취소 뒤 단계가 던지면 "폰에 걸린 알람을…" 문구로 바꾸지 않고 원문 그대로 전파 (로그아웃은 안 함)', async () => {
+    mockUnsubscribeAll.mockImplementation(() => {
+      throw new Error('구독 끊기 실패');
+    });
+    const error = await signOutAndCleanup().catch((e: unknown) => e);
+    expect(error).not.toBeInstanceOf(UserError);
+    expect((error as Error).message).toBe('구독 끊기 실패');
+    expect(mockSignOut).not.toHaveBeenCalled();
+    expect(mockCalls.at(-1)).toBe('로그아웃 중 끄기');
+  });
+
+  it('시험 데이터 지운 뒤 정리: 알람 취소 뒤 단계가 던지면 원문 그대로 전파', async () => {
+    mockUnsubscribeAll.mockImplementation(() => {
+      throw new Error('구독 끊기 실패');
+    });
+    const error = await cleanupAfterDataReset().catch((e: unknown) => e);
+    expect(error).not.toBeInstanceOf(UserError);
+    expect((error as Error).message).toBe('구독 끊기 실패');
+  });
+});
+

@@ -15,7 +15,7 @@
 --   alarm_events                지움         내 울림 · 반응 기록. alarms 삭제로 cascade되지만 user_id = 나로 한 번 더 좁혀 지움
 --   alarm_suggestions           지움         내 수정 제안 이력 (대상 알람 · 근거 기록이 같이 사라지므로)
 --   appointment_participants    지움         내 참여 행 전부. 남의 참여 행은 안 건드림
---   appointments                조건부 지움   내가 만든 일정(creator_id = 나)만, 그중 "나 혼자"인 것만 (아래 2절). 남이 만든 일정은 안 건드림
+--   appointments                조건부 지움   내가 만든 일정(creator_id = 나) 중 개인 일정(group_id 없음)이고 "나 혼자"인 것만 (아래 2절). 그룹 일정과 남이 만든 일정은 안 건드림
 --   daily_records               지움         내 생활 기록
 --   daily_journals              지움         내 일기 · 코칭
 --   conversation_sessions       지움         내 AI 대화 (turns · server_state 포함)
@@ -67,15 +67,19 @@ begin
   perform 1 from public.appointments a where a.creator_id = v_uid order by a.appointment_id for update;
 
   -- -------------------------------------------------------------------
-  -- 2. 지울 일정 = 내가 만들었고 나 혼자인 일정 (반복 묶음은 회차마다 따로 판정 — 혼자인 묶음은 회차가 모두 혼자라 묶음 전체가 지워짐)
-  --    "나 혼자" = 남의 참여 행이 없음. 거기에 더해, 남의 할 일(todos) · 고친 값 기록(user_edit_logs)이 이 일정을 가리키고 있지 않음
-  --    (일정을 지우면 FK set null로 그 남의 행이 고쳐지므로, 남의 행이 닿으면 공동 일정으로 보고 남김)
-  --    다른 사람이 참여 중인 공동 일정은 일정 자체를 지우지 않음 — 아래 참여 행 삭제로 내 참여 행(과 내 알람)만 사라짐
+  -- 2. 지울 일정 = 내가 만들었고, 개인 일정(group_id 없음)이고, 나 혼자인 일정
+  --    반복 묶음은 회차마다 따로 판정 — 혼자인 묶음은 회차가 모두 혼자라 묶음 전체가 지워짐
+  --    그룹 일정(group_id 있음)은 참여 여부와 상관없이 일정째 지우지 않음: appointments_select가 그 그룹의 JOINED 그룹원 모두에게
+  --    참여 행이 없어도 일정을 보여 주기 때문 (지우면 남의 화면에서 일정이 사라짐). 그룹 일정은 아래 참여 행 삭제로 내 참여 행(과 내 알람)만 사라짐
+  --    개인 일정의 "나 혼자" = 남의 참여 행이 없음. 거기에 더해, 남의 할 일(todos) · 고친 값 기록(user_edit_logs)이 이 일정을 가리키고 있지 않음
+  --    (일정을 지우면 FK set null로 그 남의 행이 고쳐지므로, 남의 행이 닿으면 공동 일정으로 보고 남김 — 개인 일정에는 원래 생기지 않는 방어)
+  --    다른 사람이 참여 중인 공동 일정도 일정 자체를 지우지 않음
   -- -------------------------------------------------------------------
   select coalesce(array_agg(a.appointment_id), '{}'::uuid[])
     into v_alone
   from public.appointments a
   where a.creator_id = v_uid
+    and a.group_id is null
     and not exists (select 1 from public.appointment_participants p
                     where p.appointment_id = a.appointment_id and p.user_id <> v_uid)
     and not exists (select 1 from public.todos t
@@ -112,10 +116,11 @@ begin
   delete from public.appointment_participants p where p.user_id = v_uid;
   get diagnostics v_participants = row_count;
 
-  -- 나 혼자인 일정만 일정째 (남은 참여 행이 있다면 내 것뿐이라 위에서 이미 지워짐). creator_id = 나를 한 번 더 걸어 둠
+  -- 나 혼자인 개인 일정만 일정째 (남은 참여 행이 있다면 내 것뿐이라 위에서 이미 지워짐). creator_id = 나 · group_id 없음을 한 번 더 걸어 둠
   delete from public.appointments a
   where a.appointment_id = any (v_alone)
-    and a.creator_id = v_uid;
+    and a.creator_id = v_uid
+    and a.group_id is null;
   get diagnostics v_appointments = row_count;
 
   select count(*)::integer into v_kept from public.appointments a where a.creator_id = v_uid;
@@ -123,23 +128,24 @@ begin
   -- -------------------------------------------------------------------
   -- 4. 프로필(내 행) — 온보딩부터 다시 할 수 있게 온보딩이 채우는 값을 비우거나 기본값으로
   --    비우는 것: 온보딩 끝난 시각 · 집(이름 · 좌표 · 반경) · 개인정보 동의(시각 · 판 번호는 짝 제약 때문에 둘 다) — 동의도 온보딩에서 다시 받음
+  --    `= default`로 쓰는 이유: 칸의 기본값이 바뀌면 이 함수도 따라가게 (온보딩 직후의 새 계정과 같은 상태). 아래 칸마다 지금 기본값이 기대한 값인지 init_schema · profile_onboarding · location_detect에서 확인함 — 하드코딩할 칸 없음
   --    기본값으로: 잠귀 · 깨우는 여유 · 기본 준비 · 여유 시간 · 이동 수단 · 제안 결과 반영값(intensity_offset)
   --    그대로 두는 것: handle · nickname · profile_image_url(계정 정보) · timezone · preferred_voice_tone · preferred_sound_key(고른 취향)
   -- -------------------------------------------------------------------
   update public.profiles p
-     set onboarded_at            = null,
-         wake_sensitivity        = 'NORMAL',
-         wake_margin             = 'NORMAL',
-         home_name               = null,
-         home_lat                = null,
-         home_lng                = null,
-         home_radius_m           = null,
-         default_prepare_minutes = 60,
-         default_buffer_minutes  = 10,
-         default_transport       = 'TRANSIT',
-         intensity_offset        = 0,
-         privacy_agreed_at       = null,
-         privacy_version         = null
+     set onboarded_at            = default,   -- 기본값 NULL (칸에 default 없음)
+         wake_sensitivity        = default,   -- 'NORMAL' (profile_onboarding)
+         wake_margin             = default,   -- 'NORMAL' (profile_onboarding)
+         home_name               = default,   -- NULL
+         home_lat                = default,   -- NULL
+         home_lng                = default,   -- NULL
+         home_radius_m           = default,   -- NULL (location_detect)
+         default_prepare_minutes = default,   -- 60 (init_schema)
+         default_buffer_minutes  = default,   -- 10 (init_schema)
+         default_transport       = default,   -- 'TRANSIT' (init_schema)
+         intensity_offset        = default,   -- 0 (init_schema)
+         privacy_agreed_at       = default,   -- NULL — privacy_version과 짝 제약이라 둘 다 default
+         privacy_version         = default    -- NULL
    where p.user_id = v_uid;
   get diagnostics v_profile = row_count;
 
@@ -160,7 +166,7 @@ end;
 $$;
 
 comment on function public.dev_reset_my_data() is
-  '개발용 — 부른 사람 본인의 시험 데이터(일정 · 알람 · 기록 · 일기 · AI 대화 · 고친 값 기록 · 제안)를 지우고 프로필을 온보딩 전으로 되돌림. 남이 참여 중인 공동 일정은 내 참여 행만 지움. 친구 · 그룹 · 푸시 토큰 · ai_calls · user_questions는 그대로. 출시 빌드에서는 앱이 부르지 않음';
+  '개발용 — 부른 사람 본인의 시험 데이터(일정 · 알람 · 기록 · 일기 · AI 대화 · 고친 값 기록 · 제안)를 지우고 프로필을 온보딩 전으로 되돌림. 그룹 일정과 남이 참여 중인 일정은 내 참여 행만 지움(일정째 지우는 건 내가 만든 개인 일정 중 혼자인 것뿐). 친구 · 그룹 · 푸시 토큰 · ai_calls · user_questions는 그대로. 출시 빌드에서는 앱이 부르지 않음';
 
 -- 로그인한 사용자만 (anon · public은 막음). 새 함수는 기본으로 API 역할에 열려 있을 수 있어서 직접 정함
 revoke all on function public.dev_reset_my_data() from public, anon;
