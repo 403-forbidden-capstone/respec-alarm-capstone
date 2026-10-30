@@ -339,7 +339,7 @@ export function toDayRecord(world: WorldDay, truth: DayTruth, obs: Observation, 
     wakeConfirmed: obs.wakeSource === 'BUTTON',
     prepActual: truth.prepMin,
     actualPrepareMinutes: obs.actualPrepareMinutes,
-    trips: obs.trips,
+    trips: structuredClone(obs.trips), // 밤 대화의 정정이 기록만 고치고 "앱이 처음 본 것"(obs)은 그대로 남게 복사
     late: obs.trips.some((t) => t.trulyLate),
     appLate: obs.trips.some((t) => t.isLate === true),
     oneTapCount: obs.oneTapCount,

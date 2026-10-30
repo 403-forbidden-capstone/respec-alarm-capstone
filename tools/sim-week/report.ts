@@ -73,7 +73,7 @@ export function renderReport(input: ReportInput): string {
   L.push('');
   L.push(`- 실행: \`${input.command}\` (${input.startedAt})`);
   L.push(`- 앱 코드 번호: ${input.codeLabel} · 사람 ${input.weeks.map((w) => w.persona.id).join(' · ')} · ${input.days}일치 · 씨앗 "${input.seed}"`);
-  L.push(`- 모드: 기능 모드(모델 호출 없음) — ${input.ledger.note}. 가짜 모델 호출 ${input.ledger.calls}회(규칙 출력) · 실제 모델 호출 0 · 누적 $${input.ledger.spentUsd.toFixed(4)} · --budget ${input.ledger.budgetUsd ?? '없음'}(표시만)`);
+  L.push(`- 모드: ${input.ledger.note}. 가짜 모델 호출 ${input.ledger.calls}회(규칙 출력) · 실제 모델 호출 0 · 누적 $${input.ledger.spentUsd.toFixed(4)} · --budget ${input.ledger.budgetUsd ?? '없음'}(표시만)`);
   L.push('');
 
   L.push('## 사람 × 날짜');
@@ -126,6 +126,18 @@ export function renderReport(input: ReportInput): string {
     const bad = nights.flatMap((n) => n.budget.violations);
     L.push(`- ${w.persona.id}: 질문 ${total}개 (하루 최대 ${maxDay}, 한도 ${BUDGET_PER_DAY}/${BUDGET_PER_WEEK}) → ${bad.length ? `위반 ${bad.length}건` : '위반 없음'} · 원탭이 필요했던 수 ${w.days.reduce((s, d) => s + d.record.oneTapCount, 0)}`);
   }
+  L.push('');
+
+  L.push('## 앱 판정 오판 (진짜와 다르게 본 것 — 버그가 아니라 설계 한계일 수 있음)');
+  L.push('');
+  const mis: Record<string, string[]> = {};
+  for (const w of input.weeks) {
+    for (const d of w.days) {
+      for (const tr of d.obs.trips) for (const m of tr.misjudge) (mis[m] ??= []).push(`${w.persona.id} ${d.world.date}${d.world.situation ? `(${d.world.situation})` : ''}`);
+    }
+  }
+  if (!Object.keys(mis).length) L.push('- 없음');
+  for (const [name, where] of Object.entries(mis)) L.push(`- ${name} ${where.length}번: ${where.join(', ')}`);
   L.push('');
 
   L.push('## 버그 후보');
