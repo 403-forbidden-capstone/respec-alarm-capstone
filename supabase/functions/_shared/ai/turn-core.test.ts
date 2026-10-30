@@ -896,6 +896,68 @@ describe("앱이 보낸 요약은 믿지 않음 (설계 메모 5절)", () => {
   });
 });
 
+// ───────── 모호 메모 · 지난 시각 순서 (실험실 stub.test.ts 분석 2 · 검수 2차) ─────────
+
+describe("모호 메모 · 지난 시각 순서 · 겹침 거절", () => {
+  it("분석 2: 날짜 · 시각이 다 있으면 지난 시각 검사가 모호 메모보다 먼저 · 같은 거절은 T2 흔들림으로 다시 안 냄", () => {
+    const p = (over: Partial<XAppt>) => fast({ appointments: [study({ date: "2026-10-08", time: "19:00", ...over })] });
+    const past = run(ctx(), [
+      p({ unclear: "이미 지난 일정, 저장 동의 확인 전" }),
+      p({ repeat: "NONE", unclear: "기록용 저장 요청" }),
+      p({ repeat: "NONE", save: "CONFIRMED" }), // '그래도 저장해줘' — 다시 알림
+      p({ save: "UNCONFIRMED", unclear: "저장 안 됨" }), // T2가 되돌아감 — 다시 안 냄 (040)
+      p({ time: "20:00", save: "DECLINED" }), // 사용자가 거절 — 알릴 것 없음
+    ]);
+    assert.deepEqual(past.events.map((e) => [e.rejected.map((r) => r.reason), e.clarify.length]), [[["PAST_TIME"], 0], [[], 0], [["PAST_TIME"], 0], [[], 0], [[], 0]]);
+    assert.equal(past.state.appointments.length, 1);
+    assert.deepEqual(past.state.cards, []);
+  });
+
+  it("분석 2: 다 채워졌는데 모호 메모만 붙은 일정은 되묻지 않고 카드 — 물어본 카드의 확인(응)이면 강조", () => {
+    const vague = run(ctx(), [fast({ appointments: [study({ unclear: "알람 종류는 말하지 않음" })] }), fast({ appointments: [study({ save: "CONFIRMED", unclear: "사용자가 확인함" })] })]);
+    assert.deepEqual(vague.events[0]?.clarify, []);
+    assert.deepEqual(vague.state.cards.map((c) => [c.id, c.status, c.highlight]), [["c1", "NEEDS_ESTIMATE", true]]);
+    assert.equal(vague.state.cards.length, 1, "물어본 c#을 이어 씀");
+    // 물어본 적 없이 처음부터 CONFIRMED + 메모여도 카드 하나 (저장 아님)
+    const direct = run(ctx(), [fast({ appointments: [study({ save: "CONFIRMED", unclear: "'여섯시반'을 18:30으로 봄" })] })]);
+    assert.deepEqual(direct.events[0]?.applied, []);
+    assert.deepEqual(direct.state.cards.map((c) => c.id), ["c1"]);
+    // 기존 약속: 바뀌는 칸이 없으면 메모(알람 얘기 등)가 있어도 아무것도 안 냄 (030)
+    const same = study({ ref: "a1", title: "알고리즘 수업", time: "10:00", place: "공학관", save: "CONFIRMED", unclear: "기상 알람이 늦다는 말" });
+    assert.ok(isEmpty(run(ctx(), [fast({ appointments: [same] })]).events[0] as ServerEvent));
+    // 기존 약속 변경 + 메모: 변경 카드 → 확인(응)이어도 메모가 남아도 같은 카드 (test-019)
+    const move = (save: XAppt["save"], unclear: string): XAppt => study({ ref: "a1", title: "알고리즘 수업", time: "11:00", place: null, save, unclear });
+    const chg = run(ctx(), [fast({ appointments: [move("UNCONFIRMED", "'열한시'를 11:00으로 봄")] }), fast({ appointments: [move("CONFIRMED", "사용자가 확인함")] })]);
+    assert.deepEqual(chg.events[0]?.pending.map((p) => p.summary), ["변경: 10/9(금) 11:00 알고리즘 수업 · 공학관 · 카드의 [일정 열기]로"]);
+    assert.deepEqual(chg.events[1]?.pending.map((p) => p.id), ["c1"]);
+    assert.equal(chg.state.cards.length, 1);
+  });
+
+  it("검수 2차: 같은 분 직접 알람을 사용자가 거절(DECLINED)하면 겹침을 알리지 않음", () => {
+    const d = ctx({ tomorrow: [], alarms: [al("al1", "DEPARTURE", "07:00", "NORMAL", { appointment_ref: null })] });
+    const r = run(d, [fast({ alarm_changes: [alarm({ time: "07:00", save: "UNCONFIRMED" })] }), fast({ alarm_changes: [alarm({ time: "07:00", save: "DECLINED" })] })]);
+    assert.deepEqual(r.events[0]?.conflicts, ["10/9(금) 07:00 기상 알람 안 만듦 — 같은 시각 출발 알람이 이미 있음"]);
+    assert.equal(r.events[1]?.conflicts, undefined);
+    assert.ok(isEmpty(r.events[1] as ServerEvent));
+  });
+
+  it("분석 3: 알람 변경 요청이 지금 값 그대로면(AI가 전한 값을 T2가 되받아 적음) 다시 적용하지 않음", () => {
+    const echo = run(ctx(), [fast({ alarm_changes: [alarm({ time: "08:00" }), alarm({ type: "PREPARE", time: "08:10" })] })]);
+    assert.ok(isEmpty(echo.events[0] as ServerEvent));
+    assert.deepEqual(echo.state.cards, []);
+    // 시각은 지금 값과 같고 강도만 다르면 강도만 바꿈
+    const lv = run(ctx(), [fast({ alarm_changes: [alarm({ time: "08:00", intensity: "STRONG" })] })]);
+    assert.equal(lv.state.cards[0]?.summary, "10/9(금) 기상 알람 강도 강하게");
+    assert.equal(lv.state.cards[0]?.edit?.times, undefined);
+  });
+
+  it("분석 1: 되물을 것은 T2 unclear 원문이 아니라 빈 칸(날짜 · 시각 · 장소)으로 만든 서버 문구 — 장소가 비면 ' · 장소'", () => {
+    const { events } = run(ctx(), [fast({ appointments: [study({ time: null, place: null, unclear: "'점심 먹고' 오후 18:30?" })] })]);
+    assert.deepEqual(events[0]?.clarify, ["'스터디'의 정확한 시각 · 장소"]);
+    assert.ok(!events[0]?.clarify[0]?.includes("점심"));
+  });
+});
+
 // ───────── 불변 · 결정성 ─────────
 
 describe("불변 · 결정성", () => {
