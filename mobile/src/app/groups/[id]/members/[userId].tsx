@@ -14,7 +14,7 @@ import { backOrHome } from '@/lib/nav';
 export default function MemberWakeScreen() {
   const { id, userId } = useLocalSearchParams<{ id: string; userId: string }>();
   const { data, error, reload } = useWakeLoad((date) => getMemberWake(id, userId, date), () => [id]); // 그룹 기상 신호가 오면 다시 읽음
-  const { run } = useAction();
+  const { busy, run } = useAction();
 
   if (data === undefined) {
     return (
@@ -89,7 +89,7 @@ export default function MemberWakeScreen() {
       </Card>
 
       <View style={styles.stack}>
-        <Button label="깨우기" variant="ghost" onPress={ping} />
+        <Button label="깨우기" variant="ghost" loading={busy} onPress={ping} />
       </View>
     </Screen>
   );

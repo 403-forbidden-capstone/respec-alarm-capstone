@@ -19,7 +19,7 @@ type Props = {
   onPressDay: (day: MonthDay) => void;
 };
 
-// 월간 달력 (.cal) — 월요일 시작, 날짜 아래 점: 기록 완료(검정) · 일부 기록(회색), 오늘은 검은 원
+// 월간 달력 (.cal) — 월요일 시작, 날짜 아래 점: 기록 완료(속 찬 검정 점) · 일부 기록(속 빈 회색 점), 오늘은 검은 원
 export function MonthCalendar({ record, onPrev, onNext, onPressDay }: Props) {
   return (
     <Card>
@@ -81,9 +81,10 @@ const styles = StyleSheet.create({
   num: { width: 28, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
   today: { backgroundColor: colors.ink },
   numText: { fontVariant: ['tabular-nums'] },
-  dot: { width: 4, height: 4, borderRadius: 2 },
+  dot: { width: 6, height: 6, borderRadius: 3 },
   done: { backgroundColor: colors.ink },
-  partial: { backgroundColor: colors.faintDecor },
+  // 일부 기록은 속 빈 점 + 흰 바탕 대비 3 : 1 이상인 색 (faint 4.9 : 1) — 완료 점과 모양으로도 나뉨
+  partial: { backgroundColor: 'transparent', borderWidth: 1.5, borderColor: colors.faint },
   none: { backgroundColor: 'transparent' },
   legend: {
     flexDirection: 'row',
@@ -95,5 +96,5 @@ const styles = StyleSheet.create({
     borderTopColor: colors.line,
   },
   legendItem: { flexDirection: 'row', alignItems: 'center', gap: 5 },
-  legendDot: { width: 5, height: 5, borderRadius: 2.5 },
+  legendDot: { width: 6, height: 6, borderRadius: 3 },
 });

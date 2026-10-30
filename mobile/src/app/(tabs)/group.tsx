@@ -40,16 +40,22 @@ export default function GroupScreen() {
   const setTab = (next: Tab) => setPicked({ request, tab: next });
   const { data, error, reload } = useWakeLoad(loadSocial, (d) => d.groups.map((g) => g.id)); // 그룹 기상 신호가 오면 오늘 기상 수를 다시 읽음
   const { run } = useAction();
+  const [acceptingId, setAcceptingId] = useState<string | null>(null); // 수락 처리 중인 요청 — 그 버튼에만 돌아가는 표시
 
   const accept = (p: Person) =>
     run(async () => {
-      await acceptFriend(p.id);
-      // 공유는 아직 없으므로 바로 범위를 정하러 갈 수 있게
-      toast(`${p.name}님과 친구가 됐어요`, {
-        actionLabel: '공유 범위 정하기',
-        onAction: () => router.push({ pathname: '/permissions', params: { relation: `friend:${p.id}` } }),
-      });
-      await reload();
+      setAcceptingId(p.id);
+      try {
+        await acceptFriend(p.id);
+        // 공유는 아직 없으므로 바로 범위를 정하러 갈 수 있게
+        toast(`${p.name}님과 친구가 됐어요`, {
+          actionLabel: '공유 범위 정하기',
+          onAction: () => router.push({ pathname: '/permissions', params: { relation: `friend:${p.id}` } }),
+        });
+        await reload();
+      } finally {
+        setAcceptingId(null);
+      }
     });
 
   return (
@@ -67,14 +73,24 @@ export default function GroupScreen() {
       <Segmented options={TABS} value={tab} onChange={setTab} />
 
       {!data ? error ? <LoadError onRetry={reload} /> : <Loading /> : null}
-      {data && tab === 'friend' ? <FriendTab friends={data.friends} requests={data.requests} onAccept={accept} /> : null}
+      {data && tab === 'friend' ? <FriendTab friends={data.friends} requests={data.requests} onAccept={accept} acceptingId={acceptingId} /> : null}
       {data && tab === 'group' ? <GroupTab groups={data.groups} /> : null}
     </Screen>
   );
 }
 
 // 친구 탭 — 검색 · 받은 요청 · 내 친구(내가 준 권한 수)
-function FriendTab({ friends, requests, onAccept }: { friends: FriendItem[]; requests: Person[]; onAccept: (p: Person) => void }) {
+function FriendTab({
+  friends,
+  requests,
+  onAccept,
+  acceptingId,
+}: {
+  friends: FriendItem[];
+  requests: Person[];
+  onAccept: (p: Person) => void;
+  acceptingId: string | null;
+}) {
   return (
     <>
       <SearchBox
@@ -93,7 +109,7 @@ function FriendTab({ friends, requests, onAccept }: { friends: FriendItem[]; req
                 {p.handle ?? p.name}의 친구 요청
               </Text>
             </View>
-            <Button label="수락" small onPress={() => onAccept(p)} />
+            <Button label="수락" small loading={acceptingId === p.id} disabled={acceptingId !== null && acceptingId !== p.id} onPress={() => onAccept(p)} />
           </View>
         </Card>
       ))}

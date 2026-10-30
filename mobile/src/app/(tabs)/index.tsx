@@ -213,11 +213,11 @@ export default function HomeScreen() {
         <EmptyState
           title="예정된 알람이 없어요"
           body="일정을 추가하면 기상 · 준비 · 출발 알람을 계산해 드려요."
-          action={{ label: '일정 추가', onPress: newSchedule }}
+          action={{ label: '새 일정', onPress: newSchedule }}
         />
       )}
 
-      <SectionHeader title={evening ? '내일 일정' : '오늘 일정'} right={<TextLink label="+ 일정 추가" onPress={newSchedule} strong />} />
+      <SectionHeader title={evening ? '내일 일정' : '오늘 일정'} right={<TextLink label="+ 새 일정" onPress={newSchedule} strong />} />
       <Card>
         <ScheduleList items={schedule} />
       </Card>

@@ -10,6 +10,7 @@ import { userMessage } from '@/lib/errors';
 import { canUseRealData, modeLocked } from '@/lib/mode';
 import { backOrHome } from '@/lib/nav';
 import { signOutAndCleanup } from '@/lib/session';
+import { useAction } from '@/lib/useAction';
 import { size } from '@/theme';
 
 const PROVIDER_NAME: Record<string, string> = { kakao: '카카오', google: 'Google' };
@@ -25,6 +26,7 @@ const TRANSPORT_NAME: Record<TransportType, string> = {
 export default function SettingsScreen() {
   const { session, profile, enabled } = useAuth();
   const [error, setError] = useState<string | null>(null);
+  const { busy, run } = useAction(); // 로그아웃 연타 막기 · 돌아가는 표시
   const user = session?.user;
   const provider = (user?.app_metadata?.provider as string | undefined) ?? '';
 
@@ -72,7 +74,13 @@ export default function SettingsScreen() {
           <Button
             label="로그아웃"
             variant="ghost"
-            onPress={() => signOutAndCleanup().catch((e) => setError(userMessage(e, '로그아웃하지 못했어요')))}
+            loading={busy}
+            onPress={() =>
+              run(async () => {
+                setError(null);
+                await signOutAndCleanup().catch((e) => setError(userMessage(e, '로그아웃하지 못했어요')));
+              })
+            }
           />
           {error ? (
             <Text variant="small" tone="warn">

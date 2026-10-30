@@ -131,7 +131,7 @@ export default function UiSampleScreen() {
         <Button label="저장하고 알람 설정하기" onPress={() => {}} />
         <Button label="그대로 두기" variant="ghost" onPress={() => {}} />
         <Button label="취소" variant="plain" onPress={() => {}} />
-        <Button label="+ 일정 추가" small onPress={() => {}} />
+        <Button label="+ 새 일정" small onPress={() => {}} />
         <Button label="저장 (비활성)" disabled />
       </View>
 
