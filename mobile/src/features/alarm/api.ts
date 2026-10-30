@@ -18,8 +18,6 @@ import {
   MANUAL_SOURCE,
   ORIGIN_HOME,
   RING_KINDS,
-  WAKE_NO_REPLY_MINUTES,
-  WAKE_OBSERVE_MINUTES,
   type AlarmEdits,
   type AlarmKind,
   type AlarmPreview,
@@ -29,10 +27,12 @@ import {
   type Appointment,
   type AppointmentDetail,
   type AppointmentDraft,
+  type DepartCheck,
   type Estimate,
   type IntensityAxis,
   type LatLng,
   type Level,
+  type MorningPlan,
   type NextAlarm,
   type Place,
   type RingInfo,
@@ -48,6 +48,8 @@ import { LEVEL_FIELD } from './edits';
 import { filterPlaces } from './places';
 import * as real from './real';
 import { repeatLabel, repeatToRrule, rruleToRepeat } from './repeat';
+import { pickMorningSource, toDepartCheck, toMorningPlan, morningDay, wakeAlarmOf, type MorningSource } from './morning';
+import { ringNotice } from './notice';
 import { draftAt, initialTime, ringingKinds } from './schedule';
 import type { StandaloneInput } from './request';
 import { thetaReachedAt, usageSummary, type UseSpan } from './wake';
@@ -123,6 +125,39 @@ export async function getDaySchedule(day: Date): Promise<ScheduleItem[]> {
       hasAlarm: alarmChain(a).length > 0,
     }))
     .sort(byTime);
+}
+
+// 오늘 첫 일정 (H08 기상 확정 뒤 한 줄 · H01 아침 카드, 이슈 #230) — 켜진 기상 알람이 붙은 그날 가장 이른 약속. 저녁(18시~)에는 홈처럼 내일. 없으면 null
+//   칸: 약속 · 준비 · 출발 · 도착 목표 시각(켜진 알람만) · 이동분과 출처 · 기상 확인 시각 · 출발 기록. 실데이터는 하루 일정(getDaySchedule)과 같은 읽기를 같이 씀 (realMorning.ts)
+export async function getMorningPlan(): Promise<MorningPlan | null> {
+  if (!isMock()) return real.getMorningPlan();
+  const day = morningDay(now());
+  const sources: MorningSource[] = db.appointments
+    .filter((a) => isSameDay(a.at, day))
+    .map(toAppointment)
+    .map((a) => ({
+      appointmentId: a.id,
+      title: a.title,
+      at: a.at,
+      place: a.place,
+      travelMinutes: a.travelMinutes,
+      travelSource: a.travelSource,
+      alarms: a.enabled ? a.alarms : a.alarms.map((x) => ({ ...x, enabled: false })), // 일정 전체를 끈 가짜 일정은 알람도 꺼진 것으로 (실데이터는 알람마다 꺼짐)
+      departedAt: db.me.departAt,
+    }));
+  const source = pickMorningSource(sources);
+  const wake = source ? wakeAlarmOf(source) : undefined;
+  return source && wake ? toMorningPlan(source, db.wakeConfirmations[wake.id]?.at ?? null) : null;
+}
+
+// 지금 나가면 (H01 아침 카드 [다시 확인]) — 도착 = 지금 + 이동, 여유 · 상태는 서버와 같은 departNow. 저장하지 않음
+//   실데이터는 alarm-suggest 미리 보기로 이동시간을 새로 구함 (realPlan.ts). 가짜 모드는 일정에 적힌 이동분
+export async function checkDepartNow(appointmentId: string): Promise<DepartCheck> {
+  if (!isMock()) return real.checkDepartNow(appointmentId);
+  const a = find(appointmentId);
+  if (!a) throw new UserError('일정을 찾을 수 없어요');
+  const view = toAppointment(a);
+  return toDepartCheck({ appointmentAt: view.at, travelMinutes: view.travelMinutes, source: view.travelSource, now: now() });
 }
 
 // 알람 설정 (H03) — 알람 없는 일정은 열 알람이 없어 null (일정 수정 · 삭제를 어디서 할지는 D41이 정함)
@@ -455,13 +490,11 @@ export async function createAppointment(estimate: Estimate, source = '직접 입
 }
 
 // 음성 안내 문장 — 강도(말소리)에 따라 말투가 바뀜. 출발 알람은 같이 가는 그룹원 상황을 알려 줌
-// again = 기상 확인이 안 돼 다시 울림
-function voiceLine(a: MockAppointment, kind: RingKind, at: Date, again: boolean) {
+function voiceLine(a: MockAppointment, kind: RingKind, at: Date) {
   const chain = alarmChain(a);
   const depart = chain.find((x) => x.kind === 'DEPARTURE')?.at ?? a.at;
   const when = spokenTime(a.at);
   if (kind === 'WAKE') {
-    if (again) return `아직 기상 확인이 안 됐어요. ${a.title}에 늦지 않게 지금 일어나 주세요.`;
     const subject = josa(a.title, '이', '가');
     const late = db.lateCount4w ? ` 최근 4주에 ${db.lateCount4w}번 늦었어요.` : '';
     return [
@@ -499,26 +532,25 @@ function findAlarm(alarmId: string) {
 }
 
 // 울림 화면 (H07) — 실제 울림은 알람 코어(네이티브). 이 화면은 디자인 · 웹 미리 보기용
-// again = 확인 알림에 응답이 없어 다시 울림 → 큰 시각은 다시 울린 시각 (목업 ring-time = S.now). 기상 알람만, 다른 종류는 무시
-export async function getRing(alarmId: string, again = false): Promise<RingInfo | null> {
+// 준비 · 출발 알람의 머리글(notice)은 폰 알림과 같은 글자 (서버 알림 문구 함수 — features/alarm/notice.ts)
+export async function getRing(alarmId: string): Promise<RingInfo | null> {
   if (!isMock()) return real.getRing();
   const found = findAlarm(alarmId);
   if (!found || found.alarm.kind === 'ARRIVE') return null;
   const { a, alarm } = found;
   const kind = alarm.kind as RingKind;
-  const re = again && kind === 'WAKE';
   const sound = LEVELS[axisLevel(a, 'sound')];
   const vibration = LEVELS[axisLevel(a, 'vibration')];
-  const rang = db.wake.alarmId === alarm.id && db.wake.phase === 'ringing' ? db.wake.ringAt : null;
-  // 기록이 없으면(주소로 바로 열기) 알람 시각에 끈 것으로 보고 관찰 10분 + 응답 없음 5분 뒤
-  const at = re ? (rang ?? addMinutes(alarm.at, WAKE_OBSERVE_MINUTES + WAKE_NO_REPLY_MINUTES)) : alarm.at;
+  const at = alarm.at;
+  const appointment = toAppointment(a);
   return {
     alarmId: alarm.id,
     kind,
-    appointment: toAppointment(a),
+    appointment,
     at,
     voiceTone: LEVELS[axisLevel(a, 'voice')].voice,
-    voiceLine: voiceLine(a, kind, at, re),
+    voiceLine: voiceLine(a, kind, at),
+    notice: ringNotice(appointment, kind, at),
     levelLine: `알람 강도 ${sound.name} · 배경음 ${sound.sound} · 진동 ${vibration.vibration}`,
     important: a.importance !== 'LOW',
   };
@@ -654,14 +686,6 @@ export async function promptWake(alarmId: string, at: Date) {
   const dismissedAt = db.wake.alarmId === alarmId ? db.wake.dismissedAt : null;
   db.wake = { alarmId, phase: 'prompt', ringAt: null, dismissedAt, ...SLEPT };
   db.events.push({ at, label: '확인 알림 발송', source: '알림' });
-}
-
-// 확인 알림에도 응답이 없음 → 기상 알람이 다시 울림 (H07 again=1). at = 다시 울리는 시각
-// 다시 울릴지는 D2에서 정함 — 안 울리기로 하면 이 함수와 재알람 기록을 같이 뺌
-export async function missWake(alarmId: string, at: Date) {
-  if (!isMock()) return real.missWake();
-  db.wake = { alarmId, phase: 'ringing', ringAt: at, dismissedAt: null, ...NO_USE };
-  db.events.push({ at, label: '재알람', source: '자동' });
 }
 
 // how: self = 확인 알림에 직접 응답(사용 시간은 확인 알림 때 그대로), auto = 화면 사용으로 자동 판정(시연: 폰을 보며 일어남)

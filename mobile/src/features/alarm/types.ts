@@ -2,6 +2,7 @@
 // 이름은 DB(supabase/migrations · src/types/database.ts)를 따르고, 화면에 바로 쓰기 좋게 모양만 바꿈
 import type { Weekday } from '@/lib/weekday';
 import type { Enums } from '@/types/database';
+import type { DepartStatus } from '@shared/calc/depart.ts';
 
 import type { TravelProblem } from './travelConfirm';
 
@@ -204,6 +205,7 @@ export type RingInfo = {
   at: Date; // 울리는 시각
   voiceTone: string; // 말소리 강도 설명
   voiceLine: string; // 음성 안내 문장
+  notice?: string; // 알림 한 줄 — 준비 · 출발 알람이 알림 · 울림 화면 머리글로 보여 주는 글자 (서버 꾸러미 notice와 같은 글자, features/alarm/notice.ts). 없으면 종류별 기본 머리글
   levelLine: string; // 알람 강도 중 · 배경음 80% · 진동 짧게 반복
   important: boolean;
 };
@@ -212,7 +214,6 @@ export type RingInfo = {
 export type WakePhase = 'idle' | 'ringing' | 'observing' | 'prompt' | 'confirmed';
 export const WAKE_OBSERVE_MINUTES = 10; // 해제 뒤 화면 사용을 보는 시간 — 끝나면 확정 또는 확인 알림
 export const WAKE_RECENT_MINUTES = 5; // 최근 사용을 보는 관찰 뒤쪽 시간 (해제 뒤 5~10분)
-export const WAKE_NO_REPLY_MINUTES = 5; // 확인 알림에 응답이 없으면 이만큼 뒤 기상 알람이 다시 울림
 
 // 기상 확인 (H08) — 기상 알람 하나 기준 (alarm_events.alarm_id에 WAKE_CONFIRMED)
 export type WakeCheck = {
@@ -221,11 +222,40 @@ export type WakeCheck = {
   groupId: string | null; // 기상 완료를 알려 줄 그룹 — 없으면 공유 안내 · 그룹 버튼을 숨김
   groupName: string | null;
   phase: 'observing' | 'prompt'; // 확정 전 단계 (확정이면 confirmed)
-  dismissedAt: Date; // 기상 알람을 실제로 끈 시각 (다시 울린 뒤 끄면 그 시각)
+  dismissedAt: Date; // 기상 알람을 실제로 끈 시각 (미룬 뒤 다시 울려 끄면 그 시각)
   thetaMinutes: number; // 기상 판정 기준 θ — 해제 뒤 10분 동안 누적 화면 사용
   usage: number; // 누적 사용 · 해제 후 10분 (분) — 지금은 시연 값, 실데이터는 #35 · #40
   recent: number; // 최근 사용 · 뒤쪽 5분 (분)
   confirmed: { at: Date; how: 'self' | 'auto' } | null; // 이미 확정했으면
+};
+
+// 기상 후 아침 흐름 (이슈 #230) — H08(기상 확정 뒤) 한 줄과 홈 아침 카드(기상 알람 시각부터)가 읽는 "오늘 첫 일정"
+// 오늘 첫 일정 = 그날 켜진 기상 알람이 붙은 약속 중 가장 이른 것 (서버 calc/wake.ts hasEarlierWake와 같은 기준). 저녁(18시~)에는 홈처럼 내일
+// 준비 · 출발 · 도착 목표는 켜진 알람의 시각 — 꺼져 있거나 없으면 null
+export type MorningPlan = {
+  appointmentId: string;
+  title: string;
+  at: Date; // 약속 시각
+  place: string;
+  wakeAlarmId: string;
+  wakeAt: Date; // 기상 알람 시각 — 홈 아침 카드가 이 시각부터 보임
+  prepareAt: Date | null;
+  departAt: Date | null;
+  arriveAt: Date | null; // 도착 목표
+  travelMinutes: number; // 저장된 예상 이동
+  travelSource: string; // 예상 이동의 출처 글자 (길찾기 · 대략적인 값 · 직접 입력 …)
+  wakeConfirmedAt: Date | null; // 이 기상 알람의 기상 확정 시각 — 없으면 아직 확정 전 (카드는 확정을 기다리지 않음)
+  departedAt: Date | null; // 출발 기록 (appointment_participants.departed_at) — 있으면 이미 나선 것
+};
+
+// 지금 나가면 (홈 아침 카드 [다시 확인]) — 지금 + 이동 = 도착, 여유 · 상태는 서버와 같은 departNow (7장 7.5.2)
+export type DepartCheck = {
+  travelMinutes: number;
+  source: string; // 이동 출처 글자
+  arriveAt: Date;
+  slackMinutes: number; // 약속 − 도착 (음수면 늦음)
+  status: DepartStatus; // COMFORT 여유 · TIGHT 빠듯 · LATE_RISK 지각 위험
+  checkedAt: Date; // 확인한 시각
 };
 
 // 고친 값 기록 (고치기 원칙) — 사용자가 자동 값을 직접 고치면 하나씩 남겨 두고, 나중에 개인화(계산 · 제안)에 씀
