@@ -374,6 +374,18 @@ describe('⑦ 준비 +N · 강도 — 바뀐 때만 두 번째 저장', () => {
     expect(mSettings).toHaveBeenCalledWith('ap1', expect.objectContaining({ levels: { sound: 2, voice: 2, vibration: 2 } }));
   });
 
+  it('준비 −10분(줄이기)이면 자동 준비 시간 − 10으로 한 번 더 저장', async () => {
+    await saveWith({ prepare_delta: -10 });
+    expect(mSettings).toHaveBeenCalledTimes(1);
+    expect(mSettings).toHaveBeenCalledWith('ap1', expect.objectContaining({ prepareMinutes: 35 }));
+  });
+
+  it('준비 값이 이미 같으면 안 부름 (자동 − 10이 저장된 약속에 −10)', async () => {
+    mGet.mockImplementation(async () => detailOf({ edits: { bufferMinutes: 10, origin: '집', transport: 'TRANSIT', travelMinutes: null, prepareMinutes: 35, times: {} } }));
+    await saveWith({ prepare_delta: -10 });
+    expect(mSettings).not.toHaveBeenCalled();
+  });
+
   it('두 번째 저장이 실패해도 일정은 저장됨 — 그 사실을 알려 줌', async () => {
     mSettings.mockImplementation(async () => {
       throw new Error('boom');
@@ -418,6 +430,65 @@ describe('알람 바꾸기 · 알람 만들기 카드', () => {
     expect(mSettings).toHaveBeenCalledWith('ap1', expect.objectContaining({ prepareMinutes: 60, times: { WAKE: at(7, 40) } }));
     expect(mCreate).not.toHaveBeenCalled();
     expect(turnBodies().at(-1)?.card_action).toMatchObject({ id: 'c2', action: 'SAVED', appointment_id: 'ap1' });
+  });
+
+  describe('줄이기 · 원래대로 · 보통으로 (서버 turn-core 의미)', () => {
+    const manualPrep = (prepareMinutes: number | null) => ({ bufferMinutes: 10, origin: '집', transport: 'TRANSIT', travelMinutes: null, prepareMinutes, times: {} });
+    const axesOf = (manual: boolean, level = 2) => ({ sound: { level, manual }, voice: { level, manual }, vibration: { level, manual } });
+    const withDetail = (over: Record<string, unknown>) => mGet.mockImplementation(async () => detailOf(over));
+
+    async function runEdit(edit: Record<string, unknown>) {
+      mPreview.mockImplementation(async () => ({ alarms: ringsOf() }));
+      const card = editCard({ edit: { appointment_id: 'ap1', ...edit } });
+      script = [
+        session(),
+        turn({ next: 'APP_TASKS', reply: null, cards: [card] }),
+        turn({ rev: 3, cards: [{ ...card, status: 'READY' }] }),
+        turn({ rev: 4 }),
+      ];
+      await getConversation();
+      await say('알람 바꿔줘');
+      await saveCard('c2');
+    }
+
+    it('prepare_delta −10 → 자동 − 10분으로 미리 보기 · 저장', async () => {
+      await runEdit({ prepare_delta: -10 });
+      expect((mPreview.mock.calls[0][1] as { prepareMinutes: number }).prepareMinutes).toBe(35);
+      expect(mSettings).toHaveBeenCalledWith('ap1', expect.objectContaining({ prepareMinutes: 35 }));
+    });
+
+    it('prepare_delta 0 → 이미 직접 고른 준비 시간을 자동(null)으로 되돌림', async () => {
+      withDetail({ edits: manualPrep(60) });
+      await runEdit({ prepare_delta: 0 });
+      expect((mPreview.mock.calls[0][1] as { prepareMinutes: number | null }).prepareMinutes).toBeNull();
+      expect(mSettings).toHaveBeenCalledWith('ap1', expect.objectContaining({ prepareMinutes: null }));
+    });
+
+    it('prepare_delta 0이고 이미 자동이면 미리 보기를 안 부름 (바뀐 게 없음)', async () => {
+      await runEdit({ prepare_delta: 0 });
+      expect(mPreview).not.toHaveBeenCalled();
+    });
+
+    it('prepare_delta가 없거나 null이면 직접 고른 준비 시간을 그대로 둠', async () => {
+      withDetail({ edits: manualPrep(60) });
+      await runEdit({ prepare_delta: null, enabled: { PREPARE: false } });
+      expect(mPreview).not.toHaveBeenCalled();
+      expect(mSettings).toHaveBeenCalledWith('ap1', expect.objectContaining({ prepareMinutes: 60 }));
+    });
+
+    it('levels가 모두 null("보통으로") → 직접 고른 강도를 자동(null)으로', async () => {
+      withDetail({ intensity: { auto: 0, axes: axesOf(true) } });
+      await runEdit({ levels: { sound: null, voice: null, vibration: null } });
+      expect(mSettings).toHaveBeenCalledWith('ap1', expect.objectContaining({ levels: { sound: null, voice: null, vibration: null } }));
+      const shown = (turnBodies()[1].results as { cards: { estimate: { level: number } }[] }).cards[0].estimate.level;
+      expect(shown).toBe(0); // 미리 보기 강도 = 자동 강도
+    });
+
+    it('levels가 없으면 직접 고른 강도를 그대로 둠', async () => {
+      withDetail({ intensity: { auto: 1, axes: axesOf(true) } });
+      await runEdit({ prepare_delta: -10 });
+      expect(mSettings).toHaveBeenCalledWith('ap1', expect.objectContaining({ levels: { sound: 2, voice: 2, vibration: 2 } }));
+    });
   });
 
   it('켜기 · 끄기만이면 길찾기 미리 보기를 안 부름', async () => {

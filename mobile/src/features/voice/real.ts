@@ -54,7 +54,7 @@ type ServerEdit = {
   times?: Partial<Record<RingKind, string>>;
   levels?: Partial<Record<IntensityAxis, number | null>>;
   enabled?: Partial<Record<RingKind, boolean>>;
-  prepare_delta?: number;
+  prepare_delta?: number | null; // 더 = +분, 덜 = −분, 원래대로 = 0, 없음 · null = 준비시간 말 없음
   at?: string; // ALARM_NEW
   level?: number | null; // ALARM_NEW
 };
@@ -322,8 +322,35 @@ async function estimateNew(rec: CardRec): Promise<Outcome> {
   }
 }
 
-// 저장된 약속에 고칠 값을 얹은 알람 설정 초안 — 미리 보기 · 저장이 같이 씀. 자동 준비 시간 + N (이번만 준비)
-function editsOf(detail: AppointmentDetail, edit: ServerEdit | null | undefined): { edits: AlarmEdits; draft: AlarmSettingsDraft; changed: boolean } {
+const LEVEL_AXES = ['sound', 'voice', 'vibration'] as const;
+
+// 서버 prepare_delta — 숫자면 −60~+60분(0 = 원래대로), 없음 · null이면 null = 준비시간 말 없음
+function prepDeltaOf(edit: ServerEdit | null | undefined): number | null {
+  const d = edit?.prepare_delta;
+  if (typeof d !== 'number' || !Number.isFinite(d)) return null;
+  return Math.max(-MAX_PREPARE_DELTA, Math.min(MAX_PREPARE_DELTA, Math.round(d)));
+}
+
+// 바뀔 준비 시간 — 말 없음이면 지금 값 그대로, 0이면 자동(null)으로 되돌림, 그 밖엔 자동 준비 시간 + delta (0분 미만은 0분)
+function prepareOf(detail: AppointmentDetail, delta: number | null): number | null {
+  if (delta == null) return detail.edits.prepareMinutes;
+  if (delta === 0) return null;
+  return Math.max(0, detail.auto.predictedPrepMinutes + delta);
+}
+
+// 한 축의 서버 값 — undefined = 강도 말 없음(그대로), null = "보통으로"(자동으로 되돌림), 숫자 = 그 강도
+function wantedLevelOf(edit: ServerEdit | null | undefined, axis: IntensityAxis): Level | null | undefined {
+  const v = edit?.levels?.[axis];
+  if (v === null) return null;
+  return toLevel(v) ?? undefined;
+}
+
+// 저장된 약속에 고칠 값을 얹은 알람 설정 초안 — 미리 보기 · 저장이 같이 씀. 준비 시간은 자동 + delta (음수 = 줄이기, 0 = 자동으로)
+//   changed = 알람 시각이 움직일 값(시각 · 준비)이 지금과 다른지, levelChanged = 강도가 지금과 다른지
+function editsOf(
+  detail: AppointmentDetail,
+  edit: ServerEdit | null | undefined,
+): { edits: AlarmEdits; draft: AlarmSettingsDraft; changed: boolean; levelChanged: boolean } {
   const times: AlarmEdits['times'] = { ...detail.edits.times };
   let timesChanged = false;
   for (const kind of RING_KINDS) {
@@ -333,16 +360,19 @@ function editsOf(detail: AppointmentDetail, edit: ServerEdit | null | undefined)
       timesChanged = true;
     }
   }
-  const delta = Math.min(MAX_PREPARE_DELTA, Math.round(edit?.prepare_delta ?? 0));
-  const prepareMinutes = delta > 0 ? detail.auto.predictedPrepMinutes + delta : detail.edits.prepareMinutes;
+  const prepareMinutes = prepareOf(detail, prepDeltaOf(edit));
   const levels = {} as AlarmSettingsDraft['levels'];
-  for (const axis of ['sound', 'voice', 'vibration'] as const) {
-    const wanted = toLevel(edit?.levels?.[axis]);
+  let levelChanged = false;
+  for (const axis of LEVEL_AXES) {
+    const wanted = wantedLevelOf(edit, axis);
     const axisNow = detail.intensity.axes[axis];
-    levels[axis] = wanted ?? (axisNow.manual ? axisNow.level : null);
+    levels[axis] = wanted !== undefined ? wanted : axisNow.manual ? axisNow.level : null;
+    if (wanted === null && axisNow.manual) levelChanged = true; // 수동 → 자동
+    if (wanted != null && wanted !== axisNow.level) levelChanged = true;
   }
   const edits: AlarmEdits = { ...detail.edits, times, prepareMinutes };
-  return { edits, draft: { ...edits, kinds: { ...(edit?.enabled ?? {}) }, levels }, changed: timesChanged || delta > 0 };
+  const changed = timesChanged || prepareMinutes !== detail.edits.prepareMinutes;
+  return { edits, draft: { ...edits, kinds: { ...(edit?.enabled ?? {}) }, levels }, changed, levelChanged };
 }
 
 // 있는 약속의 알람 고치기 카드 계산 — 시각 · 준비가 바뀔 때만 previewAlarms (길찾기를 불러서), 켜기 · 강도만이면 지금 알람 그대로
@@ -361,7 +391,8 @@ async function previewEdit(rec: CardRec): Promise<Outcome> {
       if (blocked) return { status: 'FAILED', error: blocked };
     }
     const shown = ringAlarms(alarms).map((a) => (edit?.enabled && typeof edit.enabled[a.kind as RingKind] === 'boolean' ? { ...a, enabled: edit.enabled[a.kind as RingKind] as boolean } : a));
-    return { status: 'READY', alarms: shown, level: toLevel(edit?.levels?.sound) ?? detail.level, withWake: detail.withWake };
+    const sound = wantedLevelOf(edit, 'sound'); // null = 보통으로 → 자동 강도
+    return { status: 'READY', alarms: shown, level: sound === undefined ? detail.level : (sound ?? detail.intensity.auto), withWake: detail.withWake };
   } catch (e) {
     return { status: 'FAILED', error: userMessage(e, '알람을 계산하지 못했어요') };
   }
@@ -583,18 +614,12 @@ const alarmSummary = (alarms: readonly { kind: AlarmKind; at: Date; enabled: boo
 
 // 새 약속 저장 뒤 준비 +N · 강도 — 실제로 바뀔 때만 saveAlarmSettings 한 번 더 (L1 답 L1-1). 바꾼 뒤의 약속을 돌려줌
 async function adjustAfterSave(id: string, edit: ServerEdit | null | undefined): Promise<AppointmentDetail | null> {
-  const delta = Math.min(MAX_PREPARE_DELTA, Math.round(edit?.prepare_delta ?? 0));
-  const levels = ['sound', 'voice', 'vibration'] as const;
-  const wantsLevel = levels.some((axis) => toLevel(edit?.levels?.[axis]) != null);
-  if (delta <= 0 && !wantsLevel) return null;
+  const delta = prepDeltaOf(edit);
+  if (delta == null && LEVEL_AXES.every((axis) => wantedLevelOf(edit, axis) === undefined)) return null; // 고칠 말 없음
   const detail = await getAppointment(id);
   if (!detail) return null;
-  const levelChanged = levels.some((axis) => {
-    const wanted = toLevel(edit?.levels?.[axis]);
-    return wanted != null && wanted !== detail.intensity.axes[axis].level;
-  });
-  if (delta <= 0 && !levelChanged) return null; // 이미 그 강도 — 길찾기를 또 부르지 않음
-  const { draft } = editsOf(detail, { prepare_delta: delta, levels: edit?.levels });
+  const { draft, changed, levelChanged } = editsOf(detail, { prepare_delta: delta ?? undefined, levels: edit?.levels });
+  if (!changed && !levelChanged) return null; // 이미 그 값 — 길찾기를 또 부르지 않음
   await saveAlarmSettings(id, draft);
   return getAppointment(id);
 }
