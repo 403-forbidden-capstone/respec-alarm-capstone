@@ -119,6 +119,7 @@ function RootStack() {
       {/* 목업에 없는 설정 · 로그인 · 온보딩 — 실데이터를 못 쓰면 빠짐. 온보딩은 ONBOARDING_IN_FLOW가 꺼져도 따로 빠짐 */}
       <Stack.Protected guard={ready && canUseRealData}>
         <Stack.Screen name="settings" />
+        <Stack.Screen name="timetable-import" />
       </Stack.Protected>
       <Stack.Protected guard={needsLogin || preview}>
         <Stack.Screen name="login" />
