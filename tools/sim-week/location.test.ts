@@ -40,12 +40,14 @@ describe('위치 상황', () => {
     assert.ok(t.signals.some((s) => s.label.startsWith('CONVENIENCE')), '반경 150m에서는 편의점 왕복도 신호가 생김');
     assert.ok(!t.misjudge.includes('DEPART_FALSE'));
   });
-  it('500m 안 약속(p04 수 NEAR): 도착 감지 꺼짐 → 도착 원탭 필요', async () => {
+  it('500m 안 약속(p04 수 NEAR): #247 이후 도착 감지는 그대로(이동시간 측정만 꺼짐)', async () => {
     const { world, obs } = await run('p04', 2);
     assert.equal(world.situation, 'NEAR');
     const near = obs.trips.find((t) => t.near);
     assert.ok(near);
-    assert.ok(near.oneTap.includes('ARRIVE_MISSING'));
+    assert.ok(near.recordedArrive, '가까운 약속도 도착을 위치로 잡음');
+    assert.equal(near.arriveSource, 'LOCATION');
+    assert.ok(!near.oneTap.includes('ARRIVE_MISSING'));
   });
   it('같은 씨앗 · 값만 바꿔도 진실은 같고 기록만 달라짐', async () => {
     const a = await run('p01', 0);

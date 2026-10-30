@@ -17,10 +17,11 @@ export interface L1Learned {
 
 export interface L1Context {
   now: Date;
-  profile: { bufferMinutes: number; defaultTransport: Transport; home: Place };
+  profile: { bufferMinutes: number; defaultTransport: Transport; home: Place; defaultPrepareMinutes?: number | null }; // defaultPrepareMinutes = 온보딩 "일어나서 나가기까지" (기상~출발 첫 값, #269)
   learned: L1Learned;
   sameDayWake: boolean; // 그날 이 약속보다 앞선 약속에 켜진 기상 알람이 있음
   kakaoMinutes: number | null; // null = 카카오 없음
+  prepareBound?: { around: number; within: number }; // 반복 다음 회차: 직전 회차 준비값 ±within분 안 (alarm-roll, D62 · #269)
 }
 
 const LEVELS: Level[] = [0, 1, 2];
@@ -53,11 +54,12 @@ export async function planAppt(appt: AppAppt, ctx: L1Context): Promise<{ summary
       ...(levels ? { levels } : {}),
       ...(appt.overrides.enabled ? { enabled: appt.overrides.enabled } : {}),
     },
-    profile: { timezone: 'Asia/Seoul', default_buffer_minutes: ctx.profile.bufferMinutes, default_transport: ctx.profile.defaultTransport, home_name: '집', home_lat: home.lat, home_lng: home.lng },
+    profile: { timezone: 'Asia/Seoul', default_buffer_minutes: ctx.profile.bufferMinutes, default_transport: ctx.profile.defaultTransport, home_name: '집', home_lat: home.lat, home_lng: home.lng, default_prepare_minutes: ctx.profile.defaultPrepareMinutes ?? null },
     existingAlarms: [],
     stats: ctx.learned.stats,
     lateCount4w: ctx.learned.lateCount4w,
     sameDayWake: ctx.sameDayWake,
+    ...(ctx.prepareBound ? { prepareBound: ctx.prepareBound } : {}),
   };
   const plan = planCore.computePlan(inputs, travel, 'preview');
 
@@ -94,11 +96,13 @@ export function hasEarlierWake(appt: AppAppt, sameDay: readonly AppAppt[]): bool
   return calc.hasEarlierWake(appt.at, wakes, appt.id);
 }
 
-// 학습 통계 — 하루 기록의 actual_prepare_minutes 모음 → 기록 수 · P80 (뷰 v_prepare_time_stats 와 같은 식: calc.percentile)
-export function statsFrom(values: readonly number[]): L1Learned['stats'] {
-  if (!values.length) return { sampleCount: 0, p80: null };
-  return { sampleCount: values.length, p80: calc.percentile(values, 0.8) };
+// 학습 통계 — 하루 기록의 actual_prepare_minutes(최신순) → 최근 30건 중 10~240분만 센 기록 수 · P80 (#269 calc.prepareStatsOf, 서버 plan.ts loadPrepareStats 와 같음)
+export function statsFrom(minutesNewestFirst: readonly (number | null)[]): L1Learned['stats'] {
+  return calc.prepareStatsOf(minutesNewestFirst);
 }
+
+// 계산 근거 한 줄 (H03) — 5건부터 "내 기록 기반 N건", 4건까지 "배우는 중 N/5"
+export const prepareLabel = (n: number): string => calc.prepareSourceLabel(n) as string;
 
 // 강도 이름 → 단계
 export const LEVEL_OF_NAME: Record<'SOFT' | 'NORMAL' | 'STRONG', Level> = { SOFT: 0, NORMAL: 1, STRONG: 2 };

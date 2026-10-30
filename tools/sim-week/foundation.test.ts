@@ -24,8 +24,10 @@ describe('앱 순수 함수 불러오기', () => {
   it('L2 판정 함수가 Node에서 뜬다', () => {
     assert.equal(typeof geoState.interpretSignals, 'function');
     const at = Date.parse('2026-10-05T10:30:00+09:00');
-    assert.deepEqual(participantTimes.judgeArrival(at + 6 * 60_000, at, 'LOCATION'), { isLate: true, lateMinutes: 6 });
-    assert.deepEqual(participantTimes.judgeArrival(at + 3 * 60_000, at, 'LOCATION'), { isLate: null, lateMinutes: null }); // 보류 구간
+    // #240 이후: 위치 도착은 +11분 넘을 때만 지각(보류 없음, 지각 분 = 차이 − 감지 지연 6분), 응답은 +5분
+    assert.deepEqual(participantTimes.judgeArrival(at + 12 * 60_000, at, 'LOCATION'), { isLate: true, lateMinutes: 6 });
+    assert.deepEqual(participantTimes.judgeArrival(at + 8 * 60_000, at, 'LOCATION'), { isLate: false, lateMinutes: 0 });
+    assert.deepEqual(participantTimes.judgeArrival(at + 6 * 60_000, at, 'BUTTON'), { isLate: true, lateMinutes: 6 });
   });
 });
 

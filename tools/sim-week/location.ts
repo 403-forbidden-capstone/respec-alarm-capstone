@@ -13,7 +13,7 @@ export interface GeoParams {
   homeRadiusM: number;
   destRadiusM: Partial<Record<Place['kind'], number>>; // 분류별 목적지 반경 (없으면 앱 기본 defaultRadiusFor)
   delay: { mode: 'mix' } | { mode: 'fixed'; minutes: number };
-  lateBoundary: 'code' | 5 | 11; // code = L2 코드 값 그대로(기본, 헤드 기준 5) · 5 = 지금 코드(judgeArrival, −2~+5분 보류) · 11 = 보류 없이 +11분 넘을 때만 지각 (constants LOCATION_HOLD_AFTER_MINUTES)
+  lateBoundary: 'code' | 5 | 11; // code = L2 코드 값 그대로(기본: 위치 도착 +11분 · 응답 +5분, judgeArrival, 보류 없음) · 5 = 위치 도착도 +5분으로 판정(조정용) · 11 = 위치 도착 +11분(지금 코드와 같음)
 }
 
 export const DEFAULT_GEO: GeoParams = { homeRadiusM: geoConst.HOME_RADIUS_M, destRadiusM: {}, delay: { mode: 'mix' }, lateBoundary: 'code' };
@@ -38,9 +38,9 @@ interface Sig {
 type PartState = { departedAt: number | null; departSource: 'LOCATION' | 'BUTTON' | 'MANUAL' | null; arrivedAt: number | null; arriveSource: 'LOCATION' | 'BUTTON' | 'MANUAL' | null; isLate: boolean | null; lateMinutes: number | null };
 
 export function judgeLocationArrival(arrivedMs: number, apptMs: number, source: 'LOCATION' | 'BUTTON' | 'MANUAL', boundary: 'code' | 5 | 11): { isLate: boolean | null; lateMinutes: number | null } {
-  if (boundary !== 11 || source !== 'LOCATION') return participantTimes.judgeArrival(arrivedMs, apptMs, source);
-  const diff = (arrivedMs - apptMs) / 60_000;
-  return diff > geoConst.LOCATION_HOLD_AFTER_MINUTES ? { isLate: true, lateMinutes: Math.round(diff) } : { isLate: false, lateMinutes: 0 };
+  // #240 이후 judgeArrival 은 보류 없음 — 위치 도착 +11분, 응답 +5분. 조정 실행에서 위치 도착에 +5분을 쓰려면 응답 규칙으로 판정
+  if (boundary === 5 && source === 'LOCATION') return participantTimes.judgeArrival(arrivedMs, apptMs, 'BUTTON');
+  return participantTimes.judgeArrival(arrivedMs, apptMs, source);
 }
 
 export interface ObserveInput {
@@ -162,25 +162,25 @@ export function observeDay(input: ObserveInput): Observation {
       const a = apptOf(ac.participantId);
       if (!rec) continue;
       if (ac.type === 'DEPART') {
-        if (participantTimes.decideWrite('LOCATION', { present: rec.departedAt != null, byResponse: rec.departSource === 'BUTTON' || rec.departSource === 'MANUAL' }) === 'new') {
+        // 위치끼리는 더 늦은 출발로 바뀜(override), 응답이 있으면 그대로(keep) — #240 decideWrite
+        const d = participantTimes.decideWrite('DEPART', { source: 'LOCATION', atMs: ac.at }, { atMs: rec.departedAt, byResponse: rec.departSource === 'BUTTON' || rec.departSource === 'MANUAL' });
+        if (d !== 'keep') {
+          const prev = rec.departedAt;
           rec.departedAt = ac.at;
           rec.departSource = 'LOCATION';
-          writePrepare(ac.at, null);
+          writePrepare(ac.at, prev);
         }
       } else if (ac.type === 'ARRIVE') {
-        if (participantTimes.decideWrite('LOCATION', { present: rec.arrivedAt != null, byResponse: false }) === 'new') {
+        if (participantTimes.decideWrite('ARRIVE', { source: 'LOCATION', atMs: ac.at }, { atMs: rec.arrivedAt, byResponse: rec.arriveSource === 'BUTTON' || rec.arriveSource === 'MANUAL' }) === 'new') {
           rec.arrivedAt = ac.at;
           rec.arriveSource = 'LOCATION';
           const j = judgeLocationArrival(ac.at, a.at.getTime(), 'LOCATION', params.lateBoundary);
           rec.isLate = j.isLate;
           rec.lateMinutes = j.lateMinutes;
         }
-      } else if (ac.type === 'RETRACT_DEPART') {
-        if (rec.departedAt === ac.at && rec.departSource === 'LOCATION') {
-          rec.departedAt = null;
-          rec.departSource = null;
-        }
       }
+      // DEPART_PENDING · DEPART_CANCEL 은 알림 안내만 — 기록은 안 바뀜.
+      // 도착 전 귀가는 액션이 없음: 앞 출발은 그대로 두고, 다음 이탈이 오면 더 늦은 출발로 바뀜 (#240 · #247)
     }
   };
   const sigRows: Record<number, TripRecord['signals']> = {};
@@ -229,7 +229,7 @@ export function observeDay(input: ObserveInput): Observation {
     else if (rec.arrivedAt < T(t.arriveAt) - ms(5)) misjudge.push('ARRIVE_EARLY');
     if (t.trulyLate && rec.isLate !== true) misjudge.push('LATE_MISSED');
     if (!t.trulyLate && rec.isLate === true) misjudge.push('LATE_FALSE');
-    if (near) note.push('출발지~목적지 500m 안: 도착 감지 꺼짐');
+    if (near) note.push('출발지~목적지 500m 안: 실제 이동시간 측정만 꺼짐 (출발 · 도착 감지는 그대로)');
 
     // 원탭이 필요했던 일 (사람이 눌러야 맞아지는 것)
     if (rec.departedAt == null) taps.push('DEPART_MISSING');
@@ -248,7 +248,7 @@ export function observeDay(input: ObserveInput): Observation {
       if (taps.includes('DEPART_MISSING') || taps.includes('DEPART_WRONG')) {
         const old = rec.departedAt;
         const at = trueDepartExit + ms(1);
-        if (participantTimes.decideWrite('BUTTON', { present: old != null, byResponse: false }) !== 'keep') {
+        if (participantTimes.decideWrite('DEPART', { source: 'BUTTON', atMs: at }, { atMs: old, byResponse: false }) !== 'keep') {
           rec.departedAt = at;
           rec.departSource = 'BUTTON';
           writePrepare(at, old);
