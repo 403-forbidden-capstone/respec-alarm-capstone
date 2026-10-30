@@ -144,7 +144,7 @@ export const db = {
   wake: {
     alarmId: null as string | null,
     phase: 'idle' as WakePhase,
-    ringAt: null as Date | null, // 울린 시각 (다시 울림이면 그 시각)
+    ringAt: null as Date | null, // 울린 시각
     dismissedAt: null as Date | null, // 실제로 끈 시각
     usage: 0, // 누적 사용 · 해제 후 10분 (분) — 지금은 시연 값 (목업 S.wake.usage)
     recent: 0, // 최근 사용 · 뒤쪽 5분 (분)

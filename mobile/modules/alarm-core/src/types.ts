@@ -12,7 +12,7 @@ export type AlarmVibration = 'NONE' | 'SHORT_REPEAT' | 'STRONG_CONTINUOUS';
 
 /**
  * 예약 꾸러미 — 서버 alarm-commit이 돌려주는 값을 그대로 폰에 넘기는 모양 (docs/alarm-core.md)
- * 앞 8칸이 alarm-core.md, 그 뒤 3칸이 #79에서 더한 칸, 마지막 2칸은 타입 자리만 있고 아직 안 읽음
+ * 앞 8칸이 alarm-core.md, 그 뒤 3칸이 #79에서 더한 칸, `notice`가 알림 문구 칸, 마지막 2칸은 타입 자리만 있고 아직 안 읽음
  */
 export type RingPackage = {
   /** 서버 alarms.alarm_id (UUID). 알람 종류는 id에서 읽지 않고 type으로 정함 */
@@ -27,8 +27,14 @@ export type RingPackage = {
   intensity: AlarmIntensity;
   /** 미루기 한도 — 저장만 하고 아직 안 읽음 (D3 정해질 때까지 횟수 제한 없음) */
   snoozeLimit: number;
-  /** 음성 안내 문장 (나중, D8) — 저장만 하고 아직 안 읽음 */
+  /** 음성 안내 문장 (나중, D8) — 저장만 하고 아직 안 읽음. 서버가 약속의 기상 알람에 채움 ("좋은 아침이에요. 오늘 첫 일정은 …") */
   voiceText?: string;
+  /**
+   * 알림 한 줄 — 있으면 RingPlan.heading(알림 · 알람 화면의 줄)이 이 글자가 되고, 없으면 종류별 기본 줄.
+   * 서버가 약속의 준비 · 출발 알림에 채움 (예: "오전 8:40 출발까지 30분" · "지금 나가면 오전 9:50 도착 · 여유 10분").
+   * 네이티브는 이 칸을 모르고 plan.heading만 읽어 저장하므로 재부팅 뒤 다시 걸어도 그대로 남음
+   */
+  notice?: string;
   /** 소리 고르기. 지금은 어떤 값이든 기본 소리(폰 기본 알람음). 앱에 든 소리가 늘면 그 키는 앱 파일을 먼저 틂 */
   soundKey?: string;
   /** 평가 보정 비율. -0.1 = 볼륨 10% 줄임 (#81, volumeAdjust.ts) */

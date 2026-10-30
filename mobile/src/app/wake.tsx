@@ -3,9 +3,10 @@ import { Fragment, useEffect, useRef, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
 import { Button, Card, LoadError, ProgressBar, Screen, Text, toast, TopBar } from '@/components/ui';
-import { confirmWake, getWakeCheck, missWake, promptWake } from '@/features/alarm/api';
+import { confirmWake, getMorningPlan, getWakeCheck, promptWake } from '@/features/alarm/api';
 import { FormulaBox } from '@/features/alarm/components/FormulaBox';
-import { WAKE_NO_REPLY_MINUTES, WAKE_OBSERVE_MINUTES, WAKE_RECENT_MINUTES, type WakeCheck } from '@/features/alarm/types';
+import { MorningPlanLine } from '@/features/alarm/components/MorningPlanLine';
+import { WAKE_OBSERVE_MINUTES, WAKE_RECENT_MINUTES, type WakeCheck } from '@/features/alarm/types';
 import { useNow } from '@/features/alarm/hooks/useNow';
 import { formatUsage, judgeLines, pickAlarmId, WAKE_RECENT_RANGE } from '@/features/alarm/wake';
 import { uploadEvents } from '@/lib/alarmSync';
@@ -78,7 +79,7 @@ function WakeFlow({ check }: { check: WakeCheck }) {
   const [state, setState] = useState(() => toState(check));
   // 두 번 눌러도 한 단계에서 한 번만 기록 (H07 handled와 같음) — 단계가 바뀌면 다시 누를 수 있음
   const handled = useRef<Phase | null>(null);
-  // 실제로 끈 시각부터 10분 — 다시 울린 뒤 끄면 그 시각부터. 판정 시점(확정 · 확인 알림)으로만 씀
+  // 실제로 끈 시각부터 10분 — 미룬 뒤 다시 울려 끄면 그 시각부터. 판정 시점(확정 · 확인 알림)으로만 씀
   // 자동 판정의 기록 시각은 api가 누적 사용이 θ를 넘은 시각으로 남김 (D14)
   const observeEnd = addMinutes(check.dismissedAt, WAKE_OBSERVE_MINUTES);
   // 두 번째 막대 구간(해제 5~10분 뒤)이 아직 안 왔으면 0초 대신 "아직" (#225)
@@ -142,13 +143,6 @@ function WakeFlow({ check }: { check: WakeCheck }) {
     await promptWake(check.alarmId, observeEnd);
     await refresh();
   }
-  // 시연용: 확인 알림에도 응답이 없으면 5분 뒤 기상 알람이 다시 울림
-  async function noReply() {
-    if (!first()) return;
-    await missWake(check.alarmId, addMinutes(observeEnd, WAKE_NO_REPLY_MINUTES));
-    router.replace({ pathname: '/ring', params: { alarm: check.alarmId, again: '1' } });
-  }
-
   const meters = (
     <>
       <Meter label={`알람 끈 뒤 ${WAKE_OBSERVE_MINUTES}분 동안 폰 사용`} value={state.usage} threshold={check.thetaMinutes} />
@@ -213,14 +207,6 @@ function WakeFlow({ check }: { check: WakeCheck }) {
             </Text>
             {meters}
           </Card>
-          {mock ? (
-            <View style={styles.sim}>
-              <Text variant="label" tone="sub" style={styles.simText}>
-                시연용
-              </Text>
-              <Button label="응답 없이 5분 지나기" variant="ghost" onPress={noReply} />
-            </View>
-          ) : null}
         </>
       ) : null}
 
@@ -241,6 +227,7 @@ function WakeFlow({ check }: { check: WakeCheck }) {
             </Text>
           </View>
           <Card>{meters}</Card>
+          <MorningLine />
           <View style={styles.stack}>
             <Button label="홈으로" onPress={() => router.dismissTo('/')} />
             {check.groupId != null ? (
@@ -255,6 +242,18 @@ function WakeFlow({ check }: { check: WakeCheck }) {
       ) : null}
     </Screen>
   );
+}
+
+// 기상 확정 뒤 오늘 첫 일정 한 줄 (이슈 #230) — 일정 · 나갈 시각 · 다음 알림. 일정 줄을 누르면 알람 설정(H03)
+// 덧붙임이라 못 읽어도 기상 확정 화면은 그대로 (LoadError와 다시 시도만 붙음)
+function MorningLine() {
+  const { data, error, reload } = useLoad(getMorningPlan);
+  const current = useNow();
+  if (data === undefined) return error ? <LoadError onRetry={reload} /> : null;
+  const open = () => {
+    if (data) router.push({ pathname: '/alarm/[id]', params: { id: data.appointmentId } });
+  };
+  return <MorningPlanLine plan={data} current={current} onPress={open} />;
 }
 
 // 판정 단계 (.flow) — 해제됨 → 관찰 중 → (확인 알림) → 기상 확정
