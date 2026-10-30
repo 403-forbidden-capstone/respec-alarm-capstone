@@ -122,5 +122,6 @@ export function vibrationOf(vibration: string | null | undefined, intensity: Ala
   return LEVEL_FIELDS[level ?? levelOfIntensity(intensity) ?? BASE_LEVEL].vibration;
 }
 export function soundKeyOf(soundKey: string | null | undefined, intensity: AlarmIntensity): string {
-  return soundKey || LEVEL_FIELDS[levelOfIntensity(intensity) ?? BASE_LEVEL].soundKey;
+  // 앞뒤 공백은 폰(Kotlin)과 모듈 plan.ts가 trim하므로 같게 — 안 맞으면 서버 값과 폰 값이 계속 달라 매번 재예약됨
+  return soundKey?.trim() || LEVEL_FIELDS[levelOfIntensity(intensity) ?? BASE_LEVEL].soundKey;
 }

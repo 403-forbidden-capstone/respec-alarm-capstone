@@ -13,8 +13,9 @@
 --   · intensity   = "전체 세기" — 볼륨 · 다시 울림 횟수. 자동 단계(약 · 보통 · 강)가 그대로 들어감
 --   · sound_key   = 배경음 축 · voice_tone = 말소리 축 (둘은 전과 같음)
 --   · vibration   = 진동 축. 직접 고른 값만 들어가고, 자동이면 NULL → 앱 · 폰이 intensity에서 풀어 씀 (약 NONE · 보통 SHORT_REPEAT · 강 STRONG_CONTINUOUS)
--- 예전에는 진동 축 단계가 intensity 칸에 들어갔음. 기존 행은 그대로 두고(백필 없음) vibration이 NULL이라 intensity를 따름 —
---   예전에 진동만 직접 올린 알람은 intensity가 그 단계라 진동은 그대로이고, 다음에 서버가 다시 계산해 저장할 때 전체 세기만 자동 값으로 돌아감
+-- 예전에는 진동 축 단계가 intensity 칸에 들어갔음. 직접 고르지 않은(AUTO) 기존 행은 vibration이 NULL이라 intensity를 따름 — 예전과 같은 진동.
+--   예전에 진동을 직접 고른(MANUAL) 행은 intensity가 곧 진동 단계였으므로 아래에서 vibration으로 옮겨 적음(3. 백필) —
+--   안 옮기면 서버가 다시 계산해 저장할 때(일정 시각 수정 · 반복 다음 회차 · H03 저장) 진동이 자동 값으로 돌아가고 전체 세기도 같이 바뀜
 -- text + check로 둔 이유: 값을 더할 때 enum 타입 변경(트랜잭션 제약) 없이 check만 바꾸면 됨 (appointments.exception_kind와 같은 방식)
 -- L6 안건후보: 진동 칸 이름 · 값 기본안 = alarms.vibration ('NONE' | 'SHORT_REPEAT' | 'STRONG_CONTINUOUS', NULL = 강도를 따름), 알람 코어 vibration 칸 값 이름과 같음
 
@@ -122,3 +123,20 @@ $$;
 -- 실행 권한 — 이전 정의와 같음 (service_role만. create or replace는 권한을 그대로 두지만 이 파일만 읽어도 알 수 있게 다시 적음)
 revoke execute on function public.roll_insert_occurrence(jsonb, jsonb, jsonb, jsonb) from public, anon, authenticated;
 grant execute on function public.roll_insert_occurrence(jsonb, jsonb, jsonb, jsonb) to service_role;
+
+
+-- ---------------------------------------------------------------------
+-- 3. 백필 — 예전에 진동을 직접 고른(MANUAL) 알람
+-- ---------------------------------------------------------------------
+-- 예전에는 진동 축을 고르면 intensity 칸에 그 단계(SOFT · NORMAL · STRONG)가 들어갔음 → 새 칸 vibration으로 같은 뜻으로 옮겨 적음.
+--   intensity는 그대로 둠(볼륨 · 다시 울림은 예전과 같음). 소리 · 말소리를 직접 골랐던 행도 intensity_source가 MANUAL이라 같이 옮겨지는데,
+--   그런 행은 intensity가 자동 단계 그대로(=진동도 같은 단계)여서 vibration이 자동 값과 같아지고, 서버는 "자동 값과 같은 칸"을 직접 고른 것으로 안 읽음(resolveOverrides) — 부작용 없음
+-- 이미 vibration이 있는 행은 건드리지 않음 (여러 번 돌려도 같은 결과)
+update public.alarms
+   set vibration = case intensity
+                     when 'SOFT' then 'NONE'
+                     when 'NORMAL' then 'SHORT_REPEAT'
+                     else 'STRONG_CONTINUOUS'
+                   end
+ where intensity_source = 'MANUAL'
+   and vibration is null;
