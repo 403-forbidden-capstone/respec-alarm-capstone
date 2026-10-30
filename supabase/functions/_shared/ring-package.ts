@@ -6,7 +6,7 @@
 // 5장 5.4.2는 snake_case 응답이지만 이 꾸러미 안쪽은 알람 코어 타입(camelCase) 그대로 — 앱이 변환 없이 넘기려고
 // 순수 TS — node --test로 시험
 import { departNow } from './calc/depart.ts';
-import { soundKeyOf, vibrationOf } from './calc/intensity.ts';
+import { AXES_PICKER_ENABLED, soundKeyOf, vibrationOf } from './calc/intensity.ts';
 import { minutesBetween } from './calc/time.ts';
 import type { AlarmVibration } from './calc/types.ts';
 import { formatKoDuration, formatKoSpokenTime, formatKoTime } from './tz.ts';
@@ -113,6 +113,18 @@ const WAKE_TONES: Record<'CALM' | 'NEUTRAL' | 'DIRECT', { greeting: string; depa
   DIRECT: { greeting: '일어날 시간이에요.', depart: (time) => `${time}에 나가야 해요.` },
 };
 
+// 알람 한 줄에서 꾸러미에 실을 축별 값 — 축별 선택을 끄면(AXES_PICKER_ENABLED false) 저장된 sound_key · vibration · voice_tone을 무시하고 강도를 따름(값은 지우지 않음)
+export function axesOf(
+  a: Pick<PackageSource, 'sound_key' | 'vibration' | 'voice_tone' | 'intensity'>,
+  axesEnabled: boolean = AXES_PICKER_ENABLED,
+): { soundKey: string; vibration: AlarmVibration; voiceTone: string | null } {
+  return {
+    soundKey: soundKeyOf(axesEnabled ? a.sound_key : null, a.intensity),
+    vibration: vibrationOf(axesEnabled ? a.vibration : null, a.intensity),
+    voiceTone: axesEnabled ? (a.voice_tone ?? null) : null,
+  };
+}
+
 export function wakeVoiceText(args: { title: string; appointmentAt: Date; departAt?: Date; timeZone: string; voiceTone?: string | null }): string {
   const title = args.title.trim() || '일정';
   const tone = args.voiceTone === 'CALM' ? WAKE_TONES.CALM : args.voiceTone === 'DIRECT' ? WAKE_TONES.DIRECT : WAKE_TONES.NEUTRAL;
@@ -170,7 +182,7 @@ export function buildRingPackages(args: {
       return notice ? { notice } : {};
     }
     if (a.alarm_type === 'WAKE') {
-      const voiceText = tryText(a.alarm_type, a.alarm_id, () => wakeVoiceText({ title: args.title, appointmentAt: appointment.appointmentAt, departAt: departureAt, timeZone: appointment.timeZone, voiceTone: a.voice_tone }));
+      const voiceText = tryText(a.alarm_type, a.alarm_id, () => wakeVoiceText({ title: args.title, appointmentAt: appointment.appointmentAt, departAt: departureAt, timeZone: appointment.timeZone, voiceTone: axesOf(a).voiceTone }));
       return voiceText ? { voiceText } : {};
     }
     return {};
@@ -185,8 +197,8 @@ export function buildRingPackages(args: {
       ...(args.subtitle ? { subtitle: args.subtitle } : {}),
       intensity: a.intensity,
       snoozeLimit: a.snooze_limit,
-      soundKey: soundKeyOf(a.sound_key, a.intensity),
-      vibration: vibrationOf(a.vibration, a.intensity),
+      soundKey: axesOf(a).soundKey,
+      vibration: axesOf(a).vibration,
       ...(args.departAt ? { departAt: args.departAt.getTime() } : {}),
       ...textFor(a),
     }))

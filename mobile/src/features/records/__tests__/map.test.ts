@@ -262,11 +262,11 @@ describe('S01 제안 (DB 종류: 말소리 · 배경음 · 진동)', () => {
     expect([formatTime(s.currentWake), formatTime(s.proposedWake), s.minutes, s.bounds]).toEqual(['오전 7:20', '오전 7:20', 0, { earlier: 0, later: 0 }]);
   });
 
-  it('배경음 · 진동 제목에 받침에 맞는 조사', () => {
+  it('배경음 · 알람 세기 제목에 받침에 맞는 조사 (알람 세기는 전체 세기라 "진동"이 아님 — D1 A, 지형님 10/30)', () => {
     expect(toSuggestion(row({ suggestion_type: 'SOUND', current_value: 'theme_default', suggested_value: 'theme_calm' }), target())?.title).toBe('기상 알람의 배경음을 바꿔 볼까요?');
     const intensity = toSuggestion(row({ suggestion_type: 'INTENSITY', current_value: 'NORMAL', suggested_value: 'STRONG' }), target({ alarm_type: 'PREPARE' }))!;
-    expect(intensity.title).toBe('준비 알람의 진동을 바꿔 볼까요?');
-    expect(intensity.summary).toBe('짧게 반복 → 강하게 연속');
+    expect(intensity.title).toBe('준비 알람의 알람 세기를 바꿔 볼까요?');
+    expect(intensity.summary).toBe('중 · 볼륨 80% → 강 · 볼륨 100%');
   });
 
   it('적용한 제안은 적용한 값과 applied를 가짐', () => {

@@ -30,6 +30,12 @@ export function wakeSensitivityOf(value: string | null | undefined): WakeSensiti
   return value === 'HEAVY' ? 'HEAVY' : 'NORMAL';
 }
 
+// 축별 선택(배경음 · 말소리 · 진동을 따로 고름, D1 A)을 쓸지 — 앱 H03 선택 UI(lib/flags.ts ALARM_AXES_PICKER가 이 값을 다시 내보냄)와 서버 · 폰 계산이 같은 값을 봄.
+//   false: 이미 저장된 축 값(sound_key · voice_tone · vibration)은 지우지 않되 **계산에서 무시**하고 모두 강도를 따름 — 숨긴 설정이 몰래 알람에 영향을 주지 않게 (헤드 확정 10/30).
+//   다시 true로 켜면 저장돼 있던 값이 그대로 살아남. 결정 안건(투표) 결과 대기
+//   서버 함수를 배포하는 쪽과 앱(APK 아님, JS)이 같은 값으로 올라가야 어긋나지 않음
+export const AXES_PICKER_ENABLED = true;
+
 // 기본 강도 = 보통 (D69)
 export const BASE_LEVEL: Level = 1;
 const MAX_LEVEL: Level = 2;

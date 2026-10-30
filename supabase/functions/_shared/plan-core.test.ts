@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
 import { prepareSourceLabel, prepareStatsOf } from './calc/index.ts';
-import { clampPrepareToBound, computePlan, firstPrepareMinutes, inferBeforePrepare, resolveBasics, toSuggestion, type AlarmRow, type AppointmentRow, type ParticipantRow, type PlanInputs, type ProfileRow } from './plan-core.ts';
+import { clampPrepareToBound, computePlan, firstPrepareMinutes, inferBeforePrepare, resolveBasics, resolveOverrides, toSuggestion, type AlarmRow, type AppointmentRow, type ParticipantRow, type PlanInputs, type ProfileRow } from './plan-core.ts';
 import type { ResolvedTravel } from './route.ts';
 
 const kst = (day: number, minutes: number) => new Date(Date.UTC(2025, 4, day) + (minutes - 9 * 60) * 60_000);
@@ -518,4 +518,12 @@ test('시간대: 같은 순간도 profile.timezone의 낮으로 판정 (서울�
   // 시간대가 비었거나 틀리면 서울
   assert.equal(computePlan(input(''), api(30)).withWake, false);
   assert.equal(computePlan(input('No/Such_Zone'), api(30)).withWake, false);
+});
+
+test('축별 선택을 끄면(axesEnabled false) 요청 · 저장된 축 값을 모두 무시하고 자동(강도 따름) — 켜면 요청 값이 우선 (D1 A flag, 헤드 확정 10/30)', () => {
+  const stored = row('WAKE', 480, { intensity_source: 'MANUAL', sound_key: 'theme_urgent', vibration: 'NONE' });
+  assert.deepEqual(resolveOverrides({ sound: 2 }, [stored], 1, true), { sound: 2 });
+  assert.deepEqual(resolveOverrides({ sound: 2 }, [stored], 1, false), {});
+  assert.deepEqual(resolveOverrides(undefined, [stored], 1, false), {});
+  assert.notDeepEqual(resolveOverrides(undefined, [stored], 1, true), {}); // 켜면 저장된 직접 값이 살아 있음
 });

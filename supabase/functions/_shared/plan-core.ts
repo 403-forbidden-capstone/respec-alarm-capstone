@@ -8,6 +8,7 @@
 import {
   DEFAULT_BEFORE_PREPARE_MINUTES,
   DEFAULT_COMMON_P80,
+  AXES_PICKER_ENABLED,
   alarmChain,
   autoLevel,
   checkAlarms,
@@ -234,7 +235,8 @@ export function resolveManualTimes(draft: PlanDraft['manualTimes'], existing: re
   return out;
 }
 
-export function resolveOverrides(draft: PlanDraft['levels'], existing: readonly AlarmRow[], auto: Level): IntensityOverrides {
+export function resolveOverrides(draft: PlanDraft['levels'], existing: readonly AlarmRow[], auto: Level, axesEnabled: boolean = AXES_PICKER_ENABLED): IntensityOverrides {
+  if (!axesEnabled) return {}; // 축별 선택을 끄면 요청 · 저장된 축 값 모두 계산에서 무시(값은 지우지 않음) — calc/intensity.ts
   if (draft) return draft;
   const stored = existing.find((a) => a.alarm_type === 'WAKE' && a.intensity_source === 'MANUAL') ?? existing.find((a) => a.intensity_source === 'MANUAL');
   if (!stored) return {};

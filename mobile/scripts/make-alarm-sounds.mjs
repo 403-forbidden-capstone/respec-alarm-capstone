@@ -10,7 +10,8 @@
 //   theme_calm    2.0초  낮은 음(G4 392Hz 사인 + 2배음 약하게) · 한 번 울림 1.3초: 0.35초 동안 천천히 커지고 0.65초 동안 사라짐 · 0.7초 쉼 → 느린 반복
 //   theme_default 1.0초  기본 비프(A5 880Hz 사인 + 3배음 약하게) · 0.22초 소리 × 2번(0.0 · 0.5초에 시작) · 5ms 켜짐 / 20ms 꺼짐 곡선
 //   theme_urgent  1.0초  높은 음(A6 1760Hz 사각파) · 0.09초 소리 × 8번(0.125초마다) · 3ms 켜짐 / 8ms 꺼짐 → 빠른 반복
-//   최대 진폭: calm 0.7 · default 0.8 · urgent 0.8 (1.0 = 풀스케일, 클리핑 안 나게 여유를 둠)
+//   최대 진폭: calm 0.7 · default 0.8 · urgent 0.9 (1.0 = 풀스케일, 클리핑 안 나게 여유를 둠). urgent는 RMS 0.55 이상(옛 사이렌과 같거나 큼)을 쓰고 나서 확인함
+//   theme_default(보통)는 폰 기본 알람음을 먼저 틀고 이 파일은 예비 (AlarmProfiles.playsOwnFileFirst) — 파일은 약 theme_calm · 강 theme_urgent만 먼저 틂
 
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -69,7 +70,8 @@ const SOUNDS = {
   // 강: 높은 음을 짧게 여덟 번 빠르게
   theme_urgent: {
     seconds: 1.0,
-    peak: 0.8,
+    peak: 0.9, // 옛 사이렌(alarm_siren.wav, 피크 0.9 · RMS 0.55)보다 작지 않게 (지형님 10/30). 아래 minRms로 확인
+    minRms: 0.55,
     sample: (t) => {
       const index = Math.floor(t / 0.125);
       const local = t - index * 0.125;
@@ -130,19 +132,24 @@ function verify(name, file, expected) {
   const count = dataBytes / 2;
   let peak = 0;
   let clipped = 0;
+  let squares = 0;
   for (let i = 0; i < count; i += 1) {
-    const v = Math.abs(buf.readInt16LE(44 + i * 2));
+    const raw = buf.readInt16LE(44 + i * 2);
+    const v = Math.abs(raw);
     if (v > peak) peak = v;
     if (v >= 32767) clipped += 1;
+    squares += (raw / 32768) ** 2;
   }
+  const rms = Math.sqrt(squares / count);
   const first = buf.readInt16LE(44);
   const last = buf.readInt16LE(44 + (count - 1) * 2);
   const seconds = count / SAMPLE_RATE;
   if (Math.abs(seconds - expected.seconds) > 0.001) fail(`길이 ${seconds}초 (기대 ${expected.seconds}초)`);
-  if (peak / 32768 > 0.81) fail(`피크 ${peak / 32768}가 0.8을 넘음`);
+  if (peak / 32768 > expected.peak + 0.01) fail(`피크 ${peak / 32768}가 ${expected.peak}를 넘음`);
+  if (expected.minRms != null && rms < expected.minRms) fail(`RMS ${rms.toFixed(3)}가 ${expected.minRms}보다 작음 (옛 사이렌보다 작으면 안 됨)`);
   if (clipped > 0) fail(`클리핑 ${clipped}개`);
   if (first !== 0 || last !== 0) fail(`이음매가 무음이 아님 (처음 ${first} · 끝 ${last})`);
-  console.log(`${name}.wav  ${seconds.toFixed(2)}초  ${SAMPLE_RATE}Hz 모노 16bit  피크 ${(peak / 32768).toFixed(3)}  ${buf.length}바이트  처음/끝 샘플 ${first}/${last}`);
+  console.log(`${name}.wav  ${seconds.toFixed(2)}초  ${SAMPLE_RATE}Hz 모노 16bit  피크 ${(peak / 32768).toFixed(3)}  RMS ${rms.toFixed(3)}  ${buf.length}바이트  처음/끝 샘플 ${first}/${last}`);
 }
 
 mkdirSync(OUT_DIR, { recursive: true });
