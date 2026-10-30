@@ -26,6 +26,13 @@ jest.mock('expo-router', () => {
   return { useFocusEffect: (effect: () => void) => useEffect(effect, [effect]) };
 });
 
+// 읽기를 붙잡아 둘 수 있게 listDetections만 감쌈 (기본은 진짜 가짜 데이터 읽기)
+const mockList = jest.fn<(since: Date) => Promise<LocationDetection[]>>();
+jest.mock('../api', () => {
+  const actual = jest.requireActual<typeof import('../api')>('../api');
+  return { ...actual, listDetections: (since: Date) => mockList(since) };
+});
+
 const mockForget = jest.fn<(d: unknown, o?: unknown) => Promise<boolean>>();
 const mockRestore = jest.fn<(d: unknown) => Promise<boolean>>();
 jest.mock('../correct', () => ({
@@ -66,6 +73,7 @@ const kinds = () => current.rows.map((r) => r.kind);
 
 beforeEach(() => {
   jest.clearAllMocks();
+  mockList.mockImplementation((since) => jest.requireActual<typeof import('../api')>('../api').listDetections(since));
   mockForget.mockResolvedValue(true);
   mockRestore.mockResolvedValue(true);
   mockSyncLocation.mockResolvedValue(undefined);
@@ -127,14 +135,66 @@ describe('useHomeDetections — 홈 감지 정정 줄', () => {
     await act(async () => renderer.unmount());
   });
 
-  it('지우는 중 실패하면 던지지 않고 토스트로, 줄은 그대로', async () => {
+  it('지운 직후 다시 읽는 동안에도 [되돌리기]가 바로 먹음', async () => {
     const renderer = await render();
-    mockForget.mockRejectedValueOnce(new Error('boom'));
+    const actualList = jest.requireActual<typeof import('../api')>('../api').listDetections;
+    let release!: () => void;
+    mockList.mockImplementationOnce(
+      (since) =>
+        new Promise((resolve) => {
+          release = () => void actualList(since).then(resolve); // 붙잡힌 읽기 — 풀 때는 서버 값이 이미 지워진 뒤라 줄 하나가 빠진 목록
+        }),
+    );
+    await act(async () => {
+      await current.reject(current.rows[0]);
+    });
+    const [, opts] = mockToast.mock.calls[0];
+    expect(opts).toMatchObject({ actionLabel: '되돌리기' });
+    expect(current.busy).toBe(false); // 다시 읽기가 아직 안 끝났어도 버튼은 풀림
+
+    mockToast.mockClear();
+    await act(async () => {
+      opts!.onAction!();
+    });
+    await flush();
+    expect(mockRestore).toHaveBeenCalledTimes(1); // 조용히 무시되지 않음
+    expect(mockToast).toHaveBeenCalledWith('출발 오전 8:02 기록을 되돌렸어요', undefined);
+    await act(async () => {
+      release(); // 먼저 시작한 낡은 읽기가 뒤늦게 끝나도 나중 읽기(되돌린 뒤)를 덮지 않음
+    });
+    await flush();
+    expect(kinds()).toEqual(['DEPART', 'ARRIVE']);
+    await act(async () => renderer.unmount());
+  });
+
+  it('되돌리는 중 폰 기억 맞춤이 던져도 다시 읽어 서버에 돌아온 줄이 보임', async () => {
+    const renderer = await render();
+    await act(async () => {
+      await current.reject(current.rows[0]);
+    });
+    const [, opts] = mockToast.mock.calls[0];
+    expect(kinds()).toEqual(['ARRIVE']);
+    mockToast.mockClear();
+    mockRestore.mockRejectedValueOnce(new Error('boom')); // 서버는 이미 돌아온 뒤
+    await act(async () => {
+      opts!.onAction!();
+    });
+    await flush();
+    expect(mockToast).toHaveBeenCalledWith('되돌리지 못했어요. 다시 해 주세요', undefined);
+    expect(kinds()).toEqual(['DEPART', 'ARRIVE']);
+    await act(async () => renderer.unmount());
+  });
+
+  // 서버 값이 지워진 채 끝나므로 마지막에 둠 (가짜 데이터는 시험 사이에 안 되돌아옴)
+  it('지우는 중 폰 기억 맞춤이 던지면 토스트로 알리고, 다시 읽어 줄이 서버 상태를 따름', async () => {
+    const renderer = await render();
+    mockForget.mockRejectedValueOnce(new Error('boom')); // 서버 값은 이미 지워진 뒤
     await act(async () => {
       await current.reject(current.rows[1]);
     });
+    await flush();
     expect(mockToast).toHaveBeenCalledWith('정정하지 못했어요. 연결을 확인하고 다시 시도해 주세요.', undefined);
-    expect(kinds()).toEqual(['DEPART', 'ARRIVE']);
+    expect(kinds()).toEqual(['DEPART']);
     await act(async () => renderer.unmount());
   });
 });

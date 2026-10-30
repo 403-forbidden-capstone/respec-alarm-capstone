@@ -60,17 +60,22 @@ export function useHomeDetections({ reloadOn, onChanged }: Options = {}) {
     return () => subscription.remove();
   }, [reload]);
 
+  // 다시 읽기는 run 밖(finally의 void reload) — run이 끝나야 busy가 풀려 토스트의 [되돌리기]가 바로 먹음
+  //   서버 쓰기만 성공하고 폰 기억 맞춤이 던져도(부분 실패) finally가 다시 읽어 줄이 서버 상태를 따름
   const undo = useCallback(
     (snapshot: RejectSnapshot) =>
       run(async () => {
-        const ok = await undoErase(snapshot);
-        await reload();
-        if (!ok) {
-          toast('그 사이 다른 기록이 들어와서 되돌리지 못했어요');
-          return;
+        try {
+          const ok = await undoErase(snapshot);
+          if (!ok) {
+            toast('그 사이 다른 기록이 들어와서 되돌리지 못했어요');
+            return;
+          }
+          toast(restoredMessage(snapshot.kind, snapshot.at));
+          notifyChanged();
+        } finally {
+          void reload();
         }
-        toast(restoredMessage(snapshot.kind, snapshot.at));
-        notifyChanged();
       }, '되돌리지 못했어요. 다시 해 주세요'),
     [run, reload, notifyChanged],
   );
@@ -78,20 +83,23 @@ export function useHomeDetections({ reloadOn, onChanged }: Options = {}) {
   const reject = useCallback(
     (detection: LocationDetection) =>
       run(async () => {
-        const done = await eraseDetection({ participantId: detection.participantId, kind: detection.kind, at: detection.at.getTime() }, 'H01');
-        setRows((prev) => prev.filter((r) => detectionKey(r) !== detectionKey(detection))); // 바로 줄을 뺌 — 다시 읽기를 기다리지 않게
-        if (!done) {
-          toast('이미 바뀐 기록이에요');
-        } else if (done.snapshot) {
-          const { snapshot } = done;
-          // 토스트 안의 [되돌리기] — 5초 동안 보임
-          toast(erasedMessage(done.kind, new Date(done.at)), { actionLabel: '되돌리기', duration: UNDO_SECONDS * 1000, onAction: () => void undo(snapshot) });
-        } else {
-          toast(erasedMessage(done.kind, new Date(done.at))); // 서버에는 없던 판정 — 되돌릴 값이 없음
+        try {
+          const done = await eraseDetection({ participantId: detection.participantId, kind: detection.kind, at: detection.at.getTime() }, 'H01');
+          setRows((prev) => prev.filter((r) => detectionKey(r) !== detectionKey(detection))); // 바로 줄을 뺌 — 다시 읽기를 기다리지 않게
+          if (!done) {
+            toast('이미 바뀐 기록이에요');
+          } else if (done.snapshot) {
+            const { snapshot } = done;
+            // 토스트 안의 [되돌리기] — 5초 동안 보임
+            toast(erasedMessage(done.kind, new Date(done.at)), { actionLabel: '되돌리기', duration: UNDO_SECONDS * 1000, onAction: () => void undo(snapshot) });
+          } else {
+            toast(erasedMessage(done.kind, new Date(done.at))); // 서버에는 없던 판정 — 되돌릴 값이 없음
+          }
+          notifyChanged();
+        } finally {
+          void reload();
         }
-        await reload();
-        notifyChanged();
-      }, '정정하지 못했어요. 연결을 확인하고 다시 시도해 주세요.'),
+      },'정정하지 못했어요. 연결을 확인하고 다시 시도해 주세요.'),
     [run, undo, reload, notifyChanged],
   );
 
