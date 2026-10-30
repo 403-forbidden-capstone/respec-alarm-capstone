@@ -323,8 +323,9 @@ async function handleText(run: Run, row: SessionRow, st: ServerState, req: Extra
     fixes = fr.fixes;
   } else {
     // T2F가 5초 안에 못 오거나 실패 — 그 턴은 처리 결과 없음 (다음 턴 T2F가 현재 상태를 따라잡음)
+    // 위험 판단도 없음 = '모름'(꺼짐 아님): 가드가 모델이 낸 109를 지우지 않게 표시 (헤드 10/30). 109를 새로 붙이지는 않음
     ts = structuredClone(ts0);
-    ts.events = [...ts.events.filter((e) => e.after_turn !== j), emptyEvent(j)];
+    ts.events = [...ts.events.filter((e) => e.after_turn !== j), { ...emptyEvent(j), risk_unknown: true }];
   }
   const noNeed = needKinds(eventAt(ts.events, j)).length === 0;
   return conclude(
