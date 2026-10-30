@@ -240,6 +240,13 @@ const suggestion = (overrides: Partial<Suggestion> = {}): Suggestion => ({
 });
 
 describe('H03 미리 보기 읽기 (toPreview)', () => {
+  it('준비 시간에 쓴 내 기록 수를 그대로 실음 (H03 계산식 아래 "배우는 중 N/5" · "내 기록 기반 N건" 한 줄용)', () => {
+    const base = suggestion({});
+    const withCount = (n: number) => suggestion({ prepare: { ...base.prepare, sample_count: n } });
+    expect(toPreview(withCount(3), saved(), same(saved())).prepareSampleCount).toBe(3);
+    expect(toPreview(withCount(12), saved(), same(saved())).prepareSampleCount).toBe(12);
+  });
+
   it('알람 시각은 서버 값으로, 알람 id는 저장된 알람에서, 직접 고른 시각은 auto 포함', () => {
     const s = suggestion({
       alarms: [

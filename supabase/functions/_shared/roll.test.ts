@@ -2,8 +2,9 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { RING_KINDS, type RingKind } from './calc/index.ts';
+import { prepareSourceLabel, prepareStatsOf, RING_KINDS, type RingKind } from './calc/index.ts';
 import { commitStandalone, persistAppointment } from './commit.ts';
+import { deleteAppointment, updateAppointment, type EditCtx } from './edit-run.ts';
 import { FakeDb } from './fake-db.ts';
 import { KakaoError, type KakaoFailure } from './kakao.ts';
 import { buildPlan } from './plan.ts';
@@ -237,7 +238,7 @@ test('본인 길 · 배치가 동시에 같은 회차를 보면 회차는 한 �
 // 쿼리마다 사용자(creator_id · user_id)로 좁혔는지 지켜보는 껍데기
 function guarded(db: FakeDb, users: string[], violations: string[]) {
   const USER_COLUMN: Record<string, string> = {
-    appointments: 'creator_id', appointment_participants: 'user_id', alarms: 'user_id', todos: 'user_id', roll_attempts: 'user_id', routines: 'user_id', profiles: 'user_id', v_prepare_time_stats: 'user_id',
+    appointments: 'creator_id', appointment_participants: 'user_id', alarms: 'user_id', todos: 'user_id', roll_attempts: 'user_id', routines: 'user_id', profiles: 'user_id', daily_records: 'user_id',
   };
   const watch = (query: any, table: string) => {
     const eqs: Record<string, unknown> = {};
@@ -401,7 +402,7 @@ test('이어받기: 만들 종류 · 끈 종류 · 직접 시각(같은 시:분)
 
 test('이어받기: 길찾기로 구한 이동시간(API)은 안 이어받고 회차마다 새로 구함, 준비시간도 새로 계산 (공통 P80 + 개인 보정)', async () => {
   const env = setup(MON_10);
-  env.db.rows('v_prepare_time_stats').push({ user_id: A, sample_count: 20, p80_minutes: 90 });
+  for (let d = 1; d <= 20; d += 1) env.db.rows('daily_records').push({ record_id: `r${d}`, user_id: A, record_date: `2026-10-${String(d).padStart(2, '0')}`, actual_prepare_minutes: 90 }); // 내 기상~출발 기록 20건 (P80 90)
   const series = await seed(env, A, slot(), MON_10);
   const basePrepare = participantOf(env.db, env.db.rows('appointments')[0].appointment_id).prepare_minutes as number;
   const kakao = fakeKakao();
@@ -1054,4 +1055,123 @@ test('카카오 partial(앞뒤 도보 구간 빠짐)은 API가 아니라 ESTIMAT
   assert.equal(participant.travel_source, 'ESTIMATE');
   assert.equal(participant.est_travel_minutes, 40);
   assert.equal(env.db.rows('roll_attempts').length, 0);
+});
+
+// ---- 학습 루프 기초 a (이슈 #266): 반복 다음 회차는 직전 회차 준비값 ±10분 안에서만 (D62 처음 2주 몫) ----
+
+// 회차를 이어서 계산 — 매 회차 직전 회차의 준비값을 기준으로 삼고(planOccurrence의 기준 참여 조건), 그날까지 쌓인 기록으로 통계를 다시 냄
+function simulate(days: number, options: { onboarding: number; recordsBefore?: number[]; actual: number }) {
+  const records: number[] = [...(options.recordsBefore ?? [])]; // 쌓인 순서 — 아래에서 뒤집어 최신순으로 넘김
+  let previous = options.onboarding;
+  const out: { day: number; prepare: number; source: string; n: number; label: string }[] = [];
+  for (let day = 0; day < days; day += 1) {
+    const stats = prepareStatsOf([...records].reverse());
+    const ctx: RollPlanCtx = { ...ctxAt(MON_10), profile: { ...profile, default_prepare_minutes: options.onboarding }, stats };
+    const base: RollBase = { ...baseOf(fullAlarms()), participant: { ...baseParticipant, prepare_minutes: previous } };
+    const planned = planOccurrence(ctx, base, THU, { travel: API_50, sameDayWake: false });
+    assert.ok(planned.ok);
+    if (!planned.ok) throw new Error('unreachable');
+    previous = planned.plan.prepare.minutes;
+    out.push({ day, prepare: previous, source: planned.plan.prepare.source, n: planned.plan.prepare.sampleCount, label: prepareSourceLabel(planned.plan.prepare.sampleCount) });
+    records.push(options.actual);
+  }
+  return out;
+}
+const steps = (rows: { prepare: number }[], first: number) => rows.map((r, i) => Math.abs(r.prepare - (i === 0 ? first : rows[i - 1].prepare)));
+
+test('[5절] 매일 실제 85분 (온보딩 70분): 매 회차 직전 값에서 ±10분 넘게 안 움직이고, 5건부터 "내 기록 기반 5건"', () => {
+  const rows = simulate(12, { onboarding: 70, actual: 85 });
+  assert.equal(rows[0].prepare, 70); // 기록 0건 = 첫 값 그대로
+  assert.deepEqual([rows[0].source, rows[0].label], ['DEFAULT', '배우는 중 0/5']);
+  assert.ok(steps(rows, 70).every((d) => d <= 10), `하루 폭: ${steps(rows, 70)}`);
+  assert.deepEqual([rows[4].label, rows[5].label, rows[5].source], ['배우는 중 4/5', '내 기록 기반 5건', 'PERSONAL']);
+  assert.ok(rows.every((r, i) => i === 0 || r.prepare >= rows[i - 1].prepare), '85분 쪽으로만 천천히 당겨짐');
+  assert.ok(rows[11].prepare > 70 && rows[11].prepare <= 85);
+});
+
+test('상한이 실제로 걸리는 경우: 기록 30건(120분)이 한꺼번에 있는 사람이 첫 값 50에서 시작하면 회차마다 10분씩만 올라 목표(103)에 닿음', () => {
+  const rows = simulate(7, { onboarding: 50, recordsBefore: Array.from({ length: 30 }, () => 120), actual: 120 });
+  assert.deepEqual(rows.map((r) => r.prepare), [60, 70, 80, 90, 100, 103, 103]); // 상한이 없으면 첫 회차부터 103
+  assert.ok(steps(rows, 50).every((d) => d <= 10));
+  assert.equal(rows[0].label, '내 기록 기반 30건');
+});
+
+test('기준 회차에 기상 알람이 없으면 상한을 걸지 않고, 새 회차가 기상 없는 일정(15분)이면 그대로 15분', () => {
+  const noWake = [baseAlarm('PREPARE', '2026-10-27T07:40'), baseAlarm('DEPARTURE', '2026-10-27T08:00')];
+  const stats = prepareStatsOf(Array.from({ length: 30 }, () => 120));
+  const ctx: RollPlanCtx = { ...ctxAt(MON_10), stats };
+  const base: RollBase = { ...baseOf(noWake), participant: { ...baseParticipant, prepare_minutes: 15 } };
+  // 새 회차에 기상이 생기는 경우(기준은 기상 없는 회차, 그날 다른 기상에 밀렸던 것) — 비교 대상이 다른 종류(15분)라 상한을 안 걸어 기록 보정이 그대로 반영됨
+  const withWake = planOccurrence(ctx, base, THU, { travel: API_50, sameDayWake: false, baseHadEarlierWake: true });
+  assert.ok(withWake.ok && withWake.plan.withWake && withWake.plan.prepare.minutes > 25);
+  // 새 회차가 그날 두 번째 일정이면 15분
+  const second = planOccurrence(ctx, baseOf(fullAlarms()), THU, { travel: API_50, sameDayWake: true });
+  assert.ok(second.ok && !second.plan.withWake && second.plan.prepare.minutes === 15);
+});
+
+// ===========================================================================
+// 일정 수정 · 삭제(appointment-edit, PR 4b)와 맞물림 — 예외 회차(exception_kind)는 기준 회차에서 빠지고 날짜 자리는 그대로
+// ===========================================================================
+
+const editCtx = (env: Env, over: Partial<EditCtx> = {}): EditCtx => ({ userId: A, userDb: env.db as unknown as Db, service: env.db as unknown as Db, now: MON_10, ...over });
+const THU_1105 = kst('2026-11-05T10:30');
+const AFTER_WEEK = kst('2026-11-02T10:00'); // 이때의 창 = 11/16 10:00 앞까지 → 11/10 화 · 11/12 목 09:00이 새로 들어옴
+
+test('이번만 고친 회차는 기준 회차에서 빠짐: 다음 회차는 이번만 고치기 전의 시각 · 제목으로 만들어짐 (본인 길 · 배치 모두), 고친 회차의 날짜 자리는 그대로라 다시 안 만듦', async () => {
+  for (const path of ['own', 'batch'] as const) {
+    const env = setup(MON_10);
+    const series = await seed(env, A, slot(), MON_10);
+    await roll(env, 'own', MON_10, { lookup: fakeKakao().lookup }); // 10/29 · 11/03 · 11/05
+    const last = occurrence(env.db, series, '2026-11-05')!;
+    const edited = await updateAppointment(editCtx(env), { action: 'UPDATE', appointmentId: last.appointment_id as string, scope: 'this', confirmed: true, patch: { at: THU_1105, title: '특강' } });
+    assert.ok(edited.saved);
+    assert.equal(last.exception_kind, 'EDITED');
+
+    const kakao = fakeKakao();
+    const res = await roll(env, path, AFTER_WEEK, { lookup: kakao.lookup });
+    assert.deepEqual(res.created.map((c) => c.occurrence_on), ['2026-11-10', '2026-11-12'], path);
+    assert.deepEqual(res.created.map((c) => hm(occurrence(env.db, series, c.occurrence_on)!.appointment_at)), ['09:00', '09:00'], path); // 10:30이 아님
+    assert.deepEqual(res.created.map((c) => occurrence(env.db, series, c.occurrence_on)!.title), ['세미나', '세미나'], path); // 특강이 아님
+    assert.deepEqual([hm(last.appointment_at), last.title, last.occurrence_on], ['10:30', '특강', '2026-11-05'], path); // 고친 회차는 그대로
+    assert.deepEqual(datesOf(env.db, series), ['2026-10-27', '2026-10-29', '2026-11-03', '2026-11-05', '2026-11-10', '2026-11-12'], path);
+  }
+});
+
+test('이번만 지운 날짜는 roll이 다시 안 만듦 (행을 두므로) — 본인 길 · 배치 모두 길찾기도 0번. 행을 진짜 지우면 다시 만들어짐(그래서 행을 두는 것)', async () => {
+  const env = setup(MON_10);
+  const series = await seed(env, A, slot(), MON_10);
+  await roll(env, 'own', MON_10, { lookup: fakeKakao().lookup });
+  const tue = occurrence(env.db, series, '2026-11-03')!;
+  const res = await deleteAppointment(editCtx(env), { action: 'DELETE', appointmentId: tue.appointment_id as string, scope: 'this' });
+  assert.equal(res.mode, 'CANCEL_THIS');
+  assert.deepEqual(res.canceled_alarm_ids.length, 4);
+
+  const kakao = fakeKakao();
+  for (const path of ['own', 'batch', 'own'] as const) assert.deepEqual((await roll(env, path, MON_10, { lookup: kakao.lookup })).created, [], path);
+  assert.equal(kakao.state.calls, 0);
+  assert.deepEqual(datesOf(env.db, series), ['2026-10-27', '2026-10-29', '2026-11-03', '2026-11-05']);
+
+  // 대조: 행을 진짜 지우면 roll이 그 날짜를 다시 만듦
+  env.db.tables.appointments = env.db.rows('appointments').filter((a) => a.appointment_id !== tue.appointment_id);
+  const again = await roll(env, 'own', MON_10, { lookup: kakao.lookup });
+  assert.deepEqual(again.created.map((c) => c.occurrence_on), ['2026-11-03']);
+});
+
+test('예외 회차뿐인 묶음: 이번만 고친 회차만 남아 있으면 그 회차가 기준이 되어 묶음이 멈추지 않음, 이번만 지운 회차뿐이면 다음 회차를 안 만듦', async () => {
+  for (const path of ['own', 'batch'] as const) {
+    const edited = setup(MON_10);
+    const series = await seed(edited, A, slot(), MON_10);
+    const first = occurrence(edited.db, series, '2026-10-27')!;
+    await updateAppointment(editCtx(edited), { action: 'UPDATE', appointmentId: first.appointment_id as string, scope: 'this', confirmed: true, patch: { at: kst('2026-10-27T09:30') } });
+    const res = await roll(edited, path, MON_10, { lookup: fakeKakao().lookup });
+    assert.deepEqual(res.created.map((c) => c.occurrence_on), ['2026-10-29', '2026-11-03', '2026-11-05'], path);
+    assert.deepEqual(res.created.map((c) => hm(occurrence(edited.db, series, c.occurrence_on)!.appointment_at)), ['09:30', '09:30', '09:30'], path); // 예외뿐이라 그 회차의 시각을 이어받음 (작성자 판단)
+
+    const canceled = setup(MON_10);
+    const series2 = await seed(canceled, A, slot(), MON_10);
+    await deleteAppointment(editCtx(canceled), { action: 'DELETE', appointmentId: occurrence(canceled.db, series2, '2026-10-27')!.appointment_id as string, scope: 'this' });
+    const kakao = fakeKakao();
+    assert.deepEqual((await roll(canceled, path, MON_10, { lookup: kakao.lookup })).created, [], path);
+    assert.equal(kakao.state.calls, 0, path);
+  }
 });

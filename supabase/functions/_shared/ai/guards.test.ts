@@ -692,6 +692,27 @@ describe("applyGuards — 서버 조치", () => {
     assert.deepEqual(legacy.flags, []);
   });
 
+  it("109 (헤드 10/30): 이 턴 위험 판단이 '모름'(riskUnknown)이면 이미 안내한 대화에서도 · 안내 전에도 모델의 109를 지우지 않음", () => {
+    const c = cardCtx();
+    const hotline = "많이 힘드셨겠어요. 힘들 땐 109(자살예방 상담전화)에 언제든 전화할 수 있어요.";
+    const turns2 = [...c.turns, ai(2, hotline), user(3, "아무것도 하기 싫어")];
+    // 모름 표시는 safetyInfoFrom이 이벤트(risk_unknown)에서 채움 — 꺼짐(riskThisTurn=false)과 구분
+    const unknownEvs = [ev({ after_turn: 1, crisis: true }), ev({ after_turn: 2, risk_unknown: true })];
+    const safety = safetyInfoFrom(unknownEvs, 2);
+    assert.deepEqual(safety, { conveyed: true, latestUser: false, riskThisTurn: false, deferredTurns: 1, riskUnknown: true });
+    const repeat = applyGuards({ reply: `푹 쉬어요. ${hotline}`, acts: [], end: false }, { ctx: c.ctx, eventsVisible: unknownEvs, turnsBefore: turns2, safety });
+    assert.ok(!repeat.flags.includes("hotline_repeat"));
+    assert.equal(repeat.reply, `푹 쉬어요. ${hotline}`);
+    // 안내한 적 없는 대화에서도 hotline_without_risk로 안 지움 (모름 = 안전 쪽)
+    const before = [ev({ after_turn: 1, risk_unknown: true })];
+    const none = applyGuards({ reply: hotline, acts: [], end: false }, { ctx: c.ctx, eventsVisible: before, turnsBefore: c.turns, safety: safetyInfoFrom(before, 1) });
+    assert.ok(!none.flags.includes("hotline_without_risk"));
+    assert.equal(none.reply, hotline);
+    // 모름 표시가 없으면 기존대로 지움 · 위기 턴이면 모름 칸은 안 붙음
+    assert.equal(safetyInfoFrom([ev({ after_turn: 1, crisis: true }), ev({ after_turn: 2 })], 2).riskUnknown, undefined);
+    assert.equal(safetyInfoFrom([ev({ after_turn: 1, crisis: true, risk_unknown: true })], 1).riskUnknown, undefined);
+  });
+
   it("지어낸 숫자: 처음엔 다시, 또 걸리면 그 숫자가 든 문장만 지움 — 지금 시각 · 카드 요약 시각은 허용", () => {
     const c = cardCtx();
     const first = run("내일 기상 알람은 오전 6시 15분이에요. 카드를 확인해 주세요.", []);
