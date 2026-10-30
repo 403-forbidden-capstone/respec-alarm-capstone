@@ -10,9 +10,12 @@ import type { Place } from '@/features/alarm/types';
 import { useAuth } from '@/features/auth/AuthProvider';
 import { DataModeToggle } from '@/features/auth/DataModeToggle';
 import { locateOnce } from '@/features/location/currentPosition';
+import { LocationAutoSection } from '@/features/location/LocationAutoSection';
 import { openAppNotificationSettings } from '@/features/permissions';
 import { homePatchOf } from '@/features/onboarding/home';
+import { CalendarPickSheet } from '@/features/onboarding/components/CalendarPickSheet';
 import { ImportEntryCard } from '@/features/onboarding/components/ImportEntryCard';
+import { useCalendarImport } from '@/features/onboarding/hooks/useCalendarImport';
 import { usePhotoImport } from '@/features/onboarding/hooks/usePhotoImport';
 import { shouldSaveHandle } from '@/features/onboarding/validate';
 import { isHandleTaken, saveProfileFields } from '@/features/profile/api';
@@ -44,6 +47,10 @@ export default function SettingsScreen() {
   const [editing, setEditing] = useState<Editing>(null);
   const [placeOpen, setPlaceOpen] = useState(false);
   const photoImport = usePhotoImport();
+  const calendarImport = useCalendarImport((batch) => {
+    setImportBatch(batch);
+    router.push('/timetable-import');
+  });
   const user = session?.user;
   const provider = (user?.app_metadata?.provider as string | undefined) ?? '';
   const userId = enabled ? user?.id : undefined;
@@ -98,6 +105,8 @@ export default function SettingsScreen() {
         <EditRow label="아이디" value={profile?.handle ? `@${profile.handle}` : '-'} onPress={open('handle')} />
       </Card>
 
+      <LocationAutoSection />
+
       {profile ? (
         <>
           <SectionHeader title="아침 준비 기본값" />
@@ -123,8 +132,17 @@ export default function SettingsScreen() {
                       }
                     : undefined
                 }
-                busy={photoImport.reading}
-                reading={photoImport.reading ? 'photo' : null}
+                onCalendar={TIMETABLE_PATHS.calendar ? calendarImport.start : undefined}
+                busy={photoImport.reading || calendarImport.busy}
+                reading={photoImport.reading ? 'photo' : calendarImport.reading ? 'calendar' : null}
+              />
+              <CalendarPickSheet
+                visible={calendarImport.pickerOpen}
+                calendars={calendarImport.calendars}
+                picked={calendarImport.picked}
+                onToggle={calendarImport.toggle}
+                onConfirm={calendarImport.confirm}
+                onClose={calendarImport.closePicker}
               />
             </>
           ) : null}
