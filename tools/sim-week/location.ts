@@ -286,6 +286,40 @@ export function observeDay(input: ObserveInput): Observation {
   };
 }
 
+// 대화로 받은 정정을 기록에 반영 — 앱 voice/fixes.ts 의 CORRECT 와 같은 길(recordParticipantTimes, 출처 MANUAL): 위치 값은 덮고 응답 값은 그대로(keep).
+//   도착이면 지각을 응답 기준(+5분)으로 다시 판정, 출발이면 준비 실측을 mayWritePrepare 규칙으로 다시 셈
+export function correctRecordTime(rec: DayRecord, world: WorldDay, apptId: string, kind: 'DEPART' | 'ARRIVE', toMs: number): 'new' | 'override' | 'keep' | null {
+  const trip = rec.trips.find((t) => t.apptId === apptId);
+  const appt = world.appts.find((a) => a.id === apptId);
+  if (!trip || !appt) return null;
+  const isResp = (s: string | null) => s === 'BUTTON' || s === 'MANUAL';
+  if (kind === 'DEPART') {
+    const old = trip.recordedDepart ? Date.parse(trip.recordedDepart) : null;
+    const d = participantTimes.decideWrite('DEPART', { source: 'MANUAL', atMs: toMs }, { atMs: old, byResponse: isResp(trip.departSource) });
+    if (d === 'keep') return d;
+    trip.recordedDepart = isoKst(new Date(toMs));
+    trip.departSource = 'MANUAL';
+    const wakeMs = Date.parse(rec.wakeRecordedAt as string);
+    const schedMs = rec.alarmWakeAt ? Date.parse(rec.alarmWakeAt) : null;
+    const prev = old == null ? null : participantTimes.prepareMinutesOf(old, wakeMs, schedMs);
+    const next = participantTimes.prepareMinutesOf(toMs, wakeMs, schedMs);
+    if (next != null && participantTimes.mayWritePrepare(rec.actualPrepareMinutes, prev)) rec.actualPrepareMinutes = next;
+    trip.note.push(`대화 정정: 출발 ${trip.recordedDepart} (출처 MANUAL)`);
+    return d;
+  }
+  const old = trip.recordedArrive ? Date.parse(trip.recordedArrive) : null;
+  const d = participantTimes.decideWrite('ARRIVE', { source: 'MANUAL', atMs: toMs }, { atMs: old, byResponse: isResp(trip.arriveSource) });
+  if (d === 'keep') return d;
+  trip.recordedArrive = isoKst(new Date(toMs));
+  trip.arriveSource = 'MANUAL';
+  const j = participantTimes.judgeArrival(toMs, appt.at.getTime(), 'MANUAL');
+  trip.isLate = j.isLate;
+  trip.lateMinutes = j.lateMinutes;
+  rec.appLate = rec.trips.some((t) => t.isLate === true);
+  trip.note.push(`대화 정정: 도착 ${trip.recordedArrive} (출처 MANUAL) → 앱 지각 ${j.isLate}`);
+  return d;
+}
+
 export function toDayRecord(world: WorldDay, truth: DayTruth, obs: Observation, plans: Record<string, PlanSummary | undefined>): DayRecord {
   const first = world.appts[0];
   const plan = first ? plans[first.id] : undefined;

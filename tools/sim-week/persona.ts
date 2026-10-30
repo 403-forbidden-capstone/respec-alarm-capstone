@@ -77,6 +77,11 @@ export function kakaoMinutes(p: Persona): number {
   return p.flow?.travel?.api_estimate_min ?? p.travel_minutes;
 }
 
+// 약속 하나의 카카오 대역 분 — 그 사람의 api_estimate_min 을 그 약속의 평소 이동 비율로 (worldDay 가 장소를 놓을 때와 같은 값)
+export function kakaoMinutesFor(p: Persona, a: { travelMinutes: number }): number {
+  return Math.max(1, Math.round(kakaoMinutes(p) * (a.travelMinutes / p.travel_minutes)));
+}
+
 const SCHOOL = '한빛대학교';
 
 // 이름으로 카카오 분류 흉내 — 장소 검색 결과의 category_name 모양 ("교육,학문 > 학교 > 대학교")

@@ -17,7 +17,7 @@ export interface L1Learned {
 
 export interface L1Context {
   now: Date;
-  profile: { bufferMinutes: number; defaultTransport: Transport; home: Place; defaultPrepareMinutes?: number | null }; // defaultPrepareMinutes = 온보딩 "일어나서 나가기까지" (기상~출발 첫 값, #269)
+  profile: { bufferMinutes: number; defaultTransport: Transport; home: Place; defaultPrepareMinutes?: number | null; wakeSensitivity?: 'HEAVY' | 'NORMAL' | null }; // defaultPrepareMinutes = 온보딩 "일어나서 나가기까지" (기상~출발 첫 값, #269)
   learned: L1Learned;
   sameDayWake: boolean; // 그날 이 약속보다 앞선 약속에 켜진 기상 알람이 있음
   kakaoMinutes: number | null; // null = 카카오 없음
@@ -54,7 +54,7 @@ export async function planAppt(appt: AppAppt, ctx: L1Context): Promise<{ summary
       ...(levels ? { levels } : {}),
       ...(appt.overrides.enabled ? { enabled: appt.overrides.enabled } : {}),
     },
-    profile: { timezone: 'Asia/Seoul', default_buffer_minutes: ctx.profile.bufferMinutes, default_transport: ctx.profile.defaultTransport, home_name: '집', home_lat: home.lat, home_lng: home.lng, default_prepare_minutes: ctx.profile.defaultPrepareMinutes ?? null },
+    profile: { timezone: 'Asia/Seoul', default_buffer_minutes: ctx.profile.bufferMinutes, default_transport: ctx.profile.defaultTransport, home_name: '집', home_lat: home.lat, home_lng: home.lng, default_prepare_minutes: ctx.profile.defaultPrepareMinutes ?? null, wake_sensitivity: ctx.profile.wakeSensitivity ?? null }, // wake_sensitivity: 지금 main 계산(computePlan)은 안 읽음 — 기능 확인 표 5b가 이 빈틈을 봄
     existingAlarms: [],
     stats: ctx.learned.stats,
     lateCount4w: ctx.learned.lateCount4w,

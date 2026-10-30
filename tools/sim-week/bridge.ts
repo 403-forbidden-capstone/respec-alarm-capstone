@@ -48,6 +48,10 @@ export const geoArea = await import(at('mobile/src/features/location/area.ts'));
 export const geoConst = await import(at('mobile/src/features/location/constants.ts'));
 export const geoGeo = await import(at('mobile/src/features/location/geo.ts'));
 export const geoAttach = await import(at('mobile/src/features/location/attach.ts'));
+// ---- 서버 대화 순수부 (#248): 카드 · 정정 · 서버 질문 고르기(turn-core) + 문맥 만들기(context-core). 모델은 안 부름 ----
+export const aiTurn = await import(at('supabase/functions/_shared/ai/turn-core.ts'));
+export const aiContext = await import(at('supabase/functions/_shared/ai/context-core.ts'));
+export const aiTypes = await import(at('supabase/functions/_shared/ai/types.ts'));
 // PR 코드에만 있는 것 (없으면 null) — 예: #240 location/real.ts(listEarlierDepartures), alarm/oneTap 등
 export const geoReal = await opt('mobile/src/features/location/real.ts').catch(() => null);
 
