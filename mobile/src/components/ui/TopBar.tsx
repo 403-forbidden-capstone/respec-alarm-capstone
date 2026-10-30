@@ -29,7 +29,9 @@ export function TopBar({ screenId, onBack, left, right }: Props) {
       ) : left ? (
         left
       ) : screenId ? (
-        <ScreenId id={screenId} />
+        <View>
+          <ScreenId id={screenId} />
+        </View>
       ) : (
         <View />
       )}

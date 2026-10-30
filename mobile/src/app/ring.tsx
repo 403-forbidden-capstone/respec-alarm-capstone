@@ -112,7 +112,7 @@ export default function RingScreen() {
       ) : data ? (
         <View style={styles.body} accessibilityRole="alert" accessibilityLabel={data.notice ?? HEAD[kind]}>
           <View style={styles.top}>
-            <ScreenId id="H07" tone="inverse" style={styles.faded45} />
+            <View><ScreenId id="H07" tone="inverse" style={styles.faded45} /></View>
             {data.important ? (
               <View style={styles.chip}>
                 <Text variant="label" tone="inverse">
@@ -246,7 +246,7 @@ function DonePanel({ kind, appointment: a }: { kind: Exclude<RingKind, 'WAKE'>; 
   return (
     <View style={styles.body}>
       <View style={styles.top}>
-        <ScreenId id="H07" tone="inverse" style={styles.faded45} />
+        <View><ScreenId id="H07" tone="inverse" style={styles.faded45} /></View>
       </View>
       <Text variant="bodyLarge" tone="inverse" align="center" style={styles.head}>
         {kind === 'PREPARE' ? '준비를 시작해요' : '출발해요'}
