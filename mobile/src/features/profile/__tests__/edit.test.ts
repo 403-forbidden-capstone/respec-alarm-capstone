@@ -1,6 +1,6 @@
 import { describe, expect, it } from '@jest/globals';
 
-import { canSaveHandle, canSaveNickname, isPrepareChanged, prepareValuesOf } from '../edit';
+import { canSaveHandle, canSaveNickname, homePatch, isPrepareChanged, prepareValuesOf } from '../edit';
 
 const base = { prepare: 60, buffer: 10, transport: 'TRANSIT', margin: 'NORMAL' } as const;
 
@@ -38,5 +38,17 @@ describe('prepareValuesOf', () => {
     const profile = { default_prepare_minutes: 45, default_buffer_minutes: 10, default_transport: 'BUS', wake_margin: 'TIGHT' } as const;
     expect(prepareValuesOf(profile)).toEqual({ prepare: 45, buffer: 10, transport: 'BUS', margin: 'TIGHT' });
     expect(prepareValuesOf({ ...profile, default_prepare_minutes: 2, default_buffer_minutes: 90 })).toMatchObject({ prepare: 5, buffer: 60 });
+  });
+});
+
+describe('homePatch', () => {
+  it('좌표가 있는 장소는 이름과 좌표를 같이 돌려줌', () => {
+    expect(homePatch({ name: '우리집', lat: 37.5, lng: 127.0 })).toEqual({ home_name: '우리집', home_lat: 37.5, home_lng: 127.0 });
+  });
+
+  it('좌표가 없거나 하나만 있으면 null — 집으로 못 정함 (0도 좌표로 침)', () => {
+    expect(homePatch({ name: '최근 장소' })).toBeNull();
+    expect(homePatch({ name: '반쪽', lat: 37.5 })).toBeNull();
+    expect(homePatch({ name: '적도', lat: 0, lng: 0 })).not.toBeNull();
   });
 });

@@ -13,7 +13,7 @@ import { shouldSaveHandle } from '@/features/onboarding/validate';
 import { isHandleTaken, saveProfileFields } from '@/features/profile/api';
 import { EditRow } from '@/features/profile/components/EditRow';
 import { HandleEditor, NicknameEditor, PrepareEditor, SleepEditor } from '@/features/profile/components/ProfileEditors';
-import { prepareValuesOf } from '@/features/profile/edit';
+import { homePatch, prepareValuesOf } from '@/features/profile/edit';
 import { TRANSPORT_NAME, WAKE_MARGIN_NAME, WAKE_SENSITIVITY_NAME } from '@/features/profile/labels';
 import type { ProfileFields } from '@/features/profile/types';
 import { UserError, userMessage } from '@/lib/errors';
@@ -69,8 +69,13 @@ export default function SettingsScreen() {
     }, '저장하지 못했어요');
 
   const pickHome = (place: Place) => {
-    // 좌표가 없는 장소면 이전 좌표가 남지 않게 null로 덮어씀
-    void saveEdit({ home_name: place.name, home_lat: place.lat ?? null, home_lng: place.lng ?? null });
+    const patch = homePatch(place);
+    // 좌표가 없는 장소는 집으로 못 정함 — 이름만 바꾸면 이전 좌표와 어긋나고, 지우면 새 일정의 이동시간 계산이 막힘 (시트는 열어 둠)
+    if (!patch) {
+      toast('이 장소는 위치를 몰라 집으로 정할 수 없어요. 다른 장소를 골라 주세요');
+      return;
+    }
+    void saveEdit(patch);
   };
 
   return (
@@ -179,7 +184,7 @@ export default function SettingsScreen() {
           </Sheet>
         </>
       ) : null}
-      <PlaceSearchSheet visible={placeOpen} onClose={() => setPlaceOpen(false)} onPick={pickHome} search={(query) => listPlaces(query)} title="집 찾기" />
+      <PlaceSearchSheet visible={placeOpen} onClose={() => setPlaceOpen(false)} onPick={pickHome} search={(query) => listPlaces(query, profile?.home_lat != null && profile.home_lng != null ? { lat: profile.home_lat, lng: profile.home_lng } : undefined)} title="집 찾기" />
     </Screen>
   );
 }
