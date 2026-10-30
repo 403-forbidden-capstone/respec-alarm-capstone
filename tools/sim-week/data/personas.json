@@ -1,0 +1,518 @@
+[
+ {
+  "id": "p01",
+  "split": "dev",
+  "name": "서윤",
+  "age": 21,
+  "major": "경영학과 3학년",
+  "living": "COMMUTE_LONG",
+  "transport": "TRANSIT",
+  "travel_minutes": 65,
+  "prep_minutes": 50,
+  "buffer_minutes": 15,
+  "chronotype": "NORMAL",
+  "sleep_pattern": "AROUND_MIDNIGHT",
+  "snooze_tendency": 2,
+  "talkativeness": "NORMAL",
+  "style": "POLITE",
+  "mood_baseline": 3,
+  "correction_tendency": "CORRECT",
+  "cooperation": "HIGH",
+  "weekly": [
+   {
+    "weekday": "MON",
+    "title": "재무관리",
+    "time": "10:30",
+    "place": "경영관",
+    "importance": "NORMAL",
+    "kind": "CLASS"
+   },
+   {
+    "weekday": "TUE",
+    "title": "마케팅 팀플 회의",
+    "time": "13:00",
+    "place": "학생회관 스터디룸",
+    "importance": "NORMAL",
+    "kind": "TEAM"
+   },
+   {
+    "weekday": "WED",
+    "title": "재무관리",
+    "time": "10:30",
+    "place": "경영관",
+    "importance": "NORMAL",
+    "kind": "CLASS"
+   },
+   {
+    "weekday": "THU",
+    "title": "마케팅원론",
+    "time": "09:00",
+    "place": "경영관",
+    "importance": "NORMAL",
+    "kind": "CLASS"
+   },
+   {
+    "weekday": "FRI",
+    "title": "카페 알바",
+    "time": "14:00",
+    "place": "신촌역 카페",
+    "importance": "NORMAL",
+    "kind": "JOB"
+   }
+  ],
+  "recurring_reasons": [
+   {
+    "tag": "HAIR_WASH",
+    "weekdays": [
+     "TUE",
+     "THU"
+    ],
+    "extra_minutes": 12
+   }
+  ],
+  "bio": "경기도에서 지하철 환승으로 1시간 넘게 통학함. 꼼꼼하고 예의 바르지만 아침엔 알람을 두어 번 미룸. 기록이 틀리면 정확히 고쳐 말함."
+ },
+ {
+  "id": "p02",
+  "split": "dev",
+  "name": "도현",
+  "age": 23,
+  "major": "컴퓨터공학과 4학년",
+  "living": "DORM",
+  "transport": "WALK",
+  "travel_minutes": 10,
+  "prep_minutes": 25,
+  "buffer_minutes": 10,
+  "chronotype": "LATE",
+  "sleep_pattern": "LATE_1_2",
+  "snooze_tendency": 3,
+  "talkativeness": "TERSE",
+  "style": "CASUAL",
+  "mood_baseline": 3,
+  "correction_tendency": "ACCEPT",
+  "cooperation": "LOW",
+  "weekly": [
+   {
+    "weekday": "TUE",
+    "title": "운영체제",
+    "time": "10:30",
+    "place": "공학관",
+    "importance": "NORMAL",
+    "kind": "CLASS"
+   },
+   {
+    "weekday": "WED",
+    "title": "캡스톤 회의",
+    "time": "15:00",
+    "place": "공학관 세미나실",
+    "importance": "HIGH",
+    "kind": "TEAM"
+   },
+   {
+    "weekday": "THU",
+    "title": "운영체제",
+    "time": "10:30",
+    "place": "공학관",
+    "importance": "NORMAL",
+    "kind": "CLASS"
+   },
+   {
+    "weekday": "FRI",
+    "title": "알고리즘 스터디",
+    "time": "11:00",
+    "place": "중앙도서관",
+    "importance": "LOW",
+    "kind": "TEAM"
+   }
+  ],
+  "recurring_reasons": [],
+  "bio": "기숙사 사는 개발자 지망생. 새벽 두 시까지 코딩하다 자고 알람을 계속 미룸. 말이 짧고 대화를 귀찮아함."
+ },
+ {
+  "id": "p03",
+  "split": "dev",
+  "name": "하은",
+  "age": 20,
+  "major": "시각디자인과 2학년",
+  "living": "HOME",
+  "transport": "SUBWAY",
+  "travel_minutes": 50,
+  "prep_minutes": 75,
+  "buffer_minutes": 10,
+  "chronotype": "NORMAL",
+  "sleep_pattern": "AROUND_MIDNIGHT",
+  "snooze_tendency": 1,
+  "talkativeness": "CHATTY",
+  "style": "TYPO_SLANG",
+  "mood_baseline": 4,
+  "correction_tendency": "ADD_INFO",
+  "cooperation": "HIGH",
+  "weekly": [
+   {
+    "weekday": "MON",
+    "title": "기초디자인 실습",
+    "time": "09:00",
+    "place": "예술관 실습실",
+    "importance": "NORMAL",
+    "kind": "CLASS"
+   },
+   {
+    "weekday": "WED",
+    "title": "색채학",
+    "time": "13:00",
+    "place": "예술관",
+    "importance": "NORMAL",
+    "kind": "CLASS"
+   },
+   {
+    "weekday": "THU",
+    "title": "스튜디오 크리틱",
+    "time": "10:00",
+    "place": "예술관 크리틱룸",
+    "importance": "HIGH",
+    "kind": "CLASS"
+   },
+   {
+    "weekday": "SAT",
+    "title": "편의점 알바",
+    "time": "11:00",
+    "place": "집 근처 편의점",
+    "importance": "NORMAL",
+    "kind": "JOB"
+   }
+  ],
+  "recurring_reasons": [
+   {
+    "tag": "MAKEUP",
+    "weekdays": [
+     "MON",
+     "THU"
+    ],
+    "extra_minutes": 15
+   },
+   {
+    "tag": "PRESENTATION",
+    "weekdays": [
+     "THU"
+    ],
+    "extra_minutes": 15
+   }
+  ],
+  "bio": "부모님 집에서 지하철로 통학. 수다스럽고 이모티콘을 많이 씀. 크리틱 있는 목요일엔 화장도 하고 작품도 챙기느라 준비가 길어짐."
+ },
+ {
+  "id": "p04",
+  "split": "dev",
+  "name": "민준",
+  "age": 22,
+  "major": "기계공학과 3학년",
+  "living": "NEAR",
+  "transport": "BUS",
+  "travel_minutes": 20,
+  "prep_minutes": 40,
+  "buffer_minutes": 10,
+  "chronotype": "EARLY",
+  "sleep_pattern": "BEFORE_MIDNIGHT",
+  "snooze_tendency": 0,
+  "talkativeness": "NORMAL",
+  "style": "STT",
+  "mood_baseline": 3,
+  "correction_tendency": "CORRECT",
+  "cooperation": "MID",
+  "weekly": [
+   {
+    "weekday": "MON",
+    "title": "열역학",
+    "time": "09:00",
+    "place": "공학관",
+    "importance": "NORMAL",
+    "kind": "CLASS"
+   },
+   {
+    "weekday": "TUE",
+    "title": "로봇 동아리",
+    "time": "18:00",
+    "place": "학생회관",
+    "importance": "LOW",
+    "kind": "SOCIAL"
+   },
+   {
+    "weekday": "WED",
+    "title": "열역학",
+    "time": "09:00",
+    "place": "공학관",
+    "importance": "NORMAL",
+    "kind": "CLASS"
+   },
+   {
+    "weekday": "FRI",
+    "title": "기계설계",
+    "time": "09:00",
+    "place": "공학관",
+    "importance": "NORMAL",
+    "kind": "CLASS"
+   }
+  ],
+  "recurring_reasons": [
+   {
+    "tag": "ESTIMATE_SHORT",
+    "weekdays": [
+     "MON",
+     "WED",
+     "FRI"
+    ],
+    "extra_minutes": 8
+   }
+  ],
+  "bio": "학교 앞 원룸에서 버스로 다님. 아침형이라 알람은 바로 끄지만 준비 시간을 늘 짧게 잡음. 음성으로 대화하는 걸 좋아함."
+ },
+ {
+  "id": "p05",
+  "split": "dev",
+  "name": "지우",
+  "age": 24,
+  "major": "간호학과 4학년",
+  "living": "COMMUTE_LONG",
+  "transport": "TRANSIT",
+  "travel_minutes": 70,
+  "prep_minutes": 45,
+  "buffer_minutes": 15,
+  "chronotype": "EARLY",
+  "sleep_pattern": "BEFORE_MIDNIGHT",
+  "snooze_tendency": 1,
+  "talkativeness": "NORMAL",
+  "style": "POLITE",
+  "mood_baseline": 2,
+  "correction_tendency": "DENY",
+  "cooperation": "HIGH",
+  "weekly": [
+   {
+    "weekday": "MON",
+    "title": "병원 실습",
+    "time": "07:30",
+    "place": "대학병원 실습동",
+    "importance": "HIGH",
+    "kind": "CLASS"
+   },
+   {
+    "weekday": "TUE",
+    "title": "병원 실습",
+    "time": "07:30",
+    "place": "대학병원 실습동",
+    "importance": "HIGH",
+    "kind": "CLASS"
+   },
+   {
+    "weekday": "WED",
+    "title": "병원 실습",
+    "time": "07:30",
+    "place": "대학병원 실습동",
+    "importance": "HIGH",
+    "kind": "CLASS"
+   },
+   {
+    "weekday": "THU",
+    "title": "병원 실습",
+    "time": "07:30",
+    "place": "대학병원 실습동",
+    "importance": "HIGH",
+    "kind": "CLASS"
+   },
+   {
+    "weekday": "FRI",
+    "title": "국시 대비 스터디",
+    "time": "10:00",
+    "place": "간호대 강의실",
+    "importance": "NORMAL",
+    "kind": "TEAM"
+   }
+  ],
+  "recurring_reasons": [],
+  "bio": "실습 때문에 새벽 5시대에 일어나야 함. 피곤하고 예민한 편이라 기록이 틀리면 '그런 적 없어요'라고 딱 잘라 말함."
+ },
+ {
+  "id": "p06",
+  "split": "dev",
+  "name": "태오",
+  "age": 21,
+  "major": "체육교육과 2학년",
+  "living": "DORM",
+  "transport": "WALK",
+  "travel_minutes": 15,
+  "prep_minutes": 30,
+  "buffer_minutes": 10,
+  "chronotype": "NORMAL",
+  "sleep_pattern": "AROUND_MIDNIGHT",
+  "snooze_tendency": 2,
+  "talkativeness": "CHATTY",
+  "style": "CASUAL",
+  "mood_baseline": 4,
+  "correction_tendency": "ACCEPT",
+  "cooperation": "MID",
+  "weekly": [
+   {
+    "weekday": "MON",
+    "title": "아침 웨이트",
+    "time": "08:00",
+    "place": "학교 체육관",
+    "importance": "LOW",
+    "kind": "SOCIAL"
+   },
+   {
+    "weekday": "TUE",
+    "title": "운동생리학",
+    "time": "10:30",
+    "place": "체육관 강의실",
+    "importance": "NORMAL",
+    "kind": "CLASS"
+   },
+   {
+    "weekday": "WED",
+    "title": "아침 웨이트",
+    "time": "08:00",
+    "place": "학교 체육관",
+    "importance": "LOW",
+    "kind": "SOCIAL"
+   },
+   {
+    "weekday": "THU",
+    "title": "운동생리학",
+    "time": "10:30",
+    "place": "체육관 강의실",
+    "importance": "NORMAL",
+    "kind": "CLASS"
+   },
+   {
+    "weekday": "FRI",
+    "title": "과 동기 저녁",
+    "time": "19:00",
+    "place": "신촌",
+    "importance": "LOW",
+    "kind": "SOCIAL"
+   }
+  ],
+  "recurring_reasons": [
+   {
+    "tag": "HAIR_WASH",
+    "weekdays": [
+     "MON",
+     "WED"
+    ],
+    "extra_minutes": 10
+   }
+  ],
+  "bio": "기숙사 사는 운동부. 밝고 말이 많음. 웨이트 끝나고 샤워하느라 수업에 아슬아슬하게 들어감."
+ },
+ {
+  "id": "p07",
+  "split": "dev",
+  "name": "수아",
+  "age": 22,
+  "major": "영어영문학과 3학년",
+  "living": "HOME",
+  "transport": "CAR",
+  "travel_minutes": 30,
+  "prep_minutes": 60,
+  "buffer_minutes": 10,
+  "chronotype": "LATE",
+  "sleep_pattern": "LATE_1_2",
+  "snooze_tendency": 2,
+  "talkativeness": "TERSE",
+  "style": "TYPO_SLANG",
+  "mood_baseline": 2,
+  "correction_tendency": "DENY",
+  "cooperation": "LOW",
+  "weekly": [
+   {
+    "weekday": "TUE",
+    "title": "영미소설",
+    "time": "11:00",
+    "place": "인문관",
+    "importance": "NORMAL",
+    "kind": "CLASS"
+   },
+   {
+    "weekday": "WED",
+    "title": "과외 알바",
+    "time": "16:00",
+    "place": "학생 집",
+    "importance": "NORMAL",
+    "kind": "JOB"
+   },
+   {
+    "weekday": "THU",
+    "title": "영미소설",
+    "time": "11:00",
+    "place": "인문관",
+    "importance": "NORMAL",
+    "kind": "CLASS"
+   }
+  ],
+  "recurring_reasons": [],
+  "bio": "가족 차로 통학. 새벽 늦게 자고 아침이 힘듦. 말이 짧고 앱에 시큰둥함. 기분이 가라앉은 날이 많음."
+ },
+ {
+  "id": "p08",
+  "split": "dev",
+  "name": "준혁",
+  "age": 25,
+  "major": "경제학과 3학년 (복학생)",
+  "living": "NEAR",
+  "transport": "SUBWAY",
+  "travel_minutes": 25,
+  "prep_minutes": 35,
+  "buffer_minutes": 10,
+  "chronotype": "EARLY",
+  "sleep_pattern": "BEFORE_MIDNIGHT",
+  "snooze_tendency": 0,
+  "talkativeness": "NORMAL",
+  "style": "POLITE",
+  "mood_baseline": 4,
+  "correction_tendency": "CORRECT",
+  "cooperation": "HIGH",
+  "weekly": [
+   {
+    "weekday": "MON",
+    "title": "계량경제학",
+    "time": "09:00",
+    "place": "사회과학관",
+    "importance": "NORMAL",
+    "kind": "CLASS"
+   },
+   {
+    "weekday": "TUE",
+    "title": "거시경제학",
+    "time": "09:00",
+    "place": "사회과학관",
+    "importance": "NORMAL",
+    "kind": "CLASS"
+   },
+   {
+    "weekday": "WED",
+    "title": "계량경제학",
+    "time": "09:00",
+    "place": "사회과학관",
+    "importance": "NORMAL",
+    "kind": "CLASS"
+   },
+   {
+    "weekday": "THU",
+    "title": "거시경제학 중간고사",
+    "time": "09:00",
+    "place": "사회과학관 301호",
+    "importance": "HIGH",
+    "kind": "EXAM"
+   },
+   {
+    "weekday": "FRI",
+    "title": "취업 스터디",
+    "time": "10:00",
+    "place": "중앙도서관 스터디룸",
+    "importance": "NORMAL",
+    "kind": "TEAM"
+   }
+  ],
+  "recurring_reasons": [],
+  "bio": "군대 다녀온 복학생. 규칙적이고 협조적이며 숫자에 정확함. 시험 기간이라 일정이 빡빡함."
+ }
+]
