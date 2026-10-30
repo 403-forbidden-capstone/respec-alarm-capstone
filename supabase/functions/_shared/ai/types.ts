@@ -11,7 +11,7 @@ export type Opening = "SUMMARY_FIRST" | "QUESTION_FIRST";
 
 export type Importance = "LOW" | "NORMAL" | "HIGH";
 /** 화면 라벨 — FE 코드(10/8) 기준. DB 값은 그대로 LOW/NORMAL/HIGH. */
-export const IMPORTANCE_LABEL: Record<Importance, string> = { LOW: "보통", NORMAL: "중요", HIGH: "매우 중요" };
+export const IMPORTANCE_LABEL: Record<Importance, string> = { LOW: "평소", NORMAL: "중요", HIGH: "매우 중요" };
 
 export const REASON_TAGS = [
   "MORE_TASKS", "OVERSLEPT", "HAIR_WASH", "TRAFFIC", "UNEXPECTED",

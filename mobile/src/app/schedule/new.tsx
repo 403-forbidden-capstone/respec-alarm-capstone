@@ -121,6 +121,7 @@ export default function NewScheduleScreen() {
   function calculate() {
     if (!draft.title.trim()) {
       setTitleError(true);
+      toast('일정명을 적어 주세요'); // 버튼이 아래에 고정이라 일정명 칸이 화면 밖일 수 있음
       return;
     }
     void runCalculate(async () => {

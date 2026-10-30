@@ -6,7 +6,7 @@ import { autoLevel, LATE_COUNT_THRESHOLD, levelOfIntensity, levelOfSoundKey, lev
 import type { Importance, Level } from './types.ts';
 
 // D69 규칙 표 — 기본 보통(1), 매우 중요(HIGH) +1, 최근 4주 늦잠 지각 2회 이상 +1, 잠귀 HEAVY면 강, 상한 강(2)
-//   중요도 DB 값 LOW · NORMAL · HIGH = 앱 라벨 보통 · 중요 · 매우 중요 — 올림은 HIGH만
+//   중요도 DB 값 LOW · NORMAL · HIGH = 앱 라벨 평소 · 중요 · 매우 중요 — 올림은 HIGH만
 const IMPORTANCES = ['LOW', 'NORMAL', 'HIGH'] as const;
 const RULE_TABLE: [Importance, number, WakeSensitivity, Level][] = [
   // 중요도, 지각 횟수, 잠귀, 기대 단계(0 약 · 1 중 · 2 강)

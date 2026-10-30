@@ -250,13 +250,13 @@ describe('알람 설정 읽기 (toAppointmentDetail · toIntensity)', () => {
     expect(toIntensity([], 'LOW', 2)).toMatchObject({ auto: 2, latePoint: 1 }); // 기본 보통에서 한 단계 올림 (D69)
   });
 
-  it('D69 기본 보통: 중요도 보통(LOW)도 중, 매우 중요(HIGH)만 한 단계 올려 강 — 중요도 올림 점수도 같이', () => {
+  it('D69 기본 보통: 중요도 평소(LOW)도 중, 매우 중요(HIGH)만 한 단계 올려 강 — 중요도 올림 점수도 같이', () => {
     expect(toIntensity([], 'LOW', 0)).toMatchObject({ auto: 1, importancePoint: 0 });
     expect(toIntensity([], 'NORMAL', 0)).toMatchObject({ auto: 1, importancePoint: 0 });
     expect(toIntensity([], 'HIGH', 0)).toMatchObject({ auto: 2, importancePoint: 1 });
   });
 
-  it('직접 고른 약은 중요도 보통이어도 그대로 약(직접 고름) — 약은 직접 고를 때만 나옴', () => {
+  it('직접 고른 약은 중요도 평소여도 그대로 약(직접 고름) — 약은 직접 고를 때만 나옴', () => {
     const soft = alarmRow('a-wake', 'WAKE', '08:00', { intensity_source: 'MANUAL', intensity: 'SOFT', sound_key: 'theme_calm', voice_tone: 'CALM' });
     const intensity = toIntensity([soft], 'LOW', 0);
     expect(intensity.auto).toBe(1);
