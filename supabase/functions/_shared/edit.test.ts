@@ -174,6 +174,11 @@ test('wakeAction: 앞에 새 일정이 생기거나 옮겨져 더 이상 첫 일
   assert.deepEqual(verdict, { action: 'REMOVE', earlierAfter: true });
 });
 
+test('wakeAction: 이미 울린 기상(wakeRung)은 앞 기상이 생겨도 떼지 않음 (NONE) — 앞 기상 여부(earlierAfter)는 그대로 알려 줌', () => {
+  const verdict = wakeAction({ id: 'a1', at: kst('2026-10-29T10:00'), hasWake: true, wakeRung: true, beforeWakes: [W('a1', '2026-10-29T10:00')], sim: [W('a2', '2026-10-29T08:00')] });
+  assert.deepEqual(verdict, { action: 'NONE', earlierAfter: true });
+});
+
 test('wakeAction: 그대로면 NONE — 사용자가 일부러 기상을 안 만든 일정(전에도 밀리지 않았음)은 되살리지 않음, 앞 기상이 꺼져 있으면 앞서지 않은 것', () => {
   // 전에도 지금도 첫 일정인데 기상이 없음 (기상을 안 고른 일정)
   assert.equal(wakeAction({ id: 'a1', at: kst('2026-10-29T10:00'), hasWake: false, beforeWakes: [], sim: [] }).action, 'NONE');

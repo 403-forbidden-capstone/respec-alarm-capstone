@@ -166,6 +166,7 @@ export type AlarmPreview = {
   predictedPrepMinutes: number; // 적용될 준비 시간
   autoPredictedPrepMinutes: number;
   prepareSampleCount?: number; // 준비 시간 계산에 쓴 내 기록 수 (최근 30건 기준) — "배우는 중 N/5" · "내 기록 기반 N건" 한 줄에 (calc prepareSourceLabel). 모르면 없음
+  prepareRecent?: number[]; // 준비 시간 계산에 쓴 내 기록 중 최근 값, 최신순 최대 5개(분) — "최근 5번 48 · 55 · 62 · 70 · 75분" 줄 (calc prepareRecentLabel). 없거나 비면 줄을 안 보임
   // 실데이터 전용 — 길찾기를 못 해 저장하면 이동시간 확인이 필요한 상태 (ESTIMATE = 직선거리 어림, CACHED = 내 지난 이동 중앙값) 또는 직접 입력이 필요한 상태 (좌표 없음). 없으면 문제 없음
   travelProblem?: TravelProblem;
 };
@@ -190,6 +191,9 @@ export type LatLng = { lat: number; lng: number };
 // 장소 — 가짜 데이터는 이름 + 집 기준 이동시간(검색용 주소 · 좌표도 있지만 계산엔 안 씀), 실데이터(place-search)는 이름 + 주소 + 좌표 (좌표가 있어야 길찾기가 됨)
 //   category = 카카오 category_name 그대로('교육,학문 > 대학교') — 서버가 주는 값을 통과시킬 뿐 DB에 저장하지 않음 (D5)
 export type Place = { name: string; travelMinutes?: number; address?: string; lat?: number; lng?: number; category?: string };
+
+// 지도 핀 자리의 주소 (place-reverse) — 주소 한 줄(도로명 우선) + 있으면 건물 이름. 화면에 보일 뿐 저장하지 않음 (카카오 응답, D5)
+export type PinAddress = { address: string; name?: string };
 
 // 새 일정 입력값 (H05)
 export type AppointmentDraft = {

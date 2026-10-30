@@ -8,16 +8,22 @@
 //   · 문서: 중요도 낮음 → 늘 약 / 지금: 낮음도 기본 보통 (약은 직접 고를 때만)
 //   · profiles.intensity_offset(수락한 제안 ±1)은 안 읽음 — 제안 적용은 D6 · D23~D25가 열려 있음
 //   · "지각"은 appointment_participants.is_late 전체 — 7.4.1은 늦잠 원인(late_cause = WAKE)만 세므로, 그 칸이 생기면 좁힘
-//   · 잠귀(profiles.wake_sensitivity) 칸이 아직 DB에 없음(L7 PR 3이 만듦) → 지금은 읽지 않아 부르는 쪽이 안 넘기면 NORMAL 취급.
-//     칸이 생기면 profiles select에 더해 plan-core · map.ts toIntensity · realWrite setIntensity 세 곳에서 같이 넘길 것
+//   · 잠귀(profiles.wake_sensitivity: LIGHT · NORMAL · HEAVY)는 wakeSensitivityOf로 HEAVY만 HEAVY, 나머지는 NORMAL로 읽음 (가벼움도 기본 보통, 약은 직접 고를 때만).
+//     plan-core · 앱 map.ts toIntensity · realWrite setIntensity · 가짜 모드(mocks/calc.ts) 네 곳이 같은 값을 넘김. 안 넘기면 NORMAL 취급
 //   · 7.4.1 표의 theme_focus(HIGH · 지각 이력 없음)는 3단계(약 · 중 · 강)에 없어 안 씀
 import type { AlarmIntensity, Importance, IntensityAxis, Level, VoiceTone } from './types.ts';
 
 // 중요도로 올리는 단계 수 — 매우 중요(HIGH)만 1 (D69: 중요도는 한 단계 올릴지에만 씀). 앱 라벨 보통(LOW) · 중요(NORMAL) · 매우 중요(HIGH)
 export const IMPORTANCE_POINT: Record<Importance, number> = { LOW: 0, NORMAL: 0, HIGH: 1 };
 
-// 가입 때 "잠귀" 한 문항 (D69). 아직 DB 칸이 없어 안 주면 NORMAL
+// 가입 때 "잠귀" 한 문항 (D69). 계산에는 무거움(HEAVY)이냐 아니냐만 쓰므로 DB 값 LIGHT · NORMAL은 NORMAL로 묶음. 안 주면 NORMAL
 export type WakeSensitivity = 'HEAVY' | 'NORMAL';
+
+// DB 칸(profiles.wake_sensitivity 'LIGHT' | 'NORMAL' | 'HEAVY') → 계산에 넘기는 값. 모르는 값 · 빈 값은 NORMAL
+//   L6 안건후보: 잠귀 모르는 값 기본안 = NORMAL (DB 제약이 LIGHT · NORMAL · HEAVY만 받으므로 실제로는 안 옴. 강으로 올리면 알람이 시끄러워지는 쪽이라 모르면 올리지 않음)
+export function wakeSensitivityOf(value: string | null | undefined): WakeSensitivity {
+  return value === 'HEAVY' ? 'HEAVY' : 'NORMAL';
+}
 
 // 기본 강도 = 보통 (D69)
 export const BASE_LEVEL: Level = 1;

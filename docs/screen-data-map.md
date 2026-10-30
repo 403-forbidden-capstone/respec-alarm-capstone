@@ -92,6 +92,7 @@
 | S01 | 알람 조정 제안 | `suggestion/[id]` | #49 |
 | — | 로그인 · 온보딩 · 권한 안내 · 설정 | `login` · `onboarding` · `settings` | #25 |
 | L04 | 알람이 안 울릴 때 | `ring-check` | #210 |
+| NTF | 감지 정정 (알림 "출발 8:30 감지"를 눌러 열림) | `detection` | #40 |
 
 ## 화면별 데이터
 
@@ -121,9 +122,9 @@
 - 반복 일정의 앞으로 회차: `listOccurrences(id)` — 이 약속의 `series_id`를 읽고 같은 묶음의 내 참여 조건 중 지금 이후 · 날짜순 (`appointment_participants` + `appointments` + `alarms`) — DB. 둘 이상일 때만 "앞으로 회차" 카드가 뜨고, 다음 3회만 보이고 나머지는 "더 보기"(누르면 펼침, 화면 상태). 읽지 못해도 화면은 그대로
 - 연결 일정 · 이동 조건 · 준비 시간: `appointments` + `appointment_participants`(출발지 · 이동 수단 · 예상 이동 · 출처 · 준비 · 여유) — DB. 출발지 · 이동 수단 · 예상 이동 · 준비 시간도 고침 (D42 C) → 다시 계산 `alarm-suggest` → 저장 `alarm-commit`
 - 알람 시각 직접 고르기 (D42 C): `alarms.scheduled_at` + `time_source` MANUAL(#160), "자동으로 되돌리기" = AUTO. 강도도 같은 규칙(`intensity_source`, #160)
-- 자동 강도 (D69, `_shared/calc/intensity.ts`): 기본 보통 — 매우 중요(HIGH)면 한 단계 올림 · 최근 4주 늦잠 지각 2회 이상이면 한 단계 올림 · 잠귀 무거움이면 강(`profiles.wake_sensitivity` 칸이 생기면, 지금은 안 읽음) · 상한 강. 약은 직접 고를 때만. 이미 저장된 자동 약은 `20261030130000_intensity_default.sql`이 보통으로 올림
+- 자동 강도 (D69, `_shared/calc/intensity.ts`): 기본 보통 — 매우 중요(HIGH)면 한 단계 올림 · 최근 4주 늦잠 지각 2회 이상이면 한 단계 올림 · 잠귀 무거움이면 강(`profiles.wake_sensitivity`, 일정 없는 단독 알람도 같음) · 상한 강. 약은 직접 고를 때만. 이미 저장된 자동 약은 `20261030130000_intensity_default.sql`이 보통으로 올림
 - 고친 값 기록 (D42 · D43): `user_edit_logs`(#160, 화면 · 칸 · 자동값 → 고친 값 · 시각) — DB, 다음 계산 · 제안의 개인화 입력
-- 예측 준비(P80) 근거: `v_prepare_time_stats` — DB
+- 예측 준비 근거: 내 기상~출발 기록 `daily_records.actual_prepare_minutes`의 최근 30건(10~240분) — DB. 깨우는 여유(`profiles.wake_margin`) 빠듯 · 보통 · 넉넉 = 0.7 · 0.8 · 0.9 분위수, 매우 중요는 한 단계 위. H03 "준비 N분 · 내 기록 기반 N건" 아래 "최근 5번 …분"(`alarm-suggest` 응답 `prepare.recent`)
 - 여유 시간을 바꾸면 다시 계산: `alarm-suggest` — Edge → 저장 `alarm-commit` — Edge → 다시 예약 — 폰
 - 종류별 켜기 · 끄기, 강도 직접 고르기(`alarms.is_enabled` · `intensity` · `voice_tone` · `sound_key`)도 저장 때 `alarm-commit`의 `enabled` · `levels`로 — Edge → 다시 예약 — 폰 (DB에 바로 쓰는 길은 없음)
 - 일정 편집 · 삭제 함수 (이슈 #211, D41 A · N6): `updateAppointment(id, patch, scope, { confirmed? })` → `{ changes, needsConfirm }`(앞당김은 바로 저장 + 토스트 [되돌리기] = 이전 값을 `confirmed: true`로 같은 함수에, 5분 이상 늦춤은 저장 전에 `needsConfirm`으로 돌려줘 기존 확인 시트 뒤 `confirmed: true`로 저장, D67) · `deleteAppointment(id, scope)` · `restoreAppointment(id)`(삭제 토스트 [되돌리기]) · `leaveSharedAppointment(id)`([나는 빠지기]) — 공동 약속은 만든 사람만(`UserError`). **가짜 모드만 구현**, 실서버는 4b(`appointment-edit`)까지 `UserError('아직 실서버에서는 쓸 수 없어요')`
@@ -135,6 +136,7 @@
 - 이동시간 · 알람 시각 · 강도 미리 보기: `alarm-suggest`(카카오 대중교통 포함) — Edge
 - 저장: `appointments` + `appointment_participants` + `alarms`("알람" 줄에서 고른 종류 — 기상 · 준비 · 출발, 다 끄면 알람 없는 일정, D46)를 한 번에 `alarm-commit` — Edge, 준비물 `todos`(ITEM) — DB → 예약 — 폰
 - 반복: 요일 칩 · 매일 · 평일 → `appointments.recurrence_rule` RRULE (D44, `FREQ=DAILY` · `FREQ=WEEKLY;BYDAY=…` 두 모양만). 저장은 첫 회차만 만들고, 다음 회차는 `alarm-roll`이 앞으로 14일치를 회차마다 새 행(약속 · 참여 · 알람 · 준비물)으로 미리 만듦 (D4 A, 5분마다 보충 · 앱 맞추기 때 본인 몫). 공동 약속은 첫 회차만 · 저장 직후 앱이 `syncNow({ rollSeriesId })`로 바로 넘기고(준비물 저장 뒤), 평소엔 앱이 앞에 올 때 10분에 한 번
+- 계산이 집 위치 없음(프로필에 `home_lat` · `home_lng` 없음)으로 실패하면 안내 카드 [집 정하기] → 장소 시트로 고른 곳을 `saveProfileFields({ home_name, home_lat, home_lng })`로 `profiles`에 저장 → 다시 계산 (토스트로 "장소를 다시 골라"만 뜨던 것을 대신함)
 - 확인 시트에서 시각 고치기 (D43): 기상을 옮기면 나머지도 따라 움직이되 순서가 뒤집히면 막음, 고친 값은 `user_edit_logs`
 
 ### H07 알람 울림
@@ -194,7 +196,7 @@
   - 앱 일: 새 약속 카드(`APPT_NEW`) = 장소 이름이 `listPlaces(이름)`에 똑같이 하나면 그 좌표로 `estimateAppointment`, 아니면 `NEEDS_PLACE`(카드의 [장소 고르기] = 장소 검색 시트) · 시각 고침 `adjustEstimate` / 알람 고치기(`ALARM_EDIT`) = `getAppointment` + `previewAlarms`(시각 · 준비가 바뀔 때만) / 정정 `fixes` = `features/voice/fixes.ts` — 새 시각 `recordParticipantTimes(MANUAL)` + 고친 값 기록(user_edit_logs, 화면 A02) 한 줄, 부정(위치 값 지우기)은 L2 PR 6 뒤 연결
   - 카드 버튼: [저장] = `createAppointment(estimate, '자기 전 대화')`(준비물 같이) · 약속 없는 알람 = `createStandaloneAlarm` · [바꾸기] = `saveAlarmSettings` · 준비 ±N(줄이기 · 0 = 자동으로) · 강도(null = 보통으로 → 자동)는 **실제로 바뀐 때만** 저장 뒤 `saveAlarmSettings` 한 번 더(alarm-commit이 길찾기를 또 부르므로) → `voice-turn {card_action: SAVED, appointment_id, alarms}` / [저장 안 함] = `card_action: REJECTED`(서버는 답 없음)
   - 완료: 대화를 그대로 남기고 홈으로 (대화 끝 정리 `voice-commit` · 할 일 · 준비물 · 일기는 이번 범위 밖)
-  - 대화 상태(세션 · rev · 카드 · 계산한 Estimate)는 앱 메모리. 앱을 다시 열면 voice-session resume으로 말 · 카드 상태를 받고, 저장 전 Estimate는 다시 계산 (D5 — 이동 분을 서버에 안 남김)
+  - 대화 상태(세션 · rev · 카드 · 계산한 Estimate)는 앱 메모리. 앱을 다시 열면 voice-session resume으로 말 · 카드 상태를 받고, 저장 전 Estimate는 다시 계산 (D5 — 이동 분을 서버에 안 남김). 계산이 안 끝난 카드(`NEEDS_ESTIMATE`)는 이어서 계산해 새 client_turn_id로 `results`만 보냄. 저장한 카드는 서버에 SAVED를 알리기 전에 로컬(AsyncStorage · 웹 localStorage, 키 = 사용자 id + 세션 id, 값 = 카드 id별 · 7일 지나면 앱을 열 때 정리, 다른 계정에는 안 보임)에 '저장됨'으로 적고, 알림이 안 가고 앱이 꺼져도 다시 열면 `createAppointment` 없이 저장됨으로 복원해 SAVED만 다시 알림(서버가 SAVED로 확인하면 지움). 실패한 요청이 남은 동안 카드 [저장] · [저장 안 함] · 장소 고르기는 앱 일만 바로 하고 서버 알림은 큐에서 기다렸다가 그 요청이 [다시 시도]로 성공한 뒤 차례로 보냄
 - 오류 · 상태 (화면 문구는 `lib/edge`의 code → 문구):
 
 | 상황 | 앱이 하는 일 |
@@ -228,12 +230,18 @@
 - 직접 수정 (D53): 앞 · 뒤 1분 단위, 준비 · 출발까지 미리 보기, 적용한 뒤에도 다시 고침 (EDITED · `result_value`). 저장 모양은 D6 · D23 · D25, 고친 값은 `user_edit_logs`(S01) — 가짜 데이터 흐름. 실데이터는 시각 조정 제안 종류가 생기면(#49)
 - 제안 만들기: `suggestion-generate`(매일 배치) — Edge
 
+### NTF 감지 안내 알림 · 정정 (`detection`, 목업에 없는 화면)
+- 알림: 위치로 출발이 잡힌 순간(이탈, 확정은 5분 뒤) "출발 오전 8:30 감지", 도착을 서버에 쓴 직후 "도착 오전 9:52 감지" — **폰 안에서 만든 소리 없는 로컬 알림**(채널 `detect_v1`, 서버 푸시 아님). 알림 권한이 없으면 띄우지 않음(권한은 묻지 않음). 5분 안에 돌아와 출발이 취소되면 그 알림을 거둠. 누르면 `respecalarm://detection?kind&participantId&at` — 앱이 꺼진 채여도 열림 (`features/location/notice.ts` · `hooks/useDetectionLinks.ts`)
+- 정정 화면: 열자마자 `rejectDetection({ participantId, kind, screen: 'NTF' })` — 위치 값만 지움(원탭 · 직접 입력 값이면 null → "이미 바뀐 기록이에요"), 폰 판정 기억에서도 잊음(`features/location/correct.ts`, 5분 대기 중이던 출발 포함). 지운 뒤 5초 동안 [되돌리기] = `undoReject` + 폰 기억 되돌림. 지운 뒤 · 되돌린 뒤 `syncNow` · `syncLocation`으로 폰 예약과 감시 계획을 다시 맞춤 — DB(`appointment_participants` · `user_edit_logs`)
+
 ### 로그인 · 온보딩 · 설정 (#25)
 - 로그인: Supabase Auth 카카오 · 구글 → 가입하면 `profiles` 자동 생성. 화면 아래의 "알람 테스트" 버튼은 `/dev/alarm-test`로 바로 감 (로그인 전에도 열림, 화면 위 "← 이전"으로 돌아옴, #177)
 - 온보딩: `profiles` 아이디(`handle`) · 닉네임 · 잠귀(`wake_sensitivity`) · 집(`home_name` · `home_lat` · `home_lng`) · 기본 준비 · 여유 시간 · 이동 수단 · 깨우는 여유(`wake_margin`) · 개인정보 동의(`privacy_agreed_at` · `privacy_version`) · 온보딩 끝낸 시각(`onboarded_at`) — DB, 집 검색 `place-search` — Edge
   - **단계 온보딩** (`lib/flags` `ONBOARDING_IN_FLOW = true`, #25): 순서는 `features/onboarding/steps.ts`, 단계마다 켜고 끄는 표는 `ONBOARDING_STEPS`(아이디 → 닉네임 → 잠귀 → 집 → 아침 준비 → 시간표 → 동의 → [권한 안내] → 기상 공유 → 첫 일정, [ ]는 화면이 아직 없어 끔). 집: 장소 검색(`place-search`)으로 고르면 `home_name` · `home_lat` · `home_lng` 저장(좌표 없는 장소는 못 고름, [나중에]는 저장 없이 다음). 시간표(직접 입력 초안, D66-1 B): 수업 줄(과목 · 요일 · 시작 시각 · 장소)마다 차례로 `estimateAppointment` → `createAppointment(…, '온보딩 시간표')`로 반복 일정 + 알람 저장, 실패한 줄만 표시하고 그 단계에 머묾, 첫 저장 뒤 알림 안내. 단계마다 [다음]에서 `saveProfileFields`로 저장하고 마지막에 `finishOnboarding`이 `onboarded_at`을 적음. 판정은 `onboarded_at`이 비었는지(`features/auth/onboardingGate.ts`). 가짜 데이터 모드 미리 보기는 저장 없이 단계만 넘김. `/dev/screens`의 "온보딩부터 다시"로 처음부터 다시 봄
   - 가입 직후 프로필: 닉네임 = 카카오 · 구글에서 가져온 값(DB 트리거), 준비 60분 · 여유 10분 · 이동 수단 대중교통 · 잠귀 보통 · 깨우는 여유 보통 = DB 기본값(온보딩 입력칸 처음 값), 집 · 아이디 = 비어 있음
 - 온보딩 단계 부품 초안(`features/onboarding/components/`): `OnboardingFrame`(틀) · `HomePlaceStep` · `TimetableStep` · `PermissionsStep` · `OnboardingDoneStep` — 값 · 콜백만 받고 api · 라우터를 부르지 않음(L7이 함수를 붙임). `/dev/onboarding?mode=mock`에서 가짜 값으로 넘겨 봄 (`/dev/screens` 목록에는 없음, #116)
+- 설정에서 값 바꾸기: 닉네임 · 아이디 · 잠귀 · 깨우는 여유 · 준비 시간 · 여유 시간 · 이동 수단 · 집 줄을 누르면 편집 시트(`features/profile/components/ProfileEditors`, 온보딩 단계 부품 재사용) → [저장]이 `saveProfileFields` → `profiles` — DB. 집은 지도 고르기 시트(아래). 실데이터 + 로그인일 때만 열리고 가짜 모드는 보기만. 아이디는 중복 확인(`isHandleTaken`) 뒤 저장 (L3 `changeHandle`이 오면 교체)
+- 지도 고르기 시트(`features/alarm/components/MapPlaceSheet`, 지금은 설정의 집 바꾸기에서 열림): 카카오맵 지도(`public/map-picker.html`을 웹은 iframe · 앱은 WebView로 열고 JavaScript 키 `EXPO_PUBLIC_KAKAO_JS_KEY`는 공개 값) + 검색 `listPlaces`(`place-search` — Edge) + 핀 자리 주소 `reverseAddress`(`place-reverse` — Edge, 핀이 멈춘 0.4초 뒤) + 폰 위치 한 번 `locateOnce`(앞 권한만, 폰). 고른 값은 시트가 저장하지 않고 `onPick`으로 돌려줌(집은 `profiles` — DB). 카카오 응답은 저장하지 않음(D5). 키가 없으면 지도 칸이 "지도 준비 중"이고 검색 결과로만 정함
 - 시간표 가져오기 확인(`app/timetable-import.tsx`, 목업 번호 없음, D66-1, #291): 사진(A) · 폰 캘린더(D)에서 읽어 온 수업을 줄마다 고치고 빼고 → [수업 N개 저장]. 줄 편집 · 저장은 온보딩 시간표 단계와 같은 `TimetableStep` · `useTimetableStep`(줄마다 `estimateAppointment` → `createAppointment(…, '온보딩 시간표')`), 가져온 수업은 `lib/importHandoff`로 받음. 학교 위치를 한 번 정하면 좌표 없는 모든 줄에 적용(`CampusCard`). 길 입구는 `lib/flags` `TIMETABLE_PATHS`(photo · calendar, 아직 끔) — 입구 · 서버 함수(`timetable-extract`)는 뒤 PR
 - 권한 안내: 알림 · 정확한 알람 · 잠금화면 알람 화면 — 폰
 - 푸시 토큰: 앱 켤 때 `register_push_token` — RPC
