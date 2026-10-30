@@ -10,6 +10,7 @@ import { HttpError } from '../errors.ts';
 import { FakeDb } from '../fake-db.ts';
 import type { Db } from '../supabase.ts';
 import { fakeClaude, upstreamError, type FakeScript } from './fake-claude.ts';
+import { POINTS } from '../prompts/index.ts';
 import { handleVoiceTurn, type VoiceDeps, type VoiceTurnOut } from './turn.ts';
 import { handleVoiceSession, type VoiceSessionOut } from './voice-session.ts';
 import type { ServerState } from './session.ts';
@@ -204,7 +205,7 @@ test('녹화 한 바퀴: 첫 마디 템플릿 → 새 약속 카드 → 계산 �
     assert.ok((c.input_tokens as number) > 0 && (c.output_tokens as number) > 0, '토큰');
     assert.ok((c.latency_ms as number) > 0, '지연');
     assert.equal(c.io, null);
-    assert.equal(c.prompt_version, c.point === 'T1' ? 'v1.3' : 'v2-a');
+    assert.equal(c.prompt_version, c.point === 'T1' ? 'v1.4' : 'v2-a');
   }
   const flagged = calls.filter((c) => (c.flags as string[]).length > 0);
   assert.ok(flagged.some((c) => (c.flags as string[]).includes('claims_saved_without_event')), '가드에 걸린 호출의 flags');
@@ -672,3 +673,23 @@ test('마감까지 7초 넘게 안 남았으면 가드가 다시 부르라 해�
   assert.equal(line.source, 'fallback');
   assert.ok(line.guard?.includes('template'));
 });
+
+// ───────── 영어 입력 (헤드 10/30 B2 ③) — 말은 그대로 모델에 가고, 시스템 글에 "영어도 뜻대로 알아듣고 한국어로 답" 규칙이 있고, 언어만으로 대화가 끝나지 않음 ─────────
+for (const [name, said] of [
+  ['영어만', 'Why no Korean input?'],
+  ['한국어에 영어가 섞임', '오늘 OS 수업 so tired, 그냥 자고 싶어'],
+  ['영어 장소 이름', '내일 Starbucks에서 스터디 있어'],
+] as const) {
+  test(`영어 입력 (${name}): 입력 그대로 모델 화면에 들어가고, 답은 한국어로 이어지고 대화는 안 끝남`, async () => {
+    const db = seed();
+    const { deps, claude } = depsOf(db, { T2F: [t2f('empty')], T1: [{ reply: '편한 말로 이야기해 주세요. 오늘 하루는 어땠어요?', acts: [], end: false }] });
+    const s = await handleVoiceSession(deps, { session_type: 'BEFORE_SLEEP', input_mode: 'TEXT' });
+    const out = (await handleVoiceTurn(deps, text(s.session_id as string, 1, said))) as VoiceTurnOut;
+    assert.equal(out.next, 'USER');
+    assert.equal(out.reply?.text, '편한 말로 이야기해 주세요. 오늘 하루는 어땠어요?');
+    assert.equal(out.reply?.end, false); // 언어만으로 끝내지 않음
+    assert.ok(claude!.seen.T1[0].includes(said), '사용자가 쓴 영어가 그대로 T1 화면에 들어감');
+    assert.ok(claude!.seen.T2F[0].includes(said), '사용자가 쓴 영어가 그대로 T2F 화면에 들어감');
+    assert.match(POINTS.T1.prompt.system, /영어로 쓰거나 한국어에 영어가 섞여도 뜻 그대로 알아듣고, 답은 한국어로/);
+  });
+}

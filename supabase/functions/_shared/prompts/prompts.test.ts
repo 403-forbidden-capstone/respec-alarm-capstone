@@ -18,6 +18,7 @@ const readModule = (name: string): string => readFileSync(new URL(`${name}.ts`, 
 // 실험실 장부의 prompt_id (채택한 실행본)
 const LEDGER: Record<string, string> = {
   'T1.v1.3': 'T1@v1.3#1a1d234b',
+  'T1.v1.4': 'T1@v1.4#1413d56c', // 서버에서 한 줄 더한 판(영어 입력 규칙) — 실험실 장부에는 없음
   'T2.v2': 'T2@v2#d5dff11c',
   'T2F.v2-a': 'T2F@v2-a#d2c172e5',
   'T4.v1.1': 'T4@v1.1#b597fc65',
@@ -26,9 +27,12 @@ const LEDGER: Record<string, string> = {
   'T3.v1': 'T3@v1#5dd07ef4',
 };
 
+// 지점이 더는 안 쓰는 옛 판 (파일은 남김 — index.ts 머리 주석 2번)
+const SUPERSEDED = ['T1.v1.3'];
+
 // 지점 → 파일 이름
 const FILE_OF: Record<PointId, string> = {
-  T1: 'T1.v1.3',
+  T1: 'T1.v1.4',
   T2F: 'T2F.v2-a',
   T2: 'T2.v2',
   T3: 'T3.v1',
@@ -129,7 +133,7 @@ describe('지점 설정(index.ts)', () => {
 
   it('모든 판 파일이 지점 하나씩에 쓰임, 쓰는 스키마 7개 = 생성기 목록', () => {
     const used = ids.map((p) => FILE_OF[p]).sort();
-    assert.deepEqual(used, [...(PROMPTS as string[])].sort());
+    assert.deepEqual(used, (PROMPTS as string[]).filter((n) => !SUPERSEDED.includes(n)).sort());
     assert.deepEqual([...new Set(ids.map((p) => POINTS[p].schema))].sort(), [...(GEN_SCHEMAS as string[])].sort());
   });
 
@@ -138,7 +142,7 @@ describe('지점 설정(index.ts)', () => {
       const c = POINTS[p];
       return [c.prompt.id, c.prompt.version, c.schema, c.effort, c.maxTokens, c.thinking?.type ?? null, c.timeoutMs, c.retryOnTimeout];
     };
-    assert.deepEqual(row('T1'), ['T1', 'v1.3', 't1-reply.v1', 'low', 2048, null, 13_000, true]);
+    assert.deepEqual(row('T1'), ['T1', 'v1.4', 't1-reply.v1', 'low', 2048, null, 13_000, true]);
     assert.deepEqual(row('T2F'), ['T2F', 'v2-a', 'extract-fast.v1', 'low', 4096, 'adaptive', 5_000, false]);
     assert.deepEqual(row('T2'), ['T2', 'v2', 'extract.v1', 'medium', 4096, null, 19_000, true]);
     assert.deepEqual(row('T3'), ['T3', 'v1', 't3-reason.v1', 'low', 1024, null, 4_000, true]);
