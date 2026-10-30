@@ -166,6 +166,7 @@ export type AlarmPreview = {
   autoTravelMinutes: number; // 출발 위치 · 이동 수단으로 다시 계산한 자동값
   predictedPrepMinutes: number; // 적용될 준비 시간
   autoPredictedPrepMinutes: number;
+  prepareSampleCount?: number; // 준비 시간 계산에 쓴 내 기록 수 (최근 30건 기준) — "배우는 중 N/5" · "내 기록 기반 N건" 한 줄에 (calc prepareSourceLabel). 모르면 없음
   // 실데이터 전용 — 길찾기를 못 해 저장하면 이동시간 확인이 필요한 상태 (ESTIMATE = 직선거리 어림, CACHED = 내 지난 이동 중앙값) 또는 직접 입력이 필요한 상태 (좌표 없음). 없으면 문제 없음
   travelProblem?: TravelProblem;
 };

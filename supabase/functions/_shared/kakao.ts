@@ -1,14 +1,15 @@
-// 카카오 REST 호출 — 장소 검색(카카오 로컬) · 이동시간(카카오맵 대중교통 · 도보, 카카오모빌리티 자동차)
+// 카카오 REST 호출 — 장소 검색 · 좌표 → 주소(카카오 로컬) · 이동시간(카카오맵 대중교통 · 도보, 카카오모빌리티 자동차)
 // 인증은 모두 `Authorization: KakaoAK {REST API 키}` (같은 REST 키, Edge 비밀값 KAKAO_REST_API_KEY)
 // 응답은 저장 · 재사용하지 않음 (카카오 약관, 7장 7.1.2) — 이 파일은 아무것도 기억하지 않고 분만 돌려줌
 // 키는 이 파일에서 읽지 않고 인자로 받음 (fetch를 바꿔 끼워 node --test로 시험)
 import type { LatLng } from './calc/travel.ts';
 import type { Transport } from './calc/types.ts';
-import { parseCarDirections, parsePlaces, parseTransit, parseWalk, type KakaoPlace } from './kakao-parse.ts';
+import { parseCarDirections, parsePlaces, parseReverse, parseTransit, parseWalk, type KakaoPlace, type ReversePlace } from './kakao-parse.ts';
 
 export const KAKAO_TIMEOUT_MS = 4_000; // 7장 7.1.2 "타임아웃 4초"
 
 const LOCAL_KEYWORD_URL = 'https://dapi.kakao.com/v2/local/search/keyword.json';
+const COORD2ADDRESS_URL = 'https://dapi.kakao.com/v2/local/geo/coord2address.json';
 const TRANSIT_URL = 'https://dapi.kakao.com/v2/routing/publictraffic';
 const WALK_URL = 'https://dapi.kakao.com/v2/routing/walk';
 const CAR_URL = 'https://apis-navi.kakaomobility.com/v1/directions';
@@ -70,6 +71,18 @@ export async function searchPlaces(
     url.searchParams.set('sort', 'distance');
   }
   return parsePlaces(await getJson(url.toString(), key, fetchImpl));
+}
+
+// ---------------------------------------------------------------------------
+// 좌표 → 주소 (place-reverse)
+// ---------------------------------------------------------------------------
+
+// 지도 핀 좌표의 주소. 주소가 없는 곳(바다 · 국외 등)은 null. 좌표를 로그 · 오류 글에 남기지 않음
+export async function reverseAddress(key: string, at: LatLng, fetchImpl: FetchLike = fetch): Promise<ReversePlace | null> {
+  const url = new URL(COORD2ADDRESS_URL);
+  url.searchParams.set('x', String(at.lng)); // x = 경도, y = 위도
+  url.searchParams.set('y', String(at.lat));
+  return parseReverse(await getJson(url.toString(), key, fetchImpl));
 }
 
 // ---------------------------------------------------------------------------
