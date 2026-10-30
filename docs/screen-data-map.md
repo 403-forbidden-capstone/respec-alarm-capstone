@@ -206,6 +206,7 @@
 - 온보딩: `profiles` 아이디(`handle`) · 집(`home_name` · `home_lat` · `home_lng`) · 기본 준비 · 여유 시간 · 이동 수단 — DB, 집 검색 `place-search` — Edge
   - **지금은 흐름에서 뺌** (`lib/flags` `ONBOARDING_IN_FLOW = false`, #177): 로그인하면 아이디가 없어도 바로 홈. 임시 화면 파일은 두고 길만 막음 (주소로도 안 열리고 `/dev/screens`의 "온보딩부터 다시"도 숨김). 새 온보딩 UI를 받으면 true로 바꾸고 화면을 바꿈
   - 건너뛰는 동안의 프로필: 닉네임 = 가입 때 카카오 · 구글에서 가져온 값(DB 트리거), 준비 60분 · 여유 10분 · 이동 수단 대중교통 = DB 기본값(온보딩 입력칸 기본값과 같음), 집 = 비어 있음(서버가 "집"으로 씀, 온보딩도 이름만 저장해 좌표는 어차피 없음), 아이디 = 비어 있음(친구가 @아이디로 나를 못 찾을 뿐, 내가 남을 찾는 것과 나머지 화면은 그대로)
+- 온보딩 단계 부품 초안(`features/onboarding/components/`): `OnboardingFrame`(틀) · `HomePlaceStep` · `TimetableStep` · `PermissionsStep` · `OnboardingDoneStep` — 값 · 콜백만 받고 api · 라우터를 부르지 않음(L7이 함수를 붙임). `/dev/onboarding?mode=mock`에서 가짜 값으로 넘겨 봄 (`/dev/screens` 목록에는 없음, #116)
 - 권한 안내: 알림 · 정확한 알람 · 잠금화면 알람 화면 — 폰
 - 푸시 토큰: 앱 켤 때 `register_push_token` — RPC
 
