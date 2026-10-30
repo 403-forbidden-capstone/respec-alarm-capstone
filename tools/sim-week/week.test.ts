@@ -8,7 +8,8 @@ import { budgetOf } from './coach.ts';
 import { runChecks } from './checks.ts';
 import { Ledger } from './ledger.ts';
 import { planAppt } from './l1.ts';
-import { PERSONA_IDS, SITUATIONS, loadPersonas, situationOf, worldDay } from './persona.ts';
+import { isOversleeper, oversleepDay, oversleepDayNumber } from './day.ts';
+import { PERSONA_IDS, SITUATIONS, loadPersonas, scheduledDays, situationOf, worldDay } from './persona.ts';
 import { renderReport } from './report.ts';
 import { runWeek } from './week.ts';
 import type { AppAppt } from './types.ts';
@@ -87,6 +88,30 @@ describe('위치 상황 6종이 한 주에 모두 나옴', () => {
       }
     }
     assert.deepEqual([...seen].sort(), [...SITUATIONS].sort());
+  });
+});
+
+describe('늦잠 — 자격 인물 주 1회, 일정이 있는 날 중에서', () => {
+  it('자격 인물(LATE · LATE_1_2)은 일주일에 정확히 하루, 그날 일정이 있음. 나머지는 0회', () => {
+    for (const p of loadPersonas()) {
+      const days = Array.from({ length: 7 }, (_, i) => worldDay(p, i));
+      const hit = days.filter((w) => oversleepDay(p, w));
+      if (isOversleeper(p) && scheduledDays(p).length > 0) {
+        assert.equal(hit.length, 1, `${p.id} 늦잠은 주 1회`);
+        assert.ok(hit[0].appts.some((a) => !a.synthetic), `${p.id} 늦잠 날에 일정이 있음`);
+      } else {
+        assert.equal(hit.length, 0, `${p.id} 대상 아님 · 일정 없음은 0회`);
+      }
+    }
+    // p07: 옛 규칙(평일 중 해시)에선 일정 없는 날에 걸려 0회였던 사람
+    assert.ok(loadPersonas(['p07']).every((p) => isOversleeper(p) && oversleepDayNumber(p) != null));
+  });
+  it('p07 7일: 진짜 하루에 늦잠(미루기 3 + 15분)이 한 번 걸림', async () => {
+    const w = await runWeek({ persona: 'p07', days: 7, ledger: new Ledger() });
+    const hit = w.days.filter((d) => d.truth.overslept > 0);
+    assert.equal(hit.length, 1);
+    assert.equal(hit[0].truth.snoozes, 3);
+    assert.ok(hit[0].world.appts.length > 0);
   });
 });
 

@@ -142,6 +142,12 @@ function lazyWake(p: Persona): string {
   return p.chronotype === 'LATE' ? '10:30' : p.chronotype === 'EARLY' ? '07:10' : '08:50';
 }
 
+// 그 사람의 일정이 있는 날 번호(1~7, 시험이 만든 NEAR 일정은 안 셈)
+export function scheduledDays(p: Persona): number[] {
+  const tl = load().timelines[p.id] ?? [];
+  return tl.flatMap((t, i) => (t.appointments.length > 0 ? [i + 1] : []));
+}
+
 export function worldDay(p: Persona, dayIndex: number): WorldDay {
   const { timelines } = load();
   const tl = timelines[p.id]?.[dayIndex];

@@ -4,7 +4,7 @@
 //   섞을 위치 상황(편의점 · 조깅 · 도착 전 귀가)은 여기서 "집 반경 밖에 잠깐 나갔다 옴" 같은 진짜 움직임으로 만들고,
 //   신호가 어떻게 잡히는지(반경 · 감지 지연)는 location.ts 가 같은 진실을 값만 바꿔 다시 읽을 수 있게 분리해 둠.
 import { addMin, diffMin, isoKst, kstDate } from './time.ts';
-import { extraPrep } from './persona.ts';
+import { extraPrep, scheduledDays } from './persona.ts';
 import { hashOf, rngFor } from './rng.ts';
 import type { Persona, PlanSummary, WorldAppt, WorldDay } from './types.ts';
 
@@ -99,7 +99,7 @@ export function simulateTruth(input: TruthInput): DayTruth {
   if (wakeAlarm && first) {
     // 헤드 기준(10/30): 미루기 = 0..snooze_tendency 중 하나(최대 3번, 한 번 5분 — 앱 기본 D3)
     snoozes = rWake.int(0, Math.min(3, p.snooze_tendency));
-    // 늦잠(첫 알람을 놓쳐 미루기 3번 다 쓰고 +15분) = LATE 또는 새벽 1~2시 취침 인물만 주 1번 (알람이 있는 날 중 사람 id로 고른 하루)
+    // 늦잠(첫 알람을 놓쳐 미루기 3번 다 쓰고 +15분) = LATE 또는 새벽 1~2시 취침 인물만 주 1번 (그 사람의 일정이 있는 날 중 사람 id로 고른 하루, 일정이 하루도 없으면 0회)
     if (oversleepDay(p, world)) {
       snoozes = 3;
       overslept = 15;
@@ -264,17 +264,24 @@ export function simulateTruth(input: TruthInput): DayTruth {
   };
 }
 
-// 주 1~2일 비 오는 날 / 주 1번 늦잠 날 — 사람 id 로 고정 (날짜 씨앗과 같은 방식)
+// 주 1~2일 비 오는 날 / 주 1번 늦잠 날(일정 있는 날 중) — 사람 id 로 고정 (날짜 씨앗과 같은 방식)
 export function rainyDay(p: Persona, w: WorldDay): boolean {
   const h = hashOf(p.id, 'rain');
   const days = h % 2 === 0 ? [h % 7] : [h % 7, (h >> 3) % 7];
   return days.includes(w.day - 1);
 }
+// 자격 인물: chronotype LATE 또는 sleep_pattern LATE_1_2 (새벽 1~2시 취침). 늦잠 날 = 그 사람의 일정이 있는 날 중 사람 id 해시로 고른 하루
+export function isOversleeper(p: Persona): boolean {
+  return p.chronotype === 'LATE' || p.sleep_pattern === 'LATE_1_2';
+}
+export function oversleepDayNumber(p: Persona): number | null {
+  if (!isOversleeper(p)) return null;
+  const days = scheduledDays(p);
+  if (days.length === 0) return null;
+  return days[hashOf(p.id, 'oversleep') % days.length];
+}
 export function oversleepDay(p: Persona, w: WorldDay): boolean {
-  const eligible = p.chronotype === 'LATE' || p.sleep_pattern === 'LATE_1_2';
-  if (!eligible || w.appts.length === 0) return false;
-  const weekdays = ['MON', 'TUE', 'WED', 'THU', 'FRI'];
-  return weekdays[hashOf(p.id, 'oversleep') % 5] === w.weekday;
+  return oversleepDayNumber(p) === w.day;
 }
 
 export const kstDateOf =(isoText: string): Date => new Date(isoText);
