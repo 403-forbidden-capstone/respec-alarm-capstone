@@ -9,11 +9,12 @@ import type { Place } from '@/features/alarm/types';
 import { useAuth } from '@/features/auth/AuthProvider';
 import { DataModeToggle } from '@/features/auth/DataModeToggle';
 import { openAppNotificationSettings } from '@/features/permissions';
+import { homePatchOf } from '@/features/onboarding/home';
 import { shouldSaveHandle } from '@/features/onboarding/validate';
 import { isHandleTaken, saveProfileFields } from '@/features/profile/api';
 import { EditRow } from '@/features/profile/components/EditRow';
 import { HandleEditor, NicknameEditor, PrepareEditor, SleepEditor } from '@/features/profile/components/ProfileEditors';
-import { homePatch, prepareValuesOf } from '@/features/profile/edit';
+import { prepareValuesOf } from '@/features/profile/edit';
 import { TRANSPORT_NAME, WAKE_MARGIN_NAME, WAKE_SENSITIVITY_NAME } from '@/features/profile/labels';
 import type { ProfileFields } from '@/features/profile/types';
 import { UserError, userMessage } from '@/lib/errors';
@@ -69,7 +70,7 @@ export default function SettingsScreen() {
     }, '저장하지 못했어요');
 
   const pickHome = (place: Place) => {
-    const patch = homePatch(place);
+    const patch = homePatchOf(place);
     // 좌표가 없는 장소는 집으로 못 정함 — 이름만 바꾸면 이전 좌표와 어긋나고, 지우면 새 일정의 이동시간 계산이 막힘 (시트는 열어 둠)
     if (!patch) {
       toast('이 장소는 위치를 몰라 집으로 정할 수 없어요. 다른 장소를 골라 주세요');

@@ -26,16 +26,15 @@ export type OnboardingStepId =
 
 // 단계마다 켜고 끄는 표 — 10/29 지형님: 일단 다 넣고 보면서 뺌 → 단계마다 flag (D38 기본안 C)
 //   끈 단계는 건너뛰고 진행 표시(n / 전체)도 켠 단계만 셈. 화면을 만들면 켬
-//   home · timetable: 집 검색 · 시간표 입력 화면이 아직 없음 (PR 5)
 //   permissions: 권한 안내 단계 화면이 아직 없음 (PR 7)
 //   mic: 마이크 권한 — L4(음성) 뒤에 켬. 매니페스트에 RECORD_AUDIO가 아직 없음
 export const ONBOARDING_STEPS: Record<OnboardingStepId, boolean> = {
   handle: true,
   nickname: true,
   sleep: true,
-  home: false,
+  home: true,
   prepare: true,
-  timetable: false,
+  timetable: true,
   consent: true,
   permissions: false,
   share: true,
