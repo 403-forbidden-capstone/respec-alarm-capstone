@@ -243,6 +243,9 @@ export type RingInfo = {
   notice?: string; // 알림 한 줄 — 준비 · 출발 알람이 알림 · 울림 화면 머리글로 보여 주는 글자 (서버 꾸러미 notice와 같은 글자, features/alarm/notice.ts). 없으면 종류별 기본 머리글
   levelLine: string; // 알람 강도 중 · 배경음 80% · 진동 짧게 반복
   important: boolean;
+  snoozeCount: number; // 이미 미룬 횟수 (알람 코어의 snoozeCount) — "미루기 N/한도회"
+  snoozeLimit: number; // 미루기 한도 (알람 코어 RingPlan.snoozeLimit, 서버 alarms.snooze_limit 기본 3)
+  departAt: Date | null; // 출발 시각 (꾸러미 departAt) — 한도 안내 · "이만큼 미루면 늦어요" 판단. 모르면 null
 };
 
 // 기상 판정 단계 (목업 S.wake.phase + 기상 알람 울림) — 울림 → 해제 뒤 관찰 → 확인 알림 → 확정

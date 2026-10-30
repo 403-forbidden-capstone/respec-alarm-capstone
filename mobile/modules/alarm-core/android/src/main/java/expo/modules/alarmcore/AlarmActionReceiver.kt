@@ -12,6 +12,8 @@ class AlarmActionReceiver : BroadcastReceiver() {
     const val ACTION_ONE_TAP = "expo.modules.alarmcore.ONE_TAP"
     const val EXTRA_ALARM_TYPE = "alarm_type"
     const val EXTRA_EVENT_TYPE = "event_type"
+    // 알림의 "미루기" 버튼이 실어 보내는 미루기 분 (없으면 계획의 기본 미루기 시간)
+    const val EXTRA_SNOOZE_MINUTES = "snooze_minutes"
   }
 
   override fun onReceive(context: Context, intent: Intent) {
@@ -21,7 +23,9 @@ class AlarmActionReceiver : BroadcastReceiver() {
     when (action) {
       AlarmPlaybackService.ACTION_SNOOZE -> {
         // 미루기 예약을 먼저 함. 정확한 알람 권한이 없어 실패하면 소리를 끄지 않음 → 미루기가 조용히 사라지지 않게
-        if (!AlarmController.snooze(context, id)) {
+        val minutes = intent.getIntExtra(EXTRA_SNOOZE_MINUTES, 0).takeIf { it > 0 }
+        // 이미 미룬 직후의 두 번째 누름(더 안 울림)이면 알리지 않음 — 아직 울리는 중일 때만 진짜 실패
+        if (!AlarmController.snooze(context, id, minutes) && AlarmController.isRinging(context, id)) {
           Toast.makeText(context, "미루기를 예약하지 못함. 해제로 꺼 주세요.", Toast.LENGTH_LONG).show()
         }
       }

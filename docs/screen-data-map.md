@@ -28,7 +28,7 @@
 
 `/dev/screens` 맨 위 · 설정 "개발" 절의 토글은 모드를 바꿀 수 있는 빌드에서만 보임. 실데이터 모드에서 로그인 전이면 `/dev/screens`에 시드 계정용 이메일 로그인(웹 · 폰 개발용)이 있음.
 
-**첫 화면** (`lib/flags` `ONBOARDING_IN_FLOW = false`, #177) — 앱을 처음 켜면 로그인 화면 하나만 나오고, 로그인하면 아이디가 없어도 바로 홈. UI 쪽에서 새 온보딩 화면을 받기 전에는 임시 온보딩(`onboarding`)을 흐름에서 뺌 (#117과 같은 뜻, 10/18 지형님). 로그인 화면 아래에 "알람 테스트" 바로 가기가 있어 로그인 전에도 `/dev/alarm-test`로 갈 수 있음 (출시용 APK에도 보임 — D16이 정해지면 같이 정리).
+**첫 화면** (`lib/flags` `ONBOARDING_IN_FLOW = true`, #25) — 앱을 처음 켜면 로그인 화면 하나만 나오고, 로그인한 뒤 프로필의 `onboarded_at`이 비어 있으면 단계 온보딩(`onboarding`)이 먼저, 끝내면 홈. 켜진 단계는 `lib/flags` `ONBOARDING_STEPS`. 로그인 화면 아래에 "알람 테스트" 바로 가기가 있어 로그인 전에도 `/dev/alarm-test`로 갈 수 있음 (출시용 APK에도 보임 — D16이 정해지면 같이 정리).
 
 **읽기** — 함수 맨 앞에서 `if (!isMock()) return real.<함수>(...)`. 쿼리는 `features/<x>/real.ts`에 얇게, DB 행 → 화면 타입(`types.ts`) 변환은 `map.ts`의 순수 함수로 빼서 jest로 시험 (본보기: `features/alarm`의 `getNextAlarm`). "내 것"은 `lib/user`의 `requireUserId()`로 `user_id`를 한 번 더 좁힘(RLS는 친구에게 받은 알람도 보여 줌). DB · 네트워크 원문은 화면에 안 보이고, 이유를 보여 줄 때만 `UserError`.
 
@@ -91,6 +91,7 @@
 | R02 | 나의 기록 | `(tabs)/records` | #38 · #41 |
 | S01 | 알람 조정 제안 | `suggestion/[id]` | #49 |
 | — | 로그인 · 온보딩 · 권한 안내 · 설정 | `login` · `onboarding` · `settings` | #25 |
+| L04 | 알람이 안 울릴 때 | `ring-check` | #210 |
 
 ## 화면별 데이터
 
@@ -185,11 +186,28 @@
 - 친구 알람: `alarms`(주인 = 친구) — DB, 조회 권한은 RLS가 확인. 약속 제목 · 장소까지 보여 주려면 RPC 하나 더 필요(`appointments` RLS는 본인 · 그룹원만) — #46에서
 - 설정 권한이면 켜기 · 끄기 · ±5분: `alarms` — DB → 주인에게 알림 `notify` — Edge → 주인 폰이 다시 예약. RLS는 설정 권한이면 강도 · 소리까지 허용하므로 ±5분 제한은 앱(`shiftSharedAlarm`)에서 지킴: 앞당길 때 옮긴 시각이 지금 + 5분(서버 `PAST_GRACE_MINUTES`)보다 이르게 되는 켜진 알람이 있으면 "곧 울릴 알람이라 앞당길 수 없어요"로 거절 (이미 지난 알람 · 꺼 둔 알람 · 늦추기는 검사 안 함)
 
-### A02 AI 대화 (AI 대기)
-- 대화: Gemini Live 단말 직결 (D7) — 임시 토큰 `voice-session` · 결과 반영 `voice-commit` — Edge
-- 대화 기록: `conversation_sessions`(`transcript` · `extracted_data` · `apply_status`) — Edge
-- 찾은 일정 · 준비물 저장: `appointments` · `todos` — Edge. 일정을 여러 개 찾으면 다 받음 (D36) — 기상과 이어지는 첫 일정만 자세히, 나머지는 시간에 맞춰 가벼운 알림. 카드별 상태 저장 자리는 D32와 같이 정함
-- 실패 · 한도 안내 부품 `ChatNotice`(값 · 콜백, L4가 붙임)
+### A02 AI 대화 (실데이터는 텍스트 대화 — 서버 함수 voice-session · voice-turn과 같이 배포돼야 동작)
+- 실패 · 한도 안내 부품 `ChatNotice`(값 · 콜백) — `ai.tsx`가 실패(`unavailable`) · 한도(`limits.reached`)일 때 마지막 말풍선 아래에 붙임
+- 가짜 데이터: 목업 대본(`mocks/ai.ts`) 그대로. 카드는 찾은 일정 한 장(`cards[0]`, 번호 c1)
+- 실데이터(`features/voice/real.ts`, 설계 `L4_자기전_설계메모.md` 1 · 2 · 5절): 글로만 대화 — 말하기 버튼 없음("키보드 마이크로 말해도 돼요")
+  - 시작: `voice-session {session_type: BEFORE_SLEEP, input_mode: TEXT, resume: true}` — 오늘 안 끝난 세션이 있으면 이어서(A02를 다시 열어도 대화 유지), 첫 마디는 서버 템플릿. 하루 한도면 `session_id: null` · `limits.reached: DAY`
+  - 말: `voice-turn {session_id, rev, client_turn_id, text}` (25초 timeout, `lib/edge`). 응답 `next: APP_TASKS`면 앱이 카드마다 일을 하고 `voice-turn {results}`(같은 client_turn_id · rev는 응답의 rev)로 돌려준 뒤 마지막 `reply`를 받음
+  - 앱 일: 새 약속 카드(`APPT_NEW`) = 장소 이름이 `listPlaces(이름)`에 똑같이 하나면 그 좌표로 `estimateAppointment`, 아니면 `NEEDS_PLACE`(카드의 [장소 고르기] = 장소 검색 시트) · 시각 고침 `adjustEstimate` / 알람 고치기(`ALARM_EDIT`) = `getAppointment` + `previewAlarms`(시각 · 준비가 바뀔 때만) / 정정 `fixes` = `features/voice/fixes.ts` — 새 시각 `recordParticipantTimes(MANUAL)` + 고친 값 기록(user_edit_logs, 화면 A02) 한 줄, 부정(위치 값 지우기)은 L2 PR 6 뒤 연결
+  - 카드 버튼: [저장] = `createAppointment(estimate, '자기 전 대화')`(준비물 같이) · 약속 없는 알람 = `createStandaloneAlarm` · [바꾸기] = `saveAlarmSettings` · 준비 ±N(줄이기 · 0 = 자동으로) · 강도(null = 보통으로 → 자동)는 **실제로 바뀐 때만** 저장 뒤 `saveAlarmSettings` 한 번 더(alarm-commit이 길찾기를 또 부르므로) → `voice-turn {card_action: SAVED, appointment_id, alarms}` / [저장 안 함] = `card_action: REJECTED`(서버는 답 없음)
+  - 완료: 대화를 그대로 남기고 홈으로 (대화 끝 정리 `voice-commit` · 할 일 · 준비물 · 일기는 이번 범위 밖)
+  - 대화 상태(세션 · rev · 카드 · 계산한 Estimate)는 앱 메모리. 앱을 다시 열면 voice-session resume으로 말 · 카드 상태를 받고, 저장 전 Estimate는 다시 계산 (D5 — 이동 분을 서버에 안 남김)
+- 오류 · 상태 (화면 문구는 `lib/edge`의 code → 문구):
+
+| 상황 | 앱이 하는 일 |
+|---|---|
+| `LLM_UNAVAILABLE` · `NOT_CONFIGURED` · `NETWORK` · `TIMEOUT` · `INTERNAL` | 던지지 않음. 대화 · 카드는 남기고 마지막 말풍선 아래에 "AI가 지금 답하지 못해요" + [다시 시도](같은 요청 · 같은 client_turn_id) · [직접 일정 만들기] · [대화 마치기]. `details`의 `cards` · `rev` · `limits`로 상태를 복원. 키가 없으면 `voice-session`은 첫 마디까지 주고 `voice-turn`만 `NOT_CONFIGURED`(보낸 말은 서버에 안 쌓이고 같은 요청을 다시 보내면 됨) |
+| `CONFLICT` (rev 어긋남) | `voice-session` resume으로 다시 읽고 오류 안내(보낸 말은 입력칸으로). 앱에서 이미 저장한 카드는 서버가 몰라도 저장으로 둠 |
+| `NOT_FOUND` (세션 · 카드 · 정정 번호) | 같은 방식으로 세션을 다시 읽음 |
+| `limits.reached` TURN · DAY | 오류가 아님 — 20번째 답은 정상 reply로 보이고 그 뒤 입력만 막음. "오늘 대화는 여기까지예요" + [대화 마치기] · [직접 일정 만들기] |
+| 그 밖 (`VALIDATION_FAILED` · `AUTH_REQUIRED` …) | 던짐 → 토스트, 보낸 말은 입력칸으로 |
+
+- 대화 기록: `conversation_sessions`(`turns` · `server_state`) — 서버만 씀(앱은 읽기만)
+- 일정 · 알람 저장: 앱이 L1 함수로(`appointments` · `alarms`), 준비물은 카드와 같이. 대화 끝 정리의 할 일 · 준비물(`todos`)은 서버 PR 5 (D32). 일정을 여러 개 찾으면 다 받음 (D36) — 기상과 이어지는 첫 일정(`first_of_day`)만 알람 줄을 자세히, 나머지는 "출발 알림" 한 줄. 카드별 상태는 서버 `server_state.cards`
 
 ### A03 하루 기록 · 일기 (AI 대기)
 - 일기: `daily_journals`(AI 글 · 고친 글 · 코칭 · 격려 · 루틴 제안) 읽기 · 고치기 — DB, 만들기 — Edge. 날짜별로 엶 (R02 일간에서, D48)
@@ -213,9 +231,9 @@
 
 ### 로그인 · 온보딩 · 설정 (#25)
 - 로그인: Supabase Auth 카카오 · 구글 → 가입하면 `profiles` 자동 생성. 화면 아래의 "알람 테스트" 버튼은 `/dev/alarm-test`로 바로 감 (로그인 전에도 열림, 화면 위 "← 이전"으로 돌아옴, #177)
-- 온보딩: `profiles` 아이디(`handle`) · 집(`home_name` · `home_lat` · `home_lng`) · 기본 준비 · 여유 시간 · 이동 수단 — DB, 집 검색 `place-search` — Edge
-  - **지금은 흐름에서 뺌** (`lib/flags` `ONBOARDING_IN_FLOW = false`, #177): 로그인하면 아이디가 없어도 바로 홈. 임시 화면 파일은 두고 길만 막음 (주소로도 안 열리고 `/dev/screens`의 "온보딩부터 다시"도 숨김). 새 온보딩 UI를 받으면 true로 바꾸고 화면을 바꿈
-  - 건너뛰는 동안의 프로필: 닉네임 = 가입 때 카카오 · 구글에서 가져온 값(DB 트리거), 준비 60분 · 여유 10분 · 이동 수단 대중교통 = DB 기본값(온보딩 입력칸 기본값과 같음), 집 = 비어 있음(서버가 "집"으로 씀, 온보딩도 이름만 저장해 좌표는 어차피 없음), 아이디 = 비어 있음(친구가 @아이디로 나를 못 찾을 뿐, 내가 남을 찾는 것과 나머지 화면은 그대로)
+- 온보딩: `profiles` 아이디(`handle`) · 닉네임 · 잠귀(`wake_sensitivity`) · 집(`home_name` · `home_lat` · `home_lng`) · 기본 준비 · 여유 시간 · 이동 수단 · 깨우는 여유(`wake_margin`) · 개인정보 동의(`privacy_agreed_at` · `privacy_version`) · 온보딩 끝낸 시각(`onboarded_at`) — DB, 집 검색 `place-search` — Edge
+  - **단계 온보딩** (`lib/flags` `ONBOARDING_IN_FLOW = true`, #25): 순서는 `features/onboarding/steps.ts`, 단계마다 켜고 끄는 표는 `ONBOARDING_STEPS`(아이디 → 닉네임 → 잠귀 → [집] → 아침 준비 → [시간표] → 동의 → [권한 안내] → 기상 공유 → 첫 일정, [ ]는 화면이 아직 없어 끔). 단계마다 [다음]에서 `saveProfileFields`로 저장하고 마지막에 `finishOnboarding`이 `onboarded_at`을 적음. 판정은 `onboarded_at`이 비었는지(`features/auth/onboardingGate.ts`). 가짜 데이터 모드 미리 보기는 저장 없이 단계만 넘김. `/dev/screens`의 "온보딩부터 다시"로 처음부터 다시 봄
+  - 가입 직후 프로필: 닉네임 = 카카오 · 구글에서 가져온 값(DB 트리거), 준비 60분 · 여유 10분 · 이동 수단 대중교통 · 잠귀 보통 · 깨우는 여유 보통 = DB 기본값(온보딩 입력칸 처음 값), 집 · 아이디 = 비어 있음
 - 온보딩 단계 부품 초안(`features/onboarding/components/`): `OnboardingFrame`(틀) · `HomePlaceStep` · `TimetableStep` · `PermissionsStep` · `OnboardingDoneStep` — 값 · 콜백만 받고 api · 라우터를 부르지 않음(L7이 함수를 붙임). `/dev/onboarding?mode=mock`에서 가짜 값으로 넘겨 봄 (`/dev/screens` 목록에는 없음, #116)
 - 권한 안내: 알림 · 정확한 알람 · 잠금화면 알람 화면 — 폰
 - 푸시 토큰: 앱 켤 때 `register_push_token` — RPC
@@ -232,7 +250,7 @@
 | `alarm-roll` | 반복 약속 · 일정 없는 반복 알람의 다음 회차를 14일치 미리 만들고(`series_id` · `occurrence_on`), 루틴 알람 시각을 다음 발생으로 옮김 — pg_cron 5분마다(서비스 키) + 앱 맞추기 때 본인 몫(로그인 토큰) | 카카오 대중교통 | H01 · H02 · H03 · R02 |
 | `suggestion-generate` | 매일 03:00 제안 만들기 (배치) | — | S01 |
 | `voice-session` | 자기 전 대화 시작 · 이어 받기(텍스트). 첫 마디는 서버 템플릿(모델 호출 없음), 하루 5대화 상한. 응답 `{ session_id, resumed, rev, turn_seq, day, messages, cards, limits }` (L4 AI 묶음) | — | A02 |
-| `voice-turn` | 자기 전 대화 한 턴: 말(`text`) · 앱 일 결과(`results`) · 카드 버튼(`card_action`). 빠른 추출(T2F)과 대화 답(T1) 동시 호출 → 턴 처리 → 가드. 응답 `{ rev, turn_seq, next: USER \| APP_TASKS, reply, cards(전체), fixes, limits }`, 서버 마감 18초 (L4 AI 묶음) | Claude | A02 |
+| `voice-turn` | 자기 전 대화 한 턴: 말(`text`) · 앱 일 결과(`results`) · 카드 버튼(`card_action`). 서버는 카드 재료와 말만 주고 계산 · 저장은 앱이 함. 빠른 추출(T2F)과 대화 답(T1) 동시 호출 → 턴 처리 → 가드. 응답 `{ rev, turn_seq, next: USER \| APP_TASKS, reply, cards(전체), fixes, limits }`, 서버 마감 18초 (L4 AI 묶음) | Claude | A02 |
 | `voice-commit` · `journal-*` | AI 대화 끝 정리(할 일 · 준비물) · 일기 | Claude | A02 · A03 (AI 대기) |
 
 나머지(목록 · 체크 · 권한 · 기록 화면)는 Edge 없이 DB · RPC로 함.

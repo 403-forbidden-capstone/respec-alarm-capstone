@@ -4,6 +4,7 @@
 //   · uploadEvents()       폰에 쌓인 울림 기록을 alarm_events로 올림. 앱이 앞에 올 때 · 기상 확인 화면에 들어올 때
 //   · syncNow()            기록 올리기 → 내 반복 회차 넘기기(서버 alarm-roll) → 맞추기를 한 묶음으로. 로그인 직후 · 앱이 앞에 올 때 · 반복 일정을 저장한 직후
 //   · cancelAllPhoneAlarms() / setSigningOut(value) / discardPendingEvents() / onEventsUploaded(handler) / onAlarmsSynced(handler)  로그아웃 정리 · 원탭 뒤처리 훅 · 맞춘 뒤 훅 (아래)
+//   · failedAlarmCount() / onFailedAlarmsChange(listener)  폰에 못 건 알람 수 (홈 빨간 줄용, 맞춘 뒤 훅에 붙어 있음)
 // 실데이터 모드에서만 일함 (reconcile · uploadEvents는 가짜 모드면 아무것도 안 함). 이 함수들은 한 줄로 차례대로 돎 — 맞추는 도중에 저장 결과가 끼어들어 방금 건 알람을 지우지 않게
 // 계산은 reconcile.ts · events.ts(순수 함수)에, 여기는 DB · 폰 호출만
 import * as AlarmCore from '@capstone/alarm-core';
@@ -62,6 +63,7 @@ export function setSigningOut(value: boolean): void {
   if (value) {
     lastTimeZone = null; // 다음에 로그인하는 계정의 시간대와 섞이지 않게
     lastRollOkAt = null; // 〃 반복 회차 넘기기 10분 제한도 새 계정은 처음부터
+    setFailed(new Set()); // 못 건 알람 목록도 앞 계정 것이라 비움
   }
 }
 
@@ -73,6 +75,7 @@ export type AlarmsSyncedInfo = {
   source: 'reconcile' | 'commit'; // 어디서 맞췄는지: 서버를 읽어 맞춤 / 저장 결과(alarm-commit)를 반영
   whole: boolean; // 전체 맞추기면 true. alarmIds로 일부만 맞췄거나 저장 결과를 반영한 것이면 false — 빠진 것을 "없어졌다"로 보면 안 됨
   summary: SyncSummary;
+  droppedIds?: readonly string[]; // alarmIds로 지정했는데 서버 목록에 없던 알람(끄거나 지움) — 일부 맞추기에서만. 못 건 알람 목록에서 뺄 근거 (L7)
   upcoming: UpcomingParticipant[]; // 이번에 본 앞으로 알람의 참여 행(겹침 없이, 약속 시각 순). appointmentAt은 ISO 글자
   nowMs: number;
 };
@@ -100,6 +103,50 @@ function afterSync(info: AlarmsSyncedInfo): void {
     }
   }
 }
+
+// ---------------------------------------------------------------------------
+// 폰에 못 건 알람 — 홈 빨간 줄 ("알람 N개를 폰에 걸지 못했어요")이 읽음. 맞춘 뒤 훅(onAlarmsSynced)에 붙어서 목록을 고침
+// ---------------------------------------------------------------------------
+
+let failedIds = new Set<string>();
+const failedListeners = new Set<() => void>();
+
+// 목록이 달라졌을 때만 구독자에게 알림 (맞출 때마다 홈이 다시 그려지지 않게)
+function setFailed(next: Set<string>): void {
+  const changed = next.size !== failedIds.size || [...next].some((id) => !failedIds.has(id));
+  failedIds = next;
+  if (changed) for (const listener of [...failedListeners]) listener();
+}
+
+export function failedAlarmCount(): number {
+  return failedIds.size;
+}
+
+export function onFailedAlarmsChange(listener: () => void): () => void {
+  failedListeners.add(listener);
+  return () => {
+    failedListeners.delete(listener);
+  };
+}
+
+// 맞춘 결과로 못 건 알람 목록을 고침
+//   whole = 서버 알람 전체를 맞춘 경우(잘리지 않았을 때) → 이번 결과로 목록을 새로 정함 (이번에 안 건드린 알람은 폰에 이미 걸려 있거나 서버에 없는 것)
+//   일부 맞추기 · 저장 결과 반영은 이번 결과에 나온 알람만 고침: 걸렸거나 지운 것은 빼고 실패한 것은 넣음
+//   summary.failed에는 지우지 못한 것도 섞여 있음 (SyncSummary가 구분하지 않아 같이 셈)
+//   droppedIds = 일부 맞추기에서 지정했는데 서버 목록에 없고 폰에도 없어 summary에 안 나온 알람 (끄거나 지운 알람) — 더 걸 게 없으니 목록에서 뺌
+onAlarmsSynced((info) => {
+  if (signingOut) return; // 정리가 시작된 뒤 끝난 맞추기는 앞 계정의 못 건 목록을 다시 채우지 않음 (setSigningOut이 비운 목록)
+  const { summary, whole, droppedIds = [] } = info;
+  const failedNow = summary.failed.map((f) => f.alarmId).filter((id) => id !== '');
+  if (whole) {
+    setFailed(new Set(failedNow));
+    return;
+  }
+  const next = new Set(failedIds);
+  for (const id of [...summary.scheduled, ...summary.skippedPast, ...summary.deferred, ...summary.canceled, ...droppedIds]) next.delete(id);
+  for (const id of failedNow) next.add(id);
+  setFailed(next);
+});
 
 // ---------------------------------------------------------------------------
 // 폰 예약
@@ -280,7 +327,7 @@ export function reconcile(options: ReconcileOptions = {}): Promise<SyncSummary> 
     const summary = await executePlan(plan);
     // 맞춘 뒤 훅 — 기다리지 않음. 전체 맞추기가 아니면(alarmIds) whole = false, upcoming은 이번에 맞춘 알람의 참여 행만
     const scope = scopeIds;
-    afterSync({ source: 'reconcile', whole: only == null && !truncated, summary, upcoming: upcomingParticipants(scope ? rows.filter((row) => scope.has(row.alarm_id)) : rows), nowMs });
+    afterSync({ source: 'reconcile', whole: only == null && !truncated, summary, droppedIds: only ? [...only].filter((id) => !listed.has(id)) : undefined, upcoming: upcomingParticipants(scope ? rows.filter((row) => scope.has(row.alarm_id)) : rows), nowMs });
     return summary;
   });
 }
