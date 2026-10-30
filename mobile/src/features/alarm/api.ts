@@ -6,7 +6,7 @@ import { hasEarlierWake } from '@shared/calc/wake.ts';
 import { now } from '@/lib/clock';
 import { UserError } from '@/lib/errors';
 import { isMock } from '@/lib/mode';
-import { addMinutes, isSameDay, josa, joinKo, minuteOfDay, spokenTime, startOfDay } from '@/lib/format';
+import { addMinutes, isSameDay, josa, joinKo, minuteOfDay, minutesBetween, spokenTime, startOfDay } from '@/lib/format';
 import { alarmChain, autoLevel, axisLevel } from '@/mocks/calc';
 import { awayFromHomeFactor, db, people, places, recentMockPlaces, timelines, transportFactor, type MockAppointment } from '@/mocks/data';
 
@@ -27,7 +27,9 @@ import {
   type Appointment,
   type AppointmentDetail,
   type AppointmentDraft,
+  type AppointmentPatch,
   type DepartCheck,
+  type EditScope,
   type Estimate,
   type IntensityAxis,
   type LatLng,
@@ -40,6 +42,8 @@ import {
   type ScheduleItem,
   type Snooze,
   type Transport,
+  type UpdateOptions,
+  type UpdateResult,
   type UserEditLog,
   type WakeCheck,
 } from './types';
@@ -50,7 +54,7 @@ import * as real from './real';
 import { repeatLabel, repeatToRrule, rruleToRepeat } from './repeat';
 import { pickMorningSource, toDepartCheck, toMorningPlan, morningDay, wakeAlarmOf, type MorningSource } from './morning';
 import { ringNotice } from './notice';
-import { draftAt, initialTime, ringingKinds } from './schedule';
+import { changedAlarms, CONFIRM_MOVE_MINUTES, draftAt, initialTime, ringingKinds } from './schedule';
 import type { StandaloneInput } from './request';
 import { thetaReachedAt, usageSummary, type UseSpan } from './wake';
 
@@ -350,6 +354,155 @@ export async function saveAlarmSettings(id: string, draft: AlarmSettingsDraft): 
     return { turnedOff: false, turnedOn: true };
   }
   return { turnedOff: false, turnedOn: false };
+}
+
+// ── 일정 수정 · 삭제 (H03 편집 시트 · 이슈 #211 · D41 A · N6) ──
+//   가짜 모드만 — 실서버는 4b(서버 함수 appointment-edit)에서 realEdit.ts를 채움. 화면(L5)은 이 4개 함수와 types.ts의 AppointmentPatch · EditScope · UpdateResult만 앎
+
+const NOT_CREATOR = '공동 약속은 만든 사람만 고칠 수 있어요';
+
+// 공동 약속은 만든 사람만 고치고 지움 (N6). 만든 사람 칸이 없으면 나
+const isMine = (a: MockAppointment) => (a.creatorId ?? 'me') === 'me';
+
+function assertEditable(a: MockAppointment) {
+  if (a.groupId && !isMine(a)) throw new UserError(NOT_CREATOR);
+}
+
+// 고치기 · 지우기가 닿는 일정들 — this = 그 일정만, following = 같은 반복 묶음(seriesId)의 이 일정과 그 뒤 일정. 묶음이 없으면(반복이 아니거나 가짜 데이터에 묶음이 없음) scope와 상관없이 그 일정 하나
+function scopeTargets(a: MockAppointment, scope: EditScope): MockAppointment[] {
+  if (scope === 'this' || !a.seriesId) return [a];
+  return db.appointments.filter((x) => x.seriesId === a.seriesId && x.at.getTime() >= a.at.getTime()).sort(byTime);
+}
+
+// 그날 첫 일정만 기상 알람 — 같은 날 일정 중 기상을 울릴 수 있는 가장 이른 일정에 붙이고 나머지는 준비부터 (서버 hasEarlierWake와 같은 기준: 꺼 둔 기상 · 알람 없는 일정은 안 셈)
+//   시각이 옮겨지거나 일정이 지워지고 되살아날 때 그날 첫 일정이 바뀌므로 다시 판정 (실서버는 4b가 7.1.3대로). days = 다시 볼 날짜들
+function wakeFlags(list: readonly MockAppointment[], days: readonly Date[]): Map<string, boolean> {
+  const flags = new Map<string, boolean>();
+  for (const day of days) {
+    let taken = false;
+    for (const a of list.filter((x) => isSameDay(x.at, day)).sort(byTime)) {
+      const canWake = alarmChain({ ...a, withWake: true }).some((x) => x.kind === 'WAKE');
+      flags.set(a.id, canWake && !taken);
+      if (canWake && !db.disabledAppointments.has(a.id) && !db.disabledKinds.has(`${a.id}:WAKE`)) taken = true;
+    }
+  }
+  return flags;
+}
+
+function reassignWake(days: readonly Date[]) {
+  const flags = wakeFlags(db.appointments, days);
+  for (const a of db.appointments) if (flags.has(a.id)) a.withWake = flags.get(a.id)!;
+}
+
+// 일정 하나에 고친 값을 반영한 새 일정 (저장 전) — 알람 시각 · 강도는 alarmChain · axisLevel이 일정 값에서 다시 셈
+//   · at: 'following'은 고른 일정이 옮겨진 만큼(delta) 뒤 회차도 같이 옮김 (회차마다 날짜가 다르니 같은 시각으로 맞추지 않고 같은 간격으로)
+//   · place: 목업 장소표에 있는 곳이면 이동시간을 다시 구함(자동값). 직접 입력한 이동시간은 그대로 (D42 C)
+//   · 직접 고른 알람 시각은 그대로 두되, 날짜가 바뀌면 같은 시:분으로 따라감
+//     // L6 안건후보: 일정 시각을 옮길 때 직접 고른 알람 시각 기본안 = 같은 날이면 유지 · 날짜가 바뀌면 날짜만 따라감
+//   · repeatDays: 'following'일 때만 (한 회차만 고치면서 반복 규칙을 바꾸는 건 뜻이 없음)
+//     // L6 안건후보: 이번만 고칠 때 반복 요일 기본안 = 무시
+function applyPatch(a: MockAppointment, patch: AppointmentPatch, delta: number, scope: EditScope): MockAppointment {
+  const next: MockAppointment = { ...a };
+  if (patch.title !== undefined) next.title = patch.title.trim();
+  if (patch.at) {
+    next.at = new Date(a.at.getTime() + delta);
+    if (!isSameDay(a.at, next.at) && a.manual?.times) {
+      const days = startOfDay(next.at).getTime() - startOfDay(a.at).getTime();
+      const times: Partial<Record<RingKind, Date>> = {};
+      for (const kind of RING_KINDS) {
+        const picked = a.manual.times[kind];
+        if (picked) times[kind] = new Date(picked.getTime() + days);
+      }
+      next.manual = { ...a.manual, times };
+    }
+  }
+  if (patch.place !== undefined && patch.place !== a.place) {
+    next.place = patch.place;
+    const travel = mockTravel(patch.place, a.transport, a.origin);
+    if (travel != null) {
+      next.travelMinutes = travel;
+      next.travelSource = '길찾기';
+    }
+  }
+  if (patch.importance) next.importance = patch.importance;
+  if (patch.repeatDays && scope === 'following') next.recurrenceRule = repeatToRrule(patch.repeatDays);
+  return next;
+}
+
+// 일정 고치기 (H03 편집 시트) — 제목 · 날짜 시각 · 장소 · 중요도 · 반복 요일. 알람 시각 · 강도는 고친 값으로 다시 계산됨
+//   changes = 시각이 바뀌는 기상 · 준비 · 출발의 전 → 후 (제목만 바꾸면 빈 목록)
+//   needsConfirm = 5분(CONFIRM_MOVE_MINUTES) 이상 늦춰지는 알람이 있음 (D67). true면 저장하지 않고 돌려줌 → 화면이 기존 확인 시트로 묻고, 확인하면 { confirmed: true }로 같은 값을 다시 부름
+//   앞당김 · 5분 미만 늦춤은 바로 저장하고 needsConfirm false → 화면이 토스트 [되돌리기]. 되돌리기 = 이전 값을 { confirmed: true }로 넣어 같은 함수를 다시 부름 (늦춤이어도 묻지 않게)
+//   공동 약속은 만든 사람만 (UserError). 알람 순서(기상 ≤ 준비 ≤ 출발 ≤ 도착 목표)가 뒤집히면 저장하지 않고 UserError — saveAlarmSettings와 같은 검사
+export async function updateAppointment(id: string, patch: AppointmentPatch, scope: EditScope, options: UpdateOptions = {}): Promise<UpdateResult> {
+  if (!isMock()) return real.updateAppointment(id, patch, scope, options);
+  const a = find(id);
+  if (!a) throw new UserError('일정을 찾을 수 없어요');
+  assertEditable(a);
+  if (patch.title !== undefined && !patch.title.trim()) throw new UserError('일정 이름을 입력해 주세요');
+
+  const targets = scopeTargets(a, scope);
+  const delta = patch.at ? patch.at.getTime() - a.at.getTime() : 0;
+  const edited = targets.map((t) => applyPatch(t, patch, delta, scope));
+  // 그날 첫 일정을 다시 판정해 기상 알람이 붙는 일정을 정함 — 옮기기 전 날 · 옮긴 뒤 날 모두
+  const after = db.appointments.map((x) => edited.find((e) => e.id === x.id) ?? x);
+  const flags = wakeFlags(after, [...targets, ...edited].map((x) => x.at));
+  const next = after.map((x) => (flags.has(x.id) && x.withWake !== flags.get(x.id) ? { ...x, withWake: flags.get(x.id)! } : x));
+
+  for (const e of edited) {
+    const blocked = orderError(alarmChain(next.find((x) => x.id === e.id)!));
+    if (blocked) throw new UserError(blocked);
+  }
+  const changes = changedAlarms(alarmChain(a), alarmChain(next.find((x) => x.id === id)!));
+  const needsConfirm = changes.some((c) => minutesBetween(c.from, c.to) >= CONFIRM_MOVE_MINUTES);
+  if (needsConfirm && !options.confirmed) return { changes, needsConfirm: true };
+
+  db.appointments.forEach((x, i) => Object.assign(x, next[i]));
+  return { changes, needsConfirm: false };
+}
+
+let trashBatch = 0; // 한 번에 지운 일정들을 묶는 번호
+
+// 일정 지우기 (H03 · H01) — 가짜 db에서 숨김(휴지통)으로 옮겨 목록 · 하루 일정 · 다음 알람에서 안 보임. restoreAppointment로 되살림
+//   scope: 반복이면 this = 이번 회차만 · following = 이번 회차와 그 뒤 모두. 반복이 아니면 scope를 안 봄 (그 일정 하나)
+//   지운 일정이 그날 첫 일정이었으면 그날 다음 일정에 기상 알람이 붙음. 공동 약속은 만든 사람만 (UserError)
+export async function deleteAppointment(id: string, scope: EditScope): Promise<void> {
+  if (!isMock()) return real.deleteAppointment(id, scope);
+  const a = find(id);
+  if (!a) throw new UserError('일정을 찾을 수 없어요');
+  assertEditable(a);
+  const targets = scopeTargets(a, scope);
+  const batch = ++trashBatch;
+  const rows = targets.map((t) => ({ batch, index: db.appointments.indexOf(t), appointment: t }));
+  for (const row of [...rows].sort((x, y) => y.index - x.index)) db.appointments.splice(row.index, 1);
+  db.trash.push(...rows);
+  reassignWake(targets.map((t) => t.at));
+}
+
+// 지운 일정 되살리기 (삭제 토스트 [되돌리기], 앱이 5초 안에 부름) — 같이 지운 반복 회차도 함께, 원래 자리로. 지운 적 없으면 아무것도 안 함
+//   실데이터(4b)는 5초 안에는 서버로 안 보내서 되살릴 것이 서버에 없음 — 가짜 모드만 지운 것을 되살림
+export async function restoreAppointment(id: string): Promise<void> {
+  if (!isMock()) return real.restoreAppointment(id);
+  const hit = db.trash.filter((t) => t.appointment.id === id).pop();
+  if (!hit) return;
+  const batch = db.trash.filter((t) => t.batch === hit.batch).sort((x, y) => x.index - y.index);
+  db.trash = db.trash.filter((t) => t.batch !== hit.batch);
+  for (const row of batch) db.appointments.splice(Math.min(row.index, db.appointments.length), 0, row.appointment);
+  reassignWake(batch.map((t) => t.appointment.at));
+}
+
+// 공동 약속에서 나만 빠지기 ([나는 빠지기]) — 내 참여 행 · 알람만 사라지고 약속은 다른 참여자에게 그대로 (가짜 모드는 내 목록에서만 뺌, 되살리기 없음)
+//   공동 약속이 아니거나 내가 만든 약속이면 UserError (만든 사람은 지우기를 써야 함)
+//   // L6 안건후보: 만든 사람이 빠지려 할 때 기본안 = 막고 "지워 주세요" 안내
+export async function leaveSharedAppointment(id: string): Promise<void> {
+  if (!isMock()) return real.leaveSharedAppointment(id);
+  const a = find(id);
+  if (!a) throw new UserError('일정을 찾을 수 없어요');
+  if (!a.groupId) throw new UserError('공동 약속이 아니에요');
+  if (isMine(a)) throw new UserError('내가 만든 공동 약속은 빠질 수 없어요. 지워 주세요');
+  db.appointments.splice(db.appointments.indexOf(a), 1);
+  db.left.push(a);
+  reassignWake([a.at]);
 }
 
 // 장소 목록 (H05 · H03) — 검색어가 없으면 최근에 쓴 곳, 있으면 이름 · 주소에 검색어가 든 곳 (실데이터는 place-search 카카오 키워드, 가짜는 목업 장소에서 거름)
