@@ -10,6 +10,7 @@ import type { Place } from '@/features/alarm/types';
 import { useAuth } from '@/features/auth/AuthProvider';
 import { DataModeToggle } from '@/features/auth/DataModeToggle';
 import { locateOnce } from '@/features/location/currentPosition';
+import { LocationAutoSection } from '@/features/location/LocationAutoSection';
 import { openAppNotificationSettings } from '@/features/permissions';
 import { homePatchOf } from '@/features/onboarding/home';
 import { CalendarPickSheet } from '@/features/onboarding/components/CalendarPickSheet';
@@ -103,6 +104,8 @@ export default function SettingsScreen() {
         <EditRow label="닉네임" value={profile?.nickname ?? '-'} onPress={open('nickname')} />
         <EditRow label="아이디" value={profile?.handle ? `@${profile.handle}` : '-'} onPress={open('handle')} />
       </Card>
+
+      <LocationAutoSection />
 
       {profile ? (
         <>
