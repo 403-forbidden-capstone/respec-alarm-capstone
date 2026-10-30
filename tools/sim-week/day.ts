@@ -5,7 +5,7 @@
 //   신호가 어떻게 잡히는지(반경 · 감지 지연)는 location.ts 가 같은 진실을 값만 바꿔 다시 읽을 수 있게 분리해 둠.
 import { addMin, diffMin, isoKst, kstDate } from './time.ts';
 import { extraPrep } from './persona.ts';
-import { rngFor } from './rng.ts';
+import { hashOf, rngFor } from './rng.ts';
 import type { Persona, PlanSummary, WorldAppt, WorldDay } from './types.ts';
 
 export interface Excursion {
@@ -79,7 +79,7 @@ function alarmOf(plan: PlanSummary | undefined, kind: 'WAKE' | 'PREPARE' | 'DEPA
 export function simulateTruth(input: TruthInput): DayTruth {
   const { persona: p, world } = input;
   const seed = input.seed ?? 'sim';
-  const r = (purpose: string) => rngFor(seed, p.id, world.day, purpose);
+  const r = (purpose: string) => rngFor(seed, p.id, world.date, purpose);
   const notes: string[] = [];
   const flow = p.flow;
   const first = world.appts[0];
@@ -97,13 +97,14 @@ export function simulateTruth(input: TruthInput): DayTruth {
   const habit = flow?.wake.habit ?? 'UP_AT_ALARM';
   let noAlarmReason: string | null = null;
   if (wakeAlarm && first) {
-    const level = firstPlan?.level ?? 1;
-    let s = Math.round(rWake.gauss(p.snooze_tendency, 0.7));
-    if (world.weekday === 'MON' && p.snooze_tendency >= 2) s += 1;
-    if (level === 2 && rWake.chance(0.5)) s -= 1;
-    snoozes = Math.max(0, Math.min(5, s));
-    const sleepThrough = p.chronotype === 'LATE' ? 0.25 : p.chronotype === 'EARLY' ? 0.03 : 0.08;
-    if (rWake.chance(level === 2 ? sleepThrough / 2 : sleepThrough)) overslept = rWake.int(15, 45);
+    // 헤드 기준(10/30): 미루기 = 0..snooze_tendency 중 하나(최대 3번, 한 번 5분 — 앱 기본 D3)
+    snoozes = rWake.int(0, Math.min(3, p.snooze_tendency));
+    // 늦잠(첫 알람을 놓쳐 미루기 3번 다 쓰고 +15분) = LATE 또는 새벽 1~2시 취침 인물만 주 1번 (알람이 있는 날 중 사람 id로 고른 하루)
+    if (oversleepDay(p, world)) {
+      snoozes = 3;
+      overslept = 15;
+      notes.push('늦잠: 첫 알람을 놓쳐 미루기 3번 + 15분');
+    }
     dismiss = addMin(wakeAlarm, snoozes * 5 + overslept);
     let lie = 0;
     if (habit === 'BED_PHONE' && flow) {
@@ -148,30 +149,9 @@ export function simulateTruth(input: TruthInput): DayTruth {
   // ---- 준비 ----
   const rPrep = r('prep');
   const extra = extraPrep(p, world.weekday);
-  const noise = rPrep.gauss(0, 4.5);
-  let prep = p.prep_minutes + extra.minutes + noise;
-  const plannedDepart1 = alarmOf(firstPlan, 'DEPARTURE') ?? (firstPlan ? firstPlan.departAt : null);
+  // 헤드 기준: 준비 = prep_minutes × 0.9~1.2 + 그 요일 recurring_reasons 분
+  let prep = p.prep_minutes * rPrep.range([0.9, 1.2]) + extra.minutes;
   const skipped: string[] = [];
-  if (plannedDepart1) {
-    const readyAt = addMin(prepStart, prep);
-    let lateBy = diffMin(plannedDepart1, readyAt);
-    if (lateBy > 0) {
-      const rush = Math.min(5, lateBy);
-      prep -= rush;
-      lateBy -= rush;
-      notes.push(`서둘러서 준비 ${Math.round(rush)}분 줄임`);
-      const skip = flow?.prep.skip_when_late ?? [];
-      if (lateBy > 8) {
-        for (const tag of extra.tags) {
-          if (skip.includes(tag)) {
-            const minutes = p.recurring_reasons.find((x) => x.tag === tag && x.weekdays.includes(world.weekday))?.extra_minutes ?? 0;
-            prep -= minutes;
-            skipped.push(tag);
-          }
-        }
-      }
-    }
-  }
   prep = Math.max(8, prep);
   let ready = addMin(prepStart, prep);
 
@@ -179,7 +159,7 @@ export function simulateTruth(input: TruthInput): DayTruth {
   const trips: TripTruth[] = [];
   let prevArrive: Date | null = null;
   let prevAppt: WorldAppt | null = null;
-  const tripFlow = flow?.travel;
+  
   world.appts.forEach((a, idx) => {
     const rt = r(`trip${idx}`);
     const plan = input.plans[a.id];
@@ -204,12 +184,7 @@ export function simulateTruth(input: TruthInput): DayTruth {
       exMinutes = 7;
       exs.push({ kind: 'CONVENIENCE', startAt: iso(addMin(leave, 1)), endAt: iso(addMin(leave, 1 + exMinutes)), maxDistanceM: 180 });
       notes.push('편의점 7분 다녀옴');
-    } else if (natural && fromHome && rt.chance(natural.prob)) {
-      exMinutes = Math.round(rt.range(natural.minutes));
-      const kind = natural.kind === 'TRASH_TRIP' ? 'TRASH' : 'STORE';
-      exs.push({ kind, startAt: iso(addMin(leave, 1)), endAt: iso(addMin(leave, 1 + exMinutes)), maxDistanceM: rt.int(60, 260) });
-      notes.push(`${kind === 'TRASH' ? '쓰레기 버리러' : '가게에'} ${exMinutes}분 나갔다 옴`);
-    }
+    } // 상황이 없는 날은 깔끔한 날 (헤드 기준: 쓰레기 · 가게 왕복도 넣지 않음)
     if (exMinutes > 0) leave = addMin(leave, exMinutes + 2);
     // 알람보다 일찍 준비가 끝나면 출발 알람을 기다렸다 나감 (앱의 출발 알람이 "나갈 때"를 정함)
     if (plannedDepart) leave = new Date(Math.max(leave.getTime(), addMin(plannedDepart, -2).getTime()));
@@ -217,13 +192,11 @@ export function simulateTruth(input: TruthInput): DayTruth {
 
     // 이동 시간
     const nominal = a.travelMinutes;
-    let travel = nominal + (tripFlow?.weekday_extra[world.weekday] ?? 0) + rt.gauss(0, tripFlow?.sd ?? Math.max(1.2, nominal * 0.06));
-    for (const inc of tripFlow?.incidents ?? []) {
-      if (rt.chance(inc.prob)) {
-        const m = rt.range(inc.minutes);
-        travel += m;
-        notes.push(`${inc.kind} +${Math.round(m)}분`);
-      }
+    // 헤드 기준: 이동 = travel_minutes × 0.9~1.25, 주 1~2일은 비 오는 날 (대중교통 +15%)
+    let travel = nominal * rt.range([0.9, 1.25]);
+    if (rainyDay(p, world) && a.transport !== 'WALK' && a.transport !== 'CAR') {
+      travel *= 1.15;
+      if (idx === 0) notes.push('비 오는 날: 대중교통 +15%');
     }
     travel = Math.max(3, Math.round(travel));
 
@@ -291,5 +264,18 @@ export function simulateTruth(input: TruthInput): DayTruth {
   };
 }
 
-export const kstDateOf = (isoText: string): Date => new Date(isoText);
+// 주 1~2일 비 오는 날 / 주 1번 늦잠 날 — 사람 id 로 고정 (날짜 씨앗과 같은 방식)
+export function rainyDay(p: Persona, w: WorldDay): boolean {
+  const h = hashOf(p.id, 'rain');
+  const days = h % 2 === 0 ? [h % 7] : [h % 7, (h >> 3) % 7];
+  return days.includes(w.day - 1);
+}
+export function oversleepDay(p: Persona, w: WorldDay): boolean {
+  const eligible = p.chronotype === 'LATE' || p.sleep_pattern === 'LATE_1_2';
+  if (!eligible || w.appts.length === 0) return false;
+  const weekdays = ['MON', 'TUE', 'WED', 'THU', 'FRI'];
+  return weekdays[hashOf(p.id, 'oversleep') % 5] === w.weekday;
+}
+
+export const kstDateOf =(isoText: string): Date => new Date(isoText);
 export { kstDate };

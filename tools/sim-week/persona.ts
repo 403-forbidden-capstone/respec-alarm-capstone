@@ -115,13 +115,13 @@ export function placeAt(p: Persona, name: string, transport: Transport, nominalM
 
 // 인덱스 0=월 … 6=일
 const PLAN: Record<string, Partial<Record<number, SituationId>>> = {
-  p01: { 0: 'CAMPUS', 1: 'JOG', 2: 'CONVENIENCE', 3: 'RETURN', 4: 'SUBWAY_DUP' },
-  p02: { 2: 'CONVENIENCE', 3: 'RETURN', 4: 'JOG' }, // 화(1)는 기숙사 → 공학관이 걸어서 400m대라 원래 "500m 안 약속" (주입 아님)
+  p01: { 0: 'CAMPUS', 1: 'CONVENIENCE', 2: 'CONVENIENCE', 3: 'RETURN', 4: 'SUBWAY_DUP' },
+  p02: { 2: 'CONVENIENCE', 3: 'RETURN' }, // 화(1)는 기숙사 → 공학관이 걸어서 400m대라 원래 "500m 안 약속" (주입 아님)
   p03: { 0: 'SUBWAY_DUP', 2: 'CAMPUS', 3: 'RETURN', 5: 'CONVENIENCE' },
   p04: { 0: 'JOG', 2: 'NEAR', 3: 'CONVENIENCE', 4: 'RETURN' },
   p05: { 0: 'CONVENIENCE', 1: 'JOG', 2: 'RETURN', 3: 'SUBWAY_DUP' },
-  p06: { 0: 'CONVENIENCE', 1: 'NEAR', 2: 'JOG', 3: 'CAMPUS', 4: 'RETURN' },
-  p07: { 1: 'JOG', 2: 'CONVENIENCE', 3: 'RETURN' },
+  p06: { 0: 'CONVENIENCE', 1: 'NEAR', 3: 'CAMPUS', 4: 'RETURN' },
+  p07: { 2: 'CONVENIENCE', 3: 'RETURN' },
   p08: { 0: 'CAMPUS', 1: 'SUBWAY_DUP', 2: 'JOG', 3: 'CONVENIENCE', 4: 'NEAR' },
 };
 

@@ -12,9 +12,11 @@ import { dirname, resolve as resolvePath } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 let ROOT = '';
+let STUBS_DIR = '';
 
 export function initialize(data) {
   ROOT = data.root;
+  STUBS_DIR = data.stubsDir;
 }
 
 // 껍데기로 바꿀 모듈 (앱 별칭 그대로 적음)
@@ -46,7 +48,7 @@ function withExtension(p) {
 
 export async function resolve(specifier, context, nextResolve) {
   if (STUBS[specifier]) {
-    return { url: pathToFileURL(resolvePath(ROOT, 'tools/sim-week', STUBS[specifier])).href, shortCircuit: true };
+    return { url: pathToFileURL(resolvePath(STUBS_DIR, STUBS[specifier])).href, shortCircuit: true };
   }
   let path = aliasToPath(specifier);
   if (path === null && (specifier.startsWith('./') || specifier.startsWith('../')) && context.parentURL?.startsWith('file:')) {

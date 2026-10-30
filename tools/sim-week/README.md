@@ -3,7 +3,22 @@
 > 초안 PR. 바닥(데이터 · 앱 순수 함수 불러오기 · 하루 진실 시뮬레이터 · L1 계산 호출)까지만 됨. 아래 "남은 일" 참고.
 > 실호출 · API 키는 이 PR에 없음 (`ANTHROPIC_API_KEY`는 실행 단계에서 env로만 읽을 예정).
 
+## 시험 기준 (헤드 10/30)
+
+1. 씨앗 고정(사람 id + 날짜). 위치 조정 때는 같은 씨앗, 값만 바꿈.
+2. 아침 행동 = 인물 카드 값 + 하루 흔들림. 미루기 횟수 = 0..snooze_tendency 중 하나(최대 3번, 미루기 시간은 앱 기본, D3). 늦잠(첫 알람을 놓쳐 미루기 3번 다 쓰고 +15분) = chronotype LATE 또는 새벽 2시 이후 취침 인물만 주 1번, 나머지는 주 0번. 준비 = prep_minutes × 0.9~1.2 + 그 요일 recurring_reasons 분. 이동 = travel_minutes × 0.9~1.25, 주 1~2일은 비 오는 날로 대중교통 +15%.
+3. 위치 상황 6종: 한 주에 6종 모두 최소 1번, 한 사람 하루 최대 1개, 나머지 날은 깔끔한 날. 조깅은 아침형 인물, 나머지는 고루.
+4. 밤 대화 카드 수락: cooperation HIGH 90% · MID 70% · LOW 40%, 정정은 correction_tendency대로. AI 질문 수 · 원탭이 필요했던 수는 매일 셈(하루 1 · 주 3 — D104 · 7.15 기준 위반이면 버그 후보로 표시).
+5. 지각 경계 · 반경 · 감지 지연은 L2 코드 값을 그대로 쓰고, 위치 조정 표에서만 바꿈 — 시험이 따로 정하지 않음(+11분 경계도 조정 표 안에서만, 기본 실행은 코드 값).
+6. 결과 표에는 사람 × 날짜 줄마다 "PR 코드"(해당 PR 번호) 표시 · 쓴 씨앗 · 상황 이름.
+
+코드 기준: main 머지분은 main 그대로. 아직 PR인 #240 · #247 · #250 · #241은 그 브랜치를 합친 임시 worktree를 `--app-root <경로>`(또는 env `SIM_APP_ROOT`)로 가리켜 부름. 합친 브랜치는 push하지 않음.
+하네스가 혼자 정한 것은 `DECISIONS.md`. 현재 코드가 헤드 기준과 다른 곳(미루기 규칙 · 상황 배정)은 위 기준에 맞춰 고쳐 둠.
+
 ## 지금 되는 것
+
+- (추가) `location.ts` — 진실 → 신호(반경 · 감지 지연) → L2 `planRegions`/`interpretSignals`/`resolvePending` + `participantTimes` 출처 · 지각 규칙 → 기록 · 오판 · 원탭. 시험 4건(`location.test.ts`)
+- (추가) `bridge.ts` `--app-root` / `SIM_APP_ROOT`, `DECISIONS.md`
 
 - `data/` — ai-lab p01~p08(dev) 사람 · 같은 사람의 7일 일정 · v3 말투 · 습관, `prompts/SIM.v3.1.md`, `schemas/sim-user.v2.json` (복사본, p09~p12는 복사하지 않음)
 - `loader.mjs` + `bridge.ts` — 앱(`mobile/src`)의 순수 함수를 앱 코드 수정 없이 Node에서 불러옴 (`@/…` · `@shared/…` 별칭, 확장자 없는 import 해석, supabase/user는 던지는 껍데기로 대체)
