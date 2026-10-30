@@ -180,7 +180,7 @@ describe('요청 모양', () => {
       assert.equal(p.messages.length, 1);
       assert.equal(p.messages[0].role, 'user');
       assert.equal(p.messages[0].content as string, render(cfg.prompt.user, dummyVars(point)).trimEnd());
-      assert.doesNotMatch(p.messages[0].content, /\{\{/);
+      assert.doesNotMatch(p.messages[0].content as string, /\{\{/);
       // 구조화 출력 + effort
       assert.equal(p.output_config.effort, cfg.effort);
       assert.equal(p.output_config.format.type, 'json_schema');

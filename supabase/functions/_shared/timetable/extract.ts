@@ -52,8 +52,10 @@ export function parseRequest(raw: unknown): TimetableRequest {
   return { image: { media_type: mediaType, data } };
 }
 
-const CONTROL = /[\u0000-\u001f\u007f]/g;
-const clean = (s: string, max: number): string => s.replace(CONTROL, ' ').replace(/\s+/g, ' ').trim().slice(0, max);
+// 제어문자 · 글자 방향을 뒤집는 문자(U+202A–202E, U+2066–2069) · 폭 없는 문자(U+200B–200F, U+FEFF) · U+0085는 공백으로 — 사진 속 글이 확인 화면의 글자 순서를 바꾸지 못하게
+const CONTROL = /[\u0000-\u001f\u007f-\u0085​-‏‪-‮⁦-⁩﻿]/g;
+// 글자 수로 자름 (이모지 같은 두 칸짜리 글자를 반으로 쪼개지 않게 Array.from)
+const clean = (s: string, max: number): string => Array.from(s.replace(CONTROL, ' ').replace(/\s+/g, ' ').trim()).slice(0, max).join('');
 const minutesOf = (hhmm: string): number => Number(hhmm.slice(0, 2)) * 60 + Number(hhmm.slice(3, 5));
 
 // 모델 출력은 믿지 않는 입력 — 스키마를 통과했어도 앱이 그대로 쓸 수 있는 줄만 남김.
@@ -118,6 +120,7 @@ export async function handleTimetableExtract(deps: TimetableDeps, raw: unknown):
   const now = (deps.now ?? (() => new Date()))();
   const nowIso = seoulIso(now);
   const since = startOf(seoulLocal(nowIso).date);
+  // 한도는 호출 전에 확인하고 기록은 호출 뒤에 쌓이므로, 같은 사용자가 동시에 여러 번 보내면 그 몇 번은 함께 통과할 수 있음 (로그인 필요 · 호출당 비용이 작아 허용, voice-turn 하루 상한도 같은 방식)
   const [today, all] = await Promise.all([countToday(deps.userDb, deps.userId, since, 'TT'), countToday(deps.userDb, deps.userId, since)]);
   if (today >= MAX_TIMETABLE_CALLS_PER_DAY || all >= MAX_AI_CALLS_PER_DAY) {
     throw new HttpError('RATE_LIMITED', '오늘은 사진으로 넣을 수 있는 횟수를 다 썼어요. 내일 다시 하거나 직접 넣어 주세요', { left_today: 0 });
@@ -145,7 +148,7 @@ export async function handleTimetableExtract(deps: TimetableDeps, raw: unknown):
   if (!result.ok) throw toHttpError(result);
 
   const { rows, dropped } = normalizeRows(result.data.rows);
-  // 버린 줄이 있으면 모델이 또렷하다고 해도 한 단계 낮춰 앱이 "꼼꼼히 확인" 안내를 띄우게 함. 읽은 수업이 없으면 늘 LOW
+  // 버린 줄이 있고 모델이 HIGH라고 했으면 MEDIUM으로 내림 (앱은 LOW · MEDIUM이면 "확인" 안내를 강하게). 읽은 수업이 없으면 늘 LOW
   const confidence = rows.length === 0 ? 'LOW' : dropped > 0 && result.data.confidence === 'HIGH' ? 'MEDIUM' : result.data.confidence;
   return { rows, confidence, left_today: Math.max(0, MAX_TIMETABLE_CALLS_PER_DAY - today - 1) };
 }

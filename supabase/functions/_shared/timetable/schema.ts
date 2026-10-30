@@ -16,7 +16,7 @@ export interface TimetableRow {
 
 export interface TimetableExtract {
   rows: TimetableRow[];
-  confidence: 'HIGH' | 'MEDIUM' | 'LOW'; // 사진을 얼마나 또렷하게 읽었는지 (LOW면 앱이 "꼼꼼히 확인" 안내)
+  confidence: 'HIGH' | 'MEDIUM' | 'LOW'; // 사진을 얼마나 또렷하게 읽었는지 (LOW · MEDIUM이면 앱이 "꼼꼼히 확인" 안내)
 }
 
 const TIME = '^([01]\\d|2[0-3]):[0-5]\\d$';

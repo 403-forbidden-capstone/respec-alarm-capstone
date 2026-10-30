@@ -137,6 +137,13 @@ describe('출력 정리', () => {
     assert.equal(r.dropped, 5);
   });
 
+  it('이모지를 반으로 자르지 않고, 글자 방향 · 폭 없는 문자는 공백으로', () => {
+    const r = normalizeRows([row({ title: '가'.repeat(39) + '😀😀', place: 'a‮b​c\u0085d' })]);
+    assert.equal(Array.from(r.rows[0].title).length, 40);
+    assert.ok(!/[\ud800-\udfff]/.test(r.rows[0].title.replace('😀', '')));
+    assert.equal(r.rows[0].place, 'a b c d');
+  });
+
   it('글자 길이 상한 (이름 · 장소 40자)', () => {
     const r = normalizeRows([row({ title: '가'.repeat(60), place: '나'.repeat(60) })]);
     assert.equal(r.rows[0].title.length, 40);
