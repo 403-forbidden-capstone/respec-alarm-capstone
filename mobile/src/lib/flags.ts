@@ -56,5 +56,5 @@ export const TIMETABLE_PATHS = {
   calendar: true,
 };
 
-// 권한 안내 단계에 위치 줄(전경 · 항상)을 넣을지 — L2 permissions.ts 머지 뒤 켜고 permissionRows에 위치 줄을 더함 (안건 2 A)
-export const ONBOARDING_LOCATION_ROWS = false;
+// 권한 안내 단계에 위치 줄(전경 · 항상)을 넣을지 — L2 permissions.ts가 들어와서 켬 (안건 2 A)
+export const ONBOARDING_LOCATION_ROWS = true;

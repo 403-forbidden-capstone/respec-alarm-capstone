@@ -1,5 +1,6 @@
 import { describe, expect, it } from '@jest/globals';
 
+import type { LocationStatus } from '@/features/location/permissions';
 import type { PermissionSnapshot } from '@/features/permissions';
 
 import { permissionRows } from '../permissionRows';
@@ -83,5 +84,30 @@ describe('permissionRows — 줄 순서', () => {
       'battery',
       'samsung',
     ]);
+  });
+});
+
+describe('permissionRows — 위치 줄', () => {
+  const cases: [LocationStatus, 'ok' | 'off', string | undefined][] = [
+    ['on', 'ok', undefined],
+    ['off', 'off', '켜기'],
+    ['foreground-only', 'off', '항상 허용 켜기'],
+    ['coarse', 'off', '정확한 위치 켜기'],
+  ];
+
+  it.each(cases)("%s: 상태 %s · 버튼 %s", (location, state, actionLabel) => {
+    const row = byKey(permissionRows(ALL_ON, location), 'location');
+    expect(row?.state).toBe(state);
+    expect(row?.actionLabel).toBe(actionLabel);
+  });
+
+  it("'unsupported'거나 위치를 모르면(null · 안 줌) 줄이 없음", () => {
+    expect(byKey(permissionRows(ALL_ON, 'unsupported'), 'location')).toBeUndefined();
+    expect(byKey(permissionRows(ALL_ON, null), 'location')).toBeUndefined();
+    expect(byKey(permissionRows(ALL_ON), 'location')).toBeUndefined();
+  });
+
+  it('사용 정보 뒤 · 배터리 앞', () => {
+    expect(permissionRows(ALL_ON, 'off').map((row) => row.key)).toEqual(['notifications', 'fullScreen', 'usageAccess', 'location', 'battery', 'samsung']);
   });
 });

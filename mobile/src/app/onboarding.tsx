@@ -18,6 +18,7 @@ import { CalendarPickSheet } from '@/features/onboarding/components/CalendarPick
 import { ImportEntryCard } from '@/features/onboarding/components/ImportEntryCard';
 import { PermissionsStep } from '@/features/onboarding/components/PermissionsStep';
 import { TimetableStep } from '@/features/onboarding/components/TimetableStep';
+import { useLocationRow } from '@/features/onboarding/hooks/useLocationRow';
 import { useHomeStep } from '@/features/onboarding/hooks/useHomeStep';
 import { useCalendarImport } from '@/features/onboarding/hooks/useCalendarImport';
 import { usePhotoImport } from '@/features/onboarding/hooks/usePhotoImport';
@@ -95,6 +96,7 @@ export default function OnboardingScreen() {
   // 집 좌표가 없으면 서버가 출발지 '집'을 못 채워 이동시간을 못 구함 — 실데이터만 (가짜 데이터는 집 없이도 계산)
   const noHome = userId != null && !hasHome(homeStep.saved, profile);
   const [finished, setFinished] = useState(false); // 온보딩 끝난 시각을 이미 적었음 (다시 읽기만 실패해 한 번 더 누를 때 또 적지 않게)
+  const location = useLocationRow();
   const { snapshot: permissionSnapshot } = usePermissions(); // 설정에서 돌아오면 다시 읽어 줄이 갱신됨
   const [consentSaved, setConsentSaved] = useState(false); // 이 화면에서 이미 동의를 저장했음 (뒤로 갔다 와도 다시 저장하지 않게)
 
@@ -203,6 +205,9 @@ export default function OnboardingScreen() {
         break;
       case 'battery':
         void openBatterySettings();
+        break;
+      case 'location':
+        void location.request(); // 고지 → 앱 사용 중 → 항상 허용 설정 화면. 거절 · 나중에는 설정 카드로
         break;
     }
   };
@@ -346,7 +351,7 @@ export default function OnboardingScreen() {
     permissions: {
       title: '권한 안내',
       lead: '알람이 확실히 울리도록 켜 두면 좋은 것들이에요',
-      body: <PermissionsStep rows={permissionRows(permissionSnapshot)} onAction={openPermission} />,
+      body: <PermissionsStep rows={permissionRows(permissionSnapshot, location.status)} onAction={openPermission} />,
       primaryLabel: '다음', // 안 켜도 통과
       onPrimary: next,
     },
