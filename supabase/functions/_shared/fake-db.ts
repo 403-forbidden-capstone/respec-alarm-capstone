@@ -2,6 +2,7 @@
 //   from(t).select/insert/update/delete/upsert + eq · neq · is · in · not(is null) · gt · gte · lt · lte · order · limit + single · maybeSingle + 개수(count · head)
 //   rpc(이름, 인자) — 시험이 rpcHandlers에 이름별로 답을 등록함 (호출은 rpcCalls에 남음). withRollRpc()는 alarm-roll이 쓰는 DB 함수 둘을 등록해 줌
 //   기본키 만들기, alarms 유일 제약(참여 조건 + 종류), CASCADE 삭제
+//   (L1 PR 4b) appointments.exception_kind(이번만 고친 · 지운 회차, 기본 NULL). roll_due_series 흉내는 기준 회차에서 예외 회차를 뺌
 //   반복 회차 칸 (alarm_roll.sql): appointments · alarms(일정 없는 알람)는 insert 때 series_id · occurrence_on을 채우고(fill_series 트리거),
 //     (만든 사람, 묶음, 날짜)가 겹치면 23505. 날짜는 만든 사람 profiles.timezone(없으면 Asia/Seoul)으로 셈
 //   failOn으로 특정 표 · 동작을 실패시켜 되돌리기를 시험함
@@ -30,7 +31,7 @@ const PK: Record<string, string> = {
 
 const DEFAULTS: Record<string, Row> = {
   alarms: { routine_id: null, step_order: null, snooze_limit: 3, recurrence_rule: null },
-  appointments: { memo: null },
+  appointments: { memo: null, exception_kind: null },
 };
 
 const DAY_MS = 86_400_000;
@@ -413,6 +414,7 @@ function rollInsertOccurrence(db: FakeDb, args: Record<string, unknown>): string
     importance: ap.importance ?? 'NORMAL',
     recurrence_rule: ap.recurrence_rule ?? null,
     memo: ap.memo ?? null,
+    exception_kind: null,
     created_at: db.now.toISOString(),
   });
   const participantId = db.newId();
@@ -493,12 +495,26 @@ function rollDueSeries(db: FakeDb, args: Record<string, unknown>) {
     };
   };
 
+  // 기준 회차(template_id · 규칙 · 공동 약속)는 예외 아닌 행 중 가장 늦은 것 → 없으면 EDITED 중 가장 늦은 것, CANCELED는 기준이 아님 (20261030150000_appointment_edit.sql의 base_appointment)
+  //   다음 회차 시각(due_at)을 세는 기준은 예외까지 포함한 가장 늦은 행
+  const baseOf = (latest: Row): Row | undefined => {
+    const mine = db.rows('appointments').filter((x) => x.creator_id === latest.creator_id && x.series_id === latest.series_id && x.exception_kind !== 'CANCELED');
+    const rank = (x: Row) => (x.exception_kind == null ? 0 : 1);
+    return [...mine].sort(
+      (x, y) =>
+        rank(x) - rank(y) ||
+        (String(x.occurrence_on) < String(y.occurrence_on) ? 1 : String(x.occurrence_on) > String(y.occurrence_on) ? -1 : 0) ||
+        at(y, 'appointment_at') - at(x, 'appointment_at') ||
+        (String(x.appointment_id) < String(y.appointment_id) ? -1 : 1),
+    )[0];
+  };
   for (const a of newest(db.rows('appointments'), 'creator_id', 'appointment_id', 'appointment_at')) {
-    if (a.recurrence_rule == null || a.group_id != null) continue;
+    const base = baseOf(a);
+    if (!base || base.recurrence_rule == null || base.group_id != null) continue;
     const p = pendingOf(a.creator_id, a.series_id);
     const when = at(a, 'appointment_at');
     if (p.waiting || !(when < horizon || p.retryDue)) continue;
-    due.push({ user_id: String(a.creator_id), series_id: String(a.series_id), kind: 'APPOINTMENT', template_id: String(a.appointment_id), due_at: when });
+    due.push({ user_id: String(a.creator_id), series_id: String(a.series_id), kind: 'APPOINTMENT', template_id: String(base.appointment_id), due_at: when });
   }
   for (const s of newest(db.rows('alarms').filter((r) => r.participant_id == null && r.routine_id == null), 'user_id', 'alarm_id', 'scheduled_at')) {
     const when = at(s, 'scheduled_at');
