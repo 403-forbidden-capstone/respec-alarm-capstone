@@ -1,0 +1,6 @@
+{
+  "name": "sim-week",
+  "private": true,
+  "type": "module",
+  "description": "가상 유저 일주일 시험 하네스 — 외부 패키지 없음 (Node 22+ 가 .ts를 바로 실행)"
+}
