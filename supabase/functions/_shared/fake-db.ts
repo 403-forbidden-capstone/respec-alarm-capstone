@@ -1,5 +1,5 @@
 // 시험용 가짜 DB — supabase-js 쿼리 빌더 중 서버 함수가 쓰는 모양만 흉내 냄 (메모리 표). 배포되는 코드가 아님
-//   from(t).select/insert/update/delete/upsert + eq · neq · is · in · not(is null) · gt · gte · lt · order · limit + single · maybeSingle + 개수(count · head)
+//   from(t).select/insert/update/delete/upsert + eq · neq · is · in · not(is null) · gt · gte · lt · lte · order · limit + single · maybeSingle + 개수(count · head)
 //   rpc(이름, 인자) — 시험이 rpcHandlers에 이름별로 답을 등록함 (호출은 rpcCalls에 남음). withRollRpc()는 alarm-roll이 쓰는 DB 함수 둘을 등록해 줌
 //   기본키 만들기, alarms 유일 제약(참여 조건 + 종류), CASCADE 삭제
 //   (L1 PR 4b) appointments.exception_kind(이번만 고친 · 지운 회차, 기본 NULL). roll_due_series 흉내는 기준 회차에서 예외 회차를 뺌
@@ -196,6 +196,9 @@ class FakeQuery implements PromiseLike<Result> {
   }
   gte(col: string, val: unknown) {
     return this.where(col, (v) => (compare(v, val) ?? -1) >= 0);
+  }
+  lte(col: string, val: unknown) {
+    return this.where(col, (v) => (compare(v, val) ?? 1) <= 0);
   }
   lt(col: string, val: unknown) {
     return this.where(col, (v) => (compare(v, val) ?? 1) < 0);
