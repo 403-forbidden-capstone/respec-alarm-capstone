@@ -66,6 +66,11 @@ export interface AlarmPlan {
   enabled: boolean;
   /** 서버 처리 결과(ServerEvent.alarms)에서만: 이번에 새로 만든 알람인지(NEW) · 있던 알람이 바뀐 것인지(CHANGED, 꺼짐 포함) */
   change?: "NEW" | "CHANGED";
+  /**
+   * 시각을 자동으로 계산했는지(AUTO) 직접 골랐는지(MANUAL) — DB alarms.time_source. 서버만 쓰는 칸이라 화면(view.ts)은 안 읽는다.
+   * 서버 질문 PREP_CHECK는 AUTO 기상일 때만 묻는다(설계 메모 4.3 ② — 직접 고른 기상은 준비를 늘려도 안 바뀜). 없으면 AUTO로 본다.
+   */
+  time_source?: "AUTO" | "MANUAL";
 }
 
 export type FactKind = "SLEEP" | "WAKE" | "SNOOZE" | "DEPART" | "ARRIVE" | "LATE" | "PREP_OVER" | "ROUTINE_DONE";
