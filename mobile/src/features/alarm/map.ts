@@ -3,7 +3,7 @@
 import { parseDbTime } from '@/lib/dbTime';
 import type { Tables } from '@/types/database';
 import { alarmChain } from '@shared/calc/chain.ts';
-import { autoLevel, levelOfIntensity, levelOfSoundKey, levelOfVibration, levelOfVoiceTone, type WakeSensitivity } from '@shared/calc/intensity.ts';
+import { AXES_PICKER_ENABLED, autoLevel, levelOfIntensity, levelOfSoundKey, levelOfVibration, levelOfVoiceTone, type WakeSensitivity } from '@shared/calc/intensity.ts';
 import { DEFAULT_BEFORE_PREPARE_MINUTES } from '@shared/calc/prepare.ts';
 import { minutesBetween } from '@shared/calc/time.ts';
 import type { RingKind } from '@shared/calc/types.ts';
@@ -307,9 +307,9 @@ export function toOccurrences(rows: readonly OccurrenceRow[], nowMs: number): Oc
 // 직접 고른 강도 — 서버 resolveOverrides와 같은 규칙: 저장된 알람 중 기상(없으면 아무거나)이 intensity_source = MANUAL이면
 //   그 알람의 세 칸(배경음 sound_key · 말소리 voice_tone · 진동 vibration)이 자동 값과 다른 칸만 직접 고른 것 (D1 A, 이슈 #312)
 //   intensity는 세 축이 아니라 "전체 세기"(볼륨 · 다시 울림)라 여기서 안 읽음. 진동은 직접 고른 값만 vibration 칸에 있고 NULL이면 강도를 따름 = 자동
-export function storedOverrides(alarms: readonly AlarmRow[], auto: Level): Record<IntensityAxis, Level | null> {
+export function storedOverrides(alarms: readonly AlarmRow[], auto: Level, axesEnabled: boolean = AXES_PICKER_ENABLED): Record<IntensityAxis, Level | null> {
   const stored = manualIntensityRow(alarms);
-  if (!stored) return { sound: null, voice: null, vibration: null };
+  if (!axesEnabled || !stored) return { sound: null, voice: null, vibration: null }; // 축별 선택을 끄면 저장된 값은 두되 무시(서버 resolveOverrides와 같게)
   const pick = (level: Level | null) => (level != null && level !== auto ? level : null);
   return {
     sound: pick(levelOfSoundKey(stored.sound_key)),

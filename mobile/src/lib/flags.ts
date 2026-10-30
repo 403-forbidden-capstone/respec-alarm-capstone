@@ -6,8 +6,9 @@ export const REAL_DATA_READY = true;
 
 // ALARM_AXES_PICKER: 알람 설정(H03)에서 배경음 · 말소리 · 진동을 따로 고르게 보일지 (D1 A, #312 · #316)
 //   지형님 10/30: "강도를 다 설정하게 하면 UX가 과함" → 결정 안건(투표)으로 올림. 결과가 나올 때까지는 켜 둠(true)
-//   false: H03 "알람 강도" 카드가 자동 강도 한 줄만 보임. 서버 · 폰 동작(축별 소리 · 진동 해석)은 그대로이고 안 고른 알람은 강도를 따름 — 화면만 숨김
-export const ALARM_AXES_PICKER = true;
+//   false: H03 "알람 강도" 카드가 자동 강도 한 줄만 보임. 이미 저장된 축 값(sound_key · voice_tone · vibration)은 지우지 않되 서버 · 폰 계산이 무시하고 모두 강도를 따름 —
+//   숨긴 설정이 몰래 알람에 영향을 주지 않게 (헤드 확정 10/30). 값은 서버와 같은 상수 하나(_shared/calc/intensity.ts AXES_PICKER_ENABLED)이고 여기서 다시 내보냄 — 끄려면 거기서 false로, 서버 함수 재배포도 같이
+export { AXES_PICKER_ENABLED as ALARM_AXES_PICKER } from '@shared/calc/intensity.ts';
 
 // ONBOARDING_IN_FLOW: 단계 온보딩(app/onboarding.tsx)을 앱 흐름에 넣을지 (임시 온보딩을 단계 온보딩으로 바꿈, #25)
 //   true: 로그인한 뒤 프로필의 onboarded_at이 비어 있으면 온보딩부터 (판정은 features/auth/onboardingGate.ts). 어느 단계를 거칠지는 아래 ONBOARDING_STEPS
