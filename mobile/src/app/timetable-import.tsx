@@ -11,7 +11,6 @@ import { CampusCard } from '@/features/onboarding/components/CampusCard';
 import { ImportNoticeCard } from '@/features/onboarding/components/ImportNoticeCard';
 import { TimetableStep } from '@/features/onboarding/components/TimetableStep';
 import { useTimetableStep } from '@/features/onboarding/hooks/useTimetableStep';
-import { rowStatus } from '@/features/onboarding/timetable';
 import { getImportBatch, setImportBatch } from '@/features/onboarding/importHandoff';
 import { now } from '@/lib/clock';
 import { addMinutes, minuteOfDay, startOfDay } from '@/lib/format';
@@ -27,7 +26,7 @@ export default function TimetableImportScreen() {
   const [batch] = useState(() => getImportBatch());
   const timetable = useTimetableStep(profile?.default_transport ?? 'TRANSIT', batch);
   const noHome = homeOf(profile) == null;
-  const count = timetable.rows.filter((row) => rowStatus(row) === 'complete').length; // 저장할 수업 수 (이미 저장한 줄 포함)
+  const count = timetable.count; // 저장할 수업 수 (이미 있는 수업으로 뺀 줄 제외)
 
   // 줄 하나라도 못 만들면 save()가 false — 이 화면에 머물러 실패한 줄을 고침. 다 만들었으면 이전 화면으로
   const save = () =>
@@ -69,6 +68,7 @@ export default function TimetableImportScreen() {
         onRemoveRow={timetable.onRemoveRow}
         onPickPlace={timetable.onPickPlace}
         onPickTime={timetable.onPickTime}
+        onToggleExisting={timetable.onToggleExisting}
         saving={busy}
       />
       <PlaceSearchSheet
