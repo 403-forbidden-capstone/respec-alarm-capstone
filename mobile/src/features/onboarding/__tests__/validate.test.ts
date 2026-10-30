@@ -1,7 +1,7 @@
 import { describe, expect, it } from '@jest/globals';
 
 import { CONSENT_ITEMS, PRIVACY_VERSION } from '../consent';
-import { cleanHandle, cleanNickname, isHandleFormat, isNicknameOk, NICKNAME_MAX } from '../validate';
+import { cleanHandle, cleanNickname, isHandleFormat, isNicknameOk, NICKNAME_MAX, shouldSaveHandle } from '../validate';
 
 describe('아이디 검사', () => {
   it('앞뒤 공백 · 앞의 @를 떼고 소문자로', () => {
@@ -17,6 +17,18 @@ describe('아이디 검사', () => {
     expect(isHandleFormat('kim-01')).toBe(false);
     expect(isHandleFormat('김지형')).toBe(false);
     expect(isHandleFormat('')).toBe(false);
+  });
+});
+
+describe('아이디 저장 여부', () => {
+  it('이미 저장한 아이디와 같으면 저장 · 중복 확인을 안 함', () => {
+    expect(shouldSaveHandle('respec_kim', 'respec_kim')).toBe(false);
+  });
+
+  it('다르면 저장함 — 저장해 둔 게 없을 때(null · undefined)도', () => {
+    expect(shouldSaveHandle('respec_lee', 'respec_kim')).toBe(true);
+    expect(shouldSaveHandle('respec_kim', null)).toBe(true);
+    expect(shouldSaveHandle('respec_kim', undefined)).toBe(true);
   });
 });
 

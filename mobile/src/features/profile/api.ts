@@ -2,7 +2,7 @@
 import { UserError } from '@/lib/errors';
 import { supabase } from '@/lib/supabase';
 
-import type { OnboardingInput, Profile, ProfileFields } from './types';
+import type { Profile, ProfileFields } from './types';
 
 const COLUMNS =
   'user_id, nickname, handle, profile_image_url, default_prepare_minutes, default_buffer_minutes, home_name, home_lat, home_lng, default_transport, timezone, onboarded_at, wake_sensitivity, wake_margin, privacy_agreed_at, privacy_version';
@@ -68,23 +68,8 @@ export async function resetOnboarding(userId: string): Promise<void> {
   if (!data?.length) throw new UserError('내 프로필을 바꾸지 못했어요');
 }
 
-// 온보딩 저장 — 아이디 중복이면 DB 유일 제약(23505)이 막음
-export async function saveOnboarding(userId: string, input: OnboardingInput): Promise<Profile> {
-  const { data, error } = await supabase
-    .from('profiles')
-    .update({ ...input, handle: input.handle?.toLowerCase() ?? null })
-    .eq('user_id', userId)
-    .select(COLUMNS)
-    .single();
-  if (error) {
-    if (error.code === '23505') throw new UserError('이미 쓰는 아이디예요');
-    throw error;
-  }
-  return data as Profile;
-}
-
 // 내 프로필 한 행 갱신 — 갱신된 행을 돌려받음. 아이디 중복이면 DB 유일 제약(23505)이 막음
-async function updateMyProfile(userId: string, values: Partial<Profile>): Promise<Profile> {
+async function updateMyProfile(userId: string, values: ProfileFields & { onboarded_at?: string }): Promise<Profile> {
   const { data, error } = await supabase.from('profiles').update(values).eq('user_id', userId).select(COLUMNS);
   if (error) {
     if (error.code === '23505') throw new UserError('이미 쓰는 아이디예요');

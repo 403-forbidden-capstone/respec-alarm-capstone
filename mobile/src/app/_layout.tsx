@@ -1,5 +1,5 @@
 import { useFonts } from 'expo-font';
-import { Stack } from 'expo-router';
+import { router, Stack } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
 import * as WebBrowser from 'expo-web-browser';
@@ -14,6 +14,7 @@ import { ConfigErrorScreen } from '@/features/auth/ConfigErrorScreen';
 import { ProfileRetryScreen } from '@/features/auth/ProfileRetryScreen';
 import { useLocationSync } from '@/features/location/useLocationSync';
 import { useAlarmSync } from '@/lib/alarmSync/useAlarmSync';
+import { takeAfterOnboarding } from '@/lib/afterOnboarding';
 import { ONBOARDING_IN_FLOW } from '@/lib/flags';
 import { canUseRealData, configError } from '@/lib/mode';
 import { ensureNotificationChannels } from '@/lib/push/channels';
@@ -80,6 +81,13 @@ function RootStack() {
 
   // 같은 때에 최근에 끈 기상 알람 중 확정이 없는 것을 다시 판정 — 해제 뒤 앱을 안 열었어도 서버가 기상 미확인(MISSED)으로 적기 전에 확정되게
   useWakeRecheck({ active: syncActive, userId });
+
+  // 온보딩 끝에서 [첫 일정 만들기]를 눌렀으면 앱 화면이 열린 뒤 일정 화면으로 — 시간을 추측해 기다리지 않고 가드(ready)가 열린 것을 기다림
+  // (온보딩 화면은 판정이 꺼지면 사라져서 화면 안에서는 이동할 수 없음, lib/afterOnboarding)
+  useEffect(() => {
+    if (!ready || loading) return;
+    if (takeAfterOnboarding() === 'schedule') router.push({ pathname: '/schedule/new', params: { from: 'home' } });
+  }, [ready, loading]);
 
   if (configError) return <ConfigErrorScreen />;
   if (loading) return null;

@@ -6,7 +6,7 @@ import { CONSENT_ITEMS, PRIVACY_VERSION } from '@/features/onboarding/consent';
 import { OnboardingDoneStep } from '@/features/onboarding/components/OnboardingDoneStep';
 import { OnboardingFrame } from '@/features/onboarding/components/OnboardingFrame';
 import { activeSteps, nextStep, ONBOARDING_ORDER, prevStep, stepNumber, type OnboardingStepId, type StepFlags } from '@/features/onboarding/steps';
-import { cleanHandle, cleanNickname, isHandleFormat, isNicknameOk, NICKNAME_MAX } from '@/features/onboarding/validate';
+import { cleanHandle, cleanNickname, isHandleFormat, isNicknameOk, NICKNAME_MAX, shouldSaveHandle } from '@/features/onboarding/validate';
 import { ConsentStep } from '@/features/onboarding/views/ConsentStep';
 import { HandleStep } from '@/features/onboarding/views/HandleStep';
 import { NicknameStep } from '@/features/onboarding/views/NicknameStep';
@@ -15,6 +15,8 @@ import { ShareStep } from '@/features/onboarding/views/ShareStep';
 import { SleepStep } from '@/features/onboarding/views/SleepStep';
 import { finishOnboarding, isHandleTaken, saveProfileFields } from '@/features/profile/api';
 import type { WakeSensitivity } from '@/features/profile/types';
+import { setAfterOnboarding } from '@/lib/afterOnboarding';
+import { UserError } from '@/lib/errors';
 import { ONBOARDING_STEPS } from '@/lib/flags';
 import { useAction } from '@/lib/useAction';
 
@@ -22,9 +24,6 @@ import { useAction } from '@/lib/useAction';
 // 자리: home · timetable(PR 5 — 집 검색 · 시간표 입력), permissions(PR 7 — 권한 안내), mic(L4 뒤). 화면을 만들면 여기에 더함
 const SCREEN_STEPS: ReadonlySet<OnboardingStepId> = new Set(['handle', 'nickname', 'sleep', 'prepare', 'consent', 'share', 'first']);
 const FLAGS = Object.fromEntries(ONBOARDING_ORDER.map((id) => [id, ONBOARDING_STEPS[id] && SCREEN_STEPS.has(id)])) as StepFlags;
-
-// 프로필을 다시 읽은 뒤 루트 레이아웃이 앱 화면(홈 · 일정)을 열 때까지 잠깐 기다림 — 온보딩 중에는 앱 화면이 막혀 있어서 (_layout.tsx RootStack ready)
-const waitForAppScreens = () => new Promise<void>((resolve) => setTimeout(resolve, 150));
 
 // 단계에 따라 틀(OnboardingFrame)에 넣을 것
 type StepView = {
@@ -39,7 +38,8 @@ type StepView = {
 };
 
 // 처음 설정 — 켜진 단계를 순서대로 한 번에 하나씩 (단계 표 · 켜고 끄기: features/onboarding/steps.ts, lib/flags ONBOARDING_STEPS)
-// 단계마다 [다음]에서 그 단계 값을 저장하고, 마지막 단계에서 온보딩 끝낸 시각(onboarded_at)을 적은 뒤 프로필을 다시 읽어 앱으로 보냄
+// 단계마다 [다음]에서 그 단계 값을 저장하고, 마지막 단계에서 온보딩 끝낸 시각(onboarded_at)을 적은 뒤 프로필을 다시 읽음
+// 다시 읽어 온보딩 판정이 꺼지면 이 화면은 사라지고 루트(_layout.tsx)가 홈으로 보냄 — 첫 일정으로 갈지는 lib/afterOnboarding에 적어 둠
 // 앱을 껐다 켜면 처음 단계부터 다시지만, 저장해 둔 값은 미리 채워져 있음
 // 가짜 데이터 모드(미리 보기)는 저장 없이 단계만 넘김
 export default function OnboardingScreen() {
@@ -49,6 +49,7 @@ export default function OnboardingScreen() {
 
   const [step, setStep] = useState<OnboardingStepId>(() => activeSteps(FLAGS)[0]);
   const [handle, setHandle] = useState(profile?.handle ?? '');
+  const [savedHandle, setSavedHandle] = useState<string | null>(profile?.handle ?? null); // 지금까지 저장한 아이디 — profile은 단계 사이에 안 바뀌어서 따로 둠
   const [handleError, setHandleError] = useState<string | null>(null);
   const [nickname, setNickname] = useState(profile?.nickname ?? '');
   const [sleep, setSleep] = useState<WakeSensitivity>(profile?.wake_sensitivity ?? 'NORMAL');
@@ -58,6 +59,7 @@ export default function OnboardingScreen() {
     transport: profile?.default_transport ?? 'TRANSIT',
     margin: profile?.wake_margin ?? 'NORMAL',
   });
+  const [finished, setFinished] = useState(false); // 온보딩 끝난 시각을 이미 적었음 (다시 읽기만 실패해 한 번 더 누를 때 또 적지 않게)
   const [consentSaved, setConsentSaved] = useState(false); // 이 화면에서 이미 동의를 저장했음 (뒤로 갔다 와도 다시 저장하지 않게)
 
   const changeHandle = (next: string) => {
@@ -75,13 +77,14 @@ export default function OnboardingScreen() {
     switch (step) {
       case 'handle': {
         const clean = cleanHandle(handle);
-        if (!userId) return true;
-        // 원래 내 아이디 그대로면 중복 확인을 건너뜀
-        if (clean !== profile?.handle && (await isHandleTaken(clean, userId))) {
+        // 이미 저장한 아이디 그대로면 중복 확인도 저장도 건너뜀
+        if (!userId || !shouldSaveHandle(clean, savedHandle)) return true;
+        if (await isHandleTaken(clean, userId)) {
           setHandleError('이미 쓰는 아이디예요');
           return false;
         }
         await saveProfileFields(userId, { handle: clean });
+        setSavedHandle(clean);
         return true;
       }
       case 'nickname':
@@ -119,16 +122,27 @@ export default function OnboardingScreen() {
       if (await save()) advance();
     }, '저장하지 못했어요');
 
-  // 마지막 단계 — 끝낸 시각을 적고 프로필을 다시 읽은 뒤에 이동 (읽기 전에는 앱 화면이 막혀 있음)
+  // 마지막 단계 — 끝낸 시각을 적고 프로필을 다시 읽음. 온보딩 중에는 앱 화면이 막혀 있어서(_layout.tsx RootStack ready) 여기서는 이동하지 않고,
+  // 다시 읽어 판정이 꺼지면 이 화면이 사라지고 루트가 홈으로 보냄 (첫 일정이면 lib/afterOnboarding에 적어 둔 걸 루트가 읽고 일정 화면을 엶)
   const finish = (to: 'schedule' | 'home') =>
     run(async () => {
-      if (userId) {
-        await finishOnboarding(userId);
-        await refreshProfile();
-        await waitForAppScreens();
+      if (!userId) {
+        // 가짜 데이터 모드(미리 보기)는 가드가 안 막으니 바로 이동
+        router.replace('/');
+        if (to === 'schedule') router.push({ pathname: '/schedule/new', params: { from: 'home' } });
+        return;
       }
-      router.replace('/');
-      if (to === 'schedule') router.push({ pathname: '/schedule/new', params: { from: 'home' } });
+      if (!finished) {
+        await finishOnboarding(userId);
+        setFinished(true);
+      }
+      setAfterOnboarding(to === 'schedule' ? 'schedule' : null);
+      try {
+        await refreshProfile();
+      } catch {
+        // 적는 건 끝났고 다시 읽기만 실패 — 저장 실패로 보이지 않게
+        throw new UserError('저장했어요 · 다시 불러오지 못했어요. 한 번 더 눌러 주세요');
+      }
     }, '저장하지 못했어요');
 
   const views: Partial<Record<OnboardingStepId, StepView>> = {

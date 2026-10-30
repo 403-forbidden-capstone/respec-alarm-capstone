@@ -22,3 +22,8 @@ export function isNicknameOk(input: string): boolean {
   const nickname = cleanNickname(input);
   return nickname.length > 0 && nickname.length <= NICKNAME_MAX;
 }
+
+// 아이디를 저장(중복 확인 포함)해야 하는지 — 이미 저장해 둔 아이디와 같으면 안 함. saved = 지금까지 저장한 아이디 (처음엔 프로필의 값)
+export function shouldSaveHandle(clean: string, saved: string | null | undefined): boolean {
+  return clean !== (saved ?? null);
+}

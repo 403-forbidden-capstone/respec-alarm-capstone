@@ -27,11 +27,6 @@ export type Profile = {
   privacy_version: number | null;
 };
 
-export type OnboardingInput = Pick<
-  Profile,
-  'nickname' | 'handle' | 'home_name' | 'default_prepare_minutes' | 'default_buffer_minutes' | 'default_transport'
->;
-
 // 한 번에 바꿀 수 있는 칸 — 온보딩 단계마다 · 설정에서 쓰는 만큼만 저장 (profile/api.ts saveProfileFields)
 export type ProfileFields = Partial<
   Pick<
