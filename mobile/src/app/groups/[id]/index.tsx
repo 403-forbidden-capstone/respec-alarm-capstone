@@ -59,6 +59,8 @@ function Detail({ group: g, onBack }: { group: GroupDetail; onBack?: () => void 
     }
   }
 
+  const noWake = !g.members.some((m) => !m.isMe && m.received.viewWake); // 내가 볼 수 있는 멤버 기상 상태가 하나도 없음 (혼자 그룹 포함)
+
   return (
     <Screen>
       <TopBar
@@ -120,7 +122,13 @@ function Detail({ group: g, onBack }: { group: GroupDetail; onBack?: () => void 
         </Card>
       ) : null}
 
-      <SectionHeader title="멤버 · 기상 상태" right={<TextLink label="+ 초대" onPress={() => setInviting(true)} strong />} />
+      {/* D21 B: 기상 상태를 볼 수 있는 멤버가 없어도 상세는 열고, 기상 칸(상태 글자 · 점 · [기상 상태])만 숨김 */}
+      <SectionHeader title={noWake ? '멤버' : '멤버 · 기상 상태'} right={<TextLink label="+ 초대" onPress={() => setInviting(true)} strong />} />
+      {noWake ? (
+        <Text variant="small" tone="sub" style={styles.paragraph}>
+          기상 상태는 공유를 허용한 멤버만 볼 수 있어요.
+        </Text>
+      ) : null}
       <Card>
         {g.members.map((m, i) => (
           <MemberRow key={m.person.id} member={m} groupId={g.id} first={i === 0} onMyAlarm={openMyAlarms} />
@@ -167,7 +175,6 @@ function MemberRow({
 }) {
   const canSee = m.isMe || m.received.viewWake;
   const name = m.person.short;
-  const wakeReason = `${name}님이 기상 상태 공유를 허용하지 않았어요`;
   const alarmReason = `${name}님이 알람 공유를 허용하지 않았어요`;
   const openWake = () =>
     router.push({ pathname: '/groups/[id]/members/[userId]', params: { id: groupId, userId: m.person.id } });
@@ -177,15 +184,15 @@ function MemberRow({
       first={first}
       icon={<Avatar initial={m.person.initial} dot={canSee ? m.state.dot : undefined} />}
       title={m.person.name}
-      sub={canSee ? m.state.text : '기상 상태를 볼 수 없어요'}
-      onPress={m.isMe ? undefined : m.received.viewWake ? openWake : () => toast(wakeReason)}
+      sub={canSee ? m.state.text : undefined} // 권한이 없으면 기상 칸을 숨김 (D21 B)
+      onPress={m.isMe || !m.received.viewWake ? undefined : openWake}
       rightIsButtons
       right={
         m.isMe ? (
           <MiniButton label="내 알람" onPress={onMyAlarm} />
         ) : (
           <View style={styles.minis}>
-            <MiniButton label="기상 상태" disabledReason={m.received.viewWake ? undefined : wakeReason} onPress={openWake} />
+            {m.received.viewWake ? <MiniButton label="기상 상태" onPress={openWake} /> : null}
             <MiniButton
               label="알람 보기"
               disabledReason={m.received.viewAlarm ? undefined : alarmReason}

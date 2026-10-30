@@ -1,44 +1,22 @@
 import { useLocalSearchParams } from 'expo-router';
-import { useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
-import { Card, Chip, confirm, LoadError, Loading, Screen, Sheet, Text, Timeline, toast, TopBar } from '@/components/ui';
-import { TextLink } from '@/features/alarm/components/TextLink';
-import { getShareLog, getSharedAlarms, setSharedAlarmEnabled, shiftSharedAlarm } from '@/features/social/api';
+import { Card, Chip, confirm, LoadError, Loading, Screen, Text, toast, TopBar } from '@/components/ui';
+import { getSharedAlarms, setSharedAlarmEnabled, shiftSharedAlarm } from '@/features/social/api';
 import { MemberAlarmCard } from '@/features/social/components/MemberAlarmCard';
 import { Note } from '@/features/social/components/Note';
-import type { ShareLogItem } from '@/features/social/types';
-import { formatTime } from '@/lib/format';
 import { useLoad } from '@/lib/useLoad';
 import { colors } from '@/theme';
 import { useAction } from '@/lib/useAction';
 import { backOrHome } from '@/lib/nav';
 
 // G04 공유받은 알람 — 친구 · 그룹원이 공유한 알람을 봄. 설정 권한이 있으면 켜기 · 끄기 · 5분 옮기기
-// 바꾸면 주인에게 알림(실데이터는 notify Edge Function, 알림이 안 가도 저장은 됨), 변경 기록은 이번 실행 동안만 남음 (docs/decisions.md D9 · D20)
+// 바꾸면 주인에게 알림(실데이터는 notify Edge Function, 알림이 안 가도 저장은 됨). 변경 기록 시트는 없음 — 저장 자리도 안 만듦 (D9 · D20 A)
 export default function SharedAlarmsScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { data, error, reload } = useLoad(() => getSharedAlarms(id));
   const { run } = useAction();
-  const [log, setLog] = useState<ShareLogItem[] | null>(null);
-
-  async function openLog() {
-    setLog(await getShareLog());
-  }
-
-  const top = <TopBar onBack={backOrHome} screenId="G04" right={<TextLink label="변경 기록" onPress={openLog} />} />;
-  // 닫기는 시트 머리의 "닫기" 하나로 (아래에 또 두지 않음)
-  const logSheet = (
-    <Sheet visible={log != null} onClose={() => setLog(null)} title="변경 기록">
-      {log?.length ? (
-        <Timeline items={log.map((l) => ({ time: formatTime(l.at), label: l.text, source: '나' }))} />
-      ) : (
-        <Text variant="note" tone="sub" style={styles.empty}>
-          아직 바꾼 내용이 없어요.
-        </Text>
-      )}
-    </Sheet>
-  );
+  const top = <TopBar onBack={backOrHome} screenId="G04" />;
 
   if (data === undefined) return <Screen>{top}{error ? <LoadError onRetry={reload} /> : <Loading />}</Screen>;
   if (data === null) {
@@ -48,7 +26,6 @@ export default function SharedAlarmsScreen() {
         <Text variant="body" tone="sub">
           공유받은 알람이 없어요.
         </Text>
-        {logSheet}
       </Screen>
     );
   }
@@ -123,8 +100,6 @@ export default function SharedAlarmsScreen() {
           {canEdit ? `변경하면 ${p.short}님에게 알림이 전송돼요.` : '알람 설정 권한이 없어 볼 수만 있어요.'}
         </Note>
       ) : null}
-
-      {logSheet}
     </Screen>
   );
 }
@@ -137,5 +112,4 @@ const styles = StyleSheet.create({
   lead: { marginBottom: 18 },
   summary: { backgroundColor: colors.chip },
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 8 },
-  empty: { marginVertical: 6 },
 });
