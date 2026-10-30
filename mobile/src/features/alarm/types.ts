@@ -212,6 +212,7 @@ export type AppointmentDraft = {
   place: string;
   placeLat?: number; // 고른 장소의 좌표 (place-search) — 가짜 데이터 계산은 안 읽음. 없으면 listPlaces가 기억해 둔 이름 → 좌표를 씀
   placeLng?: number;
+  destRadiusM?: number; // 도착 감지 반경(m, 정수 100~500) — 지도 시트에서 고른 값. 없으면 서버 기본값 (요청 destination.radius_m, destinationPick.ts)
   transport: Transport;
   importance: Importance;
   items: string; // 쉼표로 구분

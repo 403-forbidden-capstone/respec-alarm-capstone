@@ -4,13 +4,14 @@ import { Fragment, useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 
 import { Button, Card, DateRow, Field, KeyValueRow, LoadError, Screen, Sheet, Text, toast, Toggle, TopBar } from '@/components/ui';
-import { createAppointment, defaultDraft, draftAt, estimateAppointment, listAppointments, listPlaces } from '@/features/alarm/api';
+import { createAppointment, defaultDraft, draftAt, estimateAppointment, listAppointments, listPlaces, reverseAddress } from '@/features/alarm/api';
 import { adjustEstimate, isManualTime, orderError } from '@/features/alarm/adjust';
 import { useNow } from '@/features/alarm/hooks/useNow';
 import { AreaPlaceNote } from '@/features/alarm/components/AreaPlaceNote';
 import { HomeMissingNotice } from '@/features/alarm/components/HomeMissingNotice';
 import { ItemChips } from '@/features/alarm/components/ItemChips';
 import { OptionGrid } from '@/features/alarm/components/OptionGrid';
+import { MapPlaceSheet } from '@/features/alarm/components/MapPlaceSheet';
 import { PlaceSearchSheet } from '@/features/alarm/components/PlaceSearchSheet';
 import { RepeatPicker } from '@/features/alarm/components/RepeatPicker';
 import { SelectRow } from '@/features/alarm/components/SelectRow';
@@ -18,6 +19,7 @@ import { TimeButton } from '@/features/alarm/components/TimeButton';
 import { TimePickBody } from '@/features/alarm/components/TimePicker';
 import { TimeRow } from '@/features/alarm/components/TimeRow';
 import { isHomeMissing } from '@/features/alarm/homeMissing';
+import { selectedUserPlaceLabel, withDestination, withUserPlace } from '@/features/alarm/destinationPick';
 import { homeOf } from '@/features/alarm/placeSheet';
 import { repeatToRrule } from '@/features/alarm/repeat';
 import { addItems, earlierWakeOf, isPassed, parseDayParam, ringingKinds, tomorrow, upcomingAlarms } from '@/features/alarm/schedule';
@@ -38,6 +40,10 @@ import { isAreaPlace } from '@/features/location/area';
 import { askNotifications } from '@/features/permissions';
 import { useAuth } from '@/features/auth/AuthProvider';
 import { saveProfileFields } from '@/features/profile/api';
+import { DESTINATION_RADIUS_PRESETS } from '@/features/location/radius';
+import { FrequentPlaceChips } from '@/features/location/components/FrequentPlaceChips';
+import { locateOnce } from '@/features/location/currentPosition';
+import { listUserPlaces } from '@/features/location/api';
 import { foundScheduleDraft, saveFoundSchedule } from '@/features/voice/api';
 import { now } from '@/lib/clock';
 import { addMinutes, dayKey, formatDateShort, formatTime, formatTime24, startOfDay } from '@/lib/format';
@@ -64,6 +70,7 @@ export default function NewScheduleScreen() {
   // 대화에서 왔고 찾은 일정이 아직 대기일 때만 — 이미 확인한 카드면 보통 새 일정으로 (두 벌 저장 막기)
   const [fromChat] = useState(() => from === 'chat' && foundScheduleDraft() != null);
   const { data: places, error: placesError, reload: reloadPlaces } = useLoad(listPlaces);
+  const { data: userPlaces } = useLoad(listUserPlaces); // 자주 가는 곳 칩 — 못 읽으면 칩만 안 보임
   const { data: appointments } = useLoad(() => listAppointments({ everyOccurrence: true })); // 같은 날 앞 일정의 기상 알람을 찾는 데만 씀 — 못 읽어도 폼은 그대로
   const [initial] = useState(() => {
     if (fromChat) {
@@ -252,6 +259,11 @@ export default function NewScheduleScreen() {
         <Text variant="label" tone="sub">
           장소와 중요도
         </Text>
+        {userPlaces?.length ? (
+          <View style={styles.chipsRow}>
+            <FrequentPlaceChips places={userPlaces} selectedLabel={selectedUserPlaceLabel(draft, userPlaces)} onPick={(p) => setDraft((d) => withUserPlace(d, p))} />
+          </View>
+        ) : null}
         {/* SelectRow와 같은 모양 — 누르면 목록 대신 검색 시트. 실데이터는 고른 장소의 좌표도 초안에 담아 계산 · 저장 요청까지 가져감 (가짜 데이터는 좌표가 없음) */}
         <Pressable
           onPress={() => {
@@ -282,13 +294,18 @@ export default function NewScheduleScreen() {
             }}
           />
         ) : null}
-        <PlaceSearchSheet
+        <MapPlaceSheet
           visible={placeOpen}
           onClose={() => setPlaceOpen(false)}
+          title="도착 장소"
           search={(query) => listPlaces(query, home)}
           initialQuery={placeQuery}
+          reverse={reverseAddress}
+          locate={locateOnce}
+          center={draft.placeLat != null && draft.placeLng != null ? { lat: draft.placeLat, lng: draft.placeLng } : home}
+          radius={{ initial: draft.destRadiusM ?? 150, presets: DESTINATION_RADIUS_PRESETS, hint: '이 원 안에 들어오면 도착으로 기록해요' }}
           onPick={(picked) => {
-            setDraft((d) => ({ ...d, place: picked.name, placeLat: picked.lat, placeLng: picked.lng }));
+            setDraft((d) => withDestination(d, picked));
             setPickedPlace(picked);
             setPlaceOpen(false);
           }}
@@ -576,6 +593,7 @@ const styles = StyleSheet.create({
     borderTopColor: colors.line,
   },
   pressed: { opacity: 0.6 },
+  chipsRow: { marginTop: 8 },
   placeRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, paddingVertical: 14 },
   placeValue: { flexDirection: 'row', alignItems: 'center', gap: 6, flexShrink: 1 },
   placeName: { flexShrink: 1 },
