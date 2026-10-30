@@ -39,15 +39,16 @@ describe('AI 대화 → 하루 기록 → 루틴', () => {
   it('저장하면 알람을 맞추고 준비 · 출발 시각으로 답함 (같은 날 수업 기상이 있어 외출 준비만)', async () => {
     const saved = await saveFoundSchedule();
     expect(saved.title).toBe('스터디');
+    // 같은 날 두 번째 일정은 개인 보정 없이 공통 15분 그대로 (학습 루프 기초 2절 2 버그 수정) — 예전에는 가짜 기록 보정 +10분이 붙어 준비 25분, 준비 알람이 12:40이었음
     expect(saved.alarms.map((x) => `${x.kind} ${formatTime(x.at)}`)).toEqual([
-      'PREPARE 오후 12:40',
+      'PREPARE 오후 12:50',
       'DEPARTURE 오후 1:05',
       'ARRIVE 오후 1:50',
     ]);
     const c = await getConversation();
     expect(c.found?.status).toBe('APPLIED');
     expect(c.messages[c.messages.length - 1].text).toBe(
-      '저장했어요. 내일 오후 12:40 준비, 오후 1:05 출발 알람을 맞춰 둘게요. 오늘 대화는 여기까지 할까요?',
+      '저장했어요. 내일 오후 12:50 준비, 오후 1:05 출발 알람을 맞춰 둘게요. 오늘 대화는 여기까지 할까요?',
     );
     expect(db.events.map((e) => `${e.label} · ${e.source}`)).toContain('일정 저장 · 스터디 · AI 대화 · 확인함');
 

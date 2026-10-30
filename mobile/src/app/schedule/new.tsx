@@ -1,3 +1,4 @@
+import { prepareSourceLabel } from '@shared/calc/prepare.ts';
 import { router, useLocalSearchParams } from 'expo-router';
 import { Fragment, useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
@@ -378,7 +379,8 @@ function CalcSteps({
     [`이동시간 ${a.travelMinutes}분`, e.travelNote ? `${e.travelNote} · ${TRANSPORT_LABEL[a.transport]}` : `카카오 길찾기 · ${TRANSPORT_LABEL[a.transport]} 최소 소요시간`],
     [
       `준비시간 ${a.predictedPrepMinutes}분`,
-      `${e.sameDayWake ? '같은 날 기상 알람이 있어 외출 준비만' : '기상부터 출발까지'} · ${e.sampleCount > 0 ? `내 기록 ${e.sampleCount}건 반영` : '아직 내 기록이 없어 기본값'}`,
+      // 기록으로 맞추는 건 그날 첫 일정(기상부터)뿐 — 두 번째 일정은 기록 줄 없이 공통 15분. 5건부터 "내 기록 기반 N건", 4건까지 "배우는 중 N/5" (학습 루프 기초 ⑦)
+      e.sameDayWake ? '같은 날 기상 알람이 있어 외출 준비만' : `기상부터 출발까지 · ${prepareSourceLabel(e.sampleCount)}`,
     ],
     [
       `${KIND_LABEL[baseKind]} ${formatTime(base)}`,

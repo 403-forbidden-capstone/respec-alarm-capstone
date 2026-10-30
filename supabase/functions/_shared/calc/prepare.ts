@@ -7,11 +7,16 @@
 // 문서(7장 7.2)는 "조건별 P80과 전체 P80을 n:K로 섞는 축소 추정"이라 같은 모양(공통 ↔ 개인을 n:k로 섞음)이지만
 //   목업 숫자(k = 10, 공통 50 · 15)를 따름. 문서 K = 5 · 학습 대상 = 기상~출발 한 덩어리(R-19)와의 차이는 D56 (F1)
 // 공통 P80 기본값 — 목업의 값. 전체 사용자 통계 칸이 DB에 없어 임시로 고정 (그날 첫 일정이면 기상부터, 아니면 외출 준비만)
+//   withWake는 온보딩 값(profiles.default_prepare_minutes)이 없을 때만 씀 — 있으면 그 값이 "기상~출발 첫 값" (학습 루프 기초 1절 ①). sameDay 15는 그대로
 export const DEFAULT_COMMON_P80 = { withWake: 50, sameDay: 15 } as const;
 // 기상 뒤 준비 전 활동 기본값 (기상 알람이 있는 일정). 7장 pre_prep_minutes 기본 10분과 다르게 목업 값(20분)
 export const DEFAULT_BEFORE_PREPARE_MINUTES = 20;
 export const PREPARE_PRIOR_K = 10; // 목업 k
-export const PERSONAL_MIN_SAMPLES = 5; // 7장 7.2.1 N_min — 이 아래면 출처를 DEFAULT로 표시
+export const PERSONAL_MIN_SAMPLES = 5; // 7장 7.2.1 N_min — 이 아래면 출처를 DEFAULT(첫 값)로 표시
+// 학습에 쓰는 기록 범위 (학습 루프 기초 ③, 7장 7.0.5 N_win) — 최근 30건, 기상~출발 10~300분만 (잘못 찍힌 5분 · 400분 같은 값은 버림)
+export const PREPARE_WINDOW = 30;
+export const PREPARE_RECORD_MIN = 10;
+export const PREPARE_RECORD_MAX = 300;
 
 export type PrepareSource = 'DEFAULT' | 'PERSONAL' | 'MANUAL';
 export type Confidence = 'LOW' | 'MEDIUM' | 'HIGH';
@@ -59,8 +64,9 @@ export function predictPrepare(input: PrepareInput): PrepareBasis {
   };
 }
 
-// 내가 적어 둔 준비(= 출발 − 준비 시작, daily_records.actual_prepare_minutes)의 P80을 기상~출발 기준으로 맞춤
-//   기상 ~ 출발 = 준비 전 활동 + 준비 (7장 7.1.1: prep_minutes = morning_minutes − pre_prep_minutes)
+// 준비 전 활동을 더해 "기상 ~ 출발"로 바꾸는 계산 (7장 7.1.1: prep_minutes = morning_minutes − pre_prep_minutes)
+//   지금 알람 계산(plan-core.ts)은 부르지 않음 — 기록(daily_records.actual_prepare_minutes)이 이미 기상~출발이라
+//   여기에 20분을 또 더하면 기록이 쌓일수록 알람이 일찍 당겨지는 버그였음 (학습 루프 기초 2절 1). 공용 export라 남겨 둠
 export function toMorningMinutes(prepareP80: number, beforePrepareMinutes: number): number {
   return Math.round(prepareP80 + beforePrepareMinutes);
 }
@@ -73,4 +79,24 @@ export function percentile(values: readonly number[], p: number): number | null 
   const lo = Math.floor(pos);
   const hi = Math.ceil(pos);
   return sorted[lo] + (sorted[hi] - sorted[lo]) * (pos - lo);
+}
+
+// 기록 목록(최신순)에서 학습에 쓸 것만 — 10~300분, 앞에서 30건. 개수(n)와 P80이 같은 30건 기준 (학습 루프 기초 ③)
+//   뷰 v_prepare_time_stats(전체 기간 · 거르기 없음)를 대신함. 값이 소수 · 문자여도 숫자로 읽고 유한한 값만 셈
+export function prepareStatsOf(minutesNewestFirst: readonly (number | string | null | undefined)[]): { sampleCount: number; p80: number | null } {
+  const used: number[] = [];
+  for (const raw of minutesNewestFirst) {
+    if (used.length >= PREPARE_WINDOW) break;
+    if (raw == null) continue;
+    const m = Number(raw);
+    if (Number.isFinite(m) && m >= PREPARE_RECORD_MIN && m <= PREPARE_RECORD_MAX) used.push(m);
+  }
+  return { sampleCount: used.length, p80: percentile(used, 0.8) };
+}
+
+// 계산 근거에 보이는 출처 한 줄 (H03 · H05) — 5건부터 "내 기록 기반 N건", 4건까지는 "배우는 중 N/5". 통계 식 · P80 같은 말은 화면에 안 보임 (D47)
+//   앱 가짜 모드와 서버 실데이터가 같은 글자가 되도록 한 곳에서 만듦
+export function prepareSourceLabel(sampleCount: number): string {
+  const n = Math.max(0, Math.floor(sampleCount));
+  return n >= PERSONAL_MIN_SAMPLES ? `내 기록 기반 ${n}건` : `배우는 중 ${n}/${PERSONAL_MIN_SAMPLES}`;
 }

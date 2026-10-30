@@ -1,3 +1,4 @@
+import { prepareSourceLabel } from '@shared/calc/prepare.ts';
 import { useLocalSearchParams } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
@@ -317,6 +318,9 @@ function Detail({ appointment: a, reload }: { appointment: AppointmentDetail; re
           lines={[
             `${KIND_LABEL[baseKind]} ${formatTime(base)} = 약속 ${formatTime(a.at)} − 여유 ${edits.bufferMinutes} − 이동 ${travel} − 준비 ${prepare}`,
             ...(a.withWake && a.beforePrepMinutes ? [`준비 알람은 기상 후 준비 전 활동 ${a.beforePrepMinutes}분 뒤`] : []),
+            // 준비 시간이 어디서 왔는지 한 줄 — 4건까지 "배우는 중 N/5", 5건부터 "내 기록 기반 N건" (학습 루프 기초 ⑦, 통계 식은 안 보임 D47)
+            //   기록으로 맞추는 건 그날 첫 일정(기상 있음)뿐이고, 직접 고른 준비 시간이면 기록 기반이 아니라서 줄을 뺌. 서버가 기록 수를 주기 전(처음 그릴 때)에도 뺌
+            ...(a.withWake && edits.prepareMinutes == null && preview.prepareSampleCount != null ? [`준비 ${prepare}분 · ${prepareSourceLabel(preview.prepareSampleCount)}`] : []),
           ]}
         />
         {preview.alarms.map((x, i) => (
