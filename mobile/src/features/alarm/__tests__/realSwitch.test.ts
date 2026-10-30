@@ -26,6 +26,7 @@ jest.mock('../real', () => {
     'setIntensity',
     'saveAlarmSettings',
     'listPlaces',
+    'reverseAddress',
     'estimateAppointment',
     'createAppointment',
     'saveStandaloneAlarm',
@@ -94,6 +95,7 @@ describe('실데이터 모드: 알람 api 전부가 real.ts로 넘어감', () =>
     ['saveAlarmSettings', () => api.saveAlarmSettings('a1', settings), 'saveAlarmSettings', ['a1', settings]],
     ['listPlaces', () => api.listPlaces('세종'), 'listPlaces', ['세종', undefined]],
     ['listPlaces (near)', () => api.listPlaces('세종', { lat: 37.5, lng: 127 }), 'listPlaces', ['세종', { lat: 37.5, lng: 127 }]],
+    ['reverseAddress', () => api.reverseAddress(37.55, 127.07), 'reverseAddress', [37.55, 127.07]],
     ['estimateAppointment', () => api.estimateAppointment(api.defaultDraft(at)), 'estimateAppointment', [expect.objectContaining({ place: '' })]], // 실데이터는 장소를 목록에서 고름
     ['createAppointment', () => api.createAppointment(estimate, 'AI 대화'), 'createAppointment', [estimate, 'AI 대화']],
     ['getRing', () => api.getRing('a1:WAKE'), 'getRing', []],

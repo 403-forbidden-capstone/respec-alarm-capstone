@@ -15,10 +15,11 @@ import {
   levelOfIntensity,
   levelOfSoundKey,
   levelOfVoiceTone,
+  personalPrepareOf,
   predictPrepare,
+  recentPrepareOf,
   resolveIntensity,
   RING_KINDS,
-  toMorningMinutes,
   type AlarmIntensity,
   type ChainAlarm,
   type CheckResult,
@@ -27,10 +28,13 @@ import {
   type IntensityOverrides,
   type Level,
   type PrepareBasis,
+  type PrepareStats,
   type ResolvedIntensity,
   type RingKind,
   type SameDayWake,
   type Transport,
+  wakeMarginOf,
+  wakeSensitivityOf,
 } from './calc/index.ts';
 import { resolveEnabled } from './commit-core.ts';
 import type { AlarmFields, ParticipantFields, PlaceInput } from './draft.ts';
@@ -45,6 +49,9 @@ export type ProfileRow = {
   home_name: string | null;
   home_lat: number | null;
   home_lng: number | null;
+  default_prepare_minutes?: number | null; // 온보딩에서 답한 "일어나서 나가기까지" — 기상~출발 첫 값 (학습 루프 기초 1절 ①). 없으면 null
+  wake_sensitivity?: string | null; // 온보딩 잠귀 'LIGHT' | 'NORMAL' | 'HEAVY' (D69) — 무거움이면 강도 자동 값이 강. 없으면 보통
+  wake_margin?: string | null; // 온보딩 깨우는 여유 'TIGHT' | 'NORMAL' | 'LOOSE' (D63) — 기록의 0.7 · 0.8 · 0.9 분위수. 없으면 보통
 };
 
 export type AppointmentRow = {
@@ -108,10 +115,29 @@ export type PlanInputs = {
   appointment?: AppointmentRow;
   participant?: ParticipantRow;
   existingAlarms: AlarmRow[];
-  stats: { sampleCount: number; p80: number | null }; // v_prepare_time_stats (기상 전 준비 = 출발 − 준비 시작)
+  stats: PrepareStats; // 내 기상~출발 기록 최근 30건 중 10~240분 (plan.ts loadPrepareStats, 이미 기상~출발이라 준비 전 활동을 더하지 않음). values가 있어야 깨우는 여유(0.7 · 0.9)를 반영
   lateCount4w: number;
   sameDayWake: boolean;
+  // 반복 다음 회차용 — 자동 준비시간이 이 값에서 `within`분 넘게 벗어나면 그 범위로 (D62 처음 2주 몫). 직접 고른 준비시간(draft.prepareMinutes)은 건드리지 않음
+  prepareBound?: { around: number; within: number };
 };
+
+// 기상~출발 첫 값 — 온보딩 값이 있으면 그것, 없으면(null · 프로필 없음 · 범위 밖) 목업의 50
+//   L6 안건후보: 첫 값 범위 기본안 = 5~300분만 믿음 (온보딩 · 설정 입력 화면 범위와 같음. 기록 범위 10~240(D107 기본안 A)과는 따로 — 첫 값은 사용자가 직접 답한 값이라 짧게 답한 것도 인정. DB 제약은 0~600)
+const FIRST_PREPARE_MIN = 5;
+const FIRST_PREPARE_MAX = 300;
+export function firstPrepareMinutes(profile: Pick<ProfileRow, 'default_prepare_minutes'>): number {
+  const v = profile.default_prepare_minutes;
+  return v != null && Number.isFinite(Number(v)) && Number(v) >= FIRST_PREPARE_MIN && Number(v) <= FIRST_PREPARE_MAX ? Math.round(Number(v)) : DEFAULT_COMMON_P80.withWake;
+}
+
+// 자동 준비시간을 기준 값 ±within분 안으로 — 직접 고른 값(MANUAL)은 그대로. 설명용 칸(개인 보정)은 합이 맞게 같이 바꿈
+export function clampPrepareToBound(prepare: PrepareBasis, bound: { around: number; within: number }): PrepareBasis {
+  if (prepare.source === 'MANUAL') return prepare;
+  const auto = Math.min(Math.max(prepare.autoMinutes, bound.around - bound.within), bound.around + bound.within);
+  if (auto === prepare.autoMinutes) return prepare;
+  return { ...prepare, autoMinutes: auto, minutes: auto, correction: auto - prepare.commonP80 };
+}
 
 const num = (v: number | string | null | undefined): number | undefined => (v == null ? undefined : Number(v));
 
@@ -238,6 +264,7 @@ export type Plan = {
   travel: ResolvedTravel;
   travelMinutes: number;
   prepare: PrepareBasis;
+  recentPrepare: number[]; // H03 "최근 5번" — 최신순 최대 5개(분). 그날 두 번째 일정(기록을 안 씀)은 빈 목록
   intensity: ResolvedIntensity;
   kinds: RingKind[] | undefined; // 만든 종류 (undefined = 계산된 전부)
   manualTimes: Partial<Record<RingKind, Date>>;
@@ -265,16 +292,23 @@ export function computePlan(i: PlanInputs, travel: ResolvedTravel, mode: PlanMod
   const withWake = i.draft.withWake ?? !i.sameDayWake;
   const beforePrepareMinutes = i.draft.beforePrepareMinutes ?? (withWake ? inferBeforePrepare(i.existingAlarms) ?? DEFAULT_BEFORE_PREPARE_MINUTES : 0);
 
-  const prepare = predictPrepare({
-    commonP80: withWake ? DEFAULT_COMMON_P80.withWake : DEFAULT_COMMON_P80.sameDay,
-    personalP80: i.stats.p80 != null ? toMorningMinutes(i.stats.p80, beforePrepareMinutes) : null,
-    sampleCount: i.stats.sampleCount,
+  // 기록(stats.p80)은 이미 "기상 ~ 출발"이라 그대로 씀 — 예전에는 준비 전 활동 20분을 또 더해서 기록이 쌓일수록 알람이 일찍 당겨졌음 (학습 루프 기초 2절 1)
+  // 개인 보정은 그날 첫 일정(기상 알람 있음)에만 — 두 번째 일정(기상 없음, 공통 15분)에 기상~출발 기록을 붙이면 준비가 부풀어서 15분 그대로 (2절 2, 기록 수와 상관없음)
+  //   두 번째 일정은 기록 수도 0으로 넘김 → 출처 DEFAULT · 보정 0. 화면 문구는 sameDayWake일 때 기록 줄을 안 보임
+  // 깨우는 여유(wake_margin)는 내 기록의 0.7 · 0.8 · 0.9 분위수 — 보통이 예전 P80 고정과 같음. 매우 중요 일정은 한 단계 위(빠듯 → 보통 → 넉넉, calc/prepare.ts marginForImportance). 직접 고른 준비 시간이 있으면 그 값이 먼저
+  // 첫 값(공통)은 온보딩 "일어나서 나가기까지" (2절 3). 반복 다음 회차는 prepareBound로 직전 회차 ±10분 안에서만 움직임 (1절 ④)
+  const predicted = predictPrepare({
+    commonP80: withWake ? firstPrepareMinutes(i.profile) : DEFAULT_COMMON_P80.sameDay,
+    personalP80: withWake ? personalPrepareOf(i.stats, wakeMarginOf(i.profile.wake_margin), basics.importance) : null,
+    sampleCount: withWake ? i.stats.sampleCount : 0,
     override: i.draft.prepareMinutes,
   });
+  const prepare = i.prepareBound && withWake ? clampPrepareToBound(predicted, i.prepareBound) : predicted;
 
-  // 잠귀(profiles.wake_sensitivity) 칸은 아직 DB에 없어 안 넘김(NORMAL 취급) — L7 PR 3이 칸을 만들면 loadProfile에서 읽어 여기 · map.ts toIntensity · realWrite setIntensity에 같이 넘김
-  const auto = autoLevel(basics.importance, i.lateCount4w);
-  const intensity = resolveIntensity(basics.importance, i.lateCount4w, resolveOverrides(i.draft.levels, i.existingAlarms, auto));
+  // 잠귀(profiles.wake_sensitivity): 무거움(HEAVY)이면 강, 가벼움 · 보통은 기본 보통 (D69). 앱 map.ts toIntensity · realWrite setIntensity도 같은 값을 넘김
+  const wakeSensitivity = wakeSensitivityOf(i.profile.wake_sensitivity);
+  const auto = autoLevel(basics.importance, i.lateCount4w, wakeSensitivity);
+  const intensity = resolveIntensity(basics.importance, i.lateCount4w, resolveOverrides(i.draft.levels, i.existingAlarms, auto), wakeSensitivity);
 
   const kinds = resolveKinds(i.draft.kinds, i.existingAlarms);
   const manualTimes = resolveManualTimes(i.draft.manualTimes, i.existingAlarms);
@@ -309,6 +343,7 @@ export function computePlan(i: PlanInputs, travel: ResolvedTravel, mode: PlanMod
     travel,
     travelMinutes: chosen.minutes,
     prepare,
+    recentPrepare: withWake ? recentPrepareOf(i.stats) : [],
     intensity,
     kinds,
     manualTimes,
@@ -420,6 +455,7 @@ export function toSuggestion(plan: Plan, inputs?: Pick<PlanInputs, 'existingAlar
       weight: prepare.weight,
       residual_p80: prepare.residualP80,
       before_prepare_minutes: plan.beforePrepareMinutes,
+      recent: plan.recentPrepare, // 내 기상~출발 기록 최근 5개, 최신순 (0건이면 빈 배열)
     },
     intensity: {
       level: intensity.fields.intensity,

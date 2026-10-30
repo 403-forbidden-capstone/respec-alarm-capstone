@@ -70,6 +70,7 @@ export type Suggestion = {
     weight: number;
     residual_p80: number;
     before_prepare_minutes: number;
+    recent?: number[]; // 내 기상~출발 기록 최근 5개, 최신순 (서버 학습 기초 b부터. 옛 서버 응답에는 없음)
   };
   intensity: {
     level: AlarmIntensity;
@@ -281,6 +282,8 @@ export function toPreview(s: Suggestion, saved: AppointmentDetail, edits: AlarmE
     autoTravelMinutes: s.travel.auto_minutes ?? s.travel.minutes ?? saved.auto.travelMinutes,
     predictedPrepMinutes: s.prepare.minutes,
     autoPredictedPrepMinutes: saved.auto.predictedPrepMinutes,
+    prepareSampleCount: s.prepare.sample_count,
+    ...(s.prepare.recent ? { prepareRecent: s.prepare.recent } : {}),
     ...(problem ? { travelProblem: problem } : {}),
   };
 }

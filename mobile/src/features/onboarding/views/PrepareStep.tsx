@@ -1,6 +1,7 @@
 import { StyleSheet } from 'react-native';
 
 import { Card, SectionHeader, Segmented, Stepper, Text } from '@/components/ui';
+import { TRANSPORT_NAME, WAKE_MARGIN_NAME } from '@/features/profile/labels';
 import type { TransportType, WakeMargin } from '@/features/profile/types';
 
 import { ChoiceChips } from './ChoiceChips';
@@ -17,20 +18,11 @@ type Props = {
   onChange: (patch: Partial<PrepareValues>) => void;
 };
 
-const TRANSPORTS: readonly (readonly [TransportType, string])[] = [
-  ['TRANSIT', '대중교통'],
-  ['BUS', '버스'],
-  ['SUBWAY', '지하철'],
-  ['CAR', '자차'],
-  ['WALK', '도보'],
-];
-
-// D63 깨우는 여유 3단계 — 기록의 0.7 · 0.8 · 0.9 분위수, 예측 반영은 L1
-const MARGINS: readonly (readonly [WakeMargin, string])[] = [
-  ['TIGHT', '빠듯'],
-  ['NORMAL', '보통'],
-  ['LOOSE', '넉넉'],
-];
+// 이름은 profile/labels.ts (깨우는 여유는 D63 3단계 — 기록의 0.7 · 0.8 · 0.9 분위수, 예측 반영은 L1)
+const TRANSPORT_ORDER: readonly TransportType[] = ['TRANSIT', 'BUS', 'SUBWAY', 'CAR', 'WALK'];
+const MARGIN_ORDER: readonly WakeMargin[] = ['TIGHT', 'NORMAL', 'LOOSE'];
+const TRANSPORTS = TRANSPORT_ORDER.map((v) => [v, TRANSPORT_NAME[v]] as const);
+const MARGINS = MARGIN_ORDER.map((v) => [v, WAKE_MARGIN_NAME[v]] as const);
 
 // 아침 준비 단계 (L02-5) — 준비 · 여유 시간, 이동 수단, 깨우는 여유. 값 · 콜백만 받고 저장은 부르는 화면이 함
 export function PrepareStep({ values, onChange }: Props) {

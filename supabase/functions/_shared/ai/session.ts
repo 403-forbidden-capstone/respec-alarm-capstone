@@ -227,9 +227,9 @@ export interface CallLog {
 
 /**
  * 모델 호출 기록(ai_calls) — 호출마다 한 줄. 기록이 실패해도 사용자의 턴은 막지 않는다(로그만).
- * 칸은 AiCallRecord 그대로(llm.ts) + user_id · session_id · io · created_at.
+ * 칸은 AiCallRecord 그대로(llm.ts) + user_id · session_id · io · created_at. 대화에 속하지 않는 호출(시간표 사진 읽기)은 sessionId null.
  */
-export async function recordCalls(deps: SessionDeps, sessionId: string, logs: CallLog[], createdAt: string): Promise<void> {
+export async function recordCalls(deps: SessionDeps, sessionId: string | null, logs: CallLog[], createdAt: string): Promise<void> {
   if (logs.length === 0) return;
   try {
     const res = await deps.service.from('ai_calls').insert(

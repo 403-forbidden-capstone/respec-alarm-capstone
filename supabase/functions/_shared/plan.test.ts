@@ -5,7 +5,7 @@ import { test } from 'node:test';
 import { assertPersistable, persistAppointment, type CommitCtx } from './commit.ts';
 import { HttpError } from './errors.ts';
 import { FakeDb } from './fake-db.ts';
-import { buildPlan, loadPrepareStats, loadSameDayWake, TravelRequiredError, type PlanContext } from './plan.ts';
+import { buildPlan, loadPrepareStats, loadProfile, loadSameDayWake, TravelRequiredError, type PlanContext } from './plan.ts';
 import { toSuggestion, toTravelRequiredSuggestion } from './plan-core.ts';
 import { Reader } from './read.ts';
 import { readCommitRequest, readSuggestRequest } from './requests.ts';
@@ -321,13 +321,74 @@ test('지난 알림 경고 문구: alarm-suggest(preview)는 "저장할 때 꺼�
   assert.deepEqual(toSuggestion(preview.plan, preview.inputs).warnings, preview.plan.warnings); // 앱이 받는 미리 보기 응답에 그 문구
 });
 
-// ---- 준비 통계: 뷰에 여러 사람의 줄이 보여도 내 줄만 ----
+// ---- 준비 통계: 내 기상~출발 기록 최근 30건 · 10~240분만 (학습 루프 기초 ③) ----
 
-test('준비 통계는 내 user_id 줄만: 뷰에 다른 사람 줄이 같이 보여도 오류 없이 내 값 (친구 기록 조회 정책이 생겨도)', async () => {
+// 날짜(record_date)만 다른 기록 줄들 — daysAgo가 클수록 오래됨
+const record = (user: string, daysAgo: number, minutes: number | null) => ({
+  record_id: `r-${user}-${daysAgo}`,
+  user_id: user,
+  record_date: new Date(Date.UTC(2025, 4, 22) - daysAgo * 86_400_000).toISOString().slice(0, 10),
+  actual_prepare_minutes: minutes,
+});
+
+test('준비 통계는 내 user_id 줄만: 다른 사람 기록이 같이 보여도 오류 없이 내 값 (친구 기록 조회 정책이 생겨도)', async () => {
   const { db, ctx } = setup();
-  db.rows('v_prepare_time_stats').push({ user_id: 'u-friend', sample_count: 3, p80_minutes: 100 }, { user_id: USER, sample_count: '12', p80_minutes: '41.5' });
-  assert.deepEqual(await loadPrepareStats(db as unknown as Db, USER), { sampleCount: 12, p80: 41.5 });
-  assert.deepEqual(await loadPrepareStats(db as unknown as Db, 'u-nobody'), { sampleCount: 0, p80: null });
+  db.rows('daily_records').push(record('u-friend', 1, 100), ...[40, 41, 42, 43, 44].map((m, i) => record(USER, i, m)));
+  const mine = await loadPrepareStats(db as unknown as Db, USER);
+  assert.equal(mine.sampleCount, 5);
+  assert.equal(mine.p80, 43.2); // 40 41 42 43 44의 0.8 분위수 (선형 보간)
+  assert.deepEqual(await loadPrepareStats(db as unknown as Db, 'u-nobody'), { sampleCount: 0, p80: null, values: [] });
+  assert.deepEqual(mine.values, [40, 41, 42, 43, 44]); // 최신순 (daysAgo 0이 40)
   const { plan } = await buildPlan(ctx, draftOf(FULL));
-  assert.equal(plan.prepare.sampleCount, 12);
+  assert.equal(plan.prepare.sampleCount, 5);
+});
+
+test('준비 통계는 최근 30건만, 10~240분만: 31번째 오래된 기록과 5분 · 400분 · 빈 값은 무시', async () => {
+  const { db } = setup();
+  // 최근 30일은 60분, 그 전 31번째 날(daysAgo 30)은 200분 — 30건 창 밖이라 무시돼야 함
+  for (let d = 0; d < 30; d += 1) db.rows('daily_records').push(record(USER, d, 60));
+  db.rows('daily_records').push(record(USER, 30, 200));
+  // 범위 밖 · 빈 값 — 가장 최근 날짜(-1 ~ -5일 전)에 있어도 30건 창을 차지하지 않고 무시
+  db.rows('daily_records').push(record(USER, -1, 5), record(USER, -2, 400), record(USER, -3, null), record(USER, -4, 9), record(USER, -5, 241));
+  const stats = await loadPrepareStats(db as unknown as Db, USER);
+  assert.deepEqual(stats, { sampleCount: 30, p80: 60, values: Array.from({ length: 30 }, () => 60) });
+  // 경계값 10 · 240은 쓴다
+  const edge = setup().db;
+  edge.rows('daily_records').push(record(USER, 0, 10), record(USER, 1, 240));
+  assert.deepEqual(await loadPrepareStats(edge as unknown as Db, USER), { sampleCount: 2, p80: 194, values: [10, 240] });
+});
+
+test('뷰 v_prepare_time_stats는 더 읽지 않음: 뷰에 값이 있어도 기록이 없으면 0건', async () => {
+  const { db } = setup();
+  db.rows('v_prepare_time_stats').push({ user_id: USER, sample_count: 12, p80_minutes: 41.5 });
+  assert.deepEqual(await loadPrepareStats(db as unknown as Db, USER), { sampleCount: 0, p80: null, values: [] });
+});
+
+// ---- 학습 루프 기초 b (이슈 #272): 프로필의 잠귀 · 깨우는 여유 ----
+
+test('loadProfile이 잠귀(wake_sensitivity)와 깨우는 여유(wake_margin) 두 칸을 읽음 — 프로필이 없으면 둘 다 보통', async () => {
+  const { db } = setup();
+  Object.assign(db.rows('profiles')[0], { wake_sensitivity: 'HEAVY', wake_margin: 'LOOSE' });
+  const mine = await loadProfile(db as unknown as Db, USER);
+  assert.deepEqual([mine.wake_sensitivity, mine.wake_margin], ['HEAVY', 'LOOSE']);
+  const none = await loadProfile(db as unknown as Db, 'u-nobody');
+  assert.deepEqual([none.wake_sensitivity, none.wake_margin], ['NORMAL', 'NORMAL']);
+});
+
+test('buildPlan: 프로필의 두 칸이 계산에 닿음 — 잠귀 깊음 → 강, 넉넉 → 같은 기록에서 준비가 더 김, 응답에 최근 값', async () => {
+  const body = { appointment: { appointment_at: iso(22, 600), destination: { name: '세종대학교', lat: 37.55, lng: 127.07 } }, participant: { est_travel_minutes: 50, travel_source: 'MANUAL' } };
+  const run = async (profile: Record<string, unknown>) => {
+    const { db, ctx } = setup();
+    Object.assign(db.rows('profiles')[0], profile);
+    // 최근 10일 기록 (최신이 앞): 70 100 40 80 45 75 55 60 50 65
+    [70, 100, 40, 80, 45, 75, 55, 60, 50, 65].forEach((m, d) => db.rows('daily_records').push(record(USER, d, m)));
+    const { plan } = await buildPlan(ctx, draftOf(body));
+    return toSuggestion(plan);
+  };
+  const normal = await run({});
+  const tuned = await run({ wake_sensitivity: 'HEAVY', wake_margin: 'LOOSE' });
+  assert.deepEqual([normal.intensity.level, normal.prepare.minutes], ['NORMAL', 63]);
+  assert.deepEqual([tuned.intensity.level, tuned.prepare.minutes], ['STRONG', 66]);
+  assert.deepEqual(tuned.prepare.recent, [70, 100, 40, 80, 45]);
+  assert.equal((await run({ wake_margin: 'TIGHT' })).prepare.minutes, 61);
 });

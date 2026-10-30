@@ -2,7 +2,8 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { computePlan, inferBeforePrepare, resolveBasics, toSuggestion, type AlarmRow, type AppointmentRow, type ParticipantRow, type PlanInputs, type ProfileRow } from './plan-core.ts';
+import { prepareSourceLabel, prepareStatsOf } from './calc/index.ts';
+import { clampPrepareToBound, computePlan, firstPrepareMinutes, inferBeforePrepare, resolveBasics, toSuggestion, type AlarmRow, type AppointmentRow, type ParticipantRow, type PlanInputs, type ProfileRow } from './plan-core.ts';
 import type { ResolvedTravel } from './route.ts';
 
 const kst = (day: number, minutes: number) => new Date(Date.UTC(2025, 4, day) + (minutes - 9 * 60) * 60_000);
@@ -32,8 +33,8 @@ const base = (over: Partial<PlanInputs> = {}): PlanInputs => ({
   draft: { at: kst(22, 600), destination: { name: '세종대학교', lat: 37.55, lng: 127.07 } },
   profile,
   existingAlarms: [],
-  // 목업 estimate: n 10 · 공통 50 · 개인 오차 P80 20 → 보정 10 → 예측 60. 서버: 내 P80(출발 − 준비 시작)에 준비 전 활동 30분을 더해 기상~출발 70이 되도록 40
-  stats: { sampleCount: 10, p80: 40 },
+  // 목업 estimate: n 10 · 공통 50 · 개인 오차 P80 20 → 보정 10 → 예측 60. 기록은 이미 기상~출발이라 P80 70 그대로 (예전에는 40 + 준비 전 활동을 또 더하는 계산이었음 — 학습 루프 기초 2절 1)
+  stats: { sampleCount: 10, p80: 70 },
   lateCount4w: 1,
   sameDayWake: false,
   ...over,
@@ -78,7 +79,7 @@ test('직접 고른 준비 · 이동 · 시각이 자동보다 먼저 (D42 C)', 
   assert.equal(dto.travel.minutes, 70);
   assert.equal(dto.travel.auto_minutes, 50);
   assert.equal(dto.prepare.source, 'MANUAL');
-  assert.equal(dto.prepare.auto_minutes, 50); // 내 P80 40 + 준비 전 활동 10 = 50 = 공통 50 → 보정 0
+  assert.equal(dto.prepare.auto_minutes, 60); // 내 기록 P80 70(이미 기상~출발) → 공통 50 + 보정 10. 예전 식은 준비 전 활동을 또 더했음
 });
 
 test('고른 종류만 · 알람 없는 일정', () => {
@@ -91,7 +92,7 @@ test('고른 종류만 · 알람 없는 일정', () => {
 });
 
 test('지난 기상은 끄고 저장 + 경고, 출발까지 지나면 막힘 (8.2.1)', () => {
-  const late = computePlan(base({ now: kst(22, 490) }), api(50)); // 기상 8:05 < 8:10 + 5분 (이 입력의 예측 준비는 55분)
+  const late = computePlan(base({ now: kst(22, 490) }), api(50)); // 기상 < 8:10 + 5분 (이 입력의 예측 준비는 60분이라 기상 8:00)
   assert.ok(late.check.ok);
   assert.equal(late.check.ok && late.check.alarms[0].enabled, false);
   assert.deepEqual(late.warnings.map((w) => [w.code, w.detail]), [['PAST_ALARM_DISABLED', 'WAKE']]);
@@ -219,6 +220,84 @@ test('늦잠 지각이 2회 이상이면 이유 문구에 나옴', () => {
   assert.equal(dto.intensity.reason, '중요 일정 + 최근 4주 늦잠 지각 3회 → 강');
 });
 
+// ---- 학습 루프 기초 a (이슈 #266) — 5절 시험 표 ----
+
+test('[5절] 기록 0건 · 온보딩 70분: 기상~출발 70분, 출처 첫 값(DEFAULT), "배우는 중 0/5"', () => {
+  const onboarded = { ...profile, default_prepare_minutes: 70 };
+  const plan = computePlan(base({ profile: onboarded, stats: { sampleCount: 0, p80: null } }), api(50));
+  assert.deepEqual([plan.prepare.minutes, plan.prepare.source, plan.prepare.commonP80, plan.prepare.sampleCount], [70, 'DEFAULT', 70, 0]);
+  assert.equal(prepareSourceLabel(plan.prepare.sampleCount), '배우는 중 0/5');
+  assert.equal(toSuggestion(plan).prepare.common_p80, 70); // 앱이 받는 "공통(첫 값)"도 70
+  // 기상 = 약속 10:00 − 여유 10 − 이동 50 − 준비 70 = 7:50 (온보딩을 안 읽던 때는 50분 기준이라 8:10)
+  assert.equal(text(plan)[0], 'WAKE 07:50');
+});
+
+test('온보딩 값이 없거나 범위 밖이면 50 (프로필 없음 · null · 5분 · 400분)', () => {
+  assert.equal(firstPrepareMinutes({}), 50);
+  assert.equal(firstPrepareMinutes({ default_prepare_minutes: null }), 50);
+  assert.equal(firstPrepareMinutes({ default_prepare_minutes: 4 }), 50);
+  assert.equal(firstPrepareMinutes({ default_prepare_minutes: 5 }), 5);
+  assert.equal(firstPrepareMinutes({ default_prepare_minutes: 400 }), 50);
+  assert.equal(firstPrepareMinutes({ default_prepare_minutes: 10 }), 10);
+  assert.equal(firstPrepareMinutes({ default_prepare_minutes: 300 }), 300);
+});
+
+test('[5절] 그날 두 번째 일정(기상 없음): 준비 15분 그대로 — 기록이 0건이든 30건이든 같음, 온보딩 값과도 무관', () => {
+  const second = (stats: PlanInputs['stats']) =>
+    computePlan(
+      base({ draft: { at: kst(22, 1080), destination: { name: '강남역' }, bufferMinutes: 5 }, sameDayWake: true, profile: { ...profile, default_prepare_minutes: 90 }, stats, now: kst(22, 600) }),
+      api(20),
+    );
+  for (const stats of [{ sampleCount: 0, p80: null }, { sampleCount: 5, p80: 60 }, { sampleCount: 30, p80: 120 }]) {
+    const plan = second(stats);
+    assert.deepEqual([plan.withWake, plan.prepare.minutes, plan.prepare.correction, plan.prepare.source], [false, 15, 0, 'DEFAULT'], `기록 ${stats.sampleCount}건`);
+  }
+  // 요청에서 기상을 빼도(withWake false) 같음 — 기록 수와 상관없음
+  const asked = computePlan(base({ draft: { at: kst(22, 1080), destination: { name: '강남역' }, withWake: false }, sameDayWake: false, stats: { sampleCount: 30, p80: 120 } }), api(20));
+  assert.equal(asked.prepare.minutes, 15);
+  // 반대로 첫 일정(기상 있음)은 같은 기록으로 보정됨
+  const first = computePlan(base({ stats: { sampleCount: 30, p80: 120 } }), api(50));
+  assert.ok(first.prepare.minutes > 50);
+});
+
+test('[5절] 20분 중복 없음: 기록 60분 · n=10이면 기상~출발 = 공통 50 + 보정 5 = 55 (준비 전 활동이 얼마든 안 변함)', () => {
+  for (const beforePrepareMinutes of [0, 10, 20, 30]) {
+    const plan = computePlan(base({ draft: { at: kst(22, 600), destination: { name: 'x' }, beforePrepareMinutes }, stats: { sampleCount: 10, p80: 60 } }), api(50));
+    assert.deepEqual([plan.prepare.correction, plan.prepare.minutes], [5, 55], `준비 전 활동 ${beforePrepareMinutes}분`);
+  }
+  // 예전 식(+20분)이었다면 개인 P80이 80이 되어 보정 15 · 65분이었음
+  const plan = computePlan(base({ stats: { sampleCount: 10, p80: 60 } }), api(50));
+  assert.notEqual(plan.prepare.minutes, 65);
+});
+
+test('[5절] 기록이 쌓이면 출처 문구가 바뀜: 4건까지 배우는 중, 5건부터 내 기록 기반 (출처 DEFAULT → PERSONAL)', () => {
+  const at = (n: number) => computePlan(base({ stats: { sampleCount: n, p80: n ? 80 : null } }), api(50)).prepare;
+  assert.deepEqual([4, 5].map((n) => [at(n).source, prepareSourceLabel(at(n).sampleCount)]), [['DEFAULT', '배우는 중 4/5'], ['PERSONAL', '내 기록 기반 5건']]);
+});
+
+test('clampPrepareToBound: 자동 값만 기준 ±범위로, 직접 고른 값(MANUAL)과 범위 안 값은 그대로, 보정 칸은 합이 맞게', () => {
+  const auto = (minutes: number) => ({ minutes, autoMinutes: minutes, commonP80: 50, correction: minutes - 50, sampleCount: 30, prior: 10, weight: 0.75, residualP80: 70, source: 'PERSONAL' as const, confidence: 'HIGH' as const });
+  const bound = { around: 70, within: 10 };
+  const up = clampPrepareToBound(auto(103), bound);
+  assert.deepEqual([up.minutes, up.autoMinutes, up.correction], [80, 80, 30]);
+  assert.equal(clampPrepareToBound(auto(30), bound).minutes, 60);
+  assert.equal(clampPrepareToBound(auto(80), bound).minutes, 80); // 경계 포함
+  const inside = auto(75);
+  assert.equal(clampPrepareToBound(inside, bound), inside);
+  const manual = { ...auto(200), source: 'MANUAL' as const };
+  assert.equal(clampPrepareToBound(manual, bound).minutes, 200);
+});
+
+test('computePlan의 prepareBound: 직접 고른 준비시간은 안 자름, 기상 없는 일정(15분)에는 걸지 않음', () => {
+  const big = { sampleCount: 30, p80: 150 }; // 자동 예측 약 105
+  const auto = computePlan(base({ stats: big, prepareBound: { around: 60, within: 10 } }), api(50));
+  assert.deepEqual([auto.prepare.minutes, auto.prepare.autoMinutes], [70, 70]);
+  const manual = computePlan(base({ stats: big, prepareBound: { around: 60, within: 10 }, draft: { at: kst(22, 600), destination: { name: 'x' }, prepareMinutes: 120 } }), api(50));
+  assert.deepEqual([manual.prepare.minutes, manual.prepare.source], [120, 'MANUAL']);
+  const second = computePlan(base({ stats: big, sameDayWake: true, prepareBound: { around: 60, within: 10 } }), api(50));
+  assert.equal(second.prepare.minutes, 15);
+});
+
 // D69: 기본 보통 — 중요도 낮음(앱 라벨 '보통')이어도 약이 아니고, 매우 중요(HIGH)만 한 단계 올림
 test('강도 이유: 중요도 낮음은 보통(중), 매우 중요는 한 단계 올려 강 — 약이라는 문구는 안 나옴', () => {
   const draft = { at: kst(22, 600), destination: { name: '세종대학교', lat: 37.55, lng: 127.07 } };
@@ -235,4 +314,126 @@ test('강도 이유: 중요도 낮음은 보통(중), 매우 중요는 한 단�
   const lowLate = toSuggestion(computePlan(base({ draft: { ...draft, importance: 'LOW' }, lateCount4w: 2 }), api(50)));
   assert.equal(lowLate.intensity.level, 'STRONG'); // 낮음 + 늦잠 지각 2회 = 보통에서 한 단계 올림
   assert.equal(lowLate.intensity.reason, '보통 일정 + 최근 4주 늦잠 지각 2회 → 강');
+});
+
+// ---- 학습 루프 기초 b (이슈 #272) — 잠귀 · 깨우는 여유 · 최근 5번 ----
+
+const TEN = [70, 100, 40, 80, 45, 75, 55, 60, 50, 65]; // 최신순. 정렬하면 0.7 → 71.5, 0.8 → 76, 0.9 → 82
+const withMargin = (wake_margin: string | null | undefined): ProfileRow => ({ ...profile, wake_margin });
+const prepareOf = (margin: string | null | undefined, importance: 'LOW' | 'NORMAL' | 'HIGH' = 'NORMAL', stats = prepareStatsOf(TEN)) =>
+  computePlan(base({ profile: withMargin(margin), stats, draft: { at: kst(22, 600), destination: { name: 'x' }, importance } }), api(50)).prepare;
+
+test('[5절] 같은 기록, 빠듯 / 보통 / 넉넉: 넉넉이 더 이름 (0.7 < 0.8 < 0.9)', () => {
+  const [tight, normal, loose] = ['TIGHT', 'NORMAL', 'LOOSE'].map((m) => prepareOf(m));
+  assert.ok(tight.minutes < normal.minutes && normal.minutes < loose.minutes, `${tight.minutes} < ${normal.minutes} < ${loose.minutes}`);
+  // 공통 50 + round(0.5 × (분위수 − 50)) — 71.5 → 61, 76 → 63, 82 → 66
+  assert.deepEqual([tight.minutes, normal.minutes, loose.minutes], [61, 63, 66]);
+  assert.deepEqual([tight.sampleCount, normal.sampleCount, loose.sampleCount], [10, 10, 10]); // 기록 수는 여유와 무관
+});
+
+test('깨우는 여유 보통은 예전 값과 정확히 같음: 칸이 없거나 모르는 값이어도, 옛 모양 stats(p80만)여도', () => {
+  const old = computePlan(base({ stats: { sampleCount: 10, p80: 76 } }), api(50)).prepare; // wake_margin 칸 없는 프로필 + 옛 모양
+  for (const margin of ['NORMAL', undefined, null, 'x']) assert.deepEqual(prepareOf(margin), old, String(margin));
+  assert.equal(old.minutes, 63);
+});
+
+test('[5절] 매우 중요 일정은 여유가 한 단계 위: 빠듯 → 보통, 보통 → 넉넉, 넉넉은 그대로 · 중요 / 보통 일정은 그대로', () => {
+  assert.equal(prepareOf('TIGHT', 'HIGH').minutes, prepareOf('NORMAL').minutes);
+  assert.equal(prepareOf('NORMAL', 'HIGH').minutes, prepareOf('LOOSE').minutes);
+  assert.equal(prepareOf('LOOSE', 'HIGH').minutes, prepareOf('LOOSE').minutes);
+  for (const importance of ['LOW', 'NORMAL'] as const) assert.equal(prepareOf('TIGHT', importance).minutes, prepareOf('TIGHT').minutes);
+});
+
+test('기록이 5건 미만이어도 같은 규칙 (섞는 가중치 n:(n+10) 그대로): 3건 → 빠듯 < 보통 < 넉넉, 매우 중요는 한 단계 위', () => {
+  const three = prepareStatsOf([90, 70, 50]); // 정렬 50 70 90: 0.7 → 78, 0.8 → 82, 0.9 → 86
+  const at = (m: string, imp: 'NORMAL' | 'HIGH' = 'NORMAL') => prepareOf(m, imp, three);
+  // 가중치 3/13: 보정 = round(3/13 × (분위수 − 50)) → 78 → 6, 82 → 7, 86 → 8
+  assert.deepEqual(['TIGHT', 'NORMAL', 'LOOSE'].map((m) => at(m).minutes), [56, 57, 58]);
+  assert.equal(at('NORMAL').source, 'DEFAULT'); // 5건 미만이라 출처는 첫 값
+  assert.equal(at('TIGHT', 'HIGH').minutes, at('NORMAL').minutes);
+  assert.equal(at('NORMAL', 'HIGH').minutes, at('LOOSE').minutes);
+});
+
+test('기록이 0건이면 여유와 상관없이 첫 값 그대로', () => {
+  for (const m of ['TIGHT', 'NORMAL', 'LOOSE']) {
+    for (const imp of ['NORMAL', 'HIGH'] as const) {
+      const p = prepareOf(m, imp, prepareStatsOf([]));
+      assert.deepEqual([p.minutes, p.source], [50, 'DEFAULT']);
+    }
+  }
+});
+
+test('[5절] 그날 두 번째 일정(기상 없음)은 여유 · 중요도와 상관없이 준비 15분 그대로', () => {
+  for (const m of ['TIGHT', 'NORMAL', 'LOOSE']) {
+    for (const importance of ['NORMAL', 'HIGH'] as const) {
+      const plan = computePlan(
+        base({ draft: { at: kst(22, 1080), destination: { name: '강남역' }, bufferMinutes: 5, importance }, sameDayWake: true, profile: withMargin(m), stats: prepareStatsOf(TEN), now: kst(22, 600) }),
+        api(20),
+      );
+      assert.deepEqual([plan.withWake, plan.prepare.minutes, plan.prepare.correction, plan.recentPrepare], [false, 15, 0, []], `${m} ${importance}`);
+    }
+  }
+});
+
+test('직접 고른 준비 시간은 여유와 상관없이 그 값', () => {
+  const plan = computePlan(base({ profile: withMargin('LOOSE'), stats: prepareStatsOf(TEN), draft: { at: kst(22, 600), destination: { name: 'x' }, prepareMinutes: 40 } }), api(50));
+  assert.deepEqual([plan.prepare.minutes, plan.prepare.source], [40, 'MANUAL']);
+});
+
+test('깨우는 여유가 알람 시각에 닿음: 같은 기록에서 넉넉하면 기상이 더 이름', () => {
+  const wake = (m: string) => {
+    const plan = computePlan(base({ profile: withMargin(m), stats: prepareStatsOf(TEN), draft: { at: kst(22, 600), destination: { name: 'x' }, beforePrepareMinutes: 30 } }), api(50));
+    return plan.chain.find((x) => x.kind === 'WAKE')?.at.getTime() as number;
+  };
+  assert.ok(wake('LOOSE') < wake('NORMAL') && wake('NORMAL') < wake('TIGHT'));
+});
+
+// 잠귀 — 강도 (D69: 약은 직접 고를 때만)
+const levelOf = (wake_sensitivity: string | null | undefined, importance: 'LOW' | 'NORMAL' | 'HIGH', lateCount4w = 0) =>
+  computePlan(base({ profile: { ...profile, wake_sensitivity }, lateCount4w, draft: { at: kst(22, 600), destination: { name: 'x' }, importance } }), api(50)).intensity;
+
+test('[5절] 잠귀 깊음(HEAVY): 보통 일정이어도 강 — 매우 중요 · 지각 2번이어도 최대 강에서 멈춤', () => {
+  assert.equal(levelOf('HEAVY', 'NORMAL').auto, 2);
+  assert.equal(levelOf('HEAVY', 'LOW').auto, 2);
+  const max = levelOf('HEAVY', 'HIGH', 2);
+  assert.deepEqual([max.auto, max.fields.intensity, max.heavySleeper], [2, 'STRONG', true]);
+});
+
+test('[5절] 잠귀 가벼움(LIGHT) · 보통(NORMAL) · 칸 없음 + 보통 일정: 기본 보통 (약 아님)', () => {
+  for (const sensitivity of ['LIGHT', 'NORMAL', undefined, null, 'x']) {
+    for (const importance of ['LOW', 'NORMAL'] as const) {
+      const it = levelOf(sensitivity, importance);
+      assert.deepEqual([it.auto, it.fields.intensity, it.heavySleeper], [1, 'NORMAL', false], `${sensitivity} ${importance}`);
+    }
+  }
+  assert.equal(levelOf('LIGHT', 'HIGH').auto, 2); // 매우 중요는 한 단계 올림 그대로
+});
+
+test('잠귀가 무거우면 이유 문구에 나오고, 직접 고른 칸은 잠귀보다 먼저', () => {
+  const dto = toSuggestion(computePlan(base({ profile: { ...profile, wake_sensitivity: 'HEAVY' }, lateCount4w: 0 }), api(50)));
+  assert.equal(dto.intensity.reason, '중요 일정 + 잠귀가 무거움 → 강');
+  const manual = computePlan(base({ profile: { ...profile, wake_sensitivity: 'HEAVY' }, draft: { at: kst(22, 600), destination: { name: 'x' }, levels: { sound: 0, voice: null, vibration: null } } }), api(50));
+  assert.deepEqual([manual.intensity.axes.sound, manual.intensity.axes.voice], [{ level: 0, manual: true }, { level: 2, manual: false }]);
+});
+
+test('저장된 직접 고른 강도 비교는 잠귀를 반영한 자동 값 기준: HEAVY인 사람의 강 칸은 직접 고름이 아님', () => {
+  const stored = [
+    { alarm_id: 'a1', participant_id: 'p1', user_id: 'u', alarm_type: 'WAKE', scheduled_at: '2025-05-22T07:00:00+09:00', intensity: 'STRONG', voice_tone: 'DIRECT', sound_key: 'theme_urgent', is_enabled: true, snooze_limit: 3, time_source: 'AUTO', intensity_source: 'MANUAL', recurrence_rule: null },
+  ] as AlarmRow[];
+  const plan = computePlan(base({ profile: { ...profile, wake_sensitivity: 'HEAVY' }, existingAlarms: stored, draft: { at: kst(22, 600), destination: { name: 'x' } } }), api(50));
+  assert.equal(plan.intensity.manual, false);
+});
+
+// 최근 5번
+test('응답의 prepare.recent: 최신순 최대 5개 — 0건 빈 배열 · 3건 3개 · 7건 최신 5개', () => {
+  const recent = (values: number[]) => toSuggestion(computePlan(base({ stats: prepareStatsOf(values) }), api(50))).prepare.recent;
+  assert.deepEqual(recent([]), []);
+  assert.deepEqual(recent([62, 55, 48]), [62, 55, 48]);
+  assert.deepEqual(recent([75, 70, 62, 55, 48, 90, 91]), [75, 70, 62, 55, 48]);
+  assert.deepEqual(toSuggestion(computePlan(base({ stats: { sampleCount: 10, p80: 70 } }), api(50))).prepare.recent, []); // 옛 모양 stats
+});
+
+test('응답의 prepare.recent: 그날 두 번째 일정은 기록을 안 쓰므로 빈 배열', () => {
+  const dto = toSuggestion(computePlan(base({ sameDayWake: true, stats: prepareStatsOf([62, 55, 48]) }), api(20)));
+  assert.deepEqual([dto.prepare.recent, dto.prepare.sample_count], [[], 0]);
 });

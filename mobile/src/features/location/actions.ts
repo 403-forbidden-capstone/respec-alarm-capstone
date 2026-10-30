@@ -3,10 +3,13 @@
 //   · flushActions가 보관함 앞에서부터 차례로 서버에 씀: 성공하면 뺌, 일시 오류(네트워크 · 로그인 없음 · 5xx)는 거기서 멈추고 다음에,
 //     다시 해도 소용없는 오류(lib/alarmSync/events isPermanentInsertError)는 버림. 쓰기는 같은 입력이면 같은 결과라 두 번 가도 안전 (participantTimes)
 //   · 안내만 하는 것(DEPART_PENDING · DEPART_CANCEL)은 보관하지 않고 notice.ts를 바로 부름
+//   · 도착(ARRIVE) 안내는 서버에 쓴 뒤에 부름 — 못 쓴 채 "도착 감지"만 뜨지 않게 (출발 안내는 이탈 순간 DEPART_PENDING에서 이미 나감)
 import { recordParticipantTimes } from '@/features/alarm/participantTimes';
 import { isPermanentInsertError } from '@/lib/alarmSync/events';
+import { now } from '@/lib/clock';
 import { isMock } from '@/lib/mode';
 
+import { minutesMs } from './constants';
 import { withLock } from './lock';
 import { errorText } from './native';
 import { onDetectionNotice } from './notice';
@@ -32,6 +35,9 @@ export function announce(notices: readonly GeoAction[]): void {
 }
 
 type Outcome = 'done' | 'drop' | 'retry';
+
+// 도착 안내는 감지 뒤 이만큼(분) 안에 쓴 것만 — 오프라인 보관함에서 한참 뒤에 쓰인 도착은 이미 지난 일이라 알리지 않음 (근거 없음 — 작성자 판단)
+const ARRIVE_NOTICE_MAX_DELAY_MINUTES = 60;
 
 async function send(action: WriteAction): Promise<Outcome> {
   try {
@@ -61,7 +67,10 @@ async function flushPass(): Promise<void> {
     for (let i = 0; i < MAX_QUEUED_ACTIONS * 2; i += 1) {
       const [head] = await withLock(loadActions);
       if (!head) return;
-      if ((await send(head)) === 'retry') return;
+      const outcome = await send(head);
+      if (outcome === 'retry') return;
+      // 쓰기에 성공한 도착만 안내 — 버린 것(drop)은 서버에 없음. 보내고 보관함에서 빼기 전에 앱이 꺼져 다시 보내도 알림 번호가 같아 한 장으로 덮어씀
+      if (outcome === 'done' && head.type === 'ARRIVE' && now().getTime() - head.at <= minutesMs(ARRIVE_NOTICE_MAX_DELAY_MINUTES)) announce([head]);
       await withLock(() => dropHead(head));
     }
   } catch (e) {

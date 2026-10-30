@@ -1,6 +1,7 @@
 // ① 약속 기반 알람 — 데이터 접근은 이 파일에서만 합니다.
 // 지금은 src/mocks의 가짜 데이터를 돌려주고, Supabase가 붙으면 이 파일 안에서만 바꿉니다.
 //   읽기 · 쓰기 위치는 docs/screen-data-map.md (H01 · H02 · H03 · H05 · H07 · H08)
+import { DEFAULT_COMMON_P80, personalPrepareOf, predictPrepare, prepareStatsOf, recentPrepareOf, wakeMarginOf } from '@shared/calc/prepare.ts';
 import { hasEarlierWake } from '@shared/calc/wake.ts';
 
 import { now } from '@/lib/clock';
@@ -38,6 +39,7 @@ import {
   type NextAlarm,
   type Occurrence,
   type Place,
+  type PinAddress,
   type RingInfo,
   type RingKind,
   type ScheduleItem,
@@ -246,6 +248,11 @@ function withEdits(a: MockAppointment, e: AlarmEdits) {
 }
 
 // 값을 바꾸면 알람이 어떻게 되는지 (저장 전 미리 보기) — 실데이터는 alarm-suggest
+// 가짜 모드의 "내 기록" — 기상~출발 10건(최신순)이고 0.8 분위수가 70분(정렬 …65 70 70 90) = 첫 값 50보다 20분 긺 (목업 숫자 n 10 · 개인 오차 20). 계산은 서버와 같은 predictPrepare
+//   서버와 같은 규칙: 개인 보정은 그날 첫 일정(기상 있음)에만, 두 번째 일정은 공통 15분 그대로 (학습 루프 기초 2절 2).
+//   깨우는 여유(db.wakeMargin)는 이 기록의 0.7 · 0.8 · 0.9 분위수, 매우 중요 일정은 한 단계 위 (서버 personalPrepareOf와 같은 함수). 기본 보통 = 예전과 같은 70분
+const MOCK_PREPARE_STATS = prepareStatsOf([90, 70, 62, 55, 48, 70, 65, 60, 58, 45]);
+
 export async function previewAlarms(id: string, edits: AlarmEdits): Promise<AlarmPreview> {
   if (!isMock()) return real.previewAlarms(id, edits);
   const a = find(id);
@@ -259,6 +266,8 @@ export async function previewAlarms(id: string, edits: AlarmEdits): Promise<Alar
     autoTravelMinutes: autoTravel,
     predictedPrepMinutes: view.predictedPrepMinutes,
     autoPredictedPrepMinutes: autoPrepare,
+    prepareSampleCount: appointment.withWake ? MOCK_PREPARE_STATS.sampleCount : 0,
+    prepareRecent: appointment.withWake ? recentPrepareOf(MOCK_PREPARE_STATS) : [],
   };
 }
 
@@ -535,6 +544,15 @@ export async function listPlaces(query?: string, near?: LatLng): Promise<Place[]
   return filterPlaces(places, text, near).map((p) => ({ ...p }));
 }
 
+// 지도 핀 자리의 주소 (지도 고르기 시트) — 핀이 멈춘 뒤 부름. 못 구하면 null (바다 · 해외), 서버 오류는 던짐 (실데이터는 place-reverse 카카오 좌표→주소, 저장 안 함)
+//   가짜 모드는 좌표로 만든 그럴듯한 광진구 주소 (같은 좌표면 같은 주소)
+export async function reverseAddress(lat: number, lng: number): Promise<PinAddress | null> {
+  if (!isMock()) return real.reverseAddress(lat, lng);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180) return null;
+  const number = 1 + (Math.round(Math.abs(lat * 1e4 + lng * 1e4)) % 300);
+  return { address: `서울 광진구 능동로 ${number} (가짜)` };
+}
+
 // 새 일정 처음 입력값 — 일정명 · 준비물은 비어 있음, 장소는 첫 곳 선택. 날짜 · 시간은 홈에서 넘어온 날(day)의 오후 2시
 // (그 시각이 이미 지났으면 다음 정각)
 export function defaultDraft(day: Date, current = now()): AppointmentDraft {
@@ -556,7 +574,7 @@ export { draftAt };
 
 let draftSeq = 0; // 새 일정 가짜 id 뒤에 붙이는 번호 — 같은 순간에 만들어도 겹치지 않게
 
-// 알람 계산 (H05 확인 시트) — 공통 P80 + 개인 보정(n ÷ (n + k) × 개인 오차 P80)
+// 알람 계산 (H05 확인 시트) — 서버와 같은 공용 계산(predictPrepare): 첫 값 + 개인 보정(n ÷ (n + k) × 개인 오차)
 export async function estimateAppointment(d: AppointmentDraft): Promise<Estimate> {
   if (!isMock()) return real.estimateAppointment(d);
   const at = draftAt(d.date, d.time);
@@ -571,12 +589,13 @@ export async function estimateAppointment(d: AppointmentDraft): Promise<Estimate
       .map((a) => ({ appointmentId: a.id, appointmentAt: a.at, isEnabled: !db.disabledAppointments.has(a.id) && !db.disabledKinds.has(`${a.id}:WAKE`) })),
   );
   const withWake = !sameDayWake;
-  const common = withWake ? 50 : 15;
-  const n = 10;
-  const k = 10;
-  const weight = n / (n + k);
-  const residual = 20;
-  const correction = Math.round(weight * residual);
+  // 예전에는 여기에 같은 식을 따로 적어 두고 두 번째 일정(15분)에도 개인 보정 +10을 붙였음 → 서버와 같은 함수로 (두 번째 일정은 15분 그대로)
+  const prepare = predictPrepare({
+    commonP80: withWake ? DEFAULT_COMMON_P80.withWake : DEFAULT_COMMON_P80.sameDay,
+    personalP80: withWake ? personalPrepareOf(MOCK_PREPARE_STATS, wakeMarginOf(db.wakeMargin), d.importance) : null,
+    sampleCount: withWake ? MOCK_PREPARE_STATS.sampleCount : 0,
+  });
+  const common = prepare.commonP80;
   const before = withWake ? 20 : 0;
   const draft: MockAppointment = {
     id: `n${Date.now()}_${++draftSeq}`,
@@ -590,7 +609,7 @@ export async function estimateAppointment(d: AppointmentDraft): Promise<Estimate
     bufferMinutes: 10,
     beforePrepMinutes: before,
     prepMinutes: common - before,
-    predictedPrepMinutes: common + correction,
+    predictedPrepMinutes: prepare.minutes,
     importance: d.importance,
     recurrenceRule: repeatToRrule(d.repeat),
     groupId: null,
@@ -603,12 +622,12 @@ export async function estimateAppointment(d: AppointmentDraft): Promise<Estimate
   };
   return {
     appointment: toAppointment(draft),
-    commonP80: common,
-    correction,
-    sampleCount: n,
-    prior: k,
-    weight,
-    residualP80: residual,
+    commonP80: prepare.commonP80,
+    correction: prepare.correction,
+    sampleCount: prepare.sampleCount,
+    prior: prepare.prior,
+    weight: prepare.weight,
+    residualP80: prepare.residualP80,
     sameDayWake,
     latePoint: db.lateCount4w >= 2 ? 1 : 0,
   };

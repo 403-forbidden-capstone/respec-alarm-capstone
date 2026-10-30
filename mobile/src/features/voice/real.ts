@@ -5,6 +5,8 @@
 //   · 카드 버튼: 저장 = createAppointment(estimate, '자기 전 대화') → voice-turn {card_action: SAVED, appointment_id, alarms}. 준비 +N · 강도는 실제로 바뀐 때만 saveAlarmSettings 한 번 더(L1 답 L1-1 — alarm-commit이 길찾기를 다시 부름)
 //   · 실패(LLM_UNAVAILABLE · NOT_CONFIGURED · 네트워크 · 시간 초과)면 대화 · 카드는 남기고 같은 요청을 [다시 시도] (같은 client_turn_id라 말이 두 번 쌓이지 않음). CONFLICT면 세션을 다시 읽음
 //   · 대화 상태(세션 번호 · rev · 카드 · 계산한 Estimate)는 이 모듈 메모리에만 — 앱을 다시 열면 voice-session resume으로 말 · 카드 상태를 서버에서 받음 (Estimate는 안 남으니 저장 때 다시 계산)
+//     다시 열 때 계산이 안 끝난 카드(NEEDS_ESTIMATE)는 이어서 계산해 results만 보냄. 저장한 카드는 서버에 SAVED를 알리기 전에 로컬(savedMarks.ts)에 적어 두어, 알림이 안 가고 꺼져도 일정이 두 벌 생기지 않게 함
+//   · 서버 요청은 pending 하나 + 카드 요청 큐 — 실패한 요청(pending)이 있으면 카드 동작은 앱 일만 바로 하고 서버 알림은 큐에서 기다렸다가 그 요청이 성공한 뒤 차례로 보냄
 import { adjustEstimate, orderError } from '@/features/alarm/adjust';
 import { createAppointment, createStandaloneAlarm, estimateAppointment, getAppointment, listPlaces, previewAlarms, saveAlarmSettings } from '@/features/alarm/api';
 import { draftAt } from '@/features/alarm/schedule';
@@ -30,6 +32,7 @@ import { currentUserId } from '@/lib/user';
 import type { Weekday } from '@/lib/weekday';
 
 import { applyFix, type Fix } from './fixes';
+import { clearSaved, markSaved, pruneExpired, pruneOtherSessions, readSavedMarks } from './savedMarks';
 import type { ChatMessage, CardAlarm, CardKind, CardStatus, Conversation, ConversationCard, FixResult, Limits, Unavailable } from './types';
 
 // ---------------------------------------------------------------------------
@@ -126,7 +129,18 @@ type CardRec = {
   appointmentId: string | null;
 };
 
-type Pending = { phase: 'TEXT' | 'RESULTS' | 'CARD'; body: Record<string, unknown>; turnId: string };
+// 카드 동작(저장 · 반려 · 장소 고른 뒤 results)이 서버에 알릴 요청 — 앞 요청이 끝나야 rev를 알 수 있어 보낼 때 body를 만듦
+//   saved = 저장됨 로컬 표시를 달고 있는 SAVED 알림 — 서버가 받으면(또는 카드를 모르면) 그 표시를 지움
+type Queued = {
+  phase: 'RESULTS' | 'CARD';
+  turnId: string;
+  make: (sessionId: string, rev: number) => Record<string, unknown>;
+  retried?: boolean;
+  saved?: { userId: string; sessionId: string; cardId: string };
+};
+
+// quiet = 카드에서 시작한 요청 — 서버가 거절해도 던지지 않음(앱에서 한 일은 그대로). src = 그 요청의 큐 항목(CONFLICT 때 새 rev로 한 번 더)
+type Pending = { phase: 'TEXT' | 'RESULTS' | 'CARD'; body: Record<string, unknown>; turnId: string; quiet?: boolean; src?: Queued };
 
 type State = {
   userId: string | null;
@@ -138,11 +152,12 @@ type State = {
   limits: Limits | null;
   unavailable: Unavailable | null;
   pending: Pending | null; // 보냈지만 답을 못 받은 요청 — [다시 시도]가 같은 것을 다시 보냄
+  queue: Queued[]; // pending이 끝나길 기다리는 카드 요청 — 앞 요청이 성공하면 차례로 보냄 (pending을 덮어쓰지 않음)
   seq: number;
 };
 
 function freshState(userId: string | null): State {
-  return { userId, sessionId: null, rev: 0, started: false, messages: [], cards: new Map(), limits: null, unavailable: null, pending: null, seq: 0 };
+  return { userId, sessionId: null, rev: 0, started: false, messages: [], cards: new Map(), limits: null, unavailable: null, pending: null, queue: [], seq: 0 };
 }
 
 let state: State = freshState(null);
@@ -456,9 +471,13 @@ async function runTasks(res: TurnResponse): Promise<{ cards: ResultCard[]; fixes
 
 const unavailableOf = (e: EdgeError): Unavailable => ({ code: e.code, message: e.message, canRetry: true });
 
-// 오류가 났을 때 — 대화를 남기고 [다시 시도]를 보일 것이면 상태에 적고 true, 아니면 던짐 (CONFLICT는 세션을 다시 읽은 뒤 던짐)
-async function onError(e: unknown): Promise<void> {
-  if (!(e instanceof EdgeError)) throw e;
+// 오류가 났을 때 — 대화를 남기고 [다시 시도]를 보일 것이면 상태에 적고 돌아옴(그 요청 p는 pending에 남음), 아니면 던짐 (CONFLICT는 세션을 다시 읽은 뒤 던짐)
+//   p = 실패한 요청 (세션 시작이면 없음). unavailable은 p가 pending에 남아 [다시 시도]가 다시 보낼 때만 적음 — 죽은 안내가 남지 않게
+async function onError(e: unknown, p: Pending | null = null): Promise<void> {
+  if (!(e instanceof EdgeError)) {
+    if (p) state.pending = null;
+    throw e;
+  }
   if (UNAVAILABLE_CODES.includes(e.code)) {
     // LLM 실패는 서버가 상태를 details로 줌 ({ cards, fixes, rev, turn_seq, limits }) — 카드 · rev · 한도를 받아 둠
     //   rev가 올라가 있어도 [다시 시도]는 처음 보낸 rev · client_turn_id 그대로 (서버가 같은 client_turn_id는 rev를 안 봄)
@@ -470,25 +489,68 @@ async function onError(e: unknown): Promise<void> {
     return;
   }
   state.pending = null;
-  // CONFLICT = rev 어긋남, NOT_FOUND = 세션 · 카드를 모름 — 서버 상태를 다시 읽음 (세션이 없어졌으면 resume이 새로 시작)
+  state.unavailable = null;
+  if (e.code === 'NOT_FOUND' && p?.src?.saved) await clearSaved(p.src.saved.userId, p.src.saved.sessionId, p.src.saved.cardId); // 서버가 모르는 카드 — 다시 알릴 수 없음
+  // CONFLICT = rev 어긋남, NOT_FOUND = 세션 · 카드를 모름 — 서버 상태를 다시 읽음 (세션이 없어졌으면 resume이 새로 시작). 기다리는 큐는 그대로 — 새 rev로 보냄
   if (e.code === 'CONFLICT' || e.code === 'NOT_FOUND') await readSession(true);
+  // 카드 요청이 rev 어긋남으로 거절됐으면 서버가 받지 않았으니 새 rev로 한 번 더 (같은 client_turn_id)
+  if (e.code === 'CONFLICT' && p?.src && !p.src.retried) {
+    p.src.retried = true;
+    state.queue.unshift(p.src);
+  }
   throw e;
 }
 
-// 보낼 요청을 끝까지 — 앱 일이 있으면 results까지. 답을 못 받으면 pending을 남기고 unavailable
+// 큐의 다음 요청을 pending으로 — 지금 sessionId · rev로 body를 만듦
+function startNext(): boolean {
+  const q = state.queue.shift();
+  if (!q) return false;
+  if (!state.sessionId) {
+    state.queue = [];
+    return false;
+  }
+  state.pending = { phase: q.phase, turnId: q.turnId, body: q.make(state.sessionId, state.rev), quiet: true, src: q };
+  return true;
+}
+
+// 보낼 요청을 끝까지 — 앱 일이 있으면 results까지, 이어서 큐의 카드 요청을 차례로. 답을 못 받으면 그 요청을 pending에 남기고 unavailable (큐는 그 뒤에 기다림)
+//   카드에서 시작한 요청(quiet)의 거절은 삼키고 다음 요청으로, 말(TEXT)의 거절은 큐를 다 보낸 뒤 던짐
 async function drive(): Promise<void> {
-  while (state.pending) {
-    const p = state.pending;
+  let failed: { error: unknown } | null = null;
+  while (state.pending || state.queue.length > 0) {
+    if (!state.pending && !startNext()) break;
+    const p = state.pending as Pending;
     let res: TurnResponse;
     try {
       res = await callEdge<TurnResponse>('voice-turn', p.body, { timeoutMs: TURN_TIMEOUT_MS });
     } catch (e) {
-      await onError(e);
-      return;
+      try {
+        await onError(e, p);
+        break; // unavailable — p는 pending에 남음, [다시 시도]가 이어 감
+      } catch (err) {
+        if (!p.quiet && !failed) failed = { error: err };
+        continue;
+      }
     }
     state.unavailable = null;
     state.pending = null;
-    state.pending = await absorb(res, p.turnId);
+    if (p.src?.saved) await clearSaved(p.src.saved.userId, p.src.saved.sessionId, p.src.saved.cardId); // 서버가 SAVED를 받음 — 로컬 표시는 이제 필요 없음
+    const next = await absorb(res, p.turnId);
+    if (next && p.quiet) next.quiet = true;
+    state.pending = next;
+  }
+  if (failed) throw failed.error;
+}
+
+// 카드 요청을 큐에 넣고, 앞에 못 끝난 요청(pending)이 없으면 바로 보냄 — 있으면 그 요청의 [다시 시도]가 성공한 뒤 차례로 (pending을 덮어쓰지 않음)
+async function submitCard(item: Queued): Promise<void> {
+  if (!state.sessionId) return;
+  state.queue.push(item);
+  if (state.pending) return;
+  try {
+    await drive();
+  } catch {
+    // 카드 요청의 거절은 삼킴 — 앱에서 한 일은 그대로
   }
 }
 
@@ -496,7 +558,43 @@ async function drive(): Promise<void> {
 // 세션
 // ---------------------------------------------------------------------------
 
-async function readSession(resume: boolean): Promise<void> {
+// 저장은 했는데 서버에 SAVED를 못 알린 카드(로컬 '저장됨' 표시)를 저장됨으로 복원 — 서버가 READY · NEEDS_*로 줘도 createAppointment를 또 부르지 않게.
+//   서버가 이미 SAVED · REJECTED로 알면 표시를 지움. renotify(앱을 다시 연 때)면 서버에 SAVED만 다시 알림(큐). 서버가 모르는 카드는 건드리지 않음
+async function restoreSaved(sessionId: string, renotify: boolean): Promise<void> {
+  const userId = state.userId;
+  if (!userId) return; // 로그인 전 — 표시를 쓰지 않음 (저장 · 대화는 그대로)
+  await pruneOtherSessions(userId, sessionId);
+  const marks = await readSavedMarks(userId, sessionId);
+  for (const [cardId, mark] of Object.entries(marks)) {
+    const rec = state.cards.get(cardId);
+    if (!rec) continue;
+    if (rec.status === 'SAVED' || rec.status === 'REJECTED') {
+      await clearSaved(userId, sessionId, cardId);
+      continue;
+    }
+    rec.status = 'SAVED';
+    rec.estimate = null;
+    rec.error = null;
+    rec.appointmentId = mark.appointmentId;
+    rec.alarms = mark.alarms.map((a) => ({ kind: a.kind as AlarmKind, at: new Date(a.at), enabled: a.enabled }));
+    if (!renotify || state.queue.some((q) => q.saved?.cardId === cardId) || state.pending?.src?.saved?.cardId === cardId) continue;
+    const turnId = newId();
+    state.queue.push({
+      phase: 'CARD',
+      turnId,
+      saved: { userId, sessionId, cardId },
+      make: (session_id, rev) => ({
+        session_id,
+        rev,
+        client_turn_id: turnId,
+        card_action: { id: cardId, action: 'SAVED', appointment_id: mark.appointmentId, alarms: mark.alarms },
+      }),
+    });
+  }
+}
+
+// fresh = 앱을 (다시) 열어 시작하는 읽기 — 저장 표시가 남은 카드는 서버에 SAVED를 다시 알림. 오류 뒤 다시 읽기(CONFLICT · NOT_FOUND)는 복원만
+async function readSession(resume: boolean, fresh = false): Promise<void> {
   const res = await callEdge<SessionResponse>('voice-session', { session_type: 'BEFORE_SLEEP', input_mode: 'TEXT', resume });
   const at = now();
   // 앱에서 이미 저장 · 저장 안 함으로 끝낸 카드는 서버가 아직 몰라도 그대로 — 다시 저장해 일정이 두 벌 생기지 않게
@@ -511,6 +609,8 @@ async function readSession(resume: boolean): Promise<void> {
   state.cards = new Map();
   for (const m of res.messages ?? []) pushMessage(m.role === 'ai' ? 'ai' : 'me', m.text, m.at ? new Date(m.at) : at);
   mergeCards(res.cards, at);
+  if (fresh) await pruneExpired(now()); // 앱을 열 때 — 모든 사용자의 7일 지난 표시 · 옛 형식 키 정리
+  if (res.session_id) await restoreSaved(res.session_id, fresh);
   for (const [id, old] of done) {
     const rec = state.cards.get(id);
     if (rec && res.session_id && rec.status !== 'SAVED' && rec.status !== 'REJECTED') {
@@ -521,10 +621,27 @@ async function readSession(resume: boolean): Promise<void> {
   }
 }
 
+// 앱을 다시 열었더니 계산이 안 끝난 카드(NEEDS_ESTIMATE)가 있으면 — 계산 중에 앱이 꺼져 서버는 results를 기다리는 중 — 이어서 계산해
+//   새 client_turn_id로 results만 보냄 (장소 고른 뒤와 같은 길). 장소가 필요한 카드는 NEEDS_PLACE로 알려 카드의 [장소 고르기]가 이어 감
+//   서버가 계산 요청에 정정(fixes)도 기다리면 results 응답이 next = APP_TASKS로 그 정정을 다시 줌 — drive가 이어서 함
+async function continueAfterOpen(): Promise<void> {
+  const results: ResultCard[] = [];
+  for (const [id, rec] of state.cards) {
+    if (rec.status !== 'NEEDS_ESTIMATE') continue;
+    rec.status = 'ESTIMATING';
+    const outcome = await runCard(rec);
+    applyOutcome(rec, outcome);
+    results.push(resultCard(id, outcome));
+  }
+  if (results.length > 0) await sendResults(results);
+  else if (state.queue.length > 0 && !state.pending) await drive();
+}
+
 // 대화 시작 — 오늘 안 끝난 세션이 있으면 그대로(resume), 없으면 새로. 첫 마디는 서버 템플릿이라 messages에 옴. 하루 한도면 세션 없이 limits.reached = DAY
 export async function startConversation(_opts: { type: 'BEFORE_SLEEP' } = { type: 'BEFORE_SLEEP' }): Promise<void> {
   try {
-    await readSession(true);
+    await readSession(true, true);
+    await continueAfterOpen();
   } catch (e) {
     await onError(e);
   }
@@ -558,7 +675,7 @@ export function say(text?: string): Promise<Conversation> {
   return serial(async () => {
     await ensureSession();
     const typed = text?.trim();
-    if (!typed || !state.sessionId || state.pending || state.limits?.reached) return snapshot();
+    if (!typed || !state.sessionId || state.pending || state.queue.length > 0 || state.limits?.reached) return snapshot();
     const turnId = newId();
     pushMessage('me', typed, now());
     const sent = state.messages[state.messages.length - 1];
@@ -573,7 +690,7 @@ export function say(text?: string): Promise<Conversation> {
   });
 }
 
-// [다시 시도] — 세션을 못 시작했으면 다시 시작, 보낸 요청이 남았으면 같은 요청(같은 client_turn_id)을 다시
+// [다시 시도] — 세션을 못 시작했으면 다시 시작, 보낸 요청이 남았으면 같은 요청(같은 client_turn_id)을 다시 (성공하면 뒤에 쌓인 카드 요청도 차례로)
 export function retry(): Promise<Conversation> {
   return serial(async () => {
     await guardUser();
@@ -581,7 +698,7 @@ export function retry(): Promise<Conversation> {
       state.unavailable = null;
       state.started = false;
       await startConversation({ type: 'BEFORE_SLEEP' });
-    } else if (state.pending) {
+    } else if (state.pending || state.queue.length > 0) {
       state.unavailable = null;
       await drive();
     }
@@ -595,17 +712,23 @@ function recOf(id: string): CardRec {
   return rec;
 }
 
-// 카드 상태를 서버에 알림 — 이미 저장한 일은 되돌리지 않으므로 실패해도 던지지 않고 [다시 시도] 자리(pending)로
-async function notifyCard(action: Record<string, unknown>): Promise<void> {
-  if (!state.sessionId) return;
+// 카드 상태를 서버에 알림 — 이미 저장한 일은 되돌리지 않으므로 실패해도 던지지 않음. 앞에 못 끝난 요청이 있으면 큐에서 기다림
+//   서버가 거절해도(CONFLICT는 세션을 다시 읽고 새 rev로 한 번 더) 앱에서 한 저장은 그대로
+//   saved = 저장됨 로컬 표시를 지울 카드 (SAVED 알림 — 서버가 받으면 지움)
+async function notifyCard(action: Record<string, unknown>, saved?: { cardId: string }): Promise<void> {
   const turnId = newId();
-  state.pending = { phase: 'CARD', turnId, body: { session_id: state.sessionId, rev: state.rev, client_turn_id: turnId, card_action: action } };
-  try {
-    await drive();
-  } catch {
-    // 서버가 거절해도(CONFLICT는 세션을 다시 읽음 — 카드 상태는 서버 값) 앱에서 한 저장은 그대로
-    state.pending = null;
-  }
+  await submitCard({
+    phase: 'CARD',
+    turnId,
+    make: (session_id, rev) => ({ session_id, rev, client_turn_id: turnId, card_action: action }),
+    ...(saved && state.userId && state.sessionId ? { saved: { userId: state.userId, sessionId: state.sessionId, cardId: saved.cardId } } : {}),
+  });
+}
+
+// 저장한 카드를 '저장됨'으로 로컬에 적음 — 서버에 알리기 전에. 앱이 꺼져 알림이 안 가도 다시 열면 이 표시로 일정이 두 벌 생기지 않게 (저장소 오류는 삼킴)
+async function rememberSaved(cardId: string, cardKind: CardKind, appointmentId: string, alarms: readonly { kind: AlarmKind; at: Date; enabled: boolean }[], level: number): Promise<void> {
+  if (!state.userId || !state.sessionId) return; // 로그인 전이면 표시를 쓰지 않음
+  await markSaved(state.userId, state.sessionId, cardId, { appointmentId, cardKind, alarms: alarmSummary(alarms, level), savedAt: now().toISOString() });
 }
 
 // 저장 뒤 알람 한 줄씩 — 서버가 말할 숫자 (종류 · 시각 · 켜짐 · 강도만, 이동 분은 안 보냄 — D5)
@@ -653,11 +776,13 @@ export function saveCard(cardId: string): Promise<string> {
       toast = `${saved.title} 알람을 맞췄어요`;
       rec.status = 'SAVED'; // 일정은 저장됨 — 아래 두 번째 저장이 실패해도 카드는 저장으로
       rec.appointmentId = saved.id;
+      await rememberSaved(cardId, kind, saved.id, alarms, level); // 서버에 알리기 전에 — 앱이 꺼져도 다시 저장되지 않게
       try {
         const after = await adjustAfterSave(saved.id, rec.server.edit);
         if (after) {
           alarms = after.alarms;
           level = after.level;
+          await rememberSaved(cardId, kind, saved.id, alarms, level); // 바뀐 알람으로 갱신
         }
       } catch {
         partial = `${saved.title}은 저장했지만 준비 시간 · 강도는 바꾸지 못했어요. 알람 설정에서 바꿔 주세요`;
@@ -674,6 +799,7 @@ export function saveCard(cardId: string): Promise<string> {
       toast = '알람을 바꿨어요';
       rec.status = 'SAVED';
       rec.appointmentId = id;
+      await rememberSaved(cardId, kind, id, alarms, level);
     } else if (kind === 'ALARM_NEW') {
       const at = rec.server.edit?.at ? new Date(rec.server.edit.at) : null;
       if (!at || Number.isNaN(at.getTime())) throw new UserError('알람 시각을 알 수 없어요');
@@ -684,11 +810,12 @@ export function saveCard(cardId: string): Promise<string> {
       level = saved.level;
       rec.status = 'SAVED';
       rec.appointmentId = saved.id;
+      await rememberSaved(cardId, kind, saved.id, alarms, level);
     } else {
       throw new UserError('이 카드는 저장할 게 없어요');
     }
 
-    await notifyCard({ id: cardId, action: 'SAVED', appointment_id: appointmentId, alarms: alarmSummary(alarms, level) });
+    await notifyCard({ id: cardId, action: 'SAVED', appointment_id: appointmentId, alarms: alarmSummary(alarms, level) }, { cardId });
     return partial ?? toast;
   });
 }
@@ -703,6 +830,12 @@ export function rejectCard(cardId: string): Promise<void> {
   });
 }
 
+// 앱이 계산한 카드 결과만 서버에 알림 — 새 client_turn_id (장소 고른 뒤 · 다시 연 뒤 이어서 계산). 서버(#265 handleResults)는 기다리는 앱 일이 없어도 받음
+async function sendResults(cards: ResultCard[]): Promise<void> {
+  const turnId = newId();
+  await submitCard({ phase: 'RESULTS', turnId, make: (session_id, rev) => ({ session_id, rev, client_turn_id: turnId, results: { cards, fixes: [] } }) });
+}
+
 // 카드 [장소 고르기] — 고른 곳으로 다시 계산해 READY로, 결과를 서버에 알림 (새 client_turn_id로 results만 보냄 — 서버(#265)가 받음)
 export function pickCardPlace(cardId: string, place: { name: string; lat?: number; lng?: number }): Promise<void> {
   return serial(async () => {
@@ -713,16 +846,7 @@ export function pickCardPlace(cardId: string, place: { name: string; lat?: numbe
     const outcome = await runCard(rec);
     applyOutcome(rec, outcome);
     if (!state.sessionId) return;
-    const turnId = newId();
-    state.pending = {
-      phase: 'RESULTS',
-      turnId,
-      body: { session_id: state.sessionId, rev: state.rev, client_turn_id: turnId, results: { cards: [resultCard(cardId, outcome)], fixes: [] } },
-    };
-    try {
-      await drive();
-    } catch {
-      state.pending = null; // 서버가 받지 않아도 이 카드는 앱에서 계산한 상태 그대로
-    }
+    // 서버가 받지 않아도 이 카드는 앱에서 계산한 상태 그대로
+    await sendResults([resultCard(cardId, outcome)]);
   });
 }

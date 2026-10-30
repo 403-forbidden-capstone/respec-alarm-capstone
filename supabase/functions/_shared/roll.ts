@@ -20,6 +20,7 @@ import {
 } from './calc/index.ts';
 import { diffAlarms, resolveEnabled, type AlarmWrite } from './commit-core.ts';
 import { dbFail, must } from './db.ts';
+import { pickBaseRow, type ExceptionKind } from './edit.ts';
 import { HttpError } from './errors.ts';
 import { KakaoError } from './kakao.ts';
 import {
@@ -177,6 +178,9 @@ export function inheritedEnabled(alarms: readonly AlarmRow[], now: Date): Partia
   return out;
 }
 
+// 반복 다음 회차의 자동 준비시간이 직전 회차에서 움직일 수 있는 폭 (분) — D62 처음 2주 몫
+export const PREPARE_DAILY_STEP_MAX = 10;
+
 export type RollPlanCtx = {
   userId: string; // 만든 사람 — 본인 길은 검증한 로그인 사용자(requireUser), 배치는 roll_due_series가 준 사용자. 요청 본문에서 받지 않음
   now: Date;
@@ -209,7 +213,7 @@ export const resolvedTravelOf = (chosen: TravelChoice): ResolvedTravel => ({ cho
 
 // 새 회차 하나의 계획 — 설계 메모 2절 이어받기 표대로. 계산은 alarm-commit · alarm-suggest가 쓰는 computePlan · diffAlarms 그대로 (따로 규칙을 만들지 않음)
 //   이어받음: 만들 종류 · 끈 종류 · 직접 강도(단계 그대로) · 직접 시각(같은 시:분) · 출발지 · 이동 수단 · 여유 · 직접 이동시간(travel에 MANUAL로 넘어옴) · 준비물 · 제목 · 장소 · 중요도 · 메모 · 반경 · 규칙
-//   새로 구함: 이동시간(API) · 준비시간(공통 P80 + 개인 보정, D56-3 A) · 그날 첫 일정(회차 날짜 기준 hasEarlierWake)
+//   새로 구함: 이동시간(API) · 준비시간(첫 값 + 개인 보정, D56-3 A — 단 기준 회차 준비값 ±10분 안에서만, D62 처음 2주 몫) · 그날 첫 일정(회차 날짜 기준 hasEarlierWake)
 //   resolved.travel = 이 회차에 쓸 이동시간, sameDayWake = 이 회차 날짜에 약속 시각이 더 앞선 켜진 기상이 있나, baseHadEarlierWake = 기준 회차가 그랬나(inheritedKinds)
 export function planOccurrence(
   ctx: RollPlanCtx,
@@ -230,6 +234,10 @@ export function planOccurrence(
     kinds: inheritedKinds(alarms, { withWake: !resolved.sameDayWake, baseHadEarlierWake: resolved.baseHadEarlierWake === true }),
     manualTimes,
   });
+  // D62 처음 2주 몫: 하루에 움직이는 폭 상한 — 새 회차의 자동 준비시간은 직전(기준) 회차의 준비값 ±10분 안에서만 (학습 루프 기초 1절 ④)
+  //   기준 회차에 기상 알람이 있어서 준비값이 "기상~출발"일 때만 비교함 — 기상 없는 회차(공통 15분)와 섞어 비교하면 15 ↔ 60처럼 엉뚱하게 당겨지므로.
+  //   L6 안건후보: 기준 회차에 기상 행이 없는 묶음의 상한 기본안 = 상한을 걸지 않음 (기준이 기상 없는 회차인지 알 수 없음)
+  const prepareBound = alarms.some((a) => a.alarm_type === 'WAKE') ? { around: Number(participant.prepare_minutes), within: PREPARE_DAILY_STEP_MAX } : undefined;
   const planWith = (manualTimes: Partial<Record<RingKind, Date>>) => {
     const inputs: PlanInputs = {
       now,
@@ -240,6 +248,7 @@ export function planOccurrence(
       stats: ctx.stats,
       lateCount4w: ctx.lateCount4w,
       sameDayWake: resolved.sameDayWake,
+      ...(prepareBound && Number.isFinite(prepareBound.around) ? { prepareBound } : {}),
     };
     return { inputs, plan: computePlan(inputs, resolvedTravelOf(resolved.travel), 'save') };
   };
@@ -309,6 +318,16 @@ type Task = RollTask & { appointment?: SeriesAppointmentRow; standalone?: Standa
 function newestPerSeries<T extends { series_id: string }>(rows: readonly T[]): T[] {
   const seen = new Set<string>();
   return rows.filter((r) => (seen.has(r.series_id) ? false : (seen.add(r.series_id), true)));
+}
+
+// 묶음마다 기준 회차 (edit.ts pickBaseRow) — 예외 아닌 행이 우선, 예외뿐이면 이번만 고친 행, 지운 행은 기준이 아님
+function baseRowsPerSeries<T extends { series_id: string; occurrence_on: string; appointment_at: string; appointment_id: string; exception_kind?: ExceptionKind | null }>(rows: readonly T[]): T[] {
+  const bySeries = new Map<string, T[]>();
+  for (const r of rows) bySeries.set(r.series_id, [...(bySeries.get(r.series_id) ?? []), r]);
+  return [...bySeries.values()].flatMap((list) => {
+    const base = pickBaseRow(list);
+    return base ? [base] : [];
+  });
 }
 
 const attemptKey = (seriesId: string, date: string) => `${seriesId}|${date}`;
@@ -522,10 +541,17 @@ class RollRun {
 
     // 본인 길 — 내 묶음을 RLS 클라이언트로 직접 읽음 (roll_due_series는 service_role 전용이고 모든 사람의 줄을 줌)
     const userId = this.scope.userId as string;
-    const appointments = newestPerSeries(
-      must<SeriesAppointmentRow[]>(
+    // 기준 회차는 예외(이번만 고친 · 지운 회차, exception_kind)가 아닌 행 중 가장 늦은 것 — 이번만 고친 값이 다음 회차들로 번지지 않게 (edit.ts pickBaseRow = DB 함수 roll_due_series와 같은 규칙)
+    const appointments = baseRowsPerSeries(
+      must<(SeriesAppointmentRow & { exception_kind: ExceptionKind | null })[]>(
         'appointments',
-        await read.from('appointments').select(SERIES_APPOINTMENT_COLUMNS).eq('creator_id', userId).not('recurrence_rule', 'is', null).order('occurrence_on', { ascending: false }).limit(500),
+        await read
+          .from('appointments')
+          .select(`${SERIES_APPOINTMENT_COLUMNS}, exception_kind`)
+          .eq('creator_id', userId)
+          .not('recurrence_rule', 'is', null)
+          .order('occurrence_on', { ascending: false })
+          .limit(500),
       ),
     ).map((a): Task => ({ user_id: userId, series_id: a.series_id, kind: 'APPOINTMENT', template_id: a.appointment_id, appointment: a }));
     const standalones = newestPerSeries(
