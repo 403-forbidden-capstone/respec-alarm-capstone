@@ -1,11 +1,14 @@
 // 수업 시간표 단계(L02-6, D66-1 B 직접 입력 초안)의 순수 함수 — 줄 상태 · 첫 수업 날짜 · 일정 입력값 만들기 (시험: __tests__/timetable.test.ts)
 import { defaultDraft } from '@/features/alarm/api';
 import { sortDays } from '@/features/alarm/repeat';
-import type { AppointmentDraft, LatLng, Transport } from '@/features/alarm/types';
+import type { AppointmentDraft, Estimate, LatLng, Transport } from '@/features/alarm/types';
 import { addDays, dateParts, formatMinuteOfDay, minuteOfDay, startOfDay } from '@/lib/format';
 import { WEEKDAYS, type Weekday } from '@/lib/weekday';
 
 import type { ClassRow } from './components/TimetableStep';
+
+// 수업 줄 수 상한 — 한 번에 길찾기를 줄마다 부르므로 (카카오 도보 하루 한도). 나머지는 일정 화면에서
+export const MAX_CLASS_ROWS = 10;
 
 export type RowStatus = 'empty' | 'partial' | 'complete';
 
@@ -31,6 +34,15 @@ export function firstDate(days: readonly Weekday[], startMinutes: number, nowDat
     if (offset > 0 || startMinutes > minuteOfDay(nowDate)) return day;
   }
   return today; // 위 반복에서 반드시 잡히므로 닿지 않음
+}
+
+// 길찾기를 못 해 대략값으로만 나온 계산 — 이대로 반복 일정에 저장하면 계속 쓰이므로 저장하지 않고 다시 누르게 함
+// 줄에 달 이유 글자를 돌려줌 (이동 분을 알면 넣음). 저장해도 되면 null
+export function needsRetry(estimate: Pick<Estimate, 'travelNeedsConfirm'> & { appointment?: { travelMinutes?: number } }): string | null {
+  if (!estimate.travelNeedsConfirm) return null;
+  const minutes = estimate.appointment?.travelMinutes;
+  const rough = typeof minutes === 'number' ? `대략 ${minutes}분` : '대략적인 값';
+  return `길 찾기를 못 해 ${rough}으로만 나왔어요. 잠시 뒤 다시 눌러 주세요`;
 }
 
 // 수업 한 줄 → 일정 입력값. 줄은 complete여야 함

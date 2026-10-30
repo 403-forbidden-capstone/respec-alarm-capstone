@@ -1,6 +1,6 @@
 import { describe, expect, it } from '@jest/globals';
 
-import { homePatchOf } from '../home';
+import { hasHome, homePatchOf } from '../home';
 
 describe('homePatchOf — 고른 장소를 집으로 정할 수 있나', () => {
   it('좌표가 있으면 프로필에 쓸 값', () => {
@@ -26,5 +26,22 @@ describe('homePatchOf — 고른 장소를 집으로 정할 수 있나', () => {
   it('이름이 비면 null, 앞뒤 공백은 뗌', () => {
     expect(homePatchOf({ name: '  ', lat: 37, lng: 127 })).toBeNull();
     expect(homePatchOf({ name: ' 우리 집 ', lat: 37, lng: 127 })?.home_name).toBe('우리 집');
+  });
+});
+
+describe('hasHome — 시간표 단계가 이동시간을 구할 수 있나', () => {
+  it('이 단계에서 집을 저장했으면 true', () => {
+    expect(hasHome(true, null)).toBe(true);
+  });
+
+  it('저장은 안 했어도 프로필에 집 좌표가 있으면 true (0도 있는 좌표)', () => {
+    expect(hasHome(false, { home_lat: 37.5, home_lng: 127 })).toBe(true);
+    expect(hasHome(false, { home_lat: 0, home_lng: 0 })).toBe(true);
+  });
+
+  it('둘 다 없으면 false — 좌표가 하나만 있어도', () => {
+    expect(hasHome(false, null)).toBe(false);
+    expect(hasHome(false, { home_lat: null, home_lng: null })).toBe(false);
+    expect(hasHome(false, { home_lat: 37.5, home_lng: null })).toBe(false);
   });
 });

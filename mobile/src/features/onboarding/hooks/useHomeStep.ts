@@ -14,6 +14,7 @@ export function useHomeStep(profile: Profile | null, userId: string | null) {
     profile?.home_name ? homePatchOf({ name: profile.home_name, lat: profile.home_lat ?? undefined, lng: profile.home_lng ?? undefined }) : null,
   );
   const [searchOpen, setSearchOpen] = useState(false);
+  const [saved, setSaved] = useState(false); // 이 단계에서 집을 고르고 [다음]까지 지났음 (시간표 단계가 집 유무를 볼 때 씀)
 
   function pick(place: Place) {
     const patch = homePatchOf(place);
@@ -35,8 +36,10 @@ export function useHomeStep(profile: Profile | null, userId: string | null) {
     pick,
     clear: () => setHome(null),
     // [다음] — 실데이터만 저장 (userId 없으면 저장 없이 통과). [나중에]는 이걸 부르지 않음
+    saved,
     save: async () => {
       if (userId && home) await saveProfileFields(userId, home);
+      if (home) setSaved(true);
     },
   };
 }

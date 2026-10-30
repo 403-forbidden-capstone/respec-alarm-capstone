@@ -5,7 +5,7 @@ import { defaultAlarms } from '@/features/alarm/types';
 import { dayKey } from '@/lib/format';
 
 import type { ClassRow } from '../components/TimetableStep';
-import { firstDate, rowStatus, toDraft } from '../timetable';
+import { firstDate, MAX_CLASS_ROWS, needsRetry, rowStatus, toDraft } from '../timetable';
 
 const row = (patch: Partial<ClassRow> = {}): ClassRow => ({ id: 'r1', name: '', days: [], startMinutes: null, place: '', ...patch });
 const FULL = row({ name: '자료구조', days: ['월', '수'], startMinutes: 9 * 60 + 30, place: '공학관 301호' });
@@ -105,5 +105,21 @@ describe('toDraft — 수업 줄 → 일정 입력값', () => {
 
   it('덜 채운 줄은 일정으로 못 바꿈', () => {
     expect(() => toDraft(row({ name: '자료구조' }), undefined, 'TRANSIT', date)).toThrow();
+  });
+});
+
+describe('needsRetry — 길찾기 대략값은 저장하지 않음', () => {
+  it('확인이 필요한 계산이면 이동 분을 넣은 이유를 돌려줌', () => {
+    expect(needsRetry({ travelNeedsConfirm: true, appointment: { travelMinutes: 25 } })).toBe('길 찾기를 못 해 대략 25분으로만 나왔어요. 잠시 뒤 다시 눌러 주세요');
+  });
+
+  it('이동 분을 모르면 분 없는 문구, 확인이 필요 없으면 null', () => {
+    expect(needsRetry({ travelNeedsConfirm: true })).toBe('길 찾기를 못 해 대략적인 값으로만 나왔어요. 잠시 뒤 다시 눌러 주세요');
+    expect(needsRetry({ travelNeedsConfirm: false, appointment: { travelMinutes: 25 } })).toBeNull();
+    expect(needsRetry({})).toBeNull();
+  });
+
+  it('수업 줄 상한은 10', () => {
+    expect(MAX_CLASS_ROWS).toBe(10);
   });
 });

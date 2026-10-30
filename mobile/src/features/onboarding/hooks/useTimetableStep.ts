@@ -5,10 +5,10 @@ import { createAppointment, estimateAppointment } from '@/features/alarm/api';
 import type { LatLng, Place, Transport } from '@/features/alarm/types';
 import { askNotifications } from '@/features/permissions';
 import { now } from '@/lib/clock';
-import { userMessage } from '@/lib/errors';
+import { UserError, userMessage } from '@/lib/errors';
 
 import type { ClassRow } from '../components/TimetableStep';
-import { firstDate, rowStatus, toDraft } from '../timetable';
+import { firstDate, MAX_CLASS_ROWS, needsRetry, rowStatus, toDraft } from '../timetable';
 
 const DEFAULT_START = 9 * 60; // 시각 시트를 처음 열 때 보여 주는 시각 (오전 9:00)
 const SOURCE = '온보딩 시간표'; // createAppointment의 출처 글자
@@ -62,6 +62,9 @@ export function useTimetableStep(transport: Transport) {
       try {
         const date = firstDate(row.days, row.startMinutes, now());
         const estimate = await estimateAppointment(toDraft(row, coords[row.id], transport, date));
+        // 길찾기를 못 해 대략값만 나왔으면 저장하지 않음 — 반복 일정에 그대로 남기 때문. 다시 누르면 길찾기를 다시 부름
+        const retry = needsRetry(estimate);
+        if (retry) throw new UserError(retry);
         await createAppointment(estimate, SOURCE);
         mark(row.id, { result: 'ok', resultNote: undefined });
         made += 1;
@@ -84,10 +87,18 @@ export function useTimetableStep(transport: Transport) {
     canSave,
     onChangeRow: change,
     onAddRow: () => {
+      if (rows.length >= MAX_CLASS_ROWS) {
+        toast(`수업은 ${MAX_CLASS_ROWS}개까지 넣을 수 있어요. 나머지는 일정 화면에서 추가해 주세요`);
+        return;
+      }
       seq.current += 1;
       setRows((list) => [...list, { id: `class-${seq.current}`, name: '', days: [], startMinutes: null, place: '' }]);
     },
     onRemoveRow: (id: string) => {
+      if (locked(id)) {
+        toast('이미 저장했어요. 일정 화면에서 지워 주세요');
+        return;
+      }
       setRows((list) => list.filter((row) => row.id !== id));
       setCoords(({ [id]: _gone, ...rest }) => rest);
     },
