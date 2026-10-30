@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import { mock, test } from 'node:test';
 
-import { buildRingPackages, departureNotice, prepareNotice, wakeVoiceText, type AppointmentNotice, type PackageSource, type RingPackage } from './ring-package.ts';
+import { axesOf, buildRingPackages, departureNotice, prepareNotice, wakeVoiceText, type AppointmentNotice, type PackageSource, type RingPackage } from './ring-package.ts';
 
 const TZ = 'Asia/Seoul';
 // 2025년 5월 22일 한국 시각 minutes분
@@ -147,4 +147,11 @@ test('문구가 붙어도 제목 · 부제 · 출발 시각 칸은 그대로이�
 
 test('출발 문구 단독', () => {
   assert.equal(departureNotice({ departAt: kst(540), appointmentAt: kst(600), travelMinutes: 50, timeZone: TZ }), '지금 나가면 오전 9:50 도착 · 여유 10분');
+});
+
+test('축별 선택을 끄면(axesEnabled false) 저장된 소리 · 진동 · 말소리를 무시하고 강도를 따름 — 켜면 저장된 값이 그대로 살아 있음 (D1 A flag, 헤드 확정 10/30)', () => {
+  const stored = { sound_key: 'theme_urgent', vibration: 'NONE', voice_tone: 'DIRECT', intensity: 'NORMAL' } as const;
+  assert.deepEqual(axesOf(stored, true), { soundKey: 'theme_urgent', vibration: 'NONE', voiceTone: 'DIRECT' });
+  assert.deepEqual(axesOf(stored, false), { soundKey: 'theme_default', vibration: 'SHORT_REPEAT', voiceTone: null });
+  assert.deepEqual(axesOf({ ...stored, intensity: 'STRONG' }, false), { soundKey: 'theme_urgent', vibration: 'STRONG_CONTINUOUS', voiceTone: null });
 });

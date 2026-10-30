@@ -314,8 +314,8 @@ class AlarmPlaybackService : Service() {
     return true
   }
 
-  // 알람음 후보 (앞에서부터 시도). 기본 소리 키(와 모르는 키)는 폰 기본 알람음이 먼저, 우리 앱 파일이 그 다음 — 안드로이드 기본 알람처럼
-  // 그 밖의 소리 키(Q7)는 우리 앱 파일이 먼저. 마지막은 폰 기본 벨소리 · 알림음 (어느 것도 안 되면 그때서야 실패)
+  // 알람음 후보 (앞에서부터 시도). 기본 키(default) · 보통(theme_default) · 모르는 키는 폰 기본 알람음이 먼저, 우리 앱 파일이 그 다음 — 안드로이드 기본 알람처럼
+  // 약(theme_calm) · 강(theme_urgent)만 우리 앱 파일이 먼저 (AlarmSoundKeys.playsOwnFileFirst). 마지막은 폰 기본 벨소리 · 알림음 (어느 것도 안 되면 그때서야 실패)
   private fun alarmSounds(soundKey: String): List<Uri> {
     val resource = SOUND_RESOURCES[soundKey]
     val ownFirst = AlarmSoundKeys.playsOwnFileFirst(soundKey, resource != null)
