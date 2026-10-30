@@ -78,6 +78,7 @@ function toAppointment(a: MockAppointment): Appointment {
     repeatLabel: repeatLabel(rruleToRepeat(a.recurrenceRule)),
     recurrenceRule: a.recurrenceRule,
     groupName: a.groupId ? (db.groups[a.groupId]?.name ?? null) : null,
+    ...(a.groupId && !isMine(a) ? { canEdit: false as const } : {}),
     items: [...a.items],
     withWake: a.withWake,
     enabled: !db.disabledAppointments.has(a.id),
