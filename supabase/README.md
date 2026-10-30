@@ -55,7 +55,7 @@ select vault.create_secret('<service_role 키>', 'service_role_key');
 | `can_send_push(sender, target, kind)` | `notify` | 푸시를 보내도 되는지. `ALARM_CHANGED`(G04)는 보내는 사람이 받는 사람 알람의 설정 권한을 가졌을 때만 true, `WAKE_PING`(G03 깨우기)은 D19 결정 뒤까지 false |
 | `find_missed_wake_alarms(p_now, p_lookback_hours)` | `wake-check` | 기상 미확인(MISSED)으로 기록할 알람 목록 (7장 7.9.2: 마지막으로 울리기 시작한 때 + 다시 울림 총 소요 + 30분. 총 소요는 첫 울림 시작부터 마지막 울림 끝까지로 약 11 · 보통 19 · 강 21분 — 알람 코어와 같은 끝난 뒤 간격 기준. 폰은 미루면 다시 울림 묶음을 처음부터 새로 시작하므로, 마지막 울림 시작 = 마지막 미루기 시각 + 미루기 시간(미루기가 없으면 알람 시각). 돌려주는 `snooze_minutes`는 미루기 합이라 참고용이고 `missed_at`은 이 합으로 구하지 않음). 기상 확인은 같은 사람의 `WAKE_CONFIRMED`(어느 기상 알람이든) 또는 `daily_records.wake_confirmed_at`이면 인정 — 그룹 현황판이 '기상'으로 세는 기준과 같음. 기록은 알람 시각 6시간 전 ~ 18시간 뒤만 봄. 돌려주는 `event_key`를 `alarm_events.client_event_id`로 넣고 `on conflict do nothing`하면 같은 알람이 두 번 기록되지 않음 |
 | `roll_insert_occurrence(p_appointment, p_participant, p_alarms, p_items)` | `alarm-roll` (다음 PR) | 반복 회차 하나를 약속 · 참여 조건 · 알람 · 준비물(`todos` ITEM)까지 **한 트랜잭션**으로 씀. 같은 (만든 사람, 묶음, 날짜)가 이미 있으면 아무것도 안 쓰고 `null`(같은 요청 두 번 = 같은 결과), 새로 만들면 `appointment_id`. 넣는 칸은 `alarm-commit`(`_shared/commit.ts` persistAppointment)과 같고 약속에 `memo` · `dest_radius_m`만 더 이어받음. 입력은 jsonb(`series_id` · `occurrence_on` 필수) |
-| `roll_due_series(p_now, p_limit)` | `alarm-roll` 배치 (다음 PR) | 회차를 넘길 후보 묶음 `(user_id, series_id, kind, template_id)`, 다음 회차가 급한 순 (정말 만들 날짜가 있는지는 `alarm-roll`이 다시 봄). `APPOINTMENT`: 묶음에서 날짜가 가장 늦은 회차에 읽을 수 있는 `recurrence_rule`(두 모양)이 있고 개인 약속이며 **다음 회차** 시각이 `p_now + 14일` 앞(14일치가 차 있으면 안 줌) · 재시도 대기 아님(`roll_attempts.next_try_at`이 안 온 줄 없음) · 미뤄 둔 날짜의 재시도 때가 지났으면 창 밖이어도 포함. `STANDALONE`: 일정 없는 반복 알람(같은 기준). `ROUTINE`: 켜 둔 루틴(읽을 수 있는 요일)의 켜진 단계 알람 시각이 지난 것. 못 읽는 규칙 · 요일(예전 MONTHLY · INTERVAL 등)은 빼서 매번 앞자리를 차지하지 않게 |
+| `roll_due_series(p_now, p_limit)` | `alarm-roll` 배치 (다음 PR) | 회차를 넘길 후보 묶음 `(user_id, series_id, kind, template_id)`, 다음 회차가 급한 순 (정말 만들 날짜가 있는지는 `alarm-roll`이 다시 봄). `APPOINTMENT`: 묶음의 **기준 회차**(예외 아닌 회차 중 날짜가 가장 늦은 것, 없으면 이번만 고친 회차 중, 이번만 지운 회차는 기준이 아님)에 읽을 수 있는 `recurrence_rule`(두 모양)이 있고 개인 약속이며 **다음 회차** 시각이 `p_now + 14일` 앞(14일치가 차 있으면 안 줌) · 재시도 대기 아님(`roll_attempts.next_try_at`이 안 온 줄 없음) · 미뤄 둔 날짜의 재시도 때가 지났으면 창 밖이어도 포함. `STANDALONE`: 일정 없는 반복 알람(같은 기준). `ROUTINE`: 켜 둔 루틴(읽을 수 있는 요일)의 켜진 단계 알람 시각이 지난 것. 못 읽는 규칙 · 요일(예전 MONTHLY · INTERVAL 등)은 빼서 매번 앞자리를 차지하지 않게 |
 
 앱(authenticated)이 부르는 DB 함수 추가분:
 
@@ -116,6 +116,7 @@ create policy wake_signal_receive on realtime.messages
 | `alarm-commit` | 약속 · 참여 조건 · 알람을 한 번에 저장 → 예약 꾸러미 + 취소할 알람 id. 일정 없는 알람도 여기서 만듦. 요청은 `alarm-suggest`와 같은 초안 모양 + `title` · `replace_existing` · `edits`. 직접 입력 이동은 이어받음 | 앱 H05 · H03 · S01 | 켬 | 카카오 길찾기 |
 | `place-search` | 장소 검색 | 앱 H05 · 온보딩 | 켬 | 카카오 로컬 |
 | `notify` | 다른 사람 폰에 푸시 (권한은 `can_send_push`) | 앱 G04 · G03 | 켬 | Expo Push |
+| `appointment-edit` | 일정 수정 · 삭제 (N6, D41): 한 번짜리와 반복의 **이번만 / 이후 모두** 고치기 · 지우기, 이번만 지운 회차 되돌리기, 공동 약속에서 나만 빠지기. 알람은 다시 계산해 `ring_packages` · `canceled_alarm_ids`를 `alarm-commit`과 같은 모양으로 돌려줌(앱이 `applyCommit`에 그대로). 7장 7.1.3: 앞 일정이 바뀌거나 지워지면 같은 날 다른 일정의 기상을 다시 판정. 요청 `{ action: UPDATE|DELETE|RESTORE|LEAVE, appointment_id, scope?: this|following, patch?, confirmed? }`. 이번만 고친 / 지운 회차는 `appointments.exception_kind`(EDITED / CANCELED)로 표시 — alarm-roll이 다시 안 만들고 기준 회차에서 뺌. **배포는 `20261030150000_appointment_edit.sql` 적용 뒤, `alarm-roll` 재배포도 같이** | 앱 H03 편집 시트 (4c 뒤) | 켬 | 카카오 길찾기 (장소를 바꿀 때) |
 | `wake-check` | 기상 미확인(MISSED) 기록 | pg_cron 5분마다 (서비스 키) | 끔 (코드에서 키 비교) | — |
 | `alarm-roll` | 반복 약속 · 일정 없는 반복 알람의 다음 회차를 앞으로 14일치 미리 만들고(회차마다 약속 · 참여 · 알람 새 행, 회차마다 길찾기 1번), 루틴 알람 시각을 다음 발생으로 옮김. 길찾기가 안 되면 1 · 3 · 6시간 뒤 재시도 → 첫 알람 12시간 전까지 안 되면 내 실측 중앙값(`CACHED`) → 직선 근사(`ESTIMATE`). 응답 `{ created, moved_alarm_ids, pending, ring_packages, canceled_alarm_ids, kakao_calls }` (`pending`은 `{ series_id, occurrence_on, reason }` 목록, `reason`은 `ROUTE_RETRY`(길찾기 재시도 대기) · `DAILY_BUDGET`(하루 길찾기 몫) · `ALARM_CAP`(앞으로 켜진 알람 상한) · `RUN_LIMIT`(이번 실행 한도 · 시간)). 길찾기를 쓴 뒤 계산 · 저장이 던져도 재시도 기록(1 · 3 · 6시간)을 남겨서 다음 5분 실행이 같은 회차로 카카오를 또 부르지 않음. **배포는 앱 맞추기(3b) 머지 뒤** | 배치: pg_cron 5분마다 (서비스 키, 길찾기 20번 · 50묶음 · 40초) / 본인: 앱 `syncNow`·반복 일정 저장 직후 (로그인 토큰, 길찾기 최대 4회차) | 끔 (코드에서 길을 가름) | 카카오 길찾기 |
 | `voice-session` | 자기 전 대화 시작 · 이어 받기(텍스트, 첫 마디는 서버 템플릿 — 모델 호출 없어 `ANTHROPIC_API_KEY` 없이도 동작). 오늘 안 끝난 세션은 그대로(resume), 하루 5대화 넘으면 `session_id: null` + `limits.reached: DAY`. L4 AI 묶음 — **첫 배포 전 헤드에 알림** | 앱 A02 | 켬 | — |
@@ -238,7 +239,8 @@ npx supabase@2.119.0 functions deploy alarm-commit  --project-ref gomrhctwjvttoq
 npx supabase@2.119.0 functions deploy place-search  --project-ref gomrhctwjvttoqifxktt --use-api
 npx supabase@2.119.0 functions deploy notify        --project-ref gomrhctwjvttoqifxktt --use-api
 npx supabase@2.119.0 functions deploy wake-check    --project-ref gomrhctwjvttoqifxktt --use-api
-npx supabase@2.119.0 functions deploy alarm-roll    --project-ref gomrhctwjvttoqifxktt --use-api   # 앱 맞추기(3b) 머지 뒤에
+npx supabase@2.119.0 functions deploy alarm-roll    --project-ref gomrhctwjvttoqifxktt --use-api   # 앱 맞추기(3b) 머지 뒤에. appointment_edit 마이그레이션 적용 뒤에 다시 배포
+npx supabase@2.119.0 functions deploy appointment-edit --project-ref gomrhctwjvttoqifxktt --use-api   # appointment_edit 마이그레이션 적용 뒤에
 ```
 
 - `verify_jwt`는 `config.toml`의 `[functions.<이름>]`이 정함 (`wake-check` · `alarm-roll` 둘만 끔). 배포 때 따라감
