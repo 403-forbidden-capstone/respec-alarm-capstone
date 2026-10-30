@@ -943,9 +943,12 @@ export function applyFast(state: TurnState, fast: FastExtract, ctx: Context, aft
     }
   }
 
-  // ── 안전 — 위기 안내 시점은 서버가: 위험 표시가 처음 켜진 턴에만, 대화당 1회 ──
+  // ── 안전 — 위기 안내 판단은 서버가: 이 턴 사용자 말에서 위험 표시(T2F safety_flag)가 켜진 턴마다 `위기 안내 필요` 줄을 넘김 (헤드 10/30 B안).
+  //   예전엔 대화당 1번만 넘겨서, 위기 말이 이어지는 둘째 턴의 109 문장을 가드가 '되풀이'로 지웠음. 새 위험 말에 다시 안내하는 건 되풀이가 아님.
+  //   가드가 109를 지우는 건 이 턴 위험 판단이 꺼져 있고 이미 안내한 대화일 때뿐 (guards.ts hotline_repeat · hotline_without_risk)
+  //   crisisNotified는 '한 번이라도 안내했는지'로 남김(상태 기록 · 시험용). 안내 줄 자체는 이 턴 위험 표시만 따른다
   s.safetyFlag = s.safetyFlag || extract.safety_flag;
-  const crisis = extract.safety_flag && !s.crisisNotified;
+  const crisis = extract.safety_flag;
   if (crisis) {
     s.crisisNotified = true;
     ev.crisis = true;
@@ -1246,9 +1249,12 @@ export interface PickedQuestion {
 export function pickServerQuestion(ctx: Context, history: QuestionHistory, now: string): PickedQuestion | null {
   if (history.askedInConversation) return null;
   const nowAbs = absMinutes(now);
-  const today = seoulLocal(now).date;
   const recent = history.recent ?? [];
-  if (recent.filter((q) => seoulLocal(q.asked_at).date === today).length >= QUESTION_PER_DAY) return null;
+  // '하루' = 대화 기준일(같은 밤, 헤드 H1 · 10/30) — 달력 날짜가 아님. 기준일 = 돌아볼 날(ctx.dates.today)의 0시부터 지금까지.
+  //   23:50에 물은 뒤 00:20 같은 밤 대화(기준일 아직 어제)에서도 오늘 몫을 이미 쓴 것이고, 다음 기준일(돌아볼 날이 바뀐 대화)에는 새로 물을 수 있음.
+  //   (자정 뒤에 물은 질문은 그 밤의 기준일에 묶이지 못하고 달력 날짜로 셈 — 다음 날 저녁에 한 번 덜 묻는 쪽으로 틀림, 안전한 쪽)
+  const dayStart = dayNumber(ctx.dates.today) * 1440;
+  if (recent.filter((q) => absMinutes(q.asked_at) >= dayStart).length >= QUESTION_PER_DAY) return null;
   if (recent.filter((q) => nowAbs - absMinutes(q.asked_at) < 7 * 1440).length >= QUESTION_PER_WEEK) return null;
 
   const tomorrowAppts = ctx.tomorrow.appointments;

@@ -77,7 +77,7 @@ export async function handleVoiceSession(deps: VoiceSessionDeps, body: unknown):
   const confirm = pickConfirmFacts(first.context, SERVER_CONFIRM_OPTS);
   const picked = pickServerQuestion(first.context, { askedInConversation: false, recent }, nowIso);
   const built = buildContext({ ...rows.input, question: picked?.question ?? null, confirmFactIds: confirm });
-  const opening = openingMessage(built.context, picked?.question ?? null);
+  const opening = openingMessage(built.context, picked?.question ?? null, confirm);
 
   const { events, cards, fixes, awaiting, ...core } = initTurnState(built.context);
   const state: ServerState = {

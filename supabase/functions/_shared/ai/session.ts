@@ -6,7 +6,8 @@ import { HttpError } from '../errors.ts';
 import type { Db } from '../supabase.ts';
 import type { AiCallRecord } from './llm.ts';
 import type { AskedQuestion, FixRecord, TurnState } from './turn-core.ts';
-import type { RefsOut } from './context-core.ts';
+import { dbMs, type RefsOut } from './context-core.ts';
+import { seoulIso } from './context.ts';
 import { MAX_AI_CALLS_PER_DAY, MAX_SESSIONS_PER_DAY, MAX_USER_TURNS } from './opening.ts';
 import type { Act, Card, Context, ServerEvent, TurnLimits } from './types.ts';
 
@@ -152,7 +153,8 @@ export async function recentQuestions(deps: SessionDeps, sinceIso: string): Prom
     'user_questions',
     await deps.userDb.from('user_questions').select('kind, subject_key, asked_at').eq('user_id', deps.userId).gte('asked_at', sinceIso).order('asked_at', { ascending: false }),
   );
-  return (rows ?? []).map((r) => ({ kind: r.kind as AskedQuestion['kind'], subject_key: r.subject_key, asked_at: r.asked_at }));
+  // DB가 준 시각 글자('…+00' 등)를 서울 ISO로 맞춰 줌 — 질문 예산 셈(turn-core)은 서울 ISO만 읽음
+  return (rows ?? []).map((r) => ({ kind: r.kind as AskedQuestion['kind'], subject_key: r.subject_key, asked_at: seoulIso(new Date(dbMs(r.asked_at))) }));
 }
 
 // ───────── 쓰기 (서버 키) ─────────

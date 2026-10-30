@@ -39,6 +39,7 @@
     "saved": { "_recorded": false, "reply": "저장했어요. 내일 오전 7시 40분에 강하게 깨울게요.", "acts": [], "end": false },
     "arrive_fixed": { "_recorded": false, "reply": "도착 시각을 10시 20분으로 고쳤어요.", "acts": [], "end": false },
     "crisis": { "_recorded": false, "reply": "많이 힘드셨겠어요. 힘들 땐 109(자살예방 상담전화)에 언제든 전화할 수 있어요.", "acts": [], "end": false },
+    "crisis_repeat": { "_recorded": false, "reply": "푹 쉬어요. 많이 힘드셨겠어요. 힘들 땐 109(자살예방 상담전화)에 언제든 전화할 수 있어요.", "acts": [], "end": false },
     "chat": { "_recorded": true, "reply": "좋은 하루였다니 다행이에요. 푹 주무시고 내일 발표도 잘 준비해요.", "acts": [], "end": false },
     "place_ready": { "_recorded": false, "reply": "알람이 준비됐어요. 카드의 저장 버튼을 눌러 주세요.", "acts": [], "end": false },
     "place_ask": { "_recorded": false, "reply": "동아리 모임 장소를 카드에서 골라 주세요.", "acts": [], "end": false },

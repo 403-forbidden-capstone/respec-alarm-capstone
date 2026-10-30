@@ -366,15 +366,22 @@ export interface ConfirmOptions {
   wakeAlways?: boolean;
   /** 2개보다 적으면 나머지(취침 · 미루기 · 루틴 …)로 채운다 (실험실 규칙, 기본 true). 서버는 false — 설계 메모 4.2 #4 */
   fill?: boolean;
-  /** 후보로 삼을 사실 종류 (기본: 모두). 서버는 기상 · 출발 · 도착만 */
+  /** 후보로 삼을 사실 종류 (기본: 모두). 서버는 출발 · 도착만(기상은 고칠 길이 생기면 켬) */
   kinds?: readonly FactKind[];
+  /**
+   * 3개 상한을 채우는 차례: 출발 → 도착 → 앞 출발(지금 출발 앞에 있던 "잠깐 나갔다 들어옴"). 앞 출발이 도착을 밀어내지 않게 (헤드 10/30).
+   * 기본 끔(실험실 규칙 — 출발 · 도착을 시각 순서로).
+   */
+  departFirst?: boolean;
 }
 
 /** 서버 규칙 (설계 메모 4.2): 자동 감지 값만(원탭 · 직접 · 대화로 받은 값은 confirmed) · 채우기 없음 · 기상 1 + 출발 · 도착 2 */
 export const SERVER_CONFIRM_OPTS: Readonly<ConfirmOptions> = Object.freeze({
   wakeAlways: true,
   fill: false,
-  kinds: ["WAKE", ...FIXABLE_FACT_KINDS] as readonly FactKind[],
+  // 헤드 10/30: 첫 마디에서 기상 기록은 읽지 않음 — 대화로 기상을 고칠 길(L1 대화 기상 정정 함수)이 없어서. 길이 생기면 FIXABLE_FACT_KINDS와 함께 WAKE를 다시 넣음
+  kinds: [...FIXABLE_FACT_KINDS] as readonly FactKind[],
+  departFirst: true,
 });
 
 /**
@@ -391,11 +398,13 @@ export function pickConfirmFacts(ctx: Context, opts: ConfirmOptions = {}): strin
     pick(FACT_KIND_KO, f.kind, "사실 종류"); // 모르는 종류면 에러
     return (f.source === "AUTO" ? 0 : 10) + CONFIRM_RANK[f.kind];
   };
+  // 같은 등급 안의 차례(departFirst): 출발 0 → 도착 1 → 앞 출발 2
+  const sub = (f: Fact): number => (f.earlier === true ? 2 : f.kind === "ARRIVE" ? 1 : 0);
   const kinds = opts.kinds;
   const cands = ctx.today.facts
     .map((f, i) => ({ f, i, r: rank(f) }))
     .filter(({ f }) => !f.confirmed && !DERIVED_FACTS.includes(f.kind) && (kinds === undefined || kinds.includes(f.kind)))
-    .sort((a, b) => a.r - b.r || a.i - b.i);
+    .sort((a, b) => a.r - b.r || (opts.departFirst ? sub(a.f) - sub(b.f) : 0) || a.i - b.i);
   const auto = cands.filter((c) => c.r <= CONFIRM_RANK.WAKE);
   // 자동 · 미확인 기상 기록이 있으면 첫 번째를 꼭 넣고, 남은 자리를 출발 · 도착(없으면 다른 기상)으로
   const wake = opts.wakeAlways === false ? undefined : auto.filter((c) => c.f.kind === "WAKE").sort((a, b) => a.i - b.i)[0];

@@ -140,10 +140,10 @@ describe("출처 · 사실 (설계 메모 4 · 4.2)", () => {
     assert.deepEqual(refs["f2"], { kind: "WAKE", record_date: "2026-10-29" });
   });
 
-  it("확인할 기록은 서버 규칙(채우기 없음): 자동 값만, 기상 1 + 출발 · 도착 2", () => {
+  it("확인할 기록은 서버 규칙(채우기 없음): 자동 값만, 출발 → 도착 → 앞 출발 3개 상한, 기상은 안 읽음 (헤드 10/30)", () => {
     const ctx = buildContext(seed()).context;
-    // 앞 출발(f1) · 기상(f2) · 출발(f3) · 도착(f4): 기상 1 + 출발 · 도착 2 → 앞 출발과 출발. 도착은 3개 상한 때문에 밀림 (지침 1a가 말한 한계)
-    assert.deepEqual(pickConfirmFacts(ctx, SERVER_CONFIRM_OPTS), ["f1", "f2", "f3"]);
+    // 앞 출발(f1) · 기상(f2) · 출발(f3) · 도착(f4): 기상은 빠지고 셋 다 들어감(앞 출발이 도착을 밀어내지 않음)
+    assert.deepEqual(pickConfirmFacts(ctx, SERVER_CONFIRM_OPTS), ["f1", "f3", "f4"]);
     // 원탭으로 받은 도착은 처음부터 안 읽음
     const oneTap = seed({ arrivedSource: "BUTTON" });
     assert.deepEqual(buildContext(oneTap).context.today.facts.map((f) => f.confirmed), [false, false, false, true]);
@@ -319,7 +319,7 @@ describe("buildContext — 한 바퀴 (설계 메모 8절 시드)", () => {
   it("T1 화면: 확인할 기록 줄 · 날짜 · 내일 일정 · 알람 (viewContext가 에러 없이 나옴)", () => {
     const { context } = buildContext(seed());
     const out = viewContext(context, { confirmFacts: true });
-    assert.ok(out.includes("확인할 기록(서버가 고름): f1 · f2 · f3"), out);
+    assert.ok(out.includes("확인할 기록(서버가 고름): f1 · f3 · f4"), out);
     assert.ok(out.includes("[f1] 출발 07:45 · a1 기준 (자동)"), out);
     assert.ok(out.includes("[a2] 10-30(금) 10:00 캡스톤 발표 · 장소 강남역 · 중요도 매우 중요(HIGH) · 이동 지하철 50분"), out);
     assert.ok(out.includes("[al1] 기상 07:40 · 강하게(STRONG) · a2 기준"), out);

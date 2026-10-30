@@ -104,9 +104,10 @@ test('녹화 한 바퀴: 첫 마디 템플릿 → 새 약속 카드 → 계산 �
   assert.equal(s.messages.length, 1);
   assert.equal(s.messages[0].role, 'ai');
   const hello = s.messages[0].text;
-  assert.match(hello, /오전 8시 12분에 일어났고/); // 기상
   assert.match(hello, /오전 7시 45분에 잠깐 나갔다 들어왔고/); // 앞 출발
+  assert.match(hello, /오전 8시 40분에 출발해서/); // 출발
   assert.match(hello, /오전 10시 7분에 도착했어요/); // 도착
+  assert.doesNotMatch(hello, /일어났/); // 기상 기록은 안 읽음 (헤드 10/30 — 대화로 기상을 고칠 길이 생기면)
   assert.match(hello, /틀린 게 있으면 말해 주세요\.$/);
   assert.doesNotMatch(hello, /지각/); // 지각 말 없음
   assert.deepEqual(s.limits, { turns_left: 20, sessions_left_today: 4, reached: null });
@@ -114,7 +115,7 @@ test('녹화 한 바퀴: 첫 마디 템플릿 → 새 약속 카드 → 계산 �
   assert.equal(claude!.order.length, 0);
   const sid = s.session_id as string;
   const st0 = stateOf(db, sid);
-  assert.deepEqual(st0.confirm, ['f1', 'f2', 'f3']); // 앞 출발 · 기상 · 출발 (도착은 3개 상한 밖)
+  assert.deepEqual(st0.confirm, ['f1', 'f3', 'f4']); // 앞 출발 · 출발 · 도착 (기상은 안 읽음, 앞 출발이 도착을 밀어내지 않음)
   assert.deepEqual(st0.ctx.today.facts.map((f) => [f.id, f.kind, f.time]), [['f1', 'DEPART', '07:45'], ['f2', 'WAKE', '08:12'], ['f3', 'DEPART', '08:40'], ['f4', 'ARRIVE', '10:07']]);
   assert.equal(st0.ctx.today.facts.some((f) => f.kind === 'LATE'), false);
 
@@ -137,7 +138,7 @@ test('녹화 한 바퀴: 첫 마디 템플릿 → 새 약속 카드 → 계산 �
   assert.equal(r1.cards[0].draft?.importance, 'HIGH'); // 서버 키워드 사전(발표)
   assert.deepEqual(r1.fixes, []);
   // 받은 화면: 확인할 기록 줄은 T1 화면에만, T2F는 기본 화면
-  assert.match(claude!.seen.T1[0], /확인할 기록\(서버가 고름\): f1 · f2 · f3/);
+  assert.match(claude!.seen.T1[0], /확인할 기록\(서버가 고름\): f1 · f3 · f4/);
   assert.match(claude!.seen.T1[0], /사용자 말 1 뒤:\n- 바뀐 것 없음/);
   assert.doesNotMatch(claude!.seen.T2F[0], /확인할 기록/);
   assert.match(claude!.seen.T2F[0], /서버 처리 결과 없음/);
@@ -341,7 +342,7 @@ test('00:30에 연 대화: 오늘 기상 기록이 없으면 전날 밤 — 오�
   const { deps } = depsOf(db, null, { now: () => now });
   const s = await handleVoiceSession(deps, { session_type: 'BEFORE_SLEEP', input_mode: 'TEXT' });
   assert.deepEqual(s.day, { review: '2026-10-29', morning: '2026-10-30' });
-  assert.match(s.messages[0].text, /오전 8시 12분에 일어났고/); // 어제(대화의 오늘) 기록
+  assert.match(s.messages[0].text, /오전 10시 7분에 도착했어요/); // 어제(대화의 오늘) 기록
   const st = stateOf(db, s.session_id as string);
   assert.equal(st.ctx.dates.today, '2026-10-29');
   assert.equal(st.ctx.dates.tomorrow, '2026-10-30');
@@ -364,7 +365,7 @@ test('00:30인데 오늘 기상 기록이 이미 있으면 달력 그대로 — 
 
 // ───────── 위기 턴 ─────────
 
-test('위기 턴: 위기 안내 줄 → 109 문장은 통과, 앱 일은 다음 턴으로 미룸(next USER)', async () => {
+test('위기 턴: 위기 안내 필요 줄 → 109 문장은 통과, 앱 일은 다음 턴으로 미룸(next USER)', async () => {
   const db = seed();
   const { deps, claude } = depsOf(db, { T2F: [t2f('crisis')], T1: [t1('preview'), t1('crisis')] });
   const s = await handleVoiceSession(deps, { session_type: 'BEFORE_SLEEP', input_mode: 'TEXT' });
@@ -376,6 +377,37 @@ test('위기 턴: 위기 안내 줄 → 109 문장은 통과, 앱 일은 다음 
   const line = turnsOf(db, sid).at(-1) as { guard?: string[]; flags?: string[] };
   assert.ok(!line.flags?.includes('hotline_without_risk'));
   assert.equal(stateOf(db, sid).core.crisisNotified, true);
+});
+
+test('위기 (헤드 10/30 B안): 위기 말이 두 턴 이어지면 두 턴 다 위기 안내 줄 + 109 통과', async () => {
+  const db = seed();
+  const { deps, claude } = depsOf(db, { T2F: [t2f('crisis'), t2f('crisis')], T1: [t1('preview'), t1('crisis'), t1('preview'), t1('crisis')] });
+  const s = await handleVoiceSession(deps, { session_type: 'BEFORE_SLEEP', input_mode: 'TEXT' });
+  const sid = s.session_id as string;
+  const r1 = await handleVoiceTurn(deps, text(sid, 1, '다 의미 없는 것 같아'));
+  const r2 = await handleVoiceTurn(deps, text(sid, r1.rev, '계속 사라지고 싶어'));
+  assert.match(r1.reply?.text ?? '', /109/);
+  assert.match(r2.reply?.text ?? '', /109/, '둘째 위기 턴의 109도 되풀이로 안 지움');
+  // 둘째 턴 T1 화면: 이번 턴은 위기 안내 필요, 앞 턴은 이미 함
+  const last = claude!.seen.T1.at(-1) as string;
+  assert.match(last, /사용자 말 1 뒤:\n- 위기 안내: 이미 함/);
+  assert.match(last, /사용자 말 2 뒤:\n- 위기 안내 필요: /);
+  const lines = turnsOf(db, sid).filter((t) => t.role === 'ai') as { source?: string; guard?: string[]; flags?: string[] }[];
+  assert.ok(lines.slice(1).every((l) => l.source === 't1' && !(l.flags ?? []).includes('hotline_repeat')));
+});
+
+test('위기 (헤드 10/30 B안): 위기 말 한 번 뒤 평범한 말에는 109를 되풀이하지 않음 (가드가 지움)', async () => {
+  const db = seed();
+  const { deps } = depsOf(db, { T2F: [t2f('crisis'), t2f('empty')], T1: [t1('preview'), t1('crisis'), t1('crisis_repeat')] });
+  const s = await handleVoiceSession(deps, { session_type: 'BEFORE_SLEEP', input_mode: 'TEXT' });
+  const sid = s.session_id as string;
+  const r1 = await handleVoiceTurn(deps, text(sid, 1, '다 의미 없는 것 같아'));
+  assert.match(r1.reply?.text ?? '', /109/);
+  const r2 = await handleVoiceTurn(deps, text(sid, r1.rev, '아니야 그냥 피곤해서'));
+  assert.equal(r2.reply?.text, '푹 쉬어요. 많이 힘드셨겠어요.'); // 109 문장만 지워짐
+  const line = turnsOf(db, sid).at(-1) as { guard?: string[]; flags?: string[] };
+  assert.ok(line.flags?.includes('hotline_repeat'));
+  assert.ok(line.guard?.includes('drop_sentence'));
 });
 
 // ───────── 질문 예산 ─────────
@@ -430,6 +462,24 @@ test('질문 예산: 7일에 3개를 이미 물었으면 안 묻고, 같은 일�
   same.rows('user_questions').push({ question_id: 'q9', user_id: ME, channel: 'CARD', kind: 'PREP_CHECK', subject_key: 'PREP_CHECK:2026-10-30|캡스톤발표', asked_at: '2026-10-28T22:00:00+09:00' }); // 22시간 전
   const b = await handleVoiceSession(depsOf(same, null).deps, { session_type: 'BEFORE_SLEEP', input_mode: 'TEXT' });
   assert.match(b.messages[0].text, /오늘 하루는 어땠어요\?$/);
+});
+
+test('질문 예산의 하루 = 대화 기준일(같은 밤): 23:50에 물은 뒤 00:20 같은 밤 대화에서 또 못 묻고, 앞 기준일에 물은 것은 셈에 안 듦 (헤드 10/30)', async () => {
+  const now = new Date('2026-10-30T00:20:00+09:00'); // 달력은 10/30이지만 아직 안 잔 밤 — 기준일 10/29
+  const sameNight = seed(now);
+  seedNoAutoFacts(sameNight);
+  seedTomorrow(sameNight);
+  sameNight.rows('user_questions').push({ question_id: 'q1', user_id: ME, channel: 'CHAT', kind: 'PREP_CHECK', subject_key: 'PREP_CHECK:other', asked_at: '2026-10-29T23:50:00+09:00' });
+  const a = await handleVoiceSession(depsOf(sameNight, null, { now: () => now }).deps, { session_type: 'BEFORE_SLEEP', input_mode: 'TEXT' });
+  assert.deepEqual(a.day, { review: '2026-10-29', morning: '2026-10-30' });
+  assert.match(a.messages[0].text, /오늘 하루는 어땠어요\?$/); // 같은 밤에 이미 물음
+
+  const nextNight = seed(now);
+  seedNoAutoFacts(nextNight);
+  seedTomorrow(nextNight);
+  nextNight.rows('user_questions').push({ question_id: 'q1', user_id: ME, channel: 'CHAT', kind: 'PREP_CHECK', subject_key: 'PREP_CHECK:other', asked_at: '2026-10-28T23:50:00+09:00' }); // 앞 기준일 (26시간 전)
+  const b = await handleVoiceSession(depsOf(nextNight, null, { now: () => now }).deps, { session_type: 'BEFORE_SLEEP', input_mode: 'TEXT' });
+  assert.equal(b.messages[0].text, '내일 10:00 캡스톤 발표 준비가 평소보다 더 걸릴 것 같아요?');
 });
 
 test('서버 질문을 T1이 나중에 묻는 경우(읽어 줄 기록이 있는 날): 그때 user_questions 한 줄', async () => {
