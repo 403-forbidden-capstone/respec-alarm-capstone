@@ -28,7 +28,8 @@ export const defaultAlarms = (): Record<RingKind, boolean> => ({ WAKE: true, PRE
 
 // 목업의 보통 · 중요 · 매우 중요 = DB LOW · NORMAL · HIGH
 export const IMPORTANCE_LABEL: Record<Importance, string> = { LOW: '보통', NORMAL: '중요', HIGH: '매우 중요' };
-export const IMPORTANCE_POINT: Record<Importance, number> = { LOW: 0, NORMAL: 1, HIGH: 2 };
+// 중요도로 올리는 단계 수 — 매우 중요(HIGH)만 1 (D69, 공용 IMPORTANCE_POINT와 같아야 함: mocks/__tests__/shared.test.ts)
+export const IMPORTANCE_POINT: Record<Importance, number> = { LOW: 0, NORMAL: 0, HIGH: 1 };
 
 // 출발 위치 기본값 · 이동 수단 고르기 (H05 · H03) — DB에는 BUS · SUBWAY도 있지만 목업 선택지는 이 셋
 export const ORIGIN_HOME = '집';
@@ -102,8 +103,8 @@ export type ScheduleItem = {
 };
 
 export type Intensity = {
-  auto: Level; // 중요도 + 최근 4주 늦잠 지각으로 정한 값
-  importancePoint: number;
+  auto: Level; // 기본 보통 + 중요도(매우 중요) · 최근 4주 늦잠 지각으로 올린 값 (D69)
+  importancePoint: number; // 중요도로 올린 단계 (매우 중요면 1)
   lateCount: number; // 최근 4주 늦잠 지각 횟수
   latePoint: number; // 2회 이상이면 1
   axes: Record<IntensityAxis, { level: Level; manual: boolean }>; // manual = 직접 고름
