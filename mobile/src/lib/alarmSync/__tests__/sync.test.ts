@@ -1,7 +1,7 @@
-import { beforeEach, describe, expect, it, jest } from '@jest/globals';
+import { afterEach, beforeEach, describe, expect, it, jest } from '@jest/globals';
 import type { AlarmEvent, RingPackage, ScheduleOutcome, ScheduledAlarm } from '@capstone/alarm-core';
 
-import { applyCommit, cancelAllPhoneAlarms, discardPendingEvents, onEventsUploaded, reconcile, setSigningOut, syncNow, uploadEvents } from '../index';
+import { applyCommit, cancelAllPhoneAlarms, discardPendingEvents, onAlarmsSynced, onEventsUploaded, reconcile, setSigningOut, syncNow, uploadEvents, type AlarmsSyncedInfo } from '../index';
 
 // 알람 코어(폰) · supabase · 데이터 모드를 가짜로 — 오케스트레이션(어느 순서로 무엇을 부르는지)만 확인. 계산은 reconcile.test.ts · events.test.ts
 const mockCore = {
@@ -23,6 +23,10 @@ jest.mock('@capstone/alarm-core', () => ({
 
 let mockMock = false;
 jest.mock('../../mode', () => ({ isMock: () => mockMock }));
+
+// 서버 함수 호출(반복 회차 넘기기 alarm-roll)을 가짜로
+const mockCallEdge = jest.fn<(name: string, body?: Record<string, unknown>, options?: unknown) => Promise<unknown>>();
+jest.mock('../../edge', () => ({ callEdge: (name: string, body?: Record<string, unknown>, options?: unknown) => mockCallEdge(name, body, options) }));
 
 type DbError = { code: string; message: string } | null;
 let mockUser: string | null = 'user-1';
@@ -61,7 +65,10 @@ beforeEach(() => {
   mockAlarmRows = [];
   mockEnabledIds = [];
   mockParticipantRows = [];
+  setSigningOut(true); // 반복 회차 넘기기 10분 제한 · 시간대를 처음 상태로
   setSigningOut(false);
+  mockCallEdge.mockReset();
+  mockCallEdge.mockResolvedValue({ created: [], ring_packages: [] });
   mockCore.cancel.mockResolvedValue();
   mockCore.cancelAll.mockResolvedValue();
   mockCore.scheduleAll.mockImplementation(scheduledAll);
@@ -508,5 +515,310 @@ describe('로그아웃 정리 — 폰 알람 전부 지우기와 맞추기의 �
     expect(mockCore.scheduleAll).not.toHaveBeenCalled();
     setSigningOut(false);
     expect(await reconcile({ nowMs: NOW })).toMatchObject({ scheduled: ['server-1'] });
+  });
+});
+
+// 서버 alarms 한 줄(임베드 포함)을 만드는 도우미 — 약속 알람. record = 그 참여 행의 출발 · 도착 기록
+type Record3 = { departed_at?: string | null; arrived_at?: string | null };
+const dbRow = (id: string, type: string, scheduledAt: string, participantId = 'p1', record: Record3 = {}) => ({
+  alarm_id: id,
+  alarm_type: type,
+  scheduled_at: scheduledAt,
+  intensity: 'NORMAL',
+  sound_key: null,
+  snooze_limit: 3,
+  is_enabled: true,
+  participant_id: participantId,
+  routine_id: null,
+  appointment_participants: { est_travel_minutes: 50, departed_at: null, arrived_at: null, ...record, appointments: { title: '회의', appointment_at: '2026-10-20T01:00:00.000Z', dest_name: '세종대학교' } },
+  routines: null,
+});
+const onPhone = (id: string, type: ScheduledAlarm['type'], atMillis: number): ScheduledAlarm => ({ id, type, intensity: 'NORMAL', title: '회의', atMillis, snoozeCount: 0, nextRingAt: atMillis });
+
+const WAKE_AT = '2026-10-19T22:30:00.000Z';
+const PREPARE_AT = '2026-10-19T23:00:00.000Z';
+const DEPART_AT = '2026-10-20T00:00:00.000Z';
+const ARRIVE_AT = '2026-10-20T00:50:00.000Z';
+const fourAlarms = (record: Record3 = {}, participantId = 'p1') => [
+  dbRow(`${participantId}-wake`, 'WAKE', WAKE_AT, participantId, record),
+  dbRow(`${participantId}-prep`, 'PREPARE', PREPARE_AT, participantId, record),
+  dbRow(`${participantId}-dep`, 'DEPARTURE', DEPART_AT, participantId, record),
+  dbRow(`${participantId}-arr`, 'ARRIVE', ARRIVE_AT, participantId, record),
+];
+const phoneFour = (participantId = 'p1') => [
+  onPhone(`${participantId}-wake`, 'WAKE', Date.parse(WAKE_AT)),
+  onPhone(`${participantId}-prep`, 'PREPARE', Date.parse(PREPARE_AT)),
+  onPhone(`${participantId}-dep`, 'DEPARTURE', Date.parse(DEPART_AT)),
+  onPhone(`${participantId}-arr`, 'ARRIVE', Date.parse(ARRIVE_AT)),
+];
+const DEPARTED = { departed_at: '2026-10-20T00:01:00.000Z' };
+const ARRIVED = { departed_at: '2026-10-20T00:01:00.000Z', arrived_at: '2026-10-20T00:40:00.000Z' };
+
+describe('reconcile — 출발 · 도착 기록이 있는 약속은 알림을 폰에서 뺌', () => {
+  it('출발 기록이 있으면 그 약속의 준비 · 출발 알람은 걸지 않고, 이미 폰에 걸린 것은 지움 (기상 · 도착 목표는 그대로)', async () => {
+    mockAlarmRows = fourAlarms(DEPARTED);
+    mockCore.list.mockResolvedValue(phoneFour());
+    const summary = await reconcile({ nowMs: NOW });
+    expect([...summary.canceled].sort()).toEqual(['p1-dep', 'p1-prep']);
+    expect(summary.scheduled).toEqual([]);
+  });
+
+  it('도착 기록이 있으면 준비 · 출발 · 도착 목표를 뺌 (기상은 그대로) — 폰에 없으면 걸지도 않음', async () => {
+    mockAlarmRows = fourAlarms(ARRIVED);
+    mockCore.list.mockResolvedValue(phoneFour());
+    expect([...(await reconcile({ nowMs: NOW })).canceled].sort()).toEqual(['p1-arr', 'p1-dep', 'p1-prep']);
+    mockCore.list.mockResolvedValue([]);
+    await reconcile({ nowMs: NOW });
+    expect(mockCore.scheduleAll.mock.calls.at(-1)?.[0].map((p) => p.alarmId)).toEqual(['p1-wake']);
+  });
+
+  it('참여 행마다 따로 봄 — 기록이 없는 다른 약속은 그대로', async () => {
+    mockAlarmRows = [...fourAlarms(DEPARTED, 'p1'), ...fourAlarms({}, 'p2')];
+    mockCore.list.mockResolvedValue([...phoneFour('p1'), ...phoneFour('p2')]);
+    expect([...(await reconcile({ nowMs: NOW })).canceled].sort()).toEqual(['p1-dep', 'p1-prep']);
+  });
+
+  it('서버 목록이 상한(500)에서 잘렸어도 기록으로 뺀 알람은 지움 — 일부러 뺀 것이지 "서버에 없음"이 아님 (잘림은 거르기 전 줄 수로 판단, 먼 폰 예약은 그대로)', async () => {
+    const filler = Array.from({ length: 496 }, (_, i) => dbRow(`f-${i}`, 'WAKE', new Date(Date.parse('2026-10-20T10:00:00.000Z') + i * 60_000).toISOString(), `f-p-${i}`));
+    mockAlarmRows = [...fourAlarms(DEPARTED), ...filler];
+    expect(mockAlarmRows).toHaveLength(500);
+    const far = Date.parse('2026-12-01T00:00:00.000Z');
+    mockCore.list.mockResolvedValue([...phoneFour(), onPhone('beyond-limit', 'WAKE', far)]);
+    const summary = await reconcile({ nowMs: NOW });
+    expect([...summary.canceled].sort()).toEqual(['p1-dep', 'p1-prep']); // beyond-limit은 지우지 않음
+  });
+
+  it('참여 행이 없는 알람(일정 없는 알람)은 그대로, 쿼리는 출발 · 도착 기록 칸도 읽음', async () => {
+    mockAlarmRows = [{ ...dbRow('solo', 'WAKE', WAKE_AT), participant_id: null, appointment_participants: null }];
+    expect((await reconcile({ nowMs: NOW })).scheduled).toEqual(['solo']);
+    expect(mockAlarmQuery.select).toHaveBeenCalledWith(expect.stringContaining('departed_at, arrived_at'));
+  });
+});
+
+describe('onAlarmsSynced — 상한에서 잘린 목록', () => {
+  it('서버 목록이 상한(500)에서 잘렸으면 whole = false — 빠진 것을 "사라졌다"로 읽지 않게', async () => {
+    const infos: AlarmsSyncedInfo[] = [];
+    const off = onAlarmsSynced((info) => {
+      infos.push(info);
+    });
+    mockAlarmRows = Array.from({ length: 500 }, (_, i) => dbRow(`t-${i}`, 'WAKE', new Date(Date.parse('2026-10-19T22:30:00.000Z') + i * 60_000).toISOString(), `p-${i}`));
+    await reconcile({ nowMs: NOW });
+    off();
+    expect(infos).toHaveLength(1);
+    expect(infos[0].whole).toBe(false);
+  });
+});
+
+describe('onAlarmsSynced — 맞춘 뒤 훅', () => {
+  let infos: AlarmsSyncedInfo[];
+  let off: () => void;
+  beforeEach(() => {
+    infos = [];
+    off = onAlarmsSynced((info) => {
+      infos.push(info);
+    });
+  });
+  afterEach(() => off());
+
+  it('전체 맞추기 끝에 불림 — 어디서(source) · 전체인지(whole) · 결과(summary) · 앞으로 알람의 참여 행(겹침 없이 약속 시각 순) · 지금(nowMs)', async () => {
+    const early = { ...dbRow('q-wake', 'WAKE', '2026-10-19T21:30:00.000Z', 'p0') };
+    early.appointment_participants.appointments.appointment_at = '2026-10-19T23:00:00.000Z';
+    mockAlarmRows = [...fourAlarms({}, 'p1'), early];
+    const summary = await reconcile({ nowMs: NOW });
+    expect(infos).toEqual([
+      {
+        source: 'reconcile',
+        whole: true,
+        summary,
+        upcoming: [
+          { participantId: 'p0', appointmentAt: '2026-10-19T23:00:00.000Z' },
+          { participantId: 'p1', appointmentAt: '2026-10-20T01:00:00.000Z' },
+        ],
+        nowMs: NOW,
+      },
+    ]);
+    expect(summary.scheduled).toHaveLength(5);
+  });
+
+  it('출발 · 도착 기록으로 알람이 빠진 약속도 남은 알람(기상 · 도착 목표)이 있으면 upcoming에 있음, 하나도 안 남으면 빠짐', async () => {
+    mockAlarmRows = [...fourAlarms(DEPARTED, 'p1'), ...fourAlarms(ARRIVED, 'p2'), dbRow('p3-prep', 'PREPARE', PREPARE_AT, 'p3', ARRIVED)];
+    await reconcile({ nowMs: NOW });
+    expect(infos[0].upcoming.map((u) => u.participantId).sort()).toEqual(['p1', 'p2']); // p2는 기상이 남음, p3은 준비 알람뿐이라 전부 빠짐
+  });
+
+  it('alarmIds로 일부만 맞추면 whole = false, upcoming은 맞춘 알람의 참여 행만', async () => {
+    mockAlarmRows = [dbRow('a-wake', 'WAKE', WAKE_AT, 'pa'), dbRow('b-wake', 'WAKE', WAKE_AT, 'pb')];
+    await reconcile({ nowMs: NOW, alarmIds: ['a-wake'] });
+    expect(infos[0]).toMatchObject({ source: 'reconcile', whole: false, upcoming: [{ participantId: 'pa' }] });
+  });
+
+  it('applyCommit 끝에도 불림 — source = commit, whole = false, 약속 시각을 같이 넘겼으면 그 한 건이 upcoming', async () => {
+    const at = new Date(Date.now() + 3_600_000).toISOString(); // applyCommit은 실제 지금을 씀
+    const summary = await applyCommit({ ring_packages: [pkg('new-1', NOW + 60_000)], participant_id: 'p-new', appointment_at: at });
+    expect(infos).toEqual([{ source: 'commit', whole: false, summary, upcoming: [{ participantId: 'p-new', appointmentAt: at }], nowMs: expect.any(Number) }]);
+    // 약속 시각이 없거나(일정 없는 알람) 이미 지났으면 비어 있음
+    await applyCommit({ ring_packages: [] });
+    await applyCommit({ participant_id: 'p-old', appointment_at: '2020-01-01T00:00:00.000Z' });
+    expect(infos.slice(1).map((i) => i.upcoming)).toEqual([[], []]);
+  });
+
+  it('훅을 기다리지 않음 — 끝나지 않는 훅이 있어도 맞추기는 끝남', async () => {
+    off();
+    off = onAlarmsSynced(() => new Promise<void>(() => {}));
+    mockAlarmRows = [dbRow('wake', 'WAKE', WAKE_AT)];
+    await expect(reconcile({ nowMs: NOW })).resolves.toMatchObject({ scheduled: ['wake'] });
+  });
+
+  it('훅이 던지거나(동기) 거절해도 맞추기는 성공하고 다른 훅은 계속 불림 — 개발 중에만 경고', async () => {
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    const offThrow = onAlarmsSynced(() => {
+      throw new Error('동기 오류');
+    });
+    const offReject = onAlarmsSynced(async () => {
+      throw new Error('비동기 오류');
+    });
+    mockAlarmRows = [dbRow('wake', 'WAKE', WAKE_AT)];
+    await expect(reconcile({ nowMs: NOW })).resolves.toMatchObject({ scheduled: ['wake'], failed: [] });
+    await new Promise((r) => setTimeout(r, 0)); // 거절된 훅의 catch가 도는 틈
+    expect(infos).toHaveLength(1);
+    expect(warn).toHaveBeenCalledTimes(2);
+    offThrow();
+    offReject();
+    warn.mockRestore();
+  });
+
+  it('구독 해제 함수를 부르면 더는 안 불림', async () => {
+    mockAlarmRows = [dbRow('wake', 'WAKE', WAKE_AT)];
+    off();
+    await reconcile({ nowMs: NOW });
+    expect(infos).toEqual([]);
+  });
+
+  it('가짜 모드 · 로그인 전 · 로그아웃 중 · 폰 읽기 실패면 안 불림 (맞춘 일이 없음)', async () => {
+    mockMock = true;
+    await reconcile({ nowMs: NOW });
+    mockMock = false;
+    mockUser = null;
+    await reconcile({ nowMs: NOW });
+    mockUser = 'user-1';
+    setSigningOut(true);
+    await reconcile({ nowMs: NOW });
+    setSigningOut(false);
+    mockCore.list.mockRejectedValueOnce(new Error('폰 오류'));
+    await expect(reconcile({ nowMs: NOW })).rejects.toThrow('폰 오류');
+    expect(infos).toEqual([]);
+  });
+});
+
+describe('syncNow — 기록 올리기 → 내 반복 회차 넘기기(alarm-roll) → 맞추기', () => {
+  beforeEach(() => {
+    jest.spyOn(console, 'warn').mockImplementation(() => {}); // 실패는 개발 중에만 콘솔에 남김 — 시험 출력에 안 섞이게
+  });
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  it('순서: 기록 올리기 → alarm-roll → 맞추기, 꾸러미는 응답이 아니라 reconcile이 DB에서 읽어 걺', async () => {
+    const order: string[] = [];
+    mockCore.getPendingEvents.mockImplementation(async () => {
+      order.push('upload');
+      return [];
+    });
+    mockCallEdge.mockImplementation(async () => {
+      order.push('roll');
+      return { ring_packages: [pkg('from-roll', NOW + 60_000)] }; // 응답의 꾸러미는 안 씀
+    });
+    mockCore.list.mockImplementation(async () => {
+      order.push('reconcile');
+      return [];
+    });
+    mockAlarmRows = [dbRow('server-wake', 'WAKE', WAKE_AT)];
+    await syncNow({ nowMs: NOW });
+    expect(order).toEqual(['upload', 'roll', 'reconcile']);
+    expect(mockCallEdge).toHaveBeenCalledWith('alarm-roll', {}, { timeoutMs: 8_000 });
+    expect(mockCore.scheduleAll.mock.calls.flatMap(([pkgs]) => pkgs.map((p) => p.alarmId))).toEqual(['server-wake']);
+  });
+
+  it('alarm-roll이 실패해도 삼키고 맞추기는 계속 — 실패한 호출은 10분 제한을 시작하지 않아 다음에 다시 부름', async () => {
+    mockCallEdge.mockRejectedValueOnce(new Error('서버 오류'));
+    mockAlarmRows = [dbRow('server-wake', 'WAKE', WAKE_AT)];
+    await expect(syncNow({ nowMs: NOW })).resolves.toBeUndefined();
+    expect(mockCore.scheduleAll).toHaveBeenCalled();
+    await syncNow({ nowMs: NOW + 1_000 });
+    expect(mockCallEdge).toHaveBeenCalledTimes(2);
+  });
+
+  it('10분에 한 번만 부름 (마지막 성공 시각 기준)', async () => {
+    await syncNow({ nowMs: NOW });
+    await syncNow({ nowMs: NOW + 9 * 60_000 });
+    expect(mockCallEdge).toHaveBeenCalledTimes(1);
+    expect(mockCore.list).toHaveBeenCalledTimes(2); // 맞추기는 매번
+    await syncNow({ nowMs: NOW + 10 * 60_000 });
+    expect(mockCallEdge).toHaveBeenCalledTimes(2);
+  });
+
+  it('rollSeriesId를 주면 10분 제한을 건너뛰고 그 묶음 번호를 보냄', async () => {
+    await syncNow({ nowMs: NOW });
+    await syncNow({ nowMs: NOW + 1_000, rollSeriesId: 'series-1' });
+    expect(mockCallEdge).toHaveBeenCalledTimes(2);
+    expect(mockCallEdge).toHaveBeenLastCalledWith('alarm-roll', { series_id: 'series-1' }, { timeoutMs: 8_000 });
+    await syncNow({ nowMs: NOW + 2_000 }); // 묶음 지정 호출의 성공도 제한 시간으로 침
+    expect(mockCallEdge).toHaveBeenCalledTimes(2);
+  });
+
+  it('8초 안에 안 끝나면 기다리지 않고 맞추기를 이어감 — 성공으로 치지 않음', async () => {
+    jest.useFakeTimers();
+    try {
+      mockCallEdge.mockImplementation(() => new Promise(() => {})); // 끝나지 않는 서버
+      mockAlarmRows = [dbRow('server-wake', 'WAKE', WAKE_AT)];
+      let done = false;
+      const running = syncNow({ nowMs: NOW }).then(() => {
+        done = true;
+      });
+      await jest.advanceTimersByTimeAsync(7_000);
+      expect(done).toBe(false);
+      expect(mockCore.scheduleAll).not.toHaveBeenCalled();
+      await jest.advanceTimersByTimeAsync(1_500);
+      await running;
+      expect(done).toBe(true);
+      expect(mockCore.scheduleAll).toHaveBeenCalled();
+      const again = syncNow({ nowMs: NOW + 1_000 }); // 성공이 아니라서 제한 없이 다시 부름
+      await jest.advanceTimersByTimeAsync(8_500);
+      await again;
+      expect(mockCallEdge).toHaveBeenCalledTimes(2);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('동시에 두 번 불려도(묶음 지정 없이) 서버에는 한 번', async () => {
+    let release: () => void = () => {};
+    mockCallEdge.mockImplementationOnce(() => new Promise((resolve) => (release = () => resolve({}))));
+    const first = syncNow({ nowMs: NOW });
+    const second = syncNow({ nowMs: NOW });
+    await new Promise((r) => setTimeout(r, 0));
+    release();
+    await Promise.all([first, second]);
+    expect(mockCallEdge).toHaveBeenCalledTimes(1);
+  });
+
+  it('가짜 모드 · 로그인 전 · 로그아웃 중에는 alarm-roll을 부르지 않음', async () => {
+    mockMock = true;
+    await syncNow({ nowMs: NOW });
+    mockMock = false;
+    mockUser = null;
+    await syncNow({ nowMs: NOW });
+    mockUser = 'user-1';
+    setSigningOut(true);
+    await syncNow({ nowMs: NOW });
+    expect(mockCallEdge).not.toHaveBeenCalled();
+  });
+
+  it('로그아웃하면 10분 제한도 처음부터 (다음 계정은 바로 부름)', async () => {
+    await syncNow({ nowMs: NOW });
+    setSigningOut(true);
+    setSigningOut(false);
+    await syncNow({ nowMs: NOW + 1_000 });
+    expect(mockCallEdge).toHaveBeenCalledTimes(2);
   });
 });

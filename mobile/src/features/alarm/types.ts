@@ -90,6 +90,14 @@ export type Appointment = {
   alarms: AlarmTime[]; // 기상 · 준비 · 출발 · 도착 목표 순 — H05에서 고른 종류만, 하나도 없으면 빈 목록(알람 없는 일정)
   level: Level; // 지금 적용되는 강도 (배경음 기준)
   standalone?: true; // 일정 없는 알람 (실데이터 전용, D46) — id는 알람 id, 제목은 "알람". 알람 설정(H03)은 아직 못 엶
+  upcomingCount?: number; // 같은 반복 묶음에서 지금 이후 남은 회차 수(이 회차 포함) — 알람 목록(H02)만 채움. 2 이상이면 앞으로 회차가 폰에 미리 걸려 있음
+};
+
+// 반복 일정의 앞으로 회차 한 줄 (H03 회차 목록) — 같은 묶음(series_id)의 지금 이후 회차, 시각 순
+export type Occurrence = {
+  id: string; // 약속 id (실데이터는 appointment_id)
+  at: Date; // 약속 시각
+  alarmAt: Date | null; // 이 회차에서 가장 먼저 울릴 켜진 알람 시각(기상 · 준비 · 출발). 알람이 없거나 다 껐으면 null
 };
 
 // 하루 일정 한 줄 (H01) — 알람 없는 일정도 일정이라 id가 있음. 알람 없는 줄은 누를 수 없음 (일정 수정 · 삭제는 D41이 정함)
