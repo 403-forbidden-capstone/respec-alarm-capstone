@@ -174,7 +174,8 @@ export default function HomeScreen() {
           onPress={() => router.push({ pathname: '/alarm/[id]', params: { id: morning.appointmentId } })}
         />
       ) : null}
-      <DetectionRows reloadOn={data} onChanged={reload} /> {/* 위치로 잡은 출발 · 도착 — 출발하면 아침 카드가 빠지고 이 줄이 그 자리를 이음 */}
+      {/* 위치로 잡은 출발 · 도착 — 출발하면 아침 카드가 빠지고 이 줄이 그 자리를 이음 */}
+      <DetectionRows reloadOn={data} onChanged={reload} />
 
       {/* 기상 알람을 끈 뒤 판정 중이면 H08로 다시 들어가는 길 */}
       {wake ? (
