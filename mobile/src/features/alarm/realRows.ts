@@ -98,11 +98,14 @@ export async function loadAppointmentRowsSince(userId: string, since: string): P
   return rows.map((row) => toRows(row, items));
 }
 
-// [from, to) 안 약속의 내 참여 조건 — 알람이 있는지만 알면 되는 하루 일정 한 줄용 (H01)
-export async function loadDayRows(userId: string, from: string, to: string) {
+// [from, to) 안 약속의 내 참여 조건 — 하루 일정 한 줄(H01)과 오늘 첫 일정(기상 후 아침 흐름)이 같이 읽음.
+//   알람은 종류 · 시각 · 켜짐까지, 참여 조건은 예상 이동 · 출처 · 출발 기록까지 (오늘 첫 일정 = 켜진 기상 알람이 붙은 가장 이른 약속)
+async function fetchDayRows(userId: string, from: string, to: string) {
   const { data, error } = await supabase
     .from('appointment_participants')
-    .select('participant_id, appointments!inner(appointment_id, title, appointment_at, dest_name, importance), alarms(alarm_id, alarm_type)')
+    .select(
+      'participant_id, est_travel_minutes, travel_source, departed_at, appointments!inner(appointment_id, title, appointment_at, dest_name, importance), alarms(alarm_id, alarm_type, scheduled_at, is_enabled)',
+    )
     .eq('user_id', userId)
     .gte('appointments.appointment_at', from)
     .lt('appointments.appointment_at', to)
@@ -110,6 +113,18 @@ export async function loadDayRows(userId: string, from: string, to: string) {
     .limit(LIST_LIMIT);
   if (error) throw error;
   return data ?? [];
+}
+
+// 홈이 하루 일정과 오늘 첫 일정을 한꺼번에 부르므로(Promise.all) 같은 하루를 동시에 두 번 묻지 않게 한 번만 — 끝나면 기억하지 않음 (realPlan suggest와 같은 방식)
+const dayReads = new Map<string, ReturnType<typeof fetchDayRows>>();
+
+export function loadDayRows(userId: string, from: string, to: string) {
+  const key = [userId, from, to].join('|');
+  const running = dayReads.get(key);
+  if (running) return running;
+  const task = fetchDayRows(userId, from, to).finally(() => dayReads.delete(key));
+  dayReads.set(key, task);
+  return task;
 }
 
 // 일정 없는 알람(D46) — 약속 · 루틴과 안 이어진 기상 알람. since(ISO)보다 이전 시각은 안 읽음

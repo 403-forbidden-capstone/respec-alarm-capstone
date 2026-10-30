@@ -2,6 +2,7 @@
 // 이름은 DB(supabase/migrations · src/types/database.ts)를 따르고, 화면에 바로 쓰기 좋게 모양만 바꿈
 import type { Weekday } from '@/lib/weekday';
 import type { Enums } from '@/types/database';
+import type { DepartStatus } from '@shared/calc/depart.ts';
 
 import type { TravelProblem } from './travelConfirm';
 
@@ -148,8 +149,12 @@ export type Snooze = { alarmId: string; kind: RingKind; appointmentTitle: string
 // 미루기 취소의 결과 — wakeCheck = 기상 알람의 미루기를 취소해 해제로 기록했으니 기상 확인(H08)으로 이어가야 함 (실데이터만, 가짜 데이터는 늘 false)
 export type CancelSnoozeResult = { wakeCheck: boolean };
 
-// 장소 — 가짜 데이터는 이름 + 집 기준 이동시간, 실데이터(place-search)는 이름 + 주소 + 좌표 (좌표가 있어야 길찾기가 됨)
-export type Place = { name: string; travelMinutes?: number; address?: string; lat?: number; lng?: number };
+// 위도 · 경도 (장소 검색의 기준점 등)
+export type LatLng = { lat: number; lng: number };
+
+// 장소 — 가짜 데이터는 이름 + 집 기준 이동시간(검색용 주소 · 좌표도 있지만 계산엔 안 씀), 실데이터(place-search)는 이름 + 주소 + 좌표 (좌표가 있어야 길찾기가 됨)
+//   category = 카카오 category_name 그대로('교육,학문 > 대학교') — 서버가 주는 값을 통과시킬 뿐 DB에 저장하지 않음 (D5)
+export type Place = { name: string; travelMinutes?: number; address?: string; lat?: number; lng?: number; category?: string };
 
 // 새 일정 입력값 (H05)
 export type AppointmentDraft = {
@@ -158,7 +163,7 @@ export type AppointmentDraft = {
   time: string; // 14:00
   repeat: Weekday[]; // 반복 요일 (월요일부터) — 비어 있으면 반복 없음. 저장할 때는 RRULE (repeat.ts)
   place: string;
-  placeLat?: number; // 고른 장소의 좌표 (place-search) — 가짜 데이터에는 없음. 없으면 listPlaces가 기억해 둔 이름 → 좌표를 씀
+  placeLat?: number; // 고른 장소의 좌표 (place-search) — 가짜 데이터 계산은 안 읽음. 없으면 listPlaces가 기억해 둔 이름 → 좌표를 씀
   placeLng?: number;
   transport: Transport;
   importance: Importance;
@@ -200,6 +205,7 @@ export type RingInfo = {
   at: Date; // 울리는 시각
   voiceTone: string; // 말소리 강도 설명
   voiceLine: string; // 음성 안내 문장
+  notice?: string; // 알림 한 줄 — 준비 · 출발 알람이 알림 · 울림 화면 머리글로 보여 주는 글자 (서버 꾸러미 notice와 같은 글자, features/alarm/notice.ts). 없으면 종류별 기본 머리글
   levelLine: string; // 알람 강도 중 · 배경음 80% · 진동 짧게 반복
   important: boolean;
 };
@@ -208,7 +214,6 @@ export type RingInfo = {
 export type WakePhase = 'idle' | 'ringing' | 'observing' | 'prompt' | 'confirmed';
 export const WAKE_OBSERVE_MINUTES = 10; // 해제 뒤 화면 사용을 보는 시간 — 끝나면 확정 또는 확인 알림
 export const WAKE_RECENT_MINUTES = 5; // 최근 사용을 보는 관찰 뒤쪽 시간 (해제 뒤 5~10분)
-export const WAKE_NO_REPLY_MINUTES = 5; // 확인 알림에 응답이 없으면 이만큼 뒤 기상 알람이 다시 울림
 
 // 기상 확인 (H08) — 기상 알람 하나 기준 (alarm_events.alarm_id에 WAKE_CONFIRMED)
 export type WakeCheck = {
@@ -217,21 +222,55 @@ export type WakeCheck = {
   groupId: string | null; // 기상 완료를 알려 줄 그룹 — 없으면 공유 안내 · 그룹 버튼을 숨김
   groupName: string | null;
   phase: 'observing' | 'prompt'; // 확정 전 단계 (확정이면 confirmed)
-  dismissedAt: Date; // 기상 알람을 실제로 끈 시각 (다시 울린 뒤 끄면 그 시각)
+  dismissedAt: Date; // 기상 알람을 실제로 끈 시각 (미룬 뒤 다시 울려 끄면 그 시각)
   thetaMinutes: number; // 기상 판정 기준 θ — 해제 뒤 10분 동안 누적 화면 사용
   usage: number; // 누적 사용 · 해제 후 10분 (분) — 지금은 시연 값, 실데이터는 #35 · #40
   recent: number; // 최근 사용 · 뒤쪽 5분 (분)
   confirmed: { at: Date; how: 'self' | 'auto' } | null; // 이미 확정했으면
 };
 
+// 기상 후 아침 흐름 (이슈 #230) — H08(기상 확정 뒤) 한 줄과 홈 아침 카드(기상 알람 시각부터)가 읽는 "오늘 첫 일정"
+// 오늘 첫 일정 = 그날 켜진 기상 알람이 붙은 약속 중 가장 이른 것 (서버 calc/wake.ts hasEarlierWake와 같은 기준). 저녁(18시~)에는 홈처럼 내일
+// 준비 · 출발 · 도착 목표는 켜진 알람의 시각 — 꺼져 있거나 없으면 null
+export type MorningPlan = {
+  appointmentId: string;
+  title: string;
+  at: Date; // 약속 시각
+  place: string;
+  wakeAlarmId: string;
+  wakeAt: Date; // 기상 알람 시각 — 홈 아침 카드가 이 시각부터 보임
+  prepareAt: Date | null;
+  departAt: Date | null;
+  arriveAt: Date | null; // 도착 목표
+  travelMinutes: number; // 저장된 예상 이동
+  travelSource: string; // 예상 이동의 출처 글자 (길찾기 · 대략적인 값 · 직접 입력 …)
+  wakeConfirmedAt: Date | null; // 이 기상 알람의 기상 확정 시각 — 없으면 아직 확정 전 (카드는 확정을 기다리지 않음)
+  departedAt: Date | null; // 출발 기록 (appointment_participants.departed_at) — 있으면 이미 나선 것
+};
+
+// 지금 나가면 (홈 아침 카드 [다시 확인]) — 지금 + 이동 = 도착, 여유 · 상태는 서버와 같은 departNow (7장 7.5.2)
+export type DepartCheck = {
+  travelMinutes: number;
+  source: string; // 이동 출처 글자
+  arriveAt: Date;
+  slackMinutes: number; // 약속 − 도착 (음수면 늦음)
+  status: DepartStatus; // COMFORT 여유 · TIGHT 빠듯 · LATE_RISK 지각 위험
+  checkedAt: Date; // 확인한 시각
+};
+
 // 고친 값 기록 (고치기 원칙) — 사용자가 자동 값을 직접 고치면 하나씩 남겨 두고, 나중에 개인화(계산 · 제안)에 씀
 // DB public.user_edit_logs 한 줄과 같은 모양 — 실데이터가 붙으면 api.ts의 recordEdit만 insert로 바뀜
 //   screen: 고친 화면 (S01 = 알람 조정 제안 직접 수정, 다른 담당이 같은 기록 함수를 부름)
+//     H03 · H05 · S01은 저장(alarm-commit edits)과 같이 남김. H01 홈 감지 정정 줄 · NTF 감지 안내 알림 · H08 기상 정정(D61)은 앱이 user_edit_logs에 바로 남김
 //   autoValue: 고치기 전에 앱이 쓰던 값 — 계산하는 값(이동 · 준비 · 알람 시각 · 강도)은 자동 계산값, 입력하는 값(여유 · 출발 위치 · 이동 수단 · 켜기)은 고치기 전 값
-//   editedValue: 고친 뒤 값. 자동으로 되돌렸으면 null
+//   editedValue: 고친 뒤 값. 자동으로 되돌렸으면 null. 위치 감지를 [아니에요]로 지웠으면 { rejected: true } (features/location/detections.ts)
 //   강도 세 칸은 DB 칸 이름으로 남김 — 배경음 = sound_key, 말소리 = voice_tone, 진동 = intensity (값은 약 · 중 · 강 = 0 · 1 · 2)
-export type EditLogScreen = 'H03' | 'H05' | 'S01';
+// alarm-commit이 받는 화면 (서버 supabase/functions/_shared/requests.ts SCREENS와 같음)
+export type CommitEditScreen = 'H03' | 'H05' | 'S01';
+export type EditLogScreen = CommitEditScreen | 'H01' | 'H08' | 'NTF';
 export type EditLogField =
+  | 'departed_at' // 위치로 잡은 출발 · 도착 정정 (H01 · NTF)
+  | 'arrived_at'
   | 'buffer_minutes'
   | 'prepare_minutes'
   | 'travel_minutes'

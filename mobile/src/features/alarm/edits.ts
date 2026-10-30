@@ -10,6 +10,7 @@ import {
   type AlarmSettingsDraft,
   type AlarmTime,
   type AppointmentDetail,
+  type CommitEditScreen,
   type EditLogField,
   type Estimate,
   type IntensityAxis,
@@ -18,7 +19,8 @@ import {
 } from './types';
 import { toEditPayload, type EditPayload } from './request';
 
-export type EditLogLine = Omit<UserEditLog, 'at'>;
+// 저장(alarm-commit edits)에 실어 보내는 줄 — 서버가 받는 화면만 (H01 · NTF · H08은 앱이 user_edit_logs에 바로 남김)
+export type EditLogLine = Omit<UserEditLog, 'at'> & { screen: CommitEditScreen };
 
 // 강도 세 칸은 DB 칸 이름으로 고친 값 기록에 남김 (types.ts UserEditLog): 배경음 = sound_key, 말소리 = voice_tone, 진동 = intensity
 export const LEVEL_FIELD: Record<IntensityAxis, EditLogField> = { sound: 'sound_key', voice: 'voice_tone', vibration: 'intensity' };

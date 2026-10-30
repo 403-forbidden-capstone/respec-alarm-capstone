@@ -4,6 +4,9 @@ import { IMPORTANCE_POINT, KIND_LABEL, toAlarmIntensity } from '@/features/alarm
 import { buildRingPackages, canceledAlarmIds, subtitleFor } from '@shared/ring-package.ts';
 import { IMPORTANCE_POINT as SHARED_IMPORTANCE_POINT, LEVEL_FIELDS } from '@shared/calc/intensity.ts';
 import { KIND_LABEL as SHARED_KIND_LABEL } from '@shared/calc/types.ts';
+import { departNow, departSlack } from '@shared/calc/depart.ts';
+import { formatKoDuration } from '@shared/tz.ts';
+import { formatDuration } from '@/lib/format';
 
 // 서버 함수와 같이 쓰는 공용 계산(supabase/functions/_shared) 경로 별칭이 앱 · jest에서 풀리는지,
 // 앱에도 따로 적어 둔 값(중요도 점수 · 종류 이름 · 강도 이름)이 공용 값과 어긋나지 않는지 (한쪽만 고치면 여기서 잡힘)
@@ -21,6 +24,26 @@ describe('공용 계산 경로 별칭 (@shared)', () => {
     expect(packages.map((p) => p.alarmId)).toEqual(['a', 'b']); // 꺼진 알람 제외 · 시각순
     expect(packages[0]).toMatchObject({ type: 'WAKE', atMillis: Date.parse('2026-10-19T22:30:00.000Z'), title: '팀 주간회의', subtitle: '오전 10:00 · 세종대학교', intensity: 'STRONG', soundKey: 'theme_urgent' });
     expect(canceledAlarmIds({ before: [{ alarm_id: 'a' }, { alarm_id: 'c' }], after: [{ alarm_id: 'a', is_enabled: true }] })).toEqual(['c']);
+  });
+
+  it('출발 여유 계산(7장 7.5.2)을 서버와 같은 파일로 부름', () => {
+    const appointmentAt = new Date('2025-05-22T01:00:00.000Z'); // 한국 시각 10:00
+    const base = { appointmentAt, travelMinutes: 50 };
+    const wake = (utcHour: number, minute: number) => departSlack({ ...base, now: new Date(Date.UTC(2025, 4, 21, utcHour, minute)), remainingMinutes: 60 });
+    expect([wake(23, 0), wake(23, 5), wake(23, 25)]).toEqual([
+      { slackMinutes: 10, status: 'COMFORT' }, // 8:00 기상
+      { slackMinutes: 5, status: 'TIGHT' }, // 8:05
+      { slackMinutes: -15, status: 'LATE_RISK' }, // 8:25
+    ]);
+    const leave = departNow({ ...base, now: new Date('2025-05-22T00:00:00.000Z') }); // 9:00 출발
+    expect([leave.arriveAt.toISOString(), leave.slackMinutes, leave.status]).toEqual(['2025-05-22T00:50:00.000Z', 10, 'COMFORT']);
+  });
+
+  it('앱의 시간 길이 글자(lib/format formatDuration)가 서버 알림 문구의 formatKoDuration과 같음', () => {
+    for (const minutes of [0, 1, 30, 59, 60, 61, 70, 90, 125, 600, 0.4, 29.6, -5]) {
+      expect(formatDuration(minutes)).toBe(formatKoDuration(minutes));
+    }
+    expect(formatDuration(70)).toBe('1시간 10분');
   });
 
   it('앱에 적어 둔 값이 공용 값과 같음', () => {

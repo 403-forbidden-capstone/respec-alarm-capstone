@@ -109,6 +109,14 @@ export function formatRelative(from: Date, to: Date) {
   return `${[h ? `${h}시간` : '', m ? `${m}분` : ''].filter(Boolean).join(' ')} 뒤`;
 }
 
+// 시간 길이 글자 — 30분 · 1시간 · 1시간 10분 (분은 반올림). 서버 알림 문구(_shared/tz.ts formatKoDuration)와 같은 모양 — mocks/__tests__/shared.test.ts가 같은 값인지 봄
+export function formatDuration(minutes: number) {
+  const total = Math.max(0, Math.round(minutes));
+  const h = Math.floor(total / 60);
+  const m = total % 60;
+  return [h ? `${h}시간` : '', m || !h ? `${m}분` : ''].filter(Boolean).join(' ');
+}
+
 // 받침에 맞는 조사 (josa('수연', '이', '가') → '수연이')
 export function josa(word: string, withBatchim: string, withoutBatchim: string) {
   const code = word.charCodeAt(word.length - 1);
