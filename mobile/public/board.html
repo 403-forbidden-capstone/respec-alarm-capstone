@@ -344,8 +344,13 @@ const SCREENS = [
       { k: 'Edge', t: '집 검색', r: ['place-search'] },
       { k: '폰', t: '권한 안내(알림 · 정확한 알람 · 잠금화면)', r: ['alarm-core'] },
     ] },
-  { code: 'L03', name: '설정', tab: 'common', route: 'settings', ui: [25], link: [], feat: ['기반'], off: true,
-    data: [{ k: 'RPC', t: '푸시 토큰 등록', r: ['register_push_token', 'push_tokens'] }] },
+  { code: 'L03', name: '설정', tab: 'common', route: 'settings', ui: [25], link: [], feat: ['기반'],
+    data: [
+      { k: 'RPC', t: '푸시 토큰 등록', r: ['register_push_token', 'push_tokens'] },
+      { k: '폰', t: '알림 설정 열기 · 점검표 들어가는 길', r: ['alarm-core'] },
+    ] },
+  { code: 'L04', name: '알람이 안 울릴 때', tab: 'common', route: 'ring-check', ui: [210], link: [], feat: ['기반'],
+    data: [{ k: '폰', t: '권한 상태(알림 · 전체화면 · 정확한 알람 · 사용 정보) 읽기 · 설정 열기', r: ['alarm-core'] }] },
 ];
 for (const s of SCREENS) s.issues = [...s.ui, ...s.link]; // 할 일 · 상태 계산용
 
@@ -469,6 +474,11 @@ const CHECKS = [
     server: { st: 'part', ev: '10/28 확인 — 로그인 공급자 구글 · 카카오 · 이메일 켜짐, 구글 · 카카오 실계정 로그인 됨 · 시드 데모 계정 4명 — 로그인 뒤 흐름 한 바퀴는 아직(#212) → #168 폰은 로그인 필수 · 개발 메뉴 이메일 로그인 · #180 로그인 뒤 바로 홈' }, test: { st: 'part', ev: 'lib/mode · modePolicy 모드 · 이메일 로그인 · 로그아웃 정리(session) · onboardingGate · DB 검사 가입 → 프로필 생성 — 카카오 · 구글 OAuth 로그인 테스트 없음' },
     how: ['배포 웹 주소 끝에 "?mode=real" → "/login" — "카카오로 시작하기" · "Google로 시작하기" · "알람 테스트"(#180) · "개발 메뉴에서 이메일로 로그인"', '가짜 모드(기본 · ?mode=mock)는 로그인 없이 홈 — ?mode=real은 이 브라우저에 남아 다음에도 실데이터, 돌아갈 땐 ?mode=mock', '이메일 로그인은 시드 계정 만든 뒤(이메일 공급자는 켜짐) · 로그인하면 바로 홈(#180, 임시 온보딩 뺌), 온보딩 새 화면은 #25'],
     issues: [25] },
+  { id: 'C26', area: '기반 · 서버', name: '권한 안내 · 홈 빨간 줄 · 점검표', screens: ['H01', 'H05', 'L03', 'L04'], start: null,
+    web: { st: 'part', ev: '웹은 폰 권한 상태를 못 읽어 홈 줄 없음 · L04는 "폰에서 확인해요" 안내' }, phone: { st: 'no', ev: '에뮬레이터 확인 전' },
+    server: { st: 'na', ev: '폰 상태만' }, test: { st: 'ok', ev: 'features/permissions banner · notify · alarmSync 못 건 알람 수' },
+    how: ['H05 새 일정 저장 → "알람이 잠금화면에 뜨려면 알림이 필요해요" 시트 → [알림 켜기] → 시스템 허용 창', '거절 → 홈 인사 아래 빨간 줄 → 누르면 L04 점검표', '홈 위 오른쪽 "설정" → L03 → "알람이 안 울릴 때" → L04'],
+    issues: [210] },
   { id: 'C22', area: '기반 · 서버', name: 'Supabase 저장 · 조회', screens: [], start: null,
     web: { st: 'no', ev: '#168 머지: 실데이터 모드(웹 ?mode=real · 폰 개발용 기본)에서 알람 · 기록 · 루틴 · 친구 · 그룹이 Supabase를 부름 — 시드 · 이메일 로그인 전이라 아직 못 봄' }, phone: { st: 'no', ev: '실데이터 로그인 전이라 못 봄 (웹과 같은 코드)' },
     server: { st: 'part', ev: '테이블 · RLS · DB 함수(머지 시 자동 적용) · 10/27 밤 서버 함수 5개 배포 · Vault 키 · 기상 미확인 배치(5분마다) · 시드 — 앱 흐름 한 바퀴는 아직(#212) → #160 마이그레이션 · #167 서버 함수' }, test: { st: 'ok', ev: 'DB 검사(PGlite 93항목 · 실제 이미지 적용) RLS · 함수 · 기능별 real 테스트(가짜 Supabase) · lib/edge — 앱 쿼리를 실제 DB에 붙이는 테스트 없음' },

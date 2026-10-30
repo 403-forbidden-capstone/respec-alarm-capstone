@@ -90,6 +90,7 @@
 | R02 | 나의 기록 | `(tabs)/records` | #38 · #41 |
 | S01 | 알람 조정 제안 | `suggestion/[id]` | #49 |
 | — | 로그인 · 온보딩 · 권한 안내 · 설정 | `login` · `onboarding` · `settings` | #25 |
+| L04 | 알람이 안 울릴 때 | `ring-check` | #210 |
 
 ## 화면별 데이터
 
