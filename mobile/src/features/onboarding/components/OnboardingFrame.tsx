@@ -45,7 +45,7 @@ export function OnboardingFrame({
         </View>
       }
     >
-      {onBack ? <TopBar onBack={onBack} /> : null}
+      {onBack ? <TopBar onBack={primaryBusy ? noop : onBack} /> : null}
       <View style={[styles.progress, !onBack && styles.progressFirst]} accessible accessibilityLabel={`${safeTotal}단계 중 ${step}단계`}>
         <Text variant="caption" tone="sub" style={styles.count}>
           {step} / {safeTotal}
@@ -66,6 +66,8 @@ export function OnboardingFrame({
     </Screen>
   );
 }
+
+const noop = () => {}; // 저장하는 중에는 이전으로 못 감
 
 const styles = StyleSheet.create({
   footer: { gap: 4 },

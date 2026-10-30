@@ -14,7 +14,7 @@ export type PermissionRow = {
   label: string; // 알림
   why: string; // 한 줄 이유
   state: PermissionState;
-  actionLabel?: string; // 꺼짐일 때 버튼 글자 (기본 "켜기")
+  actionLabel?: string; // 버튼 글자 (꺼짐이면 기본 "켜기", 확인 전은 글자를 줄 때만 버튼 — 예: 배터리 "설정 열기")
 };
 
 type Props = {
@@ -45,7 +45,9 @@ export function PermissionsStep({ rows, onAction, onOpenChecklist }: Props) {
               </View>
               <View style={styles.side}>
                 <Chip label={permissionStateLabel(row.state)} variant={row.state === 'ok' ? 'fill' : 'outline'} />
-                {row.state === 'off' ? <Button small variant="ghost" label={row.actionLabel ?? '켜기'} onPress={() => onAction(row.key)} /> : null}
+                {row.state === 'off' || (row.state === 'unknown' && row.actionLabel) ? (
+                  <Button small variant="ghost" label={row.actionLabel ?? '켜기'} onPress={() => onAction(row.key)} />
+                ) : null}
               </View>
             </View>
           ))}
