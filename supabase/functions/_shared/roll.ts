@@ -446,6 +446,8 @@ type Item = {
   requested: boolean; // 요청의 series_id인 묶음 (본인 길)
   appointment?: SeriesAppointmentRow;
   standalone?: StandaloneRow;
+  lookedUp?: boolean; // 이 회차에 길찾기를 이미 부름 (처리 중 던지면 재시도 기록을 남기려고)
+  settled?: boolean; // 결과가 DB에 남음 (재시도 기록을 올렸거나 회차를 만듦) — 이후에 던져도 다시 기록하지 않음
 };
 
 // 길찾기 값을 못 정했을 때 — 다음에 어떻게 할지
@@ -481,8 +483,12 @@ class RollRun {
   }
 
   // 묶음 하나가 실패해도 다음 묶음으로 — 이유 글자만 남김 (사용자 · 일정 내용 없이)
+  private reasonOf(e: unknown): string {
+    return e instanceof RangeError ? 'INVALID_VALUE' : e instanceof HttpError ? e.code : 'ERROR';
+  }
+
   private skipped(where: string, e: unknown) {
-    const reason = e instanceof RangeError ? 'INVALID_VALUE' : e instanceof HttpError ? e.code : 'ERROR';
+    const reason = this.reasonOf(e);
     (this.deps.warn ?? console.warn)(JSON.stringify({ fn: 'alarm-roll', event: 'series_skipped', where, reason }));
   }
 
@@ -699,6 +705,20 @@ class RollRun {
     attempts.set(key, { series_id: seriesId, occurrence_on: date, tries, next_try_at: row.next_try_at, skipped: row.skipped });
   }
 
+  // 길찾기를 이미 썼는데 계산 · 저장이 던졌으면 재시도 기록을 남김 — 안 남기면 다음 5분 실행이 같은 회차로 길찾기를 또 부름.
+  //   기존 1 · 3 · 6시간 규칙 그대로, 하루 몫에도 한 번 센 것으로 남음. last_error는 이름 글자만 (좌표 · 장소명 없음). 길찾기를 안 썼으면(순수 계산 오류) 아무것도 안 함
+  private async retryAfterThrow(item: Item, e: unknown) {
+    if (!item.lookedUp || item.settled) return;
+    try {
+      await this.record(item.task.user_id, item.task.series_id, item.occ.date, {
+        failure: { name: this.reasonOf(e), mode: 'RETRY', reason: 'ROUTE_RETRY', spent: true },
+        spent: true,
+      });
+    } catch (e2) {
+      this.skipped('retry_record', e2);
+    }
+  }
+
   private async clearAttempt(userId: string, seriesId: string, date: string) {
     const attempts = await this.user(userId).attempts();
     if (!attempts.delete(attemptKey(seriesId, date))) return;
@@ -791,6 +811,7 @@ class RollRun {
       failure = !origin || !destination ? { name: 'NO_COORDS', mode: 'RETRY', reason: 'ROUTE_RETRY', spent: false } : await this.lookupGate(user);
       if (!failure && origin && destination) {
         lookedUp = true;
+        item.lookedUp = true;
         this.result.kakao_calls += 1; // 실패한 호출도 한도를 씀 (회차마다 새로 부름 — 같은 실행 안 같은 경로라도 재사용 안 함, D5 A)
         user.addLookup();
         try {
@@ -822,6 +843,7 @@ class RollRun {
     if (!travel) {
       const why = failure as Failure;
       if (why.mode !== 'NONE') await this.record(task.user_id, task.series_id, occ.date, { failure: why, spent: why.spent });
+      item.settled = true;
       return this.pend(task.series_id, occ.date, why.reason);
     }
 
@@ -829,6 +851,7 @@ class RollRun {
     if (!planned.ok) {
       // 출발 시각까지 이미 지남(또는 순서가 어긋남) → 그 날짜는 건너뜀 (다시 안 만듦)
       await this.record(task.user_id, task.series_id, occ.date, { skipped: planned.reason, spent: lookedUp });
+      item.settled = true;
       return;
     }
 
@@ -836,6 +859,7 @@ class RollRun {
       'roll_insert_occurrence',
       await write.rpc('roll_insert_occurrence', { p_appointment: planned.payload.appointment, p_participant: planned.payload.participant, p_alarms: planned.alarms, p_items: planned.payload.items }),
     );
+    item.settled = true; // 만들기 끝 (이후 던져도 회차는 이미 있음)
     await this.clearAttempt(task.user_id, task.series_id, occ.date);
     if (!appointmentId) return; // 다른 실행이 먼저 만듦 — 같은 결과
     this.result.created.push({ series_id: task.series_id, occurrence_on: occ.date, appointment_id: appointmentId });
@@ -885,6 +909,7 @@ class RollRun {
         await this.process(item);
       } catch (e) {
         this.skipped('process', e);
+        await this.retryAfterThrow(item, e);
       }
     }
 

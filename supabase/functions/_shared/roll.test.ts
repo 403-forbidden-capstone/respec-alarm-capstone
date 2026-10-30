@@ -481,6 +481,53 @@ test('길찾기 실패(TIMEOUT · HTTP · NO_ROUTE): 그 회차는 안 만들고
   }
 });
 
+test('길찾기를 쓴 뒤 저장(roll_insert_occurrence)이 던지면 재시도 기록을 남겨서, 5분 뒤 실행이 같은 회차로 카카오를 또 안 부름', async () => {
+  const env = setup(MON_10);
+  const series = await seed(env, A, slot(), MON_10);
+  const original = env.db.rpcHandlers.roll_insert_occurrence;
+  let thrown = false;
+  env.db.rpcHandlers.roll_insert_occurrence = (args) => {
+    if (!thrown) {
+      thrown = true;
+      throw new Error('시험용 저장 실패 (세종대학교 37.55,127.07)');
+    }
+    return original(args);
+  };
+  const kakao = fakeKakao();
+
+  // 첫 실행: 가까운 회차(10-29)의 저장이 한 번 던짐 → 길찾기는 이미 썼으니 재시도 기록(tries 1, 1시간 뒤), 나머지 두 회차는 만듦
+  const first = await roll(env, 'own', MON_10, { lookup: kakao.lookup });
+  assert.deepEqual([first.created.length, first.kakao_calls, kakao.state.calls], [2, 3, 3]);
+  assert.deepEqual(attempts(env.db), ['2026-10-29 1 INTERNAL 2026-10-26 11:00']);
+  assert.ok(!JSON.stringify(env.db.rows('roll_attempts')).includes('세종'), '좌표 · 장소명은 기록에 안 남음');
+  assert.equal(occurrence(env.db, series, '2026-10-29'), undefined);
+
+  // 5분 뒤: 대기 중이라 카카오 0번 (본인 길 · 배치 모두)
+  for (const path of ['own', 'batch'] as const) {
+    const again = await roll(env, path, kst('2026-10-26T10:05'), { lookup: kakao.lookup });
+    assert.deepEqual([again.created, again.pending, again.kakao_calls], [[], [], 0], path);
+  }
+  assert.equal(kakao.state.calls, 3);
+
+  // 1시간 뒤엔 다시 시도해서 만들고 기록을 지움
+  const later = await roll(env, 'own', kst('2026-10-26T11:00'), { lookup: kakao.lookup });
+  assert.deepEqual([later.created.length, later.kakao_calls], [1, 1]);
+  assert.deepEqual(attempts(env.db), []);
+});
+
+test('길찾기를 안 쓴 채 던지는 순수 계산 오류는 기존대로: 재시도 기록 없이 건너뜀 + 로그', async () => {
+  const env = setup(MON_10);
+  await seed(env, A, slot({ participant: { ...slot().participant, travel_source: 'MANUAL', est_travel_minutes: 50 } }), MON_10);
+  env.db.rpcHandlers.roll_insert_occurrence = () => {
+    throw new Error('시험용 저장 실패');
+  };
+  const kakao = fakeKakao();
+  const run = await roll(env, 'own', MON_10, { lookup: kakao.lookup });
+  assert.deepEqual([run.created.length, kakao.state.calls], [0, 0]);
+  assert.deepEqual(attempts(env.db), []);
+  assert.ok(env.warns.some((w) => w.includes('series_skipped') && w.includes('process')));
+});
+
 test('RATE_LIMIT · AUTH: 이번 실행의 길찾기를 멈추고(첫 실패 1번만 씀) 다음 날 0시 뒤 다시', async () => {
   for (const kind of ['RATE_LIMIT', 'AUTH'] as const) {
     const env = setup(MON_10);
