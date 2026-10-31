@@ -159,9 +159,9 @@ export async function retryConversation(): Promise<Conversation> {
 
 // 대화 끝 — 목업: 기록된 사실과 대화로 그날 일기를 만들고(다시 누르면 다시 만듦) 일기 날짜를 돌려줌
 // 목업은 하루(5월 22일)만 있어서 일기 날짜는 시나리오의 오늘.
-// 실데이터: 대화를 그대로 남기고 recordDate null — 화면은 홈으로만 돌아감 (대화 끝 정리 voice-commit · 일기는 이번 범위 밖, 서버 PR 5)
+// 실데이터: 지금 세션을 끝남으로 로컬에 적고 recordDate null — 다음 [대화 시작]은 새 세션 (서버에 닫는 길 · 대화 끝 정리 voice-commit · 일기는 이번 범위 밖, 서버 PR 5)
 export async function finishConversation(): Promise<{ recordDate: string | null }> {
-  if (!isMock()) return { recordDate: null };
+  if (!isMock()) return real.finishConversation();
   const c = chat();
   const date = kst(TODAY, 0);
   const recordDate = dayKey(date);

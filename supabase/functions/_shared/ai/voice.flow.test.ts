@@ -10,6 +10,7 @@ import { HttpError } from '../errors.ts';
 import { FakeDb } from '../fake-db.ts';
 import type { Db } from '../supabase.ts';
 import { fakeClaude, upstreamError, type FakeScript } from './fake-claude.ts';
+import { POINTS } from '../prompts/index.ts';
 import { handleVoiceTurn, type VoiceDeps, type VoiceTurnOut } from './turn.ts';
 import { handleVoiceSession, type VoiceSessionOut } from './voice-session.ts';
 import type { ServerState } from './session.ts';
@@ -204,7 +205,7 @@ test('녹화 한 바퀴: 첫 마디 템플릿 → 새 약속 카드 → 계산 �
     assert.ok((c.input_tokens as number) > 0 && (c.output_tokens as number) > 0, '토큰');
     assert.ok((c.latency_ms as number) > 0, '지연');
     assert.equal(c.io, null);
-    assert.equal(c.prompt_version, c.point === 'T1' ? 'v1.3' : 'v2-a');
+    assert.equal(c.prompt_version, c.point === 'T1' ? 'v1.4' : 'v2-a');
   }
   const flagged = calls.filter((c) => (c.flags as string[]).length > 0);
   assert.ok(flagged.some((c) => (c.flags as string[]).includes('claims_saved_without_event')), '가드에 걸린 호출의 flags');
@@ -558,6 +559,25 @@ test('장소 고르기 뒤 text 없이 새 client_turn_id로 results만 와도 �
   assert.equal(claude!.left('T1'), 0);
 });
 
+test('장소를 고른 뒤(READY) T1 화면에서 앞서 낸 "장소 되물을 것" 줄이 사라지고 확인 필요 줄만 남음 (L8 버그 1)', async () => {
+  const db = seed();
+  const { deps, claude } = depsOf(db, { T2F: [t2f('place_pending_appt')], T1: [t1('preview'), t1('place_ask'), t1('place_ready')] });
+  const s = await handleVoiceSession(deps, { session_type: 'BEFORE_SLEEP', input_mode: 'TEXT' });
+  const sid = s.session_id as string;
+  const id = cid();
+  const r1 = await handleVoiceTurn(deps, text(sid, 1, '내일 저녁 6시 반에 학생회관에서 동아리 모임', id));
+  const needPlace = { cards: [{ id: 'c1', status: 'NEEDS_PLACE', estimate: null, error: '위치를 골라 주세요' }], fixes: [] };
+  const r2 = await handleVoiceTurn(deps, { session_id: sid, rev: r1.rev, client_turn_id: id, results: needPlace });
+  assert.match(claude!.seen.T1[1], /- 되물을 것: '동아리 모임' 장소/);
+  const est = { alarms: [{ kind: 'DEPARTURE', at: '2026-10-30T17:30:00+09:00', enabled: true }], level: 1, with_wake: false };
+  await handleVoiceTurn(deps, { session_id: sid, rev: r2.rev, client_turn_id: cid(), results: { cards: [{ id: 'c1', status: 'READY', estimate: est, error: null }], fixes: [] } });
+  const view = claude!.seen.T1[2];
+  assert.doesNotMatch(view, /되물을 것/);
+  assert.match(view, /확인 필요/);
+  // 서버 상태에도 해소된 되물을 것이 남지 않음
+  assert.equal(stateOf(db, sid).events.flatMap((e) => e.clarify).length, 0);
+});
+
 test('모르는 카드 · 남의 세션은 NOT_FOUND, 남의 세션에 닿지 못함', async () => {
   const db = seed();
   db.rows('profiles').push({ user_id: OTHER, nickname: '서연', timezone: 'Asia/Seoul' });
@@ -653,3 +673,23 @@ test('마감까지 7초 넘게 안 남았으면 가드가 다시 부르라 해�
   assert.equal(line.source, 'fallback');
   assert.ok(line.guard?.includes('template'));
 });
+
+// ───────── 영어 입력 (헤드 10/30 B2 ③) — 말은 그대로 모델에 가고, 시스템 글에 "영어도 뜻대로 알아듣고 한국어로 답" 규칙이 있고, 언어만으로 대화가 끝나지 않음 ─────────
+for (const [name, said] of [
+  ['영어만', 'Why no Korean input?'],
+  ['한국어에 영어가 섞임', '오늘 OS 수업 so tired, 그냥 자고 싶어'],
+  ['영어 장소 이름', '내일 Starbucks에서 스터디 있어'],
+] as const) {
+  test(`영어 입력 (${name}): 입력 그대로 모델 화면에 들어가고, 답은 한국어로 이어지고 대화는 안 끝남`, async () => {
+    const db = seed();
+    const { deps, claude } = depsOf(db, { T2F: [t2f('empty')], T1: [{ reply: '편한 말로 이야기해 주세요. 오늘 하루는 어땠어요?', acts: [], end: false }] });
+    const s = await handleVoiceSession(deps, { session_type: 'BEFORE_SLEEP', input_mode: 'TEXT' });
+    const out = (await handleVoiceTurn(deps, text(s.session_id as string, 1, said))) as VoiceTurnOut;
+    assert.equal(out.next, 'USER');
+    assert.equal(out.reply?.text, '편한 말로 이야기해 주세요. 오늘 하루는 어땠어요?');
+    assert.equal(out.reply?.end, false); // 언어만으로 끝내지 않음
+    assert.ok(claude!.seen.T1[0].includes(said), '사용자가 쓴 영어가 그대로 T1 화면에 들어감');
+    assert.ok(claude!.seen.T2F[0].includes(said), '사용자가 쓴 영어가 그대로 T2F 화면에 들어감');
+    assert.match(POINTS.T1.prompt.system, /영어로 쓰거나 한국어에 영어가 섞여도 뜻 그대로 알아듣고, 답은 한국어로/);
+  });
+}

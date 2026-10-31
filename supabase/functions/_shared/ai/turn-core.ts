@@ -1026,6 +1026,9 @@ export function applyTaskResults(state: TurnState, results: TaskResults, ctx: Co
     touchedCards.push(c);
     c.first_of_day = c.kind === "APPT_NEW" ? isFirstOfDay(s, c) : c.first_of_day;
     const title = c.draft?.title ?? c.summary;
+    // 이 카드가 앞서 낸 "되물을 것"(장소 · 계산 실패)은 새 결과로 풀렸거나 바뀌었으므로 지움 — 안 지우면 장소를 고른 뒤에도 T1이 장소를 또 물음 (L8 버그 1)
+    const stale = new Set([`'${title}' 장소 (카드의 [장소 고르기])`, `'${title}' 알람 계산`, ...(typeof c.error === "string" ? [c.error] : [])]);
+    for (const e of s.events) e.clarify = e.clarify.filter((l) => !stale.has(l));
     if (r.status === "READY") {
       const reason = checkDigest(r.estimate as RawDigest | null | undefined, now, apptAtOf(c, s)) ?? checkAgainstCard(c, (r.estimate as RawDigest).alarms);
       if (reason !== null) {

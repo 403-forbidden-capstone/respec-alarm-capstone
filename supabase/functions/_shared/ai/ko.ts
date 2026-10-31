@@ -149,6 +149,15 @@ function prep(text: string): string {
   return toHalfWidth(text.normalize("NFC"));
 }
 
+/** 영어 시각('3pm' · '9:30 AM' · '10 a.m.')을 한국어 때 표시로 — 사용자가 영어로 시각을 쓰면 AI가 '오후 3시'로 되받아도 근거로 인정. 시각 찾기(findTimeMentions) 전용 */
+const LATIN_AMPM = /(?<![A-Za-z\d:.])(\d{1,2})(?::([0-5]\d))?\s?([ap])\.?m\b\.?/giu;
+function latinAmPm(s: string): string {
+  return s.replace(LATIN_AMPM, (all, h: string, m: string | undefined, ap: string) => {
+    if (Number(h) < 1 || Number(h) > 12) return all;
+    return `${ap.toLowerCase() === "a" ? "오전" : "오후"} ${h}시${m && m !== "00" ? ` ${Number(m)}분` : ""}`;
+  });
+}
+
 // ───────── 시각 · 날짜 도우미 ─────────
 
 /** 분 → "HH:MM" (하루를 넘으면 접음) */
@@ -512,7 +521,7 @@ function duVerb(s: string, hourStart: number, tailStart: number): boolean {
  * '시간을 더 두시는 게' · '그대로 두시면'의 '두시'(동사 두다)는 시각이 아님.
  */
 export function findTimeMentions(text: string): TimeMention[] {
-  const s = prep(text);
+  const s = latinAmPm(prep(text));
   const taken = new Uint8Array(s.length);
   const out: TimeMention[] = [];
   const free = (a: number, b: number): boolean => {

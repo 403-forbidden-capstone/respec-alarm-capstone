@@ -1289,3 +1289,36 @@ test("검수: ampmExact opts.exact — 사용자의 모호한 '7시'가 허용 �
   assert.deepEqual(ampmExact("오후 3시에 봐요", allowed, { exact }).map((x) => [x.raw, x.flipped]), [["오후 3시", false]]);
   assert.deepEqual(exactClocksIn("내일 7시, 오후 3시, 18:30, 07:40, 밤 12시"), [hm("15:00"), hm("18:30"), hm("07:40"), 0]);
 });
+
+// ───────── 영어 시각 (사용자가 '3pm'으로 써도 AI가 '오후 3시'로 되받을 수 있게) ─────────
+
+test("영어 am/pm 시각을 오전 · 오후로 읽음", () => {
+  const cases: [string, number][] = [
+    ["meeting at Gangnam 3pm", hm("15:00")],
+    ["내일 9am 수업", hm("09:00")],
+    ["9:30 AM class", hm("09:30")],
+    ["see you at 10 a.m.", hm("10:00")],
+    ["dinner 7 PM", hm("19:00")],
+    ["12am", 0],
+    ["12pm", hm("12:00")],
+  ];
+  for (const [text, want] of cases) {
+    const c = clock(text);
+    assert.deepEqual(c.candidates, [want], text);
+    assert.equal(c.hour12Ambiguous, false, text);
+  }
+});
+
+test("영어 am/pm이 아닌 글자는 시각으로 안 읽음", () => {
+  for (const text of ["I am here", "OS 수업", "Starbucks", "hello", "2pmx", "ver3.5pm", "13pm", "0am"]) {
+    assert.deepEqual(only(text, "clock"), [], text);
+  }
+});
+
+test("사용자가 영어로 쓴 시각을 AI가 한국어로 되받아도 근거 있음", () => {
+  const allowed = { clocks: [] as number[], durations: [], counts: [], dates: [], exactClocks: [] as number[] };
+  const said = findTimeMentions("meeting at Gangnam 3pm").flatMap((m) => (m.kind === "clock" ? m.candidates : []));
+  const withUser = { ...allowed, clocks: said, exactClocks: said };
+  assert.deepEqual(unsupportedNumbers("오후 3시 강남 미팅이네요.", withUser, DATES), []);
+  assert.equal(unsupportedNumbers("오후 4시 강남 미팅이네요.", withUser, DATES).length, 1);
+});
