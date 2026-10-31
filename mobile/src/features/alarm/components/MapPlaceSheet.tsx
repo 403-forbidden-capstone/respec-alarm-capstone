@@ -49,6 +49,7 @@ type Props = {
   areaWarning?: string | null; // 캠퍼스 대표 좌표를 골랐을 때 문구 (기본은 캠퍼스 안내, null이면 안 보임). 캠퍼스가 아닌 곳(집)에서는 중립 문구나 null
   radius?: RadiusOption; // 감지 범위 고르기 (없으면 반경 UI · 원 없음)
   title?: string;
+  initialQuery?: string; // 처음부터 채워 둘 검색어 (예: 캠퍼스 이름으로 건물 다시 찾기) — 있으면 결과 목록이 바로 열림
 };
 
 // 지도에서 위치 고르기 시트 — 맨 위 검색 칸, 가운데 카카오맵(핀 고정, 지도를 끌어 맞춤) + [현재 위치], 아래 핀 자리 주소 · 이름 · [이 위치로 정하기]
@@ -67,9 +68,9 @@ type PinResult = { lat: number; lng: number; address: PinAddress | null } | { la
 type Pin = { kind: 'loading' } | { kind: 'done'; address: PinAddress | null } | { kind: 'failed' };
 
 // 시트 안에서 그려지는 본문 — 시트가 열릴 때마다 새로 떠서 상태가 초기화됨 (시트 내용은 루트에서 그려지므로 상태를 여기에 둠)
-function MapPlaceBody({ onPick, search, reverse, locate, center, suggestedNames, areaWarning = AREA_WARNING, radius: radiusOption }: Omit<Props, 'visible' | 'onClose' | 'title'>) {
-  const [text, setText] = useState(''); // 검색 칸
-  const [listOpen, setListOpen] = useState(false); // 검색 결과 목록이 지도 위에 뜸 (글자를 칠 때 열리고, 결과를 고르면 닫힘)
+function MapPlaceBody({ onPick, search, reverse, locate, center, suggestedNames, areaWarning = AREA_WARNING, radius: radiusOption, initialQuery }: Omit<Props, 'visible' | 'onClose' | 'title'>) {
+  const [text, setText] = useState(initialQuery ?? ''); // 검색 칸
+  const [listOpen, setListOpen] = useState(Boolean(initialQuery?.trim())); // 검색 결과 목록이 지도 위에 뜸 (글자를 칠 때 열리고, 결과를 고르면 닫힘)
   const [point, setPoint] = useState<LatLng | null>(center ?? null); // 핀이 놓인 자리
   const [picked, setPicked] = useState<Place | null>(null); // 검색 결과로 고른 장소
   const [moveTo, setMoveTo] = useState<{ lat: number; lng: number; nonce: number }>();
