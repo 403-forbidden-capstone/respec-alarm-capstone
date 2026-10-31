@@ -32,6 +32,7 @@ import { currentUserId } from '@/lib/user';
 import type { Weekday } from '@/lib/weekday';
 
 import { applyFix, type Fix } from './fixes';
+import { isFinished, markFinished } from './finishedSessions';
 import { clearSaved, markSaved, pruneExpired, pruneOtherSessions, readSavedMarks } from './savedMarks';
 import type { ChatMessage, CardAlarm, CardKind, CardStatus, Conversation, ConversationCard, FixResult, Limits, Unavailable } from './types';
 
@@ -595,7 +596,11 @@ async function restoreSaved(sessionId: string, renotify: boolean): Promise<void>
 
 // fresh = 앱을 (다시) 열어 시작하는 읽기 — 저장 표시가 남은 카드는 서버에 SAVED를 다시 알림. 오류 뒤 다시 읽기(CONFLICT · NOT_FOUND)는 복원만
 async function readSession(resume: boolean, fresh = false): Promise<void> {
-  const res = await callEdge<SessionResponse>('voice-session', { session_type: 'BEFORE_SLEEP', input_mode: 'TEXT', resume });
+  let res = await callEdge<SessionResponse>('voice-session', { session_type: 'BEFORE_SLEEP', input_mode: 'TEXT', resume });
+  // [완료]한 세션은 서버가 아직 안 끝난 줄로 알아 resume이 또 돌려줌 — 무시하고 새 세션 (완료 없이 나간 세션은 적혀 있지 않아 그대로 이어짐)
+  if (resume && res.resumed && res.session_id && state.userId && (await isFinished(state.userId, res.session_id))) {
+    res = await callEdge<SessionResponse>('voice-session', { session_type: 'BEFORE_SLEEP', input_mode: 'TEXT', resume: false });
+  }
   const at = now();
   // 앱에서 이미 저장 · 저장 안 함으로 끝낸 카드는 서버가 아직 몰라도 그대로 — 다시 저장해 일정이 두 벌 생기지 않게
   const done = [...state.cards].filter(([, rec]) => rec.status === 'SAVED' || rec.status === 'REJECTED');
@@ -703,6 +708,27 @@ export function retry(): Promise<Conversation> {
       await drive();
     }
     return snapshot();
+  });
+}
+
+// [완료] — 지금 세션을 "끝남"으로 로컬에 적고 상태를 비움. 다음 getConversation(= [대화 시작])은 새 세션을 요청함 (서버에 세션을 닫는 길은 voice-commit 뒤)
+//   서버로 가야 할 카드 알림(SAVED 등)이 큐에 남았으면 세션이 바뀌기 전에 한 번 보내 봄 (실패해도 삼킴)
+export function finishConversation(): Promise<{ recordDate: string | null }> {
+  return serial(async () => {
+    await guardUser();
+    if (!state.started) return { recordDate: null };
+    // 한 마디도 안 한 대화는 끝남으로 적지 않음 — 다음 [대화 시작]이 같은 세션을 이어 받아 하루 5대화 한도만 닳지 않게
+    const spoke = state.messages.some((m) => m.who === 'me');
+    if (spoke && state.userId && state.sessionId) await markFinished(state.userId, state.sessionId);
+    if (state.sessionId && !state.pending && state.queue.length > 0) {
+      try {
+        await drive();
+      } catch {
+        // 이미 앱에서 한 일은 그대로
+      }
+    }
+    state = freshState(state.userId); // 세션 · 말 · 카드까지 비움 — 다음 열기가 실패해도 끝난 세션으로 말이 가지 않고 [다시 시도]가 새로 읽음
+    return { recordDate: null };
   });
 }
 

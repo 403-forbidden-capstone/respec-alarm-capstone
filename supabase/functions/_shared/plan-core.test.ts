@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
 import { prepareSourceLabel, prepareStatsOf } from './calc/index.ts';
-import { clampPrepareToBound, computePlan, firstPrepareMinutes, inferBeforePrepare, resolveBasics, toSuggestion, type AlarmRow, type AppointmentRow, type ParticipantRow, type PlanInputs, type ProfileRow } from './plan-core.ts';
+import { clampPrepareToBound, computePlan, firstPrepareMinutes, inferBeforePrepare, resolveBasics, resolveOverrides, toSuggestion, type AlarmRow, type AppointmentRow, type ParticipantRow, type PlanInputs, type ProfileRow } from './plan-core.ts';
 import type { ResolvedTravel } from './route.ts';
 
 const kst = (day: number, minutes: number) => new Date(Date.UTC(2025, 4, day) + (minutes - 9 * 60) * 60_000);
@@ -301,12 +301,12 @@ test('computePlan의 prepareBound: 직접 고른 준비시간은 안 자름, 기
   assert.equal(second.prepare.minutes, 15);
 });
 
-// D69: 기본 보통 — 중요도 낮음(앱 라벨 '보통')이어도 약이 아니고, 매우 중요(HIGH)만 한 단계 올림
+// D69: 기본 보통 — 중요도 낮음(앱 라벨 '평소')이어도 약이 아니고, 매우 중요(HIGH)만 한 단계 올림
 test('강도 이유: 중요도 낮음은 보통(중), 매우 중요는 한 단계 올려 강 — 약이라는 문구는 안 나옴', () => {
   const draft = { at: kst(22, 600), destination: { name: '세종대학교', lat: 37.55, lng: 127.07 } };
   const low = toSuggestion(computePlan(base({ draft: { ...draft, importance: 'LOW' }, lateCount4w: 0 }), api(50)));
   assert.equal(low.intensity.level, 'NORMAL');
-  assert.equal(low.intensity.reason, '보통 일정 → 중');
+  assert.equal(low.intensity.reason, '평소 일정 → 중');
   assert.deepEqual([low.intensity.auto_level, low.intensity.importance_point, low.intensity.late_point], [1, 0, 0]);
 
   const high = toSuggestion(computePlan(base({ draft: { ...draft, importance: 'HIGH' }, lateCount4w: 0 }), api(50)));
@@ -316,7 +316,7 @@ test('강도 이유: 중요도 낮음은 보통(중), 매우 중요는 한 단�
 
   const lowLate = toSuggestion(computePlan(base({ draft: { ...draft, importance: 'LOW' }, lateCount4w: 2 }), api(50)));
   assert.equal(lowLate.intensity.level, 'STRONG'); // 낮음 + 늦잠 지각 2회 = 보통에서 한 단계 올림
-  assert.equal(lowLate.intensity.reason, '보통 일정 + 최근 4주 늦잠 지각 2회 → 강');
+  assert.equal(lowLate.intensity.reason, '평소 일정 + 최근 4주 늦잠 지각 2회 → 강');
 });
 
 test('옛 알람(vibration 칸이 비어 있고 intensity만 STRONG인 직접 알람)은 진동을 직접 고른 것으로 안 읽음 — 강도를 따르는 칸이라 자동', () => {
@@ -454,4 +454,76 @@ test('응답의 prepare.recent: 최신순 최대 5개 — 0건 빈 배열 · 3�
 test('응답의 prepare.recent: 그날 두 번째 일정은 기록을 안 쓰므로 빈 배열', () => {
   const dto = toSuggestion(computePlan(base({ sameDayWake: true, stats: prepareStatsOf([62, 55, 48]) }), api(20)));
   assert.deepEqual([dto.prepare.recent, dto.prepare.sample_count], [[], 0]);
+});
+
+// ---- 저녁에만 일정이 있는 날은 기상 알람 없음 (#320, 헤드 10/30) ----
+
+test('저녁 단일 일정 18:00(이동 30 · 여유 10): 기상 없음 · 준비 · 출발 · 도착만, 준비 15분', () => {
+  const plan = computePlan(base({ draft: { at: kst(22, 1080), destination: { name: '강남역' } }, now: kst(22, 600) }), api(30));
+  assert.equal(plan.withWake, false);
+  assert.equal(plan.prepare.minutes, 15);
+  assert.equal(plan.beforePrepareMinutes, 0);
+  assert.deepEqual(text(plan), ['PREPARE 17:05', 'DEPARTURE 17:20', 'ARRIVE 17:50']);
+  const s = toSuggestion(plan);
+  assert.equal(s.with_wake, false);
+  assert.equal(s.wake_at, null);
+});
+
+test('경계: 계산된 기상이 11:59면 기상 있음, 12:00이면 기상 없음', () => {
+  // 기록 없음: 준비 50 + 이동 30 + 여유 10 = 90분 전이 기상 → 약속 13:29면 기상 11:59, 13:30이면 12:00
+  const at = (minutes: number) => computePlan(base({ stats: { sampleCount: 0, p80: null }, draft: { at: kst(22, minutes), destination: { name: '강남역' } }, now: kst(22, 400) }), api(30));
+  const before = at(13 * 60 + 29);
+  assert.equal(before.withWake, true);
+  assert.equal(hm(before.chain[0].at.toISOString()), '11:59');
+  const exact = at(13 * 60 + 30);
+  assert.equal(exact.withWake, false);
+  assert.deepEqual(text(exact), ['PREPARE 12:35', 'DEPARTURE 12:50', 'ARRIVE 13:20']); // 기상 없이 준비 15분으로 다시 계산
+});
+
+test('낮 일정 14:00에서 계산된 기상이 오전이면 기상 있음', () => {
+  // 첫 값(온보딩) 90분 · 이동 30 · 여유 10 → 기상 14:00 − 10 − 30 − 90 = 11:50. 기본 50분이면 12:30이라 기상 없음
+  const draft = { at: kst(22, 14 * 60), destination: { name: '강남역' } };
+  const long = computePlan(base({ profile: { ...profile, default_prepare_minutes: 90 }, stats: { sampleCount: 0, p80: null }, draft, now: kst(22, 400) }), api(30));
+  assert.equal(long.withWake, true);
+  assert.equal(hm(long.chain[0].at.toISOString()), '11:50');
+  const short = computePlan(base({ stats: { sampleCount: 0, p80: null }, draft, now: kst(22, 400) }), api(30));
+  assert.equal(short.withWake, false);
+});
+
+test('직접 지정은 존중: with_wake true · 직접 고른 기상 시각은 12시 이후여도 기상 있음', () => {
+  const draft = { at: kst(22, 1080), destination: { name: '강남역' } };
+  const forced = computePlan(base({ draft: { ...draft, withWake: true }, now: kst(22, 400) }), api(30));
+  assert.equal(forced.withWake, true);
+  assert.equal(forced.chain[0].kind, 'WAKE');
+  const manual = computePlan(base({ draft: { ...draft, manualTimes: { WAKE: kst(22, 15 * 60) } }, now: kst(22, 400) }), api(30));
+  assert.equal(manual.withWake, true);
+  assert.deepEqual(text(manual).slice(0, 1), ['WAKE 15:00*']);
+  // with_wake false는 원래대로 기상 없음 (오전 일정이어도)
+  const off = computePlan(base({ draft: { at: kst(22, 600), destination: { name: '세종대학교' }, withWake: false } }), api(50));
+  assert.equal(off.withWake, false);
+});
+
+test('kinds에 WAKE가 있어도 저녁이면 기상은 안 만들어짐 (kinds는 거르기만, L6 안건후보 기본안)', () => {
+  const plan = computePlan(base({ draft: { at: kst(22, 1080), destination: { name: '강남역' }, kinds: ['WAKE', 'PREPARE', 'DEPARTURE'] }, now: kst(22, 400) }), api(30));
+  assert.equal(plan.withWake, false);
+  assert.deepEqual(plan.chain.map((x) => x.kind), ['PREPARE', 'DEPARTURE', 'ARRIVE']);
+});
+
+test('시간대: 같은 순간도 profile.timezone의 낮으로 판정 (서울이면 오후 → 기상 없음, 뉴욕이면 새벽 → 기상 있음)', () => {
+  // 약속 UTC 08:00 (서울 17:00 · 뉴욕 04:00), 기록 없음 · 이동 30 · 여유 10 · 준비 50 → 기상 UTC 06:30 (서울 15:30 · 뉴욕 02:30)
+  const at = new Date('2025-05-22T08:00:00Z');
+  const input = (timezone: string) => base({ profile: { ...profile, timezone }, stats: { sampleCount: 0, p80: null }, draft: { at, destination: { name: '강남역' } }, now: new Date('2025-05-21T00:00:00Z') });
+  assert.equal(computePlan(input('Asia/Seoul'), api(30)).withWake, false);
+  assert.equal(computePlan(input('America/New_York'), api(30)).withWake, true);
+  // 시간대가 비었거나 틀리면 서울
+  assert.equal(computePlan(input(''), api(30)).withWake, false);
+  assert.equal(computePlan(input('No/Such_Zone'), api(30)).withWake, false);
+});
+
+test('축별 선택을 끄면(axesEnabled false) 요청 · 저장된 축 값을 모두 무시하고 자동(강도 따름) — 켜면 요청 값이 우선 (D1 A flag, 헤드 확정 10/30)', () => {
+  const stored = row('WAKE', 480, { intensity_source: 'MANUAL', sound_key: 'theme_urgent', vibration: 'NONE' });
+  assert.deepEqual(resolveOverrides({ sound: 2 }, [stored], 1, true), { sound: 2 });
+  assert.deepEqual(resolveOverrides({ sound: 2 }, [stored], 1, false), {});
+  assert.deepEqual(resolveOverrides(undefined, [stored], 1, false), {});
+  assert.notDeepEqual(resolveOverrides(undefined, [stored], 1, true), {}); // 켜면 저장된 직접 값이 살아 있음
 });

@@ -140,6 +140,24 @@ export function keepWords(text: string) {
     .replace(/([가-힣])(?=[가-힣])/g, '$1\u2060');
 }
 
+// 이어진 시각 글자에서 앞 줄과 같은 오전 · 오후는 뺌 — ['오전 8:00 기상', '오전 8:30 준비', '오후 1:10 출발'] → ['오전 8:00 기상', '8:30 준비', '오후 1:10 출발']
+export function dropRepeatedAmpm(lines: string[]) {
+  let prev = '';
+  return lines.map((line) => {
+    const m = /^(오전|오후) /.exec(line);
+    if (!m) return line;
+    const same = m[1] === prev;
+    prev = m[1];
+    return same ? line.slice(m[0].length) : line;
+  });
+}
+
+// 공통 Text가 자동으로 keepWords를 걸지 판단 — 띄어쓰기가 있는 한글 글에만 (숫자 · 한 단어는 줄바꿈 자리가 없어 그대로 둠)
+// keepWords는 두 번 걸어도 결과가 같아서, 이미 건 곳(AlarmCard 등)과 겹쳐도 보이는 글자는 달라지지 않음
+export function keepWordsIfWrappable(text: string) {
+  return /[가-힣]/.test(text) && /\s/.test(text) ? keepWords(text) : text;
+}
+
 // 0시부터 분 → '21:30' (루틴 시작 시각 등). 하루를 넘으면 다음 날 시각으로 (목업 h24)
 export function formatMinuteOfDay(minutes: number) {
   const m = ((minutes % 1440) + 1440) % 1440;

@@ -13,7 +13,7 @@ import { callLlm, DEFAULT_MODEL, type Effort, type LlmClient, type LlmResult } f
 import { render } from '../ai/render.ts';
 import { schemaOf, type SchemaId } from '../ai/schemas/index.ts';
 import ASSIST_E4 from './ASSIST_E4.v1.1.ts';
-import T1 from './T1.v1.3.ts';
+import T1 from './T1.v1.4.ts';
 import T2 from './T2.v2.ts';
 import T2F from './T2F.v2-a.ts';
 import T3 from './T3.v1.ts';

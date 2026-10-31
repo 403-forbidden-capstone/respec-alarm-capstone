@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Keyboard, Platform, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 
 import { Button, EmptyState, LoadError, Loading, Sheet, Text, toast } from '@/components/ui';
+import { DESTINATION_RADIUS_PRESETS, initialRadius, radiusAfterPick } from '@/features/location/radius';
 import { userMessage } from '@/lib/errors';
 import { colors, radius, size, typeScale } from '@/theme';
 
@@ -21,9 +22,20 @@ import {
 import { noResultTitle, placeSubtitle } from '../placeSheet';
 import type { LatLng, PinAddress, Place } from '../types';
 import { MapView } from './MapView';
+import { RadiusPicker } from './RadiusPicker';
 
 const DEFAULT_NAMES = ['집', '학교', '회사']; // 이름 칩 (suggestedNames를 안 주면)
 const MAP_HEIGHT = 300;
+
+// 감지 범위 고르기 — 주면 지도에 원이 그려지고 지도 아래에 작게 · 보통 · 크게 3칸이 나옴. onPick의 radiusM에 고른 값(100~500m)이 실림. 안 주면 반경 UI 없음
+export type RadiusOption = {
+  initial: number; // 처음 값(m) — 저장돼 있던 값 · 기본값. 프리셋 25m 안이면 그 칸, 아니면 그 값 그대로(칸은 모두 꺼짐)
+  presets?: readonly number[]; // 작은 것부터 3개 (기본 [100, 150, 300] — 목적지 기준. 집은 [100, 200, 300])
+  hint?: string; // 한 줄 설명 (기본 "이 원 안에 들어오면 도착으로 기록해요", 집은 "이 원을 벗어나면 …")
+  followPlace?: boolean; // 검색 결과를 누르면 그 장소 분류의 기본 반경으로 맞춤(사용자가 직접 고르기 전까지) — 기본 true. 집처럼 분류와 상관없으면 false
+};
+
+const DEFAULT_RADIUS_HINT = '이 원 안에 들어오면 도착으로 기록해요';
 
 type Props = {
   visible: boolean;
@@ -35,7 +47,9 @@ type Props = {
   center?: LatLng; // 처음 중심 — 지금 집 같은 곳. 없으면 서울 시청에서 열고, 핀을 놓기 전에는 [이 위치로 정하기]가 막힘
   suggestedNames?: string[]; // 이름 칩 (기본 집 · 학교 · 회사)
   areaWarning?: string | null; // 캠퍼스 대표 좌표를 골랐을 때 문구 (기본은 캠퍼스 안내, null이면 안 보임). 캠퍼스가 아닌 곳(집)에서는 중립 문구나 null
+  radius?: RadiusOption; // 감지 범위 고르기 (없으면 반경 UI · 원 없음)
   title?: string;
+  initialQuery?: string; // 처음부터 채워 둘 검색어 (예: 캠퍼스 이름으로 건물 다시 찾기) — 있으면 결과 목록이 바로 열림
 };
 
 // 지도에서 위치 고르기 시트 — 맨 위 검색 칸, 가운데 카카오맵(핀 고정, 지도를 끌어 맞춤) + [현재 위치], 아래 핀 자리 주소 · 이름 · [이 위치로 정하기]
@@ -54,9 +68,9 @@ type PinResult = { lat: number; lng: number; address: PinAddress | null } | { la
 type Pin = { kind: 'loading' } | { kind: 'done'; address: PinAddress | null } | { kind: 'failed' };
 
 // 시트 안에서 그려지는 본문 — 시트가 열릴 때마다 새로 떠서 상태가 초기화됨 (시트 내용은 루트에서 그려지므로 상태를 여기에 둠)
-function MapPlaceBody({ onPick, search, reverse, locate, center, suggestedNames, areaWarning = AREA_WARNING }: Omit<Props, 'visible' | 'onClose' | 'title'>) {
-  const [text, setText] = useState(''); // 검색 칸
-  const [listOpen, setListOpen] = useState(false); // 검색 결과 목록이 지도 위에 뜸 (글자를 칠 때 열리고, 결과를 고르면 닫힘)
+function MapPlaceBody({ onPick, search, reverse, locate, center, suggestedNames, areaWarning = AREA_WARNING, radius: radiusOption, initialQuery }: Omit<Props, 'visible' | 'onClose' | 'title'>) {
+  const [text, setText] = useState(initialQuery ?? ''); // 검색 칸
+  const [listOpen, setListOpen] = useState(Boolean(initialQuery?.trim())); // 검색 결과 목록이 지도 위에 뜸 (글자를 칠 때 열리고, 결과를 고르면 닫힘)
   const [point, setPoint] = useState<LatLng | null>(center ?? null); // 핀이 놓인 자리
   const [picked, setPicked] = useState<Place | null>(null); // 검색 결과로 고른 장소
   const [moveTo, setMoveTo] = useState<{ lat: number; lng: number; nonce: number }>();
@@ -65,6 +79,9 @@ function MapPlaceBody({ onPick, search, reverse, locate, center, suggestedNames,
   const [name, setName] = useState(''); // 직접 쓴 이름 · 칩
   const [locating, setLocating] = useState(false);
   const [locateFailed, setLocateFailed] = useState(false);
+  const presets = radiusOption?.presets ?? DESTINATION_RADIUS_PRESETS;
+  const [radiusM, setRadiusM] = useState<number | undefined>(() => (radiusOption ? initialRadius(radiusOption.initial, presets) : undefined)); // 고른 감지 범위
+  const radiusTouched = useRef(false); // 사용자가 칸을 직접 눌렀음 — 그 뒤로는 검색 결과가 바꾸지 않음
   const nonce = useRef(0);
   const reverseRef = useRef(reverse);
   const query = text.trim();
@@ -130,6 +147,7 @@ function MapPlaceBody({ onPick, search, reverse, locate, center, suggestedNames,
     setListOpen(false);
     setPicked(place);
     goTo({ lat: place.lat, lng: place.lng });
+    if (radiusM != null) setRadiusM(radiusAfterPick({ current: radiusM, touched: radiusTouched.current, follow: radiusOption?.followPlace, place, presets }));
   };
 
   const onLocate = async () => {
@@ -160,7 +178,7 @@ function MapPlaceBody({ onPick, search, reverse, locate, center, suggestedNames,
   const waitingAddress = pin.kind === 'loading' && !naming;
   const confirm = () => {
     if (!point || waitingAddress) return;
-    onPick(placeFromPin({ point, typedName: name, picked: naming, pinAddress }));
+    onPick(placeFromPin({ point, typedName: name, picked: naming, pinAddress, radiusM }));
   };
 
   const names = suggestedNames ?? DEFAULT_NAMES;
@@ -196,7 +214,7 @@ function MapPlaceBody({ onPick, search, reverse, locate, center, suggestedNames,
       </View>
 
       <View style={styles.map}>
-        <MapView center={center ?? DEFAULT_CENTER} onCenter={onCenter} moveTo={moveTo} onStatus={setMapStatus} />
+        <MapView center={center ?? DEFAULT_CENTER} onCenter={onCenter} moveTo={moveTo} onStatus={setMapStatus} radiusMeters={radiusM} />
         {listOpen && query ? (
           <View style={styles.results}>
             <ScrollView nestedScrollEnabled keyboardShouldPersistTaps="handled" style={styles.resultList}>
@@ -228,6 +246,18 @@ function MapPlaceBody({ onPick, search, reverse, locate, center, suggestedNames,
           </Pressable>
         )}
       </View>
+
+      {radiusM != null ? (
+        <RadiusPicker
+          value={radiusM}
+          presets={presets}
+          hint={radiusOption?.hint ?? DEFAULT_RADIUS_HINT}
+          onChange={(meters) => {
+            radiusTouched.current = true;
+            setRadiusM(meters);
+          }}
+        />
+      ) : null}
 
       <View style={styles.pin} accessibilityLiveRegion="polite">
         <Text variant="label">핀 자리</Text>

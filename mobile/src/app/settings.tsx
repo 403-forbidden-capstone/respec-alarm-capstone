@@ -6,13 +6,19 @@ import { Button, Card, KeyValueRow, Screen, SectionHeader, Sheet, Text, toast, T
 import { listPlaces, reverseAddress } from '@/features/alarm/api';
 import { MapPlaceSheet } from '@/features/alarm/components/MapPlaceSheet';
 import { homeOf } from '@/features/alarm/placeSheet';
-import type { Place } from '@/features/alarm/types';
+import type { PickedPlace } from '@/features/alarm/mapPicker';
 import { useAuth } from '@/features/auth/AuthProvider';
 import { DataModeToggle } from '@/features/auth/DataModeToggle';
+import { HOME_RADIUS_M } from '@/features/location/constants';
 import { locateOnce } from '@/features/location/currentPosition';
+import { HOME_RADIUS_PRESETS } from '@/features/location/radius';
+import { FrequentPlacesSection } from '@/features/location/FrequentPlacesSection';
+import { LocationAutoSection } from '@/features/location/LocationAutoSection';
 import { openAppNotificationSettings } from '@/features/permissions';
 import { homePatchOf } from '@/features/onboarding/home';
+import { CalendarPickSheet } from '@/features/onboarding/components/CalendarPickSheet';
 import { ImportEntryCard } from '@/features/onboarding/components/ImportEntryCard';
+import { useCalendarImport } from '@/features/onboarding/hooks/useCalendarImport';
 import { usePhotoImport } from '@/features/onboarding/hooks/usePhotoImport';
 import { shouldSaveHandle } from '@/features/onboarding/validate';
 import { isHandleTaken, saveProfileFields } from '@/features/profile/api';
@@ -40,10 +46,15 @@ type Editing = 'nickname' | 'handle' | 'sleep' | 'prepare' | null;
 export default function SettingsScreen() {
   const { session, profile, enabled, refreshProfile } = useAuth();
   const { run } = useAction();
+  const logout = useAction(); // 로그아웃 연타 막기 · 돌아가는 표시 — 프로필 저장 중에 로그아웃 버튼이 같이 돌지 않게 따로
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState<Editing>(null);
   const [placeOpen, setPlaceOpen] = useState(false);
   const photoImport = usePhotoImport();
+  const calendarImport = useCalendarImport((batch) => {
+    setImportBatch(batch);
+    router.push('/timetable-import');
+  });
   const user = session?.user;
   const provider = (user?.app_metadata?.provider as string | undefined) ?? '';
   const userId = enabled ? user?.id : undefined;
@@ -76,7 +87,7 @@ export default function SettingsScreen() {
       toast(note);
     }, '저장하지 못했어요');
 
-  const pickHome = (place: Place) => {
+  const pickHome = (place: PickedPlace) => {
     const patch = homePatchOf(place);
     // 좌표가 없는 장소는 집으로 못 정함 — 이름만 바꾸면 이전 좌표와 어긋나고, 지우면 새 일정의 이동시간 계산이 막힘 (시트는 열어 둠)
     if (!patch) {
@@ -97,6 +108,8 @@ export default function SettingsScreen() {
         <EditRow label="닉네임" value={profile?.nickname ?? '-'} onPress={open('nickname')} />
         <EditRow label="아이디" value={profile?.handle ? `@${profile.handle}` : '-'} onPress={open('handle')} />
       </Card>
+
+      <LocationAutoSection />
 
       {profile ? (
         <>
@@ -123,8 +136,17 @@ export default function SettingsScreen() {
                       }
                     : undefined
                 }
-                busy={photoImport.reading}
-                reading={photoImport.reading ? 'photo' : null}
+                onCalendar={TIMETABLE_PATHS.calendar ? calendarImport.start : undefined}
+                busy={photoImport.reading || calendarImport.busy}
+                reading={photoImport.reading ? 'photo' : calendarImport.reading ? 'calendar' : null}
+              />
+              <CalendarPickSheet
+                visible={calendarImport.pickerOpen}
+                calendars={calendarImport.calendars}
+                picked={calendarImport.picked}
+                onToggle={calendarImport.toggle}
+                onConfirm={calendarImport.confirm}
+                onClose={calendarImport.closePicker}
               />
             </>
           ) : null}
@@ -136,6 +158,8 @@ export default function SettingsScreen() {
           </Card>
         </>
       ) : null}
+
+      {profile ? <FrequentPlacesSection center={homeOf(profile)} /> : null}
 
       {/* 알람이 잘 울리게 하는 폰 설정 — 값이 아니라 길이라 프로필 값(위 "알람" 절)과 나눔. 가짜 모드에서도 보임 */}
       <SectionHeader title="알람 점검" />
@@ -171,7 +195,13 @@ export default function SettingsScreen() {
           <Button
             label="로그아웃"
             variant="ghost"
-            onPress={() => signOutAndCleanup().catch((e) => setError(userMessage(e, '로그아웃하지 못했어요')))}
+            loading={logout.busy}
+            onPress={() =>
+              logout.run(async () => {
+                setError(null);
+                await signOutAndCleanup().catch((e) => setError(userMessage(e, '로그아웃하지 못했어요')));
+              })
+            }
           />
           {error ? (
             <Text variant="small" tone="warn">
@@ -223,6 +253,7 @@ export default function SettingsScreen() {
         locate={locateOnce}
         center={homeOf(profile)}
         suggestedNames={['집']}
+        radius={{ initial: profile?.home_radius_m ?? HOME_RADIUS_M, presets: HOME_RADIUS_PRESETS, hint: '이 원을 벗어나면 집에서 출발한 것으로 기록해요', followPlace: false }}
         areaWarning="캠퍼스 대표 위치예요. 건물을 고르면 더 정확해요"
         title="집 찾기"
       />

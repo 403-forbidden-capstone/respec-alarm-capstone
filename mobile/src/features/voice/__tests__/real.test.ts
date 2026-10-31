@@ -8,7 +8,7 @@ import { EdgeError, callEdge } from '@/lib/edge';
 
 import { applyFix } from '../fixes';
 import { clearSavedMarksForUser, SAVED_MARK_TTL_MS } from '../savedMarks';
-import { getConversation, pickCardPlace, rejectCard, resetVoiceState, retry, saveCard, say, TURN_TIMEOUT_MS } from '../real';
+import { finishConversation, getConversation, pickCardPlace, rejectCard, resetVoiceState, retry, saveCard, say, TURN_TIMEOUT_MS } from '../real';
 
 // 실데이터 대화(real.ts)를 가짜 서버 함수(callEdge) + 가짜 L1 · L2 함수로 시험 — 서버 함수 voice-session · voice-turn은 별도 PR(배포 전엔 이 가짜 응답으로 확인)
 jest.mock('@/lib/edge', () => ({ ...jest.requireActual<typeof import('@/lib/edge')>('@/lib/edge'), callEdge: jest.fn() }));
@@ -1108,5 +1108,88 @@ describe('⑮ pending이 있을 때 카드 동작은 큐에서 기다림', () =>
     script = [turn({ rev: 4 }), turn({ rev: 5 })];
     await retry();
     expect((turnBodies()[1].results as { cards: { status: string }[] }).cards[0].status).toBe('READY');
+  });
+});
+
+describe('⑯ [완료] 뒤 [대화 시작]은 새 대화 (L8 버그 2)', () => {
+  const sessionCalls = () => bodies().filter((b) => b.name === 'voice-session').map((b) => b.body.resume);
+
+  it('완료 없이 다시 열면 그대로 이어지고(서버를 또 안 부름), 완료한 뒤 다시 열면 새 세션을 읽음', async () => {
+    script = [session(), turn()];
+    await getConversation();
+    await say('안녕');
+    await getConversation(); // 완료 없이 나갔다 돌아옴
+    expect(edge).toHaveBeenCalledTimes(2);
+
+    await finishConversation();
+    script = [session({ session_id: 's2', rev: 1, messages: [{ role: 'ai', text: '새 첫 마디', at: at(22, 0).toISOString() }] })];
+    const c = await getConversation();
+    expect(sessionCalls()).toEqual([true, true]);
+    expect(c.messages.map((m) => m.text)).toEqual(['새 첫 마디']);
+    script = [turn()];
+    await say('새 대화 말');
+    expect(turnBodies()[1]).toMatchObject({ session_id: 's2' });
+  });
+
+  it('서버 resume이 완료한 세션을 또 돌려주면 무시하고 resume:false로 한 번 더 부름 (앱을 다시 열어도)', async () => {
+    script = [session(), turn()];
+    await getConversation();
+    await say('안녕');
+    await finishConversation();
+    resetVoiceState(); // 앱을 껐다 켬 — 메모리는 비고 완료 표시(저장소)만 남음
+    script = [session({ resumed: true, rev: 3 }), session({ session_id: 's2', rev: 1 })];
+    const c = await getConversation();
+    expect(sessionCalls()).toEqual([true, true, false]);
+    expect(c.messages).toHaveLength(1);
+    script = [turn()];
+    await say('hi');
+    expect(turnBodies()[1]).toMatchObject({ session_id: 's2' });
+  });
+
+  it('한 마디도 안 한 대화를 완료하면 끝남으로 안 적어, 다시 열면 같은 세션을 이어 받음 (한도를 안 닳게)', async () => {
+    script = [session()];
+    await getConversation();
+    await finishConversation();
+    script = [session({ resumed: true })];
+    const c = await getConversation();
+    expect(c.messages).toHaveLength(1);
+    expect(sessionCalls()).toEqual([true, true]);
+  });
+
+  it('완료 뒤 새 대화 열기가 실패하면 옛 세션이 안 남아, [다시 시도]가 새 세션을 읽고 말은 옛 세션으로 가지 않음', async () => {
+    script = [session(), turn()];
+    await getConversation();
+    await say('안녕');
+    await finishConversation();
+    script = [new EdgeError('NETWORK')];
+    const failed = await getConversation();
+    expect(failed.unavailable).not.toBeNull();
+    expect(failed.messages).toEqual([]);
+    script = [session({ session_id: 's2', rev: 1 })];
+    const again = await retry();
+    expect(again.unavailable).toBeNull();
+    script = [turn()];
+    await say('새 말');
+    expect(turnBodies()[1]).toMatchObject({ session_id: 's2' });
+  });
+
+  it('완료하지 않은 세션을 서버가 이어 주면 그대로 씀 (같은 밤 resume)', async () => {
+    script = [session({ resumed: true, rev: 3 })];
+    await getConversation();
+    expect(sessionCalls()).toEqual([true]);
+  });
+
+  it('완료할 때 못 보낸 카드 알림이 큐에 있어도 완료는 되고, 다음 열기는 새 세션', async () => {
+    script = [session(), turn({ next: 'APP_TASKS', reply: null, cards: [apptCard()] }), turn({ rev: 3, cards: [apptCard({ status: 'READY' })] })];
+    await getConversation();
+    await say('발표 있어');
+    script = [new EdgeError('NETWORK')];
+    await saveCard('c1'); // 서버 알림 실패 — 보낼 것이 남음
+    script = [new EdgeError('NETWORK')];
+    await finishConversation();
+    script = [session({ session_id: 's2' })];
+    const c = await getConversation();
+    expect(c.unavailable).toBeNull();
+    expect(sessionCalls()).toEqual([true, true]);
   });
 });

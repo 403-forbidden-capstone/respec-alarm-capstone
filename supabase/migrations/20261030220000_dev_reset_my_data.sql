@@ -166,7 +166,7 @@ end;
 $$;
 
 comment on function public.dev_reset_my_data() is
-  '개발용 — 부른 사람 본인의 시험 데이터(일정 · 알람 · 기록 · 일기 · AI 대화 · 고친 값 기록 · 제안)를 지우고 프로필을 온보딩 전으로 되돌림. 그룹 일정과 남이 참여 중인 일정은 내 참여 행만 지움(일정째 지우는 건 내가 만든 개인 일정 중 혼자인 것뿐). 친구 · 그룹 · 푸시 토큰 · ai_calls · user_questions는 그대로. 출시 빌드에서는 앱이 부르지 않음';
+  '개발용 — 부른 사람 본인의 시험 데이터(일정 · 알람 · 기록 · 일기 · AI 대화 · 고친 값 기록 · 제안)를 지우고 프로필을 온보딩 전으로 되돌림. 그룹 일정과 남이 참여 중인 일정은 내 참여 행만 지움(일정째 지우는 건 내가 만든 개인 일정 중 혼자인 것뿐). 친구 · 그룹 · 푸시 토큰 · 자주 가는 곳(user_places) · ai_calls · user_questions는 그대로. 출시 빌드에서는 앱이 부르지 않음';
 
 -- 로그인한 사용자만 (anon · public은 막음). 새 함수는 기본으로 API 역할에 열려 있을 수 있어서 직접 정함
 revoke all on function public.dev_reset_my_data() from public, anon;

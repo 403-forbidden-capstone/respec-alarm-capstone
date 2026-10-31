@@ -35,6 +35,6 @@ const DAY = 38; // 모양은 38, 누르는 칸은 hitSlop 3을 더해 44
 
 const styles = StyleSheet.create({
   row: { flexDirection: 'row', justifyContent: 'space-between' },
-  day: { width: DAY, height: DAY, borderRadius: DAY / 2, backgroundColor: colors.chip, alignItems: 'center', justifyContent: 'center' },
+  day: { width: DAY, minHeight: DAY, borderRadius: DAY / 2, backgroundColor: colors.chip, alignItems: 'center', justifyContent: 'center' },
   on: { backgroundColor: colors.ink },
 });

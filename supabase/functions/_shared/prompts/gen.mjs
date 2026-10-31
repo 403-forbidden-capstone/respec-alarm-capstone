@@ -18,7 +18,7 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, '../../../..');
 
 // 쓰는 판 목록. 새 판은 여기에 한 줄 더하고 md를 docs/ai-lab/prompts/에 둔 뒤 다시 돌림 (옛 판 줄은 지우지 않음 — index.ts 머리 주석)
-export const PROMPTS = ['T1.v1.3', 'T2F.v2-a', 'T2.v2', 'T3.v1', 'T4.v1.1', 'T5.v1.2', 'ASSIST_E4.v1.1'];
+export const PROMPTS = ['T1.v1.3', 'T1.v1.4', 'T2F.v2-a', 'T2.v2', 'T3.v1', 'T4.v1.1', 'T5.v1.2', 'ASSIST_E4.v1.1'];
 export const SCHEMAS = ['t1-reply.v1', 'extract.v1', 'extract-fast.v1', 't4-diary.v1', 't5-journal.v1', 'assist-e4.v1', 't3-reason.v1'];
 
 // ---------------------------------------------------------------------------

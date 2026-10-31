@@ -1,6 +1,6 @@
 // ALG-02 알람 강도 — D56 1 기본안 → D69 (정한 것, 10/26: 기본 강도는 보통, 약은 사용자가 직접 고를 때만)
 //   자동 = 보통(1)에서 시작해 올림 규칙을 단계로 더함, 상한 강(2). 중요도 낮음(LOW)이어도 기본은 보통(약으로 내려가지 않음)
-//     · 중요도 매우 중요(HIGH)면 한 단계 올림 (보통 · 중요는 올림 없음)
+//     · 중요도 매우 중요(HIGH)면 한 단계 올림 (평소 · 중요는 올림 없음)
 //     · 최근 4주 늦잠 지각이 2회 이상이면 한 단계 올림
 //     · 잠귀가 무거움(wakeSensitivity = HEAVY)이면 곧바로 강
 //   직접 고른 칸(배경음 · 말소리 · 진동)이 있으면 그 칸은 그 값, 나머지는 자동 (약은 이 경우에만 나옴)
@@ -29,6 +29,12 @@ export type WakeSensitivity = 'HEAVY' | 'NORMAL';
 export function wakeSensitivityOf(value: string | null | undefined): WakeSensitivity {
   return value === 'HEAVY' ? 'HEAVY' : 'NORMAL';
 }
+
+// 축별 선택(배경음 · 말소리 · 진동을 따로 고름, D1 A)을 쓸지 — 앱 H03 선택 UI(lib/flags.ts ALARM_AXES_PICKER가 이 값을 다시 내보냄)와 서버 · 폰 계산이 같은 값을 봄.
+//   false: 이미 저장된 축 값(sound_key · voice_tone · vibration)은 지우지 않되 **계산에서 무시**하고 모두 강도를 따름 — 숨긴 설정이 몰래 알람에 영향을 주지 않게 (헤드 확정 10/30).
+//   다시 true로 켜면 저장돼 있던 값이 그대로 살아남. 결정 안건(투표) 결과 대기
+//   서버 함수를 배포하는 쪽과 앱(APK 아님, JS)이 같은 값으로 올라가야 어긋나지 않음
+export const AXES_PICKER_ENABLED = true;
 
 // 기본 강도 = 보통 (D69)
 export const BASE_LEVEL: Level = 1;

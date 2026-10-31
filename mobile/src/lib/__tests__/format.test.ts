@@ -1,6 +1,7 @@
 import { describe, expect, it } from '@jest/globals';
 
 import {
+  dropRepeatedAmpm,
   formatDate,
   formatDateParen,
   formatDateShort,
@@ -11,6 +12,7 @@ import {
   josa,
   joinKo,
   keepWords,
+  keepWordsIfWrappable,
   minuteOfDay,
   spokenTime,
   timeParts,
@@ -72,5 +74,45 @@ describe('keepWords', () => {
     expect(out.replace(/\u2060/g, '').replace(/\u00A0/g, ' ')).toBe('오후 12:28 기상 · 지남');
     expect(out).toBe('오\u2060후\u00A012:28 기\u2060상 ·\u00A0지\u2060남');
     expect(keepWords('7:00 AM')).toBe('7:00 AM');
+  });
+
+  it('두 번 걸어도 결과가 같음 (공통 Text와 화면이 겹쳐도 안전)', () => {
+    const once = keepWords('오후 12:28 기상 · 지남');
+    expect(keepWords(once)).toBe(once);
+  });
+});
+
+describe('keepWordsIfWrappable', () => {
+  it('띄어쓰기가 있는 한글 글에만 걸고, 숫자 · 한 단어 · 영문은 그대로', () => {
+    expect(keepWordsIfWrappable('기상 확인')).toBe(keepWords('기상 확인'));
+    expect(keepWordsIfWrappable('기상')).toBe('기상');
+    expect(keepWordsIfWrappable('7:55')).toBe('7:55');
+    expect(keepWordsIfWrappable('Re:Spec Alarm')).toBe('Re:Spec Alarm');
+    expect(keepWordsIfWrappable('https://example.com/가나다')).toBe('https://example.com/가나다');
+  });
+
+  it('이미 keepWords를 건 글에 다시 걸어도 같음', () => {
+    const done = keepWords('집에서 나서는 시각');
+    expect(keepWordsIfWrappable(done)).toBe(done);
+  });
+});
+
+describe('dropRepeatedAmpm', () => {
+  it('앞 줄과 같은 오전 · 오후만 빼고, 바뀌는 곳은 남김', () => {
+    expect(dropRepeatedAmpm(['오전 8:00 기상', '오전 8:30 준비', '오후 1:10 출발', '오후 1:40 도착'])).toEqual([
+      '오전 8:00 기상',
+      '8:30 준비',
+      '오후 1:10 출발',
+      '1:40 도착',
+    ]);
+  });
+  it('오전 · 오후가 없는 줄은 그대로, 하나뿐이면 그대로', () => {
+    expect(dropRepeatedAmpm(['오전 8:00 기상'])).toEqual(['오전 8:00 기상']);
+    expect(dropRepeatedAmpm(['08:00 기상', '08:30 준비'])).toEqual(['08:00 기상', '08:30 준비']);
+    expect(dropRepeatedAmpm([])).toEqual([]);
+  });
+  it('하루를 넘기는 체인은 바뀌는 곳을 남김, 뒤에 붙은 표시(지남 · 꺼짐)는 영향 없음', () => {
+    expect(dropRepeatedAmpm(['오후 11:30 준비', '오전 12:10 출발'])).toEqual(['오후 11:30 준비', '오전 12:10 출발']);
+    expect(dropRepeatedAmpm(['오전 8:00 기상 · 지남', '오전 8:30 준비 · 꺼짐'])).toEqual(['오전 8:00 기상 · 지남', '8:30 준비 · 꺼짐']);
   });
 });

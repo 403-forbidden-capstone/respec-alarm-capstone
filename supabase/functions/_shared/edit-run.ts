@@ -7,7 +7,7 @@
 //   고치기 = (이후 모두면) 뒤 회차 지우기 → 참여 조건 → 알람 → 약속 행 마지막 / 지우기(이후 모두) = 뒤 회차 → 규칙 비우기 → 이 행 마지막
 //   약속 행을 마지막에 쓰는 이유: 앞에서 실패해도 약속 행이 안 바뀌어 있어 다시 보내면 고칠 것이 그대로 보임
 // 하루 경계는 profiles.timezone(없으면 Asia/Seoul) 0시 (tz.ts)
-import { hasEarlierWake, type SameDayWake } from './calc/index.ts';
+import { hasEarlierWake, isEveningWake, type SameDayWake } from './calc/index.ts';
 import { diffAlarms, type AlarmDiff } from './commit-core.ts';
 import { summarize } from './commit.ts';
 import { must } from './db.ts';
@@ -30,7 +30,7 @@ import {
 import type { EditRequest } from './edit-request.ts';
 import { HttpError } from './errors.ts';
 import { loadAlarms, loadLateCount, loadParticipant, loadPrepareStats, loadProfile, loadTravelSamples, ALARM_COLUMNS, SERIES_APPOINTMENT_COLUMNS, type SeriesAppointmentRow } from './plan.ts';
-import { computePlan, resolveBasics, type AlarmRow, type AppointmentRow, type ParticipantRow, type Plan, type PlanInputs, type ProfileRow } from './plan-core.ts';
+import { computePlan, firstPrepareMinutes, resolveBasics, type AlarmRow, type AppointmentRow, type ParticipantRow, type Plan, type PlanInputs, type ProfileRow } from './plan-core.ts';
 import { buildRingPackages, canceledAlarmIds, subtitleFor, type RingPackage } from './ring-package.ts';
 import { resolveTravel, type TravelChoice, type TravelDeps } from './route.ts';
 import { inheritedKinds, resolvedTravelOf, shiftManualTimes } from './roll.ts';
@@ -391,7 +391,14 @@ export async function updateAppointment(ctx: EditCtx, req: Extract<EditRequest, 
     const newDay = snapshot.days.get(localDateKey(newAt, tz)) ?? [];
     const oldDay = snapshot.days.get(localDateKey(oldAt, tz)) ?? [];
     const sameDayWake = hasEarlierWake(newAt, wakesOfRows(newDay.filter((r) => !excluded.has(r.appointment.appointment_id)).map(dayWakeRow)), row.appointment_id);
-    const hadEarlierWake = hasEarlierWake(oldAt, wakesOfRows(oldDay.map(dayWakeRow)), row.appointment_id);
+    // 기상이 없던 이유가 "앞 기상에 밀려서"만이 아님 — 저녁 일정은 계산된 기상이 낮 12시 이후라 기상을 안 만듦(plan-core.ts, #320). 저녁 일정을 아침으로 옮기면 기상이 붙어야 하므로 같이 "밀려서 없던 것"으로 봄
+    //   L6 안건후보: 기상 없는 일정을 고칠 때 기본안 = 옛 시각의 **계산된** 기상(옛 이동 · 여유 + 기상 있는 첫 준비값)이 낮 12시 이후였으면 규칙 때문에 없던 것이라 다시 계산하고,
+    //   12시 전이었는데 기상이 없으면 사용자가 일부러 끈 것이라 그대로 둠 (헤드 확정 10/30 — 13:00 일정에서 끈 기상이 장소만 고쳐도 되살아나던 것, 리뷰 F1)
+    const oldFirstPrepare = firstPrepareMinutes(await env.profile());
+    const oldWakeAt = new Date(oldAt.getTime() - ((participant.buffer_minutes ?? 0) + (participant.est_travel_minutes ?? 0) + oldFirstPrepare) * 60_000);
+    const hadNoWakeInEvening =
+      alarms.some((a) => a.alarm_type === 'PREPARE' || a.alarm_type === 'DEPARTURE') && !alarms.some((a) => a.alarm_type === 'WAKE') && isEveningWake(oldWakeAt, tz, oldAt);
+    const hadEarlierWake = hasEarlierWake(oldAt, wakesOfRows(oldDay.map(dayWakeRow)), row.appointment_id) || hadNoWakeInEvening;
 
     const { travel, warnings } = await travelFor(ctx, env, { row: patchedRow, participant, placeChanged: patched.changed.place });
     result.warnings.push(...warnings);

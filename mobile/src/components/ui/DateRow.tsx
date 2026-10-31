@@ -34,9 +34,50 @@ function shiftMonth(year: number, month: number, delta: number) {
 // 지난 날(minDate 앞)은 흐리게 막아서 못 고름. 오늘은 테두리, 고른 날은 검은 원
 export function DateRow({ label, value, onChange, minDate, maxDate, first }: Props) {
   const [open, setOpen] = useState(false);
+  const text = formatDateShort(value);
+
+  return (
+    <>
+      <Pressable
+        onPress={() => setOpen(true)}
+        accessibilityRole="button"
+        accessibilityLabel={`${label} ${text}`}
+        style={({ pressed }) => [styles.row, !first && styles.divider, pressed && styles.pressed]}
+      >
+        <Text variant="rowLabel" tone="sub">
+          {label}
+        </Text>
+        <View style={styles.value}>
+          <Text variant="bodyStrong">{text}</Text>
+          <Text variant="bodyStrong" tone="faint">
+            ›
+          </Text>
+        </View>
+      </Pressable>
+      <DateSheet visible={open} onClose={() => setOpen(false)} title={label} value={value} onChange={onChange} minDate={minDate} maxDate={maxDate} />
+    </>
+  );
+}
+
+type SheetProps = Omit<Props, 'label' | 'first'> & {
+  visible: boolean;
+  onClose: () => void;
+  title: string;
+};
+
+// 달력 시트만 — 줄 없이 부르는 쪽이 열고 닫을 때 (다른 시트 안의 줄에서 날짜를 고를 때: 시트는 한 번에 하나만 뜨므로 시트 안에 DateRow를 둘 수 없음)
+export function DateSheet({ visible, onClose, title, ...calendar }: SheetProps) {
+  return (
+    <Sheet visible={visible} onClose={onClose} title={title}>
+      <Calendar {...calendar} onClose={onClose} />
+    </Sheet>
+  );
+}
+
+// 시트 안에서 그려지는 달력 — 시트가 열릴 때마다 새로 떠서 고른 날이 든 달부터 보임 (보는 달은 이 안에서 들고 있음)
+function Calendar({ value, onChange, onClose, minDate, maxDate }: Omit<SheetProps, 'visible' | 'title'>) {
   const picked = dateParts(value);
   const [view, setView] = useState({ year: picked.year, month: picked.month });
-  const text = formatDateShort(value);
 
   const todayKey = dayKey(now());
   const pickedKey = dayKey(value);
@@ -54,84 +95,61 @@ export function DateRow({ label, value, onChange, minDate, maxDate, first }: Pro
   while (cells.length % 7) cells.push(null);
   const rows = Array.from({ length: cells.length / 7 }, (_, i) => cells.slice(i * 7, i * 7 + 7));
 
-  function openSheet() {
-    setView({ year: picked.year, month: picked.month }); // 열 때마다 고른 날이 든 달부터
-    setOpen(true);
-  }
-
   function pick(day: Date) {
     onChange(addMinutes(day, minuteOfDay(value)));
-    setOpen(false);
+    onClose();
   }
 
   return (
     <>
-      <Pressable
-        onPress={openSheet}
-        accessibilityRole="button"
-        accessibilityLabel={`${label} ${text}`}
-        style={({ pressed }) => [styles.row, !first && styles.divider, pressed && styles.pressed]}
-      >
-        <Text variant="rowLabel" tone="sub">
-          {label}
+      <View style={styles.header}>
+        <Arrow label="←" a11y="이전 달" disabled={!canPrev} onPress={() => setView((v) => shiftMonth(v.year, v.month, -1))} />
+        <Text variant="big" align="center" style={styles.title}>
+          {view.year}년 {view.month}월
         </Text>
-        <View style={styles.value}>
-          <Text variant="bodyStrong">{text}</Text>
-          <Text variant="bodyStrong" tone="faint">
-            ›
+        <Arrow label="→" a11y="다음 달" disabled={!canNext} onPress={() => setView((v) => shiftMonth(v.year, v.month, 1))} />
+      </View>
+      <View style={styles.week}>
+        {WEEK.map((w) => (
+          <Text key={w} variant="tiny" align="center" style={styles.weekday}>
+            {w}
           </Text>
-        </View>
-      </Pressable>
-      <Sheet visible={open} onClose={() => setOpen(false)} title={label}>
-        <View style={styles.header}>
-          <Arrow label="←" a11y="이전 달" disabled={!canPrev} onPress={() => setView((v) => shiftMonth(v.year, v.month, -1))} />
-          <Text variant="big" align="center" style={styles.title}>
-            {view.year}년 {view.month}월
-          </Text>
-          <Arrow label="→" a11y="다음 달" disabled={!canNext} onPress={() => setView((v) => shiftMonth(v.year, v.month, 1))} />
-        </View>
-        <View style={styles.week}>
-          {WEEK.map((w) => (
-            <Text key={w} variant="tiny" align="center" style={styles.weekday}>
-              {w}
-            </Text>
-          ))}
-        </View>
-        {rows.map((row, i) => (
-          <View key={i} style={styles.week}>
-            {row.map((day, j) => {
-              if (!day) return <View key={`blank-${j}`} style={styles.cell} />;
-              const key = dayKey(day);
-              const parts = dateParts(day);
-              const disabled = (minKey != null && key < minKey) || (maxKey != null && key > maxKey);
-              const selected = key === pickedKey;
-              const today = key === todayKey;
-              return (
-                <Pressable
-                  key={key}
-                  onPress={() => pick(day)}
-                  disabled={disabled}
-                  accessibilityRole="button"
-                  accessibilityLabel={`${parts.month}월 ${parts.day}일 (${parts.weekday})${today ? ' 오늘' : ''}`}
-                  accessibilityState={{ selected, disabled }}
-                  style={styles.cell}
-                >
-                  <View style={[styles.num, today && !selected && styles.today, selected && styles.selected]}>
-                    <Text
-                      variant="note"
-                      tone={selected ? 'inverse' : disabled ? 'faint' : 'ink'}
-                      weight={selected || today ? 600 : 400}
-                      style={[styles.numText, disabled && styles.disabledText]}
-                    >
-                      {parts.day}
-                    </Text>
-                  </View>
-                </Pressable>
-              );
-            })}
-          </View>
         ))}
-      </Sheet>
+      </View>
+      {rows.map((row, i) => (
+        <View key={i} style={styles.week}>
+          {row.map((day, j) => {
+            if (!day) return <View key={`blank-${j}`} style={styles.cell} />;
+            const key = dayKey(day);
+            const parts = dateParts(day);
+            const disabled = (minKey != null && key < minKey) || (maxKey != null && key > maxKey);
+            const selected = key === pickedKey;
+            const today = key === todayKey;
+            return (
+              <Pressable
+                key={key}
+                onPress={() => pick(day)}
+                disabled={disabled}
+                accessibilityRole="button"
+                accessibilityLabel={`${parts.month}월 ${parts.day}일 (${parts.weekday})${today ? ' 오늘' : ''}`}
+                accessibilityState={{ selected, disabled }}
+                style={styles.cell}
+              >
+                <View style={[styles.num, today && !selected && styles.today, selected && styles.selected]}>
+                  <Text
+                    variant="note"
+                    tone={selected ? 'inverse' : disabled ? 'faint' : 'ink'}
+                    weight={selected || today ? 600 : 400}
+                    style={[styles.numText, disabled && styles.disabledText]}
+                  >
+                    {parts.day}
+                  </Text>
+                </View>
+              </Pressable>
+            );
+          })}
+        </View>
+      ))}
     </>
   );
 }

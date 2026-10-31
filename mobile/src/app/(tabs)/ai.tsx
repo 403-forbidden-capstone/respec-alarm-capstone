@@ -1,5 +1,5 @@
-import { router } from 'expo-router';
-import { useEffect, useRef, useState } from 'react';
+import { router, useFocusEffect } from 'expo-router';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { ScrollView, StyleSheet, View } from 'react-native';
 
 import { confirm, LoadError, Loading, Screen, Text, toast, TopBar } from '@/components/ui';
@@ -22,10 +22,20 @@ const LISTEN_MS = 1100; // 말하기를 누른 뒤 듣는 시간 (목업 chatSpe
 
 // 03 AI 탭 · A02 AI 대화 — 자기 전 대화
 // 가짜 데이터: 목업 대본대로 흘러감 (마이크 · 음성 합성 · 서버 호출 없음). 말하기 = 다음 대본 문장을 말한 것으로 침, 텍스트 = 빈 칸에 쓴 글을 그대로 보냄(AI 답은 대본). 완료하면 하루 기록(A03)으로
-// 실데이터: 글로만 대화(서버 voice-session · voice-turn). 일정 · 알람을 찾으면 카드가 여러 장 떠서 [저장] · [바꾸기] · [저장 안 함]으로 확인받고, 완료하면 대화를 남긴 채 이전 화면(홈)으로
+// 실데이터: 글로만 대화(서버 voice-session · voice-turn). 일정 · 알람을 찾으면 카드가 여러 장 떠서 [저장] · [바꾸기] · [저장 안 함]으로 확인받고, 완료하면 대화를 끝내고(다음에 열면 새 대화) 이전 화면(홈)으로
 //   서버가 답하지 못하면(LLM_UNAVAILABLE · NOT_CONFIGURED …) 대화 · 카드는 두고 마지막 말풍선 아래에 ChatNotice failed, 한도에 닿으면(limits.reached) ChatNotice limit — 입력창은 막음
 export default function AiScreen() {
-  const { data, error, reload } = useLoad(getConversation);
+  const { data, error, reload: reloadNow } = useLoad(getConversation);
+  // [완료]로 나간 뒤에는 끝나지 않은 저장 · 답이 다시 읽기를 걸어도 새 세션을 열지 않음 — 다시 들어올 때(포커스)만 읽음 (그건 useLoad가 함)
+  const leftRef = useRef(false);
+  useFocusEffect(
+    useCallback(() => {
+      leftRef.current = false;
+    }, []),
+  );
+  const reload = async () => {
+    if (!leftRef.current) await reloadNow();
+  };
   const [mode, setMode] = useState<'voice' | 'text'>('voice');
   const [draftText, setDraftText] = useState(''); // 글 모드에 쓰는 글 — 말하기로 바꿔도 남음
   const [listening, setListening] = useState(false);
@@ -142,13 +152,16 @@ export default function AiScreen() {
   }
 
   // 완료 — 가짜: 한 번 묻고 일기를 만들어 하루 기록으로. 내가 아직 한 마디도 안 했으면 완료를 막음 (빈 대화로 기록이 생기지 않게)
-  // 실데이터: 대화를 그대로 남기고 이전 화면(홈)으로 — 대화 끝 정리(할 일 · 준비물)는 서버의 대화 끝 함수가 생긴 뒤
+  // 실데이터: 지금 대화를 끝남으로 적고 이전 화면(홈)으로 — 다음 [대화 시작]은 새 대화. 대화 끝 정리(할 일 · 준비물)는 서버의 대화 끝 함수가 생긴 뒤
   // 정리 중에 끝내면 끝난 대화에 답 · 카드가 붙으므로, 확인창 앞뒤로 두 번 봄 (확인창이 떠 있는 사이 글 모드 보내기로 정리가 시작될 수 있음)
   const started = messages.some((m) => m.who === 'me');
   const finish = async () => {
     if (thinkingRef.current) return;
     setListening(false); // 듣는 중이면 멈춤 — 확인창이 떠 있는 사이 듣기 타이머가 터져 말을 보내지 않게
     if (real) {
+      // 카드 저장 · 장소 계산이 AI 답을 기다리는 동안(busy)에도 눌려야 함 — 막으면 첫 탭이 먹통. 끝남 표시는 api가 앞 요청 뒤에 차례로 적음
+      leftRef.current = true;
+      finishConversation().catch(() => {}); // 로컬에 적는 일이라 실패해도 이동은 그대로
       backOrHome();
       return;
     }
@@ -250,7 +263,7 @@ export default function AiScreen() {
           onToggleMode={toggleMode}
           onSpeak={speak}
           onDone={finish}
-          doneDisabled={thinking || listening || busy || (!real && !started)}
+          doneDisabled={thinking || listening || (!real && (busy || !started))}
         />
       </View>
       <PlaceSearchSheet

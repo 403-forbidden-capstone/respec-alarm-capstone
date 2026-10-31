@@ -3,16 +3,20 @@ import { useLocalSearchParams } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
-import { Button, Card, Chip, KeyValueRow, Loading, LoadError, Screen, Sheet, Stepper, Text, toast, Toggle, TopBar } from '@/components/ui';
+import { Button, Card, Chip, DateSheet, EmptyState, KeyValueRow, Loading, LoadError, Screen, Sheet, Stepper, Text, toast, Toggle, TopBar } from '@/components/ui';
 import { getAppointment, listOccurrences, listPlaces, previewAlarms, saveAlarmSettings } from '@/features/alarm/api';
 import { isManualTime, manualTimes, moveAlarm, orderError, resetAlarm, sameEdits, timeInputsChanged } from '@/features/alarm/adjust';
 import { FormulaBox } from '@/features/alarm/components/FormulaBox';
 import { OccurrenceList } from '@/features/alarm/components/OccurrenceList';
 import { OptionGrid } from '@/features/alarm/components/OptionGrid';
+import { PlaceSearchSheet } from '@/features/alarm/components/PlaceSearchSheet';
+import { RepeatScopeSheet } from '@/features/alarm/components/RepeatScopeSheet';
+import { ScheduleEditSheet } from '@/features/alarm/components/ScheduleEditSheet';
 import { SelectRow } from '@/features/alarm/components/SelectRow';
 import { TextLink } from '@/features/alarm/components/TextLink';
 import { TimeButton } from '@/features/alarm/components/TimeButton';
 import { TimeSheet } from '@/features/alarm/components/TimePicker';
+import { useScheduleEdit } from '@/features/alarm/hooks/useScheduleEdit';
 import { changedAlarms, needsMoveConfirm, ringingKinds, type AlarmChange } from '@/features/alarm/schedule';
 import { TRAVEL_CONFIRM_EDIT, TRAVEL_CONFIRM_OK, TRAVEL_PROBLEM_NOTE, TravelConfirmNeeded, travelConfirmMessage, type TravelFallback } from '@/features/alarm/travelConfirm';
 import {
@@ -32,7 +36,9 @@ import {
   type RingKind,
   type Transport,
 } from '@/features/alarm/types';
-import { addMinutes, formatDateShort, formatTime } from '@/lib/format';
+import { now } from '@/lib/clock';
+import { ALARM_AXES_PICKER } from '@/lib/flags';
+import { addMinutes, formatDateShort, formatTime, startOfDay } from '@/lib/format';
 import { backOrHome } from '@/lib/nav';
 import { useAction } from '@/lib/useAction';
 import { useLeaveGuard } from '@/lib/useLeaveGuard';
@@ -100,6 +106,7 @@ function Detail({ appointment: a, reload }: { appointment: AppointmentDetail; re
   const { data: occurrences, reload: reloadOccurrences } = useLoad(() => listOccurrences(a.id));
   const [showAllOccurrences, setShowAllOccurrences] = useState(false);
   const { busy, run } = useAction();
+  const edit = useScheduleEdit({ appointment: a, reload: () => Promise.all([reload(), reloadOccurrences()]) }); // 연결 일정 카드 → 일정 편집 시트 · 삭제 되돌리기
   const setEdit = (patch: Partial<AlarmEdits>) => setEdits((e) => ({ ...e, ...patch }));
 
   // 저장된 값과 다른 곳이 있으면 저장 전 — 저장 버튼이 켜지고, 나갈 때 한 번 물음
@@ -109,7 +116,7 @@ function Detail({ appointment: a, reload }: { appointment: AppointmentDetail; re
     !sameEdits(edits, a.edits) ||
     ringingKinds(a.alarms).some((x) => kinds[x.kind] !== saved[x.kind]) ||
     AXES.some(([axis]) => levels[axis] !== savedLv[axis]);
-  useLeaveGuard(dirty);
+  useLeaveGuard(dirty && !edit.deleted); // 지운 일정이면 H03 초안은 의미가 없어 나갈 때 묻지 않음
 
   // 값을 바꾸면 알람 시각을 다시 계산 (저장 전 미리 보기)
   useEffect(() => {
@@ -219,6 +226,16 @@ function Detail({ appointment: a, reload }: { appointment: AppointmentDetail; re
   // 저장은 화면 아래에 고정 — 폼이 길어 스크롤 끝까지 내려가지 않아도 보이게. 바뀐 게 없거나 순서가 뒤집혔으면 못 누름
   const footer = <Button label="저장" onPress={save} disabled={!dirty || blocked != null} loading={busy && changes == null && travelConfirm == null} />;
 
+  // 일정을 지운 5초 — 되돌리기 토스트가 떠 있는 동안 지운 일정만 보임 (5초 뒤 · 화면을 떠날 때 실제로 지움)
+  if (edit.deleted) {
+    return (
+      <Screen>
+        <TopBar onBack={backOrHome} screenId="H03" />
+        <EmptyState title="일정을 지웠어요" body="5초 안에 되돌릴 수 있어요" action={{ label: '되돌리기', onPress: edit.undoDelete }} />
+      </Screen>
+    );
+  }
+
   return (
     <Screen footer={footer}>
       <TopBar onBack={backOrHome} screenId="H03" />
@@ -232,13 +249,18 @@ function Detail({ appointment: a, reload }: { appointment: AppointmentDetail; re
         </Text>
       </Text>
 
-      <Card>
+      <Card onPress={edit.open} accessibilityLabel={`연결 일정 ${a.title}, 눌러서 고치기`}>
         <Text variant="label" tone="sub" style={styles.label}>
           연결 일정
         </Text>
         <View style={styles.between}>
           <Text variant="big">{a.title}</Text>
-          <Chip label={IMPORTANCE_LABEL[a.importance]} variant="fill" />
+          <View style={styles.tail}>
+            <Chip label={IMPORTANCE_LABEL[a.importance]} variant="fill" />
+            <Text variant="bodyStrong" tone="faint">
+              ›
+            </Text>
+          </View>
         </View>
         <Text variant="small" tone="sub" style={styles.sub}>
           {formatTime(a.at)} · {a.place} · {a.repeatLabel}
@@ -386,7 +408,8 @@ function Detail({ appointment: a, reload }: { appointment: AppointmentDetail; re
           자동 {LEVELS[a.intensity.auto].name} · 중요도 {IMPORTANCE_LABEL[a.importance]}
           {a.intensity.latePoint > 0 ? ` · 최근 4주 늦잠 지각 ${a.intensity.lateCount}번` : ''}
         </Text>
-        {AXES.map(([axis, name]) => {
+        {/* 축별 선택(배경음 · 말소리 · 진동)은 flag로 숨길 수 있음 — 결정 안건(투표) 결과 대기 (lib/flags.ts ALARM_AXES_PICKER) */}
+        {(ALARM_AXES_PICKER ? AXES : []).map(([axis, name]) => {
           const picked = levels[axis];
           const level = picked ?? a.intensity.auto;
           return (
@@ -428,10 +451,12 @@ function Detail({ appointment: a, reload }: { appointment: AppointmentDetail; re
             </View>
           );
         })}
-        <Text variant="caption" tone="faint" style={styles.note}>
-          직접 고른 항목은 자동 계산보다 항상 먼저 적용돼요.
-        </Text>
-        {anyManual ? (
+        {ALARM_AXES_PICKER ? (
+          <Text variant="caption" tone="faint" style={styles.note}>
+            직접 고른 항목은 자동 계산보다 항상 먼저 적용돼요.
+          </Text>
+        ) : null}
+        {ALARM_AXES_PICKER && anyManual ? (
           <View style={styles.reset}>
             <TextLink label="모두 자동으로 되돌리기" onPress={() => setLevels({ sound: null, voice: null, vibration: null })} />
           </View>
@@ -462,13 +487,54 @@ function Detail({ appointment: a, reload }: { appointment: AppointmentDetail; re
         </View>
       </Sheet>
 
-      {/* 알람 시각이 바뀌는 저장이면 바뀌는 알람을 전부 보여 주고 한 번 더 물음 */}
-      <Sheet visible={changes != null} onClose={keep} title="알람 시각이 바뀌어요">
+      {/* 일정 편집 시트 (U14) — 날짜 · 시간 · 장소 · 반복 범위 시트는 편집 시트 대신 하나씩 뜸 (시트는 한 번에 하나) */}
+      <ScheduleEditSheet
+        visible={edit.step === 'edit'}
+        onClose={edit.close}
+        initial={edit.initial}
+        value={edit.value}
+        onChange={edit.change}
+        onPickPlace={edit.pickPlace}
+        onPickDate={edit.pickDate}
+        onPickTime={edit.pickTime}
+        onSave={edit.save}
+        onDelete={edit.startDelete}
+        saving={edit.saving}
+        canEdit={edit.canEdit}
+        onLeave={edit.shared ? edit.leave : undefined}
+      />
+      <DateSheet visible={edit.step === 'date'} onClose={edit.back} title="날짜" value={edit.value.at} onChange={(at) => edit.change({ at })} minDate={startOfDay(now())} />
+      <TimeSheet
+        visible={edit.step === 'time'}
+        onClose={edit.back}
+        title="시간"
+        value={edit.value.at}
+        onChange={(at) => edit.change({ at })}
+        error={edit.value.at.getTime() !== edit.initial.at.getTime() && edit.value.at.getTime() <= now().getTime() ? '이미 지난 시각이에요' : undefined}
+      />
+      <PlaceSearchSheet
+        visible={edit.step === 'place'}
+        onClose={edit.back}
+        search={edit.searchPlaces}
+        onPick={(picked) => {
+          edit.change({ place: picked.name, placeLat: picked.lat, placeLng: picked.lng });
+          edit.back();
+        }}
+      />
+      <RepeatScopeSheet
+        visible={edit.step === 'scopeSave' || edit.step === 'scopeDelete'}
+        onClose={edit.back}
+        title={edit.step === 'scopeDelete' ? '어느 일정을 지울까요?' : '어느 일정을 바꿀까요?'}
+        onPick={edit.step === 'scopeDelete' ? edit.pickDeleteScope : edit.pickSaveScope}
+      />
+
+      {/* 알람 시각이 바뀌는 저장이면 바뀌는 알람을 전부 보여 주고 한 번 더 물음 — 설정 저장 · 일정 편집 저장이 같은 시트를 씀 */}
+      <Sheet visible={changes != null || edit.step === 'move'} onClose={edit.step === 'move' ? edit.cancelMove : keep} title="알람 시각이 바뀌어요">
         <Text variant="small" tone="sub">
           저장하면 아래 알람이 이렇게 바뀌어요.
         </Text>
         <View style={styles.changes}>
-          {(changes ?? []).map((c) => (
+          {(changes ?? edit.move?.changes ?? []).map((c) => (
             <View key={c.kind} style={styles.change}>
               <Text variant="body" tone="sub">
                 {KIND_LABEL[c.kind]}
@@ -480,8 +546,8 @@ function Detail({ appointment: a, reload }: { appointment: AppointmentDetail; re
           ))}
         </View>
         <View style={styles.stack}>
-          <Button label="바꾸기" onPress={confirmApply} loading={busy} />
-          <Button label="그대로 두기" variant="ghost" onPress={keep} />
+          <Button label="바꾸기" onPress={edit.step === 'move' ? edit.confirmMove : confirmApply} loading={busy || edit.saving} />
+          <Button label="그대로 두기" variant="ghost" onPress={edit.step === 'move' ? edit.cancelMove : keep} />
         </View>
       </Sheet>
     </Screen>
@@ -493,6 +559,7 @@ const styles = StyleSheet.create({
   lead: { marginBottom: 18 },
   label: { marginBottom: 8 },
   between: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10 },
+  tail: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   sub: { marginTop: 4 },
   timeRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   axis: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginTop: 12 },

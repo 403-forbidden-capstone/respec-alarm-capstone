@@ -2,8 +2,7 @@ import { useLocalSearchParams } from 'expo-router';
 import { useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
-import { Card, Chip, confirm, LoadError, Loading, Screen, Sheet, Text, Timeline, toast, TopBar } from '@/components/ui';
-import { TextLink } from '@/features/alarm/components/TextLink';
+import { Card, Chip, confirm, LoadError, Loading, Screen, Sheet, Text, Timeline, toast, TopBar, TopBarButton } from '@/components/ui';
 import { getShareLog, getSharedAlarms, setSharedAlarmEnabled, shiftSharedAlarm } from '@/features/social/api';
 import { MemberAlarmCard } from '@/features/social/components/MemberAlarmCard';
 import { Note } from '@/features/social/components/Note';
@@ -26,7 +25,7 @@ export default function SharedAlarmsScreen() {
     setLog(await getShareLog());
   }
 
-  const top = <TopBar onBack={backOrHome} screenId="G04" right={<TextLink label="변경 기록" onPress={openLog} />} />;
+  const top = <TopBar onBack={backOrHome} screenId="G04" right={<TopBarButton label="변경 기록" onPress={openLog} />} />;
   // 닫기는 시트 머리의 "닫기" 하나로 (아래에 또 두지 않음)
   const logSheet = (
     <Sheet visible={log != null} onClose={() => setLog(null)} title="변경 기록">

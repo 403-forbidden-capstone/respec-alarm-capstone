@@ -39,6 +39,14 @@ const draft = (overrides: Partial<AppointmentDraft> = {}): AppointmentDraft => (
 beforeEach(() => forgetPlaces());
 
 describe('새 일정 요청 (newAppointmentBody)', () => {
+  it('감지 반경을 골랐고 좌표가 있으면 destination.radius_m을 실음 (칸이 없으면 안 보냄)', () => {
+    const dest = (d: Partial<AppointmentDraft>) => (newAppointmentBody(draft(d), at('10:00')) as { appointment: { destination: unknown } }).appointment.destination;
+    expect(dest({ placeLat: 37.55, placeLng: 127.07, destRadiusM: 150 })).toEqual({ name: '세종대학교', lat: 37.55, lng: 127.07, radius_m: 150 });
+    expect(dest({ placeLat: 37.55, placeLng: 127.07 })).toEqual({ name: '세종대학교', lat: 37.55, lng: 127.07 });
+    expect(dest({ placeLat: 37.55, placeLng: 127.07, destRadiusM: 50 })).toEqual({ name: '세종대학교', lat: 37.55, lng: 127.07 }); // 범위 밖
+    expect(dest({ destRadiusM: 150 })).toEqual({ name: '세종대학교' }); // 좌표가 없으면 반경만 보내지 않음
+  });
+
   it('서버의 H05 초안 모양: appointment + participant + kinds, 중요도는 늘 보냄', () => {
     expect(newAppointmentBody(draft(), at('10:00'))).toEqual({
       appointment: { title: '스터디', appointment_at: iso('10:00'), destination: { name: '세종대학교' }, importance: 'LOW' },

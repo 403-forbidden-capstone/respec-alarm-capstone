@@ -14,7 +14,7 @@
                      {type:'center', lat, lng}                 지도를 움직여 멈춘 뒤 가운데(핀) 좌표 — 0.3초 디바운스
                      {type:'error', reason:'no-key'|'sdk-failed'}  지도를 못 띄움
     앱 → 이 페이지  {type:'moveTo', lat, lng}                 그 좌표로 지도를 옮김
-                     {type:'setRadius', meters}                핀 둘레에 원 하나 (0 이하면 지움) — 반경 고르기(다음 PR)용
+                     {type:'setRadius', meters}                핀 둘레에 감지 범위 원 하나 (0 이하면 지움, 상한 5000). 원 중심 = 지도 중심(핀)이라 지도를 끌 때 같이 움직임
   보내는 길: RN WebView면 window.ReactNativeWebView.postMessage, iframe이면 window.parent.postMessage (받는 쪽이 origin 확인)
   카카오 JavaScript 키는 공개 값(허용 도메인으로 막음)이라 주소에 실려도 됨. REST 키는 여기에 쓰지 않음
 -->
@@ -90,6 +90,7 @@ html,body{ margin:0; height:100%; overflow:hidden; background:var(--bg); font-fa
     } else if (msg.type === 'setRadius') {
       radius = msg.meters > 0 && isFinite(msg.meters) ? Math.min(msg.meters, MAX_RADIUS_M) : 0;
       drawCircle();
+      fitCircle();
     }
   }
 
@@ -110,7 +111,8 @@ html,body{ margin:0; height:100%; overflow:hidden; background:var(--bg); font-fa
   window.addEventListener('message', onMessage);
   document.addEventListener('message', onMessage); // 안드로이드 WebView는 document로 보냄
 
-  // ---- 반경 원 (다음 PR에서 반경 고르기가 씀) ----
+  // ---- 감지 범위 원 (시트의 작게 · 보통 · 크게 → setRadius) ----
+  // 색은 한 가지 — 가운데 핀(#pin)과 같은 앱 theme ink(#151515)를 반투명으로 (선 0.6 · 면 0.08), 지도 타일 위에서 핀과 한 덩어리로 보이게
   function drawCircle() {
     if (!map) return;
     if (!radius) {
@@ -132,6 +134,12 @@ html,body{ margin:0; height:100%; overflow:hidden; background:var(--bg); font-fa
       circle.setPosition(map.getCenter());
       circle.setRadius(radius);
     }
+  }
+
+  // 반경이 바뀌었을 때 원이 지도 밖으로 안 잘리게 맞춤 — 중심은 그대로(원 중심 = 지도 중심)라 핀은 안 움직이고 확대 수준만 바뀜. 못 맞추면(옛 SDK) 조용히 둠
+  function fitCircle() {
+    if (!map || !circle) return;
+    try { map.setBounds(circle.getBounds(), 16, 16, 16, 16); } catch (e) { /* 맞추지 못해도 원은 그대로 보임 */ }
   }
 
   // ---- 지도 ----
@@ -162,6 +170,7 @@ html,body{ margin:0; height:100%; overflow:hidden; background:var(--bg); font-fa
       if (circle) circle.setPosition(map.getCenter());
     });
     kakao.maps.event.addListener(map, 'idle', function () {
+      if (circle) circle.setPosition(map.getCenter()); // center_changed를 놓쳤을 때를 대비해 멈출 때마다 한 번 더 맞춤
       clearTimeout(sendTimer);
       sendTimer = setTimeout(sendCenter, SEND_DELAY_MS);
     });

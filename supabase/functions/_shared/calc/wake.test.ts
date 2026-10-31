@@ -46,3 +46,30 @@ test('이 약속 자신의 기상은 안 셈 (기존 약속을 다시 계산할 
 test('같은 날 다른 약속이 없으면 기상 있음', () => {
   assert.equal(hasEarlierWake(kst(600), []), false);
 });
+
+// ---- 저녁 기상 (#320) ----
+import { isEveningWake } from './wake.ts';
+
+test('기상 시각이 11:59면 저녁 아님, 12:00 정각부터 저녁 (내 시간대 기준)', () => {
+  assert.equal(isEveningWake(kst(11 * 60 + 59), 'Asia/Seoul'), false);
+  assert.equal(isEveningWake(kst(12 * 60), 'Asia/Seoul'), true);
+  assert.equal(isEveningWake(kst(23 * 60 + 30), 'Asia/Seoul'), true);
+  assert.equal(isEveningWake(kst(0), 'Asia/Seoul'), false);
+});
+
+test('시간대: 서울 12:00 = UTC 03:00 경계. 시간대가 없거나 틀리면 서울', () => {
+  assert.equal(isEveningWake(new Date('2025-05-22T02:59:00Z'), 'Asia/Seoul'), false);
+  assert.equal(isEveningWake(new Date('2025-05-22T03:00:00Z'), 'Asia/Seoul'), true);
+  assert.equal(isEveningWake(new Date('2025-05-22T03:00:00Z')), true);
+  assert.equal(isEveningWake(new Date('2025-05-22T03:00:00Z'), 'No/Such_Zone'), true);
+  // 같은 순간도 다른 시간대면 낮이 다름: UTC 03:00은 뉴욕에서 전날 밤 23:00 → 저녁, UTC 15:00은 뉴욕 11:00 → 아님
+  assert.equal(isEveningWake(new Date('2025-05-22T03:00:00Z'), 'America/New_York'), true);
+  assert.equal(isEveningWake(new Date('2025-05-22T15:00:00Z'), 'America/New_York'), false);
+});
+
+test('약속 날짜보다 전날인 기상(새벽 약속의 전날 밤 기상)은 저녁 기상이 아님', () => {
+  const appointmentAt = kst(60); // 1:00
+  const wakeAt = new Date(kst(60).getTime() - 110 * 60_000); // 전날 23:10
+  assert.equal(isEveningWake(wakeAt, 'Asia/Seoul'), true);
+  assert.equal(isEveningWake(wakeAt, 'Asia/Seoul', appointmentAt), false);
+});

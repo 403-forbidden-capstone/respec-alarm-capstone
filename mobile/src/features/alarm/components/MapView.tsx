@@ -13,6 +13,7 @@ import {
   mapPickerUrl,
   moveToMessage,
   parsePageMessage,
+  setRadiusMessage,
   startReadyTimer,
 } from '../mapPicker';
 import type { LatLng } from '../types';
@@ -22,13 +23,14 @@ type Props = {
   onCenter: (lat: number, lng: number) => void; // 지도를 움직여 멈춘 뒤 가운데(핀) 좌표
   moveTo?: { lat: number; lng: number; nonce: number }; // 바뀔 때마다 그 좌표로 옮김 (같은 좌표를 또 보내려면 nonce를 올림)
   onStatus: (status: 'loading' | 'ready' | 'error') => void; // 지도가 떴음 · 못 띄움 (다시 시도하면 loading)
+  radiusMeters?: number; // 핀 둘레에 그릴 감지 범위 원(m). 없으면 원 없음. 바뀔 때마다 페이지에 setRadius를 보냄 (지도가 뜨기 전 · 다시 시도 뒤에도 마지막 값이 다시 감)
 };
 
 // 카카오맵 지도 칸 — public/map-picker.html을 웹은 iframe, 앱은 WebView로 열고 postMessage로 주고받음 (형식은 mapPicker.ts)
 // 가운데 핀은 페이지가 그림. 카카오 JavaScript 키(EXPO_PUBLIC_KAKAO_JS_KEY)가 없으면 열지 않고 "지도 준비 중" 문구만
 // 키가 있는데 12초 안에 지도가 안 뜨면(허용 도메인이 틀려 빈 지도 · 네트워크 막힘) 못 띄운 것으로 보고 [다시 시도]를 보여 줌
 // 부모가 크기를 정함 (이 칸은 주어진 자리를 가득 채움)
-export function MapView({ center, onCenter, moveTo, onStatus }: Props) {
+export function MapView({ center, onCenter, moveTo, onStatus, radiusMeters }: Props) {
   const [url] = useState(() => (KAKAO_JS_KEY ? mapPickerUrl({ origin: MAP_PICKER_ORIGIN, key: KAKAO_JS_KEY, center }) : null));
   const [failure, setFailure] = useState<'no-key' | 'failed' | null>(url ? null : 'no-key');
   const [loaded, setLoaded] = useState(false); // 페이지가 ready를 보냄
@@ -36,6 +38,7 @@ export function MapView({ center, onCenter, moveTo, onStatus }: Props) {
   const post = useRef<((text: string) => void) | null>(null); // 페이지에 글자를 보내는 함수 — 아래 웹 · 앱 조각이 register로 채움
   const ready = useRef(false);
   const queued = useRef<string | null>(null); // 지도가 뜨기 전에 온 moveTo (마지막 것만)
+  const radiusText = useRef<string | null>(null); // 마지막 setRadius — 페이지가 새로 뜰 때(처음 · 다시 시도)마다 다시 보냄
   const callbacks = useRef({ onCenter, onStatus });
 
   useEffect(() => {
@@ -78,6 +81,7 @@ export function MapView({ center, onCenter, moveTo, onStatus }: Props) {
         setLoaded(true);
         if (queued.current) post.current?.(queued.current);
         queued.current = null;
+        if (radiusText.current) post.current?.(radiusText.current);
         callbacks.current.onStatus('ready');
       } else {
         setFailure(message.reason === 'no-key' ? 'no-key' : 'failed');
@@ -98,6 +102,14 @@ export function MapView({ center, onCenter, moveTo, onStatus }: Props) {
     if (ready.current && post.current) post.current(text);
     else queued.current = text;
   }, [moveTo]);
+
+  // 감지 범위 원 — 지도가 떠 있으면 바로, 아니면 ready 때 보냄 (위 onPageMessage)
+  useEffect(() => {
+    if (radiusMeters == null) return;
+    const text = setRadiusMessage(radiusMeters);
+    radiusText.current = text;
+    if (ready.current && post.current) post.current(text);
+  }, [radiusMeters]);
 
   if (!url || failure) {
     return (

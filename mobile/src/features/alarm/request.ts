@@ -8,6 +8,7 @@ import { parseDbTime } from '@/lib/dbTime';
 import { minutesBetween } from '@/lib/format';
 import type { Weekday } from '@/lib/weekday';
 
+import { validDestRadius } from './destinationPick';
 import { TRAVEL_SOURCE_LABEL } from './map';
 import { toPoint } from './places';
 import { repeatLabel, repeatToRrule } from './repeat';
@@ -119,6 +120,13 @@ const MAX_BUFFER_MINUTES = 240;
 const MAX_BEFORE_PREPARE_MINUTES = 240;
 const within = (minutes: number, max: number) => Math.min(max, Math.max(0, Math.round(minutes)));
 
+// 도착지 — 좌표가 있고 감지 반경(100~500 정수)을 골랐을 때만 radius_m을 실음 (칸이 없는 옛 서버·고르지 않은 일정에는 안 보냄)
+function destinationBody(d: AppointmentDraft): Body {
+  const point = toPoint(d.place, { lat: d.placeLat, lng: d.placeLng });
+  const radius = validDestRadius(d.destRadiusM);
+  return radius != null && point.lat != null && point.lng != null ? { ...point, radius_m: radius } : point;
+}
+
 // 새 일정 (H05) — 중요도는 늘 보냄 (서버 기본은 NORMAL(중요)이고 초안 기본은 LOW(보통)이라 안 보내면 값이 달라짐)
 //   출발지는 "집" 이름만 (좌표는 서버가 프로필 집에서 채움). 여유는 안 보내서 프로필 기본 여유
 export function newAppointmentBody(d: AppointmentDraft, at: Date): Body {
@@ -127,7 +135,7 @@ export function newAppointmentBody(d: AppointmentDraft, at: Date): Body {
     appointment: {
       title: d.title.trim() || '새 일정',
       appointment_at: iso(at),
-      destination: toPoint(d.place, { lat: d.placeLat, lng: d.placeLng }),
+      destination: destinationBody(d),
       importance: d.importance,
       ...(rule ? { recurrence_rule: rule } : {}),
     },

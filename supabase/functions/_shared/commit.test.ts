@@ -92,6 +92,16 @@ test('새 약속: 약속 · 참여 조건 · 알람 4개를 만들고 예약 꾸
   assert.deepEqual(body.canceled_alarm_ids, []);
 });
 
+test('새 약속: destination의 radiusM이 appointments.dest_radius_m으로 저장됨, 없으면 null', async () => {
+  const withRadius = setup();
+  await persistAppointment(withRadius.ctx, commitArgs(newDraft({ destination: { name: '세종대학교', lat: 37.55, lng: 127.07, radiusM: 250 } })));
+  assert.equal(withRadius.db.rows('appointments')[0].dest_radius_m, 250);
+
+  const none = setup();
+  await persistAppointment(none.ctx, commitArgs(newDraft()));
+  assert.equal(none.db.rows('appointments')[0].dest_radius_m, null);
+});
+
 test('직접 고른 시각 · 강도는 MANUAL로, 고친 값 기록에 알람 id가 붙음', async () => {
   const { db, ctx } = setup();
   const draft = newDraft({ manualTimes: { WAKE: kst(22, 450) }, levels: { vibration: 2 } });

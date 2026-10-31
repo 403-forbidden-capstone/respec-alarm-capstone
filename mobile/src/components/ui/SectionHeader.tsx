@@ -10,7 +10,7 @@ type Props = {
   right?: ReactNode; // 글자면 작은 회색 글자, 요소면 그대로(작은 버튼 등)
 };
 
-// 화면 안 섹션 제목 (.h2) — 예: "오늘 일정"  "+ 일정 추가"
+// 화면 안 섹션 제목 (.h2) — 예: "오늘 일정"  "+ 새 일정"
 export function SectionHeader({ title, right }: Props) {
   return (
     <View style={styles.row}>

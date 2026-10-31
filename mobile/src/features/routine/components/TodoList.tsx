@@ -1,7 +1,7 @@
 import { Pressable, StyleSheet, View } from 'react-native';
 
 import { Text } from '@/components/ui';
-import { colors } from '@/theme';
+import { colors, size } from '@/theme';
 
 import type { Todo } from '../types';
 
@@ -41,14 +41,14 @@ export function TodoList({ todos, onToggle }: { todos: Todo[]; onToggle: (id: st
 }
 
 const styles = StyleSheet.create({
-  row: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 10 },
+  row: { minHeight: size.touch, flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 10 },
   divider: { borderTopWidth: 1, borderTopColor: colors.line },
   box: {
     width: 20,
     height: 20,
     borderRadius: 6,
     borderWidth: 1.5,
-    borderColor: colors.faintDecor,
+    borderColor: colors.faint, // 흰 바탕 대비 3 : 1 이상 (faintDecor 2.5 : 1은 모자람)
     alignItems: 'center',
     justifyContent: 'center',
   },

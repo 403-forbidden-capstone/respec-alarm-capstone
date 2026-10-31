@@ -199,7 +199,13 @@ describe('deleteAppointment · restoreAppointment', () => {
     expect(db.trash).toEqual([]);
   });
 
+  it('그날 첫 일정을 지워도 저녁 일정(계산된 기상이 낮 12시 이후)에는 기상 알람이 붙지 않음 (#320)', async () => {
+    await deleteAppointment(ID, 'this');
+    expect((await times('a2')).WAKE).toBeUndefined();
+  });
+
   it('그날 첫 일정을 지우면 다음 일정에 기상 알람이 붙고, 되살리면 다시 준비부터', async () => {
+    db.appointments.find((a) => a.id === 'a2')!.at = kst(22, 720); // 저녁약속을 낮 12시로 — 기상이 낮 12시 전이어야 붙음(#320)
     expect((await times('a2')).WAKE).toBeUndefined();
     await deleteAppointment(ID, 'this');
     expect((await times('a2')).WAKE).toBeDefined();

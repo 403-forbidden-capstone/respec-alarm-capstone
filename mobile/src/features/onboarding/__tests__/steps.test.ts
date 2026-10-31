@@ -6,8 +6,8 @@ import { activeSteps, nextStep, ONBOARDING_ORDER, prevStep, stepNumber, type Ste
 
 // 모두 켠 표 — 순서 배열 그대로
 const ALL_ON = Object.fromEntries(ONBOARDING_ORDER.map((id) => [id, true])) as StepFlags;
-// 화면을 만든 단계만 켠 표 (lib/flags 기본값) — 권한 안내 · 마이크는 끔
-const DEFAULT_ON = ['handle', 'nickname', 'sleep', 'home', 'prepare', 'timetable', 'consent', 'share', 'first'];
+// 화면을 만든 단계만 켠 표 (lib/flags 기본값) — 마이크는 끔
+const DEFAULT_ON = ['handle', 'nickname', 'sleep', 'home', 'prepare', 'timetable', 'consent', 'permissions', 'share', 'first'];
 
 describe('온보딩 단계 순서', () => {
   it('순서는 레인 정의 그대로, 중복 없음', () => {
@@ -53,8 +53,10 @@ describe('nextStep · prevStep', () => {
 
   it('기본 표: 꺼진 단계를 건너뛰고 이어짐', () => {
     expect(nextStep('timetable')).toBe('consent');
-    expect(nextStep('consent')).toBe('share'); // permissions 건너뜀
-    expect(prevStep('share')).toBe('consent');
+    expect(nextStep('consent')).toBe('permissions');
+    expect(nextStep('permissions')).toBe('share');
+    expect(prevStep('share')).toBe('permissions');
+    expect(prevStep('permissions')).toBe('consent');
     expect(prevStep('consent')).toBe('timetable');
   });
 
@@ -64,8 +66,8 @@ describe('nextStep · prevStep', () => {
   });
 
   it('꺼진 단계에서 부르면 null — 현재 단계가 목록에 없음', () => {
-    expect(nextStep('permissions')).toBeNull();
-    expect(prevStep('permissions')).toBeNull();
+    expect(nextStep('mic')).toBeNull();
+    expect(prevStep('mic')).toBeNull();
   });
 });
 
@@ -76,13 +78,13 @@ describe('stepNumber — 진행 표시', () => {
     expect(stepNumber('mic', ALL_ON)).toEqual({ step: 11, total: 11 });
   });
 
-  it('기본 표: 켠 단계만 셈 — 전체 9', () => {
-    expect(stepNumber('handle')).toEqual({ step: 1, total: 9 });
-    expect(stepNumber('prepare')).toEqual({ step: 5, total: 9 });
-    expect(stepNumber('first')).toEqual({ step: 9, total: 9 });
+  it('기본 표: 켠 단계만 셈 — 전체 10', () => {
+    expect(stepNumber('handle')).toEqual({ step: 1, total: 10 });
+    expect(stepNumber('prepare')).toEqual({ step: 5, total: 10 });
+    expect(stepNumber('first')).toEqual({ step: 10, total: 10 });
   });
 
   it('꺼진 단계는 step 0', () => {
-    expect(stepNumber('permissions').step).toBe(0);
+    expect(stepNumber('mic').step).toBe(0);
   });
 });

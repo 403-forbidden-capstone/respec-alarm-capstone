@@ -501,6 +501,25 @@ isOneToOne: false
       referencedColumns: ["user_id"]
     }
                   ]
+                },"user_places": {
+                  Row: {
+                    "address": string | null,"created_at": string,"label": string,"lat": number,"lng": number,"name": string,"place_id": string,"radius_m": number | null,"updated_at": string,"user_id": string
+                  }
+                  Insert: {
+                    "address"?: string | null,"created_at"?: string,"label": string,"lat": number,"lng": number,"name": string,"place_id"?: string,"radius_m"?: number | null,"updated_at"?: string,"user_id": string
+                  }
+                  Update: {
+                    "address"?: string | null,"created_at"?: string,"label"?: string,"lat"?: number,"lng"?: number,"name"?: string,"place_id"?: string,"radius_m"?: number | null,"updated_at"?: string,"user_id"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "user_places_user_id_fkey"
+      columns: ["user_id"]
+isOneToOne: false
+      referencedRelation: "profiles"
+      referencedColumns: ["user_id"]
+    }
+                  ]
                 },"user_questions": {
                   Row: {
                     "answer": string | null,"answered_at": string | null,"asked_at": string,"channel": string,"kind": string,"question_id": string,"session_id": string | null,"subject_key": string,"user_id": string

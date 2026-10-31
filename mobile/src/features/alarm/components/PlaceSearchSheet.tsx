@@ -3,7 +3,7 @@ import { Pressable, StyleSheet, TextInput, View } from 'react-native';
 
 import { EmptyState, LoadError, Loading, Sheet, Text } from '@/components/ui';
 import { userMessage } from '@/lib/errors';
-import { colors, radius, typeScale } from '@/theme';
+import { colors, radius, size, typeScale } from '@/theme';
 
 import { noResultTitle, placeSubtitle, SEARCH_DELAY_MS } from '../placeSheet';
 import type { Place } from '../types';
@@ -14,14 +14,15 @@ type Props = {
   onPick: (place: Place) => void; // 장소 줄을 누르면 — 시트를 닫는 것은 부르는 쪽 (onClose)
   search: (query: string) => Promise<Place[]>; // 검색어가 비면 '최근 장소'를 돌려주는 함수 (api.ts listPlaces). 어디를 기준으로 가까운 순을 낼지는 부르는 쪽이 정함
   title?: string;
+  initialQuery?: string; // 처음부터 채워 둘 검색어 (예: 캠퍼스 이름으로 건물 다시 찾기) — 없으면 빈 칸(최근 장소)
 };
 
 // 장소 검색 시트 — 맨 위 검색 칸, 아래로 결과 줄. 0.3초 입력이 멈추면 search를 부르고, 검색어가 비면 최근 장소
 // <PlaceSearchSheet visible={open} onClose={…} onPick={…} search={(q) => listPlaces(q, home)} />
-export function PlaceSearchSheet({ visible, onClose, onPick, search, title = '장소 찾기' }: Props) {
+export function PlaceSearchSheet({ visible, onClose, onPick, search, title = '장소 찾기', initialQuery }: Props) {
   return (
     <Sheet visible={visible} onClose={onClose} title={title}>
-      <PlaceSearchBody search={search} onPick={onPick} />
+      <PlaceSearchBody search={search} onPick={onPick} initialQuery={initialQuery} />
     </Sheet>
   );
 }
@@ -30,8 +31,8 @@ export function PlaceSearchSheet({ visible, onClose, onPick, search, title = '�
 // (시트 내용은 루트에서 그려지므로 상태를 여기에 둠. 부모가 다시 그려져도 입력은 그대로)
 type Result = { kind: 'loading' } | { kind: 'done'; query: string; places: Place[] } | { kind: 'error'; query: string; error: unknown };
 
-function PlaceSearchBody({ search, onPick }: Pick<Props, 'search' | 'onPick'>) {
-  const [text, setText] = useState('');
+function PlaceSearchBody({ search, onPick, initialQuery }: Pick<Props, 'search' | 'onPick' | 'initialQuery'>) {
+  const [text, setText] = useState(initialQuery ?? '');
   const [focused, setFocused] = useState(false);
   const [result, setResult] = useState<Result>({ kind: 'loading' });
   const searchRef = useRef(search); // 부모가 새 함수를 줘도(집 좌표가 늦게 읽힘 등) 다음 검색부터 그걸 씀
@@ -89,8 +90,22 @@ function PlaceSearchBody({ search, onPick }: Pick<Props, 'search' | 'onPick'>) {
           placeholder="장소 이름으로 찾기"
           placeholderTextColor={colors.faint}
           accessibilityLabel="장소 검색"
+          maxFontSizeMultiplier={1.3}
           style={styles.input}
         />
+        {text ? (
+          // 한 번에 비우고 '최근 장소'로 — 칸 높이(48) 안에서 누르는 칸 44
+          <Pressable
+            onPress={() => setText('')}
+            accessibilityRole="button"
+            accessibilityLabel="검색어 지우기"
+            style={({ pressed }) => [styles.clear, pressed && styles.pressed]}
+          >
+            <Text variant="body" tone="sub" accessibilityElementsHidden importantForAccessibility="no">
+              ×
+            </Text>
+          </Pressable>
+        ) : null}
       </View>
       {result.kind === 'loading' ? <Loading /> : null}
       {result.kind === 'error' ? (
@@ -147,7 +162,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    height: 48,
+    minHeight: 48,
     paddingHorizontal: 14,
     borderRadius: radius.field,
     borderWidth: 1,
@@ -158,6 +173,7 @@ const styles = StyleSheet.create({
   },
   focused: { borderColor: colors.ink },
   input: { ...typeScale.body, flex: 1, minWidth: 0, color: colors.ink, paddingVertical: 0 },
+  clear: { width: size.touch, height: size.touch, marginRight: -12, alignItems: 'center', justifyContent: 'center' },
   head: { marginBottom: 2 },
   row: { paddingVertical: 12, minHeight: 52, justifyContent: 'center' },
   divider: { borderTopWidth: 1, borderTopColor: colors.line },

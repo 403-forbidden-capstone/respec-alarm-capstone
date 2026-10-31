@@ -75,6 +75,14 @@ select vault.create_secret('<service_role 키>', 'service_role_key');
 - DB 함수 `roll_insert_occurrence` · `roll_due_series`는 위 "서버 함수가 쓰는 DB 함수" 표. pg_cron 예약은 "배치"
 - 반복 규칙은 `FREQ=DAILY` · `FREQ=WEEKLY;BYDAY=MO,…` 두 모양만 받음(`_shared/draft.ts` `RRULE_PATTERN`, 그 밖은 400) — 해석은 `_shared/calc/recur.ts`
 
+## 자주 가는 곳 (`user_places`, `20261030210000_user_places.sql`, 이슈 #31)
+
+학교 · 회사 · 알바 등 한 사람 **최대 5개** (헤드 설계 10/30 "집 · 회사 위치를 지도로"). 집은 `profiles.home_*` 그대로.
+
+- 칸: `label`(이름표 1~20자, 사람 안에서 유일 — 같은 이름표로 저장하면 덮어씀) · `name` · `address` · `lat` · `lng`(`numeric(9,6)`, ±90 · ±180) · `radius_m`(100~500, NULL = 앱 기본값)
+- 5개 제한은 BEFORE INSERT 트리거(`private.enforce_user_places_limit`): 6번째 새 이름표는 `54000`. 이미 있는 이름표를 덮어쓰는 upsert는 개수가 늘지 않아 통과
+- RLS는 본인만 읽고 쓰기. 친구 · 그룹 읽기 정책 없음 (위치는 공유 안 함, Q13 · D59). 앱은 `features/location/api.ts`의 `listUserPlaces` · `saveUserPlace` · `deleteUserPlace`
+
 ## 그룹 기상 신호 (Realtime)
 
 `alarm_events`는 본인만 읽을 수 있어서 남의 기상 기록은 Realtime으로 직접 못 받음 → 기상 기록이 들어오면 DB가 그룹 채널에 "새로 고침" 신호만 보내고, 받은 앱이 `get_group_wake_status`를 다시 부름 (권한은 그 함수가 봄).
@@ -149,7 +157,7 @@ create policy wake_signal_receive on realtime.messages
 
 ### alarm-suggest
 
-요청 — **`alarm-commit`과 같은 초안 모양**이라 앱은 H05 · H03 초안 하나를 두 함수에 그대로 보냄 (계획 7절). 새 약속은 `appointment`, 기존 약속은 `appointment_id` (둘 다 쓰면 400). 기존 약속이면 시각 · 장소 · 중요도는 DB 값을 씀 (D41). 미리 보기에는 `title` · `group_id` · `recurrence_rule` · `replace_existing` · `edits`가 필요 없어 읽기만 하고 안 씀. 예전 모양(루트의 `appointment_at` · `destination` · `travel_minutes_override` · `prepare_minutes_override`)은 받지 않음. 앱은 `place-search`가 준 좌표를 초안의 `destination` · `origin`에 담아 보냄 (좌표가 없으면 길찾기를 못 함).
+요청 — **`alarm-commit`과 같은 초안 모양**이라 앱은 H05 · H03 초안 하나를 두 함수에 그대로 보냄 (계획 7절). 새 약속은 `appointment`, 기존 약속은 `appointment_id` (둘 다 쓰면 400). 기존 약속이면 시각 · 장소 · 중요도는 DB 값을 씀 (D41). 미리 보기에는 `title` · `group_id` · `recurrence_rule` · `replace_existing` · `edits`가 필요 없어 읽기만 하고 안 씀. 예전 모양(루트의 `appointment_at` · `destination` · `travel_minutes_override` · `prepare_minutes_override`)은 받지 않음. 앱은 `place-search`가 준 좌표를 초안의 `destination` · `origin`에 담아 보냄 (좌표가 없으면 길찾기를 못 함). 새 약속의 `destination`에는 선택 칸 `radius_m`(정수 100~500, 목적지 감지 반경)을 더 담을 수 있고 `alarm-commit`이 `appointments.dest_radius_m`에 저장함 (없으면 NULL, 기존 약속에 참여할 때 · 출발지의 `radius_m`은 무시, 미리 보기 계산에는 안 씀).
 
 ```jsonc
 {
@@ -211,7 +219,7 @@ create policy wake_signal_receive on realtime.messages
 
 ### 공용 계산 (`functions/_shared/calc/`)
 
-기상 시각 역산 · 강도 · 준비 P80 · 순서 확인 · 저장 검증 · 이동시간 폴백 계산 · 반복 규칙 읽기 · 다음 회차 날짜(`recur.ts`: 두 모양만, 요일은 내 시간대 날짜 기준, 창 지금 ~ 14일) · 출발 여유(`departSlack` · `departNow`: 약속 − 이동으로 구한 출발 한계와 지금 + 남은 준비를 비교해 여유 · 빠듯 · 지각 위험, 7장 7.5.2. 출발 알림 글자의 도착 · 여유도 이 계산) · 그날 첫 일정 판정(`hasEarlierWake`: 약속 시각이 이 약속보다 앞선 같은 날 약속에 켜진 기상 알람이 있으면 이 약속은 기상 없이 준비부터. 알람이 울리는 시각이 아니라 약속 시각 기준이고, 같은 시각 두 약속은 둘 다 기상을 가짐). Deno · Node API를 안 쓰는 순수 TS고 import는 상대 경로 + `.ts`라서 앱(P6)이 경로 별칭으로 같은 파일을 가져다 씀 (앱 `tsconfig`에 `allowImportingTsExtensions`, Metro에 `watchFolders` 필요). 규칙은 앱 목업 계산(`mobile/src/mocks/calc.ts` · `features/alarm/adjust.ts`)을 그대로 옮김 — 문서(4장 · 7장)와 다른 곳(낮은 중요도 강도 · 도착 알람 시각 · 준비시간 · 7장의 개인 보정 ±30분 / 예측 15~240분 clamp)은 D56이 정할 때까지 목업을 따름 — 앱이 이 계산을 그대로 가져다 쓰므로 목업과 한 줄도 다르면 안 됨.
+기상 시각 역산 · 강도 · 준비 P80 · 순서 확인 · 저장 검증 · 이동시간 폴백 계산 · 반복 규칙 읽기 · 다음 회차 날짜(`recur.ts`: 두 모양만, 요일은 내 시간대 날짜 기준, 창 지금 ~ 14일) · 출발 여유(`departSlack` · `departNow`: 약속 − 이동으로 구한 출발 한계와 지금 + 남은 준비를 비교해 여유 · 빠듯 · 지각 위험, 7장 7.5.2. 출발 알림 글자의 도착 · 여유도 이 계산) · 그날 첫 일정 판정(`hasEarlierWake`: 약속 시각이 이 약속보다 앞선 같은 날 약속에 켜진 기상 알람이 있으면 이 약속은 기상 없이 준비부터. 알람이 울리는 시각이 아니라 약속 시각 기준이고, 같은 시각 두 약속은 둘 다 기상을 가짐) · 저녁 기상 예외(`isEveningWake`: 첫 일정이어도 계산된 기상 시각이 내 시간대 낮 12시 이후면 기상 알람 없이 준비 · 출발 · 도착만, 12:00 정각은 이후. `with_wake` 직접 지정 · 직접 고른 기상 시각은 존중. #320). Deno · Node API를 안 쓰는 순수 TS고 import는 상대 경로 + `.ts`라서 앱(P6)이 경로 별칭으로 같은 파일을 가져다 씀 (앱 `tsconfig`에 `allowImportingTsExtensions`, Metro에 `watchFolders` 필요). 규칙은 앱 목업 계산(`mobile/src/mocks/calc.ts` · `features/alarm/adjust.ts`)을 그대로 옮김 — 문서(4장 · 7장)와 다른 곳(낮은 중요도 강도 · 도착 알람 시각 · 준비시간 · 7장의 개인 보정 ±30분 / 예측 15~240분 clamp)은 D56이 정할 때까지 목업을 따름 — 앱이 이 계산을 그대로 가져다 쓰므로 목업과 한 줄도 다르면 안 됨.
 
 ### 시험
 

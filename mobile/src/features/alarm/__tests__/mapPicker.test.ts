@@ -99,6 +99,14 @@ describe('placeFromPin', () => {
     expect(placeFromPin({ point, typedName: '  ', picked: null, pinAddress: null }).name).toBe(UNNAMED_PLACE);
   });
 
+  it('감지 범위를 주면 radiusM으로 100~500에 맞춰 실리고, 안 주면 칸이 없음', () => {
+    const point = { lat: 37.5, lng: 127.1 };
+    expect(placeFromPin({ point, typedName: '학교', radiusM: 300 })).toMatchObject({ name: '학교', lat: 37.5, lng: 127.1, radiusM: 300 });
+    expect(placeFromPin({ point, typedName: '학교', radiusM: 60 }).radiusM).toBe(100);
+    expect(placeFromPin({ point, typedName: '학교', radiusM: 5000 }).radiusM).toBe(500);
+    expect(placeFromPin({ point, typedName: '학교' })).not.toHaveProperty('radiusM');
+  });
+
   it('주소는 핀 자리 주소 우선, 없으면 검색 결과 주소, 둘 다 없으면 칸 없음 — 좌표는 핀 자리', () => {
     expect(placeFromPin({ point, typedName: '', picked: CAMPUS, pinAddress: { address: '핀 주소' } })).toEqual({ name: '세종대학교', address: '핀 주소', ...point });
     expect(placeFromPin({ point, typedName: '', picked: CAMPUS, pinAddress: null })).toEqual({ name: '세종대학교', address: CAMPUS.address, ...point });
