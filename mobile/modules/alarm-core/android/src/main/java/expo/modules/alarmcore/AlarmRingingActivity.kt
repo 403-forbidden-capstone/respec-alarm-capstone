@@ -7,7 +7,10 @@ import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.view.Gravity
+import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
 import android.widget.Button
@@ -17,7 +20,10 @@ import android.widget.TextView
 import android.widget.Toast
 import java.lang.ref.WeakReference
 
-// 잠금화면 위에 뜨는 WAKE 알람 화면. 해제 · 미루기는 알람 코어(AlarmController)가 처리하고, 해제하면 앱을 기상 확인 화면으로 엶
+// 울림 길잡이 + 대체 화면 (#332). 풀스크린 인텐트 · 알림 본문이 이 화면을 열면 앱의 H07(/ring)을 잠금화면 위로 불러 주고,
+//   앱이 ackRingScreen()으로 "H07 떴음"을 알리면 닫힘. 앱이 RING_APP_TIMEOUT_MS 안에 못 띄우면(콜드 스타트 실패 · 로그아웃 등)
+//   아래의 네이티브 컨트롤(해제 · 미루기)을 그려 알람을 끌 수 있게 함. 해제 · 미루기는 알람 코어(AlarmController)가 처리하고,
+//   이 화면에서 해제하면 앱을 기상 확인 화면으로 엶
 class AlarmRingingActivity : Activity() {
   companion object {
     const val EXTRA_ALARM_TITLE = "alarm_title"
@@ -26,6 +32,12 @@ class AlarmRingingActivity : Activity() {
     private val WARN_COLOR = Color.rgb(200, 85, 61)
     private val DANGER_COLOR = Color.rgb(184, 69, 46)
     private val NAVY = Color.rgb(11, 26, 58)
+
+    // 앱을 기다리는 동안의 바탕 — 앱 H07 기상 배경(theme ringWake #141414)과 같아 앱이 뜰 때 깜빡이지 않음
+    private val WAIT_COLOR = Color.rgb(20, 20, 20)
+
+    // 앱이 /ring을 띄우기를 기다리는 시간. 이 안에 ackRingScreen()이 없으면 네이티브 컨트롤을 그림 (콜드 스타트를 감안한 값)
+    const val RING_APP_TIMEOUT_MS = 6000L
     private val CHIP_COLOR = Color.rgb(36, 56, 98)
 
     private var showing: WeakReference<AlarmRingingActivity>? = null
@@ -39,6 +51,12 @@ class AlarmRingingActivity : Activity() {
     // 알람 둘이 겹쳐 서비스가 다른 알람으로 넘어가면 불러서 화면이 지금 울리는 알람을 보이게 함
     fun showCurrentIfShowing() {
       showing?.get()?.showCurrentAlarm()
+    }
+
+    // 앱이 H07을 띄웠다고 알림 (JS ackRingScreen) — 길잡이 화면이 떠 있으면 닫음. 어느 스레드에서 불러도 됨
+    fun onAppShowedRing() {
+      val activity = showing?.get() ?: return
+      activity.runOnUiThread { activity.handleAppAck() }
     }
   }
 
@@ -55,6 +73,11 @@ class AlarmRingingActivity : Activity() {
   // 미루기를 누른 뒤 서비스가 멈춰 화면이 닫히기까지 사이에 또 눌려 두 번 세어지지 않게. 예약이 실패하면 풀어 다시 누를 수 있음
   private var snoozing = false
 
+  // 앱이 H07을 띄웠다고 알려 올 때까지 기다리다 못해 네이티브 컨트롤을 그렸는지
+  private var fallbackShown = false
+  private val handler = Handler(Looper.getMainLooper())
+  private val fallbackRunnable = Runnable { showFallback() }
+
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
     // 이미 멈춘 뒤에 늦게 열리면 바로 닫음
@@ -65,10 +88,11 @@ class AlarmRingingActivity : Activity() {
     showing = WeakReference(this)
     readAlarmDetails(intent)
     showOverLockScreen()
-    renderAlarmControls()
+    waitForApp()
   }
 
   override fun onDestroy() {
+    handler.removeCallbacks(fallbackRunnable)
     if (showing?.get() === this) showing = null
     super.onDestroy()
   }
@@ -77,7 +101,46 @@ class AlarmRingingActivity : Activity() {
     super.onNewIntent(intent)
     setIntent(intent)
     readAlarmDetails(intent)
+    // 이미 네이티브 컨트롤을 그렸으면 새 알람으로 다시 그림, 아직 기다리는 중이면 앱을 다시 불러 기다림
+    if (fallbackShown) renderAlarmControls() else waitForApp()
+  }
+
+  // 앱에 H07을 열라고 하고, 단색 화면으로 기다림. 시간 안에 앱 응답이 없으면 showFallback
+  private fun waitForApp() {
+    fallbackShown = false
+    handler.removeCallbacks(fallbackRunnable)
+    scrollView = null
+    setContentView(View(this).apply { setBackgroundColor(WAIT_COLOR) })
+    val opened = runCatching {
+      startActivity(
+        Intent(Intent.ACTION_VIEW, RingOverLock.ringLink(AlarmPlaybackService.ringingAlarmId ?: alarmId)).apply {
+          setPackage(packageName)
+          addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+        },
+      )
+    }.isSuccess
+    // 앱을 아예 못 열면 기다리지 않고 바로 네이티브 컨트롤
+    if (opened) handler.postDelayed(fallbackRunnable, RING_APP_TIMEOUT_MS) else showFallback()
+  }
+
+  // 앱이 H07을 띄움 — 이 화면은 할 일이 끝남. 알람은 앱이 해제 · 미루기하면 서비스가 멈춰 끝남
+  private fun handleAppAck() {
+    handler.removeCallbacks(fallbackRunnable)
+    finish()
+  }
+
+  // 대체 화면: 앱이 못 떴으니 여기서 해제 · 미루기. 앱이 다른 화면을 앞에 올렸을 수 있어 이 화면을 앞으로 가져옴
+  private fun showFallback() {
+    if (isFinishing) return
+    fallbackShown = true
     renderAlarmControls()
+    runCatching {
+      startActivity(
+        Intent(this, AlarmRingingActivity::class.java).apply {
+          addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
+        },
+      )
+    }
   }
 
   // 지금 울리는 알람이 화면이 든 알람과 다르면 그 알람으로 바꿔 다시 그림 (해제 · 미루기가 보이는 알람에 듣게)
@@ -89,11 +152,12 @@ class AlarmRingingActivity : Activity() {
     alarm = AlarmStorage.get(this, current)
     selectedMinutes = null
     snoozing = false
-    renderAlarmControls()
+    if (fallbackShown) renderAlarmControls()
   }
 
   private fun readAlarmDetails(source: Intent?) {
-    alarmId = source?.getStringExtra(AlarmScheduler.EXTRA_ALARM_ID) ?: "alarm"
+    // 인자 없이 앞으로 가져온 경우(showFallback)를 위해 없으면 지금 울리는 알람
+    alarmId = source?.getStringExtra(AlarmScheduler.EXTRA_ALARM_ID) ?: AlarmPlaybackService.ringingAlarmId ?: "alarm"
     fallbackTitle = source?.getStringExtra(EXTRA_ALARM_TITLE) ?: "알람"
     alarm = AlarmStorage.get(this, alarmId)
     selectedMinutes = null

@@ -210,6 +210,37 @@ object AlarmController {
     }
   }
 
+  /**
+   * JS의 getRinging — 지금 울리는 알람 (앱 H07이 그릴 값). 울리는 게 없으면 null
+   * 값의 출처는 알람 화면(AlarmRingingActivity.renderAlarmControls)과 같음: 저장된 알람(StoredAlarm) + 울림 계획
+   */
+  fun getRinging(context: Context): Map<String, Any?>? {
+    val id = AlarmPlaybackService.ringingAlarmId ?: return null
+    val alarm = AlarmStorage.get(context, id) ?: return null
+    return mapOf(
+      "id" to alarm.alarmId,
+      "type" to alarm.type,
+      "title" to alarm.title,
+      "subtitle" to alarm.subtitle,
+      "atMillis" to alarm.atMillis.toDouble(),
+      "nextRingAt" to alarm.nextRingAt.toDouble(),
+      "snoozeCount" to alarm.snoozeCount,
+      "snoozeLimit" to alarm.plan.snoozeLimit,
+      "snoozeMinutesOptions" to (alarm.plan.snoozeMinutesOptions.takeIf { it.isNotEmpty() } ?: SnoozeRules.DEFAULT_OPTIONS),
+      "departAtMillis" to alarm.departAt?.toDouble(),
+      "heading" to alarm.plan.heading,
+      "soundKey" to alarm.soundKey,
+      "vibration" to alarm.vibration,
+      "intensity" to alarm.intensity,
+    )
+  }
+
+  /** JS의 snooze — 지금 울리는 알람을 minutes분 미룸. 울리는 게 없거나 한도 · 허용 분을 넘으면 false */
+  fun snoozeRinging(context: Context, minutes: Int): Boolean {
+    val id = AlarmPlaybackService.ringingAlarmId ?: return false
+    return snooze(context, id, minutes)
+  }
+
   /** JS의 list — 다음 울릴 시각 순 */
   fun list(context: Context): List<Map<String, Any>> =
     AlarmStorage.all(context)

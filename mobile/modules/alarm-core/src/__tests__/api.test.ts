@@ -100,6 +100,48 @@ describe('웹 대체 (메모리) — #98', () => {
     expect(heard).toEqual(['TRIGGERED']);
   });
 
+  it('울리는 알람: ringNow로 울리면 getRinging이 값을 주고, 미루기는 한도 · 허용 분을 검사하고, 끄면 null', async () => {
+    const backend = createMemoryBackend(() => NOW);
+    expect(await backend.getRinging()).toBeNull();
+    expect(await backend.snooze(5)).toBe(false); // 울리는 게 없음
+
+    const wake = pkg({ subtitle: '오전 10:00 · 세종대학교', departAt: NOW + 3_600_000 });
+    await backend.ringNow(wake, buildRingPlan(wake));
+    expect(await backend.getRinging()).toMatchObject({
+      id: wake.alarmId,
+      type: 'WAKE',
+      title: '캡스톤 회의',
+      subtitle: '오전 10:00 · 세종대학교',
+      snoozeCount: 0,
+      snoozeLimit: 3,
+      snoozeMinutesOptions: [5, 10, 15],
+      departAtMillis: NOW + 3_600_000,
+      intensity: 'NORMAL',
+    });
+
+    expect(await backend.snooze(7)).toBe(false); // 목록에 없는 분
+    expect(await backend.getRinging()).not.toBeNull();
+    expect(await backend.snooze(10)).toBe(true);
+    expect(await backend.getRinging()).toBeNull(); // 미루면 울림이 멈춤
+    expect((await backend.getPendingEvents()).map((event) => [event.eventType, event.snoozeMinutes])).toEqual([
+      ['TRIGGERED', undefined],
+      ['SNOOZED', 10],
+    ]);
+
+    await backend.ringNow(wake, buildRingPlan(wake));
+    await backend.stop();
+    expect(await backend.getRinging()).toBeNull();
+    backend.ackRingScreen(); // 아무 일 없음
+    await backend.releaseRingOverLock(true);
+  });
+
+  it('소리 없는 알림은 울리는 알람이 아님', async () => {
+    const backend = createMemoryBackend(() => NOW);
+    const arrive = pkg({ type: 'ARRIVE' });
+    await backend.ringNow(arrive, buildRingPlan(arrive));
+    expect(await backend.getRinging()).toBeNull();
+  });
+
   it('권한 · 사용 정보는 없는 것으로', async () => {
     const backend = createMemoryBackend(() => NOW);
     expect(await backend.canScheduleExactAlarms()).toBe(false);
@@ -178,6 +220,32 @@ describe('공개 함수 (index.ts)', () => {
     expect(payload.plan.volumePercent).toBe(72);
     expect(payload.plan.reRingOffsetsMillis).toEqual([480_000, 960_000]);
     expect(calls[2].args).toEqual([['e1']]);
+  });
+
+  it('울림 화면 함수 4개는 네이티브에 그대로 넘어감', async () => {
+    const calls: { name: string; args: unknown[] }[] = [];
+    const fake = new Proxy({} as NativeAlarmCore, {
+      get: (_target, name: string) => (...args: unknown[]) => {
+        calls.push({ name, args });
+        if (name === 'getRinging') return Promise.resolve(null);
+        if (name === 'snooze') return Promise.resolve(false);
+        return Promise.resolve(undefined);
+      },
+    });
+    jest.doMock('react-native', () => ({ Platform: { OS: 'android' } }));
+    jest.doMock('expo-modules-core', () => ({ requireOptionalNativeModule: () => fake }));
+    const alarmCore = loadIndex();
+
+    expect(await alarmCore.getRinging()).toBeNull();
+    expect(await alarmCore.snooze(10)).toBe(false);
+    alarmCore.ackRingScreen();
+    await alarmCore.releaseRingOverLock(true);
+    expect(calls).toEqual([
+      { name: 'getRinging', args: [] },
+      { name: 'snooze', args: [10] },
+      { name: 'ackRingScreen', args: [] },
+      { name: 'releaseRingOverLock', args: [true] },
+    ]);
   });
 
   it('네이티브가 새 꾸러미를 미루면(deferred) 그대로 돌려주고, scheduleAll도 알람마다 담음', async () => {

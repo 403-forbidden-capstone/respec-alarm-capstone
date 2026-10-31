@@ -57,6 +57,10 @@ jest.mock('@/lib/alarmSync', () => ({
 
 const mockCore = {
   stop: jest.fn<() => Promise<void>>(),
+  getRinging: jest.fn<() => Promise<unknown>>(),
+  snooze: jest.fn<(minutes: number) => Promise<boolean>>(),
+  releaseRingOverLock: jest.fn<(dismissKeyguard: boolean) => Promise<void>>(),
+  ackRingScreen: jest.fn<() => void>(),
   cancel: jest.fn<(id: string) => Promise<void>>(),
   list: jest.fn<() => Promise<unknown[]>>(),
   hasUsageAccess: jest.fn<() => Promise<boolean>>(),
@@ -65,6 +69,10 @@ const mockCore = {
 };
 jest.mock('@capstone/alarm-core', () => ({
   stop: () => mockCore.stop(),
+  getRinging: () => mockCore.getRinging(),
+  snooze: (minutes: number) => mockCore.snooze(minutes),
+  releaseRingOverLock: (dismissKeyguard: boolean) => mockCore.releaseRingOverLock(dismissKeyguard),
+  ackRingScreen: () => mockCore.ackRingScreen(),
   cancel: (id: string) => mockCore.cancel(id),
   list: () => mockCore.list(),
   hasUsageAccess: () => mockCore.hasUsageAccess(),
@@ -1297,11 +1305,89 @@ describe('고친 값 기록 읽기 (listEditLogs)', () => {
 // 울림 · 기상 확인
 // ---------------------------------------------------------------------------
 
-describe('울림 (H07) — 알람 코어로 잇거나 실데이터에서는 열 알람이 없음', () => {
-  it('getRing은 늘 null (울림은 알람 코어 화면), 해제는 알람 코어 stop', async () => {
-    expect(await real.getRing()).toBeNull();
+describe('울림 (H07) — 알람 코어가 지금 울리는 알람을 읽어 그리고, 해제 · 미루기는 알람 코어로 잇음', () => {
+  const ringing = {
+    id: 'alarm-1',
+    type: 'WAKE',
+    title: '팀 주간회의',
+    subtitle: null,
+    atMillis: Date.parse('2025-05-22T07:55:00+09:00'),
+    nextRingAt: Date.parse('2025-05-22T08:00:00+09:00'),
+    snoozeCount: 1,
+    snoozeLimit: 3,
+    snoozeMinutesOptions: [5, 10, 15],
+    departAtMillis: Date.parse('2025-05-22T09:00:00+09:00'),
+    heading: '일어날 시간이에요',
+    soundKey: 'theme_default',
+    vibration: 'SHORT_REPEAT',
+    intensity: 'STRONG',
+  };
+
+  it('getRing: 코어의 울리는 알람을 RingInfo로 바꿈 (제목 · 미루기 횟수 · 한도 · 출발 시각), 약속 정보는 빈 값', async () => {
+    mockNow = new Date(kst('07:56'));
+    mockCore.getRinging.mockResolvedValue(ringing);
+    const ring = await real.getRing('alarm-1');
+    expect(ring).toMatchObject({
+      alarmId: 'alarm-1',
+      kind: 'WAKE',
+      notice: '일어날 시간이에요',
+      voiceLine: '',
+      snoozeCount: 1,
+      snoozeLimit: 3,
+      important: false,
+    });
+    expect(ring?.appointment.title).toBe('팀 주간회의');
+    expect(ring?.appointment.place).toBe('');
+    expect(ring?.at.getTime()).toBe(Date.parse(kst('07:56'))); // 지금 시각
+    expect(ring?.departAt?.getTime()).toBe(ringing.departAtMillis);
+    expect(ring?.levelLine).toContain('강');
+  });
+
+  it('getRing: 울리는 알람이 없거나 다른 알람이거나 울림이 아닌 종류면 null', async () => {
+    mockCore.getRinging.mockResolvedValue(null);
+    expect(await real.getRing('alarm-1')).toBeNull();
+    mockCore.getRinging.mockResolvedValue(ringing);
+    expect(await real.getRing('other')).toBeNull();
+    mockCore.getRinging.mockResolvedValue({ ...ringing, type: 'ARRIVE' });
+    expect(await real.getRing('alarm-1')).toBeNull();
+    mockCore.getRinging.mockResolvedValue({ ...ringing, departAtMillis: null });
+    expect((await real.getRing('alarm-1'))?.departAt).toBeNull();
+  });
+
+  it('해제: 알람 코어 stop 다음에 잠금화면 위 설정을 되돌리며 잠금 해제를 요청', async () => {
+    const order: string[] = [];
+    mockCore.stop.mockImplementation(async () => void order.push('stop'));
+    mockCore.releaseRingOverLock.mockImplementation(async (dismissKeyguard) => void order.push(`release:${dismissKeyguard}`));
     await real.dismissRing();
+    expect(order).toEqual(['stop', 'release:true']);
+  });
+
+  it('해제: 되돌리기가 실패해도(옛 APK) 해제는 끝난 것으로 둠', async () => {
+    mockCore.releaseRingOverLock.mockRejectedValue(new Error('no function'));
+    await expect(real.dismissRing()).resolves.toBeUndefined();
     expect(mockCore.stop).toHaveBeenCalledTimes(1);
+  });
+
+  it('미루기: 코어 snooze 성공 뒤에만 되돌리고(잠금 해제 요청 없이) true, 코어가 거절하면 되돌리지 않고 false', async () => {
+    mockCore.releaseRingOverLock.mockResolvedValue(undefined);
+    mockCore.snooze.mockResolvedValue(true);
+    expect(await real.snoozeRing('alarm-1', 10)).toBe(true);
+    expect(mockCore.snooze).toHaveBeenCalledWith(10);
+    expect(mockCore.releaseRingOverLock).toHaveBeenCalledWith(false);
+
+    mockCore.releaseRingOverLock.mockClear();
+    mockCore.snooze.mockResolvedValue(false);
+    expect(await real.snoozeRing('alarm-1', 10)).toBe(false);
+    expect(mockCore.releaseRingOverLock).not.toHaveBeenCalled();
+  });
+
+  it('ackRing: 코어에 알리고, 옛 APK에서 던져도 조용히 넘어감', () => {
+    real.ackRing();
+    expect(mockCore.ackRingScreen).toHaveBeenCalledTimes(1);
+    mockCore.ackRingScreen.mockImplementation(() => {
+      throw new Error('no function');
+    });
+    expect(() => real.ackRing()).not.toThrow();
   });
 
   it('getSnooze: 폰이 미루기 예약을 가진 알람 중 다시 울릴 시각이 가장 이른 것 · cancelSnooze는 폰 예약 지움', async () => {

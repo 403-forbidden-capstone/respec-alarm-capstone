@@ -111,6 +111,33 @@ export type ScheduledAlarm = {
   nextRingAt: number;
 };
 
+/**
+ * 지금 울리는 알람 — getRinging()이 돌려주는 값. 앱 H07(/ring)이 그리는 데 필요한 것만 (네이티브 알람 화면이 쓰는 값과 같은 출처)
+ * 해제하면 폰에서 알람이 지워지므로 화면은 처음 읽은 값을 들고 있어야 함
+ */
+export type RingingAlarm = {
+  id: string;
+  type: AlarmType;
+  title: string;
+  subtitle: string | null;
+  /** 처음 예약한 시각 (서버 scheduled_at) */
+  atMillis: number;
+  /** 지금 울림의 시각 — 미뤘거나 다시 울림이면 atMillis와 다름 */
+  nextRingAt: number;
+  /** 이미 미룬 횟수 */
+  snoozeCount: number;
+  snoozeLimit: number;
+  /** 고를 수 있는 미루기 분. 계획에 없으면 5 · 10 · 15 */
+  snoozeMinutesOptions: number[];
+  /** 출발 시각 (epoch ms). 모르면 null */
+  departAtMillis: number | null;
+  /** 알람 화면의 머리글 (예: "일어날 시간이에요") */
+  heading: string;
+  soundKey: string;
+  vibration: AlarmVibration;
+  intensity: AlarmIntensity;
+};
+
 export type AlarmEventType = 'TRIGGERED' | 'SNOOZED' | 'DISMISSED' | 'ACKNOWLEDGED' | 'ARRIVAL_CONFIRMED';
 
 /**
@@ -145,6 +172,14 @@ export type AlarmBackend = {
   cancelAll(): Promise<void>;
   list(): Promise<ScheduledAlarm[]>;
   stop(): Promise<void>;
+  /** 지금 울리는 알람. 없으면 null */
+  getRinging(): Promise<RingingAlarm | null>;
+  /** 지금 울리는 알람을 minutes분 미룸. 한도 · 허용 분을 넘었거나 울리는 게 없으면 false */
+  snooze(minutes: number): Promise<boolean>;
+  /** 앱이 H07(/ring)을 띄웠다고 네이티브 길잡이 화면에 알림 */
+  ackRingScreen(): void;
+  /** 알람이 끝나 H07의 잠금화면 위 설정을 되돌림. dismissKeyguard = 해제(true)면 잠금 해제도 요청, 미루기(false)면 앱을 뒤로 보냄 */
+  releaseRingOverLock(dismissKeyguard: boolean): Promise<void>;
   ringNow(pkg: RingPackage, plan: RingPlan): Promise<void>;
   canScheduleExactAlarms(): Promise<boolean>;
   canUseFullScreenIntent(): Promise<boolean>;

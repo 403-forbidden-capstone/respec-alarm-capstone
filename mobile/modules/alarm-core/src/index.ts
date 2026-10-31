@@ -15,6 +15,7 @@ import { buildRingPlan, validateRingPackage } from './plan';
 import type {
   AlarmBackend,
   AlarmEvent,
+  RingingAlarm,
   RingPackage,
   ScheduleOutcome,
   ScheduledAlarm,
@@ -118,6 +119,29 @@ export async function list(): Promise<ScheduledAlarm[]> {
 /** 끄기: 지금 울리는 알람을 해제 처리함(해제 기록이 남음). 울리는 게 없으면 아무 일 없음 */
 export async function stop(): Promise<void> {
   await backend.stop();
+}
+
+/** 지금 울리는 알람 (앱 H07이 그림). 울리는 게 없으면 null. 해제하면 알람이 지워지므로 처음 읽은 값을 화면이 들고 있을 것 */
+export async function getRinging(): Promise<RingingAlarm | null> {
+  return backend.getRinging();
+}
+
+/** 지금 울리는 알람을 minutes분 미룸 (SNOOZED 기록). 한도(3번) · 허용 분(5 · 10 · 15)을 넘었거나 울리는 게 없으면 false — 코어가 검사함 */
+export async function snooze(minutes: number): Promise<boolean> {
+  return backend.snooze(minutes);
+}
+
+/** 앱이 H07(/ring)을 띄웠다고 알림 — 네이티브 길잡이 화면이 닫힘. 안 알리면 몇 초 뒤 네이티브 대체 화면이 뜸 (docs/alarm-core.md) */
+export function ackRingScreen(): void {
+  backend.ackRingScreen();
+}
+
+/**
+ * 알람이 끝나(해제 · 미루기) H07의 잠금화면 위 설정을 되돌림. 해제는 true — 잠금 해제를 요청해 기상 확인(H08)이 이어서 보이게 함.
+ * 미루기는 false — 설정만 되돌리고 앱을 뒤로 보냄 (잠금화면으로 돌아감)
+ */
+export async function releaseRingOverLock(dismissKeyguard: boolean): Promise<void> {
+  await backend.releaseRingOverLock(dismissKeyguard);
 }
 
 /** 테스트: 예약 없이 지금 바로 울림. 같은 id가 있으면 덮어씀 */
