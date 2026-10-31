@@ -1,5 +1,5 @@
 // place-search — 장소 검색 (카카오 로컬 키워드 검색). H05 도착지 · 출발지 · 온보딩 집 검색
-//   입력: { query, lat?, lng?, limit? }  (lat · lng를 주면 가까운 순)
+//   입력: { query, lat?, lng?, limit? }  (정확도순 — lat · lng는 가까운 쪽으로 치우치게만 쓰고, "…역"이면 지하철역이 맨 위, 같은 이름 지점은 가까운 순)
 //   응답: { places: [{ id, name, address, lat, lng, category? }] } — 결과가 없으면 빈 배열 (재검색 유도, 8장 8.2.2)
 //   KAKAO_REST_API_KEY가 없으면 NOT_CONFIGURED(503). 응답은 저장하지 않음 (카카오 약관)
 import 'jsr:@supabase/functions-js/edge-runtime.d.ts';
