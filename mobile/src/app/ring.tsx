@@ -48,17 +48,26 @@ const BACKGROUND: Record<RingKind, string> = {
 export default function RingScreen() {
   const params = useLocalSearchParams<{ alarm?: string }>();
   const alarmId = params.alarm ?? 'a1:WAKE';
-  const { data: loaded, error } = useLoad(() => getRing(alarmId));
+  const { data: loaded, error, reload } = useLoad(() => getRing(alarmId));
   // 실데이터는 해제 · 미루기 뒤 코어에서 울리는 알람이 사라져 다시 읽으면 null — 처음 읽은 값을 들고 있어 화면이 "찾을 수 없어요"로 바뀌지 않게
   const [firstLoaded, setFirstLoaded] = useState<RingInfo | null>(null);
-  if (loaded && !firstLoaded) setFirstLoaded(loaded);
-  const data = loaded === null && firstLoaded ? firstLoaded : loaded;
+  if (loaded && loaded.alarmId === alarmId && firstLoaded?.alarmId !== alarmId) setFirstLoaded(loaded);
+  const data = loaded === null && firstLoaded?.alarmId === alarmId ? firstLoaded : loaded?.alarmId === alarmId || loaded == null ? loaded : undefined;
   // 읽는 동안에도 맞는 배경이 보이게 알람 id(<일정>:<종류>)의 종류를 먼저 씀
   const fromId = params.alarm?.split(':')[1];
   const kind: RingKind = data?.kind ?? (fromId && Object.keys(HEAD).includes(fromId) ? (fromId as RingKind) : 'WAKE');
   const [minutes, setMinutes] = useState<number>(SNOOZE_MINUTES_OPTIONS[0]);
   const [done, setDone] = useState(false); // 준비 · 출발 알람을 끈 뒤 — 안내를 화면에 남김
   const handled = useRef(false); // 두 번 눌러도 해제 · 미루기는 한 번만 기록
+
+  // 같은 /ring 화면에 다른 알람의 딥링크가 와서 주소의 alarm만 바뀌면(앞 알람이 낡은 채 남은 경우) 다시 읽음 (#332 로컬 리뷰)
+  const lastAlarmId = useRef(alarmId);
+  useEffect(() => {
+    if (lastAlarmId.current === alarmId) return;
+    lastAlarmId.current = alarmId;
+    handled.current = false;
+    void reload();
+  }, [alarmId, reload]);
 
   // 울리는 동안 안드로이드 뒤로 가기는 막음 — 해제 · 미루기 없이 나가면 알람이 그냥 사라짐 (웹은 해당 없음)
   const ringing = data != null && !done;
@@ -100,7 +109,12 @@ export default function RingScreen() {
   async function snooze() {
     if (!data || handled.current || !canSnooze(data.snoozeCount, data.snoozeLimit)) return;
     handled.current = true;
-    const snoozed = await snoozeRing(data.alarmId, minutes, data.at);
+    let snoozed = false;
+    try {
+      snoozed = await snoozeRing(data.alarmId, minutes, data.at);
+    } catch {
+      // 알람 코어 호출이 던짐(옛 APK · 네이티브 오류) — 다시 누를 수 있게 풀어 둠
+    }
     if (!snoozed) {
       // 한도 · 이미 멈춤 — 알람 코어가 거절함. 다시 누를 수 있게 풀어 둠
       handled.current = false;
@@ -108,7 +122,8 @@ export default function RingScreen() {
       return;
     }
     toast(`${minutes}분 뒤 다시 울려요`);
-    backOrHome();
+    // 해제처럼 스택을 홈으로 정리 — 울림 화면 밑에 이전 해제의 기상 확인(H08) 등이 남아 있으면 backOrHome이 그리로 돌아감 (L8 3차)
+    router.dismissTo('/');
   }
 
   // 기상 알람을 끄면 기상 확인(H08)으로, 준비 · 출발은 결과 안내 화면
@@ -116,7 +131,14 @@ export default function RingScreen() {
   async function dismiss() {
     if (!data || handled.current) return;
     handled.current = true;
-    await dismissRing(data.alarmId, data.at);
+    try {
+      await dismissRing(data.alarmId, data.at);
+    } catch {
+      // 알람 코어 호출이 던짐 — 다시 누를 수 있게 풀고 알림. 안 풀면 알람은 울리는데 앱에서 끌 방법이 없음
+      handled.current = false;
+      toast('알람을 끄지 못했어요. 다시 눌러 주세요');
+      return;
+    }
     if (data.kind === 'WAKE') {
       // 목업 A.dismiss처럼 [홈, 기상 확인] — 기상 확인에서 뒤로 가면 홈
       router.dismissTo('/');
@@ -283,7 +305,7 @@ function DonePanel({ kind, appointment: a }: { kind: Exclude<RingKind, 'WAKE'>; 
         {a.title}
       </Text>
       <Text variant="small" tone="inverse" align="center" style={styles.faded65}>
-        {formatTime(a.at)} · {a.place}
+        {a.place ? `${formatTime(a.at)} · ${a.place}` : formatTime(a.at)}
       </Text>
 
       <View style={styles.voice}>

@@ -36,13 +36,20 @@ object RingOverLock {
 
   // --- 앱 액티비티 생명주기 (AlarmCorePackage의 listener가 부름, 전부 메인 스레드) ---
 
+  // 울리는 알람이 있고, 인텐트가 알람 id를 실었으면 그 알람일 때만 — 밖에서 respecalarm://ring만 열어도 잠금화면 위로 올라오는 것을 막음 (#332 로컬 리뷰)
+  private fun isRingingFor(intent: Intent?): Boolean {
+    val ringing = AlarmPlaybackService.ringingAlarmId ?: return false
+    val wanted = intent?.data?.getQueryParameter("alarm")
+    return wanted == null || wanted == ringing
+  }
+
   fun onActivityCreated(activity: Activity) {
     current = WeakReference(activity)
-    if (isRingIntent(activity.intent)) hold(activity)
+    if (isRingIntent(activity.intent) && isRingingFor(activity.intent)) hold(activity)
   }
 
   fun onActivityNewIntent(intent: Intent?) {
-    if (!isRingIntent(intent)) return
+    if (!isRingIntent(intent) || !isRingingFor(intent)) return
     current?.get()?.let { hold(it) }
   }
 
@@ -89,7 +96,7 @@ object RingOverLock {
    * false(미루기): 설정만 거두고 앱을 뒤로 보냄 — 잠금화면으로 돌아가도 됨
    */
   fun release(dismissKeyguard: Boolean) {
-    handler.removeCallbacksAndMessages(null)
+    // 대기 중인 releaseIfStale은 지우지 않음 — 잠금 해제 요청의 콜백이 안 와도(화면이 꺼짐 등) 안전장치가 설정을 거둠
     handler.post {
       val activity = held?.get() ?: return@post
       if (!dismissKeyguard) {

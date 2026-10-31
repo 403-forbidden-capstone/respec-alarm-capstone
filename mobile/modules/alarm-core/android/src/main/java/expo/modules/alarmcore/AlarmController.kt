@@ -140,7 +140,8 @@ object AlarmController {
     if (!alarm.ringing) return false
     if (!SnoozeRules.canSnooze(alarm.snoozeCount, alarm.plan.snoozeLimit)) return false
     val chosenMinutes = minutes ?: SnoozeRules.defaultMinutes(alarm.plan)
-    if (chosenMinutes !in alarm.plan.snoozeMinutesOptions) return false
+    // 옵션 칸이 없던 옛 저장 알람은 화면과 같이 기본 목록으로 봄 (#332 로컬 리뷰)
+    if (chosenMinutes !in alarm.plan.snoozeMinutesOptions.ifEmpty { SnoozeRules.DEFAULT_OPTIONS }) return false
     val updated = alarm.copy(
       ringing = false,
       snoozeCount = alarm.snoozeCount + 1,

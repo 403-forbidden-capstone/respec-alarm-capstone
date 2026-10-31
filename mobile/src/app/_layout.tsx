@@ -61,7 +61,7 @@ export default function RootLayout() {
 // 가짜 데이터 모드(enabled=false, lib/mode.ts)는 웹 · 폰 개발용에서만. 로그인 없이 바로 탭이고 login · onboarding은 주소로 열어 볼 수만 있음 (onboarding은 흐름에 넣었을 때만, 저장 없이 단계만 넘어감)
 // 실데이터를 못 쓰면(Supabase 값 없음 · lib/flags REAL_DATA_READY = false) login · onboarding · settings를 아예 뺌 — 주소로 열어도 탭 홈 (#116)
 // ring(H07 알람 울림, #332)은 알람 코어가 잠금화면 위로 불러 오는 화면이라 로그인 · 온보딩 · 프로필 읽기를 기다리지 않고 바로 열림 — 해제 · 미루기는 알람 코어 호출뿐이라 서버 값이 필요 없음
-//   (로그아웃 상태에서 울려도 끌 수 있게). 해제 뒤 기상 확인(wake)은 가드가 열려 있을 때만 이어짐
+//   (로그아웃 상태에서 울려도 끌 수 있게). 해제 뒤 기상 확인(wake)으로의 이동은 ring.tsx가 항상 시도하고, 로그인 전이면 아래 Protected 가드가 막음 (그때 화면이 어디로 가는지는 에뮬레이터 확인 대상)
 // dev/* · auth/callback은 어느 쪽에서도 열림 (로그인 화면의 "알람 테스트"가 dev/alarm-test로 감). 앱 화면을 새로 만들면 첫 번째 Protected 안에 넣음
 function RootStack() {
   const { session, profile, loading, enabled, needsOnboarding, profileError, refreshProfile } = useAuth();
