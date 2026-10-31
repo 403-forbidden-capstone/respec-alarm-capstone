@@ -496,6 +496,11 @@ const CHECKS = [
     server: { st: 'na', ev: '기능이 아닌 배포 파이프라인 — DB 변경도 머지 시 자동 적용 (#82)' }, test: { st: 'ok', ev: 'push 전 훅(lefthook) tsc · 린트 · jest 전체 · PR에 Cloudflare 빌드 · DB 검사 자동 · 앱 검사 · 안드로이드 빌드 검사는 손으로 · 서버 함수 시험은 자동 없음' },
     how: ['PR 생성 시 자동: 웹 미리보기 · DB 검사(supabase/ 바뀔 때) · Claude 리뷰(지형 PR은 로컬 리뷰, #165). push 전 훅이 mobile/ 바뀌면 타입 · 린트 · jest 전체(#199). 앱 · 안드로이드 · 보안 검사는 Actions → Run workflow로 손으로. 머지 시 현재 주소가 새 버전으로 교체', 'APK: 첫 릴리스 v0.0.1(링크 "최신 APK" · README QR, EAS) · 이 PC 로컬 빌드(개발 탭 "④ 빌드 · 설치") · Actions → "안드로이드 빌드 검사" 아티팩트(3일 보관) · EAS 개발 빌드(#20)'],
     issues: [20] },
+  { id: 'C27', area: '기반 · 서버', name: '개발 도구: 내 시험 데이터 지우기 → 온보딩부터 다시', screens: [], start: null,
+    web: { st: 'no', ev: '코드만 들어감 — 화면으로 아직 확인 안 함. 웹 ?mode=real로 로그인했을 때만 보이는 버튼 (출시용 빌드에서는 숨김, D16)' }, phone: { st: 'no', ev: '개발용 APK 확인 전 (폰 알람 전부 취소 포함)' },
+    server: { st: 'part', ev: 'DB 함수 dev_reset_my_data는 DB 검사(PGlite)로 확인 — 내 데이터만 지우고 남의 줄 · 친구 · 그룹 · ai_calls는 그대로. 실서버에는 마이그레이션 머지 전' }, test: { st: 'ok', ev: 'DB 검사 내 시험 데이터 지우기 ①~⑧ · features/dev/api 가짜 모드 거절 · lib/session 폰 정리(로그아웃 없이) — 화면 시험 없음' },
+    how: ['웹 주소 끝에 "?mode=real"로 로그인 → "/dev/screens" → 위쪽 버튼 "내 시험 데이터 지우기"', '확인 창 "내 시험 데이터를 지울까요?" → "지우기" → "지웠어요" → 온보딩 첫 단계', '홈 · 알람 목록이 비어 있고 친구 · 그룹은 그대로, 아이디 · 닉네임은 남아 있음'],
+    issues: [] },
 ];
 const KINDS = {
   table: ['profiles', 'friends', 'groups', 'group_members', 'sharing_permissions', 'appointments', 'appointment_participants', 'alarms', 'alarm_events', 'daily_records', 'todos', 'routines', 'alarm_suggestions', 'conversation_sessions', 'daily_journals', 'push_tokens', 'v_prepare_time_stats'],

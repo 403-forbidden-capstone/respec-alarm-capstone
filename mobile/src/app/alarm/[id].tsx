@@ -5,7 +5,7 @@ import { StyleSheet, View } from 'react-native';
 
 import { Button, Card, Chip, DateSheet, EmptyState, KeyValueRow, Loading, LoadError, Screen, Sheet, Stepper, Text, toast, Toggle, TopBar } from '@/components/ui';
 import { getAppointment, listOccurrences, listPlaces, previewAlarms, saveAlarmSettings } from '@/features/alarm/api';
-import { isManualTime, manualTimes, moveAlarm, orderError, resetAlarm, sameEdits, timeInputsChanged } from '@/features/alarm/adjust';
+import { isManualTime, manualTimes, moveAlarm, orderError, resetAlarm, sameEdits, shownPreview, timeInputsChanged } from '@/features/alarm/adjust';
 import { FormulaBox } from '@/features/alarm/components/FormulaBox';
 import { OccurrenceList } from '@/features/alarm/components/OccurrenceList';
 import { OptionGrid } from '@/features/alarm/components/OptionGrid';
@@ -132,13 +132,14 @@ function Detail({ appointment: a, reload }: { appointment: AppointmentDetail; re
     };
   }, [a.id, edits, a.alarms]);
 
-  const first = preview.alarms[0] ?? a.alarms[0];
-  const blocked = orderError(preview.alarms); // 순서가 뒤집히면 저장을 막음
-  const manualAny = preview.alarms.some(isManualTime);
+  const view = shownPreview(edits, a.edits, savedPreview(a), preview); // 입력을 안 바꿨으면 저장된 알람 시각 (adjust.ts)
+  const first = view.alarms[0] ?? a.alarms[0];
+  const blocked = orderError(view.alarms); // 순서가 뒤집히면 저장을 막음
+  const manualAny = view.alarms.some(isManualTime);
   const anyManual = AXES.some(([axis]) => levels[axis] != null);
-  const travel = edits.travelMinutes ?? preview.autoTravelMinutes;
-  const prepare = edits.prepareMinutes ?? preview.autoPredictedPrepMinutes;
-  const recentLine = preview.prepareSampleCount != null ? prepareRecentLabel(preview.prepareRecent ?? []) : null;
+  const travel = edits.travelMinutes ?? view.autoTravelMinutes;
+  const prepare = edits.prepareMinutes ?? view.autoPredictedPrepMinutes;
+  const recentLine = view.prepareSampleCount != null ? prepareRecentLabel(view.prepareRecent ?? []) : null;
   const margin = a.auto.predictedPrepMinutes - a.beforePrepMinutes - a.prepMinutes;
   const originOptions = [ORIGIN_HOME, ...(places ?? []).map((p) => p.name), edits.origin]
     .filter((name, i, all) => all.indexOf(name) === i)
@@ -146,7 +147,7 @@ function Detail({ appointment: a, reload }: { appointment: AppointmentDetail; re
   // 계산식의 기준 알람 — 그날 첫 일정이면 기상, 아니면 준비. 직접 고른 알람 시각이 있어도 식은 자동 계산 그대로
   const baseKind: AlarmKind = a.withWake ? 'WAKE' : 'PREPARE';
   const base = addMinutes(a.at, -(edits.bufferMinutes + travel + prepare));
-  const picking = pickKind ? preview.alarms.find((x) => x.kind === pickKind) : undefined;
+  const picking = pickKind ? view.alarms.find((x) => x.kind === pickKind) : undefined;
 
   // travelMinutes = 확인 시트에서 사용자가 확인한 어림 이동시간 — 예상 이동에 직접 입력한 값으로 넣어 저장(MANUAL)
   async function apply(travelMinutes?: number) {
@@ -285,7 +286,7 @@ function Detail({ appointment: a, reload }: { appointment: AppointmentDetail; re
         <Stepper
           label="예상 이동"
           value={travel}
-          onChange={(next) => setEdit({ travelMinutes: next === preview.autoTravelMinutes ? null : next })}
+          onChange={(next) => setEdit({ travelMinutes: next === view.autoTravelMinutes ? null : next })}
           min={1}
           max={240}
           step={1}
@@ -293,7 +294,7 @@ function Detail({ appointment: a, reload }: { appointment: AppointmentDetail; re
         />
         <View style={styles.axisDesc}>
           <Text variant="caption" tone="faint">
-            {edits.travelMinutes != null ? MANUAL_SOURCE : preview.travelSource}
+            {edits.travelMinutes != null ? MANUAL_SOURCE : view.travelSource}
           </Text>
           {edits.travelMinutes != null ? (
             <TextLink label="자동으로" accessibilityLabel="예상 이동 자동으로 되돌리기" onPress={() => setEdit({ travelMinutes: null })} />
@@ -302,9 +303,9 @@ function Detail({ appointment: a, reload }: { appointment: AppointmentDetail; re
           )}
         </View>
         {/* 길찾기를 못 한 미리 보기 (실데이터) — 직접 입력한 값이 있으면 문제가 아님 */}
-        {edits.travelMinutes == null && preview.travelProblem ? (
+        {edits.travelMinutes == null && view.travelProblem ? (
           <Text variant="caption" tone="warn" style={styles.note} accessibilityLiveRegion="polite">
-            {TRAVEL_PROBLEM_NOTE[preview.travelProblem]}
+            {TRAVEL_PROBLEM_NOTE[view.travelProblem]}
           </Text>
         ) : null}
       </Card>
@@ -321,7 +322,7 @@ function Detail({ appointment: a, reload }: { appointment: AppointmentDetail; re
         <Stepper
           label="준비 시간"
           value={prepare}
-          onChange={(next) => setEdit({ prepareMinutes: next === preview.autoPredictedPrepMinutes ? null : next })}
+          onChange={(next) => setEdit({ prepareMinutes: next === view.autoPredictedPrepMinutes ? null : next })}
           min={Math.max(5, a.beforePrepMinutes)}
           max={240}
           step={1}
@@ -330,7 +331,7 @@ function Detail({ appointment: a, reload }: { appointment: AppointmentDetail; re
         {edits.prepareMinutes != null ? (
           <View style={styles.axisDesc}>
             <Text variant="caption" tone="faint">
-              직접 고름 · 자동은 {preview.autoPredictedPrepMinutes}분
+              직접 고름 · 자동은 {view.autoPredictedPrepMinutes}분
             </Text>
             <TextLink label="자동으로" accessibilityLabel="준비 시간 자동으로 되돌리기" onPress={() => setEdit({ prepareMinutes: null })} />
           </View>
@@ -356,12 +357,12 @@ function Detail({ appointment: a, reload }: { appointment: AppointmentDetail; re
             ...(a.withWake && a.beforePrepMinutes ? [`준비 알람은 기상 후 준비 전 활동 ${a.beforePrepMinutes}분 뒤`] : []),
             // 준비 시간이 어디서 왔는지 한 줄 — 4건까지 "배우는 중 N/5", 5건부터 "내 기록 기반 N건" (학습 루프 기초 ⑦, 통계 식은 안 보임 D47)
             //   기록으로 맞추는 건 그날 첫 일정(기상 있음)뿐이고, 직접 고른 준비 시간이면 기록 기반이 아니라서 줄을 뺌. 서버가 기록 수를 주기 전(처음 그릴 때)에도 뺌
-            ...(a.withWake && edits.prepareMinutes == null && preview.prepareSampleCount != null ? [`준비 ${prepare}분 · ${prepareSourceLabel(preview.prepareSampleCount)}`] : []),
+            ...(a.withWake && edits.prepareMinutes == null && view.prepareSampleCount != null ? [`준비 ${prepare}분 · ${prepareSourceLabel(view.prepareSampleCount)}`] : []),
             // 그 아래 한 줄 — 최근 기록 값 (학습 루프 기초 ⑦). 위 줄과 같은 조건이고, 기록이 없으면 줄이 없음
             ...(a.withWake && edits.prepareMinutes == null && recentLine ? [recentLine] : []),
           ]}
         />
-        {preview.alarms.map((x, i) => (
+        {view.alarms.map((x, i) => (
           <KeyValueRow
             key={x.kind}
             first={i === 0}
@@ -469,10 +470,10 @@ function Detail({ appointment: a, reload }: { appointment: AppointmentDetail; re
         onClose={() => setPickKind(null)}
         title={pickKind ? `${KIND_LABEL[pickKind]} 시각` : ''}
         value={picking?.at ?? a.at}
-        onChange={(to) => pickKind && setEdit({ times: manualTimes(moveAlarm(preview.alarms, pickKind, to)) })}
+        onChange={(to) => pickKind && setEdit({ times: manualTimes(moveAlarm(view.alarms, pickKind, to)) })}
         autoAt={picking && isManualTime(picking) ? picking.auto : undefined}
-        onReset={() => pickKind && setEdit({ times: manualTimes(resetAlarm(preview.alarms, pickKind)) })}
-        note={pickKind === 'WAKE' && preview.alarms.some((x) => x.kind === 'PREPARE') ? '준비 알람도 같은 만큼 같이 움직여요' : undefined}
+        onReset={() => pickKind && setEdit({ times: manualTimes(resetAlarm(view.alarms, pickKind)) })}
+        note={pickKind === 'WAKE' && view.alarms.some((x) => x.kind === 'PREPARE') ? '준비 알람도 같은 만큼 같이 움직여요' : undefined}
         error={blocked ?? undefined}
       />
 

@@ -2603,6 +2603,262 @@ await check('프로필 온보딩 칸: 공개 함수(find_profile_by_handle · ge
   return cols.length === 2 && leaked.length === 0 ? true : { cols, leaked };
 });
 
+
+// ---------------------------------------------------------------------
+// 개발용 [내 시험 데이터 지우기] — public.dev_reset_my_data() (20261030220000_dev_reset_my_data.sql)
+// ---------------------------------------------------------------------
+// 남의 행에 닿지 않는 것이 최우선이라 전용 사용자 둘(RA = 지우는 사람, RB = 남)을 새로 만들어 앞 검사의 데이터와 섞이지 않게 함
+// 데이터는 슈퍼유저로 바로 넣음 (RLS가 아니라 함수가 남의 행을 건드리는지 보는 검사). 부르는 것만 RA · RB 로그인으로
+
+const RA = 'd4d4d4d4-d4d4-4d4d-8d4d-d4d4d4d4d4d4';
+const RB = 'e5e5e5e5-e5e5-4e5e-8e5e-e5e5e5e5e5e5';
+const RSER = 'f6f6f6f6-f6f6-4f6f-8f6f-f6f6f6f6f6f6';   // RA의 혼자인 반복 묶음
+const RS = {};   // 만든 행 id 모음
+
+// 일정 하나 + 참여자별 참여 행 · 기상/출발 알람 · 기상 알람 울림 기록
+const mkAppt = async (creator, title, { group = null, series = null, on = null, who = [creator] } = {}) => {
+  const [a] = await q(`insert into public.appointments (creator_id, title, appointment_at, dest_name, group_id, series_id, occurrence_on)
+                       values ($1, $2, now() + interval '1 day', '세종대학교', $3, $4, $5) returning appointment_id`, [creator, title, group, series, on]);
+  const out = { appt: a.appointment_id, parts: {}, wake: {}, alarms: {} };
+  for (const u of who) {
+    const [p] = await q(`insert into public.appointment_participants (appointment_id, user_id) values ($1, $2) returning participant_id`, [a.appointment_id, u]);
+    const [w] = await q(`insert into public.alarms (participant_id, user_id, alarm_type, scheduled_at) values ($1, $2, 'WAKE', now() + interval '20 hours') returning alarm_id`, [p.participant_id, u]);
+    const [d] = await q(`insert into public.alarms (participant_id, user_id, alarm_type, scheduled_at) values ($1, $2, 'DEPARTURE', now() + interval '23 hours') returning alarm_id`, [p.participant_id, u]);
+    await q(`insert into public.alarm_events (alarm_id, user_id, event_type) values ($1, $2, 'TRIGGERED')`, [w.alarm_id, u]);
+    out.parts[u] = p.participant_id;
+    out.wake[u] = w.alarm_id;
+    out.alarms[u] = [w.alarm_id, d.alarm_id];
+  }
+  return out;
+};
+
+// 사용자 한 명이 가진 줄을 표별로 지문(md5)으로 — 앞뒤가 같으면 한 줄도 안 바뀐 것 (줄 수 + 내용)
+// 지우개 목록 — public 표 중 사용자 칸이 있는 것을 전부 "지움/되돌림" 아니면 "둠"으로 나눠 적음 (migration 머리 주석의 표와 같은 이름)
+//   RESET_DELETES = dev_reset_my_data()가 내 줄을 지우거나(profiles는 제자리에서 되돌림) 하는 표, RESET_KEEPS = 안 건드리는 표
+//   새 표가 생기면 함수를 고치고 여기에 적어야 아래 가드 항목이 통과함
+const RESET_DELETES = ['alarm_events', 'alarm_suggestions', 'alarms', 'appointment_participants', 'appointments', 'conversation_sessions',
+                       'daily_journals', 'daily_records', 'profiles', 'user_edit_logs'];
+const RESET_KEEPS = ['ai_calls', 'friends', 'group_members', 'groups', 'push_tokens', 'roll_attempts', 'routines', 'sharing_permissions', 'todos', 'user_places', 'user_questions'];
+const MINE = {
+  appointments: `select * from public.appointments where creator_id = $1`,
+  appointment_participants: `select * from public.appointment_participants where user_id = $1`,
+  alarms: `select * from public.alarms where user_id = $1`,
+  alarm_events: `select * from public.alarm_events where user_id = $1`,
+  alarm_suggestions: `select * from public.alarm_suggestions where user_id = $1`,
+  daily_records: `select * from public.daily_records where user_id = $1`,
+  daily_journals: `select * from public.daily_journals where user_id = $1`,
+  conversation_sessions: `select * from public.conversation_sessions where user_id = $1`,
+  user_edit_logs: `select * from public.user_edit_logs where user_id = $1`,
+  todos: `select * from public.todos where user_id = $1`,
+  routines: `select * from public.routines where user_id = $1`,
+  ai_calls: `select * from public.ai_calls where user_id = $1`,
+  user_questions: `select * from public.user_questions where user_id = $1`,
+  push_tokens: `select * from public.push_tokens where user_id = $1`,
+  roll_attempts: `select * from public.roll_attempts where user_id = $1`,
+  user_places: `select * from public.user_places where user_id = $1`,
+  profiles: `select * from public.profiles where user_id = $1`,
+  friends: `select * from public.friends where $1 in (requester_id, addressee_id)`,
+  group_members: `select * from public.group_members where user_id = $1`,
+  sharing_permissions: `select * from public.sharing_permissions where $1 in (owner_id, grantee_id)`,
+  groups: `select * from public.groups where owner_id = $1`,
+};
+await check('내 시험 데이터 지우기 가드: 사용자 칸(user_id · creator_id · owner_id · requester_id · addressee_id · grantee_id)이 있는 public 표는 모두 지움/둠 목록에 있음 (새 표를 더하면 실패)', async () => {
+  await su();
+  const known = new Set([...RESET_DELETES, ...RESET_KEEPS]);
+  const tables = (await q(`select distinct c.table_name from information_schema.columns c
+                           join information_schema.tables t on t.table_schema = c.table_schema and t.table_name = c.table_name and t.table_type = 'BASE TABLE'
+                           where c.table_schema = 'public'
+                             and c.column_name in ('user_id', 'creator_id', 'owner_id', 'requester_id', 'addressee_id', 'grantee_id')
+                           order by 1`)).map((x) => x.table_name);
+  const missing = tables.filter((n) => !known.has(n));
+  const stale = [...known].filter((n) => !tables.includes(n));   // 목록에만 있고 DB에는 없는 이름
+  const noSnap = [...known].filter((n) => !(n in MINE));   // MINE 지문 맵과 이름이 같아야 함
+  const mineExtra = Object.keys(MINE).filter((n) => !known.has(n));
+  if (missing.length) return `새 표 ${missing.join(', ')}이 dev_reset_my_data의 지움/둠 목록에 없음 — 함수와 목록에 추가하세요`;
+  return stale.length === 0 && mineExtra.length === 0 && noSnap.length === 0 ? true : { stale, mineExtra, noSnap };
+});
+const snapOf = async (u, only = Object.keys(MINE)) => {
+  await su();
+  const out = {};
+  for (const k of only) {
+    const [r] = await q(`select md5(coalesce(string_agg(t::text, '|' order by t::text), '')) as h, count(*)::int as n from (${MINE[k]}) t`, [u]);
+    out[k] = `${r.n}:${r.h}`;
+  }
+  return out;
+};
+const diffSnap = (a, b) => Object.keys(a).filter((k) => a[k] !== b[k]);
+const countOf = async (sql, params = []) => (await q(`select count(*)::int as n from (${sql}) t`, params))[0].n;
+
+await check('내 시험 데이터 지우기 준비: RA(지우는 사람) · RB(남)에 일정 · 알람 · 기록 · 대화 · 제안 · 일기 · 친구 · 그룹 · 푸시 토큰 · ai_calls를 만듦', async () => {
+  await as(null, 'supabase_auth_admin');
+  await q(`insert into auth.users (id, email, raw_user_meta_data) values ($1, 'ra@example.com', '{"name":"지우는사람"}'), ($2, 'rb@example.com', '{"name":"남"}')`, [RA, RB]);
+  await su();
+  // 둘 다 온보딩을 끝내고 값을 바꿔 둔 상태
+  for (const [u, handle] of [[RA, 'reset_a'], [RB, 'reset_b']]) {
+    await q(`update public.profiles set handle = $2, home_name = '우리집', home_lat = 37.5, home_lng = 127.0, home_radius_m = 250,
+                    default_prepare_minutes = 90, default_buffer_minutes = 20, default_transport = 'BUS', intensity_offset = 1,
+                    onboarded_at = now(), wake_sensitivity = 'HEAVY', wake_margin = 'LOOSE', privacy_agreed_at = now(), privacy_version = 2,
+                    preferred_voice_tone = 'CALM', preferred_sound_key = 'theme_calm' where user_id = $1`, [u, handle]);
+  }
+  // 친구(양쪽 권한) · 그룹 · 푸시 토큰
+  const [{ friend_id: fr }] = await q(`insert into public.friends (requester_id, addressee_id, status, accepted_at) values ($1, $2, 'ACCEPTED', now()) returning friend_id`, [RA, RB]);
+  await q(`insert into public.sharing_permissions (owner_id, grantee_id, source_type, source_id, can_view_alarm) values ($1, $2, 'FRIEND', $3, true), ($2, $1, 'FRIEND', $3, true)`, [RA, RB, fr]);
+  [{ group_id: RS.g }] = await q(`insert into public.groups (group_name, owner_id) values ('지우기 시험 그룹', $1) returning group_id`, [RA]);
+  await q(`insert into public.group_members (group_id, user_id, invite_status, joined_at) values ($1, $2, 'JOINED', now())`, [RS.g, RB]);
+  await q(`insert into public.push_tokens (user_id, token) values ($1, 'reset-token-a'), ($2, 'reset-token-b')`, [RA, RB]);
+
+  // 일정 — RA: 혼자(개인) · 혼자인 반복 2회차 · RB와 함께한 공동 · 공동이지만 RA 혼자(RB의 할 일 / 고친 값 기록이 가리킴)
+  RS.solo = await mkAppt(RA, 'RA 혼자', {});
+  RS.rec1 = await mkAppt(RA, 'RA 반복', { series: RSER, on: '2026-11-02' });
+  RS.rec2 = await mkAppt(RA, 'RA 반복', { series: RSER, on: '2026-11-03' });
+  RS.shared = await mkAppt(RA, 'RA가 만든 공동', { group: RS.g, who: [RA, RB] });
+  RS.mixed1 = await mkAppt(RA, 'RA 혼자지만 RB의 할 일이 걸림', { group: RS.g });
+  RS.mixed2 = await mkAppt(RA, 'RA 혼자지만 RB의 고친 값 기록이 걸림', { group: RS.g });
+  // RB는 같은 그룹 멤버일 뿐 참여 행 · 할 일이 없음 — 그래도 appointments_select가 RB에게 보여 주는 그룹 일정 (A가 만들고 A만 참여)
+  RS.groupOnly = await mkAppt(RA, 'RA가 만들고 RA만 참여한 그룹 일정', { group: RS.g });
+  // RB: 혼자 · RB가 만들고 RA가 참여한 공동
+  RS.soloB = await mkAppt(RB, 'RB 혼자', {});
+  RS.fromB = await mkAppt(RB, 'RB가 만든 공동', { group: RS.g, who: [RB, RA] });
+
+  for (const u of [RA, RB]) {
+    // 일정 없는 알람 · 루틴 + 루틴 알람
+    await q(`insert into public.alarms (user_id, alarm_type, scheduled_at) values ($1, 'WAKE', now() + interval '2 days')`, [u]);
+    const [{ routine_id: rt }] = await q(`insert into public.routines (user_id, title) values ($1, '아침 루틴') returning routine_id`, [u]);
+    await q(`insert into public.alarms (routine_id, step_order, user_id, alarm_type, scheduled_at) values ($1, 1, $2, 'ROUTINE', now() + interval '2 days')`, [rt, u]);
+    // 대화 · 일기 · 기록 · 제안 · 고친 값 기록 · 할 일 · 서버 기록(ai_calls · 질문) · 재시도 기록
+    const [{ session_id: sid }] = await q(`insert into public.conversation_sessions (user_id, session_type, turns, server_state)
+                                           values ($1, 'ANYTIME', '[{"role":"user","text":"안녕"}]', '{"utterances":1}') returning session_id`, [u]);
+    await q(`insert into public.daily_journals (user_id, record_date, source_session_id, ai_summary) values ($1, ${TODAY}, $2, '요약')`, [u, sid]);
+    await q(`insert into public.daily_records (user_id, record_date) values ($1, ${TODAY})`, [u]);
+    const own = u === RA ? RS.solo : RS.soloB;
+    const [{ event_id }] = await q(`select event_id from public.alarm_events where alarm_id = $1`, [own.wake[u]]);
+    await q(`insert into public.alarm_suggestions (user_id, target_alarm_id, source_event_id, suggestion_type, suggested_value) values ($1, $2, $3, 'INTENSITY', 'STRONG')`, [u, own.wake[u], event_id]);
+    await q(`insert into public.user_edit_logs (user_id, appointment_id, alarm_id, screen, field) values ($1, $2, $3, 'H03', 'buffer_minutes')`, [u, own.appt, own.wake[u]]);
+    await q(`insert into public.todos (user_id, appointment_id, source_session_id, title) values ($1, $2, $3, '준비물')`, [u, own.appt, sid]);
+    await insCall(u, { session_id: sid });
+    await insQ(u, { session_id: sid });
+    await q(`insert into public.roll_attempts (user_id, series_id, occurrence_on, next_try_at) values ($1, gen_random_uuid(), ${TODAY}, now())`, [u]);
+  }
+  // RB의 행이 RA의 공동 일정을 가리킴 — 일정을 지우면 FK(set null)로 이 남의 행이 고쳐지므로 RA 혼자여도 지우면 안 됨
+  await q(`insert into public.todos (user_id, appointment_id, title) values ($1, $2, 'RB가 RA 일정에 단 할 일')`, [RB, RS.mixed1.appt]);
+  await q(`insert into public.user_edit_logs (user_id, appointment_id, screen, field) values ($1, $2, 'H03', 'buffer_minutes')`, [RB, RS.mixed2.appt]);
+  const mine = await countOf(`select 1 from public.appointments where creator_id = $1`, [RA]);
+  const parts = await countOf(`select 1 from public.appointment_participants where user_id = $1`, [RA]);
+  return mine === 7 && parts === 8 ? true : { mine, parts };
+});
+
+// 지우기 전 기준값 — RB(전부)와 RA가 둔다고 한 것들
+let beforeB, beforeAKept, resetResult;
+await check('내 시험 데이터 지우기: RA가 부르면 지운 줄 수를 jsonb로 돌려줌', async () => {
+  beforeB = await snapOf(RB);
+  beforeAKept = await snapOf(RA, ['push_tokens', 'friends', 'sharing_permissions', 'groups', 'group_members', 'routines', 'user_questions']);
+  beforeAKept.callIds = (await q(`select string_agg(call_id::text, ',' order by call_id) as ids from public.ai_calls where user_id = $1`, [RA]))[0].ids;
+  beforeAKept.sharedRows = (await q(`select md5(string_agg(a::text, '|' order by a.appointment_id::text)) as h from public.appointments a where appointment_id = any($1::uuid[])`,
+    [[RS.shared.appt, RS.mixed1.appt, RS.mixed2.appt, RS.groupOnly.appt, RS.fromB.appt]]))[0].h;
+  await as(RA);
+  [{ r: resetResult }] = await q(`select public.dev_reset_my_data() as r`);
+  const expected = { appointments: 3, appointments_kept: 4, participants: 8, alarms: 18, alarm_events: 8, alarm_suggestions: 1, daily_records: 1,
+                     daily_journals: 1, conversation_sessions: 1, user_edit_logs: 1, profile: 1 };
+  return JSON.stringify(Object.entries(resetResult).sort()) === JSON.stringify(Object.entries(expected).sort()) ? true : resetResult;
+});
+await check('내 시험 데이터 지우기 ①: RA의 혼자 일정(반복 2회차 포함) · 알람 · 울림 기록 · 기록 · 일기 · 대화 · 제안 · 고친 값 기록이 사라짐', async () => {
+  await su();
+  const left = {};
+  for (const k of ['appointment_participants', 'alarms', 'alarm_events', 'alarm_suggestions', 'daily_records', 'daily_journals', 'conversation_sessions', 'user_edit_logs']) {
+    left[k] = await countOf(MINE[k], [RA]);
+  }
+  const gone = await countOf(`select 1 from public.appointments where appointment_id = any($1::uuid[])`, [[RS.solo.appt, RS.rec1.appt, RS.rec2.appt]]);
+  const series = await countOf(`select 1 from public.appointments where series_id = $1`, [RSER]);
+  const noneLeft = Object.values(left).every((n) => n === 0);
+  return gone === 0 && series === 0 && noneLeft ? true : { gone, series, left };
+});
+await check('내 시험 데이터 지우기 ②: 다른 사람이 참여 중인 공동 일정은 남고 RA의 참여 행 · 알람만 사라짐 (RB의 참여 행 · 알람 · 울림 기록 그대로)', async () => {
+  await su();
+  const appts = await q(`select appointment_id from public.appointments where appointment_id = any($1::uuid[])`, [[RS.shared.appt, RS.fromB.appt]]);
+  const aParts = await countOf(`select 1 from public.appointment_participants where user_id = $1 and appointment_id = any($2::uuid[])`, [RA, [RS.shared.appt, RS.fromB.appt]]);
+  const aAlarms = await countOf(`select 1 from public.alarms where alarm_id = any($1::uuid[])`, [[...RS.shared.alarms[RA], ...RS.fromB.alarms[RA]]]);
+  const bParts = await q(`select participant_id from public.appointment_participants where user_id = $1 and appointment_id = any($2::uuid[]) order by 1`, [RB, [RS.shared.appt, RS.fromB.appt]]);
+  const bAlarms = await countOf(`select 1 from public.alarms where alarm_id = any($1::uuid[])`, [[...RS.shared.alarms[RB], ...RS.fromB.alarms[RB]]]);
+  const bEvents = await countOf(`select 1 from public.alarm_events where alarm_id = any($1::uuid[])`, [[RS.shared.wake[RB], RS.fromB.wake[RB]]]);
+  return appts.length === 2 && aParts === 0 && aAlarms === 0 && bParts.length === 2 && bAlarms === 4 && bEvents === 2 ? true : { appts, aParts, aAlarms, bParts, bAlarms, bEvents };
+});
+await check('내 시험 데이터 지우기 ②-2: RB가 같은 그룹 멤버일 뿐 참여 행 · 할 일이 없는 그룹 일정(RA가 만들고 RA만 참여)은 RA가 지워도 남고 RB가 그대로 조회함 (RA의 참여 행 · 알람만 사라짐)', async () => {
+  await su();
+  const [row] = await q(`select group_id, creator_id, title from public.appointments where appointment_id = $1`, [RS.groupOnly.appt]);
+  const aParts = await countOf(`select 1 from public.appointment_participants where appointment_id = $1`, [RS.groupOnly.appt]);
+  const aAlarms = await countOf(`select 1 from public.alarms where alarm_id = any($1::uuid[])`, [RS.groupOnly.alarms[RA]]);
+  const bLinks = await countOf(`select 1 from public.todos where appointment_id = $1 union all select 1 from public.user_edit_logs where appointment_id = $1`, [RS.groupOnly.appt]);
+  await as(RB);
+  const seen = await q(`select appointment_id, title from public.appointments where appointment_id = $1`, [RS.groupOnly.appt]);   // RLS를 거친 RB의 조회
+  return row && row.group_id === RS.g && row.creator_id === RA && aParts === 0 && aAlarms === 0 && bLinks === 0 && seen.length === 1 && seen[0].title === row.title
+    ? true : { row, aParts, aAlarms, bLinks, seen };
+});
+await check('내 시험 데이터 지우기 ③: RB의 모든 줄이 한 줄도 안 바뀜 (표별 줄 수 · 내용 지문) · RB가 만든 일정은 그대로 · RB의 할 일 · 고친 값 기록이 걸린 RA 일정도 남음', async () => {
+  const afterB = await snapOf(RB);
+  const changed = diffSnap(beforeB, afterB);
+  const guarded = await countOf(`select 1 from public.appointments where appointment_id = any($1::uuid[])`, [[RS.mixed1.appt, RS.mixed2.appt, RS.soloB.appt, RS.fromB.appt]]);
+  return changed.length === 0 && guarded === 4 ? true : { changed, guarded };
+});
+await check('내 시험 데이터 지우기 ④: 친구 · 공유 권한 · 그룹 · 푸시 토큰 · 루틴 · ai_calls · 질문 기록 · 공동 일정 행은 그대로 (대화를 지워도 ai_calls는 줄이 남고 session_id만 NULL)', async () => {
+  const keep = ['push_tokens', 'friends', 'sharing_permissions', 'groups', 'group_members', 'routines', 'user_questions'];
+  const after = await snapOf(RA, keep);
+  // user_questions도 대화를 지우면 session_id가 NULL이 되므로 지문이 아니라 줄 수로 봄
+  const changed = keep.filter((k) => (k === 'user_questions' ? after[k].split(':')[0] !== beforeAKept[k].split(':')[0] : after[k] !== beforeAKept[k]));
+  const calls = await q(`select string_agg(call_id::text, ',' order by call_id) as ids, count(*)::int as n, bool_and(session_id is null) as nulled from public.ai_calls where user_id = $1`, [RA]);
+  const shared = (await q(`select md5(string_agg(a::text, '|' order by a.appointment_id::text)) as h from public.appointments a where appointment_id = any($1::uuid[])`,
+    [[RS.shared.appt, RS.mixed1.appt, RS.mixed2.appt, RS.groupOnly.appt, RS.fromB.appt]]))[0].h;
+  const todos = await q(`select count(*)::int as n, bool_and(appointment_id is null) as cut from public.todos where user_id = $1`, [RA]);   // 둔 표 — 지운 일정에 달린 연결만 끊김
+  return changed.length === 0 && calls[0].ids === beforeAKept.callIds && calls[0].n === 1 && calls[0].nulled === true
+    && shared === beforeAKept.sharedRows && todos[0].n === 1 && todos[0].cut === true
+    ? true : { changed, calls, sameShared: shared === beforeAKept.sharedRows, todos };
+});
+await check('내 시험 데이터 지우기 ⑤: RA의 프로필이 온보딩 전 기본값으로 (handle · nickname · 사진 · 시간대 · 선호 소리 · 말투는 그대로)', async () => {
+  await su();
+  const [p] = await q(`select * from public.profiles where user_id = $1`, [RA]);
+  const ok = p.onboarded_at === null && p.wake_sensitivity === 'NORMAL' && p.wake_margin === 'NORMAL'
+    && p.home_name === null && p.home_lat === null && p.home_lng === null && p.home_radius_m === null
+    && p.default_prepare_minutes === 60 && p.default_buffer_minutes === 10 && p.default_transport === 'TRANSIT' && p.intensity_offset === 0
+    && p.privacy_agreed_at === null && p.privacy_version === null
+    && p.handle === 'reset_a' && p.nickname === '지우는사람' && p.timezone === 'Asia/Seoul'
+    && p.preferred_voice_tone === 'CALM' && p.preferred_sound_key === 'theme_calm';
+  return ok ? true : p;
+});
+await check('내 시험 데이터 지우기 ⑥: anon은 권한 오류 · 로그인 정보가 없으면 예외 · authenticated만 실행 가능 · SECURITY DEFINER', async () => {
+  await as(null, 'anon');
+  const anon = await expectErr(() => q(`select public.dev_reset_my_data()`), /permission denied/);
+  await as(null);   // authenticated 역할이지만 auth.uid()가 null
+  const noUid = await expectErr(() => q(`select public.dev_reset_my_data()`), /로그인이 필요함/);
+  await svc();      // 서버 키도 auth.uid()가 없어 같은 예외 (남의 id를 넘길 인자가 없음)
+  const svcNoUid = await expectErr(() => q(`select public.dev_reset_my_data()`), /로그인이 필요함/);
+  await su();
+  const [fn] = await q(`select p.prosecdef, p.proconfig, has_function_privilege('authenticated', p.oid, 'execute') as auth_x,
+                               has_function_privilege('anon', p.oid, 'execute') as anon_x, has_function_privilege('public', p.oid, 'execute') as public_x,
+                               pg_get_function_arguments(p.oid) as args
+                        from pg_proc p where p.oid = 'public.dev_reset_my_data()'::regprocedure`);
+  return anon === true && noUid === true && svcNoUid === true && fn.prosecdef === true && fn.auth_x === true && fn.anon_x === false && fn.public_x === false && fn.args === ''
+    && fn.proconfig.some((c) => c === 'search_path=""' || c === 'search_path=')
+    ? true : { anon, noUid, svcNoUid, fn };
+});
+await check('내 시험 데이터 지우기 ⑦: 두 번 불러도 오류 없음 (멱등) — 지운 줄은 0이고 남긴 일정 · RB의 줄은 그대로', async () => {
+  await as(RA);
+  const [{ r }] = await q(`select public.dev_reset_my_data() as r`);
+  const afterB = await snapOf(RB);
+  const zeros = ['appointments', 'participants', 'alarms', 'alarm_events', 'alarm_suggestions', 'daily_records', 'daily_journals', 'conversation_sessions', 'user_edit_logs']
+    .every((k) => r[k] === 0);
+  return zeros && r.appointments_kept === 4 && r.profile === 1 && diffSnap(beforeB, afterB).length === 0 ? true : { r, changed: diffSnap(beforeB, afterB) };
+});
+await check('내 시험 데이터 지우기 ⑧: 반대로 RB가 지워도 RA의 남은 줄은 한 줄도 안 바뀜 (RB 혼자인 개인 일정만 지워지고 RB가 만든 그룹 일정은 남음)', async () => {
+  const beforeA = await snapOf(RA);
+  await as(RB);
+  const [{ r }] = await q(`select public.dev_reset_my_data() as r`);
+  const afterA = await snapOf(RA);
+  const changed = diffSnap(beforeA, afterA);
+  const aKept = await countOf(`select 1 from public.appointments where appointment_id = any($1::uuid[])`, [[RS.shared.appt, RS.mixed1.appt, RS.mixed2.appt, RS.groupOnly.appt]]);
+  const bGone = await countOf(`select 1 from public.appointments where appointment_id = $1`, [RS.soloB.appt]);
+  const bGroupKept = await countOf(`select 1 from public.appointments where appointment_id = $1`, [RS.fromB.appt]);   // 그룹 일정은 RB 혼자여도 안 지움
+  return changed.length === 0 && aKept === 4 && bGone === 0 && bGroupKept === 1 && r.appointments === 1 && r.appointments_kept === 1 ? true : { changed, aKept, bGone, bGroupKept, r };
+});
+
 // ---- 자주 가는 곳 user_places (지도에서 위치 고르기 ②, 헤드 설계 10/30 · Q13 · D59) ----------
 
 const PL1 = 'a1a1a1a1-a1a1-4a1a-8a1a-a1a1a1a1a1a1';   // 자주 가는 곳 시험 (친구 · 그룹으로 엮은 두 사람)

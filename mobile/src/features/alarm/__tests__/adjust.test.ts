@@ -3,8 +3,8 @@ import { describe, expect, it } from '@jest/globals';
 import { formatTime } from '@/lib/format';
 import { kst } from '@/mocks/data';
 
-import { adjustEstimate, autoTime, isManualTime, manualTimes, moveAlarm, orderError, resetAlarm, sameEdits, timeInputsChanged } from '../adjust';
-import type { AlarmEdits, AlarmKind, AlarmTime, Estimate } from '../types';
+import { adjustEstimate, autoTime, isManualTime, manualTimes, moveAlarm, orderError, resetAlarm, sameEdits, shownPreview, timeInputsChanged } from '../adjust';
+import type { AlarmEdits, AlarmKind, AlarmPreview, AlarmTime, Estimate } from '../types';
 
 const at = (minutes: number) => kst(22, minutes);
 const alarm = (kind: AlarmKind, minutes: number): AlarmTime => ({ id: `a1:${kind}`, kind, at: at(minutes), enabled: true });
@@ -114,5 +114,23 @@ describe('H03 초안 비교', () => {
     expect(sameEdits({ ...base, times: { WAKE: at(450) } }, { ...base, times: { WAKE: at(450) } })).toBe(true);
     expect(sameEdits({ ...base, times: { WAKE: at(450) } }, { ...base, times: { WAKE: at(451) } })).toBe(false);
     expect(sameEdits(base, { ...base, times: { PREPARE: at(500) } })).toBe(false);
+  });
+});
+
+describe('H03에 보일 알람 — 입력을 안 바꾸면 저장된 값', () => {
+  const edits: AlarmEdits = { bufferMinutes: 10, origin: '집', transport: 'TRANSIT', travelMinutes: null, prepareMinutes: null, times: {} };
+  const preview = (alarms: AlarmTime[], extra = {}): AlarmPreview => ({ alarms, travelMinutes: 40, travelSource: '', autoTravelMinutes: 40, predictedPrepMinutes: 30, autoPredictedPrepMinutes: 30, ...extra });
+  const saved = preview(chain());
+  const recalculated = preview([alarm('WAKE', 497), alarm('PREPARE', 527), alarm('DEPARTURE', 540), alarm('ARRIVE', 590)], { prepareSampleCount: 6 });
+
+  it('입력을 안 바꿨으면 다시 계산한 값이 달라도 저장된 시각을 보이고, 기록 기반 줄만 다시 계산한 값에서 가져옴', () => {
+    const shown = shownPreview(edits, edits, saved, recalculated);
+    expect(times(shown.alarms)).toEqual(times(chain()));
+    expect(shown.prepareSampleCount).toBe(6);
+  });
+
+  it('입력을 바꾸면 다시 계산한 값을 보임', () => {
+    expect(shownPreview({ ...edits, bufferMinutes: 5 }, edits, saved, recalculated)).toBe(recalculated);
+    expect(shownPreview({ ...edits, times: { WAKE: at(450) } }, edits, saved, recalculated)).toBe(recalculated);
   });
 });
