@@ -37,6 +37,7 @@ const writes = () => mockCalls.filter((c) => c.op !== 'select');
 
 type Source = 'BUTTON' | 'MANUAL' | 'LOCATION' | null;
 const ALARMS = [
+  { alarm_id: 'al-wake', alarm_type: 'WAKE', scheduled_at: iso('08:00') },
   { alarm_id: 'al-dep', alarm_type: 'DEPARTURE', scheduled_at: iso('08:50') },
   { alarm_id: 'al-arr', alarm_type: 'ARRIVE', scheduled_at: iso('09:50') },
 ];

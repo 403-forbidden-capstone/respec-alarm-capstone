@@ -144,6 +144,14 @@ describe('준비 실측 (prepareMinutesOf, #41 · 7장 B) — 출발 − max(실
     expect(prepareMinutesOf(at('08:00'), null, at('08:00'))).toBeNull();
   });
 
+  it('기록 범위(10~240분) 밖이면 null — 저녁 일정의 560분 · 250분 · 9분은 저장하지 않음 (#329)', () => {
+    expect(prepareMinutesOf(at('20:00'), null, at('10:40'))).toBeNull(); // 560분
+    expect(prepareMinutesOf(at('12:10'), null, at('08:00'))).toBeNull(); // 250분
+    expect(prepareMinutesOf(at('08:09'), null, at('08:00'))).toBeNull(); // 9분
+    expect(prepareMinutesOf(at('08:10'), null, at('08:00'))).toBe(10);
+    expect(prepareMinutesOf(at('12:00'), null, at('08:00'))).toBe(240);
+  });
+
   it('이미 값이 있으면 덮지 않음, 단 이 참여 조건의 이전 출발로 셈한 값이면 다시 씀', () => {
     expect(mayWritePrepare(null, null)).toBe(true);
     expect(mayWritePrepare(60, null)).toBe(false);
@@ -314,7 +322,7 @@ describe('DB에 쓰기 (recordParticipantTimes)', () => {
     });
 
     it('위치 출발 위에 더 늦은 위치 출발 — 귀가 뒤 다시 나간 출발로 바꿈 (7.13.7 약속 전 마지막 출발), 읽은 값 그대로일 때만', async () => {
-      setup({ participant: participantRow({ alarms: ALARMS, departed_at: iso('08:20'), departed_source: 'LOCATION' }), record: { record_id: 'r1', wake_confirmed_at: null, actual_prepare_minutes: 20 } });
+      setup({ participant: participantRow({ alarms: [{ alarm_id: 'al-wake', alarm_type: 'WAKE', scheduled_at: iso('08:00') }, ...ALARMS], departed_at: iso('08:20'), departed_source: 'LOCATION' }), record: { record_id: 'r1', wake_confirmed_at: null, actual_prepare_minutes: 20 } });
       const result = await run({ departedAt: at('08:50'), source: 'LOCATION' });
       expect(result).toMatchObject({ departed: 'override', prepareMinutes: 50 });
       const [write] = only('appointment_participants', 'update');
@@ -581,6 +589,34 @@ describe('DB에 쓰기 (recordParticipantTimes)', () => {
   });
 
   describe('준비 실측 (daily_records.actual_prepare_minutes)', () => {
+    it('이 일정 사슬에 기상 알람이 없으면(저녁 규칙 · 직접 끔) 준비 실측을 쓰지 않음 — 그날 다른 기상 알람이 있어도 (#329)', async () => {
+      setup({ participant: participantRow({ alarms: ALARMS }), record: null });
+      const result = await run({ departedAt: at('09:00'), source: 'BUTTON' });
+      expect(result.prepareMinutes).toBeNull();
+      expect(only('daily_records', 'insert')).toEqual([]);
+      expect(only('daily_records', 'update')).toEqual([]);
+    });
+
+    it('기상 알람이 있는 오전 일정은 그대로 씀', async () => {
+      setup({ participant: participantRow({ alarms: [{ alarm_id: 'al-wake', alarm_type: 'WAKE', scheduled_at: iso('08:00') }, ...ALARMS] }), record: null });
+      expect((await run({ departedAt: at('09:00'), source: 'BUTTON' })).prepareMinutes).toBe(60);
+    });
+
+    it('귀가 뒤 재출발이 기록 범위 밖(250분)이면 앞 출발로 셈한 옛 값을 비움', async () => {
+      setup({ participant: participantRow({ departed_at: iso('09:00'), departed_source: 'LOCATION' }), record: { record_id: 'r1', wake_confirmed_at: null, actual_prepare_minutes: 60 } });
+      const result = await run({ departedAt: at('12:10'), source: 'LOCATION' });
+      expect(result).toMatchObject({ departed: 'override', prepareMinutes: null });
+      const [clear] = only('daily_records', 'update');
+      expect(clear.payload).toEqual({ actual_prepare_minutes: null });
+      expect(filterArgs(clear, 'eq', 'actual_prepare_minutes')).toEqual([60]);
+    });
+
+    it('기록 범위 밖(250분)이면 저장하지 않음', async () => {
+      setup({ record: null });
+      expect((await run({ departedAt: at('12:10'), source: 'BUTTON' })).prepareMinutes).toBeNull();
+      expect(only('daily_records', 'insert')).toEqual([]);
+    });
+
     it('출발이 들어오면 출발 − max(실제 기상, 예정 기상) — 그날 행이 없으면 만듦 (출처 LOCATION이어도)', async () => {
       setup({ record: null });
       const result = await run({ departedAt: at('09:00'), source: 'LOCATION' });
@@ -740,7 +776,7 @@ describe('DB에 쓰기 (recordParticipantTimes)', () => {
     it('귀가 뒤 재출발(override) 직후 위치 기록이 던져도 준비 실측 · 이동시간은 새 출발 기준으로 이미 들어가 있고, 같은 입력으로 다시 부르면 위치 기록만 남음', async () => {
       // 위치 출발 8:20 · 위치 도착 있음 · 준비 실측 20분 · 이동시간 있음 → 더 늦은 위치 출발 8:50으로 바뀜 (예정 기상 8:00 → 준비 50분, 8:50 → 9:52 = 62 + 4)
       const departedRow = (patch: { departed_at: string; actual_travel_minutes: number | null }) =>
-        participantRow({ dest: SEJONG, alarms: ALARMS, departed_source: 'LOCATION', arrived_at: isoMs(min(-8)), arrived_source: 'LOCATION', ...patch });
+        participantRow({ dest: SEJONG, alarms: [{ alarm_id: 'al-wake', alarm_type: 'WAKE', scheduled_at: iso('08:00') }, ...ALARMS], departed_source: 'LOCATION', arrived_at: isoMs(min(-8)), arrived_source: 'LOCATION', ...patch });
       setup({ participant: departedRow({ departed_at: iso('08:20'), actual_travel_minutes: 94 }), record: { record_id: 'r1', wake_confirmed_at: null, actual_prepare_minutes: 20 } });
       mockRoutes['alarm_events:upsert'] = respond(() => ({ error: { code: '', message: 'event failed' } }));
       await expect(run({ departedAt: at('08:50'), source: 'LOCATION' })).rejects.toMatchObject({ message: 'event failed' });
