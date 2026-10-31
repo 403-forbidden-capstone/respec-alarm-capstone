@@ -15,7 +15,7 @@ import {
 import { manualTimes as sharedManualTimes } from '@shared/calc/chain.ts';
 import type { ChainAlarm } from '@shared/calc/types.ts';
 
-import { KIND_LABEL, type AlarmEdits, type AlarmTime, type Estimate, type RingKind } from './types';
+import { KIND_LABEL, type AlarmEdits, type AlarmPreview, type AlarmTime, type Estimate, type RingKind } from './types';
 
 // 자동으로 계산했다면 이 시각 — 직접 고르지 않았으면 지금 시각
 export const autoTime = (x: AlarmTime): Date => sharedAutoTime(x);
@@ -90,4 +90,10 @@ export function timeInputsChanged(x: AlarmEdits, y: AlarmEdits) {
 
 export function sameEdits(x: AlarmEdits, y: AlarmEdits) {
   return !timeInputsChanged(x, y) && sameTimes(x.times, y.times);
+}
+
+// H03에 보일 알람 — 입력을 안 바꿨으면 저장된 값. 열자마자 다시 계산한 값(길찾기 · 기록이 그새 달라짐)으로 바꾸면 저장된 7:20이 7:37로 보임
+// 다시 계산해야 아는 것(기록 기반 준비 줄 · 길찾기 안내)만 다시 계산한 값에서 가져옴
+export function shownPreview(edits: AlarmEdits, savedEdits: AlarmEdits, saved: AlarmPreview, recalculated: AlarmPreview): AlarmPreview {
+  return sameEdits(edits, savedEdits) ? { ...recalculated, ...saved } : recalculated;
 }
