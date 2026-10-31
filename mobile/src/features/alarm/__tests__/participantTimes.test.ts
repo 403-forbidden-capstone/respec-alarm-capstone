@@ -602,6 +602,15 @@ describe('DB에 쓰기 (recordParticipantTimes)', () => {
       expect((await run({ departedAt: at('09:00'), source: 'BUTTON' })).prepareMinutes).toBe(60);
     });
 
+    it('귀가 뒤 재출발이 기록 범위 밖(250분)이면 앞 출발로 셈한 옛 값을 비움', async () => {
+      setup({ participant: participantRow({ departed_at: iso('09:00'), departed_source: 'LOCATION' }), record: { record_id: 'r1', wake_confirmed_at: null, actual_prepare_minutes: 60 } });
+      const result = await run({ departedAt: at('12:10'), source: 'LOCATION' });
+      expect(result).toMatchObject({ departed: 'override', prepareMinutes: null });
+      const [clear] = only('daily_records', 'update');
+      expect(clear.payload).toEqual({ actual_prepare_minutes: null });
+      expect(filterArgs(clear, 'eq', 'actual_prepare_minutes')).toEqual([60]);
+    });
+
     it('기록 범위 밖(250분)이면 저장하지 않음', async () => {
       setup({ record: null });
       expect((await run({ departedAt: at('12:10'), source: 'BUTTON' })).prepareMinutes).toBeNull();

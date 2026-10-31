@@ -191,9 +191,21 @@ async function recordPrepareMinutes(userId: string, departedAtMs: number, previo
   const departed = new Date(departedAtMs);
   const { record, confirmedMs, scheduledMs } = await loadPrepareBases(userId, departedAtMs);
   const minutes = prepareMinutesOf(departedAtMs, confirmedMs, scheduledMs);
-  if (minutes == null) return null;
   const existing = record?.actual_prepare_minutes ?? null;
   const fromPrevious = previousDepartedAtMs == null ? null : prepareMinutesOf(previousDepartedAtMs, confirmedMs, scheduledMs);
+  if (minutes == null) {
+    // 출발이 바뀌어 새 값이 기록 범위 밖(또는 셀 수 없음)이 됐고 지금 값이 앞 출발로 셈한 값이면 비움 — 틀린 출발로 셈한 값을 남기지 않음 (#329)
+    if (existing != null && fromPrevious != null && existing === fromPrevious) {
+      const { error } = await supabase
+        .from('daily_records')
+        .update({ actual_prepare_minutes: null })
+        .eq('user_id', userId)
+        .eq('record_date', dayKey(departed))
+        .eq('actual_prepare_minutes', existing);
+      if (error) throw error;
+    }
+    return null;
+  }
   if (!mayWritePrepare(existing, fromPrevious) || existing === minutes) return null;
 
   if (!record) {
