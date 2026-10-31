@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
 import { KakaoError, kakaoTravelMinutes, reverseAddress, searchPlaces, type FetchLike } from './kakao.ts';
-import { parseCarDirections, parsePlaces, parseReverse, parseTransit, parseWalk } from './kakao-parse.ts';
+import { parseCarDirections, parsePlaces, parseReverse, parseTransit, parseWalk, rankPlaces, type KakaoPlace } from './kakao-parse.ts';
 
 const ORIGIN = { lat: 37.5547, lng: 126.9707 };
 const DEST = { lat: 37.4979, lng: 127.0276 };
@@ -154,11 +154,61 @@ test('실패는 종류별 KakaoError로', async () => {
   await assert.rejects(() => kakaoTravelMinutes('KEY', { origin: ORIGIN, destination: DEST, transport: 'WALK' }, abort), (e: unknown) => e instanceof KakaoError && e.kind === 'TIMEOUT');
 });
 
-test('장소 검색: 기준 좌표를 주면 가까운 순 (x = 경도, y = 위도)', async () => {
+// 카카오 키워드 검색 문서 한 건
+const doc = (id: string, name: string, x: number, y: number, category = '') => ({ id, place_name: name, address_name: '주소', x: String(x), y: String(y), category_name: category });
+const KEYWORD = 'https://dapi.kakao.com/v2/local/search/keyword.json';
+
+test('장소 검색: 기본은 정확도순, 기준 좌표(x = 경도, y = 위도)는 치우침으로만 — 거리순으로 부르지 않음', async () => {
   const calls: string[] = [];
-  const fetchImpl = fakeFetch({ 'https://dapi.kakao.com/v2/local/search/keyword.json': ok({ documents: [] }) }, calls);
+  const fetchImpl = fakeFetch({ [KEYWORD]: ok({ documents: [] }) }, calls);
   assert.deepEqual(await searchPlaces('KEY', { query: '세종대', near: { lat: 37.5, lng: 127 }, size: 99 }, fetchImpl), []);
-  assert.ok(calls[0].includes('x=127') && calls[0].includes('y=37.5') && calls[0].includes('sort=distance') && calls[0].includes('size=15'));
+  assert.equal(calls.length, 1);
+  assert.ok(calls[0].includes('x=127') && calls[0].includes('y=37.5') && calls[0].includes('sort=accuracy') && calls[0].includes('size=15'));
+  assert.ok(!calls[0].includes('sort=distance') && !calls[0].includes('category_group_code'));
+});
+
+test('장소 검색: "역"으로 끝나면 지하철역(SW8)을 따로 찾아 맨 위에 둠 — 겹치는 곳은 한 번만', async () => {
+  const calls: string[] = [];
+  const station = doc('S1', '강남역 2호선', 127.0276, 37.4979, '교통,수송 > 지하철,전철 > 수도권2호선 > 강남역');
+  const fetchImpl: FetchLike = async (input) => {
+    calls.push(input);
+    const hasSubway = new URL(input).searchParams.get('category_group_code') === 'SW8';
+    const documents = hasSubway
+      ? [station]
+      : [doc('F1', '강남교자 뚝섬역점', 127.04, 37.54), doc('F2', '압구정로데오역', 127.04, 37.527), station, doc('F3', '파스타집', 127.03, 37.5)];
+    return new Response(JSON.stringify({ documents }), { status: 200 });
+  };
+  const r = await searchPlaces('KEY', { query: '강남역', near: { lat: 37.5547, lng: 126.9707 } }, fetchImpl);
+  assert.equal(calls.length, 2);
+  assert.equal(r[0].name, '강남역 2호선');
+  assert.deepEqual(r.map((p) => p.id), ['S1', 'F1', 'F2', 'F3']); // 지하철역이 한 번만, 나머지는 원래 순서
+});
+
+test('장소 검색: 지하철역 보조 호출이 실패해도 본 검색 결과는 돌려줌', async () => {
+  const fetchImpl: FetchLike = async (input) =>
+    new URL(input).searchParams.get('category_group_code') === 'SW8' ? new Response('{}', { status: 500 }) : new Response(JSON.stringify({ documents: [doc('A', '시청역', 126.97, 37.56)] }), { status: 200 });
+  assert.deepEqual((await searchPlaces('KEY', { query: '시청역' }, fetchImpl)).map((p) => p.id), ['A']);
+});
+
+test('장소 검색: "역"이 아니면 보조 호출 없음 ("세종대" · "스타벅스" · 한 글자 "역")', async () => {
+  for (const query of ['세종대', '스타벅스', '역', '역삼동']) {
+    const calls: string[] = [];
+    await searchPlaces('KEY', { query }, fakeFetch({ [KEYWORD]: ok({ documents: [] }) }, calls));
+    assert.equal(calls.length, 1, query);
+  }
+});
+
+test('장소 검색: 정확도순을 지키고, "세종대"는 학교가 1순위', async () => {
+  const fetchImpl = fakeFetch({ [KEYWORD]: ok({ documents: [doc('U', '세종대학교', 127.07, 37.55, '교육,학문 > 대학교'), doc('C', '세종대 앞 카페', 127.07, 37.551)] }) });
+  assert.equal((await searchPlaces('KEY', { query: '세종대', near: { lat: 37.5, lng: 127 } }, fetchImpl))[0].name, '세종대학교');
+});
+
+test('장소 검색: 같은 이름 여러 지점(스타벅스)은 기준 좌표에서 가까운 순, 다른 이름과의 순서는 그대로', () => {
+  const near = { lat: 37.5547, lng: 126.9707 };
+  const p = (id: string, name: string, lat: number, lng: number): KakaoPlace => ({ id, name, address: '', lat, lng });
+  const ranked = rankPlaces([p('far', '스타벅스', 37.4979, 127.0276), p('x', '스타벅스 리저브', 37.6, 127.1), p('near', '스타벅스', 37.555, 126.971), p('mid', '스타벅스', 37.52, 127.0)], near);
+  assert.deepEqual(ranked.map((r) => r.id), ['near', 'x', 'mid', 'far']);
+  assert.deepEqual(rankPlaces([p('a', '스타벅스', 1, 1), p('b', '스타벅스', 0, 0)], undefined).map((r) => r.id), ['a', 'b']); // 기준 좌표가 없으면 그대로
 });
 
 test('좌표 → 주소 응답: 도로명 우선 + 건물 이름, 지번만 있으면 지번, 빈 결과 · 깨진 응답은 null', () => {

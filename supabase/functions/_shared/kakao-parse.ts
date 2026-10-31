@@ -16,6 +16,29 @@ import type { LatLng } from './calc/travel.ts';
 
 export type KakaoPlace = { id: string; name: string; address: string; lat: number; lng: number; category?: string };
 
+// 같은 이름이 여러 곳(스타벅스 여러 지점)이면 그 이름끼리는 기준 좌표에서 가까운 순으로 — 이름 사이의 순서(정확도순)는 그대로 둠
+export function rankPlaces(places: KakaoPlace[], near?: LatLng): KakaoPlace[] {
+  if (!near) return places;
+  const slots = new Map<string, number[]>();
+  places.forEach((p, i) => slots.set(p.name, [...(slots.get(p.name) ?? []), i]));
+  const out = [...places];
+  for (const idx of slots.values()) {
+    if (idx.length < 2) continue;
+    const sorted = idx.map((i) => places[i]).sort((a, b) => metersBetween(near, a) - metersBetween(near, b));
+    idx.forEach((slot, k) => {
+      out[slot] = sorted[k];
+    });
+  }
+  return out;
+}
+
+// 두 점 사이 직선거리(m) — 순서를 매기는 데만 쓰는 근사(위도 1도 ≈ 111km, 경도는 위도에 따라 줄임)
+function metersBetween(a: LatLng, b: LatLng): number {
+  const dy = (a.lat - b.lat) * 111_000;
+  const dx = (a.lng - b.lng) * 111_000 * Math.cos((a.lat * Math.PI) / 180);
+  return Math.hypot(dx, dy);
+}
+
 const isObject = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
 const num = (v: unknown): number | undefined => {
   const n = typeof v === 'string' ? Number(v) : v;

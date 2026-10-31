@@ -211,7 +211,7 @@ create policy wake_signal_receive on realtime.messages
 
 ### place-search · place-reverse · notify · wake-check
 
-- `place-search`: `{ query, lat?, lng?, limit? }` → `{ places: [{ id, name, address, lat, lng, category? }] }`. `lat · lng`를 주면 가까운 순
+- `place-search`: `{ query, lat?, lng?, limit? }` → `{ places: [{ id, name, address, lat, lng, category? }] }`. 정확도순이고 `lat · lng`는 가까운 쪽으로 치우치게만 씀("…역"이면 지하철역이 맨 위, 같은 이름의 여러 지점은 가까운 순)
 - `place-reverse`: `{ lat, lng }`(필수) → `{ place: { address, roadAddress, buildingName } | null }`. `address`는 도로명이 있으면 도로명, 없으면 지번. 주소가 없는 곳(바다 · 국외)은 `place: null`. 카카오 응답은 저장하지 않고 좌표도 로그에 안 남김. 비밀값은 `place-search`와 같은 `KAKAO_REST_API_KEY`
 - `notify`: `{ kind, targetUserId, alarmId?, title, body, data? }` → `{ sent, failed, reason? }`. `kind`는 `ALARM_CHANGED`(G04) · `WAKE_PING`(G03, D19까지 403). 권한은 `can_send_push`(DB 함수). 푸시 토큰이 없으면 `reason: "NO_TOKENS"`, FCM 키가 없거나 `EXPO_ACCESS_TOKEN`이 틀려 Expo가 401 · 403을 주면 `reason: "PUSH_NOT_CONFIGURED"`, Expo 서버 장애면 `"PUSH_UNAVAILABLE"` — 오류가 아니라 `sent: 0`. 만료된 토큰(`DeviceNotRegistered`)은 `push_tokens`에서 지움
 - `wake-check`: 서비스 키만. `find_missed_wake_alarms` 결과를 `alarm_events`에 `MISSED`로 기록 (`client_event_id = event_key`, `ON CONFLICT DO NOTHING`이라 두 번 안 들어감). 응답 `{ checked, recorded, pushed }`. 그룹 미확인 푸시는 D19가 정해질 때까지 안 보냄(`_shared/wake.ts`의 `PUSH_MISSED_TO_GROUP = false` — 그 전에는 구성원 조회도 `can_send_push` 호출도 안 함). D19 뒤에는 받을 사람 후보를 그룹 참여 구성원(사실)으로만 뽑고 보내도 되는지는 `can_send_push('WAKE_MISSED')` 하나에 맡김 (TS에서 권한 표를 다시 해석하지 않음)

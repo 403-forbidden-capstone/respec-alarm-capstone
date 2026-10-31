@@ -4,7 +4,7 @@
 // 키는 이 파일에서 읽지 않고 인자로 받음 (fetch를 바꿔 끼워 node --test로 시험)
 import type { LatLng } from './calc/travel.ts';
 import type { Transport } from './calc/types.ts';
-import { parseCarDirections, parsePlaces, parseReverse, parseTransit, parseWalk, type KakaoPlace, type ReversePlace } from './kakao-parse.ts';
+import { parseCarDirections, parsePlaces, parseReverse, parseTransit, parseWalk, rankPlaces, type KakaoPlace, type ReversePlace } from './kakao-parse.ts';
 
 export const KAKAO_TIMEOUT_MS = 4_000; // 7장 7.1.2 "타임아웃 4초"
 
@@ -56,22 +56,44 @@ async function getJson(url: string, key: string, fetchImpl: FetchLike, timeoutMs
 // 장소 검색 (place-search)
 // ---------------------------------------------------------------------------
 
+const SUBWAY_CATEGORY = 'SW8'; // 카카오 카테고리 그룹 코드: 지하철역
+const SUBWAY_FIRST_SIZE = 5;
+
+// 검색어가 "…역"으로 끝나면 지하철역을 찾는 것으로 봄 ("강남역", "서울 시청역"). 한 글자 "역"은 제외
+export const asksForStation = (query: string): boolean => /\S역$/.test(query.trim());
+
+function keywordUrl(query: string, size: number, near?: LatLng): URL {
+  const url = new URL(LOCAL_KEYWORD_URL);
+  url.searchParams.set('query', query);
+  url.searchParams.set('size', String(size));
+  // 정확도순(기본)에 기준 좌표는 치우침으로만 — 거리순으로 부르면 "강남역"이 먼 곳의 가까운 음식점 뒤로 밀림 (x = 경도, y = 위도)
+  url.searchParams.set('sort', 'accuracy');
+  if (near) {
+    url.searchParams.set('x', String(near.lng));
+    url.searchParams.set('y', String(near.lat));
+  }
+  return url;
+}
+
 export async function searchPlaces(
   key: string,
   args: { query: string; near?: LatLng; size?: number },
   fetchImpl: FetchLike = fetch,
 ): Promise<KakaoPlace[]> {
-  const url = new URL(LOCAL_KEYWORD_URL);
-  url.searchParams.set('query', args.query);
-  url.searchParams.set('size', String(Math.min(15, Math.max(1, args.size ?? 10))));
-  if (args.near) {
-    // 가까운 순으로: 기준 좌표를 주면 거리 순 정렬 (x = 경도, y = 위도)
-    url.searchParams.set('x', String(args.near.lng));
-    url.searchParams.set('y', String(args.near.lat));
-    url.searchParams.set('sort', 'distance');
-  }
-  return parsePlaces(await getJson(url.toString(), key, fetchImpl));
+  const size = Math.min(15, Math.max(1, args.size ?? 10));
+  const main = fetchJson(keywordUrl(args.query, size, args.near), key, fetchImpl);
+  if (!asksForStation(args.query)) return rankPlaces(parsePlaces(await main), args.near);
+
+  // "…역"이면 지하철역 분류만 따로 찾아 맨 위에 둠. 이 보조 호출이 실패해도 검색 자체는 계속
+  const stationUrl = keywordUrl(args.query, SUBWAY_FIRST_SIZE, args.near);
+  stationUrl.searchParams.set('category_group_code', SUBWAY_CATEGORY);
+  const [mainJson, stationJson] = await Promise.all([main, fetchJson(stationUrl, key, fetchImpl).catch(() => null)]);
+  const stations = stationJson ? parsePlaces(stationJson) : [];
+  const seen = new Set(stations.map((p) => p.id));
+  return [...stations, ...rankPlaces(parsePlaces(mainJson), args.near).filter((p) => !seen.has(p.id))].slice(0, size);
 }
+
+const fetchJson = (url: URL, key: string, fetchImpl: FetchLike) => getJson(url.toString(), key, fetchImpl);
 
 // ---------------------------------------------------------------------------
 // 좌표 → 주소 (place-reverse)
