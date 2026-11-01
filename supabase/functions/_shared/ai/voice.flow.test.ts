@@ -205,7 +205,7 @@ test('녹화 한 바퀴: 첫 마디 템플릿 → 새 약속 카드 → 계산 �
     assert.ok((c.input_tokens as number) > 0 && (c.output_tokens as number) > 0, '토큰');
     assert.ok((c.latency_ms as number) > 0, '지연');
     assert.equal(c.io, null);
-    assert.equal(c.prompt_version, c.point === 'T1' ? 'v1.4' : 'v2-a');
+    assert.equal(c.prompt_version, c.point === 'T1' ? 'v1.5' : 'v2-b');
   }
   const flagged = calls.filter((c) => (c.flags as string[]).length > 0);
   assert.ok(flagged.some((c) => (c.flags as string[]).includes('claims_saved_without_event')), '가드에 걸린 호출의 flags');
@@ -693,3 +693,85 @@ for (const [name, said] of [
     assert.match(POINTS.T1.prompt.system, /영어로 쓰거나 한국어에 영어가 섞여도 뜻 그대로 알아듣고, 답은 한국어로/);
   });
 }
+
+// ───────── AI 대화 품질 (T1 v1.5) — 단답에 안 끝냄 · 내일 일정 물음(ASK_TOMORROW = acts REFLECT) · 규칙 문구 ─────────
+test('T1 v1.5 시스템 글: 단답 한 번에 안 끝냄 · 내일 일정 물음 · 확인 문장 반복 금지 · 장소는 카드로 · 근거 줄 규칙이 있음', () => {
+  const sys = POINTS.T1.prompt.system;
+  assert.equal(POINTS.T1.prompt.version, 'v1.5');
+  assert.match(sys, /ASK_TOMORROW/);
+  assert.match(sys, /단답 한 번으로는 끝내지 마/); // ①
+  assert.match(sys, /내일 챙길 일정이 있어요\?/);
+  assert.match(sys, /같은 확인 문장.*똑같이 되풀이하지 마/); // ④
+  assert.match(sys, /카드의 \[장소 고르기\]를 눌러 주세요/); // ③
+  assert.match(sys, /"근거"/); // ②
+  assert.match(sys, /근거에 없는 숫자는 쓰지 마/);
+  assert.match(sys, /109\(자살예방 상담전화\)/); // ⑤ 위기 규칙은 그대로
+});
+
+test('단답("그냥 그랬어") 뒤 내일 일정 물음: end=false가 그대로 가고, 물음 acts(REFLECT)가 가드 · 질문 예산에 안 걸리며 대화가 이어짐', async () => {
+  const db = seed();
+  const { deps, claude } = depsOf(db, {
+    T2F: [t2f('empty'), t2f('empty')],
+    T1: [
+      { reply: '그랬군요. 내일 챙길 일정이 있어요?', acts: [{ type: 'REFLECT', ref: null }], end: false },
+      { reply: '알겠어요. 아침 일정이 정해지면 알려 주세요.', acts: [], end: false },
+    ],
+  });
+  const s = await handleVoiceSession(deps, { session_type: 'BEFORE_SLEEP', input_mode: 'TEXT' });
+  const sid = s.session_id as string;
+  const out = (await handleVoiceTurn(deps, text(sid, 1, '그냥 그랬어'))) as VoiceTurnOut;
+  assert.equal(out.reply?.text, '그랬군요. 내일 챙길 일정이 있어요?');
+  assert.equal(out.reply?.end, false);
+  assert.deepEqual(out.reply?.acts, [{ type: 'REFLECT', ref: null }]);
+  const t = turnsOf(db, sid).filter((x) => x.role === 'ai');
+  assert.deepEqual(t[t.length - 1]?.guard ?? [], []); // 가드가 아무것도 안 함
+  assert.equal(db.rows('user_questions').length, 0); // 서버 질문 예산(하루 1 · 주 3)은 안 씀
+  // 이어 가는 말에도 끝나지 않음
+  const out2 = (await handleVoiceTurn(deps, text(sid, 2, '아직 모르겠어'))) as VoiceTurnOut;
+  assert.equal(out2.reply?.end, false);
+  assert.equal(claude!.left('T1'), 0);
+});
+
+test('내일 일정 물음을 한 답에 둘 쓰면 물음은 하나만 남음 (한 번에 하나)', async () => {
+  const db = seed();
+  const two = { reply: '내일 챙길 일정이 있어요? 내일 아침에 할 일이 있어요?', acts: [{ type: 'REFLECT', ref: null }, { type: 'REFLECT', ref: null }], end: false };
+  const { deps } = depsOf(db, { T2F: [t2f('empty')], T1: [two, two] });
+  const s = await handleVoiceSession(deps, { session_type: 'BEFORE_SLEEP', input_mode: 'TEXT' });
+  const out = (await handleVoiceTurn(deps, text(s.session_id as string, 1, '그냥 그랬어'))) as VoiceTurnOut;
+  assert.equal((out.reply?.text.match(/\?/g) ?? []).length, 1);
+  assert.equal(out.reply?.end, false);
+});
+
+// ───────── 새 약속 vs 수정 (T2F v2-b) — 같은 이름의 기존 일정이 있어도 ref null이면 새 약속 카드, 애매하면 되묻기 ─────────
+function seedDinner(db: FakeDb) {
+  db.rows('appointments').push({ appointment_id: 'ap-din', creator_id: ME, title: '저녁', appointment_at: '2026-10-30T18:00:00+09:00', dest_name: '홍대입구역', importance: 'NORMAL', recurrence_rule: null });
+  db.rows('appointment_participants').push({ participant_id: 'pt-din', appointment_id: 'ap-din', user_id: ME, transport_type: 'SUBWAY', est_travel_minutes: 30, departed_at: null, departed_source: null, arrived_at: null, arrived_source: null, is_late: null, late_minutes: null });
+}
+const dinnerAppt = (over: Record<string, unknown>) => ({
+  ...t2f('new_appt'),
+  appointments: [{ ref: null, title: '저녁', date: '2026-10-30', time: '00:30', place: '강남역', importance: null, transport: null, repeat: null, save: 'UNCONFIRMED', unclear: null, ...over }],
+});
+
+test('T2F v2-b: 같은 이름 기존 일정(저녁)이 있어도 ref null · 다른 시각 · 장소면 변경 카드(APPT_OPEN)가 아니라 새 일정 카드(APPT_NEW)', async () => {
+  const db = seed();
+  seedDinner(db);
+  const { deps, claude } = depsOf(db, { T2F: [dinnerAppt({})], T1: [t1('preview'), t1('chat')] });
+  const s = await handleVoiceSession(deps, { session_type: 'BEFORE_SLEEP', input_mode: 'TEXT' });
+  const r = await handleVoiceTurn(deps, text(s.session_id as string, 1, 'dinner tomorrow 12:30am at gangnam station'));
+  assert.equal(r.cards.length, 1);
+  assert.equal(r.cards[0].kind, 'APPT_NEW');
+  assert.doesNotMatch(r.cards[0].summary, /^변경:/);
+  assert.equal(r.cards[0].draft?.place, '강남역');
+  assert.equal(r.cards[0].draft?.time, '00:30');
+  assert.ok(claude!.seen.T2F[0].includes('dinner tomorrow 12:30am at gangnam station'));
+});
+
+test('T2F v2-b: 애매해서 날짜 · 시각이 null + unclear면 카드 없이 되묻기(CLARIFY)', async () => {
+  const db = seed();
+  seedDinner(db);
+  const { deps, claude } = depsOf(db, { T2F: [dinnerAppt({ date: null, time: null, place: null, unclear: '시각이 모호함' })], T1: [t1('preview'), t1('chat')] });
+  const s = await handleVoiceSession(deps, { session_type: 'BEFORE_SLEEP', input_mode: 'TEXT' });
+  const r = await handleVoiceTurn(deps, text(s.session_id as string, 1, '저녁 약속 있어'));
+  assert.equal(r.cards.length, 0);
+  assert.match(claude!.seen.T1[1], /되물을 것: '저녁'의 정확한 날짜·시각 · 장소/);
+});

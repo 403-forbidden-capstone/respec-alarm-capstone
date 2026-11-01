@@ -731,6 +731,22 @@ describe("applyGuards — 서버 조치", () => {
     assert.deepEqual(withSummary.flags, []);
   });
 
+  it("알람 근거 줄의 숫자(분 · 시각)는 허용 숫자가 되고, 근거에 없는 숫자는 여전히 걸림", () => {
+    const c = cardCtx();
+    const summary = "10/9(금) 10:00 캡스톤 발표 · 강남역 · 중요도 매우 중요 · 알람 기상 07:40 강하게 · 근거 기상 07:40 = 약속 10:00 − 이동 50분 − 준비 70분 − 여유 20분 · 카드의 [저장]으로 저장";
+    const g = (reply: string, withBasis: boolean, retried = false) =>
+      applyGuards({ reply, acts: [], end: false }, {
+        ctx: c.ctx, eventsVisible: c.events, turnsBefore: c.turns, safety: safetyInfoFrom(c.events, 1), retried,
+        cardSummaries: [withBasis ? summary : summary.replace(/ · 근거 [^·]*/u, "")],
+      });
+    const said = "기상 오전 7시 40분은 약속 오전 10시에서 이동 50분, 준비 70분, 여유 20분을 뺀 시각이에요.";
+    assert.deepEqual(g(said, true).flags, []); // 근거 숫자를 그대로 인용하면 통과
+    assert.ok(g(said, false).flags.includes("unsupported_numbers")); // 근거 줄이 없으면 같은 말이 걸림 (이동 · 준비 · 여유 분은 근거에서만 옴)
+    const invented = "이동 30분이 들어가서 그 시각이에요.";
+    assert.ok(g(invented, true).flags.includes("unsupported_numbers")); // 근거에 없는 30분은 걸림
+    assert.ok(g(invented, true, true).actions.includes("drop_sentence")); // 한 문장뿐이라 대체 문구로 바뀜
+  });
+
   it("시각 표기 섞임: HH:MM을 말로 바꿈 (mixed_time_format)", () => {
     const c = cardCtx();
     const r = applyGuards({ reply: "오전 10시 발표고 알람은 07:40이에요.", acts: [], end: false }, {

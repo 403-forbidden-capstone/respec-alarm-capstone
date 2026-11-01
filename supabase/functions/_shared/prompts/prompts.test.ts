@@ -19,8 +19,10 @@ const readModule = (name: string): string => readFileSync(new URL(`${name}.ts`, 
 const LEDGER: Record<string, string> = {
   'T1.v1.3': 'T1@v1.3#1a1d234b',
   'T1.v1.4': 'T1@v1.4#1413d56c', // 서버에서 한 줄 더한 판(영어 입력 규칙) — 실험실 장부에는 없음
+  'T1.v1.5': 'T1@v1.5#a32f3f75', // 서버에서 더한 판 — 실험실 장부에 없음
   'T2.v2': 'T2@v2#d5dff11c',
   'T2F.v2-a': 'T2F@v2-a#d2c172e5',
+  'T2F.v2-b': 'T2F@v2-b#a3a350f2', // 서버에서 더한 판
   'T4.v1.1': 'T4@v1.1#b597fc65',
   'T5.v1.2': 'T5@v1.2#d792df8d',
   'ASSIST_E4.v1.1': 'ASSIST_E4@v1.1#71eed0db',
@@ -28,12 +30,12 @@ const LEDGER: Record<string, string> = {
 };
 
 // 지점이 더는 안 쓰는 옛 판 (파일은 남김 — index.ts 머리 주석 2번)
-const SUPERSEDED = ['T1.v1.3'];
+const SUPERSEDED = ['T1.v1.3', 'T1.v1.4', 'T2F.v2-a'];
 
 // 지점 → 파일 이름
 const FILE_OF: Record<PointId, string> = {
-  T1: 'T1.v1.4',
-  T2F: 'T2F.v2-a',
+  T1: 'T1.v1.5',
+  T2F: 'T2F.v2-b',
   T2: 'T2.v2',
   T3: 'T3.v1',
   T4: 'T4.v1.1',
@@ -142,8 +144,8 @@ describe('지점 설정(index.ts)', () => {
       const c = POINTS[p];
       return [c.prompt.id, c.prompt.version, c.schema, c.effort, c.maxTokens, c.thinking?.type ?? null, c.timeoutMs, c.retryOnTimeout];
     };
-    assert.deepEqual(row('T1'), ['T1', 'v1.4', 't1-reply.v1', 'low', 2048, null, 13_000, true]);
-    assert.deepEqual(row('T2F'), ['T2F', 'v2-a', 'extract-fast.v1', 'low', 4096, 'adaptive', 5_000, false]);
+    assert.deepEqual(row('T1'), ['T1', 'v1.5', 't1-reply.v1', 'low', 2048, null, 13_000, true]);
+    assert.deepEqual(row('T2F'), ['T2F', 'v2-b', 'extract-fast.v1', 'low', 4096, 'adaptive', 5_000, false]);
     assert.deepEqual(row('T2'), ['T2', 'v2', 'extract.v1', 'medium', 4096, null, 19_000, true]);
     assert.deepEqual(row('T3'), ['T3', 'v1', 't3-reason.v1', 'low', 1024, null, 4_000, true]);
     assert.deepEqual(row('T4'), ['T4', 'v1.1', 't4-diary.v1', 'medium', 4096, null, 11_000, true]);
@@ -180,5 +182,13 @@ describe('gen.mjs — md 읽기 규칙', () => {
     assert.throws(() => parsePromptMd('---\nid: X\nversion: v1\n---\n메모\n## system\na\n## user\nb'), /앞에 내용/);
     assert.throws(() => parsePromptMd('---\nid: X\nversion: v1\n---\n## system\n{{a}}\n## user\nb'), /system'에 \{\{/);
     assert.throws(() => parsePromptMd('---\nid: X\nversion: v1\n---\n## system\na\n## user\n\n'), /비어/);
+  });
+});
+
+describe('T1.v1.5 영어 섞임 규칙', () => {
+  it('고유 이름은 그대로, 일반 설명 · 위치 표현은 한국어로 하라는 문구가 system에 있음', async () => {
+    const mod = (await import('./T1.v1.5.ts')).default;
+    assert.match(mod.system, /고유 이름\(OS 수업, Starbucks 같은 일정 이름 · 장소 이름\)은 그대로 두되/);
+    assert.match(mod.system, /"Gangnam station 근처" 대신 "강남역 근처"/);
   });
 });
