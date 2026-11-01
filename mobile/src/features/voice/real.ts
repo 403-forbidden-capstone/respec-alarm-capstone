@@ -100,7 +100,10 @@ type TurnResponse = {
   limits?: ServerLimits;
 };
 
-type ResultCard = { id: string; status: 'READY' | 'NEEDS_PLACE' | 'FAILED'; estimate: { alarms: { kind: string; at: string; enabled: boolean }[]; level: number; with_wake: boolean } | null; error: string | null };
+type ResultCard = { id: string; status: 'READY' | 'NEEDS_PLACE' | 'FAILED'; estimate: { alarms: { kind: string; at: string; enabled: boolean }[]; level: number; with_wake: boolean; basis?: Basis } | null; error: string | null };
+
+// 기상 알람 계산 근거(분) — 서버가 "왜 이 시각이야?"에 답하려고 받음. 서버는 믿지 않고 합(기상 = 약속 − 이동 − 준비 − 여유)이 맞을 때만 씀
+type Basis = { travel_minutes: number; prepare_minutes: number; buffer_minutes: number };
 
 // ---------------------------------------------------------------------------
 // 상수
@@ -285,7 +288,7 @@ async function absorb(res: TurnResponse, turnId: string): Promise<Pending | null
 // 앱 일 — 카드 계산 · 정정
 // ---------------------------------------------------------------------------
 
-type Outcome = { status: 'READY' | 'NEEDS_PLACE' | 'FAILED'; estimate?: Estimate; alarms?: CardAlarm[]; level?: number; withWake?: boolean; error?: string };
+type Outcome = { status: 'READY' | 'NEEDS_PLACE' | 'FAILED'; estimate?: Estimate; alarms?: CardAlarm[]; level?: number; withWake?: boolean; basis?: Basis; error?: string };
 
 // 장소 이름이 내가 쓴 곳(listPlaces)에 똑같이 하나면 그 좌표 (L1 답 L1-6) — 아니면 null (카드의 [장소 고르기])
 async function placeByName(name: string): Promise<ResolvedPlace | null> {
@@ -298,6 +301,18 @@ async function placeByName(name: string): Promise<ResolvedPlace | null> {
 
 const toLevel = (n: unknown): Level | null => (n === 0 || n === 1 || n === 2 ? n : null);
 const ringAlarms = (alarms: readonly { kind: AlarmKind; at: Date; enabled: boolean }[]): CardAlarm[] => alarms.filter((a) => a.kind !== 'ARRIVE').map((a) => ({ kind: a.kind, at: a.at, enabled: a.enabled }));
+
+// L1 결과에 실제로 있는 값만 근거로 — 하나라도 없거나 숫자가 아니면 생략 (서버는 근거가 없으면 "모른다"고 함). 준비 = 기상~준비 알람 + 준비 알람~출발
+function basisOf(a: { travelMinutes?: unknown; prepMinutes?: unknown; beforePrepMinutes?: unknown; bufferMinutes?: unknown; withWake?: unknown }): Basis | undefined {
+  const n = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) && v >= 0 ? Math.round(v) : null);
+  if (a.withWake !== true) return undefined;
+  const travel = n(a.travelMinutes);
+  const prep = n(a.prepMinutes);
+  const before = a.beforePrepMinutes === undefined ? 0 : n(a.beforePrepMinutes);
+  const buffer = n(a.bufferMinutes);
+  if (travel === null || prep === null || before === null || buffer === null) return undefined;
+  return { travel_minutes: travel, prepare_minutes: prep + before, buffer_minutes: buffer };
+}
 
 // 새 약속 카드 계산 — 좌표를 풀고 estimateAppointment, 카드의 시각 고침(times)은 adjustEstimate로
 async function estimateNew(rec: CardRec): Promise<Outcome> {
@@ -331,7 +346,7 @@ async function estimateNew(rec: CardRec): Promise<Outcome> {
     const blocked = orderError(estimate.appointment.alarms); // 순서 뒤집힘(기상 ≤ 준비 ≤ 출발) → 실패 + 이유를 서버에 (처리 결과 "되물을 것")
     if (blocked) return { status: 'FAILED', error: blocked };
     const level = toLevel(rec.server.edit?.levels?.sound) ?? estimate.appointment.level;
-    return { status: 'READY', estimate, alarms: ringAlarms(estimate.appointment.alarms), level, withWake: estimate.appointment.withWake };
+    return { status: 'READY', estimate, alarms: ringAlarms(estimate.appointment.alarms), level, withWake: estimate.appointment.withWake, basis: basisOf(estimate.appointment) };
   } catch (e) {
     if (e instanceof UserError && e.message.includes(UNKNOWN_PLACE_HINT)) return { status: 'NEEDS_PLACE', error: e.message };
     return { status: 'FAILED', error: userMessage(e, '알람을 계산하지 못했어요') };
@@ -426,7 +441,7 @@ function resultCard(id: string, o: Outcome): ResultCard {
     status: o.status,
     estimate:
       o.status === 'READY'
-        ? { alarms: (o.alarms ?? []).map((a) => ({ kind: a.kind, at: a.at.toISOString(), enabled: a.enabled })), level: o.level ?? 1, with_wake: o.withWake ?? false }
+        ? { alarms: (o.alarms ?? []).map((a) => ({ kind: a.kind, at: a.at.toISOString(), enabled: a.enabled })), level: o.level ?? 1, with_wake: o.withWake ?? false, ...(o.basis ? { basis: o.basis } : {}) }
         : null,
     error: o.error ?? null,
   };

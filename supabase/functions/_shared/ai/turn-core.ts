@@ -11,7 +11,7 @@
 //   · 다른 사람 알람 권한 길은 v0에서 늘 NO_PERMISSION. 준비시간 범위는 day(내일 기상 기준 일정) 고정.
 //   · 할 일 · 준비물 · 이유 태그 · 하루 기록은 T2F가 안 뽑는다 — 대화 끝 추출(applyFinal, PR 5) 몫. itemKey만 미리 옮겨 둠.
 import type {
-  AlarmPlan, AlarmType, Appointment, Card, CardAction, CardEdit, CardKind, Context, Digest, Extract, FactKind, FastExtract, Fix, Importance, Intensity,
+  AlarmPlan, AlarmType, Appointment, Basis, Card, CardAction, CardEdit, CardKind, Context, Digest, Extract, FactKind, FastExtract, Fix, Importance, Intensity,
   LocalDate, LocalTime, PendingItem, QuestionKind, RejectReason, ServerEvent, ServerQuestion, TaskResults, Weekday,
 } from "./types.ts";
 import { IMPORTANCE_LABEL } from "./types.ts";
@@ -339,6 +339,8 @@ export function pendingText(c: Card, s: TurnState): string {
       if (d.importance !== null) parts.push(`중요도 ${IMPORTANCE_LABEL[d.importance]}`);
       const w = wakeOf(c.digest);
       parts.push(c.first_of_day && w !== null ? `알람 기상 ${w.time} ${levelKo(c.digest?.level ?? null)}` : "알람: 출발 알림");
+      // 알람 근거 — 앱이 준 값을 검사해 통과한 것만 (checkBasis). 기상 알람을 말할 때만 붙임
+      if (c.first_of_day && w !== null && c.digest?.basis) parts.push(basisText(c.digest.basis, w, { date: d.date, time: d.time }));
       if (c.edit?.prepare_delta !== undefined) parts.push(c.edit.prepare_delta === 0 ? "내일만 준비시간 원래대로" : `내일만 준비시간 ${signed(c.edit.prepare_delta)}`);
       parts.push("카드의 [저장]으로 저장");
       return parts.join(" · ");
@@ -375,6 +377,36 @@ export interface RawDigest {
   alarms: { kind: AlarmType; at: string; enabled: boolean; level?: number | null }[];
   level?: number | null;
   with_wake?: boolean;
+  basis?: unknown; // 앱이 L1 결과에서 준 기상 근거(분) — 믿지 않고 checkBasis로 검사
+}
+
+/** 근거 분 값 하나의 범위 */
+export const BASIS_MAX_MINUTES = 600;
+/** 기상 시각과 (약속 − 이동 − 준비 − 여유)가 이만큼(분)까지 어긋나도 반올림으로 보고 맞는 것으로 침 */
+export const BASIS_TOLERANCE_MINUTES = 1;
+
+/**
+ * 앱이 보낸 기상 알람 근거를 검사한다 — 정수 · 0~600 · 기상 시각 = 약속 − 이동 − 준비 − 여유 (±1분)일 때만 그 값을 돌려주고, 아니면(빠짐 · 모양 이상 · 합이 안 맞음) null.
+ * 서버가 값을 계산해 만들지 않는다: 앱이 준 값을 맞는지 보고 그대로 쓸 뿐. null이면 근거 줄을 만들지 않아 AI는 "근거는 모른다"고 한다.
+ */
+export function checkBasis(raw: unknown, wake: LocalDateTime | null, apptAt: LocalDateTime | null): Basis | null {
+  if (!isObj(raw) || wake === null || apptAt === null) return null;
+  const f = (k: string): number | null => {
+    const v = raw[k];
+    return typeof v === "number" && Number.isInteger(v) && v >= 0 && v <= BASIS_MAX_MINUTES ? v : null;
+  };
+  const travel = f("travel_minutes");
+  const prepare = f("prepare_minutes");
+  const buffer = f("buffer_minutes");
+  if (travel === null || prepare === null || buffer === null) return null;
+  const gap = minutesBetween(wake, apptAt); // 기상 → 약속
+  if (Math.abs(gap - (travel + prepare + buffer)) > BASIS_TOLERANCE_MINUTES) return null;
+  return { travel_minutes: travel, prepare_minutes: prepare, buffer_minutes: buffer };
+}
+
+/** '기상 = 약속 09:00 − 이동 41분 − 준비 45분 − 여유 14분' — 처리 결과 알람 줄에 덧붙이는 근거 (검사를 통과한 값만) */
+export function basisText(b: Basis, wake: LocalDateTime, apptAt: LocalDateTime): string {
+  return `근거 기상 ${wake.time} = 약속 ${apptAt.time} − 이동 ${b.travel_minutes}분 − 준비 ${b.prepare_minutes}분 − 여유 ${b.buffer_minutes}분`;
 }
 
 /** 약속이 없는 카드(ALARM_NEW 등)의 알람은 지금부터 이 시간(분) 안이어야 함 (리뷰 #261) */
@@ -1041,6 +1073,8 @@ export function applyTaskResults(state: TurnState, results: TaskResults, ctx: Co
       }
       const est = r.estimate as NonNullable<TaskResults["cards"][number]["estimate"]>;
       c.digest = { alarms: est.alarms.map((a) => ({ kind: a.kind, at: a.at, enabled: a.enabled })), level: est.level ?? null, with_wake: est.with_wake === true };
+      const basis = checkBasis((est as RawDigest).basis, wakeOf(c.digest), apptAtOf(c, s));
+      if (basis !== null) c.digest.basis = basis;
       c.status = "READY";
       c.error = null;
       pushPending(ev, c, s);

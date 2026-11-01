@@ -7,7 +7,7 @@ import assert from "node:assert/strict";
 import type { AlarmPlan, Appointment, Card, CardAction, Context, Fact, FastExtract, ServerEvent, TaskResults } from "./types.ts";
 import { datesFor } from "./testing.ts";
 import {
-  appointmentSummary, applyCardAction as applyCardActionRaw, applyFast, applyTaskResults as applyTaskResultsRaw, checkDigest, dateKo, dayOf, eventAt, expandFast, initTurnState, isoToLocal, itemKey,
+  appointmentSummary, applyCardAction as applyCardActionRaw, applyFast, applyTaskResults as applyTaskResultsRaw, checkBasis, checkDigest, dateKo, dayOf, eventAt, expandFast, initTurnState, isoToLocal, itemKey,
   keywordImportance, needKinds, normTitle, pickServerQuestion, questionSubjectKey, titleMatch,
 } from "./turn-core.ts";
 import type { CardOutcome, QuestionHistory, TaskOutcome, TurnState } from "./turn-core.ts";
@@ -1313,5 +1313,58 @@ describe("pickServerQuestion — PREP_CHECK 하나, 질문 예산", () => {
     const q = pickServerQuestion(c, none, NOW)!.question;
     c.question = q;
     assert.equal(c.question.kind, "PREP_CHECK");
+  });
+});
+
+describe("알람 근거 (basis) — 앱이 준 값을 검사해 맞을 때만 처리 결과 줄에 붙임", () => {
+  const wake = isoToLocal(iso("2026-10-09", "07:40"));
+  const appt = isoToLocal(iso("2026-10-09", "10:00")); // 기상 → 약속 140분
+  const good = { travel_minutes: 50, prepare_minutes: 70, buffer_minutes: 20 };
+
+  it("checkBasis: 합이 맞으면(±1분) 채택, 합이 다르거나 범위 밖 · 정수 아님 · 필드 없음 · 모양 이상이면 null", () => {
+    assert.deepEqual(checkBasis(good, wake, appt), good);
+    assert.deepEqual(checkBasis({ ...good, buffer_minutes: 21 }, wake, appt), { ...good, buffer_minutes: 21 }); // +1분은 반올림
+    assert.deepEqual(checkBasis({ ...good, buffer_minutes: 19 }, wake, appt), { ...good, buffer_minutes: 19 }); // −1분도
+    assert.equal(checkBasis({ ...good, buffer_minutes: 22 }, wake, appt), null); // 합이 안 맞음
+    assert.equal(checkBasis({ travel_minutes: 700, prepare_minutes: -560, buffer_minutes: 0 }, wake, appt), null); // 범위 밖
+    assert.equal(checkBasis({ ...good, travel_minutes: 50.5, buffer_minutes: 19.5 }, wake, appt), null); // 정수 아님
+    assert.equal(checkBasis({ ...good, travel_minutes: "50" }, wake, appt), null);
+    assert.equal(checkBasis({ travel_minutes: 50, prepare_minutes: 70 }, wake, appt), null); // 필드 없음
+    assert.equal(checkBasis(undefined, wake, appt), null);
+    assert.equal(checkBasis(null, wake, appt), null);
+    assert.equal(checkBasis([good], wake, appt), null);
+    assert.equal(checkBasis(good, null, appt), null);
+    assert.equal(checkBasis(good, wake, null), null);
+  });
+
+  const start = () => {
+    const c = ctx({ tomorrow: [] });
+    const cap = study({ title: "캡스톤 발표", time: "10:00", place: "강남역" });
+    return { c, s: applyFast(initTurnState(c), fast({ appointments: [cap] }), c, 1).state };
+  };
+  const withBasis = (basis: unknown): TaskResults => {
+    const r = ready("c1", "07:40");
+    return { cards: [{ ...r, estimate: { ...(r.estimate as NonNullable<typeof r.estimate>), basis } }], fixes: [] };
+  };
+
+  it("맞는 근거는 확인 필요 줄에 붙고 카드 요약(digest)에 남음", () => {
+    const { c, s } = start();
+    const t = applyTaskResults(s, withBasis(good), c, 1);
+    assert.equal(
+      t.event.pending[0]!.summary,
+      "10/9(금) 10:00 캡스톤 발표 · 강남역 · 중요도 매우 중요 · 알람 기상 07:40 강하게 · 근거 기상 07:40 = 약속 10:00 − 이동 50분 − 준비 70분 − 여유 20분 · 카드의 [저장]으로 저장",
+    );
+    assert.deepEqual(card(t.state, "c1").digest?.basis, good);
+    console.log("근거 줄 예:", t.event.pending[0]!.summary);
+  });
+
+  it("합이 안 맞는 근거 · basis 없음(옛 앱)은 근거 줄 없이 기존 그대로", () => {
+    const plain = "10/9(금) 10:00 캡스톤 발표 · 강남역 · 중요도 매우 중요 · 알람 기상 07:40 강하게 · 카드의 [저장]으로 저장";
+    for (const basis of [{ ...good, buffer_minutes: 30 }, undefined, null, "x", { travel_minutes: 50 }]) {
+      const { c, s } = start();
+      const t = applyTaskResults(s, withBasis(basis), c, 1);
+      assert.equal(t.event.pending[0]!.summary, plain);
+      assert.equal(card(t.state, "c1").digest?.basis, undefined);
+    }
   });
 });
