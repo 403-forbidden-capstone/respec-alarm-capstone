@@ -44,7 +44,7 @@ const FIRST_ROWS: ScreenRow[] = canUseRealData
     ]
   : [];
 
-export const SECTIONS: ScreenSection[] = [
+const ALL_SECTIONS: ScreenSection[] = [
   {
     title: '홈 · 알람',
     issue: '#30',
@@ -106,4 +106,7 @@ export const SECTIONS: ScreenSection[] = [
     issue: '#25',
     rows: FIRST_ROWS,
   },
-].filter((section) => section.rows.length > 0);
+];
+
+// 줄이 없는 절(실데이터를 못 쓰는 빌드의 "처음 · 설정")은 뺌
+export const SECTIONS = ALL_SECTIONS.filter((section) => section.rows.length > 0);
