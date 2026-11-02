@@ -3,7 +3,8 @@ import { useState, type ReactNode } from 'react';
 import { StyleSheet } from 'react-native';
 
 import { Text } from '@/components/ui';
-import { listPlaces } from '@/features/alarm/api';
+import { listPlaces, reverseAddress } from '@/features/alarm/api';
+import { MapPlaceSheet } from '@/features/alarm/components/MapPlaceSheet';
 import { PlaceSearchSheet } from '@/features/alarm/components/PlaceSearchSheet';
 import { TimeSheet } from '@/features/alarm/components/TimePicker';
 import { useAuth } from '@/features/auth/AuthProvider';
@@ -19,6 +20,9 @@ import { ImportEntryCard } from '@/features/onboarding/components/ImportEntryCar
 import { PermissionsStep } from '@/features/onboarding/components/PermissionsStep';
 import { TimetableStep } from '@/features/onboarding/components/TimetableStep';
 import { useLocationRow } from '@/features/onboarding/hooks/useLocationRow';
+import { locateOnce } from '@/features/location/currentPosition';
+import { HOME_RADIUS_M } from '@/features/location/constants';
+import { HOME_RADIUS_PRESETS } from '@/features/location/radius';
 import { useHomeStep } from '@/features/onboarding/hooks/useHomeStep';
 import { useCalendarImport } from '@/features/onboarding/hooks/useCalendarImport';
 import { usePhotoImport } from '@/features/onboarding/hooks/usePhotoImport';
@@ -240,11 +244,16 @@ export default function OnboardingScreen() {
       body: (
         <>
           <HomePlaceStep homeName={homeStep.homeName} onOpenSearch={homeStep.openSearch} onClear={homeStep.clear} />
-          <PlaceSearchSheet
+          <MapPlaceSheet
             visible={homeStep.searchOpen}
             onClose={homeStep.closeSearch}
             onPick={homeStep.pick}
             search={(query) => listPlaces(query)}
+            reverse={reverseAddress}
+            locate={locateOnce}
+            suggestedNames={['집']}
+            areaWarning={null}
+            radius={{ initial: HOME_RADIUS_M, presets: HOME_RADIUS_PRESETS, followPlace: false, hint: '이 원을 벗어나면 출발을 기록해요' }}
             title="집 찾기"
           />
         </>

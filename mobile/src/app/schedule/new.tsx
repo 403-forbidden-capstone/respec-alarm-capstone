@@ -12,7 +12,6 @@ import { HomeMissingNotice } from '@/features/alarm/components/HomeMissingNotice
 import { ItemChips } from '@/features/alarm/components/ItemChips';
 import { OptionGrid } from '@/features/alarm/components/OptionGrid';
 import { MapPlaceSheet } from '@/features/alarm/components/MapPlaceSheet';
-import { PlaceSearchSheet } from '@/features/alarm/components/PlaceSearchSheet';
 import { RepeatPicker } from '@/features/alarm/components/RepeatPicker';
 import { SelectRow } from '@/features/alarm/components/SelectRow';
 import { TimeButton } from '@/features/alarm/components/TimeButton';
@@ -40,7 +39,9 @@ import { isAreaPlace } from '@/features/location/area';
 import { askNotifications } from '@/features/permissions';
 import { useAuth } from '@/features/auth/AuthProvider';
 import { saveProfileFields } from '@/features/profile/api';
-import { DESTINATION_RADIUS_PRESETS } from '@/features/location/radius';
+import { DESTINATION_RADIUS_PRESETS, HOME_RADIUS_PRESETS } from '@/features/location/radius';
+import { HOME_RADIUS_M } from '@/features/location/constants';
+import { homePatchOf } from '@/features/onboarding/home';
 import { FrequentPlaceChips } from '@/features/location/components/FrequentPlaceChips';
 import { locateOnce } from '@/features/location/currentPosition';
 import { listUserPlaces } from '@/features/location/api';
@@ -168,9 +169,13 @@ export default function NewScheduleScreen() {
       toast('이 장소는 위치를 몰라 집으로 정할 수 없어요');
       return;
     }
-    const { name, lat, lng } = place;
+    const patch = homePatchOf(place);
+    if (!patch) {
+      toast('이 장소는 위치를 몰라 집으로 정할 수 없어요');
+      return;
+    }
     void runSaveHome(async () => {
-      await saveProfileFields(await requireUserId(), { home_name: name, home_lat: lat, home_lng: lng });
+      await saveProfileFields(await requireUserId(), patch);
       await auth.refreshProfile().catch(() => {}); // 못 읽어도 집은 저장됨 — 서버는 계산할 때 프로필을 직접 읽음
       setHomeMissing(false);
       setHomeSheetOpen(false);
@@ -386,11 +391,17 @@ export default function NewScheduleScreen() {
       </Card>
 
       {homeMissing ? <HomeMissingNotice onPickHome={() => setHomeSheetOpen(true)} busy={savingHome} /> : null}
-      <PlaceSearchSheet
+      <MapPlaceSheet
         visible={homeSheetOpen}
         onClose={() => setHomeSheetOpen(false)}
         title="집 찾기"
         search={(query) => listPlaces(query, home)}
+        reverse={reverseAddress}
+        locate={locateOnce}
+        center={home}
+        suggestedNames={['집']}
+        areaWarning={null}
+        radius={{ initial: HOME_RADIUS_M, presets: HOME_RADIUS_PRESETS, followPlace: false, hint: '이 원을 벗어나면 출발을 기록해요' }}
         onPick={pickHome}
       />
 
