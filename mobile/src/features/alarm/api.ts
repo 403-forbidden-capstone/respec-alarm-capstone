@@ -55,7 +55,7 @@ import { LEVEL_FIELD, type EditLogLine } from './edits';
 import { hasAlarms, listOnePerSeries, toOccurrences } from './map';
 import { filterPlaces } from './places';
 import * as real from './real';
-import { getPreviewRing, isPreviewAlarmId, parsePreviewAlarmId } from './ringPreview';
+import { getPreviewRing, isPreviewAlarmId, nextPreviewAlarm, parsePreviewAlarmId } from './ringPreview';
 import { repeatLabel, repeatToRrule, rruleToRepeat } from './repeat';
 import { pickMorningSource, toDepartCheck, toMorningPlan, morningDay, wakeAlarmOf, type MorningSource } from './morning';
 import { ringNotice } from './notice';
@@ -776,6 +776,9 @@ const NO_USE = { usage: 0, recent: 0 };
 const USED = usageSummary(USED_SPANS);
 const SLEPT = { usage: 0.4, recent: 0 };
 
+// 웹 울림 미리보기에서 같은 일정의 다음 알람 (울림 · 기상 확인 화면의 [다음 알람 울려 보기]) — 없으면 null
+export const nextPreviewRing = (alarmId: string) => nextPreviewAlarm(alarmId);
+
 // 웹 실데이터 울림 미리보기의 기상 확인 (ringPreview.ts) — 이 탭 메모리에만 두고 서버에 안 씀. 시연 버튼 값은 가짜 데이터와 같음
 type PreviewWake = Pick<WakeCheck, 'phase' | 'dismissedAt' | 'usage' | 'recent' | 'confirmed'>;
 const previewWakes = new Map<string, PreviewWake>();
@@ -849,8 +852,8 @@ export async function cancelSnooze(alarmId: string): Promise<CancelSnoozeResult>
 export async function dismissRing(alarmId: string, at: Date) {
   if (!isMock()) {
     if (!isPreviewAlarmId(alarmId)) return real.dismissRing();
-    // 웹 미리보기 — 기상 알람이면 이 탭에서 기상 확인을 시작 (끈 시각 = 지금)
-    if (parsePreviewAlarmId(alarmId)?.kind === 'WAKE' && !previewWakes.get(alarmId)?.confirmed) {
+    // 웹 미리보기 — 기상 알람이면 이 탭에서 기상 확인을 처음부터 시작 (끈 시각 = 지금). 확정된 뒤 다시 울려 봐도 시연 버튼이 다시 나옴
+    if (parsePreviewAlarmId(alarmId)?.kind === 'WAKE') {
       previewWakes.set(alarmId, { phase: 'observing', dismissedAt: now(), ...NO_USE, confirmed: null });
     }
     return;

@@ -7,11 +7,11 @@ import { confirmWake, getMorningPlan, getWakeCheck, promptWake } from '@/feature
 import { FormulaBox } from '@/features/alarm/components/FormulaBox';
 import { MorningPlanLine } from '@/features/alarm/components/MorningPlanLine';
 import { WAKE_OBSERVE_MINUTES, WAKE_RECENT_MINUTES, type WakeCheck } from '@/features/alarm/types';
+import { useNextRing } from '@/features/alarm/hooks/useNextRing';
 import { useNow } from '@/features/alarm/hooks/useNow';
 import { formatUsage, judgeLines, pickAlarmId, WAKE_RECENT_RANGE } from '@/features/alarm/wake';
 import { uploadEvents } from '@/lib/alarmSync';
 import { addMinutes, formatTime, timeParts } from '@/lib/format';
-import { NextRingButton } from '@/features/alarm/components/NextRingButton';
 import { isPreviewAlarmId } from '@/features/alarm/ringPreview';
 import { isMock } from '@/lib/mode';
 import { backOrHome, openGroupDetail } from '@/lib/nav';
@@ -127,6 +127,7 @@ function WakeFlow({ check }: { check: WakeCheck }) {
   // 웹 실데이터 울림 미리보기(ringPreview.ts)도 서버 판정 없이 시연 버튼으로 넘기고, 확정 뒤 다음 알람으로 이어 봄
   const preview = !isMock() && isPreviewAlarmId(check.alarmId);
   const mock = isMock() || preview;
+  const next = useNextRing(preview ? check.alarmId : null);
   useEffect(() => {
     if (mock || state.phase !== 'observing') return;
     let stopped = false;
@@ -237,7 +238,7 @@ function WakeFlow({ check }: { check: WakeCheck }) {
           <Card>{meters}</Card>
           <MorningLine />
           <View style={styles.stack}>
-            {preview ? <NextRingButton alarmId={check.alarmId} /> : null}
+            {next ? <Button label={next.label} onPress={next.open} /> : null}
             <Button label="홈으로" variant={preview ? 'ghost' : 'primary'} onPress={() => router.dismissTo('/')} />
             {check.groupId != null ? (
               <Button

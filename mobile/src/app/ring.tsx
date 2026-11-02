@@ -6,8 +6,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ScreenId, Text, toast } from '@/components/ui';
 import { dismissRing, getRing, snoozeRing, startRing, stopRing } from '@/features/alarm/api';
-import { useNextRing } from '@/features/alarm/components/NextRingButton';
 import { VoiceWave } from '@/features/alarm/components/VoiceWave';
+import { useNextRing } from '@/features/alarm/hooks/useNextRing';
 import { isPreviewAlarmId } from '@/features/alarm/ringPreview';
 import { snoozeView } from '@/features/alarm/snooze';
 import type { Appointment, RingKind } from '@/features/alarm/types';

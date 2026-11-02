@@ -7,9 +7,7 @@ import { josa, spokenTime } from '@/lib/format';
 
 import { ringNotice } from './notice';
 import { getAppointment } from './real';
-import { LEVELS, type Appointment, type RingInfo, type RingKind } from './types';
-
-const RING_KINDS: readonly RingKind[] = ['WAKE', 'PREPARE', 'DEPARTURE'];
+import { LEVELS, RING_KINDS, type Appointment, type RingInfo, type RingKind } from './types';
 
 export const previewAlarmId = (appointmentId: string, kind: RingKind) => `${appointmentId}:${kind}`;
 

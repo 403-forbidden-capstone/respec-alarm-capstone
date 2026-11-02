@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, jest } from '@jest/globals';
 
 import * as api from '../api';
-import { nextPreviewAlarm, nextRingKind, parsePreviewAlarmId, previewRingOf } from '../ringPreview';
+import { nextRingKind, parsePreviewAlarmId, previewRingOf } from '../ringPreview';
 import type { Appointment } from '../types';
 
 // 웹 실데이터 울림 미리보기 — 저장된 일정으로 울림 · 기상 확인 화면을 이어 보고, 서버(real.ts)의 울림 · 기상 기록 함수는 부르지 않음
@@ -91,6 +91,14 @@ describe('실데이터 모드에서 미리보기 흐름 (api)', () => {
     expect((await api.getWakeCheck('w2:WAKE'))?.confirmed?.how).toBe('self');
   });
 
+  it('확정한 뒤 다시 울려 보면 기상 확인이 처음부터 (시연 버튼이 다시 나옴)', async () => {
+    await api.dismissRing('w4:WAKE', at('08:30'));
+    await api.confirmWake('w4:WAKE', 'auto', new Date());
+    expect((await api.getWakeCheck('w4:WAKE'))?.confirmed).not.toBeNull();
+    await api.dismissRing('w4:WAKE', at('08:30'));
+    expect(await api.getWakeCheck('w4:WAKE')).toMatchObject({ phase: 'observing', confirmed: null });
+  });
+
   it('끄기 전에는 기상 확인 없음, 실데이터 알람 id는 그대로 서버 함수로', async () => {
     expect(await api.getWakeCheck('w3:WAKE')).toBeNull();
     await api.getRing('6b1f2c4e-0d7a-4a59-9a43-2f0c8d1e5b77');
@@ -99,7 +107,7 @@ describe('실데이터 모드에서 미리보기 흐름 (api)', () => {
   });
 
   it('준비를 끄면 다음은 출발, 출발 뒤에는 없음', async () => {
-    expect(await nextPreviewAlarm('p1:PREPARE')).toEqual({ id: 'p1:DEPARTURE', kind: 'DEPARTURE', at: at('09:20') });
-    expect(await nextPreviewAlarm('p1:DEPARTURE')).toBeNull();
+    expect(await api.nextPreviewRing('p1:PREPARE')).toEqual({ id: 'p1:DEPARTURE', kind: 'DEPARTURE', at: at('09:20') });
+    expect(await api.nextPreviewRing('p1:DEPARTURE')).toBeNull();
   });
 });
