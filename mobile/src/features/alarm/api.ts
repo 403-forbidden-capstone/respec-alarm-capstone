@@ -55,12 +55,13 @@ import { LEVEL_FIELD, type EditLogLine } from './edits';
 import { hasAlarms, listOnePerSeries, toOccurrences } from './map';
 import { filterPlaces } from './places';
 import * as real from './real';
+import { getPreviewRing, isPreviewAlarmId, nextPreviewAlarm, parsePreviewAlarmId } from './ringPreview';
 import { repeatLabel, repeatToRrule, rruleToRepeat } from './repeat';
 import { pickMorningSource, toDepartCheck, toMorningPlan, morningDay, wakeAlarmOf, type MorningSource } from './morning';
 import { ringNotice } from './notice';
 import { changedAlarms, CONFIRM_MOVE_MINUTES, draftAt, initialTime, ringingKinds } from './schedule';
 import type { StandaloneInput } from './request';
-import { thetaReachedAt, usageSummary, type UseSpan } from './wake';
+import { thetaReachedAt, usageSummary, WAKE_THETA_MINUTES, type UseSpan } from './wake';
 // 알람 코어의 순수 계산 파일만 직접 가져옴 (index는 네이티브 모듈을 찾으므로 — 같은 선례: lib/alarmSync 시험)
 import { canSnooze, DEFAULT_SNOOZE_LIMIT } from '../../../modules/alarm-core/src/plan';
 
@@ -735,7 +736,7 @@ function findAlarm(alarmId: string) {
 // 울림 화면 (H07) — 실제 울림은 알람 코어(네이티브). 이 화면은 디자인 · 웹 미리 보기용
 // 준비 · 출발 알람의 머리글(notice)은 폰 알림과 같은 글자 (서버 알림 문구 함수 — features/alarm/notice.ts)
 export async function getRing(alarmId: string): Promise<RingInfo | null> {
-  if (!isMock()) return real.getRing();
+  if (!isMock()) return isPreviewAlarmId(alarmId) ? getPreviewRing(alarmId) : real.getRing(); // 웹 미리보기는 저장된 일정으로 (ringPreview.ts)
   const found = findAlarm(alarmId);
   if (!found || found.alarm.kind === 'ARRIVE') return null;
   const { a, alarm } = found;
@@ -774,6 +775,22 @@ const USED_SPANS: UseSpan[] = [
 const NO_USE = { usage: 0, recent: 0 };
 const USED = usageSummary(USED_SPANS);
 const SLEPT = { usage: 0.4, recent: 0 };
+
+// 웹 울림 미리보기에서 같은 일정의 다음 알람 (울림 · 기상 확인 화면의 [다음 알람 울려 보기]) — 없으면 null
+export const nextPreviewRing = (alarmId: string) => nextPreviewAlarm(alarmId);
+
+// 웹 실데이터 울림 미리보기의 기상 확인 (ringPreview.ts) — 이 탭 메모리에만 두고 서버에 안 씀. 시연 버튼 값은 가짜 데이터와 같음
+type PreviewWake = Pick<WakeCheck, 'phase' | 'dismissedAt' | 'usage' | 'recent' | 'confirmed'>;
+const previewWakes = new Map<string, PreviewWake>();
+
+async function previewWakeCheck(alarmId: string): Promise<WakeCheck | null> {
+  const wake = previewWakes.get(alarmId);
+  const parsed = parsePreviewAlarmId(alarmId);
+  if (!wake || !parsed) return null;
+  const a = await real.getAppointment(parsed.appointmentId);
+  // 그룹 공유 문구는 뺌 — 미리보기는 그룹에 알리지 않음
+  return { alarmId, appointmentTitle: a?.title ?? '', groupId: null, groupName: null, thetaMinutes: WAKE_THETA_MINUTES, ...wake };
+}
 
 // 울리기 시작 (H07) — 기상 알람이면 내 상태가 '알람 울리는 중'. 실데이터는 알람 코어(#33) · alarm_events TRIGGERED
 // 이미 기상 확정한 알람이면 판정을 그대로 둠 (목업은 기상 전에만 S.wake를 비움)
@@ -833,7 +850,14 @@ export async function cancelSnooze(alarmId: string): Promise<CancelSnoozeResult>
 // 알람 해제 (H07) — at = 실제로 끈 시각(울린 시각). 기상 알람이면 기상 판정(관찰 중)을 시작
 // 이미 기상 확정한 알람이면 판정 · 기록을 그대로 둠 (해제 기록이 겹치지 않게). 실데이터는 alarm_events DISMISSED
 export async function dismissRing(alarmId: string, at: Date) {
-  if (!isMock()) return real.dismissRing();
+  if (!isMock()) {
+    if (!isPreviewAlarmId(alarmId)) return real.dismissRing();
+    // 웹 미리보기 — 기상 알람이면 이 탭에서 기상 확인을 처음부터 시작 (끈 시각 = 지금). 확정된 뒤 다시 울려 봐도 시연 버튼이 다시 나옴
+    if (parsePreviewAlarmId(alarmId)?.kind === 'WAKE') {
+      previewWakes.set(alarmId, { phase: 'observing', dismissedAt: now(), ...NO_USE, confirmed: null });
+    }
+    return;
+  }
   const found = findAlarm(alarmId);
   delete db.snoozes[alarmId];
   delete db.snoozeCounts[alarmId]; // 해제하면 미룬 횟수는 끝
@@ -846,7 +870,7 @@ export async function dismissRing(alarmId: string, at: Date) {
 // alarmId가 없으면 진행 중인 판정, 그것도 없으면 오늘 첫 기상 알람
 // 확정 전인데 아직 안 껐으면(울리기 전 · 울리는 중) 목업 빈 화면처럼 null
 export async function getWakeCheck(alarmId?: string): Promise<WakeCheck | null> {
-  if (!isMock()) return real.getWakeCheck(alarmId);
+  if (!isMock()) return alarmId && isPreviewAlarmId(alarmId) ? previewWakeCheck(alarmId) : real.getWakeCheck(alarmId);
   const id = alarmId ?? db.wake.alarmId;
   const found = id
     ? findAlarm(id)
@@ -893,7 +917,12 @@ export async function recheckRecentWakes(): Promise<string[]> {
 
 // 확인 알림 (H08) — 해제 뒤 10분 동안 조건을 못 채움 (시연: 알람만 끄고 다시 잠듦). at = 관찰이 끝난 시각. 실데이터는 #35 · #40
 export async function promptWake(alarmId: string, at: Date) {
-  if (!isMock()) return real.promptWake();
+  if (!isMock()) {
+    if (!isPreviewAlarmId(alarmId)) return real.promptWake();
+    const wake = previewWakes.get(alarmId);
+    if (wake && !wake.confirmed) previewWakes.set(alarmId, { ...wake, phase: 'prompt', ...SLEPT });
+    return;
+  }
   const dismissedAt = db.wake.alarmId === alarmId ? db.wake.dismissedAt : null;
   db.wake = { alarmId, phase: 'prompt', ringAt: null, dismissedAt, ...SLEPT };
   db.events.push({ at, label: '확인 알림 발송', source: '알림' });
@@ -904,7 +933,14 @@ export async function promptWake(alarmId: string, at: Date) {
 // 기록 시각 (D14): 직접 응답은 at 그대로, 자동은 누적 사용이 θ를 넘은 시각 — 해제 시각을 모르거나 못 넘었으면 at
 // 실데이터는 alarm_events WAKE_CONFIRMED
 export async function confirmWake(alarmId: string, how: 'self' | 'auto', at: Date) {
-  if (!isMock()) return real.confirmWake(alarmId, how);
+  if (!isMock()) {
+    if (!isPreviewAlarmId(alarmId)) return real.confirmWake(alarmId, how);
+    const wake = previewWakes.get(alarmId);
+    if (!wake || wake.confirmed) return;
+    const reached = how === 'auto' ? thetaReachedAt(wake.dismissedAt, USED_SPANS, WAKE_THETA_MINUTES) : null;
+    previewWakes.set(alarmId, { ...wake, ...(how === 'auto' ? USED : {}), confirmed: { at: reached ?? now(), how } });
+    return;
+  }
   if (db.wakeConfirmations[alarmId]) return; // 이미 확정한 알람은 처음 판정 그대로
   const dismissedAt = db.wake.alarmId === alarmId ? db.wake.dismissedAt : null;
   const reached = how === 'auto' && dismissedAt ? thetaReachedAt(dismissedAt, USED_SPANS, db.wakeThetaMinutes) : null;

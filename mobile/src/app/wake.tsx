@@ -7,10 +7,12 @@ import { confirmWake, getMorningPlan, getWakeCheck, promptWake } from '@/feature
 import { FormulaBox } from '@/features/alarm/components/FormulaBox';
 import { MorningPlanLine } from '@/features/alarm/components/MorningPlanLine';
 import { WAKE_OBSERVE_MINUTES, WAKE_RECENT_MINUTES, type WakeCheck } from '@/features/alarm/types';
+import { useNextRing } from '@/features/alarm/hooks/useNextRing';
 import { useNow } from '@/features/alarm/hooks/useNow';
 import { formatUsage, judgeLines, pickAlarmId, WAKE_RECENT_RANGE } from '@/features/alarm/wake';
 import { uploadEvents } from '@/lib/alarmSync';
 import { addMinutes, formatTime, timeParts } from '@/lib/format';
+import { isPreviewAlarmId } from '@/features/alarm/ringPreview';
 import { isMock } from '@/lib/mode';
 import { backOrHome, openGroupDetail } from '@/lib/nav';
 import { useLoad } from '@/lib/useLoad';
@@ -122,7 +124,10 @@ function WakeFlow({ check }: { check: WakeCheck }) {
   }
 
   // 실데이터: 관찰 10분 동안은 판정을 다시 읽어, 끝나면 확정(자동 판정) 또는 확인 알림 단계로 넘어감. 가짜 데이터는 시연 버튼으로 넘김
-  const mock = isMock();
+  // 웹 실데이터 울림 미리보기(ringPreview.ts)도 서버 판정 없이 시연 버튼으로 넘기고, 확정 뒤 다음 알람으로 이어 봄
+  const preview = !isMock() && isPreviewAlarmId(check.alarmId);
+  const mock = isMock() || preview;
+  const next = useNextRing(preview ? check.alarmId : null);
   useEffect(() => {
     if (mock || state.phase !== 'observing') return;
     let stopped = false;
@@ -233,7 +238,8 @@ function WakeFlow({ check }: { check: WakeCheck }) {
           <Card>{meters}</Card>
           <MorningLine />
           <View style={styles.stack}>
-            <Button label="홈으로" onPress={() => router.dismissTo('/')} />
+            {next ? <Button label={next.label} onPress={next.open} /> : null}
+            <Button label="홈으로" variant={preview ? 'ghost' : 'primary'} onPress={() => router.dismissTo('/')} />
             {check.groupId != null ? (
               <Button
                 label={`${check.groupName ?? '그룹'} 기상 현황 보기`}
