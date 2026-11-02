@@ -5,9 +5,9 @@ import type { Href } from 'expo-router';
 
 import { activeSteps, type OnboardingStepId } from '@/features/onboarding/steps';
 import { ONBOARDING_IN_FLOW, TIMETABLE_PATHS } from '@/lib/flags';
-import { canUseRealData } from '@/lib/mode';
+import { canUseRealData, type DataMode } from '@/lib/mode';
 
-export type ScreenRow = { id: string; name: string; href: Href };
+export type ScreenRow = { id: string; name: string; href: Href; mockOnly?: boolean }; // mockOnly = 가짜 데이터 모드에서만 열림 (실데이터면 로그인 · 온보딩 판정대로만 감)
 
 export type ScreenSection = { title: string; issue: string; rows: ScreenRow[] };
 
@@ -26,16 +26,18 @@ const STEP_TITLE: Record<OnboardingStepId, string> = {
   mic: '마이크',
 };
 
-// 로그인 · 온보딩 · 설정은 실데이터를 쓸 수 있는 빌드에서만 열림(가짜 모드는 미리 보기) — app/_layout.tsx 막는 조건과 같게
+// 로그인 · 온보딩 · 설정은 실데이터를 쓸 수 있는 빌드에서만 열림 — app/_layout.tsx 막는 조건과 같게
+//   로그인 · 온보딩은 가짜 모드의 미리 보기로만 열림(preview). 실데이터면 로그인 · 온보딩 판정이 정하므로 줄을 숨김(mockOnly)
 //   온보딩은 흐름에서 빼면(ONBOARDING_IN_FLOW) 주소로도 안 열리고, 시간표 가져오기는 사진 · 캘린더 길이 둘 다 꺼지면 안 열림
 const STEPS = ONBOARDING_IN_FLOW ? activeSteps() : []; // 켜진 단계만 (lib/flags ONBOARDING_STEPS)
 const FIRST_ROWS: ScreenRow[] = canUseRealData
   ? [
-      { id: 'L01', name: '로그인', href: '/login' },
+      { id: 'L01', name: '로그인', href: '/login', mockOnly: true },
       ...STEPS.map((step, i) => ({
         id: 'L02',
         name: `온보딩 ${i + 1}/${STEPS.length} · ${STEP_TITLE[step]}`,
         href: { pathname: '/onboarding', params: { step } } as const,
+        mockOnly: true,
       })),
       { id: 'L03', name: '설정', href: '/settings' },
       ...(TIMETABLE_PATHS.photo || TIMETABLE_PATHS.calendar
@@ -108,5 +110,9 @@ const ALL_SECTIONS: ScreenSection[] = [
   },
 ];
 
-// 줄이 없는 절(실데이터를 못 쓰는 빌드의 "처음 · 설정")은 뺌
-export const SECTIONS = ALL_SECTIONS.filter((section) => section.rows.length > 0);
+// 지금 데이터 모드에서 열리는 줄만. 줄이 없는 절(실데이터를 못 쓰는 빌드의 "처음 · 설정")은 뺌
+export function sectionsFor(mode: DataMode): ScreenSection[] {
+  return ALL_SECTIONS.map((section) => ({ ...section, rows: section.rows.filter((row) => mode === 'mock' || !row.mockOnly) })).filter(
+    (section) => section.rows.length > 0,
+  );
+}

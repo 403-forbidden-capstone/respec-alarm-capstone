@@ -3,7 +3,7 @@ import { useState } from 'react';
 import { Platform, Pressable, StyleSheet, View } from 'react-native';
 
 import { Button, Card, confirm, Screen, SectionHeader, Segmented, Text, toast, TopBar } from '@/components/ui';
-import { SECTIONS } from '@/dev/screenList';
+import { sectionsFor } from '@/dev/screenList';
 import { useAuth } from '@/features/auth/AuthProvider';
 import { DataModeToggle, goAfterRender } from '@/features/auth/DataModeToggle';
 import { DevLoginForm } from '@/features/auth/DevLoginForm';
@@ -161,7 +161,7 @@ export default function ScreenListScreen() {
         </>
       ) : null}
 
-      {SECTIONS.map((section) => (
+      {sectionsFor(mode).map((section) => (
         <View key={section.title}>
           <SectionHeader title={section.title} right={section.issue} />
           <Card>
