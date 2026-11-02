@@ -44,3 +44,9 @@ export function stepNumber(id: OnboardingStepId, flags: StepFlags = ONBOARDING_S
   const list = activeSteps(flags);
   return { step: list.indexOf(id) + 1, total: list.length };
 }
+
+// 처음 열 단계 — 주소 step(개발 화면 목록에서 단계 바로 열기)이 켜진 단계면 그 단계, 아니면 첫 단계
+export function startStep(param: unknown, flags: StepFlags = ONBOARDING_STEPS): OnboardingStepId {
+  const list = activeSteps(flags);
+  return list.find((id) => id === param) ?? list[0];
+}

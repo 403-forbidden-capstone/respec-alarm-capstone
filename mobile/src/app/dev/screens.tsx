@@ -25,7 +25,7 @@ import { colors } from '@/theme';
 // 실데이터를 쓸 수 있고 모드를 바꿀 수 있는 빌드(웹 · 폰 개발용, lib/modePolicy.ts)일 때만 맨 위에서 데이터 모드를 바꿈 — 로그인 · 온보딩부터 E2E로 돌릴 때
 // 폰 출시용 빌드는 모드가 실데이터로 고정이라 토글이 없음. 가짜 데이터 시나리오 시각도 가짜 모드에서만 보임
 // 실데이터 모드에서 로그인 전이면 이메일 로그인(시드 계정, 웹 · 폰 개발용만), 로그인 후에는 로그아웃(폰 알람 · 기록 정리 포함)
-// 목업에 없는 로그인 · 온보딩 · 설정은 목록에 두지 않음 (#116)
+// 목업에 없는 로그인 · 온보딩 · 설정은 목록 맨 아래 "처음 · 설정" (dev/screenList)
 // "내 시험 데이터 지우기"는 실데이터 + 로그인 + 모드를 바꿀 수 있는 빌드(폰 출시용이 아님, D16)에서만 보임 — 내 일정 · 알람 · 기록 · AI 대화를 서버에서 지우고 폰 알람도 정리한 뒤 온보딩부터 다시 함. 계정 · 친구 · 그룹은 그대로
 // "온보딩부터 다시"는 온보딩이 흐름에 있을 때(lib/flags ONBOARDING_IN_FLOW)만 보임 — 아이디 · 집 · 기본값 · 온보딩 끝난 시각을 비워 처음 단계부터 다시 함
 const TIMES = [
@@ -87,8 +87,8 @@ export default function ScreenListScreen() {
   return (
     <Screen>
       <TopBar onBack={router.canGoBack() ? router.back : undefined} screenId="DEV" />
-      <Text variant="title">목업 화면 목록</Text>
-      <Text variant="lead">클릭 목업(mockup.html)의 화면 번호로 바로 열어요. 가짜 데이터 모드는 목업과 같은 데이터예요.</Text>
+      <Text variant="title">화면 목록</Text>
+      <Text variant="lead">화면 번호로 바로 열어요. 가짜 데이터 모드는 목업과 같은 데이터예요. 목업에 없는 로그인 · 온보딩 · 설정은 맨 아래예요.</Text>
 
       {canUseRealData && !modeLocked ? (
         <>

@@ -1,4 +1,4 @@
-import { router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import { useState, type ReactNode } from 'react';
 import { StyleSheet } from 'react-native';
 
@@ -24,7 +24,7 @@ import { useCalendarImport } from '@/features/onboarding/hooks/useCalendarImport
 import { usePhotoImport } from '@/features/onboarding/hooks/usePhotoImport';
 import { useTimetableStep } from '@/features/onboarding/hooks/useTimetableStep';
 import { permissionRows } from '@/features/onboarding/permissionRows';
-import { activeSteps, nextStep, ONBOARDING_ORDER, prevStep, stepNumber, type OnboardingStepId, type StepFlags } from '@/features/onboarding/steps';
+import { nextStep, ONBOARDING_ORDER, prevStep, startStep, stepNumber, type OnboardingStepId, type StepFlags } from '@/features/onboarding/steps';
 import { cleanHandle, cleanNickname, isHandleFormat, isNicknameOk, NICKNAME_MAX, shouldSaveHandle } from '@/features/onboarding/validate';
 import { ConsentStep } from '@/features/onboarding/views/ConsentStep';
 import { HandleStep } from '@/features/onboarding/views/HandleStep';
@@ -70,13 +70,15 @@ type StepView = {
 // 단계마다 [다음]에서 그 단계 값을 저장하고, 마지막 단계에서 온보딩 끝낸 시각(onboarded_at)을 적은 뒤 프로필을 다시 읽음
 // 다시 읽어 온보딩 판정이 꺼지면 이 화면은 사라지고 루트(_layout.tsx)가 홈으로 보냄 — 첫 일정으로 갈지는 lib/afterOnboarding에 적어 둠
 // 앱을 껐다 켜면 처음 단계부터 다시지만, 저장해 둔 값은 미리 채워져 있음
-// 가짜 데이터 모드(미리 보기)는 저장 없이 단계만 넘김
+// 가짜 데이터 모드(미리 보기)는 저장 없이 단계만 넘기고, 주소 step(/onboarding?step=home)이 있으면 그 단계부터 — 개발 화면 목록(dev/screenList)에서 단계 바로 열기
+//   실데이터는 주소와 상관없이 늘 첫 단계부터 (단계를 건너뛰어 저장이 빠지지 않게)
 export default function OnboardingScreen() {
   const { session, profile, enabled, refreshProfile } = useAuth();
   const { busy, run } = useAction();
   const userId = enabled ? (session?.user.id ?? null) : null; // null = 저장하지 않음
+  const { step: stepParam } = useLocalSearchParams<{ step?: string }>();
 
-  const [step, setStep] = useState<OnboardingStepId>(() => activeSteps(FLAGS)[0]);
+  const [step, setStep] = useState<OnboardingStepId>(() => startStep(userId == null ? stepParam : undefined, FLAGS));
   const [handle, setHandle] = useState(profile?.handle ?? '');
   const [savedHandle, setSavedHandle] = useState<string | null>(profile?.handle ?? null); // 지금까지 저장한 아이디 — profile은 단계 사이에 안 바뀌어서 따로 둠
   const [handleError, setHandleError] = useState<string | null>(null);
