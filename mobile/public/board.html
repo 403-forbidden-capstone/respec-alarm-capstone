@@ -250,12 +250,14 @@ const SCREENS = [
       { k: 'DB', t: '켜기 · 끄기', r: ['alarms'] },
       { k: '폰', t: '예약 취소 · 다시 예약', r: ['alarm-core'] },
     ] },
-  { code: 'H03', name: '알람 설정', tab: 'home', route: 'alarm/[id]', ui: [30], link: [29, 32], feat: ['①'],
+  { code: 'H03', name: '알람 설정', tab: 'home', route: 'alarm/[id]', ui: [30], link: [29, 32, 211], feat: ['①'],
     data: [
-      { k: 'DB', t: '연결 일정(눌러서 고치기 · 지우기) · 이동 조건 · 준비 시간', r: ['appointments', 'appointment_participants'] },
-      { k: 'DB', t: '예측 준비(P80) 근거', r: ['v_prepare_time_stats'] },
-      { k: 'Edge', t: '여유 시간 바꾸면 다시 계산 → 저장', r: ['alarm-suggest', 'alarm-commit'] },
-      { k: 'DB', t: '강도 직접 고르기 → 다시 예약', r: ['alarms'] },
+      { k: 'DB', t: '반복 일정 앞으로 회차 (둘 이상일 때 카드, 다음 3회 + 더 보기)', r: ['appointment_participants', 'appointments', 'alarms'] },
+      { k: 'DB', t: '연결 일정 · 이동 조건 · 준비 시간', r: ['appointments', 'appointment_participants'] },
+      { k: 'Edge', t: '연결 일정 고치기 · 지우기 — 반복이면 이번만 · 이후 모두, 지우면 5초 되돌리기 (D41)', r: ['appointment-edit'] },
+      { k: 'DB', t: '예측 준비 근거 — 최근 30건 · 깨우는 여유 분위수 · 최근 5번', r: ['daily_records', 'profiles'] },
+      { k: 'Edge', t: '출발 · 수단 · 이동 · 준비 · 여유 · 알람 시각 고침 → 다시 계산 → 저장', r: ['alarm-suggest', 'alarm-commit'] },
+      { k: 'Edge', t: '종류별 켜기 · 끄기, 강도 축(배경음 · 말소리 · 진동) 직접 고르기도 저장 때 같이', r: ['alarm-commit', 'alarms'] },
       { k: '폰', t: '다시 예약', r: ['alarm-core'] },
     ] },
   { code: 'H05', name: '새 일정', tab: 'home', route: 'schedule/new', ui: [30], link: [31, 32, 33], feat: ['①'],
@@ -279,6 +281,11 @@ const SCREENS = [
       { k: 'DB', t: '확인 알림 원탭 → ACKNOWLEDGED', r: ['alarm_events'] },
       { k: 'DB', t: '기상 확정 뒤 오늘 첫 일정 한 줄 · 나갈 시각 · 다음 알림', r: ['appointment_participants', 'alarms', 'alarm_events'] },
       { k: '배치', t: '끝까지 안 깨면 MISSED + 미확인 푸시 (다시 울림 없음, D2 B)', r: ['wake-check'] },
+    ] },
+  { code: 'NTF', name: '감지 정정', tab: 'home', route: 'detection', ui: [], link: [40], feat: ['①'],
+    data: [
+      { k: '폰', t: '감지 안내 알림 "출발 오전 8:30 감지"(소리 없음, 폰 안에서 만듦)을 누르면 열림', r: [] },
+      { k: 'DB', t: '열자마자 위치로 잡은 출발 · 도착 값 지우기 · 5초 되돌리기 (원탭 · 직접 입력 값은 그대로)', r: ['appointment_participants'] },
     ] },
   { code: 'F01·G01', name: '친구와 그룹', tab: 'group', route: '(tabs)/group', ui: [43], link: [44], feat: ['②'],
     data: [
@@ -336,19 +343,20 @@ const SCREENS = [
       { k: 'Edge', t: '시각이 바뀌면 저장 → 다시 예약', r: ['alarm-commit'] },
       { k: '배치', t: '매일 03:00 제안 만들기', r: ['suggestion-generate'] },
     ] },
-  { code: 'L01', name: '로그인', tab: 'common', route: 'login', ui: [25], link: [], feat: ['기반'], off: true,
+  { code: 'L01', name: '로그인', tab: 'common', route: 'login', ui: [25], link: [], feat: ['기반'],
     data: [{ k: 'Auth', t: '카카오 · 구글 → 가입하면 profiles 자동 생성', r: ['profiles'] }] },
   { code: 'L02', name: '온보딩', tab: 'common', route: 'onboarding', ui: [25], link: [], feat: ['기반'],
     data: [
-      { k: 'DB', t: '아이디 · 닉네임 · 잠귀 · 아침 준비 · 깨우는 여유 · 동의 · 온보딩 끝낸 시각', r: ['profiles'] },
+      { k: 'DB', t: '10단계: 아이디 → 닉네임 → 잠귀 → 집 → 아침 준비 → 시간표 → 동의 → 권한 → 기상 공유 → 첫 일정, 마지막에 온보딩 끝낸 시각', r: ['profiles'] },
       { k: 'Edge', t: '집 위치 · 수업 장소 검색 → 고른 집의 이름 · 좌표를 프로필에 저장', r: ['place-search'] },
-      { k: 'Edge', t: '수업 시간표 → 수업마다 알람 계산 · 저장(반복 일정)', r: ['alarm-suggest', 'alarm-commit'] },
-      { k: '폰', t: '권한 안내 — 알림 · 전체화면 알림 · 사용 정보 상태 읽기 · 누르면 설정 열기', r: ['alarm-core'] },
+      { k: 'Edge', t: '수업 시간표 — 직접 넣기 · 사진 읽기 · 폰 캘린더 → 수업마다 알람 계산 · 저장(반복 일정)', r: ['timetable-extract', 'alarm-suggest', 'alarm-commit'] },
+      { k: '폰', t: '권한 안내 — 알림 · 전체화면 · 정확한 알람 · 사용 정보 · 배터리 · 위치 상태 읽기 · 누르면 설정 열기', r: ['alarm-core'] },
     ] },
   { code: 'L03', name: '설정', tab: 'common', route: 'settings', ui: [25], link: [], feat: ['기반'],
     data: [
       { k: 'RPC', t: '푸시 토큰 등록', r: ['register_push_token', 'push_tokens'] },
       { k: 'DB', t: '닉네임 · 아이디 · 잠귀 · 깨우는 여유 · 준비 · 여유 · 이동 수단 · 집 바꾸기', r: ['profiles'] },
+      { k: 'Edge', t: '시간표 가져오기(사진 · 캘린더) → 확인 화면(timetable-import)에서 줄마다 고치고 저장', r: ['timetable-extract', 'alarm-suggest', 'alarm-commit'] },
       { k: '폰', t: '알림 설정 열기 · 점검표 들어가는 길', r: ['alarm-core'] },
     ] },
   { code: 'L04', name: '알람이 안 울릴 때', tab: 'common', route: 'ring-check', ui: [210], link: [], feat: ['기반'],
@@ -503,9 +511,9 @@ const CHECKS = [
     issues: [] },
 ];
 const KINDS = {
-  table: ['profiles', 'friends', 'groups', 'group_members', 'sharing_permissions', 'appointments', 'appointment_participants', 'alarms', 'alarm_events', 'daily_records', 'todos', 'routines', 'alarm_suggestions', 'conversation_sessions', 'daily_journals', 'push_tokens', 'v_prepare_time_stats'],
+  table: ['profiles', 'friends', 'groups', 'group_members', 'sharing_permissions', 'appointments', 'appointment_participants', 'alarms', 'alarm_events', 'daily_records', 'todos', 'routines', 'alarm_suggestions', 'conversation_sessions', 'daily_journals', 'push_tokens'],
   rpc: ['get_group_wake_status', 'get_public_profiles', 'find_profile_by_handle', 'join_group_by_invite_code', 'regenerate_invite_code', 'register_push_token'],
-  edge: ['place-search', 'alarm-suggest', 'alarm-commit', 'notify', 'wake-check', 'suggestion-generate', 'voice-*', 'journal-*'],
+  edge: ['place-search', 'alarm-suggest', 'alarm-commit', 'appointment-edit', 'timetable-extract', 'notify', 'wake-check', 'suggestion-generate', 'voice-*', 'journal-*'],
   phone: ['alarm-core'],
 };
 // 서버 함수 — [코드 이름, 쉬운 이름, 하는 일, 외부 서비스]. 10/27 밤 5개 배포(#167 코드), 새벽 배치 · AI는 아직

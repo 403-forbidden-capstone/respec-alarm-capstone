@@ -2,7 +2,7 @@ import { describe, expect, it } from '@jest/globals';
 
 import { ONBOARDING_STEPS } from '@/lib/flags';
 
-import { activeSteps, nextStep, ONBOARDING_ORDER, prevStep, stepNumber, type StepFlags } from '../steps';
+import { activeSteps, nextStep, ONBOARDING_ORDER, prevStep, startStep, stepNumber, type StepFlags } from '../steps';
 
 // 모두 켠 표 — 순서 배열 그대로
 const ALL_ON = Object.fromEntries(ONBOARDING_ORDER.map((id) => [id, true])) as StepFlags;
@@ -86,5 +86,21 @@ describe('stepNumber — 진행 표시', () => {
 
   it('꺼진 단계는 step 0', () => {
     expect(stepNumber('mic').step).toBe(0);
+  });
+});
+
+describe('startStep — 주소 step으로 단계 바로 열기', () => {
+  it('켜진 단계면 그 단계', () => {
+    expect(startStep('prepare')).toBe('prepare');
+    expect(startStep('first')).toBe('first');
+  });
+
+  it('없거나 꺼진 단계 · 낯선 값이면 첫 단계', () => {
+    expect(startStep(undefined)).toBe('handle');
+    expect(startStep('mic')).toBe('handle');
+    expect(startStep('nope')).toBe('handle');
+    expect(startStep(['home'])).toBe('handle');
+    expect(startStep('home', { ...ALL_ON, handle: false })).toBe('home');
+    expect(startStep(undefined, { ...ALL_ON, handle: false })).toBe('nickname');
   });
 });
