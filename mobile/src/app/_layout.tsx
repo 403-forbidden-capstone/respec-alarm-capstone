@@ -121,6 +121,8 @@ function RootStack() {
         <Stack.Screen name="routine/[id]" />
         {/* 감지 안내 알림에서 열리는 1탭 정정 (목업에 없는 화면) — features/location/hooks/useDetectionLinks */}
         <Stack.Screen name="detection" />
+        {/* 학교 시간표 (목업에 없는 화면, 11/2) — 반복 일정 보기 · 지우기. 가져오기 입구는 실데이터에서만 보임 */}
+        <Stack.Screen name="timetable" />
       </Stack.Protected>
       {/* 목업에 없는 설정 · 로그인 · 온보딩 — 실데이터를 못 쓰면 빠짐. 온보딩은 ONBOARDING_IN_FLOW가 꺼져도 따로 빠짐 */}
       <Stack.Protected guard={ready && canUseRealData}>

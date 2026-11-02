@@ -18,7 +18,7 @@ import { backOrHome } from '@/lib/nav';
 import { useAction } from '@/lib/useAction';
 
 // 시간표 가져오기 확인 — 사진 · 캘린더에서 읽어 온 수업을 줄마다 고치고 빼고, 학교 위치를 한 번 정한 뒤 [저장]
-// 줄 편집 · 저장은 온보딩 시간표 단계와 같은 부품(TimetableStep · useTimetableStep) — 설정에서 들어온 길이라 온보딩 밖에서도 같은 화면
+// 줄 편집 · 저장은 온보딩 시간표 단계와 같은 부품(TimetableStep · useTimetableStep) — 학교 시간표에서 들어온 길이라 온보딩 밖에서도 같은 화면
 // 읽어 온 수업은 화면을 열 때 features/onboarding/importHandoff에서 받음. 저장은 줄마다 길찾기 → 일정 만들기를 차례로 하고, 실패한 줄만 남아 고쳐서 다시 저장
 export default function TimetableImportScreen() {
   const { profile } = useAuth();

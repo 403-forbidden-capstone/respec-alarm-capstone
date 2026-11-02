@@ -40,8 +40,9 @@ const FIRST_ROWS: ScreenRow[] = canUseRealData
         mockOnly: true,
       })),
       { id: 'L03', name: '설정', href: '/settings' },
+      { id: 'L03', name: '학교 시간표 (반복 일정 보기 · 지우기 · 가져오기)', href: '/timetable' },
       ...(TIMETABLE_PATHS.photo || TIMETABLE_PATHS.calendar
-        ? [{ id: 'L03', name: '시간표 가져오기 확인 (설정 · 온보딩 시간표에서 들어옴)', href: '/timetable-import' as const }]
+        ? [{ id: 'L03', name: '시간표 가져오기 확인 (학교 시간표 · 온보딩 시간표에서 들어옴)', href: '/timetable-import' as const }]
         : []),
     ]
   : [];
