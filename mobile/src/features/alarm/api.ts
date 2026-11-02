@@ -3,6 +3,7 @@
 //   읽기 · 쓰기 위치는 docs/screen-data-map.md (H01 · H02 · H03 · H05 · H07 · H08)
 import { DEFAULT_COMMON_P80, personalPrepareOf, predictPrepare, prepareStatsOf, recentPrepareOf, wakeMarginOf } from '@shared/calc/prepare.ts';
 import { hasEarlierWake, isEveningWake } from '@shared/calc/wake.ts';
+import { Platform } from 'react-native';
 
 import { now } from '@/lib/clock';
 import { UserError } from '@/lib/errors';
@@ -55,7 +56,7 @@ import { LEVEL_FIELD, type EditLogLine } from './edits';
 import { hasAlarms, listOnePerSeries, toOccurrences } from './map';
 import { filterPlaces } from './places';
 import * as real from './real';
-import { getPreviewRing, isPreviewAlarmId, nextPreviewAlarm, parsePreviewAlarmId } from './ringPreview';
+import { getNearestPreviewRing, getPreviewRing, isPreviewAlarmId, nextPreviewAlarm, parsePreviewAlarmId } from './ringPreview';
 import { repeatLabel, repeatToRrule, rruleToRepeat } from './repeat';
 import { pickMorningSource, toDepartCheck, toMorningPlan, morningDay, wakeAlarmOf, type MorningSource } from './morning';
 import { ringNotice } from './notice';
@@ -736,7 +737,11 @@ function findAlarm(alarmId: string) {
 // 울림 화면 (H07) — 실제 울림은 알람 코어(네이티브). 이 화면은 디자인 · 웹 미리 보기용
 // 준비 · 출발 알람의 머리글(notice)은 폰 알림과 같은 글자 (서버 알림 문구 함수 — features/alarm/notice.ts)
 export async function getRing(alarmId: string): Promise<RingInfo | null> {
-  if (!isMock()) return isPreviewAlarmId(alarmId) ? getPreviewRing(alarmId) : real.getRing(); // 웹 미리보기는 저장된 일정으로 (ringPreview.ts)
+  if (!isMock()) {
+    const ring = isPreviewAlarmId(alarmId) ? await getPreviewRing(alarmId) : await real.getRing(); // 웹 미리보기는 저장된 일정으로 (ringPreview.ts)
+    // 웹은 폰 알람 코어가 없어 누른 알람을 못 찾을 때가 많음(가짜 데이터 주소 · 주소 없이 열기) → 저장된 알람 중 지금과 가장 가까운 것을 바로 울림
+    return ring ?? (Platform.OS === 'web' ? getNearestPreviewRing(alarmId) : null);
+  }
   const found = findAlarm(alarmId);
   if (!found || found.alarm.kind === 'ARRIVE') return null;
   const { a, alarm } = found;
