@@ -20,10 +20,15 @@ describe('학교 시간표 목록 (classSeriesOf)', () => {
     expect(classSeriesOf(list).map((s) => s.id)).toEqual(['mon-early', 'mon-late', 'tue', 'fri']);
   });
 
-  it('남이 만든 공동 약속은 지울 수 없음', () => {
-    const [mine, shared] = classSeriesOf([appt('a', '수업', ['월'], '09:00'), appt('b', '스터디', ['화'], '09:00', { canEdit: false })]);
-    expect(mine.canDelete).toBe(true);
-    expect(shared.canDelete).toBe(false);
+  it('남이 만든 공동 약속은 지울 수 없음, 내가 만든 공동 약속은 지울 수 있지만 공동 약속으로 표시', () => {
+    const [mine, others, myShared] = classSeriesOf([
+      appt('a', '수업', ['월'], '09:00', { groupName: null }),
+      appt('b', '스터디', ['화'], '09:00', { canEdit: false, groupName: '스터디방' }),
+      appt('c', '팀 회의', ['수'], '09:00', { groupName: '캡스톤' }),
+    ]);
+    expect([mine.canDelete, mine.shared]).toEqual([true, false]);
+    expect([others.canDelete, others.shared]).toEqual([false, true]);
+    expect([myShared.canDelete, myShared.shared]).toEqual([true, true]);
   });
 
   it('줄 아래 글자 = 반복 · 시각 · 장소', () => {

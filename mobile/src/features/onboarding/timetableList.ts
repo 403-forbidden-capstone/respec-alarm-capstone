@@ -12,13 +12,14 @@ export type ClassSeries = {
   at: Date;
   place: string;
   canDelete: boolean; // 남이 만든 공동 약속이면 false (N6)
+  shared: boolean; // 공동 약속(그룹) — 지우면 모두에게서 사라짐 (useScheduleEdit와 같은 기준: groupName)
 };
 
 // listAppointments(묶음당 회차 하나) → 반복 일정만, 첫 요일 · 시각 · 제목 순
 export function classSeriesOf(list: readonly Appointment[]): ClassSeries[] {
   return list
     .filter((a) => !a.standalone)
-    .map((a) => ({ id: a.id, title: a.title, days: sortDays(rruleToRepeat(a.recurrenceRule)), at: a.at, place: a.place, canDelete: a.canEdit !== false }))
+    .map((a) => ({ id: a.id, title: a.title, days: sortDays(rruleToRepeat(a.recurrenceRule)), at: a.at, place: a.place, canDelete: a.canEdit !== false, shared: a.groupName != null }))
     .filter((s) => s.days.length > 0)
     .sort((x, y) => WEEKDAYS.indexOf(x.days[0]) - WEEKDAYS.indexOf(y.days[0]) || minuteOfDay(x.at) - minuteOfDay(y.at) || x.title.localeCompare(y.title));
 }

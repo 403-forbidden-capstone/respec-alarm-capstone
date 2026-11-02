@@ -3,6 +3,7 @@ import { StyleSheet, View } from 'react-native';
 
 import { Button, Card, confirm, EmptyState, Loading, LoadError, Screen, Text, toast, TopBar } from '@/components/ui';
 import { deleteAppointment, listAppointments } from '@/features/alarm/api';
+import { deleteConfirmCopy } from '@/features/alarm/editSheet';
 import { useAuth } from '@/features/auth/AuthProvider';
 import { CalendarPickSheet } from '@/features/onboarding/components/CalendarPickSheet';
 import { ImportEntryCard } from '@/features/onboarding/components/ImportEntryCard';
@@ -19,7 +20,11 @@ import { colors } from '@/theme';
 // 학교 시간표 — 매주 반복하는 일정을 요일 · 시각 순으로 보고 지움. 사진 · 캘린더로 한 번에 넣는 입구도 여기 (설정에서 옮김, 11/2)
 //   들어오는 길: 홈 '오늘 일정' 옆 · 알람 목록 · 새 일정 맨 위
 //   지우기 = 그 반복의 다음 회차부터 모두(following) — 지난 회차 기록은 남음. 남이 만든 공동 약속은 못 지움(N6)
+//   내가 만든 공동 약속은 지우면 모두에게서 사라짐 → 확인 창에 그 문구(일정 지우기 창과 같은 글), [모두 지우기]에서는 뺌
 //   가져오기는 실데이터 + 로그인일 때만 (설정에 있던 때와 같은 조건 — 사진 읽기 · 저장이 서버를 부름)
+const KEEP_NOTE = '앞으로 회차와 알람이 모두 지워져요. 지난 기록은 남아요';
+const SHARED_NOTE = `${deleteConfirmCopy({ shared: true, repeated: true }).message}. 지난 기록은 남아요`;
+
 export default function TimetableScreen() {
   const { data, error, reload } = useLoad(listAppointments);
   const { session, enabled } = useAuth();
@@ -31,12 +36,12 @@ export default function TimetableScreen() {
   });
   const canImport = enabled && session != null && (TIMETABLE_PATHS.photo || TIMETABLE_PATHS.calendar);
   const series = data ? classSeriesOf(data) : [];
-  const deletable = series.filter((s) => s.canDelete);
+  const deletable = series.filter((s) => s.canDelete && !s.shared);
 
   // 하나씩 차례로 지움 — 중간에 실패해도 그때까지 지운 것이 목록에 반영되게 끝나면 늘 다시 읽음
-  const remove = (targets: ClassSeries[], title: string) =>
+  const remove = (targets: ClassSeries[], title: string, message = KEEP_NOTE) =>
     void run(async () => {
-      if (!(await confirm({ title, message: '앞으로 회차와 알람이 모두 지워져요. 지난 기록은 남아요', okLabel: '삭제', destructive: true }))) return;
+      if (!(await confirm({ title, message, okLabel: '삭제', destructive: true }))) return;
       try {
         for (const s of targets) await deleteAppointment(s.id, 'following');
       } finally {
@@ -100,7 +105,7 @@ export default function TimetableScreen() {
                 </Text>
               </View>
               {s.canDelete ? (
-                <Button variant="ghost" small label="삭제" onPress={() => remove([s], `'${s.title}' 일정을 지울까요?`)} disabled={busy} />
+                <Button variant="ghost" small label="삭제" onPress={() => remove([s], `'${s.title}' 일정을 지울까요?`, s.shared ? SHARED_NOTE : KEEP_NOTE)} disabled={busy} />
               ) : (
                 <Text variant="small" tone="sub">
                   공동 약속
