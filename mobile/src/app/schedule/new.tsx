@@ -15,6 +15,7 @@ import { MapPlaceSheet } from '@/features/alarm/components/MapPlaceSheet';
 import { PlaceSearchSheet } from '@/features/alarm/components/PlaceSearchSheet';
 import { RepeatPicker } from '@/features/alarm/components/RepeatPicker';
 import { SelectRow } from '@/features/alarm/components/SelectRow';
+import { TextLink } from '@/features/alarm/components/TextLink';
 import { TimeButton } from '@/features/alarm/components/TimeButton';
 import { TimePickBody } from '@/features/alarm/components/TimePicker';
 import { TimeRow } from '@/features/alarm/components/TimeRow';
@@ -221,6 +222,9 @@ export default function NewScheduleScreen() {
       <Text variant="lead" style={styles.lead}>
         약속 정보를 바탕으로 필요한 알람을 계산해요.
       </Text>
+      <View style={styles.timetableLink}>
+        <TextLink label="수업이면 학교 시간표로 한 번에 넣기" onPress={() => router.push('/timetable')} />
+      </View>
 
       <Card>
         <Text variant="label" tone="sub">
@@ -574,6 +578,7 @@ function CalcSteps({
 }
 
 const styles = StyleSheet.create({
+  timetableLink: { marginBottom: 12, alignSelf: 'flex-start' },
   title: { marginTop: 8, marginBottom: 4 },
   lead: { marginBottom: 18 },
   optLabel: { marginTop: 12, marginBottom: 8 },
