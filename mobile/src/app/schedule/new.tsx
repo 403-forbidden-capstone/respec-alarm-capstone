@@ -99,6 +99,7 @@ export default function NewScheduleScreen() {
   const [homeMissing, setHomeMissing] = useState(false); // 계산이 집 위치를 몰라 막힘 — 안내 카드 [집 정하기]
   const [homeSheetOpen, setHomeSheetOpen] = useState(false); // 집 찾기 시트
   const { busy: calculating, run: runCalculate } = useAction();
+  const { busy: locatingOrigin, run: runLocateOrigin } = useAction();
   const { busy: savingHome, run: runSaveHome } = useAction();
   const { busy: saving, run: runSave } = useAction();
   const current = useNow();
@@ -113,6 +114,7 @@ export default function NewScheduleScreen() {
     draft.time !== initial.time ||
     repeatToRrule(draft.repeat) !== repeatToRrule(initial.repeat) ||
     edited.place !== initial.place ||
+    draft.originLocation != null ||
     draft.transport !== initial.transport ||
     draft.importance !== initial.importance ||
     RING_KINDS.some((kind) => draft.alarms[kind] !== initial.alarms[kind]);
@@ -149,7 +151,7 @@ export default function NewScheduleScreen() {
         setEstimate(await estimateAppointment({ ...draft, title: draft.title.trim(), items: items.join(',') }));
       } catch (e) {
         // 원인이 집이면 토스트 대신 안내 카드 (장소를 다시 골라도 안 풀림)
-        if (!isHomeMissing({ error: e, hasHome: homeJustSaved || home != null, placeHasCoords: draft.placeLat != null && draft.placeLng != null })) throw e;
+        if (!isHomeMissing({ error: e, hasHome: homeJustSaved || home != null || draft.originLocation != null, placeHasCoords: draft.placeLat != null && draft.placeLng != null })) throw e;
         setHomeMissing(true);
         return;
       }
@@ -259,6 +261,18 @@ export default function NewScheduleScreen() {
         <Text variant="label" tone="sub">
           장소와 중요도
         </Text>
+        <KeyValueRow label="출발지" value={draft.originLocation ? '현재 위치' : (auth.profile?.home_name ?? '집 위치 미설정')} />
+        <Button variant="ghost" label="현재 위치를 출발지로 사용" loading={locatingOrigin} onPress={() => void runLocateOrigin(async () => {
+          const point = await locateOnce();
+          if (!point) {
+            toast('현재 위치를 가져오지 못했어요. 브라우저 위치 권한을 확인해 주세요');
+            return;
+          }
+          setDraft((previous) => ({ ...previous, originLocation: point }));
+          setHomeMissing(false);
+        }, '현재 위치를 가져오지 못했어요')} />
+        {draft.originLocation ? <Button variant="ghost" label="집을 출발지로 사용" onPress={() => setDraft((previous) => ({ ...previous, originLocation: undefined }))} /> : null}
+        {draft.originLocation ? <Text variant="caption">현재 위치는 이 일정의 출발지로 저장돼요. 반복 일정은 같은 출발지를 사용해요.</Text> : null}
         {userPlaces?.length ? (
           <View style={styles.chipsRow}>
             <FrequentPlaceChips places={userPlaces} selectedLabel={selectedUserPlaceLabel(draft, userPlaces)} onPick={(p) => setDraft((d) => withUserPlace(d, p))} />
