@@ -1,5 +1,5 @@
 // 지금 위치 한 번 — 지도 고르기 시트의 [현재 위치] 버튼이 부름. 앞(앱 사용 중) 권한만 쓰고 백그라운드 권한은 건드리지 않음
-//   · 저장하지 않음 (지도를 그 자리로 옮기는 데만 씀). 거절 · 실패 · 안드로이드가 아닌 곳(웹 · 시험)은 null
+//   · 저장하지 않음 (지도를 그 자리로 옮기는 데만 씀). 거절 · 실패 시 null
 //   · 8초 안에 못 읽으면 5분 안의 마지막 위치로 대신하고, 그것도 없으면 null
 import { Platform } from 'react-native';
 
@@ -28,7 +28,17 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
 }
 
 export async function locateOnce(): Promise<LatLng | null> {
-  if (Platform.OS !== 'android') return null; // 웹은 단순하게 건너뜀
+  if (Platform.OS === 'web') {
+    if (typeof navigator === 'undefined' || !navigator.geolocation) return null;
+    return new Promise((resolve) => {
+      navigator.geolocation.getCurrentPosition(
+        (position) => resolve(toLatLng(position)),
+        () => resolve(null),
+        { timeout: LOCATE_TIMEOUT_MS, maximumAge: LAST_KNOWN_MAX_AGE_MS },
+      );
+    });
+  }
+  if (Platform.OS !== 'android') return null;
   try {
     const Location = nativeLocation();
     const permission = await Location.requestForegroundPermissionsAsync();

@@ -81,11 +81,26 @@ describe('locateOnce', () => {
     await expect(none).resolves.toBeNull();
   });
 
-  it('웹 · iOS는 null (권한도 묻지 않음)', async () => {
-    mockOS = 'web';
-    await expect(locateOnce()).resolves.toBeNull();
+  it('iOS는 null (권한도 묻지 않음)', async () => {
     mockOS = 'ios';
     await expect(locateOnce()).resolves.toBeNull();
     expect(mockAsk).not.toHaveBeenCalled();
+  });
+
+  it('웹은 브라우저 위치를 읽고 실패하면 null', async () => {
+    mockOS = 'web';
+    const original = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+    const getCurrentPosition = jest.fn<(success: (position: unknown) => void, failure: () => void) => void>();
+    Object.defineProperty(globalThis, 'navigator', { configurable: true, value: { geolocation: { getCurrentPosition } } });
+    try {
+      getCurrentPosition.mockImplementationOnce((success) => success({ coords: { latitude: 37.55, longitude: 127.07 } }));
+      await expect(locateOnce()).resolves.toEqual({ lat: 37.55, lng: 127.07 });
+      getCurrentPosition.mockImplementationOnce((_success, failure) => failure());
+      await expect(locateOnce()).resolves.toBeNull();
+      expect(mockAsk).not.toHaveBeenCalled();
+    } finally {
+      if (original) Object.defineProperty(globalThis, 'navigator', original);
+      else Reflect.deleteProperty(globalThis, 'navigator');
+    }
   });
 });
