@@ -12,6 +12,15 @@ const mockSync = jest.fn<(options?: { ignoreThrottle?: boolean }) => Promise<voi
 const mockClear = jest.fn<() => Promise<void>>();
 jest.mock('../register', () => ({ syncLocation: (options?: { ignoreThrottle?: boolean }) => mockSync(options), clearOnSignOut: () => mockClear() }));
 
+let mockAlarmsSynced: (() => Promise<void>) | null = null;
+const mockUnsubscribeAlarms = jest.fn();
+jest.mock('@/lib/alarmSync', () => ({
+  onAlarmsSynced: (handler: () => Promise<void>) => {
+    mockAlarmsSynced = handler;
+    return mockUnsubscribeAlarms;
+  },
+}));
+
 let mockSignOutCleanup: (() => void) | null = null;
 const mockUnregister = jest.fn();
 jest.mock('@/lib/session', () => ({
@@ -36,6 +45,7 @@ beforeEach(() => {
   mockSync.mockResolvedValue(undefined);
   mockClear.mockResolvedValue(undefined);
   mockSignOutCleanup = null;
+  mockAlarmsSynced = null;
   mockListener = null;
   jest.spyOn(AppState, 'addEventListener').mockImplementation(((_type: string, listener: (state: AppStateStatus) => void) => {
     mockListener = listener;
@@ -64,12 +74,21 @@ describe('useLocationSync', () => {
     mount(props);
     expect(mockSync).not.toHaveBeenCalled();
     expect(AppState.addEventListener).not.toHaveBeenCalled();
+    expect(mockAlarmsSynced).toBeNull();
   });
 
   it('정리하면 앱 상태 구독을 끊음', () => {
     const cleanups = mount({ active: true, userId: 'user-1' });
     (cleanups[1] as () => void)();
     expect(mockRemove).toHaveBeenCalledTimes(1);
+    expect(mockUnsubscribeAlarms).toHaveBeenCalledTimes(1);
+  });
+
+  it('알람을 맞춘 뒤 일정 변경을 바로 반영하도록 5분 제한 없이 위치를 다시 맞춤', async () => {
+    mount({ active: true, userId: 'user-1' });
+    await mockAlarmsSynced?.();
+    expect(mockSync).toHaveBeenCalledTimes(2);
+    expect(mockSync).toHaveBeenLastCalledWith({ ignoreThrottle: true });
   });
 
   it('로그아웃 정리를 lib/session에 등록 — 로그아웃 때 지오펜스를 끄고 위치 기억을 지움 (로그인 전에도 등록)', () => {

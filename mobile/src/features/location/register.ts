@@ -29,6 +29,7 @@ const READ_BEFORE_MINUTES = 2 * 60;
 const READ_AFTER_MINUTES = 26 * 60;
 const PLAN_AHEAD_MINUTES = 24 * 60;
 const PARTICIPANT_LIMIT = 100;
+const NOT_CANCELED = 'exception_kind.is.null,exception_kind.neq.CANCELED';
 
 // 앱이 앞에 올 때마다 새로 읽지 않고 이만큼(분) 안이면 건너뜀 (syncLocation) — 서버 읽기 + 폰 저장소 읽기가 잦아지지 않게
 const SYNC_INTERVAL_MINUTES = 5;
@@ -47,6 +48,7 @@ async function readPlanSource(userId: string, nowMs: number): Promise<PlanSource
         'participant_id, origin_lat, origin_lng, departed_at, arrived_at, buffer_minutes, est_travel_minutes, appointments!inner(appointment_at, dest_lat, dest_lng, dest_radius_m), alarms(alarm_type, scheduled_at)',
       )
       .eq('user_id', userId)
+      .or(NOT_CANCELED, { referencedTable: 'appointments' })
       .gte('appointments.appointment_at', from)
       .lte('appointments.appointment_at', to)
       .limit(PARTICIPANT_LIMIT),
@@ -177,7 +179,7 @@ export async function refreshGeofences(options: { force?: boolean } = {}): Promi
 
 // 앱을 열 때 · 앞에 올 때 부르는 한 묶음 — 못 쓴 기록 쓰기 → 감시 목록 등록. SYNC_INTERVAL_MINUTES 안에 또 부르면 건너뜀 (ignoreThrottle로 건너뛰지 않기)
 //   5분 제한은 등록이 끝까지 간 때('ran')만 검 — 실패 · 일 안 한 때는 다음에 앞에 올 때 바로 다시
-//   부르는 곳: useLocationSync. L1의 알람 맞추기 끝 훅(onAlarmsSynced, L1 PR 3b)이 생기면 그것도 여기를 부름 (약속이 바뀐 직후 감시 목록을 새로 짜려고)
+//   부르는 곳: useLocationSync. 알람 맞추기 완료 후에도 호출해 약속 변경을 반영함
 let lastSyncAt = 0;
 let inFlight: Promise<void> | null = null;
 let rerun = false; // 돌고 있는 중에 ignoreThrottle로 또 불렀음 — 끝난 뒤 한 번 더 돎 (몇 번을 겹쳐 불러도 한 번만)
