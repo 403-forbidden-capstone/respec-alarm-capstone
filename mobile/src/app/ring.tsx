@@ -6,10 +6,13 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ScreenId, Text, toast } from '@/components/ui';
 import { dismissRing, getRing, snoozeRing, startRing, stopRing } from '@/features/alarm/api';
+import { useNextRing } from '@/features/alarm/components/NextRingButton';
 import { VoiceWave } from '@/features/alarm/components/VoiceWave';
+import { isPreviewAlarmId } from '@/features/alarm/ringPreview';
 import { snoozeView } from '@/features/alarm/snooze';
 import type { Appointment, RingKind } from '@/features/alarm/types';
 import { formatTime, timeParts } from '@/lib/format';
+import { isMock } from '@/lib/mode';
 import { backOrHome } from '@/lib/nav';
 import { useLoad } from '@/lib/useLoad';
 import { colors } from '@/theme';
@@ -48,6 +51,7 @@ export default function RingScreen() {
   const params = useLocalSearchParams<{ alarm?: string }>();
   const alarmId = params.alarm ?? 'a1:WAKE';
   const { data, error } = useLoad(() => getRing(alarmId));
+  const preview = !isMock() && isPreviewAlarmId(alarmId); // 웹 실데이터 미리보기 — 저장된 일정으로 보여 주기만, 기록 없음 (ringPreview.ts)
   // 읽는 동안에도 맞는 배경이 보이게 알람 id(<일정>:<종류>)의 종류를 먼저 씀
   const fromId = params.alarm?.split(':')[1];
   const kind: RingKind = data?.kind ?? (fromId && Object.keys(HEAD).includes(fromId) ? (fromId as RingKind) : 'WAKE');
@@ -84,7 +88,7 @@ export default function RingScreen() {
     if (!data || handled.current || !canSnooze(data.snoozeCount, data.snoozeLimit)) return;
     handled.current = true;
     await snoozeRing(data.alarmId, minutes, data.at);
-    toast(`${minutes}분 뒤 다시 울려요`);
+    toast(preview ? '미리보기라 다시 울리지 않아요' : `${minutes}분 뒤 다시 울려요`);
     backOrHome();
   }
 
@@ -108,11 +112,16 @@ export default function RingScreen() {
     <SafeAreaView style={[styles.screen, { backgroundColor: BACKGROUND[kind] }]} edges={['top', 'bottom']}>
       <StatusBar style="light" />
       {data && done && data.kind !== 'WAKE' ? (
-        <DonePanel kind={data.kind} appointment={data.appointment} />
+        <DonePanel kind={data.kind} appointment={data.appointment} next={preview ? data.alarmId : null} />
       ) : data ? (
         <View style={styles.body} accessibilityRole="alert" accessibilityLabel={data.notice ?? HEAD[kind]}>
           <View style={styles.top}>
             <View><ScreenId id="H07" tone="inverse" style={styles.faded45} /></View>
+            {preview ? (
+              <Text variant="caption" tone="inverse" style={styles.faded65}>
+                미리보기 · 기록 안 남음
+              </Text>
+            ) : null}
             {data.important ? (
               <View style={styles.chip}>
                 <Text variant="label" tone="inverse">
@@ -240,8 +249,10 @@ export default function RingScreen() {
 }
 
 // 준비 · 출발 알람을 끈 뒤 안내 — 준비물 체크(준비) · 이동 시간과 도착 목표(출발), "확인"을 누르면 홈
-function DonePanel({ kind, appointment: a }: { kind: Exclude<RingKind, 'WAKE'>; appointment: Appointment }) {
+// next = 웹 미리보기에서 이어 볼 알람의 기준(지금 끈 알람 id) — 있으면 [다음 알람 울려 보기]
+function DonePanel({ kind, appointment: a, next: from }: { kind: Exclude<RingKind, 'WAKE'>; appointment: Appointment; next: string | null }) {
   const [checked, setChecked] = useState<string[]>([]);
+  const next = useNextRing(from);
   const arrive = a.alarms.find((x) => x.kind === 'ARRIVE');
   return (
     <View style={styles.body}>
@@ -310,6 +321,13 @@ function DonePanel({ kind, appointment: a }: { kind: Exclude<RingKind, 'WAKE'>; 
       </View>
 
       <View style={styles.bottom}>
+        {next ? (
+          <Pressable onPress={next.open} accessibilityRole="button" style={[styles.button, styles.closeButton, styles.nextButton]}>
+            <Text variant="button" style={{ color: colors.ringWake }}>
+              {next.label}
+            </Text>
+          </Pressable>
+        ) : null}
         <Pressable onPress={() => router.dismissTo('/')} accessibilityRole="button" style={[styles.button, styles.closeButton]}>
           <Text variant="button" style={{ color: colors.ringWake }}>
             확인
@@ -325,6 +343,7 @@ const styles = StyleSheet.create({
   body: { flex: 1, paddingTop: 10, paddingHorizontal: 22, paddingBottom: 28 },
   missing: { flex: 1, justifyContent: 'center', gap: 16, paddingHorizontal: 22 },
   closeButton: { backgroundColor: colors.inverse },
+  nextButton: { marginBottom: 10 },
   top: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', minHeight: 26 },
   chip: {
     height: 26,

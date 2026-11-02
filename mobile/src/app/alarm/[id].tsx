@@ -1,7 +1,7 @@
 import { prepareRecentLabel, prepareSourceLabel } from '@shared/calc/prepare.ts';
-import { useLocalSearchParams } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { Platform, StyleSheet, View } from 'react-native';
 
 import { Button, Card, Chip, DateSheet, EmptyState, KeyValueRow, Loading, LoadError, Screen, Sheet, Stepper, Text, toast, Toggle, TopBar } from '@/components/ui';
 import { getAppointment, listOccurrences, listPlaces, previewAlarms, saveAlarmSettings } from '@/features/alarm/api';
@@ -14,6 +14,7 @@ import { RepeatScopeSheet } from '@/features/alarm/components/RepeatScopeSheet';
 import { ScheduleEditSheet } from '@/features/alarm/components/ScheduleEditSheet';
 import { SelectRow } from '@/features/alarm/components/SelectRow';
 import { TextLink } from '@/features/alarm/components/TextLink';
+import { previewAlarmId } from '@/features/alarm/ringPreview';
 import { TimeButton } from '@/features/alarm/components/TimeButton';
 import { TimeSheet } from '@/features/alarm/components/TimePicker';
 import { useScheduleEdit } from '@/features/alarm/hooks/useScheduleEdit';
@@ -385,6 +386,23 @@ function Detail({ appointment: a, reload }: { appointment: AppointmentDetail; re
             }
           />
         ))}
+        {/* 웹은 폰 알람이 울리지 않아 저장된 알람으로 울림 화면을 미리 봄 — 끄면 다음 알람으로 이어짐 (ringPreview.ts) */}
+        {Platform.OS === 'web' ? (
+          <View style={styles.previewRow}>
+            <Text variant="caption" tone="faint">
+              웹 미리보기
+            </Text>
+            {a.alarms
+              .filter((x) => x.kind !== 'ARRIVE' && x.enabled)
+              .map((x) => (
+                <TextLink
+                  key={x.kind}
+                  label={`${KIND_LABEL[x.kind]} 울려 보기`}
+                  onPress={() => router.push({ pathname: '/ring', params: { alarm: previewAlarmId(a.id, x.kind as RingKind) } })}
+                />
+              ))}
+          </View>
+        ) : null}
         {blocked ? (
           <Text variant="caption" tone="warn" style={styles.note} accessibilityLiveRegion="polite">
             {blocked}
@@ -563,6 +581,7 @@ const styles = StyleSheet.create({
   tail: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   sub: { marginTop: 4 },
   timeRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  previewRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 12, marginTop: 10 },
   axis: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginTop: 12 },
   axisName: { flexDirection: 'row', alignItems: 'center', flexShrink: 1, gap: 6 },
   manual: { backgroundColor: colors.chip, borderRadius: 8, paddingHorizontal: 6, overflow: 'hidden' },
