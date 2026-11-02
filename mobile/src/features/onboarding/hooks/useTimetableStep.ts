@@ -21,7 +21,7 @@ const SOURCE = '온보딩 시간표'; // createAppointment의 출처 글자
 //   성공한 줄은 result 'ok' (다시 안 만들고 편집도 막음, 지우기만), 실패한 줄은 'error' + 이유를 달고 거기서 멈춤 → 고쳐서 다시 누르면 'ok'가 아닌 줄만 이어서 저장
 //   첫 성공 뒤 알림 안내를 한 번 (N3 · D38) — 온보딩 중에는 앱 화면이 막혀 있어 화면 이동은 하지 않음
 // transport = 온보딩 '아침 준비'에서 고른(또는 프로필) 이동 수단 — 모든 줄이 같이 씀
-// initial = 화면을 열 때 이미 가져온 수업이 있을 때(설정에서 사진 · 캘린더로 들어온 경우) — 처음부터 줄 + 안내가 채워져 있음
+// initial = 화면을 열 때 이미 가져온 수업이 있을 때(학교 시간표에서 사진 · 캘린더로 들어온 경우) — 처음부터 줄 + 안내가 채워져 있음
 export function useTimetableStep(transport: Transport, initial?: ImportBatch | null) {
   const [start] = useState(() => (initial ? startImport(initial, MAX_CLASS_ROWS) : null));
   const [rows, setRows] = useState<ClassRow[]>(start?.rows ?? []);
