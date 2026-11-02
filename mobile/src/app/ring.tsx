@@ -51,7 +51,7 @@ export default function RingScreen() {
   const params = useLocalSearchParams<{ alarm?: string }>();
   const alarmId = params.alarm ?? 'a1:WAKE';
   const { data, error } = useLoad(() => getRing(alarmId));
-  const preview = !isMock() && isPreviewAlarmId(alarmId); // 웹 실데이터 미리보기 — 저장된 일정으로 보여 주기만, 기록 없음 (ringPreview.ts)
+  const preview = !isMock() && data != null && isPreviewAlarmId(data.alarmId); // 웹 실데이터 미리보기 — 저장된 일정으로 보여 주기만, 기록 없음 (ringPreview.ts). 가장 가까운 알람으로 바뀐 경우도 읽은 알람 id로 앎
   // 읽는 동안에도 맞는 배경이 보이게 알람 id(<일정>:<종류>)의 종류를 먼저 씀
   const fromId = params.alarm?.split(':')[1];
   const kind: RingKind = data?.kind ?? (fromId && Object.keys(HEAD).includes(fromId) ? (fromId as RingKind) : 'WAKE');
