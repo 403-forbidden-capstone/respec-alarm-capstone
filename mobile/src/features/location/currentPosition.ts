@@ -49,7 +49,7 @@ export async function locateWithReason(): Promise<LocateResult> {
     const permission = await Location.requestForegroundPermissionsAsync();
     if (!permission.granted) return { point: null, reason: 'denied' };
     try {
-      const here = toLatLng(await withTimeout(Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced }), LOCATE_TIMEOUT_MS));
+      const here = toLatLng(await withTimeout(Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High }), LOCATE_TIMEOUT_MS));
       if (here) return { point: here, reason: null };
     } catch {
       /* 시간 초과 · 위치 꺼짐 — 아래에서 마지막 위치로 */

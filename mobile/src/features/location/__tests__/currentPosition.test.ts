@@ -19,7 +19,7 @@ const mockBackground = jest.fn<() => Promise<{ granted: boolean }>>();
 const mockPosition = jest.fn<(options: { accuracy: number }) => Promise<{ coords: { latitude: number; longitude: number } }>>();
 const mockLastKnown = jest.fn<(options: { maxAge: number }) => Promise<{ coords: { latitude: number; longitude: number } } | null>>();
 jest.mock('expo-location', () => ({
-  Accuracy: { Balanced: 3 },
+  Accuracy: { High: 4 },
   requestForegroundPermissionsAsync: () => mockAsk(),
   requestBackgroundPermissionsAsync: () => mockBackground(),
   getCurrentPositionAsync: (options: { accuracy: number }) => mockPosition(options),
@@ -39,9 +39,9 @@ afterEach(() => {
 });
 
 describe('locateOnce', () => {
-  it('앞 권한을 물어 허용이면 균형 정확도로 한 번 읽어 {lat, lng}', async () => {
+  it('앞 권한을 물어 허용이면 높은 정확도로 한 번 읽어 {lat, lng}', async () => {
     await expect(locateOnce()).resolves.toEqual({ lat: 37.55, lng: 127.07 });
-    expect(mockPosition).toHaveBeenCalledWith({ accuracy: 3 });
+    expect(mockPosition).toHaveBeenCalledWith({ accuracy: 4 });
     expect(mockBackground).not.toHaveBeenCalled(); // 백그라운드 권한은 건드리지 않음
   });
 
