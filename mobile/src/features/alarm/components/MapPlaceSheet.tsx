@@ -162,7 +162,7 @@ function MapPlaceBody({ onPick, search, reverse, locate, center, suggestedNames,
     setLocating(false);
     if (!here) {
       setLocateFailed(true);
-      toast('현재 위치를 가져오지 못했어요. 위치 권한을 확인해 주세요');
+      toast('현재 위치를 가져오지 못했어요. 위치 설정을 확인하거나 장소를 검색해 주세요');
       return;
     }
     setLocateFailed(false);
