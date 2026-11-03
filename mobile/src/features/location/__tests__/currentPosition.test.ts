@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, jest } from '@jest/globals';
 
-import { LOCATE_TIMEOUT_MS, locateOnce } from '../currentPosition';
+import { LOCATE_TIMEOUT_MS, locateOnce, locateWithReason } from '../currentPosition';
 
 // 지금 위치 한 번 — 안드로이드에서만 expo-location을 부름. 권한은 앞(앱 사용 중)만 물음
 let mockOS = 'android';
@@ -19,7 +19,7 @@ const mockBackground = jest.fn<() => Promise<{ granted: boolean }>>();
 const mockPosition = jest.fn<(options: { accuracy: number }) => Promise<{ coords: { latitude: number; longitude: number } }>>();
 const mockLastKnown = jest.fn<(options: { maxAge: number }) => Promise<{ coords: { latitude: number; longitude: number } } | null>>();
 jest.mock('expo-location', () => ({
-  Accuracy: { Balanced: 3 },
+  Accuracy: { High: 4 },
   requestForegroundPermissionsAsync: () => mockAsk(),
   requestBackgroundPermissionsAsync: () => mockBackground(),
   getCurrentPositionAsync: (options: { accuracy: number }) => mockPosition(options),
@@ -39,9 +39,9 @@ afterEach(() => {
 });
 
 describe('locateOnce', () => {
-  it('앞 권한을 물어 허용이면 균형 정확도로 한 번 읽어 {lat, lng}', async () => {
+  it('앞 권한을 물어 허용이면 높은 정확도로 한 번 읽어 {lat, lng}', async () => {
     await expect(locateOnce()).resolves.toEqual({ lat: 37.55, lng: 127.07 });
-    expect(mockPosition).toHaveBeenCalledWith({ accuracy: 3 });
+    expect(mockPosition).toHaveBeenCalledWith({ accuracy: 4 });
     expect(mockBackground).not.toHaveBeenCalled(); // 백그라운드 권한은 건드리지 않음
   });
 
@@ -81,11 +81,42 @@ describe('locateOnce', () => {
     await expect(none).resolves.toBeNull();
   });
 
-  it('웹 · iOS는 null (권한도 묻지 않음)', async () => {
-    mockOS = 'web';
-    await expect(locateOnce()).resolves.toBeNull();
+  it('iOS는 null (권한도 묻지 않음)', async () => {
     mockOS = 'ios';
     await expect(locateOnce()).resolves.toBeNull();
     expect(mockAsk).not.toHaveBeenCalled();
+  });
+
+  it('웹은 브라우저 위치를 읽고 실패하면 null', async () => {
+    mockOS = 'web';
+    const original = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+    const getCurrentPosition = jest.fn<(success: (position: unknown) => void, failure: () => void) => void>();
+    Object.defineProperty(globalThis, 'navigator', { configurable: true, value: { geolocation: { getCurrentPosition } } });
+    try {
+      getCurrentPosition.mockImplementationOnce((success) => success({ coords: { latitude: 37.55, longitude: 127.07 } }));
+      await expect(locateOnce()).resolves.toEqual({ lat: 37.55, lng: 127.07 });
+      getCurrentPosition.mockImplementationOnce((_success, failure) => failure());
+      await expect(locateOnce()).resolves.toBeNull();
+      expect(mockAsk).not.toHaveBeenCalled();
+    } finally {
+      if (original) Object.defineProperty(globalThis, 'navigator', original);
+      else Reflect.deleteProperty(globalThis, 'navigator');
+    }
+  });
+
+  it('웹에서 권한 거부와 위치 확인 시간 초과를 구분함', async () => {
+    mockOS = 'web';
+    const original = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+    const getCurrentPosition = jest.fn<(success: (position: unknown) => void, failure: (error: { code: number }) => void) => void>();
+    Object.defineProperty(globalThis, 'navigator', { configurable: true, value: { geolocation: { getCurrentPosition } } });
+    try {
+      getCurrentPosition.mockImplementationOnce((_success, failure) => failure({ code: 1 }));
+      await expect(locateWithReason()).resolves.toEqual({ point: null, reason: 'denied' });
+      getCurrentPosition.mockImplementationOnce((_success, failure) => failure({ code: 3 }));
+      await expect(locateWithReason()).resolves.toEqual({ point: null, reason: 'timeout' });
+    } finally {
+      if (original) Object.defineProperty(globalThis, 'navigator', original);
+      else Reflect.deleteProperty(globalThis, 'navigator');
+    }
   });
 });
