@@ -27,30 +27,40 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
 }
 
-export async function locateOnce(): Promise<LatLng | null> {
+export type LocateResult = { point: LatLng; reason: null } | { point: null; reason: 'denied' | 'timeout' | 'unavailable' };
+
+export async function locateWithReason(): Promise<LocateResult> {
   if (Platform.OS === 'web') {
-    if (typeof navigator === 'undefined' || !navigator.geolocation) return null;
+    if (typeof navigator === 'undefined' || !navigator.geolocation) return { point: null, reason: 'unavailable' };
     return new Promise((resolve) => {
       navigator.geolocation.getCurrentPosition(
-        (position) => resolve(toLatLng(position)),
-        () => resolve(null),
+        (position) => {
+          const point = toLatLng(position);
+          resolve(point ? { point, reason: null } : { point: null, reason: 'unavailable' });
+        },
+        (error) => resolve({ point: null, reason: error?.code === 1 ? 'denied' : error?.code === 3 ? 'timeout' : 'unavailable' }),
         { timeout: LOCATE_TIMEOUT_MS, maximumAge: LAST_KNOWN_MAX_AGE_MS },
       );
     });
   }
-  if (Platform.OS !== 'android') return null;
+  if (Platform.OS !== 'android') return { point: null, reason: 'unavailable' };
   try {
     const Location = nativeLocation();
     const permission = await Location.requestForegroundPermissionsAsync();
-    if (!permission.granted) return null;
+    if (!permission.granted) return { point: null, reason: 'denied' };
     try {
       const here = toLatLng(await withTimeout(Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced }), LOCATE_TIMEOUT_MS));
-      if (here) return here;
+      if (here) return { point: here, reason: null };
     } catch {
       /* 시간 초과 · 위치 꺼짐 — 아래에서 마지막 위치로 */
     }
-    return toLatLng(await Location.getLastKnownPositionAsync({ maxAge: LAST_KNOWN_MAX_AGE_MS }));
+    const last = toLatLng(await Location.getLastKnownPositionAsync({ maxAge: LAST_KNOWN_MAX_AGE_MS }));
+    return last ? { point: last, reason: null } : { point: null, reason: 'unavailable' };
   } catch {
-    return null; // 권한 확인 실패 등 — 좌표 원문은 남기지 않음
+    return { point: null, reason: 'unavailable' }; // 좌표 원문은 남기지 않음
   }
+}
+
+export async function locateOnce(): Promise<LatLng | null> {
+  return (await locateWithReason()).point;
 }

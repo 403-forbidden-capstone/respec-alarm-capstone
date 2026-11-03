@@ -43,7 +43,7 @@ import { DESTINATION_RADIUS_PRESETS, HOME_RADIUS_PRESETS } from '@/features/loca
 import { HOME_RADIUS_M } from '@/features/location/constants';
 import { homePatchOf } from '@/features/onboarding/home';
 import { FrequentPlaceChips } from '@/features/location/components/FrequentPlaceChips';
-import { locateOnce } from '@/features/location/currentPosition';
+import { locateOnce, locateWithReason } from '@/features/location/currentPosition';
 import { listUserPlaces } from '@/features/location/api';
 import { foundScheduleDraft, saveFoundSchedule } from '@/features/voice/api';
 import { now } from '@/lib/clock';
@@ -92,6 +92,7 @@ export default function NewScheduleScreen() {
   const [estimate, setEstimate] = useState<Estimate | null>(null);
   const [pick, setPick] = useState<RingKind | null>(null); // 확인 시트에서 시각을 고르는 알람 (D43)
   const [placeOpen, setPlaceOpen] = useState(false); // 장소 검색 시트
+  const [originOpen, setOriginOpen] = useState(false); // 이번 일정의 출발지 선택
   const [placeQuery, setPlaceQuery] = useState(''); // 시트를 열 때 채워 둘 검색어 (캠퍼스 [건물 검색]이면 그 이름)
   const [pickedPlace, setPickedPlace] = useState<Place | null>(null); // 방금 고른 장소의 분류(category)를 경고 판정에만 잠깐 들고 있음 — 저장하지 않음 (D5)
   const auth = useAuth();
@@ -266,18 +267,39 @@ export default function NewScheduleScreen() {
         <Text variant="label" tone="sub">
           장소와 중요도
         </Text>
-        <KeyValueRow label="출발지" value={draft.originLocation ? '현재 위치' : (auth.profile?.home_name ?? '집 위치 미설정')} />
+        <KeyValueRow label="출발지" value={draft.originLocation ? (draft.originName || '현재 위치') : (auth.profile?.home_name ?? '집 위치 미설정')} />
         <Button variant="ghost" label="현재 위치를 출발지로 사용" loading={locatingOrigin} onPress={() => void runLocateOrigin(async () => {
-          const point = await locateOnce();
+          const { point, reason } = await locateWithReason();
           if (!point) {
-            toast('현재 위치를 가져오지 못했어요. 브라우저 위치 권한을 확인해 주세요');
+            toast(reason === 'denied' ? '위치 권한이 꺼져 있어요. 브라우저나 기기 설정을 확인해 주세요' : reason === 'timeout' ? '위치 확인 시간이 지났어요. 다시 시도하거나 출발지를 검색해 주세요' : '위치를 확인하지 못했어요. 기기 설정을 확인하거나 출발지를 검색해 주세요');
             return;
           }
-          setDraft((previous) => ({ ...previous, originLocation: point }));
+          setDraft((previous) => ({ ...previous, originLocation: point, originName: undefined }));
           setHomeMissing(false);
         }, '현재 위치를 가져오지 못했어요')} />
-        {draft.originLocation ? <Button variant="ghost" label="집을 출발지로 사용" onPress={() => setDraft((previous) => ({ ...previous, originLocation: undefined }))} /> : null}
-        {draft.originLocation ? <Text variant="caption">현재 위치는 이 일정의 출발지로 저장돼요. 반복 일정은 같은 출발지를 사용해요.</Text> : null}
+        <Button variant="ghost" label="출발지 검색" onPress={() => setOriginOpen(true)} />
+        {draft.originLocation ? <Button variant="ghost" label="집을 출발지로 사용" onPress={() => setDraft((previous) => ({ ...previous, originLocation: undefined, originName: undefined }))} /> : null}
+        {draft.originLocation ? <Text variant="caption">선택한 위치는 이 일정의 출발지로 저장돼요. 반복 일정은 같은 출발지를 사용해요.</Text> : null}
+        <MapPlaceSheet
+          visible={originOpen}
+          onClose={() => setOriginOpen(false)}
+          title="출발지 고르기"
+          search={(query) => listPlaces(query, home)}
+          reverse={reverseAddress}
+          locate={locateOnce}
+          center={draft.originLocation ?? home}
+          areaWarning={null}
+          onPick={(place) => {
+            const { lat, lng } = place;
+            if (lat == null || lng == null) {
+              toast('이 장소의 위치를 확인하지 못했어요. 다른 장소를 골라 주세요');
+              return;
+            }
+            setDraft((previous) => ({ ...previous, originLocation: { lat, lng }, originName: place.name }));
+            setHomeMissing(false);
+            setOriginOpen(false);
+          }}
+        />
         {userPlaces?.length ? (
           <View style={styles.chipsRow}>
             <FrequentPlaceChips places={userPlaces} selectedLabel={selectedUserPlaceLabel(draft, userPlaces)} onPick={(p) => setDraft((d) => withUserPlace(d, p))} />

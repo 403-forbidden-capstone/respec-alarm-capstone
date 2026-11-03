@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, jest } from '@jest/globals';
 
-import { LOCATE_TIMEOUT_MS, locateOnce } from '../currentPosition';
+import { LOCATE_TIMEOUT_MS, locateOnce, locateWithReason } from '../currentPosition';
 
 // 지금 위치 한 번 — 안드로이드에서만 expo-location을 부름. 권한은 앞(앱 사용 중)만 물음
 let mockOS = 'android';
@@ -98,6 +98,22 @@ describe('locateOnce', () => {
       getCurrentPosition.mockImplementationOnce((_success, failure) => failure());
       await expect(locateOnce()).resolves.toBeNull();
       expect(mockAsk).not.toHaveBeenCalled();
+    } finally {
+      if (original) Object.defineProperty(globalThis, 'navigator', original);
+      else Reflect.deleteProperty(globalThis, 'navigator');
+    }
+  });
+
+  it('웹에서 권한 거부와 위치 확인 시간 초과를 구분함', async () => {
+    mockOS = 'web';
+    const original = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+    const getCurrentPosition = jest.fn<(success: (position: unknown) => void, failure: (error: { code: number }) => void) => void>();
+    Object.defineProperty(globalThis, 'navigator', { configurable: true, value: { geolocation: { getCurrentPosition } } });
+    try {
+      getCurrentPosition.mockImplementationOnce((_success, failure) => failure({ code: 1 }));
+      await expect(locateWithReason()).resolves.toEqual({ point: null, reason: 'denied' });
+      getCurrentPosition.mockImplementationOnce((_success, failure) => failure({ code: 3 }));
+      await expect(locateWithReason()).resolves.toEqual({ point: null, reason: 'timeout' });
     } finally {
       if (original) Object.defineProperty(globalThis, 'navigator', original);
       else Reflect.deleteProperty(globalThis, 'navigator');

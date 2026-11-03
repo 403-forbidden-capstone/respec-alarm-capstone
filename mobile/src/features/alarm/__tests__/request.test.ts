@@ -348,6 +348,14 @@ describe('새 일정 저장 요청 (createCommitBody)', () => {
     expect((createCommitBody(calculated, {}, []) as { participant: Record<string, unknown> }).participant.origin).toEqual({ name: '현재 위치', lat: 37.55, lng: 127.07 });
   });
 
+  it('검색으로 고른 출발지 이름과 좌표도 계산과 저장에 유지함', () => {
+    const selected = draft({ originName: '서울역', originLocation: { lat: 37.55, lng: 126.97 } });
+    const requested = newAppointmentBody(selected, at('10:00'));
+    const calculated = toEstimate(suggestion(), selected, at('10:00'), requested, 1);
+    expect(calculated.appointment.origin).toBe('서울역');
+    expect((createCommitBody(calculated, {}, []) as { participant: Record<string, unknown> }).participant.origin).toEqual({ name: '서울역', lat: 37.55, lng: 126.97 });
+  });
+
   it('확인 시트에서 보여 준 이동 · 준비 · 준비 전 활동 · 기상 여부를 그대로 박고, 길찾기 값은 API로', () => {
     const body = createCommitBody(estimate(), {}, []) as { appointment: Record<string, unknown>; participant: Record<string, unknown>; manual_times: unknown; edits: unknown };
     expect(body.appointment).toMatchObject({ title: '스터디', appointment_at: iso('10:00'), importance: 'LOW' });

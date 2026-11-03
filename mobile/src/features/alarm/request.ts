@@ -139,7 +139,7 @@ export function newAppointmentBody(d: AppointmentDraft, at: Date): Body {
       importance: d.importance,
       ...(rule ? { recurrence_rule: rule } : {}),
     },
-    participant: { origin: d.originLocation ? { name: '현재 위치', lat: d.originLocation.lat, lng: d.originLocation.lng } : { name: ORIGIN_HOME }, transport_type: d.transport },
+    participant: { origin: d.originLocation ? { name: d.originName || '현재 위치', lat: d.originLocation.lat, lng: d.originLocation.lng } : { name: ORIGIN_HOME }, transport_type: d.transport },
     kinds: RING_KINDS.filter((kind) => d.alarms[kind]),
   };
 }
@@ -316,7 +316,7 @@ export function toEstimate(s: Suggestion, d: AppointmentDraft, at: Date, body: B
     title: d.title.trim() || '새 일정',
     at,
     place: d.place,
-    origin: d.originLocation ? '현재 위치' : ORIGIN_HOME,
+    origin: d.originLocation ? d.originName || '현재 위치' : ORIGIN_HOME,
     transport: d.transport,
     travelMinutes,
     travelSource: travelLabel(s.travel.source),
