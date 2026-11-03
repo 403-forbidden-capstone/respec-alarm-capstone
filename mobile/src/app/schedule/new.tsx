@@ -218,7 +218,7 @@ export default function NewScheduleScreen() {
   }
 
   // 계산 버튼은 화면 아래에 고정 — 폼이 길어 스크롤 끝까지 내려가지 않아도 보이게 (H03 저장과 같음). 키보드가 올라오면 같이 올라감
-  const footer = <Button label={anyAlarm ? '알람 계산하기' : '일정만 저장하기'} onPress={calculate} loading={calculating} disabled={past} />;
+  const footer = <Button label={anyAlarm ? '알람 계산하기' : '일정만 저장하기'} onPress={calculate} loading={calculating} disabled={past || locatingOrigin} />;
 
   return (
     <Screen footer={footer}>
@@ -269,7 +269,7 @@ export default function NewScheduleScreen() {
         </Text>
         <KeyValueRow label="출발지" value={draft.originLocation ? (draft.originName || '현재 위치') : (auth.profile?.home_name ?? '집 위치 미설정')} />
         <Text variant="caption" tone="sub">기본 출발지는 집이에요. 다른 위치를 고르면 이 일정에만 적용돼요.</Text>
-        <Button variant="ghost" label="현재 위치를 출발지로 사용" loading={locatingOrigin} onPress={() => void runLocateOrigin(async () => {
+        <Button variant="ghost" label="현재 위치를 출발지로 사용" loading={locatingOrigin} disabled={calculating} onPress={() => void runLocateOrigin(async () => {
           const { point, reason } = await locateWithReason();
           if (!point) {
             toast(reason === 'denied' ? '위치 권한이 꺼져 있어요. 브라우저나 기기 설정을 확인해 주세요' : reason === 'timeout' ? '위치 확인 시간이 지났어요. 다시 시도하거나 출발지를 검색해 주세요' : '위치를 확인하지 못했어요. 기기 설정을 확인하거나 출발지를 검색해 주세요');
@@ -278,8 +278,8 @@ export default function NewScheduleScreen() {
           setDraft((previous) => ({ ...previous, originLocation: point, originName: undefined }));
           setHomeMissing(false);
         }, '현재 위치를 가져오지 못했어요')} />
-        <Button variant="ghost" label="출발지 검색" onPress={() => setOriginOpen(true)} />
-        {draft.originLocation ? <Button variant="ghost" label="집을 출발지로 사용" onPress={() => setDraft((previous) => ({ ...previous, originLocation: undefined, originName: undefined }))} /> : null}
+        <Button variant="ghost" label="출발지 검색" disabled={locatingOrigin || calculating} onPress={() => setOriginOpen(true)} />
+        {draft.originLocation ? <Button variant="ghost" label="집을 출발지로 사용" disabled={locatingOrigin || calculating} onPress={() => setDraft((previous) => ({ ...previous, originLocation: undefined, originName: undefined }))} /> : null}
         {draft.originLocation ? <Text variant="caption" tone="sub">선택한 위치는 일정에 저장돼요. 반복 일정은 모든 회차에 같은 위치를 사용해요.</Text> : null}
         <MapPlaceSheet
           visible={originOpen}
@@ -413,7 +413,7 @@ export default function NewScheduleScreen() {
         </Text>
       </Card>
 
-      {homeMissing ? <HomeMissingNotice onPickHome={() => setHomeSheetOpen(true)} busy={savingHome} /> : null}
+      {homeMissing ? <HomeMissingNotice onPickHome={() => setHomeSheetOpen(true)} busy={savingHome || locatingOrigin || calculating} /> : null}
       <MapPlaceSheet
         visible={homeSheetOpen}
         onClose={() => setHomeSheetOpen(false)}

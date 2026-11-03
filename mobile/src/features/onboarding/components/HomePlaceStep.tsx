@@ -17,7 +17,7 @@ export function HomePlaceStep({ homeName, onOpenSearch, onClear }: Props) {
   return (
     <View>
       <Text variant="note" tone="sub">
-        {keepWords('집에서 나서는 시각을 알려면 집 위치가 필요해요. 집 위치는 알람 계산에 써요.')}
+        {keepWords('집에서 나서는 시각을 알려면 집 위치가 필요해요. 현재 위치를 고르면 주소를 찾기 위해 위치가 서버와 카카오에 전달돼요. 다음을 누르면 선택한 집 위치가 서버에 저장되어 알람 계산과 출발 감지에 사용돼요.')}
       </Text>
       <Card style={styles.card}>
         <PickRow first label="집 위치" value={homeName} placeholder="집 찾기" onPress={onOpenSearch} />
