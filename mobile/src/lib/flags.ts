@@ -48,7 +48,7 @@ export const ONBOARDING_STEPS: Record<OnboardingStepId, boolean> = {
   mic: false,
 };
 
-// 시간표 채우기 길 (D66-1) — 직접 입력은 위 ONBOARDING_STEPS.timetable, 아래 둘은 그 단계 · 설정에서 쓰는 가져오기 입구. "되게 해 놓고 빼면 된다"(지형님 10/30) → 길마다 끄고 켬
+// 시간표 채우기 길 (D66-1) — 직접 입력은 위 ONBOARDING_STEPS.timetable, 아래 둘은 그 단계 · 학교 시간표 화면에서 쓰는 가져오기 입구. "되게 해 놓고 빼면 된다"(지형님 10/30) → 길마다 끄고 켬
 //   photo: [시간표 사진으로 넣기] — 사진 고르기 → 서버 함수 timetable-extract(Claude가 읽음) → 확인 화면
 //   calendar: [폰 캘린더에서 가져오기] — 캘린더 읽기 → 앞으로 2주 매주 반복 일정 후보(규칙, AI 없음) → 확인 화면
 export const TIMETABLE_PATHS = {

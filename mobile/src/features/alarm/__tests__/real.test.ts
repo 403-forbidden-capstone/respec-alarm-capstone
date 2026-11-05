@@ -819,6 +819,7 @@ describe('장소 (listPlaces)', () => {
       data: [
         { origin_name: '집', origin_lat: 37.5, origin_lng: 127.0, appointments: { dest_name: '학교 도서관', dest_lat: 37.1, dest_lng: 127.1, appointment_at: kst('09:00', 20) } },
         { origin_name: '세종대학교', origin_lat: 37.55, origin_lng: 127.07, appointments: { dest_name: '강남역', dest_lat: 37.49, dest_lng: 127.03, appointment_at: kst('18:00', 21) } },
+        { origin_name: '현재 위치', origin_lat: 37.55, origin_lng: 126.97, appointments: { dest_name: '학교 도서관', dest_lat: 37.1, dest_lng: 127.1, appointment_at: kst('18:00', 20) } },
       ],
     });
     const places = await real.listPlaces();

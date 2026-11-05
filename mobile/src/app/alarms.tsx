@@ -5,6 +5,7 @@ import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { EmptyState, Loading, LoadError, Screen, SectionHeader, Text, TopBar, TopBarButton } from '@/components/ui';
 import { listAppointments } from '@/features/alarm/api';
 import { AppointmentAlarmCard } from '@/features/alarm/components/AppointmentAlarmCard';
+import { TextLink } from '@/features/alarm/components/TextLink';
 import { useAppointmentToggle } from '@/features/alarm/hooks/useAppointmentToggle';
 import { useNow } from '@/features/alarm/hooks/useNow';
 import { dayHeading, groupByDay, seriesInfo, splitUpcoming } from '@/features/alarm/schedule';
@@ -48,6 +49,9 @@ export default function AlarmsScreen() {
         알람
       </Text>
       <Text variant="lead">일정마다 기상 · 준비 · 출발 알람을 계산해 두었어요.</Text>
+      <View style={styles.links}>
+        <TextLink label="학교 시간표 · 반복 일정 지우기" onPress={() => router.push('/timetable')} />
+      </View>
       {!data && !error ? <Loading text="알람을 불러오는 중" /> : null}
       {data && !upcoming.length ? (
         <View style={styles.empty}>
@@ -109,6 +113,7 @@ export default function AlarmsScreen() {
 }
 
 const styles = StyleSheet.create({
+  links: { marginTop: 8, alignSelf: 'flex-start' },
   title: { marginTop: 8, marginBottom: 4 },
   empty: { marginTop: 18 },
   pastToggle: {

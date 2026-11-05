@@ -178,6 +178,36 @@ describe('② 말 → 일반 답', () => {
 });
 
 describe('③ 2단 턴 — 앱 일 → results → 마지막 답', () => {
+  it('estimate에 기상 계산 근거(basis)가 실림 — L1 결과의 이동 · 준비(기상~준비 + 준비~출발) · 여유 그대로, 없으면 생략', async () => {
+    const withMinutes = (extra: Record<string, unknown>) => {
+      const e = estimateOf() as unknown as { appointment: Record<string, unknown> };
+      Object.assign(e.appointment, extra);
+      return e as unknown as Estimate;
+    };
+    const run = async (est: Estimate) => {
+      mEstimate.mockImplementationOnce(async () => est);
+      script = [session(), turn({ next: 'APP_TASKS', reply: null, cards: [apptCard()] }), turn({ rev: 3, reply: { text: '저장할까요?' }, cards: [apptCard({ status: 'READY' })] })];
+      await getConversation();
+      await say('내일 10시 강남역에서 발표 있어');
+      const [, second] = turnBodies();
+      return (second.results as { cards: { estimate: Record<string, unknown> }[] }).cards[0].estimate;
+    };
+    // 기상 7:40 → 약속 10:00 = 140분 = 이동 50 + 준비 (10 + 60) + 여유 20
+    const est = await run(withMinutes({ travelMinutes: 50, beforePrepMinutes: 10, prepMinutes: 60, bufferMinutes: 20 }));
+    expect(est.basis).toEqual({ travel_minutes: 50, prepare_minutes: 70, buffer_minutes: 20 });
+    expect(est.with_wake).toBe(true);
+  });
+
+  it('근거 값이 L1 결과에 없으면 basis를 보내지 않음 (옛 모양 그대로)', async () => {
+    script = [session(), turn({ next: 'APP_TASKS', reply: null, cards: [apptCard()] }), turn({ rev: 3, reply: { text: '저장할까요?' }, cards: [apptCard({ status: 'READY' })] })];
+    await getConversation();
+    await say('내일 10시 강남역에서 발표 있어'); // estimateOf에는 이동 · 준비 · 여유 분이 없음
+    const [, second] = turnBodies();
+    const est = (second.results as { cards: { estimate: Record<string, unknown> }[] }).cards[0].estimate;
+    expect('basis' in est).toBe(false);
+    expect(Object.keys(est).sort()).toEqual(['alarms', 'level', 'with_wake']);
+  });
+
   it('next가 APP_TASKS면 카드를 계산해 같은 client_turn_id · 응답의 rev로 results를 보냄', async () => {
     script = [
       session(),

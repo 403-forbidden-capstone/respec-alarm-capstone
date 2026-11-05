@@ -74,7 +74,7 @@ async function recentPlaces(userId: string): Promise<Place[]> {
   if (error) throw error;
   const rows = [...(data ?? [])].sort((x, y) => dbTimeMs(y.appointments.appointment_at) - dbTimeMs(x.appointments.appointment_at));
   const destinations = rows.map((r) => toPlace({ name: r.appointments.dest_name, lat: r.appointments.dest_lat, lng: r.appointments.dest_lng }));
-  const origins = rows.flatMap((r) => (r.origin_name && r.origin_name !== ORIGIN_HOME ? [toPlace({ name: r.origin_name, lat: r.origin_lat, lng: r.origin_lng })] : []));
+  const origins = rows.flatMap((r) => (r.origin_name && r.origin_name !== ORIGIN_HOME && r.origin_name !== '현재 위치' ? [toPlace({ name: r.origin_name, lat: r.origin_lat, lng: r.origin_lng })] : []));
   return uniqueByName([...destinations, ...origins]).slice(0, RECENT_PLACE_COUNT);
 }
 

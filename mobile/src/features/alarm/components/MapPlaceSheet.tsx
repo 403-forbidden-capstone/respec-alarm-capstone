@@ -162,7 +162,7 @@ function MapPlaceBody({ onPick, search, reverse, locate, center, suggestedNames,
     setLocating(false);
     if (!here) {
       setLocateFailed(true);
-      toast('현재 위치를 가져오지 못했어요. 위치 권한을 확인해 주세요');
+      toast('현재 위치를 가져오지 못했어요. 위치 설정을 확인하거나 장소를 검색해 주세요');
       return;
     }
     setLocateFailed(false);
@@ -182,7 +182,7 @@ function MapPlaceBody({ onPick, search, reverse, locate, center, suggestedNames,
   };
 
   const names = suggestedNames ?? DEFAULT_NAMES;
-  const canLocate = Platform.OS !== 'web'; // 웹 미리보기는 위치를 못 읽음 — 눌러서 실패하게 하지 않고 처음부터 흐리게
+  const canLocate = Platform.OS === 'android' || Platform.OS === 'web'; // 현재 위치 조회를 지원하는 환경
   return (
     <>
       <View style={[styles.box, listOpen && styles.focused]}>
@@ -237,7 +237,7 @@ function MapPlaceBody({ onPick, search, reverse, locate, center, suggestedNames,
             disabled={locating || !canLocate}
             accessibilityRole="button"
             accessibilityLabel="현재 위치"
-            accessibilityState={{ disabled: locating || locateFailed || !canLocate, busy: locating }}
+            accessibilityState={{ disabled: locating || !canLocate, busy: locating }}
             style={({ pressed }) => [styles.locate, (locateFailed || locating || !canLocate) && styles.dim, pressed && styles.pressed]}
           >
             <Text variant="label" tone="ink">

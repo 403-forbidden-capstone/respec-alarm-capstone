@@ -7,9 +7,12 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { ScreenId, Text, toast } from '@/components/ui';
 import { ackRing, dismissRing, getRing, snoozeRing, startRing, stopRing } from '@/features/alarm/api';
 import { VoiceWave } from '@/features/alarm/components/VoiceWave';
+import { useNextRing } from '@/features/alarm/hooks/useNextRing';
+import { isPreviewAlarmId } from '@/features/alarm/ringPreview';
 import { snoozeView } from '@/features/alarm/snooze';
 import type { Appointment, RingInfo, RingKind } from '@/features/alarm/types';
 import { formatTime, timeParts } from '@/lib/format';
+import { isMock } from '@/lib/mode';
 import { backOrHome } from '@/lib/nav';
 import { useLoad } from '@/lib/useLoad';
 import { colors } from '@/theme';
@@ -53,6 +56,7 @@ export default function RingScreen() {
   const [firstLoaded, setFirstLoaded] = useState<RingInfo | null>(null);
   if (loaded && loaded.alarmId === alarmId && firstLoaded?.alarmId !== alarmId) setFirstLoaded(loaded);
   const data = loaded === null && firstLoaded?.alarmId === alarmId ? firstLoaded : loaded?.alarmId === alarmId || loaded == null ? loaded : undefined;
+  const preview = !isMock() && data != null && isPreviewAlarmId(data.alarmId); // 웹 실데이터 미리보기 — 저장된 일정으로 보여 주기만, 기록 없음 (ringPreview.ts). 가장 가까운 알람으로 바뀐 경우도 읽은 알람 id로 앎
   // 읽는 동안에도 맞는 배경이 보이게 알람 id(<일정>:<종류>)의 종류를 먼저 씀
   const fromId = params.alarm?.split(':')[1];
   const kind: RingKind = data?.kind ?? (fromId && Object.keys(HEAD).includes(fromId) ? (fromId as RingKind) : 'WAKE');
@@ -92,7 +96,7 @@ export default function RingScreen() {
   // H07이 떴다고 코어의 길잡이 화면에 알림 (실데이터만). 앱이 이미 앞에 있어도 알림을 눌러 길잡이가 다시 열리면 앱이 앞으로 와서 다시 알림
   const shownId = data?.alarmId ?? null;
   useEffect(() => {
-    if (!shownId) return;
+    if (!shownId || isPreviewAlarmId(shownId)) return; // 웹 미리보기는 길잡이 화면이 없음
     ackRing();
     if (Platform.OS === 'web') return;
     const sub = AppState.addEventListener('change', (state) => {
@@ -109,6 +113,12 @@ export default function RingScreen() {
   async function snooze() {
     if (!data || handled.current || !canSnooze(data.snoozeCount, data.snoozeLimit)) return;
     handled.current = true;
+    if (preview) {
+      // 웹 미리보기는 코어 · 서버에 미루기를 남기지 않음 — 안내만 하고 나감
+      toast('미리보기라 다시 울리지 않아요');
+      backOrHome();
+      return;
+    }
     let snoozed = false;
     try {
       snoozed = await snoozeRing(data.alarmId, minutes, data.at);
@@ -153,11 +163,16 @@ export default function RingScreen() {
     <SafeAreaView style={[styles.screen, { backgroundColor: BACKGROUND[kind] }]} edges={['top', 'bottom']}>
       <StatusBar style="light" />
       {data && done && data.kind !== 'WAKE' ? (
-        <DonePanel kind={data.kind} appointment={data.appointment} />
+        <DonePanel kind={data.kind} appointment={data.appointment} next={preview ? data.alarmId : null} />
       ) : data ? (
         <View style={styles.body} accessibilityRole="alert" accessibilityLabel={data.notice ?? HEAD[kind]}>
           <View style={styles.top}>
             <View><ScreenId id="H07" tone="inverse" style={styles.faded45} /></View>
+            {preview ? (
+              <Text variant="caption" tone="inverse" style={styles.faded65}>
+                미리보기 · 기록 안 남음
+              </Text>
+            ) : null}
             {data.important ? (
               <View style={styles.chip}>
                 <Text variant="label" tone="inverse">
@@ -290,8 +305,10 @@ export default function RingScreen() {
 }
 
 // 준비 · 출발 알람을 끈 뒤 안내 — 준비물 체크(준비) · 이동 시간과 도착 목표(출발), "확인"을 누르면 홈
-function DonePanel({ kind, appointment: a }: { kind: Exclude<RingKind, 'WAKE'>; appointment: Appointment }) {
+// next = 웹 미리보기에서 이어 볼 알람의 기준(지금 끈 알람 id) — 있으면 [다음 알람 울려 보기]
+function DonePanel({ kind, appointment: a, next: from }: { kind: Exclude<RingKind, 'WAKE'>; appointment: Appointment; next: string | null }) {
   const [checked, setChecked] = useState<string[]>([]);
+  const next = useNextRing(from);
   const arrive = a.alarms.find((x) => x.kind === 'ARRIVE');
   return (
     <View style={styles.body}>
@@ -360,6 +377,13 @@ function DonePanel({ kind, appointment: a }: { kind: Exclude<RingKind, 'WAKE'>; 
       </View>
 
       <View style={styles.bottom}>
+        {next ? (
+          <Pressable onPress={next.open} accessibilityRole="button" style={[styles.button, styles.closeButton, styles.nextButton]}>
+            <Text variant="button" style={{ color: colors.ringWake }}>
+              {next.label}
+            </Text>
+          </Pressable>
+        ) : null}
         <Pressable onPress={() => router.dismissTo('/')} accessibilityRole="button" style={[styles.button, styles.closeButton]}>
           <Text variant="button" style={{ color: colors.ringWake }}>
             확인
@@ -375,6 +399,7 @@ const styles = StyleSheet.create({
   body: { flex: 1, paddingTop: 10, paddingHorizontal: 22, paddingBottom: 28 },
   missing: { flex: 1, justifyContent: 'center', gap: 16, paddingHorizontal: 22 },
   closeButton: { backgroundColor: colors.inverse },
+  nextButton: { marginBottom: 10 },
   top: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', minHeight: 26 },
   chip: {
     height: 26,

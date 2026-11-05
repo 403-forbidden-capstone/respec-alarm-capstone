@@ -220,7 +220,12 @@ export default function HomeScreen() {
         />
       )}
 
-      <SectionHeader title={evening ? '내일 일정' : '오늘 일정'} right={<TextLink label="+ 새 일정" onPress={newSchedule} strong />} />
+      <SectionHeader title={evening ? '내일 일정' : '오늘 일정'} right={
+          <View style={styles.links}>
+            <TextLink label="학교 시간표" onPress={() => router.push('/timetable')} />
+            <TextLink label="+ 새 일정" onPress={newSchedule} strong />
+          </View>
+        } />
       <Card>
         <ScheduleList items={schedule} />
       </Card>
@@ -334,6 +339,7 @@ export default function HomeScreen() {
 }
 
 const styles = StyleSheet.create({
+  links: { flexDirection: 'row', gap: 14 },
   title: { marginTop: 8, marginBottom: 4 },
   topActions: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   ctaText: { marginTop: 4 },

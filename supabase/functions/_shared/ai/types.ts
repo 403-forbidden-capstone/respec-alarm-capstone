@@ -291,6 +291,14 @@ export interface Digest {
   alarms: { kind: AlarmType; at: string; enabled: boolean }[];
   level: number | null;
   with_wake: boolean;
+  /** 기상 알람 계산 근거(분) — 앱이 L1 결과에서 준 값을 서버가 검사해 통과한 것만 (checkBasis). 없으면 근거를 말하지 않음 */
+  basis?: Basis | null;
+}
+/** 기상 = 약속 시각 − 이동 − 준비 − 여유 */
+export interface Basis {
+  travel_minutes: number;
+  prepare_minutes: number;
+  buffer_minutes: number;
 }
 export interface Card {
   id: string; // c1 — 처리 결과의 확인 대기 번호와 같음
@@ -321,7 +329,7 @@ export interface TaskResults {
   cards: {
     id: string;
     status: "READY" | "NEEDS_PLACE" | "FAILED";
-    estimate?: { alarms: { kind: AlarmType; at: string; enabled: boolean }[]; level: number | null; with_wake: boolean } | null;
+    estimate?: { alarms: { kind: AlarmType; at: string; enabled: boolean }[]; level: number | null; with_wake: boolean; basis?: unknown } | null;
     error?: string | null;
   }[];
   fixes: { id: string; ok: boolean; error?: string | null }[];
