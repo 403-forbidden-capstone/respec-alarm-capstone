@@ -738,7 +738,7 @@ function findAlarm(alarmId: string) {
 // 준비 · 출발 알람의 머리글(notice)은 폰 알림과 같은 글자 (서버 알림 문구 함수 — features/alarm/notice.ts)
 export async function getRing(alarmId: string): Promise<RingInfo | null> {
   if (!isMock()) {
-    const ring = isPreviewAlarmId(alarmId) ? await getPreviewRing(alarmId) : await real.getRing(); // 웹 미리보기는 저장된 일정으로 (ringPreview.ts)
+    const ring = isPreviewAlarmId(alarmId) ? await getPreviewRing(alarmId) : await real.getRing(alarmId); // 웹 미리보기는 저장된 일정으로 (ringPreview.ts), 폰은 코어의 지금 울리는 알람
     // 웹은 폰 알람 코어가 없어 누른 알람을 못 찾을 때가 많음(가짜 데이터 주소 · 주소 없이 열기) → 저장된 알람 중 지금과 가장 가까운 것을 바로 울림
     return ring ?? (Platform.OS === 'web' ? getNearestPreviewRing(alarmId) : null);
   }
@@ -806,6 +806,11 @@ export async function startRing(alarmId: string, at: Date) {
   db.wake = { alarmId, phase: 'ringing', ringAt: at, dismissedAt: null, ...NO_USE };
 }
 
+// H07을 띄웠다고 알람 코어의 길잡이 화면에 알림 (실데이터만 — 가짜 데이터는 길잡이 화면이 없음)
+export function ackRing(): void {
+  if (!isMock()) real.ackRing();
+}
+
 // 미루기 · 해제 없이 울림 화면을 나감 (뒤로 가기) — 울리는 중 표시만 지우고 기록은 안 남김
 export async function stopRing(alarmId: string) {
   if (!isMock()) return real.stopRing();
@@ -814,17 +819,23 @@ export async function stopRing(alarmId: string) {
 
 // 미루기 (H07) — 울리는 중 표시를 지우고 기록 (목업 A.snooze). at = 미룬 시각, minutes = 고른 분 (5 · 10 · 15)
 // 3번까지 (한도에 닿으면 아무것도 안 함 — 화면이 이미 버튼을 끔). 실데이터의 다시 울림 · 한도 · SNOOZED 기록은 알람 코어(#33)
-export async function snoozeRing(alarmId: string, minutes: number, at: Date) {
-  if (!isMock()) return real.snoozeRing();
+// 돌려주는 값 = 미뤘는지. 한도 · 이미 멈춤으로 못 미루면 false (화면이 토스트로 알림)
+export async function snoozeRing(alarmId: string, minutes: number, at: Date): Promise<boolean> {
+  if (!isMock()) {
+    // 웹 미리보기 알람은 코어에 없는 id라 부르지 않음 — 화면(ring.tsx)이 미리보기면 이 함수를 안 부르고 "다시 울리지 않아요"로 안내
+    if (isPreviewAlarmId(alarmId)) return false;
+    return real.snoozeRing(alarmId, minutes);
+  }
   const found = findAlarm(alarmId);
   // 이미 기상 확정한 알람이면 해제처럼 기록을 그대로 둠 (확정 뒤에 미루기가 붙지 않게)
-  if (!found || db.wakeConfirmations[alarmId]) return;
+  if (!found || db.wakeConfirmations[alarmId]) return false;
   const count = db.snoozeCounts[alarmId] ?? 0;
-  if (!canSnooze(count, DEFAULT_SNOOZE_LIMIT)) return;
+  if (!canSnooze(count, DEFAULT_SNOOZE_LIMIT)) return false;
   await stopRing(alarmId);
   db.snoozeCounts[alarmId] = count + 1;
   db.snoozes[alarmId] = { at: addMinutes(at, minutes), minutes };
   db.events.push({ at, label: `${KIND_LABEL[found.alarm.kind]} 알람 ${minutes}분 미루기`, source: '자동' });
+  return true;
 }
 
 // 미룬 알람 (H01) — 다시 울릴 시각이 아직 안 된 것 중 가장 빠른 것. 실데이터는 알람 코어가 가진 미루기 예약(#33)

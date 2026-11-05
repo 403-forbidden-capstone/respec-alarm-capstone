@@ -1,5 +1,5 @@
 import { useFonts } from 'expo-font';
-import { router, Stack } from 'expo-router';
+import { router, Stack, usePathname } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
 import * as WebBrowser from 'expo-web-browser';
@@ -60,16 +60,19 @@ export default function RootLayout() {
 // 폰 출시용 빌드(lib/modePolicy.ts)는 실데이터만 — 로그인해야만 탭이 열리고, Supabase 값이 없으면 가짜로 돌지 않고 설정 오류 화면
 // 가짜 데이터 모드(enabled=false, lib/mode.ts)는 웹 · 폰 개발용에서만. 로그인 없이 바로 탭이고 login · onboarding은 주소로 열어 볼 수만 있음 (onboarding은 흐름에 넣었을 때만, 저장 없이 단계만 넘어감)
 // 실데이터를 못 쓰면(Supabase 값 없음 · lib/flags REAL_DATA_READY = false) login · onboarding · settings를 아예 뺌 — 주소로 열어도 탭 홈 (#116)
+// ring(H07 알람 울림, #332)은 알람 코어가 잠금화면 위로 불러 오는 화면이라 로그인 · 온보딩 · 프로필 읽기를 기다리지 않고 바로 열림 — 해제 · 미루기는 알람 코어 호출뿐이라 서버 값이 필요 없음
+//   (로그아웃 상태에서 울려도 끌 수 있게). 해제 뒤 기상 확인(wake)으로의 이동은 ring.tsx가 항상 시도하고, 로그인 전이면 아래 Protected 가드가 막음 (그때 화면이 어디로 가는지는 에뮬레이터 확인 대상)
 // dev/* · auth/callback은 어느 쪽에서도 열림 (로그인 화면의 "알람 테스트"가 dev/alarm-test로 감). 앱 화면을 새로 만들면 첫 번째 Protected 안에 넣음
 function RootStack() {
   const { session, profile, loading, enabled, needsOnboarding, profileError, refreshProfile } = useAuth();
   const needsLogin = enabled && !session;
   const ready = !needsLogin && !needsOnboarding;
   const preview = !enabled && canUseRealData; // 가짜 모드에서 login · onboarding을 열어 보기 (실데이터를 쓸 수 있을 때만)
+  const ringEntry = usePathname() === '/ring'; // 알람 울림 화면으로 들어옴 (알람 코어의 길잡이 화면 · 딥링크)
 
   useEffect(() => {
-    if (!loading) SplashScreen.hideAsync();
-  }, [loading]);
+    if (!loading || ringEntry) SplashScreen.hideAsync();
+  }, [loading, ringEntry]);
 
   // 알람 기능 훅(원탭 뒤처리 · 로그아웃 정리) — useAlarmSync보다 먼저 등록해야 앱을 열자마자 올리는 원탭 기록도 뒤처리됨
   useOneTapFollowUp();
@@ -95,9 +98,9 @@ function RootStack() {
     if (takeAfterOnboarding() === 'schedule') router.push({ pathname: '/schedule/new', params: { from: 'home' } });
   }, [ready, loading]);
 
-  if (configError) return <ConfigErrorScreen />;
-  if (loading) return null;
-  if (profileError != null) return <ProfileRetryScreen message={profileError} onRetry={refreshProfile} />;
+  if (configError && !ringEntry) return <ConfigErrorScreen />;
+  if (loading && !ringEntry) return null;
+  if (profileError != null && !ringEntry) return <ProfileRetryScreen message={profileError} onRetry={refreshProfile} />;
 
   return (
     <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: colors.bg } }}>
@@ -108,7 +111,6 @@ function RootStack() {
         <Stack.Screen name="alarm/[id]" />
         <Stack.Screen name="schedule/new" />
         <Stack.Screen name="wake" />
-        <Stack.Screen name="ring" options={{ animation: 'fade' }} />
         <Stack.Screen name="friends/[id]/index" />
         <Stack.Screen name="friends/[id]/alarms" />
         <Stack.Screen name="permissions" />
@@ -139,6 +141,10 @@ function RootStack() {
       <Stack.Protected guard={ONBOARDING_IN_FLOW && (needsOnboarding || preview)}>
         <Stack.Screen name="onboarding" />
       </Stack.Protected>
+      {/* 알람 울림(H07) — 가드 없이 늘 열림(로그인 · 온보딩 · 읽는 중에도). 이미 켜진 앱에 길잡이 화면의 딥링크가 와도 열려야 함
+          — 예전 가드(ready || 지금 주소가 /ring)는 로그인 전에 켜져 있던 앱에서 /ring으로 가는 길을 막아 6초 뒤 네이티브 대체 화면이 떴음 (11/5 에뮬레이터)
+          맨 끝에 두는 이유: 막힌 화면으로 가면 열린 화면 중 앞의 것으로 보내므로, 앞에 두면 로그인 전 사용자가 홈 대신 울림 화면으로 감 */}
+      <Stack.Screen name="ring" options={{ animation: 'fade' }} />
     </Stack>
   );
 }

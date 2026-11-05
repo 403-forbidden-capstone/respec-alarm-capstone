@@ -507,6 +507,8 @@ class AlarmPlaybackService : Service() {
     stopForeground(STOP_FOREGROUND_REMOVE)
     // 어떻게 멈췄든 떠 있는 알람 화면도 닫음
     AlarmRingingActivity.closeIfShowing()
+    // 앱 H07을 잠금화면 위에 올렸다면 곧 앱이 되돌림 — 안 되돌리고 끝났을 때를 위한 안전장치 (RingOverLock)
+    RingOverLock.releaseIfStale()
     super.onDestroy()
   }
 

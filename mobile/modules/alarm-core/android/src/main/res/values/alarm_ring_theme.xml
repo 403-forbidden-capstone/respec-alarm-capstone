@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+  <!-- 앱 H07 기상 배경(theme ringWake #141414) — 길잡이 화면이 뜨는 순간 흰 바탕이 번쩍이지 않게 -->
+  <color name="alarm_ring_wait">#141414</color>
+  <style name="AlarmRingingTheme" parent="@android:style/Theme.Material.Light.NoActionBar">
+    <item name="android:windowBackground">@color/alarm_ring_wait</item>
+  </style>
+</resources>

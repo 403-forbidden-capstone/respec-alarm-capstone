@@ -13,6 +13,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { TopBar } from '@/components/ui';
+import { makeDevAlarmId } from '@/lib/alarmSync/devAlarm';
 import { backOrHome } from '@/lib/nav';
 import {
   addAlarmEventListener,
@@ -24,7 +25,6 @@ import {
   hasUsageAccess,
   isAvailable,
   list,
-  makeUuid,
   markEventsUploaded,
   openUsageAccessSettings,
   ringNow,
@@ -354,10 +354,10 @@ function nowMillis() {
   return Date.now();
 }
 
-// 서버 alarm_id처럼 UUID로 만든 테스트 꾸러미
+// 서버 alarm_id처럼 UUID로 만든 테스트 꾸러미 — 앞머리로 개발 알람임을 알려 맞추기가 지우지 않게 함
 function testPackage(type: AlarmType, atMillis: number, title: string, intensity: AlarmIntensity): RingPackage {
   return {
-    alarmId: makeUuid(),
+    alarmId: makeDevAlarmId(),
     type,
     atMillis,
     title,

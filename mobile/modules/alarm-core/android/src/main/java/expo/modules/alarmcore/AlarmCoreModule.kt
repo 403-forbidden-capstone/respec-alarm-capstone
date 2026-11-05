@@ -7,7 +7,7 @@ import expo.modules.kotlin.exception.Exceptions
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
 
-// JS(src/index.ts)가 부르는 함수 모음. 전부 AsyncFunction — 판단은 AlarmController가 하고 여기는 이어 주기만 함
+// JS(src/index.ts)가 부르는 함수 모음. ackRingScreen만 바로 끝나는 Function이고 나머지는 AsyncFunction — 판단은 AlarmController가 하고 여기는 이어 주기만 함
 // 복잡한 값(꾸러미 + 울림 계획)은 JSON 글자 하나로 받아 AlarmController가 파싱함
 class AlarmCoreModule : Module() {
   // 컨텍스트가 없으면 조용히 넘어가지 않고 JS 쪽 Promise를 reject함 ("예약된 줄 알았는데 안 울림" 방지)
@@ -50,6 +50,26 @@ class AlarmCoreModule : Module() {
     // 지금 울리는 알람을 해제 처리
     AsyncFunction("stop") {
       AlarmController.stopRinging(context)
+    }
+
+    // 지금 울리는 알람 (앱 H07이 그림). 울리는 게 없으면 null
+    AsyncFunction("getRinging") {
+      AlarmController.getRinging(context)
+    }
+
+    // 지금 울리는 알람을 고른 분만큼 미룸. 한도 · 허용 분을 넘었거나 이미 멈췄으면 false
+    AsyncFunction("snooze") { minutes: Int ->
+      AlarmController.snoozeRinging(context, minutes)
+    }
+
+    // 앱이 H07(/ring)을 띄웠다고 알림 — 길잡이 화면(AlarmRingingActivity)이 닫힘
+    Function("ackRingScreen") {
+      AlarmRingingActivity.onAppShowedRing()
+    }
+
+    // 알람이 끝나 앱 H07의 잠금화면 위 설정을 되돌림. dismissKeyguard = true(해제)면 잠금 해제도 요청, false(미루기)면 앱을 뒤로 보냄
+    AsyncFunction("releaseRingOverLock") { dismissKeyguard: Boolean ->
+      RingOverLock.release(dismissKeyguard)
     }
 
     // 예약 없이 바로 울림 (시험용)

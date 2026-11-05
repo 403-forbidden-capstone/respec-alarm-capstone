@@ -15,6 +15,7 @@ import {
   uploadEvents,
   type AlarmsSyncedInfo,
 } from '../index';
+import { DEV_ALARM_ID_PREFIX, isDevAlarmId } from '../devAlarm';
 
 // 알람 코어(폰) · supabase · 데이터 모드를 가짜로 — 오케스트레이션(어느 순서로 무엇을 부르는지)만 확인. 계산은 reconcile.test.ts · events.test.ts
 const mockCore = {
@@ -193,6 +194,17 @@ describe('reconcile — 서버 ↔ 폰 맞추기', () => {
     expect(summary.canceled).toEqual(['wake-1']);
     expect(mockCore.cancel).toHaveBeenCalledTimes(1);
     expect(mockAlarmQuery.in).toHaveBeenCalledWith('alarm_id', ['wake-1', 'wake-2']); // 시각 조건 없이 켜진 행만 물음
+  });
+
+  it('개발 화면의 시험 알람(앞머리 DEV_ALARM_ID_PREFIX)은 서버에 없어도 지우지 않음 — 지우면 앱이 앞에 올 때 울림이 끊김 (#332)', async () => {
+    const devId = `${DEV_ALARM_ID_PREFIX}1111-4111-8111-111111111111`;
+    mockCore.list.mockResolvedValue([snoozed(devId), snoozed('wake-1')]);
+    mockEnabledIds = [];
+    const summary = await reconcile({ nowMs: NOW });
+    expect(summary.canceled).toEqual(['wake-1']);
+    expect(mockCore.cancel.mock.calls.map(([id]) => id)).toEqual(['wake-1']);
+    expect(isDevAlarmId(devId)).toBe(true);
+    expect(isDevAlarmId('wake-1')).toBe(false);
   });
 
   it('전체 맞추기는 서버에 켜진 행이 남은 미룸 중 예약은 지우지 않음 (울린 뒤 서버 행의 시각이 과거가 되어 목록에서 빠지는 정상 경우)', async () => {
