@@ -79,7 +79,7 @@ export function missingCoords(rows: readonly ClassRow[], hasCoords: (id: string)
 export const campusCoords = (place: Place | null): { lat: number; lng: number } | null =>
   place && Number.isFinite(place.lat) && Number.isFinite(place.lng) ? { lat: place.lat as number, lng: place.lng as number } : null;
 
-// 확인 화면을 처음 열 때 이미 가져온 것이 있을 때(설정에서 들어온 경우) — 빈 화면에서 시작하는 plan + 줄 + 안내 한 번에. 줄 id는 class-1부터
+// 확인 화면을 처음 열 때 이미 가져온 것이 있을 때(학교 시간표에서 들어온 경우) — 빈 화면에서 시작하는 plan + 줄 + 안내 한 번에. 줄 id는 class-1부터
 export function startImport(batch: ImportBatch, limit: number): { rows: ClassRow[]; notice: ImportNotice } {
   const plan = planImport([], batch.classes, limit);
   return { rows: plan.accepted.map((c, i) => classRowOf(c, `class-${i + 1}`)), notice: importNotice(batch, plan, limit) };

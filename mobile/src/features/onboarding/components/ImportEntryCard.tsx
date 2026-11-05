@@ -9,7 +9,7 @@ type Props = {
   reading?: 'photo' | 'calendar' | null;
 };
 
-// 수업을 한 줄씩 넣는 대신 한 번에 가져오는 입구 — 온보딩 시간표 단계 위 · 설정에서 같이 씀. 값 · 콜백만 받음
+// 수업을 한 줄씩 넣는 대신 한 번에 가져오는 입구 — 온보딩 시간표 단계 위 · 학교 시간표 화면에서 같이 씀. 값 · 콜백만 받음
 export function ImportEntryCard({ onPhoto, onCalendar, busy, reading }: Props) {
   if (!onPhoto && !onCalendar) return null;
   return (

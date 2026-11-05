@@ -12,7 +12,7 @@ import {
   type Device,
 } from '@/dev/devices';
 import { DEV_TOOLS, modeBlock } from '@/dev/panelModel';
-import { SECTIONS } from '@/dev/screenList';
+import { sectionsFor } from '@/dev/screenList';
 import { useAuth } from '@/features/auth/AuthProvider';
 import { changeDataMode, goAfterRender } from '@/features/auth/DataModeToggle';
 import type { ScenarioTime } from '@/lib/clock';
@@ -84,6 +84,7 @@ function copyAddress(device: Device) {
 }
 
 export function DevicePanel({ device, scale, onDevice, collapsed, onToggle, scenario, onScenario, canScenario }: Props) {
+  const { mode } = useMode(); // 화면 목록은 지금 모드에서 열리는 줄만
   if (collapsed) {
     return (
       <View style={[styles.panel, styles.folded]}>
@@ -152,7 +153,7 @@ export function DevicePanel({ device, scale, onDevice, collapsed, onToggle, scen
         </Block>
 
         <Block title="화면 목록" hint="누르면 이 프레임 안에서 열림">
-          {SECTIONS.map((section) => (
+          {sectionsFor(mode).map((section) => (
             <View key={section.title} style={styles.group}>
               <Text variant="label" weight={600}>
                 {section.title}

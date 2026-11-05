@@ -16,10 +16,6 @@ import { FrequentPlacesSection } from '@/features/location/FrequentPlacesSection
 import { LocationAutoSection } from '@/features/location/LocationAutoSection';
 import { openAppNotificationSettings } from '@/features/permissions';
 import { homePatchOf } from '@/features/onboarding/home';
-import { CalendarPickSheet } from '@/features/onboarding/components/CalendarPickSheet';
-import { ImportEntryCard } from '@/features/onboarding/components/ImportEntryCard';
-import { useCalendarImport } from '@/features/onboarding/hooks/useCalendarImport';
-import { usePhotoImport } from '@/features/onboarding/hooks/usePhotoImport';
 import { shouldSaveHandle } from '@/features/onboarding/validate';
 import { isHandleTaken, saveProfileFields } from '@/features/profile/api';
 import { EditRow } from '@/features/profile/components/EditRow';
@@ -28,8 +24,6 @@ import { prepareValuesOf } from '@/features/profile/edit';
 import { TRANSPORT_NAME, WAKE_MARGIN_NAME, WAKE_SENSITIVITY_NAME } from '@/features/profile/labels';
 import type { ProfileFields } from '@/features/profile/types';
 import { UserError, userMessage } from '@/lib/errors';
-import { TIMETABLE_PATHS } from '@/lib/flags';
-import { setImportBatch } from '@/features/onboarding/importHandoff';
 import { canUseRealData, modeLocked } from '@/lib/mode';
 import { backOrHome } from '@/lib/nav';
 import { signOutAndCleanup } from '@/lib/session';
@@ -50,11 +44,6 @@ export default function SettingsScreen() {
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState<Editing>(null);
   const [placeOpen, setPlaceOpen] = useState(false);
-  const photoImport = usePhotoImport();
-  const calendarImport = useCalendarImport((batch) => {
-    setImportBatch(batch);
-    router.push('/timetable-import');
-  });
   const user = session?.user;
   const provider = (user?.app_metadata?.provider as string | undefined) ?? '';
   const userId = enabled ? user?.id : undefined;
@@ -120,36 +109,6 @@ export default function SettingsScreen() {
             <EditRow label="이동 수단" value={TRANSPORT_NAME[profile.default_transport]} onPress={open('prepare')} />
             <EditRow label="집(출발지)" value={profile.home_name ?? '정하지 않았어요'} onPress={canEdit ? () => setPlaceOpen(true) : undefined} />
           </Card>
-
-          {canEdit && (TIMETABLE_PATHS.photo || TIMETABLE_PATHS.calendar) ? (
-            <>
-              <SectionHeader title="수업 시간표" />
-              <ImportEntryCard
-                onPhoto={
-                  TIMETABLE_PATHS.photo
-                    ? async () => {
-                        const batch = await photoImport.pick();
-                        if (batch) {
-                          setImportBatch(batch);
-                          router.push('/timetable-import');
-                        }
-                      }
-                    : undefined
-                }
-                onCalendar={TIMETABLE_PATHS.calendar ? calendarImport.start : undefined}
-                busy={photoImport.reading || calendarImport.busy}
-                reading={photoImport.reading ? 'photo' : calendarImport.reading ? 'calendar' : null}
-              />
-              <CalendarPickSheet
-                visible={calendarImport.pickerOpen}
-                calendars={calendarImport.calendars}
-                picked={calendarImport.picked}
-                onToggle={calendarImport.toggle}
-                onConfirm={calendarImport.confirm}
-                onClose={calendarImport.closePicker}
-              />
-            </>
-          ) : null}
 
           <SectionHeader title="알람" />
           <Card>

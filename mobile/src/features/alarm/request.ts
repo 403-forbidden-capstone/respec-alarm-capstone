@@ -128,7 +128,7 @@ function destinationBody(d: AppointmentDraft): Body {
 }
 
 // 새 일정 (H05) — 중요도는 늘 보냄 (서버 기본은 NORMAL(중요)이고 초안 기본은 LOW(보통)이라 안 보내면 값이 달라짐)
-//   출발지는 "집" 이름만 (좌표는 서버가 프로필 집에서 채움). 여유는 안 보내서 프로필 기본 여유
+//   현재 위치를 고르면 그 좌표를 출발지로 보내고, 아니면 프로필에 저장된 집을 씀
 export function newAppointmentBody(d: AppointmentDraft, at: Date): Body {
   const rule = repeatToRrule(d.repeat);
   return {
@@ -139,7 +139,7 @@ export function newAppointmentBody(d: AppointmentDraft, at: Date): Body {
       importance: d.importance,
       ...(rule ? { recurrence_rule: rule } : {}),
     },
-    participant: { origin: { name: ORIGIN_HOME }, transport_type: d.transport },
+    participant: { origin: d.originLocation ? { name: d.originName || '현재 위치', lat: d.originLocation.lat, lng: d.originLocation.lng } : { name: ORIGIN_HOME }, transport_type: d.transport },
     kinds: RING_KINDS.filter((kind) => d.alarms[kind]),
   };
 }
@@ -316,7 +316,7 @@ export function toEstimate(s: Suggestion, d: AppointmentDraft, at: Date, body: B
     title: d.title.trim() || '새 일정',
     at,
     place: d.place,
-    origin: ORIGIN_HOME,
+    origin: d.originLocation ? d.originName || '현재 위치' : ORIGIN_HOME,
     transport: d.transport,
     travelMinutes,
     travelSource: travelLabel(s.travel.source),

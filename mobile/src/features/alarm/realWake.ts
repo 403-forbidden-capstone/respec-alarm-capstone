@@ -1,6 +1,9 @@
 // ① 약속 기반 알람 — 실데이터 울림 · 기상 확인 (H07 · H08)
-//   울림 자체는 폰 알람 코어(네이티브 화면)가 함. 앱의 ring.tsx는 디자인 · 웹 미리 보기용이라 실데이터에서는 열 알람이 없음(getRing = null)
-//   · 해제 → 알람 코어 stop, 미룬 알람 보기 · 취소 → 알람 코어 list · cancel (미루기 예약은 코어가 가짐)
+//   울림 소리 · 진동 · 다시 울림은 폰 알람 코어가 하고, 화면(H07 ring.tsx)은 앱이 잠금화면 위에 띄움 (#332, docs/alarm-core.md):
+//     풀스크린 인텐트 → 길잡이 화면 → 앱 /ring?alarm=<id> → getRing = 코어의 지금 울리는 알람(getRinging)을 RingInfo로 바꿈
+//     앱이 못 뜨면 코어의 네이티브 대체 화면이 해제 · 미루기를 함
+//   · 해제 → 알람 코어 stop + 잠금화면 위 설정 되돌리기(잠금 해제 요청), 미루기 → 알람 코어 snooze + 되돌리기(앱을 뒤로)
+//   · 미룬 알람 보기 · 취소 → 알람 코어 list · cancel (미루기 예약은 코어가 가짐)
 //   · 기상 확인: 해제 기록(alarm_events DISMISSED) 시각부터 10분의 화면 사용 구간(AlarmCore.getUsageSpans)으로 판정 (features/alarm/wake.ts evaluateWake, D14)
 //     확정하면 daily_records.wake_confirmed_at(빈 칸만) → alarm_events WAKE_CONFIRMED(event_at = θ를 넘은 시각 · 직접 응답은 응답 시각) 순으로 씀
 //     이벤트가 확정의 표지라(이게 있으면 다시 안 씀) 맨 마지막에 쓰고, 번호(client_event_id)는 그 알람의 그 해제로 정해지는 고정 값 — 중간에 끊겨 다시 눌러도 둘 다 한 번씩만 남음
@@ -16,7 +19,7 @@ import { supabase } from '@/lib/supabase';
 import { requireUserId } from '@/lib/user';
 
 import { STANDALONE_TITLE } from './map';
-import { WAKE_OBSERVE_MINUTES, type CancelSnoozeResult, type RingInfo, type Snooze, type WakeCheck } from './types';
+import { LEVELS, toLevel, WAKE_OBSERVE_MINUTES, type Appointment, type CancelSnoozeResult, type RingInfo, type Snooze, type WakeCheck } from './types';
 import { evaluateWake, pickDismissedAt, thetaReachedAt, WAKE_PROMPT_WINDOW_MINUTES, WAKE_THETA_MINUTES, type UseSpan } from './wake';
 
 // 미룬 알람의 Snooze.minutes에 넣는 참고 값 — 폰 list()는 고른 분을 안 돌려줘서 기본 미루기 시간(10분)을 넣음.
@@ -28,19 +31,87 @@ const MINUTE_MS = 60_000;
 // 울림 (H07)
 // ---------------------------------------------------------------------------
 
-// 실데이터에서는 이 화면으로 오지 않음 — 울림은 알람 코어 화면이 하고 해제 · 미루기도 거기서 함. 열려도 "울릴 알람을 찾을 수 없어요"
-export async function getRing(): Promise<RingInfo | null> {
-  return null;
+// 알람 코어가 지금 울리는 알람을 H07이 그리는 모양으로 바꿈. 울리는 게 없거나 다른 알람이면 null ("울릴 알람을 찾을 수 없어요")
+//   코어는 약속 정보(장소 · 음성 문장 · 중요도)를 안 가져서 제목만 코어 값이고, 나머지는 빈 값 — 화면(ring.tsx)이 빈 줄은 그리지 않음
+//   울린 시각(at)은 지금 — 다시 울림 · 미루고 난 뒤의 울림에서도 "지금 몇 시"를 보이고, 미루기의 늦어요 계산이 지금을 기준으로 함(네이티브 화면과 같음)
+export async function getRing(alarmId: string): Promise<RingInfo | null> {
+  const ringing = await AlarmCore.getRinging();
+  if (!ringing || ringing.id !== alarmId) return null;
+  if (ringing.type !== 'WAKE' && ringing.type !== 'PREPARE' && ringing.type !== 'DEPARTURE') return null;
+  const at = now();
+  const appointment: Appointment = {
+    id: ringing.id,
+    title: ringing.title || STANDALONE_TITLE,
+    at: new Date(ringing.atMillis),
+    place: '',
+    origin: '',
+    transport: 'WALK',
+    travelMinutes: 0,
+    travelSource: '',
+    bufferMinutes: 0,
+    beforePrepMinutes: 0,
+    prepMinutes: 0,
+    predictedPrepMinutes: 0,
+    importance: 'NORMAL',
+    repeatLabel: '',
+    recurrenceRule: null,
+    groupName: null,
+    items: [],
+    withWake: ringing.type === 'WAKE',
+    enabled: true,
+    alarms: [],
+    level: toLevel(ringing.intensity),
+  };
+  return {
+    alarmId: ringing.id,
+    kind: ringing.type,
+    appointment,
+    at,
+    voiceTone: '',
+    voiceLine: '',
+    notice: ringing.heading || undefined,
+    levelLine: `알람 강도 ${LEVELS[toLevel(ringing.intensity)].name}`,
+    important: false,
+    snoozeCount: ringing.snoozeCount,
+    snoozeLimit: ringing.snoozeLimit,
+    departAt: ringing.departAtMillis != null ? new Date(ringing.departAtMillis) : null,
+  };
 }
 
-// 울림 시작 · 화면을 나감 · 미루기는 알람 코어가 기록하고 처리하므로 앱이 할 일 없음
+// H07을 띄웠다고 코어의 길잡이 화면에 알림 — 안 알리면 몇 초 뒤 네이티브 대체 화면이 뜸. 못 알려도(옛 APK) 화면은 계속 씀
+export function ackRing(): void {
+  try {
+    AlarmCore.ackRingScreen();
+  } catch {
+    // 옛 APK에는 함수가 없음
+  }
+}
+
+// 알람이 끝난 뒤 H07의 잠금화면 위 설정 되돌리기 — 끝난 알람의 뒷정리라 실패해도 해제 · 미루기 결과는 그대로 둠
+async function releaseOverLock(dismissKeyguard: boolean): Promise<void> {
+  try {
+    await AlarmCore.releaseRingOverLock(dismissKeyguard);
+  } catch {
+    // 옛 APK에는 함수가 없음
+  }
+}
+
+// 울림 시작 · 화면을 나감은 알람 코어가 기록하고 처리하므로 앱이 할 일 없음
 export async function startRing(): Promise<void> {}
 export async function stopRing(): Promise<void> {}
-export async function snoozeRing(): Promise<void> {}
 
-// 해제 — 지금 울리는 알람을 코어가 해제 처리 (해제 기록은 코어가 남기고 올리기가 서버에 보냄)
+// 미루기 — 코어가 고른 분으로 다시 울릴 예약 + SNOOZED 기록. 한도(3번) · 허용 분(5 · 10 · 15)은 코어가 검사해 false를 줄 수 있음(이미 멈춤 포함)
+//   미뤘으면 H07을 잠금화면 위에서 내리고 앱을 뒤로 보냄(잠금화면으로 돌아감)
+export async function snoozeRing(_alarmId: string, minutes: number): Promise<boolean> {
+  const snoozed = await AlarmCore.snooze(minutes);
+  if (snoozed) await releaseOverLock(false);
+  return snoozed;
+}
+
+// 해제 — 지금 울리는 알람을 코어가 해제 처리 (해제 기록은 코어가 남기고 올리기가 서버에 보냄). 그 뒤 잠금 해제를 요청해 기상 확인(H08)이 이어서 보이게 함
 export async function dismissRing(): Promise<void> {
   await AlarmCore.stop();
+  await releaseOverLock(true);
 }
 
 // 미룬 알람 (H01) — 폰이 가진 미루기 예약 중 다시 울릴 시각이 아직 안 된 가장 이른 것

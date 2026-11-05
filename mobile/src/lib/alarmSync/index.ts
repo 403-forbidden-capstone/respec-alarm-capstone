@@ -15,6 +15,7 @@ import { callEdge } from '../edge';
 import { isMock } from '../mode';
 import { supabase } from '../supabase';
 import { currentUserId } from '../user';
+import { isDevAlarmId } from './devAlarm';
 import { isPermanentInsertError, toEventRow, type EventRow } from './events';
 import {
   buildServerPackages,
@@ -289,7 +290,8 @@ export function reconcile(options: ReconcileOptions = {}): Promise<SyncSummary> 
     const droppedIds = new Set(dropped.map((row) => row.alarm_id));
     if (options.timeZone) lastTimeZone = options.timeZone;
     const allServer = buildServerPackages(rows, options.timeZone ?? lastTimeZone ?? undefined);
-    const allPhone = await AlarmCore.list();
+    // 개발 화면의 시험 알람(서버 행 없음)은 맞추기 대상이 아님 — 안 빼면 앱이 앞에 올 때 "서버에 없음"으로 지워져 울림이 1초 만에 끊김
+    const allPhone = (await AlarmCore.list()).filter((a) => !isDevAlarmId(a.id));
     const only = options.alarmIds ? new Set(options.alarmIds) : null;
     let scopeIds: ReadonlySet<string> | null = null; // 이번에 맞춘 알람 id (alarmIds를 줬을 때만). 훅의 upcoming 범위
     // 준비 알림 글자 · 기상 음성 문장은 같은 약속의 출발 알람에서 나옴 — 폰에서 지울(서버에 없는) 앞으로 울릴 출발 알람의 약속을 알아 두면 같은 약속의 준비 · 기상을 다시 걸 수 있음 (planReconcile)

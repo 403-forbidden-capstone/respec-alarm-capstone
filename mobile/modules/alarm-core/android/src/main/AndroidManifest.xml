@@ -20,13 +20,16 @@
     tools:ignore="ProtectedPermissions" />
 
   <application>
+    <!-- 울림 길잡이 + 대체 화면 (#332): 앱을 따로 불러 H07을 띄우므로 앱과 다른 작업(task)에 둠 — 앱이 앞에 와도 이 화면이 사라지지 않아 앱이 못 뜰 때 대체 화면을 그릴 수 있음 -->
     <activity
       android:name=".AlarmRingingActivity"
       android:exported="false"
       android:excludeFromRecents="true"
+      android:launchMode="singleTask"
+      android:taskAffinity=""
       android:showWhenLocked="true"
       android:turnScreenOn="true"
-      android:theme="@android:style/Theme.Material.Light.NoActionBar" />
+      android:theme="@style/AlarmRingingTheme" />
 
     <!-- 화면 없는 중계 화면: WAKE 알림의 "해제" 버튼 → 해제 처리 + 앱 열기 -->
     <activity

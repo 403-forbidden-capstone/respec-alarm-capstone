@@ -5,7 +5,7 @@
 ```text
 화면 → alarm-core(JS) → 울림 계획 계산(TS, plan.ts) → 네이티브(Kotlin)는 받은 계획대로만 실행
      → AlarmManager → 시각이 되면 BroadcastReceiver
-        ├ WAKE            → 포그라운드 서비스 → 알람 볼륨 채널로 배경음(soundKey) + 진동(vibration 3종) + 잠금화면 위 알람 화면
+        ├ WAKE            → 포그라운드 서비스 → 알람 볼륨 채널로 배경음(soundKey) + 진동(vibration 3종) + 풀스크린 인텐트(→ 앱 H07 /ring, 아래 "울림 화면")
         └ 그 밖(준비 · 출발 · 도착 · 루틴) → 보통 알림(알림음 · 진동 한 번) + 원탭 버튼
 ```
 
@@ -27,6 +27,10 @@ mobile/modules/alarm-core/
 | `cancel(alarmId)` · `cancelAll()` | 예약 지우기 (미루기 · 다시 울림 대기 포함). 울리는 중이면 멈춤. 해제 기록은 안 남음. `cancelAll()`은 이미 떠 있는 일정 알림(준비 · 출발 · 도착 · 루틴)도 지워서 로그아웃 뒤 남은 알림의 원탭이 기록을 쌓지 않음 |
 | `list()` | 폰에 걸린 예약. `{ id, type, intensity, soundKey, vibration, title, atMillis, snoozeCount, nextRingAt }` — 서버 `alarms`와 `alarm_id` + `scheduled_at`(=`atMillis`) + `intensity` + `soundKey` + `vibration`으로 맞춤 (`soundKey` · `vibration`은 칸이 없는 예전 저장 알람이면 아래 기본값) |
 | `stop()` | 지금 울리는 알람을 해제 처리 (해제 기록이 남고, 앱이 이미 열려 있으니 앱은 안 엶) |
+| `getRinging()` | 지금 울리는 알람 `{ id, type, title, subtitle, atMillis, nextRingAt, snoozeCount, snoozeLimit, snoozeMinutesOptions, departAtMillis, heading, soundKey, vibration, intensity }` 또는 `null`. 앱 H07이 그림. 해제하면 알람이 지워져 다시 읽으면 `null` |
+| `snooze(minutes)` | 지금 울리는 알람을 `minutes`분 미룸 (SNOOZED 기록). 한도(3번) · 허용 분(5 · 10 · 15)은 코어가 검사해 `false`를 줄 수 있음 (이미 멈춤 포함) |
+| `ackRingScreen()` | (동기) 앱이 H07을 띄웠다고 네이티브 길잡이 화면에 알림 → 길잡이 화면이 닫힘 |
+| `releaseRingOverLock(dismissKeyguard)` | 알람이 끝나 H07의 잠금화면 위 설정을 되돌림. `true`(해제)면 잠금 해제도 요청해 기상 확인(H08)이 이어서 보이게 하고, `false`(미루기)면 앱을 뒤로 보냄 |
 | `ringNow(pkg)` | 예약 없이 바로 울림 (시험용). 같은 id가 있으면 덮어씀 |
 | `canScheduleExactAlarms()` · `canUseFullScreenIntent()` | 정확한 알람 · 잠금화면 알람 화면 권한 |
 | `hasUsageAccess()` · `openUsageAccessSettings()` · `getUsageSpans(from, to)` | 사용 정보 접근 권한 확인 · 설정 열기 · 화면 사용 구간 읽기 (아래 기상 확인) |
@@ -34,6 +38,23 @@ mobile/modules/alarm-core/
 | `isAvailable` | Android + 모듈이 든 APK인지. 웹이면 false |
 
 순수 함수(네이티브 없이 씀): `buildRingPlan` · `volumePercentFor` · `ringStartTimes` · `snoozeRingAt` · `canSnooze` · `isSnoozeLate` · `snoozeCountLabel` · `snoozeLimitNotice` · `unansweredSpanMillis` · `isPastRing` · `volumeAdjustFromRatings` · `toUseSpans` · `makeUuid`.
+
+## 울림 화면 (#332)
+
+WAKE가 울리면 소리 · 진동 · 다시 울림은 네이티브 서비스(`AlarmPlaybackService`)가 맡고, 화면은 앱의 H07(`/ring`)이 잠금화면 위에 뜸.
+
+```text
+풀스크린 인텐트 · 알림 본문 → AlarmRingingActivity(길잡이, 단색 #141414)
+   → respecalarm://ring?alarm=<알람 id> 로 앱(MainActivity)을 엶 → 앱 /ring이 getRinging()으로 그림
+   → 앱이 ackRingScreen() → 길잡이 화면 닫힘
+   → 해제: stop() + releaseRingOverLock(true) → /wake   미루기: snooze(분) + releaseRingOverLock(false)
+앱이 RING_APP_TIMEOUT_MS(6초) 안에 ack를 안 하면 → 길잡이 화면이 네이티브 컨트롤(대체 화면: 5 · 10 · 15분 미루기 · 해제)을 그림
+```
+
+- **잠금화면 위 규칙**: 앱 manifest에 `showWhenLocked`를 박지 않음 (잠긴 채 다른 알림을 눌러도 앱이 잠금 위에 뜨는 보안 후퇴). `respecalarm://ring` 인텐트로 열렸을 때만 `AlarmCorePackage`의 ReactActivityLifecycleListener가 `setShowWhenLocked` · `setTurnScreenOn` · `KEEP_SCREEN_ON`을 켬(`RingOverLock`). `releaseRingOverLock`이 되돌리고, 사용자가 홈으로 나가거나(`onUserLeaveHint`) 서비스가 멈춘 지 8초가 지나도 남아 있으면 스스로 거둠.
+- 길잡이 화면은 앱과 다른 작업(task)에 둠(`taskAffinity=""`) — 앱이 앞에 와도 길잡이가 사라지지 않아, 앱이 못 뜰 때 대체 화면을 그릴 수 있음.
+- 앱 라우팅: `/ring`은 로그인 · 온보딩 · 프로필 읽기를 기다리지 않고 열림 (`app/_layout.tsx`). 해제 · 미루기는 코어 호출뿐.
+- 코어는 약속 정보(장소 · 음성 문장)를 안 가져서 실데이터 H07은 제목 · 시각 · 미루기 칸만 그림.
 
 ## 예약 꾸러미
 

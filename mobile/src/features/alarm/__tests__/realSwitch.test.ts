@@ -34,6 +34,7 @@ jest.mock('../real', () => {
     'startRing',
     'stopRing',
     'snoozeRing',
+    'ackRing',
     'getSnooze',
     'cancelSnooze',
     'dismissRing',
@@ -98,10 +99,10 @@ describe('실데이터 모드: 알람 api 전부가 real.ts로 넘어감', () =>
     ['reverseAddress', () => api.reverseAddress(37.55, 127.07), 'reverseAddress', [37.55, 127.07]],
     ['estimateAppointment', () => api.estimateAppointment(api.defaultDraft(at)), 'estimateAppointment', [expect.objectContaining({ place: '' })]], // 실데이터는 장소를 목록에서 고름
     ['createAppointment', () => api.createAppointment(estimate, 'AI 대화'), 'createAppointment', [estimate, 'AI 대화']],
-    ['getRing', () => api.getRing('a1:WAKE'), 'getRing', []],
+    ['getRing', () => api.getRing('alarm-1'), 'getRing', ['alarm-1']], // 실데이터 알람 id(UUID) — `일정:종류` 모양은 웹 미리보기라 코어로 안 감 (ringPreview.test.ts)
     ['startRing', () => api.startRing('a1', at), 'startRing', []],
     ['stopRing', () => api.stopRing('a1'), 'stopRing', []],
-    ['snoozeRing', () => api.snoozeRing('a1', 5, at), 'snoozeRing', []],
+    ['snoozeRing', () => api.snoozeRing('a1', 5, at), 'snoozeRing', ['a1', 5]],
     ['getSnooze', () => api.getSnooze(), 'getSnooze', []],
     ['cancelSnooze', () => api.cancelSnooze('a1'), 'cancelSnooze', ['a1']],
     ['dismissRing', () => api.dismissRing('a1', at), 'dismissRing', []],
@@ -122,6 +123,14 @@ describe('실데이터 모드: 알람 api 전부가 real.ts로 넘어감', () =>
     await expect(invoke()).resolves.toBe(sentinel);
     expect(mockReal).toHaveBeenCalledTimes(1);
     expect(mockReal).toHaveBeenCalledWith(realName, ...realArgs);
+  });
+
+  it('ackRing: 실데이터에서만 real.ts로 넘어가고, 가짜 모드에서는 아무 일도 안 함', () => {
+    api.ackRing();
+    expect(mockReal).not.toHaveBeenCalled();
+    mockIsMock = false;
+    api.ackRing();
+    expect(mockReal).toHaveBeenCalledWith('ackRing');
   });
 
   it('실데이터에서 새 일정의 장소는 비어 있음(목록에서 고름) — 가짜 데이터는 첫 장소', () => {

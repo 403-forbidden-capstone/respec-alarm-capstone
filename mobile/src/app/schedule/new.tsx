@@ -12,9 +12,9 @@ import { HomeMissingNotice } from '@/features/alarm/components/HomeMissingNotice
 import { ItemChips } from '@/features/alarm/components/ItemChips';
 import { OptionGrid } from '@/features/alarm/components/OptionGrid';
 import { MapPlaceSheet } from '@/features/alarm/components/MapPlaceSheet';
-import { PlaceSearchSheet } from '@/features/alarm/components/PlaceSearchSheet';
 import { RepeatPicker } from '@/features/alarm/components/RepeatPicker';
 import { SelectRow } from '@/features/alarm/components/SelectRow';
+import { TextLink } from '@/features/alarm/components/TextLink';
 import { TimeButton } from '@/features/alarm/components/TimeButton';
 import { TimePickBody } from '@/features/alarm/components/TimePicker';
 import { TimeRow } from '@/features/alarm/components/TimeRow';
@@ -40,9 +40,11 @@ import { isAreaPlace } from '@/features/location/area';
 import { askNotifications } from '@/features/permissions';
 import { useAuth } from '@/features/auth/AuthProvider';
 import { saveProfileFields } from '@/features/profile/api';
-import { DESTINATION_RADIUS_PRESETS } from '@/features/location/radius';
+import { DESTINATION_RADIUS_PRESETS, HOME_RADIUS_PRESETS } from '@/features/location/radius';
+import { HOME_RADIUS_M } from '@/features/location/constants';
+import { homePatchOf } from '@/features/onboarding/home';
 import { FrequentPlaceChips } from '@/features/location/components/FrequentPlaceChips';
-import { locateOnce } from '@/features/location/currentPosition';
+import { locateOnce, locateWithReason } from '@/features/location/currentPosition';
 import { listUserPlaces } from '@/features/location/api';
 import { foundScheduleDraft, saveFoundSchedule } from '@/features/voice/api';
 import { now } from '@/lib/clock';
@@ -91,6 +93,7 @@ export default function NewScheduleScreen() {
   const [estimate, setEstimate] = useState<Estimate | null>(null);
   const [pick, setPick] = useState<RingKind | null>(null); // 확인 시트에서 시각을 고르는 알람 (D43)
   const [placeOpen, setPlaceOpen] = useState(false); // 장소 검색 시트
+  const [originOpen, setOriginOpen] = useState(false); // 이번 일정의 출발지 선택
   const [placeQuery, setPlaceQuery] = useState(''); // 시트를 열 때 채워 둘 검색어 (캠퍼스 [건물 검색]이면 그 이름)
   const [pickedPlace, setPickedPlace] = useState<Place | null>(null); // 방금 고른 장소의 분류(category)를 경고 판정에만 잠깐 들고 있음 — 저장하지 않음 (D5)
   const auth = useAuth();
@@ -99,6 +102,7 @@ export default function NewScheduleScreen() {
   const [homeMissing, setHomeMissing] = useState(false); // 계산이 집 위치를 몰라 막힘 — 안내 카드 [집 정하기]
   const [homeSheetOpen, setHomeSheetOpen] = useState(false); // 집 찾기 시트
   const { busy: calculating, run: runCalculate } = useAction();
+  const { busy: locatingOrigin, run: runLocateOrigin } = useAction();
   const { busy: savingHome, run: runSaveHome } = useAction();
   const { busy: saving, run: runSave } = useAction();
   const current = useNow();
@@ -113,6 +117,7 @@ export default function NewScheduleScreen() {
     draft.time !== initial.time ||
     repeatToRrule(draft.repeat) !== repeatToRrule(initial.repeat) ||
     edited.place !== initial.place ||
+    draft.originLocation != null ||
     draft.transport !== initial.transport ||
     draft.importance !== initial.importance ||
     RING_KINDS.some((kind) => draft.alarms[kind] !== initial.alarms[kind]);
@@ -149,7 +154,7 @@ export default function NewScheduleScreen() {
         setEstimate(await estimateAppointment({ ...draft, title: draft.title.trim(), items: items.join(',') }));
       } catch (e) {
         // 원인이 집이면 토스트 대신 안내 카드 (장소를 다시 골라도 안 풀림)
-        if (!isHomeMissing({ error: e, hasHome: homeJustSaved || home != null, placeHasCoords: draft.placeLat != null && draft.placeLng != null })) throw e;
+        if (!isHomeMissing({ error: e, hasHome: homeJustSaved || home != null || draft.originLocation != null, placeHasCoords: draft.placeLat != null && draft.placeLng != null })) throw e;
         setHomeMissing(true);
         return;
       }
@@ -166,9 +171,13 @@ export default function NewScheduleScreen() {
       toast('이 장소는 위치를 몰라 집으로 정할 수 없어요');
       return;
     }
-    const { name, lat, lng } = place;
+    const patch = homePatchOf(place);
+    if (!patch) {
+      toast('이 장소는 위치를 몰라 집으로 정할 수 없어요');
+      return;
+    }
     void runSaveHome(async () => {
-      await saveProfileFields(await requireUserId(), { home_name: name, home_lat: lat, home_lng: lng });
+      await saveProfileFields(await requireUserId(), patch);
       await auth.refreshProfile().catch(() => {}); // 못 읽어도 집은 저장됨 — 서버는 계산할 때 프로필을 직접 읽음
       setHomeMissing(false);
       setHomeSheetOpen(false);
@@ -210,7 +219,7 @@ export default function NewScheduleScreen() {
   }
 
   // 계산 버튼은 화면 아래에 고정 — 폼이 길어 스크롤 끝까지 내려가지 않아도 보이게 (H03 저장과 같음). 키보드가 올라오면 같이 올라감
-  const footer = <Button label={anyAlarm ? '알람 계산하기' : '일정만 저장하기'} onPress={calculate} loading={calculating} disabled={past} />;
+  const footer = <Button label={anyAlarm ? '알람 계산하기' : '일정만 저장하기'} onPress={calculate} loading={calculating} disabled={past || locatingOrigin} />;
 
   return (
     <Screen footer={footer}>
@@ -221,6 +230,9 @@ export default function NewScheduleScreen() {
       <Text variant="lead" style={styles.lead}>
         약속 정보를 바탕으로 필요한 알람을 계산해요.
       </Text>
+      <View style={styles.timetableLink}>
+        <TextLink label="수업이면 학교 시간표로 한 번에 넣기" onPress={() => router.push('/timetable')} />
+      </View>
 
       <Card>
         <Text variant="label" tone="sub">
@@ -259,6 +271,40 @@ export default function NewScheduleScreen() {
         <Text variant="label" tone="sub">
           장소와 중요도
         </Text>
+        <KeyValueRow label="출발지" value={draft.originLocation ? (draft.originName || '현재 위치') : (auth.profile?.home_name ?? '집 위치 미설정')} />
+        <Text variant="caption" tone="sub">기본 출발지는 집이에요. 다른 위치를 고르면 이 일정에만 적용돼요.</Text>
+        <Button variant="ghost" label="현재 위치를 출발지로 사용" loading={locatingOrigin} disabled={calculating} onPress={() => void runLocateOrigin(async () => {
+          const { point, reason } = await locateWithReason();
+          if (!point) {
+            toast(reason === 'denied' ? '위치 권한이 꺼져 있어요. 브라우저나 기기 설정을 확인해 주세요' : reason === 'timeout' ? '위치 확인 시간이 지났어요. 다시 시도하거나 출발지를 검색해 주세요' : '위치를 확인하지 못했어요. 기기 설정을 확인하거나 출발지를 검색해 주세요');
+            return;
+          }
+          setDraft((previous) => ({ ...previous, originLocation: point, originName: undefined }));
+          setHomeMissing(false);
+        }, '현재 위치를 가져오지 못했어요')} />
+        <Button variant="ghost" label="출발지 검색" disabled={locatingOrigin || calculating} onPress={() => setOriginOpen(true)} />
+        {draft.originLocation ? <Button variant="ghost" label="집을 출발지로 사용" disabled={locatingOrigin || calculating} onPress={() => setDraft((previous) => ({ ...previous, originLocation: undefined, originName: undefined }))} /> : null}
+        {draft.originLocation ? <Text variant="caption" tone="sub">선택한 위치는 일정에 저장돼요. 반복 일정은 모든 회차에 같은 위치를 사용해요.</Text> : null}
+        <MapPlaceSheet
+          visible={originOpen}
+          onClose={() => setOriginOpen(false)}
+          title="출발지 고르기"
+          search={(query) => listPlaces(query, home)}
+          reverse={reverseAddress}
+          locate={locateOnce}
+          center={draft.originLocation ?? home}
+          areaWarning={null}
+          onPick={(place) => {
+            const { lat, lng } = place;
+            if (lat == null || lng == null) {
+              toast('이 장소의 위치를 확인하지 못했어요. 다른 장소를 골라 주세요');
+              return;
+            }
+            setDraft((previous) => ({ ...previous, originLocation: { lat, lng }, originName: place.name }));
+            setHomeMissing(false);
+            setOriginOpen(false);
+          }}
+        />
         {userPlaces?.length ? (
           <View style={styles.chipsRow}>
             <FrequentPlaceChips places={userPlaces} selectedLabel={selectedUserPlaceLabel(draft, userPlaces)} onPick={(p) => setDraft((d) => withUserPlace(d, p))} />
@@ -371,12 +417,18 @@ export default function NewScheduleScreen() {
         </Text>
       </Card>
 
-      {homeMissing ? <HomeMissingNotice onPickHome={() => setHomeSheetOpen(true)} busy={savingHome} /> : null}
-      <PlaceSearchSheet
+      {homeMissing ? <HomeMissingNotice onPickHome={() => setHomeSheetOpen(true)} busy={savingHome || locatingOrigin || calculating} /> : null}
+      <MapPlaceSheet
         visible={homeSheetOpen}
         onClose={() => setHomeSheetOpen(false)}
         title="집 찾기"
         search={(query) => listPlaces(query, home)}
+        reverse={reverseAddress}
+        locate={locateOnce}
+        center={home}
+        suggestedNames={['집']}
+        areaWarning={null}
+        radius={{ initial: HOME_RADIUS_M, presets: HOME_RADIUS_PRESETS, followPlace: false, hint: '이 원을 벗어나면 출발을 기록해요' }}
         onPick={pickHome}
       />
 
@@ -574,6 +626,7 @@ function CalcSteps({
 }
 
 const styles = StyleSheet.create({
+  timetableLink: { marginBottom: 12, alignSelf: 'flex-start' },
   title: { marginTop: 8, marginBottom: 4 },
   lead: { marginBottom: 18 },
   optLabel: { marginTop: 12, marginBottom: 8 },
