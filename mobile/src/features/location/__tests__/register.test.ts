@@ -221,6 +221,7 @@ describe('등록 (refreshGeofences)', () => {
     expect(profileCall?.filters).toContainEqual(['eq', 'user_id', 'user-1']);
     const participantCall = mockCalls.find((c) => c.table === 'appointment_participants');
     expect(participantCall?.filters).toContainEqual(['eq', 'user_id', 'user-1']);
+    expect(participantCall?.filters).toContainEqual(['or', 'exception_kind.is.null,exception_kind.neq.CANCELED', { referencedTable: 'appointments' }]);
     expect(participantCall?.filters).toContainEqual(['gte', 'appointments.appointment_at', new Date(at('07:55') - 2 * 3_600_000).toISOString()]);
     expect(participantCall?.filters).toContainEqual(['lte', 'appointments.appointment_at', new Date(at('07:55') + 26 * 3_600_000).toISOString()]);
   });
