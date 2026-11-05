@@ -126,10 +126,6 @@ function RootStack() {
         {/* 학교 시간표 (목업에 없는 화면, 11/2) — 반복 일정 보기 · 지우기. 가져오기 입구는 실데이터에서만 보임 */}
         <Stack.Screen name="timetable" />
       </Stack.Protected>
-      {/* 알람 울림(H07) — 로그인 · 온보딩 · 읽는 중에도 열림. 다른 화면은 위 가드가 그대로 막음 */}
-      <Stack.Protected guard={ready || ringEntry}>
-        <Stack.Screen name="ring" options={{ animation: 'fade' }} />
-      </Stack.Protected>
       {/* 목업에 없는 설정 · 로그인 · 온보딩 — 실데이터를 못 쓰면 빠짐. 온보딩은 ONBOARDING_IN_FLOW가 꺼져도 따로 빠짐 */}
       <Stack.Protected guard={ready && canUseRealData}>
         <Stack.Screen name="settings" />
@@ -145,6 +141,10 @@ function RootStack() {
       <Stack.Protected guard={ONBOARDING_IN_FLOW && (needsOnboarding || preview)}>
         <Stack.Screen name="onboarding" />
       </Stack.Protected>
+      {/* 알람 울림(H07) — 가드 없이 늘 열림(로그인 · 온보딩 · 읽는 중에도). 이미 켜진 앱에 길잡이 화면의 딥링크가 와도 열려야 함
+          — 예전 가드(ready || 지금 주소가 /ring)는 로그인 전에 켜져 있던 앱에서 /ring으로 가는 길을 막아 6초 뒤 네이티브 대체 화면이 떴음 (11/5 에뮬레이터)
+          맨 끝에 두는 이유: 막힌 화면으로 가면 열린 화면 중 앞의 것으로 보내므로, 앞에 두면 로그인 전 사용자가 홈 대신 울림 화면으로 감 */}
+      <Stack.Screen name="ring" options={{ animation: 'fade' }} />
     </Stack>
   );
 }

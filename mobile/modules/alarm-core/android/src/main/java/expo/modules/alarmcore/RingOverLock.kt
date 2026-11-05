@@ -43,9 +43,24 @@ object RingOverLock {
     return wanted == null || wanted == ringing
   }
 
+  // 길잡이 화면(AlarmRingingActivity)이 앱을 열려고 한 알람 id — 앱 액티비티가 그 인텐트를 못 받고 만들어진 경우를 메움
+  @Volatile
+  var pendingRingId: String? = null
+
   fun onActivityCreated(activity: Activity) {
     current = WeakReference(activity)
-    if (isRingIntent(activity.intent) && isRingingFor(activity.intent)) hold(activity)
+    if (isRingIntent(activity.intent) && isRingingFor(activity.intent)) {
+      hold(activity)
+      return
+    }
+    // 프로세스가 정리된 뒤 최근 앱 자리에서 되살아나면 액티비티는 예전 인텐트(앱 아이콘 등)로 만들어지고, 울림 링크는 onNewIntent로 오는데
+    // 앱 로딩이 끝나기 전이라 Expo가 버림(ReactActivityDelegateWrapper.onNewIntent: loadAppReady 전이면 false) → 앱이 로그인 · 홈으로 뜨고 6초 뒤 대체 화면 (11/5 에뮬레이터)
+    // 길잡이가 열려던 알람이 아직 울리면 액티비티 인텐트를 울림 링크로 바꿔 JS가 처음 주소로 /ring을 읽게 하고 잠금화면 위로 올림
+    val pending = pendingRingId
+    if (pending != null && pending == AlarmPlaybackService.ringingAlarmId) {
+      activity.intent = Intent(Intent.ACTION_VIEW, ringLink(pending)).setPackage(activity.packageName)
+      hold(activity)
+    }
   }
 
   fun onActivityNewIntent(intent: Intent?) {

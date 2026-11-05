@@ -111,9 +111,12 @@ class AlarmRingingActivity : Activity() {
     handler.removeCallbacks(fallbackRunnable)
     scrollView = null
     setContentView(View(this).apply { setBackgroundColor(WAIT_COLOR) })
+    val ringId = AlarmPlaybackService.ringingAlarmId ?: alarmId
+    // 앱 액티비티가 새로 만들어지며 이 인텐트를 못 받아도 울림 화면으로 열리게 적어 둠 (RingOverLock.onActivityCreated)
+    RingOverLock.pendingRingId = ringId
     val opened = runCatching {
       startActivity(
-        Intent(Intent.ACTION_VIEW, RingOverLock.ringLink(AlarmPlaybackService.ringingAlarmId ?: alarmId)).apply {
+        Intent(Intent.ACTION_VIEW, RingOverLock.ringLink(ringId)).apply {
           setPackage(packageName)
           addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP)
         },
@@ -126,6 +129,7 @@ class AlarmRingingActivity : Activity() {
   // 앱이 H07을 띄움 — 이 화면은 할 일이 끝남. 알람은 앱이 해제 · 미루기하면 서비스가 멈춰 끝남
   private fun handleAppAck() {
     handler.removeCallbacks(fallbackRunnable)
+    RingOverLock.pendingRingId = null
     finish()
   }
 
