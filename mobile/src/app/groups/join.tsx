@@ -54,7 +54,7 @@ export default function JoinGroupScreen() {
           onSubmitEditing={join}
         />
       </Card>
-      <Note>들어가면 그룹원이 허용한 만큼 알람 시간과 기상 상태가 보여요. 내가 보여 줄 범위는 들어간 뒤 공유 권한 설정에서 정해요.</Note>
+      <Note>그룹원의 알람 · 기상 상태는 그 사람이 공유를 허용해야 보여요. 내가 보여 줄 범위는 들어간 뒤 공유 권한 설정에서 정해요.</Note>
     </Screen>
   );
 }
