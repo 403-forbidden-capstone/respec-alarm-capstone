@@ -49,6 +49,9 @@ import {
   type LatLng,
   type Place,
   type PinAddress,
+  type SavedAppointment,
+  type SaveFollowUp,
+  type SettingsSaveResult,
   type UserEditLog,
 } from './types';
 
@@ -175,10 +178,36 @@ const warnDev = (what: string, e: unknown) => {
   if (__DEV__) console.warn(`[alarm] ${what}`, e);
 };
 
+// 저장 결과를 폰에 반영하고 못 건 알람 수를 돌려줌 — 던지지 않음. applyCommit이 던지면 이번에 걸려던 알람 모두를 못 건 것으로 셈
+async function phoneFailures(result: Parameters<typeof applyCommit>[0]): Promise<number> {
+  try {
+    const summary = await applyCommit(result);
+    if (summary.failed.length) warnDev('폰에 못 건 알람', summary.failed);
+    return new Set(summary.failed.map((f) => f.alarmId)).size;
+  } catch (e) {
+    warnDev('저장 뒤처리 실패 (폰 예약)', e);
+    return Math.max(1, result.ring_packages?.length ?? 0);
+  }
+}
+
+// 반복 회차 넘기기 — 기다리지 않고, 던져도(동기 오류 포함) 저장 흐름은 그대로 (못 건 회차는 다음 앱 열림 때 걸림)
+function rollSeries(seriesId: string) {
+  try {
+    void syncNow({ rollSeriesId: seriesId });
+  } catch (e) {
+    warnDev('저장 뒤처리 실패 (반복 회차)', e);
+  }
+}
+
+// 뒤처리가 못 한 것이 있을 때만 followUp을 채움 (화면은 saveNotice.ts 문구로 알림)
+const followUpOf = (phoneFailed: number, itemsFailed = false): { followUp?: SaveFollowUp } =>
+  phoneFailed > 0 || itemsFailed ? { followUp: { phoneFailed, itemsFailed } } : {};
+
 // 새 일정 저장 (H05). source(하루 기록에 남길 출처)는 실데이터에선 안 씀 — 하루 기록은 울림 · 확인 기록에서 읽음
 //   저장이 끝난 뒤의 뒤처리(폰 예약 · 준비물)는 실패해도 오류로 돌리지 않음: 같은 요청을 다시 보내면 일정이 하나 더 생김.
-//   폰 예약은 다음 맞추기(앱이 앞에 올 때)에서 다시 걸리고, 준비물은 개발 중에만 로그
-export async function createAppointment(estimate: Estimate, source?: string): Promise<Appointment> {
+//   대신 못 한 것을 followUp으로 돌려줘 화면이 "저장했지만 ~못 했어요"로 알림. 폰 예약은 다음 맞추기(앱이 앞에 올 때)에서 다시 걸리고,
+//   준비물은 다시 넣는 길이 없어 알리기만 함. 폰 예약이 실패해도 준비물은 넣음 (둘은 서로 영향 없음)
+export async function createAppointment(estimate: Estimate, source?: string): Promise<SavedAppointment> {
   void source;
   const a = estimate.appointment;
   const blocked = orderError(a.alarms);
@@ -190,30 +219,31 @@ export async function createAppointment(estimate: Estimate, source?: string): Pr
   const res = await callEdge<CommitResponse>('alarm-commit', body, { timeoutMs: COMMIT_TIMEOUT_MS });
   const saved = toCreatedAppointment(res, estimate);
 
-  try {
-    const summary = await applyCommit({ ...res, appointment_at: a.at.toISOString() }); // 약속 시각은 맞춘 뒤 훅(onAlarmsSynced)의 upcoming용
-    if (summary.failed.length) warnDev('폰에 못 건 알람', summary.failed);
-    const items = a.items.map((x) => x.trim()).filter(Boolean);
-    if (items.length && res.appointment_id) {
+  const phoneFailed = await phoneFailures({ ...res, appointment_at: a.at.toISOString() }); // 약속 시각은 맞춘 뒤 훅(onAlarmsSynced)의 upcoming용
+  let itemsFailed = false;
+  const items = a.items.map((x) => x.trim()).filter(Boolean);
+  if (items.length && res.appointment_id) {
+    try {
       const { error } = await supabase
         .from('todos')
         .insert(items.map((title) => ({ user_id: userId, appointment_id: res.appointment_id, title: title.slice(0, 100), todo_type: 'ITEM' as const, due_date: dayKey(a.at) })));
-      if (error) warnDev('준비물 저장 실패', error);
+      if (error) throw error;
+    } catch (e) {
+      itemsFailed = true;
+      warnDev('준비물 저장 실패', e);
     }
-    // 반복 일정이면 서버가 다음 회차들(앞으로 14일치)을 만들어 폰에 걸게 함 — 첫 회차는 위에서 이미 걸었고, 나머지는 몇 초 뒤 맞추기가 끝나면 걸림.
-    //   준비물 저장 뒤에 불러야 서버가 회차를 만들 때 준비물을 복사함. 기다리지 않음 — 실패해도 저장 흐름은 그대로 (syncNow는 던지지 않고, 못 건 회차는 다음 앱 열림 때 걸림)
-    //   묶음 번호(series_id)는 새 약속이면 appointment_id (DB가 채움, 설계메모 1절)
-    if (a.recurrenceRule && res.appointment_id) void syncNow({ rollSeriesId: res.appointment_id });
-  } catch (e) {
-    warnDev('저장 뒤처리 실패', e);
   }
-  return saved;
+  // 반복 일정이면 서버가 다음 회차들(앞으로 14일치)을 만들어 폰에 걸게 함 — 첫 회차는 위에서 이미 걸었고, 나머지는 몇 초 뒤 맞추기가 끝나면 걸림.
+  //   준비물 저장 뒤에 불러야 서버가 회차를 만들 때 준비물을 복사함. 기다리지 않음 — 실패해도 저장 흐름은 그대로 (syncNow는 던지지 않고, 못 건 회차는 다음 앱 열림 때 걸림)
+  //   묶음 번호(series_id)는 새 약속이면 appointment_id (DB가 채움, 설계메모 1절)
+  if (a.recurrenceRule && res.appointment_id) rollSeries(res.appointment_id);
+  return { ...saved, ...followUpOf(phoneFailed, itemsFailed) };
 }
 
 // 알람 설정 저장 (H03) — 여유 · 출발 위치 · 이동 수단 · 이동 · 준비 · 알람 시각 · 종류별 켜기 · 강도를 한 번에
 //   바뀐 곳은 고친 값 기록(edits)으로 같이 보냄. 시각 입력이 바뀌었으면 먼저 계산해서 자동값을 알아냄(고친 값 기록의 auto_value)
-//   돌려주는 값 = 이번 저장으로 일정 알람이 꺼졌는지 · 켜졌는지 (종류를 모두 껐거나 껐던 종류를 다시 켠 경우)
-export async function saveAlarmSettings(id: string, draft: AlarmSettingsDraft): Promise<{ turnedOff: boolean; turnedOn: boolean }> {
+//   돌려주는 값 = 이번 저장으로 일정 알람이 꺼졌는지 · 켜졌는지 (종류를 모두 껐거나 껐던 종류를 다시 켠 경우) + 폰에 못 건 알람이 있으면 followUp
+export async function saveAlarmSettings(id: string, draft: AlarmSettingsDraft): Promise<SettingsSaveResult> {
   const userId = await requireUserId();
   const saved = await loadDetail(id, userId, now().getTime());
   if (!saved) return { turnedOff: false, turnedOn: false };
@@ -247,13 +277,8 @@ export async function saveAlarmSettings(id: string, draft: AlarmSettingsDraft): 
 
   // 저장(alarm-commit)은 끝났음 — 뒤처리(폰 예약 · 도착 목표 맞추기)가 실패해도 실패로 돌리지 않음 (createAppointment와 같은 방침):
   //   실패 토스트가 뜨면 저장된 줄 모르고 화면이 저장 전 상태로 남고, 같은 저장을 다시 눌러도 같은 서버 상태일 뿐임.
-  //   폰 예약은 다음 맞추기(앱이 앞에 올 때 reconcile)에서 서버 값으로 다시 걸림. 둘은 서로 영향이 없게 따로 감쌈
-  try {
-    const summary = await applyCommit({ ...res, appointment_at: saved.at.toISOString() });
-    if (summary.failed.length) warnDev('폰에 못 건 알람', summary.failed);
-  } catch (e) {
-    warnDev('저장 뒤처리 실패 (폰 예약)', e);
-  }
+  //   폰 예약은 다음 맞추기(앱이 앞에 올 때 reconcile)에서 서버 값으로 다시 걸림. 둘은 서로 영향이 없게 따로 감쌈. 못 건 수는 followUp으로 화면에 알림
+  const phoneFailed = await phoneFailures({ ...res, appointment_at: saved.at.toISOString() });
   try {
     const arrive = res.participant_id ? await mirrorArrive(userId, res.participant_id) : [];
     await syncPhone(arrive);
@@ -265,7 +290,7 @@ export async function saveAlarmSettings(id: string, draft: AlarmSettingsDraft): 
   const wasOn = (kind: (typeof RING_KINDS)[number]) => saved.alarms.find((x) => x.kind === kind)?.enabled;
   const kindOff = RING_KINDS.some((kind) => draft.kinds[kind] === false && wasOn(kind) === true);
   const kindOn = RING_KINDS.some((kind) => draft.kinds[kind] === true && wasOn(kind) === false);
-  return { turnedOff: kindOff && saved.enabled && !nowEnabled, turnedOn: kindOn && !saved.enabled && nowEnabled };
+  return { turnedOff: kindOff && saved.enabled && !nowEnabled, turnedOn: kindOn && !saved.enabled && nowEnabled, ...followUpOf(phoneFailed) };
 }
 
 // ---------------------------------------------------------------------------
@@ -273,7 +298,7 @@ export async function saveAlarmSettings(id: string, draft: AlarmSettingsDraft): 
 // ---------------------------------------------------------------------------
 
 // 만들기: 시각 필수. 고치기: alarmId만 있으면 시각 없이 강도 · 켜기만도 됨
-export async function saveStandaloneAlarm(input: StandaloneInput): Promise<Appointment> {
+export async function saveStandaloneAlarm(input: StandaloneInput): Promise<SavedAppointment> {
   if (!input.alarmId && !input.at) throw new UserError('알람 시각을 골라 주세요');
   const queued = peekEdits(null);
   const body = { ...standaloneBody(input), edits: toEditPayloads(queued) };
@@ -281,15 +306,10 @@ export async function saveStandaloneAlarm(input: StandaloneInput): Promise<Appoi
   dropEdits(queued);
   const row = res.alarms[0];
   if (!row) throw new UserError('알람을 저장하지 못했어요. 다시 해 주세요');
-  try {
-    const summary = await applyCommit(res);
-    if (summary.failed.length) warnDev('폰에 못 건 알람', summary.failed);
-    // 새로 만든 반복 알람이면 다음 회차들도 바로 넘김 (createAppointment와 같음). 묶음 번호 = 첫 회차의 alarm_id. 고치기(alarmId 있음)는 어느 회차인지 몰라 건너뜀 — 다음 앱 열림 때 넘김
-    if (!input.alarmId && row.recurrence_rule) void syncNow({ rollSeriesId: row.alarm_id });
-  } catch (e) {
-    warnDev('저장 뒤처리 실패', e);
-  }
-  return toStandaloneAppointment({ ...row, alarm_type: 'WAKE' });
+  const phoneFailed = await phoneFailures(res);
+  // 새로 만든 반복 알람이면 다음 회차들도 바로 넘김 (createAppointment와 같음). 묶음 번호 = 첫 회차의 alarm_id. 고치기(alarmId 있음)는 어느 회차인지 몰라 건너뜀 — 다음 앱 열림 때 넘김
+  if (!input.alarmId && row.recurrence_rule) rollSeries(row.alarm_id);
+  return { ...toStandaloneAppointment({ ...row, alarm_type: 'WAKE' }), ...followUpOf(phoneFailed) };
 }
 
 // ---------------------------------------------------------------------------

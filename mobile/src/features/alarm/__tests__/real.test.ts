@@ -985,6 +985,36 @@ describe('새 일정 계산 · 저장 (H05)', () => {
     await expect(real.createAppointment(estimate)).resolves.toMatchObject({ id: 'new-appt' });
   });
 
+  it('뒤처리가 다 되면 followUp 없음 — 화면은 원래 저장 문구', async () => {
+    const estimate = await estimateOf();
+    mockCallEdge.mockResolvedValueOnce(commitResponse());
+    mockRoutes['todos:insert'] = () => undefined;
+    expect((await real.createAppointment(estimate)).followUp).toBeUndefined();
+  });
+
+  it('폰에 못 건 알람 · 못 넣은 준비물은 followUp으로 돌려줌 (화면이 "저장했지만 ~못 했어요"로 알림)', async () => {
+    const estimate = await estimateOf();
+    mockCallEdge.mockResolvedValueOnce(commitResponse());
+    mockApplyCommit.mockResolvedValue({ failed: [{ alarmId: 'n-wake', error: '권한 없음' }] });
+    mockRoutes['todos:insert'] = () => undefined;
+    expect((await real.createAppointment(estimate)).followUp).toEqual({ phoneFailed: 1, itemsFailed: false });
+
+    mockCallEdge.mockResolvedValueOnce(commitResponse());
+    mockApplyCommit.mockResolvedValue({ failed: [] });
+    mockRoutes['todos:insert'] = () => ({ error: { code: '', message: 'offline' } });
+    expect((await real.createAppointment(estimate)).followUp).toEqual({ phoneFailed: 0, itemsFailed: true });
+  });
+
+  it('폰 예약이 통째로 던져도 준비물은 넣고, 걸려던 알람 모두를 못 건 것으로 셈', async () => {
+    const estimate = await estimateOf();
+    mockCallEdge.mockResolvedValueOnce(commitResponse({ ring_packages: [{ alarmId: 'n-wake' }, { alarmId: 'n-arrive' }] }));
+    mockApplyCommit.mockRejectedValue(new Error('폰 오류'));
+    mockRoutes['todos:insert'] = () => undefined;
+    const saved = await real.createAppointment(estimate);
+    expect(callsTo('todos', 'insert')).toHaveLength(1);
+    expect(saved.followUp).toEqual({ phoneFailed: 2, itemsFailed: false });
+  });
+
   it('저장 요청이 서버에서 거절되면 그대로 던짐 (폰 예약 · 준비물은 안 건드림)', async () => {
     const estimate = await estimateOf();
     mockCallEdge.mockRejectedValueOnce(new EdgeError('UNPROCESSABLE', { details: { reason: 'ORDER' } }));
@@ -1166,7 +1196,11 @@ describe('알람 설정 미리 보기 · 저장 (H03)', () => {
       mockCallEdge.mockResolvedValue(commitResponse());
       mockRoutes['alarms:select'] = () => ({ data: [] });
       mockApplyCommit.mockResolvedValue({ failed: [{ alarmId: 'n-wake', error: '정확한 알람 권한 없음' }] });
-      await expect(real.saveAlarmSettings('00000000-0000-4000-8000-0000000000a1', turnOffWake(detail))).resolves.toEqual({ turnedOff: false, turnedOn: false });
+      await expect(real.saveAlarmSettings('00000000-0000-4000-8000-0000000000a1', turnOffWake(detail))).resolves.toEqual({
+        turnedOff: false,
+        turnedOn: false,
+        followUp: { phoneFailed: 1, itemsFailed: false }, // 화면이 "저장했지만 알람 1개를 폰에 걸지 못했어요"로 알림
+      });
     });
 
     it('폰 예약이 던지거나 도착 목표 맞추기가 실패해도 저장은 성공 — 둘은 서로 영향 없이 각각 시도', async () => {
@@ -1263,6 +1297,17 @@ describe('일정 없는 알람 (D46)', () => {
     });
     expect(mockApplyCommit).toHaveBeenCalledTimes(1);
     expect(saved).toMatchObject({ id: '00000000-0000-4000-8000-0000000000c1', title: '알람', standalone: true, repeatLabel: '매주 월요일', level: 2 });
+  });
+
+  it('폰에 못 걸었으면 followUp — 폰 예약이 던져도 저장은 성공하고 반복 회차 넘기기는 그대로', async () => {
+    mockCallEdge.mockResolvedValue(standaloneResponse());
+    mockApplyCommit.mockResolvedValue({ failed: [{ alarmId: '00000000-0000-4000-8000-0000000000c1', error: '정확한 알람 권한 없음' }] });
+    expect((await real.saveStandaloneAlarm({ at: new Date(kst('07:00', 23)) })).followUp).toEqual({ phoneFailed: 1, itemsFailed: false });
+
+    mockApplyCommit.mockRejectedValue(new Error('native'));
+    const saved = await real.saveStandaloneAlarm({ at: new Date(kst('07:00', 23)), repeat: ['월'] });
+    expect(saved).toMatchObject({ id: '00000000-0000-4000-8000-0000000000c1', followUp: { phoneFailed: 1, itemsFailed: false } });
+    expect(mockSyncNow).toHaveBeenCalledWith({ rollSeriesId: '00000000-0000-4000-8000-0000000000c1' });
   });
 
   it('새로 만든 반복 알람이면 그 묶음(= 첫 알람 id)의 회차를 넘기라고 syncNow를 부름 — 반복이 아니거나 고치기면 안 부름', async () => {

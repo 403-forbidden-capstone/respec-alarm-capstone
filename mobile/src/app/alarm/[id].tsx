@@ -15,6 +15,7 @@ import { ScheduleEditSheet } from '@/features/alarm/components/ScheduleEditSheet
 import { SelectRow } from '@/features/alarm/components/SelectRow';
 import { TextLink } from '@/features/alarm/components/TextLink';
 import { previewAlarmId } from '@/features/alarm/ringPreview';
+import { saveNotice } from '@/features/alarm/saveNotice';
 import { TimeButton } from '@/features/alarm/components/TimeButton';
 import { TimeSheet } from '@/features/alarm/components/TimePicker';
 import { useScheduleEdit } from '@/features/alarm/hooks/useScheduleEdit';
@@ -171,14 +172,16 @@ function Detail({ appointment: a, reload }: { appointment: AppointmentDetail; re
     setTravelConfirm(null);
     // 확인한 이동시간은 이제 직접 입력으로 저장됨 — 화면의 초안도 같은 값으로 맞춰 "저장 전" 표시(저장 버튼 · 나갈 때 묻기)가 남지 않게
     if (travelMinutes != null) setEdit({ travelMinutes });
+    // 저장은 됐는데 폰에 못 건 알람이 있으면 그 사실을 먼저 (saveNotice.ts)
     toast(
-      turnedOff
-        ? '알람을 모두 꺼서 이 일정 알람이 꺼졌어요'
-        : turnedOn
-          ? '알람을 켜서 이 일정 알람도 다시 켰어요'
-          : moved
-            ? '알람 시각을 다시 계산했어요'
-            : '저장했어요',
+      saveNotice(result.followUp, '저장했지만') ??
+        (turnedOff
+          ? '알람을 모두 꺼서 이 일정 알람이 꺼졌어요'
+          : turnedOn
+            ? '알람을 켜서 이 일정 알람도 다시 켰어요'
+            : moved
+              ? '알람 시각을 다시 계산했어요'
+              : '저장했어요'),
     );
     await Promise.all([reload(), reloadOccurrences()]); // 저장으로 알람이 바뀌면 회차 목록의 첫 알람 시각도 다시
   }

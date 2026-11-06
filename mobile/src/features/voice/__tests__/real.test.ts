@@ -394,8 +394,23 @@ describe('⑦ 준비 +N · 강도 — 바뀐 때만 두 번째 저장', () => {
     script = [session(), turn({ next: 'APP_TASKS', reply: null, cards: [card] }), turn({ rev: 3, cards: [{ ...card, status: 'READY' }] }), turn({ rev: 4 })];
     await getConversation();
     await say('발표');
-    await saveCard('c1');
+    return saveCard('c1');
   }
+
+  it('저장 뒤 폰에 못 건 알람 · 못 넣은 준비물이 있으면 "맞췄어요" 대신 그 사실을 돌려줌', async () => {
+    mCreate.mockImplementation(async () => ({ ...savedOf(), followUp: { phoneFailed: 1, itemsFailed: false } }));
+    expect(await saveWith(null)).toBe('캡스톤 발표 일정은 저장했지만 알람 1개를 폰에 걸지 못했어요. 홈 안내를 확인해 주세요');
+  });
+
+  it('두 번째 저장을 했으면 못 건 수는 그 결과로(폰 예약을 다시 함), 준비물은 첫 저장 결과 그대로', async () => {
+    mCreate.mockImplementation(async () => ({ ...savedOf(), followUp: { phoneFailed: 2, itemsFailed: true } }));
+    expect(await saveWith({ prepare_delta: 15 })).toBe('캡스톤 발표 일정은 저장했지만 준비물은 저장하지 못했어요');
+
+    resetVoiceState();
+    mCreate.mockImplementation(async () => savedOf());
+    mSettings.mockImplementation(async () => ({ turnedOff: false, turnedOn: false, followUp: { phoneFailed: 3, itemsFailed: false } }));
+    expect(await saveWith({ prepare_delta: 15 })).toBe('캡스톤 발표 일정은 저장했지만 알람 3개를 폰에 걸지 못했어요. 홈 안내를 확인해 주세요');
+  });
 
   it('고칠 값이 없으면 saveAlarmSettings를 안 부름 (카카오 +1 없음)', async () => {
     await saveWith(null);
@@ -567,6 +582,15 @@ describe('알람 바꾸기 · 알람 만들기 카드', () => {
     await saveCard('c3');
     expect(mStandalone).toHaveBeenCalledWith({ at: at(7, 0), level: 2 });
     expect(turnBodies().at(-1)?.card_action).toMatchObject({ appointment_id: 'alarm-9' });
+  });
+
+  it('약속 없는 알람을 폰에 못 걸었으면 저장 문구 대신 그 사실을 돌려줌', async () => {
+    mStandalone.mockImplementation(async () => ({ id: 'alarm-9', title: '알람', alarms: [ring('WAKE', 7, 0)], level: 1, followUp: { phoneFailed: 1, itemsFailed: false } }));
+    const card = { id: 'c3', kind: 'ALARM_NEW', status: 'READY', first_of_day: true, highlight: false, summary: '내일 07:00 알람', draft: null, edit: { at: at(7, 0).toISOString(), level: 2 } };
+    script = [session(), turn({ cards: [card] }), turn({ rev: 3 })];
+    await getConversation();
+    await say('7시에 깨워줘');
+    expect(await saveCard('c3')).toBe('알람은 저장했지만 알람 1개를 폰에 걸지 못했어요. 홈 안내를 확인해 주세요');
   });
 });
 

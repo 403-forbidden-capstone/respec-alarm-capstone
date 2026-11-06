@@ -22,6 +22,7 @@ import { isHomeMissing } from '@/features/alarm/homeMissing';
 import { selectedUserPlaceLabel, withDestination, withUserPlace } from '@/features/alarm/destinationPick';
 import { homeOf } from '@/features/alarm/placeSheet';
 import { repeatToRrule } from '@/features/alarm/repeat';
+import { saveNotice } from '@/features/alarm/saveNotice';
 import { addItems, earlierWakeOf, isPassed, parseDayParam, ringingKinds, tomorrow, upcomingAlarms } from '@/features/alarm/schedule';
 import {
   IMPORTANCE_LABEL,
@@ -202,12 +203,14 @@ export default function NewScheduleScreen() {
       const saved = fromChat ? await saveFoundSchedule(estimate) : await createAppointment(estimate);
       const rings = upcomingAlarms(saved.alarms, now()).length;
       const skipped = ringingKinds(saved.alarms).filter((x) => isPassed(x, now())).length;
+      // 저장은 됐는데 폰 예약 · 준비물이 못 한 것이 있으면 "맞췄어요" 대신 그 사실을 (saveNotice.ts)
       toast(
-        !saved.alarms.length
-          ? '일정을 알람 없이 저장했어요'
-          : rings
-            ? `알람 ${rings}개를 맞췄어요${skipped ? ` · 지난 알람 ${skipped}개는 울리지 않아요` : ''}`
-            : '일정을 저장했어요 · 울릴 알람이 없어요',
+        saveNotice(saved.followUp) ??
+          (!saved.alarms.length
+            ? '일정을 알람 없이 저장했어요'
+            : rings
+              ? `알람 ${rings}개를 맞췄어요${skipped ? ` · 지난 알람 ${skipped}개는 울리지 않아요` : ''}`
+              : '일정을 저장했어요 · 울릴 알람이 없어요'),
       );
       // N3: 첫 알람 저장 직후 알림 안내 (한 번만, 거절 뒤엔 홈 빨간 줄 · 점검표) — L7
       // 울릴 알람이 없는 저장(전부 지난 알람)에는 안 물음 — 답이 결과를 안 바꿈(#240 원칙 ④)

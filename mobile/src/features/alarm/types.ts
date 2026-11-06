@@ -101,6 +101,13 @@ export type Appointment = {
   upcomingCount?: number; // 같은 반복 묶음에서 지금 이후 남은 회차 수(이 회차 포함) — 알람 목록(H02)만 채움. 2 이상이면 앞으로 회차가 폰에 미리 걸려 있음
 };
 
+// 저장(alarm-commit)은 됐는데 그 뒤처리가 못 한 것 — 화면은 원래 저장 문구 대신 saveNotice.ts 문구로 알림. 다 됐으면 followUp 없음
+//   phoneFailed = 폰에 못 건 알람 수 (다음 맞추기에서 다시 걸리고, 그때까지 홈 빨간 줄에 남음)
+//   itemsFailed = 준비물(todos)을 못 넣음 (다시 넣는 길이 없음)
+export type SaveFollowUp = { phoneFailed: number; itemsFailed: boolean };
+export type SavedAppointment = Appointment & { followUp?: SaveFollowUp };
+export type SettingsSaveResult = { turnedOff: boolean; turnedOn: boolean; followUp?: SaveFollowUp };
+
 // 반복 일정의 앞으로 회차 한 줄 (H03 회차 목록) — 같은 묶음(series_id)의 지금 이후 회차, 시각 순
 export type Occurrence = {
   id: string; // 약속 id (실데이터는 appointment_id)

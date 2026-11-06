@@ -9,6 +9,7 @@
 //   · 서버 요청은 pending 하나 + 카드 요청 큐 — 실패한 요청(pending)이 있으면 카드 동작은 앱 일만 바로 하고 서버 알림은 큐에서 기다렸다가 그 요청이 성공한 뒤 차례로 보냄
 import { adjustEstimate, orderError } from '@/features/alarm/adjust';
 import { createAppointment, createStandaloneAlarm, estimateAppointment, getAppointment, listPlaces, previewAlarms, saveAlarmSettings } from '@/features/alarm/api';
+import { saveNotice } from '@/features/alarm/saveNotice';
 import { draftAt } from '@/features/alarm/schedule';
 import {
   RING_KINDS,
@@ -23,6 +24,7 @@ import {
   type IntensityAxis,
   type Level,
   type RingKind,
+  type SaveFollowUp,
   type Transport,
 } from '@/features/alarm/types';
 import { now } from '@/lib/clock';
@@ -776,16 +778,16 @@ async function rememberSaved(cardId: string, cardKind: CardKind, appointmentId: 
 const alarmSummary = (alarms: readonly { kind: AlarmKind; at: Date; enabled: boolean }[], level: number) =>
   ringAlarms(alarms).map((a) => ({ kind: a.kind, at: a.at.toISOString(), enabled: a.enabled, level }));
 
-// 새 약속 저장 뒤 준비 +N · 강도 — 실제로 바뀔 때만 saveAlarmSettings 한 번 더 (L1 답 L1-1). 바꾼 뒤의 약속을 돌려줌
-async function adjustAfterSave(id: string, edit: ServerEdit | null | undefined): Promise<AppointmentDetail | null> {
+// 새 약속 저장 뒤 준비 +N · 강도 — 실제로 바뀔 때만 saveAlarmSettings 한 번 더 (L1 답 L1-1). 바꾼 뒤의 약속과 그 저장의 뒤처리 결과를 돌려줌
+async function adjustAfterSave(id: string, edit: ServerEdit | null | undefined): Promise<{ after: AppointmentDetail | null; followUp?: SaveFollowUp } | null> {
   const delta = prepDeltaOf(edit);
   if (delta == null && LEVEL_AXES.every((axis) => wantedLevelOf(edit, axis) === undefined)) return null; // 고칠 말 없음
   const detail = await getAppointment(id);
   if (!detail) return null;
   const { draft, changed, levelChanged } = editsOf(detail, { prepare_delta: delta ?? undefined, levels: edit?.levels });
   if (!changed && !levelChanged) return null; // 이미 그 값 — 길찾기를 또 부르지 않음
-  await saveAlarmSettings(id, draft);
-  return getAppointment(id);
+  const { followUp } = await saveAlarmSettings(id, draft);
+  return { after: await getAppointment(id), followUp };
 }
 
 // 카드 [저장] · [바꾸기] — 돌려주는 글은 토스트. 일정 · 알람을 L1 함수로 저장한 뒤 서버에 SAVED
@@ -800,6 +802,8 @@ export function saveCard(cardId: string): Promise<string> {
     let level: number;
     let toast = '알람을 맞췄어요';
     let partial: string | null = null;
+    // 저장은 됐는데 폰 예약 · 준비물이 못 한 것 (saveNotice.ts) — 있으면 성공 문구 대신 이것. 폰에 못 건 알람이 준비 시간 · 강도보다 급해서 partial보다 먼저
+    let notice: string | null = null;
 
     if (kind === 'APPT_NEW') {
       // 앱을 다시 열어 계산 결과(Estimate)가 없으면 저장 전에 다시 계산
@@ -818,21 +822,30 @@ export function saveCard(cardId: string): Promise<string> {
       rec.status = 'SAVED'; // 일정은 저장됨 — 아래 두 번째 저장이 실패해도 카드는 저장으로
       rec.appointmentId = saved.id;
       await rememberSaved(cardId, kind, saved.id, alarms, level); // 서버에 알리기 전에 — 앱이 꺼져도 다시 저장되지 않게
+      let followUp = saved.followUp;
       try {
-        const after = await adjustAfterSave(saved.id, rec.server.edit);
-        if (after) {
-          alarms = after.alarms;
-          level = after.level;
+        const adjusted = await adjustAfterSave(saved.id, rec.server.edit);
+        if (adjusted) {
+          // 두 번째 저장이 폰 예약을 다시 했으니 못 건 수는 그 결과로, 준비물은 첫 저장 결과 그대로
+          const phoneFailed = adjusted.followUp?.phoneFailed ?? 0;
+          const itemsFailed = saved.followUp?.itemsFailed === true;
+          followUp = phoneFailed > 0 || itemsFailed ? { phoneFailed, itemsFailed } : undefined;
+        }
+        if (adjusted?.after) {
+          alarms = adjusted.after.alarms;
+          level = adjusted.after.level;
           await rememberSaved(cardId, kind, saved.id, alarms, level); // 바뀐 알람으로 갱신
         }
       } catch {
         partial = `${saved.title}은 저장했지만 준비 시간 · 강도는 바꾸지 못했어요. 알람 설정에서 바꿔 주세요`;
       }
+      notice = saveNotice(followUp, `${saved.title} 일정은 저장했지만`);
     } else if (kind === 'ALARM_EDIT') {
       const id = rec.server.edit?.appointment_id;
       const detail = id ? await getAppointment(id) : null;
       if (!id || !detail) throw new UserError('바꿀 일정을 찾지 못했어요');
-      await saveAlarmSettings(id, editsOf(detail, rec.server.edit).draft);
+      const { followUp } = await saveAlarmSettings(id, editsOf(detail, rec.server.edit).draft);
+      notice = saveNotice(followUp, '바꾼 값은 저장했지만');
       const after = await getAppointment(id);
       appointmentId = id;
       alarms = after?.alarms ?? detail.alarms;
@@ -846,6 +859,7 @@ export function saveCard(cardId: string): Promise<string> {
       if (!at || Number.isNaN(at.getTime())) throw new UserError('알람 시각을 알 수 없어요');
       const lv = toLevel(rec.server.edit?.level);
       const saved = await createStandaloneAlarm({ at, ...(lv != null ? { level: lv } : {}) });
+      notice = saveNotice(saved.followUp, '알람은 저장했지만');
       appointmentId = saved.id;
       alarms = saved.alarms;
       level = saved.level;
@@ -857,7 +871,7 @@ export function saveCard(cardId: string): Promise<string> {
     }
 
     await notifyCard({ id: cardId, action: 'SAVED', appointment_id: appointmentId, alarms: alarmSummary(alarms, level) }, { cardId });
-    return partial ?? toast;
+    return notice ?? partial ?? toast;
   });
 }
 
