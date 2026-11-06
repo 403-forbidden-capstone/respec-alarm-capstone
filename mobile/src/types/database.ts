@@ -571,7 +571,7 @@ isOneToOne: false
 { Args: { "p_author": string,"p_id": number }; Returns: boolean
                            },
 "dev_reset_my_data":
-{ Args: never; Returns: Json
+{ Args: Record<PropertyKey, never>; Returns: Json
                            },
 "find_missed_wake_alarms":
 { Args: { "p_lookback_hours"?: number,"p_now"?: string }; Returns: {
