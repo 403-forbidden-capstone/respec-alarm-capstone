@@ -147,13 +147,13 @@ function GroupTab({ groups }: { groups: GroupItem[] }) {
           icon="+"
           title="새 그룹 만들기"
           sub="이름과 멤버 설정"
-          onPress={() => toast('그룹 만들기는 곧 열려요')}
+          onPress={() => router.push('/groups/new')}
         />
         <ActionTile
           icon="↳"
           title="그룹 참여하기"
           sub="초대 코드 입력"
-          onPress={() => toast('초대 코드로 참여하기는 곧 열려요')}
+          onPress={() => router.push('/groups/join')}
         />
       </View>
 

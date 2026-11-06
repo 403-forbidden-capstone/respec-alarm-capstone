@@ -80,6 +80,8 @@ const ALL_SECTIONS: ScreenSection[] = [
         href: { pathname: '/groups/[id]/members/[userId]', params: { id: 'cap', userId: 'sy' } },
       },
       { id: 'G04', name: '공유받은 알람 · 수연', href: { pathname: '/friends/[id]/alarms', params: { id: 'sy' } } },
+      { id: 'G01', name: '새 그룹 만들기 (목업 번호 없음 · 와이어프레임 4번)', href: '/groups/new' },
+      { id: 'G01', name: '초대 코드로 참여 (목업 번호 없음 · 와이어프레임 4번)', href: '/groups/join' },
     ],
   },
   {
