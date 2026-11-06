@@ -5,6 +5,7 @@
 import { createAppointment, draftAt, estimateAppointment } from '@/features/alarm/api';
 import type { Appointment, AppointmentDraft, Estimate } from '@/features/alarm/types';
 import { now } from '@/lib/clock';
+import { callEdge } from '@/lib/edge';
 import { dateParts, dayKey } from '@/lib/format';
 import { isMock } from '@/lib/mode';
 import {
@@ -79,6 +80,20 @@ function toConversation(c: MockChat): Conversation {
 export async function getConversation(): Promise<Conversation> {
   if (!isMock()) return real.getConversation();
   return toConversation(chat());
+}
+
+// 개발용: PC 토큰 서버(tools/live-token-server.ts) 주소 — 운영 voice-live-token 배포 전 로컬에서 Live만 시험. 출시 빌드(__DEV__ false)는 무시
+const LOCAL_LIVE_TOKEN_URL = __DEV__ ? process.env.EXPO_PUBLIC_LIVE_TOKEN_URL : undefined;
+
+// 실시간 음성 대화(Gemini Live) 1회용 토큰 — 서버(voice-live-token)가 GEMINI_API_KEY로 만들어 줌. 키는 앱에 오지 않음
+export async function getLiveToken(): Promise<{ token: string; model: string }> {
+  if (isMock()) throw new UserError('실시간 음성 대화는 실데이터 모드에서만 쓸 수 있어요');
+  if (LOCAL_LIVE_TOKEN_URL) {
+    const res = await fetch(LOCAL_LIVE_TOKEN_URL, { method: 'POST' }).catch(() => null);
+    if (!res?.ok) throw new UserError('로컬 음성 토큰 서버에 연결하지 못했어요. tools/live-token-server.ts가 켜져 있는지 확인해 주세요');
+    return (await res.json()) as { token: string; model: string };
+  }
+  return callEdge<{ token: string; model: string }>('voice-live-token');
 }
 
 // 목업만: AI가 정리하는 척 기다리는 시간 (목업 userSay → aiTurn 0.8초). 실데이터는 Gemini Live 답을 기다림. 테스트는 0

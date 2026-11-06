@@ -452,6 +452,10 @@ verify_jwt = true
 [functions.voice-turn]
 verify_jwt = true
 
+# 실시간 음성 대화(Gemini Live) 1회용 토큰 — 앱이 로그인 토큰으로 부름
+[functions.voice-live-token]
+verify_jwt = true
+
 # L9 시간표 채우기 — 사진(base64) → Claude → 수업 줄. 앱이 로그인 토큰으로 부름
 [functions.timetable-extract]
 verify_jwt = true

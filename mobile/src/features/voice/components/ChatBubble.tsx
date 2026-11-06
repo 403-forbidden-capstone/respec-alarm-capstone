@@ -20,15 +20,23 @@ export function BubbleTime({ who, at }: { who: 'ai' | 'me'; at: Date }) {
   );
 }
 
-// 대화 한 줄
-export function ChatBubble({ who, text, at }: { who: 'ai' | 'me'; text: string; at: Date }) {
+// 대화 한 줄. interim = 음성으로 아직 말하는 중인 글(확정 전) — 흐리게, 시각 대신 "듣는 중 · 말하는 중"
+export function ChatBubble({ who, text, at, interim }: { who: 'ai' | 'me'; text: string; at: Date; interim?: boolean }) {
   return (
-    <Bubble who={who}>
-      <Text variant="body" tone={who === 'me' ? 'inverse' : 'ink'} style={styles.text}>
-        {text}
-      </Text>
-      <BubbleTime who={who} at={at} />
-    </Bubble>
+    <View style={interim && styles.interim}>
+      <Bubble who={who}>
+        <Text variant="body" tone={who === 'me' ? 'inverse' : 'ink'} style={styles.text}>
+          {text}
+        </Text>
+        {interim ? (
+          <Text variant="tiny" tone={who === 'me' ? 'inverse' : 'faint'} style={[styles.time, who === 'me' && styles.meTime]}>
+            {who === 'me' ? '듣는 중…' : 'AI · 말하는 중…'}
+          </Text>
+        ) : (
+          <BubbleTime who={who} at={at} />
+        )}
+      </Bubble>
+    </View>
   );
 }
 
@@ -72,6 +80,7 @@ const styles = StyleSheet.create({
   text: { lineHeight: 21.5 },
   time: { marginTop: 4 },
   meTime: { opacity: 0.55 },
+  interim: { opacity: 0.6 },
   typing: { flexDirection: 'row', gap: 4, padding: 16 },
   dot: { width: 6, height: 6, borderRadius: 3, backgroundColor: colors.faintDecor },
 });

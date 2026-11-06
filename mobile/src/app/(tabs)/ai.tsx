@@ -7,11 +7,13 @@ import { listPlaces } from '@/features/alarm/api';
 import { PlaceSearchSheet } from '@/features/alarm/components/PlaceSearchSheet';
 import { homeOf } from '@/features/alarm/placeSheet';
 import { useAuth } from '@/features/auth/AuthProvider';
-import { finishConversation, getConversation, pickCardPlace, rejectCard, retryConversation, saveCard, say } from '@/features/voice/api';
+import { finishConversation, getConversation, getLiveToken, pickCardPlace, rejectCard, retryConversation, saveCard, say } from '@/features/voice/api';
 import { ChatBubble, TypingBubble } from '@/features/voice/components/ChatBubble';
 import { ChatComposer } from '@/features/voice/components/ChatComposer';
 import { ChatNotice } from '@/features/voice/components/ChatNotice'; // L5 부품 — 실패 · 한도 안내
 import { FoundScheduleCard } from '@/features/voice/components/FoundScheduleCard';
+import { useLiveVoice } from '@/features/voice/hooks/useLiveVoice';
+import { isNearBottom, mergeLive, type ChatRow } from '@/features/voice/liveChat';
 import { now } from '@/lib/clock';
 import { userMessage } from '@/lib/errors';
 import { backOrHome } from '@/lib/nav';
@@ -22,15 +24,21 @@ const LISTEN_MS = 1100; // 말하기를 누른 뒤 듣는 시간 (목업 chatSpe
 
 // 03 AI 탭 · A02 AI 대화 — 자기 전 대화
 // 가짜 데이터: 목업 대본대로 흘러감 (마이크 · 음성 합성 · 서버 호출 없음). 말하기 = 다음 대본 문장을 말한 것으로 침, 텍스트 = 빈 칸에 쓴 글을 그대로 보냄(AI 답은 대본). 완료하면 하루 기록(A03)으로
-// 실데이터: 글로만 대화(서버 voice-session · voice-turn). 일정 · 알람을 찾으면 카드가 여러 장 떠서 [저장] · [바꾸기] · [저장 안 함]으로 확인받고, 완료하면 대화를 끝내고(다음에 열면 새 대화) 이전 화면(홈)으로
+// 실데이터: 글(서버 voice-session · voice-turn)과 실시간 음성(Gemini Live, [말하기])을 한 대화 목록에. 음성 말풍선은 이 화면에만 남고(서버 · DB에 안 감) 글 대화 · 카드와는 따로 돎. 일정 · 알람을 찾으면 카드가 여러 장 떠서 [저장] · [바꾸기] · [저장 안 함]으로 확인받고, 완료하면 대화를 끝내고(다음에 열면 새 대화) 이전 화면(홈)으로
 //   서버가 답하지 못하면(LLM_UNAVAILABLE · NOT_CONFIGURED …) 대화 · 카드는 두고 마지막 말풍선 아래에 ChatNotice failed, 한도에 닿으면(limits.reached) ChatNotice limit — 입력창은 막음
 export default function AiScreen() {
   const { data, error, reload: reloadNow } = useLoad(getConversation);
   // [완료]로 나간 뒤에는 끝나지 않은 저장 · 답이 다시 읽기를 걸어도 새 세션을 열지 않음 — 다시 들어올 때(포커스)만 읽음 (그건 useLoad가 함)
   const leftRef = useRef(false);
+  const live = useLiveVoice(getLiveToken); // 실시간 음성 대화 — 실데이터만 씀
+  const stopLive = useRef(live.stop);
+  useEffect(() => {
+    stopLive.current = live.stop;
+  });
   useFocusEffect(
     useCallback(() => {
       leftRef.current = false;
+      return () => stopLive.current(); // 화면을 떠나면 마이크 · 연결을 닫음 (탭 화면은 내려가지 않고 남아 있어서)
     }, []),
   );
   const reload = async () => {
@@ -47,6 +55,7 @@ export default function AiScreen() {
   // 카드 저장 · 완료 같은 버튼은 한 번에 하나씩, 다시 읽기가 끝날 때까지 — 실패하면 토스트 (lib/useAction)
   const { busy, run: act } = useAction();
   const scroll = useRef<ScrollView>(null);
+  const atBottom = useRef(true); // 맨 아래 근처를 보고 있음 — 이때만 새 말에 맞춰 내림 (위를 읽는 중이면 그대로)
   const thinkingRef = useRef(false); // 정리 중인지 — 확인창이 떠 있는 사이 바뀐 값을 읽어야 해서 렌더 값(thinking) 말고 ref로도 둠
 
   const next = data?.next ?? null;
@@ -57,6 +66,7 @@ export default function AiScreen() {
   // 실데이터에서 next에 대본 문장이 없고 글 모드도 아니면(음성) 보낼 글을 모르니 점 세 개만. 다시 읽은 뒤에 정리 표시를 내림
   async function talk(text?: string) {
     thinkingRef.current = true;
+    atBottom.current = true; // 내가 보냈으면 맨 아래로
     setPendingText(text?.trim() || (next?.who === 'me' ? next.text : null));
     setPendingAt(now());
     setThinking(true);
@@ -114,10 +124,21 @@ export default function AiScreen() {
   const cardOf = (id?: string) => cards.find((c) => c.id === id);
   const reached = limits?.reached ?? null;
   const waiting = cards.some((c) => c.status === 'READY' || c.status === 'NEEDS_PLACE' || c.status === 'NEEDS_ESTIMATE' || c.status === 'ESTIMATING');
-  const textMode = real || mode === 'text';
+  const textMode = mode === 'text';
   const placeCard = cardOf(placeCardId ?? undefined);
+  const liveOn = real && live.phase !== 'idle';
+  const rows: ChatRow[] = real ? mergeLive(messages, live.lines) : messages; // 글 대화 + 음성 말풍선, 시각 순서
 
-  const status = listening
+  const liveStatus = !real
+    ? null
+    : live.phase === 'connecting'
+      ? '음성 대화를 연결하고 있어요…'
+      : live.phase === 'live'
+        ? '듣고 있어요. 편하게 말해 보세요'
+        : live.error;
+  const status = liveStatus
+    ? liveStatus
+    : listening
     ? '듣고 있어요…'
     : thinking
       ? real
@@ -135,7 +156,13 @@ export default function AiScreen() {
               ? '찾은 내용을 확인해 주세요'
               : '대화를 마치려면 완료를 눌러 주세요';
 
+  // 말하기 — 가짜: 대본 한 문장을 들은 것으로. 실데이터: 실시간 음성 대화를 켜고 끔 (켜져 있는 동안 계속 주고받음)
   function speak() {
+    if (real) {
+      if (liveOn) return live.stop();
+      atBottom.current = true;
+      return void live.start();
+    }
     if (canSay) setListening(true);
   }
 
@@ -161,6 +188,8 @@ export default function AiScreen() {
     if (real) {
       // 카드 저장 · 장소 계산이 AI 답을 기다리는 동안(busy)에도 눌려야 함 — 막으면 첫 탭이 먹통. 끝남 표시는 api가 앞 요청 뒤에 차례로 적음
       leftRef.current = true;
+      live.stop();
+      live.clear(); // 다음 대화는 새로 — 음성 말풍선은 이 대화에만
       finishConversation().catch(() => {}); // 로컬에 적는 일이라 실패해도 이동은 그대로
       backOrHome();
       return;
@@ -211,7 +240,13 @@ export default function AiScreen() {
         contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
-        onContentSizeChange={() => scroll.current?.scrollToEnd({ animated: true })}
+        scrollEventThrottle={16}
+        onScroll={(e) => {
+          atBottom.current = isNearBottom(e.nativeEvent);
+        }}
+        onContentSizeChange={() => {
+          if (atBottom.current) scroll.current?.scrollToEnd({ animated: true });
+        }}
       >
         <TopBar screenId="A02" />
         <Text variant="title" style={styles.title}>
@@ -220,8 +255,8 @@ export default function AiScreen() {
         <Text variant="lead">기본 AI · 차분한 코치</Text>
 
         <View style={styles.chat} accessibilityLiveRegion="polite">
-          {messages.map((m) => {
-            if (m.who !== 'card') return <ChatBubble key={m.id} who={m.who} text={m.text} at={m.at} />;
+          {rows.map((m) => {
+            if (m.who !== 'card') return <ChatBubble key={m.id} who={m.who} text={m.text} at={m.at} interim={m.interim} />;
             const card = cardOf(m.cardId);
             if (!card) return null;
             const appointmentId = card.appointmentId;
@@ -250,13 +285,16 @@ export default function AiScreen() {
       </ScrollView>
 
       <View style={styles.composer}>
+        {/* 실시간 음성 대화(Gemini Live)의 소리 페이지 — 보이지 않음 */}
+        {live.frame}
         <ChatComposer
           status={status}
           mode={textMode ? 'text' : 'voice'}
-          textOnly={real}
           inputVisible={next?.who === 'me'}
           canSay={canSay}
-          listening={listening}
+          listening={real ? liveOn : listening}
+          micLabel={liveOn ? '끝내기' : undefined}
+          micDisabled={real ? false : undefined}
           text={draftText}
           onChangeText={setDraftText}
           onSend={send}
@@ -282,5 +320,5 @@ const styles = StyleSheet.create({
   content: { flexGrow: 1, paddingBottom: 8 },
   title: { marginTop: 8, marginBottom: 4 },
   chat: { flexGrow: 1, justifyContent: 'flex-end', gap: 10, paddingTop: 18 },
-  composer: { paddingTop: 10 },
+  composer: { paddingTop: 10, gap: 10 },
 });
