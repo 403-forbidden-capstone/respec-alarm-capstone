@@ -9,7 +9,7 @@
 //   5. 글이 실험실 실행본과 같은지는 prompts.test.ts가 md 글자와 지문(FNV-1a)으로 대조한다.
 //
 // 앱에는 프롬프트가 없다 — 글 · 숫자 · 시각 · 저장은 모두 서버. 모델 출력은 믿지 않는 입력이라 callLlm이 기준 스키마로 다시 검사한다.
-import { callLlm, DEFAULT_MODEL, type Effort, type LlmClient, type LlmResult } from '../ai/llm.ts';
+import { callLlm, DEFAULT_MODEL, type CallGate, type Effort, type LlmClient, type LlmResult } from '../ai/llm.ts';
 import { render } from '../ai/render.ts';
 import { schemaOf, type SchemaId } from '../ai/schemas/index.ts';
 import ASSIST_E4 from './ASSIST_E4.v1.1.ts';
@@ -69,6 +69,7 @@ export interface PointExtra {
   deadlineMs?: number; // 전체 마감(callLlm 참고) — 기본 없음
   sleep?: (ms: number) => Promise<void>;
   now?: () => number;
+  gate?: CallGate; // 사용량 관문(ai/quota.ts) — 요청마다 통과해야 보냄
 }
 
 // 한 지점을 부른다: user 템플릿을 vars로 채워(빠진 변수는 RenderError — 코드 버그라 던짐) callLlm에 넘김.
@@ -97,5 +98,6 @@ export async function callPoint<T = unknown>(
     deadlineMs: extra.deadlineMs,
     sleep: extra.sleep,
     now: extra.now,
+    gate: extra.gate,
   });
 }

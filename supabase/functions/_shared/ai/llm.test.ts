@@ -332,8 +332,8 @@ describe('응답 해석 — 던지지 않고 코드로', () => {
 // ---------------------------------------------------------------------------
 
 describe('재시도 — 1번만', () => {
-  it('429 한 번 뒤 성공: 시도 2, 기본 500ms 기다림, call은 성공한 시도의 값', async () => {
-    const t = setup([rateLimit(), response([text(T1_OK)], { request_id: 'req_second', usage: usage(1, 2) })]);
+  it('5xx 한 번 뒤 성공: 시도 2, 기본 500ms 기다림, call은 성공한 시도의 값', async () => {
+    const t = setup([server(), response([text(T1_OK)], { request_id: 'req_second', usage: usage(1, 2) })]);
     const r = await callPoint(t.client, 'T1', dummyVars('T1'), t.extra);
     assert.equal(r.ok, true);
     assert.deepEqual(t.sleeps, [500]);
@@ -341,6 +341,16 @@ describe('재시도 — 1번만', () => {
     assert.equal(r.call.request_id, 'req_second');
     assert.equal(r.call.input_tokens, 1);
     assert.equal(r.call.latency_ms, 700); // 첫 시도 100 + 기다림 500 + 둘째 시도 100
+  });
+
+  it('429인데 다시 할 시각을 모르거나 2초보다 길면 다시 보내지 않음 (한도만 더 씀)', async () => {
+    for (const after of [null, 30_000]) {
+      const t = setup([rateLimit(after), response([text(T1_OK)])]);
+      const r = mustFail(await callPoint(t.client, 'T1', dummyVars('T1'), t.extra));
+      assert.equal(r.code, 'RATE_LIMITED');
+      assert.equal(r.call.attempts, 1);
+      assert.deepEqual(t.sleeps, []);
+    }
   });
 
   it('retry-after는 200~2000ms로 자름, 없으면 500ms', () => {
@@ -372,8 +382,8 @@ describe('재시도 — 1번만', () => {
     assert.equal(r.call.input_tokens, null);
   });
 
-  it('429가 두 번이면 RATE_LIMITED', async () => {
-    const t = setup([rateLimit(), rateLimit()]);
+  it('429(2초 안에 다시)가 두 번이면 RATE_LIMITED — 세 번째는 없음', async () => {
+    const t = setup([rateLimit(300), rateLimit(300), response([text(T1_OK)])]);
     const r = mustFail(await callPoint(t.client, 'T1', dummyVars('T1'), t.extra));
     assert.equal(r.code, 'RATE_LIMITED');
     assert.equal(r.call.attempts, 2);

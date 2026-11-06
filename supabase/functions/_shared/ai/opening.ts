@@ -12,6 +12,8 @@ export const MAX_AI_CALLS_PER_DAY = 300;
 
 export const LIMIT_TURN_TEXT = '오늘 대화는 여기까지예요. [완료]를 누르면 정리할게요.';
 export const LIMIT_DAY_TEXT = '오늘 대화는 여기까지예요.';
+/** 앱 전체의 하루 AI 사용량(ai/quota.ts AI_LIMIT_RPD)에 닿음 — 내 탓이 아니라는 걸 알 수 있게 */
+export const LIMIT_AI_DAY_TEXT = '오늘은 AI 대화를 더 할 수 없어요. 일정은 직접 만들 수 있고, 내일 다시 이야기해요.';
 
 const spoken = (hhmm: string): string => {
   const [h, m] = hhmm.split(':').map(Number) as [number, number];

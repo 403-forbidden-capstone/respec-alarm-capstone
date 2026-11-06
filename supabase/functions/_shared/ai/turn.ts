@@ -1,9 +1,10 @@
 // voice-turn 한 턴 (설계 메모 1 · 2.2 · 5 · 6 · 11절). DB 읽기 · 쓰기와 모델 호출을 묶고, 계산은 모두 PR 3의 순수 함수(turn-core · guards · view)가 한다.
 //
 // 요청 세 가지:
-//   text        사용자 말 — T2F(빠른 추출) ∥ T1 미리(처리 결과 "바뀐 것 없음") 동시 → applyFast → 분기
-//                 앱 일(카드 계산 · 기록 정정) 있음 → T1 미리 답 버림, next = APP_TASKS, reply 없음
-//                 처리 결과 없음 → 미리 부른 T1 답 → 가드          처리 결과 있음 · 앱 일 없음 → T1 다시 → 가드
+//   text        사용자 말 — 기본(절약): T2F(빠른 추출) → applyFast → 분기. 인사 · 작별 같은 짧은 말은 T2F를 건너뜀(extractNeeded)
+//                 앱 일(카드 계산 · 기록 정정) 있음 → next = APP_TASKS, reply 없음 (T1 0번)      앱 일 없음 → T1 한 번 → 가드
+//               parallelPreview(AI_PARALLEL_PREVIEW=1)면 예전처럼 T2F ∥ T1 미리 동시 — 빠르지만 처리 결과가 있으면 미리 부른 T1이 버려짐(호출 1번 더)
+//               사용량 관문(deps.quota, ai/quota.ts): 말을 쌓기 전에 여유를 봄 — 하루 한도면 "오늘은 여기까지" 템플릿, 1분 한도 · 동시 요청이면 LLM_UNAVAILABLE(RATE_LIMITED)
 //   results     앱이 계산한 카드 상태 · 정정 결과 — applyTaskResults → T1 → 가드. 대기 중인 앱 일이 없어도 받음(장소 고르기 뒤 새 client_turn_id)
 //   card_action 카드 [저장] · [저장 안 함] — applyCardAction. 저장(SAVED) 뒤 T1 한 번, REJECTED는 상태만(reply null)
 // 동시 요청 · 재시도: server_state.rev 비교(CONFLICT), client_turn_id가 이미 있으면 저장한 답을 그대로 / 답이 아직 없던 요청이면 T1만 다시 (말이 두 번 쌓이지 않음).
@@ -11,12 +12,13 @@
 // 모델 호출마다 ai_calls 한 줄(서버 키). 모델 호출 · 키 읽기는 deps.llm(null이면 NOT_CONFIGURED)만 통한다 — 이 파일은 Deno API를 안 써서 node --test로 돈다.
 import { HttpError } from '../errors.ts';
 import type { Db } from '../supabase.ts';
-import { toHttpError, type LlmClient, type LlmFailure, type LlmResult } from './llm.ts';
+import { FAIL_MESSAGES, toHttpError, type LlmClient, type LlmFailure, type LlmResult } from './llm.ts';
 import { POINTS, callPoint, type PointId } from '../prompts/index.ts';
 import { render } from './render.ts';
 import { applyGuards, eventsForView, safetyInfoFrom } from './guards.ts';
 import { seoulIso, startOf } from './context.ts';
-import { LIMIT_DAY_TEXT, LIMIT_TURN_TEXT, MAX_USER_TURNS } from './opening.ts';
+import { LIMIT_AI_DAY_TEXT, LIMIT_DAY_TEXT, LIMIT_TURN_TEXT, MAX_USER_TURNS } from './opening.ts';
+import type { QuotaGate } from './quota.ts';
 import {
   callsCapReached, countCallsSince, countSessionsSince, limitsOf, loadSession, recordCalls, recordQuestion, saveSession,
   type CallLog, type ServerState, type SessionRow, type StoredTurn,
@@ -45,6 +47,10 @@ export interface VoiceDeps {
   /** ai_calls.io(호출 입력 · 출력 글)를 채울 사용자 id — 비면 아무도 안 채움 (AI_LOG_IO_USER_IDS) */
   ioUserIds?: string[];
   sleep?: (ms: number) => Promise<void>;
+  /** 사용량 관문 — 없으면 막지 않음 (시험 · 키 없는 환경) */
+  quota?: QuotaGate | null;
+  /** T2F ∥ T1 미리 동시 호출 (빠름 · 호출 더 씀). 기본 false = 차례로 (AI_PARALLEL_PREVIEW) */
+  parallelPreview?: boolean;
 }
 
 export interface VoiceTurnOut {
@@ -88,6 +94,7 @@ class Run {
       deadlineMs: Math.max(1, rem),
       sleep: this.deps.sleep,
       now: this.deps.clock,
+      gate: this.deps.quota ?? undefined,
     });
     const fillIo = (this.deps.ioUserIds ?? []).includes(this.deps.userId);
     this.logs.push({
@@ -288,6 +295,16 @@ export async function handleVoiceTurn(deps: VoiceDeps, body: unknown): Promise<V
 
 type LimitsFor = (s: ServerState, reached?: TurnLimits['reached']) => Promise<TurnLimits>;
 
+// 추출(T2F)이 필요 없는 말 — 인사 · 고마움 · 작별만 (정확히 같을 때). 일정 · 시각 · 정정 · 위험한 말이 끼어들 여지가 없는 말이라 건너뛰어도 놓치는 게 없음
+//   "응 · 네 · 그래"는 넣지 않음: 확인 질문(CONFIRM) · 서버 질문의 답일 수 있어 T2F가 봐야 함
+const SMALL_TALK = new Set(['안녕', '하이', 'ㅎㅇ', '고마워', '고마워요', '감사해', '감사해요', '감사합니다', '잘자', '잘자요', '잘게', '잘게요', '굿나잇', '굿밤', 'ㅂㅂ', '바이', '바이바이']);
+
+/** 이 말에 추출(T2F)을 불러야 하는지 — 공백 · 문장부호 · ㅎㅋ · 이모지를 걷어 낸 뒤 SMALL_TALK와 같으면 false */
+export function extractNeeded(text: string, _st?: ServerState): boolean {
+  const core = text.replace(/[\s.,!?~…ㅎㅋ^]+/g, '').replace(/\p{Extended_Pictographic}/gu, '');
+  return !SMALL_TALK.has(core);
+}
+
 async function handleText(run: Run, row: SessionRow, st: ServerState, req: Extract<TurnRequest, { kind: 'text' }>, limitsFor: LimitsFor): Promise<VoiceTurnOut> {
   const { deps } = run;
   const sessionDeps = { userId: deps.userId, userDb: deps.userDb, service: deps.service };
@@ -305,18 +322,33 @@ async function handleText(run: Run, row: SessionRow, st: ServerState, req: Extra
   const stored = [...row.turns, userLine];
   const ts0 = toTurnState(st);
   const ctx = ctxOf(st, run.nowIso, []);
+  const extract = extractNeeded(req.text, st);
+  const parallel = extract && deps.parallelPreview === true;
 
-  // T2F ∥ T1 미리 — 둘 다 같은 시각에 시작 (T1 미리 화면 = T1 화면 + "사용자 말 j 뒤: 바뀐 것 없음")
+  // 사용량 관문 — 이 턴에 필요한 호출 수만큼 여유가 있는지 말을 쌓기 전에 봄 (막히면 말을 저장하지 않으니 [다시 시도]로 같은 말을 다시 보내면 됨)
+  if (deps.quota) {
+    const v = await deps.quota.check(extract ? 2 : 1);
+    if (!v.ok && v.scope === 'RPD') {
+      return outOf(st, { n: row.turns.length, role: 'ai', text: LIMIT_AI_DAY_TEXT, at: run.nowIso, acts: [], end: false }, [], await limitsFor(st, 'DAY'), false);
+    }
+    if (!v.ok) throw new HttpError('LLM_UNAVAILABLE', FAIL_MESSAGES.RATE_LIMITED, { code: 'RATE_LIMITED', scope: v.scope, retry_after_s: v.retryAfterS });
+  }
+
+  // 기본: T2F 먼저, 처리 결과를 본 뒤 T1 한 번. parallel이면 T2F ∥ T1 미리 (T1 미리 화면 = T1 화면 + "사용자 말 j 뒤: 바뀐 것 없음")
   const previewEvents = [...eventsForView(ts0.events, ts0), emptyEvent(j)];
   const [fastRes, preview] = await Promise.all([
-    run.call<FastExtract>('T2F', screenFast(st, run.nowIso, stored)),
-    run.call<T1Output>('T1', screenT1(st, run.nowIso, stored, previewEvents).vars),
+    extract ? run.call<FastExtract>('T2F', screenFast(st, run.nowIso, stored)) : Promise.resolve(null),
+    parallel ? run.call<T1Output>('T1', screenT1(st, run.nowIso, stored, previewEvents).vars) : Promise.resolve(null),
   ]);
 
   let ts: TurnState = ts0;
   let tasks = false;
   let fixes: Fix[] = [];
-  if (fastRes.ok) {
+  if (fastRes === null) {
+    // 추출을 건너뜀(인사 · 작별) — 바뀐 것 없음. 위험한 말이 없는 정해진 말만 건너뛰므로 risk_unknown은 붙이지 않음
+    ts = structuredClone(ts0);
+    ts.events = [...ts.events.filter((e) => e.after_turn !== j), emptyEvent(j)];
+  } else if (fastRes.ok) {
     const fr = applyFast(ts0, fastRes.data, ctx, j);
     ts = fr.state;
     tasks = fr.tasks;

@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { createGeminiClient, fromGeminiBody, kindOfStatus, toGeminiBody } from './gemini.ts';
+import { createGeminiClient, fromGeminiBody, kindOfStatus, retryDelayOf, toGeminiBody } from './gemini.ts';
 import { buildRequest, callLlm, type CallOpts } from './llm.ts';
 
 const schema = { type: 'object', properties: { reply: { type: 'string' } }, required: ['reply'], additionalProperties: false };
@@ -61,6 +61,32 @@ describe('gemini', () => {
     assert.deepEqual(r.data, { reply: '네' });
     assert.match(seen.url ?? '', /models\/gemini-3\.8-flash:generateContent$/);
     assert.equal((seen.init?.headers as Record<string, string>)['x-goog-api-key'], 'k');
+  });
+
+  it('429 본문의 retryDelay를 읽음 — 30초면 다시 보내지 않고 RATE_LIMITED (시도 1)', async () => {
+    assert.equal(retryDelayOf({ details: [{ '@type': 'type.googleapis.com/google.rpc.RetryInfo', retryDelay: '17s' }] }), 17_000);
+    assert.equal(retryDelayOf({ details: [{ retryDelay: '0.5s' }] }), 500);
+    assert.equal(retryDelayOf({}), null);
+    const body = { error: { code: 429, message: 'Quota exceeded', details: [{ retryDelay: '30s' }] } };
+    let sent = 0;
+    const fetchFn = (async () => {
+      sent++;
+      return new Response(JSON.stringify(body), { status: 429 });
+    }) as unknown as typeof fetch;
+    const r = await callLlm(createGeminiClient('k', fetchFn), { ...opts, sleep: async () => {} });
+    assert.equal(!r.ok && r.code, 'RATE_LIMITED');
+    assert.equal(sent, 1);
+  });
+
+  it('503(과부하)은 한 번만 다시 — UPSTREAM, 시도 2', async () => {
+    let sent = 0;
+    const fetchFn = (async () => {
+      sent++;
+      return new Response(JSON.stringify({ error: { code: 503, message: 'high demand' } }), { status: 503 });
+    }) as unknown as typeof fetch;
+    const r = await callLlm(createGeminiClient('k', fetchFn), { ...opts, sleep: async () => {} });
+    assert.equal(!r.ok && r.code, 'UPSTREAM');
+    assert.equal(sent, 2);
   });
 
   it('callLlm — 키가 틀리면 AUTH', async () => {

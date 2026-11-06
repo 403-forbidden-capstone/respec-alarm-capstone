@@ -60,7 +60,8 @@ function depsOf(db: FakeDb, script: FakeScript | null, extra: Partial<VoiceDeps>
   let t = 0;
   const deps: VoiceDeps = {
     userId: ME, userDb: db as unknown as Db, service: db as unknown as Db, llm: claude?.client ?? null, model: 'claude-haiku-5-5',
-    now: () => NOW, clock: () => (t += 40), sleep: async () => {}, ...extra,
+    // 이 파일의 녹화 대본은 T2F ∥ T1 미리(동시) 순서로 짜여 있음 — 기본(차례로) 흐름은 voice.quota.test.ts
+    now: () => NOW, clock: () => (t += 40), sleep: async () => {}, parallelPreview: true, ...extra,
   };
   return { deps, claude };
 }

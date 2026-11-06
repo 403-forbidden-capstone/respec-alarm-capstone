@@ -2,12 +2,12 @@
 //   요청(LlmRequest, Claude 모양)을 Gemini 본문으로 바꾸고, 응답을 다시 LlmResponse(Claude 모양)로 되돌림 — llm.ts가 stop_reason · usage를 그대로 읽게.
 //   SDK 없이 fetch만 씀 (패키지를 늘리지 않으려고). 그래서 node --test로 바로 시험됨 (gemini.test.ts)
 // 비밀값: GEMINI_API_KEY (Live 토큰과 같은 키). 없으면 geminiClient()가 null → 호출 0번으로 NOT_CONFIGURED
-// 모델: GEMINI_TEXT_MODEL로 바꿀 수 있고 기본은 gemini-3.8-flash. 단가표(pricing.ts)에 없어서 ai_calls.cost_usd는 NULL
+// 모델: GEMINI_TEXT_MODEL로 바꿀 수 있고 기본은 Flash-Lite(gemini-3.5-flash-lite — 모델 목록에서 이름만 확인, 응답은 미검증). 단가표(pricing.ts)에 없어서 ai_calls.cost_usd는 NULL
 // shortcut: 프롬프트 · 가드 · 시간 제한(T2F 5초 등)은 Claude Haiku로 맞춘 값 — Gemini에서 다시 재 보고 맞출 것
 import { getEnv } from '../env.ts';
 import { LlmClientError, llmClientFrom, type LlmClient, type LlmErrorKind, type LlmRequest, type LlmResponse } from './llm.ts';
 
-export const GEMINI_DEFAULT_MODEL = 'gemini-3.8-flash';
+export const GEMINI_DEFAULT_MODEL = 'gemini-3.5-flash-lite';
 const BASE_URL = 'https://generativelanguage.googleapis.com/v1beta/models';
 
 export function geminiModel(): string {
@@ -92,6 +92,20 @@ export function kindOfStatus(status: number, message: string): LlmErrorKind {
   return 'unknown';
 }
 
+type GeminiError = { message?: string; details?: { '@type'?: string; retryDelay?: string }[] };
+
+const retryAfterOf = (header: string | null): number | null => {
+  const sec = Number(header);
+  return header && Number.isFinite(sec) ? sec * 1000 : null;
+};
+
+// 429 본문의 RetryInfo.retryDelay ("17s" · "0.5s") → ms. 없으면 null
+export function retryDelayOf(err: GeminiError | undefined): number | null {
+  const delay = err?.details?.find((d) => typeof d.retryDelay === 'string')?.retryDelay;
+  const m = delay ? /^(\d+(?:\.\d+)?)s$/.exec(delay) : null;
+  return m ? Math.round(Number(m[1]) * 1000) : null;
+}
+
 export function createGeminiClient(apiKey: string, fetchFn: typeof fetch = fetch): LlmClient {
   return {
     async create(params: LlmRequest, options: { signal: AbortSignal }): Promise<LlmResponse> {
@@ -111,16 +125,15 @@ export function createGeminiClient(apiKey: string, fetchFn: typeof fetch = fetch
       if (!res.ok) {
         const text = await res.text().catch(() => '');
         let message = text;
+        let retryAfterMs = retryAfterOf(res.headers.get('retry-after'));
         try {
-          message = (JSON.parse(text) as { error?: { message?: string } }).error?.message ?? text;
+          const err = (JSON.parse(text) as { error?: GeminiError }).error;
+          message = err?.message ?? text;
+          retryAfterMs = retryDelayOf(err) ?? retryAfterMs;
         } catch {
           // 본문이 JSON이 아님 — 원문 그대로
         }
-        const sec = Number(res.headers.get('retry-after'));
-        throw new LlmClientError(kindOfStatus(res.status, message), message, {
-          status: res.status,
-          retryAfterMs: res.headers.get('retry-after') && Number.isFinite(sec) ? sec * 1000 : null,
-        });
+        throw new LlmClientError(kindOfStatus(res.status, message), message, { status: res.status, retryAfterMs });
       }
       return fromGeminiBody((await res.json()) as GeminiBody, params.model);
     },

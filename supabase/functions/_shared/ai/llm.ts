@@ -109,10 +109,12 @@ function asClientError(e: unknown): LlmClientError {
   return new LlmClientError('unknown', e instanceof Error ? e.message : String(e), { cause: e });
 }
 
-// 다시 시도해 볼 만한 것: 429 · 529 · 5xx · 연결 오류, 그리고 (지점 설정이 허락하면) 시간 초과. 400 · 401 · 403 · 404는 다시 해도 같음
+// 다시 시도해 볼 만한 것: 529 · 503 과부하 · 5xx · 연결 오류, 그리고 (지점 설정이 허락하면) 시간 초과. 400 · 401 · 403 · 404는 다시 해도 같음
+// 429(한도 초과)는 서버가 2초 안에 다시 하라고 알려 준 때만 — 1분 · 하루 한도는 곧바로 다시 보내면 한도만 더 씀
 function isRetryable(e: LlmClientError, retryOnTimeout: boolean): boolean {
   switch (e.kind) {
     case 'rate_limit':
+      return e.retryAfterMs != null && e.retryAfterMs <= RETRY_MAX_MS;
     case 'overloaded':
     case 'server':
     case 'connection':
@@ -220,6 +222,12 @@ export type LlmResult<T = unknown> = LlmSuccess<T> | LlmFailure;
 // 호출
 // ---------------------------------------------------------------------------
 
+// 사용량 관문 (ai/quota.ts QuotaGate) — 요청을 보내기 직전에 acquire, 끝나면 release. 막히면 보내지 않고 RATE_LIMITED
+export interface CallGate {
+  acquire(): Promise<{ ok: true } | { ok: false; scope: string; retryAfterS: number }>;
+  release(): void;
+}
+
 export interface CallOpts {
   point: string;
   promptId: string;
@@ -240,6 +248,7 @@ export interface CallOpts {
   // 시험에서 바꿔 끼움
   sleep?: (ms: number) => Promise<void>;
   now?: () => number; // ms 단위 단조 시계 (기본 performance.now)
+  gate?: CallGate;
 }
 
 const defaultSleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
@@ -307,14 +316,12 @@ export async function callLlm<T = unknown>(client: LlmClient | null, opts: CallO
   const fail = (
     code: LlmFailCode,
     reason: string,
-    extra: { latency_ms?: number; attempts?: number; response?: LlmResponse | null; requestId?: string | null } = {},
-  ): LlmFailure => ({
-    ok: false,
-    code,
-    message: FAIL_MESSAGES[code],
-    reason: clip(reason),
-    call: makeCall(opts, { ok: false, error_code: code, latency_ms: extra.latency_ms ?? 0, attempts: extra.attempts ?? 0, response: extra.response ?? null, requestId: extra.requestId ?? null }),
-  });
+    extra: { latency_ms?: number; attempts?: number; response?: LlmResponse | null; requestId?: string | null; flags?: string[] } = {},
+  ): LlmFailure => {
+    const call = makeCall(opts, { ok: false, error_code: code, latency_ms: extra.latency_ms ?? 0, attempts: extra.attempts ?? 0, response: extra.response ?? null, requestId: extra.requestId ?? null });
+    if (extra.flags) call.flags = extra.flags;
+    return { ok: false, code, message: FAIL_MESSAGES[code], reason: clip(reason), call };
+  };
 
   // 키가 없으면 호출 0번 — 앱은 AI 칸만 비우고 알람 · 기록은 그대로
   if (!client) return fail('NOT_CONFIGURED', 'ANTHROPIC_API_KEY가 없어 호출하지 않음');
@@ -327,7 +334,15 @@ export async function callLlm<T = unknown>(client: LlmClient | null, opts: CallO
   let attempts = 0;
   let response: LlmResponse | null = null;
   let lastError: LlmClientError | null = null;
+  let blocked: { scope: string; retryAfterS: number } | null = null;
   for (;;) {
+    if (opts.gate) {
+      const v = await opts.gate.acquire();
+      if (!v.ok) {
+        blocked = v;
+        break;
+      }
+    }
     attempts++;
     try {
       response = await attemptOnce(client, request, opts.timeoutMs);
@@ -338,10 +353,16 @@ export async function callLlm<T = unknown>(client: LlmClient | null, opts: CallO
       const wait = retryDelayMs(lastError);
       if (opts.deadlineMs !== undefined && now() - t0 + wait + opts.timeoutMs > opts.deadlineMs) break;
       await sleep(wait);
+    } finally {
+      opts.gate?.release();
     }
   }
   const latency_ms = Math.max(0, Math.round(now() - t0));
 
+  // 관문이 막음 — 앞 시도가 없으면 보낸 요청 0개(attempts 0)로 기록, 있으면 그 시도의 오류를 그대로
+  if (!response && blocked !== null && lastError === null) {
+    return fail('RATE_LIMITED', `사용량 상한(${blocked.scope})에 닿아 보내지 않음 — ${blocked.retryAfterS}초 뒤 가능`, { latency_ms, attempts, flags: [`quota:${blocked.scope}`] });
+  }
   if (!response) {
     const err = lastError as LlmClientError;
     return fail(CODE_OF_KIND[err.kind], `${err.kind}${err.status ? ` ${err.status}` : ''}: ${err.message}`, { latency_ms, attempts, requestId: err.requestId });
