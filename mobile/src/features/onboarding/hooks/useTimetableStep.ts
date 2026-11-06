@@ -139,9 +139,15 @@ export function useTimetableStep(transport: Transport, initial?: ImportBatch | n
       asked.current = true;
       void askNotifications('alarm');
     }
-    const notice = saveNotice(mergeFollowUps(followUps), '수업은 저장했지만');
-    if (failed) toast('저장하지 못한 수업이 있어요. 표시된 줄을 확인해 주세요');
-    else if (notice) toast(notice);
+    const merged = mergeFollowUps(followUps);
+    if (failed) {
+      // 실패한 줄이 있어도 이번에 저장된 수업의 안내는 같이 — 다시 누르면 저장된 줄은 건너뛰어 이 안내를 다시 볼 길이 없음
+      const extra = saveNotice(merged, '저장한 수업 중');
+      toast(`저장하지 못한 수업이 있어요. 표시된 줄을 확인해 주세요${extra ? `. ${extra}` : ''}`);
+    } else {
+      const notice = saveNotice(merged, '수업은 저장했지만');
+      if (notice) toast(notice);
+    }
     return !failed;
   }
 

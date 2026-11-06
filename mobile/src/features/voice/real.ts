@@ -802,7 +802,7 @@ export function saveCard(cardId: string): Promise<string> {
     let level: number;
     let toast = '알람을 맞췄어요';
     let partial: string | null = null;
-    // 저장은 됐는데 폰 예약 · 준비물이 못 한 것 (saveNotice.ts) — 있으면 성공 문구 대신 이것. 폰에 못 건 알람이 준비 시간 · 강도보다 급해서 partial보다 먼저
+    // 저장은 됐는데 폰 예약 · 준비물이 못 한 것 (saveNotice.ts) — 있으면 성공 문구 대신 이것. partial도 있으면 둘 다 (폰 안내가 앞)
     let notice: string | null = null;
 
     if (kind === 'APPT_NEW') {
@@ -871,6 +871,8 @@ export function saveCard(cardId: string): Promise<string> {
     }
 
     await notifyCard({ id: cardId, action: 'SAVED', appointment_id: appointmentId, alarms: alarmSummary(alarms, level) }, { cardId });
+    // 한 문구만 보이면 다른 쪽(폰에 못 건 알람 · 준비 시간 · 강도 못 바꿈)을 모르므로 둘 다 나면 이어 붙임
+    if (notice && partial) return `${notice}. 준비 시간 · 강도도 바꾸지 못했어요. 알람 설정에서 바꿔 주세요`;
     return notice ?? partial ?? toast;
   });
 }

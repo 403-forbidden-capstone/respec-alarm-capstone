@@ -412,6 +412,16 @@ describe('⑦ 준비 +N · 강도 — 바뀐 때만 두 번째 저장', () => {
     expect(await saveWith({ prepare_delta: 15 })).toBe('캡스톤 발표 일정은 저장했지만 알람 3개를 폰에 걸지 못했어요. 홈 안내를 확인해 주세요');
   });
 
+  it('폰에 못 건 알람과 준비 시간 · 강도 못 바꿈이 같이 나면 둘 다 알림 (한쪽이 다른 쪽을 가리지 않음)', async () => {
+    mCreate.mockImplementation(async () => ({ ...savedOf(), followUp: { phoneFailed: 1, itemsFailed: false } }));
+    mSettings.mockImplementation(async () => {
+      throw new Error('boom');
+    });
+    expect(await saveWith({ prepare_delta: 15 })).toBe(
+      '캡스톤 발표 일정은 저장했지만 알람 1개를 폰에 걸지 못했어요. 홈 안내를 확인해 주세요. 준비 시간 · 강도도 바꾸지 못했어요. 알람 설정에서 바꿔 주세요',
+    );
+  });
+
   it('고칠 값이 없으면 saveAlarmSettings를 안 부름 (카카오 +1 없음)', async () => {
     await saveWith(null);
     expect(mSettings).not.toHaveBeenCalled();

@@ -2,7 +2,7 @@
 //   계산(미리 보기)은 DB에 안 쓰고, 저장은 alarm-commit → 응답을 폰에 반영(applyCommit). 요청 · 응답 모양은 request.ts (서버의 H05 초안 모양 하나)
 //   · 고친 값 기록은 따로 insert하지 않고 alarm-commit의 edits로 보냄 — 저장이 성공해야 user_edit_logs에 남음
 //   · 저장은 중복 키를 서버가 아직 안 읽어서(lib/edge) 자동 재시도하지 않음. 읽기(alarm-suggest · place-search)만 한 번 재시도
-import { applyCommit, syncNow } from '@/lib/alarmSync';
+import { applyCommit, reconcile, syncNow } from '@/lib/alarmSync';
 import { now } from '@/lib/clock';
 import { dbTimeMs, parseDbTime } from '@/lib/dbTime';
 import { callEdge, EdgeError, messageFor } from '@/lib/edge';
@@ -33,7 +33,7 @@ import {
   type Suggestion,
 } from './request';
 import { loadDetail } from './realRows';
-import { mirrorArrive, syncPhone } from './realWrite';
+import { mirrorArrive } from './realWrite';
 import { draftAt } from './schedule';
 import { TravelConfirmNeeded, travelFallbackOf } from './travelConfirm';
 import {
@@ -42,7 +42,6 @@ import {
   type AlarmEdits,
   type AlarmPreview,
   type AlarmSettingsDraft,
-  type Appointment,
   type AppointmentDraft,
   type DepartCheck,
   type Estimate,
@@ -178,15 +177,18 @@ const warnDev = (what: string, e: unknown) => {
   if (__DEV__) console.warn(`[alarm] ${what}`, e);
 };
 
-// 저장 결과를 폰에 반영하고 못 건 알람 수를 돌려줌 — 던지지 않음. applyCommit이 던지면 이번에 걸려던 알람 모두를 못 건 것으로 셈
-async function phoneFailures(result: Parameters<typeof applyCommit>[0]): Promise<number> {
+// 저장 결과를 폰에 반영하고 못 건 알람 id를 돌려줌 (수는 .size, 같은 id는 한 번) — 던지지 않음
+//   applyCommit이 던지면 이번에 걸려던 알람 모두를 못 건 것으로 셈 (꾸러미가 없으면 하나로)
+async function phoneFailedIds(result: Parameters<typeof applyCommit>[0]): Promise<Set<string>> {
   try {
     const summary = await applyCommit(result);
     if (summary.failed.length) warnDev('폰에 못 건 알람', summary.failed);
-    return new Set(summary.failed.map((f) => f.alarmId)).size;
+    return new Set(summary.failed.map((f) => f.alarmId));
   } catch (e) {
     warnDev('저장 뒤처리 실패 (폰 예약)', e);
-    return Math.max(1, result.ring_packages?.length ?? 0);
+    const ids = new Set((result.ring_packages ?? []).map((p) => p.alarmId));
+    if (!ids.size) ids.add('(폰 예약)');
+    return ids;
   }
 }
 
@@ -219,7 +221,7 @@ export async function createAppointment(estimate: Estimate, source?: string): Pr
   const res = await callEdge<CommitResponse>('alarm-commit', body, { timeoutMs: COMMIT_TIMEOUT_MS });
   const saved = toCreatedAppointment(res, estimate);
 
-  const phoneFailed = await phoneFailures({ ...res, appointment_at: a.at.toISOString() }); // 약속 시각은 맞춘 뒤 훅(onAlarmsSynced)의 upcoming용
+  const phoneFailed = (await phoneFailedIds({ ...res, appointment_at: a.at.toISOString() })).size; // 약속 시각은 맞춘 뒤 훅(onAlarmsSynced)의 upcoming용
   let itemsFailed = false;
   const items = a.items.map((x) => x.trim()).filter(Boolean);
   if (items.length && res.appointment_id) {
@@ -278,10 +280,11 @@ export async function saveAlarmSettings(id: string, draft: AlarmSettingsDraft): 
   // 저장(alarm-commit)은 끝났음 — 뒤처리(폰 예약 · 도착 목표 맞추기)가 실패해도 실패로 돌리지 않음 (createAppointment와 같은 방침):
   //   실패 토스트가 뜨면 저장된 줄 모르고 화면이 저장 전 상태로 남고, 같은 저장을 다시 눌러도 같은 서버 상태일 뿐임.
   //   폰 예약은 다음 맞추기(앱이 앞에 올 때 reconcile)에서 서버 값으로 다시 걸림. 둘은 서로 영향이 없게 따로 감쌈. 못 건 수는 followUp으로 화면에 알림
-  const phoneFailed = await phoneFailures({ ...res, appointment_at: saved.at.toISOString() });
+  //   도착 목표를 폰에 못 건 것도 같이 셈 — 홈 빨간 줄(맞춘 뒤 훅)과 같은 기준, 같은 알람은 한 번
+  const failedIds = await phoneFailedIds({ ...res, appointment_at: saved.at.toISOString() });
   try {
     const arrive = res.participant_id ? await mirrorArrive(userId, res.participant_id) : [];
-    await syncPhone(arrive);
+    if (arrive.length) for (const f of (await reconcile({ alarmIds: arrive })).failed) failedIds.add(f.alarmId);
   } catch (e) {
     warnDev('저장 뒤처리 실패 (도착 목표 맞추기)', e);
   }
@@ -290,7 +293,7 @@ export async function saveAlarmSettings(id: string, draft: AlarmSettingsDraft): 
   const wasOn = (kind: (typeof RING_KINDS)[number]) => saved.alarms.find((x) => x.kind === kind)?.enabled;
   const kindOff = RING_KINDS.some((kind) => draft.kinds[kind] === false && wasOn(kind) === true);
   const kindOn = RING_KINDS.some((kind) => draft.kinds[kind] === true && wasOn(kind) === false);
-  return { turnedOff: kindOff && saved.enabled && !nowEnabled, turnedOn: kindOn && !saved.enabled && nowEnabled, ...followUpOf(phoneFailed) };
+  return { turnedOff: kindOff && saved.enabled && !nowEnabled, turnedOn: kindOn && !saved.enabled && nowEnabled, ...followUpOf(failedIds.size) };
 }
 
 // ---------------------------------------------------------------------------
@@ -306,7 +309,7 @@ export async function saveStandaloneAlarm(input: StandaloneInput): Promise<Saved
   dropEdits(queued);
   const row = res.alarms[0];
   if (!row) throw new UserError('알람을 저장하지 못했어요. 다시 해 주세요');
-  const phoneFailed = await phoneFailures(res);
+  const phoneFailed = (await phoneFailedIds(res)).size;
   // 새로 만든 반복 알람이면 다음 회차들도 바로 넘김 (createAppointment와 같음). 묶음 번호 = 첫 회차의 alarm_id. 고치기(alarmId 있음)는 어느 회차인지 몰라 건너뜀 — 다음 앱 열림 때 넘김
   if (!input.alarmId && row.recurrence_rule) rollSeries(row.alarm_id);
   return { ...toStandaloneAppointment({ ...row, alarm_type: 'WAKE' }), ...followUpOf(phoneFailed) };
