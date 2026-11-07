@@ -293,7 +293,7 @@ export default function AiScreen() {
           canSay={canSay}
           listening={real ? liveOn : listening}
           micLabel={liveOn ? '끝내기' : undefined}
-          micDisabled={real ? live.limited && !liveOn : undefined} // 음성 한도는 글 대화 한도(reached)와 따로 — 서버 voice-live-token이 셈
+          micDisabled={real ? false : undefined}
           text={draftText}
           onChangeText={setDraftText}
           onSend={send}

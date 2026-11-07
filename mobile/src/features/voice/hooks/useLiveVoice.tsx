@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from 'react';
 import { PermissionsAndroid, Platform } from 'react-native';
 
 import { now } from '@/lib/clock';
-import { EdgeError } from '@/lib/edge';
 import { userMessage } from '@/lib/errors';
 
 import { LiveFrame } from '../components/LiveFrame';
@@ -22,7 +21,6 @@ export function useLiveVoice(getToken: () => Promise<{ token: string; model: str
   const [page, setPage] = useState<string | null>(null);
   const [lines, setLines] = useState<LiveLine[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [limited, setLimited] = useState(false); // 서버가 오늘 음성 횟수를 다 썼다고 함(RATE_LIMITED) — 이 화면에서는 다시 시작하지 않음
   const run = useRef(0); // 시작 · 끝마다 늘림 — 토큰을 기다리는 사이 끝냈으면 늦게 온 토큰으로 연결하지 않게
 
   const end = () => {
@@ -64,12 +62,7 @@ export function useLiveVoice(getToken: () => Promise<{ token: string; model: str
       const { token, model } = await getToken();
       if (mine === run.current) setPage(livePage(token, model));
     } catch (e) {
-      if (mine !== run.current) return;
-      if (e instanceof EdgeError && e.code === 'RATE_LIMITED') {
-        setLimited(true);
-        return fail('오늘 음성 대화 횟수를 다 썼어요. 글로 이어 가 주세요');
-      }
-      fail(userMessage(e, '음성 대화를 시작하지 못했어요'));
+      if (mine === run.current) fail(userMessage(e, '음성 대화를 시작하지 못했어요'));
     }
   }
 
@@ -91,15 +84,11 @@ export function useLiveVoice(getToken: () => Promise<{ token: string; model: str
   return {
     phase,
     error,
-    limited,
     lines,
     start,
     stop: end,
     clear: () => setLines([]),
-    // 글을 보내거나 입력 방식을 바꾸면 지난 음성 오류 문구를 내림 — 한도 안내는 [말하기]가 막힌 이유라 남김
-    clearError: () => {
-      if (!limited) setError(null);
-    },
+    clearError: () => setError(null), // 글을 보내거나 입력 방식을 바꾸면 지난 음성 오류 문구를 내림
     frame: page ? <LiveFrame html={page} onMessage={onPageMessage} /> : null,
   };
 }
