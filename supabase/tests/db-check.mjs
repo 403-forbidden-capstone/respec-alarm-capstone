@@ -1397,7 +1397,7 @@ await check('호출 기록: 칸 기본값(시도 1회 · 규칙 걸림 [] · 호
     && points.join() === 'T1,T2F,T2,T3,T4,T5,E4,TT,LV' && upd.length === 1 && upd[0].error_code === 'TIMEOUT' && del.length === 1
     ? true : { r, full, points, upd, del };
 });
-await check('호출 기록: 지점은 8가지만 · 지연 · 시도(0 = 보내기 전 실패는 가능, 음수 불가) · 토큰 · 비용은 음수 불가 · 필수 칸 · 없는 사용자 거부', async () => {
+await check('호출 기록: 지점은 9가지만 · 지연 · 시도(0 = 보내기 전 실패는 가능, 음수 불가) · 토큰 · 비용은 음수 불가 · 필수 칸 · 없는 사용자 거부', async () => {
   await svc();
   const bad = (over, re) => expectErr(() => insCall(A, over, ''), re);
   const point = await bad({ point: 'T9' }, /ai_calls_point_check/);
