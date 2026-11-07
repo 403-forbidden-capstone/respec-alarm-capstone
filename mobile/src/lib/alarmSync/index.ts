@@ -166,7 +166,16 @@ async function cancelAlarms(ids: readonly string[], into: SyncSummary) {
 
 async function scheduleAlarms(packages: readonly RingPackage[], into: SyncSummary) {
   if (!packages.length) return;
-  const outcomes: ScheduleOutcome[] = await AlarmCore.scheduleAll(packages);
+  let outcomes: ScheduleOutcome[];
+  try {
+    outcomes = await AlarmCore.scheduleAll(packages);
+  } catch (e) {
+    // 코어가 통째로 던지면(네이티브 모듈 오류 등) 이번에 걸려던 알람을 모두 못 건 것으로 셈 — 던지면 맞춘 뒤 훅이 안 불려 홈 빨간 줄에도 안 남음
+    //   못 건 알람은 다음 맞추기(앱이 앞에 올 때)에서 다시 걺
+    const error = errorText(e);
+    for (const p of packages) into.failed.push({ alarmId: p.alarmId, error });
+    return;
+  }
   for (const o of outcomes) {
     if (o.status === 'scheduled') into.scheduled.push(o.alarmId);
     else if (o.status === 'skipped_past') into.skippedPast.push(o.alarmId);

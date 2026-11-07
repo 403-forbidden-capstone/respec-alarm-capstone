@@ -2,7 +2,8 @@ import { useRef, useState } from 'react';
 
 import { toast } from '@/components/ui';
 import { createAppointment, estimateAppointment } from '@/features/alarm/api';
-import type { LatLng, Place, Transport } from '@/features/alarm/types';
+import { mergeFollowUps, saveNotice } from '@/features/alarm/saveNotice';
+import type { LatLng, Place, SaveFollowUp, Transport } from '@/features/alarm/types';
 import { askNotifications } from '@/features/permissions';
 import { now } from '@/lib/clock';
 import { UserError, userMessage } from '@/lib/errors';
@@ -115,6 +116,7 @@ export function useTimetableStep(transport: Transport, initial?: ImportBatch | n
   async function save(): Promise<boolean> {
     let made = 0;
     let failed = false;
+    const followUps: (SaveFollowUp | undefined)[] = []; // 저장은 됐는데 폰 예약 · 준비물이 못 한 것 (saveNotice.ts)
     for (const row of shown) {
       if (row.existing === 'skip' || row.result === 'ok' || rowStatus(row) !== 'complete' || row.startMinutes == null) continue;
       try {
@@ -123,7 +125,8 @@ export function useTimetableStep(transport: Transport, initial?: ImportBatch | n
         // 길찾기를 못 해 대략값만 나왔으면 저장하지 않음 — 반복 일정에 그대로 남기 때문. 다시 누르면 길찾기를 다시 부름
         const retry = needsRetry(estimate);
         if (retry) throw new UserError(retry);
-        await createAppointment(estimate, SOURCE);
+        const saved = await createAppointment(estimate, SOURCE);
+        followUps.push(saved.followUp);
         mark(row.id, { result: 'ok', resultNote: undefined });
         made += 1;
       } catch (e) {
@@ -136,7 +139,15 @@ export function useTimetableStep(transport: Transport, initial?: ImportBatch | n
       asked.current = true;
       void askNotifications('alarm');
     }
-    if (failed) toast('저장하지 못한 수업이 있어요. 표시된 줄을 확인해 주세요');
+    const merged = mergeFollowUps(followUps);
+    if (failed) {
+      // 실패한 줄이 있어도 이번에 저장된 수업의 안내는 같이 — 다시 누르면 저장된 줄은 건너뛰어 이 안내를 다시 볼 길이 없음
+      const extra = saveNotice(merged, '저장한 수업 중');
+      toast(`저장하지 못한 수업이 있어요. 표시된 줄을 확인해 주세요${extra ? `. ${extra}` : ''}`);
+    } else {
+      const notice = saveNotice(merged, '수업은 저장했지만');
+      if (notice) toast(notice);
+    }
     return !failed;
   }
 

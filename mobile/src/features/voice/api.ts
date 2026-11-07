@@ -3,7 +3,7 @@
 //   읽기 · 쓰기 위치는 docs/screen-data-map.md (A02 AI 대화 · A03 하루 기록)
 // 실데이터 대화는 텍스트만 (설계: L4_자기전_설계메모.md) — 마이크 · 음성 합성 없음. 하루 기록(일기)은 아직 AI 대기
 import { createAppointment, draftAt, estimateAppointment } from '@/features/alarm/api';
-import type { Appointment, AppointmentDraft, Estimate } from '@/features/alarm/types';
+import type { AppointmentDraft, Estimate, SavedAppointment } from '@/features/alarm/types';
 import { now } from '@/lib/clock';
 import { callEdge } from '@/lib/edge';
 import { dateParts, dayKey } from '@/lib/format';
@@ -132,7 +132,7 @@ export function foundScheduleDraft(): AppointmentDraft | null {
 
 // 찾은 일정 저장 — estimate가 있으면 H05에서 고친 값. 알람을 맞추고 AI가 한마디 덧붙임
 // 실데이터는 Edge가 appointments · 알람을 저장하고 apply_status = APPLIED
-export async function saveFoundSchedule(estimate?: Estimate): Promise<Appointment> {
+export async function saveFoundSchedule(estimate?: Estimate): Promise<SavedAppointment> {
   // 이미 저장 · 저장 안 함을 고른 카드면 막음 — 두 번 누르거나 H05를 다시 열어도 일정이 두 벌 생기지 않게
   if (aiDb.chat?.found !== 'PENDING') throw new UserError('이미 확인한 일정이에요');
   const e = estimate ?? (await estimateAppointment(FOUND_DRAFT));

@@ -43,7 +43,9 @@ import {
   type PinAddress,
   type RingInfo,
   type RingKind,
+  type SavedAppointment,
   type ScheduleItem,
+  type SettingsSaveResult,
   type Snooze,
   type Transport,
   type UpdateOptions,
@@ -318,8 +320,8 @@ export async function setIntensity(id: string, axis: IntensityAxis, level: Level
 // 직접 고친 값은 하나씩 고친 값 기록(user_edit_logs)에 남김. 알람 순서(기상 ≤ 준비 ≤ 출발 ≤ 도착 목표)가 뒤집히면 저장하지 않고 UserError
 // 종류를 모두 껐으면 일정 알람도 끄고, 껐던 종류를 다시 켜면 일정 알람도 다시 켬 (종류를 안 바꿨으면 일정 켜기 · 끄기는 그대로)
 //   ※ "종류를 모두 끔"은 알람을 만들어 둔 채 끈 것 — H05에서 알람을 처음부터 안 만든 "알람 없는 일정"과 다름
-// 돌려주는 값 = 이번 저장으로 일정 알람이 꺼졌는지 · 켜졌는지. 실데이터는 alarm-commit
-export async function saveAlarmSettings(id: string, draft: AlarmSettingsDraft): Promise<{ turnedOff: boolean; turnedOn: boolean }> {
+// 돌려주는 값 = 이번 저장으로 일정 알람이 꺼졌는지 · 켜졌는지. 실데이터는 alarm-commit — 폰에 못 건 알람이 있으면 followUp (saveNotice.ts)
+export async function saveAlarmSettings(id: string, draft: AlarmSettingsDraft): Promise<SettingsSaveResult> {
   if (!isMock()) return real.saveAlarmSettings(id, draft);
   const a = find(id);
   if (!a) return { turnedOff: false, turnedOn: false };
@@ -648,7 +650,8 @@ export async function estimateAppointment(d: AppointmentDraft): Promise<Estimate
 // 계산한 일정을 저장 — 실데이터는 alarm-commit (일정 · 참여 조건 · 알람 4개를 한 번에)
 // source = 하루 기록에 남길 출처 (AI 대화에서 찾은 일정이면 'AI 대화 · 확인함' 등)
 // 확인 시트에서 알람 시각을 직접 고쳤으면(D43) 그 시각으로 저장하고 고친 값 기록에 남김. 순서가 뒤집혔으면 저장하지 않고 UserError
-export async function createAppointment(estimate: Estimate, source = '직접 입력'): Promise<Appointment> {
+// 실데이터는 저장 뒤 폰 예약 · 준비물이 못 한 것이 있으면 followUp — 화면은 saveNotice.ts 문구로 알림
+export async function createAppointment(estimate: Estimate, source = '직접 입력'): Promise<SavedAppointment> {
   if (!isMock()) return real.createAppointment(estimate, source);
   const a = estimate.appointment;
   const blocked = orderError(a.alarms);
@@ -975,12 +978,12 @@ export async function confirmWake(alarmId: string, how: 'self' | 'auto', at: Dat
 export type NewStandaloneAlarm = Required<Pick<StandaloneInput, 'at'>> & Omit<StandaloneInput, 'alarmId' | 'at'>;
 export type StandaloneAlarmPatch = Omit<StandaloneInput, 'alarmId'>;
 
-export async function createStandaloneAlarm(input: NewStandaloneAlarm): Promise<Appointment> {
+export async function createStandaloneAlarm(input: NewStandaloneAlarm): Promise<SavedAppointment> {
   if (isMock()) throw new UserError('일정 없는 알람은 실데이터 모드에서만 만들 수 있어요');
   return real.saveStandaloneAlarm(input);
 }
 
-export async function updateStandaloneAlarm(alarmId: string, patch: StandaloneAlarmPatch): Promise<Appointment> {
+export async function updateStandaloneAlarm(alarmId: string, patch: StandaloneAlarmPatch): Promise<SavedAppointment> {
   if (isMock()) throw new UserError('일정 없는 알람은 실데이터 모드에서만 고칠 수 있어요');
   return real.saveStandaloneAlarm({ ...patch, alarmId });
 }

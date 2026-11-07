@@ -121,6 +121,17 @@ describe('applyCommit — 저장 결과를 폰에 반영', () => {
     });
   });
 
+  it('알람 코어가 통째로 던져도 던지지 않고 걸려던 알람 모두를 failed로 — 홈 빨간 줄(못 건 수)에도 들어감', async () => {
+    const before = failedAlarmCount();
+    mockCore.scheduleAll.mockRejectedValueOnce(new Error('native crash'));
+    const summary = await applyCommit({ ring_packages: [pkg('thrown-1', NOW + 60_000), pkg('thrown-2', NOW + 120_000)] });
+    expect(summary.failed).toEqual([
+      { alarmId: 'thrown-1', error: 'native crash' },
+      { alarmId: 'thrown-2', error: 'native crash' },
+    ]);
+    expect(failedAlarmCount()).toBe(before + 2);
+  });
+
   it('칸이 없어도 됨 (일정 없는 알람을 끈 응답 등)', async () => {
     await applyCommit({});
     expect(mockCore.cancel).not.toHaveBeenCalled();
