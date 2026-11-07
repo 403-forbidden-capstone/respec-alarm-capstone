@@ -17,7 +17,8 @@ type Props = {
   onSpeak: () => void;
   onDone: () => void;
   doneDisabled?: boolean; // AI가 정리 중이면 완료를 막음 — 끝난 대화에 답 · 카드가 붙지 않게
-  textOnly?: boolean; // 실데이터 대화 — 글로만. 텍스트 · 말하기 버튼을 숨기고 "키보드 마이크로 말해도 돼요" 한 줄
+  micLabel?: string; // 말하기 버튼 글 (기본 "말하기") — 실데이터 음성 대화 중이면 "끝내기"
+  micDisabled?: boolean; // 기본은 내 차례가 아니면 막음(!canSay). 실데이터 음성 대화는 글 대화와 따로 돌아 화면이 정함
 };
 
 // 대화 아래 입력 칸 (.composer) — 상태 한 줄 · 글 입력(글 모드) · 텍스트 / 말하기 / 완료
@@ -34,7 +35,8 @@ export function ChatComposer({
   onSpeak,
   onDone,
   doneDisabled,
-  textOnly,
+  micLabel = '말하기',
+  micDisabled,
 }: Props) {
   const input = useRef<TextInput>(null);
   const sendable = canSay && text.trim().length > 0; // 빈 글 · 공백만은 못 보냄
@@ -69,14 +71,9 @@ export function ChatComposer({
           <Button label="보내기" small onPress={send} disabled={!sendable} />
         </View>
       ) : null}
-      {textOnly && inputVisible ? (
-        <Text variant="caption" tone="faint" align="center" style={styles.hint}>
-          키보드 마이크로 말해도 돼요
-        </Text>
-      ) : null}
       <View style={styles.buttons}>
-        {textOnly ? null : <Pill label="텍스트" on={mode === 'text'} onPress={onToggleMode} />}
-        {textOnly ? null : <MicButton listening={listening} disabled={!canSay} onPress={onSpeak} />}
+        <Pill label="텍스트" on={mode === 'text'} onPress={onToggleMode} />
+        <MicButton label={micLabel} listening={listening} disabled={micDisabled ?? !canSay} onPress={onSpeak} />
         <Pill label="완료" onPress={onDone} disabled={doneDisabled} />
       </View>
     </View>
@@ -102,7 +99,7 @@ function Pill({ label, on, disabled, onPress }: { label: string; on?: boolean; d
 }
 
 // 말하기 (.mic) — 듣는 동안 테두리가 퍼짐 (.mic.listen)
-function MicButton({ listening, disabled, onPress }: { listening: boolean; disabled: boolean; onPress: () => void }) {
+function MicButton({ label, listening, disabled, onPress }: { label: string; listening: boolean; disabled: boolean; onPress: () => void }) {
   const [pulse] = useState(() => new Animated.Value(0));
 
   useEffect(() => {
@@ -130,12 +127,12 @@ function MicButton({ listening, disabled, onPress }: { listening: boolean; disab
         onPress={onPress}
         disabled={disabled}
         accessibilityRole="button"
-        accessibilityLabel="말하기"
+        accessibilityLabel={label}
         accessibilityState={{ disabled, busy: listening }}
         style={({ pressed }) => [styles.mic, disabled && !listening && styles.micOff, pressed && styles.pressed]}
       >
         <Text variant="note" tone="inverse" weight={600}>
-          말하기
+          {label}
         </Text>
       </Pressable>
     </View>
@@ -156,7 +153,6 @@ const styles = StyleSheet.create({
     boxShadow: `0 10px 30px -18px ${colors.shadow}40`,
   },
   status: { marginBottom: 8 },
-  hint: { marginBottom: 10 },
   inputRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 10 },
   input: {
     ...typeScale.body,
