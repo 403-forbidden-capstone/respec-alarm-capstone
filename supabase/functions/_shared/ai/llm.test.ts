@@ -450,8 +450,8 @@ describe('시간 초과 — Promise.race로 직접', () => {
   it('설정 확인: T1은 시간 초과도 다시 시도하고 T2F는 안 함, 시간은 표대로', () => {
     assert.equal(POINTS.T1.retryOnTimeout, true);
     assert.equal(POINTS.T2F.retryOnTimeout, false);
-    assert.equal(POINTS.T2F.timeoutMs, 5_000);
-    assert.deepEqual(Object.fromEntries(POINT_IDS.map((p) => [p, POINTS[p].timeoutMs])), { T1: 13_000, T2F: 5_000, T2: 19_000, T3: 4_000, T4: 11_000, T5: 26_000, E4: 28_000 });
+    assert.equal(POINTS.T2F.timeoutMs, 9_000);
+    assert.deepEqual(Object.fromEntries(POINT_IDS.map((p) => [p, POINTS[p].timeoutMs])), { T1: 16_000, T2F: 9_000, T2: 19_000, T3: 4_000, T4: 11_000, T5: 26_000, E4: 28_000 });
   });
 
   it('deadlineMs: 다시 시도하면 전체 마감을 넘길 것 같으면 재시도 안 함', async () => {
@@ -497,7 +497,7 @@ describe('시간 초과 — Promise.race로 직접', () => {
     assert.equal(t.calls[1].signal.aborted, false);
   });
 
-  it('T2F: 시간 초과는 다시 시도하지 않음 (5초 안에 안 오면 미리 부른 T1 답을 씀)', async () => {
+  it('T2F: 시간 초과는 다시 시도하지 않음 (제한 시간 안에 안 오면 T1 답을 씀)', async () => {
     const t = setup(['hang', response([text(JSON.stringify(fixture('T2F').expect))])]);
     const r = mustFail(await callPoint(t.client, 'T2F', dummyVars('T2F'), { ...t.extra, timeoutMs: 20 }));
     assert.equal(r.code, 'TIMEOUT');

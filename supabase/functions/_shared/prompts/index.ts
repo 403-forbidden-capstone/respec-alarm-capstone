@@ -45,11 +45,13 @@ export interface PointConfig {
 }
 
 export const POINTS: Record<PointId, PointConfig> = {
-  // 대화 답. 장부 n=1530(오류 · 생각 끔 제외): p50 3.9초 / p95 6.5초 → 13초
-  T1: { prompt: T1, schema: 't1-reply.v1', effort: 'low', maxTokens: 2048, thinking: null, timeoutMs: 13_000, retryOnTimeout: true, cacheSystem: true },
-  // 빠른 추출. 장부 n=156: p50 2.4초 / p95 5.3초. 제한 5초는 카드 ⑥ 34번 — 5초 안에 안 오면 "처리할 게 없음"으로 보고 미리 부른 T1 답을 쓴다
-  //   (다음 턴 T2F가 따라잡음). 그래서 다시 시도하지 않음: 다시 기다리면 T1을 미리 부른 이득이 없어짐. 적응형 생각 켬(카드 ⑥ 31번, 끄면 오류 3배)
-  T2F: { prompt: T2F, schema: 'extract-fast.v1', effort: 'low', maxTokens: 4096, thinking: { type: 'adaptive' }, timeoutMs: 5_000, retryOnTimeout: false, cacheSystem: true },
+  // 대화 답. 장부 n=1530(Claude, 오류 · 생각 끔 제외): p50 3.9초 / p95 6.5초 → 13초였음
+  //   Gemini Flash-Lite 실측(11/7) 4.7 · 11.5 · 12.4초 → 16초. 다시 시도는 원래 18초 마감 안에 안 들어가 일어나지 않으므로 늘려도 호출 수 · 마감은 그대로
+  T1: { prompt: T1, schema: 't1-reply.v1', effort: 'low', maxTokens: 2048, thinking: null, timeoutMs: 16_000, retryOnTimeout: true, cacheSystem: true },
+  // 빠른 추출. 장부 n=156(Claude Haiku): p50 2.4초 / p95 5.3초. 제한 시간 안에 안 오면 "처리할 게 없음"으로 보고 T1 답을 쓴다
+  //   (다음 턴 T2F가 따라잡음). 그래서 다시 시도하지 않음. 적응형 생각 켬(카드 ⑥ 31번, 끄면 오류 3배 — Gemini는 effort low = thinkingLevel low)
+  //   Gemini Flash-Lite는 5초에 시간 초과(11/7 실측, 같은 크기 T1이 4.7~11.5초) → 9초. T2F 9초 + T1 9초 남음 = 턴 마감 18초 · REGEN_MIN 7초 안
+  T2F: { prompt: T2F, schema: 'extract-fast.v1', effort: 'low', maxTokens: 4096, thinking: { type: 'adaptive' }, timeoutMs: 9_000, retryOnTimeout: false, cacheSystem: true },
   // 대화 끝 전체 추출. 장부 n=724: p50 5.6초 / p95 9.4초 → 19초
   T2: { prompt: T2, schema: 'extract.v1', effort: 'medium', maxTokens: 4096, thinking: null, timeoutMs: 19_000, retryOnTimeout: true, cacheSystem: true },
   // 이유 태그. 장부 n=594: p50 1.4초 / p95 1.6초 → ×2는 3.2초지만 네트워크 흔들림 여유로 4초 바닥

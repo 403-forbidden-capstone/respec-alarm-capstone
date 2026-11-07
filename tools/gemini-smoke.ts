@@ -1,6 +1,7 @@
 // Gemini 로컬 점검 — 운영 Supabase를 거치지 않고 서버와 같은 코드로 Google에 바로 붙어 봄
-//   node tools/gemini-smoke.ts            글(T1 · T2F) + Live 둘 다
-//   node tools/gemini-smoke.ts text|live  하나만 · GEMINI_TEXT_MODEL=gemini-3.5-flash node … 로 모델만 바꿔 보기
+//   실제 Google API를 부르므로(비용 · 한도 사용) --real을 붙여야만 돎. 평소 시험은 Mock(npm/deno test)
+//   node tools/gemini-smoke.ts --real            글(T1 · T2F) + Live 둘 다
+//   node tools/gemini-smoke.ts text|live --real  하나만 · GEMINI_TEXT_MODEL=gemini-3.5-flash node … 로 모델만 바꿔 보기
 // 키: supabase/functions/.env의 GEMINI_API_KEY (커밋 안 됨). 모델: GEMINI_TEXT_MODEL(선택)
 // 확인하는 것: 모델 이름이 맞는지 · 우리 JSON 스키마를 Gemini가 받는지 · 지연이 지점 제한 시간 안인지 · Live 토큰 발급 → WebSocket 연결 → 한 턴 답
 import { readFileSync } from 'node:fs';
@@ -11,6 +12,11 @@ import { callLlm } from '../supabase/functions/_shared/ai/llm.ts';
 import { schemaOf } from '../supabase/functions/_shared/ai/schemas/index.ts';
 import { POINTS } from '../supabase/functions/_shared/prompts/index.ts';
 
+if (!process.argv.includes('--real')) {
+  console.log('실제 Gemini API를 부르는 점검이에요. 정말 부르려면 --real을 붙이세요 (예: node tools/gemini-smoke.ts text --real)');
+  process.exit(0);
+}
+
 const env: Record<string, string> = {};
 for (const line of readFileSync(new URL('../supabase/functions/.env', import.meta.url), 'utf8').split(/\r?\n/)) {
   const m = /^([A-Z_]+)=(.*)$/.exec(line.trim());
@@ -19,7 +25,7 @@ for (const line of readFileSync(new URL('../supabase/functions/.env', import.met
 const key = env.GEMINI_API_KEY;
 if (!key) throw new Error('supabase/functions/.env에 GEMINI_API_KEY가 없어요');
 const textModel = process.env.GEMINI_TEXT_MODEL || env.GEMINI_TEXT_MODEL || GEMINI_DEFAULT_MODEL; // 셸 값이 .env보다 먼저
-const which = process.argv[2] ?? 'all';
+const which = process.argv.slice(2).find((a) => a !== '--real') ?? 'all';
 let failed = false;
 
 // 글 대화 — 실제 프롬프트 · 스키마로 한 번씩. 제한 시간은 넉넉히(30초) 잡고, 운영 제한(timeoutMs)을 넘었는지 따로 표시

@@ -10,7 +10,7 @@
 import 'jsr:@supabase/functions-js/edge-runtime.d.ts';
 
 import { geminiClient, geminiModel } from '../_shared/ai/gemini.ts';
-import { QuotaGate, quotaFromEnv, readUsage } from '../_shared/ai/quota.ts';
+import { QuotaGate, quotaFromEnv } from '../_shared/ai/quota.ts';
 import { handleVoiceTurn } from '../_shared/ai/turn.ts';
 import { requireUser } from '../_shared/auth.ts';
 import { getEnv } from '../_shared/env.ts';
@@ -24,8 +24,8 @@ Deno.serve(
     const body = await readJson(req);
     const ioUserIds = (getEnv('AI_LOG_IO_USER_IDS') ?? '').split(',').map((s) => s.trim()).filter(Boolean);
     const service = createServiceClient();
-    // 사용량 관문 — 프로젝트 전체 한도(AI_LIMIT_*)를 ai_calls 기록으로 셈 (ai/quota.ts)
-    const quota = new QuotaGate(quotaFromEnv(getEnv), () => readUsage(service, Date.now()));
+    // 사용량 관문 — 글 대화 · 일정 추출 호출을 이 인스턴스 메모리에서 셈 (ai/quota.ts, AI_LIMIT_*)
+    const quota = new QuotaGate(quotaFromEnv(getEnv));
     return jsonResponse(
       await handleVoiceTurn(
         { userId: user.userId, userDb: user.db, service, llm: geminiClient(), model: geminiModel(), ioUserIds, quota, parallelPreview: getEnv('AI_PARALLEL_PREVIEW') === '1' },

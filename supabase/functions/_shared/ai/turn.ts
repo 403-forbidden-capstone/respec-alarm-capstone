@@ -5,10 +5,12 @@
 //                 앱 일(카드 계산 · 기록 정정) 있음 → next = APP_TASKS, reply 없음 (T1 0번)      앱 일 없음 → T1 한 번 → 가드
 //               parallelPreview(AI_PARALLEL_PREVIEW=1)면 예전처럼 T2F ∥ T1 미리 동시 — 빠르지만 처리 결과가 있으면 미리 부른 T1이 버려짐(호출 1번 더)
 //               사용량 관문(deps.quota, ai/quota.ts): 말을 쌓기 전에 여유를 봄 — 하루 한도면 "오늘은 여기까지" 템플릿, 1분 한도 · 동시 요청이면 LLM_UNAVAILABLE(RATE_LIMITED)
+//               음성 차례(spoken_reply 있음, Gemini Live): 말 + Live 답을 같은 대화에 쌓고 T2F만 — 일정이면 같은 카드 흐름(APP_TASKS → results → T1), 아니면 T1 0번
+//                 사용량 관문에 막히면 추출만 건너뛰고 말은 남김 (Live는 이미 답했으므로)
 //   results     앱이 계산한 카드 상태 · 정정 결과 — applyTaskResults → T1 → 가드. 대기 중인 앱 일이 없어도 받음(장소 고르기 뒤 새 client_turn_id)
 //   card_action 카드 [저장] · [저장 안 함] — applyCardAction. 저장(SAVED) 뒤 T1 한 번, REJECTED는 상태만(reply null)
 // 동시 요청 · 재시도: server_state.rev 비교(CONFLICT), client_turn_id가 이미 있으면 저장한 답을 그대로 / 답이 아직 없던 요청이면 T1만 다시 (말이 두 번 쌓이지 않음).
-// 시간: 서버 전체 18초 마감(T2F 5초 · T1 13초, 다시 부르기는 남은 시간 7초 넘을 때만). T2F가 못 오면 그 턴은 "처리 결과 없음".
+// 시간: 서버 전체 18초 마감(T2F 9초 · T1 16초 — 둘 다 남은 시간으로 잘림, 다시 부르기는 남은 시간 7초 넘을 때만). T2F가 못 오면 그 턴은 "처리 결과 없음".
 // 모델 호출마다 ai_calls 한 줄(서버 키). 모델 호출 · 키 읽기는 deps.llm(null이면 NOT_CONFIGURED)만 통한다 — 이 파일은 Deno API를 안 써서 node --test로 돈다.
 import { HttpError } from '../errors.ts';
 import type { Db } from '../supabase.ts';
@@ -61,6 +63,10 @@ export interface VoiceTurnOut {
   cards: PublicCard[];
   fixes: PublicFix[];
   limits: TurnLimits;
+  /** 이 말의 일정 추출(T2F)을 못 함 — RATE_LIMITED 사용량 상한(음성 차례만, 말은 남김) · EXTRACT_FAILED 시간 초과 · 오류. 다음 말의 추출이 현재 상태를 따라잡음 */
+  notice?: 'RATE_LIMITED' | 'EXTRACT_FAILED';
+  /** 음성 차례만: 일정에서 아직 모르는 것 ("'산책'의 정확한 날짜") — 앱이 Live에 넘겨 Live가 소리로 되물음 */
+  ask?: string[];
 }
 
 // ───────── 한 요청의 작업대 ─────────
@@ -322,16 +328,20 @@ async function handleText(run: Run, row: SessionRow, st: ServerState, req: Extra
   const stored = [...row.turns, userLine];
   const ts0 = toTurnState(st);
   const ctx = ctxOf(st, run.nowIso, []);
-  const extract = extractNeeded(req.text, st);
-  const parallel = extract && deps.parallelPreview === true;
+  const voice = req.spoken_reply !== undefined;
+  let extract = extractNeeded(req.text, st);
+  let blocked = false; // 음성 차례인데 사용량 관문에 막혀 추출을 건너뜀 — 위험 판단 '모름'
+  const parallel = extract && !voice && deps.parallelPreview === true;
 
   // 사용량 관문 — 이 턴에 필요한 호출 수만큼 여유가 있는지 말을 쌓기 전에 봄 (막히면 말을 저장하지 않으니 [다시 시도]로 같은 말을 다시 보내면 됨)
-  if (deps.quota) {
-    const v = await deps.quota.check(extract ? 2 : 1);
-    if (!v.ok && v.scope === 'RPD') {
+  if (deps.quota && (extract || !voice)) {
+    const v = await deps.quota.check(voice ? 1 : extract ? 2 : 1);
+    if (!v.ok && voice) {
+      extract = false;
+      blocked = true;
+    } else if (!v.ok && v.scope === 'RPD') {
       return outOf(st, { n: row.turns.length, role: 'ai', text: LIMIT_AI_DAY_TEXT, at: run.nowIso, acts: [], end: false }, [], await limitsFor(st, 'DAY'), false);
-    }
-    if (!v.ok) throw new HttpError('LLM_UNAVAILABLE', FAIL_MESSAGES.RATE_LIMITED, { code: 'RATE_LIMITED', scope: v.scope, retry_after_s: v.retryAfterS });
+    } else if (!v.ok) throw new HttpError('LLM_UNAVAILABLE', FAIL_MESSAGES.RATE_LIMITED, { code: 'RATE_LIMITED', scope: v.scope, retry_after_s: v.retryAfterS });
   }
 
   // 기본: T2F 먼저, 처리 결과를 본 뒤 T1 한 번. parallel이면 T2F ∥ T1 미리 (T1 미리 화면 = T1 화면 + "사용자 말 j 뒤: 바뀐 것 없음")
@@ -344,27 +354,36 @@ async function handleText(run: Run, row: SessionRow, st: ServerState, req: Extra
   let ts: TurnState = ts0;
   let tasks = false;
   let fixes: Fix[] = [];
-  if (fastRes === null) {
+  if (fastRes === null && !blocked) {
     // 추출을 건너뜀(인사 · 작별) — 바뀐 것 없음. 위험한 말이 없는 정해진 말만 건너뛰므로 risk_unknown은 붙이지 않음
     ts = structuredClone(ts0);
     ts.events = [...ts.events.filter((e) => e.after_turn !== j), emptyEvent(j)];
-  } else if (fastRes.ok) {
+  } else if (fastRes?.ok) {
     const fr = applyFast(ts0, fastRes.data, ctx, j);
     ts = fr.state;
     tasks = fr.tasks;
     fixes = fr.fixes;
   } else {
-    // T2F가 5초 안에 못 오거나 실패 — 그 턴은 처리 결과 없음 (다음 턴 T2F가 현재 상태를 따라잡음)
+    // T2F가 제한 시간(9초) 안에 못 오거나 실패 — 그 턴은 처리 결과 없음 (다음 턴 T2F가 현재 상태를 따라잡음)
     // 위험 판단도 없음 = '모름'(꺼짐 아님): 가드가 모델이 낸 109를 지우지 않게 표시 (헤드 10/30). 109를 새로 붙이지는 않음
     ts = structuredClone(ts0);
     ts.events = [...ts.events.filter((e) => e.after_turn !== j), { ...emptyEvent(j), risk_unknown: true }];
   }
   const noNeed = needKinds(eventAt(ts.events, j)).length === 0;
-  return conclude(
+  // 음성 차례: Live가 소리로 한 답을 그대로 AI 줄로 남김 — 글 답(T1)은 만들지 않음 (일정 카드 뒤 안내는 results 뒤 T1이 함)
+  //   날짜 · 시각 · 이름을 몰라 되물을 것(clarify)은 ask로 앱에 돌려줌 — 앱이 열려 있는 Live 연결에 넣어 Live가 소리로 물음 (T1 추가 호출 없음)
+  //   안 돌려주면 Live는 서버 처리 결과를 몰라 되물음이 아무 데도 안 나가 일정이 조용히 사라짐 (11/8 웹 시험 '초롱이랑 2시에 산책 약속 있어' — 날짜 없음)
+  const spoken = req.spoken_reply?.trim();
+  const said = voice && spoken ? [...stored, { n: stored.length, role: 'ai' as const, text: spoken, at: run.nowIso, after_turn: j, source: 'live' as const, trigger: 'text' }] : stored;
+  // 추출을 못 함 — 앱이 일정일 수도 있는 말이면 "일정을 확인하지 못했어요"를 띄움 (텍스트는 사용량 관문에 막히면 위에서 이미 던짐)
+  const notice: VoiceTurnOut['notice'] = blocked ? 'RATE_LIMITED' : fastRes !== null && !fastRes.ok ? 'EXTRACT_FAILED' : undefined;
+  const out = await conclude(
     run, row, st,
-    { ts, stored, userTurns: j, j, trigger: 'text', fixes, needReply: !tasks, preview: tasks ? null : noNeed ? preview : null },
+    { ts, stored: said, userTurns: j, j, trigger: 'text', fixes, needReply: !tasks && !voice, preview: tasks || voice ? null : noNeed ? preview : null },
     req.client_turn_id, limitsFor,
   );
+  const ask = voice && !tasks ? eventAt(ts.events, j)?.clarify ?? [] : []; // 서버가 만든 문구('산책'의 정확한 날짜) — 모델 원문 아님
+  return { ...out, ...(notice ? { notice } : {}), ...(ask.length > 0 ? { ask } : {}) };
 }
 
 async function handleResults(run: Run, row: SessionRow, st: ServerState, results: TaskResults, ctid: string, limitsFor: LimitsFor): Promise<VoiceTurnOut> {

@@ -144,8 +144,8 @@ describe('지점 설정(index.ts)', () => {
       const c = POINTS[p];
       return [c.prompt.id, c.prompt.version, c.schema, c.effort, c.maxTokens, c.thinking?.type ?? null, c.timeoutMs, c.retryOnTimeout];
     };
-    assert.deepEqual(row('T1'), ['T1', 'v1.5', 't1-reply.v1', 'low', 2048, null, 13_000, true]);
-    assert.deepEqual(row('T2F'), ['T2F', 'v2-b', 'extract-fast.v1', 'low', 4096, 'adaptive', 5_000, false]);
+    assert.deepEqual(row('T1'), ['T1', 'v1.5', 't1-reply.v1', 'low', 2048, null, 16_000, true]);
+    assert.deepEqual(row('T2F'), ['T2F', 'v2-b', 'extract-fast.v1', 'low', 4096, 'adaptive', 9_000, false]);
     assert.deepEqual(row('T2'), ['T2', 'v2', 'extract.v1', 'medium', 4096, null, 19_000, true]);
     assert.deepEqual(row('T3'), ['T3', 'v1', 't3-reason.v1', 'low', 1024, null, 4_000, true]);
     assert.deepEqual(row('T4'), ['T4', 'v1.1', 't4-diary.v1', 'medium', 4096, null, 11_000, true]);

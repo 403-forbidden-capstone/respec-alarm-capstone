@@ -7,30 +7,71 @@ import { listPlaces } from '@/features/alarm/api';
 import { PlaceSearchSheet } from '@/features/alarm/components/PlaceSearchSheet';
 import { homeOf } from '@/features/alarm/placeSheet';
 import { useAuth } from '@/features/auth/AuthProvider';
-import { finishConversation, getConversation, getLiveToken, pickCardPlace, rejectCard, retryConversation, saveCard, say } from '@/features/voice/api';
+import { finishConversation, getConversation, getLiveToken, pickCardPlace, rejectCard, retryConversation, saveCard, say, sayVoice } from '@/features/voice/api';
 import { ChatBubble, TypingBubble } from '@/features/voice/components/ChatBubble';
 import { ChatComposer } from '@/features/voice/components/ChatComposer';
 import { ChatNotice } from '@/features/voice/components/ChatNotice'; // L5 부품 — 실패 · 한도 안내
 import { FoundScheduleCard } from '@/features/voice/components/FoundScheduleCard';
 import { useLiveVoice } from '@/features/voice/hooks/useLiveVoice';
-import { isNearBottom, mergeLive, type ChatRow } from '@/features/voice/liveChat';
+import { askPrompt, heardSchedule, isNearBottom, mergeLive, mightBeSchedule, type ChatRow } from '@/features/voice/liveChat';
+import type { Conversation, TurnNotice } from '@/features/voice/types';
 import { now } from '@/lib/clock';
 import { userMessage } from '@/lib/errors';
 import { backOrHome } from '@/lib/nav';
 import { useAction } from '@/lib/useAction';
 import { useLoad } from '@/lib/useLoad';
 
+const CARD_DRAFTING = '일정 카드를 생성하고 있어요...';
+// 일정일 수도 있는 말을 일정으로 정리하지 못한 까닭 — 모른 채 같은 말을 되풀이하지 않게 짧게 알림 (일반 대화면 알리지 않음)
+const MISSED: Record<'LIMIT' | 'BUSY' | TurnNotice, string> = {
+  LIMIT: '이 대화는 기록 한도에 닿아 더 이상 일정으로 정리되지 않아요. [완료] 후 새 대화에서 말해 주세요.',
+  BUSY: '앞의 요청이 실패해 방금 말은 정리되지 않았어요. [다시 시도]를 먼저 눌러 주세요.',
+  RATE_LIMITED: 'AI 요청이 몰려 방금 말한 일정을 확인하지 못했어요. 잠시 뒤 한 번 더 말해 주세요.',
+  EXTRACT_FAILED: '방금 말한 일정을 확인하지 못했어요. 한 번 더 말해 주세요.',
+};
+const explain = (text: string, why: keyof typeof MISSED | null | undefined) => {
+  if (why && mightBeSchedule(text)) toast(MISSED[why]);
+};
 const LISTEN_MS = 1100; // 말하기를 누른 뒤 듣는 시간 (목업 chatSpeak). AI가 답하는 시간은 api(say)가 기다림
 
 // 03 AI 탭 · A02 AI 대화 — 자기 전 대화
 // 가짜 데이터: 목업 대본대로 흘러감 (마이크 · 음성 합성 · 서버 호출 없음). 말하기 = 다음 대본 문장을 말한 것으로 침, 텍스트 = 빈 칸에 쓴 글을 그대로 보냄(AI 답은 대본). 완료하면 하루 기록(A03)으로
-// 실데이터: 글(서버 voice-session · voice-turn)과 실시간 음성(Gemini Live, [말하기])을 한 대화 목록에. 음성 말풍선은 이 화면에만 남고(서버 · DB에 안 감) 글 대화 · 카드와는 따로 돎. 일정 · 알람을 찾으면 카드가 여러 장 떠서 [저장] · [바꾸기] · [저장 안 함]으로 확인받고, 완료하면 대화를 끝내고(다음에 열면 새 대화) 이전 화면(홈)으로
+// 실데이터: 글(서버 voice-session · voice-turn)과 실시간 음성(Gemini Live, [말하기])을 한 대화 목록에. 음성은 한 차례(내 말 + Live 답)가 끝나면 같은 서버 대화에 남아(voice-turn spoken_reply) 글과 문맥 · 일정 카드 흐름을 함께 씀 — 못 남긴 말풍선만 화면에 남음. 일정 · 알람을 찾으면 카드가 여러 장 떠서 [저장] · [바꾸기] · [저장 안 함]으로 확인받고, 완료하면 대화를 끝내고(다음에 열면 새 대화) 이전 화면(홈)으로
 //   서버가 답하지 못하면(LLM_UNAVAILABLE · NOT_CONFIGURED …) 대화 · 카드는 두고 마지막 말풍선 아래에 ChatNotice failed, 한도에 닿으면(limits.reached) ChatNotice limit — 입력창은 막음
 export default function AiScreen() {
   const { data, error, reload: reloadNow } = useLoad(getConversation);
   // [완료]로 나간 뒤에는 끝나지 않은 저장 · 답이 다시 읽기를 걸어도 새 세션을 열지 않음 — 다시 들어올 때(포커스)만 읽음 (그건 useLoad가 함)
   const leftRef = useRef(false);
-  const live = useLiveVoice(getLiveToken); // 실시간 음성 대화 — 실데이터만 씀
+  // 말 하나를 처리하는 도중의 대화 (api say · sayVoice의 onProgress) — 카드 계산 중 · 계산 끝 카드를 안내 답보다 먼저 그림. 끝나고 다시 읽으면 비움
+  const [progress, setProgress] = useState<Conversation | null>(null);
+  // 보낸 말 중 일정일 수도 있는 것(mightBeSchedule)의 수 — 추출(T2F) 결과가 오기 전부터 "일정 카드를 생성하고 있어요..."를 띄움.
+  //   추출이 일정을 찾으면(progress) 카드 자리의 임시 말풍선이 이어받고, 아니면 · 실패하면 그 말 처리가 끝날 때 내림
+  const [drafting, setDrafting] = useState(0);
+  const draft = async <T,>(text: string | undefined, task: () => Promise<T>): Promise<T> => {
+    const maybe = !!text && mightBeSchedule(text);
+    if (maybe) setDrafting((n) => n + 1);
+    try {
+      return await task();
+    } finally {
+      if (maybe) setDrafting((n) => n - 1);
+    }
+  };
+  // 실시간 음성 대화 — 실데이터만 씀. 한 차례가 끝나면 같은 대화에 남기고(일정이면 카드까지) 다시 읽음
+  const live = useLiveVoice(getLiveToken, (heard, spoken, ask) => draft(heard, async () => {
+    try {
+      const r = await sayVoice(heard, spoken, setProgress);
+      if (r.kept && !leftRef.current) await reloadNow();
+      explain(heard, r.reason ?? r.notice);
+      // 일정에서 아직 모르는 것(날짜 · 시각 · 이름) — 열려 있는 Live 연결에 넣어 Live가 소리로 되물음 (글 질문 · T1 호출 없음). 연결이 끝났으면 글로 짧게
+      if (r.ask?.length && !ask(askPrompt(r.ask))) toast(`알려 주세요: ${r.ask.join(', ')}`);
+      return r.kept;
+    } catch (e) {
+      toast(userMessage(e, '음성 대화를 대화 기록에 남기지 못했어요'));
+      return false;
+    } finally {
+      setProgress(null);
+    }
+  }));
   const stopLive = useRef(live.stop);
   useEffect(() => {
     stopLive.current = live.stop;
@@ -72,12 +113,14 @@ export default function AiScreen() {
     setPendingAt(now());
     setThinking(true);
     try {
-      await say(text);
+      const c = await draft(text, () => say(text, setProgress));
+      if (text) explain(text, c.notice);
     } catch (e) {
       toast(userMessage(e, '말을 보내지 못했어요'));
       if (text) setDraftText((d) => d || text); // 못 보냈으면 쓴 글을 되돌려 놓음
     } finally {
       await reload();
+      setProgress(null);
       setThinking(false);
       setPendingText(null);
       thinkingRef.current = false;
@@ -121,7 +164,7 @@ export default function AiScreen() {
       </Screen>
     );
   }
-  const { messages, cards, unavailable, limits } = data;
+  const { messages, cards, unavailable, limits } = progress ?? data;
   const cardOf = (id?: string) => cards.find((c) => c.id === id);
   const reached = limits?.reached ?? null;
   const waiting = cards.some((c) => c.status === 'READY' || c.status === 'NEEDS_PLACE' || c.status === 'NEEDS_ESTIMATE' || c.status === 'ESTIMATING');
@@ -258,6 +301,11 @@ export default function AiScreen() {
             if (m.who !== 'card') return <ChatBubble key={m.id} who={m.who} text={m.text} at={m.at} interim={m.interim} />;
             const card = cardOf(m.cardId);
             if (!card) return null;
+            // 말을 처리하는 도중 앱이 알람을 계산하는 카드 — 카드 대신 임시 말풍선 (끝나면 같은 자리가 카드로 바뀜, 실패하면 카드가 오류 안내)
+            //   처리가 끝났는데 계산 전으로 남은 카드(오류 뒤)는 임시 말풍선으로 두지 않고 카드 그대로
+            if ((progress || thinking) && (card.status === 'NEEDS_ESTIMATE' || card.status === 'ESTIMATING')) {
+              return <ChatBubble key={m.id} who="ai" text={CARD_DRAFTING} at={m.at} />;
+            }
             const appointmentId = card.appointmentId;
             return (
               <FoundScheduleCard
@@ -274,8 +322,9 @@ export default function AiScreen() {
               />
             );
           })}
-          {thinking && pendingText ? <ChatBubble who="me" text={pendingText} at={pendingAt ?? now()} /> : null}
-          {thinking ? <TypingBubble /> : null}
+          {thinking && pendingText && !progress ? <ChatBubble who="me" text={pendingText} at={pendingAt ?? now()} /> : null}
+          {/* 추출 전 — 일정일 수도 있는 말이면 점 세 개 대신 임시 말풍선 (추출이 일정을 찾으면 카드 자리가 이어받음). Live는 내 말이 확정된 순간부터(차례 끝 전) */}
+          {(drafting > 0 || (real && heardSchedule(live.lines))) && !progress ? <ChatBubble who="ai" text={CARD_DRAFTING} at={pendingAt ?? now()} /> : thinking ? <TypingBubble /> : null}
           {unavailable && !thinking ? (
             <ChatNotice kind="failed" onRetry={unavailable.canRetry ? retry : undefined} onManual={() => router.push('/schedule/new')} onDone={finish} busy={busy} />
           ) : null}

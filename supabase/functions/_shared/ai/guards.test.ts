@@ -574,6 +574,30 @@ describe("applyGuards — 서버 조치", () => {
     assert.deepEqual(r.actions, ["drop_sentence"]);
   });
 
+  it("확인 대기 카드가 없는데 저장해 달라는 문장은 지움 (저장한 뒤 다시 저장하라고 함 · asks_save_without_card)", () => {
+    const saved = { ...cardCtx(), events: [] }; // 저장해서 확인 대기가 지워진 뒤
+    const r = run("수업 잘 다녀와요. 카드의 [저장]을 눌러 주세요.", [], saved);
+    assert.ok(r.flags.includes("asks_save_without_card"));
+    assert.equal(r.reply, "수업 잘 다녀와요.");
+    assert.deepEqual(r.actions, ["drop_sentence"]);
+    // 확인 대기 카드가 있으면 맞는 안내 — 그대로
+    assert.deepEqual(run("이대로 저장할까요?", [{ type: "CONFIRM", ref: "c1" }]).flags, []);
+  });
+
+  it("앞서 저장한 일정이 있어도 지금 카드를 '저장했어요' · '띄웠어요'라고 하면 지움 (가장 최근 처리 결과 기준)", () => {
+    const c = cardCtx();
+    const earlier = ev({ after_turn: 0, applied: ["어제 저장한 일정"] });
+    const r = run("수업 일정을 저장했어요. 화면에 일정을 띄웠어요. 카드에서 확인해 주세요.", [], { ...c, events: [earlier, c.events[0]!] });
+    assert.ok(r.flags.includes("claims_saved_without_event"));
+    assert.equal(r.reply, "카드에서 확인해 주세요.");
+  });
+
+  it("저장 전에 '생성했어요'라고 하면 저장 주장으로 지움", () => {
+    const r = run("발표 일정을 생성했어요. 카드에서 확인해 주세요.", [], { ...cardCtx(), events: [] });
+    assert.ok(r.flags.includes("claims_saved_without_event"));
+    assert.equal(r.reply, "카드에서 확인해 주세요.");
+  });
+
   it("지우고 남는 말이 없으면 처음엔 다시(redo + regen), 다시 불러도 같으면 템플릿", () => {
     const first = run("저장했어요.", []);
     assert.equal(first.redo, true);

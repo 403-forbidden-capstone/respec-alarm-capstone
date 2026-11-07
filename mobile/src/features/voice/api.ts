@@ -93,7 +93,14 @@ export async function getLiveToken(): Promise<{ token: string; model: string }> 
     if (!res?.ok) throw new UserError('로컬 음성 토큰 서버에 연결하지 못했어요. tools/live-token-server.ts가 켜져 있는지 확인해 주세요');
     return (await res.json()) as { token: string; model: string };
   }
-  return callEdge<{ token: string; model: string }>('voice-live-token');
+  const sessionId = real.liveSessionId();
+  return callEdge<{ token: string; model: string }>('voice-live-token', sessionId ? { session_id: sessionId } : undefined);
+}
+
+// 실시간 음성 한 차례(내 말 + Live 답)를 같은 대화에 남김 — 일정이면 글과 같은 카드 흐름. 목업은 음성이 없어 남기지 않음
+export async function sayVoice(heard: string, spoken: string, onProgress?: (c: Conversation) => void): Promise<real.VoiceKept> {
+  if (isMock()) return { kept: false };
+  return real.sayVoice(heard, spoken, onProgress);
 }
 
 // 목업만: AI가 정리하는 척 기다리는 시간 (목업 userSay → aiTurn 0.8초). 실데이터는 Gemini Live 답을 기다림. 테스트는 0
@@ -102,8 +109,8 @@ const pause = (ms: number) => (ms > 0 ? new Promise<void>((resolve) => setTimeou
 
 // 내 차례에 말하고 AI 답까지 받아 같이 돌려줌 — text가 없거나 비면 대본 문장 (말하기 버튼). 내 차례가 아니면 그대로
 // 실데이터는 글을 voice-turn으로 보내고 AI 답(카드 계산이 있으면 앱 일을 한 뒤 마지막 답)까지 받음. 서버가 답하지 못하면 던지지 않고 Conversation.unavailable
-export async function say(text?: string): Promise<Conversation> {
-  if (!isMock()) return real.say(text);
+export async function say(text?: string, onProgress?: (c: Conversation) => void): Promise<Conversation> {
+  if (!isMock()) return real.say(text, onProgress); // onProgress — 처리 도중의 대화 (카드 계산 중 · 끝). 목업은 한 번에 끝나서 안 부름
   const c = chat();
   if (!userTurn(c, now(), text)) return toConversation(c);
   await pause(mockTiming.replyMs);

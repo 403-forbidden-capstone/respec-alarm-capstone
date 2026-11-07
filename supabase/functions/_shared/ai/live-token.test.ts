@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import { HttpError } from '../errors.ts';
-import { createLiveToken, LIVE_MODEL, LIVE_TOKEN_URL } from './live-token.ts';
+import { createLiveToken, LIVE_HISTORY_TURNS, LIVE_MODEL, LIVE_SYSTEM, LIVE_TOKEN_URL, liveHistory, liveTokenBody } from './live-token.ts';
 
 describe('live-token', () => {
   it('키를 헤더로 보내고 모델 · 지침을 잠근 토큰을 돌려줌', async () => {
@@ -29,5 +29,22 @@ describe('live-token', () => {
     for (const fetchFn of [reject, offline]) {
       await assert.rejects(createLiveToken('k', { fetchFn, log: () => {} }), (e) => e instanceof HttpError && e.code === 'VOICE_UNAVAILABLE');
     }
+  });
+
+  it('같은 대화방의 앞 대화(글 · 음성)를 지침 끝에 붙임 — 최근 줄만, 빈 줄은 뺌, 없으면 지침 그대로', () => {
+    const turns = [
+      { role: 'ai' as const, text: '오늘 하루는 어땠어요?' },
+      { role: 'user' as const, text: '내일 9시에 세종대에서 수업 있어' },
+      { role: 'ai' as const, text: '  ' },
+    ];
+    const h = liveHistory(turns);
+    assert.match(h, /Assistant: 오늘 하루는 어땠어요\?\nUser: 내일 9시에 세종대에서 수업 있어$/);
+    const setup = liveTokenBody(0, LIVE_MODEL, h).bidiGenerateContentSetup as { systemInstruction: { parts: { text: string }[] } };
+    assert.equal(setup.systemInstruction.parts[0].text, LIVE_SYSTEM + h);
+    assert.equal(liveHistory([]), '');
+    // Live는 카드 상태를 모름 — 생성 · 저장을 말하거나 저장을 요청하지 않게 지침에 적혀 있음
+    assert.match(LIVE_SYSTEM, /never say a card or schedule was created, added or saved, and never ask the user to save/);
+    const many = Array.from({ length: 30 }, (_, i) => ({ role: 'user' as const, text: `말${i}` }));
+    assert.equal(liveHistory(many).split('\n').filter((l) => l.startsWith('User:')).length, LIVE_HISTORY_TURNS);
   });
 });

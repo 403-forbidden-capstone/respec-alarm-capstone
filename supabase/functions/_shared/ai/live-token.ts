@@ -13,10 +13,28 @@ export const LIVE_SYSTEM = [
   'Language rule: always reply in the same language the user is speaking in their latest turn (for example Korean, Japanese, English or any other).',
   'Do not default to a fixed language. If the user asks you to speak in another language, switch to it and keep using it until they speak or ask otherwise.',
   'Keep replies short and natural for spoken conversation (one to three sentences), and ask one follow-up question when it helps.',
+  // 카드는 앱이 대화 글에서 따로 만들고 저장은 사용자가 카드 버튼으로 함 — Live는 카드가 생겼는지 · 저장됐는지 모르므로 상태를 말하지 않게 (11/7 웹 시험)
+  'When the user mentions a plan or schedule, the app picks it up from the transcript on its own and may show a confirmation card on screen a little later.',
+  'You cannot see whether a card was created or saved, so never say a card or schedule was created, added or saved, and never ask the user to save or press a button; just acknowledge the plan naturally and continue the conversation.',
+  // 11/8 웹 시험 — '화면에 일정을 띄웠어요'라고 말함
+  'Also never say you showed, displayed or put anything on the screen. If the date or time of a plan is unclear, ask the user for it briefly.',
+  // 앱이 서버 추출 결과(되물을 것)를 Live 연결에 글로 넣음 (mobile live.ts 'ask') — 사용자 말이 아니라는 것 · 소리 내 읽지 않을 것
+  'A text message starting with [APP NOTE] comes from the app, not the user: it lists what is still missing for a plan the user just mentioned. Ask the user only for that, in one short natural question in the language of the conversation, and never read the note aloud.',
 ].join(' ');
 
+// 같은 대화방의 앞 대화(글 · 음성) — 지침 끝에 붙여 Live가 이어서 답하게. 최근 줄만 · 줄마다 잘라서 토큰을 아낌
+export const LIVE_HISTORY_TURNS = 20;
+const LIVE_HISTORY_LINE_CHARS = 300;
+export function liveHistory(turns: readonly { role: 'user' | 'ai'; text: string }[]): string {
+  const lines = turns
+    .filter((t) => t.text.trim())
+    .slice(-LIVE_HISTORY_TURNS)
+    .map((t) => `${t.role === 'user' ? 'User' : 'Assistant'}: ${t.text.trim().slice(0, LIVE_HISTORY_LINE_CHARS)}`);
+  return lines.length === 0 ? '' : `\n\nConversation so far in this chat room (typed or spoken). Continue naturally from it; do not repeat greetings:\n${lines.join('\n')}`;
+}
+
 // 토큰 요청 본문 — 모델 · 응답 형식 · 지침을 토큰에 잠가서 앱이 바꿀 수 없게 함
-export function liveTokenBody(now: number, model = LIVE_MODEL): Record<string, unknown> {
+export function liveTokenBody(now: number, model = LIVE_MODEL, history = ''): Record<string, unknown> {
   return {
     // uses는 생략하면 1회 (REST에서는 설정과 함께 보내지 않음)
     expireTime: new Date(now + LIVE_SESSION_MS).toISOString(), // 대화 한 번의 최대 길이
@@ -24,7 +42,7 @@ export function liveTokenBody(now: number, model = LIVE_MODEL): Record<string, u
     bidiGenerateContentSetup: {
       model: `models/${model}`,
       generationConfig: { responseModalities: ['AUDIO'] },
-      systemInstruction: { parts: [{ text: LIVE_SYSTEM }] },
+      systemInstruction: { parts: [{ text: LIVE_SYSTEM + history }] },
       inputAudioTranscription: {}, // 내 말 · AI 말을 글로도 받아 화면에 보여 줌
       outputAudioTranscription: {},
     },
@@ -34,13 +52,13 @@ export function liveTokenBody(now: number, model = LIVE_MODEL): Record<string, u
 // 실패하면 VOICE_UNAVAILABLE. 원인(상태 · 본문)은 서버 로그(log)에만 남김
 export async function createLiveToken(
   apiKey: string,
-  opts: { fetchFn?: typeof fetch; now?: number; model?: string; log?: (...a: unknown[]) => void } = {},
+  opts: { fetchFn?: typeof fetch; now?: number; model?: string; history?: string; log?: (...a: unknown[]) => void } = {},
 ): Promise<{ token: string; model: string }> {
-  const { fetchFn = fetch, now = Date.now(), model = LIVE_MODEL, log = console.error } = opts;
+  const { fetchFn = fetch, now = Date.now(), model = LIVE_MODEL, history = '', log = console.error } = opts;
   const res = await fetchFn(LIVE_TOKEN_URL, {
     method: 'POST',
     headers: { 'x-goog-api-key': apiKey, 'content-type': 'application/json' },
-    body: JSON.stringify(liveTokenBody(now, model)),
+    body: JSON.stringify(liveTokenBody(now, model, history)),
   }).catch((e) => {
     log('gemini auth_tokens fetch failed', String(e));
     return null;

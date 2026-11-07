@@ -1,6 +1,7 @@
 // voice-session · voice-turn 요청 읽기 (순수 · node --test) — 모양은 설계 메모 2.1 · 2.2 · 14절.
 //   voice-session { session_type: 'BEFORE_SLEEP', input_mode: 'TEXT', resume }
-//   voice-turn    { session_id, rev, client_turn_id, text } | { …, results } | { …, card_action } 중 정확히 하나
+//   voice-turn    { session_id, rev, client_turn_id, text, spoken_reply? } | { …, results } | { …, card_action } 중 정확히 하나
+//                 spoken_reply = 실시간 음성(Gemini Live)이 이미 소리로 한 답 — 있으면 음성 차례: 말을 쌓고 추출만, 글 답(T1)은 안 만듦
 import { HttpError } from '../errors.ts';
 import { parseIso, Reader } from '../read.ts';
 import type { AlarmType, CardAction, TaskResults } from './types.ts';
@@ -34,7 +35,7 @@ interface TurnBase {
   client_turn_id: string;
 }
 export type TurnRequest =
-  | (TurnBase & { kind: 'text'; text: string })
+  | (TurnBase & { kind: 'text'; text: string; spoken_reply?: string })
   | (TurnBase & { kind: 'results'; results: TaskResults })
   | (TurnBase & { kind: 'card'; card_action: CardAction });
 
@@ -113,7 +114,8 @@ export function readTurnRequest(body: unknown): TurnRequest {
   let out: TurnRequest | undefined;
   if (given[0] === 'text' && given.length === 1) {
     const text = r.string('text', { required: true, min: 1, max: MAX_TEXT_CHARS });
-    out = { ...base, kind: 'text', text: text ?? '' };
+    const spoken = r.string('spoken_reply', { max: MAX_TEXT_CHARS });
+    out = { ...base, kind: 'text', text: text ?? '', ...(spoken !== undefined ? { spoken_reply: spoken } : {}) };
   } else if (given[0] === 'results' && given.length === 1) {
     const sub = r.object('results', { required: true });
     out = { ...base, kind: 'results', results: sub ? readResults(sub) : { cards: [], fixes: [] } };

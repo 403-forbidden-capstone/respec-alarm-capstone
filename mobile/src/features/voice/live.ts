@@ -2,6 +2,7 @@
 //   앱은 WebView, 웹 미리보기는 iframe으로 이 페이지를 띄움 (마이크 PCM 스트리밍 · 24kHz 재생을 새 네이티브 패키지 없이 하려고)
 //   토큰은 서버(voice-live-token)가 준 1회용 토큰 — 1분 안에 연결, 모델 · 지침은 서버가 잠가 둠
 //   페이지 → 앱: live(연결됨) · me/ai(말을 글로 바꾼 조각) · turn(AI 차례 끝) · error(MIC · NETWORK) · closed(연결 끊김)
+//   앱 → 페이지: ask(글) — 서버가 찾은 되물을 것을 Live 연결에 글로 넣어 Live가 소리로 물음 (clientContent, 받아쓰기에는 안 나옴)
 
 export type LiveMessage =
   | { type: 'live' }
@@ -100,6 +101,16 @@ export function livePage(token: string, model: string): string {
     try { if (inCtx) inCtx.close(); if (outCtx) outCtx.close(); } catch (e) {}
   }
   window.addEventListener('pagehide', cleanup);
+  // 앱이 보낸 글(되물을 것) — 연결돼 있을 때만 Live에 넣고 차례를 넘겨 바로 답하게 (웹은 부모 창 · 앱은 WebView가 보냄)
+  function fromApp(ev) {
+    if (ev.source && ev.source !== window.parent) return;
+    var m;
+    try { m = JSON.parse(ev.data); } catch (e) { return; }
+    if (!m || m.type !== 'ask' || typeof m.text !== 'string' || !ws || ws.readyState !== 1) return;
+    ws.send(JSON.stringify({ clientContent: { turns: [{ role: 'user', parts: [{ text: m.text }] }], turnComplete: true } }));
+  }
+  window.addEventListener('message', fromApp);
+  document.addEventListener('message', fromApp);
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { post({ type: 'error', code: 'MIC', detail: 'unsupported' }); return; }
   navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true } }).then(function (stream) {
     mic = stream;

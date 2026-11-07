@@ -40,6 +40,8 @@ export interface AutoCheckT1 {
   claims_saved_without_event: boolean;
   /** 앞으로 저장 · 변경하겠다는 약속 ('맞춰 둘게요' · '저장해 둘게요') — 처리 결과와 상관없이 걸림 */
   promises_save: boolean;
+  /** 저장해 달라는 말('저장할까요?' · '[저장]을 눌러 주세요')인데 확인 대기 카드가 없음 — 이미 저장했거나 카드가 아직 없음 */
+  asks_save_without_card: boolean;
   /** 가장 최근 처리 결과의 바뀐 알람 중 답이 시각을 말하지 않은 것 ('기상 07:40') — 위기 턴은 검사 안 함 */
   alarm_relay_missing: string[];
   /** 지금까지 위험한 말(SAFETY)이 없었는데 109 안내 — opts.safety를 줄 때만 봄 */
@@ -63,7 +65,7 @@ export interface SafetyInfo {
    */
   riskThisTurn?: boolean;
   /**
-   * 이 턴 위험 판단이 아예 없음('모름') — T2F 실패 · 5초 초과 (헤드 10/30). riskThisTurn=false(꺼짐)와 다름:
+   * 이 턴 위험 판단이 아예 없음('모름') — T2F 실패 · 시간 초과 (헤드 10/30). riskThisTurn=false(꺼짐)와 다름:
    * 켜지면 모델(T1)이 낸 109는 지우지 않는다(안전 쪽). 109를 새로 붙이지도 않음. 없으면 false = 기존 동작
    */
   riskUnknown?: boolean;
@@ -223,6 +225,8 @@ const SAVE_CLAIM_RE = new RegExp(
     "(?:저장|설정|등록|반영|수정|변경|조정)\\s*(?:했|됐|되었|되어|돼\\s*있)",
     "(?:저장|설정|등록|반영|수정|변경|조정)이\\s*(?:됐|되었|되어|돼\\s*있)",
     "변경\\s*완료",
+    "(?:생성|저장\\s*완료)(?:했|됐|되었)", // '일정을 생성했어요' · '저장 완료했어요' (11/7 웹 시험 — 저장 전에 생성했다고 말함)
+    "띄웠|띄워\\s*(?:드렸|놨|놓았|뒀|두었)", // '화면에 일정을 띄웠어요' (11/8 웹 시험 — 카드가 나오기 전에 말함)
     "(?<!그대로\\s)맞췄(?:어요|습니다|죠|네요|고요|구요)",
     "(?:넣었|바꿨)(?:어요|습니다|죠|네요|고요|구요)",
     "(?:바꾸어|바꿔|넣어|옮겨|조정해)\\s*(?:두었|뒀)",
@@ -261,9 +265,22 @@ export function promisesSave(reply: string): boolean {
   return SAVE_PROMISE_RE.test(reply);
 }
 
-/** 저장 · 변경했다고 말하는데, 보이는 처리 결과 어디에도 저장됨 · 바뀐 알람이 없음 */
+// 저장해 달라는 말 — '저장할까요?' · '저장해 주세요' · '[저장]' · '저장 버튼'. 확인 대기 카드가 있을 때만 맞는 안내
+const SAVE_ASK_RE = /저장\s*(?:할까요|하시겠어요|하실래요|해\s*(?:주세요|줄래요|드릴까요|볼까요))|저장\s*버튼|\[저장\]|저장을\s*눌러/u;
+
+export function asksSave(reply: string): boolean {
+  return SAVE_ASK_RE.test(reply);
+}
+
+/** 저장해 달라는데 보이는 처리 결과에 확인 대기(카드)가 하나도 없음 — 저장한 뒤 다시 저장하라고 하거나, 카드가 생기기 전에 저장하라고 함 (11/7 웹 시험) */
+export function asksSaveWithoutCard(reply: string, eventsVisible: ServerEvent[]): boolean {
+  return asksSave(reply) && !eventsVisible.some((e) => e.pending.length > 0);
+}
+
+/** 저장 · 변경했다고 말하는데, 가장 최근 처리 결과에 저장됨 · 바뀐 알람이 없음 — 앞서 저장한 다른 일정이 있어도 지금 카드를 저장했다고 하면 걸림 (11/8 웹 시험) */
 export function claimsSavedWithoutEvent(reply: string, eventsVisible: ServerEvent[]): boolean {
-  return claimsSaved(reply) && !eventsVisible.some((e) => e.applied.length > 0 || e.alarms.length > 0);
+  const latest = latestEvent(eventsVisible);
+  return claimsSaved(reply) && !(latest !== null && (latest.applied.length > 0 || latest.alarms.length > 0));
 }
 
 const ALARM_TYPE_SHORT: Record<AlarmPlan["type"], string> = { WAKE: "기상", PREPARE: "준비", DEPARTURE: "출발", ARRIVE: "도착" };
@@ -384,6 +401,7 @@ export function autoCheckT1(
     mixed_time_format: mixedTimeFormat(reply),
     claims_saved_without_event: claimsSavedWithoutEvent(reply, eventsVisible),
     promises_save: promisesSave(reply),
+    asks_save_without_card: asksSaveWithoutCard(reply, eventsVisible),
     // 위기 턴엔 알람 이야기를 하지 않는 게 규칙 — 다음 턴에 전함 (그래서 위기 턴 다음 답은 미룬 처리 결과까지 봄)
     alarm_relay_missing: opts.safety?.latestUser ? [] : relayWithDeferred(reply, ctxAtTurn, eventsVisible, turnsBefore, opts.safety?.deferredTurns ?? 0),
     hotline_without_risk: hotlineWithoutRisk(reply, opts.safety),
@@ -396,7 +414,7 @@ export function autoCheckT1(
 
 export const AUTO_FLAGS = [
   "multi_question", "unsupported_numbers", "non_haeyo", "over_length", "acts_mismatch",
-  "hotline_repeat", "mixed_time_format", "claims_saved_without_event", "promises_save", "alarm_relay_missing", "hotline_without_risk",
+  "hotline_repeat", "mixed_time_format", "claims_saved_without_event", "promises_save", "asks_save_without_card", "alarm_relay_missing", "hotline_without_risk",
 ] as const;
 export type AutoFlag = (typeof AUTO_FLAGS)[number];
 
@@ -679,10 +697,12 @@ export function applyGuards(input: GuardInput, view: GuardView): GuardResult {
   const redo = (): GuardResult => ({ reply: input.reply, acts: input.acts, end: input.end, actions: ["regen"], redo: true, ...base });
   const template = (): GuardResult => ({ reply: fallbackReply(eventsVisible), acts: [], end: false, actions: [...actions, "template"], redo: false, ...base });
 
-  // 1) 문장 지우기 — 저장 주장 · 저장 약속 · 109
+  // 1) 문장 지우기 — 저장 주장 · 저장 약속 · 카드 없는 저장 요청 · 109
   let sents = splitSentences(input.reply);
   const hot = check.hotline_repeat || check.hotline_without_risk;
-  const kept = sents.filter((s) => !((check.claims_saved_without_event && claimsSaved(s)) || (check.promises_save && promisesSave(s)) || (hot && hasHotline(s))));
+  const kept = sents.filter(
+    (s) => !((check.claims_saved_without_event && claimsSaved(s)) || (check.promises_save && promisesSave(s)) || (check.asks_save_without_card && asksSave(s)) || (hot && hasHotline(s))),
+  );
   if (kept.length !== sents.length) {
     actions.push("drop_sentence");
     sents = kept;

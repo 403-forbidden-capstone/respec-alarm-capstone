@@ -9,7 +9,7 @@ import { FakeDb } from '../fake-db.ts';
 import type { Db } from '../supabase.ts';
 import { fakeClaude, type FakeScript } from './fake-claude.ts';
 import { LIMIT_AI_DAY_TEXT } from './opening.ts';
-import { QuotaGate, type QuotaLimits, type Usage } from './quota.ts';
+import { QuotaGate, QuotaLog, type QuotaLimits, type Usage } from './quota.ts';
 import { extractNeeded, handleVoiceTurn, type VoiceDeps, type VoiceTurnOut } from './turn.ts';
 import { handleVoiceSession, type VoiceSessionOut } from './voice-session.ts';
 
@@ -41,8 +41,17 @@ async function start(script: FakeScript, extra: Partial<VoiceDeps> = {}) {
   return { db, fake, deps, sid: s.session_id as string, rev: s.rev };
 }
 
-const gateOf = (limits: Partial<QuotaLimits>, usage: Partial<Usage> = {}) =>
-  new QuotaGate({ rpm: 0, tpm: 0, rpd: 0, concurrency: 0, ...limits }, async () => ({ minuteRequests: 0, minuteTokens: 0, dayRequests: 0, callTokens: 5000, ...usage }));
+// 앞서 쓴 사용량을 메모리 기록에 채운 관문 — 1분 요청은 지금, 나머지 하루 요청은 1시간 전, 1분 토큰은 한 줄로 (한 번 어림 5,000)
+const gateOf = (limits: Partial<QuotaLimits>, usage: Partial<Usage> = {}) => {
+  const log = new QuotaLog();
+  log.callTokens = 5000;
+  const now = Date.now();
+  const minute = usage.minuteRequests ?? 0;
+  for (let i = 0; i < minute; i++) log.entries.push({ at: now, tokens: 0 });
+  for (let i = minute; i < (usage.dayRequests ?? 0); i++) log.entries.push({ at: now - 3600_000, tokens: 0 });
+  if (usage.minuteTokens) log.entries.push({ at: now, tokens: usage.minuteTokens });
+  return new QuotaGate({ rpm: 0, tpm: 0, rpd: 0, concurrency: 0, ...limits }, log);
+};
 
 test('기본(차례로): 처리할 게 없는 말 = T2F 1 + T1 1, 미리 부른 T1이 없음', async () => {
   const { fake, deps, sid, rev, db } = await start({ T2F: [T2F_NONE], T1: [T1_OK] });
@@ -133,4 +142,118 @@ test('관문 미리 보기는 이 턴에 필요한 수만 — 작별 말(T1 1번
   assert.ok(r.reply);
   assert.deepEqual(fake.order, ['T1']);
   assert.equal(db.rows('ai_calls').length, 1);
+});
+
+// ───────── 음성 차례 (Gemini Live가 이미 소리로 답한 말 — spoken_reply) ─────────
+const voiceTurn = (sid: string, rev: number, t: string, spoken: string) => ({ ...text(sid, rev, t), spoken_reply: spoken });
+const turnsOf = (db: FakeDb) => (db.rows('conversation_sessions')[0] as { turns: { role: string; text: string; source?: string }[] }).turns;
+
+test('음성 차례: 말 + Live 답을 같은 대화에 쌓고 T2F만 (T1 0번, 답은 null — Live가 이미 함)', async () => {
+  const { fake, deps, sid, rev, db } = await start({ T2F: [T2F_NONE], T1: [] });
+  const r = (await handleVoiceTurn(deps, voiceTurn(sid, rev, '오늘 좀 피곤했어', '많이 피곤했겠어요. 푹 쉬어요.'))) as VoiceTurnOut;
+  assert.equal(r.next, 'USER');
+  assert.equal(r.reply, null);
+  assert.deepEqual(fake.order, ['T2F']);
+  assert.deepEqual(turnsOf(db).slice(-2).map((t) => [t.role, t.text, t.source]), [['user', '오늘 좀 피곤했어', undefined], ['ai', '많이 피곤했겠어요. 푹 쉬어요.', 'live']]);
+});
+
+test('음성 차례에 일정 → 글과 같은 카드 흐름 (APP_TASKS + 카드, T1 0번)', async () => {
+  const { fake, deps, sid, rev } = await start({ T2F: [clean(DATA.T2F.new_appt)], T1: [] });
+  const r = (await handleVoiceTurn(deps, voiceTurn(sid, rev, '내일 10시 강남역에서 캡스톤 발표 있어', '발표가 있군요. 화면의 카드를 확인해 주세요.'))) as VoiceTurnOut;
+  assert.equal(r.next, 'APP_TASKS');
+  assert.ok(r.cards.length > 0);
+  assert.deepEqual(fake.order, ['T2F']);
+});
+
+test('음성 다음 글 차례: T1이 음성으로 한 말과 Live 답을 문맥으로 받음', async () => {
+  const { fake, deps, sid, rev } = await start({ T2F: [T2F_NONE, T2F_NONE], T1: [T1_OK] });
+  const v = (await handleVoiceTurn(deps, voiceTurn(sid, rev, '오늘 도서관에서 공부했어', '도서관에서 열심히 했네요.'))) as VoiceTurnOut;
+  await handleVoiceTurn(deps, text(sid, v.rev, '근데 좀 피곤해'));
+  assert.deepEqual(fake.order, ['T2F', 'T2F', 'T1']);
+  assert.match(fake.seen.T1[0], /오늘 도서관에서 공부했어/);
+  assert.match(fake.seen.T1[0], /도서관에서 열심히 했네요/);
+});
+
+test('음성 차례가 사용량 관문에 막혀도 던지지 않고 말 · 답은 남김 (모델 0번, 추출만 건너뜀)', async () => {
+  const { fake, deps, sid, rev, db } = await start({ T2F: [], T1: [] }, { quota: gateOf({ rpm: 5 }, { minuteRequests: 5 }) });
+  const r = (await handleVoiceTurn(deps, voiceTurn(sid, rev, '내일 9시 수업', '수업이 있군요.'))) as VoiceTurnOut;
+  assert.equal(r.next, 'USER');
+  assert.deepEqual(fake.order, []);
+  assert.deepEqual(turnsOf(db).slice(-2).map((t) => t.text), ['내일 9시 수업', '수업이 있군요.']);
+  assert.equal(r.notice, 'RATE_LIMITED'); // 앱이 "요청이 몰려 일정을 확인하지 못했어요"를 띄움
+});
+
+test('음성 인사는 모델 0번, Live 답이 비면 내 말만 남김', async () => {
+  const { fake, deps, sid, rev, db } = await start({ T2F: [], T1: [] });
+  await handleVoiceTurn(deps, voiceTurn(sid, rev, '안녕', ''));
+  assert.deepEqual(fake.order, []);
+  assert.deepEqual(turnsOf(db).slice(-1).map((t) => [t.role, t.text]), [['user', '안녕']]);
+});
+
+// ───────── 음성 차례 — 되물음 · 추출 실패 · 나눠 말한 일정 (11/8 웹 시험) ─────────
+const appt = (over: Record<string, unknown> = {}) => ({
+  ...T2F_NONE,
+  appointments: [{ ref: null, title: '산책', date: '2026-10-30', time: '14:00', place: null, importance: null, transport: null, repeat: null, save: 'UNCONFIRMED', unclear: null, ...over }],
+});
+const results = (sid: string, rev: number, client_turn_id: string, id = 'c1') => ({
+  session_id: sid, rev, client_turn_id, results: { cards: [{ id, status: 'READY', estimate: (DATA as unknown as { results: { wake_0740: unknown } }).results.wake_0740, error: null }], fixes: [] },
+});
+
+test('음성 차례에 날짜가 빠진 일정 → 카드 없이 ask로 되물을 것을 돌려줌 (T1 추가 호출 없음 — Live가 소리로 물음)', async () => {
+  const { fake, deps, sid, rev } = await start({ T2F: [appt({ date: null, unclear: '날짜를 말하지 않음' })], T1: [] });
+  const r = (await handleVoiceTurn(deps, voiceTurn(sid, rev, '초롱이랑 2시에 산책 약속 있어', '산책 좋네요.'))) as VoiceTurnOut;
+  assert.equal(r.next, 'USER');
+  assert.deepEqual(r.cards, []);
+  assert.equal(r.reply, null); // 글 질문 없음 — Live 답과 겹치지 않게
+  assert.deepEqual(fake.order, ['T2F']);
+  assert.equal(r.ask?.length, 1);
+  assert.match(r.ask![0], /산책.*날짜/);
+});
+
+test('텍스트 차례의 같은 말은 ask 없이 T1이 글로 되물음 (기존 그대로)', async () => {
+  const { fake, deps, sid, rev } = await start({ T2F: [appt({ date: null, unclear: '날짜를 말하지 않음' })], T1: [T1_OK] });
+  const r = (await handleVoiceTurn(deps, text(sid, rev, '초롱이랑 2시에 산책 약속 있어'))) as VoiceTurnOut;
+  assert.deepEqual(fake.order, ['T2F', 'T1']);
+  assert.ok(r.reply?.text);
+  assert.equal(r.ask, undefined);
+});
+
+test('음성 차례 추출 실패(시간 초과 · 오류) → 말은 남기고 notice EXTRACT_FAILED, 일반 말은 T1 없음', async () => {
+  const { fake, deps, sid, rev, db } = await start({ T2F: [new Error('boom')], T1: [] });
+  const r = (await handleVoiceTurn(deps, voiceTurn(sid, rev, '내일 2시에 산책 있어', '좋아요.'))) as VoiceTurnOut;
+  assert.equal(r.notice, 'EXTRACT_FAILED');
+  assert.equal(r.reply, null);
+  assert.deepEqual(fake.order, ['T2F']);
+  assert.deepEqual(turnsOf(db).slice(-2).map((t) => t.text), ['내일 2시에 산책 있어', '좋아요.']);
+});
+
+test('나눠 말한 일정: 이름 없음 → 되물음, 이름 → 카드 1장, 장소 → 같은 카드를 고침 (새 카드 없음)', async () => {
+  const { fake, deps, sid, rev } = await start({
+    T2F: [appt({ title: '', unclear: '일정 이름을 모름' }), appt(), appt({ place: '공원' })],
+    T1: [T1_OK],
+  });
+  const r1 = (await handleVoiceTurn(deps, voiceTurn(sid, rev, '내일 초롱이랑 2시에', '네, 2시요.'))) as VoiceTurnOut;
+  assert.deepEqual(r1.cards, []);
+  assert.equal(r1.reply, null);
+  assert.match(r1.ask?.[0] ?? '', /이름/); // Live가 "어떤 일정인가요?"를 소리로 물음
+  const t2 = voiceTurn(sid, r1.rev, '산책 약속 있다고', '산책이군요.');
+  const r2 = (await handleVoiceTurn(deps, t2)) as VoiceTurnOut;
+  assert.equal(r2.next, 'APP_TASKS');
+  assert.equal(r2.cards.length, 1);
+  const r2b = (await handleVoiceTurn(deps, results(sid, r2.rev, t2.client_turn_id))) as VoiceTurnOut;
+  assert.equal(r2b.cards[0].status, 'READY');
+  const r3 = (await handleVoiceTurn(deps, voiceTurn(sid, r2b.rev, '아마 공원에 갈 것 같아', '공원 좋네요.'))) as VoiceTurnOut;
+  assert.equal(r3.cards.length, 1); // 같은 일정 — 새 카드 아님
+  assert.equal(r3.cards[0].id, r2.cards[0].id);
+  assert.equal(r3.cards[0].draft?.place, '공원');
+  assert.deepEqual(fake.order, ['T2F', 'T2F', 'T1', 'T2F']); // T1은 카드 계산(results) 뒤 안내 한 번뿐
+});
+
+test('같은 일정을 다시 말해도 카드는 1장 (중복 생성 없음)', async () => {
+  const { deps, sid, rev } = await start({ T2F: [appt(), appt()], T1: [T1_OK] });
+  const t1 = voiceTurn(sid, rev, '내일 2시에 산책 있어', '좋아요.');
+  const r1 = (await handleVoiceTurn(deps, t1)) as VoiceTurnOut;
+  const r1b = (await handleVoiceTurn(deps, results(sid, r1.rev, t1.client_turn_id))) as VoiceTurnOut;
+  const r2 = (await handleVoiceTurn(deps, voiceTurn(sid, r1b.rev, '내일 2시에 산책 있다니까', '네, 알고 있어요.'))) as VoiceTurnOut;
+  assert.equal(r2.cards.length, 1);
 });

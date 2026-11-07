@@ -1,12 +1,9 @@
-// 사용량 관문 시험 — 순수 판정 · 관문(자리 잡기 · 놓기) · ai_calls에서 사용량 읽기 · callLlm이 막힌 호출을 보내지 않음. 네트워크 없음
+// 사용량 관문 시험 — 순수 판정 · 메모리 기록(1분 · 24시간 창) · 관문(자리 잡기 · 놓기 · 동시 요청) · callLlm이 막힌 호출을 보내지 않음. 네트워크 · DB 없음
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { FakeDb } from '../fake-db.ts';
-import type { Db } from '../supabase.ts';
-import { seoulIso } from './context.ts';
 import { callLlm, type CallOpts, type LlmClient } from './llm.ts';
-import { CALL_TOKENS_GUESS, checkQuota, DEFAULT_QUOTA, inFlightNow, promptTokensOf, QuotaGate, quotaFromEnv, readUsage, type Usage } from './quota.ts';
+import { CALL_TOKENS_GUESS, checkQuota, DEFAULT_QUOTA, QuotaGate, quotaFromEnv, QuotaLog, type Usage } from './quota.ts';
 
 const LIMITS = { rpm: 10, tpm: 1000, rpd: 100, concurrency: 2 };
 const use = (u: Partial<Usage> = {}): Usage => ({ minuteRequests: 0, minuteTokens: 0, dayRequests: 0, callTokens: 100, ...u });
@@ -43,9 +40,17 @@ describe('quotaFromEnv', () => {
   });
 });
 
+const logWith = (callTokens = 100, minuteRequests = 0, minuteTokens = 0): QuotaLog => {
+  const log = new QuotaLog();
+  log.callTokens = callTokens;
+  for (let i = 0; i < minuteRequests; i++) log.entries.push({ at: Date.now(), tokens: 0 });
+  if (minuteTokens) log.entries.push({ at: Date.now(), tokens: minuteTokens });
+  return log;
+};
+
 describe('QuotaGate', () => {
   it('이 요청이 보낸 호출은 토큰도 어림으로 더함 — TPM이 한 요청 안에서 쌓이는 것도 막음', async () => {
-    const gate = new QuotaGate({ rpm: 0, rpd: 0, concurrency: 0, tpm: 1000 }, async () => use({ minuteTokens: 700, callTokens: 100 }));
+    const gate = new QuotaGate({ rpm: 0, rpd: 0, concurrency: 0, tpm: 1000 }, logWith(100, 0, 700));
     for (let i = 0; i < 3; i++) {
       assert.equal((await gate.acquire()).ok, true, `${i + 1}번째`); // 800 · 900 · 1000
       gate.release();
@@ -54,72 +59,60 @@ describe('QuotaGate', () => {
     assert.equal(v.ok === false && v.scope, 'TPM');
   });
 
-  it('사용량은 한 번만 읽고, 이 요청이 보낸 수를 더해 감 (ai_calls는 요청이 끝나야 기록되므로)', async () => {
-    let reads = 0;
-    const gate = new QuotaGate({ ...LIMITS, rpm: 3 }, async () => {
-      reads++;
-      return use({ minuteRequests: 1 });
-    });
+  it('다시 시도도 한 번으로 셈 — 1분 한도 3, 앞서 1번이면 2번까지', async () => {
+    const gate = new QuotaGate({ ...LIMITS, rpm: 3 }, logWith(100, 1));
     assert.equal((await gate.acquire()).ok, true);
     gate.release();
     assert.equal((await gate.acquire()).ok, true);
     gate.release();
     const third = await gate.acquire();
     assert.equal(third.ok === false && third.scope, 'RPM');
-    assert.equal(reads, 1);
+  });
+
+  it('같은 기록을 쓰는 관문 여럿이 동시에 와도 합이 한도를 넘지 않음 (RPM 8, 앞서 7 → 1개만)', async () => {
+    const log = logWith(6000, 7);
+    const gates = [0, 1, 2, 3].map(() => new QuotaGate(DEFAULT_QUOTA, log));
+    const vs = await Promise.all(gates.map((g) => g.acquire()));
+    assert.equal(vs.filter((v) => v.ok).length, 1);
+    assert.equal(log.usage().minuteRequests, 8);
   });
 
   it('동시 요청 자리는 release로 돌려줌, 막힌 acquire는 자리를 잡지 않음', async () => {
-    const start = inFlightNow();
-    const gate = new QuotaGate({ ...LIMITS, rpm: 0, concurrency: start + 1 }, async () => use());
+    const log = logWith();
+    const gate = new QuotaGate({ ...LIMITS, rpm: 0, concurrency: 1 }, log);
+    const other = new QuotaGate({ ...LIMITS, rpm: 0, concurrency: 1 }, log);
     assert.equal((await gate.acquire()).ok, true);
-    assert.equal(inFlightNow(), start + 1);
-    assert.equal((await gate.acquire()).ok, false);
-    assert.equal(inFlightNow(), start + 1);
+    assert.equal(log.inFlight, 1);
+    assert.equal((await other.acquire()).ok, false);
+    other.release(); // 잡지 않은 자리는 놓지 않음
+    assert.equal(log.inFlight, 1);
     gate.release();
-    gate.release(); // 잡지 않은 자리는 놓지 않음
-    assert.equal(inFlightNow(), start);
-  });
-
-  it('사용량을 못 읽으면 막지 않음 (기록 실패로 대화가 멈추지 않게)', async () => {
-    const gate = new QuotaGate(DEFAULT_QUOTA, async () => {
-      throw new Error('db down');
-    });
-    const orig = console.error;
-    console.error = () => {};
-    try {
-      assert.deepEqual(await gate.check(2), { ok: true });
-    } finally {
-      console.error = orig;
-    }
+    assert.equal(log.inFlight, 0);
   });
 });
 
-describe('readUsage', () => {
-  it('TPM 토큰 = Google promptTokenCount (input_tokens는 캐시를 뺀 값이라 cache_read_tokens를 다시 더함), 출력은 안 셈', () => {
-    assert.equal(promptTokensOf({ input_tokens: 1480, cache_read_tokens: 3282 }), 4762);
-    assert.equal(promptTokensOf({ input_tokens: 100, cache_read_tokens: null }), 100);
-    assert.equal(promptTokensOf({ input_tokens: null, cache_read_tokens: null }), null); // 응답 없음(실패 · 막힘)
+describe('QuotaLog', () => {
+  it('1분 안은 요청 · 토큰, 하루는 24시간 안 요청 수. 24시간 넘은 기록은 지움', () => {
+    const now = new Date('2026-11-07T21:00:00+09:00').getTime();
+    const log = new QuotaLog();
+    log.now = () => now;
+    log.entries.push({ at: now - 10_000, tokens: 400 }, { at: now - 30_000, tokens: 50 }, { at: now - 3600_000, tokens: 950 }, { at: now - 25 * 3600_000, tokens: 1 });
+    assert.deepEqual(log.usage(), { minuteRequests: 2, minuteTokens: 450, dayRequests: 3, callTokens: CALL_TOKENS_GUESS });
+    assert.equal(log.entries.length, 3);
   });
 
-  it('기록이 없으면 한 번 토큰은 어림값', async () => {
-    assert.equal((await readUsage(new FakeDb() as unknown as Db, Date.now())).callTokens, CALL_TOKENS_GUESS);
-  });
-
-  it('최근 24시간 Gemini 줄만 — 1분 안은 요청 · 입력 토큰, 하루는 요청(attempts 합). Claude · 막힌 호출(attempts 0)은 안 셈', async () => {
-    const now = new Date('2026-11-06T21:00:00+09:00').getTime();
-    const at = (msAgo: number) => seoulIso(new Date(now - msAgo));
-    const db = new FakeDb();
-    db.rows('ai_calls').push(
-      { model: 'gemini-3.5-flash-lite', attempts: 1, input_tokens: 100, cache_read_tokens: 300, output_tokens: 20, created_at: at(10_000) },
-      { model: 'gemini-3.5-flash-lite', attempts: 2, input_tokens: 50, cache_read_tokens: 0, output_tokens: 5, created_at: at(30_000) },
-      { model: 'gemini-3.5-flash-lite', attempts: 0, input_tokens: null, cache_read_tokens: null, output_tokens: null, created_at: at(5_000) }, // 관문이 막음
-      { model: 'gemini-3.5-flash-lite', attempts: 1, input_tokens: 950, cache_read_tokens: 0, output_tokens: 1, created_at: at(3600_000) }, // 1시간 전
-      { model: 'gemini-3.5-flash-lite', attempts: 1, input_tokens: 1, cache_read_tokens: 0, output_tokens: 1, created_at: at(25 * 3600_000) }, // 하루 넘음
-      { model: 'claude-haiku-5-5', attempts: 1, input_tokens: 500, cache_read_tokens: 0, output_tokens: 50, created_at: at(1_000) }, // 시간표 사진
-    );
-    // 1분: 요청 1 + 2 = 3, 입력 토큰 400 + 50 = 450 (출력 20 · 5는 안 셈) / 하루: 요청 4 / 한 번 토큰: (400 + 50 + 950) / 3 ≈ 467
-    assert.deepEqual(await readUsage(db as unknown as Db, now), { minuteRequests: 3, minuteTokens: 450, dayRequests: 4, callTokens: 467 });
+  it('1분이 지나면 다시 보낼 수 있음 (RPM 8을 다 쓴 뒤)', async () => {
+    let now = 1_000_000;
+    const log = new QuotaLog();
+    log.now = () => now;
+    const gate = new QuotaGate(DEFAULT_QUOTA, log);
+    for (let i = 0; i < 8; i++) {
+      assert.equal((await gate.acquire()).ok, true);
+      gate.release();
+    }
+    assert.equal((await gate.acquire()).ok, false);
+    now += 61_000;
+    assert.equal((await gate.acquire()).ok, true);
   });
 });
 

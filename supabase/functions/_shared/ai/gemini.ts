@@ -3,7 +3,7 @@
 //   SDK 없이 fetch만 씀 (패키지를 늘리지 않으려고). 그래서 node --test로 바로 시험됨 (gemini.test.ts)
 // 비밀값: GEMINI_API_KEY (Live 토큰과 같은 키). 없으면 geminiClient()가 null → 호출 0번으로 NOT_CONFIGURED
 // 모델: GEMINI_TEXT_MODEL로 바꿀 수 있고 기본은 Flash-Lite(gemini-3.5-flash-lite — 모델 목록에서 이름만 확인, 응답은 미검증). 단가표(pricing.ts)에 없어서 ai_calls.cost_usd는 NULL
-// shortcut: 프롬프트 · 가드 · 시간 제한(T2F 5초 등)은 Claude Haiku로 맞춘 값 — Gemini에서 다시 재 보고 맞출 것
+// shortcut: 프롬프트 · 가드 · 시간 제한은 Claude Haiku로 맞춘 값(T2F만 Gemini 실측으로 9초) — 나머지도 Gemini에서 다시 재 보고 맞출 것
 import { getEnv } from '../env.ts';
 import { LlmClientError, llmClientFrom, type LlmClient, type LlmErrorKind, type LlmRequest, type LlmResponse } from './llm.ts';
 

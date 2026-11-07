@@ -59,7 +59,11 @@ export type Conversation = {
   cards: ConversationCard[]; // 카드 여러 장 (D36)
   limits: Limits | null; // 목업은 null
   unavailable: Unavailable | null;
+  ask?: string[] | null; // 음성 차례만: 일정에서 아직 모르는 것 (서버 voice-turn ask) — Live가 소리로 되물음
+  notice?: TurnNotice | null; // 방금 보낸 말의 일정 추출을 못 함 (서버 voice-turn notice) — 화면이 일정일 수도 있는 말이면 알림
 };
+
+export type TurnNotice = 'RATE_LIMITED' | 'EXTRACT_FAILED';
 
 // 대화에서 고친 기록 한 건의 결과 (설계 메모 2.2 fixes → results.fixes) — 앱이 L2 함수로 반영한 뒤 서버에 돌려줌
 export type FixResult = { id: string; ok: boolean; error: string | null };

@@ -29,7 +29,7 @@ export interface StoredTurn {
   at: string; // ISO
   client_turn_id?: string; // user 줄 — 재시도 판별
   after_turn?: number; // ai 줄 — 몇 번째 사용자 말에 대한 답(0 = 첫 마디)
-  source?: 'template' | 't1' | 't1_regen' | 'fallback';
+  source?: 'template' | 't1' | 't1_regen' | 'fallback' | 'live'; // live = 실시간 음성(Gemini Live)이 소리로 한 답을 글로 남긴 줄
   trigger?: string; // ai 줄 — text · results · card:c1
   acts?: Act[];
   end?: boolean;
