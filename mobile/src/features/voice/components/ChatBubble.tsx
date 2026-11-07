@@ -20,10 +20,11 @@ export function BubbleTime({ who, at }: { who: 'ai' | 'me'; at: Date }) {
   );
 }
 
-// 대화 한 줄. interim = 음성으로 아직 말하는 중인 글(확정 전) — 흐리게, 시각 대신 "듣는 중 · 말하는 중"
+// 대화 한 줄. interim = 음성으로 아직 말하는 중인 글(확정 전) — 시각 대신 "듣는 중 · 말하는 중"
+//   흐리게는 내 말만 — AI 답은 말하는 동안에도 확정된 답과 똑같이 선명하게 (확정될 때 색이 바뀌지 않게)
 export function ChatBubble({ who, text, at, interim }: { who: 'ai' | 'me'; text: string; at: Date; interim?: boolean }) {
   return (
-    <View style={interim && styles.interim}>
+    <View style={interim && who === 'me' && styles.interim}>
       <Bubble who={who}>
         <Text variant="body" tone={who === 'me' ? 'inverse' : 'ink'} style={styles.text}>
           {text}

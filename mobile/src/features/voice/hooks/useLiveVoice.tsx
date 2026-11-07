@@ -9,6 +9,7 @@ import { livePage, parseLiveMessage } from '../live';
 import { addLiveChunk, closeLive, type LiveLine } from '../liveChat';
 
 const CONNECT_TIMEOUT_MS = 15000; // 이 안에 연결(setupComplete)이 안 되면 실패로 봄
+const LIVE_MAX_MS = 10 * 60_000; // 한 번 연결의 최대 길이 — 서버 토큰 만료(supabase/functions/_shared/ai/live-token.ts LIVE_SESSION_MS)와 같게
 
 export type LivePhase = 'idle' | 'connecting' | 'live';
 
@@ -40,6 +41,13 @@ export function useLiveVoice(getToken: () => Promise<{ token: string; model: str
     // fail은 렌더마다 새로 만들어지지만 연결을 기다리기 시작할 때 한 번만 걸면 됨
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [phase, page]);
+
+  useEffect(() => {
+    if (phase !== 'live') return;
+    const timer = setTimeout(() => fail('10분이 지나 음성 대화를 마쳤어요. 이어서 말하려면 다시 시작해 주세요'), LIVE_MAX_MS);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [phase]);
 
   async function start() {
     const mine = ++run.current;
@@ -80,6 +88,7 @@ export function useLiveVoice(getToken: () => Promise<{ token: string; model: str
     start,
     stop: end,
     clear: () => setLines([]),
+    clearError: () => setError(null), // 글을 보내거나 입력 방식을 바꾸면 지난 음성 오류 문구를 내림
     frame: page ? <LiveFrame html={page} onMessage={onPageMessage} /> : null,
   };
 }

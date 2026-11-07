@@ -66,6 +66,7 @@ export default function AiScreen() {
   // 실데이터에서 next에 대본 문장이 없고 글 모드도 아니면(음성) 보낼 글을 모르니 점 세 개만. 다시 읽은 뒤에 정리 표시를 내림
   async function talk(text?: string) {
     thinkingRef.current = true;
+    live.clearError();
     atBottom.current = true; // 내가 보냈으면 맨 아래로
     setPendingText(text?.trim() || (next?.who === 'me' ? next.text : null));
     setPendingAt(now());
@@ -129,13 +130,8 @@ export default function AiScreen() {
   const liveOn = real && live.phase !== 'idle';
   const rows: ChatRow[] = real ? mergeLive(messages, live.lines) : messages; // 글 대화 + 음성 말풍선, 시각 순서
 
-  const liveStatus = !real
-    ? null
-    : live.phase === 'connecting'
-      ? '음성 대화를 연결하고 있어요…'
-      : live.phase === 'live'
-        ? '듣고 있어요. 편하게 말해 보세요'
-        : live.error;
+  // 음성이 켜져 있는 동안만 음성 상태가 앞. 지난 음성 오류는 글 대화 상태(답하는 중 · 실패 · 한도)보다 뒤 — 그 상태들을 가리지 않게
+  const liveStatus = !real ? null : live.phase === 'connecting' ? '음성 대화를 연결하고 있어요…' : live.phase === 'live' ? '듣고 있어요. 편하게 말해 보세요' : null;
   const status = liveStatus
     ? liveStatus
     : listening
@@ -148,7 +144,9 @@ export default function AiScreen() {
         ? 'AI가 답하지 못했어요'
         : reached
           ? '오늘 대화는 여기까지예요'
-          : canSay
+          : real && live.error
+            ? live.error
+            : canSay
             ? textMode
               ? '보낼 메시지를 입력해 주세요'
               : '말할 준비가 됐어요'
@@ -175,6 +173,7 @@ export default function AiScreen() {
   }
 
   function toggleMode() {
+    live.clearError();
     setMode((m) => (m === 'text' ? 'voice' : 'text'));
   }
 
