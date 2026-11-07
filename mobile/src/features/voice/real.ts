@@ -36,7 +36,7 @@ import type { Weekday } from '@/lib/weekday';
 import { applyFix, type Fix } from './fixes';
 import { isFinished, markFinished } from './finishedSessions';
 import { clearSaved, markSaved, pruneExpired, pruneOtherSessions, readSavedMarks } from './savedMarks';
-import type { ChatMessage, CardAlarm, CardKind, CardStatus, Conversation, ConversationCard, FixResult, Limits, Unavailable } from './types';
+import type { ChatMessage, CardAlarm, CardKind, CardStatus, Conversation, ConversationCard, FixResult, Limits, TurnNotice, Unavailable } from './types';
 
 // ---------------------------------------------------------------------------
 // 서버 응답 모양 (설계 메모 2절 · 14절) — 서버: supabase/functions/_shared/ai/voice-state.ts(응답) · voice-requests.ts(요청 검사)
@@ -100,6 +100,8 @@ type TurnResponse = {
   cards?: ServerCard[];
   fixes?: ServerFix[];
   limits?: ServerLimits;
+  notice?: TurnNotice; // 이 말의 일정 추출(T2F)을 못 함 — 사용량 상한 · 시간 초과 · 오류
+  ask?: string[]; // 음성 차례만: 되물을 것 — Live가 소리로 물음
 };
 
 type ResultCard = { id: string; status: 'READY' | 'NEEDS_PLACE' | 'FAILED'; estimate: { alarms: { kind: string; at: string; enabled: boolean }[]; level: number; with_wake: boolean; basis?: Basis } | null; error: string | null };
@@ -160,10 +162,12 @@ type State = {
   pending: Pending | null; // 보냈지만 답을 못 받은 요청 — [다시 시도]가 같은 것을 다시 보냄
   queue: Queued[]; // pending이 끝나길 기다리는 카드 요청 — 앞 요청이 성공하면 차례로 보냄 (pending을 덮어쓰지 않음)
   seq: number;
+  notice: TurnNotice | null; // 지금 처리 중인 말의 추출을 못 함 — 말마다 비움
+  ask: string[]; // 지금 처리 중인 음성 말에서 되물을 것 — 말마다 비움
 };
 
 function freshState(userId: string | null): State {
-  return { userId, sessionId: null, rev: 0, started: false, messages: [], cards: new Map(), limits: null, unavailable: null, pending: null, queue: [], seq: 0 };
+  return { userId, sessionId: null, rev: 0, started: false, messages: [], cards: new Map(), limits: null, unavailable: null, pending: null, queue: [], seq: 0, notice: null, ask: [] };
 }
 
 let state: State = freshState(null);
@@ -172,7 +176,12 @@ let state: State = freshState(null);
 export function resetVoiceState() {
   state = freshState(null);
   chain = Promise.resolve();
+  progress = null;
 }
+
+// 말 하나를 처리하는 도중의 대화 — 화면이 끝을 기다리지 않고 그때그때 그림 (내 말 · 카드 계산 시작 · 계산 끝). say · sayVoice가 도는 동안만
+let progress: ((c: Conversation) => void) | null = null;
+const report = () => progress?.(snapshot());
 
 // 서버 요청은 한 번에 하나 — rev가 어긋나지 않게 (말 · 카드 버튼 · 다시 시도가 겹치면 차례로)
 let chain: Promise<unknown> = Promise.resolve();
@@ -240,6 +249,7 @@ function snapshot(): Conversation {
     cards: [...state.cards].map(([id, rec]) => cardView(id, rec)),
     limits: state.limits ? { ...state.limits } : null,
     unavailable: state.unavailable,
+    notice: state.notice,
   };
 }
 
@@ -279,10 +289,14 @@ async function absorb(res: TurnResponse, turnId: string): Promise<Pending | null
   const at = now();
   state.rev = res.rev;
   state.limits = limitsOf(res.limits) ?? state.limits;
+  if (res.notice) state.notice = res.notice;
+  if (res.ask?.length) state.ask = res.ask;
   if (res.reply?.text) pushMessage('ai', res.reply.text, at);
   mergeCards(res.cards, at);
   if (res.next !== 'APP_TASKS') return null;
+  report(); // 카드 계산 시작 — 화면은 "일정 카드를 생성하고 있어요"
   const results = await runTasks(res);
+  report(); // 계산 끝 — 카드를 바로 보여 줌 (안내 답 T1은 results 응답으로 뒤에 옴)
   return { phase: 'RESULTS', turnId, body: { session_id: state.sessionId, rev: res.rev, client_turn_id: turnId, results } };
 }
 
@@ -692,25 +706,79 @@ export function getConversation(): Promise<Conversation> {
   });
 }
 
-// 말하기 — 글을 보내고 AI 답(필요하면 앱 일 뒤 마지막 답)까지. 못 보내면 말은 남고 [다시 시도]
-export function say(text?: string): Promise<Conversation> {
-  return serial(async () => {
-    await ensureSession();
-    const typed = text?.trim();
-    if (!typed || !state.sessionId || state.pending || state.queue.length > 0 || state.limits?.reached) return snapshot();
-    const turnId = newId();
-    pushMessage('me', typed, now());
-    const sent = state.messages[state.messages.length - 1];
-    state.pending = { phase: 'TEXT', turnId, body: { session_id: state.sessionId, rev: state.rev, client_turn_id: turnId, text: typed } };
-    try {
-      await drive();
-    } catch (e) {
-      state.messages = state.messages.filter((m) => m !== sent); // 못 보낸 말은 입력칸으로 돌아감
-      throw e;
-    }
-    return snapshot();
-  });
+// 말 하나를 처리하는 동안만 진행 상황을 화면에 알림
+async function withProgress<T>(onProgress: ((c: Conversation) => void) | undefined, task: () => Promise<T>): Promise<T> {
+  progress = onProgress ?? null;
+  state.notice = null;
+  state.ask = [];
+  try {
+    return await task();
+  } finally {
+    progress = null;
+  }
 }
+
+// 말하기 — 글을 보내고 AI 답(필요하면 앱 일 뒤 마지막 답)까지. 못 보내면 말은 남고 [다시 시도]
+//   onProgress — 끝을 기다리지 않고 도중의 대화를 받음 (카드 계산 중 · 계산 끝 카드). 안내 답(T1)이 늦어도 카드는 먼저 보이게
+export function say(text?: string, onProgress?: (c: Conversation) => void): Promise<Conversation> {
+  return serial(() =>
+    withProgress(onProgress, async () => {
+      await ensureSession();
+      const typed = text?.trim();
+      if (!typed || !state.sessionId || state.pending || state.queue.length > 0 || state.limits?.reached) return snapshot();
+      const turnId = newId();
+      pushMessage('me', typed, now());
+      const sent = state.messages[state.messages.length - 1];
+      state.pending = { phase: 'TEXT', turnId, body: { session_id: state.sessionId, rev: state.rev, client_turn_id: turnId, text: typed } };
+      try {
+        await drive();
+      } catch (e) {
+        state.messages = state.messages.filter((m) => m !== sent); // 못 보낸 말은 입력칸으로 돌아감
+        throw e;
+      }
+      return snapshot();
+    }),
+  );
+}
+
+// 실시간 음성(Gemini Live) 한 차례 — 내가 한 말과 Live가 소리로 한 답을 같은 대화에 남김 (서버는 일정 추출만, 되물을 게 있을 때만 글 답)
+//   일정이면 글과 같은 길: 카드 계산(APP_TASKS) → results → 카드 안내 답. kept = 대화에 넣었음 — 화면은 음성 임시 말풍선을 내림
+//   못 넣으면 kept false + reason (LIMIT 대화 한도 · BUSY 앞 요청이 [다시 시도]를 기다림) — 음성 말풍선은 화면에만 남고 화면이 까닭을 알림
+//   notice = 넣었지만 일정 추출을 못 함 (사용량 상한 · 시간 초과)
+//   ask = 일정에서 아직 모르는 것 — 화면이 Live에 넣어 Live가 소리로 되물음 (T1 글 질문 없음)
+export type VoiceKept = { kept: boolean; reason?: 'LIMIT' | 'BUSY'; notice?: TurnNotice | null; ask?: string[] };
+const MAX_VOICE_CHARS = 1000; // 서버가 받는 한 말의 최대 글자 수 (voice-turn MAX_TEXT_CHARS)
+export function sayVoice(heard: string, spoken: string, onProgress?: (c: Conversation) => void): Promise<VoiceKept> {
+  return serial(() =>
+    withProgress(onProgress, async (): Promise<VoiceKept> => {
+      await ensureSession();
+      const me = heard.trim().slice(0, MAX_VOICE_CHARS);
+      const ai = spoken.trim().slice(0, MAX_VOICE_CHARS);
+      if (!me || !state.sessionId) return { kept: false };
+      if (state.limits?.reached) return { kept: false, reason: 'LIMIT' };
+      if (state.pending || state.queue.length > 0) return { kept: false, reason: 'BUSY' };
+      const turnId = newId();
+      const at = now();
+      pushMessage('me', me, at);
+      const sent = state.messages.slice(-1);
+      if (ai) {
+        pushMessage('ai', ai, at);
+        sent.push(state.messages[state.messages.length - 1]);
+      }
+      state.pending = { phase: 'TEXT', turnId, body: { session_id: state.sessionId, rev: state.rev, client_turn_id: turnId, text: me, spoken_reply: ai } };
+      try {
+        await drive();
+      } catch (e) {
+        state.messages = state.messages.filter((m) => !sent.includes(m)); // 못 남겼으면 음성 말풍선으로 남김
+        throw e;
+      }
+      return { kept: true, notice: state.notice, ...(state.ask.length > 0 ? { ask: state.ask } : {}) };
+    }),
+  );
+}
+
+// 지금 대화방 id — Live 토큰을 받을 때 서버가 앞 대화를 지침에 붙이게 (없으면 null)
+export const liveSessionId = (): string | null => state.sessionId;
 
 // [다시 시도] — 세션을 못 시작했으면 다시 시작, 보낸 요청이 남았으면 같은 요청(같은 client_turn_id)을 다시 (성공하면 뒤에 쌓인 카드 요청도 차례로)
 export function retry(): Promise<Conversation> {

@@ -8,7 +8,7 @@ import { EdgeError, callEdge } from '@/lib/edge';
 
 import { applyFix } from '../fixes';
 import { clearSavedMarksForUser, SAVED_MARK_TTL_MS } from '../savedMarks';
-import { finishConversation, getConversation, pickCardPlace, rejectCard, resetVoiceState, retry, saveCard, say, TURN_TIMEOUT_MS } from '../real';
+import { finishConversation, getConversation, liveSessionId, pickCardPlace, rejectCard, resetVoiceState, retry, saveCard, say, sayVoice, TURN_TIMEOUT_MS } from '../real';
 
 // 실데이터 대화(real.ts)를 가짜 서버 함수(callEdge) + 가짜 L1 · L2 함수로 시험 — 서버 함수 voice-session · voice-turn은 별도 PR(배포 전엔 이 가짜 응답으로 확인)
 jest.mock('@/lib/edge', () => ({ ...jest.requireActual<typeof import('@/lib/edge')>('@/lib/edge'), callEdge: jest.fn() }));
@@ -174,6 +174,84 @@ describe('② 말 → 일반 답', () => {
     await getConversation();
     await say('   ');
     expect(edge).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('②-음성 실시간 음성(Live) 한 차례를 같은 대화에', () => {
+  it('내 말 + Live 답을 spoken_reply로 보내고 둘 다 대화에 남김 (서버 답이 없어도)', async () => {
+    script = [session(), turn({ reply: null })];
+    await getConversation();
+    expect(liveSessionId()).toBe('s1');
+    expect(await sayVoice('  오늘 도서관 갔어 ', '열심히 했네요. ')).toEqual({ kept: true, notice: null });
+    expect(turnBodies()[0]).toMatchObject({ session_id: 's1', rev: 1, text: '오늘 도서관 갔어', spoken_reply: '열심히 했네요.' });
+    const c = await getConversation();
+    expect(c.messages.slice(-2).map((m) => `${m.who}:${m.text}`)).toEqual(['me:오늘 도서관 갔어', 'ai:열심히 했네요.']);
+  });
+
+  it('음성으로 말한 일정도 글과 같은 길 — APP_TASKS면 카드를 계산해 results를 보내고 READY 카드', async () => {
+    script = [session(), turn({ next: 'APP_TASKS', reply: null, cards: [apptCard()] }), turn({ rev: 3, reply: { text: '저장할까요?' }, cards: [apptCard({ status: 'READY' })] })];
+    await getConversation();
+    expect((await sayVoice('내일 10시 강남역에서 발표 있어', '발표가 있군요.')).kept).toBe(true);
+    const [first, second] = turnBodies();
+    expect(second).toMatchObject({ client_turn_id: first.client_turn_id, rev: 2 });
+    const c = await getConversation();
+    expect(c.cards[0]).toMatchObject({ id: 'c1', status: 'READY' });
+    expect(c.messages.filter((m) => m.text).map((m) => m.text).slice(-3)).toEqual(['내일 10시 강남역에서 발표 있어', '발표가 있군요.', '저장할까요?']);
+  });
+
+  it('처리 도중에 화면에 알림 — 카드 계산 중(NEEDS_ESTIMATE) → 계산 끝(READY, 안내 답 전), 끝나면 더 안 부름', async () => {
+    script = [session(), turn({ next: 'APP_TASKS', reply: null, cards: [apptCard()] }), turn({ rev: 3, reply: { text: '저장할까요?' }, cards: [apptCard({ status: 'READY' })] })];
+    await getConversation();
+    const steps: { status: string; texts: string[] }[] = [];
+    const onStep = (c: Awaited<ReturnType<typeof getConversation>>) => steps.push({ status: c.cards[0]?.status ?? '-', texts: c.messages.filter((m) => m.text).map((m) => m.text) });
+    await sayVoice('내일 10시 강남역에서 발표 있어', '발표가 있군요.', onStep);
+    expect(steps.map((s) => s.status)).toEqual(['NEEDS_ESTIMATE', 'READY']);
+    expect(steps[1].texts).not.toContain('저장할까요?'); // 카드가 안내 답보다 먼저
+    script = [turn({ rev: 4 })];
+    await say('고마워', onStep);
+    expect(steps).toHaveLength(2); // 앱 일 없는 말은 도중 알림 없음, 끝난 뒤에도 안 부름
+  });
+
+  it('못 남긴 까닭을 알려 줌 — 대화 한도(LIMIT) · 앞 요청이 [다시 시도] 대기(BUSY) · 추출 못 함(notice)', async () => {
+    script = [session(), turn({ reply: null, notice: 'EXTRACT_FAILED' })];
+    await getConversation();
+    expect(await sayVoice('내일 2시 산책', '좋아요.')).toEqual({ kept: true, notice: 'EXTRACT_FAILED' });
+    script = [new EdgeError('LLM_UNAVAILABLE')]; // 다음 말이 실패해 [다시 시도] 대기
+    expect((await sayVoice('하나 더', '네')).kept).toBe(true);
+    expect(await sayVoice('모레 3시 회의', '네')).toEqual({ kept: false, reason: 'BUSY' });
+    resetVoiceState();
+    script = [session({ limits: { ...LIMITS, reached: 'TURN' } })];
+    await getConversation();
+    expect(await sayVoice('모레 3시 회의', '네')).toEqual({ kept: false, reason: 'LIMIT' });
+    expect(edge.mock.calls.filter(([n]) => n === 'voice-turn')).toHaveLength(2);
+  });
+
+  it('음성 차례의 되물을 것(ask)을 돌려줌 — 화면이 Live에 넣어 소리로 물음, 글 답은 없음 · 다음 말에서 비움', async () => {
+    script = [session(), turn({ reply: null, ask: ["'산책'의 정확한 날짜"] })];
+    await getConversation();
+    expect(await sayVoice('초롱이랑 2시에 산책 약속 있어', '산책 좋네요.')).toEqual({ kept: true, notice: null, ask: ["'산책'의 정확한 날짜"] });
+    const c = await getConversation();
+    expect(c.messages.filter((m) => m.who === 'ai').map((m) => m.text)).toEqual([expect.any(String), '산책 좋네요.']); // 글 질문 없음
+    script = [turn({ rev: 3, reply: null })];
+    expect((await sayVoice('내일이야', '내일이군요.')).ask).toBeUndefined();
+  });
+
+  it('텍스트도 추출을 못 하면 notice가 대화에 실림', async () => {
+    script = [session(), turn({ notice: 'EXTRACT_FAILED' })];
+    await getConversation();
+    expect((await say('내일 2시 산책')).notice).toBe('EXTRACT_FAILED');
+    script = [turn({ rev: 3 })];
+    expect((await say('고마워')).notice).toBeNull(); // 말마다 비움
+  });
+
+  it('내 말이 비면 안 보냄, 서버가 거절하면 던지고 말풍선은 대화에 안 남김', async () => {
+    script = [session()];
+    await getConversation();
+    expect(await sayVoice('  ', 'AI 혼잣말')).toEqual({ kept: false });
+    expect(edge).toHaveBeenCalledTimes(1);
+    script = [new EdgeError('VALIDATION_FAILED')];
+    await expect(sayVoice('내 말', 'AI 답')).rejects.toBeInstanceOf(EdgeError);
+    expect((await getConversation()).messages.some((m) => m.text === '내 말')).toBe(false);
   });
 });
 
