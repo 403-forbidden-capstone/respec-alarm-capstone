@@ -1386,7 +1386,7 @@ await check('호출 기록: 칸 기본값(시도 1회 · 규칙 걸림 [] · 호
   const [full] = await insCall(A, { point: 'T2F', ok: false, error_code: 'RATE_LIMITED', attempts: 2, input_tokens: 1800, output_tokens: 120, cache_read_tokens: 900, cache_write_tokens: 0,
     thinking_tokens: 40, cost_usd: 0.003421, stop_reason: 'max_tokens', request_id: 'req_abc', flags: ['promises_save', 'alarm_relay_missing'], io: JSON.stringify({ input: '내일 10시', output: { ok: 1 } }) });
   const points = [];
-  for (const p of ['T1', 'T2F', 'T2', 'T3', 'T4', 'T5', 'E4', 'TT']) points.push((await insCall(A, { point: p }, 'returning point'))[0].point);
+  for (const p of ['T1', 'T2F', 'T2', 'T3', 'T4', 'T5', 'E4', 'TT', 'LV']) points.push((await insCall(A, { point: p }, 'returning point'))[0].point);
   const upd = await q(`update public.ai_calls set ok = false, error_code = 'TIMEOUT' where call_id = $1 returning ok, error_code`, [r.call_id]);
   const del = await q(`delete from public.ai_calls where call_id = $1 returning 1`, [r.call_id]);
   await q(`delete from public.ai_calls where user_id = $1 and call_id <> $2`, [A, full.call_id]);   // 아래 검사가 쓸 한 줄만 남김
@@ -1394,7 +1394,7 @@ await check('호출 기록: 칸 기본값(시도 1회 · 규칙 걸림 [] · 호
     && r.thinking_tokens === null && r.stop_reason === null && r.request_id === null && r.session_id === null && r.created_at && r.call_id
     && full.attempts === 2 && full.flags.join() === 'promises_save,alarm_relay_missing' && full.error_code === 'RATE_LIMITED' && full.input_tokens === 1800 && full.cache_read_tokens === 900 && full.thinking_tokens === 40
     && String(full.cost_usd) === '0.003421' && full.io.output.ok === 1 && full.stop_reason === 'max_tokens'
-    && points.join() === 'T1,T2F,T2,T3,T4,T5,E4,TT' && upd.length === 1 && upd[0].error_code === 'TIMEOUT' && del.length === 1
+    && points.join() === 'T1,T2F,T2,T3,T4,T5,E4,TT,LV' && upd.length === 1 && upd[0].error_code === 'TIMEOUT' && del.length === 1
     ? true : { r, full, points, upd, del };
 });
 await check('호출 기록: 지점은 8가지만 · 지연 · 시도(0 = 보내기 전 실패는 가능, 음수 불가) · 토큰 · 비용은 음수 불가 · 필수 칸 · 없는 사용자 거부', async () => {
