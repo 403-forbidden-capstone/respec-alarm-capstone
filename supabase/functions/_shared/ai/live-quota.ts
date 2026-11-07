@@ -8,7 +8,7 @@ import { seoulLocal } from './ko.ts';
 import { seoulIso, startOf } from './context.ts';
 import { createLiveToken, LIVE_MODEL } from './live-token.ts';
 import { MAX_AI_CALLS_PER_DAY } from './opening.ts';
-import { countCallsSince, recordCalls, type SessionDeps } from './session.ts';
+import { countCallsSince, type SessionDeps } from './session.ts';
 
 export const LIVE_POINT = 'LV';
 // 하루에 음성 대화를 시작할 수 있는 횟수 (ai_calls point 'LV' 줄 수, 발급 성공 · 실패 모두 셈)
@@ -24,7 +24,7 @@ export async function handleLiveToken(deps: LiveTokenDeps): Promise<{ token: str
   const now = (deps.now ?? (() => new Date()))();
   const nowIso = seoulIso(now);
   const since = startOf(seoulLocal(nowIso).date);
-  // 한도는 발급 전에 보고 기록은 발급 뒤에 쌓여서, 동시에 여러 번 부르면 그 몇 번은 함께 통과할 수 있음 (timetable-extract와 같은 방식)
+  // 한도를 본 뒤 기록하므로, 같은 사람이 동시에 여러 번 부르면 그 몇 번은 함께 통과할 수 있음 (timetable-extract와 같은 방식)
   const [live, all] = await Promise.all([
     deps.userDb.from('ai_calls').select('call_id', { count: 'exact', head: true }).eq('user_id', deps.userId).eq('point', LIVE_POINT).gte('created_at', since),
     countCallsSince(deps, since),
@@ -35,19 +35,23 @@ export async function handleLiveToken(deps: LiveTokenDeps): Promise<{ token: str
     throw new HttpError('RATE_LIMITED', '오늘 음성 대화 횟수를 다 썼어요. 글로 이어 가 주세요', { left_today: 0 });
   }
 
+  // 발급 전에 한 줄을 먼저 씀 — 기록이 안 되면 토큰도 안 줌(한도가 안 세진 채 무제한 발급되지 않게, 실패는 INTERNAL)
+  //   Google이 토큰을 안 주면 그 줄을 실패로 고침 (실패도 한도에 셈). 토큰 · 대화 글은 남기지 않음(io NULL)
   const started = Date.now();
-  let ok = false;
+  const row = must<{ call_id: string }>(
+    'ai_calls insert',
+    await deps.service
+      .from('ai_calls')
+      .insert({ user_id: deps.userId, session_id: null, point: LIVE_POINT, prompt_id: 'LIVE', prompt_version: 'v1', model: LIVE_MODEL, ok: true, latency_ms: 0, created_at: nowIso })
+      .select('call_id')
+      .single(),
+  );
   try {
     const r = await createLiveToken(deps.apiKey, { fetchFn: deps.fetchFn, now: now.getTime() });
-    ok = true;
     return { ...r, left_today: Math.max(0, MAX_LIVE_TOKENS_PER_DAY - today - 1) };
-  } finally {
-    // 성공 · 실패 모두 한 줄 (한도 셈의 근거). 토큰 · 대화 글은 남기지 않음. 기록 실패는 recordCalls가 로그만 남기고 발급은 그대로
-    const call = {
-      point: LIVE_POINT, prompt_id: 'LIVE', prompt_version: 'v1', model: LIVE_MODEL, ok, error_code: ok ? null : ('UPSTREAM' as const),
-      latency_ms: Date.now() - started, attempts: 1, input_tokens: null, output_tokens: null, cache_read_tokens: null,
-      cache_write_tokens: null, thinking_tokens: null, cost_usd: null, stop_reason: null, request_id: null, flags: [],
-    };
-    await recordCalls(deps, null, [{ call, io: null }], nowIso);
+  } catch (e) {
+    const res = await deps.service.from('ai_calls').update({ ok: false, error_code: 'UPSTREAM', latency_ms: Date.now() - started }).eq('call_id', row.call_id);
+    if (res.error) console.error('[ai_calls] 실패 표시 못 함:', res.error.message);
+    throw e;
   }
 }

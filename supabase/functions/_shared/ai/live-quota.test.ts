@@ -73,4 +73,17 @@ describe('live-quota', () => {
     assert.equal(rows[0].ok, false);
     assert.equal(rows[0].error_code, 'UPSTREAM');
   });
+
+  it('기록을 못 쓰면 토큰을 안 줌 (Google 안 부름)', async () => {
+    const { db, deps, fetched } = setup();
+    db.failOn.push({ table: 'ai_calls', op: 'insert' });
+    const log = console.error;
+    console.error = () => {};
+    try {
+      await assert.rejects(handleLiveToken(deps), (e) => e instanceof HttpError && e.code === 'INTERNAL');
+    } finally {
+      console.error = log;
+    }
+    assert.equal(fetched(), 0);
+  });
 });
