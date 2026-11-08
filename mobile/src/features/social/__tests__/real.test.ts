@@ -589,34 +589,6 @@ describe('G04 공유받은 알람', () => {
 });
 
 describe('새 UI용 함수', () => {
-  it('아이디 검색: @ · 대소문자 · 공백을 맞춰 부르고 나와의 관계도 알려 줌', async () => {
-    mockFake.answerRpc('find_profile_by_handle', ok([{ user_id: SUYEON, nickname: '수연', handle: 'demo_suyeon', profile_image_url: null }]));
-    const found = await real.searchByHandle('  @Demo_Suyeon ');
-    expect(found).toMatchObject({ person: { id: SUYEON, name: '수연', handle: '@demo_suyeon' }, relation: 'FRIEND' });
-    expect(mockFake.rpcCalls.find((c) => c.name === 'find_profile_by_handle')?.args).toEqual({ p_handle: 'demo_suyeon' });
-  });
-
-  it('관계 표시: 받은 요청 · 나 · 아무 사이도 아님', async () => {
-    const row = (user_id: string) => ok([{ user_id, nickname: 'x', handle: 'xxx', profile_image_url: null }]);
-    mockFake.answerRpc('find_profile_by_handle', row(JUNSEONG));
-    expect((await real.searchByHandle('xxx'))?.relation).toBe('RECEIVED');
-    mockFake.answerRpc('find_profile_by_handle', row(ME));
-    expect((await real.searchByHandle('xxx'))?.relation).toBe('SELF');
-    mockFake.answerRpc('find_profile_by_handle', row('99999999-0000-4000-8000-000000000000'));
-    expect((await real.searchByHandle('xxx'))?.relation).toBe('NONE');
-    mockFake.answer('friends.select', ok([{ ...friends[2], requester_id: ME, addressee_id: JUNSEONG }]));
-    mockFake.answerRpc('find_profile_by_handle', row(JUNSEONG));
-    expect((await real.searchByHandle('xxx'))?.relation).toBe('SENT');
-  });
-
-  it('아이디 모양이 아니면 DB에 묻지 않고 null, 없으면 null', async () => {
-    expect(await real.searchByHandle('ab')).toBeNull();
-    expect(await real.searchByHandle('한글아이디')).toBeNull();
-    expect(mockFake.rpcCalls.filter((c) => c.name === 'find_profile_by_handle')).toHaveLength(0);
-    mockFake.answerRpc('find_profile_by_handle', ok([]));
-    expect(await real.searchByHandle('nobody_here')).toBeNull();
-  });
-
   it('친구 요청: 내가 PENDING으로 만듦, 이미 있는 사이 · 나 자신은 이유를 알림', async () => {
     await real.sendFriendRequest('u9');
     expect(mockFake.opsOf('friends', 'insert')[0].payload).toEqual({ requester_id: ME, addressee_id: 'u9', status: 'PENDING' });

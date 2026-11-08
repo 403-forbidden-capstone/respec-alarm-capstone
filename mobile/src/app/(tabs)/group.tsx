@@ -1,17 +1,25 @@
 import { router, useLocalSearchParams } from 'expo-router';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
-import { Avatar, Button, Card, Chip, EmptyState, LoadError, Loading, Screen, SectionHeader, Segmented, Text, toast, TopBar, TopBarButton } from '@/components/ui';
-import { acceptFriend, listFriendRequests, listFriends, listGroups } from '@/features/social/api';
+import { Avatar, Button, Card, Chip, confirm, EmptyState, LoadError, Loading, Screen, SectionHeader, Segmented, Text, toast, TopBar, TopBarButton } from '@/components/ui';
+import { useAuth } from '@/features/auth/AuthProvider';
+import { ChangeHandleSheet } from '@/features/profile/components/ChangeHandleSheet';
+import { handleHint } from '@/features/profile/handle';
+import { acceptFriend, listFriendRequests, listFriends, listGroups, myFriendLink, searchPeople, sendFriendRequest } from '@/features/social/api';
 import { ActionTile } from '@/features/social/components/ActionTile';
 import { GroupIcon } from '@/features/social/components/GroupIcon';
+import { MyHandleCard } from '@/features/social/components/MyHandleCard';
 import { Note } from '@/features/social/components/Note';
+import { PeopleSearchResults } from '@/features/social/components/PeopleSearchResults';
 import { PersonRow } from '@/features/social/components/PersonRow';
 import { SearchBox } from '@/features/social/components/SearchBox';
 import { useWakeLoad } from '@/features/social/hooks/useGroupWake';
+import { shareFriendInvite } from '@/features/social/invite';
+import { friendLinkUrl } from '@/features/social/inviteLink';
 import { permissionNames } from '@/features/social/permissions';
-import type { FriendItem, GroupItem, Person } from '@/features/social/types';
+import type { FriendItem, GroupItem, PeopleSearch, Person } from '@/features/social/types';
+import { now } from '@/lib/clock';
 import { josa } from '@/lib/format';
 import { useAction } from '@/lib/useAction';
 
@@ -78,7 +86,7 @@ export default function GroupScreen() {
   );
 }
 
-// 친구 탭 — 검색 · 받은 요청 · 내 친구(내가 준 권한 수)
+// 친구 탭 — 내 아이디 · 친구 링크 · 검색 · 받은 요청 · 내 친구(내가 준 권한 수)
 function FriendTab({
   friends,
   requests,
@@ -90,13 +98,94 @@ function FriendTab({
   onAccept: (p: Person) => void;
   acceptingId: string | null;
 }) {
+  const { session, profile, enabled } = useAuth();
+  const { run, busy } = useAction();
+  const [search, setSearch] = useState<PeopleSearch | null>(null);
+  const [requestingId, setRequestingId] = useState<string | null>(null); // 친구 요청 보내는 중인 사람
+  const [sentIds, setSentIds] = useState<ReadonlySet<string>>(new Set()); // 이 검색에서 요청을 보낸 사람 — 결과 줄을 [요청 보냄]으로
+  const [handleOpen, setHandleOpen] = useState(false);
+  const canEditHandle = enabled && session != null && profile != null;
+  const hint = profile ? handleHint({ changedAt: profile.handle_changed_at, nextChangeAt: profile.handle_next_change_at }, now()) : null;
+
+  // 검색 결과의 관계 — 요청을 보냈거나 수락한 사람은 목록 쪽 값이 더 새로움
+  const shown = useMemo<PeopleSearch | null>(() => {
+    if (!search) return null;
+    const friendIds = new Set(friends.map((f) => f.person.id));
+    return {
+      ...search,
+      rows: search.rows.map((row) => ({
+        ...row,
+        relation: friendIds.has(row.person.id) ? 'FRIEND' : sentIds.has(row.person.id) && row.relation === 'NONE' ? 'SENT' : row.relation,
+      })),
+    };
+  }, [search, friends, sentIds]);
+
+  const runSearch = (text: string) =>
+    run(async () => {
+      if (!text.trim()) {
+        setSearch(null);
+        return;
+      }
+      setSearch(await searchPeople(text));
+    }, '검색하지 못했어요. 다시 해 주세요');
+
+  const request = (p: Person) =>
+    run(async () => {
+      setRequestingId(p.id);
+      try {
+        await sendFriendRequest(p.id);
+        setSentIds((prev) => new Set(prev).add(p.id));
+        toast(`${p.name}님에게 친구 요청을 보냈어요`);
+      } finally {
+        setRequestingId(null);
+      }
+    }, '친구 요청을 보내지 못했어요');
+
+  const shareLink = () =>
+    run(async () => {
+      const link = await myFriendLink();
+      await shareFriendInvite({ nickname: profile?.nickname ?? '', handle: profile?.handle, url: friendLinkUrl(link.token) });
+    }, '링크를 만들지 못했어요');
+
+  const renewLink = () =>
+    run(async () => {
+      const ok = await confirm({ title: '친구 링크를 새로 만들까요?', message: '지금 링크는 바로 쓸 수 없게 돼요.', okLabel: '새로 만들기' });
+      if (!ok) return;
+      await myFriendLink(true);
+      toast('새 링크를 만들었어요. [공유]로 보내 보세요');
+    }, '링크를 만들지 못했어요');
+
+  const inviteByMessage = () => void shareFriendInvite({ nickname: profile?.nickname ?? '', handle: profile?.handle });
+
   return (
     <>
+      <MyHandleCard
+        handle={profile?.handle ?? null}
+        highlight={hint?.highlight ?? false}
+        onChange={canEditHandle ? () => setHandleOpen(true) : undefined}
+        onShare={shareLink}
+        onRenew={renewLink}
+      />
+      <ChangeHandleSheet visible={handleOpen} onClose={() => setHandleOpen(false)} />
+
       <SearchBox
         placeholder="이름 또는 사용자 ID 검색"
-        actionLabel="추가"
-        onAction={() => toast('친구 검색은 곧 열려요')}
+        actionLabel="검색"
+        onAction={runSearch}
+        onChangeText={(text) => {
+          if (!text.trim()) setSearch(null);
+        }}
+        busy={busy}
       />
+      {shown ? (
+        <PeopleSearchResults
+          search={shown}
+          busyId={requestingId ?? acceptingId}
+          onRequest={request}
+          onAccept={onAccept}
+          onInvite={inviteByMessage}
+        />
+      ) : null}
 
       {requests.map((p) => (
         <Card key={p.id}>

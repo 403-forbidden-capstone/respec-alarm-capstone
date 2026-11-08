@@ -33,6 +33,9 @@ jest.mock('../real', () => {
     'getShareLog',
     'sendWakePing',
     'searchByHandle',
+    'searchPeople',
+    'myFriendLink',
+    'openFriendLink',
     'sendFriendRequest',
     'createGroup',
     'joinGroupByCode',
@@ -65,6 +68,9 @@ const CASES: [keyof typeof api, unknown[]][] = [
   ['getShareLog', []],
   ['sendWakePing', ['u1']],
   ['searchByHandle', ['@etion']],
+  ['searchPeople', ['민수']],
+  ['myFriendLink', [true]],
+  ['openFriendLink', ['ABCDEFGH2345']],
   ['sendFriendRequest', ['u1']],
   ['createGroup', ['스터디']],
   ['joinGroupByCode', ['ABCD1234']],
@@ -111,6 +117,9 @@ describe('api.ts 가짜 · 실데이터 나누기 (친구 · 그룹)', () => {
       ['getSharedAlarms', ['sy']],
       ['getShareLog', []],
       ['searchByHandle', ['@etion']],
+      ['searchPeople', ['수연']],
+      ['myFriendLink', []],
+      ['openFriendLink', ['ABCDEFGH2345']],
     ];
     for (const [name, args] of reads) await call(name, args);
     expect(mockReal).not.toHaveBeenCalled();

@@ -2,6 +2,8 @@
 // 가짜 모드(웹 미리보기 · ?mode=mock)는 src/mocks의 가짜 데이터를 돌려주고, 실데이터 모드는 함수 맨 앞에서 ./real로 넘깁니다 (P6).
 //   읽기 · 쓰기 위치는 docs/screen-data-map.md (G01 · F02 · F03 · G02 · G03 · G04, 권한 합집합은 앱에서 합침 — grants.ts)
 //   date = 그룹 기상 신호(lib/realtime)가 알려 준 날 (YYYY-MM-DD). 실데이터만 씀 — get_group_wake_status의 p_date, 없으면 내 시간대의 오늘
+import { cleanHandle } from '@/features/onboarding/validate';
+import { HANDLE_PATTERN } from '@/features/profile/types';
 import { now } from '@/lib/clock';
 import { UserError } from '@/lib/errors';
 import { dateParts } from '@/lib/format';
@@ -11,20 +13,25 @@ import { db, kst, memberAlarms, people, timelines, TODAY, type MockGroup, type M
 
 import { mergeGrants } from './grants';
 import * as real from './real';
+import { mergeHits } from './searchView';
 import {
   type CreatedGroup,
   type FinalGrant,
   type FriendItem,
+  type FriendLink,
   type FriendRelation,
   type GrantRow,
   type GroupDetail,
   type GroupItem,
   type GroupSummary,
-  type HandleSearchResult,
+  type HandleSearch,
   type MemberAlarm,
   type MemberWake,
+  type OpenedLink,
+  type PeopleSearch,
   type PermissionSet,
   type Person,
+  type PersonHit,
   type Relation,
   type RelationId,
   type ShareLogItem,
@@ -320,20 +327,64 @@ export async function sendWakePing(personId: string) {
 // 새 UI용 — 화면은 나중에 붙음. 가짜 모드는 목업 사람 · 그룹에 맞춰 최소한만 흉내
 // ---------------------------------------------------------------------------
 
-// 아이디로 사람 찾기 — @ 있어도 없어도, 대소문자 무관. 없으면 null
-export async function searchByHandle(handle: string): Promise<HandleSearchResult | null> {
-  if (!isMock()) return real.searchByHandle(handle);
-  const clean = handle.trim().replace(/^@/, '').toLowerCase();
+// 가짜 모드의 관계 — 친구 · 내가 보낸 요청 · 나에게 온 요청 · 없음
+function mockRelation(id: string): FriendRelation {
+  if (db.friends.includes(id)) return 'FRIEND';
+  if (sentRequests.has(id)) return 'SENT';
+  if (db.requests.includes(id)) return 'RECEIVED';
+  return 'NONE';
+}
+
+// 아이디 정확 일치로 사람 찾기 — @ 있어도 없어도, 대소문자 무관. 아이디 모양이 아니면 못 찾은 것 (가짜 모드는 횟수 제한 없음)
+export async function searchByHandle(query: string): Promise<HandleSearch> {
+  if (!isMock()) return real.searchByHandle(query);
+  const clean = cleanHandle(query);
+  if (!HANDLE_PATTERN.test(clean)) return { status: 'NOT_FOUND' };
   const found = Object.values(people).find((p) => p.id !== 'me' && p.handle?.slice(1).toLowerCase() === clean);
-  if (!found) return null;
-  const relation: FriendRelation = db.friends.includes(found.id)
-    ? 'FRIEND'
-    : sentRequests.has(found.id)
-      ? 'SENT'
-      : db.requests.includes(found.id)
-        ? 'RECEIVED'
-        : 'NONE';
-  return { person: toPerson(found), relation };
+  if (!found) return { status: 'NOT_FOUND' };
+  return { status: 'FOUND', person: toPerson(found), relation: mockRelation(found.id) };
+}
+
+// F01 검색칸 — 아이디 정확 일치가 먼저, 이름은 친구 · 같은 그룹 안에서만 부분 일치 (실데이터는 real/friends.ts)
+export async function searchPeople(query: string): Promise<PeopleSearch> {
+  if (!isMock()) return real.searchPeople(query);
+  const q = query.trim().replace(/^@/, '').trim();
+  if (!q) return { rows: [], self: null, limitSeconds: null, notFound: false };
+  const byHandle = await searchByHandle(q);
+  const exact: PersonHit | null = byHandle.status === 'FOUND' ? { person: byHandle.person, relation: byHandle.relation, via: 'HANDLE' } : null;
+  const related = new Set([...db.friends, ...Object.values(db.groups).flatMap((g) => g.members)]);
+  const lower = q.toLowerCase();
+  const byName: PersonHit[] = [...related]
+    .filter((id) => id !== 'me' && people[id] && [people[id].name, people[id].short].some((n) => n.toLowerCase().includes(lower)))
+    .map((id) => ({ person: person(id), relation: mockRelation(id), via: db.friends.includes(id) ? ('FRIEND' as const) : ('GROUP' as const) }));
+  const rows = mergeHits(exact, byName);
+  return { rows, self: null, limitSeconds: null, notFound: !rows.length };
+}
+
+// 내 친구 링크 — 가짜 모드는 앱을 다시 열 때까지만 (실데이터는 my_friend_link)
+let linkSerial = 0;
+let currentLink = '';
+const oldLinks = new Set<string>();
+const mockLinkToken = (n: number) => `MOCKLINK${String.fromCharCode(65 + (n % 26)).repeat(4)}`;
+const MOCK_LINK_OWNERS: Record<string, string> = { FRIENDSY00001: 'sy', FRIENDJH00001: 'jh', FRIENDDAD0001: 'dad', FRIENDBJ00001: 'bj' }; // 시험 · 미리보기용 남의 링크
+
+export async function myFriendLink(renew = false): Promise<FriendLink> {
+  if (!isMock()) return real.myFriendLink(renew);
+  if (!currentLink || renew) {
+    if (currentLink) oldLinks.add(currentLink);
+    currentLink = mockLinkToken(linkSerial++);
+  }
+  return { token: currentLink, expiresAt: new Date(now().getTime() + 7 * 24 * 60 * 60 * 1000) };
+}
+
+// 친구 링크 착지 — 요청은 안 보냄. 가짜 모드는 내 링크 → SELF, 다시 만들기 전 링크 · 모르는 글자 → EXPIRED
+export async function openFriendLink(token: string): Promise<OpenedLink> {
+  if (!isMock()) return real.openFriendLink(token);
+  const t = token.trim().toUpperCase();
+  if (t && t === currentLink) return { status: 'SELF', person: person('me') };
+  const owner = MOCK_LINK_OWNERS[t];
+  if (!owner) return { status: 'EXPIRED' };
+  return { status: 'OK', person: person(owner), relation: mockRelation(owner) };
 }
 
 // 친구 요청 보내기 — 가짜 모드는 보낸 요청으로만 기억함 (상대가 수락하는 흐름은 목업 범위 밖)
