@@ -1,11 +1,14 @@
 // 내 프로필 — 데이터 접근은 이 파일에서만 함 (docs/screen-data-map.md 로그인 · 온보딩)
+import { cleanHandle } from '@/features/onboarding/validate';
+import { parseDbTime } from '@/lib/dbTime';
 import { UserError } from '@/lib/errors';
 import { supabase } from '@/lib/supabase';
 
+import type { HandleChange } from './handle';
 import type { Profile, ProfileFields } from './types';
 
 const COLUMNS =
-  'user_id, nickname, handle, profile_image_url, default_prepare_minutes, default_buffer_minutes, home_name, home_lat, home_lng, home_radius_m, default_transport, timezone, onboarded_at, wake_sensitivity, wake_margin, privacy_agreed_at, privacy_version';
+  'user_id, nickname, handle, handle_changed_at, handle_next_change_at, profile_image_url, default_prepare_minutes, default_buffer_minutes, home_name, home_lat, home_lng, home_radius_m, default_transport, timezone, onboarded_at, wake_sensitivity, wake_margin, privacy_agreed_at, privacy_version';
 
 // 내 프로필 한 행 — 가입하면 DB 트리거가 만들어 둠
 export async function getMyProfile(userId: string): Promise<Profile | null> {
@@ -14,12 +17,27 @@ export async function getMyProfile(userId: string): Promise<Profile | null> {
   return data as Profile | null;
 }
 
-// 아이디가 이미 쓰이는지 — 남의 프로필은 공개 칸만 주는 DB 함수로 확인
-export async function isHandleTaken(handle: string, myUserId: string): Promise<boolean> {
-  const { data, error } = await supabase.rpc('find_profile_by_handle', { p_handle: handle });
+// 내 아이디 바꾸기 — change_my_handle(DB 함수)로만. 앱이 profiles에 직접 쓰면 막힘(42501, 친구 2장)
+//   형식 · respec_ · 중복(TAKEN) · 30일 1번(LIMIT)은 서버가 판정 — 앱은 결과 상태를 문구로 보여 줌 (profile/handle.ts handleChangeMessage)
+export async function changeMyHandle(input: string): Promise<HandleChange> {
+  const { data, error } = await supabase.rpc('change_my_handle', { p_handle: cleanHandle(input) });
   if (error) throw error;
-  const rows = (Array.isArray(data) ? data : data ? [data] : []) as { user_id?: string }[];
-  return rows.some((row) => row.user_id !== myUserId);
+  const r = (data ?? {}) as { status?: string; handle?: string; next_change_at?: string | null };
+  const next = r.next_change_at ? parseDbTime(r.next_change_at) : null;
+  switch (r.status) {
+    case 'OK':
+      return { status: 'OK', handle: r.handle ?? '', nextChangeAt: next };
+    case 'LIMIT':
+      if (!next) throw new Error('다음 변경 가능 시각이 없어요');
+      return { status: 'LIMIT', nextChangeAt: next };
+    case 'SAME':
+    case 'INVALID':
+    case 'RESERVED':
+    case 'TAKEN':
+      return { status: r.status };
+    default:
+      throw new Error(`알 수 없는 아이디 변경 상태: ${String(r.status)}`);
+  }
 }
 
 // 가짜 데이터 모드의 내 프로필 — 목업의 '나', 기본값은 DB 기본값과 같음 (supabase/migrations init_schema profiles)
@@ -27,6 +45,8 @@ export const MOCK_PROFILE: Profile = {
   user_id: 'me',
   nickname: '나',
   handle: null,
+  handle_changed_at: null,
+  handle_next_change_at: null,
   profile_image_url: null,
   default_prepare_minutes: 60,
   default_buffer_minutes: 10,
@@ -44,48 +64,27 @@ export const MOCK_PROFILE: Profile = {
   privacy_version: null,
 };
 
-// 온보딩부터 다시 (개발용, /dev/screens) — 아이디 · 집 · 온보딩 칸을 비우고 기본값을 DB 기본값으로. 계정은 그대로
+// 온보딩부터 다시 (개발용, /dev/screens) — 내 시험 데이터를 지우고 프로필을 온보딩 전으로 되돌림. 계정은 그대로
+//   아이디 · 온보딩 칸은 앱이 직접 못 쓰므로(친구 2장) DB 함수 dev_reset_my_data가 함. 부른 사람 본인 줄만 건드림
 export async function resetOnboarding(userId: string): Promise<void> {
-  const { data, error } = await supabase
-    .from('profiles')
-    .update({
-      handle: null,
-      home_name: null,
-      home_lat: null,
-      home_lng: null,
-      home_radius_m: null,
-      default_prepare_minutes: 60,
-      default_buffer_minutes: 10,
-      default_transport: 'TRANSIT',
-      onboarded_at: null,
-      wake_sensitivity: 'NORMAL',
-      wake_margin: 'NORMAL',
-      privacy_agreed_at: null,
-      privacy_version: null,
-    })
-    .eq('user_id', userId)
-    .select('user_id');
+  void userId; // 함수가 auth.uid()로 본인을 정함 — 인자는 부르는 쪽 모양을 그대로 두려고 받기만 함
+  const { error } = await supabase.rpc('dev_reset_my_data');
   if (error) throw error;
-  // RLS에 막히거나 다른 사용자면 오류 없이 0행 — 비운 줄 알고 넘어가지 않게
-  if (!data?.length) throw new UserError('내 프로필을 바꾸지 못했어요');
 }
 
-// 내 프로필 한 행 갱신 — 갱신된 행을 돌려받음. 아이디 중복이면 DB 유일 제약(23505)이 막음
+// 내 프로필 한 행 갱신 — 갱신된 행을 돌려받음
 async function updateMyProfile(userId: string, values: ProfileFields & { onboarded_at?: string }): Promise<Profile> {
   const { data, error } = await supabase.from('profiles').update(values).eq('user_id', userId).select(COLUMNS);
-  if (error) {
-    if (error.code === '23505') throw new UserError('이미 쓰는 아이디예요');
-    throw error;
-  }
+  if (error) throw error;
   // RLS에 막히거나 다른 사용자면 오류 없이 0행 — 저장한 줄 알고 넘어가지 않게
   const row = (data as Profile[] | null)?.[0];
   if (!row) throw new UserError('내 프로필을 바꾸지 못했어요');
   return row;
 }
 
-// 내 프로필 칸 일부만 저장 — 온보딩 단계마다 · 설정에서 씀. 아이디는 소문자로
+// 내 프로필 칸 일부만 저장 — 온보딩 단계마다 · 설정에서 씀. 아이디는 changeMyHandle
 export function saveProfileFields(userId: string, fields: ProfileFields): Promise<Profile> {
-  return updateMyProfile(userId, fields.handle != null ? { ...fields, handle: fields.handle.toLowerCase() } : fields);
+  return updateMyProfile(userId, fields);
 }
 
 // 온보딩 끝 — 끝낸 시각만 적음. 이 값이 있어야 온보딩 판정(features/auth/onboardingGate.ts)이 풀림

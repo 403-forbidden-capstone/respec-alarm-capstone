@@ -17,6 +17,7 @@ import { useDetectionLinks } from '@/features/location/hooks/useDetectionLinks';
 import { useLocationSync } from '@/features/location/useLocationSync';
 import { useAlarmSync } from '@/lib/alarmSync/useAlarmSync';
 import { takeAfterOnboarding } from '@/lib/afterOnboarding';
+import { takePendingInvite } from '@/lib/pendingInvite';
 import { ONBOARDING_IN_FLOW, TIMETABLE_PATHS } from '@/lib/flags';
 import { canUseRealData, configError } from '@/lib/mode';
 import { ensureNotificationChannels } from '@/lib/push/channels';
@@ -96,6 +97,9 @@ function RootStack() {
   useEffect(() => {
     if (!ready || loading) return;
     if (takeAfterOnboarding() === 'schedule') router.push({ pathname: '/schedule/new', params: { from: 'home' } });
+    // 로그인 전에 연 친구 링크 — 로그인 · 온보딩이 끝난 뒤 같은 화면으로 이어감 (lib/pendingInvite, 친구 2장)
+    const invite = takePendingInvite();
+    if (invite) router.push({ pathname: '/invite', params: { t: invite } });
   }, [ready, loading]);
 
   if (configError && !ringEntry) return <ConfigErrorScreen />;
@@ -145,6 +149,8 @@ function RootStack() {
           — 예전 가드(ready || 지금 주소가 /ring)는 로그인 전에 켜져 있던 앱에서 /ring으로 가는 길을 막아 6초 뒤 네이티브 대체 화면이 떴음 (11/5 에뮬레이터)
           맨 끝에 두는 이유: 막힌 화면으로 가면 열린 화면 중 앞의 것으로 보내므로, 앞에 두면 로그인 전 사용자가 홈 대신 울림 화면으로 감 */}
       <Stack.Screen name="ring" options={{ animation: 'fade' }} />
+      {/* 초대 · 친구 링크 착지 (친구 2장) — 로그인 전에 열려도 화면이 토큰을 적어 두고 로그인으로 보냄. 가드가 막으면 토큰이 사라지므로 가드 없이 늘 열어 둠 */}
+      <Stack.Screen name="invite" />
     </Stack>
   );
 }
