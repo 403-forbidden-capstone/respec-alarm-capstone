@@ -79,9 +79,14 @@ export async function persistAppointment(
     timeZone: string;
   },
 ) {
-  assertPersistable(args.plan);
   const { service, userId, now } = ctx;
   const { plan, inputs, created, draft } = args;
+  // 지난 공동 약속에는 참여 조건을 새로 만들 수 없음 (9-32 · DB 정책 appointment_participants_insert_own와 같은 규칙). 이미 참여 중인 사람의 고치기는 그대로
+  if (inputs.appointment && !inputs.participant && inputs.appointment.group_id != null && Date.parse(inputs.appointment.appointment_at) <= now.getTime()) {
+    throw new HttpError('UNPROCESSABLE', '지난 약속이에요', { reason: 'PAST_APPOINTMENT' });
+  }
+
+  assertPersistable(args.plan);
   const travel = plan.travel.chosen as NonNullable<Plan['travel']['chosen']>;
   const place = plan.basics.destination;
   let createdAppointmentId: string | undefined;

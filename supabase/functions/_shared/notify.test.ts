@@ -5,7 +5,7 @@ import { test } from 'node:test';
 
 import { HttpError } from './errors.ts';
 import { FakeDb } from './fake-db.ts';
-import { readNotifyRequest, runNotify, type NotifyRequest } from './notify.ts';
+import { planGroupPush, readNotifyRequest, runNotify, sendGroupPush, type NotifyRequest } from './notify.ts';
 import { Reader } from './read.ts';
 import type { Db } from './supabase.ts';
 
@@ -422,4 +422,21 @@ test('11-20: 보내지 못한 이유(설정 없음 · Expo 장애)는 서버 로
   }
   assert.match(logged[0], /PUSH_NOT_CONFIGURED/);
   assert.match(logged[1], /PUSH_UNAVAILABLE/);
+});
+
+test('그룹 알림을 둘로 나눠 부를 수 있음: 받는 사람 정하기(planGroupPush)와 보내기(sendGroupPush) — 보내기는 취소됨 문구 · 알림 데이터 change · 받는 사람마다 더할 값을 받음 (9-20 · 9-11)', async () => {
+  const { service, pushes, fetchImpl, db } = groupSetup({ status: 'OK', group_name: '캡스톤팀', appointment_title: '팀 회의', recipients: [R1, R2] });
+  const req = { kind: 'GROUP_APPT_CHANGED' as const, groupId: GROUP, appointmentId: APPT };
+  const plan = await planGroupPush(service, SENDER, req);
+  assert.deepEqual(plan, { recipients: [R1, R2], groupName: '캡스톤팀', appointmentTitle: '팀 회의' });
+  assert.equal(pushes.length, 0); // 정하기만으로는 안 보냄
+  const result = await sendGroupPush(service, req, plan, { fetchImpl: fetchImpl(okAll), sleep: noSleep }, { change: 'CANCELED', perRecipient: new Map([[R2, { needsConfirm: true }]]) });
+  assert.deepEqual(result, { sent: 2, failed: 0 });
+  assert.deepEqual(pushes.map((p) => [p.body, p.data.change, p.data.needsConfirm, p.data.recipientUserId]).sort(), [['‘팀 회의’ 약속이 취소됐어요', 'CANCELED', true, R2], ['‘팀 회의’ 약속이 취소됐어요', 'CANCELED', undefined, R1]].sort());
+  assert.equal(db.rpcCalls.length, 1);
+  // 권한이 없으면 정하는 데서 403
+  const forbidden = groupSetup({ status: 'FORBIDDEN' });
+  await assert.rejects(() => planGroupPush(forbidden.service, SENDER, req), (e: unknown) => e instanceof HttpError && e.status === 403);
+  // 앱 요청에서는 change를 읽지 않음 — 앱이 취소됨 문구 · 데이터를 직접 만들 수 없음
+  assert.deepEqual(readNotifyRequest(Reader.root({ kind: 'GROUP_APPT_CHANGED', groupId: GROUP, appointmentId: APPT, change: 'CANCELED' })), req);
 });

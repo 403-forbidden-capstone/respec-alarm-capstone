@@ -60,7 +60,7 @@ export type ProfileRow = {
 
 export type AppointmentRow = {
   appointment_id: string;
-  creator_id: string;
+  creator_id: string | null; // 공동 약속은 만든 사람이 탈퇴하면 비어 있을 수 있음 (친구 9장)
   group_id: string | null;
   title: string;
   appointment_at: string;

@@ -12,7 +12,7 @@
 //   응답: { sent, failed, reason?, ping? } — 토큰이 없거나 푸시 설정(FCM 키 · Expo 액세스 토큰)이 아직 없으면 오류가 아니라 { sent: 0, reason }
 import { dbFail, must } from './db.ts';
 import { HttpError } from './errors.ts';
-import { CHANNEL_IDS, CLIENT_KINDS, composeCopy, type ClientKind, type GroupKind, isGroupKind, PATHS, type PushKind as AnyPushKind } from './push-copy.ts';
+import { CHANNEL_IDS, CLIENT_KINDS, composeCopy, type ClientKind, type GroupChange, type GroupKind, isGroupKind, PATHS, type PushKind as AnyPushKind } from './push-copy.ts';
 import { type FetchLike, type OutgoingMessage, type PushResult, sendExpoMessages, type SendResult } from './push.ts';
 import type { Reader } from './read.ts';
 import type { Db } from './supabase.ts';
@@ -158,6 +158,12 @@ async function notifyOne(service: Db, senderId: string, req: NotifyRequest, opti
 }
 
 async function notifyGroup(service: Db, senderId: string, req: NotifyRequest & { kind: GroupKind }, options: NotifyOptions): Promise<NotifyResult> {
+  return await sendGroupPush(service, req, await planGroupPush(service, senderId, req), options);
+}
+
+// 그룹 알림의 받는 사람 · 문구 재료를 DB 함수로 정함 — 권한이 없으면 403. 보내기와 나눈 이유: 약속을 지우기 전에 받는 사람을 정해 두고(지운 뒤엔 약속이 없음) 지운 다음에 보내려고 (9장)
+export type GroupPlan = { recipients: string[]; groupName: string | null; appointmentTitle: string | null };
+export async function planGroupPush(service: Db, senderId: string, req: NotifyRequest & { kind: GroupKind }): Promise<GroupPlan> {
   const planned = await service.rpc('plan_group_push', { p_sender_id: senderId, p_group_id: req.groupId, p_kind: req.kind, p_appointment_id: req.appointmentId ?? null });
   if (planned.error) dbFail('plan_group_push', planned.error);
   const plan = planned.data as { status?: unknown; group_name?: unknown; appointment_title?: unknown; recipients?: unknown } | null;
@@ -166,19 +172,25 @@ async function notifyGroup(service: Db, senderId: string, req: NotifyRequest & {
     console.error('[notify] plan_group_push 응답이 약속과 다름', JSON.stringify(plan));
     throw new HttpError('INTERNAL', '데이터를 처리하지 못했어요. 잠시 후 다시 시도해 주세요');
   }
-  const recipients = plan.recipients as string[];
-  if (!recipients.length) return noTokens();
+  return {
+    recipients: plan.recipients as string[],
+    groupName: typeof plan.group_name === 'string' ? plan.group_name : null,
+    appointmentTitle: typeof plan.appointment_title === 'string' ? plan.appointment_title : null,
+  };
+}
 
-  const rows = must<{ user_id: string; token: string }[]>('push_tokens', await service.from('push_tokens').select('user_id, token').in('user_id', recipients));
+// 정해 둔 받는 사람의 토큰으로 보냄. extra.change = 바뀜 / 취소됨(문구 · 알림 데이터 `change`), extra.perRecipient = 받는 사람마다 알림 데이터에 더할 값(예: 확인이 필요한 사람)
+export type GroupSendExtra = { change?: GroupChange; perRecipient?: ReadonlyMap<string, Record<string, unknown>> };
+export async function sendGroupPush(service: Db, req: NotifyRequest & { kind: GroupKind }, plan: GroupPlan, options: NotifyOptions, extra: GroupSendExtra = {}): Promise<NotifyResult> {
+  if (!plan.recipients.length) return noTokens();
+
+  const rows = must<{ user_id: string; token: string }[]>('push_tokens', await service.from('push_tokens').select('user_id, token').in('user_id', plan.recipients));
   if (!rows.length) return noTokens();
 
   // 문구에는 그룹 이름 · 약속 제목만 (사람 이름 없음). 받는 사람마다 알림 데이터의 받는 사람 id가 다름
-  const copy = composeCopy(req.kind, {
-    groupName: typeof plan.group_name === 'string' ? plan.group_name : null,
-    appointmentTitle: typeof plan.appointment_title === 'string' ? plan.appointment_title : null,
-  });
-  const base = { kind: req.kind, path: PATHS[req.kind], groupId: req.groupId, ...(req.appointmentId ? { appointmentId: req.appointmentId } : {}) };
-  const messages: OutgoingMessage[] = rows.map((r) => ({ to: r.token, ...copy, channelId: CHANNEL_IDS[req.kind], data: { ...base, recipientUserId: r.user_id } }));
+  const copy = composeCopy(req.kind, { groupName: plan.groupName, appointmentTitle: plan.appointmentTitle, ...(extra.change ? { change: extra.change } : {}) });
+  const base = { kind: req.kind, path: PATHS[req.kind], groupId: req.groupId, ...(req.appointmentId ? { appointmentId: req.appointmentId } : {}), ...(extra.change ? { change: extra.change } : {}) };
+  const messages: OutgoingMessage[] = rows.map((r) => ({ to: r.token, ...copy, channelId: CHANNEL_IDS[req.kind], data: { ...base, ...(extra.perRecipient?.get(r.user_id) ?? {}), recipientUserId: r.user_id } }));
   return await deliver(service, req.kind, messages, new Map(rows.map((r) => [r.token, r.user_id])), options);
 }
 
