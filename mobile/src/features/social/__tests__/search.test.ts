@@ -180,6 +180,11 @@ describe('searchView — 결과 문구 · 버튼', () => {
     expect(searchNotice({ ...base, limitSeconds: 42 })).toEqual({ text: '잠시 뒤 다시 해 주세요(42초)', invite: false });
   });
 
+  it('제한 시간은 길면 분 · 시간으로 (하루 100회에 걸리면 몇 시간)', () => {
+    expect(searchNotice({ ...base, limitSeconds: 95 })?.text).toBe('잠시 뒤 다시 해 주세요(2분)');
+    expect(searchNotice({ ...base, limitSeconds: 30000 })?.text).toBe('잠시 뒤 다시 해 주세요(9시간)');
+  });
+
   it('내 아이디: "내 아이디예요" (2-13)', () => {
     expect(searchNotice({ ...base, self: person })).toEqual({ text: '내 아이디예요', invite: false });
   });

@@ -163,3 +163,11 @@ export function formatMinuteOfDay(minutes: number) {
   const m = ((minutes % 1440) + 1440) % 1440;
   return `${pad(Math.floor(m / 60))}:${pad(m % 60)}`;
 }
+
+// 잠시 뒤 다시 해 달라는 문구에 쓰는 기다릴 시간 — 60초까지는 초, 1시간 전까지는 분(올림), 그 뒤는 시간(올림). 검색 1분 10회 · 하루 100회가 걸렸을 때
+export function formatWait(seconds: number): string {
+  const s = Math.max(1, Math.ceil(seconds));
+  if (s <= 60) return `${s}초`;
+  if (s < 3600) return `${Math.ceil(s / 60)}분`;
+  return `${Math.ceil(s / 3600)}시간`;
+}
