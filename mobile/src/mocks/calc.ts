@@ -87,5 +87,5 @@ export function mockWakeRow(personId: string, now: Date): WakeRow | null {
   return { ...base, wake_status: 'SCHEDULED' };
 }
 
-// 그 줄의 화면 글자 (가짜 모드 홈 · 알람 시험이 씀)
+// 그 줄의 화면 글자 (시험이 씀 — 화면은 social/api의 mockWakeRows로 읽음)
 export const memberState = (personId: string, now: Date): WakeState => wakeStateOf(mockWakeRow(personId, now) ?? undefined, true);

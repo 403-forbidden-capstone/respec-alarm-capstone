@@ -1,4 +1,4 @@
-// 그룹 기상 신호 구독 — 그룹원의 기상 기록이 들어오면 DB가 그룹 채널에 "새로 고침" 신호만 보내고, 받은 앱이 기상 상태 함수(get_group_wake_status)를 다시 부름
+// 그룹 기상 신호 구독 — 그룹원의 기상 기록이 들어오면 DB가 그룹 채널에 "새로 고침" 신호만 보내고, 받은 앱이 기상 상태 함수(get_group_wake)를 다시 부름
 //   채널 group:<group_id>:wake (비공개 채널 — 그 그룹에 참여 중인 사람만 받음, realtime.messages 정책), 이벤트 refresh, 내용 { date } (누구의 기록인지는 안 담음)
 //   근거: 개발환경_v1.md 10/15 "기상 상태 실시간", supabase/README.md "그룹 기상 신호 (Realtime)"
 //   화면에 붙이는 것은 P6-4 (G01 · G02 · G03): useEffect(() => subscribeGroupWake(groupId, ({ date }) => reload()), [groupId])

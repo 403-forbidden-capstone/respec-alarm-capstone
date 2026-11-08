@@ -13,7 +13,7 @@ import * as AlarmCore from '@capstone/alarm-core';
 import { uploadEvents } from '@/lib/alarmSync';
 import { now } from '@/lib/clock';
 import { parseDbTime } from '@/lib/dbTime';
-import { dayKey } from '@/lib/format';
+import { dayKey, startOfDay } from '@/lib/format';
 import { isUuid, stableUuid } from '@/lib/uuid';
 import { supabase } from '@/lib/supabase';
 import { requireUserId } from '@/lib/user';
@@ -417,7 +417,9 @@ export async function confirmWake(alarmId: string, how: 'self' | 'auto'): Promis
   await settle(userId, ctx, wokeAt, how);
 }
 
-// H08 [먼저 깼어요] — 지금부터 60분 안에 울릴 켜진 기상 알람 중 가장 이른 것 (D61). 이미 울렸거나 · 확인한 알람이면 없음
+// H08 [먼저 깼어요] — 지금부터 60분 안에 울릴 켜진 기상 알람 중 가장 이른 것 (D61). 그 알람이 이미 울렸거나, 그날 이미 기상을 확인했으면 없음
+//   기상 확인은 사람마다 하루 한 건(둘째는 서버가 버림, 7-d4) — 알람이 달라도 그날 확인이 있으면 묻지 않음
+//   울림 기록은 그 알람 시각 6시간 전부터만 봄(서버 group_wake_rows와 같은 구간) — 반복 알람의 지난 회차 기록에 걸리지 않게
 //   폰 알람 자체는 그대로 둠(미리 끄기는 알람 코어 몫) — 확인이 먼저 있으면 그 회차의 울림 · 미루기 기록은 서버가 끝냄 (7-d5)
 export async function getEarlyWake(): Promise<EarlyWake | null> {
   const userId = await requireUserId();
@@ -435,22 +437,46 @@ export async function getEarlyWake(): Promise<EarlyWake | null> {
   if (error) throw error;
   const alarm = data?.[0];
   if (!alarm) return null;
-  const events = await supabase
-    .from('alarm_events')
-    .select('event_type')
-    .eq('alarm_id', alarm.alarm_id)
-    .eq('user_id', userId)
-    .in('event_type', ['TRIGGERED', 'DISMISSED', 'WAKE_CONFIRMED'])
-    .limit(1);
-  if (events.error) throw events.error;
-  if (events.data?.length) return null;
-  return { alarmId: alarm.alarm_id, at: parseDbTime(alarm.scheduled_at) };
+  const at = parseDbTime(alarm.scheduled_at);
+  const [rang, confirmed] = await Promise.all([
+    supabase
+      .from('alarm_events')
+      .select('event_type')
+      .eq('alarm_id', alarm.alarm_id)
+      .eq('user_id', userId)
+      .in('event_type', ['TRIGGERED', 'DISMISSED'])
+      .gte('event_at', new Date(at.getTime() - EARLY_RANG_LOOKBACK_MS).toISOString())
+      .limit(1),
+    confirmedOnDay(userId, at),
+  ]);
+  if (rang.error) throw rang.error;
+  if (rang.data?.length || confirmed) return null;
+  return { alarmId: alarm.alarm_id, at };
 }
 
-// [먼저 깼어요]를 누름 — 지금 시각으로 기상 확인(BUTTON, 그룹에는 바로 '일어났어요', D61 · 7-20) + 그날 기록. 이미 확인했으면 그대로
+const EARLY_RANG_LOOKBACK_MS = 6 * 60 * MINUTE_MS;
+
+// 그 알람이 울리는 날(한국 시간 하루)에 이미 기상 확인이 있는지 — 알람과 상관없이 사람 단위
+async function confirmedOnDay(userId: string, at: Date): Promise<boolean> {
+  const from = startOfDay(at);
+  const { data, error } = await supabase
+    .from('alarm_events')
+    .select('event_type')
+    .eq('user_id', userId)
+    .eq('event_type', 'WAKE_CONFIRMED')
+    .gte('event_at', from.toISOString())
+    .lt('event_at', new Date(from.getTime() + 24 * 60 * MINUTE_MS).toISOString())
+    .limit(1);
+  if (error) throw error;
+  return !!data?.length;
+}
+
+// [먼저 깼어요]를 누름 — 지금 시각으로 기상 확인(BUTTON, 그룹에는 바로 '일어났어요', D61 · 7-20) + 그날 기록. 그 알람 · 그날 이미 확인했으면 그대로
 export async function confirmEarlyWake(alarmId: string): Promise<void> {
   const userId = await requireUserId();
   const ctx = await loadWakeContext(userId, alarmId);
   if (!ctx || ctx.confirmed) return;
-  await settle(userId, ctx, now(), 'self');
+  const current = now();
+  if (await confirmedOnDay(userId, current)) return;
+  await settle(userId, ctx, current, 'self');
 }

@@ -1962,6 +1962,29 @@ describe('먼저 깼어요 (H08)', () => {
     expect(await real.getEarlyWake()).toBeNull();
   });
 
+  it('다른 알람으로 그날 이미 기상을 확인했으면 묻지도 쓰지도 않음 (하루 한 건, 7-d4)', async () => {
+    upcoming();
+    mockRoutes['alarm_events:select'] = (call) =>
+      call.filters.some(([m, col, v]) => m === 'eq' && col === 'event_type' && v === 'WAKE_CONFIRMED')
+        ? { data: [{ event_type: 'WAKE_CONFIRMED' }] }
+        : { data: [] };
+    before(30);
+    expect(await real.getEarlyWake()).toBeNull();
+    const confirmQuery = callsTo('alarm_events', 'select').find((c) => c.filters.some(([m, col]) => m === 'eq' && col === 'event_type'));
+    expect(confirmQuery?.filters).toEqual([
+      ['eq', 'user_id', 'user-1'],
+      ['eq', 'event_type', 'WAKE_CONFIRMED'],
+      ['gte', 'event_at', '2025-05-21T15:00:00.000Z'], // 한국 시간 그날 0시
+      ['lt', 'event_at', '2025-05-22T15:00:00.000Z'],
+      ['limit', 1],
+    ]);
+    // 울림 기록은 그 알람 6시간 전부터만
+    const rangQuery = callsTo('alarm_events', 'select').find((c) => c.filters.some(([m]) => m === 'in'));
+    expect(rangQuery?.filters).toContainEqual(['gte', 'event_at', new Date(ALARM_AT - 6 * 60 * 60_000).toISOString()]);
+    await real.confirmEarlyWake(ALARM);
+    expect(callsTo('alarm_events', 'upsert')).toEqual([]);
+  });
+
   it('누르면 지금 시각으로 WAKE_CONFIRMED(BUTTON) + 그날 기록 — 해제 기록 없이', async () => {
     upcoming();
     before(25);
