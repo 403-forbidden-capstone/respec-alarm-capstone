@@ -162,6 +162,17 @@ export default async function ch11({ q, as, su, svc, check, expectErr }) {
       && blocked.acc === false && blocked.accAB === false && nulls.every((x) => x === false) ? true : { pending, accepted, old, blocked, nulls };
   });
 
+  await check('11-17(DB): can_send_push는 없는 id · 탈퇴한 사람 · 권한 없는 사람 · 차단한 사람 모두 오류 없이 같은 false — 한 사람 종류 전부(서버 함수가 권한 판정을 먼저 하고 모두 같은 403을 돌려주는 바탕)', async () => {
+    const A = await join_(60, '보낸이'), B = await join_(61, '없는권한'), W = await join_(62, '탈퇴'), K = await join_(63, '차단');
+    await request(A, W); await accept(W, A);                          // 탈퇴하기 전에는 친구
+    await q(`delete from auth.users where id = $1`, [W]);
+    await befriend(A, K); await call(K, 'public.block_user($1)', [A]);
+    const kinds = ['ALARM_CHANGED', 'FRIEND_REQUEST', 'FRIEND_ACCEPTED', 'WAKE_PING'];
+    const out = {};
+    for (const k of kinds) out[k] = [await canPush(A, NOBODY, k), await canPush(A, W, k), await canPush(A, B, k), await canPush(A, K, k)];
+    return kinds.every((k) => out[k].every((x) => x === false)) ? true : out;
+  });
+
   await check('11-12(변형): 깨우기는 8장 전까지 거절, 모르는 종류 · 서버 전용 종류(미확인 본인)는 앱 요청으로 거절 — 대기 요청이 있어도 마찬가지', async () => {
     const A = await join_(10, '에이'), B = await join_(11, '비');
     await request(A, B);
