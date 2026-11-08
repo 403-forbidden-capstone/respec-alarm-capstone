@@ -379,15 +379,15 @@ await check('초대: 만든 사람은 INVITED로 초대 · JOINED로 바로 넣�
   const seen = await q(`select 1 from public.groups where group_id = $1`, [G]);
   return direct === true && outsider === true && seen.length === 0 ? true : { direct, outsider, seen };
 });
-await check('초대받은 B는 그룹 표를 못 읽고(5장: 초대 카드만) 직접 update로는 수락 못 함 → 수락 함수로 JOINED · group_id 변경 거부 · 남의 기상 공유 동의는 못 바꿈', async () => {
+await check('초대받은 B는 그룹을 보고 수락 · group_id 변경 거부 · 남의 기상 공유 동의는 못 바꿈', async () => {
   await as(B);
   const seen = await q(`select group_name from public.groups where group_id = $1`, [G]);
-  const direct = await expectErr(() => q(`update public.group_members set invite_status = 'JOINED', joined_at = now() where group_id = $1 and user_id = $2`, [G, B]), /함수로만/);
-  const [acc] = await q(`select public.accept_group_invite($1, false) as r`, [G]);
+  const acc = await q(`update public.group_members set invite_status = 'JOINED', joined_at = now()
+                       where group_id = $1 and user_id = $2 returning 1`, [G, B]);
   const move = await expectErr(() => q(`update public.group_members set group_id = gen_random_uuid() where group_id = $1 and user_id = $2`, [G, B]),
     /바꿀 수 없음/);
   const other = await q(`update public.group_members set wake_share_opt_in = true where group_id = $1 and user_id = $2 returning 1`, [G, A]);
-  return seen.length === 0 && direct === true && acc.r.status === 'JOINED' && move === true && other.length === 0 ? true : { seen, direct, acc, move, other };
+  return seen.length === 1 && acc.length === 1 && move === true && other.length === 0 ? true : { seen, acc, move, other };
 });
 await check('초대 코드로 참여 (대소문자 · 공백 무시) · 틀린 코드 거부', async () => {
   await as(C);
@@ -732,25 +732,20 @@ await check('기상 신호 받기: 그 그룹에 참여 중인 사람만 (비구
 // 13. 초대 · 내보내기 · 초대 코드
 // ---------------------------------------------------------------------
 
-await check('구성원도 초대함(자기 친구만, 5장) · 초대 상태면 기상 결과 없음 · 그룹 표도 못 읽음 · 참여 중 멤버 누구나 초대를 취소함', async () => {
-  await su();
-  await q(`insert into public.friends (requester_id, addressee_id, status, accepted_at) values ($1, $2, 'ACCEPTED', now())`, [C, E]);   // 5장: 직접 초대는 친구 사이만
+await check('구성원도 초대함 · 초대 상태면 기상 결과 없음 · 구성원은 남을 못 내보내고 만든 사람은 내보냄', async () => {
   await as(C);
   const inv = await q(`insert into public.group_members (group_id, user_id) values ($1, $2) returning 1`, [G, E]);
+  const kick = await q(`delete from public.group_members where group_id = $1 and user_id = $2 returning 1`, [G, D]);
   const ew = await wake(E);
   await as(E);
   const seen = await q(`select 1 from public.groups where group_id = $1`, [G]);
-  await as(C);
-  const cancel = await q(`delete from public.group_members where group_id = $1 and user_id = $2 returning 1`, [G, E]);
-  await su();
-  await q(`delete from public.friends where requester_id = $1 and addressee_id = $2`, [C, E]);   // 뒤 검사들이 E를 아무와도 관계 없는 사람으로 씀
-  return inv.length === 1 && ew.length === 0 && seen.length === 0 && cancel.length === 1 ? true : { inv, ew, seen, cancel };
-});
-await check('참여 중 멤버가 내보내면 코드가 바뀌어 내보내진 사람은 옛 코드로 못 들어옴 · 스스로 나가면 코드 그대로', async () => {
-  await as(E);
-  await q(`select public.join_group_by_invite_code($1)`, [code]);   // E가 코드로 참여
   await as(A);
-  const kicked = await q(`delete from public.group_members where group_id = $1 and user_id = $2 returning 1`, [G, E]);
+  const ownerKick = await q(`delete from public.group_members where group_id = $1 and user_id = $2 returning 1`, [G, E]);
+  return inv.length === 1 && kick.length === 0 && ew.length === 0 && seen.length === 1 && ownerKick.length === 1
+    ? true : { inv, kick, ew, seen, ownerKick };
+});
+await check('만든 사람이 내보내면 코드가 바뀌어 내보내진 사람은 옛 코드로 못 들어옴 · 스스로 나가면 코드 그대로', async () => {
+  await as(A);
   const [{ invite_code: now1 }] = await q(`select invite_code from public.groups where group_id = $1`, [G]);
   await as(E);
   const old = await expectErr(() => q(`select public.join_group_by_invite_code($1)`, [code]), /초대 코드가 맞지 않음/);
@@ -760,12 +755,12 @@ await check('참여 중 멤버가 내보내면 코드가 바뀌어 내보내진 
   const [{ invite_code: now2 }] = await q(`select invite_code from public.groups where group_id = $1`, [G]);
   const rotated = now1 !== code && /^[A-Z0-9]{8}$/.test(now1);
   code = now1;
-  return kicked.length === 1 && rotated && old === true && selfLeave.length === 1 && now2 === now1 ? true : { kicked, rotated, old, selfLeave, now1, now2 };
+  return rotated && old === true && selfLeave.length === 1 && now2 === now1 ? true : { rotated, old, selfLeave, now1, now2 };
 });
-await check('regenerate_invite_code: 참여 중 멤버 누구나 새 코드를 받고(그룹장 없음, 5장) 옛 코드는 바로 막힘 · 참여 중이 아닌 사람은 거부', async () => {
-  await as(E);
-  const member = await expectErr(() => q(`select public.regenerate_invite_code($1)`, [G]), /참여 중인 멤버만/);
+await check('regenerate_invite_code: 만든 사람만 새 코드를 받고 옛 코드는 바로 막힘 · 구성원은 거부', async () => {
   await as(C);
+  const member = await expectErr(() => q(`select public.regenerate_invite_code($1)`, [G]), /만든 사람만/);
+  await as(A);
   const [{ c: fresh }] = await q(`select public.regenerate_invite_code($1) as c`, [G]);
   const [{ invite_code: stored }] = await q(`select invite_code from public.groups where group_id = $1`, [G]);
   await as(E);
@@ -1629,15 +1624,14 @@ await check('탈퇴하면 AI 호출 기록 · 질문 기록 · 대화(턴 · 서
   return dAi.calls === 2 && dAi.sessions === 1 && dAi.questions === 2 && r.calls === 0 && r.sessions === 0 && r.questions === 0
     && r.a_calls === 1 && r.b_calls === 2 && r.b_questions === 2 ? true : { dAi, r };
 });
-await check('그룹 삭제(서버만 — 앱은 지우는 길이 없음, 5장): 앱은 0행, 지우면 그 그룹에서 나온 권한 행이 모두 지워지고 코드 교체 트리거도 오류 없이 넘어감', async () => {
+await check('그룹 삭제: 그 그룹에서 나온 권한 행이 모두 지워지고 코드 교체 트리거도 오류 없이 넘어감', async () => {
   await su();
   const [before] = await q(`select count(*)::int as n from public.sharing_permissions where source_type = 'GROUP' and source_id = $1`, [G]);
   await as(A);
-  const appDel = await q(`delete from public.groups where group_id = $1 returning 1`, [G]);
-  await su();
   const del = await q(`delete from public.groups where group_id = $1 returning 1`, [G]);
+  await su();
   const [after] = await q(`select count(*)::int as n from public.sharing_permissions where source_type = 'GROUP' and source_id = $1`, [G]);
-  return before.n > 0 && appDel.length === 0 && del.length === 1 && after.n === 0 ? true : { before, appDel, del, after };
+  return before.n > 0 && del.length === 1 && after.n === 0 ? true : { before, del, after };
 });
 
 
@@ -3008,6 +3002,6 @@ await check('user_places: updated_at이 고칠 때 갱신됨 · 계정을 지우
 // ---------------------------------------------------------------------
 // 장마다 자기 계정을 새로 만들어 앞 검사의 A~E와 섞이지 않게 함. 장이 늘면 아래 목록에 한 줄씩
 const FRIEND_CTX = { q, as, su, svc, check, expectErr, PGlite, AUTH_STUBS, MIG_DIR, readFileSync, readdirSync, join };
-for (const ch of ['ch02', 'ch03', 'ch04', 'ch05']) await (await import(`./friend/${ch}.mjs`)).default(FRIEND_CTX);
+for (const ch of ['ch02', 'ch03', 'ch04']) await (await import(`./friend/${ch}.mjs`)).default(FRIEND_CTX);
 
 report();

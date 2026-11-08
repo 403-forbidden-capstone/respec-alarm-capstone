@@ -60,3 +60,7 @@ node --test "tools/sim-week/**/*.test.ts"
 - `calc/prepare.ts`: 기록 1~4건이어도 개인 보정이 이미 적용되고(n:(n+10)) 출처 이름만 DEFAULT (L1, 의도일 수 있음)
 - `location/area.ts:28` `namesWholeSchool`: 대학교 분류에 한 낱말 이름("경영관")이면 학교 전체(CAMPUS 300m)로 분류 (L2, 카카오는 보통 "○○대학교 경영관"이라 영향 작음)
 - 새로 보인 것(대화): 기능 확인 표 3 · 5b(깨우는 여유 · 잠귀)는 #274(학습 기초 b)가 들어와 실제 값으로 판정됨 — 결과는 보고서 확인 / `voice/fixes.ts:27` 대화 정정 DENY가 아직 안 됨(L2 PR 6 대기)
+
+## 친구 · 그룹 · 권한 확장
+
+로컬 Supabase에 가상 유저 여럿이 일주일 동안 친구 · 차단 · 그룹 · 권한을 바꾸고 규칙 위반을 세는 도구는 [`friends/`](friends/README.md)에 따로 있습니다(모델 호출 0).

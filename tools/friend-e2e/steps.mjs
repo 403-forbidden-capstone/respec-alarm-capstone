@@ -31,6 +31,34 @@ async function searchHandle(ctx, client, query) {
   return rows.length ? { status: 'FOUND', profile: rows[0], relation: null } : { status: 'NOT_FOUND', profile: null, relation: null };
 }
 
+// 친구 요청 · 수락 (3장). 함수가 DB에 없으면 옛 길(표 직접 쓰기)로 같은 일을 함
+async function friendRow(ctx, x, y) {
+  const rows = ok(
+    await ctx.admin.from('friends').select('friend_id, requester_id, addressee_id, status, accepted_at').in('requester_id', [x, y]).in('addressee_id', [x, y]),
+    '친구 행 읽기',
+  );
+  return rows[0] ?? null;
+}
+async function sendRequest(ctx, client, from, to) {
+  const fn = rpcOf(ctx.caps, 'friend_request');
+  if (!fn) {
+    ok(await client.from('friends').insert({ requester_id: from, addressee_id: to }), '친구 요청(옛 길)');
+    return 'REQUESTED';
+  }
+  const r = ok(await callRpc(client, fn, { p_target_id: to }), '친구 요청');
+  if (r.status === 'LIMIT') skip(`친구 요청이 1분 10회 제한에 걸림 (${r.retry_after_seconds}초 뒤 다시)`);
+  return r.status;
+}
+async function acceptRequest(ctx, client, requesterId, addresseeId) {
+  const fn = rpcOf(ctx.caps, 'friend_accept');
+  if (!fn) {
+    const row = await friendRow(ctx, requesterId, addresseeId);
+    ok(await client.from('friends').update({ status: 'ACCEPTED', accepted_at: new Date().toISOString() }).eq('friend_id', row.friend_id), '수락(옛 길)');
+    return 'ACCEPTED';
+  }
+  return ok(await callRpc(client, fn, { p_requester_id: requesterId }), '수락').status;
+}
+
 const pushNote = (ctx, who) => ctx.note(`${who}에게 푸시 도착 확인 생략 (11장 푸시 기록 표 미구현)`);
 
 // ---- 가입 (1 · 2) — OAuth는 supabase-js로 못 하므로 이메일 임시 계정으로 "가입 직후 상태"만 봄 ----
@@ -119,13 +147,15 @@ export const STEPS = [
     ch: '3',
     action: '[친구 요청] → 요청 보냄, 보낸 목록',
     async run(ctx) {
-      if (rpcOf(ctx.caps, 'friend_request')) skip('friend_request 입력 모양을 아직 안 맞춤');
-      const row = ok(
-        await ctx.a.from('friends').insert({ requester_id: ctx.ids.A, addressee_id: ctx.ids.B }).select().single(),
-        '친구 요청',
-      );
-      must(row.status === 'PENDING', `요청 상태가 PENDING이 아님: ${row.status}`);
+      const st = await sendRequest(ctx, ctx.a, ctx.ids.A, ctx.ids.B);
+      must(st === 'REQUESTED', `요청 결과가 REQUESTED가 아님: ${st}`);
+      const row = await friendRow(ctx, ctx.ids.A, ctx.ids.B);
+      must(row?.status === 'PENDING' && row.requester_id === ctx.ids.A, `요청 행이 PENDING이 아님: ${row?.status}`);
       ctx.s.fAB = row.friend_id;
+      if (rpcOf(ctx.caps, 'friend_request')) {
+        const dup = await sendRequest(ctx, ctx.a, ctx.ids.A, ctx.ids.B);
+        must(dup === 'ALREADY_REQUESTED', `같은 요청을 또 보냈는데 ${dup}`);
+      }
       const sent = ok(await ctx.a.from('friends').select('friend_id').eq('requester_id', ctx.ids.A).eq('status', 'PENDING'), '보낸 목록');
       must(sent.some((r) => r.friend_id === row.friend_id), 'A의 보낸 목록에 없음');
       const got = ok(await ctx.b.from('friends').select('friend_id').eq('addressee_id', ctx.ids.B).eq('status', 'PENDING'), '받은 요청');
@@ -140,7 +170,16 @@ export const STEPS = [
     action: '받은 요청 [수락] → 친구, 공유는 아직 없어요',
     deps: [6],
     async run(ctx) {
-      ok(await ctx.b.from('friends').update({ status: 'ACCEPTED', accepted_at: new Date().toISOString() }).eq('friend_id', ctx.s.fAB), '수락');
+      const st = await acceptRequest(ctx, ctx.b, ctx.ids.A, ctx.ids.B);
+      must(st === 'ACCEPTED', `수락 결과가 ACCEPTED가 아님: ${st}`);
+      if (rpcOf(ctx.caps, 'friend_accept')) {
+        const again = await acceptRequest(ctx, ctx.b, ctx.ids.A, ctx.ids.B);
+        must(again === 'ALREADY_FRIEND', `두 번 수락했는데 ${again}`);
+        const row = await friendRow(ctx, ctx.ids.A, ctx.ids.B);
+        must(row?.accepted_at, '수락 시각이 서버에서 안 채워짐');
+        const back = await ctx.b.from('friends').update({ status: 'PENDING' }).eq('friend_id', ctx.s.fAB);
+        must(back.error?.code === '42501', `수락을 되돌릴 수 있음: ${back.error?.code ?? '성공'}`);
+      }
       const seen = ok(await ctx.a.from('friends').select('status').eq('friend_id', ctx.s.fAB), 'A 쪽 확인');
       must(seen[0]?.status === 'ACCEPTED', 'A 목록에서 친구가 아님');
       const perms = ok(await ctx.admin.from('sharing_permissions').select('permission_id').eq('source_id', ctx.s.fAB), '권한 확인');
@@ -212,10 +251,13 @@ export const STEPS = [
     ch: '3',
     action: 'F01에서 A에게 요청, A 수락 → 친구',
     async run(ctx) {
-      if (rpcOf(ctx.caps, 'friend_request')) skip('friend_request 입력 모양을 아직 안 맞춤');
-      const row = ok(await ctx.c.from('friends').insert({ requester_id: ctx.ids.C, addressee_id: ctx.ids.A }).select().single(), 'C의 요청');
+      const st = await sendRequest(ctx, ctx.c, ctx.ids.C, ctx.ids.A);
+      must(st === 'REQUESTED', `C의 요청 결과가 REQUESTED가 아님: ${st}`);
+      const row = await friendRow(ctx, ctx.ids.C, ctx.ids.A);
+      must(row?.status === 'PENDING', 'C의 요청 행이 없음');
       ctx.s.fAC = row.friend_id;
-      ok(await ctx.a.from('friends').update({ status: 'ACCEPTED', accepted_at: new Date().toISOString() }).eq('friend_id', row.friend_id), 'A의 수락');
+      const acc = await acceptRequest(ctx, ctx.a, ctx.ids.C, ctx.ids.A);
+      must(acc === 'ACCEPTED', `A의 수락 결과가 ACCEPTED가 아님: ${acc}`);
       const seen = ok(await ctx.c.from('friends').select('status').eq('friend_id', row.friend_id), 'C 쪽 확인');
       must(seen[0]?.status === 'ACCEPTED', 'C 목록에서 친구가 아님');
       ctx.note('C 가입(OAuth)은 시드 계정으로 대신');
@@ -530,8 +572,33 @@ export const STEPS = [
       if (!ctx.caps.hasTable('user_blocks') || !rpcOf(ctx.caps, 'block_user')) skip('차단이 아직 없음 (4장 미구현: user_blocks · block_user)');
       // 대본 12단계에서 이미 친구가 됐으므로, 차단할 "A의 대기 요청"을 만들려고 친구를 끊고 A가 다시 요청
       ok(await ctx.admin.from('friends').delete().eq('friend_id', ctx.s.fAC), 'A–C 친구 끊기(준비)');
-      ok(await ctx.a.from('friends').insert({ requester_id: ctx.ids.A, addressee_id: ctx.ids.C }), 'A의 새 요청(준비)');
-      ok(await callRpc(ctx.c, ctx.fn.block_user, { p_user_id: ctx.ids.A }), '차단');
+      const st = await sendRequest(ctx, ctx.a, ctx.ids.A, ctx.ids.C);
+      must(st === 'REQUESTED', `A의 새 요청(준비)이 REQUESTED가 아님: ${st}`);
+      const blk = ok(await callRpc(ctx.c, ctx.fn.block_user, { p_user_id: ctx.ids.A }), '차단');
+      must(blk.status === 'BLOCKED', `차단 결과가 BLOCKED가 아님: ${blk.status}`);
+      const again = ok(await callRpc(ctx.c, ctx.fn.block_user, { p_user_id: ctx.ids.A }), '차단(두 번째)');
+      must(again.status === 'ALREADY_BLOCKED', `두 번 차단했는데 ${again.status}`);
+      const perms = ok(
+        await ctx.admin.from('sharing_permissions').select('permission_id').in('owner_id', [ctx.ids.A, ctx.ids.C]).in('grantee_id', [ctx.ids.A, ctx.ids.C]),
+        '두 사람 사이 권한',
+      );
+      must(perms.length === 0, '차단했는데 두 사람 사이 공유 권한이 남음');
+      const mine = ok(await callRpc(ctx.c, ctx.fn.my_blocks, {}), 'C의 차단 목록');
+      must(mine.some((r) => r.user_id === ctx.ids.A), 'C의 차단 목록에 A가 없음');
+      const theirs = ok(await callRpc(ctx.a, ctx.fn.my_blocks, {}), 'A의 차단 목록');
+      must(!theirs.some((r) => r.user_id === ctx.ids.C), '차단당한 A의 목록에 C가 보임 (차단 사실이 새어 나감)');
+      const retry = await sendRequest(ctx, ctx.a, ctx.ids.A, ctx.ids.C);
+      must(retry === 'NOT_FOUND', `차단당한 뒤 A가 요청하면 NOT_FOUND여야 함: ${retry}`);
+      const reportFn = rpcOf(ctx.caps, 'submit_report');
+      if (reportFn) {
+        const rep = ok(await callRpc(ctx.c, reportFn, { p_target_type: 'USER', p_target_id: ctx.ids.A, p_reason: 'HARASSMENT' }), '신고');
+        must(rep.status === 'REPORTED', `신고 결과가 REPORTED가 아님: ${rep.status}`);
+        const rep2 = ok(await callRpc(ctx.c, reportFn, { p_target_type: 'USER', p_target_id: ctx.ids.A, p_reason: 'HARASSMENT' }), '신고(두 번째)');
+        must(rep2.status === 'ALREADY_REPORTED', `같은 대상 하루 두 번 신고가 됨: ${rep2.status}`);
+        const direct = await ctx.c.from('reports').select('report_id');
+        must(direct.error || (direct.data ?? []).length === 0, '앱이 신고 표를 직접 읽을 수 있음');
+        ctx.note('신고 처리(웹 운영 화면, 팀원만) 확인 생략 (4장 빈 곳: 처리 함수 문서 보충 대기)');
+      }
       const pending = ok(await ctx.c.from('friends').select('friend_id').eq('requester_id', ctx.ids.A).eq('addressee_id', ctx.ids.C), 'C의 받은 요청');
       must(pending.length === 0, '차단했는데 A의 대기 요청이 남음');
     },
@@ -571,11 +638,20 @@ export const STEPS = [
     action: '설정 차단 목록 [풀기] → 다시 친구는 새 요청부터',
     deps: [30],
     async run(ctx) {
-      ok(await callRpc(ctx.c, ctx.fn.unblock_user, { p_user_id: ctx.ids.A }), '차단 풀기');
+      const ub = ok(await callRpc(ctx.c, ctx.fn.unblock_user, { p_user_id: ctx.ids.A }), '차단 풀기');
+      must(ub.status === 'UNBLOCKED', `풀기 결과가 UNBLOCKED가 아님: ${ub.status}`);
+      const ub2 = ok(await callRpc(ctx.c, ctx.fn.unblock_user, { p_user_id: ctx.ids.A }), '차단 풀기(두 번째)');
+      must(ub2.status === 'GONE', `이미 푼 사람을 또 풀었는데 ${ub2.status}`);
+      const left = ok(await callRpc(ctx.c, ctx.fn.my_blocks, {}), 'C의 차단 목록');
+      must(!left.some((r) => r.user_id === ctx.ids.A), '풀었는데 차단 목록에 남음');
       const f = ok(await ctx.admin.from('friends').select('friend_id').in('requester_id', [ctx.ids.A, ctx.ids.C]).in('addressee_id', [ctx.ids.A, ctx.ids.C]), '친구 행');
       must(f.length === 0, '차단을 풀었는데 옛 친구 관계가 되살아남');
       const found = await searchHandle(ctx, ctx.a, ctx.handles.C);
       must(found.status === 'FOUND', `차단을 풀었는데 A가 C를 다시 못 찾음: ${found.status}`);
+      // 다시 친구는 새 요청부터 (친구 · 권한이 복구되지 않음)
+      const st = await sendRequest(ctx, ctx.a, ctx.ids.A, ctx.ids.C);
+      must(st === 'REQUESTED', `풀린 뒤 새 요청이 REQUESTED가 아님: ${st}`);
+      ok(await ctx.admin.from('friends').delete().in('requester_id', [ctx.ids.A, ctx.ids.C]).in('addressee_id', [ctx.ids.A, ctx.ids.C]), '새 요청 정리');
     },
   },
   {
