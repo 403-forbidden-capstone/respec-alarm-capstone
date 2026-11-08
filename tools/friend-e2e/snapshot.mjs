@@ -36,7 +36,8 @@ export async function takeSnapshot(admin, ids, caps) {
 // 이전 실행이 남긴 것 지움 + 친구 · 권한 비움
 export async function wipe(admin, ids) {
   const set = Object.values(ids);
-  must(await admin.from('groups').delete().like('group_name', `${E2E_PREFIX}%`).in('owner_id', set), '남은 E2E 그룹 지움');
+  // 이름 머리말로만 거름 (5장에서 owner_id 칼럼이 빠져도 동작)
+  must(await admin.from('groups').delete().like('group_name', `${E2E_PREFIX}%`), '남은 E2E 그룹 지움');
   must(await admin.from('appointments').delete().like('title', `${E2E_PREFIX}%`).in('creator_id', set), '남은 E2E 약속 지움');
   must(await admin.from('sharing_permissions').delete().in('owner_id', set).in('grantee_id', set), '권한 비움');
   must(await admin.from('friends').delete().in('requester_id', set).in('addressee_id', set), '친구 비움');

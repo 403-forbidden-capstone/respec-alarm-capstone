@@ -75,10 +75,12 @@ async function main() {
     restored = true;
     await restore(admin, snap);
   };
-  process.once('SIGINT', async () => {
-    await finish();
-    process.exit(130);
-  });
+  for (const sig of ['SIGINT', 'SIGTERM']) {
+    process.once(sig, async () => {
+      await finish().catch(() => {});
+      process.exit(130);
+    });
+  }
 
   const ctx = {
     admin,
@@ -101,7 +103,11 @@ async function main() {
       log: (r) => console.log(`${String(r.n).padStart(2)} ${r.who} [${r.ch}] ${r.status.padEnd(4)} ${r.action}${r.reason ? `\n      → ${r.reason}` : ''}${r.notes.map((n) => `\n      · 생략: ${n}`).join('')}`),
     });
   } finally {
-    await finish();
+    // 되돌리기가 실패해도 결과는 남김 (저장본이 남아 있으니 --restore로 다시)
+    await finish().catch((e) => {
+      console.error(`되돌리기 실패: ${e.message} — node run.mjs --restore로 다시 시도`);
+      process.exitCode = 2;
+    });
   }
 
   const meta = { date: kstDate(), main: process.env.E2E_MAIN_LABEL ?? git('rev-parse', '--short', 'HEAD') };
@@ -112,7 +118,7 @@ async function main() {
   mkdirSync(dirname(reportPath), { recursive: true });
   writeFileSync(reportPath, reportMarkdown(results, meta));
   console.log(`보고서: ${reportPath}`);
-  process.exitCode = firstFail ? 1 : 0;
+  if (!process.exitCode) process.exitCode = firstFail ? 1 : 0;
 }
 
 main().catch((e) => {

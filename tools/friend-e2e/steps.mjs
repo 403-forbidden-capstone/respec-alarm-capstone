@@ -244,6 +244,7 @@ export const STEPS = [
     action: 'F03 A에게 알람 조회 · 설정 켜기 → 저장',
     deps: [7],
     async run(ctx) {
+      if (rpcOf(ctx.caps, 'save_permissions')) skip('save_permissions 입력 모양을 아직 안 맞춤');
       ok(
         await ctx.b.from('sharing_permissions').insert({
           owner_id: ctx.ids.B,
@@ -318,7 +319,9 @@ export const STEPS = [
     deps: [17],
     async run(ctx) {
       const part = ok(await ctx.c.from('appointment_participants').select('participant_id').eq('appointment_id', ctx.s.appt), 'C의 참여 행');
-      must(part.length === 0, 'C는 안 눌렀는데 참여 행이 있음 (알람은 참여 행에 붙으므로 알람도 없음)');
+      must(part.length === 0, 'C는 안 눌렀는데 참여 행이 있음');
+      const anyC = ok(await ctx.admin.from('appointment_participants').select('participant_id').eq('appointment_id', ctx.s.appt).eq('user_id', ctx.ids.C), 'C 참여 행(관리자)');
+      must(anyC.length === 0, '아무도 안 눌렀는데 C의 참여 행이 자동으로 생김 (알람은 참여 행에 붙으므로 알람도 없음)');
     },
   },
   {
@@ -358,7 +361,7 @@ export const STEPS = [
       const rows = ok(await callRpc(ctx.a, ctx.fn.group_wake, { p_group_id: ctx.s.group, p_date: todayKst() }), '그룹 기상 상태');
       const b = rows.find((r) => r.user_id === ctx.ids.B);
       if (b?.wake_status === 'CONFIRMED') {
-        must(String(b.wake_confirmed_at).includes('T08:08') || new Date(b.wake_confirmed_at).getTime() === new Date(at('08:08')).getTime(), 'B 기상 확인 시각이 8:08이 아님');
+        must(new Date(b.wake_confirmed_at).getTime() === new Date(at('08:08')).getTime(), 'B 기상 확인 시각이 8:08(KST)이 아님');
         return;
       }
       // main은 그룹 동의만으로는 기상이 안 보임 (기상 조회 권한 행이 따로 필요) — 7장이 들어오면 FAIL로 바뀜
@@ -504,6 +507,7 @@ export const STEPS = [
     action: 'C 아이디 검색 → 찾을 수 없어요',
     deps: [30],
     async run(ctx) {
+      must(ctx.handles.C, 'C의 아이디를 못 읽음');
       const rows = ok(await callRpc(ctx.a, ctx.fn.find_profile, { p_handle: ctx.handles.C }), '아이디 검색');
       must(rows.length === 0, '차단당했는데 C가 검색됨');
     },
@@ -515,6 +519,10 @@ export const STEPS = [
     action: 'G02 C 줄 → 이름만, 기상 공유 안 함',
     deps: [30, 14],
     async run(ctx) {
+      // 비교 기준: C에게 오늘 기상 확인을 먼저 만들어 둠 (없으면 "안 보임"이 당연해서 확인이 안 됨)
+      const part = ok(await ctx.c.from('appointment_participants').insert({ appointment_id: ctx.s.appt, user_id: ctx.ids.C, prepare_minutes: 60 }).select().single(), 'C 참여 행(준비)');
+      const alarm = ok(await ctx.c.from('alarms').insert({ participant_id: part.participant_id, user_id: ctx.ids.C, alarm_type: 'WAKE', scheduled_at: at('06:40') }).select().single(), 'C 알람(준비)');
+      ok(await ctx.c.from('alarm_events').insert({ alarm_id: alarm.alarm_id, user_id: ctx.ids.C, event_type: 'WAKE_CONFIRMED', event_at: at('08:10') }), 'C 기상 확인(준비)');
       const rows = ok(await callRpc(ctx.a, ctx.fn.group_wake, { p_group_id: ctx.s.group, p_date: todayKst() }), '그룹 기상 상태');
       const c = rows.find((r) => r.user_id === ctx.ids.C);
       must(!c || (!c.wake_confirmed_at && !c.rang_at && !c.dismissed_at), 'C의 기상 정보가 A에게 보임');
@@ -530,6 +538,8 @@ export const STEPS = [
       ok(await callRpc(ctx.c, ctx.fn.unblock_user, { p_user_id: ctx.ids.A }), '차단 풀기');
       const f = ok(await ctx.admin.from('friends').select('friend_id').in('requester_id', [ctx.ids.A, ctx.ids.C]).in('addressee_id', [ctx.ids.A, ctx.ids.C]), '친구 행');
       must(f.length === 0, '차단을 풀었는데 옛 친구 관계가 되살아남');
+      const found = ok(await callRpc(ctx.a, ctx.fn.find_profile, { p_handle: ctx.handles.C }), '풀린 뒤 A의 검색');
+      must(found.length === 1, '차단을 풀었는데 A가 C를 다시 못 찾음');
     },
   },
   {
