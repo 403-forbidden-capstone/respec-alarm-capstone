@@ -9,7 +9,8 @@ import { requireUserId } from '@/lib/user';
 
 import { friendLinkFromRpc, handleSearchFromRpc, openedLinkFromRpc, personFromProfile, type ProfileRow } from '../map';
 import { mergeHits } from '../searchView';
-import { friendIds, givenTo, personOf, requestIds, type Snapshot } from '../snapshot';
+import { MESSAGE_FRIEND_LIMIT, MESSAGE_GONE, messageLimit } from '../relationMessages';
+import { friendIds, givenTo, personOf, requestIds, sentRequestIds, type Snapshot } from '../snapshot';
 import type { FriendItem, FriendLink, FriendRelation, HandleSearch, OpenedLink, PeopleSearch, Person, PersonHit } from '../types';
 import { invalidateSnapshot, loadSnapshot } from './load';
 
@@ -23,20 +24,57 @@ export async function listFriendRequests(): Promise<Person[]> {
   return requestIds(s).map((id) => personOf(s, id));
 }
 
-// 요청 수락 — 받은 사람(나)만. 친구가 돼도 공유는 아직 없음 (권한 행은 F03에서 저장할 때 생김)
-export async function acceptFriend(requesterId: string) {
-  const me = await requireUserId();
-  const { data, error } = await supabase
-    .from('friends')
-    .update({ status: 'ACCEPTED', accepted_at: new Date().toISOString() })
-    .eq('requester_id', requesterId)
-    .eq('addressee_id', me)
-    .eq('status', 'PENDING')
-    .select('friend_id');
-  if (error) throw error;
+// 내가 보낸 대기 요청 — 받는 사람 목록, 최근 보낸 순 (F01 보낸 요청 · [취소])
+export async function listSentRequests(): Promise<Person[]> {
+  const s = await loadSnapshot();
+  return sentRequestIds(s).map((id) => personOf(s, id));
+}
+
+// 친구 관계 서버 함수 하나를 부르고 {status}를 돌려줌 — 오류는 원문 그대로 던짐, 성공 · 실패 모두 읽어 둔 목록을 비움(다음 읽기에서 새로)
+//   친구 요청 · 수락 · 거절 · 취소 · 끊기는 friends 표를 직접 쓰지 않음 (3장부터, 서버가 횟수 · 100명 · 동시 요청 · 권한 삭제를 함)
+async function callRelation(name: 'send_friend_request' | 'accept_friend_request' | 'decline_friend_request' | 'cancel_friend_request' | 'remove_friend', args: Record<string, string>) {
+  const { data, error } = await supabase.rpc(name, args as never);
   invalidateSnapshot();
-  // 이미 수락했거나 상대가 요청을 취소한 경우 RLS는 오류 없이 0행을 바꿈
-  if (!data?.length) throw new UserError('친구 요청을 찾을 수 없어요. 이미 처리됐을 수 있어요');
+  if (error) throw error;
+  const r = (data ?? {}) as { status?: string; retry_after_seconds?: number };
+  if (typeof r.status !== 'string') throw new Error(`${name} 응답에 status가 없어요`);
+  return r as { status: string; retry_after_seconds?: number };
+}
+
+const unknownStatus = (name: string, status: string) => new Error(`알 수 없는 ${name} 상태: ${status}`);
+
+// 요청 수락 — 받은 사람(나)만. 친구가 돼도 공유는 아직 없음 (권한 행은 F03에서 저장할 때 생김). 수락 시각은 서버가 정함 (3-26)
+//   두 번 눌러 ALREADY_FRIEND가 와도 성공 (3-29). GONE = 상대가 그 사이 취소 (3-28)
+export async function acceptFriend(requesterId: string): Promise<void> {
+  const { status } = await callRelation('accept_friend_request', { p_requester_id: requesterId });
+  if (status === 'ACCEPTED' || status === 'ALREADY_FRIEND') return;
+  if (status === 'GONE') throw new UserError(MESSAGE_GONE);
+  if (status === 'FRIEND_LIMIT') throw new UserError(MESSAGE_FRIEND_LIMIT);
+  throw unknownStatus('accept_friend_request', status);
+}
+
+// 받은 요청 거절 — 행이 지워지고 알림은 없음. A 화면은 보낸 목록에서 사라지고 [친구 요청]으로 돌아감 (3-03)
+export async function declineFriend(requesterId: string): Promise<void> {
+  const { status } = await callRelation('decline_friend_request', { p_requester_id: requesterId });
+  if (status === 'DECLINED') return;
+  if (status === 'GONE') throw new UserError(MESSAGE_GONE);
+  throw unknownStatus('decline_friend_request', status);
+}
+
+// 보낸 요청 취소 — 행 삭제 (3-04). 취소해도 하루 요청 횟수는 안 줄어듦(서버)
+export async function cancelFriendRequest(addresseeId: string): Promise<void> {
+  const { status } = await callRelation('cancel_friend_request', { p_addressee_id: addresseeId });
+  if (status === 'CANCELED') return;
+  if (status === 'GONE') throw new UserError(MESSAGE_GONE);
+  throw unknownStatus('cancel_friend_request', status);
+}
+
+// 친구 끊기 — 행 삭제 + 양쪽 친구 출처 권한 삭제(그룹 출처는 그대로), 알림 없음 (3-14 · 3-15 · 3-41)
+export async function removeFriend(userId: string): Promise<void> {
+  const { status } = await callRelation('remove_friend', { p_user_id: userId });
+  if (status === 'REMOVED') return;
+  if (status === 'GONE') throw new UserError(MESSAGE_GONE);
+  throw unknownStatus('remove_friend', status);
 }
 
 // ---------------------------------------------------------------------------
@@ -106,14 +144,27 @@ export async function openFriendLink(token: string): Promise<OpenedLink> {
   return openedLinkFromRpc(data);
 }
 
-// 친구 요청 보내기 — 같은 두 사람 사이는 방향과 상관없이 한 건만 (friends_pair_key)
-export async function sendFriendRequest(userId: string) {
-  const me = await requireUserId();
-  if (userId === me) throw new UserError('나에게는 친구 요청을 보낼 수 없어요');
-  const { error } = await supabase.from('friends').insert({ requester_id: me, addressee_id: userId, status: 'PENDING' });
-  invalidateSnapshot();
-  if (!error) return;
-  if (error.code === '23505') throw new UserError('이미 친구이거나 요청이 진행 중이에요'); // unique_violation
-  if (error.code === '23503') throw new UserError('사용자를 찾을 수 없어요'); // foreign_key_violation
-  throw error;
+// 친구 요청 보내기 (send_friend_request) — 돌려주는 값은 이 사람과의 새 관계: 보냄(SENT) · 친구(FRIEND)
+//   상대가 먼저 보낸 대기가 있으면 서버가 맞요청으로 자동 수락 → ACCEPTED = 바로 친구 (3-05). 이미 보냈으면 SENT · 이미 친구면 FRIEND 그대로 (3-06 · 3-07)
+//   1분 10회 · 하루 50회 · 친구 100명은 서버가 판단 — LIMIT은 기다릴 시간, FRIEND_LIMIT은 상한 문구 (3-10 · 3-11 · 3-12)
+export async function sendFriendRequest(userId: string): Promise<'SENT' | 'FRIEND'> {
+  const { status, retry_after_seconds } = await callRelation('send_friend_request', { p_target_id: userId });
+  switch (status) {
+    case 'REQUESTED':
+    case 'ALREADY_REQUESTED':
+      return 'SENT';
+    case 'ACCEPTED':
+    case 'ALREADY_FRIEND':
+      return 'FRIEND';
+    case 'SELF':
+      throw new UserError('나에게는 친구 요청을 보낼 수 없어요');
+    case 'NOT_FOUND':
+      throw new UserError('사용자를 찾을 수 없어요'); // 없음 · 탈퇴 · 온보딩 전 · 차단 쌍이 같은 응답
+    case 'LIMIT':
+      throw new UserError(messageLimit(retry_after_seconds ?? 1));
+    case 'FRIEND_LIMIT':
+      throw new UserError(MESSAGE_FRIEND_LIMIT);
+    default:
+      throw unknownStatus('send_friend_request', status);
+  }
 }
