@@ -468,6 +468,130 @@ export default async function ch05({ q, as, su, check, expectErr, PGlite, AUTH_S
     }
   });
 
+  // ---- 리뷰 고침(#387 1번째 리뷰) -------------------------------------------------------
+
+  await check('5-19(리뷰 1): 만든 사람의 "방금 만든" 읽기 예외는 만든 같은 트랜잭션뿐 — created_at을 바꾸거나 만들 때 미래로 지정해도 영구가 안 되고, 내보내진 · 스스로 나간 만든 사람은 그룹(새 코드)을 못 읽음', async () => {
+    const O = await join_(50, '만든사람'), M = await join_(51, '남은멤버');
+    const K = await mkGroup(O, '예외');
+    await addMember(K.g, M);
+    await as(O);
+    const forge = await expectErr(() => q(`update public.groups set created_at = '2999-01-01' where group_id = $1`, [K.g]), /바꿀 수 없음/);
+    const [mk] = await q(`insert into public.groups (group_name, owner_id, created_at) values ('미래', $1, '2999-01-01') returning created_at < now() + interval '1 day' as ok`, [O]);
+    await su();
+    await as(M);
+    const kicked = await q(`delete from public.group_members where group_id = $1 and user_id = $2 returning 1`, [K.g, O]);
+    await su();
+    await as(O);
+    const readAfterKick = await q(`select invite_code from public.groups where group_id = $1`, [K.g]);
+    await su();
+    // 스스로 나간 경우
+    const K2 = await mkGroup(O, '스스로나감');
+    await addMember(K2.g, M);
+    await leave(O, K2.g);
+    await as(O);
+    const readAfterLeave = await q(`select invite_code from public.groups where group_id = $1`, [K2.g]);
+    await su();
+    await q(`delete from public.groups where owner_id = $1`, [O]);
+    return forge === true && mk.ok === true && kicked.length === 1 && readAfterKick.length === 0 && readAfterLeave.length === 0 ? true : { forge, mk, kicked, readAfterKick, readAfterLeave };
+  });
+
+  await check('5-35(리뷰 3 · 바탕): 참여 · 수락은 그룹 잠금과 사람 잠금을, 앱이 직접 그룹을 만드는 길은 만드는 사람 잠금을 건 채로 일함 — 열쇠 이름까지 확인(10개 상한이 겹쳐도 넘지 않게)', async () => {
+    const O = await join_(52, '잠금주인'), Iv = await join_(53, '초대받음'), J = await join_(54, '코드참여'), W = await join_(55, '만드는이');
+    const K = await mkGroup(O, '잠금');
+    await befriend(O, Iv);
+    await inviteTo(O, K.g, Iv);
+    await q(`create function pg_temp.f5_held(uid uuid, op text, arg text, keys text[]) returns integer language plpgsql as $$
+             declare n integer;
+             begin
+               perform set_config('request.jwt.claim.sub', uid::text, true);
+               if op = 'join' then
+                 perform public.join_group(arg, false);
+               elsif op = 'accept' then
+                 perform public.accept_group_invite(arg::uuid, false);
+               else
+                 set local role authenticated;
+                 insert into public.groups (group_name, owner_id) values ('잠금확인', uid);
+               end if;
+               select count(*)::integer into n
+               from unnest(keys) as k
+               join pg_locks l on l.locktype = 'advisory' and l.pid = pg_backend_pid() and l.objsubid = 1
+                              and l.classid = ((hashtextextended(k, 0) >> 32) & 4294967295)::bigint::oid
+                              and l.objid = (hashtextextended(k, 0) & 4294967295)::bigint::oid;
+               return n;
+             end $$`);
+    const held = async (uid, op, arg, keys) => (await q(`select pg_temp.f5_held($1, $2, $3, $4::text[]) as n`, [uid, op, arg, keys]))[0].n;
+    const joinHeld = await held(J, 'join', K.code, [`group:${K.g}`, `group_user:${J}`]);
+    const acceptHeld = await held(Iv, 'accept', K.g, [`group:${K.g}`, `group_user:${Iv}`]);
+    const insertHeld = await held(W, 'insert', '', [`group_user:${W}`]);
+    return joinHeld === 2 && acceptHeld === 2 && insertHeld === 1 ? true : { joinHeld, acceptHeld, insertHeld };
+  });
+
+  await check('5-39(리뷰 2 · 바탕): 마지막 멤버가 나가는 일과 겹쳐도 수락 · 참여가 가짜 성공을 못 내게 그룹 행을 키 공유로 잡고 다시 확인함 — 두 함수 모두 (실제 두 세션 겹침은 PGlite로 못 해서 손으로 확인)', async () => {
+    const defs = await q(`select p.proname, pg_get_functiondef(p.oid) as d from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+                          where n.nspname = 'public' and p.proname in ('join_group', 'accept_group_invite') order by 1`);
+    return defs.length === 2 && defs.every((x) => /for key share/i.test(x.d)) ? true : defs.map((x) => [x.proname, /for key share/i.test(x.d)]);
+  });
+
+  await check('5-마 · 5-d6(리뷰 4): 정책 · 가드 분기 — 비멤버는 이름을 못 바꾸고(0행) 남의 멤버 행을 못 지우고, 친구여도 비멤버는 초대를 못 넣고, 초대 행의 기록(초대한 사람 · 알림 끄기)은 서버가 정하고, 참여 일시 · 동의를 미리 넣을 수 없고, 초대 · 나간 상태에서는 동의 · 알림 끄기를 못 바꾸고, 코드는 직접 지정 · 만료 변경이 안 됨', async () => {
+    const O = await join_(56, '멤버'), F = await join_(57, '친구'), X = await join_(58, '비멤버'), Y = await join_(59, '다른친구'), F2 = await join_(64, '친구2');
+    const K = await mkGroup(O, '분기');
+    await befriend(O, F); await befriend(O, F2); await befriend(X, Y);
+    // (a) 비멤버 수정 · (b) 비멤버 삭제 · (d) 비멤버 초대
+    await as(X);
+    const rename = await q(`update public.groups set group_name = '뺏김' where group_id = $1 returning 1`, [K.g]);
+    const kick = await q(`delete from public.group_members where group_id = $1 and user_id = $2 returning 1`, [K.g, O]);
+    const outsiderInvite = await expectErr(() => q(`insert into public.group_members (group_id, user_id, invite_status) values ($1, $2, 'INVITED')`, [K.g, Y]), /row-level security/);
+    await su();
+    // 멤버의 초대 행: 위조한 초대한 사람 · 알림 끄기는 서버 값으로
+    await as(O);
+    await q(`insert into public.group_members (group_id, user_id, invite_status, invited_by, notifications_off) values ($1, $2, 'INVITED', $3, true)`, [K.g, F, Y]);
+    const preJoin = await expectErr(() => q(`insert into public.group_members (group_id, user_id, invite_status, joined_at) values ($1, $2, 'INVITED', now())`, [K.g, F2]), /row-level security/);
+    const preOpt = await expectErr(() => q(`insert into public.group_members (group_id, user_id, invite_status, wake_share_opt_in) values ($1, $2, 'INVITED', true)`, [K.g, F2]), /row-level security/);
+    await su();
+    const inv = await member(K.g, F);
+    // 초대받은 상태에서 동의 · 알림 끄기 · 초대 기록 바꾸기는 거절
+    await as(F);
+    const optInvited = await expectErr(() => q(`update public.group_members set wake_share_opt_in = true where group_id = $1 and user_id = $2`, [K.g, F]), /참여 중일 때만/);
+    const offInvited = await expectErr(() => q(`update public.group_members set notifications_off = true where group_id = $1 and user_id = $2`, [K.g, F]), /참여 중일 때만/);
+    const byInvited = await expectErr(() => q(`update public.group_members set invited_by = $3 where group_id = $1 and user_id = $2`, [K.g, F, Y]), /초대 기록/);
+    await su();
+    const acc = await accept(F, K.g, false);
+    const joined = await member(K.g, F);
+    await leave(F, K.g);
+    await as(F);
+    const optLeft = await expectErr(() => q(`update public.group_members set wake_share_opt_in = true where group_id = $1 and user_id = $2`, [K.g, F]), /참여 중일 때만/);
+    await su();
+    // 코드 직접 지정 · 만료 변경
+    await as(O);
+    const [mine] = await q(`insert into public.groups (group_name, owner_id, invite_code) values ('코드지정', $1, 'AAAAAAAA') returning invite_code, invite_code_expires_at > now() + interval '6 days' as week`, [O]);
+    const expEdit = await expectErr(() => q(`update public.groups set invite_code_expires_at = now() + interval '99 days' where group_id = $1`, [K.g]), /새 코드 함수로만/);
+    await su();
+    await q(`delete from public.groups where group_name = '코드지정' and owner_id = $1`, [O]);
+    return rename.length === 0 && kick.length === 0 && outsiderInvite === true
+      && inv.st === 'INVITED' && inv.off === false && inv.invited_by === O && preJoin === true && preOpt === true
+      && optInvited === true && offInvited === true && byInvited === true
+      && acc.status === 'JOINED' && joined.joined_at !== null && optLeft === true
+      && mine.invite_code !== 'AAAAAAAA' && mine.week === true && expEdit === true
+      ? true : { rename, kick, outsiderInvite, inv, preJoin, preOpt, optInvited, offInvited, byInvited, acc, joined, optLeft, mine, expEdit };
+  });
+
+  await check('4-17 · 4-20(5장 몫): 차단한 사이여도 같은 그룹 멤버 누구나 상대를 내보낼 수 있고(행이 지워짐), 제3자가 차단 쌍의 한쪽을 직접 초대하면 막지 않아 수락하면 참여 중이 됨', async () => {
+    const P = await join_(60, '차단함'), Q = await join_(61, '차단당함'), R = await join_(62, '제삼자'), S = await join_(63, '초대될사람');
+    const K = await mkGroup(P, '차단그룹');
+    await addMember(K.g, Q); await addMember(K.g, R);
+    await call(P, 'public.block_user($1)', [Q]);
+    await befriend(R, S);
+    await call(P, 'public.block_user($1)', [S]);
+    // 4-17: 차단당한 Q가 차단한 P를 내보냄
+    await as(Q);
+    const kickedP = await q(`delete from public.group_members where group_id = $1 and user_id = $2 returning 1`, [K.g, P]);
+    await su();
+    // 4-20: P가 S를 차단했는데 R이 S를 P의 옛 그룹에 초대 (P는 나갔지만 그룹은 R · Q가 남아 있음)
+    const inv = await inviteTo(R, K.g, S);
+    const acc = await accept(S, K.g, false);
+    return kickedP.length === 1 && (await member(K.g, P)) === null && inv.status === 'INVITED' && acc.status === 'JOINED' && (await member(K.g, S)).st === 'JOINED' ? true : { kickedP, inv, acc };
+  });
+
   await check('5장 함수: 로그인 정보가 없으면 42501(내 초대 · 코드 시트는 빈 결과), anon은 실행 권한 없음, 판정 보조 함수는 앱이 직접 못 부름', async () => {
     await as(null);
     const errs = [];
