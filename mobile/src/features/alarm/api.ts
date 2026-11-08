@@ -52,6 +52,9 @@ import {
   type UpdateResult,
   type UserEditLog,
   type WakeCheck,
+  type JoinChoice,
+  type JoinDefaults,
+  type JoinResult,
   type EarlyWake,
   EARLY_WAKE_MINUTES,
 } from './types';
@@ -528,6 +531,23 @@ export async function restoreAppointment(id: string): Promise<void> {
   reassignWake(batch.map((t) => t.appointment.at));
 }
 
+// 공동 약속 [내 알람 만들기] (친구 9장) — 가짜 모드는 빠졌던 약속을 내 목록으로 되돌림(내 집 · 고른 수단)
+export async function joinSharedAppointment(id: string, choice: JoinChoice): Promise<JoinResult> {
+  if (!isMock()) return real.joinSharedAppointment(id, choice);
+  const left = db.left.find((x) => x.id === id);
+  if (left) {
+    db.left.splice(db.left.indexOf(left), 1);
+    db.appointments.push({ ...left, transport: choice.transport, origin: ORIGIN_HOME });
+    reassignWake([left.at]);
+  }
+  return { phoneFailed: 0 };
+}
+
+export async function getJoinDefaults(): Promise<JoinDefaults> {
+  if (!isMock()) return real.getJoinDefaults();
+  return { homeName: '집', transport: 'TRANSIT', prepareMinutes: 60 };
+}
+
 // 공동 약속에서 나만 빠지기 ([나는 빠지기]) — 내 참여 행 · 알람만 사라지고 약속은 다른 참여자에게 그대로 (가짜 모드는 내 목록에서만 뺌, 되살리기 없음)
 //   공동 약속이 아니거나 내가 만든 약속이면 UserError (만든 사람은 지우기를 써야 함)
 //   // L6 안건후보: 만든 사람이 빠지려 할 때 기본안 = 막고 "지워 주세요" 안내
@@ -628,7 +648,7 @@ export async function estimateAppointment(d: AppointmentDraft): Promise<Estimate
     predictedPrepMinutes: prepare.minutes,
     importance: d.importance,
     recurrenceRule: repeatToRrule(d.repeat),
-    groupId: null,
+    groupId: d.groupId && db.groups[d.groupId] ? d.groupId : null, // 함께할 그룹 (친구 9장)
     items: d.items
       .split(',')
       .map((s) => s.trim())
@@ -674,7 +694,7 @@ export async function createAppointment(estimate: Estimate, source = '직접 입
     predictedPrepMinutes: a.predictedPrepMinutes,
     importance: a.importance,
     recurrenceRule: a.recurrenceRule,
-    groupId: null,
+    groupId: a.groupName ? (Object.values(db.groups).find((g) => g.name === a.groupName)?.id ?? null) : null, // 화면 일정에는 그룹 이름만 있어 이름으로 찾음
     items: a.items,
     withWake: a.withWake,
     kinds: ringingKinds(a.alarms).map((x) => x.kind as RingKind), // 만든 알람 종류 — 하나도 없으면 알람 없는 일정

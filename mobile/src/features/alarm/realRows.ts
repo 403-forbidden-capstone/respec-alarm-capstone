@@ -11,7 +11,7 @@ import type { AppointmentDetail } from './types';
 
 // 참여 조건 하나 + 약속 + 그룹 이름 + 이 참여 조건의 알람 전부 (꺼진 것 · 도착 목표 포함). appointments!inner = 약속이 있는 참여 조건만, 약속 날짜로 거를 수 있음
 const PARTICIPANT_SELECT =
-  'participant_id, origin_name, transport_type, est_travel_minutes, travel_source, prepare_minutes, buffer_minutes, appointments!inner(appointment_id, series_id, title, appointment_at, dest_name, dest_lat, dest_lng, importance, recurrence_rule, groups(group_name)), alarms(alarm_id, alarm_type, scheduled_at, intensity, voice_tone, sound_key, vibration, is_enabled, time_source, intensity_source)';
+  'participant_id, origin_name, transport_type, est_travel_minutes, travel_source, prepare_minutes, buffer_minutes, appointments!inner(appointment_id, series_id, title, appointment_at, dest_name, dest_lat, dest_lng, importance, recurrence_rule, creator_id, group_id, groups(group_name)), alarms(alarm_id, alarm_type, scheduled_at, intensity, voice_tone, sound_key, vibration, is_enabled, time_source, intensity_source)';
 
 // 이번만 지운 회차(appointments.exception_kind = 'CANCELED', 서버 appointment-edit)는 행은 남아 있고 알람만 지워져 있음 — H01 하루 일정(알람 없는 일정 줄) · H02 · 회차 목록에 안 보여야 함.
 //   NULL은 `neq`에 안 걸려서 is.null을 같이 씀. 약속 쪽 칸이라 `appointments!inner` 임베드에 referencedTable로 걺 (그래야 참여 조건 줄이 통째로 빠짐).
@@ -33,19 +33,22 @@ type ParticipantQueryRow = {
   travel_source: AppointmentRows['participant']['travel_source'];
   prepare_minutes: number;
   buffer_minutes: number;
-  appointments: AppointmentRows['appointment'] & { groups: { group_name: string } | null };
+  appointments: AppointmentRows['appointment'] & { creator_id?: string | null; group_id?: string | null; groups: { group_name: string } | null };
   alarms: AlarmRow[];
 };
 
-function toRows(row: ParticipantQueryRow, items: ReadonlyMap<string, string[]>): AppointmentRows {
+// me = 부른 사람 (쿼리가 이미 내 참여 조건만 읽음). 남이 만든 공동 약속이면 canEdit false — 만든 사람이 탈퇴해 비었으면 참여자 누구나 고침 (친구 9장 9-자 · 9-아)
+export function toRows(row: ParticipantQueryRow, items: ReadonlyMap<string, string[]>, me: string): AppointmentRows {
   const { appointments: appointment, alarms, ...participant } = row;
-  const { groups, ...appointmentColumns } = appointment;
+  const { groups, creator_id: creatorId, group_id: groupId, ...appointmentColumns } = appointment;
+  const othersShared = groupId != null && creatorId != null && creatorId !== me;
   return {
     appointment: appointmentColumns,
     participant,
     alarms,
     groupName: groups?.group_name ?? null,
     items: items.get(appointment.appointment_id) ?? [],
+    ...(othersShared ? { canEdit: false as const } : {}),
   };
 }
 
@@ -80,7 +83,7 @@ export async function loadAppointmentRows(participantId: string, userId: string)
   const { data, error } = await supabase.from('appointment_participants').select(PARTICIPANT_SELECT).eq('participant_id', participantId).eq('user_id', userId).or(NOT_CANCELED, EMBED).maybeSingle();
   if (error) throw error;
   if (!data) return null;
-  return toRows(data, await fetchItems(userId, [data.appointments.appointment_id]));
+  return toRows(data, await fetchItems(userId, [data.appointments.appointment_id]), userId);
 }
 
 // 같은 것을 약속 id로 (H03 — 화면 주소가 약속 id). 내 것이 아니거나(RLS) 없으면 null
@@ -89,7 +92,7 @@ export async function loadAppointmentRowsByAppointment(appointmentId: string, us
   const { data, error } = await supabase.from('appointment_participants').select(PARTICIPANT_SELECT).eq('appointment_id', appointmentId).eq('user_id', userId).maybeSingle();
   if (error) throw error;
   if (!data) return null;
-  return toRows(data, await fetchItems(userId, [appointmentId]));
+  return toRows(data, await fetchItems(userId, [appointmentId]), userId);
 }
 
 // since(ISO) 이후 약속의 내 참여 조건 전부 (H02 목록)
@@ -105,7 +108,7 @@ export async function loadAppointmentRowsSince(userId: string, since: string): P
   if (error) throw error;
   const rows = data ?? [];
   const items = await fetchItems(userId, rows.map((r) => r.appointments.appointment_id));
-  return rows.map((row) => toRows(row, items));
+  return rows.map((row) => toRows(row, items, userId));
 }
 
 // [from, to) 안 약속의 내 참여 조건 — 하루 일정 한 줄(H01)과 오늘 첫 일정(기상 후 아침 흐름)이 같이 읽음.

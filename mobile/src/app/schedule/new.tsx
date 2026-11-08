@@ -55,6 +55,8 @@ import { useAction } from '@/lib/useAction';
 import { requireUserId } from '@/lib/user';
 import { useLeaveGuard } from '@/lib/useLeaveGuard';
 import { useLoad } from '@/lib/useLoad';
+import { listGroups } from '@/features/social/api';
+import { SHARED_APPOINTMENT_NOTE } from '@/features/social/groupTexts';
 import { colors } from '@/theme';
 
 const IMPORTANCE_OPTIONS = (['LOW', 'NORMAL', 'HIGH'] as const).map((v) => [v, IMPORTANCE_LABEL[v]] as const);
@@ -74,6 +76,8 @@ export default function NewScheduleScreen() {
   const [fromChat] = useState(() => from === 'chat' && foundScheduleDraft() != null);
   const { data: places, error: placesError, reload: reloadPlaces } = useLoad(listPlaces);
   const { data: userPlaces } = useLoad(listUserPlaces); // 자주 가는 곳 칩 — 못 읽으면 칩만 안 보임
+  const { data: myGroups } = useLoad(listGroups); // 함께할 그룹 — 참여 중인 그룹이 없거나 못 읽으면 그 줄을 안 보임
+  const groupOptions: [string, string][] = [['', '없음 (나만)'], ...(myGroups ?? []).map((g): [string, string] => [g.id, g.name])];
   const { data: appointments } = useLoad(() => listAppointments({ everyOccurrence: true })); // 같은 날 앞 일정의 기상 알람을 찾는 데만 씀 — 못 읽어도 폼은 그대로
   const [initial] = useState(() => {
     if (fromChat) {
@@ -359,6 +363,17 @@ export default function NewScheduleScreen() {
             setPlaceOpen(false);
           }}
         />
+        {groupOptions.length > 1 ? (
+          <>
+            {/* 함께할 그룹 — 고르면 공동 약속, 그룹원은 G02 연결 일정에서 보고 각자 [내 알람 만들기] (친구 9장) */}
+            <SelectRow<string> label="함께할 그룹" value={draft.groupId ?? ''} options={groupOptions} onChange={(v) => set('groupId', v || null)} />
+            {draft.groupId ? (
+              <Text variant="small" tone="sub" style={styles.groupNote}>
+                {SHARED_APPOINTMENT_NOTE}
+              </Text>
+            ) : null}
+          </>
+        ) : null}
         <SelectRow<Transport>
           label="이동 수단"
           value={draft.transport}
@@ -633,6 +648,7 @@ const styles = StyleSheet.create({
   title: { marginTop: 8, marginBottom: 4 },
   lead: { marginBottom: 18 },
   optLabel: { marginTop: 12, marginBottom: 8 },
+  groupNote: { marginTop: 6, marginBottom: 4 },
   cardLabel: { marginBottom: 8 },
   alarmNote: { marginTop: 6 },
   wakeNote: { marginTop: -4, marginBottom: 8 },

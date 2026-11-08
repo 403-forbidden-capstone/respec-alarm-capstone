@@ -138,6 +138,8 @@
 - 장소 줄 = 지도 시트(`MapPlaceSheet`, 검색 · 핀 · 현재 위치) + 자주 가는 곳 칩(`listUserPlaces`, 없으면 안 그림). 목적지 반경은 시트 "감지 범위"에서 골라 `draft.destRadiusM` → 요청 `appointment.destination.radius_m`(100~500 정수, 좌표가 있고 골랐을 때만) → `appointments.dest_radius_m`. 장소를 바꾸면 반경도 같이 바뀜(칩은 그 곳의 저장된 반경, 없으면 서버 기본값)
 - 장소 검색 시트("장소" 줄을 누르면 열림): 0.3초 입력이 멈추면 `listPlaces(query, near)` → `place-search`(카카오 키워드) — Edge. `near` = 프로필 집 좌표(`profiles.home_lat` · `home_lng`)가 있으면 가까운 순, 검색어가 비면 최근 장소(최근 90일 약속의 도착지 · 출발지, `near` 안 씀). 줄 아래 글자는 주소 · 분류(`category`, 카카오 값 그대로 통과 — 저장 안 함, 카카오 약관 "응답 저장 · 재사용 불가"는 D5 참고). 가짜 모드는 목업 대학가 장소에서 거름
 - 이동시간 · 알람 시각 · 강도 미리 보기: `alarm-suggest`(카카오 대중교통 포함) — Edge
+- 함께할 그룹(친구 9장): 참여 중인 그룹 목록에서 고르면 요청 `appointment.group_id` → 공동 약속. 줄 아래 '일정 이름 · 시각 · 장소는 그룹원 모두에게 보여요'(메모 칸은 아직 없음)
+- 공동 약속 시각이 바뀐 뒤 확인(`/alarm/changed?id=`): 지금 알람(`getAppointment`) → 바뀐 시각으로 다시 계산(`alarm-suggest`) 나란히, [새 시각으로 맞추기] = 내 조건 그대로 `alarm-commit` — Edge. 공동 약속 변경 알림 `needsConfirm`일 때 열림(알림 받는 곳은 푸시 앱 PR)
 - 저장: `appointments` + `appointment_participants` + `alarms`("알람" 줄에서 고른 종류 — 기상 · 준비 · 출발, 다 끄면 알람 없는 일정, D46)를 한 번에 `alarm-commit` — Edge, 준비물 `todos`(ITEM) — DB → 예약 — 폰
 - 반복: 요일 칩 · 매일 · 평일 → `appointments.recurrence_rule` RRULE (D44, `FREQ=DAILY` · `FREQ=WEEKLY;BYDAY=…` 두 모양만). 저장은 첫 회차만 만들고, 다음 회차는 `alarm-roll`이 앞으로 14일치를 회차마다 새 행(약속 · 참여 · 알람 · 준비물)으로 미리 만듦 (D4 A, 5분마다 보충 · 앱 맞추기 때 본인 몫). 공동 약속은 첫 회차만 · 저장 직후 앱이 `syncNow({ rollSeriesId })`로 바로 넘기고(준비물 저장 뒤), 평소엔 앱이 앞에 올 때 10분에 한 번
 - 계산이 집 위치 없음(프로필에 `home_lat` · `home_lng` 없음)으로 실패하면 안내 카드 [집 정하기] → 장소 시트로 고른 곳을 `saveProfileFields({ home_name, home_lat, home_lng })`로 `profiles`에 저장 → 다시 계산 (토스트로 "장소를 다시 골라"만 뜨던 것을 대신함)
@@ -180,7 +182,7 @@
 
 ### G02 그룹 상세
 - 그룹 · 멤버: `groups` + `group_members` — DB, 기상 공유 동의 `wake_share_opt_in` — DB
-- 연결 일정: `appointments`(`group_id`) — DB
+- 연결 일정: `appointments`(`group_id`, 오늘부터, `creator_id`) — DB + 인원수 · 내 참여 `group_appointment_counts` — RPC. 줄을 누르면 참여자(참여 / 알람 없음, 차단 쌍은 이름만) `appointment_joiners` — RPC. [내 알람 만들기] = `alarm-commit`(`appointment_id` + 내 집 · 수단 · 준비 시간) — Edge, [나는 빠지기] = `appointment-edit` LEAVE — Edge. 지난 약속은 '지난 약속이에요'(버튼 숨김) (친구 9장)
 - 멤버 기상 상태: `get_group_wake` — RPC. 그 그룹 일정이 있는 날만 (D57). 6단계를 3단계로 묶음(`SCHEDULED` '오전 8:50 알람' · `RINGING` · `DISMISSED` · `MISSED` '울렸어요' · `CONFIRMED` '일어났어요 오전 8:08', `NO_ALARM` '알람 없음'), 줄이 없는 멤버는 '공유 안 함' (친구 7장). 멤버 메뉴 [이 사람에게 기상 숨기기 / 보이기] `set_wake_hidden` — RPC, 숨긴 목록 `wake_hides` — DB(내 줄만). 누가 일어나면 DB가 그룹 채널에 새로 고침 신호(Realtime 방송, #160) → 앱이 다시 부름 (지형님 10/15 기술 결정 — `capstone/전체작업계획_v1.md` 8절 Q3, 레포 밖)
 - 초대: 코드 시트 `my_group_code`(만료됐으면 서버가 새 코드 + 7일) — RPC, [새 코드] `regenerate_invite_code` — RPC, 직접 초대 `invite_to_group` — RPC (친구 5장). 그룹장 없음 — 이름 바꾸기 `groups` update · 나가기 `group_members` JOINED → LEFT · 내보내기 다른 사람 행 delete · 알림 끄기 `group_members.notifications_off` — DB
 

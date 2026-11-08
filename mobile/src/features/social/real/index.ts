@@ -20,6 +20,7 @@ export {
   acceptGroupInvite,
   createGroup,
   declineGroupInvite,
+  getAppointmentJoiners,
   getGroup,
   getGroupCode,
   getGroupSummary,

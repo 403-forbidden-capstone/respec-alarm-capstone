@@ -1,11 +1,15 @@
 import { router, useLocalSearchParams } from 'expo-router';
 import { Pressable, StyleSheet, View } from 'react-native';
 
-import { Avatar, Card, Chip, LoadError, Loading, Screen, SectionHeader, Text, toast, TopBar } from '@/components/ui';
+import { Avatar, Button, Card, Chip, LoadError, Loading, Screen, SectionHeader, Text, toast, TopBar } from '@/components/ui';
 import { IMPORTANCE_LABEL } from '@/features/alarm/types';
 import { TextLink } from '@/features/alarm/components/TextLink';
 import { getGroup } from '@/features/social/api';
+import { AppointmentJoinersSheet } from '@/features/social/components/AppointmentJoinersSheet';
 import { GroupCodeSheet } from '@/features/social/components/GroupCodeSheet';
+import { GroupJoinSheet } from '@/features/social/components/GroupJoinSheet';
+import { appointmentStateText, CREATOR_UNKNOWN, joinedCountText } from '@/features/social/groupTexts';
+import { useGroupAppointments } from '@/features/social/hooks/useGroupAppointments';
 import { GroupInviteSheet } from '@/features/social/components/GroupInviteSheet';
 import { GroupMenuSheet } from '@/features/social/components/GroupMenuSheet';
 import { PersonMenuSheet } from '@/features/social/components/PersonMenuSheet';
@@ -53,6 +57,7 @@ function Detail({ group: g, stale, onBack, onChanged }: { group: GroupDetail; st
   const menu = usePersonMenu(onChanged, (personId) => g.members.some((m) => m.person.id === personId && m.wakeHidden));
   const grants = permissionNames(g.grants);
   const groupMenu = useGroupMenu(g, onChanged, () => onBack?.()); // [···] 그룹 메뉴 · [+ 초대] — 그룹장 없음, 멤버 누구나 (친구 5장)
+  const appts = useGroupAppointments(onChanged); // 연결 일정 [내 알람 만들기] · 참여자 · [나는 빠지기] (친구 9장)
 
   // 연결 일정이 여러 개일 수 있어 "내 알람"은 늘 알람 목록으로 (작성자 판단 — 목업은 연결 일정 고정)
   const openMyAlarms = () => router.push('/alarms');
@@ -63,6 +68,8 @@ function Detail({ group: g, stale, onBack, onChanged }: { group: GroupDetail; st
       <GroupMenuSheet {...groupMenu.menuProps} />
       <GroupCodeSheet {...groupMenu.codeProps} />
       <GroupInviteSheet {...groupMenu.inviteProps} />
+      <GroupJoinSheet {...appts.joinProps} />
+      <AppointmentJoinersSheet {...appts.joinersProps} />
       <TopBar
         onBack={onBack}
         screenId="G02"
@@ -100,9 +107,9 @@ function Detail({ group: g, stale, onBack, onChanged }: { group: GroupDetail; st
           {g.appointments.map((a, i) => (
             <Pressable
               key={a.id}
-              onPress={() => router.push({ pathname: '/alarm/[id]', params: { id: a.id } })}
+              onPress={() => void appts.openJoiners(a)}
               accessibilityRole="button"
-              accessibilityLabel={`${a.title} 내 알람 보기`}
+              accessibilityLabel={`${a.title} 참여자 보기`}
               style={({ pressed }) => [styles.linked, i > 0 && styles.divider, pressed && styles.pressed]}
             >
               <View style={styles.between}>
@@ -114,9 +121,17 @@ function Detail({ group: g, stale, onBack, onChanged }: { group: GroupDetail; st
               <Text variant="small" tone="sub" style={styles.sub}>
                 {formatDateShort(a.at)} · {formatTime(a.at)} · {a.place}
               </Text>
-              <Text variant="label" tone="sub" weight={600} style={styles.linkText}>
-                내 알람 보기 ›
+              {/* 참여 / 알람 없음 두 가지 + 인원수, 지난 약속은 그 한 줄만 (친구 9장 9-42 · 9-32) */}
+              <Text variant="small" tone={a.iJoined && !a.past ? undefined : 'sub'} style={styles.sub}>
+                {[a.past ? null : joinedCountText(a.joinedCount), appointmentStateText(a), a.creatorUnknown ? CREATOR_UNKNOWN : null].filter(Boolean).join(' · ')}
               </Text>
+              {a.past ? null : a.iJoined ? (
+                <TextLink label="내 알람 보기 ›" onPress={() => router.push({ pathname: '/alarm/[id]', params: { id: a.id } })} />
+              ) : (
+                <View style={styles.joinButton}>
+                  <Button label="내 알람 만들기" small onPress={() => void appts.openJoin(a)} />
+                </View>
+              )}
             </Pressable>
           ))}
         </Card>
@@ -209,7 +224,7 @@ const styles = StyleSheet.create({
   divider: { borderTopWidth: 1, borderTopColor: colors.line, marginTop: 6, paddingTop: 12 },
   pressed: { opacity: 0.6 },
   sub: { marginTop: 4 },
-  linkText: { marginTop: 6 },
+  joinButton: { marginTop: 8, alignItems: 'flex-start' },
   paragraph: { lineHeight: 20 },
   stale: { marginBottom: 8 },
 });
