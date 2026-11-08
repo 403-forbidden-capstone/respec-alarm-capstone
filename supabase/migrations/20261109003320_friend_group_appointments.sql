@@ -121,6 +121,7 @@ $$;
 -- ---------------------------------------------------------------------
 
 -- 그 그룹 약속마다 참여 수(그 그룹에 아직 참여 중인 사람 중 이 약속에 알람이 켜진 사람)와 내가 참여 중인지.
+-- 차단 쌍은 합계에서 뺌 — appointment_joiners가 그 사람의 참여 여부를 비워 두는데 합계로 되짚을 수 있으면 안 되므로 (9-33)
 -- 참여 조건은 본인 줄만 읽히므로 서버가 세어 줌. 그룹에 참여 중인 사람만 부를 수 있고 아니면 빈 결과
 create function public.group_appointment_counts(p_group_id uuid)
 returns table (
@@ -138,6 +139,7 @@ as $$
           from public.appointment_participants pt
           join public.group_members gm on gm.group_id = a.group_id and gm.user_id = pt.user_id and gm.invite_status = 'JOINED'
           where pt.appointment_id = a.appointment_id
+            and (pt.user_id = (select auth.uid()) or not private.is_blocked_pair((select auth.uid()), pt.user_id))
             and exists (select 1 from public.alarms al where al.participant_id = pt.participant_id and al.is_enabled)),
          exists (select 1
                  from public.appointment_participants pt
@@ -150,11 +152,14 @@ as $$
 $$;
 
 -- 그 약속의 그룹에 참여 중인 사람마다 참여(알람 켜짐) / 알람 없음 두 가지 — 안 누름 · 빠짐 · 끔은 모두 알람 없음.
--- 차단 쌍은 줄은 있되 참여 여부를 비워 둠(이름만 보임, 9-33). 그룹에 참여 중인 사람만 부를 수 있고 아니면 빈 결과
+-- 차단 쌍은 줄은 있되 참여 여부를 안 알려 줌(이름만 보임, 9-33): hidden = true, joined = false. 앱은 hidden이면 참여 여부 글자를 비움
+-- (생성 타입이 칸마다 null 여부를 못 나타내서 joined를 null로 두지 않고 hidden 칸을 따로 둠)
+-- 그룹에 참여 중인 사람만 부를 수 있고 아니면 빈 결과
 create function public.appointment_joiners(p_appointment_id uuid)
 returns table (
   user_id uuid,
-  joined  boolean
+  joined  boolean,
+  hidden  boolean
 )
 language sql
 stable
@@ -162,15 +167,14 @@ security definer
 set search_path = ''
 as $$
   select gm.user_id,
-         case
-           when gm.user_id <> (select auth.uid()) and private.is_blocked_pair((select auth.uid()), gm.user_id) then null
-           else exists (select 1
-                        from public.appointment_participants pt
-                        where pt.appointment_id = a.appointment_id and pt.user_id = gm.user_id
-                          and exists (select 1 from public.alarms al where al.participant_id = pt.participant_id and al.is_enabled))
-         end
+         (not v.hidden) and exists (select 1
+                                    from public.appointment_participants pt
+                                    where pt.appointment_id = a.appointment_id and pt.user_id = gm.user_id
+                                      and exists (select 1 from public.alarms al where al.participant_id = pt.participant_id and al.is_enabled)),
+         v.hidden
   from public.appointments a
   join public.group_members gm on gm.group_id = a.group_id and gm.invite_status = 'JOINED'
+  cross join lateral (select (gm.user_id <> (select auth.uid()) and private.is_blocked_pair((select auth.uid()), gm.user_id)) as hidden) v
   where a.appointment_id = p_appointment_id
     and a.group_id is not null
     and private.is_group_member(a.group_id)

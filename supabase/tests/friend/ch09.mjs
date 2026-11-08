@@ -1,10 +1,11 @@
 // 친구 9장 — 공동 약속 DB 규칙 (친구_시험케이스.md 9장 DB 층 + 11/9 헤드 결정, 항목 이름 앞 번호 = 시험케이스 번호)
-//   이 장 DB에 없는 것: 9-03 · 9-07의 화면 글자 · 9-27 · 9-33 · 9-35 ~ 9-37 · 9-42(앱 · 실기기 층) — 서버 함수 층은 supabase/functions/_shared/edit-group.test.ts
-//   날짜는 시험이 돌 때 항상 미래(2027-03-01) · 과거(2026-10-01)로 고정. 사람은 이 장 전용 계정. db-check 맨 끝에서 돎
+//   이 장 DB에 없는 것: 9-03 · 9-07의 화면 글자 · 9-27 · 9-33 · 9-35 ~ 9-37 · 9-42(앱 · 실기기 층) — 서버 함수 층은 supabase/functions/_shared/edit-run.test.ts · notify.test.ts · push-copy.test.ts
+//   날짜는 시험이 돌 때 항상 미래(2099-03-01) · 과거(2026-10-01)로 고정 (정책이 지금(now())과 비교하므로 시계가 가도 안 바뀌게).
+//   지금 기준으로 바꿔 보는 시험(지난 시각으로 옮기기)만 now()를 씀. 사람은 이 장 전용 계정. db-check 맨 끝에서 돎
 export default async function ch09({ q, as, su, svc, check, expectErr }) {
   const id = (n) => `b9000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
   const NOBODY = 'b9000000-0000-4000-8000-999999999999';
-  const FUTURE = '2027-03-01';
+  const FUTURE = '2099-03-01';
   const PAST = '2026-10-01';
   const at = (hhmm, day = FUTURE) => `${day}T${hhmm}:00+09:00`;
   const iso = (v) => (v == null ? null : new Date(v).toISOString());
@@ -88,7 +89,7 @@ export default async function ch09({ q, as, su, svc, check, expectErr }) {
     const del = async (u) => { await as(u); const r = await q(`delete from public.appointments where appointment_id = $1 returning appointment_id`, [ap]); await su(); return r.length; };
     const delB = await del(B), delC = await del(C);
     await as(A);
-    const moveGroup = await expectErr(() => q(`update public.appointments set group_id = $2 where appointment_id = $1`, [ap, other]), /./);
+    const moveGroup = await expectErr(() => q(`update public.appointments set group_id = $2 where appointment_id = $1`, [ap, other]), /바꿀 수 없음/);
     await su();
     const title = (await q(`select title from public.appointments where appointment_id = $1`, [ap]))[0].title;
     return byB === 0 && byC === 0 && byA === 1 && delB === 0 && delC === 0 && moveGroup === true && title === 'A가 고침' ? true : { byB, byC, byA, delB, delC, moveGroup, title };
@@ -204,8 +205,38 @@ export default async function ch09({ q, as, su, svc, check, expectErr }) {
     const nobody = await q(`select * from public.appointment_joiners($1)`, [ap]);
     await su();
     const pick = (rows, u) => rows.find((x) => x.user_id === u);
+    const shape = (rows, u) => [pick(rows, u).joined, pick(rows, u).hidden];
     return r.length === 4 && joinedOf(A) === true && joinedOf(B) === true && joinedOf(C) === false && joinedOf(D) === false && out.length === 0 && none.length === 0 && nobody.length === 0
-      && fromA.length === 4 && pick(fromA, B).joined === null && pick(fromA, D).joined === false && pick(fromA, A).joined === true && pick(fromB, A).joined === null && pick(fromB, B).joined === true ? true : { r, out, none, nobody, fromA, fromB };
+      && r.every((x) => x.hidden === false)
+      && fromA.length === 4 && JSON.stringify(shape(fromA, B)) === '[false,true]' && JSON.stringify(shape(fromA, D)) === '[false,false]' && JSON.stringify(shape(fromA, A)) === '[true,false]'
+      && JSON.stringify(shape(fromB, A)) === '[false,true]' && JSON.stringify(shape(fromB, B)) === '[true,false]' ? true : { r, out, none, nobody, fromA, fromB };
+  });
+
+  await check('9장 인원수: 차단 쌍은 합계에서 빠짐 — 참여 여부를 비운 사람이 합계로 되짚이지 않게(내 쪽 · 상대 쪽 모두), 내 참여는 늘 셈', async () => {
+    const A = await join_(40, '에이'), B = await join_(41, '비'), C = await join_(42, '씨');
+    const g = await mkGroup(A, [B, C]);
+    const ap = await appt(A, g, at('10:00'));
+    const pa = await part(A, ap), pb = await part(B, ap), pc = await part(C, ap);
+    await wakeAt(A, pa, at('07:00')); await wakeAt(B, pb, at('06:30')); await wakeAt(C, pc, at('06:30'));
+    const before = (await counts(A, g))[0].joined_count;
+    await call(A, 'public.block_user($1)', [B]);
+    const fromA = (await counts(A, g))[0], fromB = (await counts(B, g))[0], fromC = (await counts(C, g))[0];
+    return before === 3 && fromA.joined_count === 2 && fromA.i_joined === true && fromB.joined_count === 2 && fromB.i_joined === true && fromC.joined_count === 3 ? true : { before, fromA, fromB, fromC };
+  });
+
+  await check('9-32(DB): 만든 사람도 공동 약속을 지난 시각으로 못 옮김(오류 42501) — 아직 안 지난 시각으로 옮기기는 됨, 지난 공동 약속은 만든 사람도 못 고침', async () => {
+    const A = await join_(43, '만든이'), B = await join_(44, '참여');
+    const g = await mkGroup(A, [B]);
+    const ap = await appt(A, g, at('10:00'));
+    await as(A);
+    const toPast = await expectErr(() => q(`update public.appointments set appointment_at = now() - interval '1 minute' where appointment_id = $1`, [ap]), /row-level security/);
+    const toSoon = await q(`update public.appointments set appointment_at = now() + interval '1 hour' where appointment_id = $1 returning appointment_id`, [ap]);
+    await su();
+    const past = await appt(A, g, at('10:00', PAST), '지난 약속');
+    await as(A);
+    const editPast = await q(`update public.appointments set title = '고침' where appointment_id = $1 returning appointment_id`, [past]);
+    await su();
+    return toPast === true && toSoon.length === 1 && editPast.length === 0 ? true : { toPast, toSoon, editPast };
   });
 
   // ---- 그룹을 나갈 때 정리 -------------------------------------------------------------------

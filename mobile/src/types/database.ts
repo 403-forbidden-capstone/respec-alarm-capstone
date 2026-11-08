@@ -722,7 +722,7 @@ isOneToOne: false
                            },
 "appointment_joiners":
 { Args: { "p_appointment_id": string }; Returns: {
-              "joined": boolean | null,"user_id": string
+              "hidden": boolean,"joined": boolean,"user_id": string
             }[]
                            },
 "block_user":

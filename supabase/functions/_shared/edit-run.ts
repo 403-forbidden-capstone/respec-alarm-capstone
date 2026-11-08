@@ -42,7 +42,7 @@ import { localDateKey, localDayRange, safeTimeZone } from './tz.ts';
 export type EditCtx = {
   userId: string; // 검증한 로그인 사용자 (요청 본문에서 받지 않음)
   userDb: Db; // 부른 사람의 RLS 클라이언트 — 읽기 · 쓰기 모두
-  service: Db; // service_role — roll_attempts 정리 · 공동 약속 기록 확인만
+  service: Db; // service_role — roll_attempts 정리 · 공동 약속 기록 확인 · 공동 약속 고치기의 참여자 동기화 · 푸시만
   now: Date;
   kakao?: TravelDeps['kakao']; // 장소를 바꿀 때만 씀. 키가 없으면 안 줌
   push?: NotifyOptions; // 공동 약속 푸시를 보낼 때(Expo 액세스 토큰 등). 시험은 가짜 fetch
@@ -224,6 +224,17 @@ async function updateRow(ctx: EditCtx, appointmentId: string, patch: Record<stri
   const query = ctx.userDb.from('appointments').update(patch).eq('appointment_id', appointmentId);
   const done = must<{ appointment_id: string }[]>('appointments update', await (creatorId == null ? query.is('creator_id', null) : query.eq('creator_id', creatorId)).select('appointment_id'));
   if (done.length !== 1) throw new HttpError('NOT_FOUND', '일정을 찾을 수 없어요');
+}
+
+// 공동 약속을 고치거나 지우려면 지금 그 그룹에 참여 중이어야 함. 나갔거나 내보내진 만든 사람은 만든 사람 경로로 약속이 아직 보이고 editorVerdict도 통과하는데,
+//   약속 행 쓰기는 RLS가 막으므로(is_group_member) 그 전에 service로 다른 참여자의 알람을 먼저 바꾸는 일이 없게 쓰기 전에 확인함 (9장 PR 리뷰)
+async function assertGroupMember(ctx: EditCtx, row: { group_id: string | null }): Promise<void> {
+  if (row.group_id == null) return;
+  const mine = must<{ user_id: string }[]>(
+    'group member',
+    await ctx.userDb.from('group_members').select('user_id').eq('group_id', row.group_id).eq('user_id', ctx.userId).eq('invite_status', 'JOINED').limit(1),
+  );
+  if (!mine.length) throw new HttpError('NOT_FOUND', '일정을 찾을 수 없어요');
 }
 
 // 약속 행들을 지움 (참여 조건 · 알람은 CASCADE). 돌려주는 값 = 지워지는 내 알람 id (폰에서 지울 예약)
@@ -408,11 +419,59 @@ async function replanFor(
 //   앞당김과 5분 미만 늦춤은 바로 쓰고, 5분 이상 늦춰지면 그 사람이 확인할 때까지 보류(D67, 9-11 · 9-12 — 그 사람 앱이 푸시의 needsConfirm을 보고 alarm-commit 미리 보기로 다시 계산해 묻고 저장)
 //   이미 울린 알람은 안 건드림(9-16). 장소가 바뀌어 길찾기가 안 되면 그 사람의 기존 알람을 그대로 두고 경고만(9-17). 사람 이름은 응답에 넣지 않음
 //   service 클라이언트로 읽고 쓰되 모든 조회를 그 참여자의 user_id로 좁힘(ctx를 그 사람 몫으로 바꿔서 같은 함수를 부름). DB 오류는 올리고(같은 요청을 다시 보내면 이어서 맞춰짐), 계산 못 하는 사람만 건너뜀
+// 한 참여자를 맞춘 결과. UPDATED = 바로 반영 · HELD = 5분 이상 늦춰져 확인 전 보류 · SKIPPED = 맞출 알람이 없음(다 울림) · NOT_UPDATED = 계산을 못 해 알람을 그대로 둠
+type SyncOutcome = { userId: string; kind: 'UPDATED' | 'HELD' | 'SKIPPED' | 'NOT_UPDATED'; warning?: EditWarning };
+
+const ROUTE_FAILED: EditWarning = { code: 'PARTICIPANT_ROUTE_FAILED', message: '참여자 한 명의 이동시간을 구하지 못해 그 사람의 알람을 그대로 뒀어요. 이동 시간 확인이 필요해요' };
+
+// 참여자를 몇 명씩 한꺼번에 맞출지 — 참여자 한 명마다 DB 약 12번 + 길찾기 1번이라 20명을 하나씩 하면 길찾기가 느린 순간 앱 제한(30초)을 넘음
+export const SYNC_CONCURRENCY = 4;
+
+async function syncOne(ctx: EditCtx, a: { row: EditRow; patched: ReturnType<typeof applyPatch>; oldAt: Date; newAt: Date }, p: ParticipantRow): Promise<SyncOutcome> {
+  const { row, patched, oldAt, newAt } = a;
+  const pctx: EditCtx = { ...ctx, userId: p.user_id, userDb: ctx.service };
+  try {
+    const alarms = await loadAlarms(ctx.service, p.participant_id, p.user_id);
+    const rung = new Set(alarms.filter((x) => Date.parse(x.scheduled_at) <= ctx.now.getTime()).map((x) => x.alarm_id)); // 이미 울린 알람은 안 건드림
+    if (alarms.every((x) => rung.has(x.alarm_id))) return { userId: p.user_id, kind: 'SKIPPED' };
+    const penv = new Env(pctx);
+    const tz = await penv.tz();
+    const snapshot = await snapshotDays(pctx, penv, [oldAt, newAt]);
+    const made = await replanFor(pctx, penv, { row, patched, participant: p, alarms, snapshot, excluded: new Set([row.appointment_id]), oldAt, newAt, tz });
+    // 장소가 바뀌었는데 길찾기가 안 돼 근사값 · 내 이동 기록뿐이면 그 사람의 기존 알람을 그대로 두고 '이동 시간 확인 필요' 경고만 (9-17)
+    const source = made.plan.travel.chosen?.source;
+    if (patched.changed.place && (source === 'ESTIMATE' || source === 'CACHED')) return { userId: p.user_id, kind: 'NOT_UPDATED', warning: ROUTE_FAILED };
+    const diff: AlarmDiff = { insert: made.diff.insert, update: made.diff.update.filter((u) => !rung.has(u.alarm_id)), remove: made.diff.remove.filter((id) => !rung.has(id)) };
+    const changes = alarmChanges(alarms.filter((x) => !rung.has(x.alarm_id)), [...diff.update.map((u) => u.patch), ...diff.insert]);
+    if (needsConfirm(changes)) return { userId: p.user_id, kind: 'HELD' };
+    must(
+      'appointment_participants update',
+      await ctx.service
+        .from('appointment_participants')
+        .update({ est_travel_minutes: made.plan.travelMinutes, travel_source: made.plan.travel.chosen?.source, prepare_minutes: made.plan.prepare.minutes })
+        .eq('participant_id', p.participant_id)
+        .eq('user_id', p.user_id),
+    );
+    await applyAlarmDiff(pctx, p.participant_id, diff, alarms);
+    return { userId: p.user_id, kind: 'UPDATED' };
+  } catch (e) {
+    // 계산을 못 하는 사람(길찾기 장애 · 계산 결과가 맞지 않음)만 건너뜀. DB 오류 같은 나머지는 요청 전체를 실패로 올림 —
+    //   이 시점에 약속 행은 아직 안 바뀌어 있어 같은 요청을 다시 보내면 이어서 맞춰짐 (이미 맞춘 사람은 바뀔 것이 없음)
+    if (!(e instanceof HttpError) || (e.code !== 'ROUTE_UNAVAILABLE' && e.code !== 'UNPROCESSABLE')) throw e;
+    return {
+      userId: p.user_id,
+      kind: 'NOT_UPDATED',
+      warning: e.code === 'ROUTE_UNAVAILABLE' ? ROUTE_FAILED : { code: 'PARTICIPANT_NOT_UPDATED', message: '참여자 한 명의 알람을 다시 계산하지 못해 그대로 뒀어요', detail: e.code },
+    };
+  }
+}
+
+// held = 푸시에 needsConfirm: true를 실을 사람 — 서버가 아직 맞추지 못한 사람(보류 · 계산 못 함). 그 사람 폰이 미리 보기로 다시 계산해 묻고 저장함
 async function syncOtherParticipants(
   ctx: EditCtx,
   a: { row: EditRow; patched: ReturnType<typeof applyPatch>; oldAt: Date; newAt: Date },
 ): Promise<{ summary: ParticipantSync; held: Set<string>; warnings: EditWarning[] }> {
-  const { row, patched, oldAt, newAt } = a;
+  const { row } = a;
   const summary: ParticipantSync = { updated: 0, held: 0, skipped: 0 };
   const held = new Set<string>();
   const warnings: EditWarning[] = [];
@@ -423,52 +482,23 @@ async function syncOtherParticipants(
     await ctx.service.from('appointment_participants').select(PARTICIPANT_COLUMNS).eq('appointment_id', row.appointment_id).neq('user_id', ctx.userId),
   ).filter((p) => joined.has(p.user_id));
 
-  const nowMs = ctx.now.getTime();
-  for (const p of others) {
-    const pctx: EditCtx = { ...ctx, userId: p.user_id, userDb: ctx.service };
-    try {
-      const alarms = await loadAlarms(ctx.service, p.participant_id, p.user_id);
-      const rung = new Set(alarms.filter((x) => Date.parse(x.scheduled_at) <= nowMs).map((x) => x.alarm_id)); // 이미 울린 알람은 안 건드림
-      if (alarms.every((x) => rung.has(x.alarm_id))) {
-        summary.skipped += 1;
-        continue;
-      }
-      const penv = new Env(pctx);
-      const tz = await penv.tz();
-      const snapshot = await snapshotDays(pctx, penv, [oldAt, newAt]);
-      const made = await replanFor(pctx, penv, { row, patched, participant: p, alarms, snapshot, excluded: new Set([row.appointment_id]), oldAt, newAt, tz });
-      // 장소가 바뀌었는데 길찾기가 안 돼 근사값 · 내 이동 기록뿐이면 그 사람의 기존 알람을 그대로 두고 '이동 시간 확인 필요' 경고만 (9-17)
-      const source = made.plan.travel.chosen?.source;
-      if (patched.changed.place && (source === 'ESTIMATE' || source === 'CACHED')) {
-        summary.skipped += 1;
-        warnings.push({ code: 'PARTICIPANT_ROUTE_FAILED', message: '참여자 한 명의 이동시간을 구하지 못해 그 사람의 알람을 그대로 뒀어요. 이동 시간 확인이 필요해요' });
-        continue;
-      }
-      const diff: AlarmDiff = { insert: made.diff.insert, update: made.diff.update.filter((u) => !rung.has(u.alarm_id)), remove: made.diff.remove.filter((id) => !rung.has(id)) };
-      const changes = alarmChanges(alarms.filter((x) => !rung.has(x.alarm_id)), [...diff.update.map((u) => u.patch), ...diff.insert]);
-      if (needsConfirm(changes)) {
-        summary.held += 1;
-        held.add(p.user_id);
-        continue;
-      }
-      must(
-        'appointment_participants update',
-        await ctx.service
-          .from('appointment_participants')
-          .update({ est_travel_minutes: made.plan.travelMinutes, travel_source: made.plan.travel.chosen?.source, prepare_minutes: made.plan.prepare.minutes })
-          .eq('participant_id', p.participant_id)
-          .eq('user_id', p.user_id),
-      );
-      await applyAlarmDiff(pctx, p.participant_id, diff, alarms);
-      summary.updated += 1;
-    } catch (e) {
-      if (!(e instanceof HttpError)) throw e;
+  const outcomes: SyncOutcome[] = [];
+  for (let i = 0; i < others.length; i += SYNC_CONCURRENCY) {
+    // allSettled: 한 명이 실패해도 같은 묶음의 쓰기가 끝난 뒤에 오류를 올림 (요청이 끝난 뒤에 남은 쓰기가 돌지 않게)
+    const settled = await Promise.allSettled(others.slice(i, i + SYNC_CONCURRENCY).map((p) => syncOne(ctx, a, p)));
+    const failed = settled.find((r): r is PromiseRejectedResult => r.status === 'rejected');
+    if (failed) throw failed.reason;
+    outcomes.push(...settled.map((r) => (r as PromiseFulfilledResult<SyncOutcome>).value));
+  }
+  for (const o of outcomes) {
+    if (o.kind === 'UPDATED') summary.updated += 1;
+    else if (o.kind === 'HELD') {
+      summary.held += 1;
+      held.add(o.userId);
+    } else {
       summary.skipped += 1;
-      warnings.push(
-        e.code === 'ROUTE_UNAVAILABLE'
-          ? { code: 'PARTICIPANT_ROUTE_FAILED', message: '참여자 한 명의 이동시간을 구하지 못해 그 사람의 알람을 그대로 뒀어요. 이동 시간 확인이 필요해요' }
-          : { code: 'PARTICIPANT_NOT_UPDATED', message: '참여자 한 명의 알람을 다시 계산하지 못해 그대로 뒀어요', detail: e.code },
-      );
+      if (o.kind === 'NOT_UPDATED') held.add(o.userId);
+      if (o.warning) warnings.push(o.warning);
     }
   }
   return { summary, held, warnings };
@@ -507,6 +537,7 @@ async function pushGroupChange(
 export async function updateAppointment(ctx: EditCtx, req: Extract<EditRequest, { action: 'UPDATE' }>): Promise<UpdateResponse> {
   const target = await loadTarget(ctx, req.appointmentId);
   assertEditor(target, ctx, '고칠');
+  await assertGroupMember(ctx, target.appointment);
   const { appointment: row, participant, alarms } = target;
   if (row.exception_kind === 'CANCELED') throw new HttpError('NOT_FOUND', '일정을 찾을 수 없어요'); // 이번만 지운 회차 — 고치려면 되돌리기(RESTORE)가 먼저
 
@@ -679,6 +710,7 @@ export async function deleteAppointment(ctx: EditCtx, req: Extract<EditRequest, 
   // 없는 행(이미 지움 · 남의 개인 약속)은 성공 — 같은 요청을 두 번 보내면 같은 결과. 남의 것은 RLS로 안 보여서 건드릴 것이 애초에 없음
   if (!target) return { ...common(req.appointmentId), deleted: false, mode: 'NONE', deleted_appointment_ids: [] };
   assertEditor(target, ctx, '지울');
+  await assertGroupMember(ctx, target.appointment);
   const { appointment: row, alarms } = target;
 
   const group = row.group_id != null;

@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
 import { persistAppointment } from './commit.ts';
-import { deleteAppointment, leaveSharedAppointment, restoreAppointment, runEdit, updateAppointment, type EditCtx } from './edit-run.ts';
+import { deleteAppointment, leaveSharedAppointment, restoreAppointment, runEdit, SYNC_CONCURRENCY, updateAppointment, type EditCtx } from './edit-run.ts';
 import type { EditRequest } from './edit-request.ts';
 import type { AppointmentPatch } from './edit.ts';
 import { HttpError } from './errors.ts';
@@ -1117,4 +1117,90 @@ test('#320 F1: 저녁 일정(규칙으로 기상 없음)을 아침으로 옮기�
   assert.equal(kinds(env.db, a), 'ARRIVE,DEPARTURE,PREPARE');
   await updateAppointment(ctxFor(env, A), upd(a, { at: kst('2026-10-29T09:00') }, 'this', true));
   assert.equal(kinds(env.db, a), 'ARRIVE,DEPARTURE,PREPARE,WAKE');
+});
+
+// ---- 9장 PR 리뷰 반영 ----
+
+test('9-18(서버): 그룹을 나간(내보내진) 만든 사람은 약속이 보여도 고치기 · 지우기가 NOT_FOUND — 다른 참여자의 알람은 건드리지 않고 알림도 없음 (RLS가 약속 행을 막기 전에 service가 먼저 쓰지 못하게)', async () => {
+  const { env, id } = await groupCase();
+  // 나가면 DB가 그 사람의 앞으로 약속 참여 조건 · 알람을 지움(트리거) — 약속 행은 남고 만든 사람 칸도 그대로
+  env.db.rows('group_members').find((m) => m.user_id === A)!.invite_status = 'LEFT';
+  env.db.tables.alarms = env.db.rows('alarms').filter((x) => x.user_id !== A);
+  env.db.tables.appointment_participants = env.db.rows('appointment_participants').filter((p) => p.user_id !== A);
+  const bBefore = times(env.db, id, B);
+  const spy = pushSpy();
+  await assert.rejects(
+    () => updateAppointment(ctxFor(env, A, { kakao: fakeKakao().lookup, push: spy.push }), upd(id, { at: kst('2026-10-29T08:50') }, 'this', true)),
+    (e: unknown) => e instanceof HttpError && e.status === 404,
+  );
+  await assert.rejects(() => deleteAppointment(ctxFor(env, A, { push: spy.push }), del(id)), (e: unknown) => e instanceof HttpError && e.status === 404);
+  assert.deepEqual(times(env.db, id, B), bBefore);
+  assert.equal(hm(row(env.db, id)!.appointment_at), '09:00');
+  assert.deepEqual(spy.sent, []);
+});
+
+// 서비스 클라이언트의 참여 조건 update만 DB 오류로 만든 껍데기 (읽기는 그대로)
+function failingParticipantUpdate(env: Env): Db {
+  return {
+    from: (table: string) => {
+      const q = env.db.from(table);
+      return table === 'appointment_participants'
+        ? new Proxy(q, {
+            get: (target, prop) =>
+              prop === 'update' ? () => ({ eq: () => ({ eq: () => Promise.resolve({ data: null, error: { message: 'boom', code: 'XX000' } }) }) }) : (target as never as Record<string | symbol, unknown>)[prop] instanceof Function ? ((target as never as Record<string | symbol, (...a: unknown[]) => unknown>)[prop]).bind(target) : (target as never as Record<string | symbol, unknown>)[prop],
+          })
+        : q;
+    },
+    rpc: (name: string, args?: Record<string, unknown>) => env.db.rpc(name, args),
+  } as unknown as Db;
+}
+
+test('9-14(오류): 참여자를 맞추다 DB 오류가 나면 "건너뜀"으로 삼키지 않고 요청이 실패(500) — 약속 행은 안 바뀌고 푸시도 없어서, 같은 요청을 다시 보내면 이어서 맞춰짐', async () => {
+  const { env, id } = await groupCase();
+  const bBefore = times(env.db, id, B);
+  const spy = pushSpy();
+  const ctx = { ...ctxFor(env, A, { kakao: fakeKakao().lookup, push: spy.push }), service: failingParticipantUpdate(env) };
+  await quiet(() => assert.rejects(() => updateAppointment(ctx, upd(id, { at: kst('2026-10-29T08:50') }, 'this', true)), (e: unknown) => e instanceof HttpError && e.status === 500));
+  assert.equal(hm(row(env.db, id)!.appointment_at), '09:00');   // 약속 행은 그대로
+  assert.deepEqual(times(env.db, id, B), bBefore);
+  assert.deepEqual(spy.sent, []);
+
+  const again = await updateAppointment(ctxFor(env, A, { kakao: fakeKakao().lookup, push: spy.push }), upd(id, { at: kst('2026-10-29T08:50') }, 'this', true)); // 다시 보냄
+  assert.deepEqual(again.participants, { updated: 1, held: 0, skipped: 0 });
+  assert.deepEqual(times(env.db, id, B), bBefore.map((t) => t - min(10)));
+  assert.equal(hm(row(env.db, id)!.appointment_at), '08:50');
+  assert.equal(spy.sent.length, 1);
+});
+
+test('9-17(알림): 이동시간을 못 구해 알람을 그대로 둔 참여자 폰에도 needsConfirm: true — 앞당김 · 5분 미만 늦춤으로 바로 맞춘 사람은 false', async () => {
+  const { env, id } = await groupCase([A, B, 'u-c']);
+  const lookup: TravelLookup = async ({ origin }) => {
+    if (Math.abs(origin.lat - FAR.lat) < 0.001) throw new KakaoError('QUOTA', '시험용 한도 초과'); // B(먼 집, 37.4)만 실패 — u-c(37.38)는 이동이 길어져 앞당겨짐
+    return { minutes: 100, partial: false };
+  };
+  const spy = pushSpy();
+  const res = await updateAppointment(ctxFor(env, A, { kakao: lookup, push: spy.push }), upd(id, { destination: { name: '강남역', lat: 37.4979, lng: 127.0276 } }, 'this', true));
+  assert.deepEqual(res.participants, { updated: 1, held: 0, skipped: 1 });
+  const byUser = Object.fromEntries(spy.sent.map((m) => [m.data.recipientUserId as string, m.data.needsConfirm]));
+  assert.deepEqual(byUser, { [B]: true, 'u-c': false });
+});
+
+test('9-43(동시): 참여자는 4명씩 묶어 한꺼번에 맞춤 — 길찾기가 동시에 4번을 넘지 않고(앱 제한 시간 안에 끝나게), 둘 이상은 겹쳐 돌며, 결과 요약 · 경고 순서는 그대로', async () => {
+  const users = [A, B, ...Array.from({ length: 8 }, (_v, i) => `u-p${i + 1}`)];
+  const { env, id } = await groupCase(users);
+  let inflight = 0;
+  let peak = 0;
+  const lookup: TravelLookup = async ({ origin }) => {
+    inflight += 1;
+    peak = Math.max(peak, inflight);
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    inflight -= 1;
+    if (Math.abs(origin.lat - 37.38) < 0.001) throw new KakaoError('QUOTA', '시험용 한도 초과');
+    return { minutes: 100, partial: false };
+  };
+  const res = await updateAppointment(ctxFor(env, A, { kakao: lookup, push: pushSpy().push }), upd(id, { destination: { name: '강남역', lat: 37.4979, lng: 127.0276 } }, 'this', true));
+  assert.equal(SYNC_CONCURRENCY, 4);
+  assert.ok(peak > 1 && peak <= 4, `동시 길찾기 최대 ${peak}`);
+  assert.deepEqual(res.participants, { updated: 8, held: 0, skipped: 1 });
+  assert.equal(res.warnings.filter((w) => w.code === 'PARTICIPANT_ROUTE_FAILED').length, 1);
 });
