@@ -1,11 +1,13 @@
 // F01 검색 결과를 화면 문구 · 버튼으로 바꾸는 순수 함수 (시험: __tests__/search.test.ts, 시험케이스 2장)
+import { formatWait } from '@/lib/format';
+
 import type { FriendRelation, PeopleSearch, PersonHit } from './types';
 
 export type SearchNotice = { text: string; invite: boolean }; // invite = [카톡으로 초대]를 같이 보일지
 
 // 결과 위에 보일 한 줄. 제한이 가장 먼저 — 누구를 찾든 같은 문구라 "찾을 수 없어요"와 섞이지 않음 (2-37)
 export function searchNotice(search: PeopleSearch): SearchNotice | null {
-  if (search.limitSeconds != null) return { text: `잠시 뒤 다시 해 주세요(${search.limitSeconds}초)`, invite: false };
+  if (search.limitSeconds != null) return { text: `잠시 뒤 다시 해 주세요(${formatWait(search.limitSeconds)})`, invite: false };
   if (search.self) return { text: '내 아이디예요', invite: false };
   if (search.notFound) return { text: '찾을 수 없어요', invite: true }; // 없음 · 탈퇴 · 차단(어느 쪽이든)이 같은 문구 (2-14)
   return null;

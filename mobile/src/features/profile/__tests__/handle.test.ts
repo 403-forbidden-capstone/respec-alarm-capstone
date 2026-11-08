@@ -45,7 +45,12 @@ describe('changeMyHandle', () => {
     expect((await changeMyHandle('kim_01')).status).toBe(status);
   });
 
-  it('모르는 상태 · LIMIT인데 시각이 없으면 오류 — 성공한 줄 알고 넘어가지 않게', async () => {
+  it('LIMIT이 검색 횟수(retry_after_seconds)면 BUSY — 바꾸기 시도도 검색과 같은 1분 10회 · 하루 100회에 셈 (2-53)', async () => {
+    mockFake.answerRpc('change_my_handle', ok({ status: 'LIMIT', retry_after_seconds: 38 }));
+    expect(await changeMyHandle('kim_01')).toEqual({ status: 'BUSY', retryAfterSeconds: 38 });
+  });
+
+  it('모르는 상태 · LIMIT인데 시각도 횟수도 없으면 오류 — 성공한 줄 알고 넘어가지 않게', async () => {
     mockFake.answerRpc('change_my_handle', ok({ status: 'NEW_STATUS' }));
     await expect(changeMyHandle('kim_01')).rejects.toThrow();
     mockFake.answerRpc('change_my_handle', ok({ status: 'LIMIT' }));
@@ -83,11 +88,16 @@ describe('handleChangeMessage — 상태별 안내 문구', () => {
 
   it('INVALID · RESERVED: 규칙을 알려 줌 (2-05 · 2-06 · 2-09)', () => {
     expect(handleChangeMessage({ status: 'INVALID' })).toBe('영문 소문자 · 숫자 · _ 3~20자로 써 주세요');
-    expect(handleChangeMessage({ status: 'RESERVED' })).toBe('respec_로 시작하는 아이디는 쓸 수 없어요');
+    expect(handleChangeMessage({ status: 'RESERVED' })).toBe('쓸 수 없는 아이디예요');
   });
 
   it('LIMIT: "12월 1일 오후 11시부터" 날짜 · 시각 (2-25)', () => {
     expect(handleChangeMessage({ status: 'LIMIT', nextChangeAt: at })).toBe('12월 1일 오후 11시부터 바꿀 수 있어요');
+  });
+
+  it('BUSY: 횟수 제한은 기다릴 시간으로 (초 · 분 · 시간)', () => {
+    expect(handleChangeMessage({ status: 'BUSY', retryAfterSeconds: 38 })).toBe('잠시 뒤 다시 해 주세요(38초)');
+    expect(handleChangeMessage({ status: 'BUSY', retryAfterSeconds: 4000 })).toBe('잠시 뒤 다시 해 주세요(2시간)');
   });
 
   it('OK · SAME은 오류 문구 없음', () => {

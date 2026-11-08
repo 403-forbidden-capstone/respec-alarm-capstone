@@ -22,14 +22,16 @@ export async function getMyProfile(userId: string): Promise<Profile | null> {
 export async function changeMyHandle(input: string): Promise<HandleChange> {
   const { data, error } = await supabase.rpc('change_my_handle', { p_handle: cleanHandle(input) });
   if (error) throw error;
-  const r = (data ?? {}) as { status?: string; handle?: string; next_change_at?: string | null };
+  const r = (data ?? {}) as { status?: string; handle?: string; next_change_at?: string | null; retry_after_seconds?: number };
   const next = r.next_change_at ? parseDbTime(r.next_change_at) : null;
   switch (r.status) {
     case 'OK':
       return { status: 'OK', handle: r.handle ?? '', nextChangeAt: next };
     case 'LIMIT':
-      if (!next) throw new Error('다음 변경 가능 시각이 없어요');
-      return { status: 'LIMIT', nextChangeAt: next };
+      // 30일(next_change_at)과 검색 횟수(retry_after_seconds) 두 가지 — 바꾸기 시도도 검색과 같은 1분 10회 · 하루 100회에 셈
+      if (next) return { status: 'LIMIT', nextChangeAt: next };
+      if (typeof r.retry_after_seconds === 'number') return { status: 'BUSY', retryAfterSeconds: r.retry_after_seconds };
+      throw new Error('LIMIT인데 다음 가능 시각이 없어요');
     case 'SAME':
     case 'INVALID':
     case 'RESERVED':

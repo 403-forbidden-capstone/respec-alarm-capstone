@@ -1,6 +1,6 @@
 // 아이디 바꾸기 결과를 화면 문구로 — 순수 함수 (시험: __tests__/handle.test.ts, 시험케이스 2-04 · 2-07 · 2-25 · 2-50)
 import { parseDbTime } from '@/lib/dbTime';
-import { dateParts, spokenTime } from '@/lib/format';
+import { dateParts, formatWait, spokenTime } from '@/lib/format';
 
 // change_my_handle 결과 — SAME = 지금 아이디와 같음(바뀐 것 없음)
 export type HandleChange =
@@ -9,7 +9,8 @@ export type HandleChange =
   | { status: 'INVALID' }
   | { status: 'RESERVED' }
   | { status: 'TAKEN' }
-  | { status: 'LIMIT'; nextChangeAt: Date };
+  | { status: 'LIMIT'; nextChangeAt: Date } // 30일에 1번
+  | { status: 'BUSY'; retryAfterSeconds: number }; // 검색과 같은 1분 10회 · 하루 100회에 걸림 (바꾸기 시도도 셈)
 
 // "12월 1일 오후 11시" — 한국 시간, 분이 0이 아니면 분까지
 export function nextChangeLabel(at: Date): string {
@@ -25,9 +26,11 @@ export function handleChangeMessage(result: HandleChange): string | null {
     case 'INVALID':
       return '영문 소문자 · 숫자 · _ 3~20자로 써 주세요';
     case 'RESERVED':
-      return 'respec_로 시작하는 아이디는 쓸 수 없어요';
+      return '쓸 수 없는 아이디예요'; // respec_로 시작 · 예약어 10개
     case 'LIMIT':
       return `${nextChangeLabel(result.nextChangeAt)}부터 바꿀 수 있어요`;
+    case 'BUSY':
+      return `잠시 뒤 다시 해 주세요(${formatWait(result.retryAfterSeconds)})`;
     default:
       return null;
   }
