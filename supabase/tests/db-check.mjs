@@ -162,14 +162,14 @@ const MEETING = ['decision_comments', 'decision_votes', 'decision_states'];
 // 서버 전용 표 — RLS는 켜고 정책은 없음 (앱은 못 읽고 못 씀, service_role만). 아래 "반복 다음 회차"에서 따로 확인
 //   rate_limit_events · friend_links = 친구 2장 (제한 기록 · 친구 링크, DB 함수로만) — friend/ch02.mjs에서 따로 확인
 //   reports = 친구 4장 (신고, 넣기는 DB 함수로만 · 읽기는 운영 화면 몫) — friend/ch04.mjs에서 따로 확인
-const SERVER_ONLY = ['roll_attempts', 'rate_limit_events', 'friend_links', 'reports'];
+const SERVER_ONLY = ['roll_attempts', 'rate_limit_events', 'friend_links', 'reports', 'push_tickets'];
 
-await check('모든 public 테이블(앱 25개 — 서버 전용 4개 포함 + 회의 도구 3개)에 RLS가 켜져 있음', async () => {
+await check('모든 public 테이블(앱 26개 — 서버 전용 5개 포함 + 회의 도구 3개)에 RLS가 켜져 있음', async () => {
   const r = await q(`select c.relname, c.relrowsecurity from pg_class c join pg_namespace n on n.oid = c.relnamespace
                      where n.nspname = 'public' and c.relkind = 'r' order by 1`);
   const off = r.filter((x) => !x.relrowsecurity).map((x) => x.relname);
   const app = r.filter((x) => !MEETING.includes(x.relname)).length;
-  return app === 25 && r.length === 28 && off.length === 0 ? true : { count: r.length, app, off };
+  return app === 26 && r.length === 29 && off.length === 0 ? true : { count: r.length, app, off };
 });
 await check('모든 앱 테이블에 정책이 있고(서버 전용 표 제외) anon용 정책은 없음', async () => {
   const r = await q(`select c.relname, count(p.polname) as n,
@@ -783,20 +783,19 @@ await check('regenerate_invite_code: 참여 중 멤버 누구나 새 코드를 �
 // 14. 푸시 토큰
 // ---------------------------------------------------------------------
 
-await check('push_tokens는 본인만 · register_push_token은 같은 폰 토큰을 새 계정으로 옮김 · 이상한 platform 거부', async () => {
+await check('push_tokens는 본인만 읽고(직접 insert · update는 11장부터 회수) · register_push_token은 같은 폰 토큰을 새 계정으로 옮김 · 이상한 platform 거부', async () => {
   await as(A);
-  await q(`insert into public.push_tokens (user_id, token) values ($1, 'ExponentPushToken[aaa]')`, [A]);
+  await q(`select public.register_push_token('ExponentPushToken[aaa]')`);
   await as(B);
   const seen = await q(`select 1 from public.push_tokens`);
-  const upd = await q(`update public.push_tokens set platform = 'web' where token = 'ExponentPushToken[aaa]' returning 1`);
-  const forge = await expectErr(() => q(`insert into public.push_tokens (user_id, token) values ($1, 'x')`, [A]), /row-level security/);
+  const upd = await expectErr(() => q(`update public.push_tokens set platform = 'web' where token = 'ExponentPushToken[aaa]'`), /permission denied for table push_tokens/);
+  const forge = await expectErr(() => q(`insert into public.push_tokens (user_id, token) values ($1, 'x')`, [A]), /permission denied for table push_tokens/);
   await q(`select public.register_push_token('ExponentPushToken[aaa]')`);
   const mine = await q(`select user_id from public.push_tokens`);
   await as(A);
   const aNow = await q(`select 1 from public.push_tokens`);
-  const badPlatform = await expectErr(() => q(`insert into public.push_tokens (user_id, token, platform) values ($1, 'y', 'symbian')`, [A]),
-    /push_tokens_platform_check/);
-  return seen.length === 0 && upd.length === 0 && forge === true && mine.length === 1 && mine[0].user_id === B
+  const badPlatform = await expectErr(() => q(`select public.register_push_token('ExponentPushToken[bbb]', 'symbian')`), /지원하지 않는 플랫폼/);
+  return seen.length === 0 && upd === true && forge === true && mine.length === 1 && mine[0].user_id === B
     && aNow.length === 0 && badPlatform === true ? true : { seen, upd, forge, mine, aNow, badPlatform };
 });
 
@@ -2660,7 +2659,7 @@ const mkAppt = async (creator, title, { group = null, series = null, on = null, 
 const RESET_DELETES = ['alarm_events', 'alarm_suggestions', 'alarms', 'appointment_participants', 'appointments', 'conversation_sessions',
                        'daily_journals', 'daily_records', 'profiles', 'user_edit_logs'];
 //   friend_links · rate_limit_events(친구 2장)는 지금 둠 — 친구 쪽 지우기는 15장(15-타)
-const RESET_KEEPS = ['ai_calls', 'friend_links', 'friends', 'group_members', 'groups', 'push_tokens', 'rate_limit_events', 'roll_attempts', 'routines',
+const RESET_KEEPS = ['ai_calls', 'friend_links', 'friends', 'group_members', 'groups', 'push_tickets', 'push_tokens', 'rate_limit_events', 'roll_attempts', 'routines',
                      'sharing_permissions', 'todos', 'user_places', 'user_questions'];
 const MINE = {
   appointments: `select * from public.appointments where creator_id = $1`,
@@ -2676,6 +2675,7 @@ const MINE = {
   routines: `select * from public.routines where user_id = $1`,
   ai_calls: `select * from public.ai_calls where user_id = $1`,
   user_questions: `select * from public.user_questions where user_id = $1`,
+  push_tickets: `select * from public.push_tickets where user_id = $1`,
   push_tokens: `select * from public.push_tokens where user_id = $1`,
   roll_attempts: `select * from public.roll_attempts where user_id = $1`,
   user_places: `select * from public.user_places where user_id = $1`,
@@ -3011,6 +3011,6 @@ await check('user_places: updated_at이 고칠 때 갱신됨 · 계정을 지우
 // ---------------------------------------------------------------------
 // 장마다 자기 계정을 새로 만들어 앞 검사의 A~E와 섞이지 않게 함. 장이 늘면 아래 목록에 한 줄씩
 const FRIEND_CTX = { q, as, su, svc, check, expectErr, PGlite, AUTH_STUBS, MIG_DIR, readFileSync, readdirSync, join };
-for (const ch of ['ch02', 'ch03', 'ch04', 'ch05', 'ch06']) await (await import(`./friend/${ch}.mjs`)).default(FRIEND_CTX);
+for (const ch of ['ch02', 'ch03', 'ch04', 'ch05', 'ch06', 'ch11']) await (await import(`./friend/${ch}.mjs`)).default(FRIEND_CTX);
 
 report();
