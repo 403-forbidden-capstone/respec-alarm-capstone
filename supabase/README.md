@@ -61,6 +61,12 @@ select vault.create_secret('<service_role 키>', 'service_role_key');
 
 - `get_shared_alarm_appointments(p_owner_id)` (G04) — 조회 권한(친구 ∪ 그룹)을 받은 사람 알람의 약속 제목 · 장소 · 시각. 본인 알람과 약속 없는 알람(일정 없는 알람 · 루틴)은 안 나옴
 - `get_group_wake_status`는 그 그룹에 그날 약속이 있을 때만 행을 줌 (D57)
+- 친구 2장 아이디 · 찾기 (`20261108062757_friend_handle_search.sql`, 이슈 #366) — 새 함수는 jsonb `status`로 돌려주고 앱이 문구로 바꿈
+  - `change_my_handle(p_handle)` — 아이디 바꾸기(`OK` · `SAME` · `INVALID` · `RESERVED` · `TAKEN` · `LIMIT`). 30일 1번, 자동 아이디 첫 변경 · 온보딩 중 변경은 안 셈. 앱이 `profiles.handle`을 직접 update하면 42501
+  - `search_by_handle(p_query)` — 아이디 정확 일치(`FOUND` · `SELF` · `NOT_FOUND` · `LIMIT`), 1분 10회. 차단 · 탈퇴 · 온보딩 전은 없는 아이디와 같은 응답. `find_profile_by_handle`은 이걸 거치는 옛 모양(앱이 옮기면 지움)
+  - `search_related_by_name(p_query)` — 친구 · 같은 그룹 안 닉네임 부분 일치
+  - `my_friend_link(p_renew)` · `open_friend_link(p_token)` — 친구 링크(7일, 다시 만들면 옛 링크 무효). 표 `friend_links` · 제한 기록 `rate_limit_events`는 서버 전용(정책 없음)
+  - 가입하면 아이디가 `respec_` + 4자로 자동으로 생김(`handle` NOT NULL). 닉네임은 앞뒤 공백을 떼고 1~30자
 - `dev_reset_my_data()` (`20261030220000_dev_reset_my_data.sql`) — **개발용**. 부른 사람 본인의 시험 데이터(일정 · 알람 · 울림 기록 · 기록 · 일기 · AI 대화 · 고친 값 기록 · 제안)를 지우고 프로필을 온보딩 전으로 되돌림. 인자 없음 — `auth.uid()` 본인 줄만 건드림. 그룹 일정(`group_id` 있음, 그룹원 누구나 조회)과 다른 사람이 참여 중인 일정은 내 참여 행(과 내 알람)만 지우고 일정은 둠 — 일정째 지우는 건 내가 만든 개인 일정 중 혼자인 것뿐. 친구 · 그룹 · 공유 권한 · 푸시 토큰 · `ai_calls` · `user_questions`(AI 상한 · 질문 예산을 세는 기록) · 루틴 · 할 일은 그대로. 앱은 개발 화면(`/dev/screens`)에서만 부르고 출시 빌드에서는 안 부름
 
 ## 반복 다음 회차 (`20261029075743_alarm_roll.sql`, 이슈 #209)
