@@ -729,7 +729,8 @@ function withGroupPush(env: Env): void {
     const participants = env.db.rows('appointment_participants').filter((p) => p.appointment_id === args.p_appointment_id).map((p) => p.user_id as string);
     const mine = ap && (ap.creator_id === sender || (ap.creator_id == null && participants.includes(sender)));
     if (!ap || !mine || Date.parse(ap.appointment_at as string) <= env.db.now.getTime()) return { status: 'FORBIDDEN' };
-    return { status: 'OK', group_name: '캡스톤팀', appointment_title: ap.title, recipients: participants.filter((u) => u !== sender) };
+    const joined = new Set(env.db.rows('group_members').filter((m) => m.group_id === args.p_group_id && m.invite_status === 'JOINED' && !m.notifications_off).map((m) => m.user_id as string));
+    return { status: 'OK', group_name: '캡스톤팀', appointment_title: ap.title, recipients: participants.filter((u) => u !== sender && joined.has(u)) };
   };
 }
 
@@ -855,6 +856,17 @@ test('9-17: 참여자의 이동시간을 구하지 못하면(길찾기 실패 �
   assert.equal(res.warnings.filter((w) => w.code === 'PARTICIPANT_ROUTE_FAILED').length, 2);
   assert.ok(!JSON.stringify(res.warnings).includes(B));
   assert.equal(spy.sent.length, 2); // 알림은 모두에게
+});
+
+test('동기화 대상: 그룹에 아직 참여 중인 참여자만 — 나간 사람에게 남은 참여 조건은 다시 계산하지도 알리지도 않음', async () => {
+  const { env, id } = await groupCase();
+  env.db.rows('group_members').find((m) => m.user_id === B)!.invite_status = 'LEFT';
+  const before = times(env.db, id, B);
+  const spy = pushSpy();
+  const res = await updateAppointment(ctxFor(env, A, { kakao: fakeKakao().lookup, push: spy.push }), upd(id, { at: kst('2026-10-29T08:50') }, 'this', true));
+  assert.deepEqual(times(env.db, id, B), before);
+  assert.deepEqual(res.participants, { updated: 0, held: 0, skipped: 0 });
+  assert.equal(spy.sent.length, 0);
 });
 
 test('9-39: 제목 · 중요도만 고치면 참여자 알림도 다시 계산도 없음', async () => {

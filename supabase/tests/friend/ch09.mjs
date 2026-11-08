@@ -171,7 +171,11 @@ export default async function ch09({ q, as, su, svc, check, expectErr }) {
     const ap1 = await appt(A, g, at('10:00')), ap2 = await appt(A, g, at('14:00'));
     const pa = await part(A, ap1), pb = await part(B, ap1), pb2 = await part(B, ap2);
     await wakeAt(A, pa, at('07:00')); await wakeAt(B, pb, at('06:30')); await wakeAt(B, pb2, at('12:00'), false);   // 둘째 약속은 알람이 꺼져 있어 참여 아님
+    const pl = await part(L, ap1); await wakeAt(L, pl, at('06:00'));                              // 나가기 전에 참여했던 사람
     await q(`update public.group_members set invite_status = 'LEFT' where group_id = $1 and user_id = $2`, [g, L]);
+    await q(`insert into public.appointment_participants (appointment_id, user_id) values ($1, $2) on conflict do nothing`, [ap1, L]);   // (나간 뒤에도 남은 참여 조건이 있다 해도 세지 않음)
+    const stale = await part(L, ap2).catch(() => null);
+    if (stale) await wakeAt(L, stale, at('11:00'));
     const forA = await counts(A, g), forB = await counts(B, g);
     const byId = (r, ap) => r.find((x) => x.appointment_id === ap);
     const outsiders = [await counts(X, g), await counts(I, g), await counts(L, g)];
@@ -194,10 +198,14 @@ export default async function ch09({ q, as, su, svc, check, expectErr }) {
     const joinedOf = (u) => r.find((x) => x.user_id === u)?.joined;
     const out = await joiners(X, ap);
     const none = await joiners(A, NOBODY);
+    await call(A, 'public.block_user($1)', [B]);                       // 차단 쌍은 줄은 있되 참여 여부가 비어 있음(어느 쪽에서 보든)
+    const fromA = await joiners(A, ap), fromB = await joiners(B, ap);
     await as(null);
     const nobody = await q(`select * from public.appointment_joiners($1)`, [ap]);
     await su();
-    return r.length === 4 && joinedOf(A) === true && joinedOf(B) === true && joinedOf(C) === false && joinedOf(D) === false && out.length === 0 && none.length === 0 && nobody.length === 0 ? true : { r, out, none, nobody };
+    const pick = (rows, u) => rows.find((x) => x.user_id === u);
+    return r.length === 4 && joinedOf(A) === true && joinedOf(B) === true && joinedOf(C) === false && joinedOf(D) === false && out.length === 0 && none.length === 0 && nobody.length === 0
+      && fromA.length === 4 && pick(fromA, B).joined === null && pick(fromA, D).joined === false && pick(fromA, A).joined === true && pick(fromB, A).joined === null && pick(fromB, B).joined === true ? true : { r, out, none, nobody, fromA, fromB };
   });
 
   // ---- 그룹을 나갈 때 정리 -------------------------------------------------------------------
