@@ -161,14 +161,15 @@ const TODAY = `(now() at time zone 'Asia/Seoul')::date`;
 const MEETING = ['decision_comments', 'decision_votes', 'decision_states'];
 // 서버 전용 표 — RLS는 켜고 정책은 없음 (앱은 못 읽고 못 씀, service_role만). 아래 "반복 다음 회차"에서 따로 확인
 //   rate_limit_events · friend_links = 친구 2장 (제한 기록 · 친구 링크, DB 함수로만) — friend/ch02.mjs에서 따로 확인
-const SERVER_ONLY = ['roll_attempts', 'rate_limit_events', 'friend_links'];
+//   reports = 친구 4장 (신고, 넣기는 DB 함수로만 · 읽기는 운영 화면 몫) — friend/ch04.mjs에서 따로 확인
+const SERVER_ONLY = ['roll_attempts', 'rate_limit_events', 'friend_links', 'reports'];
 
-await check('모든 public 테이블(앱 23개 — 서버 전용 3개 포함 + 회의 도구 3개)에 RLS가 켜져 있음', async () => {
+await check('모든 public 테이블(앱 25개 — 서버 전용 4개 포함 + 회의 도구 3개)에 RLS가 켜져 있음', async () => {
   const r = await q(`select c.relname, c.relrowsecurity from pg_class c join pg_namespace n on n.oid = c.relnamespace
                      where n.nspname = 'public' and c.relkind = 'r' order by 1`);
   const off = r.filter((x) => !x.relrowsecurity).map((x) => x.relname);
   const app = r.filter((x) => !MEETING.includes(x.relname)).length;
-  return app === 23 && r.length === 26 && off.length === 0 ? true : { count: r.length, app, off };
+  return app === 25 && r.length === 28 && off.length === 0 ? true : { count: r.length, app, off };
 });
 await check('모든 앱 테이블에 정책이 있고(서버 전용 표 제외) anon용 정책은 없음', async () => {
   const r = await q(`select c.relname, count(p.polname) as n,
@@ -1562,18 +1563,20 @@ await check('호출 기록 · 대화 · 질문: D의 기록을 만들어 둠 (�
 // 17. 관계가 끝날 때 · 탈퇴
 // ---------------------------------------------------------------------
 
-await check('차단: 그 친구 관계의 권한 행이 지워짐 · 차단당한 요청자는 차단을 못 지움 · 아이디 검색에서 숨김', async () => {
+await check('차단(block_user): 그 친구 관계와 권한 행이 지워짐 · 차단당한 사람은 상대 차단을 못 풂 · 아이디 검색에서 숨김 (자세한 건 friend/ch04.mjs)', async () => {
   await as(B);
   await q(`insert into public.sharing_permissions (owner_id, grantee_id, source_type, source_id, can_view_alarm) values ($1, $2, 'FRIEND', $3, true)`, [B, A, fAB]);
-  // 친구 3장부터 상태는 대기 → 친구로만 바뀜(update로 차단 못 함, 3-24). 지금 차단 모양(BLOCKED 행)은 행을 지우고 BLOCKED로 다시 넣어 만듦 — 4장에서 user_blocks로 옮기며 이 검사도 바뀜
+  const [blocked] = await q(`select public.block_user($1) as r`, [A]);
   await su();
-  await q(`delete from public.friends where friend_id = $1`, [fAB]);
-  await q(`insert into public.friends (friend_id, requester_id, addressee_id, status) values ($1, $2, $3, 'BLOCKED')`, [fAB, A, B]);
   const left = await q(`select 1 from public.sharing_permissions where source_type = 'FRIEND' and source_id = $1`, [fAB]);
+  const gone = await q(`select 1 from public.friends where friend_id = $1`, [fAB]);
   await as(A);
-  const del = await q(`delete from public.friends where friend_id = $1 returning 1`, [fAB]);
+  const [del] = await q(`select public.unblock_user($1) as r`, [B]);
   const found = await q(`select * from public.find_profile_by_handle('etion')`);
-  return left.length === 0 && del.length === 0 && found.length === 0 ? true : { left, del, found };
+  await su();
+  const kept = await q(`select 1 from public.user_blocks where blocker_id = $1 and blocked_id = $2`, [B, A]);
+  return blocked.r.status === 'BLOCKED' && left.length === 0 && gone.length === 0 && del.r.status === 'GONE' && kept.length === 1 && found.length === 0
+    ? true : { blocked, left, gone, del, found, kept };
 });
 await check('그룹 나가기(LEFT): 그 그룹에서 받은 · 준 권한 행이 지워지고 기상판에서 사라짐', async () => {
   await as(B);
@@ -2999,6 +3002,6 @@ await check('user_places: updated_at이 고칠 때 갱신됨 · 계정을 지우
 // ---------------------------------------------------------------------
 // 장마다 자기 계정을 새로 만들어 앞 검사의 A~E와 섞이지 않게 함. 장이 늘면 아래 목록에 한 줄씩
 const FRIEND_CTX = { q, as, su, svc, check, expectErr, PGlite, AUTH_STUBS, MIG_DIR, readFileSync, readdirSync, join };
-for (const ch of ['ch02', 'ch03']) await (await import(`./friend/${ch}.mjs`)).default(FRIEND_CTX);
+for (const ch of ['ch02', 'ch03', 'ch04']) await (await import(`./friend/${ch}.mjs`)).default(FRIEND_CTX);
 
 report();
