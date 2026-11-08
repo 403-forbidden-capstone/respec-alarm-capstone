@@ -168,7 +168,7 @@ function MemberRow({
       first={first}
       icon={<Avatar initial={m.person.initial} dot={canSee ? m.state.dot : undefined} />}
       title={m.person.name}
-      sub={canSee ? m.state.text : '기상 상태를 볼 수 없어요'}
+      sub={[m.person.handle, canSee ? m.state.text : '기상 상태를 볼 수 없어요'].filter(Boolean).join(' · ')} // 멤버 줄 @아이디 — 차단 쌍은 서버가 아이디를 비워 이름만
       onPress={m.isMe ? undefined : m.received.viewWake ? openWake : () => toast(wakeReason)}
       rightIsButtons={m.isMe}
       right={m.isMe ? <MiniButton label="내 알람" onPress={onMyAlarm} /> : undefined}

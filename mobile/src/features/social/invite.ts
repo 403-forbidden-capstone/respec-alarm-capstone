@@ -13,7 +13,13 @@ export async function shareInvite(name: string, code: string, expires: string | 
     await Share.share({ message: inviteShareMessage(name, code, expires) });
   } catch (e) {
     if (e instanceof Error && e.name === 'AbortError') return;
-    toast('코드를 길게 눌러 복사해 주세요');
+    // 웹처럼 공유창이 없으면 초대 글을 복사해 둠 — 복사도 안 되면 코드를 길게 눌러 복사 (코드가 보이는 시트에서만 의미 있음)
+    try {
+      await navigator.clipboard.writeText(inviteShareMessage(name, code, expires));
+      toast('초대 글을 복사했어요. 붙여 넣어 보내 주세요');
+    } catch {
+      toast('코드를 길게 눌러 복사해 주세요');
+    }
   }
 }
 
