@@ -16,7 +16,26 @@ export {
   sendFriendRequest,
 } from './friends';
 export { blockUser, listBlocks, submitReport, unblockUser } from './blocks';
-export { createGroup, getGroup, getGroupSummary, joinGroupByCode, listGroups, regenerateInviteCode, setWakeShareOptIn } from './groups';
+export {
+  acceptGroupInvite,
+  createGroup,
+  declineGroupInvite,
+  getGroup,
+  getGroupCode,
+  getGroupSummary,
+  inviteToGroup,
+  joinGroup,
+  leaveGroup,
+  listGroupInvites,
+  listGroups,
+  listInvitableFriends,
+  previewGroupByCode,
+  regenerateInviteCode,
+  removeGroupMember,
+  renameGroup,
+  setGroupNotificationsOff,
+  setWakeShareOptIn,
+} from './groups';
 export { getFriendGrant, getReceived, getRelation, getShareSettings, listRelations, saveShareSettings } from './sharing';
 export { getSharedAlarms, getShareLog, setSharedAlarmEnabled, shiftSharedAlarm } from './sharedAlarms';
 export { getMemberWake, sendWakePing } from './wake';

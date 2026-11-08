@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { checkGroupVisibility, checkSharedRead, checkState, isServerFault } from './oracle.mjs';
+import { checkGroups, checkGroupVisibility, checkMemberRows, checkSharedRead, checkState, isServerFault } from './oracle.mjs';
 import { makeRng } from './rng.mjs';
 
 const A = 'a';
@@ -78,4 +78,35 @@ test('서버 오류와 정상 거절을 가름', () => {
   assert.equal(isServerFault({ code: '42501', message: 'denied' }), false);
   assert.equal(isServerFault({ code: '23505', message: 'dup' }), false);
   assert.equal(isServerFault(null), false);
+});
+
+test('5장 그룹 노출(strict): 초대만 받은 그룹이 보이면 위반, 만든 사람이어도 나간 뒤 보이면 위반(5장 전에만 알려진 동작)', () => {
+  const members = [{ user_id: A, group_id: 'g1', invite_status: 'INVITED' }, { user_id: B, group_id: 'g1', invite_status: 'JOINED' }];
+  const groups = [{ group_id: 'g1', owner_id: B }];
+  assert.deepEqual(checkGroupVisibility({ me: A, visibleGroupIds: ['g1'], members, groups }), []); // 옛 규칙은 초대 중도 허용
+  assert.equal(checkGroupVisibility({ me: A, visibleGroupIds: ['g1'], members, groups, strict: true })[0].kind, 'VIOLATION');
+  assert.deepEqual(checkGroupVisibility({ me: B, visibleGroupIds: ['g1'], members, groups, strict: true }), []);
+  const mine = [{ user_id: A, group_id: 'g2', invite_status: 'LEFT' }];
+  const own = [{ group_id: 'g2', owner_id: A }];
+  assert.equal(checkGroupVisibility({ me: A, visibleGroupIds: ['g2'], members: mine, groups: own, strict: true })[0].kind, 'VIOLATION');
+  assert.equal(checkGroupVisibility({ me: A, visibleGroupIds: ['g2'], members: mine, groups: own })[0].kind, 'KNOWN');
+});
+
+test('5장 구성원 행 노출: 초대만 받은 사람은 내 행 말고 다른 사람 행을 못 봄', () => {
+  const members = [{ user_id: A, group_id: 'g1', invite_status: 'INVITED' }, { user_id: B, group_id: 'g1', invite_status: 'JOINED' }];
+  const rows = [{ group_id: 'g1', user_id: A }, { group_id: 'g1', user_id: B }];
+  assert.equal(checkMemberRows({ me: A, rows, members })[0].kind, 'VIOLATION');
+  assert.deepEqual(checkMemberRows({ me: B, rows, members }), []);
+  assert.deepEqual(checkMemberRows({ me: A, rows: [rows[0]], members }), []);
+});
+
+test('5장 그룹 정적 규칙: 참여 중 0명 · 20명 초과 · 한 사람 10개 초과를 잡음', () => {
+  const j = (u, g) => ({ user_id: u, group_id: g, invite_status: 'JOINED' });
+  const rules = (groups, members) => checkGroups({ groups, members }).map((v) => v.rule);
+  assert.ok(rules([{ group_id: 'g1' }], [{ user_id: A, group_id: 'g1', invite_status: 'LEFT' }]).includes('G-참여 중인 사람이 없는데 그룹이 남음'));
+  const many = Array.from({ length: 21 }, (_, i) => j(`u${i}`, 'g1'));
+  assert.ok(rules([{ group_id: 'g1' }], many).includes('G-참여 중이 20명을 넘음'));
+  const tenPlus = Array.from({ length: 11 }, (_, i) => j(A, `g${i}`));
+  assert.ok(rules(tenPlus.map((m) => ({ group_id: m.group_id })), tenPlus).includes('G-한 사람이 참여 그룹 10개를 넘음'));
+  assert.deepEqual(rules([{ group_id: 'g1' }], [j(A, 'g1')]), []);
 });

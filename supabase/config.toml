@@ -452,6 +452,10 @@ verify_jwt = true
 [functions.voice-turn]
 verify_jwt = true
 
+# 대화 끝 정리 (T2 전체 추출 → 할 일 · 생활 기록 저장) — 앱 [완료] 뒤 로그인 토큰으로 부름
+[functions.voice-commit]
+verify_jwt = true
+
 # 실시간 음성 대화(Gemini Live) 1회용 토큰 — 앱이 로그인 토큰으로 부름
 [functions.voice-live-token]
 verify_jwt = true

@@ -25,6 +25,14 @@ export const RPC = {
   friend_cancel: 'cancel_friend_request',
   friend_remove: 'remove_friend',
 
+  // 5장 (PR #387) — 옛 join_group(join_group_by_invite_code)은 그대로 남아 있고, 새 함수는 group_ 이름으로
+  group_preview: 'preview_group_by_code',
+  group_join: 'join_group',
+  group_invite: 'invite_to_group',
+  group_accept: 'accept_group_invite',
+  group_invites: 'my_group_invites',
+  group_code: 'my_group_code',
+
   // 4장 (PR #380) — 입력 모양은 S1이 만든 뒤 맞춤
   block_user: 'block_user',
   unblock_user: 'unblock_user',
@@ -32,8 +40,6 @@ export const RPC = {
   submit_report: 'submit_report',
 
   // 아직 이름 없음 ( 5 · 6 · 7 · 8 · 9 · 10 · 12장)
-  group_preview: null, // 5장 코드 입력 미리보기
-  leave_group: null, // 5장 나가기
   save_permissions: null, // 6장 저장 (설정⊂조회)
   wake_confirm: null, // 7장 기상 확인
   wake_hide: null, // 7장 특정 멤버에게 기상 숨기기
