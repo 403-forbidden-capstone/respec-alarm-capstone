@@ -269,6 +269,25 @@ isOneToOne: false
                   Relationships: [
                     
                   ]
+                },"friend_links": {
+                  Row: {
+                    "created_at": string,"expires_at": string,"owner_id": string,"token": string
+                  }
+                  Insert: {
+                    "created_at"?: string,"expires_at": string,"owner_id": string,"token": string
+                  }
+                  Update: {
+                    "created_at"?: string,"expires_at"?: string,"owner_id"?: string,"token"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "friend_links_owner_id_fkey"
+      columns: ["owner_id"]
+isOneToOne: true
+      referencedRelation: "profiles"
+      referencedColumns: ["user_id"]
+    }
+                  ]
                 },"friends": {
                   Row: {
                     "accepted_at": string | null,"addressee_id": string,"friend_id": string,"requested_at": string,"requester_id": string,"status": Database["public"]['Enums']["friend_status"]
@@ -340,13 +359,13 @@ isOneToOne: false
                   ]
                 },"profiles": {
                   Row: {
-                    "created_at": string,"default_buffer_minutes": number,"default_prepare_minutes": number,"default_transport": Database["public"]['Enums']["transport_type"],"handle": string | null,"home_lat": number | null,"home_lng": number | null,"home_name": string | null,"home_radius_m": number | null,"intensity_offset": number,"nickname": string,"onboarded_at": string | null,"preferred_sound_key": string | null,"preferred_voice_tone": Database["public"]['Enums']["voice_tone"] | null,"privacy_agreed_at": string | null,"privacy_version": number | null,"profile_image_url": string | null,"timezone": string,"updated_at": string,"user_id": string,"wake_margin": string,"wake_sensitivity": string
+                    "created_at": string,"default_buffer_minutes": number,"default_prepare_minutes": number,"default_transport": Database["public"]['Enums']["transport_type"],"handle": string | null,"handle_changed_at": string | null,"handle_next_change_at": string | null,"home_lat": number | null,"home_lng": number | null,"home_name": string | null,"home_radius_m": number | null,"intensity_offset": number,"nickname": string,"onboarded_at": string | null,"preferred_sound_key": string | null,"preferred_voice_tone": Database["public"]['Enums']["voice_tone"] | null,"privacy_agreed_at": string | null,"privacy_version": number | null,"profile_image_url": string | null,"timezone": string,"updated_at": string,"user_id": string,"wake_margin": string,"wake_sensitivity": string
                   }
                   Insert: {
-                    "created_at"?: string,"default_buffer_minutes"?: number,"default_prepare_minutes"?: number,"default_transport"?: Database["public"]['Enums']["transport_type"],"handle"?: string | null,"home_lat"?: number | null,"home_lng"?: number | null,"home_name"?: string | null,"home_radius_m"?: number | null,"intensity_offset"?: number,"nickname": string,"onboarded_at"?: string | null,"preferred_sound_key"?: string | null,"preferred_voice_tone"?: Database["public"]['Enums']["voice_tone"] | null,"privacy_agreed_at"?: string | null,"privacy_version"?: number | null,"profile_image_url"?: string | null,"timezone"?: string,"updated_at"?: string,"user_id": string,"wake_margin"?: string,"wake_sensitivity"?: string
+                    "created_at"?: string,"default_buffer_minutes"?: number,"default_prepare_minutes"?: number,"default_transport"?: Database["public"]['Enums']["transport_type"],"handle"?: string | null,"handle_changed_at"?: string | null,"handle_next_change_at"?: string | null,"home_lat"?: number | null,"home_lng"?: number | null,"home_name"?: string | null,"home_radius_m"?: number | null,"intensity_offset"?: number,"nickname": string,"onboarded_at"?: string | null,"preferred_sound_key"?: string | null,"preferred_voice_tone"?: Database["public"]['Enums']["voice_tone"] | null,"privacy_agreed_at"?: string | null,"privacy_version"?: number | null,"profile_image_url"?: string | null,"timezone"?: string,"updated_at"?: string,"user_id": string,"wake_margin"?: string,"wake_sensitivity"?: string
                   }
                   Update: {
-                    "created_at"?: string,"default_buffer_minutes"?: number,"default_prepare_minutes"?: number,"default_transport"?: Database["public"]['Enums']["transport_type"],"handle"?: string | null,"home_lat"?: number | null,"home_lng"?: number | null,"home_name"?: string | null,"home_radius_m"?: number | null,"intensity_offset"?: number,"nickname"?: string,"onboarded_at"?: string | null,"preferred_sound_key"?: string | null,"preferred_voice_tone"?: Database["public"]['Enums']["voice_tone"] | null,"privacy_agreed_at"?: string | null,"privacy_version"?: number | null,"profile_image_url"?: string | null,"timezone"?: string,"updated_at"?: string,"user_id"?: string,"wake_margin"?: string,"wake_sensitivity"?: string
+                    "created_at"?: string,"default_buffer_minutes"?: number,"default_prepare_minutes"?: number,"default_transport"?: Database["public"]['Enums']["transport_type"],"handle"?: string | null,"handle_changed_at"?: string | null,"handle_next_change_at"?: string | null,"home_lat"?: number | null,"home_lng"?: number | null,"home_name"?: string | null,"home_radius_m"?: number | null,"intensity_offset"?: number,"nickname"?: string,"onboarded_at"?: string | null,"preferred_sound_key"?: string | null,"preferred_voice_tone"?: Database["public"]['Enums']["voice_tone"] | null,"privacy_agreed_at"?: string | null,"privacy_version"?: number | null,"profile_image_url"?: string | null,"timezone"?: string,"updated_at"?: string,"user_id"?: string,"wake_margin"?: string,"wake_sensitivity"?: string
                   }
                   Relationships: [
                     
@@ -364,6 +383,25 @@ isOneToOne: false
                   Relationships: [
                     {
       foreignKeyName: "push_tokens_user_id_fkey"
+      columns: ["user_id"]
+isOneToOne: false
+      referencedRelation: "profiles"
+      referencedColumns: ["user_id"]
+    }
+                  ]
+                },"rate_limit_events": {
+                  Row: {
+                    "action": string,"created_at": string,"event_id": number,"user_id": string
+                  }
+                  Insert: {
+                    "action": string,"created_at"?: string,"event_id"?: never,"user_id": string
+                  }
+                  Update: {
+                    "action"?: string,"created_at"?: string,"event_id"?: never,"user_id"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "rate_limit_events_user_id_fkey"
       columns: ["user_id"]
 isOneToOne: false
       referencedRelation: "profiles"
@@ -567,6 +605,9 @@ isOneToOne: false
             "can_send_push":
 { Args: { "p_kind": string,"p_sender_id": string,"p_target_id": string }; Returns: boolean
                            },
+"change_my_handle":
+{ Args: { "p_handle": string }; Returns: Json
+                           },
 "delete_decision_comment":
 { Args: { "p_author": string,"p_id": number }; Returns: boolean
                            },
@@ -601,6 +642,12 @@ isOneToOne: false
 "join_group_by_invite_code":
 { Args: { "p_invite_code": string }; Returns: string
                            },
+"my_friend_link":
+{ Args: { "p_renew"?: boolean }; Returns: Json
+                           },
+"open_friend_link":
+{ Args: { "p_token": string }; Returns: Json
+                           },
 "regenerate_invite_code":
 { Args: { "p_group_id": string }; Returns: string
                            },
@@ -614,6 +661,14 @@ isOneToOne: false
                            },
 "roll_insert_occurrence":
 { Args: { "p_alarms": Json,"p_appointment": Json,"p_items": Json,"p_participant": Json }; Returns: string
+                           },
+"search_by_handle":
+{ Args: { "p_query": string }; Returns: Json
+                           },
+"search_related_by_name":
+{ Args: { "p_query": string }; Returns: {
+              "handle": string,"nickname": string,"profile_image_url": string,"relation": string,"user_id": string
+            }[]
                            }
           }
           Enums: {
