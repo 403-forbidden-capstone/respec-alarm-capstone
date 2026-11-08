@@ -1227,10 +1227,10 @@ await check('서버 전용 함수(can_send_push · find_missed_wake_alarms · �
 });
 
 // 배치 (Q5 A) — pg_cron · pg_net은 PGlite에 없어 cron.schedule · net.http_post 흉내로 확인
-await check('배치 예약: wake-check · alarm-roll(반복 다음 회차)을 5분마다 (PGlite에는 pg_cron · pg_net이 없어 확장은 건너뛰고 예약만 흉내에 들어감)', async () => {
+await check('배치 예약: wake-check · alarm-roll(반복 다음 회차)을 5분마다 + friend-requests-expire(친구 3장, 30일 지난 받은 요청 삭제 — 내용은 friend/ch03.mjs) (PGlite에는 pg_cron · pg_net이 없어 확장은 건너뛰고 예약만 흉내에 들어감)', async () => {
   const jobs = await q(`select jobname, schedule, command from cron.job order by jobname`);
   const ext = await q(`select extname from pg_extension where extname in ('pg_cron', 'pg_net')`);
-  return jobs.length === 2 && ext.length === 0
+  return jobs.length === 3 && ext.length === 0 && jobs.some((x) => x.jobname === 'friend-requests-expire')
     && ['wake-check', 'alarm-roll'].every((name) => {
       const j = jobs.find((x) => x.jobname === name);
       return j && j.schedule === '*/5 * * * *' && j.command === `select private.invoke_edge_function('${name}')`;
@@ -1565,8 +1565,10 @@ await check('호출 기록 · 대화 · 질문: D의 기록을 만들어 둠 (�
 await check('차단: 그 친구 관계의 권한 행이 지워짐 · 차단당한 요청자는 차단을 못 지움 · 아이디 검색에서 숨김', async () => {
   await as(B);
   await q(`insert into public.sharing_permissions (owner_id, grantee_id, source_type, source_id, can_view_alarm) values ($1, $2, 'FRIEND', $3, true)`, [B, A, fAB]);
-  await q(`update public.friends set status = 'BLOCKED' where friend_id = $1`, [fAB]);
+  // 친구 3장부터 상태는 대기 → 친구로만 바뀜(update로 차단 못 함, 3-24). 지금 차단 모양(BLOCKED 행)은 행을 지우고 BLOCKED로 다시 넣어 만듦 — 4장에서 user_blocks로 옮기며 이 검사도 바뀜
   await su();
+  await q(`delete from public.friends where friend_id = $1`, [fAB]);
+  await q(`insert into public.friends (friend_id, requester_id, addressee_id, status) values ($1, $2, $3, 'BLOCKED')`, [fAB, A, B]);
   const left = await q(`select 1 from public.sharing_permissions where source_type = 'FRIEND' and source_id = $1`, [fAB]);
   await as(A);
   const del = await q(`delete from public.friends where friend_id = $1 returning 1`, [fAB]);
@@ -2997,6 +2999,6 @@ await check('user_places: updated_at이 고칠 때 갱신됨 · 계정을 지우
 // ---------------------------------------------------------------------
 // 장마다 자기 계정을 새로 만들어 앞 검사의 A~E와 섞이지 않게 함. 장이 늘면 아래 목록에 한 줄씩
 const FRIEND_CTX = { q, as, su, svc, check, expectErr, PGlite, AUTH_STUBS, MIG_DIR, readFileSync, readdirSync, join };
-for (const ch of ['ch02']) await (await import(`./friend/${ch}.mjs`)).default(FRIEND_CTX);
+for (const ch of ['ch02', 'ch03']) await (await import(`./friend/${ch}.mjs`)).default(FRIEND_CTX);
 
 report();
