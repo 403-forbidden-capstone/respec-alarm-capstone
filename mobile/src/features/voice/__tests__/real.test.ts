@@ -8,7 +8,7 @@ import { EdgeError, callEdge } from '@/lib/edge';
 
 import { applyFix } from '../fixes';
 import { clearSavedMarksForUser, SAVED_MARK_TTL_MS } from '../savedMarks';
-import { finishConversation, getConversation, liveSessionId, pickCardPlace, rejectCard, resetVoiceState, retry, saveCard, say, sayVoice, TURN_TIMEOUT_MS } from '../real';
+import { COMMIT_TIMEOUT_MS, finishConversation, flushCommits, getConversation, liveSessionId, pickCardPlace, rejectCard, resetVoiceState, retry, saveCard, say, sayVoice, TURN_TIMEOUT_MS } from '../real';
 
 // 실데이터 대화(real.ts)를 가짜 서버 함수(callEdge) + 가짜 L1 · L2 함수로 시험 — 서버 함수 voice-session · voice-turn은 별도 PR(배포 전엔 이 가짜 응답으로 확인)
 jest.mock('@/lib/edge', () => ({ ...jest.requireActual<typeof import('@/lib/edge')>('@/lib/edge'), callEdge: jest.fn() }));
@@ -113,7 +113,10 @@ const turn = (over: Record<string, unknown> = {}) => ({ rev: 2, turn_seq: 1, nex
 
 // 서버 흉내 — 부른 순서대로 응답을 줌. 값이 Error면 던짐
 let script: unknown[] = [];
-const bodies = () => edge.mock.calls.map(([name, body]) => ({ name, body }));
+// 대화 끝 정리(voice-commit)는 기다리지 않고 따로 가므로 대화 요청 순서에서는 뺌 — 정리 요청은 commitBodies
+const bodies = () => edge.mock.calls.filter(([name]) => name !== 'voice-commit').map(([name, body]) => ({ name, body }));
+const commitBodies = () => edge.mock.calls.filter(([name]) => name === 'voice-commit').map(([, body, options]) => ({ body, options }));
+let commitReplies: unknown[] = [];
 const turnBodies = () => bodies().filter((c) => c.name === 'voice-turn').map((c) => c.body);
 
 beforeEach(async () => {
@@ -122,7 +125,14 @@ beforeEach(async () => {
   mockUser = 'user-1';
   resetVoiceState();
   script = [];
-  edge.mockImplementation(async () => {
+  commitReplies = [];
+  edge.mockImplementation(async (name) => {
+    // 대화 끝 정리는 [완료] 뒤 기다리지 않고 따로 감 — 대화 대본(script) 순서와 섞이지 않게 따로 답함 (기본 DONE)
+    if (name === 'voice-commit') {
+      const r = commitReplies.shift() ?? { status: 'DONE' };
+      if (r instanceof Error) throw r;
+      return r;
+    }
     const next = script.shift();
     if (next instanceof Error) throw next;
     if (next === undefined) throw new Error('서버 응답 대본이 모자람');
@@ -1333,5 +1343,138 @@ describe('⑯ [완료] 뒤 [대화 시작]은 새 대화 (L8 버그 2)', () => {
     const c = await getConversation();
     expect(c.unavailable).toBeNull();
     expect(sessionCalls()).toEqual([true, true]);
+  });
+});
+
+describe('⑰ [완료] 뒤 대화 끝 정리(voice-commit)', () => {
+  const commitKey = 'respec.voice.commit.user-1';
+
+  it('말한 대화를 완료하면 그 세션으로 voice-commit을 한 번 보내고, DONE이면 다시 보낼 목록에서 지움', async () => {
+    script = [session(), turn()];
+    await getConversation();
+    await say('내일 우산 챙겨야 해');
+    await finishConversation();
+    await flushCommits('user-1');
+    expect(commitBodies()).toEqual([{ body: { session_id: 's1' }, options: { timeoutMs: COMMIT_TIMEOUT_MS } }]);
+    expect(await AsyncStorage.getItem(commitKey)).toBeNull();
+  });
+
+  it('한 마디도 안 한 대화는 정리를 보내지 않음', async () => {
+    script = [session()];
+    await getConversation();
+    await finishConversation();
+    await flushCommits('user-1');
+    expect(commitBodies()).toEqual([]);
+  });
+
+  it('정리 요청이 실패하거나 일부만 저장(PARTIAL)되면 남겨 두고, 다음에 대화를 열 때 같은 세션으로 다시 보냄', async () => {
+    script = [session(), turn()];
+    await getConversation();
+    await say('안녕');
+    commitReplies = [new EdgeError('NETWORK')];
+    await finishConversation();
+    await flushCommits('user-1');
+    expect(JSON.parse((await AsyncStorage.getItem(commitKey)) ?? '[]')).toEqual([{ sessionId: 's1', rejected: [] }]);
+
+    commitReplies = [{ status: 'PARTIAL' }];
+    await flushCommits('user-1');
+    expect(JSON.parse((await AsyncStorage.getItem(commitKey)) ?? '[]')).toEqual([{ sessionId: 's1', rejected: [] }]);
+
+    commitReplies = [{ status: 'DONE' }];
+    script = [session({ session_id: 's2', rev: 1 })];
+    await getConversation(); // 새 대화 열기 — 지난 정리를 다시 보냄
+    await flushCommits('user-1');
+    expect(commitBodies().map((c) => c.body)).toEqual([{ session_id: 's1' }, { session_id: 's1' }, { session_id: 's1' }]);
+    expect(await AsyncStorage.getItem(commitKey)).toBeNull();
+  });
+
+  it('다시 해도 안 되는 오류(NOT_FOUND)면 목록에서 지움 — 끝없이 다시 보내지 않음', async () => {
+    script = [session(), turn()];
+    await getConversation();
+    await say('안녕');
+    commitReplies = [new EdgeError('NOT_FOUND')];
+    await finishConversation();
+    await flushCommits('user-1');
+    expect(await AsyncStorage.getItem(commitKey)).toBeNull();
+  });
+});
+
+describe('⑱ [저장 안 함]이 서버에 닿을 때까지 (11/8 음성 실사용: 거절했는데 서버 카드가 READY로 남음)', () => {
+  const commitKey = 'respec.voice.commit.user-1';
+  const stored = async () => JSON.parse((await AsyncStorage.getItem(commitKey)) ?? '[]');
+  async function ready() {
+    script = [session(), turn({ next: 'APP_TASKS', reply: null, cards: [apptCard()] }), turn({ rev: 3, cards: [apptCard({ status: 'READY' })] })];
+    await getConversation();
+    await say('발표 있어');
+  }
+
+  it('정상 거절 → REJECTED 알림, [완료]의 정리 요청에도 거절 카드 번호 (서버는 이미 끝난 카드를 그대로 둠)', async () => {
+    await ready();
+    script = [turn({ rev: 4, reply: null, cards: [apptCard({ status: 'REJECTED' })] })];
+    await rejectCard('c1');
+    expect(turnBodies().at(-1)?.card_action).toEqual({ id: 'c1', action: 'REJECTED' });
+    await finishConversation();
+    await flushCommits('user-1');
+    expect(commitBodies().map((c) => c.body)).toEqual([{ session_id: 's1', rejected_cards: ['c1'] }]);
+  });
+
+  it('거절 요청이 시간 초과면 성공으로 치지 않고 [다시 시도]가 같은 요청을 다시 보냄', async () => {
+    await ready();
+    script = [new EdgeError('TIMEOUT')];
+    await rejectCard('c1');
+    let c = await getConversation();
+    expect(c.unavailable?.code).toBe('TIMEOUT');
+    const failed = turnBodies().at(-1)!;
+    script = [turn({ rev: 4, reply: null, cards: [apptCard({ status: 'REJECTED' })] })];
+    c = await retry();
+    expect(turnBodies().at(-1)).toEqual(failed); // 같은 client_turn_id · rev
+    expect(c.unavailable).toBeNull();
+    expect(c.cards[0].status).toBe('REJECTED');
+  });
+
+  it('거절 요청이 실패한 채 [완료]해도 정리 요청에 실리고, 정리까지 실패하면 다음에 같은 거절과 함께 다시 보냄', async () => {
+    await ready();
+    script = [new EdgeError('TIMEOUT')];
+    await rejectCard('c1');
+    commitReplies = [new EdgeError('NETWORK')];
+    await finishConversation();
+    await flushCommits('user-1');
+    expect(await stored()).toEqual([{ sessionId: 's1', rejected: ['c1'] }]);
+    await flushCommits('user-1');
+    expect(commitBodies().map((c) => c.body)).toEqual([{ session_id: 's1', rejected_cards: ['c1'] }, { session_id: 's1', rejected_cards: ['c1'] }]);
+    expect(await stored()).toEqual([]);
+  });
+
+  it('앞 말이 [다시 시도]를 기다리는 중 [저장 안 함] → 큐에서 기다리다 [완료]로 비워져도 정리 요청에 실림', async () => {
+    await ready();
+    script = [new EdgeError('LLM_UNAVAILABLE')];
+    await say('그리고 하나 더');
+    edge.mockClear();
+    await rejectCard('c1');
+    expect(turnBodies()).toEqual([]); // 앞 요청 뒤에서 기다림
+    await finishConversation();
+    await flushCommits('user-1');
+    expect(turnBodies()).toEqual([]); // [완료]는 막힌 요청을 다시 보내지 않음 — 그래서 예전엔 거절이 사라졌음
+    expect(commitBodies().map((c) => c.body)).toEqual([{ session_id: 's1', rejected_cards: ['c1'] }]);
+  });
+
+  it('[저장 안 함] 직후 [완료](기다리지 않고 연달아) — 거절 알림이 먼저 가고 정리 요청에도 실림', async () => {
+    await ready();
+    script = [turn({ rev: 4, reply: null, cards: [apptCard({ status: 'REJECTED' })] })];
+    await Promise.all([rejectCard('c1'), finishConversation()]);
+    await flushCommits('user-1');
+    expect(turnBodies().at(-1)?.card_action).toEqual({ id: 'c1', action: 'REJECTED' });
+    expect(commitBodies().map((c) => c.body)).toEqual([{ session_id: 's1', rejected_cards: ['c1'] }]);
+  });
+
+  it('[저장]한 카드는 거절로 보내지 않음 (기존 저장 그대로)', async () => {
+    await ready();
+    script = [turn({ rev: 4, reply: { text: '저장했어요.' }, cards: [apptCard({ status: 'SAVED' })] })];
+    await saveCard('c1');
+    await finishConversation();
+    await flushCommits('user-1');
+    expect(mCreate).toHaveBeenCalledTimes(1);
+    expect(turnBodies().at(-1)?.card_action).toMatchObject({ id: 'c1', action: 'SAVED' });
+    expect(commitBodies().map((c) => c.body)).toEqual([{ session_id: 's1' }]);
   });
 });

@@ -7,6 +7,7 @@ import assert from "node:assert/strict";
 import type { AlarmPlan, Appointment, Card, CardAction, Context, Fact, FastExtract, ServerEvent, TaskResults } from "./types.ts";
 import { datesFor } from "./testing.ts";
 import {
+  prepAsked,
   appointmentSummary, applyCardAction as applyCardActionRaw, applyFast, applyTaskResults as applyTaskResultsRaw, checkBasis, checkDigest, dateKo, dayOf, eventAt, expandFast, initTurnState, isoToLocal, itemKey,
   keywordImportance, needKinds, normTitle, pickServerQuestion, questionSubjectKey, titleMatch,
 } from "./turn-core.ts";
@@ -1366,5 +1367,28 @@ describe("알람 근거 (basis) — 앱이 준 값을 검사해 맞을 때만 �
       assert.equal(t.event.pending[0]!.summary, plain);
       assert.equal(card(t.state, "c1").digest?.basis, undefined);
     }
+  });
+});
+
+describe("prepAsked — 준비시간 변경을 사용자가 청했는지 (11/8 음성: 지난 일 + 목표를 +10분 요청으로 읽음)", () => {
+  const u = (text: string) => ({ role: "user", text });
+  const ai = (text: string) => ({ role: "ai", text });
+  it("지난 일 · 목표 · 이유 · 다짐만 있으면 아님", () => {
+    for (const t of [
+      "오늘 아침에 알람을 두 번 미뤘어. 준비하는데 평소보다 15분 더 걸렸고 내일부턴 조금 더 일찍 일어나고 싶어.",
+      "준비하는 데 오래 걸렸어",
+      "내일은 여유 있게 해봐야지",
+      "일찍 일어나고 싶어",
+    ]) assert.equal(prepAsked([u(t)]), false, t);
+  });
+  it("바꿔 달라는 말 · 부탁 · 앞으로의 예상이면 청함", () => {
+    for (const t of ["내일 준비시간을 15분 늘려줘", "준비 시간 10분만 줄여 줘", "준비 시간 좀 더 주세요", "내일은 준비가 더 걸릴 것 같아", "준비시간 원래대로 해", "내일 아침 10분 더 여유 있게 해줘"]) {
+      assert.equal(prepAsked([u(t)]), true, t);
+    }
+  });
+  it("코치가 준비시간을 물은 바로 다음 말은 답 ('응' · '그 정도면 돼')", () => {
+    assert.equal(prepAsked([ai("내일 준비시간을 10분 더 늘려 드릴까요?"), u("응")]), true);
+    assert.equal(prepAsked([ai("오늘 하루 어땠어요?"), u("응")]), false);
+    assert.equal(prepAsked([ai("내일 준비시간을 늘려 드릴까요?"), u("아니"), ai("알겠어요."), u("잘 자")]), true); // 답한 말이 있으면 대화 전체로는 청함(방향은 모델 · DECLINED가 정함)
   });
 });

@@ -206,7 +206,7 @@ export interface T1Output {
 
 export type SaveStatus = "CONFIRMED" | "DECLINED" | "UNCONFIRMED";
 
-/** T2 대화 분석 — 정규형(schemas/extract.v1.json). 지금까지의 대화 전체에서 뽑은 '현재 상태'를 낸다(변화분 아님). */
+/** T2 대화 분석 — 정규형(schemas/extract.v1.json, 대화 끝 정리 칸을 더한 판은 아래 FinalExtract). 지금까지의 대화 전체에서 뽑은 '현재 상태'를 낸다(변화분 아님). */
 export interface Extract {
   schema_version: string; // "2.0-lab.N"
   appointments: {
@@ -253,6 +253,40 @@ export interface FastExtract {
   fact_feedback: Extract["fact_feedback"];
   prep_adjustment: Extract["prep_adjustment"];
   safety_flag: boolean;
+}
+
+/** 사실의 출처 — 입력 방식(글 · Live 음성)과 다른 개념. stated 사용자가 직접 말함 · confirmed 확인 질문에 동의 · inferred AI 짐작 */
+export type FactSource = "stated" | "confirmed" | "inferred";
+
+/** 사용자가 대화에서 말한 실제 행동 한 줄 (T2.v3 behavior) — 시스템이 잰 값(Fact)과 달리 사용자 진술 */
+export type BehaviorKind = "SLEEP" | "WAKE" | "ALARM_RING" | "SNOOZE" | "PREP_START" | "PREP_DURATION" | "PREP_OVER" | "DEPART" | "ARRIVE" | "LATE";
+export interface BehaviorReport {
+  kind: BehaviorKind;
+  /** 그 일이 일어난 달력 날짜 · 시각 (새벽 1시 반에 잤으면 그 새벽의 날짜) */
+  date: LocalDate | null;
+  time: LocalTime | null;
+  /** WAKE 사용자가 직접 말한 늦은 분만 · SNOOZE 횟수 · PREP_DURATION 전체 분 · PREP_OVER 더 걸린 분 · LATE 늦은 분(0 = 제시간) */
+  minutes: number | null;
+  appointment_ref: string | null;
+  appointment_title: string | null;
+  reasons: ReasonTag[];
+  source: FactSource;
+  /** 말이 서로 맞지 않거나 애매해 확인이 필요한 이유 */
+  uncertain: string | null;
+}
+export type Habit = "late_bedtime" | "phone_in_bed" | "snooze_repeat" | "skip_breakfast" | "slow_prep" | "forgot_item" | "late_departure" | "irregular_wake" | "other";
+export type Mood = "good" | "calm" | "tired" | "stressed" | "anxious" | "sad" | "angry" | "mixed";
+export type AlarmEffect = "helpful" | "too_weak" | "too_strong" | "missed" | "annoying_sound" | "wrong_time";
+
+/** T2 대화 끝 전체 추출 출력 (schemas/extract.v2, T2.v3) — Extract + 대화 끝 정리 칸. 공개 모양(structured.v1)은 final-core가 만든다 */
+export interface FinalExtract extends Omit<Extract, "todos"> {
+  todos: (Extract["todos"][number] & { appointment_title: string | null })[];
+  behavior: BehaviorReport[];
+  alarm_feedback: { effect: AlarmEffect; alarm_type: AlarmType | null; date: LocalDate | null; note: string | null; source: FactSource }[];
+  day_review: { events: { text: string; time: LocalTime | null; important: boolean; source: FactSource }[]; memorable: string | null };
+  mood_condition: { mood: Mood[]; valence: number | null; fatigue: number | null; stress: number | null; causes: string[]; source: FactSource };
+  habit_signals: { habit: Habit; note: string; date: LocalDate | null; recurring: boolean; source: FactSource }[];
+  goals_routine: { goals: { habit: Habit; goal_text: string; source: FactSource }[]; wanted_routine: string | null };
 }
 
 // ───────── 자기 전 대화 카드 · 정정 · 앱 일 (설계 메모 2.2 · 5절) ─────────
