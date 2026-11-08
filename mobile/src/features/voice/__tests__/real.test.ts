@@ -8,7 +8,7 @@ import { EdgeError, callEdge } from '@/lib/edge';
 
 import { applyFix } from '../fixes';
 import { clearSavedMarksForUser, SAVED_MARK_TTL_MS } from '../savedMarks';
-import { finishConversation, getConversation, liveSessionId, pickCardPlace, rejectCard, resetVoiceState, retry, saveCard, say, sayVoice, TURN_TIMEOUT_MS } from '../real';
+import { COMMIT_TIMEOUT_MS, finishConversation, flushCommits, getConversation, liveSessionId, pickCardPlace, rejectCard, resetVoiceState, retry, saveCard, say, sayVoice, TURN_TIMEOUT_MS } from '../real';
 
 // 실데이터 대화(real.ts)를 가짜 서버 함수(callEdge) + 가짜 L1 · L2 함수로 시험 — 서버 함수 voice-session · voice-turn은 별도 PR(배포 전엔 이 가짜 응답으로 확인)
 jest.mock('@/lib/edge', () => ({ ...jest.requireActual<typeof import('@/lib/edge')>('@/lib/edge'), callEdge: jest.fn() }));
@@ -113,7 +113,10 @@ const turn = (over: Record<string, unknown> = {}) => ({ rev: 2, turn_seq: 1, nex
 
 // 서버 흉내 — 부른 순서대로 응답을 줌. 값이 Error면 던짐
 let script: unknown[] = [];
-const bodies = () => edge.mock.calls.map(([name, body]) => ({ name, body }));
+// 대화 끝 정리(voice-commit)는 기다리지 않고 따로 가므로 대화 요청 순서에서는 뺌 — 정리 요청은 commitBodies
+const bodies = () => edge.mock.calls.filter(([name]) => name !== 'voice-commit').map(([name, body]) => ({ name, body }));
+const commitBodies = () => edge.mock.calls.filter(([name]) => name === 'voice-commit').map(([, body, options]) => ({ body, options }));
+let commitReplies: unknown[] = [];
 const turnBodies = () => bodies().filter((c) => c.name === 'voice-turn').map((c) => c.body);
 
 beforeEach(async () => {
@@ -122,7 +125,14 @@ beforeEach(async () => {
   mockUser = 'user-1';
   resetVoiceState();
   script = [];
-  edge.mockImplementation(async () => {
+  commitReplies = [];
+  edge.mockImplementation(async (name) => {
+    // 대화 끝 정리는 [완료] 뒤 기다리지 않고 따로 감 — 대화 대본(script) 순서와 섞이지 않게 따로 답함 (기본 DONE)
+    if (name === 'voice-commit') {
+      const r = commitReplies.shift() ?? { status: 'DONE' };
+      if (r instanceof Error) throw r;
+      return r;
+    }
     const next = script.shift();
     if (next instanceof Error) throw next;
     if (next === undefined) throw new Error('서버 응답 대본이 모자람');
@@ -1333,5 +1343,58 @@ describe('⑯ [완료] 뒤 [대화 시작]은 새 대화 (L8 버그 2)', () => {
     const c = await getConversation();
     expect(c.unavailable).toBeNull();
     expect(sessionCalls()).toEqual([true, true]);
+  });
+});
+
+describe('⑰ [완료] 뒤 대화 끝 정리(voice-commit)', () => {
+  const commitKey = 'respec.voice.commit.user-1';
+
+  it('말한 대화를 완료하면 그 세션으로 voice-commit을 한 번 보내고, DONE이면 다시 보낼 목록에서 지움', async () => {
+    script = [session(), turn()];
+    await getConversation();
+    await say('내일 우산 챙겨야 해');
+    await finishConversation();
+    await flushCommits('user-1');
+    expect(commitBodies()).toEqual([{ body: { session_id: 's1' }, options: { timeoutMs: COMMIT_TIMEOUT_MS } }]);
+    expect(await AsyncStorage.getItem(commitKey)).toBeNull();
+  });
+
+  it('한 마디도 안 한 대화는 정리를 보내지 않음', async () => {
+    script = [session()];
+    await getConversation();
+    await finishConversation();
+    await flushCommits('user-1');
+    expect(commitBodies()).toEqual([]);
+  });
+
+  it('정리 요청이 실패하거나 일부만 저장(PARTIAL)되면 남겨 두고, 다음에 대화를 열 때 같은 세션으로 다시 보냄', async () => {
+    script = [session(), turn()];
+    await getConversation();
+    await say('안녕');
+    commitReplies = [new EdgeError('NETWORK')];
+    await finishConversation();
+    await flushCommits('user-1');
+    expect(JSON.parse((await AsyncStorage.getItem(commitKey)) ?? '[]')).toEqual(['s1']);
+
+    commitReplies = [{ status: 'PARTIAL' }];
+    await flushCommits('user-1');
+    expect(JSON.parse((await AsyncStorage.getItem(commitKey)) ?? '[]')).toEqual(['s1']);
+
+    commitReplies = [{ status: 'DONE' }];
+    script = [session({ session_id: 's2', rev: 1 })];
+    await getConversation(); // 새 대화 열기 — 지난 정리를 다시 보냄
+    await flushCommits('user-1');
+    expect(commitBodies().map((c) => c.body)).toEqual([{ session_id: 's1' }, { session_id: 's1' }, { session_id: 's1' }]);
+    expect(await AsyncStorage.getItem(commitKey)).toBeNull();
+  });
+
+  it('다시 해도 안 되는 오류(NOT_FOUND)면 목록에서 지움 — 끝없이 다시 보내지 않음', async () => {
+    script = [session(), turn()];
+    await getConversation();
+    await say('안녕');
+    commitReplies = [new EdgeError('NOT_FOUND')];
+    await finishConversation();
+    await flushCommits('user-1');
+    expect(await AsyncStorage.getItem(commitKey)).toBeNull();
   });
 });
