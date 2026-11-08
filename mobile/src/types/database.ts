@@ -602,11 +602,20 @@ isOneToOne: false
                 }
           }
           Functions: {
-            "can_send_push":
+            "accept_friend_request":
+{ Args: { "p_requester_id": string }; Returns: Json
+                           },
+"can_send_push":
 { Args: { "p_kind": string,"p_sender_id": string,"p_target_id": string }; Returns: boolean
+                           },
+"cancel_friend_request":
+{ Args: { "p_addressee_id": string }; Returns: Json
                            },
 "change_my_handle":
 { Args: { "p_handle": string }; Returns: Json
+                           },
+"decline_friend_request":
+{ Args: { "p_requester_id": string }; Returns: Json
                            },
 "delete_decision_comment":
 { Args: { "p_author": string,"p_id": number }; Returns: boolean
@@ -654,6 +663,9 @@ isOneToOne: false
 "register_push_token":
 { Args: { "p_platform"?: string,"p_token": string }; Returns: undefined
                            },
+"remove_friend":
+{ Args: { "p_user_id": string }; Returns: Json
+                           },
 "roll_due_series":
 { Args: { "p_limit"?: number,"p_now"?: string }; Returns: {
               "kind": string,"series_id": string,"template_id": string,"user_id": string
@@ -669,6 +681,9 @@ isOneToOne: false
 { Args: { "p_query": string }; Returns: {
               "handle": string,"nickname": string,"profile_image_url": string,"relation": string,"user_id": string
             }[]
+                           },
+"send_friend_request":
+{ Args: { "p_target_id": string }; Returns: Json
                            }
           }
           Enums: {

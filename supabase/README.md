@@ -67,6 +67,11 @@ select vault.create_secret('<service_role 키>', 'service_role_key');
   - `search_related_by_name(p_query)` — 친구 · 같은 그룹 안 닉네임 부분 일치
   - `my_friend_link(p_renew)` · `open_friend_link(p_token)` — 친구 링크(7일, 다시 만들면 옛 링크 무효). 표 `friend_links` · 제한 기록 `rate_limit_events`는 서버 전용(정책 없음)
   - 가입하면 아이디가 `respec_` + 4자로 자동으로 생기고 빈 아이디는 채움(NOT NULL은 앱 타입이 옮긴 뒤). 닉네임은 앞뒤 공백(탭 · 줄바꿈 포함)을 떼고 1~30자, 가입 때 이름이 공백뿐이면 이메일 앞부분 · '사용자'
+- 친구 3장 친구 관계 (`20261108180042_friend_relations.sql`, 이슈 #372) — 상태 값으로 돌려주고 앱이 문구로 바꿈. 푸시는 11장
+  - `send_friend_request(p_target_id)`(`REQUESTED` · `ACCEPTED`(맞요청 자동 수락) · `ALREADY_REQUESTED` · `ALREADY_FRIEND` · `SELF` · `NOT_FOUND` · `LIMIT` · `FRIEND_LIMIT`) — 1분 10회 + 하루 50회(행을 만든 요청만, 취소해도 안 줄어듦), 친구 100명 상한
+  - `accept_friend_request(p_requester_id)`(`ACCEPTED` · `ALREADY_FRIEND` · `GONE` · `FRIEND_LIMIT`) · `decline_friend_request(p_requester_id)`(`DECLINED` · `GONE`) · `cancel_friend_request(p_addressee_id)`(`CANCELED` · `GONE`) · `remove_friend(p_user_id)`(`REMOVED` · `GONE`) — 거절 · 취소 · 끊기는 행 삭제, 끊기는 친구 출처 권한만 지움
+  - `friends` 상태는 대기 → 친구로만 바뀌고(수락 되돌리기 · 차단으로 바꾸기는 42501) 수락 시각은 서버가 넣음. 같은 사람이 끼는 동작은 사람별 잠금(`private.lock_friend_pair`)으로 한 줄씩. 받은 요청은 30일 뒤 5분 배치(`friend-requests-expire`)가 지움
+  - 앱이 `friends`를 직접 insert · update · delete 하는 옛 길은 15장까지 열려 있고 그 길은 요청 제한 · 100명 상한을 안 거침
 - `dev_reset_my_data()` (`20261030220000_dev_reset_my_data.sql`) — **개발용**. 부른 사람 본인의 시험 데이터(일정 · 알람 · 울림 기록 · 기록 · 일기 · AI 대화 · 고친 값 기록 · 제안)를 지우고 프로필을 온보딩 전으로 되돌림. 인자 없음 — `auth.uid()` 본인 줄만 건드림. 그룹 일정(`group_id` 있음, 그룹원 누구나 조회)과 다른 사람이 참여 중인 일정은 내 참여 행(과 내 알람)만 지우고 일정은 둠 — 일정째 지우는 건 내가 만든 개인 일정 중 혼자인 것뿐. 친구 · 그룹 · 공유 권한 · 푸시 토큰 · `ai_calls` · `user_questions`(AI 상한 · 질문 예산을 세는 기록) · 루틴 · 할 일은 그대로. 앱은 개발 화면(`/dev/screens`)에서만 부르고 출시 빌드에서는 안 부름
 
 ## 반복 다음 회차 (`20261029075743_alarm_roll.sql`, 이슈 #209)
