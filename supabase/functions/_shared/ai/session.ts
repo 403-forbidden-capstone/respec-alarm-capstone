@@ -9,7 +9,7 @@ import type { AskedQuestion, FixRecord, TurnState } from './turn-core.ts';
 import { dbMs, type RefsOut } from './context-core.ts';
 import { seoulIso } from './context.ts';
 import { MAX_AI_CALLS_PER_DAY, MAX_SESSIONS_PER_DAY, MAX_USER_TURNS } from './opening.ts';
-import type { Act, Card, Context, ServerEvent, TurnLimits } from './types.ts';
+import type { Act, Card, Context, FinalExtract, ServerEvent, TurnLimits } from './types.ts';
 
 export interface SessionDeps {
   userId: string;
@@ -74,6 +74,19 @@ export interface ServerState {
   counts: { user_turns: number; llm_calls: number };
   ended: boolean;
   end_reason: string | null;
+  /** 대화 끝 정리(voice-commit) 진행 — 없으면 아직 안 함. 추출 결과를 여기 둬서 저장만 실패했을 때 다시 시도가 T2를 또 부르지 않음 */
+  commit?: CommitState | null;
+}
+
+export interface CommitState {
+  /** RUNNING 처리 중 · DONE 끝 · PARTIAL 일부 저장 실패(다시 시도 가능) · FAILED 추출 실패(다시 시도 가능) */
+  status: 'RUNNING' | 'DONE' | 'PARTIAL' | 'FAILED';
+  attempts: number;
+  started_at: string;
+  finished_at: string | null;
+  extract: FinalExtract | null;
+  out: unknown;
+  error: string | null;
 }
 
 export interface SessionRow {

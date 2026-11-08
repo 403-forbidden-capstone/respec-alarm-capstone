@@ -80,23 +80,6 @@ describe('F01 친구 · 요청', () => {
     expect((await real.listFriendRequests()).map((p) => p.name)).toEqual(['준성']);
   });
 
-  it('수락: 받은 사람이 나인 대기 요청을 ACCEPTED로, 수락 시각을 같이 씀', async () => {
-    mockFake.answer('friends.update', ok([{ friend_id: 'f' }]));
-    await real.acceptFriend(JUNSEONG);
-    const [op] = mockFake.opsOf('friends', 'update');
-    expect(op.payload).toMatchObject({ status: 'ACCEPTED' });
-    expect(typeof (op.payload as { accepted_at: string }).accepted_at).toBe('string');
-    expect(op.filters).toEqual([
-      ['eq', 'requester_id', JUNSEONG],
-      ['eq', 'addressee_id', ME],
-      ['eq', 'status', 'PENDING'],
-    ]);
-  });
-
-  it('이미 처리된(바뀐 행이 없는) 요청이면 이유를 알림', async () => {
-    mockFake.answer('friends.update', ok([]));
-    await expect(real.acceptFriend(JUNSEONG)).rejects.toThrow(UserError);
-  });
 });
 
 describe('G01 · H01 · G02 그룹', () => {
@@ -162,7 +145,7 @@ describe('G01 · H01 · G02 그룹', () => {
     mockFake.answerRpc('get_group_wake_status', ok(wake));
     mockFake.answer('appointments.select', ok([{ appointment_id: 'ap1', title: '팀 주간회의', appointment_at: '2026-10-20T01:00:00.000Z', dest_name: '세종대학교', importance: 'NORMAL' }]));
     const g = await real.getGroup(GROUP);
-    expect(g).toMatchObject({ id: GROUP, name: '캡스톤팀', since: '2026년 3월부터 함께하는 중', inviteCode: 'ABCD1234', isOwner: false, wakeShareOptIn: true });
+    expect(g).toMatchObject({ id: GROUP, name: '캡스톤팀', since: '2026년 4월부터 함께하는 중', wakeShareOptIn: true, notificationsOff: false });
     expect(g?.appointments).toEqual([{ id: 'ap1', title: '팀 주간회의', at: new Date('2026-10-20T01:00:00.000Z'), place: '세종대학교', importance: 'NORMAL' }]);
     const [query] = mockFake.opsOf('appointments', 'select');
     expect(query.filters).toEqual([
@@ -175,12 +158,6 @@ describe('G01 · H01 · G02 그룹', () => {
       ['준성', false, false], // 동의가 꺼져 있어 기상 조회가 효력 없음
       ['지형', false, true],
     ]);
-  });
-
-  it('내가 만든 그룹이면 isOwner', async () => {
-    mockFake.answer('groups.select', ok(groups.map((g) => ({ ...g, owner_id: ME }))));
-    mockFake.answerRpc('get_group_wake_status', ok([]));
-    expect((await real.getGroup(GROUP))?.isOwner).toBe(true);
   });
 });
 
@@ -589,83 +566,6 @@ describe('G04 공유받은 알람', () => {
 });
 
 describe('새 UI용 함수', () => {
-  it('아이디 검색: @ · 대소문자 · 공백을 맞춰 부르고 나와의 관계도 알려 줌', async () => {
-    mockFake.answerRpc('find_profile_by_handle', ok([{ user_id: SUYEON, nickname: '수연', handle: 'demo_suyeon', profile_image_url: null }]));
-    const found = await real.searchByHandle('  @Demo_Suyeon ');
-    expect(found).toMatchObject({ person: { id: SUYEON, name: '수연', handle: '@demo_suyeon' }, relation: 'FRIEND' });
-    expect(mockFake.rpcCalls.find((c) => c.name === 'find_profile_by_handle')?.args).toEqual({ p_handle: 'demo_suyeon' });
-  });
-
-  it('관계 표시: 받은 요청 · 나 · 아무 사이도 아님', async () => {
-    const row = (user_id: string) => ok([{ user_id, nickname: 'x', handle: 'xxx', profile_image_url: null }]);
-    mockFake.answerRpc('find_profile_by_handle', row(JUNSEONG));
-    expect((await real.searchByHandle('xxx'))?.relation).toBe('RECEIVED');
-    mockFake.answerRpc('find_profile_by_handle', row(ME));
-    expect((await real.searchByHandle('xxx'))?.relation).toBe('SELF');
-    mockFake.answerRpc('find_profile_by_handle', row('99999999-0000-4000-8000-000000000000'));
-    expect((await real.searchByHandle('xxx'))?.relation).toBe('NONE');
-    mockFake.answer('friends.select', ok([{ ...friends[2], requester_id: ME, addressee_id: JUNSEONG }]));
-    mockFake.answerRpc('find_profile_by_handle', row(JUNSEONG));
-    expect((await real.searchByHandle('xxx'))?.relation).toBe('SENT');
-  });
-
-  it('아이디 모양이 아니면 DB에 묻지 않고 null, 없으면 null', async () => {
-    expect(await real.searchByHandle('ab')).toBeNull();
-    expect(await real.searchByHandle('한글아이디')).toBeNull();
-    expect(mockFake.rpcCalls.filter((c) => c.name === 'find_profile_by_handle')).toHaveLength(0);
-    mockFake.answerRpc('find_profile_by_handle', ok([]));
-    expect(await real.searchByHandle('nobody_here')).toBeNull();
-  });
-
-  it('친구 요청: 내가 PENDING으로 만듦, 이미 있는 사이 · 나 자신은 이유를 알림', async () => {
-    await real.sendFriendRequest('u9');
-    expect(mockFake.opsOf('friends', 'insert')[0].payload).toEqual({ requester_id: ME, addressee_id: 'u9', status: 'PENDING' });
-    mockFake.answer('friends.insert', { data: null, error: { code: '23505', message: 'duplicate key' } });
-    await expect(real.sendFriendRequest('u9')).rejects.toThrow(new UserError('이미 친구이거나 요청이 진행 중이에요'));
-    mockFake.answer('friends.insert', { data: null, error: { code: '23503', message: 'fk' } });
-    await expect(real.sendFriendRequest('u9')).rejects.toThrow(new UserError('사용자를 찾을 수 없어요'));
-    mockFake.answer('friends.insert', { data: null, error: { code: 'XX000', message: 'boom' } });
-    await expect(real.sendFriendRequest('u9')).rejects.toMatchObject({ message: 'boom' });
-    const before = mockFake.opsOf('friends', 'insert').length;
-    await expect(real.sendFriendRequest(ME)).rejects.toThrow(UserError);
-    expect(mockFake.opsOf('friends', 'insert')).toHaveLength(before);
-  });
-
-  it('그룹 만들기: 이름을 다듬어 만든 사람(나)으로 넣고 초대 코드를 돌려줌', async () => {
-    mockFake.answer('groups.insert', ok({ group_id: 'g-new', invite_code: 'ZZZZ9999' }));
-    await expect(real.createGroup('  스터디 모임 ')).resolves.toEqual({ id: 'g-new', inviteCode: 'ZZZZ9999' });
-    const [op] = mockFake.opsOf('groups', 'insert');
-    expect(op.payload).toEqual({ group_name: '스터디 모임', owner_id: ME });
-    expect(op.returning).toBe(true);
-    // 만든 사람이 참여(JOINED)로 들어가는 것은 DB 트리거(add_owner_as_member)가 함 — 앱은 구성원 행을 쓰지 않음
-    expect(mockFake.opsOf('group_members', 'insert')).toHaveLength(0);
-  });
-
-  it('그룹 이름이 비었거나 50자를 넘으면 DB에 가지 않음', async () => {
-    await expect(real.createGroup('   ')).rejects.toThrow(UserError);
-    await expect(real.createGroup('가'.repeat(51))).rejects.toThrow(UserError);
-    expect(mockFake.opsOf('groups', 'insert')).toHaveLength(0);
-  });
-
-  it('코드로 참여: 코드를 다듬어 DB 함수에 맡기고 그룹 id를 돌려줌, 틀린 코드는 이유를 알림', async () => {
-    mockFake.answerRpc('join_group_by_invite_code', ok(GROUP));
-    await expect(real.joinGroupByCode(' abcd1234 ')).resolves.toBe(GROUP);
-    expect(mockFake.rpcCalls.find((c) => c.name === 'join_group_by_invite_code')?.args).toEqual({ p_invite_code: 'abcd1234' });
-    mockFake.answerRpc('join_group_by_invite_code', { data: null, error: { code: 'P0001', message: '초대 코드가 맞지 않음' } });
-    await expect(real.joinGroupByCode('nope')).rejects.toThrow(new UserError('초대 코드가 맞지 않아요'));
-    mockFake.answerRpc('join_group_by_invite_code', { data: null, error: { code: '42501', message: 'login' } });
-    await expect(real.joinGroupByCode('nope')).rejects.toMatchObject({ message: 'login' });
-    await expect(real.joinGroupByCode('  ')).rejects.toThrow(UserError);
-  });
-
-  it('초대 코드 다시 만들기: 만든 사람만 (아니면 이유를 알림)', async () => {
-    mockFake.answerRpc('regenerate_invite_code', ok('NEWCODE1'));
-    await expect(real.regenerateInviteCode(GROUP)).resolves.toBe('NEWCODE1');
-    expect(mockFake.rpcCalls.find((c) => c.name === 'regenerate_invite_code')?.args).toEqual({ p_group_id: GROUP });
-    mockFake.answerRpc('regenerate_invite_code', { data: null, error: { code: '42501', message: 'owner only' } });
-    await expect(real.regenerateInviteCode(GROUP)).rejects.toThrow(new UserError('그룹을 만든 사람만 초대 코드를 바꿀 수 있어요'));
-  });
-
   it('기상 공유 동의: 내 구성원 행만 고침, 바뀐 행이 없으면 이유를 알림', async () => {
     mockFake.answer('group_members.update', ok([{ group_member_id: 'm1' }]));
     await real.setWakeShareOptIn(GROUP, true);

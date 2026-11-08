@@ -62,8 +62,8 @@ select vault.create_secret('<service_role 키>', 'service_role_key');
 - `get_shared_alarm_appointments(p_owner_id)` (G04) — 조회 권한(친구 ∪ 그룹)을 받은 사람 알람의 약속 제목 · 장소 · 시각. 본인 알람과 약속 없는 알람(일정 없는 알람 · 루틴)은 안 나옴
 - `get_group_wake_status`는 그 그룹에 그날 약속이 있을 때만 행을 줌 (D57)
 - 친구 2장 아이디 · 찾기 (`20261108062757_friend_handle_search.sql`, 이슈 #366) — 새 함수는 jsonb `status`로 돌려주고 앱이 문구로 바꿈
-  - `change_my_handle(p_handle)` — 아이디 바꾸기(`OK` · `SAME` · `INVALID` · `RESERVED` · `TAKEN` · `LIMIT`). 30일 1번, 자동 아이디 첫 변경 · 온보딩 중 변경은 안 셈. 앱이 `profiles.handle`을 직접 update하거나 채워진 `onboarded_at`을 바꾸면 42501(`onboarded_at`은 비어 있을 때 한 번 채우기만)
-  - `search_by_handle(p_query)` — 아이디 정확 일치(`FOUND` · `SELF` · `NOT_FOUND` · `LIMIT`), 1분 10회. 차단 · 탈퇴 · 온보딩 전은 없는 아이디와 같은 응답. `find_profile_by_handle`은 이걸 거치는 옛 모양(앱이 옮기면 지움)
+  - `change_my_handle(p_handle)` — 아이디 바꾸기(`OK` · `SAME` · `INVALID` · `RESERVED` · `TAKEN` · `LIMIT`). `respec_`로 시작하는 아이디와 예약어 10개(admin · respec · support · help · official · system · root · operator · manager · null, 정확히 같을 때만)는 `RESERVED`. 30일 1번, 자동 아이디 첫 변경 · 온보딩 중 변경은 안 셈(`LIMIT` + `next_change_at`). 바꾸기 시도도 검색과 같은 1분 10회 + 하루 100회에 셈(`LIMIT` + `retry_after_seconds`). 앱이 `profiles.handle`을 직접 update하거나 채워진 `onboarded_at`을 바꾸면 42501(`onboarded_at`은 비어 있을 때 한 번 채우기만)
+  - `search_by_handle(p_query)` — 아이디 정확 일치(`FOUND` · `SELF` · `NOT_FOUND` · `LIMIT`), 1분 10회 + 하루 100회(바꾸기 시도와 합쳐서). 차단 · 탈퇴 · 온보딩 전은 없는 아이디와 같은 응답. `find_profile_by_handle`은 이걸 거치는 옛 모양(앱이 옮기면 지움)
   - `search_related_by_name(p_query)` — 친구 · 같은 그룹 안 닉네임 부분 일치
   - `my_friend_link(p_renew)` · `open_friend_link(p_token)` — 친구 링크(7일, 다시 만들면 옛 링크 무효). 표 `friend_links` · 제한 기록 `rate_limit_events`는 서버 전용(정책 없음)
   - 가입하면 아이디가 `respec_` + 4자로 자동으로 생기고 빈 아이디는 채움(NOT NULL은 앱 타입이 옮긴 뒤). 닉네임은 앞뒤 공백(탭 · 줄바꿈 포함)을 떼고 1~30자, 가입 때 이름이 공백뿐이면 이메일 앞부분 · '사용자'
@@ -82,6 +82,8 @@ select vault.create_secret('<service_role 키>', 'service_role_key');
   - 그룹장 없음: 이름 바꾸기(`groups` update) · `regenerate_invite_code` · 초대 · 내보내기(다른 사람의 `group_members` 행 삭제)는 참여 중 멤버 누구나, 그룹 삭제 길은 없음. 마지막 참여 멤버가 나가거나 탈퇴하면 그룹 · 공동 약속 · 초대 · 코드가 지워지고(각자 `daily_records`는 남음) 나가는 사람의 그 그룹 공동 약속 참여 · 알람도 지워짐. `groups.owner_id`는 '만든 사람' 기록(탈퇴하면 비어 있음)
   - 앱이 `group_members`를 직접 고칠 수 있는 건 나가기(`JOINED → LEFT`) · 기상 공유 동의 · 알림 끄기(`notifications_off`)뿐, 초대 수락 · 다시 참여는 함수로만(그 밖은 42501). 초대만 받은 사람은 `groups` · 멤버 목록 · 공개 프로필을 못 읽음
   - 초대 코드는 8자(0 O 1 I 뺀 글자표), 만료 칸 `groups.invite_code_expires_at`(마지막 발급 + 7일, 기존 그룹은 마이그레이션 시각 + 7일). 지금 앱이 쓰는 `join_group_by_invite_code`는 옛 모양으로 남김(실패는 예외라 틀린 코드 횟수는 못 셈)
+  - 읽기 예외·상한 (1번째 리뷰 반영): 방금 만든 사람이 `insert ... returning`으로 돌려받을 수 있는 예외는 만든 시각 = 그 트랜잭션 시각일 때만(`created_at`은 트리거가 `now()`로 못 박고 못 바꿈) — 내보내진 · 나간 만든 사람은 새 코드를 못 읽음. 10개 상한은 앱이 직접 그룹을 만들 때도 참여 · 수락과 같은 사람 잠금을 건 채로 셈. 참여 · 수락은 그룹 행을 키 공유로 잡아 마지막 멤버가 나가며 그룹이 지워지는 일과 겹쳐도 `GONE` · `NOT_FOUND`
+  - 앱 쪽 주의: 직접 만들기 한도는 `54000` 예외로 옴 · `my_group_invites`의 `invited_by` · `invited_by_nickname` · `invited_at`은 비어 있을 수 있음(마이그레이션 전 초대 행 · 초대한 사람 탈퇴, 생성 타입은 `string`). 12장 탈퇴 연쇄를 함수로 순회하면 그룹 번호 순서로 잠글 것(같은 그룹 여러 개에 함께 속한 두 사람이 반대 순서로 지우면 교착 가능)
 - `dev_reset_my_data()` (`20261030220000_dev_reset_my_data.sql`) — **개발용**. 부른 사람 본인의 시험 데이터(일정 · 알람 · 울림 기록 · 기록 · 일기 · AI 대화 · 고친 값 기록 · 제안)를 지우고 프로필을 온보딩 전으로 되돌림. 인자 없음 — `auth.uid()` 본인 줄만 건드림. 그룹 일정(`group_id` 있음, 그룹원 누구나 조회)과 다른 사람이 참여 중인 일정은 내 참여 행(과 내 알람)만 지우고 일정은 둠 — 일정째 지우는 건 내가 만든 개인 일정 중 혼자인 것뿐. 친구 · 그룹 · 공유 권한 · 푸시 토큰 · `ai_calls` · `user_questions`(AI 상한 · 질문 예산을 세는 기록) · 루틴 · 할 일은 그대로. 앱은 개발 화면(`/dev/screens`)에서만 부르고 출시 빌드에서는 안 부름
 
 ## 반복 다음 회차 (`20261029075743_alarm_roll.sql`, 이슈 #209)

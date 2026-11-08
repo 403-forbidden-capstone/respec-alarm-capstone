@@ -108,6 +108,19 @@ as $$
   select pg_advisory_xact_lock(hashtextextended('group_user:' || p_uid::text, 0));
 $$;
 
+-- 앱 역할이 직접 그룹을 만들 때(10개 상한을 세기 전에) 자기 사람 잠금만 거는 얇은 함수 — 참여 · 수락과 같은 열쇠라 겹쳐도 11개가 안 됨.
+-- 남의 열쇠를 못 걸게 인자가 없고 로그인한 본인 것만 잡음
+create function private.lock_my_group_user()
+returns void
+language sql
+volatile
+security definer
+set search_path = ''
+as $$
+  select private.lock_group_user((select auth.uid()))
+  where (select auth.uid()) is not null;
+$$;
+
 -- 코드 다시 발급: 이미 쓰는 코드와 겹치면 다시 (유일 색인이 막음)
 create function private.reissue_group_code(p_group_id uuid)
 returns text
@@ -225,15 +238,17 @@ as $$
 begin
   if current_user in ('authenticated', 'anon') then
     if tg_op = 'INSERT' then
+      perform private.lock_my_group_user();
       if (select count(*) from public.group_members gm where gm.user_id = new.owner_id and gm.invite_status = 'JOINED') >= 10 then
         raise exception '그룹은 10개까지 참여할 수 있음' using errcode = '54000';
       end if;
+      new.created_at := now();
       new.invite_code := private.new_group_code();
       new.invite_code_issued_at := now();
       new.invite_code_expires_at := now() + interval '7 days';
     else
-      if new.owner_id is distinct from old.owner_id then
-        raise exception '만든 사람 기록은 바꿀 수 없음' using errcode = '42501';
+      if new.owner_id is distinct from old.owner_id or new.created_at is distinct from old.created_at or new.group_id is distinct from old.group_id then
+        raise exception '만든 사람 · 만든 시각 · 번호는 바꿀 수 없음' using errcode = '42501';
       end if;
       if new.invite_code is distinct from old.invite_code
          or new.invite_code_issued_at is distinct from old.invite_code_issued_at
@@ -283,6 +298,9 @@ $$;
 create trigger guard_group_member_row
   before insert or update on public.group_members
   for each row execute function private.guard_group_member_row();
+
+-- 초대한 사람이 탈퇴하면 on delete set null이 이 칸을 찾아야 하므로 (순차 검색 방지)
+create index idx_group_members_invited_by on public.group_members (invited_by) where invited_by is not null;
 
 
 -- ---------------------------------------------------------------------
@@ -351,13 +369,13 @@ $$;
 -- 5. 읽기 · 쓰기 정책 (그룹장 없음, 초대만 받은 사람은 카드 범위만)
 -- ---------------------------------------------------------------------
 
--- groups: 참여 중인 사람만 읽음. 방금 만든 사람은 만든 직후(같은 트랜잭션)에 돌려받을 수 있게 만든 사람 + 1분 안만 더 허용
---   (만든 사람이 구성원 행에 들어가는 건 insert 뒤 트리거라 returning에서는 아직 참여 중으로 안 보임)
+-- groups: 참여 중인 사람만 읽음. 방금 만든 사람은 만든 직후(같은 트랜잭션)에 돌려받을 수 있게 만든 사람 + 만든 시각 = 이 트랜잭션 시각만 더 허용
+--   (만든 사람이 구성원 행에 들어가는 건 insert 뒤 트리거라 returning에서는 아직 참여 중으로 안 보임. 만든 시각은 트리거가 now()로 못 박고 못 바꿈)
 drop policy groups_select_member on public.groups;
 create policy groups_select_member on public.groups
   for select to authenticated
   using (private.is_group_member(group_id)
-         or (owner_id = (select auth.uid()) and created_at >= now() - interval '1 minute'));
+         or (owner_id = (select auth.uid()) and created_at = now()));
 
 -- 이름 · 설명은 참여 중 멤버 누구나 고침 (코드 · 만든 사람은 위 트리거가 막음). 삭제 길은 없음
 drop policy groups_update_owner on public.groups;
@@ -531,7 +549,8 @@ begin
   perform private.lock_group_user(v_uid);
 
   -- 잠금을 건 뒤 다시 읽음(그 사이 코드가 바뀌거나 그룹이 지워졌을 수 있음)
-  select g.group_id, g.invite_code_expires_at into v_g from public.groups g where g.group_id = v_g.group_id and g.invite_code = v_code;
+  -- 행을 키 공유로 잡아, 마지막 멤버가 나가며 그룹을 지우는 일(트리거의 for update)과 겹쳐도 지워진 그룹에 참여가 성공으로 끝나지 않게 함
+  select g.group_id, g.invite_code_expires_at into v_g from public.groups g where g.group_id = v_g.group_id and g.invite_code = v_code for key share;
   if not found then
     perform private.group_code_fail(v_uid);
     return jsonb_build_object('status', 'NOT_FOUND');
@@ -583,6 +602,11 @@ begin
   perform private.lock_group(p_group_id);
   perform private.lock_group_user(v_uid);
 
+  -- 그룹 행을 키 공유로 잡음 — 마지막 멤버가 나가며 그룹을 지우는 일과 겹쳐도 수락이 성공으로 끝나지 않고 GONE (join_group과 같음)
+  perform 1 from public.groups g where g.group_id = p_group_id for key share;
+  if not found then
+    return jsonb_build_object('status', 'GONE');
+  end if;
   select gm.invite_status into v_st from public.group_members gm where gm.group_id = p_group_id and gm.user_id = v_uid;
   if v_st = 'JOINED' then
     return jsonb_build_object('status', 'ALREADY_JOINED', 'group_id', p_group_id);
@@ -762,6 +786,7 @@ revoke execute on function
   private.joined_group_count(uuid),
   private.lock_group(uuid),
   private.lock_group_user(uuid),
+  private.lock_my_group_user(),
   private.reissue_group_code(uuid),
   private.normalize_group_code(text),
   private.group_code_wait(uuid),
@@ -776,6 +801,7 @@ from public, anon, authenticated;
 -- 앱 역할이 정책 · 기본값 · 트리거 안에서 직접 부르는 것만 다시 엶
 grant execute on function private.new_group_code() to authenticated, service_role;   -- 열 기본값이라 그룹을 넣는 시드(service_role)도 실행해야 함
 grant execute on function private.can_invite_to_group(uuid, uuid) to authenticated;
+grant execute on function private.lock_my_group_user() to authenticated;   -- guard_group_row(앱 역할로 도는 트리거)가 부름
 
 revoke execute on function
   public.preview_group_by_code(text),

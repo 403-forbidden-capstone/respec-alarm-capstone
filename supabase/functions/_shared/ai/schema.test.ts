@@ -53,6 +53,7 @@ describe('스키마 7개 — 실험실과 같은 내용인지 지문으로 대�
     't5-journal.v1': 'af6752',
     'assist-e4.v1': '718628',
     't3-reason.v1': '72294f',
+    'extract.v2': 'ca990a', // 서버 판 (실험실 장부에 없음 — extract.v1 + 대화 끝 정리 칸)
   };
 
   it('지문이 같고, $id가 id와 같음', () => {
@@ -69,7 +70,7 @@ describe('스키마 7개 — 실험실과 같은 내용인지 지문으로 대�
       const info = apiSchemaInfo(s);
       assert.deepEqual(apiLimitProblems(info.schema), [], id);
       assert.deepEqual(findUnsupported(info.schema), [], id);
-      assert.equal(info.mode, id === 'extract.v1' ? 'sentinel' : 'union', id);
+      assert.equal(info.mode, id.startsWith('extract.v') ? 'sentinel' : 'union', id);
     }
   });
 

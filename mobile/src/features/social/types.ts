@@ -78,10 +78,9 @@ export type GroupDetail = {
   since: string; // 2025년 3월부터 함께하는 중
   grants: PermissionSet; // 그룹 공유 범위 (내가 준 권한)
   appointments: { id: string; title: string; at: Date; place: string; importance: Importance }[]; // 연결 일정 (여러 개일 수 있음)
-  inviteCode: string; // 초대 코드 (G02 "+ 초대")
-  members: GroupMember[];
-  isOwner: boolean; // 내가 만든 그룹인지 — 초대 코드 다시 만들기는 만든 사람만 (새 UI용, 화면은 아직 안 씀)
+  members: GroupMember[]; // 참여 중인 사람만 (초대 중은 + 초대 시트에서) — 그룹장 표시 없음 (5장)
   wakeShareOptIn: boolean; // 이 그룹에 내 기상 상태 공유를 동의했는지 (group_members.wake_share_opt_in, D19 열림 — 새 UI용)
+  notificationsOff: boolean; // 이 그룹에서 오는 알림 끄기 (group_members.notifications_off)
 };
 
 // 친구 · 그룹원이 공유한 알람 한 건 (G03 · G04)
@@ -119,9 +118,61 @@ export type ShareLogItem = { at: Date; text: string };
 // G04에서 알람을 바꾼 결과 — 저장은 됐고 주인에게 알림이 갔는지만 알려 줌 (알림이 실패해도 저장은 그대로, 화면은 조용히 "바꿨어요"만)
 export type SharedChangeResult = { notified: boolean };
 
-// 아이디로 찾은 사람과 나와의 관계 (새 UI용 — 이미 친구인 사람에게 요청을 또 보내지 않게)
-export type FriendRelation = 'SELF' | 'FRIEND' | 'SENT' | 'RECEIVED' | 'NONE';
-export type HandleSearchResult = { person: Person; relation: FriendRelation };
+// 아이디로 찾은 사람과 나와의 관계 — 서버 값 NONE · REQUEST_SENT · REQUEST_RECEIVED · FRIEND를 앱 값으로 (real/friends.ts)
+export type FriendRelation = 'FRIEND' | 'SENT' | 'RECEIVED' | 'NONE';
 
-// 그룹을 만든 결과 (새 UI용) — 만들고 바로 초대 코드를 보여 줄 수 있게
-export type CreatedGroup = { id: string; inviteCode: string };
+// 아이디 정확 일치 한 번의 결과 (search_by_handle) — 없음 · 탈퇴 · 차단 · 온보딩 전은 모두 NOT_FOUND
+export type HandleSearch =
+  | { status: 'FOUND'; person: Person; relation: FriendRelation }
+  | { status: 'SELF'; person: Person }
+  | { status: 'NOT_FOUND' }
+  | { status: 'LIMIT'; retryAfterSeconds: number };
+
+// 검색 결과 한 줄 — via = 어떻게 찾았나 (HANDLE 아이디 정확 일치 · FRIEND 친구 이름 · GROUP 같은 그룹 이름)
+export type PersonHit = { person: Person; relation: FriendRelation; via: 'HANDLE' | 'FRIEND' | 'GROUP' };
+
+// F01 검색칸 한 번의 결과 — 아이디 정확 일치가 rows 맨 앞
+export type PeopleSearch = {
+  rows: PersonHit[];
+  self: Person | null; // 내 아이디로 찾음
+  limitSeconds: number | null; // 아이디 검색 제한에 걸림 — n초 뒤 다시
+  notFound: boolean; // 아무도 못 찾음 (내 아이디 · 제한은 아님)
+};
+
+// 내 친구 링크 (my_friend_link) — 7일, 다시 만들면 옛 링크는 바로 무효
+export type FriendLink = { token: string; expiresAt: Date };
+
+// 친구 링크 착지 (open_friend_link) — 요청은 안 보낸 상태. 없는 · 옛 · 만료 · 탈퇴 · 차단 · 온보딩 전은 모두 EXPIRED
+export type OpenedLink =
+  | { status: 'OK'; person: Person; relation: FriendRelation }
+  | { status: 'SELF'; person: Person }
+  | { status: 'EXPIRED' };
+
+// 그룹을 만든 결과 — 만들고 바로 초대 글을 보낼 수 있게 (코드는 8자, 7일)
+export type CreatedGroup = { id: string; inviteCode: string; expiresAt: Date | null };
+
+// 코드 입력 미리보기 (preview_group_by_code) — 참여는 아직 안 함. 오류 3가지(없는 · 만료 · 잠시 뒤)는 status로
+export type GroupPreview =
+  | { status: 'FOUND'; name: string; memberCount: number; full: boolean; alreadyJoined: boolean; expiresAt: Date | null }
+  | { status: 'NOT_FOUND' | 'EXPIRED' }
+  | { status: 'LIMIT'; retryAfterSeconds: number };
+
+// 참여한 그룹 — already = 이미 참여 중이던 그룹 (같은 코드를 또 넣음)
+export type JoinedGroup = { id: string; already: boolean };
+
+// G01 위 받은 초대 카드 (my_group_invites) — 그룹 이름 · 인원 · 초대한 사람까지만
+export type GroupInvite = { groupId: string; name: string; initial: string; memberCount: number; invitedByName: string; invitedAt: Date };
+
+// 코드 시트 (my_group_code) — 만료됐으면 서버가 새 코드 + 7일로 바꿔서 줌
+export type GroupCode = { code: string; expiresAt: Date };
+
+// G02 [+ 초대] 친구 목록의 한 줄 — 초대 중 · 이미 멤버는 표시만
+export type InvitableFriend = { person: Person; state: 'NONE' | 'INVITED' | 'MEMBER' };
+
+// 차단 목록 한 줄 (my_blocks) — 새로 차단한 순
+export type BlockedPerson = { person: Person; blockedAt: Date };
+
+// 신고 (submit_report) — 대상은 사람(닉네임 · 사진 · 괴롭힘) 또는 그룹(그룹 이름)
+export type ReportTarget = { type: 'USER' | 'GROUP'; id: string };
+export type ReportReason = 'HARASSMENT' | 'NICKNAME' | 'PHOTO' | 'GROUP_NAME' | 'OTHER';
+export type ReportResult = 'REPORTED' | 'ALREADY_REPORTED'; // 같은 대상은 하루 1번
