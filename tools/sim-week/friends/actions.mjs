@@ -126,10 +126,17 @@ export const ACTIONS = [
   {
     name: '멤버 내보내기', w: 1, when: (c) => c.caps.hasTable('group_members'),
     async run(c) {
-      const { data } = await c.admin.from('group_members').select('group_id, user_id').neq('user_id', c.me.id).eq('invite_status', 'JOINED');
+      // 가상 유저가 만든 SIM 그룹 안의 가상 유저만 대상 (시드 그룹은 건드리지 않음)
+      const groups = (await c.admin.from('groups').select('group_id').like('group_name', 'SIM %')).data ?? [];
+      const ids = c.users.map((u) => u.id);
+      const { data } = await c.admin
+        .from('group_members').select('group_id, user_id').in('group_id', groups.map((g) => g.group_id)).in('user_id', ids)
+        .neq('user_id', c.me.id).eq('invite_status', 'JOINED');
       const m = c.rng.pick(data ?? []);
       if (!m) return { status: '(내보낼 멤버 없음)' };
-      return tableCall(c, '내보내기', c.me.client.from('group_members').delete().eq('group_id', m.group_id).eq('user_id', m.user_id));
+      const r = await tableCall(c, '내보내기', c.me.client.from('group_members').delete().eq('group_id', m.group_id).eq('user_id', m.user_id).select());
+      // 권한이 없으면 오류 없이 0행만 지워짐 — 결과에 따로 적음
+      return { status: r.data ? (r.data.length ? '지움' : '0행(권한 없음)') : r.status };
     },
   },
   {
