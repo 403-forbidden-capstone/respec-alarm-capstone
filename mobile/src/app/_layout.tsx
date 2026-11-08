@@ -98,9 +98,11 @@ function RootStack() {
     if (!ready || loading) return;
     if (takeAfterOnboarding() === 'schedule') router.push({ pathname: '/schedule/new', params: { from: 'home' } });
     // 로그인 전에 연 친구 링크 — 로그인 · 온보딩이 끝난 뒤 같은 화면으로 이어감 (lib/pendingInvite, 친구 2장)
+    // 프로필 읽기에 실패해 다시 시도 화면이 떠 있는 동안은 읽지 않음 — 읽으면 비워져서 링크를 잃음
+    if (profileError != null) return;
     const invite = takePendingInvite();
     if (invite) router.push({ pathname: '/invite', params: { t: invite } });
-  }, [ready, loading]);
+  }, [ready, loading, profileError]);
 
   if (configError && !ringEntry) return <ConfigErrorScreen />;
   if (loading && !ringEntry) return null;

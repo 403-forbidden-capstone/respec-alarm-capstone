@@ -35,7 +35,7 @@ export function MyHandleCard({ handle, highlight, onChange, onShare, onRenew }: 
           <Text variant="caption" tone="sub">
             내 친구 링크
           </Text>
-          <Text variant="small">보낸 날부터 7일 동안 쓸 수 있어요</Text>
+          <Text variant="small">만든 날부터 7일 동안 쓸 수 있어요</Text>
         </View>
         <View style={styles.actions}>
           <TextLink label="새로 만들기" onPress={onRenew} />

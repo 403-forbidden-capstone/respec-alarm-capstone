@@ -95,7 +95,7 @@ function Landing({ token }: { token: string }) {
       {mine ? (
         <Card variant="dash">
           <Text variant="note" tone="sub">
-            이 링크를 받은 사람이 열면 내 아이디가 보이고 친구 요청을 보낼 수 있어요. 링크는 보낸 날부터 7일 동안 쓸 수 있어요.
+            이 링크를 받은 사람이 열면 내 아이디가 보이고 친구 요청을 보낼 수 있어요. 링크는 만든 날부터 7일 동안 쓸 수 있어요.
           </Text>
         </Card>
       ) : (
@@ -109,7 +109,7 @@ function Landing({ token }: { token: string }) {
         </View>
       )}
       {mine ? null : <Note>친구가 되어도 알람과 기상 상태는 권한을 허용한 뒤에만 볼 수 있어요.</Note>}
-      {mine ? null : <Note>링크는 보낸 날부터 7일 동안 쓸 수 있어요.</Note>}
+      {mine ? null : <Note>링크는 만든 날부터 7일 동안 쓸 수 있어요.</Note>}
     </Screen>
   );
 }
