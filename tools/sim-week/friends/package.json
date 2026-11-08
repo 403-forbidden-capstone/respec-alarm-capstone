@@ -1,0 +1,13 @@
+{
+  "name": "sim-week-friends",
+  "private": true,
+  "type": "module",
+  "description": "가상 유저 일주일 시험 — 친구 · 그룹 · 권한 확장 (로컬 Supabase, 모델 호출 0)",
+  "scripts": {
+    "start": "node run.mjs",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.117.3"
+  }
+}
