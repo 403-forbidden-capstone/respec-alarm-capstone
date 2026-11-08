@@ -68,3 +68,9 @@ test('이름 자르기는 40자 — 40자까지는 그대로, 41자부터 40자 
   assert.equal(composeCopy('GROUP_MEMBER_JOINED', { groupName: at41 }).title, `${at40}…`);
   assert.equal(composeCopy('GROUP_APPT_CHANGED', { groupName: '팀', appointmentTitle: at41 }).body, `‘${at40}…’ 약속이 바뀌었어요`);
 });
+
+test('공동 약속 취소 알림 문구: 약속 제목이 있으면 ‘제목’ 약속이 취소됐어요, 없으면 약속이 취소됐어요 — 바뀜 문구와 구분 (9-20)', () => {
+  assert.equal(composeCopy('GROUP_APPT_CHANGED', { groupName: '캡스톤팀', appointmentTitle: '팀 주간회의', change: 'CANCELED' }).body, '‘팀 주간회의’ 약속이 취소됐어요');
+  assert.equal(composeCopy('GROUP_APPT_CHANGED', { groupName: '캡스톤팀', change: 'CANCELED' }).body, '약속이 취소됐어요');
+  assert.equal(composeCopy('GROUP_APPT_CHANGED', { groupName: '캡스톤팀', appointmentTitle: '팀 주간회의', change: 'CHANGED' }).body, '‘팀 주간회의’ 약속이 바뀌었어요');
+});
