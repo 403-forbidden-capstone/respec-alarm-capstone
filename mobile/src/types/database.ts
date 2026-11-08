@@ -144,13 +144,13 @@ isOneToOne: false
                   ]
                 },"appointments": {
                   Row: {
-                    "appointment_at": string,"appointment_id": string,"created_at": string,"creator_id": string,"dest_lat": number | null,"dest_lng": number | null,"dest_name": string,"dest_radius_m": number | null,"exception_kind": string | null,"group_id": string | null,"importance": Database["public"]['Enums']["importance_level"],"memo": string | null,"occurrence_on": string,"recurrence_rule": string | null,"series_id": string,"title": string,"updated_at": string
+                    "appointment_at": string,"appointment_id": string,"created_at": string,"creator_id": string | null,"dest_lat": number | null,"dest_lng": number | null,"dest_name": string,"dest_radius_m": number | null,"exception_kind": string | null,"group_id": string | null,"importance": Database["public"]['Enums']["importance_level"],"memo": string | null,"occurrence_on": string,"recurrence_rule": string | null,"series_id": string,"title": string,"updated_at": string
                   }
                   Insert: {
-                    "appointment_at": string,"appointment_id"?: string,"created_at"?: string,"creator_id": string,"dest_lat"?: number | null,"dest_lng"?: number | null,"dest_name": string,"dest_radius_m"?: number | null,"exception_kind"?: string | null,"group_id"?: string | null,"importance"?: Database["public"]['Enums']["importance_level"],"memo"?: string | null,"occurrence_on": string,"recurrence_rule"?: string | null,"series_id": string,"title": string,"updated_at"?: string
+                    "appointment_at": string,"appointment_id"?: string,"created_at"?: string,"creator_id"?: string | null,"dest_lat"?: number | null,"dest_lng"?: number | null,"dest_name": string,"dest_radius_m"?: number | null,"exception_kind"?: string | null,"group_id"?: string | null,"importance"?: Database["public"]['Enums']["importance_level"],"memo"?: string | null,"occurrence_on": string,"recurrence_rule"?: string | null,"series_id": string,"title": string,"updated_at"?: string
                   }
                   Update: {
-                    "appointment_at"?: string,"appointment_id"?: string,"created_at"?: string,"creator_id"?: string,"dest_lat"?: number | null,"dest_lng"?: number | null,"dest_name"?: string,"dest_radius_m"?: number | null,"exception_kind"?: string | null,"group_id"?: string | null,"importance"?: Database["public"]['Enums']["importance_level"],"memo"?: string | null,"occurrence_on"?: string,"recurrence_rule"?: string | null,"series_id"?: string,"title"?: string,"updated_at"?: string
+                    "appointment_at"?: string,"appointment_id"?: string,"created_at"?: string,"creator_id"?: string | null,"dest_lat"?: number | null,"dest_lng"?: number | null,"dest_name"?: string,"dest_radius_m"?: number | null,"exception_kind"?: string | null,"group_id"?: string | null,"importance"?: Database["public"]['Enums']["importance_level"],"memo"?: string | null,"occurrence_on"?: string,"recurrence_rule"?: string | null,"series_id"?: string,"title"?: string,"updated_at"?: string
                   }
                   Relationships: [
                     {
@@ -720,6 +720,11 @@ isOneToOne: false
 "accept_group_invite":
 { Args: { "p_group_id": string,"p_wake_share"?: boolean }; Returns: Json
                            },
+"appointment_joiners":
+{ Args: { "p_appointment_id": string }; Returns: {
+              "joined": boolean | null,"user_id": string
+            }[]
+                           },
 "block_user":
 { Args: { "p_user_id": string }; Returns: Json
                            },
@@ -769,6 +774,11 @@ isOneToOne: false
 "get_shared_alarm_appointments":
 { Args: { "p_owner_id"?: string }; Returns: {
               "alarm_id": string,"appointment_at": string,"appointment_id": string,"dest_name": string,"title": string,"user_id": string
+            }[]
+                           },
+"group_appointment_counts":
+{ Args: { "p_group_id": string }; Returns: {
+              "appointment_id": string,"i_joined": boolean,"joined_count": number
             }[]
                            },
 "invite_to_group":

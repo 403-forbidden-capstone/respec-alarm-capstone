@@ -10,6 +10,7 @@ import type { EditRequest } from './edit-request.ts';
 import type { AppointmentPatch } from './edit.ts';
 import { HttpError } from './errors.ts';
 import { FakeDb } from './fake-db.ts';
+import type { NotifyOptions } from './notify.ts';
 import { KakaoError, type KakaoFailure } from './kakao.ts';
 import { buildPlan } from './plan.ts';
 import type { ProfileRow } from './plan-core.ts';
@@ -72,9 +73,9 @@ function fakeKakao(minutes = 35) {
   return { state, lookup };
 }
 
-function ctxFor(env: Env, user: string, over: { now?: Date; kakao?: TravelLookup } = {}): EditCtx {
-  const service = { from: (table: string) => (env.serviceTables.add(table), env.db.from(table)) } as unknown as Db;
-  return { userId: user, userDb: asUser(env.db, user), service, now: over.now ?? MON_10, ...(over.kakao ? { kakao: over.kakao } : {}) };
+function ctxFor(env: Env, user: string, over: { now?: Date; kakao?: TravelLookup; push?: NotifyOptions } = {}): EditCtx {
+  const service = { from: (table: string) => (env.serviceTables.add(table), env.db.from(table)), rpc: (name: string, args?: Record<string, unknown>) => env.db.rpc(name, args) } as unknown as Db;
+  return { userId: user, userDb: asUser(env.db, user), service, now: over.now ?? MON_10, ...(over.kakao ? { kakao: over.kakao } : {}), ...(over.push ? { push: over.push } : {}) };
 }
 
 const upd = (id: string, patch: AppointmentPatch, scope: 'this' | 'following' = 'this', confirmed = false): Extract<EditRequest, { action: 'UPDATE' }> => ({ action: 'UPDATE', appointmentId: id, scope, patch, confirmed });
@@ -672,9 +673,10 @@ test('남의 개인 약속은 못 고치고 못 지움: 고치기 NOT_FOUND, 지
   assert.equal(snap(env.db), before);
 });
 
-test('공동 약속: 만든 사람만 고치기 · 지우기 (참여만 한 사람은 FORBIDDEN), 시각 · 장소 · 반복은 아직 못 고침(제목 · 중요도만), 지우면 약속 전체가 사라짐', async () => {
+test('공동 약속: 만든 사람만 고치기 · 지우기 (참여만 한 사람은 FORBIDDEN), 반복은 아직 못 고침, 제목 · 중요도만 고치면 다른 참여자의 알람은 그대로, 지우면 약속 전체가 사라짐', async () => {
   const env = setup([A, B]);
   env.db.rows('group_members').push({ group_id: 'g1', user_id: A, invite_status: 'JOINED' }, { group_id: 'g1', user_id: B, invite_status: 'JOINED' });
+  withGroupPush(env);
   const [id] = rawSeries(env.db, A, { ats: ['2026-10-29T09:00'], rule: null, title: '팀플', group: 'g1' });
   addParticipant(env.db, B, id, new Date(iso('2026-10-29T09:00')));
   const bAlarms = alarmIds(env.db, id, B);
@@ -686,13 +688,11 @@ test('공동 약속: 만든 사람만 고치기 · 지우기 (참여만 한 사�
   assert.equal(snap(env.db), before);
 
   const a = ctxFor(env, A);
-  await expectHttp(() => updateAppointment(a, upd(id, { at: kst('2026-10-29T10:00') }, 'this', true)), 'UNPROCESSABLE', 'GROUP_EDIT_LIMIT');
-  await expectHttp(() => updateAppointment(a, upd(id, { destination: { name: '강남역', lat: 37.4979, lng: 127.0276 } }, 'this', true)), 'UNPROCESSABLE', 'GROUP_EDIT_LIMIT');
-  await expectHttp(() => updateAppointment(a, upd(id, { recurrenceRule: 'FREQ=DAILY' }, 'this', true)), 'UNPROCESSABLE', 'GROUP_EDIT_LIMIT');
+  await expectHttp(() => updateAppointment(a, upd(id, { recurrenceRule: 'FREQ=DAILY' }, 'this', true)), 'UNPROCESSABLE', 'GROUP_RECURRENCE_LATER');
   const titled = await updateAppointment(a, upd(id, { title: '팀플 (장소 변경)', importance: 'HIGH' }, 'this', true));
   assert.ok(titled.saved);
   assert.deepEqual([row(env.db, id)!.title, row(env.db, id)!.exception_kind], ['팀플 (장소 변경)', null]);
-  assert.equal(JSON.stringify(alarmsOf(env.db, id, B).map((x) => x.alarm_id)), JSON.stringify(bAlarms)); // 다른 참여자의 알람은 이 PR에서 안 건드림
+  assert.equal(JSON.stringify(alarmsOf(env.db, id, B).map((x) => x.alarm_id)), JSON.stringify(bAlarms)); // 제목만 고치면 다른 참여자의 알람은 그대로
 
   participantOf(env.db, id, B)!.arrived_at = iso('2026-10-29T08:50'); // 다른 참여자의 도착 기록도 지킴 (service로 확인)
   await expectHttp(() => deleteAppointment(a, del(id)), 'UNPROCESSABLE', 'HAS_RECORDS');
@@ -703,6 +703,246 @@ test('공동 약속: 만든 사람만 고치기 · 지우기 (참여만 한 사�
   assert.deepEqual([gone.deleted, gone.mode], [true, 'ROW']);
   assert.deepEqual(env.db.rows('appointments').length + env.db.rows('appointment_participants').length + env.db.rows('alarms').length, 0);
   assert.equal(gone.canceled_alarm_ids.some((x) => bAlarms.includes(x)), false); // 내 알람만 돌려줌 (B의 폰은 B의 다음 맞추기에서 정리)
+});
+
+// ---- 공동 약속 (친구 9장): 만든 사람이 시각 · 장소를 고치면 다른 참여자의 알람도 다시 계산하고 알림, 지우면 취소 알림 ----
+
+const quiet = async <T>(fn: () => Promise<T>): Promise<T> => {
+  const original = console.error;
+  console.error = () => {};
+  try {
+    return await fn();
+  } finally {
+    console.error = original;
+  }
+};
+
+const GROUP = '5a5a5a5a-5a5a-4a5a-8a5a-5a5a5a5a5a5a';
+const T_B = 'ExponentPushToken[bbbbbbbbbbbbbbbbbbbbbb]';
+const FAR = { lat: 37.4, lng: 127.1 };
+
+// DB 함수 plan_group_push 흉내 — 보낸 사람이 그 약속을 만든 사람(비었으면 참여자)이고 아직 안 지난 약속일 때만 OK, 받는 사람 = 약속 참여자 − 보낸 사람
+function withGroupPush(env: Env): void {
+  env.db.rpcHandlers.plan_group_push = (args) => {
+    const ap = env.db.rows('appointments').find((a) => a.appointment_id === args.p_appointment_id);
+    const sender = args.p_sender_id as string;
+    const participants = env.db.rows('appointment_participants').filter((p) => p.appointment_id === args.p_appointment_id).map((p) => p.user_id as string);
+    const mine = ap && (ap.creator_id === sender || (ap.creator_id == null && participants.includes(sender)));
+    if (!ap || !mine || Date.parse(ap.appointment_at as string) <= env.db.now.getTime()) return { status: 'FORBIDDEN' };
+    return { status: 'OK', group_name: '캡스톤팀', appointment_title: ap.title, recipients: participants.filter((u) => u !== sender) };
+  };
+}
+
+function pushSpy(opts: { fail?: boolean } = {}) {
+  const sent: { to: string; title: string; body: string; data: Record<string, unknown> }[] = [];
+  const fetchImpl = async (_url: string, init?: RequestInit) => {
+    if (opts.fail) throw new Error('network down');
+    const body = JSON.parse(init?.body as string) as { to: string; title: string; body: string; data: Record<string, unknown> }[];
+    sent.push(...body);
+    return new Response(JSON.stringify({ data: body.map((_b, i) => ({ status: 'ok', id: `ticket-${sent.length}-${i}` })) }));
+  };
+  const push: NotifyOptions = { fetchImpl, sleep: async () => {} };
+  return { sent, push };
+}
+
+const P_A = { origin: { name: '집', ...HOME }, transport_type: 'TRANSIT', est_travel_minutes: 50, travel_source: 'API', buffer_minutes: 10, before_prepare_minutes: 30 };
+const P_B = { origin: { name: '먼 집', ...FAR }, transport_type: 'TRANSIT', est_travel_minutes: 70, travel_source: 'API', buffer_minutes: 10, before_prepare_minutes: 30 };
+
+// 그룹 + 공동 약속(만든 사람 A, 참여자 B 이상). 알람은 alarm-commit이 저장한 것과 같은 계산으로 만듦
+async function groupCase(users: string[] = [A, B], local = '2026-10-29T09:00') {
+  const env = setup(users);
+  env.db.rows('groups').push({ group_id: GROUP, group_name: '캡스톤팀' });
+  for (const u of users) env.db.rows('group_members').push({ group_id: GROUP, user_id: u, invite_status: 'JOINED' });
+  withGroupPush(env);
+  const id = await seed(env, A, { appointment: { title: '팀플', appointment_at: iso(local), destination: { name: '세종대학교', ...SCHOOL }, importance: 'NORMAL', group_id: GROUP }, participant: P_A });
+  for (const u of users.slice(1)) {
+    await seed(env, u, { appointment_id: id, participant: u === B ? P_B : { ...P_B, origin: { name: `${u} 집`, lat: FAR.lat - users.indexOf(u) / 100, lng: FAR.lng } } });
+    env.db.rows('push_tokens').push({ user_id: u, token: u === B ? T_B : `ExponentPushToken[${u.replace(/[^a-z0-9]/g, '').padEnd(22, 'x').slice(0, 22)}]` });
+  }
+  return { env, id };
+}
+const times = (db: FakeDb, id: string, user: string) => alarmsOf(db, id, user).map((a) => Date.parse(a.scheduled_at as string));
+const min = (n: number) => n * 60_000;
+
+test('9-10 · 9-15: 만든 사람이 시각을 10분 앞당기면 참여자의 알람이 바로 10분 빨라지고, 참여자에게만 변경 알림(만든 사람은 제외, 알림 데이터에 change · needsConfirm)', async () => {
+  const { env, id } = await groupCase();
+  const kk = fakeKakao();
+  const spy = pushSpy();
+  const bBefore = times(env.db, id, B);
+  const res = await updateAppointment(ctxFor(env, A, { kakao: kk.lookup, push: spy.push }), upd(id, { at: kst('2026-10-29T08:50') }, 'this', true));
+  assert.deepEqual(times(env.db, id, B), bBefore.map((t) => t - min(10)));
+  assert.deepEqual(res.participants, { updated: 1, held: 0, skipped: 0 });
+  assert.equal(kk.state.calls, 0); // 시각만 바꾸면 길찾기를 새로 안 부름
+  assert.deepEqual(spy.sent.map((m) => [m.to, m.title, m.body, m.data.kind, m.data.change, m.data.needsConfirm, m.data.recipientUserId, m.data.appointmentId]), [[T_B, '캡스톤팀', '‘팀플’ 약속이 바뀌었어요', 'GROUP_APPT_CHANGED', 'CHANGED', false, B, id]]);
+  assert.equal(res.notified, 1);
+  assert.equal(ymd(row(env.db, id)!.appointment_at), '2026-10-29');
+  assert.equal(hm(row(env.db, id)!.appointment_at), '08:50');
+});
+
+test('9-11 · 9-12: 참여자의 알람이 5분 이상 늦춰지면 그 사람이 확인할 때까지 보류(알람 그대로, 알림에 needsConfirm), 5분 미만은 바로 반영 — 만든 사람 자신의 알람은 확인 시트 규칙 그대로', async () => {
+  const late6 = await groupCase();
+  const bBefore = times(late6.env.db, late6.id, B);
+  const spy6 = pushSpy();
+  const res6 = await updateAppointment(ctxFor(late6.env, A, { kakao: fakeKakao().lookup, push: spy6.push }), upd(late6.id, { at: kst('2026-10-29T09:06') }, 'this', true));
+  assert.deepEqual(times(late6.env.db, late6.id, B), bBefore); // 보류: B 알람은 아직 그대로
+  assert.deepEqual(res6.participants, { updated: 0, held: 1, skipped: 0 });
+  assert.deepEqual(spy6.sent.map((m) => m.data.needsConfirm), [true]);
+  assert.equal(hm(row(late6.env.db, late6.id)!.appointment_at), '09:06'); // 약속 자체는 바뀜
+
+  const late3 = await groupCase();
+  const bBefore3 = times(late3.env.db, late3.id, B);
+  const spy3 = pushSpy();
+  const res3 = await updateAppointment(ctxFor(late3.env, A, { kakao: fakeKakao().lookup, push: spy3.push }), upd(late3.id, { at: kst('2026-10-29T09:03') }, 'this'));
+  assert.deepEqual(times(late3.env.db, late3.id, B), bBefore3.map((t) => t + min(3)));
+  assert.deepEqual([res3.saved, res3.participants, spy3.sent.map((m) => m.data.needsConfirm)], [true, { updated: 1, held: 0, skipped: 0 }, [false]]);
+
+  // 만든 사람 자신은 10분 늦추면 확인이 먼저 — 확인 전에는 아무것도 안 바뀌고 알림도 없음
+  const mine = await groupCase();
+  const spyM = pushSpy();
+  const ask = await updateAppointment(ctxFor(mine.env, A, { kakao: fakeKakao().lookup, push: spyM.push }), upd(mine.id, { at: kst('2026-10-29T09:10') }, 'this'));
+  assert.deepEqual([ask.saved, ask.needs_confirm, hm(row(mine.env.db, mine.id)!.appointment_at), spyM.sent.length], [false, true, '09:00', 0]);
+});
+
+test('9-13 · 9-14: 장소만 바꾸면 참여자마다 자기 출발지로 길찾기를 다시 부르고(서로 다른 새 알람 시각), 변경 알림이 감', async () => {
+  const { env, id } = await groupCase();
+  const lookup: TravelLookup = async ({ origin }) => ({ minutes: origin.lat > 37.5 ? 30 : 90, partial: false }); // A(집) 30분, B(먼 집) 90분 — B는 이동이 길어져 알람이 앞당겨짐
+  let calls = 0;
+  const counted: TravelLookup = async (args) => ((calls += 1), lookup(args));
+  const spy = pushSpy();
+  const res = await updateAppointment(ctxFor(env, A, { kakao: counted, push: spy.push }), upd(id, { destination: { name: '강남역', lat: 37.4979, lng: 127.0276 } }, 'this', true));
+  assert.equal(calls, 2); // A와 B 각자 한 번
+  const wake = (user: string) => Date.parse(alarmsOf(env.db, id, user).find((a) => a.alarm_type === 'WAKE')!.scheduled_at as string);
+  const lead = (user: string) => { const p = participantOf(env.db, id, user)!; return (p.est_travel_minutes as number) + (p.buffer_minutes as number) + (p.prepare_minutes as number); };
+  assert.equal(wake(A) - wake(B), min(lead(B) - lead(A))); // 각자 이동 · 여유 · 준비만큼 약속 시각에서 거꾸로
+  assert.equal(participantOf(env.db, id, A)!.est_travel_minutes, 30);
+  assert.equal(participantOf(env.db, id, B)!.est_travel_minutes, 90);
+  assert.ok(wake(B) < wake(A));
+  assert.deepEqual(res.participants, { updated: 1, held: 0, skipped: 0 });
+  assert.deepEqual(spy.sent.map((m) => [m.data.kind, m.data.change]), [['GROUP_APPT_CHANGED', 'CHANGED']]);
+});
+
+test('9-16: 참여자의 이미 울린 알람은 안 건드리고 아직 안 울린 알람만 다시 맞춤, 알람이 모두 울렸으면 그 사람은 건너뜀', async () => {
+  const { env, id } = await groupCase();
+  const wakeB = alarmsOf(env.db, id, B).find((a) => a.alarm_type === 'WAKE')!;
+  const rungAt = new Date(MON_10.getTime() - min(30)).toISOString();
+  wakeB.scheduled_at = rungAt; // 울린 알람
+  const others = alarmsOf(env.db, id, B).filter((a) => a.alarm_type !== 'WAKE').map((a) => Date.parse(a.scheduled_at as string));
+  const res = await updateAppointment(ctxFor(env, A, { kakao: fakeKakao().lookup, push: pushSpy().push }), upd(id, { at: kst('2026-10-29T08:50') }, 'this', true));
+  assert.equal(wakeB.scheduled_at, rungAt);
+  const nowOthers = alarmsOf(env.db, id, B).filter((a) => a.alarm_type !== 'WAKE').map((a) => Date.parse(a.scheduled_at as string));
+  assert.ok(nowOthers.every((t, i) => t < others[i])); // 아직 안 울린 알람은 앞당겨짐
+  assert.deepEqual(res.participants, { updated: 1, held: 0, skipped: 0 });
+
+  const all = await groupCase();
+  for (const a of alarmsOf(all.env.db, all.id, B)) a.scheduled_at = rungAt;
+  const before = times(all.env.db, all.id, B);
+  const res2 = await updateAppointment(ctxFor(all.env, A, { kakao: fakeKakao().lookup, push: pushSpy().push }), upd(all.id, { at: kst('2026-10-29T08:50') }, 'this', true));
+  assert.deepEqual(times(all.env.db, all.id, B), before);
+  assert.deepEqual(res2.participants, { updated: 0, held: 0, skipped: 1 });
+});
+
+test('9-17: 참여자의 이동시간을 구하지 못하면(길찾기 실패 → 근사값뿐) 그 사람의 기존 알람을 그대로 두고 경고만 — 이름 없이, 다른 참여자는 정상, 알림은 감', async () => {
+  const { env, id } = await groupCase([A, B, 'u-c']);
+  const lookup: TravelLookup = async ({ origin }) => {
+    if (origin.lat < 37.5) throw new KakaoError('QUOTA', '시험용 한도 초과'); // 먼 집에서 오는 사람들만 실패
+    return { minutes: 30, partial: false };
+  };
+  const spy = pushSpy();
+  const bBefore = times(env.db, id, B);
+  const res = await updateAppointment(ctxFor(env, A, { kakao: lookup, push: spy.push }), upd(id, { destination: { name: '강남역', lat: 37.4979, lng: 127.0276 } }, 'this', true));
+  assert.deepEqual(times(env.db, id, B), bBefore);
+  assert.deepEqual(res.participants, { updated: 0, held: 0, skipped: 2 });
+  assert.equal(res.warnings.filter((w) => w.code === 'PARTICIPANT_ROUTE_FAILED').length, 2);
+  assert.ok(!JSON.stringify(res.warnings).includes(B));
+  assert.equal(spy.sent.length, 2); // 알림은 모두에게
+});
+
+test('9-39: 제목 · 중요도만 고치면 참여자 알림도 다시 계산도 없음', async () => {
+  const { env, id } = await groupCase();
+  const spy = pushSpy();
+  const kk = fakeKakao();
+  const bBefore = JSON.stringify(alarmsOf(env.db, id, B));
+  const res = await updateAppointment(ctxFor(env, A, { kakao: kk.lookup, push: spy.push }), upd(id, { title: '팀플 (제목만)' }, 'this', true));
+  assert.deepEqual([spy.sent.length, res.participants, res.notified, kk.state.calls], [0, undefined, undefined, 0]);
+  assert.equal(JSON.stringify(alarmsOf(env.db, id, B)), bBefore);
+});
+
+test('9-20: 만든 사람이 지우면 참여자의 참여 · 알람이 사라지고 참여자에게 취소 알림(change CANCELED) — 알림이 안 가도 지우기는 끝남, 지난 약속을 지울 땐 알림 없음', async () => {
+  const { env, id } = await groupCase();
+  const spy = pushSpy();
+  const res = await deleteAppointment(ctxFor(env, A, { push: spy.push }), del(id));
+  assert.deepEqual([res.deleted, res.mode, res.notified], [true, 'ROW', 1]);
+  assert.deepEqual(spy.sent.map((m) => [m.to, m.title, m.body, m.data.change, m.data.appointmentId]), [[T_B, '캡스톤팀', '‘팀플’ 약속이 취소됐어요', 'CANCELED', id]]);
+  assert.equal(env.db.rows('appointments').length + env.db.rows('appointment_participants').length + env.db.rows('alarms').length, 0);
+
+  const broken = await groupCase();
+  const down = pushSpy({ fail: true });
+  const quietRes = await quiet(() => deleteAppointment(ctxFor(broken.env, A, { push: down.push }), del(broken.id)));
+  assert.deepEqual([quietRes.deleted, quietRes.warnings.some((w) => w.code === 'PUSH_NOT_SENT'), broken.env.db.rows('appointments').length], [true, true, 0]);
+
+  const past = await groupCase();
+  const spyPast = pushSpy();
+  const pastRes = await deleteAppointment(ctxFor(past.env, A, { now: kst('2026-10-29T10:00'), push: spyPast.push }), del(past.id));
+  assert.deepEqual([pastRes.deleted, pastRes.notified, spyPast.sent.length], [true, undefined, 0]);
+});
+
+test('9-32: 지난 공동 약속은 고칠 수 없고(PAST_APPOINTMENT), 지난 시각으로 옮길 수도 없고, 지난 공동 약속에 새로 참여할 수도 없음 — 앞으로 약속은 됨', async () => {
+  const { env, id } = await groupCase();
+  const late = kst('2026-10-29T09:30');
+  await expectHttp(() => updateAppointment(ctxFor(env, A, { now: late, kakao: fakeKakao().lookup }), upd(id, { title: '지난 약속 고치기' }, 'this', true)), 'UNPROCESSABLE', 'PAST_APPOINTMENT');
+  await expectHttp(() => updateAppointment(ctxFor(env, A, { kakao: fakeKakao().lookup }), upd(id, { at: kst('2026-10-26T09:00') }, 'this', true)), 'UNPROCESSABLE', 'PAST_APPOINTMENT');
+
+  const joinEnv = await groupCase([A, B]);
+  const c = 'u-late';
+  joinEnv.env.db.rows('profiles').push({ user_id: c, timezone: 'Asia/Seoul', default_buffer_minutes: 10, default_transport: 'TRANSIT', home_name: '집', home_lat: HOME.lat, home_lng: HOME.lng });
+  joinEnv.env.db.rows('group_members').push({ group_id: GROUP, user_id: c, invite_status: 'JOINED' });
+  await assert.rejects(
+    () => seed(joinEnv.env, c, { appointment_id: joinEnv.id, participant: P_A }, kst('2026-10-29T09:30')),
+    (e: unknown) => e instanceof HttpError && e.code === 'UNPROCESSABLE' && (e.details as { reason?: string }).reason === 'PAST_APPOINTMENT',
+  );
+  assert.equal(participantOf(joinEnv.env.db, joinEnv.id, c), undefined);
+  await seed(joinEnv.env, c, { appointment_id: joinEnv.id, participant: P_A }); // 아직 안 지났을 때는 참여됨
+  assert.ok(participantOf(joinEnv.env.db, joinEnv.id, c));
+});
+
+test('9-38: 만든 사람이 없는(탈퇴한) 공동 약속은 그 약속에 참여한 사람이 고침(만든 사람 칸이 비어 있어도) — 참여 안 한 그룹원과 지우기는 FORBIDDEN, 알림은 고친 사람 제외 다른 참여자에게', async () => {
+  const { env, id } = await groupCase([A, B, 'u-c']);
+  row(env.db, id)!.creator_id = null;
+  const spy = pushSpy();
+  const aBefore = times(env.db, id, A);
+  const res = await updateAppointment(ctxFor(env, B, { kakao: fakeKakao().lookup, push: spy.push }), upd(id, { at: kst('2026-10-29T08:50') }, 'this', true));
+  assert.equal(hm(row(env.db, id)!.appointment_at), '08:50');
+  assert.deepEqual(times(env.db, id, A), aBefore.map((t) => t - min(10)));
+  assert.deepEqual(res.participants, { updated: 2, held: 0, skipped: 0 });
+  assert.ok(spy.sent.every((m) => m.data.recipientUserId !== B));
+  await expectHttp(() => deleteAppointment(ctxFor(env, B), del(id)), 'FORBIDDEN');
+  env.db.rows('group_members').push({ group_id: GROUP, user_id: 'u-d', invite_status: 'JOINED' });
+  env.db.rows('profiles').push({ user_id: 'u-d', timezone: 'Asia/Seoul', default_buffer_minutes: 10, default_transport: 'TRANSIT', home_name: '집', home_lat: HOME.lat, home_lng: HOME.lng });
+  await expectHttp(() => updateAppointment(ctxFor(env, 'u-d'), upd(id, { title: '참여 안 한 사람' }, 'this', true)), 'FORBIDDEN');
+});
+
+test('9-43: 10명 그룹에서 장소를 바꾸면 참여자마다 길찾기를 다시 부름(최대 10번), 일부가 실패해도 나머지는 정상이고 실패한 사람은 기존 알람 유지', async () => {
+  const users = [A, B, ...Array.from({ length: 8 }, (_v, i) => `u-p${i + 1}`)];
+  const { env, id } = await groupCase(users);
+  let calls = 0;
+  const lookup: TravelLookup = async ({ origin }) => {
+    calls += 1;
+    if (Math.abs(origin.lat - 37.38) < 0.001) throw new KakaoError('QUOTA', '시험용 한도 초과'); // 한 사람만 실패
+    return { minutes: 100, partial: false }; // 이동이 길어져 모두 앞당겨짐
+  };
+  const before = users.map((u) => JSON.stringify(times(env.db, id, u)));
+  const res = await updateAppointment(ctxFor(env, A, { kakao: lookup, push: pushSpy().push }), upd(id, { destination: { name: '강남역', lat: 37.4979, lng: 127.0276 } }, 'this', true));
+  assert.equal(calls, 10);
+  assert.deepEqual(res.participants, { updated: 8, held: 0, skipped: 1 });
+  assert.equal(res.warnings.filter((w) => w.code === 'PARTICIPANT_ROUTE_FAILED').length, 1);
+  const unchanged = users.filter((_u, i) => JSON.stringify(times(env.db, id, users[i])) === before[i]);
+  assert.deepEqual(unchanged, [users[2]]); // 실패한 사람(출발지 37.38)만 기존 알람 그대로 — users[2]
+});
+
+test('공동 약속 고치기에서 service 클라이언트는 다른 참여자의 행을 읽고 쓰는 곳에만 닿음 — 개인 일정 고치기는 그대로 roll_attempts뿐', async () => {
+  const { env, id } = await groupCase();
+  await updateAppointment(ctxFor(env, A, { kakao: fakeKakao().lookup, push: pushSpy().push }), upd(id, { at: kst('2026-10-29T08:50') }, 'this', true));
+  assert.ok(['appointment_participants', 'group_members'].every((t) => env.serviceTables.has(t)));
 });
 
 test('공동 약속에서 나만 빠지기: 내 참여 · 알람만 사라지고 약속 · 만든 사람의 참여는 그대로, 만든 사람 · 공동 약속이 아닌 일정은 UNPROCESSABLE, 두 번 보내도 같은 결과', async () => {

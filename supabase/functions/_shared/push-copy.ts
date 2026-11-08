@@ -11,6 +11,8 @@ export const GROUP_KINDS = ['GROUP_MEMBER_JOINED', 'GROUP_APPT_CHANGED'] as cons
 export type ClientKind = (typeof CLIENT_KINDS)[number];
 export type PushKind = ClientKind | (typeof SERVER_ONLY_KINDS)[number];
 export type GroupKind = (typeof GROUP_KINDS)[number];
+// 공동 약속 알림의 두 가지: 바뀜(시각 · 장소) / 취소됨(만든 사람이 지움). 서버 함수가 정해 알림 데이터 `change`에 싣고, 받은 폰이 알람을 맞추거나 지움 (9장)
+export type GroupChange = 'CHANGED' | 'CANCELED';
 
 export const isGroupKind = (kind: string): kind is GroupKind => (GROUP_KINDS as readonly string[]).includes(kind);
 
@@ -42,6 +44,7 @@ export type CopyContext = {
   previousAt?: string | null; // 알람 바뀜: 이전 → 새 시각 (둘 다 있을 때만 문구에 넣음)
   newAt?: string | null;
   timeZone?: string | null; // 받는 사람 시간대 (기본 Asia/Seoul)
+  change?: GroupChange; // GROUP_APPT_CHANGED: 취소됐으면 문구가 '취소됐어요'
 };
 
 const NAME_MAX = 40;
@@ -82,7 +85,8 @@ export function composeCopy(kind: PushKind, ctx: CopyContext): { title: string; 
       return { title: nameOr(ctx.groupName, '그룹'), body: '새 멤버가 들어왔어요' };
     case 'GROUP_APPT_CHANGED': {
       const title = (ctx.appointmentTitle ?? '').trim();
-      return { title: nameOr(ctx.groupName, '그룹'), body: title ? `‘${clip(title)}’ 약속이 바뀌었어요` : '약속이 바뀌었어요' };
+      const verb = ctx.change === 'CANCELED' ? '취소됐어요' : '바뀌었어요';
+      return { title: nameOr(ctx.groupName, '그룹'), body: title ? `‘${clip(title)}’ 약속이 ${verb}` : `약속이 ${verb}` };
     }
     case 'WAKE_MISSED':
       return { title: '기상 확인', body: '기상 확인이 안 됐어요' };
