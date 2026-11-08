@@ -1,8 +1,9 @@
 -- =====================================================================
 -- 친구 2장 — 아이디 · 친구 찾기 (친구 논리설계 2장, 11/8 확정)
---   ① 자동 아이디        가입하면 respec_ + 4자(소문자 · 숫자), 겹치면 다시 만듦. 빈 아이디는 지금 채우고 handle NOT NULL
+--   ① 자동 아이디        가입하면 respec_ + 4자(소문자 · 숫자), 겹치면 다시 만듦. 빈 아이디는 지금 채움
+--                        (NOT NULL은 앱 타입 handle: string | null을 S2가 옮긴 뒤 — 그전에도 앱은 트리거 때문에 못 비움)
 --   ② 아이디 바꾸기      change_my_handle — 형식 · 소문자 · respec_ 거절 · 30일 1번(자동 아이디 첫 변경 · 온보딩 중은 안 셈)
---                        앱이 handle을 직접 update하는 길은 트리거로 막음 (15-라)
+--                        앱이 handle을 직접 update하는 길, onboarded_at을 비워 30일을 피하는 길은 트리거로 막음 (15-라 중 2장 몫)
 --   ③ 아이디 검색        search_by_handle — 공백 · @ · 대소문자 정리, 차단 · 탈퇴 · 온보딩 전은 없는 아이디와 같은 응답, 1분 10회
 --                        find_profile_by_handle은 같은 검색을 거치는 옛 모양 (앱이 옮길 때까지, 15장에서 지움)
 --   ④ 이름 검색          search_related_by_name — 친구 · 같은 그룹 안 닉네임 부분 일치
@@ -19,7 +20,8 @@
 -- 0. 공용 — 무작위 코드 · 차단 쌍 · 제한 기록
 -- ---------------------------------------------------------------------
 
--- 무작위 글자 p_len개 — 글자마다 gen_random_uuid()의 첫 바이트를 씀 (강한 난수, pgcrypto 없이)
+-- 무작위 글자 p_len개 — 글자마다 gen_random_uuid()의 첫 바이트(강한 난수, pgcrypto 없이) % 글자 수
+--   글자표가 32자(256의 약수)면 고르게 나옴. 36자(자동 아이디)는 앞 4글자가 조금 더 자주 나옴(8/256 vs 7/256) — 아이디는 비밀값이 아니라 그대로 씀
 --   친구 링크와 5장 그룹 초대 코드가 같은 함수를 씀 (2-바 "그룹 코드 규칙과 같은 함수")
 create function private.random_code(p_len integer, p_alphabet text)
 returns text
@@ -53,6 +55,14 @@ language sql
 volatile
 set search_path = ''
 as $$ select 'respec_' || private.random_code(4, 'abcdefghijklmnopqrstuvwxyz0123456789') $$;
+
+-- 앞뒤 공백 떼기 — 스페이스만 떼는 btrim과 달리 탭 · 줄바꿈 · (로캘이 아는) 전각 공백도 뗌. 닉네임 저장 · 가입 닉네임 고르기가 같이 씀
+create function private.trim_spaces(p text)
+returns text
+language sql
+immutable
+set search_path = ''
+as $$ select regexp_replace(p, '^[[:space:]]+|[[:space:]]+$', '', 'g') $$;
 
 -- 두 사람이 차단 쌍인가 (어느 쪽이 걸었든) — 검색 · 링크 · 이름 검색이 같이 씀
 --   지금은 friends.status = BLOCKED 행. 4장에서 user_blocks로 바꿀 때 이 함수만 고침
@@ -181,7 +191,8 @@ comment on column public.profiles.handle_next_change_at is
   '다음에 아이디를 바꿀 수 있는 시각(바꾼 시각 + 30일). NULL = 언제든 — 자동 아이디 첫 변경 · 온보딩 중 변경은 안 셈 (2-아 · 2-카)';
 
 -- 가입하면 프로필 행 + 자동 아이디 — 아이디가 겹치면(유일 색인) 다시 만듦 (2-01 · 2-02 · 2-24)
---   닉네임 고르는 법은 init_schema 그대로
+--   닉네임 고르는 순서는 init_schema 그대로. 후보의 앞뒤 공백은 아래 닉네임 트리거와 같은 trim_spaces로 떼서
+--   탭 · 줄바꿈 · 전각 공백뿐인 이름은 다음 후보로 넘어감 (트리거가 ''로 만들어 가입째 실패하지 않게)
 create or replace function public.handle_new_user()
 returns trigger
 language plpgsql
@@ -194,12 +205,12 @@ declare
 begin
   -- 닉네임은 필수라 메타데이터에 없으면 이메일 앞부분, 그것도 없으면 '사용자'로 채움
   v_nickname := coalesce(
-    nullif(btrim(v_meta ->> 'nickname'), ''),
-    nullif(btrim(v_meta ->> 'name'), ''),
-    nullif(btrim(v_meta ->> 'full_name'), ''),
-    nullif(btrim(v_meta ->> 'user_name'), ''),
-    nullif(btrim(v_meta ->> 'preferred_username'), ''),
-    nullif(split_part(coalesce(new.email, ''), '@', 1), ''),
+    nullif(private.trim_spaces(v_meta ->> 'nickname'), ''),
+    nullif(private.trim_spaces(v_meta ->> 'name'), ''),
+    nullif(private.trim_spaces(v_meta ->> 'full_name'), ''),
+    nullif(private.trim_spaces(v_meta ->> 'user_name'), ''),
+    nullif(private.trim_spaces(v_meta ->> 'preferred_username'), ''),
+    nullif(private.trim_spaces(split_part(coalesce(new.email, ''), '@', 1)), ''),
     '사용자'
   );
 
@@ -208,7 +219,7 @@ begin
       insert into public.profiles (user_id, nickname, profile_image_url, handle)
       values (
         new.id,
-        left(v_nickname, 30),
+        private.trim_spaces(left(v_nickname, 30)),
         coalesce(nullif(v_meta ->> 'avatar_url', ''), nullif(v_meta ->> 'picture', '')),
         private.auto_handle()
       )
@@ -240,35 +251,39 @@ begin
 end;
 $$;
 
-alter table public.profiles alter column handle set not null;
-
 
 -- ---------------------------------------------------------------------
 -- 2. 아이디 바꾸기 — change_my_handle · 직접 쓰기 막기
 -- ---------------------------------------------------------------------
 
--- 앱 역할(authenticated · anon)이 handle · 변경 시각 칸을 직접 바꾸면 막음 (15-라)
---   change_my_handle(security definer)은 함수 주인 권한으로 돌아 current_user가 앱 역할이 아니라서 통과
+-- 앱 역할(authenticated · anon)의 직접 update 막기 (15-라 중 2장 몫)
+--   ① handle · 변경 시각 칸은 못 바꿈 → change_my_handle로만
+--   ② onboarded_at은 비어 있을 때 한 번 채우기만 (온보딩 마지막 단계). 비우거나 바꾸면 30일 예외(온보딩 중)를 다시 얻으므로 막음 (2-아)
+--   change_my_handle · dev_reset_my_data(security definer)는 함수 주인 권한으로 돌아 current_user가 앱 역할이 아니라서 통과
 --   service_role · 마이그레이션도 통과 (시드 · 운영)
-create function private.guard_profile_handle()
+create function private.guard_profile_columns()
 returns trigger
 language plpgsql
 set search_path = ''
 as $$
 begin
-  if current_user in ('authenticated', 'anon')
-     and (new.handle is distinct from old.handle
-          or new.handle_changed_at is distinct from old.handle_changed_at
-          or new.handle_next_change_at is distinct from old.handle_next_change_at) then
-    raise exception '아이디는 change_my_handle로만 바꿈' using errcode = '42501';
+  if current_user in ('authenticated', 'anon') then
+    if new.handle is distinct from old.handle
+       or new.handle_changed_at is distinct from old.handle_changed_at
+       or new.handle_next_change_at is distinct from old.handle_next_change_at then
+      raise exception '아이디는 change_my_handle로만 바꿈' using errcode = '42501';
+    end if;
+    if old.onboarded_at is not null and new.onboarded_at is distinct from old.onboarded_at then
+      raise exception '온보딩을 끝낸 시각은 바꿀 수 없음' using errcode = '42501';
+    end if;
   end if;
   return new;
 end;
 $$;
 
-create trigger guard_profile_handle
+create trigger guard_profile_columns
   before update on public.profiles
-  for each row execute function private.guard_profile_handle();
+  for each row execute function private.guard_profile_columns();
 
 -- 내 아이디 바꾸기 — 검사는 여기 한 곳 (2-나 · 2-차)
 --   상태: OK · SAME · INVALID · RESERVED · TAKEN · LIMIT. 실패는 예외 대신 상태 값 (X-7)
@@ -300,10 +315,6 @@ begin
   if v_new !~ '^[a-z0-9_]{3,20}$' then
     return jsonb_build_object('status', 'INVALID');
   end if;
-  -- 자동 아이디 모양(respec_…)은 사칭이라 거절. 예약어 목록은 문서 보충 대기(빈 곳)
-  if left(v_new, 7) = 'respec_' then
-    return jsonb_build_object('status', 'RESERVED');
-  end if;
 
   -- 같은 사람이 두 기기에서 동시에 바꾸면 한 줄씩 (2-26)
   select p.handle, p.handle_changed_at, p.handle_next_change_at, p.onboarded_at into v_me
@@ -313,8 +324,13 @@ begin
     raise exception '프로필이 없음' using errcode = '42501';
   end if;
 
+  -- 지금 아이디 그대로(자동 아이디 포함)면 바꾸지 않고 SAME — respec_ 검사보다 먼저 (온보딩 [다음]이 자동 아이디를 그대로 보내도 됨)
   if v_me.handle = v_new then
     return jsonb_build_object('status', 'SAME', 'handle', v_new, 'next_change_at', v_me.handle_next_change_at);
+  end if;
+  -- 자동 아이디 모양(respec_…)은 사칭이라 거절. 예약어 목록은 문서 보충 대기(빈 곳)
+  if left(v_new, 7) = 'respec_' then
+    return jsonb_build_object('status', 'RESERVED');
   end if;
 
   if v_me.onboarded_at is not null and v_me.handle_next_change_at is not null and now() < v_me.handle_next_change_at then
@@ -504,6 +520,9 @@ begin
     raise exception '로그인이 필요함' using errcode = '42501';
   end if;
 
+  -- 폰 · 웹이 처음에 동시에 불러도 한 줄씩 (행이 없으면 for update가 잠글 게 없어 뒤 호출이 앞 토큰을 덮어씀)
+  perform pg_advisory_xact_lock(hashtextextended('friend_link:' || v_uid::text, 0));
+
   select l.token, l.expires_at into v_link
   from public.friend_links l where l.owner_id = v_uid
   for update;
@@ -585,6 +604,7 @@ language plpgsql
 set search_path = ''
 as $$
 begin
+  -- private.trim_spaces와 같은 식 (이 트리거는 앱 역할 권한으로 돌아 private 함수를 부르지 않음)
   new.nickname := regexp_replace(new.nickname, '^[[:space:]]+|[[:space:]]+$', '', 'g');
   return new;
 end;
@@ -615,7 +635,8 @@ revoke execute on function
   private.take_rate_slot(uuid, text, integer, integer),
   private.public_profile_json(uuid),
   private.friend_relation(uuid, uuid),
-  private.guard_profile_handle(),
+  private.trim_spaces(text),
+  private.guard_profile_columns(),
   private.trim_profile_nickname()
 from public, anon, authenticated;
 

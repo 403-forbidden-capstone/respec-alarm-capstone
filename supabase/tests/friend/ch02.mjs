@@ -59,7 +59,7 @@ export default async function ch02({ q, as, su, check, expectErr, PGlite, AUTH_S
     }
   });
 
-  await check('2-23: 마이그레이션 전에 아이디가 비어 있던 계정은 자동 아이디로 채워지고(있던 아이디는 그대로) handle은 NOT NULL · 앞뒤 공백 닉네임은 정리', async () => {
+  await check('2-23: 마이그레이션 전에 아이디가 비어 있던 계정은 자동 아이디로 채워지고(있던 아이디는 그대로) 빈 아이디 0 · 앞뒤 공백 닉네임은 정리', async () => {
     const staged = new PGlite();
     try {
       await staged.exec(AUTH_STUBS);
@@ -76,19 +76,38 @@ export default async function ch02({ q, as, su, check, expectErr, PGlite, AUTH_S
       for (const f of files.slice(i)) await staged.exec(readFileSync(join(MIG_DIR, f), 'utf8'));
       const r = await sq(`select user_id, handle, nickname, handle_changed_at from public.profiles order by user_id`);
       const m = Object.fromEntries(r.map((x) => [x.user_id, x]));
-      const [nn] = await sq(`select is_nullable from information_schema.columns where table_schema = 'public' and table_name = 'profiles' and column_name = 'handle'`);
+      const [nn] = await sq(`select count(*)::int as n from public.profiles where handle is null`);
       return m[id(31)].handle === 'kept_one' && HANDLE_RE.test(m[id(32)].handle) && HANDLE_RE.test(m[id(33)].handle)
         && m[id(32)].handle !== m[id(33)].handle && r.every((x) => x.handle_changed_at === null)
-        && m[id(32)].nickname === '공백' && m[id(33)].nickname === '사용자' && nn.is_nullable === 'NO'
+        && m[id(32)].nickname === '공백' && m[id(33)].nickname === '사용자' && nn.n === 0
         ? true : { r, nn };
     } finally {
       await staged.close();
     }
   });
 
+  await check('2-28(가입 몫): OAuth 이름이 탭 · 줄바꿈뿐이면 가입이 실패하지 않고 다음 후보(이메일 앞부분 → "사용자")로, 앞뒤 공백은 떼고 저장', async () => {
+    await as(null, 'supabase_auth_admin');
+    await q(`insert into auth.users (id, email, raw_user_meta_data) values
+             ($1, 'tabname@example.com', $4), ($2, null, $5), ($3, 'x@example.com', $6)`,
+      [id(5), id(6), id(7), JSON.stringify({ name: '\t' }), JSON.stringify({ name: '\n \t', full_name: '  ' }), JSON.stringify({ name: '\t수연\n' })]);
+    await su();
+    const r = Object.fromEntries((await q(`select user_id, nickname from public.profiles where user_id = any($1::uuid[])`, [[id(5), id(6), id(7)]]))
+      .map((x) => [x.user_id, x.nickname]));
+    return r[id(5)] === 'tabname' && r[id(6)] === '사용자' && r[id(7)] === '수연' ? true : r;
+  });
+
   // ---- 아이디 바꾸기 -------------------------------------------------------
 
   const U = await join_(10, '바꾸는사람');                      // 온보딩 끝남, 자동 아이디
+
+  await check('2-03(앞): 지금 자동 아이디를 그대로 보내면 RESERVED가 아니라 SAME(온보딩 [다음]이 그대로 보내도 됨), 30일에도 안 셈', async () => {
+    const auto = await handleOf(U);
+    const same = await change(U, auto.toUpperCase());
+    const [p] = await q(`select handle_changed_at, handle_next_change_at from public.profiles where user_id = $1`, [U]);
+    return HANDLE_RE.test(auto) && same.status === 'SAME' && same.handle === auto && p.handle_changed_at === null && p.handle_next_change_at === null
+      ? true : { auto, same, p };
+  });
   const V = await join_(11, '온보딩중', { onboarded: false });   // 온보딩 중
   const W = await join_(12, '형식시험', { onboarded: false });
 
@@ -161,6 +180,26 @@ export default async function ch02({ q, as, su, check, expectErr, PGlite, AUTH_S
     const seed = await q(`update public.profiles set handle = 'seed_handle' where user_id = $1 returning handle`, [X]);
     await su();
     return h === true && t === true && c === true && nick[0]?.nickname === '새닉네임' && seed[0]?.handle === 'seed_handle' ? true : { h, t, c, nick, seed };
+  });
+
+  await check('15-라(2장 몫): 앱은 onboarded_at을 비어 있을 때 한 번 채우기만 — 채운 뒤 비우거나 바꾸면 42501(30일 예외를 다시 얻는 길), 비우기 우회 뒤에도 LIMIT 그대로', async () => {
+    const O = await join_(15, '온보딩채움', { onboarded: false });
+    await as(O);
+    const fill = await q(`update public.profiles set onboarded_at = now() where user_id = $1 returning 1`, [O]);
+    const clear = await expectErr(() => q(`update public.profiles set onboarded_at = null where user_id = $1`, [O]), /온보딩을 끝낸 시각/);
+    const move = await expectErr(() => q(`update public.profiles set onboarded_at = now() - interval '1 day' where user_id = $1`, [O]), /온보딩을 끝낸 시각/);
+    const same = await q(`update public.profiles set onboarded_at = onboarded_at, nickname = '그대로' where user_id = $1 returning 1`, [O]);
+    await su();
+    // 바꾼 적 있고 30일 안 → LIMIT. 비우기가 막혀 우회 못 함
+    await q(`update public.profiles set handle_changed_at = now() - interval '1 day', handle_next_change_at = now() + interval '29 days' where user_id = $1`, [O]);
+    const lim = await change(O, 'escape_try');
+    // dev_reset_my_data(개발용, security definer)는 지금처럼 온보딩 전으로 되돌림
+    await as(O);
+    await q(`select public.dev_reset_my_data()`);
+    await su();
+    const [{ onboarded_at: reset }] = await q(`select onboarded_at from public.profiles where user_id = $1`, [O]);
+    return fill.length === 1 && clear === true && move === true && same.length === 1 && lim.status === 'LIMIT' && reset === null
+      ? true : { fill, clear, move, same, lim, reset };
   });
 
   await check('2-28: 닉네임 — 앞뒤 공백(탭 · 줄바꿈 포함) 떼고 저장, 빈 값 · 공백만 · 31자는 거절, 같은 닉네임은 허용', async () => {
