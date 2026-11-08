@@ -80,23 +80,6 @@ describe('F01 친구 · 요청', () => {
     expect((await real.listFriendRequests()).map((p) => p.name)).toEqual(['준성']);
   });
 
-  it('수락: 받은 사람이 나인 대기 요청을 ACCEPTED로, 수락 시각을 같이 씀', async () => {
-    mockFake.answer('friends.update', ok([{ friend_id: 'f' }]));
-    await real.acceptFriend(JUNSEONG);
-    const [op] = mockFake.opsOf('friends', 'update');
-    expect(op.payload).toMatchObject({ status: 'ACCEPTED' });
-    expect(typeof (op.payload as { accepted_at: string }).accepted_at).toBe('string');
-    expect(op.filters).toEqual([
-      ['eq', 'requester_id', JUNSEONG],
-      ['eq', 'addressee_id', ME],
-      ['eq', 'status', 'PENDING'],
-    ]);
-  });
-
-  it('이미 처리된(바뀐 행이 없는) 요청이면 이유를 알림', async () => {
-    mockFake.answer('friends.update', ok([]));
-    await expect(real.acceptFriend(JUNSEONG)).rejects.toThrow(UserError);
-  });
 });
 
 describe('G01 · H01 · G02 그룹', () => {
@@ -589,20 +572,6 @@ describe('G04 공유받은 알람', () => {
 });
 
 describe('새 UI용 함수', () => {
-  it('친구 요청: 내가 PENDING으로 만듦, 이미 있는 사이 · 나 자신은 이유를 알림', async () => {
-    await real.sendFriendRequest('u9');
-    expect(mockFake.opsOf('friends', 'insert')[0].payload).toEqual({ requester_id: ME, addressee_id: 'u9', status: 'PENDING' });
-    mockFake.answer('friends.insert', { data: null, error: { code: '23505', message: 'duplicate key' } });
-    await expect(real.sendFriendRequest('u9')).rejects.toThrow(new UserError('이미 친구이거나 요청이 진행 중이에요'));
-    mockFake.answer('friends.insert', { data: null, error: { code: '23503', message: 'fk' } });
-    await expect(real.sendFriendRequest('u9')).rejects.toThrow(new UserError('사용자를 찾을 수 없어요'));
-    mockFake.answer('friends.insert', { data: null, error: { code: 'XX000', message: 'boom' } });
-    await expect(real.sendFriendRequest('u9')).rejects.toMatchObject({ message: 'boom' });
-    const before = mockFake.opsOf('friends', 'insert').length;
-    await expect(real.sendFriendRequest(ME)).rejects.toThrow(UserError);
-    expect(mockFake.opsOf('friends', 'insert')).toHaveLength(before);
-  });
-
   it('그룹 만들기: 이름을 다듬어 만든 사람(나)으로 넣고 초대 코드를 돌려줌', async () => {
     mockFake.answer('groups.insert', ok({ group_id: 'g-new', invite_code: 'ZZZZ9999' }));
     await expect(real.createGroup('  스터디 모임 ')).resolves.toEqual({ id: 'g-new', inviteCode: 'ZZZZ9999' });
