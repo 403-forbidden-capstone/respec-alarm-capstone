@@ -2,6 +2,8 @@
 // 가짜 모드(웹 미리보기 · ?mode=mock)는 src/mocks의 가짜 데이터를 돌려주고, 실데이터 모드는 함수 맨 앞에서 ./real로 넘깁니다 (P6).
 //   읽기 · 쓰기 위치는 docs/screen-data-map.md (G01 · F02 · F03 · G02 · G03 · G04, 권한 합집합은 앱에서 합침 — grants.ts)
 //   date = 그룹 기상 신호(lib/realtime)가 알려 준 날 (YYYY-MM-DD). 실데이터만 씀 — get_group_wake_status의 p_date, 없으면 내 시간대의 오늘
+import { cleanHandle } from '@/features/onboarding/validate';
+import { HANDLE_PATTERN } from '@/features/profile/types';
 import { now } from '@/lib/clock';
 import { UserError } from '@/lib/errors';
 import { dateParts } from '@/lib/format';
@@ -11,20 +13,30 @@ import { db, kst, memberAlarms, people, timelines, TODAY, type MockGroup, type M
 
 import { mergeGrants } from './grants';
 import * as real from './real';
+import { MESSAGE_GONE } from './relationMessages';
+import { mergeHits } from './searchView';
 import {
   type CreatedGroup,
   type FinalGrant,
   type FriendItem,
+  type BlockedPerson,
+  type FriendLink,
   type FriendRelation,
   type GrantRow,
   type GroupDetail,
   type GroupItem,
   type GroupSummary,
-  type HandleSearchResult,
+  type HandleSearch,
   type MemberAlarm,
   type MemberWake,
+  type OpenedLink,
+  type PeopleSearch,
   type PermissionSet,
   type Person,
+  type PersonHit,
+  type ReportReason,
+  type ReportResult,
+  type ReportTarget,
   type Relation,
   type RelationId,
   type ShareLogItem,
@@ -64,6 +76,8 @@ function wokeCount(groupId: string) {
 
 // 새 UI용 가짜 상태 — 앱을 다시 열 때까지만 (mocks/data.ts는 안 고침)
 const sentRequests = new Set<string>(); // 내가 친구 요청을 보낸 사람
+const blocked: string[] = []; // 내가 차단한 사람 — 새로 차단한 순 (가짜 모드는 앱을 다시 열 때까지만)
+const reported = new Set<string>(); // 오늘 신고한 대상 `종류:id` — 같은 대상은 하루 한 번
 const newInviteCodes: Record<string, string> = {}; // 다시 만든 초대 코드
 const wakeOptIns: Record<string, boolean> = {}; // 기상 공유 동의 — 목업 그룹은 이미 공유 중이라 기본 켬
 const ownedGroups = new Set(['fam']); // 내가 만든 그룹 — 목업은 가족 그룹만 내가 만든 것으로
@@ -106,6 +120,70 @@ export async function acceptFriend(id: string) {
   db.requests = db.requests.filter((x) => x !== id);
   if (!db.friends.includes(id)) db.friends.push(id);
   db.grants.friend[id] = none();
+}
+
+// 내가 보낸 대기 요청 — F01 보낸 요청 · [취소]
+export async function listSentRequests(): Promise<Person[]> {
+  if (!isMock()) return real.listSentRequests();
+  return [...sentRequests].map(person);
+}
+
+// 받은 요청 거절 — 행이 지워지고 알림은 없음
+export async function declineFriend(id: string) {
+  if (!isMock()) return real.declineFriend(id);
+  if (!db.requests.includes(id)) throw new UserError(MESSAGE_GONE);
+  db.requests = db.requests.filter((x) => x !== id);
+}
+
+// 보낸 요청 취소
+export async function cancelFriendRequest(id: string) {
+  if (!isMock()) return real.cancelFriendRequest(id);
+  if (!sentRequests.delete(id)) throw new UserError(MESSAGE_GONE);
+}
+
+// 친구 끊기 — 친구 권한도 같이 지워짐 (그룹 출처는 그대로)
+export async function removeFriend(id: string) {
+  if (!isMock()) return real.removeFriend(id);
+  if (!db.friends.includes(id)) throw new UserError(MESSAGE_GONE);
+  db.friends = db.friends.filter((x) => x !== id);
+  delete db.grants.friend[id];
+}
+
+// 차단 — 친구 끊김 · 대기 요청 삭제 · 권한 삭제 (가짜 모드는 목록에서만 빠짐)
+export async function blockUser(userId: string) {
+  if (!isMock()) return real.blockUser(userId);
+  if (userId === 'me') throw new UserError('나는 차단할 수 없어요');
+  if (!people[userId]) throw new UserError('사용자를 찾을 수 없어요');
+  db.friends = db.friends.filter((x) => x !== userId);
+  db.requests = db.requests.filter((x) => x !== userId);
+  sentRequests.delete(userId);
+  delete db.grants.friend[userId];
+  if (!blocked.includes(userId)) blocked.unshift(userId);
+}
+
+// 차단 풀기 — 친구는 복구 안 됨
+export async function unblockUser(userId: string) {
+  if (!isMock()) return real.unblockUser(userId);
+  const i = blocked.indexOf(userId);
+  if (i < 0) throw new UserError(MESSAGE_GONE);
+  blocked.splice(i, 1);
+}
+
+// 설정 > 차단 목록
+export async function listBlocks(): Promise<BlockedPerson[]> {
+  if (!isMock()) return real.listBlocks();
+  return blocked.map((id) => ({ person: person(id), blockedAt: now() }));
+}
+
+// 신고 — 같은 대상은 하루 한 번
+export async function submitReport(target: ReportTarget, reason: ReportReason, note?: string): Promise<ReportResult> {
+  if (!isMock()) return real.submitReport(target, reason, note);
+  if (target.type === 'USER' && target.id === 'me') throw new UserError('나는 신고할 수 없어요');
+  if (target.type === 'USER' ? !people[target.id] : !db.groups[target.id]) throw new UserError('신고할 대상을 찾을 수 없어요');
+  const key = `${target.type}:${target.id}`;
+  if (reported.has(key)) return 'ALREADY_REPORTED';
+  reported.add(key);
+  return 'REPORTED';
 }
 
 // 참여 중인 그룹 (G01 그룹)
@@ -320,24 +398,68 @@ export async function sendWakePing(personId: string) {
 // 새 UI용 — 화면은 나중에 붙음. 가짜 모드는 목업 사람 · 그룹에 맞춰 최소한만 흉내
 // ---------------------------------------------------------------------------
 
-// 아이디로 사람 찾기 — @ 있어도 없어도, 대소문자 무관. 없으면 null
-export async function searchByHandle(handle: string): Promise<HandleSearchResult | null> {
-  if (!isMock()) return real.searchByHandle(handle);
-  const clean = handle.trim().replace(/^@/, '').toLowerCase();
+// 가짜 모드의 관계 — 친구 · 내가 보낸 요청 · 나에게 온 요청 · 없음
+function mockRelation(id: string): FriendRelation {
+  if (db.friends.includes(id)) return 'FRIEND';
+  if (sentRequests.has(id)) return 'SENT';
+  if (db.requests.includes(id)) return 'RECEIVED';
+  return 'NONE';
+}
+
+// 아이디 정확 일치로 사람 찾기 — @ 있어도 없어도, 대소문자 무관. 아이디 모양이 아니면 못 찾은 것 (가짜 모드는 횟수 제한 없음)
+export async function searchByHandle(query: string): Promise<HandleSearch> {
+  if (!isMock()) return real.searchByHandle(query);
+  const clean = cleanHandle(query);
+  if (!HANDLE_PATTERN.test(clean)) return { status: 'NOT_FOUND' };
   const found = Object.values(people).find((p) => p.id !== 'me' && p.handle?.slice(1).toLowerCase() === clean);
-  if (!found) return null;
-  const relation: FriendRelation = db.friends.includes(found.id)
-    ? 'FRIEND'
-    : sentRequests.has(found.id)
-      ? 'SENT'
-      : db.requests.includes(found.id)
-        ? 'RECEIVED'
-        : 'NONE';
-  return { person: toPerson(found), relation };
+  if (!found || blocked.includes(found.id)) return { status: 'NOT_FOUND' }; // 차단한 사람도 없는 아이디와 같은 응답
+  return { status: 'FOUND', person: toPerson(found), relation: mockRelation(found.id) };
+}
+
+// F01 검색칸 — 아이디 정확 일치가 먼저, 이름은 친구 · 같은 그룹 안에서만 부분 일치 (실데이터는 real/friends.ts)
+export async function searchPeople(query: string): Promise<PeopleSearch> {
+  if (!isMock()) return real.searchPeople(query);
+  const q = query.trim().replace(/^@/, '').trim();
+  if (!q) return { rows: [], self: null, limitSeconds: null, notFound: false };
+  const byHandle = await searchByHandle(q);
+  const exact: PersonHit | null = byHandle.status === 'FOUND' ? { person: byHandle.person, relation: byHandle.relation, via: 'HANDLE' } : null;
+  const related = new Set([...db.friends, ...Object.values(db.groups).flatMap((g) => g.members)]);
+  const lower = q.toLowerCase();
+  const byName: PersonHit[] = [...related]
+    .filter((id) => id !== 'me' && people[id] && !blocked.includes(id) && [people[id].name, people[id].short].some((n) => n.toLowerCase().includes(lower)))
+    .map((id) => ({ person: person(id), relation: mockRelation(id), via: db.friends.includes(id) ? ('FRIEND' as const) : ('GROUP' as const) }));
+  const rows = mergeHits(exact, byName);
+  return { rows, self: null, limitSeconds: null, notFound: !rows.length };
+}
+
+// 내 친구 링크 — 가짜 모드는 앱을 다시 열 때까지만 (실데이터는 my_friend_link)
+let linkSerial = 0;
+let currentLink = '';
+const oldLinks = new Set<string>();
+const mockLinkToken = (n: number) => `MOCKLINK${String.fromCharCode(65 + (n % 26)).repeat(4)}`;
+const MOCK_LINK_OWNERS: Record<string, string> = { FRIENDSY00001: 'sy', FRIENDJH00001: 'jh', FRIENDDAD0001: 'dad', FRIENDBJ00001: 'bj' }; // 시험 · 미리보기용 남의 링크
+
+export async function myFriendLink(renew = false): Promise<FriendLink> {
+  if (!isMock()) return real.myFriendLink(renew);
+  if (!currentLink || renew) {
+    if (currentLink) oldLinks.add(currentLink);
+    currentLink = mockLinkToken(linkSerial++);
+  }
+  return { token: currentLink, expiresAt: new Date(now().getTime() + 7 * 24 * 60 * 60 * 1000) };
+}
+
+// 친구 링크 착지 — 요청은 안 보냄. 가짜 모드는 내 링크 → SELF, 다시 만들기 전 링크 · 모르는 글자 → EXPIRED
+export async function openFriendLink(token: string): Promise<OpenedLink> {
+  if (!isMock()) return real.openFriendLink(token);
+  const t = token.trim().toUpperCase();
+  if (t && t === currentLink) return { status: 'SELF', person: person('me') };
+  const owner = MOCK_LINK_OWNERS[t];
+  if (!owner) return { status: 'EXPIRED' };
+  return { status: 'OK', person: person(owner), relation: mockRelation(owner) };
 }
 
 // 친구 요청 보내기 — 가짜 모드는 보낸 요청으로만 기억함 (상대가 수락하는 흐름은 목업 범위 밖)
-export async function sendFriendRequest(userId: string) {
+export async function sendFriendRequest(userId: string): Promise<'SENT' | 'FRIEND'> {
   if (!isMock()) return real.sendFriendRequest(userId);
   if (userId === 'me') throw new UserError('나에게는 친구 요청을 보낼 수 없어요');
   if (!people[userId]) throw new UserError('사용자를 찾을 수 없어요');
@@ -345,6 +467,7 @@ export async function sendFriendRequest(userId: string) {
     throw new UserError('이미 친구이거나 요청이 진행 중이에요');
   }
   sentRequests.add(userId);
+  return 'SENT';
 }
 
 // 그룹 만들기 — 만든 사람(나)이 바로 참여, 초대 코드가 생김

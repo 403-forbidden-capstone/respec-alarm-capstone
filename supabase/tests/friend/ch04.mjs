@@ -95,9 +95,9 @@ export default async function ch04({ q, as, su, check, expectErr, PGlite, AUTH_S
     const open1 = await call(Q, 'public.open_friend_link($1)', [linkP.token]);
     const open2 = await call(P, 'public.open_friend_link($1)', [linkQ.token]);
     await as(Q);
-    const direct1 = await expectErr(() => q(`insert into public.friends (requester_id, addressee_id) values ($1, $2)`, [Q, P]), /찾을 수 없음/);
+    const direct1 = await expectErr(() => q(`insert into public.friends (requester_id, addressee_id) values ($1, $2)`, [Q, P]), /violates foreign key constraint/);
     await as(P);
-    const direct2 = await expectErr(() => q(`insert into public.friends (requester_id, addressee_id) values ($1, $2)`, [P, Q]), /찾을 수 없음/);
+    const direct2 = await expectErr(() => q(`insert into public.friends (requester_id, addressee_id) values ($1, $2)`, [P, Q]), /violates foreign key constraint/);
     await su();
     await clearLimits(P, Q);
     return shapes.every((x) => x === NOT_FOUND) && open1.status === 'EXPIRED' && open2.status === 'EXPIRED'
@@ -308,6 +308,10 @@ export default async function ch04({ q, as, su, check, expectErr, PGlite, AUTH_S
                 ('50000000-0000-4000-8000-000000000003', $5, $6, 'ACCEPTED', now())`, [u(1), u(2), u(3), u(4), u(5), u(6)]);
       await sq(`insert into public.sharing_permissions (owner_id, grantee_id, source_type, source_id, can_view_alarm) values
                 ($1, $2, 'FRIEND', '50000000-0000-4000-8000-000000000003', true)`, [u(5), u(6)]);
+      // 옛 BLOCKED 쌍이 같은 그룹에 있고 그룹 출처 권한 행이 남아 있던 경우 — 옮기면서 같이 지워야 풀어도 되살아나지 않음
+      const [{ group_id: gOld }] = await sq(`insert into public.groups (group_name, owner_id) values ('옛그룹', $1) returning group_id`, [u(1)]);
+      await sq(`insert into public.group_members (group_id, user_id, invite_status, joined_at) values ($1, $2, 'JOINED', now())`, [gOld, u(2)]);
+      await sq(`insert into public.sharing_permissions (owner_id, grantee_id, source_type, source_id, can_view_wake) values ($1, $2, 'GROUP', $3, true), ($2, $1, 'GROUP', $3, true)`, [u(1), u(2), gOld]);
       for (const f of files.slice(i)) await staged.exec(readFileSync(join(MIG_DIR, f), 'utf8'));
       const blocks = await sq(`select blocker_id, blocked_id from public.user_blocks`);
       const left = await sq(`select friend_id::text as id, status::text from public.friends order by friend_id`);
@@ -358,6 +362,116 @@ export default async function ch04({ q, as, su, check, expectErr, PGlite, AUTH_S
     return first.status === 'REPORTED' && same.status === 'ALREADY_REPORTED' && other.status === 'REPORTED' && nextDay.status === 'REPORTED'
       && bad.every((x) => x.status === 'INVALID') && self.status === 'SELF' && ghost.status === 'NOT_FOUND' && hidden.status === 'NOT_FOUND'
       && ok200.status === 'REPORTED' ? true : { first, same, other, nextDay, bad, self, ghost, hidden, ok200 };
+  });
+
+  await check('4-04(변형): 직접 insert 거절은 없는 사람과 같은 모양 — 에러 코드 23503, 메시지 · 상세가 외래 키 위반 문구 (차단당했음이 드러나지 않게, 4-가)', async () => {
+    const S1 = await join_(110, '차단자'), S2 = await join_(111, '차단당함');
+    await block(S1, S2);
+    const grab = async (who, target) => {
+      await as(who);
+      try { await q(`insert into public.friends (requester_id, addressee_id) values ($1, $2)`, [who, target]); return { ok: true }; }
+      catch (e) { return { code: e.code, message: e.message, detail: e.detail ?? null }; }
+      finally { await su(); }
+    };
+    const blocked = await grab(S2, S1);
+    const ghost = await grab(S2, NOBODY);
+    const shape = (x) => x.code === '23503' && /^insert or update on table "friends" violates foreign key constraint "friends_(requester|addressee)_id_fkey"$/.test(x.message)
+      && /^Key is not present in table "profiles"\.$/.test(x.detail ?? '');
+    return shape(blocked) && shape(ghost) ? true : { blocked, ghost };
+  });
+
+  await check('4-04(바탕) · 4-08(바탕): 차단 · 직접 insert 가드 · 신고가 잠금을 건 채로 일함 — 차단과 직접 insert가 같은 사람 잠금(3장)을 써서 겹쳐도 차단 쌍에 대기 행이 남지 않고, 신고는 같은 대상 잠금으로 한 번만', async () => {
+    const S1 = await join_(119, '잠금1'), S2 = await join_(120, '잠금2'), S3 = await join_(121, '잠금3'), S4 = await join_(122, '잠금4');
+    await q(`create function pg_temp.f4_locks(kind text, a uuid, b uuid) returns integer language plpgsql as $$
+             declare n integer;
+             begin
+               perform set_config('request.jwt.claim.sub', a::text, true);
+               if kind = 'block' then
+                 perform public.block_user(b);
+               elsif kind = 'report' then
+                 perform public.submit_report('USER', b, 'OTHER', null);
+               else
+                 set local role authenticated;
+                 insert into public.friends (requester_id, addressee_id) values (a, b);
+               end if;
+               select count(*)::integer into n from pg_locks where locktype = 'advisory' and pid = pg_backend_pid();
+               return n;
+             end $$`);
+    const [{ n: blockLocks }] = await q(`select pg_temp.f4_locks('block', $1, $2) as n`, [S1, S2]);
+    const [{ n: insertLocks }] = await q(`select pg_temp.f4_locks('insert', $1, $2) as n`, [S3, S4]);
+    const [{ n: reportLocks }] = await q(`select pg_temp.f4_locks('report', $1, $2) as n`, [S3, S1]);
+    await q(`delete from public.friends where requester_id = $1`, [S3]);
+    return blockLocks >= 2 && insertLocks >= 2 && reportLocks >= 1 ? true : { blockLocks, insertLocks, reportLocks };
+  });
+
+  await check('4-06(변형): 차단과 겹쳐 대기 행이 남았어도(직접 insert 경쟁 흉내) 차단한 쪽이 수락하면 GONE — 친구가 되지 않음', async () => {
+    const S1 = await join_(123, '차단하는쪽'), S2 = await join_(124, '남은요청');
+    await block(S1, S2);
+    await q(`insert into public.friends (requester_id, addressee_id) values ($1, $2)`, [S2, S1]);   // 남은 대기 행을 흉내 (서버 권한이라 가드를 안 탐)
+    const a = await call(S1, 'public.accept_friend_request($1)', [S2]);
+    const row = await friendRow(S1, S2);
+    await q(`delete from public.friends where requester_id = $1`, [S2]);
+    return a.status === 'GONE' && row?.status === 'PENDING' ? true : { a, row };
+  });
+
+  await check('4-28(변형) · 4-21(변형): 이미 차단한 사이에 남은 친구 행 · 권한 행이 있어도 다시 차단하면(ALREADY_BLOCKED) 정리되고, 풀 때도 남은 권한 행을 지워 되살아나지 않음', async () => {
+    const S1 = await join_(125, '정리1'), S2 = await join_(126, '정리2');
+    await block(S1, S2);
+    const [{ friend_id: f }] = await q(`insert into public.friends (requester_id, addressee_id, status, accepted_at) values ($1, $2, 'ACCEPTED', now()) returning friend_id`, [S1, S2]);
+    await q(`insert into public.sharing_permissions (owner_id, grantee_id, source_type, source_id, can_view_alarm) values ($1, $2, 'FRIEND', $3, true)`, [S1, S2, f]);
+    const again = await block(S1, S2);
+    const cleaned = (await friendRow(S1, S2)) === null && (await permCount(S1, S2)) === 0;
+    await q(`insert into public.sharing_permissions (owner_id, grantee_id, source_type, source_id, can_view_wake) values ($1, $2, 'GROUP', gen_random_uuid(), true)`, [S2, S1]);
+    const un = await unblock(S1, S2);
+    return again.status === 'ALREADY_BLOCKED' && cleaned && un.status === 'UNBLOCKED' && (await permCount(S1, S2)) === 0 ? true : { again, cleaned, un, perms: await permCount(S1, S2) };
+  });
+
+  await check('4-10(변형): 대기 중인 친구 행은 권한 출처로 안 침 — 수락돼 친구가 돼야 권한이 효력을 가짐', async () => {
+    const S1 = await join_(127, '대기권한1'), S2 = await join_(128, '대기권한2');
+    const [{ friend_id: f }] = await q(`insert into public.friends (requester_id, addressee_id) values ($1, $2) returning friend_id`, [S1, S2]);
+    await q(`insert into public.sharing_permissions (owner_id, grantee_id, source_type, source_id, can_view_alarm) values ($1, $2, 'FRIEND', $3, true)`, [S1, S2, f]);
+    const pending = (await q(`select count(*)::int as n from private.granted_owner_ids_for($1, 'VIEW_ALARM')`, [S2]))[0].n;
+    await q(`update public.friends set status = 'ACCEPTED' where friend_id = $1`, [f]);
+    const accepted = (await q(`select count(*)::int as n from private.granted_owner_ids_for($1, 'VIEW_ALARM')`, [S2]))[0].n;
+    return pending === 0 && accepted === 1 ? true : { pending, accepted };
+  });
+
+  await check('4-31(경계): 신고의 하루는 신고하는 사람 시간대 자정부터 — 자정 전 기록은 오늘로 안 세어 다시 되고, 자정 뒤 기록은 셈', async () => {
+    const R = await join_(112, '시간대신고'), T = await join_(113, '시간대대상');
+    // 그 시간대에서 지금이 새벽 1시쯤이 되는 고정 시간대(Etc/GMT±N) — 6시간 전은 어제, 10분 전은 오늘
+    const [{ tz }] = await q(`select case when o >= 0 then 'Etc/GMT-' || o else 'Etc/GMT+' || (-o) end as tz
+                              from (select case when h <= 13 then 1 - h else 25 - h end as o
+                                    from (select extract(hour from now() at time zone 'UTC')::int as h) x) y`);
+    await q(`update public.profiles set timezone = $2 where user_id = $1`, [R, tz]);
+    const first = await report(R, 'USER', T, 'OTHER');
+    await q(`update public.reports set created_at = now() - interval '6 hours' where reporter_id = $1`, [R]);
+    const nextDay = await report(R, 'USER', T, 'OTHER');
+    await q(`update public.reports set created_at = now() - interval '10 minutes' where reporter_id = $1 and created_at > now() - interval '1 minute'`, [R]);
+    const same = await report(R, 'USER', T, 'OTHER');
+    return first.status === 'REPORTED' && nextDay.status === 'REPORTED' && same.status === 'ALREADY_REPORTED' ? true : { tz, first, nextDay, same };
+  });
+
+  await check('4-31(경계): 초대만 받은 사람도 그룹 이름을 신고하고 아무 관계 없는 사람은 못 함(NOT_FOUND) · 공백만 있는 메모는 메모 없음으로 저장', async () => {
+    const O = await join_(129, '신고그룹주인'), Inv = await join_(130, '초대만'), Out = await join_(131, '관계없음');
+    const { g } = await mkGroup(O, []);
+    await q(`insert into public.group_members (group_id, user_id, invite_status) values ($1, $2, 'INVITED')`, [g, Inv]);
+    const a = await report(Inv, 'GROUP', g, 'GROUP_NAME', '   ');
+    const b = await report(Out, 'GROUP', g, 'GROUP_NAME');
+    const [row] = await q(`select note from public.reports where reporter_id = $1`, [Inv]);
+    return a.status === 'REPORTED' && b.status === 'NOT_FOUND' && row.note === null ? true : { a, b, row };
+  });
+
+  await check('4-26(변형) · 12장 바탕: 신고한 사람이 탈퇴해도 신고는 남고(신고자만 비움), 신고당한 사람 · 그룹이 사라지면 신고도 사라짐 — 탈퇴가 신고 때문에 막히지 않음', async () => {
+    const R = await join_(114, '신고하고탈퇴'), T = await join_(115, '신고당하고탈퇴'), O = await join_(116, '그룹주인2');
+    const { g } = await mkGroup(O, [R]);
+    await report(R, 'USER', T, 'OTHER');
+    await report(R, 'GROUP', g, 'GROUP_NAME');
+    await q(`delete from auth.users where id = $1`, [R]);
+    const afterR = await q(`select target_type, reporter_id from public.reports where target_user_id = $1 or target_group_id = $2`, [T, g]);
+    await q(`delete from auth.users where id = $1`, [T]);
+    await q(`delete from public.groups where group_id = $1`, [g]);
+    const left = await q(`select 1 from public.reports where target_user_id = $1 or target_group_id = $2`, [T, g]);
+    return afterR.length === 2 && afterR.every((x) => x.reporter_id === null) && left.length === 0 ? true : { afterR, left };
   });
 
   await check('4장 함수: 로그인 정보가 없으면 42501, anon은 실행 권한 없음, 차단 판정 함수는 앱이 직접 못 부름, 신고 표는 서버 전용', async () => {
