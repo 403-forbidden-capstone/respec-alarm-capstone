@@ -107,7 +107,7 @@ export default async function ch03({ q, as, su, check, expectErr }) {
   await check('3-08 · 2-38(요청 부분): 자기에게 요청은 SELF, 없는 사람 · 온보딩 전 · 차단 쌍에게는 NOT_FOUND(같은 응답) — 기록 안 셈', async () => {
     const NO = await join_(7, '온보딩전', { onboarded: false });
     const BL = await join_(8, '차단');
-    await q(`insert into public.friends (requester_id, addressee_id, status) values ($1, $2, 'BLOCKED')`, [BL, A]);   // 지금 차단 모양(4장에서 user_blocks로)
+    await q(`insert into public.user_blocks (blocker_id, blocked_id) values ($1, $2)`, [A, BL]);   // A가 BL을 차단 (4장)
     const self = await request(A, A);
     const shapes = [await request(A, '30000000-0000-4000-8000-999999999999'), await request(A, NO), await request(A, BL), await request(BL, A)];
     const [{ n }] = await q(`select count(*)::int as n from public.rate_limit_events where user_id = $1 and action = 'FRIEND_REQUEST'`, [A]);

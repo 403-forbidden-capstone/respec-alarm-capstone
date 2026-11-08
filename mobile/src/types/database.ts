@@ -408,6 +408,43 @@ isOneToOne: false
       referencedColumns: ["user_id"]
     }
                   ]
+                },"reports": {
+                  Row: {
+                    "created_at": string,"handled_at": string | null,"handled_by": string | null,"note": string | null,"reason": string,"report_id": string,"reporter_id": string | null,"status": string,"target_group_id": string | null,"target_type": string,"target_user_id": string | null
+                  }
+                  Insert: {
+                    "created_at"?: string,"handled_at"?: string | null,"handled_by"?: string | null,"note"?: string | null,"reason": string,"report_id"?: string,"reporter_id"?: string | null,"status"?: string,"target_group_id"?: string | null,"target_type": string,"target_user_id"?: string | null
+                  }
+                  Update: {
+                    "created_at"?: string,"handled_at"?: string | null,"handled_by"?: string | null,"note"?: string | null,"reason"?: string,"report_id"?: string,"reporter_id"?: string | null,"status"?: string,"target_group_id"?: string | null,"target_type"?: string,"target_user_id"?: string | null
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "reports_handled_by_fkey"
+      columns: ["handled_by"]
+isOneToOne: false
+      referencedRelation: "profiles"
+      referencedColumns: ["user_id"]
+    },{
+      foreignKeyName: "reports_reporter_id_fkey"
+      columns: ["reporter_id"]
+isOneToOne: false
+      referencedRelation: "profiles"
+      referencedColumns: ["user_id"]
+    },{
+      foreignKeyName: "reports_target_group_id_fkey"
+      columns: ["target_group_id"]
+isOneToOne: false
+      referencedRelation: "groups"
+      referencedColumns: ["group_id"]
+    },{
+      foreignKeyName: "reports_target_user_id_fkey"
+      columns: ["target_user_id"]
+isOneToOne: false
+      referencedRelation: "profiles"
+      referencedColumns: ["user_id"]
+    }
+                  ]
                 },"roll_attempts": {
                   Row: {
                     "last_error": string | null,"next_try_at": string,"occurrence_on": string,"series_id": string,"skipped": boolean,"tries": number,"updated_at": string,"user_id": string
@@ -503,6 +540,31 @@ isOneToOne: false
     },{
       foreignKeyName: "todos_user_id_fkey"
       columns: ["user_id"]
+isOneToOne: false
+      referencedRelation: "profiles"
+      referencedColumns: ["user_id"]
+    }
+                  ]
+                },"user_blocks": {
+                  Row: {
+                    "blocked_id": string,"blocker_id": string,"created_at": string
+                  }
+                  Insert: {
+                    "blocked_id": string,"blocker_id": string,"created_at"?: string
+                  }
+                  Update: {
+                    "blocked_id"?: string,"blocker_id"?: string,"created_at"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "user_blocks_blocked_id_fkey"
+      columns: ["blocked_id"]
+isOneToOne: false
+      referencedRelation: "profiles"
+      referencedColumns: ["user_id"]
+    },{
+      foreignKeyName: "user_blocks_blocker_id_fkey"
+      columns: ["blocker_id"]
 isOneToOne: false
       referencedRelation: "profiles"
       referencedColumns: ["user_id"]
@@ -605,6 +667,9 @@ isOneToOne: false
             "accept_friend_request":
 { Args: { "p_requester_id": string }; Returns: Json
                            },
+"block_user":
+{ Args: { "p_user_id": string }; Returns: Json
+                           },
 "can_send_push":
 { Args: { "p_kind": string,"p_sender_id": string,"p_target_id": string }; Returns: boolean
                            },
@@ -651,6 +716,11 @@ isOneToOne: false
 "join_group_by_invite_code":
 { Args: { "p_invite_code": string }; Returns: string
                            },
+"my_blocks":
+{ Args: Record<PropertyKey, never>; Returns: {
+              "blocked_at": string,"handle": string,"nickname": string,"profile_image_url": string,"user_id": string
+            }[]
+                           },
 "my_friend_link":
 { Args: { "p_renew"?: boolean }; Returns: Json
                            },
@@ -684,6 +754,12 @@ isOneToOne: false
                            },
 "send_friend_request":
 { Args: { "p_target_id": string }; Returns: Json
+                           },
+"submit_report":
+{ Args: { "p_note"?: string,"p_reason": string,"p_target_id": string,"p_target_type": string }; Returns: Json
+                           },
+"unblock_user":
+{ Args: { "p_user_id": string }; Returns: Json
                            }
           }
           Enums: {
