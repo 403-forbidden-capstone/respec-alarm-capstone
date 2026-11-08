@@ -115,6 +115,49 @@ export const ACTIONS = [
     },
   },
   {
+    name: '코드 미리보기', w: 2, when: (c) => hasFn(c, 'group_preview'),
+    async run(c) {
+      const { data } = await c.admin.from('groups').select('invite_code').like('group_name', 'SIM %');
+      const g = c.rng.pick(data ?? []);
+      // 가끔 틀린 코드로도 봄 (NOT_FOUND와 틀린 코드 횟수 제한을 탐)
+      const code = !g || c.rng.chance(0.15) ? 'ZZZZZZZZ' : g.invite_code;
+      return callStatus(c, c.me.client, 'group_preview', { p_code: code });
+    },
+  },
+  {
+    name: '코드로 참여(함수)', w: 3, when: (c) => hasFn(c, 'group_join'),
+    async run(c) {
+      const { data } = await c.admin.from('groups').select('invite_code').like('group_name', 'SIM %');
+      const g = c.rng.pick(data ?? []);
+      if (!g) return { status: '(그룹 없음)' };
+      return callStatus(c, c.me.client, 'group_join', { p_code: g.invite_code, p_wake_share: c.rng.chance(0.5) });
+    },
+  },
+  {
+    name: '그룹에 친구 초대', w: 5, when: (c) => hasFn(c, 'group_invite'),
+    async run(c) {
+      const { data } = await c.admin.from('group_members').select('group_id').eq('user_id', c.me.id).eq('invite_status', 'JOINED');
+      const g = c.rng.pick(data ?? []);
+      if (!g) return { status: '(참여 그룹 없음)' };
+      // 대부분 내 친구를 초대하고, 가끔 친구 아닌 사람도 시도함(NOT_FOUND를 탐)
+      const { data: fr } = await c.admin
+        .from('friends').select('requester_id, addressee_id').eq('status', 'ACCEPTED')
+        .or(`requester_id.eq.${c.me.id},addressee_id.eq.${c.me.id}`);
+      const friend = c.rng.pick(fr ?? []);
+      const target = friend && !c.rng.chance(0.15) ? (friend.requester_id === c.me.id ? friend.addressee_id : friend.requester_id) : other(c).id;
+      return callStatus(c, c.me.client, 'group_invite', { p_group_id: g.group_id, p_user_id: target });
+    },
+  },
+  {
+    name: '초대 수락', w: 4, when: (c) => hasFn(c, 'group_accept'),
+    async run(c) {
+      const { data } = await c.admin.from('group_members').select('group_id').eq('user_id', c.me.id).eq('invite_status', 'INVITED');
+      const g = c.rng.pick(data ?? []);
+      if (!g) return { status: '(받은 초대 없음)' };
+      return callStatus(c, c.me.client, 'group_accept', { p_group_id: g.group_id, p_wake_share: c.rng.chance(0.5) });
+    },
+  },
+  {
     name: '그룹 나가기', w: 1, when: (c) => c.caps.hasTable('group_members'),
     async run(c) {
       const { data } = await c.admin.from('group_members').select('group_id').eq('user_id', c.me.id).eq('invite_status', 'JOINED');
