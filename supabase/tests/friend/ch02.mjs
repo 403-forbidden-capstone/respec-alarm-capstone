@@ -354,8 +354,9 @@ export default async function ch02({ q, as, su, check, expectErr, PGlite, AUTH_S
     const ids = (rows) => rows.map((r) => r.user_id).sort();
     const rel = Object.fromEntries(first.map((r) => [r.user_id, r.relation]));
     const handles = new Set(first.map((r) => r.handle)).size;
-    // 차단(지금 모양 = 친구 행 BLOCKED) · 탈퇴
-    await q(`update public.friends set status = 'BLOCKED' where requester_id = $1 and addressee_id = $2`, [N, NB]);
+    // 차단(지금 모양 = 친구 행 BLOCKED) · 탈퇴. 3장부터 update로는 차단 못 하니 행을 지우고 BLOCKED로 다시 넣음
+    await q(`delete from public.friends where requester_id = $1 and addressee_id = $2`, [N, NB]);
+    await q(`insert into public.friends (requester_id, addressee_id, status) values ($1, $2, 'BLOCKED')`, [N, NB]);
     await q(`delete from auth.users where id = $1`, [NC]);
     const after = await byName(N, '민수');
     const wild = await byName(N, '%');
