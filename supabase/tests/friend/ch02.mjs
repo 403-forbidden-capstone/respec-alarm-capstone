@@ -262,7 +262,7 @@ export default async function ch02({ q, as, su, check, expectErr, PGlite, AUTH_S
     const GONE = await join_(27, '탈퇴할사람');
     await setHandle(BL, 'blocker');
     await setHandle(GONE, 'gone_soon');
-    await q(`insert into public.user_blocks (blocker_id, blocked_id) values ($1, $2)`, [BL, A]);   // 차단한사람(BL)이 A를 차단 (4장)
+    await q(`insert into public.friends (requester_id, addressee_id, status) values ($1, $2, 'BLOCKED')`, [A, BL]);   // 지금 차단 모양(4장에서 user_blocks로)
     const before = await search(A, 'gone_soon');
     await q(`delete from auth.users where id = $1`, [GONE]);
     const shapes = {
@@ -396,8 +396,8 @@ export default async function ch02({ q, as, su, check, expectErr, PGlite, AUTH_S
     const ids = (rows) => rows.map((r) => r.user_id).sort();
     const rel = Object.fromEntries(first.map((r) => [r.user_id, r.relation]));
     const handles = new Set(first.map((r) => r.handle)).size;
-    // 차단(친구 NB가 나를 차단) · 탈퇴
-    await q(`insert into public.user_blocks (blocker_id, blocked_id) values ($1, $2)`, [NB, N]);
+    // 차단(지금 모양 = 친구 행 BLOCKED) · 탈퇴
+    await q(`update public.friends set status = 'BLOCKED' where requester_id = $1 and addressee_id = $2`, [N, NB]);
     await q(`delete from auth.users where id = $1`, [NC]);
     const after = await byName(N, '민수');
     const wild = await byName(N, '%');
@@ -447,7 +447,7 @@ export default async function ch02({ q, as, su, check, expectErr, PGlite, AUTH_S
 
   await check('2-41 · 2-42 · 2-22(DB 몫): 주인이 받는 사람을 차단했거나 받는 쪽이 차단했으면 EXPIRED, 내 링크는 SELF, 주인이 탈퇴하면 EXPIRED, 없는 · 형식 밖 토큰도 EXPIRED', async () => {
     const t = (await myLink(L)).token;
-    await q(`insert into public.user_blocks (blocker_id, blocked_id) values ($1, $2)`, [L, LC]);   // 주인(L)이 받는 사람(LC)을 차단 (4장)
+    await q(`insert into public.friends (requester_id, addressee_id, status) values ($1, $2, 'BLOCKED')`, [LC, L]);
     const blocked = await openLink(LC, t);
     const self = await openLink(L, t);
     const missing = await openLink(LB, 'ZZZZZZZZZZZZ');

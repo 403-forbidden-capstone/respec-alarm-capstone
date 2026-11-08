@@ -161,15 +161,14 @@ const TODAY = `(now() at time zone 'Asia/Seoul')::date`;
 const MEETING = ['decision_comments', 'decision_votes', 'decision_states'];
 // 서버 전용 표 — RLS는 켜고 정책은 없음 (앱은 못 읽고 못 씀, service_role만). 아래 "반복 다음 회차"에서 따로 확인
 //   rate_limit_events · friend_links = 친구 2장 (제한 기록 · 친구 링크, DB 함수로만) — friend/ch02.mjs에서 따로 확인
-//   reports = 친구 4장 (신고, 넣기는 DB 함수로만 · 읽기는 운영 화면 몫) — friend/ch04.mjs에서 따로 확인
-const SERVER_ONLY = ['roll_attempts', 'rate_limit_events', 'friend_links', 'reports'];
+const SERVER_ONLY = ['roll_attempts', 'rate_limit_events', 'friend_links'];
 
-await check('모든 public 테이블(앱 25개 — 서버 전용 4개 포함 + 회의 도구 3개)에 RLS가 켜져 있음', async () => {
+await check('모든 public 테이블(앱 23개 — 서버 전용 3개 포함 + 회의 도구 3개)에 RLS가 켜져 있음', async () => {
   const r = await q(`select c.relname, c.relrowsecurity from pg_class c join pg_namespace n on n.oid = c.relnamespace
                      where n.nspname = 'public' and c.relkind = 'r' order by 1`);
   const off = r.filter((x) => !x.relrowsecurity).map((x) => x.relname);
   const app = r.filter((x) => !MEETING.includes(x.relname)).length;
-  return app === 25 && r.length === 28 && off.length === 0 ? true : { count: r.length, app, off };
+  return app === 23 && r.length === 26 && off.length === 0 ? true : { count: r.length, app, off };
 });
 await check('모든 앱 테이블에 정책이 있고(서버 전용 표 제외) anon용 정책은 없음', async () => {
   const r = await q(`select c.relname, count(p.polname) as n,
@@ -1228,10 +1227,10 @@ await check('서버 전용 함수(can_send_push · find_missed_wake_alarms · �
 });
 
 // 배치 (Q5 A) — pg_cron · pg_net은 PGlite에 없어 cron.schedule · net.http_post 흉내로 확인
-await check('배치 예약: wake-check · alarm-roll(반복 다음 회차)을 5분마다 + friend-requests-expire(친구 3장, 30일 지난 받은 요청 삭제 — 내용은 friend/ch03.mjs) (PGlite에는 pg_cron · pg_net이 없어 확장은 건너뛰고 예약만 흉내에 들어감)', async () => {
+await check('배치 예약: wake-check · alarm-roll(반복 다음 회차)을 5분마다 (PGlite에는 pg_cron · pg_net이 없어 확장은 건너뛰고 예약만 흉내에 들어감)', async () => {
   const jobs = await q(`select jobname, schedule, command from cron.job order by jobname`);
   const ext = await q(`select extname from pg_extension where extname in ('pg_cron', 'pg_net')`);
-  return jobs.length === 3 && ext.length === 0 && jobs.some((x) => x.jobname === 'friend-requests-expire')
+  return jobs.length === 2 && ext.length === 0
     && ['wake-check', 'alarm-roll'].every((name) => {
       const j = jobs.find((x) => x.jobname === name);
       return j && j.schedule === '*/5 * * * *' && j.command === `select private.invoke_edge_function('${name}')`;
@@ -1563,20 +1562,16 @@ await check('호출 기록 · 대화 · 질문: D의 기록을 만들어 둠 (�
 // 17. 관계가 끝날 때 · 탈퇴
 // ---------------------------------------------------------------------
 
-await check('차단(block_user): 그 친구 관계와 권한 행이 지워짐 · 차단당한 사람은 상대 차단을 못 풂 · 아이디 검색에서 숨김 (자세한 건 friend/ch04.mjs)', async () => {
+await check('차단: 그 친구 관계의 권한 행이 지워짐 · 차단당한 요청자는 차단을 못 지움 · 아이디 검색에서 숨김', async () => {
   await as(B);
   await q(`insert into public.sharing_permissions (owner_id, grantee_id, source_type, source_id, can_view_alarm) values ($1, $2, 'FRIEND', $3, true)`, [B, A, fAB]);
-  const [blocked] = await q(`select public.block_user($1) as r`, [A]);
+  await q(`update public.friends set status = 'BLOCKED' where friend_id = $1`, [fAB]);
   await su();
   const left = await q(`select 1 from public.sharing_permissions where source_type = 'FRIEND' and source_id = $1`, [fAB]);
-  const gone = await q(`select 1 from public.friends where friend_id = $1`, [fAB]);
   await as(A);
-  const [del] = await q(`select public.unblock_user($1) as r`, [B]);
+  const del = await q(`delete from public.friends where friend_id = $1 returning 1`, [fAB]);
   const found = await q(`select * from public.find_profile_by_handle('etion')`);
-  await su();
-  const kept = await q(`select 1 from public.user_blocks where blocker_id = $1 and blocked_id = $2`, [B, A]);
-  return blocked.r.status === 'BLOCKED' && left.length === 0 && gone.length === 0 && del.r.status === 'GONE' && kept.length === 1 && found.length === 0
-    ? true : { blocked, left, gone, del, found, kept };
+  return left.length === 0 && del.length === 0 && found.length === 0 ? true : { left, del, found };
 });
 await check('그룹 나가기(LEFT): 그 그룹에서 받은 · 준 권한 행이 지워지고 기상판에서 사라짐', async () => {
   await as(B);
@@ -3002,6 +2997,6 @@ await check('user_places: updated_at이 고칠 때 갱신됨 · 계정을 지우
 // ---------------------------------------------------------------------
 // 장마다 자기 계정을 새로 만들어 앞 검사의 A~E와 섞이지 않게 함. 장이 늘면 아래 목록에 한 줄씩
 const FRIEND_CTX = { q, as, su, svc, check, expectErr, PGlite, AUTH_STUBS, MIG_DIR, readFileSync, readdirSync, join };
-for (const ch of ['ch02', 'ch03', 'ch04']) await (await import(`./friend/${ch}.mjs`)).default(FRIEND_CTX);
+for (const ch of ['ch02']) await (await import(`./friend/${ch}.mjs`)).default(FRIEND_CTX);
 
 report();
