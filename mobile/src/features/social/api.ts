@@ -12,11 +12,17 @@ import { memberState } from '@/mocks/calc';
 import { db, kst, memberAlarms, people, timelines, TODAY, type MockGroup, type MockMemberAlarm, type MockPerson } from '@/mocks/data';
 
 import { mergeGrants } from './grants';
+import { CODE_EXPIRED, CODE_NOT_FOUND, GROUP_FULL, GROUP_NOT_MEMBER, GROUP_TOO_MANY, cleanCode, groupNameProblem } from './groupTexts';
 import * as real from './real';
 import { MESSAGE_GONE } from './relationMessages';
 import { mergeHits } from './searchView';
 import {
   type CreatedGroup,
+  type GroupCode,
+  type GroupInvite,
+  type GroupPreview,
+  type InvitableFriend,
+  type JoinedGroup,
   type FinalGrant,
   type FriendItem,
   type BlockedPerson,
@@ -78,15 +84,49 @@ function wokeCount(groupId: string) {
 const sentRequests = new Set<string>(); // 내가 친구 요청을 보낸 사람
 const blocked: string[] = []; // 내가 차단한 사람 — 새로 차단한 순 (가짜 모드는 앱을 다시 열 때까지만)
 const reported = new Set<string>(); // 오늘 신고한 대상 `종류:id` — 같은 대상은 하루 한 번
-const newInviteCodes: Record<string, string> = {}; // 다시 만든 초대 코드
 const wakeOptIns: Record<string, boolean> = {}; // 기상 공유 동의 — 목업 그룹은 이미 공유 중이라 기본 켬
-const ownedGroups = new Set(['fam']); // 내가 만든 그룹 — 목업은 가족 그룹만 내가 만든 것으로
+const notifOff: Record<string, boolean> = {}; // 이 그룹 알림 끄기 — 기본 꺼짐(= 알림 받음)
+const invitedFriends: Record<string, Set<string>> = {}; // 그룹별로 내가 초대한 친구 (G02 + 초대에서 '초대 중' 표시)
+const groupCodes: Record<string, GroupCode> = {}; // 그룹 코드 + 만료일 (처음 열 때 정함, 새 코드를 누르면 바뀜)
 
-// 초대 코드 — 목업은 그룹 id에서 정해진 글자 (실데이터는 그룹의 초대 코드 칼럼)
-function inviteCodeOf(g: MockGroup) {
-  if (newInviteCodes[g.id]) return newInviteCodes[g.id];
-  const hash = [...g.id].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7);
-  return `${g.id.toUpperCase().slice(0, 3)}-${hash.toString(36).toUpperCase().padStart(4, '0').slice(-4)}`;
+// 초대 코드 — 헷갈리는 글자(0 O 1 I)를 뺀 글자표 8자 · 7일 (5장). 목업은 그룹 id에서 정해진 글자
+const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+function mockCode(seed: string, salt = 0) {
+  let h = [...seed].reduce((n, c) => (n * 31 + c.charCodeAt(0)) >>> 0, 7 + salt);
+  let out = '';
+  for (let i = 0; i < 8; i++) {
+    out += CODE_CHARS[h >>> 27]; // 위쪽 5비트 — 아래쪽 비트는 시작값이 비슷하면 같아짐
+    h = (Math.imul(h, 1103515245) + 12345) >>> 0;
+  }
+  return out;
+}
+const sevenDays = () => new Date(now().getTime() + 7 * 24 * 3600 * 1000);
+function codeOf(groupId: string): GroupCode {
+  return (groupCodes[groupId] ??= { code: mockCode(groupId), expiresAt: sevenDays() });
+}
+
+// 아직 안 들어간 그룹 — 코드 입력 · 받은 초대 시험용. 'READ' · 'RUN'은 받은 초대 카드도 있음, 'FULLFULL'은 가득 찬 그룹, 'OLDCODE2'는 만료된 코드
+type OutsideGroup = { id: string; name: string; initial: string; memberIds: string[]; count?: number; code: string; expired?: boolean; invitedBy?: string };
+const outsideGroups: OutsideGroup[] = [
+  { id: 'read', name: '독서 모임', initial: '독', memberIds: ['sy', 'jh', 'js'], code: 'READ2345', invitedBy: 'sy' },
+  { id: 'run', name: '아침 러닝', initial: '러', memberIds: ['jh'], code: 'RUNNING2', invitedBy: 'jh' },
+  { id: 'full', name: '가득 찬 모임', initial: '가', memberIds: ['sy'], count: 20, code: 'FULLFULL' },
+  { id: 'old', name: '옛 모임', initial: '옛', memberIds: ['jh'], code: 'OLDCODE2', expired: true },
+];
+const declinedInvites = new Set<string>();
+const joinedOutside = new Set<string>();
+const hasInvite = (o: OutsideGroup) => !!o.invitedBy && !declinedInvites.has(o.id) && !joinedOutside.has(o.id);
+const outsideByCode = (code: string) => outsideGroups.find((o) => o.code === code && !joinedOutside.has(o.id));
+
+// 밖에 있던 그룹에 내가 들어옴 — 가짜 데이터 그룹으로 옮김
+function enterOutside(o: OutsideGroup, wakeShare: boolean): JoinedGroup {
+  const { year, month } = dateParts(now());
+  db.groups[o.id] = { id: o.id, name: o.name, initial: o.initial, members: ['me', ...o.memberIds], since: `${year}년 ${month}월부터 함께하는 중` };
+  db.grants.group[o.id] = none();
+  wakeOptIns[o.id] = wakeShare;
+  groupCodes[o.id] = { code: o.code, expiresAt: sevenDays() }; // 입력한 코드 그대로 이 그룹의 코드가 됨
+  joinedOutside.add(o.id);
+  return { id: o.id, already: false };
 }
 
 function toMemberAlarm(a: MockMemberAlarm): MemberAlarm {
@@ -228,15 +268,14 @@ export async function getGroup(groupId: string, date?: string | null): Promise<G
     appointments: db.appointments
       .filter((a) => a.groupId === g.id)
       .map((a) => ({ id: a.id, title: a.title, at: a.at, place: a.place, importance: a.importance })),
-    inviteCode: inviteCodeOf(g),
     members: g.members.map((id) => ({
       person: person(id),
       isMe: id === 'me',
       state: memberState(id, t),
       received: receivedFrom(id),
     })),
-    isOwner: ownedGroups.has(g.id),
     wakeShareOptIn: wakeOptIns[g.id] ?? true,
+    notificationsOff: notifOff[g.id] ?? false,
   };
 }
 
@@ -470,44 +509,160 @@ export async function sendFriendRequest(userId: string): Promise<'SENT' | 'FRIEN
   return 'SENT';
 }
 
-// 그룹 만들기 — 만든 사람(나)이 바로 참여, 초대 코드가 생김
+// 그룹 만들기 — 만든 사람(나)이 바로 참여, 초대 코드가 생김 (그룹장 없음 — 만든 사람은 권한 없는 기록)
 export async function createGroup(name: string): Promise<CreatedGroup> {
   if (!isMock()) return real.createGroup(name);
+  const problem = groupNameProblem(name);
+  if (problem) throw new UserError(problem);
   const trimmed = name.trim();
-  if (!trimmed) throw new UserError('그룹 이름을 입력해 주세요');
-  if ([...trimmed].length > 50) throw new UserError('그룹 이름은 50자까지 쓸 수 있어요');
+  if (Object.keys(db.groups).length >= 10) throw new UserError(GROUP_TOO_MANY);
   let n = Object.keys(db.groups).length + 1;
   while (db.groups[`g${n}`]) n++;
   const id = `g${n}`;
   const { year, month } = dateParts(now());
   db.groups[id] = { id, name: trimmed, initial: [...trimmed][0], members: ['me'], since: `${year}년 ${month}월부터 함께하는 중` };
   db.grants.group[id] = none();
-  ownedGroups.add(id);
-  wakeOptIns[id] = false; // 만든 사람도 기상 공유 동의는 꺼진 채로 시작
-  return { id, inviteCode: inviteCodeOf(db.groups[id]) };
+  wakeOptIns[id] = false; // 만든 사람도 기상 공유 동의는 꺼진 채로 시작 — 만든 직후 같은 동의 시트가 뜸
+  const { code, expiresAt } = codeOf(id);
+  return { id, inviteCode: code, expiresAt };
 }
 
-// 초대 코드로 참여 — 참여한 그룹 id. 가짜 모드의 그룹은 모두 내가 이미 참여 중이라 그 그룹 id를 돌려줌
-export async function joinGroupByCode(code: string): Promise<string> {
-  if (!isMock()) return real.joinGroupByCode(code);
-  const trimmed = code.trim().toUpperCase();
-  if (!trimmed) throw new UserError('초대 코드를 입력해 주세요');
-  const g = Object.values(db.groups).find((x) => inviteCodeOf(x) === trimmed);
-  if (!g) throw new UserError('초대 코드가 맞지 않아요');
-  if (!g.members.includes('me')) g.members.push('me');
-  return g.id;
+// 코드 입력 → 미리보기 (참여는 안 함)
+export async function previewGroupByCode(code: string): Promise<GroupPreview> {
+  if (!isMock()) return real.previewGroupByCode(code);
+  const cleaned = cleanCode(code);
+  if (!cleaned) throw new UserError('초대 코드를 입력해 주세요');
+  const mine = Object.values(db.groups).find((g) => codeOf(g.id).code === cleaned);
+  if (mine) return { status: 'FOUND', name: mine.name, memberCount: mine.members.length, full: false, alreadyJoined: true, expiresAt: codeOf(mine.id).expiresAt };
+  const o = outsideByCode(cleaned);
+  if (!o) return { status: 'NOT_FOUND' };
+  if (o.expired) return { status: 'EXPIRED' };
+  const memberCount = o.count ?? o.memberIds.length;
+  return { status: 'FOUND', name: o.name, memberCount, full: memberCount >= 20, alreadyJoined: false, expiresAt: sevenDays() };
 }
 
-// 초대 코드 새로 받기 — 만든 사람만
-export async function regenerateInviteCode(groupId: string): Promise<string> {
-  if (!isMock()) return real.regenerateInviteCode(groupId);
+// 코드로 참여 — wakeShare = 동의 시트 [공유]
+export async function joinGroup(code: string, wakeShare: boolean): Promise<JoinedGroup> {
+  if (!isMock()) return real.joinGroup(code, wakeShare);
+  const cleaned = cleanCode(code);
+  if (!cleaned) throw new UserError('초대 코드를 입력해 주세요');
+  const mine = Object.values(db.groups).find((g) => codeOf(g.id).code === cleaned);
+  if (mine) return { id: mine.id, already: true };
+  const o = outsideByCode(cleaned);
+  if (!o) throw new UserError(CODE_NOT_FOUND);
+  if (o.expired) throw new UserError(CODE_EXPIRED);
+  if ((o.count ?? o.memberIds.length) >= 20) throw new UserError(GROUP_FULL);
+  if (Object.keys(db.groups).length >= 10) throw new UserError(GROUP_TOO_MANY);
+  return enterOutside(o, wakeShare);
+}
+
+// G01 위 받은 초대 카드
+export async function listGroupInvites(): Promise<GroupInvite[]> {
+  if (!isMock()) return real.listGroupInvites();
+  return outsideGroups.filter(hasInvite).map((o) => ({
+    groupId: o.id,
+    name: o.name,
+    initial: o.initial,
+    memberCount: o.count ?? o.memberIds.length,
+    invitedByName: person(o.invitedBy as string).name,
+    invitedAt: now(),
+  }));
+}
+
+// 받은 초대 [참여]
+export async function acceptGroupInvite(groupId: string, wakeShare: boolean): Promise<JoinedGroup> {
+  if (!isMock()) return real.acceptGroupInvite(groupId, wakeShare);
+  const o = outsideGroups.find((x) => x.id === groupId);
+  if (!o || !hasInvite(o)) throw new UserError(MESSAGE_GONE);
+  if ((o.count ?? o.memberIds.length) >= 20) throw new UserError(GROUP_FULL);
+  if (Object.keys(db.groups).length >= 10) throw new UserError(GROUP_TOO_MANY);
+  return enterOutside(o, wakeShare);
+}
+
+// 받은 초대 [거절] — 조용히 지움
+export async function declineGroupInvite(groupId: string): Promise<void> {
+  if (!isMock()) return real.declineGroupInvite(groupId);
+  const o = outsideGroups.find((x) => x.id === groupId);
+  if (!o || !hasInvite(o)) throw new UserError(MESSAGE_GONE);
+  declinedInvites.add(groupId);
+}
+
+// G02 [+ 초대] — 내 친구 이름순, 이미 멤버 · 초대 중은 표시
+export async function listInvitableFriends(groupId: string): Promise<InvitableFriend[]> {
+  if (!isMock()) return real.listInvitableFriends(groupId);
   const g = db.groups[groupId];
-  if (!g || !ownedGroups.has(groupId)) throw new UserError('그룹을 만든 사람만 초대 코드를 바꿀 수 있어요');
-  const old = inviteCodeOf(g);
-  let code = old;
-  while (code === old) code = `${g.id.toUpperCase().slice(0, 3)}-${Math.random().toString(36).slice(2, 6).toUpperCase().padEnd(4, '0')}`;
-  newInviteCodes[groupId] = code;
-  return code;
+  if (!g) throw new UserError(GROUP_NOT_MEMBER);
+  return [...db.friends]
+    .map(person)
+    .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
+    .map((p) => ({ person: p, state: g.members.includes(p.id) ? ('MEMBER' as const) : invitedFriends[groupId]?.has(p.id) ? ('INVITED' as const) : ('NONE' as const) }));
+}
+
+export async function inviteToGroup(groupId: string, userId: string): Promise<'INVITED' | 'ALREADY_INVITED'> {
+  if (!isMock()) return real.inviteToGroup(groupId, userId);
+  const g = db.groups[groupId];
+  if (!g) throw new UserError(GROUP_NOT_MEMBER);
+  if (!db.friends.includes(userId)) throw new UserError('초대할 수 없는 사람이에요');
+  if (g.members.includes(userId)) throw new UserError('이미 그룹에 있어요');
+  const set = (invitedFriends[groupId] ??= new Set());
+  if (set.has(userId)) return 'ALREADY_INVITED';
+  set.add(userId);
+  return 'INVITED';
+}
+
+// 코드 시트 — 코드 + 만료일
+export async function getGroupCode(groupId: string): Promise<GroupCode> {
+  if (!isMock()) return real.getGroupCode(groupId);
+  if (!db.groups[groupId]) throw new UserError(GROUP_NOT_MEMBER);
+  return { ...codeOf(groupId) };
+}
+
+// [새 코드] — 멤버 누구나, 옛 코드는 바로 못 씀
+export async function regenerateInviteCode(groupId: string): Promise<GroupCode> {
+  if (!isMock()) return real.regenerateInviteCode(groupId);
+  if (!db.groups[groupId]) throw new UserError(GROUP_NOT_MEMBER);
+  const old = codeOf(groupId).code;
+  let salt = 1;
+  let code = mockCode(groupId, salt);
+  while (code === old) code = mockCode(groupId, ++salt);
+  groupCodes[groupId] = { code, expiresAt: sevenDays() };
+  return { ...groupCodes[groupId] };
+}
+
+// 이름 바꾸기 — 멤버 누구나
+export async function renameGroup(groupId: string, name: string): Promise<void> {
+  if (!isMock()) return real.renameGroup(groupId, name);
+  const problem = groupNameProblem(name);
+  if (problem) throw new UserError(problem);
+  const g = db.groups[groupId];
+  if (!g) throw new UserError(GROUP_NOT_MEMBER);
+  g.name = name.trim();
+  g.initial = [...g.name][0];
+}
+
+// 나가기 — 가짜 데이터에서는 내 그룹 목록에서 빠짐
+export async function leaveGroup(groupId: string): Promise<void> {
+  if (!isMock()) return real.leaveGroup(groupId);
+  if (!db.groups[groupId]) throw new UserError(MESSAGE_GONE);
+  delete db.groups[groupId];
+  delete db.grants.group[groupId];
+}
+
+// 내보내기 — 코드가 바뀜 (5-19)
+export async function removeGroupMember(groupId: string, userId: string): Promise<void> {
+  if (!isMock()) return real.removeGroupMember(groupId, userId);
+  if (userId === 'me') throw new UserError('나는 내보낼 수 없어요. 나가기를 눌러 주세요');
+  const g = db.groups[groupId];
+  if (!g || !g.members.includes(userId)) throw new UserError(MESSAGE_GONE);
+  g.members = g.members.filter((p) => p !== userId);
+  await regenerateInviteCode(groupId);
+}
+
+// 이 그룹 알림 끄기 · 켜기
+export async function setGroupNotificationsOff(groupId: string, off: boolean): Promise<void> {
+  if (!isMock()) return real.setGroupNotificationsOff(groupId, off);
+  if (!db.groups[groupId]) throw new UserError(GROUP_NOT_MEMBER);
+  notifOff[groupId] = off;
 }
 
 // 이 그룹에 내 기상 상태 공유를 동의 / 취소 (D19 열림 — F03 저장은 이 값을 건드리지 않음)

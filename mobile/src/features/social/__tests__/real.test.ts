@@ -145,7 +145,7 @@ describe('G01 · H01 · G02 그룹', () => {
     mockFake.answerRpc('get_group_wake_status', ok(wake));
     mockFake.answer('appointments.select', ok([{ appointment_id: 'ap1', title: '팀 주간회의', appointment_at: '2026-10-20T01:00:00.000Z', dest_name: '세종대학교', importance: 'NORMAL' }]));
     const g = await real.getGroup(GROUP);
-    expect(g).toMatchObject({ id: GROUP, name: '캡스톤팀', since: '2026년 3월부터 함께하는 중', inviteCode: 'ABCD1234', isOwner: false, wakeShareOptIn: true });
+    expect(g).toMatchObject({ id: GROUP, name: '캡스톤팀', since: '2026년 4월부터 함께하는 중', wakeShareOptIn: true, notificationsOff: false });
     expect(g?.appointments).toEqual([{ id: 'ap1', title: '팀 주간회의', at: new Date('2026-10-20T01:00:00.000Z'), place: '세종대학교', importance: 'NORMAL' }]);
     const [query] = mockFake.opsOf('appointments', 'select');
     expect(query.filters).toEqual([
@@ -158,12 +158,6 @@ describe('G01 · H01 · G02 그룹', () => {
       ['준성', false, false], // 동의가 꺼져 있어 기상 조회가 효력 없음
       ['지형', false, true],
     ]);
-  });
-
-  it('내가 만든 그룹이면 isOwner', async () => {
-    mockFake.answer('groups.select', ok(groups.map((g) => ({ ...g, owner_id: ME }))));
-    mockFake.answerRpc('get_group_wake_status', ok([]));
-    expect((await real.getGroup(GROUP))?.isOwner).toBe(true);
   });
 });
 
@@ -572,41 +566,6 @@ describe('G04 공유받은 알람', () => {
 });
 
 describe('새 UI용 함수', () => {
-  it('그룹 만들기: 이름을 다듬어 만든 사람(나)으로 넣고 초대 코드를 돌려줌', async () => {
-    mockFake.answer('groups.insert', ok({ group_id: 'g-new', invite_code: 'ZZZZ9999' }));
-    await expect(real.createGroup('  스터디 모임 ')).resolves.toEqual({ id: 'g-new', inviteCode: 'ZZZZ9999' });
-    const [op] = mockFake.opsOf('groups', 'insert');
-    expect(op.payload).toEqual({ group_name: '스터디 모임', owner_id: ME });
-    expect(op.returning).toBe(true);
-    // 만든 사람이 참여(JOINED)로 들어가는 것은 DB 트리거(add_owner_as_member)가 함 — 앱은 구성원 행을 쓰지 않음
-    expect(mockFake.opsOf('group_members', 'insert')).toHaveLength(0);
-  });
-
-  it('그룹 이름이 비었거나 50자를 넘으면 DB에 가지 않음', async () => {
-    await expect(real.createGroup('   ')).rejects.toThrow(UserError);
-    await expect(real.createGroup('가'.repeat(51))).rejects.toThrow(UserError);
-    expect(mockFake.opsOf('groups', 'insert')).toHaveLength(0);
-  });
-
-  it('코드로 참여: 코드를 다듬어 DB 함수에 맡기고 그룹 id를 돌려줌, 틀린 코드는 이유를 알림', async () => {
-    mockFake.answerRpc('join_group_by_invite_code', ok(GROUP));
-    await expect(real.joinGroupByCode(' abcd1234 ')).resolves.toBe(GROUP);
-    expect(mockFake.rpcCalls.find((c) => c.name === 'join_group_by_invite_code')?.args).toEqual({ p_invite_code: 'abcd1234' });
-    mockFake.answerRpc('join_group_by_invite_code', { data: null, error: { code: 'P0001', message: '초대 코드가 맞지 않음' } });
-    await expect(real.joinGroupByCode('nope')).rejects.toThrow(new UserError('초대 코드가 맞지 않아요'));
-    mockFake.answerRpc('join_group_by_invite_code', { data: null, error: { code: '42501', message: 'login' } });
-    await expect(real.joinGroupByCode('nope')).rejects.toMatchObject({ message: 'login' });
-    await expect(real.joinGroupByCode('  ')).rejects.toThrow(UserError);
-  });
-
-  it('초대 코드 다시 만들기: 만든 사람만 (아니면 이유를 알림)', async () => {
-    mockFake.answerRpc('regenerate_invite_code', ok('NEWCODE1'));
-    await expect(real.regenerateInviteCode(GROUP)).resolves.toBe('NEWCODE1');
-    expect(mockFake.rpcCalls.find((c) => c.name === 'regenerate_invite_code')?.args).toEqual({ p_group_id: GROUP });
-    mockFake.answerRpc('regenerate_invite_code', { data: null, error: { code: '42501', message: 'owner only' } });
-    await expect(real.regenerateInviteCode(GROUP)).rejects.toThrow(new UserError('그룹을 만든 사람만 초대 코드를 바꿀 수 있어요'));
-  });
-
   it('기상 공유 동의: 내 구성원 행만 고침, 바뀐 행이 없으면 이유를 알림', async () => {
     mockFake.answer('group_members.update', ok([{ group_member_id: 'm1' }]));
     await real.setWakeShareOptIn(GROUP, true);

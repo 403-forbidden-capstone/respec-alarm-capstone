@@ -3,7 +3,7 @@ import { describe, expect, it } from '@jest/globals';
 import { now } from '@/lib/clock';
 import { UserError } from '@/lib/errors';
 
-import { createGroup, getGroup, joinGroupByCode, listGroups, listRelations, blockUser, cancelFriendRequest, declineFriend, listBlocks, submitReport, unblockUser, listFriendRequests, listFriends, listSentRequests, myFriendLink, openFriendLink, regenerateInviteCode, removeFriend, searchByHandle, searchPeople, sendFriendRequest, setWakeShareOptIn } from '../api';
+import { acceptGroupInvite, createGroup, declineGroupInvite, getGroup, getGroupCode, inviteToGroup, joinGroup, leaveGroup, listGroupInvites, listGroups, listInvitableFriends, listRelations, previewGroupByCode, removeGroupMember, renameGroup, setGroupNotificationsOff, blockUser, cancelFriendRequest, declineFriend, listBlocks, submitReport, unblockUser, listFriendRequests, listFriends, listSentRequests, myFriendLink, openFriendLink, regenerateInviteCode, removeFriend, searchByHandle, searchPeople, sendFriendRequest, setWakeShareOptIn } from '../api';
 
 // 새 UI용 함수의 가짜 구현 — 화면이 생기면 가짜 모드에서도 같은 이름으로 바로 쓰게 (실데이터는 real.test.ts)
 describe('아이디 검색 · 친구 요청 (가짜)', () => {
@@ -109,12 +109,15 @@ describe('차단 · 신고 (가짜)', () => {
 });
 
 describe('그룹 만들기 · 참여 · 초대 코드 · 동의 (가짜)', () => {
-  it('만들면 내가 만든 그룹으로 목록에 들어가고 초대 코드가 생김', async () => {
+  it('만들면 목록에 들어가고 8자 코드 + 7일 만료가 생김, 그룹장 칸은 없음', async () => {
     const before = (await listGroups()).length;
     const created = await createGroup('  스터디  ');
     expect((await listGroups()).length).toBe(before + 1);
+    expect(created.inviteCode).toMatch(/^[A-HJ-NP-Z2-9]{8}$/);
+    expect(created.expiresAt).toBeInstanceOf(Date);
     const group = await getGroup(created.id);
-    expect(group).toMatchObject({ name: '스터디', inviteCode: created.inviteCode, isOwner: true, wakeShareOptIn: false });
+    expect(group).toMatchObject({ name: '스터디', wakeShareOptIn: false, notificationsOff: false });
+    expect(group).not.toHaveProperty('isOwner');
     expect(group?.members.map((m) => m.isMe)).toEqual([true]);
     expect(group?.since).toMatch(/^\d{4}년 \d{1,2}월부터 함께하는 중$/);
     // F03 관계 고르기에도 나옴
@@ -126,21 +129,75 @@ describe('그룹 만들기 · 참여 · 초대 코드 · 동의 (가짜)', () =>
     await expect(createGroup('가'.repeat(51))).rejects.toThrow(UserError);
   });
 
-  it('코드로 참여: 맞는 코드면 그 그룹 id, 틀리면 이유 (대소문자 · 공백은 맞춤)', async () => {
-    const cap = await getGroup('cap');
-    await expect(joinGroupByCode(` ${cap?.inviteCode.toLowerCase()} `)).resolves.toBe('cap');
-    await expect(joinGroupByCode('NOPE-0000')).rejects.toThrow(new UserError('초대 코드가 맞지 않아요'));
-    await expect(joinGroupByCode(' ')).rejects.toThrow(UserError);
+  it('코드 미리보기: 내 그룹 · 아직 안 들어간 그룹 · 가득 · 만료 · 없는 코드, 참여는 안 함', async () => {
+    const cap = (await getGroupCode('cap')).code;
+    expect(await previewGroupByCode(` ${cap.toLowerCase()} `)).toMatchObject({ status: 'FOUND', name: '캡스톤팀', alreadyJoined: true });
+    expect(await previewGroupByCode('READ2345')).toMatchObject({ status: 'FOUND', name: '독서 모임', memberCount: 3, full: false, alreadyJoined: false });
+    expect(await previewGroupByCode('FULLFULL')).toMatchObject({ status: 'FOUND', full: true });
+    expect(await previewGroupByCode('OLDCODE2')).toEqual({ status: 'EXPIRED' });
+    expect(await previewGroupByCode('ZZZZZZZZ')).toEqual({ status: 'NOT_FOUND' });
+    await expect(previewGroupByCode('  ')).rejects.toThrow(UserError);
+    expect((await listGroups()).some((g) => g.name === '독서 모임')).toBe(false); // 미리보기만으로는 안 들어감
   });
 
-  it('초대 코드 다시 만들기: 만든 사람(내가 만든 그룹)만, 옛 코드는 더 못 씀', async () => {
+  it('코드로 참여: 동의 선택이 저장되고 받은 초대 카드는 사라짐, 이미 참여 중이면 already, 가득 · 만료 · 없는 코드는 이유', async () => {
+    await expect(joinGroup('FULLFULL', true)).rejects.toThrow(new UserError('가득 찼어요'));
+    await expect(joinGroup('OLDCODE2', true)).rejects.toThrow(new UserError('만료된 코드예요'));
+    await expect(joinGroup('ZZZZZZZZ', true)).rejects.toThrow(new UserError('없는 코드예요'));
+    expect((await listGroupInvites()).map((i) => i.groupId)).toContain('read');
+    await expect(joinGroup(' read 2345 ', true)).resolves.toEqual({ id: 'read', already: false });
+    expect((await getGroup('read'))?.wakeShareOptIn).toBe(true);
+    expect((await listGroupInvites()).map((i) => i.groupId)).not.toContain('read'); // 5-31 초대 카드 사라짐
+    await expect(joinGroup('READ2345', false)).resolves.toEqual({ id: 'read', already: true });
+  });
+
+  it('받은 초대: [참여]는 동의를 묻고 들어감, [거절]은 조용히 사라지고 다시 처리하면 이미 처리됨', async () => {
+    const invite = (await listGroupInvites()).find((i) => i.groupId === 'run');
+    expect(invite).toMatchObject({ name: '아침 러닝', memberCount: 1 });
+    await declineGroupInvite('run');
+    expect((await listGroupInvites()).map((i) => i.groupId)).not.toContain('run');
+    await expect(declineGroupInvite('run')).rejects.toThrow(UserError);
+    await expect(acceptGroupInvite('run', false)).rejects.toThrow(UserError);
+  });
+
+  it('코드 시트: 8자 코드 + 만료일, [새 코드]를 누르면 코드가 바뀜 (멤버 누구나), 옛 코드는 더 못 씀', async () => {
     const { id, inviteCode } = await createGroup('코드 시험');
     const next = await regenerateInviteCode(id);
-    expect(next).not.toBe(inviteCode);
-    expect((await getGroup(id))?.inviteCode).toBe(next);
-    await expect(joinGroupByCode(inviteCode)).rejects.toThrow(UserError);
-    await expect(joinGroupByCode(next)).resolves.toBe(id);
-    await expect(regenerateInviteCode('cap')).rejects.toThrow(UserError); // 캡스톤팀은 내가 만든 그룹이 아님
+    expect(next.code).not.toBe(inviteCode);
+    expect((await getGroupCode(id)).code).toBe(next.code);
+    expect(await previewGroupByCode(inviteCode)).toEqual({ status: 'NOT_FOUND' });
+    expect((await regenerateInviteCode('cap')).code).toMatch(/^[A-HJ-NP-Z2-9]{8}$/); // 만든 사람이 아니어도 됨
+  });
+
+  it('G02 메뉴: 이름 바꾸기 · 알림 끄기 · 내보내기(코드가 바뀜) · 나가기', async () => {
+    const { id } = await createGroup('메뉴 시험');
+    await renameGroup(id, '  새 이름 ');
+    expect((await getGroup(id))?.name).toBe('새 이름');
+    await expect(renameGroup(id, '  ')).rejects.toThrow(UserError);
+    await setGroupNotificationsOff(id, true);
+    expect((await getGroup(id))?.notificationsOff).toBe(true);
+    await setGroupNotificationsOff(id, false);
+    expect((await getGroup(id))?.notificationsOff).toBe(false);
+    const before = (await getGroupCode('cap')).code;
+    await removeGroupMember('cap', 'js');
+    expect((await getGroup('cap'))?.members.map((m) => m.person.id)).not.toContain('js');
+    expect((await getGroupCode('cap')).code).not.toBe(before);
+    await expect(removeGroupMember('cap', 'me')).rejects.toThrow(UserError);
+    await leaveGroup(id);
+    expect(await getGroup(id)).toBeNull();
+    await expect(leaveGroup(id)).rejects.toThrow(UserError);
+  });
+
+  it('직접 초대: 친구만, 이미 멤버는 거절, 두 번 눌러도 성공, 목록에 초대 중 표시', async () => {
+    const { id } = await createGroup('초대 시험');
+    const before = await listInvitableFriends(id);
+    expect(before.every((f) => f.state === 'NONE')).toBe(true);
+    const target = before[0].person.id;
+    await expect(inviteToGroup(id, target)).resolves.toBe('INVITED');
+    await expect(inviteToGroup(id, target)).resolves.toBe('ALREADY_INVITED');
+    expect((await listInvitableFriends(id)).find((f) => f.person.id === target)?.state).toBe('INVITED');
+    await expect(inviteToGroup(id, 'nobody')).rejects.toThrow(UserError);
+    expect((await listInvitableFriends('cap')).filter((f) => f.state === 'MEMBER').length).toBeGreaterThan(0);
   });
 
   it('기상 공유 동의: 켜고 끄면 그룹 상세에 반영, 참여 중이 아닌 그룹은 이유', async () => {
