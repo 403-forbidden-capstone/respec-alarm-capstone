@@ -254,6 +254,8 @@ export default async function ch06({ q, as, su, svc, check, expectErr, PGlite, A
     await save(A, g, true, false);
     await save(B, g, false, false);
     await call(A, 'public.invite_to_group($1, $2)', [g, C]);
+    // 초대 중인 멤버가 있는 채로 준 사람이 다시 저장해도(설정까지) 그 사람 몫 행은 안 생김 — 수락할 때 조회 행만 자동으로 생김
+    await save(A, g, true, true);
     const invited = (await groupRows(A, g)).filter((x) => x.grantee_id === C).length;
     const acc = await call(C, 'public.accept_group_invite($1, $2)', [g, false]);
     const fromA = (await groupRows(A, g)).filter((x) => x.grantee_id === C);
@@ -297,14 +299,16 @@ export default async function ch06({ q, as, su, svc, check, expectErr, PGlite, A
       for (const f of files.slice(0, i)) await staged.exec(readFileSync(join(MIG_DIR, f), 'utf8'));
       const sq = async (sql, params = []) => (await staged.query(sql, params)).rows;
       const u = (n) => id(300 + n);
-      for (let n = 1; n <= 5; n++) await sq(`insert into auth.users (id, email) values ($1, $2)`, [u(n), `f6-old-${n}@example.com`]);
+      for (let n = 1; n <= 6; n++) await sq(`insert into auth.users (id, email) values ($1, $2)`, [u(n), `f6-old-${n}@example.com`]);
       const [{ group_id: g }] = await sq(`insert into public.groups (group_name, owner_id) values ('옛그룹', $1) returning group_id`, [u(1)]);
       for (const n of [2, 3]) await sq(`insert into public.group_members (group_id, user_id, invite_status, joined_at) values ($1, $2, 'JOINED', now())`, [g, u(n)]);
+      await sq(`insert into public.group_members (group_id, user_id, invite_status) values ($1, $2, 'LEFT')`, [g, u(6)]);
       const ins = (owner, grantee, v, e = false) => sq(`insert into public.sharing_permissions (owner_id, grantee_id, source_type, source_id, can_view_alarm, can_edit_alarm)
                                                         values ($1, $2, 'GROUP', $3, $4, $5)`, [u(owner), u(grantee), g, v, e]);
       await ins(1, 2, true, true); await ins(1, 3, false);          // 값이 다름 → 둘 다 꺼짐
       await ins(2, 1, true, true); await ins(2, 3, true, true);     // 같음 → 그대로
-      await ins(3, 1, true);                                        // 멤버 한 명 행이 없음 → 꺼짐
+      await ins(3, 1, true);                                        // 참여 중 멤버 한 명(2) 행이 없음 → 꺼짐
+      await ins(3, 6, true);                                        // 나간 사람(6) 몫 행은 세지 않으니 행 수가 같아 보여도 꺼짐
       const [{ friend_id: f }] = await sq(`insert into public.friends (requester_id, addressee_id, status, accepted_at) values ($1, $2, 'ACCEPTED', now()) returning friend_id`, [u(4), u(5)]);
       await sq(`insert into public.sharing_permissions (owner_id, grantee_id, source_type, source_id, can_view_alarm, can_edit_alarm, can_view_wake)
                 values ($1, $2, 'FRIEND', $3, false, true, true), ($2, $1, 'FRIEND', $3, true, true, true)`, [u(4), u(5), f]);
@@ -316,7 +320,7 @@ export default async function ch06({ q, as, su, svc, check, expectErr, PGlite, A
       const fr4 = fr.find((x) => x.owner_id === u(4)), fr5 = fr.find((x) => x.owner_id === u(5));
       return g1.length === 2 && g1.every((x) => x.v === false && x.e === false)
         && g2.length === 2 && g2.every((x) => x.v === true && x.e === true)
-        && g3.length === 1 && g3[0].v === false && g3[0].e === false
+        && g3.length === 2 && g3.every((x) => x.v === false && x.e === false)
         && fr4.v === false && fr4.e === false && fr4.w === false && fr5.v === true && fr5.e === true && fr5.w === false ? true : { g1, g2, g3, fr };
     } finally {
       await staged.close();
@@ -357,6 +361,23 @@ export default async function ch06({ q, as, su, svc, check, expectErr, PGlite, A
     return n >= 1 ? true : { n };
   });
 
+  await check('6-17(경쟁): 저장이 참여 중 멤버 행(나 + 받는 사람 전부)을 잠가 둠 — 나가기 · 내보내기는 이 행을 고치거나 지우므로 저장이 끝날 때까지 기다림(나간 사람 몫 행이 되살아나지 않음)', async () => {
+    const A = await join_(47, '주인'), B = await join_(48, '비'), C = await join_(49, '씨'), L = await join_(77, '나감');
+    const { g } = await mkGroup(A, [B, C]);
+    await q(`insert into public.group_members (group_id, user_id, invite_status) values ($1, $2, 'LEFT')`, [g, L]);
+    await q(`create function pg_temp.f6_rowlocks(uid uuid, g uuid) returns text[] language plpgsql as $$
+             declare r text[];
+             begin
+               perform set_config('request.jwt.claim.sub', uid::text, true);
+               perform public.save_group_permissions(g, true, false);
+               select array_agg(gm.user_id::text order by gm.user_id) into r from public.group_members gm
+               where gm.group_id = g and gm.xmax::text::bigint = txid_current() % 4294967296;
+               return r;
+             end $$`);
+    const [{ r }] = await q(`select pg_temp.f6_rowlocks($1, $2) as r`, [A, g]);
+    return JSON.stringify(r) === JSON.stringify(sorted(A, B, C)) ? true : { r, want: sorted(A, B, C) };
+  });
+
   await check('6-18: 혼자인 그룹 · 다른 멤버가 모두 초대 중이거나 나간 그룹은 NO_MEMBERS(행도 안 생김), 참여 중이 아니거나 없는 그룹은 NOT_FOUND — 로그인이 없으면 42501, anon은 실행 권한 없음', async () => {
     const A = await join_(41, '혼자'), B = await join_(42, '초대만'), C = await join_(43, '나감'), O = await join_(44, '밖');
     const solo = await mkGroup(A, []);
@@ -366,6 +387,7 @@ export default async function ch06({ q, as, su, svc, check, expectErr, PGlite, A
     await q(`insert into public.group_members (group_id, user_id, invite_status) values ($1, $2, 'LEFT')`, [solo.g, C]);
     const r2 = await save(A, solo.g, true, false);
     const asInvited = await save(B, solo.g, true, false);
+    const asLeft = await save(C, solo.g, true, false);
     const invitedRow = (await q(`select invite_status::text as st from public.group_members where group_id = $1 and user_id = $2`, [solo.g, B]))[0]?.st;
     const outsider = await save(O, solo.g, true, false);
     const ghost = await save(A, NOBODY, true, false);
@@ -376,9 +398,9 @@ export default async function ch06({ q, as, su, svc, check, expectErr, PGlite, A
     await as(null, 'anon');
     const anon = await expectErr(() => q(`select public.save_group_permissions($1, true, false)`, [solo.g]), /permission denied/);
     await su();
-    return invitedRow === 'INVITED' && r1.status === 'NO_MEMBERS' && r2.status === 'NO_MEMBERS' && asInvited.status === 'NOT_FOUND' && outsider.status === 'NOT_FOUND'
+    return invitedRow === 'INVITED' && r1.status === 'NO_MEMBERS' && r2.status === 'NO_MEMBERS' && asInvited.status === 'NOT_FOUND' && asLeft.status === 'NOT_FOUND' && outsider.status === 'NOT_FOUND'
       && ghost.status === 'NOT_FOUND' && nul.status === 'NOT_FOUND' && rows === 0 && noLogin === true && anon === true
-      && Object.keys(r1).join() === 'status' ? true : { invitedRow, r1, r2, asInvited, outsider, ghost, nul, rows, noLogin, anon };
+      && Object.keys(r1).join() === 'status' ? true : { invitedRow, r1, r2, asInvited, asLeft, outsider, ghost, nul, rows, noLogin, anon };
   });
 
   // ---- 기상 보기 = 그룹 기상 공유 동의 하나 -----------------------------------------------

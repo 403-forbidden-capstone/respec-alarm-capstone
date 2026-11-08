@@ -16,9 +16,11 @@
 -- 친구 출처 기상 조회는 없앰(F03 친구 스위치 3개 → 2개)
 update public.sharing_permissions set can_view_wake = false where source_type = 'FRIEND' and can_view_wake;
 
--- 그룹 권한은 (주인, 그룹) 한 벌: 멤버마다 값이 다르거나 일부 멤버에게 행이 없으면 꺼짐(좁은 쪽). 설정은 조회가 있을 때만 (6-16)
+-- 그룹 권한은 (주인, 그룹) 한 벌: 멤버마다 값이 다르거나 참여 중인 멤버 일부에게 행이 없으면 꺼짐(좁은 쪽, 나간 사람 몫 행은 세지 않음). 설정은 조회가 있을 때만 (6-16)
 with g as (
-  select sp.owner_id, sp.source_id as group_id, bool_and(sp.can_view_alarm) as v, bool_and(sp.can_edit_alarm) as e, count(*) as n
+  select sp.owner_id, sp.source_id as group_id, bool_and(sp.can_view_alarm) as v, bool_and(sp.can_edit_alarm) as e,
+         count(*) filter (where exists (select 1 from public.group_members gm
+                                        where gm.group_id = sp.source_id and gm.user_id = sp.grantee_id and gm.invite_status = 'JOINED')) as n
   from public.sharing_permissions sp
   where sp.source_type = 'GROUP'
   group by sp.owner_id, sp.source_id
@@ -123,6 +125,7 @@ declare
   v_edit boolean;
   v_view boolean;
   v_n    integer;
+  v_me   boolean;
 begin
   if v_uid is null then
     raise exception '로그인이 필요함' using errcode = '42501';
@@ -137,9 +140,16 @@ begin
   v_view := coalesce(p_can_view_alarm, false) or v_edit;
 
   perform private.lock_group(p_group_id);
-  select count(*) into v_n
-  from public.group_members gm
-  where gm.group_id = p_group_id and gm.invite_status = 'JOINED' and gm.user_id <> v_uid;
+  -- 참여 중 멤버 행을 잠가 둠(나가기 · 내보내기는 이 행을 고치거나 지우므로 이 저장이 끝날 때까지 기다림).
+  --   잠금을 기다리는 사이 나갔거나 내보내진 호출자는 여기서 걸러지고, 저장 도중 나가는 받는 사람 몫으로 행이 되살아나지 않음
+  select coalesce(bool_or(l.user_id = v_uid), false), count(*) filter (where l.user_id <> v_uid)
+  into v_me, v_n
+  from (select gm.user_id from public.group_members gm
+        where gm.group_id = p_group_id and gm.invite_status = 'JOINED'
+        for share of gm) l;
+  if not v_me then
+    return jsonb_build_object('status', 'NOT_FOUND');
+  end if;
   if v_n = 0 then
     return jsonb_build_object('status', 'NO_MEMBERS');
   end if;
