@@ -21,8 +21,13 @@ const LEDGER: Record<string, string> = {
   'T1.v1.4': 'T1@v1.4#1413d56c', // 서버에서 한 줄 더한 판(영어 입력 규칙) — 실험실 장부에는 없음
   'T1.v1.5': 'T1@v1.5#a32f3f75', // 서버에서 더한 판 — 실험실 장부에 없음
   'T2.v2': 'T2@v2#d5dff11c',
+  'T2.v3': 'T2@v3#48979e16', // 서버에서 더한 판(대화 끝 정리 칸) — 실험실 장부에 없음
+  'T2.v3.2': 'T2@v3.2#873687fa', // v3.1 + 감정 원인은 직접 이어 말한 것만 · 짐작한 습관은 inferred (11/8 실제 호출)
+  'T2.v3.3': 'T2@v3.3#93fd2581', // v3.2 + 지난 일 · 목표는 준비시간 변경이 아님 · 목표의 습관은 직접 말했을 때만 (11/8 음성 실제 호출)
+  'T2.v3.1': 'T2@v3.1#c152792e', // v3 + 피로 · 스트레스는 숫자로 말했을 때만 (11/8 실제 호출에서 '너무 피곤해' → 4)
   'T2F.v2-a': 'T2F@v2-a#d2c172e5',
   'T2F.v2-b': 'T2F@v2-b#a3a350f2', // 서버에서 더한 판
+  'T2F.v2-c': 'T2F@v2-c#f51a263e', // v2-b + 지난 일 · 바라는 목표는 준비시간 변경이 아님 (11/8 음성 실제 호출에서 '15분 더 걸렸고 … 일찍 일어나고 싶어' → +10분 카드)
   'T4.v1.1': 'T4@v1.1#b597fc65',
   'T5.v1.2': 'T5@v1.2#d792df8d',
   'ASSIST_E4.v1.1': 'ASSIST_E4@v1.1#71eed0db',
@@ -30,13 +35,13 @@ const LEDGER: Record<string, string> = {
 };
 
 // 지점이 더는 안 쓰는 옛 판 (파일은 남김 — index.ts 머리 주석 2번)
-const SUPERSEDED = ['T1.v1.3', 'T1.v1.4', 'T2F.v2-a'];
+const SUPERSEDED = ['T1.v1.3', 'T1.v1.4', 'T2F.v2-a', 'T2F.v2-b', 'T2.v2', 'T2.v3', 'T2.v3.1', 'T2.v3.2'];
 
 // 지점 → 파일 이름
 const FILE_OF: Record<PointId, string> = {
   T1: 'T1.v1.5',
-  T2F: 'T2F.v2-b',
-  T2: 'T2.v2',
+  T2F: 'T2F.v2-c',
+  T2: 'T2.v3.3',
   T3: 'T3.v1',
   T4: 'T4.v1.1',
   T5: 'T5.v1.2',
@@ -136,7 +141,9 @@ describe('지점 설정(index.ts)', () => {
   it('모든 판 파일이 지점 하나씩에 쓰임, 쓰는 스키마 7개 = 생성기 목록', () => {
     const used = ids.map((p) => FILE_OF[p]).sort();
     assert.deepEqual(used, (PROMPTS as string[]).filter((n) => !SUPERSEDED.includes(n)).sort());
-    assert.deepEqual([...new Set(ids.map((p) => POINTS[p].schema))].sort(), [...(GEN_SCHEMAS as string[])].sort());
+    // 생성기 목록(실험실 스키마) 중 extract.v1은 T2.v3 뒤로 안 씀, extract.v2는 서버 판이라 생성기 목록에 없음
+    const usedSchemas = [...(GEN_SCHEMAS as string[]).filter((id) => id !== 'extract.v1'), 'extract.v2'];
+    assert.deepEqual([...new Set(ids.map((p) => POINTS[p].schema))].sort(), usedSchemas.sort());
   });
 
   it('지점 설정 값 (실험실 채택 실행 설정)', () => {
@@ -145,8 +152,8 @@ describe('지점 설정(index.ts)', () => {
       return [c.prompt.id, c.prompt.version, c.schema, c.effort, c.maxTokens, c.thinking?.type ?? null, c.timeoutMs, c.retryOnTimeout];
     };
     assert.deepEqual(row('T1'), ['T1', 'v1.5', 't1-reply.v1', 'low', 2048, null, 16_000, true]);
-    assert.deepEqual(row('T2F'), ['T2F', 'v2-b', 'extract-fast.v1', 'low', 4096, 'adaptive', 9_000, false]);
-    assert.deepEqual(row('T2'), ['T2', 'v2', 'extract.v1', 'medium', 4096, null, 19_000, true]);
+    assert.deepEqual(row('T2F'), ['T2F', 'v2-c', 'extract-fast.v1', 'low', 4096, 'adaptive', 9_000, false]);
+    assert.deepEqual(row('T2'), ['T2', 'v3.3', 'extract.v2', 'medium', 4096, null, 19_000, true]);
     assert.deepEqual(row('T3'), ['T3', 'v1', 't3-reason.v1', 'low', 1024, null, 4_000, true]);
     assert.deepEqual(row('T4'), ['T4', 'v1.1', 't4-diary.v1', 'medium', 4096, null, 11_000, true]);
     assert.deepEqual(row('T5'), ['T5', 'v1.2', 't5-journal.v1', 'medium', 6000, null, 26_000, true]);

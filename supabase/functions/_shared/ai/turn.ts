@@ -25,7 +25,7 @@ import {
   callsCapReached, countCallsSince, countSessionsSince, limitsOf, loadSession, recordCalls, recordQuestion, saveSession,
   type CallLog, type ServerState, type SessionRow, type StoredTurn,
 } from './session.ts';
-import { applyCardAction, applyFast, applyTaskResults, needKinds, eventAt, type Rejected, type TurnState } from './turn-core.ts';
+import { applyCardAction, applyFast, applyTaskResults, needKinds, eventAt, prepAsked, type Rejected, type TurnState } from './turn-core.ts';
 import type { Act, CardAction, Context, FastExtract, Fix, ServerEvent, T1Output, TaskResults, TurnLimits } from './types.ts';
 import { readTurnRequest, type TurnRequest } from './voice-requests.ts';
 import { ctxOf, publicCard, publicFix, toTurnState, turnsOf, withTurnState, type PublicCard, type PublicFix } from './voice-state.ts';
@@ -359,7 +359,8 @@ async function handleText(run: Run, row: SessionRow, st: ServerState, req: Extra
     ts = structuredClone(ts0);
     ts.events = [...ts.events.filter((e) => e.after_turn !== j), emptyEvent(j)];
   } else if (fastRes?.ok) {
-    const fr = applyFast(ts0, fastRes.data, ctx, j);
+    const fast = fastRes.data.prep_adjustment === null || prepAsked(stored) ? fastRes.data : { ...fastRes.data, prep_adjustment: null }; // 청하지 않은 준비시간 변경은 카드로 만들지 않음
+    const fr = applyFast(ts0, fast, ctx, j);
     ts = fr.state;
     tasks = fr.tasks;
     fixes = fr.fixes;

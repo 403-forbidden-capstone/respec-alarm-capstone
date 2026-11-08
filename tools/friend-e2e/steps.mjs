@@ -199,6 +199,13 @@ export const STEPS = [
       ctx.s.group = g.group_id;
       ctx.s.code = g.invite_code;
       must(g.invite_code, '초대 코드가 없음');
+      if (rpcOf(ctx.caps, 'group_code')) {
+        must(/^[A-HJ-NP-Z2-9]{8}$/.test(g.invite_code), `초대 코드가 8자 대문자 · 숫자(0 O 1 I 뺌)가 아님: ${g.invite_code}`);
+        const direct = await ctx.a.from('groups').update({ invite_code: 'ABCDEFGH' }).eq('group_id', g.group_id);
+        must(direct.error?.code === '42501', `초대 코드를 직접 바꿀 수 있음: ${direct.error?.code ?? '성공'}`);
+        const sheet = ok(await callRpc(ctx.a, ctx.fn.group_code, { p_group_id: g.group_id }), '코드 시트');
+        must(sheet.status === 'OK' && sheet.code === g.invite_code, `코드 시트가 같은 코드를 주지 않음: ${sheet.status}`);
+      }
       const me = ok(await ctx.a.from('group_members').select('invite_status, wake_share_opt_in').eq('group_id', g.group_id).eq('user_id', ctx.ids.A), '내 멤버 행');
       must(me[0]?.invite_status === 'JOINED', '만든 사람이 바로 멤버(JOINED)가 아님');
     },
@@ -224,9 +231,26 @@ export const STEPS = [
     action: '[그룹 참여하기] 코드 입력 → 미리보기',
     deps: [8],
     async run(ctx) {
-      if (!rpcOf(ctx.caps, 'group_preview')) ctx.note('코드 입력 미리보기(이름 · 인원 · 오류) 확인 생략 (5장 미구현)');
-      const id = ok(await callRpc(ctx.b, ctx.fn.join_group, { p_invite_code: ctx.s.code }), '코드로 참여');
-      must(id === ctx.s.group, '다른 그룹으로 참여됨');
+      const preview = rpcOf(ctx.caps, 'group_preview');
+      if (preview) {
+        const pv = ok(await callRpc(ctx.b, preview, { p_code: ctx.s.code }), '코드 미리보기');
+        must(pv.status === 'FOUND' && pv.group_name === `${E2E_PREFIX}그룹`, `미리보기가 FOUND + 그룹 이름이 아님: ${pv.status} ${pv.group_name}`);
+        must(pv.member_count === 1 && pv.already_joined === false, `미리보기 인원 · 참여 여부가 다름: ${pv.member_count} ${pv.already_joined}`);
+        const bad = ok(await callRpc(ctx.b, preview, { p_code: 'ZZZZZZZZ' }), '틀린 코드 미리보기');
+        must(bad.status === 'NOT_FOUND', `틀린 코드가 NOT_FOUND가 아님: ${bad.status}`);
+      } else {
+        ctx.note('코드 입력 미리보기(이름 · 인원 · 오류) 확인 생략 (5장 미구현)');
+      }
+      const join = rpcOf(ctx.caps, 'group_join');
+      if (join) {
+        const r = ok(await callRpc(ctx.b, join, { p_code: ctx.s.code }), '코드로 참여');
+        must(r.status === 'JOINED' && r.group_id === ctx.s.group, `참여 결과가 JOINED가 아님: ${r.status}`);
+        const again = ok(await callRpc(ctx.b, join, { p_code: ctx.s.code }), '코드로 다시 참여');
+        must(again.status === 'ALREADY_JOINED', `이미 참여했는데 ${again.status}`);
+      } else {
+        const id = ok(await callRpc(ctx.b, ctx.fn.join_group, { p_invite_code: ctx.s.code }), '코드로 참여');
+        must(id === ctx.s.group, '다른 그룹으로 참여됨');
+      }
       const me = ok(await ctx.b.from('group_members').select('invite_status').eq('group_id', ctx.s.group).eq('user_id', ctx.ids.B), '내 멤버 행');
       must(me[0]?.invite_status === 'JOINED', 'B가 JOINED가 아님');
     },
@@ -270,12 +294,23 @@ export const STEPS = [
     action: 'G02 [+ 초대] C 고름 → C 줄 초대 중',
     deps: [8, 12],
     async run(ctx) {
-      ok(
-        await ctx.a.from('group_members').insert({ group_id: ctx.s.group, user_id: ctx.ids.C, invite_status: 'INVITED' }),
-        '친구 초대',
-      );
+      const invite = rpcOf(ctx.caps, 'group_invite');
+      if (invite) {
+        const r = ok(await callRpc(ctx.a, invite, { p_group_id: ctx.s.group, p_user_id: ctx.ids.C }), '친구 초대');
+        must(r.status === 'INVITED', `초대 결과가 INVITED가 아님: ${r.status}`);
+        const dup = ok(await callRpc(ctx.a, invite, { p_group_id: ctx.s.group, p_user_id: ctx.ids.C }), '친구 초대(두 번째)');
+        must(dup.status === 'ALREADY_INVITED', `같은 사람을 또 초대했는데 ${dup.status}`);
+      } else {
+        ok(await ctx.a.from('group_members').insert({ group_id: ctx.s.group, user_id: ctx.ids.C, invite_status: 'INVITED' }), '친구 초대(옛 길)');
+      }
       const mine = ok(await ctx.c.from('group_members').select('invite_status').eq('group_id', ctx.s.group).eq('user_id', ctx.ids.C), 'C가 본 초대');
       must(mine[0]?.invite_status === 'INVITED', 'C에게 초대 카드가 안 보임');
+      const cards = rpcOf(ctx.caps, 'group_invites');
+      if (cards) {
+        const list = ok(await callRpc(ctx.c, cards, {}), '받은 초대 목록');
+        const card = list.find((r) => r.group_id === ctx.s.group);
+        must(card && card.invited_by === ctx.ids.A, 'C의 받은 초대 카드에 이 그룹(초대한 사람 A)이 없음');
+      }
     },
   },
   {
@@ -285,14 +320,23 @@ export const STEPS = [
     action: '초대 카드 [수락] → 동의 → 그룹 3명',
     deps: [13],
     async run(ctx) {
-      ok(
-        await ctx.c
-          .from('group_members')
-          .update({ invite_status: 'JOINED', joined_at: new Date().toISOString(), wake_share_opt_in: true })
-          .eq('group_id', ctx.s.group)
-          .eq('user_id', ctx.ids.C),
-        '초대 수락',
-      );
+      const accept = rpcOf(ctx.caps, 'group_accept');
+      if (accept) {
+        // 직접 상태를 바꾸는 옛 방식은 막혀 있어야 함 (초대 수락 · 다시 참여는 함수로만)
+        const direct = await ctx.c.from('group_members').update({ invite_status: 'JOINED' }).eq('group_id', ctx.s.group).eq('user_id', ctx.ids.C);
+        must(direct.error?.code === '42501', `초대를 직접 update로 수락할 수 있음: ${direct.error?.code ?? '성공'}`);
+        const r = ok(await callRpc(ctx.c, accept, { p_group_id: ctx.s.group, p_wake_share: true }), '초대 수락');
+        must(r.status === 'JOINED', `수락 결과가 JOINED가 아님: ${r.status}`);
+        const again = ok(await callRpc(ctx.c, accept, { p_group_id: ctx.s.group, p_wake_share: true }), '초대 수락(두 번째)');
+        must(again.status === 'ALREADY_JOINED', `두 번 수락했는데 ${again.status}`);
+        const me = ok(await ctx.c.from('group_members').select('wake_share_opt_in').eq('group_id', ctx.s.group).eq('user_id', ctx.ids.C), 'C의 동의');
+        must(me[0]?.wake_share_opt_in === true, '수락할 때 낸 기상 공유 동의가 안 켜짐');
+      } else {
+        ok(
+          await ctx.c.from('group_members').update({ invite_status: 'JOINED', joined_at: new Date().toISOString(), wake_share_opt_in: true }).eq('group_id', ctx.s.group).eq('user_id', ctx.ids.C),
+          '초대 수락(옛 길)',
+        );
+      }
       const rows = ok(await ctx.a.from('group_members').select('user_id').eq('group_id', ctx.s.group).eq('invite_status', 'JOINED'), '멤버 수');
       must(rows.length === 3, `JOINED가 3명이 아님: ${rows.length}`);
       pushNote(ctx, 'A · B');
@@ -307,8 +351,9 @@ export const STEPS = [
     async run(ctx) {
       const r = ok(await ctx.a.from('groups').update({ group_name: `${E2E_PREFIX}그룹 (이름 바꿈)` }).eq('group_id', ctx.s.group).select(), 'A의 이름 변경');
       must(r.length === 1, 'A가 이름을 못 바꿈');
-      if (ctx.caps.hasCol('groups', 'owner_id')) {
-        ctx.note('B(만든 사람 아님)의 이름 변경 확인 생략 — 그룹장 없음 미반영 (5장: owner_id 칼럼이 아직 있음)');
+      // 5장부터 owner_id는 '만든 사람 기록'일 뿐이고 이름은 참여 중 멤버 누구나 고침. 5장 함수가 없는 DB에서만 B 확인을 생략
+      if (ctx.caps.hasCol('groups', 'owner_id') && !rpcOf(ctx.caps, 'group_join')) {
+        ctx.note('B(만든 사람 아님)의 이름 변경 확인 생략 — 그룹장 없음 미반영 (5장 미구현: owner_id 정책이 남아 있음)');
       } else {
         const b = ok(await ctx.b.from('groups').update({ group_name: `${E2E_PREFIX}그룹 (B가 바꿈)` }).eq('group_id', ctx.s.group).select(), 'B의 이름 변경');
         must(b.length === 1, '멤버 B가 이름을 못 바꿈 (그룹장 없음 규칙)');
@@ -439,7 +484,13 @@ export const STEPS = [
       const rows = ok(await callRpc(ctx.a, ctx.fn.group_wake, { p_group_id: ctx.s.group, p_date: todayKst() }), '그룹 기상 상태');
       const b = rows.find((r) => r.user_id === ctx.ids.B);
       if (b?.wake_status === 'CONFIRMED') {
-        must(new Date(b.wake_confirmed_at).getTime() === new Date(at('08:08')).getTime(), 'B 기상 확인 시각이 8:08(KST)이 아님');
+        const got = new Date(b.wake_confirmed_at).getTime();
+        if (got !== new Date(at('08:08')).getTime()) {
+          // 기상 상태는 그날 첫 알람 기준이라, 시드 계정에 더 이른 알람이 있으면 그 확인 시각이 나옴 → B의 오늘 기상 확인 중 하나인지 확인
+          const ev = ok(await ctx.admin.from('alarm_events').select('event_at').eq('user_id', ctx.ids.B).eq('event_type', 'WAKE_CONFIRMED').gte('event_at', at('00:00')).lt('event_at', `${new Date(new Date(at('00:00')).getTime() + 86400e3).toISOString()}`), 'B의 오늘 기상 확인');
+          must(ev.some((e) => new Date(e.event_at).getTime() === got), `B 기상 확인 시각이 B의 오늘 확인 중 어느 것과도 안 맞음: ${b.wake_confirmed_at}`);
+          ctx.note('B의 시드 알람이 더 이르면 그 확인 시각이 나옴 — 8:08 일치는 확인 생략');
+        }
         return;
       }
       // main은 그룹 동의만으로는 기상이 안 보임 (기상 조회 권한 행이 따로 필요) — 7장이 들어오면 FAIL로 바뀜
@@ -667,6 +718,11 @@ export const STEPS = [
       must(left.length === 0, 'C가 그룹에 남음');
       const after = ok(await ctx.a.from('groups').select('invite_code').eq('group_id', ctx.s.group).single(), '코드');
       must(after.invite_code !== before.invite_code, '내보냈는데 초대 코드가 안 바뀜');
+      const join = rpcOf(ctx.caps, 'group_join');
+      if (join) {
+        const retry = ok(await callRpc(ctx.c, join, { p_code: before.invite_code }), '내보낸 뒤 옛 코드로 다시 참여');
+        must(retry.status === 'NOT_FOUND', `내보낸 사람이 옛 코드로 다시 들어옴: ${retry.status}`);
+      }
       ctx.note('"알림 없음" 확인 생략 (11장 푸시 기록 표 미구현)');
     },
   },
@@ -681,6 +737,18 @@ export const STEPS = [
       ok(await ctx.b.from('group_members').update({ invite_status: 'LEFT' }).eq('group_id', ctx.s.group).eq('user_id', ctx.ids.B), '나가기');
       const g = ok(await ctx.b.from('groups').select('group_id').eq('group_id', ctx.s.group), 'B가 볼 수 있는 그룹');
       must(g.length === 0, '나갔는데 B가 그룹을 계속 봄');
+      // A가 남아 있으니 그룹은 그대로
+      const still = ok(await ctx.a.from('groups').select('group_id').eq('group_id', ctx.s.group), 'A가 본 그룹');
+      must(still.length === 1, 'B가 나갔는데 그룹이 사라짐');
+      if (rpcOf(ctx.caps, 'group_join')) {
+        // 마지막 참여 멤버가 나가면 그룹이 자동으로 지워짐 (5장): 따로 만든 한 사람짜리 그룹으로 확인해 위 흐름의 그룹은 건드리지 않음
+        const side = ok(await ctx.a.from('groups').insert({ group_name: `${E2E_PREFIX}마지막 멤버`, owner_id: ctx.ids.A }).select().single(), '한 사람 그룹');
+        ok(await ctx.a.from('group_members').update({ invite_status: 'LEFT' }).eq('group_id', side.group_id).eq('user_id', ctx.ids.A), '마지막 멤버 나가기');
+        const gone = ok(await ctx.admin.from('groups').select('group_id').eq('group_id', side.group_id), '그룹 남았나');
+        must(gone.length === 0, '마지막 멤버가 나갔는데 그룹이 안 지워짐');
+      } else {
+        ctx.note('마지막 멤버가 나가면 그룹 자동 삭제 확인 생략 (5장 미구현)');
+      }
       ctx.note('나가기 확인창의 "공동 약속 알람 n개" 개수와 알람 정리 확인 생략 (9장 나감 트리거 미구현)');
     },
   },

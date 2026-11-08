@@ -49,6 +49,8 @@ export async function wipe(admin, ids, caps) {
     const res = await run();
     if (res.error && !(res.error.code === 'PGRST205' || res.error.code === '42P01')) throw new Fail(`${table} 비움: ${res.error.message}`);
   };
+  // 검색 · 요청 · 틀린 코드 횟수 제한 기록 (A · B · C 것만): 시험을 연달아 돌려도 제한에 안 걸리게 비움
+  await optional('rate_limit_events', () => admin.from('rate_limit_events').delete().in('user_id', set));
   await optional('user_blocks', () => admin.from('user_blocks').delete().in('blocker_id', set).in('blocked_id', set));
   await optional('reports', () => admin.from('reports').delete().in('reporter_id', set).in('target_user_id', set));
   // 이름 머리말로만 거름 (5장에서 owner_id 칼럼이 빠져도 동작)

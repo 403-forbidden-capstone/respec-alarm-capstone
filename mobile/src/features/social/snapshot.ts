@@ -6,7 +6,7 @@ import { effectiveOf, mergeGrants, noPermission, permissionOf, unionPermissions,
 import { personFromProfile, unknownPerson, type ProfileRow } from './map';
 import type { FinalGrant, GrantRow, PermissionSet, Person } from './types';
 
-export type GroupRow = Pick<Tables<'groups'>, 'group_id' | 'group_name' | 'owner_id' | 'invite_code' | 'created_at'>;
+export type GroupRow = Pick<Tables<'groups'>, 'group_id' | 'group_name' | 'created_at'>; // 만든 사람 · 코드는 앱이 안 읽음 — 그룹장이 없고 코드는 my_group_code가 줌 (5장)
 
 export type Snapshot = {
   me: string;
@@ -146,6 +146,16 @@ export function canSeeWakeIn(s: Snapshot, groupId: string): boolean {
 // 내 기상 공유 동의 (group_members.wake_share_opt_in)
 export function myOptIn(s: Snapshot, groupId: string): boolean {
   return s.members.some((m) => m.group_id === groupId && m.user_id === s.me && m.wake_share_opt_in);
+}
+
+// 이 그룹에서 오는 알림 끄기 (group_members.notifications_off)
+export function myNotificationsOff(s: Snapshot, groupId: string): boolean {
+  return s.members.some((m) => m.group_id === groupId && m.user_id === s.me && m.notifications_off);
+}
+
+// 내가 이 그룹에 들어온 일시 — G02 '3월부터 함께'. 비어 있으면(옛 행) null
+export function myJoinedAt(s: Snapshot, groupId: string): string | null {
+  return s.members.find((m) => m.group_id === groupId && m.user_id === s.me)?.joined_at ?? null;
 }
 
 // 내가 보낸 대기 요청의 받는 사람들 — 최근 보낸 순 (F01 보낸 요청 · [취소])
