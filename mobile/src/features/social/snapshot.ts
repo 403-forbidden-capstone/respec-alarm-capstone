@@ -147,3 +147,11 @@ export function canSeeWakeIn(s: Snapshot, groupId: string): boolean {
 export function myOptIn(s: Snapshot, groupId: string): boolean {
   return s.members.some((m) => m.group_id === groupId && m.user_id === s.me && m.wake_share_opt_in);
 }
+
+// 내가 보낸 대기 요청의 받는 사람들 — 최근 보낸 순 (F01 보낸 요청 · [취소])
+export function sentRequestIds(s: Snapshot): string[] {
+  return s.friends
+    .filter((f) => f.status === 'PENDING' && f.requester_id === s.me)
+    .sort((a, b) => (a.requested_at < b.requested_at ? 1 : a.requested_at > b.requested_at ? -1 : 0))
+    .map((f) => f.addressee_id);
+}

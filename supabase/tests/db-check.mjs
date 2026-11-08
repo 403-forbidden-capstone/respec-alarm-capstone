@@ -160,14 +160,16 @@ const TODAY = `(now() at time zone 'Asia/Seoul')::date`;
 // 회의 도구 테이블(결정 안건 페이지 /decisions — 의견 · 투표 · 상태)은 앱 데이터가 아니라 anon 규칙의 예외 — 아래 "회의 의견"에서 따로 확인
 const MEETING = ['decision_comments', 'decision_votes', 'decision_states'];
 // 서버 전용 표 — RLS는 켜고 정책은 없음 (앱은 못 읽고 못 씀, service_role만). 아래 "반복 다음 회차"에서 따로 확인
-const SERVER_ONLY = ['roll_attempts'];
+//   rate_limit_events · friend_links = 친구 2장 (제한 기록 · 친구 링크, DB 함수로만) — friend/ch02.mjs에서 따로 확인
+//   reports = 친구 4장 (신고, 넣기는 DB 함수로만 · 읽기는 운영 화면 몫) — friend/ch04.mjs에서 따로 확인
+const SERVER_ONLY = ['roll_attempts', 'rate_limit_events', 'friend_links', 'reports'];
 
-await check('모든 public 테이블(앱 21개 — 서버 전용 1개 포함 + 회의 도구 3개)에 RLS가 켜져 있음', async () => {
+await check('모든 public 테이블(앱 25개 — 서버 전용 4개 포함 + 회의 도구 3개)에 RLS가 켜져 있음', async () => {
   const r = await q(`select c.relname, c.relrowsecurity from pg_class c join pg_namespace n on n.oid = c.relnamespace
                      where n.nspname = 'public' and c.relkind = 'r' order by 1`);
   const off = r.filter((x) => !x.relrowsecurity).map((x) => x.relname);
   const app = r.filter((x) => !MEETING.includes(x.relname)).length;
-  return app === 21 && r.length === 24 && off.length === 0 ? true : { count: r.length, app, off };
+  return app === 25 && r.length === 28 && off.length === 0 ? true : { count: r.length, app, off };
 });
 await check('모든 앱 테이블에 정책이 있고(서버 전용 표 제외) anon용 정책은 없음', async () => {
   const r = await q(`select c.relname, count(p.polname) as n,
@@ -795,18 +797,24 @@ await check('push_tokens는 본인만 · register_push_token은 같은 폰 토�
 // 15. 아이디 · 공개 프로필
 // ---------------------------------------------------------------------
 
-await check('아이디: 형식 · 대소문자 무시 유일 · 검색 결과는 공개 4칸만', async () => {
+// 친구 2장부터 아이디는 change_my_handle로만 바꿈(직접 update는 막힘), 검색은 온보딩을 끝낸 사람만 — 자세한 건 friend/ch02.mjs
+await check('아이디: 바꾸기 함수가 소문자로 저장 · 대소문자 무시 유일(TAKEN) · 직접 update는 막힘 · 검색 결과는 공개 4칸만', async () => {
+  await su();
+  await q(`update public.profiles set onboarded_at = now() where user_id = any($1::uuid[])`, [[A, B]]);
   await as(A);
-  await q(`update public.profiles set handle = 'vmgfh' where user_id = $1`, [A]);
+  const [a] = await q(`select public.change_my_handle('vmgfh') as r`);
   await as(B);
-  const upper = await expectErr(() => q(`update public.profiles set handle = 'VMGFH' where user_id = $1`, [B]), /profiles_handle_format/);
-  const dup = await expectErr(() => q(`update public.profiles set handle = 'vmgfh' where user_id = $1`, [B]), /profiles_handle_key|duplicate/);
-  await q(`update public.profiles set handle = 'etion' where user_id = $1`, [B]);
+  const direct = await expectErr(() => q(`update public.profiles set handle = 'etion' where user_id = $1`, [B]), /change_my_handle/);
+  const [dup] = await q(`select public.change_my_handle('VMGFH') as r`);
+  const [b] = await q(`select public.change_my_handle('etion') as r`);
   await as(E);
   const r = await q(`select * from public.find_profile_by_handle('@VmGfH')`);
   const cols = r.length ? Object.keys(r[0]).sort().join(',') : '';
-  return upper === true && dup === true && r.length === 1 && r[0].user_id === A
-    && cols === 'handle,nickname,profile_image_url,user_id' ? true : { upper, dup, r };
+  await su();
+  // 아래 온보딩 칸 검사가 기본값(NULL)을 기대하므로 되돌림
+  await q(`update public.profiles set onboarded_at = null where user_id = any($1::uuid[])`, [[A, B]]);
+  return a.r.status === 'OK' && direct === true && dup.r.status === 'TAKEN' && b.r.status === 'OK' && r.length === 1 && r[0].user_id === A
+    && cols === 'handle,nickname,profile_image_url,user_id' ? true : { a, direct, dup, b, r };
 });
 await check('get_public_profiles: 친구 · 그룹원은 보이고 모르는 사람은 안 보임', async () => {
   await as(A);
@@ -1220,10 +1228,10 @@ await check('서버 전용 함수(can_send_push · find_missed_wake_alarms · �
 });
 
 // 배치 (Q5 A) — pg_cron · pg_net은 PGlite에 없어 cron.schedule · net.http_post 흉내로 확인
-await check('배치 예약: wake-check · alarm-roll(반복 다음 회차)을 5분마다 (PGlite에는 pg_cron · pg_net이 없어 확장은 건너뛰고 예약만 흉내에 들어감)', async () => {
+await check('배치 예약: wake-check · alarm-roll(반복 다음 회차)을 5분마다 + friend-requests-expire(친구 3장, 30일 지난 받은 요청 삭제 — 내용은 friend/ch03.mjs) (PGlite에는 pg_cron · pg_net이 없어 확장은 건너뛰고 예약만 흉내에 들어감)', async () => {
   const jobs = await q(`select jobname, schedule, command from cron.job order by jobname`);
   const ext = await q(`select extname from pg_extension where extname in ('pg_cron', 'pg_net')`);
-  return jobs.length === 2 && ext.length === 0
+  return jobs.length === 3 && ext.length === 0 && jobs.some((x) => x.jobname === 'friend-requests-expire')
     && ['wake-check', 'alarm-roll'].every((name) => {
       const j = jobs.find((x) => x.jobname === name);
       return j && j.schedule === '*/5 * * * *' && j.command === `select private.invoke_edge_function('${name}')`;
@@ -1555,16 +1563,20 @@ await check('호출 기록 · 대화 · 질문: D의 기록을 만들어 둠 (�
 // 17. 관계가 끝날 때 · 탈퇴
 // ---------------------------------------------------------------------
 
-await check('차단: 그 친구 관계의 권한 행이 지워짐 · 차단당한 요청자는 차단을 못 지움 · 아이디 검색에서 숨김', async () => {
+await check('차단(block_user): 그 친구 관계와 권한 행이 지워짐 · 차단당한 사람은 상대 차단을 못 풂 · 아이디 검색에서 숨김 (자세한 건 friend/ch04.mjs)', async () => {
   await as(B);
   await q(`insert into public.sharing_permissions (owner_id, grantee_id, source_type, source_id, can_view_alarm) values ($1, $2, 'FRIEND', $3, true)`, [B, A, fAB]);
-  await q(`update public.friends set status = 'BLOCKED' where friend_id = $1`, [fAB]);
+  const [blocked] = await q(`select public.block_user($1) as r`, [A]);
   await su();
   const left = await q(`select 1 from public.sharing_permissions where source_type = 'FRIEND' and source_id = $1`, [fAB]);
+  const gone = await q(`select 1 from public.friends where friend_id = $1`, [fAB]);
   await as(A);
-  const del = await q(`delete from public.friends where friend_id = $1 returning 1`, [fAB]);
+  const [del] = await q(`select public.unblock_user($1) as r`, [B]);
   const found = await q(`select * from public.find_profile_by_handle('etion')`);
-  return left.length === 0 && del.length === 0 && found.length === 0 ? true : { left, del, found };
+  await su();
+  const kept = await q(`select 1 from public.user_blocks where blocker_id = $1 and blocked_id = $2`, [B, A]);
+  return blocked.r.status === 'BLOCKED' && left.length === 0 && gone.length === 0 && del.r.status === 'GONE' && kept.length === 1 && found.length === 0
+    ? true : { blocked, left, gone, del, found, kept };
 });
 await check('그룹 나가기(LEFT): 그 그룹에서 받은 · 준 권한 행이 지워지고 기상판에서 사라짐', async () => {
   await as(B);
@@ -2638,7 +2650,9 @@ const mkAppt = async (creator, title, { group = null, series = null, on = null, 
 //   새 표가 생기면 함수를 고치고 여기에 적어야 아래 가드 항목이 통과함
 const RESET_DELETES = ['alarm_events', 'alarm_suggestions', 'alarms', 'appointment_participants', 'appointments', 'conversation_sessions',
                        'daily_journals', 'daily_records', 'profiles', 'user_edit_logs'];
-const RESET_KEEPS = ['ai_calls', 'friends', 'group_members', 'groups', 'push_tokens', 'roll_attempts', 'routines', 'sharing_permissions', 'todos', 'user_places', 'user_questions'];
+//   friend_links · rate_limit_events(친구 2장)는 지금 둠 — 친구 쪽 지우기는 15장(15-타)
+const RESET_KEEPS = ['ai_calls', 'friend_links', 'friends', 'group_members', 'groups', 'push_tokens', 'rate_limit_events', 'roll_attempts', 'routines',
+                     'sharing_permissions', 'todos', 'user_places', 'user_questions'];
 const MINE = {
   appointments: `select * from public.appointments where creator_id = $1`,
   appointment_participants: `select * from public.appointment_participants where user_id = $1`,
@@ -2661,6 +2675,8 @@ const MINE = {
   group_members: `select * from public.group_members where user_id = $1`,
   sharing_permissions: `select * from public.sharing_permissions where $1 in (owner_id, grantee_id)`,
   groups: `select * from public.groups where owner_id = $1`,
+  friend_links: `select * from public.friend_links where owner_id = $1`,
+  rate_limit_events: `select * from public.rate_limit_events where user_id = $1`,
 };
 await check('내 시험 데이터 지우기 가드: 사용자 칸(user_id · creator_id · owner_id · requester_id · addressee_id · grantee_id)이 있는 public 표는 모두 지움/둠 목록에 있음 (새 표를 더하면 실패)', async () => {
   await su();
@@ -2979,5 +2995,13 @@ await check('user_places: updated_at이 고칠 때 갱신됨 · 계정을 지우
   const [left] = await q(`select count(*)::int as n from public.user_places where user_id = $1`, [PL3]);
   return upd.touched === true && fnPriv.a === false && fnPriv.n === false && left.n === 0 ? true : { upd, fnPriv, left };
 });
+
+
+// ---------------------------------------------------------------------
+// 친구 장별 검사 — friend/chNN.mjs (친구_시험케이스.md DB · 함수 층, 항목 이름 앞 번호 = 시험 번호)
+// ---------------------------------------------------------------------
+// 장마다 자기 계정을 새로 만들어 앞 검사의 A~E와 섞이지 않게 함. 장이 늘면 아래 목록에 한 줄씩
+const FRIEND_CTX = { q, as, su, svc, check, expectErr, PGlite, AUTH_STUBS, MIG_DIR, readFileSync, readdirSync, join };
+for (const ch of ['ch02', 'ch03', 'ch04']) await (await import(`./friend/${ch}.mjs`)).default(FRIEND_CTX);
 
 report();

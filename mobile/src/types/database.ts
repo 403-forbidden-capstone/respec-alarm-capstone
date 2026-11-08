@@ -269,6 +269,25 @@ isOneToOne: false
                   Relationships: [
                     
                   ]
+                },"friend_links": {
+                  Row: {
+                    "created_at": string,"expires_at": string,"owner_id": string,"token": string
+                  }
+                  Insert: {
+                    "created_at"?: string,"expires_at": string,"owner_id": string,"token": string
+                  }
+                  Update: {
+                    "created_at"?: string,"expires_at"?: string,"owner_id"?: string,"token"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "friend_links_owner_id_fkey"
+      columns: ["owner_id"]
+isOneToOne: true
+      referencedRelation: "profiles"
+      referencedColumns: ["user_id"]
+    }
+                  ]
                 },"friends": {
                   Row: {
                     "accepted_at": string | null,"addressee_id": string,"friend_id": string,"requested_at": string,"requester_id": string,"status": Database["public"]['Enums']["friend_status"]
@@ -340,13 +359,13 @@ isOneToOne: false
                   ]
                 },"profiles": {
                   Row: {
-                    "created_at": string,"default_buffer_minutes": number,"default_prepare_minutes": number,"default_transport": Database["public"]['Enums']["transport_type"],"handle": string | null,"home_lat": number | null,"home_lng": number | null,"home_name": string | null,"home_radius_m": number | null,"intensity_offset": number,"nickname": string,"onboarded_at": string | null,"preferred_sound_key": string | null,"preferred_voice_tone": Database["public"]['Enums']["voice_tone"] | null,"privacy_agreed_at": string | null,"privacy_version": number | null,"profile_image_url": string | null,"timezone": string,"updated_at": string,"user_id": string,"wake_margin": string,"wake_sensitivity": string
+                    "created_at": string,"default_buffer_minutes": number,"default_prepare_minutes": number,"default_transport": Database["public"]['Enums']["transport_type"],"handle": string | null,"handle_changed_at": string | null,"handle_next_change_at": string | null,"home_lat": number | null,"home_lng": number | null,"home_name": string | null,"home_radius_m": number | null,"intensity_offset": number,"nickname": string,"onboarded_at": string | null,"preferred_sound_key": string | null,"preferred_voice_tone": Database["public"]['Enums']["voice_tone"] | null,"privacy_agreed_at": string | null,"privacy_version": number | null,"profile_image_url": string | null,"timezone": string,"updated_at": string,"user_id": string,"wake_margin": string,"wake_sensitivity": string
                   }
                   Insert: {
-                    "created_at"?: string,"default_buffer_minutes"?: number,"default_prepare_minutes"?: number,"default_transport"?: Database["public"]['Enums']["transport_type"],"handle"?: string | null,"home_lat"?: number | null,"home_lng"?: number | null,"home_name"?: string | null,"home_radius_m"?: number | null,"intensity_offset"?: number,"nickname": string,"onboarded_at"?: string | null,"preferred_sound_key"?: string | null,"preferred_voice_tone"?: Database["public"]['Enums']["voice_tone"] | null,"privacy_agreed_at"?: string | null,"privacy_version"?: number | null,"profile_image_url"?: string | null,"timezone"?: string,"updated_at"?: string,"user_id": string,"wake_margin"?: string,"wake_sensitivity"?: string
+                    "created_at"?: string,"default_buffer_minutes"?: number,"default_prepare_minutes"?: number,"default_transport"?: Database["public"]['Enums']["transport_type"],"handle"?: string | null,"handle_changed_at"?: string | null,"handle_next_change_at"?: string | null,"home_lat"?: number | null,"home_lng"?: number | null,"home_name"?: string | null,"home_radius_m"?: number | null,"intensity_offset"?: number,"nickname": string,"onboarded_at"?: string | null,"preferred_sound_key"?: string | null,"preferred_voice_tone"?: Database["public"]['Enums']["voice_tone"] | null,"privacy_agreed_at"?: string | null,"privacy_version"?: number | null,"profile_image_url"?: string | null,"timezone"?: string,"updated_at"?: string,"user_id": string,"wake_margin"?: string,"wake_sensitivity"?: string
                   }
                   Update: {
-                    "created_at"?: string,"default_buffer_minutes"?: number,"default_prepare_minutes"?: number,"default_transport"?: Database["public"]['Enums']["transport_type"],"handle"?: string | null,"home_lat"?: number | null,"home_lng"?: number | null,"home_name"?: string | null,"home_radius_m"?: number | null,"intensity_offset"?: number,"nickname"?: string,"onboarded_at"?: string | null,"preferred_sound_key"?: string | null,"preferred_voice_tone"?: Database["public"]['Enums']["voice_tone"] | null,"privacy_agreed_at"?: string | null,"privacy_version"?: number | null,"profile_image_url"?: string | null,"timezone"?: string,"updated_at"?: string,"user_id"?: string,"wake_margin"?: string,"wake_sensitivity"?: string
+                    "created_at"?: string,"default_buffer_minutes"?: number,"default_prepare_minutes"?: number,"default_transport"?: Database["public"]['Enums']["transport_type"],"handle"?: string | null,"handle_changed_at"?: string | null,"handle_next_change_at"?: string | null,"home_lat"?: number | null,"home_lng"?: number | null,"home_name"?: string | null,"home_radius_m"?: number | null,"intensity_offset"?: number,"nickname"?: string,"onboarded_at"?: string | null,"preferred_sound_key"?: string | null,"preferred_voice_tone"?: Database["public"]['Enums']["voice_tone"] | null,"privacy_agreed_at"?: string | null,"privacy_version"?: number | null,"profile_image_url"?: string | null,"timezone"?: string,"updated_at"?: string,"user_id"?: string,"wake_margin"?: string,"wake_sensitivity"?: string
                   }
                   Relationships: [
                     
@@ -365,6 +384,62 @@ isOneToOne: false
                     {
       foreignKeyName: "push_tokens_user_id_fkey"
       columns: ["user_id"]
+isOneToOne: false
+      referencedRelation: "profiles"
+      referencedColumns: ["user_id"]
+    }
+                  ]
+                },"rate_limit_events": {
+                  Row: {
+                    "action": string,"created_at": string,"event_id": number,"user_id": string
+                  }
+                  Insert: {
+                    "action": string,"created_at"?: string,"event_id"?: never,"user_id": string
+                  }
+                  Update: {
+                    "action"?: string,"created_at"?: string,"event_id"?: never,"user_id"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "rate_limit_events_user_id_fkey"
+      columns: ["user_id"]
+isOneToOne: false
+      referencedRelation: "profiles"
+      referencedColumns: ["user_id"]
+    }
+                  ]
+                },"reports": {
+                  Row: {
+                    "created_at": string,"handled_at": string | null,"handled_by": string | null,"note": string | null,"reason": string,"report_id": string,"reporter_id": string | null,"status": string,"target_group_id": string | null,"target_type": string,"target_user_id": string | null
+                  }
+                  Insert: {
+                    "created_at"?: string,"handled_at"?: string | null,"handled_by"?: string | null,"note"?: string | null,"reason": string,"report_id"?: string,"reporter_id"?: string | null,"status"?: string,"target_group_id"?: string | null,"target_type": string,"target_user_id"?: string | null
+                  }
+                  Update: {
+                    "created_at"?: string,"handled_at"?: string | null,"handled_by"?: string | null,"note"?: string | null,"reason"?: string,"report_id"?: string,"reporter_id"?: string | null,"status"?: string,"target_group_id"?: string | null,"target_type"?: string,"target_user_id"?: string | null
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "reports_handled_by_fkey"
+      columns: ["handled_by"]
+isOneToOne: false
+      referencedRelation: "profiles"
+      referencedColumns: ["user_id"]
+    },{
+      foreignKeyName: "reports_reporter_id_fkey"
+      columns: ["reporter_id"]
+isOneToOne: false
+      referencedRelation: "profiles"
+      referencedColumns: ["user_id"]
+    },{
+      foreignKeyName: "reports_target_group_id_fkey"
+      columns: ["target_group_id"]
+isOneToOne: false
+      referencedRelation: "groups"
+      referencedColumns: ["group_id"]
+    },{
+      foreignKeyName: "reports_target_user_id_fkey"
+      columns: ["target_user_id"]
 isOneToOne: false
       referencedRelation: "profiles"
       referencedColumns: ["user_id"]
@@ -470,6 +545,31 @@ isOneToOne: false
       referencedColumns: ["user_id"]
     }
                   ]
+                },"user_blocks": {
+                  Row: {
+                    "blocked_id": string,"blocker_id": string,"created_at": string
+                  }
+                  Insert: {
+                    "blocked_id": string,"blocker_id": string,"created_at"?: string
+                  }
+                  Update: {
+                    "blocked_id"?: string,"blocker_id"?: string,"created_at"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "user_blocks_blocked_id_fkey"
+      columns: ["blocked_id"]
+isOneToOne: false
+      referencedRelation: "profiles"
+      referencedColumns: ["user_id"]
+    },{
+      foreignKeyName: "user_blocks_blocker_id_fkey"
+      columns: ["blocker_id"]
+isOneToOne: false
+      referencedRelation: "profiles"
+      referencedColumns: ["user_id"]
+    }
+                  ]
                 },"user_edit_logs": {
                   Row: {
                     "alarm_id": string | null,"alarm_type": Database["public"]['Enums']["alarm_type"] | null,"appointment_id": string | null,"auto_value": Json | null,"created_at": string,"edit_id": string,"edited_value": Json | null,"field": string,"screen": string,"user_id": string
@@ -564,8 +664,23 @@ isOneToOne: false
                 }
           }
           Functions: {
-            "can_send_push":
+            "accept_friend_request":
+{ Args: { "p_requester_id": string }; Returns: Json
+                           },
+"block_user":
+{ Args: { "p_user_id": string }; Returns: Json
+                           },
+"can_send_push":
 { Args: { "p_kind": string,"p_sender_id": string,"p_target_id": string }; Returns: boolean
+                           },
+"cancel_friend_request":
+{ Args: { "p_addressee_id": string }; Returns: Json
+                           },
+"change_my_handle":
+{ Args: { "p_handle": string }; Returns: Json
+                           },
+"decline_friend_request":
+{ Args: { "p_requester_id": string }; Returns: Json
                            },
 "delete_decision_comment":
 { Args: { "p_author": string,"p_id": number }; Returns: boolean
@@ -601,11 +716,25 @@ isOneToOne: false
 "join_group_by_invite_code":
 { Args: { "p_invite_code": string }; Returns: string
                            },
+"my_blocks":
+{ Args: Record<PropertyKey, never>; Returns: {
+              "blocked_at": string,"handle": string,"nickname": string,"profile_image_url": string,"user_id": string
+            }[]
+                           },
+"my_friend_link":
+{ Args: { "p_renew"?: boolean }; Returns: Json
+                           },
+"open_friend_link":
+{ Args: { "p_token": string }; Returns: Json
+                           },
 "regenerate_invite_code":
 { Args: { "p_group_id": string }; Returns: string
                            },
 "register_push_token":
 { Args: { "p_platform"?: string,"p_token": string }; Returns: undefined
+                           },
+"remove_friend":
+{ Args: { "p_user_id": string }; Returns: Json
                            },
 "roll_due_series":
 { Args: { "p_limit"?: number,"p_now"?: string }; Returns: {
@@ -614,6 +743,23 @@ isOneToOne: false
                            },
 "roll_insert_occurrence":
 { Args: { "p_alarms": Json,"p_appointment": Json,"p_items": Json,"p_participant": Json }; Returns: string
+                           },
+"search_by_handle":
+{ Args: { "p_query": string }; Returns: Json
+                           },
+"search_related_by_name":
+{ Args: { "p_query": string }; Returns: {
+              "handle": string,"nickname": string,"profile_image_url": string,"relation": string,"user_id": string
+            }[]
+                           },
+"send_friend_request":
+{ Args: { "p_target_id": string }; Returns: Json
+                           },
+"submit_report":
+{ Args: { "p_note"?: string,"p_reason": string,"p_target_id": string,"p_target_type": string }; Returns: Json
+                           },
+"unblock_user":
+{ Args: { "p_user_id": string }; Returns: Json
                            }
           }
           Enums: {

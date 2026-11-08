@@ -37,19 +37,6 @@ describe('saveProfileFields', () => {
     expect(calls[0].columns).toContain('home_radius_m');
   });
 
-  it('아이디는 소문자로 저장', async () => {
-    onCall(() => ({ data: [row] }));
-    await saveProfileFields('user-1', { handle: 'Respec_KIM' });
-    expect(calls[0].payload).toEqual({ handle: 'respec_kim' });
-  });
-
-  it('아이디 중복(23505)이면 "이미 쓰는 아이디예요"', async () => {
-    onCall(() => ({ error: { code: '23505', message: 'duplicate key value violates unique constraint' } }));
-    const result = saveProfileFields('user-1', { handle: 'taken' });
-    await expect(result).rejects.toBeInstanceOf(UserError);
-    await expect(result).rejects.toThrow('이미 쓰는 아이디예요');
-  });
-
   it('그 밖의 DB 오류는 원문 그대로 던짐 (화면이 기본 문구로 바꿈)', async () => {
     onCall(() => ({ error: { code: '42501', message: 'permission denied' } }));
     const result = saveProfileFields('user-1', { nickname: 'x' });
