@@ -4,7 +4,7 @@ import { UserError } from '@/lib/errors';
 
 import { createFake } from '../__fixtures__/fakeSupabase';
 import { friends, groups, GROUP, JIHYEONG, JUNSEONG, ME, members, perms, profiles, SUYEON } from '../__fixtures__/seed';
-import { CODE_EXPIRED, CODE_NOT_FOUND, GROUP_FULL, GROUP_NOT_MEMBER, GROUP_TOO_MANY, cleanCode, groupNameProblem, leaveText, previewProblem, removeMemberText } from '../groupTexts';
+import { CODE_EXPIRED, CODE_NOT_FOUND, GROUP_FULL, expiresLabel, inviteShareMessage, GROUP_NOT_MEMBER, GROUP_TOO_MANY, cleanCode, groupNameProblem, leaveText, previewProblem, removeMemberText } from '../groupTexts';
 import { MESSAGE_GONE } from '../relationMessages';
 import * as real from '../real';
 
@@ -352,6 +352,12 @@ describe('G01 · G02 보이는 값 — 5-04 · 5-30 · 5-41 · 5-46', () => {
 });
 
 describe('확인창 문구 — 5-19 · 5-44 · 5-47', () => {
+  it('코드 시트 만료일 · 공유 글 (5-07 · 5-49)', () => {
+    expect(expiresLabel(new Date('2026-11-15T01:00:00.000Z'))).toBe('11/15까지');
+    expect(inviteShareMessage('캡스톤팀', 'ABCD2345', '11/15까지')).toBe("Re:Spec 알람 '캡스톤팀' 그룹에 초대해요. 초대 코드: ABCD2345 (11/15까지)");
+    expect(inviteShareMessage('캡스톤팀', 'ABCD2345', null)).not.toContain('까지');
+  });
+
   it('나가기: 공동 약속 알람 수 · 마지막 멤버면 그룹이 사라진다고 알림', () => {
     expect(leaveText('캡스톤팀', 2, false)).toEqual({
       title: '캡스톤팀에서 나갈까요?',

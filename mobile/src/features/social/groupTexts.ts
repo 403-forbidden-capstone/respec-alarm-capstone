@@ -1,4 +1,6 @@
 // 그룹 5장 문구 · 상태 → 문구 (친구_논리설계.md 5장, 시험: __tests__/groups.test.ts)
+import { dateParts } from '@/lib/format';
+
 import { messageLimit } from './relationMessages';
 import type { GroupPreview } from './types';
 
@@ -57,5 +59,12 @@ export function removeMemberText(name: string) {
   return { title: `${name}님을 내보낼까요?`, body: '그룹 코드가 새로 바뀌어요. 상대에게는 알리지 않아요.', ok: '내보내기' };
 }
 
-export const inviteShareMessage = (groupName: string, code: string, expiresLabel: string | null) =>
-  `Re:Spec 알람 '${groupName}' 그룹에 초대해요. 초대 코드: ${code}${expiresLabel ? ` (${expiresLabel}까지)` : ''}`;
+// 코드 시트 · 미리보기의 만료일 — '11/15까지' (한국 시간)
+export function expiresLabel(date: Date): string {
+  const { month, day } = dateParts(date);
+  return `${month}/${day}까지`;
+}
+
+// 공유창에 뜨는 초대 글 — 만료일(예: '11/15까지')이 있으면 같이 (5-07 · 5-49)
+export const inviteShareMessage = (groupName: string, code: string, expires: string | null) =>
+  `Re:Spec 알람 '${groupName}' 그룹에 초대해요. 초대 코드: ${code}${expires ? ` (${expires})` : ''}`;

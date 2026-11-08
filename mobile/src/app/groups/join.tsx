@@ -1,37 +1,56 @@
-import { router } from 'expo-router';
 import { useState } from 'react';
-import { StyleSheet } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 
 import { Button, Card, Field, Screen, Text, toast, TopBar } from '@/components/ui';
-import { joinGroupByCode } from '@/features/social/api';
+import { joinGroup, previewGroupByCode } from '@/features/social/api';
+import { ConsentSheet } from '@/features/social/components/ConsentSheet';
+import { GroupIcon } from '@/features/social/components/GroupIcon';
 import { Note } from '@/features/social/components/Note';
+import { cleanCode, expiresLabel, GROUP_ALREADY, GROUP_FULL, previewProblem } from '@/features/social/groupTexts';
+import type { GroupPreview } from '@/features/social/types';
 import { backOrHome, openGroupDetail } from '@/lib/nav';
 import { useAction } from '@/lib/useAction';
 
-// 초대 코드 칸 최대 글자 수 — 실데이터 코드는 8자(DB 기본값), 가짜 모드 코드는 하이픈 포함 8자. 붙여 넣을 때 공백이 섞여도 받게 여유를 둠
+// 코드 칸 최대 글자 수 — 코드는 8자. 붙여 넣을 때 공백이 섞여도 받게 여유를 둠
 const CODE_MAX = 16;
 
-// 초대 코드로 그룹 참여 — G01 그룹 탭 "그룹 참여하기"에서 옴 (지형님 와이어프레임 4번 · 목업 번호 없음)
-//   와이어프레임의 "참여 전 그룹 미리보기(이름 · 인원 · 공유 범위)"는 코드로 그룹을 미리 읽는 서버 함수가 없어 뺌 — 참여하면 바로 그룹 상세(G02)로
+// 초대 코드로 그룹 참여 — G01 그룹 탭 "그룹 참여하기"에서 옴 (친구 5장)
+//   코드 입력 → [확인] 미리보기(그룹 이름 · 인원 · 이미 참여 · 만료 · 가득, 오류는 없는 · 만료 · 잠시 뒤 다시 세 가지) → [참여하기] → 기상 공유 동의 시트 → 그룹 상세
 export default function JoinGroupScreen() {
   const [code, setCode] = useState('');
+  const [preview, setPreview] = useState<GroupPreview | null>(null);
+  const [consent, setConsent] = useState(false);
   const { busy, run } = useAction();
-  const cleaned = code.trim();
+  const cleaned = cleanCode(code);
+  const found = preview?.status === 'FOUND' ? preview : null;
 
-  const join = () =>
+  const check = () =>
     run(async () => {
       if (!cleaned) return;
-      const id = await joinGroupByCode(cleaned);
-      // 친구 수락과 같게, 들어간 뒤 내가 보여 줄 범위를 바로 정하러 갈 수 있게 (G01 accept)
-      toast('그룹에 참여했어요', {
-        actionLabel: '공유 범위 정하기',
-        onAction: () => router.push({ pathname: '/permissions', params: { relation: `group:${id}` } }),
-      });
-      openGroupDetail(id, 'stack');
-    }, '그룹에 참여하지 못했어요');
+      setPreview(await previewGroupByCode(cleaned));
+    }, '코드를 확인하지 못했어요. 다시 해 주세요');
+
+  // 이미 참여 중이면 같은 함수가 그 그룹 id만 돌려줌(상태 그대로) — 동의를 다시 묻지 않고 그룹 상세로
+  const join = (share: boolean) =>
+    run(async () => {
+      const g = await joinGroup(cleaned, share);
+      setConsent(false);
+      toast(g.already ? GROUP_ALREADY : '그룹에 참여했어요');
+      openGroupDetail(g.id, 'stack');
+    }, '그룹에 참여하지 못했어요. 다시 해 주세요');
+
+  const problem = preview ? previewProblem(preview) : null;
+  const primary = !found ? (
+    <Button label="확인" onPress={check} disabled={!cleaned} loading={busy} />
+  ) : found.alreadyJoined ? (
+    <Button label="그룹으로 가기" onPress={() => join(false)} loading={busy} />
+  ) : (
+    <Button label="참여하기" onPress={() => setConsent(true)} disabled={found.full} loading={busy} />
+  );
 
   return (
-    <Screen footer={<Button label="참여하기" onPress={join} disabled={!cleaned} loading={busy} />}>
+    <Screen footer={primary}>
+      <ConsentSheet visible={consent} busy={busy} onChoose={join} onClose={() => setConsent(false)} />
       <TopBar onBack={backOrHome} />
       <Text variant="title" style={styles.title}>
         그룹 참여하기
@@ -45,16 +64,46 @@ export default function JoinGroupScreen() {
           first
           label="초대 코드"
           value={code}
-          onChangeText={(t) => setCode(t.toUpperCase())}
+          onChangeText={(t) => {
+            setCode(t.toUpperCase());
+            setPreview(null); // 코드를 고치면 미리보기는 다시
+          }}
           autoCapitalize="characters"
           autoCorrect={false}
           maxLength={CODE_MAX}
-          placeholder="예: A1B2C3D4"
+          placeholder="예: A2B3C4D5"
           returnKeyType="go"
-          onSubmitEditing={join}
+          onSubmitEditing={check}
         />
       </Card>
-      <Note>그룹원의 알람 · 기상 상태는 그 사람이 공유를 허용해야 보여요. 내가 보여 줄 범위는 들어간 뒤 공유 권한 설정에서 정해요.</Note>
+
+      {problem ? (
+        <Text variant="small" tone="warn" style={styles.problem} accessibilityLiveRegion="polite">
+          {problem}
+        </Text>
+      ) : null}
+
+      {found ? (
+        <Card>
+          <View style={styles.row}>
+            <GroupIcon label={[...found.name][0] ?? ''} />
+            <View style={styles.grow}>
+              <Text variant="big" numberOfLines={2}>
+                {found.name}
+              </Text>
+              <Text variant="small" tone="sub">
+                {found.memberCount}명{found.expiresAt ? ` · ${expiresLabel(found.expiresAt)}` : ''}
+              </Text>
+            </View>
+          </View>
+          {found.alreadyJoined || found.full ? (
+            <Text variant="small" tone="warn" style={styles.state}>
+              {found.alreadyJoined ? GROUP_ALREADY : GROUP_FULL}
+            </Text>
+          ) : null}
+        </Card>
+      ) : null}
+      <Note>그룹원의 알람 · 기상 상태는 그 사람이 공유를 허용해야 보여요. 내가 보여 줄 범위는 들어갈 때 · 들어간 뒤 정해요.</Note>
     </Screen>
   );
 }
@@ -62,4 +111,8 @@ export default function JoinGroupScreen() {
 const styles = StyleSheet.create({
   title: { marginTop: 8, marginBottom: 4 },
   lead: { marginBottom: 18 },
+  problem: { marginTop: 10, marginBottom: 4 },
+  row: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  grow: { flex: 1, minWidth: 0 },
+  state: { marginTop: 10 },
 });

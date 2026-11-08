@@ -1,33 +1,24 @@
 import { useState } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { StyleSheet } from 'react-native';
 
-import { Button, Card, Field, Screen, SectionHeader, Text, toast, Toggle, TopBar } from '@/components/ui';
+import { Button, Card, Field, Screen, Text, toast, TopBar } from '@/components/ui';
 import { createGroup, setWakeShareOptIn } from '@/features/social/api';
+import { ConsentSheet } from '@/features/social/components/ConsentSheet';
 import { Note } from '@/features/social/components/Note';
+import { expiresLabel, GROUP_NAME_MAX } from '@/features/social/groupTexts';
 import { shareInvite } from '@/features/social/invite';
-import { PERMISSIONS, type CreatedGroup } from '@/features/social/types';
+import type { CreatedGroup } from '@/features/social/types';
 import { backOrHome, openGroupDetail } from '@/lib/nav';
 import { useAction } from '@/lib/useAction';
 import { useLeaveGuard } from '@/lib/useLeaveGuard';
 
-// 그룹 이름 최대 글자 수 — api.ts createGroup과 같은 값
-const NAME_MAX = 50;
-
-// 새 그룹에서 고르는 공유는 기상 상태 하나 — F03과 같은 이름 · 설명
-//   기상 상태는 그룹 권한 행이 아니라 이 그룹에 대한 내 기상 공유 동의(wake_share_opt_in) 하나로 정해짐 (D19 A · D18 참고)
-//   그래서 만든 사람 혼자인 그룹에서도 바로 효과가 남. 알람 조회 · 설정은 그룹 권한 행이라
-//   새 구성원에게 행을 주는 D18이 반영되기 전에는 혼자인 그룹에 저장해도 아무것도 안 써짐 → 이 화면에서 빼고 안내만
-const WAKE = PERMISSIONS.find((p) => p.key === 'viewWake')!;
-
 type Created = CreatedGroup & { name: string };
 
-// 새 그룹 만들기 — G01 그룹 탭 "새 그룹 만들기"에서 옴 (지형님 와이어프레임 4번 · 목업 번호 없음)
-//   1단계: 이름 + 기상 상태 공유(F03과 같은 이름 · 설명) → 만들기
-//   2단계: 초대 코드 보여 주기 → 코드 보내기 · 그룹으로 가기
+// 새 그룹 만들기 — G01 그룹 탭 "새 그룹 만들기"에서 옴 (친구 5장)
+//   이름을 정하고 [만들기] → 바로 OS 공유창에 초대 글(코드 + 만료일) → 이어서 기상 공유 동의 시트([공유] [나중에]) → 그룹 상세
+//   그룹장이 없어 만든 사람도 다른 멤버와 같은 메뉴를 씀. 알람 조회 · 설정은 멤버가 들어온 뒤 공유 권한 설정에서
 export default function NewGroupScreen() {
   const [name, setName] = useState('');
-  // 처음 켜 둠 — 근거 없음 — 작성자 판단 (기상 공유가 그룹의 주된 쓰임이라, 끄려면 직접 끔)
-  const [shareWake, setShareWake] = useState(true);
   const [created, setCreated] = useState<Created | null>(null);
   const { busy, run } = useAction();
   const trimmed = name.trim();
@@ -36,84 +27,41 @@ export default function NewGroupScreen() {
   const create = () =>
     run(async () => {
       const g = await createGroup(trimmed);
-      // 기상 상태를 켰으면 이 그룹에 내 기상 공유 동의도 켬 (D19 A — 기상 조회를 켜면 동의도 같이 켬)
-      // 그룹은 이미 만들어졌으므로 실패해도 코드 화면으로 넘어가고 안내만 함
-      if (shareWake) {
+      allowLeave();
+      // 만들자마자 보내기 — 공유창을 닫아도 그룹은 이미 만들어졌으니 동의 시트로 이어감
+      await shareInvite(trimmed, g.inviteCode, g.expiresAt ? expiresLabel(g.expiresAt) : null);
+      setCreated({ ...g, name: trimmed });
+    }, '그룹을 만들지 못했어요. 다시 해 주세요');
+
+  // 동의 시트 — [공유] = 기상 공유 켬. 그룹은 이미 만들어졌으므로 저장에 실패해도 그룹 상세로 가고 안내만 함 (5-06)
+  const choose = (share: boolean) =>
+    run(async () => {
+      if (!created) return;
+      if (share) {
         try {
-          await setWakeShareOptIn(g.id, true);
+          await setWakeShareOptIn(created.id, true);
         } catch {
-          toast('기상 상태 공유는 켜지 못했어요');
+          toast('기상 상태 공유는 켜지 못했어요. 그룹 상세에서 다시 해 주세요');
         }
       }
-      allowLeave();
-      setCreated({ ...g, name: trimmed });
-    }, '그룹을 만들지 못했어요');
-
-  if (created) return <InviteStep group={created} />;
+      openGroupDetail(created.id, 'stack');
+    }, '그룹으로 가지 못했어요. 다시 해 주세요');
 
   return (
-    <Screen footer={<Button label="만들기" onPress={create} disabled={!trimmed} loading={busy} />}>
+    <Screen footer={<Button label="만들기" onPress={create} disabled={!trimmed || created != null} loading={busy && created == null} />}>
+      <ConsentSheet visible={created != null} busy={busy} onChoose={choose} onClose={() => void choose(false)} />
       <TopBar onBack={backOrHome} />
       <Text variant="title" style={styles.title}>
         새 그룹
       </Text>
       <Text variant="lead" style={styles.lead}>
-        목적에 맞는 그룹을 만들고 공유 범위를 정해요.
+        이름을 정하면 바로 친구에게 초대 코드를 보낼 수 있어요.
       </Text>
 
       <Card>
-        <Field
-          first
-          label="그룹 이름"
-          value={name}
-          onChangeText={setName}
-          maxLength={NAME_MAX}
-          placeholder="예: 아침 준비 메이트"
-          returnKeyType="done"
-        />
+        <Field first label="그룹 이름" value={name} onChangeText={setName} maxLength={GROUP_NAME_MAX} placeholder="예: 아침 준비 메이트" returnKeyType="done" onSubmitEditing={create} />
       </Card>
-
-      <SectionHeader title="그룹원에게 보여 줄 것" />
-      <Card>
-        <View style={styles.toggleRow}>
-          <View style={styles.grow}>
-            <Text variant="bodyStrong">{WAKE.name}</Text>
-            <Text variant="small" tone="sub" style={styles.description}>
-              {WAKE.description}
-            </Text>
-          </View>
-          <Toggle value={shareWake} onChange={setShareWake} label={WAKE.name} disabled={busy} />
-        </View>
-      </Card>
-      <Note>알람 조회 · 알람 설정은 구성원이 들어온 뒤 공유 권한 설정에서 정해요.</Note>
-    </Screen>
-  );
-}
-
-// 만든 뒤 — 초대 코드 보여 주기 (와이어프레임 "그룹을 만들었어요")
-function InviteStep({ group: g }: { group: Created }) {
-  return (
-    <Screen footer={<Button label="그룹으로 가기" onPress={() => openGroupDetail(g.id, 'stack')} />}>
-      <TopBar onBack={backOrHome} />
-      <Text variant="title" style={styles.title}>
-        그룹을 만들었어요
-      </Text>
-      <Text variant="lead" style={styles.lead}>
-        친구에게 코드를 보내면 바로 들어올 수 있어요.
-      </Text>
-
-      <Card>
-        <Text variant="label" tone="sub" style={styles.center}>
-          {g.name} 초대 코드
-        </Text>
-        <View style={styles.codeBox}>
-          <Text variant="stat" selectable accessibilityLabel={`초대 코드 ${g.inviteCode}`}>
-            {g.inviteCode}
-          </Text>
-        </View>
-        <Button label="코드 보내기" variant="ghost" onPress={() => shareInvite(g.name, g.inviteCode)} />
-      </Card>
-      <Note>{'카카오톡 · 메시지로 보내거나, 코드를 길게 눌러 복사할 수 있어요. 그룹 상세의 "+ 초대"에서도 다시 볼 수 있어요.'}</Note>
+      <Note>알람 조회 · 알람 설정은 구성원이 들어온 뒤 공유 권한 설정에서 정해요. 그룹장은 없고, 멤버 누구나 초대 · 이름 바꾸기를 할 수 있어요.</Note>
     </Screen>
   );
 }
@@ -121,9 +69,4 @@ function InviteStep({ group: g }: { group: Created }) {
 const styles = StyleSheet.create({
   title: { marginTop: 8, marginBottom: 4 },
   lead: { marginBottom: 18 },
-  grow: { flex: 1, minWidth: 0 },
-  toggleRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 13 },
-  description: { marginTop: 2 },
-  center: { textAlign: 'center' },
-  codeBox: { alignItems: 'center', marginVertical: 16 },
 });

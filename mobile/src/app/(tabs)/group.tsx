@@ -8,10 +8,13 @@ import { ChangeHandleSheet } from '@/features/profile/components/ChangeHandleShe
 import { handleHint } from '@/features/profile/handle';
 import {
   acceptFriend,
+  acceptGroupInvite,
   cancelFriendRequest,
   declineFriend,
+  declineGroupInvite,
   listFriendRequests,
   listFriends,
+  listGroupInvites,
   listGroups,
   listSentRequests,
   myFriendLink,
@@ -19,6 +22,8 @@ import {
   sendFriendRequest,
 } from '@/features/social/api';
 import { ActionTile } from '@/features/social/components/ActionTile';
+import { ConsentSheet } from '@/features/social/components/ConsentSheet';
+import { GroupInviteCard } from '@/features/social/components/GroupInviteCard';
 import { GroupIcon } from '@/features/social/components/GroupIcon';
 import { MiniButton } from '@/features/social/components/MiniButton';
 import { MyHandleCard } from '@/features/social/components/MyHandleCard';
@@ -33,7 +38,7 @@ import { usePersonMenu } from '@/features/social/hooks/usePersonMenu';
 import { shareFriendInvite } from '@/features/social/invite';
 import { friendLinkUrl } from '@/features/social/inviteLink';
 import { permissionNames } from '@/features/social/permissions';
-import type { FriendItem, GroupItem, PeopleSearch, Person } from '@/features/social/types';
+import type { FriendItem, GroupInvite, GroupItem, PeopleSearch, Person } from '@/features/social/types';
 import { now } from '@/lib/clock';
 import { josa } from '@/lib/format';
 import { useAction } from '@/lib/useAction';
@@ -47,8 +52,8 @@ const TABS = [
 
 // date = 그룹 기상 신호가 알려 준 날 (오늘 기상 수만 씀, 없으면 오늘)
 async function loadSocial(date: string | null) {
-  const [friends, requests, sent, groups] = await Promise.all([listFriends(), listFriendRequests(), listSentRequests(), listGroups(date)]);
-  return { friends, requests, sent, groups };
+  const [friends, requests, sent, groups, invites] = await Promise.all([listFriends(), listFriendRequests(), listSentRequests(), listGroups(date), listGroupInvites()]);
+  return { friends, requests, sent, groups, invites };
 }
 
 // G01 친구와 그룹 — 친구 탭(목업 F01: 요청 수락 · 친구별 권한 수) · 그룹 탭(목업 G01: 참여 중인 그룹 · 오늘 기상 수)
@@ -90,10 +95,38 @@ export default function GroupScreen() {
       '수락하지 못했어요. 다시 해 주세요',
     );
   const decline = (p: Person) => act(p, () => declineFriend(p.id), '거절하지 못했어요. 다시 해 주세요');
+
+  // 받은 그룹 초대 — [참여]는 기상 공유 동의를 한 번 묻고 들어감(5-25), [거절]은 조용히 지움. 끝나면(실패해도) 목록을 새로 읽음
+  const [consentFor, setConsentFor] = useState<GroupInvite | null>(null);
+  const actInvite = (invite: GroupInvite, task: () => Promise<void>, fallback: string) =>
+    run(async () => {
+      setWorkingId(invite.groupId);
+      try {
+        await task();
+      } finally {
+        setWorkingId(null);
+        setConsentFor(null);
+        await reload();
+      }
+    }, fallback);
+  const acceptInvite = (share: boolean) => {
+    const invite = consentFor;
+    if (!invite) return;
+    void actInvite(
+      invite,
+      async () => {
+        await acceptGroupInvite(invite.groupId, share);
+        toast(`${invite.name}에 참여했어요`);
+      },
+      '참여하지 못했어요. 다시 해 주세요',
+    );
+  };
+  const declineInvite = (invite: GroupInvite) => actInvite(invite, () => declineGroupInvite(invite.groupId), '거절하지 못했어요. 다시 해 주세요');
   const cancel = (p: Person) => act(p, () => cancelFriendRequest(p.id), '취소하지 못했어요. 다시 해 주세요');
 
   return (
     <Screen onRefresh={reload}>
+      <ConsentSheet visible={consentFor != null} busy={workingId != null} onChoose={acceptInvite} onClose={() => setConsentFor(null)} />
       <TopBar
         screenId={tab === 'friend' ? 'F01' : 'G01'}
         right={<TopBarButton label="권한 관리" onPress={() => router.push('/permissions')} />}
@@ -121,7 +154,9 @@ export default function GroupScreen() {
           workingId={workingId}
         />
       ) : null}
-      {data && tab === 'group' ? <GroupTab groups={data.groups} /> : null}
+      {data && tab === 'group' ? (
+        <GroupTab groups={data.groups} invites={data.invites} workingId={workingId} onAccept={setConsentFor} onDecline={declineInvite} />
+      ) : null}
     </Screen>
   );
 }
@@ -301,11 +336,38 @@ function FriendTab({
   );
 }
 
-// 그룹 탭 — 만들기 · 참여(아직 없음 — 누르면 "곧 열려요") · 참여 중인 그룹
+// 그룹 탭 — 받은 초대 · 만들기 · 참여(코드 입력) · 참여 중인 그룹
 // 기상 상태를 볼 수 있는 그룹(받은 권한)만 그룹 상세로 들어가고, 아니면 안내만 (목업 G01 우리 가족)
-function GroupTab({ groups }: { groups: GroupItem[] }) {
+function GroupTab({
+  groups,
+  invites,
+  workingId,
+  onAccept,
+  onDecline,
+}: {
+  groups: GroupItem[];
+  invites: GroupInvite[];
+  workingId: string | null;
+  onAccept: (i: GroupInvite) => void;
+  onDecline: (i: GroupInvite) => void;
+}) {
   return (
     <>
+      {invites.length ? (
+        <>
+          <SectionHeader title="받은 초대" right={`${invites.length}개`} />
+          {invites.map((i) => (
+            <GroupInviteCard
+              key={i.groupId}
+              invite={i}
+              working={workingId === i.groupId}
+              disabled={workingId !== null && workingId !== i.groupId}
+              onAccept={() => onAccept(i)}
+              onDecline={() => onDecline(i)}
+            />
+          ))}
+        </>
+      ) : null}
       <View style={styles.tiles}>
         <ActionTile
           dark

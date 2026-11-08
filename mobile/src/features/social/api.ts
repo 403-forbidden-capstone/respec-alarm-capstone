@@ -9,7 +9,7 @@ import { UserError } from '@/lib/errors';
 import { dateParts } from '@/lib/format';
 import { isMock } from '@/lib/mode';
 import { memberState } from '@/mocks/calc';
-import { db, kst, memberAlarms, people, timelines, TODAY, type MockGroup, type MockMemberAlarm, type MockPerson } from '@/mocks/data';
+import { db, kst, memberAlarms, people, timelines, TODAY, type MockMemberAlarm, type MockPerson } from '@/mocks/data';
 
 import { mergeGrants } from './grants';
 import { CODE_EXPIRED, CODE_NOT_FOUND, GROUP_FULL, GROUP_NOT_MEMBER, GROUP_TOO_MANY, cleanCode, groupNameProblem } from './groupTexts';

@@ -1,12 +1,15 @@
 import { router, useLocalSearchParams } from 'expo-router';
-import { useState } from 'react';
-import { Pressable, Share, StyleSheet, View } from 'react-native';
+import { Pressable, StyleSheet, View } from 'react-native';
 
-import { Avatar, Button, Card, Chip, LoadError, Loading, Screen, SectionHeader, Sheet, Text, toast, TopBar } from '@/components/ui';
+import { Avatar, Card, Chip, LoadError, Loading, Screen, SectionHeader, Text, toast, TopBar } from '@/components/ui';
 import { IMPORTANCE_LABEL } from '@/features/alarm/types';
 import { TextLink } from '@/features/alarm/components/TextLink';
 import { getGroup } from '@/features/social/api';
+import { GroupCodeSheet } from '@/features/social/components/GroupCodeSheet';
+import { GroupInviteSheet } from '@/features/social/components/GroupInviteSheet';
+import { GroupMenuSheet } from '@/features/social/components/GroupMenuSheet';
 import { PersonMenuSheet } from '@/features/social/components/PersonMenuSheet';
+import { useGroupMenu } from '@/features/social/hooks/useGroupMenu';
 import { useWakeLoad } from '@/features/social/hooks/useGroupWake';
 import { usePersonMenu } from '@/features/social/hooks/usePersonMenu';
 import { MiniButton } from '@/features/social/components/MiniButton';
@@ -47,28 +50,21 @@ export default function GroupDetailScreen() {
 function Detail({ group: g, onBack, onChanged }: { group: GroupDetail; onBack?: () => void; onChanged: () => void }) {
   const menu = usePersonMenu(onChanged); // 멤버 줄 [···] 신고 · 차단 — 차단하면 그 사람은 이름만 보이게 다시 읽음 (친구 4장)
   const grants = permissionNames(g.grants);
-  const [inviting, setInviting] = useState(false);
+  const groupMenu = useGroupMenu(g, onChanged, () => onBack?.()); // [···] 그룹 메뉴 · [+ 초대] — 그룹장 없음, 멤버 누구나 (친구 5장)
 
   // 연결 일정이 여러 개일 수 있어 "내 알람"은 늘 알람 목록으로 (작성자 판단 — 목업은 연결 일정 고정)
   const openMyAlarms = () => router.push('/alarms');
 
-  // 코드를 다른 앱으로 보냄. 웹처럼 공유창이 없으면 코드를 길게 눌러 복사하도록 안내 (사용자가 창을 닫은 것은 오류가 아님)
-  async function shareInvite() {
-    try {
-      await Share.share({ message: `Re:Spec 알람 '${g.name}' 그룹에 초대해요. 초대 코드: ${g.inviteCode}` });
-    } catch (e) {
-      if (e instanceof Error && e.name === 'AbortError') return;
-      toast('코드를 길게 눌러 복사해 주세요');
-    }
-  }
-
   return (
     <Screen>
       <PersonMenuSheet {...menu.sheetProps} />
+      <GroupMenuSheet {...groupMenu.menuProps} />
+      <GroupCodeSheet {...groupMenu.codeProps} />
+      <GroupInviteSheet {...groupMenu.inviteProps} />
       <TopBar
         onBack={onBack}
         screenId="G02"
-        right={<TextLink label="···" accessibilityLabel="그룹 메뉴" onPress={() => toast('그룹 메뉴는 곧 열려요')} />}
+        right={<TextLink label="···" accessibilityLabel="그룹 메뉴" onPress={groupMenu.openMenu} />}
       />
       <Text variant="title" style={styles.title}>
         {g.name}
@@ -124,7 +120,7 @@ function Detail({ group: g, onBack, onChanged }: { group: GroupDetail; onBack?: 
         </Card>
       ) : null}
 
-      <SectionHeader title="멤버 · 기상 상태" right={<TextLink label="+ 초대" onPress={() => setInviting(true)} strong />} />
+      <SectionHeader title="멤버 · 기상 상태" right={<TextLink label="+ 초대" onPress={groupMenu.openInvite} strong />} />
       <Card>
         {g.members.map((m, i) => (
           <MemberRow key={m.person.id} member={m} groupId={g.id} first={i === 0} onMyAlarm={openMyAlarms} onMenu={menu.open} />
@@ -141,17 +137,6 @@ function Detail({ group: g, onBack, onChanged }: { group: GroupDetail; onBack?: 
         </Text>
       </Card>
 
-      <Sheet visible={inviting} onClose={() => setInviting(false)} title="그룹 초대">
-        <Text variant="small" tone="sub">
-          이 코드를 친구에게 보내면 {g.name}에 참여할 수 있어요.
-        </Text>
-        <View style={styles.codeBox}>
-          <Text variant="stat" selectable accessibilityLabel={`초대 코드 ${g.inviteCode}`}>
-            {g.inviteCode}
-          </Text>
-        </View>
-        <Button label="공유하기" onPress={shareInvite} />
-      </Sheet>
     </Screen>
   );
 }
