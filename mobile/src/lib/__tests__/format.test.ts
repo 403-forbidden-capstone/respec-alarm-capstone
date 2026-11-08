@@ -15,8 +15,7 @@ import {
   keepWordsIfWrappable,
   minuteOfDay,
   spokenTime,
-  timeParts,
-} from '../format';
+  timeParts, formatWait } from '../format';
 
 // 5월 22일 오전 7:55 (한국) = 5월 21일 22:55 (UTC)
 const morning = new Date('2025-05-21T22:55:00Z');
@@ -114,5 +113,21 @@ describe('dropRepeatedAmpm', () => {
   it('하루를 넘기는 체인은 바뀌는 곳을 남김, 뒤에 붙은 표시(지남 · 꺼짐)는 영향 없음', () => {
     expect(dropRepeatedAmpm(['오후 11:30 준비', '오전 12:10 출발'])).toEqual(['오후 11:30 준비', '오전 12:10 출발']);
     expect(dropRepeatedAmpm(['오전 8:00 기상 · 지남', '오전 8:30 준비 · 꺼짐'])).toEqual(['오전 8:00 기상 · 지남', '8:30 준비 · 꺼짐']);
+  });
+});
+
+describe('formatWait', () => {
+  it('60초까지는 초, 1시간 전까지는 분(올림), 그 뒤는 시간(올림)', () => {
+    expect(formatWait(1)).toBe('1초');
+    expect(formatWait(42.2)).toBe('43초');
+    expect(formatWait(60)).toBe('60초');
+    expect(formatWait(61)).toBe('2분');
+    expect(formatWait(3599)).toBe('60분');
+    expect(formatWait(3600)).toBe('1시간');
+    expect(formatWait(30000)).toBe('9시간');
+  });
+
+  it('0 이하도 1초로', () => {
+    expect(formatWait(0)).toBe('1초');
   });
 });
