@@ -1,5 +1,5 @@
 // 친구 링크 주소 · 초대 메시지 — 순수 함수 (시험: __tests__/search.test.ts)
-//   링크는 /invite?t=토큰. 폰은 앱 주소(respecalarm://invite?t=…), 웹은 배포 주소가 같은 화면(app/invite.tsx)을 엶
+//   링크는 배포 주소의 /invite?t=토큰 — 웹 앱의 같은 화면(app/invite.tsx)을 엶. 폰에서 눌러 앱을 바로 여는 길(앱 링크)과 앱 없는 사람용 정적 착지는 아직 없음 (지형님 결정 대기)
 //   메시지에는 닉네임 + 아이디를 넣음 — 앱이 없는 사람도 아이디를 보고 찾을 수 있게 (2-머)
 import { Platform } from 'react-native';
 
