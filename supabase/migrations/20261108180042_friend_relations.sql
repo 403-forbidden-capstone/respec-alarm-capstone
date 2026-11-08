@@ -185,8 +185,8 @@ begin
   if found and v_row.status = 'ACCEPTED' then
     return jsonb_build_object('status', 'ALREADY_FRIEND');
   end if;
-  if not found or v_row.status <> 'PENDING' or v_row.requester_id <> p_requester_id then
-    return jsonb_build_object('status', 'GONE');   -- '이미 처리됐을 수 있어요' (3-카 · 3-28)
+  if not found or v_row.status <> 'PENDING' or v_row.requester_id <> p_requester_id or private.is_blocked_pair(v_uid, p_requester_id) then
+    return jsonb_build_object('status', 'GONE');   -- '이미 처리됐을 수 있어요' (3-카 · 3-28). 차단 쌍의 남은 대기 행도 같은 응답 (4장)
   end if;
   if private.friend_count(v_uid) >= 100 or private.friend_count(p_requester_id) >= 100 then
     return jsonb_build_object('status', 'FRIEND_LIMIT');

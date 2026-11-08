@@ -52,7 +52,7 @@ select vault.create_secret('<service_role 키>', 'service_role_key');
 
 | 함수 | 쓰는 곳 | 하는 일 |
 |---|---|---|
-| `can_send_push(sender, target, kind)` | `notify` | 푸시를 보내도 되는지. `ALARM_CHANGED`(G04)는 보내는 사람이 받는 사람 알람의 설정 권한을 가졌을 때만 true, `WAKE_PING`(G03 깨우기)은 D19 결정 뒤까지 false |
+| `can_send_push(sender, target, kind)` | `notify` | 푸시를 보내도 되는지. `ALARM_CHANGED`(G04)는 보내는 사람이 받는 사람 알람의 설정 권한을 가졌을 때만 true, `WAKE_PING`(G03 깨우기)은 D19 결정 뒤까지 false. 보내는 사람과 받는 사람이 차단 쌍이면(어느 쪽이 걸었든, 친구 4장) 종류와 상관없이 false |
 | `find_missed_wake_alarms(p_now, p_lookback_hours)` | `wake-check` | 기상 미확인(MISSED)으로 기록할 알람 목록 (7장 7.9.2: 마지막으로 울리기 시작한 때 + 다시 울림 총 소요 + 30분. 총 소요는 첫 울림 시작부터 마지막 울림 끝까지로 약 11 · 보통 19 · 강 21분 — 알람 코어와 같은 끝난 뒤 간격 기준. 폰은 미루면 다시 울림 묶음을 처음부터 새로 시작하므로, 마지막 울림 시작 = 마지막 미루기 시각 + 미루기 시간(미루기가 없으면 알람 시각). 돌려주는 `snooze_minutes`는 미루기 합이라 참고용이고 `missed_at`은 이 합으로 구하지 않음). 기상 확인은 같은 사람의 `WAKE_CONFIRMED`(어느 기상 알람이든) 또는 `daily_records.wake_confirmed_at`이면 인정 — 그룹 현황판이 '기상'으로 세는 기준과 같음. 기록은 알람 시각 6시간 전 ~ 18시간 뒤만 봄. 돌려주는 `event_key`를 `alarm_events.client_event_id`로 넣고 `on conflict do nothing`하면 같은 알람이 두 번 기록되지 않음 |
 | `roll_insert_occurrence(p_appointment, p_participant, p_alarms, p_items)` | `alarm-roll` (다음 PR) | 반복 회차 하나를 약속 · 참여 조건 · 알람 · 준비물(`todos` ITEM)까지 **한 트랜잭션**으로 씀. 같은 (만든 사람, 묶음, 날짜)가 이미 있으면 아무것도 안 쓰고 `null`(같은 요청 두 번 = 같은 결과), 새로 만들면 `appointment_id`. 넣는 칸은 `alarm-commit`(`_shared/commit.ts` persistAppointment)과 같고 (알람의 `vibration`은 `20261030200000_alarm_vibration.sql`부터 — 직접 고른 진동을 다음 회차가 이어받음) 약속에 `memo` · `dest_radius_m`만 더 이어받음. 입력은 jsonb(`series_id` · `occurrence_on` 필수) |
 | `roll_due_series(p_now, p_limit)` | `alarm-roll` 배치 (다음 PR) | 회차를 넘길 후보 묶음 `(user_id, series_id, kind, template_id)`, 다음 회차가 급한 순 (정말 만들 날짜가 있는지는 `alarm-roll`이 다시 봄). `APPOINTMENT`: 묶음의 **기준 회차**(예외 아닌 회차 중 날짜가 가장 늦은 것, 없으면 이번만 고친 회차 중, 이번만 지운 회차는 기준이 아님)에 읽을 수 있는 `recurrence_rule`(두 모양)이 있고 개인 약속이며 **다음 회차** 시각이 `p_now + 14일` 앞(14일치가 차 있으면 안 줌) · 재시도 대기 아님(`roll_attempts.next_try_at`이 안 온 줄 없음) · 미뤄 둔 날짜의 재시도 때가 지났으면 창 밖이어도 포함. `STANDALONE`: 일정 없는 반복 알람(같은 기준). `ROUTINE`: 켜 둔 루틴(읽을 수 있는 요일)의 켜진 단계 알람 시각이 지난 것. 못 읽는 규칙 · 요일(예전 MONTHLY · INTERVAL 등)은 빼서 매번 앞자리를 차지하지 않게 |
@@ -67,6 +67,15 @@ select vault.create_secret('<service_role 키>', 'service_role_key');
   - `search_related_by_name(p_query)` — 친구 · 같은 그룹 안 닉네임 부분 일치
   - `my_friend_link(p_renew)` · `open_friend_link(p_token)` — 친구 링크(7일, 다시 만들면 옛 링크 무효). 표 `friend_links` · 제한 기록 `rate_limit_events`는 서버 전용(정책 없음)
   - 가입하면 아이디가 `respec_` + 4자로 자동으로 생기고 빈 아이디는 채움(NOT NULL은 앱 타입이 옮긴 뒤). 닉네임은 앞뒤 공백(탭 · 줄바꿈 포함)을 떼고 1~30자, 가입 때 이름이 공백뿐이면 이메일 앞부분 · '사용자'
+- 친구 3장 친구 관계 (`20261108180042_friend_relations.sql`, 이슈 #372) — 상태 값으로 돌려주고 앱이 문구로 바꿈. 푸시는 11장
+  - `send_friend_request(p_target_id)`(`REQUESTED` · `ACCEPTED`(맞요청 자동 수락) · `ALREADY_REQUESTED` · `ALREADY_FRIEND` · `SELF` · `NOT_FOUND` · `LIMIT` · `FRIEND_LIMIT`) — 1분 10회 + 하루 50회(행을 만든 요청만, 취소해도 안 줄어듦), 친구 100명 상한
+  - `accept_friend_request(p_requester_id)`(`ACCEPTED` · `ALREADY_FRIEND` · `GONE` · `FRIEND_LIMIT`) · `decline_friend_request(p_requester_id)`(`DECLINED` · `GONE`) · `cancel_friend_request(p_addressee_id)`(`CANCELED` · `GONE`) · `remove_friend(p_user_id)`(`REMOVED` · `GONE`) — 거절 · 취소 · 끊기는 행 삭제, 끊기는 친구 출처 권한만 지움
+  - `friends` 상태는 대기 → 친구로만 바뀌고(수락 되돌리기 · 차단으로 바꾸기는 42501) 수락 시각은 서버가 넣음. 같은 사람이 끼는 동작은 사람별 잠금(`private.lock_friend_pair`)으로 한 줄씩. 받은 요청은 30일 뒤 5분 배치(`friend-requests-expire`)가 지움
+  - 앱이 `friends`를 직접 insert · update · delete 하는 옛 길은 15장까지 열려 있고 그 길은 요청 제한 · 100명 상한을 안 거침
+- 친구 4장 차단 · 신고 (`20261108181556_friend_blocks.sql`, 이슈 #375) — 상태 값으로 돌려줌
+  - `block_user(p_user_id)`(`BLOCKED` · `ALREADY_BLOCKED` · `SELF` · `NOT_FOUND`) · `unblock_user(p_user_id)`(`UNBLOCKED` · `GONE`) · `my_blocks()` — 누구나 차단, 친구 끊김 + 양쪽 방향 대기 요청 삭제 + 두 사람 사이 공유 권한 삭제, 풀어도 친구 · 권한은 복구 안 됨. 표 `user_blocks`는 차단한 사람 본인만 읽고 쓰기는 함수로만
+  - 차단 판정은 `private.is_blocked_pair` 한 곳: 검색 · 이름 검색 · 친구 링크 · 친구 요청이 없는 사람과 같은 응답, 권한 판정(`is_valid_permission_source`)이 끝나서 알람 조회 · 설정 · 기상 · 푸시(`can_send_push`)도 끊김, `get_public_profiles`는 같은 그룹의 차단 쌍에게 닉네임만(사진 · 아이디 `null`), `friends` 직접 insert는 없는 사람과 같은 외래 키 위반(23503)으로 거절
+  - `submit_report(p_target_type, p_target_id, p_reason, p_note)`(`REPORTED` · `ALREADY_REPORTED` · `INVALID` · `SELF` · `NOT_FOUND`) — 같은 대상 하루 1번(신고하는 사람 시간대). 표 `reports`는 서버 전용(운영 화면용 조회 · 처리 함수는 '팀원 계정' 판별 방법이 정해진 뒤)
 - `dev_reset_my_data()` (`20261030220000_dev_reset_my_data.sql`) — **개발용**. 부른 사람 본인의 시험 데이터(일정 · 알람 · 울림 기록 · 기록 · 일기 · AI 대화 · 고친 값 기록 · 제안)를 지우고 프로필을 온보딩 전으로 되돌림. 인자 없음 — `auth.uid()` 본인 줄만 건드림. 그룹 일정(`group_id` 있음, 그룹원 누구나 조회)과 다른 사람이 참여 중인 일정은 내 참여 행(과 내 알람)만 지우고 일정은 둠 — 일정째 지우는 건 내가 만든 개인 일정 중 혼자인 것뿐. 친구 · 그룹 · 공유 권한 · 푸시 토큰 · `ai_calls` · `user_questions`(AI 상한 · 질문 예산을 세는 기록) · 루틴 · 할 일은 그대로. 앱은 개발 화면(`/dev/screens`)에서만 부르고 출시 빌드에서는 안 부름
 
 ## 반복 다음 회차 (`20261029075743_alarm_roll.sql`, 이슈 #209)
