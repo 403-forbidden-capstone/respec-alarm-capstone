@@ -107,7 +107,7 @@ export default async function ch03({ q, as, su, check, expectErr }) {
   await check('3-08 · 2-38(요청 부분): 자기에게 요청은 SELF, 없는 사람 · 온보딩 전 · 차단 쌍에게는 NOT_FOUND(같은 응답) — 기록 안 셈', async () => {
     const NO = await join_(7, '온보딩전', { onboarded: false });
     const BL = await join_(8, '차단');
-    await q(`insert into public.friends (requester_id, addressee_id, status) values ($1, $2, 'BLOCKED')`, [BL, A]);   // 지금 차단 모양(4장에서 user_blocks로)
+    await q(`insert into public.user_blocks (blocker_id, blocked_id) values ($1, $2)`, [A, BL]);   // A가 BL을 차단 (4장)
     const self = await request(A, A);
     const shapes = [await request(A, '30000000-0000-4000-8000-999999999999'), await request(A, NO), await request(A, BL), await request(BL, A)];
     const [{ n }] = await q(`select count(*)::int as n from public.rate_limit_events where user_id = $1 and action = 'FRIEND_REQUEST'`, [A]);
@@ -162,9 +162,21 @@ export default async function ch03({ q, as, su, check, expectErr }) {
     const a = await accept(P, FULL);
     const row = await rowOf(FULL, P);
     await q(`delete from public.friends where requester_id = $1 and addressee_id in (select id from auth.users where email like 'f3-full-%' limit 1)`, [FULL]);
-    const a2 = await accept(P, FULL);   // 99명이 되면 수락됨
+    const a2 = await accept(P, FULL);   // 99명이 되면 수락됨 → 다시 100명
+    // 받는 쪽이 100명이어도 요청은 가지만(REQUESTED) 그 사람이 수락하면 FRIEND_LIMIT (수락 함수의 "내가 100명" 분기)
+    const toFull = await request(Q, FULL);
+    const fullAccepts = await accept(FULL, Q);
+    const stillPending = await rowOf(Q, FULL);
+    // 상대가 100명인데 내가 맞요청하면 자동 수락도 FRIEND_LIMIT (요청 함수의 "상대 100명" 분기), 상대의 대기 요청은 그대로
+    const Z = await join_(43, '자동수락상대');
+    await q(`insert into public.friends (requester_id, addressee_id, status) values ($1, $2, 'PENDING')`, [FULL, Z]);
+    const auto = await request(Z, FULL);
+    const autoRow = await rowOf(FULL, Z);
+    await clearLimits(Q, Z);
     await q(`delete from auth.users where email like 'f3-full-%'`);
-    return r.status === 'FRIEND_LIMIT' && a.status === 'FRIEND_LIMIT' && row.status === 'PENDING' && a2.status === 'ACCEPTED' ? true : { r, a, row, a2 };
+    return r.status === 'FRIEND_LIMIT' && a.status === 'FRIEND_LIMIT' && row.status === 'PENDING' && a2.status === 'ACCEPTED'
+      && toFull.status === 'REQUESTED' && fullAccepts.status === 'FRIEND_LIMIT' && stillPending?.status === 'PENDING'
+      && auto.status === 'FRIEND_LIMIT' && autoRow?.status === 'PENDING' && autoRow.requester_id === FULL ? true : { r, a, row, a2, toFull, fullAccepts, stillPending, auto, autoRow };
   });
 
   await check('3-13: 받은 요청이 31일 지나면 배치가 지우고, 29일 지난 것은 남김 (5분 예약 friend-requests-expire)', async () => {
@@ -172,12 +184,19 @@ export default async function ch03({ q, as, su, check, expectErr }) {
     const N = await join_(51, '덜오래된');
     await q(`insert into public.friends (requester_id, addressee_id, status, requested_at) values ($1, $3, 'PENDING', now() - interval '31 days'),
                                                                                          ($2, $3, 'PENDING', now() - interval '29 days')`, [O, N, C]);
-    await q(`select private.expire_friend_requests()`);
+    // 40일 전에 맺은 친구 행은 대기 정리와 상관없이 남음
+    const E1 = await join_(52, '오랜친구1');
+    const E2 = await join_(53, '오랜친구2');
+    await q(`insert into public.friends (requester_id, addressee_id, status, requested_at, accepted_at)
+             values ($1, $2, 'ACCEPTED', now() - interval '40 days', now() - interval '39 days')`, [E1, E2]);
+    const [{ n }] = await q(`select private.expire_friend_requests() as n`);
     const old = await rowOf(O, C);
     const fresh = await rowOf(N, C);
+    const longFriends = await rowOf(E1, E2);
     const [job] = await q(`select schedule, command from cron.job where jobname = 'friend-requests-expire'`);
-    return old === null && fresh?.status === 'PENDING' && job?.schedule === '*/5 * * * *' && job.command === 'select private.expire_friend_requests()'
-      ? true : { old, fresh, job };
+    return old === null && fresh?.status === 'PENDING' && longFriends?.status === 'ACCEPTED' && n >= 1
+      && job?.schedule === '*/5 * * * *' && job.command === 'select private.expire_friend_requests()'
+      ? true : { old, fresh, longFriends, n, job };
   });
 
   await check('3-15: 친구 + 같은 그룹 — 끊으면 친구 출처 권한만 지워지고 그룹 출처 권한 · 그룹 기상 공유 동의는 그대로', async () => {
@@ -279,6 +298,67 @@ export default async function ch03({ q, as, su, check, expectErr }) {
     await su();
     return changed.length === 1 && new Date(kept.scheduled_at).getTime() === new Date(changed[0].scheduled_at).getTime() && after.length === 0
       ? true : { changed, kept, after };
+  });
+
+  await check('3-03 · 3-04 · 3-14(상태 조건): 취소 · 거절 · 끊기는 자기 상태의 행만 지움 — 친구 행은 취소 · 거절로, 대기 행은 끊기로, 받은 사람은 취소로, 보낸 사람은 거절로 못 지움', async () => {
+    const X1 = await join_(90, '친구1'), X2 = await join_(91, '친구2'), Y1 = await join_(92, '대기1'), Y2 = await join_(93, '대기2');
+    await request(X1, X2);
+    await accept(X2, X1);
+    await request(Y1, Y2);
+    const out = [
+      (await cancel(X1, X2)).status, (await decline(X2, X1)).status,   // 친구 행 → GONE
+      (await remove(Y1, Y2)).status, (await remove(Y2, Y1)).status,    // 대기 행 → GONE
+      (await cancel(Y2, Y1)).status, (await decline(Y1, Y2)).status,   // 받은 사람이 취소 · 보낸 사람이 거절 → GONE
+    ];
+    const rows = [(await rowOf(X1, X2))?.status, (await rowOf(Y1, Y2))?.status];
+    await clearLimits(X1, Y1);
+    return out.every((x) => x === 'GONE') && rows[0] === 'ACCEPTED' && rows[1] === 'PENDING' ? true : { out, rows };
+  });
+
+  await check('3-05 · 3-12 · 3-27(동시성 바탕): 같은 사람이 끼는 요청 · 수락 · 취소는 상대가 달라도 한 줄씩 — 잠금이 사람마다 걸리고(두 사람 몫 둘, 순서 고정) 같은 사람은 겹쳐도 하나', async () => {
+    // 한 트랜잭션 안에서 잠금을 걸어 보고 지금 쥔 잠금 수를 셈: (A,B) · (B,A) · (A,C) → A · B · C 세 개 (쌍마다 걸면 둘)
+    await q(`create function pg_temp.f3_locks(a uuid, b uuid, c uuid) returns integer language plpgsql as $$
+             declare n integer;
+             begin
+               perform private.lock_friend_pair(a, b);
+               perform private.lock_friend_pair(b, a);
+               perform private.lock_friend_pair(a, c);
+               select count(*)::integer into n from pg_locks where locktype = 'advisory' and pid = pg_backend_pid();
+               return n;
+             end $$`);
+    const [{ n }] = await q(`select pg_temp.f3_locks($1, $2, $3) as n`, [A, B, C]);
+    return n === 3 ? true : { n };
+  });
+
+  await check('3-28(변형) · 3-05(변형): 수락 · 자동 수락이 고치려던 행이 그 사이 사라졌으면 — 수락은 GONE(친구가 됐다고 하지 않음), 자동 수락은 내 요청으로 이어감', async () => {
+    const V1 = await join_(94, '사라짐1'), V2 = await join_(95, '사라짐2'), V3 = await join_(96, '사라짐3'), V4 = await join_(97, '사라짐4');
+    await request(V1, V2);
+    await request(V3, V4);
+    await q(`create schema f3test`);
+    await q(`create function f3test.vanish() returns trigger language plpgsql as $$
+             begin delete from public.friends where friend_id = old.friend_id; return null; end $$`);
+    await q(`create trigger aaa_vanish before update on public.friends for each row execute function f3test.vanish()`);   // 고치려는 순간 행이 지워진 상황을 흉내
+    try {
+      const accepted = await accept(V2, V1);
+      const gone = await rowOf(V1, V2);
+      const auto = await request(V4, V3);
+      const mine = await rowOf(V3, V4);
+      await clearLimits(V1, V3, V4);
+      return accepted.status === 'GONE' && gone === null && auto.status === 'REQUESTED' && mine?.status === 'PENDING' && mine.requester_id === V4
+        ? true : { accepted, gone, auto, mine };
+    } finally {
+      await q(`drop trigger if exists aaa_vanish on public.friends`);
+      await q(`drop schema f3test cascade`);
+    }
+  });
+
+  await check('3-06(변형): 대기 · 친구 말고 다른 상태 행이 있으면 요청은 NOT_FOUND(자동 수락으로 넘어가지 않음)', async () => {
+    const W1 = await join_(98, '이상한행1'), W2 = await join_(99, '이상한행2');
+    await q(`insert into public.friends (requester_id, addressee_id, status) values ($1, $2, 'BLOCKED')`, [W1, W2]);   // 예전 모양이 남아 있는 경우를 흉내
+    const r = await request(W2, W1);
+    const row = await rowOf(W1, W2);
+    await q(`delete from public.friends where requester_id = $1`, [W1]);
+    return JSON.stringify(r) === JSON.stringify({ status: 'NOT_FOUND' }) && row?.status === 'BLOCKED' ? true : { r, row };
   });
 
   await check('3장 함수: 로그인 정보가 없으면 42501, anon은 실행 권한 없음, 배치 정리 함수는 앱이 못 부름', async () => {

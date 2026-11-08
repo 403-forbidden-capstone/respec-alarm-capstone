@@ -52,14 +52,19 @@ create trigger guard_friend_status
 -- 2. 공용 — 두 사람 잠금 · 친구 수
 -- ---------------------------------------------------------------------
 
--- 같은 두 사람의 요청 · 수락 · 취소가 동시에 와도 한 줄씩 (3-05 · 3-28 · 3-29)
+-- 두 사람 각자에게 잠금을 걸어 이 두 사람이 끼는 요청 · 수락 · 취소 · 차단이 동시에 와도 한 줄씩 (3-05 · 3-28 · 3-29)
+--   쌍 하나에만 걸면 (U,B)와 (U,C)가 서로 안 막아, 둘 다 99명을 보고 수락해 101명이 되는 길이 열림(100명 상한 3-다) →
+--   사람마다 잠금을 걸고, 교착을 막으려고 uuid 순서대로 건다. 요청 제한 잠금(take_rate_slot)은 항상 이 뒤에 걸려 순환이 없음
 create function private.lock_friend_pair(p_a uuid, p_b uuid)
 returns void
-language sql
+language plpgsql
 volatile
 set search_path = ''
 as $$
-  select pg_advisory_xact_lock(hashtextextended('friend:' || least(p_a, p_b)::text || ':' || greatest(p_a, p_b)::text, 0));
+begin
+  perform pg_advisory_xact_lock(hashtextextended('friend_user:' || least(p_a, p_b)::text, 0));
+  perform pg_advisory_xact_lock(hashtextextended('friend_user:' || greatest(p_a, p_b)::text, 0));
+end;
 $$;
 
 -- 수락된 친구 수 (3-다 상한 100명)
@@ -91,6 +96,7 @@ as $$
 declare
   v_uid  uuid := auth.uid();
   v_row  record;
+  v_has  boolean;
   v_wait integer;
 begin
   if v_uid is null then
@@ -114,16 +120,20 @@ begin
   from public.friends f
   where least(f.requester_id, f.addressee_id) = least(v_uid, p_target_id)
     and greatest(f.requester_id, f.addressee_id) = greatest(v_uid, p_target_id);
+  v_has := found;
 
-  if found and v_row.status = 'ACCEPTED' then
+  if v_has and v_row.status = 'ACCEPTED' then
     return jsonb_build_object('status', 'ALREADY_FRIEND');
   end if;
-  if found and v_row.requester_id = v_uid then
+  if v_has and v_row.status <> 'PENDING' then
+    return jsonb_build_object('status', 'NOT_FOUND');   -- 대기 · 친구 말고 다른 상태 행은 없는 사람과 같게
+  end if;
+  if v_has and v_row.requester_id = v_uid then
     return jsonb_build_object('status', 'ALREADY_REQUESTED');
   end if;
 
   -- 상한: 내가 100명이면 거절. 자동 수락이면 상대도 봄 (3-다)
-  if private.friend_count(v_uid) >= 100 or (found and private.friend_count(p_target_id) >= 100) then
+  if private.friend_count(v_uid) >= 100 or (v_has and private.friend_count(p_target_id) >= 100) then
     return jsonb_build_object('status', 'FRIEND_LIMIT');
   end if;
 
@@ -132,10 +142,13 @@ begin
     return jsonb_build_object('status', 'LIMIT', 'retry_after_seconds', v_wait);
   end if;
 
-  if found then
+  if v_has then
     -- 상대가 먼저 보낸 대기 → 자동 수락. 요청자는 먼저 보낸 상대 그대로 (3-차 · 3-05)
     update public.friends set status = 'ACCEPTED' where friend_id = v_row.friend_id;
-    return jsonb_build_object('status', 'ACCEPTED');
+    if found then
+      return jsonb_build_object('status', 'ACCEPTED');
+    end if;
+    -- 그 사이 상대 요청이 지워졌으면(직접 delete · 30일 정리) 내 요청을 새로 보냄
   end if;
 
   insert into public.friends (requester_id, addressee_id, status) values (v_uid, p_target_id, 'PENDING');
@@ -180,6 +193,9 @@ begin
   end if;
 
   update public.friends set status = 'ACCEPTED' where friend_id = v_row.friend_id;
+  if not found then
+    return jsonb_build_object('status', 'GONE');   -- 고치는 사이 행이 지워졌으면 친구가 됐다고 하지 않음 (3-카)
+  end if;
   return jsonb_build_object('status', 'ACCEPTED');
 end;
 $$;
