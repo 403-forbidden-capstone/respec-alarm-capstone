@@ -66,8 +66,7 @@ function Landing({ token }: { token: string }) {
 
   const request = (p: Person) =>
     run(async () => {
-      await sendFriendRequest(p.id);
-      setDone('SENT');
+      setDone(await sendFriendRequest(p.id)); // 상대가 먼저 보낸 요청이 있으면 서버가 바로 친구로
     }, '친구 요청을 보내지 못했어요');
 
   const accept = (p: Person) =>

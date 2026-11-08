@@ -5,7 +5,6 @@ import { cleanHandle } from '@/features/onboarding/validate';
 import { HANDLE_PATTERN } from '@/features/profile/types';
 import { UserError } from '@/lib/errors';
 import { supabase } from '@/lib/supabase';
-import { requireUserId } from '@/lib/user';
 
 import { friendLinkFromRpc, handleSearchFromRpc, openedLinkFromRpc, personFromProfile, type ProfileRow } from '../map';
 import { mergeHits } from '../searchView';

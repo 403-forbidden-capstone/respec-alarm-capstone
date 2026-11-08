@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { StyleSheet, TextInput, View } from 'react-native';
 
 import { Text } from '@/components/ui';
@@ -11,12 +11,18 @@ type Props = {
   onAction: (text: string) => void;
   onChangeText?: (text: string) => void; // 글자가 바뀔 때 (비우면 결과를 지우는 데 씀)
   busy?: boolean; // 찾는 중 — 버튼 흐리게
+  focusSignal?: number; // 값이 바뀔 때마다 입력칸에 커서를 둠 (빈 상태의 [친구 찾기])
 };
 
 // 검색 칸 (.search) — 왼쪽 돋보기, 오른쪽 글자 버튼. 입력 중이면 테두리를 진하게
-export function SearchBox({ placeholder, actionLabel, onAction, onChangeText, busy }: Props) {
+export function SearchBox({ placeholder, actionLabel, onAction, onChangeText, busy, focusSignal }: Props) {
   const [text, setText] = useState('');
   const [focused, setFocused] = useState(false);
+  const input = useRef<TextInput>(null);
+
+  useEffect(() => {
+    if (focusSignal) input.current?.focus();
+  }, [focusSignal]);
 
   return (
     <View style={[styles.box, focused && styles.focused]}>
@@ -24,6 +30,7 @@ export function SearchBox({ placeholder, actionLabel, onAction, onChangeText, bu
         ⌕
       </Text>
       <TextInput
+        ref={input}
         value={text}
         onChangeText={(next) => {
           setText(next);
