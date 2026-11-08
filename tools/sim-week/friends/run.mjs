@@ -12,7 +12,7 @@ import { readCaps } from '../../friend-e2e/caps.mjs';
 import { loadEnv } from '../../friend-e2e/env.mjs';
 import { RPC as E2E_RPC } from '../../friend-e2e/rpc-map.mjs';
 import { ACTIONS } from './actions.mjs';
-import { checkGroupVisibility, checkSharedRead, checkState } from './oracle.mjs';
+import { checkGroups, checkGroupVisibility, checkMemberRows, checkSharedRead, checkState } from './oracle.mjs';
 import { makeRng } from './rng.mjs';
 import { cleanup, createWorld } from './world.mjs';
 
@@ -24,6 +24,10 @@ const RPC = {
   friend_decline: 'decline_friend_request',
   friend_cancel: 'cancel_friend_request',
   friend_remove: 'remove_friend',
+  group_preview: 'preview_group_by_code',
+  group_join: 'join_group',
+  group_invite: 'invite_to_group',
+  group_accept: 'accept_group_invite',
   ...Object.fromEntries(Object.entries(E2E_RPC).filter(([, v]) => v)),
 };
 const NO_SESSION = { auth: { persistSession: false, autoRefreshToken: false } };
@@ -61,6 +65,7 @@ async function endOfDay({ admin, users, caps, fn }) {
   const members = caps.hasTable('group_members') ? await readOf(admin, 'group_members', ['user_id'], ids) : [];
   // 검색 제한(1분 10회)에 걸려 검사가 비지 않게, 하루 끝 검사 전에 가상 유저의 제한 기록을 비움 (가상 유저 것만)
   if (caps.hasTable('rate_limit_events')) await admin.from('rate_limit_events').delete().in('user_id', ids);
+  const strict = caps.hasRpc(fn.group_preview); // 5장 함수가 있으면 참여 중만 그룹을 봄
   const cover = { visible: 0, hidden: 0, searchChecked: 0, searchLimited: 0, control: 0 };
 
   const found = checkState({ friends, blocks, perms, hasBlocksTable: hasBlocks });
@@ -87,6 +92,7 @@ async function endOfDay({ admin, users, caps, fn }) {
     const groupRows = (await admin.from('groups').select('*').like('group_name', 'SIM %').limit(1000)).data ?? [];
     const simGroups = new Set(groupRows.map((g) => g.group_id));
     cover.groups = groupRows.length;
+    if (strict) found.push(...checkGroups({ groups: groupRows, members: members.filter((m) => simGroups.has(m.group_id)) }));
     for (const u of users) {
       const res = await u.client.from('groups').select('group_id');
       if (res.error) {
@@ -94,7 +100,12 @@ async function endOfDay({ admin, users, caps, fn }) {
         continue;
       }
       const visible = res.data.map((g) => g.group_id).filter((g) => simGroups.has(g));
-      found.push(...checkGroupVisibility({ me: u.id, visibleGroupIds: visible, members, groups: groupRows }));
+      found.push(...checkGroupVisibility({ me: u.id, visibleGroupIds: visible, members, groups: groupRows, strict }));
+      if (strict) {
+        const mem = await u.client.from('group_members').select('group_id, user_id');
+        if (mem.error) found.push({ kind: 'ANOMALY', rule: '구성원 조회가 오류', detail: `${u.name}: ${mem.error.code}` });
+        else found.push(...checkMemberRows({ me: u.id, rows: mem.data.filter((r) => simGroups.has(r.group_id)), members }));
+      }
     }
   }
 
@@ -140,7 +151,7 @@ async function main() {
   const tag = SEED.replace(/[^a-z0-9]/gi, '').slice(0, 8) || 'sim';
   let users = [];
   const rng = makeRng(SEED);
-  const total = { visible: 0, hidden: 0, searchChecked: 0, searchLimited: 0, control: 0, groupsMade: 0, permsOn: 0, accepted: 0 };
+  const total = { visible: 0, hidden: 0, searchChecked: 0, searchLimited: 0, control: 0, groupsMade: 0, permsOn: 0, accepted: 0, invited: 0, groupAccepted: 0, previewFound: 0, joinedByCode: 0 };
   const available = ACTIONS;
   const anomalies = [];
   const days = [];
@@ -166,6 +177,10 @@ async function main() {
           if (act.name === '그룹 만들기' && res.status === '됨') total.groupsMade += 1;
           if (act.name === '알람 조회 권한 켜기' && res.status === '됨') total.permsOn += 1;
           if (act.name === '요청 수락' && res.status === 'ACCEPTED') total.accepted += 1;
+          if (act.name === '그룹에 친구 초대' && res.status === 'INVITED') total.invited += 1;
+          if (act.name === '코드 미리보기' && res.status === 'FOUND') total.previewFound += 1;
+          if (act.name === '코드로 참여(함수)' && res.status === 'JOINED') total.joinedByCode += 1;
+          if (act.name === '초대 수락' && res.status === 'JOINED') total.groupAccepted += 1;
           const key = `${act.name} → ${res.status}`;
           tally.set(key, (tally.get(key) ?? 0) + 1);
         }
@@ -190,6 +205,10 @@ async function main() {
     if (total.permsOn < 1) need.push('조회 권한 켜기가 한 번도 성공하지 못함');
   }
   if (caps.hasTable('groups') && total.groupsMade < 1) need.push('그룹 만들기가 한 번도 성공하지 못함 (그룹 노출 검사 0)');
+  if (caps.hasRpc(RPC.group_preview) && total.previewFound < 1) need.push('코드 미리보기가 맞는 코드에 FOUND를 준 적이 없음 (대조군)');
+  if (caps.hasRpc(RPC.group_join) && total.joinedByCode < 1) need.push('코드 참여 함수가 JOINED를 준 적이 없음 (대조군)');
+  if (caps.hasRpc(RPC.group_invite) && total.invited < 1) need.push('그룹 직접 초대가 한 번도 성공하지 못함');
+  if (caps.hasRpc(RPC.group_accept) && total.groupAccepted < 1) need.push('그룹 초대 수락이 한 번도 성공하지 못함');
   if (caps.hasRpc(RPC.friend_accept) && total.accepted < 1) need.push('친구 수락이 한 번도 성공하지 못함');
   if (caps.hasRpc(RPC.block_user) && total.searchChecked < 1) need.push('차단 쌍 검색 검사가 한 번도 안 됨');
   if (total.control < 1 && caps.hasRpc(RPC.search_handle)) need.push('검색 대조군(차단 안 한 사람이 FOUND)이 한 번도 안 됨');
@@ -197,7 +216,7 @@ async function main() {
   const all = days.flatMap((d) => d.violations);
   const nViol = all.filter((v) => v.kind === 'VIOLATION').length;
   const nAnom = all.filter((v) => v.kind === 'ANOMALY').length;
-  console.log(`검사량: 공유 알람 보임 ${total.visible} · 안 보임 ${total.hidden} · 차단 쌍 검색 ${total.searchChecked}(제한으로 못 한 ${total.searchLimited}) · 대조군 ${total.control} · 그룹 ${total.groupsMade} · 권한 켜기 ${total.permsOn} · 수락 ${total.accepted}`);
+  console.log(`검사량: 공유 알람 보임 ${total.visible} · 안 보임 ${total.hidden} · 차단 쌍 검색 ${total.searchChecked}(제한으로 못 한 ${total.searchLimited}) · 대조군 ${total.control} · 그룹 ${total.groupsMade} · 권한 켜기 ${total.permsOn} · 수락 ${total.accepted} · 그룹 초대 ${total.invited} · 초대 수락 ${total.groupAccepted} · 미리보기 FOUND ${total.previewFound} · 코드 참여 ${total.joinedByCode}`);
   const nKnown = all.filter((v) => v.kind === 'KNOWN').length;
   console.log(`\n가상 유저 ${N}명 × ${DAYS}일: 권한 위반 ${nViol} · 이상 결과 ${nAnom}`);
 
@@ -206,7 +225,7 @@ async function main() {
     '',
     `가상 유저 ${N}명 × ${DAYS}일, 하루 사람마다 ${PER_DAY}번 행동 (모델 호출 0회). **권한 위반 ${nViol} · 이상 결과 ${nAnom}** (알려진 동작 ${nKnown}건은 안 셈)`,
     '',
-    `검사량: 공유 알람 조회 보임 ${total.visible} · 안 보임 ${total.hidden} / 차단 쌍 검색 ${total.searchChecked}(제한에 걸려 못 한 ${total.searchLimited}) · 대조군 ${total.control} / 그룹 만들기 ${total.groupsMade} · 권한 켜기 ${total.permsOn} · 수락 ${total.accepted}`,
+    `검사량: 공유 알람 조회 보임 ${total.visible} · 안 보임 ${total.hidden} / 차단 쌍 검색 ${total.searchChecked}(제한에 걸려 못 한 ${total.searchLimited}) · 대조군 ${total.control} / 그룹 만들기 ${total.groupsMade} · 권한 켜기 ${total.permsOn} · 수락 ${total.accepted} · 그룹 초대 ${total.invited} · 초대 수락 ${total.groupAccepted} · 미리보기 FOUND ${total.previewFound} · 코드 참여 ${total.joinedByCode}`,
     '',
     `쓴 기능: ${[...new Set(ACTIONS.filter((a) => a.when({ caps, fn: RPC, groupCount: () => 0 })).map((a) => a.name))].join(' · ')}`,
     '',
