@@ -123,14 +123,14 @@ test('글 대화: 여러 일정 · 준비물 — 할 일만 저장, 일정은 �
   assert.equal(x.schema_version, 'structured.v1');
   assert.deepEqual(x.session, {
     session_id: sid, reference_date: REVIEW, session_type: 'night', input_modes: ['text'], started_at: x.session.started_at, ended_at: '2026-10-29T22:30:00+09:00',
-    extracted_at: '2026-10-29T22:30:00+09:00', extractor: { prompt: 'T2@v3', schema: 'extract.v2' },
+    extracted_at: '2026-10-29T22:30:00+09:00', extractor: { prompt: 'T2@v3.1', schema: 'extract.v2' },
   });
   assert.deepEqual(x.appointments.map((a) => [a.title, a.status, a.appointment_id]), [['스터디', 'saved', 'ap-new'], ['영화', 'needs_confirm', null]]);
   assert.deepEqual(x.todos.map((t) => [t.title, t.stored]), [['노트북', 'inserted'], ['우산', 'inserted'], ['과제 제출', 'inserted']]);
   assert.deepEqual(x.storage.map((t) => [t.table, t.key, t.result]), [['todos', '노트북', 'inserted'], ['todos', '우산', 'inserted'], ['todos', '과제 제출', 'inserted']]);
   assert.match(row.transcript ?? '', /^AI: .*\n사용자: 내일 2시에 도서관에서 스터디 있어/s);
   assert.deepEqual(fake.order.filter((p) => p === 'T2'), ['T2']);
-  assert.deepEqual(db.rows('ai_calls').filter((c) => c.point === 'T2').map((c) => [c.prompt_version, c.ok, c.session_id]), [['v3', true, sid]]);
+  assert.deepEqual(db.rows('ai_calls').filter((c) => c.point === 'T2').map((c) => [c.prompt_version, c.ok, c.session_id]), [['v3.1', true, sid]]);
   // 끝난 대화에는 말을 더 못 보냄 (카드 버튼은 그대로 받음 — turn.ts)
   const e = await failure(handleVoiceTurn(deps, { session_id: sid, rev: row.server_state.rev, client_turn_id: cid(), text: '하나 더' }));
   assert.equal(e.code, 'CONFLICT');
