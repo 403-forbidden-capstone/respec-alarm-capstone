@@ -6,11 +6,13 @@ import { Avatar, Button, Card, Chip, LoadError, Loading, Screen, SectionHeader, 
 import { IMPORTANCE_LABEL } from '@/features/alarm/types';
 import { TextLink } from '@/features/alarm/components/TextLink';
 import { getGroup } from '@/features/social/api';
+import { PersonMenuSheet } from '@/features/social/components/PersonMenuSheet';
 import { useWakeLoad } from '@/features/social/hooks/useGroupWake';
+import { usePersonMenu } from '@/features/social/hooks/usePersonMenu';
 import { MiniButton } from '@/features/social/components/MiniButton';
 import { PersonRow } from '@/features/social/components/PersonRow';
 import { permissionNames } from '@/features/social/permissions';
-import type { GroupDetail, GroupMember } from '@/features/social/types';
+import type { GroupDetail, GroupMember, Person } from '@/features/social/types';
 import { formatDateShort, formatTime } from '@/lib/format';
 import { backOrHome } from '@/lib/nav';
 import { colors } from '@/theme';
@@ -39,10 +41,11 @@ export default function GroupDetailScreen() {
       </Screen>
     );
   }
-  return <Detail group={data} onBack={backOrHome} />;
+  return <Detail group={data} onBack={backOrHome} onChanged={() => void reload()} />;
 }
 
-function Detail({ group: g, onBack }: { group: GroupDetail; onBack?: () => void }) {
+function Detail({ group: g, onBack, onChanged }: { group: GroupDetail; onBack?: () => void; onChanged: () => void }) {
+  const menu = usePersonMenu(onChanged); // 멤버 줄 [···] 신고 · 차단 — 차단하면 그 사람은 이름만 보이게 다시 읽음 (친구 4장)
   const grants = permissionNames(g.grants);
   const [inviting, setInviting] = useState(false);
 
@@ -61,6 +64,7 @@ function Detail({ group: g, onBack }: { group: GroupDetail; onBack?: () => void 
 
   return (
     <Screen>
+      <PersonMenuSheet {...menu.sheetProps} />
       <TopBar
         onBack={onBack}
         screenId="G02"
@@ -123,7 +127,7 @@ function Detail({ group: g, onBack }: { group: GroupDetail; onBack?: () => void 
       <SectionHeader title="멤버 · 기상 상태" right={<TextLink label="+ 초대" onPress={() => setInviting(true)} strong />} />
       <Card>
         {g.members.map((m, i) => (
-          <MemberRow key={m.person.id} member={m} groupId={g.id} first={i === 0} onMyAlarm={openMyAlarms} />
+          <MemberRow key={m.person.id} member={m} groupId={g.id} first={i === 0} onMyAlarm={openMyAlarms} onMenu={menu.open} />
         ))}
       </Card>
 
@@ -159,11 +163,13 @@ function MemberRow({
   groupId,
   first,
   onMyAlarm,
+  onMenu,
 }: {
   member: GroupMember;
   groupId: string;
   first: boolean;
   onMyAlarm: () => void;
+  onMenu: (p: Person) => void; // [···] 신고 · 차단
 }) {
   const canSee = m.isMe || m.received.viewWake;
   const name = m.person.short;
@@ -179,19 +185,20 @@ function MemberRow({
       title={m.person.name}
       sub={canSee ? m.state.text : '기상 상태를 볼 수 없어요'}
       onPress={m.isMe ? undefined : m.received.viewWake ? openWake : () => toast(wakeReason)}
-      rightIsButtons
-      right={
-        m.isMe ? (
-          <MiniButton label="내 알람" onPress={onMyAlarm} />
-        ) : (
-          <View style={styles.minis}>
+      rightIsButtons={m.isMe}
+      right={m.isMe ? <MiniButton label="내 알람" onPress={onMyAlarm} /> : undefined}
+      // 남의 줄은 버튼 3개(기상 상태 · 알람 보기 · ···)가 오른쪽에 있으면 이름 칸이 좁아져 아래 줄로 내림 (360폭)
+      actions={
+        m.isMe ? undefined : (
+          <>
             <MiniButton label="기상 상태" disabledReason={m.received.viewWake ? undefined : wakeReason} onPress={openWake} />
             <MiniButton
               label="알람 보기"
               disabledReason={m.received.viewAlarm ? undefined : alarmReason}
               onPress={() => router.push({ pathname: '/friends/[id]/alarms', params: { id: m.person.id } })}
             />
-          </View>
+            <MiniButton label="···" accessibilityLabel={`${m.person.name}님 메뉴`} onPress={() => onMenu(m.person)} />
+          </>
         )
       }
     />

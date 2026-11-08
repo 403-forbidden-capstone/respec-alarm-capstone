@@ -15,6 +15,7 @@ export {
   searchRelatedByName,
   sendFriendRequest,
 } from './friends';
+export { blockUser, listBlocks, submitReport, unblockUser } from './blocks';
 export { createGroup, getGroup, getGroupSummary, joinGroupByCode, listGroups, regenerateInviteCode, setWakeShareOptIn } from './groups';
 export { getFriendGrant, getReceived, getRelation, getShareSettings, listRelations, saveShareSettings } from './sharing';
 export { getSharedAlarms, getShareLog, setSharedAlarmEnabled, shiftSharedAlarm } from './sharedAlarms';

@@ -19,6 +19,7 @@ import {
   type CreatedGroup,
   type FinalGrant,
   type FriendItem,
+  type BlockedPerson,
   type FriendLink,
   type FriendRelation,
   type GrantRow,
@@ -33,6 +34,9 @@ import {
   type PermissionSet,
   type Person,
   type PersonHit,
+  type ReportReason,
+  type ReportResult,
+  type ReportTarget,
   type Relation,
   type RelationId,
   type ShareLogItem,
@@ -72,6 +76,8 @@ function wokeCount(groupId: string) {
 
 // 새 UI용 가짜 상태 — 앱을 다시 열 때까지만 (mocks/data.ts는 안 고침)
 const sentRequests = new Set<string>(); // 내가 친구 요청을 보낸 사람
+const blocked: string[] = []; // 내가 차단한 사람 — 새로 차단한 순 (가짜 모드는 앱을 다시 열 때까지만)
+const reported = new Set<string>(); // 오늘 신고한 대상 `종류:id` — 같은 대상은 하루 한 번
 const newInviteCodes: Record<string, string> = {}; // 다시 만든 초대 코드
 const wakeOptIns: Record<string, boolean> = {}; // 기상 공유 동의 — 목업 그룹은 이미 공유 중이라 기본 켬
 const ownedGroups = new Set(['fam']); // 내가 만든 그룹 — 목업은 가족 그룹만 내가 만든 것으로
@@ -141,6 +147,43 @@ export async function removeFriend(id: string) {
   if (!db.friends.includes(id)) throw new UserError(MESSAGE_GONE);
   db.friends = db.friends.filter((x) => x !== id);
   delete db.grants.friend[id];
+}
+
+// 차단 — 친구 끊김 · 대기 요청 삭제 · 권한 삭제 (가짜 모드는 목록에서만 빠짐)
+export async function blockUser(userId: string) {
+  if (!isMock()) return real.blockUser(userId);
+  if (userId === 'me') throw new UserError('나는 차단할 수 없어요');
+  if (!people[userId]) throw new UserError('사용자를 찾을 수 없어요');
+  db.friends = db.friends.filter((x) => x !== userId);
+  db.requests = db.requests.filter((x) => x !== userId);
+  sentRequests.delete(userId);
+  delete db.grants.friend[userId];
+  if (!blocked.includes(userId)) blocked.unshift(userId);
+}
+
+// 차단 풀기 — 친구는 복구 안 됨
+export async function unblockUser(userId: string) {
+  if (!isMock()) return real.unblockUser(userId);
+  const i = blocked.indexOf(userId);
+  if (i < 0) throw new UserError(MESSAGE_GONE);
+  blocked.splice(i, 1);
+}
+
+// 설정 > 차단 목록
+export async function listBlocks(): Promise<BlockedPerson[]> {
+  if (!isMock()) return real.listBlocks();
+  return blocked.map((id) => ({ person: person(id), blockedAt: now() }));
+}
+
+// 신고 — 같은 대상은 하루 한 번
+export async function submitReport(target: ReportTarget, reason: ReportReason, note?: string): Promise<ReportResult> {
+  if (!isMock()) return real.submitReport(target, reason, note);
+  if (target.type === 'USER' && target.id === 'me') throw new UserError('나는 신고할 수 없어요');
+  if (target.type === 'USER' ? !people[target.id] : !db.groups[target.id]) throw new UserError('신고할 대상을 찾을 수 없어요');
+  const key = `${target.type}:${target.id}`;
+  if (reported.has(key)) return 'ALREADY_REPORTED';
+  reported.add(key);
+  return 'REPORTED';
 }
 
 // 참여 중인 그룹 (G01 그룹)
@@ -369,7 +412,7 @@ export async function searchByHandle(query: string): Promise<HandleSearch> {
   const clean = cleanHandle(query);
   if (!HANDLE_PATTERN.test(clean)) return { status: 'NOT_FOUND' };
   const found = Object.values(people).find((p) => p.id !== 'me' && p.handle?.slice(1).toLowerCase() === clean);
-  if (!found) return { status: 'NOT_FOUND' };
+  if (!found || blocked.includes(found.id)) return { status: 'NOT_FOUND' }; // 차단한 사람도 없는 아이디와 같은 응답
   return { status: 'FOUND', person: toPerson(found), relation: mockRelation(found.id) };
 }
 
@@ -383,7 +426,7 @@ export async function searchPeople(query: string): Promise<PeopleSearch> {
   const related = new Set([...db.friends, ...Object.values(db.groups).flatMap((g) => g.members)]);
   const lower = q.toLowerCase();
   const byName: PersonHit[] = [...related]
-    .filter((id) => id !== 'me' && people[id] && [people[id].name, people[id].short].some((n) => n.toLowerCase().includes(lower)))
+    .filter((id) => id !== 'me' && people[id] && !blocked.includes(id) && [people[id].name, people[id].short].some((n) => n.toLowerCase().includes(lower)))
     .map((id) => ({ person: person(id), relation: mockRelation(id), via: db.friends.includes(id) ? ('FRIEND' as const) : ('GROUP' as const) }));
   const rows = mergeHits(exact, byName);
   return { rows, self: null, limitSeconds: null, notFound: !rows.length };

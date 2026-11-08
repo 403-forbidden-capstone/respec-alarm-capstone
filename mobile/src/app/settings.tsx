@@ -27,7 +27,9 @@ import { userMessage } from '@/lib/errors';
 import { canUseRealData, modeLocked } from '@/lib/mode';
 import { backOrHome } from '@/lib/nav';
 import { signOutAndCleanup } from '@/lib/session';
+import { listBlocks } from '@/features/social/api';
 import { useAction } from '@/lib/useAction';
+import { useLoad } from '@/lib/useLoad';
 import { colors, size } from '@/theme';
 
 const PROVIDER_NAME: Record<string, string> = { kakao: '카카오', google: 'Google' };
@@ -40,6 +42,7 @@ type Editing = 'nickname' | 'handle' | 'sleep' | 'prepare' | null;
 export default function SettingsScreen() {
   const { session, profile, enabled, refreshProfile } = useAuth();
   const { run } = useAction();
+  const blocks = useLoad(listBlocks); // 차단 목록 줄의 사람 수 — 못 읽으면 수 없이 줄만 보임
   const logout = useAction(); // 로그아웃 연타 막기 · 돌아가는 표시 — 프로필 저장 중에 로그아웃 버튼이 같이 돌지 않게 따로
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState<Editing>(null);
@@ -137,6 +140,22 @@ export default function SettingsScreen() {
           <Text variant="body">알람이 안 울릴 때</Text>
           <Text variant="body" tone="sub">
             ›
+          </Text>
+        </Pressable>
+      </Card>
+
+      {/* 개인정보 — 차단 목록 (친구 4장) */}
+      <SectionHeader title="개인정보" />
+      <Card>
+        <Pressable
+          onPress={() => router.push('/blocks')}
+          accessibilityRole="button"
+          accessibilityLabel="차단 목록"
+          style={({ pressed }) => [styles.linkRow, pressed && styles.pressed]}
+        >
+          <Text variant="body">차단 목록</Text>
+          <Text variant="body" tone="sub">
+            {blocks.data ? `${blocks.data.length}명 ›` : '›'}
           </Text>
         </Pressable>
       </Card>

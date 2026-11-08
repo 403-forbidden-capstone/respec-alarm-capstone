@@ -4,6 +4,8 @@ import { Pressable, StyleSheet, View } from 'react-native';
 import { Button, Card, Chip, confirm, LoadError, Loading, Screen, SectionHeader, Text, toast, TopBar, TopBarButton } from '@/components/ui';
 import { getFriendGrant, removeFriend } from '@/features/social/api';
 import { PERMISSIONS, type GrantRow } from '@/features/social/types';
+import { PersonMenuSheet } from '@/features/social/components/PersonMenuSheet';
+import { usePersonMenu } from '@/features/social/hooks/usePersonMenu';
 import { UserError } from '@/lib/errors';
 import { useAction } from '@/lib/useAction';
 import { useLoad } from '@/lib/useLoad';
@@ -19,6 +21,8 @@ export default function FriendPermissionScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { data, error, reload } = useLoad(() => getFriendGrant(id));
   const { busy, run } = useAction();
+  // [···] 메뉴의 신고 · 차단 — 차단하면 친구가 끊기므로 이전 화면(친구 탭)으로 돌아감 (4-30)
+  const menu = usePersonMenu(() => backOrHome());
 
   // 친구 끊기 — 확인 한 번. 행이 지워지고 양쪽 친구 출처 권한도 사라짐(같은 그룹의 권한 · 기상은 그대로). 상대에게 알림 없음 (3-14 · 3-15)
   const disconnect = (name: string) =>
@@ -66,7 +70,8 @@ export default function FriendPermissionScreen() {
   const { person: p, final, groupCount } = data;
   return (
     <Screen>
-      <TopBar onBack={backOrHome} screenId="F02" />
+      <TopBar onBack={backOrHome} screenId="F02" right={<TopBarButton label="···" accessibilityLabel={`${p.name}님 메뉴`} onPress={() => menu.open(p)} />} />
+      <PersonMenuSheet {...menu.sheetProps} />
       <Text variant="title" style={styles.title}>
         {p.name}님의 권한
       </Text>

@@ -151,3 +151,11 @@ export type OpenedLink =
 
 // 그룹을 만든 결과 (새 UI용) — 만들고 바로 초대 코드를 보여 줄 수 있게
 export type CreatedGroup = { id: string; inviteCode: string };
+
+// 차단 목록 한 줄 (my_blocks) — 새로 차단한 순
+export type BlockedPerson = { person: Person; blockedAt: Date };
+
+// 신고 (submit_report) — 대상은 사람(닉네임 · 사진 · 괴롭힘) 또는 그룹(그룹 이름)
+export type ReportTarget = { type: 'USER' | 'GROUP'; id: string };
+export type ReportReason = 'HARASSMENT' | 'NICKNAME' | 'PHOTO' | 'GROUP_NAME' | 'OTHER';
+export type ReportResult = 'REPORTED' | 'ALREADY_REPORTED'; // 같은 대상은 하루 1번

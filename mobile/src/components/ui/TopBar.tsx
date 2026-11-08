@@ -46,10 +46,11 @@ type ButtonProps = {
   onLongPress?: () => void; // 길게 누르면 (계속 바뀌는 값 — 누르고 있는 동안 반복은 부르는 쪽이 onPressOut으로 멈춤)
   onPressOut?: () => void;
   disabled?: boolean; // 흐리게 · 못 누름
+  accessibilityLabel?: string; // 글자만으로 뜻이 모자랄 때(···) 화면 읽기 도구가 부를 이름
 };
 
 // 위 줄 오른쪽의 작은 테두리 버튼 (.tbtn) — 모양은 32 높이, 누르는 칸은 44
-export function TopBarButton({ label, onPress, onLongPress, onPressOut, disabled }: ButtonProps) {
+export function TopBarButton({ label, onPress, onLongPress, onPressOut, disabled, accessibilityLabel }: ButtonProps) {
   return (
     <Pressable
       onPress={onPress}
@@ -58,6 +59,7 @@ export function TopBarButton({ label, onPress, onLongPress, onPressOut, disabled
       delayLongPress={400}
       disabled={disabled}
       accessibilityRole="button"
+      accessibilityLabel={accessibilityLabel}
       accessibilityState={{ disabled }}
       style={({ pressed }) => [styles.tbtnHit, pressed && styles.pressed, disabled && styles.disabled]}
     >

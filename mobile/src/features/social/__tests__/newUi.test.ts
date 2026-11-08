@@ -3,7 +3,7 @@ import { describe, expect, it } from '@jest/globals';
 import { now } from '@/lib/clock';
 import { UserError } from '@/lib/errors';
 
-import { createGroup, getGroup, joinGroupByCode, listGroups, listRelations, cancelFriendRequest, declineFriend, listFriendRequests, listFriends, listSentRequests, myFriendLink, openFriendLink, regenerateInviteCode, removeFriend, searchByHandle, searchPeople, sendFriendRequest, setWakeShareOptIn } from '../api';
+import { createGroup, getGroup, joinGroupByCode, listGroups, listRelations, blockUser, cancelFriendRequest, declineFriend, listBlocks, submitReport, unblockUser, listFriendRequests, listFriends, listSentRequests, myFriendLink, openFriendLink, regenerateInviteCode, removeFriend, searchByHandle, searchPeople, sendFriendRequest, setWakeShareOptIn } from '../api';
 
 // 새 UI용 함수의 가짜 구현 — 화면이 생기면 가짜 모드에서도 같은 이름으로 바로 쓰게 (실데이터는 real.test.ts)
 describe('아이디 검색 · 친구 요청 (가짜)', () => {
@@ -79,6 +79,32 @@ describe('친구 링크 (가짜)', () => {
     expect(await openFriendLink('FRIENDSY00001')).toMatchObject({ status: 'OK', person: { id: 'sy' }, relation: 'FRIEND' });
     expect(await openFriendLink('FRIENDDAD0001')).toMatchObject({ status: 'OK', person: { id: 'dad' }, relation: 'NONE' });
     expect(await openFriendLink('NOSUCHLINK000')).toEqual({ status: 'EXPIRED' });
+  });
+});
+
+describe('차단 · 신고 (가짜)', () => {
+  it('차단하면 서로 안 보임: 검색이 "찾을 수 없어요", 받은 요청 · 친구 목록에서 빠지고 차단 목록에 올라감 (4-02 · 4-06 · 4-30)', async () => {
+    await blockUser('bj'); // 나에게 요청을 보낸 사람
+    expect((await listFriendRequests()).map((p) => p.id)).not.toContain('bj');
+    expect(await searchByHandle('june')).toEqual({ status: 'NOT_FOUND' });
+    expect((await searchPeople('범준')).notFound).toBe(true);
+    await blockUser('dad'); // 아무 사이도 아닌 사람도 차단됨
+    expect((await listBlocks()).map((b) => b.person.id)).toEqual(['dad', 'bj']); // 새로 차단한 순
+  });
+
+  it('풀면 목록에서 빠지고 다시 검색되지만 친구는 새 요청부터', async () => {
+    await unblockUser('bj');
+    expect((await listBlocks()).map((b) => b.person.id)).toEqual(['dad']);
+    expect(await searchByHandle('june')).toMatchObject({ status: 'FOUND', relation: 'NONE' });
+    await expect(unblockUser('bj')).rejects.toThrow(UserError); // 이미 풀었음
+    await unblockUser('dad');
+  });
+
+  it('신고: 같은 대상은 하루 한 번, 나 자신은 못 함', async () => {
+    expect(await submitReport({ type: 'USER', id: 'sy' }, 'NICKNAME', '이상해요')).toBe('REPORTED');
+    expect(await submitReport({ type: 'USER', id: 'sy' }, 'PHOTO')).toBe('ALREADY_REPORTED');
+    expect(await submitReport({ type: 'GROUP', id: 'cap' }, 'GROUP_NAME')).toBe('REPORTED');
+    await expect(submitReport({ type: 'USER', id: 'me' }, 'OTHER')).rejects.toThrow(UserError);
   });
 });
 

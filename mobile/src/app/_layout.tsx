@@ -135,6 +135,7 @@ function RootStack() {
       {/* 목업에 없는 설정 · 로그인 · 온보딩 — 실데이터를 못 쓰면 빠짐. 온보딩은 ONBOARDING_IN_FLOW가 꺼져도 따로 빠짐 */}
       <Stack.Protected guard={ready && canUseRealData}>
         <Stack.Screen name="settings" />
+        <Stack.Screen name="blocks" />
       </Stack.Protected>
       {/* 시간표 가져오기 확인 — 사진 · 캘린더 길이 둘 다 꺼져 있으면 주소로도 안 열림 (TIMETABLE_PATHS) */}
       <Stack.Protected guard={ready && canUseRealData && (TIMETABLE_PATHS.photo || TIMETABLE_PATHS.calendar)}>
