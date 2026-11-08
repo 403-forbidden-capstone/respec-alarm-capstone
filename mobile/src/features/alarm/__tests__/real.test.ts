@@ -1917,3 +1917,87 @@ describe('기상 확인 (H08)', () => {
     });
   });
 });
+
+// H08 [먼저 깼어요] — 알람이 울리기 전 60분 안에 깬 날 (D61 · 7-20 · 7-38): 지금 시각으로 기상 확인(BUTTON), 그룹에는 바로 '일어났어요'
+describe('먼저 깼어요 (H08)', () => {
+  const ALARM = '00000000-0000-4000-8000-0000000000c1';
+  const ALARM_AT = Date.parse(kst('08:50'));
+  const before = (m: number) => {
+    mockNow = new Date(ALARM_AT - m * 60_000);
+  };
+  function upcoming(events: { event_type: string; event_at: string; input_source?: string | null }[] = []) {
+    mockRoutes['alarms:select'] = (call) =>
+      call.single
+        ? { data: { alarm_id: ALARM, alarm_type: 'WAKE', appointment_participants: { appointments: { title: '팀 주간회의', group_id: 'cap', groups: { group_name: '캡스톤팀' } } } } }
+        : { data: [{ alarm_id: ALARM, scheduled_at: new Date(ALARM_AT).toISOString() }] };
+    mockRoutes['alarm_events:select'] = () => ({ data: events });
+    mockRoutes['alarm_events:upsert'] = () => undefined;
+    mockRoutes['daily_records:select'] = () => ({ data: null });
+    mockRoutes['daily_records:insert'] = () => undefined;
+  }
+
+  it('지금부터 60분 안에 울릴 켜진 기상 알람 하나 — 그 알람 시각', async () => {
+    upcoming();
+    before(30);
+    expect(await real.getEarlyWake()).toEqual({ alarmId: ALARM, at: new Date(ALARM_AT) });
+    const [query] = callsTo('alarms', 'select');
+    expect(query.filters).toEqual([
+      ['eq', 'user_id', 'user-1'],
+      ['eq', 'alarm_type', 'WAKE'],
+      ['eq', 'is_enabled', true],
+      ['gt', 'scheduled_at', new Date(ALARM_AT - 30 * 60_000).toISOString()],
+      ['lte', 'scheduled_at', new Date(ALARM_AT + 30 * 60_000).toISOString()],
+      ['order', 'scheduled_at'],
+      ['limit', 1],
+    ]);
+  });
+
+  it('없거나, 이미 울렸거나 · 확인한 알람이면 null', async () => {
+    before(30);
+    mockRoutes['alarms:select'] = () => ({ data: [] });
+    expect(await real.getEarlyWake()).toBeNull();
+    upcoming([{ event_type: 'WAKE_CONFIRMED', event_at: new Date(ALARM_AT - 40 * 60_000).toISOString(), input_source: 'BUTTON' }]);
+    expect(await real.getEarlyWake()).toBeNull();
+    upcoming([{ event_type: 'TRIGGERED', event_at: new Date(ALARM_AT).toISOString() }]);
+    expect(await real.getEarlyWake()).toBeNull();
+  });
+
+  it('다른 알람으로 그날 이미 기상을 확인했으면 묻지도 쓰지도 않음 (하루 한 건, 7-d4)', async () => {
+    upcoming();
+    mockRoutes['alarm_events:select'] = (call) =>
+      call.filters.some(([m, col, v]) => m === 'eq' && col === 'event_type' && v === 'WAKE_CONFIRMED')
+        ? { data: [{ event_type: 'WAKE_CONFIRMED' }] }
+        : { data: [] };
+    before(30);
+    expect(await real.getEarlyWake()).toBeNull();
+    const confirmQuery = callsTo('alarm_events', 'select').find((c) => c.filters.some(([m, col]) => m === 'eq' && col === 'event_type'));
+    expect(confirmQuery?.filters).toEqual([
+      ['eq', 'user_id', 'user-1'],
+      ['eq', 'event_type', 'WAKE_CONFIRMED'],
+      ['gte', 'event_at', '2025-05-21T15:00:00.000Z'], // 한국 시간 그날 0시
+      ['lt', 'event_at', '2025-05-22T15:00:00.000Z'],
+      ['limit', 1],
+    ]);
+    // 울림 기록은 그 알람 6시간 전부터만
+    const rangQuery = callsTo('alarm_events', 'select').find((c) => c.filters.some(([m]) => m === 'in'));
+    expect(rangQuery?.filters).toContainEqual(['gte', 'event_at', new Date(ALARM_AT - 6 * 60 * 60_000).toISOString()]);
+    await real.confirmEarlyWake(ALARM);
+    expect(callsTo('alarm_events', 'upsert')).toEqual([]);
+  });
+
+  it('누르면 지금 시각으로 WAKE_CONFIRMED(BUTTON) + 그날 기록 — 해제 기록 없이', async () => {
+    upcoming();
+    before(25);
+    await real.confirmEarlyWake(ALARM);
+    const [write] = callsTo('alarm_events', 'upsert');
+    expect(write.payload).toMatchObject({ alarm_id: ALARM, event_type: 'WAKE_CONFIRMED', event_at: new Date(ALARM_AT - 25 * 60_000).toISOString(), input_source: 'BUTTON' });
+    expect(callsTo('daily_records', 'insert')[0].payload).toMatchObject({ wake_confirmed_at: new Date(ALARM_AT - 25 * 60_000).toISOString(), wake_reported_at: null });
+  });
+
+  it('이미 확인했으면 다시 쓰지 않음', async () => {
+    upcoming([{ event_type: 'WAKE_CONFIRMED', event_at: new Date(ALARM_AT - 40 * 60_000).toISOString(), input_source: 'BUTTON' }]);
+    before(25);
+    await real.confirmEarlyWake(ALARM);
+    expect(callsTo('alarm_events', 'upsert')).toEqual([]);
+  });
+});

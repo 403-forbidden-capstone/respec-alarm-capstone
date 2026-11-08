@@ -39,11 +39,7 @@ const wakeRow = (user_id: string, over: Record<string, unknown> = {}) => ({
   profile_image_url: null,
   is_me: user_id === ME,
   wake_alarm_at: '2026-10-19T22:30:00.000Z',
-  rang_at: null,
-  snooze_count: 0,
-  dismissed_at: null,
   wake_confirmed_at: null,
-  missed_at: null,
   wake_status: 'SCHEDULED',
   ...over,
 });
@@ -89,8 +85,8 @@ describe('G01 · H01 · G02 그룹', () => {
     wakeRow(JIHYEONG, { wake_status: 'RINGING' }),
   ];
 
-  it('그룹 목록: 참여 중인 그룹마다 기상 수 · 내가 준 권한 · 기상 상태를 볼 수 있는지', async () => {
-    mockFake.answerRpc('get_group_wake_status', ok(wake));
+  it('그룹 목록: 참여 중인 그룹마다 오늘 일어난 수 · 내가 준 권한', async () => {
+    mockFake.answerRpc('get_group_wake', ok(wake));
     expect(await real.listGroups()).toEqual([
       {
         id: GROUP,
@@ -99,50 +95,49 @@ describe('G01 · H01 · G02 그룹', () => {
         memberCount: 4,
         wokeCount: 2,
         grants: { viewAlarm: false, editAlarm: false, viewWake: true },
-        canSeeWake: true,
       },
     ]);
     // 날짜를 안 주면 p_date 없이 → 함수가 내 시간대의 오늘
-    expect(mockFake.rpcCalls.filter((c) => c.name === 'get_group_wake_status').map((c) => c.args)).toEqual([{ p_group_id: GROUP }]);
+    expect(mockFake.rpcCalls.filter((c) => c.name === 'get_group_wake').map((c) => c.args)).toEqual([{ p_group_id: GROUP }]);
   });
 
   it('기상 신호가 알려 준 날은 그대로 p_date로', async () => {
-    mockFake.answerRpc('get_group_wake_status', ok([]));
+    mockFake.answerRpc('get_group_wake', ok([]));
     await real.listGroups('2026-10-20');
     await real.getGroupSummary(GROUP, '2026-10-20');
     await real.getGroup(GROUP, '2026-10-20');
     await real.getMemberWake(GROUP, SUYEON, '2026-10-20');
-    const dates = mockFake.rpcCalls.filter((c) => c.name === 'get_group_wake_status').map((c) => (c.args as { p_date?: string }).p_date);
+    const dates = mockFake.rpcCalls.filter((c) => c.name === 'get_group_wake').map((c) => (c.args as { p_date?: string }).p_date);
     expect(dates).toEqual(['2026-10-20', '2026-10-20', '2026-10-20', '2026-10-20']);
   });
 
-  it('홈 요약: 나 먼저, 행이 없는 멤버는 볼 수 없음, 기상 수는 기상 확인만', async () => {
-    mockFake.answerRpc('get_group_wake_status', ok(wake));
+  it('홈 요약: 나 먼저, 줄이 없는 멤버는 공유 안 함, 일어난 수는 기상 확인만', async () => {
+    mockFake.answerRpc('get_group_wake', ok(wake));
     const summary = await real.getGroupSummary(GROUP);
     expect(summary?.wokeCount).toBe(2);
     expect(summary?.members.map((m) => [m.person.name, m.state.text])).toEqual([
-      ['나(데모)', '기상 완료 · 오전 7:35'],
-      ['수연', '기상 완료 · 오전 7:31'],
-      ['준성', '기상 상태를 볼 수 없어요'], // 동의가 꺼져 있어 함수가 안 줌
-      ['지형', '알람 울리는 중'],
+      ['나(데모)', '일어났어요 오전 7:35'],
+      ['수연', '일어났어요 오전 7:31'],
+      ['준성', '공유 안 함'], // 동의가 꺼져 있어 함수가 안 줌
+      ['지형', '울렸어요'],
     ]);
   });
 
-  it('그 그룹 약속이 없는 날은 함수가 빈 결과 → 모두 "그룹 약속이 없어요", 기상 0명', async () => {
-    mockFake.answerRpc('get_group_wake_status', ok([]));
+  it('그 그룹 약속이 없는 날은 함수가 빈 결과 → 모두 "그룹 약속이 없어요", 일어난 수 줄 없음(null)', async () => {
+    mockFake.answerRpc('get_group_wake', ok([]));
     const summary = await real.getGroupSummary(GROUP);
-    expect(summary?.wokeCount).toBe(0);
+    expect(summary?.wokeCount).toBeNull();
     expect(new Set(summary?.members.map((m) => m.state.text))).toEqual(new Set(['오늘은 그룹 약속이 없어요']));
   });
 
   it('내가 참여 중이 아닌 그룹은 null (함수도 부르지 않음)', async () => {
     expect(await real.getGroupSummary('99999999-0000-4000-8000-000000000000')).toBeNull();
     expect(await real.getGroup('99999999-0000-4000-8000-000000000000')).toBeNull();
-    expect(mockFake.rpcCalls.filter((c) => c.name === 'get_group_wake_status')).toHaveLength(0);
+    expect(mockFake.rpcCalls.filter((c) => c.name === 'get_group_wake')).toHaveLength(0);
   });
 
   it('상세: 연결 일정은 오늘부터 이 그룹 것만, 초대 코드 · 만든 사람 · 동의, 멤버가 준 권한', async () => {
-    mockFake.answerRpc('get_group_wake_status', ok(wake));
+    mockFake.answerRpc('get_group_wake', ok(wake));
     mockFake.answer('appointments.select', ok([{ appointment_id: 'ap1', title: '팀 주간회의', appointment_at: '2026-10-20T01:00:00.000Z', dest_name: '세종대학교', importance: 'NORMAL' }]));
     const g = await real.getGroup(GROUP);
     expect(g).toMatchObject({ id: GROUP, name: '캡스톤팀', since: '2026년 4월부터 함께하는 중', wakeShareOptIn: true, notificationsOff: false });
@@ -246,49 +241,37 @@ describe('F02 · F03 권한', () => {
 });
 
 describe('G03 그룹원 기상 상태', () => {
-  const confirmed = wakeRow(SUYEON, {
-    wake_status: 'CONFIRMED',
-    rang_at: '2026-10-19T22:30:00.000Z',
-    dismissed_at: '2026-10-19T22:32:00.000Z',
-    wake_confirmed_at: '2026-10-19T22:35:00.000Z',
-  });
+  const confirmed = wakeRow(SUYEON, { wake_status: 'CONFIRMED', wake_confirmed_at: '2026-10-19T22:35:00.000Z' });
 
-  it('허용한 구성원이면 알람 카드 · 흐름 · 약속 줄', async () => {
-    mockFake.answerRpc('get_group_wake_status', ok([wakeRow(ME), confirmed]));
-    mockFake.answer('appointments.select', ok({ title: '팀 주간회의', dest_name: '세종대학교', appointment_at: '2026-10-20T01:00:00.000Z' }));
+  it('줄이 있는 멤버면 단계 · 알람 시각 · 확인 시각 (약속 이름 · 장소는 안 읽음)', async () => {
+    mockFake.answerRpc('get_group_wake', ok([wakeRow(ME), confirmed]));
     const wake = await real.getMemberWake(GROUP, SUYEON);
-    expect(wake).toMatchObject({ groupName: '캡스톤팀', noGroupAppointment: false });
+    expect(wake).toMatchObject({ groupName: '캡스톤팀', noGroupAppointment: false, canViewAlarm: true });
     expect(wake?.person.name).toBe('수연');
-    expect(wake?.alarm).toMatchObject({ appointmentLabel: '팀 주간회의 · 세종대학교 · 오전 10:00', chain: [{ label: '기상' }] });
-    expect(wake?.timeline.map((e) => e.label)).toEqual(['알람 울림', '알람 해제', '기상 확인']);
-    expect(wake?.firstAlarmAt?.toISOString()).toBe('2026-10-19T22:30:00.000Z');
-    // 약속 줄은 기상 알람 뒤 하루 안의 이 그룹 약속 하나
-    const [query] = mockFake.opsOf('appointments', 'select');
-    expect(query.filters).toEqual([
-      ['eq', 'group_id', GROUP],
-      ['gte', 'appointment_at', '2026-10-19T22:30:00.000Z'],
-      ['lt', 'appointment_at', '2026-10-20T22:30:00.000Z'],
-    ]);
-  });
-
-  it('기상 조회를 허용하지 않았거나(동의 꺼짐) 구성원이 아니거나 나 자신이면 null — 함수도 부르지 않음', async () => {
-    expect(await real.getMemberWake(GROUP, JUNSEONG)).toBeNull();
-    expect(await real.getMemberWake(GROUP, ME)).toBeNull();
-    expect(await real.getMemberWake(GROUP, 'nobody')).toBeNull();
-    expect(await real.getMemberWake('99999999-0000-4000-8000-000000000000', SUYEON)).toBeNull();
-    expect(mockFake.rpcCalls.filter((c) => c.name === 'get_group_wake_status')).toHaveLength(0);
-  });
-
-  it('허용은 했는데 그날 그룹 약속이 없으면 알람 없음과 구분해서 알림', async () => {
-    mockFake.answerRpc('get_group_wake_status', ok([]));
-    const wake = await real.getMemberWake(GROUP, SUYEON);
-    expect(wake).toMatchObject({ alarm: null, timeline: [], firstAlarmAt: null, noGroupAppointment: true });
+    expect(wake?.state.text).toBe('일어났어요 오전 7:35');
+    expect(wake?.alarmAt?.toISOString()).toBe('2026-10-19T22:30:00.000Z');
     expect(mockFake.opsOf('appointments')).toHaveLength(0);
   });
 
-  it('약속이 있는 날 기상 알람이 없으면 alarm: null, 약속 없는 날 표시는 아님', async () => {
-    mockFake.answerRpc('get_group_wake_status', ok([wakeRow(ME), wakeRow(SUYEON, { wake_status: 'NO_ALARM', wake_alarm_at: null })]));
-    expect(await real.getMemberWake(GROUP, SUYEON)).toMatchObject({ alarm: null, noGroupAppointment: false });
+  it('약속 있는 날 줄이 없으면(동의 꺼짐 · 숨김 · 차단) null, 구성원이 아니거나 나 자신이면 함수도 안 부르고 null', async () => {
+    mockFake.answerRpc('get_group_wake', ok([wakeRow(ME), confirmed]));
+    expect(await real.getMemberWake(GROUP, JUNSEONG)).toBeNull();
+    seed();
+    expect(await real.getMemberWake(GROUP, ME)).toBeNull();
+    expect(await real.getMemberWake(GROUP, 'nobody')).toBeNull();
+    expect(await real.getMemberWake('99999999-0000-4000-8000-000000000000', SUYEON)).toBeNull();
+    expect(mockFake.rpcCalls.filter((c) => c.name === 'get_group_wake')).toHaveLength(0);
+  });
+
+  it('그날 그룹 약속이 없으면 공유 안 함과 구분해서 알림', async () => {
+    mockFake.answerRpc('get_group_wake', ok([]));
+    const wake = await real.getMemberWake(GROUP, SUYEON);
+    expect(wake).toMatchObject({ alarmAt: null, confirmedAt: null, noGroupAppointment: true });
+  });
+
+  it('약속이 있는 날 기상 알람이 없으면 "알람 없음", 약속 없는 날 표시는 아님', async () => {
+    mockFake.answerRpc('get_group_wake', ok([wakeRow(ME), wakeRow(SUYEON, { wake_status: 'NO_ALARM', wake_alarm_at: null })]));
+    expect(await real.getMemberWake(GROUP, SUYEON)).toMatchObject({ alarmAt: null, noGroupAppointment: false, state: { text: '알람 없음' } });
   });
 
   it('깨우기는 실데이터에서 보내지 않고 "준비 중"으로 안내 (D19 열림)', async () => {

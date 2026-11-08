@@ -3,7 +3,8 @@ import { Fragment, useEffect, useRef, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
 import { Button, Card, LoadError, Loading, ProgressBar, Screen, Text, toast, TopBar } from '@/components/ui';
-import { confirmWake, getMorningPlan, getWakeCheck, promptWake } from '@/features/alarm/api';
+import { confirmWake, getEarlyWake, getMorningPlan, getWakeCheck, promptWake } from '@/features/alarm/api';
+import { EarlyWakeCard } from '@/features/alarm/components/EarlyWakeCard';
 import { FormulaBox } from '@/features/alarm/components/FormulaBox';
 import { MorningPlanLine } from '@/features/alarm/components/MorningPlanLine';
 import { WAKE_OBSERVE_MINUTES, WAKE_RECENT_MINUTES, type WakeCheck } from '@/features/alarm/types';
@@ -70,10 +71,17 @@ export default function WakeScreen() {
             기상 알람을 해제하면 여기서 기상을 판정해요.
           </Text>
         </Card>
+        <EarlyWake />
       </Screen>
     );
   }
   return <WakeFlow check={data} />;
+}
+
+// [먼저 깼어요] — 기상 알람이 울리기 전 60분 안이면 (D61 · 친구 7장). 카드는 홈과 같이 씀
+function EarlyWake() {
+  const { data } = useLoad(getEarlyWake);
+  return data ? <EarlyWakeCard early={data} /> : null;
 }
 
 // 단계는 가짜 db에 남아 있어서(api) 화면을 나갔다 와도 이어짐 — 확인 알림 단계면 확인 알림부터

@@ -67,7 +67,7 @@
 
 첫 울림이 이미 지난 폰 예약(울리는 중 · 미룸 · 다시 울림 대기)은 서버 목록(지금 이후)에 없어도 바로 지우지 않음 — 울린 뒤 서버 행의 시각이 과거가 되어 목록에서 빠지는 것이 정상이기 때문. 대신 **서버에 켜진 행이 없다고 확인된 것만** 지움 (끈 알람이 미룸 중이어도 · 다른 기기나 G04에서 꺼졌거나 지워졌어도, 시각은 안 보고 `is_enabled = true` 행이 있는지만 물음). 끄기 직후의 `reconcile({ alarmIds })`와 전체 맞추기가 같은 규칙이고, 확인 쿼리가 실패하면 전체 맞추기는 안 지움(조심 쪽, 다음 맞추기에서 다시). 서버 알람을 한 번에 읽는 줄 수(500)에서 목록이 잘렸으면 이 확인을 거친 것만 지움.
 
-**서버 함수** — 앱은 `callEdge<T>(이름, 본문)`으로만 부름. 오류는 `EdgeError`(= `UserError`)로 오고 문구는 서버 `code`로 고름 (표: `lib/edge.ts`). **그룹 기상 신호** — `subscribeGroupWake(groupId, 콜백)` (`lib/realtime`), 신호의 `date`를 `get_group_wake_status`의 `p_date`로 넘김.
+**서버 함수** — 앱은 `callEdge<T>(이름, 본문)`으로만 부름. 오류는 `EdgeError`(= `UserError`)로 오고 문구는 서버 `code`로 고름 (표: `lib/edge.ts`). **그룹 기상 신호** — `subscribeGroupWake(groupId, 콜백)` (`lib/realtime`), 신호의 `date`를 `get_group_wake`의 `p_date`로 넘김. 다시 연결될 때 · 앱이 앞에 올 때도 다시 읽음.
 
 ## 화면 목록
 
@@ -107,7 +107,7 @@
 - 오늘 루틴 · 진행: `routines`(켜짐, 오늘 요일) + 오늘 `alarm_events` ACKNOWLEDGED(단계 알람) — DB
 - 내일 준비물(저녁): `todos`(ITEM, 내일) 읽기 · 체크(`is_done` · `done_at`) — DB
 - 제안 카드: `alarm_suggestions`(PENDING) — DB. `suppress_until`은 "이 시각 전엔 같은 종류 제안을 만들지 않음"이라 `suggestion-generate`에서만 봄
-- 그룹 기상 요약: `get_group_wake_status(group_id)` — RPC. 그 그룹 일정이 있는 날만 (D57)
+- 그룹 기상 요약: `get_group_wake(group_id)` — RPC. 그 그룹 일정이 있는 날만 (D57), 약속 없는 날은 '오늘 n명 일어남' 줄을 숨김
 - 미룬 알람 줄의 "취소": 폰 예약을 지움 — 폰. 기상 알람이면 먼저 `alarm_events` `DISMISSED`(`MANUAL`)를 남기고 기상 확인(H08)으로 이어감 (해제로 봄 — 작성자 판단). 기록이 막히면(오프라인) 예약을 그대로 두고 "미루기를 취소하지 못했어요"
 - 오늘 루틴은 알람 단계가 하나라도 있는 루틴만 보임 (확인을 달 알람이 없으면 홈에서 끝낼 수 없음). 마지막 알람 단계까지 확인하면 뒤의 알람 없는 단계도 끝난 것("오늘 루틴을 모두 마쳤어요")
 
@@ -158,6 +158,7 @@
 - 판정(폰 사용 · 버튼) → `alarm_events` WAKE_CONFIRMED + `daily_records.wake_confirmed_at` — DB
 - 확정 시각 = 해제 뒤 누적 화면 사용이 θ를 넘은 시각 (D14) — 판정은 관찰 10분이 끝나야 되고 기록만 그 시각으로 남김. 확인 알림에 직접 응답하면 응답 시각
 - 해제 뒤 H08을 안 열어도 앱이 앞에 올 때 최근 12시간에 끈 기상 알람 중 확정이 없는 것을 같은 판정으로 다시 보고 확정 기록 (`useWakeRecheck`). 네이티브가 해제 + 10분에 스스로 판정하는 길은 확인 필요
+- [먼저 깼어요] (D61 · 친구 7장): 기상 알람 전 60분 안에 울릴 켜진 기상 알람 `alarms`(WAKE · 아직 울림 · 확인 기록 없음) — DB → 누르면 지금 시각으로 WAKE_CONFIRMED(BUTTON) + 하루 기록 — DB. 그룹에는 바로 '일어났어요'. 폰 알람 미리 끄기는 안 함(알람 코어 몫)
 - 확인 알림 원탭 → WAKE_CONFIRMED(알림 응답) — DB, 끝까지 안 깨면 MISSED 기록 + 미확인 푸시 — `wake-check` 배치(아래 표, 기준은 상세설계서 7장 7.9.2). **다시 울림 없음** (D2 = B) — 앱의 가짜 시연 `missWake` · "응답 없이 5분 지나기"는 뺌
 - 기상 확정 뒤 "오늘 첫 일정" 한 줄 (이슈 #230): `getMorningPlan()`(H01 아침 카드와 같은 함수) — "오늘 첫 일정 오전 10:00 전공 수업 · 세종대학교" · "오전 8:40에 나가면 돼요" · "다음 알림 · 준비 오전 8:10 · 출발 오전 8:40"(아직 안 울린 것만). 일정 줄을 누르면 H03. 켜진 기상 알람이 붙은 일정이 없으면 "오늘은 기상 알람이 걸린 일정이 없어요". 못 읽어도 확정 화면은 그대로 (덧붙임 줄)
 
@@ -167,7 +168,7 @@
 - 아이디 검색 · 요청: `find_profile_by_handle` — RPC → `friends` PENDING 추가 — DB
 - 그룹 목록 · 만들기: `groups` + `group_members`(JOINED) — DB (만든 사람은 자동 JOINED)
 - 초대 코드로 참여: 미리보기 `preview_group_by_code` — RPC → 동의 시트 → `join_group`(`p_wake_share`) — RPC. 받은 초대 카드 `my_group_invites` — RPC, [참여] `accept_group_invite` — RPC, [거절] 내 `group_members` 초대 행 삭제 — DB (친구 5장)
-- 오늘 기상 n명: `get_group_wake_status` — RPC. 그 그룹 일정이 있는 날만 (D57)
+- 오늘 n명 일어남: `get_group_wake` — RPC의 `CONFIRMED` 수(분모 없음). 그 그룹 일정이 있는 날만, 없는 날은 줄을 숨김 (D57 · 친구 7장)
 
 ### F02 친구 권한
 - 관계별 받은 권한: `sharing_permissions`(주는 사람 = 친구, 받는 사람 = 나, 출처 FRIEND · GROUP) — DB → 최종 = 항목별 OR (앱에서 합침)
@@ -180,12 +181,12 @@
 ### G02 그룹 상세
 - 그룹 · 멤버: `groups` + `group_members` — DB, 기상 공유 동의 `wake_share_opt_in` — DB
 - 연결 일정: `appointments`(`group_id`) — DB
-- 멤버 기상 상태: `get_group_wake_status` — RPC. 그 그룹 일정이 있는 날만 (D57). 누가 일어나면 DB가 그룹 채널에 새로 고침 신호(Realtime 방송, #160) → 앱이 다시 부름 (지형님 10/15 기술 결정 — `capstone/전체작업계획_v1.md` 8절 Q3, 레포 밖)
+- 멤버 기상 상태: `get_group_wake` — RPC. 그 그룹 일정이 있는 날만 (D57). 6단계를 3단계로 묶음(`SCHEDULED` '오전 8:50 알람' · `RINGING` · `DISMISSED` · `MISSED` '울렸어요' · `CONFIRMED` '일어났어요 오전 8:08', `NO_ALARM` '알람 없음'), 줄이 없는 멤버는 '공유 안 함' (친구 7장). 멤버 메뉴 [이 사람에게 기상 숨기기 / 보이기] `set_wake_hidden` — RPC, 숨긴 목록 `wake_hides` — DB(내 줄만). 누가 일어나면 DB가 그룹 채널에 새로 고침 신호(Realtime 방송, #160) → 앱이 다시 부름 (지형님 10/15 기술 결정 — `capstone/전체작업계획_v1.md` 8절 Q3, 레포 밖)
 - 초대: 코드 시트 `my_group_code`(만료됐으면 서버가 새 코드 + 7일) — RPC, [새 코드] `regenerate_invite_code` — RPC, 직접 초대 `invite_to_group` — RPC (친구 5장). 그룹장 없음 — 이름 바꾸기 `groups` update · 나가기 `group_members` JOINED → LEFT · 내보내기 다른 사람 행 delete · 알림 끄기 `group_members.notifications_off` — DB
 
 ### G03 그룹원 기상 상태
-- 오늘 기상 흐름: `get_group_wake_status` — RPC (기상 관련 값만, 준비 · 출발 · 도착은 본인만 — D59). 그 그룹 일정이 있는 날만 (D57)
-- 깨우기 알림: `notify` — Edge → `push_tokens`
+- 기상 상태: `get_group_wake` — RPC (단계 · 알람 시각 · 확인 시각만, 미루기 횟수 · 알람 끈 시각 · 준비 · 출발 · 도착은 본인만 — D59 · 친구 7장). 그 그룹 일정이 있는 날만 (D57). 알람 카드는 알람 조회 권한이 있으면 [알람 보기](G04)로
+- 깨우기 알림: `notify` — Edge → `push_tokens` ('울렸어요'일 때만 버튼, 붙이는 건 깨우기 장)
 
 ### G04 공유받은 알람
 - 친구 알람: `alarms`(주인 = 친구) — DB, 조회 권한은 RLS가 확인. 약속 제목 · 장소까지 보여 주려면 RPC 하나 더 필요(`appointments` RLS는 본인 · 그룹원만) — #46에서

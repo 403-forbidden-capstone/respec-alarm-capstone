@@ -32,7 +32,7 @@ beforeEach(() => {
   mockFake.answer('group_members.select', ok(members));
   mockFake.answer('sharing_permissions.select', ok(perms));
   mockFake.answerRpc('get_public_profiles', ok(publicProfiles));
-  mockFake.answerRpc('get_group_wake_status', ok([]));
+  mockFake.answerRpc('get_group_wake', ok([]));
 });
 
 describe('이름 · 코드 다듬기 (5-01 · 5-13)', () => {

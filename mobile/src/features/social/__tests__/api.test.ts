@@ -4,30 +4,33 @@ import { db } from '@/mocks/data';
 
 import { getFriendGrant, getGroup, getGroupCode, getMemberWake, getSharedAlarms } from '../api';
 
-// 가짜 api가 실데이터(RLS · get_group_wake_status)와 같은 범위만 돌려주는지
+// 가짜 api가 실데이터(RLS · get_group_wake)와 같은 범위만 돌려주는지
 describe('G03 그룹원 기상 상태', () => {
-  it('같은 그룹 · 기상 상태 조회 권한이 있으면 그룹 이름과 함께', async () => {
+  it('같은 그룹에서 기상을 준 사람이면 그룹 이름 · 단계 · 알람 시각 (오전 7:55 시나리오)', async () => {
     const wake = await getMemberWake('cap', 'sy');
     expect(wake?.groupName).toBe('캡스톤팀');
-    expect(wake?.timeline.map((e) => e.label)).toEqual(['알람 울림', '알람 해제', '기상 확인', '준비 시작']); // 오전 7:55까지
+    expect(wake?.state.text).toBe('일어났어요 오전 7:35'); // 7:35 기상 확인 — 준비 시작은 안 보임 (D59)
+    expect(wake?.alarmAt).not.toBeNull();
   });
 
   it('그 그룹 구성원이 아니면 null', async () => {
     expect(await getMemberWake('fam', 'sy')).toBeNull();
     expect(await getMemberWake('none', 'sy')).toBeNull();
+    expect(await getMemberWake('cap', 'me')).toBeNull();
   });
 
-  it('기상 상태 조회 권한을 받지 않았으면 null', async () => {
-    expect(await getMemberWake('fam', 'mom')).toBeNull();
+  it('그 그룹 약속이 없는 날은 null이 아니라 noGroupAppointment (공유 안 함과 구분)', async () => {
+    expect(await getMemberWake('fam', 'mom')).toMatchObject({ groupName: '우리 가족', noGroupAppointment: true, alarmAt: null });
   });
 
-  it('권한은 있는데 오늘 알람이 없으면 null이 아니라 알람 없음으로 (권한 오류와 구분)', async () => {
-    db.received.mom = [{ source: '우리 가족', sourceType: 'GROUP', sourceId: 'fam', viewAlarm: false, editAlarm: false, viewWake: true }];
+  it('약속 있는 날 기상을 안 준 사람은 null (공유 안 함)', async () => {
+    const saved = db.received.js;
+    db.received.js = [];
     try {
-      const wake = await getMemberWake('fam', 'mom');
-      expect([wake?.groupName, wake?.alarm, wake?.timeline, wake?.firstAlarmAt]).toEqual(['우리 가족', null, [], null]);
+      expect(await getMemberWake('cap', 'js')).toBeNull();
+      expect((await getGroup('cap'))?.members.find((m) => m.person.id === 'js')?.state.text).toBe('공유 안 함');
     } finally {
-      delete db.received.mom;
+      db.received.js = saved;
     }
   });
 });

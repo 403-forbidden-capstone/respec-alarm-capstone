@@ -275,6 +275,10 @@ export type WakePhase = 'idle' | 'ringing' | 'observing' | 'prompt' | 'confirmed
 export const WAKE_OBSERVE_MINUTES = 10; // 해제 뒤 화면 사용을 보는 시간 — 끝나면 확정 또는 확인 알림
 export const WAKE_RECENT_MINUTES = 5; // 최근 사용을 보는 관찰 뒤쪽 시간 (해제 뒤 5~10분)
 
+// H08 [먼저 깼어요] — 알람이 울리기 전 이만큼 안에 깬 날만 (D61 '예정 기상 전 60분 안')
+export const EARLY_WAKE_MINUTES = 60;
+export type EarlyWake = { alarmId: string; at: Date }; // 곧 울릴 기상 알람과 그 시각
+
 // 기상 확인 (H08) — 기상 알람 하나 기준 (alarm_events.alarm_id에 WAKE_CONFIRMED)
 export type WakeCheck = {
   alarmId: string;

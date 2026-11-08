@@ -1,12 +1,12 @@
 // DB 행 → 화면 타입(types.ts) 바꾸기 — 순수 함수만 (시험: __tests__/map.test.ts). 쿼리는 real/
-// 그룹 기상 상태는 D59에 따라 기상까지만 (알람 울림 · 해제 · 기상 확인 · 미확인) — 준비 · 출발 · 도착 줄은 실데이터에 없음 (docs/screen-data-map.md "스키마에 더 필요한 것" 5)
+// 그룹 기상 상태는 D59에 따라 기상까지만, 화면은 3단계(아직 · 울렸어요 · 일어남) — 준비 · 출발 · 도착은 실데이터에 없음 (친구 7장)
 import { KIND_LABEL, LEVELS, type AlarmKind } from '@/features/alarm/types';
 import { parseDbTime } from '@/lib/dbTime';
-import { dateParts, formatTime, minutesBetween, startOfDay, timeParts } from '@/lib/format';
+import { dateParts, formatTime, minutesBetween, startOfDay } from '@/lib/format';
 import type { Enums } from '@/types/database';
 import { levelOfIntensity, levelOfSoundKey } from '@shared/calc/intensity.ts';
 
-import type { FriendLink, FriendRelation, HandleSearch, MemberAlarm, OpenedLink, Person, TimelineEntry, WakeState } from './types';
+import type { FriendLink, FriendRelation, HandleSearch, MemberAlarm, OpenedLink, Person, WakeState } from './types';
 
 // ---------------------------------------------------------------------------
 // 사람
@@ -33,79 +33,66 @@ export function sinceLabel(createdAt: string): string {
 }
 
 // ---------------------------------------------------------------------------
-// 그룹 기상 상태 (get_group_wake_status)
+// 그룹 기상 상태 (get_group_wake, 친구 7장)
 // ---------------------------------------------------------------------------
 
+// 함수가 주는 칸 — 단계 · 알람 시각 · 확인 시각만 (미루기 횟수 · 알람 끈 시각 · 울린 시각 · 미확인 시각은 서버가 안 줌, 7-37)
 export type WakeRow = {
   user_id: string;
   is_me: boolean;
-  wake_alarm_at: string | null; // 그날 첫 기상 알람 시각
-  rang_at: string | null;
-  snooze_count: number;
-  dismissed_at: string | null; // 알람 해제 (기상 확인 아님)
+  wake_alarm_at: string | null; // 그날 첫 켜진 기상 알람 시각
   wake_confirmed_at: string | null;
-  missed_at: string | null;
-  wake_status: string; // CONFIRMED · MISSED · DISMISSED · RINGING · SCHEDULED · NO_ALARM
+  wake_status: string; // SCHEDULED · RINGING · DISMISSED · MISSED · CONFIRMED · NO_ALARM
 };
 
-export const NO_APPOINTMENT_STATE: WakeState = { text: '오늘은 그룹 약속이 없어요', dot: 'zz', woke: false };
-export const HIDDEN_STATE: WakeState = { text: '기상 상태를 볼 수 없어요', dot: 'zz', woke: false };
+// 서버 6단계 → 화면 3단계 + 알람 없음. 울림 · 해제 · 미확인은 '울렸어요'로 묶음 (7-아 · 7-바 · D61: 해제만 하면 '울렸어요')
+//   모르는 값은 '울렸어요' — 일어남으로 잘못 보이지 않게
+export function stageOf(status: string): 'SCHEDULED' | 'RANG' | 'WOKE' | 'NO_ALARM' {
+  switch (status) {
+    case 'SCHEDULED':
+      return 'SCHEDULED';
+    case 'CONFIRMED':
+      return 'WOKE';
+    case 'NO_ALARM':
+      return 'NO_ALARM';
+    default:
+      return 'RANG';
+  }
+}
+
+export const NO_APPOINTMENT_STATE: WakeState = { stage: 'NO_APPOINTMENT', text: '오늘은 그룹 약속이 없어요', dot: null, woke: false };
+// 약속 있는 날 줄이 없는 멤버 — 동의 안 함 · 나를 숨김 · 차단을 구분하지 않음 (7-06 · 7-10)
+export const NOT_SHARED_STATE: WakeState = { stage: 'NOT_SHARED', text: '공유 안 함', dot: null, woke: false };
 
 const at = parseDbTime; // DB 시각 글자 (lib/dbTime)
 
-// 멤버 한 줄의 기상 상태. dayHasRows = 함수가 그날 행을 하나라도 줬는지 (안 줬으면 그 그룹의 약속이 없는 날, D57)
-// 행이 없는 멤버 = 나에게 기상 상태 조회를 허용하지 않은 사람 (함수가 권한 있는 멤버만 돌려줌)
+// '오전 8:50 알람' — 알람 시각 한 줄 (앱 다른 화면처럼 오전 · 오후를 붙임, 11/9 결정표) (G02 아직 단계 · G03, 7-다)
+export const alarmLine = (alarmAt: Date | null) => (alarmAt ? `${formatTime(alarmAt)} 알람` : null);
+
+// 멤버 한 줄의 기상 상태 — 알람 기준 글자만, '취침 중' · 준비 · 출발 · 도착 없음 (7-라 · 7-42). 색 + 글자를 같이 (14-파)
+//   dayHasRows = 함수가 그날 줄을 하나라도 줬는지 (나는 늘 나오니 비었으면 그 그룹 약속이 없는 날, D57)
 export function wakeStateOf(row: WakeRow | undefined, dayHasRows: boolean): WakeState {
   if (!dayHasRows) return NO_APPOINTMENT_STATE;
-  if (!row) return HIDDEN_STATE;
-  switch (row.wake_status) {
-    case 'CONFIRMED':
-      return { text: row.wake_confirmed_at ? `기상 완료 · ${formatTime(at(row.wake_confirmed_at))}` : '기상 완료', dot: 'ok', woke: true };
-    case 'MISSED':
-      return { text: '기상 미확인', dot: 'zz', woke: false };
-    case 'DISMISSED':
-      return { text: '알람 해제 · 기상 확인 전', dot: 'zz', woke: false };
-    case 'RINGING':
-      return { text: '알람 울리는 중', dot: 'zz', woke: false };
+  if (!row) return NOT_SHARED_STATE;
+  const stage = stageOf(row.wake_status);
+  switch (stage) {
+    case 'WOKE':
+      return { stage, text: row.wake_confirmed_at ? `일어났어요 ${formatTime(at(row.wake_confirmed_at))}` : '일어났어요', dot: 'ok', woke: true };
+    case 'RANG':
+      return { stage, text: '울렸어요', dot: 'mid', woke: false };
     case 'SCHEDULED':
-      return { text: row.wake_alarm_at ? `취침 중 · 알람 ${timeParts(at(row.wake_alarm_at)).hm}` : '취침 중', dot: 'zz', woke: false };
+      return { stage, text: alarmLine(row.wake_alarm_at ? at(row.wake_alarm_at) : null) ?? '알람 전', dot: 'zz', woke: false };
     default:
-      return { text: '오늘은 기상 알람이 없어요', dot: 'zz', woke: false };
+      return { stage, text: '알람 없음', dot: 'zz', woke: false };
   }
 }
 
-// 오늘 기상한 사람 수 — 기상 확인이 된 사람만 (D59: 기상까지만)
-export const wokeCountOf = (rows: readonly WakeRow[]) => rows.filter((r) => r.wake_status === 'CONFIRMED').length;
-
-// G03 "오늘의 흐름" — 함수가 주는 시각들을 시간순으로. 기상 확인의 출처(본인 응답 · 자동 판정)는 함수가 안 줘서 비워 둠
-export function wakeTimeline(row: WakeRow): TimelineEntry[] {
-  const entries: TimelineEntry[] = [];
-  if (row.rang_at) {
-    entries.push({ at: at(row.rang_at), label: '알람 울림', source: row.snooze_count > 0 ? `자동 기록 · 미루기 ${row.snooze_count}회` : '자동 기록' });
-  }
-  if (row.dismissed_at) entries.push({ at: at(row.dismissed_at), label: '알람 해제', source: '기상 미확정' });
-  if (row.wake_confirmed_at) entries.push({ at: at(row.wake_confirmed_at), label: '기상 확인', source: '' });
-  if (row.missed_at) entries.push({ at: at(row.missed_at), label: '기상 미확인', source: '자동 기록' });
-  return entries.sort((a, b) => a.at.getTime() - b.at.getTime());
-}
+// 오늘 일어난 사람 수 — 약속 없는 날(줄 없음)은 null이라 G01이 그 줄을 숨김 (7-사 · 7-34)
+export const wokeCountOf = (rows: readonly WakeRow[]): number | null =>
+  rows.length ? rows.filter((r) => stageOf(r.wake_status) === 'WOKE').length : null;
 
 // 팀 주간회의 · 세종대학교 · 오전 10:00
 export const appointmentLabel = (title: string, place: string, when: Date) => `${title} · ${place} · ${formatTime(when)}`;
-
-// G03 위쪽 알람 카드 — 그룹원의 오늘 기상 알람 하나. 강도 · 준비 · 이동은 기상 조회 권한으로는 못 읽어서 비움 (알람 조회 권한과 다름)
-export function wakeAlarmCard(row: WakeRow, label: string): MemberAlarm | null {
-  if (!row.wake_alarm_at) return null;
-  const wakeAt = at(row.wake_alarm_at);
-  return {
-    id: `wake:${row.user_id}`,
-    date: startOfDay(wakeAt),
-    chain: [{ at: wakeAt, label: KIND_LABEL.WAKE }],
-    appointmentLabel: label,
-    levelName: '',
-    note: '',
-    enabled: true,
-  };
-}
 
 // ---------------------------------------------------------------------------
 // G04 공유받은 알람 (get_shared_alarm_appointments + alarms)

@@ -16,15 +16,16 @@ import { MiniButton } from '@/features/social/components/MiniButton';
 import { PersonRow } from '@/features/social/components/PersonRow';
 import { permissionNames } from '@/features/social/permissions';
 import type { GroupDetail, GroupMember, Person } from '@/features/social/types';
+import { WAKE_STALE_TEXT } from '@/features/social/wakeTexts';
 import { formatDateShort, formatTime } from '@/lib/format';
 import { backOrHome } from '@/lib/nav';
 import { colors } from '@/theme';
 
 // G02 그룹 상세 — 내가 이 그룹에 준 공유 범위 · 연결 일정 · 멤버 기상 상태
-// 멤버의 기상 상태(G03) · 알람 보기(G04)는 그 사람에게 받은 권한(친구 · 그룹 합집합)이 있을 때만 열림 — 없으면 이유를 알림
+// 멤버 기상 상태는 그 사람의 이 그룹 기상 공유 동의로만(서버 get_group_wake, 친구 7장) — 줄이 없으면 '공유 안 함'. 알람 보기(G04)는 받은 알람 조회 권한
 export default function GroupDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
-  const { data, error, reload } = useWakeLoad((date) => getGroup(id, date), (g) => [g.id]); // 그룹 기상 신호가 오면 멤버 상태를 다시 읽음
+  const { data, error, reload, stale } = useWakeLoad((date) => getGroup(id, date), (g) => [g.id]); // 그룹 기상 신호 · 다시 연결 · 앱이 앞에 올 때 멤버 상태를 다시 읽음
 
   if (data === undefined) {
     return (
@@ -44,11 +45,12 @@ export default function GroupDetailScreen() {
       </Screen>
     );
   }
-  return <Detail group={data} onBack={backOrHome} onChanged={() => void reload()} />;
+  return <Detail group={data} stale={stale} onBack={backOrHome} onChanged={() => void reload()} />;
 }
 
-function Detail({ group: g, onBack, onChanged }: { group: GroupDetail; onBack?: () => void; onChanged: () => void }) {
-  const menu = usePersonMenu(onChanged); // 멤버 줄 [···] 신고 · 차단 — 차단하면 그 사람은 이름만 보이게 다시 읽음 (친구 4장)
+function Detail({ group: g, stale, onBack, onChanged }: { group: GroupDetail; stale: boolean; onBack?: () => void; onChanged: () => void }) {
+  // 멤버 줄 [···] 기상 숨기기 · 신고 · 차단 — 바꾸면 다시 읽음 (친구 4장 · 7장)
+  const menu = usePersonMenu(onChanged, (personId) => g.members.some((m) => m.person.id === personId && m.wakeHidden));
   const grants = permissionNames(g.grants);
   const groupMenu = useGroupMenu(g, onChanged, () => onBack?.()); // [···] 그룹 메뉴 · [+ 초대] — 그룹장 없음, 멤버 누구나 (친구 5장)
 
@@ -121,6 +123,11 @@ function Detail({ group: g, onBack, onChanged }: { group: GroupDetail; onBack?: 
       ) : null}
 
       <SectionHeader title="멤버 · 기상 상태" right={<TextLink label="+ 초대" onPress={groupMenu.openInvite} strong />} />
+      {stale ? (
+        <Text variant="small" tone="warn" style={styles.stale} accessibilityLiveRegion="polite">
+          {WAKE_STALE_TEXT}
+        </Text>
+      ) : null}
       <Card>
         {g.members.map((m, i) => (
           <MemberRow key={m.person.id} member={m} groupId={g.id} first={i === 0} onMyAlarm={openMyAlarms} onMenu={menu.open} />
@@ -141,8 +148,8 @@ function Detail({ group: g, onBack, onChanged }: { group: GroupDetail; onBack?: 
   );
 }
 
-// 멤버 한 줄 — 기상 상태 조회 권한이 없으면 상태 글자 · 점을 숨김 (get_group_wake_status는 권한 있는 멤버만 돌려줌)
-// 줄을 누르면 기상 상태(G03). 권한이 없으면 이유를 알림
+// 멤버 한 줄 — 기상 단계 글자 + 색 (14-파). '공유 안 함'(동의 안 함 · 숨김 · 차단)은 색 점 없이 글자만
+// 줄을 누르면 기상 상태(G03). 공유 안 함이면 이유 없이 볼 수 없다고만 알림 (상대가 왜 안 보이는지 드러내지 않음)
 function MemberRow({
   member: m,
   groupId,
@@ -154,29 +161,30 @@ function MemberRow({
   groupId: string;
   first: boolean;
   onMyAlarm: () => void;
-  onMenu: (p: Person) => void; // [···] 신고 · 차단
+  onMenu: (p: Person) => void; // [···] 기상 숨기기 · 신고 · 차단
 }) {
-  const canSee = m.isMe || m.received.viewWake;
+  const shared = m.state.stage !== 'NOT_SHARED';
   const name = m.person.short;
-  const wakeReason = `${name}님이 기상 상태 공유를 허용하지 않았어요`;
+  const wakeReason = `${name}님의 기상 상태는 볼 수 없어요`;
   const alarmReason = `${name}님이 알람 공유를 허용하지 않았어요`;
   const openWake = () =>
     router.push({ pathname: '/groups/[id]/members/[userId]', params: { id: groupId, userId: m.person.id } });
+  const sub = [m.person.handle, m.state.text, m.wakeHidden ? '내 기상 숨김' : null].filter(Boolean).join(' · '); // 멤버 줄 @아이디 — 차단 쌍은 서버가 아이디를 비워 이름만
 
   return (
     <PersonRow
       first={first}
-      icon={<Avatar initial={m.person.initial} dot={canSee ? m.state.dot : undefined} />}
+      icon={<Avatar initial={m.person.initial} dot={m.state.dot ?? undefined} />}
       title={m.person.name}
-      sub={[m.person.handle, canSee ? m.state.text : '기상 상태를 볼 수 없어요'].filter(Boolean).join(' · ')} // 멤버 줄 @아이디 — 차단 쌍은 서버가 아이디를 비워 이름만
-      onPress={m.isMe ? undefined : m.received.viewWake ? openWake : () => toast(wakeReason)}
+      sub={sub}
+      onPress={m.isMe ? undefined : shared ? openWake : () => toast(wakeReason)}
       rightIsButtons={m.isMe}
       right={m.isMe ? <MiniButton label="내 알람" onPress={onMyAlarm} /> : undefined}
       // 남의 줄은 버튼 3개(기상 상태 · 알람 보기 · ···)가 오른쪽에 있으면 이름 칸이 좁아져 아래 줄로 내림 (360폭)
       actions={
         m.isMe ? undefined : (
           <>
-            <MiniButton label="기상 상태" disabledReason={m.received.viewWake ? undefined : wakeReason} onPress={openWake} />
+            <MiniButton label="기상 상태" disabledReason={shared ? undefined : wakeReason} onPress={openWake} />
             <MiniButton
               label="알람 보기"
               disabledReason={m.received.viewAlarm ? undefined : alarmReason}
@@ -203,4 +211,5 @@ const styles = StyleSheet.create({
   sub: { marginTop: 4 },
   linkText: { marginTop: 6 },
   paragraph: { lineHeight: 20 },
+  stale: { marginBottom: 8 },
 });

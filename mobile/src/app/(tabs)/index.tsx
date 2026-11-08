@@ -17,7 +17,8 @@ import {
   TopBar,
   TopBarButton,
 } from '@/components/ui';
-import { cancelSnooze, getDaySchedule, getMorningPlan, getNextAlarm, getSnooze, getWakeInProgress } from '@/features/alarm/api';
+import { cancelSnooze, getDaySchedule, getEarlyWake, getMorningPlan, getNextAlarm, getSnooze, getWakeInProgress } from '@/features/alarm/api';
+import { EarlyWakeCard } from '@/features/alarm/components/EarlyWakeCard';
 import { AppointmentAlarmCard } from '@/features/alarm/components/AppointmentAlarmCard';
 import { MorningCard } from '@/features/alarm/components/MorningCard';
 import { ScheduleList } from '@/features/alarm/components/ScheduleList';
@@ -35,6 +36,7 @@ import { advanceRoutine, getEveningRoutine, getTodayRoutine, listTodos, toggleTo
 import { RoutineCard } from '@/features/routine/components/RoutineCard';
 import { TodoList } from '@/features/routine/components/TodoList';
 import { getGroupSummary, listGroups } from '@/features/social/api';
+import { wokeLine } from '@/features/social/wakeTexts';
 import { useWakeLoad } from '@/features/social/hooks/useGroupWake';
 import { now } from '@/lib/clock';
 import { addDays, dayKey, formatDate, formatMinuteOfDay, formatRelative, formatTime, minuteOfDay, startOfDay } from '@/lib/format';
@@ -52,7 +54,7 @@ async function loadHome(date: string | null) {
   const evening = isEvening(now());
   const target = evening ? addDays(today, 1) : today;
   const groups = await listGroups(date);
-  const [next, schedule, routine, todos, suggestion, groupSummaries, eveningRoutine, snooze, wake, morning] = await Promise.all([
+  const [next, schedule, routine, todos, suggestion, groupSummaries, eveningRoutine, snooze, wake, morning, early] = await Promise.all([
     getNextAlarm(),
     getDaySchedule(target),
     getTodayRoutine(),
@@ -64,9 +66,11 @@ async function loadHome(date: string | null) {
     getWakeInProgress(),
     // 아침 카드 — 저녁에는 안 보이니 안 읽음. 덧붙임 줄이라 못 읽어도 홈 전체가 막히지 않게 없는 것으로 (진행 중 기상 확인 · 미룸과 같은 방침)
     evening ? Promise.resolve(null) : getMorningPlan().catch(() => null),
+    // [먼저 깼어요] 입구 — 기상 알람 60분 전부터 (11/9 결정표). 덧붙임 카드라 못 읽어도 홈은 그대로
+    getEarlyWake().catch(() => null),
   ]);
   const summaries = groupSummaries.flatMap((g) => (g ? [g] : []));
-  return { evening, target, next, schedule, routine, todos, suggestion, groups: summaries, eveningRoutine, snooze, wake, morning };
+  return { evening, target, next, schedule, routine, todos, suggestion, groups: summaries, eveningRoutine, snooze, wake, morning, early };
 }
 
 function greeting(t: Date) {
@@ -97,7 +101,7 @@ export default function HomeScreen() {
       {error ? <LoadError onRetry={reload} /> : <Loading text="홈을 불러오는 중" />}
     </Screen>
   );
-  const { evening, target, next, schedule, routine, todos, suggestion, groups, eveningRoutine, snooze, wake, morning } = data;
+  const { evening, target, next, schedule, routine, todos, suggestion, groups, eveningRoutine, snooze, wake, morning, early } = data;
   // 추가한 일정이 홈이 보여 주는 날(낮 = 오늘, 저녁 = 내일)에 들어가게 날짜를 넘김
   const newSchedule = () => router.push({ pathname: '/schedule/new', params: { from: 'home', date: dayKey(target) } });
 
@@ -220,6 +224,17 @@ export default function HomeScreen() {
         />
       )}
 
+      {/* 기상 알람 60분 전부터 [먼저 깼어요] — 누르면 카드가 사라지고 그룹 줄의 내 상태가 '일어났어요'로 */}
+      {early ? (
+        <EarlyWakeCard
+          early={early}
+          onDone={() => {
+            toast('일어났어요로 기록했어요');
+            void reload();
+          }}
+        />
+      ) : null}
+
       <SectionHeader title={evening ? '내일 일정' : '오늘 일정'} right={
           <View style={styles.links}>
             <TextLink label="학교 시간표" onPress={() => router.push('/timetable')} />
@@ -305,21 +320,24 @@ export default function HomeScreen() {
               key={group.id}
               onPress={() => openGroupDetail(group.id, 'tab')}
               accessibilityRole="button"
-              accessibilityLabel={`${group.name}, 오늘 ${group.wokeCount}명 기상 완료`}
+              accessibilityLabel={[group.name, wokeLine(group.wokeCount)].filter(Boolean).join(', ')}
               style={({ pressed }) => [styles.group, i > 0 && styles.groupDivider, pressed && styles.pressed]}
             >
               <View style={styles.avatars}>
                 {group.members.map(({ person, state }, j) => (
                   <View key={person.id} style={[styles.avatarRing, j > 0 && styles.avatarOverlap]}>
-                    <Avatar initial={person.initial} small dot={state.dot} />
+                    <Avatar initial={person.initial} small dot={state.dot ?? undefined} />
                   </View>
                 ))}
               </View>
               <View style={styles.bannerText}>
                 <Text variant="bodyStrong">{group.name}</Text>
-                <Text variant="small" tone="sub">
-                  오늘 {group.wokeCount}명 기상 완료
-                </Text>
+                {/* 그 그룹 약속이 없는 날은 그 줄을 숨김 (7-사) */}
+                {group.wokeCount != null ? (
+                  <Text variant="small" tone="sub">
+                    {wokeLine(group.wokeCount)}
+                  </Text>
+                ) : null}
               </View>
             </Pressable>
           ))}

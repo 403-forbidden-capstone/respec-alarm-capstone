@@ -38,4 +38,4 @@ export {
 } from './groups';
 export { getFriendGrant, getReceived, getRelation, getShareSettings, listRelations, saveShareSettings } from './sharing';
 export { getSharedAlarms, getShareLog, setSharedAlarmEnabled, shiftSharedAlarm } from './sharedAlarms';
-export { getMemberWake, sendWakePing } from './wake';
+export { getMemberWake, sendWakePing, setWakeHidden } from './wake';
