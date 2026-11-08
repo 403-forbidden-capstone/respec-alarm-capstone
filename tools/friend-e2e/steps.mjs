@@ -574,7 +574,31 @@ export const STEPS = [
       ok(await ctx.admin.from('friends').delete().eq('friend_id', ctx.s.fAC), 'A–C 친구 끊기(준비)');
       const st = await sendRequest(ctx, ctx.a, ctx.ids.A, ctx.ids.C);
       must(st === 'REQUESTED', `A의 새 요청(준비)이 REQUESTED가 아님: ${st}`);
-      ok(await callRpc(ctx.c, ctx.fn.block_user, { p_user_id: ctx.ids.A }), '차단');
+      const blk = ok(await callRpc(ctx.c, ctx.fn.block_user, { p_user_id: ctx.ids.A }), '차단');
+      must(blk.status === 'BLOCKED', `차단 결과가 BLOCKED가 아님: ${blk.status}`);
+      const again = ok(await callRpc(ctx.c, ctx.fn.block_user, { p_user_id: ctx.ids.A }), '차단(두 번째)');
+      must(again.status === 'ALREADY_BLOCKED', `두 번 차단했는데 ${again.status}`);
+      const perms = ok(
+        await ctx.admin.from('sharing_permissions').select('permission_id').in('owner_id', [ctx.ids.A, ctx.ids.C]).in('grantee_id', [ctx.ids.A, ctx.ids.C]),
+        '두 사람 사이 권한',
+      );
+      must(perms.length === 0, '차단했는데 두 사람 사이 공유 권한이 남음');
+      const mine = ok(await callRpc(ctx.c, ctx.fn.my_blocks, {}), 'C의 차단 목록');
+      must(mine.some((r) => r.user_id === ctx.ids.A), 'C의 차단 목록에 A가 없음');
+      const theirs = ok(await callRpc(ctx.a, ctx.fn.my_blocks, {}), 'A의 차단 목록');
+      must(!theirs.some((r) => r.user_id === ctx.ids.C), '차단당한 A의 목록에 C가 보임 (차단 사실이 새어 나감)');
+      const retry = await sendRequest(ctx, ctx.a, ctx.ids.A, ctx.ids.C);
+      must(retry === 'NOT_FOUND', `차단당한 뒤 A가 요청하면 NOT_FOUND여야 함: ${retry}`);
+      const reportFn = rpcOf(ctx.caps, 'submit_report');
+      if (reportFn) {
+        const rep = ok(await callRpc(ctx.c, reportFn, { p_target_type: 'USER', p_target_id: ctx.ids.A, p_reason: 'HARASSMENT' }), '신고');
+        must(rep.status === 'REPORTED', `신고 결과가 REPORTED가 아님: ${rep.status}`);
+        const rep2 = ok(await callRpc(ctx.c, reportFn, { p_target_type: 'USER', p_target_id: ctx.ids.A, p_reason: 'HARASSMENT' }), '신고(두 번째)');
+        must(rep2.status === 'ALREADY_REPORTED', `같은 대상 하루 두 번 신고가 됨: ${rep2.status}`);
+        const direct = await ctx.c.from('reports').select('report_id');
+        must(direct.error || (direct.data ?? []).length === 0, '앱이 신고 표를 직접 읽을 수 있음');
+        ctx.note('신고 처리(웹 운영 화면, 팀원만) 확인 생략 (4장 빈 곳: 처리 함수 문서 보충 대기)');
+      }
       const pending = ok(await ctx.c.from('friends').select('friend_id').eq('requester_id', ctx.ids.A).eq('addressee_id', ctx.ids.C), 'C의 받은 요청');
       must(pending.length === 0, '차단했는데 A의 대기 요청이 남음');
     },
@@ -614,11 +638,20 @@ export const STEPS = [
     action: '설정 차단 목록 [풀기] → 다시 친구는 새 요청부터',
     deps: [30],
     async run(ctx) {
-      ok(await callRpc(ctx.c, ctx.fn.unblock_user, { p_user_id: ctx.ids.A }), '차단 풀기');
+      const ub = ok(await callRpc(ctx.c, ctx.fn.unblock_user, { p_user_id: ctx.ids.A }), '차단 풀기');
+      must(ub.status === 'UNBLOCKED', `풀기 결과가 UNBLOCKED가 아님: ${ub.status}`);
+      const ub2 = ok(await callRpc(ctx.c, ctx.fn.unblock_user, { p_user_id: ctx.ids.A }), '차단 풀기(두 번째)');
+      must(ub2.status === 'GONE', `이미 푼 사람을 또 풀었는데 ${ub2.status}`);
+      const left = ok(await callRpc(ctx.c, ctx.fn.my_blocks, {}), 'C의 차단 목록');
+      must(!left.some((r) => r.user_id === ctx.ids.A), '풀었는데 차단 목록에 남음');
       const f = ok(await ctx.admin.from('friends').select('friend_id').in('requester_id', [ctx.ids.A, ctx.ids.C]).in('addressee_id', [ctx.ids.A, ctx.ids.C]), '친구 행');
       must(f.length === 0, '차단을 풀었는데 옛 친구 관계가 되살아남');
       const found = await searchHandle(ctx, ctx.a, ctx.handles.C);
       must(found.status === 'FOUND', `차단을 풀었는데 A가 C를 다시 못 찾음: ${found.status}`);
+      // 다시 친구는 새 요청부터 (친구 · 권한이 복구되지 않음)
+      const st = await sendRequest(ctx, ctx.a, ctx.ids.A, ctx.ids.C);
+      must(st === 'REQUESTED', `풀린 뒤 새 요청이 REQUESTED가 아님: ${st}`);
+      ok(await ctx.admin.from('friends').delete().in('requester_id', [ctx.ids.A, ctx.ids.C]).in('addressee_id', [ctx.ids.A, ctx.ids.C]), '새 요청 정리');
     },
   },
   {

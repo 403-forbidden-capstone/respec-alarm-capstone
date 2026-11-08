@@ -25,9 +25,11 @@ export const RPC = {
   friend_cancel: 'cancel_friend_request',
   friend_remove: 'remove_friend',
 
-  // 논리설계 이름이 정해진 것 (4장) — 입력 모양은 S1이 만든 뒤 맞춤
+  // 4장 (PR #380) — 입력 모양은 S1이 만든 뒤 맞춤
   block_user: 'block_user',
   unblock_user: 'unblock_user',
+  my_blocks: 'my_blocks',
+  submit_report: 'submit_report',
 
   // 아직 이름 없음 ( 5 · 6 · 7 · 8 · 9 · 10 · 12장)
   group_preview: null, // 5장 코드 입력 미리보기
