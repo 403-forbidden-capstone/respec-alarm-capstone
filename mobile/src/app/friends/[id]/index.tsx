@@ -4,6 +4,7 @@ import { Pressable, StyleSheet, View } from 'react-native';
 import { Button, Card, Chip, confirm, LoadError, Loading, Screen, SectionHeader, Text, toast, TopBar, TopBarButton } from '@/components/ui';
 import { getFriendGrant, removeFriend } from '@/features/social/api';
 import { PERMISSIONS, type GrantRow } from '@/features/social/types';
+import { UserError } from '@/lib/errors';
 import { useAction } from '@/lib/useAction';
 import { useLoad } from '@/lib/useLoad';
 import { colors } from '@/theme';
@@ -29,11 +30,17 @@ export default function FriendPermissionScreen() {
         destructive: true,
       });
       if (!ok) return;
+      // 끊었거나 이미 끊긴 경우(GONE, UserError)만 목록으로 — 통신 오류면 이 화면에 남아 다시 할 수 있게
+      let leave = false;
       try {
         await removeFriend(id);
         toast('친구를 끊었어요');
+        leave = true;
+      } catch (e) {
+        leave = e instanceof UserError;
+        throw e;
       } finally {
-        router.replace({ pathname: '/group', params: { seg: 'friend' } }); // 이미 끊긴 경우(GONE)도 목록으로 돌아가 새로 읽음
+        if (leave) backOrHome();
       }
     }, '친구를 끊지 못했어요. 다시 해 주세요');
 

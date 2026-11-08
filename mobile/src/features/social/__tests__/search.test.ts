@@ -4,7 +4,7 @@ import { createFake } from '../__fixtures__/fakeSupabase';
 import { JUNSEONG, ME, SUYEON, friends, groups, members, perms, profiles } from '../__fixtures__/seed';
 import { friendInviteMessage, friendLinkUrl, linkTokenOf } from '../inviteLink';
 import * as real from '../real';
-import { relationButton, searchNotice } from '../searchView';
+import { relationButton, relationFromLists, searchNotice } from '../searchView';
 import type { PeopleSearch } from '../types';
 
 // 친구 2장 앱 층 — 아이디 검색 · 이름 검색 · 친구 링크 (시험케이스 2-10~2-14 · 2-18 · 2-22 · 2-29 · 2-31 · 2-34 · 2-37 · 2-39 · 2-43 · 2-46 · 2-47)
@@ -261,5 +261,22 @@ describe('inviteLink — 링크 주소 · 초대 메시지', () => {
     expect(friendInviteMessage({ nickname: '지형', handle: 'vmgfh', url: 'https://example.test/invite?t=ABC' })).toBe(
       '지형님이 Re:Spec 알람에서 친구가 되고 싶어 해요.\n아이디: @vmgfh\nhttps://example.test/invite?t=ABC',
     );
+  });
+});
+
+describe('relationFromLists — 검색 결과 줄의 관계는 목록에서 (3-03 · 3-09)', () => {
+  const lists = { friends: ['f'], requests: ['r'], sent: ['s'] };
+
+  it('친구 · 받은 요청 · 보낸 요청 · 그 밖', () => {
+    expect(relationFromLists('f', lists)).toBe('FRIEND');
+    expect(relationFromLists('r', lists)).toBe('RECEIVED');
+    expect(relationFromLists('s', lists)).toBe('SENT');
+    expect(relationFromLists('x', lists)).toBe('NONE');
+  });
+
+  it('취소 · 거절 · 끊기로 목록에서 빠지면 [친구 요청]으로 돌아옴', () => {
+    expect(relationFromLists('s', { ...lists, sent: [] })).toBe('NONE');
+    expect(relationFromLists('r', { ...lists, requests: [] })).toBe('NONE');
+    expect(relationFromLists('f', { ...lists, friends: [] })).toBe('NONE');
   });
 });

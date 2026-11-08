@@ -8,6 +8,7 @@ import { acceptFriend, openFriendLink, sendFriendRequest } from '@/features/soci
 import { Note } from '@/features/social/components/Note';
 import { linkTokenOf } from '@/features/social/inviteLink';
 import type { FriendRelation, OpenedLink, Person } from '@/features/social/types';
+import { UserError } from '@/lib/errors';
 import { backOrHome } from '@/lib/nav';
 import { setPendingInvite } from '@/lib/pendingInvite';
 import { useAction } from '@/lib/useAction';
@@ -66,14 +67,21 @@ function Landing({ token }: { token: string }) {
 
   const request = (p: Person) =>
     run(async () => {
-      setDone(await sendFriendRequest(p.id)); // 상대가 먼저 보낸 요청이 있으면 서버가 바로 친구로
+      const relation = await sendFriendRequest(p.id); // 상대가 먼저 보낸 요청이 있으면 서버가 바로 친구로
+      setDone(relation);
+      if (relation === 'FRIEND') toast(`${p.name}님과 친구가 됐어요`);
     }, '친구 요청을 보내지 못했어요');
 
   const accept = (p: Person) =>
     run(async () => {
-      await acceptFriend(p.id);
-      setDone('FRIEND');
-      toast(`${p.name}님과 친구가 됐어요`);
+      try {
+        await acceptFriend(p.id);
+        setDone('FRIEND');
+        toast(`${p.name}님과 친구가 됐어요`);
+      } catch (e) {
+        if (e instanceof UserError) reload(); // 상대가 그 사이 취소했으면(GONE) 새로 읽어 화면을 맞춤
+        throw e;
+      }
     }, '수락하지 못했어요');
 
   return (
