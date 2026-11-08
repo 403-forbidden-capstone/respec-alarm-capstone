@@ -185,20 +185,20 @@ function MemberRow({
       title={m.person.name}
       sub={canSee ? m.state.text : '기상 상태를 볼 수 없어요'}
       onPress={m.isMe ? undefined : m.received.viewWake ? openWake : () => toast(wakeReason)}
-      rightIsButtons
-      right={
-        m.isMe ? (
-          <MiniButton label="내 알람" onPress={onMyAlarm} />
-        ) : (
-          <View style={styles.minis}>
+      rightIsButtons={m.isMe}
+      right={m.isMe ? <MiniButton label="내 알람" onPress={onMyAlarm} /> : undefined}
+      // 남의 줄은 버튼 3개(기상 상태 · 알람 보기 · ···)가 오른쪽에 있으면 이름 칸이 좁아져 아래 줄로 내림 (360폭)
+      actions={
+        m.isMe ? undefined : (
+          <>
             <MiniButton label="기상 상태" disabledReason={m.received.viewWake ? undefined : wakeReason} onPress={openWake} />
             <MiniButton
               label="알람 보기"
               disabledReason={m.received.viewAlarm ? undefined : alarmReason}
               onPress={() => router.push({ pathname: '/friends/[id]/alarms', params: { id: m.person.id } })}
             />
-            <MiniButton label="···" onPress={() => onMenu(m.person)} />
-          </View>
+            <MiniButton label="···" accessibilityLabel={`${m.person.name}님 메뉴`} onPress={() => onMenu(m.person)} />
+          </>
         )
       }
     />

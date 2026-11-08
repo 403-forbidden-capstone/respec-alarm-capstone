@@ -70,7 +70,7 @@ export default function FriendPermissionScreen() {
   const { person: p, final, groupCount } = data;
   return (
     <Screen>
-      <TopBar onBack={backOrHome} screenId="F02" right={<TopBarButton label="···" onPress={() => menu.open(p)} />} />
+      <TopBar onBack={backOrHome} screenId="F02" right={<TopBarButton label="···" accessibilityLabel={`${p.name}님 메뉴`} onPress={() => menu.open(p)} />} />
       <PersonMenuSheet {...menu.sheetProps} />
       <Text variant="title" style={styles.title}>
         {p.name}님의 권한

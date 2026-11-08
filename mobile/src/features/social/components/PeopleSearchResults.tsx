@@ -63,7 +63,7 @@ export function PeopleSearchResults({ search, busyId, onRequest, onAccept, onInv
                         onPress={() => (button.action === 'accept' ? onAccept(p) : onRequest(p))}
                       />
                     )}
-                    <MiniButton label="···" onPress={() => onMenu(p)} />
+                    <MiniButton label="···" accessibilityLabel={`${p.name}님 메뉴`} onPress={() => onMenu(p)} />
                   </View>
                 }
               />

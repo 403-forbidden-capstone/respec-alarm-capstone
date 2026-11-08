@@ -251,7 +251,7 @@ function FriendTab({
           <View style={styles.requestActions}>
             <Button variant="plain" label="거절" small disabled={workingId !== null} onPress={() => onDecline(p)} />
             <Button label="수락" small loading={workingId === p.id} disabled={workingId !== null && workingId !== p.id} onPress={() => onAccept(p)} />
-            <MiniButton label="···" onPress={() => menu.open(p)} />
+            <MiniButton label="···" accessibilityLabel={`${p.name}님 메뉴`} onPress={() => menu.open(p)} />
           </View>
         </Card>
       ))}
