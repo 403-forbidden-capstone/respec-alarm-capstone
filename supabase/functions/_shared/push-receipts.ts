@@ -11,6 +11,12 @@ import type { Db } from './supabase.ts';
 export const RECEIPT_DELAY_MS = 15 * 60_000;
 export const TICKET_MAX_AGE_MS = 24 * 3_600_000;
 const MAX_PER_RUN = 1000;
+const DELETE_CHUNK = 100; // 주소(URL)에 실리는 값이 길면 요청이 거절되므로 지울 때는 100개씩 (한 번 거절되면 같은 줄을 영영 다시 잡음)
+const chunks = <T>(items: T[], size: number): T[][] => {
+  const out: T[][] = [];
+  for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
+  return out;
+};
 
 export type ReceiptCheckResult = { checked: number; tokensRemoved: number; expired: number };
 type TicketRow = { ticket_id: string; token: string; created_at: string };
@@ -34,20 +40,28 @@ export async function runReceiptCheck(service: Db, now: Date, options: { accessT
     // 영수증 요청이 일부 실패해도 받은 것은 씀. 못 받은 번호는 영수증이 아직 없는 것과 같이 다음 배치로
     const { ok, receipts } = await fetchExpoReceipts(rows.map((r) => r.ticket_id), { accessToken: options.accessToken, fetchImpl: options.fetchImpl });
     const resolved = rows.filter((r) => r.ticket_id in receipts);
-    const gone = new Set<string>();
+    // 앱이 지워진 토큰 → 그 토큰으로 보낸 가장 늦은 접수 시각 (그 뒤에 다시 등록된 토큰은 지우지 않으려고)
+    const gone = new Map<string, string>();
     for (const r of resolved) {
       const receipt = receipts[r.ticket_id];
-      if (receipt.status === 'error' && receipt.details?.error === 'DeviceNotRegistered') gone.add(r.token);
+      if (receipt.status !== 'error') continue;
+      if (receipt.details?.error === 'DeviceNotRegistered') {
+        const prev = gone.get(r.token);
+        if (!prev || Date.parse(r.created_at) > Date.parse(prev)) gone.set(r.token, r.created_at);
+      } else {
+        console.error('[wake-check] 푸시 영수증 오류', receipt.details?.error ?? 'unknown', receipt.message ?? '');
+      }
     }
     const expired = rows.filter((r) => !(r.ticket_id in receipts) && now.getTime() - Date.parse(r.created_at) > TICKET_MAX_AGE_MS);
 
-    if (gone.size) {
-      const del = await service.from('push_tokens').delete().in('token', [...gone]);
-      if (del.error) console.error('[wake-check] 만료 토큰 삭제 실패', del.error.message);
+    // 영수증이 늦게 오는 사이 같은 토큰이 다시 등록됐으면(last_seen_at이 접수 시각보다 늦음) 지우지 않음. 한 번에 10개씩 병렬로
+    for (const part of chunks([...gone], 10)) {
+      const dels = await Promise.all(part.map(([token, at]) => service.from('push_tokens').delete().eq('token', token).lte('last_seen_at', at)));
+      for (const del of dels) if (del.error) console.error('[wake-check] 만료 토큰 삭제 실패', del.error.message);
     }
     const finished = [...resolved, ...expired].map((r) => r.ticket_id);
-    if (finished.length) {
-      const del = await service.from('push_tickets').delete().in('ticket_id', finished);
+    for (const part of chunks(finished, DELETE_CHUNK)) {
+      const del = await service.from('push_tickets').delete().in('ticket_id', part);
       if (del.error) console.error('[wake-check] 영수증 표 정리 실패', del.error.message);
     }
     return { checked: ok ? rows.length : resolved.length, tokensRemoved: gone.size, expired: expired.length };

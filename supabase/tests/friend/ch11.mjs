@@ -51,8 +51,51 @@ export default async function ch11({ q, as, su, svc, check, expectErr }) {
     await su();
     await register(A, T('d'), 'ios');
     const total = (await tokensOf(A)).length;
+    // 경계: 옛 이름(ExpoPushToken[...])도 받고, 길이 200자까지는 되고 201자부터 거절, 같은 토큰을 다시 등록하면 플랫폼도 새 값으로
+    const oldName = `ExpoPushToken[${'q'.repeat(22)}]`;
+    const at200 = `ExponentPushToken[${'r'.repeat(200 - 'ExponentPushToken[]'.length)}]`;
+    const at201 = `ExponentPushToken[${'s'.repeat(201 - 'ExponentPushToken[]'.length)}]`;
+    await register(A, oldName);
+    await register(A, at200);
+    await as(A);
+    const over = await expectErr(() => q(`select public.register_push_token($1, 'android')`, [at201]), /푸시 토큰/);
+    await su();
+    await register(A, T('d'), 'android');
+    const [{ platform: pf }] = await q(`select platform from public.push_tokens where token = $1`, [T('d')]);
+    const stored = await tokensOf(A);
     return rows.length === 1 && rows[0].token === T('a') && rows[0].platform === 'android' && noLogin === true
-      && badShape === true && empty === true && long === true && badPlatform === true && nullPlatform === true && total === 2 ? true : { rows, noLogin, badShape, empty, long, badPlatform, nullPlatform, total };
+      && badShape === true && empty === true && long === true && badPlatform === true && nullPlatform === true && total === 2
+      && at200.length === 200 && over === true && stored.includes(oldName) && stored.includes(at200) && !stored.includes(at201) && pf === 'android' ? true : { rows, noLogin, badShape, empty, long, badPlatform, nullPlatform, total, over, stored, pf };
+  });
+
+  await check('11-01(상한): 한 사람이 등록할 수 있는 기기는 10대 — 넘으면 가장 오래 전에 등록한 것부터 지워지고 최근 10대가 남음, 같은 토큰을 다시 등록하면 새것으로 침, 남의 토큰은 안 지워짐', async () => {
+    const A = await join_(33, '에이'), B = await join_(34, '비');
+    await register(B, T('B'));
+    const letters = 'abcdefghijkl'.split('');
+    for (const c of letters) await register(A, T(c));
+    const afterTwelve = await tokensOf(A);
+    await register(A, T('c'));      // 오래된 것을 다시 등록하면 최근 쪽으로
+    await register(A, T('m'));
+    const afterMore = await tokensOf(A);
+    return afterTwelve.join() === sorted(...letters.slice(2).map((c) => T(c))).join()
+      && afterMore.length === 10 && afterMore.includes(T('c')) && afterMore.includes(T('m')) && !afterMore.includes(T('d'))
+      && (await tokensOf(B)).join() === T('B') ? true : { afterTwelve, afterMore };
+  });
+
+  await check('11-01(직접 쓰기): 앱 역할은 push_tokens에 직접 넣거나 고칠 수 없음(permission denied) — 입력 검사 · 개수 상한을 못 피함, 읽기와 지우기만 됨', async () => {
+    const A = await join_(35, '에이');
+    await register(A, T('n'));
+    await as(A);
+    const ins = await expectErr(() => q(`insert into public.push_tokens (user_id, token, platform) values ($1, 'junk', 'web')`, [A]), /permission denied for table push_tokens/);
+    await su();
+    await as(A);
+    const upd = await expectErr(() => q(`update public.push_tokens set token = 'junk' where user_id = $1`, [A]), /permission denied for table push_tokens/);
+    await su();
+    await as(A);
+    const seen = await q(`select token from public.push_tokens`);
+    const del = await q(`delete from public.push_tokens where token = $1 returning 1`, [T('n')]);
+    await su();
+    return ins === true && upd === true && seen.length === 1 && del.length === 1 ? true : { ins, upd, seen, del };
   });
 
   await check('11-02 · 15-14: 로그아웃 때 내 토큰을 지우고(본인 행만), 남의 토큰은 읽기 · 고치기 · 지우기가 0행', async () => {
@@ -60,12 +103,14 @@ export default async function ch11({ q, as, su, svc, check, expectErr }) {
     await register(A, T('e')); await register(B, T('f'));
     await as(A);
     const seen = await q(`select token from public.push_tokens`);
-    const updB = await q(`update public.push_tokens set platform = 'ios' where token = $1 returning 1`, [T('f')]);
+    await su(); await as(A);
+    const updB = await expectErr(() => q(`update public.push_tokens set platform = 'ios' where token = $1`, [T('f')]), /permission denied for table push_tokens/);
+    await su(); await as(A);
     const delB = await q(`delete from public.push_tokens where token = $1 returning 1`, [T('f')]);
     const delMine = await q(`delete from public.push_tokens where token = $1 returning 1`, [T('e')]);
     await su();
     const hasB = seen.some((x) => x.token === T('f'));
-    return !hasB && updB.length === 0 && delB.length === 0 && delMine.length === 1 && (await tokensOf(A)).length === 0 && (await tokensOf(B)).join() === T('f') ? true : { seen, updB, delB, delMine };
+    return !hasB && updB === true && delB.length === 0 && delMine.length === 1 && (await tokensOf(A)).length === 0 && (await tokensOf(B)).join() === T('f') ? true : { seen, updB, delB, delMine };
   });
 
   await check('11-04 · 15-15: 같은 폰에서 A → B로 로그인하면 토큰 주인이 마지막 로그인 계정 B로 바뀌고(A는 0행), 폰 2대면 둘 다 받음 · 다시 등록하면 마지막 본 시각만 갱신', async () => {
@@ -152,21 +197,49 @@ export default async function ch11({ q, as, su, svc, check, expectErr }) {
     return ok.status === 'OK' && late.status === 'FORBIDDEN' && forbidden.every((x) => x.status === 'FORBIDDEN' && Object.keys(x).join() === 'status') ? true : { ok, late, forbidden };
   });
 
-  await check('11-15(약속): 공동 약속 변경 알림 — 그 그룹의 약속일 때만(다른 그룹 약속 · 개인 일정 · 없는 약속은 FORBIDDEN), 약속 제목을 같이 돌려주고 받는 사람은 보낸 사람 · 알림 끈 멤버 · 차단 쌍 제외', async () => {
-    const S = await join_(23, '보낸이'), M1 = await join_(24, '멤버1'), M2 = await join_(25, '알림끔'), M3 = await join_(26, '차단함'), O = await join_(27, '다른그룹주인');
-    const g = await mkGroup(S, [M1, M2, M3]);
+  await check('11-15(약속): 공동 약속 변경 알림 — 그 그룹의 아직 안 지난 약속을 만든 사람이 보낼 때만(다른 그룹 약속 · 개인 일정 · 없는 약속 · 지난 약속 · 만든 사람이 아닌 멤버는 FORBIDDEN), 받는 사람은 그 약속의 참여자에서 보낸 사람 · 알림 끈 멤버 · 차단 쌍 제외, 약속 제목을 같이 돌려줌', async () => {
+    const S = await join_(23, '보낸이'), M1 = await join_(24, '참여자'), M2 = await join_(25, '알림끔'), M3 = await join_(26, '차단함'), O = await join_(27, '다른그룹주인'), M4 = await join_(36, '참여안함');
+    const g = await mkGroup(S, [M1, M2, M3, M4]);
     const g2 = await mkGroup(O, [], '다른 그룹');
     await q(`update public.group_members set notifications_off = true where group_id = $1 and user_id = $2`, [g, M2]);
     await call(M3, 'public.block_user($1)', [S]);
     const [{ appointment_id: ap }] = await q(`insert into public.appointments (creator_id, group_id, title, appointment_at, dest_name) values ($1, $2, '팀 회의', now() + interval '1 day', '학교') returning appointment_id`, [S, g]);
     const [{ appointment_id: ap2 }] = await q(`insert into public.appointments (creator_id, group_id, title, appointment_at, dest_name) values ($1, $2, '다른 약속', now() + interval '1 day', '학교') returning appointment_id`, [O, g2]);
     const [{ appointment_id: personal }] = await q(`insert into public.appointments (creator_id, title, appointment_at, dest_name) values ($1, '개인', now() + interval '1 day', '학교') returning appointment_id`, [S]);
+    const [{ appointment_id: past }] = await q(`insert into public.appointments (creator_id, group_id, title, appointment_at, dest_name) values ($1, $2, '지난 약속', now() - interval '1 minute', '학교') returning appointment_id`, [S, g]);
+    const [{ appointment_id: byM1 }] = await q(`insert into public.appointments (creator_id, group_id, title, appointment_at, dest_name) values ($1, $2, '참여자가 만든 약속', now() + interval '1 day', '학교') returning appointment_id`, [M1, g]);
+    for (const [apId, users] of [[ap, [S, M1, M2, M3]], [past, [S, M1]], [byM1, [M1, S]]]) {
+      for (const u of users) await q(`insert into public.appointment_participants (appointment_id, user_id) values ($1, $2)`, [apId, u]);
+    }
     const ok = await planGroup(S, g, 'GROUP_APPT_CHANGED', ap);
     const other = await planGroup(S, g, 'GROUP_APPT_CHANGED', ap2), per = await planGroup(S, g, 'GROUP_APPT_CHANGED', personal), none = await planGroup(S, g, 'GROUP_APPT_CHANGED', NOBODY), missing = await planGroup(S, g, 'GROUP_APPT_CHANGED', null);
     const outsider = await planGroup(O, g, 'GROUP_APPT_CHANGED', ap);
+    const notCreator = [await planGroup(M1, g, 'GROUP_APPT_CHANGED', ap), await planGroup(M4, g, 'GROUP_APPT_CHANGED', ap)];   // 참여자도 · 참여 안 한 멤버도 남의 약속은 못 보냄
+    const pastOne = await planGroup(S, g, 'GROUP_APPT_CHANGED', past);
+    const byParticipant = await planGroup(M1, g, 'GROUP_APPT_CHANGED', byM1);                                                   // 자기가 만든 약속이면 받는 사람 = 다른 참여자(S)
     const wrongKind = [await planGroup(S, g, 'FRIEND_REQUEST', ap), await planGroup(S, g, 'WAKE_PING', ap)];   // 그룹 알림 종류가 아니면 약속이 맞아도 FORBIDDEN
     return ok.status === 'OK' && ok.appointment_title === '팀 회의' && ok.group_name === '푸시그룹' && ids(ok).join() === [M1].join()
-      && [other, per, none, missing, outsider, ...wrongKind].every((x) => x.status === 'FORBIDDEN') ? true : { ok, other, per, none, missing, outsider, wrongKind };
+      && [other, per, none, missing, outsider, ...notCreator, pastOne, ...wrongKind].every((x) => x.status === 'FORBIDDEN')
+      && byParticipant.status === 'OK' && ids(byParticipant).join() === [S].join() ? true : { ok, other, per, none, missing, outsider, notCreator, pastOne, byParticipant, wrongKind };
+  });
+
+  await check('11-12(창): 요청 푸시는 요청한 지 1시간 안(59분 O · 61분 X), 수락 푸시는 수락한 지 1시간 안(59분 O · 61분 X) — 오래된 대기 요청 · 오래된 수락으로 다시 보내지 못함', async () => {
+    const A1 = await join_(37, '요청59'), B1 = await join_(38, '받음59'), A2 = await join_(39, '요청61'), B2 = await join_(40, '받음61');
+    const A3 = await join_(41, '수락59'), B3 = await join_(42, '수락받음59'), A4 = await join_(43, '수락61'), B4 = await join_(44, '수락받음61');
+    await q(`insert into public.friends (requester_id, addressee_id, status, requested_at) values ($1, $2, 'PENDING', now() - interval '59 minutes'), ($3, $4, 'PENDING', now() - interval '61 minutes')`, [A1, B1, A2, B2]);
+    await q(`insert into public.friends (requester_id, addressee_id, status, accepted_at) values ($1, $2, 'ACCEPTED', now() - interval '59 minutes'), ($3, $4, 'ACCEPTED', now() - interval '61 minutes')`, [A3, B3, A4, B4]);
+    const r = [await canPush(A1, B1, 'FRIEND_REQUEST'), await canPush(A2, B2, 'FRIEND_REQUEST'), await canPush(B3, A3, 'FRIEND_ACCEPTED'), await canPush(B4, A4, 'FRIEND_ACCEPTED')];
+    return JSON.stringify(r) === JSON.stringify([true, false, true, false]) ? true : r;
+  });
+
+  await check('11-14(창): 새 멤버 알림은 들어온 지 10분 안(9분 O · 11분 X) — 1초 안만이 아님', async () => {
+    const O = await join_(45, '주인'), N = await join_(46, '새멤버');
+    const g = await mkGroup(O, [N]);
+    await q(`update public.group_members set joined_at = now() - interval '9 minutes' where group_id = $1 and user_id = $2`, [g, N]);
+    const nine = await planGroup(N, g, 'GROUP_MEMBER_JOINED');
+    await q(`update public.group_members set joined_at = now() - interval '11 minutes' where group_id = $1 and user_id = $2`, [g, N]);
+    const eleven = await planGroup(N, g, 'GROUP_MEMBER_JOINED');
+    return nine.status === 'OK' && eleven.status === 'FORBIDDEN' ? true : { nine, eleven };
   });
 
   await check('11-16(바탕): 받는 사람이 아무도 안 남아도 OK(빈 배열) — 혼자인 그룹 · 모두 알림을 끈 그룹', async () => {

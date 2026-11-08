@@ -1,7 +1,7 @@
 -- =====================================================================
 -- 친구 11장 — 푸시 바탕 (친구 논리설계 11장, 11/8 확정)
 --   ① 푸시 영수증 표 push_tickets(서버 전용) — 보낸 지 15분 뒤 wake-check 배치가 Expo 영수증을 확인해 앱이 지워진 기기의 토큰을 지움 (11-06 · 11-07)
---   ② 토큰 등록 입력 검사 — Expo 토큰 모양 · 플랫폼 android / ios (11-01, 웹은 푸시를 안 받음)
+--   ② 토큰 등록 입력 검사 — Expo 토큰 모양 · 플랫폼 android / ios (11-01, 웹은 푸시를 안 받음), 사용자당 최대 10대, 앱의 직접 쓰기 길 회수
 --   ③ can_send_push에 FRIEND_REQUEST · FRIEND_ACCEPTED (11-12 · 11-13)
 --   ④ plan_group_push — 그룹 알림(새 멤버 · 공동 약속 변경)의 받는 사람을 서버가 고름: 알림 끈 멤버 · 차단 쌍 · 보낸 사람 제외 (11-14 ~ 11-16, 11-라)
 -- 문구 · 채널 · 알림 데이터는 notify 서버 함수(supabase/functions/_shared/notify.ts)가 종류별로 고정
@@ -59,8 +59,23 @@ begin
     set user_id      = excluded.user_id,
         platform     = excluded.platform,
         last_seen_at = now();
+
+  -- 한 사람이 쌓을 수 있는 기기는 최대 10대: 넘으면 가장 오래 전에 등록한 것부터 지움(폰을 바꾸거나 앱을 다시 깔면 새 토큰이 생기므로 거절하지 않고 밀어냄).
+  --   한 사람이 토큰을 잔뜩 만들어 다른 멤버의 그룹 푸시 조회를 밀어내지 못하게 (조회 상한 max_rows)
+  delete from public.push_tokens pt
+  where pt.user_id = v_uid
+    and pt.token not in (
+      select t.token from public.push_tokens t
+      where t.user_id = v_uid
+      order by t.last_seen_at desc, t.created_at desc, t.token
+      limit 10);
 end;
 $$;
+
+-- 토큰은 register_push_token으로만 넣고 고침(입력 검사 · 개수 상한이 여기 있음). 앱 역할의 직접 insert · update는 회수 — 읽기와 지우기(로그아웃)는 그대로 (15-라)
+revoke insert, update on public.push_tokens from anon, authenticated;
+drop policy push_tokens_insert_own on public.push_tokens;
+drop policy push_tokens_update_own on public.push_tokens;
 
 
 -- ---------------------------------------------------------------------
@@ -69,7 +84,7 @@ $$;
 
 -- ALARM_CHANGED  보내는 사람이 받는 사람의 알람에 설정 권한(조회도 함께, 6장)을 가졌을 때 (내용은 10장)
 -- WAKE_PING      8장에서 조건을 정할 때까지 거절
--- FRIEND_REQUEST 보내는 사람이 받는 사람에게 보낸 대기 요청이 있을 때 (받는 사람에게만)
+-- FRIEND_REQUEST 보내는 사람이 받는 사람에게 방금(1시간 안) 보낸 대기 요청이 있을 때 (받는 사람에게만) — 오래된 대기 요청으로 다시 보내지 못하게
 -- FRIEND_ACCEPTED 받는 사람이 보낸 요청을 보내는 사람이 방금(1시간 안) 수락했을 때 (요청한 사람에게만) — 오래된 수락으로 다시 보내지 못하게
 -- 그룹 알림은 받는 사람이 여럿이라 plan_group_push가 따로 고름. 미확인 본인(WAKE_MISSED)은 앱이 아니라 배치가 보냄 → 앱 요청은 거절
 -- 차단 쌍이면 종류와 상관없이 거절
@@ -89,7 +104,8 @@ as $$
         false)
       when 'FRIEND_REQUEST' then exists (
         select 1 from public.friends f
-        where f.status = 'PENDING' and f.requester_id = p_sender_id and f.addressee_id = p_target_id)
+        where f.status = 'PENDING' and f.requester_id = p_sender_id and f.addressee_id = p_target_id
+          and f.requested_at >= now() - interval '1 hour')
       when 'FRIEND_ACCEPTED' then exists (
         select 1 from public.friends f
         where f.status = 'ACCEPTED' and f.requester_id = p_target_id and f.addressee_id = p_sender_id
@@ -105,8 +121,10 @@ $$;
 -- 4. 그룹 알림 — 받는 사람은 서버가 고름 (앱은 그룹 · 약속 id만 보냄)
 -- ---------------------------------------------------------------------
 
--- 보낸 사람이 그 그룹에 참여 중이어야 하고, 새 멤버 알림은 들어온 지 10분 안(들어온 사람이 보냄), 약속 변경은 그 그룹의 약속일 때.
--- 받는 사람 = 참여 중 멤버 − 보낸 사람 − 알림 끈 멤버(notifications_off) − 보낸 사람과 차단 쌍. 문구에 쓸 그룹 이름 · 약속 제목을 같이 돌려줌(사람 이름은 안 돌려줌)
+-- 보낸 사람이 그 그룹에 참여 중이어야 하고, 새 멤버 알림은 들어온 지 10분 안(들어온 사람이 보냄), 약속 변경은 그 그룹의 아직 지나지 않은 약속을
+-- 만든 사람(만든 사람이 비어 있으면 참여자)이 보낼 때만 — 시각 · 장소 수정은 만든 사람만(9-자), 위조로 아무 약속이나 '바뀌었어요'를 보내지 못하게.
+-- 받는 사람 = 새 멤버 알림은 참여 중 멤버 전체, 약속 변경은 그 약속에 참여 조건이 있는 참여 중 멤버(9-더) − 보낸 사람 − 알림 끈 멤버(notifications_off) − 보낸 사람과 차단 쌍.
+-- 문구에 쓸 그룹 이름 · 약속 제목을 같이 돌려줌(사람 이름은 안 돌려줌)
 -- 안 되는 모든 경우(참여 중이 아님 · 없는 그룹 · 약속이 맞지 않음 · 모르는 종류)는 같은 FORBIDDEN
 create function public.plan_group_push(p_sender_id uuid, p_group_id uuid, p_kind text, p_appointment_id uuid default null)
 returns jsonb
@@ -137,7 +155,13 @@ begin
       return jsonb_build_object('status', 'FORBIDDEN');
     end if;
   else
-    select ap.title into v_title from public.appointments ap where ap.appointment_id = p_appointment_id and ap.group_id = p_group_id;
+    select ap.title into v_title
+    from public.appointments ap
+    where ap.appointment_id = p_appointment_id and ap.group_id = p_group_id
+      and ap.appointment_at > now()
+      and (ap.creator_id = p_sender_id
+           or (ap.creator_id is null and exists (
+                 select 1 from public.appointment_participants pt where pt.appointment_id = ap.appointment_id and pt.user_id = p_sender_id)));
     if not found then
       return jsonb_build_object('status', 'FORBIDDEN');
     end if;
@@ -155,6 +179,8 @@ begin
         and gm.user_id <> p_sender_id
         and not gm.notifications_off
         and not private.is_blocked_pair(p_sender_id, gm.user_id)
+        and (p_kind = 'GROUP_MEMBER_JOINED' or exists (
+              select 1 from public.appointment_participants pt where pt.appointment_id = p_appointment_id and pt.user_id = gm.user_id))
     ), '[]'::jsonb)
   );
 end;

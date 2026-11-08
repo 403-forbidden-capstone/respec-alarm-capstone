@@ -60,3 +60,11 @@ test('이름이 길면 잘라서 제목 100자 · 본문 200자를 넘지 않음
   const wake = composeCopy('WAKE_PING', { senderName: long });
   assert.ok(wake.body.length <= 200);
 });
+
+test('이름 자르기는 40자 — 40자까지는 그대로, 41자부터 40자 뒤에 …', () => {
+  const at40 = '나'.repeat(40);
+  const at41 = '나'.repeat(41);
+  assert.equal(composeCopy('GROUP_MEMBER_JOINED', { groupName: at40 }).title, at40);
+  assert.equal(composeCopy('GROUP_MEMBER_JOINED', { groupName: at41 }).title, `${at40}…`);
+  assert.equal(composeCopy('GROUP_APPT_CHANGED', { groupName: '팀', appointmentTitle: at41 }).body, `‘${at40}…’ 약속이 바뀌었어요`);
+});

@@ -783,20 +783,19 @@ await check('regenerate_invite_code: 참여 중 멤버 누구나 새 코드를 �
 // 14. 푸시 토큰
 // ---------------------------------------------------------------------
 
-await check('push_tokens는 본인만 · register_push_token은 같은 폰 토큰을 새 계정으로 옮김 · 이상한 platform 거부', async () => {
+await check('push_tokens는 본인만 읽고(직접 insert · update는 11장부터 회수) · register_push_token은 같은 폰 토큰을 새 계정으로 옮김 · 이상한 platform 거부', async () => {
   await as(A);
-  await q(`insert into public.push_tokens (user_id, token) values ($1, 'ExponentPushToken[aaa]')`, [A]);
+  await q(`select public.register_push_token('ExponentPushToken[aaa]')`);
   await as(B);
   const seen = await q(`select 1 from public.push_tokens`);
-  const upd = await q(`update public.push_tokens set platform = 'web' where token = 'ExponentPushToken[aaa]' returning 1`);
-  const forge = await expectErr(() => q(`insert into public.push_tokens (user_id, token) values ($1, 'x')`, [A]), /row-level security/);
+  const upd = await expectErr(() => q(`update public.push_tokens set platform = 'web' where token = 'ExponentPushToken[aaa]'`), /permission denied for table push_tokens/);
+  const forge = await expectErr(() => q(`insert into public.push_tokens (user_id, token) values ($1, 'x')`, [A]), /permission denied for table push_tokens/);
   await q(`select public.register_push_token('ExponentPushToken[aaa]')`);
   const mine = await q(`select user_id from public.push_tokens`);
   await as(A);
   const aNow = await q(`select 1 from public.push_tokens`);
-  const badPlatform = await expectErr(() => q(`insert into public.push_tokens (user_id, token, platform) values ($1, 'y', 'symbian')`, [A]),
-    /push_tokens_platform_check/);
-  return seen.length === 0 && upd.length === 0 && forge === true && mine.length === 1 && mine[0].user_id === B
+  const badPlatform = await expectErr(() => q(`select public.register_push_token('ExponentPushToken[bbb]', 'symbian')`), /지원하지 않는 플랫폼/);
+  return seen.length === 0 && upd === true && forge === true && mine.length === 1 && mine[0].user_id === B
     && aNow.length === 0 && badPlatform === true ? true : { seen, upd, forge, mine, aNow, badPlatform };
 });
 

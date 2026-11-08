@@ -71,7 +71,7 @@ export function readNotifyRequest(root: Reader): NotifyRequest {
   return {
     kind,
     targetUserId,
-    ...(alarmId ? { alarmId } : {}),
+    ...(kind === 'ALARM_CHANGED' && alarmId ? { alarmId } : {}),   // 알람 id는 알람 바뀜에만 (다른 종류에 실어 남의 알람 id를 시험하지 못하게)
     ...(kind === 'ALARM_CHANGED' && previousAt && newAt ? { previousAt: previousAt.toISOString(), newAt: newAt.toISOString() } : {}),
   };
 }
@@ -98,11 +98,12 @@ async function notifyOne(service: Db, senderId: string, req: NotifyRequest, opti
   if (allowed.error) dbFail('can_send_push', allowed.error);
   if (allowed.data !== true) throw new HttpError('FORBIDDEN', DENIED[req.kind]);
 
-  // 알람 id를 같이 받은 경우, 받는 사람의 알람이 맞는지 (남의 알람 id로 알림 내용을 꾸미지 못하게)
-  if (req.alarmId) {
+  // 알람 id를 같이 받은 경우(알람 바뀜만), 받는 사람의 알람이 맞는지 (남의 알람 id로 알림 내용을 꾸미지 못하게)
+  const alarmId = req.kind === 'ALARM_CHANGED' ? req.alarmId : undefined;
+  if (alarmId) {
     const alarm = must<{ alarm_id: string } | null>(
       'alarm lookup',
-      await service.from('alarms').select('alarm_id').eq('alarm_id', req.alarmId).eq('user_id', target).maybeSingle(),
+      await service.from('alarms').select('alarm_id').eq('alarm_id', alarmId).eq('user_id', target).maybeSingle(),
     );
     if (!alarm) throw new HttpError('NOT_FOUND', '받는 사람의 알람을 찾을 수 없어요');
   }
@@ -116,7 +117,7 @@ async function notifyOne(service: Db, senderId: string, req: NotifyRequest, opti
     newAt: req.newAt,
     timeZone: targetProfile.timezone,
   });
-  const data = { kind: req.kind, recipientUserId: target, path: PATHS[req.kind], ...(req.alarmId ? { alarmId: req.alarmId } : {}) };
+  const data = { kind: req.kind, recipientUserId: target, path: PATHS[req.kind], ...(alarmId ? { alarmId } : {}) };
   const messages: OutgoingMessage[] = rows.map((r) => ({ to: r.token, ...copy, channelId: CHANNEL_IDS[req.kind], data }));
   return await deliver(service, req.kind, messages, new Map(rows.map((r) => [r.token, target])), options);
 }
@@ -164,5 +165,7 @@ async function deliver(service: Db, kind: ClientKind, messages: OutgoingMessage[
     if (del.error) console.error('[notify] 만료 토큰 삭제 실패', del.error.message);
   }
 
+  // 보내지 못한 이유를 서버 로그에 남김 — 앱은 푸시 실패를 무시하므로 FCM 키 없음 · Expo 장애를 운영자가 알 길이 이것뿐 (11-20)
+  if (result.reason) console.error('[notify] 푸시 전송 실패', kind, result.reason, `sent=${result.sent} failed=${result.failed}`);
   return { sent: result.sent, failed: result.failed, ...(result.reason ? { reason: result.reason } : {}) };
 }

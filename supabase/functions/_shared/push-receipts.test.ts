@@ -16,7 +16,8 @@ const TC = 'ExponentPushToken[cccccccccccccccccccccc]';
 
 function setup() {
   const db = new FakeDb();
-  db.rows('push_tokens').push({ user_id: A, token: TA }, { user_id: B, token: TB }, { user_id: B, token: TC });
+  const registered = ago(24 * 3_600_000); // 등록한 지 오래된 토큰 (영수증 접수 시각보다 앞)
+  db.rows('push_tokens').push({ user_id: A, token: TA, last_seen_at: registered }, { user_id: B, token: TB, last_seen_at: registered }, { user_id: B, token: TC, last_seen_at: registered });
   return { db, service: db as unknown as Db };
 }
 const receiptsOf = (map: Record<string, unknown>) => async (_url: string, init?: RequestInit) => {
@@ -100,4 +101,65 @@ test('DB 읽기가 실패해도 던지지 않고 로그만 (MISSED 기록과 같
   db.failOn.push({ table: 'push_tickets', op: 'select' });
   const result = await quiet(() => runReceiptCheck(service, NOW, { fetchImpl: receiptsOf({ x: { status: 'ok' } }) }));
   assert.deepEqual(result, { checked: 0, tokensRemoved: 0, expired: 0 });
+});
+
+test('상수: 영수증은 15분 뒤에 확인하고 24시간이 지나면 포기함 (문서의 숫자 그대로)', () => {
+  assert.equal(RECEIPT_DELAY_MS, 15 * 60_000);
+  assert.equal(TICKET_MAX_AGE_MS, 24 * 3_600_000);
+});
+
+test('영수증이 늦게 오는 사이 같은 토큰이 다시 등록됐으면(마지막 본 시각이 접수 시각보다 늦음) 지우지 않음 — 표 줄만 정리', async () => {
+  const { db, service } = setup();
+  db.rows('push_tokens').find((t) => t.token === TA)!.last_seen_at = ago(60_000); // 접수(15분 넘게 전) 뒤에 앱이 다시 등록
+  db.rows('push_tickets').push(
+    { ticket_id: 't-a', user_id: A, token: TA, kind: 'WAKE_PING', created_at: ago(RECEIPT_DELAY_MS + 1000) },
+    { ticket_id: 't-b', user_id: B, token: TB, kind: 'WAKE_PING', created_at: ago(RECEIPT_DELAY_MS + 1000) },
+  );
+  const gone = { status: 'error', message: 'gone', details: { error: 'DeviceNotRegistered' } };
+  await runReceiptCheck(service, NOW, { fetchImpl: receiptsOf({ 't-a': gone, 't-b': gone }) });
+  assert.deepEqual(db.rows('push_tokens').map((t) => t.token).sort(), [TA, TC]); // 다시 등록한 A는 남고 B의 낡은 토큰만 사라짐
+  assert.equal(db.rows('push_tickets').length, 0);
+});
+
+test('DeviceNotRegistered가 아닌 영수증 오류는 서버 로그에 남김 (토큰은 그대로)', async () => {
+  const { db, service } = setup();
+  db.rows('push_tickets').push({ ticket_id: 't-c', user_id: B, token: TC, kind: 'WAKE_PING', created_at: ago(RECEIPT_DELAY_MS + 1000) });
+  const logged: unknown[][] = [];
+  const original = console.error;
+  console.error = (...a: unknown[]) => { logged.push(a); };
+  try {
+    await runReceiptCheck(service, NOW, { fetchImpl: receiptsOf({ 't-c': { status: 'error', message: 'too big', details: { error: 'MessageTooBig' } } }) });
+  } finally {
+    console.error = original;
+  }
+  assert.equal(logged.length, 1);
+  assert.match(String(logged[0].join(' ')), /MessageTooBig/);
+  assert.equal(db.rows('push_tokens').length, 3);
+});
+
+test('표 줄은 100개씩 나눠 지움 (한 번에 긴 목록을 지우다 거절되면 같은 줄을 영영 다시 잡음) — 250줄이면 지우기 3번', async () => {
+  const { db, service } = setup();
+  const map: Record<string, unknown> = {};
+  for (let i = 0; i < 250; i++) {
+    const id = `t${String(i).padStart(4, '0')}`;
+    db.rows('push_tickets').push({ ticket_id: id, user_id: A, token: TA, kind: 'WAKE_PING', created_at: ago(RECEIPT_DELAY_MS + 1000 + i) });
+    map[id] = { status: 'ok' };
+  }
+  const result = await runReceiptCheck(service, NOW, { fetchImpl: receiptsOf(map) });
+  assert.equal(result.checked, 250);
+  assert.equal(db.rows('push_tickets').length, 0);
+  assert.equal(db.calls.filter((c) => c === 'delete push_tickets').length, 3);
+});
+
+test('한 번에 1000줄까지, 오래된 접수 번호부터 — 1001줄이 쌓였으면 가장 새 줄이 남음', async () => {
+  const { db, service } = setup();
+  const map: Record<string, unknown> = {};
+  for (let i = 1000; i >= 0; i--) { // 새것부터 쌓음 — 정렬이 없으면 새것 1000줄이 잡혀 가장 오래된 줄이 남음
+    const id = `t${String(i).padStart(4, '0')}`;
+    db.rows('push_tickets').push({ ticket_id: id, user_id: A, token: TA, kind: 'WAKE_PING', created_at: ago(RECEIPT_DELAY_MS + (1001 - i) * 1000) }); // 번호가 클수록 새것
+    map[id] = { status: 'ok' };
+  }
+  const result = await runReceiptCheck(service, NOW, { fetchImpl: receiptsOf(map) });
+  assert.equal(result.checked, 1000);
+  assert.deepEqual(db.rows('push_tickets').map((t) => t.ticket_id), ['t1000']);
 });

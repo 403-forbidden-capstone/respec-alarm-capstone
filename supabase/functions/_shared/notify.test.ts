@@ -295,3 +295,32 @@ test('요청 읽기: 종류별 필수 칸 — 한 사람 종류는 targetUserId,
   assert.equal(issues({}), 'kind');
   assert.equal(issues({ kind: 'GROUP_APPT_CHANGED', groupId: GROUP, appointmentId: APPT }), 'no-error');
 });
+
+test('알람 id는 알람 바뀜에만 — 다른 종류에 실려 와도 읽을 때 버리고, 알림 데이터에도 안 실림 (남의 알람 id를 시험하는 길을 막음)', async () => {
+  const parsed = readNotifyRequest(Reader.root({ kind: 'FRIEND_REQUEST', targetUserId: TARGET, alarmId: ALARM }));
+  assert.deepEqual(parsed, { kind: 'FRIEND_REQUEST', targetUserId: TARGET });
+  const { db, service, pushes, fetchImpl } = setup();
+  db.rows('alarms').push({ alarm_id: '99999999-9999-4999-8999-999999999999', user_id: OTHER });
+  // 이미 읽은 요청에 알람 id가 남아 있어도(직접 부른 경우) 다른 종류는 알람을 조회하지도 데이터에 싣지도 않음
+  const result = await runNotify(service, SENDER, request({ kind: 'FRIEND_REQUEST', alarmId: '99999999-9999-4999-8999-999999999999' }), { fetchImpl: fetchImpl(okAll), sleep: noSleep });
+  assert.equal(result.sent, 2);
+  assert.ok(pushes.every((p) => !('alarmId' in p.data)));
+});
+
+test('11-20: 보내지 못한 이유(설정 없음 · Expo 장애)는 서버 로그에 남고, 잘 보내면 로그 없음', async () => {
+  const { service, fetchImpl } = setup();
+  const logged: string[] = [];
+  const original = console.error;
+  console.error = (...a: unknown[]) => { logged.push(a.join(' ')); };
+  try {
+    await runNotify(service, SENDER, request(), { fetchImpl: fetchImpl(() => ({ status: 'error', message: 'no fcm', details: { error: 'InvalidCredentials' } })), sleep: noSleep });
+    await runNotify(service, SENDER, request(), { fetchImpl: async () => new Response('{}', { status: 503 }), sleep: noSleep });
+    const clean = logged.length;
+    await runNotify(service, SENDER, request(), { fetchImpl: fetchImpl(okAll), sleep: noSleep });
+    assert.equal(logged.length, clean);
+  } finally {
+    console.error = original;
+  }
+  assert.match(logged[0], /PUSH_NOT_CONFIGURED/);
+  assert.match(logged[1], /PUSH_UNAVAILABLE/);
+});
