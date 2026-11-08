@@ -80,14 +80,16 @@ test('서버 오류와 정상 거절을 가름', () => {
   assert.equal(isServerFault(null), false);
 });
 
-test('5장 그룹 노출(strict): 초대만 받은 그룹이 보이면 위반, 만든 직후 예외는 알려진 동작', () => {
+test('5장 그룹 노출(strict): 초대만 받은 그룹이 보이면 위반, 만든 사람이어도 나간 뒤 보이면 위반(5장 전에만 알려진 동작)', () => {
   const members = [{ user_id: A, group_id: 'g1', invite_status: 'INVITED' }, { user_id: B, group_id: 'g1', invite_status: 'JOINED' }];
   const groups = [{ group_id: 'g1', owner_id: B }];
   assert.deepEqual(checkGroupVisibility({ me: A, visibleGroupIds: ['g1'], members, groups }), []); // 옛 규칙은 초대 중도 허용
   assert.equal(checkGroupVisibility({ me: A, visibleGroupIds: ['g1'], members, groups, strict: true })[0].kind, 'VIOLATION');
   assert.deepEqual(checkGroupVisibility({ me: B, visibleGroupIds: ['g1'], members, groups, strict: true }), []);
   const mine = [{ user_id: A, group_id: 'g2', invite_status: 'LEFT' }];
-  assert.equal(checkGroupVisibility({ me: A, visibleGroupIds: ['g2'], members: mine, groups: [{ group_id: 'g2', owner_id: A }], strict: true })[0].kind, 'KNOWN');
+  const own = [{ group_id: 'g2', owner_id: A }];
+  assert.equal(checkGroupVisibility({ me: A, visibleGroupIds: ['g2'], members: mine, groups: own, strict: true })[0].kind, 'VIOLATION');
+  assert.equal(checkGroupVisibility({ me: A, visibleGroupIds: ['g2'], members: mine, groups: own })[0].kind, 'KNOWN');
 });
 
 test('5장 구성원 행 노출: 초대만 받은 사람은 내 행 말고 다른 사람 행을 못 봄', () => {

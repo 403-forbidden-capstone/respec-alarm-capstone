@@ -145,7 +145,14 @@ export const ACTIONS = [
         .or(`requester_id.eq.${c.me.id},addressee_id.eq.${c.me.id}`);
       const friend = c.rng.pick(fr ?? []);
       const target = friend && !c.rng.chance(0.15) ? (friend.requester_id === c.me.id ? friend.addressee_id : friend.requester_id) : other(c).id;
-      return callStatus(c, c.me.client, 'group_invite', { p_group_id: g.group_id, p_user_id: target });
+      // 초대가 되려면: 내가 참여 중(위에서 고름) + 상대가 내 친구(수락됨) + 차단 쌍 아님 + 아직 멤버 아님. 아니면 INVITED가 돌아오면 안 됨
+      const isFriend = (fr ?? []).some((f) => (f.requester_id === target && f.addressee_id === c.me.id) || (f.addressee_id === target && f.requester_id === c.me.id));
+      const blocked = (await c.admin.from('user_blocks').select('blocker_id').or(`and(blocker_id.eq.${c.me.id},blocked_id.eq.${target}),and(blocker_id.eq.${target},blocked_id.eq.${c.me.id})`)).data ?? [];
+      const res = await callStatus(c, c.me.client, 'group_invite', { p_group_id: g.group_id, p_user_id: target });
+      if (res.status === 'INVITED' && (!isFriend || blocked.length > 0)) {
+        c.anomalies.push({ kind: 'VIOLATION', rule: 'G-친구가 아니거나 차단 쌍인 사람에게 그룹 초대가 됨', detail: `${c.me.id} → ${target} (friend=${isFriend}, blocked=${blocked.length > 0})` });
+      }
+      return res;
     },
   },
   {

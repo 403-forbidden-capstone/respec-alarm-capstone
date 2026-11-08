@@ -60,7 +60,8 @@ export function checkSharedRead({ owner, grantee, rows, perms, friends, blocks }
 // 그룹 노출: 내가 볼 수 있는 그룹은 내 멤버 행이 있는 곳뿐.
 //   strict(5장 이후) = 참여 중(JOINED)인 그룹만 보임 — 초대만 받은 사람은 그룹 표를 못 봄(초대 카드는 my_group_invites 함수로).
 //   strict가 아니면 초대 중도 허용.
-//   만든 사람은 만든 직후 1분 동안은 나간 뒤에도 보이는 예외가 있음(5장 정책) · 그 전에는 그룹장 정책 → KNOWN
+//   5장 이후: 만든 사람의 읽기 예외는 '만든 같은 트랜잭션' 안에서만이라 하루 끝 조회에는 걸리지 않음 → 나간 뒤에도 보이면 위반.
+//   5장 전: 그룹장 정책이 남아 있어 나간 뒤에도 보이는 것은 알려진 동작(KNOWN)
 export function checkGroupVisibility({ me, visibleGroupIds, members, groups = [], strict = false }) {
   const out = [];
   const okStatus = strict ? ['JOINED'] : ['INVITED', 'JOINED'];
@@ -68,8 +69,8 @@ export function checkGroupVisibility({ me, visibleGroupIds, members, groups = []
   for (const g of visibleGroupIds) {
     if (mineOk.has(g)) continue;
     const row = groups.find((x) => x.group_id === g);
-    if (row && row.owner_id === me) {
-      out.push({ kind: 'KNOWN', rule: strict ? 'G-만든 사람은 만든 직후 1분 동안 나간 뒤에도 보임 (5장 예외)' : 'G-그룹장이라 나간 뒤에도 보임 (5장 그룹장 없음 전 동작)', detail: `${me} → ${g}` });
+    if (!strict && row && row.owner_id === me) {
+      out.push({ kind: 'KNOWN', rule: 'G-그룹장이라 나간 뒤에도 보임 (5장 그룹장 없음 전 동작)', detail: `${me} → ${g}` });
     } else {
       out.push({ kind: 'VIOLATION', rule: strict ? 'G-참여 중이 아닌 그룹이 보임' : 'G-멤버가 아닌 그룹이 보임', detail: `${me} → ${g}` });
     }
