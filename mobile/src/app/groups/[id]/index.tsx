@@ -202,13 +202,5 @@ const styles = StyleSheet.create({
   pressed: { opacity: 0.6 },
   sub: { marginTop: 4 },
   linkText: { marginTop: 6 },
-  minis: { flexDirection: 'row', gap: 8 },
   paragraph: { lineHeight: 20 },
-  codeBox: {
-    alignItems: 'center',
-    marginVertical: 16,
-    paddingVertical: 18,
-    borderRadius: 16,
-    backgroundColor: colors.chip,
-  },
 });

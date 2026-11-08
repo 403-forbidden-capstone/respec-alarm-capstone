@@ -40,7 +40,6 @@ import { friendLinkUrl } from '@/features/social/inviteLink';
 import { permissionNames } from '@/features/social/permissions';
 import type { FriendItem, GroupInvite, GroupItem, PeopleSearch, Person } from '@/features/social/types';
 import { now } from '@/lib/clock';
-import { josa } from '@/lib/format';
 import { useAction } from '@/lib/useAction';
 
 type Tab = 'friend' | 'group';
@@ -387,15 +386,14 @@ function GroupTab({
       <SectionHeader title="참여 중인 그룹" right={`${groups.length}개`} />
       {groups.length ? null : <EmptyState title="아직 참여한 그룹이 없어요" body="새 그룹을 만들거나 초대 코드로 참여해 보세요." />}
       {groups.map((g) => {
+        // 기상 상태를 볼 수 없는 그룹(혼자 · 아직 아무도 권한을 안 줌)도 상세는 열림 — 나가기 · 초대 · 코드 메뉴가 거기 있음 (5-04). 기상 칸만 상세에서 숨김
         if (!g.canSeeWake) {
           return (
-            <Card key={g.id} onPress={() => toast(`${josa(g.name, '은', '는')} 공유 권한이 없어 기상 상태를 볼 수 없어요`)}>
+            <Card key={g.id} onPress={() => router.push({ pathname: '/groups/[id]', params: { id: g.id } })}>
               <View style={styles.row}>
                 <GroupIcon label={g.initial} light />
                 <View style={styles.grow}>
-                  <Text variant="big">
-                    {g.name}
-                  </Text>
+                  <Text variant="big">{g.name}</Text>
                   <Text variant="small" tone="sub">
                     {g.memberCount}명 · 공유 없음
                   </Text>

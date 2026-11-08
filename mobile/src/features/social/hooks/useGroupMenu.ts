@@ -1,6 +1,7 @@
 import { useState } from 'react';
 
 import { confirm, toast } from '@/components/ui';
+import { userMessage } from '@/lib/errors';
 import { useAction } from '@/lib/useAction';
 
 import { getGroupCode, inviteToGroup, leaveGroup, listInvitableFriends, regenerateInviteCode, removeGroupMember, renameGroup, setGroupNotificationsOff } from '../api';
@@ -25,15 +26,15 @@ export function useGroupMenu(group: GroupDetail, onChanged: () => void, onLeft: 
     setInviteOpen(false);
   };
 
-  const loadCode = () =>
-    run(async () => {
-      try {
-        setCode(await getGroupCode(group.id));
-      } catch (e) {
-        setCodeOpen(false); // 못 읽으면 빈 시트를 열어 두지 않음 — 이유는 useAction이 토스트로
-        throw e;
-      }
-    }, '코드를 불러오지 못했어요');
+  // 시트 열 때의 읽기는 쓰기 버튼의 한 번에 하나 가드(run)와 따로 — 가드에 막혀 버려지면 시트가 로딩에 머묾
+  const loadCode = async () => {
+    try {
+      setCode(await getGroupCode(group.id));
+    } catch (e) {
+      setCodeOpen(false); // 못 읽으면 빈 시트를 열어 두지 않음
+      toast(userMessage(e, '코드를 불러오지 못했어요'));
+    }
+  };
 
   const openCode = () => {
     setMenuOpen(false);
@@ -43,15 +44,14 @@ export function useGroupMenu(group: GroupDetail, onChanged: () => void, onLeft: 
     void loadCode();
   };
 
-  const loadFriends = () =>
-    run(async () => {
-      try {
-        setFriends(await listInvitableFriends(group.id));
-      } catch (e) {
-        setInviteOpen(false);
-        throw e;
-      }
-    }, '친구 목록을 불러오지 못했어요');
+  const loadFriends = async () => {
+    try {
+      setFriends(await listInvitableFriends(group.id));
+    } catch (e) {
+      setInviteOpen(false);
+      toast(userMessage(e, '친구 목록을 불러오지 못했어요'));
+    }
+  };
 
   const openInvite = () => {
     setFriends(null);
@@ -65,7 +65,7 @@ export function useGroupMenu(group: GroupDetail, onChanged: () => void, onLeft: 
       await run(async () => {
         await inviteToGroup(group.id, f.person.id);
         toast(`${f.person.name}님을 초대했어요`);
-        setFriends(await listInvitableFriends(group.id));
+        await listInvitableFriends(group.id).then(setFriends, () => undefined); // 초대는 됐으니 목록 갱신이 실패해도 오류로 안 보임
       }, '초대하지 못했어요. 다시 해 주세요');
     } finally {
       setInvitingId(null);
@@ -74,8 +74,14 @@ export function useGroupMenu(group: GroupDetail, onChanged: () => void, onLeft: 
 
   const newCode = () =>
     run(async () => {
-      setCode(await regenerateInviteCode(group.id));
-      toast('새 코드를 만들었어요');
+      try {
+        setCode(await regenerateInviteCode(group.id));
+        toast('새 코드를 만들었어요');
+      } catch (e) {
+        setCode(null); // 새 코드는 만들어졌는데 읽기만 실패했을 수 있음 — 무효가 된 옛 코드를 그대로 두지 않고 다시 읽음
+        void loadCode();
+        throw e;
+      }
     }, '새 코드를 만들지 못했어요. 다시 해 주세요');
 
   const share = () => {
@@ -98,25 +104,28 @@ export function useGroupMenu(group: GroupDetail, onChanged: () => void, onLeft: 
       onChanged();
     }, '알림 설정을 바꾸지 못했어요. 다시 해 주세요');
 
-  const remove = (p: Person) =>
-    run(async () => {
-      setMenuOpen(false);
-      const t = removeMemberText(p.name);
-      if (!(await confirm({ title: t.title, message: t.body, okLabel: t.ok, destructive: true }))) return;
+  // 확인 창은 한 번에 하나 가드(run) 밖에서 — 확인 대기 중에는 busy가 켜지지 않음
+  const remove = async (p: Person) => {
+    setMenuOpen(false);
+    const t = removeMemberText(p.name);
+    if (!(await confirm({ title: t.title, message: t.body, okLabel: t.ok, destructive: true }))) return;
+    await run(async () => {
       await removeGroupMember(group.id, p.id);
       toast(MEMBER_REMOVED_TOAST);
       onChanged();
     }, '내보내지 못했어요. 다시 해 주세요');
+  };
 
-  const leave = () =>
-    run(async () => {
-      setMenuOpen(false);
-      const t = leaveText(group.name, group.appointments.length, group.members.length <= 1);
-      if (!(await confirm({ title: t.title, message: t.body, okLabel: t.ok, destructive: true }))) return;
+  const leave = async () => {
+    setMenuOpen(false);
+    const t = leaveText(group.name, group.appointments.length, group.members.length <= 1);
+    if (!(await confirm({ title: t.title, message: t.body, okLabel: t.ok, destructive: true }))) return;
+    await run(async () => {
       await leaveGroup(group.id);
       toast(LEFT_TOAST);
       onLeft();
     }, '나가지 못했어요. 다시 해 주세요');
+  };
 
   const others = group.members.filter((m) => !m.isMe).map((m) => m.person);
 

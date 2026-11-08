@@ -18,28 +18,37 @@ const CODE_MAX = 16;
 //   코드 입력 → [확인] 미리보기(그룹 이름 · 인원 · 이미 참여 · 만료 · 가득, 오류는 없는 · 만료 · 잠시 뒤 다시 세 가지) → [참여하기] → 기상 공유 동의 시트 → 그룹 상세
 export default function JoinGroupScreen() {
   const [code, setCode] = useState('');
-  const [preview, setPreview] = useState<GroupPreview | null>(null);
+  const [preview, setPreview] = useState<{ code: string; result: GroupPreview } | null>(null); // 어느 코드로 물은 결과인지 같이 둠
   const [consent, setConsent] = useState(false);
   const { busy, run } = useAction();
   const cleaned = cleanCode(code);
-  const found = preview?.status === 'FOUND' ? preview : null;
+  // 입력한 코드와 다른 코드로 물은 결과(늦게 온 응답)는 안 보임 — 코드를 고치면 미리보기가 사라지고 [확인]으로 돌아감
+  const shown = preview && preview.code === cleaned ? preview.result : null;
+  const found = shown?.status === 'FOUND' ? shown : null;
 
   const check = () =>
     run(async () => {
       if (!cleaned) return;
-      setPreview(await previewGroupByCode(cleaned));
+      const result = await previewGroupByCode(cleaned);
+      setPreview({ code: cleaned, result });
     }, '코드를 확인하지 못했어요. 다시 해 주세요');
 
   // 이미 참여 중이면 같은 함수가 그 그룹 id만 돌려줌(상태 그대로) — 동의를 다시 묻지 않고 그룹 상세로
   const join = (share: boolean) =>
     run(async () => {
-      const g = await joinGroup(cleaned, share);
-      setConsent(false);
-      toast(g.already ? GROUP_ALREADY : '그룹에 참여했어요');
-      openGroupDetail(g.id, 'stack');
+      try {
+        const g = await joinGroup(cleaned, share);
+        toast(g.already ? GROUP_ALREADY : '그룹에 참여했어요');
+        openGroupDetail(g.id, 'stack');
+      } catch (e) {
+        setPreview(null); // 미리보기 뒤 코드가 바뀌었을 수 있음 — 다시 [확인]부터
+        throw e;
+      } finally {
+        setConsent(false);
+      }
     }, '그룹에 참여하지 못했어요. 다시 해 주세요');
 
-  const problem = preview ? previewProblem(preview) : null;
+  const problem = shown ? previewProblem(shown) : null;
   const primary = !found ? (
     <Button label="확인" onPress={check} disabled={!cleaned} loading={busy} />
   ) : found.alreadyJoined ? (
@@ -64,10 +73,7 @@ export default function JoinGroupScreen() {
           first
           label="초대 코드"
           value={code}
-          onChangeText={(t) => {
-            setCode(t.toUpperCase());
-            setPreview(null); // 코드를 고치면 미리보기는 다시
-          }}
+          onChangeText={(t) => setCode(t.toUpperCase())}
           autoCapitalize="characters"
           autoCorrect={false}
           maxLength={CODE_MAX}

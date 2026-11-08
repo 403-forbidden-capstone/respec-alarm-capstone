@@ -26,6 +26,7 @@ export default function NewGroupScreen() {
 
   const create = () =>
     run(async () => {
+      if (created) return; // 동의 시트가 떠 있는 동안 키보드 완료로 또 만들지 않음
       const g = await createGroup(trimmed);
       allowLeave();
       // 만들자마자 보내기 — 공유창을 닫아도 그룹은 이미 만들어졌으니 동의 시트로 이어감
