@@ -119,9 +119,35 @@ export type ShareLogItem = { at: Date; text: string };
 // G04에서 알람을 바꾼 결과 — 저장은 됐고 주인에게 알림이 갔는지만 알려 줌 (알림이 실패해도 저장은 그대로, 화면은 조용히 "바꿨어요"만)
 export type SharedChangeResult = { notified: boolean };
 
-// 아이디로 찾은 사람과 나와의 관계 (새 UI용 — 이미 친구인 사람에게 요청을 또 보내지 않게)
-export type FriendRelation = 'SELF' | 'FRIEND' | 'SENT' | 'RECEIVED' | 'NONE';
-export type HandleSearchResult = { person: Person; relation: FriendRelation };
+// 아이디로 찾은 사람과 나와의 관계 — 서버 값 NONE · REQUEST_SENT · REQUEST_RECEIVED · FRIEND를 앱 값으로 (real/friends.ts)
+export type FriendRelation = 'FRIEND' | 'SENT' | 'RECEIVED' | 'NONE';
+
+// 아이디 정확 일치 한 번의 결과 (search_by_handle) — 없음 · 탈퇴 · 차단 · 온보딩 전은 모두 NOT_FOUND
+export type HandleSearch =
+  | { status: 'FOUND'; person: Person; relation: FriendRelation }
+  | { status: 'SELF'; person: Person }
+  | { status: 'NOT_FOUND' }
+  | { status: 'LIMIT'; retryAfterSeconds: number };
+
+// 검색 결과 한 줄 — via = 어떻게 찾았나 (HANDLE 아이디 정확 일치 · FRIEND 친구 이름 · GROUP 같은 그룹 이름)
+export type PersonHit = { person: Person; relation: FriendRelation; via: 'HANDLE' | 'FRIEND' | 'GROUP' };
+
+// F01 검색칸 한 번의 결과 — 아이디 정확 일치가 rows 맨 앞
+export type PeopleSearch = {
+  rows: PersonHit[];
+  self: Person | null; // 내 아이디로 찾음
+  limitSeconds: number | null; // 아이디 검색 제한에 걸림 — n초 뒤 다시
+  notFound: boolean; // 아무도 못 찾음 (내 아이디 · 제한은 아님)
+};
+
+// 내 친구 링크 (my_friend_link) — 7일, 다시 만들면 옛 링크는 바로 무효
+export type FriendLink = { token: string; expiresAt: Date };
+
+// 친구 링크 착지 (open_friend_link) — 요청은 안 보낸 상태. 없는 · 옛 · 만료 · 탈퇴 · 차단 · 온보딩 전은 모두 EXPIRED
+export type OpenedLink =
+  | { status: 'OK'; person: Person; relation: FriendRelation }
+  | { status: 'SELF'; person: Person }
+  | { status: 'EXPIRED' };
 
 // 그룹을 만든 결과 (새 UI용) — 만들고 바로 초대 코드를 보여 줄 수 있게
 export type CreatedGroup = { id: string; inviteCode: string };

@@ -6,13 +6,13 @@ import { dateParts, formatTime, minutesBetween, startOfDay, timeParts } from '@/
 import type { Enums } from '@/types/database';
 import { levelOfIntensity, levelOfSoundKey } from '@shared/calc/intensity.ts';
 
-import type { MemberAlarm, Person, TimelineEntry, WakeState } from './types';
+import type { FriendLink, FriendRelation, HandleSearch, MemberAlarm, OpenedLink, Person, TimelineEntry, WakeState } from './types';
 
 // ---------------------------------------------------------------------------
 // 사람
 // ---------------------------------------------------------------------------
 
-// get_public_profiles · find_profile_by_handle가 주는 공개 칸 (닉네임 · 사진 · 아이디)
+// get_public_profiles · search_by_handle · search_related_by_name이 주는 공개 칸 (닉네임 · 사진 · 아이디)
 export type ProfileRow = { user_id: string; nickname: string; handle: string | null; profile_image_url: string | null };
 
 // 이름 첫 글자 (아바타)
@@ -179,4 +179,66 @@ export function shareTags(rows: readonly { source: string; viewAlarm: boolean; e
   const canView = rows.some((r) => r.viewAlarm);
   const tags = rows.flatMap((r) => [...(r.viewAlarm ? [`조회 · ${r.source}`] : []), ...(r.editAlarm && canView ? [`설정 · ${r.source}`] : [])]);
   return [...new Set(tags)];
+}
+
+// ---------------------------------------------------------------------------
+// 친구 2장 — 아이디 검색 · 이름 검색 · 친구 링크 응답 (search_by_handle · search_related_by_name · my_friend_link · open_friend_link)
+// ---------------------------------------------------------------------------
+
+// 서버의 관계 값 → 앱 값 (REQUEST_SENT · REQUEST_RECEIVED가 앱의 SENT · RECEIVED)
+export function relationFromServer(value: unknown): FriendRelation {
+  switch (value) {
+    case 'NONE':
+      return 'NONE';
+    case 'REQUEST_SENT':
+      return 'SENT';
+    case 'REQUEST_RECEIVED':
+      return 'RECEIVED';
+    case 'FRIEND':
+      return 'FRIEND';
+    default:
+      throw new Error(`알 수 없는 관계 값: ${String(value)}`);
+  }
+}
+
+type Json = Record<string, unknown>;
+const obj = (value: unknown): Json => (value && typeof value === 'object' ? (value as Json) : {});
+
+// search_by_handle 응답 → 화면 값. 모르는 상태는 던짐 — 못 찾은 것으로 잘못 보이지 않게
+export function handleSearchFromRpc(data: unknown): HandleSearch {
+  const r = obj(data);
+  switch (r.status) {
+    case 'FOUND':
+      return { status: 'FOUND', person: personFromProfile(r.profile as ProfileRow), relation: relationFromServer(r.relation) };
+    case 'SELF':
+      return { status: 'SELF', person: personFromProfile(r.profile as ProfileRow) };
+    case 'NOT_FOUND':
+      return { status: 'NOT_FOUND' };
+    case 'LIMIT':
+      return { status: 'LIMIT', retryAfterSeconds: Math.max(1, Math.ceil(Number(r.retry_after_seconds) || 1)) };
+    default:
+      throw new Error(`알 수 없는 검색 상태: ${String(r.status)}`);
+  }
+}
+
+// open_friend_link 응답 → 화면 값
+export function openedLinkFromRpc(data: unknown): OpenedLink {
+  const r = obj(data);
+  switch (r.status) {
+    case 'OK':
+      return { status: 'OK', person: personFromProfile(r.profile as ProfileRow), relation: relationFromServer(r.relation) };
+    case 'SELF':
+      return { status: 'SELF', person: personFromProfile(r.profile as ProfileRow) };
+    case 'EXPIRED':
+      return { status: 'EXPIRED' };
+    default:
+      throw new Error(`알 수 없는 링크 상태: ${String(r.status)}`);
+  }
+}
+
+// my_friend_link 응답 → 화면 값
+export function friendLinkFromRpc(data: unknown): FriendLink {
+  const r = obj(data);
+  if (typeof r.token !== 'string' || typeof r.expires_at !== 'string') throw new Error('친구 링크 응답이 이상해요');
+  return { token: r.token, expiresAt: parseDbTime(r.expires_at) };
 }

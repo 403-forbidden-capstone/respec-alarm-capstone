@@ -1,6 +1,5 @@
 // 친구 2장 — 아이디 · 친구 찾기 (친구_시험케이스.md 2장 DB · 함수 층, 11/8 확정)
 //   항목 이름 앞 번호 = 시험케이스 번호. 함수 층(2-34)은 서버 함수 없이 앱이 DB 함수를 바로 부르므로 DB에서 확인
-//   빈 곳(문서 보충 대기): 2-09 예약어 목록 · 검색 하루 상한 숫자 → respec_ 거절 · 1분 10회만 확인
 //   사람은 이 장 전용 계정(앞 검사의 A~E와 안 섞임). 이 장 끝에 아무것도 되돌리지 않아도 됨(db-check 맨 끝에서 돎)
 export default async function ch02({ q, as, su, check, expectErr, PGlite, AUTH_STUBS, MIG_DIR, readFileSync, readdirSync, join }) {
   const id = (n) => `20000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
@@ -17,7 +16,11 @@ export default async function ch02({ q, as, su, check, expectErr, PGlite, AUTH_S
   };
   const handleOf = async (uid) => (await q(`select handle from public.profiles where user_id = $1`, [uid]))[0]?.handle;
   const setHandle = (uid, h) => q(`update public.profiles set handle = $2 where user_id = $1`, [uid, h]);   // 슈퍼유저로 바로
-  const change = async (uid, h) => { await as(uid); const [r] = await q(`select public.change_my_handle($1) as r`, [h]); await su(); return r.r; };
+  // 바꾸기 시도도 검색과 같은 횟수에 세므로(2-53) 보통은 부르기 전에 내 기록을 지워 여러 번 불러도 걸리지 않게 함. 횟수를 시험하는 곳만 keep
+  const change = async (uid, h, { keep = false } = {}) => {
+    if (!keep) await q(`delete from public.rate_limit_events where user_id = $1`, [uid]);
+    await as(uid); const [r] = await q(`select public.change_my_handle($1) as r`, [h]); await su(); return r.r;
+  };
   const search = async (uid, s) => { await as(uid); const [r] = await q(`select public.search_by_handle($1) as r`, [s]); await su(); return r.r; };
   const byName = async (uid, s) => { await as(uid); const r = await q(`select * from public.search_related_by_name($1)`, [s]); await su(); return r; };
   const myLink = async (uid, renew = false) => { await as(uid); const [r] = await q(`select public.my_friend_link($1) as r`, [renew]); await su(); return r.r; };
@@ -142,14 +145,19 @@ export default async function ch02({ q, as, su, check, expectErr, PGlite, AUTH_S
     return lim(out.d10) && lim(out.d29h23) && out.d30m1.r.status === 'OK' && out.d30m1.r.handle === 'try_d30m1' ? true : out;
   });
 
-  await check('2-05 · 2-06 · 2-09(respec_ 부분): Kim.01 · 김철수 · 2자 · 21자는 INVALID, respec_admin은 RESERVED, KIM_01 · " @Mix_09 "는 소문자로 저장', async () => {
+  await check('2-05 · 2-06 · 2-09: Kim.01 · 김철수 · 2자 · 21자는 INVALID, respec_ 로 시작하는 것과 예약어 10개(대소문자 무시, 정확히 같을 때만)는 RESERVED, admin1처럼 다른 글자가 붙으면 통과, KIM_01 · " @Mix_09 "는 소문자로 저장', async () => {
     const r = {};
     for (const h of ['Kim.01', '김철수', 'ab', 'a'.repeat(21), 'respec_admin', 'RESPEC_x1y2', '', 'x'.repeat(65)]) r[h.slice(0, 12)] = (await change(W, h)).status;
+    const words = ['admin', 'respec', 'support', 'help', 'official', 'system', 'root', 'operator', 'manager', 'null', 'ADMIN', ' @Root '];
+    const reserved = [];
+    for (const w of words) reserved.push((await change(W, w)).status);
+    const near = [(await change(W, 'admin1')).status, (await change(W, 'my_root')).status, (await change(W, 'respec1')).status];   // 정확히 같을 때만 막음
     const up = await change(W, 'KIM_01');
     const mixed = await change(W, ' @Mix_09 ');
     return r['Kim.01'] === 'INVALID' && r['김철수'] === 'INVALID' && r.ab === 'INVALID' && r['aaaaaaaaaaaa'] === 'INVALID'
       && r.respec_admin === 'RESERVED' && r.RESPEC_x1y2 === 'RESERVED' && r[''] === 'INVALID' && r['xxxxxxxxxxxx'] === 'INVALID'
-      && up.status === 'OK' && up.handle === 'kim_01' && mixed.status === 'OK' && (await handleOf(W)) === 'mix_09' ? true : { r, up, mixed };
+      && reserved.every((x) => x === 'RESERVED') && near.every((x) => x === 'OK')
+      && up.status === 'OK' && up.handle === 'kim_01' && mixed.status === 'OK' && (await handleOf(W)) === 'mix_09' ? true : { r, reserved, near, up, mixed };
   });
 
   const X = await join_(13, '갖고있던사람', { onboarded: false });
@@ -297,6 +305,40 @@ export default async function ch02({ q, as, su, check, expectErr, PGlite, AUTH_S
     await clearSearches(A);
     await clearSearches(B);
     return [aFound, aMissing, aSelf].every((x) => x.status === 'LIMIT') && b.status === 'FOUND' ? true : { aFound, aMissing, aSelf, b };
+  });
+
+  await check('2-52: 하루 100번 — 101번째 검색은 LIMIT(남은 시간은 그 사람 시간대 다음 0시까지), 걸린 호출은 기록에 안 남고 날이 바뀌면(어제 기록은 안 셈) 다시 됨', async () => {
+    const S = await join_(28, '하루검색');
+    // 시험을 돌리는 시각과 상관없이 그 사람 시간대에서 지금이 낮 12시쯤이 되게 고정 시간대(Etc/GMT±N)를 고름 — 자정 근처에 돌아도 흔들리지 않게
+    const [{ tz }] = await q(`select 'Etc/GMT' || case when h >= 12 then '+' || (h - 12) else '-' || (12 - h) end as tz
+                              from (select extract(hour from now() at time zone 'UTC')::int as h) x`);
+    await q(`update public.profiles set timezone = $2 where user_id = $1`, [S, tz]);
+    // 오늘 100번(그 시간대 0시 1시간 뒤 = 지금보다 한참 전이라 1분 제한에는 안 걸림)
+    await q(`insert into public.rate_limit_events (user_id, action, created_at)
+             select $1, 'HANDLE_SEARCH', ((now() at time zone $2)::date::timestamp at time zone $2) + interval '1 hour' from generate_series(1, 100)`, [S, tz]);
+    const over = await search(S, 'kim_01');
+    const [{ n }] = await q(`select count(*)::int as n from public.rate_limit_events where user_id = $1`, [S]);
+    await q(`update public.rate_limit_events set created_at = created_at - interval '1 day' where user_id = $1`, [S]);
+    const nextDay = await search(S, 'kim_01');
+    return over.status === 'LIMIT' && over.retry_after_seconds > 60 && over.retry_after_seconds <= 86400 && n === 100 && nextDay.status === 'FOUND' ? true : { over, n, nextDay };
+  });
+
+  await check('2-53: 아이디 바꾸기 시도도 검색과 같은 횟수에 셈 — 검색 6번 + 바꾸기(TAKEN) 4번 = 10번, 11번째는 바꾸기도 검색도 LIMIT(+ 남은 초), 걸린 호출은 아이디를 안 바꾸고 기록에 안 남음', async () => {
+    const S = await join_(29, '바꾸기시도', { onboarded: false });
+    const six = [];
+    for (let i = 0; i < 6; i++) six.push((await search(S, i % 2 ? 'kim_01' : `none_${i}`)).status);
+    const four = [];
+    for (let i = 0; i < 4; i++) four.push((await change(S, 'kim_01', { keep: true })).status);   // kim_01은 B가 씀
+    const eleventh = await change(S, 'kim_02x', { keep: true });
+    const searchLimited = await search(S, 'kim_01');
+    const [{ n }] = await q(`select count(*)::int as n from public.rate_limit_events where user_id = $1 and action = 'HANDLE_SEARCH'`, [S]);
+    const kept = await handleOf(S);
+    await q(`update public.rate_limit_events set created_at = created_at - interval '61 seconds' where user_id = $1`, [S]);
+    const later = await change(S, 'kim_03x', { keep: true });
+    return six.every((x) => x === 'FOUND' || x === 'NOT_FOUND') && four.every((x) => x === 'TAKEN')
+      && eleventh.status === 'LIMIT' && eleventh.retry_after_seconds >= 1 && eleventh.retry_after_seconds <= 60
+      && Object.keys(eleventh).sort().join(',') === 'retry_after_seconds,status' && searchLimited.status === 'LIMIT'
+      && n === 10 && HANDLE_RE.test(kept) && later.status === 'OK' ? true : { six, four, eleventh, searchLimited, n, kept, later };
   });
 
   await check('옛 모양 find_profile_by_handle: 같은 검색 · 같은 제한을 거침 — 찾으면 공개 4칸 한 행, 온보딩 전 · 제한이면 빈 결과', async () => {
