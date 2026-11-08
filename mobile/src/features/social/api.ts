@@ -13,6 +13,7 @@ import { db, kst, memberAlarms, people, timelines, TODAY, type MockGroup, type M
 
 import { mergeGrants } from './grants';
 import * as real from './real';
+import { MESSAGE_GONE } from './relationMessages';
 import { mergeHits } from './searchView';
 import {
   type CreatedGroup,
@@ -113,6 +114,33 @@ export async function acceptFriend(id: string) {
   db.requests = db.requests.filter((x) => x !== id);
   if (!db.friends.includes(id)) db.friends.push(id);
   db.grants.friend[id] = none();
+}
+
+// 내가 보낸 대기 요청 — F01 보낸 요청 · [취소]
+export async function listSentRequests(): Promise<Person[]> {
+  if (!isMock()) return real.listSentRequests();
+  return [...sentRequests].map(person);
+}
+
+// 받은 요청 거절 — 행이 지워지고 알림은 없음
+export async function declineFriend(id: string) {
+  if (!isMock()) return real.declineFriend(id);
+  if (!db.requests.includes(id)) throw new UserError(MESSAGE_GONE);
+  db.requests = db.requests.filter((x) => x !== id);
+}
+
+// 보낸 요청 취소
+export async function cancelFriendRequest(id: string) {
+  if (!isMock()) return real.cancelFriendRequest(id);
+  if (!sentRequests.delete(id)) throw new UserError(MESSAGE_GONE);
+}
+
+// 친구 끊기 — 친구 권한도 같이 지워짐 (그룹 출처는 그대로)
+export async function removeFriend(id: string) {
+  if (!isMock()) return real.removeFriend(id);
+  if (!db.friends.includes(id)) throw new UserError(MESSAGE_GONE);
+  db.friends = db.friends.filter((x) => x !== id);
+  delete db.grants.friend[id];
 }
 
 // 참여 중인 그룹 (G01 그룹)
@@ -388,7 +416,7 @@ export async function openFriendLink(token: string): Promise<OpenedLink> {
 }
 
 // 친구 요청 보내기 — 가짜 모드는 보낸 요청으로만 기억함 (상대가 수락하는 흐름은 목업 범위 밖)
-export async function sendFriendRequest(userId: string) {
+export async function sendFriendRequest(userId: string): Promise<'SENT' | 'FRIEND'> {
   if (!isMock()) return real.sendFriendRequest(userId);
   if (userId === 'me') throw new UserError('나에게는 친구 요청을 보낼 수 없어요');
   if (!people[userId]) throw new UserError('사용자를 찾을 수 없어요');
@@ -396,6 +424,7 @@ export async function sendFriendRequest(userId: string) {
     throw new UserError('이미 친구이거나 요청이 진행 중이에요');
   }
   sentRequests.add(userId);
+  return 'SENT';
 }
 
 // 그룹 만들기 — 만든 사람(나)이 바로 참여, 초대 코드가 생김

@@ -3,7 +3,7 @@ import { describe, expect, it } from '@jest/globals';
 import { now } from '@/lib/clock';
 import { UserError } from '@/lib/errors';
 
-import { createGroup, getGroup, joinGroupByCode, listGroups, listRelations, myFriendLink, openFriendLink, regenerateInviteCode, searchByHandle, searchPeople, sendFriendRequest, setWakeShareOptIn } from '../api';
+import { createGroup, getGroup, joinGroupByCode, listGroups, listRelations, cancelFriendRequest, declineFriend, listFriendRequests, listFriends, listSentRequests, myFriendLink, openFriendLink, regenerateInviteCode, removeFriend, searchByHandle, searchPeople, sendFriendRequest, setWakeShareOptIn } from '../api';
 
 // 새 UI용 함수의 가짜 구현 — 화면이 생기면 가짜 모드에서도 같은 이름으로 바로 쓰게 (실데이터는 real.test.ts)
 describe('아이디 검색 · 친구 요청 (가짜)', () => {
@@ -30,8 +30,34 @@ describe('아이디 검색 · 친구 요청 (가짜)', () => {
     await expect(sendFriendRequest('bj')).rejects.toThrow(UserError); // 이미 받은 요청
     await expect(sendFriendRequest('me')).rejects.toThrow(UserError);
     await expect(sendFriendRequest('nobody')).rejects.toThrow(UserError);
-    await sendFriendRequest('mom');
+    expect(await sendFriendRequest('mom')).toBe('SENT');
     await expect(sendFriendRequest('mom')).rejects.toThrow(UserError); // 두 번은 안 됨
+  });
+});
+
+describe('친구 요청 거절 · 취소 · 끊기 (가짜)', () => {
+  it('보낸 요청 목록에 보이고, 취소하면 사라져 다시 보낼 수 있음', async () => {
+    await sendFriendRequest('dad');
+    expect((await listSentRequests()).map((p) => p.id)).toContain('dad');
+    await cancelFriendRequest('dad');
+    expect((await listSentRequests()).map((p) => p.id)).not.toContain('dad');
+    await expect(cancelFriendRequest('dad')).rejects.toThrow(UserError); // 이미 없음
+    expect(await sendFriendRequest('dad')).toBe('SENT');
+    await cancelFriendRequest('dad');
+  });
+
+  it('받은 요청을 거절하면 목록에서 사라짐', async () => {
+    expect((await listFriendRequests()).map((p) => p.id)).toContain('bj');
+    await declineFriend('bj');
+    expect((await listFriendRequests()).map((p) => p.id)).not.toContain('bj');
+    await expect(declineFriend('bj')).rejects.toThrow(UserError);
+  });
+
+  it('친구를 끊으면 목록에서 빠지고, 이미 끊은 사람은 이유 문구', async () => {
+    expect((await listFriends()).map((f) => f.person.id)).toContain('jh');
+    await removeFriend('jh');
+    expect((await listFriends()).map((f) => f.person.id)).not.toContain('jh');
+    await expect(removeFriend('jh')).rejects.toThrow(UserError);
   });
 });
 

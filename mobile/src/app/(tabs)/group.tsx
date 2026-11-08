@@ -6,13 +6,25 @@ import { Avatar, Button, Card, Chip, confirm, EmptyState, LoadError, Loading, Sc
 import { useAuth } from '@/features/auth/AuthProvider';
 import { ChangeHandleSheet } from '@/features/profile/components/ChangeHandleSheet';
 import { handleHint } from '@/features/profile/handle';
-import { acceptFriend, listFriendRequests, listFriends, listGroups, myFriendLink, searchPeople, sendFriendRequest } from '@/features/social/api';
+import {
+  acceptFriend,
+  cancelFriendRequest,
+  declineFriend,
+  listFriendRequests,
+  listFriends,
+  listGroups,
+  listSentRequests,
+  myFriendLink,
+  searchPeople,
+  sendFriendRequest,
+} from '@/features/social/api';
 import { ActionTile } from '@/features/social/components/ActionTile';
 import { GroupIcon } from '@/features/social/components/GroupIcon';
 import { MyHandleCard } from '@/features/social/components/MyHandleCard';
 import { Note } from '@/features/social/components/Note';
 import { PeopleSearchResults } from '@/features/social/components/PeopleSearchResults';
 import { PersonRow } from '@/features/social/components/PersonRow';
+import { relationFromLists } from '@/features/social/searchView';
 import { SearchBox } from '@/features/social/components/SearchBox';
 import { useWakeLoad } from '@/features/social/hooks/useGroupWake';
 import { shareFriendInvite } from '@/features/social/invite';
@@ -32,8 +44,8 @@ const TABS = [
 
 // date = 그룹 기상 신호가 알려 준 날 (오늘 기상 수만 씀, 없으면 오늘)
 async function loadSocial(date: string | null) {
-  const [friends, requests, groups] = await Promise.all([listFriends(), listFriendRequests(), listGroups(date)]);
-  return { friends, requests, groups };
+  const [friends, requests, sent, groups] = await Promise.all([listFriends(), listFriendRequests(), listSentRequests(), listGroups(date)]);
+  return { friends, requests, sent, groups };
 }
 
 // G01 친구와 그룹 — 친구 탭(목업 F01: 요청 수락 · 친구별 권한 수) · 그룹 탭(목업 G01: 참여 중인 그룹 · 오늘 기상 수)
@@ -47,23 +59,35 @@ export default function GroupScreen() {
   const setTab = (next: Tab) => setPicked({ request, tab: next });
   const { data, error, reload } = useWakeLoad(loadSocial, (d) => d.groups.map((g) => g.id)); // 그룹 기상 신호가 오면 오늘 기상 수를 다시 읽음
   const { run } = useAction();
-  const [acceptingId, setAcceptingId] = useState<string | null>(null); // 수락 처리 중인 요청 — 그 버튼에만 돌아가는 표시
+  const [workingId, setWorkingId] = useState<string | null>(null); // 수락 · 거절 · 취소 처리 중인 사람 — 그 줄 버튼에만 돌아가는 표시
+
+  // 요청 수락 · 거절 · 취소 한 번 — 끝나면(실패해도) 목록을 새로 읽음. 상대가 그 사이 취소했으면 "이미 처리됐을 수 있어요"(3-28)
+  const act = (p: Person, task: () => Promise<void>, fallback: string) =>
+    run(async () => {
+      setWorkingId(p.id);
+      try {
+        await task();
+      } finally {
+        setWorkingId(null);
+        await reload();
+      }
+    }, fallback);
 
   const accept = (p: Person) =>
-    run(async () => {
-      setAcceptingId(p.id);
-      try {
+    act(
+      p,
+      async () => {
         await acceptFriend(p.id);
         // 공유는 아직 없으므로 바로 범위를 정하러 갈 수 있게
         toast(`${p.name}님과 친구가 됐어요`, {
           actionLabel: '공유 범위 정하기',
           onAction: () => router.push({ pathname: '/permissions', params: { relation: `friend:${p.id}` } }),
         });
-        await reload();
-      } finally {
-        setAcceptingId(null);
-      }
-    });
+      },
+      '수락하지 못했어요. 다시 해 주세요',
+    );
+  const decline = (p: Person) => act(p, () => declineFriend(p.id), '거절하지 못했어요. 다시 해 주세요');
+  const cancel = (p: Person) => act(p, () => cancelFriendRequest(p.id), '취소하지 못했어요. 다시 해 주세요');
 
   return (
     <Screen onRefresh={reload}>
@@ -80,7 +104,20 @@ export default function GroupScreen() {
       <Segmented options={TABS} value={tab} onChange={setTab} />
 
       {!data ? error ? <LoadError onRetry={reload} /> : <Loading /> : null}
-      {data && tab === 'friend' ? <FriendTab friends={data.friends} requests={data.requests} onAccept={accept} acceptingId={acceptingId} /> : null}
+      {data && tab === 'friend' ? (
+        <FriendTab
+          friends={data.friends}
+          requests={data.requests}
+          sent={data.sent}
+          onAccept={accept}
+          onDecline={decline}
+          onCancel={cancel}
+          onSent={async () => {
+            await reload();
+          }}
+          workingId={workingId}
+        />
+      ) : null}
       {data && tab === 'group' ? <GroupTab groups={data.groups} /> : null}
     </Screen>
   );
@@ -90,35 +127,37 @@ export default function GroupScreen() {
 function FriendTab({
   friends,
   requests,
+  sent,
   onAccept,
-  acceptingId,
+  onDecline,
+  onCancel,
+  onSent,
+  workingId,
 }: {
   friends: FriendItem[];
   requests: Person[];
+  sent: Person[];
   onAccept: (p: Person) => void;
-  acceptingId: string | null;
+  onDecline: (p: Person) => void;
+  onCancel: (p: Person) => void;
+  onSent: () => Promise<void>; // 검색 결과에서 요청을 보낸 뒤 목록을 새로 읽음
+  workingId: string | null;
 }) {
   const { session, profile, enabled } = useAuth();
   const { run, busy } = useAction();
   const [search, setSearch] = useState<PeopleSearch | null>(null);
   const [requestingId, setRequestingId] = useState<string | null>(null); // 친구 요청 보내는 중인 사람
-  const [sentIds, setSentIds] = useState<ReadonlySet<string>>(new Set()); // 이 검색에서 요청을 보낸 사람 — 결과 줄을 [요청 보냄]으로
   const [handleOpen, setHandleOpen] = useState(false);
+  const [focusSearch, setFocusSearch] = useState(0); // [친구 찾기]를 누르면 검색칸으로 (값이 바뀔 때마다)
   const canEditHandle = enabled && session != null && profile != null;
   const hint = profile ? handleHint({ changedAt: profile.handle_changed_at, nextChangeAt: profile.handle_next_change_at }, now()) : null;
 
-  // 검색 결과의 관계 — 요청을 보냈거나 수락한 사람은 목록 쪽 값이 더 새로움
+  // 검색 결과의 관계 — 친구 · 받은 요청 · 보낸 요청 목록에서 매번 계산 (요청 · 수락 · 거절 · 취소 · 끊기 뒤 목록을 새로 읽으면 결과 줄도 맞게 바뀜)
   const shown = useMemo<PeopleSearch | null>(() => {
     if (!search) return null;
-    const friendIds = new Set(friends.map((f) => f.person.id));
-    return {
-      ...search,
-      rows: search.rows.map((row) => ({
-        ...row,
-        relation: friendIds.has(row.person.id) ? 'FRIEND' : sentIds.has(row.person.id) && row.relation === 'NONE' ? 'SENT' : row.relation,
-      })),
-    };
-  }, [search, friends, sentIds]);
+    const lists = { friends: friends.map((f) => f.person.id), requests: requests.map((p) => p.id), sent: sent.map((p) => p.id) };
+    return { ...search, rows: search.rows.map((row) => ({ ...row, relation: relationFromLists(row.person.id, lists) })) };
+  }, [search, friends, requests, sent]);
 
   const runSearch = (text: string) =>
     run(async () => {
@@ -133,9 +172,9 @@ function FriendTab({
     run(async () => {
       setRequestingId(p.id);
       try {
-        await sendFriendRequest(p.id);
-        setSentIds((prev) => new Set(prev).add(p.id));
-        toast(`${p.name}님에게 친구 요청을 보냈어요`);
+        const relation = await sendFriendRequest(p.id);
+        toast(relation === 'FRIEND' ? `${p.name}님과 친구가 됐어요` : `${p.name}님에게 친구 요청을 보냈어요`);
+        await onSent(); // 목록을 새로 읽으면 결과 줄이 [요청 보냄] · 친구로 바뀜
       } finally {
         setRequestingId(null);
       }
@@ -176,11 +215,12 @@ function FriendTab({
           if (!text.trim()) setSearch(null);
         }}
         busy={busy}
+        focusSignal={focusSearch}
       />
       {shown ? (
         <PeopleSearchResults
           search={shown}
-          busyId={requestingId ?? acceptingId}
+          busyId={requestingId ?? workingId}
           onRequest={request}
           onAccept={onAccept}
           onInvite={inviteByMessage}
@@ -197,10 +237,31 @@ function FriendTab({
                 {p.handle ?? p.name}의 친구 요청
               </Text>
             </View>
-            <Button label="수락" small loading={acceptingId === p.id} disabled={acceptingId !== null && acceptingId !== p.id} onPress={() => onAccept(p)} />
+          </View>
+          <View style={styles.requestActions}>
+            <Button variant="plain" label="거절" small disabled={workingId !== null} onPress={() => onDecline(p)} />
+            <Button label="수락" small loading={workingId === p.id} disabled={workingId !== null && workingId !== p.id} onPress={() => onAccept(p)} />
           </View>
         </Card>
       ))}
+
+      {sent.length ? (
+        <>
+          <SectionHeader title="보낸 요청" right={`${sent.length}명`} />
+          <Card>
+            {sent.map((p, i) => (
+              <PersonRow
+                key={p.id}
+                first={i === 0}
+                icon={<Avatar initial={p.initial} />}
+                title={p.name}
+                sub={p.handle ?? undefined}
+                right={<Button variant="ghost" label="취소" small loading={workingId === p.id} disabled={workingId !== null && workingId !== p.id} onPress={() => onCancel(p)} />}
+              />
+            ))}
+          </Card>
+        </>
+      ) : null}
 
       <SectionHeader title="내 친구" right={`${friends.length}명`} />
       {friends.length ? (
@@ -218,7 +279,11 @@ function FriendTab({
           ))}
         </Card>
       ) : (
-        <EmptyState title="아직 친구가 없어요" body="이름이나 사용자 ID로 검색해 친구를 추가해 보세요." />
+        <EmptyState
+          title="아직 친구가 없어요"
+          body="이름이나 사용자 ID로 검색해 친구를 추가해 보세요."
+          action={requests.length || sent.length ? undefined : { label: '친구 찾기', onPress: () => setFocusSearch((n) => n + 1) }} // 친구 0 · 요청 0일 때만 (3-21)
+        />
       )}
       <Note>친구는 역할이 아닌 관계예요. 친구가 되어도 알람과 기상 상태는 권한을 허용한 뒤에만 볼 수 있어요.</Note>
     </>
@@ -315,6 +380,7 @@ const styles = StyleSheet.create({
   lead: { marginBottom: 18 },
   row: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   grow: { flex: 1, minWidth: 0 },
+  requestActions: { flexDirection: 'row', justifyContent: 'flex-end', gap: 8, marginTop: 10 },
   between: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between' },
   trailing: { alignItems: 'flex-end' },
   tiles: { flexDirection: 'row', gap: 10, marginTop: 14 },
