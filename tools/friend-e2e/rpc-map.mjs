@@ -18,12 +18,18 @@ export const RPC = {
   friend_link: 'my_friend_link',
   open_link: 'open_friend_link',
 
+  // 3장 (PR #374) — 친구_세션약속.md 1절
+  friend_request: 'send_friend_request',
+  friend_accept: 'accept_friend_request',
+  friend_decline: 'decline_friend_request',
+  friend_cancel: 'cancel_friend_request',
+  friend_remove: 'remove_friend',
+
   // 논리설계 이름이 정해진 것 (4장) — 입력 모양은 S1이 만든 뒤 맞춤
   block_user: 'block_user',
   unblock_user: 'unblock_user',
 
-  // 아직 이름 없음 (3 · 5 · 6 · 7 · 8 · 9 · 10 · 12장)
-  friend_request: null, // 3장 요청 (직접 표 쓰기 닫힌 뒤)
+  // 아직 이름 없음 ( 5 · 6 · 7 · 8 · 9 · 10 · 12장)
   group_preview: null, // 5장 코드 입력 미리보기
   leave_group: null, // 5장 나가기
   save_permissions: null, // 6장 저장 (설정⊂조회)

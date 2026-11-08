@@ -52,6 +52,12 @@ on conflict do nothing;
 
 delete from public.friends f where f.status = 'BLOCKED';
 
+-- 옮긴 쌍 사이에 남은 공유 권한(그룹 출처 포함)도 지움 — 친구 행을 지우는 트리거는 친구 출처 권한만 지우고, 남겨 두면 풀 때 되살아남(4-21)
+delete from public.sharing_permissions sp
+using public.user_blocks b
+where (sp.owner_id = b.blocker_id and sp.grantee_id = b.blocked_id)
+   or (sp.owner_id = b.blocked_id and sp.grantee_id = b.blocker_id);
+
 -- 3장부터 친구 상태는 대기 → 친구로만 바뀌어 "친구 → 다른 상태" 때 권한을 지우던 트리거는 더는 닿지 않음
 drop trigger if exists revoke_permissions_on_change on public.friends;
 
@@ -112,7 +118,9 @@ as $$
 $$;
 
 -- 앱이 friends에 직접 요청 행을 넣는 길(15장에서 닫기 전까지)도 차단 쌍이면 거절 (4-04)
---   앱 역할(authenticated · anon)만 — 시드 · 서버(service_role)는 그대로. 앱의 기존 문구 처리(23503 = '사용자를 찾을 수 없어요')와 같게 함
+--   앱 역할(authenticated · anon)만 — 시드 · 서버(service_role)는 그대로. 없는 사람을 넣을 때의 외래 키 위반(23503)과 코드 · 메시지 · 상세까지 같은 모양으로 거절해
+--   차단당했음이 드러나지 않게 하고(4-가), 앱의 기존 문구 처리(23503 = '사용자를 찾을 수 없어요')도 그대로 탐
+--   차단(block_user)과 겹치면 가드가 아직 커밋 안 된 차단을 못 보고 대기 행이 남던 경쟁을 막으려고 같은 사람 잠금(3장)을 먼저 걸어 차단이 끝나길 기다림
 --   definer 함수 안에서는 current_user가 소유자라 호출한 역할은 role 설정으로 봄
 create function private.guard_friend_insert()
 returns trigger
@@ -121,8 +129,13 @@ security definer
 set search_path = ''
 as $$
 begin
-  if current_setting('role', true) in ('authenticated', 'anon') and private.is_blocked_pair(new.requester_id, new.addressee_id) then
-    raise exception '사용자를 찾을 수 없음' using errcode = '23503';
+  if current_setting('role', true) in ('authenticated', 'anon') then
+    perform private.lock_friend_pair(new.requester_id, new.addressee_id);
+    if private.is_blocked_pair(new.requester_id, new.addressee_id) then
+      raise exception 'insert or update on table "friends" violates foreign key constraint "friends_addressee_id_fkey"'
+        using errcode = '23503', schema = 'public', table = 'friends', constraint = 'friends_addressee_id_fkey',
+              detail = 'Key is not present in table "profiles".';   -- 앱 역할은 키 값을 읽을 권한이 없어 없는 사람일 때도 이 모양
+    end if;
   end if;
   return new;
 end;
@@ -255,12 +268,19 @@ set search_path = ''
 as $$
 declare
   v_uid uuid := auth.uid();
+  v_had boolean;
 begin
   if v_uid is null then
     raise exception '로그인이 필요함' using errcode = '42501';
   end if;
   delete from public.user_blocks b where b.blocker_id = v_uid and b.blocked_id = p_user_id;
-  return jsonb_build_object('status', case when found then 'UNBLOCKED' else 'GONE' end);
+  v_had := found;
+  if v_had then
+    -- 차단 중에 어떤 길로든 생긴 권한 행이 풀리는 순간 되살아나지 않게 지움 (4-21)
+    delete from public.sharing_permissions sp
+    where (sp.owner_id = v_uid and sp.grantee_id = p_user_id) or (sp.owner_id = p_user_id and sp.grantee_id = v_uid);
+  end if;
+  return jsonb_build_object('status', case when v_had then 'UNBLOCKED' else 'GONE' end);
 end;
 $$;
 
