@@ -20,12 +20,15 @@ import {
 } from '@/features/social/api';
 import { ActionTile } from '@/features/social/components/ActionTile';
 import { GroupIcon } from '@/features/social/components/GroupIcon';
+import { MiniButton } from '@/features/social/components/MiniButton';
 import { MyHandleCard } from '@/features/social/components/MyHandleCard';
 import { Note } from '@/features/social/components/Note';
 import { PeopleSearchResults } from '@/features/social/components/PeopleSearchResults';
+import { PersonMenuSheet } from '@/features/social/components/PersonMenuSheet';
 import { PersonRow } from '@/features/social/components/PersonRow';
 import { SearchBox } from '@/features/social/components/SearchBox';
 import { useWakeLoad } from '@/features/social/hooks/useGroupWake';
+import { usePersonMenu } from '@/features/social/hooks/usePersonMenu';
 import { shareFriendInvite } from '@/features/social/invite';
 import { friendLinkUrl } from '@/features/social/inviteLink';
 import { permissionNames } from '@/features/social/permissions';
@@ -146,6 +149,11 @@ function FriendTab({
   const [requestingId, setRequestingId] = useState<string | null>(null); // 친구 요청 보내는 중인 사람
   const [relations, setRelations] = useState<Readonly<Record<string, FriendRelation>>>({}); // 이 검색에서 요청을 보내 바뀐 관계 — 결과 줄 버튼을 바로 바꿈
   const [handleOpen, setHandleOpen] = useState(false);
+  // 사람 줄 메뉴 [차단] [신고] — 차단하면 받은 요청 · 친구 · 검색 결과에서 빠지므로 결과를 비우고 목록을 새로 읽음 (4-06 · 4-32)
+  const menu = usePersonMenu(() => {
+    setSearch(null);
+    onSent();
+  });
   const [focusSearch, setFocusSearch] = useState(0); // [친구 찾기]를 누르면 검색칸으로 (값이 바뀔 때마다)
   const canEditHandle = enabled && session != null && profile != null;
   const hint = profile ? handleHint({ changedAt: profile.handle_changed_at, nextChangeAt: profile.handle_next_change_at }, now()) : null;
@@ -211,6 +219,7 @@ function FriendTab({
         onRenew={renewLink}
       />
       <ChangeHandleSheet visible={handleOpen} onClose={() => setHandleOpen(false)} />
+      <PersonMenuSheet {...menu.sheetProps} />
 
       <SearchBox
         placeholder="이름 또는 사용자 ID 검색"
@@ -229,6 +238,7 @@ function FriendTab({
           onRequest={request}
           onAccept={onAccept}
           onInvite={inviteByMessage}
+          onMenu={menu.open}
         />
       ) : null}
 
@@ -244,6 +254,7 @@ function FriendTab({
             </View>
             <Button variant="plain" label="거절" small disabled={workingId !== null} onPress={() => onDecline(p)} />
             <Button label="수락" small loading={workingId === p.id} disabled={workingId !== null && workingId !== p.id} onPress={() => onAccept(p)} />
+            <MiniButton label="···" onPress={() => menu.open(p)} />
           </View>
         </Card>
       ))}

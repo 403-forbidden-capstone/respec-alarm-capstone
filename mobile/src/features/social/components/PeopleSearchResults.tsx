@@ -3,6 +3,7 @@ import { StyleSheet, View } from 'react-native';
 import { Avatar, Button, Card, Text } from '@/components/ui';
 import { relationButton, searchNotice } from '../searchView';
 import type { PeopleSearch, Person } from '../types';
+import { MiniButton } from './MiniButton';
 import { PersonRow } from './PersonRow';
 
 type Props = {
@@ -11,10 +12,11 @@ type Props = {
   onRequest: (p: Person) => void;
   onAccept: (p: Person) => void;
   onInvite: () => void;
+  onMenu: (p: Person) => void; // 줄 오른쪽 [···] — 신고 · 차단
 };
 
 // F01 검색 결과 — 문구(못 찾음 · 제한 · 내 아이디) + 사람 줄(닉네임 · @아이디 + 관계대로 버튼). 동명이인은 @아이디로 구분 (2-29)
-export function PeopleSearchResults({ search, busyId, onRequest, onAccept, onInvite }: Props) {
+export function PeopleSearchResults({ search, busyId, onRequest, onAccept, onInvite, onMenu }: Props) {
   const notice = searchNotice(search);
   return (
     <View style={styles.wrap}>
@@ -44,21 +46,25 @@ export function PeopleSearchResults({ search, busyId, onRequest, onAccept, onInv
                 icon={<Avatar initial={p.initial} />}
                 title={p.name}
                 sub={[p.handle, via === 'GROUP' ? '같은 그룹' : null].filter(Boolean).join(' · ') || undefined}
+                rightIsButtons
                 right={
-                  button.action === 'none' ? (
-                    <Text variant="label" tone="sub" weight={600}>
-                      {button.label}
-                    </Text>
-                  ) : (
-                    <Button
-                      small
-                      variant={button.action === 'accept' ? 'primary' : 'ghost'}
-                      label={button.label}
-                      loading={busyId === p.id}
-                      disabled={busyId !== null && busyId !== p.id}
-                      onPress={() => (button.action === 'accept' ? onAccept(p) : onRequest(p))}
-                    />
-                  )
+                  <View style={styles.right}>
+                    {button.action === 'none' ? (
+                      <Text variant="label" tone="sub" weight={600}>
+                        {button.label}
+                      </Text>
+                    ) : (
+                      <Button
+                        small
+                        variant={button.action === 'accept' ? 'primary' : 'ghost'}
+                        label={button.label}
+                        loading={busyId === p.id}
+                        disabled={busyId !== null && busyId !== p.id}
+                        onPress={() => (button.action === 'accept' ? onAccept(p) : onRequest(p))}
+                      />
+                    )}
+                    <MiniButton label="···" onPress={() => onMenu(p)} />
+                  </View>
                 }
               />
             );
@@ -72,4 +78,5 @@ export function PeopleSearchResults({ search, busyId, onRequest, onAccept, onInv
 const styles = StyleSheet.create({
   wrap: { gap: 8, marginBottom: 12 },
   invite: { marginTop: 8, gap: 8, alignItems: 'flex-start' },
+  right: { flexDirection: 'row', alignItems: 'center' },
 });
