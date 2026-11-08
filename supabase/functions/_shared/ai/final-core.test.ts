@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import type { RefsOut } from './context-core.ts';
-import { applyFinal, finishStructured, isDuplicateTodo, type FinalPlan, type Structured } from './final-core.ts';
+import { applyFinal, dropUnstatedScores, finishStructured, isDuplicateTodo, type FinalPlan, type Structured } from './final-core.ts';
 import { validate } from './schema.ts';
 import { schemaOf } from './schemas/index.ts';
 import { structuredProblems } from './structured.v1.ts';
@@ -323,5 +323,16 @@ describe('상대 날짜 — 기준일(돌아볼 날)과 사건 날짜가 다를 
   it('하루 전 사건 회고 "어제 수업에 10분 늦었어" → 11/4 지각으로 남고, 기준일(11/5) 수업에 잇지 않음', () => {
     const { s } = go([b('LATE', { date: D4, minutes: 10, appointment_title: '수업' })]);
     assert.deepEqual(s.schedule_outcomes.map((o) => [o.date, o.appointment_id, o.appointment_title, o.late_minutes, o.status]), [[D4, null, '수업', 10, 'needs_confirm']]);
+  });
+});
+
+describe('피로 · 스트레스 점수 — 사용자가 숫자로 말했을 때만 (실제 호출에서 "너무 피곤해" → 5)', () => {
+  const tired = emptyExtract({ mood_condition: { mood: ['tired'], valence: null, fatigue: 5, stress: 4, causes: ['발표'], source: 'stated' } });
+  it('숫자 점수 표현이 없으면 null — 시각 숫자("1시", "12시")는 점수가 아님', () => {
+    const x = dropUnstatedScores(tired, ['어제 새벽 1시까지 휴대폰을 봤어. 오늘 발표는 잘 끝났는데 너무 피곤해. 앞으로 12시 전에는 자고 싶어.']);
+    assert.deepEqual([x.mood_condition.fatigue, x.mood_condition.stress, x.mood_condition.mood, x.mood_condition.causes], [null, null, ['tired'], ['발표']]);
+  });
+  it('"피로도 4", "10점 중 8점", "스트레스 3/5"면 모델 값 유지', () => {
+    for (const said of ['오늘 피로도 4 정도야', '10점 중 8점만큼 피곤해', '스트레스 3/5']) assert.equal(dropUnstatedScores(tired, [said]).mood_condition.fatigue, 5, said);
   });
 });

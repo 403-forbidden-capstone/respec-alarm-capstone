@@ -314,6 +314,19 @@ function pendingOf(d: FinalPlan["draft"]): Structured["pending"] {
   ];
 }
 
+// shortcut: 숫자 점수 표현만 봄("4점" · "8/10" · "피로도 4") — "다섯 점"처럼 글자로 쓴 숫자는 못 알아봄(점수가 지워지는 쪽이라 안전), 필요해지면 말 숫자도
+//   키워드 바로 뒤 숫자만("피로도 4") — "피곤해. 앞으로 12시"의 시각 숫자를 점수로 보지 않게
+const SCORE_SAID = /\d+\s*(점|\/\s*(5|10)\b)|(피로도?|스트레스)\s*(는|가|도|지수)?\s*\d/u;
+
+/**
+ * 피로 · 스트레스 점수는 사용자가 숫자로 말했을 때만 — 모델이 "너무 피곤해"를 4 · 5로 바꾸는 일이 실제 호출에서 나옴(11/8, T2.v3 · v3.1 둘 다).
+ * 사용자 말에 점수 표현이 없으면 null로 (기분 mood · causes는 그대로).
+ */
+export function dropUnstatedScores(x: FinalExtract, userTexts: string[]): FinalExtract {
+  if (userTexts.some((t) => SCORE_SAID.test(t))) return x;
+  return { ...x, mood_condition: { ...x.mood_condition, fatigue: null, stress: null } };
+}
+
 /** 세션 정보 · 저장 결과를 붙여 공개 JSON 완성 */
 export function finishStructured(plan: FinalPlan, session: Structured["session"], storage: Structured["storage"], todoResults: (Structured["todos"][number]["stored"])[]): Structured {
   const todos = plan.draft.todos.map((t, i) => {

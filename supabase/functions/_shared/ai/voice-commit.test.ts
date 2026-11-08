@@ -374,3 +374,12 @@ test('자정을 넘긴 대화(10/30 00:40, 아직 기상 기록 없음) → 기�
   assert.equal(x.session.reference_date, REVIEW);
   assert.deepEqual(x.schedule_outcomes.map((o) => [o.date, o.appointment_id, o.status]), [[REVIEW, 'ap-class', 'recorded']]);
 });
+
+test('모델이 숫자 없는 피로를 점수로 내도(fatigue 5) 저장 JSON에는 null — 실제 시험 문장 B', async () => {
+  const db = seed();
+  const out = emptyExtract({ mood_condition: { mood: ['tired'], valence: null, fatigue: 5, stress: null, causes: ['발표'], source: 'stated' } });
+  const { deps, sid } = await chat(db, [['어제 새벽 1시까지 휴대폰을 봤어. 오늘 발표는 잘 끝났는데 너무 피곤해. 앞으로 12시 전에는 자고 싶어.']], [out]);
+  await commit(deps, sid);
+  const x = rowOf(db, sid).extracted_data as Structured;
+  assert.deepEqual([x.mood_condition.fatigue, x.mood_condition.mood], [null, ['tired']]);
+});

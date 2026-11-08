@@ -14,7 +14,7 @@ import { callPoint, POINTS } from '../prompts/index.ts';
 import { Reader } from '../read.ts';
 import type { Db } from '../supabase.ts';
 import { seoulIso } from './context.ts';
-import { applyFinal, finishStructured, isDuplicateTodo, recordDateInRange, type FinalPlan, type Structured, type TodoPlan } from './final-core.ts';
+import { applyFinal, dropUnstatedScores, finishStructured, isDuplicateTodo, recordDateInRange, type FinalPlan, type Structured, type TodoPlan } from './final-core.ts';
 import { structuredProblems } from './structured.v1.ts';
 import { toHttpError, type LlmClient } from './llm.ts';
 import type { QuotaGate } from './quota.ts';
@@ -197,7 +197,8 @@ export async function handleVoiceCommit(deps: CommitDeps, body: unknown): Promis
 
   // 3) 나누기 4) 저장 — 카드는 그 사이 저장됐을 수 있어 지금 상태로
   const latest = (await loadSession(sd, sessionId)).server_state;
-  const plan = applyFinal(extract, latest.ctx, latest.refs, latest.cards);
+  const userTexts = row.turns.filter((t) => t.role === 'user').map((t) => t.text);
+  const plan = applyFinal(dropUnstatedScores(extract, userTexts), latest.ctx, latest.refs, latest.cards);
   const saved = { ...NOTHING };
   const failed: string[] = [];
   const storage: Storage = [];
