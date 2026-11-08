@@ -200,7 +200,7 @@ export const STEPS = [
       ctx.s.code = g.invite_code;
       must(g.invite_code, '초대 코드가 없음');
       if (rpcOf(ctx.caps, 'group_code')) {
-        must(/^[A-Z2-9]{8}$/.test(g.invite_code), `초대 코드가 8자 대문자 · 숫자(0 O 1 I 뺌)가 아님: ${g.invite_code}`);
+        must(/^[A-HJ-NP-Z2-9]{8}$/.test(g.invite_code), `초대 코드가 8자 대문자 · 숫자(0 O 1 I 뺌)가 아님: ${g.invite_code}`);
         const direct = await ctx.a.from('groups').update({ invite_code: 'ABCDEFGH' }).eq('group_id', g.group_id);
         must(direct.error?.code === '42501', `초대 코드를 직접 바꿀 수 있음: ${direct.error?.code ?? '성공'}`);
         const sheet = ok(await callRpc(ctx.a, ctx.fn.group_code, { p_group_id: g.group_id }), '코드 시트');
@@ -487,8 +487,8 @@ export const STEPS = [
         const got = new Date(b.wake_confirmed_at).getTime();
         if (got !== new Date(at('08:08')).getTime()) {
           // 기상 상태는 그날 첫 알람 기준이라, 시드 계정에 더 이른 알람이 있으면 그 확인 시각이 나옴 → B의 오늘 기상 확인 중 하나인지 확인
-          const ev = ok(await ctx.admin.from('alarm_events').select('event_at').eq('user_id', ctx.ids.B).eq('event_type', 'WAKE_CONFIRMED'), 'B의 기상 확인');
-          must(ev.some((e) => new Date(e.event_at).getTime() === got), `B 기상 확인 시각이 B의 어떤 확인과도 안 맞음: ${b.wake_confirmed_at}`);
+          const ev = ok(await ctx.admin.from('alarm_events').select('event_at').eq('user_id', ctx.ids.B).eq('event_type', 'WAKE_CONFIRMED').gte('event_at', at('00:00')).lt('event_at', `${new Date(new Date(at('00:00')).getTime() + 86400e3).toISOString()}`), 'B의 오늘 기상 확인');
+          must(ev.some((e) => new Date(e.event_at).getTime() === got), `B 기상 확인 시각이 B의 오늘 확인 중 어느 것과도 안 맞음: ${b.wake_confirmed_at}`);
           ctx.note('B의 시드 알람이 더 이르면 그 확인 시각이 나옴 — 8:08 일치는 확인 생략');
         }
         return;
