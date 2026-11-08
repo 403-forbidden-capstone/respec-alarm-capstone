@@ -11,7 +11,9 @@ export type WakeMargin = 'TIGHT' | 'NORMAL' | 'LOOSE';
 export type Profile = {
   user_id: string;
   nickname: string;
-  handle: string | null; // 온보딩 전엔 null
+  handle: string | null; // 가입하면 서버가 자동 아이디(respec_…)를 채움. 바꾸기는 change_my_handle(DB 함수)로만
+  handle_changed_at: string | null; // 직접 바꾼 마지막 시각 — 비어 있으면 자동 아이디 그대로('바꿔 보세요')
+  handle_next_change_at: string | null; // 다음 변경 가능 시각 — 비어 있으면 언제든
   profile_image_url: string | null;
   default_prepare_minutes: number;
   default_buffer_minutes: number;
@@ -28,12 +30,11 @@ export type Profile = {
   privacy_version: number | null;
 };
 
-// 한 번에 바꿀 수 있는 칸 — 온보딩 단계마다 · 설정에서 쓰는 만큼만 저장 (profile/api.ts saveProfileFields)
+// 한 번에 바꿀 수 있는 칸 — 온보딩 단계마다 · 설정에서 쓰는 만큼만 저장 (profile/api.ts saveProfileFields). 아이디는 여기 없음 — changeMyHandle
 export type ProfileFields = Partial<
   Pick<
     Profile,
     | 'nickname'
-    | 'handle'
     | 'home_name'
     | 'home_lat'
     | 'home_lng'

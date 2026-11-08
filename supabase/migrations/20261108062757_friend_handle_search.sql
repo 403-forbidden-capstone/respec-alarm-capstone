@@ -12,7 +12,7 @@
 --   ⑦ 제한 기록          rate_limit_events (서버 전용 표) + private.take_rate_slot — 3장 요청 · 5장 코드 실패도 같은 표를 씀
 -- 새 함수는 상태 값(jsonb status)으로 돌려주고 앱이 문구로 바꿈 (논리설계 공통 규칙 X-7)
 -- 차단 판정은 private.is_blocked_pair 한 곳 — 지금은 friends.status = BLOCKED, 4장에서 user_blocks로 바꿈
--- 빈 곳(문서 보충 대기): 검색 하루 상한 숫자(결정표 2-거는 '1분 10회만'), 아이디 예약어 목록 → 이 파일엔 respec_ 거절만
+-- 검색 제한 = 1분 10회 + 하루 100회, 아이디 바꾸기 시도도 같은 횟수에 셈 · 예약어 10개는 정확히 같을 때만 거절 (11/8 지형님, 2-거 · 2-09 · 2-52 · 2-53)
 -- =====================================================================
 
 
@@ -287,6 +287,8 @@ create trigger guard_profile_columns
 
 -- 내 아이디 바꾸기 — 검사는 여기 한 곳 (2-나 · 2-차)
 --   상태: OK · SAME · INVALID · RESERVED · TAKEN · LIMIT. 실패는 예외 대신 상태 값 (X-7)
+--   LIMIT은 두 가지: 30일(next_change_at)과 검색 횟수(retry_after_seconds) — 바꾸기 시도도 아이디 검색과 같은 1분 10회 + 하루 100회에 셈.
+--   부를 때마다 한 번 셈(TAKEN으로 남이 쓰는 아이디를 계속 알아보는 길을 검색 제한과 같게 막음, 11/8 지형님)
 --   30일: 직접 바꾼 적이 있고(handle_changed_at) 온보딩을 끝낸(onboarded_at) 뒤의 변경만 셈.
 --         자동 아이디에서 처음 바꾸기 · 온보딩 중 바꾸기는 안 셈 (2-아). 다음 변경 = 바꾼 시각 + 30일, 서버 시각 하나 (2-카)
 create function public.change_my_handle(p_handle text)
@@ -302,9 +304,16 @@ declare
   v_me     record;
   v_counts boolean;
   v_next   timestamptz;
+  v_wait   integer;
 begin
   if v_uid is null then
     raise exception '로그인이 필요함' using errcode = '42501';
+  end if;
+
+  -- 바꾸기 시도도 검색과 같은 횟수에 셈 (2-53). 걸리면 30일 LIMIT과 달리 retry_after_seconds를 돌려줌
+  v_wait := private.take_rate_slot(v_uid, 'HANDLE_SEARCH', 10, 100);
+  if v_wait > 0 then
+    return jsonb_build_object('status', 'LIMIT', 'retry_after_seconds', v_wait);
   end if;
 
   -- 길이를 먼저 봐서 큰 입력은 다루지 않음 (15-마)
@@ -328,8 +337,9 @@ begin
   if v_me.handle = v_new then
     return jsonb_build_object('status', 'SAME', 'handle', v_new, 'next_change_at', v_me.handle_next_change_at);
   end if;
-  -- 자동 아이디 모양(respec_…)은 사칭이라 거절. 예약어 목록은 문서 보충 대기(빈 곳)
-  if left(v_new, 7) = 'respec_' then
+  -- 자동 아이디 모양(respec_…)과 예약어 10개는 사칭이라 거절. 예약어는 정확히 같을 때만(admin1은 통과, 2-09)
+  if left(v_new, 7) = 'respec_'
+     or v_new = any (array['admin', 'respec', 'support', 'help', 'official', 'system', 'root', 'operator', 'manager', 'null']) then
     return jsonb_build_object('status', 'RESERVED');
   end if;
 
@@ -360,8 +370,7 @@ $$;
 -- 아이디 정확 일치로 사람 찾기 (D64 #7)
 --   상태: FOUND(profile · relation) · SELF(profile) · NOT_FOUND · LIMIT(retry_after_seconds)
 --   NOT_FOUND = 없는 아이디 · 탈퇴 · 차단(어느 쪽이든) · 온보딩 전 — 응답 모양까지 같음 (2-라 · 2-34 · 2-너)
---   제한: 1분 10회, 성공 · 실패 모두 셈, 사람 단위 (2-거). 걸리면 누구를 찾든 같은 LIMIT
---   하루 상한은 숫자가 정해지면 take_rate_slot의 넷째 인자로 넣음 (빈 곳)
+--   제한: 1분 10회 + 하루 100회(프로필 시간대 0시부터), 성공 · 실패 모두 셈, 사람 단위, 아이디 바꾸기 시도와 합쳐서 (2-거 · 2-52 · 2-53). 걸리면 누구를 찾든 같은 LIMIT
 create function public.search_by_handle(p_query text)
 returns jsonb
 language plpgsql
@@ -379,7 +388,7 @@ begin
     raise exception '로그인이 필요함' using errcode = '42501';
   end if;
 
-  v_wait := private.take_rate_slot(v_uid, 'HANDLE_SEARCH', 10);
+  v_wait := private.take_rate_slot(v_uid, 'HANDLE_SEARCH', 10, 100);
   if v_wait > 0 then
     return jsonb_build_object('status', 'LIMIT', 'retry_after_seconds', v_wait);
   end if;
