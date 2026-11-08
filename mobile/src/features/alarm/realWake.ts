@@ -19,7 +19,7 @@ import { supabase } from '@/lib/supabase';
 import { requireUserId } from '@/lib/user';
 
 import { STANDALONE_TITLE } from './map';
-import { LEVELS, toLevel, WAKE_OBSERVE_MINUTES, type Appointment, type CancelSnoozeResult, type RingInfo, type Snooze, type WakeCheck } from './types';
+import { EARLY_WAKE_MINUTES, LEVELS, toLevel, WAKE_OBSERVE_MINUTES, type Appointment, type EarlyWake, type CancelSnoozeResult, type RingInfo, type Snooze, type WakeCheck } from './types';
 import { evaluateWake, pickDismissedAt, thetaReachedAt, WAKE_PROMPT_WINDOW_MINUTES, WAKE_THETA_MINUTES, type UseSpan } from './wake';
 
 // 미룬 알람의 Snooze.minutes에 넣는 참고 값 — 폰 list()는 고른 분을 안 돌려줘서 기본 미루기 시간(10분)을 넣음.
@@ -415,4 +415,42 @@ export async function confirmWake(alarmId: string, how: 'self' | 'auto'): Promis
     wokeAt = (spans && thetaReachedAt(ctx.dismissedAt, spans, WAKE_THETA_MINUTES)) || current;
   }
   await settle(userId, ctx, wokeAt, how);
+}
+
+// H08 [먼저 깼어요] — 지금부터 60분 안에 울릴 켜진 기상 알람 중 가장 이른 것 (D61). 이미 울렸거나 · 확인한 알람이면 없음
+//   폰 알람 자체는 그대로 둠(미리 끄기는 알람 코어 몫) — 확인이 먼저 있으면 그 회차의 울림 · 미루기 기록은 서버가 끝냄 (7-d5)
+export async function getEarlyWake(): Promise<EarlyWake | null> {
+  const userId = await requireUserId();
+  const current = now();
+  const { data, error } = await supabase
+    .from('alarms')
+    .select('alarm_id, scheduled_at')
+    .eq('user_id', userId)
+    .eq('alarm_type', 'WAKE')
+    .eq('is_enabled', true)
+    .gt('scheduled_at', current.toISOString())
+    .lte('scheduled_at', new Date(current.getTime() + EARLY_WAKE_MINUTES * MINUTE_MS).toISOString())
+    .order('scheduled_at')
+    .limit(1);
+  if (error) throw error;
+  const alarm = data?.[0];
+  if (!alarm) return null;
+  const events = await supabase
+    .from('alarm_events')
+    .select('event_type')
+    .eq('alarm_id', alarm.alarm_id)
+    .eq('user_id', userId)
+    .in('event_type', ['TRIGGERED', 'DISMISSED', 'WAKE_CONFIRMED'])
+    .limit(1);
+  if (events.error) throw events.error;
+  if (events.data?.length) return null;
+  return { alarmId: alarm.alarm_id, at: parseDbTime(alarm.scheduled_at) };
+}
+
+// [먼저 깼어요]를 누름 — 지금 시각으로 기상 확인(BUTTON, 그룹에는 바로 '일어났어요', D61 · 7-20) + 그날 기록. 이미 확인했으면 그대로
+export async function confirmEarlyWake(alarmId: string): Promise<void> {
+  const userId = await requireUserId();
+  const ctx = await loadWakeContext(userId, alarmId);
+  if (!ctx || ctx.confirmed) return;
+  await settle(userId, ctx, now(), 'self');
 }

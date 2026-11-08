@@ -3,7 +3,7 @@ import { Fragment, useEffect, useRef, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
 import { Button, Card, LoadError, Loading, ProgressBar, Screen, Text, toast, TopBar } from '@/components/ui';
-import { confirmWake, getMorningPlan, getWakeCheck, promptWake } from '@/features/alarm/api';
+import { confirmEarlyWake, confirmWake, getEarlyWake, getMorningPlan, getWakeCheck, promptWake } from '@/features/alarm/api';
 import { FormulaBox } from '@/features/alarm/components/FormulaBox';
 import { MorningPlanLine } from '@/features/alarm/components/MorningPlanLine';
 import { WAKE_OBSERVE_MINUTES, WAKE_RECENT_MINUTES, type WakeCheck } from '@/features/alarm/types';
@@ -70,10 +70,54 @@ export default function WakeScreen() {
             기상 알람을 해제하면 여기서 기상을 판정해요.
           </Text>
         </Card>
+        <EarlyWake />
       </Screen>
     );
   }
   return <WakeFlow check={data} />;
+}
+
+// [먼저 깼어요] — 기상 알람이 울리기 전 60분 안에 깼을 때 (D61 · 친구 7장). 지금 시각으로 기상 확인, 그룹에는 바로 '일어났어요'
+//   폰 알람은 그대로 울림(미리 끄기는 알람 코어 몫) — 울린 뒤 끄면 이미 확인한 날이라 판정 없이 확인으로 보임
+function EarlyWake() {
+  const { data, reload } = useLoad(getEarlyWake);
+  const [done, setDone] = useState(false);
+  const [busy, setBusy] = useState(false);
+  if (done) {
+    return (
+      <Card>
+        <Text variant="bodyStrong">일어났어요로 기록했어요</Text>
+        <Text variant="small" tone="sub" style={styles.earlySub}>
+          그룹 약속이 있는 날이면 그룹에도 바로 보여요.
+        </Text>
+      </Card>
+    );
+  }
+  if (!data) return null;
+  const press = async () => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await confirmEarlyWake(data.alarmId);
+      setDone(true);
+    } catch {
+      toast('기록하지 못했어요. 다시 눌러 주세요');
+      void reload();
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Card>
+      <Text variant="bodyStrong">{`${timeParts(data.at).hm} 알람 전에 깼나요?`}</Text>
+      <Text variant="small" tone="sub" style={styles.earlySub}>
+        누르면 지금 시각으로 기상을 기록해요.
+      </Text>
+      <View style={styles.earlyButton}>
+        <Button label="먼저 깼어요" small loading={busy} onPress={press} />
+      </View>
+    </Card>
+  );
 }
 
 // 단계는 가짜 db에 남아 있어서(api) 화면을 나갔다 와도 이어짐 — 확인 알림 단계면 확인 알림부터
@@ -333,6 +377,8 @@ const styles = StyleSheet.create({
   sim: { borderWidth: 1, borderStyle: 'dashed', borderColor: colors.faintDecor, borderRadius: 18, padding: 14, marginTop: 14 },
   simText: { marginBottom: 10 },
   simButtons: { gap: 8 },
+  earlySub: { marginTop: 4 },
+  earlyButton: { marginTop: 12, alignItems: 'flex-start' },
   notif: {
     backgroundColor: colors.card,
     borderRadius: 18,

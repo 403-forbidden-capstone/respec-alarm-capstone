@@ -2,7 +2,7 @@ import { describe, expect, it } from '@jest/globals';
 
 import { formatTime } from '@/lib/format';
 
-import { alarmChain, autoLevel, memberState } from '../calc';
+import { alarmChain, autoLevel, memberState, mockWakeRow } from '../calc';
 import { db, kst } from '../data';
 
 const appointment = (id: string) => {
@@ -42,17 +42,22 @@ describe('ALG-02 강도', () => {
   });
 });
 
-describe('그룹원 기상 상태', () => {
+describe('그룹원 기상 상태 — 서버 get_group_wake 줄 흉내 (친구 7장)', () => {
   const morning = kst(22, 475); // 오전 7:55
 
-  it('오전 7:55 기준 마지막으로 일어난 일', () => {
-    expect(memberState('sy', morning).text).toBe('준비 시작 · 오전 7:38');
-    expect(memberState('jh', morning)).toEqual({ text: '기상 완료 · 오전 7:30', dot: 'ok', woke: true });
-    expect(memberState('js', morning)).toEqual({ text: '취침 중 · 알람 8:50', dot: 'zz', woke: false });
-    expect(memberState('me', morning).text).toBe('취침 중 · 알람 8:00');
+  it('오전 7:55 기준 — 기상까지만(준비 시작은 일어남에 머묾), 아직은 알람 시각', () => {
+    expect(memberState('sy', morning).text).toBe('일어났어요 7:35');
+    expect(memberState('jh', morning)).toEqual({ stage: 'WOKE', text: '일어났어요 7:30', dot: 'ok', woke: true });
+    expect(memberState('js', morning)).toEqual({ stage: 'SCHEDULED', text: '8:50 알람', dot: 'zz', woke: false });
+    expect(memberState('me', morning).text).toBe('8:00 알람');
   });
 
-  it('전날 밤에는 내일 알람', () => {
-    expect(memberState('sy', kst(21, 1260)).text).toBe('내일 알람 7:30');
+  it('줄 모양: 미루기 횟수 · 해제 시각 칸 없음, 시나리오가 없는 사람은 null(공유 안 함)', () => {
+    expect(Object.keys(mockWakeRow('sy', morning) ?? {}).sort()).toEqual(['is_me', 'user_id', 'wake_alarm_at', 'wake_confirmed_at', 'wake_status']);
+    expect(mockWakeRow('mom', morning)).toBeNull();
+  });
+
+  it('전날 밤에는 그날 알람 시각', () => {
+    expect(memberState('sy', kst(21, 1260)).text).toBe('7:30 알람');
   });
 });

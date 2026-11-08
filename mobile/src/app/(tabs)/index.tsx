@@ -35,6 +35,7 @@ import { advanceRoutine, getEveningRoutine, getTodayRoutine, listTodos, toggleTo
 import { RoutineCard } from '@/features/routine/components/RoutineCard';
 import { TodoList } from '@/features/routine/components/TodoList';
 import { getGroupSummary, listGroups } from '@/features/social/api';
+import { wokeLine } from '@/features/social/wakeTexts';
 import { useWakeLoad } from '@/features/social/hooks/useGroupWake';
 import { now } from '@/lib/clock';
 import { addDays, dayKey, formatDate, formatMinuteOfDay, formatRelative, formatTime, minuteOfDay, startOfDay } from '@/lib/format';
@@ -305,21 +306,24 @@ export default function HomeScreen() {
               key={group.id}
               onPress={() => openGroupDetail(group.id, 'tab')}
               accessibilityRole="button"
-              accessibilityLabel={`${group.name}, 오늘 ${group.wokeCount}명 기상 완료`}
+              accessibilityLabel={[group.name, wokeLine(group.wokeCount)].filter(Boolean).join(', ')}
               style={({ pressed }) => [styles.group, i > 0 && styles.groupDivider, pressed && styles.pressed]}
             >
               <View style={styles.avatars}>
                 {group.members.map(({ person, state }, j) => (
                   <View key={person.id} style={[styles.avatarRing, j > 0 && styles.avatarOverlap]}>
-                    <Avatar initial={person.initial} small dot={state.dot} />
+                    <Avatar initial={person.initial} small dot={state.dot ?? undefined} />
                   </View>
                 ))}
               </View>
               <View style={styles.bannerText}>
                 <Text variant="bodyStrong">{group.name}</Text>
-                <Text variant="small" tone="sub">
-                  오늘 {group.wokeCount}명 기상 완료
-                </Text>
+                {/* 그 그룹 약속이 없는 날은 그 줄을 숨김 (7-사) */}
+                {group.wokeCount != null ? (
+                  <Text variant="small" tone="sub">
+                    {wokeLine(group.wokeCount)}
+                  </Text>
+                ) : null}
               </View>
             </Pressable>
           ))}

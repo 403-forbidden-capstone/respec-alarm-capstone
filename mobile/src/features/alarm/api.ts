@@ -52,6 +52,8 @@ import {
   type UpdateResult,
   type UserEditLog,
   type WakeCheck,
+  type EarlyWake,
+  EARLY_WAKE_MINUTES,
 } from './types';
 import { manualTimes, orderError } from './adjust';
 import { LEVEL_FIELD, type EditLogLine } from './edits';
@@ -969,6 +971,26 @@ export async function confirmWake(alarmId: string, how: 'self' | 'auto', at: Dat
   db.wakeConfirmations[alarmId] = { at: wokeAt, how, ...use };
   db.me.wakeAt = wokeAt;
   db.events.push({ at: wokeAt, label: '기상 확인', source: how === 'self' ? '직접 응답' : '자동 판정' });
+}
+
+// H08 [먼저 깼어요] — 알람이 울리기 전 60분 안에 깬 날 (D61). 곧 울릴 기상 알람이 없거나 이미 울렸 · 확인했으면 null
+//   가짜 모드: 내 첫 기상 알람(팀 주간회의) 기준. 웹 실데이터 미리보기 알람은 대상이 아님
+export async function getEarlyWake(): Promise<EarlyWake | null> {
+  if (!isMock()) return real.getEarlyWake();
+  const a = find('a1');
+  const wake = a ? alarmChain(a).find((x) => x.kind === 'WAKE') : undefined;
+  if (!wake || db.wakeConfirmations[wake.id] || db.me.wakeAt || db.wake.phase !== 'idle') return null;
+  const left = wake.at.getTime() - now().getTime();
+  return left > 0 && left <= EARLY_WAKE_MINUTES * 60_000 ? { alarmId: wake.id, at: wake.at } : null;
+}
+
+export async function confirmEarlyWake(alarmId: string): Promise<void> {
+  if (!isMock()) return real.confirmEarlyWake(alarmId);
+  if (db.wakeConfirmations[alarmId]) return;
+  const at = now();
+  db.wakeConfirmations[alarmId] = { at, how: 'self', ...NO_USE };
+  db.me.wakeAt = at;
+  db.events.push({ at, label: '기상 확인', source: '먼저 깼어요' });
 }
 
 // 일정 없는 알람 만들기 · 고치기 (D46 · Q10, 알람 목록 "+") — 입력 화면은 새 UI라 아직 없고 api만. 실데이터 전용 (alarm-commit STANDALONE)

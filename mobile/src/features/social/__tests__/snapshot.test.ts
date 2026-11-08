@@ -2,7 +2,6 @@ import { describe, expect, it } from '@jest/globals';
 
 import { F_SUYEON, GROUP, JIHYEONG, JUNSEONG, ME, SUYEON, snapshot } from '../__fixtures__/seed';
 import {
-  canSeeWakeIn,
   friendBetween,
   friendIds,
   friendShareSet,
@@ -129,21 +128,5 @@ describe('준 권한 (내가 이 사람에게 준 것)', () => {
       ],
     });
     expect(groupShareSet(mixed, GROUP)).toEqual({ viewAlarm: true, editAlarm: false, viewWake: true });
-  });
-});
-
-describe('G01 canSeeWake — 다른 구성원 중 한 명이라도 나에게 기상 조회를 허용했는지', () => {
-  it('수연 · 지형이 허용 → true', () => {
-    expect(canSeeWakeIn(s, GROUP)).toBe(true);
-  });
-
-  it('허용한 사람이 동의를 껐거나 아무도 안 줬으면 false', () => {
-    const none = snapshot({ perms: s.perms.filter((p) => p.grantee_id !== ME) });
-    expect(canSeeWakeIn(none, GROUP)).toBe(false);
-    const allOff = snapshot({ members: s.members.map((m) => ({ ...m, wake_share_opt_in: false })) });
-    // 친구 출처(수연 · 지형)로 받은 기상 조회는 동의와 상관없이 인정 — 그룹 기상은 친구 권한으로도 보임
-    expect(canSeeWakeIn(allOff, GROUP)).toBe(true);
-    const groupOnly = snapshot({ members: allOff.members, perms: s.perms.filter((p) => p.source_type === 'GROUP') });
-    expect(canSeeWakeIn(groupOnly, GROUP)).toBe(false);
   });
 });

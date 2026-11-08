@@ -5,6 +5,7 @@ import { Button, Sheet, Text } from '@/components/ui';
 import { colors, font, radius } from '@/theme';
 
 import { REPORT_NOTE_MAX, REPORT_REASONS } from '../blockTexts';
+import { wakeHideLabel } from '../wakeTexts';
 import type { Person, ReportReason } from '../types';
 
 type Props = {
@@ -12,19 +13,39 @@ type Props = {
   onClose: () => void;
   onBlock: (person: Person) => void; // 확인 창 · 차단 호출은 부르는 쪽(usePersonMenu)이 함
   onReport: (person: Person, reason: ReportReason, note: string) => Promise<void>;
+  wakeHidden?: boolean | null; // G02 멤버 줄만 — 내가 이 사람에게 기상을 숨겼는지. null · 없으면 그 줄을 안 보임 (숨기기는 이 메뉴 한 곳, 7-43)
+  onToggleWakeHidden?: (person: Person) => void;
 };
 
 // 사람 줄 메뉴 (친구 4장) — [신고하기] [차단하기] [취소]. [신고하기]를 누르면 같은 시트에서 사유 고르기 + 한 줄 메모
 //   F02 친구 상세 · F01 받은 요청 카드 · 검색 결과 · G02 멤버 줄이 같이 씀. 시트 내용은 화면 밖(루트)에서 그려져 값 · 콜백만 받음
-export function PersonMenuSheet({ person, onClose, onBlock, onReport }: Props) {
+//   G02 멤버 줄은 맨 위에 [이 사람에게 기상 숨기기 / 보이기] (친구 7장)
+export function PersonMenuSheet({ person, onClose, onBlock, onReport, wakeHidden, onToggleWakeHidden }: Props) {
   return (
     <Sheet visible={person != null} onClose={onClose} title={person ? `${person.name} ${person.handle ?? ''}`.trim() : undefined}>
-      {person ? <Body key={person.id} person={person} onClose={onClose} onBlock={onBlock} onReport={onReport} /> : null}
+      {person ? (
+        <Body
+          key={person.id}
+          person={person}
+          onClose={onClose}
+          onBlock={onBlock}
+          onReport={onReport}
+          wakeHidden={wakeHidden}
+          onToggleWakeHidden={onToggleWakeHidden}
+        />
+      ) : null}
     </Sheet>
   );
 }
 
-function Body({ person, onClose, onBlock, onReport }: { person: Person } & Pick<Props, 'onClose' | 'onBlock' | 'onReport'>) {
+function Body({
+  person,
+  onClose,
+  onBlock,
+  onReport,
+  wakeHidden,
+  onToggleWakeHidden,
+}: { person: Person } & Pick<Props, 'onClose' | 'onBlock' | 'onReport' | 'wakeHidden' | 'onToggleWakeHidden'>) {
   const [step, setStep] = useState<'menu' | 'report'>('menu');
   const [reason, setReason] = useState<ReportReason | null>(null);
   const [note, setNote] = useState('');
@@ -33,6 +54,9 @@ function Body({ person, onClose, onBlock, onReport }: { person: Person } & Pick<
   if (step === 'menu') {
     return (
       <View style={styles.stack}>
+        {wakeHidden != null && onToggleWakeHidden ? (
+          <Button variant="ghost" label={wakeHideLabel(wakeHidden)} onPress={() => onToggleWakeHidden(person)} />
+        ) : null}
         <Button variant="ghost" label="신고하기" onPress={() => setStep('report')} />
         <Button variant="ghost" label="차단하기" onPress={() => onBlock(person)} />
         <Button variant="plain" label="취소" onPress={onClose} />

@@ -1,17 +1,18 @@
 // ② 알람 공유 · 기상 확인 — 데이터 접근은 이 파일에서만 합니다.
 // 가짜 모드(웹 미리보기 · ?mode=mock)는 src/mocks의 가짜 데이터를 돌려주고, 실데이터 모드는 함수 맨 앞에서 ./real로 넘깁니다 (P6).
 //   읽기 · 쓰기 위치는 docs/screen-data-map.md (G01 · F02 · F03 · G02 · G03 · G04, 권한 합집합은 앱에서 합침 — grants.ts)
-//   date = 그룹 기상 신호(lib/realtime)가 알려 준 날 (YYYY-MM-DD). 실데이터만 씀 — get_group_wake_status의 p_date, 없으면 내 시간대의 오늘
+//   date = 그룹 기상 신호(lib/realtime)가 알려 준 날 (YYYY-MM-DD). 실데이터만 씀 — get_group_wake의 p_date, 없으면 내 시간대의 오늘
 import { cleanHandle } from '@/features/onboarding/validate';
 import { HANDLE_PATTERN } from '@/features/profile/types';
 import { now } from '@/lib/clock';
 import { UserError } from '@/lib/errors';
 import { dateParts } from '@/lib/format';
 import { isMock } from '@/lib/mode';
-import { memberState } from '@/mocks/calc';
-import { db, kst, memberAlarms, people, timelines, TODAY, type MockMemberAlarm, type MockPerson } from '@/mocks/data';
+import { mockWakeRow } from '@/mocks/calc';
+import { db, kst, memberAlarms, people, type MockMemberAlarm, type MockPerson } from '@/mocks/data';
 
 import { mergeGrants } from './grants';
+import { NO_APPOINTMENT_STATE, wakeStateOf, wokeCountOf, type WakeRow } from './map';
 import { CODE_EXPIRED, CODE_NOT_FOUND, GROUP_FULL, GROUP_NOT_MEMBER, GROUP_TOO_MANY, cleanCode, groupNameProblem } from './groupTexts';
 import * as real from './real';
 import { MESSAGE_GONE } from './relationMessages';
@@ -48,7 +49,6 @@ import {
   type ShareLogItem,
   type SharedAlarms,
   type SharedChangeResult,
-  type TimelineEntry,
 } from './types';
 
 const toPerson = (p: MockPerson): Person => ({ ...p });
@@ -75,10 +75,19 @@ function receivedFrom(personId: string): FinalGrant {
   return mergeGrants((db.received[personId] ?? []).map((r) => ({ ...r })));
 }
 
-function wokeCount(groupId: string) {
+// 가짜 모드의 get_group_wake — 그 그룹 약속이 있을 때만(목업은 날짜 없이 연결 일정이 있으면), 나 + 시나리오가 있고 그 그룹에서 기상을 준 사람 − 차단
+//   (목업에는 동의 칸이 없어 받은 그룹 권한의 기상을 동의로 봄)
+function mockWakeRows(groupId: string): WakeRow[] {
+  const g = db.groups[groupId];
+  if (!g || !db.appointments.some((a) => a.groupId === groupId)) return [];
   const t = now();
-  return (db.groups[groupId]?.members ?? []).filter((p) => (p === 'me' || timelines[p]) && memberState(p, t).woke).length;
+  return g.members.flatMap((p) => {
+    const consent = p === 'me' || (db.received[p] ?? []).some((r) => r.sourceType === 'GROUP' && r.sourceId === groupId && r.viewWake);
+    const row = consent && !blocked.includes(p) ? mockWakeRow(p, t) : null;
+    return row ? [row] : [];
+  });
 }
+const mockStateOf = (rows: WakeRow[], personId: string) => wakeStateOf(rows.find((r) => r.user_id === personId), rows.length > 0);
 
 // 새 UI용 가짜 상태 — 앱을 다시 열 때까지만 (mocks/data.ts는 안 고침)
 const sentRequests = new Set<string>(); // 내가 친구 요청을 보낸 사람
@@ -86,6 +95,7 @@ const blocked: string[] = []; // 내가 차단한 사람 — 새로 차단한 �
 const reported = new Set<string>(); // 오늘 신고한 대상 `종류:id` — 같은 대상은 하루 한 번
 const wakeOptIns: Record<string, boolean> = {}; // 기상 공유 동의 — 목업 그룹은 이미 공유 중이라 기본 켬
 const notifOff: Record<string, boolean> = {}; // 이 그룹 알림 끄기 — 기본 꺼짐(= 알림 받음)
+const wakeHides = new Set<string>(); // 내가 기상을 숨긴 사람 (G02 멤버 메뉴)
 const invitedFriends: Record<string, Set<string>> = {}; // 그룹별로 내가 초대한 친구 (G02 + 초대에서 '초대 중' 표시)
 const groupCodes: Record<string, GroupCode> = {}; // 그룹 코드 + 만료일 (처음 열 때 정함, 새 코드를 누르면 바뀜)
 
@@ -234,9 +244,8 @@ export async function listGroups(date?: string | null): Promise<GroupItem[]> {
     name: g.name,
     initial: g.initial,
     memberCount: g.members.length,
-    wokeCount: wokeCount(g.id),
+    wokeCount: wokeCountOf(mockWakeRows(g.id)),
     grants: copy(db.grants.group[g.id] ?? none()),
-    canSeeWake: g.members.some((p) => p !== 'me' && receivedFrom(p).viewWake),
   }));
 }
 
@@ -245,12 +254,12 @@ export async function getGroupSummary(groupId: string, date?: string | null): Pr
   if (!isMock()) return real.getGroupSummary(groupId, date);
   const g = db.groups[groupId];
   if (!g) return null;
-  const t = now();
+  const rows = mockWakeRows(g.id);
   return {
     id: g.id,
     name: g.name,
-    members: g.members.map((id) => ({ person: person(id), state: memberState(id, t) })),
-    wokeCount: wokeCount(g.id),
+    members: g.members.map((id) => ({ person: person(id), state: mockStateOf(rows, id) })),
+    wokeCount: wokeCountOf(rows),
   };
 }
 
@@ -259,7 +268,7 @@ export async function getGroup(groupId: string, date?: string | null): Promise<G
   if (!isMock()) return real.getGroup(groupId, date);
   const g = db.groups[groupId];
   if (!g) return null;
-  const t = now();
+  const rows = mockWakeRows(g.id);
   return {
     id: g.id,
     name: g.name,
@@ -271,8 +280,9 @@ export async function getGroup(groupId: string, date?: string | null): Promise<G
     members: g.members.map((id) => ({
       person: person(id),
       isMe: id === 'me',
-      state: memberState(id, t),
+      state: mockStateOf(rows, id),
       received: receivedFrom(id),
+      wakeHidden: wakeHides.has(id),
     })),
     wakeShareOptIn: wakeOptIns[g.id] ?? true,
     notificationsOff: notifOff[g.id] ?? false,
@@ -351,36 +361,30 @@ export async function getReceived(id: RelationId): Promise<{ person: Person; per
   });
 }
 
-// 그룹원 기상 상태 (G03) — 지금까지 일어난 일만
-const SOURCE: Record<string, string> = {
-  '알람 울림': '자동 기록',
-  '알람 해제': '기상 미확정',
-  '준비 시작': '진행 중',
-  출발: '지오펜스',
-  도착: '지오펜스',
-};
-
-// 그 그룹의 구성원이고 나에게 기상 상태 조회 권한을 줬을 때만 (get_group_wake_status와 같게), 아니면 null
-// 권한은 있는데 오늘 알람이 없으면 alarm: null (권한이 없다는 말과 구분)
+// G03 — 그 그룹의 다른 멤버일 때만. 약속 있는 날 줄이 없으면 null(공유 안 함), 약속 없는 날은 noGroupAppointment (실데이터와 같게)
 export async function getMemberWake(groupId: string, personId: string, date?: string | null): Promise<MemberWake | null> {
   if (!isMock()) return real.getMemberWake(groupId, personId, date);
   const g = db.groups[groupId];
-  const tl = timelines[personId];
-  const alarms = memberAlarms[personId];
-  if (!g?.members.includes(personId) || !receivedFrom(personId).viewWake) return null;
-  if (!tl || !alarms?.length) return { person: person(personId), groupName: g.name, alarm: null, timeline: [], firstAlarmAt: null, noGroupAppointment: false };
-  const t = now().getTime();
-  const timeline: TimelineEntry[] = tl
-    .map(([m, label, source]) => ({ at: kst(TODAY, m), label, source: source ?? SOURCE[label] ?? '' }))
-    .filter((e) => e.at.getTime() <= t);
+  if (!g?.members.includes(personId) || personId === 'me') return null;
+  const rows = mockWakeRows(groupId);
+  const base = { person: person(personId), groupName: g.name, canViewAlarm: receivedFrom(personId).viewAlarm };
+  if (!rows.length) return { ...base, state: NO_APPOINTMENT_STATE, alarmAt: null, confirmedAt: null, noGroupAppointment: true };
+  const row = rows.find((r) => r.user_id === personId);
+  if (!row) return null;
   return {
-    person: person(personId),
-    groupName: g.name,
-    alarm: toMemberAlarm(alarms[0]),
-    timeline,
-    firstAlarmAt: kst(TODAY, tl[0][0]),
+    ...base,
+    state: wakeStateOf(row, true),
+    alarmAt: row.wake_alarm_at ? new Date(row.wake_alarm_at) : null,
+    confirmedAt: row.wake_confirmed_at ? new Date(row.wake_confirmed_at) : null,
     noGroupAppointment: false,
   };
+}
+
+// G02 멤버 메뉴 [이 사람에게 기상 숨기기 / 보이기] — 상대에게 알리지 않음 (7-43)
+export async function setWakeHidden(personId: string, hidden: boolean): Promise<void> {
+  if (!isMock()) return real.setWakeHidden(personId, hidden);
+  if (hidden) wakeHides.add(personId);
+  else wakeHides.delete(personId);
 }
 
 // 공유받은 알람 (G04) — 조회 권한이 없으면 알람은 비워서 줌 (alarms RLS와 같게)

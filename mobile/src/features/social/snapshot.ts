@@ -136,13 +136,6 @@ export function groupShareSet(s: Snapshot, groupId: string): PermissionSet {
   return unionPermissions(sets);
 }
 
-// 그 그룹의 다른 구성원 중 누구라도 나에게 기상 상태 조회를 허용했는지 (G01 카드가 상세로 들어가는지)
-export function canSeeWakeIn(s: Snapshot, groupId: string): boolean {
-  return joinedIds(s, groupId)
-    .filter((id) => id !== s.me)
-    .some((id) => receivedFrom(s, id).viewWake);
-}
-
 // 내 기상 공유 동의 (group_members.wake_share_opt_in)
 export function myOptIn(s: Snapshot, groupId: string): boolean {
   return s.members.some((m) => m.group_id === groupId && m.user_id === s.me && m.wake_share_opt_in);

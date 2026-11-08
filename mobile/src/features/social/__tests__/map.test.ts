@@ -3,17 +3,15 @@ import { describe, expect, it } from '@jest/globals';
 import {
   appointmentLabel,
   groupSharedCards,
-  HIDDEN_STATE,
   initialOf,
   NO_APPOINTMENT_STATE,
+  NOT_SHARED_STATE,
   personFromProfile,
   shareTags,
   sinceLabel,
   toMemberAlarm,
   upcomingCards,
-  wakeAlarmCard,
   wakeStateOf,
-  wakeTimeline,
   wokeCountOf,
   type SharedAlarmRow,
   type SharedApptRow,
@@ -25,11 +23,7 @@ const wakeRow = (over: Partial<WakeRow> = {}): WakeRow => ({
   user_id: 'u1',
   is_me: false,
   wake_alarm_at: '2026-10-19T22:30:00.000Z',
-  rang_at: null,
-  snooze_count: 0,
-  dismissed_at: null,
   wake_confirmed_at: null,
-  missed_at: null,
   wake_status: 'SCHEDULED',
   ...over,
 });
@@ -59,18 +53,19 @@ describe('사람 · 그룹 글자', () => {
   });
 });
 
-describe('wakeStateOf — 기상까지만 (D59)', () => {
-  it('상태마다 글자 · 점 · 기상 여부', () => {
+describe('wakeStateOf — 기상까지만, 화면 3단계 (D59 · 친구 7장)', () => {
+  it('단계마다 글자 · 점 · 기상 여부 — 울림 · 해제 · 미확인은 "울렸어요"', () => {
     expect(wakeStateOf(wakeRow({ wake_status: 'CONFIRMED', wake_confirmed_at: '2026-10-19T22:35:00.000Z' }), true)).toEqual({
-      text: '기상 완료 · 오전 7:35',
+      stage: 'WOKE',
+      text: '일어났어요 7:35',
       dot: 'ok',
       woke: true,
     });
-    expect(wakeStateOf(wakeRow({ wake_status: 'RINGING' }), true)).toMatchObject({ text: '알람 울리는 중', dot: 'zz', woke: false });
-    expect(wakeStateOf(wakeRow({ wake_status: 'DISMISSED' }), true)).toMatchObject({ text: '알람 해제 · 기상 확인 전', woke: false });
-    expect(wakeStateOf(wakeRow({ wake_status: 'MISSED' }), true)).toMatchObject({ text: '기상 미확인', woke: false });
-    expect(wakeStateOf(wakeRow({ wake_status: 'SCHEDULED' }), true)).toMatchObject({ text: '취침 중 · 알람 7:30', woke: false });
-    expect(wakeStateOf(wakeRow({ wake_status: 'NO_ALARM', wake_alarm_at: null }), true)).toMatchObject({ text: '오늘은 기상 알람이 없어요' });
+    for (const wake_status of ['RINGING', 'DISMISSED', 'MISSED']) {
+      expect(wakeStateOf(wakeRow({ wake_status }), true)).toMatchObject({ stage: 'RANG', text: '울렸어요', dot: 'mid', woke: false });
+    }
+    expect(wakeStateOf(wakeRow({ wake_status: 'SCHEDULED' }), true)).toMatchObject({ stage: 'SCHEDULED', text: '7:30 알람', woke: false });
+    expect(wakeStateOf(wakeRow({ wake_status: 'NO_ALARM', wake_alarm_at: null }), true)).toMatchObject({ stage: 'NO_ALARM', text: '알람 없음' });
   });
 
   it('준비 · 출발 · 도착 같은 단계는 만들지 않음', () => {
@@ -78,51 +73,20 @@ describe('wakeStateOf — 기상까지만 (D59)', () => {
     expect(texts.join(' ')).not.toMatch(/준비|출발|도착/);
   });
 
-  it('그날 행이 하나도 없으면 그 그룹 약속이 없는 날, 행이 없는 멤버는 볼 수 없음 (D57)', () => {
+  it('그날 줄이 하나도 없으면 그 그룹 약속이 없는 날, 줄이 없는 멤버는 공유 안 함 (D57)', () => {
     expect(wakeStateOf(undefined, false)).toBe(NO_APPOINTMENT_STATE);
     expect(wakeStateOf(wakeRow(), false)).toBe(NO_APPOINTMENT_STATE);
-    expect(wakeStateOf(undefined, true)).toBe(HIDDEN_STATE);
+    expect(wakeStateOf(undefined, true)).toBe(NOT_SHARED_STATE);
   });
 
-  it('오늘 기상한 사람 수는 기상 확인이 된 사람만', () => {
+  it('오늘 일어난 사람 수는 기상 확인이 된 사람만, 줄이 없으면 null', () => {
     const rows = [wakeRow({ wake_status: 'CONFIRMED' }), wakeRow({ wake_status: 'DISMISSED' }), wakeRow({ wake_status: 'CONFIRMED' }), wakeRow({ wake_status: 'MISSED' })];
     expect(wokeCountOf(rows)).toBe(2);
-    expect(wokeCountOf([])).toBe(0);
+    expect(wokeCountOf([])).toBeNull();
   });
 });
 
-describe('G03 흐름 · 알람 카드', () => {
-  it('울림 → 해제 → 확인을 시간순으로, 미루기 횟수는 출처 칸에', () => {
-    const row = wakeRow({
-      wake_status: 'CONFIRMED',
-      rang_at: '2026-10-19T22:30:00.000Z',
-      snooze_count: 2,
-      dismissed_at: '2026-10-19T22:34:00.000Z',
-      wake_confirmed_at: '2026-10-19T22:40:00.000Z',
-    });
-    expect(wakeTimeline(row).map((e) => [e.label, e.source])).toEqual([
-      ['알람 울림', '자동 기록 · 미루기 2회'],
-      ['알람 해제', '기상 미확정'],
-      ['기상 확인', ''],
-    ]);
-  });
-
-  it('미루지 않았으면 출처에 횟수를 안 적고, 미확인은 흐름 끝에', () => {
-    const row = wakeRow({ wake_status: 'MISSED', rang_at: '2026-10-19T22:30:00.000Z', missed_at: '2026-10-19T23:30:00.000Z' });
-    expect(wakeTimeline(row).map((e) => [e.label, e.source])).toEqual([
-      ['알람 울림', '자동 기록'],
-      ['기상 미확인', '자동 기록'],
-    ]);
-    expect(wakeTimeline(wakeRow())).toEqual([]);
-  });
-
-  it('알람 카드: 기상 한 줄만, 강도 · 준비는 비움 (기상 조회 권한으로는 못 읽음)', () => {
-    const card = wakeAlarmCard(wakeRow(), '팀 주간회의 · 세종대학교 · 오전 10:00');
-    expect(card).toMatchObject({ chain: [{ label: '기상' }], levelName: '', note: '', enabled: true, appointmentLabel: '팀 주간회의 · 세종대학교 · 오전 10:00' });
-    expect(card?.chain[0].at.toISOString()).toBe('2026-10-19T22:30:00.000Z');
-    expect(wakeAlarmCard(wakeRow({ wake_alarm_at: null }), '')).toBeNull();
-  });
-
+describe('G04 약속 줄', () => {
   it('약속 줄: 제목 · 장소 · 시각', () => {
     expect(appointmentLabel('팀 주간회의', '세종대학교', new Date('2026-10-20T01:00:00.000Z'))).toBe('팀 주간회의 · 세종대학교 · 오전 10:00');
   });

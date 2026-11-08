@@ -10,10 +10,14 @@ export type Person = {
   handle: string | null; // @etion
 };
 
-// 기상 상태 한 줄 (G02 멤버 · H01 그룹 요약)
+// 기상 상태 한 줄 (G01 · G02 멤버 · G03 · H01 그룹 요약) — 서버 6단계를 화면 3단계로 묶은 값 (친구 7장, map.ts wakeStateOf)
+//   SCHEDULED 아직('8:50 알람') · RANG 울렸어요(울림 · 해제 · 미확인) · WOKE 일어남 · NO_ALARM 알람 없음
+//   NOT_SHARED 공유 안 함(동의 안 함 · 숨김 · 차단 구분 없음) · NO_APPOINTMENT 그 그룹 약속이 없는 날
+export type WakeStage = 'SCHEDULED' | 'RANG' | 'WOKE' | 'NO_ALARM' | 'NOT_SHARED' | 'NO_APPOINTMENT';
 export type WakeState = {
-  text: string; // 기상 완료 · 오전 7:30
-  dot: WakeDot;
+  stage: WakeStage;
+  text: string; // 일어났어요 8:08
+  dot: WakeDot | null; // 색 점 — 공유 안 함 · 약속 없는 날은 없음
   woke: boolean;
 };
 
@@ -52,9 +56,8 @@ export type GroupItem = {
   name: string;
   initial: string; // 그룹 아이콘 글자
   memberCount: number;
-  wokeCount: number;
+  wokeCount: number | null; // 오늘 일어난 사람 수 — 그 그룹 약속이 없는 날은 null (G01 '오늘 n명 일어남' 줄을 숨김)
   grants: PermissionSet; // 이 그룹에 내가 준 권한
-  canSeeWake: boolean; // 멤버 기상 상태를 볼 수 있는지 (받은 권한)
 };
 
 // 홈(H01)의 그룹 기상 요약
@@ -62,14 +65,15 @@ export type GroupSummary = {
   id: string;
   name: string;
   members: { person: Person; state: WakeState }[];
-  wokeCount: number;
+  wokeCount: number | null; // 약속 없는 날은 null
 };
 
 export type GroupMember = {
   person: Person;
   isMe: boolean;
-  state: WakeState;
-  received: FinalGrant; // 이 사람에게서 받은 권한 (기상 상태 · 알람 보기 버튼)
+  state: WakeState; // 기상 상태는 받은 권한이 아니라 그 사람의 그룹 기상 공유 동의로만 (6장 · 7장)
+  received: FinalGrant; // 이 사람에게서 받은 권한 (알람 보기 버튼)
+  wakeHidden: boolean; // 내가 이 사람에게 내 기상을 숨김 (wake_hides, G02 멤버 메뉴)
 };
 
 export type GroupDetail = {
@@ -94,15 +98,15 @@ export type MemberAlarm = {
   enabled: boolean;
 };
 
-export type TimelineEntry = { at: Date; label: string; source: string };
-
+// G03 그룹원 기상 상태 — 알람 시각 한 줄 + 확인 시각만. 알람 카드(강도 · 장소 · 준비)는 알람 조회 권한이 있을 때 G04에서 (7-다 · 7-41)
 export type MemberWake = {
   person: Person;
-  groupName: string; // 공유 범위 안내 (캡스톤팀에 허용한 범위만)
-  alarm: MemberAlarm | null; // 오늘 알람이 없으면 null (권한이 없는 것과 다름)
-  timeline: TimelineEntry[]; // 지금까지 일어난 일
-  firstAlarmAt: Date | null;
-  noGroupAppointment: boolean; // 그날 이 그룹의 약속이 없어 기상 상태를 주지 않는 날 (D57 — 알람이 없는 것과 다름). 가짜 데이터는 늘 false
+  groupName: string; // 공유 범위 안내
+  state: WakeState;
+  alarmAt: Date | null; // 그날 첫 기상 알람 시각
+  confirmedAt: Date | null;
+  canViewAlarm: boolean; // 알람 조회 권한 → [알람 보기] (G04)
+  noGroupAppointment: boolean; // 그날 이 그룹 약속이 없어 기상 상태를 주지 않는 날 (D57 — 공유 안 함과 다름)
 };
 
 export type SharedAlarms = {

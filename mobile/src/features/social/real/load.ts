@@ -1,6 +1,7 @@
 // ② 친구 · 그룹 실데이터 — 읽기 공용 (쿼리만, 화면 모양으로 바꾸는 일은 snapshot.ts · map.ts)
 //   · loadSnapshot: 친구 · 그룹 · 구성원 · 권한 · 공개 프로필을 한 번에 읽음. 같은 시각에 여러 함수가 부르면(홈이 그룹마다 부름) 한 번만 읽음 — 쓰기 뒤에는 invalidateSnapshot()
-//   · loadWakeRows: get_group_wake_status. date = 기상 신호가 알려 준 날 (없으면 함수가 내 시간대의 오늘)
+//   · loadWakeRows: get_group_wake(칸 7개, 친구 7장). date = 기상 신호가 알려 준 날 (없으면 함수가 내 시간대의 오늘)
+//   · loadWakeHides: 내가 기상을 숨긴 사람들 (wake_hides — 내 줄만 읽힘, 쓰기는 set_wake_hidden으로만)
 import { supabase } from '@/lib/supabase';
 import { requireUserId } from '@/lib/user';
 
@@ -48,7 +49,13 @@ export async function loadSnapshot(): Promise<Snapshot> {
 }
 
 export async function loadWakeRows(groupId: string, date?: string | null): Promise<WakeRow[]> {
-  const { data, error } = await supabase.rpc('get_group_wake_status', date ? { p_group_id: groupId, p_date: date } : { p_group_id: groupId });
+  const { data, error } = await supabase.rpc('get_group_wake', date ? { p_group_id: groupId, p_date: date } : { p_group_id: groupId });
   if (error) throw error;
   return data ?? [];
+}
+
+export async function loadWakeHides(): Promise<Set<string>> {
+  const { data, error } = await supabase.from('wake_hides').select('hidden_from_id');
+  if (error) throw error;
+  return new Set((data ?? []).map((r) => r.hidden_from_id));
 }
