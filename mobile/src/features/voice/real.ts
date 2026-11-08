@@ -807,9 +807,10 @@ export function flushCommits(userId: string | null): Promise<void> {
   if (!userId) return Promise.resolve();
   flushing ??= (async () => {
     try {
-      for (const sessionId of await pendingCommits(userId)) {
+      for (const { sessionId, rejected } of await pendingCommits(userId)) {
         try {
-          const res = await callEdge<{ status?: string }>('voice-commit', { session_id: sessionId }, { timeoutMs: COMMIT_TIMEOUT_MS });
+          const body = rejected.length > 0 ? { session_id: sessionId, rejected_cards: rejected } : { session_id: sessionId };
+          const res = await callEdge<{ status?: string }>('voice-commit', body, { timeoutMs: COMMIT_TIMEOUT_MS });
           if (res?.status === 'DONE' || res?.status === 'SKIPPED') await removePendingCommit(userId, sessionId);
         } catch (e) {
           if (e instanceof EdgeError && (e.code === 'NOT_FOUND' || e.code === 'VALIDATION_FAILED')) await removePendingCommit(userId, sessionId);
@@ -831,8 +832,10 @@ export function finishConversation(): Promise<{ recordDate: string | null }> {
     // 한 마디도 안 한 대화는 끝남으로 적지 않음 — 다음 [대화 시작]이 같은 세션을 이어 받아 하루 5대화 한도만 닳지 않게
     const spoke = state.messages.some((m) => m.who === 'me');
     if (spoke && state.userId && state.sessionId) {
+      // [저장 안 함]한 카드 — 그 알림이 실패했거나 앞 요청([다시 시도] 대기)에 막혀 큐에서 사라져도 정리 요청에 실어 보내 서버가 REJECTED로
+      const rejected = [...state.cards].filter(([, rec]) => rec.status === 'REJECTED').map(([id]) => id);
       await markFinished(state.userId, state.sessionId);
-      await addPendingCommit(state.userId, state.sessionId);
+      await addPendingCommit(state.userId, state.sessionId, rejected);
     }
     if (state.sessionId && !state.pending && state.queue.length > 0) {
       try {

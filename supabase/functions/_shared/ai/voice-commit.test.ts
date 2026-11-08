@@ -123,14 +123,14 @@ test('글 대화: 여러 일정 · 준비물 — 할 일만 저장, 일정은 �
   assert.equal(x.schema_version, 'structured.v1');
   assert.deepEqual(x.session, {
     session_id: sid, reference_date: REVIEW, session_type: 'night', input_modes: ['text'], started_at: x.session.started_at, ended_at: '2026-10-29T22:30:00+09:00',
-    extracted_at: '2026-10-29T22:30:00+09:00', extractor: { prompt: 'T2@v3.2', schema: 'extract.v2' },
+    extracted_at: '2026-10-29T22:30:00+09:00', extractor: { prompt: 'T2@v3.3', schema: 'extract.v2' },
   });
   assert.deepEqual(x.appointments.map((a) => [a.title, a.status, a.appointment_id]), [['스터디', 'saved', 'ap-new'], ['영화', 'needs_confirm', null]]);
   assert.deepEqual(x.todos.map((t) => [t.title, t.stored]), [['노트북', 'inserted'], ['우산', 'inserted'], ['과제 제출', 'inserted']]);
   assert.deepEqual(x.storage.map((t) => [t.table, t.key, t.result]), [['todos', '노트북', 'inserted'], ['todos', '우산', 'inserted'], ['todos', '과제 제출', 'inserted']]);
   assert.match(row.transcript ?? '', /^AI: .*\n사용자: 내일 2시에 도서관에서 스터디 있어/s);
   assert.deepEqual(fake.order.filter((p) => p === 'T2'), ['T2']);
-  assert.deepEqual(db.rows('ai_calls').filter((c) => c.point === 'T2').map((c) => [c.prompt_version, c.ok, c.session_id]), [['v3.2', true, sid]]);
+  assert.deepEqual(db.rows('ai_calls').filter((c) => c.point === 'T2').map((c) => [c.prompt_version, c.ok, c.session_id]), [['v3.3', true, sid]]);
   // 끝난 대화에는 말을 더 못 보냄 (카드 버튼은 그대로 받음 — turn.ts)
   const e = await failure(handleVoiceTurn(deps, { session_id: sid, rev: row.server_state.rev, client_turn_id: cid(), text: '하나 더' }));
   assert.equal(e.code, 'CONFLICT');
@@ -216,6 +216,7 @@ test('감정 · 습관 · 목표 · 알람 평가 · 수면 → JSON 전부, 표
   const x = rowOf(db, sid).extracted_data as Structured;
   assert.deepEqual([x.mood_condition.mood, x.mood_condition.fatigue, x.mood_condition.condition_note], [['good', 'tired'], null, '많이 피곤함']);
   assert.deepEqual([x.habit_signals.length, x.goals_routine.goals.length, x.goals_routine.wanted_routine, x.alarm_feedback[0].db_feedback_type], [1, 1, '아침 20분 운동', 'TOO_QUIET']);
+  assert.deepEqual(x.goals_routine.goals, [{ habit: 'other', goal_text: '12시 전에 자기', source: 'stated' }]); // 늦게 잔다고 말한 신호가 없음 — 습관은 단정하지 않고 문장만
   // 10/28 기상 · 10/29 기록(23:40 취침은 다음 날 아침 기록)이 날짜별로
   assert.deepEqual(x.sleep_wake.map((w) => [w.date, w.sleep_at, w.wake_at]), [['2026-10-28', null, '2026-10-28T07:30:00+09:00'], [REVIEW, '2026-10-28T23:40:00+09:00', null]]);
   const rec = db.rows('daily_records').find((d) => d.record_date === REVIEW)!;
@@ -382,4 +383,96 @@ test('모델이 숫자 없는 피로를 점수로 내도(fatigue 5) 저장 JSON�
   await commit(deps, sid);
   const x = rowOf(db, sid).extracted_data as Structured;
   assert.deepEqual([x.mood_condition.fatigue, x.mood_condition.mood], [null, ['tired']]);
+});
+
+// ───────── 지난 일 · 목표 vs 준비시간 변경 요청 · [저장 안 함]이 서버에 못 간 카드 (11/8 음성 실사용) ─────────
+
+const VOICE_TALK = '오늘 아침에 알람을 두 번 미뤘어. 준비하는데 평소보다 15분 더 걸렸고 내일부턴 조금 더 일찍 일어나고 싶어.';
+const prepFast = (minutes: number | null) => ({ ...T2F_NONE, prep_adjustment: { direction: 'MORE' as const, minutes } });
+
+/** 내일(10/30) 9시 1교시 + 기상 알람 7:30 — 준비시간 카드가 붙을 내일 첫 일정 */
+function seedTomorrow(): FakeDb {
+  const db = seed();
+  db.rows('appointments').push({ appointment_id: 'ap-tmr', creator_id: ME, title: '1교시', appointment_at: '2026-10-30T09:00:00+09:00', dest_name: '공학관', importance: 'NORMAL', recurrence_rule: null });
+  db.rows('appointment_participants').push({ participant_id: 'pt-tmr', appointment_id: 'ap-tmr', user_id: ME, transport_type: 'WALK', est_travel_minutes: 15, departed_at: null, departed_source: null, arrived_at: null, arrived_source: null, is_late: null, late_minutes: null });
+  db.rows('alarms').push({ alarm_id: 'al-tmr', user_id: ME, participant_id: 'pt-tmr', routine_id: null, alarm_type: 'WAKE', scheduled_at: '2026-10-30T07:30:00+09:00', intensity: 'NORMAL', is_enabled: true, time_source: 'AUTO' });
+  return db;
+}
+
+/** 말 하나 — T2F 출력을 정해서. 음성이면 spoken */
+async function say1(db: FakeDb, said: string, t2f: unknown, spoken?: string, t2: FakeScript['T2'] = []) {
+  const fake = fakeClaude({ T2F: [t2f], T1: [T1_OK], T2: t2 });
+  let t = 0;
+  const deps: CommitDeps = { userId: ME, userDb: db as unknown as Db, service: db as unknown as Db, llm: fake.client, model: 'gemini-3.5-flash-lite', now: () => NOW, clock: () => (t += 40), sleep: async () => {} };
+  const s = (await handleVoiceSession(deps, { session_type: 'BEFORE_SLEEP', input_mode: 'TEXT', resume: true })) as VoiceSessionOut;
+  const sid = s.session_id as string;
+  const r = (await handleVoiceTurn(deps, { session_id: sid, rev: s.rev, client_turn_id: cid(), text: said, ...(spoken !== undefined ? { spoken_reply: spoken } : {}) })) as VoiceTurnOut;
+  return { deps, sid, r };
+}
+
+const voiceExtract = (prep: FinalExtract['prep_adjustment']) => emptyExtract({
+  behavior: [beh('SNOOZE', { minutes: 2 }), beh('PREP_OVER', { minutes: 15 })],
+  prep_adjustment: prep,
+  habit_signals: [{ habit: 'snooze_repeat', note: '알람을 두 번 미룸', recurring: false, date: REVIEW, source: 'stated' }, { habit: 'slow_prep', note: '15분 더 걸림', recurring: false, date: REVIEW, source: 'stated' }],
+  goals_routine: { goals: [{ habit: 'irregular_wake', goal_text: '조금 더 일찍 일어나고 싶어', source: 'stated' }], wanted_routine: null },
+});
+
+test('음성: 지난 일 + 목표만 말하면 T2F가 준비시간 MORE를 내도 카드 없음 · 끝 JSON에 준비시간 · 알람 변경 없음, 목표 문장은 남고 습관은 other', async () => {
+  const db = seedTomorrow();
+  const { deps, sid, r } = await say1(db, VOICE_TALK, prepFast(null), '그랬구나. 내일은 조금 더 일찍 일어나 봐요.', [voiceExtract({ direction: 'MORE', minutes: null })]);
+  assert.deepEqual(r.cards, []); // '+10분' 카드가 생기지 않음
+  assert.equal(r.next, 'USER');
+  assert.deepEqual(rowOf(db, sid).server_state.cards, []);
+
+  const out = await commit(deps, sid);
+  assert.equal(out.status, 'DONE');
+  assert.deepEqual(out.pending, []);
+  const x = rowOf(db, sid).extracted_data as Structured;
+  assert.deepEqual(structuredProblems(x), []);
+  assert.deepEqual(x.session.input_modes, ['voice']);
+  assert.equal(x.prep_adjustment, null);
+  assert.deepEqual(x.alarm_changes, []);
+  assert.deepEqual(x.behavior.map((b) => [b.kind, b.minutes, b.status]), [['snooze', 2, 'recorded'], ['prep_over', 15, 'recorded']]);
+  assert.deepEqual(x.goals_routine.goals, [{ habit: 'other', goal_text: '조금 더 일찍 일어나고 싶어', source: 'stated' }]);
+});
+
+test('명시 요청 "내일 준비시간을 15분 늘려줘"는 기존대로 준비시간 카드(+15) · 끝 JSON은 서버 카드 상태(READY → needs_confirm)', async () => {
+  const db = seedTomorrow();
+  const { deps, sid, r } = await say1(db, '내일 준비시간을 15분 늘려줘', prepFast(15), undefined, [voiceExtract({ direction: 'MORE', minutes: 15 })]);
+  assert.deepEqual(r.cards.map((c) => [c.id, c.kind, c.edit?.prepare_delta]), [['c1', 'ALARM_EDIT', 15]]);
+  rowOf(db, sid).server_state.cards[0].status = 'READY'; // 앱 계산(results) 뒤
+
+  await commit(deps, sid);
+  const x = rowOf(db, sid).extracted_data as Structured;
+  assert.deepEqual(x.prep_adjustment, { direction: 'MORE', minutes: 15, status: 'needs_confirm' });
+  assert.equal(rowOf(db, sid).server_state.cards[0].status, 'READY');
+});
+
+test('[저장 안 함]을 서버에 못 알렸어도 [완료]의 rejected_cards로 서버가 카드를 REJECTED로 바꾸고 JSON은 declined (저장 · 모르는 카드는 그대로)', async () => {
+  const db = seedTomorrow();
+  const { deps, sid } = await say1(db, '내일 준비시간을 15분 늘려줘', prepFast(15), undefined, [voiceExtract({ direction: 'MORE', minutes: 15 })]);
+  const st = rowOf(db, sid).server_state;
+  st.cards[0].status = 'READY';
+  st.cards.push({ ...st.cards[0], id: 'c2', kind: 'APPT_NEW', status: 'SAVED' } as Card);
+
+  const out = (await handleVoiceCommit(deps, { session_id: sid, rejected_cards: ['c1', 'c2', 'c9'] })) as VoiceCommitOut;
+  assert.equal(out.status, 'DONE');
+  assert.deepEqual(out.pending, []);
+  const row = rowOf(db, sid);
+  assert.deepEqual(row.server_state.cards.map((c) => [c.id, c.status]), [['c1', 'REJECTED'], ['c2', 'SAVED']]);
+  assert.equal(row.server_state.core.pending['c1'], undefined);
+  assert.deepEqual((row.extracted_data as Structured).prep_adjustment, { direction: 'MORE', minutes: 15, status: 'declined' });
+  // 끝난 뒤 늦게 온 같은 요청은 저장한 결과 그대로 (다시 바꾸지 않음)
+  assert.deepEqual(await handleVoiceCommit(deps, { session_id: sid, rejected_cards: ['c1'] }), out);
+});
+
+test('rejected_cards 모양 검사: 카드 번호 배열이 아니면 VALIDATION_FAILED (상태 안 바꿈)', async () => {
+  const db = seedTomorrow();
+  const { deps, sid } = await say1(db, '내일 준비시간을 15분 늘려줘', prepFast(15));
+  const rev = rowOf(db, sid).server_state.rev;
+  for (const bad of ['c1', [1], ['DROP TABLE'], Array(51).fill('c1')]) {
+    const e = await failure(handleVoiceCommit(deps, { session_id: sid, rejected_cards: bad }));
+    assert.equal(e.code, 'VALIDATION_FAILED');
+  }
+  assert.equal(rowOf(db, sid).server_state.rev, rev);
 });

@@ -1,5 +1,6 @@
 // voice-commit — 대화 끝 정리 (서버 PR 5, docs/screen-data-map.md 'voice-commit'). 앱 [완료] 뒤 부름. 글 · 실시간 음성(Live) 차례는 같은 세션 turns에 쌓이므로 처리는 하나.
 //   1) 차지하기: server_state.rev 비교-교체로 commit = RUNNING · ended = true (같은 요청이 겹치면 하나만 진행, 나머지는 RUNNING을 돌려받음) + ended_at
+//      앱이 [저장 안 함]을 눌렀는데 voice-turn으로 못 알린 카드(rejected_cards)도 같은 저장에서 카드 버튼 규칙(applyCardAction)으로 REJECTED — 열린 카드만, 모르는 · 끝난 카드는 그대로
 //   2) 추출: 대화 전체로 T2 한 번(extract.v2, 모델 출력은 callLlm이 스키마로 검사). 결과는 바로 server_state.commit.extract에 — 저장이 실패해 다시 시도해도 T2를 또 부르지 않음
 //   3) 나누기: applyFinal(final-core) — 공개 JSON(structured.v1) 초안 + 저장할 것. 일정 · 알람은 저장하지 않고(카드 몫) 확인 상태만
 //   4) 저장: 할 일(todos) · 생활 기록 진술 칸(daily_records의 빈 칸)만 — 단계마다 따로, 다시 해도 같은 결과(겹침 검사 · 빈 칸만 채움)
@@ -14,15 +15,16 @@ import { callPoint, POINTS } from '../prompts/index.ts';
 import { Reader } from '../read.ts';
 import type { Db } from '../supabase.ts';
 import { seoulIso } from './context.ts';
-import { applyFinal, dropUnstatedScores, finishStructured, isDuplicateTodo, recordDateInRange, type FinalPlan, type Structured, type TodoPlan } from './final-core.ts';
+import { applyFinal, dropUnaskedPrep, dropUnstatedScores, finishStructured, isDuplicateTodo, recordDateInRange, type FinalPlan, type Structured, type TodoPlan } from './final-core.ts';
 import { structuredProblems } from './structured.v1.ts';
 import { toHttpError, type LlmClient } from './llm.ts';
 import type { QuotaGate } from './quota.ts';
 import { render } from './render.ts';
-import { loadSession, recordCalls, saveSession, type CommitState, type SessionDeps, type SessionRow } from './session.ts';
+import { loadSession, recordCalls, saveSession, type CommitState, type ServerState, type SessionDeps, type SessionRow } from './session.ts';
+import { applyCardAction } from './turn-core.ts';
 import type { FinalExtract } from './types.ts';
 import { contextVars, viewTranscript } from './view.ts';
-import { ctxOf, turnsOf } from './voice-state.ts';
+import { ctxOf, toTurnState, turnsOf, withTurnState } from './voice-state.ts';
 
 /** RUNNING이 이만큼 지나면 앞 요청이 죽은 것으로 보고 다시 시도를 받음 (T2 19초 × 다시 시도 1번 + 저장) */
 export const COMMIT_STALE_MS = 90_000;
@@ -147,11 +149,39 @@ const SESSION_TYPE = { BEFORE_SLEEP: 'night', AFTER_WAKE: 'morning', ANYTIME: 'a
 /** transcript 칸 — 말 단위 turns를 글 한 덩어리로 (음성 차례도 받아쓴 글만) */
 const transcriptOf = (row: SessionRow): string => row.turns.map((t) => `${t.role === 'user' ? '사용자' : 'AI'}: ${t.text}`).join('\n');
 
+const CARD_ID = /^c\d{1,4}$/;
+
+/** rejected_cards — 카드 번호(c1 …) 배열, 없으면 빈 배열 */
+function readRejected(r: Reader): string[] {
+  const v = r.json('rejected_cards');
+  if (v === undefined || v === null) return [];
+  if (!Array.isArray(v) || v.length > 50 || !v.every((id) => typeof id === 'string' && CARD_ID.test(id))) {
+    r.problemAt('rejected_cards', '카드 번호(c1 …) 배열이어야 해요');
+    return [];
+  }
+  return [...new Set(v as string[])];
+}
+
+/** 앱이 거절한 카드를 서버 상태에 반영 — 아직 열린 카드만 REJECTED (저장 · 거절이 끝난 카드 · 모르는 카드는 건너뜀) */
+function withRejected(st: ServerState, ids: string[], nowIso: string): ServerState {
+  let ts = toTurnState(st);
+  let changed = false;
+  for (const id of ids) {
+    const res = applyCardAction(ts, { id, action: 'REJECTED' }, ctxOf(st, nowIso, []), st.counts.user_turns);
+    if (res.ok && res.status === 'OK') {
+      ts = res.state;
+      changed = true;
+    }
+  }
+  return changed ? withTurnState(st, ts, st.awaiting?.client_turn_id ?? '') : st;
+}
+
 // ───────── 요청 처리 ─────────
 
 export async function handleVoiceCommit(deps: CommitDeps, body: unknown): Promise<VoiceCommitOut> {
   const r = Reader.root(body);
   const sessionId = r.uuid('session_id', { required: true }) ?? '';
+  const rejected = readRejected(r);
   r.finish();
   const now = (deps.now ?? (() => new Date()))();
   const nowIso = seoulIso(now);
@@ -163,7 +193,7 @@ export async function handleVoiceCommit(deps: CommitDeps, body: unknown): Promis
   if (row.server_state.counts.user_turns === 0) return outOf(sessionId, 'SKIPPED'); // 첫 마디만 있는 대화 — 끝내지도 않음(다음에 이어 씀)
 
   // 1) 차지하기 — 겹친 요청은 rev 비교에서 하나만 이김
-  const st = row.server_state;
+  const st = withRejected(row.server_state, rejected, nowIso);
   const prev = st.commit ?? null;
   const commit: CommitState = { status: 'RUNNING', attempts: (prev?.attempts ?? 0) + 1, started_at: nowIso, finished_at: null, extract: prev?.extract ?? null, out: null, error: null };
   try {
@@ -198,7 +228,7 @@ export async function handleVoiceCommit(deps: CommitDeps, body: unknown): Promis
   // 3) 나누기 4) 저장 — 카드는 그 사이 저장됐을 수 있어 지금 상태로
   const latest = (await loadSession(sd, sessionId)).server_state;
   const userTexts = row.turns.filter((t) => t.role === 'user').map((t) => t.text);
-  const plan = applyFinal(dropUnstatedScores(extract, userTexts), latest.ctx, latest.refs, latest.cards);
+  const plan = applyFinal(dropUnaskedPrep(dropUnstatedScores(extract, userTexts), row.turns), latest.ctx, latest.refs, latest.cards);
   const saved = { ...NOTHING };
   const failed: string[] = [];
   const storage: Storage = [];

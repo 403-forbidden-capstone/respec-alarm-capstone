@@ -11,7 +11,7 @@
 //     (지각 · 출발 · 도착 판정은 위치 · 원탭 담당, 일기 ai_summary는 일기 담당 — 진술은 이 JSON에만 남김).
 //   · 날짜를 모름 · 말이 엇갈림(uncertain · 같은 날 같은 대상에 다른 값) · 어느 일정인지 모름은 지우지 않고 status needs_confirm + issue로 남긴다.
 import type { RefsOut } from "./context-core.ts";
-import { itemKey, localToIso, normTitle, titleMatch } from "./turn-core.ts";
+import { itemKey, localToIso, normTitle, prepAsked, titleMatch } from "./turn-core.ts";
 import type { AlarmEffect, Appointment, BehaviorReport, Card, Context, FactSource, FinalExtract, LocalDate, LocalTime, ReasonTag } from "./types.ts";
 import { addDays } from "./view.ts";
 import { toMinutes } from "./guards.ts";
@@ -322,22 +322,33 @@ const SCORE_SAID = /\d+\s*(점|\/\s*(5|10)\b)|(피로도?|스트레스)\s*(는|�
  * 모델 출력 중 사용자 직접 진술로 단정하면 안 되는 것을 걸러 냄 (프롬프트 규칙만으로는 안 지켜짐 — 11/8 실제 호출):
  *   · 피로 · 스트레스 점수: 사용자 말에 점수 표현이 없으면 null ("너무 피곤해" → 4 · 5가 나옴, T2.v3 · v3.1)
  *   · 감정 원인: 이유를 잇는 말이 없으면 비움 · phone_in_bed: 잠자리 말이 없으면 출처 inferred (기분 mood는 그대로)
+ *   · 목표의 습관: 그 습관을 직접 말한 신호(stated · confirmed)가 없으면 other
  */
 export function dropUnstatedScores(x: FinalExtract, userTexts: string[]): FinalExtract {
   const said = (re: RegExp) => userTexts.some((t) => re.test(t));
   const m = x.mood_condition;
+  // '자기 전 휴대폰'은 잠자리를 말했을 때만 사용자 진술 — "새벽 1시까지 휴대폰을 봤어"의 분류는 짐작(11/8)
+  const habits = x.habit_signals.map((h) => (h.habit === "phone_in_bed" && h.source !== "inferred" && !said(BED_SAID) ? { ...h, source: "inferred" as const } : h));
   return {
     ...x,
+    habit_signals: habits,
+    // 목표의 습관은 사용자가 그 습관을 말한 신호가 있을 때만 — "조금 더 일찍 일어나고 싶어"를 irregular_wake로 단정한 일(11/8 음성). 목표 문장은 그대로
+    goals_routine: {
+      ...x.goals_routine,
+      goals: x.goals_routine.goals.map((g) => (g.habit === "other" || habits.some((h) => h.habit === g.habit && h.source !== "inferred") ? g : { ...g, habit: "other" as const })),
+    },
     mood_condition: {
       ...m,
       ...(said(SCORE_SAID) ? {} : { fatigue: null, stress: null }),
       // 감정 원인은 사용자가 이유로 이어 말했을 때만 — "발표는 잘 끝났는데 너무 피곤해"를 원인 '발표'로 확정한 일(11/8)
       ...(said(CAUSE_SAID) ? {} : { causes: [] }),
     },
-    // '자기 전 휴대폰'은 잠자리를 말했을 때만 사용자 진술 — "새벽 1시까지 휴대폰을 봤어"의 분류는 짐작(11/8)
-    habit_signals: x.habit_signals.map((h) => (h.habit === "phone_in_bed" && h.source !== "inferred" && !said(BED_SAID) ? { ...h, source: "inferred" as const } : h)),
   };
 }
+
+/** 사용자가 청하지 않은 준비시간 변경은 버림 — 대화 중 카드와 같은 기준(turn-core prepAsked). 지난 일은 behavior, 바람은 goals에 이미 남음 */
+export const dropUnaskedPrep = (x: FinalExtract, turns: readonly { role: string; text: string }[]): FinalExtract =>
+  x.prep_adjustment === null || prepAsked(turns) ? x : { ...x, prep_adjustment: null };
 // shortcut: 이어 주는 말 · 잠자리 말을 글자로만 봄 — 말투가 다르면(예: "피곤한 건 발표 탓") 원인을 비우는 쪽(안전), 자주 놓치면 목록을 늘림
 //   '-아서 · -어서'(마쳐서 · 늦어서)는 말끝의 '서'로 보되 장소의 '에서'(도서관에서)는 뺌
 const CAUSE_SAID = /(때문|라서|느라|니까|으니|탓|[가-힣](?<!에)서(?=[\s,.!?~]|$))/u;

@@ -1,5 +1,5 @@
 // voice-commit — AI 대화 끝 정리 (서버 PR 5). 앱 [완료] 뒤 한 번, 실패하면 같은 요청을 다시 보냄(결과는 한 번만 저장)
-//   요청: { session_id }
+//   요청: { session_id, rejected_cards?: [카드 번호] } — rejected_cards는 앱이 [저장 안 함]을 눌렀는데 서버에 못 알렸을 수 있는 카드 (서버가 열린 카드만 REJECTED로)
 //   응답: { session_id, status: DONE | PARTIAL | RUNNING | SKIPPED, saved: { todos, daily_record, journal, lates }, pending: [확인이 필요한 것], failed: [실패한 저장 단계] }
 //   T2(대화 전체 추출) 한 번 → 할 일 · 준비물 · 생활 기록 · 지각 진술 · 일기 요약 저장. 일정 · 알람은 저장하지 않음(대화 중 카드로 확인)
 //   오류: AUTH_REQUIRED · VALIDATION_FAILED · NOT_FOUND · CONFLICT · NOT_CONFIGURED(키 없음) · LLM_UNAVAILABLE · INTERNAL
