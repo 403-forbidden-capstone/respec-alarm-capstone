@@ -315,13 +315,13 @@ isOneToOne: false
                   ]
                 },"group_members": {
                   Row: {
-                    "group_id": string,"group_member_id": string,"invite_status": Database["public"]['Enums']["invite_status"],"joined_at": string | null,"user_id": string,"wake_share_opt_in": boolean
+                    "group_id": string,"group_member_id": string,"invite_status": Database["public"]['Enums']["invite_status"],"invited_at": string | null,"invited_by": string | null,"joined_at": string | null,"notifications_off": boolean,"user_id": string,"wake_share_opt_in": boolean
                   }
                   Insert: {
-                    "group_id": string,"group_member_id"?: string,"invite_status"?: Database["public"]['Enums']["invite_status"],"joined_at"?: string | null,"user_id": string,"wake_share_opt_in"?: boolean
+                    "group_id": string,"group_member_id"?: string,"invite_status"?: Database["public"]['Enums']["invite_status"],"invited_at"?: string | null,"invited_by"?: string | null,"joined_at"?: string | null,"notifications_off"?: boolean,"user_id": string,"wake_share_opt_in"?: boolean
                   }
                   Update: {
-                    "group_id"?: string,"group_member_id"?: string,"invite_status"?: Database["public"]['Enums']["invite_status"],"joined_at"?: string | null,"user_id"?: string,"wake_share_opt_in"?: boolean
+                    "group_id"?: string,"group_member_id"?: string,"invite_status"?: Database["public"]['Enums']["invite_status"],"invited_at"?: string | null,"invited_by"?: string | null,"joined_at"?: string | null,"notifications_off"?: boolean,"user_id"?: string,"wake_share_opt_in"?: boolean
                   }
                   Relationships: [
                     {
@@ -330,6 +330,12 @@ isOneToOne: false
 isOneToOne: false
       referencedRelation: "groups"
       referencedColumns: ["group_id"]
+    },{
+      foreignKeyName: "group_members_invited_by_fkey"
+      columns: ["invited_by"]
+isOneToOne: false
+      referencedRelation: "profiles"
+      referencedColumns: ["user_id"]
     },{
       foreignKeyName: "group_members_user_id_fkey"
       columns: ["user_id"]
@@ -340,13 +346,13 @@ isOneToOne: false
                   ]
                 },"groups": {
                   Row: {
-                    "created_at": string,"description": string | null,"group_id": string,"group_name": string,"invite_code": string,"owner_id": string,"updated_at": string
+                    "created_at": string,"description": string | null,"group_id": string,"group_name": string,"invite_code": string,"invite_code_expires_at": string,"invite_code_issued_at": string,"owner_id": string | null,"updated_at": string
                   }
                   Insert: {
-                    "created_at"?: string,"description"?: string | null,"group_id"?: string,"group_name": string,"invite_code"?: string,"owner_id": string,"updated_at"?: string
+                    "created_at"?: string,"description"?: string | null,"group_id"?: string,"group_name": string,"invite_code"?: string,"invite_code_expires_at"?: string,"invite_code_issued_at"?: string,"owner_id"?: string | null,"updated_at"?: string
                   }
                   Update: {
-                    "created_at"?: string,"description"?: string | null,"group_id"?: string,"group_name"?: string,"invite_code"?: string,"owner_id"?: string,"updated_at"?: string
+                    "created_at"?: string,"description"?: string | null,"group_id"?: string,"group_name"?: string,"invite_code"?: string,"invite_code_expires_at"?: string,"invite_code_issued_at"?: string,"owner_id"?: string | null,"updated_at"?: string
                   }
                   Relationships: [
                     {
@@ -667,6 +673,9 @@ isOneToOne: false
             "accept_friend_request":
 { Args: { "p_requester_id": string }; Returns: Json
                            },
+"accept_group_invite":
+{ Args: { "p_group_id": string,"p_wake_share"?: boolean }; Returns: Json
+                           },
 "block_user":
 { Args: { "p_user_id": string }; Returns: Json
                            },
@@ -713,6 +722,12 @@ isOneToOne: false
               "alarm_id": string,"appointment_at": string,"appointment_id": string,"dest_name": string,"title": string,"user_id": string
             }[]
                            },
+"invite_to_group":
+{ Args: { "p_group_id": string,"p_user_id": string }; Returns: Json
+                           },
+"join_group":
+{ Args: { "p_code": string,"p_wake_share"?: boolean }; Returns: Json
+                           },
 "join_group_by_invite_code":
 { Args: { "p_invite_code": string }; Returns: string
                            },
@@ -724,8 +739,19 @@ isOneToOne: false
 "my_friend_link":
 { Args: { "p_renew"?: boolean }; Returns: Json
                            },
+"my_group_code":
+{ Args: { "p_group_id": string }; Returns: Json
+                           },
+"my_group_invites":
+{ Args: Record<PropertyKey, never>; Returns: {
+              "group_id": string,"group_name": string,"invited_at": string,"invited_by": string,"invited_by_nickname": string,"member_count": number
+            }[]
+                           },
 "open_friend_link":
 { Args: { "p_token": string }; Returns: Json
+                           },
+"preview_group_by_code":
+{ Args: { "p_code": string }; Returns: Json
                            },
 "regenerate_invite_code":
 { Args: { "p_group_id": string }; Returns: string
