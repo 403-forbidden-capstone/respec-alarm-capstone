@@ -6,6 +6,7 @@ import { getFriendGrant, removeFriend } from '@/features/social/api';
 import { PERMISSIONS, type GrantRow } from '@/features/social/types';
 import { PersonMenuSheet } from '@/features/social/components/PersonMenuSheet';
 import { usePersonMenu } from '@/features/social/hooks/usePersonMenu';
+import { UserError } from '@/lib/errors';
 import { useAction } from '@/lib/useAction';
 import { useLoad } from '@/lib/useLoad';
 import { colors } from '@/theme';
@@ -20,8 +21,8 @@ export default function FriendPermissionScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { data, error, reload } = useLoad(() => getFriendGrant(id));
   const { busy, run } = useAction();
-  // [···] 메뉴의 신고 · 차단 — 차단하면 친구가 끊기므로 친구 탭으로 돌아감 (4-30)
-  const menu = usePersonMenu(() => router.replace({ pathname: '/group', params: { seg: 'friend' } }));
+  // [···] 메뉴의 신고 · 차단 — 차단하면 친구가 끊기므로 이전 화면(친구 탭)으로 돌아감 (4-30)
+  const menu = usePersonMenu(() => backOrHome());
 
   // 친구 끊기 — 확인 한 번. 행이 지워지고 양쪽 친구 출처 권한도 사라짐(같은 그룹의 권한 · 기상은 그대로). 상대에게 알림 없음 (3-14 · 3-15)
   const disconnect = (name: string) =>
@@ -33,11 +34,17 @@ export default function FriendPermissionScreen() {
         destructive: true,
       });
       if (!ok) return;
+      // 끊었거나 이미 끊긴 경우(GONE, UserError)만 목록으로 — 통신 오류면 이 화면에 남아 다시 할 수 있게
+      let leave = false;
       try {
         await removeFriend(id);
         toast('친구를 끊었어요');
+        leave = true;
+      } catch (e) {
+        leave = e instanceof UserError;
+        throw e;
       } finally {
-        router.replace({ pathname: '/group', params: { seg: 'friend' } }); // 이미 끊긴 경우(GONE)도 목록으로 돌아가 새로 읽음
+        if (leave) backOrHome();
       }
     }, '친구를 끊지 못했어요. 다시 해 주세요');
 

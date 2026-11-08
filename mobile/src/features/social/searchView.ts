@@ -35,3 +35,14 @@ export function mergeHits(exact: PersonHit | null, byName: PersonHit[]): PersonH
   for (const hit of byName) if (!rows.some((r) => r.person.id === hit.person.id)) rows.push(hit);
   return rows;
 }
+
+// 검색 결과 줄의 관계 — 지금 읽어 둔 목록이 서버 값보다 새로움. 요청을 보내거나 받거나 거절 · 취소 · 끊기를 한 뒤에도 목록만 새로 읽으면 맞게 돌아옴 (3-03 · 3-09)
+export function relationFromLists(
+  id: string,
+  lists: { friends: readonly string[]; requests: readonly string[]; sent: readonly string[] },
+): FriendRelation {
+  if (lists.friends.includes(id)) return 'FRIEND';
+  if (lists.requests.includes(id)) return 'RECEIVED';
+  if (lists.sent.includes(id)) return 'SENT';
+  return 'NONE';
+}

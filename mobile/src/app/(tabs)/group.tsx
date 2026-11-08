@@ -26,13 +26,14 @@ import { Note } from '@/features/social/components/Note';
 import { PeopleSearchResults } from '@/features/social/components/PeopleSearchResults';
 import { PersonMenuSheet } from '@/features/social/components/PersonMenuSheet';
 import { PersonRow } from '@/features/social/components/PersonRow';
+import { relationFromLists } from '@/features/social/searchView';
 import { SearchBox } from '@/features/social/components/SearchBox';
 import { useWakeLoad } from '@/features/social/hooks/useGroupWake';
 import { usePersonMenu } from '@/features/social/hooks/usePersonMenu';
 import { shareFriendInvite } from '@/features/social/invite';
 import { friendLinkUrl } from '@/features/social/inviteLink';
 import { permissionNames } from '@/features/social/permissions';
-import type { FriendItem, FriendRelation, GroupItem, PeopleSearch, Person } from '@/features/social/types';
+import type { FriendItem, GroupItem, PeopleSearch, Person } from '@/features/social/types';
 import { now } from '@/lib/clock';
 import { josa } from '@/lib/format';
 import { useAction } from '@/lib/useAction';
@@ -71,7 +72,7 @@ export default function GroupScreen() {
         await task();
       } finally {
         setWorkingId(null);
-        await reload().catch(() => undefined);
+        await reload();
       }
     }, fallback);
 
@@ -114,7 +115,9 @@ export default function GroupScreen() {
           onAccept={accept}
           onDecline={decline}
           onCancel={cancel}
-          onSent={() => void reload().catch(() => undefined)}
+          onSent={async () => {
+            await reload();
+          }}
           workingId={workingId}
         />
       ) : null}
@@ -140,14 +143,13 @@ function FriendTab({
   onAccept: (p: Person) => void;
   onDecline: (p: Person) => void;
   onCancel: (p: Person) => void;
-  onSent: () => void; // 검색 결과에서 요청을 보낸 뒤 목록을 새로 읽음
+  onSent: () => Promise<void>; // 검색 결과에서 요청을 보낸 뒤 목록을 새로 읽음
   workingId: string | null;
 }) {
   const { session, profile, enabled } = useAuth();
   const { run, busy } = useAction();
   const [search, setSearch] = useState<PeopleSearch | null>(null);
   const [requestingId, setRequestingId] = useState<string | null>(null); // 친구 요청 보내는 중인 사람
-  const [relations, setRelations] = useState<Readonly<Record<string, FriendRelation>>>({}); // 이 검색에서 요청을 보내 바뀐 관계 — 결과 줄 버튼을 바로 바꿈
   const [handleOpen, setHandleOpen] = useState(false);
   // 사람 줄 메뉴 [차단] [신고] — 차단하면 받은 요청 · 친구 · 검색 결과에서 빠지므로 결과를 비우고 목록을 새로 읽음 (4-06 · 4-32)
   const menu = usePersonMenu(() => {
@@ -158,18 +160,12 @@ function FriendTab({
   const canEditHandle = enabled && session != null && profile != null;
   const hint = profile ? handleHint({ changedAt: profile.handle_changed_at, nextChangeAt: profile.handle_next_change_at }, now()) : null;
 
-  // 검색 결과의 관계 — 요청을 보냈거나 수락한 사람은 목록 쪽 값이 더 새로움
+  // 검색 결과의 관계 — 친구 · 받은 요청 · 보낸 요청 목록에서 매번 계산 (요청 · 수락 · 거절 · 취소 · 끊기 뒤 목록을 새로 읽으면 결과 줄도 맞게 바뀜)
   const shown = useMemo<PeopleSearch | null>(() => {
     if (!search) return null;
-    const friendIds = new Set(friends.map((f) => f.person.id));
-    return {
-      ...search,
-      rows: search.rows.map((row) => ({
-        ...row,
-        relation: friendIds.has(row.person.id) ? 'FRIEND' : (relations[row.person.id] ?? row.relation),
-      })),
-    };
-  }, [search, friends, relations]);
+    const lists = { friends: friends.map((f) => f.person.id), requests: requests.map((p) => p.id), sent: sent.map((p) => p.id) };
+    return { ...search, rows: search.rows.map((row) => ({ ...row, relation: relationFromLists(row.person.id, lists) })) };
+  }, [search, friends, requests, sent]);
 
   const runSearch = (text: string) =>
     run(async () => {
@@ -185,9 +181,8 @@ function FriendTab({
       setRequestingId(p.id);
       try {
         const relation = await sendFriendRequest(p.id);
-        setRelations((prev) => ({ ...prev, [p.id]: relation }));
         toast(relation === 'FRIEND' ? `${p.name}님과 친구가 됐어요` : `${p.name}님에게 친구 요청을 보냈어요`);
-        onSent();
+        await onSent(); // 목록을 새로 읽으면 결과 줄이 [요청 보냄] · 친구로 바뀜
       } finally {
         setRequestingId(null);
       }
@@ -252,6 +247,8 @@ function FriendTab({
                 {p.handle ?? p.name}의 친구 요청
               </Text>
             </View>
+          </View>
+          <View style={styles.requestActions}>
             <Button variant="plain" label="거절" small disabled={workingId !== null} onPress={() => onDecline(p)} />
             <Button label="수락" small loading={workingId === p.id} disabled={workingId !== null && workingId !== p.id} onPress={() => onAccept(p)} />
             <MiniButton label="···" onPress={() => menu.open(p)} />
@@ -296,7 +293,7 @@ function FriendTab({
         <EmptyState
           title="아직 친구가 없어요"
           body="이름이나 사용자 ID로 검색해 친구를 추가해 보세요."
-          action={{ label: '친구 찾기', onPress: () => setFocusSearch((n) => n + 1) }}
+          action={requests.length || sent.length ? undefined : { label: '친구 찾기', onPress: () => setFocusSearch((n) => n + 1) }} // 친구 0 · 요청 0일 때만 (3-21)
         />
       )}
       <Note>친구는 역할이 아닌 관계예요. 친구가 되어도 알람과 기상 상태는 권한을 허용한 뒤에만 볼 수 있어요.</Note>
@@ -394,6 +391,7 @@ const styles = StyleSheet.create({
   lead: { marginBottom: 18 },
   row: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   grow: { flex: 1, minWidth: 0 },
+  requestActions: { flexDirection: 'row', justifyContent: 'flex-end', gap: 8, marginTop: 10 },
   between: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between' },
   trailing: { alignItems: 'flex-end' },
   tiles: { flexDirection: 'row', gap: 10, marginTop: 14 },
