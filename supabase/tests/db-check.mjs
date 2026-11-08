@@ -164,12 +164,12 @@ const MEETING = ['decision_comments', 'decision_votes', 'decision_states'];
 //   reports = 친구 4장 (신고, 넣기는 DB 함수로만 · 읽기는 운영 화면 몫) — friend/ch04.mjs에서 따로 확인
 const SERVER_ONLY = ['roll_attempts', 'rate_limit_events', 'friend_links', 'reports', 'push_tickets'];
 
-await check('모든 public 테이블(앱 26개 — 서버 전용 5개 포함 + 회의 도구 3개)에 RLS가 켜져 있음', async () => {
+await check('모든 public 테이블(앱 27개 — 서버 전용 5개 포함 + 회의 도구 3개)에 RLS가 켜져 있음', async () => {
   const r = await q(`select c.relname, c.relrowsecurity from pg_class c join pg_namespace n on n.oid = c.relnamespace
                      where n.nspname = 'public' and c.relkind = 'r' order by 1`);
   const off = r.filter((x) => !x.relrowsecurity).map((x) => x.relname);
   const app = r.filter((x) => !MEETING.includes(x.relname)).length;
-  return app === 26 && r.length === 29 && off.length === 0 ? true : { count: r.length, app, off };
+  return app === 27 && r.length === 30 && off.length === 0 ? true : { count: r.length, app, off };
 });
 await check('모든 앱 테이블에 정책이 있고(서버 전용 표 제외) anon용 정책은 없음', async () => {
   const r = await q(`select c.relname, count(p.polname) as n,
@@ -470,9 +470,11 @@ await check('A에게는 본인 + 기상 공유에 동의한 B · D만 나옴 (6�
   const r = await wake(A);
   const users = r.map((x) => x.user_id);
   const b = r.find((x) => x.user_id === B);
+  const [{ t: alarmB }] = await q(`select ${KST0} + interval '07:30' as t`);
+  // 7장부터 다른 사람 줄은 단계 · 알람 시각 · 확인 시각만 (울린 시각 · 미루기 횟수 · 해제 시각 · 미확인 시각 칸은 비어 있음)
   const ok = r.length === 3 && users[0] === A && r[0].is_me === true && b
-    && b.wake_status === 'CONFIRMED' && b.snooze_count === 1 && b.rang_at && b.dismissed_at && b.wake_confirmed_at
-    && new Date(b.wake_alarm_at).getTime() === new Date(b.rang_at).getTime()
+    && b.wake_status === 'CONFIRMED' && b.snooze_count === 0 && b.rang_at === null && b.dismissed_at === null && b.missed_at === null && b.wake_confirmed_at
+    && new Date(b.wake_alarm_at).getTime() === new Date(alarmB).getTime()
     && users.includes(D) && !users.includes(C);
   return ok ? true : r;
 });
@@ -489,7 +491,8 @@ await check('C가 그룹에서 기상 공유에 동의하면 나오고(RINGING) 
   await as(C);
   await q(`update public.group_members set wake_share_opt_in = false where group_id = $1 and user_id = $2`, [G, C]);
   const r2 = await wake(A);
-  return c && c.wake_status === 'RINGING' && !r2.some((x) => x.user_id === C) ? true : { r, r2 };
+  // 울림만 있고 확인이 없으면 RINGING, 알람 시각(07:00) + 30분이 지나면 기록이 없어도 미확인(MISSED, 7-마) — 시험을 도는 시각에 따라 둘 중 하나
+  return c && ['RINGING', 'MISSED'].includes(c.wake_status) && !r2.some((x) => x.user_id === C) ? true : { r, r2 };
 });
 await check('친구로 받은 기상 권한은 없음(6장) — 써 넣어도 꺼진 채 저장되고 그룹 동의가 없으면 친구여도 안 보임', async () => {
   await as(C);
@@ -508,32 +511,31 @@ await check('비구성원은 빈 결과 · 다른 구성원은 본인 + 기상 �
 });
 await check('함수 밖에서는 B의 alarm_events · daily_records를 못 읽음', async () => {
   await as(B);
-  await q(`insert into public.daily_records (user_id, record_date, wake_confirmed_at) values ($1, ${TODAY}, now())`, [B]);
+  await q(`insert into public.daily_records (user_id, record_date, wake_confirmed_at) values ($1, ${TODAY}, now()) on conflict (user_id, record_date) do nothing`, [B]);   // 기상 확인이 저장되면 하루 기록이 같이 생김(7장)
   await as(A);
   const ev = await q(`select 1 from public.alarm_events where user_id = $1`, [B]);
   const dr = await q(`select 1 from public.daily_records where user_id = $1`, [B]);
   return ev.length === 0 && dr.length === 0 ? true : { ev, dr };
 });
-await check('하루 경계는 호출자 시간대 (한국 자정 1분 전 이벤트는 빼고 1분 뒤는 셈)', async () => {
-  await as(A);
-  await q(`insert into public.alarm_events (alarm_id, user_id, event_type, event_at) values ($1, $2, 'TRIGGERED', ${KST0} - interval '1 minute')`, [ids[A].alarm, A]);
+await check('하루 경계는 각자 시간대의 0시 (한국 자정 1분 전 기상 알람은 어제 것, 1분 뒤는 오늘 것 — 그날 첫 알람 시각으로 보임)', async () => {
+  await su();
+  await q(`insert into public.alarms (user_id, alarm_type, scheduled_at) values ($1, 'WAKE', ${KST0} - interval '1 minute')`, [A]);
   const r1 = (await wake(A)).find((x) => x.user_id === A);
-  await as(A);
-  await q(`insert into public.alarm_events (alarm_id, user_id, event_type, event_at) values ($1, $2, 'TRIGGERED', ${KST0} + interval '1 minute')`, [ids[A].alarm, A]);
+  await su();
+  await q(`insert into public.alarms (user_id, alarm_type, scheduled_at) values ($1, 'WAKE', ${KST0} + interval '1 minute')`, [A]);
   const r2 = (await wake(A)).find((x) => x.user_id === A);
-  const [{ exp }] = await q(`select ${KST0} + interval '1 minute' as exp`);
-  return r1.rang_at === null && r1.wake_status === 'SCHEDULED'
-    && new Date(r2.rang_at).getTime() === new Date(exp).getTime() && r2.wake_status === 'RINGING'
-    ? true : { r1, r2, exp };
+  const [{ exp0700 }] = await q(`select ${KST0} + interval '07:00' as exp0700`);
+  const [{ exp0001 }] = await q(`select ${KST0} + interval '1 minute' as exp0001`);
+  return new Date(r1.wake_alarm_at).getTime() === new Date(exp0700).getTime() && new Date(r2.wake_alarm_at).getTime() === new Date(exp0001).getTime() ? true : { r1, r2, exp0700, exp0001 };
 });
-await check('WAKE_CONFIRMED 이벤트가 없으면 daily_records의 기상 확인 시각을 씀', async () => {
+await check('저녁에 직접 입력한 하루 기록(daily_records)의 기상 시각은 그룹에 안 띄움 (7장부터 — WAKE_CONFIRMED 기록만 봄)', async () => {
   await as(C);
-  await q(`insert into public.daily_records (user_id, record_date, wake_confirmed_at) values ($1, ${TODAY}, ${KST0} + interval '07:05')`, [C]);
+  await q(`insert into public.daily_records (user_id, record_date, wake_confirmed_at) values ($1, ${TODAY}, ${KST0} + interval '07:05') on conflict (user_id, record_date) do update set wake_confirmed_at = excluded.wake_confirmed_at`, [C]);
   await q(`update public.group_members set wake_share_opt_in = true where group_id = $1 and user_id = $2`, [G, C]);   // 보이려면 동의가 있어야 함(6장)
   const c = (await wake(A)).find((x) => x.user_id === C);
   await as(C);
   await q(`update public.group_members set wake_share_opt_in = false where group_id = $1 and user_id = $2`, [G, C]);   // 뒤 시험(기상 신호)이 C는 동의 없음으로 씀
-  return c && c.wake_status === 'CONFIRMED' && c.wake_confirmed_at ? true : c;
+  return c && c.wake_status !== 'CONFIRMED' && c.wake_confirmed_at === null ? true : c;
 });
 
 // F4: 그 그룹에 약속이 있는 날에만 그룹원 기상 상태가 나옴 (전체작업계획 8.1 F4 · D57)
@@ -679,9 +681,13 @@ await check('기상 신호: 동의했어도 그날 약속이 없는 그룹에는
   await logEvent(B, ids[B].alarm, 'DISMISSED');
   const today = await signals();
   await clearSignals();
+  await su();
+  const [{ alarm_id: yAlarm }] = await q(`insert into public.alarms (user_id, alarm_type, scheduled_at) values ($1, 'WAKE', ${KST0} - interval '17 hours') returning alarm_id`, [B]);   // 어제 아침 7시 알람
   await as(B);
-  await logEvent(B, ids[B].alarm, 'DISMISSED', `${KST0} - interval '1 hour'`);   // 어제 밤 11시 — 어제는 이 그룹에 약속이 없음
+  await logEvent(B, yAlarm, 'DISMISSED', `${KST0} - interval '16 hours'`);   // 어제 — 어제는 이 그룹에 약속이 없음(신호 날짜는 그 알람이 울린 날)
   const yesterday = await signals();
+  await su();
+  await q(`delete from public.alarms where alarm_id = $1`, [yAlarm]);
   await as(B);
   await q(`delete from public.groups where group_id = $1`, [G3]);
   return today.length === 1 && today[0].topic === `group:${G}:wake` && yesterday.length === 0 ? true : { today, yesterday };
@@ -699,10 +705,15 @@ await check('기상 신호: 기상 알람의 울림 · 미루기 · 해제 · �
     ['PREPARE 기상 확인', prep, 'WAKE_CONFIRMED'],
   ]) {
     await clearSignals();
+    await su();
+    if (type === 'WAKE_CONFIRMED') await q(`delete from public.alarm_events where user_id = $1 and event_type = 'WAKE_CONFIRMED'`, [B]);   // 기상 확인은 하루 첫 한 건만 저장되므로 매번 비우고 시험
     await as(B);
     await logEvent(B, alarm, type);
     sent[label] = (await signals()).length;
   }
+  await su();   // 앞 시험이 쓰는 B의 오늘 기상 확인(07:42)을 되돌림
+  await q(`delete from public.alarm_events where user_id = $1 and event_type = 'WAKE_CONFIRMED'`, [B]);
+  await q(`insert into public.alarm_events (alarm_id, user_id, event_type, event_at) values ($1, $2, 'WAKE_CONFIRMED', ${KST0} + interval '07:42')`, [ids[B].alarm, B]);
   await as(B);
   await q(`delete from public.alarms where alarm_id = $1`, [prep]);
   const expected = { 'WAKE 울림': 1, 'WAKE 미루기': 1, 'WAKE 해제': 1, 'WAKE 미확인': 1, 'WAKE 기상 확인': 1, 'WAKE 원탭 응답': 0, 'WAKE 도착 확인': 0,
@@ -1076,7 +1087,7 @@ await check('푸시 권한 확인(can_send_push): ALARM_CHANGED는 보내는 사
 });
 
 // 기상 미확인 후보 (7.9.2)
-await check('MISSED 후보(find_missed_wake_alarms): 알람 시각(마지막 미루기 뒤면 그 울림 시각) + 다시 울림 총 소요(끝난 뒤 간격 기준 약 11 · 보통 19 · 강 21분) + 30분이 지난 켜진 기상 알람만, 기상 확인 · 미확인 기록이 있으면 뺌', async () => {
+await check('MISSED 후보(find_missed_wake_alarms): 마지막 울림 시작(마지막 미루기 뒤면 그 울림 시각) + 30분이 지난 켜진 기상 알람만, 기상 확인 · 미확인 기록이 있으면 뺌', async () => {
   const T = '2026-03-01 07:00:00+09';
   const at = (hhmm) => `2026-03-01 ${hhmm}:00+09`;
   await svc();
@@ -1123,24 +1134,20 @@ await check('MISSED 후보(find_missed_wake_alarms): 알람 시각(마지막 미
     const r = await q(`select * from public.find_missed_wake_alarms($1::timestamptz)`, [at(hhmm)]);
     return { rows: r, names: r.map((x) => label[x.alarm_id]).filter(Boolean).sort().join() };
   };
-  // 다시 울림 총 소요(첫 울림 시작 ~ 마지막 울림 끝): 약 3+5+3=11분 · 보통 3+5+3+5+3=19분 · 강 3×4 + 3×3=21분 (알람 코어와 같은 끝난 뒤 간격 기준)
-  // 판정 시각 = (마지막으로 울리기 시작한 때) + 총 소요 + 30분 → soft 07:41 · normal류 07:49 · strong 07:51
-  //   snoozed(SOFT): 마지막 미루기 07:06 + 10분 = 07:16에 다시 울림 시작 → 07:16 + 11 + 30 = 07:57 (미루기 합 15분을 단순히 더한 07:56이 아님)
-  const t40 = await at_('07:40');
-  const t41 = await at_('07:41');
-  const t48 = await at_('07:48');
-  const t49 = await at_('07:49');
-  const t51 = await at_('07:51');
-  const t55 = await at_('07:55');
-  const t56 = await at_('07:56');
-  const t57 = await at_('07:57');
-  const t100 = await at_('10:00');   // 두 번째 기상 알람(09:00)도 판정 시각(09:49)이 지남
+  // 미확인 시각 = 마지막으로 울리기 시작한 때 + 30분 (7장: 확인 알림에 답이 없으면 다시 울리지 않으므로 다시 울림 소요를 안 더함, 강도와 상관없이 같음)
+  //   soft · strong · normal류 07:00 + 30 = 07:30, snoozed: 마지막 미루기 07:06 + 10분 = 07:16에 다시 울림 시작 → 07:46
+  const t29 = await at_('07:29');
+  const t30 = await at_('07:30');
+  const t45 = await at_('07:45');
+  const t46 = await at_('07:46');
+  const t100 = await at_('10:00');   // 두 번째 기상 알람(09:00)은 같은 사람의 생활 기록으로 확인된 것이라 계속 빠짐
   const byName = (res, n) => res.rows.find((x) => label[x.alarm_id] === n);
-  const s = byName(t41, 'soft');
-  const sn = byName(t57, 'snoozed');
-  const ap = byName(t49, 'normal');
-  const keys = t57.rows.map((x) => x.event_key);
-  const again = (await at_('07:57')).rows.map((x) => x.event_key);
+  const s = byName(t30, 'soft');
+  const strongRow = byName(t30, 'strong');
+  const sn = byName(t46, 'snoozed');
+  const ap = byName(t30, 'normal');
+  const keys = t46.rows.map((x) => x.event_key);
+  const again = (await at_('07:46')).rows.map((x) => x.event_key);
   await svc();
   const noArgs = await q(`select * from public.find_missed_wake_alarms()`);   // 안 주면 지금 기준 — 오류 없이 돎
 
@@ -1148,21 +1155,19 @@ await check('MISSED 후보(find_missed_wake_alarms): 알람 시각(마지막 미
   await q(`delete from public.appointments where appointment_id = $1`, [apId]);
   await q(`delete from public.daily_records where record_date = '2026-03-01'`);
   const iso = (t) => new Date(t).toISOString();
-  const normalSet = 'ackOnly,dismissedOnly,normal,prevDay,soft';
-  return t40.names === '' && t41.names === 'soft' && t48.names === 'soft' && t49.names === normalSet
-    && t51.names === 'ackOnly,dismissedOnly,normal,prevDay,soft,strong' && t55.names === t51.names
-    && t56.names === t51.names && t57.names === 'ackOnly,dismissedOnly,normal,prevDay,snoozed,soft,strong' && t100.names === t57.names
-    && s.rering_minutes === 11 && s.snooze_minutes === 0 && iso(s.missed_at) === iso(at('07:41')) && s.intensity === 'SOFT'
-    && sn.rering_minutes === 11 && sn.snooze_minutes === 15 && iso(sn.missed_at) === iso(at('07:57'))
-    && byName(t49, 'normal').rering_minutes === 19 && byName(t51, 'strong').rering_minutes === 21
+  const normalSet = 'ackOnly,dismissedOnly,normal,prevDay,soft,strong';
+  return t29.names === '' && t30.names === normalSet && t45.names === normalSet
+    && t46.names === 'ackOnly,dismissedOnly,normal,prevDay,snoozed,soft,strong' && t100.names === t46.names
+    && !('rering_minutes' in s) && s.snooze_minutes === 0 && iso(s.missed_at) === iso(at('07:30')) && s.intensity === 'SOFT' && iso(strongRow.missed_at) === iso(at('07:30')) && strongRow.intensity === 'STRONG'
+    && sn.snooze_minutes === 15 && iso(sn.missed_at) === iso(at('07:46'))
     && ap.appointment_id === apId && ap.group_id === G && iso(ap.appointment_at) === iso(at('10:00')) && ap.participant_id === ptId && ap.user_id === A
     && s.appointment_id === null && s.group_id === null
     && new Set(keys).size === keys.length && keys.every((k) => /^[0-9a-f-]{36}$/.test(k)) && JSON.stringify(keys) === JSON.stringify(again)
     && Array.isArray(noArgs)
-    ? true : { t40: t40.names, t41: t41.names, t48: t48.names, t49: t49.names, t51: t51.names, t55: t55.names, t56: t56.names, t57: t57.names, t100: t100.names, normalSet, s, sn, ap, keys };
+    ? true : { t29: t29.names, t30: t30.names, t45: t45.names, t46: t46.names, t100: t100.names, normalSet, s, sn, ap, keys };
 });
 
-await check('MISSED 후보: 기상 확인은 그 사람 기준(어느 기상 알람이든) · 확인 구간은 알람 시각 6시간 전 ~ 18시간 뒤 · 미룬 뒤 기준은 폰과 같게(마지막 미루기 + 미루기 시간 + 총 소요 + 30분)', async () => {
+await check('MISSED 후보: 기상 확인은 그 사람 기준(어느 기상 알람이든) · 확인 구간은 알람 시각 6시간 전 ~ 18시간 뒤 · 미룬 뒤 기준은 폰과 같게(마지막 미루기 + 미루기 시간 + 30분)', async () => {
   const at = (day, hhmm) => `2026-03-${day} ${hhmm}:00+09`;
   await svc();
   const label = {};
@@ -1189,8 +1194,8 @@ await check('MISSED 후보: 기상 확인은 그 사람 기준(어느 기상 알
   await mk('b2', B, at('02', '09:00'));
   await ev(b1, B, 'MISSED', at('02', '07:50'));
 
-  // (b) 보통 강도, 늦게 두 번 미룸: 07:18 미룸(10분) → 07:28 울림 → 07:46 미룸(10분) → 07:56 울림 시작 → 08:15 끝 (폰: 알람 시각 + 75분)
-  //     미루기 합(20분)만 더하면 69분(08:09)에 나가 폰이 아직 울리는 중 — 마지막 울림 시작 07:56 + 19분 + 30분 = 08:45
+  // (b) 보통 강도, 늦게 두 번 미룸: 07:18 미룸(10분) → 07:28 울림 → 07:46 미룸(10분) → 07:56 울림 시작
+  //     미루기 합(20분)만 더하면 07:50 — 마지막 울림 시작 07:56 + 30분 = 08:26
   //     기록은 올라온 순서가 뒤바뀌어도(폰이 오프라인) event_at이 늦은 쪽을 마지막으로 봄
   const c1 = await mk('c1', C, at('02', '07:00'));
   await ev(c1, C, 'SNOOZED', at('02', '07:46'), 10);
@@ -1206,8 +1211,8 @@ await check('MISSED 후보: 기상 확인은 그 사람 기준(어느 기상 알
   await q(`insert into public.daily_records (user_id, record_date, wake_confirmed_at) values ($1, '2026-03-03', $2)`, [E, at('03', '07:30')]);
 
   const r0809 = await run('02', '08:09');
-  const r0844 = await run('02', '08:44');
-  const r0845 = await run('02', '08:45');
+  const r0844 = await run('02', '08:25');
+  const r0845 = await run('02', '08:26');
   const r1000 = await run('02', '10:00');
   const r0309 = await run('03', '09:00', 48);   // 3/2 알람도 판정 범위 안 (48시간)
   const c = r0845.rows.find((x) => label[x.alarm_id] === 'c1');
@@ -1217,7 +1222,7 @@ await check('MISSED 후보: 기상 확인은 그 사람 기준(어느 기상 알
   await q(`delete from public.daily_records where user_id = $1 and record_date = '2026-03-03'`, [E]);
   const iso = (t) => new Date(t).toISOString();
   return r0809.names('c') === '' && r0844.names('c') === '' && r0845.names('c') === 'c1'
-    && c.rering_minutes === 19 && c.snooze_minutes === 20 && iso(c.missed_at) === iso(at('02', '08:45'))
+    && !('rering_minutes' in c) && c.snooze_minutes === 20 && iso(c.missed_at) === iso(at('02', '08:26'))
     && r1000.names('a') === '' && r1000.names('b') === 'b2' && r1000.names('c') === 'c1'
     && r0309.names('d') === 'd1' && r0309.names('e') === 'e1'
     ? true : { r0809: r0809.names(''), r0844: r0844.names(''), r0845: r0845.names(''), r1000: r1000.names(''), r0309: r0309.names(''), c };
@@ -2191,11 +2196,11 @@ await check('지난 회차가 그대로: 다음 회차(화 11-10)를 만든 뒤�
   const after = await snap();
   const same = (k) => JSON.stringify(before[k]) === JSON.stringify(after[k]);
   const ok = typeof nextId === 'string'
-    // MISSED 후보: 지난 회차 기상(11-03 07:30 + 다시 울림 19 + 30분 = 08:19)이 그대로
-    && before.missed.length === 1 && before.missed[0].alarm_id === ring.WAKE && before.missed[0].at === '11-03 07:30' && before.missed[0].missed === '11-03 08:19' && same('missed')
-    // 그룹 기상 상태: 11-03은 지난 회차 그대로(끄기만 함 = DISMISSED), 11-10은 새 회차가 생긴 뒤에 생김
-    && before.g3.length === 1 && before.g3[0].is_me === true && before.g3[0].at === '11-03 07:30' && before.g3[0].wake_status === 'DISMISSED' && same('g3')
-    && before.g10[0].wake_status === 'NO_ALARM' && after.g10[0].at === '11-10 07:30' && after.g10[0].wake_status === 'SCHEDULED'
+    // MISSED 후보: 지난 회차 기상(11-03 07:30 + 30분 = 08:00)이 그대로
+    && before.missed.length === 1 && before.missed[0].alarm_id === ring.WAKE && before.missed[0].at === '11-03 07:30' && before.missed[0].missed === '11-03 08:00' && same('missed')
+    // 그룹 기상 상태: 11-03은 지난 회차 그대로(끄기만 하고 확인이 없는 채 30분이 지난 지난 날 = MISSED), 11-10은 새 회차가 생긴 뒤에 생김(시험을 11-10 이후에 돌리면 MISSED)
+    && before.g3.length === 1 && before.g3[0].is_me === true && before.g3[0].at === '11-03 07:30' && before.g3[0].wake_status === 'MISSED' && same('g3')
+    && before.g10[0].wake_status === 'NO_ALARM' && after.g10[0].at === '11-10 07:30' && ['SCHEDULED', 'MISSED'].includes(after.g10[0].wake_status)
     // R02: 지난 날 계획 줄 3개 · 목표 기상이 같은 알람 id로 남고, 새 날짜에는 새 회차 알람이 생김
     && before.p3.length === 3 && before.p3[0].alarm_id === ring.WAKE && before.p3.map((x) => x.at).join() === '11-03 07:30,11-03 08:30,11-03 09:10' && same('p3') && same('w3')
     && before.p10.length === 0 && after.p10.map((x) => x.at).join() === '11-10 07:30,11-10 08:30,11-10 09:10' && before.w10.length === 0 && after.w10.length === 1;
@@ -2660,7 +2665,7 @@ const RESET_DELETES = ['alarm_events', 'alarm_suggestions', 'alarms', 'appointme
                        'daily_journals', 'daily_records', 'profiles', 'user_edit_logs'];
 //   friend_links · rate_limit_events(친구 2장)는 지금 둠 — 친구 쪽 지우기는 15장(15-타)
 const RESET_KEEPS = ['ai_calls', 'friend_links', 'friends', 'group_members', 'groups', 'push_tickets', 'push_tokens', 'rate_limit_events', 'roll_attempts', 'routines',
-                     'sharing_permissions', 'todos', 'user_places', 'user_questions'];
+                     'sharing_permissions', 'todos', 'user_places', 'user_questions', 'wake_hides'];
 const MINE = {
   appointments: `select * from public.appointments where creator_id = $1`,
   appointment_participants: `select * from public.appointment_participants where user_id = $1`,
@@ -2676,6 +2681,7 @@ const MINE = {
   ai_calls: `select * from public.ai_calls where user_id = $1`,
   user_questions: `select * from public.user_questions where user_id = $1`,
   push_tickets: `select * from public.push_tickets where user_id = $1`,
+  wake_hides: `select * from public.wake_hides where $1 in (owner_id, hidden_from_id)`,
   push_tokens: `select * from public.push_tokens where user_id = $1`,
   roll_attempts: `select * from public.roll_attempts where user_id = $1`,
   user_places: `select * from public.user_places where user_id = $1`,
@@ -3011,6 +3017,6 @@ await check('user_places: updated_at이 고칠 때 갱신됨 · 계정을 지우
 // ---------------------------------------------------------------------
 // 장마다 자기 계정을 새로 만들어 앞 검사의 A~E와 섞이지 않게 함. 장이 늘면 아래 목록에 한 줄씩
 const FRIEND_CTX = { q, as, su, svc, check, expectErr, PGlite, AUTH_STUBS, MIG_DIR, readFileSync, readdirSync, join };
-for (const ch of ['ch02', 'ch03', 'ch04', 'ch05', 'ch06', 'ch11']) await (await import(`./friend/${ch}.mjs`)).default(FRIEND_CTX);
+for (const ch of ['ch02', 'ch03', 'ch04', 'ch05', 'ch06', 'ch11', 'ch07']) await (await import(`./friend/${ch}.mjs`)).default(FRIEND_CTX);
 
 report();
