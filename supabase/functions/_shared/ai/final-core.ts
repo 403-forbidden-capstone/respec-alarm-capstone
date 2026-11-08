@@ -319,13 +319,29 @@ function pendingOf(d: FinalPlan["draft"]): Structured["pending"] {
 const SCORE_SAID = /\d+\s*(점|\/\s*(5|10)\b)|(피로도?|스트레스)\s*(는|가|도|지수)?\s*\d/u;
 
 /**
- * 피로 · 스트레스 점수는 사용자가 숫자로 말했을 때만 — 모델이 "너무 피곤해"를 4 · 5로 바꾸는 일이 실제 호출에서 나옴(11/8, T2.v3 · v3.1 둘 다).
- * 사용자 말에 점수 표현이 없으면 null로 (기분 mood · causes는 그대로).
+ * 모델 출력 중 사용자 직접 진술로 단정하면 안 되는 것을 걸러 냄 (프롬프트 규칙만으로는 안 지켜짐 — 11/8 실제 호출):
+ *   · 피로 · 스트레스 점수: 사용자 말에 점수 표현이 없으면 null ("너무 피곤해" → 4 · 5가 나옴, T2.v3 · v3.1)
+ *   · 감정 원인: 이유를 잇는 말이 없으면 비움 · phone_in_bed: 잠자리 말이 없으면 출처 inferred (기분 mood는 그대로)
  */
 export function dropUnstatedScores(x: FinalExtract, userTexts: string[]): FinalExtract {
-  if (userTexts.some((t) => SCORE_SAID.test(t))) return x;
-  return { ...x, mood_condition: { ...x.mood_condition, fatigue: null, stress: null } };
+  const said = (re: RegExp) => userTexts.some((t) => re.test(t));
+  const m = x.mood_condition;
+  return {
+    ...x,
+    mood_condition: {
+      ...m,
+      ...(said(SCORE_SAID) ? {} : { fatigue: null, stress: null }),
+      // 감정 원인은 사용자가 이유로 이어 말했을 때만 — "발표는 잘 끝났는데 너무 피곤해"를 원인 '발표'로 확정한 일(11/8)
+      ...(said(CAUSE_SAID) ? {} : { causes: [] }),
+    },
+    // '자기 전 휴대폰'은 잠자리를 말했을 때만 사용자 진술 — "새벽 1시까지 휴대폰을 봤어"의 분류는 짐작(11/8)
+    habit_signals: x.habit_signals.map((h) => (h.habit === "phone_in_bed" && h.source !== "inferred" && !said(BED_SAID) ? { ...h, source: "inferred" as const } : h)),
+  };
 }
+// shortcut: 이어 주는 말 · 잠자리 말을 글자로만 봄 — 말투가 다르면(예: "피곤한 건 발표 탓") 원인을 비우는 쪽(안전), 자주 놓치면 목록을 늘림
+//   '-아서 · -어서'(마쳐서 · 늦어서)는 말끝의 '서'로 보되 장소의 '에서'(도서관에서)는 뺌
+const CAUSE_SAID = /(때문|라서|느라|니까|으니|탓|[가-힣](?<!에)서(?=[\s,.!?~]|$))/u;
+const BED_SAID = /(자기\s*전|잠들기|누워|침대|이불|잠자리)/u;
 
 /** 세션 정보 · 저장 결과를 붙여 공개 JSON 완성 */
 export function finishStructured(plan: FinalPlan, session: Structured["session"], storage: Structured["storage"], todoResults: (Structured["todos"][number]["stored"])[]): Structured {

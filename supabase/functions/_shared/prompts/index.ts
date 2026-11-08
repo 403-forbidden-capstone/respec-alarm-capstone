@@ -14,7 +14,7 @@ import { render } from '../ai/render.ts';
 import { schemaOf, type SchemaId } from '../ai/schemas/index.ts';
 import ASSIST_E4 from './ASSIST_E4.v1.1.ts';
 import T1 from './T1.v1.5.ts';
-import T2 from './T2.v3.1.ts';
+import T2 from './T2.v3.2.ts';
 import T2F from './T2F.v2-b.ts';
 import T3 from './T3.v1.ts';
 import T4 from './T4.v1.1.ts';
@@ -52,7 +52,7 @@ export const POINTS: Record<PointId, PointConfig> = {
   //   (다음 턴 T2F가 따라잡음). 그래서 다시 시도하지 않음. 적응형 생각 켬(카드 ⑥ 31번, 끄면 오류 3배 — Gemini는 effort low = thinkingLevel low)
   //   Gemini Flash-Lite는 5초에 시간 초과(11/7 실측, 같은 크기 T1이 4.7~11.5초) → 9초. T2F 9초 + T1 9초 남음 = 턴 마감 18초 · REGEN_MIN 7초 안
   T2F: { prompt: T2F, schema: 'extract-fast.v1', effort: 'low', maxTokens: 4096, thinking: { type: 'adaptive' }, timeoutMs: 9_000, retryOnTimeout: false, cacheSystem: true },
-  // 대화 끝 전체 추출(voice-commit). 장부 n=724(v2): p50 5.6초 / p95 9.4초 → 19초. v3 = v2 + 행동 · 알람 평가 · 돌아보기 칸(extract.v2), v3.1 = 피로 · 스트레스 점수는 숫자로 말했을 때만
+  // 대화 끝 전체 추출(voice-commit). 장부 n=724(v2): p50 5.6초 / p95 9.4초 → 19초. v3 = v2 + 행동 · 알람 평가 · 돌아보기 칸(extract.v2), v3.1 = 피로 · 스트레스 점수는 숫자로 말했을 때만, v3.2 = 감정 원인 · 습관 출처는 직접 말한 것만
   T2: { prompt: T2, schema: 'extract.v2', effort: 'medium', maxTokens: 4096, thinking: null, timeoutMs: 19_000, retryOnTimeout: true, cacheSystem: true },
   // 이유 태그. 장부 n=594: p50 1.4초 / p95 1.6초 → ×2는 3.2초지만 네트워크 흔들림 여유로 4초 바닥
   T3: { prompt: T3, schema: 't3-reason.v1', effort: 'low', maxTokens: 1024, thinking: null, timeoutMs: 4_000, retryOnTimeout: true, cacheSystem: true },

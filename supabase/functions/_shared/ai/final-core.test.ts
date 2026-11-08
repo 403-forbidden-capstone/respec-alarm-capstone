@@ -330,9 +330,34 @@ describe('피로 · 스트레스 점수 — 사용자가 숫자로 말했을 때
   const tired = emptyExtract({ mood_condition: { mood: ['tired'], valence: null, fatigue: 5, stress: 4, causes: ['발표'], source: 'stated' } });
   it('숫자 점수 표현이 없으면 null — 시각 숫자("1시", "12시")는 점수가 아님', () => {
     const x = dropUnstatedScores(tired, ['어제 새벽 1시까지 휴대폰을 봤어. 오늘 발표는 잘 끝났는데 너무 피곤해. 앞으로 12시 전에는 자고 싶어.']);
-    assert.deepEqual([x.mood_condition.fatigue, x.mood_condition.stress, x.mood_condition.mood, x.mood_condition.causes], [null, null, ['tired'], ['발표']]);
+    // '~는데'로 나란히 말했을 뿐이라 원인 '발표'도 비움 (아래 원인 시험)
+    assert.deepEqual([x.mood_condition.fatigue, x.mood_condition.stress, x.mood_condition.mood, x.mood_condition.causes], [null, null, ['tired'], []]);
   });
   it('"피로도 4", "10점 중 8점", "스트레스 3/5"면 모델 값 유지', () => {
     for (const said of ['오늘 피로도 4 정도야', '10점 중 8점만큼 피곤해', '스트레스 3/5']) assert.equal(dropUnstatedScores(tired, [said]).mood_condition.fatigue, 5, said);
+  });
+});
+
+describe('직접 진술로 단정하지 않기 — 감정 원인 · 자기 전 휴대폰 (실제 시험 B)', () => {
+  const B = '어제 새벽 1시까지 휴대폰을 봤어. 오늘 발표는 잘 끝났는데 너무 피곤해. 앞으로 12시 전에는 자고 싶어.';
+  const x = emptyExtract({
+    mood_condition: { mood: ['tired'], valence: null, fatigue: null, stress: null, causes: ['발표'], source: 'stated' },
+    habit_signals: [{ habit: 'phone_in_bed', note: '어제 새벽 1시까지 휴대폰을 봤어', date: '2026-11-07', recurring: false, source: 'stated' }],
+  });
+
+  it('시험 B: 원인은 이어 말하지 않아 비우고, 잠자리를 말하지 않은 phone_in_bed는 inferred (기록은 남김)', () => {
+    const y = dropUnstatedScores(x, [B]);
+    assert.deepEqual(y.mood_condition.causes, []);
+    assert.deepEqual(y.habit_signals.map((h) => [h.habit, h.source, h.note]), [['phone_in_bed', 'inferred', '어제 새벽 1시까지 휴대폰을 봤어']]);
+    assert.deepEqual(y.mood_condition.mood, ['tired']);
+  });
+
+  it('이유로 이어 말하면("마쳐서" · "때문에" · "늦게 자서") 원인 유지, 장소의 "에서"는 이유가 아님', () => {
+    for (const said of ['발표를 잘 마쳐서 뿌듯했어', '발표 때문에 너무 피곤해', '늦게 자서 피곤해']) assert.deepEqual(dropUnstatedScores(x, [said]).mood_condition.causes, ['발표'], said);
+    assert.deepEqual(dropUnstatedScores(x, ['도서관에서 공부했는데 피곤해']).mood_condition.causes, []);
+  });
+
+  it('"자기 전에 휴대폰" · "누워서 폰"이면 stated 그대로', () => {
+    for (const said of ['요즘 자기 전에 휴대폰을 너무 오래 봐', '누워서 폰 보다가 늦게 잤어']) assert.equal(dropUnstatedScores(x, [said]).habit_signals[0].source, 'stated', said);
   });
 });
