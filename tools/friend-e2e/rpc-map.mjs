@@ -4,19 +4,25 @@
 // 함수가 DB에 생기면 그 단계는 SKIP에서 PASS / FAIL로 바뀜 — 그래서 이름을 채우는 것이 "장 PR 머지 뒤 재실행"의 첫 일
 export const RPC = {
   // 지금 main에 있음
-  find_profile: 'find_profile_by_handle',
+  find_profile: 'find_profile_by_handle', // 옛 모양(15장에서 지워짐) — search_by_handle이 없을 때만 씀
   join_group: 'join_group_by_invite_code',
   regen_code: 'regenerate_invite_code',
   group_wake: 'get_group_wake_status',
   shared_alarms: 'get_shared_alarm_appointments',
   register_push_token: 'register_push_token',
 
+  // 2장 (PR #368) — 친구_세션약속.md 1절
+  change_handle: 'change_my_handle',
+  search_handle: 'search_by_handle',
+  search_name: 'search_related_by_name',
+  friend_link: 'my_friend_link',
+  open_link: 'open_friend_link',
+
   // 논리설계 이름이 정해진 것 (4장) — 입력 모양은 S1이 만든 뒤 맞춤
   block_user: 'block_user',
   unblock_user: 'unblock_user',
 
-  // 아직 이름 없음 (2 · 3 · 5 · 6 · 7 · 8 · 9 · 10 · 12장)
-  change_handle: null, // 2장 아이디 바꾸기 (30일 제한)
+  // 아직 이름 없음 (3 · 5 · 6 · 7 · 8 · 9 · 10 · 12장)
   friend_request: null, // 3장 요청 (직접 표 쓰기 닫힌 뒤)
   group_preview: null, // 5장 코드 입력 미리보기
   leave_group: null, // 5장 나가기

@@ -1,6 +1,6 @@
 // 시작 전 A · B · C 사이의 친구 · 권한을 저장해 두고 비운 뒤, 끝나면 되돌림 (시드 데이터를 망가뜨리지 않음)
 //   비우는 것: A · B · C끼리의 친구 행, A · B · C끼리의 권한 행 전부, 이전 실행이 남긴 'E2E ' 그룹 · 약속
-//   되돌리는 것: 같은 id로 다시 넣음. A의 아이디 변경도 원래대로
+//   되돌리는 것: 같은 id로 다시 넣음. A의 아이디 변경도 원래대로 (handle은 앱이 못 쓰지만 service_role은 통과)
 //   저장 파일은 비정상 종료에 대비해 임시 폴더에 둠 → `node run.mjs --restore`
 import { existsSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -26,7 +26,7 @@ export async function takeSnapshot(admin, ids, caps) {
     await admin.from('sharing_permissions').select('*').in('owner_id', set).in('grantee_id', set),
     '권한 행 저장',
   );
-  const handleCols = ['user_id', 'handle', ...(caps.hasCol('profiles', 'handle_changed_at') ? ['handle_changed_at'] : [])];
+  const handleCols = ['user_id', 'handle', ...['handle_changed_at', 'handle_next_change_at'].filter((c) => caps.hasCol('profiles', c))];
   const profiles = must(await admin.from('profiles').select(handleCols.join(',')).in('user_id', set), '프로필 저장');
   const snap = { friends, perms, profiles, ids };
   writeFileSync(SNAPSHOT_FILE, JSON.stringify(snap));
