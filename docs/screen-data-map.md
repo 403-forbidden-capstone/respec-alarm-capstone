@@ -166,7 +166,7 @@
 - 받은 요청: `friends`(PENDING, 받는 사람 = 나) — DB, 수락 → ACCEPTED — DB
 - 아이디 검색 · 요청: `find_profile_by_handle` — RPC → `friends` PENDING 추가 — DB
 - 그룹 목록 · 만들기: `groups` + `group_members`(JOINED) — DB (만든 사람은 자동 JOINED)
-- 초대 코드로 참여: `join_group_by_invite_code` — RPC
+- 초대 코드로 참여: 미리보기 `preview_group_by_code` — RPC → 동의 시트 → `join_group`(`p_wake_share`) — RPC. 받은 초대 카드 `my_group_invites` — RPC, [참여] `accept_group_invite` — RPC, [거절] 내 `group_members` 초대 행 삭제 — DB (친구 5장)
 - 오늘 기상 n명: `get_group_wake_status` — RPC. 그 그룹 일정이 있는 날만 (D57)
 
 ### F02 친구 권한
@@ -181,7 +181,7 @@
 - 그룹 · 멤버: `groups` + `group_members` — DB, 기상 공유 동의 `wake_share_opt_in` — DB
 - 연결 일정: `appointments`(`group_id`) — DB
 - 멤버 기상 상태: `get_group_wake_status` — RPC. 그 그룹 일정이 있는 날만 (D57). 누가 일어나면 DB가 그룹 채널에 새로 고침 신호(Realtime 방송, #160) → 앱이 다시 부름 (지형님 10/15 기술 결정 — `capstone/전체작업계획_v1.md` 8절 Q3, 레포 밖)
-- 초대: `groups.invite_code` 공유, 다시 만들기 `regenerate_invite_code` — RPC
+- 초대: 코드 시트 `my_group_code`(만료됐으면 서버가 새 코드 + 7일) — RPC, [새 코드] `regenerate_invite_code` — RPC, 직접 초대 `invite_to_group` — RPC (친구 5장). 그룹장 없음 — 이름 바꾸기 `groups` update · 나가기 `group_members` JOINED → LEFT · 내보내기 다른 사람 행 delete · 알림 끄기 `group_members.notifications_off` — DB
 
 ### G03 그룹원 기상 상태
 - 오늘 기상 흐름: `get_group_wake_status` — RPC (기상 관련 값만, 준비 · 출발 · 도착은 본인만 — D59). 그 그룹 일정이 있는 날만 (D57)

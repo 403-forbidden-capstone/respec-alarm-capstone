@@ -78,10 +78,9 @@ export type GroupDetail = {
   since: string; // 2025년 3월부터 함께하는 중
   grants: PermissionSet; // 그룹 공유 범위 (내가 준 권한)
   appointments: { id: string; title: string; at: Date; place: string; importance: Importance }[]; // 연결 일정 (여러 개일 수 있음)
-  inviteCode: string; // 초대 코드 (G02 "+ 초대")
-  members: GroupMember[];
-  isOwner: boolean; // 내가 만든 그룹인지 — 초대 코드 다시 만들기는 만든 사람만 (새 UI용, 화면은 아직 안 씀)
+  members: GroupMember[]; // 참여 중인 사람만 (초대 중은 + 초대 시트에서) — 그룹장 표시 없음 (5장)
   wakeShareOptIn: boolean; // 이 그룹에 내 기상 상태 공유를 동의했는지 (group_members.wake_share_opt_in, D19 열림 — 새 UI용)
+  notificationsOff: boolean; // 이 그룹에서 오는 알림 끄기 (group_members.notifications_off)
 };
 
 // 친구 · 그룹원이 공유한 알람 한 건 (G03 · G04)
@@ -149,8 +148,26 @@ export type OpenedLink =
   | { status: 'SELF'; person: Person }
   | { status: 'EXPIRED' };
 
-// 그룹을 만든 결과 (새 UI용) — 만들고 바로 초대 코드를 보여 줄 수 있게
-export type CreatedGroup = { id: string; inviteCode: string };
+// 그룹을 만든 결과 — 만들고 바로 초대 글을 보낼 수 있게 (코드는 8자, 7일)
+export type CreatedGroup = { id: string; inviteCode: string; expiresAt: Date | null };
+
+// 코드 입력 미리보기 (preview_group_by_code) — 참여는 아직 안 함. 오류 3가지(없는 · 만료 · 잠시 뒤)는 status로
+export type GroupPreview =
+  | { status: 'FOUND'; name: string; memberCount: number; full: boolean; alreadyJoined: boolean; expiresAt: Date | null }
+  | { status: 'NOT_FOUND' | 'EXPIRED' }
+  | { status: 'LIMIT'; retryAfterSeconds: number };
+
+// 참여한 그룹 — already = 이미 참여 중이던 그룹 (같은 코드를 또 넣음)
+export type JoinedGroup = { id: string; already: boolean };
+
+// G01 위 받은 초대 카드 (my_group_invites) — 그룹 이름 · 인원 · 초대한 사람까지만
+export type GroupInvite = { groupId: string; name: string; initial: string; memberCount: number; invitedByName: string; invitedAt: Date };
+
+// 코드 시트 (my_group_code) — 만료됐으면 서버가 새 코드 + 7일로 바꿔서 줌
+export type GroupCode = { code: string; expiresAt: Date };
+
+// G02 [+ 초대] 친구 목록의 한 줄 — 초대 중 · 이미 멤버는 표시만
+export type InvitableFriend = { person: Person; state: 'NONE' | 'INVITED' | 'MEMBER' };
 
 // 차단 목록 한 줄 (my_blocks) — 새로 차단한 순
 export type BlockedPerson = { person: Person; blockedAt: Date };

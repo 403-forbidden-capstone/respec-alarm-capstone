@@ -32,11 +32,19 @@ export const friends: FriendRow[] = [
 ];
 
 export const groups: GroupRow[] = [
-  { group_id: GROUP, group_name: '캡스톤팀', owner_id: JIHYEONG, invite_code: 'ABCD1234', created_at: '2026-03-05T00:00:00.000Z' },
+  { group_id: GROUP, group_name: '캡스톤팀', created_at: '2026-03-05T00:00:00.000Z' },
 ];
 
-const member = (user_id: string, wake_share_opt_in: boolean): MemberRow => ({ group_id: GROUP, user_id, invite_status: 'JOINED', wake_share_opt_in });
-export const members: MemberRow[] = [member(ME, true), member(SUYEON, true), member(JIHYEONG, true), member(JUNSEONG, false)];
+const member = (user_id: string, wake_share_opt_in: boolean, joined_at = '2026-03-05T00:00:00.000Z'): MemberRow => ({
+  group_id: GROUP,
+  user_id,
+  invite_status: 'JOINED',
+  wake_share_opt_in,
+  joined_at,
+  notifications_off: false,
+});
+// 나는 4월에 들어옴 — G02 '4월부터 함께'는 내 참여 일시 (5-41)
+export const members: MemberRow[] = [member(ME, true, '2026-04-20T00:00:00.000Z'), member(SUYEON, true), member(JIHYEONG, true), member(JUNSEONG, false)];
 
 type Flags = { alarm?: boolean; edit?: boolean; wake?: boolean };
 const perm = (owner_id: string, grantee_id: string, source_type: 'FRIEND' | 'GROUP', source_id: string, v: Flags): PermRow => ({
