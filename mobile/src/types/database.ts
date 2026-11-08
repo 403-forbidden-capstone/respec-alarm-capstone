@@ -770,6 +770,9 @@ isOneToOne: false
 "roll_insert_occurrence":
 { Args: { "p_alarms": Json,"p_appointment": Json,"p_items": Json,"p_participant": Json }; Returns: string
                            },
+"save_group_permissions":
+{ Args: { "p_can_edit_alarm": boolean,"p_can_view_alarm": boolean,"p_group_id": string }; Returns: Json
+                           },
 "search_by_handle":
 { Args: { "p_query": string }; Returns: Json
                            },
