@@ -2,7 +2,7 @@
 // 그룹 기상 상태는 D59에 따라 기상까지만, 화면은 3단계(아직 · 울렸어요 · 일어남) — 준비 · 출발 · 도착은 실데이터에 없음 (친구 7장)
 import { KIND_LABEL, LEVELS, type AlarmKind } from '@/features/alarm/types';
 import { parseDbTime } from '@/lib/dbTime';
-import { dateParts, formatTime, minutesBetween, startOfDay, timeParts } from '@/lib/format';
+import { dateParts, formatTime, minutesBetween, startOfDay } from '@/lib/format';
 import type { Enums } from '@/types/database';
 import { levelOfIntensity, levelOfSoundKey } from '@shared/calc/intensity.ts';
 
@@ -66,8 +66,8 @@ export const NOT_SHARED_STATE: WakeState = { stage: 'NOT_SHARED', text: '공유 
 
 const at = parseDbTime; // DB 시각 글자 (lib/dbTime)
 
-// '8:50 알람' — 알람 시각 한 줄 (G02 아직 단계 · G03, 7-다)
-export const alarmLine = (alarmAt: Date | null) => (alarmAt ? `${timeParts(alarmAt).hm} 알람` : null);
+// '오전 8:50 알람' — 알람 시각 한 줄 (앱 다른 화면처럼 오전 · 오후를 붙임, 11/9 결정표) (G02 아직 단계 · G03, 7-다)
+export const alarmLine = (alarmAt: Date | null) => (alarmAt ? `${formatTime(alarmAt)} 알람` : null);
 
 // 멤버 한 줄의 기상 상태 — 알람 기준 글자만, '취침 중' · 준비 · 출발 · 도착 없음 (7-라 · 7-42). 색 + 글자를 같이 (14-파)
 //   dayHasRows = 함수가 그날 줄을 하나라도 줬는지 (나는 늘 나오니 비었으면 그 그룹 약속이 없는 날, D57)
@@ -77,7 +77,7 @@ export function wakeStateOf(row: WakeRow | undefined, dayHasRows: boolean): Wake
   const stage = stageOf(row.wake_status);
   switch (stage) {
     case 'WOKE':
-      return { stage, text: row.wake_confirmed_at ? `일어났어요 ${timeParts(at(row.wake_confirmed_at)).hm}` : '일어났어요', dot: 'ok', woke: true };
+      return { stage, text: row.wake_confirmed_at ? `일어났어요 ${formatTime(at(row.wake_confirmed_at))}` : '일어났어요', dot: 'ok', woke: true };
     case 'RANG':
       return { stage, text: '울렸어요', dot: 'mid', woke: false };
     case 'SCHEDULED':

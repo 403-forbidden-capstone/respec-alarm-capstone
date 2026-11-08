@@ -181,7 +181,7 @@
 ### G02 그룹 상세
 - 그룹 · 멤버: `groups` + `group_members` — DB, 기상 공유 동의 `wake_share_opt_in` — DB
 - 연결 일정: `appointments`(`group_id`) — DB
-- 멤버 기상 상태: `get_group_wake` — RPC. 그 그룹 일정이 있는 날만 (D57). 6단계를 3단계로 묶음(`SCHEDULED` '8:50 알람' · `RINGING` · `DISMISSED` · `MISSED` '울렸어요' · `CONFIRMED` '일어났어요 8:08', `NO_ALARM` '알람 없음'), 줄이 없는 멤버는 '공유 안 함' (친구 7장). 멤버 메뉴 [이 사람에게 기상 숨기기 / 보이기] `set_wake_hidden` — RPC, 숨긴 목록 `wake_hides` — DB(내 줄만). 누가 일어나면 DB가 그룹 채널에 새로 고침 신호(Realtime 방송, #160) → 앱이 다시 부름 (지형님 10/15 기술 결정 — `capstone/전체작업계획_v1.md` 8절 Q3, 레포 밖)
+- 멤버 기상 상태: `get_group_wake` — RPC. 그 그룹 일정이 있는 날만 (D57). 6단계를 3단계로 묶음(`SCHEDULED` '오전 8:50 알람' · `RINGING` · `DISMISSED` · `MISSED` '울렸어요' · `CONFIRMED` '일어났어요 오전 8:08', `NO_ALARM` '알람 없음'), 줄이 없는 멤버는 '공유 안 함' (친구 7장). 멤버 메뉴 [이 사람에게 기상 숨기기 / 보이기] `set_wake_hidden` — RPC, 숨긴 목록 `wake_hides` — DB(내 줄만). 누가 일어나면 DB가 그룹 채널에 새로 고침 신호(Realtime 방송, #160) → 앱이 다시 부름 (지형님 10/15 기술 결정 — `capstone/전체작업계획_v1.md` 8절 Q3, 레포 밖)
 - 초대: 코드 시트 `my_group_code`(만료됐으면 서버가 새 코드 + 7일) — RPC, [새 코드] `regenerate_invite_code` — RPC, 직접 초대 `invite_to_group` — RPC (친구 5장). 그룹장 없음 — 이름 바꾸기 `groups` update · 나가기 `group_members` JOINED → LEFT · 내보내기 다른 사람 행 delete · 알림 끄기 `group_members.notifications_off` — DB
 
 ### G03 그룹원 기상 상태

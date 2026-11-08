@@ -9,7 +9,7 @@ describe('G03 그룹원 기상 상태', () => {
   it('같은 그룹에서 기상을 준 사람이면 그룹 이름 · 단계 · 알람 시각 (오전 7:55 시나리오)', async () => {
     const wake = await getMemberWake('cap', 'sy');
     expect(wake?.groupName).toBe('캡스톤팀');
-    expect(wake?.state.text).toBe('일어났어요 7:35'); // 7:35 기상 확인 — 준비 시작은 안 보임 (D59)
+    expect(wake?.state.text).toBe('일어났어요 오전 7:35'); // 7:35 기상 확인 — 준비 시작은 안 보임 (D59)
     expect(wake?.alarmAt).not.toBeNull();
   });
 

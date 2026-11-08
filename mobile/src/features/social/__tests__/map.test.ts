@@ -57,14 +57,14 @@ describe('wakeStateOf — 기상까지만, 화면 3단계 (D59 · 친구 7장)',
   it('단계마다 글자 · 점 · 기상 여부 — 울림 · 해제 · 미확인은 "울렸어요"', () => {
     expect(wakeStateOf(wakeRow({ wake_status: 'CONFIRMED', wake_confirmed_at: '2026-10-19T22:35:00.000Z' }), true)).toEqual({
       stage: 'WOKE',
-      text: '일어났어요 7:35',
+      text: '일어났어요 오전 7:35',
       dot: 'ok',
       woke: true,
     });
     for (const wake_status of ['RINGING', 'DISMISSED', 'MISSED']) {
       expect(wakeStateOf(wakeRow({ wake_status }), true)).toMatchObject({ stage: 'RANG', text: '울렸어요', dot: 'mid', woke: false });
     }
-    expect(wakeStateOf(wakeRow({ wake_status: 'SCHEDULED' }), true)).toMatchObject({ stage: 'SCHEDULED', text: '7:30 알람', woke: false });
+    expect(wakeStateOf(wakeRow({ wake_status: 'SCHEDULED' }), true)).toMatchObject({ stage: 'SCHEDULED', text: '오전 7:30 알람', woke: false });
     expect(wakeStateOf(wakeRow({ wake_status: 'NO_ALARM', wake_alarm_at: null }), true)).toMatchObject({ stage: 'NO_ALARM', text: '알람 없음' });
   });
 

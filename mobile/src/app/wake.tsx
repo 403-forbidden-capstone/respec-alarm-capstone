@@ -109,7 +109,7 @@ function EarlyWake() {
   };
   return (
     <Card>
-      <Text variant="bodyStrong">{`${timeParts(data.at).hm} 알람 전에 깼나요?`}</Text>
+      <Text variant="bodyStrong">{`${formatTime(data.at)} 알람 전에 깼나요?`}</Text>
       <Text variant="small" tone="sub" style={styles.earlySub}>
         누르면 지금 시각으로 기상을 기록해요.
       </Text>

@@ -54,11 +54,11 @@ describe('6단계 → 화면 3단계 (7-13 · 7-15 · 7-17 · 7-18 · 7-38 · 7-
     }
   });
 
-  it('아직은 알람 시각 한 줄 "8:50 알람", 일어남은 "일어났어요 8:08"', () => {
-    expect(wakeStateOf(row(SUYEON), true)).toMatchObject({ stage: 'SCHEDULED', text: '8:50 알람', dot: 'zz', woke: false });
+  it('아직은 알람 시각 한 줄 "오전 8:50 알람", 일어남은 "일어났어요 오전 8:08"', () => {
+    expect(wakeStateOf(row(SUYEON), true)).toMatchObject({ stage: 'SCHEDULED', text: '오전 8:50 알람', dot: 'zz', woke: false });
     expect(wakeStateOf(row(SUYEON, { wake_status: 'CONFIRMED', wake_confirmed_at: '2026-10-19T23:08:00.000Z' }), true)).toMatchObject({
       stage: 'WOKE',
-      text: '일어났어요 8:08',
+      text: '일어났어요 오전 8:08',
       dot: 'ok',
       woke: true,
     });
@@ -80,7 +80,7 @@ describe('6단계 → 화면 3단계 (7-13 · 7-15 · 7-17 · 7-18 · 7-38 · 7-
   });
 
   it('알람 시각 줄', () => {
-    expect(alarmLine(new Date('2026-10-19T23:50:00.000Z'))).toBe('8:50 알람');
+    expect(alarmLine(new Date('2026-10-19T23:50:00.000Z'))).toBe('오전 8:50 알람');
     expect(alarmLine(null)).toBeNull();
   });
 });
@@ -100,7 +100,7 @@ describe('공유 안 함 · 약속 없는 날 (7-02 · 7-06)', () => {
     mockFake.answerRpc('get_group_wake', ok([row(ME), row(SUYEON, { wake_status: 'RINGING' })]));
     const g = await real.getGroup(GROUP);
     expect(g?.members.map((m) => [m.person.name, m.state.text])).toEqual([
-      ['나(데모)', '8:50 알람'],
+      ['나(데모)', '오전 8:50 알람'],
       ['수연', '울렸어요'],
       ['준성', '공유 안 함'],
       ['지형', '공유 안 함'],
@@ -145,7 +145,7 @@ describe('읽기는 get_group_wake (7-39 · 7-37)', () => {
 
   it('정정(잘못 누른 기상 확인을 고침)은 다음 조회 때 그대로 — 앱이 값을 붙잡아 두지 않음', async () => {
     mockFake.answerRpc('get_group_wake', ok([row(ME), row(SUYEON, { wake_status: 'CONFIRMED', wake_confirmed_at: '2026-10-19T23:08:00.000Z' })]));
-    expect((await real.getGroup(GROUP))?.members[1].state.text).toBe('일어났어요 8:08');
+    expect((await real.getGroup(GROUP))?.members[1].state.text).toBe('일어났어요 오전 8:08');
     mockFake.answerRpc('get_group_wake', ok([row(ME), row(SUYEON, { wake_status: 'DISMISSED' })]));
     expect((await real.getGroup(GROUP))?.members[1].state.text).toBe('울렸어요');
   });
@@ -158,7 +158,7 @@ describe('G03 기상 상태 (7-41 · 7-06 · 7-02)', () => {
     expect(w).toEqual({
       person: expect.objectContaining({ name: '수연' }),
       groupName: '캡스톤팀',
-      state: expect.objectContaining({ stage: 'WOKE', text: '일어났어요 8:08' }),
+      state: expect.objectContaining({ stage: 'WOKE', text: '일어났어요 오전 8:08' }),
       alarmAt: new Date('2026-10-19T23:50:00.000Z'),
       confirmedAt: new Date('2026-10-19T23:08:00.000Z'),
       canViewAlarm: true, // 수연 → 나 친구 출처 조회

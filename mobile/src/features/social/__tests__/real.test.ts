@@ -116,8 +116,8 @@ describe('G01 · H01 · G02 그룹', () => {
     const summary = await real.getGroupSummary(GROUP);
     expect(summary?.wokeCount).toBe(2);
     expect(summary?.members.map((m) => [m.person.name, m.state.text])).toEqual([
-      ['나(데모)', '일어났어요 7:35'],
-      ['수연', '일어났어요 7:31'],
+      ['나(데모)', '일어났어요 오전 7:35'],
+      ['수연', '일어났어요 오전 7:31'],
       ['준성', '공유 안 함'], // 동의가 꺼져 있어 함수가 안 줌
       ['지형', '울렸어요'],
     ]);
@@ -248,7 +248,7 @@ describe('G03 그룹원 기상 상태', () => {
     const wake = await real.getMemberWake(GROUP, SUYEON);
     expect(wake).toMatchObject({ groupName: '캡스톤팀', noGroupAppointment: false, canViewAlarm: true });
     expect(wake?.person.name).toBe('수연');
-    expect(wake?.state.text).toBe('일어났어요 7:35');
+    expect(wake?.state.text).toBe('일어났어요 오전 7:35');
     expect(wake?.alarmAt?.toISOString()).toBe('2026-10-19T22:30:00.000Z');
     expect(mockFake.opsOf('appointments')).toHaveLength(0);
   });
