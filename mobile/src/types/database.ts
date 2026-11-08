@@ -376,6 +376,25 @@ isOneToOne: false
                   Relationships: [
                     
                   ]
+                },"push_tickets": {
+                  Row: {
+                    "created_at": string,"kind": string,"ticket_id": string,"token": string,"user_id": string
+                  }
+                  Insert: {
+                    "created_at"?: string,"kind": string,"ticket_id": string,"token": string,"user_id": string
+                  }
+                  Update: {
+                    "created_at"?: string,"kind"?: string,"ticket_id"?: string,"token"?: string,"user_id"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "push_tickets_user_id_fkey"
+      columns: ["user_id"]
+isOneToOne: false
+      referencedRelation: "profiles"
+      referencedColumns: ["user_id"]
+    }
+                  ]
                 },"push_tokens": {
                   Row: {
                     "created_at": string,"id": string,"last_seen_at": string,"platform": string,"token": string,"user_id": string
@@ -749,6 +768,9 @@ isOneToOne: false
                            },
 "open_friend_link":
 { Args: { "p_token": string }; Returns: Json
+                           },
+"plan_group_push":
+{ Args: { "p_appointment_id"?: string,"p_group_id": string,"p_kind": string,"p_sender_id": string }; Returns: Json
                            },
 "preview_group_by_code":
 { Args: { "p_code": string }; Returns: Json
