@@ -25,15 +25,15 @@ export default function FriendPermissionScreen() {
   const menu = usePersonMenu(() => backOrHome());
 
   // 친구 끊기 — 확인 한 번. 행이 지워지고 양쪽 친구 출처 권한도 사라짐(같은 그룹의 권한 · 기상은 그대로). 상대에게 알림 없음 (3-14 · 3-15)
-  const disconnect = (name: string) =>
-    run(async () => {
-      const ok = await confirm({
-        title: `${name}님과 친구를 끊을까요?`,
-        message: '서로 친구로 준 권한이 모두 사라져요. 같은 그룹이면 그룹 안에서는 그대로 보여요. 상대에게 알림은 가지 않아요.',
-        okLabel: '친구 끊기',
-        destructive: true,
-      });
-      if (!ok) return;
+  const disconnect = async (name: string) => {
+    const ok = await confirm({
+      title: `${name}님과 친구를 끊을까요?`,
+      message: '서로 친구로 준 권한이 모두 사라져요. 같은 그룹이면 그룹 안에서는 그대로 보여요. 상대에게 알림은 가지 않아요.',
+      okLabel: '친구 끊기',
+      destructive: true,
+    });
+    if (!ok) return; // 확인 창이 떠 있는 동안에는 버튼이 돌지 않음 — 확인한 뒤에만 busy
+    await run(async () => {
       // 끊었거나 이미 끊긴 경우(GONE, UserError)만 목록으로 — 통신 오류면 이 화면에 남아 다시 할 수 있게
       let leave = false;
       try {
@@ -47,6 +47,7 @@ export default function FriendPermissionScreen() {
         if (leave) backOrHome();
       }
     }, '친구를 끊지 못했어요. 다시 해 주세요');
+  };
 
   if (data === undefined) {
     return (

@@ -2,7 +2,7 @@ import { describe, expect, it } from '@jest/globals';
 
 import { db } from '@/mocks/data';
 
-import { getFriendGrant, getGroup, getMemberWake, getSharedAlarms } from '../api';
+import { getFriendGrant, getGroup, getGroupCode, getMemberWake, getSharedAlarms } from '../api';
 
 // 가짜 api가 실데이터(RLS · get_group_wake_status)와 같은 범위만 돌려주는지
 describe('G03 그룹원 기상 상태', () => {
@@ -44,9 +44,11 @@ describe('G02 그룹 상세', () => {
       db.appointments.pop();
     }
     expect((await getGroup('fam'))?.appointments).toEqual([]);
-    expect(cap?.inviteCode).toMatch(/^CAP-[0-9A-Z]{4}$/);
-    expect((await getGroup('cap'))?.inviteCode).toBe(cap?.inviteCode);
-    expect((await getGroup('fam'))?.inviteCode).not.toBe(cap?.inviteCode);
+    // 초대 코드는 8자(0 O 1 I 없음), 그룹마다 다름 — 상세에는 코드가 없고 코드 시트가 따로 읽음 (5장)
+    const capCode = (await getGroupCode('cap')).code;
+    expect(capCode).toMatch(/^[A-HJ-NP-Z2-9]{8}$/);
+    expect((await getGroupCode('fam')).code).not.toBe(capCode);
+    expect(cap).not.toHaveProperty('inviteCode');
   });
 });
 

@@ -57,21 +57,54 @@ export function checkSharedRead({ owner, grantee, rows, perms, friends, blocks }
   return out;
 }
 
-// 그룹 노출: 내가 볼 수 있는 그룹은 내 멤버 행(초대 중 · 참여 중)이 있는 곳뿐
-//   groups: [{group_id, owner_id}] — 아직 그룹장 칼럼이 남아 있는 동안은 그룹장이 나간 뒤에도 자기 그룹이 보임(5장 '그룹장 없음'에서 사라짐).
-//   그건 알려진 동작(KNOWN)으로 따로 적고 위반으로 세지 않음. 그룹장도 아닌데 보이면 위반
-export function checkGroupVisibility({ me, visibleGroupIds, members, groups = [] }) {
+// 그룹 노출: 내가 볼 수 있는 그룹은 내 멤버 행이 있는 곳뿐.
+//   strict(5장 이후) = 참여 중(JOINED)인 그룹만 보임 — 초대만 받은 사람은 그룹 표를 못 봄(초대 카드는 my_group_invites 함수로).
+//   strict가 아니면 초대 중도 허용.
+//   5장 이후: 만든 사람의 읽기 예외는 '만든 같은 트랜잭션' 안에서만이라 하루 끝 조회에는 걸리지 않음 → 나간 뒤에도 보이면 위반.
+//   5장 전: 그룹장 정책이 남아 있어 나간 뒤에도 보이는 것은 알려진 동작(KNOWN)
+export function checkGroupVisibility({ me, visibleGroupIds, members, groups = [], strict = false }) {
   const out = [];
-  const mineOk = new Set(members.filter((m) => m.user_id === me && ['INVITED', 'JOINED'].includes(m.invite_status)).map((m) => m.group_id));
+  const okStatus = strict ? ['JOINED'] : ['INVITED', 'JOINED'];
+  const mineOk = new Set(members.filter((m) => m.user_id === me && okStatus.includes(m.invite_status)).map((m) => m.group_id));
   for (const g of visibleGroupIds) {
     if (mineOk.has(g)) continue;
     const row = groups.find((x) => x.group_id === g);
-    if (row && row.owner_id === me) {
+    if (!strict && row && row.owner_id === me) {
       out.push({ kind: 'KNOWN', rule: 'G-그룹장이라 나간 뒤에도 보임 (5장 그룹장 없음 전 동작)', detail: `${me} → ${g}` });
     } else {
-      out.push({ kind: 'VIOLATION', rule: 'G-멤버가 아닌 그룹이 보임', detail: `${me} → ${g}` });
+      out.push({ kind: 'VIOLATION', rule: strict ? 'G-참여 중이 아닌 그룹이 보임' : 'G-멤버가 아닌 그룹이 보임', detail: `${me} → ${g}` });
     }
   }
+  return out;
+}
+
+// 구성원 행 노출(5장): 내 행 + 내가 참여 중인 그룹의 행만. 초대만 받은 사람은 다른 멤버 행을 못 봄
+export function checkMemberRows({ me, rows, members }) {
+  const out = [];
+  const joined = new Set(members.filter((m) => m.user_id === me && m.invite_status === 'JOINED').map((m) => m.group_id));
+  for (const r of rows) {
+    if (r.user_id === me || joined.has(r.group_id)) continue;
+    out.push({ kind: 'VIOLATION', rule: 'G-참여 중이 아닌 그룹의 구성원 행이 보임', detail: `${me} → ${r.group_id}/${r.user_id}` });
+  }
+  return out;
+}
+
+// 그룹 정적 규칙(5장): 그룹마다 참여 중 1명 이상(마지막이 나가면 자동 삭제), 참여 중 20명 이하, 한 사람 참여 그룹 10개 이하
+export function checkGroups({ groups, members }) {
+  const out = [];
+  const joinedBy = new Map();
+  for (const m of members) {
+    if (m.invite_status !== 'JOINED') continue;
+    joinedBy.set(m.group_id, (joinedBy.get(m.group_id) ?? 0) + 1);
+  }
+  for (const g of groups) {
+    const n = joinedBy.get(g.group_id) ?? 0;
+    if (n < 1) out.push({ kind: 'VIOLATION', rule: 'G-참여 중인 사람이 없는데 그룹이 남음', detail: g.group_id });
+    if (n > 20) out.push({ kind: 'VIOLATION', rule: 'G-참여 중이 20명을 넘음', detail: `${g.group_id}: ${n}` });
+  }
+  const perUser = new Map();
+  for (const m of members) if (m.invite_status === 'JOINED') perUser.set(m.user_id, (perUser.get(m.user_id) ?? 0) + 1);
+  for (const [u, n] of perUser) if (n > 10) out.push({ kind: 'VIOLATION', rule: 'G-한 사람이 참여 그룹 10개를 넘음', detail: `${u}: ${n}` });
   return out;
 }
 
@@ -85,6 +118,10 @@ export const STATUS = {
   block_user: ['BLOCKED', 'ALREADY_BLOCKED', 'SELF', 'NOT_FOUND'],
   unblock_user: ['UNBLOCKED', 'GONE'],
   search_by_handle: ['FOUND', 'SELF', 'NOT_FOUND', 'LIMIT'],
+  preview_group_by_code: ['FOUND', 'NOT_FOUND', 'EXPIRED', 'LIMIT'],
+  join_group: ['JOINED', 'ALREADY_JOINED', 'NOT_FOUND', 'EXPIRED', 'LIMIT', 'FULL', 'TOO_MANY_GROUPS'],
+  invite_to_group: ['INVITED', 'ALREADY_INVITED', 'ALREADY_MEMBER', 'SELF', 'NOT_FOUND'],
+  accept_group_invite: ['JOINED', 'ALREADY_JOINED', 'GONE', 'FULL', 'TOO_MANY_GROUPS'],
 };
 
 // 서버가 죽었다는 뜻의 오류 (권한 · 검사 거절은 정상 거절)
