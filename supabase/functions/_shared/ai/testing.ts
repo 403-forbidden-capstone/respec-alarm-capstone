@@ -10,7 +10,7 @@
 //   사용자 말 1(머리 감아야 해) 뒤 준비 87분 → 기상 07:28 · 준비 시작 07:38
 //   a3 '동아리 모임'은 서버 키워드 사전에 없는 제목이라 중요도 미정(null)
 
-import type { AlarmPlan, Appointment, Context, LocalDate, SessionType, Turn, Weekday } from "./types.ts";
+import type { AlarmPlan, Appointment, Context, FinalExtract, LocalDate, SessionType, Turn, Weekday } from "./types.ts";
 import { REASON_LABEL, WEEKDAYS } from "./types.ts";
 import { addDays, weekdayOf } from "./view.ts";
 
@@ -243,3 +243,24 @@ export function sampleTranscript(type: SessionType, opts: SampleOptions = {}): T
   }
   return turns;
 }
+
+/** 대화 끝 정리 시험용 빈 T2 출력(extract.v2) — 칸만 바꿔 씀 */
+export const emptyExtract = (over: Partial<FinalExtract> = {}): FinalExtract => ({
+  schema_version: '2.1',
+  appointments: [],
+  todos: [],
+  importance_updates: [],
+  alarm_changes: [],
+  fact_feedback: [],
+  reason_tags: [],
+  prep_adjustment: null,
+  daily_record: { sleep_time: null, sleep_satisfaction: null, condition_note: null },
+  safety_flag: false,
+  behavior: [],
+  alarm_feedback: [],
+  day_review: { events: [], memorable: null },
+  mood_condition: { mood: [], valence: null, fatigue: null, stress: null, causes: [], source: "stated" },
+  habit_signals: [],
+  goals_routine: { goals: [], wanted_routine: null },
+  ...over,
+});

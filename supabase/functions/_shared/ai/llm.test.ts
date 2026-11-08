@@ -27,7 +27,31 @@ interface Fixture {
   response: LlmResponse;
   expect: unknown;
 }
-const fixture = (p: PointId): Fixture => JSON.parse(readFileSync(new URL(`./fixtures/${p}.json`, import.meta.url), 'utf8'));
+const readFixture = (p: PointId): Fixture => JSON.parse(readFileSync(new URL(`./fixtures/${p}.json`, import.meta.url), 'utf8'));
+// T2 녹화(실험실 T2.v2 · extract.v1 응답)에 T2.v3(extract.v2)이 더한 칸을 API 대신 값 방식("" = null)으로 붙임 — 녹화 파일은 그대로
+// 대신 값: 문자열 "" · 최솟값 1 이상 정수 0. 최솟값이 1보다 작은 정수(valence)는 union이라 null 그대로
+const V3_SENTINEL = {
+  behavior: [], alarm_feedback: [], day_review: { events: [], memorable: '' },
+  mood_condition: { mood: [], valence: null, fatigue: 0, stress: 0, causes: [], source: 'stated' }, habit_signals: [], goals_routine: { goals: [], wanted_routine: '' },
+};
+const V3_EMPTY = {
+  behavior: [], alarm_feedback: [], day_review: { events: [], memorable: null },
+  mood_condition: { mood: [], valence: null, fatigue: null, stress: null, causes: [], source: 'stated' }, habit_signals: [], goals_routine: { goals: [], wanted_routine: null },
+};
+function fixture(p: PointId): Fixture {
+  const fx = readFixture(p);
+  if (p !== 'T2') return fx;
+  const block = fx.response.content.find((b) => b.type === 'text') as { text: string };
+  const out = JSON.parse(block.text);
+  for (const t of out.todos) t.appointment_title = '';
+  Object.assign(out, V3_SENTINEL);
+  block.text = JSON.stringify(out);
+  // 해석 뒤 기대값은 대신 값을 null로 되돌린 모양
+  const expect = fx.expect as { todos: Record<string, unknown>[] } & Record<string, unknown>;
+  for (const t of expect.todos) t.appointment_title = null;
+  Object.assign(expect, V3_EMPTY);
+  return fx;
+}
 
 // 템플릿이 쓰는 이름마다 글 하나를 채운 변수 (섹션도 참으로 들어감) — 시험은 채운 글이 아니라 호출 모양을 봄
 function dummyVars(point: PointId): Record<string, unknown> {
@@ -127,7 +151,7 @@ describe('녹화 응답 — 지점 7개의 성공 경로', () => {
     });
   }
 
-  it('T2(extract.v1)는 대신 값으로 온 응답을 null로 되돌린 뒤 기준 스키마로 검증 — 되돌리기 전 글은 기준 스키마를 못 지킴', async () => {
+  it('T2(extract.v2)는 대신 값으로 온 응답을 null로 되돌린 뒤 기준 스키마로 검증 — 되돌리기 전 글은 기준 스키마를 못 지킴', async () => {
     const fx = fixture('T2');
     assert.equal(fx.api_mode, 'sentinel');
     const raw = (fx.response.content.find((b) => b.type === 'text') as { text: string }).text;
@@ -689,7 +713,7 @@ describe('call 기록 — ai_calls 표 칸과 같은 이름', () => {
     assert.deepEqual([...POINT_IDS].sort(), [...POINT_CHECK].sort());
     assert.deepEqual(
       Object.fromEntries(POINT_IDS.map((p) => [p, `${POINTS[p].prompt.id}@${POINTS[p].prompt.version}`])),
-      { T1: 'T1@v1.5', T2F: 'T2F@v2-b', T2: 'T2@v2', T3: 'T3@v1', T4: 'T4@v1.1', T5: 'T5@v1.2', E4: 'ASSIST_E4@v1.1' },
+      { T1: 'T1@v1.5', T2F: 'T2F@v2-c', T2: 'T2@v3.3', T3: 'T3@v1', T4: 'T4@v1.1', T5: 'T5@v1.2', E4: 'ASSIST_E4@v1.1' },
     );
   });
 

@@ -34,7 +34,7 @@ import { currentUserId } from '@/lib/user';
 import type { Weekday } from '@/lib/weekday';
 
 import { applyFix, type Fix } from './fixes';
-import { isFinished, markFinished } from './finishedSessions';
+import { addPendingCommit, isFinished, markFinished, pendingCommits, removePendingCommit } from './finishedSessions';
 import { clearSaved, markSaved, pruneExpired, pruneOtherSessions, readSavedMarks } from './savedMarks';
 import type { ChatMessage, CardAlarm, CardKind, CardStatus, Conversation, ConversationCard, FixResult, Limits, TurnNotice, Unavailable } from './types';
 
@@ -177,6 +177,7 @@ export function resetVoiceState() {
   state = freshState(null);
   chain = Promise.resolve();
   progress = null;
+  flushing = null;
 }
 
 // 말 하나를 처리하는 도중의 대화 — 화면이 끝을 기다리지 않고 그때그때 그림 (내 말 · 카드 계산 시작 · 계산 끝). say · sayVoice가 도는 동안만
@@ -646,6 +647,7 @@ async function readSession(resume: boolean, fresh = false): Promise<void> {
   for (const m of res.messages ?? []) pushMessage(m.role === 'ai' ? 'ai' : 'me', m.text, m.at ? new Date(m.at) : at);
   mergeCards(res.cards, at);
   if (fresh) await pruneExpired(now()); // 앱을 열 때 — 모든 사용자의 7일 지난 표시 · 옛 형식 키 정리
+  if (fresh) void flushCommits(state.userId); // 지난번에 못 보낸 대화 끝 정리
   if (res.session_id) await restoreSaved(res.session_id, fresh);
   for (const [id, old] of done) {
     const rec = state.cards.get(id);
@@ -796,15 +798,45 @@ export function retry(): Promise<Conversation> {
   });
 }
 
-// [완료] — 지금 세션을 "끝남"으로 로컬에 적고 상태를 비움. 다음 getConversation(= [대화 시작])은 새 세션을 요청함 (서버에 세션을 닫는 길은 voice-commit 뒤)
-//   서버로 가야 할 카드 알림(SAVED 등)이 큐에 남았으면 세션이 바뀌기 전에 한 번 보내 봄 (실패해도 삼킴)
+// 대화 끝 정리(서버 voice-commit — T2 전체 추출 → 할 일 · 준비물 · 생활 기록 저장, 일정 · 알람은 카드로만) — 적어 둔 세션을 차례로 보냄
+//   DONE · SKIPPED(정리할 것 없음) · 다시 해도 안 되는 오류(NOT_FOUND · VALIDATION_FAILED)면 목록에서 지움. PARTIAL · RUNNING · 실패는 남겨 다음 대화 열기 때 다시 (서버가 한 번만 저장)
+//   서버가 T2를 부르므로(19초 · 다시 시도 1번) 대화 화면의 직렬 큐 밖에서 — 새 대화 열기를 막지 않게. 동시에 두 번 돌지 않음
+export const COMMIT_TIMEOUT_MS = 45_000;
+let flushing: Promise<void> | null = null;
+export function flushCommits(userId: string | null): Promise<void> {
+  if (!userId) return Promise.resolve();
+  flushing ??= (async () => {
+    try {
+      for (const { sessionId, rejected } of await pendingCommits(userId)) {
+        try {
+          const body = rejected.length > 0 ? { session_id: sessionId, rejected_cards: rejected } : { session_id: sessionId };
+          const res = await callEdge<{ status?: string }>('voice-commit', body, { timeoutMs: COMMIT_TIMEOUT_MS });
+          if (res?.status === 'DONE' || res?.status === 'SKIPPED') await removePendingCommit(userId, sessionId);
+        } catch (e) {
+          if (e instanceof EdgeError && (e.code === 'NOT_FOUND' || e.code === 'VALIDATION_FAILED')) await removePendingCommit(userId, sessionId);
+        }
+      }
+    } finally {
+      flushing = null;
+    }
+  })();
+  return flushing;
+}
+
+// [완료] — 지금 세션을 "끝남"으로 로컬에 적고 상태를 비움. 다음 getConversation(= [대화 시작])은 새 세션을 요청함
+//   서버로 가야 할 카드 알림(SAVED 등)이 큐에 남았으면 세션이 바뀌기 전에 한 번 보내 봄 (실패해도 삼킴). 그 뒤 대화 끝 정리(voice-commit)를 기다리지 않고 보냄
 export function finishConversation(): Promise<{ recordDate: string | null }> {
   return serial(async () => {
     await guardUser();
     if (!state.started) return { recordDate: null };
     // 한 마디도 안 한 대화는 끝남으로 적지 않음 — 다음 [대화 시작]이 같은 세션을 이어 받아 하루 5대화 한도만 닳지 않게
     const spoke = state.messages.some((m) => m.who === 'me');
-    if (spoke && state.userId && state.sessionId) await markFinished(state.userId, state.sessionId);
+    if (spoke && state.userId && state.sessionId) {
+      // [저장 안 함]한 카드 — 그 알림이 실패했거나 앞 요청([다시 시도] 대기)에 막혀 큐에서 사라져도 정리 요청에 실어 보내 서버가 REJECTED로
+      const rejected = [...state.cards].filter(([, rec]) => rec.status === 'REJECTED').map(([id]) => id);
+      await markFinished(state.userId, state.sessionId);
+      await addPendingCommit(state.userId, state.sessionId, rejected);
+    }
     if (state.sessionId && !state.pending && state.queue.length > 0) {
       try {
         await drive();
@@ -813,6 +845,8 @@ export function finishConversation(): Promise<{ recordDate: string | null }> {
       }
     }
     state = freshState(state.userId); // 세션 · 말 · 카드까지 비움 — 다음 열기가 실패해도 끝난 세션으로 말이 가지 않고 [다시 시도]가 새로 읽음
+    // 카드 알림을 먼저 보낸 뒤(위 drive) 정리 — 정리는 그 순간의 카드 상태로 일정 확인 상태를 정함
+    if (spoke) void flushCommits(state.userId);
     return { recordDate: null };
   });
 }
