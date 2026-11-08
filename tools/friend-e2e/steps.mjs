@@ -19,6 +19,18 @@ async function callRpc(client, fn, args) {
   return res;
 }
 
+// 아이디 검색 → { status, profile, relation }. 2장 search_by_handle이 없으면 옛 find_profile 한 행을 같은 모양으로 맞춤
+async function searchHandle(ctx, client, query) {
+  const fn = rpcOf(ctx.caps, 'search_handle');
+  if (fn) {
+    const r = ok(await callRpc(client, fn, { p_query: query }), '아이디 검색');
+    if (r.status === 'LIMIT') skip(`검색이 1분 10회 제한에 걸림 (${r.retry_after_seconds}초 뒤 다시)`);
+    return r;
+  }
+  const rows = ok(await callRpc(client, ctx.fn.find_profile, { p_handle: query }), '아이디 검색');
+  return rows.length ? { status: 'FOUND', profile: rows[0], relation: null } : { status: 'NOT_FOUND', profile: null, relation: null };
+}
+
 const pushNote = (ctx, who) => ctx.note(`${who}에게 푸시 도착 확인 생략 (11장 푸시 기록 표 미구현)`);
 
 // ---- 가입 (1 · 2) — OAuth는 supabase-js로 못 하므로 이메일 임시 계정으로 "가입 직후 상태"만 봄 ----
@@ -28,9 +40,19 @@ async function signupCheck(ctx, label) {
   must(!created.error, `임시 계정 만들기: ${created.error?.message}`);
   const id = created.data.user.id;
   try {
-    const p = ok(await ctx.admin.from('profiles').select('handle').eq('user_id', id).single(), '프로필 읽기');
+    const cols = ['handle', ...(ctx.caps.hasCol('profiles', 'handle_changed_at') ? ['handle_changed_at'] : [])];
+    const p = ok(await ctx.admin.from('profiles').select(cols.join(',')).eq('user_id', id).single(), '프로필 읽기');
     if (!p.handle) skip('가입 때 자동 아이디(respec_xxxx)가 안 생김 (2장 미구현)');
     must(/^respec_[a-z0-9]{4,}$/.test(p.handle), `자동 아이디 모양이 다름: ${p.handle}`);
+    must(p.handle_changed_at == null, '가입 직후인데 직접 바꾼 시각이 있음 (자동 아이디는 "바꿔 보세요" 상태여야 함)');
+    // 온보딩 전(onboarded_at 비어 있음)이라 남이 검색해도 안 나와야 함 — 시험 계정을 service_role로 온보딩 끝낸 상태로 만든 뒤에는 나옴
+    if (rpcOf(ctx.caps, 'search_handle')) {
+      const before = await searchHandle(ctx, ctx.c, p.handle);
+      must(before.status === 'NOT_FOUND', `온보딩 전 계정이 검색됨: ${before.status}`);
+      ok(await ctx.admin.from('profiles').update({ onboarded_at: new Date().toISOString() }).eq('user_id', id), '온보딩 끝냄(service_role)');
+      const after = await searchHandle(ctx, ctx.c, p.handle);
+      must(after.status === 'FOUND' && after.profile.user_id === id, `온보딩 뒤에도 검색 안 됨: ${after.status}`);
+    }
     ctx.note('카카오 · 구글 로그인 화면은 못 봄 (이메일 임시 계정으로 가입 직후 상태만 확인)');
   } finally {
     await ctx.admin.auth.admin.deleteUser(id);
@@ -47,13 +69,26 @@ export const STEPS = [
     action: '내 아이디 [바꾸기] → 다음 변경은 30일 뒤',
     async run(ctx) {
       if (!ctx.caps.hasCol('profiles', 'handle_changed_at')) skip('아이디 바꾸기 미구현 (2장: handle_changed_at 없음)');
-      if (rpcOf(ctx.caps, 'change_handle')) skip('change_handle 입력 모양을 아직 안 맞춤');
+      const fn = rpcOf(ctx.caps, 'change_handle');
+      if (!fn) skip('change_my_handle이 DB에 없음');
+      // 앱이 handle을 직접 쓰면 막혀야 함 (42501)
+      const direct = await ctx.a.from('profiles').update({ handle: `e2e_a_${rand()}` }).eq('user_id', ctx.ids.A);
+      must(direct.error?.code === '42501', `handle 직접 update가 안 막힘: ${direct.error?.code ?? '성공'}`);
+      // 처음 바꾸기(자동 아이디 · 시드 아이디)는 30일에 안 세고, 다음 바꾸기부터 30일 제한 — 둘째에서 제한 시각이 생기면 셋째는 LIMIT
+      const change = async (h) => ok(await callRpc(ctx.a, fn, { p_handle: h }), '아이디 변경');
       const h1 = `e2e_a_${rand()}`;
-      ok(await ctx.a.from('profiles').update({ handle: h1 }).eq('user_id', ctx.ids.A), '아이디 변경');
-      const p = ok(await ctx.admin.from('profiles').select('handle, handle_changed_at').eq('user_id', ctx.ids.A).single(), '읽기');
-      must(p.handle === h1 && p.handle_changed_at, '변경 시각이 안 남음');
-      const second = await ctx.a.from('profiles').update({ handle: `e2e_a_${rand()}` }).eq('user_id', ctx.ids.A);
-      must(second.error, '30일 안에 또 바꿀 수 있음');
+      const r1 = await change(h1);
+      if (r1.status === 'LIMIT') skip(`A가 이미 아이디 변경 제한 중(${r1.next_change_at}까지) — 지난 실행 복원 실패면 node run.mjs --restore`);
+      must(r1.status === 'OK' && r1.handle === h1, `첫 변경이 OK가 아님: ${r1.status}`);
+      let last = r1;
+      if (!r1.next_change_at) {
+        last = await change(`e2e_a_${rand()}`);
+        must(last.status === 'OK' && last.next_change_at, `둘째 변경에 30일 제한 시각이 안 생김: ${last.status} (A의 onboarded_at이 비어 있으면 안 생김)`);
+      }
+      const p = ok(await ctx.admin.from('profiles').select('handle_changed_at, handle_next_change_at').eq('user_id', ctx.ids.A).single(), '읽기');
+      must(p.handle_changed_at, '변경 시각(handle_changed_at)이 안 남음');
+      const again = await change(`e2e_a_${rand()}`);
+      must(again.status === 'LIMIT' && again.next_change_at === last.next_change_at, `30일 안에 또 바꿀 수 있음: ${again.status}`);
     },
   },
   {
@@ -62,9 +97,10 @@ export const STEPS = [
     ch: '2',
     action: 'B 아이디 검색 → 닉네임 · 사진 · @아이디',
     async run(ctx) {
-      const rows = ok(await callRpc(ctx.a, ctx.fn.find_profile, { p_handle: ctx.handles.B }), '아이디 검색');
-      must(rows.length === 1 && rows[0].user_id === ctx.ids.B, 'B가 검색 결과 한 줄로 안 나옴');
-      must(rows[0].nickname && rows[0].handle, '닉네임 · 아이디가 없음');
+      const r = await searchHandle(ctx, ctx.a, ctx.handles.B);
+      must(r.status === 'FOUND' && r.profile?.user_id === ctx.ids.B, `B가 검색 결과로 안 나옴: ${r.status}`);
+      must(r.profile.nickname && r.profile.handle, '닉네임 · 아이디가 없음');
+      if (r.relation !== null) must(r.relation === 'NONE', `친구 관계가 비어 있어야 하는데 relation=${r.relation}`);
     },
   },
   {
@@ -73,8 +109,8 @@ export const STEPS = [
     ch: '2 · 15',
     action: '없는 아이디 → 찾을 수 없어요',
     async run(ctx) {
-      const rows = ok(await callRpc(ctx.a, ctx.fn.find_profile, { p_handle: `nobody_${rand()}` }), '아이디 검색');
-      must(rows.length === 0, '없는 아이디인데 결과가 나옴');
+      const r = await searchHandle(ctx, ctx.a, `nobody_${rand()}`);
+      must(r.status === 'NOT_FOUND' && !r.profile, `없는 아이디인데 결과가 나옴: ${r.status}`);
     },
   },
   {
@@ -508,8 +544,8 @@ export const STEPS = [
     deps: [30],
     async run(ctx) {
       must(ctx.handles.C, 'C의 아이디를 못 읽음');
-      const rows = ok(await callRpc(ctx.a, ctx.fn.find_profile, { p_handle: ctx.handles.C }), '아이디 검색');
-      must(rows.length === 0, '차단당했는데 C가 검색됨');
+      const r = await searchHandle(ctx, ctx.a, ctx.handles.C);
+      must(r.status === 'NOT_FOUND', `차단당했는데 C가 검색됨: ${r.status}`);
     },
   },
   {
@@ -538,8 +574,8 @@ export const STEPS = [
       ok(await callRpc(ctx.c, ctx.fn.unblock_user, { p_user_id: ctx.ids.A }), '차단 풀기');
       const f = ok(await ctx.admin.from('friends').select('friend_id').in('requester_id', [ctx.ids.A, ctx.ids.C]).in('addressee_id', [ctx.ids.A, ctx.ids.C]), '친구 행');
       must(f.length === 0, '차단을 풀었는데 옛 친구 관계가 되살아남');
-      const found = ok(await callRpc(ctx.a, ctx.fn.find_profile, { p_handle: ctx.handles.C }), '풀린 뒤 A의 검색');
-      must(found.length === 1, '차단을 풀었는데 A가 C를 다시 못 찾음');
+      const found = await searchHandle(ctx, ctx.a, ctx.handles.C);
+      must(found.status === 'FOUND', `차단을 풀었는데 A가 C를 다시 못 찾음: ${found.status}`);
     },
   },
   {
