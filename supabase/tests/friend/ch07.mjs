@@ -445,6 +445,14 @@ export default async function ch07({ q, as, su, svc, check, expectErr }) {
     return (await eventCount(U, 'WAKE_CONFIRMED')) === 2 && (await eventCount(V, 'WAKE_CONFIRMED')) === 2 ? true : { u: await eventCount(U, 'WAKE_CONFIRMED'), v: await eventCount(V, 'WAKE_CONFIRMED') };
   });
 
+  await check('7-21(알람 종류): 기상 알람이 아닌 알람(출발 알람)에 붙은 기상 확인은 그 알람 시각이 아니라 확인한 날로 셈 — 하루 기록 날짜가 확인한 날', async () => {
+    const U = await join_(84, '출발알람', 'UTC');
+    const dep = (await q(`insert into public.alarms (user_id, alarm_type, scheduled_at) values ($1, 'DEPARTURE', $2::timestamptz) returning alarm_id`, [U, '2026-11-10T23:50:00Z']))[0].alarm_id;
+    await ev(dep, U, 'WAKE_CONFIRMED', '2026-11-11T00:10:00Z', { src: 'BUTTON' });
+    const rec = await q(`select record_date::text as d from public.daily_records where user_id = $1`, [U]);
+    return rec.length === 1 && rec[0].d === '2026-11-11' ? true : rec;
+  });
+
   await check('7-21 · 7-39(하루 기록): 기상 확인이 저장되면 그날 daily_records.wake_confirmed_at이 같이 기록됨 — 이미 있던 값은 안 덮고, 버려진 중복은 기록을 안 바꿈', async () => {
     const A = await join_(50, '에이'), B = await join_(51, '이미있음');
     const a = await wakeAlarm(A, at('07:00')), b = await wakeAlarm(B, at('07:00'));
