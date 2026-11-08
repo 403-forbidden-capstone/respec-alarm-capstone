@@ -1,6 +1,6 @@
 // wake-check — 기상 미확인(MISSED) 기록 배치 (상세설계서 5장 5.7 · 7장 7.9.2). 서버 전용
 //   pg_cron이 5분마다 pg_net으로 부름 (private.invoke_edge_function — 주소 · 키는 Vault, supabase/README.md "배치")
-//   처리: find_missed_wake_alarms(DB 함수)가 "알람 시각 + 다시 울림 총 소요 + 미루기 누적 + 30분"이 지났는데 기상 확인이 없는 알람을 찾음
+//   처리: find_missed_wake_alarms(DB 함수)가 "마지막으로 울리기 시작한 때(알람 시각 또는 마지막 미루기가 끝나 다시 울린 때) + 30분"이 지났는데 기상 확인이 없는 알람을 찾음
 //        → alarm_events에 MISSED로 기록. client_event_id = event_key라서 겹쳐 돌거나 다시 돌아도 한 번만 들어감
 //   푸시: 그룹에 알리는 미확인 푸시는 D19(기상 공유 동의 조건)가 정해질 때까지 안 보냄 — 기록만 남김 (자리는 _shared/wake.ts pushMissedToGroup)
 //   같은 배치에서 푸시 영수증도 확인함 (_shared/push-receipts.ts, 친구 11장): 15분 지난 접수 번호의 영수증을 받아 앱이 지워진 기기의 토큰을 지우고 push_tickets를 정리.
