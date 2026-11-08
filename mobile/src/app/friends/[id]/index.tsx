@@ -1,9 +1,13 @@
 import { router, useLocalSearchParams } from 'expo-router';
 import { Pressable, StyleSheet, View } from 'react-native';
 
-import { Card, Chip, LoadError, Loading, Screen, SectionHeader, Text, TopBar, TopBarButton } from '@/components/ui';
-import { getFriendGrant } from '@/features/social/api';
+import { Button, Card, Chip, confirm, LoadError, Loading, Screen, SectionHeader, Text, toast, TopBar, TopBarButton } from '@/components/ui';
+import { getFriendGrant, removeFriend } from '@/features/social/api';
 import { PERMISSIONS, type GrantRow } from '@/features/social/types';
+import { PersonMenuSheet } from '@/features/social/components/PersonMenuSheet';
+import { usePersonMenu } from '@/features/social/hooks/usePersonMenu';
+import { UserError } from '@/lib/errors';
+import { useAction } from '@/lib/useAction';
 import { useLoad } from '@/lib/useLoad';
 import { colors } from '@/theme';
 import { backOrHome } from '@/lib/nav';
@@ -16,6 +20,33 @@ const relationOf = (r: GrantRow) => `${r.sourceType === 'FRIEND' ? 'friend' : 'g
 export default function FriendPermissionScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { data, error, reload } = useLoad(() => getFriendGrant(id));
+  const { busy, run } = useAction();
+  // [···] 메뉴의 신고 · 차단 — 차단하면 친구가 끊기므로 이전 화면(친구 탭)으로 돌아감 (4-30)
+  const menu = usePersonMenu(() => backOrHome());
+
+  // 친구 끊기 — 확인 한 번. 행이 지워지고 양쪽 친구 출처 권한도 사라짐(같은 그룹의 권한 · 기상은 그대로). 상대에게 알림 없음 (3-14 · 3-15)
+  const disconnect = (name: string) =>
+    run(async () => {
+      const ok = await confirm({
+        title: `${name}님과 친구를 끊을까요?`,
+        message: '서로 친구로 준 권한이 모두 사라져요. 같은 그룹이면 그룹 안에서는 그대로 보여요. 상대에게 알림은 가지 않아요.',
+        okLabel: '친구 끊기',
+        destructive: true,
+      });
+      if (!ok) return;
+      // 끊었거나 이미 끊긴 경우(GONE, UserError)만 목록으로 — 통신 오류면 이 화면에 남아 다시 할 수 있게
+      let leave = false;
+      try {
+        await removeFriend(id);
+        toast('친구를 끊었어요');
+        leave = true;
+      } catch (e) {
+        leave = e instanceof UserError;
+        throw e;
+      } finally {
+        if (leave) backOrHome();
+      }
+    }, '친구를 끊지 못했어요. 다시 해 주세요');
 
   if (data === undefined) {
     return (
@@ -39,7 +70,8 @@ export default function FriendPermissionScreen() {
   const { person: p, final, groupCount } = data;
   return (
     <Screen>
-      <TopBar onBack={backOrHome} screenId="F02" />
+      <TopBar onBack={backOrHome} screenId="F02" right={<TopBarButton label="···" accessibilityLabel={`${p.name}님 메뉴`} onPress={() => menu.open(p)} />} />
+      <PersonMenuSheet {...menu.sheetProps} />
       <Text variant="title" style={styles.title}>
         {p.name}님의 권한
       </Text>
@@ -97,6 +129,18 @@ export default function FriendPermissionScreen() {
             label="설정"
             onPress={() => router.push({ pathname: '/permissions', params: { relation: `friend:${p.id}` } })}
           />
+        </View>
+      </Card>
+
+      <Card>
+        <View style={styles.between}>
+          <View style={styles.grow}>
+            <Text variant="bodyStrong">친구 끊기</Text>
+            <Text variant="small" tone="sub">
+              끊어도 상대에게 알림은 가지 않아요.
+            </Text>
+          </View>
+          <Button small variant="danger" label="끊기" loading={busy} onPress={() => disconnect(p.name)} />
         </View>
       </Card>
     </Screen>

@@ -12,10 +12,22 @@ type Props = {
   onPress?: () => void; // 있으면 줄 전체를 누름
   rightIsButtons?: boolean; // right에 누르는 버튼이 있으면 — 줄 누름은 아이콘 · 글자까지만, 버튼은 따로 눌림
   first?: boolean; // 묶음의 첫 줄이면 위 구분선을 뺌
+  actions?: ReactNode; // 줄 아래에 오른쪽 맞춤으로 붙는 작은 버튼들 — 줄 오른쪽에 두면 이름 칸이 좁아질 때(그룹 멤버 줄 360폭)
 };
 
 // 사람 · 관계 한 줄 (.person) — 친구 목록 · 그룹 멤버 · 받은 권한 · 관계 고르기
-export function PersonRow({ icon, title, sub, right, onPress, rightIsButtons, first }: Props) {
+export function PersonRow({ actions, first, ...row }: Props) {
+  if (!actions) return <Row first={first} {...row} />;
+  // 구분선은 글 줄과 버튼 줄 둘을 묶은 바깥에 한 번만
+  return (
+    <View style={!first && styles.divider}>
+      <Row first {...row} />
+      <View style={styles.actions}>{actions}</View>
+    </View>
+  );
+}
+
+function Row({ icon, title, sub, right, onPress, rightIsButtons, first }: Omit<Props, 'actions'>) {
   const body = (
     <>
       {icon}
@@ -74,4 +86,5 @@ const styles = StyleSheet.create({
   divider: { borderTopWidth: 1, borderTopColor: colors.line },
   pressed: { opacity: 0.6 },
   text: { flex: 1, minWidth: 0 },
+  actions: { flexDirection: 'row', justifyContent: 'flex-end', alignItems: 'center', gap: 4, marginTop: -6, paddingBottom: 6 },
 });
