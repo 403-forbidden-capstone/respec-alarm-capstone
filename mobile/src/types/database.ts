@@ -670,6 +670,31 @@ isOneToOne: false
       referencedColumns: ["user_id"]
     }
                   ]
+                },"wake_hides": {
+                  Row: {
+                    "created_at": string,"hidden_from_id": string,"owner_id": string
+                  }
+                  Insert: {
+                    "created_at"?: string,"hidden_from_id": string,"owner_id": string
+                  }
+                  Update: {
+                    "created_at"?: string,"hidden_from_id"?: string,"owner_id"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "wake_hides_hidden_from_id_fkey"
+      columns: ["hidden_from_id"]
+isOneToOne: false
+      referencedRelation: "profiles"
+      referencedColumns: ["user_id"]
+    },{
+      foreignKeyName: "wake_hides_owner_id_fkey"
+      columns: ["owner_id"]
+isOneToOne: false
+      referencedRelation: "profiles"
+      referencedColumns: ["user_id"]
+    }
+                  ]
                 }
           }
           Views: {
@@ -718,12 +743,17 @@ isOneToOne: false
                            },
 "find_missed_wake_alarms":
 { Args: { "p_lookback_hours"?: number,"p_now"?: string }; Returns: {
-              "alarm_id": string,"appointment_at": string,"appointment_id": string,"event_key": string,"group_id": string,"intensity": Database["public"]['Enums']["alarm_intensity"],"missed_at": string,"participant_id": string,"rering_minutes": number,"scheduled_at": string,"snooze_minutes": number,"user_id": string
+              "alarm_id": string,"appointment_at": string,"appointment_id": string,"event_key": string,"group_id": string,"intensity": Database["public"]['Enums']["alarm_intensity"],"missed_at": string,"participant_id": string,"scheduled_at": string,"snooze_minutes": number,"user_id": string
             }[]
                            },
 "find_profile_by_handle":
 { Args: { "p_handle": string }; Returns: {
               "handle": string,"nickname": string,"profile_image_url": string,"user_id": string
+            }[]
+                           },
+"get_group_wake":
+{ Args: { "p_date"?: string,"p_group_id": string }; Returns: {
+              "is_me": boolean,"nickname": string,"profile_image_url": string,"user_id": string,"wake_alarm_at": string,"wake_confirmed_at": string,"wake_status": string
             }[]
                            },
 "get_group_wake_status":
@@ -805,6 +835,9 @@ isOneToOne: false
                            },
 "send_friend_request":
 { Args: { "p_target_id": string }; Returns: Json
+                           },
+"set_wake_hidden":
+{ Args: { "p_hidden": boolean,"p_user_id": string }; Returns: Json
                            },
 "submit_report":
 { Args: { "p_note"?: string,"p_reason": string,"p_target_id": string,"p_target_type": string }; Returns: Json

@@ -54,14 +54,16 @@ select vault.create_secret('<service_role 키>', 'service_role_key');
 |---|---|---|
 | `can_send_push(sender, target, kind)` | `notify` | 푸시를 보내도 되는지(한 사람에게). `ALARM_CHANGED`(G04)는 보내는 사람이 받는 사람 알람의 설정 권한(조회도 함께 가진 같은 권한 행, 친구 6장)을 가졌을 때만 true, `FRIEND_REQUEST`는 보내는 사람이 받는 사람에게 방금(1시간 안) 보낸 대기 요청이 있을 때, `FRIEND_ACCEPTED`는 받는 사람이 보낸 요청을 보내는 사람이 방금(1시간 안) 수락했을 때(친구 11장), `WAKE_PING`(G03 깨우기)은 8장 전까지 false. 보내는 사람과 받는 사람이 차단 쌍이면(어느 쪽이 걸었든, 친구 4장) 종류와 상관없이 false |
 | `plan_group_push(sender, group, kind, appointment?)` | `notify` | 그룹 알림(`GROUP_MEMBER_JOINED` · `GROUP_APPT_CHANGED`)의 받는 사람을 서버가 고름(친구 11장). 보낸 사람이 그 그룹에 참여 중이어야 하고 (새 멤버 알림은 들어온 지 10분 안, 약속 변경은 그 그룹의 아직 안 지난 약속을 만든 사람이 보낼 때만) 받는 사람 = 새 멤버 알림은 참여 중 멤버 전체, 약속 변경은 그 약속에 참여 조건이 있는 참여 중 멤버 − 보낸 사람 − 알림 끈 멤버(`notifications_off`) − 보낸 사람과 차단 쌍. `{status, group_name, appointment_title, recipients}` — 안 되는 모든 경우는 같은 `FORBIDDEN` |
-| `find_missed_wake_alarms(p_now, p_lookback_hours)` | `wake-check` | 기상 미확인(MISSED)으로 기록할 알람 목록 (7장 7.9.2: 마지막으로 울리기 시작한 때 + 다시 울림 총 소요 + 30분. 총 소요는 첫 울림 시작부터 마지막 울림 끝까지로 약 11 · 보통 19 · 강 21분 — 알람 코어와 같은 끝난 뒤 간격 기준. 폰은 미루면 다시 울림 묶음을 처음부터 새로 시작하므로, 마지막 울림 시작 = 마지막 미루기 시각 + 미루기 시간(미루기가 없으면 알람 시각). 돌려주는 `snooze_minutes`는 미루기 합이라 참고용이고 `missed_at`은 이 합으로 구하지 않음). 기상 확인은 같은 사람의 `WAKE_CONFIRMED`(어느 기상 알람이든) 또는 `daily_records.wake_confirmed_at`이면 인정 — 그룹 현황판이 '기상'으로 세는 기준과 같음. 기록은 알람 시각 6시간 전 ~ 18시간 뒤만 봄. 돌려주는 `event_key`를 `alarm_events.client_event_id`로 넣고 `on conflict do nothing`하면 같은 알람이 두 번 기록되지 않음 |
+| `find_missed_wake_alarms(p_now, p_lookback_hours)` | `wake-check` | 기상 미확인(MISSED)으로 기록할 알람 목록 (미확인 시각 = 마지막으로 울리기 시작한 때 + 30분 — 확인 알림에 답이 없으면 다시 울리지 않으므로 다시 울림 소요를 안 더함, 친구 7장 D2). 폰은 미루면 다시 울림 묶음을 처음부터 새로 시작하므로, 마지막 울림 시작 = 마지막 미루기 시각 + 미루기 시간(미루기가 없으면 알람 시각). 돌려주는 `snooze_minutes`는 미루기 합이라 참고용이고 `missed_at`은 이 합으로 구하지 않음. 기상 확인은 같은 사람의 `WAKE_CONFIRMED`(어느 기상 알람이든) 또는 `daily_records.wake_confirmed_at`이면 인정. 기록은 알람 시각 6시간 전 ~ 18시간 뒤만 봄. 돌려주는 `event_key`를 `alarm_events.client_event_id`로 넣고 `on conflict do nothing`하면 같은 알람이 두 번 기록되지 않음 |
 | `roll_insert_occurrence(p_appointment, p_participant, p_alarms, p_items)` | `alarm-roll` (다음 PR) | 반복 회차 하나를 약속 · 참여 조건 · 알람 · 준비물(`todos` ITEM)까지 **한 트랜잭션**으로 씀. 같은 (만든 사람, 묶음, 날짜)가 이미 있으면 아무것도 안 쓰고 `null`(같은 요청 두 번 = 같은 결과), 새로 만들면 `appointment_id`. 넣는 칸은 `alarm-commit`(`_shared/commit.ts` persistAppointment)과 같고 (알람의 `vibration`은 `20261030200000_alarm_vibration.sql`부터 — 직접 고른 진동을 다음 회차가 이어받음) 약속에 `memo` · `dest_radius_m`만 더 이어받음. 입력은 jsonb(`series_id` · `occurrence_on` 필수) |
 | `roll_due_series(p_now, p_limit)` | `alarm-roll` 배치 (다음 PR) | 회차를 넘길 후보 묶음 `(user_id, series_id, kind, template_id)`, 다음 회차가 급한 순 (정말 만들 날짜가 있는지는 `alarm-roll`이 다시 봄). `APPOINTMENT`: 묶음의 **기준 회차**(예외 아닌 회차 중 날짜가 가장 늦은 것, 없으면 이번만 고친 회차 중, 이번만 지운 회차는 기준이 아님)에 읽을 수 있는 `recurrence_rule`(두 모양)이 있고 개인 약속이며 **다음 회차** 시각이 `p_now + 14일` 앞(14일치가 차 있으면 안 줌) · 재시도 대기 아님(`roll_attempts.next_try_at`이 안 온 줄 없음) · 미뤄 둔 날짜의 재시도 때가 지났으면 창 밖이어도 포함. `STANDALONE`: 일정 없는 반복 알람(같은 기준). `ROUTINE`: 켜 둔 루틴(읽을 수 있는 요일)의 켜진 단계 알람 시각이 지난 것. 못 읽는 규칙 · 요일(예전 MONTHLY · INTERVAL 등)은 빼서 매번 앞자리를 차지하지 않게 |
 
 앱(authenticated)이 부르는 DB 함수 추가분:
 
 - `get_shared_alarm_appointments(p_owner_id)` (G04) — 조회 권한(친구 ∪ 그룹)을 받은 사람 알람의 약속 제목 · 장소 · 시각. 본인 알람과 약속 없는 알람(일정 없는 알람 · 루틴)은 안 나옴
-- `get_group_wake_status`는 그 그룹에 그날 약속이 있을 때만 행을 줌 (D57)
+- `get_group_wake(p_group_id, p_date?)` (G01 · G02 · G03) — 그 그룹에 그날 약속이 있을 때만(D57) 나 + 기상 공유에 동의한 참여 중 멤버의 줄을 줌. 칸은 `user_id · nickname · profile_image_url · is_me · wake_alarm_at · wake_confirmed_at · wake_status`뿐 (미루기 횟수 · 알람 끈 시각 · 울린 시각 · 미확인 시각은 안 줌). `wake_status`: `SCHEDULED` · `RINGING` · `DISMISSED` · `MISSED` · `CONFIRMED` · `NO_ALARM`(앱이 아직 · 울렸어요 · 일어남 · 알람 없음으로 묶음). 자세한 규칙은 아래 "친구 7장"
+- `get_group_wake_status(p_group_id, p_date?)` — 위 함수의 옛 11칸 모양 호환판(앱이 옮길 때까지, 15장에서 지움). 내 줄만 울린 시각 · 미루기 · 해제 · 미확인 칸이 차고 다른 사람 줄은 비어 있음(미루기 0)
+- `set_wake_hidden(p_user_id, p_hidden)` (G02 멤버 메뉴) → `OK` · `NOT_FOUND` — 내 기상을 그 사람에게만 숨김/보이기. 같은 그룹이거나 친구인 사람만 숨길 수 있고(보이기는 아무에게나), 숨긴 목록은 `wake_hides`에서 내 줄만 읽힘
 - 친구 2장 아이디 · 찾기 (`20261108062757_friend_handle_search.sql`, 이슈 #366) — 새 함수는 jsonb `status`로 돌려주고 앱이 문구로 바꿈
   - `change_my_handle(p_handle)` — 아이디 바꾸기(`OK` · `SAME` · `INVALID` · `RESERVED` · `TAKEN` · `LIMIT`). `respec_`로 시작하는 아이디와 예약어 10개(admin · respec · support · help · official · system · root · operator · manager · null, 정확히 같을 때만)는 `RESERVED`. 30일 1번, 자동 아이디 첫 변경 · 온보딩 중 변경은 안 셈(`LIMIT` + `next_change_at`). 바꾸기 시도도 검색과 같은 1분 10회 + 하루 100회에 셈(`LIMIT` + `retry_after_seconds`). 앱이 `profiles.handle`을 직접 update하거나 채워진 `onboarded_at`을 바꾸면 42501(`onboarded_at`은 비어 있을 때 한 번 채우기만)
   - `search_by_handle(p_query)` — 아이디 정확 일치(`FOUND` · `SELF` · `NOT_FOUND` · `LIMIT`), 1분 10회 + 하루 100회(바꾸기 시도와 합쳐서). 차단 · 탈퇴 · 온보딩 전은 없는 아이디와 같은 응답. `find_profile_by_handle`은 이걸 거치는 옛 모양(앱이 옮기면 지움)
@@ -91,6 +93,16 @@ select vault.create_secret('<service_role 키>', 'service_role_key');
   - 권한을 준 뒤 참여 중이 된 사람(코드 참여 · 초대 수락)에게는 이미 그 그룹에 조회를 준 멤버들의 조회 행만 자동으로 생김(설정은 준 사람이 다시 저장해야, 차단 쌍은 건너뜀)
   - `private.granted_owner_ids_for`는 이제 `VIEW_ALARM` · `EDIT_ALARM`만 — 설정은 조회를 함께 가진 같은 행만 인정(알림 판정 `can_send_push`도 이 집합을 그대로 써서 설정과 조회를 둘 다 봄). 알람 조회는 일정에 붙은 알람만(`alarms_select_shared`: 개인 일정 포함, 루틴 · 일정 없는 알람 제외) — 수정 정책은 조회 정책도 같이 통과해야 해서 따로 안 바꿈
   - 기상 보기는 권한 행 없이 그 그룹의 기상 공유 동의(`group_members.wake_share_opt_in`)로만: `get_group_wake_status`가 그룹마다 따로 판정(참여 중 멤버 · 차단 쌍 제외). `sharing_permissions.can_view_wake` 칸은 판정에 안 쓰임(칸 정리는 15장). 사람별 기상 숨기기는 7장
+- 친구 7장 그룹 기상 상태 (`20261108203600_friend_wake_status.sql`, 이슈 #400)
+  - 보임 판정 `private.can_see_wake(보는 사람, 주인, 그룹)` 한 곳 — 둘 다 그 그룹 참여 중 · 주인이 그 그룹에서 기상 공유에 동의 · 차단 쌍 아님 · 주인이 보는 사람에게 숨기지 않음. 8장 깨우기도 이 함수를 씀. 내 줄은 늘 나옴
+  - 하루는 사람마다 프로필 시간대(`profiles.timezone`)로 셈. 그날 첫 켜진 기상 알람이 기준 알람(개인 일정 알람도 포함). 새벽 약속의 전날 밤 알람은 알람이 울린 날로 잡혀 그날이 '약속 있는 날'(그 그룹 약속이 그날에 있거나, 그 그룹 약속 참여자의 기상 알람이 그날에 울릴 때)
+  - 단계 우선순위 `CONFIRMED` > `MISSED` > `DISMISSED` > `RINGING` > `SCHEDULED`, 기상 알람이 없으면 `NO_ALARM`. 기록은 그 알람 시각 6시간 전 ~ 18시간 뒤만 봄(`find_missed_wake_alarms`와 같은 구간)
+  - 기상 확인: 직접 입력(`MANUAL`) · 대화 정정(`VOICE`) 출처는 그룹에 안 띄움, 자동 판정(`USAGE`)은 다른 사람에게 20분 뒤부터(내 줄은 바로, 20분을 기다리는 동안은 MISSED로 보지 않음). 저녁에 직접 입력한 `daily_records`는 안 읽음
+  - 폰이 꺼졌거나 기록이 못 올라와도 (마지막 울림 시작 + 30분)이 지나면 확인이 없는 한 `MISSED`(서버 배치가 기록한 MISSED도 같음)
+  - `wake_hides(owner_id, hidden_from_id)` 표 + `set_wake_hidden` — 앱은 쓰기 불가, 내 줄만 읽기. 숨김당한 쪽은 숨김 · 동의 안 함 · 차단이 같은 모습이라 알 수 없음
+  - `alarm_events`의 `WAKE_CONFIRMED`는 사람마다 하루(그 사람 시간대) 첫 한 건만 저장 — 둘째부터는 오류 없이 무시되고 먼저 것(출처도)이 남음(사람 · 날짜별 잠금). 저장될 때 그날 `daily_records.wake_confirmed_at`도 같이 기록(이미 있으면 덮지 않음, `data_source = ALARM`)
+  - 새로 고침 신호: 직접 입력 · 대화 정정 · 자동 판정 출처의 기록은 신호를 안 냄. 날짜 = 그 기상 알람이 울린 날(그 사람 시간대)
+  - 미확인 시각 식에서 다시 울림 몫을 뺌(`find_missed_wake_alarms`의 `rering_minutes` 칸 없어짐)
 - 친구 11장 푸시 바탕 (`20261108195000_friend_push.sql`, 이슈 #398)
   - `push_tickets`(서버 전용 표): Expo가 접수한 알림마다 한 줄(접수 번호 · 받는 토큰 · 종류). 15분 뒤 `wake-check`가 영수증을 확인해 지움. 탈퇴하면 같이 지워짐
   - `register_push_token`: Expo 토큰 모양(`ExponentPushToken[...]` · 옛 `ExpoPushToken[...]`, 200자 이하)과 플랫폼(`android` · `ios`, 웹은 푸시를 안 받음)을 검사(`22023`). 같은 폰의 토큰은 마지막 로그인 계정이 가짐(옛 그대로). 한 사람당 최대 10대 — 넘으면 가장 오래 전에 등록한 것부터 지움. 앱 역할의 `push_tokens` 직접 insert · update는 회수됐고(읽기 · 지우기만) 로그아웃 때는 앱이 자기 행을 지움(본인 행만 RLS). 안드로이드는 알림 채널 5개(`friend_v1` · `alarm_change_v1` · `request_v1` · `group_v1` · `missed_v1`)를 먼저 만든 뒤에 토큰을 등록해야 함 — 서버가 채널 이름을 싣는데 기기에 채널이 없으면 알림이 안 보임
@@ -120,7 +132,7 @@ select vault.create_secret('<service_role 키>', 'service_role_key');
 
 ## 그룹 기상 신호 (Realtime)
 
-`alarm_events`는 본인만 읽을 수 있어서 남의 기상 기록은 Realtime으로 직접 못 받음 → 기상 기록이 들어오면 DB가 그룹 채널에 "새로 고침" 신호만 보내고, 받은 앱이 `get_group_wake_status`를 다시 부름 (권한은 그 함수가 봄).
+`alarm_events`는 본인만 읽을 수 있어서 남의 기상 기록은 Realtime으로 직접 못 받음 → 기상 기록이 들어오면 DB가 그룹 채널에 "새로 고침" 신호만 보내고, 받은 앱이 `get_group_wake`(옛 앱은 `get_group_wake_status`)를 다시 부름 (권한은 그 함수가 봄).
 
 - 채널 `group:<group_id>:wake` (비공개 채널), 이벤트 `refresh`, 내용 `{"date": "2026-10-15"}` — 누구의 기록인지는 안 담음. 실제 Realtime은 payload에 `id`(uuid)를 덧붙이므로 앱은 payload 전체를 비교하지 말고 `date`만 읽음
 - 보내는 때: 기상 알람의 울림 · 미루기 · 해제 · 미확인, 기상 확인. 기록한 사람이 참여 중(JOINED)이고 **그 그룹에서 기상 공유에 동의(`wake_share_opt_in`)했고** 그날 약속이 있는 그룹에만 감 (동의 조건은 D19 결정 전 보수 기본값 — 정해지면 트리거 함수의 한 줄만 고침. 친구 권한으로만 보는 사람은 실시간 새로 고침을 못 받고 직접 조회하면 보임)
