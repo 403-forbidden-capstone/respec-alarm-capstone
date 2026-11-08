@@ -7,16 +7,18 @@
 //        ③ alarmId는 받는 사람의 알람인지 ④ push_tokens 조회 ⑤ Expo Push로 보냄(실패하면 한 번 더) ⑥ 접수 번호를 push_tickets에 기록(영수증은 15분 뒤 배치가 확인)
 //        ⑦ 접수 단계에서 만료로 돌아온 토큰은 바로 지움
 //   처리(그룹): plan_group_push(DB 함수)가 보낸 사람이 그 그룹에 참여 중인지 보고 받는 사람 = 참여 중 멤버 − 보낸 사람 − 알림 끈 멤버 − 차단 쌍을 돌려줌 → 받는 사람마다 토큰 조회 · 발송
-//   응답: { sent, failed, reason? } — 토큰이 없거나 푸시 설정(FCM 키 · Expo 액세스 토큰)이 아직 없으면 오류가 아니라 { sent: 0, reason }
+//   깨우기(WAKE_PING)는 ②와 ③ 사이에 판정이 더 있음: plan_wake_ping(판정만) → 토큰 확인 → plan_wake_ping(횟수 세기, 같은 쌍 잠금 아래 다시 판정) → 발송.
+//        못 보내는 이유(아직 안 울림 · 이미 일어남 · 5분 · 하루 3번 · 받기 꺼짐)는 오류가 아니라 응답의 ping.status로 — 보낸 쪽 G03이 글자를 바꿈. 토큰이 없으면 횟수를 안 세고 ping.status = NO_TOKENS
+//   응답: { sent, failed, reason?, ping? } — 토큰이 없거나 푸시 설정(FCM 키 · Expo 액세스 토큰)이 아직 없으면 오류가 아니라 { sent: 0, reason }
 import { dbFail, must } from './db.ts';
 import { HttpError } from './errors.ts';
-import { CHANNEL_IDS, CLIENT_KINDS, composeCopy, type ClientKind, type GroupKind, isGroupKind, PATHS } from './push-copy.ts';
+import { CHANNEL_IDS, CLIENT_KINDS, composeCopy, type ClientKind, type GroupKind, isGroupKind, PATHS, type PushKind as AnyPushKind } from './push-copy.ts';
 import { type FetchLike, type OutgoingMessage, type PushResult, sendExpoMessages, type SendResult } from './push.ts';
 import type { Reader } from './read.ts';
 import type { Db } from './supabase.ts';
 
 // 종류별 권한은 DB 함수 can_send_push(한 사람)와 plan_group_push(그룹)가 정함 (supabase/README.md). 종류가 늘어도 여기는 이름만 더함
-//   WAKE_PING          — G03 깨우기. 8장이 조건(기상 공유 동의 · 간격)을 정할 때까지 DB 함수가 늘 거절 → 403
+//   WAKE_PING          — G03 깨우기. 기상이 보이는 사람에게만(그룹 · 동의 · 오늘 약속 · 숨김 / 차단 아님), 아니면 403. 간격 · 횟수 · 이미 일어남은 plan_wake_ping이 상태로 돌려줌
 //   ALARM_CHANGED      — G04. 부른 사람이 받는 사람의 알람에 설정 권한(조회도 함께)이 있을 때만 (D9: 변경 기록은 저장하지 않고 푸시만)
 //   FRIEND_REQUEST     — 받는 사람에게 보낸 대기 요청이 있을 때 / FRIEND_ACCEPTED — 방금 수락한 사람이 요청한 사람에게
 //   GROUP_MEMBER_JOINED · GROUP_APPT_CHANGED — 그룹 단위
@@ -25,7 +27,7 @@ export type PushKind = ClientKind;
 
 const DENIED: Record<ClientKind, string> = {
   ALARM_CHANGED: '이 사람의 알람을 바꿀 권한이 없어서 알림을 보낼 수 없어요',
-  WAKE_PING: '깨우기 알림은 아직 보낼 수 없어요',
+  WAKE_PING: '이 사람에게는 깨우기 알림을 보낼 수 없어요',
   FRIEND_REQUEST: '이 사람에게는 친구 요청 알림을 보낼 수 없어요',
   FRIEND_ACCEPTED: '이 사람에게는 수락 알림을 보낼 수 없어요',
   GROUP_MEMBER_JOINED: '이 그룹에는 알림을 보낼 수 없어요',
@@ -42,7 +44,12 @@ export type NotifyRequest = {
   newAt?: string;
 };
 
-export type NotifyResult = { sent: number; failed: number; reason?: 'NO_TOKENS' | NonNullable<PushResult['reason']> };
+// 깨우기 판정 결과 (DB 함수 plan_wake_ping의 jsonb + 토큰이 없을 때 NO_TOKENS). OK일 때만 푸시가 나갔음
+//   count · limit = 오늘 몇 번째/하루 몇 번, next_at = 다음에 보낼 수 있는 시각, resets_at = 하루 한도가 풀리는 시각(받는 사람 시간대 0시)
+export type WakePing = { status: 'OK' | 'NOT_RINGING' | 'ALREADY_UP' | 'WAIT' | 'DAILY_LIMIT' | 'OFF' | 'NO_TOKENS'; count?: number; limit?: number; next_at?: string; resets_at?: string };
+const PING_STATUSES = new Set(['OK', 'NOT_RINGING', 'ALREADY_UP', 'WAIT', 'DAILY_LIMIT', 'OFF']);
+
+export type NotifyResult = { sent: number; failed: number; reason?: 'NO_TOKENS' | NonNullable<PushResult['reason']>; ping?: WakePing };
 
 // 요청을 읽고 문제가 있으면 한 번에 던짐 (root.finish() 포함)
 export function readNotifyRequest(root: Reader): NotifyRequest {
@@ -85,7 +92,20 @@ export async function runNotify(service: Db, senderId: string, req: NotifyReques
   return isGroupKind(req.kind) ? await notifyGroup(service, senderId, req as NotifyRequest & { kind: GroupKind }, options) : await notifyOne(service, senderId, req, options);
 }
 
-const noTokens = (): NotifyResult => ({ sent: 0, failed: 0, reason: 'NO_TOKENS' });
+const noTokens = (withPing = false): NotifyResult => ({ sent: 0, failed: 0, reason: 'NO_TOKENS', ...(withPing ? { ping: { status: 'NO_TOKENS' as const } } : {}) });
+
+// 깨우기 판정 (DB 함수 한 군데). 기상이 안 보이는 사람이면 403(이유 구분 없음), 모르는 응답이면 500
+async function planPing(service: Db, senderId: string, target: string, reserve: boolean): Promise<WakePing> {
+  const r = await service.rpc('plan_wake_ping', { p_sender: senderId, p_target: target, p_reserve: reserve });
+  if (r.error) dbFail('plan_wake_ping', r.error);
+  const data = r.data as (Record<string, unknown> & { status?: unknown }) | null;
+  if (data?.status === 'FORBIDDEN') throw new HttpError('FORBIDDEN', DENIED.WAKE_PING);
+  if (typeof data?.status !== 'string' || !PING_STATUSES.has(data.status)) {
+    console.error('[notify] plan_wake_ping 응답이 약속과 다름', JSON.stringify(data));
+    throw new HttpError('INTERNAL', '데이터를 처리하지 못했어요. 잠시 후 다시 시도해 주세요');
+  }
+  return data as WakePing;
+}
 
 async function notifyOne(service: Db, senderId: string, req: NotifyRequest, options: NotifyOptions): Promise<NotifyResult> {
   const target = req.targetUserId as string;
@@ -94,9 +114,16 @@ async function notifyOne(service: Db, senderId: string, req: NotifyRequest, opti
   if (allowed.error) dbFail('can_send_push', allowed.error);
   if (allowed.data !== true) throw new HttpError('FORBIDDEN', DENIED[req.kind]);
 
+  // 깨우기: 보낼 수 있는 때인지 먼저 (토큰 조회 전에 — 못 보내는 이유를 보낸 쪽에 알려 주려고)
+  const wake = req.kind === 'WAKE_PING';
+  if (wake) {
+    const verdict = await planPing(service, senderId, target, false);
+    if (verdict.status !== 'OK') return { sent: 0, failed: 0, ping: verdict };
+  }
+
   const profiles = must<Profile[]>('profiles', await service.from('profiles').select('user_id, nickname, timezone').in('user_id', [target, senderId]));
   const targetProfile = profiles.find((p) => p.user_id === target);
-  if (!targetProfile) return noTokens(); // 판정과 조회 사이에 탈퇴한 경우뿐
+  if (!targetProfile) return noTokens(wake); // 판정과 조회 사이에 탈퇴한 경우뿐
 
   // 알람 id를 같이 받은 경우(알람 바뀜만), 받는 사람의 알람이 맞는지 (남의 알람 id로 알림 내용을 꾸미지 못하게)
   const alarmId = req.kind === 'ALARM_CHANGED' ? req.alarmId : undefined;
@@ -109,7 +136,14 @@ async function notifyOne(service: Db, senderId: string, req: NotifyRequest, opti
   }
 
   const rows = must<{ token: string }[]>('push_tokens', await service.from('push_tokens').select('token').eq('user_id', target));
-  if (!rows.length) return noTokens();
+  if (!rows.length) return noTokens(wake); // 토큰이 없으면 횟수를 안 셈 (8-14)
+
+  // 보내기 직전에 횟수를 셈 — 같은 쌍 잠금 아래에서 다시 판정하므로 동시에 두 번 눌러도 한 번만 나감 (8-차)
+  let reserved: WakePing | undefined;
+  if (wake) {
+    reserved = await planPing(service, senderId, target, true);
+    if (reserved.status !== 'OK') return { sent: 0, failed: 0, ping: reserved };
+  }
 
   const copy = composeCopy(req.kind, {
     senderName: profiles.find((p) => p.user_id === senderId)?.nickname,
@@ -119,7 +153,8 @@ async function notifyOne(service: Db, senderId: string, req: NotifyRequest, opti
   });
   const data = { kind: req.kind, recipientUserId: target, path: PATHS[req.kind], ...(alarmId ? { alarmId } : {}) };
   const messages: OutgoingMessage[] = rows.map((r) => ({ to: r.token, ...copy, channelId: CHANNEL_IDS[req.kind], data }));
-  return await deliver(service, req.kind, messages, new Map(rows.map((r) => [r.token, target])), options);
+  const delivered = await deliver(service, req.kind, messages, new Map(rows.map((r) => [r.token, target])), options);
+  return reserved ? { ...delivered, ping: reserved } : delivered;
 }
 
 async function notifyGroup(service: Db, senderId: string, req: NotifyRequest & { kind: GroupKind }, options: NotifyOptions): Promise<NotifyResult> {
@@ -148,7 +183,7 @@ async function notifyGroup(service: Db, senderId: string, req: NotifyRequest & {
 }
 
 // 보내고, 접수 번호를 영수증 표에 남기고, 접수 단계에서 만료로 돌아온 토큰은 지움
-async function deliver(service: Db, kind: ClientKind, messages: OutgoingMessage[], owners: Map<string, string>, options: NotifyOptions): Promise<NotifyResult> {
+export async function deliver(service: Db, kind: AnyPushKind, messages: OutgoingMessage[], owners: Map<string, string>, options: NotifyOptions): Promise<NotifyResult> {
   const result: SendResult = await sendExpoMessages(messages, { accessToken: options.accessToken, fetchImpl: options.fetchImpl, sleep: options.sleep });
 
   // 영수증 기록이 안 돼도 푸시는 이미 나갔으므로 오류로 만들지 않음 (다음 배치에서 확인할 대상이 빠질 뿐)

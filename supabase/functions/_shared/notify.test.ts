@@ -26,10 +26,11 @@ const request = (over: Partial<NotifyRequest> = {}): NotifyRequest => ({ kind: '
 
 type Sent = { to: string; title: string; body: string; channelId?: string; data: Record<string, unknown> };
 
-// can_send_push는 DB 함수라 여기서는 종류별로 "SENDER → TARGET이면 허용"으로 흉내 (WAKE_PING은 8장 전이라 늘 거절)
+// can_send_push는 DB 함수라 여기서는 종류별로 "SENDER → TARGET이면 허용"으로 흉내. 깨우기(WAKE_PING) 판정 plan_wake_ping도 DB 함수 — 기본은 '보낼 수 있음'(reserve면 count 1)
 function setup(allowed: string[] = ['ALARM_CHANGED', 'FRIEND_REQUEST', 'FRIEND_ACCEPTED']) {
   const db = new FakeDb();
   db.rpcHandlers.can_send_push = (a) => allowed.includes(String(a.p_kind)) && a.p_sender_id === SENDER && a.p_target_id === TARGET;
+  db.rpcHandlers.plan_wake_ping = (a) => (a.p_reserve ? { status: 'OK', count: 1, limit: 3, next_at: '2026-11-10T07:10:00Z' } : { status: 'OK' });
   db.rows('alarms').push({ alarm_id: ALARM, user_id: TARGET });
   db.rows('profiles').push({ user_id: SENDER, nickname: '수연', timezone: 'Asia/Seoul' }, { user_id: TARGET, nickname: '지형', timezone: 'Asia/Seoul' }, { user_id: OTHER, nickname: '남', timezone: 'Asia/Seoul' });
   db.rows('push_tokens').push({ user_id: TARGET, token: T1 }, { user_id: TARGET, token: T2 }, { user_id: OTHER, token: T3 });
@@ -96,18 +97,90 @@ test('11-11: 권한이 없으면 403 — 토큰도 Expo도 건드리지 않음',
   assert.ok(!db.calls.includes('select push_tokens'));
 });
 
-test('깨우기(WAKE_PING)는 8장 전이라 DB 함수가 거절하는 대로 403, 허용되면 보낸 사람 이름이 든 고정 문구 (11-05 · 11-28)', async () => {
-  const { service, pushes, fetchImpl } = setup();
+test('깨우기(WAKE_PING)는 DB 함수가 거절하면 403, 허용되면 보낸 사람 이름이 든 고정 문구 + 응답에 ping 상태 (11-05 · 11-28 · 8-사)', async () => {
+  const { db, service, pushes, fetchImpl } = setup([]);
   await assert.rejects(
     () => runNotify(service, SENDER, request({ kind: 'WAKE_PING' }), { fetchImpl: fetchImpl(okAll), sleep: noSleep }),
     (e: unknown) => e instanceof HttpError && e.status === 403 && e.message.includes('깨우기'),
   );
   assert.deepEqual(pushes, []);
+  assert.ok(!db.rpcCalls.some((c) => c.name === 'plan_wake_ping')); // 권한 판정이 먼저
 
   const open = setup(['WAKE_PING']);
   const result = await runNotify(open.service, SENDER, request({ kind: 'WAKE_PING' }), { fetchImpl: open.fetchImpl(okAll), sleep: noSleep });
-  assert.deepEqual(result, { sent: 2, failed: 0 });
+  assert.deepEqual(result, { sent: 2, failed: 0, ping: { status: 'OK', count: 1, limit: 3, next_at: '2026-11-10T07:10:00Z' } });
   assert.deepEqual(open.pushes.map((p) => [p.title, p.body, p.channelId, p.data.path]), [['깨우기', '수연님이 깨워요', 'friend_v1', '/wake'], ['깨우기', '수연님이 깨워요', 'friend_v1', '/wake']]);
+  assert.ok(open.pushes.every((p) => p.data.kind === 'WAKE_PING' && p.data.recipientUserId === TARGET));
+});
+
+test('8-차 · 8-14: 깨우기 순서 = 권한 → 판정(횟수 안 셈) → 토큰 조회 → 횟수 세기(reserve) → 발송, DB 함수 인자 이름은 p_sender · p_target · p_reserve', async () => {
+  const { db, service, fetchImpl } = setup(['WAKE_PING']);
+  await runNotify(service, SENDER, request({ kind: 'WAKE_PING' }), { fetchImpl: fetchImpl(okAll), sleep: noSleep });
+  assert.deepEqual(db.rpcCalls, [
+    { name: 'can_send_push', args: { p_sender_id: SENDER, p_target_id: TARGET, p_kind: 'WAKE_PING' } },
+    { name: 'plan_wake_ping', args: { p_sender: SENDER, p_target: TARGET, p_reserve: false } },
+    { name: 'plan_wake_ping', args: { p_sender: SENDER, p_target: TARGET, p_reserve: true } },
+  ]);
+  const order = db.calls.filter((c) => c === 'select push_tokens' || c.startsWith('rpc plan_wake_ping'));
+  assert.deepEqual(order, ['rpc plan_wake_ping', 'select push_tokens', 'rpc plan_wake_ping']);
+});
+
+test('8-01 · 8-05 · 8-06 · 8-08 · 8-10: 못 보내는 이유(아직 안 울림 · 이미 일어남 · 5분 · 하루 3번 · 받기 꺼짐)는 오류가 아니라 ping 상태로 — 푸시도 토큰 조회도 횟수 세기도 없음', async () => {
+  const cases: Record<string, unknown>[] = [
+    { status: 'NOT_RINGING' },
+    { status: 'ALREADY_UP' },
+    { status: 'WAIT', next_at: '2026-11-10T07:10:00Z' },
+    { status: 'DAILY_LIMIT', resets_at: '2026-11-10T15:00:00Z' },
+    { status: 'OFF' },
+  ];
+  for (const verdict of cases) {
+    const { db, service, pushes, fetchImpl } = setup(['WAKE_PING']);
+    db.rpcHandlers.plan_wake_ping = () => verdict;
+    const result = await runNotify(service, SENDER, request({ kind: 'WAKE_PING' }), { fetchImpl: fetchImpl(okAll), sleep: noSleep });
+    assert.deepEqual(result, { sent: 0, failed: 0, ping: verdict });
+    assert.deepEqual(pushes, []);
+    assert.ok(!db.calls.includes('select push_tokens'));
+    assert.equal(db.rpcCalls.filter((c) => c.name === 'plan_wake_ping').length, 1); // 판정만 — 횟수는 안 셈
+  }
+});
+
+test('8-14: 받는 사람 토큰이 없으면 횟수를 안 세고(reserve 안 부름) ping.status = NO_TOKENS', async () => {
+  const { db, service, pushes, fetchImpl } = setup(['WAKE_PING']);
+  db.tables.push_tokens = [];
+  const result = await runNotify(service, SENDER, request({ kind: 'WAKE_PING' }), { fetchImpl: fetchImpl(okAll), sleep: noSleep });
+  assert.deepEqual(result, { sent: 0, failed: 0, reason: 'NO_TOKENS', ping: { status: 'NO_TOKENS' } });
+  assert.deepEqual(pushes, []);
+  assert.deepEqual(db.rpcCalls.filter((c) => c.name === 'plan_wake_ping').map((c) => c.args.p_reserve), [false]);
+});
+
+test('8-차: 판정과 횟수 세기 사이에 다른 요청이 먼저 보냈으면(reserve가 WAIT) 푸시를 안 보냄', async () => {
+  const { db, service, pushes, fetchImpl } = setup(['WAKE_PING']);
+  db.rpcHandlers.plan_wake_ping = (a) => (a.p_reserve ? { status: 'WAIT', next_at: '2026-11-10T07:10:00Z' } : { status: 'OK' });
+  const result = await runNotify(service, SENDER, request({ kind: 'WAKE_PING' }), { fetchImpl: fetchImpl(okAll), sleep: noSleep });
+  assert.deepEqual(result, { sent: 0, failed: 0, ping: { status: 'WAIT', next_at: '2026-11-10T07:10:00Z' } });
+  assert.deepEqual(pushes, []);
+});
+
+test('8-11 · 8-35: 기상이 안 보이는 사람(DB 판정 FORBIDDEN)은 403 — 이유를 안 알려 줌. 모르는 응답이나 DB 오류는 500', async () => {
+  const forbidden = setup(['WAKE_PING']);
+  forbidden.db.rpcHandlers.plan_wake_ping = () => ({ status: 'FORBIDDEN' });
+  await assert.rejects(
+    () => runNotify(forbidden.service, SENDER, request({ kind: 'WAKE_PING' }), { fetchImpl: forbidden.fetchImpl(okAll), sleep: noSleep }),
+    (e: unknown) => e instanceof HttpError && e.status === 403 && e.message === '이 사람에게는 깨우기 알림을 보낼 수 없어요',
+  );
+  assert.deepEqual(forbidden.pushes, []);
+
+  for (const bad of [() => ({ status: 'SOMETHING' }), () => null, () => { throw new Error('boom'); }]) {
+    const s = setup(['WAKE_PING']);
+    s.db.rpcHandlers.plan_wake_ping = bad;
+    await quiet(() =>
+      assert.rejects(
+        () => runNotify(s.service, SENDER, request({ kind: 'WAKE_PING' }), { fetchImpl: s.fetchImpl(okAll), sleep: noSleep }),
+        (e: unknown) => e instanceof HttpError && e.status === 500,
+      ),
+    );
+    assert.deepEqual(s.pushes, []);
+  }
 });
 
 test('11-12 · 11-13: 친구 요청은 받는 사람에게만, 수락은 요청한 사람에게만 — 요청 채널, 고정 문구', async () => {
