@@ -78,11 +78,12 @@ export const STEPS = [
       const change = async (h) => ok(await callRpc(ctx.a, fn, { p_handle: h }), '아이디 변경');
       const h1 = `e2e_a_${rand()}`;
       const r1 = await change(h1);
+      if (r1.status === 'LIMIT') skip(`A가 이미 아이디 변경 제한 중(${r1.next_change_at}까지) — 지난 실행 복원 실패면 node run.mjs --restore`);
       must(r1.status === 'OK' && r1.handle === h1, `첫 변경이 OK가 아님: ${r1.status}`);
       let last = r1;
       if (!r1.next_change_at) {
         last = await change(`e2e_a_${rand()}`);
-        must(last.status === 'OK' && last.next_change_at, `둘째 변경에 30일 제한 시각이 안 생김: ${last.status}`);
+        must(last.status === 'OK' && last.next_change_at, `둘째 변경에 30일 제한 시각이 안 생김: ${last.status} (A의 onboarded_at이 비어 있으면 안 생김)`);
       }
       const p = ok(await ctx.admin.from('profiles').select('handle_changed_at, handle_next_change_at').eq('user_id', ctx.ids.A).single(), '읽기');
       must(p.handle_changed_at, '변경 시각(handle_changed_at)이 안 남음');
