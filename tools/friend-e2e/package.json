@@ -1,0 +1,17 @@
+{
+  "name": "friend-e2e",
+  "private": true,
+  "type": "module",
+  "description": "친구 · 그룹 대본 자동 시험 — 로컬 Supabase(127.0.0.1)에 계정 A · B · C가 로그인해 논리설계 16장 대본을 끝까지 돌림",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "start": "node run.mjs",
+    "restore": "node run.mjs --restore",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.117.3"
+  }
+}

@@ -44,7 +44,8 @@ import {
   openUsageAccessSettings,
   usePermissions,
 } from '@/features/permissions';
-import { finishOnboarding, isHandleTaken, saveProfileFields } from '@/features/profile/api';
+import { changeMyHandle, finishOnboarding, saveProfileFields } from '@/features/profile/api';
+import { handleChangeMessage } from '@/features/profile/handle';
 import type { WakeSensitivity } from '@/features/profile/types';
 import { setAfterOnboarding } from '@/lib/afterOnboarding';
 import { now } from '@/lib/clock';
@@ -123,11 +124,13 @@ export default function OnboardingScreen() {
         const clean = cleanHandle(handle);
         // 이미 저장한 아이디 그대로면 중복 확인도 저장도 건너뜀
         if (!userId || !shouldSaveHandle(clean, savedHandle)) return true;
-        if (await isHandleTaken(clean, userId)) {
-          setHandleError('이미 쓰는 아이디예요');
+        // 형식 · respec_ · 중복은 서버가 판정 (change_my_handle). 온보딩 안에서 바꾸는 건 30일 제한에 안 셈
+        const result = await changeMyHandle(clean);
+        const message = handleChangeMessage(result);
+        if (message) {
+          setHandleError(message);
           return false;
         }
-        await saveProfileFields(userId, { handle: clean });
         setSavedHandle(clean);
         return true;
       }

@@ -6,16 +6,18 @@ import { size } from '@/theme';
 type Props = {
   label: string;
   onPress: () => void;
+  accessibilityLabel?: string; // 글자만으로 뜻이 모자랄 때(···) 화면 읽기 도구가 부를 이름
   disabledReason?: string; // 있으면 못 누르는 버튼 — 흐리게 보이고, 누르면 이 이유를 토스트로 알림 (수연님이 기상 상태 공유를 허용하지 않았어요)
 };
 
 // 멤버 줄 오른쪽 작은 글자 버튼 (.mini) — 누르는 칸은 44. 못 누를 때도 눌리고 이유를 알려 줌
-export function MiniButton({ label, onPress, disabledReason }: Props) {
+export function MiniButton({ label, onPress, disabledReason, accessibilityLabel }: Props) {
   const disabled = disabledReason != null;
   return (
     <Pressable
       onPress={disabled ? () => toast(disabledReason) : onPress}
       accessibilityRole="button"
+      accessibilityLabel={accessibilityLabel}
       accessibilityHint={disabledReason}
       style={({ pressed }) => [styles.button, pressed && styles.pressed]}
     >
