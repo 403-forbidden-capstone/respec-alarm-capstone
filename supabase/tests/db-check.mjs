@@ -344,14 +344,14 @@ await check('조회 권한만으로는 못 고침 · 설정 권한이면 고침 
   return before.length === 0 && after.length === 1 && steal === true && del.length === 0
     ? true : { before, after, steal, del };
 });
-await check('설정 권한만 있고 조회 권한이 없으면 0행 수정 (UPDATE ... WHERE에도 조회 정책이 걸림)', async () => {
+await check('설정 권한만 있고 조회 권한이 없는 상태는 없음(6장) — 조회를 끄면 설정도 같이 꺼져 0행 수정 (UPDATE ... WHERE에도 조회 정책이 걸림)', async () => {
   await as(B);
-  await q(`update public.sharing_permissions set can_view_alarm = false, can_edit_alarm = true where permission_id = $1`, [pFriendBA]);
+  const off = await q(`update public.sharing_permissions set can_view_alarm = false, can_edit_alarm = true where permission_id = $1 returning can_edit_alarm as e`, [pFriendBA]);
   await as(A);
   const r = await q(`update public.alarms set is_enabled = false where alarm_id = $1 returning 1`, [ids[B].alarm]);
   await as(B);
   await q(`update public.sharing_permissions set can_view_alarm = true where permission_id = $1`, [pFriendBA]);
-  return r.length === 0 ? true : r;
+  return r.length === 0 && off[0].e === false ? true : { r, off };
 });
 
 
@@ -438,7 +438,7 @@ await check('최종 권한 = 친구 ∪ 그룹 (그룹을 끄고 친구를 켜�
 // 11. 그룹원 기상 상태 (get_group_wake_status)
 // ---------------------------------------------------------------------
 // 오늘(한국) 이벤트: B는 울림 · 미루기 · 해제 · 기상 확인, C는 울림만, D는 울림 · 기상 확인
-// B는 그룹 권한 + 동의, C는 그룹 권한만, D는 동의만
+// B · D는 그룹 기상 공유 동의, C는 옛 방식 기상 조회 권한 행만(6장부터 판정에 안 쓰임 → 동의가 없으면 안 보임)
 // 그룹 기상 상태는 그 그룹에 약속이 있는 날에만 나옴 (F4) → 오늘 10시 그룹 약속을 먼저 만들어 둠
 
 await as(A);
@@ -466,14 +466,14 @@ const wake = async (uid, withDate = true) => {
   return q(withDate ? `select * from public.get_group_wake_status($1, ${TODAY})` : `select * from public.get_group_wake_status($1)`, [G]);
 };
 
-await check('A에게는 본인 + B만 나옴 (C는 권한만 · D는 동의만 있어서 안 나옴)', async () => {
+await check('A에게는 본인 + 기상 공유에 동의한 B · D만 나옴 (6장: 권한 행 없이 동의 하나로 — C는 옛 권한 행만 있고 동의가 없어서 안 나옴)', async () => {
   const r = await wake(A);
   const users = r.map((x) => x.user_id);
   const b = r.find((x) => x.user_id === B);
-  const ok = r.length === 2 && users[0] === A && r[0].is_me === true && b
+  const ok = r.length === 3 && users[0] === A && r[0].is_me === true && b
     && b.wake_status === 'CONFIRMED' && b.snooze_count === 1 && b.rang_at && b.dismissed_at && b.wake_confirmed_at
     && new Date(b.wake_alarm_at).getTime() === new Date(b.rang_at).getTime()
-    && !users.includes(C) && !users.includes(D);
+    && users.includes(D) && !users.includes(C);
   return ok ? true : r;
 });
 await check('날짜를 안 주면 호출자 시간대의 오늘', async () => {
@@ -491,20 +491,20 @@ await check('C가 그룹에서 기상 공유에 동의하면 나오고(RINGING) 
   const r2 = await wake(A);
   return c && c.wake_status === 'RINGING' && !r2.some((x) => x.user_id === C) ? true : { r, r2 };
 });
-await check('친구로 받은 기상 권한은 그룹 동의 없이도 인정 (합집합)', async () => {
+await check('친구로 받은 기상 권한은 없음(6장) — 써 넣어도 꺼진 채 저장되고 그룹 동의가 없으면 친구여도 안 보임', async () => {
   await as(C);
   const [{ friend_id: fCA }] = await q(`insert into public.friends (requester_id, addressee_id) values ($1, $2) returning friend_id`, [C, A]);
   await as(A);
   await q(`update public.friends set status = 'ACCEPTED', accepted_at = now() where friend_id = $1`, [fCA]);
   await as(C);
-  await q(`insert into public.sharing_permissions (owner_id, grantee_id, source_type, source_id, can_view_wake) values ($1, $2, 'FRIEND', $3, true)`, [C, A, fCA]);
+  const [row] = await q(`insert into public.sharing_permissions (owner_id, grantee_id, source_type, source_id, can_view_wake) values ($1, $2, 'FRIEND', $3, true) returning can_view_wake as w`, [C, A, fCA]);
   const r = await wake(A);
-  return r.some((x) => x.user_id === C) ? true : r;
+  return row.w === false && !r.some((x) => x.user_id === C) ? true : { row, r };
 });
-await check('비구성원은 빈 결과 · 다른 구성원은 자기가 받은 권한만큼만 봄', async () => {
+await check('비구성원은 빈 결과 · 다른 구성원은 본인 + 기상 공유에 동의한 사람만 봄 (A는 동의 안 했으니 B에게 안 보임)', async () => {
   const e = await wake(E);
   const b = await wake(B);
-  return e.length === 0 && b.length === 1 && b[0].user_id === B ? true : { e, b };
+  return e.length === 0 && b.length === 2 && b[0].user_id === B && b[0].is_me === true && b[1].user_id === D ? true : { e, b };
 });
 await check('함수 밖에서는 B의 alarm_events · daily_records를 못 읽음', async () => {
   await as(B);
@@ -529,7 +529,10 @@ await check('하루 경계는 호출자 시간대 (한국 자정 1분 전 이벤
 await check('WAKE_CONFIRMED 이벤트가 없으면 daily_records의 기상 확인 시각을 씀', async () => {
   await as(C);
   await q(`insert into public.daily_records (user_id, record_date, wake_confirmed_at) values ($1, ${TODAY}, ${KST0} + interval '07:05')`, [C]);
+  await q(`update public.group_members set wake_share_opt_in = true where group_id = $1 and user_id = $2`, [G, C]);   // 보이려면 동의가 있어야 함(6장)
   const c = (await wake(A)).find((x) => x.user_id === C);
+  await as(C);
+  await q(`update public.group_members set wake_share_opt_in = false where group_id = $1 and user_id = $2`, [G, C]);   // 뒤 시험(기상 신호)이 C는 동의 없음으로 씀
   return c && c.wake_status === 'CONFIRMED' && c.wake_confirmed_at ? true : c;
 });
 
@@ -1060,10 +1063,10 @@ await check('푸시 권한 확인(can_send_push): ALARM_CHANGED는 보내는 사
   await q(`update public.sharing_permissions set can_edit_alarm = false where permission_id = $1`, [pe]);
   const viewOnly = await can(A, B, 'ALARM_CHANGED');
   await as(B);
-  await q(`update public.sharing_permissions set can_edit_alarm = true where permission_id = $1`, [pGroupBA]);   // 그룹으로 받은 설정 권한
+  await q(`update public.sharing_permissions set can_view_alarm = true, can_edit_alarm = true where permission_id = $1`, [pGroupBA]);   // 그룹으로 받은 설정 권한(설정이면 조회, 6장)
   const viaGroup = await can(A, B, 'ALARM_CHANGED');
   await as(B);
-  await q(`update public.sharing_permissions set can_edit_alarm = false where permission_id = $1`, [pGroupBA]);
+  await q(`update public.sharing_permissions set can_view_alarm = false, can_edit_alarm = false where permission_id = $1`, [pGroupBA]);
   await q(`delete from public.sharing_permissions where permission_id = $1`, [pe]);
   const after = await can(A, B, 'ALARM_CHANGED');
   await as(A);
@@ -3008,6 +3011,6 @@ await check('user_places: updated_at이 고칠 때 갱신됨 · 계정을 지우
 // ---------------------------------------------------------------------
 // 장마다 자기 계정을 새로 만들어 앞 검사의 A~E와 섞이지 않게 함. 장이 늘면 아래 목록에 한 줄씩
 const FRIEND_CTX = { q, as, su, svc, check, expectErr, PGlite, AUTH_STUBS, MIG_DIR, readFileSync, readdirSync, join };
-for (const ch of ['ch02', 'ch03', 'ch04', 'ch05']) await (await import(`./friend/${ch}.mjs`)).default(FRIEND_CTX);
+for (const ch of ['ch02', 'ch03', 'ch04', 'ch05', 'ch06']) await (await import(`./friend/${ch}.mjs`)).default(FRIEND_CTX);
 
 report();
