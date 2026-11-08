@@ -121,8 +121,9 @@ async function seedDemo(client, today) {
   await insertAll(client, 'appointments', tables.appointments);
   await insertAll(client, 'appointment_participants', tables.appointment_participants);
   await insertAll(client, 'alarms', tables.alarms);
-  await insertAll(client, 'alarm_events', tables.alarm_events);
+  // 하루 기록을 먼저: 기상 확인 이벤트가 들어올 때 그날 하루 기록을 DB가 같이 채우는데(7장), 이미 있으면 그대로 두기 때문
   await insertAll(client, 'daily_records', tables.daily_records);
+  await insertAll(client, 'alarm_events', tables.alarm_events);
   console.log('넣은 개수');
   console.log(fmtCounts(counts));
   console.log(`\n로그인: ${DEMO_USERS.map((u) => u.email).join(' · ')} (비밀번호는 SEED_PASSWORD)`);

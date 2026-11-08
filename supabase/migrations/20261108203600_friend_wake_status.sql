@@ -6,7 +6,8 @@
 --                            폰이 꺼져 기록이 못 올라와도 알람 시각이 지나고 30분 동안 확인이 없으면 미확인과 같게 (7-마)
 --   ② get_group_wake_status    옛 11칸 모양의 호환 함수 — 같은 값을 줄여 돌려줌(내 줄만 울린 시각 · 미루기 · 해제 · 미확인 칸이 참). 앱이 ①로 옮기면 15장에서 지움
 --   ③ 사람별 기상 숨기기        wake_hides 표 + set_wake_hidden (친구 · 친구 아닌 그룹원 모두) (7-더 · Q13)
---   ④ 기상 확인 하루 한 건      사람마다 하루 첫 한 건만 저장(먼저 것 유지), 저장될 때 그날 daily_records 기상 시각도 같이 (7-d4 · 7-d5 · 7-하)
+--   ④ 기상 확인 하루 한 건      사람마다 '기상한 날' 첫 한 건만 저장(먼저 것 유지), 저장될 때 그날 daily_records 기상 시각도 같이 (7-d4 · 7-d5 · 7-하)
+--                            기상한 날 = 그 확인이 붙은 기상 알람이 울린 날(알람 시각 6시간 전 ~ 18시간 뒤 안의 확인), 아니면 확인한 날 — 자정을 넘겨 확인해도 알람이 울린 날로 셈 (private.wake_day)
 --   ⑤ 새로 고침 신호            직접 입력 · 대화 정정 · 자동 판정이 만든 기록은 신호를 안 냄, 새벽 약속은 알람이 울린 날 기준 (7-머)
 --   ⑥ 미확인 시각 식            다시 울림 몫을 뺌: 미확인 시각 = 마지막 울림 시작 + 30분 (D2)
 -- "기상 보임" 판정(private.can_see_wake)은 ① · 8장 깨우기가 같은 한 곳을 씀
@@ -65,8 +66,7 @@ begin
     return jsonb_build_object('status', 'OK');
   end if;
 
-  if not exists (select 1 from public.profiles p where p.user_id = p_user_id)
-     or not (
+  if not (
        private.friend_relation(v_uid, p_user_id) = 'FRIEND'
        or exists (
          select 1
@@ -75,7 +75,7 @@ begin
          where a.user_id = v_uid and a.invite_status = 'JOINED'
            and b.user_id = p_user_id and b.invite_status = 'JOINED')
      ) then
-    return jsonb_build_object('status', 'NOT_FOUND');
+    return jsonb_build_object('status', 'NOT_FOUND');   -- 없는 사람도 관계가 없어 여기로 옴
   end if;
 
   insert into public.wake_hides (owner_id, hidden_from_id) values (v_uid, p_user_id)
@@ -133,8 +133,29 @@ as $$
            join public.alarms a on a.participant_id = pt.participant_id and a.alarm_type = 'WAKE' and a.is_enabled
            join public.profiles pr on pr.user_id = a.user_id
            where ap.group_id = p_group_id
+             and ap.appointment_at >= (p_date::timestamp at time zone coalesce(pr.timezone, 'Asia/Seoul')) - interval '1 day'      -- 약속 이틀 전까지의 기상 알람만 셈(약속 시각 색인을 타게 좁힘)
+             and ap.appointment_at <  ((p_date + 1)::timestamp at time zone coalesce(pr.timezone, 'Asia/Seoul')) + interval '2 days'
              and a.scheduled_at >= (p_date::timestamp at time zone coalesce(pr.timezone, 'Asia/Seoul'))
              and a.scheduled_at <  ((p_date + 1)::timestamp at time zone coalesce(pr.timezone, 'Asia/Seoul')));
+$$;
+
+
+-- 기상 확인이 어느 '날'의 것인가 (그 사람 시간대): 그 확인이 붙은 기상 알람의 [알람 시각 6시간 전, 18시간 뒤) 안에 있으면 알람이 울린 날,
+--   아니면 확인한 날. 자정을 넘겨 확인해도(23:50 알람 → 00:10 확인) 알람이 울린 날이고, 알람 행이 다음 회차로 재사용돼 옛 확인이 붙어 있어도(구간 밖) 확인한 날 (7-자 · X-1)
+create function private.wake_day(p_alarm_id uuid, p_event_at timestamptz, p_tz text)
+returns date
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select (coalesce(
+            (select a.scheduled_at
+             from public.alarms a
+             where a.alarm_id = p_alarm_id and a.alarm_type = 'WAKE'
+               and p_event_at >= a.scheduled_at - interval '6 hours'
+               and p_event_at <  a.scheduled_at + interval '18 hours'),
+            p_event_at) at time zone coalesce(p_tz, 'Asia/Seoul'))::date;
 $$;
 
 
@@ -146,7 +167,7 @@ $$;
 -- 사람마다 하루 = 그 사람 프로필 시간대의 p_date. 그날 첫 기상 알람(켜진 것)이 그날의 기준 알람
 -- 기록은 그 알람(들)의 [알람 시각 6시간 전, 18시간 뒤) 안 (find_missed_wake_alarms와 같은 구간)
 --   울림 · 미루기 · 해제 · 미확인: 그날 기상 알람 전부의 기록
---   기상 확인: 그 사람의 WAKE_CONFIRMED 중 직접 입력(MANUAL) · 대화 정정(VOICE) 출처는 뺌. 자동 판정(USAGE)은 다른 사람에게는 20분 뒤부터(내 줄은 바로)
+--   기상 확인: 그 사람의 WAKE_CONFIRMED 중 그 날(기상한 날, private.wake_day)의 것만, 직접 입력(MANUAL) · 대화 정정(VOICE) 출처는 뺌. 자동 판정(USAGE)은 다른 사람에게는 20분 뒤부터(내 줄은 바로)
 --   daily_records(저녁에 직접 입력한 기상 시각)는 안 읽음
 -- 단계: CONFIRMED > MISSED > DISMISSED > RINGING > SCHEDULED, 알람이 없으면 NO_ALARM
 --   MISSED = 서버가 기록한 MISSED, 또는 확인이 없는 채 (마지막 울림 시작 + 30분)이 지남. 마지막 울림 시작 = 그날 첫 알람의 마지막 미루기 끝(없으면 알람 시각)
@@ -163,7 +184,8 @@ returns table (
   dismissed_at      timestamptz,
   wake_confirmed_at timestamptz,
   missed_at         timestamptz,
-  wake_status       text
+  wake_status       text,
+  confirm_pending   boolean       -- 자동 판정 확인이 있는데 아직 20분이 안 지나 다른 사람에게 안 보이는 중 (8장 깨우기가 '이미 일어났어요'로 막을 때 씀)
 )
 language plpgsql
 stable
@@ -193,6 +215,7 @@ begin
   return query
   with members as (
     select gm.user_id,
+           coalesce(pr.timezone, 'Asia/Seoul')                                         as tz,
            (v_date::timestamp at time zone coalesce(pr.timezone, 'Asia/Seoul'))       as w_from,
            ((v_date + 1)::timestamp at time zone coalesce(pr.timezone, 'Asia/Seoul')) as w_to
     from public.group_members gm
@@ -239,11 +262,13 @@ begin
            min(e.event_at) filter (where vis.ok) as confirmed_at,
            coalesce(bool_or(not vis.ok), false)  as pending
     from first_alarm f
+    join members m on m.user_id = f.user_id
     join public.alarm_events e on e.user_id = f.user_id
       and e.event_type = 'WAKE_CONFIRMED'
-      and e.event_at >= f.scheduled_at - interval '6 hours'
-      and e.event_at <  f.scheduled_at + interval '18 hours'
+      and e.event_at >= m.w_from - interval '1 day'
+      and e.event_at <  m.w_to   + interval '1 day'
       and coalesce(e.input_source::text, '') not in ('MANUAL', 'VOICE')
+      and private.wake_day(e.alarm_id, e.event_at, m.tz) = v_date
     cross join lateral (
       select (f.user_id = p_viewer
               or e.input_source is distinct from 'USAGE'
@@ -272,7 +297,8 @@ begin
            when ag.dismissed_at is not null then 'DISMISSED'
            when ag.rang_at is not null then 'RINGING'
            else 'SCHEDULED'
-         end
+         end,
+         coalesce(c.pending, false)
   from members m
   join public.profiles pr on pr.user_id = m.user_id
   left join first_alarm f on f.user_id = m.user_id
@@ -340,7 +366,7 @@ $$;
 -- 4. 기상 확인은 하루 한 건 + 하루 기록의 기상 시각 같이
 -- ---------------------------------------------------------------------
 
--- 같은 사람의 같은 날(그 사람 시간대) 둘째 기상 확인은 오류 없이 저장하지 않음 — 폰 · 웹이 겹치면 먼저 들어온 것(출처도 그것)이 남음.
+-- 같은 사람의 같은 '기상한 날'(그 사람 시간대) 둘째 기상 확인은 오류 없이 저장하지 않음 — 폰 · 웹이 겹치면 먼저 들어온 것(출처도 그것)이 남음.
 -- 같은 사람 같은 날은 잠금으로 줄을 세워 동시에 들어와도 한 건만 (7-d4)
 create function private.limit_wake_confirmed_per_day()
 returns trigger
@@ -354,14 +380,15 @@ declare
 begin
   select p.timezone into v_tz from public.profiles p where p.user_id = new.user_id;
   v_tz   := coalesce(v_tz, 'Asia/Seoul');
-  v_date := (new.event_at at time zone v_tz)::date;
+  v_date := private.wake_day(new.alarm_id, new.event_at, v_tz);
   perform pg_advisory_xact_lock(hashtextextended('wake_confirmed:' || new.user_id::text || ':' || v_date::text, 0));
   if exists (
     select 1 from public.alarm_events e
     where e.user_id = new.user_id
       and e.event_type = 'WAKE_CONFIRMED'
-      and e.event_at >= (v_date::timestamp at time zone v_tz)
-      and e.event_at <  ((v_date + 1)::timestamp at time zone v_tz)
+      and e.event_at >= new.event_at - interval '2 days'
+      and e.event_at <  new.event_at + interval '2 days'
+      and private.wake_day(e.alarm_id, e.event_at, v_tz) = v_date
   ) then
     return null;
   end if;
@@ -386,7 +413,7 @@ declare
 begin
   select p.timezone into v_tz from public.profiles p where p.user_id = new.user_id;
   insert into public.daily_records (user_id, record_date, wake_confirmed_at, data_source)
-  values (new.user_id, (new.event_at at time zone coalesce(v_tz, 'Asia/Seoul'))::date, new.event_at, 'ALARM')
+  values (new.user_id, private.wake_day(new.alarm_id, new.event_at, v_tz), new.event_at, 'ALARM')
   on conflict (user_id, record_date) do update
     set wake_confirmed_at = coalesce(public.daily_records.wake_confirmed_at, excluded.wake_confirmed_at);
   return null;
@@ -405,7 +432,7 @@ create trigger record_wake_on_confirm
 
 -- 지난 정의(group_wake ⑥)와 같고 달라진 곳:
 --   · 기록의 출처가 직접 입력(MANUAL) · 대화 정정(VOICE) · 자동 판정(USAGE)이면 신호를 안 냄 (자동 판정은 20분 뒤부터 보이니 그때까지 보일 게 없음)
---   · 날짜 = 그 기상 알람이 울린 날(그 사람 시간대), 알람이 기상 알람이 아니면 기록한 날. '약속 있는 날'도 같은 판정(group_wake_has_meeting)
+--   · 날짜 = 기상한 날(private.wake_day: 그 기상 알람이 울린 날 — 자정을 넘겨 확인해도 — 아니면 기록한 날). '약속 있는 날'도 같은 판정(group_wake_has_meeting)
 create or replace function private.send_wake_signal()
 returns trigger
 language plpgsql
@@ -435,7 +462,7 @@ begin
 
   select p.timezone into v_tz from public.profiles p where p.user_id = new.user_id;
   v_tz   := coalesce(v_tz, 'Asia/Seoul');
-  v_date := (coalesce(v_alarm_at, new.event_at) at time zone v_tz)::date;
+  v_date := private.wake_day(new.alarm_id, new.event_at, v_tz);
 
   for v_group in
     select gm.group_id
@@ -463,6 +490,8 @@ $$;
 
 -- 지난 정의(batch_notify ⑨)와 같고 달라진 곳: 미확인 시각 = 마지막 울림 시작 + 30분 (확인 알림에 답이 없으면 다시 울리지 않으므로 다시 울림 소요를 더하지 않음, D2)
 --   마지막 울림 시작 = 마지막 미루기가 있으면 greatest(알람 시각, 미루기 기록 시각 + 미루기 분), 없으면 알람 시각
+--   기상 확인은 그 사람의 같은 '기상한 날'(private.wake_day)의 WAKE_CONFIRMED면 어느 기상 알람에서 눌렀든 인정,
+--   하루 기록(daily_records)에 그 날짜의 기상 시각이 적혀 있어도 인정(저녁에 직접 입력한 경우)
 --   돌려주는 칸에서 rering_minutes를 뺌(서버 함수 wake-check는 안 씀)
 drop function public.find_missed_wake_alarms(timestamptz, integer);
 
@@ -493,8 +522,10 @@ as $$
            a.intensity,
            coalesce(sn.total, 0)::integer as snooze_minutes,
            -- 마지막 울림 묶음이 시작한 때: 마지막 미루기의 다음 울림 (미루기가 없으면 알람 시각)
-           greatest(a.scheduled_at, sn.last_ring_at) as last_ring_start
+           greatest(a.scheduled_at, sn.last_ring_at) as last_ring_start,
+           coalesce(pr.timezone, 'Asia/Seoul') as tz
     from public.alarms a
+    join public.profiles pr on pr.user_id = a.user_id
     left join lateral (
       select sum(e.snooze_minutes) as total,
              (array_agg(e.event_at + make_interval(mins => coalesce(e.snooze_minutes, 0))
@@ -535,8 +566,9 @@ as $$
       from public.alarm_events e
       where e.user_id = d.user_id
         and e.event_type = 'WAKE_CONFIRMED'
-        and e.event_at >= d.scheduled_at - interval '6 hours'
-        and e.event_at <  d.scheduled_at + interval '18 hours')
+        and e.event_at >= d.scheduled_at - interval '2 days'
+        and e.event_at <  d.scheduled_at + interval '2 days'
+        and private.wake_day(e.alarm_id, e.event_at, d.tz) = (d.scheduled_at at time zone d.tz)::date)
     and not exists (
       select 1
       from public.alarm_events e
@@ -547,8 +579,8 @@ as $$
       select 1
       from public.daily_records dr
       where dr.user_id = d.user_id
-        and dr.wake_confirmed_at >= d.scheduled_at - interval '6 hours'
-        and dr.wake_confirmed_at <  d.scheduled_at + interval '18 hours')
+        and dr.record_date = (d.scheduled_at at time zone d.tz)::date
+        and dr.wake_confirmed_at is not null)
   order by d.missed_at, d.alarm_id;
 $$;
 
@@ -560,6 +592,7 @@ $$;
 revoke execute on function public.set_wake_hidden(uuid, boolean) from public, anon;
 revoke execute on function public.get_group_wake(uuid, date) from public, anon;
 revoke execute on function private.can_see_wake(uuid, uuid, uuid) from public, anon, authenticated;
+revoke execute on function private.wake_day(uuid, timestamptz, text) from public, anon, authenticated;
 revoke execute on function private.group_wake_has_meeting(uuid, date, text) from public, anon, authenticated;
 revoke execute on function private.group_wake_rows(uuid, uuid, date, timestamptz) from public, anon, authenticated;
 revoke execute on function private.limit_wake_confirmed_per_day() from public, anon, authenticated;

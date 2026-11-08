@@ -1,5 +1,5 @@
 // wake-check의 본문 — Deno.serve 없이 모듈로 빼서 가짜 DB로 시험함 (wake.test.ts). 연결은 wake-check/index.ts
-//   처리: find_missed_wake_alarms(DB 함수)가 "알람 시각 + 다시 울림 총 소요 + 미루기 누적 + 30분"이 지났는데 기상 확인이 없는 알람을 찾음
+//   처리: find_missed_wake_alarms(DB 함수)가 "마지막으로 울리기 시작한 때(알람 시각 또는 마지막 미루기가 끝나 다시 울린 때) + 30분"이 지났는데 기상 확인이 없는 알람을 찾음
 //        → alarm_events에 MISSED로 기록. client_event_id = event_key라서 겹쳐 돌거나 다시 돌아도 한 번만 들어감
 //   푸시: 그룹에 알리는 미확인 푸시는 D19(기상 공유 동의 조건)가 정해질 때까지 안 보냄 — 기록만 남김
 import { dbFail } from './db.ts';
