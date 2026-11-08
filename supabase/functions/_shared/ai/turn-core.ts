@@ -153,6 +153,18 @@ export const PREP_ADJUST_DEFAULT = 10;
 /** 대화 한 번으로 바꿀 수 있는 준비시간 상한 (설계 가정) */
 export const PREP_ADJUST_MAX = 60;
 
+const PREP_TOPIC = /(준비|여유|시간)/u;
+const PREP_CHANGE = /(늘려|늘리|줄여|줄이|바꿔|바꾸|변경|당겨|늦춰|원래대로|줘|주세요|주라|줄래|달라|걸릴)/u;
+const PREP_QUESTION = /준비[^?]*(\?|까요)/u;
+
+/**
+ * 사용자가 준비시간 변경을 실제로 청했는지 — 준비 · 여유 · 시간 이야기에 바꾸는 말 · 부탁 · 앞으로의 예상('더 걸릴 듯')이 있거나, 코치가 준비시간을 물은 바로 다음 말.
+ * 모델(T2F · T2)이 지난 일 · 목표를 변경 요청으로 읽어도 서버가 거름 (11/8 음성 '준비하는데 15분 더 걸렸고 … 일찍 일어나고 싶어' → '+10분' 카드)
+ */
+export function prepAsked(turns: readonly { role: string; text: string }[]): boolean {
+  return turns.some((t, i) => t.role === "user" && ((PREP_TOPIC.test(t.text) && PREP_CHANGE.test(t.text)) || (turns[i - 1]?.role === "ai" && PREP_QUESTION.test(turns[i - 1].text))));
+}
+
 /** 준비시간 가감 분 (부호 포함): '좀 더'(분 없음) 10, 상한 60, 원래대로 0 */
 function prepDeltaOf(pa: XPrep): number {
   const size = Math.min(PREP_ADJUST_MAX, Math.max(1, pa.minutes ?? PREP_ADJUST_DEFAULT));
