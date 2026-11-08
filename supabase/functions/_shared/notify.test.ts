@@ -136,15 +136,6 @@ test('11-22: 받는 사람의 토큰이 없으면(권한 거부 · 앱 삭제) �
   assert.deepEqual(pushes, []);
 });
 
-<<<<<<< HEAD
-test('11-17: 받는 사람이 탈퇴해 프로필이 없으면 권한 판정 · 토큰 조회 없이 조용히 무시 (NO_TOKENS와 같은 응답)', async () => {
-  const { db, service, pushes, fetchImpl } = setup();
-  db.tables.profiles = db.rows('profiles').filter((p) => p.user_id !== TARGET);
-  const result = await runNotify(service, SENDER, request(), { fetchImpl: fetchImpl(okAll), sleep: noSleep });
-  assert.deepEqual(result, { sent: 0, failed: 0, reason: 'NO_TOKENS' });
-  assert.deepEqual(pushes, []);
-  assert.deepEqual(db.rpcCalls, []);
-=======
 test('11-17 · 15-나: 없는 · 탈퇴한 · 권한 없는 · 차단된 대상은 모두 같은 403 — 권한 판정이 먼저라 사용자 존재 여부가 응답으로 드러나지 않음', async () => {
   const GHOST = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
   const outcome = async (target: string, kind: NotifyRequest['kind'] = 'ALARM_CHANGED', mutate?: (db: FakeDb) => void) => {
@@ -178,7 +169,6 @@ test('11-17(순서): 권한이 있는 대상만 프로필 · 토큰을 읽음 �
   await assert.rejects(() => runNotify(service, SENDER, request({ targetUserId: OTHER }), { fetchImpl: fetchImpl(okAll), sleep: noSleep }), (e: unknown) => e instanceof HttpError && e.status === 403);
   assert.deepEqual(reads, []);
   assert.deepEqual(pushes, []);
->>>>>>> origin/main
 });
 
 test('11-06: 접수된 푸시는 영수증 표에 기록하고(영수증은 15분 뒤 배치가 확인), 접수 단계에서 만료로 돌아온 토큰은 바로 지움', async () => {

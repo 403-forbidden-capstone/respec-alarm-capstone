@@ -2,12 +2,8 @@
 //   요청: { kind, targetUserId?, groupId?, appointmentId?, alarmId?, previousAt?, newAt? }
 //        한 사람에게 가는 종류(깨우기 · 알람 바뀜 · 친구 요청 · 수락)는 targetUserId, 그룹 종류(새 멤버 · 약속 변경)는 groupId(+ appointmentId)만 — 받는 사람은 서버가 고름
 //        옛 앱이 보내던 title · body · data는 읽지 않음: 문구는 종류별로 서버가 고정하고(push-copy.ts) 알림 데이터도 서버가 채움
-<<<<<<< HEAD
-//   처리(한 사람): ① 받는 사람 프로필 확인(탈퇴했으면 조용히 끝) ② can_send_push(부른 사람, 받는 사람, kind) — 서버 권한 판정(DB 함수, service_role 전용)
-=======
 //   처리(한 사람): ① can_send_push(부른 사람, 받는 사람, kind) — 서버 권한 판정(DB 함수, service_role 전용). 없는 · 탈퇴한 · 권한 없는 · 차단된 대상은 모두 같은 403이라
 //        사용자 존재 여부가 응답으로 드러나지 않음(15-나) ② 받는 사람 프로필(문구에 쓸 이름 · 시간대)
->>>>>>> origin/main
 //        ③ alarmId는 받는 사람의 알람인지 ④ push_tokens 조회 ⑤ Expo Push로 보냄(실패하면 한 번 더) ⑥ 접수 번호를 push_tickets에 기록(영수증은 15분 뒤 배치가 확인)
 //        ⑦ 접수 단계에서 만료로 돌아온 토큰은 바로 지움
 //   처리(그룹): plan_group_push(DB 함수)가 보낸 사람이 그 그룹에 참여 중인지 보고 받는 사람 = 참여 중 멤버 − 보낸 사람 − 알림 끈 멤버 − 차단 쌍을 돌려줌 → 받는 사람마다 토큰 조회 · 발송
@@ -93,27 +89,15 @@ const noTokens = (): NotifyResult => ({ sent: 0, failed: 0, reason: 'NO_TOKENS' 
 
 async function notifyOne(service: Db, senderId: string, req: NotifyRequest, options: NotifyOptions): Promise<NotifyResult> {
   const target = req.targetUserId as string;
-<<<<<<< HEAD
-  // 받는 사람이 탈퇴했으면 조용히 끝 — 권한 판정도 토큰 조회도 하지 않음 (11-17)
-  const profiles = must<Profile[]>('profiles', await service.from('profiles').select('user_id, nickname, timezone').in('user_id', [target, senderId]));
-  const targetProfile = profiles.find((p) => p.user_id === target);
-  if (!targetProfile) return noTokens();
-
-  // 권한 판정은 DB 함수 한 군데 (종류별 조건이 늘어도 여기는 안 바뀜)
-=======
   // 권한 판정이 먼저, DB 함수 한 군데 (종류별 조건이 늘어도 여기는 안 바뀜). 없는 · 탈퇴한 사람은 권한 행이 없어 권한 없음 · 차단과 같은 거절이 됨 (11-17 · 15-나)
->>>>>>> origin/main
   const allowed = await service.rpc('can_send_push', { p_sender_id: senderId, p_target_id: target, p_kind: req.kind });
   if (allowed.error) dbFail('can_send_push', allowed.error);
   if (allowed.data !== true) throw new HttpError('FORBIDDEN', DENIED[req.kind]);
 
-<<<<<<< HEAD
-=======
   const profiles = must<Profile[]>('profiles', await service.from('profiles').select('user_id, nickname, timezone').in('user_id', [target, senderId]));
   const targetProfile = profiles.find((p) => p.user_id === target);
   if (!targetProfile) return noTokens(); // 판정과 조회 사이에 탈퇴한 경우뿐
 
->>>>>>> origin/main
   // 알람 id를 같이 받은 경우(알람 바뀜만), 받는 사람의 알람이 맞는지 (남의 알람 id로 알림 내용을 꾸미지 못하게)
   const alarmId = req.kind === 'ALARM_CHANGED' ? req.alarmId : undefined;
   if (alarmId) {
