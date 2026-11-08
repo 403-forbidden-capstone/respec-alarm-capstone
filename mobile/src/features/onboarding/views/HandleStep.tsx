@@ -9,7 +9,7 @@ type Props = {
 };
 
 // 내 아이디 단계 (L02-1) — 입력 한 칸 + 규칙 안내. 형식 검사 · 중복 확인 · 저장은 부르는 화면이 함
-// L3 changeHandle 오면 교체 (자동 아이디 [바꾸기] 화면 — Q1)
+// 저장은 changeMyHandle(DB 함수) — 온보딩 단계와 아이디 바꾸기 시트(profile/components/ChangeHandleSheet)가 같이 씀
 export function HandleStep({ value, onChange, error }: Props) {
   return (
     <>

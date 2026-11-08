@@ -16,14 +16,14 @@ import { FrequentPlacesSection } from '@/features/location/FrequentPlacesSection
 import { LocationAutoSection } from '@/features/location/LocationAutoSection';
 import { openAppNotificationSettings } from '@/features/permissions';
 import { homePatchOf } from '@/features/onboarding/home';
-import { shouldSaveHandle } from '@/features/onboarding/validate';
-import { isHandleTaken, saveProfileFields } from '@/features/profile/api';
+import { saveProfileFields } from '@/features/profile/api';
 import { EditRow } from '@/features/profile/components/EditRow';
-import { HandleEditor, NicknameEditor, PrepareEditor, SleepEditor } from '@/features/profile/components/ProfileEditors';
+import { ChangeHandleSheet } from '@/features/profile/components/ChangeHandleSheet';
+import { NicknameEditor, PrepareEditor, SleepEditor } from '@/features/profile/components/ProfileEditors';
 import { prepareValuesOf } from '@/features/profile/edit';
 import { TRANSPORT_NAME, WAKE_MARGIN_NAME, WAKE_SENSITIVITY_NAME } from '@/features/profile/labels';
 import type { ProfileFields } from '@/features/profile/types';
-import { UserError, userMessage } from '@/lib/errors';
+import { userMessage } from '@/lib/errors';
 import { canUseRealData, modeLocked } from '@/lib/mode';
 import { backOrHome } from '@/lib/nav';
 import { signOutAndCleanup } from '@/lib/session';
@@ -56,14 +56,6 @@ export default function SettingsScreen() {
   const saveEdit = (fields: ProfileFields) =>
     run(async () => {
       if (!userId) return;
-      if (fields.handle != null) {
-        // L3 changeHandle 오면 교체 (30일에 한 번 바꾸는 제한 D95도 L3 몫)
-        if (!shouldSaveHandle(fields.handle, profile?.handle)) {
-          closeEditor();
-          return;
-        }
-        if (await isHandleTaken(fields.handle, userId)) throw new UserError('이미 쓰는 아이디예요');
-      }
       await saveProfileFields(userId, fields);
       let note = '바꿨어요';
       try {
@@ -191,9 +183,7 @@ export default function SettingsScreen() {
           <Sheet visible={editing === 'nickname'} onClose={closeEditor} title="닉네임">
             <NicknameEditor initial={profile.nickname} onSave={saveEdit} onCancel={closeEditor} />
           </Sheet>
-          <Sheet visible={editing === 'handle'} onClose={closeEditor} title="아이디">
-            <HandleEditor initial={profile.handle} onSave={saveEdit} onCancel={closeEditor} />
-          </Sheet>
+          <ChangeHandleSheet visible={editing === 'handle'} onClose={closeEditor} />
           <Sheet visible={editing === 'sleep'} onClose={closeEditor} title="잠귀">
             <SleepEditor initial={profile.wake_sensitivity} onSave={saveEdit} onCancel={closeEditor} />
           </Sheet>
