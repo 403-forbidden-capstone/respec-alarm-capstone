@@ -116,7 +116,19 @@ export type MemberAlarm = {
   levelName: string; // 약 · 중 · 강
   note: string; // 준비 70분 · 이동 70분 · 여유 10분
   enabled: boolean;
+  firstAlarmId?: string; // 제안을 보낼 때 가리키는 알람(켜져 있고 아직 안 울린 가장 이른 것) — 없으면 시각 제안 불가
+  proposeAt?: Date; // 그 알람의 지금 시각 (고른 시각 초안의 기준)
+  originalAt?: Date | null; // 친구가 바꾸기 전 원래 시각(합계 ±60분 기준, [원래대로]) — 비어 있으면 아직 바뀐 적 없음
+  proposal?: SentProposal | null; // 내가 보낸 제안의 지금 상태 ('제안함' · '반영됨')
 };
+
+// 내가 이 알람에 보낸 가장 최근 제안 — PENDING은 '제안함'(주인이 무시해도 서버가 PENDING으로 돌려줘 보낸 쪽에는 안 알림), APPLIED는 '반영됨' (친구 10장 10-파)
+export type SentProposal = { status: 'PENDING' | 'APPLIED'; toAt: Date };
+
+// 홈에 뜨는 받은 제안 카드 '수연 제안 기상 알람 7:30 → 7:00 [적용] [무시]'
+export type AlarmProposal = { id: string; proposerName: string; kindLabel: string; fromAt: Date; toAt: Date };
+
+export type ProposalResponse = 'APPLIED' | 'DISMISSED' | 'EXPIRED';
 
 // G03 그룹원 기상 상태 — 알람 시각 한 줄 + 확인 시각만. 알람 카드(강도 · 장소 · 준비)는 알람 조회 권한이 있을 때 G04에서 (7-다 · 7-41)
 export type MemberWake = {
@@ -149,7 +161,6 @@ export type SharedAlarms = {
   alarms: MemberAlarm[];
 };
 
-export type ShareLogItem = { at: Date; text: string };
 
 // G04에서 알람을 바꾼 결과 — 저장은 됐고 주인에게 알림이 갔는지만 알려 줌 (알림이 실패해도 저장은 그대로, 화면은 조용히 "바꿨어요"만)
 export type SharedChangeResult = { notified: boolean };
