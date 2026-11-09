@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { buildMlRequest, calendarFeatures, mayUseMl, previousDateKey, requestMlPrediction, validMlEndpoint } from './prepare-ml.ts';
+import { approvedMlProfile, buildMlRequest, calendarFeatures, mayUseMl, previousDateKey, requestMlPrediction, validMlEndpoint } from './prepare-ml.ts';
 
 const profile = { ml_codes_verified: true, ml_age_code: '2', ml_education_code: '1', ml_economic_code: '3' };
 const at = new Date('2026-11-09T01:00:00Z');
@@ -57,4 +57,24 @@ test('real ML is denied unless both flag and server-side UUID allowlist permit t
   assert.equal(mayUseMl({ ...base, allowedUserIds: '' }), false);
   assert.equal(mayUseMl({ ...base, allowedUserIds: 'not-a-uuid' }), false);
   assert.equal(mayUseMl({ ...base, userId: '11111111-1111-4111-8111-111111111111', allowedUserIds: userId }), false);
+});
+
+test('only a service-verified, consented and matching codebook profile can be used', () => {
+  const good = {
+    ml_age_code: '2',
+    ml_education_code: '1',
+    ml_economic_code: '3',
+    codebook_version: 'validated-v1',
+    consent_at: '2025-01-01T00:00:00Z',
+    verified_at: '2025-01-02T00:00:00Z',
+  };
+  assert.deepEqual(approvedMlProfile(good, 'validated-v1'), {
+    ml_codes_verified: true, ml_age_code: '2', ml_education_code: '1', ml_economic_code: '3',
+  });
+  assert.equal(approvedMlProfile(good, ''), null);
+  assert.equal(approvedMlProfile(good, 'other-version'), null);
+  assert.equal(approvedMlProfile({ ...good, consent_at: null }, 'validated-v1'), null);
+  assert.equal(approvedMlProfile({ ...good, verified_at: null }, 'validated-v1'), null);
+  assert.equal(approvedMlProfile({ ...good, ml_age_code: '__MISSING__' }, 'validated-v1'), null);
+  assert.equal(approvedMlProfile({ ...good, consent_at: '3025-01-01T00:00:00Z' }, 'validated-v1'), null);
 });
