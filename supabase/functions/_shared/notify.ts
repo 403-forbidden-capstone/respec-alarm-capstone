@@ -1,7 +1,7 @@
 // notify의 본문 — Deno.serve 없이 모듈로 빼서 가짜 DB로 시험함 (notify.test.ts). 연결은 notify/index.ts
 //   요청: { kind, targetUserId?, groupId?, appointmentId?, alarmId? } (옛 앱이 보내던 previousAt · newAt은 읽기만 하고 안 씀 — ALARM_CHANGED의 시각은 제안 기록에서)
 //        한 사람에게 가는 종류(깨우기 · 알람 바뀜 · 친구 요청 · 수락)는 targetUserId, 그룹 종류(새 멤버 · 약속 변경)는 groupId(+ appointmentId)만 — 받는 사람은 서버가 고름
-//        깨우기는 groupId도 받음(어느 그룹의 G03에서 눌렀는지): 그 그룹에서 보이는 사람일 때만 되고, 푸시를 누르면 그 그룹의 G03로 감
+//        깨우기는 groupId도 받음(어느 그룹의 G03에서 눌렀는지): 그 그룹에서 보이는 사람일 때만 되고, 푸시를 받은 사람이 누르면 자기 기상 확인 화면(/wake, H08)으로 감
 //        옛 앱이 보내던 title · body · data는 읽지 않음: 문구는 종류별로 서버가 고정하고(push-copy.ts) 알림 데이터도 서버가 채움
 //   처리(한 사람): ① can_send_push(부른 사람, 받는 사람, kind) — 서버 권한 판정(DB 함수, service_role 전용). 없는 · 탈퇴한 · 권한 없는 · 차단된 대상은 모두 같은 403이라
 //        사용자 존재 여부가 응답으로 드러나지 않음(15-나). 깨우기만 can_send_push를 안 부르고 plan_wake_ping이 권한까지 한 곳에서 판정함 ② 받는 사람 프로필(문구에 쓸 이름 · 시간대)

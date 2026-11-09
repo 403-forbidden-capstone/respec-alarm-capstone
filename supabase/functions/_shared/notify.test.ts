@@ -144,7 +144,7 @@ test('11-11: 권한이 없으면 403 — 토큰도 Expo도 건드리지 않음',
   assert.ok(!db.calls.includes('select push_tokens'));
 });
 
-test('깨우기(WAKE_PING)는 plan_wake_ping이 FORBIDDEN이면 403, 허용되면 보낸 사람 이름이 든 고정 문구 + 응답에 ping 상태 + 누르면 그 그룹의 G03 (11-05 · 11-28 · 8-사)', async () => {
+test('깨우기(WAKE_PING)는 plan_wake_ping이 FORBIDDEN이면 403, 허용되면 보낸 사람 이름이 든 고정 문구 + 응답에 ping 상태 + 누르면 받는 사람의 기상 확인 /wake (11-05 · 11-28 · 8-02)', async () => {
   const { db, service, pushes, fetchImpl } = setup([]);
   await assert.rejects(
     () => runNotify(service, OTHER, request({ kind: 'WAKE_PING' }), { fetchImpl: fetchImpl(okAll), sleep: noSleep }),
