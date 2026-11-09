@@ -106,6 +106,84 @@ async function signupCheck(ctx, label) {
   }
 }
 
+// ---- 15장 (남용 · 보안) 대본 층 — 단계 5 · 22에 붙여 봄 ----
+// 15-02: 함수 밖 직접 insert는 닫혀 있음 (횟수 제한 · 차단 검사를 우회하지 못하게)
+async function directInsertClosed(ctx) {
+  const r = await ctx.a.from('friends').insert({ requester_id: ctx.ids.A, addressee_id: ctx.ids.B, status: 'PENDING' });
+  must(r.error, '함수 밖 직접 insert로 친구 요청이 만들어짐 (15-02)');
+  must(/row-level security|permission denied|violates/i.test(r.error.message), `직접 insert 거절 이유가 권한이 아님: ${r.error.message}`);
+  const left = ok(await ctx.admin.from('friends').select('friend_id').eq('requester_id', ctx.ids.A).eq('addressee_id', ctx.ids.B), '친구 행');
+  must(left.length === 0, '거절됐다는데 친구 행이 남음');
+}
+
+// 15-27: 개발용 초기화는 부른 사람의 친구 · 그룹만 지우고 다른 사람 관계는 그대로. 임시 계정으로 함 (시드 계정을 비우지 않으려고)
+async function devResetCheck(ctx) {
+  if (!ctx.caps.hasRpc('dev_reset_my_data')) skip('dev_reset_my_data가 DB에 없음');
+  const email = `e2e-reset-${rand()}@example.com`;
+  const created = await ctx.admin.auth.admin.createUser({ email, password: ctx.password, email_confirm: true });
+  must(!created.error, `임시 계정 만들기: ${created.error?.message}`);
+  const T = created.data.user.id;
+  try {
+    ok(await ctx.admin.from('profiles').update({ nickname: '초기화시험', onboarded_at: new Date().toISOString() }).eq('user_id', T), '프로필 채우기');
+    const { createClient } = await import('@supabase/supabase-js');
+    const tc = createClient(ctx.url, ctx.anonKey, { auth: { persistSession: false, autoRefreshToken: false } });
+    const si = await tc.auth.signInWithPassword({ email, password: ctx.password });
+    must(!si.error, `임시 계정 로그인: ${si.error?.message}`);
+    must((await sendRequest(ctx, tc, T, ctx.ids.B)) === 'REQUESTED', '임시 계정의 친구 요청이 REQUESTED가 아님');
+    must((await acceptRequest(ctx, ctx.b, T, ctx.ids.B)) === 'ACCEPTED', 'B의 수락이 ACCEPTED가 아님');
+    const g = ok(await tc.from('groups').insert({ group_name: `${E2E_PREFIX}초기화 그룹`, owner_id: T }).select().single(), '임시 계정 그룹');
+    const bBefore = ok(await ctx.admin.from('friends').select('friend_id').or(`requester_id.eq.${ctx.ids.B},addressee_id.eq.${ctx.ids.B}`), 'B 친구 행 (전)');
+    const res = ok(await tc.rpc('dev_reset_my_data'), '개발용 초기화');
+    must(res?.friend_data, `초기화 결과에 친구 쪽 정리 요약이 없음: ${JSON.stringify(res)}`);
+    const mine = ok(await ctx.admin.from('friends').select('friend_id').or(`requester_id.eq.${T},addressee_id.eq.${T}`), '임시 계정 친구 행');
+    must(mine.length === 0, `초기화했는데 친구 행이 ${mine.length}개 남음`);
+    const mem = ok(await ctx.admin.from('group_members').select('user_id').eq('group_id', g.group_id).eq('user_id', T), '임시 계정 멤버 행');
+    must(mem.length === 0, '초기화했는데 그룹 멤버 행이 남음');
+    const bAfter = ok(await ctx.admin.from('friends').select('friend_id').or(`requester_id.eq.${ctx.ids.B},addressee_id.eq.${ctx.ids.B}`), 'B 친구 행 (후)');
+    must(bAfter.length === bBefore.length - 1, `B의 다른 친구 관계가 영향 받음: ${bBefore.length} → ${bAfter.length}`);
+    const noLogin = await createClient(ctx.url, ctx.anonKey, { auth: { persistSession: false, autoRefreshToken: false } }).rpc('dev_reset_my_data');
+    must(noLogin.error, '로그인 없이 개발용 초기화가 불림');
+  } finally {
+    await ctx.admin.from('groups').delete().like('group_name', `${E2E_PREFIX}초기화%`);
+    const del = await ctx.admin.auth.admin.deleteUser(T);
+    if (del.error) throw new Error(`임시 계정 지우기 실패: ${del.error.message}`);
+  }
+}
+
+// 15-16: 그룹 기상 신호 채널은 서버 트리거만 보냄 — 멤버가 직접 broadcast를 보내도 다른 멤버에게 안 감
+async function broadcastClosed(ctx) {
+  const topic = `group:${ctx.s.group}:wake`;
+  const got = [];
+  const rx = ctx.b.channel(topic, { config: { private: true, broadcast: { self: false } } });
+  rx.on('broadcast', { event: 'refresh' }, (m) => got.push(m));
+  const subscribed = await new Promise((resolve) => {
+    const t = setTimeout(() => resolve(false), 5000);
+    rx.subscribe((status) => {
+      if (status === 'SUBSCRIBED') { clearTimeout(t); resolve(true); }
+      if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') { clearTimeout(t); resolve(false); }
+    });
+  });
+  try {
+    if (!subscribed) skip('Realtime 비공개 채널을 못 열어 broadcast 거부 확인 생략 (로컬 Realtime 상태 확인)');
+    const tx = ctx.a.channel(topic, { config: { private: true } });
+    const txOpen = await new Promise((resolve) => {
+      const t = setTimeout(() => resolve(false), 4000);
+      tx.subscribe((status) => { if (status === 'SUBSCRIBED') { clearTimeout(t); resolve(true); } });
+    });
+    try {
+      // 보내는 쪽이 채널을 못 열었다면 '서버가 거부'인지 '안 보냄'인지 구분이 안 되므로 확인 생략
+      if (!txOpen) skip('보내는 쪽(A) 비공개 채널이 안 열려 broadcast 거부 확인 생략');
+      await tx.send({ type: 'broadcast', event: 'refresh', payload: { date: todayKst(), from: 'e2e' } });
+      await new Promise((r) => setTimeout(r, 2000));
+    } finally {
+      await ctx.a.removeChannel(tx);
+    }
+    must(got.length === 0, `A가 직접 보낸 기상 신호가 B에게 도착함 (${got.length}건)`);
+  } finally {
+    await ctx.b.removeChannel(rx);
+  }
+}
+
 export const STEPS = [
   { n: 1, who: 'A', ch: '2 · 13', action: '카카오로 가입 → 자동 아이디', run: (ctx) => signupCheck(ctx, 'a') },
   { n: 2, who: 'B', ch: '2 · 13', action: '구글로 가입 → 자동 아이디', run: (ctx) => signupCheck(ctx, 'b') },
@@ -158,6 +236,10 @@ export const STEPS = [
     async run(ctx) {
       const r = await searchHandle(ctx, ctx.a, `nobody_${rand()}`);
       must(r.status === 'NOT_FOUND' && !r.profile, `없는 아이디인데 결과가 나옴: ${r.status}`);
+      // 15장 대본 층: 직접 insert 닫힘(15-02) · 시드 계정 아이디는 demo_ 로 구분(15-28) · 개발용 초기화(15-27)
+      if (rpcOf(ctx.caps, 'friend_request')) await directInsertClosed(ctx);
+      must(/^demo_/.test(ctx.handles.B), `시드 계정 아이디가 demo_로 시작하지 않음: ${ctx.handles.B}`);
+      await devResetCheck(ctx);
     },
   },
   {
@@ -561,6 +643,26 @@ export const STEPS = [
       // 줄인 응답: 미루기 횟수 · 알람 끈 시각 같은 칸은 내 줄만
       const mine = rows.find((r) => r.is_me);
       must(mine, 'A 자신의 줄이 없음');
+      // 15장 대본 층: 조회 날짜는 어제 · 오늘 · 내일만 (지난 이력을 거슬러 읽는 길 막음), 직접 broadcast 거부(15-16)
+      for (const days of [3, -3]) {
+        const d = new Date(Date.parse(`${todayKst()}T00:00:00Z`) + days * 86400e3).toISOString().slice(0, 10);
+        const far = ok(await callRpc(ctx.a, ctx.fn.group_wake, { p_group_id: ctx.s.group, p_date: d }), `기상 조회 ${d}`);
+        must(far.length === 0, `${d} 날짜로 조회하면 줄이 나오면 안 되는데 ${far.length}개 나옴`);
+      }
+      // 그룹에 없는 사람(임시 계정)을 대상으로 — 이미 초대된 C로 하면 중복 키 오류로 정책이 열려 있어도 통과함
+      const tmp = await ctx.admin.auth.admin.createUser({ email: `e2e-inv-${rand()}@example.com`, password: ctx.password, email_confirm: true });
+      must(!tmp.error, `임시 계정 만들기: ${tmp.error?.message}`);
+      try {
+        const direct = await ctx.a.from('group_members').insert({ group_id: ctx.s.group, user_id: tmp.data.user.id, invite_status: 'INVITED' });
+        must(direct.error, '함수 밖 직접 insert로 그룹 초대가 만들어짐 (15-02)');
+        must(/row-level security|permission denied/i.test(direct.error.message), `직접 초대 거절 이유가 권한이 아님: ${direct.error.message}`);
+        const row = ok(await ctx.admin.from('group_members').select('user_id').eq('group_id', ctx.s.group).eq('user_id', tmp.data.user.id), '멤버 행');
+        must(row.length === 0, '거절됐다는데 멤버 행이 남음');
+      } finally {
+        const del = await ctx.admin.auth.admin.deleteUser(tmp.data.user.id);
+        if (del.error) throw new Error(`임시 계정 지우기 실패: ${del.error.message}`);
+      }
+      await broadcastClosed(ctx);
     },
   },
   {
@@ -834,7 +936,7 @@ export const STEPS = [
       }
       const rows = ok(await callRpc(ctx.a, ctx.fn.group_wake, { p_group_id: ctx.s.group, p_date: todayKst() }), '그룹 기상 상태');
       const c = rows.find((r) => r.user_id === ctx.ids.C);
-      must(!c || (!c.wake_confirmed_at && !c.rang_at && !c.dismissed_at), 'C의 기상 정보가 A에게 보임');
+      must(!c || (!c.wake_confirmed_at && c.wake_status !== 'CONFIRMED'), 'C의 기상 정보가 A에게 보임');
     },
   },
   {

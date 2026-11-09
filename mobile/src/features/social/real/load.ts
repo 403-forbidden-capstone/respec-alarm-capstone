@@ -1,7 +1,8 @@
 // ② 친구 · 그룹 실데이터 — 읽기 공용 (쿼리만, 화면 모양으로 바꾸는 일은 snapshot.ts · map.ts)
 //   · loadSnapshot: 친구 · 그룹 · 구성원 · 권한 · 공개 프로필을 한 번에 읽음. 같은 시각에 여러 함수가 부르면(홈이 그룹마다 부름) 한 번만 읽음 — 쓰기 뒤에는 invalidateSnapshot()
-//   · loadWakeRows: get_group_wake(칸 7개, 친구 7장). date = 기상 신호가 알려 준 날 (없으면 함수가 내 시간대의 오늘)
+//   · loadWakeRows: get_group_wake(칸 7개, 친구 7장). date = 기상 신호가 알려 준 날 (없거나 어제~내일 밖이면 함수가 내 시간대의 오늘)
 //   · loadWakeHides: 내가 기상을 숨긴 사람들 (wake_hides — 내 줄만 읽힘, 쓰기는 set_wake_hidden으로만)
+import { addDays, dayKey } from '@/lib/format';
 import { supabase } from '@/lib/supabase';
 import { requireUserId } from '@/lib/user';
 
@@ -48,8 +49,16 @@ export async function loadSnapshot(): Promise<Snapshot> {
   return entry.promise;
 }
 
+// 서버 get_group_wake는 날짜를 어제 · 오늘 · 내일만 받음(밖이면 줄 없음, 친구의 지난 기상을 거슬러 읽는 길 막기). 폰이 오래 꺼졌다 올라온 기상 신호의
+//   날짜는 그 밖일 수 있어 — 이때는 날짜 없이 불러 오늘 기준으로 읽음. 앱은 한국 시간 날짜(dayKey)로 어제~내일을 봄
+export function wakeDateInRange(date: string | null | undefined, now: Date = new Date()): string | null {
+  if (!date) return null;
+  return date >= dayKey(addDays(now, -1)) && date <= dayKey(addDays(now, 1)) ? date : null;
+}
+
 export async function loadWakeRows(groupId: string, date?: string | null): Promise<WakeRow[]> {
-  const { data, error } = await supabase.rpc('get_group_wake', date ? { p_group_id: groupId, p_date: date } : { p_group_id: groupId });
+  const day = wakeDateInRange(date);
+  const { data, error } = await supabase.rpc('get_group_wake', day ? { p_group_id: groupId, p_date: day } : { p_group_id: groupId });
   if (error) throw error;
   return data ?? [];
 }
