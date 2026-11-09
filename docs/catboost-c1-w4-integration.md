@@ -70,3 +70,12 @@ node --experimental-strip-types --test supabase/functions/_shared/prepare-ml.tes
 - 직전 날짜의 `daily_records.actual_prepare_minutes`를 찾은 경우만 W4 후보이며 없거나 유효하지 않으면 C1 후보. 모델 API 실패/시간 초과/검증 실패 시 기존 P80 사용.
 - 동일한 `computePlan`에 동일한 입력과 추론값을 주었을 때 preview/save 시각이 일치하는 순수 테스트 추가. **실제 저장 API E2E 또는 데이터베이스 영속화 일치성은 아직 검증하지 못했다**.
 - 서버 코드의 새 안전장치는 브랜치에서 테스트한 뒤 별도로 배포해야 동작한다. 현재 운영 플래그는 0 유지.
+
+## 검증된 사용자 입력 저장 경로 (미배포)
+
+- DB 마이그레이션 `20261110100000_prepare_ml_verified_profiles.sql`에 `public.prepare_ml_verified_profiles` 신설. 일반 `authenticated`는 SELECT/INSERT/UPDATE/DELETE 권한 없음. `service_role`만 접근; 프로필 삭제 시 CASCADE.
+- 코드북 확인 + 명시적 동의 후, **별도 신뢰된 서버 워크플로**에서만 연령/교육/경제활동 코드를 이 테이블에 저장. 현재 앱 UI와 검증된 코드 생성/저장 엔드포인트는 아직 구현하지 않음.
+- 모델 예측 전 필수 조건: 전역 `PREPARE_ML_ENABLED=1`, 해당 유저가 `PREPARE_ML_ALLOWED_USER_IDS`에 포함, 서버 전용 검증행 존재, `consent_at`/ `verified_at` 유효, `codebook_version === PREPARE_ML_CODEBOOK_VERSION`. 하나라도 빠지면 기존 P80로 복귀.
+- 종전 클라이언트 수정 가능 `profiles.ml_*` 및 `ml_codes_verified`는 **더 이상 모델 요청 경로에서 사용하지 않음**.
+- 실제 앱 요청은 여전히 일정 초안만 제출. 날짜/시간대는 서버에서 달력 피처로, 모델 코드값은 서버 전용 테이블에서, W4 직전 날짜 기록은 `daily_records`에서 읽음.
+- 아직 **미구현/미검증**: UI와 동의 문구, 원본 조사 코드 매핑, 서비스 유저 평가, 실제 `alarm-commit` 영속화 일치 검증. 운영에 배포하거나 전체 플래그를 켜지 말 것.
