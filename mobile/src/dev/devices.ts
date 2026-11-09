@@ -29,6 +29,7 @@ export const DEFAULT_DEVICE_ID = 's24';
 // 고른 기종 저장 키(localStorage)와 주소 인자(?device=s24) — 주소에 있으면 저장값보다 앞섬
 export const DEVICE_STORAGE_KEY = 'respec.device';
 export const DEVICE_QUERY = 'device';
+export const PANEL_TOOLS_KEY = 'respec.panelTools'; // 패널 "도구" 묶음을 펼쳐 뒀는지 ('1' = 펼침). 새 세션을 눌러도 남김
 
 // 레이아웃 숫자
 export const PANEL_WIDTH = 280; // 왼쪽 패널 폭

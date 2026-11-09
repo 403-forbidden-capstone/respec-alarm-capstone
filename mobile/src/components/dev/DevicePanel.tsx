@@ -1,6 +1,6 @@
-import { router } from 'expo-router';
-import type { ReactNode } from 'react';
-import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { router, usePathname } from 'expo-router';
+import { useMemo, useState, type ReactNode } from 'react';
+import { Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 
 import { Button, Segmented, Text, toast } from '@/components/ui';
 import {
@@ -8,11 +8,12 @@ import {
   DEVICE_STORAGE_KEY,
   DEVICES,
   PANEL_COLLAPSED_WIDTH,
+  PANEL_TOOLS_KEY,
   PANEL_WIDTH,
   type Device,
 } from '@/dev/devices';
-import { DEV_TOOLS, modeBlock } from '@/dev/panelModel';
-import { sectionsFor } from '@/dev/screenList';
+import { DEV_TOOLS, filterSections, modeBlock, sectionIndexOfPath } from '@/dev/panelModel';
+import { isFold, sectionsFor, type ScreenRow } from '@/dev/screenList';
 import { useAuth } from '@/features/auth/AuthProvider';
 import { changeDataMode, goAfterRender } from '@/features/auth/DataModeToggle';
 import type { ScenarioTime } from '@/lib/clock';
@@ -22,7 +23,7 @@ import { signOutAndCleanup } from '@/lib/session';
 import { useAction } from '@/lib/useAction';
 import { colors, radius } from '@/theme';
 
-// 웹 미리보기 왼쪽 패널 (DeviceFrame.web.tsx만 씀) — 데이터 모드 · 시나리오 시각 · 개발 도구 · 기종 선택 · 화면 목록 · 세션 · 바로 가기
+// 웹 미리보기 왼쪽 패널 (DeviceFrame.web.tsx만 씀) — 위에서부터 데이터 모드 · 화면 목록(기능별 절, 거르기 칸) · 도구(시나리오 시각 · 개발 도구 · 기종 · 세션 · 바로 가기, 기본 접힘)
 // 웹 미리보기는 개발 서버처럼 쓰므로 데이터 모드 전환 · 로그인 · 개발 화면(알람 테스트 등)은 /dev/screens까지 안 가고 여기서 바로
 
 type Props = {
@@ -50,8 +51,8 @@ const MODES = [
 // 새 탭에서 여는 곳 — 프레임 안 화면(/dev/*)은 "개발 도구"에 있음
 const LINKS = [['/board', '개발 보드']] as const;
 
-// 이 앱이 localStorage에 쓰는 키 — 데이터 모드(respec.dataMode) · 로그인 세션(sb-). 기종 선택과 보드 · 결정 페이지 키는 남김
-const isSessionKey = (key: string) => key !== DEVICE_STORAGE_KEY && (key.startsWith('respec.') || key.startsWith('sb-'));
+// 이 앱이 localStorage에 쓰는 키 — 데이터 모드(respec.dataMode) · 로그인 세션(sb-). 기종 선택 · 패널 도구 접힘과 보드 · 결정 페이지 키는 남김
+const isSessionKey = (key: string) => key !== DEVICE_STORAGE_KEY && key !== PANEL_TOOLS_KEY && (key.startsWith('respec.') || key.startsWith('sb-'));
 
 function resetSession() {
   try {
@@ -84,7 +85,6 @@ function copyAddress(device: Device) {
 }
 
 export function DevicePanel({ device, scale, onDevice, collapsed, onToggle, scenario, onScenario, canScenario }: Props) {
-  const { mode } = useMode(); // 화면 목록은 지금 모드에서 열리는 줄만
   if (collapsed) {
     return (
       <View style={[styles.panel, styles.folded]}>
@@ -108,97 +108,9 @@ export function DevicePanel({ device, scale, onDevice, collapsed, onToggle, scen
       <ScrollView contentContainerStyle={styles.body} showsVerticalScrollIndicator={false}>
         <ModeBlock />
 
-        {canScenario ? (
-          <Block title="시나리오 시각" hint="가짜 데이터 · 5월 22일 목요일">
-            <Segmented options={TIMES} value={scenario} onChange={onScenario} />
-          </Block>
-        ) : null}
+        <ScreenListBlock />
 
-        <Block title="개발 도구" hint="누르면 이 프레임 안에서 열림">
-          {DEV_TOOLS.map((tool) => (
-            <Pressable
-              key={tool.name}
-              onPress={() => router.push(tool.href)}
-              accessibilityRole="button"
-              style={({ pressed }) => [styles.item, pressed && styles.pressed]}
-            >
-              <Text variant="rowLabel">{tool.name}</Text>
-              <Text variant="caption" style={styles.note}>
-                {tool.note}
-              </Text>
-            </Pressable>
-          ))}
-        </Block>
-
-        <Block title="기종" hint={`${device.width} × ${device.height} · 비율 ${Math.round(scale * 100)}%`}>
-          {DEVICES.map((d) => {
-            const on = d.id === device.id;
-            return (
-              <Pressable
-                key={d.id}
-                onPress={() => onDevice(d.id)}
-                accessibilityRole="button"
-                accessibilityState={{ selected: on }}
-                style={[styles.item, on && styles.itemOn]}
-              >
-                <Text variant="rowLabel" tone={on ? 'ink' : 'sub'} weight={on ? 600 : 400} style={styles.grow}>
-                  {d.name}
-                </Text>
-                <Text variant="caption">
-                  {d.width} × {d.height}
-                </Text>
-              </Pressable>
-            );
-          })}
-        </Block>
-
-        <Block title="화면 목록" hint="누르면 이 프레임 안에서 열림">
-          {sectionsFor(mode).map((section) => (
-            <View key={section.title} style={styles.group}>
-              <Text variant="label" weight={600}>
-                {section.title}
-              </Text>
-              {section.rows.map((row) => (
-                <Pressable
-                  key={`${row.id}-${row.name}`}
-                  onPress={() => router.push(row.href)}
-                  accessibilityRole="button"
-                  style={({ pressed }) => [styles.item, pressed && styles.pressed]}
-                >
-                  <Text variant="screenId" style={styles.id}>
-                    {row.id}
-                  </Text>
-                  <Text variant="rowLabel" style={styles.grow}>
-                    {row.name}
-                  </Text>
-                </Pressable>
-              ))}
-            </View>
-          ))}
-        </Block>
-
-        <Block title="세션">
-          <View style={styles.buttons}>
-            <Button small variant="ghost" label="새 세션" onPress={resetSession} />
-            <Button small variant="ghost" label="주소 복사" onPress={() => copyAddress(device)} />
-          </View>
-        </Block>
-
-        <Block title="바로 가기" hint="새 탭에서 열림">
-          {LINKS.map(([path, label]) => (
-            <Pressable
-              key={path}
-              onPress={() => window.open(path, '_blank', 'noopener')}
-              accessibilityRole="link"
-              style={({ pressed }) => [styles.item, pressed && styles.pressed]}
-            >
-              <Text variant="rowLabel" style={styles.grow}>
-                {label}
-              </Text>
-              <Text variant="caption">{path}</Text>
-            </Pressable>
-          ))}
-        </Block>
+        <ToolsBlock device={device} scale={scale} onDevice={onDevice} scenario={scenario} onScenario={onScenario} canScenario={canScenario} />
       </ScrollView>
     </View>
   );
@@ -262,6 +174,233 @@ function ModeBlock() {
   );
 }
 
+// 접힘 상태를 localStorage에 남김 — 막힌 브라우저(비공개 창 등)는 접힘 그대로 기본값만 씀
+function readFlag(key: string): boolean {
+  try {
+    return globalThis.localStorage?.getItem(key) === '1';
+  } catch {
+    return false;
+  }
+}
+function writeFlag(key: string, on: boolean) {
+  try {
+    globalThis.localStorage?.setItem(key, on ? '1' : '0');
+  } catch {
+    // 저장 못 해도 이번 화면에서는 동작함
+  }
+}
+
+function Chevron({ open }: { open: boolean }) {
+  return (
+    <Text variant="caption" style={styles.chevron}>
+      {open ? '▾' : '▸'}
+    </Text>
+  );
+}
+
+function ScreenRowButton({ row }: { row: ScreenRow }) {
+  return (
+    <Pressable
+      onPress={() => router.push(row.href)}
+      accessibilityRole="button"
+      style={({ pressed }) => [styles.item, pressed && styles.pressed]}
+    >
+      <Text variant="screenId" style={styles.id}>
+        {row.id}
+      </Text>
+      <Text variant="rowLabel" style={styles.grow}>
+        {row.name}
+      </Text>
+    </Pressable>
+  );
+}
+
+// 화면 목록 — 맨 위 거르기 칸, 기능별 절(절마다 접기 · 펼치기, 지금 열린 화면이 속한 절만 기본 펼침)
+function ScreenListBlock() {
+  const { mode } = useMode(); // 지금 모드에서 열리는 줄만
+  const pathname = usePathname();
+  const [query, setQuery] = useState('');
+  const [open, setOpen] = useState<Record<string, boolean>>({}); // 절 · 묶음 이름 → 사용자가 누른 상태
+  const sections = useMemo(() => sectionsFor(mode), [mode]);
+  const current = sections[sectionIndexOfPath(sections, pathname)]?.title;
+  const shown = filterSections(sections, query);
+  const searching = query.trim().length > 0;
+  const isOpen = (key: string, byDefault: boolean) => searching || (open[key] ?? byDefault);
+  const toggle = (key: string, byDefault: boolean) => setOpen((prev) => ({ ...prev, [key]: !(prev[key] ?? byDefault) }));
+
+  return (
+    <Block title="화면 목록" hint="누르면 이 프레임 안에서 열림">
+      <TextInput
+        value={query}
+        onChangeText={setQuery}
+        placeholder="번호 · 이름으로 거르기 (예: G03, 깨우기)"
+        placeholderTextColor={colors.faint}
+        accessibilityLabel="화면 거르기"
+        autoCapitalize="none"
+        autoCorrect={false}
+        style={styles.search}
+      />
+      {shown.length === 0 ? (
+        <Text variant="caption" style={styles.reason}>
+          맞는 화면이 없어요
+        </Text>
+      ) : null}
+      {shown.map((section) => {
+        const sectionOpen = isOpen(section.title, section.title === current);
+        return (
+          <View key={section.title} style={styles.group}>
+            <Pressable
+              onPress={() => toggle(section.title, section.title === current)}
+              accessibilityRole="button"
+              accessibilityState={{ expanded: sectionOpen }}
+              style={({ pressed }) => [styles.sectionHead, pressed && styles.pressed]}
+            >
+              <Chevron open={sectionOpen} />
+              <Text variant="label" weight={600} style={styles.grow}>
+                {section.title}
+              </Text>
+              <Text variant="caption">{section.rows.length}</Text>
+            </Pressable>
+            {sectionOpen
+              ? section.items.map((item) => {
+                  if (!isFold(item)) return <ScreenRowButton key={`${item.id}-${item.name}`} row={item} />;
+                  const key = `${section.title}/${item.fold}`;
+                  const foldOpen = isOpen(key, false);
+                  return (
+                    <View key={key}>
+                      <Pressable
+                        onPress={() => toggle(key, false)}
+                        accessibilityRole="button"
+                        accessibilityState={{ expanded: foldOpen }}
+                        style={({ pressed }) => [styles.item, pressed && styles.pressed]}
+                      >
+                        <Text variant="screenId" style={styles.id}>
+                          <Chevron open={foldOpen} />
+                        </Text>
+                        <Text variant="rowLabel" style={styles.grow}>
+                          {item.fold}
+                        </Text>
+                      </Pressable>
+                      {foldOpen ? (
+                        <View style={styles.foldRows}>
+                          {item.rows.map((row) => (
+                            <ScreenRowButton key={`${row.id}-${row.name}`} row={row} />
+                          ))}
+                        </View>
+                      ) : null}
+                    </View>
+                  );
+                })
+              : null}
+          </View>
+        );
+      })}
+    </Block>
+  );
+}
+
+// 도구 — 시나리오 시각 · 개발 도구 · 기종 · 세션 · 바로 가기. 자주 안 써서 기본 접힘, 펼침 상태는 기억
+function ToolsBlock({
+  device,
+  scale,
+  onDevice,
+  scenario,
+  onScenario,
+  canScenario,
+}: Pick<Props, 'device' | 'scale' | 'onDevice' | 'scenario' | 'onScenario' | 'canScenario'>) {
+  const [open, setOpen] = useState(() => readFlag(PANEL_TOOLS_KEY));
+  const toggle = () => {
+    writeFlag(PANEL_TOOLS_KEY, !open);
+    setOpen(!open);
+  };
+  return (
+    <View style={styles.block}>
+      <Pressable
+        onPress={toggle}
+        accessibilityRole="button"
+        accessibilityState={{ expanded: open }}
+        style={({ pressed }) => [styles.toolsHead, pressed && styles.pressed]}
+      >
+        <Chevron open={open} />
+        <Text variant="bodyStrong" style={styles.grow}>
+          도구
+        </Text>
+        <Text variant="caption">{open ? '접기' : '시나리오 · 기종 · 세션'}</Text>
+      </Pressable>
+      {open ? (
+        <>
+          {canScenario ? (
+            <Block title="시나리오 시각" hint="가짜 데이터 · 5월 22일 목요일">
+              <Segmented options={TIMES} value={scenario} onChange={onScenario} />
+            </Block>
+          ) : null}
+
+          <Block title="개발 도구" hint="누르면 이 프레임 안에서 열림">
+            {DEV_TOOLS.map((tool) => (
+              <Pressable
+                key={tool.name}
+                onPress={() => router.push(tool.href)}
+                accessibilityRole="button"
+                style={({ pressed }) => [styles.item, pressed && styles.pressed]}
+              >
+                <Text variant="rowLabel">{tool.name}</Text>
+                <Text variant="caption" style={styles.note}>
+                  {tool.note}
+                </Text>
+              </Pressable>
+            ))}
+          </Block>
+
+          <Block title="기종" hint={`${device.width} × ${device.height} · 비율 ${Math.round(scale * 100)}%`}>
+            {DEVICES.map((d) => {
+              const on = d.id === device.id;
+              return (
+                <Pressable
+                  key={d.id}
+                  onPress={() => onDevice(d.id)}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: on }}
+                  style={[styles.item, on && styles.itemOn]}
+                >
+                  <Text variant="rowLabel" tone={on ? 'ink' : 'sub'} weight={on ? 600 : 400} style={styles.grow}>
+                    {d.name}
+                  </Text>
+                  <Text variant="caption">
+                    {d.width} × {d.height}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </Block>
+
+          <Block title="세션">
+            <View style={styles.buttons}>
+              <Button small variant="ghost" label="새 세션" onPress={resetSession} />
+              <Button small variant="ghost" label="주소 복사" onPress={() => copyAddress(device)} />
+            </View>
+          </Block>
+
+          <Block title="바로 가기" hint="새 탭에서 열림">
+            {LINKS.map(([path, label]) => (
+              <Pressable
+                key={path}
+                onPress={() => window.open(path, '_blank', 'noopener')}
+                accessibilityRole="link"
+                style={({ pressed }) => [styles.item, pressed && styles.pressed]}
+              >
+                <Text variant="rowLabel" style={styles.grow}>
+                  {label}
+                </Text>
+                <Text variant="caption">{path}</Text>
+              </Pressable>
+            ))}
+          </Block>
+        </>
+      ) : null}
+    </View>
+  );
+}
+
 function Block({ title, hint, children }: { title: string; hint?: string; children: ReactNode }) {
   return (
     <View style={styles.block}>
@@ -296,6 +435,11 @@ const styles = StyleSheet.create({
   block: { marginTop: 16 },
   blockHead: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', paddingHorizontal: 4, marginBottom: 6 },
   group: { marginTop: 4, marginBottom: 6 },
+  sectionHead: { flexDirection: 'row', alignItems: 'center', gap: 6, minHeight: 34, paddingVertical: 6, paddingHorizontal: 8, borderRadius: radius.segmentItem, backgroundColor: colors.chip },
+  toolsHead: { flexDirection: 'row', alignItems: 'center', gap: 6, minHeight: 34, paddingVertical: 6, paddingHorizontal: 8, borderRadius: radius.segmentItem },
+  chevron: { width: 14 },
+  foldRows: { paddingLeft: 12 },
+  search: { minHeight: 36, borderWidth: 1, borderColor: colors.line, borderRadius: radius.segmentItem, paddingHorizontal: 10, marginBottom: 6, fontSize: 13, color: colors.ink, backgroundColor: colors.card },
   item: { flexDirection: 'row', alignItems: 'center', gap: 8, minHeight: 34, paddingVertical: 6, paddingHorizontal: 8, borderRadius: radius.segmentItem },
   itemOn: { backgroundColor: colors.chip },
   pressed: { backgroundColor: colors.chip },

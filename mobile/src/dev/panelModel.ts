@@ -4,6 +4,8 @@ import type { Href } from 'expo-router';
 
 import type { DataMode } from '@/lib/modePolicy';
 
+import type { ScreenItem, ScreenRow, ScreenSection } from './screenList';
+
 export type ModeBlockInput = {
   mode: DataMode;
   ready: boolean; // lib/flags REAL_DATA_READY
@@ -59,3 +61,42 @@ export const DEV_TOOLS: readonly DevTool[] = [
   // "화면 목록"은 패널의 같은 이름 블록과 겹쳐서 "개발 메뉴"로 부름 — 로그인 화면의 "개발 메뉴에서 이메일로 로그인"과 같은 이름
   { href: '/dev/screens', name: '개발 메뉴', note: '이메일 로그인 · 화면 번호로 열기' },
 ];
+
+// ---- 화면 목록 (패널 맨 위) ----
+
+// href를 열렸을 때의 주소 글자로 — '/alarm/[id]' + { id: 'a1' } → '/alarm/a1'. usePathname()과 맞춰 보려는 용도
+export function hrefPath(href: Href): string {
+  if (typeof href === 'string') return href.split('?')[0];
+  const params = (href as { params?: Record<string, unknown> }).params ?? {};
+  const pathname = (href as { pathname: string }).pathname;
+  return pathname.replace(/\[(\w+)\]/g, (_, key: string) => String(params[key] ?? `[${key}]`));
+}
+
+const rowsOf = (item: ScreenItem): ScreenRow[] => ('fold' in item ? item.rows : [item]);
+
+// 지금 열린 화면이 속한 절의 번호 — 못 찾으면 0 (맨 위 절). 같은 화면이 여러 절에 있으면 먼저 나온 절
+export function sectionIndexOfPath(sections: ScreenSection[], pathname: string): number {
+  const at = sections.findIndex((section) => section.rows.some((row) => hrefPath(row.href) === pathname));
+  return at < 0 ? 0 : at;
+}
+
+// 거르기 칸 — 번호나 이름에 글자가 들어 있는 줄만 (대소문자 무시). 묶음은 이름이 맞으면 통째로, 아니면 맞는 단계만. 비면 그대로
+export function filterSections(sections: ScreenSection[], query: string): ScreenSection[] {
+  const q = query.trim().toLowerCase();
+  if (!q) return sections;
+  const hit = (text: string) => text.toLowerCase().includes(q);
+  const rowHit = (row: ScreenRow) => hit(row.id) || hit(row.name);
+  return sections
+    .map((section) => {
+      const items = section.items
+        .map((item): ScreenItem | null => {
+          if (!('fold' in item)) return rowHit(item) ? item : null;
+          if (hit(item.fold)) return item;
+          const rows = item.rows.filter(rowHit);
+          return rows.length ? { ...item, rows } : null;
+        })
+        .filter((item): item is ScreenItem => item != null);
+      return { ...section, items, rows: items.flatMap(rowsOf) };
+    })
+    .filter((section) => section.items.length > 0);
+}
