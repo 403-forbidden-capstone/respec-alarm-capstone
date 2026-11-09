@@ -110,3 +110,63 @@ test('5장 그룹 정적 규칙: 참여 중 0명 · 20명 초과 · 한 사람 1
   assert.ok(rules(tenPlus.map((m) => ({ group_id: m.group_id })), tenPlus).includes('G-한 사람이 참여 그룹 10개를 넘음'));
   assert.deepEqual(rules([{ group_id: 'g1' }], [j(A, 'g1')]), []);
 });
+
+// ---- 7 · 8 · 9 · 10장 규칙
+import { canSeeWake, checkApptEdit, checkPingVerdict, checkProposal, checkWakeAndAppointments, checkWakeRows } from './oracle.mjs';
+
+const mem = (u, g, over = {}) => ({ user_id: u, group_id: g, invite_status: 'JOINED', wake_share_opt_in: true, ...over });
+
+test('기상이 보이는가: 둘 다 참여 중 + 주인 동의 + 숨김 · 차단 아님', () => {
+  const members = [mem(A, 'g'), mem(B, 'g')];
+  assert.equal(canSeeWake({ viewer: A, owner: B, groupId: 'g', members }), true);
+  assert.equal(canSeeWake({ viewer: A, owner: B, groupId: 'g', members: [mem(A, 'g'), mem(B, 'g', { wake_share_opt_in: false })] }), false);
+  assert.equal(canSeeWake({ viewer: A, owner: B, groupId: 'g', members: [mem(A, 'g'), mem(B, 'g', { invite_status: 'LEFT' })] }), false);
+  assert.equal(canSeeWake({ viewer: A, owner: B, groupId: 'g', members, hides: [{ owner_id: B, hidden_from_id: A }] }), false);
+  assert.equal(canSeeWake({ viewer: A, owner: B, groupId: 'g', members, hides: [{ owner_id: A, hidden_from_id: B }] }), true); // 반대 방향 숨김은 상관없음
+  assert.equal(canSeeWake({ viewer: A, owner: B, groupId: 'g', members, blocks: [{ blocker_id: B, blocked_id: A }] }), false);
+});
+
+test('그룹 기상 줄: 조건 밖 사람 줄이 있으면 위반', () => {
+  const members = [mem(A, 'g'), mem(B, 'g', { wake_share_opt_in: false }), mem(C, 'g')];
+  const rows = [{ user_id: A, is_me: true }, { user_id: B }, { user_id: C }];
+  const v = checkWakeRows({ viewer: A, groupId: 'g', rows, members });
+  assert.equal(v.length, 1);
+  assert.match(v[0].detail, new RegExp(B));
+});
+
+test('깨우기 판정: FORBIDDEN이 아닌데 기상이 안 보이는 사이면 위반', () => {
+  const members = [mem(A, 'g'), mem(B, 'g', { wake_share_opt_in: false })];
+  assert.equal(checkPingVerdict({ sender: A, target: B, status: 'OK', members }).length, 1);
+  assert.equal(checkPingVerdict({ sender: A, target: B, status: 'FORBIDDEN', members }).length, 0);
+  assert.equal(checkPingVerdict({ sender: A, target: B, status: 'WAIT', members: [mem(A, 'g'), mem(B, 'g')] }).length, 0);
+});
+
+test('알람 바꾸기 제안: 설정 권한 없이 OK면 위반, 차단 쌍이어도 위반', () => {
+  const perms = [{ owner_id: B, grantee_id: A, can_view_alarm: true, can_edit_alarm: true }];
+  assert.equal(checkProposal({ proposer: A, owner: B, status: 'OK', perms }).length, 0);
+  assert.equal(checkProposal({ proposer: C, owner: B, status: 'OK', perms }).length, 1);
+  assert.equal(checkProposal({ proposer: A, owner: B, status: 'FORBIDDEN', perms: [] }).length, 0);
+  assert.equal(checkProposal({ proposer: A, owner: B, status: 'OK', perms, blocks: [{ blocker_id: A, blocked_id: B }] }).length, 1);
+});
+
+test('공동 약속 고치기: 만든 사람 아닌데 고쳐지면 위반 (만든 사람이 비면 참여자는 가능)', () => {
+  assert.equal(checkApptEdit({ editor: A, creatorId: A, rowsChanged: true }).length, 0);
+  assert.equal(checkApptEdit({ editor: B, creatorId: A, rowsChanged: true }).length, 1);
+  assert.equal(checkApptEdit({ editor: B, creatorId: A, rowsChanged: false }).length, 0);
+  assert.equal(checkApptEdit({ editor: B, creatorId: null, rowsChanged: true, isParticipant: true }).length, 0);
+  assert.equal(checkApptEdit({ editor: B, creatorId: null, rowsChanged: true, isParticipant: false }).length, 1);
+});
+
+test('정적 규칙: 기상 확인 하루 한 건 · 그룹 나간 사람의 앞으로 약속 참여 · 제안 합계 ±60분', () => {
+  const now = Date.parse('2026-11-09T01:00:00Z');
+  const future = '2026-11-09T09:00:00Z';
+  const alarms = [{ alarm_id: 'a1', scheduled_at: '2026-11-09T01:30:00Z' }, { alarm_id: 'a2', scheduled_at: '2026-11-09T02:00:00Z', original_scheduled_at: '2026-11-09T00:00:00Z' }];
+  const events = [{ alarm_id: 'a1', user_id: A, event_at: future }, { alarm_id: 'a1', user_id: A, event_at: future }];
+  const rules = (over) => checkWakeAndAppointments({ now, ...over }).map((v) => v.rule);
+  assert.ok(rules({ wakeEvents: events, alarms }).includes('W-기상 확인이 하루 한 건을 넘음'));
+  assert.ok(rules({ alarms }).includes('A-친구가 바꾼 합계가 ±60분을 넘음'));
+  const appointments = [{ appointment_id: 'p', group_id: 'g', appointment_at: future }];
+  const participants = [{ appointment_id: 'p', user_id: A }];
+  assert.ok(rules({ appointments, participants, members: [mem(A, 'g', { invite_status: 'LEFT' })] }).includes('P9-그룹을 나갔는데 앞으로 공동 약속 참여가 남음'));
+  assert.deepEqual(rules({ appointments, participants, members: [mem(A, 'g')] }), []);
+});

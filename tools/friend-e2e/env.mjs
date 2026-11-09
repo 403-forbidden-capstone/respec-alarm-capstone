@@ -35,6 +35,14 @@ function seedEnvPath() {
 
 // 로컬 스택의 공개(anon) 키: E2E_ANON_KEY → `supabase status -o json`
 function anonKeyFromStatus() {
+  // 로컬 스택이 바쁠 때 status가 잠깐 실패할 수 있어 세 번까지 다시 시도
+  for (let i = 0; i < 3; i += 1) {
+    const key = anonKeyOnce();
+    if (key) return key;
+  }
+  return undefined;
+}
+function anonKeyOnce() {
   const r = spawnSync('npx', ['supabase', 'status', '-o', 'json'], { cwd: REPO_ROOT, shell: true, encoding: 'utf8' });
   const start = (r.stdout ?? '').indexOf('{');
   if (start < 0) return undefined;
