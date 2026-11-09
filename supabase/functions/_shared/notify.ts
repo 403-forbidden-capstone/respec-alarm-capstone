@@ -5,7 +5,7 @@
 //        옛 앱이 보내던 title · body · data는 읽지 않음: 문구는 종류별로 서버가 고정하고(push-copy.ts) 알림 데이터도 서버가 채움
 //   처리(한 사람): ① can_send_push(부른 사람, 받는 사람, kind) — 서버 권한 판정(DB 함수, service_role 전용). 없는 · 탈퇴한 · 권한 없는 · 차단된 대상은 모두 같은 403이라
 //        사용자 존재 여부가 응답으로 드러나지 않음(15-나). 깨우기만 can_send_push를 안 부르고 plan_wake_ping이 권한까지 한 곳에서 판정함 ② 받는 사람 프로필(문구에 쓸 이름 · 시간대)
-//        ③ alarmId는 받는 사람의 알람인지 ④ push_tokens 조회 ⑤ Expo Push로 보냄(실패하면 한 번 더) ⑥ 접수 번호를 push_tickets에 기록(영수증은 15분 뒤 배치가 확인)
+//        ③ 알람 바뀜(제안)은 받는 사람에게 방금(1시간 안) 보낸 대기 중 제안을 조회해 문구의 시각 · 알람 종류를 채움(alarmId가 있으면 그 알람의 제안으로 좁힘) ④ push_tokens 조회 ⑤ Expo Push로 보냄(실패하면 한 번 더) ⑥ 접수 번호를 push_tickets에 기록(영수증은 15분 뒤 배치가 확인)
 //        ⑦ 접수 단계에서 만료로 돌아온 토큰은 바로 지움
 //   처리(그룹): plan_group_push(DB 함수)가 보낸 사람이 그 그룹에 참여 중인지 보고 받는 사람 = 참여 중 멤버 − 보낸 사람 − 알림 끈 멤버 − 차단 쌍을 돌려줌 → 받는 사람마다 토큰 조회 · 발송
 //   깨우기(WAKE_PING)는 ①이 아니라 plan_wake_ping(판정만) → 토큰 확인 → plan_wake_ping(횟수 세기, 같은 쌍 잠금 아래 다시 판정) → 발송. 기상이 안 보이는 사람이면 403.
@@ -21,14 +21,14 @@ import type { Db } from './supabase.ts';
 
 // 종류별 권한은 DB 함수 can_send_push(한 사람)와 plan_group_push(그룹)가 정함 (supabase/README.md). 종류가 늘어도 여기는 이름만 더함
 //   WAKE_PING          — G03 깨우기. can_send_push는 늘 거절(옛 서버 함수가 한도 없이 보내지 못하게)이고 plan_wake_ping이 판정: 기상이 보이는 사람에게만(그룹 · 동의 · 오늘 약속 · 숨김 / 차단 아님), 아니면 403. 간격 · 횟수 · 이미 일어남은 상태로 돌려줌
-//   ALARM_CHANGED      — G04. 부른 사람이 받는 사람의 알람에 설정 권한(조회도 함께)이 있을 때만 (D9: 변경 기록은 저장하지 않고 푸시만)
+//   ALARM_CHANGED      — G04 알람 시각 제안. 부른 사람이 받는 사람의 알람에 설정 권한(조회도 함께)이 있고 받는 사람에게 방금(1시간 안) 보낸 대기 중 제안이 있을 때만
 //   FRIEND_REQUEST     — 받는 사람에게 보낸 대기 요청이 있을 때 / FRIEND_ACCEPTED — 방금 수락한 사람이 요청한 사람에게
 //   GROUP_MEMBER_JOINED · GROUP_APPT_CHANGED — 그룹 단위
 export { CLIENT_KINDS as PUSH_KINDS };
 export type PushKind = ClientKind;
 
 const DENIED: Record<ClientKind, string> = {
-  ALARM_CHANGED: '이 사람의 알람을 바꿀 권한이 없어서 알림을 보낼 수 없어요',
+  ALARM_CHANGED: '이 사람에게 알람 제안 알림을 보낼 수 없어요 (권한이 없거나 방금 보낸 제안이 없어요)',
   WAKE_PING: '이 사람에게는 깨우기 알림을 보낼 수 없어요',
   FRIEND_REQUEST: '이 사람에게는 친구 요청 알림을 보낼 수 없어요',
   FRIEND_ACCEPTED: '이 사람에게는 수락 알림을 보낼 수 없어요',

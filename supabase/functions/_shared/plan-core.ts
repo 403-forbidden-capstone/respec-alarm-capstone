@@ -101,7 +101,19 @@ export type AlarmRow = {
   intensity_source: 'AUTO' | 'MANUAL';
   recurrence_rule: string | null;
   original_scheduled_at?: string | null; // 친구 제안을 적용한 알람이면 처음 시각 (친구 10장 — 주인이 직접 고치거나 새로 계산하면 비워짐)
+  original_time_source?: 'AUTO' | 'MANUAL' | null; // 그때의 time_source (원래대로 돌아오면 복원)
 };
+
+// 친구가 제안해 주인이 적용한 알람(original_scheduled_at 있음)을 친구가 바꾸기 전 모습(시각 · time_source)으로 되돌린 목록.
+//   약속의 시각 · 장소가 바뀌거나 반복 새 회차를 만들 때 새 계산 · 직접 고른 값 옮기기의 입력으로 씀 — D67: 친구 값은 새 계산이 이기고
+//   (그 알람은 원래 자동이었으면 자동으로 계산되고), 주인이 직접 고른 값이었으면 그 값을 이어받음. DB에 쓰는 비교(diffAlarms)에는 실제 행을 그대로 넘김
+export function withoutFriendTimes(alarms: readonly AlarmRow[]): AlarmRow[] {
+  return alarms.map((a) =>
+    a.original_scheduled_at == null
+      ? a
+      : { ...a, scheduled_at: a.original_scheduled_at, time_source: a.original_time_source ?? 'AUTO', original_scheduled_at: null, original_time_source: null },
+  );
+}
 
 export type PlanDraft = ParticipantFields &
   AlarmFields & {
