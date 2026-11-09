@@ -35,7 +35,7 @@ Deno.serve(
     const user = await requireUser(req);
     if (!permitted(user.userId)) throw new HttpError('FORBIDDEN', '허용된 테스트 계정만 사용할 수 있어요');
 
-    const model = req.headers.get('x-ml-test-model') ?? 'c1_mae';
+    const model = new URL(req.url).searchParams.get('model') ?? 'c1_mae';
     if (model !== 'c1_mae' && model !== 'w4_mae') {
       throw new HttpError('VALIDATION_FAILED', '테스트 모델은 c1_mae 또는 w4_mae만 지원해요');
     }
