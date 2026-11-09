@@ -30,6 +30,7 @@ export function checkState({ friends, blocks = [], perms = [], hasBlocksTable = 
   }
   for (const p of perms) {
     const k = pairKey(p.owner_id, p.grantee_id);
+    if (p.can_edit_alarm && !p.can_view_alarm) bad('P-설정만 켜고 조회가 꺼짐 (설정⊂조회)', p.permission_id);
     if (blocked.has(k)) bad('B-차단 쌍에 공유 권한', p.permission_id);
     if (p.source_type === 'FRIEND') {
       const fr = friends.find((f) => f.friend_id === p.source_id);
@@ -118,6 +119,11 @@ export const STATUS = {
   block_user: ['BLOCKED', 'ALREADY_BLOCKED', 'SELF', 'NOT_FOUND'],
   unblock_user: ['UNBLOCKED', 'GONE'],
   search_by_handle: ['FOUND', 'SELF', 'NOT_FOUND', 'LIMIT'],
+  set_wake_hidden: ['OK', 'NOT_FOUND'],
+  plan_wake_ping: ['OK', 'WAIT', 'DAILY_LIMIT', 'ALREADY_UP', 'NOT_RINGING', 'OFF', 'FORBIDDEN'],
+  propose_alarm_time: ['OK', 'FORBIDDEN', 'SAME', 'TOO_SOON', 'LIMIT', 'INVALID'],
+  respond_alarm_proposal: ['APPLIED', 'DISMISSED', 'EXPIRED', 'LIMIT', 'NOT_FOUND'],
+  save_group_permissions: ['OK', 'NOT_FOUND', 'NO_MEMBERS'],
   preview_group_by_code: ['FOUND', 'NOT_FOUND', 'EXPIRED', 'LIMIT'],
   join_group: ['JOINED', 'ALREADY_JOINED', 'NOT_FOUND', 'EXPIRED', 'LIMIT', 'FULL', 'TOO_MANY_GROUPS'],
   invite_to_group: ['INVITED', 'ALREADY_INVITED', 'ALREADY_MEMBER', 'SELF', 'NOT_FOUND'],
@@ -129,4 +135,84 @@ export function isServerFault(error) {
   if (!error) return false;
   const code = String(error.code ?? '');
   return code.startsWith('XX') || code === '57014' || /^PGRST00[0-3]$/.test(code) || /fetch failed|ECONNREFUSED/i.test(error.message ?? '');
+}
+
+// ---------------------------------------------------------------------
+// 7 · 8 · 9 · 10장: 기상 · 깨우기 · 공동 약속 · 알람 제안
+// ---------------------------------------------------------------------
+
+// 기상이 보이는가 (7장 can_see_wake): 둘 다 그 그룹에 참여 중 · 주인이 그 그룹에 기상 공유 동의 · 주인이 보는 사람에게 숨기지 않음 · 차단 쌍 아님
+export function canSeeWake({ viewer, owner, groupId, members, hides = [], blocks = [] }) {
+  const joined = (u) => members.find((m) => m.group_id === groupId && m.user_id === u && m.invite_status === 'JOINED');
+  const ownerRow = joined(owner);
+  if (!joined(viewer) || !ownerRow || !ownerRow.wake_share_opt_in) return false;
+  if (hides.some((h) => h.owner_id === owner && h.hidden_from_id === viewer)) return false;
+  if (blocks.some((b) => pairKey(b.blocker_id, b.blocked_id) === pairKey(viewer, owner))) return false;
+  return true;
+}
+
+// 그룹 기상 줄: 내 줄 말고는 can_see_wake가 참인 사람만 있어야 함
+export function checkWakeRows({ viewer, groupId, rows, members, hides = [], blocks = [] }) {
+  const out = [];
+  for (const r of rows) {
+    if (r.is_me || r.user_id === viewer) continue;
+    if (!canSeeWake({ viewer, owner: r.user_id, groupId, members, hides, blocks })) {
+      out.push({ kind: 'VIOLATION', rule: 'W-기상 공유 조건 밖인데 그룹 기상 줄이 보임', detail: `${viewer} → ${r.user_id} @ ${groupId}` });
+    }
+  }
+  return out;
+}
+
+// 깨우기 판정: FORBIDDEN이 아닌 어떤 상태든(OK · WAIT · 횟수 초과 · 이미 일어남 …) 둘 사이에 기상이 보이는 그룹이 있어야 함
+export function checkPingVerdict({ sender, target, status, members, hides = [], blocks = [] }) {
+  if (!status || status === 'FORBIDDEN') return [];
+  const groups = [...new Set(members.map((m) => m.group_id))];
+  const ok = groups.some((g) => canSeeWake({ viewer: sender, owner: target, groupId: g, members, hides, blocks }));
+  return ok ? [] : [{ kind: 'VIOLATION', rule: 'W-기상이 안 보이는 사이인데 깨우기 판정이 FORBIDDEN이 아님', detail: `${sender} → ${target}: ${status}` }];
+}
+
+// 제안 보내기: OK가 돌아오려면 주인이 보낸 사람에게 설정 권한(조회 포함)을 줬고 차단 쌍이 아니어야 함
+export function checkProposal({ proposer, owner, status, perms, blocks = [] }) {
+  if (status !== 'OK') return [];
+  const granted = perms.some((p) => p.owner_id === owner && p.grantee_id === proposer && p.can_edit_alarm && p.can_view_alarm);
+  const blocked = blocks.some((b) => pairKey(b.blocker_id, b.blocked_id) === pairKey(proposer, owner));
+  return granted && !blocked ? [] : [{ kind: 'VIOLATION', rule: 'A-설정 권한이 없거나 차단 쌍인데 알람 변경 제안이 됨', detail: `${proposer} → ${owner} (권한 ${granted}, 차단 ${blocked})` }];
+}
+
+// 공동 약속 고치기: 만든 사람만(만든 사람이 비면 참여자). 다른 사람이 고쳐졌으면 위반
+export function checkApptEdit({ editor, creatorId, rowsChanged, isParticipant, editorJoined = true }) {
+  if (!rowsChanged) return [];
+  if (!editorJoined) return [{ kind: 'VIOLATION', rule: 'P9-그룹에 참여 중이 아닌 사람이 공동 약속을 고침', detail: `${editor}` }];
+  if (creatorId === editor) return [];
+  if (creatorId == null && isParticipant) return [];
+  return [{ kind: 'VIOLATION', rule: 'P9-만든 사람이 아닌데 공동 약속이 고쳐짐', detail: `${editor} (만든 사람 ${creatorId})` }];
+}
+
+const kstDate = (iso) => new Date(new Date(iso).getTime() + 9 * 3600e3).toISOString().slice(0, 10);
+
+// 정적 규칙: 기상 확인 하루 한 건(알람이 울리는 날 기준), 앞으로 공동 약속 참여는 그룹 참여 중인 사람만, 제안 합계 ±60분
+export function checkWakeAndAppointments({ wakeEvents = [], alarms = [], participants = [], appointments = [], members = [], now = Date.now() }) {
+  const out = [];
+  const alarmDay = new Map(alarms.map((a) => [a.alarm_id, kstDate(a.scheduled_at)]));
+  const perDay = new Map();
+  for (const e of wakeEvents) {
+    const day = alarmDay.get(e.alarm_id) ?? kstDate(e.event_at);
+    const k = `${e.user_id}|${day}`;
+    perDay.set(k, (perDay.get(k) ?? 0) + 1);
+  }
+  for (const [k, n] of perDay) if (n > 1) out.push({ kind: 'VIOLATION', rule: 'W-기상 확인이 하루 한 건을 넘음', detail: `${k}: ${n}` });
+
+  const joined = new Set(members.filter((m) => m.invite_status === 'JOINED').map((m) => `${m.group_id}|${m.user_id}`));
+  for (const a of appointments) {
+    if (!a.group_id || new Date(a.appointment_at).getTime() <= now) continue;
+    for (const p of participants.filter((x) => x.appointment_id === a.appointment_id)) {
+      if (!joined.has(`${a.group_id}|${p.user_id}`)) out.push({ kind: 'VIOLATION', rule: 'P9-그룹을 나갔는데 앞으로 공동 약속 참여가 남음', detail: `${p.user_id} @ ${a.appointment_id}` });
+    }
+  }
+  for (const a of alarms) {
+    if (!a.original_scheduled_at) continue;
+    const gap = Math.abs(new Date(a.scheduled_at).getTime() - new Date(a.original_scheduled_at).getTime());
+    if (gap > 3600e3 + 60e3) out.push({ kind: 'VIOLATION', rule: 'A-친구가 바꾼 합계가 ±60분을 넘음', detail: a.alarm_id });
+  }
+  return out;
 }
