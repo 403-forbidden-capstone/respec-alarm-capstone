@@ -26,10 +26,13 @@ export type Permission = 'viewAlarm' | 'editAlarm' | 'viewWake';
 export type PermissionSet = Record<Permission, boolean>;
 
 export const PERMISSIONS: readonly { key: Permission; name: string; description: string }[] = [
-  { key: 'viewAlarm', name: '알람 조회', description: '내 알람 시간과 반복 일정을 볼 수 있어요.' },
+  { key: 'viewAlarm', name: '알람 조회', description: '알람 시간 · 일정 · 장소 · 준비 시간을 볼 수 있어요.' },
   { key: 'editAlarm', name: '알람 설정', description: '내 알람을 추가하거나 시간을 바꿀 수 있어요.' },
   { key: 'viewWake', name: '기상 상태 조회', description: '기상 확인 여부와 확인 시각을 볼 수 있어요.' },
 ];
+
+// F03 스위치 목록 — 친구 관계에는 기상 조회가 없음(그룹 기상 공유 동의 하나로만, 친구 6장 6-가). 그룹 관계의 기상 조회는 그 그룹에 내 기상 공유를 켜는 동의
+export const permissionsFor = (kind: 'friend' | 'group') => (kind === 'friend' ? PERMISSIONS.filter((p) => p.key !== 'viewWake') : PERMISSIONS);
 
 // 관계 하나에서 준(받은) 권한 — DB sharing_permissions의 source_type · source_id
 // sourceId: 그룹이면 group_id, 친구면 상대 사람 id (실데이터는 friends.friend_id로 찾아 사람으로 바꿈)

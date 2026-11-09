@@ -77,7 +77,7 @@ export default function FriendPermissionScreen() {
         {p.name}님의 권한
       </Text>
       <Text variant="lead" style={styles.lead}>
-        {`친구와 함께하는 그룹 ${groupCount}개에서 준 권한을 합친 결과예요. 하나라도 허용하면 허용돼요.`}
+        {`내가 ${p.short}님에게 준 권한을 관계별로 합친 결과예요. 하나라도 허용하면 허용돼요. (함께하는 그룹 ${groupCount}개)`}
       </Text>
 
       <SectionHeader title={`${p.short}님이 가진 최종 권한`} right={<Chip label={`${final.count}개 허용`} variant="ink" />} />

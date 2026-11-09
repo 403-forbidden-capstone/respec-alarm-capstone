@@ -84,3 +84,6 @@ export function expiresLabel(date: Date): string {
 // 공유창에 뜨는 초대 글 — 만료일(예: '11/15까지')이 있으면 같이 (5-07 · 5-49)
 export const inviteShareMessage = (groupName: string, code: string, expires: string | null) =>
   `Re:Spec 알람 '${groupName}' 그룹에 초대해요. 초대 코드: ${code}${expires ? ` (${expires})` : ''}`;
+
+// F03 혼자인 그룹 저장 (6-18) — 줄 사람이 없어 저장이 안 됨. 가짜 성공을 보이지 않음
+export const NO_MEMBERS = '이 그룹에는 나 말고 멤버가 없어요. 멤버가 들어오면 권한을 줄 수 있어요';
