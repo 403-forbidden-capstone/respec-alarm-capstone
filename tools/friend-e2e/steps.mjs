@@ -8,7 +8,8 @@ import { must, ok, skip } from './harness.mjs';
 import { E2E_PREFIX } from './snapshot.mjs';
 import { rpcOf } from './rpc-map.mjs';
 
-const todayKst = () => new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 10);
+const RUN_DAY = new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 10); // 자정을 넘겨 돌려도 한 실행 안에서는 같은 날
+const todayKst = () => RUN_DAY;
 const at = (hhmm) => `${todayKst()}T${hhmm}:00+09:00`;
 const inFuture = (ms) => new Date(Date.now() + ms).toISOString();
 const rand = () => randomUUID().slice(0, 6);
@@ -64,12 +65,15 @@ const pushNote = (ctx, who) => ctx.note(`${who}에게 푸시 도착 확인 생�
 
 // 11장: 서버 함수(notify)가 푸시를 보내기 전에 부르는 판정 — can_send_push(두 사람 사이), plan_group_push(그룹 받는 사람). service_role 전용이라 admin으로 부름
 async function canPush(ctx, sender, target, kind, what) {
-  if (!ctx.caps.hasRpc('can_send_push')) return;
+  if (!ctx.caps.hasRpc('can_send_push')) return ctx.note('푸시 판정 함수(can_send_push)가 DB에 없어 판정 확인 생략');
   const r = ok(await ctx.admin.rpc('can_send_push', { p_sender_id: sender, p_target_id: target, p_kind: kind }), `${what} 푸시 판정`);
   must(r === true, `${what} 푸시를 보낼 수 없다고 판정됨 (${kind})`);
 }
 async function groupPush(ctx, sender, kind, appt) {
-  if (!ctx.caps.hasRpc('plan_group_push')) return null;
+  if (!ctx.caps.hasRpc('plan_group_push')) {
+    ctx.note('그룹 푸시 판정 함수(plan_group_push)가 DB에 없어 받는 사람 확인 생략');
+    return null;
+  }
   const r = ok(await ctx.admin.rpc('plan_group_push', { p_sender_id: sender, p_group_id: ctx.s.group, p_kind: kind, p_appointment_id: appt ?? null }), `그룹 푸시 판정 ${kind}`);
   must(r.status === 'OK', `그룹 푸시 판정이 OK가 아님: ${kind} ${r.status}`);
   must(!r.recipients.includes(sender), '그룹 푸시 받는 사람에 보낸 본인이 들어 있음');
@@ -387,7 +391,7 @@ export const STEPS = [
     who: 'B',
     ch: '6',
     action: 'F03 A에게 알람 조회 · 설정 켜기 → 저장',
-    deps: [7],
+    deps: [7, 14],
     async run(ctx) {
       ok(
         await ctx.b.from('sharing_permissions').insert({
@@ -415,9 +419,9 @@ export const STEPS = [
       const save = rpcOf(ctx.caps, 'save_group_permissions');
       if (save) {
         const r = ok(await callRpc(ctx.b, save, { p_group_id: ctx.s.group, p_can_view_alarm: true, p_can_edit_alarm: false }), '그룹 권한 저장');
-        must(r.status === 'OK' && r.saved >= 1, `그룹 권한 저장 결과가 OK가 아님: ${r.status} ${r.saved}`);
-        const gp = ok(await ctx.admin.from('sharing_permissions').select('grantee_id, source_type, can_view_alarm, can_edit_alarm').eq('owner_id', ctx.ids.B).eq('source_type', 'GROUP'), '그룹 출처 권한');
-        must(gp.length >= 1 && gp.every((p) => p.can_view_alarm && !p.can_edit_alarm), '그룹 출처 권한이 저장한 값(조회만)과 다름');
+        must(r.status === 'OK' && r.saved === 2, `그룹 권한 저장 결과가 OK · 2명(A · C)이 아님: ${r.status} ${r.saved}`);
+        const gp = ok(await ctx.admin.from('sharing_permissions').select('grantee_id, source_type, can_view_alarm, can_edit_alarm').eq('owner_id', ctx.ids.B).eq('source_type', 'GROUP').eq('source_id', ctx.s.group), '그룹 출처 권한');
+        must(gp.length === 2 && gp.every((p) => p.can_view_alarm && !p.can_edit_alarm), '그룹 출처 권한이 저장한 값(조회만, 2명)과 다름');
       }    },
   },
   {
@@ -428,6 +432,7 @@ export const STEPS = [
     deps: [14],
     async run(ctx) {
       const id = randomUUID();
+      ctx.s.apptAt = new Date(Math.ceil((Date.now() + 5 * 3600e3) / 60e3) * 60e3).toISOString();
       ok(
         await ctx.a.from('appointments').insert({
           appointment_id: id,
@@ -435,7 +440,7 @@ export const STEPS = [
           creator_id: ctx.ids.A,
           group_id: ctx.s.group,
           title: `${E2E_PREFIX}점심`,
-          appointment_at: at('23:50'), // 하루 끝에 가깝게 — 대본을 낮에 돌려도 '앞으로 약속'이고 8장 '그날 가장 이른 약속이 아직 안 시작'도 맞음
+          appointment_at: ctx.s.apptAt, // 실행 시각 + 5시간 — 언제 돌려도 '앞으로 약속'이고 8장 고정 시각(7:35)보다 뒤
           dest_name: '세종대학교',
           dest_lat: 37.5509,
           dest_lng: 127.0736,
@@ -511,7 +516,7 @@ export const STEPS = [
       const mine = rpcOf(ctx.caps, 'my_wake_pings');
       if (mine) {
         const got = ok(await callRpc(ctx.b, mine, {}), 'B가 받은 깨우기');
-        must(got.some((r) => r.sender_id === ctx.ids.A || r.user_id === ctx.ids.A), 'B의 받은 깨우기 한 줄에 A가 없음');
+        must(got.some((r) => r.sender_id === ctx.ids.A), 'B의 받은 깨우기 한 줄에 A가 없음');
       }
       ctx.note('깨우기 푸시 도착 확인 생략 (푸시 보냄은 서버 함수 몫, 도착은 사람 대본)');
     },
@@ -536,7 +541,7 @@ export const STEPS = [
       must(after.length === 1 && new Date(after[0].event_at).getTime() === new Date(at('08:08')).getTime(), '하루 한 건이 아니거나 먼저 것이 안 남음');
       // 하루 기록의 기상 시각도 같이
       const rec = ok(await ctx.admin.from('daily_records').select('wake_confirmed_at').eq('user_id', ctx.ids.B).eq('record_date', todayKst()), 'B의 오늘 기록');
-      must(rec[0]?.wake_confirmed_at, '기상 확인 때 오늘 하루 기록의 기상 시각이 같이 안 채워짐');
+      must(rec[0]?.wake_confirmed_at && new Date(rec[0].wake_confirmed_at).getTime() === new Date(at('08:08')).getTime(), `기상 확인 때 오늘 하루 기록의 기상 시각이 8:08로 같이 안 채워짐: ${rec[0]?.wake_confirmed_at}`);
       pushNote(ctx, '그룹원');
     },
   },
@@ -545,7 +550,7 @@ export const STEPS = [
     who: 'A',
     ch: '7',
     action: 'G01 / G03 열기 → B 일어났어요 8:08',
-    deps: [21],
+    deps: [11, 21],
     async run(ctx) {
       const rows = ok(await callRpc(ctx.a, ctx.fn.group_wake, { p_group_id: ctx.s.group, p_date: todayKst() }), '그룹 기상 상태');
       const b = rows.find((r) => r.user_id === ctx.ids.B);
@@ -562,7 +567,7 @@ export const STEPS = [
     who: 'C',
     ch: '8 · 11',
     action: '확인 없이 알람 시각 지남 → 미확인 알림 → 10분 뒤 깨워 볼까요?',
-    deps: [14, 19],
+    deps: [10, 14, 19],
     async run(ctx) {
       const fn = rpcOf(ctx.caps, 'unconfirmed_batch');
       if (!fn) skip('미확인 알림 함수가 DB에 없음');
@@ -595,7 +600,7 @@ export const STEPS = [
     who: 'B',
     ch: '7',
     action: 'G02 기상 숨기기(C에게)',
-    deps: [14, 21],
+    deps: [10, 14, 21],
     async run(ctx) {
       const fn = rpcOf(ctx.caps, 'wake_hide');
       if (!fn) skip('기상 숨기기 함수가 DB에 없음');
@@ -680,9 +685,9 @@ export const STEPS = [
     who: 'A',
     ch: '9',
     action: '일정 시각 · 장소 변경 저장 → 참여자에게 공동 약속 변경 푸시, 재계산',
-    deps: [17],
+    deps: [17, 18],
     async run(ctx) {
-      const newAt = at('23:55');
+      const newAt = new Date(new Date(ctx.s.apptAt).getTime() + 30 * 60e3).toISOString();
       const r = ok(
         await ctx.a.from('appointments').update({ appointment_at: newAt, dest_name: '강남역 2번출구' }).eq('appointment_id', ctx.s.appt).select(),
         '약속 변경',
@@ -923,6 +928,7 @@ export const STEPS = [
       must(!created.error, `임시 계정 만들기: ${created.error?.message}`);
       const X = created.data.user.id;
       ctx.s.delX = X;
+      try {
       ok(await ctx.admin.from('profiles').update({ nickname: '삭제시험', onboarded_at: new Date().toISOString() }).eq('user_id', X), '프로필 채우기');
       const handle = ok(await ctx.admin.from('profiles').select('handle').eq('user_id', X).single(), '아이디').handle;
       ctx.s.delXHandle = handle;
@@ -982,6 +988,10 @@ export const STEPS = [
       must(!byId[a1.appointment_id], '혼자 있던 그룹의 공동 약속이 안 지워짐');
       must(!byId[a3.appointment_id], '개인 약속이 안 지워짐');
       must(byId[a2.appointment_id] && byId[a2.appointment_id].creator_id === null, 'B와 함께 있던 공동 약속이 "만든 사람 알 수 없음"으로 남지 않음');
+      } finally {
+        // 중간에 실패해도 임시 계정(과 B와의 친구 행 · 개인 약속)이 남지 않게
+        if (!ctx.s.delXGone) await ctx.admin.auth.admin.deleteUser(X).catch(() => {});
+      }
     },
   },
   {

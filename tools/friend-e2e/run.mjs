@@ -106,7 +106,7 @@ async function main() {
 
   let results;
   try {
-    await wipe(admin, ids, caps);
+    await wipe(admin, ids, caps, snap.win);
     results = await runSteps(STEPS, ctx, {
       log: (r) => console.log(`${String(r.n).padStart(2)} ${r.who} [${r.ch}] ${r.status.padEnd(4)} ${r.action}${r.reason ? `\n      → ${r.reason}` : ''}${r.notes.map((n) => `\n      · 생략: ${n}`).join('')}`),
     });
