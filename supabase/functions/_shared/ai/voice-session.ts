@@ -6,11 +6,11 @@
 //   5) 확인할 기록 · 서버 질문 고르기 → 첫 마디 템플릿 → turns[0]
 import { MAX_SESSIONS_PER_DAY } from './opening.ts';
 import { buildContext } from './context-core.ts';
-import { readContextRows } from './context.ts';
+import { readContextRows, seoulIso, startOf } from './context.ts';
 import { openingMessage } from './opening.ts';
 import { POINTS } from '../prompts/index.ts';
 import {
-  callsCapReached, countCallsSince, countSessionsSince, createSession, findOpenSession, limitsOf, recentQuestions, recordQuestion,
+  callsCapReached, countCallsSince, countSessionsSince, createSession, findOpenSession, findUncommitted, limitsOf, recentQuestions, recordQuestion,
   roomRows, type ServerState, type SessionDeps, type SessionRow, type StoredTurn,
 } from './session.ts';
 import { initTurnState, pickServerQuestion } from './turn-core.ts';
@@ -37,6 +37,8 @@ export interface VoiceSessionOut {
   limits: TurnLimits;
   /** 같은 대화방의 앞 구간 세션(기준일이 다름) — 앱이 그 구간에서 저장했지만 서버에 못 알린 카드 표시를 이 세션으로 옮김 (카드 번호는 그대로) */
   prev_session_ids: string[];
+  /** 어제(KST) 연 방 중 정리가 안 된 것 — 자정이 지나 [완료] 없이 넘어온 방. 앱이 정리 요청(voice-commit) 목록에 넣음 */
+  uncommitted_session_ids: string[];
 }
 
 const messagesOf = (turns: StoredTurn[]): VoiceSessionOut['messages'] => turns.map((t) => ({ role: t.role, text: t.text, at: t.at }));
@@ -59,7 +61,7 @@ export function withCardTimes(st: ServerState, turns: StoredTurn[]): Card[] {
   });
 }
 
-async function outOfRow(deps: SessionDeps, row: SessionRow, resumed: boolean, sessionsToday: number): Promise<VoiceSessionOut> {
+async function outOfRow(deps: SessionDeps, row: SessionRow, resumed: boolean, sessionsToday: number): Promise<Omit<VoiceSessionOut, 'uncommitted_session_ids'>> {
   const st = row.server_state;
   const room = await roomRows(deps, row);
   return {
@@ -76,6 +78,13 @@ async function outOfRow(deps: SessionDeps, row: SessionRow, resumed: boolean, se
 }
 
 export async function handleVoiceSession(deps: VoiceSessionDeps, body: unknown): Promise<VoiceSessionOut> {
+  const now = (deps.now ?? (() => new Date()))();
+  const out = await openRoom({ ...deps, now: () => now }, body);
+  const today = seoulLocal(seoulIso(now)).date;
+  return { ...out, uncommitted_session_ids: await findUncommitted(deps, startOf(addDays(today, -1)), startOf(today)) };
+}
+
+async function openRoom(deps: VoiceSessionDeps, body: unknown): Promise<Omit<VoiceSessionOut, 'uncommitted_session_ids'>> {
   const req = readSessionRequest(body);
   const now = (deps.now ?? (() => new Date()))();
   const rows = await readContextRows(deps, now);

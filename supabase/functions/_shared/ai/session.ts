@@ -156,6 +156,31 @@ export async function findOpenSession(deps: SessionDeps, sinceIso: string): Prom
   return null;
 }
 
+/**
+ * [sinceIso, untilIso)에 연 방 중 정리가 안 됐거나 정리 뒤 말이 는 것 — 자정이 지나 새 방이 열리면 [완료] 없이 남은 어제 방을 앱이 대신 정리하게 (안 하면 그 말이 기록 · 일기에 안 들어감)
+ * 예전 방식으로 끝낸(ended) 세션 · 말 없는 방은 뺌
+ */
+export async function findUncommitted(deps: SessionDeps, sinceIso: string, untilIso: string): Promise<string[]> {
+  const rows = must<{ session_id: string; server_state: unknown }[]>(
+    'conversation_sessions',
+    await deps.userDb
+      .from('conversation_sessions')
+      .select('session_id, server_state')
+      .eq('user_id', deps.userId)
+      .eq('session_type', 'BEFORE_SLEEP')
+      .is('ended_at', null)
+      .gte('started_at', sinceIso)
+      .lt('started_at', untilIso),
+  );
+  return (rows ?? [])
+    .filter((r) => {
+      if (!isState(r.server_state) || r.server_state.ended || r.server_state.counts.user_turns === 0) return false;
+      const c = r.server_state.commit;
+      return !(c?.status === 'DONE' && (c.at_turn ?? Infinity) >= r.server_state.counts.user_turns);
+    })
+    .map((r) => r.session_id);
+}
+
 /** 대화방의 세션 줄 — 앞 구간(prev_session_id)들 + 이 세션, 오래된 것부터. 앞 구간을 못 읽으면 이 세션만 */
 export async function roomRows(deps: SessionDeps, row: SessionRow): Promise<SessionRow[]> {
   const prev = row.server_state.prev_session_id;

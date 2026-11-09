@@ -93,6 +93,7 @@ type SessionResponse = {
   cards?: ServerCard[];
   limits?: ServerLimits;
   prev_session_ids?: string[]; // 같은 대화방의 앞 구간 세션(기준일이 달라 기록만 나뉨) — 화면 말 · 카드는 이미 이어서 옴
+  uncommitted_session_ids?: string[]; // 어제 연 방 중 [완료] 없이 넘어와 정리가 안 된 것 — 정리 요청 목록에 넣음
 };
 
 type TurnResponse = {
@@ -667,6 +668,11 @@ async function readSession(resume: boolean, fresh = false): Promise<void> {
   mergeCards(res.cards, last && last > at ? last : at);
   state.messages.sort((a, b) => a.at.getTime() - b.at.getTime());
   if (fresh) await pruneExpired(now()); // 앱을 열 때 — 모든 사용자의 7일 지난 표시 · 옛 형식 키 정리
+  // 자정이 지나 [완료] 없이 넘어온 어제 방 — 정리 목록에 없으면 넣음 (있으면 [저장 안 함] 카드 목록을 지키려고 그대로)
+  if (state.userId && res.uncommitted_session_ids?.length) {
+    const queued = new Set((await pendingCommits(state.userId)).map((c) => c.sessionId));
+    for (const id of res.uncommitted_session_ids) if (!queued.has(id)) await addPendingCommit(state.userId, id);
+  }
   if (fresh) void flushCommits(state.userId); // 지난번에 못 보낸 대화 끝 정리
   if (res.session_id) await restoreSaved(res.session_id, fresh, res.prev_session_ids ?? []);
   for (const [id, old] of done) {

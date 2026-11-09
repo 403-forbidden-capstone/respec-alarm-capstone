@@ -1024,3 +1024,20 @@ test('만든 때가 없는 예전 카드: 다시 열 때 처음 나온 처리 �
   // 만든 때가 있는 카드는 그대로
   assert.equal(withCardTimes({ ...row.server_state, cards: [{ ...row.server_state.cards[0], at: '2026-10-29T21:00:00+09:00' }] }, [])[0].at, '2026-10-29T21:00:00+09:00');
 });
+
+test('23시 대화를 [완료] 없이 두고 자정 뒤 열면: 새 방 + 어제 방을 정리할 목록(uncommitted_session_ids)으로 알려 줌 — 정리하면 어제 기준일로 기록, 정리 뒤엔 다시 안 알림', async () => {
+  const db = seed();
+  const night = await chat(db, [['오늘 팀플 발표 끝냈어']], [eventsOf('팀플 발표를 끝냄')]); // 22:30, [완료] 안 함
+  db.now = AFTER_MIDNIGHT;
+  const late = await chat(db, [], [], [], AFTER_MIDNIGHT);
+  assert.notEqual(late.sid, night.sid); // 자정 뒤 새 방 (요구사항)
+  assert.deepEqual(late.session.uncommitted_session_ids, [night.sid]);
+  assert.equal(rowOf(db, night.sid).server_state.counts.user_turns, 1); // 어제 방 말은 그대로
+  // 앱이 정리 요청을 보냄 → 어제 기준일(10/29)로 저장
+  assert.equal((await commit({ ...night.deps, now: () => AFTER_MIDNIGHT }, night.sid)).status, 'DONE');
+  assert.equal(rowOf(db, night.sid).extracted_data.session.reference_date, REVIEW);
+  const again = (await handleVoiceSession({ ...late.deps, now: () => new Date('2026-10-30T00:50:00+09:00') }, { session_type: 'BEFORE_SLEEP', input_mode: 'TEXT', resume: true })) as VoiceSessionOut;
+  assert.deepEqual(again.uncommitted_session_ids, []);
+  // 같은 날 연 방 · 말 없는 방은 알리지 않음
+  assert.deepEqual(night.session.uncommitted_session_ids, []);
+});

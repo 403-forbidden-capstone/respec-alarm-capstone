@@ -1528,6 +1528,15 @@ describe('⑰ [완료] 뒤 대화 끝 정리(voice-commit)', () => {
     expect(commitBodies().map((c) => c.body)).toEqual([{ session_id: 's1' }, { session_id: 's1' }]);
   });
 
+  it('자정 뒤 열 때 서버가 알린 어제 방(uncommitted_session_ids)을 정리 목록에 넣어 보냄 — 이미 목록에 있으면 [저장 안 함] 카드 목록을 덮지 않음', async () => {
+    await AsyncStorage.setItem(commitKey, JSON.stringify([{ sessionId: 'old-2', rejected: ['c3'] }]));
+    script = [session({ session_id: 's2', uncommitted_session_ids: ['old-1', 'old-2'] })];
+    await getConversation(); // 열 때 정리를 바로 보냄
+    await flushCommits('user-1');
+    expect(commitBodies().map((c) => c.body)).toEqual([{ session_id: 'old-2', rejected_cards: ['c3'] }, { session_id: 'old-1' }]);
+    expect(await AsyncStorage.getItem(commitKey)).toBeNull(); // DONE → 목록에서 지움
+  });
+
   it('다시 해도 안 되는 오류(NOT_FOUND)면 목록에서 지움 — 끝없이 다시 보내지 않음', async () => {
     script = [session(), turn()];
     await getConversation();
