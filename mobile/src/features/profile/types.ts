@@ -1,3 +1,5 @@
+import type { SchoolStatus, WorkStatus } from './prepareMlSurvey';
+
 // 내 프로필 — supabase/migrations의 profiles 칼럼과 같은 이름
 // (타입 생성 `npx supabase gen types` 뒤에는 생성된 타입으로 바꿈)
 
@@ -28,6 +30,10 @@ export type Profile = {
   wake_margin: WakeMargin;
   privacy_agreed_at: string | null; // privacy_version과 같이 있거나 같이 없음
   privacy_version: number | null;
+  ml_age_years: number | null;
+  ml_school_status: SchoolStatus | null;
+  ml_work_status: WorkStatus | null;
+  ml_profile_consented_at: string | null;
   wake_ping_enabled: boolean; // 친구 깨우기 받기 — 기본 켬. 꺼 두면 보낸 쪽에 '지금은 깨울 수 없어요'만 (친구 8장)
 };
 
@@ -48,6 +54,10 @@ export type ProfileFields = Partial<
     | 'privacy_agreed_at'
     | 'privacy_version'
     | 'wake_ping_enabled'
+    | 'ml_age_years'
+    | 'ml_school_status'
+    | 'ml_work_status'
+    | 'ml_profile_consented_at'
   >
 >;
 
