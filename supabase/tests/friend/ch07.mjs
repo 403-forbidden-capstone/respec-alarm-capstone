@@ -550,7 +550,7 @@ export default async function ch07({ q, as, su, svc, check, expectErr }) {
 
   await check('7장 날짜 제한: 기상 조회(get_group_wake · get_group_wake_status)는 호출자 시간대의 어제 · 오늘 · 내일만 — 그 밖의 날짜는 그날 약속이 있어도 줄이 없고, 날짜를 안 주면 오늘, 비공개 계산은 제한 없이 같은 날을 읽음', async () => {
     const dayIn = (tz, n) => new Date(Date.now() + n * 86400_000).toLocaleDateString('en-CA', { timeZone: tz });
-    const offsetOf = { 'Asia/Seoul': '+09:00', 'Pacific/Honolulu': '-10:00' };
+    const offsetOf = { 'Pacific/Kiritimati': '+14:00', 'Pacific/Pago_Pago': '-11:00' };      // UTC · 서울과 날짜가 같아지는 시각이 없도록 가장 먼 두 시간대(하루 중 어느 때 돌려도 시간대 계산 변이를 잡음)
     const run = async (tz, base) => {
       const V = await join_(base, `보는이-${tz}`), O = await join_(base + 1, `상대-${tz}`);
       await q(`update public.profiles set timezone = $2 where user_id = $1`, [V, tz]);
@@ -570,14 +570,15 @@ export default async function ch07({ q, as, su, svc, check, expectErr }) {
       await as(V);
       const none = await q(`select 1 from public.get_group_wake($1, null)`, [g]);
       const noneOld = await q(`select 1 from public.get_group_wake_status($1)`, [g]);
+      const inf = [await q(`select 1 from public.get_group_wake($1, 'infinity'::date)`, [g]), await q(`select 1 from public.get_group_wake_status($1, '-infinity'::date)`, [g])];   // 오류 없이 0행
       await su();
-      return { out, none: none.length, noneOld: noneOld.length };
+      return { out, none: none.length, noneOld: noneOld.length, inf: inf.map((x) => x.length) };
     };
-    const seoul = await run('Asia/Seoul', 400), honolulu = await run('Pacific/Honolulu', 410);
+    const seoul = await run('Pacific/Kiritimati', 400), honolulu = await run('Pacific/Pago_Pago', 410);
     const ok = (r) => [-1, 0, 1].every((n) => r.out[n].narrow >= 1 && r.out[n].old >= 1)
       && [-3, -2, 2, 3].every((n) => r.out[n].narrow === 0 && r.out[n].old === 0)
       && [-3, -2, -1, 0, 1, 2, 3].every((n) => r.out[n].internal >= 1)       // 그날 데이터는 있음 — 막은 것은 날짜 범위뿐
-      && r.none >= 1 && r.noneOld >= 1;
+      && r.none >= 1 && r.noneOld >= 1 && r.inf[0] === 0 && r.inf[1] === 0;
     return ok(seoul) && ok(honolulu) ? true : { seoul, honolulu };
   });
 }

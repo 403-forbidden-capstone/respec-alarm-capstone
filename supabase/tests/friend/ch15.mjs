@@ -178,7 +178,7 @@ export default async function ch15({ q, as, su, svc, check, expectErr }) {
     return forged === true && foreignRelation === true && (await count(`select 1 from public.sharing_permissions where owner_id in ($1, $2)`, [A, B])) === 0 ? true : { forged, foreignRelation };
   });
 
-  await check('15-18 · 15-19: 그룹 비멤버는 이름 고치기 · 지우기가 0행, 참여 중 멤버는 이름은 고치지만 지우기는 0행 — 남의 멤버 행 지우기도 0행(나가기는 내 행만)', async () => {
+  await check('15-18 · 15-19: 그룹 비멤버는 이름 고치기 · 지우기 · 남의 멤버 행 지우기가 모두 0행, 참여 중 멤버는 이름은 고치지만 그룹 지우기는 0행 — 멤버끼리 멤버 행을 지우는 것은 5장 내보내기 규칙대로 됨(그룹장 없음)', async () => {
     const A = await join_(17, '주인'), B = await join_(18, '참여'), X = await join_(19, '비멤버');
     const g = await mkGroup(A, [B]);
     const run = async (uid, sql, params) => { await as(uid); const r = await q(sql, params); await su(); return r.length; };
@@ -189,7 +189,7 @@ export default async function ch15({ q, as, su, svc, check, expectErr }) {
     const outsiderKick = await run(X, `delete from public.group_members where group_id = $1 and user_id = $2 returning 1`, [g, A]);
     const memberKickOwnerRow = await (async () => { await as(B); const r = await q(`delete from public.group_members where group_id = $1 and user_id = $2 returning 1`, [g, A]); await su(); return r.length; })();
     const name = (await q(`select group_name from public.groups where group_id = $1`, [g]))[0]?.group_name;
-    return outsiderUpdate === 0 && outsiderDelete === 0 && memberRename === 1 && memberDelete === 0 && outsiderKick === 0 && name === '새 이름' && memberKickOwnerRow >= 0
+    return outsiderUpdate === 0 && outsiderDelete === 0 && memberRename === 1 && memberDelete === 0 && outsiderKick === 0 && name === '새 이름' && memberKickOwnerRow === 1
       ? true : { outsiderUpdate, outsiderDelete, memberRename, memberDelete, outsiderKick, memberKickOwnerRow, name };
   });
 

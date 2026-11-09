@@ -14,6 +14,7 @@
 -- ---------------------------------------------------------------------
 
 -- p_date가 비었으면 통과(= 오늘). 아니면 호출자(로그인한 사람) 시간대의 오늘과 하루 이내. 시간대가 없으면 서울
+--   between으로 비교해 infinity 같은 날짜도 오류 없이 범위 밖(= 0행)으로 처리
 create function private.wake_date_in_range(p_date date)
 returns boolean
 language sql
@@ -21,8 +22,8 @@ stable
 security definer
 set search_path = ''
 as $$
-  select p_date is null
-      or abs(p_date - ((now() at time zone coalesce((select p.timezone from public.profiles p where p.user_id = (select auth.uid())), 'Asia/Seoul'))::date)) <= 1;
+  select p_date is null or p_date between t.today - 1 and t.today + 1
+  from (select (now() at time zone coalesce((select p.timezone from public.profiles p where p.user_id = (select auth.uid())), 'Asia/Seoul'))::date as today) t;
 $$;
 
 revoke execute on function private.wake_date_in_range(date) from public, anon, authenticated;

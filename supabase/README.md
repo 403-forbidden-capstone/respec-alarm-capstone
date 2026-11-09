@@ -82,11 +82,11 @@ select vault.create_secret('<service_role 키>', 'service_role_key');
   - `send_friend_request(p_target_id)`(`REQUESTED` · `ACCEPTED`(맞요청 자동 수락) · `ALREADY_REQUESTED` · `ALREADY_FRIEND` · `SELF` · `NOT_FOUND` · `LIMIT` · `FRIEND_LIMIT`) — 1분 10회 + 하루 50회(행을 만든 요청만, 취소해도 안 줄어듦), 친구 100명 상한
   - `accept_friend_request(p_requester_id)`(`ACCEPTED` · `ALREADY_FRIEND` · `GONE` · `FRIEND_LIMIT`) · `decline_friend_request(p_requester_id)`(`DECLINED` · `GONE`) · `cancel_friend_request(p_addressee_id)`(`CANCELED` · `GONE`) · `remove_friend(p_user_id)`(`REMOVED` · `GONE`) — 거절 · 취소 · 끊기는 행 삭제, 끊기는 친구 출처 권한만 지움
   - `friends` 상태는 대기 → 친구로만 바뀌고(수락 되돌리기 · 차단으로 바꾸기는 42501) 수락 시각은 서버가 넣음. 같은 사람이 끼는 동작은 사람별 잠금(`private.lock_friend_pair`)으로 한 줄씩. 받은 요청은 30일 뒤 5분 배치(`friend-requests-expire`)가 지움
-  - 앱이 `friends`에 직접 insert 하는 옛 길은 15장에서 닫음(요청은 `send_friend_request`로만). 직접 update · delete 길(수락 · 거절 · 끊기)은 아직 열려 있고 그 길은 100명 상한을 안 거침 — 앱은 함수로만 부르므로 따로 닫을지는 15장 빈 곳
+  - 앱이 `friends`에 직접 insert 하는 옛 길은 15장에서 닫음(요청은 `send_friend_request`로만). 직접 update · delete 길(수락 · 거절 · 끊기)은 아직 열려 있고 그 길은 100명 상한을 안 거침(친구 100명인 사람에게 온 요청을 직접 update로 수락하면 101명이 됨, 검수가 확인) — 앱은 함수로만 부르므로 닫아도 앱에는 영향이 없고, 닫을지는 15장 빈 곳
 - 친구 4장 차단 · 신고 (`20261108181556_friend_blocks.sql`, 이슈 #375) — 상태 값으로 돌려줌
   - `block_user(p_user_id)`(`BLOCKED` · `ALREADY_BLOCKED` · `SELF` · `NOT_FOUND`) · `unblock_user(p_user_id)`(`UNBLOCKED` · `GONE`) · `my_blocks()` — 누구나 차단, 친구 끊김 + 양쪽 방향 대기 요청 삭제 + 두 사람 사이 공유 권한 삭제, 풀어도 친구 · 권한은 복구 안 됨. 표 `user_blocks`는 차단한 사람 본인만 읽고 쓰기는 함수로만
-  - 차단 판정은 `private.is_blocked_pair` 한 곳: 검색 · 이름 검색 · 친구 링크 · 친구 요청이 없는 사람과 같은 응답, 권한 판정(`is_valid_permission_source`)이 끝나서 알람 조회 · 설정 · 기상 · 푸시(`can_send_push`)도 끊김, `get_public_profiles`는 같은 그룹의 차단 쌍에게 닉네임만(사진 · 아이디 `null`), `friends` 직접 insert는 없는 사람과 같은 외래 키 위반(23503)으로 거절
-  - `submit_report(p_target_type, p_target_id, p_reason, p_note)`(`REPORTED` · `ALREADY_REPORTED` · `INVALID` · `SELF` · `NOT_FOUND`) — 같은 대상 하루 1번(신고하는 사람 시간대). 표 `reports`는 서버 전용(운영 화면용 조회 · 처리 함수는 '팀원 계정' 판별 방법이 정해진 뒤)
+  - 차단 판정은 `private.is_blocked_pair` 한 곳: 검색 · 이름 검색 · 친구 링크 · 친구 요청이 없는 사람과 같은 응답, 권한 판정(`is_valid_permission_source`)이 끝나서 알람 조회 · 설정 · 기상 · 푸시(`can_send_push`)도 끊김, `get_public_profiles`는 같은 그룹의 차단 쌍에게 닉네임만(사진 · 아이디 `null`), `friends` 직접 insert는 차단 여부와 상관없이 모두 같은 거절(42501, 11/9부터 직접 insert 정책이 없음)
+  - `submit_report(p_target_type, p_target_id, p_reason, p_note)`(`REPORTED` · `ALREADY_REPORTED` · `INVALID` · `SELF` · `NOT_FOUND`) — 같은 대상 하루 1번(신고하는 사람 시간대). 표 `reports`는 서버 전용(운영 화면용 조회 · 처리 함수 `list_reports` · `resolve_report`와 팀원 표 `team_members`는 아래 '친구 4장 꼬리 신고 처리 · 팀원 표' 항목, 괴롭힘 신고 근거 복사 포함)
 - 친구 5장 그룹 · 초대, 그룹장 없음 (`20261108183700_friend_groups.sql`, 이슈 #384) — 상태 값으로 돌려줌
   - `preview_group_by_code(p_code)`(`FOUND` · `NOT_FOUND` · `EXPIRED` · `LIMIT`) · `join_group(p_code, p_wake_share)`(`JOINED` · `ALREADY_JOINED` · `NOT_FOUND` · `EXPIRED` · `LIMIT` · `FULL` · `TOO_MANY_GROUPS`) — 코드는 공백 제거 · 대문자(O/0 보정 없음), 틀린 코드는 계정별 1시간 10번까지 기록(반환값이라 되돌려지지 않음)하고 막힌 동안은 맞는 코드도 `LIMIT`. 그룹 20명 · 한 사람 10개 상한은 그룹 잠금 → 사람 잠금으로 한 명씩 셈
   - `accept_group_invite(p_group_id, p_wake_share)` · `invite_to_group(p_group_id, p_user_id)`(친구 사이 · 차단 아님만) · `my_group_invites()`(초대 카드: 이름 · 인원 · 초대한 사람까지만) · `my_group_code(p_group_id)`(시트를 열 때 만료면 새 코드 + 7일)
@@ -156,6 +156,9 @@ select vault.create_secret('<service_role 키>', 'service_role_key');
   - `resolve_report(p_report_id, p_action)`: 팀원만. `HIDE`(대상 사람의 닉네임을 '사용자'로 · 사진을 비움, 그룹이면 이름을 '이름 없는 그룹'으로) · `DISMISS`(대상 그대로) → 신고를 `DONE`으로 하고 결과 `resolution`(`HIDDEN` · `DISMISSED`) · 처리한 사람 · 시각을 남김. `HIDDEN` · `DISMISSED` · `ALREADY_DONE`(이미 처리된 신고는 다시 안 바꿈) · `NOT_FOUND` · `INVALID` · `FORBIDDEN`. 신고한 사람에게 알림 없음. 팀원 확인이 먼저라 팀원 아니면 신고가 있는지도 알 수 없음
   - `reports`에 `resolution` · `evidence` 칸 추가, 처리 중이면 결과 없음 · 처리됨이면 결과 있음을 표 규칙으로(`reports_resolution_shape`)
   - 근거 보관(13장 후속): `submit_report`는 사람 대상 괴롭힘(`HARASSMENT`) 신고가 들어온 순간 두 사람 사이(양쪽 방향)의 7일 안 깨우기(`push_sends`) · 알람 제안(`alarm_proposals`) 기록을 각각 50건까지 `reports.evidence`로 복사 — 원본은 7일 뒤 정리 배치(`friend-records-purge`)가 지우지만 신고 줄에 남은 근거는 안 지워짐. 괴롭힘이 아닌 신고 · 그룹 신고에는 근거를 안 모음(필요한 만큼만 모으기). 앱 호출 모양은 그대로
+  - 근거 창과 정리 배치 기준은 조금 다름: 근거는 만든 지 7일 안 기록만 복사하고, 정리 배치는 알람 시각이 아직 안 지난 끝난 제안을 7일이 넘어도 남겼다가 나중에 지움 — 그런 기록은 신고 때 근거로 안 들어감(문서의 '7일 안' 규칙과는 같음)
+  - 숨김은 신고 때가 아니라 처리하는 때의 닉네임 · 사진 · 그룹 이름에 작용하고, 신고된 시점의 값은 어디에도 안 남음(그사이 바꿨으면 바뀐 값이 초기화됨). 필요하면 신고 시점 값을 `evidence`에 스냅샷하는 방법이 있음(빈 곳)
+  - `list_reports`는 최신 100건까지(`total`은 전체 개수, 쪽 이동 없음)
   - 이 PR에 없는 것: 웹 운영 화면(앱 S2 몫), 신고 줄 보관 기간(지금은 계속 남음 — 정리 규칙은 개인정보 정책이 정하면)
 - 친구 7 · 8장 보정 (`20261109061000_friend_wake_hardening.sql`, 이슈 #431)
   - 기상 조회(`get_group_wake` · `get_group_wake_status`)의 날짜는 호출자 시간대 기준 어제 · 오늘 · 내일만 — 그 밖은 줄 없음(약속이 없는 날과 같은 모양, 날짜를 안 주면 오늘). 친구의 지난 기상 이력을 날짜를 바꿔 가며 거슬러 읽는 길을 막음. 판정은 비공개 함수 `private.wake_date_in_range(date)`. 서버 쪽 계산(`private.group_wake_rows`)은 그대로라 서버 함수 · 시험은 제한 없이 같은 날을 읽음

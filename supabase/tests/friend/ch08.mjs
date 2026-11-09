@@ -471,7 +471,7 @@ export default async function ch08({ q, as, su, svc, check, expectErr }) {
     return app.every((x) => x === true) && Array.isArray(mine) && anon.every((x) => x === true) ? true : { app, mine, anon };
   });
 
-  await check('8-카 · 8-27(받기 끈 사람): 깨우기 받기를 끈 사람이 미확인이어도 친구에게 "깨워 볼까요?"를 안 보냄 — 켜 둔 사람은 그대로 가고, 끈 사람이 다시 켜면 다음 배치에 감', async () => {
+  await check('8-카(받기 끈 사람): 깨우기 받기를 끈 사람이 미확인이어도 친구에게 "깨워 볼까요?"를 안 보냄 — 켜 둔 사람은 그대로 가고, 끈 사람이 다시 켜면 다음 배치에 감. 이미 "깨워 볼까요?"를 받은 뒤 끈 사람이 확인하면 후속 "일어났어요"는 그대로 감', async () => {
     const on = await missedCase(700);
     const off = await missedCase(710);
     await q(`update public.profiles set wake_ping_enabled = false where user_id = $1`, [off.S]);
@@ -481,5 +481,14 @@ export default async function ch08({ q, as, su, svc, check, expectErr }) {
     return JSON.stringify(targetsOf(first.filter((x) => x.sleeper_id === on.S))) === JSON.stringify(sorted(on.V1, on.V2))
       && first.filter((x) => x.sleeper_id === off.S).length === 0
       && JSON.stringify(targetsOf(later)) === JSON.stringify(sorted(off.V1, off.V2)) ? true : { first, later };
+  });
+
+  await check('8-카(후속은 영향 없음): 켜 둔 상태에서 "깨워 볼까요?"를 받은 뒤 사람이 받기를 꺼도 본인이 늦게 확인하면 후속 "일어났어요"는 그 받은 사람에게 감', async () => {
+    const x = await missedCase(720);
+    const nudge = await claim(at('07:45'), x.S);
+    await q(`update public.profiles set wake_ping_enabled = false where user_id = $1`, [x.S]);
+    await ev(x.al, x.S, 'WAKE_CONFIRMED', at('07:55'), { src: 'BUTTON' });
+    const up = await claim(at('08:00'), x.S);
+    return nudge.length === 2 && up.length === 2 && up.every((r) => r.kind === 'UP' && r.sleeper_id === x.S) && JSON.stringify(targetsOf(up)) === JSON.stringify(sorted(x.V1, x.V2)) ? true : { nudge, up };
   });
 }

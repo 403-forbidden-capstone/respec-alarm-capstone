@@ -388,7 +388,7 @@ export default async function ch04({ q, as, su, check, expectErr, PGlite, AUTH_S
     return shape(blocked) && shape(ghost) ? true : { blocked, ghost };
   });
 
-  await check('4-04(바탕) · 4-08(바탕): 차단 · 직접 insert 가드 · 신고가 잠금을 건 채로 일함 — 차단과 직접 insert가 같은 사람 잠금(3장)을 써서 겹쳐도 차단 쌍에 대기 행이 남지 않고, 신고는 같은 대상 잠금으로 한 번만', async () => {
+  await check('4-04(바탕) · 4-08(바탕): 차단 · 친구 요청 · 신고가 잠금을 건 채로 일함 — 차단과 친구 요청이 같은 사람 잠금(3장)을 써서 겹쳐도 차단 쌍에 대기 행이 남지 않고, 신고는 같은 대상 잠금으로 한 번만', async () => {
     const S1 = await join_(119, '잠금1'), S2 = await join_(120, '잠금2'), S3 = await join_(121, '잠금3'), S4 = await join_(122, '잠금4');
     await q(`create function pg_temp.f4_locks(kind text, a uuid, b uuid) returns integer language plpgsql as $$
              declare n integer;
@@ -526,9 +526,12 @@ export default async function ch04({ q, as, su, check, expectErr, PGlite, AUTH_S
     await report(OR, 'USER', OU, 'NICKNAME', '이상한 닉네임');
     await report(OR, 'GROUP', OG, 'GROUP_NAME', null);
     const rid = await reportIdOf(OR, OU);
-    await q(`update public.reports set created_at = now() - interval '2 hours' where report_id = $1`, [rid]);   // 시험 전체가 한 트랜잭션이라 now()가 같으므로 순서를 가르게 오래된 줄을 만듦
-    const noList = [await listR(ON), await listR(OR), await listR(OU)];
-    const noResolve = [await resolveR(ON, rid, 'HIDE'), await resolveR(OR, rid, 'HIDE'), await resolveR(OU, rid, 'DISMISS')];
+    await q(`update public.reports set created_at = now() - interval '2 hours' where report_id = $1`, [rid]);   // 같은 밀리초에 들어간 줄은 created_at이 같을 수 있으므로 순서를 가르게 오래된 줄을 만듦
+    const noList = [await listR(ON), await listR(OR), await listR(OU),
+                    await listR(ON, 'x', 0), await listR(ON, null, null)];                     // 잘못된 인자로도 FORBIDDEN이 먼저 — 팀원 확인이 INVALID보다 앞
+    const ghostId = '00000000-0000-4000-8000-00000000dead';
+    const noResolve = [await resolveR(ON, rid, 'HIDE'), await resolveR(OR, rid, 'HIDE'), await resolveR(OU, rid, 'DISMISS'),
+                       await resolveR(ON, ghostId, 'HIDE'), await resolveR(ON, rid, 'X'), await resolveR(ON, null, 'HIDE')];   // 없는 신고 · 잘못된 동작도 FORBIDDEN — 신고가 있는지 안 샘
     const untouched = { u: await nicknameOf(OU), row: await reportRow(rid) };
     await as(null);
     const noLogin = [await expectErr(() => q(`select public.list_reports('OPEN', 10)`), /로그인이 필요함/),
@@ -590,13 +593,15 @@ export default async function ch04({ q, as, su, check, expectErr, PGlite, AUTH_S
     const dismissed = await resolveR(OT, vid, 'DISMISS');
     const v = await nicknameOf(OV);
     const gid = await reportIdOf(OR, OG);
+    const { g: OG2 } = await mkGroup(OR, []);                             // 다른 그룹은 그대로여야 함
     const hidden = await resolveR(OT2, gid, 'HIDE');
     const gname = (await q(`select group_name from public.groups where group_id = $1`, [OG]))[0].group_name;
+    const otherGroup = (await q(`select group_name from public.groups where group_id = $1`, [OG2]))[0].group_name;
     const rows = { v: await reportRow(vid), g: await reportRow(gid) };
     const ghost = await resolveR(OT, '00000000-0000-4000-8000-00000000dead', 'HIDE');
     const bad = [await resolveR(OT, vid, 'DELETE'), await resolveR(OT, vid, null), await resolveR(OT, null, 'HIDE'), await resolveR(OT, vid, 'hide')];
     return dismissed.status === 'DISMISSED' && v.nickname === '또다른신고당한사람' && v.profile_image_url === 'https://img/v.png'
-      && rows.v.resolution === 'DISMISSED' && rows.v.handled_by === OT && hidden.status === 'HIDDEN' && gname === '이름 없는 그룹' && rows.g.resolution === 'HIDDEN' && rows.g.handled_by === OT2
+      && rows.v.resolution === 'DISMISSED' && rows.v.handled_by === OT && hidden.status === 'HIDDEN' && gname === '이름 없는 그룹' && otherGroup === '차단그룹' && rows.g.resolution === 'HIDDEN' && rows.g.handled_by === OT2
       && ghost.status === 'NOT_FOUND' && bad.every((x) => x.status === 'INVALID') ? true : { dismissed, v, hidden, gname, rows, ghost, bad };
   });
 
@@ -607,6 +612,7 @@ export default async function ch04({ q, as, su, check, expectErr, PGlite, AUTH_S
     const done = await listR(OT, 'DONE', 100);
     const bad = [await listR(OT, 'x', 10), await listR(OT, null, 10), await listR(OT, 'OPEN', 0), await listR(OT, 'OPEN', 101), await listR(OT, 'OPEN', null)];
     return all.status === 'OK' && all.reports.length === all.total && all.total >= 3 && one.reports.length === 1 && one.total === all.total
+      && one.reports[0].report_id === all.reports[0].report_id                                  // 개수 제한은 최신 줄부터 자름
       && open.reports.every((x) => x.status === 'OPEN') && done.reports.every((x) => x.status === 'DONE') && open.total + done.total === all.total
       && done.reports.length >= 3 && bad.every((x) => x.status === 'INVALID') ? true : { all: all.total, one, open: open.total, done: done.total, bad };
   });
@@ -656,6 +662,30 @@ export default async function ch04({ q, as, su, check, expectErr, PGlite, AUTH_S
       && !!row.evidence.captured_at && nickRow?.evidence === null
       && sourceAfter === 0 && proposalsAfter === 0 && JSON.stringify(kept?.evidence) === JSON.stringify(row.evidence)
       ? true : { harass, nick, sourceBefore, pings, props, nickRow, sourceAfter, proposalsAfter, same: JSON.stringify(kept?.evidence) === JSON.stringify(row?.evidence) };
+  });
+
+  await check('13-카 · 99-04(근거 보관, 상한 · 경계): 깨우기 근거는 최신 50건까지(51건이면 가장 오래된 1건 빠짐), 7일 경계는 6일 23시간은 들어가고 7일 1분은 안 들어감', async () => {
+    const H = await join_(155, '신고많은이'), P = await join_(156, '많이깨운이');
+    await q(`insert into public.push_sends (kind, sender_id, target_id, sent_at)
+             select 'WAKE_PING', $2, $1, now() - make_interval(mins => g * 10) from generate_series(1, 51) g`, [H, P]);      // 10분 간격 51건 (가장 오래된 것 = 510분 전)
+    await report(H, 'USER', P, 'HARASSMENT', null);
+    const row = (await listR(OT, 'ALL', 100)).reports.find((x) => x.target_user_id === P);
+    const pings = row?.evidence?.wake_pings ?? [];
+    const times = pings.map((x) => new Date(x.sent_at).getTime());
+    const sortedDesc = times.every((t, i) => i === 0 || times[i - 1] >= t);
+    const oldest = Math.min(...times), newest = Math.max(...times);
+    return pings.length === 50 && sortedDesc && Date.now() - oldest < 505 * 60_000 && Date.now() - newest > 5 * 60_000          // 510분 전 줄(51번째, 가장 오래된 것)이 빠지고 최신 50건이 남음
+      ? true : { n: pings.length, sortedDesc, oldestMin: (Date.now() - oldest) / 60_000, newestMin: (Date.now() - newest) / 60_000 };
+  });
+
+  await check('13-카 · 99-04(근거 보관, 7일 경계): 6일 23시간 전 깨우기는 근거에 들어가고 7일 1분 전은 안 들어감 (51건 제한과 따로)', async () => {
+    const H = await join_(157, '경계신고'), P = await join_(158, '경계대상');
+    await q(`insert into public.push_sends (kind, sender_id, target_id, sent_at) values
+             ('WAKE_PING', $2, $1, now() - interval '6 days 23 hours'), ('WAKE_PING', $2, $1, now() - interval '7 days 1 minute')`, [H, P]);
+    await report(H, 'USER', P, 'HARASSMENT', null);
+    const row = (await listR(OT, 'ALL', 100)).reports.find((x) => x.target_user_id === P);
+    const ages = (row?.evidence?.wake_pings ?? []).map((x) => (Date.now() - new Date(x.sent_at).getTime()) / 3600_000);
+    return ages.length === 1 && ages[0] > 6 * 24 && ages[0] < 7 * 24 ? true : { ages };
   });
 
   await check('13-카 · 99-04(근거 보관, 그룹 · 근거 없음): 그룹 대상 괴롭힘 신고는 근거 없음(null), 근거 기록이 없는 사람 신고는 빈 목록 두 개', async () => {

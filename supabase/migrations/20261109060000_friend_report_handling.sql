@@ -44,6 +44,10 @@ alter table public.reports
   add column resolution text check (resolution is null or resolution in ('HIDDEN', 'DISMISSED')),
   add column evidence jsonb;
 
+-- 처리 함수가 생기기 전에 서버 키로 직접 DONE으로 바꾼 줄이 있어도 아래 제약 추가가 멈추지 않게: 결과 없는 처리됨 줄은 무시(DISMISSED)로 봄
+--   (그런 줄을 만드는 앱 · 서버 길은 없었음 — 실서버에는 보통 0줄)
+update public.reports set resolution = 'DISMISSED' where status = 'DONE' and resolution is null;
+
 -- 처리 중이면 결과가 없고, 처리됨이면 결과가 있음
 alter table public.reports add constraint reports_resolution_shape
   check ((status = 'OPEN' and resolution is null) or (status = 'DONE' and resolution is not null));

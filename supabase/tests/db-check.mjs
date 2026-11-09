@@ -304,9 +304,9 @@ await check('친구 요청: 요청자는 스스로 수락 못 함 · B→A 역�
   [{ friend_id: fAB }] = await q(`insert into public.friends (requester_id, addressee_id) values ($1, $2) returning friend_id`, [A, B]);
   await as(A);
   const selfAccept = await q(`update public.friends set status = 'ACCEPTED' where friend_id = $1 returning 1`, [fAB]);
+  await su();   // 역방향 중복은 방향 무관 쌍 유일 인덱스(friends_pair_key)가 막음 — 앱의 직접 insert는 정책이 없어 늘 거절되므로 서버 권한으로 인덱스만 시험
+  const dup = await expectErr(() => q(`insert into public.friends (requester_id, addressee_id) values ($1, $2)`, [B, A]), /duplicate key|friends_pair_key/);
   await as(B);
-  const dup = await expectErr(() => q(`insert into public.friends (requester_id, addressee_id) values ($1, $2)`, [B, A]),
-    /duplicate key|friends_pair_key|row-level security/);
   const acc = await q(`update public.friends set status = 'ACCEPTED', accepted_at = now() where friend_id = $1 returning status`, [fAB]);
   const keyChange = await expectErr(() => q(`update public.friends set requester_id = $1 where friend_id = $2`, [C, fAB]),
     /바꿀 수 없음/);
@@ -2684,11 +2684,13 @@ const mkAppt = async (creator, title, { group = null, series = null, on = null, 
 // 지우개 목록 — public 표 중 사용자 칸이 있는 것을 전부 "지움/되돌림" 아니면 "둠"으로 나눠 적음 (migration 머리 주석의 표와 같은 이름)
 //   RESET_DELETES = dev_reset_my_data()가 내 줄을 지우거나(profiles는 제자리에서 되돌림) 하는 표, RESET_KEEPS = 안 건드리는 표
 //   새 표가 생기면 함수를 고치고 여기에 적어야 아래 가드 항목이 통과함
+//   11/9부터(친구 15장, 15-타) 친구 · 그룹 참여 · 공유 권한 · 내가 건 차단 · 내가 숨긴 기상도 지움 — 그래서 friends · group_members · sharing_permissions · wake_hides는 지우는 쪽
+//   (user_blocks는 사용자 칸 이름이 blocker_id라 이 가드의 열 목록 밖 — 지움은 friend/ch15.mjs 15-타가 직접 봄)
 const RESET_DELETES = ['alarm_events', 'alarm_suggestions', 'alarms', 'appointment_participants', 'appointments', 'conversation_sessions',
-                       'daily_journals', 'daily_records', 'profiles', 'user_edit_logs'];
-//   friend_links · rate_limit_events(친구 2장)는 지금 둠 — 친구 쪽 지우기는 15장(15-타)
-const RESET_KEEPS = ['ai_calls', 'alarm_proposals', 'friend_links', 'friends', 'group_members', 'groups', 'push_tickets', 'push_tokens', 'rate_limit_events', 'roll_attempts', 'routines',
-                     'sharing_permissions', 'team_members', 'todos', 'user_places', 'user_questions', 'wake_hides'];
+                       'daily_journals', 'daily_records', 'friends', 'group_members', 'profiles', 'sharing_permissions', 'user_edit_logs', 'wake_hides'];
+//   friend_links · rate_limit_events(친구 2장) · groups(남이 있는 그룹은 둠)는 둠, team_members(운영 화면 팀원)도 둠
+const RESET_KEEPS = ['ai_calls', 'alarm_proposals', 'friend_links', 'groups', 'push_tickets', 'push_tokens', 'rate_limit_events', 'roll_attempts', 'routines',
+                     'team_members', 'todos', 'user_places', 'user_questions'];
 const MINE = {
   appointments: `select * from public.appointments where creator_id = $1`,
   appointment_participants: `select * from public.appointment_participants where user_id = $1`,
