@@ -5,7 +5,7 @@ import type { TravelSample } from './calc/travel.ts';
 import { dbFail, must } from './db.ts';
 import { HttpError } from './errors.ts';
 import { getEnv } from './env.ts';
-import { buildMlRequest, previousDateKey, requestMlPrediction, type MlProfile, type MlPrediction } from './prepare-ml.ts';
+import { buildMlRequest, mayUseMl, previousDateKey, requestMlPrediction, type MlProfile, type MlPrediction } from './prepare-ml.ts';
 import { kakaoTravelMinutes, type FetchLike } from './kakao.ts';
 import {
   computePlan,
@@ -229,7 +229,12 @@ async function optionalMlPrediction(
   timeZone: string,
   allow: boolean,
 ): Promise<MlPrediction | undefined> {
-  if (!allow || getEnv('PREPARE_ML_ENABLED') !== '1') return undefined;
+  if (!mayUseMl({
+    enabled: getEnv('PREPARE_ML_ENABLED') === '1',
+    allowForPlan: allow,
+    userId: ctx.userId,
+    allowedUserIds: getEnv('PREPARE_ML_ALLOWED_USER_IDS'),
+  })) return undefined;
   const url = getEnv('PREPARE_ML_URL');
   const token = getEnv('PREPARE_ML_API_TOKEN');
   if (!url || !token) return undefined;
