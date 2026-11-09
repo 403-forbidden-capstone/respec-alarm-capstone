@@ -971,7 +971,7 @@ test('9-32(고치기 하루 경계): 오늘 안으로 옮기기는 지난 약속
   await expectHttp(() => updateAppointment(ctxFor(seoul.env, A, { now: new Date('2026-10-29T16:00:00Z'), kakao: fakeKakao().lookup }), upd(seoul.id, { title: '서울 사람' }, 'this', true)), 'UNPROCESSABLE', 'PAST_APPOINTMENT');
 });
 
-test('9-38: 만든 사람이 없는(탈퇴한) 공동 약속은 그 약속에 참여한 사람이 고침(만든 사람 칸이 비어 있어도) — 참여 안 한 그룹원과 지우기는 FORBIDDEN, 알림은 고친 사람 제외 다른 참여자에게', async () => {
+test('9-38: 만든 사람이 없는(탈퇴한) 공동 약속은 그 약속에 참여한 사람이 고침(만든 사람 칸이 비어 있어도) — 참여 안 한 그룹원은 FORBIDDEN, 알림은 고친 사람 제외 다른 참여자에게 (지우기는 X-APPT-01)', async () => {
   const { env, id } = await groupCase([A, B, 'u-c']);
   row(env.db, id)!.creator_id = null;
   const spy = pushSpy();
@@ -981,10 +981,26 @@ test('9-38: 만든 사람이 없는(탈퇴한) 공동 약속은 그 약속에 �
   assert.deepEqual(times(env.db, id, A), aBefore.map((t) => t - min(10)));
   assert.deepEqual(res.participants, { updated: 2, held: 0, skipped: 0 });
   assert.ok(spy.sent.every((m) => m.data.recipientUserId !== B));
-  await expectHttp(() => deleteAppointment(ctxFor(env, B), del(id)), 'FORBIDDEN');
   env.db.rows('group_members').push({ group_id: GROUP, user_id: 'u-d', invite_status: 'JOINED' });
   env.db.rows('profiles').push({ user_id: 'u-d', timezone: 'Asia/Seoul', default_buffer_minutes: 10, default_transport: 'TRANSIT', home_name: '집', home_lat: HOME.lat, home_lng: HOME.lng });
   await expectHttp(() => updateAppointment(ctxFor(env, 'u-d'), upd(id, { title: '참여 안 한 사람' }, 'this', true)), 'FORBIDDEN');
+});
+
+test('X-APPT-01: 만든 사람이 없는(탈퇴한) 공동 약속은 그 약속에 참여한 사람이 지움 — 참여 안 한 그룹원은 FORBIDDEN, 지우면 약속 · 참여 · 알람이 사라지고 지운 사람 빼고 취소 알림, 만든 사람이 있는 약속은 참여자가 못 지움', async () => {
+  const { env, id } = await groupCase([A, B, 'u-c']);
+  row(env.db, id)!.creator_id = null;
+  env.db.rows('group_members').push({ group_id: GROUP, user_id: 'u-d', invite_status: 'JOINED' });
+  await expectHttp(() => deleteAppointment(ctxFor(env, 'u-d'), del(id)), 'FORBIDDEN');        // 참여 안 한 그룹원
+  assert.equal(env.db.rows('appointments').length, 1);
+  const spy = pushSpy();
+  const res = await deleteAppointment(ctxFor(env, B, { push: spy.push }), del(id));            // 참여자 B가 지움
+  assert.deepEqual([res.deleted, res.mode, res.deleted_appointment_ids], [true, 'ROW', [id]]);
+  assert.equal(env.db.rows('appointments').length + env.db.rows('appointment_participants').length + env.db.rows('alarms').length, 0);
+  assert.equal(res.notified, 1);                                                                 // 알림 받는 폰이 있는 다른 참여자 u-c (A는 시험 설정에 폰이 없음)
+  assert.deepEqual(spy.sent.map((m) => [m.data.change, m.data.recipientUserId]), [['CANCELED', 'u-c']]);
+  const alive = await groupCase([A, B]);                                                        // 만든 사람이 있는 약속은 참여자가 못 지움 (9-18 · 9-31)
+  await expectHttp(() => deleteAppointment(ctxFor(alive.env, B), del(alive.id)), 'FORBIDDEN');
+  assert.equal(alive.env.db.rows('appointments').length, 1);
 });
 
 test('9-43: 10명 그룹에서 장소를 바꾸면 참여자마다 길찾기를 다시 부름(최대 10번), 일부가 실패해도 나머지는 정상이고 실패한 사람은 기존 알람 유지', async () => {

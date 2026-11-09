@@ -1258,10 +1258,11 @@ await check('서버 전용 함수(can_send_push · find_missed_wake_alarms · �
 });
 
 // 배치 (Q5 A) — pg_cron · pg_net은 PGlite에 없어 cron.schedule · net.http_post 흉내로 확인
-await check('배치 예약: wake-check · alarm-roll(반복 다음 회차)을 5분마다 + friend-requests-expire(친구 3장, 30일 지난 받은 요청 삭제 — 내용은 friend/ch03.mjs) + friend-records-purge(친구 13장, 매일 새벽 7일 지난 서버 기록 삭제 — 내용은 friend/ch13.mjs) (PGlite에는 pg_cron · pg_net이 없어 확장은 건너뛰고 예약만 흉내에 들어감)', async () => {
+await check('배치 예약: wake-check · alarm-roll(반복 다음 회차)을 5분마다 + voice-auto-commit(하루 기록 자동 정리, 10분마다) + friend-requests-expire(친구 3장, 30일 지난 받은 요청 삭제 — 내용은 friend/ch03.mjs) + friend-records-purge(친구 13장, 매일 새벽 7일 지난 서버 기록 삭제 — 내용은 friend/ch13.mjs) (PGlite에는 pg_cron · pg_net이 없어 확장은 건너뛰고 예약만 흉내에 들어감)', async () => {
   const jobs = await q(`select jobname, schedule, command from cron.job order by jobname`);
   const ext = await q(`select extname from pg_extension where extname in ('pg_cron', 'pg_net')`);
-  return jobs.length === 4 && ext.length === 0 && jobs.some((x) => x.jobname === 'friend-requests-expire')
+  return jobs.length === 5 && ext.length === 0 && jobs.some((x) => x.jobname === 'friend-requests-expire')
+    && jobs.some((x) => x.jobname === 'voice-auto-commit' && x.schedule === '*/10 * * * *' && x.command === `select private.invoke_edge_function('voice-commit')`)
     && jobs.some((x) => x.jobname === 'friend-records-purge' && x.schedule === '0 18 * * *' && x.command === 'select private.purge_old_friend_records()')
     && ['wake-check', 'alarm-roll'].every((name) => {
       const j = jobs.find((x) => x.jobname === name);

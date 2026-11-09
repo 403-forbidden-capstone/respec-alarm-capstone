@@ -238,14 +238,16 @@ async function assertGroupMember(ctx: EditCtx, row: { group_id: string | null })
 }
 
 // 약속 행들을 지움 (참여 조건 · 알람은 CASCADE). 돌려주는 값 = 지워지는 내 알람 id (폰에서 지울 예약)
-async function deleteRows(ctx: EditCtx, appointmentIds: readonly string[]): Promise<string[]> {
+//   creatorId = 지울 행의 만든 사람 — 내가 만든 약속은 내 id, 만든 사람이 비어 있는(탈퇴한) 공동 약속은 null (참여자가 지움, DB 정책 appointments_delete_creator가 참여 중인 그룹원에게만 열어 둠)
+async function deleteRows(ctx: EditCtx, appointmentIds: readonly string[], creatorId: string | null = ctx.userId): Promise<string[]> {
   if (!appointmentIds.length) return [];
   const list = [...appointmentIds];
   const participants = must<{ participant_id: string }[]>('participants', await ctx.userDb.from('appointment_participants').select('participant_id').eq('user_id', ctx.userId).in('appointment_id', list));
   const alarmIds = participants.length
     ? ids(must<{ alarm_id: string }[]>('alarms', await ctx.userDb.from('alarms').select('alarm_id').eq('user_id', ctx.userId).in('participant_id', participants.map((p) => p.participant_id))))
     : [];
-  must('appointments delete', await ctx.userDb.from('appointments').delete().in('appointment_id', list).eq('creator_id', ctx.userId));
+  const del = ctx.userDb.from('appointments').delete().in('appointment_id', list);
+  must('appointments delete', await (creatorId == null ? del.is('creator_id', null) : del.eq('creator_id', creatorId)));
   return alarmIds;
 }
 
@@ -357,7 +359,7 @@ async function replanForWake(
 // ---------------------------------------------------------------------------
 
 function assertEditor(target: Target | null, ctx: EditCtx, verb: '고칠' | '지울'): asserts target is Target {
-  const verdict = editorVerdict({ row: target?.appointment ?? null, userId: ctx.userId, participating: target?.participant != null, verb: verb === '지울' ? 'DELETE' : 'EDIT' });
+  const verdict = editorVerdict({ row: target?.appointment ?? null, userId: ctx.userId, participating: target?.participant != null });
   if (verdict === 'NOT_VISIBLE') throw new HttpError('NOT_FOUND', '일정을 찾을 수 없어요');
   if (verdict === 'NOT_CREATOR') {
     // L6 안건후보: 공동 약속을 참여만 한 사람이 고치기 · 지우기를 하면 기본안 = 거절 (만든 사람만). 참여자는 "나는 빠지기"(LEAVE)
@@ -758,7 +760,7 @@ export async function deleteAppointment(ctx: EditCtx, req: Extract<EditRequest, 
     //   L6 안건후보: 공동 약속 지우기 기본안 = 만든 사람이 지우면 약속 전체가 지워짐. 다른 참여자의 폰 예약은 그 사람의 다음 맞추기(reconcile)에서 정리 (변경 알림은 L3 S2 뒤)
     //   공동 약속의 받는 사람(참여자)은 지우기 전에 정해 두고 지운 뒤에 '취소됐어요' 푸시를 보냄 — 받은 폰이 그 약속의 알람을 지움 (9-20). 지난 약속은 알릴 일이 없음
     const planned = group && Date.parse(row.appointment_at) >= localDayRange(ctx.now, await env.tz()).start.getTime() ? await planGroupPushSafe(ctx, row) : undefined;
-    canceled.push(...(await deleteRows(ctx, [row.appointment_id])));
+    canceled.push(...(await deleteRows(ctx, [row.appointment_id], row.creator_id)));
     result.deleted_appointment_ids = [row.appointment_id];
     if (planned) {
       result.warnings.push(...planned.warnings);

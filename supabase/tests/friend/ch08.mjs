@@ -510,4 +510,29 @@ export default async function ch08({ q, as, su, svc, check, expectErr }) {
     const up = await claim(at('08:00'), x.S);
     return nudge.length === 2 && up.length === 2 && up.every((r) => r.kind === 'UP' && r.sleeper_id === x.S) && JSON.stringify(targetsOf(up)) === JSON.stringify(sorted(x.V1, x.V2)) ? true : { nudge, up };
   });
+
+  // ---- 탐색 시험 X-WAKE-04: 알람이 울린 뒤 알람만 끈 사람 --------------------------------------------
+
+  await check('X-WAKE-04(깨우기): 알람이 울린 뒤 알람만 끄고 확인이 없는 사람에게도 깨우기가 OK(FORBIDDEN 아님) — 울리기 전에 꺼 둔 사람은 그대로 깨울 수 없음', async () => {
+    const { A, B, al } = await base(910);
+    await ev(al, B, 'TRIGGERED', at('07:00')); await ev(al, B, 'DISMISSED', at('07:03'));
+    await q(`update public.alarms set is_enabled = false where alarm_id = $1`, [al]);
+    const rang = await ping(A, B, at('07:10'));
+    const { A: A2, B: B2, al: al2 } = await base(912);
+    await q(`update public.alarms set is_enabled = false where alarm_id = $1`, [al2]);
+    const off = await ping(A2, B2, at('07:10'));
+    return rang.status === 'OK' && off.status !== 'OK' ? true : { rang, off };
+  });
+
+  await check('X-WAKE-04(새벽 약속 후속 알림): 약속이 다음 날 00:30이고 전날 기상 알람이 울린 뒤 꺼져 미확인이 되어도 그룹원에게 "깨워 볼까요?"가 나감', async () => {
+    const S = await join_(930, '잠꾸러기'), V = await join_(931, '보는이');
+    const g = await mkGroup(V, [S], [S, V]);
+    const ap = await appt(V, g, at('00:30', '2026-11-11'));
+    const [pt] = await q(`insert into public.appointment_participants (appointment_id, user_id) values ($1, $2) returning participant_id`, [ap, S]);
+    const [{ alarm_id: al }] = await q(`insert into public.alarms (participant_id, user_id, alarm_type, scheduled_at) values ($1, $2, 'WAKE', $3::timestamptz) returning alarm_id`, [pt.participant_id, S, at('23:00')]);
+    await ev(al, S, 'TRIGGERED', at('23:00')); await ev(al, S, 'MISSED', at('23:30'));
+    await q(`update public.alarms set is_enabled = false where alarm_id = $1`, [al]);
+    const r = await claim(at('23:40'), S);
+    return JSON.stringify(targetsOf(r)) === JSON.stringify([V]) && r.every((x) => x.kind === 'NUDGE' && x.sleeper_id === S) ? true : r;
+  });
 }

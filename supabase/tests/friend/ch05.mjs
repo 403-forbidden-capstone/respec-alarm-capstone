@@ -608,4 +608,27 @@ export default async function ch05({ q, as, su, check, expectErr, PGlite, AUTH_S
     await su();
     return errs.every((x) => x === true) && invites.length === 0 && anon === true && helper === true ? true : { errs, invites, anon, helper };
   });
+
+  // ---- 탐색 시험 X-PRIV-01: 차단하면 차단 쌍의 그룹 초대 카드가 사라짐 --------------------------------
+
+  await check('X-PRIV-01: 차단하면 둘 사이의 대기 중인 그룹 초대가 정리되고(어느 쪽이 차단해도), 정리 전 남은 행이 있어도 받은 초대 목록에는 차단 쌍이 보낸 카드가 안 나옴 — 제삼자가 보낸 초대 · 이미 들어간 그룹은 그대로', async () => {
+    const Ba = await join_(70, '차단하는이'), Bb = await join_(71, '초대한이'), Bc = await join_(72, '제삼자'), Bd = await join_(73, '초대받은이'), Be = await join_(74, '남은행');
+    const G1 = await mkGroup(Bb, '차단초대1'), G2 = await mkGroup(Bc, '제삼자초대'), G3 = await mkGroup(Ba, '내그룹'), G4 = await mkGroup(Bb, '같이있는그룹');
+    for (const u of [Bb, Bc, Bd]) await befriend(Ba, u);
+    await addMember(G4.g, Ba);
+    await inviteTo(Bb, G1.g, Ba); await inviteTo(Bc, G2.g, Ba); await inviteTo(Ba, G3.g, Bd);
+    const cards = async (u) => { await as(u); const r = await q(`select group_id from public.my_group_invites() order by group_name`); await su(); return r.map((x) => x.group_id); };
+    const before = await cards(Ba), beforeD = await cards(Bd);
+    await call(Ba, 'public.block_user($1)', [Bb]);                      // 차단한 사람 Ba의 카드(초대한 사람 Bb)
+    await call(Ba, 'public.block_user($1)', [Bd]);                      // 차단한 사람이 초대한 쪽(Ba → Bd)
+    const after = await cards(Ba), afterD = await cards(Bd);
+    const rowsLeft = await q(`select group_id, user_id from public.group_members where invite_status = 'INVITED' and group_id = any($1::uuid[])`, [[G1.g, G2.g, G3.g]]);
+    const stillJoined = await member(G4.g, Ba);
+    // 정리 전부터 남아 있던 행처럼 목록 쪽 걸러내기만 따로 봄: 차단 뒤에 직접 끼워 넣은 대기 초대
+    await call(Be, 'public.block_user($1)', [Bd]);
+    await q(`insert into public.group_members (group_id, user_id, invite_status, invited_by) values ($1, $2, 'INVITED', $3)`, [G3.g, Be, Bd]);
+    const stale = await cards(Be);
+    return before.length === 2 && beforeD.length === 1 && after.length === 1 && after[0] === G2.g && afterD.length === 0
+      && rowsLeft.length === 1 && rowsLeft[0].group_id === G2.g && rowsLeft[0].user_id === Ba && stillJoined?.st === 'JOINED' && stale.length === 0 ? true : { before, beforeD, after, afterD, rowsLeft, stillJoined, stale };
+  });
 }

@@ -581,4 +581,48 @@ export default async function ch07({ q, as, su, svc, check, expectErr }) {
       && r.none >= 1 && r.noneOld >= 1 && r.inf[0] === 0 && r.inf[1] === 0;
     return ok(seoul) && ok(honolulu) ? true : { seoul, honolulu };
   });
+
+  // ---- 탐색 시험 X-WAKE-04: 알람이 울린 뒤 알람만 끈 사람 --------------------------------------------
+
+  await check('X-WAKE-04(조회): 알람이 울린 뒤 알람만 끄고 기상 확인이 없어도 그룹 기상 조회에 줄이 남음 — 울림 직후 DISMISSED, 30분 뒤 MISSED(미확인). 울리기 전에 꺼 둔 알람은 그대로 NO_ALARM', async () => {
+    const A = await join_(90, '에이'), B = await join_(91, '끈이'), C = await join_(92, '미리끈이');
+    const g = await mkGroup(A, [B, C], [B, C]);
+    await appt(A, g, at('10:00'));
+    const bAl = await wakeAlarm(B, at('07:00'));
+    await ev(bAl, B, 'TRIGGERED', at('07:00')); await ev(bAl, B, 'DISMISSED', at('07:03'));
+    await q(`update public.alarms set is_enabled = false where alarm_id = $1`, [bAl]);     // 울린 뒤 알람을 끔 — 기상 확인은 없음
+    await wakeAlarm(C, at('07:00'), { enabled: false });                                     // 울리기 전에 꺼 둔 알람
+    const soon = await rows(A, g, D, at('07:10')), late = await rows(A, g, D, at('07:40'));
+    return JSON.stringify(who(soon)) === JSON.stringify(sorted(A, B, C)) && of(soon, B).wake_status === 'DISMISSED' && iso(of(soon, B).wake_alarm_at) === iso(at('07:00')) && of(soon, C).wake_status === 'NO_ALARM'
+      && of(late, B).wake_status === 'MISSED' && iso(of(late, B).missed_at) === iso(at('07:30')) && of(late, C).wake_status === 'NO_ALARM' ? true : { soon, late };
+  });
+
+  await check('X-WAKE-04(새벽 약속): 약속이 다음 날 00:30이고 그 전날 기상 알람이 울린 뒤 꺼졌어도 전날 그룹 기상 조회가 비지 않고 그 사람 줄이 남음 — 울리기 전에 끈 알람이면 전날은 약속 없는 날(0행)', async () => {
+    const A = await join_(93, '에이'), B = await join_(94, '끈이'), A2 = await join_(95, '에이2'), C = await join_(96, '미리끈이');
+    const g = await mkGroup(A, [B], [B]), g2 = await mkGroup(A2, [C], [C]);
+    const addAlarm = async (ap, u) => {
+      const [pt] = await q(`insert into public.appointment_participants (appointment_id, user_id) values ($1, $2) returning participant_id`, [ap, u]);
+      return (await q(`insert into public.alarms (participant_id, user_id, alarm_type, scheduled_at) values ($1, $2, 'WAKE', $3::timestamptz) returning alarm_id`, [pt.participant_id, u, at('23:00')]))[0].alarm_id;
+    };
+    const bAl = await addAlarm(await appt(A, g, at('00:30', '2026-11-11')), B);                // 참여자는 B 하나 — 보는 사람 A는 알람 없음
+    await ev(bAl, B, 'TRIGGERED', at('23:00')); await ev(bAl, B, 'DISMISSED', at('23:03'));
+    await q(`update public.alarms set is_enabled = false where alarm_id = $1`, [bAl]);
+    const cAl = await addAlarm(await appt(A2, g2, at('00:30', '2026-11-11')), C);
+    await q(`update public.alarms set is_enabled = false where alarm_id = $1`, [cAl]);          // 울리기 전에 꺼 둠
+    const eve = await rows(A, g, D, at('23:10')), eveOff = await rows(A2, g2, D, at('23:10'));
+    return JSON.stringify(who(eve)) === JSON.stringify(sorted(A, B)) && of(eve, B).wake_status === 'DISMISSED' && iso(of(eve, B).wake_alarm_at) === iso(at('23:00')) && eveOff.length === 0 ? true : { eve, eveOff };
+  });
+
+  await check('X-WAKE-04(미확인 후보): 울린 뒤 알람만 끈 알람도 30분이 지나면 find_missed_wake_alarms에 나옴(미확인 시각 = 울림 + 30분) — 울리기 전에 꺼 둔 알람은 안 나옴', async () => {
+    const U = await join_(97, '끈이'), V = await join_(98, '미리끈이');
+    const a1 = await wakeAlarm(U, at('06:00'));
+    await ev(a1, U, 'TRIGGERED', at('06:00')); await ev(a1, U, 'DISMISSED', at('06:02'));
+    await q(`update public.alarms set is_enabled = false where alarm_id = $1`, [a1]);
+    const a2 = await wakeAlarm(V, at('06:00'), { enabled: false });
+    await svc();
+    const r = await q(`select * from public.find_missed_wake_alarms($1::timestamptz, 24)`, [at('23:00')]);
+    await su();
+    const got = r.find((x) => x.alarm_id === a1);
+    return got && iso(got.missed_at) === iso(at('06:30')) && !r.some((x) => x.alarm_id === a2) ? true : { r };
+  });
 }
