@@ -527,3 +527,15 @@ test('축별 선택을 끄면(axesEnabled false) 요청 · 저장된 축 값을 
   assert.deepEqual(resolveOverrides(undefined, [stored], 1, false), {});
   assert.notDeepEqual(resolveOverrides(undefined, [stored], 1, true), {}); // 켜면 저장된 직접 값이 살아 있음
 });
+
+test('9-05: 같은 약속(11:00)에 사람마다 이동 · 기상~출발이 다르면 알람도 각자 따로 — 서로의 값이 섞이지 않고 한쪽만 바꿔도 다른 쪽은 그대로', () => {
+  const at = kst(22, 660); // 11:00 약속, 여유 0
+  const mine = (travel: number, prepare: number) =>
+    text(computePlan(base({ draft: { at, destination: { name: '세종대학교' }, bufferMinutes: 0, prepareMinutes: prepare, beforePrepareMinutes: 5 } }), api(travel))).filter((x) => x.startsWith('WAKE') || x.startsWith('DEPARTURE'));
+  const a = mine(30, 20); // A: 이동 30 · 기상~출발 20 → 출발 10:30, 기상 10:10
+  const b = mine(60, 40); // B: 이동 60 · 기상~출발 40 → 출발 10:00, 기상 9:20
+  assert.deepEqual(a, ['WAKE 10:10', 'DEPARTURE 10:30']);
+  assert.deepEqual(b, ['WAKE 09:20', 'DEPARTURE 10:00']);
+  assert.deepEqual(mine(30, 20), a); // 같은 입력은 같은 결과 — B를 계산해도 A는 안 변함
+  assert.deepEqual(mine(60, 20), ['WAKE 09:40', 'DEPARTURE 10:00']); // 이동만 늘면 출발이 그만큼 일러지고 기상도 같이 감
+});
