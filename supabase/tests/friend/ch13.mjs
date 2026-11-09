@@ -8,6 +8,7 @@
 export default async function ch13({ q, as, su, svc, check, expectErr }) {
   const id = (n) => `bd000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
   const FUTURE = '2099-03-01';
+  const TODAY_KST = () => new Date(Date.now() + 9 * 3600_000).toISOString().slice(0, 10);       // 기상 조회는 어제~내일만 받으므로(이슈 #431) 그룹 기상을 보는 시험은 오늘(한국)로
   const at = (hhmm, day = FUTURE) => `${day}T${hhmm}:00+09:00`;
 
   const join_ = async (n, nickname) => {
@@ -150,8 +151,9 @@ export default async function ch13({ q, as, su, svc, check, expectErr }) {
     const A = await join_(10, '주인'), B = await join_(11, '그룹원');
     const g = await mkGroup(A, [B]);
     await q(`update public.group_members set wake_share_opt_in = true where group_id = $1`, [g]);
-    await groupWake(A, g);
-    const rows = await readAs(B, `select * from public.get_group_wake($1, $2::date)`, [g, FUTURE]);
+    const today = TODAY_KST();
+    await groupWake(A, g, today);
+    const rows = await readAs(B, `select * from public.get_group_wake($1, $2::date)`, [g, today]);
     const keys = rows[0] ? Object.keys(rows[0]).sort() : [];
     return rows.length >= 1 && JSON.stringify(keys) === JSON.stringify(['is_me', 'nickname', 'profile_image_url', 'user_id', 'wake_alarm_at', 'wake_confirmed_at', 'wake_status'])
       ? true : { keys, rows };
@@ -165,10 +167,11 @@ export default async function ch13({ q, as, su, svc, check, expectErr }) {
     const g = await mkGroup(A, [B]);
     await q(`update public.group_members set wake_share_opt_in = true where group_id = $1 and user_id = $2`, [g, A]);
     const { alarm } = await personalAlarm(A);
-    await groupWake(A, g);
+    const today = TODAY_KST();
+    await groupWake(A, g, today);
     const perm = await viewGrant(A, B);
     const visible = async () => ({
-      wake: (await readAs(B, `select 1 from public.get_group_wake($1, $2::date) where not is_me and wake_alarm_at is not null`, [g, FUTURE])).length,
+      wake: (await readAs(B, `select 1 from public.get_group_wake($1, $2::date) where not is_me and wake_alarm_at is not null`, [g, today])).length,
       alarms: (await readAs(B, `select 1 from public.alarms where alarm_id = $1`, [alarm])).length,
       shared: (await readAs(B, `select 1 from public.get_shared_alarm_appointments($1)`, [A])).length,
     });
