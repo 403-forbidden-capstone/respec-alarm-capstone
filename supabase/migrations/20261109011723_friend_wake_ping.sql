@@ -3,7 +3,7 @@
 --   ① push_sends(서버 전용) — 보낸 깨우기 · 친구 알림 기록. 깨우기 횟수(5분 1번 · 하루 3번) · 받은 깨우기 한 줄 · 같은 알림 두 번 방지가 이 표 하나
 --   ② profiles.wake_ping_enabled — [깨우기 받기] 스위치 (기본 켬)
 --   ③ plan_wake_ping — 깨울 수 있는지 판정, reserve면 같은 쌍 잠금 아래에서 다시 판정하고 횟수를 셈 (8-01 ~ 8-15 · 8-33 · 8-35)
---      can_send_push의 WAKE_PING도 같은 판정(보이는 사람이면 통과) — notify 서버 함수가 403으로 막는 것과 판정이 어긋나지 않게
+--      can_send_push의 WAKE_PING은 그대로 거절 — 이 마이그레이션이 먼저 적용돼도 옛 notify가 한도 없이 보내지 못하게. 새 notify는 can_send_push 대신 plan_wake_ping만 부름
 --   ④ my_wake_pings — 오늘 받은 깨우기 한 줄 (8-18)
 --   ⑤ claim_wake_nudges — 미확인 10분 뒤 '깨워 볼까요?'와 본인이 늦게 확인했을 때 후속 1회의 받는 사람을 정함 (8-21 ~ 8-30 · 8-36)
 --   ⑥ get_wake_announcement — 알람이 울리기 직전 음성 안내용 그룹별 일어난 사람 수 (8-31)
@@ -63,11 +63,12 @@ comment on column public.profiles.wake_ping_enabled is '친구가 깨우기를 �
 
 -- 상태: FORBIDDEN(기상이 안 보이는 사람 · 자기 자신 · 없는 사람 — 이유 구분 없음) → OFF → ALREADY_UP → NOT_RINGING → DAILY_LIMIT → WAIT → OK
 --   보이는지: 보내는 사람 시점의 7장 group_wake_rows에 받는 사람 줄이 있어야 함 (같은 그룹 · 동의 · 그 그룹 오늘 약속 · 숨김 / 차단 아님). '오늘' = 받는 사람 시간대의 p_now 날짜
+--     p_group_id를 주면 그 그룹에서 보일 때만 (G03를 연 그룹), 안 주면 보이는 그룹 중 id가 가장 작은 것. 판정에 쓴 그룹을 group_id로 돌려줌 (푸시를 누르면 그 그룹의 G03가 열림)
 --   ALREADY_UP: 확인이 있거나 자동 판정(USAGE) 확인이 아직 20분 전이라 친구에게 안 보이는 중 (8-33) — 그동안 깨우기는 서버가 막음
 --   NOT_RINGING: 그날 첫 기상 알람이 없거나 예정 시각 전. 예정 시각이 지났으면 울림 기록이 없어도 OK (폰이 꺼져 기록이 못 올라와도, 8-아)
 --   한도: 보내는 사람 → 받는 사람 쌍마다 하루 3번(하루 = 받는 사람 시간대 0시) · 5분에 한 번. 하루 3번을 먼저 봄(한도가 찼는데 '5분 뒤'라고 하면 틀리므로)
 -- 읽기만 함 — 횟수를 세는 것은 plan_wake_ping
-create function private.wake_ping_verdict(p_sender uuid, p_target uuid, p_now timestamptz)
+create function private.wake_ping_verdict(p_sender uuid, p_target uuid, p_now timestamptz, p_group_id uuid default null)
 returns jsonb
 language plpgsql
 stable
@@ -84,6 +85,7 @@ declare
   v_row       record;
   v_count     integer;
   v_last      timestamptz;
+  v_gid       uuid;
 begin
   if p_sender is null or p_target is null or p_sender = p_target then
     return jsonb_build_object('status', 'FORBIDDEN');
@@ -100,25 +102,27 @@ begin
   v_day_start := v_date::timestamp at time zone v_tz;
   v_day_end   := (v_date + 1)::timestamp at time zone v_tz;
 
-  select r.wake_alarm_at, r.wake_status, r.confirm_pending into v_row
+  select r.wake_alarm_at, r.wake_status, r.confirm_pending, gs.group_id into v_row
   from public.group_members gs
   cross join lateral private.group_wake_rows(p_sender, gs.group_id, v_date, p_now) r
   where gs.user_id = p_sender and gs.invite_status = 'JOINED'
+    and (p_group_id is null or gs.group_id = p_group_id)
     and r.user_id = p_target
   order by gs.group_id
   limit 1;
   if not found then
     return jsonb_build_object('status', 'FORBIDDEN');
   end if;
+  v_gid := v_row.group_id;
 
   if not v_enabled then
-    return jsonb_build_object('status', 'OFF');
+    return jsonb_build_object('status', 'OFF', 'group_id', v_gid);
   end if;
   if v_row.wake_status = 'CONFIRMED' or v_row.confirm_pending then
-    return jsonb_build_object('status', 'ALREADY_UP');
+    return jsonb_build_object('status', 'ALREADY_UP', 'group_id', v_gid);
   end if;
   if v_row.wake_alarm_at is null or v_row.wake_alarm_at > p_now then
-    return jsonb_build_object('status', 'NOT_RINGING');
+    return jsonb_build_object('status', 'NOT_RINGING', 'group_id', v_gid);
   end if;
 
   select count(*)::integer, max(ps.sent_at) into v_count, v_last
@@ -127,19 +131,19 @@ begin
     and ps.sent_at >= v_day_start and ps.sent_at < v_day_end;
 
   if v_count >= 3 then
-    return jsonb_build_object('status', 'DAILY_LIMIT', 'resets_at', v_day_end);
+    return jsonb_build_object('status', 'DAILY_LIMIT', 'group_id', v_gid, 'resets_at', v_day_end);
   end if;
   if v_last is not null and v_last + interval '5 minutes' > p_now then
-    return jsonb_build_object('status', 'WAIT', 'next_at', v_last + interval '5 minutes');
+    return jsonb_build_object('status', 'WAIT', 'group_id', v_gid, 'next_at', v_last + interval '5 minutes');
   end if;
-  return jsonb_build_object('status', 'OK', 'count', v_count);
+  return jsonb_build_object('status', 'OK', 'group_id', v_gid, 'count', v_count);
 end;
 $$;
 
 -- notify 서버 함수가 부름 (서버 전용). p_reserve가 거짓이면 판정만 {status}, 참이면 같은 쌍을 잠그고(동시에 두 번 눌러도 횟수가 넘지 않게)
---   그 안에서 다시 판정한 뒤 통과하면 한 번 세고 {status:'OK', count, limit, next_at}를 돌려줌 (8-차 · 8-06 · 8-08). 횟수는 푸시를 보내기 직전에 셈(토큰이 없으면 reserve를 안 부름, 8-14)
--- p_now는 시험용(서버 함수는 기본값 = 지금)
-create function public.plan_wake_ping(p_sender uuid, p_target uuid, p_reserve boolean default false, p_now timestamptz default now())
+--   그 안에서 다시 판정한 뒤 통과하면 한 번 세고 {status:'OK', count, limit, next_at, send_id}를 돌려줌 (8-차 · 8-06 · 8-08). send_id = 센 줄의 번호 — 푸시가 한 건도 못 나가면 서버가 그 줄을 지워 횟수를 돌려놓음. 횟수는 푸시를 보내기 직전에 셈(토큰이 없으면 reserve를 안 부름, 8-14)
+-- p_now는 시험용(서버 함수는 기본값 = 지금). p_group_id = 깨우기를 누른 그룹 화면 (위 판정 설명)
+create function public.plan_wake_ping(p_sender uuid, p_target uuid, p_reserve boolean default false, p_now timestamptz default now(), p_group_id uuid default null)
 returns jsonb
 language plpgsql
 volatile
@@ -149,6 +153,7 @@ as $$
 declare
   v        jsonb;
   v_count  integer;
+  v_send   bigint;
 begin
   if p_sender is null or p_target is null then
     return jsonb_build_object('status', 'FORBIDDEN');
@@ -158,55 +163,22 @@ begin
     perform pg_advisory_xact_lock(hashtextextended('wake_ping:' || p_sender::text || ':' || p_target::text, 0));
   end if;
 
-  v := private.wake_ping_verdict(p_sender, p_target, p_now);
+  v := private.wake_ping_verdict(p_sender, p_target, p_now, p_group_id);
   if v ->> 'status' <> 'OK' or not coalesce(p_reserve, false) then
     return v - 'count';
   end if;
 
   v_count := (v ->> 'count')::integer + 1;
   insert into public.push_sends (kind, sender_id, target_id, sent_at)
-  values ('WAKE_PING', p_sender, p_target, p_now);
-  return jsonb_build_object('status', 'OK', 'count', v_count, 'limit', 3, 'next_at', p_now + interval '5 minutes');
+  values ('WAKE_PING', p_sender, p_target, p_now)
+  returning send_id into v_send;
+  return jsonb_build_object('status', 'OK', 'group_id', v ->> 'group_id', 'count', v_count, 'limit', 3, 'next_at', p_now + interval '5 minutes', 'send_id', v_send);
 end;
 $$;
 
 
 -- ---------------------------------------------------------------------
--- 4. 보내도 되는지 — 깨우기 추가
--- ---------------------------------------------------------------------
-
--- WAKE_PING  기상이 보이는 사람이면 통과 (판정 이유는 plan_wake_ping이 따로 돌려줌). 나머지는 11장 그대로
-create or replace function public.can_send_push(p_sender_id uuid, p_target_id uuid, p_kind text)
-returns boolean
-language sql
-stable
-security definer
-set search_path = ''
-as $$
-  select case
-    when p_sender_id is null or p_target_id is null then false
-    when private.is_blocked_pair(p_sender_id, p_target_id) then false
-    else case p_kind
-      when 'ALARM_CHANGED' then coalesce(
-        p_target_id in (select private.granted_owner_ids_for(p_sender_id, 'EDIT_ALARM')),
-        false)
-      when 'FRIEND_REQUEST' then exists (
-        select 1 from public.friends f
-        where f.status = 'PENDING' and f.requester_id = p_sender_id and f.addressee_id = p_target_id
-          and f.requested_at >= now() - interval '1 hour')
-      when 'FRIEND_ACCEPTED' then exists (
-        select 1 from public.friends f
-        where f.status = 'ACCEPTED' and f.requester_id = p_target_id and f.addressee_id = p_sender_id
-          and f.accepted_at >= now() - interval '1 hour')
-      when 'WAKE_PING' then (private.wake_ping_verdict(p_sender_id, p_target_id, now()) ->> 'status') <> 'FORBIDDEN'
-      else false
-    end
-  end;
-$$;
-
-
--- ---------------------------------------------------------------------
--- 5. 받은 깨우기 한 줄 — 홈 · H08 '수연님이 7:12에 깨웠어요'
+-- 4. 받은 깨우기 한 줄 — 홈 · H08 '수연님이 7:12에 깨웠어요'
 -- ---------------------------------------------------------------------
 
 -- 오늘(내 시간대, 또는 p_date) 내가 받은 깨우기, 최신 순. 차단한 사람 것은 뺌
@@ -245,14 +217,14 @@ $$;
 
 
 -- ---------------------------------------------------------------------
--- 6. 미확인 친구 알림 — 받는 사람 정하기 (wake-check 5분 배치)
+-- 5. 미확인 친구 알림 — 받는 사람 정하기 (wake-check 5분 배치)
 -- ---------------------------------------------------------------------
 
 -- 본인 알림(WAKE_MISSED)은 서버 함수가 미확인 기록을 만들 때 바로 보냄. 여기는 그 다음 두 가지
 --   NUDGE '깨워 볼까요?': 미확인(MISSED) 기록 10분 뒤(최근 12시간 안 기록만). 그사이 본인이 확인했으면 취소(8-21). 받는 사람 =
 --     그 사람이 기상 공유에 동의한 그룹 중 '그날 그 그룹의 가장 이른 약속이 아직 안 시작한' 그룹의 참여 중 멤버로,
 --     기상이 보이는 사람(can_see_wake — 동의 · 숨김 · 차단 반영)이고 그 그룹 알림을 안 껐으며(notifications_off), 같은 날 이미 받은 적이 없는 사람. 여러 그룹이어도 한 사람에게 한 번 (8-22 ~ 8-29)
---     그날 = 안 일어난 사람의 기상한 날, 시간대는 그 사람 것. 약속이 없는 날 · 약속 시각이 지난 뒤는 안 보냄 (8-24 ~ 8-26)
+--     그날 = 안 일어난 사람의 기상한 날, 시간대는 그 사람 것. 약속이 없는 날 · 약속 시각이 지난 뒤는 안 보냄 (8-24 ~ 8-26). 새벽 약속(다음 날 01:00, 알람은 그 전날 밤)도 그날 약속으로 침
 --   UP '일어났어요': NUDGE를 받은 사람에게, 본인이 그 뒤 확인했을 때(자동 판정은 20분 뒤부터 보임) 한 번 (8-30). 받는 사람이 여전히 볼 수 있고 알림을 안 껐을 때만
 --   확인 인정은 7장과 같음: 직접 입력(MANUAL) · 대화 정정(VOICE) 출처는 뺌
 -- 돌려주는 group_id = 누르면 열 그룹(받는 사람과 안 일어난 사람이 함께 있고 조건에 맞는 그룹 중 id가 가장 작은 것)
@@ -300,7 +272,14 @@ begin
            from public.appointments ap
            where ap.group_id = gs.group_id
              and ap.appointment_at >= (s.d::timestamp at time zone s.tz)
-             and ap.appointment_at <  ((s.d + 1)::timestamp at time zone s.tz)) > p_now
+             and (ap.appointment_at < ((s.d + 1)::timestamp at time zone s.tz)
+                  or exists (                                                              -- 새벽 약속: 그 사람의 기상 알람이 그날 울리는 다음 날 약속도 그날 약속 (7장 group_wake_has_meeting과 같음)
+                    select 1
+                    from public.appointment_participants pt
+                    join public.alarms al on al.participant_id = pt.participant_id and al.alarm_type = 'WAKE' and al.is_enabled
+                    where pt.appointment_id = ap.appointment_id and pt.user_id = s.sleeper_id
+                      and al.scheduled_at >= (s.d::timestamp at time zone s.tz)
+                      and al.scheduled_at <  ((s.d + 1)::timestamp at time zone s.tz)))) > p_now
     order by s.sleeper_id, s.d, gm.user_id, gs.group_id
   ),
   ins as (
@@ -352,7 +331,7 @@ $$;
 
 
 -- ---------------------------------------------------------------------
--- 7. 음성 안내 — '캡스톤팀 2명이 일어났어요'
+-- 6. 음성 안내 — '캡스톤팀 2명이 일어났어요'
 -- ---------------------------------------------------------------------
 
 -- 오늘 약속이 있는 내 그룹마다 그룹 이름 + 일어난 사람 수(내가 볼 수 있는 사람 중 기상 확인이 된 사람, 나 빼고). 사람 이름은 안 줌.
@@ -387,14 +366,163 @@ $$;
 
 
 -- ---------------------------------------------------------------------
+-- 7. 9장 보정 (11/9 헤드 결정) — '지난 약속'은 하루 경계 · 알림 끈 멤버에게도 조용한 데이터 푸시
+-- ---------------------------------------------------------------------
+
+-- 사람마다 폰 시간대(profiles.timezone, 없으면 Asia/Seoul)의 오늘 0시. '지난 약속' = 이 시각보다 앞의 약속 — 오늘 이미 지난 약속은 오늘 안에는 고치기 · 참여할 수 있음 (9-러)
+create function private.day_start(p_user uuid)
+returns timestamptz
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select ((now() at time zone t.tz)::date)::timestamp at time zone t.tz
+  from (select coalesce((select pr.timezone from public.profiles pr where pr.user_id = p_user), 'Asia/Seoul') as tz) t;
+$$;
+
+-- 9장(20261109003320)의 같은 규칙에서 '약속 시각 > 지금'만 '약속 시각 >= 내 오늘 0시'로 바뀜
+create or replace function private.appointment_open_for_join(p_appointment_id uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select exists (
+    select 1 from public.appointments a
+    where a.appointment_id = p_appointment_id
+      and (a.group_id is null or a.appointment_at >= private.day_start((select auth.uid()))));
+$$;
+
+drop policy appointments_update on public.appointments;
+create policy appointments_update on public.appointments
+  for update to authenticated
+  using (
+    (group_id is null and creator_id = (select auth.uid()))
+    or (group_id is not null
+        and appointment_at >= private.day_start((select auth.uid()))
+        and private.is_group_member(group_id)
+        and (creator_id = (select auth.uid())
+             or (creator_id is null and private.is_appointment_participant(appointment_id)))))
+  with check (
+    (group_id is null and creator_id = (select auth.uid()))
+    or (group_id is not null
+        and appointment_at >= private.day_start((select auth.uid()))
+        and private.is_group_member(group_id)
+        and (creator_id = (select auth.uid())
+             or (creator_id is null and private.is_appointment_participant(appointment_id)))));
+
+create or replace function private.after_group_member_gone()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  delete from public.appointment_participants ap
+  using public.appointments a
+  where ap.appointment_id = a.appointment_id
+    and a.group_id = old.group_id
+    and a.appointment_at >= private.day_start(old.user_id)
+    and ap.user_id = old.user_id;
+
+  perform 1 from public.groups g where g.group_id = old.group_id for update;
+  if found and not exists (
+    select 1 from public.group_members gm where gm.group_id = old.group_id and gm.invite_status = 'JOINED'
+  ) then
+    delete from public.groups g where g.group_id = old.group_id;
+  end if;
+  return null;
+end;
+$$;
+
+-- plan_group_push(20261108195000)에서 달라진 곳 둘
+--   ① 약속 변경은 '안 지난 약속'을 보낸 사람 시간대의 오늘 0시로 판정 (위와 같은 하루 경계)
+--   ② silent_recipients — 약속 변경에서 보이는 알림이 빠진 사람(알림 끈 멤버 · 보낸 사람과 차단 쌍) 중 그 약속에 참여 조건이 있는 사람.
+--      보이는 알림은 설정대로 빼되 알람은 다시 맞춰야 하므로 서버가 이 사람들에게는 조용한 데이터 푸시(문구 없음)만 보냄
+create or replace function public.plan_group_push(p_sender_id uuid, p_group_id uuid, p_kind text, p_appointment_id uuid default null)
+returns jsonb
+language plpgsql
+stable
+security definer
+set search_path = ''
+as $$
+declare
+  v_group_name text;
+  v_joined_at  timestamptz;
+  v_title      text;
+begin
+  if p_sender_id is null or p_group_id is null or p_kind is null or p_kind not in ('GROUP_MEMBER_JOINED', 'GROUP_APPT_CHANGED') then
+    return jsonb_build_object('status', 'FORBIDDEN');
+  end if;
+
+  select g.group_name, gm.joined_at into v_group_name, v_joined_at
+  from public.groups g
+  join public.group_members gm on gm.group_id = g.group_id
+  where g.group_id = p_group_id and gm.user_id = p_sender_id and gm.invite_status = 'JOINED';
+  if not found then
+    return jsonb_build_object('status', 'FORBIDDEN');
+  end if;
+
+  if p_kind = 'GROUP_MEMBER_JOINED' then
+    if v_joined_at is null or v_joined_at < now() - interval '10 minutes' then
+      return jsonb_build_object('status', 'FORBIDDEN');
+    end if;
+  else
+    select ap.title into v_title
+    from public.appointments ap
+    where ap.appointment_id = p_appointment_id and ap.group_id = p_group_id
+      and ap.appointment_at >= private.day_start(p_sender_id)
+      and (ap.creator_id = p_sender_id
+           or (ap.creator_id is null and exists (
+                 select 1 from public.appointment_participants pt where pt.appointment_id = ap.appointment_id and pt.user_id = p_sender_id)));
+    if not found then
+      return jsonb_build_object('status', 'FORBIDDEN');
+    end if;
+  end if;
+
+  return jsonb_build_object(
+    'status', 'OK',
+    'group_name', v_group_name,
+    'appointment_title', v_title,
+    'recipients', coalesce((
+      select jsonb_agg(gm.user_id order by gm.user_id)
+      from public.group_members gm
+      where gm.group_id = p_group_id
+        and gm.invite_status = 'JOINED'
+        and gm.user_id <> p_sender_id
+        and not gm.notifications_off
+        and not private.is_blocked_pair(p_sender_id, gm.user_id)
+        and (p_kind = 'GROUP_MEMBER_JOINED' or exists (
+              select 1 from public.appointment_participants pt where pt.appointment_id = p_appointment_id and pt.user_id = gm.user_id))
+    ), '[]'::jsonb),
+    'silent_recipients', case when p_kind = 'GROUP_APPT_CHANGED' then coalesce((
+      select jsonb_agg(gm.user_id order by gm.user_id)
+      from public.group_members gm
+      where gm.group_id = p_group_id
+        and gm.invite_status = 'JOINED'
+        and gm.user_id <> p_sender_id
+        and (gm.notifications_off or private.is_blocked_pair(p_sender_id, gm.user_id))
+        and exists (
+              select 1 from public.appointment_participants pt where pt.appointment_id = p_appointment_id and pt.user_id = gm.user_id)
+    ), '[]'::jsonb) else '[]'::jsonb end
+  );
+end;
+$$;
+
+
+-- ---------------------------------------------------------------------
 -- 8. 실행 권한
 -- ---------------------------------------------------------------------
 
-revoke execute on function private.wake_ping_verdict(uuid, uuid, timestamptz) from public, anon, authenticated;
+revoke execute on function private.day_start(uuid) from public, anon;
+grant execute on function private.day_start(uuid) to authenticated, service_role;
+revoke execute on function private.wake_ping_verdict(uuid, uuid, timestamptz, uuid) from public, anon, authenticated;
 revoke execute on function private.wake_announcement(uuid, timestamptz) from public, anon, authenticated;
-revoke execute on function public.plan_wake_ping(uuid, uuid, boolean, timestamptz) from public, anon, authenticated;
+revoke execute on function public.plan_wake_ping(uuid, uuid, boolean, timestamptz, uuid) from public, anon, authenticated;
 revoke execute on function public.claim_wake_nudges(timestamptz) from public, anon, authenticated;
-grant execute on function public.plan_wake_ping(uuid, uuid, boolean, timestamptz) to service_role;
+grant execute on function public.plan_wake_ping(uuid, uuid, boolean, timestamptz, uuid) to service_role;
 grant execute on function public.claim_wake_nudges(timestamptz) to service_role;
 
 revoke execute on function public.my_wake_pings(date) from public, anon;

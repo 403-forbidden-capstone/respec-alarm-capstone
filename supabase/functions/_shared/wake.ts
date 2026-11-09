@@ -29,13 +29,22 @@ export const LOOKBACK_HOURS = 24; // 오래된 알람이 한꺼번에 MISSED로 
 // claim_wake_nudges 반환 행. kind NUDGE = '깨워 볼까요?', UP = 후속 '일어났어요'. group_id = 누르면 열 그룹
 export type NudgeRow = { event_key: string; kind: 'NUDGE' | 'UP'; recipient_id: string; sleeper_id: string; group_id: string };
 
-export type WakeCheckResult = { checked: number; recorded: number; pushed: number; nudged: number };
+// claimed = 이번에 친구 알림 대상으로 정한 (받는 사람, 안 일어난 사람) 쌍 수, nudged = 실제로 나간 기기 수 (토큰이 없거나 전송이 실패하면 claimed보다 적음)
+export type WakeCheckResult = { checked: number; recorded: number; pushed: number; claimed: number; nudged: number };
+
+// .in()에 한꺼번에 넣는 id 수 (요청 주소가 너무 길어지지 않게)
+const IN_CHUNK = 100;
+async function selectIn<T>(service: Db, table: string, columns: string, column: string, ids: readonly string[]): Promise<T[]> {
+  const out: T[] = [];
+  for (let i = 0; i < ids.length; i += IN_CHUNK) out.push(...must<T[]>(table, await service.from(table).select(columns).in(column, ids.slice(i, i + IN_CHUNK))));
+  return out;
+}
 
 // 본인 알림: 이번에 새로 기록된 MISSED의 주인마다 한 번 (한 사람의 알람이 둘 이상 같이 미확인이어도 한 번). 보낸 기기 수를 돌려줌
 async function pushMissedToSelf(service: Db, rows: MissedRow[], push: NotifyOptions): Promise<number> {
   const users = [...new Set(rows.map((r) => r.user_id))];
   if (!users.length) return 0;
-  const tokens = must<{ user_id: string; token: string }[]>('push_tokens', await service.from('push_tokens').select('user_id, token').in('user_id', users));
+  const tokens = await selectIn<{ user_id: string; token: string }>(service, 'push_tokens', 'user_id, token', 'user_id', users);
   if (!tokens.length) return 0;
   const copy = composeCopy('WAKE_MISSED', {});
   const messages: OutgoingMessage[] = tokens.map((t) => ({
@@ -82,18 +91,18 @@ async function recordMissed(service: Db, now: Date, push: NotifyOptions): Promis
 }
 
 // 친구 알림: 받을 사람을 DB가 정해 돌려주면 종류별로 묶어 보냄. 이름은 안 일어난(일어난) 사람 것만 문구에
-async function pushNudges(service: Db, now: Date, push: NotifyOptions): Promise<number> {
+async function pushNudges(service: Db, now: Date, push: NotifyOptions): Promise<{ claimed: number; sent: number }> {
   const claimed = await service.rpc('claim_wake_nudges', { p_now: now.toISOString() });
   if (claimed.error) dbFail('claim_wake_nudges', claimed.error);
   const rows = (claimed.data ?? []) as NudgeRow[];
-  if (!rows.length) return 0;
+  if (!rows.length) return { claimed: 0, sent: 0 };
 
   let sent = 0;
   try {
     const names = new Map(
-      must<{ user_id: string; nickname: string | null }[]>('profiles', await service.from('profiles').select('user_id, nickname').in('user_id', [...new Set(rows.map((r) => r.sleeper_id))])).map((p) => [p.user_id, p.nickname]),
+      (await selectIn<{ user_id: string; nickname: string | null }>(service, 'profiles', 'user_id, nickname', 'user_id', [...new Set(rows.map((r) => r.sleeper_id))])).map((p) => [p.user_id, p.nickname]),
     );
-    const tokens = must<{ user_id: string; token: string }[]>('push_tokens', await service.from('push_tokens').select('user_id, token').in('user_id', [...new Set(rows.map((r) => r.recipient_id))]));
+    const tokens = await selectIn<{ user_id: string; token: string }>(service, 'push_tokens', 'user_id, token', 'user_id', [...new Set(rows.map((r) => r.recipient_id))]);
     for (const [kind, rowKind] of [['WAKE_NUDGE', 'NUDGE'], ['WAKE_NUDGE_UP', 'UP']] as [PushKind & ('WAKE_NUDGE' | 'WAKE_NUDGE_UP'), NudgeRow['kind']][]) {
       const messages: OutgoingMessage[] = rows
         .filter((r) => r.kind === rowKind)
@@ -112,7 +121,8 @@ async function pushNudges(service: Db, now: Date, push: NotifyOptions): Promise<
   } catch (e) {
     console.error('[wake-check] 친구 미확인 푸시 실패', e instanceof Error ? e.message : String(e));
   }
-  return sent;
+  if (sent < rows.length) console.error('[wake-check] 친구 알림 대상보다 적게 나감', `claimed=${rows.length} sent=${sent}`);   // 토큰이 없거나 전송이 실패한 몫 — 기록이 먼저라 다시 보내지 않음
+  return { claimed: rows.length, sent };
 }
 
 // ①②와 ③은 서로 안 막음: 한쪽이 실패해도 다른 쪽은 돌리고, 실패는 그 뒤에 그대로 던짐
@@ -120,17 +130,17 @@ export async function runWakeCheck(service: Db, now: Date, options: { push?: Not
   const push = options.push ?? {};
   let failure: unknown;
   let recorded = { checked: 0, recorded: 0, pushed: 0 };
-  let nudged = 0;
+  let nudges = { claimed: 0, sent: 0 };
   try {
     recorded = await recordMissed(service, now, push);
   } catch (e) {
     failure = e;
   }
   try {
-    nudged = await pushNudges(service, now, push);
+    nudges = await pushNudges(service, now, push);
   } catch (e) {
     failure ??= e;
   }
   if (failure) throw failure;
-  return { ...recorded, nudged };
+  return { ...recorded, claimed: nudges.claimed, nudged: nudges.sent };
 }
