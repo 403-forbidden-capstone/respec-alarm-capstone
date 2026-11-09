@@ -41,6 +41,24 @@ export interface VoiceSessionOut {
 
 const messagesOf = (turns: StoredTurn[]): VoiceSessionOut['messages'] => turns.map((t) => ({ role: t.role, text: t.text, at: t.at }));
 
+/**
+ * 만든 때(at)가 없는 예전 카드(11/9 전에 만든 것)에 때를 어림해 채움 — 다시 열 때 맨 끝에 새 카드처럼 붙지 않게. 저장은 안 바꿈(응답에만).
+ * 처음 나온 처리 결과(확인 대기 c# · 되물을 '제목' · 저장 줄)가 붙은 사용자 말의 때. 못 찾으면 앞 카드의 때(없으면 첫 말)
+ */
+export function withCardTimes(st: ServerState, turns: StoredTurn[]): Card[] {
+  const userAt = turns.filter((t) => t.role === 'user').map((t) => t.at);
+  const events = [...st.events].sort((a, b) => a.after_turn - b.after_turn);
+  let prev = turns[0]?.at;
+  return st.cards.map((c) => {
+    if (c.at) return (prev = c.at), c;
+    const title = c.draft?.title;
+    const e = events.find((x) => x.pending.some((p) => p.id === c.id) || (!!title && x.clarify.some((q) => q.includes(`'${title}'`))) || (!!c.summary && x.applied.some((a) => a.includes(c.summary))));
+    const at = (e && userAt[e.after_turn - 1]) ?? prev;
+    prev = at;
+    return at ? { ...c, at } : c;
+  });
+}
+
 async function outOfRow(deps: SessionDeps, row: SessionRow, resumed: boolean, sessionsToday: number): Promise<VoiceSessionOut> {
   const st = row.server_state;
   const room = await roomRows(deps, row);
@@ -51,7 +69,7 @@ async function outOfRow(deps: SessionDeps, row: SessionRow, resumed: boolean, se
     turn_seq: st.counts.user_turns,
     day: { review: st.day.review, morning: st.day.morning },
     messages: messagesOf(room.flatMap((r) => r.turns)), // 같은 방의 앞 구간 말까지
-    cards: st.cards.map((c) => publicCard(c, st.refs)),
+    cards: withCardTimes(st, row.turns).map((c) => publicCard(c, st.refs)),
     limits: limitsOf(st, sessionsToday),
     prev_session_ids: room.slice(0, -1).map((r) => r.session_id),
   };

@@ -1394,6 +1394,51 @@ describe('⑯ [완료] 뒤 같은 날 다시 열면 같은 대화 (하루 한 �
     expect(turnBodies()[1]).toMatchObject({ session_id: 's2' });
   });
 
+  it('다시 열면 카드는 서버가 준 만든 때(at) 자리에 놓임 — 읽은 때로 맨 끝에 붙지 않음 (만든 때가 없는 예전 카드는 읽은 때)', async () => {
+    script = [
+      session({
+        resumed: true,
+        rev: 5,
+        messages: [
+          { role: 'ai', text: '첫 마디', at: at(21, 0).toISOString() },
+          { role: 'user', text: '내일 2시 스터디', at: at(21, 14).toISOString() },
+          { role: 'ai', text: '저장했어요.', at: at(21, 15).toISOString() },
+          { role: 'user', text: '오늘 피곤했어', at: at(21, 16).toISOString() },
+        ],
+        cards: [apptCard({ id: 'c1', status: 'SAVED', appointment_id: 'ap1', at: at(21, 14).toISOString() }), apptCard({ id: 'c2', status: 'READY' })],
+      }),
+    ];
+    const c = await getConversation();
+    expect(c.messages.map((m) => (m.who === 'card' ? m.cardId : m.text))).toEqual(['첫 마디', '내일 2시 스터디', 'c1', '저장했어요.', '오늘 피곤했어', 'c2']);
+    expect(c.messages[2].at).toEqual(at(21, 14));
+  });
+
+  it('다시 열 때 [저장 안 함]한 카드는 대화에 다시 그리지 않음 — 저장한 카드 · 처리 안 한 카드는 제자리에 그대로, 말은 하나도 안 빠짐', async () => {
+    script = [
+      session({
+        resumed: true,
+        rev: 7,
+        messages: [
+          { role: 'ai', text: '첫 마디', at: at(21, 0).toISOString() },
+          { role: 'user', text: '내일 2시 스터디', at: at(21, 14).toISOString() },
+          { role: 'user', text: '오늘 피곤했어', at: at(21, 16).toISOString() },
+          { role: 'user', text: '내일 2시 치과', at: at(21, 18).toISOString() },
+        ],
+        cards: [
+          apptCard({ id: 'c1', status: 'SAVED', appointment_id: 'ap1', at: at(21, 14).toISOString() }),
+          apptCard({ id: 'c2', status: 'REJECTED', at: at(21, 16).toISOString() }),
+          apptCard({ id: 'c3', status: 'READY', at: at(21, 18).toISOString() }),
+        ],
+      }),
+    ];
+    const c = await getConversation();
+    expect(c.messages.map((m) => (m.who === 'card' ? m.cardId : m.text))).toEqual(['첫 마디', '내일 2시 스터디', 'c1', '오늘 피곤했어', '내일 2시 치과', 'c3']);
+    expect(c.cards.map((k) => [k.id, k.status])).toEqual([['c1', 'SAVED'], ['c2', 'REJECTED'], ['c3', 'READY']]); // 상태는 그대로 — c3은 나중에 저장 · 거절 가능
+    await finishConversation();
+    await flushCommits('user-1');
+    expect(commitBodies().map((b) => b.body)).toEqual([{ session_id: 's1', rejected_cards: ['c2'] }]);
+  });
+
   it('완료하지 않은 세션을 서버가 이어 주면 그대로 씀 (같은 밤 resume)', async () => {
     script = [session({ resumed: true, rev: 3 })];
     await getConversation();

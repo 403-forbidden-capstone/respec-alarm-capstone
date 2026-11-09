@@ -76,6 +76,7 @@ type ServerCard = {
   edit?: ServerEdit | null;
   appointment_id?: string | null; // 저장한 약속 (서버가 SAVED 뒤 채움)
   error?: string | null;
+  at?: string | null; // 카드를 만든 때 — 다시 열 때 그 자리에 놓음 (예전 카드는 없음 → 읽은 때)
 };
 
 type ServerFix = { id: string; fact?: string; kind: string; participant_id: string /* 늘 글자 (모르면 '') */; action: 'CORRECT' | 'DENY'; to: string | null };
@@ -268,7 +269,8 @@ function mergeCards(cards: ServerCard[] | undefined, at: Date) {
     const rec = state.cards.get(sc.id);
     if (!rec) {
       state.cards.set(sc.id, { server: sc, status: sc.status, estimate: null, alarms: [], error: null, place: null, appointmentId: null });
-      pushMessage('card', '', at, sc.id);
+      // [저장 안 함]한 카드는 다시 열 때 대화에 다시 그리지 않음 (상태는 남겨 정리 요청의 rejected_cards로 감)
+      if (sc.status !== 'REJECTED') pushMessage('card', '', sc.at ? new Date(sc.at) : at, sc.id);
       continue;
     }
     const done = rec.status === 'SAVED' || rec.status === 'REJECTED';
@@ -660,7 +662,10 @@ async function readSession(resume: boolean, fresh = false): Promise<void> {
   state.messages = [];
   state.cards = new Map();
   for (const m of res.messages ?? []) pushMessage(m.role === 'ai' ? 'ai' : 'me', m.text, m.at ? new Date(m.at) : at);
-  mergeCards(res.cards, at);
+  // 카드는 만든 때(at) 자리로 (같은 때면 말 뒤 — 안정 정렬). 만든 때가 없는 예전 카드는 예전처럼 맨 끝(읽은 때 · 마지막 말 중 늦은 때)
+  const last = state.messages.at(-1)?.at;
+  mergeCards(res.cards, last && last > at ? last : at);
+  state.messages.sort((a, b) => a.at.getTime() - b.at.getTime());
   if (fresh) await pruneExpired(now()); // 앱을 열 때 — 모든 사용자의 7일 지난 표시 · 옛 형식 키 정리
   if (fresh) void flushCommits(state.userId); // 지난번에 못 보낸 대화 끝 정리
   if (res.session_id) await restoreSaved(res.session_id, fresh, res.prev_session_ids ?? []);

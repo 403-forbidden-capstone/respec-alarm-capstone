@@ -27,8 +27,9 @@ const CARD_DRAFTING = '일정 카드를 생성하고 있어요...';
 const MISSED: Record<'LIMIT' | 'BUSY' | TurnNotice, string> = {
   LIMIT: '오늘 대화 한도에 닿아 더 이상 일정으로 정리되지 않아요. 일정은 직접 만들거나 내일 새 대화에서 말해 주세요.',
   BUSY: '앞의 요청이 실패해 방금 말은 정리되지 않았어요. [다시 시도]를 먼저 눌러 주세요.',
-  RATE_LIMITED: 'AI 요청이 몰려 방금 말한 일정을 확인하지 못했어요. 잠시 뒤 한 번 더 말해 주세요.',
-  EXTRACT_FAILED: '방금 말한 일정을 확인하지 못했어요. 한 번 더 말해 주세요.',
+  // 추출이 실패하면 그 말이 일정이었는지 모름 — 일정이라고 단정하지 않음 (할 일 · 생활 기록은 [완료] 정리가 따로 챙김)
+  RATE_LIMITED: 'AI 요청이 몰려 방금 한 말에서 일정을 찾지 못했어요. 일정이었다면 잠시 뒤 한 번 더 말해 주세요.',
+  EXTRACT_FAILED: '방금 한 말에서 일정을 찾지 못했어요. 일정이었다면 한 번 더 말해 주세요.',
 };
 const explain = (text: string, why: keyof typeof MISSED | null | undefined) => {
   if (why && mightBeSchedule(text)) toast(MISSED[why]);

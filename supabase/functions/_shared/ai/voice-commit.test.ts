@@ -15,7 +15,7 @@ import type { Structured } from './final-core.ts';
 import { structuredProblems } from './structured.v1.ts';
 import type { BehaviorReport, Card, FinalExtract } from './types.ts';
 import { handleVoiceCommit, journalFacts, type CommitDeps, type VoiceCommitOut } from './voice-commit.ts';
-import { CARRIED_STALE_ERROR, handleVoiceSession, type VoiceSessionOut } from './voice-session.ts';
+import { CARRIED_STALE_ERROR, handleVoiceSession, withCardTimes, type VoiceSessionOut } from './voice-session.ts';
 
 const ME = 'u-me';
 const REVIEW = '2026-10-29';
@@ -952,4 +952,75 @@ test('계산이 안 끝난 채 이어 받은 카드: 새 구간 첫 말 전에 �
   // 이어 받은 카드가 없는 보통 세션은 예전처럼 말 전 results를 거절
   const plain = await chat(seed(), [], [], [], AT_9AM);
   assert.equal((await failure(handleVoiceTurn(plain.deps, { session_id: plain.sid, rev: plain.session.rev, client_turn_id: cid(), results: { cards: [], fixes: [] } }))).code, 'VALIDATION_FAILED');
+});
+
+// ───────── 같은 일정의 반복 언급 · 글자 흔들림 (11/9 웹 시험 재현) ─────────
+
+test('저장한 스터디 뒤 상관없는 말에 T2F가 "스터더 · 도서간"으로 다시 뽑아도 새 카드 없음 · 같은 시각 다른 일정(치과)은 새 카드 · [저장 안 함] 카드는 오타 재추출로 안 살아남 · 다시 열면 카드 상태와 만든 때 그대로', async () => {
+  const db = seed();
+  const x = (title: string, place: string | null, save = 'UNCONFIRMED') => ({ ref: null, title, date: TOMORROW, time: '14:00', place, importance: null, transport: null, repeat: null, save, unclear: null });
+  const fast = (...appointments: unknown[]) => ({ ...T2F_NONE, appointments });
+  const fake = fakeClaude({
+    T2F: [fast(x('스터디', '도서관')), fast(x('스터더', '도서간', 'CONFIRMED')), fast(x('스터디', '도서관'), x('치과', null)), fast(x('치카', null, 'CONFIRMED'))],
+    T1: Array(8).fill(T1_OK),
+  });
+  let clock = new Date('2026-10-29T21:00:00+09:00');
+  let t = 0;
+  const deps: CommitDeps = { userId: ME, userDb: db as unknown as Db, service: db as unknown as Db, llm: fake.client, model: 'gemini-3.5-flash-lite', now: () => clock, clock: () => (t += 40), sleep: async () => {} };
+  const s = (await handleVoiceSession(deps, { session_type: 'BEFORE_SLEEP', input_mode: 'TEXT', resume: true })) as VoiceSessionOut;
+  const sid = s.session_id as string;
+  const say = async (rev: number, text: string) => (await handleVoiceTurn(deps, { session_id: sid, rev, client_turn_id: cid(), text })) as VoiceTurnOut;
+
+  // 1) 스터디 → 카드 계산 → 저장
+  clock = new Date('2026-10-29T21:14:30+09:00');
+  const r1 = await say(s.rev, '내일 오후 2시에 도서관에서 스터디 약속이 있어');
+  assert.deepEqual([r1.next, r1.cards.map((c) => [c.id, c.status, c.at])], ['APP_TASKS', [['c1', 'NEEDS_ESTIMATE', '2026-10-29T21:14:30+09:00']]]);
+  const estimate = { alarms: [{ kind: 'PREPARE', at: '2026-10-30T12:30:00+09:00', enabled: true }, { kind: 'DEPARTURE', at: '2026-10-30T13:20:00+09:00', enabled: true }], level: 2, with_wake: false };
+  const r2 = (await handleVoiceTurn(deps, { session_id: sid, rev: r1.rev, client_turn_id: cid(), results: { cards: [{ id: 'c1', status: 'READY', estimate, error: null }], fixes: [] } })) as VoiceTurnOut;
+  const r3 = (await handleVoiceTurn(deps, { session_id: sid, rev: r2.rev, client_turn_id: cid(), card_action: { id: 'c1', action: 'SAVED', appointment_id: 'aaaaaaaa-0000-4000-8000-000000000002', alarms: estimate.alarms.map((a) => ({ ...a, level: 2 })) } })) as VoiceTurnOut;
+  assert.equal(r3.cards[0].status, 'SAVED');
+
+  // 2) 상관없는 말 — T2F가 앞 스터디를 글자를 틀리게 다시 뽑음 → 같은 날짜 · 시각 · 한 글자 차이라 새 카드 없음
+  clock = new Date('2026-10-29T21:16:42+09:00');
+  const r4 = await say(r3.rev, '오늘 수업도 듣고 팀플도 하느라 정말 피곤했어');
+  assert.deepEqual([r4.next, r4.cards.map((c) => c.id), r4.reply?.text], ['USER', ['c1'], T1_OK.reply]);
+
+  // 3) 같은 시각이어도 다른 일정은 새 카드 (같은 스터디를 또 말한 것은 그대로)
+  const r5 = await say(r4.rev, '내일 2시에 치과 예약도 있어');
+  assert.deepEqual(r5.cards.map((c) => [c.id, c.status, c.draft?.title]), [['c1', 'SAVED', '스터디'], ['c2', 'NEEDS_ESTIMATE', '치과']]);
+
+  // 4) [저장 안 함] 뒤 같은 일정을 글자만 틀리게 다시 뽑아도 되살아나지 않음 (장소를 다시 묻지 않음)
+  const r6 = (await handleVoiceTurn(deps, { session_id: sid, rev: r5.rev, client_turn_id: cid(), card_action: { id: 'c2', action: 'REJECTED' } })) as VoiceTurnOut;
+  const r7 = await say(r6.rev, '치과는 신경 안 써도 돼');
+  assert.deepEqual(r7.cards.map((c) => [c.id, c.status]), [['c1', 'SAVED'], ['c2', 'REJECTED']]);
+  assert.ok(!(rowOf(db, sid).server_state.events.at(-1)?.clarify ?? []).length);
+
+  // 5) 다시 열기(16:19 상황) — 새로 만들지 않고 그대로, 카드의 만든 때도 그대로
+  clock = new Date('2026-10-29T21:19:24+09:00');
+  const again = (await handleVoiceSession(deps, { session_type: 'BEFORE_SLEEP', input_mode: 'TEXT', resume: true })) as VoiceSessionOut;
+  assert.equal(again.session_id, sid);
+  assert.deepEqual(again.cards.map((c) => [c.id, c.status, c.at]), [['c1', 'SAVED', '2026-10-29T21:14:30+09:00'], ['c2', 'REJECTED', '2026-10-29T21:16:42+09:00']]);
+  assert.equal(fake.order.filter((p) => p === 'T2F').length, 4);
+});
+
+test('만든 때가 없는 예전 카드: 다시 열 때 처음 나온 처리 결과의 사용자 말 때로 채움 (11/9 웹 시험 — 저장한 스터디 · 거절한 스터더가 맨 끝에 붙던 것), 저장한 상태는 그대로', async () => {
+  const db = seed();
+  const { deps, sid } = await chat(db, [['안녕'], ['내일 오후 2시에 도서관에서 스터디 약속이 있어'], ['오늘 수업도 듣고 팀플도 하느라 정말 피곤했어']]);
+  const row = rowOf(db, sid);
+  const userAt = (db.rows('conversation_sessions').find((s) => s.session_id === sid) as { turns: { role: string; at: string }[] }).turns.filter((t) => t.role === 'user').map((t) => t.at);
+  // DB에 남은 모양 그대로: c1은 2번째 말 뒤 확인 대기(저장함), c2는 3번째 말 뒤 장소 되묻기(거절함), c3은 처리 결과에 없음 — 셋 다 at 없음
+  putCards(db, sid, [
+    { status: 'SAVED', appointment_id: 'ap-team', summary: '10/30(금) 14:00 스터디 · 도서관', draft: { title: '스터디', date: TOMORROW, time: '14:00', place: '도서관', importance: null, transport: null, repeat: [], items: [], alarms: { WAKE: true, PREPARE: true, DEPARTURE: true } } },
+    { status: 'REJECTED', summary: '10/30(금) 14:00 스터더 · 도서간', draft: { title: '스터더', date: TOMORROW, time: '14:00', place: '도서간', importance: null, transport: null, repeat: [], items: [], alarms: { WAKE: true, PREPARE: true, DEPARTURE: true } } },
+    { status: 'READY', summary: '' },
+  ]);
+  row.server_state.events = [
+    { after_turn: 3, applied: [], pending: [], rejected: [], clarify: ["'스터더' 장소 (카드의 [장소 고르기])"], alarms: [] },
+    { after_turn: 2, applied: [], pending: [{ id: 'c1', kind: 'APPOINTMENT', summary: '10/30(금) 14:00 스터디 · 도서관' }], rejected: [], clarify: [], alarms: [] },
+  ];
+  const s = (await handleVoiceSession({ ...deps, now: () => LATER }, { session_type: 'BEFORE_SLEEP', input_mode: 'TEXT', resume: true })) as VoiceSessionOut;
+  assert.deepEqual(s.cards.map((c) => [c.id, c.status, c.at]), [['c1', 'SAVED', userAt[1]], ['c2', 'REJECTED', userAt[2]], ['c3', 'READY', userAt[2]]]); // c3은 앞 카드 때
+  assert.equal(rowOf(db, sid).server_state.cards.every((c) => c.at === undefined), true); // 저장된 상태는 안 바꿈(응답에만)
+  // 만든 때가 있는 카드는 그대로
+  assert.equal(withCardTimes({ ...row.server_state, cards: [{ ...row.server_state.cards[0], at: '2026-10-29T21:00:00+09:00' }] }, [])[0].at, '2026-10-29T21:00:00+09:00');
 });
