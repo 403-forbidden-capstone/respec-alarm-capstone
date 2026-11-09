@@ -113,7 +113,8 @@ export type MemberAlarm = {
   levelName: string; // 약 · 중 · 강
   note: string; // 준비 70분 · 이동 70분 · 여유 10분
   enabled: boolean;
-  firstAlarmId?: string; // 제안을 보낼 때 가리키는 알람(카드에서 가장 이른 것) — 실데이터만
+  firstAlarmId?: string; // 제안을 보낼 때 가리키는 알람(켜져 있고 아직 안 울린 가장 이른 것) — 없으면 시각 제안 불가
+  proposeAt?: Date; // 그 알람의 지금 시각 (고른 시각 초안의 기준)
   originalAt?: Date | null; // 친구가 바꾸기 전 원래 시각(합계 ±60분 기준, [원래대로]) — 비어 있으면 아직 바뀐 적 없음
   proposal?: SentProposal | null; // 내가 보낸 제안의 지금 상태 ('제안함' · '반영됨')
 };

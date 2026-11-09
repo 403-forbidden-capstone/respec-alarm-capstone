@@ -4,7 +4,7 @@ import { StyleSheet, View } from 'react-native';
 
 import { Card, Chip, LoadError, Loading, Screen, Sheet, Text, Timeline, toast, TopBar, TopBarButton } from '@/components/ui';
 import { getShareLog, getSharedAlarms, proposeSharedAlarm } from '@/features/social/api';
-import { PROPOSE_NOTE, PROPOSE_SENT, PROPOSE_SENT_NO_PUSH } from '@/features/social/proposalTexts';
+import { PROPOSE_NOTE, PROPOSE_SENT } from '@/features/social/proposalTexts';
 import { MemberAlarmCard } from '@/features/social/components/MemberAlarmCard';
 import { Note } from '@/features/social/components/Note';
 import type { ShareLogItem } from '@/features/social/types';
@@ -56,12 +56,17 @@ export default function SharedAlarmsScreen() {
   const { person: p, canView, canEdit, tags, alarms } = data;
 
   // 시각을 골라 [보내기] — 제안 한 줄(상대 알람은 그대로, 상대가 [적용]해야 바뀜). 연타해도 한 번씩 (한 번에 하나)
-  const propose = (alarmId: string, newAt: Date) =>
-    run(async () => {
-      const { notified } = await proposeSharedAlarm(p.id, alarmId, newAt);
-      toast(notified ? PROPOSE_SENT : PROPOSE_SENT_NO_PUSH);
+  //   보낸 쪽에는 상대 알림이 닿았는지 알리지 않음(상대가 알림을 껐거나 토큰이 없다는 사실이 새지 않게) — 늘 '제안을 보냈어요'. 보냈으면 true
+  const propose = async (alarmId: string, newAt: Date): Promise<boolean> => {
+    let sent = false;
+    await run(async () => {
+      await proposeSharedAlarm(p.id, alarmId, newAt);
+      sent = true;
+      toast(PROPOSE_SENT);
       await reload();
     });
+    return sent;
+  };
 
   return (
     <Screen>
@@ -96,7 +101,7 @@ export default function SharedAlarmsScreen() {
           key={a.id}
           alarm={a}
           busy={busy}
-          onPropose={canEdit ? (newAt) => propose(a.id, newAt) : undefined}
+          onPropose={canEdit && a.firstAlarmId ? (newAt) => propose(a.firstAlarmId as string, newAt) : undefined}
         />
       ))}
 

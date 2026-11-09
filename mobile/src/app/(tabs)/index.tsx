@@ -215,7 +215,7 @@ export default function HomeScreen() {
       ) : null}
 
       {/* 친구가 보낸 알람 시각 제안 (친구 10장) */}
-      <ProposalCards />
+      <ProposalCards onChanged={() => void reload()} />
 
       <SectionHeader title="다음 알람" right={next ? formatRelative(current, next.alarm.at) : undefined} />
       {next ? (

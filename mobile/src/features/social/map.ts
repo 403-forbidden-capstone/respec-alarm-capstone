@@ -147,8 +147,14 @@ function noteOf(card: SharedCard): string {
   return `준비 ${minutesBetween(at(first.scheduled_at), at(departure.scheduled_at))}분 · 출발부터 약속까지 ${minutesBetween(at(departure.scheduled_at), card.appointmentAt)}분`;
 }
 
-export function toMemberAlarm(card: SharedCard): MemberAlarm {
+// 제안을 보낼 알람 — 켜져 있고 아직 안 울린 가장 이른 알람 (서버가 그 알람이 속한 카드 전체를 같은 만큼 옮기고, 이미 울렸거나 꺼진 알람은 받지 않음). 없으면 undefined = 시각 제안 불가
+export function proposalTarget(card: SharedCard, nowMs: number): SharedAlarmRow | undefined {
+  return card.alarms.find((a) => a.is_enabled && at(a.scheduled_at).getTime() > nowMs);
+}
+
+export function toMemberAlarm(card: SharedCard, nowMs: number = Date.now()): MemberAlarm {
   const first = card.alarms[0];
+  const target = proposalTarget(card, nowMs);
   // 강도 세 칸이 한 약속에서 같은 값이라 첫 알람의 배경음 칸으로 읽음 (features/alarm/map.ts와 같은 규칙)
   const level = levelOfSoundKey(first.sound_key) ?? levelOfIntensity(first.intensity) ?? 1;
   return {
@@ -159,8 +165,9 @@ export function toMemberAlarm(card: SharedCard): MemberAlarm {
     levelName: LEVELS[level].name,
     note: noteOf(card),
     enabled: card.alarms.some((a) => a.is_enabled), // 카드 스위치 = 묶음 전체. 하나라도 켜져 있으면 켜짐
-    firstAlarmId: first.alarm_id,
-    originalAt: first.original_scheduled_at ? at(first.original_scheduled_at) : null,
+    firstAlarmId: target?.alarm_id, // 제안을 보낼 알람 id — 없으면 컨트롤을 숨김
+    proposeAt: target ? at(target.scheduled_at) : undefined,
+    originalAt: target?.original_scheduled_at ? at(target.original_scheduled_at) : null,
     proposal: null, // getSharedAlarms가 보낸 제안 상태를 붙임
   };
 }

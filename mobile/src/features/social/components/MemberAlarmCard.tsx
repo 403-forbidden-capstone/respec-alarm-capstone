@@ -10,7 +10,7 @@ import type { MemberAlarm } from '../types';
 type Props = {
   alarm: MemberAlarm;
   busy?: boolean;
-  onPropose?: (newAt: Date) => void; // 설정 권한이 있을 때만 — 고른 시각으로 [보내기] · [원래대로]
+  onPropose?: (newAt: Date) => Promise<boolean>; // 설정 권한이 있을 때만 — 고른 시각으로 [보내기] · [원래대로], 보냈으면 true (실패하면 고른 시각을 남겨 다시 보내게)
 };
 
 const STEP_MINUTES = 5;
@@ -20,10 +20,12 @@ const STEP_MINUTES = 5;
 // 설정 권한이 있으면 시각 고르기(5분씩) → [보내기] 한 번 (친구 10장): 바꾸는 게 아니라 제안이고, 끄기 · 삭제는 없음. 두 번째 줄에 내가 보낸 제안 상태('제안함' · '반영됨')
 export function MemberAlarmCard({ alarm, busy, onPropose }: Props) {
   const first = alarm.chain[0];
+  const baseAt = alarm.proposeAt ?? first.at; // 제안을 보낼 알람(켜져 있고 아직 안 울린 가장 이른 것)의 지금 시각
+  const target = alarm.chain.find((x) => x.at.getTime() === baseAt.getTime()) ?? first;
   const [delta, setDelta] = useState(0); // 지금 시각에서 5분 단위로 움직인 값 (보내기 전 초안)
-  const picked = addMinutes(first.at, delta);
+  const picked = addMinutes(baseAt, delta);
   const original = alarm.originalAt ?? null;
-  const canRevert = original != null && original.getTime() !== first.at.getTime();
+  const canRevert = original != null && original.getTime() !== baseAt.getTime();
   const line = proposalLine(alarm.proposal);
 
   return (
@@ -41,7 +43,7 @@ export function MemberAlarmCard({ alarm, busy, onPropose }: Props) {
           {line}
         </Text>
       ) : null}
-      {onPropose && alarm.enabled ? (
+      {onPropose && alarm.enabled && alarm.firstAlarmId ? (
         <View style={styles.pick}>
           <View style={styles.shift}>
             <TopBarButton label={`${STEP_MINUTES}분 앞당기기`} onPress={() => setDelta((d) => d - STEP_MINUTES)} />
@@ -49,7 +51,7 @@ export function MemberAlarmCard({ alarm, busy, onPropose }: Props) {
           </View>
           {delta !== 0 ? (
             <Text variant="bodyStrong" style={styles.line}>
-              {`${first.label} ${formatTime(first.at)} → ${formatTime(picked)}`}
+              {`${target.label} ${formatTime(baseAt)} → ${formatTime(picked)}`}
             </Text>
           ) : null}
           <View style={styles.shift}>
@@ -59,11 +61,17 @@ export function MemberAlarmCard({ alarm, busy, onPropose }: Props) {
               loading={busy}
               disabled={delta === 0}
               onPress={() => {
-                onPropose(picked);
-                setDelta(0);
+                void onPropose(picked).then((sent) => {
+                  if (sent) setDelta(0); // 실패(오프라인 · 범위 밖)면 고른 시각을 남김 (친구 10-31)
+                });
               }}
             />
-            {canRevert ? <Button small variant="ghost" label="원래대로" disabled={busy} onPress={() => onPropose(original)} /> : null}
+            {canRevert ? <Button small variant="ghost" label="원래대로" disabled={busy} onPress={() => {
+                  void onPropose(original).then((sent) => {
+                    if (sent) setDelta(0);
+                  });
+                }}
+              /> : null}
           </View>
         </View>
       ) : null}

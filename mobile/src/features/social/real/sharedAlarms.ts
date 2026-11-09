@@ -62,9 +62,9 @@ export async function getSharedAlarms(personId: string): Promise<SharedAlarms | 
     canEdit: canView && received.editAlarm, // 조회가 안 되면 고칠 알람도 안 보임 (docs/screen-data-map.md G04)
     tags: shareTags(receivedRows(s, personId)),
     alarms: cards.map((card) => {
-      const alarm = toMemberAlarm(card);
+      const alarm = toMemberAlarm(card, now().getTime());
       // 보낸 제안은 카드의 알람마다 따로 기록되므로 가장 이른 알람(제안을 보낸 알람) 것을 붙임
-      return { ...alarm, proposal: sent.get(card.alarms[0].alarm_id) ?? null };
+      return { ...alarm, proposal: (alarm.firstAlarmId && sent.get(alarm.firstAlarmId)) || null };
     }),
   };
 }
@@ -111,12 +111,10 @@ async function notifyOwner(ownerId: string, alarmId: string): Promise<boolean> {
 
 const NOTIFY_TIMEOUT_MS = 8_000; // 알림은 덤이라 오래 기다리지 않음 (제안은 이미 저장됨)
 
-// 시각 제안 보내기 (G04 [보내기] · [원래대로]) — 카드의 가장 이른 알람 기준 새 시각. 서버가 권한 · 곧 울릴 알람 · ±60분을 다시 확인
+// 시각 제안 보내기 (G04 [보내기] · [원래대로]) — 화면이 본 알람(카드에서 켜져 있고 아직 안 울린 가장 이른 것)의 새 시각. 서버가 권한 · 곧 울릴 알람 · ±60분을 다시 확인
 //   성공하면 상대에게 알림을 부르고(실패해도 제안은 그대로), 거절은 UserError로 이유를 알림
-export async function proposeSharedAlarm(personId: string, cardId: string, newAt: Date): Promise<SharedChangeResult> {
+export async function proposeSharedAlarm(personId: string, alarmId: string, newAt: Date): Promise<SharedChangeResult> {
   const s = await loadSnapshot();
-  const card = await loadCard(personId, cardId);
-  const alarmId = card.alarms[0].alarm_id;
   const { data, error } = await supabase.rpc('propose_alarm_time', { p_alarm_id: alarmId, p_new_at: newAt.toISOString() });
   if (error) throw error;
   const status = (data as { status?: unknown } | null)?.status;

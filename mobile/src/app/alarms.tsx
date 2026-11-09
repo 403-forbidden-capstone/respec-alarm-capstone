@@ -50,7 +50,7 @@ export default function AlarmsScreen() {
         알람
       </Text>
       {/* 친구가 보낸 알람 시각 제안 — 푸시를 누르면 여기로 (친구 10장) */}
-      <ProposalCards />
+      <ProposalCards onChanged={() => void reload()} />
       <Text variant="lead">일정마다 기상 · 준비 · 출발 알람을 계산해 두었어요.</Text>
       <View style={styles.links}>
         <TextLink label="학교 시간표 · 반복 일정 지우기" onPress={() => router.push('/timetable')} />

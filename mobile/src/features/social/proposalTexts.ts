@@ -5,7 +5,6 @@ import { formatTime } from '@/lib/format';
 import type { SentProposal } from './types';
 
 export const PROPOSE_SENT = '제안을 보냈어요';
-export const PROPOSE_SENT_NO_PUSH = '제안을 보냈어요. 상대 폰에는 알림이 닿지 않았어요';
 export const PROPOSE_TOO_SOON = '곧 울릴 알람이라 지금은 제안할 수 없어요';
 export const PROPOSE_LIMIT = '원래 시각에서 1시간(±60분) 안에서만 제안할 수 있어요';
 export const PROPOSE_SAME = '지금 시각과 같아요';

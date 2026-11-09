@@ -153,6 +153,8 @@ function toMemberAlarm(a: MockMemberAlarm): MemberAlarm {
     levelName: a.levelName,
     note: a.note,
     enabled: shared.on,
+    firstAlarmId: a.id, // 가짜 모드는 약속 하나가 알람 하나 — 제안 보내기 입구를 보이게
+    proposeAt: kst(a.day, a.chain[0][0] + shared.shift),
   };
 }
 
@@ -449,8 +451,8 @@ export async function getSharedAlarms(personId: string): Promise<SharedAlarms | 
 }
 
 // 시각 제안 보내기 (G04 [보내기] · [원래대로]) — 제안이 저장되고 상대에게 알림이 갔는지를 돌려줌. 상대 알람은 상대가 [적용]해야 바뀜 (친구 10장)
-export async function proposeSharedAlarm(personId: string, cardId: string, newAt: Date): Promise<SharedChangeResult> {
-  if (!isMock()) return real.proposeSharedAlarm(personId, cardId, newAt);
+export async function proposeSharedAlarm(personId: string, alarmId: string, newAt: Date): Promise<SharedChangeResult> {
+  if (!isMock()) return real.proposeSharedAlarm(personId, alarmId, newAt);
   db.shareLog.push({ at: now(), text: `${person(personId).short}님 알람 시각 제안` });
   return { notified: true };
 }
