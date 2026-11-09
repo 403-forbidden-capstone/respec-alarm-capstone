@@ -288,9 +288,14 @@ export default async function ch03({ q, as, su, check, expectErr }) {
     const [{ participant_id: p }] = await q(`insert into public.appointment_participants (appointment_id, user_id) values ($1, $2) returning participant_id`, [ap, M]);
     const [{ alarm_id: al }] = await q(`insert into public.alarms (participant_id, user_id, alarm_type, scheduled_at) values ($1, $2, 'WAKE', now() + interval '20 hours') returning alarm_id`, [p, M]);
     await q(`insert into public.sharing_permissions (owner_id, grantee_id, source_type, source_id, can_view_alarm, can_edit_alarm) values ($1, $2, 'FRIEND', $3, true, true)`, [M, NB, f]);
+    const [{ t: moved }] = await q(`select scheduled_at + interval '5 minutes' as t from public.alarms where alarm_id = $1`, [al]);
     await as(NB);
-    const changed = await q(`update public.alarms set scheduled_at = scheduled_at + interval '5 minutes' where alarm_id = $1 returning scheduled_at`, [al]);
+    const [{ r: prop }] = await q(`select public.propose_alarm_time($1, $2::timestamptz) as r`, [al, moved]);   // 친구가 바꾸기 = 제안 (직접 update 길은 닫힘, 이슈 #427)
     await su();
+    await as(M);
+    const [{ r: applied }] = await q(`select public.respond_alarm_proposal($1, true) as r`, [prop.proposal_id]);
+    await su();
+    const changed = applied.status === 'APPLIED' ? await q(`select scheduled_at from public.alarms where alarm_id = $1`, [al]) : [];
     await remove(M, NB);
     const [kept] = await q(`select scheduled_at from public.alarms where alarm_id = $1`, [al]);
     await as(NB);

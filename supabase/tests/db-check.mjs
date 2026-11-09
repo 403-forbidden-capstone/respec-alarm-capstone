@@ -331,19 +331,20 @@ await check('가짜 출처로는 권한을 만들 수 없음', async () => {
   return expectErr(() => q(`insert into public.sharing_permissions (owner_id, grantee_id, source_type, source_id, can_view_alarm)
                             values ($1, $2, 'FRIEND', gen_random_uuid(), true)`, [B, C]), /row-level security/);
 });
-await check('조회 권한만으로는 못 고침 · 설정 권한이면 고침 · 알람 주인은 못 바꿈 · 남의 알람은 못 지움', async () => {
+await check('조회 권한만으로는 못 고침 · 설정 권한이 있어도 직접 못 고침(친구가 바꾸는 길은 제안 → 주인 [적용]뿐, 이슈 #427) · 알람 주인을 못 바꿈 · 남의 알람은 못 지움 · 주인 본인은 고침', async () => {
   await as(A);
   const before = await q(`update public.alarms set is_enabled = false where alarm_id = $1 returning 1`, [ids[B].alarm]);
   await as(B);
   await q(`update public.sharing_permissions set can_edit_alarm = true where permission_id = $1`, [pFriendBA]);
   await as(A);
   const after = await q(`update public.alarms set scheduled_at = scheduled_at - interval '5 minutes' where alarm_id = $1 returning 1`, [ids[B].alarm]);
-  const steal = await expectErr(() => q(`update public.alarms set user_id = $1 where alarm_id = $2`, [A, ids[B].alarm]), /바꿀 수 없음/);
+  const steal = await q(`update public.alarms set user_id = $1 where alarm_id = $2 returning 1`, [A, ids[B].alarm]);
   const del = await q(`delete from public.alarms where alarm_id = $1 returning 1`, [ids[B].alarm]);
-  await as(B);  // 뒤 기상 검사를 위해 B 알람 시각을 되돌림
-  await q(`update public.alarms set scheduled_at = scheduled_at + interval '5 minutes' where alarm_id = $1`, [ids[B].alarm]);
-  return before.length === 0 && after.length === 1 && steal === true && del.length === 0
-    ? true : { before, after, steal, del };
+  await as(B);
+  const own = await q(`update public.alarms set scheduled_at = scheduled_at + interval '5 minutes' where alarm_id = $1 returning 1`, [ids[B].alarm]);   // 주인은 고침
+  await q(`update public.alarms set scheduled_at = scheduled_at - interval '5 minutes' where alarm_id = $1`, [ids[B].alarm]);                           // 뒤 기상 검사를 위해 되돌림
+  return before.length === 0 && after.length === 0 && steal.length === 0 && del.length === 0 && own.length === 1
+    ? true : { before, after, steal, del, own };
 });
 await check('설정 권한만 있고 조회 권한이 없는 상태는 없음(6장) — 조회를 끄면 설정도 같이 꺼져 0행 수정 (UPDATE ... WHERE에도 조회 정책이 걸림)', async () => {
   await as(B);
