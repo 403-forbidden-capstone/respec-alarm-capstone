@@ -2,7 +2,7 @@ import { router } from 'expo-router';
 import { useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 
-import { Button, Card, KeyValueRow, Screen, SectionHeader, Sheet, Text, toast, TopBar } from '@/components/ui';
+import { Button, Card, KeyValueRow, Screen, SectionHeader, Sheet, Text, toast, Toggle, TopBar } from '@/components/ui';
 import { listPlaces, reverseAddress } from '@/features/alarm/api';
 import { MapPlaceSheet } from '@/features/alarm/components/MapPlaceSheet';
 import { homeOf } from '@/features/alarm/placeSheet';
@@ -14,7 +14,7 @@ import { locateOnce } from '@/features/location/currentPosition';
 import { HOME_RADIUS_PRESETS } from '@/features/location/radius';
 import { FrequentPlacesSection } from '@/features/location/FrequentPlacesSection';
 import { LocationAutoSection } from '@/features/location/LocationAutoSection';
-import { openAppNotificationSettings } from '@/features/permissions';
+import { openAppNotificationSettings, turnOnNotifications, usePermissions } from '@/features/permissions';
 import { homePatchOf } from '@/features/onboarding/home';
 import { saveProfileFields } from '@/features/profile/api';
 import { EditRow } from '@/features/profile/components/EditRow';
@@ -24,6 +24,7 @@ import { prepareValuesOf } from '@/features/profile/edit';
 import { TRANSPORT_NAME, WAKE_MARGIN_NAME, WAKE_SENSITIVITY_NAME } from '@/features/profile/labels';
 import type { ProfileFields } from '@/features/profile/types';
 import { userMessage } from '@/lib/errors';
+import { registerPushToken } from '@/lib/push/token';
 import { canUseRealData, modeLocked } from '@/lib/mode';
 import { backOrHome } from '@/lib/nav';
 import { signOutAndCleanup } from '@/lib/session';
@@ -43,6 +44,8 @@ export default function SettingsScreen() {
   const { session, profile, enabled, refreshProfile } = useAuth();
   const { run } = useAction();
   const blocks = useLoad(listBlocks); // 차단 목록 줄의 사람 수 — 못 읽으면 수 없이 줄만 보임
+  const { snapshot: phone } = usePermissions();
+  const notifyOff = phone?.supported === true && phone.notifications === 'off'; // 폰의 알림 권한이 꺼져 있음 — 친구 알림 · 알람 안내가 안 뜸
   const logout = useAction(); // 로그아웃 연타 막기 · 돌아가는 표시 — 프로필 저장 중에 로그아웃 버튼이 같이 돌지 않게 따로
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState<Editing>(null);
@@ -115,10 +118,42 @@ export default function SettingsScreen() {
 
       {profile ? <FrequentPlacesSection center={homeOf(profile)} /> : null}
 
+      {/* 친구가 내가 안 일어났을 때 깨우는 알림을 보낼 수 있게 (친구 8장) — 기본 켬, 꺼 두면 보낸 쪽에는 '지금은 깨울 수 없어요'만 보이고 꺼 둔 사실은 안 드러남 */}
+      {profile && canEdit ? (
+        <>
+          <SectionHeader title="친구 알림" />
+          <Card>
+            <View style={styles.pingRow}>
+              <View style={styles.pingText}>
+                <Text variant="body">깨우기 받기</Text>
+                <Text variant="small" tone="sub">
+                  같은 그룹 친구가 알람이 울렸는데 안 일어났을 때 깨울 수 있어요
+                </Text>
+              </View>
+              <Toggle value={profile.wake_ping_enabled} onChange={(on) => void saveEdit({ wake_ping_enabled: on })} label="깨우기 받기" />
+            </View>
+          </Card>
+        </>
+      ) : null}
+
       {/* 알람이 잘 울리게 하는 폰 설정 — 값이 아니라 길이라 프로필 값(위 "알람" 절)과 나눔. 가짜 모드에서도 보임 */}
       <SectionHeader title="알람 점검" />
       <Card>
-        {profile ? (
+        {profile && notifyOff ? (
+          <View style={styles.linkRow}>
+            <Text variant="body">알림이 꺼져 있어요</Text>
+            <Button
+              label="켜기"
+              small
+              variant="ghost"
+              onPress={() =>
+                void turnOnNotifications('settings').then((result) => {
+                  if (result === 'granted') void registerPushToken();
+                })
+              }
+            />
+          </View>
+        ) : profile ? (
           <Pressable
             onPress={() => void openAppNotificationSettings()}
             accessibilityRole="button"
@@ -232,6 +267,8 @@ export default function SettingsScreen() {
 const styles = StyleSheet.create({
   stack: { gap: 8, marginTop: 16 },
   note: { marginTop: 4, marginHorizontal: 4 },
+  pingRow: { minHeight: size.touch, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
+  pingText: { flex: 1, minWidth: 0 },
   linkRow: { minHeight: size.touch, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
   linkDivider: { borderTopWidth: 1, borderTopColor: colors.line },
   pressed: { opacity: 0.6 },

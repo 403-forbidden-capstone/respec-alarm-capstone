@@ -128,6 +128,7 @@ export default async function ch06({ q, as, su, svc, check, expectErr, PGlite, A
     const f = await friendId(A, B);
     const al = await apptAlarm(A);
     const p = await friendGrant(A, B, f, true, true);
+    await q(`insert into public.alarm_proposals (alarm_id, owner_id, proposer_id, from_at, to_at) values ($1, $2, $3, now() + interval '8 hours', now() + interval '7 hours')`, [al, A, B]);   // 알림 권한은 방금 보낸 제안이 있어야 (10장)
     const before = { edit: await canEdit(B, al), push: await canPush(B, A) };
     const row = await patch(A, p, `can_view_alarm = false`);
     const after = { edit: await canEdit(B, al), push: await canPush(B, A), saw: await seen(B, A) };

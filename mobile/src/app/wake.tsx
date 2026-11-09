@@ -16,6 +16,7 @@ import { addMinutes, formatTime, timeParts } from '@/lib/format';
 import { isPreviewAlarmId } from '@/features/alarm/ringPreview';
 import { isMock } from '@/lib/mode';
 import { backOrHome, openGroupDetail } from '@/lib/nav';
+import { ReceivedWakePingLine } from '@/features/social/components/ReceivedWakePingLine';
 import { useLoad } from '@/lib/useLoad';
 import { colors } from '@/theme';
 
@@ -71,6 +72,7 @@ export default function WakeScreen() {
             기상 알람을 해제하면 여기서 기상을 판정해요.
           </Text>
         </Card>
+        <ReceivedWakePingLine />
         <EarlyWake />
       </Screen>
     );
@@ -171,6 +173,7 @@ function WakeFlow({ check }: { check: WakeCheck }) {
   return (
     <Screen>
       <TopBar onBack={backOrHome} screenId="H08" />
+      <ReceivedWakePingLine />
       <Text variant="title" style={styles.title}>
         기상 확인
       </Text>

@@ -17,6 +17,7 @@ import { CODE_EXPIRED, CODE_NOT_FOUND, GROUP_FULL, GROUP_NOT_MEMBER, GROUP_TOO_M
 import * as real from './real';
 import { MESSAGE_GONE } from './relationMessages';
 import { mergeHits } from './searchView';
+import { WAKE_PING_MOCK } from './wakeTexts';
 import {
   type AppointmentJoiner,
   type GroupAppointment,
@@ -43,14 +44,17 @@ import {
   type PermissionSet,
   type Person,
   type PersonHit,
+  type AlarmProposal,
+  type ProposalResponse,
+  type ReceivedWakePing,
   type ReportReason,
   type ReportResult,
   type ReportTarget,
   type Relation,
   type RelationId,
-  type ShareLogItem,
   type SharedAlarms,
   type SharedChangeResult,
+  type WakePingResult,
 } from './types';
 
 const toPerson = (p: MockPerson): Person => ({ ...p });
@@ -151,6 +155,8 @@ function toMemberAlarm(a: MockMemberAlarm): MemberAlarm {
     levelName: a.levelName,
     note: a.note,
     enabled: shared.on,
+    firstAlarmId: a.id, // 가짜 모드는 약속 하나가 알람 하나 — 제안 보내기 입구를 보이게
+    proposeAt: kst(a.day, a.chain[0][0] + shared.shift),
   };
 }
 
@@ -330,13 +336,14 @@ export async function getGroup(groupId: string, date?: string | null): Promise<G
 // 친구 권한 (F02) — 이 친구가 내 정보에 대해 가진 최종 권한과 출처. 친구가 아니면 null (그룹원 · 나를 주소로 열어도)
 export async function getFriendGrant(
   personId: string,
-): Promise<{ person: Person; final: FinalGrant; groupCount: number } | null> {
+): Promise<{ person: Person; final: FinalGrant; groupCount: number; firstGroupId: string | null } | null> {
   if (!isMock()) return real.getFriendGrant(personId);
   if (!db.friends.includes(personId)) return null;
   return {
     person: person(personId),
     final: givenTo(personId),
     groupCount: Object.values(db.groups).filter((g) => g.members.includes(personId)).length,
+    firstGroupId: Object.values(db.groups).find((g) => g.members.includes(personId))?.id ?? null,
   };
 }
 
@@ -379,7 +386,6 @@ export async function saveShareSettings(id: RelationId, next: PermissionSet) {
   const [kind, key] = id.split(':');
   if (kind === 'friend') db.grants.friend[key] = copy(next);
   else db.grants.group[key] = copy(next);
-  db.shareLog.push({ at: now(), text: `${relationOf(id)?.label ?? ''} 공유 권한 변경` });
 }
 
 // 이 관계에서 받은 권한 (F03 받은 권한)
@@ -445,34 +451,34 @@ export async function getSharedAlarms(personId: string): Promise<SharedAlarms | 
   };
 }
 
-// 켜기 · 끄기 — 저장되고 주인에게 알림이 갔는지를 돌려줌 (알림이 실패해도 저장은 그대로)
-export async function setSharedAlarmEnabled(personId: string, alarmId: string, enabled: boolean): Promise<SharedChangeResult> {
-  if (!isMock()) return real.setSharedAlarmEnabled(personId, alarmId, enabled);
-  const s = (db.sharedAlarms[alarmId] ??= { on: true, shift: 0 });
-  s.on = enabled;
-  db.shareLog.push({ at: now(), text: `${person(personId).short}님 알람 ${enabled ? '켬' : '끔'}` });
+// 시각 제안 보내기 (G04 [보내기] · [원래대로]) — 제안이 저장되고 상대에게 알림이 갔는지를 돌려줌. 상대 알람은 상대가 [적용]해야 바뀜 (친구 10장)
+export async function proposeSharedAlarm(personId: string, alarmId: string, newAt: Date): Promise<SharedChangeResult> {
+  if (!isMock()) return real.proposeSharedAlarm(personId, alarmId, newAt);
   return { notified: true };
 }
 
-// 공유받은 알람 시각 옮기기 — minutes가 음수면 앞당김
-export async function shiftSharedAlarm(personId: string, alarmId: string, minutes: number): Promise<SharedChangeResult> {
-  if (!isMock()) return real.shiftSharedAlarm(personId, alarmId, minutes);
-  const s = (db.sharedAlarms[alarmId] ??= { on: true, shift: 0 });
-  s.shift += minutes;
-  db.shareLog.push({ at: now(), text: `${person(personId).short}님 알람 ${Math.abs(minutes)}분 ${minutes < 0 ? '앞당김' : '늦춤'}` });
-  return { notified: true };
+// 받은 제안 (홈 카드) — 가짜 모드는 받은 제안이 없음
+export async function listAlarmProposals(): Promise<AlarmProposal[]> {
+  if (!isMock()) return real.listAlarmProposals();
+  return [];
 }
 
-// 공유 알람 변경 기록 — DB에는 저장 자리가 없음 (D9: 저장 없이 주인에게 푸시만, 스키마 보완 3). 실데이터도 이번 실행 동안 바꾼 것만 보임 (D20 열림)
-export async function getShareLog(): Promise<ShareLogItem[]> {
-  if (!isMock()) return real.getShareLog();
-  return db.shareLog.map((l) => ({ ...l }));
+// [적용] · [무시]
+export async function respondAlarmProposal(proposalId: string, apply: boolean): Promise<ProposalResponse> {
+  if (!isMock()) return real.respondAlarmProposal(proposalId, apply);
+  return apply ? 'APPLIED' : 'DISMISSED';
 }
 
-// 깨우기 알림 보내기 (G03) — 실데이터는 D19가 열려 있어 서버가 거절하므로 아직 보내지 않고 "준비 중" 안내만 (UserError)
-export async function sendWakePing(personId: string) {
-  if (!isMock()) return real.sendWakePing(personId);
-  db.shareLog.push({ at: now(), text: `${person(personId).short}님에게 깨우기 알림` });
+// 깨우기 알림 보내기 (G03) — 실데이터는 서버가 판정 · 횟수를 세고 결과 상태를 줌. 가짜 모드는 막힘 (8-16)
+export async function sendWakePing(groupId: string, personId: string): Promise<WakePingResult> {
+  if (!isMock()) return real.sendWakePing(groupId, personId);
+  throw new UserError(WAKE_PING_MOCK);
+}
+
+// 오늘 내가 받은 깨우기 — 홈 · H08 '수연님이 7:12에 깨웠어요'. 가짜 모드는 받은 것이 없음
+export async function getReceivedWakePings(): Promise<ReceivedWakePing[]> {
+  if (!isMock()) return real.getReceivedWakePings();
+  return [];
 }
 
 // ---------------------------------------------------------------------------
@@ -707,7 +713,7 @@ export async function setGroupNotificationsOff(groupId: string, off: boolean): P
   notifOff[groupId] = off;
 }
 
-// 이 그룹에 내 기상 상태 공유를 동의 / 취소 (D19 열림 — F03 저장은 이 값을 건드리지 않음)
+// 이 그룹에 내 기상 상태 공유를 동의 / 취소 (F03 그룹 관계의 기상 스위치도 같은 값)
 export async function setWakeShareOptIn(groupId: string, on: boolean) {
   if (!isMock()) return real.setWakeShareOptIn(groupId, on);
   if (!db.groups[groupId]?.members.includes('me')) throw new UserError('참여 중인 그룹이 아니에요');

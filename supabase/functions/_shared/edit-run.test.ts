@@ -12,7 +12,7 @@ import { HttpError } from './errors.ts';
 import { FakeDb } from './fake-db.ts';
 import type { NotifyOptions } from './notify.ts';
 import { KakaoError, type KakaoFailure } from './kakao.ts';
-import { buildPlan } from './plan.ts';
+import { ALARM_COLUMNS, buildPlan } from './plan.ts';
 import type { ProfileRow } from './plan-core.ts';
 import { Reader } from './read.ts';
 import { readCommitRequest } from './requests.ts';
@@ -1257,4 +1257,89 @@ test('9-43(동시): 참여자는 4명씩 묶어 한꺼번에 맞춤 — 길찾�
   assert.ok(peak > 1 && peak <= 4, `동시 길찾기 최대 ${peak}`);
   assert.deepEqual(res.participants, { updated: 8, held: 0, skipped: 1 });
   assert.equal(res.warnings.filter((w) => w.code === 'PARTICIPANT_ROUTE_FAILED').length, 1);
+});
+
+// ---- 10장: 친구가 제안해 주인이 적용한 알람 시각 (original_scheduled_at이 채워진 MANUAL) ----
+
+// 10/29 09:00 약속의 기상을 친구가 07:25 → 07:20으로 바꿔 주인이 적용한 상태
+async function friendAppliedCase() {
+  const env = setup();
+  const { thu } = await seededSeries(env);
+  const wake = alarmsOf(env.db, thu.appointment_id).find((a) => a.alarm_type === 'WAKE')!;
+  const original = wake.scheduled_at as string;
+  wake.scheduled_at = new Date(Date.parse(original) - min(5)).toISOString();
+  wake.time_source = 'MANUAL';
+  wake.original_scheduled_at = original;
+  wake.original_time_source = 'AUTO';           // 친구가 바꾸기 전엔 자동 계산이던 알람
+  return { env, thu, wake, original };
+}
+
+// 기상 · 준비 · 출발 셋 다 친구가 바꿔 주인이 적용한 상태 (기상 −10 · 준비 +10 · 출발 −10분)
+async function friendAppliedAll() {
+  const env = setup();
+  const { thu } = await seededSeries(env);
+  for (const [type, delta] of [['WAKE', -10], ['PREPARE', 10], ['DEPARTURE', -10]] as const) {
+    const row = alarmsOf(env.db, thu.appointment_id).find((a) => a.alarm_type === type)!;
+    row.original_scheduled_at = row.scheduled_at;
+    row.original_time_source = 'AUTO';
+    row.scheduled_at = new Date(Date.parse(row.scheduled_at as string) + delta * 60_000).toISOString();
+    row.time_source = 'MANUAL';
+  }
+  return { env, thu };
+}
+
+test('10-22: 약속의 제목만 다시 저장하면 친구가 정한 알람 시각이 그대로(알람을 안 건드림), 중요도만 바꿔도 시각은 그대로', async () => {
+  const { env, thu, wake } = await friendAppliedCase();
+  const before = wake.scheduled_at;
+  await updateAppointment(ctxFor(env, A), upd(thu.appointment_id as string, { title: '새 제목' }, 'this', true));
+  assert.deepEqual([wake.scheduled_at, wake.time_source, wake.original_scheduled_at != null], [before, 'MANUAL', true]);
+  await updateAppointment(ctxFor(env, A), upd(thu.appointment_id as string, { importance: 'HIGH' }, 'this', true));
+  assert.deepEqual([wake.scheduled_at, wake.time_source, wake.original_scheduled_at != null], [before, 'MANUAL', true]);
+});
+
+test('10-22: 약속의 시각을 바꾸면 친구가 정한 알람 시각은 새 계산에 밀림(주인이 직접 고른 MANUAL과 다름) — 장소를 바꿔도 같음', async () => {
+  const { env, thu, wake } = await friendAppliedCase();
+  await updateAppointment(ctxFor(env, A), upd(thu.appointment_id as string, { at: kst('2026-10-29T09:30') }, 'this', true));
+  const moved = alarmsOf(env.db, thu.appointment_id).find((a) => a.alarm_type === 'WAKE')!;
+  assert.equal(hm(moved.scheduled_at), '07:55');   // 09:30 약속의 새 계산 (친구 값 07:20은 같은 날이라 MANUAL이면 그대로였을 것)
+  assert.notEqual(moved.time_source, 'MANUAL');
+
+  const place = await friendAppliedCase();
+  await updateAppointment(ctxFor(place.env, A, { kakao: fakeKakao(20).lookup }), upd(place.thu.appointment_id as string, { destination: { name: '강남역', lat: 37.4979, lng: 127.0276 } }, 'this', true));
+  const afterPlace = alarmsOf(place.env.db, place.thu.appointment_id).find((a) => a.alarm_type === 'WAKE')!;
+  assert.notEqual(afterPlace.time_source, 'MANUAL');
+  assert.equal(hm(afterPlace.scheduled_at), '07:40'); // 이동 20분으로 새 계산 (친구 값이 아님)
+});
+
+test('10-22: 친구 값이 기상 · 준비 · 출발 셋 다에 있어도 약속 시각을 바꾸면 친구 값이 없는 상태와 똑같이 새 계산 — 준비 알람 시각이 친구 값 간격에 끌려가지 않음', async () => {
+  const control = setup();
+  const c = await seededSeries(control);
+  await updateAppointment(ctxFor(control, A), upd(c.thu.appointment_id as string, { at: kst('2026-10-29T09:30') }, 'this', true));
+  const shape = (db: FakeDb, id: unknown) => alarmsOf(db, id).map((a) => [a.alarm_type, hm(a.scheduled_at), a.time_source]).sort();
+  const expected = shape(control.db, c.thu.appointment_id);
+
+  const { env, thu } = await friendAppliedAll();
+  await updateAppointment(ctxFor(env, A), upd(thu.appointment_id as string, { at: kst('2026-10-29T09:30') }, 'this', true));
+  assert.deepEqual(shape(env.db, thu.appointment_id), expected);
+});
+
+test('10-22: 친구가 바꾸기 전에 주인이 직접 골랐던 알람(original_time_source = MANUAL)은 약속 시각이 바뀌면 친구 값만 지워지고 주인의 값이 이어짐', async () => {
+  const { env, thu, wake, original } = await friendAppliedCase();
+  wake.original_time_source = 'MANUAL';
+  await updateAppointment(ctxFor(env, A), upd(thu.appointment_id as string, { at: kst('2026-10-29T09:30') }, 'this', true));
+  const moved = alarmsOf(env.db, thu.appointment_id).find((a) => a.alarm_type === 'WAKE')!;
+  assert.deepEqual([hm(moved.scheduled_at), moved.time_source], [hm(original), 'MANUAL']);   // 친구 값 07:20이 아니라 주인이 고른 07:25
+});
+
+test('10-22: 알람을 읽는 열 목록에 원래 시각 · 그때의 time_source 칸이 들어 있음 (가짜 DB는 열 목록을 안 보므로 따로 못 박음)', () => {
+  const columns = ALARM_COLUMNS.split(',').map((x) => x.trim());
+  assert.ok(columns.includes('original_scheduled_at') && columns.includes('original_time_source'));
+});
+
+test('10-23: 주인이 직접 고른 MANUAL(원래 시각 기억 없음)은 약속 시각이 바뀌어도 그대로 — 친구 값과 규칙이 다름 (기존 규칙)', async () => {
+  const { env, thu, wake } = await friendAppliedCase();
+  wake.original_scheduled_at = null;           // 주인이 직접 고친 값이면 서버 가드가 기억을 비움
+  const own = wake.scheduled_at;
+  await updateAppointment(ctxFor(env, A), upd(thu.appointment_id as string, { at: kst('2026-10-29T09:30') }, 'this', true));
+  assert.deepEqual([wake.scheduled_at, wake.time_source], [own, 'MANUAL']);
 });
