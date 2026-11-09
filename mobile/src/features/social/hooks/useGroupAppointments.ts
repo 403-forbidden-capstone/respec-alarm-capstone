@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 
 import { confirm, toast } from '@/components/ui';
 import { getJoinDefaults, joinSharedAppointment, leaveSharedAppointment } from '@/features/alarm/api';
@@ -21,14 +21,22 @@ export function useGroupAppointments(onChanged: () => void) {
   const [joinersFor, setJoinersFor] = useState<GroupAppointment | null>(null);
   const [joiners, setJoiners] = useState<AppointmentJoiner[] | null>(null);
   const { busy, run } = useAction();
+  // 시트를 닫고 다른 약속을 연 뒤 늦게 온 앞 약속의 응답 · 실패가 새 시트를 덮거나 닫지 않게 — 마지막으로 연 약속만 반영
+  const joinTarget = useRef<string | null>(null);
+  const joinersTarget = useRef<string | null>(null);
 
   const openJoin = async (a: GroupAppointment) => {
     setJoinersFor(null);
+    joinersTarget.current = null;
+    joinTarget.current = a.id;
     setJoinFor(a);
     setDefaults(null);
     try {
-      setDefaults(await getJoinDefaults());
+      const loaded = await getJoinDefaults();
+      if (joinTarget.current === a.id) setDefaults(loaded);
     } catch (e) {
+      if (joinTarget.current !== a.id) return;
+      joinTarget.current = null;
       setJoinFor(null);
       toast(userMessage(e, '기본값을 불러오지 못했어요'));
     }
@@ -57,17 +65,24 @@ export function useGroupAppointments(onChanged: () => void) {
 
   const finishJoin = async (appointmentId: string, choice: JoinChoice) => {
     const result = await joinSharedAppointment(appointmentId, choice);
-    setJoinFor(null);
+    if (joinTarget.current === appointmentId) {
+      joinTarget.current = null;
+      setJoinFor(null);
+    }
     toast(result.phoneFailed ? `${JOINED_TOAST}. 폰에 못 건 알람은 앱을 다시 열면 걸어요` : JOINED_TOAST);
     onChanged();
   };
 
   const openJoiners = async (a: GroupAppointment) => {
+    joinersTarget.current = a.id;
     setJoinersFor(a);
     setJoiners(null);
     try {
-      setJoiners(await getAppointmentJoiners(a.id));
+      const loaded = await getAppointmentJoiners(a.id);
+      if (joinersTarget.current === a.id) setJoiners(loaded);
     } catch (e) {
+      if (joinersTarget.current !== a.id) return;
+      joinersTarget.current = null;
       setJoinersFor(null);
       toast(userMessage(e, '참여자를 불러오지 못했어요'));
     }
@@ -75,6 +90,7 @@ export function useGroupAppointments(onChanged: () => void) {
 
   // [나는 빠지기] — 내 알람만 지움, 알림 없음 (9-21)
   const leave = async (a: GroupAppointment) => {
+    joinersTarget.current = null;
     setJoinersFor(null);
     const t = leaveAppointmentText(a.title);
     if (!(await confirm({ title: t.title, message: t.body, okLabel: t.ok, destructive: true }))) return;
@@ -90,11 +106,18 @@ export function useGroupAppointments(onChanged: () => void) {
     openJoin,
     openJoiners,
     leave,
-    joinProps: { appointment: joinFor, defaults, busy, onJoin: join, onClose: () => setJoinFor(null) },
+    joinProps: { appointment: joinFor, defaults, busy, onJoin: join, onClose: () => {
+        joinTarget.current = null;
+        setJoinFor(null);
+      },
+    },
     joinersProps: {
       appointment: joinersFor,
       joiners,
-      onClose: () => setJoinersFor(null),
+      onClose: () => {
+        joinersTarget.current = null;
+        setJoinersFor(null);
+      },
       onJoin: openJoin,
       onLeave: leave,
     },

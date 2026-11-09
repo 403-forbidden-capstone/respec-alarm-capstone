@@ -125,6 +125,7 @@ export default function NewScheduleScreen() {
     draft.originLocation != null ||
     draft.transport !== initial.transport ||
     draft.importance !== initial.importance ||
+    (draft.groupId ?? null) !== (initial.groupId ?? null) ||
     RING_KINDS.some((kind) => draft.alarms[kind] !== initial.alarms[kind]);
   const { allowLeave } = useLeaveGuard(dirty, '입력한 일정이 사라져요.');
 

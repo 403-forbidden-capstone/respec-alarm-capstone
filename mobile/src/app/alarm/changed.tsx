@@ -1,9 +1,11 @@
 import { router, useLocalSearchParams } from 'expo-router';
 import { StyleSheet, View } from 'react-native';
 
-import { Button, Card, EmptyState, LoadError, Loading, Screen, Text, toast, TopBar } from '@/components/ui';
+import { Button, Card, confirm, EmptyState, LoadError, Loading, Screen, Text, toast, TopBar } from '@/components/ui';
 import { getAppointment, previewAlarms, saveAlarmSettings } from '@/features/alarm/api';
 import { settingsDraftOf } from '@/features/alarm/groupChange';
+import { saveNotice } from '@/features/alarm/saveNotice';
+import { travelConfirmMessage, TravelConfirmNeeded, TRAVEL_CONFIRM_OK } from '@/features/alarm/travelConfirm';
 import { KIND_LABEL, RING_KINDS } from '@/features/alarm/types';
 import { formatDateShort, formatTime } from '@/lib/format';
 import { backOrHome } from '@/lib/nav';
@@ -44,18 +46,35 @@ export default function GroupChangeScreen() {
   const after = (kind: string) => next.alarms.find((x) => x.kind === kind);
   const rows = RING_KINDS.filter((kind) => before(kind)?.enabled || after(kind)?.enabled);
 
-  const apply = () =>
-    run(async () => {
-      await saveAlarmSettings(id, settingsDraftOf(saved));
-      toast('내 알람을 새 시각으로 맞췄어요');
-      backOrHome();
+  // 길찾기를 못 해 서버가 어림값만 가졌으면(이동시간을 못 구해 보류된 참여자) 어림 분을 보여 주고, 확인하면 그 분을 직접 정한 값(MANUAL)으로 다시 저장 — H03 저장과 같은 길
+  //   확인 창은 한 번에 하나 가드(run) 밖에서
+  const save = async (travelMinutes?: number) => {
+    const draft = { ...settingsDraftOf(saved), ...(travelMinutes != null ? { travelMinutes } : {}) };
+    const result = await saveAlarmSettings(id, draft);
+    toast(saveNotice(result.followUp, '맞췄지만') ?? '내 알람을 새 시각으로 맞췄어요');
+    backOrHome();
+  };
+  const apply = async () => {
+    let ask: TravelConfirmNeeded | null = null;
+    await run(async () => {
+      try {
+        await save();
+      } catch (e) {
+        if (!(e instanceof TravelConfirmNeeded)) throw e;
+        ask = e;
+      }
     }, '맞추지 못했어요. 다시 해 주세요');
+    const fallback = ask as TravelConfirmNeeded | null;
+    if (!fallback) return;
+    if (!(await confirm({ title: '이동시간을 확인해 주세요', message: travelConfirmMessage(fallback), okLabel: TRAVEL_CONFIRM_OK }))) return;
+    await run(() => save(fallback.minutes), '맞추지 못했어요. 다시 해 주세요');
+  };
 
   return (
     <Screen
       footer={
         <View style={styles.footer}>
-          <Button label="새 시각으로 맞추기" loading={busy} onPress={apply} />
+          <Button label="새 시각으로 맞추기" loading={busy} onPress={() => void apply()} />
           <Button label="지금은 그대로 두기" variant="plain" onPress={() => (router.canGoBack() ? router.back() : backOrHome())} />
         </View>
       }

@@ -260,6 +260,7 @@ export async function joinSharedAppointment(appointmentId: string, choice: JoinC
     if (e instanceof EdgeError && e.code === 'ROUTE_UNAVAILABLE') throw new UserError('이동시간을 구하지 못해 알람을 만들지 못했어요. 잠시 뒤 다시 해 주세요');
     throw e;
   }
+  forgetDetail(appointmentId); // 이미 읽어 둔 H03 상세(알람 없음 · 꺼짐)를 버림 — 다음에 새 값으로
   return { phoneFailed: (await phoneFailedIds(res)).size };
 }
 
