@@ -4,7 +4,6 @@
 //   적용하면 서버 DB만 바뀐 것 — 폰 예약은 앱이 서버 알람으로 다시 맞춰야 함(lib/alarmSync syncNow)
 import { parseDbTime } from '@/lib/dbTime';
 import { UserError } from '@/lib/errors';
-import { syncNow } from '@/lib/alarmSync';
 import { supabase } from '@/lib/supabase';
 
 import { KIND_LABEL, type AlarmKind } from '@/features/alarm/types';
@@ -29,7 +28,9 @@ export async function respondAlarmProposal(proposalId: string, apply: boolean): 
   if (error) throw error;
   const status = (data as { status?: unknown } | null)?.status;
   if (status === 'APPLIED') {
-    await syncNow().catch(() => {}); // 서버가 바꾼 알람을 폰에 다시 검 — 못 걸어도 적용은 그대로(다음에 앱이 켜질 때 맞춤)
+    // 서버가 바꾼 알람을 폰에 다시 검 — 못 걸어도 적용은 그대로(다음에 앱이 켜질 때 맞춤). 알람 동기화 모듈은 이때만 읽음(다른 시험이 시계를 가짜로 둘 때 딸려 오지 않게)
+    const { syncNow } = await import('@/lib/alarmSync');
+    await syncNow().catch(() => {});
     return 'APPLIED';
   }
   if (status === 'DISMISSED') return 'DISMISSED';
