@@ -79,6 +79,20 @@ export default function SettingsScreen() {
       toast(note);
     }, '저장하지 못했어요');
 
+  // This editor must receive the real write result. useAction swallows errors, so
+  // using saveEdit here could falsely report a consent/save or revocation success.
+  const saveMlSurvey = async (fields: ProfileFields) => {
+    if (!userId) throw new Error('로그인이 필요해요');
+    await saveProfileFields(userId, fields);
+    try {
+      await refreshProfile();
+      toast('바꿨어요');
+    } catch {
+      toast('저장은 완료됐지만 화면 정보를 다시 읽지 못했어요');
+    }
+    closeEditor();
+  };
+
   // 계정 삭제 (친구 12장) — 영향 요약을 읽어 확인 두 번, 유예 없이 바로. 확인 창은 한 번에 하나 가드(run) 밖에서
   //   서버가 먼저 지우고(실패하면 이 기기는 그대로, 다시 누르면 이어서 끝냄) 성공하거나 로그인 거절(AUTH_REQUIRED = 이미 지워짐)이면 이 기기를 비우고 로그아웃 → 로그인 화면
   const revokeMlSurvey = async () => {
@@ -88,7 +102,7 @@ export default function SettingsScreen() {
       okLabel: '삭제',
       destructive: true,
     }))) return;
-    await saveEdit(EMPTY_PREPARE_ML_SURVEY);
+    await saveMlSurvey(EMPTY_PREPARE_ML_SURVEY);
   };
 
   const deleteAccount = async () => {
@@ -301,7 +315,7 @@ export default function SettingsScreen() {
           <Sheet visible={editing === 'prepareMlSurvey'} onClose={closeEditor} title="준비시간 예측 연구정보">
             <PrepareMlSurveyEditor
               initial={profile}
-              onSave={saveEdit}
+              onSave={saveMlSurvey}
               onRevoke={revokeMlSurvey}
               onCancel={closeEditor}
             />
