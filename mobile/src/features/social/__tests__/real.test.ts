@@ -276,9 +276,10 @@ describe('G03 그룹원 기상 상태', () => {
     expect(await real.getMemberWake(GROUP, SUYEON)).toMatchObject({ alarmAt: null, noGroupAppointment: false, state: { text: '알람 없음' } });
   });
 
-  it('깨우기는 실데이터에서 보내지 않고 "준비 중"으로 안내 (D19 열림)', async () => {
-    await expect(real.sendWakePing(SUYEON)).rejects.toThrow(new UserError('깨우기는 준비 중이에요'));
-    expect(mockCallEdge).not.toHaveBeenCalled();
+  it('깨우기: notify(WAKE_PING)에 받는 사람 + 어느 그룹 화면인지만 보내고, 서버가 준 ping 상태를 돌려줌 (8-01 · 8-06 · 8-17)', async () => {
+    mockCallEdge.mockResolvedValue({ sent: 1, failed: 0, ping: { status: 'OK', count: 1, limit: 3, next_at: '2026-11-10T23:15:00.000Z' } });
+    await expect(real.sendWakePing(GROUP, SUYEON)).resolves.toEqual({ status: 'OK', count: 1, limit: 3, nextAt: new Date('2026-11-10T23:15:00.000Z') });
+    expect(mockCallEdge).toHaveBeenCalledWith('notify', { kind: 'WAKE_PING', targetUserId: SUYEON, groupId: GROUP });
   });
 });
 

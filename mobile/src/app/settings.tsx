@@ -2,7 +2,7 @@ import { router } from 'expo-router';
 import { useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 
-import { Button, Card, KeyValueRow, Screen, SectionHeader, Sheet, Text, toast, TopBar } from '@/components/ui';
+import { Button, Card, KeyValueRow, Screen, SectionHeader, Sheet, Text, toast, Toggle, TopBar } from '@/components/ui';
 import { listPlaces, reverseAddress } from '@/features/alarm/api';
 import { MapPlaceSheet } from '@/features/alarm/components/MapPlaceSheet';
 import { homeOf } from '@/features/alarm/placeSheet';
@@ -117,6 +117,24 @@ export default function SettingsScreen() {
       ) : null}
 
       {profile ? <FrequentPlacesSection center={homeOf(profile)} /> : null}
+
+      {/* 친구가 내가 안 일어났을 때 깨우는 알림을 보낼 수 있게 (친구 8장) — 기본 켬, 꺼 두면 보낸 쪽에는 '지금은 깨울 수 없어요'만 보이고 꺼 둔 사실은 안 드러남 */}
+      {profile && canEdit ? (
+        <>
+          <SectionHeader title="친구 알림" />
+          <Card>
+            <View style={styles.pingRow}>
+              <View style={styles.pingText}>
+                <Text variant="body">깨우기 받기</Text>
+                <Text variant="small" tone="sub">
+                  같은 그룹 친구가 알람이 울렸는데 안 일어났을 때 깨울 수 있어요
+                </Text>
+              </View>
+              <Toggle value={profile.wake_ping_enabled} onChange={(on) => void saveEdit({ wake_ping_enabled: on })} label="깨우기 받기" />
+            </View>
+          </Card>
+        </>
+      ) : null}
 
       {/* 알람이 잘 울리게 하는 폰 설정 — 값이 아니라 길이라 프로필 값(위 "알람" 절)과 나눔. 가짜 모드에서도 보임 */}
       <SectionHeader title="알람 점검" />
@@ -249,6 +267,8 @@ export default function SettingsScreen() {
 const styles = StyleSheet.create({
   stack: { gap: 8, marginTop: 16 },
   note: { marginTop: 4, marginHorizontal: 4 },
+  pingRow: { minHeight: size.touch, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
+  pingText: { flex: 1, minWidth: 0 },
   linkRow: { minHeight: size.touch, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
   linkDivider: { borderTopWidth: 1, borderTopColor: colors.line },
   pressed: { opacity: 0.6 },
