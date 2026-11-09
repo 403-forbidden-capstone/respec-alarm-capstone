@@ -38,6 +38,13 @@ if [[ -z "$(gcloud auth list --filter='status:ACTIVE' --format='value(account)')
   exit 2
 fi
 
+BILLING_ENABLED="$(gcloud beta billing projects describe "$PROJECT" --format='value(billingEnabled)' 2>/dev/null || true)"
+if [[ "$BILLING_ENABLED" != 'True' && "$BILLING_ENABLED" != 'true' ]]; then
+  printf 'Billing is not enabled for GCP project %s.\n' "$PROJECT" >&2
+  printf '%s\n' 'Link an ACTIVE Cloud Billing account before deploying. No resources were created.' >&2
+  exit 2
+fi
+
 printf '%s\n' "Cloud Run project: $PROJECT" "Region: $REGION" "Service: $SERVICE"
 printf '%s\n' 'This creates billable Google Cloud resources (Cloud Build, Artifact Registry, Secret Manager, Cloud Run).'
 printf '%s\n' 'The Cloud Run service will initially require Google IAM authentication (NOT publicly accessible).'
