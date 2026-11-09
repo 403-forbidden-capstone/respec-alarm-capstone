@@ -39,5 +39,5 @@ export {
 } from './groups';
 export { getFriendGrant, getReceived, getRelation, getShareSettings, listRelations, saveShareSettings } from './sharing';
 export { listAlarmProposals, respondAlarmProposal } from './proposals';
-export { getSharedAlarms, getShareLog, proposeSharedAlarm } from './sharedAlarms';
+export { getSharedAlarms, proposeSharedAlarm } from './sharedAlarms';
 export { getMemberWake, sendWakePing, setWakeHidden } from './wake';

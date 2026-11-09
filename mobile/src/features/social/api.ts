@@ -50,7 +50,6 @@ import {
   type ReportTarget,
   type Relation,
   type RelationId,
-  type ShareLogItem,
   type SharedAlarms,
   type SharedChangeResult,
 } from './types';
@@ -384,7 +383,6 @@ export async function saveShareSettings(id: RelationId, next: PermissionSet) {
   const [kind, key] = id.split(':');
   if (kind === 'friend') db.grants.friend[key] = copy(next);
   else db.grants.group[key] = copy(next);
-  db.shareLog.push({ at: now(), text: `${relationOf(id)?.label ?? ''} 공유 권한 변경` });
 }
 
 // 이 관계에서 받은 권한 (F03 받은 권한)
@@ -453,7 +451,6 @@ export async function getSharedAlarms(personId: string): Promise<SharedAlarms | 
 // 시각 제안 보내기 (G04 [보내기] · [원래대로]) — 제안이 저장되고 상대에게 알림이 갔는지를 돌려줌. 상대 알람은 상대가 [적용]해야 바뀜 (친구 10장)
 export async function proposeSharedAlarm(personId: string, alarmId: string, newAt: Date): Promise<SharedChangeResult> {
   if (!isMock()) return real.proposeSharedAlarm(personId, alarmId, newAt);
-  db.shareLog.push({ at: now(), text: `${person(personId).short}님 알람 시각 제안` });
   return { notified: true };
 }
 
@@ -469,16 +466,9 @@ export async function respondAlarmProposal(proposalId: string, apply: boolean): 
   return apply ? 'APPLIED' : 'DISMISSED';
 }
 
-// 공유 알람 변경 기록 — DB에는 저장 자리가 없음 (D9: 저장 없이 주인에게 푸시만, 스키마 보완 3). 실데이터도 이번 실행 동안 바꾼 것만 보임 (D20 열림)
-export async function getShareLog(): Promise<ShareLogItem[]> {
-  if (!isMock()) return real.getShareLog();
-  return db.shareLog.map((l) => ({ ...l }));
-}
-
 // 깨우기 알림 보내기 (G03) — 실데이터는 D19가 열려 있어 서버가 거절하므로 아직 보내지 않고 "준비 중" 안내만 (UserError)
 export async function sendWakePing(personId: string) {
   if (!isMock()) return real.sendWakePing(personId);
-  db.shareLog.push({ at: now(), text: `${person(personId).short}님에게 깨우기 알림` });
 }
 
 // ---------------------------------------------------------------------------

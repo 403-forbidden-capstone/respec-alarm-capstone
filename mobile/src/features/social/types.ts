@@ -146,7 +146,6 @@ export type SharedAlarms = {
   alarms: MemberAlarm[];
 };
 
-export type ShareLogItem = { at: Date; text: string };
 
 // G04에서 알람을 바꾼 결과 — 저장은 됐고 주인에게 알림이 갔는지만 알려 줌 (알림이 실패해도 저장은 그대로, 화면은 조용히 "바꿨어요"만)
 export type SharedChangeResult = { notified: boolean };

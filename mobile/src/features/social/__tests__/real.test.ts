@@ -422,17 +422,6 @@ describe('G04 공유받은 알람', () => {
     const [card] = (await real.getSharedAlarms(SUYEON))?.alarms ?? [];
     expect(card.proposal).toBeNull();
   });
-
-  it('변경 기록: DB에 저장하지 않고 이번 실행 동안 바꾼 것만', async () => {
-    shareSetup();
-    mockFake.answerRpc('propose_alarm_time', ok({ status: 'OK' }));
-    mockCallEdge.mockResolvedValue({ sent: 0 });
-    const before = (await real.getShareLog()).length;
-    await real.proposeSharedAlarm(SUYEON, 'w1', new Date('2026-10-19T22:00:00.000Z'));
-    const log = await real.getShareLog();
-    expect(log).toHaveLength(before + 1);
-    expect(log[log.length - 1].text).toBe('수연님 알람 시각 제안');
-  });
 });
 
 describe('새 UI용 함수', () => {

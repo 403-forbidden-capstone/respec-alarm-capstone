@@ -284,7 +284,7 @@
 |---|---|---|---|
 | 1 | S01 "다음 알람 10분 앞당김" | `alarm_suggestion_type`이 VOICE_TONE · SOUND · INTENSITY뿐 | #49에서 시각 조정 종류 추가 |
 | 2 | H03 강도를 배경음 · 말소리 · 진동 따로 고름 | `intensity`(전체 세기) · `voice_tone`(말소리) · `sound_key`(배경음) · `vibration`(진동, `20261030200000_alarm_vibration.sql` — 직접 고른 값만, NULL = 강도를 따름) | D1 A로 정함 (이슈 #312) |
-| 3 | G04 "변경 기록" | 저장 자리 없음 | 처음엔 주인에게 푸시만 |
+| 3 | G04 "변경 기록" | 저장 자리 없음 | 시트를 뺌 (친구 논리설계 10장 · D9 · D20) — 주인에게 푸시만, 보낸 쪽은 카드의 '제안함' · '반영됨' |
 | 4 | — | 카카오 응답은 저장 · 재사용 불가인데 `est_travel_minutes` · `travel_source` CACHED가 있음 | #27에서 계산에 쓴 값만 남기는지 정함 |
 | 5 | G02 · H01 그룹원 상태에 준비 시작 · 출발 · 도착까지 보임 | `get_group_wake_status`는 기상 상태(`wake_status`)와 시각만 돌려줌, MISSED는 목업에 없음 | 기상까지만으로 정함 (D59) — 화면을 실데이터로 바꿀 때 준비 · 출발 · 도착 줄을 뺌 (목업 api는 글자 `WakeState`, 실데이터는 상태 값 + 시각) |
 | 6 | 일정 없는 알람 (D46) · H03 직접 고름 (D42) · 고친 값 기록 (D42 · D43) · 울림 기록 중복 | `alarms_one_source`가 둘 다 NULL을 막음, `alarms.recurrence_rule` · `time_source` · `intensity_source` · `user_edit_logs` · `alarm_events.client_event_id` · `input_source` 없음 | PR #160에서 더함 (제약 풀기 · 칸 · 표 + RLS · `client_event_id` 유니크) |

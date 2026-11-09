@@ -211,6 +211,5 @@ export const db = {
     js: [{ source: '캡스톤팀', sourceType: 'GROUP', sourceId: 'cap', viewAlarm: false, editAlarm: false, viewWake: true }],
   } as Record<string, (PermissionSet & { source: string; sourceType: 'FRIEND' | 'GROUP'; sourceId: string })[]>,
   sharedAlarms: {} as Record<string, { on: boolean; shift: number }>, // 공유받은 알람을 내가 바꾼 값
-  shareLog: [] as { at: Date; text: string }[],
   suggestion: { id: 's1', appointmentId: 'a3', minutes: 10, status: 'PENDING' as SuggestionStatus, appliedMinutes: 0 },
 };
