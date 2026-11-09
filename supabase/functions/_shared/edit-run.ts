@@ -31,7 +31,7 @@ import {
 import type { EditRequest } from './edit-request.ts';
 import { HttpError } from './errors.ts';
 import { loadAlarms, loadLateCount, loadParticipant, loadPrepareStats, loadProfile, loadTravelSamples, ALARM_COLUMNS, SERIES_APPOINTMENT_COLUMNS, type SeriesAppointmentRow } from './plan.ts';
-import { computePlan, firstPrepareMinutes, resolveBasics, type AlarmRow, type AppointmentRow, type ParticipantRow, type Plan, type PlanInputs, type ProfileRow } from './plan-core.ts';
+import { computePlan, firstPrepareMinutes, resolveBasics, withoutFriendTimes, type AlarmRow, type AppointmentRow, type ParticipantRow, type Plan, type PlanInputs, type ProfileRow } from './plan-core.ts';
 import { buildRingPackages, canceledAlarmIds, subtitleFor, type RingPackage } from './ring-package.ts';
 import { planGroupPush, sendGroupPush, type GroupPlan, type NotifyOptions } from './notify.ts';
 import { resolveTravel, type TravelChoice, type TravelDeps } from './route.ts';
@@ -391,18 +391,22 @@ async function replanFor(
   warnings.push(...travelled.warnings);
 
   const [profile, stats, lateCount4w] = await Promise.all([env.profile(), env.stats(), env.late()]);
+  // 친구가 제안해 주인이 적용한 시각(original_scheduled_at 있음)은 약속의 시각 · 장소를 바꾸면 새 계산이 이김 — 친구가 바꾸기 전 모습으로 되돌린 알람을 새 계산의 입력(직접 고른 시각 · 기존 알람 간격)으로 씀.
+  //   시각 · 장소가 그대로면(제목 · 중요도만) 이 되돌림을 안 해서 친구 값이 그대로 남음. 변경 비교(diffAlarms)에는 실제 행을 넘김
+  const planAlarms = patched.changed.at || patched.changed.place ? withoutFriendTimes(alarms) : alarms;
   const inputs: PlanInputs = {
     now: ctx.now,
     draft: {
       // 그날 첫 일정이 바뀌면 기상이 붙고 떨어짐 (7.1.3). 직접 고른 알람 시각은 같은 날이면 그대로 · 날짜가 바뀌면 날짜만 따라감
       //   L6 안건후보: 일정 시각을 옮길 때 직접 고른 알람 시각 기본안 = 같은 날이면 유지 · 날짜가 바뀌면 날짜만 따라감 (앱 가짜 모드와 같음)
       kinds: inheritedKinds(alarms, { withWake: !sameDayWake, baseHadEarlierWake: hadEarlierWake }),
-      manualTimes: shiftManualTimes(alarms, oldAt, localDateKey(newAt, tz), tz),
+      //   친구가 제안해서 주인이 적용한 시각(original_scheduled_at 있음)은 약속의 시각 · 장소를 바꾸면 새 계산이 이김 — 시각 · 장소가 그대로면(제목 · 중요도만) 이 길이 아예 안 돎 (친구 10-22, D67)
+      manualTimes: shiftManualTimes(planAlarms, oldAt, localDateKey(newAt, tz), tz),
     },
     profile,
     appointment: patchedRow,
     participant,
-    existingAlarms: alarms,
+    existingAlarms: planAlarms,
     stats,
     lateCount4w,
     sameDayWake,

@@ -37,7 +37,7 @@ import {
   loadTravelSamples,
   type SeriesAppointmentRow,
 } from './plan.ts';
-import { computePlan, resolveBasics, type AlarmRow, type ParticipantRow, type Plan, type PlanDraft, type PlanInputs, type ProfileRow } from './plan-core.ts';
+import { computePlan, resolveBasics, withoutFriendTimes, type AlarmRow, type ParticipantRow, type Plan, type PlanDraft, type PlanInputs, type ProfileRow } from './plan-core.ts';
 import type { Reader } from './read.ts';
 import { buildRingPackages, subtitleFor, type RingPackage } from './ring-package.ts';
 import { resolveAutoTravel, type ResolvedTravel, type TravelChoice } from './route.ts';
@@ -222,7 +222,9 @@ export function planOccurrence(
   resolved: { travel: TravelChoice; sameDayWake: boolean; baseHadEarlierWake?: boolean },
 ): PlannedOccurrence {
   const { now, profile, timeZone } = ctx;
-  const { appointment, participant, alarms } = base;
+  const { appointment, participant } = base;
+  // 기준 회차에 친구가 제안해 주인이 적용한 시각이 있어도 새 회차에는 이어받지 않음 — 친구가 바꾸기 전 모습(시각 · time_source)에서 이어받음 (한 번의 제안이 반복 전체에 퍼지지 않게)
+  const alarms = withoutFriendTimes(base.alarms);
   const num = (v: number | string | null) => (v == null ? undefined : Number(v));
   const destLat = num(appointment.dest_lat);
   const destLng = num(appointment.dest_lng);

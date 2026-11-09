@@ -55,6 +55,37 @@ isOneToOne: false
       referencedColumns: ["user_id"]
     }
                   ]
+                },"alarm_proposals": {
+                  Row: {
+                    "alarm_id": string,"created_at": string,"from_at": string,"owner_id": string,"proposal_id": string,"proposer_id": string,"responded_at": string | null,"status": string,"to_at": string
+                  }
+                  Insert: {
+                    "alarm_id": string,"created_at"?: string,"from_at": string,"owner_id": string,"proposal_id"?: string,"proposer_id": string,"responded_at"?: string | null,"status"?: string,"to_at": string
+                  }
+                  Update: {
+                    "alarm_id"?: string,"created_at"?: string,"from_at"?: string,"owner_id"?: string,"proposal_id"?: string,"proposer_id"?: string,"responded_at"?: string | null,"status"?: string,"to_at"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "alarm_proposals_alarm_id_fkey"
+      columns: ["alarm_id"]
+isOneToOne: false
+      referencedRelation: "alarms"
+      referencedColumns: ["alarm_id"]
+    },{
+      foreignKeyName: "alarm_proposals_owner_id_fkey"
+      columns: ["owner_id"]
+isOneToOne: false
+      referencedRelation: "profiles"
+      referencedColumns: ["user_id"]
+    },{
+      foreignKeyName: "alarm_proposals_proposer_id_fkey"
+      columns: ["proposer_id"]
+isOneToOne: false
+      referencedRelation: "profiles"
+      referencedColumns: ["user_id"]
+    }
+                  ]
                 },"alarm_suggestions": {
                   Row: {
                     "created_at": string,"current_value": string | null,"responded_at": string | null,"result_value": string | null,"source_event_id": number | null,"status": Database["public"]['Enums']["alarm_suggestion_status"],"suggested_value": string,"suggestion_id": string,"suggestion_type": Database["public"]['Enums']["alarm_suggestion_type"],"suppress_until": string | null,"target_alarm_id": string | null,"user_id": string
@@ -88,13 +119,13 @@ isOneToOne: false
                   ]
                 },"alarms": {
                   Row: {
-                    "alarm_id": string,"alarm_type": Database["public"]['Enums']["alarm_type"],"created_at": string,"intensity": Database["public"]['Enums']["alarm_intensity"],"intensity_source": Database["public"]['Enums']["alarm_value_source"],"is_enabled": boolean,"last_calculated_at": string,"occurrence_on": string | null,"participant_id": string | null,"recurrence_rule": string | null,"routine_id": string | null,"scheduled_at": string,"series_id": string | null,"snooze_limit": number,"sound_key": string | null,"step_order": number | null,"time_source": Database["public"]['Enums']["alarm_value_source"],"updated_at": string,"user_id": string,"vibration": string | null,"voice_tone": Database["public"]['Enums']["voice_tone"]
+                    "alarm_id": string,"alarm_type": Database["public"]['Enums']["alarm_type"],"created_at": string,"intensity": Database["public"]['Enums']["alarm_intensity"],"intensity_source": Database["public"]['Enums']["alarm_value_source"],"is_enabled": boolean,"last_calculated_at": string,"occurrence_on": string | null,"original_scheduled_at": string | null,"original_time_source": Database["public"]['Enums']["alarm_value_source"] | null,"participant_id": string | null,"recurrence_rule": string | null,"routine_id": string | null,"scheduled_at": string,"series_id": string | null,"snooze_limit": number,"sound_key": string | null,"step_order": number | null,"time_source": Database["public"]['Enums']["alarm_value_source"],"updated_at": string,"user_id": string,"vibration": string | null,"voice_tone": Database["public"]['Enums']["voice_tone"]
                   }
                   Insert: {
-                    "alarm_id"?: string,"alarm_type": Database["public"]['Enums']["alarm_type"],"created_at"?: string,"intensity"?: Database["public"]['Enums']["alarm_intensity"],"intensity_source"?: Database["public"]['Enums']["alarm_value_source"],"is_enabled"?: boolean,"last_calculated_at"?: string,"occurrence_on"?: string | null,"participant_id"?: string | null,"recurrence_rule"?: string | null,"routine_id"?: string | null,"scheduled_at": string,"series_id"?: string | null,"snooze_limit"?: number,"sound_key"?: string | null,"step_order"?: number | null,"time_source"?: Database["public"]['Enums']["alarm_value_source"],"updated_at"?: string,"user_id": string,"vibration"?: string | null,"voice_tone"?: Database["public"]['Enums']["voice_tone"]
+                    "alarm_id"?: string,"alarm_type": Database["public"]['Enums']["alarm_type"],"created_at"?: string,"intensity"?: Database["public"]['Enums']["alarm_intensity"],"intensity_source"?: Database["public"]['Enums']["alarm_value_source"],"is_enabled"?: boolean,"last_calculated_at"?: string,"occurrence_on"?: string | null,"original_scheduled_at"?: string | null,"original_time_source"?: Database["public"]['Enums']["alarm_value_source"] | null,"participant_id"?: string | null,"recurrence_rule"?: string | null,"routine_id"?: string | null,"scheduled_at": string,"series_id"?: string | null,"snooze_limit"?: number,"sound_key"?: string | null,"step_order"?: number | null,"time_source"?: Database["public"]['Enums']["alarm_value_source"],"updated_at"?: string,"user_id": string,"vibration"?: string | null,"voice_tone"?: Database["public"]['Enums']["voice_tone"]
                   }
                   Update: {
-                    "alarm_id"?: string,"alarm_type"?: Database["public"]['Enums']["alarm_type"],"created_at"?: string,"intensity"?: Database["public"]['Enums']["alarm_intensity"],"intensity_source"?: Database["public"]['Enums']["alarm_value_source"],"is_enabled"?: boolean,"last_calculated_at"?: string,"occurrence_on"?: string | null,"participant_id"?: string | null,"recurrence_rule"?: string | null,"routine_id"?: string | null,"scheduled_at"?: string,"series_id"?: string | null,"snooze_limit"?: number,"sound_key"?: string | null,"step_order"?: number | null,"time_source"?: Database["public"]['Enums']["alarm_value_source"],"updated_at"?: string,"user_id"?: string,"vibration"?: string | null,"voice_tone"?: Database["public"]['Enums']["voice_tone"]
+                    "alarm_id"?: string,"alarm_type"?: Database["public"]['Enums']["alarm_type"],"created_at"?: string,"intensity"?: Database["public"]['Enums']["alarm_intensity"],"intensity_source"?: Database["public"]['Enums']["alarm_value_source"],"is_enabled"?: boolean,"last_calculated_at"?: string,"occurrence_on"?: string | null,"original_scheduled_at"?: string | null,"original_time_source"?: Database["public"]['Enums']["alarm_value_source"] | null,"participant_id"?: string | null,"recurrence_rule"?: string | null,"routine_id"?: string | null,"scheduled_at"?: string,"series_id"?: string | null,"snooze_limit"?: number,"sound_key"?: string | null,"step_order"?: number | null,"time_source"?: Database["public"]['Enums']["alarm_value_source"],"updated_at"?: string,"user_id"?: string,"vibration"?: string | null,"voice_tone"?: Database["public"]['Enums']["voice_tone"]
                   }
                   Relationships: [
                     {
@@ -831,6 +862,16 @@ isOneToOne: false
 "join_group_by_invite_code":
 { Args: { "p_invite_code": string }; Returns: string
                            },
+"my_account_delete_summary":
+{ Args: Record<PropertyKey, never>; Returns: {
+              "friends": number,"group_appointments_staying": number,"groups_disappearing": number,"groups_leaving": number
+            }[]
+                           },
+"my_alarm_proposals":
+{ Args: Record<PropertyKey, never>; Returns: {
+              "alarm_id": string,"alarm_type": string,"created_at": string,"from_at": string,"proposal_id": string,"proposer_id": string,"proposer_nickname": string,"to_at": string
+            }[]
+                           },
 "my_blocks":
 { Args: Record<PropertyKey, never>; Returns: {
               "blocked_at": string,"handle": string,"nickname": string,"profile_image_url": string,"user_id": string
@@ -861,8 +902,14 @@ isOneToOne: false
 "plan_wake_ping":
 { Args: { "p_group_id"?: string,"p_now"?: string,"p_reserve"?: boolean,"p_sender": string,"p_target": string }; Returns: Json
                            },
+"prepare_account_delete":
+{ Args: { "p_user_id": string }; Returns: Json
+                           },
 "preview_group_by_code":
 { Args: { "p_code": string }; Returns: Json
+                           },
+"propose_alarm_time":
+{ Args: { "p_alarm_id": string,"p_new_at": string }; Returns: Json
                            },
 "regenerate_invite_code":
 { Args: { "p_group_id": string }; Returns: string
@@ -872,6 +919,9 @@ isOneToOne: false
                            },
 "remove_friend":
 { Args: { "p_user_id": string }; Returns: Json
+                           },
+"respond_alarm_proposal":
+{ Args: { "p_apply": boolean,"p_proposal_id": string }; Returns: Json
                            },
 "roll_due_series":
 { Args: { "p_limit"?: number,"p_now"?: string }; Returns: {
@@ -894,6 +944,11 @@ isOneToOne: false
                            },
 "send_friend_request":
 { Args: { "p_target_id": string }; Returns: Json
+                           },
+"sent_alarm_proposals":
+{ Args: { "p_owner_id": string }; Returns: {
+              "alarm_id": string,"created_at": string,"from_at": string,"proposal_id": string,"status": string,"to_at": string
+            }[]
                            },
 "set_wake_hidden":
 { Args: { "p_hidden": boolean,"p_user_id": string }; Returns: Json

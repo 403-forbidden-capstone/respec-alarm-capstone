@@ -44,7 +44,7 @@ const DEFAULT_PROFILE: ProfileRow = {
 };
 
 export const ALARM_COLUMNS =
-  'alarm_id, participant_id, user_id, alarm_type, scheduled_at, intensity, voice_tone, sound_key, vibration, is_enabled, snooze_limit, time_source, intensity_source, recurrence_rule';
+  'alarm_id, participant_id, user_id, alarm_type, scheduled_at, intensity, voice_tone, sound_key, vibration, is_enabled, snooze_limit, time_source, intensity_source, recurrence_rule, original_scheduled_at, original_time_source';
 
 export async function loadProfile(db: Db, userId: string): Promise<ProfileRow> {
   const row = must<ProfileRow | null>(

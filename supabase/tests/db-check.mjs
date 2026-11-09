@@ -165,12 +165,12 @@ const MEETING = ['decision_comments', 'decision_votes', 'decision_states'];
 //   push_sends = 친구 8장 (깨우기 · 미확인 친구 알림 보낸 기록, DB 함수로만) — friend/ch08.mjs에서 따로 확인
 const SERVER_ONLY = ['roll_attempts', 'rate_limit_events', 'friend_links', 'reports', 'push_tickets', 'push_sends'];
 
-await check('모든 public 테이블(앱 28개 — 서버 전용 6개 포함 + 회의 도구 3개)에 RLS가 켜져 있음', async () => {
+await check('모든 public 테이블(앱 29개 — 서버 전용 6개 포함 + 회의 도구 3개)에 RLS가 켜져 있음', async () => {
   const r = await q(`select c.relname, c.relrowsecurity from pg_class c join pg_namespace n on n.oid = c.relnamespace
                      where n.nspname = 'public' and c.relkind = 'r' order by 1`);
   const off = r.filter((x) => !x.relrowsecurity).map((x) => x.relname);
   const app = r.filter((x) => !MEETING.includes(x.relname)).length;
-  return app === 28 && r.length === 31 && off.length === 0 ? true : { count: r.length, app, off };
+  return app === 29 && r.length === 32 && off.length === 0 ? true : { count: r.length, app, off };
 });
 await check('모든 앱 테이블에 정책이 있고(서버 전용 표 제외) anon용 정책은 없음', async () => {
   const r = await q(`select c.relname, count(p.polname) as n,
@@ -1060,10 +1060,19 @@ await check('푸시 권한 확인(can_send_push): ALARM_CHANGED는 보내는 사
     await svc();
     return (await q(`select public.can_send_push($1, $2, $3) as ok`, [s, t, k]))[0].ok;
   };
+  const pend = async (proposer, owner) => {   // 알림 권한(ALARM_CHANGED)은 방금 보낸 대기 중 제안이 있어야 통과 (10장) — 제안 한 줄을 서버 역할로 직접 넣음
+    await su();
+    const [ap] = await q(`insert into public.appointments (creator_id, title, appointment_at, dest_name) values ($1, '약속', now() + interval '10 hours', '학교') returning appointment_id`, [owner]);
+    const [pt] = await q(`insert into public.appointment_participants (appointment_id, user_id) values ($1, $2) returning participant_id`, [ap.appointment_id, owner]);
+    const [al] = await q(`insert into public.alarms (participant_id, user_id, alarm_type, scheduled_at) values ($1, $2, 'WAKE', now() + interval '8 hours') returning alarm_id`, [pt.participant_id, owner]);
+    await q(`insert into public.alarm_proposals (alarm_id, owner_id, proposer_id, from_at, to_at) values ($1, $2, $3, now() + interval '8 hours', now() + interval '7 hours')`, [al.alarm_id, owner, proposer]);
+  };
   const none = await can(A, B, 'ALARM_CHANGED');
   await as(B);
   const [{ permission_id: pe }] = await q(`insert into public.sharing_permissions (owner_id, grantee_id, source_type, source_id, can_view_alarm, can_edit_alarm, can_view_wake)
      values ($1, $2, 'FRIEND', $3, true, true, true) returning permission_id`, [B, A, fAB]);
+  await pend(A, B);
+  await svc();
   const yes = await can(A, B, 'ALARM_CHANGED');
   const reverse = await can(B, A, 'ALARM_CHANGED');
   const stranger = await can(A, C, 'ALARM_CHANGED');
@@ -2076,7 +2085,7 @@ await check('열쇠 칸: 묶음 · 날짜는 한 번 정하면 못 바꿈(servic
   const ok = svcErrs.every((x) => x === true) && ownerErrs.every((x) => x === true)
     && okTitle.length === 1 && okTitle[0].title === '바뀐 제목' && okTitle[0].series_id === S && okTitle[0].on === '2026-11-04'
     && moved.length === 1 && moved[0].on === '2026-11-13' && moved[0].series_id === sa.series_id && movedAppt[0].on === '2026-11-04'
-    && def.appointments?.includes(`prevent_key_change('creator_id', 'group_id', 'series_id', 'occurrence_on')`)
+    && def.appointments?.includes('prevent_appointment_key_change()')   // 12장: creator_id 비우기만 풀고 group_id · series_id · occurrence_on은 같은 함수 안에서 그대로 못 바꿈
     && def.alarms?.includes(`prevent_key_change('user_id', 'participant_id', 'routine_id', 'series_id', 'occurrence_on')`);
   return ok ? true : { svcErrs, ownerErrs, okTitle, moved, movedAppt, def };
 });
@@ -2665,7 +2674,7 @@ const mkAppt = async (creator, title, { group = null, series = null, on = null, 
 const RESET_DELETES = ['alarm_events', 'alarm_suggestions', 'alarms', 'appointment_participants', 'appointments', 'conversation_sessions',
                        'daily_journals', 'daily_records', 'profiles', 'user_edit_logs'];
 //   friend_links · rate_limit_events(친구 2장)는 지금 둠 — 친구 쪽 지우기는 15장(15-타)
-const RESET_KEEPS = ['ai_calls', 'friend_links', 'friends', 'group_members', 'groups', 'push_tickets', 'push_tokens', 'rate_limit_events', 'roll_attempts', 'routines',
+const RESET_KEEPS = ['ai_calls', 'alarm_proposals', 'friend_links', 'friends', 'group_members', 'groups', 'push_tickets', 'push_tokens', 'rate_limit_events', 'roll_attempts', 'routines',
                      'sharing_permissions', 'todos', 'user_places', 'user_questions', 'wake_hides'];
 const MINE = {
   appointments: `select * from public.appointments where creator_id = $1`,
@@ -2683,6 +2692,7 @@ const MINE = {
   user_questions: `select * from public.user_questions where user_id = $1`,
   push_tickets: `select * from public.push_tickets where user_id = $1`,
   wake_hides: `select * from public.wake_hides where $1 in (owner_id, hidden_from_id)`,
+  alarm_proposals: `select * from public.alarm_proposals where $1 in (owner_id, proposer_id)`,
   push_tokens: `select * from public.push_tokens where user_id = $1`,
   roll_attempts: `select * from public.roll_attempts where user_id = $1`,
   user_places: `select * from public.user_places where user_id = $1`,
@@ -3018,6 +3028,6 @@ await check('user_places: updated_at이 고칠 때 갱신됨 · 계정을 지우
 // ---------------------------------------------------------------------
 // 장마다 자기 계정을 새로 만들어 앞 검사의 A~E와 섞이지 않게 함. 장이 늘면 아래 목록에 한 줄씩
 const FRIEND_CTX = { q, as, su, svc, check, expectErr, PGlite, AUTH_STUBS, MIG_DIR, readFileSync, readdirSync, join };
-for (const ch of ['ch02', 'ch03', 'ch04', 'ch05', 'ch06', 'ch11', 'ch07', 'ch08', 'ch09']) await (await import(`./friend/${ch}.mjs`)).default(FRIEND_CTX);
+for (const ch of ['ch02', 'ch03', 'ch04', 'ch05', 'ch06', 'ch11', 'ch07', 'ch08', 'ch09', 'ch10', 'ch12']) await (await import(`./friend/${ch}.mjs`)).default(FRIEND_CTX);
 
 report();
