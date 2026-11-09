@@ -1,3 +1,4 @@
+import { router } from 'expo-router';
 import { useRef, useState } from 'react';
 
 import { confirm, toast } from '@/components/ui';
@@ -8,7 +9,7 @@ import { userMessage } from '@/lib/errors';
 import { useAction } from '@/lib/useAction';
 
 import { getAppointmentJoiners } from '../api';
-import { JOINED_TOAST, LEFT_APPOINTMENT_TOAST, leaveAppointmentText } from '../groupTexts';
+import { HOME_MISSING_JOIN_ACTION, HOME_MISSING_JOIN_TOAST, JOINED_TOAST, LEFT_APPOINTMENT_TOAST, leaveAppointmentText } from '../groupTexts';
 import type { AppointmentJoiner, GroupAppointment } from '../types';
 
 // G02 연결 일정 (친구 9장) — [내 알람 만들기] 시트 · 참여자 시트 · [나는 빠지기]. 시트는 값 · 콜백만 받음 (그리기는 루트 SheetHost)
@@ -47,6 +48,21 @@ export function useGroupAppointments(onChanged: () => void) {
   const join = async (choice: JoinChoice) => {
     const target = joinFor;
     if (!target) return;
+    // 집 위치가 없으면 서버는 이동시간을 못 구해 '잠시 뒤 다시' 문구로 끝남 — 보내기 전에 이유와 설정 바로 가기를 알림 (탐색 시험 · 카카오 키 없는 로컬에서 확인)
+    if (defaults && defaults.homeName == null) {
+      toast(HOME_MISSING_JOIN_TOAST, {
+        actionLabel: HOME_MISSING_JOIN_ACTION,
+        onAction: () => {
+          // 토스트가 떠 있는 사이 다른 약속 시트를 열었다면 그 시트는 닫지 않음
+          if (joinTarget.current === target.id) {
+            joinTarget.current = null;
+            setJoinFor(null);
+          }
+          router.push('/settings');
+        },
+      });
+      return;
+    }
     let ask: TravelConfirmNeeded | null = null;
     await run(async () => {
       try {

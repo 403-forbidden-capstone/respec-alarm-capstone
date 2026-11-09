@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, jest } from '@jest/globals';
 
 import { createFake } from '../__fixtures__/fakeSupabase';
 import { friends, groups, GROUP, JIHYEONG, JUNSEONG, ME, members, perms, profiles, SUYEON } from '../__fixtures__/seed';
-import { appointmentStateText, joinedCountText, leaveText } from '../groupTexts';
+import { appointmentStateText, HOME_MISSING_JOIN_ACTION, HOME_MISSING_JOIN_TOAST, INVITES_SHOWN, joinedCountText, leaveText, moreInvitesText } from '../groupTexts';
 import * as real from '../real';
 
 // 친구 9장 앱 층 — G02 연결 일정 (시험케이스 9-03 · 9-21 · 9-23 · 9-27 · 9-29 · 9-32 · 9-33 · 9-42)
@@ -78,7 +78,18 @@ describe('G02 연결 일정 줄 (9-03 · 9-23 · 9-27 · 9-32 · 9-42)', () => {
     expect(appointmentStateText({ iJoined: true, past: true })).toBe('지난 약속이에요');
     expect(appointmentStateText({ iJoined: false, past: true })).toBe('지난 약속이에요');
     expect(joinedCountText(3)).toBe('3명 참여');
-    expect(joinedCountText(0)).toBe('아직 참여한 사람이 없어요');
+    expect(joinedCountText(0)).toBe('보이는 참여자가 없어요');
+  });
+});
+
+describe('탐색 시험 반영 문구 (X-BOUND-15 · 차단 쌍 0명 · 집 위치 없음)', () => {
+  it('받은 초대는 3개까지 펼치고 나머지는 개수로 접음', () => {
+    expect(INVITES_SHOWN).toBe(3);
+    expect(moreInvitesText(47)).toBe('초대 47개 더 보기');
+  });
+  it('집 위치가 없을 때 [내 알람 만들기] 안내는 이유 + 설정 바로 가기', () => {
+    expect(HOME_MISSING_JOIN_TOAST).toBe('집 위치를 먼저 정해 주세요');
+    expect(HOME_MISSING_JOIN_ACTION).toBe('설정 열기');
   });
 });
 

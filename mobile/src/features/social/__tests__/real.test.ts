@@ -437,6 +437,7 @@ describe('G04 공유받은 알람', () => {
       return real.proposeSharedAlarm(SUYEON, 'w1', new Date('2026-10-19T22:00:00.000Z'));
     };
     await expect(try_('TOO_SOON')).rejects.toThrow('곧 울릴 알람이라 지금은 제안할 수 없어요');
+    await expect(try_('TOO_LATE')).rejects.toThrow('이대로면 약속에 늦어요');
     await expect(try_('LIMIT')).rejects.toThrow('원래 시각에서 1시간(±60분) 안에서만 제안할 수 있어요');
     await expect(try_('SAME')).rejects.toThrow('지금 시각과 같아요');
     await expect(try_('FORBIDDEN')).rejects.toThrow('이 알람은 바꿀 수 없어요');

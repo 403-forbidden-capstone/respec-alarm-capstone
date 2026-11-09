@@ -20,6 +20,7 @@ import {
   PROPOSE_INVALID,
   PROPOSE_LIMIT,
   PROPOSE_SAME,
+  PROPOSE_TOO_LATE,
   PROPOSE_TOO_SOON,
 } from '../proposalTexts';
 import type { SentProposal, SharedAlarms, SharedChangeResult } from '../types';
@@ -98,6 +99,7 @@ export async function proposeSharedAlarm(personId: string, alarmId: string, newA
   if (error) throw error;
   const status = (data as { status?: unknown } | null)?.status;
   if (status === 'TOO_SOON') throw new UserError(PROPOSE_TOO_SOON);
+  if (status === 'TOO_LATE') throw new UserError(PROPOSE_TOO_LATE);
   if (status === 'LIMIT') throw new UserError(PROPOSE_LIMIT);
   if (status === 'SAME') throw new UserError(PROPOSE_SAME);
   if (status === 'FORBIDDEN') throw new UserError(PROPOSE_FORBIDDEN);

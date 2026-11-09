@@ -6,6 +6,7 @@ import type { SentProposal } from './types';
 
 export const PROPOSE_SENT = '제안을 보냈어요';
 export const PROPOSE_TOO_SOON = '곧 울릴 알람이라 지금은 제안할 수 없어요';
+export const PROPOSE_TOO_LATE = '이대로면 약속에 늦어요'; // 늦추면 같은 카드의 출발 알람 + 이동시간이 약속 시각을 넘음 (서버 TOO_LATE, 앞당기기는 검사 안 함)
 export const PROPOSE_LIMIT = '원래 시각에서 1시간(±60분) 안에서만 제안할 수 있어요';
 export const PROPOSE_SAME = '지금 시각과 같아요';
 export const PROPOSE_FORBIDDEN = '이 알람은 바꿀 수 없어요';
