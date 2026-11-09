@@ -30,12 +30,13 @@ const LEDGER: Record<string, string> = {
   'T2F.v2-c': 'T2F@v2-c#f51a263e', // v2-b + 지난 일 · 바라는 목표는 준비시간 변경이 아님 (11/8 음성 실제 호출에서 '15분 더 걸렸고 … 일찍 일어나고 싶어' → +10분 카드)
   'T4.v1.1': 'T4@v1.1#b597fc65',
   'T5.v1.2': 'T5@v1.2#d792df8d',
+  'T5.v2': 'T5@v2#abf0a650', // 서버에서 더한 판(구조화 JSON → 1~2문장 일기) — 실험실 장부에 없음
   'ASSIST_E4.v1.1': 'ASSIST_E4@v1.1#71eed0db',
   'T3.v1': 'T3@v1#5dd07ef4',
 };
 
 // 지점이 더는 안 쓰는 옛 판 (파일은 남김 — index.ts 머리 주석 2번)
-const SUPERSEDED = ['T1.v1.3', 'T1.v1.4', 'T2F.v2-a', 'T2F.v2-b', 'T2.v2', 'T2.v3', 'T2.v3.1', 'T2.v3.2'];
+const SUPERSEDED = ['T1.v1.3', 'T1.v1.4', 'T2F.v2-a', 'T2F.v2-b', 'T2.v2', 'T2.v3', 'T2.v3.1', 'T2.v3.2', 'T5.v1.2'];
 
 // 지점 → 파일 이름
 const FILE_OF: Record<PointId, string> = {
@@ -44,7 +45,7 @@ const FILE_OF: Record<PointId, string> = {
   T2: 'T2.v3.3',
   T3: 'T3.v1',
   T4: 'T4.v1.1',
-  T5: 'T5.v1.2',
+  T5: 'T5.v2',
   E4: 'ASSIST_E4.v1.1',
 };
 
@@ -55,7 +56,7 @@ const VARS: Record<PointId, string[]> = {
   T2: ['context', 'transcript'],
   T3: ['utterance'],
   T4: ['date_line', 'facts', 'appointments', 'todos', 'record_amount'],
-  T5: ['date_line', 'facts', 'appointments', 'routine_eligible', 'server_saved', 'week_pattern', 'transcript'],
+  T5: ['date_line', 'facts'],
   E4: ['mode_hybrid', 'mode_stats', 'appointments', 'plan_line', 'rule_block', 'stats_block', 'target_line', 'window_days', 'window_line'],
 };
 
@@ -141,8 +142,8 @@ describe('지점 설정(index.ts)', () => {
   it('모든 판 파일이 지점 하나씩에 쓰임, 쓰는 스키마 7개 = 생성기 목록', () => {
     const used = ids.map((p) => FILE_OF[p]).sort();
     assert.deepEqual(used, (PROMPTS as string[]).filter((n) => !SUPERSEDED.includes(n)).sort());
-    // 생성기 목록(실험실 스키마) 중 extract.v1은 T2.v3 뒤로 안 씀, extract.v2는 서버 판이라 생성기 목록에 없음
-    const usedSchemas = [...(GEN_SCHEMAS as string[]).filter((id) => id !== 'extract.v1'), 'extract.v2'];
+    // 생성기 목록(실험실 스키마) 중 extract.v1은 T2.v3 뒤로, t5-journal.v1은 T5.v2 뒤로 안 씀(T5.v2는 t4-diary.v1을 같이 씀), extract.v2는 서버 판이라 생성기 목록에 없음
+    const usedSchemas = [...(GEN_SCHEMAS as string[]).filter((id) => id !== 'extract.v1' && id !== 't5-journal.v1'), 'extract.v2'];
     assert.deepEqual([...new Set(ids.map((p) => POINTS[p].schema))].sort(), usedSchemas.sort());
   });
 
@@ -156,7 +157,7 @@ describe('지점 설정(index.ts)', () => {
     assert.deepEqual(row('T2'), ['T2', 'v3.3', 'extract.v2', 'medium', 4096, null, 19_000, true]);
     assert.deepEqual(row('T3'), ['T3', 'v1', 't3-reason.v1', 'low', 1024, null, 4_000, true]);
     assert.deepEqual(row('T4'), ['T4', 'v1.1', 't4-diary.v1', 'medium', 4096, null, 11_000, true]);
-    assert.deepEqual(row('T5'), ['T5', 'v1.2', 't5-journal.v1', 'medium', 6000, null, 26_000, true]);
+    assert.deepEqual(row('T5'), ['T5', 'v2', 't4-diary.v1', 'low', 1024, null, 9_000, false]);
     assert.deepEqual(row('E4'), ['ASSIST_E4', 'v1.1', 'assist-e4.v1', 'medium', 8000, null, 28_000, true]);
   });
 });
