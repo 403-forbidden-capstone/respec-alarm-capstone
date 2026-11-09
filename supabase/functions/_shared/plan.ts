@@ -5,7 +5,7 @@ import type { TravelSample } from './calc/travel.ts';
 import { dbFail, must } from './db.ts';
 import { HttpError } from './errors.ts';
 import { getEnv } from './env.ts';
-import { buildMlRequest, mayUseMl, previousDateKey, requestMlPrediction, type MlProfile, type MlPrediction } from './prepare-ml.ts';
+import { approvedMlProfile, buildMlRequest, mayUseMl, previousDateKey, requestMlPrediction, type VerifiedMlProfile, type MlPrediction } from './prepare-ml.ts';
 import { kakaoTravelMinutes, type FetchLike } from './kakao.ts';
 import {
   computePlan,
@@ -22,7 +22,7 @@ import {
   type SameDayWakeRow,
 } from './plan-core.ts';
 import { resolveTravel, type ResolvedTravel, type TravelDeps } from './route.ts';
-import type { Db } from './supabase.ts';
+import { createServiceClient, type Db } from './supabase.ts';
 import { localDayRange, safeTimeZone } from './tz.ts';
 
 export type PlanContext = {
@@ -240,12 +240,16 @@ async function optionalMlPrediction(
   if (!url || !token) return undefined;
 
   try {
-    const { data: profile, error: profileError } = await ctx.db.from('profiles')
-      .select('ml_codes_verified, ml_age_code, ml_education_code, ml_economic_code')
+    // Never trust client-writable profiles.ml_* fields. The separate table
+    // is readable only by service_role; this is reached only after auth +
+    // exact user UUID allowlist. Match an explicitly approved codebook version.
+    const { data: row, error: profileError } = await createServiceClient()
+      .from('prepare_ml_verified_profiles')
+      .select('ml_age_code, ml_education_code, ml_economic_code, codebook_version, consent_at, verified_at')
       .eq('user_id', ctx.userId).maybeSingle();
-    if (profileError || !profile) return undefined;
-    const verified = profile as MlProfile;
-    if (!verified.ml_codes_verified) return undefined;
+    if (profileError || !row) return undefined;
+    const verified = approvedMlProfile(row as VerifiedMlProfile, getEnv('PREPARE_ML_CODEBOOK_VERSION'));
+    if (!verified) return undefined;
 
     // Crucial: use the record from EXACTLY the preceding local calendar day.
     // Unlike loadPrepareStats(), it is NOT the latest arbitrary history item.
