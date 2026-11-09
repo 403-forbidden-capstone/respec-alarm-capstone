@@ -373,8 +373,6 @@ describe('G04 공유받은 알람', () => {
       kind: 'ALARM_CHANGED',
       targetUserId: SUYEON,
       alarmId: 'w1',
-      title: '공유한 알람이 바뀌었어요',
-      body: "나(데모)님이 '팀 주간회의' 알람을 껐어요",
     });
   });
 
@@ -424,16 +422,13 @@ describe('G04 공유받은 알람', () => {
     expect(mockCallEdge).not.toHaveBeenCalled();
   });
 
-  it('알림 본문은 서버 한도(200자) 안으로 — 약속 제목이 길면 줄임', async () => {
-    const long = '가'.repeat(100);
-    mockFake.answerRpc('get_shared_alarm_appointments', ok(alarms.map((a) => ({ ...ap(a.alarm_id), title: long }))));
-    mockFake.answer('alarms.select', ok(alarms));
+  it('알림 요청에 제목 · 본문 · data는 없음 — 문구는 서버가 종류별로 고정 (11장)', async () => {
+    shareSetup();
     mockFake.answer('alarms.update', ok([{ alarm_id: 'w1' }, { alarm_id: 'p1' }, { alarm_id: 'd1' }]));
     mockCallEdge.mockResolvedValue({ sent: 1, failed: 0 });
     await real.setSharedAlarmEnabled(SUYEON, 'ap1', false);
-    const body = (mockCallEdge.mock.calls[0][1] as { body: string }).body;
-    expect(body).toBe(`나(데모)님이 '${'가'.repeat(39)}…' 알람을 껐어요`);
-    expect(body.length).toBeLessThanOrEqual(200);
+    const body = mockCallEdge.mock.calls[0][1] as Record<string, unknown>;
+    expect(Object.keys(body).sort()).toEqual(['alarmId', 'kind', 'targetUserId']);
   });
 
   it('알림이 실패해도 저장은 그대로, 던지지 않고 notified: false', async () => {
@@ -471,7 +466,14 @@ describe('G04 공유받은 알람', () => {
       ['p1', { scheduled_at: '2026-10-19T22:35:00.000Z', time_source: 'MANUAL' }],
       ['d1', { scheduled_at: '2026-10-19T23:45:00.000Z', time_source: 'MANUAL' }],
     ]);
-    expect(mockCallEdge).toHaveBeenCalledWith('notify', expect.objectContaining({ kind: 'ALARM_CHANGED', targetUserId: SUYEON, body: "나(데모)님이 '팀 주간회의' 알람을 5분 앞당겼어요" }));
+    // 시각을 옮긴 알림은 이전 → 새 시각(가장 이른 알람 = 기상)을 같이 보내야 문구에 '이전 → 새 시각'이 나옴
+    expect(mockCallEdge).toHaveBeenCalledWith('notify', {
+      kind: 'ALARM_CHANGED',
+      targetUserId: SUYEON,
+      alarmId: 'w1',
+      previousAt: '2026-10-19T22:30:00.000Z',
+      newAt: '2026-10-19T22:25:00.000Z',
+    });
   });
 
   describe('앞당기기 — 옮긴 시각이 지금 + 5분(서버 PAST_GRACE_MINUTES)보다 이르게 되면 거절', () => {

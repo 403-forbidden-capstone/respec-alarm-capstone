@@ -16,6 +16,7 @@ import { CODE_EXPIRED, CODE_NOT_FOUND, GROUP_FULL, GROUP_NOT_MEMBER, GROUP_TOO_M
 import { MESSAGE_GONE, messageLimit } from '../relationMessages';
 import type { AppointmentJoiner, CreatedGroup, GroupCode, GroupDetail, GroupInvite, GroupItem, GroupPreview, GroupSummary, InvitableFriend, JoinedGroup } from '../types';
 import { invalidateSnapshot, loadSnapshot, loadWakeHides, loadWakeRows } from './load';
+import { sendPush } from './push';
 
 // 연결 일정은 오늘부터 앞으로 (지난 약속은 안 보임 — 작성자 판단), 많아도 이만큼
 const APPOINTMENT_LIMIT = 20;
@@ -184,6 +185,13 @@ export async function previewGroupByCode(code: string): Promise<GroupPreview> {
   }
 }
 
+// 새로 들어온 직후 — 기존 멤버들에게 '새 멤버가 들어왔어요' (받는 사람은 서버가 고름: 알림 끈 멤버 · 차단 쌍 · 나 제외, 들어온 지 10분 안일 때만). 실패해도 참여는 그대로
+function joined(groupId: string | undefined): JoinedGroup {
+  const id = groupId ?? '';
+  if (id) void sendPush({ kind: 'GROUP_MEMBER_JOINED', groupId: id });
+  return { id, already: false };
+}
+
 // 코드로 참여 = 직접 초대를 받았으면 초대 수락. wakeShare = 동의 시트 [공유] (5-09 · 5-10)
 export async function joinGroup(code: string, wakeShare: boolean): Promise<JoinedGroup> {
   const cleaned = cleanCode(code);
@@ -194,8 +202,9 @@ export async function joinGroup(code: string, wakeShare: boolean): Promise<Joine
   if (error) throw error;
   switch (data.status) {
     case 'JOINED':
+      return joined(data.group_id);
     case 'ALREADY_JOINED':
-      return { id: data.group_id ?? '', already: data.status === 'ALREADY_JOINED' };
+      return { id: data.group_id ?? '', already: true };
     case 'NOT_FOUND':
       throw new UserError(CODE_NOT_FOUND);
     case 'EXPIRED':
@@ -233,8 +242,9 @@ export async function acceptGroupInvite(groupId: string, wakeShare: boolean): Pr
   if (error) throw error;
   switch (data.status) {
     case 'JOINED':
+      return joined(data.group_id);
     case 'ALREADY_JOINED':
-      return { id: data.group_id ?? '', already: data.status === 'ALREADY_JOINED' };
+      return { id: data.group_id ?? '', already: true };
     case 'GONE':
       throw new UserError(MESSAGE_GONE);
     case 'FULL':

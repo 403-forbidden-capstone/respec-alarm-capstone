@@ -59,7 +59,7 @@
 - 기상 확인(H08)에 들어올 때 — `uploadEvents()` (해제 기록이 기상 확인보다 먼저 들어가게)
 - 같은 때(로그인 직후 · 앱이 앞에 올 때) — 최근 12시간에 끈 기상 알람 중 확정이 없는 것을 H08과 같은 판정으로 다시 보고 조건을 채웠으면 확정 기록 (`useWakeRecheck`, 자세히는 `alarm-core.md`)
 - 저장 직후 — `applyCommit(응답)`
-- 로그아웃 — `signOutAndCleanup()` (`lib/session`): 로그아웃 중 표시 켜기(`setSigningOut`) → 기록 올려 보기 → 맞추기와 같은 줄에서 `AlarmCore.cancelAll()`(`cancelAllPhoneAlarms`) → 남은 기록 버림 → 푸시 토큰 지우기 자리 → 실시간 구독 끊기 · 기능 메모리 정리(`onSignOut`) → `signOut`. 데이터 모드 저장값은 그대로
+- 로그아웃 — `signOutAndCleanup()` (`lib/session`): 로그아웃 중 표시 켜기(`setSigningOut`) → 기록 올려 보기 → 맞추기와 같은 줄에서 `AlarmCore.cancelAll()`(`cancelAllPhoneAlarms`) → 남은 기록 버림 → 푸시 토큰 지우기(`removePushToken`, 이 기기의 `push_tokens` 행 삭제 · 실패해도 계속) → 실시간 구독 끊기 · 기능 메모리 정리(`onSignOut`) → `signOut`. 데이터 모드 저장값은 그대로
   - 로그아웃 중 표시가 켜져 있는 동안 `reconcile`은 서버 알람을 폰에 걸지 않고 건너뜀 (로그인 상태가 남은 사이에 맞추기가 끼어 앞 계정 알람을 다시 거는 것을 막음). `cancelAll`이 실패하면 로그아웃을 멈추고 표시를 끔. 로그아웃이 끝까지 가면 켜 둔 채로 두고, 다시 로그인할 때 `useAlarmSync`가 끔
   - `signOut`은 서버에 알리다 네트워크로 실패해도 이 기기의 로그인이 지워졌으면 끝난 것으로 봄
 
@@ -257,7 +257,10 @@
 - 권한 안내: 알림 · 정확한 알람 · 잠금화면 알람 화면 — 폰
 - 설정 "출발 · 도착 자동 기록" 카드(`features/location/LocationAutoSection`, 안드로이드 + 실데이터에서만): 스위치 = 폰 저장 `location:v1:auto`(기본 켬) + 위치 권한 상태(`permissions.ts` `getLocationStatus`: 켜짐 · 위치 꺼짐 · 앱 사용 중에만 · 정확한 위치 꺼짐) — 폰, DB 없음. 앞 권한만 시스템 창으로 묻고 "항상 허용" · "정확한 위치"는 앱 설정 화면으로 안내(안드로이드 11+). 온보딩에서 못 켰다면 여기서(위치 허용하기 → 앞 권한 → 항상 허용 설정). 권한이 모자라도 스위치는 켜 둠 — 권한이 생기면 바로 등록. 끄면 등록한 지오펜스를 멈춤
 - 온보딩은 `LOCATION_DISCLOSURE`를 보여 준 뒤 `requestLocationAccessFlow()`를 부름(L7 #277)
-- 푸시 토큰: 앱 켤 때 `register_push_token` — RPC
+- 푸시 토큰: 로그인 직후 · 앱이 앞에 올 때(6시간 넘었으면) `usePushRegistration` → 안드로이드 채널 5개(`friend_v1` · `alarm_change_v1` · `request_v1` · `group_v1` · `missed_v1`)를 먼저 만든 뒤 `register_push_token(p_token, p_platform)` — RPC. 안드로이드만, 실패해도 던지지 않음. 같은 폰에서 계정이 바뀌면 마지막 로그인 계정이 토큰 주인
+- `notify` 호출 모양: 요청에는 종류별 인자만(한 사람 = `targetUserId`, 그룹 = `groupId`) — 제목 · 본문 · data는 서버가 고정. 알람 바뀜(G04)은 `previousAt` · `newAt`(ISO)을 같이, 친구 요청 보냄(`REQUESTED`) → `FRIEND_REQUEST`, 수락 · 맞요청 자동 수락 → `FRIEND_ACCEPTED`, 그룹에 새로 들어옴(`JOINED`) → `GROUP_MEMBER_JOINED`. 본 동작이 끝난 뒤 기다리지 않고 부르며 실패해도 되돌리지 않음 (`features/social/real/push.ts`)
+- 알림 누르기(`usePushLinks`, `features/push/link.ts`): `data.recipientUserId`가 지금 로그인한 계정일 때만 갈 곳(`/wake` · `/alarms` · `/friends`(그룹 탭) · `/group`(`groupId`가 있으면 그 그룹, `subjectUserId`도 있으면 그 사람의 기상 확인), 깨우기 `/groups/<그룹>/members/<사람>`, 공동 약속 변경은 `needsConfirm`이면 `/alarm/changed?id=`), 아니면 홈. 로그인 전에 누르면 로그인 뒤에 이어감. 앞에 떠 있을 때 받은 알림 중 내 알람 바뀜 · 공동 약속 바뀜 · 취소는 폰 알람을 서버와 맞춤(`syncNow`)
+- 설정 '알람 점검' 첫 줄: 폰 알림 권한이 꺼져 있으면 '알림이 꺼져 있어요 [켜기]'(켜면 토큰 다시 등록), 아니면 '알림 설정 열기'
 
 ## Edge Function — 만들 것만
 
