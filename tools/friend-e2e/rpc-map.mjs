@@ -7,7 +7,7 @@ export const RPC = {
   find_profile: 'find_profile_by_handle', // 옛 모양(15장에서 지워짐) — search_by_handle이 없을 때만 씀
   join_group: 'join_group_by_invite_code',
   regen_code: 'regenerate_invite_code',
-  group_wake: 'get_group_wake_status',
+  group_wake: 'get_group_wake', // 15장(#434)부터 대본은 줄인 응답(get_group_wake)만 씀. 11칸짜리 get_group_wake_status는 내 줄 상세용으로 남아 있음
   shared_alarms: 'get_shared_alarm_appointments',
   register_push_token: 'register_push_token',
 
