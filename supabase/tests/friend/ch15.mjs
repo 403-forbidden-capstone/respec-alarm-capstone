@@ -66,6 +66,31 @@ export default async function ch15({ q, as, su, svc, check, expectErr }) {
     return attempts.every((x) => x === true) && invite === true && rows.friends === 0 && rows.invites === 0 && viaFunction.status === 'REQUESTED' ? true : { attempts, invite, rows, viaFunction };
   });
 
+  await check('15-02(수락 · 거절 · 끊기): 앱의 직접 update · delete로는 요청을 수락 · 거절 · 취소하거나 친구를 끊을 수 없음(0행, 친구 100명 상한을 우회하던 길) — 함수로는 됨', async () => {
+    const A = await join_(60, '요청자'), B = await join_(61, '받는이'), C = await join_(62, '다른이');
+    const asDirect = async (uid, sql, params) => { await as(uid); const r = await q(sql, params); await su(); return r.length; };
+    await call(A, 'public.send_friend_request($1)', [B]);
+    const fid = await friendId(A, B);
+    const pendingDirect = [
+      await asDirect(B, `update public.friends set status = 'ACCEPTED', accepted_at = now() where friend_id = $1 returning 1`, [fid]),   // 받은 사람의 직접 수락
+      await asDirect(B, `delete from public.friends where friend_id = $1 returning 1`, [fid]),                                           // 받은 사람의 직접 거절
+      await asDirect(A, `delete from public.friends where friend_id = $1 returning 1`, [fid]),                                           // 보낸 사람의 직접 취소
+    ];
+    const stillPending = (await q(`select status::text as s from public.friends where friend_id = $1`, [fid]))[0]?.s;
+    const accepted = await call(B, 'public.accept_friend_request($1)', [A]);
+    const friendDirect = [
+      await asDirect(A, `delete from public.friends where friend_id = $1 returning 1`, [fid]),                                           // 직접 끊기
+      await asDirect(B, `delete from public.friends where friend_id = $1 returning 1`, [fid]),
+      await asDirect(C, `delete from public.friends where friend_id = $1 returning 1`, [fid]),                                           // 남
+    ];
+    const stillFriends = (await q(`select status::text as s from public.friends where friend_id = $1`, [fid]))[0]?.s;
+    const removed = await call(A, 'public.remove_friend($1)', [B]);
+    const gone = await friendId(A, B);
+    return pendingDirect.every((n) => n === 0) && stillPending === 'PENDING' && accepted.status === 'ACCEPTED'
+      && friendDirect.every((n) => n === 0) && stillFriends === 'ACCEPTED' && removed.status === 'REMOVED' && gone === null
+      ? true : { pendingDirect, stillPending, accepted, friendDirect, stillFriends, removed, gone };
+  });
+
   // ---- 15-03 ~ 15-05: 로그인 없음 ---------------------------------------------------------------
 
   await check('15-03 · 15-05: 로그인 안 한 요청(anon)은 public 함수를 하나도 못 부름 — 모든 함수에서 anon 실행 권한이 없음', async () => {

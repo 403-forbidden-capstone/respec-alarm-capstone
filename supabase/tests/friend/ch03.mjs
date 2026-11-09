@@ -234,18 +234,27 @@ export default async function ch03({ q, as, su, check, expectErr }) {
       ? true : { read, upd, del, other, otherDel, still };
   });
 
-  await check('3-24 · 3-25 · 3-26: 직접 update로도 대기 → 친구만 됨 — PENDING · BLOCKED로 바꾸기 · 수락 되돌리기는 막힘, 직접 수락해도 accepted_at은 서버 시각', async () => {
+  await check('3-24 · 3-25 · 3-26: 상태 규칙 — 앱의 직접 update · delete는 늘 0행(수락 · 끊기는 함수로만, 11/9 후속), 서버 쪽 직접 고침도 대기 → 친구로만 되고 수락 시각은 서버 시각', async () => {
     const H = await join_(70, '직접');
     await request(H, B);
     await as(B);
+    const app = [
+      await q(`update public.friends set status = 'BLOCKED' where requester_id = $1 and addressee_id = $2 returning 1`, [H, B]),
+      await q(`update public.friends set status = 'ACCEPTED', accepted_at = '2025-01-01 00:00+09' where requester_id = $1 and addressee_id = $2 returning 1`, [H, B]),
+      await q(`update public.friends set status = 'PENDING' where requester_id = $1 and addressee_id = $2 returning 1`, [H, B]),
+      await q(`update public.friends set accepted_at = now() - interval '1 year' where requester_id = $1 and addressee_id = $2 returning 1`, [H, B]),
+      await q(`delete from public.friends where requester_id = $1 and addressee_id = $2 returning 1`, [H, B]),
+    ];
+    await su();
+    const untouched = await rowOf(H, B);                                                                   // 아무것도 안 바뀜: 여전히 대기
+    // 상태 규칙 트리거는 서버 쪽 고침에도 그대로 (마지막 방어)
     const toBlocked = await expectErr(() => q(`update public.friends set status = 'BLOCKED' where requester_id = $1 and addressee_id = $2`, [H, B]), /대기 → 친구/);
     const [acc] = await q(`update public.friends set status = 'ACCEPTED', accepted_at = '2025-01-01 00:00+09' where requester_id = $1 and addressee_id = $2
                            returning abs(extract(epoch from (accepted_at - now()))) < 5 as fresh`, [H, B]);
     const back = await expectErr(() => q(`update public.friends set status = 'PENDING' where requester_id = $1 and addressee_id = $2`, [H, B]), /대기 → 친구/);
     const clock = await expectErr(() => q(`update public.friends set accepted_at = now() - interval '1 year' where requester_id = $1 and addressee_id = $2`, [H, B]), /수락 시각/);
-    await su();
     await clearLimits(H);
-    return toBlocked === true && acc?.fresh === true && back === true && clock === true ? true : { toBlocked, acc, back, clock };
+    return app.every((r) => r.length === 0) && untouched?.status === 'PENDING' && toBlocked === true && acc?.fresh === true && back === true && clock === true ? true : { app: app.map((r) => r.length), untouched, toBlocked, acc, back, clock };
   });
 
   await check('3-28: 수락하는 순간 A가 취소했으면 GONE(행 없음) — 받은 요청에서도 사라짐', async () => {

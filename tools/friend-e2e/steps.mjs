@@ -197,8 +197,9 @@ export const STEPS = [
         must(again === 'ALREADY_FRIEND', `두 번 수락했는데 ${again}`);
         const row = await friendRow(ctx, ctx.ids.A, ctx.ids.B);
         must(row?.accepted_at, '수락 시각이 서버에서 안 채워짐');
-        const back = await ctx.b.from('friends').update({ status: 'PENDING' }).eq('friend_id', ctx.s.fAB);
-        must(back.error?.code === '42501', `수락을 되돌릴 수 있음: ${back.error?.code ?? '성공'}`);
+        await ctx.b.from('friends').update({ status: 'PENDING' }).eq('friend_id', ctx.s.fAB);   // 11/9부터 앱의 직접 update 길이 닫혀 오류 없이 0행 — 상태가 그대로인지로 확인
+        const kept = await friendRow(ctx, ctx.ids.A, ctx.ids.B);
+        must(kept?.status === 'ACCEPTED', `수락을 되돌릴 수 있음: ${kept?.status ?? '행 없음'}`);
       }
       const seen = ok(await ctx.a.from('friends').select('status').eq('friend_id', ctx.s.fAB), 'A 쪽 확인');
       must(seen[0]?.status === 'ACCEPTED', 'A 목록에서 친구가 아님');
