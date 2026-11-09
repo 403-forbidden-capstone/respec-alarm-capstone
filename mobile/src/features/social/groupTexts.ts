@@ -52,7 +52,14 @@ export const SHARED_APPOINTMENT_NOTE = '일정 이름 · 시각 · 장소는 그
 // G02 연결 일정 줄 상태 — 참여 / 알람 없음 두 가지(안 누름 · 빠짐 · 끔은 모두 알람 없음), 지난 약속은 그 한 줄 (9-42 · 9-32)
 export const appointmentStateText = (a: { iJoined: boolean; past: boolean }) => (a.past ? PAST_APPOINTMENT : a.iJoined ? '참여' : '알람 없음');
 export const PAST_APPOINTMENT = '지난 약속이에요';
-export const joinedCountText = (n: number) => (n > 0 ? `${n}명 참여` : '아직 참여한 사람이 없어요');
+// 0명은 정말 없는 것일 수도, 차단한 사이라 내게 안 보이는 것일 수도 있어 '없다'고 단정하지 않음 (탐색 시험 ①-17)
+export const joinedCountText = (n: number) => (n > 0 ? `${n}명 참여` : '보이는 참여자가 없어요');
+// [내 알람 만들기] — 집 위치가 없어 이동시간을 못 구할 때 (보내기 전에 막음)
+export const HOME_MISSING_JOIN_TOAST = '집 위치를 먼저 정해 주세요';
+export const HOME_MISSING_JOIN_ACTION = '설정 열기';
+// G01 받은 초대는 이만큼만 펼치고 나머지는 접음 (탐색 시험 X-BOUND-15)
+export const INVITES_SHOWN = 3;
+export const moreInvitesText = (n: number) => `초대 ${n}개 더 보기`;
 export const CREATOR_UNKNOWN = '만든 사람 알 수 없음'; // 9-27 — 참여한 사람 누구나 고칠 수 있음
 export const JOINED_TOAST = '내 알람을 만들었어요';
 export const LEFT_APPOINTMENT_TOAST = '이 약속에서 빠졌어요';

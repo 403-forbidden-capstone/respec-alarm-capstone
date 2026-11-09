@@ -31,6 +31,7 @@ import { Note } from '@/features/social/components/Note';
 import { PeopleSearchResults } from '@/features/social/components/PeopleSearchResults';
 import { PersonMenuSheet } from '@/features/social/components/PersonMenuSheet';
 import { PersonRow } from '@/features/social/components/PersonRow';
+import { INVITES_SHOWN, moreInvitesText } from '@/features/social/groupTexts';
 import { relationFromLists } from '@/features/social/searchView';
 import { SearchBox } from '@/features/social/components/SearchBox';
 import { useWakeLoad } from '@/features/social/hooks/useGroupWake';
@@ -351,12 +352,16 @@ function GroupTab({
   onAccept: (i: GroupInvite) => void;
   onDecline: (i: GroupInvite) => void;
 }) {
+  // 받은 초대는 3개까지만 펼치고 나머지는 [초대 n개 더 보기] — 많이 받아도 내 그룹 · 버튼이 밀리지 않게 (탐색 시험 X-BOUND-15)
+  const [showAllInvites, setShowAllInvites] = useState(false);
+  const shownInvites = showAllInvites ? invites : invites.slice(0, INVITES_SHOWN);
+  const hiddenInvites = invites.length - shownInvites.length;
   return (
     <>
       {invites.length ? (
         <>
           <SectionHeader title="받은 초대" right={`${invites.length}개`} />
-          {invites.map((i) => (
+          {shownInvites.map((i) => (
             <GroupInviteCard
               key={i.groupId}
               invite={i}
@@ -366,6 +371,7 @@ function GroupTab({
               onDecline={() => onDecline(i)}
             />
           ))}
+          {hiddenInvites > 0 ? <Button variant="ghost" label={moreInvitesText(hiddenInvites)} onPress={() => setShowAllInvites(true)} /> : null}
         </>
       ) : null}
       <View style={styles.tiles}>
