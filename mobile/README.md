@@ -97,6 +97,8 @@ cp .env.example .env
 - 안드로이드 푸시(FCM)용 `google-services.json`은 키 파일이라 커밋하지 않음(`.gitignore`). `app.config.js`가 파일이 있을 때만 `android.googleServicesFile`에 넣고, 없으면 그대로 빌드됨
   - 로컬 빌드(`npx expo run:android`): 받은 파일을 `mobile/google-services.json`에 둠
   - EAS 빌드: 파일 종류 환경 변수 `GOOGLE_SERVICES_JSON`으로 올림 — `eas env:create --name GOOGLE_SERVICES_JSON --type file --value ./google-services.json --environment preview` (development · production도 같은 방식). 이 파일을 넣거나 바꾸면 네이티브 설정이 바뀌어 `runtimeVersion` fingerprint가 달라지므로 새 빌드가 필요함
+  - `eas build`를 거는 PC에도 같은 파일을 `mobile/google-services.json`에 둬야 함(EAS 변수와 같은 파일). 빌드 서버는 `GOOGLE_SERVICES_JSON` 파일이 fingerprint에 들어가는데, 이 PC에 파일이 없으면 지문이 달라 `Runtime version mismatch`로 실패함
+  - `mobile/.gitignore`(expo가 만든 블록 + `/android` `/ios`)는 레포에 올려 둠. 로컬과 EAS 서버에 이 파일이 같이 있어야 fingerprint가 같음(없으면 한쪽만 `bareGitIgnore`로 세어짐). `app.config.js` · `runtimeVersion` 정책은 그대로
 - `EXPO_PUBLIC_` 값은 빌드할 때 번들에 박힘. 로컬은 `.env`, 웹 미리보기는 Cloudflare 변수, APK는 EAS 환경 변수에 같은 값을 넣음
 
 ### 데이터 모드 · 개발 메뉴 로그인
