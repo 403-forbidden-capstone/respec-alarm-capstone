@@ -105,34 +105,38 @@ function Detail({ group: g, stale, onBack, onChanged }: { group: GroupDetail; st
             연결 일정
           </Text>
           {g.appointments.map((a, i) => (
-            <Pressable
-              key={a.id}
-              onPress={() => void appts.openJoiners(a)}
-              accessibilityRole="button"
-              accessibilityLabel={`${a.title} 참여자 보기`}
-              style={({ pressed }) => [styles.linked, i > 0 && styles.divider, pressed && styles.pressed]}
-            >
-              <View style={styles.between}>
-                <Text variant="big" style={styles.grow}>
-                  {a.title}
+            <View key={a.id} style={[styles.linked, i > 0 && styles.divider]}>
+              {/* 줄 위쪽만 누르면 참여자 시트 — [내 알람 만들기] · 내 알람 보기는 줄 밖(버튼 안에 버튼을 넣지 않음) */}
+              <Pressable
+                onPress={() => void appts.openJoiners(a)}
+                accessibilityRole="button"
+                accessibilityLabel={`${a.title} 참여자 보기`}
+                style={({ pressed }) => pressed && styles.pressed}
+              >
+                <View style={styles.between}>
+                  <Text variant="big" style={styles.grow}>
+                    {a.title}
+                  </Text>
+                  <Chip label={IMPORTANCE_LABEL[a.importance]} variant="fill" />
+                </View>
+                <Text variant="small" tone="sub" style={styles.sub}>
+                  {formatDateShort(a.at)} · {formatTime(a.at)} · {a.place}
                 </Text>
-                <Chip label={IMPORTANCE_LABEL[a.importance]} variant="fill" />
-              </View>
-              <Text variant="small" tone="sub" style={styles.sub}>
-                {formatDateShort(a.at)} · {formatTime(a.at)} · {a.place}
-              </Text>
-              {/* 참여 / 알람 없음 두 가지 + 인원수, 지난 약속은 그 한 줄만 (친구 9장 9-42 · 9-32) */}
-              <Text variant="small" tone={a.iJoined && !a.past ? undefined : 'sub'} style={styles.sub}>
-                {[a.past ? null : joinedCountText(a.joinedCount), appointmentStateText(a), a.creatorUnknown ? CREATOR_UNKNOWN : null].filter(Boolean).join(' · ')}
-              </Text>
+                {/* 참여 / 알람 없음 두 가지 + 인원수, 지난 약속은 그 한 줄만 (친구 9장 9-42 · 9-32) */}
+                <Text variant="small" tone={a.iJoined && !a.past ? undefined : 'sub'} style={styles.sub}>
+                  {[a.past ? null : joinedCountText(a.joinedCount), appointmentStateText(a), a.creatorUnknown ? CREATOR_UNKNOWN : null].filter(Boolean).join(' · ')}
+                </Text>
+              </Pressable>
               {a.past ? null : a.iJoined ? (
-                <TextLink label="내 알람 보기 ›" onPress={() => router.push({ pathname: '/alarm/[id]', params: { id: a.id } })} />
+                <View style={styles.joinButton}>
+                  <TextLink label="내 알람 보기 ›" onPress={() => router.push({ pathname: '/alarm/[id]', params: { id: a.id } })} />
+                </View>
               ) : (
                 <View style={styles.joinButton}>
                   <Button label="내 알람 만들기" small onPress={() => void appts.openJoin(a)} />
                 </View>
               )}
-            </Pressable>
+            </View>
           ))}
         </Card>
       ) : null}

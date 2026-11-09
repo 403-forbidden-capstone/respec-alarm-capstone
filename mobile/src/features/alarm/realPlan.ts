@@ -255,7 +255,10 @@ export async function joinSharedAppointment(appointmentId: string, choice: JoinC
     res = await callEdge<CommitResponse>('alarm-commit', joinBody(appointmentId, choice), { timeoutMs: COMMIT_TIMEOUT_MS });
   } catch (e) {
     const fallback = choice.travelMinutes == null ? travelFallbackOf(e) : null;
-    throw fallback ? new TravelConfirmNeeded(fallback) : e;
+    if (fallback) throw new TravelConfirmNeeded(fallback);
+    // 어림값도 없음(장소 좌표 없음) — 이 시트에는 이동시간 직접 입력 칸이 없어 lib/edge의 '직접 입력해 주세요' 문구는 맞지 않음
+    if (e instanceof EdgeError && e.code === 'ROUTE_UNAVAILABLE') throw new UserError('이동시간을 구하지 못해 알람을 만들지 못했어요. 잠시 뒤 다시 해 주세요');
+    throw e;
   }
   return { phoneFailed: (await phoneFailedIds(res)).size };
 }

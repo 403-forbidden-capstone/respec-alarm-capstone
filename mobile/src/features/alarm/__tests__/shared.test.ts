@@ -94,9 +94,9 @@ describe('[내 알람 만들기] 길찾기 실패 (9-어)', () => {
     expect(body.participant).toMatchObject({ est_travel_minutes: 30, travel_source: 'MANUAL' });
   });
 
-  it('어림값도 없으면(좌표 없음) 그대로 던짐 — 직접 입력은 H03에서', async () => {
+  it('어림값도 없으면(좌표 없음) 직접 입력 안내 대신 다시 해 달라는 문구', async () => {
     mockCallEdge.mockRejectedValueOnce(new EdgeError('ROUTE_UNAVAILABLE', { details: { manual_required: true } }));
-    await expect(real.joinSharedAppointment('ap1', { transport: 'TRANSIT', prepareMinutes: null })).rejects.toBeInstanceOf(EdgeError);
+    await expect(real.joinSharedAppointment('ap1', { transport: 'TRANSIT', prepareMinutes: null })).rejects.toThrow('이동시간을 구하지 못해 알람을 만들지 못했어요. 잠시 뒤 다시 해 주세요');
   });
 });
 
