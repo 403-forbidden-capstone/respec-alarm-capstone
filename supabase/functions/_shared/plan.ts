@@ -22,7 +22,7 @@ import {
   type SameDayWakeRow,
 } from './plan-core.ts';
 import { resolveTravel, type ResolvedTravel, type TravelDeps } from './route.ts';
-import { createServiceClient, type Db } from './supabase.ts';
+import type { Db } from './supabase.ts';
 import { localDayRange, safeTimeZone } from './tz.ts';
 
 export type PlanContext = {
@@ -243,6 +243,9 @@ async function optionalMlPrediction(
     // Never trust client-writable profiles.ml_* fields. The separate table
     // is readable only by service_role; this is reached only after auth +
     // exact user UUID allowlist. Match an explicitly approved codebook version.
+    // Lazily load Deno's npm: Supabase client only when ML is actually enabled.
+    // Plan calculation and FakeDb regression tests run in Node without npm: support.
+    const { createServiceClient } = await import('./supabase.ts');
     const { data: row, error: profileError } = await createServiceClient()
       .from('prepare_ml_verified_profiles')
       .select('ml_age_code, ml_education_code, ml_economic_code, codebook_version, consent_at, verified_at')
