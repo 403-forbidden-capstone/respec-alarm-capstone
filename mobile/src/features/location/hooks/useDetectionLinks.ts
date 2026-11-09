@@ -2,6 +2,8 @@ import { router } from 'expo-router';
 import { useEffect } from 'react';
 import { Platform } from 'react-native';
 
+import { showsInForeground } from '@/lib/push/kinds';
+
 import { parseDetectionLink } from '../link';
 import { errorText, nativeNotifications } from '../native';
 
@@ -66,10 +68,11 @@ export function useDetectionLinks({ active }: { active: boolean }) {
     if (Platform.OS !== 'android') return;
     try {
       const notifications = nativeNotifications();
-      // 앞에 떠 있는 동안에도 감지 안내는 보이게 — 소리 없이. 다른 알림은 지금 앱에 없어서 그대로 안 보임(푸시를 붙일 때 L3가 이 핸들러를 넓힘)
+      // 앞에 떠 있는 동안에도 감지 안내 · 서버 푸시(친구 · 그룹 알림, 조용한 데이터 푸시 제외)는 보이게 — 소리 없이. 그 밖의 알림은 그대로 안 보임
       notifications.setNotificationHandler({
         handleNotification: async (n) => {
-          const show = parseDetectionLink(n.request.content.data?.url) != null;
+          const data = n.request.content.data;
+          const show = parseDetectionLink(data?.url) != null || showsInForeground(data);
           return { shouldShowBanner: show, shouldShowList: show, shouldPlaySound: false, shouldSetBadge: false };
         },
       });

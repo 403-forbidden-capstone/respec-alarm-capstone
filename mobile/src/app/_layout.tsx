@@ -14,6 +14,7 @@ import { ConfigErrorScreen } from '@/features/auth/ConfigErrorScreen';
 import { PermissionPromptHost } from '@/features/permissions';
 import { ProfileRetryScreen } from '@/features/auth/ProfileRetryScreen';
 import { useDetectionLinks } from '@/features/location/hooks/useDetectionLinks';
+import { usePushLinks } from '@/features/push/usePushLinks';
 import { useLocationSync } from '@/features/location/useLocationSync';
 import { useAlarmSync } from '@/lib/alarmSync/useAlarmSync';
 import { takeAfterOnboarding } from '@/lib/afterOnboarding';
@@ -21,6 +22,7 @@ import { takePendingInvite } from '@/lib/pendingInvite';
 import { ONBOARDING_IN_FLOW, TIMETABLE_PATHS } from '@/lib/flags';
 import { canUseRealData, configError } from '@/lib/mode';
 import { ensureNotificationChannels } from '@/lib/push/channels';
+import { usePushRegistration } from '@/lib/push/usePushRegistration';
 import { colors, fontFiles } from '@/theme';
 // 지오펜스 신호를 받는 작업 정의 — 앱이 꺼진 채 받는 길은 진입 파일(index.js)이 먼저 불러 줌. 여기 import는 같은 모듈이라 한 번만 평가됨 (features/location/task)
 import '@/features/location/task';
@@ -88,6 +90,10 @@ function RootStack() {
 
   // 감지 안내 알림("출발 8:30 감지")을 누르면 정정 화면(/detection)으로 — 앱이 꺼진 채 알림으로 열린 경우도. 화면이 열릴 수 있을 때까지 기억해 둠
   useDetectionLinks({ active: ready && !loading && profileError == null });
+
+  // 친구 · 그룹 푸시 — 토큰 등록(로그인 직후 · 앞에 올 때) + 알림을 누르면 그 화면으로(받는 사람이 지금 계정일 때만, 아니면 홈) · 받으면 폰 알람 맞추기 — features/push, lib/push
+  usePushRegistration({ active: syncActive, userId });
+  usePushLinks({ active: ready && !loading && profileError == null, userId });
 
   // 같은 때에 최근에 끈 기상 알람 중 확정이 없는 것을 다시 판정 — 해제 뒤 앱을 안 열었어도 서버가 기상 미확인(MISSED)으로 적기 전에 확정되게
   useWakeRecheck({ active: syncActive, userId });

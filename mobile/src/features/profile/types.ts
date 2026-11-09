@@ -28,6 +28,7 @@ export type Profile = {
   wake_margin: WakeMargin;
   privacy_agreed_at: string | null; // privacy_version과 같이 있거나 같이 없음
   privacy_version: number | null;
+  wake_ping_enabled: boolean; // 친구 깨우기 받기 — 기본 켬. 꺼 두면 보낸 쪽에 '지금은 깨울 수 없어요'만 (친구 8장)
 };
 
 // 한 번에 바꿀 수 있는 칸 — 온보딩 단계마다 · 설정에서 쓰는 만큼만 저장 (profile/api.ts saveProfileFields). 아이디는 여기 없음 — changeMyHandle
@@ -46,6 +47,7 @@ export type ProfileFields = Partial<
     | 'wake_margin'
     | 'privacy_agreed_at'
     | 'privacy_version'
+    | 'wake_ping_enabled'
   >
 >;
 

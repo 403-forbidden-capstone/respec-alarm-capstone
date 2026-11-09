@@ -102,7 +102,15 @@ export function receivedRows(s: Snapshot, fromId: string): GrantRow[] {
       const row = set && toGrantRow(s, p, set, fromId);
       return row ? [row] : [];
     });
-  return ordered(s, rows);
+  return ordered(s, [...rows, ...wakeOnlyRows(s, fromId, fromId, rows)]);
+}
+
+// 알람 권한 행은 없지만 준 사람이 그 그룹에 기상 공유 동의를 켠 줄 — 기상은 권한 행 없이 그룹 동의 하나로 보이므로 (6-23). 둘 다 참여 중인 그룹만
+function wakeOnlyRows(s: Snapshot, ownerId: string, otherId: string, existing: readonly GrantRow[]): GrantRow[] {
+  return sharedGroups(s, otherId)
+    .filter((g) => !existing.some((r) => r.sourceType === 'GROUP' && r.sourceId === g.group_id))
+    .filter((g) => s.members.some((m) => m.group_id === g.group_id && m.user_id === ownerId && m.invite_status === 'JOINED' && m.wake_share_opt_in))
+    .map((g): GrantRow => ({ source: g.group_name, sourceType: 'GROUP', sourceId: g.group_id, viewAlarm: false, editAlarm: false, viewWake: true }));
 }
 
 // 내가 이 사람에게 준 권한 — 같은 규칙으로 효력 있는 값 (F02 "이 친구가 내 정보에 가진 최종 권한")
@@ -114,6 +122,7 @@ export function givenRows(s: Snapshot, toId: string): GrantRow[] {
       const row = set && toGrantRow(s, p, set, toId);
       return row ? [row] : [];
     });
+  rows.push(...wakeOnlyRows(s, s.me, toId, rows));
   return ordered(s, rows);
 }
 
@@ -125,7 +134,7 @@ export function friendShareSet(s: Snapshot, otherId: string): PermissionSet {
   const row = s.perms.find(
     (p) => p.owner_id === s.me && p.grantee_id === otherId && p.source_type === 'FRIEND' && effectiveOf(p, s.friends, s.members) != null,
   );
-  return row ? permissionOf(row) : noPermission();
+  return row ? { ...permissionOf(row), viewWake: false } : noPermission(); // 친구 출처에는 기상 조회가 없음 (그룹 동의 하나로만, 6-가)
 }
 
 // F03 · G01 · G02 — 그룹에 준 값. 권한 행은 멤버마다 있어서(D18 열림) 모두 합쳐 한 벌로 보임
@@ -133,7 +142,7 @@ export function groupShareSet(s: Snapshot, groupId: string): PermissionSet {
   const sets = s.perms
     .filter((p) => p.owner_id === s.me && p.source_type === 'GROUP' && p.source_id === groupId && effectiveOf(p, s.friends, s.members) != null)
     .map(permissionOf);
-  return unionPermissions(sets);
+  return { ...unionPermissions(sets), viewWake: myOptIn(s, groupId) }; // 기상 조회 = 이 그룹 기상 공유 동의 (권한 행과 따로)
 }
 
 // 내 기상 공유 동의 (group_members.wake_share_opt_in)

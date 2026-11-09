@@ -11,6 +11,7 @@ const mockUpload = jest.fn<() => Promise<unknown>>();
 const mockDiscard = jest.fn<() => Promise<number>>();
 const mockUnsubscribeAll = jest.fn<() => void>();
 const mockSignOut = jest.fn<() => Promise<void>>();
+const mockRemoveToken = jest.fn<() => Promise<void>>();
 
 jest.mock('../alarmSync', () => ({
   uploadEvents: () => mockUpload(),
@@ -19,6 +20,7 @@ jest.mock('../alarmSync', () => ({
   setSigningOut: (value: boolean) => mockSigningOut(value),
 }));
 jest.mock('../realtime', () => ({ unsubscribeAll: () => mockUnsubscribeAll() }));
+jest.mock('../push/token', () => ({ removePushToken: () => mockRemoveToken() }));
 jest.mock('../auth', () => ({ signOut: () => mockSignOut() }));
 
 beforeEach(() => {
@@ -33,12 +35,20 @@ beforeEach(() => {
   });
   mockUnsubscribeAll.mockImplementation(() => void mockCalls.push('구독 끊기'));
   mockSignOut.mockImplementation(async () => void mockCalls.push('로그아웃'));
+  mockRemoveToken.mockImplementation(async () => void mockCalls.push('푸시 토큰 삭제'));
 });
 
 describe('로그아웃 정리', () => {
-  it('로그아웃 중 켜기 → 올려 보기 → 알람 전부 취소 → 남은 기록 버림 → 구독 끊기 → 로그아웃 순서 (끝까지 가면 표시는 켜 둠 — 다시 로그인할 때 useAlarmSync가 끔)', async () => {
+  it('로그아웃 중 켜기 → 올려 보기 → 알람 전부 취소 → 남은 기록 버림 → 푸시 토큰 삭제 → 구독 끊기 → 로그아웃 순서 (끝까지 가면 표시는 켜 둠 — 다시 로그인할 때 useAlarmSync가 끔)', async () => {
     await signOutAndCleanup();
-    expect(mockCalls).toEqual(['로그아웃 중 켜기', '올리기', '알람 취소', '남은 기록 버림', '구독 끊기', '로그아웃']);
+    expect(mockCalls).toEqual(['로그아웃 중 켜기', '올리기', '알람 취소', '남은 기록 버림', '푸시 토큰 삭제', '구독 끊기', '로그아웃']);
+  });
+
+  it('푸시 토큰을 못 지워도(오프라인) 로그아웃은 계속 — 다음 로그인이 토큰 주인을 옮김 (11-02 · 11-04)', async () => {
+    mockRemoveToken.mockRejectedValue(new Error('오프라인'));
+    await expect(signOutAndCleanup()).resolves.toBeUndefined();
+    expect(mockSignOut).toHaveBeenCalledTimes(1);
+    expect(mockUnsubscribeAll).toHaveBeenCalledTimes(1);
   });
 
   it('기록을 못 올려도 · 못 버려도 로그아웃은 계속', async () => {

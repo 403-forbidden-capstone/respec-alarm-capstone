@@ -6,12 +6,11 @@
 //         켤 때는 아직 안 지난 알람만 켬 (내 알람 realWrite와 같은 규칙) — 지난 기상 알람을 켜면 서버 배치(wake-check)가 울린 적 없는 알람을 기상 미확인(MISSED)으로 기록하고 주인 폰은 걸지도 않음
 //         ±5분은 시각을 사용자가 직접 정한 것이라 time_source = MANUAL로 같이 씀 — 안 그러면 주인이 그 약속을 다시 저장할 때 alarm-commit이 자동 시각으로 덮음
 //         앞당길 때는 옮긴 시각이 지금 + 5분(서버 PAST_GRACE_MINUTES)보다 이르게 되는 켜진 알람이 있으면 거절 — 주인 폰에서는 지난 시각이라 걸리지 않고(기존 예약이 지워짐) 서버에는 켜진 지난 알람이 남음
-//   바꾼 뒤 주인에게 notify(ALARM_CHANGED). 푸시가 실패해도 저장은 되돌리지 않고 화면은 조용히 "바꿨어요"만 (푸시 토큰 등록은 Q12 — 붙이기 전엔 대부분 안 감)
+//   바꾼 뒤 주인에게 notify(ALARM_CHANGED). 푸시가 실패해도 저장은 되돌리지 않고 화면은 조용히 "바꿨어요"만 (주인 폰에 토큰이 없으면 안 감, lib/push/token)
 //   주인 폰의 예약은 주인 앱이 푸시를 받거나 다시 켜질 때 맞춤(lib/alarmSync reconcile) — 내 폰에서 걸지 않음
 //   변경 기록(getShareLog)은 DB에 저장 자리가 없음(D9 · 스키마 보완 3): 이번에 앱을 연 동안 내가 바꾼 것만 메모리에 둠 (D20 열림 — 가짜 데이터와 같은 뜻)
 import { now } from '@/lib/clock';
 import { dbTimeMs, parseDbTime } from '@/lib/dbTime';
-import { callEdge } from '@/lib/edge';
 import { UserError } from '@/lib/errors';
 import { startOfDay } from '@/lib/format';
 import { supabase } from '@/lib/supabase';
@@ -22,6 +21,7 @@ import { groupSharedCards, shareTags, toMemberAlarm, upcomingCards, type SharedA
 import { personOf, profileOf, receivedFrom, receivedRows, type Snapshot } from '../snapshot';
 import type { ShareLogItem, SharedAlarms, SharedChangeResult } from '../types';
 import { loadSnapshot } from './load';
+import { sendPush } from './push';
 
 const ALARM_COLUMNS = 'alarm_id, alarm_type, scheduled_at, intensity, sound_key, is_enabled, time_source';
 
@@ -82,33 +82,11 @@ async function loadCard(ownerId: string, cardId: string): Promise<SharedCard> {
 const NO_EDIT = '이 알람을 바꿀 권한이 없어요';
 const TOO_SOON = '곧 울릴 알람이라 앞당길 수 없어요';
 const NOTHING_TO_TURN_ON = '켤 수 있는 알람이 없어요. 이미 지난 알람이거나 지워졌을 수 있어요'; // 내 알람(realWrite)과 같은 문구
-const BODY_TITLE_MAX = 40; // notify의 body는 서버가 200자까지 (supabase/functions/_shared/notify.ts) — 약속 제목은 100자까지라 줄여서 넣음
-const NOTIFY_TIMEOUT_MS = 8_000; // 알림은 덤이라 오래 기다리지 않음 (저장은 이미 끝남)
-
-// 알림 본문의 약속 제목 — 길면 줄임표로 (닉네임 30자 + 제목 40자 + 문구라 200자 안)
-const clipTitle = (title: string) => {
-  const chars = Array.from(title);
-  return chars.length > BODY_TITLE_MAX ? `${chars.slice(0, BODY_TITLE_MAX - 1).join('')}…` : title;
-};
-
 // 주인에게 알림 — 실패해도 던지지 않음. 보냈으면 true
-async function notifyOwner(s: Snapshot, ownerId: string, card: SharedCard, what: string): Promise<boolean> {
-  try {
-    const result = await callEdge<{ sent?: number }>(
-      'notify',
-      {
-        kind: 'ALARM_CHANGED',
-        targetUserId: ownerId,
-        alarmId: card.alarms[0].alarm_id,
-        title: '공유한 알람이 바뀌었어요',
-        body: `${profileOf(s, s.me)?.nickname ?? '친구'}님이 '${clipTitle(card.title)}' 알람을 ${what}`,
-      },
-      { timeoutMs: NOTIFY_TIMEOUT_MS },
-    );
-    return (result?.sent ?? 0) > 0;
-  } catch {
-    return false;
-  }
+//   문구는 서버가 정함('○○님이 알람을 바꿨어요'): 시각을 옮긴 경우만 이전 → 새 시각을 같이 보냄 (켜기 · 끄기는 시각이 없음)
+//   알림 data에는 알람 id가 실리지 않음 — 받은 주인 앱은 알람 전체를 서버와 다시 맞춤 (features/push needsAlarmSync)
+async function notifyOwner(ownerId: string, card: SharedCard, change?: { previousAt: Date; newAt: Date }): Promise<boolean> {
+  return sendPush({ kind: 'ALARM_CHANGED', targetUserId: ownerId, alarmId: card.alarms[0].alarm_id, ...change });
 }
 
 export async function setSharedAlarmEnabled(personId: string, cardId: string, enabled: boolean): Promise<SharedChangeResult> {
@@ -124,7 +102,7 @@ export async function setSharedAlarmEnabled(personId: string, cardId: string, en
   if (error) throw error;
   if ((data?.length ?? 0) !== targets.length) throw new UserError(NO_EDIT); // RLS는 권한이 없으면 오류 없이 0행을 바꿈
   remember(s.me, `${personOf(s, personId).short}님 알람 ${enabled ? '켬' : '끔'}`);
-  return { notified: await notifyOwner(s, personId, card, enabled ? '켰어요' : '껐어요') };
+  return { notified: await notifyOwner(personId, card) };
 }
 
 // 공유받은 알람 시각 옮기기 — minutes가 음수면 앞당김. 카드의 알람이 같이 움직임 (기상 · 준비 · 출발 간격 그대로)
@@ -163,5 +141,7 @@ export async function shiftSharedAlarm(personId: string, cardId: string, minutes
     throw e;
   }
   remember(s.me, `${personOf(s, personId).short}님 알람 ${Math.abs(minutes)}분 ${minutes < 0 ? '앞당김' : '늦춤'}`);
-  return { notified: await notifyOwner(s, personId, card, `${Math.abs(minutes)}분 ${minutes < 0 ? '앞당겼어요' : '늦췄어요'}`) };
+  const first = card.alarms.reduce((a, b) => (dbTimeMs(b.scheduled_at) < dbTimeMs(a.scheduled_at) ? b : a)); // 카드에서 가장 이른 알람(보통 기상)
+  const previousAt = parseDbTime(first.scheduled_at);
+  return { notified: await notifyOwner(personId, card, { previousAt, newAt: new Date(previousAt.getTime() + minutes * 60_000) }) };
 }
