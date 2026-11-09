@@ -608,3 +608,57 @@ test('일기: 모델을 부르는 사이 사용자가 일기를 고치면 UPDATE
   assert.equal(fake.order.filter((p) => p === 'T5').length, 1);
   assert.deepEqual(journalOf(db).map((x) => [x.ai_summary, x.edited_summary, x.is_edited, x.source_session_id]), [['예전 AI 일기', '내가 고친 일기', true, null]]);
 });
+
+// ───────── 위험 판정(safety_flag) 대화는 일기 입력에서 통째로 뺌 ─────────
+
+// 위험 판정 대화 — final-core가 사건 글은 비우지만 습관 · 목표 · 행동은 JSON에 남음. 표시 글자로 T5 입력에 새는지 봄
+const unsafeExtract = () => dayExtract({
+  safety_flag: true,
+  behavior: [beh('WAKE', { time: '05:55' })],
+  habit_signals: [{ habit: 'late_bedtime', note: '위험메모-습관', date: REVIEW, recurring: false, source: 'stated' }],
+  goals_routine: { goals: [{ habit: 'other', goal_text: '위험메모-목표', source: 'stated' }], wanted_routine: '위험메모-루틴' },
+});
+const UNSAFE_MARKS = ['위험메모-습관', '위험메모-목표', '위험메모-루틴', '05:55'];
+
+test('위험 판정: 그 대화 하나뿐이면 T5를 부르지 않고 일기도 없음 (대화 · JSON 저장은 그대로)', async () => {
+  const db = seed();
+  const { fake, deps, sid } = await chat(db, [['위험한 말 예시']], [unsafeExtract()]);
+  const r = await commit(deps, sid);
+  assert.deepEqual([r.status, r.saved.daily_journals, r.failed], ['DONE', 0, []]);
+  assert.equal(fake.order.includes('T5'), false);
+  assert.equal(journalOf(db).length, 0);
+  const x = rowOf(db, sid).extracted_data as Structured;
+  assert.deepEqual([x.other.safety_flag, x.habit_signals.length, x.goals_routine.goals.length, structuredProblems(x)], [true, 1, 1, []]); // JSON은 안 바꿈
+  // 메모가 어디에 있든(행동 메모 포함) 그 세션은 일기 입력이 안 됨
+  assert.equal(journalFacts([{ ...x, behavior: x.behavior.map((b) => ({ ...b, note: '위험메모-행동' })) }], REVIEW), null);
+});
+
+test('위험 판정: 앞 정상 대화의 AI 일기 · 고친 일기는 위험 판정 대화 뒤에도 그대로 (T5 안 부름)', async () => {
+  const db = seed();
+  const first = await chat(db, [[DAY_TALK]], [dayExtract()]);
+  await commit(first.deps, first.sid);
+  const before = structuredClone(journalOf(db));
+  const second = await chat(db, [['위험한 말 예시']], [unsafeExtract()]);
+  assert.equal((await commit(second.deps, second.sid)).saved.daily_journals, 0);
+  assert.equal(second.fake.order.includes('T5'), false);
+  assert.deepEqual(journalOf(db), before);
+
+  const db2 = seed();
+  db2.rows('daily_journals').push({ journal_id: 'j-old', user_id: ME, record_date: REVIEW, source_session_id: null, ai_summary: '예전 AI 일기', edited_summary: '내가 고친 일기', is_edited: true });
+  const c = await chat(db2, [['위험한 말 예시']], [unsafeExtract()]);
+  await commit(c.deps, c.sid);
+  assert.deepEqual(journalOf(db2).map((j) => [j.ai_summary, j.edited_summary, j.is_edited, j.source_session_id]), [['예전 AI 일기', '내가 고친 일기', true, null]]);
+});
+
+test('위험 판정: 뒤에 정상 대화가 오면 정상 대화 내용만 T5에 (위험 대화의 습관 · 목표 · 행동은 안 들어감)', async () => {
+  const db = seed();
+  const unsafe = await chat(db, [['위험한 말 예시']], [unsafeExtract()]);
+  await commit(unsafe.deps, unsafe.sid);
+  const ok = await chat(db, [[DAY_TALK]], [dayExtract()]);
+  const r = await commit(ok.deps, ok.sid);
+  assert.deepEqual([r.status, r.saved.daily_journals], ['DONE', 1]);
+  const screen = ok.fake.seen.T5[0];
+  assert.ok(screen.includes('팀플 발표를 끝냄') && screen.includes('08:10'));
+  for (const s of UNSAFE_MARKS) assert.ok(!screen.includes(s), `빠져야 함: ${s}`);
+  assert.deepEqual(journalOf(db).map((j) => [j.ai_summary, j.source_session_id]), [[DIARY.diary, ok.sid]]);
+});

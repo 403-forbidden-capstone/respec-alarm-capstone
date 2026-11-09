@@ -138,7 +138,8 @@ async function saveRecords(db: Db, userId: string, plan: FinalPlan, review: stri
  */
 export function journalFacts(list: Structured[], date: string): Record<string, unknown> | null {
   const told = (x: { source: string }): boolean => x.source !== 'inferred';
-  const day = list.filter((s) => s.session.reference_date === date);
+  // 위험 판정(other.safety_flag) 대화는 어떤 칸도 일기 입력에 넣지 않음
+  const day = list.filter((s) => s.session.reference_date === date && !s.other.safety_flag);
   const events = day.flatMap((s) => s.day_review.events.filter(told).map(({ text, time }) => ({ text, time })));
   // memorable은 출처 칸이 없음 — 같은 대화의 말한 · 확인한 사건 글과 같을 때만 (짐작한 사건이 memorable로 들어오는 것을 막음)
   const flat = (t: string): string => t.replace(/\s+/g, '');
@@ -348,7 +349,8 @@ export async function handleVoiceCommit(deps: CommitDeps, body: unknown): Promis
     structuredSaved = true;
   });
   // 일기는 공개 JSON이 저장된 뒤에만 — 저장 못 했으면 이번엔 만들지 않음(PARTIAL이라 다시 시도 때 만듦)
-  if (structuredSaved) await step('daily_journals', async () => void (saved.daily_journals = await saveJournal(deps, sessionId, st.day.review, nowIso)));
+  // 이번 대화가 위험 판정이면 일기 단계를 건너뜀 — 그 대화로 기존 일기를 다시 쓰지 않음
+  if (structuredSaved && !plan.draft.other.safety_flag) await step('daily_journals', async () => void (saved.daily_journals = await saveJournal(deps, sessionId, st.day.review, nowIso)));
 
   // 5) 끝
   const out: VoiceCommitOut = { session_id: sessionId, status: failed.length === 0 ? 'DONE' : 'PARTIAL', saved, pending: plan.draft.pending.map((p) => p.text), failed };
