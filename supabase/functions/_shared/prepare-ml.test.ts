@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { buildMlRequest, calendarFeatures, previousDateKey, requestMlPrediction, validMlEndpoint } from './prepare-ml.ts';
+import { buildMlRequest, calendarFeatures, mayUseMl, previousDateKey, requestMlPrediction, validMlEndpoint } from './prepare-ml.ts';
 
 const profile = { ml_codes_verified: true, ml_age_code: '2', ml_education_code: '1', ml_economic_code: '3' };
 const at = new Date('2026-11-09T01:00:00Z');
@@ -44,4 +44,17 @@ test('rejects remote plain HTTP; disabled flag prevents fetch', async () => {
   assert.deepEqual(await requestMlPrediction(request, cfg, fakeFetch), { model: 'c1_mae', minutes: 71 });
   assert.equal(await requestMlPrediction(request, cfg, async () => { throw Error('offline'); }), null);
   assert.equal(await requestMlPrediction(request, cfg, async () => ({ ok: true, json: async () => ({ model: 'c1_mae', minutes: 999, prediction_type: 'point' }) })), null);
+});
+
+test('real ML is denied unless both flag and server-side UUID allowlist permit the user', () => {
+  const userId = 'f60d371e-63a5-4fb9-9d92-0743392325ec';
+  const allowed = '11111111-1111-4111-8111-111111111111, ' + userId.toUpperCase();
+  const base = { enabled: true, allowForPlan: true, userId };
+  assert.equal(mayUseMl({ ...base, allowedUserIds: allowed }), true);
+  assert.equal(mayUseMl({ ...base, enabled: false, allowedUserIds: allowed }), false);
+  assert.equal(mayUseMl({ ...base, allowForPlan: false, allowedUserIds: allowed }), false);
+  assert.equal(mayUseMl({ ...base, allowedUserIds: undefined }), false);
+  assert.equal(mayUseMl({ ...base, allowedUserIds: '' }), false);
+  assert.equal(mayUseMl({ ...base, allowedUserIds: 'not-a-uuid' }), false);
+  assert.equal(mayUseMl({ ...base, userId: '11111111-1111-4111-8111-111111111111', allowedUserIds: userId }), false);
 });
