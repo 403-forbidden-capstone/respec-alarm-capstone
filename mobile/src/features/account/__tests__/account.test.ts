@@ -59,6 +59,13 @@ describe('요약 읽기', () => {
     mockRpc.mockResolvedValue({ data: null, error: new Error('rpc') });
     await expect(getDeleteSummary()).rejects.toThrow('rpc');
   });
+
+  it('줄이 없거나 비어 있으면 0으로 읽지 않고 던짐 (영향을 모른 채 삭제로 가지 않게)', async () => {
+    for (const data of [null, [], undefined]) {
+      mockRpc.mockResolvedValue({ data, error: null });
+      await expect(getDeleteSummary()).rejects.toThrow('요약 줄이 없어요');
+    }
+  });
 });
 
 describe('삭제 호출', () => {

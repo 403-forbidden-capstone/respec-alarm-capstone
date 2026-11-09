@@ -15,11 +15,13 @@ export async function getDeleteSummary(): Promise<DeleteSummary> {
   const { data, error } = await rpc('my_account_delete_summary');
   if (error) throw error;
   const row = (Array.isArray(data) ? data[0] : data) as SummaryRow | null | undefined;
+  // 서버는 항상 한 줄을 줌 — 줄이 없으면 영향이 0으로 읽혀 '되돌릴 수 없어요' 한 줄만 보이므로 실패로 처리 (확인할 내용을 못 불러왔다고 안내)
+  if (!row || typeof row !== 'object') throw new Error('my_account_delete_summary: 요약 줄이 없어요');
   return {
-    groupsLeaving: row?.groups_leaving ?? 0,
-    groupsDisappearing: row?.groups_disappearing ?? 0,
-    groupAppointmentsStaying: row?.group_appointments_staying ?? 0,
-    friends: row?.friends ?? 0,
+    groupsLeaving: row.groups_leaving ?? 0,
+    groupsDisappearing: row.groups_disappearing ?? 0,
+    groupAppointmentsStaying: row.group_appointments_staying ?? 0,
+    friends: row.friends ?? 0,
   };
 }
 
