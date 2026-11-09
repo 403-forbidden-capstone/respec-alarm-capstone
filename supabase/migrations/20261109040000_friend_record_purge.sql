@@ -4,7 +4,8 @@
 --     · 제한 · 코드 실패 기록 (rate_limit_events — 검색 · 친구 요청 · 그룹 코드 실패)
 --     · 깨우기 발송 기록 (push_sends)
 --     · 푸시 영수증 (push_tickets — 영수증 배치가 15분 뒤 확인하고 24시간 뒤엔 포기하지만, 남은 줄이 없도록 마지막 안전망)
---     · 끝난 알람 제안 (alarm_proposals — 적용 · 무시 · 대체 · 만료된 지 7일, 또는 대기 중인데 알람 시각이 7일 넘게 지난 것. 13장 표에는 없던 표라 같은 7일로 맞춤: 11/9 헤드 결정 '보관 기간은 개인정보 PR에서')
+--     · 끝난 알람 제안 (alarm_proposals — 적용 · 무시 · 대체 · 만료된 지 7일이면서 알람 시각도 7일 넘게 지난 것, 또는 대기 중인데 알람 시각이 7일 넘게 지난 것.
+--       알람이 아직 안 지난 적용 · 무시 줄은 보낸 친구의 '반영됨' · '제안함'(무시도 같은 라벨) 한 줄의 근거라 남김. 13장 표에는 없던 표라 같은 7일로 맞춤: 11/9 헤드 결정 '보관 기간은 개인정보 PR에서')
 --   기상 기록(daily_records · alarm_events)은 계정이 있는 동안 남김
 -- =====================================================================
 
@@ -33,7 +34,8 @@ begin
 
   with d as (
     delete from public.alarm_proposals
-    where (status <> 'PENDING' and coalesce(responded_at, created_at) < now() - interval '7 days')
+    where (status <> 'PENDING' and coalesce(responded_at, created_at) < now() - interval '7 days'
+           and greatest(from_at, to_at) < now() - interval '7 days')
        or (status = 'PENDING' and from_at < now() - interval '7 days')
     returning 1)
   select count(*)::integer into v_proposals from d;

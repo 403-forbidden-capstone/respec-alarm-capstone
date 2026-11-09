@@ -67,6 +67,7 @@ export default async function ch13({ q, as, su, svc, check, expectErr }) {
     const A = await join_(1, '주인'), B = await join_(2, '친구'), D = await join_(3, '남');
     await befriend(A, B);
     const g = await mkGroup(A, [B]);
+    await viewGrant(A, B);                                                                // 내가 친구에게 준 권한 행이 있어도 남에게는 안 보임
     const profile = await readAs(B, `select user_id from public.profiles where user_id = $1`, [A]);
     const own = await readAs(B, `select user_id from public.profiles where user_id = $1`, [B]);
     const friendsSeenByStranger = await readAs(D, `select 1 from public.friends where requester_id = $1 or addressee_id = $1`, [A]);
@@ -114,6 +115,8 @@ export default async function ch13({ q, as, su, svc, check, expectErr }) {
     const g = await mkGroup(A, [B]);                                            // B는 같은 그룹이라 기상은 볼 수 있어도 알람은 못 읽음
     await q(`update public.group_members set wake_share_opt_in = true where group_id = $1 and user_id = $2`, [g, A]);
     const { appointment, alarm } = await personalAlarm(A);
+    await q(`insert into public.alarm_events (alarm_id, user_id, event_type, event_at) values ($1, $2, 'SNOOZED', now()), ($1, $2, 'DISMISSED', now())`, [alarm, A]);   // 미루기 · 해제 기록
+    await q(`update public.appointment_participants set departed_at = now() - interval '1 hour', arrived_at = now() where appointment_id = $1 and user_id = $2`, [appointment, A]);   // 위치로 잡은 실제 출발 · 도착
     await q(`insert into public.daily_records (user_id, record_date, sleep_at, sleep_satisfaction) values ($1, current_date - 1, now() - interval '1 day', 3)`, [A]);
     await viewGrant(A, C);
     const wakeOnly = {
@@ -121,19 +124,21 @@ export default async function ch13({ q, as, su, svc, check, expectErr }) {
       appointments: (await readAs(B, `select 1 from public.appointments where appointment_id = $1`, [appointment])).length,
       participants: (await readAs(B, `select 1 from public.appointment_participants where user_id = $1`, [A])).length,
       daily: (await readAs(B, `select 1 from public.daily_records where user_id = $1`, [A])).length,
+      events: (await readAs(B, `select 1 from public.alarm_events where user_id = $1`, [A])).length,
       shared: (await readAs(B, `select 1 from public.get_shared_alarm_appointments($1)`, [A])).length,
-      canSeeWake: (await call(A, 'private.can_see_wake($1, $2, $3)', [B, A, g]).catch(() => null)),
     };
     const alarmView = {
       alarms: (await readAs(C, `select alarm_id from public.alarms where user_id = $1`, [A])).map((x) => x.alarm_id),
       appointments: (await readAs(C, `select 1 from public.appointments where appointment_id = $1`, [appointment])).length,   // 개인 약속은 직접 select 0행(RLS)
       participants: (await readAs(C, `select 1 from public.appointment_participants where user_id = $1`, [A])).length,       // 출발지 등 참여 조건
       daily: (await readAs(C, `select 1 from public.daily_records where user_id = $1`, [A])).length,
+      events: (await readAs(C, `select 1 from public.alarm_events where user_id = $1`, [A])).length,          // 미루기 · 해제 기록 (13-자)
+      located: (await readAs(C, `select departed_at, arrived_at from public.appointment_participants where user_id = $1`, [A])).length,   // 위치로 잡은 실제 출발 · 도착 (13-나 · 13-21 DB 절반)
       shared: await readAs(C, `select * from public.get_shared_alarm_appointments($1)`, [A]),
     };
     const sharedKeys = alarmView.shared[0] ? Object.keys(alarmView.shared[0]).sort() : [];
-    return wakeOnly.alarms === 0 && wakeOnly.appointments === 0 && wakeOnly.participants === 0 && wakeOnly.daily === 0 && wakeOnly.shared === 0
-      && alarmView.alarms.length === 1 && alarmView.alarms[0] === alarm && alarmView.appointments === 0 && alarmView.participants === 0 && alarmView.daily === 0
+    return wakeOnly.alarms === 0 && wakeOnly.appointments === 0 && wakeOnly.participants === 0 && wakeOnly.daily === 0 && wakeOnly.events === 0 && wakeOnly.shared === 0
+      && alarmView.alarms.length === 1 && alarmView.alarms[0] === alarm && alarmView.appointments === 0 && alarmView.participants === 0 && alarmView.daily === 0 && alarmView.events === 0 && alarmView.located === 0
       && alarmView.shared.length === 1 && alarmView.shared[0].title === '비밀 약속' && alarmView.shared[0].dest_name === '학교'
       && JSON.stringify(sharedKeys) === JSON.stringify(['alarm_id', 'appointment_at', 'appointment_id', 'dest_name', 'title', 'user_id'])
       ? true : { wakeOnly, alarmView, sharedKeys };
@@ -223,10 +228,12 @@ export default async function ch13({ q, as, su, svc, check, expectErr }) {
       await q(`insert into public.rate_limit_events (user_id, action, created_at) values ($1, $2, ${old}), ($1, $2, ${fresh})`, [A, action]);
     }
     await q(`insert into public.push_sends (kind, sender_id, target_id, sent_at) values ('WAKE_PING', $1, $2, ${old}), ('WAKE_PING', $1, $2, ${fresh})`, [A, B]);
+    await q(`insert into public.push_sends (kind, target_id, subject_id, day, sent_at) values ('NUDGE', $2, $1, current_date - 20, ${old}), ('NUDGE', $2, $1, current_date - 1, ${fresh}), ('UP', $2, $1, current_date - 20, ${old}), ('UP', $2, $1, current_date - 1, ${fresh})`, [A, B]);   // 미확인 알림 · 후속 중복 방지 줄
     await q(`insert into public.push_tickets (ticket_id, user_id, token, kind, created_at) values ('old-ticket', $1, 'ExponentPushToken[aaaaaaaaaaaaaaaaaaaaaa]', 'WAKE_PING', ${old}), ('fresh-ticket', $1, 'ExponentPushToken[aaaaaaaaaaaaaaaaaaaaaa]', 'WAKE_PING', ${fresh})`, [A]);
     await q(`insert into public.daily_records (user_id, record_date, wake_confirmed_at) values ($1, current_date - 40, now() - interval '40 days')`, [A]);
     // 알람 제안: 7일 지난 끝난 것(적용) · 7일 지난 대기(알람 시각이 한참 지남) → 삭제, 6일 된 끝난 것(무시) · 오래됐지만 알람이 아직 안 지난 대기 → 유지
     const oldApplied = await personalAlarm(A), oldPending = await personalAlarm(A), freshDismissed = await personalAlarm(A), livePending = await personalAlarm(A);
+    const farApplied = await personalAlarm(A), farRecent = await personalAlarm(A);     // 알람이 아직 먼 미래인 끝난 제안: 응답 8일 전 적용 → 남음(보낸 친구의 '반영됨' 근거), 만든 지 9일 됐지만 응답이 1시간 전 → 남음
     const proposal = (alarmId, status, createdAgo, respondedAgo, fromAgoDays) => q(
       `insert into public.alarm_proposals (alarm_id, owner_id, proposer_id, from_at, to_at, status, created_at, responded_at)
        values ($1, $2, $3, now() - interval '${fromAgoDays} days', now() - interval '${fromAgoDays} days' - interval '10 minutes', $4, now() - interval '${createdAgo}', ${respondedAgo ? `now() - interval '${respondedAgo}'` : 'null'})`,
@@ -235,9 +242,11 @@ export default async function ch13({ q, as, su, svc, check, expectErr }) {
     await proposal(oldPending.alarm, 'PENDING', '9 days', null, 8);
     await proposal(freshDismissed.alarm, 'DISMISSED', '6 days', '6 days', 6);
     await q(`insert into public.alarm_proposals (alarm_id, owner_id, proposer_id, from_at, to_at, status, created_at) values ($1, $2, $3, now() + interval '5 hours', now() + interval '4 hours', 'PENDING', now() - interval '9 days')`, [livePending.alarm, A, B]);
+    await q(`insert into public.alarm_proposals (alarm_id, owner_id, proposer_id, from_at, to_at, status, created_at, responded_at) values ($1, $2, $3, now() + interval '30 days', now() + interval '30 days' - interval '10 minutes', 'APPLIED', now() - interval '8 days', now() - interval '8 days')`, [farApplied.alarm, A, B]);
+    await q(`insert into public.alarm_proposals (alarm_id, owner_id, proposer_id, from_at, to_at, status, created_at, responded_at) values ($1, $2, $3, now() - interval '9 days', now() - interval '9 days' - interval '10 minutes', 'DISMISSED', now() - interval '9 days', now() - interval '1 hour')`, [farRecent.alarm, A, B]);
     const before = {
       limits: await count(`select 1 from public.rate_limit_events where user_id = $1`, [A]),
-      sends: await count(`select 1 from public.push_sends where sender_id = $1`, [A]),
+      sends: await count(`select 1 from public.push_sends where sender_id = $1 or subject_id = $1`, [A]),
       tickets: await count(`select 1 from public.push_tickets where user_id = $1`, [A]),
       proposals: await count(`select 1 from public.alarm_proposals where owner_id = $1`, [A]),
     };
@@ -246,21 +255,21 @@ export default async function ch13({ q, as, su, svc, check, expectErr }) {
     const after = {
       limits: await count(`select 1 from public.rate_limit_events where user_id = $1`, [A]),
       freshLimits: await count(`select 1 from public.rate_limit_events where user_id = $1 and created_at > now() - interval '7 days'`, [A]),
-      sends: await count(`select 1 from public.push_sends where sender_id = $1`, [A]),
+      sends: await count(`select 1 from public.push_sends where sender_id = $1 or subject_id = $1`, [A]),
       tickets: (await q(`select ticket_id from public.push_tickets where user_id = $1`, [A])).map((x) => x.ticket_id),
       daily: await count(`select 1 from public.daily_records where user_id = $1`, [A]),
       proposals: (await q(`select alarm_id from public.alarm_proposals where owner_id = $1 order by alarm_id`, [A])).map((x) => x.alarm_id).sort(),
     };
-    const keptProposals = [freshDismissed.alarm, livePending.alarm].sort();
+    const keptProposals = [freshDismissed.alarm, livePending.alarm, farApplied.alarm, farRecent.alarm].sort();
     await as(A);
     const app = await expectErr(() => q(`select * from private.purge_old_friend_records()`), /permission denied/);
     await su(); await svc();
     const server = await expectErr(() => q(`select * from private.purge_old_friend_records()`), /permission denied/);
     await su();
-    return before.limits === 6 && before.sends === 2 && before.tickets === 2 && before.proposals === 4
-      && r1.rate_limit_deleted >= 3 && r1.push_sends_deleted >= 1 && r1.push_tickets_deleted >= 1 && r1.alarm_proposals_deleted >= 2
+    return before.limits === 6 && before.sends === 6 && before.tickets === 2 && before.proposals === 6
+      && r1.rate_limit_deleted >= 3 && r1.push_sends_deleted >= 3 && r1.push_tickets_deleted >= 1 && r1.alarm_proposals_deleted >= 2
       && r2.rate_limit_deleted === 0 && r2.push_sends_deleted === 0 && r2.push_tickets_deleted === 0 && r2.alarm_proposals_deleted === 0
-      && after.limits === 3 && after.freshLimits === 3 && after.sends === 1 && after.tickets.length === 1 && after.tickets[0] === 'fresh-ticket' && after.daily === 1
+      && after.limits === 3 && after.freshLimits === 3 && after.sends === 3 && after.tickets.length === 1 && after.tickets[0] === 'fresh-ticket' && after.daily === 1
       && JSON.stringify(after.proposals) === JSON.stringify(keptProposals)
       && app === true && server === true ? true : { before, r1, r2, after, keptProposals, app, server };
   });
