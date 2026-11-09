@@ -13,6 +13,22 @@ export type MlRequest = { model: MlModel; features: Record<string, string | numb
 export type MlConfig = { enabled: boolean; url?: string; token?: string; timeoutMs?: number };
 export type MlFetch = (url: string, init: RequestInit) => Promise<Pick<Response, 'ok' | 'json'>>;
 
+// Production inference is restricted to explicitly approved test user UUIDs.
+// Empty or malformed allowlists fail closed, even when PREPARE_ML_ENABLED=1.
+const UUID_PATTERN = /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i;
+export function mayUseMl(args: {
+  enabled: boolean;
+  allowForPlan: boolean;
+  userId: string;
+  allowedUserIds?: string | null;
+}): boolean {
+  if (!args.enabled || !args.allowForPlan || !UUID_PATTERN.test(args.userId)) return false;
+  return (args.allowedUserIds ?? '').split(',')
+    .map((s) => s.trim())
+    .filter((s) => UUID_PATTERN.test(s))
+    .some((s) => s.toLowerCase() === args.userId.toLowerCase());
+}
+
 const MISSING = '__MISSING__';
 const validCode = (value: string | null | undefined): value is string =>
   typeof value === 'string' && /^[0-9]{1,3}$/.test(value);
