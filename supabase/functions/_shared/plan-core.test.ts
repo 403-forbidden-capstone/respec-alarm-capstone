@@ -582,3 +582,46 @@ test('9-05: 같은 약속(11:00)에 사람마다 이동 · 기상~출발이 다�
   assert.deepEqual(mine(30, 20), a); // 같은 입력은 같은 결과 — B를 계산해도 A는 안 변함
   assert.deepEqual(mine(60, 20), ['WAKE 09:40', 'DEPARTURE 10:00']); // 이동만 늘면 출발이 그만큼 일러지고 기상도 같이 감
 });
+
+test('C1/W4 preview and save calculate exactly the same timestamps before database writes', () => {
+  for (const model of ['c1_mae', 'w4_mae'] as const) {
+    const inputs = base({
+      mlPrediction: { model, minutes: model === 'c1_mae' ? 66 : 58 },
+      draft: {
+        at: kst(22, 600),
+        destination: { name: '세종대학교' },
+        travelMinutes: 30,
+        travelSource: 'MANUAL',
+        bufferMinutes: 10,
+        beforePrepareMinutes: 20,
+        withWake: true,
+      },
+    });
+    const preview = toSuggestion(computePlan(inputs, api(30), 'preview'), inputs);
+    const save = toSuggestion(computePlan(inputs, api(30), 'save'), inputs);
+    assert.equal(preview.prepare.source, 'MODEL');
+    assert.equal(preview.prepare.model, model);
+    assert.equal(preview.prepare.minutes, model === 'c1_mae' ? 66 : 58);
+    assert.deepEqual(
+      [preview.wake_at, preview.prepare_at, preview.departure_at, preview.arrive_at],
+      [save.wake_at, save.prepare_at, save.departure_at, save.arrive_at],
+    );
+    assert.equal(preview.check.ok, save.check.ok);
+  }
+});
+
+test('missing prediction falls back to existing personal P80 while keeping manual override first', () => {
+  const args = base();
+  const fallback = computePlan({ ...args, mlPrediction: undefined }, api(50), 'preview');
+  assert.equal(fallback.prepare.source, 'PERSONAL');
+  assert.equal(fallback.prepare.minutes, 60);
+  assert.equal(toSuggestion(fallback).prepare.model, undefined);
+  const manual = computePlan({
+    ...args,
+    mlPrediction: { model: 'w4_mae', minutes: 58 },
+    draft: { ...args.draft, prepareMinutes: 75 },
+  }, api(50), 'preview');
+  assert.equal(manual.prepare.source, 'MANUAL');
+  assert.equal(manual.prepare.minutes, 75);
+  assert.equal(manual.prepare.mlModel, undefined);
+});
