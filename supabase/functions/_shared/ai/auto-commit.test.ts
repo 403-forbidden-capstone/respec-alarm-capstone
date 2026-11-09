@@ -5,7 +5,7 @@ import { test } from 'node:test';
 
 import { FakeDb } from '../fake-db.ts';
 import type { Db } from '../supabase.ts';
-import { dueAt, IDLE_MS, MAX_COMMITS_PER_RUN, runAutoCommit, type AutoCommitDeps } from './auto-commit.ts';
+import { dueAt, IDLE_MS, MAX_COMMITS_PER_RUN, runAutoCommit, startAutoCommit, type AutoCommitDeps } from './auto-commit.ts';
 import { fakeClaude, upstreamError, type FakeScript } from './fake-claude.ts';
 import { LIVE_SESSION_MS } from './live-token.ts';
 import type { ServerState } from './session.ts';
@@ -223,4 +223,59 @@ test('한 번에 처리하는 수 · 시간 제한: 3개까지, 60초 넘으면 
   assert.deepEqual([slow.done.length, slow.left], [0, 2]);
   const rest = await run(db, at, { T2: [emptyExtract(), emptyExtract()] }).out;
   assert.deepEqual([rest.done.length, rest.left, rest.pending], [2, 0, 2]);
+});
+
+// ───────── 응답 먼저 · 정리는 뒤에서 (pg_net 10초 대기) ─────────
+
+/** startAutoCommit을 그 시각에 — waitUntil이 받은 작업과 로그를 돌려줌 */
+function start(db: FakeDb, at: Date, script: FakeScript = {}, over: Partial<AutoCommitDeps> = {}) {
+  db.now = at;
+  const fake = fakeClaude(script);
+  const jobs: Promise<unknown>[] = [];
+  const logs: { level: 'log' | 'error'; text: string }[] = [];
+  const log = { log: (...a: unknown[]) => logs.push({ level: 'log', text: a.join(' ') }), error: (...a: unknown[]) => logs.push({ level: 'error', text: a.join(' ') }) };
+  const res = startAutoCommit({ service: db as unknown as Db, llm: fake.client, model: 'm', now: () => at, sleep: async () => {}, ...over }, (p) => jobs.push(p), log);
+  return { fake, res, jobs, logs };
+}
+
+test('응답 먼저: 정리를 기다리지 않고 바로 답함 · 정리는 waitUntil 작업에서 끝남 · 시작 · 완료 로그(같은 run_id)', async () => {
+  const db = seed();
+  const sid = await chat(db, ['오늘 발표 잘 끝냈어'], kst('2026-10-29T22:30:00'));
+  const s = start(db, kst('2026-10-30T04:00:00'), { T2: [told('발표를 잘 끝냄')], T5: [DIARY] });
+
+  assert.equal(s.res.accepted, true);
+  assert.equal(s.jobs.length, 1);
+  assert.equal(stateOf(db, sid).commit, undefined); // 답한 때는 아직 정리 전
+  assert.deepEqual(s.fake.order, []);
+  assert.deepEqual(s.logs.map((l) => l.text), [`[auto-commit] 시작 run=${s.res.run_id}`]);
+
+  await s.jobs[0];
+  assert.equal(stateOf(db, sid).commit?.status, 'DONE');
+  assert.deepEqual(s.fake.order, ['T2', 'T5']);
+  assert.equal(s.logs[1].level, 'log');
+  assert.ok(s.logs[1].text.startsWith(`[auto-commit] 완료 run=${s.res.run_id}`));
+  assert.ok(s.logs[1].text.includes(`"status":"DONE"`));
+});
+
+test('뒤 작업 오류: 정리 실패(T2)는 error 로그 · 세션은 FAILED로 남아 다음 실행이 다시 시도 · 작업은 거절 없이 끝남', async () => {
+  const db = seed();
+  const sid = await chat(db, ['오늘 피곤했어'], kst('2026-10-29T23:00:00'));
+  const s = start(db, kst('2026-10-30T04:00:00'), { T2: [upstreamError(), upstreamError()] });
+  await s.jobs[0]; // 거절되면 여기서 던짐
+  assert.equal(s.logs[1].level, 'error');
+  assert.ok(s.logs[1].text.startsWith(`[auto-commit] 완료 run=${s.res.run_id}`));
+  assert.ok(s.logs[1].text.includes('LLM_UNAVAILABLE'));
+  assert.equal(stateOf(db, sid).commit?.status, 'FAILED');
+  assert.deepEqual((await run(db, kst('2026-10-30T04:30:00'), { T2: [emptyExtract()] }).out).done, [{ session_id: sid, status: 'DONE' }]);
+});
+
+test('뒤 작업 오류: 배치 자체가 터지면(DB 읽기 실패) 실패 로그 · 작업은 거절 없이 끝남', async () => {
+  const broken = { from: () => { throw new Error('db down'); } } as unknown as Db;
+  const s = start(seed(), kst('2026-10-30T04:00:00'), {}, { service: broken });
+  assert.equal(s.res.accepted, true);
+  await s.jobs[0];
+  assert.deepEqual(s.logs.map((l) => [l.level, l.text]), [
+    ['log', `[auto-commit] 시작 run=${s.res.run_id}`],
+    ['error', `[auto-commit] 실패 run=${s.res.run_id} Error: db down`],
+  ]);
 });
