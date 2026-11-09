@@ -894,22 +894,25 @@ test('9-20: 만든 사람이 지우면 참여자의 참여 · 알람이 사라�
 
   const past = await groupCase();
   const spyPast = pushSpy();
-  const pastRes = await deleteAppointment(ctxFor(past.env, A, { now: kst('2026-10-29T10:00'), push: spyPast.push }), del(past.id));
+  const pastRes = await deleteAppointment(ctxFor(past.env, A, { now: kst('2026-10-30T10:00'), push: spyPast.push }), del(past.id));
   assert.deepEqual([pastRes.deleted, pastRes.notified, spyPast.sent.length], [true, undefined, 0]);
 });
 
-test('9-32: 지난 공동 약속은 고칠 수 없고(PAST_APPOINTMENT), 지난 시각으로 옮길 수도 없고, 지난 공동 약속에 새로 참여할 수도 없음 — 앞으로 약속은 됨', async () => {
+test('9-32: 지난 날의 공동 약속은 고칠 수 없고(PAST_APPOINTMENT), 지난 날로 옮길 수도 없고, 새로 참여할 수도 없음 — 앞으로 약속, 오늘 이미 지난 약속은 오늘 안에는 됨 (하루 경계: 내 폰 시간대 오늘 0시)', async () => {
   const { env, id } = await groupCase();
-  const late = kst('2026-10-29T09:30');
+  const late = kst('2026-10-30T09:30'); // 약속 다음 날
+  const sameDay = kst('2026-10-29T09:30'); // 약속과 같은 날, 시각은 이미 지남
   await expectHttp(() => updateAppointment(ctxFor(env, A, { now: late, kakao: fakeKakao().lookup }), upd(id, { title: '지난 약속 고치기' }, 'this', true)), 'UNPROCESSABLE', 'PAST_APPOINTMENT');
-  await expectHttp(() => updateAppointment(ctxFor(env, A, { kakao: fakeKakao().lookup }), upd(id, { at: kst('2026-10-26T09:00') }, 'this', true)), 'UNPROCESSABLE', 'PAST_APPOINTMENT');
+  await updateAppointment(ctxFor(env, A, { now: sameDay, kakao: fakeKakao().lookup }), upd(id, { title: '오늘 이미 지난 약속 고치기' }, 'this', true)); // 오류 없이 고쳐짐
+  assert.equal(row(env.db, id)!.title, '오늘 이미 지난 약속 고치기');
+  await expectHttp(() => updateAppointment(ctxFor(env, A, { kakao: fakeKakao().lookup }), upd(id, { at: kst('2026-10-25T23:00') }, 'this', true)), 'UNPROCESSABLE', 'PAST_APPOINTMENT'); // 기준 시각(10/26 월요일)의 어제로 옮기기
 
   const joinEnv = await groupCase([A, B]);
   const c = 'u-late';
   joinEnv.env.db.rows('profiles').push({ user_id: c, timezone: 'Asia/Seoul', default_buffer_minutes: 10, default_transport: 'TRANSIT', home_name: '집', home_lat: HOME.lat, home_lng: HOME.lng });
   joinEnv.env.db.rows('group_members').push({ group_id: GROUP, user_id: c, invite_status: 'JOINED' });
   await assert.rejects(
-    () => seed(joinEnv.env, c, { appointment_id: joinEnv.id, participant: P_A }, kst('2026-10-29T09:30')),
+    () => seed(joinEnv.env, c, { appointment_id: joinEnv.id, participant: P_A }, kst('2026-10-30T09:30')),
     (e: unknown) => e instanceof HttpError && e.code === 'UNPROCESSABLE' && (e.details as { reason?: string }).reason === 'PAST_APPOINTMENT',
   );
   assert.equal(participantOf(joinEnv.env.db, joinEnv.id, c), undefined);

@@ -52,7 +52,7 @@ test('찾은 알람마다 MISSED를 기록하고, DB 함수는 이름 인자(p_n
   const { db, service } = setup([missed(1), missed(2)]);
   const result = await runWakeCheck(service, NOW);
 
-  assert.deepEqual(result, { checked: 2, recorded: 2, pushed: 0, nudged: 0 });
+  assert.deepEqual(result, { checked: 2, recorded: 2, pushed: 0, claimed: 0, nudged: 0 });
   assert.deepEqual(db.rpcCalls[0], { name: 'find_missed_wake_alarms', args: { p_now: NOW.toISOString(), p_lookback_hours: LOOKBACK_HOURS } });
   const events = db.rows('alarm_events');
   assert.deepEqual(events.map((e) => [e.alarm_id, e.user_id, e.event_type, e.event_at, e.client_event_id, e.input_source]), [
@@ -66,18 +66,18 @@ test('겹쳐 돌거나 다시 돌아도 같은 알람의 MISSED는 한 번만 (c
   await runWakeCheck(service, NOW);
 
   const again = await runWakeCheck(service, NOW); // 5분 뒤 같은 후보가 또 나옴
-  assert.deepEqual(again, { checked: 2, recorded: 0, pushed: 0, nudged: 0 });
+  assert.deepEqual(again, { checked: 2, recorded: 0, pushed: 0, claimed: 0, nudged: 0 });
   assert.equal(db.rows('alarm_events').length, 2);
 
   db.rpcHandlers.find_missed_wake_alarms = () => [missed(1), missed(2), missed(3)];
   const third = await runWakeCheck(service, NOW);
-  assert.deepEqual(third, { checked: 3, recorded: 1, pushed: 0, nudged: 0 });
+  assert.deepEqual(third, { checked: 3, recorded: 1, pushed: 0, claimed: 0, nudged: 0 });
   assert.deepEqual(db.rows('alarm_events').map((e) => e.client_event_id), ['key-1', 'key-2', 'key-3']);
 });
 
 test('후보가 없으면 기록 호출 없이 0 — 친구 알림 판정(claim)은 그래도 돎 (옛 미확인의 10분이 이제야 찬 경우)', async () => {
   const { db, service } = setup([]);
-  assert.deepEqual(await runWakeCheck(service, NOW), { checked: 0, recorded: 0, pushed: 0, nudged: 0 });
+  assert.deepEqual(await runWakeCheck(service, NOW), { checked: 0, recorded: 0, pushed: 0, claimed: 0, nudged: 0 });
   assert.ok(!db.calls.some((c) => c.startsWith('upsert')));
   assert.deepEqual(db.rpcCalls.map((c) => c.name), ['find_missed_wake_alarms', 'claim_wake_nudges']);
 });
@@ -121,7 +121,7 @@ test('8-20: 새로 기록된 미확인의 주인 본인에게만 "기상 확인 
   db.rows('push_tokens').push({ user_id: 'user-1', token: T1 }, { user_id: 'user-1', token: T2 }, { user_id: 'user-3', token: T3 });
   const result = await runWakeCheck(service, NOW, { push });
 
-  assert.deepEqual(result, { checked: 2, recorded: 2, pushed: 2, nudged: 0 });
+  assert.deepEqual(result, { checked: 2, recorded: 2, pushed: 2, claimed: 0, nudged: 0 });
   assert.deepEqual(pushes.map((p) => p.to).sort(), [T1, T2]);
   assert.ok(pushes.every((p) => p.title === '기상 확인' && p.body === '기상 확인이 안 됐어요' && p.channelId === 'missed_v1'));
   assert.ok(pushes.every((p) => p.data.kind === 'WAKE_MISSED' && p.data.recipientUserId === 'user-1' && p.data.path === '/wake'));
@@ -143,18 +143,18 @@ test('본인 알림이 실패해도(토큰 조회 오류 · Expo 장애) MISSED 
   const a = setup([missed(1)]);
   a.db.rows('push_tokens').push({ user_id: 'user-1', token: T1 });
   a.db.failOn = [{ table: 'push_tokens', op: 'select' }];
-  assert.deepEqual(await quiet(() => runWakeCheck(a.service, NOW, { push: a.push })), { checked: 1, recorded: 1, pushed: 0, nudged: 0 });
+  assert.deepEqual(await quiet(() => runWakeCheck(a.service, NOW, { push: a.push })), { checked: 1, recorded: 1, pushed: 0, claimed: 0, nudged: 0 });
   assert.equal(a.db.rows('alarm_events').length, 1);
 
   const b = setup([missed(1)]);
   b.db.rows('push_tokens').push({ user_id: 'user-1', token: T1 });
   const down = { fetchImpl: async () => new Response('x', { status: 503 }), sleep: async () => {} };
-  assert.deepEqual(await quiet(() => runWakeCheck(b.service, NOW, { push: down })), { checked: 1, recorded: 1, pushed: 0, nudged: 0 });
+  assert.deepEqual(await quiet(() => runWakeCheck(b.service, NOW, { push: down })), { checked: 1, recorded: 1, pushed: 0, claimed: 0, nudged: 0 });
 });
 
 test('토큰이 없는 본인에게는 푸시 없이 0', async () => {
   const { service, pushes, push } = setup([missed(1)]);
-  assert.deepEqual(await runWakeCheck(service, NOW, { push }), { checked: 1, recorded: 1, pushed: 0, nudged: 0 });
+  assert.deepEqual(await runWakeCheck(service, NOW, { push }), { checked: 1, recorded: 1, pushed: 0, claimed: 0, nudged: 0 });
   assert.deepEqual(pushes, []);
 });
 
@@ -174,13 +174,28 @@ test('8-22: DB가 정한 받는 사람에게 "깨워 볼까요? / ○○님이 �
   const { db, service, pushes, push } = nudgeSetup([nudge('v1'), nudge('v2')]);
   const result = await runWakeCheck(service, NOW, { push });
 
-  assert.deepEqual(result, { checked: 0, recorded: 0, pushed: 0, nudged: 3 });
+  assert.deepEqual(result, { checked: 0, recorded: 0, pushed: 0, claimed: 2, nudged: 3 });
   assert.deepEqual(db.rpcCalls.find((c) => c.name === 'claim_wake_nudges'), { name: 'claim_wake_nudges', args: { p_now: NOW.toISOString() } });
   assert.deepEqual(pushes.map((p) => p.to).sort(), [T1, T2, T3]);                                       // 받는 사람 기기만 — 안 일어난 사람 본인 기기에는 안 감
   assert.ok(pushes.every((p) => p.title === '깨워 볼까요?' && p.body === '지형님이 아직 안 일어났어요' && p.channelId === 'friend_v1'));
   assert.ok(pushes.every((p) => p.data.kind === 'WAKE_NUDGE' && p.data.path === '/group' && p.data.groupId === GROUP && p.data.subjectUserId === 'sleeper'));
   assert.deepEqual(pushes.filter((p) => p.to === T3).map((p) => p.data.recipientUserId), ['v2']);       // 받는 사람 id는 기기 주인
   assert.deepEqual([...new Set(db.rows('push_tickets').map((t) => t.kind))], ['WAKE_NUDGE']);
+  assert.deepEqual(db.rows('push_tickets').map((t) => [t.token, t.user_id]).sort(), [[T1, 'v1'], [T2, 'v1'], [T3, 'v2']]);        // 영수증 표의 주인 = 받는 사람
+});
+
+test('8-22(많은 사람): 받는 사람 · 안 일어난 사람이 100명을 넘어도 프로필 · 토큰 조회를 100개씩 나눠 하고 모두에게 보냄 — 이름은 사람마다 맞게', async () => {
+  const rows = Array.from({ length: 130 }, (_v, i) => nudge(`r${i}`, { sleeper_id: `s${i}`, event_key: `NUDGE:s${i}:2026-10-16:r${i}` }));
+  const s = setup([], rows);
+  for (let i = 0; i < 130; i++) {
+    s.db.rows('profiles').push({ user_id: `s${i}`, nickname: `이름${i}` });
+    s.db.rows('push_tokens').push({ user_id: `r${i}`, token: `ExponentPushToken[${String(i).padStart(22, '0')}]` });
+  }
+  const result = await runWakeCheck(s.service, NOW, { push: s.push });
+  assert.deepEqual([result.claimed, result.nudged], [130, 130]);
+  assert.equal(s.db.calls.filter((c) => c === 'select profiles').length, 2);
+  assert.equal(s.db.calls.filter((c) => c === 'select push_tokens').length, 2);
+  assert.equal(s.pushes.find((p) => p.data.recipientUserId === 'r125')?.body, '이름125님이 아직 안 일어났어요');
 });
 
 test('8-30: 후속은 "일어났어요 / ○○님이 일어났어요", 종류 WAKE_NUDGE_UP — 같은 배치에 둘이 섞여도 각자 문구', async () => {
@@ -194,7 +209,7 @@ test('8-30: 후속은 "일어났어요 / ○○님이 일어났어요", 종류 W
   assert.deepEqual(db.rows('push_tickets').map((t) => t.kind).sort(), ['WAKE_NUDGE', 'WAKE_NUDGE', 'WAKE_NUDGE_UP']);
 });
 
-test('8-23: 받을 사람이 없으면(DB가 빈 목록) 푸시도 토큰 조회도 없음', async () => {
+test('8-22(빈 목록): 받을 사람이 없으면(DB가 빈 목록) 푸시도 토큰 조회도 없음', async () => {
   const { db, service, pushes, push } = nudgeSetup([]);
   assert.equal((await runWakeCheck(service, NOW, { push })).nudged, 0);
   assert.deepEqual(pushes, []);
@@ -214,9 +229,9 @@ test('받는 사람에게 토큰이 없으면 보낸 수 0, 이름이 비어 있
 test('친구 알림 보내기가 실패해도(프로필 조회 오류 · Expo 장애) 배치는 성공 — DB는 이미 보낸 것으로 남겨서 다시 안 보냄', async () => {
   const a = nudgeSetup([nudge('v1')]);
   a.db.failOn = [{ table: 'profiles', op: 'select' }];
-  assert.deepEqual(await quiet(() => runWakeCheck(a.service, NOW, { push: a.push })), { checked: 0, recorded: 0, pushed: 0, nudged: 0 });
+  assert.deepEqual(await quiet(() => runWakeCheck(a.service, NOW, { push: a.push })), { checked: 0, recorded: 0, pushed: 0, claimed: 1, nudged: 0 });
 
   const b = nudgeSetup([nudge('v1')]);
   const down = { fetchImpl: async () => new Response('x', { status: 503 }), sleep: async () => {} };
-  assert.deepEqual(await quiet(() => runWakeCheck(b.service, NOW, { push: down })), { checked: 0, recorded: 0, pushed: 0, nudged: 0 });
+  assert.deepEqual(await quiet(() => runWakeCheck(b.service, NOW, { push: down })), { checked: 0, recorded: 0, pushed: 0, claimed: 1, nudged: 0 });
 });

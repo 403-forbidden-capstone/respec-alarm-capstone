@@ -524,7 +524,7 @@ async function pushGroupChange(
   if (!planned.plan) return { warnings: planned.warnings };
   const req = { kind: 'GROUP_APPT_CHANGED' as const, groupId: row.group_id as string, appointmentId: row.appointment_id };
   try {
-    const perRecipient = opts.held ? new Map(planned.plan.recipients.map((id) => [id, { needsConfirm: opts.held!.has(id) }])) : undefined;
+    const perRecipient = opts.held ? new Map([...planned.plan.recipients, ...planned.plan.silentRecipients].map((id) => [id, { needsConfirm: opts.held!.has(id) }])) : undefined;
     const out = await sendGroupPush(ctx.service, req, planned.plan, ctx.push ?? {}, { change, ...(perRecipient ? { perRecipient } : {}) });
     const failed = out.reason && out.reason !== 'NO_TOKENS';
     return { notified: out.sent, warnings: failed ? [{ code: 'PUSH_NOT_SENT', message: '참여자에게 알림을 보내지 못했어요', detail: out.reason }] : [] };
@@ -547,8 +547,9 @@ export async function updateAppointment(ctx: EditCtx, req: Extract<EditRequest, 
   const patched = applyPatch(row, req.patch);
   const effect = scopeEffect({ recurring, group, scope: req.scope, patchRule: req.patch.recurrenceRule, currentRule: row.recurrence_rule });
 
-  // 지난 공동 약속은 고칠 수 없고, 지난 시각으로 옮길 수도 없음 (9-32 · DB 정책 appointments_update와 같은 규칙)
-  if (group && (Date.parse(row.appointment_at) <= ctx.now.getTime() || (patched.changed.at && Date.parse(patched.next.appointment_at) <= ctx.now.getTime()))) {
+  // 지난 공동 약속은 고칠 수 없고, 지난 날로 옮길 수도 없음 (9-32 · DB 정책 appointments_update와 같은 규칙). '지난'은 하루 경계 — 내 폰 시간대의 오늘 0시보다 앞 (오늘 이미 지난 약속은 오늘 안에는 고칠 수 있음, 9-러)
+  const todayStart = group ? localDayRange(ctx.now, await env.tz()).start.getTime() : 0;
+  if (group && (Date.parse(row.appointment_at) < todayStart || (patched.changed.at && Date.parse(patched.next.appointment_at) < todayStart))) {
     throw new HttpError('UNPROCESSABLE', '지난 약속이에요', { reason: 'PAST_APPOINTMENT' });
   }
   // 공동 약속의 반복은 회차마다 참여자 알람을 만드는 일이 따로 필요해 아직 못 고침 (9-머 · 9-버, 반복 공동 약속은 회차 만들기부터 이어서)
@@ -752,7 +753,7 @@ export async function deleteAppointment(ctx: EditCtx, req: Extract<EditRequest, 
     // 한 번짜리 · 공동 약속(만든 사람) — 약속 + 참여 + 알람. 공동 약속은 다른 참여자의 참여 · 알람도 같이 사라짐(CASCADE)
     //   L6 안건후보: 공동 약속 지우기 기본안 = 만든 사람이 지우면 약속 전체가 지워짐. 다른 참여자의 폰 예약은 그 사람의 다음 맞추기(reconcile)에서 정리 (변경 알림은 L3 S2 뒤)
     //   공동 약속의 받는 사람(참여자)은 지우기 전에 정해 두고 지운 뒤에 '취소됐어요' 푸시를 보냄 — 받은 폰이 그 약속의 알람을 지움 (9-20). 지난 약속은 알릴 일이 없음
-    const planned = group && Date.parse(row.appointment_at) > ctx.now.getTime() ? await planGroupPushSafe(ctx, row) : undefined;
+    const planned = group && Date.parse(row.appointment_at) >= localDayRange(ctx.now, await env.tz()).start.getTime() ? await planGroupPushSafe(ctx, row) : undefined;
     canceled.push(...(await deleteRows(ctx, [row.appointment_id])));
     result.deleted_appointment_ids = [row.appointment_id];
     if (planned) {

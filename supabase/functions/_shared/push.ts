@@ -9,7 +9,8 @@
 export type PushMessage = { title: string; body: string; data?: Record<string, unknown> };
 
 // 메시지마다 받는 토큰 · 문구 · 데이터 · 안드로이드 채널이 다름 (11장: 받는 사람마다 데이터에 받는 사람 id가 다르게 실림)
-export type OutgoingMessage = PushMessage & { to: string; channelId?: string };
+//   silent = 조용한 데이터 푸시 — 문구 · 소리 · 채널 없이 data만 보냄(앱이 열려 있지 않아도 알람을 다시 맞추게 깨움). 알림을 끈 멤버 · 차단 쌍에게 가는 공동 약속 변경이 이 모양 (title · body는 안 쓰임)
+export type OutgoingMessage = PushMessage & { to: string; channelId?: string; silent?: boolean };
 
 export type PushResult = {
   sent: number;
@@ -28,6 +29,7 @@ export type SendOptions = {
   fetchImpl?: FetchLike;
   retries?: number; // 실패한 묶음을 다시 보내 보는 횟수 (기본 1)
   sleep?: (ms: number) => Promise<void>; // 다시 보내기 전 쉬는 시간 (시험이 바꿔 끼움)
+  timeoutMs?: number; // 한 번 보내는 데 기다리는 최대 시간 (기본 10초) — Expo가 응답을 안 줘도 깨우기 요청 · 5분 배치가 매달리지 않게
 };
 
 export const EXPO_PUSH_URL = 'https://exp.host/--/api/v2/push/send';
@@ -35,6 +37,7 @@ export const EXPO_RECEIPTS_URL = 'https://exp.host/--/api/v2/push/getReceipts';
 const BATCH = 100;
 const RECEIPT_BATCH = 300;
 const RETRY_WAIT_MS = 500;
+const REQUEST_TIMEOUT_MS = 10_000;
 const EXPO_TOKEN = /^Expo(nent)?PushToken\[[^\]]+\]$/;
 
 const defaultSleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
@@ -46,15 +49,15 @@ const headersOf = (accessToken?: string): Record<string, string> => ({
 });
 
 // 한 묶음을 한 번 보냄. tickets가 null이면 실패(이유: 인증이 거절됐는지 아니면 장애인지)
-async function postChunk(doFetch: FetchLike, accessToken: string | undefined, body: unknown[]): Promise<{ tickets: unknown[] | null; rejectedByAuth: boolean }> {
+async function postChunk(doFetch: FetchLike, accessToken: string | undefined, body: unknown[], timeoutMs: number): Promise<{ tickets: unknown[] | null; rejectedByAuth: boolean }> {
   try {
-    const res = await doFetch(EXPO_PUSH_URL, { method: 'POST', headers: headersOf(accessToken), body: JSON.stringify(body) });
+    const res = await doFetch(EXPO_PUSH_URL, { method: 'POST', headers: headersOf(accessToken), body: JSON.stringify(body), signal: AbortSignal.timeout(timeoutMs) });
     const json: unknown = await res.json().catch(() => null);
     const data = json && typeof json === 'object' ? (json as { data?: unknown }).data : undefined;
     if (res.ok && Array.isArray(data)) return { tickets: data, rejectedByAuth: false };
     return { tickets: null, rejectedByAuth: res.status === 401 || res.status === 403 };
   } catch {
-    return { tickets: null, rejectedByAuth: false }; // 네트워크 오류 — 호출한 쪽이 이 묶음을 실패로 셈
+    return { tickets: null, rejectedByAuth: false }; // 네트워크 오류 · 시간 초과 — 호출한 쪽이 이 묶음을 실패로 셈
   }
 }
 
@@ -65,24 +68,29 @@ export async function sendExpoMessages(messages: readonly OutgoingMessage[], opt
   const doFetch = options.fetchImpl ?? fetch;
   const sleep = options.sleep ?? defaultSleep;
   const retries = options.retries ?? 1;
+  const timeoutMs = options.timeoutMs ?? REQUEST_TIMEOUT_MS;
   let notConfigured = 0;
   let unavailable = 0;
 
   for (let i = 0; i < valid.length; i += BATCH) {
     const chunk = valid.slice(i, i + BATCH);
-    const body = chunk.map((m) => ({
-      to: m.to,
-      title: m.title,
-      body: m.body,
-      data: m.data ?? {},
-      sound: 'default',
-      priority: 'high',
-      ...(m.channelId ? { channelId: m.channelId } : {}),
-    }));
-    let outcome = await postChunk(doFetch, options.accessToken, body);
+    const body = chunk.map((m) =>
+      m.silent
+        ? { to: m.to, data: m.data ?? {}, priority: 'high', _contentAvailable: true }
+        : {
+            to: m.to,
+            title: m.title,
+            body: m.body,
+            data: m.data ?? {},
+            sound: 'default',
+            priority: 'high',
+            ...(m.channelId ? { channelId: m.channelId } : {}),
+          },
+    );
+    let outcome = await postChunk(doFetch, options.accessToken, body, timeoutMs);
     for (let attempt = 1; !outcome.tickets && !outcome.rejectedByAuth && attempt <= retries; attempt += 1) {
       await sleep(RETRY_WAIT_MS * attempt);
-      outcome = await postChunk(doFetch, options.accessToken, body);
+      outcome = await postChunk(doFetch, options.accessToken, body, timeoutMs);
     }
     if (!outcome.tickets) {
       result.failed += chunk.length;
@@ -131,7 +139,7 @@ export async function fetchExpoReceipts(
   const doFetch = options.fetchImpl ?? fetch;
   for (let i = 0; i < ids.length; i += RECEIPT_BATCH) {
     try {
-      const res = await doFetch(EXPO_RECEIPTS_URL, { method: 'POST', headers: headersOf(options.accessToken), body: JSON.stringify({ ids: ids.slice(i, i + RECEIPT_BATCH) }) });
+      const res = await doFetch(EXPO_RECEIPTS_URL, { method: 'POST', headers: headersOf(options.accessToken), body: JSON.stringify({ ids: ids.slice(i, i + RECEIPT_BATCH) }), signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
       const json: unknown = await res.json().catch(() => null);
       const data = json && typeof json === 'object' ? (json as { data?: unknown }).data : undefined;
       if (res.ok && data && typeof data === 'object' && !Array.isArray(data)) Object.assign(out.receipts, data);

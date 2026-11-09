@@ -173,7 +173,7 @@ export default async function ch11({ q, as, su, svc, check, expectErr }) {
     return kinds.every((k) => out[k].every((x) => x === false)) ? true : out;
   });
 
-  await check('11-12(변형): 깨우기는 8장 전까지 거절, 모르는 종류 · 서버 전용 종류(미확인 본인)는 앱 요청으로 거절 — 대기 요청이 있어도 마찬가지', async () => {
+  await check('11-12(변형): 깨우기(WAKE_PING)는 can_send_push가 늘 거절(판정은 plan_wake_ping), 모르는 종류 · 서버 전용 종류(미확인 본인)는 앱 요청으로 거절 — 대기 요청이 있어도 마찬가지', async () => {
     const A = await join_(10, '에이'), B = await join_(11, '비');
     await request(A, B);
     const r = [await canPush(A, B, 'WAKE_PING'), await canPush(A, B, 'WAKE_MISSED'), await canPush(A, B, 'GROUP_MEMBER_JOINED'), await canPush(A, B, 'SOMETHING'), await canPush(A, B, null)];
@@ -191,7 +191,7 @@ export default async function ch11({ q, as, su, svc, check, expectErr }) {
     await call(M3, 'public.block_user($1)', [J]);
     const r = await planGroup(J, g, 'GROUP_MEMBER_JOINED');
     // 모양: 받는 사람은 id 배열, 앱이 넘긴 어떤 대상도 반영할 자리가 없음
-    return r.status === 'OK' && r.group_name === '푸시 확인 그룹' && ids(r).join() === [M1].join() && Object.keys(r).sort().join() === 'appointment_title,group_name,recipients,status' && r.appointment_title === null ? true : r;
+    return r.status === 'OK' && r.group_name === '푸시 확인 그룹' && ids(r).join() === [M1].join() && Object.keys(r).sort().join() === 'appointment_title,group_name,recipients,silent_recipients,status' && r.appointment_title === null && r.silent_recipients.length === 0 ? true : r;
   });
 
   await check('11-14(조건): 새 멤버 알림은 참여 중인 보낸 사람이 들어온 지 10분 안일 때만 — 오래된 멤버 · 초대만 받은 사람 · 나간 사람 · 그룹 밖 사람 · 없는 그룹 · 모르는 종류는 모두 같은 FORBIDDEN', async () => {
@@ -217,9 +217,10 @@ export default async function ch11({ q, as, su, svc, check, expectErr }) {
     const [{ appointment_id: ap }] = await q(`insert into public.appointments (creator_id, group_id, title, appointment_at, dest_name) values ($1, $2, '팀 회의', now() + interval '1 day', '학교') returning appointment_id`, [S, g]);
     const [{ appointment_id: ap2 }] = await q(`insert into public.appointments (creator_id, group_id, title, appointment_at, dest_name) values ($1, $2, '다른 약속', now() + interval '1 day', '학교') returning appointment_id`, [O, g2]);
     const [{ appointment_id: personal }] = await q(`insert into public.appointments (creator_id, title, appointment_at, dest_name) values ($1, '개인', now() + interval '1 day', '학교') returning appointment_id`, [S]);
-    const [{ appointment_id: past }] = await q(`insert into public.appointments (creator_id, group_id, title, appointment_at, dest_name) values ($1, $2, '지난 약속', now() - interval '1 minute', '학교') returning appointment_id`, [S, g]);
+    const [{ appointment_id: past }] = await q(`insert into public.appointments (creator_id, group_id, title, appointment_at, dest_name) values ($1, $2, '지난 약속', private.day_start($3) - interval '1 second', '학교') returning appointment_id`, [S, g, S]);   // 오늘 0시(보낸 사람 시간대) 1초 전 = 어제
+    const [{ appointment_id: todayEarly }] = await q(`insert into public.appointments (creator_id, group_id, title, appointment_at, dest_name) values ($1, $2, '오늘 이른 약속', private.day_start($3), '학교') returning appointment_id`, [S, g, S]);   // 오늘 0시 = 아직 안 지남(하루 경계)
     const [{ appointment_id: byM1 }] = await q(`insert into public.appointments (creator_id, group_id, title, appointment_at, dest_name) values ($1, $2, '참여자가 만든 약속', now() + interval '1 day', '학교') returning appointment_id`, [M1, g]);
-    for (const [apId, users] of [[ap, [S, M1, M2, M3]], [past, [S, M1]], [byM1, [M1, S]]]) {
+    for (const [apId, users] of [[ap, [S, M1, M2, M3]], [past, [S, M1]], [byM1, [M1, S]], [todayEarly, [S, M1]]]) {
       for (const u of users) await q(`insert into public.appointment_participants (appointment_id, user_id) values ($1, $2)`, [apId, u]);
     }
     const ok = await planGroup(S, g, 'GROUP_APPT_CHANGED', ap);
@@ -227,11 +228,14 @@ export default async function ch11({ q, as, su, svc, check, expectErr }) {
     const outsider = await planGroup(O, g, 'GROUP_APPT_CHANGED', ap);
     const notCreator = [await planGroup(M1, g, 'GROUP_APPT_CHANGED', ap), await planGroup(M4, g, 'GROUP_APPT_CHANGED', ap)];   // 참여자도 · 참여 안 한 멤버도 남의 약속은 못 보냄
     const pastOne = await planGroup(S, g, 'GROUP_APPT_CHANGED', past);
+    const todayOk = await planGroup(S, g, 'GROUP_APPT_CHANGED', todayEarly);                                                    // 오늘 이미 지난 약속은 오늘 안에는 알림을 보낼 수 있음 (9-러 하루 경계)
     const byParticipant = await planGroup(M1, g, 'GROUP_APPT_CHANGED', byM1);                                                   // 자기가 만든 약속이면 받는 사람 = 다른 참여자(S)
     const wrongKind = [await planGroup(S, g, 'FRIEND_REQUEST', ap), await planGroup(S, g, 'WAKE_PING', ap)];   // 그룹 알림 종류가 아니면 약속이 맞아도 FORBIDDEN
     return ok.status === 'OK' && ok.appointment_title === '팀 회의' && ok.group_name === '푸시그룹' && ids(ok).join() === [M1].join()
+      && [...ok.silent_recipients].sort().join() === [M2, M3].sort().join()                                                    // 알림 끈 멤버 · 차단 쌍은 보이는 알림만 빠지고 조용한 데이터 푸시 대상
+      && todayOk.status === 'OK' && ids(todayOk).join() === [M1].join() && todayOk.silent_recipients.length === 0
       && [other, per, none, missing, outsider, ...notCreator, pastOne, ...wrongKind].every((x) => x.status === 'FORBIDDEN')
-      && byParticipant.status === 'OK' && ids(byParticipant).join() === [S].join() ? true : { ok, other, per, none, missing, outsider, notCreator, pastOne, byParticipant, wrongKind };
+      && byParticipant.status === 'OK' && ids(byParticipant).join() === [S].join() ? true : { ok, other, per, none, missing, outsider, notCreator, pastOne, todayOk, byParticipant, wrongKind };
   });
 
   await check('11-12(창): 요청 푸시는 요청한 지 1시간 안(59분 O · 61분 X), 수락 푸시는 수락한 지 1시간 안(59분 O · 61분 X) — 오래된 대기 요청 · 오래된 수락으로 다시 보내지 못함', async () => {
