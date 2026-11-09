@@ -6,17 +6,19 @@ import { CHANNEL_IDS, CLIENT_KINDS, composeCopy, GROUP_KINDS, PATHS, SERVER_ONLY
 
 const ALL: readonly PushKind[] = [...CLIENT_KINDS, ...SERVER_ONLY_KINDS];
 
-test('종류 표: 앱이 부를 수 있는 6종 + 서버 배치만 보내는 미확인(WAKE_MISSED), 그룹 종류는 둘', () => {
+test('종류 표: 앱이 부를 수 있는 6종 + 서버 배치만 보내는 미확인 셋(본인 WAKE_MISSED · 친구 WAKE_NUDGE · 후속 WAKE_NUDGE_UP), 그룹 종류는 둘', () => {
   assert.deepEqual([...CLIENT_KINDS].sort(), ['ALARM_CHANGED', 'FRIEND_ACCEPTED', 'FRIEND_REQUEST', 'GROUP_APPT_CHANGED', 'GROUP_MEMBER_JOINED', 'WAKE_PING']);
-  assert.deepEqual([...SERVER_ONLY_KINDS], ['WAKE_MISSED']);
+  assert.deepEqual([...SERVER_ONLY_KINDS], ['WAKE_MISSED', 'WAKE_NUDGE', 'WAKE_NUDGE_UP']);
   assert.deepEqual([...GROUP_KINDS].sort(), ['GROUP_APPT_CHANGED', 'GROUP_MEMBER_JOINED']);
 });
 
-test('채널: 5갈래(깨우기 / 알람 바뀜 / 요청 / 그룹 / 미확인), 모두 _v1, 요청 둘 · 그룹 둘은 같은 채널, 알람 코어 채널과 안 겹침', () => {
+test('채널: 5갈래(깨우기 / 알람 바뀜 / 요청 / 그룹 / 미확인), 모두 _v1, 요청 둘 · 그룹 둘 · 친구 미확인 둘은 같은 채널, 알람 코어 채널과 안 겹침', () => {
   assert.equal(new Set(ALL.map((k) => CHANNEL_IDS[k])).size, 5);
   assert.ok(ALL.every((k) => /^[a-z_]+_v1$/.test(CHANNEL_IDS[k])));
   assert.equal(CHANNEL_IDS.FRIEND_REQUEST, CHANNEL_IDS.FRIEND_ACCEPTED);
   assert.equal(CHANNEL_IDS.GROUP_MEMBER_JOINED, CHANNEL_IDS.GROUP_APPT_CHANGED);
+  assert.equal(CHANNEL_IDS.WAKE_NUDGE, CHANNEL_IDS.WAKE_PING); // 친구가 보낸 성격이라 깨우기와 같은 채널(친구 채널)
+  assert.equal(CHANNEL_IDS.WAKE_NUDGE_UP, CHANNEL_IDS.WAKE_PING);
   assert.ok(ALL.every((k) => CHANNEL_IDS[k] !== 'detect_v1'));
 });
 
@@ -24,6 +26,8 @@ test('누르면 갈 화면 경로가 종류마다 있음 (받는 사람 id와 �
   assert.ok(ALL.every((k) => /^\/[a-z-]+/.test(PATHS[k])));
   assert.equal(PATHS.WAKE_PING, '/wake');
   assert.equal(PATHS.WAKE_MISSED, '/wake');
+  assert.equal(PATHS.WAKE_NUDGE, '/group'); // 친구 미확인 · 후속은 그 사람의 기상 확인(G03)
+  assert.equal(PATHS.WAKE_NUDGE_UP, '/group');
 });
 
 test('문구는 종류별 고정: 깨우기 · 알람 바뀜은 보낸 사람 이름, 요청 · 수락 · 미확인은 고정 문구', () => {
@@ -33,6 +37,13 @@ test('문구는 종류별 고정: 깨우기 · 알람 바뀜은 보낸 사람 �
   assert.deepEqual(composeCopy('WAKE_MISSED', {}), { title: '기상 확인', body: '기상 확인이 안 됐어요' });
   // 이름이 비어 있으면 '친구'
   assert.equal(composeCopy('WAKE_PING', {}).body, '친구님이 깨워요');
+});
+
+test('친구 미확인 · 후속: 안 일어난(일어난) 사람 이름만 문구에, 이름이 없으면 친구', () => {
+  assert.deepEqual(composeCopy('WAKE_NUDGE', { subjectName: '지형', senderName: '수연' }), { title: '깨워 볼까요?', body: '지형님이 아직 안 일어났어요' });
+  assert.deepEqual(composeCopy('WAKE_NUDGE_UP', { subjectName: '지형' }), { title: '일어났어요', body: '지형님이 일어났어요' });
+  assert.equal(composeCopy('WAKE_NUDGE', {}).body, '친구님이 아직 안 일어났어요');
+  assert.ok(composeCopy('WAKE_NUDGE', { subjectName: '가'.repeat(300) }).body.length <= 200);
 });
 
 test('알람 바뀜: 이름 + 이전 → 새 시각을 받는 사람 시간대의 HH:mm으로, 시각이 없으면 이름만', () => {
