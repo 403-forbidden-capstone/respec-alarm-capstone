@@ -153,3 +153,28 @@ export async function runAutoCommit(deps: AutoCommitDeps): Promise<AutoCommitOut
   }
   return out;
 }
+
+export interface AutoCommitStarted {
+  accepted: true;
+  run_id: string;
+}
+
+/**
+ * 배치를 응답 뒤로 미룸 — pg_net은 10초만 기다리고 끊어서, 정리(T2 · T5)가 끝나기를 기다리면 응답이 잘림.
+ * 응답(202)은 "시작했다"일 뿐 — 성공 · 실패는 로그로: 시작 → 완료(errors 있으면 error 로그) 또는 실패. 같은 run_id로 묶임
+ * waitUntil = EdgeRuntime.waitUntil (함수 최대 실행 시간까지 살려 둠). 시작했는데 완료 · 실패 로그가 없으면 실행 시간 한도로 끊긴 것
+ */
+export function startAutoCommit(
+  deps: AutoCommitDeps,
+  waitUntil: (p: Promise<unknown>) => void,
+  log: Pick<Console, 'log' | 'error'> = console,
+): AutoCommitStarted {
+  const runId = crypto.randomUUID();
+  log.log(`[auto-commit] 시작 run=${runId}`);
+  const job = runAutoCommit(deps).then(
+    (out) => (out.errors.length > 0 ? log.error : log.log)(`[auto-commit] 완료 run=${runId}`, JSON.stringify(out)),
+    (e) => log.error(`[auto-commit] 실패 run=${runId}`, e),
+  );
+  waitUntil(job);
+  return { accepted: true, run_id: runId };
+}

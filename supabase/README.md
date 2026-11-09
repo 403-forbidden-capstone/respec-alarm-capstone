@@ -44,7 +44,7 @@ select vault.create_secret('<service_role 키>', 'service_role_key');
 - 둘 중 하나라도 없으면 오류 없이 경고만 남기고 끝남 → 키를 넣기 전에도 배치가 5분마다 돌지만 아무 일도 안 함
 - 예약 확인: `select * from cron.job;` · 실행 기록 `select * from cron.job_run_details order by start_time desc limit 10;`
 - `20261029075743_alarm_roll.sql`(반복 다음 회차)이 같은 방식으로 `alarm-roll`도 5분마다 부르게 예약함. **`alarm-roll` 함수 배포는 앱 맞추기 PR(3b) 머지 뒤** — 그 전엔 호출이 404로 끝남 (해롭지 않음)
-- `20261109080000_voice_auto_commit.sql`(하루 기록 자동 정리)이 `voice-commit`을 10분마다 부르게 예약함(`voice-auto-commit`). 서비스 키로 오면 `_shared/ai/auto-commit.ts`가 [완료] 없이 지난 기준일 대화를 정리 — 다음 아침 가장 이른 켜진 기상 알람 2시간 전(없으면 KST 04:00), 마지막 사용자 말 60분 뒤, 한 번에 3개 · 60초. `voice-commit`도 `verify_jwt = false`(alarm-roll과 같이 `isServiceCall` · `requireUser`로 가름) — **마이그레이션 적용 전에 함수를 먼저 배포**
+- `20261109080000_voice_auto_commit.sql`(하루 기록 자동 정리)이 `voice-commit`을 10분마다 부르게 예약함(`voice-auto-commit`). 서비스 키로 오면 `_shared/ai/auto-commit.ts`가 [완료] 없이 지난 기준일 대화를 정리 — 다음 아침 가장 이른 켜진 기상 알람 2시간 전(없으면 KST 04:00), 마지막 사용자 말 60분 뒤, 한 번에 3개 · 60초. pg_net이 10초만 기다려서 바로 202로 답하고 정리는 `EdgeRuntime.waitUntil`로 뒤에서 — 결과는 함수 로그(`[auto-commit] 시작 · 완료 · 실패`)로 봄. `voice-commit`도 `verify_jwt = false`(alarm-roll과 같이 `isServiceCall` · `requireUser`로 가름) — **마이그레이션 적용 전에 함수를 먼저 배포**
 - `wake-check`는 `config.toml`에서 `verify_jwt = false`로 두고, 코드(`_shared/auth.ts` `requireServiceCall`)가 `apikey` · `Authorization` 머리글의 키를 `SUPABASE_SERVICE_ROLE_KEY`(legacy JWT) 또는 `SUPABASE_SECRET_KEYS`(`sb_secret_…`)와 직접 비교함 → Vault에 어느 형식을 넣어도 됨
 
 ## 서버 함수가 쓰는 DB 함수 (service_role 전용)
