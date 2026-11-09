@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
-import { Button, Stepper, Text, Toggle } from '@/components/ui';
+import { Button, Stepper, Text, Toggle, toast } from '@/components/ui';
+import { userMessage } from '@/lib/errors';
 import { ChoiceRow } from '@/features/onboarding/views/ChoiceRow';
 import { SCHOOL_OPTIONS, WORK_OPTIONS, isCompletePrepareMlSurvey, type PrepareMlSurvey, type SchoolStatus, type WorkStatus } from '@/features/profile/prepareMlSurvey';
 import type { ProfileFields } from '@/features/profile/types';
@@ -32,6 +33,8 @@ export function PrepareMlSurveyEditor({ initial, onSave, onRevoke, onCancel }: P
         ml_work_status: work,
         ml_profile_consented_at: new Date().toISOString(),
       });
+    } catch (e) {
+      toast(userMessage(e, '입력 정보를 저장하지 못했어요'));
     } finally {
       setBusy(false);
     }
@@ -42,6 +45,8 @@ export function PrepareMlSurveyEditor({ initial, onSave, onRevoke, onCancel }: P
     setBusy(true);
     try {
       await onRevoke();
+    } catch (e) {
+      toast(userMessage(e, '정보를 삭제하지 못했어요'));
     } finally {
       setBusy(false);
     }
