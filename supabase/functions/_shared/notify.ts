@@ -14,7 +14,7 @@
 //   응답: { sent, failed, reason?, ping? } — 토큰이 없거나 푸시 설정(FCM 키 · Expo 액세스 토큰)이 아직 없으면 오류가 아니라 { sent: 0, reason }
 import { dbFail, must } from './db.ts';
 import { HttpError } from './errors.ts';
-import { CHANNEL_IDS, CLIENT_KINDS, composeCopy, type ClientKind, type GroupChange, type GroupKind, isGroupKind, PATHS, type PushKind as AnyPushKind, wakePingPath } from './push-copy.ts';
+import { CHANNEL_IDS, CLIENT_KINDS, composeCopy, type ClientKind, type GroupChange, type GroupKind, isGroupKind, PATHS, type PushKind as AnyPushKind } from './push-copy.ts';
 import { type FetchLike, type OutgoingMessage, type PushResult, sendExpoMessages, type SendResult } from './push.ts';
 import type { Reader } from './read.ts';
 import type { Db } from './supabase.ts';
@@ -160,7 +160,7 @@ async function notifyOne(service: Db, senderId: string, req: NotifyRequest, opti
     ...(proposal ? { previousAt: proposal.from_at, newAt: proposal.to_at, alarmType: proposal.alarm_type, now: options.now } : {}),
     timeZone: targetProfile.timezone,
   });
-  const path = reserved?.groupId ? wakePingPath(reserved.groupId, target) : PATHS[req.kind]; // 깨우기는 그 그룹에서 본 그 사람의 G03
+  const path = PATHS[req.kind]; // 깨우기를 누르면 받는 사람의 기상 확인(H08, 8-02) — 보낸 사람이 본 그룹 화면(G03)이 아님
   const data = { kind: req.kind, recipientUserId: target, path, ...(proposal ? { alarmId: proposal.alarm_id, proposalId: proposal.proposal_id } : {}) };
   const messages: OutgoingMessage[] = rows.map((r) => ({ to: r.token, ...copy, channelId: CHANNEL_IDS[req.kind], data }));
   const delivered = await deliver(service, req.kind, messages, new Map(rows.map((r) => [r.token, target])), options);
