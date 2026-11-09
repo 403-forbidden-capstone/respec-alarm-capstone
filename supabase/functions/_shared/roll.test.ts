@@ -400,6 +400,32 @@ test('이어받기: 만들 종류 · 끈 종류 · 직접 시각(같은 시:분)
   assert.deepEqual(res.ring_packages.filter((x) => x.atMillis === kst('2026-10-29T07:30').getTime()), []);
 });
 
+test('10-22(반복): 기준 회차 알람에 친구가 제안해 주인이 적용한 시각이 있어도 새 회차에 이어받지 않음 — 주인이 직접 골랐던 값이면 그 값, 자동이었으면 새 계산', async () => {
+  const run = async (originalSource: 'AUTO' | 'MANUAL') => {
+    const env = setup(MON_10);
+    const body = slot({
+      participant: { origin: { name: '기숙사', lat: 37.5, lng: 127.0 }, transport_type: 'SUBWAY', est_travel_minutes: 40, travel_source: 'MANUAL', buffer_minutes: 15, before_prepare_minutes: 30 },
+      kinds: ['WAKE', 'DEPARTURE'],
+      manual_times: { WAKE: iso('2026-10-27T07:30') },
+    });
+    const series = await seed(env, A, body, MON_10);
+    const base = env.db.rows('appointments')[0];
+    const wake = alarmsOf(env.db, base.appointment_id).find((a) => a.alarm_type === 'WAKE')!;
+    wake.original_scheduled_at = wake.scheduled_at;                                                    // 07:30에서 친구가 07:20으로 바꿈
+    wake.original_time_source = originalSource;
+    wake.scheduled_at = new Date(Date.parse(wake.scheduled_at as string) - 10 * 60_000).toISOString();
+    wake.time_source = 'MANUAL';
+    await roll(env, 'own', MON_10, { lookup: fakeKakao(99).lookup });
+    return alarmsOf(env.db, occurrence(env.db, series, '2026-10-29')!.appointment_id).find((a) => a.alarm_type === 'WAKE')!;
+  };
+  const owner = await run('MANUAL');
+  assert.deepEqual([hm(owner.scheduled_at), owner.time_source, owner.original_scheduled_at ?? null], ['07:30', 'MANUAL', null]);   // 친구 값 07:20이 아니라 주인의 07:30
+  const auto = await run('AUTO');
+  assert.notEqual(hm(auto.scheduled_at), '07:20');
+  assert.notEqual(auto.time_source, 'MANUAL');                                                          // 새 계산이라 직접 고른 값으로 안 굳음
+  assert.equal(auto.original_scheduled_at ?? null, null);
+});
+
 test('이어받기: 길찾기로 구한 이동시간(API)은 안 이어받고 회차마다 새로 구함, 준비시간도 새로 계산 (공통 P80 + 개인 보정)', async () => {
   const env = setup(MON_10);
   for (let d = 1; d <= 20; d += 1) env.db.rows('daily_records').push({ record_id: `r${d}`, user_id: A, record_date: `2026-10-${String(d).padStart(2, '0')}`, actual_prepare_minutes: 90 }); // 내 기상~출발 기록 20건 (P80 90)
