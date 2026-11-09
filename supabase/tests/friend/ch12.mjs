@@ -59,6 +59,7 @@ export default async function ch12({ q, as, su, svc, check, expectErr }) {
   await check('12-01 · 12-02 · 12-24: 그룹 3개(다른 멤버 있는 2개 + 혼자 1개) · 친구 · 권한 · 차단 · 개인 약속 · 알람 · 토큰이 있는 사람이 탈퇴하면 — 요약 숫자가 맞고, 3개 그룹에서 모두 나가 혼자였던 그룹만 사라지고, 공동 약속은 남아 만든 사람이 비며, 나머지 개인 정보는 모두 지워짐', async () => {
     const A = await join_(1, '탈퇴자'), B = await join_(2, '비'), C = await join_(3, '씨'), D = await join_(4, '디'), F = await join_(5, '친구'), X = await join_(6, '차단당함');
     await befriend(A, F); await befriend(A, B);
+    const Y = await join_(8, '먼저요청'); await befriend(Y, A);                       // 상대가 먼저 요청한 친구도 친구 수에 셈
     const Z = await join_(7, '요청만');
     await call(A, 'public.send_friend_request($1)', [Z]);                            // 대기 중인 요청은 친구 수에 안 셈
     await grant(A, F); await grant(F, A);
@@ -97,7 +98,7 @@ export default async function ch12({ q, as, su, svc, check, expectErr }) {
       pastCreator: await creatorOf(pastAp), otherCreator: await creatorOf(otherAp),
       bFriendsWithA: await n(`select 1 from public.friends where requester_id = $1 or addressee_id = $1`, [B]),
     };
-    return before.groups_leaving === 3 && before.groups_disappearing === 1 && before.group_appointments_staying === 2 && before.friends === 2
+    return before.groups_leaving === 3 && before.groups_disappearing === 1 && before.group_appointments_staying === 2 && before.friends === 3
       && r.groups_left === 3 && r.groups_deleted === 1 && r.personal_deleted === 1 && r.group_appointments_kept === 2
       && afterPrepare.joined === 0 && afterPrepare.personal === 0 && afterPrepare.tokens === 0 && afterPrepare.futureCreator === null
       && gone.profile === false && gone.friends === 0 && gone.perms === 0 && gone.blocks === 0 && gone.alarms === 0 && gone.parts === 0
@@ -130,13 +131,14 @@ export default async function ch12({ q, as, su, svc, check, expectErr }) {
     const A = await join_(14, '개인약속'), B = await join_(29, '준비없이');
     const personal = await appt(A, null, at('09:00'), '개인');
     const rawPersonal = await appt(B, null, at('09:30'), '준비 없이 지울 개인');
+    const pastPersonal = await appt(A, null, at('09:00', PAST), '지난 개인');          // 지난 개인 약속도 준비가 먼저 지움(L3 함정 5)
     const clear = await expectErr(() => q(`update public.appointments set creator_id = null where appointment_id = $1`, [personal]), /바꿀 수 없음/);
     const noOwner = await expectErr(() => q(`insert into public.appointments (creator_id, group_id, title, appointment_at, dest_name) values (null, null, '주인 없는 개인', $1::timestamptz, '학교')`, [at('08:00')]), /appointments_creator_or_group|check constraint/);
     const r = await prepare(A);
     const goneBeforeDelete = !(await exists('appointments', 'appointment_id', personal));
     await remove(A);
     await remove(B);                                                                            // 준비 없이 바로
-    return clear === true && noOwner === true && r.personal_deleted === 1 && goneBeforeDelete && !(await exists('profiles', 'user_id', A))
+    return clear === true && noOwner === true && r.personal_deleted === 2 && goneBeforeDelete && !(await exists('appointments', 'appointment_id', pastPersonal)) && !(await exists('profiles', 'user_id', A))
       && !(await exists('profiles', 'user_id', B)) && !(await exists('appointments', 'appointment_id', rawPersonal)) ? true : { clear, noOwner, r, goneBeforeDelete };
   });
 
@@ -146,23 +148,25 @@ export default async function ch12({ q, as, su, svc, check, expectErr }) {
     const { g } = await mkGroup(C, [A, B]);
     await q(`update public.group_members set wake_share_opt_in = true where group_id = $1`, [g]);
     const ap = await appt(C, g, at('10:00')); const pa = await part(A, ap); await part(B, ap); await part(C, ap);
-    await wakeAt(A, pa, at('07:00'));
+    const aAlarm = await wakeAt(A, pa, at('07:00'));
+    await q(`insert into public.alarm_events (alarm_id, user_id, event_type, event_at) values ($1, $2, 'TRIGGERED', $3::timestamptz), ($1, $2, 'MISSED', $4::timestamptz)`, [aAlarm, A, at('07:00'), at('07:30')]);
     const bPt = (await q(`select participant_id from public.appointment_participants where user_id = $1 and appointment_id = $2`, [B, ap]))[0].participant_id;
     const bAlarm = await wakeAt(B, bPt, at('07:30'));
     await q(`update public.alarms set time_source = 'MANUAL', original_scheduled_at = $2::timestamptz where alarm_id = $1`, [bAlarm, at('07:40')]);
     await q(`insert into public.push_sends (kind, sender_id, target_id, sent_at) values ('WAKE_PING', $1, $2, now())`, [A, B]);
     await q(`insert into public.push_tokens (user_id, token) values ($1, 'ExponentPushToken[zyxwvutsrqponmlkjihgfe]')`, [A]);
     const viewBefore = (await q(`select user_id from private.group_wake_rows($1, $2, $3::date, $4::timestamptz)`, [C, g, FUTURE, at('12:00')])).map((x) => x.user_id);
+    await svc(); const nudgeBefore = await q(`select sleeper_id from public.claim_wake_nudges($1::timestamptz)`, [at('07:40')]); await su();   // 탈퇴 전에는 A가 미확인 알림의 대상
     await call(A, 'public.block_user($1)', [C]);
     await prepare(A); await remove(A);
     const viewAfter = (await q(`select user_id from private.group_wake_rows($1, $2, $3::date, $4::timestamptz)`, [C, g, FUTURE, at('12:00')])).map((x) => x.user_id);
-    await svc(); const claimed = await q(`select * from public.claim_wake_nudges(now())`); await su();
+    await svc(); const claimed = await q(`select * from public.claim_wake_nudges($1::timestamptz)`, [at('07:40')]); await su();
     const bAfter = (await q(`select scheduled_at, time_source, original_scheduled_at from public.alarms where alarm_id = $1`, [bAlarm]))[0];
-    return viewBefore.includes(A) && !viewAfter.includes(A) && claimed.every((x) => x.sleeper_id !== A && x.recipient_id !== A)
+    return viewBefore.includes(A) && !viewAfter.includes(A) && nudgeBefore.some((x) => x.sleeper_id === A) && claimed.every((x) => x.sleeper_id !== A && x.recipient_id !== A)
       && bAfter && bAfter.time_source === 'MANUAL' && new Date(bAfter.scheduled_at).toISOString() === new Date(at('07:30')).toISOString() && bAfter.original_scheduled_at !== null
       && (await n(`select 1 from public.user_blocks where blocker_id = $1 or blocked_id = $1`, [A])) === 0
       && (await n(`select 1 from public.push_tokens where user_id = $1`, [A])) === 0
-      && (await n(`select 1 from public.push_sends where sender_id = $1 or target_id = $1`, [A])) === 0 ? true : { viewBefore, viewAfter, claimed, bAfter };
+      && (await n(`select 1 from public.push_sends where sender_id = $1 or target_id = $1`, [A])) === 0 ? true : { viewBefore, viewAfter, nudgeBefore, claimed, bAfter };
   });
 
   await check('12-18 · 12-24: 같은 그룹의 마지막 두 참여 멤버가 차례로 탈퇴해도(동시 탈퇴와 같은 결과) 그룹이 남지 않음 — 둘째가 나갈 때 마지막이 되어 삭제', async () => {
@@ -219,6 +223,62 @@ export default async function ch12({ q, as, su, svc, check, expectErr }) {
     await su();
     const afterLeaveSwap = await expectErr(() => q(`update public.appointments set creator_id = $2 where appointment_id = $1`, [pastAp, B]), /바꿀 수 없음/);   // 나간 뒤에도 비우기만 되고 다른 사람으로 바꾸기는 안 됨
     return selfClear === true && svcClear === true && swap === true && rootGroupSwap === true && afterLeaveSwap === true && after.future === null && after.past === A && after.b === B && edited.length === 1 ? true : { selfClear, svcClear, swap, rootGroupSwap, afterLeaveSwap, after, edited };
+  });
+
+  await check('나갈 때(여러 그룹 · 경계): 한 그룹만 나가면 그 그룹의 앞으로 약속만 만든 사람이 비고 다른 그룹 약속은 그대로 — 나가기(LEFT)와 내보내기(DELETE) 모두, 기준은 그 사람 시간대 오늘 0시(1분 뒤 약속은 비고 1분 전은 남음)', async () => {
+    const A = await join_(30, '나감'), B = await join_(31, '남음'), K = await join_(32, '내보내짐'), N = await join_(33, '뉴질랜드');
+    await q(`update public.profiles set timezone = 'Pacific/Auckland' where user_id = $1`, [N]);
+    const startOf = async (u) => new Date((await q(`select private.day_start($1) as t`, [u]))[0].t).getTime();
+    const plus = (t, min) => new Date(t + min * 60_000).toISOString();
+    const g1 = await mkGroup(A, [B, K, N]), g2 = await mkGroup(A, [B, K, N]);
+    const startA = await startOf(A), startN = await startOf(N);
+    const a1 = await appt(A, g1.g, at('10:00')), a2 = await appt(A, g2.g, at('10:00'));
+    const aAfter = await appt(A, g1.g, plus(startA, 1)), aBefore = await appt(A, g1.g, plus(startA, -1)), aExact = await appt(A, g1.g, plus(startA, 0));   // 오늘 0시 경계 (정확히 0시는 '앞으로'에 들어감)
+    const k1 = await appt(K, g1.g, at('11:00')), k2 = await appt(K, g2.g, at('11:00'));
+    const nAfter = await appt(N, g1.g, plus(startN, 1)), nBefore = await appt(N, g1.g, plus(startN, -1));        // 다른 시간대 사람의 경계
+    await as(A);
+    await q(`update public.group_members set invite_status = 'LEFT' where group_id = $1 and user_id = $2`, [g1.g, A]);
+    await su();
+    await as(B);
+    const kicked = await q(`delete from public.group_members where group_id = $1 and user_id = $2 returning 1`, [g1.g, K]);
+    await su();
+    await as(N);
+    await q(`delete from public.group_members where group_id = $1 and user_id = $2`, [g1.g, N]);
+    await su();
+    const c = {
+      a1: await creatorOf(a1), a2: await creatorOf(a2), aAfter: await creatorOf(aAfter), aBefore: await creatorOf(aBefore), aExact: await creatorOf(aExact),
+      k1: await creatorOf(k1), k2: await creatorOf(k2), nAfter: await creatorOf(nAfter), nBefore: await creatorOf(nBefore),
+    };
+    return kicked.length === 1 && c.a1 === null && c.aAfter === null && c.aExact === null && c.aBefore === A && c.a2 === A
+      && c.k1 === null && c.k2 === K && c.nAfter === null && c.nBefore === N ? true : { c, kicked: kicked.length, startA, startN };
+  });
+
+  await check('준비 없이 계정만 지워도(대시보드 · 도구) 참여 중인 공동 약속 만든 사람의 계정이 지워져 — 외래키 처리 순서가 뒤집혀도(약속 칸이 먼저 비워져도) 막히지 않고 만든 사람 칸만 비움', async () => {
+    // 같은 사건의 외래키 처리는 만들어진 순서(oid)로 돎 — 멤버 외래키를 약속 외래키보다 나중에 다시 만들어 '약속 칸이 먼저, 멤버가 나중'을 흉내 냄
+    await q(`alter table public.group_members drop constraint group_members_user_id_fkey`);
+    await q(`alter table public.group_members add constraint group_members_user_id_fkey foreign key (user_id) references public.profiles (user_id) on delete cascade`);
+    const A = await join_(34, '만든이'), B = await join_(35, '남음');
+    const { g } = await mkGroup(A, [B]);
+    const ap = await appt(A, g, at('10:00')); await part(B, ap);
+    await remove(A);                                                                           // prepare 없이
+    return (await creatorOf(ap)) === null && (await exists('appointments', 'appointment_id', ap)) && !(await exists('profiles', 'user_id', A))
+      && (await n(`select 1 from public.group_members where group_id = $1 and user_id = $2`, [g, B])) === 1 ? true : { creator: await creatorOf(ap) };
+  });
+
+  await check('12-19: 탈퇴 준비 뒤 상대가 그 사람에게 권한을 줘도 계정이 지워지면 권한 행이 남지 않고, 지워진 사람에게는 새로 줄 수 없음', async () => {
+    const A = await join_(36, '탈퇴'), B = await join_(37, '권한줌');
+    await befriend(A, B);
+    const f = await friendId(A, B);
+    await prepare(A);
+    await as(B);
+    await q(`insert into public.sharing_permissions (owner_id, grantee_id, source_type, source_id, can_view_alarm) values ($1, $2, 'FRIEND', $3, true)`, [B, A, f]);   // 탈퇴 직전에 줌
+    await su();
+    await remove(A);
+    const left = await n(`select 1 from public.sharing_permissions where owner_id = $1 or grantee_id = $1`, [A]);
+    await as(B);
+    const after = await expectErr(() => q(`insert into public.sharing_permissions (owner_id, grantee_id, source_type, source_id, can_view_alarm) values ($1, $2, 'FRIEND', $3, true)`, [B, A, f]), /.*/);
+    await su();
+    return left === 0 && after === true ? true : { left, after };
   });
 
   // ---- 함수 약속 · 권한 ------------------------------------------------------------------------
