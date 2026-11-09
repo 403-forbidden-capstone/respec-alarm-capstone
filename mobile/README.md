@@ -94,6 +94,9 @@ cp .env.example .env
 ```
 
 - 값을 받는 곳과 넣는 곳은 루트 README의 "관리자 설정 · 비밀값" 표에 있음. `.env`는 커밋되지 않음
+- 안드로이드 푸시(FCM)용 `google-services.json`은 키 파일이라 커밋하지 않음(`.gitignore`). `app.config.js`가 파일이 있을 때만 `android.googleServicesFile`에 넣고, 없으면 그대로 빌드됨
+  - 로컬 빌드(`npx expo run:android`): 받은 파일을 `mobile/google-services.json`에 둠
+  - EAS 빌드: 파일 종류 환경 변수 `GOOGLE_SERVICES_JSON`으로 올림 — `eas env:create --name GOOGLE_SERVICES_JSON --type file --value ./google-services.json --environment preview` (development · production도 같은 방식). 이 파일을 넣거나 바꾸면 네이티브 설정이 바뀌어 `runtimeVersion` fingerprint가 달라지므로 새 빌드가 필요함
 - `EXPO_PUBLIC_` 값은 빌드할 때 번들에 박힘. 로컬은 `.env`, 웹 미리보기는 Cloudflare 변수, APK는 EAS 환경 변수에 같은 값을 넣음
 
 ### 데이터 모드 · 개발 메뉴 로그인
