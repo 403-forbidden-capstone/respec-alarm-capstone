@@ -73,6 +73,25 @@ export default async function ch08({ q, as, su, svc, check, expectErr }) {
       && later.status === 'ALREADY_UP' && button.status === 'ALREADY_UP' ? true : { ringing, pending, later, button, off };
   });
 
+  await check('8-33(보내기 직전): 판정(OK)과 횟수 세기 사이에 B가 [일어났어요]를 누르면 횟수 세기(reserve)가 판정을 다시 해서 ALREADY_UP — 횟수 줄도 send_id도 안 만듦. 그대로 자고 있으면 같은 순서에서 OK + 횟수 1', async () => {
+    const { A, B, al } = await base(900);
+    await ev(al, B, 'TRIGGERED', at('07:00'));
+    const judged = await ping(A, B, at('07:05'));                        // 판정만: 깨울 수 있음
+    await ev(al, B, 'WAKE_CONFIRMED', at('07:06'), { src: 'BUTTON' });  // 그 사이 B가 일어났어요
+    const reserved = await ping(A, B, at('07:07'), true);               // 보내기 직전 횟수 세기 — 다시 판정
+    await su();
+    const [{ n }] = await q(`select count(*)::int as n from public.push_sends where kind = 'WAKE_PING' and sender_id = $1 and target_id = $2`, [A, B]);
+    const { A: A2, B: B2, al: al2 } = await base(902);                  // 대조: 그대로 자고 있으면 같은 순서에서 센다
+    await ev(al2, B2, 'TRIGGERED', at('07:00'));
+    const judged2 = await ping(A2, B2, at('07:05'));
+    const reserved2 = await ping(A2, B2, at('07:06'), true);
+    await su();
+    const [{ n: n2 }] = await q(`select count(*)::int as n from public.push_sends where kind = 'WAKE_PING' and sender_id = $1 and target_id = $2`, [A2, B2]);
+    return judged.status === 'OK' && reserved.status === 'ALREADY_UP' && reserved.send_id == null && n === 0
+      && judged2.status === 'OK' && reserved2.status === 'OK' && reserved2.count === 1 && reserved2.send_id != null && n2 === 1
+      ? true : { judged, reserved, n, judged2, reserved2, n2 };
+  });
+
   await check('8-06 · 8-07: 같은 쌍에 5분에 한 번 — 방금 보냈으면 WAIT + 다음 가능 시각, 5분 지나면 됨(2/3). 확인만 하는 판정(reserve 아님)은 횟수에 안 셈', async () => {
     const { A, B } = await base(7);
     const peek = await ping(A, B, at('07:05'));                    // 판정만
