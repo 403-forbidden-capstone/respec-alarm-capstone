@@ -119,8 +119,8 @@ export type MemberAlarm = {
   proposal?: SentProposal | null; // 내가 보낸 제안의 지금 상태 ('제안함' · '반영됨')
 };
 
-// 내가 이 알람에 보낸 가장 최근 제안 — PENDING · DISMISSED는 '제안함'(무시해도 보낸 쪽에는 안 알림), APPLIED는 '반영됨' (친구 10장 10-파)
-export type SentProposal = { status: 'PENDING' | 'APPLIED' | 'DISMISSED'; toAt: Date };
+// 내가 이 알람에 보낸 가장 최근 제안 — PENDING은 '제안함'(주인이 무시해도 서버가 PENDING으로 돌려줘 보낸 쪽에는 안 알림), APPLIED는 '반영됨' (친구 10장 10-파)
+export type SentProposal = { status: 'PENDING' | 'APPLIED'; toAt: Date };
 
 // 홈에 뜨는 받은 제안 카드 '수연 제안 기상 알람 7:30 → 7:00 [적용] [무시]'
 export type AlarmProposal = { id: string; proposerName: string; kindLabel: string; fromAt: Date; toAt: Date };

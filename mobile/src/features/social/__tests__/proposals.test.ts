@@ -69,10 +69,9 @@ describe('[적용] · [무시]', () => {
 });
 
 describe('문구', () => {
-  it("보낸 쪽 한 줄 — 대기 · 무시는 '제안함'(무시해도 친구에게는 안 알림), 적용은 '반영됨'", () => {
+  it("보낸 쪽 한 줄 — 대기는 '제안함'(주인이 무시해도 서버가 대기로 돌려줘 친구에게는 안 알림), 적용은 '반영됨'", () => {
     const toAt = new Date('2026-11-09T22:00:00.000Z'); // 한국 7:00
     expect(proposalLine({ status: 'PENDING', toAt })).toMatch(/^제안함 · .*7:00/);
-    expect(proposalLine({ status: 'DISMISSED', toAt })).toMatch(/^제안함 · .*7:00/);
     expect(proposalLine({ status: 'APPLIED', toAt })).toMatch(/^반영됨 · .*7:00/);
     expect(proposalLine(null)).toBeNull();
   });

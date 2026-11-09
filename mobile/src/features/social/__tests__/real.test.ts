@@ -403,13 +403,13 @@ describe('G04 공유받은 알람', () => {
     expect((await real.getSharedAlarms(SUYEON))?.alarms[0].firstAlarmId).toBeUndefined();
   });
 
-  it("보낸 제안 상태: '제안함'(대기 · 무시) · '반영됨'(적용)을 카드에 붙이고, 원래 시각을 같이 줌 (10-파)", async () => {
+  it("보낸 제안 상태: '제안함'(대기 · 무시는 서버가 대기로 돌려줌) · '반영됨'(적용)을 카드에 붙이고, 원래 시각을 같이 줌 (10-파)", async () => {
     const withOriginal = alarms.map((a) => (a.alarm_id === 'w1' ? { ...a, original_scheduled_at: '2026-10-19T22:45:00.000Z' } : a));
     mockFake.answerRpc('get_shared_alarm_appointments', ok(alarms.map((a) => ap(a.alarm_id))));
     mockFake.answer('alarms.select', ok(withOriginal));
-    mockFake.answerRpc('sent_alarm_proposals', ok([{ proposal_id: 'pr1', alarm_id: 'w1', status: 'DISMISSED', from_at: '2026-10-19T22:30:00.000Z', to_at: '2026-10-19T22:00:00.000Z', created_at: '2026-10-19T12:00:00.000Z' }]));
+    mockFake.answerRpc('sent_alarm_proposals', ok([{ proposal_id: 'pr1', alarm_id: 'w1', status: 'PENDING', from_at: '2026-10-19T22:30:00.000Z', to_at: '2026-10-19T22:00:00.000Z', created_at: '2026-10-19T12:00:00.000Z' }]));
     const [card] = (await real.getSharedAlarms(SUYEON))?.alarms ?? [];
-    expect(card.proposal).toEqual({ status: 'DISMISSED', toAt: new Date('2026-10-19T22:00:00.000Z') });
+    expect(card.proposal).toEqual({ status: 'PENDING', toAt: new Date('2026-10-19T22:00:00.000Z') });
     expect(card.originalAt).toEqual(new Date('2026-10-19T22:45:00.000Z'));
     expect(card.firstAlarmId).toBe('w1');
     expect(card.proposeAt).toEqual(new Date('2026-10-19T22:30:00.000Z'));

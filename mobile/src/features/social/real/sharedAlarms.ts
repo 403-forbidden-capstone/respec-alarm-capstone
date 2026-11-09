@@ -74,7 +74,7 @@ async function loadSentProposals(ownerId: string): Promise<Map<string, SentPropo
   if (error) return new Map();
   const map = new Map<string, SentProposal>();
   for (const r of data ?? []) {
-    if (r.status === 'PENDING' || r.status === 'APPLIED' || r.status === 'DISMISSED') map.set(r.alarm_id, { status: r.status, toAt: parseDbTime(r.to_at) });
+    if (r.status === 'PENDING' || r.status === 'APPLIED') map.set(r.alarm_id, { status: r.status, toAt: parseDbTime(r.to_at) });
   }
   return map;
 }
