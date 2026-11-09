@@ -497,13 +497,13 @@ isOneToOne: false
                   ]
                 },"reports": {
                   Row: {
-                    "created_at": string,"handled_at": string | null,"handled_by": string | null,"note": string | null,"reason": string,"report_id": string,"reporter_id": string | null,"status": string,"target_group_id": string | null,"target_type": string,"target_user_id": string | null
+                    "created_at": string,"evidence": Json | null,"handled_at": string | null,"handled_by": string | null,"note": string | null,"reason": string,"report_id": string,"reporter_id": string | null,"resolution": string | null,"status": string,"target_group_id": string | null,"target_type": string,"target_user_id": string | null
                   }
                   Insert: {
-                    "created_at"?: string,"handled_at"?: string | null,"handled_by"?: string | null,"note"?: string | null,"reason": string,"report_id"?: string,"reporter_id"?: string | null,"status"?: string,"target_group_id"?: string | null,"target_type": string,"target_user_id"?: string | null
+                    "created_at"?: string,"evidence"?: Json | null,"handled_at"?: string | null,"handled_by"?: string | null,"note"?: string | null,"reason": string,"report_id"?: string,"reporter_id"?: string | null,"resolution"?: string | null,"status"?: string,"target_group_id"?: string | null,"target_type": string,"target_user_id"?: string | null
                   }
                   Update: {
-                    "created_at"?: string,"handled_at"?: string | null,"handled_by"?: string | null,"note"?: string | null,"reason"?: string,"report_id"?: string,"reporter_id"?: string | null,"status"?: string,"target_group_id"?: string | null,"target_type"?: string,"target_user_id"?: string | null
+                    "created_at"?: string,"evidence"?: Json | null,"handled_at"?: string | null,"handled_by"?: string | null,"note"?: string | null,"reason"?: string,"report_id"?: string,"reporter_id"?: string | null,"resolution"?: string | null,"status"?: string,"target_group_id"?: string | null,"target_type"?: string,"target_user_id"?: string | null
                   }
                   Relationships: [
                     {
@@ -597,6 +597,25 @@ isOneToOne: false
       foreignKeyName: "sharing_permissions_owner_id_fkey"
       columns: ["owner_id"]
 isOneToOne: false
+      referencedRelation: "profiles"
+      referencedColumns: ["user_id"]
+    }
+                  ]
+                },"team_members": {
+                  Row: {
+                    "added_at": string,"user_id": string
+                  }
+                  Insert: {
+                    "added_at"?: string,"user_id": string
+                  }
+                  Update: {
+                    "added_at"?: string,"user_id"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "team_members_user_id_fkey"
+      columns: ["user_id"]
+isOneToOne: true
       referencedRelation: "profiles"
       referencedColumns: ["user_id"]
     }
@@ -862,6 +881,9 @@ isOneToOne: false
 "join_group_by_invite_code":
 { Args: { "p_invite_code": string }; Returns: string
                            },
+"list_reports":
+{ Args: { "p_limit"?: number,"p_status"?: string }; Returns: Json
+                           },
 "my_account_delete_summary":
 { Args: Record<PropertyKey, never>; Returns: {
               "friends": number,"group_appointments_staying": number,"groups_disappearing": number,"groups_leaving": number
@@ -919,6 +941,9 @@ isOneToOne: false
                            },
 "remove_friend":
 { Args: { "p_user_id": string }; Returns: Json
+                           },
+"resolve_report":
+{ Args: { "p_action": string,"p_report_id": string }; Returns: Json
                            },
 "respond_alarm_proposal":
 { Args: { "p_apply": boolean,"p_proposal_id": string }; Returns: Json

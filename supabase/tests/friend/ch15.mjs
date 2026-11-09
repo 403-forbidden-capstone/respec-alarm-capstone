@@ -1,6 +1,7 @@
 // 친구 15장 — 남용 · 보안 (친구_시험케이스.md 15장 DB 층, 11/8 확정)
 //   항목 이름 앞 번호 = 시험케이스 번호
 //   이 장 DB에 없는 것: 15-09 ~ 15-11 · 15-24(알림 서버 함수 = notify.test.ts) · 15-23 · 15-25 · 15-26(앱) · 15-27 · 15-28(대본) · 15-16의 대본 부분 · 15-21(함수마다 다른 시험으로 이미 확인)
+//   이미 다른 곳 시험이 있는 것: 15-16 DB 부분(그룹 채널에 앱이 broadcast insert 거부 = db-check '그룹 기상 신호' 시험) · 15-22(모든 public 표 RLS 켜짐 = db-check 전 표 RLS 확인)
 //   빈 곳: ① 15-08 `wake_ping_enabled` 직접 update 거절 — 앱 PR(#417)이 지금 그 길로 스위치를 바꿔서 함수 + 트리거는 앱이 옮긴 뒤 ② `groups_insert_owner`(그룹 만들기 직접 insert) — 앱이 지금 그 길로 만들어서 같은 이유로 안 닫음
 //   사람은 이 장 전용 계정. db-check 맨 끝에서 돎
 export default async function ch15({ q, as, su, svc, check, expectErr }) {

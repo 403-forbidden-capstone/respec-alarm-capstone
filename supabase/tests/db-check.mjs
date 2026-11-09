@@ -163,14 +163,15 @@ const MEETING = ['decision_comments', 'decision_votes', 'decision_states'];
 //   rate_limit_events · friend_links = 친구 2장 (제한 기록 · 친구 링크, DB 함수로만) — friend/ch02.mjs에서 따로 확인
 //   reports = 친구 4장 (신고, 넣기는 DB 함수로만 · 읽기는 운영 화면 몫) — friend/ch04.mjs에서 따로 확인
 //   push_sends = 친구 8장 (깨우기 · 미확인 친구 알림 보낸 기록, DB 함수로만) — friend/ch08.mjs에서 따로 확인
-const SERVER_ONLY = ['roll_attempts', 'rate_limit_events', 'friend_links', 'reports', 'push_tickets', 'push_sends'];
+//   team_members = 친구 4장 꼬리 (운영 화면을 열 수 있는 팀원 목록, 추가는 서버 키로) — friend/ch04.mjs에서 따로 확인
+const SERVER_ONLY = ['roll_attempts', 'rate_limit_events', 'friend_links', 'reports', 'push_tickets', 'push_sends', 'team_members'];
 
-await check('모든 public 테이블(앱 29개 — 서버 전용 6개 포함 + 회의 도구 3개)에 RLS가 켜져 있음', async () => {
+await check('모든 public 테이블(앱 30개 — 서버 전용 7개 포함 + 회의 도구 3개)에 RLS가 켜져 있음', async () => {
   const r = await q(`select c.relname, c.relrowsecurity from pg_class c join pg_namespace n on n.oid = c.relnamespace
                      where n.nspname = 'public' and c.relkind = 'r' order by 1`);
   const off = r.filter((x) => !x.relrowsecurity).map((x) => x.relname);
   const app = r.filter((x) => !MEETING.includes(x.relname)).length;
-  return app === 29 && r.length === 32 && off.length === 0 ? true : { count: r.length, app, off };
+  return app === 30 && r.length === 33 && off.length === 0 ? true : { count: r.length, app, off };
 });
 await check('모든 앱 테이블에 정책이 있고(서버 전용 표 제외) anon용 정책은 없음', async () => {
   const r = await q(`select c.relname, count(p.polname) as n,
@@ -546,6 +547,11 @@ const wakeOn = async (uid, groupId, dateExpr) => {
   await as(uid);
   return q(`select * from public.get_group_wake_status($1, ${dateExpr})`, [groupId]);
 };
+// 공개 함수는 날짜를 어제 · 오늘 · 내일로 제한함(이슈 #431) — 더 먼 날의 약속 판정은 같은 계산을 하는 비공개 함수를 그 사람 시점으로 직접 읽음
+const wakeOnFar = async (uid, groupId, dateExpr) => {
+  await su();
+  return q(`select * from private.group_wake_rows($1, $2, ${dateExpr})`, [uid, groupId]);
+};
 await check('F4: 그 그룹에 약속이 없는 날(어제 · 내일)은 빈 결과, 약속을 만들면 그날부터 나옴', async () => {
   const yesterday = await wakeOn(A, G, `${TODAY} - 1`);
   const tomorrowBefore = await wakeOn(A, G, `${TODAY} + 1`);
@@ -565,8 +571,8 @@ await check('F4: 약속이 한 번도 없는 그룹 · 다른 그룹의 약속�
   await as(A);
   await q(`insert into public.appointments (creator_id, group_id, title, appointment_at, dest_name)
            values ($1, $2, '다른 그룹 약속', ${KST0} + interval '3 days 10 hours', '세종대학교')`, [A, G2]);
-  const otherGroupOnly = await wakeOn(A, G, `${TODAY} + 3`);
-  const own = await wakeOn(A, G2, `${TODAY} + 3`);
+  const otherGroupOnly = await wakeOnFar(A, G, `${TODAY} + 3`);
+  const own = await wakeOnFar(A, G2, `${TODAY} + 3`);
   await as(A);
   await q(`delete from public.groups where group_id = $1`, [G2]);
   return none.length === 0 && otherGroupOnly.length === 0 && own.length === 1 && own[0].wake_status === 'NO_ALARM'
@@ -577,9 +583,9 @@ await check('F4: 약속 날짜는 호출자 시간대 기준 (한국 자정 직�
   await q(`insert into public.appointments (creator_id, group_id, title, appointment_at, dest_name) values
     ($1, $2, '밤 약속', ${KST0} + interval '5 days 23 hours 59 minutes', 's'),
     ($1, $2, '새벽 약속', ${KST0} + interval '7 days 1 minute', 's')`, [A, G]);
-  const d5 = await wakeOn(A, G, `${TODAY} + 5`);
-  const d6 = await wakeOn(A, G, `${TODAY} + 6`);
-  const d7 = await wakeOn(A, G, `${TODAY} + 7`);
+  const d5 = await wakeOnFar(A, G, `${TODAY} + 5`);
+  const d6 = await wakeOnFar(A, G, `${TODAY} + 6`);
+  const d7 = await wakeOnFar(A, G, `${TODAY} + 7`);
   await as(A);
   await q(`delete from public.appointments where group_id = $1 and title in ('밤 약속', '새벽 약속')`, [G]);
   return d5.length > 0 && d6.length === 0 && d7.length > 0 ? true : { d5: d5.length, d6: d6.length, d7: d7.length };
@@ -2184,7 +2190,13 @@ await check('지난 회차가 그대로: 다음 회차(화 11-10)를 만든 뒤�
     await svc();
     const missed = await q(`select alarm_id, ${kst('scheduled_at')} as at, ${kst('missed_at')} as missed from public.find_missed_wake_alarms('2026-11-04T03:00:00+09:00', 24) where user_id = $1`, [F]);
     await as(F);
-    const group = (day) => q(`select is_me, ${kst('wake_alarm_at')} as at, wake_status from public.get_group_wake_status($1, $2)`, [G2, day]);
+    // 공개 기상 조회는 날짜를 어제~내일로 제한(이슈 #431)해서, 같은 계산을 하는 비공개 함수를 F 시점으로 직접 읽음
+    const group = async (day) => {
+      await su();
+      const r = await q(`select is_me, ${kst('wake_alarm_at')} as at, wake_status from private.group_wake_rows($1, $2, $3::date)`, [F, G2, day]);
+      await as(F);
+      return r;
+    };
     // R02: 그날 계획 줄(loadPlannedRows)과 목표 기상(loadWakeAlarmAts)과 같은 조건
     const day = (from, to) => [F, `${from}T00:00:00+09:00`, `${to}T00:00:00+09:00`];
     const plan = (from, to) => q(`select alarm_id, alarm_type::text as t, ${kst('scheduled_at')} as at, is_enabled from public.alarms where user_id = $1 and scheduled_at >= $2 and scheduled_at < $3 order by scheduled_at`, day(from, to));
@@ -2678,7 +2690,7 @@ const RESET_DELETES = ['alarm_events', 'alarm_suggestions', 'alarms', 'appointme
                        'daily_journals', 'daily_records', 'profiles', 'user_edit_logs'];
 //   friend_links · rate_limit_events(친구 2장)는 지금 둠 — 친구 쪽 지우기는 15장(15-타)
 const RESET_KEEPS = ['ai_calls', 'alarm_proposals', 'friend_links', 'friends', 'group_members', 'groups', 'push_tickets', 'push_tokens', 'rate_limit_events', 'roll_attempts', 'routines',
-                     'sharing_permissions', 'todos', 'user_places', 'user_questions', 'wake_hides'];
+                     'sharing_permissions', 'team_members', 'todos', 'user_places', 'user_questions', 'wake_hides'];
 const MINE = {
   appointments: `select * from public.appointments where creator_id = $1`,
   appointment_participants: `select * from public.appointment_participants where user_id = $1`,
@@ -2706,6 +2718,7 @@ const MINE = {
   groups: `select * from public.groups where owner_id = $1`,
   friend_links: `select * from public.friend_links where owner_id = $1`,
   rate_limit_events: `select * from public.rate_limit_events where user_id = $1`,
+  team_members: `select * from public.team_members where user_id = $1`,
 };
 await check('내 시험 데이터 지우기 가드: 사용자 칸(user_id · creator_id · owner_id · requester_id · addressee_id · grantee_id)이 있는 public 표는 모두 지움/둠 목록에 있음 (새 표를 더하면 실패)', async () => {
   await su();

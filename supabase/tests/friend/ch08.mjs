@@ -56,7 +56,7 @@ export default async function ch08({ q, as, su, svc, check, expectErr }) {
     return before.status === 'NOT_RINGING' && ontime.status === 'OK' && dismissed.status === 'OK' && missed.status === 'OK' ? true : { before, ontime, dismissed, missed };
   });
 
-  await check('8-05 · 8-33: 이미 일어난 사람은 ALREADY_UP — 확인(버튼)이 있거나 자동 판정 확인이 20분 안이면(그 20분 동안 깨우기는 서버가 막음), 20분이 지나도 확인이 있으면 그대로', async () => {
+  await check('8-05 · 8-33: 이미 일어난 사람은 ALREADY_UP — 확인(버튼)이 있거나 확인이 친구에게 보이면. 자동 판정 확인이 아직 20분 안이면 친구에게 안 보이는 중이라 ALREADY_UP이 아니라 받기 끈 사람과 글자 그대로 같은 OFF(앱 문구 "지금은 깨울 수 없어요")', async () => {
     const { A, B, al } = await base(3);
     await ev(al, B, 'TRIGGERED', at('07:00'));
     const ringing = await ping(A, B, at('07:05'));
@@ -66,7 +66,11 @@ export default async function ch08({ q, as, su, svc, check, expectErr }) {
     const { A: A2, B: B2, al: al2 } = await base(5);
     await ev(al2, B2, 'WAKE_CONFIRMED', at('07:06'), { src: 'BUTTON' });
     const button = await ping(A2, B2, at('07:07'));
-    return ringing.status === 'OK' && pending.status === 'ALREADY_UP' && later.status === 'ALREADY_UP' && button.status === 'ALREADY_UP' ? true : { ringing, pending, later, button };
+    const { A: A3, B: B3 } = await base(800);
+    await q(`update public.profiles set wake_ping_enabled = false where user_id = $1`, [B3]);
+    const off = await ping(A3, B3, at('07:20'));                  // 받기를 꺼 둔 사람
+    return ringing.status === 'OK' && pending.status === 'OFF' && JSON.stringify({ ...pending, group_id: null }) === JSON.stringify({ ...off, group_id: null })
+      && later.status === 'ALREADY_UP' && button.status === 'ALREADY_UP' ? true : { ringing, pending, later, button, off };
   });
 
   await check('8-06 · 8-07: 같은 쌍에 5분에 한 번 — 방금 보냈으면 WAIT + 다음 가능 시각, 5분 지나면 됨(2/3). 확인만 하는 판정(reserve 아님)은 횟수에 안 셈', async () => {
@@ -465,5 +469,17 @@ export default async function ch08({ q, as, su, svc, check, expectErr }) {
     const anon = [await expectErr(() => q(`select * from public.my_wake_pings()`), /permission denied/), await expectErr(() => q(`select * from public.get_wake_announcement()`), /permission denied/)];
     await su();
     return app.every((x) => x === true) && Array.isArray(mine) && anon.every((x) => x === true) ? true : { app, mine, anon };
+  });
+
+  await check('8-카 · 8-27(받기 끈 사람): 깨우기 받기를 끈 사람이 미확인이어도 친구에게 "깨워 볼까요?"를 안 보냄 — 켜 둔 사람은 그대로 가고, 끈 사람이 다시 켜면 다음 배치에 감', async () => {
+    const on = await missedCase(700);
+    const off = await missedCase(710);
+    await q(`update public.profiles set wake_ping_enabled = false where user_id = $1`, [off.S]);
+    const first = await claim(at('07:40'), on.S, off.S);
+    await q(`update public.profiles set wake_ping_enabled = true where user_id = $1`, [off.S]);
+    const later = await claim(at('07:45'), off.S);
+    return JSON.stringify(targetsOf(first.filter((x) => x.sleeper_id === on.S))) === JSON.stringify(sorted(on.V1, on.V2))
+      && first.filter((x) => x.sleeper_id === off.S).length === 0
+      && JSON.stringify(targetsOf(later)) === JSON.stringify(sorted(off.V1, off.V2)) ? true : { first, later };
   });
 }

@@ -221,7 +221,7 @@ export default async function ch07({ q, as, su, svc, check, expectErr }) {
   });
 
   await check('7-14(옛 모양): get_group_wake_status는 같은 값을 옛 11칸 모양으로 — 내 줄은 울린 시각 · 미루기 횟수 · 해제 시각이 차고, 다른 사람 줄은 그 칸이 비어 있음(미루기 0)', async () => {
-    const P = '2026-11-01';                // 공개 함수는 지금 시각 기준이라 기록이 지난 날이어야 보임
+    const P = new Date(Date.now() + 9 * 3600_000 - 86400_000).toISOString().slice(0, 10);   // 어제(한국) — 공개 함수는 지금 시각 기준이라 기록이 지난 날이어야 보이고, 날짜는 어제~내일만 받음 (이슈 #431)
     const A = await join_(30, '에이'), B = await join_(31, '비'), M = await join_(72, '미확인');
     const g = await mkGroup(A, [B, M], [A, B, M]);
     await appt(A, g, at('10:00', P));
@@ -544,5 +544,40 @@ export default async function ch07({ q, as, su, svc, check, expectErr }) {
     await call(A, 'public.block_user($1)', [B]);
     const blocked = await ask(A, B);
     return base === true && noOptIn === false && notJoined.every((x) => x === false) && hidden === false && blocked === false && (await ask(NOBODY, B)) === false && (await ask(A, NOBODY)) === false ? true : { base, noOptIn, notJoined, hidden, blocked };
+  });
+
+  // ---- 7-날짜 제한: 기상 조회는 어제 · 오늘 · 내일만 (이슈 #431) ----------------------------------------
+
+  await check('7장 날짜 제한: 기상 조회(get_group_wake · get_group_wake_status)는 호출자 시간대의 어제 · 오늘 · 내일만 — 그 밖의 날짜는 그날 약속이 있어도 줄이 없고, 날짜를 안 주면 오늘, 비공개 계산은 제한 없이 같은 날을 읽음', async () => {
+    const dayIn = (tz, n) => new Date(Date.now() + n * 86400_000).toLocaleDateString('en-CA', { timeZone: tz });
+    const offsetOf = { 'Asia/Seoul': '+09:00', 'Pacific/Honolulu': '-10:00' };
+    const run = async (tz, base) => {
+      const V = await join_(base, `보는이-${tz}`), O = await join_(base + 1, `상대-${tz}`);
+      await q(`update public.profiles set timezone = $2 where user_id = $1`, [V, tz]);
+      await q(`update public.profiles set timezone = $2 where user_id = $1`, [O, tz]);
+      const g = await mkGroup(V, [O], [V, O]);
+      for (const n of [-3, -2, -1, 0, 1, 2, 3]) await appt(V, g, at('10:00', dayIn(tz, n), offsetOf[tz]));
+      const out = {};
+      for (const n of [-3, -2, -1, 0, 1, 2, 3]) {
+        const d = dayIn(tz, n);
+        await as(V);
+        const narrow = await q(`select 1 from public.get_group_wake($1, $2::date)`, [g, d]);
+        const old = await q(`select 1 from public.get_group_wake_status($1, $2::date)`, [g, d]);
+        await su();
+        const internal = await rows(V, g, d);
+        out[n] = { narrow: narrow.length, old: old.length, internal: internal.length };
+      }
+      await as(V);
+      const none = await q(`select 1 from public.get_group_wake($1, null)`, [g]);
+      const noneOld = await q(`select 1 from public.get_group_wake_status($1)`, [g]);
+      await su();
+      return { out, none: none.length, noneOld: noneOld.length };
+    };
+    const seoul = await run('Asia/Seoul', 400), honolulu = await run('Pacific/Honolulu', 410);
+    const ok = (r) => [-1, 0, 1].every((n) => r.out[n].narrow >= 1 && r.out[n].old >= 1)
+      && [-3, -2, 2, 3].every((n) => r.out[n].narrow === 0 && r.out[n].old === 0)
+      && [-3, -2, -1, 0, 1, 2, 3].every((n) => r.out[n].internal >= 1)       // 그날 데이터는 있음 — 막은 것은 날짜 범위뿐
+      && r.none >= 1 && r.noneOld >= 1;
+    return ok(seoul) && ok(honolulu) ? true : { seoul, honolulu };
   });
 }
