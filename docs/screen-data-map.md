@@ -59,6 +59,8 @@
 - 기상 확인(H08)에 들어올 때 — `uploadEvents()` (해제 기록이 기상 확인보다 먼저 들어가게)
 - 같은 때(로그인 직후 · 앱이 앞에 올 때) — 최근 12시간에 끈 기상 알람 중 확정이 없는 것을 H08과 같은 판정으로 다시 보고 조건을 채웠으면 확정 기록 (`useWakeRecheck`, 자세히는 `alarm-core.md`)
 - 저장 직후 — `applyCommit(응답)`
+- 계정 삭제 (친구 12장) — 설정 [계정 삭제]: `my_account_delete_summary` — RPC(나갈 그룹 · 마지막 멤버라 사라질 그룹 · 남을 공동 약속 · 친구 수, 본인 것만)로 확인 문구를 만들고 확인 두 번 → `account-delete` — Edge(본인만, 요청 본문 없음, 서버가 `prepare_account_delete` → `auth.admin.deleteUser`, 중간 실패는 다시 불러 이어서 끝냄) → 성공하면 `lib/session` `cleanupAfterAccountDelete()`(폰 알람 취소 · 남은 기록 버림 · 구독 끊기 · 로그아웃, 서버 계정이 이미 없으니 못 지워도 멈추지 않음). 서버 함수 타입은 서버 PR 머지 뒤 `types/database.ts`를 다시 만들 때 들어옴(그때까지 이름으로 부름)
+- 웹 삭제 요청 안내 — `/account-deletion`(로그인 없이, 폼 없음): 팀 메일 주소(답 대기라 비워 둠, `features/account/texts` `DELETION_MAIL`) · 보낼 내용(가입 이메일 · 아이디) · 30일 안 처리 안내
 - 로그아웃 — `signOutAndCleanup()` (`lib/session`): 로그아웃 중 표시 켜기(`setSigningOut`) → 기록 올려 보기 → 맞추기와 같은 줄에서 `AlarmCore.cancelAll()`(`cancelAllPhoneAlarms`) → 남은 기록 버림 → 푸시 토큰 지우기(`removePushToken`, 이 기기의 `push_tokens` 행 삭제 · 실패해도 계속) → 실시간 구독 끊기 · 기능 메모리 정리(`onSignOut`) → `signOut`. 데이터 모드 저장값은 그대로
   - 로그아웃 중 표시가 켜져 있는 동안 `reconcile`은 서버 알람을 폰에 걸지 않고 건너뜀 (로그인 상태가 남은 사이에 맞추기가 끼어 앞 계정 알람을 다시 거는 것을 막음). `cancelAll`이 실패하면 로그아웃을 멈추고 표시를 끔. 로그아웃이 끝까지 가면 켜 둔 채로 두고, 다시 로그인할 때 `useAlarmSync`가 끔
   - `signOut`은 서버에 알리다 네트워크로 실패해도 이 기기의 로그인이 지워졌으면 끝난 것으로 봄
