@@ -1,8 +1,10 @@
 // 가상 유저 일주일 시험 — 친구 · 그룹 · 권한 (모델 호출 0회, 로컬 Supabase만)
-//   node run.mjs [--users 6] [--days 7] [--actions 8] [--seed 글자] [--report 경로]
+//   node run.mjs [--users 6] [--days 7] [--actions 8] [--seed 글자 | --seeds 글자,글자,...] [--report 경로]
 //   필요: 로컬 스택 + 시드 .env (E2E_SEED_ENV). 127.0.0.1이 아니면 멈춤. 시드 데모 계정은 안 건드리고 임시 계정만 만들고 지움
 //   끝나는 조건: 위반(VIOLATION) 0 · 이상(ANOMALY) 0 → 종료 코드 0
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { spawn } from 'node:child_process';
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -186,6 +188,43 @@ async function endOfDay({ admin, users, caps, fn }) {
   return { found, cover, counts: { friends: friends.length, accepted: friends.filter((f) => f.status === 'ACCEPTED').length, blocks: blocks.length, perms: perms.filter((p) => p.can_view_alarm).length } };
 }
 
+function kstHourNow() {
+  return new Date(Date.now() + 9 * 3600e3).getUTCHours();
+}
+
+// 검사량 문턱: 기능이 조용히 빠져서 '위반 0'이 빈 검사로 나오지 않게. DB에 그 기능이 있는데 한 번도 일어나지 않으면 이상
+//   --seeds 모드에서는 씨앗 여러 개의 합계로 한 번만 봄 (한 씨앗이 우연히 안 나온 것은 이상이 아님)
+function coverageNeeds(total, caps) {
+  const need = [];
+  if (caps.hasRpc(RPC.shared_alarms) && caps.hasTable('sharing_permissions')) {
+    if (total.visible < 1) need.push('공유 알람이 보이는 조회가 한 번도 없음 (권한 있는 쌍 검사 0)');
+    if (total.hidden < 1) need.push('공유 알람이 안 보이는 조회가 한 번도 없음');
+    if (total.permsOn < 1) need.push('조회 권한 켜기가 한 번도 성공하지 못함');
+  }
+  if (caps.hasTable('groups') && total.groupsMade < 1) need.push('그룹 만들기가 한 번도 성공하지 못함 (그룹 노출 검사 0)');
+  if (caps.hasRpc(RPC.group_preview) && total.previewFound < 1) need.push('코드 미리보기가 맞는 코드에 FOUND를 준 적이 없음 (대조군)');
+  if (caps.hasRpc(RPC.group_join) && total.joinedByCode < 1) need.push('코드 참여 함수가 맞는 코드를 알아본 적이 없음 (JOINED · ALREADY_JOINED 둘 다 없음, 대조군)');
+  if (caps.hasTable('appointments') && total.apptMade < 1) need.push('공동 약속 만들기가 한 번도 성공하지 못함');
+  if (caps.hasTable('appointment_participants') && total.alarmMade < 1) need.push('내 알람 만들기(약속 참여)가 한 번도 성공하지 못함');
+  if (caps.hasTable('alarm_events') && total.confirmed < 1) need.push('기상 확인이 한 번도 성공하지 못함');
+  // 시작 약속 · 기상 알람은 지금 + 5 · 2시간, 깨우기 판정은 지금 + 3.5시간. KST 20시 이후에 돌리면 이게 다음 날로 넘어가 '오늘' 기준 기상 조회 · 깨우기 판정이 비므로 두 문턱은 건너뜀(보고서에 적음)
+  const kstHour = (new Date(Date.now() + 9 * 3600e3)).getUTCHours();
+  const lateRun = kstHour >= 20;
+  if (lateRun) need.skipped = '실행 시각이 KST 20시 이후라 기상 줄 · 깨우기 판정 문턱은 건너뜀 (약속이 다음 날로 넘어감)';
+  if (!lateRun && caps.hasRpc('get_group_wake') && total.wakeOthers < 1) need.push('그룹 기상 조회에서 다른 사람 줄이 한 번도 안 보임 (기상 노출 검사 0)');
+  if (caps.hasRpc(RPC.wake_hide) && total.hid < 1) need.push('기상 숨기기가 한 번도 성공하지 못함');
+  if (!lateRun && caps.hasRpc(RPC.wake_ping) && total.pingJudged < 1) need.push('깨우기 판정이 FORBIDDEN 아닌 상태로 한 번도 안 나옴');
+  if (caps.hasRpc(RPC.alarm_suggest) && total.proposed < 1) need.push('알람 바꾸기 제안이 한 번도 OK가 되지 못함');
+  if (caps.hasRpc(RPC.alarm_suggest_apply) && total.responded < 1) need.push('받은 제안 응답이 한 번도 성공하지 못함');
+  if (caps.hasRpc(RPC.save_group_permissions) && total.groupPerm < 1) need.push('그룹 권한 저장이 한 번도 OK가 되지 못함');
+  if (caps.hasRpc(RPC.group_invite) && total.invited < 1) need.push('그룹 직접 초대가 한 번도 성공하지 못함');
+  if (caps.hasRpc(RPC.group_accept) && total.groupAccepted < 1) need.push('그룹 초대 수락이 한 번도 성공하지 못함');
+  if (caps.hasRpc(RPC.friend_accept) && total.accepted < 1) need.push('친구 수락이 한 번도 성공하지 못함');
+  if (caps.hasRpc(RPC.block_user) && total.searchChecked < 1) need.push('차단 쌍 검색 검사가 한 번도 안 됨');
+  if (total.control < 1 && caps.hasRpc(RPC.search_handle)) need.push('검색 대조군(차단 안 한 사람이 FOUND)이 한 번도 안 됨');
+  return need;
+}
+
 async function main() {
   const env = loadEnv();
   const admin = createClient(env.url, env.serviceKey, NO_SESSION);
@@ -260,33 +299,13 @@ async function main() {
   }
 
   // 검사량 문턱: 기능이 조용히 빠져서 '위반 0'이 빈 검사로 나오지 않게. DB에 그 기능이 있는데 일주일 동안 한 번도 일어나지 않으면 이상
-  const need = [];
-  if (caps.hasRpc(RPC.shared_alarms) && caps.hasTable('sharing_permissions')) {
-    if (total.visible < 1) need.push('공유 알람이 보이는 조회가 한 번도 없음 (권한 있는 쌍 검사 0)');
-    if (total.hidden < 1) need.push('공유 알람이 안 보이는 조회가 한 번도 없음');
-    if (total.permsOn < 1) need.push('조회 권한 켜기가 한 번도 성공하지 못함');
+  const TOTAL_OUT = opt('total-out', null); // --seeds 모드의 자식 실행: 문턱은 합쳐서 한 번만 보므로 여기선 안 봄
+  const lateRun = kstHourNow() >= 20;
+  const need = TOTAL_OUT ? [] : coverageNeeds(total, caps);
+  if (TOTAL_OUT) {
+    mkdirSync(dirname(TOTAL_OUT), { recursive: true });
+    writeFileSync(TOTAL_OUT, JSON.stringify({ seed: SEED, total, lateRun }));
   }
-  if (caps.hasTable('groups') && total.groupsMade < 1) need.push('그룹 만들기가 한 번도 성공하지 못함 (그룹 노출 검사 0)');
-  if (caps.hasRpc(RPC.group_preview) && total.previewFound < 1) need.push('코드 미리보기가 맞는 코드에 FOUND를 준 적이 없음 (대조군)');
-  if (caps.hasRpc(RPC.group_join) && total.joinedByCode < 1) need.push('코드 참여 함수가 맞는 코드를 알아본 적이 없음 (JOINED · ALREADY_JOINED 둘 다 없음, 대조군)');
-  if (caps.hasTable('appointments') && total.apptMade < 1) need.push('공동 약속 만들기가 한 번도 성공하지 못함');
-  if (caps.hasTable('appointment_participants') && total.alarmMade < 1) need.push('내 알람 만들기(약속 참여)가 한 번도 성공하지 못함');
-  if (caps.hasTable('alarm_events') && total.confirmed < 1) need.push('기상 확인이 한 번도 성공하지 못함');
-  // 시작 약속 · 기상 알람은 지금 + 5 · 2시간, 깨우기 판정은 지금 + 3.5시간. KST 20시 이후에 돌리면 이게 다음 날로 넘어가 '오늘' 기준 기상 조회 · 깨우기 판정이 비므로 두 문턱은 건너뜀(보고서에 적음)
-  const kstHour = (new Date(Date.now() + 9 * 3600e3)).getUTCHours();
-  const lateRun = kstHour >= 20;
-  if (lateRun) need.skipped = '실행 시각이 KST 20시 이후라 기상 줄 · 깨우기 판정 문턱은 건너뜀 (약속이 다음 날로 넘어감)';
-  if (!lateRun && caps.hasRpc('get_group_wake') && total.wakeOthers < 1) need.push('그룹 기상 조회에서 다른 사람 줄이 한 번도 안 보임 (기상 노출 검사 0)');
-  if (caps.hasRpc(RPC.wake_hide) && total.hid < 1) need.push('기상 숨기기가 한 번도 성공하지 못함');
-  if (!lateRun && caps.hasRpc(RPC.wake_ping) && total.pingJudged < 1) need.push('깨우기 판정이 FORBIDDEN 아닌 상태로 한 번도 안 나옴');
-  if (caps.hasRpc(RPC.alarm_suggest) && total.proposed < 1) need.push('알람 바꾸기 제안이 한 번도 OK가 되지 못함');
-  if (caps.hasRpc(RPC.alarm_suggest_apply) && total.responded < 1) need.push('받은 제안 응답이 한 번도 성공하지 못함');
-  if (caps.hasRpc(RPC.save_group_permissions) && total.groupPerm < 1) need.push('그룹 권한 저장이 한 번도 OK가 되지 못함');
-  if (caps.hasRpc(RPC.group_invite) && total.invited < 1) need.push('그룹 직접 초대가 한 번도 성공하지 못함');
-  if (caps.hasRpc(RPC.group_accept) && total.groupAccepted < 1) need.push('그룹 초대 수락이 한 번도 성공하지 못함');
-  if (caps.hasRpc(RPC.friend_accept) && total.accepted < 1) need.push('친구 수락이 한 번도 성공하지 못함');
-  if (caps.hasRpc(RPC.block_user) && total.searchChecked < 1) need.push('차단 쌍 검색 검사가 한 번도 안 됨');
-  if (total.control < 1 && caps.hasRpc(RPC.search_handle)) need.push('검색 대조군(차단 안 한 사람이 FOUND)이 한 번도 안 됨');
   if (need.skipped) console.log(`참고: ${need.skipped}`);
   for (const m of need) days[days.length - 1].violations.push({ kind: 'ANOMALY', rule: '검사량 부족', detail: m, day: DAYS });
   const all = days.flatMap((d) => d.violations);
@@ -333,7 +352,44 @@ function shuffled(rng, arr) {
   return a;
 }
 
-main().catch((e) => {
+// --seeds a,b,c : 씨앗마다 한 번씩 돌리고(각자 위반 · 이상 검사는 그대로), 검사량 문턱은 합계로 한 번만 봄
+async function runSeeds(seeds) {
+  if (!seeds.length) throw new Error('--seeds 값이 비어 있음 (예: --seeds w1,w2,w3)');
+  if (new Set(seeds).size !== seeds.length) throw new Error('--seeds에 같은 씨앗이 두 번 들어 있음 (합계가 부풀려짐)');
+  const env = loadEnv();
+  const caps = await readCaps(env.url, env.serviceKey);
+  const dir = join(tmpdir(), `sim-friends-seeds-${process.pid}`);
+  const sum = Object.fromEntries(Object.keys({ visible: 0, hidden: 0, searchChecked: 0, searchLimited: 0, control: 0, groupsMade: 0, permsOn: 0, accepted: 0, invited: 0, groupAccepted: 0, previewFound: 0, joinedByCode: 0, apptMade: 0, alarmMade: 0, confirmed: 0, hid: 0, pingJudged: 0, proposed: 0, responded: 0, groupPerm: 0, wakeViews: 0, wakeOthers: 0 }).map((k) => [k, 0]));
+  let bad = 0;
+  const passthrough = [];
+  for (const k of ['users', 'days', 'actions']) if (opt(k, null) != null) passthrough.push(`--${k}`, opt(k));
+  try {
+    for (const seed of seeds) {
+      const out = join(dir, `${seed}.json`);
+      const code = await new Promise((resolve) => {
+        const child = spawn(process.execPath, [fileURLToPath(import.meta.url), '--seed', seed, '--total-out', out, ...passthrough], { stdio: 'inherit' });
+        child.on('exit', (c) => resolve(c ?? 1));
+      });
+      if (code === 2) throw new Error(`씨앗 ${seed} 실행이 시작도 못 하고 실패함`);
+      if (code !== 0) bad += 1;
+      const r = JSON.parse(readFileSync(out, 'utf8'));
+      for (const k of Object.keys(sum)) sum[k] += r.total[k] ?? 0;
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+  const need = coverageNeeds(sum, caps);
+  console.log(`
+=== 씨앗 ${seeds.length}개 합계 (${seeds.join(' · ')}) ===`);
+  console.log(`공유 알람 보임 ${sum.visible} · 안 보임 ${sum.hidden} · 차단 쌍 검색 ${sum.searchChecked} · 그룹 ${sum.groupsMade} · 공동 약속 ${sum.apptMade} · 기상 확인 ${sum.confirmed} · 기상 줄 ${sum.wakeOthers} · 숨기기 ${sum.hid} · 깨우기 판정 ${sum.pingJudged} · 제안 ${sum.proposed}/응답 ${sum.responded} · 그룹 권한 ${sum.groupPerm}`);
+  if (need.skipped) console.log(`참고: ${need.skipped}`);
+  for (const m of need) console.log(`ANOMALY 검사량 부족(합계) — ${m}`);
+  console.log(`씨앗 ${seeds.length}개: 위반 · 이상이 있었던 씨앗 ${bad}개 · 합계 문턱 부족 ${need.length}건`);
+  process.exitCode = bad + need.length === 0 ? 0 : 1;
+}
+
+const SEEDS = args.includes('--seeds') ? (opt('seeds', '') ?? '') : null;
+(SEEDS !== null ? runSeeds(SEEDS.split(',').map((x) => x.trim()).filter(Boolean)) : main()).catch((e) => {
   console.error(`시험 실행 실패: ${e.message}`);
   process.exit(2);
 });
