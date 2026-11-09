@@ -354,27 +354,30 @@ function shuffled(rng, arr) {
 
 // --seeds a,b,c : 씨앗마다 한 번씩 돌리고(각자 위반 · 이상 검사는 그대로), 검사량 문턱은 합계로 한 번만 봄
 async function runSeeds(seeds) {
+  if (!seeds.length) throw new Error('--seeds 값이 비어 있음 (예: --seeds w1,w2,w3)');
+  if (new Set(seeds).size !== seeds.length) throw new Error('--seeds에 같은 씨앗이 두 번 들어 있음 (합계가 부풀려짐)');
   const env = loadEnv();
   const caps = await readCaps(env.url, env.serviceKey);
   const dir = join(tmpdir(), `sim-friends-seeds-${process.pid}`);
   const sum = Object.fromEntries(Object.keys({ visible: 0, hidden: 0, searchChecked: 0, searchLimited: 0, control: 0, groupsMade: 0, permsOn: 0, accepted: 0, invited: 0, groupAccepted: 0, previewFound: 0, joinedByCode: 0, apptMade: 0, alarmMade: 0, confirmed: 0, hid: 0, pingJudged: 0, proposed: 0, responded: 0, groupPerm: 0, wakeViews: 0, wakeOthers: 0 }).map((k) => [k, 0]));
   let bad = 0;
-  let late = false;
   const passthrough = [];
   for (const k of ['users', 'days', 'actions']) if (opt(k, null) != null) passthrough.push(`--${k}`, opt(k));
-  for (const seed of seeds) {
-    const out = join(dir, `${seed}.json`);
-    const code = await new Promise((resolve) => {
-      const child = spawn(process.execPath, [fileURLToPath(import.meta.url), '--seed', seed, '--total-out', out, ...passthrough], { stdio: 'inherit' });
-      child.on('exit', (c) => resolve(c ?? 1));
-    });
-    if (code === 2) throw new Error(`씨앗 ${seed} 실행이 시작도 못 하고 실패함`);
-    if (code !== 0) bad += 1;
-    const r = JSON.parse(readFileSync(out, 'utf8'));
-    for (const k of Object.keys(sum)) sum[k] += r.total[k] ?? 0;
-    late ||= r.lateRun;
+  try {
+    for (const seed of seeds) {
+      const out = join(dir, `${seed}.json`);
+      const code = await new Promise((resolve) => {
+        const child = spawn(process.execPath, [fileURLToPath(import.meta.url), '--seed', seed, '--total-out', out, ...passthrough], { stdio: 'inherit' });
+        child.on('exit', (c) => resolve(c ?? 1));
+      });
+      if (code === 2) throw new Error(`씨앗 ${seed} 실행이 시작도 못 하고 실패함`);
+      if (code !== 0) bad += 1;
+      const r = JSON.parse(readFileSync(out, 'utf8'));
+      for (const k of Object.keys(sum)) sum[k] += r.total[k] ?? 0;
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
   }
-  rmSync(dir, { recursive: true, force: true });
   const need = coverageNeeds(sum, caps);
   console.log(`
 === 씨앗 ${seeds.length}개 합계 (${seeds.join(' · ')}) ===`);
@@ -385,8 +388,8 @@ async function runSeeds(seeds) {
   process.exitCode = bad + need.length === 0 ? 0 : 1;
 }
 
-const SEEDS = opt('seeds', null);
-(SEEDS ? runSeeds(SEEDS.split(',').map((x) => x.trim()).filter(Boolean)) : main()).catch((e) => {
+const SEEDS = args.includes('--seeds') ? (opt('seeds', '') ?? '') : null;
+(SEEDS !== null ? runSeeds(SEEDS.split(',').map((x) => x.trim()).filter(Boolean)) : main()).catch((e) => {
   console.error(`시험 실행 실패: ${e.message}`);
   process.exit(2);
 });
