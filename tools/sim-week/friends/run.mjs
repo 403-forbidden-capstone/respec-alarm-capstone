@@ -272,9 +272,13 @@ async function main() {
   if (caps.hasTable('appointments') && total.apptMade < 1) need.push('공동 약속 만들기가 한 번도 성공하지 못함');
   if (caps.hasTable('appointment_participants') && total.alarmMade < 1) need.push('내 알람 만들기(약속 참여)가 한 번도 성공하지 못함');
   if (caps.hasTable('alarm_events') && total.confirmed < 1) need.push('기상 확인이 한 번도 성공하지 못함');
-  if (caps.hasRpc('get_group_wake') && total.wakeOthers < 1) need.push('그룹 기상 조회에서 다른 사람 줄이 한 번도 안 보임 (기상 노출 검사 0)');
+  // 시작 약속 · 기상 알람은 지금 + 5 · 2시간, 깨우기 판정은 지금 + 3.5시간. KST 20시 이후에 돌리면 이게 다음 날로 넘어가 '오늘' 기준 기상 조회 · 깨우기 판정이 비므로 두 문턱은 건너뜀(보고서에 적음)
+  const kstHour = (new Date(Date.now() + 9 * 3600e3)).getUTCHours();
+  const lateRun = kstHour >= 20;
+  if (lateRun) need.skipped = '실행 시각이 KST 20시 이후라 기상 줄 · 깨우기 판정 문턱은 건너뜀 (약속이 다음 날로 넘어감)';
+  if (!lateRun && caps.hasRpc('get_group_wake') && total.wakeOthers < 1) need.push('그룹 기상 조회에서 다른 사람 줄이 한 번도 안 보임 (기상 노출 검사 0)');
   if (caps.hasRpc(RPC.wake_hide) && total.hid < 1) need.push('기상 숨기기가 한 번도 성공하지 못함');
-  if (caps.hasRpc(RPC.wake_ping) && total.pingJudged < 1) need.push('깨우기 판정이 FORBIDDEN 아닌 상태로 한 번도 안 나옴');
+  if (!lateRun && caps.hasRpc(RPC.wake_ping) && total.pingJudged < 1) need.push('깨우기 판정이 FORBIDDEN 아닌 상태로 한 번도 안 나옴');
   if (caps.hasRpc(RPC.alarm_suggest) && total.proposed < 1) need.push('알람 바꾸기 제안이 한 번도 OK가 되지 못함');
   if (caps.hasRpc(RPC.alarm_suggest_apply) && total.responded < 1) need.push('받은 제안 응답이 한 번도 성공하지 못함');
   if (caps.hasRpc(RPC.save_group_permissions) && total.groupPerm < 1) need.push('그룹 권한 저장이 한 번도 OK가 되지 못함');
@@ -283,6 +287,7 @@ async function main() {
   if (caps.hasRpc(RPC.friend_accept) && total.accepted < 1) need.push('친구 수락이 한 번도 성공하지 못함');
   if (caps.hasRpc(RPC.block_user) && total.searchChecked < 1) need.push('차단 쌍 검색 검사가 한 번도 안 됨');
   if (total.control < 1 && caps.hasRpc(RPC.search_handle)) need.push('검색 대조군(차단 안 한 사람이 FOUND)이 한 번도 안 됨');
+  if (need.skipped) console.log(`참고: ${need.skipped}`);
   for (const m of need) days[days.length - 1].violations.push({ kind: 'ANOMALY', rule: '검사량 부족', detail: m, day: DAYS });
   const all = days.flatMap((d) => d.violations);
   const nViol = all.filter((v) => v.kind === 'VIOLATION').length;

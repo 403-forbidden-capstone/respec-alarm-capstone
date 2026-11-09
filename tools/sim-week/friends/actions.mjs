@@ -216,7 +216,8 @@ export const ACTIONS = [
       const { data: mine } = await c.admin.from('appointment_participants').select('participant_id').eq('appointment_id', appt.appointment_id).eq('user_id', c.me.id);
       const r = await c.me.client.from('appointments').update({ dest_name: `SIM 목적지 ${c.rng.int(1000)}` }).eq('appointment_id', appt.appointment_id).select();
       if (r.error && isServerFault(r.error)) c.anomalies.push({ kind: 'ANOMALY', rule: '서버 오류', detail: `약속 고치기: ${r.error.code}` });
-      c.anomalies.push(...checkApptEdit({ editor: c.me.id, creatorId: appt.creator_id, rowsChanged: (r.data ?? []).length > 0, isParticipant: (mine ?? []).length > 0 }));
+      const { data: still } = await c.admin.from('group_members').select('user_id').eq('group_id', appt.group_id).eq('user_id', c.me.id).eq('invite_status', 'JOINED');
+      c.anomalies.push(...checkApptEdit({ editor: c.me.id, creatorId: appt.creator_id, rowsChanged: (r.data ?? []).length > 0, isParticipant: (mine ?? []).length > 0, editorJoined: (still ?? []).length > 0 }));
       return { status: r.error ? `거절:${r.error.code}` : (r.data ?? []).length ? '고침' : '0행(권한 없음)' };
     },
   },

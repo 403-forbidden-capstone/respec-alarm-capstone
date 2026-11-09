@@ -155,6 +155,7 @@ test('공동 약속 고치기: 만든 사람 아닌데 고쳐지면 위반 (만�
   assert.equal(checkApptEdit({ editor: B, creatorId: A, rowsChanged: false }).length, 0);
   assert.equal(checkApptEdit({ editor: B, creatorId: null, rowsChanged: true, isParticipant: true }).length, 0);
   assert.equal(checkApptEdit({ editor: B, creatorId: null, rowsChanged: true, isParticipant: false }).length, 1);
+  assert.equal(checkApptEdit({ editor: A, creatorId: A, rowsChanged: true, editorJoined: false }).length, 1); // 그룹을 나간 만든 사람도 못 고침
 });
 
 test('정적 규칙: 기상 확인 하루 한 건 · 그룹 나간 사람의 앞으로 약속 참여 · 제안 합계 ±60분', () => {

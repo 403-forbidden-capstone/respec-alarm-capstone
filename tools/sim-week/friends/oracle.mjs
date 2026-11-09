@@ -180,8 +180,9 @@ export function checkProposal({ proposer, owner, status, perms, blocks = [] }) {
 }
 
 // 공동 약속 고치기: 만든 사람만(만든 사람이 비면 참여자). 다른 사람이 고쳐졌으면 위반
-export function checkApptEdit({ editor, creatorId, rowsChanged, isParticipant }) {
+export function checkApptEdit({ editor, creatorId, rowsChanged, isParticipant, editorJoined = true }) {
   if (!rowsChanged) return [];
+  if (!editorJoined) return [{ kind: 'VIOLATION', rule: 'P9-그룹에 참여 중이 아닌 사람이 공동 약속을 고침', detail: `${editor}` }];
   if (creatorId === editor) return [];
   if (creatorId == null && isParticipant) return [];
   return [{ kind: 'VIOLATION', rule: 'P9-만든 사람이 아닌데 공동 약속이 고쳐짐', detail: `${editor} (만든 사람 ${creatorId})` }];
