@@ -4,17 +4,16 @@
 import { callEdge, EdgeError } from '@/lib/edge';
 import { supabase } from '@/lib/supabase';
 
+import type { Database } from '@/types/database';
+
 import type { DeleteResult, DeleteSummary } from './types';
 
-type SummaryRow = { groups_leaving?: number; groups_disappearing?: number; group_appointments_staying?: number; friends?: number };
-
-// 서버 함수 타입(types/database.ts)은 서버 PR이 머지되고 타입을 다시 만들 때 들어오므로 그때까지 이름으로 부름
-const rpc = supabase.rpc.bind(supabase) as unknown as (name: string) => Promise<{ data: unknown; error: Error | null }>;
+type SummaryRow = Partial<Database['public']['Functions']['my_account_delete_summary']['Returns'][number]>; // 서버가 칸을 빠뜨려도 0으로 읽지 않게 Partial
 
 export async function getDeleteSummary(): Promise<DeleteSummary> {
-  const { data, error } = await rpc('my_account_delete_summary');
+  const { data, error } = await supabase.rpc('my_account_delete_summary');
   if (error) throw error;
-  const row = (Array.isArray(data) ? data[0] : data) as SummaryRow | null | undefined;
+  const row = (Array.isArray(data) ? data[0] : data) as SummaryRow | null | undefined; // 서버는 한 줄 배열을 줌 — 한 줄 객체로 와도 읽음
   // 서버는 항상 한 줄을 줌 — 줄이 없으면 영향이 0으로 읽혀 '되돌릴 수 없어요' 한 줄만 보이므로 실패로 처리 (확인할 내용을 못 불러왔다고 안내)
   if (!row || typeof row !== 'object') throw new Error('my_account_delete_summary: 요약 줄이 없어요');
   return {
