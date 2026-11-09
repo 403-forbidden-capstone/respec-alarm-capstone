@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { type AccountService, readAccountDeleteRequest, runAccountDelete } from './account.ts';
+import { type AccountService, readAccountDeleteBody, readAccountDeleteRequest, runAccountDelete } from './account.ts';
 import { HttpError } from './errors.ts';
 import { Reader } from './read.ts';
 
@@ -96,4 +96,16 @@ test('12-15: 본인만 — 요청이 비었거나 내 id면 통과(대소문자 
   assert.throws(() => readAccountDeleteRequest(Reader.root({ userId: OTHER }), ME), (e: unknown) => e instanceof HttpError && e.status === 403);
   assert.throws(() => readAccountDeleteRequest(Reader.root({ userId: 'not-a-uuid' }), ME), (e: unknown) => e instanceof HttpError && e.status === 400);
   readAccountDeleteRequest(Reader.root({ confirm: true }), ME); // 모르는 칸은 무시 (삭제 대상은 로그인한 사람뿐이라 영향 없음)
+});
+
+test('12-15: 본문 읽기 — 본문이 아예 없거나 비었거나 공백뿐이거나 {}면 본인으로 통과(앱은 본문 없이 부름), 다른 사람 id는 403, 깨진 JSON은 400', async () => {
+  const post = (body?: string) => new Request('http://localhost/account-delete', { method: 'POST', ...(body === undefined ? {} : { body }) });
+  await readAccountDeleteBody(post(), ME);                         // 본문 자체가 없음
+  await readAccountDeleteBody(post(''), ME);
+  await readAccountDeleteBody(post('  \n '), ME);
+  await readAccountDeleteBody(post('{}'), ME);
+  await readAccountDeleteBody(post(JSON.stringify({ userId: ME })), ME);
+  await assert.rejects(() => readAccountDeleteBody(post(JSON.stringify({ userId: OTHER })), ME), (e: unknown) => e instanceof HttpError && e.status === 403);
+  await assert.rejects(() => readAccountDeleteBody(post('not json'), ME), (e: unknown) => e instanceof HttpError && e.status === 400);
+  await assert.rejects(() => readAccountDeleteBody(post('[1]'), ME), (e: unknown) => e instanceof HttpError && e.status === 400);   // 객체가 아님
 });
