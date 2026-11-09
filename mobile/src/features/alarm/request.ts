@@ -154,6 +154,7 @@ export function joinBody(appointmentId: string, choice: JoinChoice): Body {
       origin: { name: ORIGIN_HOME },
       transport_type: choice.transport,
       ...(choice.prepareMinutes != null ? { prepare_minutes: within(choice.prepareMinutes, MAX_PREPARE_MINUTES) } : {}),
+      ...(choice.travelMinutes != null ? { est_travel_minutes: within(choice.travelMinutes, MAX_TRAVEL_MINUTES), travel_source: 'MANUAL' } : {}),
     },
     kinds: [...RING_KINDS],
   };

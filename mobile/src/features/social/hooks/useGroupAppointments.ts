@@ -2,6 +2,7 @@ import { useState } from 'react';
 
 import { confirm, toast } from '@/components/ui';
 import { getJoinDefaults, joinSharedAppointment, leaveSharedAppointment } from '@/features/alarm/api';
+import { travelConfirmMessage, TravelConfirmNeeded, TRAVEL_CONFIRM_OK } from '@/features/alarm/travelConfirm';
 import type { JoinChoice, JoinDefaults } from '@/features/alarm/types';
 import { userMessage } from '@/lib/errors';
 import { useAction } from '@/lib/useAction';
@@ -34,14 +35,32 @@ export function useGroupAppointments(onChanged: () => void) {
   };
 
   // 실패(오프라인 · 지난 약속)면 시트를 열어 둔 채 토스트 — 다시 누르면 같은 요청이라 서버엔 내 참여 한 줄 (9-35)
-  const join = (choice: JoinChoice) =>
-    run(async () => {
-      if (!joinFor) return;
-      const result = await joinSharedAppointment(joinFor.id, choice);
-      setJoinFor(null);
-      toast(result.phoneFailed ? `${JOINED_TOAST}. 폰에 못 건 알람은 앱을 다시 열면 걸어요` : JOINED_TOAST);
-      onChanged();
+  //   길찾기를 못 하면(어림 이동시간) 확인 창 — 확인하면 그 분을 직접 정한 값(MANUAL)으로 다시 보냄 (9-어, H03 저장과 같은 길). 확인 창은 가드 밖에서
+  const join = async (choice: JoinChoice) => {
+    const target = joinFor;
+    if (!target) return;
+    let ask: TravelConfirmNeeded | null = null;
+    await run(async () => {
+      try {
+        await finishJoin(target.id, choice);
+      } catch (e) {
+        if (!(e instanceof TravelConfirmNeeded)) throw e;
+        ask = e;
+      }
     }, '내 알람을 만들지 못했어요. 다시 해 주세요');
+    const fallback = ask as TravelConfirmNeeded | null;
+    if (!fallback) return;
+    const ok = await confirm({ title: '이동시간을 확인해 주세요', message: travelConfirmMessage(fallback), okLabel: TRAVEL_CONFIRM_OK });
+    if (!ok) return;
+    await run(() => finishJoin(target.id, { ...choice, travelMinutes: fallback.minutes }), '내 알람을 만들지 못했어요. 다시 해 주세요');
+  };
+
+  const finishJoin = async (appointmentId: string, choice: JoinChoice) => {
+    const result = await joinSharedAppointment(appointmentId, choice);
+    setJoinFor(null);
+    toast(result.phoneFailed ? `${JOINED_TOAST}. 폰에 못 건 알람은 앱을 다시 열면 걸어요` : JOINED_TOAST);
+    onChanged();
+  };
 
   const openJoiners = async (a: GroupAppointment) => {
     setJoinersFor(a);

@@ -7,6 +7,7 @@ import { editError } from '../realEdit';
 import * as real from '../real';
 import { joinBody, newAppointmentBody } from '../request';
 import { toRows } from '../realRows';
+import { TravelConfirmNeeded } from '../travelConfirm';
 import type { AppointmentDraft } from '../types';
 
 // 친구 9장 앱 층 — 공동 약속의 알람 쪽 (시험케이스 9-03 · 9-21 · 9-27 · 9-32 · 9-35 · 9-36, 세션약속 2절 11/9 9장 줄)
@@ -78,6 +79,24 @@ describe('[내 알람 만들기] (9-03 · 9-35)', () => {
     mockCallEdge.mockRejectedValueOnce(new EdgeError('NETWORK'));
     await expect(real.joinSharedAppointment('ap1', { transport: 'TRANSIT', prepareMinutes: null })).rejects.toBeInstanceOf(EdgeError);
     expect(mockApplyCommit).not.toHaveBeenCalled();
+  });
+});
+
+describe('[내 알람 만들기] 길찾기 실패 (9-어)', () => {
+  it('어림 이동시간이 오면 TravelConfirmNeeded — 확인한 분은 MANUAL로 다시 보냄', async () => {
+    mockCallEdge.mockRejectedValueOnce(new EdgeError('ROUTE_UNAVAILABLE', { details: { fallback: { minutes: 30, source: 'ESTIMATE' } } }));
+    const error = await real.joinSharedAppointment('ap1', { transport: 'TRANSIT', prepareMinutes: null }).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(TravelConfirmNeeded);
+    expect((error as TravelConfirmNeeded).minutes).toBe(30);
+    mockCallEdge.mockResolvedValueOnce({ appointment_id: 'ap1', alarms: [], ring_packages: [], canceled_alarm_ids: [] });
+    await real.joinSharedAppointment('ap1', { transport: 'TRANSIT', prepareMinutes: null, travelMinutes: 30 });
+    const body = mockCallEdge.mock.calls[1][1] as { participant: Record<string, unknown> };
+    expect(body.participant).toMatchObject({ est_travel_minutes: 30, travel_source: 'MANUAL' });
+  });
+
+  it('어림값도 없으면(좌표 없음) 그대로 던짐 — 직접 입력은 H03에서', async () => {
+    mockCallEdge.mockRejectedValueOnce(new EdgeError('ROUTE_UNAVAILABLE', { details: { manual_required: true } }));
+    await expect(real.joinSharedAppointment('ap1', { transport: 'TRANSIT', prepareMinutes: null })).rejects.toBeInstanceOf(EdgeError);
   });
 });
 

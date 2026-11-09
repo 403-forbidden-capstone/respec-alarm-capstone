@@ -248,8 +248,15 @@ export async function createAppointment(estimate: Estimate, source?: string): Pr
 
 // 공동 약속 [내 알람 만들기] (친구 9장) — 그룹원이 G02 연결 일정에서 누름. 서버가 내 참여 조건 · 알람을 만들고(이미 있으면 같은 한 줄을 고침), 응답을 폰에 걺
 //   실패(오프라인 · 지난 약속 PAST_APPOINTMENT · 그룹 밖 FORBIDDEN)는 lib/edge 문구로 그대로 던짐 → 화면이 다시 하기. 저장 뒤 폰 예약 실패는 못 건 수만
+//   길찾기를 못 하면(ROUTE_UNAVAILABLE + 어림값) TravelConfirmNeeded — 시트가 어림 분을 보여 주고 확인하면 그 분을 MANUAL로 다시 보냄 (9-어, H03과 같은 길)
 export async function joinSharedAppointment(appointmentId: string, choice: JoinChoice): Promise<JoinResult> {
-  const res = await callEdge<CommitResponse>('alarm-commit', joinBody(appointmentId, choice), { timeoutMs: COMMIT_TIMEOUT_MS });
+  let res: CommitResponse;
+  try {
+    res = await callEdge<CommitResponse>('alarm-commit', joinBody(appointmentId, choice), { timeoutMs: COMMIT_TIMEOUT_MS });
+  } catch (e) {
+    const fallback = choice.travelMinutes == null ? travelFallbackOf(e) : null;
+    throw fallback ? new TravelConfirmNeeded(fallback) : e;
+  }
   return { phoneFailed: (await phoneFailedIds(res)).size };
 }
 

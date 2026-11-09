@@ -108,7 +108,8 @@ export type SaveFollowUp = { phoneFailed: number; itemsFailed: boolean };
 
 // 공동 약속 [내 알람 만들기] 확인 시트 (친구 9장) — 출발지는 내 집, 수단 · 준비 시간 기본값은 프로필(온보딩 값), 시트에서 고침
 export type JoinDefaults = { homeName: string | null; transport: Transport; prepareMinutes: number };
-export type JoinChoice = { transport: Transport; prepareMinutes: number | null }; // prepareMinutes null = 기본값 그대로(서버가 내 기록으로 계산)
+// prepareMinutes null = 기본값 그대로(서버가 내 기록으로 계산). travelMinutes = 길찾기를 못 해 사용자가 확인한 이동시간(MANUAL), 보통은 없음(서버가 길찾기)
+export type JoinChoice = { transport: Transport; prepareMinutes: number | null; travelMinutes?: number | null };
 export type JoinResult = { phoneFailed: number }; // 폰에 못 건 알람 수
 export type SavedAppointment = Appointment & { followUp?: SaveFollowUp };
 export type SettingsSaveResult = { turnedOff: boolean; turnedOn: boolean; followUp?: SaveFollowUp };
