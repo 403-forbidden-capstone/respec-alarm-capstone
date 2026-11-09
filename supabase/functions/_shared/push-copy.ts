@@ -30,7 +30,7 @@ export const CHANNEL_IDS: Record<PushKind, string> = {
 
 // 누르면: 깨우기 · 본인 미확인 → 내 기상 확인(H08), 알람 바뀜 → 받은 알람(G04), 요청 · 수락 → 친구(F01), 그룹 → 그룹(G02), 친구 미확인 · 후속 → 그 사람의 기상 확인(G03, 그룹 id + 사람 id가 알림 데이터에)
 export const PATHS: Record<PushKind, string> = {
-  WAKE_PING: '/wake',
+  WAKE_PING: '/wake', // 그룹을 모를 때의 자리 — 깨우기는 보통 wakePingPath로 그 사람의 G03를 엶
   ALARM_CHANGED: '/alarms',
   FRIEND_REQUEST: '/friends',
   FRIEND_ACCEPTED: '/friends',
@@ -40,6 +40,9 @@ export const PATHS: Record<PushKind, string> = {
   WAKE_NUDGE: '/group',
   WAKE_NUDGE_UP: '/group',
 };
+
+// 깨우기를 누르면 열 화면: 그 그룹에서 본 그 사람의 기상 확인(G03, 8-사)
+export const wakePingPath = (groupId: string, targetUserId: string): string => `/groups/${groupId}/members/${targetUserId}`;
 
 export type CopyContext = {
   senderName?: string | null;

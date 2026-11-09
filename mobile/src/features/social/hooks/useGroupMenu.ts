@@ -118,7 +118,8 @@ export function useGroupMenu(group: GroupDetail, onChanged: () => void, onLeft: 
 
   const leave = async () => {
     setMenuOpen(false);
-    const t = leaveText(group.name, group.appointments.length, group.members.length <= 1);
+    // n = 앞으로 약속 중 내가 참여한 것 — 나가면 그 알람만 지워지고 지난 약속 기록은 남음 (9-29 · 11/9 헤드 결정)
+    const t = leaveText(group.name, group.appointments.filter((a) => a.iJoined && !a.past).length, group.members.length <= 1);
     if (!(await confirm({ title: t.title, message: t.body, okLabel: t.ok, destructive: true }))) return;
     await run(async () => {
       await leaveGroup(group.id);

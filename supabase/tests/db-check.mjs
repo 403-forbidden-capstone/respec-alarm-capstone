@@ -1055,7 +1055,7 @@ await check('G04 약속 정보: 조회 권한(친구 · 그룹)을 받은 사람
 });
 
 // 푸시 보내도 되는지 (notify)
-await check('푸시 권한 확인(can_send_push): ALARM_CHANGED는 보내는 사람이 받는 사람 알람의 설정 권한(친구 ∪ 그룹)을 가졌을 때만, WAKE_PING은 기상이 보이는 사람에게만(8장)', async () => {
+await check('푸시 권한 확인(can_send_push): ALARM_CHANGED는 보내는 사람이 받는 사람 알람의 설정 권한(친구 ∪ 그룹)을 가졌을 때만, WAKE_PING은 D19 뒤라 항상 거절', async () => {
   const can = async (s, t, k) => {
     await svc();
     return (await q(`select public.can_send_push($1, $2, $3) as ok`, [s, t, k]))[0].ok;
@@ -1076,7 +1076,7 @@ await check('푸시 권한 확인(can_send_push): ALARM_CHANGED는 보내는 사
   const yes = await can(A, B, 'ALARM_CHANGED');
   const reverse = await can(B, A, 'ALARM_CHANGED');
   const stranger = await can(A, C, 'ALARM_CHANGED');
-  const ping = await can(A, C, 'WAKE_PING');
+  const ping = await can(A, B, 'WAKE_PING');
   const unknown = await can(A, B, 'SOMETHING');
   const nulls = [await can(null, B, 'ALARM_CHANGED'), await can(A, null, 'ALARM_CHANGED'), await can(A, B, null)];
   await as(B);

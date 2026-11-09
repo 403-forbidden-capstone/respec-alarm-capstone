@@ -9,7 +9,7 @@ import { UserError } from '@/lib/errors';
 import { dateParts } from '@/lib/format';
 import { isMock } from '@/lib/mode';
 import { mockWakeRow } from '@/mocks/calc';
-import { db, kst, memberAlarms, people, type MockMemberAlarm, type MockPerson } from '@/mocks/data';
+import { db, kst, memberAlarms, people, timelines, type MockMemberAlarm, type MockPerson } from '@/mocks/data';
 
 import { mergeGrants } from './grants';
 import { NO_APPOINTMENT_STATE, wakeStateOf, wokeCountOf, type WakeRow } from './map';
@@ -18,6 +18,8 @@ import * as real from './real';
 import { MESSAGE_GONE } from './relationMessages';
 import { mergeHits } from './searchView';
 import {
+  type AppointmentJoiner,
+  type GroupAppointment,
   type CreatedGroup,
   type GroupCode,
   type GroupInvite,
@@ -263,6 +265,44 @@ export async function getGroupSummary(groupId: string, date?: string | null): Pr
   };
 }
 
+// 가짜 모드 연결 일정 (친구 9장) — 내 목록에 있으면 참여, [나는 빠지기]로 빠진 것(db.left)은 알람 없음. 다른 사람은 시나리오가 있는 그룹원을 참여로 셈
+function mockGroupAppointments(groupId: string): GroupAppointment[] {
+  const g = db.groups[groupId];
+  const others = (g?.members ?? []).filter((p) => p !== 'me' && timelines[p]).length;
+  const current = now().getTime();
+  const rows = [...db.appointments.map((a) => ({ a, joined: true })), ...db.left.map((a) => ({ a, joined: false }))].filter(({ a }) => a.groupId === groupId);
+  return rows
+    .sort((x, y) => x.a.at.getTime() - y.a.at.getTime())
+    .map(({ a, joined }) => ({
+      id: a.id,
+      title: a.title,
+      at: a.at,
+      place: a.place,
+      importance: a.importance,
+      joinedCount: others + (joined ? 1 : 0),
+      iJoined: joined,
+      past: a.at.getTime() <= current,
+      mine: !a.creatorId || a.creatorId === 'me',
+      creatorUnknown: false,
+    }));
+}
+
+// 연결 일정 참여자 줄 (G02) — 나 먼저, 시나리오가 있는 그룹원은 참여, 차단한 사람은 이름만
+export async function getAppointmentJoiners(appointmentId: string): Promise<AppointmentJoiner[]> {
+  if (!isMock()) return real.getAppointmentJoiners(appointmentId);
+  const a = [...db.appointments, ...db.left].find((x) => x.id === appointmentId);
+  const g = a?.groupId ? db.groups[a.groupId] : undefined;
+  if (!a || !g) return [];
+  const iJoined = db.appointments.includes(a);
+  return [...g.members]
+    .sort((x, y) => (x === 'me' ? -1 : y === 'me' ? 1 : 0))
+    .map((id) => ({
+      person: person(id),
+      isMe: id === 'me',
+      state: blocked.includes(id) ? ('HIDDEN' as const) : (id === 'me' ? iJoined : !!timelines[id]) ? ('JOINED' as const) : ('NO_ALARM' as const),
+    }));
+}
+
 // 그룹 상세 (G02)
 export async function getGroup(groupId: string, date?: string | null): Promise<GroupDetail | null> {
   if (!isMock()) return real.getGroup(groupId, date);
@@ -274,9 +314,7 @@ export async function getGroup(groupId: string, date?: string | null): Promise<G
     name: g.name,
     since: g.since,
     grants: copy(db.grants.group[g.id] ?? none()),
-    appointments: db.appointments
-      .filter((a) => a.groupId === g.id)
-      .map((a) => ({ id: a.id, title: a.title, at: a.at, place: a.place, importance: a.importance })),
+    appointments: mockGroupAppointments(g.id),
     members: g.members.map((id) => ({
       person: person(id),
       isMe: id === 'me',

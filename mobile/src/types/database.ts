@@ -895,7 +895,7 @@ isOneToOne: false
 { Args: { "p_appointment_id"?: string,"p_group_id": string,"p_kind": string,"p_sender_id": string }; Returns: Json
                            },
 "plan_wake_ping":
-{ Args: { "p_now"?: string,"p_reserve"?: boolean,"p_sender": string,"p_target": string }; Returns: Json
+{ Args: { "p_group_id"?: string,"p_now"?: string,"p_reserve"?: boolean,"p_sender": string,"p_target": string }; Returns: Json
                            },
 "preview_group_by_code":
 { Args: { "p_code": string }; Returns: Json
