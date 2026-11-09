@@ -53,8 +53,11 @@ export function useGroupAppointments(onChanged: () => void) {
       toast(HOME_MISSING_JOIN_TOAST, {
         actionLabel: HOME_MISSING_JOIN_ACTION,
         onAction: () => {
-          joinTarget.current = null;
-          setJoinFor(null);
+          // 토스트가 떠 있는 사이 다른 약속 시트를 열었다면 그 시트는 닫지 않음
+          if (joinTarget.current === target.id) {
+            joinTarget.current = null;
+            setJoinFor(null);
+          }
           router.push('/settings');
         },
       });

@@ -35,7 +35,8 @@ export async function respondAlarmProposal(proposalId: string, apply: boolean): 
     return 'APPLIED';
   }
   if (status === 'DISMISSED') return 'DISMISSED';
-  if (status === 'EXPIRED') return 'EXPIRED';
+  // TOO_LATE = 보낸 뒤 약속 · 이동시간이 바뀌어 늦춘 만큼이 약속 시각을 넘음 — 서버가 그 제안을 닫아(EXPIRED) 카드에서 빠지므로 같은 처리
+  if (status === 'EXPIRED' || status === 'TOO_LATE') return 'EXPIRED';
   if (status === 'LIMIT') throw new UserError(PROPOSAL_LIMIT);
   if (status === 'NOT_FOUND') throw new UserError(PROPOSAL_GONE);
   throw new Error(`respond_alarm_proposal: 모르는 상태 ${String(status)}`);

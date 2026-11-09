@@ -88,6 +88,7 @@ describe('wakeStateOf — 기상까지만, 화면 3단계 (D59 · 친구 7장)',
 
 describe('G04 약속 줄', () => {
   it('약속 줄: 제목 · 장소 · 시각', () => {
+    expect(appointmentLabel('그룹 일정', '', new Date('2026-10-20T01:00:00.000Z'))).toBe('그룹 일정 · 오전 10:00'); // 숨겨진 공동 약속 — 빈 장소를 건너뜀
     expect(appointmentLabel('팀 주간회의', '세종대학교', new Date('2026-10-20T01:00:00.000Z'))).toBe('팀 주간회의 · 세종대학교 · 오전 10:00');
   });
 });
