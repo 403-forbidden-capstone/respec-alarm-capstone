@@ -154,6 +154,8 @@ function RootStack() {
       <Stack.Screen name="ring" options={{ animation: 'fade' }} />
       {/* 초대 · 친구 링크 착지 (친구 2장) — 로그인 전에 열려도 화면이 토큰을 적어 두고 로그인으로 보냄. 가드가 막으면 토큰이 사라지므로 가드 없이 늘 열어 둠 */}
       <Stack.Screen name="invite" />
+      {/* 웹 계정 삭제 요청 안내 (친구 12-사) — 로그인 없이 열려야 하는 Play 의무 페이지라 가드 없음 */}
+      <Stack.Screen name="account-deletion" />
     </Stack>
   );
 }

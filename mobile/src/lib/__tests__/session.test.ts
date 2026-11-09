@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, jest } from '@jest/globals';
 
 import { UserError } from '../errors';
-import { cleanupAfterDataReset, onSignOut, signOutAndCleanup } from '../session';
+import { cleanupAfterAccountDelete, cleanupAfterDataReset, onSignOut, signOutAndCleanup } from '../session';
 
 // 정리 단계가 정해진 순서로 불리는지 — 각 단계는 가짜로 두고 호출 순서만 기록
 const mockCalls: string[] = [];
@@ -121,3 +121,18 @@ describe('알람 취소 이후 단계의 예외', () => {
   });
 });
 
+
+describe('계정 삭제 뒤 기기 정리 (친구 12장)', () => {
+  it('폰 알람 취소 → 기록 버림 → 구독 끊기 → 로그아웃 — 올리기는 안 함(서버 계정이 이미 없음)', async () => {
+    await cleanupAfterAccountDelete();
+    expect(mockCalls).toEqual(['로그아웃 중 켜기', '알람 취소', '남은 기록 버림', '구독 끊기', '로그아웃']);
+    expect(mockUpload).not.toHaveBeenCalled();
+  });
+
+  it('폰 알람을 못 지워도 · 로그아웃이 서버 오류여도 멈추지 않음 (계정이 이미 지워졌으니 이 기기는 비워야 함)', async () => {
+    mockCancelAll.mockRejectedValue(new Error('폰 저장소 오류'));
+    mockSignOut.mockRejectedValue(new Error('서버 로그아웃 실패'));
+    await expect(cleanupAfterAccountDelete()).resolves.toBeUndefined();
+    expect(mockUnsubscribeAll).toHaveBeenCalledTimes(1);
+  });
+});

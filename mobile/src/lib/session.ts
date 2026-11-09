@@ -60,6 +60,24 @@ export async function signOutAndCleanup(): Promise<void> {
   }
 }
 
+// 계정 삭제 뒤 이 기기 정리 (친구 12장) — 서버 계정은 이미 없으므로 로그아웃과 순서가 반대: 서버가 먼저 지우고(실패하면 이 기기는 그대로) 그 뒤에 기기를 비움
+//   폰 알람 · 올리지 못한 기록 · 푸시 토큰은 서버에서 이미 없어졌으니 못 지워도 멈추지 않음(남은 알람은 앱을 다시 열 때 맞추기가 정리). 로그아웃은 서버를 못 불러도 이 기기 로그인은 지움
+export async function cleanupAfterAccountDelete(): Promise<void> {
+  setSigningOut(true);
+  await cancelAllPhoneAlarms().catch(() => {});
+  await discardPendingEvents().catch(() => {});
+  await clearPushToken().catch(() => {});
+  unsubscribeAll();
+  signOutCleanups.forEach((cleanup) => {
+    try {
+      cleanup();
+    } catch {
+      // 메모리 정리 실패로 이어서 하는 일을 막지 않음
+    }
+  });
+  await signOut().catch(() => {});
+}
+
 // 개발용 "내 시험 데이터 지우기"(/dev/screens) 뒤의 폰 정리 — 서버에서 내 일정 · 알람을 지운 다음에 부름. 로그인은 그대로
 //   로그아웃 정리와 다른 점 둘:
 //   · 못 올린 울림 기록은 올리지 않고 버림 (서버 알람이 이미 없어 올려도 거절됨)
