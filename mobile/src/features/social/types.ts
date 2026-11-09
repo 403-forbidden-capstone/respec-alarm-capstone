@@ -26,10 +26,13 @@ export type Permission = 'viewAlarm' | 'editAlarm' | 'viewWake';
 export type PermissionSet = Record<Permission, boolean>;
 
 export const PERMISSIONS: readonly { key: Permission; name: string; description: string }[] = [
-  { key: 'viewAlarm', name: '알람 조회', description: '내 알람 시간과 반복 일정을 볼 수 있어요.' },
+  { key: 'viewAlarm', name: '알람 조회', description: '알람 시간 · 일정 · 장소 · 준비 시간을 볼 수 있어요.' },
   { key: 'editAlarm', name: '알람 설정', description: '내 알람을 추가하거나 시간을 바꿀 수 있어요.' },
   { key: 'viewWake', name: '기상 상태 조회', description: '기상 확인 여부와 확인 시각을 볼 수 있어요.' },
 ];
+
+// F03 스위치 목록 — 친구 관계에는 기상 조회가 없음(그룹 기상 공유 동의 하나로만, 친구 6장 6-가). 그룹 관계의 기상 조회는 그 그룹에 내 기상 공유를 켜는 동의
+export const permissionsFor = (kind: 'friend' | 'group') => (kind === 'friend' ? PERMISSIONS.filter((p) => p.key !== 'viewWake') : PERMISSIONS);
 
 // 관계 하나에서 준(받은) 권한 — DB sharing_permissions의 source_type · source_id
 // sourceId: 그룹이면 group_id, 친구면 상대 사람 id (실데이터는 friends.friend_id로 찾아 사람으로 바꿈)
@@ -100,7 +103,7 @@ export type GroupDetail = {
   grants: PermissionSet; // 그룹 공유 범위 (내가 준 권한)
   appointments: GroupAppointment[]; // 연결 일정 (여러 개일 수 있음, 오늘부터)
   members: GroupMember[]; // 참여 중인 사람만 (초대 중은 + 초대 시트에서) — 그룹장 표시 없음 (5장)
-  wakeShareOptIn: boolean; // 이 그룹에 내 기상 상태 공유를 동의했는지 (group_members.wake_share_opt_in, D19 열림 — 새 UI용)
+  wakeShareOptIn: boolean; // 이 그룹에 내 기상 상태 공유를 동의했는지 (group_members.wake_share_opt_in — F03 그룹 관계의 기상 스위치와 같은 값)
   notificationsOff: boolean; // 이 그룹에서 오는 알림 끄기 (group_members.notifications_off)
 };
 
@@ -137,6 +140,18 @@ export type MemberWake = {
   canViewAlarm: boolean; // 알람 조회 권한 → [알람 보기] (G04)
   noGroupAppointment: boolean; // 그날 이 그룹 약속이 없어 기상 상태를 주지 않는 날 (D57 — 공유 안 함과 다름)
 };
+
+// G03 [깨우기] 보낸 결과 (친구 8장) — 서버 notify 응답의 ping.status. 버튼 상태는 보내 봐야 알 수 있음(읽기 전용 조회가 없음)
+//   OK = 보냄(count/limit = 오늘 몇 번째, nextAt = 다음 가능 시각) · WAIT = 5분 안에 또 누름 · DAILY_LIMIT = 하루 3번 다 씀 · OFF = 받기를 꺼 뒀거나 보낼 수 없음(구분 안 함)
+//   NOT_RINGING = 아직 안 울림 · ALREADY_UP = 이미 일어남 · NO_TOKENS = 알림이 닿지 않음(횟수 안 셈)
+export type WakePingResult =
+  | { status: 'OK'; count: number; limit: number; nextAt: Date | null }
+  | { status: 'WAIT'; nextAt: Date | null }
+  | { status: 'DAILY_LIMIT' }
+  | { status: 'NOT_RINGING' | 'ALREADY_UP' | 'OFF' | 'NO_TOKENS' };
+
+// 홈 · H08 '수연님이 7:12에 깨웠어요' — 오늘 내가 받은 깨우기, 최신 순 (my_wake_pings)
+export type ReceivedWakePing = { senderId: string; senderName: string; at: Date };
 
 export type SharedAlarms = {
   person: Person;

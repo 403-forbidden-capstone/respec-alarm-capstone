@@ -32,6 +32,7 @@ jest.mock('../real', () => {
     'listAlarmProposals',
     'respondAlarmProposal',
     'sendWakePing',
+    'getReceivedWakePings',
     'searchByHandle',
     'searchPeople',
     'myFriendLink',
@@ -85,7 +86,8 @@ const CASES: [keyof typeof api, unknown[]][] = [
   ['proposeSharedAlarm', ['u1', 'ap1', new Date('2026-10-20T00:00:00.000Z')]],
   ['listAlarmProposals', []],
   ['respondAlarmProposal', ['pr1', true]],
-  ['sendWakePing', ['u1']],
+  ['sendWakePing', ['g1', 'u1']],
+  ['getReceivedWakePings', []],
   ['searchByHandle', ['@etion']],
   ['searchPeople', ['민수']],
   ['myFriendLink', [true]],
@@ -163,7 +165,7 @@ describe('api.ts 가짜 · 실데이터 나누기 (친구 · 그룹)', () => {
   });
 
   it('가짜 모드의 쓰기도 real을 부르지 않음 (깨우기 · 권한 저장 · 시각 제안 · 받은 제안)', async () => {
-    await api.sendWakePing('sy');
+    await expect(api.sendWakePing('cap', 'sy')).rejects.toThrow('가짜 데이터에서는 깨우기를 보낼 수 없어요'); // 가짜 모드는 막힘 (8-16)
     await api.saveShareSettings('group:cap', SET);
     await expect(api.proposeSharedAlarm('sy', 's1', new Date('2026-10-20T00:00:00.000Z'))).resolves.toEqual({ notified: true });
     await expect(api.listAlarmProposals()).resolves.toEqual([]);

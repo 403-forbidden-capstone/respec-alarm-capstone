@@ -1,12 +1,12 @@
 // ② 공유 권한 실데이터 — F02 친구 권한 · F03 공유 권한 설정 (docs/screen-data-map.md F02 · F03)
 //   sharing_permissions(주는 사람 owner, 받는 사람 grantee, 출처 FRIEND=friend_id · GROUP=group_id)를 읽고 씀. 화면의 "최종 권한"은 앱에서 항목별 OR로 합침
 //   효력 규칙(출처가 살아 있어야 함 · 그룹 기상 조회는 준 사람이 동의해야 함)은 grants.ts — DB 판정 함수와 같게
-//   D18 열림(그룹 권한을 어떤 단위로 저장할지): 가짜 데이터와 같은 뜻으로 "그룹마다 한 벌"을 보여 주고, 저장은 지금 참여 중인 다른 구성원마다 행을 씀.
-//     나중에 들어온 구성원은 다시 저장하기 전까지 이 그룹에서 아무 권한도 못 받음 (행 추가 규칙은 D18 결정 뒤)
-//   D19 열림(기상 조회를 켤 때 기상 공유 동의도 켤지): 저장은 권한 행만 씀. 동의는 setWakeShareOptIn(새 UI용)으로만 바뀜
+//   그룹 권한은 그룹마다 한 벌 — 저장은 save_group_permissions(멤버 전원 한 번에), 나중에 들어온 멤버는 조회만 자동으로 받고 설정은 다시 저장해야 함 (6장)
+//   기상 조회는 권한 행이 아니라 그룹 기상 공유 동의(wake_share_opt_in) 하나 — F03 그룹 관계의 기상 스위치가 이 동의를 켜고 끔. 친구 관계에는 기상 스위치 없음
 import { UserError } from '@/lib/errors';
 import { supabase } from '@/lib/supabase';
 
+import { CONSENT_FAILED, NO_MEMBERS } from '../groupTexts';
 import { parseRelation } from '../permissions';
 import {
   friendBetween,
@@ -17,11 +17,13 @@ import {
   joinedIds,
   myGroup,
   myGroups,
+  myOptIn,
   personOf,
   receivedRows,
   sharedGroups,
 } from '../snapshot';
 import type { FinalGrant, PermissionSet, Person, Relation, RelationId } from '../types';
+import { setWakeShareOptIn } from './groups';
 import { invalidateSnapshot, loadSnapshot } from './load';
 
 // 친구 권한 (F02) — 이 친구가 내 정보에 대해 가진 최종 권한과 출처. 친구가 아니면 null (그룹원 · 나를 주소로 열어도)
@@ -64,33 +66,46 @@ export async function getShareSettings(id: RelationId): Promise<PermissionSet> {
   return kind === 'friend' ? friendShareSet(s, key) : groupShareSet(s, key);
 }
 
+// F03 [변경사항 저장]
+//   친구 관계: 내 행 하나를 upsert — 알람 조회 · 설정만 (기상 조회는 친구 출처에 없음, 서버가 켜도 꺼진 채 저장). 설정을 켜면 조회도 켜서 보냄(설정만 켠 행은 DB 제약이 거절)
+//   그룹 관계: save_group_permissions 한 번 — 참여 중 멤버 전원에게 같은 값이 전부 되거나 전부 안 됨, 값이 그대로여도 저장(나중에 들어온 사람 몫의 설정 행도 이때 생김, 6-15).
+//     기상 조회 스위치 = 이 그룹 기상 공유 동의(wake_share_opt_in) — 권한 행과 따로 저장 (6-23). 혼자인 그룹은 줄 사람이 없어 오류 (6-18)
 export async function saveShareSettings(id: RelationId, next: PermissionSet) {
   const s = await loadSnapshot();
   const { kind, key } = parseRelation(id);
-  const flags = { can_view_alarm: next.viewAlarm, can_edit_alarm: next.editAlarm, can_view_wake: next.viewWake };
+  const editAlarm = next.editAlarm;
+  const viewAlarm = next.viewAlarm || editAlarm;
 
   if (kind === 'friend') {
     const friend = friendBetween(s, key);
     if (!friend) throw new UserError('친구 관계를 찾을 수 없어요');
     const { error } = await supabase
       .from('sharing_permissions')
-      .upsert({ owner_id: s.me, grantee_id: key, source_type: 'FRIEND', source_id: friend.friend_id, ...flags }, { onConflict: 'owner_id,grantee_id,source_type,source_id' });
+      .upsert(
+        { owner_id: s.me, grantee_id: key, source_type: 'FRIEND', source_id: friend.friend_id, can_view_alarm: viewAlarm, can_edit_alarm: editAlarm, can_view_wake: false },
+        { onConflict: 'owner_id,grantee_id,source_type,source_id' },
+      );
     invalidateSnapshot();
     if (error) throw error;
     return;
   }
 
   if (!myGroup(s, key)) throw new UserError('참여 중인 그룹을 찾을 수 없어요');
-  const others = joinedIds(s, key).filter((uid) => uid !== s.me);
-  if (!others.length) return; // 혼자인 그룹 — 줄 사람이 없음
-  const { error } = await supabase
-    .from('sharing_permissions')
-    .upsert(
-      others.map((uid) => ({ owner_id: s.me, grantee_id: uid, source_type: 'GROUP' as const, source_id: key, ...flags })),
-      { onConflict: 'owner_id,grantee_id,source_type,source_id' },
-    );
+  const { data, error } = await supabase.rpc('save_group_permissions', { p_group_id: key, p_can_view_alarm: viewAlarm, p_can_edit_alarm: editAlarm });
   invalidateSnapshot();
   if (error) throw error;
+  const status = (data as { status?: unknown } | null)?.status;
+  if (status === 'NO_MEMBERS') throw new UserError(NO_MEMBERS);
+  if (status === 'NOT_FOUND') throw new UserError('참여 중인 그룹을 찾을 수 없어요');
+  if (status !== 'OK') throw new Error(`save_group_permissions: 모르는 상태 ${String(status)}`);
+  if (next.viewWake !== myOptIn(s, key)) {
+    // 알람 권한은 이미 저장된 뒤 — 동의만 못 바꿨으면 그 사실을 알리고(다시 저장하면 같은 요청이라 안전), 화면은 저장된 값을 다시 읽게 함
+    try {
+      await setWakeShareOptIn(key, next.viewWake);
+    } catch (e) {
+      throw new UserError(CONSENT_FAILED);
+    }
+  }
 }
 
 // 이 관계에서 받은 권한 (F03 받은 권한) — 효력 있는 값 (동의 안 한 그룹의 기상 조회는 꺼진 것으로)
@@ -103,6 +118,7 @@ export async function getReceived(id: RelationId): Promise<{ person: Person; per
     return row ? [{ person: personOf(s, key), permissions: pick(row) }] : [];
   }
   if (!myGroup(s, key)) return [];
+  // 멤버 모두 — 알람 권한 행이 없어도 기상 공유 동의를 켰으면 기상은 보임(권한 행 따로 필요 없음, 6-23). 읽기만, 권한을 요청하는 길 없음 (6-42)
   return joinedIds(s, key)
     .filter((uid) => uid !== s.me)
     .flatMap((uid) => {

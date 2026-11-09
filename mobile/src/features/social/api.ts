@@ -17,6 +17,7 @@ import { CODE_EXPIRED, CODE_NOT_FOUND, GROUP_FULL, GROUP_NOT_MEMBER, GROUP_TOO_M
 import * as real from './real';
 import { MESSAGE_GONE } from './relationMessages';
 import { mergeHits } from './searchView';
+import { WAKE_PING_MOCK } from './wakeTexts';
 import {
   type AppointmentJoiner,
   type GroupAppointment,
@@ -45,6 +46,7 @@ import {
   type PersonHit,
   type AlarmProposal,
   type ProposalResponse,
+  type ReceivedWakePing,
   type ReportReason,
   type ReportResult,
   type ReportTarget,
@@ -52,6 +54,7 @@ import {
   type RelationId,
   type SharedAlarms,
   type SharedChangeResult,
+  type WakePingResult,
 } from './types';
 
 const toPerson = (p: MockPerson): Person => ({ ...p });
@@ -466,9 +469,16 @@ export async function respondAlarmProposal(proposalId: string, apply: boolean): 
   return apply ? 'APPLIED' : 'DISMISSED';
 }
 
-// 깨우기 알림 보내기 (G03) — 실데이터는 D19가 열려 있어 서버가 거절하므로 아직 보내지 않고 "준비 중" 안내만 (UserError)
-export async function sendWakePing(personId: string) {
-  if (!isMock()) return real.sendWakePing(personId);
+// 깨우기 알림 보내기 (G03) — 실데이터는 서버가 판정 · 횟수를 세고 결과 상태를 줌. 가짜 모드는 막힘 (8-16)
+export async function sendWakePing(groupId: string, personId: string): Promise<WakePingResult> {
+  if (!isMock()) return real.sendWakePing(groupId, personId);
+  throw new UserError(WAKE_PING_MOCK);
+}
+
+// 오늘 내가 받은 깨우기 — 홈 · H08 '수연님이 7:12에 깨웠어요'. 가짜 모드는 받은 것이 없음
+export async function getReceivedWakePings(): Promise<ReceivedWakePing[]> {
+  if (!isMock()) return real.getReceivedWakePings();
+  return [];
 }
 
 // ---------------------------------------------------------------------------
@@ -703,7 +713,7 @@ export async function setGroupNotificationsOff(groupId: string, off: boolean): P
   notifOff[groupId] = off;
 }
 
-// 이 그룹에 내 기상 상태 공유를 동의 / 취소 (D19 열림 — F03 저장은 이 값을 건드리지 않음)
+// 이 그룹에 내 기상 상태 공유를 동의 / 취소 (F03 그룹 관계의 기상 스위치도 같은 값)
 export async function setWakeShareOptIn(groupId: string, on: boolean) {
   if (!isMock()) return real.setWakeShareOptIn(groupId, on);
   if (!db.groups[groupId]?.members.includes('me')) throw new UserError('참여 중인 그룹이 아니에요');

@@ -110,8 +110,22 @@ describe('준 권한 (내가 이 사람에게 준 것)', () => {
   it('준 사람인 내가 그 그룹에서 동의하지 않았으면 기상 조회는 효력 없음', () => {
     const noOptIn = snapshot({ members: s.members.map((m) => (m.user_id === ME ? { ...m, wake_share_opt_in: false } : m)) });
     expect(givenTo(noOptIn, SUYEON)).toMatchObject({ viewWake: false, count: 1 });
-    // 내가 F03에서 본 값(적어 둔 그대로)은 그대로 켜져 있음
-    expect(groupShareSet(noOptIn, GROUP).viewWake).toBe(true);
+    // F03 그룹 관계의 기상 스위치는 내 동의 그대로 — 동의가 꺼지면 꺼짐 (권한 행의 can_view_wake와 따로)
+    expect(groupShareSet(noOptIn, GROUP).viewWake).toBe(false);
+    expect(groupShareSet(s, GROUP).viewWake).toBe(true);
+  });
+
+  it('기상은 권한 행 없이 그룹 기상 공유 동의 하나로 보임 — 알람 권한 행이 하나도 없어도 동의한 그룹은 줄이 생김 (6-23)', () => {
+    const noRows = snapshot({ perms: [] });
+    // 수연은 캡스톤팀에 동의함 → 내가 받은 쪽에서 그 그룹 기상 조회만
+    expect(receivedRows(noRows, SUYEON).filter((r) => r.sourceType === 'GROUP')).toEqual([
+      { source: '캡스톤팀', sourceType: 'GROUP', sourceId: GROUP, viewAlarm: false, editAlarm: false, viewWake: true },
+    ]);
+    expect(receivedFrom(noRows, SUYEON)).toMatchObject({ viewAlarm: false, viewWake: true, count: 1 });
+    // 내가 준 쪽도 내 동의 하나로
+    expect(givenTo(noRows, SUYEON)).toMatchObject({ viewAlarm: false, viewWake: true });
+    // 동의를 안 한 준성은 줄이 없음
+    expect(receivedRows(noRows, JUNSEONG)).toEqual([]);
   });
 
   it('F03 내가 공유: 친구는 그 친구에게 준 값, 그룹은 멤버마다 쓴 행의 합집합', () => {

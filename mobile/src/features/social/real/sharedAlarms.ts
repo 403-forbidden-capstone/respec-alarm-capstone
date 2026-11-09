@@ -9,7 +9,6 @@
 //   변경 기록은 없음 — DB에 저장 자리가 없고 시트도 뺌 (친구 논리설계 10장 · D9 · D20)
 import { now } from '@/lib/clock';
 import { dbTimeMs, parseDbTime } from '@/lib/dbTime';
-import { callEdge } from '@/lib/edge';
 import { UserError } from '@/lib/errors';
 import { startOfDay } from '@/lib/format';
 import { supabase } from '@/lib/supabase';
@@ -25,6 +24,7 @@ import {
 } from '../proposalTexts';
 import type { SentProposal, SharedAlarms, SharedChangeResult } from '../types';
 import { loadSnapshot } from './load';
+import { sendPush } from './push';
 
 const ALARM_COLUMNS = 'alarm_id, alarm_type, scheduled_at, intensity, sound_key, is_enabled, time_source, original_scheduled_at';
 
@@ -88,15 +88,8 @@ async function loadCard(ownerId: string, cardId: string): Promise<SharedCard> {
 
 // 주인에게 제안 알림 — 실패해도 던지지 않음. 보냈으면 true. 문구 · 시각 · 알람 종류는 서버가 제안 기록에서 가져옴(요청에는 받는 사람 · 알람 id만)
 async function notifyOwner(ownerId: string, alarmId: string): Promise<boolean> {
-  try {
-    const result = await callEdge<{ sent?: number }>('notify', { kind: 'ALARM_CHANGED', targetUserId: ownerId, alarmId }, { timeoutMs: NOTIFY_TIMEOUT_MS });
-    return (result?.sent ?? 0) > 0;
-  } catch {
-    return false;
-  }
+  return sendPush({ kind: 'ALARM_CHANGED', targetUserId: ownerId, alarmId });
 }
-
-const NOTIFY_TIMEOUT_MS = 8_000; // 알림은 덤이라 오래 기다리지 않음 (제안은 이미 저장됨)
 
 // 시각 제안 보내기 (G04 [보내기] · [원래대로]) — 화면이 본 알람(카드에서 켜져 있고 아직 안 울린 가장 이른 것)의 새 시각. 서버가 권한 · 곧 울릴 알람 · ±60분을 다시 확인
 //   성공하면 상대에게 알림을 부르고(실패해도 제안은 그대로), 거절은 UserError로 이유를 알림

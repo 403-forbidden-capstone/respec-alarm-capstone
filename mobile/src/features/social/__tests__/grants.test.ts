@@ -48,8 +48,8 @@ describe('effectiveOf — 실제로 효력 있는 권한', () => {
     expect(effectiveOf(row({ owner_id: JUNSEONG }), friends, members)).toBeNull();
   });
 
-  it('친구 출처는 기상 조회에 동의가 필요 없음', () => {
-    expect(effectiveOf(row({}), friends, members)).toEqual({ viewAlarm: true, editAlarm: true, viewWake: true });
+  it('친구 출처에는 기상 조회가 없음 — 행에 켜져 있어도 꺼짐 (기상은 그룹 동의 하나로만, 6-가)', () => {
+    expect(effectiveOf(row({ can_view_wake: true }), friends, members)).toEqual({ viewAlarm: true, editAlarm: true, viewWake: false });
   });
 
   it('그룹 출처의 기상 조회는 준 사람이 그 그룹에서 기상 공유에 동의했을 때만', () => {
@@ -59,14 +59,14 @@ describe('effectiveOf — 실제로 효력 있는 권한', () => {
     expect(effectiveOf(group(JUNSEONG), friends, members)).toEqual({ viewAlarm: true, editAlarm: true, viewWake: false });
   });
 
-  it('행에 적힌 값이 꺼져 있으면 동의가 있어도 꺼진 그대로', () => {
+  it('기상 조회는 권한 행의 값이 아니라 그룹 동의 하나 — 행이 꺼져 있어도 동의가 있으면 보이고, 알람 조회 · 설정은 행 그대로', () => {
     const base = row({ source_type: 'GROUP', source_id: GROUP, can_view_alarm: false, can_edit_alarm: false, can_view_wake: false });
-    expect(effectiveOf(base, friends, members)).toEqual({ viewAlarm: false, editAlarm: false, viewWake: false });
+    expect(effectiveOf(base, friends, members)).toEqual({ viewAlarm: false, editAlarm: false, viewWake: true });
   });
 
-  it('데모 시드의 권한 행: 나에게 온 것 중 준성의 기상 조회만 효력 없음', () => {
+  it('데모 시드의 권한 행: 나에게 온 것 중 친구 출처와 동의 안 한 준성의 기상 조회는 효력 없음', () => {
     const toMe = perms.filter((p) => p.grantee_id === ME).map((p) => effectiveOf(p, friends, members)?.viewWake);
-    expect(toMe).toEqual([true, true, true, true, false]);
+    expect(toMe).toEqual([false, false, true, true, false]);
   });
 });
 

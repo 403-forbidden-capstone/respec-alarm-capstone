@@ -5,7 +5,7 @@
 //   1. 올리지 못한 울림 기록을 먼저 올려 봄 — 실패해도 로그아웃은 계속
 //   2. 폰 알람 전부 취소 (AlarmCore.cancelAll, 무음 알림 포함, 맞추기와 같은 줄에서 — 앞에 서 있던 맞추기가 끝난 뒤에). 이게 실패하면 로그아웃하지 않음 — 앞 계정의 알람이 폰에 남아 울리면 안 되므로
 //   3. 그래도 폰에 남은 울림 기록은 버림 — 다음 계정에 섞이지 않게 (1에서 못 올린 것도 여기서 버려짐)
-//   4. 푸시 토큰 지우기 (자리만, 아래)
+//   4. 푸시 토큰 지우기 (이 기기의 토큰 행, 아래)
 //   5. 실시간 구독 끊기 (그룹 기상 신호) · 기능이 onSignOut으로 등록한 메모리 정리
 //   6. 로그아웃 (supabase.auth.signOut)
 // 데이터 모드 저장값은 그대로 둠 (로그아웃해도 모드가 바뀌지 않음)
@@ -13,11 +13,12 @@
 import { cancelAllPhoneAlarms, discardPendingEvents, setSigningOut, uploadEvents } from './alarmSync';
 import { signOut } from './auth';
 import { UserError } from './errors';
+import { removePushToken } from './push/token';
 import { unsubscribeAll } from './realtime';
 
-// 푸시 토큰 지우기 자리 — 지금은 푸시 토큰을 등록하지 않아(Expo Push는 붙일 때, #23 · #80 · Q12) 할 일이 없음
-// 붙일 때: 로그인 직후 register_push_token으로 등록한 이 기기의 토큰을 push_tokens에서 지움 (세션이 있는 지금이어야 RLS를 통과함)
-export async function clearPushToken(): Promise<void> {}
+// 푸시 토큰 지우기 — 로그인 직후 register_push_token으로 등록한 이 기기의 토큰을 push_tokens에서 지움 (세션이 있는 지금이어야 RLS를 통과함)
+// 못 지워도(오프라인) 로그아웃은 계속 — 다음 로그인이 같은 토큰을 새 주인으로 옮김 (lib/push/token.ts)
+export const clearPushToken = removePushToken;
 
 // 기능 쪽 메모리 정리 — lib는 기능 폴더를 가져오지 않으므로 기능이 여기에 등록함 (예: 알람의 장소 좌표 · 읽어 둔 설정 · 저장 대기 기록)
 const signOutCleanups = new Set<() => void>();
@@ -30,14 +31,15 @@ export function onSignOut(cleanup: () => void): () => void {
 
 // 로그아웃 없이 하는 폰 · 메모리 정리 (위 2~5단계) — 로그아웃 정리와 개발용 "내 시험 데이터 지우기"(cleanupAfterDataReset)가 같이 씀
 // 폰 알람을 못 지우면 cancelFailed 문구의 UserError를 던지고 뒤 단계는 하지 않음 (부르는 쪽이 자기 문구를 줌). 그 뒤 단계의 예외는 문구를 바꾸지 않고 그대로 전파
-async function cleanupLocalUserState(cancelFailed: string): Promise<void> {
+// forgetPushToken = 로그아웃일 때만 이 기기의 푸시 토큰 행을 지움 (시험 데이터 지우기는 로그인 그대로라 알림이 계속 와야 함)
+async function cleanupLocalUserState(cancelFailed: string, forgetPushToken: boolean): Promise<void> {
   try {
     await cancelAllPhoneAlarms();
   } catch {
     throw new UserError(cancelFailed);
   }
   await discardPendingEvents().catch(() => {});
-  await clearPushToken().catch(() => {});
+  if (forgetPushToken) await clearPushToken().catch(() => {});
   unsubscribeAll();
   signOutCleanups.forEach((cleanup) => {
     try {
@@ -52,7 +54,7 @@ export async function signOutAndCleanup(): Promise<void> {
   setSigningOut(true);
   try {
     await uploadEvents().catch(() => {});
-    await cleanupLocalUserState('폰에 걸린 알람을 지우지 못해 로그아웃하지 못했어요. 다시 해 주세요');
+    await cleanupLocalUserState('폰에 걸린 알람을 지우지 못해 로그아웃하지 못했어요. 다시 해 주세요', true);
     await signOut();
   } catch (e) {
     setSigningOut(false); // 로그아웃이 안 됐으니 로그인 상태 그대로 — 맞추기를 다시 돌게
@@ -66,5 +68,5 @@ export async function signOutAndCleanup(): Promise<void> {
 //   · "로그아웃 중" 표시를 켜지 않음 — 맞추기(reconcile)는 계속 돌아야 하고, 폰 알람 취소가 맞추기와 같은 줄에서 돌아 끼어들지 못하며
 //     지운 뒤의 맞추기는 서버에서 빈 목록을 읽음 (표시를 켰다 끄면 시간대 · 반복 회차 시각 기억도 같이 비워져 로그인 상태에서는 오히려 해로움)
 export async function cleanupAfterDataReset(): Promise<void> {
-  await cleanupLocalUserState('서버의 시험 데이터는 지웠지만 폰에 걸린 알람은 지우지 못했어요. 다시 눌러 주세요');
+  await cleanupLocalUserState('서버의 시험 데이터는 지웠지만 폰에 걸린 알람은 지우지 못했어요. 다시 눌러 주세요', false);
 }

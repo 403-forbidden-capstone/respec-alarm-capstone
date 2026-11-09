@@ -862,6 +862,11 @@ isOneToOne: false
 "join_group_by_invite_code":
 { Args: { "p_invite_code": string }; Returns: string
                            },
+"my_account_delete_summary":
+{ Args: Record<PropertyKey, never>; Returns: {
+              "friends": number,"group_appointments_staying": number,"groups_disappearing": number,"groups_leaving": number
+            }[]
+                           },
 "my_alarm_proposals":
 { Args: Record<PropertyKey, never>; Returns: {
               "alarm_id": string,"alarm_type": string,"created_at": string,"from_at": string,"proposal_id": string,"proposer_id": string,"proposer_nickname": string,"to_at": string
@@ -896,6 +901,9 @@ isOneToOne: false
                            },
 "plan_wake_ping":
 { Args: { "p_group_id"?: string,"p_now"?: string,"p_reserve"?: boolean,"p_sender": string,"p_target": string }; Returns: Json
+                           },
+"prepare_account_delete":
+{ Args: { "p_user_id": string }; Returns: Json
                            },
 "preview_group_by_code":
 { Args: { "p_code": string }; Returns: Json

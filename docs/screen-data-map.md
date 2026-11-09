@@ -59,7 +59,7 @@
 - 기상 확인(H08)에 들어올 때 — `uploadEvents()` (해제 기록이 기상 확인보다 먼저 들어가게)
 - 같은 때(로그인 직후 · 앱이 앞에 올 때) — 최근 12시간에 끈 기상 알람 중 확정이 없는 것을 H08과 같은 판정으로 다시 보고 조건을 채웠으면 확정 기록 (`useWakeRecheck`, 자세히는 `alarm-core.md`)
 - 저장 직후 — `applyCommit(응답)`
-- 로그아웃 — `signOutAndCleanup()` (`lib/session`): 로그아웃 중 표시 켜기(`setSigningOut`) → 기록 올려 보기 → 맞추기와 같은 줄에서 `AlarmCore.cancelAll()`(`cancelAllPhoneAlarms`) → 남은 기록 버림 → 푸시 토큰 지우기 자리 → 실시간 구독 끊기 · 기능 메모리 정리(`onSignOut`) → `signOut`. 데이터 모드 저장값은 그대로
+- 로그아웃 — `signOutAndCleanup()` (`lib/session`): 로그아웃 중 표시 켜기(`setSigningOut`) → 기록 올려 보기 → 맞추기와 같은 줄에서 `AlarmCore.cancelAll()`(`cancelAllPhoneAlarms`) → 남은 기록 버림 → 푸시 토큰 지우기(`removePushToken`, 이 기기의 `push_tokens` 행 삭제 · 실패해도 계속) → 실시간 구독 끊기 · 기능 메모리 정리(`onSignOut`) → `signOut`. 데이터 모드 저장값은 그대로
   - 로그아웃 중 표시가 켜져 있는 동안 `reconcile`은 서버 알람을 폰에 걸지 않고 건너뜀 (로그인 상태가 남은 사이에 맞추기가 끼어 앞 계정 알람을 다시 거는 것을 막음). `cancelAll`이 실패하면 로그아웃을 멈추고 표시를 끔. 로그아웃이 끝까지 가면 켜 둔 채로 두고, 다시 로그인할 때 `useAlarmSync`가 끔
   - `signOut`은 서버에 알리다 네트워크로 실패해도 이 기기의 로그인이 지워졌으면 끝난 것으로 봄
 
@@ -173,10 +173,10 @@
 - 오늘 n명 일어남: `get_group_wake` — RPC의 `CONFIRMED` 수(분모 없음). 그 그룹 일정이 있는 날만, 없는 날은 줄을 숨김 (D57 · 친구 7장)
 
 ### F02 친구 권한
-- 관계별 받은 권한: `sharing_permissions`(주는 사람 = 친구, 받는 사람 = 나, 출처 FRIEND · GROUP) — DB → 최종 = 항목별 OR (앱에서 합침)
+- 관계별 받은 권한: `sharing_permissions`(주는 사람 = 친구, 받는 사람 = 나, 출처 FRIEND · GROUP) — DB → 최종 = 항목별 OR (앱에서 합침). 기상 조회는 권한 행의 값이 아니라 그 그룹의 기상 공유 동의 하나(`wake_share_opt_in`)로 계산 — 알람 권한 행이 없어도 동의한 그룹은 줄이 생기고, 친구 출처에는 기상 조회가 없음. 안내 '내가 OO님에게 준 권한을 관계별로 합친 결과예요'
 
 ### F03 공유 권한 설정
-- 내가 주는 권한: `sharing_permissions`(주는 사람 = 나, 출처 = 고른 관계) `can_view_alarm` · `can_edit_alarm` · `can_view_wake` 저장 — DB
+- 내가 주는 권한 저장: 친구 관계 = `sharing_permissions` 내 행 하나 upsert(알람 조회 · 알람 설정 2개만, `can_view_wake`는 항상 꺼서) — DB. 그룹 관계 = `save_group_permissions(p_group_id, p_can_view_alarm, p_can_edit_alarm)` 한 번 — RPC(참여 중 멤버 전원에게 같은 값이 전부 되거나 전부 안 됨, 값이 그대로여도 저장해 나중에 들어온 멤버 몫 설정 행이 생김, 혼자인 그룹은 `NO_MEMBERS` → 오류). 그룹의 기상 상태 조회 스위치 = 이 그룹 기상 공유 동의: `group_members.wake_share_opt_in`을 내 행만 update(값이 바뀐 때만)
 - 받은 권한 보기: `sharing_permissions`(받는 사람 = 나) — DB
 - 설정 권한은 조회 권한이 있어야 실제로 고칠 수 있음 → 화면에서 설정을 켜면 조회도 같이 켬
 
@@ -188,7 +188,9 @@
 
 ### G03 그룹원 기상 상태
 - 기상 상태: `get_group_wake` — RPC (단계 · 알람 시각 · 확인 시각만, 미루기 횟수 · 알람 끈 시각 · 준비 · 출발 · 도착은 본인만 — D59 · 친구 7장). 그 그룹 일정이 있는 날만 (D57). 알람 카드는 알람 조회 권한이 있으면 [알람 보기](G04)로
-- 깨우기 알림: `notify` — Edge → `push_tokens` ('울렸어요'일 때만 버튼, 붙이는 건 깨우기 장)
+- 깨우기: `notify`(`{ kind: 'WAKE_PING', targetUserId, groupId }`) — Edge. '울렸어요'일 때만 버튼. 판정 · 횟수(보내는 사람 → 받는 사람 쌍마다 5분 1번 · 하루 3번) · 직전 재확인은 서버가 하고, 응답 `ping.status`로 버튼 아래 한 줄: `OK` '1/3 · 8:15부터 다시' · `WAIT` '8:15부터 다시' · `DAILY_LIMIT` · `OFF`(받기를 껐거나 기상이 안 보임(403) — '지금은 깨울 수 없어요'로 구분 안 함) · `ALREADY_UP`('이미 일어났어요', 상태를 다시 읽음) · `NOT_RINGING`(다시 읽음) · `NO_TOKENS`('지금은 알림이 닿지 않아요', 횟수 안 셈). 상태를 미리 읽는 곳은 없어 보내 본 뒤에 앎 — 보냄 · 기다림 · 한도 · 꺼짐 · 이미 일어남은 버튼을 잠금(다음 가능 시각이 지나면 풀림). 가짜 모드는 막힘
+- 오늘 받은 깨우기: `my_wake_pings` — RPC (`sender_nickname`, `sent_at` 최신 순, 차단한 사람 것 제외) → 홈 · H08 한 줄 '수연님이 7:12에 깨웠어요'(여러 번이면 '· 오늘 n번'). 가짜 모드는 없음
+- 설정 [깨우기 받기]: `profiles.wake_ping_enabled` — DB 직접 update(내 프로필, 기본 켬). 꺼 두면 보낸 쪽에는 `OFF`만 보임
 
 ### G04 공유받은 알람
 - 친구 알람: `alarms`(주인 = 친구) — DB, 조회 권한은 RLS가 확인. 약속 제목 · 장소까지 보여 주려면 RPC 하나 더 필요(`appointments` RLS는 본인 · 그룹원만) — #46에서
@@ -258,7 +260,10 @@
 - 권한 안내: 알림 · 정확한 알람 · 잠금화면 알람 화면 — 폰
 - 설정 "출발 · 도착 자동 기록" 카드(`features/location/LocationAutoSection`, 안드로이드 + 실데이터에서만): 스위치 = 폰 저장 `location:v1:auto`(기본 켬) + 위치 권한 상태(`permissions.ts` `getLocationStatus`: 켜짐 · 위치 꺼짐 · 앱 사용 중에만 · 정확한 위치 꺼짐) — 폰, DB 없음. 앞 권한만 시스템 창으로 묻고 "항상 허용" · "정확한 위치"는 앱 설정 화면으로 안내(안드로이드 11+). 온보딩에서 못 켰다면 여기서(위치 허용하기 → 앞 권한 → 항상 허용 설정). 권한이 모자라도 스위치는 켜 둠 — 권한이 생기면 바로 등록. 끄면 등록한 지오펜스를 멈춤
 - 온보딩은 `LOCATION_DISCLOSURE`를 보여 준 뒤 `requestLocationAccessFlow()`를 부름(L7 #277)
-- 푸시 토큰: 앱 켤 때 `register_push_token` — RPC
+- 푸시 토큰: 로그인 직후 · 앱이 앞에 올 때(6시간 넘었으면) `usePushRegistration` → 안드로이드 채널 5개(`friend_v1` · `alarm_change_v1` · `request_v1` · `group_v1` · `missed_v1`)를 먼저 만든 뒤 `register_push_token(p_token, p_platform)` — RPC. 안드로이드만, 실패해도 던지지 않음. 같은 폰에서 계정이 바뀌면 마지막 로그인 계정이 토큰 주인
+- `notify` 호출 모양: 요청에는 종류별 인자만(한 사람 = `targetUserId`, 그룹 = `groupId`) — 제목 · 본문 · data는 서버가 고정. 알람 바뀜(G04)은 `previousAt` · `newAt`(ISO)을 같이, 친구 요청 보냄(`REQUESTED`) → `FRIEND_REQUEST`, 수락 · 맞요청 자동 수락 → `FRIEND_ACCEPTED`, 그룹에 새로 들어옴(`JOINED`) → `GROUP_MEMBER_JOINED`. 본 동작이 끝난 뒤 기다리지 않고 부르며 실패해도 되돌리지 않음 (`features/social/real/push.ts`)
+- 알림 누르기(`usePushLinks`, `features/push/link.ts`): `data.recipientUserId`가 지금 로그인한 계정일 때만 갈 곳(`/wake` · `/alarms` · `/friends`(그룹 탭) · `/group`(`groupId`가 있으면 그 그룹, `subjectUserId`도 있으면 그 사람의 기상 확인), 깨우기 `/groups/<그룹>/members/<사람>`, 공동 약속 변경은 `needsConfirm`이면 `/alarm/changed?id=`), 아니면 홈. 로그인 전에 누르면 로그인 뒤에 이어감. 앞에 떠 있을 때 받은 알림 중 내 알람 바뀜 · 공동 약속 바뀜 · 취소는 폰 알람을 서버와 맞춤(`syncNow`)
+- 설정 '알람 점검' 첫 줄: 폰 알림 권한이 꺼져 있으면 '알림이 꺼져 있어요 [켜기]'(켜면 토큰 다시 등록), 아니면 '알림 설정 열기'
 
 ## Edge Function — 만들 것만
 
