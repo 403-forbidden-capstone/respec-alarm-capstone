@@ -145,7 +145,8 @@ async function devResetCheck(ctx) {
     must(noLogin.error, '로그인 없이 개발용 초기화가 불림');
   } finally {
     await ctx.admin.from('groups').delete().like('group_name', `${E2E_PREFIX}초기화%`);
-    await ctx.admin.auth.admin.deleteUser(T);
+    const del = await ctx.admin.auth.admin.deleteUser(T);
+    if (del.error) throw new Error(`임시 계정 지우기 실패: ${del.error.message}`);
   }
 }
 
@@ -165,13 +166,18 @@ async function broadcastClosed(ctx) {
   try {
     if (!subscribed) skip('Realtime 비공개 채널을 못 열어 broadcast 거부 확인 생략 (로컬 Realtime 상태 확인)');
     const tx = ctx.a.channel(topic, { config: { private: true } });
-    await new Promise((resolve) => {
-      const t = setTimeout(resolve, 4000);
-      tx.subscribe((status) => { if (status === 'SUBSCRIBED') { clearTimeout(t); resolve(); } });
+    const txOpen = await new Promise((resolve) => {
+      const t = setTimeout(() => resolve(false), 4000);
+      tx.subscribe((status) => { if (status === 'SUBSCRIBED') { clearTimeout(t); resolve(true); } });
     });
-    await tx.send({ type: 'broadcast', event: 'refresh', payload: { date: todayKst(), from: 'e2e' } }).catch(() => {});
-    await new Promise((r) => setTimeout(r, 2000));
-    await ctx.a.removeChannel(tx);
+    try {
+      // 보내는 쪽이 채널을 못 열었다면 '서버가 거부'인지 '안 보냄'인지 구분이 안 되므로 확인 생략
+      if (!txOpen) skip('보내는 쪽(A) 비공개 채널이 안 열려 broadcast 거부 확인 생략');
+      await tx.send({ type: 'broadcast', event: 'refresh', payload: { date: todayKst(), from: 'e2e' } });
+      await new Promise((r) => setTimeout(r, 2000));
+    } finally {
+      await ctx.a.removeChannel(tx);
+    }
     must(got.length === 0, `A가 직접 보낸 기상 신호가 B에게 도착함 (${got.length}건)`);
   } finally {
     await ctx.b.removeChannel(rx);
@@ -642,8 +648,19 @@ export const STEPS = [
         const far = ok(await callRpc(ctx.a, ctx.fn.group_wake, { p_group_id: ctx.s.group, p_date: d }), `기상 조회 ${d}`);
         must(far.length === 0, `${d} 날짜로 조회하면 줄이 나오면 안 되는데 ${far.length}개 나옴`);
       }
-      const direct = await ctx.a.from('group_members').insert({ group_id: ctx.s.group, user_id: ctx.ids.C, invite_status: 'INVITED' });
-      must(direct.error, '함수 밖 직접 insert로 그룹 초대가 만들어짐 (15-02)');
+      // 그룹에 없는 사람(임시 계정)을 대상으로 — 이미 초대된 C로 하면 중복 키 오류로 정책이 열려 있어도 통과함
+      const tmp = await ctx.admin.auth.admin.createUser({ email: `e2e-inv-${rand()}@example.com`, password: ctx.password, email_confirm: true });
+      must(!tmp.error, `임시 계정 만들기: ${tmp.error?.message}`);
+      try {
+        const direct = await ctx.a.from('group_members').insert({ group_id: ctx.s.group, user_id: tmp.data.user.id, invite_status: 'INVITED' });
+        must(direct.error, '함수 밖 직접 insert로 그룹 초대가 만들어짐 (15-02)');
+        must(/row-level security|permission denied/i.test(direct.error.message), `직접 초대 거절 이유가 권한이 아님: ${direct.error.message}`);
+        const row = ok(await ctx.admin.from('group_members').select('user_id').eq('group_id', ctx.s.group).eq('user_id', tmp.data.user.id), '멤버 행');
+        must(row.length === 0, '거절됐다는데 멤버 행이 남음');
+      } finally {
+        const del = await ctx.admin.auth.admin.deleteUser(tmp.data.user.id);
+        if (del.error) throw new Error(`임시 계정 지우기 실패: ${del.error.message}`);
+      }
       await broadcastClosed(ctx);
     },
   },
