@@ -402,194 +402,66 @@ describe('G04 공유받은 알람', () => {
     expect(shared?.alarms).toHaveLength(1); // 화면 카드는 그대로 (앞으로의 약속 하나)
   });
 
-  it('켜기 · 끄기: 기상 · 준비 · 출발 알람만 바꾸고(도착 목표 제외) 주인에게 알림', async () => {
+  it('제안 보내기: 카드의 가장 이른 알람(기상) 기준 새 시각으로 propose_alarm_time, 성공하면 주인에게 알림(받는 사람 · 알람 id만)', async () => {
     shareSetup();
-    mockFake.answer('alarms.update', ok([{ alarm_id: 'w1' }, { alarm_id: 'p1' }, { alarm_id: 'd1' }]));
+    mockFake.answerRpc('propose_alarm_time', ok({ status: 'OK', proposal_id: 'pr1', from_at: '2026-10-19T22:30:00.000Z', to_at: '2026-10-19T22:00:00.000Z' }));
     mockCallEdge.mockResolvedValue({ sent: 1, failed: 0 });
-    await expect(real.setSharedAlarmEnabled(SUYEON, 'ap1', false)).resolves.toEqual({ notified: true });
-    const [update] = mockFake.opsOf('alarms', 'update');
-    expect(update.payload).toEqual({ is_enabled: false });
-    expect(update.filters).toEqual([['in', 'alarm_id', ['w1', 'p1', 'd1']]]);
-    expect(mockCallEdge).toHaveBeenCalledWith('notify', {
-      kind: 'ALARM_CHANGED',
-      targetUserId: SUYEON,
-      alarmId: 'w1',
-    });
+    await expect(real.proposeSharedAlarm(SUYEON, 'w1', new Date('2026-10-19T22:00:00.000Z'))).resolves.toEqual({ notified: true });
+    expect(mockFake.rpcCalls.find((c) => c.name === 'propose_alarm_time')?.args).toEqual({ p_alarm_id: 'w1', p_new_at: '2026-10-19T22:00:00.000Z' });
+    expect(mockCallEdge).toHaveBeenCalledWith('notify', { kind: 'ALARM_CHANGED', targetUserId: SUYEON, alarmId: 'w1' });
+    expect(mockFake.opsOf('alarms', 'update')).toHaveLength(0); // 상대 알람은 바로 고치지 않음 — 상대가 [적용]해야 바뀜
   });
 
-  it('켤 때는 아직 안 지난 알람만 켬 — 지난 기상 알람을 켜면 서버가 울린 적 없는 알람을 기상 미확인으로 기록하므로 (내 알람과 같은 규칙)', async () => {
-    const mixed = [
-      alarmRow('w1', 'WAKE', '2026-10-19T11:00:00.000Z', { is_enabled: false }), // 지금(12:00Z)보다 앞 = 지남
-      alarmRow('p1', 'PREPARE', '2026-10-19T22:40:00.000Z', { is_enabled: false }),
-      alarmRow('d1', 'DEPARTURE', '2026-10-19T23:50:00.000Z', { is_enabled: false }),
-      alarmRow('a1', 'ARRIVE', '2026-10-20T00:50:00.000Z'),
-    ];
-    mockFake.answerRpc('get_shared_alarm_appointments', ok(mixed.map((a) => ap(a.alarm_id))));
-    mockFake.answer('alarms.select', ok(mixed));
-    mockFake.answer('alarms.update', ok([{ alarm_id: 'p1' }, { alarm_id: 'd1' }]));
-    mockCallEdge.mockResolvedValue({ sent: 1, failed: 0 });
-    await expect(real.setSharedAlarmEnabled(SUYEON, 'ap1', true)).resolves.toEqual({ notified: true });
-    const [update] = mockFake.opsOf('alarms', 'update');
-    expect(update.payload).toEqual({ is_enabled: true });
-    expect(update.filters).toEqual([
-      ['in', 'alarm_id', ['p1', 'd1']],
-      ['gt', 'scheduled_at', '2026-10-19T12:00:00.000Z'],
-    ]);
-
-    // 끄는 것은 지난 알람도 포함해 전부
-    mockFake.reset();
-    mockFake.answerRpc('get_shared_alarm_appointments', ok(mixed.map((a) => ap(a.alarm_id))));
-    mockFake.answer('alarms.select', ok(mixed));
-    mockFake.answer('alarms.update', ok([{ alarm_id: 'w1' }, { alarm_id: 'p1' }, { alarm_id: 'd1' }]));
-    mockFake.answer('friends.select', ok(friends));
-    mockFake.answer('groups.select', ok(groups));
-    mockFake.answer('group_members.select', ok(members));
-    mockFake.answer('sharing_permissions.select', ok(perms));
-    mockFake.answerRpc('get_public_profiles', ok(publicProfiles));
-    await real.setSharedAlarmEnabled(SUYEON, 'ap1', false);
-    expect(mockFake.opsOf('alarms', 'update')[0].filters).toEqual([['in', 'alarm_id', ['w1', 'p1', 'd1']]]);
-  });
-
-  it('켤 알람이 모두 지났으면 쓰지 않고 이유를 알림 (내 알람과 같은 문구)', async () => {
-    const past = [
-      alarmRow('w1', 'WAKE', '2026-10-19T09:00:00.000Z', { is_enabled: false }),
-      alarmRow('p1', 'PREPARE', '2026-10-19T10:00:00.000Z', { is_enabled: false }),
-      alarmRow('d1', 'DEPARTURE', '2026-10-19T11:00:00.000Z', { is_enabled: false }),
-    ];
-    mockFake.answerRpc('get_shared_alarm_appointments', ok(past.map((a) => ap(a.alarm_id))));
-    mockFake.answer('alarms.select', ok(past));
-    await expect(real.setSharedAlarmEnabled(SUYEON, 'ap1', true)).rejects.toThrow('켤 수 있는 알람이 없어요. 이미 지난 알람이거나 지워졌을 수 있어요');
-    expect(mockFake.opsOf('alarms', 'update')).toHaveLength(0);
-    expect(mockCallEdge).not.toHaveBeenCalled();
-  });
-
-  it('알림 요청에 제목 · 본문 · data는 없음 — 문구는 서버가 종류별로 고정 (11장)', async () => {
+  it('서버 거절은 이유를 알림: 곧 울릴 알람 · ±60분 · 같은 시각 · 권한 없음(안 보이는 알람과 구분 없음) — 알림은 부르지 않음 (10-파)', async () => {
     shareSetup();
-    mockFake.answer('alarms.update', ok([{ alarm_id: 'w1' }, { alarm_id: 'p1' }, { alarm_id: 'd1' }]));
-    mockCallEdge.mockResolvedValue({ sent: 1, failed: 0 });
-    await real.setSharedAlarmEnabled(SUYEON, 'ap1', false);
-    const body = mockCallEdge.mock.calls[0][1] as Record<string, unknown>;
-    expect(Object.keys(body).sort()).toEqual(['alarmId', 'kind', 'targetUserId']);
-  });
-
-  it('알림이 실패해도 저장은 그대로, 던지지 않고 notified: false', async () => {
-    shareSetup();
-    mockFake.answer('alarms.update', ok([{ alarm_id: 'w1' }, { alarm_id: 'p1' }, { alarm_id: 'd1' }]));
-    mockCallEdge.mockRejectedValue(new Error('network'));
-    await expect(real.setSharedAlarmEnabled(SUYEON, 'ap1', true)).resolves.toEqual({ notified: false });
-    // 푸시 토큰이 없어 못 보낸 경우도 같음 (sent: 0)
-    mockCallEdge.mockReset();
-    mockCallEdge.mockResolvedValue({ sent: 0, failed: 0, reason: 'NO_TOKENS' });
-    await expect(real.setSharedAlarmEnabled(SUYEON, 'ap1', true)).resolves.toEqual({ notified: false });
-  });
-
-  it('권한이 없어 바뀐 행이 없으면(RLS) 이유를 알리고 알림은 보내지 않음', async () => {
-    shareSetup();
-    mockFake.answer('alarms.update', ok([]));
-    await expect(real.setSharedAlarmEnabled(SUYEON, 'ap1', false)).rejects.toThrow(UserError);
-    expect(mockCallEdge).not.toHaveBeenCalled();
-  });
-
-  it('이미 사라진 카드는 이유를 알림', async () => {
-    shareSetup();
-    await expect(real.setSharedAlarmEnabled(SUYEON, 'nope', false)).rejects.toThrow(UserError);
-    expect(mockFake.opsOf('alarms', 'update')).toHaveLength(0);
-  });
-
-  it('±5분: 카드의 알람마다 시각을 옮기고 time_source를 MANUAL로 같이 씀 (주인의 다음 저장이 자동 시각으로 덮지 않게)', async () => {
-    shareSetup();
-    mockFake.answer('alarms.update', ok([{ alarm_id: 'x' }]));
-    mockCallEdge.mockResolvedValue({ sent: 1, failed: 0 });
-    await expect(real.shiftSharedAlarm(SUYEON, 'ap1', -5)).resolves.toEqual({ notified: true });
-    const updates = mockFake.opsOf('alarms', 'update');
-    expect(updates.map((u) => [u.filters[0][2], u.payload])).toEqual([
-      ['w1', { scheduled_at: '2026-10-19T22:25:00.000Z', time_source: 'MANUAL' }],
-      ['p1', { scheduled_at: '2026-10-19T22:35:00.000Z', time_source: 'MANUAL' }],
-      ['d1', { scheduled_at: '2026-10-19T23:45:00.000Z', time_source: 'MANUAL' }],
-    ]);
-    // 시각을 옮긴 알림은 이전 → 새 시각(가장 이른 알람 = 기상)을 같이 보내야 문구에 '이전 → 새 시각'이 나옴
-    expect(mockCallEdge).toHaveBeenCalledWith('notify', {
-      kind: 'ALARM_CHANGED',
-      targetUserId: SUYEON,
-      alarmId: 'w1',
-      previousAt: '2026-10-19T22:30:00.000Z',
-      newAt: '2026-10-19T22:25:00.000Z',
-    });
-  });
-
-  describe('앞당기기 — 옮긴 시각이 지금 + 5분(서버 PAST_GRACE_MINUTES)보다 이르게 되면 거절', () => {
-    // 지금 = 2026-10-19T12:00Z. 기상 알람이 지금 + wakeMin분, 준비는 + 10분 뒤, 출발은 + 90분 뒤
-    const near = (wakeMin: number, over: Record<string, unknown> = {}) => {
-      const at = (min: number) => new Date(Date.parse('2026-10-19T12:00:00.000Z') + min * 60_000).toISOString();
-      const list = [alarmRow('w1', 'WAKE', at(wakeMin), over), alarmRow('p1', 'PREPARE', at(wakeMin + 10)), alarmRow('d1', 'DEPARTURE', at(wakeMin + 90)), alarmRow('a1', 'ARRIVE', at(wakeMin + 180))];
-      mockFake.answerRpc('get_shared_alarm_appointments', ok(list.map((a) => ap(a.alarm_id))));
-      mockFake.answer('alarms.select', ok(list));
-      mockFake.answer('alarms.update', ok([{ alarm_id: 'x' }]));
+    const try_ = (status: string) => {
+      mockFake.answerRpc('propose_alarm_time', ok({ status }));
+      return real.proposeSharedAlarm(SUYEON, 'w1', new Date('2026-10-19T22:00:00.000Z'));
     };
-
-    it('5분 앞당기면 지금 + 5분 안쪽이 되는 켜진 알람이 있으면 아무것도 쓰지 않고 이유를 알림', async () => {
-      near(8); // 기상이 8분 뒤 -> 3분 뒤가 됨
-      await expect(real.shiftSharedAlarm(SUYEON, 'ap1', -5)).rejects.toThrow(new UserError('곧 울릴 알람이라 앞당길 수 없어요'));
-      expect(mockFake.opsOf('alarms', 'update')).toHaveLength(0);
-      expect(mockCallEdge).not.toHaveBeenCalled();
-    });
-
-    it('딱 지금 + 5분이 되는 것은 허용 (서버는 지금 + 5분보다 앞인 것만 지난 것으로 봄)', async () => {
-      near(10); // 10분 뒤 -> 정확히 5분 뒤
-      mockCallEdge.mockResolvedValue({ sent: 1 });
-      await expect(real.shiftSharedAlarm(SUYEON, 'ap1', -5)).resolves.toEqual({ notified: true });
-      expect(mockFake.opsOf('alarms', 'update')).toHaveLength(3);
-    });
-
-    it('이미 지난 알람이나 꺼 둔 알람은 걸리지 않음 — 지난 기상은 그대로 두고 나머지만 앞당길 수 있음', async () => {
-      near(-30); // 기상은 30분 전에 지났고 준비는 20분 전, 출발은 60분 뒤
-      mockCallEdge.mockResolvedValue({ sent: 0 });
-      await expect(real.shiftSharedAlarm(SUYEON, 'ap1', -5)).resolves.toEqual({ notified: false });
-      near(8, { is_enabled: false }); // 곧 울릴 수 있어도 꺼 둔 알람
-      await expect(real.shiftSharedAlarm(SUYEON, 'ap1', -5)).resolves.toBeDefined();
-    });
-
-    it('늦추기는 검사하지 않음', async () => {
-      near(1);
-      mockCallEdge.mockResolvedValue({ sent: 1 });
-      await expect(real.shiftSharedAlarm(SUYEON, 'ap1', 5)).resolves.toEqual({ notified: true });
-    });
-  });
-
-  it('늦추기는 +분으로 옮기고, 알림이 안 가면 notified: false', async () => {
-    shareSetup();
-    mockFake.answer('alarms.update', ok([{ alarm_id: 'x' }]));
-    mockCallEdge.mockResolvedValue({ sent: 0, failed: 0, reason: 'NO_TOKENS' });
-    await expect(real.shiftSharedAlarm(SUYEON, 'ap1', 5)).resolves.toEqual({ notified: false });
-    expect(mockFake.opsOf('alarms', 'update')[0].payload).toEqual({ scheduled_at: '2026-10-19T22:35:00.000Z', time_source: 'MANUAL' });
-  });
-
-  it('중간에 막히면 이미 옮긴 알람을 되돌려 기상 · 준비 · 출발 간격이 어긋나지 않게', async () => {
-    shareSetup();
-    let n = 0;
-    mockFake.answer('alarms.update', (op: Op) => {
-      n++;
-      // 첫 번째 옮기기는 되고, 두 번째에서 막힘, 되돌리기 쓰기는 됨
-      if (n === 2 && (op.payload as { time_source?: string }).time_source === 'MANUAL') return ok([]);
-      return ok([{ alarm_id: 'x' }]);
-    });
-    await expect(real.shiftSharedAlarm(SUYEON, 'ap1', 5)).rejects.toThrow(UserError);
-    const updates = mockFake.opsOf('alarms', 'update');
-    expect(updates).toHaveLength(3); // w1 옮김, p1 막힘, w1 되돌림
-    expect(updates[2].filters[0][2]).toBe('w1');
-    expect(updates[2].payload).toEqual({ scheduled_at: '2026-10-19T22:30:00.000Z', time_source: 'AUTO' });
+    await expect(try_('TOO_SOON')).rejects.toThrow('곧 울릴 알람이라 지금은 제안할 수 없어요');
+    await expect(try_('LIMIT')).rejects.toThrow('원래 시각에서 1시간(±60분) 안에서만 제안할 수 있어요');
+    await expect(try_('SAME')).rejects.toThrow('지금 시각과 같아요');
+    await expect(try_('FORBIDDEN')).rejects.toThrow('이 알람은 바꿀 수 없어요');
+    await expect(try_('SOMETHING_NEW')).rejects.toThrow();
     expect(mockCallEdge).not.toHaveBeenCalled();
   });
 
-  it('변경 기록: DB에 저장하지 않고 이번 실행 동안 바꾼 것만', async () => {
+  it('알림이 실패해도 제안은 그대로, 던지지 않고 notified: false', async () => {
     shareSetup();
-    mockFake.answer('alarms.update', ok([{ alarm_id: 'w1' }, { alarm_id: 'p1' }, { alarm_id: 'd1' }]));
-    mockCallEdge.mockResolvedValue({ sent: 0 });
-    const before = (await real.getShareLog()).length;
-    await real.setSharedAlarmEnabled(SUYEON, 'ap1', false);
-    const log = await real.getShareLog();
-    expect(log).toHaveLength(before + 1);
-    expect(log[log.length - 1].text).toBe('수연님 알람 끔');
+    mockFake.answerRpc('propose_alarm_time', ok({ status: 'OK' }));
+    mockCallEdge.mockRejectedValue(new Error('오프라인'));
+    await expect(real.proposeSharedAlarm(SUYEON, 'w1', new Date('2026-10-19T22:00:00.000Z'))).resolves.toEqual({ notified: false });
+  });
+
+  it('제안을 보낼 알람 = 켜져 있고 아직 안 울린 가장 이른 알람 — 기상이 이미 울렸거나 꺼졌으면 다음 알람, 하나도 없으면 시각 제안 불가 (10-18)', async () => {
+    const at = (a: ReturnType<typeof alarmRow>[]) => {
+      mockFake.answerRpc('get_shared_alarm_appointments', ok(a.map((x) => ap(x.alarm_id))));
+      mockFake.answer('alarms.select', ok(a));
+    };
+    at([{ ...alarms[0], is_enabled: false }, alarms[1], alarms[2], alarms[3]]); // 기상만 꺼짐
+    expect((await real.getSharedAlarms(SUYEON))?.alarms[0]).toMatchObject({ firstAlarmId: 'p1', proposeAt: new Date('2026-10-19T22:40:00.000Z') });
+    at(alarms.map((x) => ({ ...x, is_enabled: false })));
+    expect((await real.getSharedAlarms(SUYEON))?.alarms[0].firstAlarmId).toBeUndefined();
+  });
+
+  it("보낸 제안 상태: '제안함'(대기 · 무시는 서버가 대기로 돌려줌) · '반영됨'(적용)을 카드에 붙이고, 원래 시각을 같이 줌 (10-파)", async () => {
+    const withOriginal = alarms.map((a) => (a.alarm_id === 'w1' ? { ...a, original_scheduled_at: '2026-10-19T22:45:00.000Z' } : a));
+    mockFake.answerRpc('get_shared_alarm_appointments', ok(alarms.map((a) => ap(a.alarm_id))));
+    mockFake.answer('alarms.select', ok(withOriginal));
+    mockFake.answerRpc('sent_alarm_proposals', ok([{ proposal_id: 'pr1', alarm_id: 'w1', status: 'PENDING', from_at: '2026-10-19T22:30:00.000Z', to_at: '2026-10-19T22:00:00.000Z', created_at: '2026-10-19T12:00:00.000Z' }]));
+    const [card] = (await real.getSharedAlarms(SUYEON))?.alarms ?? [];
+    expect(card.proposal).toEqual({ status: 'PENDING', toAt: new Date('2026-10-19T22:00:00.000Z') });
+    expect(card.originalAt).toEqual(new Date('2026-10-19T22:45:00.000Z'));
+    expect(card.firstAlarmId).toBe('w1');
+    expect(card.proposeAt).toEqual(new Date('2026-10-19T22:30:00.000Z'));
+    expect(mockFake.rpcCalls.find((c) => c.name === 'sent_alarm_proposals')?.args).toEqual({ p_owner_id: SUYEON });
+  });
+
+  it('보낸 제안을 못 읽어도 카드는 열림 (제안 상태만 안 보임)', async () => {
+    shareSetup();
+    mockFake.answerRpc('sent_alarm_proposals', { data: null, error: new Error('rpc') });
+    const [card] = (await real.getSharedAlarms(SUYEON))?.alarms ?? [];
+    expect(card.proposal).toBeNull();
   });
 });
 
