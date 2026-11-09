@@ -45,7 +45,7 @@ export default async function ch10({ q, as, su, svc, check, expectErr }) {
     }
     return { ap: ap.appointment_id, pt: pt.participant_id, ...ids };
   };
-  const alarm = async (alarmId) => (await q(`select alarm_id, alarm_type, scheduled_at, time_source, original_scheduled_at, is_enabled from public.alarms where alarm_id = $1`, [alarmId]))[0];
+  const alarm = async (alarmId) => (await q(`select alarm_id, alarm_type, scheduled_at, time_source, original_scheduled_at, original_time_source, is_enabled from public.alarms where alarm_id = $1`, [alarmId]))[0];
   const ms = (v) => new Date(v).getTime();
   const min = (n) => n * 60_000;
   const propose = async (uid, alarmId, newAt) => call(uid, 'public.propose_alarm_time($1, $2::timestamptz)', [alarmId, newAt]);
@@ -139,6 +139,8 @@ export default async function ch10({ q, as, su, svc, check, expectErr }) {
     const outside = await propose(B, c.WAKE, new Date(base + min(65)).toISOString());
     const insideEdge = await propose(B, c.WAKE, new Date(base - min(60)).toISOString());
     const dismissed = await respond(A, insideEdge.proposal_id, false);
+    const just61 = await propose(B, c.WAKE, new Date(base + min(61)).toISOString());                // 61분은 밖
+    const edge30 = await propose(B, c.WAKE, new Date(base + min(60) + 30_000).toISOString());       // 60분 30초는 분 단위로 맞춰져 60분 → 안
     const steps = [];
     for (let i = 1; i <= 12; i++) {
       const r = await propose(B, c.WAKE, new Date(base + min(5 * i)).toISOString());
@@ -151,9 +153,10 @@ export default async function ch10({ q, as, su, svc, check, expectErr }) {
     const restored = await respond(A, backToOriginal.proposal_id, true);
     const end = await alarm(c.WAKE);
     return outside.status === 'LIMIT' && insideEdge.status === 'OK' && dismissed.status === 'DISMISSED'
+      && just61.status === 'LIMIT' && edge30.status === 'OK' && ms(edge30.to_at) === base + min(60)
       && steps.every((x, i) => x === (i % 2 === 0 ? 'OK' : 'APPLIED')) && ms(now60.scheduled_at) === base + min(60) && ms(now60.original_scheduled_at) === base
       && thirteenth.status === 'LIMIT' && backToOriginal.status === 'OK' && restored.status === 'APPLIED'
-      && ms(end.scheduled_at) === base && end.original_scheduled_at == null ? true : { outside, insideEdge, steps, now60, thirteenth, backToOriginal, restored, end };
+      && ms(end.scheduled_at) === base && end.original_scheduled_at == null ? true : { outside, insideEdge, just61, edge30, steps, now60, thirteenth, backToOriginal, restored, end };
   });
 
   await check('10-14: 곧 울릴 알람은 거절(TOO_SOON) — 알람이 지금 + 10분 안이거나 새 시각이 지금 + 5분 이전이면, 같은 시각은 SAME', async () => {
@@ -212,7 +215,7 @@ export default async function ch10({ q, as, su, svc, check, expectErr }) {
     const late = await respond(A, p3.proposal_id, true);
     const lateList = await inbox(A);
     return ignored.status === 'DISMISSED' && ms(afterIgnore.scheduled_at) === ms(before.scheduled_at) && listAfter.length === 0
-      && sentView.length === 1 && sentView[0].status === 'DISMISSED' && sentView[0].alarm_id === c.WAKE
+      && sentView.length === 1 && sentView[0].status === 'PENDING' && sentView[0].alarm_id === c.WAKE
       && edited.original_scheduled_at == null && stale.status === 'EXPIRED' && state === 'EXPIRED' && late.status === 'EXPIRED' && lateList.length === 0 ? true : { ignored, listAfter, sentView, edited, stale, state, late, lateList };
   });
 
@@ -284,7 +287,7 @@ export default async function ch10({ q, as, su, svc, check, expectErr }) {
     return results.every((x) => x.status === 'NOT_FOUND') && stillPending === 'PENDING' && done.status === 'APPLIED' && again.status === 'NOT_FOUND' ? true : { results, stillPending, done, again };
   });
 
-  await check('10-29 · 보낸 제안 조회: 알람마다 가장 최근 제안 한 줄(제안함 · 무시됨 · 반영됨), 같은 카드의 다른 대기 제안은 적용 뒤 만료(시각이 어긋나서), 제안은 주인 · 보낸 친구 본인 줄만 읽힘', async () => {
+  await check('10-29 · 보낸 제안 조회: 알람마다 가장 최근 제안 한 줄(제안함 · 반영됨 — 무시된 것도 제안함), 같은 카드의 다른 대기 제안은 적용 뒤 만료(시각이 어긋나서), 제안 표는 주인 본인 줄만 읽히고 보낸 친구는 함수로만 봄', async () => {
     const { A, B, c } = await pair(27);
     const X = await join_(29, '제3자');
     const c2 = await card(A, { hours: 10 });
@@ -308,8 +311,115 @@ export default async function ch10({ q, as, su, svc, check, expectErr }) {
     const fresh = await propose(B, c3.WAKE, await shifted(c3.WAKE, -10));
     const latest = (await sent(B, A)).filter((r) => r.alarm_id === c3.WAKE);
     return sentRows.length === 2 && byAlarm[c.WAKE] === 'APPLIED' && byAlarm[c2.WAKE] === 'PENDING' && sameCard === 'EXPIRED' && thirdParty.length === 0 && noEdit.length === 0
-      && mine.length === 1 && mine[0].proposal_id === p2.proposal_id && peek.length === 0 && peekB.length === 3 && peekA.length === 3
+      && mine.length === 1 && mine[0].proposal_id === p2.proposal_id && peek.length === 0 && peekB.length === 0 && peekA.length === 3
       && latest.length === 1 && latest[0].proposal_id === fresh.proposal_id && latest[0].status === 'PENDING' ? true : { sentRows, sameCard, thirdParty, noEdit, mine, peek: peek.length, peekB: peekB.length, peekA: peekA.length, latest, fresh };
+  });
+
+  await check('[원래대로] 복원: 친구가 바꾸기 전의 time_source로 돌아옴 — 자동 계산이던 카드는 다시 AUTO(자동 재계산이 다시 덮을 수 있음), 주인이 직접 골랐던 알람은 계속 MANUAL, 기억 칸은 둘 다 비워짐', async () => {
+    const { A, B, c } = await pair(50);                                                       // 카드 알람은 AUTO
+    const manualCard = await card(A, { hours: 10 });
+    await q(`update public.alarms set time_source = 'MANUAL' where alarm_id = $1`, [manualCard.WAKE]);      // 주인이 직접 고른 기상
+    const out = {};
+    for (const [name, cc] of [['auto', c], ['manual', manualCard]]) {
+      const base = ms((await alarm(cc.WAKE)).scheduled_at);
+      const p1 = await propose(B, cc.WAKE, new Date(base - min(10)).toISOString());
+      await respond(A, p1.proposal_id, true);
+      const mid = [await alarm(cc.WAKE), await alarm(cc.PREPARE)];
+      const p2 = await propose(B, cc.WAKE, new Date(base).toISOString());                      // 원래대로
+      await respond(A, p2.proposal_id, true);
+      out[name] = { mid, end: [await alarm(cc.WAKE), await alarm(cc.PREPARE)], base };
+    }
+    const a = out.auto, m = out.manual;
+    return a.mid.every((x) => x.time_source === 'MANUAL' && x.original_time_source === 'AUTO' && x.original_scheduled_at != null)
+      && a.end.every((x) => x.time_source === 'AUTO' && x.original_scheduled_at == null && x.original_time_source == null) && ms(a.end[0].scheduled_at) === a.base
+      && m.mid[0].original_time_source === 'MANUAL' && m.mid[1].original_time_source === 'AUTO'
+      && m.end[0].time_source === 'MANUAL' && m.end[0].original_scheduled_at == null && m.end[0].original_time_source == null && m.end[1].time_source === 'AUTO' ? true : out;
+  });
+
+  await check('이른 알람이 과거로 가는 제안: 같은 카드의 다른 알람이 같은 만큼 움직여 지금 + 5분 이전이 되면 제안은 TOO_SOON, 이미 보낸 제안은 그사이 형제 알람이 곧 울리게 되면 [적용]이 EXPIRED(아무것도 안 움직임)', async () => {
+    const { A, B } = await pair(52);
+    const near = await card(A, { hours: 10 });
+    await q(`update public.alarms set scheduled_at = date_trunc('minute', now()) + interval '12 minutes' where alarm_id = $1`, [near.WAKE]);
+    await q(`update public.alarms set scheduled_at = date_trunc('minute', now()) + interval '32 minutes' where alarm_id = $1`, [near.PREPARE]);
+    await q(`update public.alarms set scheduled_at = date_trunc('minute', now()) + interval '52 minutes' where alarm_id = $1`, [near.DEPARTURE]);
+    const tooSoon = await propose(B, near.DEPARTURE, new Date(Date.now() + 8 * 60_000).toISOString());     // 출발을 44분 당기면 기상이 지금 − 32분
+    const tooSoon2 = await propose(B, near.DEPARTURE, new Date(Date.now() + 52 * 60_000 - 10 * 60_000).toISOString());   // 10분 당기면 기상이 지금 + 2분 → 이것도 5분 이전
+    const small = await propose(B, near.DEPARTURE, new Date(Date.now() + 52 * 60_000 - 5 * 60_000).toISOString());  // 5분 당기면 기상이 지금 + 7분 → 되지만 곧 울림(알람 10분 안이 아니라 출발 기준이라 OK)
+    const far = await card(A, { hours: 10 });
+    const sent1 = await propose(B, far.DEPARTURE, await shifted(far.DEPARTURE, -44));
+    await q(`update public.alarms set scheduled_at = date_trunc('minute', now()) + interval '12 minutes' where alarm_id = $1`, [far.WAKE]);      // 그사이 기상이 곧 울릴 시각
+    const late = await respond(A, sent1.proposal_id, true);
+    const after = [await alarm(far.WAKE), await alarm(far.DEPARTURE)];
+    const state = (await q(`select status from public.alarm_proposals where proposal_id = $1`, [sent1.proposal_id]))[0].status;
+    return tooSoon.status === 'TOO_SOON' && tooSoon2.status === 'TOO_SOON' && small.status === 'OK'
+      && sent1.status === 'OK' && late.status === 'EXPIRED' && state === 'EXPIRED'
+      && after[0].time_source === 'AUTO' && after[0].original_scheduled_at == null && ms(after[1].scheduled_at) === ms(sent1.from_at) ? true : { tooSoon, tooSoon2, small, sent1, late, state, after };
+  });
+
+  await check('받은 목록 · 보낸 목록 범위: 다른 주인에게 보낸 제안이 섞이지 않고, 꺼진 알람 · 새 시각이 곧 지나는 제안은 받은 목록에서 빠지며 [적용]은 EXPIRED', async () => {
+    const { A: A1, B, c } = await pair(54);
+    const A2 = await join_(56, '다른주인');
+    await befriend(A2, B); await grant(A2, B);
+    const c2 = await card(A2);
+    const p1 = await propose(B, c.WAKE, await shifted(c.WAKE, -5));
+    const p2 = await propose(B, c2.WAKE, await shifted(c2.WAKE, -5));
+    const in1 = await inbox(A1), in2 = await inbox(A2);
+    const sent1 = await sent(B, A1), sent2 = await sent(B, A2);
+    // 꺼진 알람 · 새 시각이 곧 지나는 제안
+    const off = await card(A1, { hours: 9 }), soon = await card(A1, { hours: 11 });
+    const pOff = await propose(B, off.WAKE, await shifted(off.WAKE, -5));
+    const pSoon = await propose(B, soon.WAKE, await shifted(soon.WAKE, -5));
+    await q(`update public.alarms set is_enabled = false where alarm_id = $1`, [off.WAKE]);
+    await q(`update public.alarm_proposals set to_at = now() + interval '1 minute' where proposal_id = $1`, [pSoon.proposal_id]);
+    const hidden = (await inbox(A1)).map((x) => x.proposal_id);
+    const rOff = await respond(A1, pOff.proposal_id, true);
+    return in1.length === 1 && in1[0].proposal_id === p1.proposal_id && in2.length === 1 && in2[0].proposal_id === p2.proposal_id
+      && sent1.length === 1 && sent1[0].alarm_id === c.WAKE && sent2.length === 1 && sent2[0].alarm_id === c2.WAKE
+      && hidden.length === 1 && hidden[0] === p1.proposal_id && rOff.status === 'EXPIRED' ? true : { in1, in2, sent1, sent2, hidden, rOff };
+  });
+
+  await check('10장 푸시 권한(제안 본인): 다른 친구가 보낸 제안이나 다른 사람에게 보낸 제안으로는 통과하지 못함 — 설정 권한이 있어도 내가 그 사람에게 방금 보낸 제안이 있어야 함', async () => {
+    const { A, B, c } = await pair(58);
+    const C = await join_(60, '다른친구'); await befriend(A, C); await grant(A, C);
+    const X = await join_(61, '다른주인'); await befriend(X, B); await grant(X, B);
+    await propose(C, c.WAKE, await shifted(c.WAKE, -5));                                       // C의 제안만 있음
+    const bBefore = await canPush(B, A);
+    const cOk = await canPush(C, A);
+    await propose(B, c.PREPARE, await shifted(c.PREPARE, -5));                                 // B도 A에게 보냄 — X에게는 보낸 적 없음
+    const bToA = await canPush(B, A);
+    const bToX = await canPush(B, X);
+    return bBefore === false && cOk === true && bToA === true && bToX === false ? true : { bBefore, cOk, bToA, bToX };
+  });
+
+  await check('원래 시각 기억 가드(서버 쪽): 주인 · 서버 · 정의자가 시각을 바꾸면 기억이 비워지고, 앱이 설정 신호(app.alarm_apply)를 켠 채 시각과 기억을 같이 써 보내도 비워짐', async () => {
+    const applyOnce = async (n) => {
+      const { A, B, c } = await pair(n);
+      const p = await propose(B, c.WAKE, await shifted(c.WAKE, -5));
+      await respond(A, p.proposal_id, true);
+      return { A, c };
+    };
+    const set1 = await applyOnce(63);                                                           // 서버 역할
+    await svc(); await q(`update public.alarms set scheduled_at = scheduled_at + interval '1 minute' where alarm_id = $1`, [set1.c.WAKE]); await su();
+    const viaServer = await alarm(set1.c.WAKE);
+    const viaSuper = await alarm(set1.c.PREPARE);                                              // 정의자 · 슈퍼유저
+    await q(`update public.alarms set scheduled_at = scheduled_at + interval '1 minute' where alarm_id = $1`, [set1.c.PREPARE]);
+    const viaSuperAfter = await alarm(set1.c.PREPARE);
+    const set2 = await applyOnce(65);                                                           // 앱 위조 시도
+    await as(set2.A);
+    await q(`select set_config('app.alarm_apply', 'on', false)`);
+    await q(`update public.alarms set scheduled_at = scheduled_at + interval '2 minutes', original_scheduled_at = now(), original_time_source = 'AUTO' where alarm_id = $1`, [set2.c.WAKE]);
+    await q(`select set_config('app.alarm_apply', 'off', false)`);
+    await su();
+    const forged = await alarm(set2.c.WAKE);
+    const set3 = await applyOnce(67);                                                           // 앱이 그때의 time_source 칸만 따로 바꾸려 함
+    await as(set3.A);
+    await q(`update public.alarms set original_time_source = 'MANUAL' where alarm_id = $1`, [set3.c.WAKE]);
+    await su();
+    const sourceOnly = await alarm(set3.c.WAKE);
+    return sourceOnly.original_time_source === 'AUTO' && sourceOnly.original_scheduled_at != null
+      && viaServer.original_scheduled_at == null && viaServer.original_time_source == null
+      && viaSuper.original_scheduled_at != null && viaSuperAfter.original_scheduled_at == null && viaSuperAfter.original_time_source == null
+      && forged.original_scheduled_at == null && forged.original_time_source == null ? true : { viaServer, viaSuper, viaSuperAfter, forged, sourceOnly };
   });
 
   // ---- 막혀야 하는 길 ----------------------------------------------------------------------------
