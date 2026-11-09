@@ -299,7 +299,7 @@ await check('A는 B 알람에 반응 이력을 못 씀', async () => {
 // ---------------------------------------------------------------------
 
 let fAB;
-await check('친구 요청: 요청자는 스스로 수락 못 함 · B→A 역방향 중복 거부 · 받은 사람이 수락 · 주인 칼럼 못 바꿈', async () => {
+await check('친구 요청: 요청자는 스스로 수락 못 함 · B→A 역방향 중복 거부 · 받은 사람도 직접 update로는 못 수락하고 함수로 수락 · 주인 칼럼 못 바꿈', async () => {
   await su();   // 요청 행은 서버 쪽 사본으로 준비 — 앱의 직접 insert 정책은 15장에서 닫혔고 요청은 send_friend_request가 만듦 (friend/ch15.mjs 15-02)
   [{ friend_id: fAB }] = await q(`insert into public.friends (requester_id, addressee_id) values ($1, $2) returning friend_id`, [A, B]);
   await as(A);
@@ -307,11 +307,14 @@ await check('친구 요청: 요청자는 스스로 수락 못 함 · B→A 역�
   await su();   // 역방향 중복은 방향 무관 쌍 유일 인덱스(friends_pair_key)가 막음 — 앱의 직접 insert는 정책이 없어 늘 거절되므로 서버 권한으로 인덱스만 시험
   const dup = await expectErr(() => q(`insert into public.friends (requester_id, addressee_id) values ($1, $2)`, [B, A]), /duplicate key|friends_pair_key/);
   await as(B);
-  const acc = await q(`update public.friends set status = 'ACCEPTED', accepted_at = now() where friend_id = $1 returning status`, [fAB]);
+  const directAccept = await q(`update public.friends set status = 'ACCEPTED', accepted_at = now() where friend_id = $1 returning status`, [fAB]);   // 직접 수락 길은 11/9에 닫음(100명 상한 우회) — 0행
+  const directDelete = await q(`delete from public.friends where friend_id = $1 returning 1`, [fAB]);
+  const [{ r: acc }] = await q(`select public.accept_friend_request($1) as r`, [A]);          // 수락은 함수로
+  await su();   // 주인 칼럼 변경 막는 트리거는 서버 쪽 고침에도 그대로
   const keyChange = await expectErr(() => q(`update public.friends set requester_id = $1 where friend_id = $2`, [C, fAB]),
     /바꿀 수 없음/);
-  return selfAccept.length === 0 && dup === true && acc.length === 1 && keyChange === true
-    ? true : { selfAccept, dup, acc, keyChange };
+  return selfAccept.length === 0 && dup === true && directAccept.length === 0 && directDelete.length === 0 && acc.status === 'ACCEPTED' && keyChange === true
+    ? true : { selfAccept, dup, directAccept, directDelete, acc, keyChange };
 });
 
 
@@ -499,8 +502,7 @@ await check('C가 그룹에서 기상 공유에 동의하면 나오고(RINGING) 
 await check('친구로 받은 기상 권한은 없음(6장) — 써 넣어도 꺼진 채 저장되고 그룹 동의가 없으면 친구여도 안 보임', async () => {
   await su();   // 요청 행 준비는 서버 쪽 사본으로 (앱의 직접 insert 정책은 15장에서 닫힘)
   const [{ friend_id: fCA }] = await q(`insert into public.friends (requester_id, addressee_id) values ($1, $2) returning friend_id`, [C, A]);
-  await as(A);
-  await q(`update public.friends set status = 'ACCEPTED', accepted_at = now() where friend_id = $1`, [fCA]);
+  await q(`update public.friends set status = 'ACCEPTED', accepted_at = now() where friend_id = $1`, [fCA]);   // 수락 상태도 서버 쪽 사본으로 (앱의 직접 update 길도 닫힘)
   await as(C);
   const [row] = await q(`insert into public.sharing_permissions (owner_id, grantee_id, source_type, source_id, can_view_wake) values ($1, $2, 'FRIEND', $3, true) returning can_view_wake as w`, [C, A, fCA]);
   const r = await wake(A);
