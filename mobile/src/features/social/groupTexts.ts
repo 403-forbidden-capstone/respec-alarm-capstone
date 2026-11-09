@@ -46,6 +46,22 @@ export const MEMBER_REMOVED_TOAST = '그룹에서 내보냈어요';
 export const RENAMED_TOAST = '이름을 바꿨어요';
 
 // 나가기 확인창 — 공동 약속 알람 n개도 지워져요 (논리설계 5장 화면), 마지막 사람이면 그룹이 사라진다고 알림 (5-44)
+// H05 '함께할 그룹'을 고르면 그 줄 아래 — 메모 칸이 아직 없어 그룹원에게 보이는 것을 이 줄로 알림 (9-거, 빈 곳: 메모 칸)
+export const SHARED_APPOINTMENT_NOTE = '일정 이름 · 시각 · 장소는 그룹원 모두에게 보여요. 알람은 각자 [내 알람 만들기]로 만들어요.';
+
+// G02 연결 일정 줄 상태 — 참여 / 알람 없음 두 가지(안 누름 · 빠짐 · 끔은 모두 알람 없음), 지난 약속은 그 한 줄 (9-42 · 9-32)
+export const appointmentStateText = (a: { iJoined: boolean; past: boolean }) => (a.past ? PAST_APPOINTMENT : a.iJoined ? '참여' : '알람 없음');
+export const PAST_APPOINTMENT = '지난 약속이에요';
+export const joinedCountText = (n: number) => (n > 0 ? `${n}명 참여` : '아직 참여한 사람이 없어요');
+export const CREATOR_UNKNOWN = '만든 사람 알 수 없음'; // 9-27 — 참여한 사람 누구나 고칠 수 있음
+export const JOINED_TOAST = '내 알람을 만들었어요';
+export const LEFT_APPOINTMENT_TOAST = '이 약속에서 빠졌어요';
+export const leaveAppointmentText = (title: string) => ({
+  title: `${title}에서 빠질까요?`,
+  body: '내 알람만 지워져요. 다른 사람에게 알림은 가지 않아요. 다시 [내 알람 만들기]로 참여할 수 있어요.',
+  ok: '빠지기',
+});
+
 export function leaveText(groupName: string, alarmCount: number, last: boolean) {
   const lines: string[] = [];
   if (alarmCount > 0) lines.push(`공동 약속 알람 ${alarmCount}개도 지워져요.`);

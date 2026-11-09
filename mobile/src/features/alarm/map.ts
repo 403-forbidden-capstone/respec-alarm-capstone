@@ -46,6 +46,7 @@ export type AppointmentRows = {
   alarms: readonly AlarmRow[];
   groupName: string | null; // 같이 가는 그룹 (appointments.group_id → groups.group_name)
   items: readonly string[]; // 준비물 (todos ITEM)
+  canEdit?: false; // 남이 만든 공동 약속 — 고치기 · 지우기 대신 [나는 빠지기] (친구 9장)
 };
 
 // 일정 없는 알람 한 줄 (participant_id · routine_id가 모두 NULL인 기상 알람, D46)
@@ -161,6 +162,7 @@ export function toAppointment(rows: AppointmentRows): Appointment {
     enabled: alarms.some((x) => x.kind !== 'ARRIVE' && x.enabled), // 일정 전체 켜기는 DB에 따로 없음 — 울리는 알람이 하나라도 켜져 있으면 켜짐
     alarms,
     level: levelOf(rows.alarms),
+    ...(rows.canEdit === false ? { canEdit: false as const } : {}),
   };
 }
 

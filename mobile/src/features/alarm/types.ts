@@ -105,6 +105,12 @@ export type Appointment = {
 //   phoneFailed = 폰에 못 건 알람 수 (다음 맞추기에서 다시 걸리고, 그때까지 홈 빨간 줄에 남음)
 //   itemsFailed = 준비물(todos)을 못 넣음 (다시 넣는 길이 없음)
 export type SaveFollowUp = { phoneFailed: number; itemsFailed: boolean };
+
+// 공동 약속 [내 알람 만들기] 확인 시트 (친구 9장) — 출발지는 내 집, 수단 · 준비 시간 기본값은 프로필(온보딩 값), 시트에서 고침
+export type JoinDefaults = { homeName: string | null; transport: Transport; prepareMinutes: number };
+// prepareMinutes null = 기본값 그대로(서버가 내 기록으로 계산). travelMinutes = 길찾기를 못 해 사용자가 확인한 이동시간(MANUAL), 보통은 없음(서버가 길찾기)
+export type JoinChoice = { transport: Transport; prepareMinutes: number | null; travelMinutes?: number | null };
+export type JoinResult = { phoneFailed: number }; // 폰에 못 건 알람 수
 export type SavedAppointment = Appointment & { followUp?: SaveFollowUp };
 export type SettingsSaveResult = { turnedOff: boolean; turnedOn: boolean; followUp?: SaveFollowUp };
 
@@ -226,6 +232,7 @@ export type AppointmentDraft = {
   importance: Importance;
   items: string; // 쉼표로 구분
   alarms: Record<RingKind, boolean>; // 만들 알람 종류 (D46) — 모두 끄면 알람 없는 일정
+  groupId?: string | null; // 함께할 그룹 — 고르면 공동 약속 (친구 9장, 요청 appointment.group_id). 없으면 개인 일정
 };
 
 // 새 일정 알람 계산 결과 (H05 확인 시트) — 실데이터는 alarm-suggest Edge Function

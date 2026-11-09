@@ -29,6 +29,7 @@ import {
   type CommitEditScreen,
   type Estimate,
   type IntensityAxis,
+  type JoinChoice,
   type Level,
   type RingKind,
 } from './types';
@@ -138,9 +139,24 @@ export function newAppointmentBody(d: AppointmentDraft, at: Date): Body {
       destination: destinationBody(d),
       importance: d.importance,
       ...(rule ? { recurrence_rule: rule } : {}),
+      ...(d.groupId ? { group_id: d.groupId } : {}), // 함께할 그룹 (친구 9장)
     },
     participant: { origin: d.originLocation ? { name: d.originName || '현재 위치', lat: d.originLocation.lat, lng: d.originLocation.lng } : { name: ORIGIN_HOME }, transport_type: d.transport },
     kinds: RING_KINDS.filter((kind) => d.alarms[kind]),
+  };
+}
+
+// 공동 약속 [내 알람 만들기] (친구 9장) — 기존 약속 id + 내 집 · 고른 수단(+ 고친 준비 시간) + 기상 · 준비 · 출발. 서버가 내 참여 조건과 알람을 만듦
+export function joinBody(appointmentId: string, choice: JoinChoice): Body {
+  return {
+    appointment_id: appointmentId,
+    participant: {
+      origin: { name: ORIGIN_HOME },
+      transport_type: choice.transport,
+      ...(choice.prepareMinutes != null ? { prepare_minutes: within(choice.prepareMinutes, MAX_PREPARE_MINUTES) } : {}),
+      ...(choice.travelMinutes != null ? { est_travel_minutes: within(choice.travelMinutes, MAX_TRAVEL_MINUTES), travel_source: 'MANUAL' } : {}),
+    },
+    kinds: [...RING_KINDS],
   };
 }
 
