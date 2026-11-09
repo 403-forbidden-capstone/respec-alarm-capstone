@@ -4,6 +4,8 @@ import { hasEarlierWake, PREPARE_RECORD_MAX, PREPARE_RECORD_MIN, PREPARE_WINDOW,
 import type { TravelSample } from './calc/travel.ts';
 import { dbFail, must } from './db.ts';
 import { HttpError } from './errors.ts';
+import { getEnv } from './env.ts';
+import { buildMlRequest, previousDateKey, requestMlPrediction, type MlProfile, type MlPrediction } from './prepare-ml.ts';
 import { kakaoTravelMinutes, type FetchLike } from './kakao.ts';
 import {
   computePlan,
@@ -218,6 +220,47 @@ export class TravelRequiredError extends HttpError {
   }
 }
 
+// CatBoost is experimental and off by default. Nothing is sent until both the
+// feature flag and verified, persisted survey codes exist. All failures fall
+// back to the original P80-based preparation-time calculation.
+async function optionalMlPrediction(
+  ctx: PlanContext,
+  at: Date,
+  timeZone: string,
+  allow: boolean,
+): Promise<MlPrediction | undefined> {
+  if (!allow || getEnv('PREPARE_ML_ENABLED') !== '1') return undefined;
+  const url = getEnv('PREPARE_ML_URL');
+  const token = getEnv('PREPARE_ML_API_TOKEN');
+  if (!url || !token) return undefined;
+
+  try {
+    const { data: profile, error: profileError } = await ctx.db.from('profiles')
+      .select('ml_codes_verified, ml_age_code, ml_education_code, ml_economic_code')
+      .eq('user_id', ctx.userId).maybeSingle();
+    if (profileError || !profile) return undefined;
+    const verified = profile as MlProfile;
+    if (!verified.ml_codes_verified) return undefined;
+
+    // Crucial: use the record from EXACTLY the preceding local calendar day.
+    // Unlike loadPrepareStats(), it is NOT the latest arbitrary history item.
+    const { data: previous, error: previousError } = await ctx.db.from('daily_records')
+      .select('actual_prepare_minutes')
+      .eq('user_id', ctx.userId)
+      .eq('record_date', previousDateKey(at, timeZone))
+      .maybeSingle();
+    // Do not turn a query failure into a fabricated zero-minute warm-start input.
+    const minutes = previousError || previous?.actual_prepare_minutes == null
+      ? null
+      : Number(previous.actual_prepare_minutes);
+    const request = buildMlRequest({ appointmentAt: at, timezone: timeZone, profile: verified, previousDayMinutes: minutes });
+    if (!request) return undefined;
+    return (await requestMlPrediction(request, { enabled: true, url, token })) ?? undefined;
+  } catch {
+    return undefined; // Missing migration, API offline, timeout etc.
+  }
+}
+
 // wantAutoTravel: 직접 입력한 이동시간이 있어도 자동 값을 같이 구함 (H03 "자동으로 되돌리기" 미리 보기). 호출이 한 번 늘어남
 // mode: 어느 쪽에서 부르는지. preview(alarm-suggest)는 경고를 "저장할 때 …" 말투로, save(alarm-commit, 기본)는 저장한 뒤 말투로
 export async function buildPlan(ctx: PlanContext, draft: PlanDraft, options: { wantAutoTravel?: boolean; mode?: PlanMode } = {}): Promise<BuiltPlan> {
@@ -268,5 +311,9 @@ export async function buildPlan(ctx: PlanContext, draft: PlanDraft, options: { w
 
   // 길찾기도 같은 경로 기록도 근사값도 없음 → 직접 입력하는 흐름으로 (8장 8.2.2)
   if (!travel.chosen) throw new TravelRequiredError(inputs, travel, timeZone);
+  // Keep manual prepare settings and already-awake schedules on the existing path.
+  const allowMl = draft.prepareMinutes == null && draft.withWake !== false &&
+    !(draft.withWake == null && sameDayWake);
+  inputs.mlPrediction = await optionalMlPrediction(ctx, basics.at, timeZone, allowMl);
   return { plan: computePlan(inputs, travel, options.mode), inputs, timeZone };
 }
