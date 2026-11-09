@@ -180,6 +180,16 @@ export default async function ch11({ q, as, su, svc, check, expectErr }) {
     return r.every((x) => x === false) ? true : r;
   });
 
+  await check('11-15(조용한 푸시): 알림을 끈 보낸 사람 자신은 조용한 푸시 대상이 아님 — 다른 알림 끈 참여자 · 참여 안 한 알림 끈 멤버는 각각 대상 · 비대상', async () => {
+    const S = await join_(70, '보낸이'), M = await join_(71, '알림끔'), N = await join_(72, '참여안함');
+    const g = await mkGroup(S, [M, N]);
+    await q(`update public.group_members set notifications_off = true where group_id = $1 and user_id = any($2::uuid[])`, [g, [S, M, N]]);
+    const [{ appointment_id: ap }] = await q(`insert into public.appointments (creator_id, group_id, title, appointment_at, dest_name) values ($1, $2, '팀 회의', now() + interval '1 day', '학교') returning appointment_id`, [S, g]);
+    for (const u of [S, M]) await q(`insert into public.appointment_participants (appointment_id, user_id) values ($1, $2)`, [ap, u]);
+    const r = await planGroup(S, g, 'GROUP_APPT_CHANGED', ap);
+    return r.status === 'OK' && ids(r).length === 0 && [...r.silent_recipients].join() === [M].join() ? true : r;
+  });
+
   // ---- 보내도 되는지 (그룹) · 받는 사람은 서버가 고름 ------------------------------------------
 
   await check('11-14 · 11-15 · 11-16: 새 멤버 알림 — 받는 사람은 서버가 고름: 가입자 · 알림 끈 멤버 · 나간 사람 · 초대만 받은 사람 · 가입자와 차단 쌍인 멤버는 빠지고, 그룹 이름만 돌려줌(사람 이름 없음)', async () => {

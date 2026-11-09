@@ -128,7 +128,9 @@ test('Expo가 응답을 안 주면 시간 제한(timeoutMs)에서 끊고 그 묶
       signals.push(init?.signal instanceof AbortSignal);
       init?.signal?.addEventListener('abort', () => reject(new Error('aborted')));
     });
+  const started = Date.now();
   const result = await sendExpoMessages([{ to: T1, ...message }], { fetchImpl: hang, timeoutMs: 20, sleep: async () => {} });
+  assert.ok(Date.now() - started < 3000); // 옵션이 쓰여 20ms 만에 끊김 (기본 10초였다면 20초 가까이)
   assert.equal(calls, 2); // 처음 + 다시 보내기 1번
   assert.deepEqual(signals, [true, true]);
   assert.deepEqual([result.sent, result.failed, result.reason], [0, 1, 'PUSH_UNAVAILABLE']);

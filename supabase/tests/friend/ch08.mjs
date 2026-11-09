@@ -31,7 +31,7 @@ export default async function ch08({ q, as, su, svc, check, expectErr }) {
   const ev = (alarmId, u, type, when, { snooze = null, src = null } = {}) =>
     q(`insert into public.alarm_events (alarm_id, user_id, event_type, event_at, snooze_minutes, input_source) values ($1, $2, $3, $4::timestamptz, $5, $6)`, [alarmId, u, type, when, snooze, src]);
   // 깨우기 판정 (서버 전용). reserve = true면 횟수에 셈
-  const ping = async (s, t, now, reserve = false) => { await svc(); const r = (await q(`select public.plan_wake_ping($1, $2, $3, $4::timestamptz) as r`, [s, t, reserve, now]))[0].r; await su(); return r; };
+  const ping = async (s, t, now, reserve = false, groupId = null) => { await svc(); const r = (await q(`select public.plan_wake_ping($1, $2, $3, $4::timestamptz, $5) as r`, [s, t, reserve, now, groupId]))[0].r; await su(); return r; };
   const iso = (v) => (v == null ? null : new Date(v).toISOString());
   const sorted = (...x) => x.slice().sort();
   // 기본 상황: A(보내는 사람) · B(받는 사람, 동의), 오늘 그룹 약속, B 알람 07:00
@@ -413,6 +413,45 @@ export default async function ch08({ q, as, su, svc, check, expectErr }) {
     const mine = async (uid) => { await as(uid); const r = await q(`select * from public.get_wake_announcement()`); await su(); return r; };
     const listener = await mine(L), self = await mine(U), stranger = await mine(X);
     return listener.length === 1 && listener[0].group_id === g && listener[0].up_count === 1 && self.length === 0 && stranger.length === 0 ? true : { listener, self, stranger };
+  });
+
+  await check('8-사(그룹 id): 깨우기에 그룹 id를 주면 그 그룹에서 보일 때만 통과(아니면 FORBIDDEN, 이유 구분 없음), 응답에 판정에 쓴 그룹 id — 안 주면 보이는 그룹 중 id가 가장 작은 것', async () => {
+    const A = await join_(150, '보내는이'), B = await join_(151, '받는이'), C = await join_(152, '다른그룹');
+    const g1 = await mkGroup(A, [B], [B]), g2 = await mkGroup(A, [B], [B]), g3 = await mkGroup(A, [C], [C]);   // g1 · g2 = A와 B가 같이 있는 그룹, g3 = B 없는 그룹
+    for (const g of [g1, g2, g3]) await appt(A, g, at('10:00'));
+    await wakeAlarm(B, at('07:00'));
+    const smallest = [g1, g2].sort()[0], other = smallest === g1 ? g2 : g1;
+    const noGroup = await ping(A, B, at('07:05'));
+    const peekG = await ping(A, B, at('07:05'), false, other);
+    const wrongGroup = await ping(A, B, at('07:05'), false, g3);              // B가 없는 그룹
+    const unknownGroup = await ping(A, B, at('07:05'), false, NOBODY);
+    const first = await ping(A, B, at('07:05'), true, other);
+    const wait = await ping(A, B, at('07:06'), true, other);
+    const early = await ping(A, B, at('06:00'), false, other);               // 아직 안 울림에도 그룹 id가 실림
+    const same = (x) => JSON.stringify(x) === JSON.stringify({ status: 'FORBIDDEN' });
+    return noGroup.status === 'OK' && noGroup.group_id === smallest && peekG.status === 'OK' && peekG.group_id === other
+      && same(wrongGroup) && same(unknownGroup) && first.status === 'OK' && first.group_id === other && wait.status === 'WAIT' && wait.group_id === other
+      && early.status === 'NOT_RINGING' && early.group_id === other ? true : { noGroup, peekG, wrongGroup, unknownGroup, first, wait, early, smallest, other };
+  });
+
+  await check('8-24(새벽 약속 아닌 것): 새벽 약속이어도 꺼진 알람 · 다른 사람의 알람 · 그날이 아닌 알람은 그 사람의 "약속 있는 날"로 안 침 — 친구 알림 0', async () => {
+    const mk = async (n, setup) => {
+      const S = await join_(n, '밤샘'), V = await join_(n + 1, '보는이');
+      const g = await mkGroup(V, [S], [S, V]);
+      const apId = await appt(V, g, at('01:00', '2026-11-11'));
+      const [ps] = await q(`insert into public.appointment_participants (appointment_id, user_id) values ($1, $2) returning participant_id`, [apId, S]);
+      const [pv] = await q(`insert into public.appointment_participants (appointment_id, user_id) values ($1, $2) returning participant_id`, [apId, V]);
+      await setup({ S, V, ps: ps.participant_id, pv: pv.participant_id });
+      const own = await wakeAlarm(S, at('23:00'));                                      // 약속에 안 붙은 S의 기상 알람 — 미확인은 이 알람
+      await ev(own, S, 'MISSED', at('23:30'));
+      return S;
+    };
+    const wake = (pt, user, when, enabled = true) => q(`insert into public.alarms (participant_id, user_id, alarm_type, scheduled_at, is_enabled) values ($1, $2, 'WAKE', $3::timestamptz, $4)`, [pt, user, when, enabled]);
+    const disabled = await mk(160, async ({ S, ps }) => { await wake(ps, S, at('23:00'), false); });                      // S의 약속 알람이 꺼져 있음
+    const otherUser = await mk(162, async ({ V, pv }) => { await wake(pv, V, at('23:00')); });                            // 알람이 다른 참여자(V) 것
+    const otherDay = await mk(164, async ({ S, ps }) => { await wake(ps, S, at('00:30', '2026-11-11')); });               // S의 알람이 다음 날(그날 아님)
+    const r = await claim(at('23:40'), disabled, otherUser, otherDay);
+    return r.length === 0 ? true : r;
   });
 
   await check('8장 실행 권한: plan_wake_ping · claim_wake_nudges는 서버 역할만, my_wake_pings · get_wake_announcement는 앱(로그인한 사람)이 부르고 anon은 못 부름, push_sends는 앱이 못 읽음', async () => {

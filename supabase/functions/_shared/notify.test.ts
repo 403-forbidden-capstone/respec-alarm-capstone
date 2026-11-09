@@ -545,3 +545,18 @@ test('조용한 푸시만 있는 경우(보이는 받는 사람이 없음)에도
   assert.deepEqual(await sendGroupPush(none.service, req, planNone, { fetchImpl: none.fetchImpl(okAll), sleep: noSleep }), { sent: 0, failed: 0, reason: 'NO_TOKENS' });
   assert.deepEqual(none.pushes, []);
 });
+
+test('조용한 푸시: 이미 보이는 알림을 받는 사람이 조용한 목록에도 있으면 보이는 알림 하나만, 조용한 푸시 실패는 failed에 합침, 목록의 문자열이 아닌 값은 버림', async () => {
+  const dup = groupSetup({ status: 'OK', group_name: '캡스톤팀', appointment_title: '팀 회의', recipients: [R1], silent_recipients: [R1, R2, 5, null] });
+  const req = { kind: 'GROUP_APPT_CHANGED' as const, groupId: GROUP, appointmentId: APPT };
+  const plan = await planGroupPush(dup.service, SENDER, req);
+  assert.deepEqual(plan.silentRecipients, [R1, R2]); // 문자열이 아닌 값은 버림
+  const wire: Record<string, unknown>[] = [];
+  const result = await sendGroupPush(dup.service, req, plan, { fetchImpl: async (_url, init) => {
+    const body = JSON.parse(init?.body as string) as Record<string, unknown>[];
+    wire.push(...body);
+    return new Response(JSON.stringify({ data: body.map((b) => ('title' in b ? { status: 'ok', id: 't' } : { status: 'error', message: 'x', details: { error: 'MessageRateExceeded' } })) }));
+  }, sleep: noSleep }, { change: 'CHANGED' });
+  assert.equal(wire.filter((b) => (b.data as Record<string, unknown>).recipientUserId === R1).length, 1); // R1은 한 번만
+  assert.deepEqual(result, { sent: 1, failed: 1 }); // 조용한 푸시(R2) 실패가 failed에 합쳐짐
+});

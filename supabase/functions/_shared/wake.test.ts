@@ -235,3 +235,12 @@ test('친구 알림 보내기가 실패해도(프로필 조회 오류 · Expo �
   const down = { fetchImpl: async () => new Response('x', { status: 503 }), sleep: async () => {} };
   assert.deepEqual(await quiet(() => runWakeCheck(b.service, NOW, { push: down })), { checked: 0, recorded: 0, pushed: 0, claimed: 1, nudged: 0 });
 });
+
+test('8-20(많은 사람): 한꺼번에 미확인이 된 사람이 100명을 넘어도 본인 알림의 토큰 조회를 100개씩 나눠 하고 모두에게 보냄', async () => {
+  const rows = Array.from({ length: 130 }, (_v, i) => missed(i, { user_id: `user-${i}`, alarm_id: `alarm-${i}`, event_key: `key-${i}` }));
+  const s = setup(rows);
+  for (let i = 0; i < 130; i++) s.db.rows('push_tokens').push({ user_id: `user-${i}`, token: `ExponentPushToken[${String(i).padStart(22, '0')}]` });
+  const result = await runWakeCheck(s.service, NOW, { push: s.push });
+  assert.deepEqual([result.recorded, result.pushed], [130, 130]);
+  assert.equal(s.db.calls.filter((c) => c === 'select push_tokens').length, 2);
+});
