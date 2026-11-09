@@ -1,5 +1,7 @@
-// voice-commit — 대화 끝 정리 (서버 PR 5, docs/screen-data-map.md 'voice-commit'). 앱 [완료] 뒤 부름. 글 · 실시간 음성(Live) 차례는 같은 세션 turns에 쌓이므로 처리는 하나.
-//   1) 차지하기: server_state.rev 비교-교체로 commit = RUNNING · ended = true (같은 요청이 겹치면 하나만 진행, 나머지는 RUNNING을 돌려받음) + ended_at
+// voice-commit — 대화 정리 (서버 PR 5, docs/screen-data-map.md 'voice-commit'). 앱 [완료] 뒤 부름. 글 · 실시간 음성(Live) 차례는 같은 세션 turns에 쌓이므로 처리는 하나.
+//   세션을 끝내지 않음 — 같은 날 다시 열면 같은 대화에 이어 말하고, 다음 [완료]가 그때까지의 대화 전체로 다시 정리함 (commit.at_turn보다 말이 늘었을 때만)
+//   다시 정리해도 겹치지 않음: 할 일은 같은 대화가 만든 것을 건너뜀(isDuplicateTodo) · 생활 기록은 빈 칸만 · 일정 · 알람은 카드 몫(여기서 안 만듦) · 일기는 고친 것(is_edited)을 안 덮음
+//   1) 차지하기: server_state.rev 비교-교체로 commit = RUNNING (같은 요청이 겹치면 하나만 진행, 나머지는 RUNNING을 돌려받음). 그 사이 온 말은 이번 정리에 안 들어가고 STALE로 알림
 //      앱이 [저장 안 함]을 눌렀는데 voice-turn으로 못 알린 카드(rejected_cards)도 같은 저장에서 카드 버튼 규칙(applyCardAction)으로 REJECTED — 열린 카드만, 모르는 · 끝난 카드는 그대로
 //   2) 추출: 대화 전체로 T2 한 번(extract.v2, 모델 출력은 callLlm이 스키마로 검사). 결과는 바로 server_state.commit.extract에 — 저장이 실패해 다시 시도해도 T2를 또 부르지 않음
 //   3) 나누기: applyFinal(final-core) — 공개 JSON(structured.v1) 초안 + 저장할 것. 일정 · 알람은 저장하지 않고(카드 몫) 확인 상태만
@@ -8,7 +10,7 @@
 //      공개 JSON 저장이 끝나면 하루 일기(daily_journals.ai_summary): 그날 대화들의 JSON으로 T5 한 번 (saveJournal — 고친 일기는 그대로)
 //      사용자 표는 부른 사람의 RLS 클라이언트로 써서 기존 정책을 그대로 탐. conversation_sessions(transcript · extracted_data · apply_status)와 server_state는 서버 키(session.ts와 같음)
 //      공개 JSON은 저장 결과(storage · todos[].stored)까지 담아 structured.v1 검사를 통과해야 저장
-//   5) 끝: commit = DONE | PARTIAL(실패한 단계 있음 → 같은 요청을 다시 보내면 이어서). 이미 DONE이면 저장한 결과를 그대로 돌려줌
+//   5) 끝: commit = DONE | PARTIAL(실패한 단계 있음 → 같은 요청을 다시 보내면 이어서). 이미 DONE이고 그 뒤 말이 없으면 저장한 결과를 그대로 돌려줌
 // 이 파일은 Deno API를 안 써서 node --test로 돈다.
 import { must } from '../db.ts';
 import { HttpError } from '../errors.ts';
@@ -16,6 +18,7 @@ import { callPoint, POINTS } from '../prompts/index.ts';
 import { Reader } from '../read.ts';
 import type { Db } from '../supabase.ts';
 import { seoulIso } from './context.ts';
+import { dbMs } from './context-core.ts';
 import { applyFinal, dropUnaskedPrep, dropUnstatedScores, finishStructured, isDuplicateTodo, recordDateInRange, type FinalPlan, type Structured, type TodoPlan } from './final-core.ts';
 import { structuredProblems } from './structured.v1.ts';
 import { toHttpError, type LlmClient } from './llm.ts';
@@ -43,8 +46,11 @@ export interface CommitDeps extends SessionDeps {
 
 export interface VoiceCommitOut {
   session_id: string;
-  /** DONE 끝 · PARTIAL 일부 저장 실패(다시 보내면 이어서) · RUNNING 다른 요청이 처리 중 · SKIPPED 사용자 말이 없어 정리할 것 없음 */
-  status: 'DONE' | 'PARTIAL' | 'RUNNING' | 'SKIPPED';
+  /**
+   * DONE 끝 · PARTIAL 일부 저장 실패(다시 보내면 이어서) · RUNNING 다른 요청이 처리 중 · SKIPPED 사용자 말이 없어 정리할 것 없음
+   * STALE 정리하는 사이 새 말이 들어옴 — 그 앞까지는 저장했고, 다시 보내면 새 말까지 정리 (앱은 DONE · SKIPPED가 아니면 다시 보낼 목록에 남김)
+   */
+  status: 'DONE' | 'PARTIAL' | 'RUNNING' | 'SKIPPED' | 'STALE';
   /** todos 새로 넣은 수 · daily_records 칸을 채운 날짜 수 · daily_journals 일기를 쓴 수(0 · 1) */
   saved: { todos: number; daily_records: number; daily_journals: number };
   /** 확인이 필요해 저장하지 않은 것 (일정 · 알람 · 준비시간 · 날짜 모름 · 엇갈린 진술 · 어느 일정인지 모르는 지각) — 모두 extracted_data에는 남음 */
@@ -56,10 +62,13 @@ export interface VoiceCommitOut {
 const NOTHING: VoiceCommitOut['saved'] = { todos: 0, daily_records: 0, daily_journals: 0 };
 const outOf = (sessionId: string, status: VoiceCommitOut['status']): VoiceCommitOut => ({ session_id: sessionId, status, saved: { ...NOTHING }, pending: [], failed: [] });
 
-/** 이미 끝났거나 다른 요청이 처리 중이면 그 답 — 아니면 null(이번 요청이 처리) */
+/** 이 정리 뒤에 사용자 말이 늘었는지 — at_turn이 없는 예전 정리는 세션을 끝냈으므로 늘 수 없음 */
+const behind = (c: CommitState, row: SessionRow): boolean => c.at_turn !== undefined && c.at_turn < row.server_state.counts.user_turns;
+
+/** 이미 끝났거나(그 뒤 새 말 없음) 다른 요청이 처리 중이면 그 답 — 아니면 null(이번 요청이 처리) */
 function settled(row: SessionRow, nowMs: number): VoiceCommitOut | null {
   const c = row.server_state.commit;
-  if (c?.status === 'DONE') return c.out as VoiceCommitOut;
+  if (c?.status === 'DONE' && !behind(c, row)) return c.out as VoiceCommitOut;
   if (c?.status === 'RUNNING' && nowMs - Date.parse(c.started_at) < COMMIT_STALE_MS) return outOf(row.session_id, 'RUNNING');
   return null;
 }
@@ -168,16 +177,19 @@ export function journalFacts(list: Structured[], date: string): Record<string, u
 
 /**
  * daily_journals — 그날 대화 전부(같은 reference_date)의 structured.v1로 T5 일기 1~2문장을 만들어 ai_summary에 (하루 한 줄, source_session_id = 이번 대화).
- * 사용자가 고친 일기(is_edited)는 건드리지 않음 · 이번 대화로 이미 만든 일기는 다시 만들지 않음 · 쓸 사실이 없거나 모델이 빈 글을 주면 쓰지 않음.
+ * 사용자가 고친 일기(is_edited)는 건드리지 않음 · 이번 추출(extractedAt) 뒤에 이 대화로 이미 만든 일기는 다시 만들지 않음(다시 시도) · 쓸 사실이 없거나 모델이 빈 글을 주면 쓰지 않음.
+ * 같은 대화에 말이 늘어 다시 추출했으면 그 전에 만든 이 대화의 일기는 새 말을 모르므로 다시 씀.
  * 모델 실패는 던짐 → 이 단계만 실패(PARTIAL, 다음 대화 열기 때 다시) — 앞 단계 저장 결과는 그대로
  */
-async function saveJournal(deps: CommitDeps, sessionId: string, date: string, nowIso: string): Promise<number> {
+async function saveJournal(deps: CommitDeps, sessionId: string, date: string, nowIso: string, extractedAt: string | null): Promise<number> {
   const db = deps.userDb;
-  const cur = must<{ journal_id: string; is_edited: boolean; source_session_id: string | null; ai_summary: string | null } | null>(
+  const cur = must<{ journal_id: string; is_edited: boolean; source_session_id: string | null; ai_summary: string | null; generated_at: string | null } | null>(
     'daily_journals',
-    await db.from('daily_journals').select('journal_id, is_edited, source_session_id, ai_summary').eq('user_id', deps.userId).eq('record_date', date).maybeSingle(),
+    await db.from('daily_journals').select('journal_id, is_edited, source_session_id, ai_summary, generated_at').eq('user_id', deps.userId).eq('record_date', date).maybeSingle(),
   );
-  if (cur?.is_edited || (cur?.source_session_id === sessionId && cur.ai_summary)) return 0;
+  // extractedAt 없음 = 예전 정리 — 이 대화의 일기가 있으면 그대로
+  const upToDate = cur?.source_session_id === sessionId && !!cur.ai_summary && (extractedAt === null || (cur.generated_at !== null && dbMs(cur.generated_at) >= Date.parse(extractedAt)));
+  if (cur?.is_edited || upToDate) return 0;
   const sessions = must<{ extracted_data: Structured }[]>(
     'conversation_sessions',
     await deps.service.from('conversation_sessions').select('extracted_data').eq('user_id', deps.userId).eq('extracted_data->session->>reference_date', date).order('started_at', { ascending: true }),
@@ -253,30 +265,61 @@ export async function handleVoiceCommit(deps: CommitDeps, body: unknown): Promis
   const sessionId = r.uuid('session_id', { required: true }) ?? '';
   const rejected = readRejected(r);
   r.finish();
-  const now = (deps.now ?? (() => new Date()))();
+  return commitRoom(deps, sessionId, rejected, (deps.now ?? (() => new Date()))());
+}
+
+/**
+ * 대화방 정리 — 같은 방의 앞 구간(prev_session_id, 기준일이 다른 세션)을 먼저 그 구간의 기준일로 정리하고 이 세션을 정리.
+ * 앞 구간을 못 끝냈으면 이 세션 결과를 PARTIAL(failed에 previous_session)로 — 앱이 다시 보낼 목록에 남겨 다음에 둘 다 이어서.
+ * 카드 번호는 구간을 넘어 그대로라(carryCards) rejected_cards를 앞 구간에도 같이 넘김 (모르는 번호는 건너뜀)
+ */
+async function commitRoom(deps: CommitDeps, sessionId: string, rejected: string[], now: Date): Promise<VoiceCommitOut> {
+  const sd: SessionDeps = { userId: deps.userId, userDb: deps.userDb, service: deps.service };
+  const row = await loadSession(sd, sessionId);
+  const prevId = row.server_state.prev_session_id;
+  let prevDone = true;
+  if (prevId) {
+    try {
+      const p = await commitRoom(deps, prevId, rejected, now);
+      prevDone = p.status === 'DONE' || p.status === 'SKIPPED';
+    } catch (e) {
+      console.error('[voice-commit] 앞 구간 정리 실패:', e);
+      prevDone = false;
+    }
+  }
+  const out = await commitSession(deps, row, rejected, now);
+  if (prevDone || out.status === 'RUNNING') return out;
+  return { ...out, status: 'PARTIAL', failed: [...out.failed, 'previous_session'] };
+}
+
+async function commitSession(deps: CommitDeps, row: SessionRow, rejected: string[], now: Date): Promise<VoiceCommitOut> {
+  const sessionId = row.session_id;
   const nowIso = seoulIso(now);
   const sd: SessionDeps = { userId: deps.userId, userDb: deps.userDb, service: deps.service };
-
-  const row = await loadSession(sd, sessionId);
   const early = settled(row, now.getTime());
   if (early) return early;
   if (row.server_state.counts.user_turns === 0) return outOf(sessionId, 'SKIPPED'); // 첫 마디만 있는 대화 — 끝내지도 않음(다음에 이어 씀)
 
-  // 1) 차지하기 — 겹친 요청은 rev 비교에서 하나만 이김
+  // 1) 차지하기 — 겹친 요청은 rev 비교에서 하나만 이김. 세션은 끝내지 않음(ended · ended_at 그대로) — 같은 날 이어 말할 수 있게
   const st = withRejected(row.server_state, rejected, nowIso);
   const prev = st.commit ?? null;
-  const commit: CommitState = { status: 'RUNNING', attempts: (prev?.attempts ?? 0) + 1, started_at: nowIso, finished_at: null, extract: prev?.extract ?? null, out: null, error: null };
+  const atTurn = st.counts.user_turns; // 이번 정리가 다루는 말 수 — row.turns 그대로 추출하므로 그 뒤 온 말은 다음 정리 몫
+  // 앞 시도의 추출은 같은 말까지 뽑은 것일 때만 다시 씀 (at_turn 없는 예전 정리는 끝난 세션이라 말이 늘지 않음)
+  const reuse = prev?.extract != null && !behind(prev, row);
+  const commit: CommitState = {
+    status: 'RUNNING', attempts: (prev?.attempts ?? 0) + 1, started_at: nowIso, finished_at: null, at_turn: atTurn,
+    extracted_at: reuse ? prev?.extracted_at ?? null : null, extract: reuse ? prev?.extract ?? null : null, out: null, error: null,
+  };
   try {
-    await saveSession(sd, sessionId, st.rev, { turns: row.turns, state: { ...st, rev: st.rev + 1, ended: true, end_reason: st.end_reason ?? 'USER', commit } });
+    await saveSession(sd, sessionId, st.rev, { turns: row.turns, state: { ...st, rev: st.rev + 1, commit } });
   } catch (e) {
     if (!isConflict(e)) throw e;
     const again = settled(await loadSession(sd, sessionId), now.getTime());
     if (again) return again;
-    throw e;
+    throw e; // 그 사이 말 · 카드가 바뀜 — 앱이 다음 열기 때 다시 보냄
   }
-  must('conversation_sessions', await deps.service.from('conversation_sessions').update({ ended_at: nowIso }).eq('session_id', sessionId).eq('user_id', deps.userId).is('ended_at', null));
 
-  // 2) 추출 (앞 시도가 이미 뽑았으면 그대로)
+  // 2) 추출 (앞 시도가 같은 말까지 이미 뽑았으면 그대로)
   let extract = commit.extract;
   if (extract === null) {
     const ctx = ctxOf(st, nowIso, []);
@@ -292,6 +335,7 @@ export async function handleVoiceCommit(deps: CommitDeps, body: unknown): Promis
     }
     extract = res.data;
     commit.extract = extract;
+    commit.extracted_at = nowIso;
     await writeCommit(sd, sessionId, commit);
   }
 
@@ -350,10 +394,11 @@ export async function handleVoiceCommit(deps: CommitDeps, body: unknown): Promis
   });
   // 일기는 공개 JSON이 저장된 뒤에만 — 저장 못 했으면 이번엔 만들지 않음(PARTIAL이라 다시 시도 때 만듦)
   // 이번 대화가 위험 판정이면 일기 단계를 건너뜀 — 그 대화로 기존 일기를 다시 쓰지 않음
-  if (structuredSaved && !plan.draft.other.safety_flag) await step('daily_journals', async () => void (saved.daily_journals = await saveJournal(deps, sessionId, st.day.review, nowIso)));
+  if (structuredSaved && !plan.draft.other.safety_flag) await step('daily_journals', async () => void (saved.daily_journals = await saveJournal(deps, sessionId, st.day.review, nowIso, commit.extracted_at ?? null)));
 
-  // 5) 끝
+  // 5) 끝 — 저장한 답은 at_turn까지의 결과. 정리하는 사이 새 말이 왔으면 이 요청에는 STALE (저장 상태는 DONE이지만 at_turn이 뒤처져 다음 요청이 다시 정리)
   const out: VoiceCommitOut = { session_id: sessionId, status: failed.length === 0 ? 'DONE' : 'PARTIAL', saved, pending: plan.draft.pending.map((p) => p.text), failed };
   await writeCommit(sd, sessionId, { ...commit, status: out.status === 'DONE' ? 'DONE' : 'PARTIAL', finished_at: nowIso, out, error: failed.length === 0 ? null : failed.join(',') });
+  if (out.status === 'DONE' && (await loadSession(sd, sessionId)).server_state.counts.user_turns > atTurn) return { ...out, status: 'STALE' };
   return out;
 }

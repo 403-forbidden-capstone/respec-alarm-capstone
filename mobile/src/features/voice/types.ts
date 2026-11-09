@@ -43,11 +43,12 @@ export type ConversationCard = {
 export type Limits = {
   turnsLeft: number | null;
   sessionsLeftToday: number | null;
-  reached: 'TURN' | 'DAY' | null; // TURN = 대화당 말 수, DAY = 하루 대화 수
+  reached: 'TURN' | 'DAY' | null; // TURN = 대화 길이(대화당 말 수), DAY = 하루 사용량(대화 수 · AI 호출 수)
 };
 
 // AI가 지금 답하지 못함 — 대화 · 카드는 남기고 [다시 시도] · [직접 일정 만들기]
-export type Unavailable = { code: string; message: string; canRetry: boolean };
+//   rateLimited = 분당 사용량(요청이 몰림) — 잠시 뒤 다시 하면 됨 (서버 details.code RATE_LIMITED)
+export type Unavailable = { code: string; message: string; canRetry: boolean; rateLimited?: boolean };
 
 // 다음 차례 — 내 말(대본 문장, 목업만. 실데이터는 빈 글자) · AI 답 · 못 말함(null)
 export type NextTurn = { who: 'me'; text: string } | { who: 'ai' } | null;

@@ -14,6 +14,7 @@ import { POINTS } from '../prompts/index.ts';
 import { handleVoiceTurn, type VoiceDeps, type VoiceTurnOut } from './turn.ts';
 import { handleVoiceSession, type VoiceSessionOut } from './voice-session.ts';
 import type { ServerState } from './session.ts';
+import { LIMIT_TURN_TEXT, MAX_USER_TURNS } from './opening.ts';
 
 const DATA = JSON.parse(readFileSync(new URL('./testdata/s3-dev-014.json', import.meta.url), 'utf8')) as {
   T2F: Record<string, Record<string, unknown>>;
@@ -112,7 +113,7 @@ test('녹화 한 바퀴: 첫 마디 템플릿 → 새 약속 카드 → 계산 �
   assert.doesNotMatch(hello, /일어났/); // 기상 기록은 안 읽음 (헤드 10/30 — 대화로 기상을 고칠 길이 생기면)
   assert.match(hello, /틀린 게 있으면 말해 주세요\.$/);
   assert.doesNotMatch(hello, /지각/); // 지각 말 없음
-  assert.deepEqual(s.limits, { turns_left: 20, sessions_left_today: 4, reached: null });
+  assert.deepEqual(s.limits, { turns_left: MAX_USER_TURNS, sessions_left_today: 4, reached: null });
   assert.equal(db.rows('ai_calls').length, 0);
   assert.equal(claude!.order.length, 0);
   const sid = s.session_id as string;
@@ -193,7 +194,7 @@ test('녹화 한 바퀴: 첫 마디 템플릿 → 새 약속 카드 → 계산 �
   const r6 = await handleVoiceTurn(deps, { session_id: sid, rev: r5.rev, client_turn_id: id7, results: { cards: [], fixes: [{ id: 'x1', ok: true, error: null }] } });
   assert.equal(r6.reply?.text, '도착 시각을 10시 20분으로 고쳤어요.');
   assert.match(claude!.seen.T1.at(-1) as string, /- 저장됨: 도착 시각 오전 10시 20분으로 정정/);
-  assert.equal(r6.limits.turns_left, 17); // 사용자 말 3개
+  assert.equal(r6.limits.turns_left, MAX_USER_TURNS - 3); // 사용자 말 3개
 
   // ai_calls — 지점 · 토큰 · 지연이 남음, 일반 사용자라 io는 NULL
   const calls = db.rows('ai_calls');
@@ -276,27 +277,35 @@ test('T1 실패 → LLM_UNAVAILABLE(details: cards · fixes), 상태는 남고 �
 
 // ───────── 상한 ─────────
 
-test('21번째 말은 모델을 안 부르고 템플릿 + limits.reached TURN, 하루 6번째 세션은 session_id null + DAY', async () => {
+test('상한(100)을 넘는 말은 모델을 안 부르고 대화 길이 템플릿 + limits.reached TURN, 하루 6번째 세션은 session_id null + DAY', async () => {
   const db = seed();
-  const script: FakeScript = { T2F: Array.from({ length: 20 }, () => t2f('empty')), T1: Array.from({ length: 20 }, () => t1('chat')) };
+  const script: FakeScript = { T2F: Array.from({ length: MAX_USER_TURNS }, () => t2f('empty')), T1: Array.from({ length: MAX_USER_TURNS }, () => t1('chat')) };
   const { deps, claude } = depsOf(db, script);
   const s = await handleVoiceSession(deps, { session_type: 'BEFORE_SLEEP', input_mode: 'TEXT' });
   const sid = s.session_id as string;
   let rev = 1;
   let last: VoiceTurnOut | null = null;
-  for (let i = 1; i <= 20; i++) {
+  for (let i = 1; i <= MAX_USER_TURNS; i++) {
     last = await handleVoiceTurn(deps, text(sid, rev, `말 ${i}`));
     rev = last.rev;
   }
   assert.equal(last?.limits.turns_left, 0);
-  assert.equal(last?.limits.reached, 'TURN'); // 20번째 답에서 이미 알림
+  assert.equal(last?.limits.reached, 'TURN'); // 마지막(100번째) 답에서 이미 알림
+  // 긴 대화도 T1 · T2F에는 최근 줄만 (입력 토큰 · 비용이 대화 길이에 따라 끝없이 늘지 않게) — 번호는 대화 전체 기준
+  for (const point of ['T1', 'T2F'] as const) {
+    const screen = claude!.seen[point].at(-1) ?? '';
+    assert.match(screen, /\(앞 대화 \d+줄 생략\)/);
+    assert.match(screen, new RegExp(`${MAX_USER_TURNS}: 말 ${MAX_USER_TURNS}$`, 'm'));
+    assert.doesNotMatch(screen, /: 말 1$/m);
+  }
   const calls = claude!.order.length;
-  const over = await handleVoiceTurn(deps, text(sid, rev, '스물한 번째'));
-  assert.equal(over.reply?.text, '오늘 대화는 여기까지예요. [완료]를 누르면 정리할게요.');
+  const over = await handleVoiceTurn(deps, text(sid, rev, '백한 번째'));
+  assert.equal(over.reply?.text, LIMIT_TURN_TEXT);
+  assert.match(LIMIT_TURN_TEXT, /대화가 길어져서.*내일 새 대화/); // 대화 길이 제한 — 하루 · 분당 제한과 다른 글
   assert.equal(over.limits.reached, 'TURN');
   assert.equal(over.rev, rev); // 저장하지 않음
   assert.equal(claude!.order.length, calls);
-  assert.equal(turnsOf(db, sid).filter((t) => t.role === 'user').length, 20);
+  assert.equal(turnsOf(db, sid).filter((t) => t.role === 'user').length, MAX_USER_TURNS);
 
   // 하루 5대화: 이미 4개를 끝냈다고 보고 5번째(= 이 세션)까지, 6번째는 막힘
   for (let i = 0; i < 3; i++) db.rows('conversation_sessions').push({ session_id: `old-${i}`, user_id: ME, session_type: 'BEFORE_SLEEP', input_mode: 'TEXT', started_at: '2026-10-29T09:00:00+09:00', ended_at: '2026-10-29T09:10:00+09:00', turns: [], server_state: {} });
