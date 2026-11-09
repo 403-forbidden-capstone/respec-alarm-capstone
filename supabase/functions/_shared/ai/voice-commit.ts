@@ -4,7 +4,8 @@
 //   2) 추출: 대화 전체로 T2 한 번(extract.v2, 모델 출력은 callLlm이 스키마로 검사). 결과는 바로 server_state.commit.extract에 — 저장이 실패해 다시 시도해도 T2를 또 부르지 않음
 //   3) 나누기: applyFinal(final-core) — 공개 JSON(structured.v1) 초안 + 저장할 것. 일정 · 알람은 저장하지 않고(카드 몫) 확인 상태만
 //   4) 저장: 할 일(todos) · 생활 기록 진술 칸(daily_records의 빈 칸)만 — 단계마다 따로, 다시 해도 같은 결과(겹침 검사 · 빈 칸만 채움)
-//      지각 · 출발 · 도착(appointment_participants)과 알람 반응(alarm_events)은 위치 · 원탭 · 알람 담당 칸이라, 일기(daily_journals.ai_summary)는 일기 담당 칸이라 쓰지 않음 — JSON에만
+//      지각 · 출발 · 도착(appointment_participants)과 알람 반응(alarm_events)은 위치 · 원탭 · 알람 담당 칸이라 쓰지 않음 — JSON에만
+//      공개 JSON 저장이 끝나면 하루 일기(daily_journals.ai_summary): 그날 대화들의 JSON으로 T5 한 번 (saveJournal — 고친 일기는 그대로)
 //      사용자 표는 부른 사람의 RLS 클라이언트로 써서 기존 정책을 그대로 탐. conversation_sessions(transcript · extracted_data · apply_status)와 server_state는 서버 키(session.ts와 같음)
 //      공개 JSON은 저장 결과(storage · todos[].stored)까지 담아 structured.v1 검사를 통과해야 저장
 //   5) 끝: commit = DONE | PARTIAL(실패한 단계 있음 → 같은 요청을 다시 보내면 이어서). 이미 DONE이면 저장한 결과를 그대로 돌려줌
@@ -44,15 +45,15 @@ export interface VoiceCommitOut {
   session_id: string;
   /** DONE 끝 · PARTIAL 일부 저장 실패(다시 보내면 이어서) · RUNNING 다른 요청이 처리 중 · SKIPPED 사용자 말이 없어 정리할 것 없음 */
   status: 'DONE' | 'PARTIAL' | 'RUNNING' | 'SKIPPED';
-  /** todos 새로 넣은 수 · daily_records 칸을 채운 날짜 수 */
-  saved: { todos: number; daily_records: number };
+  /** todos 새로 넣은 수 · daily_records 칸을 채운 날짜 수 · daily_journals 일기를 쓴 수(0 · 1) */
+  saved: { todos: number; daily_records: number; daily_journals: number };
   /** 확인이 필요해 저장하지 않은 것 (일정 · 알람 · 준비시간 · 날짜 모름 · 엇갈린 진술 · 어느 일정인지 모르는 지각) — 모두 extracted_data에는 남음 */
   pending: string[];
   /** 실패한 저장 단계 이름 */
   failed: string[];
 }
 
-const NOTHING: VoiceCommitOut['saved'] = { todos: 0, daily_records: 0 };
+const NOTHING: VoiceCommitOut['saved'] = { todos: 0, daily_records: 0, daily_journals: 0 };
 const outOf = (sessionId: string, status: VoiceCommitOut['status']): VoiceCommitOut => ({ session_id: sessionId, status, saved: { ...NOTHING }, pending: [], failed: [] });
 
 /** 이미 끝났거나 다른 요청이 처리 중이면 그 답 — 아니면 null(이번 요청이 처리) */
@@ -129,6 +130,66 @@ async function saveRecords(db: Db, userId: string, plan: FinalPlan, review: stri
     written += 1;
   }
   return written;
+}
+
+/**
+ * 하루 일기에 넣을 사실 — 그날(date) 대화들의 structured.v1에서 사용자가 말했거나 확인한 것(inferred 뺌) · 기록된 행동(needs_confirm 뺌) · 날짜가 그날인 것만.
+ * 사건 · 기분 · 행동 · 수면 · 일정 결과가 하나도 없으면 null (일기를 만들지 않음 — 습관 · 목표만으로는 쓰지 않음)
+ */
+export function journalFacts(list: Structured[], date: string): Record<string, unknown> | null {
+  const told = (x: { source: string }): boolean => x.source !== 'inferred';
+  const day = list.filter((s) => s.session.reference_date === date);
+  const events = day.flatMap((s) => s.day_review.events.filter(told).map(({ text, time }) => ({ text, time })));
+  const memorable = day.flatMap((s) => (s.day_review.memorable ? [s.day_review.memorable] : []));
+  const mood = day
+    .map((s) => s.mood_condition)
+    .filter((m) => told(m) && (m.mood.length > 0 || m.fatigue !== null || m.stress !== null || m.condition_note !== null))
+    .map(({ mood, fatigue, stress, causes, condition_note }) => ({ mood, fatigue, stress, causes, condition_note }));
+  const behavior = day.flatMap((s) =>
+    s.behavior.filter((b) => b.status === 'recorded' && told(b) && b.date === date).map((b) => ({ kind: b.kind, time: b.time, minutes: b.minutes, appointment: b.appointment?.title ?? null, reasons: b.reasons, note: b.note })),
+  );
+  const sleep_wake = day.flatMap((s) =>
+    s.sleep_wake.filter((w) => told(w) && w.date === date).map(({ sleep_at, wake_at, wake_delay_minutes, overslept, sleep_satisfaction }) => ({ sleep_at, wake_at, wake_delay_minutes, overslept, sleep_satisfaction })),
+  );
+  const schedule_outcomes = day.flatMap((s) =>
+    s.schedule_outcomes.filter((o) => o.status === 'recorded' && told(o) && o.date === date).map(({ appointment_title, is_late, late_minutes, causes }) => ({ appointment_title, is_late, late_minutes, causes })),
+  );
+  const habits = day.flatMap((s) => s.habit_signals.filter((h) => told(h) && h.date === date).map(({ habit, note }) => ({ habit, note })));
+  const goals = day.flatMap((s) => s.goals_routine.goals.filter(told).map((g) => g.goal_text));
+  if (events.length + memorable.length + mood.length + behavior.length + sleep_wake.length + schedule_outcomes.length === 0) return null;
+  return { events, memorable, mood, behavior, sleep_wake, schedule_outcomes, habits, goals };
+}
+
+/**
+ * daily_journals — 그날 대화 전부(같은 reference_date)의 structured.v1로 T5 일기 1~2문장을 만들어 ai_summary에 (하루 한 줄, source_session_id = 이번 대화).
+ * 사용자가 고친 일기(is_edited)는 건드리지 않음 · 이번 대화로 이미 만든 일기는 다시 만들지 않음 · 쓸 사실이 없거나 모델이 빈 글을 주면 쓰지 않음.
+ * 모델 실패는 던짐 → 이 단계만 실패(PARTIAL, 다음 대화 열기 때 다시) — 앞 단계 저장 결과는 그대로
+ */
+async function saveJournal(deps: CommitDeps, sessionId: string, date: string, nowIso: string): Promise<number> {
+  const db = deps.userDb;
+  const cur = must<{ journal_id: string; is_edited: boolean; source_session_id: string | null; ai_summary: string | null } | null>(
+    'daily_journals',
+    await db.from('daily_journals').select('journal_id, is_edited, source_session_id, ai_summary').eq('user_id', deps.userId).eq('record_date', date).maybeSingle(),
+  );
+  if (cur?.is_edited || (cur?.source_session_id === sessionId && cur.ai_summary)) return 0;
+  const sessions = must<{ extracted_data: Structured }[]>(
+    'conversation_sessions',
+    await deps.service.from('conversation_sessions').select('extracted_data').eq('user_id', deps.userId).eq('extracted_data->session->>reference_date', date).order('started_at', { ascending: true }),
+  ) ?? [];
+  const facts = journalFacts(sessions.map((s) => s.extracted_data).filter((d) => d?.schema_version === 'structured.v1'), date);
+  if (facts === null) return 0;
+  const vars = { date_line: date, facts: JSON.stringify(facts, null, 2) };
+  const res = await callPoint<{ diary: string }>(deps.llm, 'T5', vars, { model: deps.model, sleep: deps.sleep, now: deps.clock, gate: deps.quota ?? undefined });
+  const fillIo = (deps.ioUserIds ?? []).includes(deps.userId);
+  await recordCalls(deps, sessionId, [{ call: res.call, io: fillIo ? { input: render(POINTS.T5.prompt.user, vars).trimEnd(), output: res.ok ? res.data : null, error: res.ok ? null : res.reason } : null }], nowIso);
+  if (!res.ok) throw new Error(`T5 실패: ${res.code}`);
+  const diary = res.data.diary.trim();
+  if (diary === '') return 0;
+  const row = { ai_summary: diary, source_session_id: sessionId, generated_at: nowIso };
+  // is_edited = false 조건 — 읽은 뒤 사용자가 고쳤으면 덮지 않음
+  if (cur) must('daily_journals', await db.from('daily_journals').update(row).eq('journal_id', cur.journal_id).eq('user_id', deps.userId).eq('is_edited', false));
+  else must('daily_journals', await db.from('daily_journals').insert({ user_id: deps.userId, record_date: date, ...row }));
+  return 1;
 }
 
 /** 같은 값인지 — 시각은 DB가 돌려준 글자 모양(+00:00)과 달라도 같은 순간이면 같음 (다시 시도가 자기가 쓴 값을 kept_existing으로 적지 않게) */
@@ -255,6 +316,7 @@ export async function handleVoiceCommit(deps: CommitDeps, body: unknown): Promis
       for (const c of Object.keys(r.values)) storage.push({ table: 'daily_records', key: r.record_date, column: c, result: 'failed' });
     }
   }
+  let structuredSaved = false;
   await step('conversation_sessions', async () => {
     const structured = finishStructured(
       plan,
@@ -275,7 +337,10 @@ export async function handleVoiceCommit(deps: CommitDeps, body: unknown): Promis
         .eq('session_id', sessionId)
         .eq('user_id', deps.userId),
     );
+    structuredSaved = true;
   });
+  // 일기는 공개 JSON이 저장된 뒤에만 — 저장 못 했으면 이번엔 만들지 않음(PARTIAL이라 다시 시도 때 만듦)
+  if (structuredSaved) await step('daily_journals', async () => void (saved.daily_journals = await saveJournal(deps, sessionId, st.day.review, nowIso)));
 
   // 5) 끝
   const out: VoiceCommitOut = { session_id: sessionId, status: failed.length === 0 ? 'DONE' : 'PARTIAL', saved, pending: plan.draft.pending.map((p) => p.text), failed };
