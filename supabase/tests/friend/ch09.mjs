@@ -373,6 +373,7 @@ export default async function ch09({ q, as, su, svc, check, expectErr }) {
       await q(`alter table public.appointments enable trigger keep_keys`);
     }
     await as(A);
+    const [sum] = await q(`select * from public.my_account_delete_summary()`);   // 내가 만들어 남을 공동 약속 수 — 나가며 같이 지워질 혼자 참여한 앞으로 약속은 뺌
     const left = await q(`update public.group_members set invite_status = 'LEFT' where group_id = $1 and user_id = $2 returning 1`, [g, A]);
     await su();
     const exists = (ap) => n(`select 1 from public.appointments where appointment_id = $1`, [ap]);
@@ -383,8 +384,8 @@ export default async function ch09({ q, as, su, svc, check, expectErr }) {
     await q(`update public.group_members set invite_status = 'INVITED', invited_by = $3, invited_at = now(), joined_at = null where group_id = $1 and user_id = $2`, [g, A, B]);
     const back = await call(A, 'public.accept_group_invite($1, false)', [g]);
     const aPastBack = await partRows(A, past);
-    return left.length === 1 && after.solo === 0 && after.orphanMine === 0 && after.shared === 1 && after.bOwned === 1 && after.past === 1
-      && sharedRow.creator_id === null && parts.aShared === 0 && parts.bShared === 1 && parts.aPast === 1 && back.status === 'JOINED' && aPastBack === 1 ? true : { left, after, sharedRow, parts, back, aPastBack };
+    return left.length === 1 && after.solo === 0 && after.orphanMine === 0 && after.shared === 1 && after.bOwned === 1 && after.past === 1 && sum.group_appointments_staying === 2
+      && sharedRow.creator_id === null && parts.aShared === 0 && parts.bShared === 1 && parts.aPast === 1 && back.status === 'JOINED' && aPastBack === 1 ? true : { sum, left, after, sharedRow, parts, back, aPastBack };
   });
 
   // ---- 탐색 시험 X-PRIV-09: 남의 그룹 공동 약속의 제목 · 장소는 가림 ----------------------------------------

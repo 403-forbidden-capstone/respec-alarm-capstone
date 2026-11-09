@@ -571,4 +571,13 @@ export default async function ch10({ q, as, su, svc, check, expectErr }) {
     const r2 = await respond(A, p2.proposal_id, true);
     return p1.status === 'OK' && r1.status === 'TOO_LATE' && before.every((x, i) => ms(x.scheduled_at) === ms(after[i].scheduled_at)) && st1 === 'EXPIRED' && p2.status === 'OK' && r2.status === 'APPLIED' ? true : { p1, r1, st1, before, after, p2, r2 };
   });
+
+  await check('X-PROP-01(꺼 둔 출발): 출발 알람을 꺼 둔 카드는 출발이 울리지 않으니 늦추는 제안이 약속을 넘겨도 TOO_LATE가 아님', async () => {
+    const { B, c } = await pair(88);
+    await q(`update public.appointment_participants set est_travel_minutes = 30 where participant_id = $1`, [c.pt]);
+    const late = await propose(B, c.WAKE, await shifted(c.WAKE, 55));            // 켜져 있으면 TOO_LATE인 값
+    await q(`update public.alarms set is_enabled = false where alarm_id = $1`, [c.DEPARTURE]);
+    const off = await propose(B, c.WAKE, await shifted(c.WAKE, 55));
+    return late.status === 'TOO_LATE' && off.status === 'OK' ? true : { late, off };
+  });
 }

@@ -284,9 +284,11 @@ export default async function ch15({ q, as, su, svc, check, expectErr }) {
     await befriend(R, F);
     const mkRej = async (u) => { await as(u); const r = await expectErr(() => q(`select public.dev_reset_my_data()`), /시험 계정만 쓸 수 있음/); await su(); return r; };
     const rRej = await mkRej(R), nRej = await mkRej(N);
+    const evil = await mk(75, 'x@example.com.evil.com', '비슷한주소'), sub = await mk(76, 'a@sub.example.com', '하위도메인');
+    const evilRej = await mkRej(evil), subRej = await mkRej(sub);
     const stillFriends = await count(`select 1 from public.friends where requester_id = $1 or addressee_id = $1`, [R]);
     await call(T, 'public.dev_reset_my_data()', []);
     await call(S, 'public.dev_reset_my_data()', []);
-    return rRej === true && nRej === true && stillFriends === 1 ? true : { rRej, nRej, stillFriends };
+    return rRej === true && nRej === true && evilRej === true && subRej === true && stillFriends === 1 ? true : { rRej, nRej, evilRej, subRej, stillFriends };
   });
 }

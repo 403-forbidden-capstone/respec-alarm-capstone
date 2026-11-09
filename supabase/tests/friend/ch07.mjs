@@ -625,4 +625,16 @@ export default async function ch07({ q, as, su, svc, check, expectErr }) {
     const got = r.find((x) => x.alarm_id === a1);
     return got && iso(got.missed_at) === iso(at('06:30')) && !r.some((x) => x.alarm_id === a2) ? true : { r };
   });
+
+  await check('X-WAKE-04(울린 기록 구간): 꺼진 기상 알람은 알람 시각 6시간 전부터 18시간 뒤 전까지의 울린 기록만 셈 — 6시간 전 정각은 포함 · 그보다 이른 기록과 18시간 뒤 정각은 제외, 기록이 없으면 안 셈, 켜진 알람은 기록 없이도 셈', async () => {
+    const U = await join_(99, '경계');
+    const al = await wakeAlarm(U, at('07:00'), { enabled: false });
+    const counts = async (when, enabled = false) => {
+      await q(`delete from public.alarm_events where alarm_id = $1`, [al]);
+      if (when) await ev(al, U, 'TRIGGERED', when);
+      return (await q(`select private.wake_alarm_counts($1, $2, $3::timestamptz) as r`, [al, enabled, at('07:00')]))[0].r;
+    };
+    const r = { none: await counts(null), sixBefore: await counts(at('01:00')), earlier: await counts(at('00:59')), lastMinute: await counts(at('00:59', '2026-11-11')), eighteenAfter: await counts(at('01:00', '2026-11-11')), enabled: await counts(null, true) };
+    return r.none === false && r.sixBefore === true && r.earlier === false && r.lastMinute === true && r.eighteenAfter === false && r.enabled === true ? true : r;
+  });
 }

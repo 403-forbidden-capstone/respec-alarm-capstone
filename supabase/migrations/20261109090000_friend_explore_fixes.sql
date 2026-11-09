@@ -469,7 +469,7 @@ begin
     join public.appointment_participants pt on pt.participant_id = d.participant_id
     join public.appointments ap on ap.appointment_id = pt.appointment_id
     where d.participant_id = v_alarm.participant_id and d.user_id = v_alarm.user_id
-      and d.alarm_type = 'DEPARTURE' and d.scheduled_at > now()
+      and d.alarm_type = 'DEPARTURE' and d.is_enabled and d.scheduled_at > now()
       and d.scheduled_at + (v_new - v_alarm.scheduled_at) + coalesce(pt.est_travel_minutes, 0) * interval '1 minute' > ap.appointment_at) then
     return jsonb_build_object('status', 'TOO_LATE');
   end if;
@@ -564,7 +564,7 @@ begin
     join public.appointment_participants pt on pt.participant_id = d.participant_id
     join public.appointments ap on ap.appointment_id = pt.appointment_id
     where d.participant_id = v_a.participant_id and d.user_id = v_uid
-      and d.alarm_type = 'DEPARTURE' and d.scheduled_at > now()
+      and d.alarm_type = 'DEPARTURE' and d.is_enabled and d.scheduled_at > now()
       and d.scheduled_at + (v_p.to_at - v_p.from_at) + coalesce(pt.est_travel_minutes, 0) * interval '1 minute' > ap.appointment_at) then
     update public.alarm_proposals set status = 'EXPIRED', responded_at = now() where proposal_id = v_p.proposal_id;
     return jsonb_build_object('status', 'TOO_LATE');
@@ -706,7 +706,12 @@ set search_path = ''
 as $$
 declare
   v_touched uuid[];
+  v_locked  boolean;
 begin
+  -- 그룹 행을 먼저 잠가 둘이 동시에 나가도 나중 사람이 앞 사람의 나감(참여 삭제)을 보고 처리됨 — 아래 빈 약속 판정이 서로의 참여가 남아 보여 둘 다 못 지우는 일이 없게 (5-39 · X-APPT-04)
+  perform 1 from public.groups g where g.group_id = old.group_id for update;
+  v_locked := found;
+
   -- 이 사람의 참여가 지워지는 앞으로 약속 id를 모아 둠
   with gone as (
     delete from public.appointment_participants ap
@@ -734,14 +739,43 @@ begin
     and not exists (select 1 from public.todos t where t.appointment_id = a.appointment_id and t.user_id <> old.user_id)
     and not exists (select 1 from public.user_edit_logs l where l.appointment_id = a.appointment_id and l.user_id <> old.user_id);
 
-  perform 1 from public.groups g where g.group_id = old.group_id for update;
-  if found and not exists (
+  if v_locked and not exists (
     select 1 from public.group_members gm where gm.group_id = old.group_id and gm.invite_status = 'JOINED'
   ) then
     delete from public.groups g where g.group_id = old.group_id;
   end if;
   return null;
 end;
+$$;
+
+-- 계정 삭제 영향 요약(my_account_delete_summary · prepare_account_delete가 씀)의 "남을 공동 약속" 숫자에서 위 규칙으로 같이 지워지는 약속을 뺌. 지난 정의는 같은 파일
+create or replace function private.account_delete_impact(p_user uuid)
+returns table (groups_leaving integer, groups_disappearing integer, group_appointments_staying integer, friends integer)
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  with mine as (
+    select gm.group_id,
+           not exists (
+             select 1 from public.group_members o
+             where o.group_id = gm.group_id and o.user_id <> p_user and o.invite_status = 'JOINED') as disappears
+    from public.group_members gm
+    where gm.user_id = p_user and gm.invite_status = 'JOINED')
+  select (select count(*)::integer from mine),
+         (select count(*)::integer from mine where disappears),
+         (select count(*)::integer from public.appointments a join mine m on m.group_id = a.group_id
+          where a.creator_id = p_user and not m.disappears
+            -- 나가면 같이 지워지는 약속(내가 혼자 참여한 앞으로 약속, 남의 할 일 · 고친 값 기록이 안 걸린 것)은 남지 않으므로 뺌 (after_group_member_gone, X-APPT-04)
+            and not (
+              a.appointment_at >= private.day_start(p_user)
+              and exists (select 1 from public.appointment_participants pt where pt.appointment_id = a.appointment_id and pt.user_id = p_user)
+              and not exists (select 1 from public.appointment_participants pt where pt.appointment_id = a.appointment_id and pt.user_id <> p_user)
+              and not exists (select 1 from public.todos t where t.appointment_id = a.appointment_id and t.user_id <> p_user)
+              and not exists (select 1 from public.user_edit_logs l where l.appointment_id = a.appointment_id and l.user_id <> p_user))),
+         (select count(*)::integer from public.friends f
+          where f.status = 'ACCEPTED' and p_user in (f.requester_id, f.addressee_id));
 $$;
 
 
