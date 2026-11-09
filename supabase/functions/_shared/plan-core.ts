@@ -100,6 +100,7 @@ export type AlarmRow = {
   time_source: 'AUTO' | 'MANUAL';
   intensity_source: 'AUTO' | 'MANUAL';
   recurrence_rule: string | null;
+  original_scheduled_at?: string | null; // 친구 제안을 적용한 알람이면 처음 시각 (친구 10장 — 주인이 직접 고치거나 새로 계산하면 비워짐)
 };
 
 export type PlanDraft = ParticipantFields &

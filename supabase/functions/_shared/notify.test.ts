@@ -21,6 +21,9 @@ const T1 = 'ExponentPushToken[aaaaaaaaaaaaaaaaaaaaaa]';
 const T2 = 'ExponentPushToken[bbbbbbbbbbbbbbbbbbbbbb]';
 const T3 = 'ExponentPushToken[cccccccccccccccccccccc]';
 const T4 = 'ExponentPushToken[dddddddddddddddddddddd]';
+const PROPOSAL = 'abababab-abab-4bab-8bab-abababababab';
+const NOW = new Date('2026-11-08T12:00:00.000Z'); // 한국 11/8 21:00 — 문구의 '내일'을 가르는 기준
+const HOUR = 3_600_000;
 
 const request = (over: Partial<NotifyRequest> = {}): NotifyRequest => ({ kind: 'ALARM_CHANGED', targetUserId: TARGET, ...over });
 
@@ -31,7 +34,9 @@ function setup(allowed: string[] = ['ALARM_CHANGED', 'FRIEND_REQUEST', 'FRIEND_A
   const db = new FakeDb();
   db.rpcHandlers.can_send_push = (a) => allowed.includes(String(a.p_kind)) && a.p_sender_id === SENDER && a.p_target_id === TARGET;
   db.rpcHandlers.plan_wake_ping = (a) => (a.p_reserve ? { status: 'OK', count: 1, limit: 3, next_at: '2026-11-10T07:10:00Z' } : { status: 'OK' });
-  db.rows('alarms').push({ alarm_id: ALARM, user_id: TARGET });
+  db.rows('alarms').push({ alarm_id: ALARM, user_id: TARGET, alarm_type: 'WAKE' });
+  // 알람 바뀜(제안) 알림은 방금 보낸 대기 중 제안에서 시각을 가져옴 — 한국 7:00 → 7:10
+  db.rows('alarm_proposals').push({ proposal_id: PROPOSAL, alarm_id: ALARM, owner_id: TARGET, proposer_id: SENDER, from_at: '2026-11-08T22:00:00.000Z', to_at: '2026-11-08T22:10:00.000Z', status: 'PENDING', created_at: new Date(Date.now() - 10 * 60_000).toISOString() });
   db.rows('profiles').push({ user_id: SENDER, nickname: '수연', timezone: 'Asia/Seoul' }, { user_id: TARGET, nickname: '지형', timezone: 'Asia/Seoul' }, { user_id: OTHER, nickname: '남', timezone: 'Asia/Seoul' });
   db.rows('push_tokens').push({ user_id: TARGET, token: T1 }, { user_id: TARGET, token: T2 }, { user_id: OTHER, token: T3 });
   const pushes: Sent[] = [];
@@ -59,23 +64,58 @@ const quiet = async <T>(fn: () => Promise<T>): Promise<T> => {
 
 test('권한이 있으면 받는 사람의 토큰 전부(폰 2대)에 보냄 — 다른 사람 토큰은 안 건드림, can_send_push 인자 이름, 문구는 서버가 정함 (11-05 · 11-08)', async () => {
   const { db, service, pushes, fetchImpl } = setup();
-  const result = await runNotify(service, SENDER, request({ alarmId: ALARM, previousAt: '2026-11-08T22:00:00Z', newAt: '2026-11-08T22:10:00Z' }), { fetchImpl: fetchImpl(okAll), sleep: noSleep });
+  const result = await runNotify(service, SENDER, request({ alarmId: ALARM }), { fetchImpl: fetchImpl(okAll), sleep: noSleep, now: NOW });
 
   assert.deepEqual(result, { sent: 2, failed: 0 });
   assert.deepEqual(db.rpcCalls, [{ name: 'can_send_push', args: { p_sender_id: SENDER, p_target_id: TARGET, p_kind: 'ALARM_CHANGED' } }]);
   assert.deepEqual(pushes.map((p) => p.to).sort(), [T1, T2]);
-  assert.equal(pushes[0].title, '알람이 바뀌었어요');
-  assert.equal(pushes[0].body, '수연님이 알람을 바꿨어요 · 07:00 → 07:10');
+  assert.equal(pushes[0].title, '알람 제안');
+  assert.equal(pushes[0].body, '수연님이 내일 기상 알람을 7:00 → 7:10으로 제안했어요');
   assert.equal(pushes[0].channelId, 'alarm_change_v1');
-  // 알림 데이터: 종류 · 받는 사람 id(앱이 계정 대조) · 이동 경로 · 알람 id
-  assert.deepEqual(pushes[0].data, { kind: 'ALARM_CHANGED', recipientUserId: TARGET, path: '/alarms', alarmId: ALARM });
+  // 알림 데이터: 종류 · 받는 사람 id(앱이 계정 대조) · 이동 경로 · 알람 id · 제안 id
+  assert.deepEqual(pushes[0].data, { kind: 'ALARM_CHANGED', recipientUserId: TARGET, path: '/alarms', alarmId: ALARM, proposalId: PROPOSAL });
 });
 
-test('알람 바뀜 문구의 시각은 받는 사람 시간대의 HH:mm', async () => {
+test('10-25 · 10-37: 알림의 시각 · 알람 종류는 요청이 아니라 제안 기록에서 — 옛 앱이 보낸 previousAt · newAt은 무시(꾸밀 수 없음), 알람 id 없이 보내면 가장 최근 제안', async () => {
+  const { db, service, pushes, fetchImpl } = setup();
+  const req = readNotifyRequest(Reader.root({ kind: 'ALARM_CHANGED', targetUserId: TARGET, previousAt: '2026-01-01T00:00:00Z', newAt: '2026-01-01T00:10:00Z', title: '무료 쿠폰' }));
+  assert.deepEqual(req, { kind: 'ALARM_CHANGED', targetUserId: TARGET }); // 요청 모양에 시각이 안 남음
+  // 더 최근에 보낸 다른 알람(준비)의 제안이 있으면 알람 id 없이는 그쪽
+  const prepare = '12121212-1212-4212-8212-121212121212';
+  db.rows('alarms').push({ alarm_id: prepare, user_id: TARGET, alarm_type: 'PREPARE' });
+  db.rows('alarm_proposals').push({ proposal_id: 'cdcdcdcd-cdcd-4dcd-8dcd-cdcdcdcdcdcd', alarm_id: prepare, owner_id: TARGET, proposer_id: SENDER, from_at: '2026-11-08T22:20:00.000Z', to_at: '2026-11-08T22:25:00.000Z', status: 'PENDING', created_at: new Date(Date.now() - 60_000).toISOString() });
+  await runNotify(service, SENDER, req, { fetchImpl: fetchImpl(okAll), sleep: noSleep, now: NOW });
+  assert.ok(pushes.every((p) => p.body === '수연님이 내일 준비 알람을 7:20 → 7:25로 제안했어요' && p.data.alarmId === prepare));
+  pushes.length = 0;
+  await runNotify(service, SENDER, request({ alarmId: ALARM }), { fetchImpl: fetchImpl(okAll), sleep: noSleep, now: NOW });
+  assert.ok(pushes.every((p) => p.body === '수연님이 내일 기상 알람을 7:00 → 7:10으로 제안했어요' && p.data.alarmId === ALARM));
+});
+
+test('알람 제안 알림: 방금(1시간 안) 보낸 대기 중 제안이 없으면 404 — 오래된 제안 · 응답한 제안 · 다른 사람에게 보낸 제안 · 다른 알람 id는 없는 것과 같음, 권한 판정은 DB 함수가 먼저', async () => {
+  const outcome = async (mutate: (db: FakeDb) => void, over: Partial<NotifyRequest> = {}) => {
+    const { db, service, pushes, fetchImpl } = setup();
+    mutate(db);
+    try {
+      await runNotify(service, SENDER, request(over), { fetchImpl: fetchImpl(okAll), sleep: noSleep, now: NOW });
+      return { ok: true, pushes: pushes.length };
+    } catch (e) {
+      return { status: e instanceof HttpError ? e.status : -1, pushes: pushes.length };
+    }
+  };
+  const first = (db: FakeDb) => db.rows('alarm_proposals')[0];
+  assert.deepEqual(await outcome((db) => { first(db).created_at = new Date(Date.now() - 2 * HOUR).toISOString(); }), { status: 404, pushes: 0 });
+  assert.deepEqual(await outcome((db) => { first(db).status = 'DISMISSED'; }), { status: 404, pushes: 0 });
+  assert.deepEqual(await outcome((db) => { first(db).proposer_id = OTHER; }), { status: 404, pushes: 0 });
+  assert.deepEqual(await outcome((db) => { first(db).owner_id = OTHER; }), { status: 404, pushes: 0 });
+  assert.deepEqual(await outcome(() => {}, { alarmId: '99999999-9999-4999-8999-999999999999' }), { status: 404, pushes: 0 });
+  assert.deepEqual(await outcome(() => {}), { ok: true, pushes: 2 });
+});
+
+test('알람 제안 문구의 날짜 말과 시각은 받는 사람 시간대 기준', async () => {
   const { db, service, pushes, fetchImpl } = setup();
   db.rows('profiles').find((p) => p.user_id === TARGET)!.timezone = 'America/New_York';
-  await runNotify(service, SENDER, request({ previousAt: '2026-11-08T22:00:00Z', newAt: '2026-11-08T22:10:00Z' }), { fetchImpl: fetchImpl(okAll), sleep: noSleep });
-  assert.equal(pushes[0].body, '수연님이 알람을 바꿨어요 · 17:00 → 17:10');
+  await runNotify(service, SENDER, request(), { fetchImpl: fetchImpl(okAll), sleep: noSleep, now: NOW });
+  assert.equal(pushes[0].body, '수연님이 오늘 기상 알람을 17:00 → 17:10으로 제안했어요'); // 뉴욕 11/8 17:00
 });
 
 test('11-09: 옛 앱이 보낸 title · body · data는 무시하고 고정 문구를 씀 — 요청은 받음 (남이 쓴 문구가 알림이 되지 않음)', async () => {
@@ -194,7 +234,7 @@ test('11-12 · 11-13: 친구 요청은 받는 사람에게만, 수락은 요청�
 
 test('알람 id는 받는 사람의 알람이어야 함 (남의 알람 id로 알림을 꾸미지 못함)', async () => {
   const { db, service, pushes, fetchImpl } = setup();
-  db.rows('alarms').push({ alarm_id: '99999999-9999-4999-8999-999999999999', user_id: OTHER });
+  db.rows('alarms').push({ alarm_id: '99999999-9999-4999-8999-999999999999', user_id: OTHER, alarm_type: 'WAKE' });
   await assert.rejects(
     () => runNotify(service, SENDER, request({ alarmId: '99999999-9999-4999-8999-999999999999' }), { fetchImpl: fetchImpl(okAll), sleep: noSleep }),
     (e: unknown) => e instanceof HttpError && e.status === 404,
@@ -373,7 +413,7 @@ test('그룹 알림 DB 함수가 이상한 값을 돌려주면(모양 밖) 일�
 
 test('요청 읽기: 종류별 필수 칸 — 한 사람 종류는 targetUserId, 그룹 종류는 groupId(약속 변경은 appointmentId도), 모르는 종류 · 서버 전용 종류 · 이상한 UUID · 시각은 한 번에 알려 줌 (11-10)', () => {
   const ok = readNotifyRequest(Reader.root({ kind: 'ALARM_CHANGED', targetUserId: TARGET, alarmId: ALARM, previousAt: '2026-11-08T22:00:00Z', newAt: '2026-11-08T22:10:00Z' }));
-  assert.deepEqual(ok, { kind: 'ALARM_CHANGED', targetUserId: TARGET, alarmId: ALARM, previousAt: '2026-11-08T22:00:00.000Z', newAt: '2026-11-08T22:10:00.000Z' }); // 시각은 ISO로 정리
+  assert.deepEqual(ok, { kind: 'ALARM_CHANGED', targetUserId: TARGET, alarmId: ALARM }); // 옛 앱이 보낸 시각은 모양만 확인하고 안 씀(제안 기록에서)
 
   const issues = (input: unknown) => {
     try {

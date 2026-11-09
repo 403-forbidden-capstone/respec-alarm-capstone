@@ -46,8 +46,10 @@ export type CopyContext = {
   subjectName?: string | null; // 친구 미확인 · 후속: 안 일어난(일어난) 사람 이름
   groupName?: string | null;
   appointmentTitle?: string | null;
-  previousAt?: string | null; // 알람 바뀜: 이전 → 새 시각 (둘 다 있을 때만 문구에 넣음)
+  previousAt?: string | null; // 알람 바뀜(제안): 이전 → 새 시각 (둘 다 있을 때만 문구에 넣음)
   newAt?: string | null;
+  alarmType?: string | null; // 알람 바뀜(제안): 기상 · 준비 · 출발 · 도착
+  now?: Date; // 알람 바뀜(제안): '오늘 · 내일 · 모레'를 가를 기준 시각 (기본 지금)
   timeZone?: string | null; // 받는 사람 시간대 (기본 Asia/Seoul)
   change?: GroupChange; // GROUP_APPT_CHANGED: 취소됐으면 문구가 '취소됐어요'
 };
@@ -72,15 +74,53 @@ function clock(iso: string | null | undefined, timeZone: string | null | undefin
   }
 }
 
+// "H:mm" (받는 사람 시간대, 앞 0 없음 — '7:30 → 7:00'). 시각이 이상하면 null
+function clockShort(iso: string | null | undefined, timeZone: string | null | undefined): string | null {
+  const full = clock(iso, timeZone);
+  return full ? full.replace(/^0/, '') : null;
+}
+
+// 시각 뒤 '으로 / 로' — 마지막 숫자를 읽었을 때 받침이 있으면(영 · 삼 · 육) '으로', 없으면(일 이 사 오 칠 팔 구) '로'. 7:00 → 으로, 7:55 → 로
+const particleFor = (time: string): string => (/[036]$/.test(time) ? '으로' : '로');
+
+const ALARM_LABELS: Record<string, string> = { WAKE: '기상', PREPARE: '준비', DEPARTURE: '출발', ARRIVE: '도착' };
+
+// '오늘 · 내일 · 모레', 그 밖은 'M월 D일' (받는 사람 시간대의 날짜). 날짜를 못 읽으면 빈 글자
+function dayWord(iso: string | null | undefined, now: Date | undefined, timeZone: string | null | undefined): string {
+  if (!iso || Number.isNaN(Date.parse(iso))) return '';
+  const tz = (() => {
+    try {
+      new Intl.DateTimeFormat('en-US', { timeZone: timeZone || 'Asia/Seoul' });
+      return timeZone || 'Asia/Seoul';
+    } catch {
+      return 'Asia/Seoul';
+    }
+  })();
+  const ymd = (d: Date) => {
+    const parts = new Intl.DateTimeFormat('en-CA', { year: 'numeric', month: '2-digit', day: '2-digit', timeZone: tz }).formatToParts(d);
+    const pick = (t: string) => Number(parts.find((p) => p.type === t)?.value);
+    return { y: pick('year'), m: pick('month'), d: pick('day') };
+  };
+  const target = ymd(new Date(iso));
+  const today = ymd(now ?? new Date());
+  const days = Math.round((Date.UTC(target.y, target.m - 1, target.d) - Date.UTC(today.y, today.m - 1, today.d)) / 86_400_000);
+  if (days === 0) return '오늘';
+  if (days === 1) return '내일';
+  if (days === 2) return '모레';
+  return `${target.m}월 ${target.d}일`;
+}
+
 export function composeCopy(kind: PushKind, ctx: CopyContext): { title: string; body: string } {
   switch (kind) {
     case 'WAKE_PING':
       return { title: '깨우기', body: `${nameOr(ctx.senderName, '친구')}님이 깨워요` };
     case 'ALARM_CHANGED': {
-      const who = `${nameOr(ctx.senderName, '친구')}님이 알람을 바꿨어요`;
-      const from = clock(ctx.previousAt, ctx.timeZone);
-      const to = clock(ctx.newAt, ctx.timeZone);
-      return { title: '알람이 바뀌었어요', body: from && to ? `${who} · ${from} → ${to}` : who };
+      // 친구가 알람 시각을 '제안'했을 때 — 주인이 [적용]해야 바뀜 (친구 10장). 시각은 받는 사람 시간대의 H:mm
+      const who = nameOr(ctx.senderName, '친구');
+      const what = [dayWord(ctx.newAt, ctx.now, ctx.timeZone), ALARM_LABELS[ctx.alarmType ?? ''], '알람'].filter(Boolean).join(' ');
+      const from = clockShort(ctx.previousAt, ctx.timeZone);
+      const to = clockShort(ctx.newAt, ctx.timeZone);
+      return { title: '알람 제안', body: from && to ? `${who}님이 ${what}을 ${from} → ${to}${particleFor(to)} 제안했어요` : `${who}님이 ${what}을 제안했어요` };
     }
     case 'FRIEND_REQUEST':
       return { title: '친구 요청', body: '새 친구 요청이 도착했어요' };

@@ -397,7 +397,8 @@ async function replanFor(
       // 그날 첫 일정이 바뀌면 기상이 붙고 떨어짐 (7.1.3). 직접 고른 알람 시각은 같은 날이면 그대로 · 날짜가 바뀌면 날짜만 따라감
       //   L6 안건후보: 일정 시각을 옮길 때 직접 고른 알람 시각 기본안 = 같은 날이면 유지 · 날짜가 바뀌면 날짜만 따라감 (앱 가짜 모드와 같음)
       kinds: inheritedKinds(alarms, { withWake: !sameDayWake, baseHadEarlierWake: hadEarlierWake }),
-      manualTimes: shiftManualTimes(alarms, oldAt, localDateKey(newAt, tz), tz),
+      //   친구가 제안해서 주인이 적용한 시각(original_scheduled_at 있음)은 약속의 시각 · 장소를 바꾸면 새 계산이 이김 — 시각 · 장소가 그대로면(제목 · 중요도만) 이 길이 아예 안 돎 (친구 10-22, D67)
+      manualTimes: shiftManualTimes(patched.changed.at || patched.changed.place ? alarms.filter((x) => x.original_scheduled_at == null) : alarms, oldAt, localDateKey(newAt, tz), tz),
     },
     profile,
     appointment: patchedRow,

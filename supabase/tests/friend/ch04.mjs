@@ -205,6 +205,14 @@ export default async function ch04({ q, as, su, check, expectErr, PGlite, AUTH_S
     const fs = [(await friendRow(K1, K2)).friend_id, (await friendRow(K1, K3)).friend_id];
     await q(`insert into public.sharing_permissions (owner_id, grantee_id, source_type, source_id, can_view_alarm, can_edit_alarm) values ($1, $2, 'FRIEND', $4, true, true), ($1, $3, 'FRIEND', $5, true, true)`, [K1, K2, K3, fs[0], fs[1]]);
     const can = async (s, t, k) => (await q(`select public.can_send_push($1, $2, $3) as ok`, [s, t, k]))[0].ok;
+    const pend = async (proposer, owner) => {   // 알림 권한(ALARM_CHANGED)은 방금 보낸 대기 중 제안이 있어야 통과 (10장) — 제안 한 줄을 서버 역할로 직접 넣음
+    await su();
+    const [ap] = await q(`insert into public.appointments (creator_id, title, appointment_at, dest_name) values ($1, '약속', now() + interval '10 hours', '학교') returning appointment_id`, [owner]);
+    const [pt] = await q(`insert into public.appointment_participants (appointment_id, user_id) values ($1, $2) returning participant_id`, [ap.appointment_id, owner]);
+    const [al] = await q(`insert into public.alarms (participant_id, user_id, alarm_type, scheduled_at) values ($1, $2, 'WAKE', now() + interval '8 hours') returning alarm_id`, [pt.participant_id, owner]);
+    await q(`insert into public.alarm_proposals (alarm_id, owner_id, proposer_id, from_at, to_at) values ($1, $2, $3, now() + interval '8 hours', now() + interval '7 hours')`, [al.alarm_id, owner, proposer]);
+  };
+    await pend(K2, K1); await pend(K3, K1);
     const before = await can(K2, K1, 'ALARM_CHANGED');   // 받는 사람 K1 알람을 K2가 고침 → K1이 K2에게 설정 권한을 줬는지
     await block(K1, K2);
     await q(`insert into public.friends (friend_id, requester_id, addressee_id, status, accepted_at) values ($1, $2, $3, 'ACCEPTED', now())`, [fs[0], K1, K2]);   // 예전 친구 행 · 권한이 되살아난 상황

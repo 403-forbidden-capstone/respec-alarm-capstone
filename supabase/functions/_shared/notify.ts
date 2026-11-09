@@ -1,5 +1,5 @@
 // notify의 본문 — Deno.serve 없이 모듈로 빼서 가짜 DB로 시험함 (notify.test.ts). 연결은 notify/index.ts
-//   요청: { kind, targetUserId?, groupId?, appointmentId?, alarmId?, previousAt?, newAt? }
+//   요청: { kind, targetUserId?, groupId?, appointmentId?, alarmId? } (옛 앱이 보내던 previousAt · newAt은 읽기만 하고 안 씀 — ALARM_CHANGED의 시각은 제안 기록에서)
 //        한 사람에게 가는 종류(깨우기 · 알람 바뀜 · 친구 요청 · 수락)는 targetUserId, 그룹 종류(새 멤버 · 약속 변경)는 groupId(+ appointmentId)만 — 받는 사람은 서버가 고름
 //        옛 앱이 보내던 title · body · data는 읽지 않음: 문구는 종류별로 서버가 고정하고(push-copy.ts) 알림 데이터도 서버가 채움
 //   처리(한 사람): ① can_send_push(부른 사람, 받는 사람, kind) — 서버 권한 판정(DB 함수, service_role 전용). 없는 · 탈퇴한 · 권한 없는 · 차단된 대상은 모두 같은 403이라
@@ -39,9 +39,7 @@ export type NotifyRequest = {
   targetUserId?: string; // 한 사람 종류
   groupId?: string; // 그룹 종류
   appointmentId?: string; // GROUP_APPT_CHANGED
-  alarmId?: string;
-  previousAt?: string; // ALARM_CHANGED: 바뀌기 전 → 후 시각 (ISO, 문구에 HH:mm으로)
-  newAt?: string;
+  alarmId?: string; // ALARM_CHANGED: 어느 알람의 제안인지 (없으면 방금 보낸 가장 최근 제안)
 };
 
 // 깨우기 판정 결과 (DB 함수 plan_wake_ping의 jsonb + 토큰이 없을 때 NO_TOKENS). OK일 때만 푸시가 나갔음
@@ -58,8 +56,8 @@ export function readNotifyRequest(root: Reader): NotifyRequest {
   const groupId = root.uuid('groupId');
   const appointmentId = root.uuid('appointmentId');
   const alarmId = root.uuid('alarmId');
-  const previousAt = root.date('previousAt');
-  const newAt = root.date('newAt');
+  root.date('previousAt'); // 옛 앱이 보내던 값 — 모양만 확인하고 안 씀 (문구의 시각은 서버가 제안 기록에서 가져옴, 친구 10-25)
+  root.date('newAt');
   const absent = (key: string) => !root.has(key) || root.isNull(key); // 값이 틀려서 없는 것(이미 문제로 기록됨)과 아예 안 보낸 것을 가름
   if (kind) {
     if (isGroupKind(kind)) {
@@ -80,11 +78,10 @@ export function readNotifyRequest(root: Reader): NotifyRequest {
     kind,
     targetUserId,
     ...(kind === 'ALARM_CHANGED' && alarmId ? { alarmId } : {}),   // 알람 id는 알람 바뀜에만 (다른 종류에 실어 남의 알람 id를 시험하지 못하게)
-    ...(kind === 'ALARM_CHANGED' && previousAt && newAt ? { previousAt: previousAt.toISOString(), newAt: newAt.toISOString() } : {}),
   };
 }
 
-export type NotifyOptions = { accessToken?: string; fetchImpl?: FetchLike; sleep?: (ms: number) => Promise<void> };
+export type NotifyOptions = { accessToken?: string; fetchImpl?: FetchLike; sleep?: (ms: number) => Promise<void>; now?: Date }; // now = 문구의 '내일' 같은 말을 가를 기준 시각(시험용, 기본 지금)
 
 type Profile = { user_id: string; nickname: string | null; timezone: string | null };
 
@@ -125,14 +122,21 @@ async function notifyOne(service: Db, senderId: string, req: NotifyRequest, opti
   const targetProfile = profiles.find((p) => p.user_id === target);
   if (!targetProfile) return noTokens(wake); // 판정과 조회 사이에 탈퇴한 경우뿐
 
-  // 알람 id를 같이 받은 경우(알람 바뀜만), 받는 사람의 알람이 맞는지 (남의 알람 id로 알림 내용을 꾸미지 못하게)
-  const alarmId = req.kind === 'ALARM_CHANGED' ? req.alarmId : undefined;
-  if (alarmId) {
-    const alarm = must<{ alarm_id: string } | null>(
-      'alarm lookup',
-      await service.from('alarms').select('alarm_id').eq('alarm_id', alarmId).eq('user_id', target).maybeSingle(),
-    );
-    if (!alarm) throw new HttpError('NOT_FOUND', '받는 사람의 알람을 찾을 수 없어요');
+  // 알람 바뀜(제안): 문구의 알람 종류 · 이전 → 새 시각은 요청이 아니라 방금 보낸 대기 중 제안 기록에서 — 시각을 꾸밀 수 없음 (친구 10-25). 알람 id를 같이 받았으면 그 알람의 제안이어야 함
+  let proposal: { proposal_id: string; alarm_id: string; from_at: string; to_at: string; alarm_type: string | null } | undefined;
+  if (req.kind === 'ALARM_CHANGED') {
+    let query = service
+      .from('alarm_proposals')
+      .select('proposal_id, alarm_id, from_at, to_at')
+      .eq('proposer_id', senderId)
+      .eq('owner_id', target)
+      .eq('status', 'PENDING')
+      .gte('created_at', new Date(Date.now() - 3_600_000).toISOString()); // DB의 can_send_push와 같은 1시간 (options.now는 문구용이라 안 씀)
+    if (req.alarmId) query = query.eq('alarm_id', req.alarmId);
+    const found = must<{ proposal_id: string; alarm_id: string; from_at: string; to_at: string }[]>('alarm_proposals', await query.order('created_at', { ascending: false }).limit(1));
+    if (!found.length) throw new HttpError('NOT_FOUND', '보낸 제안을 찾을 수 없어요');
+    const alarm = must<{ alarm_type: string } | null>('alarm lookup', await service.from('alarms').select('alarm_type').eq('alarm_id', found[0].alarm_id).eq('user_id', target).maybeSingle());
+    proposal = { ...found[0], alarm_type: alarm?.alarm_type ?? null };
   }
 
   const rows = must<{ token: string }[]>('push_tokens', await service.from('push_tokens').select('token').eq('user_id', target));
@@ -147,11 +151,10 @@ async function notifyOne(service: Db, senderId: string, req: NotifyRequest, opti
 
   const copy = composeCopy(req.kind, {
     senderName: profiles.find((p) => p.user_id === senderId)?.nickname,
-    previousAt: req.previousAt,
-    newAt: req.newAt,
+    ...(proposal ? { previousAt: proposal.from_at, newAt: proposal.to_at, alarmType: proposal.alarm_type, now: options.now } : {}),
     timeZone: targetProfile.timezone,
   });
-  const data = { kind: req.kind, recipientUserId: target, path: PATHS[req.kind], ...(alarmId ? { alarmId } : {}) };
+  const data = { kind: req.kind, recipientUserId: target, path: PATHS[req.kind], ...(proposal ? { alarmId: proposal.alarm_id, proposalId: proposal.proposal_id } : {}) };
   const messages: OutgoingMessage[] = rows.map((r) => ({ to: r.token, ...copy, channelId: CHANNEL_IDS[req.kind], data }));
   const delivered = await deliver(service, req.kind, messages, new Map(rows.map((r) => [r.token, target])), options);
   return reserved ? { ...delivered, ping: reserved } : delivered;
