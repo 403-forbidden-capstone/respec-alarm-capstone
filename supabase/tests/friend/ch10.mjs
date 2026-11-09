@@ -2,7 +2,7 @@
 //   항목 이름 앞 번호 = 시험케이스 번호
 //   이 장 DB에 없는 것: 10-02 · 10-30(실기기) · 10-04 · 10-14의 화면 글자 · 10-15 · 10-25 ~ 10-27(알림 서버 함수 쪽 = notify.test.ts) · 10-22 · 10-23(서버 함수 쪽 = edit-run.test.ts · commit.test.ts) ·
 //                    10-28 ~ 10-29 · 10-31 ~ 10-33 · 10-36(앱) · 10-32(대본) · 10-37(알림 문구 = push-copy.test.ts)
-//   친구가 직접 고치는 옛 길(alarms_update_shared)은 G04가 제안으로 바뀐 뒤(PR #423) 11/9에 닫음(이슈 #427) → 10-03 · 10-05 ~ 10-07 · 10-10 · 10-16의 '직접 update 0행'은 '직접 update 0행' 시험에서, 제안 보내기가 거절하는 것은 아래 시험들에서 확인
+//   친구가 직접 고치는 옛 길(alarms_update_shared)은 G04가 제안으로 바뀐 뒤(PR #423) 11/9에 닫음(이슈 #427) → 10-03 · 10-05 ~ 10-07 · 10-10 · 10-16의 '직접 update 0행'은 아래 '직접 update 0행' 시험에서, 제안 보내기가 거절하는 것은 그 밖의 시험들에서 확인
 //   시간은 지금(now()) 기준 상대값만 씀 — 시계가 가도 안 바뀌게. 사람은 이 장 전용 계정. db-check 맨 끝에서 돎
 export default async function ch10({ q, as, su, svc, check, expectErr }) {
   const id = (n) => `ba000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
@@ -439,6 +439,8 @@ export default async function ch10({ q, as, su, svc, check, expectErr }) {
     };
     const mixed = await pair(70);                                                       // 설정 권한 있음 (10-01)
     const mixedBefore = await snap(mixed.c.WAKE);
+    const seen = async (uid, alarmId) => { await as(uid); const r = await q(`select 1 from public.alarms where alarm_id = $1`, [alarmId]); await su(); return r.length; };
+    const mixedSeen = await seen(mixed.B, mixed.c.WAKE);                               // 0행이 '안 보여서'가 아니라 정책 때문임을 확인
     const withEdit = await tryEdit(mixed.B, mixed.c.WAKE);
     const afterEdit = await snap(mixed.c.WAKE);
     const view = await pair(72, { edit: false });                                      // 조회만 (10-03)
@@ -461,6 +463,7 @@ export default async function ch10({ q, as, su, svc, check, expectErr }) {
     await su();
     const gc = await card(gOwner, { groupId: gid });
     const groupBefore = await snap(gc.WAKE);
+    const groupSeen = await seen(gFriend, gc.WAKE);
     const inGroup = await tryEdit(gFriend, gc.WAKE);
     await q(`update public.group_members set invite_status = 'LEFT' where group_id = $1 and user_id = $2`, [gid, gFriend]);
     const leftGroup = await tryEdit(gFriend, gc.WAKE);
@@ -473,7 +476,7 @@ export default async function ch10({ q, as, su, svc, check, expectErr }) {
     const applied = await respond(mixed.A, viaProposal.proposal_id, true);
     const zeros = [0, 0, 0, 0];
     const same = (a) => JSON.stringify(a) === JSON.stringify(zeros);
-    return same(withEdit) && afterEdit === mixedBefore && same(viewOnly) && (await snap(view.c.WAKE)) === viewBefore && same(revoked) && same(unfriended) && same(inGroup) && same(leftGroup) && groupAfter === groupBefore
+    return mixedSeen === 1 && groupSeen === 1 && same(withEdit) && afterEdit === mixedBefore && same(viewOnly) && (await snap(view.c.WAKE)) === viewBefore && same(revoked) && same(unfriended) && same(inGroup) && same(leftGroup) && groupAfter === groupBefore
       && own.length === 1 && viaProposal.status === 'OK' && applied.status === 'APPLIED' ? true : { withEdit, viewOnly, revoked, unfriended, inGroup, leftGroup, own, viaProposal, applied };
   });
 
@@ -490,7 +493,10 @@ export default async function ch10({ q, as, su, svc, check, expectErr }) {
     const [own] = await q(`insert into public.alarms (participant_id, user_id, alarm_type, scheduled_at, original_scheduled_at) values ($1, $2, 'ARRIVE', now() + interval '12 hours', now() - interval '1 day') returning alarm_id, original_scheduled_at`, [c.pt, A]);
     await su();
     const stillA = (await q(`select user_id from public.alarms where alarm_id = $1`, [c.WAKE]))[0].user_id;
-    return steal.length === 0 && stillA === A && del.length === 0 && ins === true && forged == null && own.original_scheduled_at == null ? true : { steal, stillA, del, ins, forged, own };
+    await as(A);
+    const ownerSteal = await expectErr(() => q(`update public.alarms set user_id = $1 where alarm_id = $2`, [B, c.WAKE]), /바꿀 수 없음/);   // 주인 본인도 못 바꿈(keep_keys)
+    await su();
+    return steal.length === 0 && ownerSteal === true && stillA === A && del.length === 0 && ins === true && forged == null && own.original_scheduled_at == null ? true : { steal, stillA, del, ins, forged, own };
   });
 
   await check('10장 푸시 권한: can_send_push의 ALARM_CHANGED = 설정 권한 + 방금(1시간 안) 보낸 대기 중 제안 — 제안 없이 · 오래된 제안 · 무시된(응답한) 제안 · 다른 사람에게는 false', async () => {

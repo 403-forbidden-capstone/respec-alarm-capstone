@@ -299,10 +299,11 @@ export default async function ch03({ q, as, su, check, expectErr }) {
     await remove(M, NB);
     const [kept] = await q(`select scheduled_at from public.alarms where alarm_id = $1`, [al]);
     await as(NB);
-    const after = await q(`update public.alarms set scheduled_at = scheduled_at + interval '5 minutes' where alarm_id = $1 returning 1`, [al]);
+    const direct = await q(`update public.alarms set scheduled_at = scheduled_at + interval '5 minutes' where alarm_id = $1 returning 1`, [al]);
+    const [{ r: afterProposal }] = await q(`select public.propose_alarm_time($1, $2::timestamptz) as r`, [al, moved]);        // 끊은 뒤에는 제안도 거절
     await su();
-    return changed.length === 1 && new Date(kept.scheduled_at).getTime() === new Date(changed[0].scheduled_at).getTime() && after.length === 0
-      ? true : { changed, kept, after };
+    return changed.length === 1 && new Date(kept.scheduled_at).getTime() === new Date(changed[0].scheduled_at).getTime() && direct.length === 0 && afterProposal.status === 'FORBIDDEN'
+      ? true : { changed, kept, direct, afterProposal };
   });
 
   await check('3-03 · 3-04 · 3-14(상태 조건): 취소 · 거절 · 끊기는 자기 상태의 행만 지움 — 친구 행은 취소 · 거절로, 대기 행은 끊기로, 받은 사람은 취소로, 보낸 사람은 거절로 못 지움', async () => {
