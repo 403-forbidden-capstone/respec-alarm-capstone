@@ -1,5 +1,8 @@
 // 그룹 기상 상태 문구 (친구 7장) — G01 카드 · G02 멤버 메뉴 · G03 · 옛 값 안내
 //   단계 글자('8:50 알람' · '울렸어요' · '일어났어요 8:08' · '알람 없음' · '공유 안 함')는 map.ts wakeStateOf
+import { formatTime } from '@/lib/format';
+
+import type { WakePingResult } from './types';
 
 // G01 그룹 카드 '오늘 n명 일어남' — 분모 없음, 약속 없는 날(null)은 줄을 숨김 (7-사 · 7-34)
 export const wokeLine = (n: number | null) => (n == null ? null : `오늘 ${n}명 일어남`);
@@ -16,3 +19,44 @@ export const WAKE_STALE_TEXT = '연결이 끊겨 최신 상태가 아닐 수 있
 // G03 — 줄이 안 나온 사람(동의 안 함 · 숨김 · 차단)은 구분 없이 같은 말 (7-06)
 export const WAKE_NOT_SHARED_TITLE = '기상 상태를 볼 수 없어요';
 export const WAKE_NOT_SHARED_BODY = '이 그룹에서 기상 공유를 켠 멤버만 볼 수 있어요.';
+
+// G03 [깨우기] 보낸 결과 한 줄 (친구 8장 · 8-17) — 꺼 둔 사실은 글자로 안 드러냄(8-10): 받기를 껐든 보낼 수 없든 같은 말
+export const WAKE_PING_OFF = '지금은 깨울 수 없어요';
+export const WAKE_PING_NO_TOKENS = '지금은 알림이 닿지 않아요';
+export const WAKE_PING_ALREADY_UP = '이미 일어났어요';
+export const WAKE_PING_NOT_RINGING = '아직 알람이 울리기 전이에요';
+export const WAKE_PING_DAILY_LIMIT = '오늘은 3번 모두 깨웠어요. 내일 다시 할 수 있어요';
+export const wakePingSent = (name: string) => `${name}님에게 깨우기 알림을 보냈어요`;
+export const WAKE_PING_FAILED = '깨우기를 보내지 못했어요. 다시 해 주세요';
+export const WAKE_PING_MOCK = '가짜 데이터에서는 깨우기를 보낼 수 없어요';
+
+// 버튼 아래 한 줄 — OK는 '1/3 · 8:15부터 다시', WAIT은 '8:15부터 다시'
+export function wakePingNote(result: WakePingResult): string {
+  switch (result.status) {
+    case 'OK':
+      return result.nextAt ? `${result.count}/${result.limit} · ${formatTime(result.nextAt)}부터 다시` : `${result.count}/${result.limit}`;
+    case 'WAIT':
+      return result.nextAt ? `${formatTime(result.nextAt)}부터 다시` : '잠시 뒤 다시 할 수 있어요';
+    case 'DAILY_LIMIT':
+      return WAKE_PING_DAILY_LIMIT;
+    case 'OFF':
+      return WAKE_PING_OFF;
+    case 'NO_TOKENS':
+      return WAKE_PING_NO_TOKENS;
+    case 'ALREADY_UP':
+      return WAKE_PING_ALREADY_UP;
+    case 'NOT_RINGING':
+      return WAKE_PING_NOT_RINGING;
+  }
+}
+
+// 버튼을 잠그는 결과 — 같은 요청을 또 보내도 서버가 거절할 뿐이라 막아 둠 (WAIT · OK는 다음 가능 시각까지, 한도 · 꺼짐 · 이미 일어남은 계속)
+export const wakePingLocks = (result: WakePingResult): boolean => result.status === 'OK' || result.status === 'WAIT' || result.status === 'DAILY_LIMIT' || result.status === 'OFF' || result.status === 'ALREADY_UP';
+
+// 홈 · H08 받은 깨우기 한 줄 — 여러 번이면 가장 최근 것에 횟수를 붙임
+export function receivedPingLine(pings: readonly { senderName: string; at: Date }[]): string | null {
+  const last = pings[0];
+  if (!last) return null;
+  const line = `${last.senderName}님이 ${formatTime(last.at)}에 깨웠어요`;
+  return pings.length > 1 ? `${line} · 오늘 ${pings.length}번` : line;
+}

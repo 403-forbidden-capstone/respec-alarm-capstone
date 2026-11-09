@@ -126,6 +126,18 @@ export type MemberWake = {
   noGroupAppointment: boolean; // 그날 이 그룹 약속이 없어 기상 상태를 주지 않는 날 (D57 — 공유 안 함과 다름)
 };
 
+// G03 [깨우기] 보낸 결과 (친구 8장) — 서버 notify 응답의 ping.status. 버튼 상태는 보내 봐야 알 수 있음(읽기 전용 조회가 없음)
+//   OK = 보냄(count/limit = 오늘 몇 번째, nextAt = 다음 가능 시각) · WAIT = 5분 안에 또 누름 · DAILY_LIMIT = 하루 3번 다 씀 · OFF = 받기를 꺼 뒀거나 보낼 수 없음(구분 안 함)
+//   NOT_RINGING = 아직 안 울림 · ALREADY_UP = 이미 일어남 · NO_TOKENS = 알림이 닿지 않음(횟수 안 셈)
+export type WakePingResult =
+  | { status: 'OK'; count: number; limit: number; nextAt: Date | null }
+  | { status: 'WAIT'; nextAt: Date | null }
+  | { status: 'DAILY_LIMIT' }
+  | { status: 'NOT_RINGING' | 'ALREADY_UP' | 'OFF' | 'NO_TOKENS' };
+
+// 홈 · H08 '수연님이 7:12에 깨웠어요' — 오늘 내가 받은 깨우기, 최신 순 (my_wake_pings)
+export type ReceivedWakePing = { senderId: string; senderName: string; at: Date };
+
 export type SharedAlarms = {
   person: Person;
   canView: boolean; // 알람 조회 권한 — 없으면 alarms는 빈 목록 (RLS와 같게)

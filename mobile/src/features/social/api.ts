@@ -17,6 +17,7 @@ import { CODE_EXPIRED, CODE_NOT_FOUND, GROUP_FULL, GROUP_NOT_MEMBER, GROUP_TOO_M
 import * as real from './real';
 import { MESSAGE_GONE } from './relationMessages';
 import { mergeHits } from './searchView';
+import { WAKE_PING_MOCK } from './wakeTexts';
 import {
   type AppointmentJoiner,
   type GroupAppointment,
@@ -43,6 +44,7 @@ import {
   type PermissionSet,
   type Person,
   type PersonHit,
+  type ReceivedWakePing,
   type ReportReason,
   type ReportResult,
   type ReportTarget,
@@ -51,6 +53,7 @@ import {
   type ShareLogItem,
   type SharedAlarms,
   type SharedChangeResult,
+  type WakePingResult,
 } from './types';
 
 const toPerson = (p: MockPerson): Person => ({ ...p });
@@ -469,10 +472,16 @@ export async function getShareLog(): Promise<ShareLogItem[]> {
   return db.shareLog.map((l) => ({ ...l }));
 }
 
-// 깨우기 알림 보내기 (G03) — 실데이터는 D19가 열려 있어 서버가 거절하므로 아직 보내지 않고 "준비 중" 안내만 (UserError)
-export async function sendWakePing(personId: string) {
-  if (!isMock()) return real.sendWakePing(personId);
-  db.shareLog.push({ at: now(), text: `${person(personId).short}님에게 깨우기 알림` });
+// 깨우기 알림 보내기 (G03) — 실데이터는 서버가 판정 · 횟수를 세고 결과 상태를 줌. 가짜 모드는 막힘 (8-16)
+export async function sendWakePing(groupId: string, personId: string): Promise<WakePingResult> {
+  if (!isMock()) return real.sendWakePing(groupId, personId);
+  throw new UserError(WAKE_PING_MOCK);
+}
+
+// 오늘 내가 받은 깨우기 — 홈 · H08 '수연님이 7:12에 깨웠어요'. 가짜 모드는 받은 것이 없음
+export async function getReceivedWakePings(): Promise<ReceivedWakePing[]> {
+  if (!isMock()) return real.getReceivedWakePings();
+  return [];
 }
 
 // ---------------------------------------------------------------------------
