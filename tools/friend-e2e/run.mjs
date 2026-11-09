@@ -53,6 +53,12 @@ async function main() {
   }
 
   const caps = await readCaps(env.url, env.serviceKey);
+  // 지난 실행이 죽어 남긴 임시 계정(e2e-…)도 먼저 지움
+  for (let page = 1; page < 20; page += 1) {
+    const { data } = await admin.auth.admin.listUsers({ page, perPage: 200 });
+    for (const u of (data?.users ?? []).filter((x) => x.email?.startsWith('e2e-'))) await admin.auth.admin.deleteUser(u.id);
+    if ((data?.users ?? []).length < 200) break;
+  }
 
   // 계정 A · B · C 로그인 (시드 비밀번호는 출력하지 않음)
   const clients = {};
@@ -91,6 +97,8 @@ async function main() {
     handles,
     caps,
     password: env.password,
+    url: env.url,
+    anonKey: env.anonKey,
     fn: RPC,
     s: {},
     note() {},
