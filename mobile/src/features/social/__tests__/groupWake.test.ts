@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, jest } from '@jest/globals';
 
 import { UserError } from '@/lib/errors';
+import { addDays, dayKey } from '@/lib/format';
 
 import { createFake } from '../__fixtures__/fakeSupabase';
 import { friends, groups, GROUP, JIHYEONG, JUNSEONG, ME, members, perms, profiles, SUYEON } from '../__fixtures__/seed';
@@ -135,12 +136,13 @@ describe('G01 "오늘 n명 일어남" (7-34)', () => {
 
 describe('읽기는 get_group_wake (7-39 · 7-37)', () => {
   it('옛 함수(get_group_wake_status)는 안 부르고, 날짜를 주면 p_date로', async () => {
-    await real.listGroups('2026-10-20');
-    await real.getGroupSummary(GROUP, '2026-10-20');
-    await real.getGroup(GROUP, '2026-10-20');
-    await real.getMemberWake(GROUP, SUYEON, '2026-10-20');
+    const day = dayKey(new Date());
+    await real.listGroups(day);
+    await real.getGroupSummary(GROUP, day);
+    await real.getGroup(GROUP, day);
+    await real.getMemberWake(GROUP, SUYEON, day);
     expect(calls('get_group_wake_status')).toHaveLength(0);
-    expect(calls('get_group_wake').map((c) => c.args)).toEqual(Array(4).fill({ p_group_id: GROUP, p_date: '2026-10-20' }));
+    expect(calls('get_group_wake').map((c) => c.args)).toEqual(Array(4).fill({ p_group_id: GROUP, p_date: day }));
   });
 
   it('정정(잘못 누른 기상 확인을 고침)은 다음 조회 때 그대로 — 앱이 값을 붙잡아 두지 않음', async () => {

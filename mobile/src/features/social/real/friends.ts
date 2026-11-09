@@ -1,5 +1,5 @@
 // ② 친구 실데이터 — F01 친구 · 받은 요청, 새 UI용 아이디 검색 · 요청 보내기 (docs/screen-data-map.md F01 · G01)
-//   friends 표는 마이그레이션 그대로: 요청은 내가 PENDING으로만 만들고, 수락은 받은 사람이 UPDATE (RLS friends_insert_request · friends_update_addressee)
+//   friends 표는 앱이 직접 쓰지 않음 — 요청 · 수락 · 거절 · 취소 · 끊기는 서버 함수(send_friend_request · accept_friend_request 등)로만 (아래 callRelation)
 //   남의 프로필은 공개 칸(닉네임 · 사진 · 아이디)만 — get_public_profiles · search_by_handle · search_related_by_name이 줌
 import { cleanHandle } from '@/features/onboarding/validate';
 import { HANDLE_PATTERN } from '@/features/profile/types';
