@@ -21,6 +21,7 @@ import { rememberPlaces, toPlace, uniqueByName, validNear, type PlaceDto } from 
 import {
   createCommitBody,
   existingBody,
+  joinBody,
   newAppointmentBody,
   settingsCommitBody,
   standaloneBody,
@@ -45,6 +46,9 @@ import {
   type AppointmentDraft,
   type DepartCheck,
   type Estimate,
+  type JoinChoice,
+  type JoinDefaults,
+  type JoinResult,
   type LatLng,
   type Place,
   type PinAddress,
@@ -240,6 +244,32 @@ export async function createAppointment(estimate: Estimate, source?: string): Pr
   //   묶음 번호(series_id)는 새 약속이면 appointment_id (DB가 채움, 설계메모 1절)
   if (a.recurrenceRule && res.appointment_id) rollSeries(res.appointment_id);
   return { ...saved, ...followUpOf(phoneFailed, itemsFailed) };
+}
+
+// 공동 약속 [내 알람 만들기] (친구 9장) — 그룹원이 G02 연결 일정에서 누름. 서버가 내 참여 조건 · 알람을 만들고(이미 있으면 같은 한 줄을 고침), 응답을 폰에 걺
+//   실패(오프라인 · 지난 약속 PAST_APPOINTMENT · 그룹 밖 FORBIDDEN)는 lib/edge 문구로 그대로 던짐 → 화면이 다시 하기. 저장 뒤 폰 예약 실패는 못 건 수만
+//   길찾기를 못 하면(ROUTE_UNAVAILABLE + 어림값) TravelConfirmNeeded — 시트가 어림 분을 보여 주고 확인하면 그 분을 MANUAL로 다시 보냄 (9-어, H03과 같은 길)
+export async function joinSharedAppointment(appointmentId: string, choice: JoinChoice): Promise<JoinResult> {
+  let res: CommitResponse;
+  try {
+    res = await callEdge<CommitResponse>('alarm-commit', joinBody(appointmentId, choice), { timeoutMs: COMMIT_TIMEOUT_MS });
+  } catch (e) {
+    const fallback = choice.travelMinutes == null ? travelFallbackOf(e) : null;
+    if (fallback) throw new TravelConfirmNeeded(fallback);
+    // 어림값도 없음(장소 좌표 없음) — 이 시트에는 이동시간 직접 입력 칸이 없어 lib/edge의 '직접 입력해 주세요' 문구는 맞지 않음
+    if (e instanceof EdgeError && e.code === 'ROUTE_UNAVAILABLE') throw new UserError('이동시간을 구하지 못해 알람을 만들지 못했어요. 잠시 뒤 다시 해 주세요');
+    throw e;
+  }
+  forgetDetail(appointmentId); // 이미 읽어 둔 H03 상세(알람 없음 · 꺼짐)를 버림 — 다음에 새 값으로
+  return { phoneFailed: (await phoneFailedIds(res)).size };
+}
+
+// [내 알람 만들기] 시트 기본값 — 내 프로필(온보딩 값): 집 이름 · 기본 수단 · 기본 준비 시간
+export async function getJoinDefaults(): Promise<JoinDefaults> {
+  const userId = await requireUserId();
+  const { data, error } = await supabase.from('profiles').select('home_name, default_transport, default_prepare_minutes').eq('user_id', userId).maybeSingle();
+  if (error) throw error;
+  return { homeName: data?.home_name ?? null, transport: data?.default_transport ?? 'TRANSIT', prepareMinutes: data?.default_prepare_minutes ?? 60 };
 }
 
 // 알람 설정 저장 (H03) — 여유 · 출발 위치 · 이동 수단 · 이동 · 준비 · 알람 시각 · 종류별 켜기 · 강도를 한 번에
