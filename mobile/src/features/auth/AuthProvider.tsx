@@ -7,7 +7,9 @@ import { userMessage } from '@/lib/errors';
 import { ONBOARDING_IN_FLOW } from '@/lib/flags';
 import { canUseRealData, useMode } from '@/lib/mode';
 
-import { shouldOnboard } from './onboardingGate';
+import { PRIVACY_VERSION } from '@/features/onboarding/consent';
+
+import { shouldOnboard, shouldReconsent } from './onboardingGate';
 
 type AuthState = {
   session: Session | null;
@@ -16,6 +18,7 @@ type AuthState = {
   loading: boolean; // 저장된 세션 · 프로필을 읽는 중
   enabled: boolean; // 실데이터 모드라 로그인이 필요한지 (false면 가짜 데이터 모드 — 로그인 없이 가짜 프로필로 탭)
   needsOnboarding: boolean; // 로그인했고 프로필도 읽었는데 온보딩을 아직 안 끝냄(onboarded_at이 비어 있음). 온보딩을 흐름에서 뺀 동안(lib/flags ONBOARDING_IN_FLOW = false)은 늘 false
+  needsReconsent: boolean; // 온보딩은 끝냈는데 동의한 개인정보 안내 판이 지금 판보다 낮음 — 동의 화면만 다시 (친구 13-14). 온보딩을 흐름에서 뺀 동안은 늘 false
   refreshProfile: () => Promise<void>; // 다시 읽음. 실패하면 기존 프로필은 그대로 두고 오류를 던짐
 };
 
@@ -26,6 +29,7 @@ const AuthContext = createContext<AuthState>({
   loading: true,
   enabled: false,
   needsOnboarding: false,
+  needsReconsent: false,
   refreshProfile: async () => {},
 });
 
@@ -103,6 +107,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           profileFailed: current.error != null,
           onboardedAt: current.profile?.onboarded_at,
         }),
+        needsReconsent: shouldReconsent({
+          inFlow: ONBOARDING_IN_FLOW,
+          signedIn: session != null,
+          profileReady,
+          profileFailed: current.error != null,
+          onboardedAt: current.profile?.onboarded_at,
+          privacyVersion: current.profile?.privacy_version,
+          currentVersion: PRIVACY_VERSION,
+        }),
         refreshProfile,
       }
     : {
@@ -112,6 +125,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         loading: !modeReady,
         enabled: false,
         needsOnboarding: false,
+        needsReconsent: false,
         refreshProfile,
       };
 

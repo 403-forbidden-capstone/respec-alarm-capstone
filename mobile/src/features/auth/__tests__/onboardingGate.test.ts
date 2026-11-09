@@ -1,6 +1,6 @@
 import { describe, expect, it } from '@jest/globals';
 
-import { shouldOnboard, type OnboardingGateInput } from '../onboardingGate';
+import { shouldOnboard, shouldReconsent, type OnboardingGateInput } from '../onboardingGate';
 
 // 읽기를 마친 로그인 사용자 — 칸 하나씩 바꿔 가며 봄
 const base: OnboardingGateInput = { inFlow: true, signedIn: true, profileReady: true, profileFailed: false, onboardedAt: null };
@@ -53,5 +53,27 @@ describe('shouldOnboard — 온보딩으로 보낼지', () => {
         }
       }
     });
+  });
+});
+
+describe('shouldReconsent — 판이 올라가면 동의만 다시 (친구 13-14)', () => {
+  const base = { inFlow: true, signedIn: true, profileReady: true, profileFailed: false, onboardedAt: '2026-11-01T00:00:00Z', privacyVersion: 2, currentVersion: 3 } as const;
+
+  it('온보딩을 끝냈는데 동의한 판이 낮으면(없으면 0) 다시 받음', () => {
+    expect(shouldReconsent(base)).toBe(true);
+    expect(shouldReconsent({ ...base, privacyVersion: null })).toBe(true);
+  });
+
+  it('지금 판이거나 더 높으면 묻지 않음', () => {
+    expect(shouldReconsent({ ...base, privacyVersion: 3 })).toBe(false);
+    expect(shouldReconsent({ ...base, privacyVersion: 4 })).toBe(false);
+  });
+
+  it('온보딩 전(동의 단계가 받음) · 로그인 전 · 읽는 중 · 못 읽음 · 흐름에서 뺀 동안은 묻지 않음', () => {
+    expect(shouldReconsent({ ...base, onboardedAt: null })).toBe(false);
+    expect(shouldReconsent({ ...base, signedIn: false })).toBe(false);
+    expect(shouldReconsent({ ...base, profileReady: false })).toBe(false);
+    expect(shouldReconsent({ ...base, profileFailed: true })).toBe(false);
+    expect(shouldReconsent({ ...base, inFlow: false })).toBe(false);
   });
 });

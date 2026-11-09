@@ -25,6 +25,9 @@ export type WakeState = {
 export type Permission = 'viewAlarm' | 'editAlarm' | 'viewWake';
 export type PermissionSet = Record<Permission, boolean>;
 
+// 알람 조회를 켤 때 보이는 것 · 안 보이는 것 안내 한 줄 (친구 13-다 · 13-사 — 켤 때 따로 동의를 받지 않으므로 F03에서 미리 알림)
+export const VIEW_ALARM_NOTE = '일정 장소도 보여요 · 집 · 출발지는 안 보여요';
+
 export const PERMISSIONS: readonly { key: Permission; name: string; description: string }[] = [
   { key: 'viewAlarm', name: '알람 조회', description: '알람 시간 · 일정 · 장소 · 준비 시간을 볼 수 있어요.' },
   { key: 'editAlarm', name: '알람 설정', description: '내 알람을 추가하거나 시간을 바꿀 수 있어요.' },

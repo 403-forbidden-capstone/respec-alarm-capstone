@@ -67,9 +67,9 @@ export default function RootLayout() {
 //   (로그아웃 상태에서 울려도 끌 수 있게). 해제 뒤 기상 확인(wake)으로의 이동은 ring.tsx가 항상 시도하고, 로그인 전이면 아래 Protected 가드가 막음 (그때 화면이 어디로 가는지는 에뮬레이터 확인 대상)
 // dev/* · auth/callback은 어느 쪽에서도 열림 (로그인 화면의 "알람 테스트"가 dev/alarm-test로 감). 앱 화면을 새로 만들면 첫 번째 Protected 안에 넣음
 function RootStack() {
-  const { session, profile, loading, enabled, needsOnboarding, profileError, refreshProfile } = useAuth();
+  const { session, profile, loading, enabled, needsOnboarding, needsReconsent, profileError, refreshProfile } = useAuth();
   const needsLogin = enabled && !session;
-  const ready = !needsLogin && !needsOnboarding;
+  const ready = !needsLogin && !needsOnboarding && !needsReconsent;
   const preview = !enabled && canUseRealData; // 가짜 모드에서 login · onboarding을 열어 보기 (실데이터를 쓸 수 있을 때만)
   const ringEntry = usePathname() === '/ring'; // 알람 울림 화면으로 들어옴 (알람 코어의 길잡이 화면 · 딥링크)
 
@@ -153,6 +153,10 @@ function RootStack() {
       {/* 온보딩을 흐름에서 빼면(ONBOARDING_IN_FLOW = false) 가짜 모드 미리 보기에서도 주소로 안 열림 — 열면 막다른 곳이 아니라 홈 */}
       <Stack.Protected guard={ONBOARDING_IN_FLOW && (needsOnboarding || preview)}>
         <Stack.Screen name="onboarding" />
+      </Stack.Protected>
+      {/* 개인정보 안내 판이 올라갔을 때 동의만 다시 받는 화면 (친구 13-14) — 동의를 저장하면 프로필을 다시 읽어 이 화면은 사라지고 홈으로 */}
+      <Stack.Protected guard={needsReconsent}>
+        <Stack.Screen name="reconsent" />
       </Stack.Protected>
       {/* 알람 울림(H07) — 가드 없이 늘 열림(로그인 · 온보딩 · 읽는 중에도). 이미 켜진 앱에 길잡이 화면의 딥링크가 와도 열려야 함
           — 예전 가드(ready || 지금 주소가 /ring)는 로그인 전에 켜져 있던 앱에서 /ring으로 가는 길을 막아 6초 뒤 네이티브 대체 화면이 떴음 (11/5 에뮬레이터)
