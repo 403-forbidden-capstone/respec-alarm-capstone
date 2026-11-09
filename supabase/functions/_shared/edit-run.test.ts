@@ -12,12 +12,13 @@ import { HttpError } from './errors.ts';
 import { FakeDb } from './fake-db.ts';
 import type { NotifyOptions } from './notify.ts';
 import { KakaoError, type KakaoFailure } from './kakao.ts';
-import { buildPlan } from './plan.ts';
+import { ALARM_COLUMNS, buildPlan } from './plan.ts';
 import type { ProfileRow } from './plan-core.ts';
 import { Reader } from './read.ts';
 import { readCommitRequest } from './requests.ts';
 import { runRoll, type RollResult, type TravelLookup } from './roll.ts';
 import type { Db } from './supabase.ts';
+import { localDayRange } from './tz.ts';
 import { localDateKey } from './tz.ts';
 
 const A = 'u-a';
@@ -728,9 +729,17 @@ function withGroupPush(env: Env): void {
     const sender = args.p_sender_id as string;
     const participants = env.db.rows('appointment_participants').filter((p) => p.appointment_id === args.p_appointment_id).map((p) => p.user_id as string);
     const mine = ap && (ap.creator_id === sender || (ap.creator_id == null && participants.includes(sender)));
-    if (!ap || !mine || Date.parse(ap.appointment_at as string) <= env.db.now.getTime()) return { status: 'FORBIDDEN' };
-    const joined = new Set(env.db.rows('group_members').filter((m) => m.group_id === args.p_group_id && m.invite_status === 'JOINED' && !m.notifications_off).map((m) => m.user_id as string));
-    return { status: 'OK', group_name: '캡스톤팀', appointment_title: ap.title, recipients: participants.filter((u) => u !== sender && joined.has(u)) };
+    if (!ap || !mine || Date.parse(ap.appointment_at as string) < localDayRange(env.db.now, 'Asia/Seoul').start.getTime()) return { status: 'FORBIDDEN' }; // 지난 약속 = 하루 경계(내 시간대 오늘 0시 이전)
+    const members = env.db.rows('group_members').filter((m) => m.group_id === args.p_group_id && m.invite_status === 'JOINED');
+    const joined = new Set(members.filter((m) => !m.notifications_off).map((m) => m.user_id as string));
+    const muted = new Set(members.filter((m) => m.notifications_off).map((m) => m.user_id as string));
+    return {
+      status: 'OK',
+      group_name: '캡스톤팀',
+      appointment_title: ap.title,
+      recipients: participants.filter((u) => u !== sender && joined.has(u)),
+      silent_recipients: participants.filter((u) => u !== sender && muted.has(u)), // 알림을 끈 멤버(차단 쌍도 같은 쪽)에게는 조용한 데이터 푸시
+    };
   };
 }
 
@@ -894,27 +903,72 @@ test('9-20: 만든 사람이 지우면 참여자의 참여 · 알람이 사라�
 
   const past = await groupCase();
   const spyPast = pushSpy();
-  const pastRes = await deleteAppointment(ctxFor(past.env, A, { now: kst('2026-10-29T10:00'), push: spyPast.push }), del(past.id));
+  const pastRes = await deleteAppointment(ctxFor(past.env, A, { now: kst('2026-10-30T10:00'), push: spyPast.push }), del(past.id));
   assert.deepEqual([pastRes.deleted, pastRes.notified, spyPast.sent.length], [true, undefined, 0]);
+
+  // 같은 날 이미 지난 약속(하루 경계)은 아직 '안 지난' 약속이라 취소 알림이 감
+  const sameDay = await groupCase();
+  const spySame = pushSpy();
+  const sameRes = await deleteAppointment(ctxFor(sameDay.env, A, { now: kst('2026-10-29T09:30'), push: spySame.push }), del(sameDay.id));
+  assert.deepEqual([sameRes.deleted, sameRes.notified, spySame.sent.length], [true, 1, 1]);
 });
 
-test('9-32: 지난 공동 약속은 고칠 수 없고(PAST_APPOINTMENT), 지난 시각으로 옮길 수도 없고, 지난 공동 약속에 새로 참여할 수도 없음 — 앞으로 약속은 됨', async () => {
+test('조용한 푸시: 알림을 끈 참여자에게는 보이는 알림 없이 데이터 푸시만(알람 다시 맞추기), needsConfirm도 실림 — 보이는 알림 수(notified)에는 안 더함', async () => {
+  const { env, id } = await groupCase([A, B, 'u-mute']);
+  env.db.rows('group_members').find((m) => m.user_id === 'u-mute')!.notifications_off = true;
+  const spy = pushSpy();
+  const res = await updateAppointment(ctxFor(env, A, { kakao: fakeKakao().lookup, push: spy.push }), upd(id, { at: kst('2026-10-29T09:06') }, 'this', true)); // 6분 늦춤 = 보류(needsConfirm)
+  assert.equal(res.notified, 1);
+  const byUser = Object.fromEntries(spy.sent.map((m) => [m.data.recipientUserId as string, m]));
+  assert.equal(byUser[B]?.title, '캡스톤팀');
+  assert.equal(byUser['u-mute']?.title, undefined); // 문구 없는 데이터 푸시
+  assert.equal(byUser['u-mute']?.data.silent, true);
+  assert.equal(byUser['u-mute']?.data.needsConfirm, true);
+  assert.equal(byUser[B]?.data.needsConfirm, true);
+});
+
+test('9-32: 지난 날의 공동 약속은 고칠 수 없고(PAST_APPOINTMENT), 지난 날로 옮길 수도 없고, 새로 참여할 수도 없음 — 앞으로 약속, 오늘 이미 지난 약속은 오늘 안에는 됨 (하루 경계: 내 폰 시간대 오늘 0시)', async () => {
   const { env, id } = await groupCase();
-  const late = kst('2026-10-29T09:30');
+  const late = kst('2026-10-30T09:30'); // 약속 다음 날
+  const sameDay = kst('2026-10-29T09:30'); // 약속과 같은 날, 시각은 이미 지남
   await expectHttp(() => updateAppointment(ctxFor(env, A, { now: late, kakao: fakeKakao().lookup }), upd(id, { title: '지난 약속 고치기' }, 'this', true)), 'UNPROCESSABLE', 'PAST_APPOINTMENT');
-  await expectHttp(() => updateAppointment(ctxFor(env, A, { kakao: fakeKakao().lookup }), upd(id, { at: kst('2026-10-26T09:00') }, 'this', true)), 'UNPROCESSABLE', 'PAST_APPOINTMENT');
+  await updateAppointment(ctxFor(env, A, { now: sameDay, kakao: fakeKakao().lookup }), upd(id, { title: '오늘 이미 지난 약속 고치기' }, 'this', true)); // 오류 없이 고쳐짐
+  assert.equal(row(env.db, id)!.title, '오늘 이미 지난 약속 고치기');
+  await expectHttp(() => updateAppointment(ctxFor(env, A, { kakao: fakeKakao().lookup }), upd(id, { at: kst('2026-10-25T23:00') }, 'this', true)), 'UNPROCESSABLE', 'PAST_APPOINTMENT'); // 기준 시각(10/26 월요일)의 어제로 옮기기
 
   const joinEnv = await groupCase([A, B]);
   const c = 'u-late';
   joinEnv.env.db.rows('profiles').push({ user_id: c, timezone: 'Asia/Seoul', default_buffer_minutes: 10, default_transport: 'TRANSIT', home_name: '집', home_lat: HOME.lat, home_lng: HOME.lng });
   joinEnv.env.db.rows('group_members').push({ group_id: GROUP, user_id: c, invite_status: 'JOINED' });
   await assert.rejects(
-    () => seed(joinEnv.env, c, { appointment_id: joinEnv.id, participant: P_A }, kst('2026-10-29T09:30')),
+    () => seed(joinEnv.env, c, { appointment_id: joinEnv.id, participant: P_A }, kst('2026-10-30T09:30')),
     (e: unknown) => e instanceof HttpError && e.code === 'UNPROCESSABLE' && (e.details as { reason?: string }).reason === 'PAST_APPOINTMENT',
   );
   assert.equal(participantOf(joinEnv.env.db, joinEnv.id, c), undefined);
   await seed(joinEnv.env, c, { appointment_id: joinEnv.id, participant: P_A }); // 아직 안 지났을 때는 참여됨
   assert.ok(participantOf(joinEnv.env.db, joinEnv.id, c));
+
+  // 하루 경계: 같은 날 이미 지난 약속에는 참여할 수 있고, 시간대는 그 사람 것 (UTC 사람에게는 서울 기준으로는 지난 날이어도 아직 오늘)
+  const sameDayJoin = await groupCase([A, B]);
+  for (const [u, tz] of [['u-same', 'Asia/Seoul'], ['u-utc', 'UTC']] as const) {
+    sameDayJoin.env.db.rows('profiles').push({ user_id: u, timezone: tz, default_buffer_minutes: 10, default_transport: 'TRANSIT', home_name: '집', home_lat: HOME.lat, home_lng: HOME.lng });
+    sameDayJoin.env.db.rows('group_members').push({ group_id: GROUP, user_id: u, invite_status: 'JOINED' });
+  }
+  // 같은 날 이미 지난 약속: '지난 약속' 검사는 통과하고 그다음 단계(출발이 지났다)에서 멈춤 — 지난 날이면 PAST_APPOINTMENT에서 멈췄을 것
+  const passesPast = (e: unknown) => e instanceof HttpError && e.code === 'UNPROCESSABLE' && (e.details as { reason?: string }).reason === 'DEPARTURE_PASSED';
+  await assert.rejects(() => seed(sameDayJoin.env, 'u-same', { appointment_id: sameDayJoin.id, participant: P_A }, kst('2026-10-29T09:30')), passesPast); // 약속 09:00, 지금 09:30 — 같은 날
+  await assert.rejects(() => seed(sameDayJoin.env, 'u-utc', { appointment_id: sameDayJoin.id, participant: P_A }, new Date('2026-10-29T16:00:00Z')), passesPast); // 서울로는 10/30 01:00이지만 UTC 사람에게는 아직 10/29
+});
+
+test('9-32(고치기 하루 경계): 오늘 안으로 옮기기는 지난 약속 오류가 아님(출발이 지났다는 다른 오류), 시간대는 부른 사람 것(UTC 사람은 서울로는 지난 날이어도 오늘 약속을 고침)', async () => {
+  const { env, id } = await groupCase();
+  await expectHttp(() => updateAppointment(ctxFor(env, A, { kakao: fakeKakao().lookup }), upd(id, { at: kst('2026-10-26T08:00') }, 'this', true)), 'UNPROCESSABLE', 'DEPARTURE_PASSED'); // 기준 시각(10/26 10:00)의 오늘 이른 시각
+  const utc = await groupCase();
+  utc.env.db.rows('profiles').find((p) => p.user_id === A)!.timezone = 'UTC';
+  await updateAppointment(ctxFor(utc.env, A, { now: new Date('2026-10-29T16:00:00Z'), kakao: fakeKakao().lookup }), upd(utc.id, { title: 'UTC 사람의 오늘 약속' }, 'this', true));
+  assert.equal(row(utc.env.db, utc.id)!.title, 'UTC 사람의 오늘 약속');
+  const seoul = await groupCase();
+  await expectHttp(() => updateAppointment(ctxFor(seoul.env, A, { now: new Date('2026-10-29T16:00:00Z'), kakao: fakeKakao().lookup }), upd(seoul.id, { title: '서울 사람' }, 'this', true)), 'UNPROCESSABLE', 'PAST_APPOINTMENT');
 });
 
 test('9-38: 만든 사람이 없는(탈퇴한) 공동 약속은 그 약속에 참여한 사람이 고침(만든 사람 칸이 비어 있어도) — 참여 안 한 그룹원과 지우기는 FORBIDDEN, 알림은 고친 사람 제외 다른 참여자에게', async () => {
@@ -1203,4 +1257,89 @@ test('9-43(동시): 참여자는 4명씩 묶어 한꺼번에 맞춤 — 길찾�
   assert.ok(peak > 1 && peak <= 4, `동시 길찾기 최대 ${peak}`);
   assert.deepEqual(res.participants, { updated: 8, held: 0, skipped: 1 });
   assert.equal(res.warnings.filter((w) => w.code === 'PARTICIPANT_ROUTE_FAILED').length, 1);
+});
+
+// ---- 10장: 친구가 제안해 주인이 적용한 알람 시각 (original_scheduled_at이 채워진 MANUAL) ----
+
+// 10/29 09:00 약속의 기상을 친구가 07:25 → 07:20으로 바꿔 주인이 적용한 상태
+async function friendAppliedCase() {
+  const env = setup();
+  const { thu } = await seededSeries(env);
+  const wake = alarmsOf(env.db, thu.appointment_id).find((a) => a.alarm_type === 'WAKE')!;
+  const original = wake.scheduled_at as string;
+  wake.scheduled_at = new Date(Date.parse(original) - min(5)).toISOString();
+  wake.time_source = 'MANUAL';
+  wake.original_scheduled_at = original;
+  wake.original_time_source = 'AUTO';           // 친구가 바꾸기 전엔 자동 계산이던 알람
+  return { env, thu, wake, original };
+}
+
+// 기상 · 준비 · 출발 셋 다 친구가 바꿔 주인이 적용한 상태 (기상 −10 · 준비 +10 · 출발 −10분)
+async function friendAppliedAll() {
+  const env = setup();
+  const { thu } = await seededSeries(env);
+  for (const [type, delta] of [['WAKE', -10], ['PREPARE', 10], ['DEPARTURE', -10]] as const) {
+    const row = alarmsOf(env.db, thu.appointment_id).find((a) => a.alarm_type === type)!;
+    row.original_scheduled_at = row.scheduled_at;
+    row.original_time_source = 'AUTO';
+    row.scheduled_at = new Date(Date.parse(row.scheduled_at as string) + delta * 60_000).toISOString();
+    row.time_source = 'MANUAL';
+  }
+  return { env, thu };
+}
+
+test('10-22: 약속의 제목만 다시 저장하면 친구가 정한 알람 시각이 그대로(알람을 안 건드림), 중요도만 바꿔도 시각은 그대로', async () => {
+  const { env, thu, wake } = await friendAppliedCase();
+  const before = wake.scheduled_at;
+  await updateAppointment(ctxFor(env, A), upd(thu.appointment_id as string, { title: '새 제목' }, 'this', true));
+  assert.deepEqual([wake.scheduled_at, wake.time_source, wake.original_scheduled_at != null], [before, 'MANUAL', true]);
+  await updateAppointment(ctxFor(env, A), upd(thu.appointment_id as string, { importance: 'HIGH' }, 'this', true));
+  assert.deepEqual([wake.scheduled_at, wake.time_source, wake.original_scheduled_at != null], [before, 'MANUAL', true]);
+});
+
+test('10-22: 약속의 시각을 바꾸면 친구가 정한 알람 시각은 새 계산에 밀림(주인이 직접 고른 MANUAL과 다름) — 장소를 바꿔도 같음', async () => {
+  const { env, thu, wake } = await friendAppliedCase();
+  await updateAppointment(ctxFor(env, A), upd(thu.appointment_id as string, { at: kst('2026-10-29T09:30') }, 'this', true));
+  const moved = alarmsOf(env.db, thu.appointment_id).find((a) => a.alarm_type === 'WAKE')!;
+  assert.equal(hm(moved.scheduled_at), '07:55');   // 09:30 약속의 새 계산 (친구 값 07:20은 같은 날이라 MANUAL이면 그대로였을 것)
+  assert.notEqual(moved.time_source, 'MANUAL');
+
+  const place = await friendAppliedCase();
+  await updateAppointment(ctxFor(place.env, A, { kakao: fakeKakao(20).lookup }), upd(place.thu.appointment_id as string, { destination: { name: '강남역', lat: 37.4979, lng: 127.0276 } }, 'this', true));
+  const afterPlace = alarmsOf(place.env.db, place.thu.appointment_id).find((a) => a.alarm_type === 'WAKE')!;
+  assert.notEqual(afterPlace.time_source, 'MANUAL');
+  assert.equal(hm(afterPlace.scheduled_at), '07:40'); // 이동 20분으로 새 계산 (친구 값이 아님)
+});
+
+test('10-22: 친구 값이 기상 · 준비 · 출발 셋 다에 있어도 약속 시각을 바꾸면 친구 값이 없는 상태와 똑같이 새 계산 — 준비 알람 시각이 친구 값 간격에 끌려가지 않음', async () => {
+  const control = setup();
+  const c = await seededSeries(control);
+  await updateAppointment(ctxFor(control, A), upd(c.thu.appointment_id as string, { at: kst('2026-10-29T09:30') }, 'this', true));
+  const shape = (db: FakeDb, id: unknown) => alarmsOf(db, id).map((a) => [a.alarm_type, hm(a.scheduled_at), a.time_source]).sort();
+  const expected = shape(control.db, c.thu.appointment_id);
+
+  const { env, thu } = await friendAppliedAll();
+  await updateAppointment(ctxFor(env, A), upd(thu.appointment_id as string, { at: kst('2026-10-29T09:30') }, 'this', true));
+  assert.deepEqual(shape(env.db, thu.appointment_id), expected);
+});
+
+test('10-22: 친구가 바꾸기 전에 주인이 직접 골랐던 알람(original_time_source = MANUAL)은 약속 시각이 바뀌면 친구 값만 지워지고 주인의 값이 이어짐', async () => {
+  const { env, thu, wake, original } = await friendAppliedCase();
+  wake.original_time_source = 'MANUAL';
+  await updateAppointment(ctxFor(env, A), upd(thu.appointment_id as string, { at: kst('2026-10-29T09:30') }, 'this', true));
+  const moved = alarmsOf(env.db, thu.appointment_id).find((a) => a.alarm_type === 'WAKE')!;
+  assert.deepEqual([hm(moved.scheduled_at), moved.time_source], [hm(original), 'MANUAL']);   // 친구 값 07:20이 아니라 주인이 고른 07:25
+});
+
+test('10-22: 알람을 읽는 열 목록에 원래 시각 · 그때의 time_source 칸이 들어 있음 (가짜 DB는 열 목록을 안 보므로 따로 못 박음)', () => {
+  const columns = ALARM_COLUMNS.split(',').map((x) => x.trim());
+  assert.ok(columns.includes('original_scheduled_at') && columns.includes('original_time_source'));
+});
+
+test('10-23: 주인이 직접 고른 MANUAL(원래 시각 기억 없음)은 약속 시각이 바뀌어도 그대로 — 친구 값과 규칙이 다름 (기존 규칙)', async () => {
+  const { env, thu, wake } = await friendAppliedCase();
+  wake.original_scheduled_at = null;           // 주인이 직접 고친 값이면 서버 가드가 기억을 비움
+  const own = wake.scheduled_at;
+  await updateAppointment(ctxFor(env, A), upd(thu.appointment_id as string, { at: kst('2026-10-29T09:30') }, 'this', true));
+  assert.deepEqual([wake.scheduled_at, wake.time_source], [own, 'MANUAL']);
 });

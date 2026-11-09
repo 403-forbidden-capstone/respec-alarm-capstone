@@ -1,7 +1,7 @@
 import { describe, expect, it } from '@jest/globals';
 
 import { parseRelation, permissionNames, togglePermission } from '../permissions';
-import type { PermissionSet } from '../types';
+import { PERMISSIONS, permissionsFor, type PermissionSet } from '../types';
 
 const set = (viewAlarm: boolean, editAlarm: boolean, viewWake: boolean): PermissionSet => ({ viewAlarm, editAlarm, viewWake });
 
@@ -41,5 +41,16 @@ describe('관계 id', () => {
   it('종류와 키로 나눔', () => {
     expect(parseRelation('friend:sy')).toEqual({ kind: 'friend', key: 'sy' });
     expect(parseRelation('group:cap')).toEqual({ kind: 'group', key: 'cap' });
+  });
+});
+
+describe('F03 스위치 목록 · 문구 (6-30 · 6-41)', () => {
+  it('친구 관계는 알람 조회 · 알람 설정 2개만(기상 조회 없음), 그룹 관계는 기상 조회(그룹 동의)까지 3개', () => {
+    expect(permissionsFor('friend').map((p) => p.key)).toEqual(['viewAlarm', 'editAlarm']);
+    expect(permissionsFor('group').map((p) => p.key)).toEqual(['viewAlarm', 'editAlarm', 'viewWake']);
+  });
+
+  it("알람 조회 문구는 '알람 시간 · 일정 · 장소 · 준비 시간을 볼 수 있어요' (6-d7)", () => {
+    expect(PERMISSIONS.find((p) => p.key === 'viewAlarm')?.description).toBe('알람 시간 · 일정 · 장소 · 준비 시간을 볼 수 있어요.');
   });
 });

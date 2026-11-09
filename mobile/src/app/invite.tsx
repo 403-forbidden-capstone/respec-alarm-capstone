@@ -21,16 +21,16 @@ import { useLoad } from '@/lib/useLoad';
 export default function InviteScreen() {
   const { t } = useLocalSearchParams<{ t?: string | string[] }>();
   const token = linkTokenOf(t);
-  const { session, enabled, needsOnboarding, loading } = useAuth();
+  const { session, enabled, needsOnboarding, needsReconsent, loading } = useAuth();
   const needsLogin = enabled && !session;
-  const blocked = needsLogin || (enabled && needsOnboarding);
+  const blocked = needsLogin || (enabled && (needsOnboarding || needsReconsent));
 
   // 로그인(또는 온보딩)이 먼저 — 토큰을 적어 두고 그쪽으로 보냄
   useEffect(() => {
     if (loading || !blocked) return;
     setPendingInvite(token);
-    router.replace(needsLogin ? '/login' : '/onboarding');
-  }, [loading, blocked, needsLogin, token]);
+    router.replace(needsLogin ? '/login' : needsOnboarding ? '/onboarding' : '/reconsent');
+  }, [loading, blocked, needsLogin, needsOnboarding, token]);
 
   if (loading || blocked) return <Loading />;
   return <Landing token={token} />;

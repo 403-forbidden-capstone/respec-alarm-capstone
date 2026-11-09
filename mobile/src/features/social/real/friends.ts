@@ -1,5 +1,5 @@
 // ② 친구 실데이터 — F01 친구 · 받은 요청, 새 UI용 아이디 검색 · 요청 보내기 (docs/screen-data-map.md F01 · G01)
-//   friends 표는 마이그레이션 그대로: 요청은 내가 PENDING으로만 만들고, 수락은 받은 사람이 UPDATE (RLS friends_insert_request · friends_update_addressee)
+//   friends 표는 앱이 직접 쓰지 않음 — 요청 · 수락 · 거절 · 취소 · 끊기는 서버 함수(send_friend_request · accept_friend_request 등)로만 (아래 callRelation)
 //   남의 프로필은 공개 칸(닉네임 · 사진 · 아이디)만 — get_public_profiles · search_by_handle · search_related_by_name이 줌
 import { cleanHandle } from '@/features/onboarding/validate';
 import { HANDLE_PATTERN } from '@/features/profile/types';
@@ -12,6 +12,7 @@ import { MESSAGE_FRIEND_LIMIT, MESSAGE_GONE, messageLimit } from '../relationMes
 import { friendIds, givenTo, personOf, requestIds, sentRequestIds, type Snapshot } from '../snapshot';
 import type { FriendItem, FriendLink, FriendRelation, HandleSearch, OpenedLink, PeopleSearch, Person, PersonHit } from '../types';
 import { invalidateSnapshot, loadSnapshot } from './load';
+import { sendPush } from './push';
 
 export async function listFriends(): Promise<FriendItem[]> {
   const s = await loadSnapshot();
@@ -46,7 +47,11 @@ const unknownStatus = (name: string, status: string) => new Error(`알 수 없�
 //   두 번 눌러 ALREADY_FRIEND가 와도 성공 (3-29). GONE = 상대가 그 사이 취소 (3-28)
 export async function acceptFriend(requesterId: string): Promise<void> {
   const { status } = await callRelation('accept_friend_request', { p_requester_id: requesterId });
-  if (status === 'ACCEPTED' || status === 'ALREADY_FRIEND') return;
+  if (status === 'ACCEPTED') {
+    void sendPush({ kind: 'FRIEND_ACCEPTED', targetUserId: requesterId }); // 요청한 사람에게 — 실패해도 수락은 그대로
+    return;
+  }
+  if (status === 'ALREADY_FRIEND') return; // 두 번 눌러 온 것 — 알림은 처음 한 번만
   if (status === 'GONE') throw new UserError(MESSAGE_GONE);
   if (status === 'FRIEND_LIMIT') throw new UserError(MESSAGE_FRIEND_LIMIT);
   throw unknownStatus('accept_friend_request', status);
@@ -150,9 +155,13 @@ export async function sendFriendRequest(userId: string): Promise<'SENT' | 'FRIEN
   const { status, retry_after_seconds } = await callRelation('send_friend_request', { p_target_id: userId });
   switch (status) {
     case 'REQUESTED':
+      void sendPush({ kind: 'FRIEND_REQUEST', targetUserId: userId }); // 받는 사람에게 — 실패해도 요청은 그대로. 이미 보낸 요청(ALREADY_REQUESTED)을 다시 눌러도 알림은 안 보냄
+      return 'SENT';
     case 'ALREADY_REQUESTED':
       return 'SENT';
     case 'ACCEPTED':
+      void sendPush({ kind: 'FRIEND_ACCEPTED', targetUserId: userId }); // 상대가 먼저 보낸 요청이 있어 바로 친구 = 상대의 요청을 내가 수락한 것
+      return 'FRIEND';
     case 'ALREADY_FRIEND':
       return 'FRIEND';
     case 'SELF':

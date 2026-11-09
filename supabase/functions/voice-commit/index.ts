@@ -1,10 +1,11 @@
 // voice-commit — AI 대화 끝 정리 (서버 PR 5). 앱 [완료] 뒤 한 번, 실패하면 같은 요청을 다시 보냄(결과는 한 번만 저장)
 //   요청: { session_id, rejected_cards?: [카드 번호] } — rejected_cards는 앱이 [저장 안 함]을 눌렀는데 서버에 못 알렸을 수 있는 카드 (서버가 열린 카드만 REJECTED로)
-//   응답: { session_id, status: DONE | PARTIAL | RUNNING | SKIPPED, saved: { todos, daily_records }, pending: [확인이 필요한 것], failed: [실패한 저장 단계] }
+//   응답: { session_id, status: DONE | PARTIAL | RUNNING | SKIPPED, saved: { todos, daily_records, daily_journals }, pending: [확인이 필요한 것], failed: [실패한 저장 단계] }
 //   T2(대화 전체 추출) 한 번 → 공개 JSON structured.v1(conversation_sessions.extracted_data) + 할 일 · 준비물(todos) · 생활 기록 진술 칸의 빈 칸(daily_records)만 저장.
-//   지각 · 출발 · 도착(appointment_participants) · 알람 반응(alarm_events) · 일기(daily_journals)는 쓰지 않음(JSON에만). 일정 · 알람은 저장하지 않음(대화 중 카드로 확인)
+//   그 JSON이 저장되면 T5(Flash-Lite) 한 번으로 그날 일기 1~2문장(daily_journals.ai_summary, 사용자가 고친 일기는 그대로)
+//   지각 · 출발 · 도착(appointment_participants) · 알람 반응(alarm_events)은 쓰지 않음(JSON에만). 일정 · 알람은 저장하지 않음(대화 중 카드로 확인)
 //   오류: AUTH_REQUIRED · VALIDATION_FAILED · NOT_FOUND · CONFLICT · NOT_CONFIGURED(키 없음) · LLM_UNAVAILABLE · INTERNAL
-//   처리 순서 · 다시 시도 규칙은 _shared/ai/voice-commit.ts. 앱 타임아웃은 45초(T2 19초 × 다시 시도 1번)
+//   처리 순서 · 다시 시도 규칙은 _shared/ai/voice-commit.ts. 앱 타임아웃은 45초(T2 19초 × 다시 시도 1번 · T5 9초는 T2가 보통 빠를 때 안에 듦)
 //   비밀값: voice-turn과 같음 (GEMINI_API_KEY · GEMINI_TEXT_MODEL · AI_LIMIT_* · AI_LOG_IO_USER_IDS)
 import 'jsr:@supabase/functions-js/edge-runtime.d.ts';
 

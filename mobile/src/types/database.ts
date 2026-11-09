@@ -55,6 +55,37 @@ isOneToOne: false
       referencedColumns: ["user_id"]
     }
                   ]
+                },"alarm_proposals": {
+                  Row: {
+                    "alarm_id": string,"created_at": string,"from_at": string,"owner_id": string,"proposal_id": string,"proposer_id": string,"responded_at": string | null,"status": string,"to_at": string
+                  }
+                  Insert: {
+                    "alarm_id": string,"created_at"?: string,"from_at": string,"owner_id": string,"proposal_id"?: string,"proposer_id": string,"responded_at"?: string | null,"status"?: string,"to_at": string
+                  }
+                  Update: {
+                    "alarm_id"?: string,"created_at"?: string,"from_at"?: string,"owner_id"?: string,"proposal_id"?: string,"proposer_id"?: string,"responded_at"?: string | null,"status"?: string,"to_at"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "alarm_proposals_alarm_id_fkey"
+      columns: ["alarm_id"]
+isOneToOne: false
+      referencedRelation: "alarms"
+      referencedColumns: ["alarm_id"]
+    },{
+      foreignKeyName: "alarm_proposals_owner_id_fkey"
+      columns: ["owner_id"]
+isOneToOne: false
+      referencedRelation: "profiles"
+      referencedColumns: ["user_id"]
+    },{
+      foreignKeyName: "alarm_proposals_proposer_id_fkey"
+      columns: ["proposer_id"]
+isOneToOne: false
+      referencedRelation: "profiles"
+      referencedColumns: ["user_id"]
+    }
+                  ]
                 },"alarm_suggestions": {
                   Row: {
                     "created_at": string,"current_value": string | null,"responded_at": string | null,"result_value": string | null,"source_event_id": number | null,"status": Database["public"]['Enums']["alarm_suggestion_status"],"suggested_value": string,"suggestion_id": string,"suggestion_type": Database["public"]['Enums']["alarm_suggestion_type"],"suppress_until": string | null,"target_alarm_id": string | null,"user_id": string
@@ -88,13 +119,13 @@ isOneToOne: false
                   ]
                 },"alarms": {
                   Row: {
-                    "alarm_id": string,"alarm_type": Database["public"]['Enums']["alarm_type"],"created_at": string,"intensity": Database["public"]['Enums']["alarm_intensity"],"intensity_source": Database["public"]['Enums']["alarm_value_source"],"is_enabled": boolean,"last_calculated_at": string,"occurrence_on": string | null,"participant_id": string | null,"recurrence_rule": string | null,"routine_id": string | null,"scheduled_at": string,"series_id": string | null,"snooze_limit": number,"sound_key": string | null,"step_order": number | null,"time_source": Database["public"]['Enums']["alarm_value_source"],"updated_at": string,"user_id": string,"vibration": string | null,"voice_tone": Database["public"]['Enums']["voice_tone"]
+                    "alarm_id": string,"alarm_type": Database["public"]['Enums']["alarm_type"],"created_at": string,"intensity": Database["public"]['Enums']["alarm_intensity"],"intensity_source": Database["public"]['Enums']["alarm_value_source"],"is_enabled": boolean,"last_calculated_at": string,"occurrence_on": string | null,"original_scheduled_at": string | null,"original_time_source": Database["public"]['Enums']["alarm_value_source"] | null,"participant_id": string | null,"recurrence_rule": string | null,"routine_id": string | null,"scheduled_at": string,"series_id": string | null,"snooze_limit": number,"sound_key": string | null,"step_order": number | null,"time_source": Database["public"]['Enums']["alarm_value_source"],"updated_at": string,"user_id": string,"vibration": string | null,"voice_tone": Database["public"]['Enums']["voice_tone"]
                   }
                   Insert: {
-                    "alarm_id"?: string,"alarm_type": Database["public"]['Enums']["alarm_type"],"created_at"?: string,"intensity"?: Database["public"]['Enums']["alarm_intensity"],"intensity_source"?: Database["public"]['Enums']["alarm_value_source"],"is_enabled"?: boolean,"last_calculated_at"?: string,"occurrence_on"?: string | null,"participant_id"?: string | null,"recurrence_rule"?: string | null,"routine_id"?: string | null,"scheduled_at": string,"series_id"?: string | null,"snooze_limit"?: number,"sound_key"?: string | null,"step_order"?: number | null,"time_source"?: Database["public"]['Enums']["alarm_value_source"],"updated_at"?: string,"user_id": string,"vibration"?: string | null,"voice_tone"?: Database["public"]['Enums']["voice_tone"]
+                    "alarm_id"?: string,"alarm_type": Database["public"]['Enums']["alarm_type"],"created_at"?: string,"intensity"?: Database["public"]['Enums']["alarm_intensity"],"intensity_source"?: Database["public"]['Enums']["alarm_value_source"],"is_enabled"?: boolean,"last_calculated_at"?: string,"occurrence_on"?: string | null,"original_scheduled_at"?: string | null,"original_time_source"?: Database["public"]['Enums']["alarm_value_source"] | null,"participant_id"?: string | null,"recurrence_rule"?: string | null,"routine_id"?: string | null,"scheduled_at": string,"series_id"?: string | null,"snooze_limit"?: number,"sound_key"?: string | null,"step_order"?: number | null,"time_source"?: Database["public"]['Enums']["alarm_value_source"],"updated_at"?: string,"user_id": string,"vibration"?: string | null,"voice_tone"?: Database["public"]['Enums']["voice_tone"]
                   }
                   Update: {
-                    "alarm_id"?: string,"alarm_type"?: Database["public"]['Enums']["alarm_type"],"created_at"?: string,"intensity"?: Database["public"]['Enums']["alarm_intensity"],"intensity_source"?: Database["public"]['Enums']["alarm_value_source"],"is_enabled"?: boolean,"last_calculated_at"?: string,"occurrence_on"?: string | null,"participant_id"?: string | null,"recurrence_rule"?: string | null,"routine_id"?: string | null,"scheduled_at"?: string,"series_id"?: string | null,"snooze_limit"?: number,"sound_key"?: string | null,"step_order"?: number | null,"time_source"?: Database["public"]['Enums']["alarm_value_source"],"updated_at"?: string,"user_id"?: string,"vibration"?: string | null,"voice_tone"?: Database["public"]['Enums']["voice_tone"]
+                    "alarm_id"?: string,"alarm_type"?: Database["public"]['Enums']["alarm_type"],"created_at"?: string,"intensity"?: Database["public"]['Enums']["alarm_intensity"],"intensity_source"?: Database["public"]['Enums']["alarm_value_source"],"is_enabled"?: boolean,"last_calculated_at"?: string,"occurrence_on"?: string | null,"original_scheduled_at"?: string | null,"original_time_source"?: Database["public"]['Enums']["alarm_value_source"] | null,"participant_id"?: string | null,"recurrence_rule"?: string | null,"routine_id"?: string | null,"scheduled_at"?: string,"series_id"?: string | null,"snooze_limit"?: number,"sound_key"?: string | null,"step_order"?: number | null,"time_source"?: Database["public"]['Enums']["alarm_value_source"],"updated_at"?: string,"user_id"?: string,"vibration"?: string | null,"voice_tone"?: Database["public"]['Enums']["voice_tone"]
                   }
                   Relationships: [
                     {
@@ -365,16 +396,47 @@ isOneToOne: false
                   ]
                 },"profiles": {
                   Row: {
-                    "created_at": string,"default_buffer_minutes": number,"default_prepare_minutes": number,"default_transport": Database["public"]['Enums']["transport_type"],"handle": string | null,"handle_changed_at": string | null,"handle_next_change_at": string | null,"home_lat": number | null,"home_lng": number | null,"home_name": string | null,"home_radius_m": number | null,"intensity_offset": number,"nickname": string,"onboarded_at": string | null,"preferred_sound_key": string | null,"preferred_voice_tone": Database["public"]['Enums']["voice_tone"] | null,"privacy_agreed_at": string | null,"privacy_version": number | null,"profile_image_url": string | null,"timezone": string,"updated_at": string,"user_id": string,"wake_margin": string,"wake_sensitivity": string
+                    "created_at": string,"default_buffer_minutes": number,"default_prepare_minutes": number,"default_transport": Database["public"]['Enums']["transport_type"],"handle": string | null,"handle_changed_at": string | null,"handle_next_change_at": string | null,"home_lat": number | null,"home_lng": number | null,"home_name": string | null,"home_radius_m": number | null,"intensity_offset": number,"nickname": string,"onboarded_at": string | null,"preferred_sound_key": string | null,"preferred_voice_tone": Database["public"]['Enums']["voice_tone"] | null,"privacy_agreed_at": string | null,"privacy_version": number | null,"profile_image_url": string | null,"timezone": string,"updated_at": string,"user_id": string,"wake_margin": string,"wake_ping_enabled": boolean,"wake_sensitivity": string
                   }
                   Insert: {
-                    "created_at"?: string,"default_buffer_minutes"?: number,"default_prepare_minutes"?: number,"default_transport"?: Database["public"]['Enums']["transport_type"],"handle"?: string | null,"handle_changed_at"?: string | null,"handle_next_change_at"?: string | null,"home_lat"?: number | null,"home_lng"?: number | null,"home_name"?: string | null,"home_radius_m"?: number | null,"intensity_offset"?: number,"nickname": string,"onboarded_at"?: string | null,"preferred_sound_key"?: string | null,"preferred_voice_tone"?: Database["public"]['Enums']["voice_tone"] | null,"privacy_agreed_at"?: string | null,"privacy_version"?: number | null,"profile_image_url"?: string | null,"timezone"?: string,"updated_at"?: string,"user_id": string,"wake_margin"?: string,"wake_sensitivity"?: string
+                    "created_at"?: string,"default_buffer_minutes"?: number,"default_prepare_minutes"?: number,"default_transport"?: Database["public"]['Enums']["transport_type"],"handle"?: string | null,"handle_changed_at"?: string | null,"handle_next_change_at"?: string | null,"home_lat"?: number | null,"home_lng"?: number | null,"home_name"?: string | null,"home_radius_m"?: number | null,"intensity_offset"?: number,"nickname": string,"onboarded_at"?: string | null,"preferred_sound_key"?: string | null,"preferred_voice_tone"?: Database["public"]['Enums']["voice_tone"] | null,"privacy_agreed_at"?: string | null,"privacy_version"?: number | null,"profile_image_url"?: string | null,"timezone"?: string,"updated_at"?: string,"user_id": string,"wake_margin"?: string,"wake_ping_enabled"?: boolean,"wake_sensitivity"?: string
                   }
                   Update: {
-                    "created_at"?: string,"default_buffer_minutes"?: number,"default_prepare_minutes"?: number,"default_transport"?: Database["public"]['Enums']["transport_type"],"handle"?: string | null,"handle_changed_at"?: string | null,"handle_next_change_at"?: string | null,"home_lat"?: number | null,"home_lng"?: number | null,"home_name"?: string | null,"home_radius_m"?: number | null,"intensity_offset"?: number,"nickname"?: string,"onboarded_at"?: string | null,"preferred_sound_key"?: string | null,"preferred_voice_tone"?: Database["public"]['Enums']["voice_tone"] | null,"privacy_agreed_at"?: string | null,"privacy_version"?: number | null,"profile_image_url"?: string | null,"timezone"?: string,"updated_at"?: string,"user_id"?: string,"wake_margin"?: string,"wake_sensitivity"?: string
+                    "created_at"?: string,"default_buffer_minutes"?: number,"default_prepare_minutes"?: number,"default_transport"?: Database["public"]['Enums']["transport_type"],"handle"?: string | null,"handle_changed_at"?: string | null,"handle_next_change_at"?: string | null,"home_lat"?: number | null,"home_lng"?: number | null,"home_name"?: string | null,"home_radius_m"?: number | null,"intensity_offset"?: number,"nickname"?: string,"onboarded_at"?: string | null,"preferred_sound_key"?: string | null,"preferred_voice_tone"?: Database["public"]['Enums']["voice_tone"] | null,"privacy_agreed_at"?: string | null,"privacy_version"?: number | null,"profile_image_url"?: string | null,"timezone"?: string,"updated_at"?: string,"user_id"?: string,"wake_margin"?: string,"wake_ping_enabled"?: boolean,"wake_sensitivity"?: string
                   }
                   Relationships: [
                     
+                  ]
+                },"push_sends": {
+                  Row: {
+                    "day": string | null,"kind": string,"send_id": number,"sender_id": string | null,"sent_at": string,"subject_id": string | null,"target_id": string
+                  }
+                  Insert: {
+                    "day"?: string | null,"kind": string,"send_id"?: never,"sender_id"?: string | null,"sent_at"?: string,"subject_id"?: string | null,"target_id": string
+                  }
+                  Update: {
+                    "day"?: string | null,"kind"?: string,"send_id"?: never,"sender_id"?: string | null,"sent_at"?: string,"subject_id"?: string | null,"target_id"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "push_sends_sender_id_fkey"
+      columns: ["sender_id"]
+isOneToOne: false
+      referencedRelation: "profiles"
+      referencedColumns: ["user_id"]
+    },{
+      foreignKeyName: "push_sends_subject_id_fkey"
+      columns: ["subject_id"]
+isOneToOne: false
+      referencedRelation: "profiles"
+      referencedColumns: ["user_id"]
+    },{
+      foreignKeyName: "push_sends_target_id_fkey"
+      columns: ["target_id"]
+isOneToOne: false
+      referencedRelation: "profiles"
+      referencedColumns: ["user_id"]
+    }
                   ]
                 },"push_tickets": {
                   Row: {
@@ -435,13 +497,13 @@ isOneToOne: false
                   ]
                 },"reports": {
                   Row: {
-                    "created_at": string,"handled_at": string | null,"handled_by": string | null,"note": string | null,"reason": string,"report_id": string,"reporter_id": string | null,"status": string,"target_group_id": string | null,"target_type": string,"target_user_id": string | null
+                    "created_at": string,"evidence": Json | null,"handled_at": string | null,"handled_by": string | null,"note": string | null,"reason": string,"report_id": string,"reporter_id": string | null,"resolution": string | null,"status": string,"target_group_id": string | null,"target_type": string,"target_user_id": string | null
                   }
                   Insert: {
-                    "created_at"?: string,"handled_at"?: string | null,"handled_by"?: string | null,"note"?: string | null,"reason": string,"report_id"?: string,"reporter_id"?: string | null,"status"?: string,"target_group_id"?: string | null,"target_type": string,"target_user_id"?: string | null
+                    "created_at"?: string,"evidence"?: Json | null,"handled_at"?: string | null,"handled_by"?: string | null,"note"?: string | null,"reason": string,"report_id"?: string,"reporter_id"?: string | null,"resolution"?: string | null,"status"?: string,"target_group_id"?: string | null,"target_type": string,"target_user_id"?: string | null
                   }
                   Update: {
-                    "created_at"?: string,"handled_at"?: string | null,"handled_by"?: string | null,"note"?: string | null,"reason"?: string,"report_id"?: string,"reporter_id"?: string | null,"status"?: string,"target_group_id"?: string | null,"target_type"?: string,"target_user_id"?: string | null
+                    "created_at"?: string,"evidence"?: Json | null,"handled_at"?: string | null,"handled_by"?: string | null,"note"?: string | null,"reason"?: string,"report_id"?: string,"reporter_id"?: string | null,"resolution"?: string | null,"status"?: string,"target_group_id"?: string | null,"target_type"?: string,"target_user_id"?: string | null
                   }
                   Relationships: [
                     {
@@ -535,6 +597,25 @@ isOneToOne: false
       foreignKeyName: "sharing_permissions_owner_id_fkey"
       columns: ["owner_id"]
 isOneToOne: false
+      referencedRelation: "profiles"
+      referencedColumns: ["user_id"]
+    }
+                  ]
+                },"team_members": {
+                  Row: {
+                    "added_at": string,"user_id": string
+                  }
+                  Insert: {
+                    "added_at"?: string,"user_id": string
+                  }
+                  Update: {
+                    "added_at"?: string,"user_id"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "team_members_user_id_fkey"
+      columns: ["user_id"]
+isOneToOne: true
       referencedRelation: "profiles"
       referencedColumns: ["user_id"]
     }
@@ -737,6 +818,11 @@ isOneToOne: false
 "change_my_handle":
 { Args: { "p_handle": string }; Returns: Json
                            },
+"claim_wake_nudges":
+{ Args: { "p_now"?: string }; Returns: {
+              "event_key": string,"group_id": string,"kind": string,"recipient_id": string,"sleeper_id": string
+            }[]
+                           },
 "decline_friend_request":
 { Args: { "p_requester_id": string }; Returns: Json
                            },
@@ -776,6 +862,11 @@ isOneToOne: false
               "alarm_id": string,"appointment_at": string,"appointment_id": string,"dest_name": string,"title": string,"user_id": string
             }[]
                            },
+"get_wake_announcement":
+{ Args: Record<PropertyKey, never>; Returns: {
+              "group_id": string,"group_name": string,"up_count": number
+            }[]
+                           },
 "group_appointment_counts":
 { Args: { "p_group_id": string }; Returns: {
               "appointment_id": string,"i_joined": boolean,"joined_count": number
@@ -789,6 +880,19 @@ isOneToOne: false
                            },
 "join_group_by_invite_code":
 { Args: { "p_invite_code": string }; Returns: string
+                           },
+"list_reports":
+{ Args: { "p_limit"?: number,"p_status"?: string }; Returns: Json
+                           },
+"my_account_delete_summary":
+{ Args: Record<PropertyKey, never>; Returns: {
+              "friends": number,"group_appointments_staying": number,"groups_disappearing": number,"groups_leaving": number
+            }[]
+                           },
+"my_alarm_proposals":
+{ Args: Record<PropertyKey, never>; Returns: {
+              "alarm_id": string,"alarm_type": string,"created_at": string,"from_at": string,"proposal_id": string,"proposer_id": string,"proposer_nickname": string,"to_at": string
+            }[]
                            },
 "my_blocks":
 { Args: Record<PropertyKey, never>; Returns: {
@@ -806,14 +910,28 @@ isOneToOne: false
               "group_id": string,"group_name": string,"invited_at": string,"invited_by": string,"invited_by_nickname": string,"member_count": number
             }[]
                            },
+"my_wake_pings":
+{ Args: { "p_date"?: string }; Returns: {
+              "sender_id": string,"sender_nickname": string,"sent_at": string
+            }[]
+                           },
 "open_friend_link":
 { Args: { "p_token": string }; Returns: Json
                            },
 "plan_group_push":
 { Args: { "p_appointment_id"?: string,"p_group_id": string,"p_kind": string,"p_sender_id": string }; Returns: Json
                            },
+"plan_wake_ping":
+{ Args: { "p_group_id"?: string,"p_now"?: string,"p_reserve"?: boolean,"p_sender": string,"p_target": string }; Returns: Json
+                           },
+"prepare_account_delete":
+{ Args: { "p_user_id": string }; Returns: Json
+                           },
 "preview_group_by_code":
 { Args: { "p_code": string }; Returns: Json
+                           },
+"propose_alarm_time":
+{ Args: { "p_alarm_id": string,"p_new_at": string }; Returns: Json
                            },
 "regenerate_invite_code":
 { Args: { "p_group_id": string }; Returns: string
@@ -823,6 +941,12 @@ isOneToOne: false
                            },
 "remove_friend":
 { Args: { "p_user_id": string }; Returns: Json
+                           },
+"resolve_report":
+{ Args: { "p_action": string,"p_report_id": string }; Returns: Json
+                           },
+"respond_alarm_proposal":
+{ Args: { "p_apply": boolean,"p_proposal_id": string }; Returns: Json
                            },
 "roll_due_series":
 { Args: { "p_limit"?: number,"p_now"?: string }; Returns: {
@@ -845,6 +969,11 @@ isOneToOne: false
                            },
 "send_friend_request":
 { Args: { "p_target_id": string }; Returns: Json
+                           },
+"sent_alarm_proposals":
+{ Args: { "p_owner_id": string }; Returns: {
+              "alarm_id": string,"created_at": string,"from_at": string,"proposal_id": string,"status": string,"to_at": string
+            }[]
                            },
 "set_wake_hidden":
 { Args: { "p_hidden": boolean,"p_user_id": string }; Returns: Json

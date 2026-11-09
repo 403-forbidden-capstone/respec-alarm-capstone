@@ -3,12 +3,13 @@
 //   set_wake_hidden — 내 기상을 그 사람에게만 가림(내가 속한 모든 그룹), 상대는 모름 (7-더)
 //   date = 기상 신호가 알려 준 날 (없으면 내 시간대의 오늘)
 import { parseDbTime } from '@/lib/dbTime';
+import { callEdge, EdgeError } from '@/lib/edge';
 import { UserError } from '@/lib/errors';
 import { supabase } from '@/lib/supabase';
 
 import { NO_APPOINTMENT_STATE, wakeStateOf } from '../map';
 import { joinedIds, myGroup, personOf, receivedFrom } from '../snapshot';
-import type { MemberWake } from '../types';
+import type { MemberWake, ReceivedWakePing, WakePingResult } from '../types';
 import { WAKE_HIDE_FAILED } from '../wakeTexts';
 import { loadSnapshot, loadWakeRows } from './load';
 
@@ -42,7 +43,45 @@ export async function setWakeHidden(personId: string, hidden: boolean): Promise<
   throw new Error(`set_wake_hidden: 모르는 상태 ${String(status)}`);
 }
 
-// 깨우기 알림 (G03) — 깨우기 장(F8)에서 붙임. 지금은 서버 can_send_push가 WAKE_PING을 거절하므로 보내지 않음
-export async function sendWakePing(_personId: string): Promise<void> {
-  throw new UserError('깨우기는 준비 중이에요');
+// 깨우기 알림 (G03) — notify(WAKE_PING). 판정 · 횟수(5분 1번 · 하루 3번) · 직전 재확인은 서버가 하고, 앱은 결과 상태만 받아 보여 줌
+//   groupId = 어느 그룹 화면(G03)에서 눌렀는지 — 주면 그 그룹에서 보이는 사람일 때만 됨
+//   기상이 안 보이는 사람(같은 그룹 아님 · 동의 안 함 · 오늘 약속 없음 · 숨김 · 차단)은 서버가 구분 없이 403 → 꺼짐과 같은 말(8-11 · 8-12 · 8-35)
+export async function sendWakePing(groupId: string, personId: string): Promise<WakePingResult> {
+  let res: NotifyPingResponse;
+  try {
+    res = await callEdge<NotifyPingResponse>('notify', { kind: 'WAKE_PING', targetUserId: personId, groupId }, { timeoutMs: PING_TIMEOUT_MS });
+  } catch (e) {
+    if (e instanceof EdgeError && e.code === 'FORBIDDEN') return { status: 'OFF' };
+    throw e;
+  }
+  return pingResultOf(res);
+}
+
+type NotifyPingResponse = { sent?: number; failed?: number; reason?: string; ping?: { status?: string; count?: number; limit?: number; next_at?: string | null } };
+const PING_TIMEOUT_MS = 10_000;
+
+export function pingResultOf(res: NotifyPingResponse | null | undefined): WakePingResult {
+  const ping = res?.ping;
+  const at = (value: string | null | undefined) => (value ? parseDbTime(value) : null);
+  switch (ping?.status) {
+    case 'OK':
+      return { status: 'OK', count: ping.count ?? 1, limit: ping.limit ?? 3, nextAt: at(ping.next_at) };
+    case 'WAIT':
+      return { status: 'WAIT', nextAt: at(ping.next_at) };
+    case 'DAILY_LIMIT':
+    case 'NOT_RINGING':
+    case 'ALREADY_UP':
+    case 'OFF':
+    case 'NO_TOKENS':
+      return { status: ping.status };
+    default:
+      throw new Error(`notify WAKE_PING: 모르는 상태 ${String(ping?.status)}`);
+  }
+}
+
+// 오늘 내가 받은 깨우기 — 홈 · H08 한 줄. 차단한 사람 것은 서버가 뺌
+export async function getReceivedWakePings(): Promise<ReceivedWakePing[]> {
+  const { data, error } = await supabase.rpc('my_wake_pings');
+  if (error) throw error;
+  return (data ?? []).map((r) => ({ senderId: r.sender_id, senderName: r.sender_nickname, at: parseDbTime(r.sent_at) }));
 }

@@ -2,28 +2,31 @@
 //   읽기: get_shared_alarm_appointments(p_owner_id) — 조회 권한을 받은 사람 알람의 약속 제목 · 장소 · 시각 (appointments RLS는 본인 · 그룹원만이라 함수가 대신 줌)
 //         + alarms(RLS가 조회 권한을 확인). 함수는 지난 알람 · 꺼진 알람도 주므로 앱에서 거름: 약속 시각이 지난 카드는 빼고 꺼진 알람은 다시 켤 수 있게 남김 (작성자 판단)
 //         함수 결과는 날짜 조건이 없어 쌓일수록 길어지므로, 알람을 읽기 전에 오늘 0시 이후 약속만 남겨 .in() 목록(주소 길이)이 이력만큼 커지지 않게 함
-//   쓰기: 켜기 · 끄기 · ±5분은 상대 알람을 DB에 직접 (설정 권한 EDIT_ALARM이면 RLS가 허용). 카드 하나(약속의 기상 · 준비 · 출발)가 한 번에 움직임
-//         켤 때는 아직 안 지난 알람만 켬 (내 알람 realWrite와 같은 규칙) — 지난 기상 알람을 켜면 서버 배치(wake-check)가 울린 적 없는 알람을 기상 미확인(MISSED)으로 기록하고 주인 폰은 걸지도 않음
-//         ±5분은 시각을 사용자가 직접 정한 것이라 time_source = MANUAL로 같이 씀 — 안 그러면 주인이 그 약속을 다시 저장할 때 alarm-commit이 자동 시각으로 덮음
-//         앞당길 때는 옮긴 시각이 지금 + 5분(서버 PAST_GRACE_MINUTES)보다 이르게 되는 켜진 알람이 있으면 거절 — 주인 폰에서는 지난 시각이라 걸리지 않고(기존 예약이 지워짐) 서버에는 켜진 지난 알람이 남음
-//   바꾼 뒤 주인에게 notify(ALARM_CHANGED). 푸시가 실패해도 저장은 되돌리지 않고 화면은 조용히 "바꿨어요"만 (푸시 토큰 등록은 Q12 — 붙이기 전엔 대부분 안 감)
-//   주인 폰의 예약은 주인 앱이 푸시를 받거나 다시 켜질 때 맞춤(lib/alarmSync reconcile) — 내 폰에서 걸지 않음
-//   변경 기록(getShareLog)은 DB에 저장 자리가 없음(D9 · 스키마 보완 3): 이번에 앱을 연 동안 내가 바꾼 것만 메모리에 둠 (D20 열림 — 가짜 데이터와 같은 뜻)
+//   쓰기(친구 10장): 바꿀 수 있는 것은 시각뿐 — 켜기 · 끄기 · 삭제는 없음(내 알람은 늘 울림). 친구가 시각을 골라 [보내기]하면 propose_alarm_time으로 제안 한 줄이 생기고
+//         상대 알람은 그대로, 상대에게 제안 알림(notify ALARM_CHANGED). 상대가 [적용]해야 바뀜 — 곧 울릴 알람 · 원래 시각 기준 ±60분 · 같은 시각은 서버가 상태로 거절
+//         '제안함' · '반영됨'은 sent_alarm_proposals, [원래대로]는 alarms.original_scheduled_at 시각을 제안(친구가 바꾼 적이 있을 때만)
+//         주인 폰의 예약은 주인이 [적용]할 때 주인 앱이 다시 걸음 (lib/alarmSync) — 내 폰에서 걸지 않음
+//   변경 기록은 없음 — DB에 저장 자리가 없고 시트도 뺌 (친구 논리설계 10장 · D9 · D20)
 import { now } from '@/lib/clock';
 import { dbTimeMs, parseDbTime } from '@/lib/dbTime';
-import { callEdge } from '@/lib/edge';
 import { UserError } from '@/lib/errors';
 import { startOfDay } from '@/lib/format';
 import { supabase } from '@/lib/supabase';
-import { requireUserId } from '@/lib/user';
-import { PAST_GRACE_MINUTES } from '@shared/calc/validate.ts';
 
 import { groupSharedCards, shareTags, toMemberAlarm, upcomingCards, type SharedAlarmRow, type SharedApptRow, type SharedCard } from '../map';
 import { personOf, profileOf, receivedFrom, receivedRows, type Snapshot } from '../snapshot';
-import type { ShareLogItem, SharedAlarms, SharedChangeResult } from '../types';
+import {
+  PROPOSE_FORBIDDEN,
+  PROPOSE_INVALID,
+  PROPOSE_LIMIT,
+  PROPOSE_SAME,
+  PROPOSE_TOO_SOON,
+} from '../proposalTexts';
+import type { SentProposal, SharedAlarms, SharedChangeResult } from '../types';
 import { loadSnapshot } from './load';
+import { sendPush } from './push';
 
-const ALARM_COLUMNS = 'alarm_id, alarm_type, scheduled_at, intensity, sound_key, is_enabled, time_source';
+const ALARM_COLUMNS = 'alarm_id, alarm_type, scheduled_at, intensity, sound_key, is_enabled, time_source, original_scheduled_at';
 
 // 그 사람의 공유받은 알람 전부 (카드 묶음 전, 지난 것 포함). 권한이 없으면 함수가 빈 목록
 async function loadCards(ownerId: string): Promise<SharedCard[]> {
@@ -51,25 +54,29 @@ export async function getSharedAlarms(personId: string): Promise<SharedAlarms | 
   const received = receivedFrom(s, personId);
   const canView = received.viewAlarm;
   const cards = canView ? upcomingCards(await loadCards(personId), now().getTime()) : [];
+  const sent = cards.length ? await loadSentProposals(personId) : new Map<string, SentProposal>();
   return {
     person: personOf(s, personId),
     canView,
-    canEdit: canView && received.editAlarm, // 조회가 안 되면 고칠 알람도 안 보임 (docs/screen-data-map.md F03)
+    canEdit: canView && received.editAlarm, // 조회가 안 되면 고칠 알람도 안 보임 (docs/screen-data-map.md G04)
     tags: shareTags(receivedRows(s, personId)),
-    alarms: cards.map(toMemberAlarm),
+    alarms: cards.map((card) => {
+      const alarm = toMemberAlarm(card, now().getTime());
+      // 보낸 제안은 카드의 알람마다 따로 기록되므로 가장 이른 알람(제안을 보낸 알람) 것을 붙임
+      return { ...alarm, proposal: (alarm.firstAlarmId && sent.get(alarm.firstAlarmId)) || null };
+    }),
   };
 }
 
-// 변경 기록 — 이번 실행 동안만, 계정이 바뀌면 비움
-let log: { me: string; items: ShareLogItem[] } = { me: '', items: [] };
-function remember(me: string, text: string) {
-  if (log.me !== me) log = { me, items: [] };
-  log.items.push({ at: now(), text });
-}
-
-export async function getShareLog(): Promise<ShareLogItem[]> {
-  const me = await requireUserId();
-  return log.me === me ? log.items.map((l) => ({ ...l })) : [];
+// 내가 이 사람에게 보낸 제안 중 알람마다 가장 최근 것 — 못 읽어도 화면은 열림(제안 상태만 안 보임)
+async function loadSentProposals(ownerId: string): Promise<Map<string, SentProposal>> {
+  const { data, error } = await supabase.rpc('sent_alarm_proposals', { p_owner_id: ownerId });
+  if (error) return new Map();
+  const map = new Map<string, SentProposal>();
+  for (const r of data ?? []) {
+    if (r.status === 'PENDING' || r.status === 'APPLIED') map.set(r.alarm_id, { status: r.status, toAt: parseDbTime(r.to_at) });
+  }
+  return map;
 }
 
 // 카드(= 약속) 하나의 알람 — 지금 읽은 값. 이미 지워졌거나 권한이 없어졌으면 UserError
@@ -79,89 +86,22 @@ async function loadCard(ownerId: string, cardId: string): Promise<SharedCard> {
   return card;
 }
 
-const NO_EDIT = '이 알람을 바꿀 권한이 없어요';
-const TOO_SOON = '곧 울릴 알람이라 앞당길 수 없어요';
-const NOTHING_TO_TURN_ON = '켤 수 있는 알람이 없어요. 이미 지난 알람이거나 지워졌을 수 있어요'; // 내 알람(realWrite)과 같은 문구
-const BODY_TITLE_MAX = 40; // notify의 body는 서버가 200자까지 (supabase/functions/_shared/notify.ts) — 약속 제목은 100자까지라 줄여서 넣음
-const NOTIFY_TIMEOUT_MS = 8_000; // 알림은 덤이라 오래 기다리지 않음 (저장은 이미 끝남)
-
-// 알림 본문의 약속 제목 — 길면 줄임표로 (닉네임 30자 + 제목 40자 + 문구라 200자 안)
-const clipTitle = (title: string) => {
-  const chars = Array.from(title);
-  return chars.length > BODY_TITLE_MAX ? `${chars.slice(0, BODY_TITLE_MAX - 1).join('')}…` : title;
-};
-
-// 주인에게 알림 — 실패해도 던지지 않음. 보냈으면 true
-async function notifyOwner(s: Snapshot, ownerId: string, card: SharedCard, what: string): Promise<boolean> {
-  try {
-    const result = await callEdge<{ sent?: number }>(
-      'notify',
-      {
-        kind: 'ALARM_CHANGED',
-        targetUserId: ownerId,
-        alarmId: card.alarms[0].alarm_id,
-        title: '공유한 알람이 바뀌었어요',
-        body: `${profileOf(s, s.me)?.nickname ?? '친구'}님이 '${clipTitle(card.title)}' 알람을 ${what}`,
-      },
-      { timeoutMs: NOTIFY_TIMEOUT_MS },
-    );
-    return (result?.sent ?? 0) > 0;
-  } catch {
-    return false;
-  }
+// 주인에게 제안 알림 — 실패해도 던지지 않음. 보냈으면 true. 문구 · 시각 · 알람 종류는 서버가 제안 기록에서 가져옴(요청에는 받는 사람 · 알람 id만)
+async function notifyOwner(ownerId: string, alarmId: string): Promise<boolean> {
+  return sendPush({ kind: 'ALARM_CHANGED', targetUserId: ownerId, alarmId });
 }
 
-export async function setSharedAlarmEnabled(personId: string, cardId: string, enabled: boolean): Promise<SharedChangeResult> {
-  const s = await loadSnapshot();
-  const card = await loadCard(personId, cardId);
-  const nowMs = now().getTime();
-  const nowIso = new Date(nowMs).toISOString();
-  // 켤 때는 아직 안 지난 알람만 (끌 때는 전부)
-  const targets = enabled ? card.alarms.filter((a) => dbTimeMs(a.scheduled_at) > nowMs) : card.alarms;
-  if (!targets.length) throw new UserError(NOTHING_TO_TURN_ON);
-  const update = supabase.from('alarms').update({ is_enabled: enabled }).in('alarm_id', targets.map((a) => a.alarm_id));
-  const { data, error } = await (enabled ? update.gt('scheduled_at', nowIso) : update).select('alarm_id');
+// 시각 제안 보내기 (G04 [보내기] · [원래대로]) — 화면이 본 알람(카드에서 켜져 있고 아직 안 울린 가장 이른 것)의 새 시각. 서버가 권한 · 곧 울릴 알람 · ±60분을 다시 확인
+//   성공하면 상대에게 알림을 부르고(실패해도 제안은 그대로), 거절은 UserError로 이유를 알림
+export async function proposeSharedAlarm(personId: string, alarmId: string, newAt: Date): Promise<SharedChangeResult> {
+  const { data, error } = await supabase.rpc('propose_alarm_time', { p_alarm_id: alarmId, p_new_at: newAt.toISOString() });
   if (error) throw error;
-  if ((data?.length ?? 0) !== targets.length) throw new UserError(NO_EDIT); // RLS는 권한이 없으면 오류 없이 0행을 바꿈
-  remember(s.me, `${personOf(s, personId).short}님 알람 ${enabled ? '켬' : '끔'}`);
-  return { notified: await notifyOwner(s, personId, card, enabled ? '켰어요' : '껐어요') };
-}
-
-// 공유받은 알람 시각 옮기기 — minutes가 음수면 앞당김. 카드의 알람이 같이 움직임 (기상 · 준비 · 출발 간격 그대로)
-//   D35(옮길 수 있는 범위) · D52(누를 때마다 알림) 열림: 가짜 데이터와 같게 범위 제한 없이 누를 때마다 저장하고 알림
-export async function shiftSharedAlarm(personId: string, cardId: string, minutes: number): Promise<SharedChangeResult> {
-  const s = await loadSnapshot();
-  const card = await loadCard(personId, cardId);
-  // 앞당기면 아직 안 지난 켜진 알람이 지금 + 5분 안쪽으로 들어오는지 — 이미 지난 알람은 더 지나도 바뀌는 게 없고, 늦출 때는 해당 없음
-  if (minutes < 0) {
-    const nowMs = now().getTime();
-    const limit = nowMs + PAST_GRACE_MINUTES * 60_000;
-    const tooSoon = card.alarms.some((a) => {
-      const at = dbTimeMs(a.scheduled_at);
-      return a.is_enabled && at >= nowMs && at + minutes * 60_000 < limit;
-    });
-    if (tooSoon) throw new UserError(TOO_SOON);
-  }
-  const done: SharedAlarmRow[] = [];
-  try {
-    for (const alarm of card.alarms) {
-      const moved = new Date(parseDbTime(alarm.scheduled_at).getTime() + minutes * 60_000).toISOString();
-      const { data, error } = await supabase
-        .from('alarms')
-        .update({ scheduled_at: moved, time_source: 'MANUAL' })
-        .eq('alarm_id', alarm.alarm_id)
-        .select('alarm_id');
-      if (error) throw error;
-      if (!data?.length) throw new UserError(NO_EDIT);
-      done.push(alarm);
-    }
-  } catch (e) {
-    // 일부만 옮겨졌으면 되돌려서 기상 · 준비 · 출발 간격이 어긋나지 않게 (되돌리기도 실패하면 어쩔 수 없음)
-    for (const alarm of done) {
-      await supabase.from('alarms').update({ scheduled_at: alarm.scheduled_at, time_source: alarm.time_source }).eq('alarm_id', alarm.alarm_id);
-    }
-    throw e;
-  }
-  remember(s.me, `${personOf(s, personId).short}님 알람 ${Math.abs(minutes)}분 ${minutes < 0 ? '앞당김' : '늦춤'}`);
-  return { notified: await notifyOwner(s, personId, card, `${Math.abs(minutes)}분 ${minutes < 0 ? '앞당겼어요' : '늦췄어요'}`) };
+  const status = (data as { status?: unknown } | null)?.status;
+  if (status === 'TOO_SOON') throw new UserError(PROPOSE_TOO_SOON);
+  if (status === 'LIMIT') throw new UserError(PROPOSE_LIMIT);
+  if (status === 'SAME') throw new UserError(PROPOSE_SAME);
+  if (status === 'FORBIDDEN') throw new UserError(PROPOSE_FORBIDDEN);
+  if (status === 'INVALID') throw new UserError(PROPOSE_INVALID);
+  if (status !== 'OK') throw new Error(`propose_alarm_time: 모르는 상태 ${String(status)}`);
+  return { notified: await notifyOwner(personId, alarmId) };
 }

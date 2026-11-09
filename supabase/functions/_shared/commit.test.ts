@@ -92,6 +92,22 @@ test('새 약속: 약속 · 참여 조건 · 알람 4개를 만들고 예약 꾸
   assert.deepEqual(body.canceled_alarm_ids, []);
 });
 
+test('9-01: H05에서 고른 그룹(created.groupId)이 새 약속의 group_id로 저장되고 내 참여 조건 · 알람이 같이 생김 — 그룹을 안 골랐으면 null(개인 일정)', async () => {
+  const group = setup();
+  const body = await persistAppointment(group.ctx, commitArgs(newDraft(), { created: { title: '팀 회의', groupId: 'g-1' } }));
+  const [appointment] = group.db.rows('appointments');
+  assert.deepEqual([appointment.creator_id, appointment.group_id, appointment.title], [USER, 'g-1', '팀 회의']);
+  const [participant] = group.db.rows('appointment_participants');
+  assert.deepEqual([participant.appointment_id, participant.user_id], [appointment.appointment_id, USER]);
+  assert.equal(group.db.rows('alarms').length, 4);
+  assert.ok(group.db.rows('alarms').every((a) => a.user_id === USER && a.participant_id === participant.participant_id));
+  assert.equal(body.appointment_id, appointment.appointment_id);
+
+  const solo = setup();
+  await persistAppointment(solo.ctx, commitArgs(newDraft(), { created: { title: '개인 약속' } }));
+  assert.equal(solo.db.rows('appointments')[0].group_id, null);
+});
+
 test('새 약속: destination의 radiusM이 appointments.dest_radius_m으로 저장됨, 없으면 null', async () => {
   const withRadius = setup();
   await persistAppointment(withRadius.ctx, commitArgs(newDraft({ destination: { name: '세종대학교', lat: 37.55, lng: 127.07, radiusM: 250 } })));

@@ -21,16 +21,29 @@ const T1 = 'ExponentPushToken[aaaaaaaaaaaaaaaaaaaaaa]';
 const T2 = 'ExponentPushToken[bbbbbbbbbbbbbbbbbbbbbb]';
 const T3 = 'ExponentPushToken[cccccccccccccccccccccc]';
 const T4 = 'ExponentPushToken[dddddddddddddddddddddd]';
+const PROPOSAL = 'abababab-abab-4bab-8bab-abababababab';
+const NOW = new Date('2026-11-08T12:00:00.000Z'); // 한국 11/8 21:00 — 문구의 '내일'을 가르는 기준
+const HOUR = 3_600_000;
 
 const request = (over: Partial<NotifyRequest> = {}): NotifyRequest => ({ kind: 'ALARM_CHANGED', targetUserId: TARGET, ...over });
 
 type Sent = { to: string; title: string; body: string; channelId?: string; data: Record<string, unknown> };
 
-// can_send_push는 DB 함수라 여기서는 종류별로 "SENDER → TARGET이면 허용"으로 흉내 (WAKE_PING은 8장 전이라 늘 거절)
+// can_send_push는 DB 함수라 여기서는 종류별로 "SENDER → TARGET이면 허용"으로 흉내. 깨우기(WAKE_PING) 판정 plan_wake_ping도 DB 함수 — 기본은 '보낼 수 있음'(reserve면 count 1)
 function setup(allowed: string[] = ['ALARM_CHANGED', 'FRIEND_REQUEST', 'FRIEND_ACCEPTED']) {
   const db = new FakeDb();
   db.rpcHandlers.can_send_push = (a) => allowed.includes(String(a.p_kind)) && a.p_sender_id === SENDER && a.p_target_id === TARGET;
-  db.rows('alarms').push({ alarm_id: ALARM, user_id: TARGET });
+  // 깨우기는 can_send_push 없이 plan_wake_ping이 권한까지 판정 — 여기서는 SENDER → TARGET이면 보이는 사람(그룹 GROUP), 아니면 FORBIDDEN. send_id · group_id는 서버 안쪽 값
+  db.rpcHandlers.plan_wake_ping = (a) =>
+    a.p_sender !== SENDER || a.p_target !== TARGET || (a.p_group_id !== undefined && a.p_group_id !== GROUP)
+      ? { status: 'FORBIDDEN' }
+      : a.p_reserve
+        ? { status: 'OK', group_id: GROUP, count: 1, limit: 3, next_at: '2026-11-10T07:10:00Z', send_id: 7 }
+        : { status: 'OK', group_id: GROUP };
+  db.rows('push_sends').push({ send_id: 7, kind: 'WAKE_PING', sender_id: SENDER, target_id: TARGET });
+  db.rows('alarms').push({ alarm_id: ALARM, user_id: TARGET, alarm_type: 'WAKE' });
+  // 알람 바뀜(제안) 알림은 방금 보낸 대기 중 제안에서 시각을 가져옴 — 한국 7:00 → 7:10
+  db.rows('alarm_proposals').push({ proposal_id: PROPOSAL, alarm_id: ALARM, owner_id: TARGET, proposer_id: SENDER, from_at: '2026-11-08T22:00:00.000Z', to_at: '2026-11-08T22:10:00.000Z', status: 'PENDING', created_at: new Date(Date.now() - 10 * 60_000).toISOString() });
   db.rows('profiles').push({ user_id: SENDER, nickname: '수연', timezone: 'Asia/Seoul' }, { user_id: TARGET, nickname: '지형', timezone: 'Asia/Seoul' }, { user_id: OTHER, nickname: '남', timezone: 'Asia/Seoul' });
   db.rows('push_tokens').push({ user_id: TARGET, token: T1 }, { user_id: TARGET, token: T2 }, { user_id: OTHER, token: T3 });
   const pushes: Sent[] = [];
@@ -58,23 +71,58 @@ const quiet = async <T>(fn: () => Promise<T>): Promise<T> => {
 
 test('권한이 있으면 받는 사람의 토큰 전부(폰 2대)에 보냄 — 다른 사람 토큰은 안 건드림, can_send_push 인자 이름, 문구는 서버가 정함 (11-05 · 11-08)', async () => {
   const { db, service, pushes, fetchImpl } = setup();
-  const result = await runNotify(service, SENDER, request({ alarmId: ALARM, previousAt: '2026-11-08T22:00:00Z', newAt: '2026-11-08T22:10:00Z' }), { fetchImpl: fetchImpl(okAll), sleep: noSleep });
+  const result = await runNotify(service, SENDER, request({ alarmId: ALARM }), { fetchImpl: fetchImpl(okAll), sleep: noSleep, now: NOW });
 
   assert.deepEqual(result, { sent: 2, failed: 0 });
   assert.deepEqual(db.rpcCalls, [{ name: 'can_send_push', args: { p_sender_id: SENDER, p_target_id: TARGET, p_kind: 'ALARM_CHANGED' } }]);
   assert.deepEqual(pushes.map((p) => p.to).sort(), [T1, T2]);
-  assert.equal(pushes[0].title, '알람이 바뀌었어요');
-  assert.equal(pushes[0].body, '수연님이 알람을 바꿨어요 · 07:00 → 07:10');
+  assert.equal(pushes[0].title, '알람 제안');
+  assert.equal(pushes[0].body, '수연님이 내일 기상 알람을 7:00 → 7:10으로 제안했어요');
   assert.equal(pushes[0].channelId, 'alarm_change_v1');
-  // 알림 데이터: 종류 · 받는 사람 id(앱이 계정 대조) · 이동 경로 · 알람 id
-  assert.deepEqual(pushes[0].data, { kind: 'ALARM_CHANGED', recipientUserId: TARGET, path: '/alarms', alarmId: ALARM });
+  // 알림 데이터: 종류 · 받는 사람 id(앱이 계정 대조) · 이동 경로 · 알람 id · 제안 id
+  assert.deepEqual(pushes[0].data, { kind: 'ALARM_CHANGED', recipientUserId: TARGET, path: '/alarms', alarmId: ALARM, proposalId: PROPOSAL });
 });
 
-test('알람 바뀜 문구의 시각은 받는 사람 시간대의 HH:mm', async () => {
+test('10-25 · 10-37: 알림의 시각 · 알람 종류는 요청이 아니라 제안 기록에서 — 옛 앱이 보낸 previousAt · newAt은 무시(꾸밀 수 없음), 알람 id 없이 보내면 가장 최근 제안', async () => {
+  const { db, service, pushes, fetchImpl } = setup();
+  const req = readNotifyRequest(Reader.root({ kind: 'ALARM_CHANGED', targetUserId: TARGET, previousAt: '2026-01-01T00:00:00Z', newAt: '2026-01-01T00:10:00Z', title: '무료 쿠폰' }));
+  assert.deepEqual(req, { kind: 'ALARM_CHANGED', targetUserId: TARGET }); // 요청 모양에 시각이 안 남음
+  // 더 최근에 보낸 다른 알람(준비)의 제안이 있으면 알람 id 없이는 그쪽
+  const prepare = '12121212-1212-4212-8212-121212121212';
+  db.rows('alarms').push({ alarm_id: prepare, user_id: TARGET, alarm_type: 'PREPARE' });
+  db.rows('alarm_proposals').push({ proposal_id: 'cdcdcdcd-cdcd-4dcd-8dcd-cdcdcdcdcdcd', alarm_id: prepare, owner_id: TARGET, proposer_id: SENDER, from_at: '2026-11-08T22:20:00.000Z', to_at: '2026-11-08T22:25:00.000Z', status: 'PENDING', created_at: new Date(Date.now() - 60_000).toISOString() });
+  await runNotify(service, SENDER, req, { fetchImpl: fetchImpl(okAll), sleep: noSleep, now: NOW });
+  assert.ok(pushes.every((p) => p.body === '수연님이 내일 준비 알람을 7:20 → 7:25로 제안했어요' && p.data.alarmId === prepare));
+  pushes.length = 0;
+  await runNotify(service, SENDER, request({ alarmId: ALARM }), { fetchImpl: fetchImpl(okAll), sleep: noSleep, now: NOW });
+  assert.ok(pushes.every((p) => p.body === '수연님이 내일 기상 알람을 7:00 → 7:10으로 제안했어요' && p.data.alarmId === ALARM));
+});
+
+test('알람 제안 알림: 방금(1시간 안) 보낸 대기 중 제안이 없으면 404 — 오래된 제안 · 응답한 제안 · 다른 사람에게 보낸 제안 · 다른 알람 id는 없는 것과 같음, 권한 판정은 DB 함수가 먼저', async () => {
+  const outcome = async (mutate: (db: FakeDb) => void, over: Partial<NotifyRequest> = {}) => {
+    const { db, service, pushes, fetchImpl } = setup();
+    mutate(db);
+    try {
+      await runNotify(service, SENDER, request(over), { fetchImpl: fetchImpl(okAll), sleep: noSleep, now: NOW });
+      return { ok: true, pushes: pushes.length };
+    } catch (e) {
+      return { status: e instanceof HttpError ? e.status : -1, pushes: pushes.length };
+    }
+  };
+  const first = (db: FakeDb) => db.rows('alarm_proposals')[0];
+  assert.deepEqual(await outcome((db) => { first(db).created_at = new Date(Date.now() - 2 * HOUR).toISOString(); }), { status: 404, pushes: 0 });
+  assert.deepEqual(await outcome((db) => { first(db).status = 'DISMISSED'; }), { status: 404, pushes: 0 });
+  assert.deepEqual(await outcome((db) => { first(db).proposer_id = OTHER; }), { status: 404, pushes: 0 });
+  assert.deepEqual(await outcome((db) => { first(db).owner_id = OTHER; }), { status: 404, pushes: 0 });
+  assert.deepEqual(await outcome(() => {}, { alarmId: '99999999-9999-4999-8999-999999999999' }), { status: 404, pushes: 0 });
+  assert.deepEqual(await outcome(() => {}), { ok: true, pushes: 2 });
+});
+
+test('알람 제안 문구의 날짜 말과 시각은 받는 사람 시간대 기준', async () => {
   const { db, service, pushes, fetchImpl } = setup();
   db.rows('profiles').find((p) => p.user_id === TARGET)!.timezone = 'America/New_York';
-  await runNotify(service, SENDER, request({ previousAt: '2026-11-08T22:00:00Z', newAt: '2026-11-08T22:10:00Z' }), { fetchImpl: fetchImpl(okAll), sleep: noSleep });
-  assert.equal(pushes[0].body, '수연님이 알람을 바꿨어요 · 17:00 → 17:10');
+  await runNotify(service, SENDER, request(), { fetchImpl: fetchImpl(okAll), sleep: noSleep, now: NOW });
+  assert.equal(pushes[0].body, '수연님이 오늘 기상 알람을 17:00 → 17:10으로 제안했어요'); // 뉴욕 11/8 17:00
 });
 
 test('11-09: 옛 앱이 보낸 title · body · data는 무시하고 고정 문구를 씀 — 요청은 받음 (남이 쓴 문구가 알림이 되지 않음)', async () => {
@@ -84,6 +132,14 @@ test('11-09: 옛 앱이 보낸 title · body · data는 무시하고 고정 문�
   await runNotify(service, SENDER, req, { fetchImpl: fetchImpl(okAll), sleep: noSleep });
   assert.ok(pushes.every((p) => p.title === '친구 요청' && p.body === '새 친구 요청이 도착했어요'));
   assert.ok(pushes.every((p) => p.data.recipientUserId === TARGET && p.data.path === '/friends'));
+});
+
+test('15-10: 본문에 다른 사람 이름(senderId · userId · sender · from)을 실어 보내도 읽지 않음 — 보낸 사람은 로그인한 사람 하나(runNotify의 인자)로만 정해짐', async () => {
+  const forged = readNotifyRequest(Reader.root({ kind: 'WAKE_PING', targetUserId: TARGET, senderId: OTHER, userId: OTHER, sender: OTHER, from: OTHER }));
+  assert.deepEqual(forged, { kind: 'WAKE_PING', targetUserId: TARGET });
+  const { db, service, fetchImpl } = setup(['WAKE_PING']);
+  await runNotify(service, SENDER, forged, { fetchImpl: fetchImpl(okAll), sleep: noSleep });
+  assert.ok(db.rpcCalls.length > 0 && db.rpcCalls.every((c) => c.args.p_sender === SENDER));
 });
 
 test('11-11: 권한이 없으면 403 — 토큰도 Expo도 건드리지 않음', async () => {
@@ -96,18 +152,151 @@ test('11-11: 권한이 없으면 403 — 토큰도 Expo도 건드리지 않음',
   assert.ok(!db.calls.includes('select push_tokens'));
 });
 
-test('깨우기(WAKE_PING)는 8장 전이라 DB 함수가 거절하는 대로 403, 허용되면 보낸 사람 이름이 든 고정 문구 (11-05 · 11-28)', async () => {
-  const { service, pushes, fetchImpl } = setup();
+test('깨우기(WAKE_PING)는 plan_wake_ping이 FORBIDDEN이면 403, 허용되면 보낸 사람 이름이 든 고정 문구 + 응답에 ping 상태 + 누르면 받는 사람의 기상 확인 /wake (11-05 · 11-28 · 8-02)', async () => {
+  const { db, service, pushes, fetchImpl } = setup([]);
   await assert.rejects(
-    () => runNotify(service, SENDER, request({ kind: 'WAKE_PING' }), { fetchImpl: fetchImpl(okAll), sleep: noSleep }),
+    () => runNotify(service, OTHER, request({ kind: 'WAKE_PING' }), { fetchImpl: fetchImpl(okAll), sleep: noSleep }),
     (e: unknown) => e instanceof HttpError && e.status === 403 && e.message.includes('깨우기'),
   );
   assert.deepEqual(pushes, []);
+  assert.ok(!db.rpcCalls.some((c) => c.name === 'can_send_push')); // 깨우기는 can_send_push(DB에서 늘 false)를 안 부르고 plan_wake_ping 한 곳에서 판정
 
-  const open = setup(['WAKE_PING']);
+  const open = setup([]);
   const result = await runNotify(open.service, SENDER, request({ kind: 'WAKE_PING' }), { fetchImpl: open.fetchImpl(okAll), sleep: noSleep });
-  assert.deepEqual(result, { sent: 2, failed: 0 });
-  assert.deepEqual(open.pushes.map((p) => [p.title, p.body, p.channelId, p.data.path]), [['깨우기', '수연님이 깨워요', 'friend_v1', '/wake'], ['깨우기', '수연님이 깨워요', 'friend_v1', '/wake']]);
+  assert.deepEqual(result, { sent: 2, failed: 0, ping: { status: 'OK', count: 1, limit: 3, next_at: '2026-11-10T07:10:00Z' } }); // send_id · group_id 같은 서버 안쪽 값은 앱에 안 줌
+  const path = '/wake'; // 받는 사람이 누르면 자기 기상 확인(H08, 8-02) — 보낸 사람 쪽 그룹 화면(G03)이 아님
+  assert.deepEqual(open.pushes.map((p) => [p.title, p.body, p.channelId, p.data.path]), [['깨우기', '수연님이 깨워요', 'friend_v1', path], ['깨우기', '수연님이 깨워요', 'friend_v1', path]]);
+  assert.ok(open.pushes.every((p) => p.data.kind === 'WAKE_PING' && p.data.recipientUserId === TARGET));
+});
+
+test('깨우기는 그룹 id를 받음 — 주면 그 그룹에서 보일 때만(plan_wake_ping에 p_group_id로 넘김, 아니면 403), 안 주면 서버가 정한 그룹. 다른 한 사람 종류에서는 그룹 id를 버림', async () => {
+  const { db, service, fetchImpl } = setup([]);
+  await runNotify(service, SENDER, request({ kind: 'WAKE_PING', groupId: GROUP }), { fetchImpl: fetchImpl(okAll), sleep: noSleep });
+  assert.deepEqual(db.rpcCalls.map((c) => c.args.p_group_id), [GROUP, GROUP]);
+  const other = setup([]);
+  await assert.rejects(
+    () => runNotify(other.service, SENDER, request({ kind: 'WAKE_PING', groupId: OTHER }), { fetchImpl: other.fetchImpl(okAll), sleep: noSleep }),
+    (e: unknown) => e instanceof HttpError && e.status === 403,
+  );
+  assert.deepEqual(other.pushes, []);
+  assert.deepEqual(readNotifyRequest(Reader.root({ kind: 'WAKE_PING', targetUserId: TARGET, groupId: GROUP })), { kind: 'WAKE_PING', targetUserId: TARGET, groupId: GROUP });
+  assert.deepEqual(readNotifyRequest(Reader.root({ kind: 'ALARM_CHANGED', targetUserId: TARGET, groupId: GROUP })), { kind: 'ALARM_CHANGED', targetUserId: TARGET });
+});
+
+test('8-차 · 8-14: 깨우기 순서 = 판정(권한 포함, 횟수 안 셈) → 토큰 조회 → 횟수 세기(reserve) → 발송, DB 함수 인자 이름은 p_sender · p_target · p_reserve', async () => {
+  const { db, service, fetchImpl } = setup([]);
+  await runNotify(service, SENDER, request({ kind: 'WAKE_PING' }), { fetchImpl: fetchImpl(okAll), sleep: noSleep });
+  assert.deepEqual(db.rpcCalls, [
+    { name: 'plan_wake_ping', args: { p_sender: SENDER, p_target: TARGET, p_reserve: false } },
+    { name: 'plan_wake_ping', args: { p_sender: SENDER, p_target: TARGET, p_reserve: true } },
+  ]);
+  const order = db.calls.filter((c) => c === 'select push_tokens' || c.startsWith('rpc plan_wake_ping'));
+  assert.deepEqual(order, ['rpc plan_wake_ping', 'select push_tokens', 'rpc plan_wake_ping']);
+});
+
+test('8-14(보강): 센 뒤에 푸시가 한 건도 못 나가면(전송 실패) 센 줄을 지워 횟수를 돌려놓고 ping.status = NO_TOKENS — 하나라도 나가면 센 채로 둠', async () => {
+  const bad = setup([]);
+  const failedAll = await quiet(() => runNotify(bad.service, SENDER, request({ kind: 'WAKE_PING' }), { fetchImpl: async () => new Response('down', { status: 503 }), sleep: noSleep }));
+  assert.deepEqual(failedAll, { sent: 0, failed: 2, reason: 'PUSH_UNAVAILABLE', ping: { status: 'NO_TOKENS' } });
+  assert.equal(bad.db.rows('push_sends').length, 0); // send_id 7이 지워짐
+
+  const half = setup([]);
+  const some = await runNotify(half.service, SENDER, request({ kind: 'WAKE_PING' }), { fetchImpl: half.fetchImpl((to) => (to === T2 ? { status: 'error', message: 'x', details: { error: 'MessageRateExceeded' } } : okAll(to))), sleep: noSleep });
+  assert.equal(some.sent, 1);
+  assert.equal(some.ping?.status, 'OK');
+  assert.equal(half.db.rows('push_sends').length, 1); // 한 대라도 받았으면 횟수는 센 채로
+
+  const undoFails = setup([]);
+  undoFails.db.failOn.push({ table: 'push_sends', op: 'delete' });
+  const res = await quiet(() => runNotify(undoFails.service, SENDER, request({ kind: 'WAKE_PING' }), { fetchImpl: async () => new Response('down', { status: 503 }), sleep: noSleep }));
+  assert.equal(res.ping?.status, 'NO_TOKENS'); // 되돌리기가 실패해도 푸시 요청은 끝난 일 — 오류로 만들지 않음
+});
+
+test('8-14(탈퇴): 판정과 프로필 조회 사이에 받는 사람이 사라지면 횟수를 안 세고 NO_TOKENS', async () => {
+  const { db, service, pushes, fetchImpl } = setup([]);
+  db.tables.profiles = db.rows('profiles').filter((p) => p.user_id !== TARGET);
+  const result = await runNotify(service, SENDER, request({ kind: 'WAKE_PING' }), { fetchImpl: fetchImpl(okAll), sleep: noSleep });
+  assert.deepEqual(result, { sent: 0, failed: 0, reason: 'NO_TOKENS', ping: { status: 'NO_TOKENS' } });
+  assert.deepEqual(pushes, []);
+  assert.deepEqual(db.rpcCalls.map((c) => c.args.p_reserve), [false]);
+});
+
+test('8-사: 앱에 돌려주는 ping은 약속한 칸만 — 판정 함수가 더 얹은 값(send_id · group_id · 모르는 칸)은 안 나감', async () => {
+  const { db, service, fetchImpl } = setup([]);
+  db.rpcHandlers.plan_wake_ping = (a) => (a.p_reserve ? { status: 'OK', group_id: GROUP, count: 2, limit: 3, next_at: 'N', resets_at: 'R', send_id: 7, secret: 'x' } : { status: 'OK', group_id: GROUP });
+  const result = await runNotify(service, SENDER, request({ kind: 'WAKE_PING' }), { fetchImpl: fetchImpl(okAll), sleep: noSleep });
+  assert.deepEqual(result.ping, { status: 'OK', count: 2, limit: 3, next_at: 'N', resets_at: 'R' });
+  const blocked = setup([]);
+  blocked.db.rpcHandlers.plan_wake_ping = () => ({ status: 'WAIT', group_id: GROUP, next_at: 'N', send_id: 9, secret: 'x' });
+  const res = await runNotify(blocked.service, SENDER, request({ kind: 'WAKE_PING' }), { fetchImpl: blocked.fetchImpl(okAll), sleep: noSleep });
+  assert.deepEqual(res, { sent: 0, failed: 0, ping: { status: 'WAIT', next_at: 'N' } });
+});
+
+test('8-01 · 8-05 · 8-06 · 8-08 · 8-10: 못 보내는 이유(아직 안 울림 · 이미 일어남 · 5분 · 하루 3번 · 받기 꺼짐)는 오류가 아니라 ping 상태로 — 푸시도 토큰 조회도 횟수 세기도 없음', async () => {
+  const cases: Record<string, unknown>[] = [
+    { status: 'NOT_RINGING' },
+    { status: 'ALREADY_UP' },
+    { status: 'WAIT', next_at: '2026-11-10T07:10:00Z' },
+    { status: 'DAILY_LIMIT', resets_at: '2026-11-10T15:00:00Z' },
+    { status: 'OFF' },
+  ];
+  for (const verdict of cases) {
+    const { db, service, pushes, fetchImpl } = setup(['WAKE_PING']);
+    db.rpcHandlers.plan_wake_ping = () => verdict;
+    const result = await runNotify(service, SENDER, request({ kind: 'WAKE_PING' }), { fetchImpl: fetchImpl(okAll), sleep: noSleep });
+    assert.deepEqual(result, { sent: 0, failed: 0, ping: verdict });
+    assert.deepEqual(pushes, []);
+    assert.ok(!db.calls.includes('select push_tokens'));
+    assert.equal(db.rpcCalls.filter((c) => c.name === 'plan_wake_ping').length, 1); // 판정만 — 횟수는 안 셈
+  }
+});
+
+test('8-14: 받는 사람 토큰이 없으면 횟수를 안 세고(reserve 안 부름) ping.status = NO_TOKENS', async () => {
+  const { db, service, pushes, fetchImpl } = setup(['WAKE_PING']);
+  db.tables.push_tokens = [];
+  const result = await runNotify(service, SENDER, request({ kind: 'WAKE_PING' }), { fetchImpl: fetchImpl(okAll), sleep: noSleep });
+  assert.deepEqual(result, { sent: 0, failed: 0, reason: 'NO_TOKENS', ping: { status: 'NO_TOKENS' } });
+  assert.deepEqual(pushes, []);
+  assert.deepEqual(db.rpcCalls.filter((c) => c.name === 'plan_wake_ping').map((c) => c.args.p_reserve), [false]);
+});
+
+test('8-차: 판정과 횟수 세기 사이에 다른 요청이 먼저 보냈으면(reserve가 WAIT) 푸시를 안 보냄', async () => {
+  const { db, service, pushes, fetchImpl } = setup(['WAKE_PING']);
+  db.rpcHandlers.plan_wake_ping = (a) => (a.p_reserve ? { status: 'WAIT', next_at: '2026-11-10T07:10:00Z' } : { status: 'OK' });
+  const result = await runNotify(service, SENDER, request({ kind: 'WAKE_PING' }), { fetchImpl: fetchImpl(okAll), sleep: noSleep });
+  assert.deepEqual(result, { sent: 0, failed: 0, ping: { status: 'WAIT', next_at: '2026-11-10T07:10:00Z' } });
+  assert.deepEqual(pushes, []);
+});
+
+test('8-33: 판정은 통과했는데 횟수 세기(reserve) 때 그새 일어났으면(ALREADY_UP) 푸시를 안 보내고 ping.status ALREADY_UP으로 돌려줌 — 보낸 사람이 "이미 일어났어요"를 봄', async () => {
+  const { db, service, pushes, fetchImpl } = setup(['WAKE_PING']);
+  db.rpcHandlers.plan_wake_ping = (a) => (a.p_reserve ? { status: 'ALREADY_UP' } : { status: 'OK' });
+  const result = await runNotify(service, SENDER, request({ kind: 'WAKE_PING' }), { fetchImpl: fetchImpl(okAll), sleep: noSleep });
+  assert.deepEqual(result, { sent: 0, failed: 0, ping: { status: 'ALREADY_UP' } });
+  assert.deepEqual(pushes, []);
+  assert.deepEqual(db.rpcCalls.map((c) => c.args.p_reserve), [false, true]); // 판정 → 횟수 세기에서 멈춤
+});
+
+test('8-11 · 8-35: 기상이 안 보이는 사람(DB 판정 FORBIDDEN)은 403 — 이유를 안 알려 줌. 모르는 응답이나 DB 오류는 500', async () => {
+  const forbidden = setup(['WAKE_PING']);
+  forbidden.db.rpcHandlers.plan_wake_ping = () => ({ status: 'FORBIDDEN' });
+  await assert.rejects(
+    () => runNotify(forbidden.service, SENDER, request({ kind: 'WAKE_PING' }), { fetchImpl: forbidden.fetchImpl(okAll), sleep: noSleep }),
+    (e: unknown) => e instanceof HttpError && e.status === 403 && e.message === '이 사람에게는 깨우기 알림을 보낼 수 없어요',
+  );
+  assert.deepEqual(forbidden.pushes, []);
+
+  for (const bad of [() => ({ status: 'SOMETHING' }), () => null, () => { throw new Error('boom'); }]) {
+    const s = setup(['WAKE_PING']);
+    s.db.rpcHandlers.plan_wake_ping = bad;
+    await quiet(() =>
+      assert.rejects(
+        () => runNotify(s.service, SENDER, request({ kind: 'WAKE_PING' }), { fetchImpl: s.fetchImpl(okAll), sleep: noSleep }),
+        (e: unknown) => e instanceof HttpError && e.status === 500,
+      ),
+    );
+    assert.deepEqual(s.pushes, []);
+  }
 });
 
 test('11-12 · 11-13: 친구 요청은 받는 사람에게만, 수락은 요청한 사람에게만 — 요청 채널, 고정 문구', async () => {
@@ -121,7 +310,7 @@ test('11-12 · 11-13: 친구 요청은 받는 사람에게만, 수락은 요청�
 
 test('알람 id는 받는 사람의 알람이어야 함 (남의 알람 id로 알림을 꾸미지 못함)', async () => {
   const { db, service, pushes, fetchImpl } = setup();
-  db.rows('alarms').push({ alarm_id: '99999999-9999-4999-8999-999999999999', user_id: OTHER });
+  db.rows('alarms').push({ alarm_id: '99999999-9999-4999-8999-999999999999', user_id: OTHER, alarm_type: 'WAKE' });
   await assert.rejects(
     () => runNotify(service, SENDER, request({ alarmId: '99999999-9999-4999-8999-999999999999' }), { fetchImpl: fetchImpl(okAll), sleep: noSleep }),
     (e: unknown) => e instanceof HttpError && e.status === 404,
@@ -154,6 +343,7 @@ test('11-17 · 15-나: 없는 · 탈퇴한 · 권한 없는 · 차단된 대상�
     const withdrawn = await outcome(TARGET, kind, (db) => {                         // 탈퇴: 프로필이 사라지고 권한 판정도 거절
       db.tables.profiles = db.rows('profiles').filter((p) => p.user_id !== TARGET);
       db.rpcHandlers.can_send_push = () => false;
+      db.rpcHandlers.plan_wake_ping = () => ({ status: 'FORBIDDEN' });
     });
     assert.equal(noPermission.status, 403, kind);
     assert.deepEqual(neverExisted, noPermission, kind);
@@ -300,7 +490,7 @@ test('그룹 알림 DB 함수가 이상한 값을 돌려주면(모양 밖) 일�
 
 test('요청 읽기: 종류별 필수 칸 — 한 사람 종류는 targetUserId, 그룹 종류는 groupId(약속 변경은 appointmentId도), 모르는 종류 · 서버 전용 종류 · 이상한 UUID · 시각은 한 번에 알려 줌 (11-10)', () => {
   const ok = readNotifyRequest(Reader.root({ kind: 'ALARM_CHANGED', targetUserId: TARGET, alarmId: ALARM, previousAt: '2026-11-08T22:00:00Z', newAt: '2026-11-08T22:10:00Z' }));
-  assert.deepEqual(ok, { kind: 'ALARM_CHANGED', targetUserId: TARGET, alarmId: ALARM, previousAt: '2026-11-08T22:00:00.000Z', newAt: '2026-11-08T22:10:00.000Z' }); // 시각은 ISO로 정리
+  assert.deepEqual(ok, { kind: 'ALARM_CHANGED', targetUserId: TARGET, alarmId: ALARM }); // 옛 앱이 보낸 시각은 모양만 확인하고 안 씀(제안 기록에서)
 
   const issues = (input: unknown) => {
     try {
@@ -355,7 +545,7 @@ test('그룹 알림을 둘로 나눠 부를 수 있음: 받는 사람 정하기(
   const { service, pushes, fetchImpl, db } = groupSetup({ status: 'OK', group_name: '캡스톤팀', appointment_title: '팀 회의', recipients: [R1, R2] });
   const req = { kind: 'GROUP_APPT_CHANGED' as const, groupId: GROUP, appointmentId: APPT };
   const plan = await planGroupPush(service, SENDER, req);
-  assert.deepEqual(plan, { recipients: [R1, R2], groupName: '캡스톤팀', appointmentTitle: '팀 회의' });
+  assert.deepEqual(plan, { recipients: [R1, R2], silentRecipients: [], groupName: '캡스톤팀', appointmentTitle: '팀 회의' });
   assert.equal(pushes.length, 0); // 정하기만으로는 안 보냄
   const result = await sendGroupPush(service, req, plan, { fetchImpl: fetchImpl(okAll), sleep: noSleep }, { change: 'CANCELED', perRecipient: new Map([[R2, { needsConfirm: true }]]) });
   assert.deepEqual(result, { sent: 2, failed: 0 });
@@ -366,4 +556,64 @@ test('그룹 알림을 둘로 나눠 부를 수 있음: 받는 사람 정하기(
   await assert.rejects(() => planGroupPush(forbidden.service, SENDER, req), (e: unknown) => e instanceof HttpError && e.status === 403);
   // 앱 요청에서는 change를 읽지 않음 — 앱이 취소됨 문구 · 데이터를 직접 만들 수 없음
   assert.deepEqual(readNotifyRequest(Reader.root({ kind: 'GROUP_APPT_CHANGED', groupId: GROUP, appointmentId: APPT, change: 'CANCELED' })), req);
+});
+
+test('조용한 데이터 푸시: 알림을 끈 멤버 · 차단 쌍(silentRecipients)에게는 문구 없이 data만(알람 다시 맞추기), 보이는 알림은 설정대로 빠짐 — 보낸 수(sent)에는 안 더함', async () => {
+  const { service } = groupSetup({ status: 'OK', group_name: '캡스톤팀', appointment_title: '팀 회의', recipients: [R1], silent_recipients: [R2, OTHER] });
+  const req = { kind: 'GROUP_APPT_CHANGED' as const, groupId: GROUP, appointmentId: APPT };
+  const plan = await planGroupPush(service, SENDER, req);
+  assert.deepEqual(plan.silentRecipients, [R2, OTHER]);
+  const sentBodies: Record<string, unknown>[] = [];
+  const result = await sendGroupPush(
+    service,
+    req,
+    plan,
+    {
+      fetchImpl: async (_url, init) => {
+        const body = JSON.parse(init?.body as string) as Record<string, unknown>[];
+        sentBodies.push(...body);
+        return new Response(JSON.stringify({ data: body.map((b, i) => ({ status: 'ok', id: `t-${sentBodies.length}-${i}` })) }));
+      },
+      sleep: noSleep,
+    },
+    { change: 'CHANGED', perRecipient: new Map([[R2, { needsConfirm: true }]]) },
+  );
+  assert.deepEqual(result, { sent: 1, failed: 0 }); // 보이는 알림은 R1 한 곳
+  const visible = sentBodies.filter((b) => 'title' in b);
+  const quiet = sentBodies.filter((b) => !('title' in b));
+  assert.deepEqual(visible.map((b) => (b.data as Record<string, unknown>).recipientUserId), [R1]);
+  const T5 = 'ExponentPushToken[eeeeeeeeeeeeeeeeeeeeee]'; // groupSetup이 OTHER에게 둔 토큰
+  assert.deepEqual(
+    quiet.map((b) => [b.to, b._contentAvailable, (b.data as Record<string, unknown>).recipientUserId, (b.data as Record<string, unknown>).silent, (b.data as Record<string, unknown>).change, (b.data as Record<string, unknown>).needsConfirm]),
+    [[T4, true, R2, true, 'CHANGED', true], [T5, true, OTHER, true, 'CHANGED', undefined]], // perRecipient 값(needsConfirm)은 조용한 쪽에도 실림
+  );
+  assert.ok(quiet.every((b) => !('channelId' in b) && !('sound' in b)));
+});
+
+test('조용한 푸시만 있는 경우(보이는 받는 사람이 없음)에도 보냄 — 보이는 알림 수는 0 · NO_TOKENS, 받는 사람이 아예 없으면 보내지 않음', async () => {
+  const { service, fetchImpl, pushes } = groupSetup({ status: 'OK', group_name: '캡스톤팀', appointment_title: '팀 회의', recipients: [], silent_recipients: [R1] });
+  const req = { kind: 'GROUP_APPT_CHANGED' as const, groupId: GROUP, appointmentId: APPT };
+  const plan = await planGroupPush(service, SENDER, req);
+  const result = await sendGroupPush(service, req, plan, { fetchImpl: fetchImpl(okAll), sleep: noSleep }, { change: 'CHANGED' });
+  assert.deepEqual(result, { sent: 0, failed: 0, reason: 'NO_TOKENS' });
+  assert.deepEqual(pushes.map((p) => p.data.recipientUserId), [R1]);
+  const none = groupSetup({ status: 'OK', group_name: '캡스톤팀', appointment_title: '팀 회의', recipients: [], silent_recipients: [] });
+  const planNone = await planGroupPush(none.service, SENDER, req);
+  assert.deepEqual(await sendGroupPush(none.service, req, planNone, { fetchImpl: none.fetchImpl(okAll), sleep: noSleep }), { sent: 0, failed: 0, reason: 'NO_TOKENS' });
+  assert.deepEqual(none.pushes, []);
+});
+
+test('조용한 푸시: 이미 보이는 알림을 받는 사람이 조용한 목록에도 있으면 보이는 알림 하나만, 조용한 푸시 실패는 failed에 합침, 목록의 문자열이 아닌 값은 버림', async () => {
+  const dup = groupSetup({ status: 'OK', group_name: '캡스톤팀', appointment_title: '팀 회의', recipients: [R1], silent_recipients: [R1, R2, 5, null] });
+  const req = { kind: 'GROUP_APPT_CHANGED' as const, groupId: GROUP, appointmentId: APPT };
+  const plan = await planGroupPush(dup.service, SENDER, req);
+  assert.deepEqual(plan.silentRecipients, [R1, R2]); // 문자열이 아닌 값은 버림
+  const wire: Record<string, unknown>[] = [];
+  const result = await sendGroupPush(dup.service, req, plan, { fetchImpl: async (_url, init) => {
+    const body = JSON.parse(init?.body as string) as Record<string, unknown>[];
+    wire.push(...body);
+    return new Response(JSON.stringify({ data: body.map((b) => ('title' in b ? { status: 'ok', id: 't' } : { status: 'error', message: 'x', details: { error: 'MessageRateExceeded' } })) }));
+  }, sleep: noSleep }, { change: 'CHANGED' });
+  assert.equal(wire.filter((b) => (b.data as Record<string, unknown>).recipientUserId === R1).length, 1); // R1은 한 번만
+  assert.deepEqual(result, { sent: 1, failed: 1 }); // 조용한 푸시(R2) 실패가 failed에 합쳐짐
 });

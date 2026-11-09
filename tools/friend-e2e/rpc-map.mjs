@@ -7,7 +7,7 @@ export const RPC = {
   find_profile: 'find_profile_by_handle', // 옛 모양(15장에서 지워짐) — search_by_handle이 없을 때만 씀
   join_group: 'join_group_by_invite_code',
   regen_code: 'regenerate_invite_code',
-  group_wake: 'get_group_wake_status',
+  group_wake: 'get_group_wake', // 15장(#434)부터 대본은 줄인 응답(get_group_wake)만 씀. 11칸짜리 get_group_wake_status는 내 줄 상세용으로 남아 있음
   shared_alarms: 'get_shared_alarm_appointments',
   register_push_token: 'register_push_token',
 
@@ -33,6 +33,19 @@ export const RPC = {
   group_invites: 'my_group_invites',
   group_code: 'my_group_code',
 
+  // 6 · 7 · 8 · 10 · 12장 (main) — 서버 전용(service_role)은 admin으로 부름
+  save_group_permissions: 'save_group_permissions',
+  wake_hide: 'set_wake_hidden', // 7장: 사람별 기상 숨기기
+  wake_ping: 'plan_wake_ping', // 8장 깨우기 판정 · 횟수 세기 (서버 전용)
+  unconfirmed_batch: 'claim_wake_nudges', // 8장 미확인 친구 알림 받는 사람 정하기 (서버 전용)
+  my_wake_pings: 'my_wake_pings',
+  alarm_suggest: 'propose_alarm_time', // 10장
+  alarm_suggest_apply: 'respond_alarm_proposal',
+  my_proposals: 'my_alarm_proposals',
+  sent_proposals: 'sent_alarm_proposals',
+  prepare_account_delete: 'prepare_account_delete', // 12장 (서버 전용)
+  account_summary: 'my_account_delete_summary',
+
   // 4장 (PR #380) — 입력 모양은 S1이 만든 뒤 맞춤
   block_user: 'block_user',
   unblock_user: 'unblock_user',
@@ -40,15 +53,6 @@ export const RPC = {
   submit_report: 'submit_report',
 
   // 아직 이름 없음 ( 5 · 6 · 7 · 8 · 9 · 10 · 12장)
-  save_permissions: null, // 6장 저장 (설정⊂조회)
-  wake_confirm: null, // 7장 기상 확인
-  wake_hide: null, // 7장 특정 멤버에게 기상 숨기기
-  wake_ping: null, // 8장 깨우기
-  unconfirmed_batch: null, // 8장 미확인 알림 (배치)
-  join_appointment: null, // 9장 [내 알람 만들기]
-  alarm_suggest: null, // 10장 알람 바꾸기 제안 보내기
-  alarm_suggest_apply: null, // 10장 제안 [적용]
-  prepare_account_delete: null, // 12장 탈퇴 준비
 };
 
 // 이름이 있고 DB에도 있을 때만 이름을 돌려줌

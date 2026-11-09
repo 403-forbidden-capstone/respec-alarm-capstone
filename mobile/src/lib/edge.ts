@@ -45,6 +45,7 @@ export const UNPROCESSABLE_MESSAGES: Record<string, string> = {
   DEPARTURE_PASSED: '출발 시각이 이미 지나서 저장할 수 없어요',
   ORDER: '알람 순서가 맞지 않아요. 기상 → 준비 → 출발 순서로 맞춰 주세요',
   PAST_TIME: '이미 지난 시각이에요. 다른 시각을 골라 주세요',
+  PAST_APPOINTMENT: '지난 약속이에요', // 지난 공동 약속은 고치기 · 새 참여 모두 막힘 (친구 9장 9-32)
 };
 
 // 서버 본문 { error: { code, message, details } }이 아닐 때(Supabase 게이트웨이가 토큰을 거절하는 경우 등) HTTP 상태로 짐작

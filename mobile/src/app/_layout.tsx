@@ -14,6 +14,7 @@ import { ConfigErrorScreen } from '@/features/auth/ConfigErrorScreen';
 import { PermissionPromptHost } from '@/features/permissions';
 import { ProfileRetryScreen } from '@/features/auth/ProfileRetryScreen';
 import { useDetectionLinks } from '@/features/location/hooks/useDetectionLinks';
+import { usePushLinks } from '@/features/push/usePushLinks';
 import { useLocationSync } from '@/features/location/useLocationSync';
 import { useAlarmSync } from '@/lib/alarmSync/useAlarmSync';
 import { takeAfterOnboarding } from '@/lib/afterOnboarding';
@@ -21,6 +22,7 @@ import { takePendingInvite } from '@/lib/pendingInvite';
 import { ONBOARDING_IN_FLOW, TIMETABLE_PATHS } from '@/lib/flags';
 import { canUseRealData, configError } from '@/lib/mode';
 import { ensureNotificationChannels } from '@/lib/push/channels';
+import { usePushRegistration } from '@/lib/push/usePushRegistration';
 import { colors, fontFiles } from '@/theme';
 // 지오펜스 신호를 받는 작업 정의 — 앱이 꺼진 채 받는 길은 진입 파일(index.js)이 먼저 불러 줌. 여기 import는 같은 모듈이라 한 번만 평가됨 (features/location/task)
 import '@/features/location/task';
@@ -65,9 +67,9 @@ export default function RootLayout() {
 //   (로그아웃 상태에서 울려도 끌 수 있게). 해제 뒤 기상 확인(wake)으로의 이동은 ring.tsx가 항상 시도하고, 로그인 전이면 아래 Protected 가드가 막음 (그때 화면이 어디로 가는지는 에뮬레이터 확인 대상)
 // dev/* · auth/callback은 어느 쪽에서도 열림 (로그인 화면의 "알람 테스트"가 dev/alarm-test로 감). 앱 화면을 새로 만들면 첫 번째 Protected 안에 넣음
 function RootStack() {
-  const { session, profile, loading, enabled, needsOnboarding, profileError, refreshProfile } = useAuth();
+  const { session, profile, loading, enabled, needsOnboarding, needsReconsent, profileError, refreshProfile } = useAuth();
   const needsLogin = enabled && !session;
-  const ready = !needsLogin && !needsOnboarding;
+  const ready = !needsLogin && !needsOnboarding && !needsReconsent;
   const preview = !enabled && canUseRealData; // 가짜 모드에서 login · onboarding을 열어 보기 (실데이터를 쓸 수 있을 때만)
   const ringEntry = usePathname() === '/ring'; // 알람 울림 화면으로 들어옴 (알람 코어의 길잡이 화면 · 딥링크)
 
@@ -88,6 +90,10 @@ function RootStack() {
 
   // 감지 안내 알림("출발 8:30 감지")을 누르면 정정 화면(/detection)으로 — 앱이 꺼진 채 알림으로 열린 경우도. 화면이 열릴 수 있을 때까지 기억해 둠
   useDetectionLinks({ active: ready && !loading && profileError == null });
+
+  // 친구 · 그룹 푸시 — 토큰 등록(로그인 직후 · 앞에 올 때) + 알림을 누르면 그 화면으로(받는 사람이 지금 계정일 때만, 아니면 홈) · 받으면 폰 알람 맞추기 — features/push, lib/push
+  usePushRegistration({ active: syncActive, userId });
+  usePushLinks({ active: ready && !loading && profileError == null, userId });
 
   // 같은 때에 최근에 끈 기상 알람 중 확정이 없는 것을 다시 판정 — 해제 뒤 앱을 안 열었어도 서버가 기상 미확인(MISSED)으로 적기 전에 확정되게
   useWakeRecheck({ active: syncActive, userId });
@@ -148,12 +154,18 @@ function RootStack() {
       <Stack.Protected guard={ONBOARDING_IN_FLOW && (needsOnboarding || preview)}>
         <Stack.Screen name="onboarding" />
       </Stack.Protected>
+      {/* 개인정보 안내 판이 올라갔을 때 동의만 다시 받는 화면 (친구 13-14) — 동의를 저장하면 프로필을 다시 읽어 이 화면은 사라지고 홈으로 */}
+      <Stack.Protected guard={needsReconsent}>
+        <Stack.Screen name="reconsent" />
+      </Stack.Protected>
       {/* 알람 울림(H07) — 가드 없이 늘 열림(로그인 · 온보딩 · 읽는 중에도). 이미 켜진 앱에 길잡이 화면의 딥링크가 와도 열려야 함
           — 예전 가드(ready || 지금 주소가 /ring)는 로그인 전에 켜져 있던 앱에서 /ring으로 가는 길을 막아 6초 뒤 네이티브 대체 화면이 떴음 (11/5 에뮬레이터)
           맨 끝에 두는 이유: 막힌 화면으로 가면 열린 화면 중 앞의 것으로 보내므로, 앞에 두면 로그인 전 사용자가 홈 대신 울림 화면으로 감 */}
       <Stack.Screen name="ring" options={{ animation: 'fade' }} />
       {/* 초대 · 친구 링크 착지 (친구 2장) — 로그인 전에 열려도 화면이 토큰을 적어 두고 로그인으로 보냄. 가드가 막으면 토큰이 사라지므로 가드 없이 늘 열어 둠 */}
       <Stack.Screen name="invite" />
+      {/* 웹 계정 삭제 요청 안내 (친구 12-사) — 로그인 없이 열려야 하는 Play 의무 페이지라 가드 없음 */}
+      <Stack.Screen name="account-deletion" />
     </Stack>
   );
 }

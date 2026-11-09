@@ -13,6 +13,7 @@ import { loadProfile } from './plan.ts';
 import type { NewAppointment, StandaloneInput } from './requests.ts';
 import { buildRingPackages, canceledAlarmIds, subtitleFor } from './ring-package.ts';
 import type { Db } from './supabase.ts';
+import { localDayRange } from './tz.ts';
 
 export type CommitCtx = {
   userId: string;
@@ -81,8 +82,9 @@ export async function persistAppointment(
 ) {
   const { service, userId, now } = ctx;
   const { plan, inputs, created, draft } = args;
-  // 지난 공동 약속에는 참여 조건을 새로 만들 수 없음 (9-32 · DB 정책 appointment_participants_insert_own와 같은 규칙). 이미 참여 중인 사람의 고치기는 그대로
-  if (inputs.appointment && !inputs.participant && inputs.appointment.group_id != null && Date.parse(inputs.appointment.appointment_at) <= now.getTime()) {
+  // 지난 공동 약속에는 참여 조건을 새로 만들 수 없음 (9-32 · DB 정책 appointment_participants_insert_own와 같은 규칙). 이미 참여 중인 사람의 고치기는 그대로.
+  //   '지난'은 하루 경계 — 내 폰 시간대의 오늘 0시보다 앞의 약속 (오늘 이미 지난 약속은 오늘 안에는 참여할 수 있음, 9-러)
+  if (inputs.appointment && !inputs.participant && inputs.appointment.group_id != null && Date.parse(inputs.appointment.appointment_at) < localDayRange(now, args.timeZone).start.getTime()) {
     throw new HttpError('UNPROCESSABLE', '지난 약속이에요', { reason: 'PAST_APPOINTMENT' });
   }
 

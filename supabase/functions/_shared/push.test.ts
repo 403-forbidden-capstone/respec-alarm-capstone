@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { EXPO_PUSH_URL, sendExpoPush } from './push.ts';
+import { EXPO_PUSH_URL, type FetchLike, sendExpoMessages, sendExpoPush } from './push.ts';
 
 const T1 = 'ExponentPushToken[aaaaaaaaaaaaaaaaaaaaaa]';
 const T2 = 'ExpoPushToken[bbbbbbbbbbbbbbbbbbbbbb]';
@@ -98,4 +98,40 @@ test('토큰이 없으면 호출 없이 0', async () => {
     },
   });
   assert.deepEqual(result, { sent: 0, failed: 0, invalidTokens: [] });
+});
+
+test('조용한 데이터 푸시(silent): 문구 · 소리 · 채널 없이 data만 + _contentAvailable, 보이는 알림과 섞여도 각자 모양대로', async () => {
+  let body: Record<string, unknown>[] = [];
+  const result = await sendExpoMessages(
+    [
+      { to: T1, title: '캡스톤팀', body: '약속이 바뀌었어요', channelId: 'group_v1', data: { kind: 'GROUP_APPT_CHANGED' } },
+      { to: T2, title: '', body: '', silent: true, channelId: 'group_v1', data: { kind: 'GROUP_APPT_CHANGED', silent: true } },
+    ],
+    {
+      fetchImpl: async (_url, init) => {
+        body = JSON.parse(init?.body as string);
+        return new Response(JSON.stringify({ data: [{ status: 'ok' }, { status: 'ok' }] }));
+      },
+    },
+  );
+  assert.deepEqual([result.sent, result.failed], [2, 0]);
+  assert.deepEqual(body[0], { to: T1, title: '캡스톤팀', body: '약속이 바뀌었어요', data: { kind: 'GROUP_APPT_CHANGED' }, sound: 'default', priority: 'high', channelId: 'group_v1' });
+  assert.deepEqual(body[1], { to: T2, data: { kind: 'GROUP_APPT_CHANGED', silent: true }, priority: 'high', _contentAvailable: true });
+});
+
+test('Expo가 응답을 안 주면 시간 제한(timeoutMs)에서 끊고 그 묶음을 실패로 셈 — 한 번 더 보내 본 뒤에도 안 오면 PUSH_UNAVAILABLE', async () => {
+  let calls = 0;
+  const signals: boolean[] = [];
+  const hang: FetchLike = (_url, init) =>
+    new Promise((_resolve, reject) => {
+      calls += 1;
+      signals.push(init?.signal instanceof AbortSignal);
+      init?.signal?.addEventListener('abort', () => reject(new Error('aborted')));
+    });
+  const started = Date.now();
+  const result = await sendExpoMessages([{ to: T1, ...message }], { fetchImpl: hang, timeoutMs: 20, sleep: async () => {} });
+  assert.ok(Date.now() - started < 3000); // 옵션이 쓰여 20ms 만에 끊김 (기본 10초였다면 20초 가까이)
+  assert.equal(calls, 2); // 처음 + 다시 보내기 1번
+  assert.deepEqual(signals, [true, true]);
+  assert.deepEqual([result.sent, result.failed, result.reason], [0, 1, 'PUSH_UNAVAILABLE']);
 });

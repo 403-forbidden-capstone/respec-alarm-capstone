@@ -44,13 +44,12 @@ export function isValidSource(row: PermRow, friends: readonly FriendRow[], membe
 }
 
 // private.granted_owner_ids — 권한 행이 실제로 효력을 가진 값. 출처가 끝난 행은 null
-//   기상 조회(viewWake)의 그룹 권한은 준 사람(owner)이 그 그룹에서 기상 공유에 동의(wake_share_opt_in)했을 때만 인정 (D19 열림 — 보수 기본값)
+//   기상 조회(viewWake)는 권한 행의 값이 아니라 그룹 기상 공유 동의 하나로만 (친구 6장, Q13 · D19): 그룹 출처는 준 사람(owner)이 그 그룹에서
+//   동의(wake_share_opt_in)했을 때, 친구 출처는 항상 없음 (친구 출처 기상 조회 행은 서버가 이제 못 넣음)
 export function effectiveOf(row: PermRow, friends: readonly FriendRow[], members: readonly MemberRow[]): PermissionSet | null {
   if (!isValidSource(row, friends, members)) return null;
-  const consented =
-    row.source_type === 'FRIEND' ||
-    members.some((m) => m.group_id === row.source_id && m.user_id === row.owner_id && m.wake_share_opt_in);
-  return { viewAlarm: row.can_view_alarm, editAlarm: row.can_edit_alarm, viewWake: row.can_view_wake && consented };
+  const consented = row.source_type === 'GROUP' && members.some((m) => m.group_id === row.source_id && m.user_id === row.owner_id && m.invite_status === 'JOINED' && m.wake_share_opt_in);
+  return { viewAlarm: row.can_view_alarm, editAlarm: row.can_edit_alarm, viewWake: consented };
 }
 
 // 여러 관계의 권한을 항목별로 합침 — 하나라도 허용하면 허용 (4장 4.6 "최종 권한의 계산")

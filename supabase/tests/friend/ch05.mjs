@@ -278,16 +278,17 @@ export default async function ch05({ q, as, su, check, expectErr, PGlite, AUTH_S
       await su();
       return r;
     };
-    const okIns = async (inviter, target) => { await as(inviter); const r = await q(`insert into public.group_members (group_id, user_id, invite_status) values ($1, $2, 'INVITED') returning invited_by`, [Gx.g, target]); await su(); return r[0].invited_by; };
+    const okIns = async (inviter, target) => { const r = await inviteTo(inviter, Gx.g, target); return r.status === 'INVITED' ? (await member(Gx.g, target)).invited_by : r; };   // 초대는 함수로만 — 앱의 직접 insert 정책은 15장에서 닫힘
     const nonFriend = await ins(A, St);                 // 5-26
     const blocked = await ins(A, Bk);
     const othersFriend = await ins(Mm, Af);             // 만든 사람의 친구는 멤버 B의 친구가 아님
     const outsider = await ins(Out, Mf);                // 5-28: 멤버 아닌 사람이 남을 초대
+    const f7 = await inviteTo(Mm, Gx.g, Af);            // 5-26: 만든 사람의 친구는 멤버 Mm의 친구가 아니므로 Mm은 초대 못 함 (직접 insert 정책이 닫혀 위 insert는 늘 거절되니 함수로 규칙을 봄. 만든 사람이 Af를 초대하기 전에 불러야 함)
     const memberOwn = await okIns(Mm, Mf);              // 5-27
     const creatorOwn = await okIns(A, Af);
     const f1 = await inviteTo(A, Gx.g, St), f2 = await inviteTo(A, Gx.g, Bk), f3 = await inviteTo(Out, Gx.g, Mf), f4 = await inviteTo(A, Gx.g, A), f5 = await inviteTo(A, Gx.g, Mm), f6 = await inviteTo(A, Gx.g, NOBODY);
     return nonFriend === true && blocked === true && othersFriend === true && outsider === true && memberOwn === Mm && creatorOwn === A
-      && [f1, f2, f3, f6].every((x) => JSON.stringify(x) === JSON.stringify({ status: 'NOT_FOUND' })) && f4.status === 'SELF' && f5.status === 'ALREADY_MEMBER' ? true : { nonFriend, blocked, othersFriend, outsider, memberOwn, creatorOwn, f1, f2, f3, f4, f5, f6 };
+      && [f1, f2, f3, f6, f7].every((x) => JSON.stringify(x) === JSON.stringify({ status: 'NOT_FOUND' })) && f4.status === 'SELF' && f5.status === 'ALREADY_MEMBER' ? true : { nonFriend, blocked, othersFriend, outsider, memberOwn, creatorOwn, f1, f2, f3, f4, f5, f6 };
   });
 
   await check('5-29 · 5-30: 초대만 받은 사람은 그룹 표 · 멤버 목록 · 공개 프로필에서 그룹을 못 읽고(코드 포함), 받은 초대 카드로 그룹 이름 · 인원(참여 중만) · 초대한 사람만 봄', async () => {
@@ -544,7 +545,7 @@ export default async function ch05({ q, as, su, check, expectErr, PGlite, AUTH_S
     await su();
     // 멤버의 초대 행: 위조한 초대한 사람 · 알림 끄기는 서버 값으로
     await as(O);
-    await q(`insert into public.group_members (group_id, user_id, invite_status, invited_by, notifications_off) values ($1, $2, 'INVITED', $3, true)`, [K.g, F, Y]);
+    await q(`select public.invite_to_group($1, $2)`, [K.g, F]);        // 초대 행의 기록(초대한 사람 · 알림 끄기)은 함수가 정함 — 직접 insert 정책은 15장에서 닫힘
     const preJoin = await expectErr(() => q(`insert into public.group_members (group_id, user_id, invite_status, joined_at) values ($1, $2, 'INVITED', now())`, [K.g, F2]), /row-level security/);
     const preOpt = await expectErr(() => q(`insert into public.group_members (group_id, user_id, invite_status, wake_share_opt_in) values ($1, $2, 'INVITED', true)`, [K.g, F2]), /row-level security/);
     await su();

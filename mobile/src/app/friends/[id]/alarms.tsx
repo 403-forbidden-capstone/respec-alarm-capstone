@@ -1,43 +1,24 @@
 import { useLocalSearchParams } from 'expo-router';
-import { useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
-import { Card, Chip, confirm, LoadError, Loading, Screen, Sheet, Text, Timeline, toast, TopBar, TopBarButton } from '@/components/ui';
-import { getShareLog, getSharedAlarms, setSharedAlarmEnabled, shiftSharedAlarm } from '@/features/social/api';
+import { Card, Chip, LoadError, Loading, Screen, Text, toast, TopBar } from '@/components/ui';
+import { getSharedAlarms, proposeSharedAlarm } from '@/features/social/api';
+import { PROPOSE_NOTE, PROPOSE_SENT } from '@/features/social/proposalTexts';
 import { MemberAlarmCard } from '@/features/social/components/MemberAlarmCard';
 import { Note } from '@/features/social/components/Note';
-import type { ShareLogItem } from '@/features/social/types';
-import { formatTime } from '@/lib/format';
 import { useLoad } from '@/lib/useLoad';
 import { colors } from '@/theme';
 import { useAction } from '@/lib/useAction';
 import { backOrHome } from '@/lib/nav';
 
-// G04 공유받은 알람 — 친구 · 그룹원이 공유한 알람을 봄. 설정 권한이 있으면 켜기 · 끄기 · 5분 옮기기
-// 바꾸면 주인에게 알림(실데이터는 notify Edge Function, 알림이 안 가도 저장은 됨), 변경 기록은 이번 실행 동안만 남음 (docs/decisions.md D9 · D20)
+// G04 공유받은 알람 — 친구 · 그룹원이 공유한 알람을 봄. 설정 권한이 있으면 시각을 골라 [보내기](제안) · [원래대로] — 끄기 · 삭제는 없음 (친구 10장)
+// 제안을 보내면 주인에게 알림(실데이터는 notify Edge Function, 알림이 안 가도 제안은 저장됨), 변경 기록 시트는 없음 (친구 논리설계 10장 · docs/decisions.md D9 · D20)
 export default function SharedAlarmsScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { data, error, reload } = useLoad(() => getSharedAlarms(id));
-  const { run } = useAction();
-  const [log, setLog] = useState<ShareLogItem[] | null>(null);
+  const { busy, run } = useAction();
 
-  async function openLog() {
-    setLog(await getShareLog());
-  }
-
-  const top = <TopBar onBack={backOrHome} screenId="G04" right={<TopBarButton label="변경 기록" onPress={openLog} />} />;
-  // 닫기는 시트 머리의 "닫기" 하나로 (아래에 또 두지 않음)
-  const logSheet = (
-    <Sheet visible={log != null} onClose={() => setLog(null)} title="변경 기록">
-      {log?.length ? (
-        <Timeline items={log.map((l) => ({ time: formatTime(l.at), label: l.text, source: '나' }))} />
-      ) : (
-        <Text variant="note" tone="sub" style={styles.empty}>
-          아직 바꾼 내용이 없어요.
-        </Text>
-      )}
-    </Sheet>
-  );
+  const top = <TopBar onBack={backOrHome} screenId="G04" />;
 
   if (data === undefined) return <Screen>{top}{error ? <LoadError onRetry={reload} /> : <Loading />}</Screen>;
   if (data === null) {
@@ -47,38 +28,24 @@ export default function SharedAlarmsScreen() {
         <Text variant="body" tone="sub">
           공유받은 알람이 없어요.
         </Text>
-        {logSheet}
       </Screen>
     );
   }
 
   const { person: p, canView, canEdit, tags, alarms } = data;
 
-  // 남의 알람을 끄는 것은 한 번 물음 — 상대가 그 알람으로 못 일어남. 켜는 것은 바로
-  // 연타해도 한 번씩 — 실데이터에선 "5분 앞당기기"를 두 번 누르면 두 번 옮겨질 수 있음
-  const toggle = async (alarmId: string, next: boolean) => {
-    if (!next) {
-      const ok = await confirm({
-        title: `${p.short}님의 알람을 끌까요?`,
-        message: `이 알람이 울리지 않아요. ${p.short}님에게 변경 알림이 가요.`,
-        okLabel: '끄기',
-        destructive: true,
-      });
-      if (!ok) return;
-    }
+  // 시각을 골라 [보내기] — 제안 한 줄(상대 알람은 그대로, 상대가 [적용]해야 바뀜). 연타해도 한 번씩 (한 번에 하나)
+  //   보낸 쪽에는 상대 알림이 닿았는지 알리지 않음(상대가 알림을 껐거나 토큰이 없다는 사실이 새지 않게) — 늘 '제안을 보냈어요'. 보냈으면 true
+  const propose = async (alarmId: string, newAt: Date): Promise<boolean> => {
+    let sent = false;
     await run(async () => {
-      const { notified } = await setSharedAlarmEnabled(p.id, alarmId, next);
-      toast(changedMessage(p.short, notified));
+      await proposeSharedAlarm(p.id, alarmId, newAt);
+      sent = true;
+      toast(PROPOSE_SENT);
       await reload();
     });
+    return sent;
   };
-
-  const shift = (alarmId: string, minutes: number) =>
-    run(async () => {
-      const { notified } = await shiftSharedAlarm(p.id, alarmId, minutes);
-      toast(changedMessage(p.short, notified));
-      await reload();
-    });
 
   return (
     <Screen>
@@ -112,29 +79,24 @@ export default function SharedAlarmsScreen() {
         <MemberAlarmCard
           key={a.id}
           alarm={a}
-          onToggle={canEdit ? (next) => toggle(a.id, next) : undefined}
-          onShift={canEdit ? (minutes) => shift(a.id, minutes) : undefined}
+          busy={busy}
+          onPropose={canEdit && a.firstAlarmId ? (newAt) => propose(a.firstAlarmId as string, newAt) : undefined}
         />
       ))}
 
       {canView ? (
         <Note>
-          {canEdit ? `변경하면 ${p.short}님에게 알림이 전송돼요.` : '알람 설정 권한이 없어 볼 수만 있어요.'}
+          {canEdit ? PROPOSE_NOTE(p.short) : '알람 설정 권한이 없어 볼 수만 있어요.'}
         </Note>
       ) : null}
 
-      {logSheet}
     </Screen>
   );
 }
-
-// 알림이 안 간 경우(상대가 알림을 받을 수 없는 상태 등)에도 알람은 바뀐 것 — 실패처럼 보이지 않게 조용히
-const changedMessage = (name: string, notified: boolean) => (notified ? `${name}님에게 변경 알림을 보냈어요` : `${name}님의 알람을 바꿨어요`);
 
 const styles = StyleSheet.create({
   title: { marginTop: 8, marginBottom: 4 },
   lead: { marginBottom: 18 },
   summary: { backgroundColor: colors.chip },
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 8 },
-  empty: { marginVertical: 6 },
 });

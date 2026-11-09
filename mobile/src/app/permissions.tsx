@@ -24,12 +24,15 @@ import { getReceived, getShareSettings, listRelations, saveShareSettings } from 
 import { GroupIcon } from '@/features/social/components/GroupIcon';
 import { PersonRow } from '@/features/social/components/PersonRow';
 import { permissionNames, togglePermission } from '@/features/social/permissions';
-import { PERMISSIONS, type PermissionSet, type Relation, type RelationId } from '@/features/social/types';
+import { PERMISSIONS, permissionsFor, VIEW_ALARM_NOTE, type PermissionSet, type Relation, type RelationId } from '@/features/social/types';
 import { useLoad } from '@/lib/useLoad';
 import { colors } from '@/theme';
 import { useAction } from '@/lib/useAction';
 import { useLeaveGuard } from '@/lib/useLeaveGuard';
 import { backOrHome } from '@/lib/nav';
+
+// 그룹 관계의 기상 상태 스위치 = 이 그룹에 내 기상 공유 동의 (친구 6장 — 기상은 권한 행이 아니라 그룹 동의 하나)
+const WAKE_CONSENT_DESCRIPTION = '이 그룹 멤버가 내 기상 확인 여부와 확인 시각을 볼 수 있어요. 켜면 이 그룹에 기상 공유를 동의한 것이에요.';
 
 type Side = 'give' | 'recv';
 
@@ -114,8 +117,9 @@ function Editor({
   // 다시 읽기에 실패하면 초안을 남겨 둠 — 저장된 값과 화면이 어긋나지 않게
   const save = () =>
     run(async () => {
-      if (!draft) return;
-      await saveShareSettings(relation.id, draft);
+      const values = draft ?? saved; // 그룹 관계는 값이 그대로여도 저장 (아래 canSave)
+      if (!values) return;
+      await saveShareSettings(relation.id, values);
       if (await reload()) {
         setDraft(null);
         toast(savedMessage(relation));
@@ -132,7 +136,9 @@ function Editor({
     if (!same) onPick(id);
   }
 
-  const footer = current && (side === 'give' || changed) ? <Button label="변경사항 저장" onPress={save} disabled={!changed} loading={busy} /> : undefined;
+  // 그룹 관계는 값이 그대로여도 저장할 수 있음 — 권한을 준 뒤 들어온 멤버는 조회만 자동으로 받으므로 설정은 다시 저장해야 그 사람 몫 행이 생김 (친구 6-15). 친구 관계는 바꾼 게 있을 때만
+  const canSave = changed || relation.kind === 'group';
+  const footer = current && (side === 'give' || changed) ? <Button label="변경사항 저장" onPress={save} disabled={!canSave} loading={busy} /> : undefined;
 
   return (
     <Screen footer={footer}>
@@ -162,13 +168,18 @@ function Editor({
         ) : (
           <>
             <Card>
-              {PERMISSIONS.map(({ key, name, description }, i) => (
+              {permissionsFor(relation.kind).map(({ key, name, description }, i) => (
                 <View key={key} style={[styles.toggleRow, i > 0 && styles.divider]}>
                   <View style={styles.grow}>
                     <Text variant="bodyStrong">{name}</Text>
                     <Text variant="small" tone="sub" style={styles.description}>
-                      {description}
+                      {key === 'viewWake' ? WAKE_CONSENT_DESCRIPTION : description}
                     </Text>
+                    {key === 'viewAlarm' ? (
+                      <Text variant="caption" tone="faint" style={styles.description}>
+                        {VIEW_ALARM_NOTE}
+                      </Text>
+                    ) : null}
                     {key === 'editAlarm' ? (
                       <Text variant="caption" tone="faint" style={styles.description}>
                         알람 설정을 켜면 알람 조회도 같이 켜져요. 알람 조회를 끄면 알람 설정도 꺼져요.

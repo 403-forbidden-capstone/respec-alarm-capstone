@@ -42,7 +42,7 @@
 | 일정 전체 켜기 · 끄기 (H01 · H02 카드) | DB 직접 (`alarms.is_enabled`, 도착 목표는 `mirrorArrive`) | `reconcile({ alarmIds })`로 그 알람만 |
 | S01 제안 적용 · 되돌리기 | DB 직접 — `alarms`(말소리 · 배경음 · 진동 칸) → `alarm_suggestions` → `user_edit_logs` insert. `alarm-commit`은 안 씀 (제안 종류에 시각이 없음) | `reconcile({ alarmIds })`로 그 알람만 |
 | 루틴 저장 (A04) | DB 직접 — `routines` + 단계 알람 `alarms`(없어진 단계는 지우지 않고 `is_enabled` false) | `reconcile({ alarmIds })` — 저장이 중간에 실패해도 바뀌었을 수 있는 알람은 맞춤 |
-| G04 켜기 · 끄기 · ±5분 | DB 직접 — 상대의 `alarms`(설정 권한이면 RLS가 허용) → 주인에게 `notify` (Edge). 앞당길 때 옮긴 시각이 지금 + 5분보다 이르게 되는 켜진 알람이 있으면 거절 | 주인 폰이 푸시를 받거나 앱이 앞에 올 때 맞춤 (내 폰에서 걸지 않음) |
+| G04 시각 제안(켜기 · 끄기는 없음) | RPC `propose_alarm_time` → 주인에게 `notify` (Edge). 설정 권한이 있어도 상대의 `alarms`를 직접 update하는 길은 11/9에 닫음(0행, 이슈 #427) — 바뀌는 것은 주인이 [적용]한 뒤. 앞당길 때 옮긴 시각이 지금 + 5분보다 이르게 되는 켜진 알람이 있으면 거절 | 주인 폰이 푸시를 받거나 앱이 앞에 올 때 맞춤 (내 폰에서 걸지 않음) |
 | 울림 기록 (해제 · 미루기 · 원탭) | 폰이 쌓아 둠 → `uploadEvents`가 `alarm_events`에 upsert (`client_event_id`가 같으면 무시) | 올린 것만 폰에서 지움 |
 | 홈 "미루기 취소" (기상 알람) | `alarm_events`에 `DISMISSED`(`MANUAL`) upsert → `AlarmCore.cancel` → H08. 기록이 먼저 (폰 `cancel`은 해제 기록을 안 남김) | 예약 취소 |
 | 기상 확정 (H08 · 앱이 앞에 올 때 다시 판정) | `alarm_events` `WAKE_CONFIRMED` + `daily_records.wake_confirmed_at` | — |
@@ -59,7 +59,9 @@
 - 기상 확인(H08)에 들어올 때 — `uploadEvents()` (해제 기록이 기상 확인보다 먼저 들어가게)
 - 같은 때(로그인 직후 · 앱이 앞에 올 때) — 최근 12시간에 끈 기상 알람 중 확정이 없는 것을 H08과 같은 판정으로 다시 보고 조건을 채웠으면 확정 기록 (`useWakeRecheck`, 자세히는 `alarm-core.md`)
 - 저장 직후 — `applyCommit(응답)`
-- 로그아웃 — `signOutAndCleanup()` (`lib/session`): 로그아웃 중 표시 켜기(`setSigningOut`) → 기록 올려 보기 → 맞추기와 같은 줄에서 `AlarmCore.cancelAll()`(`cancelAllPhoneAlarms`) → 남은 기록 버림 → 푸시 토큰 지우기 자리 → 실시간 구독 끊기 · 기능 메모리 정리(`onSignOut`) → `signOut`. 데이터 모드 저장값은 그대로
+- 계정 삭제 (친구 12장) — 설정 [계정 삭제]: `my_account_delete_summary` — RPC(나갈 그룹 · 마지막 멤버라 사라질 그룹 · 남을 공동 약속 · 친구 수, 본인 것만)로 확인 문구를 만들고 확인 두 번 → `account-delete` — Edge(본인만, 요청 본문 없음, 서버가 `prepare_account_delete` → `auth.admin.deleteUser`, 중간 실패는 다시 불러 이어서 끝냄) → 성공하면 `lib/session` `cleanupAfterAccountDelete()`(폰 알람 취소 · 남은 기록 버림 · 구독 끊기 · 로그아웃, 서버 계정이 이미 없으니 못 지워도 멈추지 않음). 서버 함수 타입은 서버 PR 머지 뒤 `types/database.ts`를 다시 만들 때 들어옴(그때까지 이름으로 부름)
+- 웹 삭제 요청 안내 — `/account-deletion`(로그인 없이, 폼 없음): 팀 메일 주소(답 대기라 비워 둠, `features/account/texts` `DELETION_MAIL`) · 보낼 내용(가입 이메일 · 아이디) · 30일 안 처리 안내
+- 로그아웃 — `signOutAndCleanup()` (`lib/session`): 로그아웃 중 표시 켜기(`setSigningOut`) → 기록 올려 보기 → 맞추기와 같은 줄에서 `AlarmCore.cancelAll()`(`cancelAllPhoneAlarms`) → 남은 기록 버림 → 푸시 토큰 지우기(`removePushToken`, 이 기기의 `push_tokens` 행 삭제 · 실패해도 계속) → 실시간 구독 끊기 · 기능 메모리 정리(`onSignOut`) → `signOut`. 데이터 모드 저장값은 그대로
   - 로그아웃 중 표시가 켜져 있는 동안 `reconcile`은 서버 알람을 폰에 걸지 않고 건너뜀 (로그인 상태가 남은 사이에 맞추기가 끼어 앞 계정 알람을 다시 거는 것을 막음). `cancelAll`이 실패하면 로그아웃을 멈추고 표시를 끔. 로그아웃이 끝까지 가면 켜 둔 채로 두고, 다시 로그인할 때 `useAlarmSync`가 끔
   - `signOut`은 서버에 알리다 네트워크로 실패해도 이 기기의 로그인이 지워졌으면 끝난 것으로 봄
 
@@ -67,7 +69,7 @@
 
 첫 울림이 이미 지난 폰 예약(울리는 중 · 미룸 · 다시 울림 대기)은 서버 목록(지금 이후)에 없어도 바로 지우지 않음 — 울린 뒤 서버 행의 시각이 과거가 되어 목록에서 빠지는 것이 정상이기 때문. 대신 **서버에 켜진 행이 없다고 확인된 것만** 지움 (끈 알람이 미룸 중이어도 · 다른 기기나 G04에서 꺼졌거나 지워졌어도, 시각은 안 보고 `is_enabled = true` 행이 있는지만 물음). 끄기 직후의 `reconcile({ alarmIds })`와 전체 맞추기가 같은 규칙이고, 확인 쿼리가 실패하면 전체 맞추기는 안 지움(조심 쪽, 다음 맞추기에서 다시). 서버 알람을 한 번에 읽는 줄 수(500)에서 목록이 잘렸으면 이 확인을 거친 것만 지움.
 
-**서버 함수** — 앱은 `callEdge<T>(이름, 본문)`으로만 부름. 오류는 `EdgeError`(= `UserError`)로 오고 문구는 서버 `code`로 고름 (표: `lib/edge.ts`). **그룹 기상 신호** — `subscribeGroupWake(groupId, 콜백)` (`lib/realtime`), 신호의 `date`를 `get_group_wake`의 `p_date`로 넘김. 다시 연결될 때 · 앱이 앞에 올 때도 다시 읽음.
+**서버 함수** — 앱은 `callEdge<T>(이름, 본문)`으로만 부름. 오류는 `EdgeError`(= `UserError`)로 오고 문구는 서버 `code`로 고름 (표: `lib/edge.ts`). **그룹 기상 신호** — `subscribeGroupWake(groupId, 콜백)` (`lib/realtime`), 신호의 `date`를 `get_group_wake`의 `p_date`로 넘김(서버가 어제 · 오늘 · 내일만 받아서, 그 밖의 날짜는 `p_date` 없이 불러 오늘 기준으로 읽음). 다시 연결될 때 · 앱이 앞에 올 때도 다시 읽음.
 
 ## 화면 목록
 
@@ -138,6 +140,8 @@
 - 장소 줄 = 지도 시트(`MapPlaceSheet`, 검색 · 핀 · 현재 위치) + 자주 가는 곳 칩(`listUserPlaces`, 없으면 안 그림). 목적지 반경은 시트 "감지 범위"에서 골라 `draft.destRadiusM` → 요청 `appointment.destination.radius_m`(100~500 정수, 좌표가 있고 골랐을 때만) → `appointments.dest_radius_m`. 장소를 바꾸면 반경도 같이 바뀜(칩은 그 곳의 저장된 반경, 없으면 서버 기본값)
 - 장소 검색 시트("장소" 줄을 누르면 열림): 0.3초 입력이 멈추면 `listPlaces(query, near)` → `place-search`(카카오 키워드) — Edge. `near` = 프로필 집 좌표(`profiles.home_lat` · `home_lng`)가 있으면 가까운 순, 검색어가 비면 최근 장소(최근 90일 약속의 도착지 · 출발지, `near` 안 씀). 줄 아래 글자는 주소 · 분류(`category`, 카카오 값 그대로 통과 — 저장 안 함, 카카오 약관 "응답 저장 · 재사용 불가"는 D5 참고). 가짜 모드는 목업 대학가 장소에서 거름
 - 이동시간 · 알람 시각 · 강도 미리 보기: `alarm-suggest`(카카오 대중교통 포함) — Edge
+- 함께할 그룹(친구 9장): 참여 중인 그룹 목록에서 고르면 요청 `appointment.group_id` → 공동 약속. 줄 아래 '일정 이름 · 시각 · 장소는 그룹원 모두에게 보여요'(메모 칸은 아직 없음)
+- 공동 약속 시각이 바뀐 뒤 확인(`/alarm/changed?id=`): 지금 알람(`getAppointment`) → 바뀐 시각으로 다시 계산(`alarm-suggest`) 나란히, [새 시각으로 맞추기] = 내 조건 그대로 `alarm-commit` — Edge. 공동 약속 변경 알림 `needsConfirm`일 때 열림(알림 받는 곳은 푸시 앱 PR)
 - 저장: `appointments` + `appointment_participants` + `alarms`("알람" 줄에서 고른 종류 — 기상 · 준비 · 출발, 다 끄면 알람 없는 일정, D46)를 한 번에 `alarm-commit` — Edge, 준비물 `todos`(ITEM) — DB → 예약 — 폰
 - 반복: 요일 칩 · 매일 · 평일 → `appointments.recurrence_rule` RRULE (D44, `FREQ=DAILY` · `FREQ=WEEKLY;BYDAY=…` 두 모양만). 저장은 첫 회차만 만들고, 다음 회차는 `alarm-roll`이 앞으로 14일치를 회차마다 새 행(약속 · 참여 · 알람 · 준비물)으로 미리 만듦 (D4 A, 5분마다 보충 · 앱 맞추기 때 본인 몫). 공동 약속은 첫 회차만 · 저장 직후 앱이 `syncNow({ rollSeriesId })`로 바로 넘기고(준비물 저장 뒤), 평소엔 앱이 앞에 올 때 10분에 한 번
 - 계산이 집 위치 없음(프로필에 `home_lat` · `home_lng` 없음)으로 실패하면 안내 카드 [집 정하기] → 장소 시트로 고른 곳을 `saveProfileFields({ home_name, home_lat, home_lng })`로 `profiles`에 저장 → 다시 계산 (토스트로 "장소를 다시 골라"만 뜨던 것을 대신함)
@@ -171,26 +175,30 @@
 - 오늘 n명 일어남: `get_group_wake` — RPC의 `CONFIRMED` 수(분모 없음). 그 그룹 일정이 있는 날만, 없는 날은 줄을 숨김 (D57 · 친구 7장)
 
 ### F02 친구 권한
-- 관계별 받은 권한: `sharing_permissions`(주는 사람 = 친구, 받는 사람 = 나, 출처 FRIEND · GROUP) — DB → 최종 = 항목별 OR (앱에서 합침)
+- 관계별 받은 권한: `sharing_permissions`(주는 사람 = 친구, 받는 사람 = 나, 출처 FRIEND · GROUP) — DB → 최종 = 항목별 OR (앱에서 합침). 기상 조회는 권한 행의 값이 아니라 그 그룹의 기상 공유 동의 하나(`wake_share_opt_in`)로 계산 — 알람 권한 행이 없어도 동의한 그룹은 줄이 생기고, 친구 출처에는 기상 조회가 없음. 안내 '내가 OO님에게 준 권한을 관계별로 합친 결과예요'
 
 ### F03 공유 권한 설정
-- 내가 주는 권한: `sharing_permissions`(주는 사람 = 나, 출처 = 고른 관계) `can_view_alarm` · `can_edit_alarm` · `can_view_wake` 저장 — DB
+- 내가 주는 권한 저장: 친구 관계 = `sharing_permissions` 내 행 하나 upsert(알람 조회 · 알람 설정 2개만, `can_view_wake`는 항상 꺼서) — DB. 그룹 관계 = `save_group_permissions(p_group_id, p_can_view_alarm, p_can_edit_alarm)` 한 번 — RPC(참여 중 멤버 전원에게 같은 값이 전부 되거나 전부 안 됨, 값이 그대로여도 저장해 나중에 들어온 멤버 몫 설정 행이 생김, 혼자인 그룹은 `NO_MEMBERS` → 오류). 그룹의 기상 상태 조회 스위치 = 이 그룹 기상 공유 동의: `group_members.wake_share_opt_in`을 내 행만 update(값이 바뀐 때만)
 - 받은 권한 보기: `sharing_permissions`(받는 사람 = 나) — DB
-- 설정 권한은 조회 권한이 있어야 실제로 고칠 수 있음 → 화면에서 설정을 켜면 조회도 같이 켬
+- 설정 권한은 조회 권한이 있어야 실제로 쓸 수 있음(= 시각 제안을 보낼 수 있음) → 화면에서 설정을 켜면 조회도 같이 켬
+- 알람 조회 줄 아래 안내 '일정 장소도 보여요 · 집 · 출발지는 안 보여요' (친구 13장, 화면 글자만 — 서버는 일정 장소까지만 내려줌)
 
 ### G02 그룹 상세
 - 그룹 · 멤버: `groups` + `group_members` — DB, 기상 공유 동의 `wake_share_opt_in` — DB
-- 연결 일정: `appointments`(`group_id`) — DB
+- 연결 일정: `appointments`(`group_id`, 오늘부터, `creator_id`) — DB + 인원수 · 내 참여 `group_appointment_counts` — RPC. 줄을 누르면 참여자(참여 / 알람 없음, 차단 쌍은 이름만) `appointment_joiners` — RPC. [내 알람 만들기] = `alarm-commit`(`appointment_id` + 내 집 · 수단 · 준비 시간) — Edge, [나는 빠지기] = `appointment-edit` LEAVE — Edge. 지난 약속은 '지난 약속이에요'(버튼 숨김) (친구 9장)
 - 멤버 기상 상태: `get_group_wake` — RPC. 그 그룹 일정이 있는 날만 (D57). 6단계를 3단계로 묶음(`SCHEDULED` '오전 8:50 알람' · `RINGING` · `DISMISSED` · `MISSED` '울렸어요' · `CONFIRMED` '일어났어요 오전 8:08', `NO_ALARM` '알람 없음'), 줄이 없는 멤버는 '공유 안 함' (친구 7장). 멤버 메뉴 [이 사람에게 기상 숨기기 / 보이기] `set_wake_hidden` — RPC, 숨긴 목록 `wake_hides` — DB(내 줄만). 누가 일어나면 DB가 그룹 채널에 새로 고침 신호(Realtime 방송, #160) → 앱이 다시 부름 (지형님 10/15 기술 결정 — `capstone/전체작업계획_v1.md` 8절 Q3, 레포 밖)
 - 초대: 코드 시트 `my_group_code`(만료됐으면 서버가 새 코드 + 7일) — RPC, [새 코드] `regenerate_invite_code` — RPC, 직접 초대 `invite_to_group` — RPC (친구 5장). 그룹장 없음 — 이름 바꾸기 `groups` update · 나가기 `group_members` JOINED → LEFT · 내보내기 다른 사람 행 delete · 알림 끄기 `group_members.notifications_off` — DB
 
 ### G03 그룹원 기상 상태
 - 기상 상태: `get_group_wake` — RPC (단계 · 알람 시각 · 확인 시각만, 미루기 횟수 · 알람 끈 시각 · 준비 · 출발 · 도착은 본인만 — D59 · 친구 7장). 그 그룹 일정이 있는 날만 (D57). 알람 카드는 알람 조회 권한이 있으면 [알람 보기](G04)로
-- 깨우기 알림: `notify` — Edge → `push_tokens` ('울렸어요'일 때만 버튼, 붙이는 건 깨우기 장)
+- 깨우기: `notify`(`{ kind: 'WAKE_PING', targetUserId, groupId }`) — Edge. '울렸어요'일 때만 버튼. 판정 · 횟수(보내는 사람 → 받는 사람 쌍마다 5분 1번 · 하루 3번) · 직전 재확인은 서버가 하고, 응답 `ping.status`로 버튼 아래 한 줄: `OK` '1/3 · 8:15부터 다시' · `WAIT` '8:15부터 다시' · `DAILY_LIMIT` · `OFF`(받기를 껐거나 기상이 안 보임(403) — '지금은 깨울 수 없어요'로 구분 안 함) · `ALREADY_UP`('이미 일어났어요', 상태를 다시 읽음) · `NOT_RINGING`(다시 읽음) · `NO_TOKENS`('지금은 알림이 닿지 않아요', 횟수 안 셈). 상태를 미리 읽는 곳은 없어 보내 본 뒤에 앎 — 보냄 · 기다림 · 한도 · 꺼짐 · 이미 일어남은 버튼을 잠금(다음 가능 시각이 지나면 풀림). 가짜 모드는 막힘
+- 오늘 받은 깨우기: `my_wake_pings` — RPC (`sender_nickname`, `sent_at` 최신 순, 차단한 사람 것 제외) → 홈 · H08 한 줄 '수연님이 7:12에 깨웠어요'(여러 번이면 '· 오늘 n번'). 가짜 모드는 없음
+- 설정 [깨우기 받기]: `profiles.wake_ping_enabled` — DB 직접 update(내 프로필, 기본 켬). 꺼 두면 보낸 쪽에는 `OFF`만 보임
 
 ### G04 공유받은 알람
 - 친구 알람: `alarms`(주인 = 친구) — DB, 조회 권한은 RLS가 확인. 약속 제목 · 장소까지 보여 주려면 RPC 하나 더 필요(`appointments` RLS는 본인 · 그룹원만) — #46에서
-- 설정 권한이면 켜기 · 끄기 · ±5분: `alarms` — DB → 주인에게 알림 `notify` — Edge → 주인 폰이 다시 예약. RLS는 설정 권한이면 강도 · 소리까지 허용하므로 ±5분 제한은 앱(`shiftSharedAlarm`)에서 지킴: 앞당길 때 옮긴 시각이 지금 + 5분(서버 `PAST_GRACE_MINUTES`)보다 이르게 되는 켜진 알람이 있으면 "곧 울릴 알람이라 앞당길 수 없어요"로 거절 (이미 지난 알람 · 꺼 둔 알람 · 늦추기는 검사 안 함)
+- 설정 권한이면 시각 제안(친구 10장): 바꿀 수 있는 것은 시각뿐(켜기 · 끄기 · 삭제 없음). 5분씩 골라 [보내기] 한 번 = `propose_alarm_time(p_alarm_id = 카드에서 가장 이른 알람, p_new_at)` — RPC. 상태 `OK` · `TOO_SOON`(곧 울릴 알람) · `LIMIT`(원래 시각 기준 ±60분 밖) · `SAME` · `FORBIDDEN`(권한 없음 · 안 보이는 알람, 구분 없음) · `INVALID`를 문구로. 성공하면 주인에게 `notify { kind: 'ALARM_CHANGED', targetUserId, alarmId }`(문구 · 시각은 서버가 제안 기록에서 가져옴, 실패해도 제안은 저장). 상대 알람은 그대로 — 상대가 [적용]해야 바뀜. 카드 한 줄 '제안함 · 8:20'(대기 · 무시) · '반영됨 · 8:20'(적용)은 `sent_alarm_proposals(p_owner_id)`, [원래대로]는 `alarms.original_scheduled_at`(친구가 바꾼 적이 있을 때만)을 제안
+- 받는 쪽 제안 카드(홈 · 알람 탭): `my_alarm_proposals` — RPC → '○○님의 제안 / 기상 알람 7:30 → 7:00 [적용] [무시]'. `respond_alarm_proposal(p_proposal_id, p_apply)`: 적용하면 서버가 알람 카드 전체를 옮기고 앱이 `syncNow()`로 폰 예약을 서버 알람에 맞춤, 무시는 보낸 쪽에 알리지 않음, `EXPIRED`는 '이미 지나간 제안이에요'
 
 ### A02 AI 대화 (실데이터는 텍스트 대화 — 서버 함수 voice-session · voice-turn과 같이 배포돼야 동작)
 - 실패 · 한도 안내 부품 `ChatNotice`(값 · 콜백) — `ai.tsx`가 실패(`unavailable`) · 한도(`limits.reached`)일 때 마지막 말풍선 아래에 붙임
@@ -200,7 +208,7 @@
   - 말: `voice-turn {session_id, rev, client_turn_id, text}` (25초 timeout, `lib/edge`). 응답 `next: APP_TASKS`면 앱이 카드마다 일을 하고 `voice-turn {results}`(같은 client_turn_id · rev는 응답의 rev)로 돌려준 뒤 마지막 `reply`를 받음
   - 앱 일: 새 약속 카드(`APPT_NEW`) = 장소 이름이 `listPlaces(이름)`에 똑같이 하나면 그 좌표로 `estimateAppointment`, 아니면 `NEEDS_PLACE`(카드의 [장소 고르기] = 장소 검색 시트) · 시각 고침 `adjustEstimate` / 알람 고치기(`ALARM_EDIT`) = `getAppointment` + `previewAlarms`(시각 · 준비가 바뀔 때만) / 정정 `fixes` = `features/voice/fixes.ts` — 새 시각 `recordParticipantTimes(MANUAL)` + 고친 값 기록(user_edit_logs, 화면 A02) 한 줄, 부정(위치 값 지우기)은 L2 PR 6 뒤 연결
   - 카드 버튼: [저장] = `createAppointment(estimate, '자기 전 대화')`(준비물 같이) · 약속 없는 알람 = `createStandaloneAlarm` · [바꾸기] = `saveAlarmSettings` · 준비 ±N(줄이기 · 0 = 자동으로) · 강도(null = 보통으로 → 자동)는 **실제로 바뀐 때만** 저장 뒤 `saveAlarmSettings` 한 번 더(alarm-commit이 길찾기를 또 부르므로) → `voice-turn {card_action: SAVED, appointment_id, alarms}` / [저장 안 함] = `card_action: REJECTED`(서버는 답 없음)
-  - 완료: 대화를 그대로 남기고 홈으로 + 대화 끝 정리 `voice-commit {session_id, rejected_cards}`를 기다리지 않고 보냄(`rejected_cards` = [저장 안 함]한 카드 — 서버에 못 알렸어도 서버가 열린 카드만 REJECTED로) — 서버가 T2(T2.v3.3 · extract.v2)로 대화 전체(글 · Live 음성)를 뽑아 공개 JSON `structured.v1`을 `conversation_sessions.extracted_data`에 저장(기본 저장소, 다른 담당자가 읽는 계약 — 노션 'Voice AI 구조화 결과'), `apply_status` · `transcript`도. 표에는 `todos`(할 일 · 준비물, D32 A)와 `daily_records`의 진술 칸(`sleep_at` · `sleep_satisfaction` · `condition_note`)의 빈 칸만. 일정 · 알람은 저장하지 않음(카드로만). 지각 · 출발 · 도착 진술은 JSON에만(`appointment_participants`는 위치 · 원탭 담당), `alarm_events` · `daily_journals.ai_summary`도 안 씀. 실패 · `PARTIAL`이면 세션 id를 로컬(`respec.voice.commit.<사용자 id>`)에 남겨 다음 대화 열기 때 다시 보냄(서버가 한 번만 저장)
+  - 완료: 대화를 그대로 남기고 홈으로 + 대화 끝 정리 `voice-commit {session_id, rejected_cards}`를 기다리지 않고 보냄(`rejected_cards` = [저장 안 함]한 카드 — 서버에 못 알렸어도 서버가 열린 카드만 REJECTED로) — 서버가 T2(T2.v3.3 · extract.v2)로 대화 전체(글 · Live 음성)를 뽑아 공개 JSON `structured.v1`을 `conversation_sessions.extracted_data`에 저장(기본 저장소, 다른 담당자가 읽는 계약 — 노션 'Voice AI 구조화 결과'), `apply_status` · `transcript`도. 표에는 `todos`(할 일 · 준비물, D32 A)와 `daily_records`의 진술 칸(`sleep_at` · `sleep_satisfaction` · `condition_note`)의 빈 칸만. 일정 · 알람은 저장하지 않음(카드로만). 지각 · 출발 · 도착 진술은 JSON에만(`appointment_participants`는 위치 · 원탭 담당), `alarm_events`도 안 씀. JSON 저장이 끝나면 그날(`reference_date`) 대화들의 JSON 중 말했거나 확인한 사실(`inferred` · `needs_confirm` · 다른 날 뺌)로 T5(T5.v2 · t4-diary.v1) 한 번 → 일기 1~2문장을 `daily_journals.ai_summary`에(하루 한 줄, `source_session_id` = 이번 대화, 고친 일기(`is_edited`)는 그대로 · 쓸 사실이 없으면 안 만듦 · 실패하면 이 단계만 `PARTIAL`). 실패 · `PARTIAL`이면 세션 id를 로컬(`respec.voice.commit.<사용자 id>`)에 남겨 다음 대화 열기 때 다시 보냄(서버가 한 번만 저장)
   - 대화 상태(세션 · rev · 카드 · 계산한 Estimate)는 앱 메모리. 앱을 다시 열면 voice-session resume으로 말 · 카드 상태를 받고, 저장 전 Estimate는 다시 계산 (D5 — 이동 분을 서버에 안 남김). 계산이 안 끝난 카드(`NEEDS_ESTIMATE`)는 이어서 계산해 새 client_turn_id로 `results`만 보냄. 저장한 카드는 서버에 SAVED를 알리기 전에 로컬(AsyncStorage · 웹 localStorage, 키 = 사용자 id + 세션 id, 값 = 카드 id별 · 7일 지나면 앱을 열 때 정리, 다른 계정에는 안 보임)에 '저장됨'으로 적고, 알림이 안 가고 앱이 꺼져도 다시 열면 `createAppointment` 없이 저장됨으로 복원해 SAVED만 다시 알림(서버가 SAVED로 확인하면 지움). 실패한 요청이 남은 동안 카드 [저장] · [저장 안 함] · 장소 고르기는 앱 일만 바로 하고 서버 알림은 큐에서 기다렸다가 그 요청이 [다시 시도]로 성공한 뒤 차례로 보냄
 - 오류 · 상태 (화면 문구는 `lib/edge`의 code → 문구):
 
@@ -215,8 +223,8 @@
 - 대화 기록: `conversation_sessions`(`turns` · `server_state`) — 서버만 씀(앱은 읽기만)
 - 일정 · 알람 저장: 앱이 L1 함수로(`appointments` · `alarms`), 준비물은 카드와 같이. 대화 끝 정리의 할 일 · 준비물(`todos`)은 서버 PR 5 (D32). 일정을 여러 개 찾으면 다 받음 (D36) — 기상과 이어지는 첫 일정(`first_of_day`)만 알람 줄을 자세히, 나머지는 "출발 알림" 한 줄. 카드별 상태는 서버 `server_state.cards`
 
-### A03 하루 기록 · 일기 (AI 대기)
-- 일기: `daily_journals`(AI 글 · 고친 글 · 코칭 · 격려 · 루틴 제안) 읽기 · 고치기 — DB, 만들기 — Edge. 날짜별로 엶 (R02 일간에서, D48)
+### A03 하루 기록 · 일기
+- 일기: `daily_journals`(AI 글 · 고친 글 · 코칭 · 격려 · 루틴 제안) 읽기 · 고치기 — DB, 만들기 — Edge(`voice-commit`이 AI 글 `ai_summary`만, 코칭 · 격려 · 루틴 제안은 아직 없음). 날짜별로 엶 (R02 일간에서, D48)
 - 오늘의 사실: `alarm_events` · `appointment_participants`(출발 · 도착 · 지각) · `todos` — DB
 
 ### A04 루틴 편집
@@ -242,6 +250,7 @@
 ### 로그인 · 온보딩 · 설정 (#25)
 - 로그인: Supabase Auth 카카오 · 구글 → 가입하면 `profiles` 자동 생성. 화면 아래의 "알람 테스트" 버튼은 `/dev/alarm-test`로 바로 감 (로그인 전에도 열림, 화면 위 "← 이전"으로 돌아옴, #177)
 - 온보딩: `profiles` 아이디(`handle`) · 닉네임 · 잠귀(`wake_sensitivity`) · 집(`home_name` · `home_lat` · `home_lng`) · 기본 준비 · 여유 시간 · 이동 수단 · 깨우는 여유(`wake_margin`) · 개인정보 동의(`privacy_agreed_at` · `privacy_version`) · 온보딩 끝낸 시각(`onboarded_at`) — DB, 집 검색 `place-search` — Edge
+  - **개인정보 동의 단계** (친구 13장): 항목 5개(위치 · 화면 사용 · 음성 · 기상 공유 · 알람 공유) + '만 14세 이상이에요' 확인(체크 전에는 [다음] 잠김). 안내 판 번호 `PRIVACY_VERSION = 3` — 이 판에 이미 동의한 계정이 온보딩을 다시 열면 체크 없이 통과(다시 저장 안 함), 판이 낮으면 다시 동의. 온보딩을 마친 계정은 앱을 열 때 `privacy_version < PRIVACY_VERSION`이면 `/reconsent`(동의 항목 + 만 14세 확인만)가 먼저 뜨고, 동의하면 판 · 시각(`privacy_agreed_at`)을 저장하고 프로필을 다시 읽어 홈으로 (`needsReconsent`, `features/auth/onboardingGate.ts`). 오프라인 · 읽기 실패 때는 묻지 않음. 로그아웃 저장본은 친구 읽기 값이 계정별(`me`)로 따로 읽혀 따로 비우지 않음
   - **단계 온보딩** (`lib/flags` `ONBOARDING_IN_FLOW = true`, #25): 순서는 `features/onboarding/steps.ts`, 단계마다 켜고 끄는 표는 `ONBOARDING_STEPS`(아이디 → 닉네임 → 잠귀 → 집 → 아침 준비 → 시간표 → 동의 → 권한 안내 → 기상 공유 → 첫 일정). 집: 장소 검색(`place-search`)으로 고르면 `home_name` · `home_lat` · `home_lng` 저장(좌표 없는 장소는 못 고름, [나중에]는 저장 없이 다음). 시간표(직접 입력 초안, D66-1 B): 수업 줄(과목 · 요일 · 시작 시각 · 장소)마다 차례로 `estimateAppointment` → `createAppointment(…, '온보딩 시간표')`로 반복 일정 + 알람 저장, 실패한 줄만 표시하고 그 단계에 머묾, 첫 저장 뒤 알림 안내. 권한 안내: 알림 · 전체화면 알림 · (꺼졌을 때만)정확한 알람 · 사용 정보 · 배터리 · 삼성 절전 줄의 상태 표 + 사용자가 누르는 [켜기] · [설정 열기]만(`permissionRows`, 자동 시스템 창 없음, 안 켜도 [다음]), 위치 줄(안드로이드 + 실데이터만, `ONBOARDING_LOCATION_ROWS`): 누르면 `LOCATION_DISCLOSURE` 고지 → `requestLocationAccessFlow()`(앱 사용 중 → 항상 허용 설정 화면), 나중에 · 거절은 설정 카드로(`useLocationRow`). 단계마다 [다음]에서 `saveProfileFields`로 저장하고 마지막에 `finishOnboarding`이 `onboarded_at`을 적음. 판정은 `onboarded_at`이 비었는지(`features/auth/onboardingGate.ts`). 가짜 데이터 모드 미리 보기는 저장 없이 단계만 넘김. `/dev/screens`의 "온보딩부터 다시"로 처음부터 다시 봄
   - 개발 화면 목록(`/dev/screens` · 웹 미리보기 패널)에서 단계마다 바로 열기: `/onboarding?step=home` — 가짜 데이터 모드(저장 안 함)에서만, 실데이터는 늘 첫 단계부터 (`steps.ts` `startStep`)
   - 개발 화면 `/dev/screens`의 **내 시험 데이터 지우기** (실데이터 + 로그인 + 모드를 바꿀 수 있는 빌드에서만, 출시 빌드에서는 숨김 D16): 확인 창 → `features/dev/api` `resetMyTestData`(DB 함수 `dev_reset_my_data` — 내 일정 · 알람 · 기록 · 일기 · AI 대화 · 고친 값 기록 · 제안을 지우고 프로필을 온보딩 전으로, 그룹 일정은 내 참여 행만, 친구 · 그룹 · 푸시 토큰 · `ai_calls` · 루틴은 그대로) → `lib/session` `cleanupAfterDataReset`(폰 알람 전부 취소 · 못 올린 울림 기록 버림, 로그아웃 없음) → 프로필 다시 읽기 → 온보딩. 가짜 데이터 모드에서는 "지울 게 없어요"
@@ -255,7 +264,10 @@
 - 권한 안내: 알림 · 정확한 알람 · 잠금화면 알람 화면 — 폰
 - 설정 "출발 · 도착 자동 기록" 카드(`features/location/LocationAutoSection`, 안드로이드 + 실데이터에서만): 스위치 = 폰 저장 `location:v1:auto`(기본 켬) + 위치 권한 상태(`permissions.ts` `getLocationStatus`: 켜짐 · 위치 꺼짐 · 앱 사용 중에만 · 정확한 위치 꺼짐) — 폰, DB 없음. 앞 권한만 시스템 창으로 묻고 "항상 허용" · "정확한 위치"는 앱 설정 화면으로 안내(안드로이드 11+). 온보딩에서 못 켰다면 여기서(위치 허용하기 → 앞 권한 → 항상 허용 설정). 권한이 모자라도 스위치는 켜 둠 — 권한이 생기면 바로 등록. 끄면 등록한 지오펜스를 멈춤
 - 온보딩은 `LOCATION_DISCLOSURE`를 보여 준 뒤 `requestLocationAccessFlow()`를 부름(L7 #277)
-- 푸시 토큰: 앱 켤 때 `register_push_token` — RPC
+- 푸시 토큰: 로그인 직후 · 앱이 앞에 올 때(6시간 넘었으면) `usePushRegistration` → 안드로이드 채널 5개(`friend_v1` · `alarm_change_v1` · `request_v1` · `group_v1` · `missed_v1`)를 먼저 만든 뒤 `register_push_token(p_token, p_platform)` — RPC. 안드로이드만, 실패해도 던지지 않음. 같은 폰에서 계정이 바뀌면 마지막 로그인 계정이 토큰 주인
+- `notify` 호출 모양: 요청에는 종류별 인자만(한 사람 = `targetUserId`, 그룹 = `groupId`) — 제목 · 본문 · data는 서버가 고정. 알람 바뀜(G04)은 `previousAt` · `newAt`(ISO)을 같이, 친구 요청 보냄(`REQUESTED`) → `FRIEND_REQUEST`, 수락 · 맞요청 자동 수락 → `FRIEND_ACCEPTED`, 그룹에 새로 들어옴(`JOINED`) → `GROUP_MEMBER_JOINED`. 본 동작이 끝난 뒤 기다리지 않고 부르며 실패해도 되돌리지 않음 (`features/social/real/push.ts`)
+- 알림 누르기(`usePushLinks`, `features/push/link.ts`): `data.recipientUserId`가 지금 로그인한 계정일 때만 갈 곳(`/wake` · `/alarms` · `/friends`(그룹 탭) · `/group`(`groupId`가 있으면 그 그룹, `subjectUserId`도 있으면 그 사람의 기상 확인), 깨우기는 받는 사람의 기상 확인 `/wake`(H08), 공동 약속 변경은 `needsConfirm`이면 `/alarm/changed?id=`), 아니면 홈. 로그인 전에 누르면 로그인 뒤에 이어감. 앞에 떠 있을 때 받은 알림 중 내 알람 바뀜 · 공동 약속 바뀜 · 취소는 폰 알람을 서버와 맞춤(`syncNow`)
+- 설정 '알람 점검' 첫 줄: 폰 알림 권한이 꺼져 있으면 '알림이 꺼져 있어요 [켜기]'(켜면 토큰 다시 등록), 아니면 '알림 설정 열기'
 
 ## Edge Function — 만들 것만
 
@@ -271,7 +283,7 @@
 | `suggestion-generate` | 매일 03:00 제안 만들기 (배치) | — | S01 |
 | `voice-session` | 자기 전 대화 시작 · 이어 받기(텍스트). 첫 마디는 서버 템플릿(모델 호출 없음), 하루 5대화 상한. 응답 `{ session_id, resumed, rev, turn_seq, day, messages, cards, limits }` (L4 AI 묶음) | — | A02 |
 | `voice-turn` | 자기 전 대화 한 턴: 말(`text`) · 앱 일 결과(`results`) · 카드 버튼(`card_action`). 서버는 카드 재료와 말만 주고 계산 · 저장은 앱이 함. 빠른 추출(T2F)과 대화 답(T1) 동시 호출 → 턴 처리 → 가드. 응답 `{ rev, turn_seq, next: USER \| APP_TASKS, reply, cards(전체), fixes, limits }`, 서버 마감 18초 (L4 AI 묶음) | Claude | A02 |
-| `voice-commit` · `journal-*` | AI 대화 끝 정리(구조화 JSON `structured.v1` · 할 일 · 준비물 · 생활 기록 진술 칸) · 일기 | Gemini (T2.v3.3) · journal 미구현 | A02 · A03 (voice-commit 배포 전) |
+| `voice-commit` · `journal-*` | AI 대화 끝 정리(구조화 JSON `structured.v1` · 할 일 · 준비물 · 생활 기록 진술 칸) · 일기 | Gemini (T2.v3.3 · 일기 T5.v2는 voice-commit 안에서) | A02 · A03 (voice-commit 배포 전) |
 
 나머지(목록 · 체크 · 권한 · 기록 화면)는 Edge 없이 DB · RPC로 함.
 
@@ -281,7 +293,7 @@
 |---|---|---|---|
 | 1 | S01 "다음 알람 10분 앞당김" | `alarm_suggestion_type`이 VOICE_TONE · SOUND · INTENSITY뿐 | #49에서 시각 조정 종류 추가 |
 | 2 | H03 강도를 배경음 · 말소리 · 진동 따로 고름 | `intensity`(전체 세기) · `voice_tone`(말소리) · `sound_key`(배경음) · `vibration`(진동, `20261030200000_alarm_vibration.sql` — 직접 고른 값만, NULL = 강도를 따름) | D1 A로 정함 (이슈 #312) |
-| 3 | G04 "변경 기록" | 저장 자리 없음 | 처음엔 주인에게 푸시만 |
+| 3 | G04 "변경 기록" | 저장 자리 없음 | 시트를 뺌 (친구 논리설계 10장 · D9 · D20) — 주인에게 푸시만, 보낸 쪽은 카드의 '제안함' · '반영됨' |
 | 4 | — | 카카오 응답은 저장 · 재사용 불가인데 `est_travel_minutes` · `travel_source` CACHED가 있음 | #27에서 계산에 쓴 값만 남기는지 정함 |
 | 5 | G02 · H01 그룹원 상태에 준비 시작 · 출발 · 도착까지 보임 | `get_group_wake_status`는 기상 상태(`wake_status`)와 시각만 돌려줌, MISSED는 목업에 없음 | 기상까지만으로 정함 (D59) — 화면을 실데이터로 바꿀 때 준비 · 출발 · 도착 줄을 뺌 (목업 api는 글자 `WakeState`, 실데이터는 상태 값 + 시각) |
 | 6 | 일정 없는 알람 (D46) · H03 직접 고름 (D42) · 고친 값 기록 (D42 · D43) · 울림 기록 중복 | `alarms_one_source`가 둘 다 NULL을 막음, `alarms.recurrence_rule` · `time_source` · `intensity_source` · `user_edit_logs` · `alarm_events.client_event_id` · `input_source` 없음 | PR #160에서 더함 (제약 풀기 · 칸 · 표 + RLS · `client_event_id` 유니크) |

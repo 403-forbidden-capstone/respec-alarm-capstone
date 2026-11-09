@@ -1,15 +1,28 @@
 import { router, useLocalSearchParams } from 'expo-router';
+import { useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
 import { Avatar, Button, Card, EmptyState, LoadError, Loading, Screen, Text, toast, TopBar } from '@/components/ui';
 import { getMemberWake, sendWakePing } from '@/features/social/api';
+import { useNow } from '@/features/alarm/hooks/useNow';
 import { useWakeLoad } from '@/features/social/hooks/useGroupWake';
+import type { WakePingResult } from '@/features/social/types';
 import { alarmLine } from '@/features/social/map';
-import { WAKE_NOT_SHARED_BODY, WAKE_NOT_SHARED_TITLE, WAKE_STALE_TEXT } from '@/features/social/wakeTexts';
+import {
+  WAKE_NOT_SHARED_BODY,
+  WAKE_NOT_SHARED_TITLE,
+  WAKE_PING_FAILED,
+  WAKE_STALE_TEXT,
+  wakePingLocks,
+  wakePingNote,
+  wakePingSent,
+} from '@/features/social/wakeTexts';
 import { useAction } from '@/lib/useAction';
 import { backOrHome } from '@/lib/nav';
 
 // G03 그룹원 기상 상태 (친구 7장) — 단계 글자 + 알람 시각 한 줄, [깨우기]는 '울렸어요'일 때만 (D51)
+//   [깨우기] (친구 8장) — 서버가 판정 · 횟수를 세고 결과를 줌. 버튼 아래 한 줄로 '1/3 · 8:15부터 다시' · '지금은 깨울 수 없어요' · '이미 일어났어요' · '지금은 알림이 닿지 않아요'.
+//   읽기만 하는 상태 조회가 없어서 상태는 보내 본 뒤에 앎 — 잠긴 동안(다음 가능 시각 전 · 한도 · 꺼짐)은 버튼을 막음. 가짜 모드는 막힘(8-16)
 //   알람 카드(강도 · 장소 · 준비)는 기상 공유로는 안 보이고, 알람 조회 권한이 있으면 [알람 보기](G04)로 (7-다 · 7-41)
 //   미루기 횟수 · 알람 끈 시각은 본인만 — 서버가 안 줌 (7-거)
 export default function MemberWakeScreen() {
@@ -17,6 +30,8 @@ export default function MemberWakeScreen() {
   // 그룹 기상 신호 · 다시 연결 · 앱이 앞에 올 때 다시 읽음
   const { data, error, reload, stale } = useWakeLoad((date) => getMemberWake(id, userId, date), () => [id]);
   const { busy, run } = useAction();
+  const [ping, setPing] = useState<WakePingResult | null>(null);
+  const current = useNow(15_000);
 
   if (data === undefined) {
     return (
@@ -39,11 +54,18 @@ export default function MemberWakeScreen() {
   // 아직 단계는 글자가 이미 알람 시각이라 아래 줄을 또 쓰지 않음
   const sub = state.stage === 'SCHEDULED' ? null : alarmLine(alarmAt);
 
-  const ping = () =>
+  // 잠금 — 한도 · 꺼짐 · 이미 일어남은 계속, 보냄(OK) · 5분 안 또 누름(WAIT)은 다음 가능 시각까지
+  const timed = ping && (ping.status === 'OK' || ping.status === 'WAIT');
+  const spent = ping?.status === 'OK' && ping.count >= ping.limit; // 마지막 보냄 — 시간이 지나도 오늘은 더 못 보냄
+  const locked = ping != null && wakePingLocks(ping) && (spent || !(timed && ping.nextAt != null && current >= ping.nextAt));
+  const sendPing = () =>
     run(async () => {
-      await sendWakePing(p.id);
-      toast(`${p.short}님에게 깨우기 알림을 보냈어요`);
-    });
+      const result = await sendWakePing(id, p.id);
+      setPing(result);
+      if (result.status === 'OK') toast(wakePingSent(p.short));
+      if (result.status === 'ALREADY_UP' || result.status === 'NOT_RINGING') void reload(); // 판정이 바뀐 것 — 상태를 다시 읽음
+    }, WAKE_PING_FAILED);
+  const pingNote = ping && !(timed && !locked) ? wakePingNote(ping) : null; // 풀린 뒤에는 옛 '다시' 안내를 지움
 
   return (
     <Screen>
@@ -92,7 +114,12 @@ export default function MemberWakeScreen() {
       </Card>
 
       <View style={styles.stack}>
-        {state.stage === 'RANG' ? <Button label="깨우기" loading={busy} onPress={ping} /> : null}
+        {state.stage === 'RANG' ? <Button label="깨우기" loading={busy} disabled={locked} onPress={sendPing} /> : null}
+        {pingNote ? (
+          <Text variant="small" tone="sub" style={styles.pingNote} accessibilityLiveRegion="polite">
+            {pingNote}
+          </Text>
+        ) : null}
         {canViewAlarm ? (
           <Button label="알람 보기" variant="ghost" onPress={() => router.push({ pathname: '/friends/[id]/alarms', params: { id: p.id } })} />
         ) : null}
@@ -111,4 +138,5 @@ const styles = StyleSheet.create({
   label: { marginBottom: 8 },
   paragraph: { marginTop: 4, lineHeight: 20 },
   stack: { gap: 10, marginTop: 16 },
+  pingNote: { textAlign: 'center' },
 });

@@ -31,7 +31,7 @@ import {
 import type { EditRequest } from './edit-request.ts';
 import { HttpError } from './errors.ts';
 import { loadAlarms, loadLateCount, loadParticipant, loadPrepareStats, loadProfile, loadTravelSamples, ALARM_COLUMNS, SERIES_APPOINTMENT_COLUMNS, type SeriesAppointmentRow } from './plan.ts';
-import { computePlan, firstPrepareMinutes, resolveBasics, type AlarmRow, type AppointmentRow, type ParticipantRow, type Plan, type PlanInputs, type ProfileRow } from './plan-core.ts';
+import { computePlan, firstPrepareMinutes, resolveBasics, withoutFriendTimes, type AlarmRow, type AppointmentRow, type ParticipantRow, type Plan, type PlanInputs, type ProfileRow } from './plan-core.ts';
 import { buildRingPackages, canceledAlarmIds, subtitleFor, type RingPackage } from './ring-package.ts';
 import { planGroupPush, sendGroupPush, type GroupPlan, type NotifyOptions } from './notify.ts';
 import { resolveTravel, type TravelChoice, type TravelDeps } from './route.ts';
@@ -391,18 +391,22 @@ async function replanFor(
   warnings.push(...travelled.warnings);
 
   const [profile, stats, lateCount4w] = await Promise.all([env.profile(), env.stats(), env.late()]);
+  // 친구가 제안해 주인이 적용한 시각(original_scheduled_at 있음)은 약속의 시각 · 장소를 바꾸면 새 계산이 이김 — 친구가 바꾸기 전 모습으로 되돌린 알람을 새 계산의 입력(직접 고른 시각 · 기존 알람 간격)으로 씀.
+  //   시각 · 장소가 그대로면(제목 · 중요도만) 이 되돌림을 안 해서 친구 값이 그대로 남음. 변경 비교(diffAlarms)에는 실제 행을 넘김
+  const planAlarms = patched.changed.at || patched.changed.place ? withoutFriendTimes(alarms) : alarms;
   const inputs: PlanInputs = {
     now: ctx.now,
     draft: {
       // 그날 첫 일정이 바뀌면 기상이 붙고 떨어짐 (7.1.3). 직접 고른 알람 시각은 같은 날이면 그대로 · 날짜가 바뀌면 날짜만 따라감
       //   L6 안건후보: 일정 시각을 옮길 때 직접 고른 알람 시각 기본안 = 같은 날이면 유지 · 날짜가 바뀌면 날짜만 따라감 (앱 가짜 모드와 같음)
       kinds: inheritedKinds(alarms, { withWake: !sameDayWake, baseHadEarlierWake: hadEarlierWake }),
-      manualTimes: shiftManualTimes(alarms, oldAt, localDateKey(newAt, tz), tz),
+      //   친구가 제안해서 주인이 적용한 시각(original_scheduled_at 있음)은 약속의 시각 · 장소를 바꾸면 새 계산이 이김 — 시각 · 장소가 그대로면(제목 · 중요도만) 이 길이 아예 안 돎 (친구 10-22, D67)
+      manualTimes: shiftManualTimes(planAlarms, oldAt, localDateKey(newAt, tz), tz),
     },
     profile,
     appointment: patchedRow,
     participant,
-    existingAlarms: alarms,
+    existingAlarms: planAlarms,
     stats,
     lateCount4w,
     sameDayWake,
@@ -524,7 +528,7 @@ async function pushGroupChange(
   if (!planned.plan) return { warnings: planned.warnings };
   const req = { kind: 'GROUP_APPT_CHANGED' as const, groupId: row.group_id as string, appointmentId: row.appointment_id };
   try {
-    const perRecipient = opts.held ? new Map(planned.plan.recipients.map((id) => [id, { needsConfirm: opts.held!.has(id) }])) : undefined;
+    const perRecipient = opts.held ? new Map([...planned.plan.recipients, ...planned.plan.silentRecipients].map((id) => [id, { needsConfirm: opts.held!.has(id) }])) : undefined;
     const out = await sendGroupPush(ctx.service, req, planned.plan, ctx.push ?? {}, { change, ...(perRecipient ? { perRecipient } : {}) });
     const failed = out.reason && out.reason !== 'NO_TOKENS';
     return { notified: out.sent, warnings: failed ? [{ code: 'PUSH_NOT_SENT', message: '참여자에게 알림을 보내지 못했어요', detail: out.reason }] : [] };
@@ -547,8 +551,9 @@ export async function updateAppointment(ctx: EditCtx, req: Extract<EditRequest, 
   const patched = applyPatch(row, req.patch);
   const effect = scopeEffect({ recurring, group, scope: req.scope, patchRule: req.patch.recurrenceRule, currentRule: row.recurrence_rule });
 
-  // 지난 공동 약속은 고칠 수 없고, 지난 시각으로 옮길 수도 없음 (9-32 · DB 정책 appointments_update와 같은 규칙)
-  if (group && (Date.parse(row.appointment_at) <= ctx.now.getTime() || (patched.changed.at && Date.parse(patched.next.appointment_at) <= ctx.now.getTime()))) {
+  // 지난 공동 약속은 고칠 수 없고, 지난 날로 옮길 수도 없음 (9-32 · DB 정책 appointments_update와 같은 규칙). '지난'은 하루 경계 — 내 폰 시간대의 오늘 0시보다 앞 (오늘 이미 지난 약속은 오늘 안에는 고칠 수 있음, 9-러)
+  const todayStart = group ? localDayRange(ctx.now, await env.tz()).start.getTime() : 0;
+  if (group && (Date.parse(row.appointment_at) < todayStart || (patched.changed.at && Date.parse(patched.next.appointment_at) < todayStart))) {
     throw new HttpError('UNPROCESSABLE', '지난 약속이에요', { reason: 'PAST_APPOINTMENT' });
   }
   // 공동 약속의 반복은 회차마다 참여자 알람을 만드는 일이 따로 필요해 아직 못 고침 (9-머 · 9-버, 반복 공동 약속은 회차 만들기부터 이어서)
@@ -752,7 +757,7 @@ export async function deleteAppointment(ctx: EditCtx, req: Extract<EditRequest, 
     // 한 번짜리 · 공동 약속(만든 사람) — 약속 + 참여 + 알람. 공동 약속은 다른 참여자의 참여 · 알람도 같이 사라짐(CASCADE)
     //   L6 안건후보: 공동 약속 지우기 기본안 = 만든 사람이 지우면 약속 전체가 지워짐. 다른 참여자의 폰 예약은 그 사람의 다음 맞추기(reconcile)에서 정리 (변경 알림은 L3 S2 뒤)
     //   공동 약속의 받는 사람(참여자)은 지우기 전에 정해 두고 지운 뒤에 '취소됐어요' 푸시를 보냄 — 받은 폰이 그 약속의 알람을 지움 (9-20). 지난 약속은 알릴 일이 없음
-    const planned = group && Date.parse(row.appointment_at) > ctx.now.getTime() ? await planGroupPushSafe(ctx, row) : undefined;
+    const planned = group && Date.parse(row.appointment_at) >= localDayRange(ctx.now, await env.tz()).start.getTime() ? await planGroupPushSafe(ctx, row) : undefined;
     canceled.push(...(await deleteRows(ctx, [row.appointment_id])));
     result.deleted_appointment_ids = [row.appointment_id];
     if (planned) {

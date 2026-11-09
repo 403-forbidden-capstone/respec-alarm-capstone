@@ -224,19 +224,32 @@ export default async function ch09({ q, as, su, svc, check, expectErr }) {
     return before === 3 && fromA.joined_count === 2 && fromA.i_joined === true && fromB.joined_count === 2 && fromB.i_joined === true && fromC.joined_count === 3 ? true : { before, fromA, fromB, fromC };
   });
 
-  await check('9-32(DB): 만든 사람도 공동 약속을 지난 시각으로 못 옮김(오류 42501) — 아직 안 지난 시각으로 옮기기는 됨, 지난 공동 약속은 만든 사람도 못 고침', async () => {
+  await check('9-32(DB): 만든 사람도 공동 약속을 지난 날(어제 이전, 사람마다 폰 시간대 0시 기준)로 못 옮김(오류 42501) — 오늘 안의 시각으로 옮기기는 됨(이미 지난 오늘 시각도), 지난 날의 공동 약속은 만든 사람도 못 고침 · 참여 조건도 새로 못 만듦, 오늘 이미 지난 약속은 고치기 · 참여 가능', async () => {
     const A = await join_(43, '만든이'), B = await join_(44, '참여');
     const g = await mkGroup(A, [B]);
     const ap = await appt(A, g, at('10:00'));
     await as(A);
-    const toPast = await expectErr(() => q(`update public.appointments set appointment_at = now() - interval '1 minute' where appointment_id = $1`, [ap]), /row-level security/);
+    const toPast = await expectErr(() => q(`update public.appointments set appointment_at = private.day_start($2) - interval '1 second' where appointment_id = $1`, [ap, A]), /row-level security/);
     const toSoon = await q(`update public.appointments set appointment_at = now() + interval '1 hour' where appointment_id = $1 returning appointment_id`, [ap]);
+    const toEarlyToday = await q(`update public.appointments set appointment_at = private.day_start($2) where appointment_id = $1 returning appointment_id`, [ap, A]);   // 오늘 0시 = 오늘 안
+    await su();
+    // 오늘 이미 지난 약속 (오늘 0시 + 1분): 만든 사람이 고칠 수 있고 다른 참여자가 참여 조건을 만들 수 있음. 어제 약속은 둘 다 못 함
+    const earlyToday = (await q(`insert into public.appointments (creator_id, group_id, title, appointment_at, dest_name) values ($1, $2, '오늘 이른 약속', private.day_start($1) + interval '1 minute', '학교') returning appointment_id`, [A, g]))[0].appointment_id;
+    const yesterday = (await q(`insert into public.appointments (creator_id, group_id, title, appointment_at, dest_name) values ($1, $2, '어제 약속', private.day_start($1) - interval '1 second', '학교') returning appointment_id`, [A, g]))[0].appointment_id;
+    await as(A);
+    const editEarly = await q(`update public.appointments set title = '고침' where appointment_id = $1 returning appointment_id`, [earlyToday]);
+    const editYesterday = await q(`update public.appointments set title = '고침' where appointment_id = $1 returning appointment_id`, [yesterday]);
+    await su();
+    await as(B);
+    const joinEarly = await q(`insert into public.appointment_participants (appointment_id, user_id) values ($1, $2) returning participant_id`, [earlyToday, B]);
+    const joinYesterday = await expectErr(() => q(`insert into public.appointment_participants (appointment_id, user_id) values ($1, $2)`, [yesterday, B]), /row-level security/);
     await su();
     const past = await appt(A, g, at('10:00', PAST), '지난 약속');
     await as(A);
     const editPast = await q(`update public.appointments set title = '고침' where appointment_id = $1 returning appointment_id`, [past]);
     await su();
-    return toPast === true && toSoon.length === 1 && editPast.length === 0 ? true : { toPast, toSoon, editPast };
+    return toPast === true && toSoon.length === 1 && toEarlyToday.length === 1 && editPast.length === 0
+      && editEarly.length === 1 && editYesterday.length === 0 && joinEarly.length === 1 && joinYesterday === true ? true : { toPast, toSoon, toEarlyToday, editPast, editEarly, editYesterday, joinEarly, joinYesterday };
   });
 
   // ---- 그룹을 나갈 때 정리 -------------------------------------------------------------------
@@ -263,6 +276,23 @@ export default async function ch09({ q, as, su, svc, check, expectErr }) {
     };
     return r.bFuture === 0 && r.bPast === 1 && r.bOther === 1 && r.kFuture === 0 && r.kPast === 1 && r.bAlarms === 2 && r.kAlarms === 1 && r.events === 1 && r.appts === 2
       && iso(rec.arrived_at) === iso(at('09:55', PAST)) && rec.actual_travel_minutes === 25 && iso(recK.arrived_at) === iso(at('09:55', PAST)) ? true : { r, rec, recK };
+  });
+
+  await check('9-29(하루 경계): 하루 경계(private.day_start)는 사람마다 프로필 시간대의 오늘 0시(없으면 서울) — 나갈 때 그 사람 오늘 0시 이후 약속의 참여만 지우고 어제 약속의 참여는 남김', async () => {
+    const A = await join_(45, '만든이'), B = await join_(46, '나감');
+    await q(`update public.profiles set timezone = 'UTC' where user_id = $1`, [B]);
+    const [{ seoul, utc, ghost }] = await q(`select private.day_start($1) = ((now() at time zone 'Asia/Seoul')::date::timestamp at time zone 'Asia/Seoul') as seoul,
+                                                    private.day_start($2) = ((now() at time zone 'UTC')::date::timestamp at time zone 'UTC') as utc,
+                                                    private.day_start('b9000000-0000-4000-8000-999999999999') = ((now() at time zone 'Asia/Seoul')::date::timestamp at time zone 'Asia/Seoul') as ghost`, [A, B]);
+    const g = await mkGroup(A, [B]);
+    const [{ appointment_id: today }] = await q(`insert into public.appointments (creator_id, group_id, title, appointment_at, dest_name) values ($1, $2, '오늘 이른 약속', private.day_start($3) + interval '1 minute', '학교') returning appointment_id`, [A, g, B]);
+    const [{ appointment_id: yesterday }] = await q(`insert into public.appointments (creator_id, group_id, title, appointment_at, dest_name) values ($1, $2, '어제 약속', private.day_start($3) - interval '1 second', '학교') returning appointment_id`, [A, g, B]);
+    await part(B, today); await part(B, yesterday);
+    await as(B);
+    await q(`update public.group_members set invite_status = 'LEFT' where group_id = $1 and user_id = $2`, [g, B]);
+    await su();
+    const left = (await q(`select ap.appointment_id from public.appointment_participants ap where ap.user_id = $1`, [B])).map((x) => x.appointment_id);
+    return seoul === true && utc === true && ghost === true && left.length === 1 && left[0] === yesterday ? true : { seoul, utc, ghost, left, today, yesterday };
   });
 
   await check('9-28: 그룹의 마지막 참여 멤버가 나가면 그룹이 지워지며 약속 · 참여 · 알람이 모두 지워짐 — 각자 하루 기록(기상 기록)은 남음', async () => {

@@ -20,6 +20,7 @@ export {
   acceptGroupInvite,
   createGroup,
   declineGroupInvite,
+  getAppointmentJoiners,
   getGroup,
   getGroupCode,
   getGroupSummary,
@@ -37,5 +38,6 @@ export {
   setWakeShareOptIn,
 } from './groups';
 export { getFriendGrant, getReceived, getRelation, getShareSettings, listRelations, saveShareSettings } from './sharing';
-export { getSharedAlarms, getShareLog, setSharedAlarmEnabled, shiftSharedAlarm } from './sharedAlarms';
-export { getMemberWake, sendWakePing, setWakeHidden } from './wake';
+export { listAlarmProposals, respondAlarmProposal } from './proposals';
+export { getSharedAlarms, proposeSharedAlarm } from './sharedAlarms';
+export { getMemberWake, getReceivedWakePings, sendWakePing, setWakeHidden } from './wake';

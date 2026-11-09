@@ -14,8 +14,9 @@ import { friendIds, groupShareSet, joinedIds, myGroup, myGroups, myJoinedAt, myN
 import { mergeGrants } from '../grants';
 import { CODE_EXPIRED, CODE_NOT_FOUND, GROUP_FULL, GROUP_NOT_MEMBER, GROUP_TOO_MANY, cleanCode, groupNameProblem } from '../groupTexts';
 import { MESSAGE_GONE, messageLimit } from '../relationMessages';
-import type { CreatedGroup, GroupCode, GroupDetail, GroupInvite, GroupItem, GroupPreview, GroupSummary, InvitableFriend, JoinedGroup } from '../types';
+import type { AppointmentJoiner, CreatedGroup, GroupCode, GroupDetail, GroupInvite, GroupItem, GroupPreview, GroupSummary, InvitableFriend, JoinedGroup } from '../types';
 import { invalidateSnapshot, loadSnapshot, loadWakeHides, loadWakeRows } from './load';
+import { sendPush } from './push';
 
 // 연결 일정은 오늘부터 앞으로 (지난 약속은 안 보임 — 작성자 판단), 많아도 이만큼
 const APPOINTMENT_LIMIT = 20;
@@ -51,7 +52,7 @@ export async function getGroup(groupId: string, date?: string | null): Promise<G
   const s = await loadSnapshot();
   const group = myGroup(s, groupId);
   if (!group) return null;
-  const [rows, appointments, hides] = await Promise.all([loadWakeRows(groupId, date), loadAppointments(groupId), loadWakeHides()]);
+  const [rows, appointments, hides] = await Promise.all([loadWakeRows(groupId, date), loadAppointments(groupId, s.me), loadWakeHides()]);
   return {
     id: group.group_id,
     name: group.group_name,
@@ -70,16 +71,49 @@ export async function getGroup(groupId: string, date?: string | null): Promise<G
   };
 }
 
-async function loadAppointments(groupId: string): Promise<GroupDetail['appointments']> {
-  const { data, error } = await supabase
-    .from('appointments')
-    .select('appointment_id, title, appointment_at, dest_name, importance')
-    .eq('group_id', groupId)
-    .gte('appointment_at', startOfDay(now()).toISOString())
-    .order('appointment_at')
-    .limit(APPOINTMENT_LIMIT);
+// 연결 일정 (친구 9장) — 오늘부터의 그룹 약속 + 인원수 · 내 참여(서버가 셈). 인원수를 못 읽은 약속은 0명 · 안 참여
+async function loadAppointments(groupId: string, me: string): Promise<GroupDetail['appointments']> {
+  const [list, counts] = await Promise.all([
+    supabase
+      .from('appointments')
+      .select('appointment_id, title, appointment_at, dest_name, importance, creator_id')
+      .eq('group_id', groupId)
+      .gte('appointment_at', startOfDay(now()).toISOString())
+      .order('appointment_at')
+      .limit(APPOINTMENT_LIMIT),
+    supabase.rpc('group_appointment_counts', { p_group_id: groupId }),
+  ]);
+  if (list.error) throw list.error;
+  if (counts.error) throw counts.error;
+  const byId = new Map((counts.data ?? []).map((c) => [c.appointment_id, c]));
+  const current = now().getTime();
+  return (list.data ?? []).map((a) => {
+    const at = parseDbTime(a.appointment_at);
+    const c = byId.get(a.appointment_id);
+    return {
+      id: a.appointment_id,
+      title: a.title,
+      at,
+      place: a.dest_name,
+      importance: a.importance,
+      joinedCount: c?.joined_count ?? 0,
+      iJoined: c?.i_joined ?? false,
+      past: at.getTime() <= current,
+      mine: a.creator_id === me,
+      creatorUnknown: a.creator_id == null,
+    };
+  });
+}
+
+// 연결 일정을 열었을 때 참여자 줄 — 서버가 그 그룹 참여 멤버마다 참여 · 알람 없음 · 숨김(차단 쌍)을 줌, 나 먼저 (9-42 · 9-33)
+export async function getAppointmentJoiners(appointmentId: string): Promise<AppointmentJoiner[]> {
+  const [s, { data, error }] = await Promise.all([loadSnapshot(), supabase.rpc('appointment_joiners', { p_appointment_id: appointmentId })]);
   if (error) throw error;
-  return (data ?? []).map((a) => ({ id: a.appointment_id, title: a.title, at: parseDbTime(a.appointment_at), place: a.dest_name, importance: a.importance }));
+  return (data ?? []).map((r) => ({
+    person: personOf(s, r.user_id),
+    isMe: r.user_id === s.me,
+    state: r.hidden ? 'HIDDEN' : r.joined ? 'JOINED' : 'NO_ALARM',
+  }));
 }
 
 // ---------------------------------------------------------------------------
@@ -151,6 +185,13 @@ export async function previewGroupByCode(code: string): Promise<GroupPreview> {
   }
 }
 
+// 새로 들어온 직후 — 기존 멤버들에게 '새 멤버가 들어왔어요' (받는 사람은 서버가 고름: 알림 끈 멤버 · 차단 쌍 · 나 제외, 들어온 지 10분 안일 때만). 실패해도 참여는 그대로
+function joined(groupId: string | undefined): JoinedGroup {
+  const id = groupId ?? '';
+  if (id) void sendPush({ kind: 'GROUP_MEMBER_JOINED', groupId: id });
+  return { id, already: false };
+}
+
 // 코드로 참여 = 직접 초대를 받았으면 초대 수락. wakeShare = 동의 시트 [공유] (5-09 · 5-10)
 export async function joinGroup(code: string, wakeShare: boolean): Promise<JoinedGroup> {
   const cleaned = cleanCode(code);
@@ -161,8 +202,9 @@ export async function joinGroup(code: string, wakeShare: boolean): Promise<Joine
   if (error) throw error;
   switch (data.status) {
     case 'JOINED':
+      return joined(data.group_id);
     case 'ALREADY_JOINED':
-      return { id: data.group_id ?? '', already: data.status === 'ALREADY_JOINED' };
+      return { id: data.group_id ?? '', already: true };
     case 'NOT_FOUND':
       throw new UserError(CODE_NOT_FOUND);
     case 'EXPIRED':
@@ -200,8 +242,9 @@ export async function acceptGroupInvite(groupId: string, wakeShare: boolean): Pr
   if (error) throw error;
   switch (data.status) {
     case 'JOINED':
+      return joined(data.group_id);
     case 'ALREADY_JOINED':
-      return { id: data.group_id ?? '', already: data.status === 'ALREADY_JOINED' };
+      return { id: data.group_id ?? '', already: true };
     case 'GONE':
       throw new UserError(MESSAGE_GONE);
     case 'FULL':
@@ -331,7 +374,7 @@ export async function setGroupNotificationsOff(groupId: string, off: boolean): P
 }
 
 // 이 그룹에 내 기상 상태를 공유하는 것에 동의 (group_members.wake_share_opt_in) — 본인 행만 고칠 수 있음 (RLS group_members_update_self)
-//   D19 열림: F03에서 기상 상태 조회를 켤 때 같이 켤지 따로 둘지 정해지기 전이라 F03 저장은 이 값을 건드리지 않음
+//   F03 그룹 관계의 '기상 상태 조회' 스위치도 이 값을 바꿈(real/sharing.ts saveShareSettings), G02 · 그룹 만들기에서도 씀
 export async function setWakeShareOptIn(groupId: string, on: boolean) {
   const me = await requireUserId();
   const { data, error } = await supabase

@@ -19,6 +19,8 @@ import {
 } from '@/components/ui';
 import { cancelSnooze, getDaySchedule, getEarlyWake, getMorningPlan, getNextAlarm, getSnooze, getWakeInProgress } from '@/features/alarm/api';
 import { EarlyWakeCard } from '@/features/alarm/components/EarlyWakeCard';
+import { ProposalCards } from '@/features/social/components/ProposalCards';
+import { ReceivedWakePingLine } from '@/features/social/components/ReceivedWakePingLine';
 import { AppointmentAlarmCard } from '@/features/alarm/components/AppointmentAlarmCard';
 import { MorningCard } from '@/features/alarm/components/MorningCard';
 import { ScheduleList } from '@/features/alarm/components/ScheduleList';
@@ -213,6 +215,9 @@ export default function HomeScreen() {
         </Card>
       ) : null}
 
+      {/* 친구가 보낸 알람 시각 제안 (친구 10장) */}
+      <ProposalCards onChanged={() => void reload()} />
+
       <SectionHeader title="다음 알람" right={next ? formatRelative(current, next.alarm.at) : undefined} />
       {next ? (
         <AppointmentAlarmCard appointment={next.appointment} current={current} onToggle={(on) => toggleAppointment(next.appointment, on)} />
@@ -234,6 +239,9 @@ export default function HomeScreen() {
           }}
         />
       ) : null}
+
+      {/* 오늘 친구가 깨운 기록 한 줄 (친구 8장) */}
+      <ReceivedWakePingLine />
 
       <SectionHeader title={evening ? '내일 일정' : '오늘 일정'} right={
           <View style={styles.links}>

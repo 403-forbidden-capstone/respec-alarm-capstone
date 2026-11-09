@@ -234,18 +234,27 @@ export default async function ch03({ q, as, su, check, expectErr }) {
       ? true : { read, upd, del, other, otherDel, still };
   });
 
-  await check('3-24 · 3-25 · 3-26: 직접 update로도 대기 → 친구만 됨 — PENDING · BLOCKED로 바꾸기 · 수락 되돌리기는 막힘, 직접 수락해도 accepted_at은 서버 시각', async () => {
+  await check('3-24 · 3-25 · 3-26: 상태 규칙 — 앱의 직접 update · delete는 늘 0행(수락 · 끊기는 함수로만, 11/9 후속), 서버 쪽 직접 고침도 대기 → 친구로만 되고 수락 시각은 서버 시각', async () => {
     const H = await join_(70, '직접');
     await request(H, B);
     await as(B);
+    const app = [
+      await q(`update public.friends set status = 'BLOCKED' where requester_id = $1 and addressee_id = $2 returning 1`, [H, B]),
+      await q(`update public.friends set status = 'ACCEPTED', accepted_at = '2025-01-01 00:00+09' where requester_id = $1 and addressee_id = $2 returning 1`, [H, B]),
+      await q(`update public.friends set status = 'PENDING' where requester_id = $1 and addressee_id = $2 returning 1`, [H, B]),
+      await q(`update public.friends set accepted_at = now() - interval '1 year' where requester_id = $1 and addressee_id = $2 returning 1`, [H, B]),
+      await q(`delete from public.friends where requester_id = $1 and addressee_id = $2 returning 1`, [H, B]),
+    ];
+    await su();
+    const untouched = await rowOf(H, B);                                                                   // 아무것도 안 바뀜: 여전히 대기
+    // 상태 규칙 트리거는 서버 쪽 고침에도 그대로 (마지막 방어)
     const toBlocked = await expectErr(() => q(`update public.friends set status = 'BLOCKED' where requester_id = $1 and addressee_id = $2`, [H, B]), /대기 → 친구/);
     const [acc] = await q(`update public.friends set status = 'ACCEPTED', accepted_at = '2025-01-01 00:00+09' where requester_id = $1 and addressee_id = $2
                            returning abs(extract(epoch from (accepted_at - now()))) < 5 as fresh`, [H, B]);
     const back = await expectErr(() => q(`update public.friends set status = 'PENDING' where requester_id = $1 and addressee_id = $2`, [H, B]), /대기 → 친구/);
     const clock = await expectErr(() => q(`update public.friends set accepted_at = now() - interval '1 year' where requester_id = $1 and addressee_id = $2`, [H, B]), /수락 시각/);
-    await su();
     await clearLimits(H);
-    return toBlocked === true && acc?.fresh === true && back === true && clock === true ? true : { toBlocked, acc, back, clock };
+    return app.every((r) => r.length === 0) && untouched?.status === 'PENDING' && toBlocked === true && acc?.fresh === true && back === true && clock === true ? true : { app: app.map((r) => r.length), untouched, toBlocked, acc, back, clock };
   });
 
   await check('3-28: 수락하는 순간 A가 취소했으면 GONE(행 없음) — 받은 요청에서도 사라짐', async () => {
@@ -288,16 +297,22 @@ export default async function ch03({ q, as, su, check, expectErr }) {
     const [{ participant_id: p }] = await q(`insert into public.appointment_participants (appointment_id, user_id) values ($1, $2) returning participant_id`, [ap, M]);
     const [{ alarm_id: al }] = await q(`insert into public.alarms (participant_id, user_id, alarm_type, scheduled_at) values ($1, $2, 'WAKE', now() + interval '20 hours') returning alarm_id`, [p, M]);
     await q(`insert into public.sharing_permissions (owner_id, grantee_id, source_type, source_id, can_view_alarm, can_edit_alarm) values ($1, $2, 'FRIEND', $3, true, true)`, [M, NB, f]);
+    const [{ t: moved }] = await q(`select scheduled_at + interval '5 minutes' as t from public.alarms where alarm_id = $1`, [al]);
     await as(NB);
-    const changed = await q(`update public.alarms set scheduled_at = scheduled_at + interval '5 minutes' where alarm_id = $1 returning scheduled_at`, [al]);
+    const [{ r: prop }] = await q(`select public.propose_alarm_time($1, $2::timestamptz) as r`, [al, moved]);   // 친구가 바꾸기 = 제안 (직접 update 길은 닫힘, 이슈 #427)
     await su();
+    await as(M);
+    const [{ r: applied }] = await q(`select public.respond_alarm_proposal($1, true) as r`, [prop.proposal_id]);
+    await su();
+    const changed = applied.status === 'APPLIED' ? await q(`select scheduled_at from public.alarms where alarm_id = $1`, [al]) : [];
     await remove(M, NB);
     const [kept] = await q(`select scheduled_at from public.alarms where alarm_id = $1`, [al]);
     await as(NB);
-    const after = await q(`update public.alarms set scheduled_at = scheduled_at + interval '5 minutes' where alarm_id = $1 returning 1`, [al]);
+    const direct = await q(`update public.alarms set scheduled_at = scheduled_at + interval '5 minutes' where alarm_id = $1 returning 1`, [al]);
+    const [{ r: afterProposal }] = await q(`select public.propose_alarm_time($1, $2::timestamptz) as r`, [al, moved]);        // 끊은 뒤에는 제안도 거절
     await su();
-    return changed.length === 1 && new Date(kept.scheduled_at).getTime() === new Date(changed[0].scheduled_at).getTime() && after.length === 0
-      ? true : { changed, kept, after };
+    return changed.length === 1 && new Date(kept.scheduled_at).getTime() === new Date(changed[0].scheduled_at).getTime() && direct.length === 0 && afterProposal.status === 'FORBIDDEN'
+      ? true : { changed, kept, direct, afterProposal };
   });
 
   await check('3-03 · 3-04 · 3-14(상태 조건): 취소 · 거절 · 끊기는 자기 상태의 행만 지움 — 친구 행은 취소 · 거절로, 대기 행은 끊기로, 받은 사람은 취소로, 보낸 사람은 거절로 못 지움', async () => {
