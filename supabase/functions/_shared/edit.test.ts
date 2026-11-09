@@ -63,6 +63,15 @@ test('editorVerdict: 만든 사람만 · 못 찾음 · 공동 약속의 참여�
   assert.equal(editorVerdict({ row: { creator_id: 'a', group_id: 'g' }, userId: 'b' }), 'NOT_CREATOR');
 });
 
+test('X-APPT-01 editorVerdict: 만든 사람이 비어 있는 공동 약속은 참여한 그룹원이 고치고 지움 — 참여 안 한 사람 · 개인 약속은 거절', () => {
+  const orphan = { creator_id: null, group_id: 'g' };
+  assert.equal(editorVerdict({ row: orphan, userId: 'b', participating: true }), 'OK');
+  assert.equal(editorVerdict({ row: orphan, userId: 'b', participating: false }), 'NOT_CREATOR');
+  assert.equal(editorVerdict({ row: orphan, userId: 'b' }), 'NOT_CREATOR');
+  assert.equal(editorVerdict({ row: { creator_id: null, group_id: null }, userId: 'b', participating: true }), 'NOT_CREATOR');
+  assert.equal(editorVerdict({ row: { creator_id: 'a', group_id: 'g' }, userId: 'b', participating: true }), 'NOT_CREATOR');   // 만든 사람이 있으면 참여자도 못 지움
+});
+
 // ---- 고친 값 반영 ----
 
 const ROW = { title: '세미나', appointment_at: iso('2026-10-29T09:00'), dest_name: '세종대학교', dest_lat: '37.550000', dest_lng: 127.07, importance: 'NORMAL' as const };
