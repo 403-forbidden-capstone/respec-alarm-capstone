@@ -12,7 +12,7 @@ import { hasHome } from '@/features/onboarding/home';
 import { CampusCard } from '@/features/onboarding/components/CampusCard';
 import { ImportNoticeCard } from '@/features/onboarding/components/ImportNoticeCard';
 import { HomePlaceStep } from '@/features/onboarding/components/HomePlaceStep';
-import { consentItems, PRIVACY_VERSION } from '@/features/onboarding/consent';
+import { consentBlocked, consentItems, PRIVACY_VERSION } from '@/features/onboarding/consent';
 import { OnboardingDoneStep } from '@/features/onboarding/components/OnboardingDoneStep';
 import { OnboardingFrame } from '@/features/onboarding/components/OnboardingFrame';
 import { CalendarPickSheet } from '@/features/onboarding/components/CalendarPickSheet';
@@ -105,6 +105,8 @@ export default function OnboardingScreen() {
   const [finished, setFinished] = useState(false); // 온보딩 끝난 시각을 이미 적었음 (다시 읽기만 실패해 한 번 더 누를 때 또 적지 않게)
   const location = useLocationRow();
   const { snapshot: permissionSnapshot } = usePermissions(); // 설정에서 돌아오면 다시 읽어 줄이 갱신됨
+  const [ageChecked, setAgeChecked] = useState(false); // 만 14세 이상 확인 — 체크해야 동의 단계를 넘음 (친구 13-아)
+  const alreadyAgreed = (profile?.privacy_version ?? 0) >= PRIVACY_VERSION; // 이 판에 이미 동의한 계정 — 동의 단계를 다시 저장 · 체크하지 않고 통과
   const [consentSaved, setConsentSaved] = useState(false); // 이 화면에서 이미 동의를 저장했음 (뒤로 갔다 와도 다시 저장하지 않게)
 
   const changeHandle = (next: string) => {
@@ -157,7 +159,7 @@ export default function OnboardingScreen() {
         return timetable.save(); // 줄 하나라도 못 만들면 false — 그 단계에 머묾
       case 'consent': {
         // 이미 이 판에 동의한 계정이면 다시 저장하지 않고 통과
-        const agreed = (profile?.privacy_version ?? 0) >= PRIVACY_VERSION;
+        const agreed = alreadyAgreed;
         if (userId && !agreed && !consentSaved) {
           await saveProfileFields(userId, { privacy_agreed_at: new Date().toISOString(), privacy_version: PRIVACY_VERSION });
           setConsentSaved(true);
@@ -358,8 +360,9 @@ export default function OnboardingScreen() {
     consent: {
       title: '개인정보 안내',
       lead: '앱이 읽는 것과 읽지 않는 것이에요',
-      body: <ConsentStep items={consentItems(TIMETABLE_PATHS)} />,
+      body: <ConsentStep items={consentItems(TIMETABLE_PATHS)} ageChecked={ageChecked} onAgeChange={alreadyAgreed ? undefined : setAgeChecked} />,
       primaryLabel: '동의하고 계속',
+      primaryDisabled: consentBlocked(alreadyAgreed, ageChecked), // 만 14세 이상을 체크하지 않으면 가입을 끝내지 않음 (13-20). 이미 이 판에 동의한 계정은 다시 묻지 않음
       onPrimary: next,
     },
     permissions: {

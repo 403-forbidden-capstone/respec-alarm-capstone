@@ -24,7 +24,7 @@ import { getReceived, getShareSettings, listRelations, saveShareSettings } from 
 import { GroupIcon } from '@/features/social/components/GroupIcon';
 import { PersonRow } from '@/features/social/components/PersonRow';
 import { permissionNames, togglePermission } from '@/features/social/permissions';
-import { PERMISSIONS, permissionsFor, type PermissionSet, type Relation, type RelationId } from '@/features/social/types';
+import { PERMISSIONS, permissionsFor, VIEW_ALARM_NOTE, type PermissionSet, type Relation, type RelationId } from '@/features/social/types';
 import { useLoad } from '@/lib/useLoad';
 import { colors } from '@/theme';
 import { useAction } from '@/lib/useAction';
@@ -175,6 +175,11 @@ function Editor({
                     <Text variant="small" tone="sub" style={styles.description}>
                       {key === 'viewWake' ? WAKE_CONSENT_DESCRIPTION : description}
                     </Text>
+                    {key === 'viewAlarm' ? (
+                      <Text variant="caption" tone="faint" style={styles.description}>
+                        {VIEW_ALARM_NOTE}
+                      </Text>
+                    ) : null}
                     {key === 'editAlarm' ? (
                       <Text variant="caption" tone="faint" style={styles.description}>
                         알람 설정을 켜면 알람 조회도 같이 켜져요. 알람 조회를 끄면 알람 설정도 꺼져요.

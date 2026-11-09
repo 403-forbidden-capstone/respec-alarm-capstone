@@ -288,16 +288,22 @@ export default async function ch03({ q, as, su, check, expectErr }) {
     const [{ participant_id: p }] = await q(`insert into public.appointment_participants (appointment_id, user_id) values ($1, $2) returning participant_id`, [ap, M]);
     const [{ alarm_id: al }] = await q(`insert into public.alarms (participant_id, user_id, alarm_type, scheduled_at) values ($1, $2, 'WAKE', now() + interval '20 hours') returning alarm_id`, [p, M]);
     await q(`insert into public.sharing_permissions (owner_id, grantee_id, source_type, source_id, can_view_alarm, can_edit_alarm) values ($1, $2, 'FRIEND', $3, true, true)`, [M, NB, f]);
+    const [{ t: moved }] = await q(`select scheduled_at + interval '5 minutes' as t from public.alarms where alarm_id = $1`, [al]);
     await as(NB);
-    const changed = await q(`update public.alarms set scheduled_at = scheduled_at + interval '5 minutes' where alarm_id = $1 returning scheduled_at`, [al]);
+    const [{ r: prop }] = await q(`select public.propose_alarm_time($1, $2::timestamptz) as r`, [al, moved]);   // 친구가 바꾸기 = 제안 (직접 update 길은 닫힘, 이슈 #427)
     await su();
+    await as(M);
+    const [{ r: applied }] = await q(`select public.respond_alarm_proposal($1, true) as r`, [prop.proposal_id]);
+    await su();
+    const changed = applied.status === 'APPLIED' ? await q(`select scheduled_at from public.alarms where alarm_id = $1`, [al]) : [];
     await remove(M, NB);
     const [kept] = await q(`select scheduled_at from public.alarms where alarm_id = $1`, [al]);
     await as(NB);
-    const after = await q(`update public.alarms set scheduled_at = scheduled_at + interval '5 minutes' where alarm_id = $1 returning 1`, [al]);
+    const direct = await q(`update public.alarms set scheduled_at = scheduled_at + interval '5 minutes' where alarm_id = $1 returning 1`, [al]);
+    const [{ r: afterProposal }] = await q(`select public.propose_alarm_time($1, $2::timestamptz) as r`, [al, moved]);        // 끊은 뒤에는 제안도 거절
     await su();
-    return changed.length === 1 && new Date(kept.scheduled_at).getTime() === new Date(changed[0].scheduled_at).getTime() && after.length === 0
-      ? true : { changed, kept, after };
+    return changed.length === 1 && new Date(kept.scheduled_at).getTime() === new Date(changed[0].scheduled_at).getTime() && direct.length === 0 && afterProposal.status === 'FORBIDDEN'
+      ? true : { changed, kept, direct, afterProposal };
   });
 
   await check('3-03 · 3-04 · 3-14(상태 조건): 취소 · 거절 · 끊기는 자기 상태의 행만 지움 — 친구 행은 취소 · 거절로, 대기 행은 끊기로, 받은 사람은 취소로, 보낸 사람은 거절로 못 지움', async () => {

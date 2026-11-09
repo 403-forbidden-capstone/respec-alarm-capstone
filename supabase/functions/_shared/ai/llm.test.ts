@@ -475,7 +475,7 @@ describe('시간 초과 — Promise.race로 직접', () => {
     assert.equal(POINTS.T1.retryOnTimeout, true);
     assert.equal(POINTS.T2F.retryOnTimeout, false);
     assert.equal(POINTS.T2F.timeoutMs, 9_000);
-    assert.deepEqual(Object.fromEntries(POINT_IDS.map((p) => [p, POINTS[p].timeoutMs])), { T1: 16_000, T2F: 9_000, T2: 19_000, T3: 4_000, T4: 11_000, T5: 26_000, E4: 28_000 });
+    assert.deepEqual(Object.fromEntries(POINT_IDS.map((p) => [p, POINTS[p].timeoutMs])), { T1: 16_000, T2F: 9_000, T2: 19_000, T3: 4_000, T4: 11_000, T5: 9_000, E4: 28_000 });
   });
 
   it('deadlineMs: 다시 시도하면 전체 마감을 넘길 것 같으면 재시도 안 함', async () => {
@@ -713,7 +713,7 @@ describe('call 기록 — ai_calls 표 칸과 같은 이름', () => {
     assert.deepEqual([...POINT_IDS].sort(), [...POINT_CHECK].sort());
     assert.deepEqual(
       Object.fromEntries(POINT_IDS.map((p) => [p, `${POINTS[p].prompt.id}@${POINTS[p].prompt.version}`])),
-      { T1: 'T1@v1.5', T2F: 'T2F@v2-c', T2: 'T2@v3.3', T3: 'T3@v1', T4: 'T4@v1.1', T5: 'T5@v1.2', E4: 'ASSIST_E4@v1.1' },
+      { T1: 'T1@v1.5', T2F: 'T2F@v2-c', T2: 'T2@v3.3', T3: 'T3@v1', T4: 'T4@v1.1', T5: 'T5@v2', E4: 'ASSIST_E4@v1.1' },
     );
   });
 

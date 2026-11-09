@@ -47,8 +47,8 @@ describe('닉네임 검사', () => {
 });
 
 describe('개인정보 안내 상수', () => {
-  it('항목 4개(위치 · 화면 사용 · 음성 · 기상 공유), 항목마다 세 줄이 다 있고 판 번호는 숫자', () => {
-    expect(CONSENT_ITEMS.map((item) => item.title)).toEqual(['위치', '화면 사용', '음성', '기상 공유']);
+  it('항목 5개(위치 · 화면 사용 · 음성 · 기상 공유 · 알람 공유), 항목마다 세 줄이 다 있고 판 번호는 숫자', () => {
+    expect(CONSENT_ITEMS.map((item) => item.title)).toEqual(['위치', '화면 사용', '음성', '기상 공유', '알람 공유']);
     for (const item of CONSENT_ITEMS) {
       expect(item.reads).not.toBe('');
       expect(item.doesNotRead).not.toBe('');
