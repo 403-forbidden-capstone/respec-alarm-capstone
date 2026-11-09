@@ -2085,7 +2085,7 @@ await check('열쇠 칸: 묶음 · 날짜는 한 번 정하면 못 바꿈(servic
   const ok = svcErrs.every((x) => x === true) && ownerErrs.every((x) => x === true)
     && okTitle.length === 1 && okTitle[0].title === '바뀐 제목' && okTitle[0].series_id === S && okTitle[0].on === '2026-11-04'
     && moved.length === 1 && moved[0].on === '2026-11-13' && moved[0].series_id === sa.series_id && movedAppt[0].on === '2026-11-04'
-    && def.appointments?.includes(`prevent_key_change('creator_id', 'group_id', 'series_id', 'occurrence_on')`)
+    && def.appointments?.includes('prevent_appointment_key_change()')   // 12장: creator_id 비우기만 풀고 group_id · series_id · occurrence_on은 같은 함수 안에서 그대로 못 바꿈
     && def.alarms?.includes(`prevent_key_change('user_id', 'participant_id', 'routine_id', 'series_id', 'occurrence_on')`);
   return ok ? true : { svcErrs, ownerErrs, okTitle, moved, movedAppt, def };
 });
@@ -3028,6 +3028,6 @@ await check('user_places: updated_at이 고칠 때 갱신됨 · 계정을 지우
 // ---------------------------------------------------------------------
 // 장마다 자기 계정을 새로 만들어 앞 검사의 A~E와 섞이지 않게 함. 장이 늘면 아래 목록에 한 줄씩
 const FRIEND_CTX = { q, as, su, svc, check, expectErr, PGlite, AUTH_STUBS, MIG_DIR, readFileSync, readdirSync, join };
-for (const ch of ['ch02', 'ch03', 'ch04', 'ch05', 'ch06', 'ch11', 'ch07', 'ch08', 'ch09', 'ch10']) await (await import(`./friend/${ch}.mjs`)).default(FRIEND_CTX);
+for (const ch of ['ch02', 'ch03', 'ch04', 'ch05', 'ch06', 'ch11', 'ch07', 'ch08', 'ch09', 'ch10', 'ch12']) await (await import(`./friend/${ch}.mjs`)).default(FRIEND_CTX);
 
 report();
