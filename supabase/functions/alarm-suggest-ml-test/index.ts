@@ -11,6 +11,7 @@ import { buildPlan, TravelRequiredError, type BuiltPlan } from '../_shared/plan.
 import { computePlan, toSuggestion, toTravelRequiredSuggestion } from '../_shared/plan-core.ts';
 import { buildMlRequest, requestMlPrediction, type MlModel } from '../_shared/prepare-ml.ts';
 import { Reader, readJson } from '../_shared/read.ts';
+import { readSuggestRequest } from '../_shared/requests.ts';
 
 const SYNTHETIC_PROFILE = {
   ml_codes_verified: true,
