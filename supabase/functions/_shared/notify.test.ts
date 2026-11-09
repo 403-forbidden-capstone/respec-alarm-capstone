@@ -134,6 +134,14 @@ test('11-09: 옛 앱이 보낸 title · body · data는 무시하고 고정 문�
   assert.ok(pushes.every((p) => p.data.recipientUserId === TARGET && p.data.path === '/friends'));
 });
 
+test('15-10: 본문에 다른 사람 이름(senderId · userId · sender · from)을 실어 보내도 읽지 않음 — 보낸 사람은 로그인한 사람 하나(runNotify의 인자)로만 정해짐', async () => {
+  const forged = readNotifyRequest(Reader.root({ kind: 'WAKE_PING', targetUserId: TARGET, senderId: OTHER, userId: OTHER, sender: OTHER, from: OTHER }));
+  assert.deepEqual(forged, { kind: 'WAKE_PING', targetUserId: TARGET });
+  const { db, service, fetchImpl } = setup(['WAKE_PING']);
+  await runNotify(service, SENDER, forged, { fetchImpl: fetchImpl(okAll), sleep: noSleep });
+  assert.ok(db.rpcCalls.length > 0 && db.rpcCalls.every((c) => c.args.p_sender === SENDER));
+});
+
 test('11-11: 권한이 없으면 403 — 토큰도 Expo도 건드리지 않음', async () => {
   const { db, service, pushes, fetchImpl } = setup();
   await assert.rejects(
@@ -258,6 +266,15 @@ test('8-차: 판정과 횟수 세기 사이에 다른 요청이 먼저 보냈으
   const result = await runNotify(service, SENDER, request({ kind: 'WAKE_PING' }), { fetchImpl: fetchImpl(okAll), sleep: noSleep });
   assert.deepEqual(result, { sent: 0, failed: 0, ping: { status: 'WAIT', next_at: '2026-11-10T07:10:00Z' } });
   assert.deepEqual(pushes, []);
+});
+
+test('8-33: 판정은 통과했는데 횟수 세기(reserve) 때 그새 일어났으면(ALREADY_UP) 푸시를 안 보내고 ping.status ALREADY_UP으로 돌려줌 — 보낸 사람이 "이미 일어났어요"를 봄', async () => {
+  const { db, service, pushes, fetchImpl } = setup(['WAKE_PING']);
+  db.rpcHandlers.plan_wake_ping = (a) => (a.p_reserve ? { status: 'ALREADY_UP' } : { status: 'OK' });
+  const result = await runNotify(service, SENDER, request({ kind: 'WAKE_PING' }), { fetchImpl: fetchImpl(okAll), sleep: noSleep });
+  assert.deepEqual(result, { sent: 0, failed: 0, ping: { status: 'ALREADY_UP' } });
+  assert.deepEqual(pushes, []);
+  assert.deepEqual(db.rpcCalls.map((c) => c.args.p_reserve), [false, true]); // 판정 → 횟수 세기에서 멈춤
 });
 
 test('8-11 · 8-35: 기상이 안 보이는 사람(DB 판정 FORBIDDEN)은 403 — 이유를 안 알려 줌. 모르는 응답이나 DB 오류는 500', async () => {

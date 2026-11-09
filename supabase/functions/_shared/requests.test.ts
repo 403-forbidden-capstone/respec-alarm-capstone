@@ -132,6 +132,22 @@ test('commit: 기존 약속에 내 참여 조건을 더함 (공동 약속 각자
   assert.throws(() => neither.finish(), HttpError);
 });
 
+test('commit: 새 약속의 group_id(H05 "함께할 그룹")는 uuid만 받아 appointment.groupId로 — 안 보내면 칸 없음(개인 일정), uuid가 아니면 문제 (9-01)', () => {
+  const r = Reader.root({ ...NEW_BODY, appointment: { ...NEW_BODY.appointment, group_id: ID } });
+  const c = readCommitRequest(r);
+  r.finish();
+  assert.equal(c.type, 'APPOINTMENT');
+  if (c.type !== 'APPOINTMENT') return;
+  assert.deepEqual(c.appointment, { title: '팀 주간회의', groupId: ID, recurrenceRule: 'FREQ=WEEKLY;BYDAY=TU' });
+
+  const solo = readCommitRequest(Reader.root(NEW_BODY));
+  assert.ok(solo.type === 'APPOINTMENT' && solo.appointment !== undefined && !('groupId' in solo.appointment));
+
+  const bad = Reader.root({ ...NEW_BODY, appointment: { ...NEW_BODY.appointment, group_id: 'not-a-uuid' } });
+  readCommitRequest(bad);
+  assert.throws(() => bad.finish(), HttpError);
+});
+
 test('commit: 이동시간은 출처와 같이, CACHED · ESTIMATE는 받지 않음 (D5)', () => {
   for (const source of ['CACHED', 'ESTIMATE']) {
     const r = Reader.root({ ...NEW_BODY, participant: { est_travel_minutes: 40, travel_source: source } });
