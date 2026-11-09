@@ -42,7 +42,7 @@
 | 일정 전체 켜기 · 끄기 (H01 · H02 카드) | DB 직접 (`alarms.is_enabled`, 도착 목표는 `mirrorArrive`) | `reconcile({ alarmIds })`로 그 알람만 |
 | S01 제안 적용 · 되돌리기 | DB 직접 — `alarms`(말소리 · 배경음 · 진동 칸) → `alarm_suggestions` → `user_edit_logs` insert. `alarm-commit`은 안 씀 (제안 종류에 시각이 없음) | `reconcile({ alarmIds })`로 그 알람만 |
 | 루틴 저장 (A04) | DB 직접 — `routines` + 단계 알람 `alarms`(없어진 단계는 지우지 않고 `is_enabled` false) | `reconcile({ alarmIds })` — 저장이 중간에 실패해도 바뀌었을 수 있는 알람은 맞춤 |
-| G04 켜기 · 끄기 · ±5분 | DB 직접 — 상대의 `alarms`(설정 권한이면 RLS가 허용) → 주인에게 `notify` (Edge). 앞당길 때 옮긴 시각이 지금 + 5분보다 이르게 되는 켜진 알람이 있으면 거절 | 주인 폰이 푸시를 받거나 앱이 앞에 올 때 맞춤 (내 폰에서 걸지 않음) |
+| G04 시각 제안(켜기 · 끄기는 없음) | RPC `propose_alarm_time` → 주인에게 `notify` (Edge). 설정 권한이 있어도 상대의 `alarms`를 직접 update하는 길은 11/9에 닫음(0행, 이슈 #427) — 바뀌는 것은 주인이 [적용]한 뒤. 앞당길 때 옮긴 시각이 지금 + 5분보다 이르게 되는 켜진 알람이 있으면 거절 | 주인 폰이 푸시를 받거나 앱이 앞에 올 때 맞춤 (내 폰에서 걸지 않음) |
 | 울림 기록 (해제 · 미루기 · 원탭) | 폰이 쌓아 둠 → `uploadEvents`가 `alarm_events`에 upsert (`client_event_id`가 같으면 무시) | 올린 것만 폰에서 지움 |
 | 홈 "미루기 취소" (기상 알람) | `alarm_events`에 `DISMISSED`(`MANUAL`) upsert → `AlarmCore.cancel` → H08. 기록이 먼저 (폰 `cancel`은 해제 기록을 안 남김) | 예약 취소 |
 | 기상 확정 (H08 · 앱이 앞에 올 때 다시 판정) | `alarm_events` `WAKE_CONFIRMED` + `daily_records.wake_confirmed_at` | — |
@@ -180,7 +180,7 @@
 ### F03 공유 권한 설정
 - 내가 주는 권한 저장: 친구 관계 = `sharing_permissions` 내 행 하나 upsert(알람 조회 · 알람 설정 2개만, `can_view_wake`는 항상 꺼서) — DB. 그룹 관계 = `save_group_permissions(p_group_id, p_can_view_alarm, p_can_edit_alarm)` 한 번 — RPC(참여 중 멤버 전원에게 같은 값이 전부 되거나 전부 안 됨, 값이 그대로여도 저장해 나중에 들어온 멤버 몫 설정 행이 생김, 혼자인 그룹은 `NO_MEMBERS` → 오류). 그룹의 기상 상태 조회 스위치 = 이 그룹 기상 공유 동의: `group_members.wake_share_opt_in`을 내 행만 update(값이 바뀐 때만)
 - 받은 권한 보기: `sharing_permissions`(받는 사람 = 나) — DB
-- 설정 권한은 조회 권한이 있어야 실제로 고칠 수 있음 → 화면에서 설정을 켜면 조회도 같이 켬
+- 설정 권한은 조회 권한이 있어야 실제로 쓸 수 있음(= 시각 제안을 보낼 수 있음) → 화면에서 설정을 켜면 조회도 같이 켬
 - 알람 조회 줄 아래 안내 '일정 장소도 보여요 · 집 · 출발지는 안 보여요' (친구 13장, 화면 글자만 — 서버는 일정 장소까지만 내려줌)
 
 ### G02 그룹 상세

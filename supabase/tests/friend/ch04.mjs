@@ -62,9 +62,10 @@ export default async function ch04({ q, as, su, check, expectErr, PGlite, AUTH_S
     const [{ appointment_id: ap }] = await q(`insert into public.appointments (creator_id, title, appointment_at, dest_name) values ($1, '수업', now() + interval '1 day', '학교') returning appointment_id`, [A]);
     const [{ participant_id: p }] = await q(`insert into public.appointment_participants (appointment_id, user_id) values ($1, $2) returning participant_id`, [ap, A]);
     const [{ alarm_id: al }] = await q(`insert into public.alarms (participant_id, user_id, alarm_type, scheduled_at) values ($1, $2, 'WAKE', now() + interval '20 hours') returning alarm_id`, [p, A]);
-    await as(B);
-    const [changed] = await q(`update public.alarms set scheduled_at = scheduled_at + interval '5 minutes' where alarm_id = $1 returning scheduled_at`, [al]);
-    await su();
+    const [{ t: moved }] = await q(`select scheduled_at + interval '5 minutes' as t from public.alarms where alarm_id = $1`, [al]);
+    const prop = await call(B, 'public.propose_alarm_time($1, $2::timestamptz)', [al, moved]);   // B가 A 알람을 제안 → A가 적용 (직접 update 길은 닫힘, 이슈 #427)
+    await call(A, 'public.respond_alarm_proposal($1, true)', [prop.proposal_id]);
+    const [changed] = await q(`select scheduled_at from public.alarms where alarm_id = $1`, [al]);
     const before = await permCount(A, B);
     const r = await block(A, B);
     const rows = await pairRows(A, B);
