@@ -5,7 +5,7 @@
 //   중간에 실패하면 다시 부르면 이어서 끝남(① 은 몇 번 불러도 같고, ② 는 이미 없는 계정이면 끝난 것으로 봄). 삭제 직후 같은 토큰은 로그인 확인(requireUser)에서 거절됨
 import { dbFail } from './db.ts';
 import { HttpError } from './errors.ts';
-import type { Reader } from './read.ts';
+import { Reader, readJson } from './read.ts';
 
 // 계정 삭제에 필요한 만큼만의 클라이언트 모양 (SupabaseClient가 그대로 맞고, 시험은 가짜로)
 export type AccountService = {
@@ -22,6 +22,12 @@ export function readAccountDeleteRequest(root: Reader, callerId: string): void {
   if (userId !== undefined && userId.toLowerCase() !== callerId.toLowerCase()) {
     throw new HttpError('FORBIDDEN', '내 계정만 삭제할 수 있어요');
   }
+}
+
+// 요청 본문 읽기: 본문이 아예 없거나 공백뿐이면 {}로 받음(앱은 본문 없이 부름), 있으면 JSON이어야 하고(아니면 400) readAccountDeleteRequest로 검사
+export async function readAccountDeleteBody(req: Request, callerId: string): Promise<void> {
+  const hasBody = (await req.clone().text()).trim().length > 0;
+  readAccountDeleteRequest(Reader.root(hasBody ? await readJson(req) : {}), callerId);
 }
 
 const isInt = (v: unknown): v is number => typeof v === 'number' && Number.isInteger(v) && v >= 0;
