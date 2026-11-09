@@ -1,7 +1,7 @@
 // notify의 본문 — Deno.serve 없이 모듈로 빼서 가짜 DB로 시험함 (notify.test.ts). 연결은 notify/index.ts
 //   요청: { kind, targetUserId?, groupId?, appointmentId?, alarmId? } (옛 앱이 보내던 previousAt · newAt은 읽기만 하고 안 씀 — ALARM_CHANGED의 시각은 제안 기록에서)
 //        한 사람에게 가는 종류(깨우기 · 알람 바뀜 · 친구 요청 · 수락)는 targetUserId, 그룹 종류(새 멤버 · 약속 변경)는 groupId(+ appointmentId)만 — 받는 사람은 서버가 고름
-//        깨우기는 groupId도 받음(어느 그룹의 G03에서 눌렀는지): 그 그룹에서 보이는 사람일 때만 되고, 푸시를 누르면 그 그룹의 G03로 감
+//        깨우기는 groupId도 받음(어느 그룹의 G03에서 눌렀는지): 그 그룹에서 보이는 사람일 때만 되고, 푸시를 받은 사람이 누르면 자기 기상 확인 화면(/wake, H08)으로 감
 //        옛 앱이 보내던 title · body · data는 읽지 않음: 문구는 종류별로 서버가 고정하고(push-copy.ts) 알림 데이터도 서버가 채움
 //   처리(한 사람): ① can_send_push(부른 사람, 받는 사람, kind) — 서버 권한 판정(DB 함수, service_role 전용). 없는 · 탈퇴한 · 권한 없는 · 차단된 대상은 모두 같은 403이라
 //        사용자 존재 여부가 응답으로 드러나지 않음(15-나). 깨우기만 can_send_push를 안 부르고 plan_wake_ping이 권한까지 한 곳에서 판정함 ② 받는 사람 프로필(문구에 쓸 이름 · 시간대)
@@ -14,7 +14,7 @@
 //   응답: { sent, failed, reason?, ping? } — 토큰이 없거나 푸시 설정(FCM 키 · Expo 액세스 토큰)이 아직 없으면 오류가 아니라 { sent: 0, reason }
 import { dbFail, must } from './db.ts';
 import { HttpError } from './errors.ts';
-import { CHANNEL_IDS, CLIENT_KINDS, composeCopy, type ClientKind, type GroupChange, type GroupKind, isGroupKind, PATHS, type PushKind as AnyPushKind, wakePingPath } from './push-copy.ts';
+import { CHANNEL_IDS, CLIENT_KINDS, composeCopy, type ClientKind, type GroupChange, type GroupKind, isGroupKind, PATHS, type PushKind as AnyPushKind } from './push-copy.ts';
 import { type FetchLike, type OutgoingMessage, type PushResult, sendExpoMessages, type SendResult } from './push.ts';
 import type { Reader } from './read.ts';
 import type { Db } from './supabase.ts';
@@ -160,7 +160,7 @@ async function notifyOne(service: Db, senderId: string, req: NotifyRequest, opti
     ...(proposal ? { previousAt: proposal.from_at, newAt: proposal.to_at, alarmType: proposal.alarm_type, now: options.now } : {}),
     timeZone: targetProfile.timezone,
   });
-  const path = reserved?.groupId ? wakePingPath(reserved.groupId, target) : PATHS[req.kind]; // 깨우기는 그 그룹에서 본 그 사람의 G03
+  const path = PATHS[req.kind]; // 깨우기를 누르면 받는 사람의 기상 확인(H08, 8-02) — 보낸 사람이 본 그룹 화면(G03)이 아님
   const data = { kind: req.kind, recipientUserId: target, path, ...(proposal ? { alarmId: proposal.alarm_id, proposalId: proposal.proposal_id } : {}) };
   const messages: OutgoingMessage[] = rows.map((r) => ({ to: r.token, ...copy, channelId: CHANNEL_IDS[req.kind], data }));
   const delivered = await deliver(service, req.kind, messages, new Map(rows.map((r) => [r.token, target])), options);

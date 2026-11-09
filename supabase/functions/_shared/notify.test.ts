@@ -144,7 +144,7 @@ test('11-11: 권한이 없으면 403 — 토큰도 Expo도 건드리지 않음',
   assert.ok(!db.calls.includes('select push_tokens'));
 });
 
-test('깨우기(WAKE_PING)는 plan_wake_ping이 FORBIDDEN이면 403, 허용되면 보낸 사람 이름이 든 고정 문구 + 응답에 ping 상태 + 누르면 그 그룹의 G03 (11-05 · 11-28 · 8-사)', async () => {
+test('깨우기(WAKE_PING)는 plan_wake_ping이 FORBIDDEN이면 403, 허용되면 보낸 사람 이름이 든 고정 문구 + 응답에 ping 상태 + 누르면 받는 사람의 기상 확인 /wake (11-05 · 11-28 · 8-02)', async () => {
   const { db, service, pushes, fetchImpl } = setup([]);
   await assert.rejects(
     () => runNotify(service, OTHER, request({ kind: 'WAKE_PING' }), { fetchImpl: fetchImpl(okAll), sleep: noSleep }),
@@ -156,7 +156,7 @@ test('깨우기(WAKE_PING)는 plan_wake_ping이 FORBIDDEN이면 403, 허용되�
   const open = setup([]);
   const result = await runNotify(open.service, SENDER, request({ kind: 'WAKE_PING' }), { fetchImpl: open.fetchImpl(okAll), sleep: noSleep });
   assert.deepEqual(result, { sent: 2, failed: 0, ping: { status: 'OK', count: 1, limit: 3, next_at: '2026-11-10T07:10:00Z' } }); // send_id · group_id 같은 서버 안쪽 값은 앱에 안 줌
-  const path = `/groups/${GROUP}/members/${TARGET}`;
+  const path = '/wake'; // 받는 사람이 누르면 자기 기상 확인(H08, 8-02) — 보낸 사람 쪽 그룹 화면(G03)이 아님
   assert.deepEqual(open.pushes.map((p) => [p.title, p.body, p.channelId, p.data.path]), [['깨우기', '수연님이 깨워요', 'friend_v1', path], ['깨우기', '수연님이 깨워요', 'friend_v1', path]]);
   assert.ok(open.pushes.every((p) => p.data.kind === 'WAKE_PING' && p.data.recipientUserId === TARGET));
 });

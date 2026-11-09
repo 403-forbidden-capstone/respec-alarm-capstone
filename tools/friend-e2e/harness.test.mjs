@@ -62,8 +62,9 @@ test('OpenAPI에서 표 · 칼럼 · 함수를 읽는다', () => {
   assert.ok(caps.hasCol('friends', 'status') && !caps.hasCol('friends', 'nope'));
   assert.ok(caps.hasRpc('block_user'));
   assert.equal(rpcOf(caps, 'block_user'), 'block_user');
-  assert.equal(rpcOf(caps, 'wake_ping'), null); // 이름 없음
-  assert.equal(RPC.wake_ping, null);
+  assert.equal(rpcOf(caps, 'wake_ping'), null); // 이름은 있어도 DB에 함수가 없으면 null
+  assert.equal(RPC.wake_ping, 'plan_wake_ping');
+  assert.equal(RPC.alarm_suggest, 'propose_alarm_time');
 });
 
 test('로컬 주소만 허용 · env 읽기', () => {

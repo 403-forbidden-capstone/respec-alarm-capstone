@@ -1,7 +1,7 @@
 // 친구 4장 — 차단 · 신고 (친구_시험케이스.md 4장 DB 층 + 99-03, 11/8 확정)
 //   항목 이름 앞 번호 = 시험케이스 번호
 //   이 장에 없는 것: 4-14~4-16 중 푸시 종류별 보내기(WAKE_PING · FRIEND_* 푸시는 8 · 11장 — 여기선 보내도 되는지 판정 can_send_push까지),
-//                   4-17 내보내기(멤버 누구나, 5장), 4-18 미리보기 · 4-20 직접 초대(5장), 4-35 변경 알림 문구(9 · 11장), 99-04 운영 화면 처리(빈 곳 — "팀원 계정만" 판별 방법)
+//                   4-17 내보내기(멤버 누구나, 5장), 4-18 미리보기 · 4-20 직접 초대(5장), 4-35 변경 알림 문구(9 · 11장), 99-04 운영 화면 처리(신고 처리 · 팀원 표 PR에서 아래 '99-04' 시험들로)
 //   사람은 이 장 전용 계정. db-check 맨 끝에서 돎
 export default async function ch04({ q, as, su, check, expectErr, PGlite, AUTH_STUBS, MIG_DIR, readFileSync, readdirSync, join }) {
   const id = (n) => `40000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
@@ -62,9 +62,10 @@ export default async function ch04({ q, as, su, check, expectErr, PGlite, AUTH_S
     const [{ appointment_id: ap }] = await q(`insert into public.appointments (creator_id, title, appointment_at, dest_name) values ($1, '수업', now() + interval '1 day', '학교') returning appointment_id`, [A]);
     const [{ participant_id: p }] = await q(`insert into public.appointment_participants (appointment_id, user_id) values ($1, $2) returning participant_id`, [ap, A]);
     const [{ alarm_id: al }] = await q(`insert into public.alarms (participant_id, user_id, alarm_type, scheduled_at) values ($1, $2, 'WAKE', now() + interval '20 hours') returning alarm_id`, [p, A]);
-    await as(B);
-    const [changed] = await q(`update public.alarms set scheduled_at = scheduled_at + interval '5 minutes' where alarm_id = $1 returning scheduled_at`, [al]);
-    await su();
+    const [{ t: moved }] = await q(`select scheduled_at + interval '5 minutes' as t from public.alarms where alarm_id = $1`, [al]);
+    const prop = await call(B, 'public.propose_alarm_time($1, $2::timestamptz)', [al, moved]);   // B가 A 알람을 제안 → A가 적용 (직접 update 길은 닫힘, 이슈 #427)
+    await call(A, 'public.respond_alarm_proposal($1, true)', [prop.proposal_id]);
+    const [changed] = await q(`select scheduled_at from public.alarms where alarm_id = $1`, [al]);
     const before = await permCount(A, B);
     const r = await block(A, B);
     const rows = await pairRows(A, B);
@@ -95,9 +96,9 @@ export default async function ch04({ q, as, su, check, expectErr, PGlite, AUTH_S
     const open1 = await call(Q, 'public.open_friend_link($1)', [linkP.token]);
     const open2 = await call(P, 'public.open_friend_link($1)', [linkQ.token]);
     await as(Q);
-    const direct1 = await expectErr(() => q(`insert into public.friends (requester_id, addressee_id) values ($1, $2)`, [Q, P]), /violates foreign key constraint/);
+    const direct1 = await expectErr(() => q(`insert into public.friends (requester_id, addressee_id) values ($1, $2)`, [Q, P]), /row-level security/);   // 직접 insert 정책이 15장에서 닫혀 어느 쪽이든 같은 행 권한 거절
     await as(P);
-    const direct2 = await expectErr(() => q(`insert into public.friends (requester_id, addressee_id) values ($1, $2)`, [P, Q]), /violates foreign key constraint/);
+    const direct2 = await expectErr(() => q(`insert into public.friends (requester_id, addressee_id) values ($1, $2)`, [P, Q]), /row-level security/);
     await su();
     await clearLimits(P, Q);
     return shapes.every((x) => x === NOT_FOUND) && open1.status === 'EXPIRED' && open2.status === 'EXPIRED'
@@ -372,7 +373,7 @@ export default async function ch04({ q, as, su, check, expectErr, PGlite, AUTH_S
       && ok200.status === 'REPORTED' ? true : { first, same, other, nextDay, bad, self, ghost, hidden, ok200 };
   });
 
-  await check('4-04(변형): 직접 insert 거절은 없는 사람과 같은 모양 — 에러 코드 23503, 메시지 · 상세가 외래 키 위반 문구 (차단당했음이 드러나지 않게, 4-가)', async () => {
+  await check('4-04(변형): 직접 insert 거절은 없는 사람과 같은 모양 — 직접 insert 정책이 15장에서 닫혀 차단당한 사람이든 없는 사람이든 같은 행 권한 거절(42501) (차단당했음이 드러나지 않게, 4-가)', async () => {
     const S1 = await join_(110, '차단자'), S2 = await join_(111, '차단당함');
     await block(S1, S2);
     const grab = async (who, target) => {
@@ -383,12 +384,11 @@ export default async function ch04({ q, as, su, check, expectErr, PGlite, AUTH_S
     };
     const blocked = await grab(S2, S1);
     const ghost = await grab(S2, NOBODY);
-    const shape = (x) => x.code === '23503' && /^insert or update on table "friends" violates foreign key constraint "friends_(requester|addressee)_id_fkey"$/.test(x.message)
-      && /^Key is not present in table "profiles"\.$/.test(x.detail ?? '');
+    const shape = (x) => x.code === '42501' && /^new row violates row-level security policy for table "friends"$/.test(x.message);
     return shape(blocked) && shape(ghost) ? true : { blocked, ghost };
   });
 
-  await check('4-04(바탕) · 4-08(바탕): 차단 · 직접 insert 가드 · 신고가 잠금을 건 채로 일함 — 차단과 직접 insert가 같은 사람 잠금(3장)을 써서 겹쳐도 차단 쌍에 대기 행이 남지 않고, 신고는 같은 대상 잠금으로 한 번만', async () => {
+  await check('4-04(바탕) · 4-08(바탕): 차단 · 친구 요청 · 신고가 잠금을 건 채로 일함 — 차단과 친구 요청이 같은 사람 잠금(3장)을 써서 겹쳐도 차단 쌍에 대기 행이 남지 않고, 신고는 같은 대상 잠금으로 한 번만', async () => {
     const S1 = await join_(119, '잠금1'), S2 = await join_(120, '잠금2'), S3 = await join_(121, '잠금3'), S4 = await join_(122, '잠금4');
     await q(`create function pg_temp.f4_locks(kind text, a uuid, b uuid) returns integer language plpgsql as $$
              declare n integer;
@@ -400,7 +400,7 @@ export default async function ch04({ q, as, su, check, expectErr, PGlite, AUTH_S
                  perform public.submit_report('USER', b, 'OTHER', null);
                else
                  set local role authenticated;
-                 insert into public.friends (requester_id, addressee_id) values (a, b);
+                 perform public.send_friend_request(b);      -- 직접 insert 정책이 닫혀서 요청 함수가 같은 사람 잠금을 씀
                end if;
                select count(*)::integer into n from pg_locks where locktype = 'advisory' and pid = pg_backend_pid();
                return n;
@@ -498,5 +498,216 @@ export default async function ch04({ q, as, su, check, expectErr, PGlite, AUTH_S
     const rIns = await expectErr(() => q(`insert into public.reports (reporter_id, target_type, target_user_id, reason) values ($1, 'USER', $2, 'OTHER')`, [A, B]), /permission denied/);
     await su();
     return errs.every((x) => x === true) && list.length === 0 && anon === true && pair === true && reports === true && rIns === true ? true : { errs, list, anon, pair, reports, rIns };
+  });
+
+  // ---- 99-04: 운영 화면 — 신고 처리 · 팀원 표 (이슈 #431) -----------------------------------------
+
+  const listR = (uid, status = 'OPEN', limit = 50) => call(uid, 'public.list_reports($1, $2)', [status, limit]);
+  const resolveR = (uid, rid, action) => call(uid, 'public.resolve_report($1, $2)', [rid, action]);
+  const reportIdOf = async (reporter, target) => (await q(`select report_id from public.reports
+                                                           where reporter_id = $1 and coalesce(target_user_id, target_group_id) = $2 order by created_at desc limit 1`, [reporter, target]))[0].report_id;
+  const nicknameOf = async (u) => (await q(`select nickname, profile_image_url from public.profiles where user_id = $1`, [u]))[0];
+  const reportRow = async (rid) => (await q(`select status, resolution, handled_by, handled_at is not null as at from public.reports where report_id = $1`, [rid]))[0];
+  const addTeam = (u) => q(`insert into public.team_members (user_id) values ($1)`, [u]);
+
+  const OR = await join_(140, '신고자');
+  const OU = await join_(141, '신고당한사람');
+  const OT = await join_(142, '팀원');
+  const OT2 = await join_(143, '팀원둘');
+  const ON = await join_(144, '일반');
+  const OV = await join_(145, '또다른신고당한사람');
+  await q(`update public.profiles set profile_image_url = 'https://img/u.png' where user_id = $1`, [OU]);
+  await q(`update public.profiles set profile_image_url = 'https://img/v.png' where user_id = $1`, [OV]);
+  await addTeam(OT);
+  await addTeam(OT2);
+  const { g: OG } = await mkGroup(OR, []);
+
+  await check('99-04(팀원만): 팀원 아닌 사람은 목록도 처리도 FORBIDDEN(신고자 본인도) — 로그인이 없으면 42501, anon은 실행 권한 없음, 팀원 표 · 함수 판정은 앱이 직접 못 부름', async () => {
+    await report(OR, 'USER', OU, 'NICKNAME', '이상한 닉네임');
+    await report(OR, 'GROUP', OG, 'GROUP_NAME', null);
+    const rid = await reportIdOf(OR, OU);
+    await q(`update public.reports set created_at = now() - interval '2 hours' where report_id = $1`, [rid]);   // 같은 밀리초에 들어간 줄은 created_at이 같을 수 있으므로 순서를 가르게 오래된 줄을 만듦
+    const noList = [await listR(ON), await listR(OR), await listR(OU),
+                    await listR(ON, 'x', 0), await listR(ON, null, null)];                     // 잘못된 인자로도 FORBIDDEN이 먼저 — 팀원 확인이 INVALID보다 앞
+    const ghostId = '00000000-0000-4000-8000-00000000dead';
+    const noResolve = [await resolveR(ON, rid, 'HIDE'), await resolveR(OR, rid, 'HIDE'), await resolveR(OU, rid, 'DISMISS'),
+                       await resolveR(ON, ghostId, 'HIDE'), await resolveR(ON, rid, 'X'), await resolveR(ON, null, 'HIDE')];   // 없는 신고 · 잘못된 동작도 FORBIDDEN — 신고가 있는지 안 샘
+    const untouched = { u: await nicknameOf(OU), row: await reportRow(rid) };
+    await as(null);
+    const noLogin = [await expectErr(() => q(`select public.list_reports('OPEN', 10)`), /로그인이 필요함/),
+                     await expectErr(() => q(`select public.resolve_report($1, 'HIDE')`, [rid]), /로그인이 필요함/)];
+    await as(null, 'anon');
+    const anon = [await expectErr(() => q(`select public.list_reports('OPEN', 10)`), /permission denied/),
+                  await expectErr(() => q(`select public.resolve_report($1, 'HIDE')`, [rid]), /permission denied/)];
+    await as(OT);
+    const app = [await expectErr(() => q(`select * from public.team_members`), /permission denied/),
+                 await expectErr(() => q(`insert into public.team_members (user_id) values ($1)`, [ON]), /permission denied/),
+                 await expectErr(() => q(`select private.is_team_member($1)`, [OT]), /permission denied/)];
+    await su();
+    const forbidden = JSON.stringify({ status: 'FORBIDDEN' });
+    return noList.every((x) => JSON.stringify(x) === forbidden) && noResolve.every((x) => JSON.stringify(x) === forbidden)
+      && untouched.u.nickname === '신고당한사람' && untouched.u.profile_image_url === 'https://img/u.png' && untouched.row.status === 'OPEN' && untouched.row.resolution === null
+      && noLogin.every((x) => x === true) && anon.every((x) => x === true) && app.every((x) => x === true) ? true : { noList, noResolve, untouched, noLogin, anon, app };
+  });
+
+  await check('99-04(목록): 팀원은 처리 전(OPEN) 신고를 최신 순으로 봄 — 신고자 · 대상 사람의 지금 닉네임과 사진 · 대상 그룹의 지금 이름 · 사유 · 메모 · 시각이 한 줄에, 신고한 사람에게 알림은 안 감', async () => {
+    const sendsBefore = (await q(`select count(*)::int as n from public.push_sends`))[0].n;
+    const r = await listR(OT, 'OPEN', 100);
+    const rows = r.reports ?? [];
+    const user = rows.find((x) => x.target_type === 'USER' && x.target_user_id === OU);
+    const group = rows.find((x) => x.target_type === 'GROUP' && x.target_group_id === OG);
+    const sendsAfter = (await q(`select count(*)::int as n from public.push_sends`))[0].n;
+    const cols = Object.keys(user ?? {}).sort().join();
+    return r.status === 'OK' && r.total === rows.length && rows.length >= 2 && !!user && !!group
+      && user.reporter_id === OR && user.reporter_nickname === '신고자' && user.target_nickname === '신고당한사람' && user.target_profile_image_url === 'https://img/u.png'
+      && user.reason === 'NICKNAME' && user.note === '이상한 닉네임' && user.status === 'OPEN' && user.resolution === null && user.handled_by === null && user.handled_at === null && user.evidence === null && user.target_group_id === null && user.target_group_name === null
+      && group.target_group_name === '차단그룹' && group.reason === 'GROUP_NAME' && group.target_user_id === null && group.target_nickname === null
+      && cols === 'evidence,handled_at,handled_by,handled_by_nickname,note,reason,report_id,reporter_id,reporter_nickname,resolution,status,target_group_id,target_group_name,target_nickname,target_profile_image_url,target_type,target_user_id,created_at'.split(',').sort().join()
+      && rows.every((x, i) => i === 0 || new Date(rows[i - 1].created_at) >= new Date(x.created_at))
+      && rows.findIndex((x) => x === group) < rows.findIndex((x) => x === user) && new Date(group.created_at) > new Date(user.created_at)       // 최신 순
+      && sendsAfter === sendsBefore ? true : { r, cols, sendsBefore, sendsAfter };
+  });
+
+  await check('99-04(숨김): [숨김]이면 대상 사람의 닉네임이 "사용자"로 · 사진이 비워지고 신고는 처리됨(HIDDEN · 처리한 팀원 · 시각), 다른 사람은 그대로 — 이미 처리된 신고는 다시 못 바꿈, 신고한 사람에게 알림 없음', async () => {
+    const rid = await reportIdOf(OR, OU);
+    const sendsBefore = (await q(`select count(*)::int as n from public.push_sends`))[0].n;
+    const r = await resolveR(OT, rid, 'HIDE');
+    const after = { u: await nicknameOf(OU), v: await nicknameOf(OV), row: await reportRow(rid) };
+    const again = await resolveR(OT2, rid, 'DISMISS');               // 다른 팀원이 뒤늦게 눌러도 이미 처리됨
+    const againHide = await resolveR(OT, rid, 'HIDE');
+    const stillRow = await reportRow(rid);
+    const done = (await listR(OT, 'DONE', 100)).reports.find((x) => x.report_id === rid);
+    const open = (await listR(OT, 'OPEN', 100)).reports.find((x) => x.report_id === rid);
+    const sendsAfter = (await q(`select count(*)::int as n from public.push_sends`))[0].n;
+    return r.status === 'HIDDEN' && r.report_id === rid
+      && after.u.nickname === '사용자' && after.u.profile_image_url === null && after.v.nickname === '또다른신고당한사람' && after.v.profile_image_url === 'https://img/v.png'
+      && after.row.status === 'DONE' && after.row.resolution === 'HIDDEN' && after.row.handled_by === OT && after.row.at === true
+      && again.status === 'ALREADY_DONE' && againHide.status === 'ALREADY_DONE' && stillRow.resolution === 'HIDDEN' && stillRow.handled_by === OT
+      && done?.status === 'DONE' && done.resolution === 'HIDDEN' && done.handled_by === OT && done.handled_by_nickname === '팀원' && done.target_nickname === '사용자' && done.target_profile_image_url === null && open === undefined
+      && sendsAfter === sendsBefore ? true : { r, after, again, againHide, stillRow, done, open };
+  });
+
+  await check('99-04(무시 · 그룹): [무시]는 대상을 그대로 두고 처리됨(DISMISSED), 그룹 대상 [숨김]은 그룹 이름이 "이름 없는 그룹"으로 — 없는 신고 NOT_FOUND · 잘못된 동작 INVALID', async () => {
+    await report(OR, 'USER', OV, 'PHOTO', null);
+    const vid = await reportIdOf(OR, OV);
+    const dismissed = await resolveR(OT, vid, 'DISMISS');
+    const v = await nicknameOf(OV);
+    const gid = await reportIdOf(OR, OG);
+    const { g: OG2 } = await mkGroup(OR, []);                             // 다른 그룹은 그대로여야 함
+    const hidden = await resolveR(OT2, gid, 'HIDE');
+    const gname = (await q(`select group_name from public.groups where group_id = $1`, [OG]))[0].group_name;
+    const otherGroup = (await q(`select group_name from public.groups where group_id = $1`, [OG2]))[0].group_name;
+    const rows = { v: await reportRow(vid), g: await reportRow(gid) };
+    const ghost = await resolveR(OT, '00000000-0000-4000-8000-00000000dead', 'HIDE');
+    const bad = [await resolveR(OT, vid, 'DELETE'), await resolveR(OT, vid, null), await resolveR(OT, null, 'HIDE'), await resolveR(OT, vid, 'hide')];
+    return dismissed.status === 'DISMISSED' && v.nickname === '또다른신고당한사람' && v.profile_image_url === 'https://img/v.png'
+      && rows.v.resolution === 'DISMISSED' && rows.v.handled_by === OT && hidden.status === 'HIDDEN' && gname === '이름 없는 그룹' && otherGroup === '차단그룹' && rows.g.resolution === 'HIDDEN' && rows.g.handled_by === OT2
+      && ghost.status === 'NOT_FOUND' && bad.every((x) => x.status === 'INVALID') ? true : { dismissed, v, hidden, gname, rows, ghost, bad };
+  });
+
+  await check('99-04(목록 모양): 상태 OPEN · DONE · ALL과 개수 — 총 개수(total)는 개수 제한과 상관없이 전체, 줄 수는 p_limit까지, 잘못된 상태 · 개수는 INVALID', async () => {
+    const all = await listR(OT, 'ALL', 100);
+    const one = await listR(OT, 'ALL', 1);
+    const open = await listR(OT, 'OPEN', 100);
+    const done = await listR(OT, 'DONE', 100);
+    const bad = [await listR(OT, 'x', 10), await listR(OT, null, 10), await listR(OT, 'OPEN', 0), await listR(OT, 'OPEN', 101), await listR(OT, 'OPEN', null)];
+    return all.status === 'OK' && all.reports.length === all.total && all.total >= 3 && one.reports.length === 1 && one.total === all.total
+      && one.reports[0].report_id === all.reports[0].report_id                                  // 개수 제한은 최신 줄부터 자름
+      && open.reports.every((x) => x.status === 'OPEN') && done.reports.every((x) => x.status === 'DONE') && open.total + done.total === all.total
+      && done.reports.length >= 3 && bad.every((x) => x.status === 'INVALID') ? true : { all: all.total, one, open: open.total, done: done.total, bad };
+  });
+
+  await check('99-04(규칙): 처리 중 신고는 결과가 없고 처리됨 신고는 결과가 있음 — 결과 없는 처리됨 · 결과 있는 처리 전은 표가 거절', async () => {
+    const OW = await join_(146, '규칙대상');
+    await report(OR, 'USER', OW, 'OTHER', null);
+    const rid = await reportIdOf(OR, OW);
+    const doneNoResult = await expectErr(() => q(`update public.reports set status = 'DONE' where report_id = $1`, [rid]), /reports_resolution_shape|check constraint/);
+    const openWithResult = await expectErr(() => q(`update public.reports set resolution = 'HIDDEN' where report_id = $1`, [rid]), /reports_resolution_shape|check constraint/);
+    const badValue = await expectErr(() => q(`update public.reports set status = 'DONE', resolution = 'BANNED' where report_id = $1`, [rid]), /check constraint/);
+    return doneNoResult === true && openWithResult === true && badValue === true ? true : { doneNoResult, openWithResult, badValue };
+  });
+
+  await check('13-카 · 99-04(근거 보관): 사람 대상 괴롭힘 신고는 신고하는 순간 두 사람 사이(양쪽 방향)의 7일 안 깨우기 · 알람 제안 기록이 신고 줄에 복사돼, 원본이 7일 뒤 지워져도 남음 — 다른 사람 · 7일 지난 기록은 안 들어가고, 괴롭힘 아닌 신고 · 그룹 신고에는 근거가 없음', async () => {
+    const H = await join_(150, '신고하는이'), P = await join_(151, '괴롭힌이'), X = await join_(152, '제삼자');
+    const hAlarm = (await q(`insert into public.alarms (user_id, alarm_type, scheduled_at) values ($1, 'WAKE', now() + interval '10 hours') returning alarm_id`, [H]))[0].alarm_id;
+    const pAlarm = (await q(`insert into public.alarms (user_id, alarm_type, scheduled_at) values ($1, 'WAKE', now() + interval '11 hours') returning alarm_id`, [P]))[0].alarm_id;
+    const xAlarm = (await q(`insert into public.alarms (user_id, alarm_type, scheduled_at) values ($1, 'WAKE', now() + interval '12 hours') returning alarm_id`, [X]))[0].alarm_id;
+    await q(`insert into public.push_sends (kind, sender_id, target_id, sent_at) values
+             ('WAKE_PING', $2, $1, now() - interval '1 day'), ('WAKE_PING', $1, $2, now() - interval '2 days'),
+             ('WAKE_PING', $2, $1, now() - interval '8 days'),               -- 7일 지난 것
+             ('WAKE_PING', $3, $1, now() - interval '1 hour'),               -- 제3자가 신고하는 사람에게
+             ('WAKE_PING', $2, $3, now() - interval '1 hour')`, [H, P, X]);   // 괴롭힌 사람이 제3자에게
+    await q(`insert into public.alarm_proposals (alarm_id, owner_id, proposer_id, from_at, to_at, status, created_at, responded_at) values
+             ($4, $1, $2, now() + interval '10 hours', now() + interval '9 hours', 'APPLIED', now() - interval '3 days', now() - interval '3 days'),
+             ($5, $2, $1, now() + interval '11 hours', now() + interval '12 hours', 'PENDING', now() - interval '1 day', null),
+             ($4, $1, $2, now() + interval '10 hours', now() + interval '9 hours', 'DISMISSED', now() - interval '9 days', now() - interval '9 days'),
+             ($6, $3, $2, now() + interval '12 hours', now() + interval '11 hours', 'PENDING', now() - interval '1 day', null)`, [H, P, X, hAlarm, pAlarm, xAlarm]);
+    const harass = await report(H, 'USER', P, 'HARASSMENT', '계속 알람을 바꾸자고 해요');
+    const nick = await report(H, 'USER', X, 'NICKNAME', null);
+    const sourceBefore = (await q(`select count(*)::int as n from public.push_sends where kind = 'WAKE_PING' and ((sender_id = $1 and target_id = $2) or (sender_id = $2 and target_id = $1))`, [H, P]))[0].n;
+    const ev = (await listR(OT, 'ALL', 100)).reports;
+    const row = ev.find((x) => x.target_user_id === P);
+    const nickRow = ev.find((x) => x.target_user_id === X);
+    // 원본은 7일 뒤 정리 배치가 지움 — 근거는 남아야 함
+    await q(`update public.push_sends set sent_at = sent_at - interval '10 days' where kind = 'WAKE_PING' and ((sender_id = $1 and target_id = $2) or (sender_id = $2 and target_id = $1))`, [H, P]);
+    await q(`update public.alarm_proposals set created_at = created_at - interval '10 days', responded_at = responded_at - interval '10 days', from_at = from_at - interval '10 days', to_at = to_at - interval '10 days' where owner_id in ($1, $2) and proposer_id in ($1, $2)`, [H, P]);
+    await q(`select * from private.purge_old_friend_records()`);
+    const sourceAfter = (await q(`select count(*)::int as n from public.push_sends where kind = 'WAKE_PING' and ((sender_id = $1 and target_id = $2) or (sender_id = $2 and target_id = $1))`, [H, P]))[0].n;
+    const proposalsAfter = (await q(`select count(*)::int as n from public.alarm_proposals where owner_id in ($1, $2) and proposer_id in ($1, $2)`, [H, P]))[0].n;
+    const kept = (await listR(OT, 'ALL', 100)).reports.find((x) => x.target_user_id === P);
+    const pings = row?.evidence?.wake_pings ?? [], props = row?.evidence?.alarm_proposals ?? [];
+    return harass.status === 'REPORTED' && nick.status === 'REPORTED' && sourceBefore === 3
+      && pings.length === 2 && pings.every((x) => (x.sender_id === H && x.target_id === P) || (x.sender_id === P && x.target_id === H)) && pings[0].sender_id === P && pings[1].sender_id === H
+      && props.length === 2 && props[0].proposer_id === H && props[0].owner_id === P && props[0].status === 'PENDING' && props[1].proposer_id === P && props[1].owner_id === H && props[1].status === 'APPLIED'
+      && !!row.evidence.captured_at && nickRow?.evidence === null
+      && sourceAfter === 0 && proposalsAfter === 0 && JSON.stringify(kept?.evidence) === JSON.stringify(row.evidence)
+      ? true : { harass, nick, sourceBefore, pings, props, nickRow, sourceAfter, proposalsAfter, same: JSON.stringify(kept?.evidence) === JSON.stringify(row?.evidence) };
+  });
+
+  await check('13-카 · 99-04(근거 보관, 상한 · 경계): 깨우기 근거는 최신 50건까지(51건이면 가장 오래된 1건 빠짐), 7일 경계는 6일 23시간은 들어가고 7일 1분은 안 들어감', async () => {
+    const H = await join_(155, '신고많은이'), P = await join_(156, '많이깨운이');
+    await q(`insert into public.push_sends (kind, sender_id, target_id, sent_at)
+             select 'WAKE_PING', $2, $1, now() - make_interval(mins => g * 10) from generate_series(1, 51) g`, [H, P]);      // 10분 간격 51건 (가장 오래된 것 = 510분 전)
+    await report(H, 'USER', P, 'HARASSMENT', null);
+    const row = (await listR(OT, 'ALL', 100)).reports.find((x) => x.target_user_id === P);
+    const pings = row?.evidence?.wake_pings ?? [];
+    const times = pings.map((x) => new Date(x.sent_at).getTime());
+    const sortedDesc = times.every((t, i) => i === 0 || times[i - 1] >= t);
+    const oldest = Math.min(...times), newest = Math.max(...times);
+    return pings.length === 50 && sortedDesc && Date.now() - oldest < 505 * 60_000 && Date.now() - newest > 5 * 60_000          // 510분 전 줄(51번째, 가장 오래된 것)이 빠지고 최신 50건이 남음
+      ? true : { n: pings.length, sortedDesc, oldestMin: (Date.now() - oldest) / 60_000, newestMin: (Date.now() - newest) / 60_000 };
+  });
+
+  await check('13-카 · 99-04(근거 보관, 7일 경계): 6일 23시간 전 깨우기는 근거에 들어가고 7일 1분 전은 안 들어감 (51건 제한과 따로)', async () => {
+    const H = await join_(157, '경계신고'), P = await join_(158, '경계대상');
+    await q(`insert into public.push_sends (kind, sender_id, target_id, sent_at) values
+             ('WAKE_PING', $2, $1, now() - interval '6 days 23 hours'), ('WAKE_PING', $2, $1, now() - interval '7 days 1 minute')`, [H, P]);
+    await report(H, 'USER', P, 'HARASSMENT', null);
+    const row = (await listR(OT, 'ALL', 100)).reports.find((x) => x.target_user_id === P);
+    const ages = (row?.evidence?.wake_pings ?? []).map((x) => (Date.now() - new Date(x.sent_at).getTime()) / 3600_000);
+    return ages.length === 1 && ages[0] > 6 * 24 && ages[0] < 7 * 24 ? true : { ages };
+  });
+
+  await check('13-카 · 99-04(근거 보관, 그룹 · 근거 없음): 그룹 대상 괴롭힘 신고는 근거 없음(null), 근거 기록이 없는 사람 신고는 빈 목록 두 개', async () => {
+    const H = await join_(153, '신고둘'), P = await join_(154, '조용한사람');
+    const { g } = await mkGroup(H, []);
+    const groupHarass = await report(H, 'GROUP', g, 'HARASSMENT', null);
+    const quiet = await report(H, 'USER', P, 'HARASSMENT', null);
+    const rows = (await listR(OT, 'ALL', 100)).reports;
+    const gRow = rows.find((x) => x.target_group_id === g), qRow = rows.find((x) => x.target_user_id === P);
+    return groupHarass.status === 'REPORTED' && quiet.status === 'REPORTED' && gRow?.evidence === null
+      && JSON.stringify(qRow?.evidence?.wake_pings) === '[]' && JSON.stringify(qRow?.evidence?.alarm_proposals) === '[]' ? true : { gRow, qRow };
+  });
+
+  await check('99-04(탈퇴 · 정리): 팀원이 탈퇴하면 팀원 표에서도 사라져 운영 화면이 안 열리고, 처리 기록의 처리한 사람 칸은 비워짐 — 신고 줄은 남음', async () => {
+    const TM = await join_(147, '곧떠날팀원'), TG = await join_(148, '대상');
+    await addTeam(TM);
+    await report(OR, 'USER', TG, 'OTHER', null);
+    const rid = await reportIdOf(OR, TG);
+    const done = await resolveR(TM, rid, 'DISMISS');
+    await q(`delete from auth.users where id = $1`, [TM]);
+    const member = (await q(`select count(*)::int as n from public.team_members where user_id = $1`, [TM]))[0].n;
+    const row = await reportRow(rid);
+    return done.status === 'DISMISSED' && member === 0 && row.status === 'DONE' && row.resolution === 'DISMISSED' && row.handled_by === null && row.at === true ? true : { done, member, row };
   });
 }

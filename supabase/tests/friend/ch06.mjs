@@ -50,11 +50,15 @@ export default async function ch06({ q, as, su, svc, check, expectErr, PGlite, A
     return (await q(`insert into public.alarms (routine_id, step_order, user_id, alarm_type, scheduled_at) values ($1, 1, $2, 'ROUTINE', now() + interval '7 hours') returning alarm_id`, [rt, u]))[0].alarm_id;
   };
   const seen = async (viewer, owner) => { await as(viewer); const r = await q(`select alarm_id from public.alarms where user_id = $1 order by alarm_id`, [owner]); await su(); return r.map((x) => x.alarm_id); };
+  // 설정 권한 = '그 알람에 제안을 보낼 수 있음'(10장). 직접 update 길은 11/9에 닫혔으므로(이슈 #427) 고쳐지는지 대신
+  //   '내게 보이는 알람이고, 그 주인이 내게 설정 권한을 준 상태'인지로 봄 (이 두 조건이 propose_alarm_time의 통과 조건이기도 함 — 10장 시험이 실제 제안으로 확인)
   const canEdit = async (viewer, alarmId) => {
     await as(viewer);
-    const r = await q(`update public.alarms set scheduled_at = scheduled_at + interval '1 minute' where alarm_id = $1 returning 1`, [alarmId]);
+    const visible = await q(`select user_id from public.alarms where alarm_id = $1`, [alarmId]);
     await su();
-    return r.length === 1;
+    if (!visible.length) return false;
+    const [r] = await q(`select $2::uuid in (select private.granted_owner_ids_for($1, 'EDIT_ALARM')) as ok`, [viewer, visible[0].user_id]);
+    return r.ok === true;
   };
   const canPush = async (s, t, k = 'ALARM_CHANGED') => { await svc(); const r = (await q(`select public.can_send_push($1, $2, $3) as ok`, [s, t, k]))[0].ok; await su(); return r; };
   // 권한 행

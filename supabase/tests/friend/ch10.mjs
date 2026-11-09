@@ -2,7 +2,7 @@
 //   항목 이름 앞 번호 = 시험케이스 번호
 //   이 장 DB에 없는 것: 10-02 · 10-30(실기기) · 10-04 · 10-14의 화면 글자 · 10-15 · 10-25 ~ 10-27(알림 서버 함수 쪽 = notify.test.ts) · 10-22 · 10-23(서버 함수 쪽 = edit-run.test.ts · commit.test.ts) ·
 //                    10-28 ~ 10-29 · 10-31 ~ 10-33 · 10-36(앱) · 10-32(대본) · 10-37(알림 문구 = push-copy.test.ts)
-//   친구가 직접 고치는 옛 길(alarms_update_shared)은 S2의 G04가 제안으로 바뀐 뒤 따로 닫음 → 10-03 · 10-05 ~ 10-07 · 10-10 · 10-16의 '직접 update 0행'은 그때, 여기서는 제안 보내기가 거절하는 것으로 확인
+//   친구가 직접 고치는 옛 길(alarms_update_shared)은 G04가 제안으로 바뀐 뒤(PR #423) 11/9에 닫음(이슈 #427) → 10-03 · 10-05 ~ 10-07 · 10-10 · 10-16의 '직접 update 0행'은 아래 '직접 update 0행' 시험에서, 제안 보내기가 거절하는 것은 그 밖의 시험들에서 확인
 //   시간은 지금(now()) 기준 상대값만 씀 — 시계가 가도 안 바뀌게. 사람은 이 장 전용 계정. db-check 맨 끝에서 돎
 export default async function ch10({ q, as, su, svc, check, expectErr }) {
   const id = (n) => `ba000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
@@ -424,10 +424,66 @@ export default async function ch10({ q, as, su, svc, check, expectErr }) {
 
   // ---- 막혀야 하는 길 ----------------------------------------------------------------------------
 
+  await check('10-03 · 10-05 ~ 10-07 · 10-10 · 10-16(직접 update 0행): 조회만 · 설정 권한 · 회수 · 끊김 · 그룹 출처 모두 친구가 알람 시각 · 켬/끔 · time_source를 직접 update하면 0행이고 알람은 그대로 — 주인 본인은 고침, 제안 경로는 그대로 됨', async () => {
+    const snap = async (id_) => JSON.stringify(await alarm(id_));
+    const tryEdit = async (uid, alarmId) => {
+      await as(uid);
+      const rows = [
+        await q(`update public.alarms set scheduled_at = scheduled_at - interval '5 minutes' where alarm_id = $1 returning 1`, [alarmId]),
+        await q(`update public.alarms set is_enabled = false where alarm_id = $1 returning 1`, [alarmId]),                                  // 10-16: 끄기
+        await q(`update public.alarms set time_source = 'MANUAL' where alarm_id = $1 returning 1`, [alarmId]),
+        await q(`update public.alarms set scheduled_at = scheduled_at - interval '5 minutes', is_enabled = false, time_source = 'MANUAL' where alarm_id = $1 returning 1`, [alarmId]),
+      ];
+      await su();
+      return rows.map((r) => r.length);
+    };
+    const mixed = await pair(70);                                                       // 설정 권한 있음 (10-01)
+    const mixedBefore = await snap(mixed.c.WAKE);
+    const seen = async (uid, alarmId) => { await as(uid); const r = await q(`select 1 from public.alarms where alarm_id = $1`, [alarmId]); await su(); return r.length; };
+    const mixedSeen = await seen(mixed.B, mixed.c.WAKE);                               // 0행이 '안 보여서'가 아니라 정책 때문임을 확인
+    const withEdit = await tryEdit(mixed.B, mixed.c.WAKE);
+    const afterEdit = await snap(mixed.c.WAKE);
+    const view = await pair(72, { edit: false });                                      // 조회만 (10-03)
+    const viewBefore = await snap(view.c.WAKE);
+    const viewOnly = await tryEdit(view.B, view.c.WAKE);
+    const rev = await pair(74);                                                         // 방금 권한 회수 (10-05)
+    await as(rev.A); await q(`delete from public.sharing_permissions where permission_id = $1`, [rev.perm]); await su();
+    const revoked = await tryEdit(rev.B, rev.c.WAKE);
+    const ended = await pair(76);                                                       // 설정 권한 받은 뒤 친구 끊김 (10-07)
+    await call(ended.A, 'public.remove_friend($1)', [ended.B]);
+    const unfriended = await tryEdit(ended.B, ended.c.WAKE);
+    const gOwner = await join_(78, '그룹주인'), gFriend = await join_(79, '그룹친구');      // 그룹 출처 설정 권한 — 그룹에 있는 동안(10-06 앞부분)과 나간 뒤
+    await befriend(gOwner, gFriend);
+    await as(gOwner);
+    const [{ group_id: gid }] = await q(`insert into public.groups (group_name, owner_id) values ('직접수정그룹', $1) returning group_id`, [gOwner]);
+    await su();
+    await q(`insert into public.group_members (group_id, user_id, invite_status, joined_at) values ($1, $2, 'JOINED', now())`, [gid, gFriend]);
+    await as(gOwner);
+    await q(`insert into public.sharing_permissions (owner_id, grantee_id, source_type, source_id, can_view_alarm, can_edit_alarm) values ($1, $2, 'GROUP', $3, true, true)`, [gOwner, gFriend, gid]);
+    await su();
+    const gc = await card(gOwner, { groupId: gid });
+    const groupBefore = await snap(gc.WAKE);
+    const groupSeen = await seen(gFriend, gc.WAKE);
+    const inGroup = await tryEdit(gFriend, gc.WAKE);
+    await q(`update public.group_members set invite_status = 'LEFT' where group_id = $1 and user_id = $2`, [gid, gFriend]);
+    const leftGroup = await tryEdit(gFriend, gc.WAKE);
+    const groupAfter = await snap(gc.WAKE);
+    // 주인 본인은 그대로 고침, 친구가 건 제안은 그대로 됨
+    await as(mixed.A);
+    const own = await q(`update public.alarms set scheduled_at = scheduled_at - interval '10 minutes' where alarm_id = $1 returning 1`, [mixed.c.WAKE]);
+    await su();
+    const viaProposal = await propose(mixed.B, mixed.c.PREPARE, await shifted(mixed.c.PREPARE, -5));
+    const applied = await respond(mixed.A, viaProposal.proposal_id, true);
+    const zeros = [0, 0, 0, 0];
+    const same = (a) => JSON.stringify(a) === JSON.stringify(zeros);
+    return mixedSeen === 1 && groupSeen === 1 && same(withEdit) && afterEdit === mixedBefore && same(viewOnly) && (await snap(view.c.WAKE)) === viewBefore && same(revoked) && same(unfriended) && same(inGroup) && same(leftGroup) && groupAfter === groupBefore
+      && own.length === 1 && viaProposal.status === 'OK' && applied.status === 'APPLIED' ? true : { withEdit, viewOnly, revoked, unfriended, inGroup, leftGroup, own, viaProposal, applied };
+  });
+
   await check('10-10 · 10-11 · 10-12: 친구는 알람 주인을 못 바꾸고 · 지우지 못하고 · 새로 못 넣음 — 원래 시각 기억 칸은 앱이 못 씀(고치려 해도 그대로 · 시각이 바뀌면 비워짐 · 새로 넣을 때도 비움)', async () => {
     const { A, B, c } = await pair(30);
     await as(B);
-    const steal = await expectErr(() => q(`update public.alarms set user_id = $1 where alarm_id = $2`, [B, c.WAKE]), /바꿀 수 없음|row-level security/);
+    const steal = await q(`update public.alarms set user_id = $1 where alarm_id = $2 returning 1`, [B, c.WAKE]);                // 직접 update 길이 닫혀 0행
     const del = await q(`delete from public.alarms where alarm_id = $1 returning 1`, [c.WAKE]);
     const ins = await expectErr(() => q(`insert into public.alarms (participant_id, user_id, alarm_type, scheduled_at) values ($1, $2, 'ARRIVE', now() + interval '12 hours')`, [c.pt, A]), /row-level security/);
     await su();
@@ -436,7 +492,11 @@ export default async function ch10({ q, as, su, svc, check, expectErr }) {
     const forged = (await alarm(c.PREPARE)).original_scheduled_at;
     const [own] = await q(`insert into public.alarms (participant_id, user_id, alarm_type, scheduled_at, original_scheduled_at) values ($1, $2, 'ARRIVE', now() + interval '12 hours', now() - interval '1 day') returning alarm_id, original_scheduled_at`, [c.pt, A]);
     await su();
-    return steal === true && del.length === 0 && ins === true && forged == null && own.original_scheduled_at == null ? true : { steal, del, ins, forged, own };
+    const stillA = (await q(`select user_id from public.alarms where alarm_id = $1`, [c.WAKE]))[0].user_id;
+    await as(A);
+    const ownerSteal = await expectErr(() => q(`update public.alarms set user_id = $1 where alarm_id = $2`, [B, c.WAKE]), /바꿀 수 없음/);   // 주인 본인도 못 바꿈(keep_keys)
+    await su();
+    return steal.length === 0 && ownerSteal === true && stillA === A && del.length === 0 && ins === true && forged == null && own.original_scheduled_at == null ? true : { steal, stillA, del, ins, forged, own };
   });
 
   await check('10장 푸시 권한: can_send_push의 ALARM_CHANGED = 설정 권한 + 방금(1시간 안) 보낸 대기 중 제안 — 제안 없이 · 오래된 제안 · 무시된(응답한) 제안 · 다른 사람에게는 false', async () => {
