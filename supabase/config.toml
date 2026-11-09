@@ -455,9 +455,11 @@ verify_jwt = true
 [functions.voice-turn]
 verify_jwt = true
 
-# 대화 끝 정리 (T2 전체 추출 → 할 일 · 생활 기록 저장) — 앱 [완료] 뒤 로그인 토큰으로 부름
+# 대화 끝 정리 (T2 전체 추출 → 할 일 · 생활 기록 저장) — 두 길이 한 함수 (alarm-roll과 같은 방식):
+# 앱 [완료] 뒤 로그인 토큰으로 부르는 본인 길 + pg_cron(pg_net)이 서비스 키로 부르는 자동 정리 길(_shared/ai/auto-commit.ts).
+# 키 형식이 둘이라 게이트웨이 검사를 끄고 코드(_shared/auth.ts isServiceCall · requireUser)에서 가름. 로그인 토큰 확인은 본인 길에서 auth.getUser로 함
 [functions.voice-commit]
-verify_jwt = true
+verify_jwt = false
 
 # 실시간 음성 대화(Gemini Live) 1회용 토큰 — 앱이 로그인 토큰으로 부름
 [functions.voice-live-token]

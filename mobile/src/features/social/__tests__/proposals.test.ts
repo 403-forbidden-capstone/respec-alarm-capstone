@@ -55,6 +55,9 @@ describe('[적용] · [무시]', () => {
     await expect(real.respondAlarmProposal('p1', false)).resolves.toBe('DISMISSED');
     mockFake.answerRpc('respond_alarm_proposal', ok({ status: 'EXPIRED' }));
     await expect(real.respondAlarmProposal('p1', true)).resolves.toBe('EXPIRED');
+    // 늦춘 만큼이 약속 시각을 넘게 된 제안(TOO_LATE)도 서버가 닫아 EXPIRED와 같은 처리
+    mockFake.answerRpc('respond_alarm_proposal', ok({ status: 'TOO_LATE' }));
+    await expect(real.respondAlarmProposal('p1', true)).resolves.toBe('EXPIRED');
     expect(mockSyncNow).not.toHaveBeenCalled();
   });
 

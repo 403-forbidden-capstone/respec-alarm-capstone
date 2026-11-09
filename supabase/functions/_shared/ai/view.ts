@@ -721,6 +721,8 @@ export interface TranscriptOptions {
   aiName?: string;
   /** AI 줄 끝에 물음 종류 표시 [SERVER_Q q1] */
   showActs?: boolean;
+  /** 최근 줄만 (번호는 대화 전체 기준 그대로 — 서버 처리 결과의 '사용자 말 j'와 맞게). 없으면 전부 */
+  recent?: number;
 }
 
 /**
@@ -737,7 +739,7 @@ export function viewTranscript(turns: Turn[], opts: TranscriptOptions = {}): str
   if (userName === aiName) throw new Error(`view: 사용자 줄 이름 '${userName}'이 AI 줄 이름과 같음 — 누가 한 말인지 구분이 안 됨`);
   let ai = 0;
   let user = 0;
-  return turns
+  const lines = turns
     .map((t) => {
       let head: string;
       if (t.role === "ai") head = `${aiName} ${++ai}`;
@@ -748,8 +750,9 @@ export function viewTranscript(turns: Turn[], opts: TranscriptOptions = {}): str
         line += ` [${t.acts.map((a) => (a.ref ? `${a.type} ${oneLine(a.ref)}` : a.type)).join(" · ")}]`;
       }
       return line;
-    })
-    .join("\n");
+    });
+  const skip = opts.recent === undefined ? 0 : Math.max(0, lines.length - opts.recent);
+  return skip === 0 ? lines.join("\n") : [`(앞 대화 ${skip}줄 생략)`, ...lines.slice(skip)].join("\n");
 }
 
 // ───────── 전체 컨텍스트 ─────────

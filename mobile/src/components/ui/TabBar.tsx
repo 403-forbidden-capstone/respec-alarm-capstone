@@ -51,7 +51,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 6,
   },
   item: { flex: 1, alignItems: 'center', gap: 4, paddingVertical: 4 },
-  badge: { minWidth: 26, height: 16, borderRadius: 8, backgroundColor: colors.chip, alignItems: 'center', justifyContent: 'center' },
+  badge: { minWidth: 26, minHeight: 16, paddingHorizontal: 4, borderRadius: 8, backgroundColor: colors.chip, alignItems: 'center', justifyContent: 'center' },
   badgeOn: { backgroundColor: colors.ink },
   badgeText: { fontSize: 10, lineHeight: 14, fontVariant: ['tabular-nums'] },
 });

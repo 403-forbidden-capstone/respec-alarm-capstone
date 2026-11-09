@@ -92,7 +92,8 @@ export const wokeCountOf = (rows: readonly WakeRow[]): number | null =>
   rows.length ? rows.filter((r) => stageOf(r.wake_status) === 'WOKE').length : null;
 
 // 팀 주간회의 · 세종대학교 · 오전 10:00
-export const appointmentLabel = (title: string, place: string, when: Date) => `${title} · ${place} · ${formatTime(when)}`;
+// 장소가 빈 줄(보는 사람이 그룹 멤버가 아니라 서버가 숨긴 공동 약속)은 '그룹 일정 · 오전 10:00'으로 — 빈 칸을 건너뜀
+export const appointmentLabel = (title: string, place: string, when: Date) => [title, place, formatTime(when)].filter(Boolean).join(' · ');
 
 // ---------------------------------------------------------------------------
 // G04 공유받은 알람 (get_shared_alarm_appointments + alarms)

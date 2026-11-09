@@ -9,11 +9,12 @@
 //   약속 행을 마지막에 쓰는 이유: 앞에서 실패해도 약속 행이 안 바뀌어 있어 다시 보내면 고칠 것이 그대로 보임
 // 하루 경계는 profiles.timezone(없으면 Asia/Seoul) 0시 (tz.ts)
 import { hasEarlierWake, isEveningWake, type SameDayWake } from './calc/index.ts';
-import { diffAlarms, type AlarmDiff } from './commit-core.ts';
+import { diffAlarms, type AlarmDiff, type AlarmWrite } from './commit-core.ts';
 import { summarize } from './commit.ts';
 import { must } from './db.ts';
 import {
   alarmChanges,
+  CONFIRM_MOVE_MINUTES,
   applyPatch,
   byTimeThenId,
   deleteMode,
@@ -58,7 +59,7 @@ type Common = {
   warnings: EditWarning[];
 };
 
-// 공동 약속 시각 · 장소를 고쳤을 때 다른 참여자들의 알람이 어떻게 됐나 — 사람 이름 없이 개수만 (updated = 바로 맞춤, held = 5분 이상 늦춰져 그 사람의 확인을 기다림, skipped = 다시 계산하지 못해 그대로)
+// 공동 약속 시각 · 장소를 고쳤을 때 다른 참여자들의 알람이 어떻게 됐나 — 사람 이름 없이 개수만 (updated = 바로 맞춤 · 계산을 못 해 약속이 옮겨진 만큼 같이 옮김, held = 5분 이상 늦춰져 그 사람의 확인을 기다림, skipped = 다시 계산하지 못해 그대로)
 export type ParticipantSync = { updated: number; held: number; skipped: number };
 
 export type UpdateResponse = Common & {
@@ -238,14 +239,22 @@ async function assertGroupMember(ctx: EditCtx, row: { group_id: string | null })
 }
 
 // 약속 행들을 지움 (참여 조건 · 알람은 CASCADE). 돌려주는 값 = 지워지는 내 알람 id (폰에서 지울 예약)
-async function deleteRows(ctx: EditCtx, appointmentIds: readonly string[]): Promise<string[]> {
+//   creatorId = 지울 행의 만든 사람 — 내가 만든 약속은 내 id, 만든 사람이 비어 있는(탈퇴한) 공동 약속은 null (참여자가 지움, DB 정책 appointments_delete_creator가 참여 중인 그룹원에게만 열어 둠)
+async function deleteRows(ctx: EditCtx, appointmentIds: readonly string[], creatorId: string | null = ctx.userId): Promise<string[]> {
   if (!appointmentIds.length) return [];
   const list = [...appointmentIds];
   const participants = must<{ participant_id: string }[]>('participants', await ctx.userDb.from('appointment_participants').select('participant_id').eq('user_id', ctx.userId).in('appointment_id', list));
   const alarmIds = participants.length
     ? ids(must<{ alarm_id: string }[]>('alarms', await ctx.userDb.from('alarms').select('alarm_id').eq('user_id', ctx.userId).in('participant_id', participants.map((p) => p.participant_id))))
     : [];
-  must('appointments delete', await ctx.userDb.from('appointments').delete().in('appointment_id', list).eq('creator_id', ctx.userId));
+  const del = ctx.userDb.from('appointments').delete().in('appointment_id', list);
+  if (creatorId == null) {
+    // 만든 사람이 빈 약속은 RLS 정책(참여자 · 안 지난 약속)만이 조건을 걸어 막혀도 오류 없이 0행 — 지운 줄 알고 성공으로 돌려주지 않게 지운 행 수를 확인
+    const gone = must<{ appointment_id: string }[]>('appointments delete', await del.is('creator_id', null).select('appointment_id'));
+    if (gone.length !== list.length) throw new HttpError('FORBIDDEN', '이 약속은 지울 수 없어요');
+  } else {
+    must('appointments delete', await del.eq('creator_id', creatorId));
+  }
   return alarmIds;
 }
 
@@ -357,7 +366,7 @@ async function replanForWake(
 // ---------------------------------------------------------------------------
 
 function assertEditor(target: Target | null, ctx: EditCtx, verb: '고칠' | '지울'): asserts target is Target {
-  const verdict = editorVerdict({ row: target?.appointment ?? null, userId: ctx.userId, participating: target?.participant != null, verb: verb === '지울' ? 'DELETE' : 'EDIT' });
+  const verdict = editorVerdict({ row: target?.appointment ?? null, userId: ctx.userId, participating: target?.participant != null });
   if (verdict === 'NOT_VISIBLE') throw new HttpError('NOT_FOUND', '일정을 찾을 수 없어요');
   if (verdict === 'NOT_CREATOR') {
     // L6 안건후보: 공동 약속을 참여만 한 사람이 고치기 · 지우기를 하면 기본안 = 거절 (만든 사람만). 참여자는 "나는 빠지기"(LEAVE)
@@ -421,12 +430,56 @@ async function replanFor(
 
 // 공동 약속의 시각 · 장소를 만든 사람이 고쳤을 때 다른 참여자들의 알람을 다시 계산해 씀 — 각자의 출발지 · 수단 · 준비 시간으로 (9-14).
 //   앞당김과 5분 미만 늦춤은 바로 쓰고, 5분 이상 늦춰지면 그 사람이 확인할 때까지 보류(D67, 9-11 · 9-12 — 그 사람 앱이 푸시의 needsConfirm을 보고 alarm-commit 미리 보기로 다시 계산해 묻고 저장)
-//   이미 울린 알람은 안 건드림(9-16). 장소가 바뀌어 길찾기가 안 되면 그 사람의 기존 알람을 그대로 두고 경고만(9-17). 사람 이름은 응답에 넣지 않음
+//   이미 울린 알람은 안 건드림(9-16). 계산을 못 한 사람(길찾기 안 됨 · 계산 불가)은 약속 시각이 안 바뀌었거나 5분 이상 늦춰지면 기존 알람을 그대로 두고 경고 · 확인 알림만(9-17), 앞당김 · 5분 미만 늦춤이면 알람을 약속이 옮겨진 만큼 같이 옮김(약속 행을 쓴 뒤, X-APPT-03). 사람 이름은 응답에 넣지 않음
 //   service 클라이언트로 읽고 쓰되 모든 조회를 그 참여자의 user_id로 좁힘(ctx를 그 사람 몫으로 바꿔서 같은 함수를 부름). DB 오류는 올리고(같은 요청을 다시 보내면 이어서 맞춰짐), 계산 못 하는 사람만 건너뜀
-// 한 참여자를 맞춘 결과. UPDATED = 바로 반영 · HELD = 5분 이상 늦춰져 확인 전 보류 · SKIPPED = 맞출 알람이 없음(다 울림) · NOT_UPDATED = 계산을 못 해 알람을 그대로 둠
-type SyncOutcome = { userId: string; kind: 'UPDATED' | 'HELD' | 'SKIPPED' | 'NOT_UPDATED'; warning?: EditWarning };
+// 한 참여자를 맞춘 결과. UPDATED = 바로 반영 · HELD = 5분 이상 늦춰져 확인 전 보류 · SKIPPED = 맞출 알람이 없음(다 울림) · NOT_UPDATED = 계산을 못 해 알람을 그대로 둠 ·
+//   SHIFT = 계산을 못 해 약속이 옮겨진 만큼 알람을 같이 옮길 예정(약속 행을 쓴 뒤 shift()로 씀 — 못 쓰면 NOT_UPDATED처럼 알람 그대로 + 경고)
+type SyncOutcome = { userId: string; kind: 'UPDATED' | 'HELD' | 'SKIPPED' | 'NOT_UPDATED' | 'SHIFT'; warning?: EditWarning; confirm?: boolean; shift?: () => Promise<void> };
 
 const ROUTE_FAILED: EditWarning = { code: 'PARTICIPANT_ROUTE_FAILED', message: '참여자 한 명의 이동시간을 구하지 못해 그 사람의 알람을 그대로 뒀어요. 이동 시간 확인이 필요해요' };
+
+const ROUTE_FAILED_SHIFTED: EditWarning = {
+  code: 'PARTICIPANT_ROUTE_FAILED',
+  message: '참여자 한 명의 이동시간을 새로 구하지 못해 지난번 이동 · 준비 간격 그대로 알람을 약속이 옮겨진 만큼 같이 옮겼어요. 그 사람의 확인이 필요해요',
+  detail: 'SHIFTED',
+};
+const SHIFT_KINDS: readonly string[] = ['WAKE', 'PREPARE', 'DEPARTURE', 'ARRIVE'];
+
+// 알람을 새로 계산하지 못한 참여자(길찾기 실패 · 계산 불가)의 안 울린 알람을 약속이 옮겨진 만큼 그대로 같이 옮길 계획을 세움 — 지난번 이동 · 준비 간격을 쓰는 셈.
+//   약속을 앞당겼는데 알람이 새 약속 뒤에 그대로 남아 지각하는 일을 막음 (탐색 시험 X-APPT-03). 옮긴 시각이 이미 지난 알람은 끄고, 꺼 둔 알람은 꺼 둔 채로 같이 옮겨 순서가 안 뒤집히게 함
+//   약속 시각이 안 바뀌었거나(장소만 바뀜), 5분 이상 늦춰져 확인이 먼저인 경우는 옮기지 않음(null) — 기존대로 알람을 두고 경고 · 확인 알림만 (종류와 상관없이 약속이 늦춰진 만큼으로 정함)
+//   옮기는 쓰기는 돌려주는 함수를 부를 때 함 — 약속 행을 쓴 뒤에 부름. 시각을 상대로 옮기는 일이라 약속 행 쓰기 앞에서 하면 요청이 실패해 다시 보낼 때 한 번 더 옮겨지기 때문 (약속 행이 새 시각이 되면 다시 보내도 시각이 안 바뀐 요청이라 옮기지 않음)
+function planShift(
+  ctx: EditCtx,
+  p: ParticipantRow,
+  loaded: { alarms: AlarmRow[]; rung: ReadonlySet<string> },
+  a: { oldAt: Date; newAt: Date; atChanged: boolean },
+): (() => Promise<void>) | null {
+  const deltaMs = a.newAt.getTime() - a.oldAt.getTime();
+  if (!a.atChanged || deltaMs === 0 || deltaMs >= CONFIRM_MOVE_MINUTES * 60_000) return null;
+  const movable = loaded.alarms.filter((x) => !loaded.rung.has(x.alarm_id) && SHIFT_KINDS.includes(x.alarm_type));
+  if (!movable.some((x) => x.is_enabled)) return null;
+  const nowIso = ctx.now.toISOString();
+  const update = movable.map((x) => {
+    const at = new Date(Date.parse(x.scheduled_at) + deltaMs);
+    const patch: AlarmWrite = {
+      alarm_type: x.alarm_type,
+      scheduled_at: at.toISOString(),
+      intensity: x.intensity,
+      voice_tone: x.voice_tone,
+      sound_key: x.sound_key as AlarmWrite['sound_key'],   // DB 칸은 null 허용 — 쓰기 모양(AlarmWrite)이 string이라 좁혀 놓았을 뿐 값은 그대로
+      vibration: x.vibration,
+      is_enabled: x.is_enabled && at.getTime() > ctx.now.getTime(),
+      time_source: x.time_source,
+      intensity_source: x.intensity_source,
+      last_calculated_at: nowIso,
+    };
+    return { alarm_id: x.alarm_id, patch };
+  });
+  return async () => {
+    await applyAlarmDiff(ctx, p.participant_id, { insert: [], update, remove: [] }, loaded.alarms);
+  };
+}
 
 // 참여자를 몇 명씩 한꺼번에 맞출지 — 참여자 한 명마다 DB 약 12번 + 길찾기 1번이라 20명을 하나씩 하면 길찾기가 느린 순간 앱 제한(30초)을 넘음
 export const SYNC_CONCURRENCY = 4;
@@ -434,9 +487,15 @@ export const SYNC_CONCURRENCY = 4;
 async function syncOne(ctx: EditCtx, a: { row: EditRow; patched: ReturnType<typeof applyPatch>; oldAt: Date; newAt: Date }, p: ParticipantRow): Promise<SyncOutcome> {
   const { row, patched, oldAt, newAt } = a;
   const pctx: EditCtx = { ...ctx, userId: p.user_id, userDb: ctx.service };
+  let loaded: { alarms: AlarmRow[]; rung: ReadonlySet<string> } | undefined;
+  const shifted = (): SyncOutcome | null => {
+    const shift = loaded ? planShift(pctx, p, loaded, { oldAt, newAt, atChanged: patched.changed.at }) : null;
+    return shift ? { userId: p.user_id, kind: 'SHIFT', warning: ROUTE_FAILED_SHIFTED, confirm: true, shift } : null;
+  };
   try {
     const alarms = await loadAlarms(ctx.service, p.participant_id, p.user_id);
     const rung = new Set(alarms.filter((x) => Date.parse(x.scheduled_at) <= ctx.now.getTime()).map((x) => x.alarm_id)); // 이미 울린 알람은 안 건드림
+    loaded = { alarms, rung };
     if (alarms.every((x) => rung.has(x.alarm_id))) return { userId: p.user_id, kind: 'SKIPPED' };
     const penv = new Env(pctx);
     const tz = await penv.tz();
@@ -444,7 +503,8 @@ async function syncOne(ctx: EditCtx, a: { row: EditRow; patched: ReturnType<type
     const made = await replanFor(pctx, penv, { row, patched, participant: p, alarms, snapshot, excluded: new Set([row.appointment_id]), oldAt, newAt, tz });
     // 장소가 바뀌었는데 길찾기가 안 돼 근사값 · 내 이동 기록뿐이면 그 사람의 기존 알람을 그대로 두고 '이동 시간 확인 필요' 경고만 (9-17)
     const source = made.plan.travel.chosen?.source;
-    if (patched.changed.place && (source === 'ESTIMATE' || source === 'CACHED')) return { userId: p.user_id, kind: 'NOT_UPDATED', warning: ROUTE_FAILED };
+    //   약속 시각도 바뀌었으면 지난번 이동 간격 그대로 알람을 같이 옮김 (X-APPT-03, 쓰기는 약속 행을 쓴 뒤)
+    if (patched.changed.place && (source === 'ESTIMATE' || source === 'CACHED')) return shifted() ?? { userId: p.user_id, kind: 'NOT_UPDATED', warning: ROUTE_FAILED };
     const diff: AlarmDiff = { insert: made.diff.insert, update: made.diff.update.filter((u) => !rung.has(u.alarm_id)), remove: made.diff.remove.filter((id) => !rung.has(id)) };
     const changes = alarmChanges(alarms.filter((x) => !rung.has(x.alarm_id)), [...diff.update.map((u) => u.patch), ...diff.insert]);
     if (needsConfirm(changes)) return { userId: p.user_id, kind: 'HELD' };
@@ -459,9 +519,11 @@ async function syncOne(ctx: EditCtx, a: { row: EditRow; patched: ReturnType<type
     await applyAlarmDiff(pctx, p.participant_id, diff, alarms);
     return { userId: p.user_id, kind: 'UPDATED' };
   } catch (e) {
-    // 계산을 못 하는 사람(길찾기 장애 · 계산 결과가 맞지 않음)만 건너뜀. DB 오류 같은 나머지는 요청 전체를 실패로 올림 —
-    //   이 시점에 약속 행은 아직 안 바뀌어 있어 같은 요청을 다시 보내면 이어서 맞춰짐 (이미 맞춘 사람은 바뀔 것이 없음)
+    // 계산을 못 하는 사람(길찾기 장애 · 계산 결과가 맞지 않음)은 알람을 같이 옮기거나(shifted) 그대로 두고 경고. DB 오류 같은 나머지는 요청 전체를 실패로 올림 —
+    //   이 시점에 약속 행은 아직 안 바뀌어 있어 같은 요청을 다시 보내면 이어서 맞춰짐 (이미 맞춘 사람은 바뀔 것이 없음 — 같이 옮기는 쓰기는 약속 행 뒤에 해서 이 약속을 깨지 않음)
     if (!(e instanceof HttpError) || (e.code !== 'ROUTE_UNAVAILABLE' && e.code !== 'UNPROCESSABLE')) throw e;
+    const moved = shifted();   // 약속 시각이 바뀌었으면 알람을 같이 옮김 — 약속을 앞당겼는데 알람이 새 약속 뒤에 남지 않게 (X-APPT-03)
+    if (moved) return moved;
     return {
       userId: p.user_id,
       kind: 'NOT_UPDATED',
@@ -470,11 +532,12 @@ async function syncOne(ctx: EditCtx, a: { row: EditRow; patched: ReturnType<type
   }
 }
 
-// held = 푸시에 needsConfirm: true를 실을 사람 — 서버가 아직 맞추지 못한 사람(보류 · 계산 못 함). 그 사람 폰이 미리 보기로 다시 계산해 묻고 저장함
+// held = 푸시에 needsConfirm: true를 실을 사람 — 서버가 아직 맞추지 못했거나 정확히 계산하지 못한 사람(보류 · 계산 못 함 · 지난번 간격으로 옮김). 그 사람 폰이 미리 보기로 다시 계산해 묻고 저장함
+// finish() = 약속 행을 쓴 뒤 부르는 마무리 — 계산을 못 해 같이 옮기기로 한 사람의 알람을 쓰고, 쓰기가 안 되면(DB 오류) 그 사람은 알람 그대로 + 경고 · 확인 알림으로 내림 (이미 약속이 바뀐 뒤라 요청을 실패로 돌리지 않음)
 async function syncOtherParticipants(
   ctx: EditCtx,
   a: { row: EditRow; patched: ReturnType<typeof applyPatch>; oldAt: Date; newAt: Date },
-): Promise<{ summary: ParticipantSync; held: Set<string>; warnings: EditWarning[] }> {
+): Promise<{ summary: ParticipantSync; held: Set<string>; warnings: EditWarning[]; finish: () => Promise<void> }> {
   const { row } = a;
   const summary: ParticipantSync = { updated: 0, held: 0, skipped: 0 };
   const held = new Set<string>();
@@ -494,9 +557,18 @@ async function syncOtherParticipants(
     if (failed) throw failed.reason;
     outcomes.push(...settled.map((r) => (r as PromiseFulfilledResult<SyncOutcome>).value));
   }
+  const pending: SyncOutcome[] = [];
   for (const o of outcomes) {
-    if (o.kind === 'UPDATED') summary.updated += 1;
-    else if (o.kind === 'HELD') {
+    if (o.kind === 'UPDATED') {
+      summary.updated += 1;
+      if (o.confirm) held.add(o.userId);
+      if (o.warning) warnings.push(o.warning);
+    } else if (o.kind === 'SHIFT') {
+      summary.updated += 1;   // 같이 옮길 사람 — 쓰기는 finish()에서, 못 쓰면 거기서 skipped로 내림
+      held.add(o.userId);   // 지난번 간격으로 옮긴 사람 폰은 확인 화면을 띄움
+      if (o.warning) warnings.push(o.warning);
+      pending.push(o);
+    } else if (o.kind === 'HELD') {
       summary.held += 1;
       held.add(o.userId);
     } else {
@@ -505,7 +577,19 @@ async function syncOtherParticipants(
       if (o.warning) warnings.push(o.warning);
     }
   }
-  return { summary, held, warnings };
+  const finish = async () => {
+    for (const o of pending) {
+      try {
+        await o.shift!();
+      } catch {
+        summary.updated -= 1;
+        summary.skipped += 1;
+        const i = warnings.indexOf(o.warning!);
+        if (i >= 0) warnings[i] = ROUTE_FAILED;
+      }
+    }
+  };
+  return { summary, held, warnings, finish };
 }
 
 // 공동 약속 푸시(GROUP_APPT_CHANGED) — 받는 사람은 DB 함수 plan_group_push가 정함(보낸 사람이 만든 사람이고 아직 안 지난 약속일 때만). 푸시가 안 가도 고치기 · 지우기는 이미 끝난 일이라 오류로 만들지 않고 경고만
@@ -633,6 +717,7 @@ export async function updateAppointment(ctx: EditCtx, req: Extract<EditRequest, 
     rowPatch.recurrence_rule = null;
   }
   await updateRow(ctx, row.appointment_id, rowPatch, row.creator_id);
+  if (sync) await sync.finish();   // 계산을 못 한 참여자의 알람을 약속이 옮겨진 만큼 같이 옮김 — 약속 행 뒤에 해야 요청을 다시 보내도 두 번 안 옮겨짐 (X-APPT-03)
 
   if (effect.deleteLater) await clearAttempts(ctx, row, { after: row.occurrence_on });
 
@@ -730,6 +815,10 @@ export async function deleteAppointment(ctx: EditCtx, req: Extract<EditRequest, 
 
   const env = new Env(ctx);
   const at = new Date(row.appointment_at);
+  // 만든 사람이 비어 있는 공동 약속은 안 지난 약속만 지움 (DB 정책 appointments_delete_creator · 고치기와 같은 하루 경계, X-APPT-01). 정책이 막으면 0행이라 오류 없이 성공처럼 보이므로 먼저 거절
+  if (group && row.creator_id == null && at.getTime() < localDayRange(ctx.now, await env.tz()).start.getTime()) {
+    throw new HttpError('UNPROCESSABLE', '지난 약속이에요', { reason: 'PAST_APPOINTMENT' });
+  }
   const canceled: string[] = [];
   let laterIds: string[] = [];
   let laterAtList: Date[] = [];
@@ -758,7 +847,7 @@ export async function deleteAppointment(ctx: EditCtx, req: Extract<EditRequest, 
     //   L6 안건후보: 공동 약속 지우기 기본안 = 만든 사람이 지우면 약속 전체가 지워짐. 다른 참여자의 폰 예약은 그 사람의 다음 맞추기(reconcile)에서 정리 (변경 알림은 L3 S2 뒤)
     //   공동 약속의 받는 사람(참여자)은 지우기 전에 정해 두고 지운 뒤에 '취소됐어요' 푸시를 보냄 — 받은 폰이 그 약속의 알람을 지움 (9-20). 지난 약속은 알릴 일이 없음
     const planned = group && Date.parse(row.appointment_at) >= localDayRange(ctx.now, await env.tz()).start.getTime() ? await planGroupPushSafe(ctx, row) : undefined;
-    canceled.push(...(await deleteRows(ctx, [row.appointment_id])));
+    canceled.push(...(await deleteRows(ctx, [row.appointment_id], row.creator_id)));
     result.deleted_appointment_ids = [row.appointment_id];
     if (planned) {
       result.warnings.push(...planned.warnings);

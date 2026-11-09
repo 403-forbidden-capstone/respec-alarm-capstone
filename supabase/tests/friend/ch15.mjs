@@ -268,4 +268,27 @@ export default async function ch15({ q, as, su, svc, check, expectErr }) {
     return mine.friends === 0 && mine.perms === 0 && mine.blocks === 0 && mine.members === 0 && mine.hides === 0 && others.blockOnMe === 1
       && others.bProfile === 1 && others.sharedGroup === 1 && others.sharedMembers === 1 && others.aloneGroup === 0 ? true : { mine, others };
   });
+
+  // ---- 탐색 시험 X-SEED-03: 개발용 초기화는 시드 · 시험 계정만 ----------------------------------------------
+
+  await check('X-SEED-03: 개발용 초기화(dev_reset_my_data)는 이메일이 @example.com인 시드 · 시험 계정만 — 일반 계정(다른 주소 · 주소 없음)은 42501 "시험 계정만 쓸 수 있음", 친구 · 그룹 데이터는 그대로. 대문자 주소 · 시드 데모 주소는 통과', async () => {
+    const mk = async (n, email, nickname) => {
+      await as(null, 'supabase_auth_admin');
+      await q(`insert into auth.users (id, email, raw_user_meta_data) values ($1, $2, $3)`, [id(n), email, JSON.stringify({ name: nickname })]);
+      await su();
+      await q(`update public.profiles set onboarded_at = now(), handle = $2 where user_id = $1`, [id(n), `f15_user_${n}`]);
+      return id(n);
+    };
+    const R = await mk(70, 'real.user@gmail.com', '일반'), N = await mk(71, null, '주소없음'), T = await mk(72, 'Demo-Me@Example.COM', '대문자시험'), S = await mk(74, 'e2e-reset-abc@example.com', '도구');
+    const F = await join_(73, '친구');
+    await befriend(R, F);
+    const mkRej = async (u) => { await as(u); const r = await expectErr(() => q(`select public.dev_reset_my_data()`), /시험 계정만 쓸 수 있음/); await su(); return r; };
+    const rRej = await mkRej(R), nRej = await mkRej(N);
+    const evil = await mk(75, 'x@example.com.evil.com', '비슷한주소'), sub = await mk(76, 'a@sub.example.com', '하위도메인');
+    const evilRej = await mkRej(evil), subRej = await mkRej(sub);
+    const stillFriends = await count(`select 1 from public.friends where requester_id = $1 or addressee_id = $1`, [R]);
+    await call(T, 'public.dev_reset_my_data()', []);
+    await call(S, 'public.dev_reset_my_data()', []);
+    return rRej === true && nRej === true && evilRej === true && subRej === true && stillFriends === 1 ? true : { rRej, nRej, evilRej, subRej, stillFriends };
+  });
 }

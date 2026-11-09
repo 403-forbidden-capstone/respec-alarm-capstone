@@ -26,7 +26,7 @@ export function ScheduleList({ items }: { items: ScheduleItem[] }) {
               <Text variant="tiny" tone="sub">
                 {t.ampm}
               </Text>
-              <Text variant="bodyLarge" weight={700} style={styles.hm}>
+              <Text variant="bodyLarge" weight={700} style={styles.hm} numberOfLines={1}>
                 {t.hm}
               </Text>
             </View>
@@ -66,7 +66,7 @@ const styles = StyleSheet.create({
   row: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 10 },
   divider: { borderTopWidth: 1, borderTopColor: colors.line },
   pressed: { opacity: 0.7 },
-  time: { width: 50 },
+  time: { minWidth: 50, flexShrink: 0 }, // 글꼴을 키워도 시각이 '12:0 / 9'로 쪼개지지 않게 — 줄이 아니라 칸이 넓어짐 (탐색 시험 X-UI-15)
   hm: { fontVariant: ['tabular-nums'] },
   bar: { width: 2, height: 30, backgroundColor: colors.ink },
   barPlain: { backgroundColor: colors.line },

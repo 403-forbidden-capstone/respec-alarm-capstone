@@ -537,4 +537,47 @@ export default async function ch10({ q, as, su, svc, check, expectErr }) {
     await su();
     return anon.every((x) => x === true) && writes.every((x) => x === true) ? true : { anon, writes };
   });
+
+  // ---- 탐색 시험 X-PROP-01: 늦추는 제안이 약속에 늦게 만들면 거절 -----------------------------------------
+
+  await check('X-PROP-01(보내기): 늦추는 제안은 같이 움직인 출발 + 이동시간이 약속 시각을 넘으면 TOO_LATE(제안 행 없음) — 안 넘으면 OK, 이동시간 값이 없으면 출발이 약속 시각을 넘을 때만, 앞당기기는 이미 늦어도 막지 않음', async () => {
+    const { A, B, c } = await pair(80);                                      // 기상 → 출발 +40분, 약속 = 기상 + 120분
+    await q(`update public.appointment_participants set est_travel_minutes = 30 where participant_id = $1`, [c.pt]);
+    const late = await propose(B, c.WAKE, await shifted(c.WAKE, 55));         // 출발 +95 + 이동 30 = 125 > 120
+    const edge = await propose(B, c.WAKE, await shifted(c.WAKE, 50));         // 40 + 50 + 30 = 120 — 딱 맞으면 통과
+    const ok = await propose(B, c.WAKE, await shifted(c.WAKE, 45));           // 115
+    const rows1 = await q(`select to_at from public.alarm_proposals where alarm_id = $1 and status = 'PENDING'`, [c.WAKE]);
+    const none = await pair(82);                                              // 이동시간 값 없음 + 약속이 출발 바로 뒤(+45분)
+    await q(`update public.appointments set appointment_at = (select scheduled_at from public.alarms where alarm_id = $1) + interval '45 minutes' where appointment_id = $2`, [none.c.WAKE, none.c.ap]);
+    const noneLate = await propose(none.B, none.c.WAKE, await shifted(none.c.WAKE, 10)), noneOk = await propose(none.B, none.c.WAKE, await shifted(none.c.WAKE, 4));
+    const hurry = await pair(84);                                             // 이동시간이 길어 이미 늦은 카드 — 앞당기기는 OK
+    await q(`update public.appointment_participants set est_travel_minutes = 200 where participant_id = $1`, [hurry.c.pt]);
+    const earlier = await propose(hurry.B, hurry.c.WAKE, await shifted(hurry.c.WAKE, -5)), later = await propose(hurry.B, hurry.c.WAKE, await shifted(hurry.c.WAKE, 5));
+    return late.status === 'TOO_LATE' && edge.status === 'OK' && ok.status === 'OK' && rows1.length === 1 && ms(rows1[0].to_at) === ms(await shifted(c.WAKE, 45))
+      && noneLate.status === 'TOO_LATE' && noneOk.status === 'OK' && earlier.status === 'OK' && later.status === 'TOO_LATE' ? true : { late, edge, ok, rows1, noneLate, noneOk, earlier, later };
+  });
+
+  await check('X-PROP-01(적용): 받은 뒤 약속 · 이동시간이 바뀌어 적용하면 약속에 늦게 되면 [적용]도 TOO_LATE — 알람은 그대로, 그 제안은 닫힘(EXPIRED). 늦지 않으면 그대로 APPLIED', async () => {
+    const { A, B, c } = await pair(86);
+    await q(`update public.appointment_participants set est_travel_minutes = 30 where participant_id = $1`, [c.pt]);
+    const p1 = await propose(B, c.WAKE, await shifted(c.WAKE, 45));          // 보낼 때는 115 ≤ 120
+    await q(`update public.appointment_participants set est_travel_minutes = 50 where participant_id = $1`, [c.pt]);   // 그사이 이동시간이 늘어 135 > 120
+    const before = [await alarm(c.WAKE), await alarm(c.DEPARTURE)];
+    const r1 = await respond(A, p1.proposal_id, true);
+    const after = [await alarm(c.WAKE), await alarm(c.DEPARTURE)];
+    const st1 = (await q(`select status from public.alarm_proposals where proposal_id = $1`, [p1.proposal_id]))[0].status;
+    await q(`update public.appointment_participants set est_travel_minutes = 30 where participant_id = $1`, [c.pt]);
+    const p2 = await propose(B, c.WAKE, await shifted(c.WAKE, 45));
+    const r2 = await respond(A, p2.proposal_id, true);
+    return p1.status === 'OK' && r1.status === 'TOO_LATE' && before.every((x, i) => ms(x.scheduled_at) === ms(after[i].scheduled_at)) && st1 === 'EXPIRED' && p2.status === 'OK' && r2.status === 'APPLIED' ? true : { p1, r1, st1, before, after, p2, r2 };
+  });
+
+  await check('X-PROP-01(꺼 둔 출발): 출발 알람을 꺼 둔 카드는 출발이 울리지 않으니 늦추는 제안이 약속을 넘겨도 TOO_LATE가 아님', async () => {
+    const { B, c } = await pair(88);
+    await q(`update public.appointment_participants set est_travel_minutes = 30 where participant_id = $1`, [c.pt]);
+    const late = await propose(B, c.WAKE, await shifted(c.WAKE, 55));            // 켜져 있으면 TOO_LATE인 값
+    await q(`update public.alarms set is_enabled = false where alarm_id = $1`, [c.DEPARTURE]);
+    const off = await propose(B, c.WAKE, await shifted(c.WAKE, 55));
+    return late.status === 'TOO_LATE' && off.status === 'OK' ? true : { late, off };
+  });
 }

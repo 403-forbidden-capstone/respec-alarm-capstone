@@ -347,6 +347,8 @@ export interface Card {
   items: string[];
   appointment_id: string | null;
   error: string | null;
+  /** 카드를 처음 만든 때(서울 ISO) — 다시 열 때 앱이 카드를 그 자리에 놓음. 예전 카드는 없음 */
+  at?: string;
 }
 /** 기록 정정 — 앱이 L2 함수로 반영한다(설계 메모 4.5 · 13절 L2-2) */
 export interface Fix {

@@ -7,14 +7,15 @@ import { HttpError } from '../errors.ts';
 import { FakeDb } from '../fake-db.ts';
 import type { Db } from '../supabase.ts';
 import { fakeClaude, upstreamError, type FakeScript } from './fake-claude.ts';
-import type { ServerState } from './session.ts';
+import { loadSession, roomTurns, type ServerState } from './session.ts';
+import { LlmClientError } from './llm.ts';
 import { emptyExtract } from './testing.ts';
 import { handleVoiceTurn, type VoiceTurnOut } from './turn.ts';
 import type { Structured } from './final-core.ts';
 import { structuredProblems } from './structured.v1.ts';
 import type { BehaviorReport, Card, FinalExtract } from './types.ts';
 import { handleVoiceCommit, journalFacts, type CommitDeps, type VoiceCommitOut } from './voice-commit.ts';
-import { handleVoiceSession, type VoiceSessionOut } from './voice-session.ts';
+import { CARRIED_STALE_ERROR, handleVoiceSession, withCardTimes, type VoiceSessionOut } from './voice-session.ts';
 
 const ME = 'u-me';
 const REVIEW = '2026-10-29';
@@ -47,12 +48,14 @@ function seed(): FakeDb {
   return db;
 }
 
-/** 대화 열고 말 쌓기 — [말, 음성이면 Live 답] */
-async function chat(db: FakeDb, lines: [string, string?][], t2: FakeScript['T2'] = [], t5: FakeScript['T5'] = Array(3).fill(DIARY)) {
+const AFTER_MIDNIGHT = new Date('2026-10-30T00:40:00+09:00');
+
+/** 대화 열고(같은 날 열린 방이 있으면 이어 받음) 말 쌓기 — [말, 음성이면 Live 답] */
+async function chat(db: FakeDb, lines: [string, string?][], t2: FakeScript['T2'] = [], t5: FakeScript['T5'] = Array(3).fill(DIARY), at: Date = NOW) {
   const voiceTurns = lines.filter(([, spoken]) => spoken !== undefined).length;
   const fake = fakeClaude({ T2F: lines.map(() => T2F_NONE), T1: Array(lines.length - voiceTurns).fill(T1_OK), T2: t2, T5: t5 });
   let t = 0;
-  const deps: CommitDeps = { userId: ME, userDb: db as unknown as Db, service: db as unknown as Db, llm: fake.client, model: 'gemini-3.5-flash-lite', now: () => NOW, clock: () => (t += 40), sleep: async () => {} };
+  const deps: CommitDeps = { userId: ME, userDb: db as unknown as Db, service: db as unknown as Db, llm: fake.client, model: 'gemini-3.5-flash-lite', now: () => at, clock: () => (t += 40), sleep: async () => {} };
   const s = (await handleVoiceSession(deps, { session_type: 'BEFORE_SLEEP', input_mode: 'TEXT', resume: true })) as VoiceSessionOut;
   const sid = s.session_id as string;
   let rev = s.rev;
@@ -60,7 +63,7 @@ async function chat(db: FakeDb, lines: [string, string?][], t2: FakeScript['T2']
     const r = (await handleVoiceTurn(deps, { session_id: sid, rev, client_turn_id: cid(), text: said, ...(spoken !== undefined ? { spoken_reply: spoken } : {}) })) as VoiceTurnOut;
     rev = r.rev;
   }
-  return { fake, deps, sid };
+  return { fake, deps, sid, session: s };
 }
 
 const rowOf = (db: FakeDb, sid: string) => db.rows('conversation_sessions').find((s) => s.session_id === sid) as { server_state: ServerState; ended_at: string | null; extracted_data: any; apply_status?: string; transcript?: string };
@@ -116,8 +119,8 @@ test('글 대화: 여러 일정 · 준비물 — 할 일만 저장, 일정은 �
   assert.equal(db.rows('appointments').length, apptsBefore); // 일정은 카드로만
   const row = rowOf(db, sid);
   assert.equal(row.apply_status, 'APPLIED');
-  assert.equal(row.ended_at, '2026-10-29T22:30:00+09:00');
-  assert.equal(row.server_state.ended, true);
+  assert.equal(row.ended_at, null); // [완료]는 세션을 끝내지 않음 — 같은 날 이어 말함
+  assert.equal(row.server_state.ended, false);
   assert.equal(row.server_state.commit?.status, 'DONE');
   const x = row.extracted_data as Structured;
   assert.deepEqual(structuredProblems(x), []);
@@ -132,8 +135,12 @@ test('글 대화: 여러 일정 · 준비물 — 할 일만 저장, 일정은 �
   assert.match(row.transcript ?? '', /^AI: .*\n사용자: 내일 2시에 도서관에서 스터디 있어/s);
   assert.deepEqual(fake.order.filter((p) => p === 'T2'), ['T2']);
   assert.deepEqual(db.rows('ai_calls').filter((c) => c.point === 'T2').map((c) => [c.prompt_version, c.ok, c.session_id]), [['v3.3', true, sid]]);
-  // 끝난 대화에는 말을 더 못 보냄 (카드 버튼은 그대로 받음 — turn.ts)
-  const e = await failure(handleVoiceTurn(deps, { session_id: sid, rev: row.server_state.rev, client_turn_id: cid(), text: '하나 더' }));
+  // 정리한 대화에도 이어 말할 수 있음 (같은 날 같은 방) — 예전 방식으로 끝낸(ended) 대화만 CONFLICT
+  const more = fakeClaude({ T2F: [T2F_NONE], T1: [T1_OK] });
+  const next = await handleVoiceTurn({ ...deps, llm: more.client }, { session_id: sid, rev: row.server_state.rev, client_turn_id: cid(), text: '하나 더' });
+  assert.equal(next.reply?.text, T1_OK.reply);
+  rowOf(db, sid).server_state.ended = true;
+  const e = await failure(handleVoiceTurn(deps, { session_id: sid, rev: rowOf(db, sid).server_state.rev, client_turn_id: cid(), text: '또' }));
   assert.equal(e.code, 'CONFLICT');
 });
 
@@ -542,11 +549,12 @@ test('일기: 사용자가 고친 일기는 덮지 않음 (모델도 안 부름)
   assert.deepEqual(journalOf(db).map((j) => [j.ai_summary, j.edited_summary, j.is_edited, j.source_session_id]), [['예전 AI 일기', '내가 고친 일기', true, null]]);
 });
 
-test('일기: 같은 날 두 번째 대화 → 두 대화의 사실로 다시 써서 그날 한 줄을 갱신 (근거는 새 대화)', async () => {
+test('일기: 같은 기준일의 두 번째 대화(자정 넘어 새 방, 아직 안 잠) → 두 대화의 사실로 다시 써서 그날 한 줄을 갱신 (근거는 새 대화)', async () => {
   const db = seed();
   const first = await chat(db, [['오늘 팀플 발표 끝냈어']], [emptyExtract({ day_review: { events: [{ text: '팀플 발표를 끝냄', time: null, important: true, source: 'stated' }], memorable: null } })]);
   await commit(first.deps, first.sid);
-  const second = await chat(db, [['저녁엔 친구랑 떡볶이 먹었어']], [emptyExtract({ day_review: { events: [{ text: '친구와 떡볶이를 먹음', time: null, important: false, source: 'stated' }], memorable: null } })], [{ diary: '팀플 발표를 끝내고 저녁에는 친구와 떡볶이를 먹었다.' }]);
+  db.now = AFTER_MIDNIGHT; // 10/30 00:40 — 달력 날짜가 바뀌어 새 방, 기상 기록이 없어 기준일은 그대로 10/29
+  const second = await chat(db, [['저녁엔 친구랑 떡볶이 먹었어']], [emptyExtract({ day_review: { events: [{ text: '친구와 떡볶이를 먹음', time: null, important: false, source: 'stated' }], memorable: null } })], [{ diary: '팀플 발표를 끝내고 저녁에는 친구와 떡볶이를 먹었다.' }], AFTER_MIDNIGHT);
   assert.notEqual(second.sid, first.sid);
   await commit(second.deps, second.sid);
   const screen = second.fake.seen.T5[0];
@@ -567,7 +575,7 @@ test('일기: 모델 실패 → 이 단계만 PARTIAL (대화 · 구조화 JSON 
   const r1 = await commit(deps, sid);
   assert.deepEqual([r1.status, r1.failed, r1.saved.todos, r1.saved.daily_journals], ['PARTIAL', ['daily_journals'], 1, 0]);
   const row = rowOf(db, sid);
-  assert.deepEqual([row.apply_status, structuredProblems(row.extracted_data), row.server_state.ended, journalOf(db).length], ['APPLIED', [], true, 0]);
+  assert.deepEqual([row.apply_status, structuredProblems(row.extracted_data), row.server_state.ended, journalOf(db).length], ['APPLIED', [], false, 0]);
   assert.match(row.transcript ?? '', /팀플 발표/);
   assert.equal(db.rows('ai_calls').filter((c) => c.point === 'T5' && c.ok === false).length, 1);
 
@@ -661,4 +669,375 @@ test('위험 판정: 뒤에 정상 대화가 오면 정상 대화 내용만 T5�
   assert.ok(screen.includes('팀플 발표를 끝냄') && screen.includes('08:10'));
   for (const s of UNSAFE_MARKS) assert.ok(!screen.includes(s), `빠져야 함: ${s}`);
   assert.deepEqual(journalOf(db).map((j) => [j.ai_summary, j.source_session_id]), [[DIARY.diary, ok.sid]]);
+});
+
+// ───────── 하루 한 대화방 — [완료]해도 같은 날은 같은 세션, 다음 [완료]가 새 말까지 다시 정리 ─────────
+
+const LATER = new Date('2026-10-29T23:10:00+09:00');
+const umbrella = (over: Partial<FinalExtract> = {}) => dayExtract({ todos: [todo('우산', { due_date: TOMORROW })], daily_record: { sleep_time: null, sleep_satisfaction: 4, condition_note: null }, ...over });
+
+test('같은 날: 완료 → 다시 열면 같은 세션(말 · 카드 복원) → 글 · 음성(Live)으로 이어 말함 → 두 번째 완료가 새 말까지 다시 추출 · 할 일 · 기록 겹침 없음 · 일기 갱신', async () => {
+  const db = seed();
+  const first = await chat(db, [[DAY_TALK]], [umbrella()]);
+  putCards(db, first.sid, [{ status: 'SAVED', appointment_id: 'ap-team' }]); // 카드 [저장]으로 만든 일정
+  const r1 = await commit(first.deps, first.sid);
+  assert.deepEqual([r1.status, r1.saved], ['DONE', { todos: 1, daily_records: 1, daily_journals: 1 }]);
+
+  // 재진입 (같은 날 23:10) — 새 세션을 만들지 않고 이어 받음
+  const evening = umbrella({ day_review: { events: [{ text: '팀플 발표를 끝냄', time: null, important: true, source: 'stated' }, { text: '친구와 떡볶이를 먹음', time: null, important: false, source: 'stated' }], memorable: null } });
+  const second = await chat(db, [['저녁엔 친구랑 떡볶이 먹었어'], ['내일 우산 챙기는 거 잊지 말자', '네, 우산 꼭 챙기세요.']], [evening], [{ diary: '발표를 끝내고 친구와 떡볶이를 먹었다.' }], LATER);
+  assert.equal(second.sid, first.sid);
+  assert.equal(second.session.resumed, true);
+  assert.ok(second.session.messages.some((m) => m.text === DAY_TALK)); // 앞 대화 복원
+  assert.deepEqual(second.session.cards.map((c) => [c.id, c.status]), [['c1', 'SAVED']]); // 일정 카드 복원 (다시 저장 안 함)
+  assert.equal(db.rows('conversation_sessions').length, 1);
+  const st = rowOf(db, first.sid).server_state;
+  assert.equal(st.counts.user_turns, 3);
+  assert.ok(rowOf(db, first.sid).ended_at === null && !st.ended);
+  assert.equal((db.rows('conversation_sessions')[0] as { turns: { source?: string }[] }).turns.some((t) => t.source === 'live'), true); // 음성 차례도 같은 세션에
+
+  const r2 = await commit(second.deps, second.sid);
+  assert.deepEqual([r2.status, r2.saved], ['DONE', { todos: 0, daily_records: 1, daily_journals: 1 }]); // 할 일은 같은 대화가 만든 것이라 건너뜀
+  assert.equal(second.fake.order.filter((p) => p === 'T2').length, 1);
+  for (const s of [DAY_TALK, '떡볶이', '우산 꼭 챙기세요']) assert.ok(second.fake.seen.T2[0].includes(s), `T2가 대화 전체를 봐야 함: ${s}`);
+  assert.deepEqual(db.rows('todos').map((t) => t.title), ['우산']);
+  assert.equal(db.rows('daily_records').length, 1);
+  assert.equal(db.rows('appointments').length, 2); // 일정은 카드 몫 — 정리가 새로 만들지 않음
+  assert.deepEqual(journalOf(db).map((j) => [j.ai_summary, j.source_session_id]), [['발표를 끝내고 친구와 떡볶이를 먹었다.', first.sid]]);
+  assert.equal(rowOf(db, first.sid).server_state.commit?.at_turn, 3);
+
+  // 새 말 없이 또 [완료] — 모델 안 부르고 저장한 답 그대로
+  assert.deepEqual(await commit(second.deps, second.sid), r2);
+  assert.equal(second.fake.order.filter((p) => p === 'T2' || p === 'T5').length, 2);
+
+  // 사용자가 일기를 고친 뒤 또 말하고 [완료] — 다시 추출은 하지만 고친 일기는 안 덮음
+  Object.assign(journalOf(db)[0], { edited_summary: '내가 고친 일기', is_edited: true });
+  const third = await chat(db, [['아 그리고 내일 9시 수업']], [evening], [], new Date('2026-10-29T23:40:00+09:00'));
+  const r3 = await commit(third.deps, third.sid);
+  assert.deepEqual([r3.status, r3.saved.daily_journals, third.fake.order.includes('T5')], ['DONE', 0, false]);
+  assert.deepEqual(journalOf(db).map((j) => [j.edited_summary, j.is_edited]), [['내가 고친 일기', true]]);
+});
+
+test('정리(T2) 도중 새 말이 오면 STALE — 그 앞까지 저장, 새 말은 다음 [완료]가 다시 추출해 놓치지 않음', async () => {
+  const db = seed();
+  const { fake, deps, sid } = await chat(db, [['내일 우산 챙겨야 해']], []);
+  const extractThenTalk = () => {
+    // T2를 부르는 사이 voice-turn이 말을 저장함 (rev · 말 수가 오름)
+    const row = db.rows('conversation_sessions').find((s) => s.session_id === sid) as { turns: unknown[]; server_state: ServerState };
+    row.turns.push({ n: row.turns.length, role: 'user', text: '그리고 모레 도서관 가야 해', at: NOW.toISOString(), client_turn_id: 'late' });
+    row.server_state = { ...row.server_state, rev: row.server_state.rev + 1, counts: { ...row.server_state.counts, user_turns: row.server_state.counts.user_turns + 1 } };
+    return emptyExtract({ todos: [todo('우산')] });
+  };
+  const r1 = (await handleVoiceCommit({ ...deps, llm: fakeClaude({ T2: [extractThenTalk], T5: [DIARY] }).client }, { session_id: sid })) as VoiceCommitOut;
+  assert.equal(r1.status, 'STALE');
+  assert.equal(rowOf(db, sid).server_state.commit?.at_turn, 1);
+  assert.equal(rowOf(db, sid).server_state.counts.user_turns, 2); // 정리가 새 말을 덮어쓰지 않음
+  assert.deepEqual(db.rows('todos').map((t) => t.title), ['우산']);
+
+  const again = fakeClaude({ T2: [(screen: string) => (assert.ok(screen.includes('모레 도서관')), emptyExtract({ todos: [todo('우산'), todo('도서관 책', { due_date: '2026-10-31' })] }))], T5: [DIARY] });
+  const r2 = (await handleVoiceCommit({ ...deps, llm: again.client }, { session_id: sid })) as VoiceCommitOut;
+  assert.equal(r2.status, 'DONE');
+  assert.deepEqual(db.rows('todos').map((t) => t.title), ['우산', '도서관 책']);
+  assert.equal(fake.order.includes('T2'), false);
+});
+
+test('다음 날(KST 자정 뒤)은 새 대화방 · 예전 방식으로 끝낸 세션은 이어 받지 않음', async () => {
+  const db = seed();
+  const night = await chat(db, [['오늘 피곤했어']], [emptyExtract()]);
+  await commit(night.deps, night.sid);
+
+  db.now = AFTER_MIDNIGHT; // 10/30 00:40 — 달력 날짜가 바뀜
+  const late = await chat(db, [], [], [], AFTER_MIDNIGHT);
+  assert.notEqual(late.sid, night.sid);
+  assert.equal(late.session.day.review, REVIEW); // 아직 안 잠 → 돌아볼 날은 10/29
+  assert.deepEqual(late.session.messages.map((m) => m.role), ['ai']); // 새 첫 마디만 (어제 방을 잇지 않음)
+  assert.equal(rowOf(db, late.sid).server_state.prev_session_id, null);
+
+  // 예전 방식([완료]가 ended로 끝낸 세션)은 같은 날이어도 새 세션
+  (db.rows('conversation_sessions').find((s) => s.session_id === late.sid) as { server_state: ServerState }).server_state.ended = true;
+  const fresh = await chat(db, [], [], [], new Date('2026-10-30T00:50:00+09:00'));
+  assert.notEqual(fresh.sid, late.sid);
+});
+
+// ───────── 같은 날 기준일이 바뀜: 대화방 = KST 달력 날짜, 기록(세션 줄 · 구조화 JSON · 일기) = 기준일 ─────────
+
+const AT_1AM = new Date('2026-10-30T01:00:00+09:00'); // 기상 전 → 기준일 10/29
+const AT_9AM = new Date('2026-10-30T09:00:00+09:00'); // 08:30 기상 확인 뒤 → 기준일 10/30
+const woke = (db: FakeDb) => db.rows('daily_records').push({ record_id: 'r-wake', user_id: ME, record_date: TOMORROW, wake_confirmed_at: '2026-10-30T08:30:00+09:00', data_source: 'APP' });
+const eventsOf = (text: string) => emptyExtract({ day_review: { events: [{ text, time: null, important: true, source: 'stated' }], memorable: null } });
+
+test('오전 1시에 대화 → 오전 9시(기상 뒤) 재접속: 같은 대화방(말 · 카드 이어짐) · 기록은 기준일별 — 01시 말은 10/29, 09시 말은 10/30 일기로', async () => {
+  const db = seed();
+  db.now = AT_1AM;
+  const night = await chat(db, [['오늘 팀플 발표 끝냈어'], ['내일 2시에 도서관에서 스터디 있어']], [], [], AT_1AM);
+  assert.equal(night.session.day.review, REVIEW);
+  putCards(db, night.sid, [
+    { status: 'READY', summary: '스터디', draft: { title: '스터디', date: TOMORROW, time: '14:00', place: '도서관', importance: null, transport: null, repeat: [], items: [], alarms: { WAKE: true, PREPARE: true, DEPARTURE: true } } },
+    { kind: 'ALARM_EDIT', status: 'READY', draft: null, edit: { appointment_id: 'a1', times: { WAKE: '2026-10-30T07:00:00+09:00' } } },
+    { status: 'SAVED', appointment_id: 'ap-team', summary: '팀플' },
+  ]);
+
+  woke(db);
+  db.now = AT_9AM;
+  const fake = fakeClaude({ T2F: [T2F_NONE], T1: [T1_OK, T1_OK], T2: [eventsOf('팀플 발표를 끝냄'), eventsOf('아침에 일찍 일어남')], T5: [{ diary: '10/29 일기' }, { diary: '10/30 일기' }] });
+  let t = 0;
+  const deps: CommitDeps = { userId: ME, userDb: db as unknown as Db, service: db as unknown as Db, llm: fake.client, model: 'gemini-3.5-flash-lite', now: () => AT_9AM, clock: () => (t += 40), sleep: async () => {} };
+  const s = (await handleVoiceSession(deps, { session_type: 'BEFORE_SLEEP', input_mode: 'TEXT', resume: true })) as VoiceSessionOut;
+  // 화면: 같은 방 — 01시 말이 그대로 보이고, 오늘 첫 마디가 뒤에 붙음
+  assert.equal(s.resumed, true);
+  assert.equal(s.day.review, TOMORROW);
+  const texts = s.messages.map((m) => m.text);
+  assert.ok(texts.includes('오늘 팀플 발표 끝냈어') && texts.indexOf('내일 2시에 도서관에서 스터디 있어') < texts.length - 1);
+  assert.equal(s.messages.at(-1)?.role, 'ai');
+  // 카드: 번호 · 상태 그대로, 어제 문맥 별칭을 쓰는 열린 알람 카드만 저장 불가, 약속 id는 그대로 풀림
+  assert.deepEqual(s.cards.map((c) => [c.id, c.status]), [['c1', 'READY'], ['c2', 'FAILED'], ['c3', 'SAVED']]);
+  assert.equal(s.cards[1].error, CARRIED_STALE_ERROR);
+  assert.equal(s.cards[1].edit?.appointment_id, rowOf(db, night.sid).server_state.refs.appointments.a1.appointment_id); // 앞 구간 a1 → DB id (새 문맥의 a1과 안 섞임)
+  // 서버: 기록은 새 기준일 세션(같은 방의 다음 구간)
+  const sid = s.session_id as string;
+  assert.notEqual(sid, night.sid);
+  assert.equal(rowOf(db, sid).server_state.prev_session_id, night.sid);
+  assert.deepEqual(s.prev_session_ids, [night.sid]); // 앱이 앞 구간의 '저장됨' 표시를 옮길 수 있게
+  assert.equal(rowOf(db, sid).server_state.counts.user_turns, 0);
+
+  // 이어 받은 열린 일정 카드를 9시에 저장 → 새 구간에서 처리, 새 카드 번호는 c4부터
+  const saved = await handleVoiceTurn(deps, { session_id: sid, rev: s.rev, client_turn_id: cid(), card_action: { id: 'c1', action: 'SAVED', appointment_id: 'aaaaaaaa-0000-4000-8000-000000000001', alarms: [] } });
+  assert.equal(saved.cards.find((c) => c.id === 'c1')?.status, 'SAVED');
+  assert.equal(rowOf(db, sid).server_state.core.pendingSeq, 3);
+  const said = await handleVoiceTurn(deps, { session_id: sid, rev: saved.rev, client_turn_id: cid(), text: '오늘은 아침에 일찍 일어났어' });
+  assert.equal(said.reply?.text, T1_OK.reply);
+  assert.ok(!fake.seen.T2F[0].includes('팀플 발표 끝냈어')); // 모델 화면에는 이 구간 말만 — 어제 날짜의 '오늘 · 내일'이 섞이지 않게
+
+  // 같은 날 다시 열면 같은 구간 (새 세션 안 만듦), 화면 말은 두 구간 다
+  const again = (await handleVoiceSession({ ...deps, now: () => new Date('2026-10-30T21:00:00+09:00') }, { session_type: 'BEFORE_SLEEP', input_mode: 'TEXT', resume: true })) as VoiceSessionOut;
+  assert.equal(again.session_id, sid);
+  assert.ok(again.messages.some((m) => m.text === '오늘 팀플 발표 끝냈어') && again.messages.some((m) => m.text === '오늘은 아침에 일찍 일어났어'));
+  const room = await roomTurns(deps, (await loadSession(deps, sid)));
+  assert.deepEqual(room.filter((x) => x.role === 'user').map((x) => x.text), ['오늘 팀플 발표 끝냈어', '내일 2시에 도서관에서 스터디 있어', '오늘은 아침에 일찍 일어났어']); // Live 앞 대화도 이것
+
+  // [완료] 한 번 → 앞 구간(10/29)을 먼저 그 기준일로, 이 구간(10/30)을 제 기준일로
+  const r = await commit(deps, sid);
+  assert.equal(r.status, 'DONE');
+  assert.deepEqual(fake.order.filter((p) => p === 'T2' || p === 'T5'), ['T2', 'T5', 'T2', 'T5']);
+  assert.ok(fake.seen.T2[0].includes('오늘 팀플 발표 끝냈어') && !fake.seen.T2[0].includes('일찍 일어났어'));
+  assert.ok(fake.seen.T2[1].includes('일찍 일어났어') && !fake.seen.T2[1].includes('팀플 발표 끝냈어'));
+  assert.equal(rowOf(db, night.sid).extracted_data.session.reference_date, REVIEW);
+  assert.equal(rowOf(db, sid).extracted_data.session.reference_date, TOMORROW);
+  assert.deepEqual(db.rows('daily_journals').map((j) => [j.record_date, j.ai_summary, j.source_session_id]).sort(), [[REVIEW, '10/29 일기', night.sid], [TOMORROW, '10/30 일기', sid]]);
+  // 다시 [완료] — 새 말이 없으니 두 구간 모두 모델 안 부름
+  assert.deepEqual(await commit(deps, sid), r);
+  assert.equal(fake.order.filter((p) => p === 'T2').length, 2);
+
+  // 다음 날 자정 뒤는 이 방을 잇지 않고 새 방
+  const nextDay = (await handleVoiceSession({ ...deps, now: () => new Date('2026-10-31T00:30:00+09:00') }, { session_type: 'BEFORE_SLEEP', input_mode: 'TEXT', resume: true })) as VoiceSessionOut;
+  assert.notEqual(nextDay.session_id, sid);
+  assert.equal(rowOf(db, nextDay.session_id as string).server_state.prev_session_id, null);
+});
+
+test('앞 구간 정리가 실패하면 이 구간 결과는 저장하되 PARTIAL(previous_session) — 다시 보내면 앞 구간만 이어서 정리', async () => {
+  const db = seed();
+  db.now = AT_1AM;
+  const night = await chat(db, [['오늘 팀플 발표 끝냈어']], [], [], AT_1AM);
+  woke(db);
+  db.now = AT_9AM;
+  // T2 순서: 앞 구간(실패 · 다시 시도도 실패) → 이 구간 → (다시 보냄) 앞 구간
+  const day = await chat(db, [['오늘은 아침에 일찍 일어났어']], [upstreamError(), upstreamError(), eventsOf('아침에 일찍 일어남'), eventsOf('팀플 발표를 끝냄')], [{ diary: '10/30 일기' }, { diary: '10/29 일기' }], AT_9AM);
+  assert.equal(rowOf(db, day.sid).server_state.prev_session_id, night.sid);
+  const r1 = await commit(day.deps, day.sid);
+  assert.deepEqual([r1.status, r1.failed], ['PARTIAL', ['previous_session']]);
+  assert.equal(rowOf(db, night.sid).server_state.commit?.status, 'FAILED');
+  assert.equal(rowOf(db, day.sid).server_state.commit?.status, 'DONE');
+  assert.equal(rowOf(db, night.sid).server_state.counts.user_turns, 1); // 앞 구간 말은 그대로
+  const r2 = await commit(day.deps, day.sid);
+  assert.equal(r2.status, 'DONE');
+  assert.equal(day.fake.order.filter((p) => p === 'T2').length, 4); // 실패 2(다시 시도 포함) + 이 구간 1 + 앞 구간 1 — 이 구간은 다시 안 뽑음
+  assert.deepEqual(db.rows('daily_journals').map((j) => j.record_date).sort(), [REVIEW, TOMORROW]);
+});
+
+test('0시 ~ 기상 전에 첫 마디만 있던 방은 이을 것이 없어 기상 뒤에는 그냥 새 세션 (앞 구간 연결 없음)', async () => {
+  const db = seed();
+  db.now = AT_1AM;
+  const night = await chat(db, [], [], [], AT_1AM);
+  woke(db);
+  db.now = AT_9AM;
+  const day = await chat(db, [], [], [], AT_9AM);
+  assert.notEqual(day.sid, night.sid);
+  assert.equal(day.session.resumed, false);
+  assert.equal(rowOf(db, day.sid).server_state.prev_session_id, null);
+  assert.equal(day.session.messages.length, 1);
+});
+
+// ───────── 긴 대화 (사용자 말 90 ~ 100) ─────────
+
+const manyLines = (n: number, from = 1): [string][] => Array.from({ length: n }, (_, i) => [`말 ${from + i}: 오늘 있었던 일을 조금 길게 이야기해 보면 수업 끝나고 도서관에 갔다가 저녁을 먹었어`]);
+
+test('긴 대화(사용자 말 95): 다시 열어도 말 · 카드 그대로, T1 · T2F 화면은 최근 줄만이라 크기가 묶이고 T2는 대화 전체', async () => {
+  const db = seed();
+  const { fake, deps, sid } = await chat(db, manyLines(95), [emptyExtract({ todos: [todo('우산', { due_date: TOMORROW })] })]);
+  putCards(db, sid, [
+    { status: 'SAVED', appointment_id: 'ap-team', summary: '팀플' },
+    { status: 'READY', summary: '스터디', draft: { title: '스터디', date: TOMORROW, time: '14:00', place: '도서관', importance: null, transport: null, repeat: [], items: [], alarms: { WAKE: true, PREPARE: true, DEPARTURE: true } } },
+  ]);
+  const s = (await handleVoiceSession({ ...deps, now: () => LATER }, { session_type: 'BEFORE_SLEEP', input_mode: 'TEXT', resume: true })) as VoiceSessionOut;
+  assert.equal(s.session_id, sid);
+  assert.equal(s.messages.length, 1 + 95 * 2);
+  assert.deepEqual(s.cards.map((c) => [c.id, c.status]), [['c1', 'SAVED'], ['c2', 'READY']]);
+  assert.equal(s.limits.turns_left, 5);
+  // 모델 화면 크기: T1 · T2F는 창(40줄)이 찬 뒤로는 화면 길이가 거의 그대로 (대화 길이에 비례해 늘지 않음)
+  for (const point of ['T1', 'T2F'] as const) {
+    const sizes = fake.seen[point].map((x) => x.length).slice(30);
+    assert.ok(Math.max(...sizes) - Math.min(...sizes) < 2_000, `${point} 화면이 대화 길이에 따라 커짐: ${Math.min(...sizes)} → ${Math.max(...sizes)}`);
+    const last = fake.seen[point].at(-1) ?? '';
+    assert.ok(!last.includes('말 1:') && last.includes('말 95:'));
+  }
+  // [완료] — T2는 대화 전체(첫 말 · 끝 말)
+  const r = await commit(deps, sid);
+  assert.equal(r.status, 'DONE');
+  const t2 = fake.seen.T2[0];
+  assert.ok(t2.includes('말 1:') && t2.includes('말 95:'));
+  assert.equal(rowOf(db, sid).server_state.commit?.at_turn, 95);
+  assert.deepEqual(structuredProblems(rowOf(db, sid).extracted_data), []);
+  assert.equal((rowOf(db, sid).transcript ?? '').split('\n').length, 1 + 95 * 2);
+});
+
+test('긴 대화 정리 실패(T2 시간 초과 · 다시 시도까지): 말 · 카드 · 기존 기록은 그대로, 계속 말할 수 있고 다시 [완료]하면 새 말까지 정리 · 상한(100) 뒤에도 정리됨', async () => {
+  const db = seed();
+  db.rows('todos').push({ todo_id: 't-old', user_id: ME, title: '과제', todo_type: 'TASK', due_date: TOMORROW, appointment_id: null, source_session_id: null, is_done: false, created_at: '2026-10-28T10:00:00+09:00' });
+  const timeout = () => new LlmClientError('timeout', '응답이 19000ms 안에 오지 않음');
+  const { fake, deps, sid } = await chat(db, manyLines(92), [timeout(), timeout()]);
+  putCards(db, sid, [{ status: 'SAVED', appointment_id: 'ap-team', summary: '팀플' }]);
+  const snap = () => structuredClone({ turns: (db.rows('conversation_sessions').find((x) => x.session_id === sid) as { turns: unknown[] }).turns, cards: rowOf(db, sid).server_state.cards });
+  const before = snap();
+
+  const e = await failure(commit(deps, sid));
+  assert.equal(e.code, 'LLM_UNAVAILABLE');
+  assert.equal(fake.order.filter((p) => p === 'T2').length, 2); // 시간 초과는 한 번 다시 시도
+  assert.equal(rowOf(db, sid).server_state.commit?.status, 'FAILED');
+  assert.deepEqual(snap(), before);
+  assert.deepEqual(db.rows('todos').map((x) => x.title), ['과제']);
+  assert.equal(rowOf(db, sid).extracted_data ?? null, null);
+
+  // 실패 뒤에도 대화는 이어짐 — 100번째까지 말하고 101번째는 대화 길이 템플릿
+  const more = await chat(db, manyLines(8, 93), [emptyExtract({ todos: [todo('우산', { due_date: TOMORROW })] })], [DIARY], LATER);
+  assert.equal(more.sid, sid);
+  const st = rowOf(db, sid).server_state;
+  assert.equal(st.counts.user_turns, 100);
+  const over = await handleVoiceTurn(more.deps, { session_id: sid, rev: st.rev, client_turn_id: cid(), text: '백한 번째' });
+  assert.equal(over.limits.reached, 'TURN');
+
+  const r = await commit(more.deps, sid);
+  assert.equal(r.status, 'DONE');
+  assert.ok(more.fake.seen.T2[0].includes('말 1:') && more.fake.seen.T2[0].includes('말 100:'));
+  assert.equal(rowOf(db, sid).server_state.commit?.at_turn, 100);
+  assert.deepEqual(db.rows('todos').map((x) => x.title), ['과제', '우산']);
+});
+
+test('계산이 안 끝난 채 이어 받은 카드: 새 구간 첫 말 전에 계산 결과(results)를 보내도 받음 — 답 없이 카드만 READY, 다음 말은 정상', async () => {
+  const db = seed();
+  db.now = AT_1AM;
+  const night = await chat(db, [['내일 2시에 도서관에서 스터디 있어']], [], [], AT_1AM);
+  putCards(db, night.sid, [{ status: 'NEEDS_ESTIMATE', summary: '스터디', draft: { title: '스터디', date: TOMORROW, time: '14:00', place: '도서관', importance: null, transport: null, repeat: [], items: [], alarms: { WAKE: true, PREPARE: true, DEPARTURE: true } } }]);
+  woke(db);
+  db.now = AT_9AM;
+  const day = await chat(db, [], [], [], AT_9AM);
+  assert.deepEqual(day.session.cards.map((c) => [c.id, c.status]), [['c1', 'NEEDS_ESTIMATE']]);
+  const fake = fakeClaude({ T2F: [T2F_NONE], T1: [T1_OK] });
+  const deps = { ...day.deps, llm: fake.client };
+  const estimate = { alarms: [{ kind: 'PREPARE', at: '2026-10-30T12:30:00+09:00', enabled: true }, { kind: 'DEPARTURE', at: '2026-10-30T13:20:00+09:00', enabled: true }], level: 2, with_wake: false };
+  const r = await handleVoiceTurn(deps, { session_id: day.sid, rev: day.session.rev, client_turn_id: cid(), results: { cards: [{ id: 'c1', status: 'READY', estimate, error: null }], fixes: [] } });
+  assert.deepEqual([r.reply, r.cards[0].status], [null, 'READY']);
+  assert.equal(fake.order.length, 0);
+  const next = await handleVoiceTurn(deps, { session_id: day.sid, rev: r.rev, client_turn_id: cid(), text: '좋아 고마워 오늘도 화이팅' });
+  assert.equal(next.reply?.text, T1_OK.reply);
+  // 이어 받은 카드가 없는 보통 세션은 예전처럼 말 전 results를 거절
+  const plain = await chat(seed(), [], [], [], AT_9AM);
+  assert.equal((await failure(handleVoiceTurn(plain.deps, { session_id: plain.sid, rev: plain.session.rev, client_turn_id: cid(), results: { cards: [], fixes: [] } }))).code, 'VALIDATION_FAILED');
+});
+
+// ───────── 같은 일정의 반복 언급 · 글자 흔들림 (11/9 웹 시험 재현) ─────────
+
+test('저장한 스터디 뒤 상관없는 말에 T2F가 "스터더 · 도서간"으로 다시 뽑아도 새 카드 없음 · 같은 시각 다른 일정(치과)은 새 카드 · [저장 안 함] 카드는 오타 재추출로 안 살아남 · 다시 열면 카드 상태와 만든 때 그대로', async () => {
+  const db = seed();
+  const x = (title: string, place: string | null, save = 'UNCONFIRMED') => ({ ref: null, title, date: TOMORROW, time: '14:00', place, importance: null, transport: null, repeat: null, save, unclear: null });
+  const fast = (...appointments: unknown[]) => ({ ...T2F_NONE, appointments });
+  const fake = fakeClaude({
+    T2F: [fast(x('스터디', '도서관')), fast(x('스터더', '도서간', 'CONFIRMED')), fast(x('스터디', '도서관'), x('치과', null)), fast(x('치카', null, 'CONFIRMED'))],
+    T1: Array(8).fill(T1_OK),
+  });
+  let clock = new Date('2026-10-29T21:00:00+09:00');
+  let t = 0;
+  const deps: CommitDeps = { userId: ME, userDb: db as unknown as Db, service: db as unknown as Db, llm: fake.client, model: 'gemini-3.5-flash-lite', now: () => clock, clock: () => (t += 40), sleep: async () => {} };
+  const s = (await handleVoiceSession(deps, { session_type: 'BEFORE_SLEEP', input_mode: 'TEXT', resume: true })) as VoiceSessionOut;
+  const sid = s.session_id as string;
+  const say = async (rev: number, text: string) => (await handleVoiceTurn(deps, { session_id: sid, rev, client_turn_id: cid(), text })) as VoiceTurnOut;
+
+  // 1) 스터디 → 카드 계산 → 저장
+  clock = new Date('2026-10-29T21:14:30+09:00');
+  const r1 = await say(s.rev, '내일 오후 2시에 도서관에서 스터디 약속이 있어');
+  assert.deepEqual([r1.next, r1.cards.map((c) => [c.id, c.status, c.at])], ['APP_TASKS', [['c1', 'NEEDS_ESTIMATE', '2026-10-29T21:14:30+09:00']]]);
+  const estimate = { alarms: [{ kind: 'PREPARE', at: '2026-10-30T12:30:00+09:00', enabled: true }, { kind: 'DEPARTURE', at: '2026-10-30T13:20:00+09:00', enabled: true }], level: 2, with_wake: false };
+  const r2 = (await handleVoiceTurn(deps, { session_id: sid, rev: r1.rev, client_turn_id: cid(), results: { cards: [{ id: 'c1', status: 'READY', estimate, error: null }], fixes: [] } })) as VoiceTurnOut;
+  const r3 = (await handleVoiceTurn(deps, { session_id: sid, rev: r2.rev, client_turn_id: cid(), card_action: { id: 'c1', action: 'SAVED', appointment_id: 'aaaaaaaa-0000-4000-8000-000000000002', alarms: estimate.alarms.map((a) => ({ ...a, level: 2 })) } })) as VoiceTurnOut;
+  assert.equal(r3.cards[0].status, 'SAVED');
+
+  // 2) 상관없는 말 — T2F가 앞 스터디를 글자를 틀리게 다시 뽑음 → 같은 날짜 · 시각 · 한 글자 차이라 새 카드 없음
+  clock = new Date('2026-10-29T21:16:42+09:00');
+  const r4 = await say(r3.rev, '오늘 수업도 듣고 팀플도 하느라 정말 피곤했어');
+  assert.deepEqual([r4.next, r4.cards.map((c) => c.id), r4.reply?.text], ['USER', ['c1'], T1_OK.reply]);
+
+  // 3) 같은 시각이어도 다른 일정은 새 카드 (같은 스터디를 또 말한 것은 그대로)
+  const r5 = await say(r4.rev, '내일 2시에 치과 예약도 있어');
+  assert.deepEqual(r5.cards.map((c) => [c.id, c.status, c.draft?.title]), [['c1', 'SAVED', '스터디'], ['c2', 'NEEDS_ESTIMATE', '치과']]);
+
+  // 4) [저장 안 함] 뒤 같은 일정을 글자만 틀리게 다시 뽑아도 되살아나지 않음 (장소를 다시 묻지 않음)
+  const r6 = (await handleVoiceTurn(deps, { session_id: sid, rev: r5.rev, client_turn_id: cid(), card_action: { id: 'c2', action: 'REJECTED' } })) as VoiceTurnOut;
+  const r7 = await say(r6.rev, '치과는 신경 안 써도 돼');
+  assert.deepEqual(r7.cards.map((c) => [c.id, c.status]), [['c1', 'SAVED'], ['c2', 'REJECTED']]);
+  assert.ok(!(rowOf(db, sid).server_state.events.at(-1)?.clarify ?? []).length);
+
+  // 5) 다시 열기(16:19 상황) — 새로 만들지 않고 그대로, 카드의 만든 때도 그대로
+  clock = new Date('2026-10-29T21:19:24+09:00');
+  const again = (await handleVoiceSession(deps, { session_type: 'BEFORE_SLEEP', input_mode: 'TEXT', resume: true })) as VoiceSessionOut;
+  assert.equal(again.session_id, sid);
+  assert.deepEqual(again.cards.map((c) => [c.id, c.status, c.at]), [['c1', 'SAVED', '2026-10-29T21:14:30+09:00'], ['c2', 'REJECTED', '2026-10-29T21:16:42+09:00']]);
+  assert.equal(fake.order.filter((p) => p === 'T2F').length, 4);
+});
+
+test('만든 때가 없는 예전 카드: 다시 열 때 처음 나온 처리 결과의 사용자 말 때로 채움 (11/9 웹 시험 — 저장한 스터디 · 거절한 스터더가 맨 끝에 붙던 것), 저장한 상태는 그대로', async () => {
+  const db = seed();
+  const { deps, sid } = await chat(db, [['안녕'], ['내일 오후 2시에 도서관에서 스터디 약속이 있어'], ['오늘 수업도 듣고 팀플도 하느라 정말 피곤했어']]);
+  const row = rowOf(db, sid);
+  const userAt = (db.rows('conversation_sessions').find((s) => s.session_id === sid) as { turns: { role: string; at: string }[] }).turns.filter((t) => t.role === 'user').map((t) => t.at);
+  // DB에 남은 모양 그대로: c1은 2번째 말 뒤 확인 대기(저장함), c2는 3번째 말 뒤 장소 되묻기(거절함), c3은 처리 결과에 없음 — 셋 다 at 없음
+  putCards(db, sid, [
+    { status: 'SAVED', appointment_id: 'ap-team', summary: '10/30(금) 14:00 스터디 · 도서관', draft: { title: '스터디', date: TOMORROW, time: '14:00', place: '도서관', importance: null, transport: null, repeat: [], items: [], alarms: { WAKE: true, PREPARE: true, DEPARTURE: true } } },
+    { status: 'REJECTED', summary: '10/30(금) 14:00 스터더 · 도서간', draft: { title: '스터더', date: TOMORROW, time: '14:00', place: '도서간', importance: null, transport: null, repeat: [], items: [], alarms: { WAKE: true, PREPARE: true, DEPARTURE: true } } },
+    { status: 'READY', summary: '' },
+  ]);
+  row.server_state.events = [
+    { after_turn: 3, applied: [], pending: [], rejected: [], clarify: ["'스터더' 장소 (카드의 [장소 고르기])"], alarms: [] },
+    { after_turn: 2, applied: [], pending: [{ id: 'c1', kind: 'APPOINTMENT', summary: '10/30(금) 14:00 스터디 · 도서관' }], rejected: [], clarify: [], alarms: [] },
+  ];
+  const s = (await handleVoiceSession({ ...deps, now: () => LATER }, { session_type: 'BEFORE_SLEEP', input_mode: 'TEXT', resume: true })) as VoiceSessionOut;
+  assert.deepEqual(s.cards.map((c) => [c.id, c.status, c.at]), [['c1', 'SAVED', userAt[1]], ['c2', 'REJECTED', userAt[2]], ['c3', 'READY', userAt[2]]]); // c3은 앞 카드 때
+  assert.equal(rowOf(db, sid).server_state.cards.every((c) => c.at === undefined), true); // 저장된 상태는 안 바꿈(응답에만)
+  // 만든 때가 있는 카드는 그대로
+  assert.equal(withCardTimes({ ...row.server_state, cards: [{ ...row.server_state.cards[0], at: '2026-10-29T21:00:00+09:00' }] }, [])[0].at, '2026-10-29T21:00:00+09:00');
+});
+
+test('23시 대화를 [완료] 없이 두고 자정 뒤 열면: 새 방 + 어제 방을 정리할 목록(uncommitted_session_ids)으로 알려 줌 — 정리하면 어제 기준일로 기록, 정리 뒤엔 다시 안 알림', async () => {
+  const db = seed();
+  const night = await chat(db, [['오늘 팀플 발표 끝냈어']], [eventsOf('팀플 발표를 끝냄')]); // 22:30, [완료] 안 함
+  db.now = AFTER_MIDNIGHT;
+  const late = await chat(db, [], [], [], AFTER_MIDNIGHT);
+  assert.notEqual(late.sid, night.sid); // 자정 뒤 새 방 (요구사항)
+  assert.deepEqual(late.session.uncommitted_session_ids, [night.sid]);
+  assert.equal(rowOf(db, night.sid).server_state.counts.user_turns, 1); // 어제 방 말은 그대로
+  // 앱이 정리 요청을 보냄 → 어제 기준일(10/29)로 저장
+  assert.equal((await commit({ ...night.deps, now: () => AFTER_MIDNIGHT }, night.sid)).status, 'DONE');
+  assert.equal(rowOf(db, night.sid).extracted_data.session.reference_date, REVIEW);
+  const again = (await handleVoiceSession({ ...late.deps, now: () => new Date('2026-10-30T00:50:00+09:00') }, { session_type: 'BEFORE_SLEEP', input_mode: 'TEXT', resume: true })) as VoiceSessionOut;
+  assert.deepEqual(again.uncommitted_session_ids, []);
+  // 같은 날 연 방 · 말 없는 방은 알리지 않음
+  assert.deepEqual(night.session.uncommitted_session_ids, []);
 });

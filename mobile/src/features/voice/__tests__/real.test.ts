@@ -693,6 +693,15 @@ describe('알람 바꾸기 · 알람 만들기 카드', () => {
 });
 
 describe('⑧ 실패 — 대화 · 카드는 남기고 다시 시도', () => {
+  it('분당 사용량(LLM_UNAVAILABLE · details.code RATE_LIMITED)이면 unavailable.rateLimited — 화면이 "요청이 몰렸어요"로 가름', async () => {
+    script = [session(), new EdgeError('LLM_UNAVAILABLE', { details: { code: 'RATE_LIMITED', scope: 'RPM', retry_after_s: 60 } })];
+    const c = await say('안녕');
+    expect(c.unavailable).toMatchObject({ code: 'LLM_UNAVAILABLE', canRetry: true, rateLimited: true });
+    resetVoiceState();
+    script = [session(), new EdgeError('LLM_UNAVAILABLE', { details: { code: 'UPSTREAM' } })];
+    expect((await say('안녕')).unavailable?.rateLimited).toBeUndefined();
+  });
+
   it('LLM_UNAVAILABLE: 말과 카드를 두고 unavailable, [다시 시도]는 같은 요청', async () => {
     script = [session(), new EdgeError('LLM_UNAVAILABLE', { details: { cards: [apptCard({ status: 'READY' })], fixes: [] } })];
     await getConversation();
@@ -915,6 +924,22 @@ describe('⑫ 저장됨 로컬 표시', () => {
     expect(await AsyncStorage.getAllKeys()).toHaveLength(1); // 서버가 모르는 동안 로컬 표시가 남음
     edge.mockClear();
   }
+
+  it('저장 뒤 알림 전 재시작했는데 기상 뒤라 같은 방의 다음 구간(s2)이 열림 → 앞 구간(s1) 표시를 s2로 옮겨 저장됨으로 복원, 일정은 다시 안 만들고 SAVED는 s2로', async () => {
+    await savedButNotTold();
+    resetVoiceState();
+    script = [
+      session({ session_id: 's2', resumed: true, rev: 1, prev_session_ids: ['s1'], cards: [apptCard({ status: 'READY' })] }), // 이어 받은 카드는 서버가 아직 READY로 앎
+      turn({ rev: 2, reply: null, cards: [apptCard({ status: 'SAVED' })] }),
+    ];
+    const c = await getConversation();
+    expect(c.cards[0]).toMatchObject({ id: 'c1', status: 'SAVED', appointmentId: 'ap1' });
+    expect(turnBodies()).toHaveLength(1);
+    expect(turnBodies()[0]).toMatchObject({ session_id: 's2', rev: 1, card_action: { id: 'c1', action: 'SAVED', appointment_id: 'ap1' } });
+    expect(await AsyncStorage.getAllKeys()).toEqual([]); // 앞 구간 표시는 정리, 지금 구간 표시는 서버가 받아 지움
+    await expect(saveCard('c1')).rejects.toThrow('이미 확인한 카드예요');
+    expect(mCreate).toHaveBeenCalledTimes(1);
+  });
 
   it('저장 뒤 알림 전 재시작 → 카드는 저장됨으로 복원, createAppointment는 총 1번, 서버에 SAVED만 다시 알리고 표시를 지움', async () => {
     await savedButNotTold();
@@ -1263,10 +1288,18 @@ describe('⑮ pending이 있을 때 카드 동작은 큐에서 기다림', () =>
   });
 });
 
-describe('⑯ [완료] 뒤 [대화 시작]은 새 대화 (L8 버그 2)', () => {
+describe('⑯ [완료] 뒤 같은 날 다시 열면 같은 대화 (하루 한 대화방)', () => {
   const sessionCalls = () => bodies().filter((b) => b.name === 'voice-session').map((b) => b.body.resume);
+  const restored = (rev: number) =>
+    session({
+      resumed: true,
+      rev,
+      turn_seq: 1,
+      messages: [{ role: 'ai', text: '첫 마디', at: at(21, 0).toISOString() }, { role: 'user', text: '안녕', at: at(21, 1).toISOString() }, { role: 'ai', text: '네, 알겠어요.', at: at(21, 1).toISOString() }],
+      cards: [apptCard({ status: 'SAVED', appointment_id: 'ap1' })],
+    });
 
-  it('완료 없이 다시 열면 그대로 이어지고(서버를 또 안 부름), 완료한 뒤 다시 열면 새 세션을 읽음', async () => {
+  it('완료 없이 다시 열면 그대로 이어지고(서버를 또 안 부름), 완료한 뒤 다시 열면 resume으로 같은 세션의 말 · 카드를 복원해 이어 말함', async () => {
     script = [session(), turn()];
     await getConversation();
     await say('안녕');
@@ -1274,31 +1307,53 @@ describe('⑯ [완료] 뒤 [대화 시작]은 새 대화 (L8 버그 2)', () => {
     expect(edge).toHaveBeenCalledTimes(2);
 
     await finishConversation();
-    script = [session({ session_id: 's2', rev: 1, messages: [{ role: 'ai', text: '새 첫 마디', at: at(22, 0).toISOString() }] })];
+    script = [restored(3)];
     const c = await getConversation();
-    expect(sessionCalls()).toEqual([true, true]);
-    expect(c.messages.map((m) => m.text)).toEqual(['새 첫 마디']);
-    script = [turn()];
-    await say('새 대화 말');
-    expect(turnBodies()[1]).toMatchObject({ session_id: 's2' });
+    expect(sessionCalls()).toEqual([true, true]); // resume:false로 새 세션을 청하지 않음
+    expect(c.messages.map((m) => (m.who === 'card' ? `card:${m.cardId}` : m.text))).toEqual(['첫 마디', '안녕', '네, 알겠어요.', 'card:c1']); // 말 + 일정 카드 자리
+    expect(c.cards.map((k) => [k.id, k.status])).toEqual([['c1', 'SAVED']]); // 저장한 카드는 저장됨으로 — 다시 저장하지 않음
+    expect(mCreate).not.toHaveBeenCalled();
+    script = [turn({ rev: 4 })];
+    await say('이어서 하는 말');
+    expect(turnBodies()[1]).toMatchObject({ session_id: 's1', rev: 3, text: '이어서 하는 말' });
   });
 
-  it('서버 resume이 완료한 세션을 또 돌려주면 무시하고 resume:false로 한 번 더 부름 (앱을 다시 열어도)', async () => {
+  it('완료 뒤 다시 열어 음성(Live) 차례도 같은 세션에 남김', async () => {
     script = [session(), turn()];
     await getConversation();
     await say('안녕');
     await finishConversation();
-    resetVoiceState(); // 앱을 껐다 켬 — 메모리는 비고 완료 표시(저장소)만 남음
+    script = [restored(3), turn({ rev: 4, reply: null })];
+    const r = await sayVoice('내일 우산 챙겨야 해', '네, 우산 챙기세요.');
+    expect(r.kept).toBe(true);
+    expect(turnBodies()[1]).toMatchObject({ session_id: 's1', rev: 3, text: '내일 우산 챙겨야 해', spoken_reply: '네, 우산 챙기세요.' });
+  });
+
+  it('업데이트 전에 [완료] 표시가 적힌 세션을 resume이 돌려주면 무시하고 resume:false로 새 세션 (옛 세션을 합치지 않음)', async () => {
+    await AsyncStorage.setItem('respec.voice.finished.user-1', JSON.stringify(['s1']));
     script = [session({ resumed: true, rev: 3 }), session({ session_id: 's2', rev: 1 })];
     const c = await getConversation();
-    expect(sessionCalls()).toEqual([true, true, false]);
+    expect(sessionCalls()).toEqual([true, false]);
     expect(c.messages).toHaveLength(1);
     script = [turn()];
     await say('hi');
-    expect(turnBodies()[1]).toMatchObject({ session_id: 's2' });
+    expect(turnBodies()[0]).toMatchObject({ session_id: 's2' });
   });
 
-  it('한 마디도 안 한 대화를 완료하면 끝남으로 안 적어, 다시 열면 같은 세션을 이어 받음 (한도를 안 닳게)', async () => {
+  it('[완료]는 완료 표시를 적지 않음 — 앱을 껐다 켜도 같은 세션을 그대로 받음', async () => {
+    script = [session(), turn()];
+    await getConversation();
+    await say('안녕');
+    await finishConversation();
+    resetVoiceState(); // 앱을 껐다 켬
+    expect(await AsyncStorage.getItem('respec.voice.finished.user-1')).toBeNull();
+    script = [restored(3)];
+    const c = await getConversation();
+    expect(sessionCalls()).toEqual([true, true]);
+    expect(c.messages.filter((m) => m.who !== 'card')).toHaveLength(3);
+  });
+
+  it('한 마디도 안 한 대화를 완료하면 정리할 것이 없고, 다시 열면 같은 세션을 이어 받음', async () => {
     script = [session()];
     await getConversation();
     await finishConversation();
@@ -1308,7 +1363,7 @@ describe('⑯ [완료] 뒤 [대화 시작]은 새 대화 (L8 버그 2)', () => {
     expect(sessionCalls()).toEqual([true, true]);
   });
 
-  it('완료 뒤 새 대화 열기가 실패하면 옛 세션이 안 남아, [다시 시도]가 새 세션을 읽고 말은 옛 세션으로 가지 않음', async () => {
+  it('완료 뒤 다시 열기가 실패하면 화면 상태가 비어 말이 가지 않고, [다시 시도]가 서버에서 다시 읽음', async () => {
     script = [session(), turn()];
     await getConversation();
     await say('안녕');
@@ -1317,12 +1372,71 @@ describe('⑯ [완료] 뒤 [대화 시작]은 새 대화 (L8 버그 2)', () => {
     const failed = await getConversation();
     expect(failed.unavailable).not.toBeNull();
     expect(failed.messages).toEqual([]);
-    script = [session({ session_id: 's2', rev: 1 })];
+    script = [restored(3)];
     const again = await retry();
     expect(again.unavailable).toBeNull();
-    script = [turn()];
+    expect(again.messages.filter((m) => m.who !== 'card')).toHaveLength(3);
+    script = [turn({ rev: 4 })];
     await say('새 말');
+    expect(turnBodies()[1]).toMatchObject({ session_id: 's1', rev: 3 });
+  });
+
+  it('날짜가 바뀌어 서버가 새 세션을 주면 그 세션으로 (앞 대화 말 · 카드는 남지 않음)', async () => {
+    script = [session(), turn()];
+    await getConversation();
+    await say('안녕');
+    await finishConversation();
+    script = [session({ session_id: 's2', rev: 1, messages: [{ role: 'ai', text: '새 첫 마디', at: at(22, 0).toISOString() }] })];
+    const c = await getConversation();
+    expect(c.messages.map((m) => m.text)).toEqual(['새 첫 마디']);
+    script = [turn()];
+    await say('다음 날 말');
     expect(turnBodies()[1]).toMatchObject({ session_id: 's2' });
+  });
+
+  it('다시 열면 카드는 서버가 준 만든 때(at) 자리에 놓임 — 읽은 때로 맨 끝에 붙지 않음 (만든 때가 없는 예전 카드는 읽은 때)', async () => {
+    script = [
+      session({
+        resumed: true,
+        rev: 5,
+        messages: [
+          { role: 'ai', text: '첫 마디', at: at(21, 0).toISOString() },
+          { role: 'user', text: '내일 2시 스터디', at: at(21, 14).toISOString() },
+          { role: 'ai', text: '저장했어요.', at: at(21, 15).toISOString() },
+          { role: 'user', text: '오늘 피곤했어', at: at(21, 16).toISOString() },
+        ],
+        cards: [apptCard({ id: 'c1', status: 'SAVED', appointment_id: 'ap1', at: at(21, 14).toISOString() }), apptCard({ id: 'c2', status: 'READY' })],
+      }),
+    ];
+    const c = await getConversation();
+    expect(c.messages.map((m) => (m.who === 'card' ? m.cardId : m.text))).toEqual(['첫 마디', '내일 2시 스터디', 'c1', '저장했어요.', '오늘 피곤했어', 'c2']);
+    expect(c.messages[2].at).toEqual(at(21, 14));
+  });
+
+  it('다시 열 때 [저장 안 함]한 카드는 대화에 다시 그리지 않음 — 저장한 카드 · 처리 안 한 카드는 제자리에 그대로, 말은 하나도 안 빠짐', async () => {
+    script = [
+      session({
+        resumed: true,
+        rev: 7,
+        messages: [
+          { role: 'ai', text: '첫 마디', at: at(21, 0).toISOString() },
+          { role: 'user', text: '내일 2시 스터디', at: at(21, 14).toISOString() },
+          { role: 'user', text: '오늘 피곤했어', at: at(21, 16).toISOString() },
+          { role: 'user', text: '내일 2시 치과', at: at(21, 18).toISOString() },
+        ],
+        cards: [
+          apptCard({ id: 'c1', status: 'SAVED', appointment_id: 'ap1', at: at(21, 14).toISOString() }),
+          apptCard({ id: 'c2', status: 'REJECTED', at: at(21, 16).toISOString() }),
+          apptCard({ id: 'c3', status: 'READY', at: at(21, 18).toISOString() }),
+        ],
+      }),
+    ];
+    const c = await getConversation();
+    expect(c.messages.map((m) => (m.who === 'card' ? m.cardId : m.text))).toEqual(['첫 마디', '내일 2시 스터디', 'c1', '오늘 피곤했어', '내일 2시 치과', 'c3']);
+    expect(c.cards.map((k) => [k.id, k.status])).toEqual([['c1', 'SAVED'], ['c2', 'REJECTED'], ['c3', 'READY']]); // 상태는 그대로 — c3은 나중에 저장 · 거절 가능
+    await finishConversation();
+    await flushCommits('user-1');
+    expect(commitBodies().map((b) => b.body)).toEqual([{ session_id: 's1', rejected_cards: ['c2'] }]);
   });
 
   it('완료하지 않은 세션을 서버가 이어 주면 그대로 씀 (같은 밤 resume)', async () => {
@@ -1331,7 +1445,7 @@ describe('⑯ [완료] 뒤 [대화 시작]은 새 대화 (L8 버그 2)', () => {
     expect(sessionCalls()).toEqual([true]);
   });
 
-  it('완료할 때 못 보낸 카드 알림이 큐에 있어도 완료는 되고, 다음 열기는 새 세션', async () => {
+  it('완료할 때 못 보낸 카드 알림이 큐에 있어도 완료는 되고, 다음 열기는 서버에서 다시 읽음', async () => {
     script = [session(), turn({ next: 'APP_TASKS', reply: null, cards: [apptCard()] }), turn({ rev: 3, cards: [apptCard({ status: 'READY' })] })];
     await getConversation();
     await say('발표 있어');
@@ -1386,6 +1500,41 @@ describe('⑰ [완료] 뒤 대화 끝 정리(voice-commit)', () => {
     await flushCommits('user-1');
     expect(commitBodies().map((c) => c.body)).toEqual([{ session_id: 's1' }, { session_id: 's1' }, { session_id: 's1' }]);
     expect(await AsyncStorage.getItem(commitKey)).toBeNull();
+  });
+
+  it('정리하는 사이 새 말이 들어왔으면(STALE) 남겨 두고 다음 열기 때 같은 세션으로 다시 보냄', async () => {
+    script = [session(), turn()];
+    await getConversation();
+    await say('안녕');
+    commitReplies = [{ status: 'STALE' }];
+    await finishConversation();
+    await flushCommits('user-1');
+    expect(JSON.parse((await AsyncStorage.getItem(commitKey)) ?? '[]')).toEqual([{ sessionId: 's1', rejected: [] }]);
+    await flushCommits('user-1');
+    expect(commitBodies().map((c) => c.body)).toEqual([{ session_id: 's1' }, { session_id: 's1' }]);
+    expect(await AsyncStorage.getItem(commitKey)).toBeNull();
+  });
+
+  it('같은 날 이어 말하고 다시 [완료]하면 같은 세션으로 정리를 한 번 더 보냄 (서버가 새 말까지 다시 정리)', async () => {
+    script = [session(), turn()];
+    await getConversation();
+    await say('안녕');
+    await finishConversation();
+    await flushCommits('user-1');
+    script = [session({ resumed: true, rev: 3, turn_seq: 1 }), turn({ rev: 4 })];
+    await say('저녁엔 떡볶이 먹었어');
+    await finishConversation();
+    await flushCommits('user-1');
+    expect(commitBodies().map((c) => c.body)).toEqual([{ session_id: 's1' }, { session_id: 's1' }]);
+  });
+
+  it('자정 뒤 열 때 서버가 알린 어제 방(uncommitted_session_ids)을 정리 목록에 넣어 보냄 — 이미 목록에 있으면 [저장 안 함] 카드 목록을 덮지 않음', async () => {
+    await AsyncStorage.setItem(commitKey, JSON.stringify([{ sessionId: 'old-2', rejected: ['c3'] }]));
+    script = [session({ session_id: 's2', uncommitted_session_ids: ['old-1', 'old-2'] })];
+    await getConversation(); // 열 때 정리를 바로 보냄
+    await flushCommits('user-1');
+    expect(commitBodies().map((c) => c.body)).toEqual([{ session_id: 'old-2', rejected_cards: ['c3'] }, { session_id: 'old-1' }]);
+    expect(await AsyncStorage.getItem(commitKey)).toBeNull(); // DONE → 목록에서 지움
   });
 
   it('다시 해도 안 되는 오류(NOT_FOUND)면 목록에서 지움 — 끝없이 다시 보내지 않음', async () => {

@@ -63,11 +63,11 @@ export function deleteMode(args: { recurring: boolean; group: boolean; scope: Ed
 
 // 약속을 고치거나 지울 수 있는 사람. 개인 약속은 RLS가 이미 만든 사람에게만 보여 주고, 공동 약속은 참여 중인 그룹원도 RLS로 고칠 수 있어서 코드로 막음
 //   NOT_VISIBLE = 못 찾음(없거나 남의 개인 약속), NOT_CREATOR = 공동 약속의 참여만 한 사람(빠지기만 가능)
-//   만든 사람이 비어 있는(탈퇴한) 공동 약속은 그 약속에 참여한 사람이 고침 — 지우기는 아님 (9장 9-아 · 9-카, DB 정책 appointments_update와 같은 규칙)
-export function editorVerdict(args: { row: { creator_id: string | null; group_id: string | null } | null; userId: string; participating?: boolean; verb?: 'EDIT' | 'DELETE' }): 'OK' | 'NOT_VISIBLE' | 'NOT_CREATOR' {
+//   만든 사람이 비어 있는(탈퇴한) 공동 약속은 그 약속에 참여한 사람이 고치고 지움 (9장 9-아 · 9-카, DB 정책 appointments_update · appointments_delete_creator와 같은 규칙 — 지우기는 탐색 시험 X-APPT-01 뒤에 열림)
+export function editorVerdict(args: { row: { creator_id: string | null; group_id: string | null } | null; userId: string; participating?: boolean }): 'OK' | 'NOT_VISIBLE' | 'NOT_CREATOR' {
   if (!args.row) return 'NOT_VISIBLE';
   if (args.row.creator_id === args.userId) return 'OK';
-  if (args.row.creator_id == null && args.row.group_id != null && args.participating && args.verb !== 'DELETE') return 'OK';
+  if (args.row.creator_id == null && args.row.group_id != null && args.participating) return 'OK';
   return 'NOT_CREATOR';
 }
 
