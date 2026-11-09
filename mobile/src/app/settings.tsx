@@ -20,6 +20,8 @@ import { openAppNotificationSettings, turnOnNotifications, usePermissions } from
 import { homePatchOf } from '@/features/onboarding/home';
 import { saveProfileFields } from '@/features/profile/api';
 import { EditRow } from '@/features/profile/components/EditRow';
+import { PrepareMlSurveyEditor } from '@/features/profile/components/PrepareMlSurveyEditor';
+import { EMPTY_PREPARE_ML_SURVEY, prepareMlSurveySummary } from '@/features/profile/prepareMlSurvey';
 import { ChangeHandleSheet } from '@/features/profile/components/ChangeHandleSheet';
 import { NicknameEditor, PrepareEditor, SleepEditor } from '@/features/profile/components/ProfileEditors';
 import { prepareValuesOf } from '@/features/profile/edit';
@@ -38,7 +40,7 @@ import { colors, size } from '@/theme';
 const PROVIDER_NAME: Record<string, string> = { kakao: '카카오', google: 'Google' };
 
 // 열려 있는 편집 시트 — 집은 지도 고르기 시트(placeOpen)가 따로 맡음
-type Editing = 'nickname' | 'handle' | 'sleep' | 'prepare' | null;
+type Editing = 'nickname' | 'handle' | 'sleep' | 'prepare' | 'prepareMlSurvey' | null;
 
 // 설정 — 계정 · 아침 준비 기본값 · 알람 · 로그아웃 · 개발(데이터 모드)
 // 값 줄을 누르면 편집 시트가 열리고 [저장]하면 profiles에 씀 (실데이터 + 로그인일 때만, 가짜 모드는 보기만)
@@ -79,6 +81,16 @@ export default function SettingsScreen() {
 
   // 계정 삭제 (친구 12장) — 영향 요약을 읽어 확인 두 번, 유예 없이 바로. 확인 창은 한 번에 하나 가드(run) 밖에서
   //   서버가 먼저 지우고(실패하면 이 기기는 그대로, 다시 누르면 이어서 끝냄) 성공하거나 로그인 거절(AUTH_REQUIRED = 이미 지워짐)이면 이 기기를 비우고 로그아웃 → 로그인 화면
+  const revokeMlSurvey = async () => {
+    if (!(await confirm({
+      title: '예측용 프로필 정보를 삭제할까요?',
+      message: '입력한 만 나이·학교·경제활동 정보와 동의를 삭제합니다. 기존 알람에는 영향을 주지 않아요.',
+      okLabel: '삭제',
+      destructive: true,
+    }))) return;
+    await saveEdit(EMPTY_PREPARE_ML_SURVEY);
+  };
+
   const deleteAccount = async () => {
     setError(null);
     let summary;
@@ -134,6 +146,19 @@ export default function SettingsScreen() {
             <EditRow label="여유 시간" value={`${profile.default_buffer_minutes}분`} onPress={open('prepare')} />
             <EditRow label="이동 수단" value={TRANSPORT_NAME[profile.default_transport]} onPress={open('prepare')} />
             <EditRow label="집(출발지)" value={profile.home_name ?? '정하지 않았어요'} onPress={canEdit ? () => setPlaceOpen(true) : undefined} />
+          </Card>
+
+          <SectionHeader title="준비시간 예측 연구정보 (선택)" />
+          <Card>
+            <EditRow
+              first
+              label="사용자 정보"
+              value={prepareMlSurveySummary(profile)}
+              onPress={open('prepareMlSurvey')}
+            />
+            <Text variant="small" tone="sub">
+              선택적으로 수집하며, 현재 CatBoost 예측에는 사용되지 않아요.
+            </Text>
           </Card>
 
           <SectionHeader title="알람" />
@@ -272,6 +297,14 @@ export default function SettingsScreen() {
           </Sheet>
           <Sheet visible={editing === 'prepare'} onClose={closeEditor} title="아침 준비">
             <PrepareEditor initial={prepareValuesOf(profile)} onSave={saveEdit} onCancel={closeEditor} />
+          </Sheet>
+          <Sheet visible={editing === 'prepareMlSurvey'} onClose={closeEditor} title="준비시간 예측 연구정보">
+            <PrepareMlSurveyEditor
+              initial={profile}
+              onSave={saveEdit}
+              onRevoke={revokeMlSurvey}
+              onCancel={closeEditor}
+            />
           </Sheet>
         </>
       ) : null}
