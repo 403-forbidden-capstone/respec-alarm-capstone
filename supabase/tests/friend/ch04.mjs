@@ -525,6 +525,7 @@ export default async function ch04({ q, as, su, check, expectErr, PGlite, AUTH_S
     await report(OR, 'USER', OU, 'NICKNAME', '이상한 닉네임');
     await report(OR, 'GROUP', OG, 'GROUP_NAME', null);
     const rid = await reportIdOf(OR, OU);
+    await q(`update public.reports set created_at = now() - interval '2 hours' where report_id = $1`, [rid]);   // 시험 전체가 한 트랜잭션이라 now()가 같으므로 순서를 가르게 오래된 줄을 만듦
     const noList = [await listR(ON), await listR(OR), await listR(OU)];
     const noResolve = [await resolveR(ON, rid, 'HIDE'), await resolveR(OR, rid, 'HIDE'), await resolveR(OU, rid, 'DISMISS')];
     const untouched = { u: await nicknameOf(OU), row: await reportRow(rid) };
@@ -559,6 +560,7 @@ export default async function ch04({ q, as, su, check, expectErr, PGlite, AUTH_S
       && group.target_group_name === '차단그룹' && group.reason === 'GROUP_NAME' && group.target_user_id === null && group.target_nickname === null
       && cols === 'evidence,handled_at,handled_by,handled_by_nickname,note,reason,report_id,reporter_id,reporter_nickname,resolution,status,target_group_id,target_group_name,target_nickname,target_profile_image_url,target_type,target_user_id,created_at'.split(',').sort().join()
       && rows.every((x, i) => i === 0 || new Date(rows[i - 1].created_at) >= new Date(x.created_at))
+      && rows.findIndex((x) => x === group) < rows.findIndex((x) => x === user) && new Date(group.created_at) > new Date(user.created_at)       // 최신 순
       && sendsAfter === sendsBefore ? true : { r, cols, sendsBefore, sendsAfter };
   });
 
