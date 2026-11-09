@@ -88,3 +88,10 @@ node --experimental-strip-types --test supabase/functions/_shared/prepare-ml.tes
 - 배포 순서 **반드시**: DB 마이그레이션/접근 통제 확인 → 앱 배포. 데이터베이스 변경 전 앱을 배포하면 새 컬럼을 SELECT할 때 프로필 조회에 실패한다.
 - 작업 브랜치의 UI와 DB 마이그레이션은 GitHub에 커밋만 했으며 실제 환경에 적용하지 않았다.
 - QA: `cd mobile && npx tsc --noEmit`, `cd mobile && npx jest --runInBand src/features/profile/__tests__/prepareMlSurvey.test.ts`, Edge `node@24 --test` 회귀 테스트를 실행한다.
+
+## 최종 검증 게이트 (2026-11-10, 운영 배포 전)
+- PGlite `supabase/tests/npm test` 결과: 사용자가 503/503 통과 확인. 이것은 Supabase 호스팅 DB의 적용 여부가 아님.
+- `supabase/functions/_shared/commit.test.ts`에 C1/W4/P80 미리보기 → `persistAppointment` → FakeDb 알람·참여정보 저장/재조회 대조 테스트 추가. 아직 실행 결과 미확인.
+- PR #410은 `main`보다 새 커밋이 있으면 다시 병합·회귀 검사해야 함. 머지 전 CI/리뷰 및 migration ordering 확인.
+- **여전히 불가**: 코드북/개인정보처리 문구 검증 없이 추론 플래그 활성화; 마이그레이션 전 새 앱 프로필 SELECT 배포; 본인 계정의 실제 알람을 테스트 도중 무단 생성/삭제.
+- 실제 Supabase 통합 검증은 별도 테스트 환경 또는 명시적으로 허가된 시험 계정에서만: 선택형 응답 저장/재조회/철회, `alarm-suggest`와 `alarm-commit` 호출, 반환된 `appointment_id`/ `participant_id`를 기준으로 DB `alarms` 및 `appointment_participants`를 읽어 UTC 시각 비교. 테스트 후 명시적 정리.
