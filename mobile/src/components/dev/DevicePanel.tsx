@@ -108,13 +108,13 @@ export function DevicePanel({ device, scale, onDevice, collapsed, onToggle, scen
   const { mode } = useMode(); // 화면 목록은 지금 모드에서 열리는 줄만
   const { session } = useAuth();
   const pathname = usePathname();
-  const { targets, loading } = useScreenTargets(mode === 'real' && session != null, pathname);
+  const { targets, status } = useScreenTargets(mode === 'real' ? (session?.user.id ?? null) : null, pathname);
   const [query, setQuery] = useState('');
   const [sectionOpen, setSectionOpen] = useState<Record<string, boolean>>({}); // 직접 접거나 편 절 (없으면 지금 화면이 속한 절만 펼침)
   const [groupOpen, setGroupOpen] = useState<Record<string, boolean>>({}); // 온보딩 같은 접힌 줄
   const [toolsOpen, setToolsOpen] = useState(readToolsOpen);
 
-  const sections = useMemo(() => panelSections(mode, targets, loading), [mode, targets, loading]);
+  const sections = useMemo(() => panelSections(mode, targets, status), [mode, targets, status]);
   const shown = useMemo(() => filterSections(sections, query), [sections, query]);
   const current = useMemo(() => currentSectionTitle(sections, pathname), [sections, pathname]);
   const filtering = query.trim().length > 0;
@@ -132,10 +132,8 @@ export function DevicePanel({ device, scale, onDevice, collapsed, onToggle, scen
   }
 
   const toggleTools = () => {
-    setToolsOpen((open) => {
-      writeToolsOpen(!open);
-      return !open;
-    });
+    writeToolsOpen(!toolsOpen);
+    setToolsOpen(!toolsOpen);
   };
 
   return (

@@ -11,25 +11,32 @@ export const EMPTY_TARGETS: ScreenTargets = { friendId: null, groupId: null, app
 const TARGET_KEY: Record<TargetNeed, keyof ScreenTargets> = { friend: 'friendId', group: 'groupId', appointment: 'appointmentId', alarm: 'alarmId' };
 const MISSING_TEXT: Record<TargetNeed, string> = { friend: '(친구 없음)', group: '(그룹 없음)', appointment: '(일정 없음)', alarm: '(다음 알람 없음)' };
 const LOADING_TEXT = '(불러오는 중)';
+const SIGNED_OUT_TEXT = '(로그인 필요)';
+
+// 실데이터 id를 읽는 상태 — 읽는 중이거나 로그인 전이면 이유 글자가 다름
+export type TargetStatus = 'ready' | 'loading' | 'signedOut';
 
 // 패널이 그리는 한 줄 — missing이 있으면 흐리게 하고 누를 수 없음
 export type ResolvedRow = { row: ScreenRow; name: string; href: Href; missing: string | null };
 export type PanelSection = { title: string; issue: string; rows: ResolvedRow[] };
 
 // 실데이터면 가짜 id 줄을 내 첫 친구 · 그룹 · 다음 알람으로 바꿈. 없으면 missing(이유 글자), 읽는 중이면 '(불러오는 중)'
-export function resolveRow(row: ScreenRow, mode: DataMode, targets: ScreenTargets, loading = false): ResolvedRow {
+export function resolveRow(row: ScreenRow, mode: DataMode, targets: ScreenTargets, status: TargetStatus = 'ready'): ResolvedRow {
   if (mode !== 'real' || !row.real) return { row, name: row.name, href: row.href, missing: null };
   const name = row.real.name ?? row.name;
   const lacking = row.real.needs.find((need) => !targets[TARGET_KEY[need]]);
-  if (lacking) return { row, name, href: row.href, missing: loading ? LOADING_TEXT : MISSING_TEXT[lacking] };
+  if (lacking) {
+    const missing = status === 'loading' ? LOADING_TEXT : status === 'signedOut' ? SIGNED_OUT_TEXT : MISSING_TEXT[lacking];
+    return { row, name, href: row.href, missing };
+  }
   return { row, name, href: row.real.href(targets), missing: null };
 }
 
-export function panelSections(mode: DataMode, targets: ScreenTargets, loading = false): PanelSection[] {
+export function panelSections(mode: DataMode, targets: ScreenTargets, status: TargetStatus = 'ready'): PanelSection[] {
   return sectionsFor(mode).map((section) => ({
     title: section.title,
     issue: section.issue,
-    rows: section.rows.map((row) => resolveRow(row, mode, targets, loading)),
+    rows: section.rows.map((row) => resolveRow(row, mode, targets, status)),
   }));
 }
 
@@ -64,9 +71,20 @@ export function pathMatches(href: Href, pathname: string): boolean {
   return new RegExp(`^${pattern}/?$`).test(pathname);
 }
 
-// 지금 열린 화면이 속한 절 이름 (없으면 null). 같은 주소가 여러 절에 있으면 앞 절
+// 주소 틀이 얼마나 구체적인지 — [id] 자리가 아닌 마디 수 ('/alarm/changed' 2 > '/alarm/[id]' 1)
+const specificity = (href: Href) => hrefPath(href).split('/').filter((seg) => seg && !/^\[.*\]$/.test(seg)).length;
+
+// 지금 열린 화면이 속한 절 이름 (없으면 null). 맞는 줄 중 주소 틀이 가장 구체적인 줄의 절, 같으면 앞 절
 export function currentSectionTitle(sections: readonly PanelSection[], pathname: string): string | null {
-  return sections.find((section) => section.rows.some((r) => pathMatches(r.href, pathname)))?.title ?? null;
+  let best: { title: string; score: number } | null = null;
+  for (const section of sections) {
+    for (const r of section.rows) {
+      if (!pathMatches(r.href, pathname)) continue;
+      const score = specificity(r.href);
+      if (!best || score > best.score) best = { title: section.title, score };
+    }
+  }
+  return best?.title ?? null;
 }
 
 // 온보딩 단계처럼 `group`이 같은 줄이 이어지면 한 덩어리로 (패널이 한 줄로 접어 보임). 나머지는 그대로

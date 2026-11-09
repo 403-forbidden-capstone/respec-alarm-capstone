@@ -29,7 +29,8 @@ describe('실데이터에서 가짜 id 줄 채우기 (resolveRow)', () => {
 
   it('친구가 없으면 흐리게 — 이유 글자, 읽는 중이면 불러오는 중', () => {
     expect(resolveRow(friendRow, 'real', EMPTY_TARGETS).missing).toBe('(친구 없음)');
-    expect(resolveRow(friendRow, 'real', EMPTY_TARGETS, true).missing).toBe('(불러오는 중)');
+    expect(resolveRow(friendRow, 'real', EMPTY_TARGETS, 'loading').missing).toBe('(불러오는 중)');
+    expect(resolveRow(friendRow, 'real', EMPTY_TARGETS, 'signedOut').missing).toBe('(로그인 필요)');
   });
 
   it('필요한 것이 둘이면 모두 있어야 열림 (그룹원 줄 = 그룹 + 친구)', () => {
@@ -123,6 +124,10 @@ describe('지금 화면이 속한 절 (currentSectionTitle · pathMatches)', () 
     expect(currentSectionTitle(sections, '/alarm/a2')).toBe('알람');
     expect(currentSectionTitle(sections, '/groups/cap')).toBe('친구 · 그룹');
     expect(currentSectionTitle(sections, '/blocks')).toBe('친구 · 그룹');
+    // 같은 틀에 맞는 줄이 여럿이면 더 구체적인 주소('/alarm/changed')가 이김 — '/alarm/[id]'가 아니라 친구 · 그룹 절
+    expect(currentSectionTitle(sections, '/alarm/changed')).toBe('친구 · 그룹');
+    // 같은 주소가 두 절에 있으면(새 일정 · 새 공동 약속) 앞 절
+    expect(currentSectionTitle(sections, '/schedule/new')).toBe('알람');
     expect(currentSectionTitle(sections, '/records')).toBe('기록 · 제안');
     expect(currentSectionTitle(sections, '/nowhere')).toBeNull();
   });
