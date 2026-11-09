@@ -164,15 +164,38 @@ const MEETING = ['decision_comments', 'decision_votes', 'decision_states'];
 //   reports = 친구 4장 (신고, 넣기는 DB 함수로만 · 읽기는 운영 화면 몫) — friend/ch04.mjs에서 따로 확인
 //   push_sends = 친구 8장 (깨우기 · 미확인 친구 알림 보낸 기록, DB 함수로만) — friend/ch08.mjs에서 따로 확인
 //   team_members = 친구 4장 꼬리 (운영 화면을 열 수 있는 팀원 목록, 추가는 서버 키로) — friend/ch04.mjs에서 따로 확인
-const SERVER_ONLY = ['roll_attempts', 'rate_limit_events', 'friend_links', 'reports', 'push_tickets', 'push_sends', 'team_members'];
+const SERVER_ONLY = ['roll_attempts', 'rate_limit_events', 'friend_links', 'reports', 'push_tickets', 'push_sends', 'team_members', 'prepare_ml_verified_profiles'];
 
-await check('모든 public 테이블(앱 30개 — 서버 전용 7개 포함 + 회의 도구 3개)에 RLS가 켜져 있음', async () => {
+await check('모든 public 테이블(앱 31개 — 서버 전용 8개 포함 + 회의 도구 3개)에 RLS가 켜져 있음', async () => {
   const r = await q(`select c.relname, c.relrowsecurity from pg_class c join pg_namespace n on n.oid = c.relnamespace
                      where n.nspname = 'public' and c.relkind = 'r' order by 1`);
   const off = r.filter((x) => !x.relrowsecurity).map((x) => x.relname);
   const app = r.filter((x) => !MEETING.includes(x.relname)).length;
-  return app === 30 && r.length === 33 && off.length === 0 ? true : { count: r.length, app, off };
+  return app === 31 && r.length === 34 && off.length === 0 ? true : { count: r.length, app, off };
 });
+
+await check('검증된 ML 프로필: RLS 켜짐, 사용자 접근 차단, 서비스 역할만 접근 허용', async () => {
+  const r = await q(`select
+    (select relrowsecurity from pg_class where oid='public.prepare_ml_verified_profiles'::regclass) as rls,
+    has_table_privilege('anon', 'public.prepare_ml_verified_profiles', 'select') as anon_read,
+    has_table_privilege('authenticated', 'public.prepare_ml_verified_profiles', 'select') as client_read,
+    has_table_privilege('authenticated', 'public.prepare_ml_verified_profiles', 'insert') as client_insert,
+    has_table_privilege('authenticated', 'public.prepare_ml_verified_profiles', 'update') as client_update,
+    has_table_privilege('authenticated', 'public.prepare_ml_verified_profiles', 'delete') as client_delete,
+    has_table_privilege('service_role', 'public.prepare_ml_verified_profiles', 'select') as server_read,
+    has_table_privilege('service_role', 'public.prepare_ml_verified_profiles', 'insert') as server_insert`);
+  const x = r[0];
+  return x.rls === true && !x.anon_read && !x.client_read && !x.client_insert &&
+    !x.client_update && !x.client_delete && x.server_read && x.server_insert ? true : x;
+});
+
+await check('선택형 ML 자가응답 컬럼: 모두 선택적이고 신뢰 코드 표와 분리됨', async () => {
+  const rows = await q(`select column_name, is_nullable from information_schema.columns
+                         where table_schema='public' and table_name='profiles'
+                           and column_name in ('ml_age_years','ml_school_status','ml_work_status','ml_profile_consented_at')`);
+  return rows.length === 4 && rows.every((x) => x.is_nullable === 'YES') ? true : rows;
+});
+
 await check('모든 앱 테이블에 정책이 있고(서버 전용 표 제외) anon용 정책은 없음', async () => {
   const r = await q(`select c.relname, count(p.polname) as n,
                        bool_or(p.polroles @> array['anon'::regrole::oid]) as has_anon
