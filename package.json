@@ -3,6 +3,6 @@
   "private": true,
   "description": "Cloudflare 웹 미리보기 빌드 입구. 앱은 mobile/에 있고, 레포 맨 위에서 도는 빌드 규칙이 이 스크립트로 들어감",
   "scripts": {
-    "build:web": "cd mobile && npm ci && set -a && . ../preview.env && set +a && npm run build:web"
+    "build:web": "cd mobile && npm ci && npm run build:web"
   }
 }
