@@ -81,6 +81,13 @@ describe('받았을 때 폰 알람을 서버와 맞춰야 하는지', () => {
     expect(needsAlarmSync({ ...d, change: 'CHANGED', needsConfirm: true }, ME)).toBe(false);
   });
 
+  it('조용한 데이터 푸시(알림을 끈 멤버 · 차단 쌍, silent)도 같은 규칙으로 맞춤 — 문구 없이 data만 와도 폰 알람은 서버와 맞춰야 함', () => {
+    const d = { ...base, kind: 'GROUP_APPT_CHANGED', groupId: G, appointmentId: 'ap1', silent: true };
+    expect(needsAlarmSync({ ...d, change: 'CHANGED', needsConfirm: false }, ME)).toBe(true);
+    expect(needsAlarmSync({ ...d, change: 'CANCELED' }, ME)).toBe(true);
+    expect(needsAlarmSync({ ...d, silent: 'true', change: 'CHANGED' }, ME)).toBe(true);
+  });
+
   it('다른 종류 · 다른 계정 · 로그인 전은 안 맞춤', () => {
     expect(needsAlarmSync({ ...base, kind: 'WAKE_PING' }, ME)).toBe(false);
     expect(needsAlarmSync({ kind: 'ALARM_CHANGED', recipientUserId: 'other' }, ME)).toBe(false);
