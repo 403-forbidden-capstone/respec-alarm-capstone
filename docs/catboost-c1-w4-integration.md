@@ -37,3 +37,26 @@ node --experimental-strip-types --test supabase/functions/_shared/prepare-ml.tes
 ```
 
 모델 호출이 없으면 알람 계산 경로는 변경 전과 같게 유지됩니다.
+
+## 2026-11-10 연결 검증 결과 (운영 ML은 여전히 비활성화)
+
+아래는 **가상 프로필** 및 가상 W4 전날 준비시간(60분)을 사용한 통합 테스트 결과로, 실제 서비스 정확도 시험이 아니다.
+
+- Mac Docker C1/W4 /health: 두 모델 로딩 성공.
+- Cloudflare 임시 HTTPS 터널 /predict: C1/W4 성공, 인증키 누락 요청 401.
+- Supabase Edge → 임시 HTTPS → CatBoost 실제 통신: 테스트용 함수 HTTP 200, C1 66분 / W4 53분 (해당 테스트용 입력).
+- 로그인한 허용 테스트 계정 전용 `alarm-suggest-ml-test` 미리보기: HTTP 200, `prepare.source=MODEL`, `saved=false`.
+- 2026-11-17 10:00 KST 가상 약속(이동 30분, 여유 10분, 준비 전 활동 20분):
+  - 기존 P80: 준비 60분, 기상 08:20 KST (비교 기준).
+  - C1: 준비 66분, 기상 08:14 KST.
+  - W4: 준비 58분, 기상 08:22 KST.
+- 71개 Node 테스트 통과 및 앱 TypeScript 검사 통과(사용자 로컬 실행).
+
+### 실사용 적용 전 보류 사항
+1. **원본 2024 생활시간조사 코드북 및 학습 전처리 로직을 교차 확인**: `weekday_code`, `평토일구분코드`, `휴일종류코드`, `연령코드`, `교육재학코드`, `경제활동상태코드`의 값/결측/시점 정의.
+2. 사용자에게 필요한 선택 입력과 개인정보 동의 흐름을 설계하고, 검증 없이 모델 범주 코드를 추정해서 저장하지 않음.
+3. `ml_codes_verified`가 사용자가 직접 true로 변경할 수 없는 **서버측 검증 상태**가 되도록 권한을 점검하고, 별도 운영 ML 계정 허용 목록을 구현.
+4. W4의 직전 로컬 날짜 `daily_records.actual_prepare_minutes`와 조사 학습 타깃('수면 종료→첫 외출 이동')의 차이 및 실제 서비스 오차 검증.
+5. 자동 준비시간의 C1/W4 선택, 수동 입력 우선순위, 예측 실패 시 P80 복귀, 미리보기와 저장의 일관성 E2E 검증.
+6. 일시적인 Cloudflare Quick Tunnel은 개발용으로만 사용. 지속적인 운영용 배포 및 키 관리 별도 설계.
+7. `PREPARE_ML_ENABLED=0` 유지. 테스트 전용 함수는 사용하지 않을 때 `PREPARE_ML_TEST_ENABLED=0`으로 차단하고 종료 후 삭제.
