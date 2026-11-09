@@ -49,6 +49,49 @@ test('목업 a1과 같은 숫자: 기상 8:00 · 준비 8:30 · 출발 9:00 · �
   assert.ok(plan.check.ok);
 });
 
+test('C1 예측이 준비시간과 기상 알람 계산에 적용되고 응답에 모델이 표시됨', () => {
+  const plan = computePlan(base({
+    stats: { sampleCount: 0, p80: null },
+    mlPrediction: { model: 'c1_mae', minutes: 80 },
+  }), api(50));
+  assert.equal(plan.prepare.minutes, 80);
+  assert.equal(plan.prepare.autoMinutes, 80);
+  assert.equal(plan.prepare.source, 'MODEL');
+  assert.equal(plan.prepare.confidence, 'LOW');
+  assert.deepEqual(text(plan), ['WAKE 07:40', 'PREPARE 08:00', 'DEPARTURE 09:00', 'ARRIVE 09:50']);
+  const dto = toSuggestion(plan);
+  assert.equal(dto.prepare.model, 'c1_mae');
+  assert.equal(dto.prepare.source, 'MODEL');
+  assert.equal(dto.prepare.auto_minutes, 80);
+});
+
+test('W4 예측이 적용돼도 직접 준비시간은 수동값 우선', () => {
+  const mlPrediction = { model: 'w4_mae' as const, minutes: 90 };
+  const automatic = computePlan(base({ mlPrediction }), api(50));
+  assert.equal(automatic.prepare.minutes, 90);
+  assert.equal(automatic.prepare.mlModel, 'w4_mae');
+  assert.equal(toSuggestion(automatic).prepare.model, 'w4_mae');
+  const manual = computePlan(base({
+    mlPrediction,
+    draft: { at: kst(22, 600), destination: { name: '세종대학교' }, prepareMinutes: 30 },
+  }), api(50));
+  assert.equal(manual.prepare.source, 'MANUAL');
+  assert.equal(manual.prepare.minutes, 30);
+  assert.equal(manual.prepare.mlModel, undefined);
+  assert.equal('model' in toSuggestion(manual).prepare, false);
+});
+
+test('기상 없는 당일 추가 일정에는 모델 예측을 사용하지 않음', () => {
+  const plan = computePlan(base({
+    draft: { at: kst(22, 1080), destination: { name: '강남역' }, bufferMinutes: 5 },
+    sameDayWake: true,
+    mlPrediction: { model: 'w4_mae', minutes: 90 },
+  }), api(20));
+  assert.equal(plan.withWake, false);
+  assert.equal(plan.prepare.minutes, 15);
+  assert.notEqual(plan.prepare.source, 'MODEL');
+});
+
 test('기록이 없는 사용자는 공통 P80 그대로 (50분) + 기본 준비 전 활동 20분', () => {
   const plan = computePlan(base({ stats: { sampleCount: 0, p80: null } }), api(50));
   assert.equal(plan.prepare.minutes, 50);
