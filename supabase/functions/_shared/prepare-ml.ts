@@ -29,6 +29,34 @@ export function mayUseMl(args: {
     .some((s) => s.toLowerCase() === args.userId.toLowerCase());
 }
 
+// A trusted Edge-service read is still not enough without a versioned codebook
+// and recorded consent. Client-writable public.profiles fields are never accepted.
+export type VerifiedMlProfile = MlProfile & {
+  codebook_version?: string | null;
+  consent_at?: string | null;
+  verified_at?: string | null;
+};
+export function approvedMlProfile(
+  profile: VerifiedMlProfile | null,
+  expectedVersion: string | null | undefined,
+): MlProfile | null {
+  if (!profile || !expectedVersion?.trim() ||
+      profile.codebook_version !== expectedVersion ||
+      !profile.consent_at || !profile.verified_at) return null;
+  const consent = Date.parse(profile.consent_at);
+  const verified = Date.parse(profile.verified_at);
+  if (!Number.isFinite(consent) || !Number.isFinite(verified) || consent > Date.now() ||
+      verified > Date.now()) return null;
+  if (!validCode(profile.ml_age_code) || !validCode(profile.ml_education_code) ||
+      !validCode(profile.ml_economic_code)) return null;
+  return {
+    ml_codes_verified: true,
+    ml_age_code: profile.ml_age_code,
+    ml_education_code: profile.ml_education_code,
+    ml_economic_code: profile.ml_economic_code,
+  };
+}
+
 const MISSING = '__MISSING__';
 const validCode = (value: string | null | undefined): value is string =>
   typeof value === 'string' && /^[0-9]{1,3}$/.test(value);
