@@ -21,3 +21,16 @@ export function shouldOnboard({ inFlow, signedIn, profileReady, profileFailed, o
   if (!inFlow) return false;
   return signedIn && profileReady && !profileFailed && onboardedAt == null;
 }
+
+// 개인정보 안내 판이 올라갔는데 내가 동의한 판이 낮을 때 동의만 다시 받을지 (친구 13-바 · 13-14 — 판이 올라가면 다음 실행 때 다시 동의)
+//   온보딩을 끝낸 계정만 — 끝내지 않은 계정은 온보딩의 동의 단계가 받음. 못 읽었을 때(오프라인)는 묻지 않음
+export type ReconsentGateInput = Omit<OnboardingGateInput, 'onboardedAt'> & {
+  onboardedAt: string | null | undefined;
+  privacyVersion: number | null | undefined; // profiles.privacy_version — 동의한 판 (없으면 0)
+  currentVersion: number; // features/onboarding/consent PRIVACY_VERSION
+};
+
+export function shouldReconsent({ inFlow, signedIn, profileReady, profileFailed, onboardedAt, privacyVersion, currentVersion }: ReconsentGateInput): boolean {
+  if (!inFlow) return false;
+  return signedIn && profileReady && !profileFailed && onboardedAt != null && (privacyVersion ?? 0) < currentVersion;
+}
