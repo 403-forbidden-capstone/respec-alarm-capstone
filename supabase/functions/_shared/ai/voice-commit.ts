@@ -140,7 +140,12 @@ export function journalFacts(list: Structured[], date: string): Record<string, u
   const told = (x: { source: string }): boolean => x.source !== 'inferred';
   const day = list.filter((s) => s.session.reference_date === date);
   const events = day.flatMap((s) => s.day_review.events.filter(told).map(({ text, time }) => ({ text, time })));
-  const memorable = day.flatMap((s) => (s.day_review.memorable ? [s.day_review.memorable] : []));
+  // memorable은 출처 칸이 없음 — 같은 대화의 말한 · 확인한 사건 글과 같을 때만 (짐작한 사건이 memorable로 들어오는 것을 막음)
+  const flat = (t: string): string => t.replace(/\s+/g, '');
+  const memorable = day.flatMap((s) => {
+    const m = s.day_review.memorable;
+    return m && s.day_review.events.some((e) => told(e) && flat(e.text) === flat(m)) ? [m] : [];
+  });
   const mood = day
     .map((s) => s.mood_condition)
     .filter((m) => told(m) && (m.mood.length > 0 || m.fatigue !== null || m.stress !== null || m.condition_note !== null))
@@ -186,9 +191,12 @@ async function saveJournal(deps: CommitDeps, sessionId: string, date: string, no
   const diary = res.data.diary.trim();
   if (diary === '') return 0;
   const row = { ai_summary: diary, source_session_id: sessionId, generated_at: nowIso };
-  // is_edited = false 조건 — 읽은 뒤 사용자가 고쳤으면 덮지 않음
-  if (cur) must('daily_journals', await db.from('daily_journals').update(row).eq('journal_id', cur.journal_id).eq('user_id', deps.userId).eq('is_edited', false));
-  else must('daily_journals', await db.from('daily_journals').insert({ user_id: deps.userId, record_date: date, ...row }));
+  // is_edited = false 조건 — 읽은 뒤 사용자가 고쳤으면 덮지 않음(0줄 → 쓴 수 0)
+  if (cur) {
+    const updated = must<{ journal_id: string }[]>('daily_journals', await db.from('daily_journals').update(row).eq('journal_id', cur.journal_id).eq('user_id', deps.userId).eq('is_edited', false).select('journal_id'));
+    return updated?.length ?? 0;
+  }
+  must('daily_journals', await db.from('daily_journals').insert({ user_id: deps.userId, record_date: date, ...row }));
   return 1;
 }
 

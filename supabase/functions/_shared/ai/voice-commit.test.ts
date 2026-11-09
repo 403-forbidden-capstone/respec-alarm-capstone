@@ -576,3 +576,35 @@ test('일기: 모델 실패 → 이 단계만 PARTIAL (대화 · 구조화 JSON 
   assert.equal(fake.order.filter((p) => p === 'T2').length, 1);
   assert.deepEqual([db.rows('todos').length, journalOf(db).map((j) => j.ai_summary)], [1, [DIARY.diary]]);
 });
+
+test('일기: memorable은 같은 대화의 말한 사건과 같을 때만 입력에 (짐작한 사건 · 사건 목록에 없는 글은 뺌)', async () => {
+  const db = seed();
+  const { deps, sid } = await chat(db, [[DAY_TALK]], [dayExtract()]);
+  await commit(deps, sid);
+  const x = rowOf(db, sid).extracted_data as Structured;
+  const memo = (memorable: string | null) => (journalFacts([{ ...x, day_review: { ...x.day_review, memorable } }], REVIEW) as { memorable: string[] }).memorable;
+  assert.deepEqual(memo('교수님께 칭찬받음'), ['교수님께 칭찬받음']); // stated 사건
+  assert.deepEqual(memo('교수님께  칭찬 받음'), ['교수님께  칭찬 받음']); // 띄어쓰기만 다름
+  assert.deepEqual(memo('친구와 다툼'), []); // inferred 사건
+  assert.deepEqual(memo('여행을 다녀옴'), []); // 사건 목록에 없음
+  // 짐작한 사건이 memorable이어도 모델 입력에 안 들어감 (전체 흐름)
+  const db2 = seed();
+  const c2 = await chat(db2, [[DAY_TALK]], [dayExtract({ day_review: { events: [{ text: '팀플 발표를 끝냄', time: null, important: true, source: 'stated' }, { text: '친구와 다툼', time: null, important: false, source: 'inferred' }], memorable: '친구와 다툼' } })]);
+  await commit(c2.deps, c2.sid);
+  assert.equal(c2.fake.seen.T5[0].includes('친구와 다툼'), false);
+});
+
+test('일기: 모델을 부르는 사이 사용자가 일기를 고치면 UPDATE 0줄 → 덮지 않고 saved.daily_journals 0', async () => {
+  const db = seed();
+  const j: Record<string, unknown> = { journal_id: 'j-old', user_id: ME, record_date: REVIEW, source_session_id: null, ai_summary: '예전 AI 일기', edited_summary: null, is_edited: false };
+  db.rows('daily_journals').push(j);
+  const editWhileCalling = () => {
+    Object.assign(j, { edited_summary: '내가 고친 일기', is_edited: true }); // 읽은 뒤 · 쓰기 전에 앱에서 고침
+    return DIARY;
+  };
+  const { fake, deps, sid } = await chat(db, [[DAY_TALK]], [dayExtract()], [editWhileCalling]);
+  const r = await commit(deps, sid);
+  assert.deepEqual([r.status, r.saved.daily_journals, r.failed], ['DONE', 0, []]);
+  assert.equal(fake.order.filter((p) => p === 'T5').length, 1);
+  assert.deepEqual(journalOf(db).map((x) => [x.ai_summary, x.edited_summary, x.is_edited, x.source_session_id]), [['예전 AI 일기', '내가 고친 일기', true, null]]);
+});
