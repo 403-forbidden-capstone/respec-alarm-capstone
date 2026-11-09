@@ -23,6 +23,8 @@ mobile/ios/
 .env
 .env.*
 !.env.example
+# 웹 빌드용 공개 값 (#455) — mobile 것만 올림
+!mobile/.env.production
 *.jks
 *.keystore
 *.p8
