@@ -219,7 +219,8 @@ describe('오류 문구 (editError)', () => {
   });
 
   it('UNPROCESSABLE의 이유별: 공동 약속 제한 · 기록 있음 · 공동 약속 아님 · 만든 사람은 못 빠짐', async () => {
-    expect(await messageOf(edgeError('UNPROCESSABLE', { reason: 'GROUP_EDIT_LIMIT' }))).toBe('공동 약속의 시각 · 장소 · 반복은 아직 고칠 수 없어요. 지우고 다시 만들어 주세요');
+    expect(await messageOf(edgeError('UNPROCESSABLE', { reason: 'GROUP_RECURRENCE_LATER' }))).toBe('공동 약속의 반복은 아직 고칠 수 없어요');
+    expect(await messageOf(edgeError('UNPROCESSABLE', { reason: 'PAST_APPOINTMENT' }))).toBe('지난 약속이에요');
     expect(await messageOf(edgeError('UNPROCESSABLE', { reason: 'HAS_RECORDS' }))).toBe('출발 · 도착 기록이 있는 일정은 지우거나 빠질 수 없어요');
     expect(await messageOf(edgeError('UNPROCESSABLE', { reason: 'NOT_SHARED' }))).toBe('공동 약속이 아니에요');
     expect(await messageOf(edgeError('UNPROCESSABLE', { reason: 'CREATOR_CANNOT_LEAVE' }))).toBe('내가 만든 공동 약속은 빠질 수 없어요. 지워 주세요');

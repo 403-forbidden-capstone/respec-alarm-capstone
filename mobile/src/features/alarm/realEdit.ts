@@ -92,9 +92,9 @@ export function toAlarmChanges(changes: EditUpdateResponse['changes']): AlarmCha
 // 오류 문구
 // ---------------------------------------------------------------------------
 
-// UNPROCESSABLE의 details.reason별 문구. 출발 시각 지남 · 순서 어긋남(DEPARTURE_PASSED · ORDER) · 지난 시각(PAST_TIME)은 lib/edge의 문구를 그대로 씀
+// UNPROCESSABLE의 details.reason별 문구. 출발 시각 지남 · 순서 어긋남(DEPARTURE_PASSED · ORDER) · 지난 시각(PAST_TIME) · 지난 약속(PAST_APPOINTMENT)은 lib/edge의 문구를 그대로 씀
 const EDIT_REASONS: Record<string, string> = {
-  GROUP_EDIT_LIMIT: '공동 약속의 시각 · 장소 · 반복은 아직 고칠 수 없어요. 지우고 다시 만들어 주세요',
+  GROUP_RECURRENCE_LATER: '공동 약속의 반복은 아직 고칠 수 없어요', // 시각 · 장소는 만든 사람이 고치면 서버가 참여자마다 다시 계산 (친구 9장)
   HAS_RECORDS: '출발 · 도착 기록이 있는 일정은 지우거나 빠질 수 없어요',
   NOT_SHARED: '공동 약속이 아니에요',
   CREATOR_CANNOT_LEAVE: '내가 만든 공동 약속은 빠질 수 없어요. 지워 주세요',
@@ -114,7 +114,7 @@ export function editError(e: unknown): unknown {
   if (e.code === 'UNPROCESSABLE') {
     const reason = (e.details as { reason?: unknown } | null | undefined)?.reason;
     const message = typeof reason === 'string' ? EDIT_REASONS[reason] : undefined;
-    return message ? new UserError(message) : e;
+    return message ? new UserError(message) : e; // 없는 사유는 lib/edge 문구(지난 약속 등) 그대로
   }
   const message = EDIT_CODES[e.code];
   return message ? new UserError(message) : e;

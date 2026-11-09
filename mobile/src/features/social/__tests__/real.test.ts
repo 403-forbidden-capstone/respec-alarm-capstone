@@ -141,7 +141,9 @@ describe('G01 · H01 · G02 그룹', () => {
     mockFake.answer('appointments.select', ok([{ appointment_id: 'ap1', title: '팀 주간회의', appointment_at: '2026-10-20T01:00:00.000Z', dest_name: '세종대학교', importance: 'NORMAL' }]));
     const g = await real.getGroup(GROUP);
     expect(g).toMatchObject({ id: GROUP, name: '캡스톤팀', since: '2026년 4월부터 함께하는 중', wakeShareOptIn: true, notificationsOff: false });
-    expect(g?.appointments).toEqual([{ id: 'ap1', title: '팀 주간회의', at: new Date('2026-10-20T01:00:00.000Z'), place: '세종대학교', importance: 'NORMAL' }]);
+    expect(g?.appointments).toEqual([
+      { id: 'ap1', title: '팀 주간회의', at: new Date('2026-10-20T01:00:00.000Z'), place: '세종대학교', importance: 'NORMAL', joinedCount: 0, iJoined: false, past: false, mine: false, creatorUnknown: true },
+    ]); // 인원수 · 만든 사람은 groupAppointments.test.ts
     const [query] = mockFake.opsOf('appointments', 'select');
     expect(query.filters).toEqual([
       ['eq', 'group_id', GROUP],
