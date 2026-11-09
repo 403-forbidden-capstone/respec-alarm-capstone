@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
 import { Button, Stepper, Text, Toggle } from '@/components/ui';
-import { ChoiceChips } from '@/features/onboarding/views/ChoiceChips';
+import { ChoiceRow } from '@/features/onboarding/views/ChoiceRow';
 import { SCHOOL_OPTIONS, WORK_OPTIONS, isCompletePrepareMlSurvey, type PrepareMlSurvey, type SchoolStatus, type WorkStatus } from '@/features/profile/prepareMlSurvey';
 import type { ProfileFields } from '@/features/profile/types';
 
@@ -55,19 +55,13 @@ export function PrepareMlSurveyEditor({ initial, onSave, onRevoke, onCancel }: P
       </Text>
       <Stepper label="만 나이" value={age} onChange={setAge} min={14} max={100} step={1} unit="세" first />
       <Text variant="bodyStrong">현재 학교 상태</Text>
-      <ChoiceChips
-        label="현재 학교 상태"
-        options={SCHOOL_OPTIONS}
-        value={school ?? ''}
-        onChange={setSchool}
-      />
+      {SCHOOL_OPTIONS.map(([value, label]) => (
+        <ChoiceRow key={value} label={label} selected={school === value} onPress={() => setSchool(value)} />
+      ))}
       <Text variant="bodyStrong">현재 일하는 상태</Text>
-      <ChoiceChips
-        label="현재 일하는 상태"
-        options={WORK_OPTIONS}
-        value={work ?? ''}
-        onChange={setWork}
-      />
+      {WORK_OPTIONS.map(([value, label]) => (
+        <ChoiceRow key={value} label={label} selected={work === value} onPress={() => setWork(value)} />
+      ))}
       <View style={styles.consent}>
         <View style={styles.consentText}>
           <Text variant="bodyStrong">정보 수집·이용에 동의</Text>
