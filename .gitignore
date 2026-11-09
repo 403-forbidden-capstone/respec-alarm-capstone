@@ -45,6 +45,10 @@ supabase/.temp/
 .wrangler/
 .dev.vars
 
+# Trained model artifacts are deployed separately; do not commit model binaries.
+services/prepare-ml/models/
+*.cbm
+
 # Python (모델 학습 스크립트)
 __pycache__/
 .venv/
