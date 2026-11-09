@@ -47,7 +47,7 @@ test('rejects remote plain HTTP; disabled flag prevents fetch', async () => {
 });
 
 test('real ML is denied unless both flag and server-side UUID allowlist permit the user', () => {
-  const userId = 'f60d371e-63a5-4fb9-9d92-0743392325ec';
+  const userId = '22222222-2222-4222-8222-222222222222';
   const allowed = '11111111-1111-4111-8111-111111111111, ' + userId.toUpperCase();
   const base = { enabled: true, allowForPlan: true, userId };
   assert.equal(mayUseMl({ ...base, allowedUserIds: allowed }), true);
