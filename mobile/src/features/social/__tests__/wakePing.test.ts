@@ -85,6 +85,10 @@ describe('G03 버튼 아래 한 줄 · 잠금 (8-17)', () => {
     expect(wakePingNote({ status: 'WAIT', nextAt: T })).toMatch(/^.*8:15.*부터 다시$/);
   });
 
+  it('3번째(3/3) 보냄은 5분 뒤 안내 대신 한도 문구 — 시간이 지나도 못 보냄', () => {
+    expect(wakePingNote({ status: 'OK', count: 3, limit: 3, nextAt: T })).toBe(`3/3 · ${WAKE_PING_DAILY_LIMIT}`);
+  });
+
   it('한도 · 꺼짐 · 이미 일어남 · 토큰 없음 · 아직 안 울림 문구', () => {
     expect(wakePingNote({ status: 'DAILY_LIMIT' })).toBe(WAKE_PING_DAILY_LIMIT);
     expect(wakePingNote({ status: 'OFF' })).toBe('지금은 깨울 수 없어요');
@@ -114,7 +118,9 @@ describe('받은 깨우기 한 줄 (8-18)', () => {
   it("'수연님이 7:12에 깨웠어요', 여러 번이면 가장 최근 것에 '오늘 n번', 없으면 줄 없음", () => {
     const at = new Date('2026-11-10T22:12:00.000Z'); // 한국 7:12
     expect(receivedPingLine([{ senderName: '수연', at }])).toMatch(/^수연님이 .*7:12.*에 깨웠어요$/);
-    expect(receivedPingLine([{ senderName: '수연', at }, { senderName: '민수', at }])).toMatch(/에 깨웠어요 · 오늘 2번$/);
+    expect(receivedPingLine([{ senderId: 'a', senderName: '수연', at }, { senderId: 'a', senderName: '수연', at }])).toMatch(/에 깨웠어요 · 오늘 2번$/);
+    // 다른 사람이 깨운 것은 세지 않음 — 수연이 두 번 깨운 것처럼 읽히지 않게
+    expect(receivedPingLine([{ senderId: 'a', senderName: '수연', at }, { senderId: 'b', senderName: '민수', at }])).toMatch(/^수연님이 .*에 깨웠어요$/);
     expect(receivedPingLine([])).toBeNull();
   });
 });

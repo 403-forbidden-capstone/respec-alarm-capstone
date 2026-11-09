@@ -34,6 +34,8 @@ export const WAKE_PING_MOCK = '가짜 데이터에서는 깨우기를 보낼 수
 export function wakePingNote(result: WakePingResult): string {
   switch (result.status) {
     case 'OK':
+      // 마지막(3/3) 보냄은 5분 뒤에도 못 보냄 — '다시' 안내 대신 한도 문구
+      if (result.count >= result.limit) return `${result.count}/${result.limit} · ${WAKE_PING_DAILY_LIMIT}`;
       return result.nextAt ? `${result.count}/${result.limit} · ${formatTime(result.nextAt)}부터 다시` : `${result.count}/${result.limit}`;
     case 'WAIT':
       return result.nextAt ? `${formatTime(result.nextAt)}부터 다시` : '잠시 뒤 다시 할 수 있어요';
@@ -53,10 +55,11 @@ export function wakePingNote(result: WakePingResult): string {
 // 버튼을 잠그는 결과 — 같은 요청을 또 보내도 서버가 거절할 뿐이라 막아 둠 (WAIT · OK는 다음 가능 시각까지, 한도 · 꺼짐 · 이미 일어남은 계속)
 export const wakePingLocks = (result: WakePingResult): boolean => result.status === 'OK' || result.status === 'WAIT' || result.status === 'DAILY_LIMIT' || result.status === 'OFF' || result.status === 'ALREADY_UP';
 
-// 홈 · H08 받은 깨우기 한 줄 — 여러 번이면 가장 최근 것에 횟수를 붙임
-export function receivedPingLine(pings: readonly { senderName: string; at: Date }[]): string | null {
+// 홈 · H08 받은 깨우기 한 줄 — 가장 최근 것, 같은 사람이 여러 번 깨웠으면 '· 오늘 n번' (다른 사람이 깨운 것까지 세지 않음)
+export function receivedPingLine(pings: readonly { senderId?: string; senderName: string; at: Date }[]): string | null {
   const last = pings[0];
   if (!last) return null;
   const line = `${last.senderName}님이 ${formatTime(last.at)}에 깨웠어요`;
-  return pings.length > 1 ? `${line} · 오늘 ${pings.length}번` : line;
+  const same = pings.filter((p) => (last.senderId ? p.senderId === last.senderId : p.senderName === last.senderName)).length;
+  return same > 1 ? `${line} · 오늘 ${same}번` : line;
 }

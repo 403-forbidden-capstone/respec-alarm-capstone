@@ -56,7 +56,8 @@ export default function MemberWakeScreen() {
 
   // 잠금 — 한도 · 꺼짐 · 이미 일어남은 계속, 보냄(OK) · 5분 안 또 누름(WAIT)은 다음 가능 시각까지
   const timed = ping && (ping.status === 'OK' || ping.status === 'WAIT');
-  const locked = ping != null && wakePingLocks(ping) && !(timed && ping.nextAt != null && current >= ping.nextAt);
+  const spent = ping?.status === 'OK' && ping.count >= ping.limit; // 마지막 보냄 — 시간이 지나도 오늘은 더 못 보냄
+  const locked = ping != null && wakePingLocks(ping) && (spent || !(timed && ping.nextAt != null && current >= ping.nextAt));
   const sendPing = () =>
     run(async () => {
       const result = await sendWakePing(id, p.id);
