@@ -273,7 +273,7 @@ export async function handleVoiceCommit(deps: CommitDeps, body: unknown): Promis
  * 앞 구간을 못 끝냈으면 이 세션 결과를 PARTIAL(failed에 previous_session)로 — 앱이 다시 보낼 목록에 남겨 다음에 둘 다 이어서.
  * 카드 번호는 구간을 넘어 그대로라(carryCards) rejected_cards를 앞 구간에도 같이 넘김 (모르는 번호는 건너뜀)
  */
-async function commitRoom(deps: CommitDeps, sessionId: string, rejected: string[], now: Date): Promise<VoiceCommitOut> {
+export async function commitRoom(deps: CommitDeps, sessionId: string, rejected: string[], now: Date): Promise<VoiceCommitOut> {
   const sd: SessionDeps = { userId: deps.userId, userDb: deps.userDb, service: deps.service };
   const row = await loadSession(sd, sessionId);
   const prevId = row.server_state.prev_session_id;
