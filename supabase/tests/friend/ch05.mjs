@@ -278,7 +278,7 @@ export default async function ch05({ q, as, su, check, expectErr, PGlite, AUTH_S
       await su();
       return r;
     };
-    const okIns = async (inviter, target) => { await as(inviter); const r = await q(`insert into public.group_members (group_id, user_id, invite_status) values ($1, $2, 'INVITED') returning invited_by`, [Gx.g, target]); await su(); return r[0].invited_by; };
+    const okIns = async (inviter, target) => { const r = await inviteTo(inviter, Gx.g, target); return r.status === 'INVITED' ? (await member(Gx.g, target)).invited_by : r; };   // 초대는 함수로만 — 앱의 직접 insert 정책은 15장에서 닫힘
     const nonFriend = await ins(A, St);                 // 5-26
     const blocked = await ins(A, Bk);
     const othersFriend = await ins(Mm, Af);             // 만든 사람의 친구는 멤버 B의 친구가 아님
@@ -544,7 +544,7 @@ export default async function ch05({ q, as, su, check, expectErr, PGlite, AUTH_S
     await su();
     // 멤버의 초대 행: 위조한 초대한 사람 · 알림 끄기는 서버 값으로
     await as(O);
-    await q(`insert into public.group_members (group_id, user_id, invite_status, invited_by, notifications_off) values ($1, $2, 'INVITED', $3, true)`, [K.g, F, Y]);
+    await q(`select public.invite_to_group($1, $2)`, [K.g, F]);        // 초대 행의 기록(초대한 사람 · 알림 끄기)은 함수가 정함 — 직접 insert 정책은 15장에서 닫힘
     const preJoin = await expectErr(() => q(`insert into public.group_members (group_id, user_id, invite_status, joined_at) values ($1, $2, 'INVITED', now())`, [K.g, F2]), /row-level security/);
     const preOpt = await expectErr(() => q(`insert into public.group_members (group_id, user_id, invite_status, wake_share_opt_in) values ($1, $2, 'INVITED', true)`, [K.g, F2]), /row-level security/);
     await su();

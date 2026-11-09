@@ -299,12 +299,13 @@ await check('A는 B 알람에 반응 이력을 못 씀', async () => {
 
 let fAB;
 await check('친구 요청: 요청자는 스스로 수락 못 함 · B→A 역방향 중복 거부 · 받은 사람이 수락 · 주인 칼럼 못 바꿈', async () => {
-  await as(A);
+  await su();   // 요청 행은 서버 쪽 사본으로 준비 — 앱의 직접 insert 정책은 15장에서 닫혔고 요청은 send_friend_request가 만듦 (friend/ch15.mjs 15-02)
   [{ friend_id: fAB }] = await q(`insert into public.friends (requester_id, addressee_id) values ($1, $2) returning friend_id`, [A, B]);
+  await as(A);
   const selfAccept = await q(`update public.friends set status = 'ACCEPTED' where friend_id = $1 returning 1`, [fAB]);
   await as(B);
   const dup = await expectErr(() => q(`insert into public.friends (requester_id, addressee_id) values ($1, $2)`, [B, A]),
-    /duplicate key|friends_pair_key/);
+    /duplicate key|friends_pair_key|row-level security/);
   const acc = await q(`update public.friends set status = 'ACCEPTED', accepted_at = now() where friend_id = $1 returning status`, [fAB]);
   const keyChange = await expectErr(() => q(`update public.friends set requester_id = $1 where friend_id = $2`, [C, fAB]),
     /바꿀 수 없음/);
@@ -369,9 +370,10 @@ await check('그룹 만들기: 만든 사람 자동 JOINED · 초대 코드 생�
   return /^[A-Z0-9]{8}$/.test(code) && m.length === 1 && m[0].user_id === A && m[0].invite_status === 'JOINED'
     ? true : { code, m };
 });
-await check('초대: 만든 사람은 INVITED로 초대 · JOINED로 바로 넣기 거부 · 외부인은 초대 못 하고 그룹도 못 봄', async () => {
-  await as(A);
+await check('초대: 초대 행 준비 · JOINED로 바로 넣기 거부 · 외부인은 초대 못 하고 그룹도 못 봄 (초대 행은 invite_to_group이 만듦 — 앱의 직접 insert 정책은 15장에서 닫힘)', async () => {
+  await su();
   await q(`insert into public.group_members (group_id, user_id) values ($1, $2)`, [G, B]);
+  await as(A);
   const direct = await expectErr(() => q(`insert into public.group_members (group_id, user_id, invite_status) values ($1, $2, 'JOINED')`, [G, D]),
     /row-level security/);
   await as(E);
@@ -496,7 +498,7 @@ await check('C가 그룹에서 기상 공유에 동의하면 나오고(RINGING) 
   return c && ['RINGING', 'MISSED'].includes(c.wake_status) && !r2.some((x) => x.user_id === C) ? true : { r, r2 };
 });
 await check('친구로 받은 기상 권한은 없음(6장) — 써 넣어도 꺼진 채 저장되고 그룹 동의가 없으면 친구여도 안 보임', async () => {
-  await as(C);
+  await su();   // 요청 행 준비는 서버 쪽 사본으로 (앱의 직접 insert 정책은 15장에서 닫힘)
   const [{ friend_id: fCA }] = await q(`insert into public.friends (requester_id, addressee_id) values ($1, $2) returning friend_id`, [C, A]);
   await as(A);
   await q(`update public.friends set status = 'ACCEPTED', accepted_at = now() where friend_id = $1`, [fCA]);
@@ -751,7 +753,7 @@ await check('구성원도 초대함(자기 친구만, 5장) · 초대 상태면 
   await su();
   await q(`insert into public.friends (requester_id, addressee_id, status, accepted_at) values ($1, $2, 'ACCEPTED', now())`, [C, E]);   // 5장: 직접 초대는 친구 사이만
   await as(C);
-  const inv = await q(`insert into public.group_members (group_id, user_id) values ($1, $2) returning 1`, [G, E]);
+  const inv = await q(`select public.invite_to_group($1, $2) as r`, [G, E]);   // 초대는 함수로만 (직접 insert 정책은 15장에서 닫힘)
   const ew = await wake(E);
   await as(E);
   const seen = await q(`select 1 from public.groups where group_id = $1`, [G]);
@@ -759,7 +761,7 @@ await check('구성원도 초대함(자기 친구만, 5장) · 초대 상태면 
   const cancel = await q(`delete from public.group_members where group_id = $1 and user_id = $2 returning 1`, [G, E]);
   await su();
   await q(`delete from public.friends where requester_id = $1 and addressee_id = $2`, [C, E]);   // 뒤 검사들이 E를 아무와도 관계 없는 사람으로 씀
-  return inv.length === 1 && ew.length === 0 && seen.length === 0 && cancel.length === 1 ? true : { inv, ew, seen, cancel };
+  return inv.length === 1 && inv[0].r.status === 'INVITED' && ew.length === 0 && seen.length === 0 && cancel.length === 1 ? true : { inv, ew, seen, cancel };
 });
 await check('참여 중 멤버가 내보내면 코드가 바뀌어 내보내진 사람은 옛 코드로 못 들어옴 · 스스로 나가면 코드 그대로', async () => {
   await as(E);
@@ -2731,6 +2733,7 @@ const snapOf = async (u, only = Object.keys(MINE)) => {
 };
 const diffSnap = (a, b) => Object.keys(a).filter((k) => a[k] !== b[k]);
 const countOf = async (sql, params = []) => (await q(`select count(*)::int as n from (${sql}) t`, params))[0].n;
+const canon = (o) => (o && typeof o === 'object' && !Array.isArray(o) ? Object.fromEntries(Object.entries(o).sort(([a], [b]) => (a < b ? -1 : 1)).map(([k, v]) => [k, canon(v)])) : o);
 
 await check('내 시험 데이터 지우기 준비: RA(지우는 사람) · RB(남)에 일정 · 알람 · 기록 · 대화 · 제안 · 일기 · 친구 · 그룹 · 푸시 토큰 · ai_calls를 만듦', async () => {
   await as(null, 'supabase_auth_admin');
@@ -2796,13 +2799,15 @@ await check('내 시험 데이터 지우기: RA가 부르면 지운 줄 수를 j
   beforeB = await snapOf(RB);
   beforeAKept = await snapOf(RA, ['push_tokens', 'friends', 'sharing_permissions', 'groups', 'group_members', 'routines', 'user_questions']);
   beforeAKept.callIds = (await q(`select string_agg(call_id::text, ',' order by call_id) as ids from public.ai_calls where user_id = $1`, [RA]))[0].ids;
-  beforeAKept.sharedRows = (await q(`select md5(string_agg(a::text, '|' order by a.appointment_id::text)) as h from public.appointments a where appointment_id = any($1::uuid[])`,
+  beforeAKept.sharedRows = (await q(`select md5(string_agg((to_jsonb(a) - 'creator_id' - 'updated_at')::text, '|' order by a.appointment_id::text)) as h from public.appointments a where appointment_id = any($1::uuid[])`,
     [[RS.shared.appt, RS.mixed1.appt, RS.mixed2.appt, RS.groupOnly.appt, RS.fromB.appt]]))[0].h;
   await as(RA);
   [{ r: resetResult }] = await q(`select public.dev_reset_my_data() as r`);
-  const expected = { appointments: 3, appointments_kept: 4, participants: 8, alarms: 18, alarm_events: 8, alarm_suggestions: 1, daily_records: 1,
-                     daily_journals: 1, conversation_sessions: 1, user_edit_logs: 1, profile: 1 };
-  return JSON.stringify(Object.entries(resetResult).sort()) === JSON.stringify(Object.entries(expected).sort()) ? true : resetResult;
+  // 15장: 친구 정리가 먼저 돌아 그룹을 나갈 때 그 그룹 앞으로 약속의 참여 · 알람(참여 5 · 알람 10 · 울림 기록 5)과 만든 사람 칸이 정리됨 — 남은 몫(개인 일정 · 지난 약속)만 아래에서 셈
+  const expected = { appointments: 3, appointments_kept: 0, participants: 3, alarms: 8, alarm_events: 3, alarm_suggestions: 1, daily_records: 1,
+                     daily_journals: 1, conversation_sessions: 1, user_edit_logs: 1, profile: 1,
+                     friend_data: { groups_left: 1, sharing_permissions: 2, friends: 1, blocks: 0, wake_hides: 0 } };
+  return JSON.stringify(canon(resetResult)) === JSON.stringify(canon(expected)) ? true : resetResult;
 });
 await check('내 시험 데이터 지우기 ①: RA의 혼자 일정(반복 2회차 포함) · 알람 · 울림 기록 · 기록 · 일기 · 대화 · 제안 · 고친 값 기록이 사라짐', async () => {
   await su();
@@ -2833,27 +2838,31 @@ await check('내 시험 데이터 지우기 ②-2: RB가 같은 그룹 멤버일
   const bLinks = await countOf(`select 1 from public.todos where appointment_id = $1 union all select 1 from public.user_edit_logs where appointment_id = $1`, [RS.groupOnly.appt]);
   await as(RB);
   const seen = await q(`select appointment_id, title from public.appointments where appointment_id = $1`, [RS.groupOnly.appt]);   // RLS를 거친 RB의 조회
-  return row && row.group_id === RS.g && row.creator_id === RA && aParts === 0 && aAlarms === 0 && bLinks === 0 && seen.length === 1 && seen[0].title === row.title
+  return row && row.group_id === RS.g && row.creator_id === null && aParts === 0 && aAlarms === 0 && bLinks === 0 && seen.length === 1 && seen[0].title === row.title   // 15장: RA가 그룹을 나가며 앞으로 약속의 만든 사람 칸이 비어 남음
     ? true : { row, aParts, aAlarms, bLinks, seen };
 });
 await check('내 시험 데이터 지우기 ③: RB의 모든 줄이 한 줄도 안 바뀜 (표별 줄 수 · 내용 지문) · RB가 만든 일정은 그대로 · RB의 할 일 · 고친 값 기록이 걸린 RA 일정도 남음', async () => {
   const afterB = await snapOf(RB);
   const changed = diffSnap(beforeB, afterB);
   const guarded = await countOf(`select 1 from public.appointments where appointment_id = any($1::uuid[])`, [[RS.mixed1.appt, RS.mixed2.appt, RS.soloB.appt, RS.fromB.appt]]);
-  return changed.length === 0 && guarded === 4 ? true : { changed, guarded };
+  // 15장: RB와 맺은 친구 관계 · 공유 권한은 RA가 지우면서 같이 사라짐 — 그 두 표만 바뀌고 RB의 나머지 줄은 그대로
+  return JSON.stringify(changed.sort()) === JSON.stringify(['friends', 'sharing_permissions']) && guarded === 4 ? true : { changed, guarded };
 });
-await check('내 시험 데이터 지우기 ④: 친구 · 공유 권한 · 그룹 · 푸시 토큰 · 루틴 · ai_calls · 질문 기록 · 공동 일정 행은 그대로 (대화를 지워도 ai_calls는 줄이 남고 session_id만 NULL)', async () => {
-  const keep = ['push_tokens', 'friends', 'sharing_permissions', 'groups', 'group_members', 'routines', 'user_questions'];
+await check('내 시험 데이터 지우기 ④: 푸시 토큰 · 그룹(남이 있는 그룹) · 루틴 · ai_calls · 질문 기록 · 공동 일정 행은 그대로, 친구 · 공유 권한 · 그룹 참여는 15장에서 정리됨 (대화를 지워도 ai_calls는 줄이 남고 session_id만 NULL)', async () => {
+  const keep = ['push_tokens', 'groups', 'routines', 'user_questions'];
+  const cleared = await snapOf(RA, ['friends', 'sharing_permissions', 'group_members']);
+  const clearedOk = Object.values(cleared).every((v) => v.startsWith('0:'));
   const after = await snapOf(RA, keep);
   // user_questions도 대화를 지우면 session_id가 NULL이 되므로 지문이 아니라 줄 수로 봄
   const changed = keep.filter((k) => (k === 'user_questions' ? after[k].split(':')[0] !== beforeAKept[k].split(':')[0] : after[k] !== beforeAKept[k]));
   const calls = await q(`select string_agg(call_id::text, ',' order by call_id) as ids, count(*)::int as n, bool_and(session_id is null) as nulled from public.ai_calls where user_id = $1`, [RA]);
-  const shared = (await q(`select md5(string_agg(a::text, '|' order by a.appointment_id::text)) as h from public.appointments a where appointment_id = any($1::uuid[])`,
+  // 공동 일정 행은 그대로 남되, RA가 만든 앞으로 약속의 만든 사람 칸만 비워짐(그룹을 나가며) — 그 칸을 뺀 나머지가 지우기 전과 같음
+  const shared = (await q(`select md5(string_agg((to_jsonb(a) - 'creator_id' - 'updated_at')::text, '|' order by a.appointment_id::text)) as h from public.appointments a where appointment_id = any($1::uuid[])`,
     [[RS.shared.appt, RS.mixed1.appt, RS.mixed2.appt, RS.groupOnly.appt, RS.fromB.appt]]))[0].h;
   const todos = await q(`select count(*)::int as n, bool_and(appointment_id is null) as cut from public.todos where user_id = $1`, [RA]);   // 둔 표 — 지운 일정에 달린 연결만 끊김
-  return changed.length === 0 && calls[0].ids === beforeAKept.callIds && calls[0].n === 1 && calls[0].nulled === true
+  return changed.length === 0 && clearedOk && calls[0].ids === beforeAKept.callIds && calls[0].n === 1 && calls[0].nulled === true
     && shared === beforeAKept.sharedRows && todos[0].n === 1 && todos[0].cut === true
-    ? true : { changed, calls, sameShared: shared === beforeAKept.sharedRows, todos };
+    ? true : { changed, cleared, calls, sameShared: shared === beforeAKept.sharedRows, todos };
 });
 await check('내 시험 데이터 지우기 ⑤: RA의 프로필이 온보딩 전 기본값으로 (handle · nickname · 사진 · 시간대 · 선호 소리 · 말투는 그대로)', async () => {
   await su();
@@ -2888,18 +2897,21 @@ await check('내 시험 데이터 지우기 ⑦: 두 번 불러도 오류 없음
   const afterB = await snapOf(RB);
   const zeros = ['appointments', 'participants', 'alarms', 'alarm_events', 'alarm_suggestions', 'daily_records', 'daily_journals', 'conversation_sessions', 'user_edit_logs']
     .every((k) => r[k] === 0);
-  return zeros && r.appointments_kept === 4 && r.profile === 1 && diffSnap(beforeB, afterB).length === 0 ? true : { r, changed: diffSnap(beforeB, afterB) };
+  const friendZero = Object.values(r.friend_data).every((n) => n === 0);       // 15장: 친구 정리도 두 번째에는 지울 것이 없음
+  return zeros && friendZero && r.appointments_kept === 0 && r.profile === 1 && JSON.stringify(diffSnap(beforeB, afterB).sort()) === JSON.stringify(['friends', 'sharing_permissions']) ? true : { r, changed: diffSnap(beforeB, afterB) };
 });
 await check('내 시험 데이터 지우기 ⑧: 반대로 RB가 지워도 RA의 남은 줄은 한 줄도 안 바뀜 (RB 혼자인 개인 일정만 지워지고 RB가 만든 그룹 일정은 남음)', async () => {
   const beforeA = await snapOf(RA);
   await as(RB);
   const [{ r }] = await q(`select public.dev_reset_my_data() as r`);
   const afterA = await snapOf(RA);
-  const changed = diffSnap(beforeA, afterA);
+  const changed = diffSnap(beforeA, afterA);      // 15장: RB가 그룹을 나가면 그 그룹(남은 멤버가 없으면 삭제)이 RA 몫 표에서도 바뀜
   const aKept = await countOf(`select 1 from public.appointments where appointment_id = any($1::uuid[])`, [[RS.shared.appt, RS.mixed1.appt, RS.mixed2.appt, RS.groupOnly.appt]]);
   const bGone = await countOf(`select 1 from public.appointments where appointment_id = $1`, [RS.soloB.appt]);
   const bGroupKept = await countOf(`select 1 from public.appointments where appointment_id = $1`, [RS.fromB.appt]);   // 그룹 일정은 RB 혼자여도 안 지움
-  return changed.length === 0 && aKept === 4 && bGone === 0 && bGroupKept === 1 && r.appointments === 1 && r.appointments_kept === 1 ? true : { changed, aKept, bGone, bGroupKept, r };
+  // RB도 지우면서 그룹을 나가 마지막 참여 멤버(RA는 이미 나감)가 되므로 그룹이 삭제되고 그 그룹의 공동 일정도 같이 사라짐 — RA의 개인 줄(기록 · 일기 · 대화 …)은 안 바뀜
+  const groupGone = await countOf(`select 1 from public.groups where group_id = $1`, [RS.g]);
+  return JSON.stringify(changed) === JSON.stringify(['groups']) && groupGone === 0 && aKept === 0 && bGone === 0 && bGroupKept === 0 && r.appointments === 1 ? true : { changed, aKept, bGone, bGroupKept, groupGone, r };
 });
 
 // ---- 자주 가는 곳 user_places (지도에서 위치 고르기 ②, 헤드 설계 10/30 · Q13 · D59) ----------
@@ -3029,6 +3041,6 @@ await check('user_places: updated_at이 고칠 때 갱신됨 · 계정을 지우
 // ---------------------------------------------------------------------
 // 장마다 자기 계정을 새로 만들어 앞 검사의 A~E와 섞이지 않게 함. 장이 늘면 아래 목록에 한 줄씩
 const FRIEND_CTX = { q, as, su, svc, check, expectErr, PGlite, AUTH_STUBS, MIG_DIR, readFileSync, readdirSync, join };
-for (const ch of ['ch02', 'ch03', 'ch04', 'ch05', 'ch06', 'ch11', 'ch07', 'ch08', 'ch09', 'ch10', 'ch12', 'ch13']) await (await import(`./friend/${ch}.mjs`)).default(FRIEND_CTX);
+for (const ch of ['ch02', 'ch03', 'ch04', 'ch05', 'ch06', 'ch11', 'ch07', 'ch08', 'ch09', 'ch10', 'ch12', 'ch13', 'ch15']) await (await import(`./friend/${ch}.mjs`)).default(FRIEND_CTX);
 
 report();

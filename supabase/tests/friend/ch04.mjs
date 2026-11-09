@@ -95,9 +95,9 @@ export default async function ch04({ q, as, su, check, expectErr, PGlite, AUTH_S
     const open1 = await call(Q, 'public.open_friend_link($1)', [linkP.token]);
     const open2 = await call(P, 'public.open_friend_link($1)', [linkQ.token]);
     await as(Q);
-    const direct1 = await expectErr(() => q(`insert into public.friends (requester_id, addressee_id) values ($1, $2)`, [Q, P]), /violates foreign key constraint/);
+    const direct1 = await expectErr(() => q(`insert into public.friends (requester_id, addressee_id) values ($1, $2)`, [Q, P]), /row-level security/);   // 직접 insert 정책이 15장에서 닫혀 어느 쪽이든 같은 행 권한 거절
     await as(P);
-    const direct2 = await expectErr(() => q(`insert into public.friends (requester_id, addressee_id) values ($1, $2)`, [P, Q]), /violates foreign key constraint/);
+    const direct2 = await expectErr(() => q(`insert into public.friends (requester_id, addressee_id) values ($1, $2)`, [P, Q]), /row-level security/);
     await su();
     await clearLimits(P, Q);
     return shapes.every((x) => x === NOT_FOUND) && open1.status === 'EXPIRED' && open2.status === 'EXPIRED'
@@ -372,7 +372,7 @@ export default async function ch04({ q, as, su, check, expectErr, PGlite, AUTH_S
       && ok200.status === 'REPORTED' ? true : { first, same, other, nextDay, bad, self, ghost, hidden, ok200 };
   });
 
-  await check('4-04(변형): 직접 insert 거절은 없는 사람과 같은 모양 — 에러 코드 23503, 메시지 · 상세가 외래 키 위반 문구 (차단당했음이 드러나지 않게, 4-가)', async () => {
+  await check('4-04(변형): 직접 insert 거절은 없는 사람과 같은 모양 — 직접 insert 정책이 15장에서 닫혀 차단당한 사람이든 없는 사람이든 같은 행 권한 거절(42501) (차단당했음이 드러나지 않게, 4-가)', async () => {
     const S1 = await join_(110, '차단자'), S2 = await join_(111, '차단당함');
     await block(S1, S2);
     const grab = async (who, target) => {
@@ -383,8 +383,7 @@ export default async function ch04({ q, as, su, check, expectErr, PGlite, AUTH_S
     };
     const blocked = await grab(S2, S1);
     const ghost = await grab(S2, NOBODY);
-    const shape = (x) => x.code === '23503' && /^insert or update on table "friends" violates foreign key constraint "friends_(requester|addressee)_id_fkey"$/.test(x.message)
-      && /^Key is not present in table "profiles"\.$/.test(x.detail ?? '');
+    const shape = (x) => x.code === '42501' && /^new row violates row-level security policy for table "friends"$/.test(x.message);
     return shape(blocked) && shape(ghost) ? true : { blocked, ghost };
   });
 
@@ -400,7 +399,7 @@ export default async function ch04({ q, as, su, check, expectErr, PGlite, AUTH_S
                  perform public.submit_report('USER', b, 'OTHER', null);
                else
                  set local role authenticated;
-                 insert into public.friends (requester_id, addressee_id) values (a, b);
+                 perform public.send_friend_request(b);      -- 직접 insert 정책이 닫혀서 요청 함수가 같은 사람 잠금을 씀
                end if;
                select count(*)::integer into n from pg_locks where locktype = 'advisory' and pid = pg_backend_pid();
                return n;
