@@ -60,3 +60,13 @@ node --experimental-strip-types --test supabase/functions/_shared/prepare-ml.tes
 5. 자동 준비시간의 C1/W4 선택, 수동 입력 우선순위, 예측 실패 시 P80 복귀, 미리보기와 저장의 일관성 E2E 검증.
 6. 일시적인 Cloudflare Quick Tunnel은 개발용으로만 사용. 지속적인 운영용 배포 및 키 관리 별도 설계.
 7. `PREPARE_ML_ENABLED=0` 유지. 테스트 전용 함수는 사용하지 않을 때 `PREPARE_ML_TEST_ENABLED=0`으로 차단하고 종료 후 삭제.
+
+## 2026-11-10 운영 사용 전 추가 안전장치 (작업 브랜치, 아직 미배포)
+
+- `PREPARE_ML_ENABLED=1`만으로는 **어떤 사용자도 추론할 수 없다**. 서버 비밀값 `PREPARE_ML_ALLOWED_USER_IDS`에 정확히 허용된 UUID가 추가로 있어야 한다. 빈 목록 또는 잘못된 목록이면 전체 거부.
+- 자동 준비시간·기상 포함 일정에서만 추론. `participant.prepare_minutes` 수동 지정은 우선하며 그날 두 번째 일정은 기존 규칙 유지.
+- 사용자 프로필 3개는 클라이언트가 요청 본문으로 보내지 않는다. `buildPlan`이 서버 DB에서 가져오는 방식이다. 코드북 매핑과 별도 개인정보 동의가 확인되기 전에는 해당 프로필 필드 값을 임의로 넣거나 `ml_codes_verified=true`로 바꾸지 않는다.
+- 현재 `ml_codes_verified` 컬럼은 **RLS 소유자 수정이 가능**하므로 신뢰된 검증 신호가 아니다. 운영에 적용하려면 인증된 서비스 측 저장·검증 방식, 컬럼 UPDATE 권한 차단 또는 보호 테이블을 추가해야 한다. **서버 사용자 허용 목록만으로 이 문제를 해결한 것으로 취급하지 않는다**.
+- 직전 날짜의 `daily_records.actual_prepare_minutes`를 찾은 경우만 W4 후보이며 없거나 유효하지 않으면 C1 후보. 모델 API 실패/시간 초과/검증 실패 시 기존 P80 사용.
+- 동일한 `computePlan`에 동일한 입력과 추론값을 주었을 때 preview/save 시각이 일치하는 순수 테스트 추가. **실제 저장 API E2E 또는 데이터베이스 영속화 일치성은 아직 검증하지 못했다**.
+- 서버 코드의 새 안전장치는 브랜치에서 테스트한 뒤 별도로 배포해야 동작한다. 현재 운영 플래그는 0 유지.
