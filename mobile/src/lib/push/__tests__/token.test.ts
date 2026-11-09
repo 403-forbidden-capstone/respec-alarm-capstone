@@ -102,8 +102,10 @@ describe('로그아웃 때 토큰 삭제 (11-02)', () => {
     await registerPushToken();
     mockDeleteEq.mockResolvedValueOnce({ error: { message: 'offline' } });
     await expect(removePushToken()).rejects.toBeDefined();
+    await removePushToken(); // 못 지웠으면 같은 토큰으로 다시 시도할 수 있음
+    expect(mockDeleteEq).toHaveBeenCalledTimes(2);
     mockOS = 'web';
     await removePushToken();
-    expect(mockDeleteEq).toHaveBeenCalledTimes(1);
+    expect(mockDeleteEq).toHaveBeenCalledTimes(2);
   });
 });

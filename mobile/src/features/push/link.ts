@@ -19,6 +19,12 @@ const groupHref = (groupId: string, userId?: string | null): Href =>
     ? { pathname: '/groups/[id]/members/[userId]', params: { id: groupId, userId } }
     : { pathname: '/groups/[id]', params: { id: groupId } };
 
+// 탭 밑에 깔아 둘 화면인지 — 그룹 탭 · 그룹 상세 · 그룹원 기상 확인은 뒤로 가면 그룹 탭 (친구 14-자, lib/nav openGroupDetail과 같은 방식)
+export function needsGroupTabBelow(href: Href): boolean {
+  const pathname = typeof href === 'string' ? href : href.pathname;
+  return pathname.startsWith('/groups/');
+}
+
 // 누르면 갈 곳 — 푸시가 아니면(감지 안내 같은 로컬 알림) null (다른 처리가 맡음)
 export function pushHref(data: unknown, me: string | null): Href | null {
   if (!isPushData(data)) return null;
@@ -30,9 +36,11 @@ export function pushHref(data: unknown, me: string | null): Href | null {
   if (change?.type === 'CONFIRM') return { pathname: '/alarm/changed', params: { id: change.appointmentId } };
   if (change) return groupId ? groupHref(groupId) : { pathname: '/group' };
 
+  // 깨우기를 받은 사람은 내 기상 확인(H08, 8-02) — 서버 path가 받는 사람 자신의 G03 주소라 그대로 열면 '볼 수 없어요'가 뜸
+  if (data.kind === 'WAKE_PING') return '/wake';
   const path = text(data.path);
   const direct = path ? GROUP_PATH.exec(path) : null;
-  if (direct) return groupHref(direct[1], direct[2]); // 8장이 정확한 화면 주소를 줌 (깨우기 → 그 사람의 기상 확인)
+  if (direct) return direct[2] === me ? '/wake' : groupHref(direct[1], direct[2]); // 8장이 정확한 화면 주소를 줌
   switch (path) {
     case '/wake':
       return '/wake';

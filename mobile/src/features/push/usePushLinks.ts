@@ -1,11 +1,11 @@
-import { router } from 'expo-router';
+import { router, type Href } from 'expo-router';
 import { useEffect, useRef } from 'react';
 import { Platform } from 'react-native';
 
 import { syncNow } from '@/lib/alarmSync';
 import { isPushData } from '@/lib/push/kinds';
 
-import { needsAlarmSync, pushHref } from './link';
+import { needsAlarmSync, needsGroupTabBelow, pushHref } from './link';
 
 // 서버 푸시(친구 · 그룹 알림)를 눌렀을 때 화면 이동 · 받았을 때 폰 알람 맞추기 — 안드로이드만, 웹 · 시험에서는 expo-notifications를 읽지 않음
 //   active = 앱 화면이 열릴 수 있는 때(로그인 · 온보딩 끝) — 그 전에 누른 알림은 기억해 뒀다가 열린 뒤에 이동 (로그인 전에 눌렀으면 로그인 뒤 그 화면, 11-23)
@@ -21,6 +21,16 @@ const keyOf = (r: Response): string => `${r.notification.request.identifier}@${r
 // 시험용
 export function resetPushLinks() {
   handled.clear();
+}
+
+// 알림으로 열린 화면에서 뒤로 가면 그 탭 첫 화면 (친구 14-자) — 그룹 쪽은 그룹 탭을 밑에 깔고 올림. 이미 화면이 쌓여 있으면 걷어 내고 탭으로 (navigate만 쓰면 탭 묶음이 하나 더 쌓임)
+function openPushHref(href: Href) {
+  if (needsGroupTabBelow(href)) {
+    const tab = { pathname: '/group', params: { seg: 'group', open: String(Date.now()) } } as const;
+    if (router.canDismiss()) router.dismissTo(tab);
+    else router.navigate(tab);
+  }
+  router.push(href);
 }
 
 export function usePushLinks({ active, userId }: { active: boolean; userId: string | null }) {
@@ -41,7 +51,7 @@ export function usePushLinks({ active, userId }: { active: boolean; userId: stri
     handled.add(key);
     if (needsAlarmSync(data, me)) void syncNow();
     try {
-      router.push(href);
+      openPushHref(href);
     } catch (e) {
       if (__DEV__) console.warn('[push] 알림 화면으로 이동하지 못함', e);
     }

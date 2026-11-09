@@ -1,6 +1,6 @@
 import { describe, expect, it } from '@jest/globals';
 
-import { HOME, needsAlarmSync, pushHref } from '../link';
+import { HOME, needsAlarmSync, needsGroupTabBelow, pushHref } from '../link';
 
 // 알림 누르기 · 받기 (시험케이스 11-23 · 11-24, 세션약속 1절 푸시 종류 표)
 const ME = 'me';
@@ -25,18 +25,31 @@ describe('눌렀을 때 갈 화면', () => {
     });
   });
 
-  it('깨우기는 서버가 준 G03 주소 그대로 (8장)', () => {
-    expect(pushHref({ ...base, kind: 'WAKE_PING', path: `/groups/${G}/members/${U}` }, ME)).toEqual({
+  it('깨우기를 받으면 내 기상 확인(H08) — 서버 path가 받는 사람 자신의 G03 주소여도 (8-02)', () => {
+    expect(pushHref({ kind: 'WAKE_PING', recipientUserId: U, path: `/groups/${G}/members/${U}` }, U)).toBe('/wake');
+    expect(pushHref({ ...base, kind: 'WAKE_PING', path: `/groups/${G}/members/${U}` }, ME)).toBe('/wake');
+  });
+
+  it('서버가 준 그룹 주소는 그대로 (다른 사람의 G03 · 그룹 상세), 받는 사람 자신의 G03이면 H08', () => {
+    expect(pushHref({ ...base, kind: 'WAKE_NUDGE', path: `/groups/${G}/members/${U}` }, ME)).toEqual({
       pathname: '/groups/[id]/members/[userId]',
       params: { id: G, userId: U },
     });
-    expect(pushHref({ ...base, kind: 'WAKE_PING', path: `/groups/${G}` }, ME)).toEqual({ pathname: '/groups/[id]', params: { id: G } });
+    expect(pushHref({ ...base, kind: 'WAKE_NUDGE', path: `/groups/${G}` }, ME)).toEqual({ pathname: '/groups/[id]', params: { id: G } });
+    expect(pushHref({ kind: 'WAKE_NUDGE', recipientUserId: U, path: `/groups/${G}/members/${U}` }, U)).toBe('/wake');
+  });
+
+  it('그룹 쪽 화면은 그룹 탭을 밑에 깔고 열어야 함 (뒤로 가면 그룹 탭, 14-자)', () => {
+    expect(needsGroupTabBelow({ pathname: '/groups/[id]', params: { id: G } })).toBe(true);
+    expect(needsGroupTabBelow({ pathname: '/groups/[id]/members/[userId]', params: { id: G, userId: U } })).toBe(true);
+    expect(needsGroupTabBelow({ pathname: '/group' })).toBe(false);
+    expect(needsGroupTabBelow('/wake')).toBe(false);
   });
 
   it('모양이 이상한 주소 · 모르는 path는 홈 (앱 안 임의 주소로 보내지 않음)', () => {
-    expect(pushHref({ ...base, kind: 'WAKE_PING', path: '/groups/x/members/y' }, ME)).toBe(HOME);
-    expect(pushHref({ ...base, kind: 'WAKE_PING', path: '/settings' }, ME)).toBe(HOME);
-    expect(pushHref({ ...base, kind: 'WAKE_PING' }, ME)).toBe(HOME);
+    expect(pushHref({ ...base, kind: 'WAKE_NUDGE', path: '/groups/x/members/y' }, ME)).toBe(HOME);
+    expect(pushHref({ ...base, kind: 'WAKE_NUDGE', path: '/settings' }, ME)).toBe(HOME);
+    expect(pushHref({ ...base, kind: 'WAKE_NUDGE' }, ME)).toBe(HOME);
   });
 
   it('받는 사람이 지금 계정이 아니면 홈 (11-24) · 로그인 전(me null) · 받는 사람 값이 없어도 홈', () => {

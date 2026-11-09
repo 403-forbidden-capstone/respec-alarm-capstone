@@ -9,6 +9,7 @@ import { supabase } from '@/lib/supabase';
 
 export type PushRegistration = 'registered' | 'unsupported' | 'failed';
 
+const FETCH_WAIT_MS = 4_000;
 let current: string | null = null; // 이번 실행에서 등록한 토큰 — 로그아웃 때 같은 값을 지움
 
 const warn = (what: string, e: unknown) => {
@@ -47,11 +48,12 @@ export async function registerPushToken(): Promise<PushRegistration> {
 //   못 지워도 로그아웃은 계속 (부르는 쪽이 삼킴) — 다음 로그인이 같은 토큰을 새 주인으로 옮김
 export async function removePushToken(): Promise<void> {
   if (Platform.OS !== 'android') return;
-  const token = current ?? (await fetchToken());
-  current = null;
+  // 등록한 적이 없으면 폰에서 받아 오는데, 오프라인에서 로그아웃이 오래 걸리지 않게 짧게만 기다림
+  const token = current ?? (await Promise.race([fetchToken(), new Promise<null>((resolve) => setTimeout(() => resolve(null), FETCH_WAIT_MS))]));
   if (!token) return;
   const { error } = await supabase.from('push_tokens').delete().eq('token', token);
   if (error) throw error;
+  current = null; // 지운 뒤에만 비움 — 로그아웃이 중간에 멈춰 로그인이 남으면 다음 앞에 올 때 다시 등록
 }
 
 // 시험용
