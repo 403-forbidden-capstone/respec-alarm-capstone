@@ -1,4 +1,4 @@
--- 탐색 시험(Fable 계획 247개, S3 실행)에서 나온 서버 결함 네 가지 (11/9)
+-- 탐색 시험(Fable 계획 247개, S3 실행)에서 나온 서버 결함 (11/9)
 --   X-WAKE-04  알람이 울린 뒤 알람만 끄고 기상 확인이 없으면 그룹 기상 조회에서 줄이 사라지고(약속이 다음 날 새벽이면 그룹 전체가 비고) 미확인 · 깨우기 대상에서도 빠짐
 --              → 울린 기록이 있는 기상 알람은 꺼도 그날의 기준 알람으로 셈 (private.wake_alarm_counts). 울리기 전에 꺼 둔 알람은 그대로 '알람 없음'
 --   X-PROP-01  늦추는 제안을 적용하면 같은 카드의 출발 알람이 같이 움직여 약속보다 뒤가 됨
@@ -7,7 +7,15 @@
 --              → 차단 쌍이 보낸 초대는 목록에서 빼고, 차단할 때 둘 사이의 대기 초대를 정리
 --   X-APPT-01  만든 사람이 나간 공동 약속(creator_id 비어 있음)을 아무도 못 지움
 --              → 그 약속에 참여한 그룹원이 지울 수 있게 (고치기 정책 appointments_update와 같은 조건: 참여 중인 그룹원 + 안 지난 약속)
--- 함수 본문은 지난 마이그레이션(wake_status · wake_hardening · alarm_proposals · blocks · groups)과 같고 위 이유로 달라진 곳에만 주석을 닮
+--   X-APPT-04  그룹을 나가 참여자가 0명이 된 앞으로 약속이 아무도 못 고치는 채 남음
+--              → 나가는 사람의 앞으로 약속 중 참여자가 한 명도 안 남은 것은 같이 지움
+--   X-STATE-01 친구를 끊고 차단해도 차단 전에 받은 그룹 초대를 수락하면 들어가짐
+--              → 차단한 사이가 보낸 초대는 수락할 수 없음(GONE) — 차단할 때 정리와 함께
+--   X-SEED-03  일반 로그인 사용자도 개발용 초기화(dev_reset_my_data)로 자기 친구 · 그룹 데이터를 지울 수 있음
+--              → 이메일이 @example.com인 시드 · 시험 계정만 허용 (일반 계정은 42501)
+--   X-PRIV-09  알람 조회 권한이 있는 친구가 내가 참여한 공동 약속의 제목 · 장소를 그 그룹 멤버가 아니어도 봄
+--              → 보는 사람이 그 그룹 멤버가 아니면 제목을 '그룹 일정', 장소를 빈 글자로 가림 (개인 일정은 그대로)
+-- 함수 본문은 지난 마이그레이션(wake_status · wake_hardening · alarm_proposals · blocks · groups · account_delete · abuse_closing · group_wake)과 같고 위 이유로 달라진 곳에만 주석을 닮
 
 -- ---------------------------------------------------------------------
 -- 1. 기상 알람으로 셀 알람 — 켜져 있거나, 꺼졌어도 그날 울린 기록(TRIGGERED)이 있으면
@@ -683,3 +691,182 @@ create policy appointments_delete_creator on public.appointments
         and appointment_at >= private.day_start((select auth.uid()))
         and private.is_group_member(group_id)
         and private.is_appointment_participant(appointment_id)));
+
+
+-- ---------------------------------------------------------------------
+-- 5. 그룹을 나갈 때 참여자가 0명이 된 앞으로 약속은 지움 (X-APPT-04)
+-- ---------------------------------------------------------------------
+
+-- 지난 정의는 20261109031500_friend_account_delete.sql. 달라진 곳 = 참여가 지워진 약속을 모아 두었다가 참여자가 한 명도 안 남고 만든 사람 칸도 비었으면 약속을 지움 (지난 약속 · 만든 사람이 남은 약속 · 남의 할 일이 걸린 약속은 그대로)
+create or replace function private.after_group_member_gone()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_touched uuid[];
+begin
+  -- 이 사람의 참여가 지워지는 앞으로 약속 id를 모아 둠
+  with gone as (
+    delete from public.appointment_participants ap
+    using public.appointments a
+    where ap.appointment_id = a.appointment_id
+      and a.group_id = old.group_id
+      and a.appointment_at >= private.day_start(old.user_id)
+      and ap.user_id = old.user_id
+    returning ap.appointment_id)
+  select coalesce(array_agg(g.appointment_id), '{}'::uuid[]) into v_touched from gone g;
+
+  update public.appointments a
+  set creator_id = null
+  where a.group_id = old.group_id
+    and a.creator_id = old.user_id
+    and a.appointment_at >= private.day_start(old.user_id);
+
+  -- 이 사람의 참여가 지워져 참여자가 한 명도 안 남았고 만든 사람 칸도 빈(이 사람이 만든 약속이거나 이미 비어 있던) 앞으로 약속은 지움 — 아무도 고치지 못하는 빈 약속을 남기지 않음 (탐색 시험 X-APPT-04).
+  --   만든 사람이 그룹에 남아 있는 약속은 참여자가 없어도 그 사람이 고치거나 지울 수 있어 그대로 둠.
+  --   남의 할 일(todos) · 고친 값 기록(user_edit_logs)이 가리키는 약속은 지우지 않음 (지우면 남의 행이 고쳐짐 — 개발용 초기화 시험의 "남의 행에 안 닿음"과 같은 방어)
+  delete from public.appointments a
+  where a.appointment_id = any(v_touched)
+    and a.creator_id is null
+    and not exists (select 1 from public.appointment_participants pt where pt.appointment_id = a.appointment_id)
+    and not exists (select 1 from public.todos t where t.appointment_id = a.appointment_id and t.user_id <> old.user_id)
+    and not exists (select 1 from public.user_edit_logs l where l.appointment_id = a.appointment_id and l.user_id <> old.user_id);
+
+  perform 1 from public.groups g where g.group_id = old.group_id for update;
+  if found and not exists (
+    select 1 from public.group_members gm where gm.group_id = old.group_id and gm.invite_status = 'JOINED'
+  ) then
+    delete from public.groups g where g.group_id = old.group_id;
+  end if;
+  return null;
+end;
+$$;
+
+
+-- ---------------------------------------------------------------------
+-- 6. 차단한 사이가 보낸 그룹 초대는 수락할 수 없음 (X-STATE-01)
+-- ---------------------------------------------------------------------
+
+create or replace function public.accept_group_invite(p_group_id uuid, p_wake_share boolean default false)
+returns jsonb
+language plpgsql
+volatile
+security definer
+set search_path = ''
+as $$
+declare
+  v_uid uuid := auth.uid();
+  v_st  public.invite_status;
+begin
+  if v_uid is null then
+    raise exception '로그인이 필요함' using errcode = '42501';
+  end if;
+  if p_group_id is null then
+    return jsonb_build_object('status', 'GONE');
+  end if;
+
+  perform private.lock_group(p_group_id);
+  perform private.lock_group_user(v_uid);
+
+  -- 그룹 행을 키 공유로 잡음 — 마지막 멤버가 나가며 그룹을 지우는 일과 겹쳐도 수락이 성공으로 끝나지 않고 GONE (join_group과 같음)
+  perform 1 from public.groups g where g.group_id = p_group_id for key share;
+  if not found then
+    return jsonb_build_object('status', 'GONE');
+  end if;
+  select gm.invite_status into v_st from public.group_members gm where gm.group_id = p_group_id and gm.user_id = v_uid;
+  if v_st = 'JOINED' then
+    return jsonb_build_object('status', 'ALREADY_JOINED', 'group_id', p_group_id);
+  end if;
+  if v_st is distinct from 'INVITED' then
+    return jsonb_build_object('status', 'GONE');
+  end if;
+  -- 초대한 사람과 차단한 사이면 수락할 수 없음 — 차단 전에 받은 초대여도 (정리 전부터 남은 행 포함). 그 초대는 지우고 없는 초대와 같은 응답 (탐색 시험 X-STATE-01)
+  if exists (
+    select 1 from public.group_members gm
+    where gm.group_id = p_group_id and gm.user_id = v_uid and gm.invited_by is not null
+      and private.is_blocked_pair(v_uid, gm.invited_by)) then
+    delete from public.group_members gm where gm.group_id = p_group_id and gm.user_id = v_uid and gm.invite_status = 'INVITED';
+    return jsonb_build_object('status', 'GONE');
+  end if;
+  if private.group_member_count(p_group_id) >= 20 then
+    return jsonb_build_object('status', 'FULL');
+  end if;
+  if private.joined_group_count(v_uid) >= 10 then
+    return jsonb_build_object('status', 'TOO_MANY_GROUPS');
+  end if;
+
+  update public.group_members gm
+  set invite_status = 'JOINED', joined_at = now(), wake_share_opt_in = coalesce(p_wake_share, false),
+      notifications_off = false, invited_by = null, invited_at = null
+  where gm.group_id = p_group_id and gm.user_id = v_uid;
+  return jsonb_build_object('status', 'JOINED', 'group_id', p_group_id);
+end;
+$$;
+
+
+-- ---------------------------------------------------------------------
+-- 7. 개발용 초기화는 시드 · 시험 계정만 (X-SEED-03)
+-- ---------------------------------------------------------------------
+
+-- 지난 정의는 20261109050000_friend_abuse_closing.sql. 달라진 곳 = 이메일 검사 하나. 앱의 개발 화면(/dev/screens)이 일반 계정으로 부르면 42501
+create or replace function public.dev_reset_my_data()
+returns jsonb
+language plpgsql
+volatile
+security definer
+set search_path = ''
+as $$
+declare
+  v_uid    uuid := auth.uid();
+  v_friend jsonb;
+  v_email  text;
+begin
+  if v_uid is null then
+    raise exception '로그인이 필요함' using errcode = '42501';
+  end if;
+  -- 시드 · 시험 계정만: 이메일이 @example.com인 계정 (시드 데모 demo-… · 시험 도구 e2e-… · simfriend-… · 탐색 시험 probe… · DB 시험 계정이 모두 이 주소를 씀).
+  --   카카오 · 구글로 들어온 일반 계정은 거절 (탐색 시험 X-SEED-03)
+  select lower(u.email) into v_email from auth.users u where u.id = v_uid;
+  if v_email is null or v_email not like '%@example.com' then
+    raise exception '시험 계정만 쓸 수 있음' using errcode = '42501';
+  end if;
+  v_friend := private.dev_reset_friend_data(v_uid);
+  return private.dev_reset_my_data_core() || jsonb_build_object('friend_data', v_friend);
+end;
+$$;
+
+
+-- ---------------------------------------------------------------------
+-- 8. 알람 조회 권한으로 보는 약속 정보에서 남의 그룹 공동 약속은 가림 (X-PRIV-09)
+-- ---------------------------------------------------------------------
+
+-- 지난 정의는 20261015000100_group_wake.sql. 달라진 곳 = 보는 사람이 그 공동 약속의 그룹 멤버가 아니면 제목 '그룹 일정', 장소 빈 글자. 시각은 그대로, 개인 일정은 그대로
+create or replace function public.get_shared_alarm_appointments(p_owner_id uuid default null)
+returns table (
+  alarm_id       uuid,
+  user_id        uuid,          -- 알람 주인
+  appointment_id uuid,
+  title          varchar,
+  dest_name      varchar,       -- 장소 이름
+  appointment_at timestamptz
+)
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select a.alarm_id,
+         a.user_id,
+         ap.appointment_id,
+         (case when ap.group_id is not null and not private.is_group_member(ap.group_id) then '그룹 일정' else ap.title end)::varchar,
+         (case when ap.group_id is not null and not private.is_group_member(ap.group_id) then '' else ap.dest_name end)::varchar,
+         ap.appointment_at
+  from public.alarms a
+  join public.appointment_participants pt on pt.participant_id = a.participant_id
+  join public.appointments ap on ap.appointment_id = pt.appointment_id
+  where a.user_id in (select private.granted_owner_ids('VIEW_ALARM'))
+    and (p_owner_id is null or a.user_id = p_owner_id)
+  order by ap.appointment_at, a.scheduled_at;
+$$;

@@ -356,4 +356,59 @@ export default async function ch09({ q, as, su, svc, check, expectErr }) {
     const b = rows.filter((x) => x.user_id === B);
     return b.length === 1 && iso(b[0].wake_alarm_at) === iso(at('06:30')) ? true : { b };
   });
+
+  // ---- 탐색 시험 X-APPT-04: 나가는 사람의 앞으로 약속 중 참여자가 한 명도 안 남은 것은 같이 지움 -------------
+
+  await check('X-APPT-04 · X-STATE-02: 그룹을 나가 참여자가 0명이 되고 만든 사람 칸도 빈 앞으로 약속(내가 만들고 혼자 참여한 약속 · 만든 사람 칸이 이미 비고 나만 참여한 약속)은 같이 지워지고, 다른 참여자가 남은 약속 · 만든 사람이 남은 약속 · 지난 약속은 그대로 — 지난 약속 참여 기록은 다시 초대받아 들어와도 남음', async () => {
+    const A = await join_(50, '나가는이'), B = await join_(51, '남는이');
+    const g = await mkGroup(A, [B]);
+    const solo = await appt(A, g, at('10:00'), '혼자 참여한 약속'), shared = await appt(A, g, at('11:00'), '같이 참여한 약속');
+    const orphanMine = await appt(A, g, at('12:00'), '만든 사람 칸이 이미 빈 약속'), bOwned = await appt(B, g, at('13:00'), '남이 만들고 나만 참여한 약속');
+    const past = await appt(A, g, at('10:00', PAST), '지난 약속');
+    await part(A, solo); await part(A, shared); await part(B, shared); await part(A, past); await part(A, orphanMine); await part(A, bOwned);
+    await q(`alter table public.appointments disable trigger keep_keys`);       // 탈퇴 연쇄(12장)가 하는 일을 흉내: 만든 사람 칸 비우기
+    try {
+      await q(`update public.appointments set creator_id = null where appointment_id = $1`, [orphanMine]);
+    } finally {
+      await q(`alter table public.appointments enable trigger keep_keys`);
+    }
+    await as(A);
+    const left = await q(`update public.group_members set invite_status = 'LEFT' where group_id = $1 and user_id = $2 returning 1`, [g, A]);
+    await su();
+    const exists = (ap) => n(`select 1 from public.appointments where appointment_id = $1`, [ap]);
+    const after = { solo: await exists(solo), orphanMine: await exists(orphanMine), shared: await exists(shared), bOwned: await exists(bOwned), past: await exists(past) };
+    const sharedRow = (await q(`select creator_id from public.appointments where appointment_id = $1`, [shared]))[0];
+    const parts = { aShared: await partRows(A, shared), bShared: await partRows(B, shared), aPast: await partRows(A, past) };
+    // 다시 초대받아 들어옴 — 지난 약속 참여 기록은 그대로
+    await q(`update public.group_members set invite_status = 'INVITED', invited_by = $3, invited_at = now(), joined_at = null where group_id = $1 and user_id = $2`, [g, A, B]);
+    const back = await call(A, 'public.accept_group_invite($1, false)', [g]);
+    const aPastBack = await partRows(A, past);
+    return left.length === 1 && after.solo === 0 && after.orphanMine === 0 && after.shared === 1 && after.bOwned === 1 && after.past === 1
+      && sharedRow.creator_id === null && parts.aShared === 0 && parts.bShared === 1 && parts.aPast === 1 && back.status === 'JOINED' && aPastBack === 1 ? true : { left, after, sharedRow, parts, back, aPastBack };
+  });
+
+  // ---- 탐색 시험 X-PRIV-09: 남의 그룹 공동 약속의 제목 · 장소는 가림 ----------------------------------------
+
+  await check('X-PRIV-09: 알람 조회 권한으로 보는 약속 정보(get_shared_alarm_appointments)에서 보는 사람이 그 그룹 멤버가 아닌 공동 약속은 제목 "그룹 일정" · 장소 빈 글자 — 같은 그룹 멤버가 보면 그대로, 개인 일정은 그대로, 시각은 그대로', async () => {
+    const O = await join_(53, '주인'), V = await join_(54, '그룹밖친구'), M = await join_(55, '같은그룹친구');
+    const g = await mkGroup(O, [M]);                                          // V는 이 그룹 멤버가 아님
+    const befriend = async (a, b) => {
+      await call(a, 'public.send_friend_request($1)', [b]);
+      await call(b, 'public.accept_friend_request($1)', [a]);
+      await q(`delete from public.rate_limit_events where user_id = any($1::uuid[])`, [[a, b]]);
+    };
+    const grant = async (owner, grantee) => {
+      const [f] = await q(`select friend_id from public.friends where least(requester_id, addressee_id) = least($1::uuid, $2::uuid) and greatest(requester_id, addressee_id) = greatest($1::uuid, $2::uuid)`, [owner, grantee]);
+      await q(`insert into public.sharing_permissions (owner_id, grantee_id, source_type, source_id, can_view_alarm) values ($1, $2, 'FRIEND', $3, true)`, [owner, grantee, f.friend_id]);
+    };
+    await befriend(O, V); await befriend(O, M); await grant(O, V); await grant(O, M);
+    const group = await appt(O, g, at('10:00'), '비밀 모임'), solo = await appt(O, null, at('14:00'), '개인 일정');
+    await wakeAt(O, await part(O, group), at('07:00')); await wakeAt(O, await part(O, solo), at('12:00'));
+    const seen = async (viewer) => { await as(viewer); const r = await q(`select * from public.get_shared_alarm_appointments($1)`, [O]); await su(); return r; };
+    const byTitle = (r, ap) => r.find((x) => x.appointment_id === ap);
+    const outsider = await seen(V), member = await seen(M);
+    const og = byTitle(outsider, group), os = byTitle(outsider, solo), mg = byTitle(member, group), ms = byTitle(member, solo);
+    return outsider.length === 2 && og.title === '그룹 일정' && og.dest_name === '' && iso(og.appointment_at) === iso(at('10:00')) && os.title === '개인 일정' && os.dest_name === '학교'
+      && member.length === 2 && mg.title === '비밀 모임' && mg.dest_name === '학교' && ms.title === '개인 일정' ? true : { outsider, member };
+  });
 }

@@ -2816,7 +2816,7 @@ await check('내 시험 데이터 지우기: RA가 부르면 지운 줄 수를 j
   beforeAKept = await snapOf(RA, ['push_tokens', 'friends', 'sharing_permissions', 'groups', 'group_members', 'routines', 'user_questions']);
   beforeAKept.callIds = (await q(`select string_agg(call_id::text, ',' order by call_id) as ids from public.ai_calls where user_id = $1`, [RA]))[0].ids;
   beforeAKept.sharedRows = (await q(`select md5(string_agg((to_jsonb(a) - 'creator_id' - 'updated_at')::text, '|' order by a.appointment_id::text)) as h from public.appointments a where appointment_id = any($1::uuid[])`,
-    [[RS.shared.appt, RS.mixed1.appt, RS.mixed2.appt, RS.groupOnly.appt, RS.fromB.appt]]))[0].h;
+    [[RS.shared.appt, RS.mixed1.appt, RS.mixed2.appt, RS.fromB.appt]]))[0].h;
   await as(RA);
   [{ r: resetResult }] = await q(`select public.dev_reset_my_data() as r`);
   // 15장: 친구 정리가 먼저 돌아 그룹을 나갈 때 그 그룹 앞으로 약속의 참여 · 알람(참여 5 · 알람 10 · 울림 기록 5)과 만든 사람 칸이 정리됨 — 남은 몫(개인 일정 · 지난 약속)만 아래에서 셈
@@ -2846,15 +2846,15 @@ await check('내 시험 데이터 지우기 ②: 다른 사람이 참여 중인 
   const bEvents = await countOf(`select 1 from public.alarm_events where alarm_id = any($1::uuid[])`, [[RS.shared.wake[RB], RS.fromB.wake[RB]]]);
   return appts.length === 2 && aParts === 0 && aAlarms === 0 && bParts.length === 2 && bAlarms === 4 && bEvents === 2 ? true : { appts, aParts, aAlarms, bParts, bAlarms, bEvents };
 });
-await check('내 시험 데이터 지우기 ②-2: RB가 같은 그룹 멤버일 뿐 참여 행 · 할 일이 없는 그룹 일정(RA가 만들고 RA만 참여)은 RA가 지워도 남고 RB가 그대로 조회함 (RA의 참여 행 · 알람만 사라짐)', async () => {
+await check('내 시험 데이터 지우기 ②-2: RB가 같은 그룹 멤버일 뿐 참여 행 · 할 일이 없는 그룹 일정(RA가 만들고 RA만 참여)은 RA가 그룹을 나가면 참여자가 0명이고 만든 사람 칸도 비어 같이 지워짐 (X-APPT-04) — 남의 참여 행 · 할 일이 걸린 일정은 안 지움(③)', async () => {
   await su();
-  const [row] = await q(`select group_id, creator_id, title from public.appointments where appointment_id = $1`, [RS.groupOnly.appt]);
+  const row = (await q(`select group_id, creator_id, title from public.appointments where appointment_id = $1`, [RS.groupOnly.appt]))[0];
   const aParts = await countOf(`select 1 from public.appointment_participants where appointment_id = $1`, [RS.groupOnly.appt]);
   const aAlarms = await countOf(`select 1 from public.alarms where alarm_id = any($1::uuid[])`, [RS.groupOnly.alarms[RA]]);
   const bLinks = await countOf(`select 1 from public.todos where appointment_id = $1 union all select 1 from public.user_edit_logs where appointment_id = $1`, [RS.groupOnly.appt]);
   await as(RB);
   const seen = await q(`select appointment_id, title from public.appointments where appointment_id = $1`, [RS.groupOnly.appt]);   // RLS를 거친 RB의 조회
-  return row && row.group_id === RS.g && row.creator_id === null && aParts === 0 && aAlarms === 0 && bLinks === 0 && seen.length === 1 && seen[0].title === row.title   // 15장: RA가 그룹을 나가며 앞으로 약속의 만든 사람 칸이 비어 남음
+  return row === undefined && aParts === 0 && aAlarms === 0 && bLinks === 0 && seen.length === 0   // 15장: RA가 그룹을 나가며 참여가 지워지고 만든 사람 칸이 비어 아무도 못 고치는 일정이 되므로 같이 지워짐
     ? true : { row, aParts, aAlarms, bLinks, seen };
 });
 await check('내 시험 데이터 지우기 ③: RB의 모든 줄이 한 줄도 안 바뀜 (표별 줄 수 · 내용 지문) · RB가 만든 일정은 그대로 · RB의 할 일 · 고친 값 기록이 걸린 RA 일정도 남음', async () => {
@@ -2874,7 +2874,7 @@ await check('내 시험 데이터 지우기 ④: 푸시 토큰 · 그룹(남이 
   const calls = await q(`select string_agg(call_id::text, ',' order by call_id) as ids, count(*)::int as n, bool_and(session_id is null) as nulled from public.ai_calls where user_id = $1`, [RA]);
   // 공동 일정 행은 그대로 남되, RA가 만든 앞으로 약속의 만든 사람 칸만 비워짐(그룹을 나가며) — 그 칸을 뺀 나머지가 지우기 전과 같음
   const shared = (await q(`select md5(string_agg((to_jsonb(a) - 'creator_id' - 'updated_at')::text, '|' order by a.appointment_id::text)) as h from public.appointments a where appointment_id = any($1::uuid[])`,
-    [[RS.shared.appt, RS.mixed1.appt, RS.mixed2.appt, RS.groupOnly.appt, RS.fromB.appt]]))[0].h;
+    [[RS.shared.appt, RS.mixed1.appt, RS.mixed2.appt, RS.fromB.appt]]))[0].h;
   const todos = await q(`select count(*)::int as n, bool_and(appointment_id is null) as cut from public.todos where user_id = $1`, [RA]);   // 둔 표 — 지운 일정에 달린 연결만 끊김
   return changed.length === 0 && clearedOk && calls[0].ids === beforeAKept.callIds && calls[0].n === 1 && calls[0].nulled === true
     && shared === beforeAKept.sharedRows && todos[0].n === 1 && todos[0].cut === true

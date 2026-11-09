@@ -1003,6 +1003,60 @@ test('X-APPT-01: 만든 사람이 없는(탈퇴한) 공동 약속은 그 약속�
   assert.equal(alive.env.db.rows('appointments').length, 1);
 });
 
+test('X-APPT-03(장소도 바뀜): 약속을 30분 앞당기며 장소도 바꿨는데 참여자의 길찾기가 실패하면 그 사람의 알람을 지난번 간격 그대로 30분 같이 앞당기고 확인 알림(needsConfirm) — 경고는 SHIFTED, 길찾기가 된 사람은 새 계산', async () => {
+  const { env, id } = await groupCase([A, B, 'u-c']);
+  const lookup: TravelLookup = async ({ origin }) => {
+    if (Math.abs(origin.lat - FAR.lat) < 0.001) throw new KakaoError('QUOTA', '시험용 한도 초과'); // B(먼 집)만 실패
+    return { minutes: 50, partial: false };
+  };
+  const bBefore = times(env.db, id, B);
+  const spy = pushSpy();
+  const res = await updateAppointment(ctxFor(env, A, { kakao: lookup, push: spy.push }), upd(id, { at: kst('2026-10-29T08:30'), destination: { name: '강남역', lat: 37.4979, lng: 127.0276 } }, 'this', true));
+  assert.deepEqual(times(env.db, id, B), bBefore.map((t) => t - min(30)));                  // 새 약속 뒤에 남지 않고 같이 앞당겨짐
+  assert.deepEqual(res.participants, { updated: 2, held: 0, skipped: 0 });                 // B(옮김) + u-c(새 계산)
+  const failed = res.warnings.filter((w) => w.code === 'PARTICIPANT_ROUTE_FAILED');
+  assert.deepEqual(failed.map((w) => w.detail), ['SHIFTED']);
+  assert.ok(!JSON.stringify(res.warnings).includes(B));
+  const byUser = Object.fromEntries(spy.sent.map((m) => [m.data.recipientUserId as string, m.data.needsConfirm]));
+  assert.equal(byUser[B], true);                                                           // 폰이 확인 화면을 띄움
+});
+
+test('X-APPT-03(늦춤 · 장소만): 길찾기가 실패한 참여자라도 약속을 5분 이상 늦추면 알람을 옮기지 않고(확인이 먼저) 기존대로 두며, 시각 없이 장소만 바뀐 경우도 알람 그대로 + 경고', async () => {
+  const lookup: TravelLookup = async ({ origin }) => {
+    if (Math.abs(origin.lat - FAR.lat) < 0.001) throw new KakaoError('QUOTA', '시험용 한도 초과');
+    return { minutes: 30, partial: false };
+  };
+  const later = await groupCase([A, B]);
+  const bLater = times(later.env.db, later.id, B);
+  const resLater = await updateAppointment(ctxFor(later.env, A, { kakao: lookup, push: pushSpy().push }), upd(later.id, { at: kst('2026-10-29T09:30'), destination: { name: '강남역', lat: 37.4979, lng: 127.0276 } }, 'this', true));
+  assert.deepEqual(times(later.env.db, later.id, B), bLater);
+  assert.deepEqual(resLater.participants, { updated: 0, held: 0, skipped: 1 });
+  assert.deepEqual(resLater.warnings.filter((w) => w.code === 'PARTICIPANT_ROUTE_FAILED').map((w) => w.detail), [undefined]);
+  const placeOnly = await groupCase([A, B]);
+  const bPlace = times(placeOnly.env.db, placeOnly.id, B);
+  const resPlace = await updateAppointment(ctxFor(placeOnly.env, A, { kakao: lookup, push: pushSpy().push }), upd(placeOnly.id, { destination: { name: '강남역', lat: 37.4979, lng: 127.0276 } }, 'this', true));
+  assert.deepEqual(times(placeOnly.env.db, placeOnly.id, B), bPlace);
+  assert.deepEqual(resPlace.participants, { updated: 0, held: 0, skipped: 1 });
+});
+
+test('X-APPT-03(저장된 이동시간 없음): 시각만 앞당겼는데 참여자의 이동시간도 출발지도 없어 계산할 수 없어도 그 사람의 알람은 새 약속 뒤에 남지 않고 같이 앞당겨지며, 앞당긴 시각이 이미 지났으면 그 알람은 꺼짐', async () => {
+  const { env, id } = await groupCase([A, B]);
+  const p = participantOf(env.db, id, B)!;
+  p.est_travel_minutes = null;
+  p.origin_lat = null;
+  p.origin_lng = null;
+  const prof = env.db.rows('profiles').find((x) => x.user_id === B)!;
+  prof.home_lat = null;
+  prof.home_lng = null;
+  const before = alarmsOf(env.db, id, B).map((x) => Date.parse(x.scheduled_at as string));
+  const spy = pushSpy();
+  const res = await updateAppointment(ctxFor(env, A, { kakao: fakeKakao().lookup, push: spy.push }), upd(id, { at: kst('2026-10-29T08:30') }, 'this', true));
+  assert.deepEqual(times(env.db, id, B), before.map((t) => t - min(30)));
+  assert.deepEqual(res.participants, { updated: 1, held: 0, skipped: 0 });
+  assert.deepEqual(res.warnings.filter((w) => w.code === 'PARTICIPANT_ROUTE_FAILED').map((w) => w.detail), ['SHIFTED']);
+  assert.equal(Object.fromEntries(spy.sent.map((m) => [m.data.recipientUserId as string, m.data.needsConfirm]))[B], true);
+});
+
 test('9-43: 10명 그룹에서 장소를 바꾸면 참여자마다 길찾기를 다시 부름(최대 10번), 일부가 실패해도 나머지는 정상이고 실패한 사람은 기존 알람 유지', async () => {
   const users = [A, B, ...Array.from({ length: 8 }, (_v, i) => `u-p${i + 1}`)];
   const { env, id } = await groupCase(users);

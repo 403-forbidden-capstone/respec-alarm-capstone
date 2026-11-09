@@ -9,7 +9,7 @@
 //   약속 행을 마지막에 쓰는 이유: 앞에서 실패해도 약속 행이 안 바뀌어 있어 다시 보내면 고칠 것이 그대로 보임
 // 하루 경계는 profiles.timezone(없으면 Asia/Seoul) 0시 (tz.ts)
 import { hasEarlierWake, isEveningWake, type SameDayWake } from './calc/index.ts';
-import { diffAlarms, type AlarmDiff } from './commit-core.ts';
+import { diffAlarms, type AlarmDiff, type AlarmWrite } from './commit-core.ts';
 import { summarize } from './commit.ts';
 import { must } from './db.ts';
 import {
@@ -426,9 +426,51 @@ async function replanFor(
 //   이미 울린 알람은 안 건드림(9-16). 장소가 바뀌어 길찾기가 안 되면 그 사람의 기존 알람을 그대로 두고 경고만(9-17). 사람 이름은 응답에 넣지 않음
 //   service 클라이언트로 읽고 쓰되 모든 조회를 그 참여자의 user_id로 좁힘(ctx를 그 사람 몫으로 바꿔서 같은 함수를 부름). DB 오류는 올리고(같은 요청을 다시 보내면 이어서 맞춰짐), 계산 못 하는 사람만 건너뜀
 // 한 참여자를 맞춘 결과. UPDATED = 바로 반영 · HELD = 5분 이상 늦춰져 확인 전 보류 · SKIPPED = 맞출 알람이 없음(다 울림) · NOT_UPDATED = 계산을 못 해 알람을 그대로 둠
-type SyncOutcome = { userId: string; kind: 'UPDATED' | 'HELD' | 'SKIPPED' | 'NOT_UPDATED'; warning?: EditWarning };
+type SyncOutcome = { userId: string; kind: 'UPDATED' | 'HELD' | 'SKIPPED' | 'NOT_UPDATED'; warning?: EditWarning; confirm?: boolean };
 
 const ROUTE_FAILED: EditWarning = { code: 'PARTICIPANT_ROUTE_FAILED', message: '참여자 한 명의 이동시간을 구하지 못해 그 사람의 알람을 그대로 뒀어요. 이동 시간 확인이 필요해요' };
+
+const ROUTE_FAILED_SHIFTED: EditWarning = {
+  code: 'PARTICIPANT_ROUTE_FAILED',
+  message: '참여자 한 명의 이동시간을 새로 구하지 못해 지난번 이동 · 준비 간격 그대로 알람을 약속이 옮겨진 만큼 같이 옮겼어요. 그 사람의 확인이 필요해요',
+  detail: 'SHIFTED',
+};
+const SHIFT_KINDS: readonly string[] = ['WAKE', 'PREPARE', 'DEPARTURE', 'ARRIVE'];
+
+// 알람을 새로 계산하지 못한 참여자(길찾기 실패 · 계산 불가)의 안 울린 알람을 약속이 옮겨진 만큼 그대로 같이 옮김 — 지난번 이동 · 준비 간격을 쓰는 셈.
+//   약속을 앞당겼는데 알람이 새 약속 뒤에 그대로 남아 지각하는 일을 막음 (탐색 시험 X-APPT-03). 옮긴 시각이 이미 지났으면 그 알람은 끔
+//   약속 시각이 안 바뀌었거나(장소만 바뀜), 5분 이상 늦춰져 확인이 먼저인 경우는 옮기지 않음(null) — 기존대로 알람을 두고 경고 · 확인 알림만
+async function shiftWhenNotCalculated(
+  ctx: EditCtx,
+  p: ParticipantRow,
+  loaded: { alarms: AlarmRow[]; rung: ReadonlySet<string> },
+  a: { oldAt: Date; newAt: Date; atChanged: boolean },
+): Promise<SyncOutcome | null> {
+  const deltaMs = a.newAt.getTime() - a.oldAt.getTime();
+  if (!a.atChanged || deltaMs === 0) return null;
+  const movable = loaded.alarms.filter((x) => !loaded.rung.has(x.alarm_id) && x.is_enabled && SHIFT_KINDS.includes(x.alarm_type));
+  if (!movable.length) return null;
+  const nowIso = ctx.now.toISOString();
+  const update = movable.map((x) => {
+    const at = new Date(Date.parse(x.scheduled_at) + deltaMs);
+    const patch: AlarmWrite = {
+      alarm_type: x.alarm_type,
+      scheduled_at: at.toISOString(),
+      intensity: x.intensity,
+      voice_tone: x.voice_tone,
+      sound_key: x.sound_key,
+      vibration: x.vibration,
+      is_enabled: at.getTime() > ctx.now.getTime(),
+      time_source: x.time_source as AlarmWrite['time_source'],
+      intensity_source: x.intensity_source as AlarmWrite['intensity_source'],
+      last_calculated_at: nowIso,
+    };
+    return { alarm_id: x.alarm_id, patch };
+  });
+  if (needsConfirm(alarmChanges(movable, update.map((u) => u.patch)))) return null;
+  await applyAlarmDiff(ctx, p.participant_id, { insert: [], update, remove: [] }, loaded.alarms);
+  return { userId: p.user_id, kind: 'UPDATED', warning: ROUTE_FAILED_SHIFTED, confirm: true };
+}
 
 // 참여자를 몇 명씩 한꺼번에 맞출지 — 참여자 한 명마다 DB 약 12번 + 길찾기 1번이라 20명을 하나씩 하면 길찾기가 느린 순간 앱 제한(30초)을 넘음
 export const SYNC_CONCURRENCY = 4;
@@ -436,9 +478,12 @@ export const SYNC_CONCURRENCY = 4;
 async function syncOne(ctx: EditCtx, a: { row: EditRow; patched: ReturnType<typeof applyPatch>; oldAt: Date; newAt: Date }, p: ParticipantRow): Promise<SyncOutcome> {
   const { row, patched, oldAt, newAt } = a;
   const pctx: EditCtx = { ...ctx, userId: p.user_id, userDb: ctx.service };
+  let loaded: { alarms: AlarmRow[]; rung: ReadonlySet<string> } | undefined;
+  const shifted = (): Promise<SyncOutcome | null> => (loaded ? shiftWhenNotCalculated(pctx, p, loaded, { oldAt, newAt, atChanged: patched.changed.at }) : Promise.resolve(null));
   try {
     const alarms = await loadAlarms(ctx.service, p.participant_id, p.user_id);
     const rung = new Set(alarms.filter((x) => Date.parse(x.scheduled_at) <= ctx.now.getTime()).map((x) => x.alarm_id)); // 이미 울린 알람은 안 건드림
+    loaded = { alarms, rung };
     if (alarms.every((x) => rung.has(x.alarm_id))) return { userId: p.user_id, kind: 'SKIPPED' };
     const penv = new Env(pctx);
     const tz = await penv.tz();
@@ -446,7 +491,8 @@ async function syncOne(ctx: EditCtx, a: { row: EditRow; patched: ReturnType<type
     const made = await replanFor(pctx, penv, { row, patched, participant: p, alarms, snapshot, excluded: new Set([row.appointment_id]), oldAt, newAt, tz });
     // 장소가 바뀌었는데 길찾기가 안 돼 근사값 · 내 이동 기록뿐이면 그 사람의 기존 알람을 그대로 두고 '이동 시간 확인 필요' 경고만 (9-17)
     const source = made.plan.travel.chosen?.source;
-    if (patched.changed.place && (source === 'ESTIMATE' || source === 'CACHED')) return { userId: p.user_id, kind: 'NOT_UPDATED', warning: ROUTE_FAILED };
+    //   약속 시각도 바뀌었으면 지난번 이동 간격 그대로 알람을 같이 옮김 (X-APPT-03)
+    if (patched.changed.place && (source === 'ESTIMATE' || source === 'CACHED')) return (await shifted()) ?? { userId: p.user_id, kind: 'NOT_UPDATED', warning: ROUTE_FAILED };
     const diff: AlarmDiff = { insert: made.diff.insert, update: made.diff.update.filter((u) => !rung.has(u.alarm_id)), remove: made.diff.remove.filter((id) => !rung.has(id)) };
     const changes = alarmChanges(alarms.filter((x) => !rung.has(x.alarm_id)), [...diff.update.map((u) => u.patch), ...diff.insert]);
     if (needsConfirm(changes)) return { userId: p.user_id, kind: 'HELD' };
@@ -464,6 +510,8 @@ async function syncOne(ctx: EditCtx, a: { row: EditRow; patched: ReturnType<type
     // 계산을 못 하는 사람(길찾기 장애 · 계산 결과가 맞지 않음)만 건너뜀. DB 오류 같은 나머지는 요청 전체를 실패로 올림 —
     //   이 시점에 약속 행은 아직 안 바뀌어 있어 같은 요청을 다시 보내면 이어서 맞춰짐 (이미 맞춘 사람은 바뀔 것이 없음)
     if (!(e instanceof HttpError) || (e.code !== 'ROUTE_UNAVAILABLE' && e.code !== 'UNPROCESSABLE')) throw e;
+    const moved = await shifted();   // 약속 시각이 바뀌었으면 알람을 같이 옮김 — 약속을 앞당겼는데 알람이 새 약속 뒤에 남지 않게 (X-APPT-03)
+    if (moved) return moved;
     return {
       userId: p.user_id,
       kind: 'NOT_UPDATED',
@@ -497,8 +545,11 @@ async function syncOtherParticipants(
     outcomes.push(...settled.map((r) => (r as PromiseFulfilledResult<SyncOutcome>).value));
   }
   for (const o of outcomes) {
-    if (o.kind === 'UPDATED') summary.updated += 1;
-    else if (o.kind === 'HELD') {
+    if (o.kind === 'UPDATED') {
+      summary.updated += 1;
+      if (o.confirm) held.add(o.userId);   // 지난번 간격으로 옮긴 사람 폰은 확인 화면을 띄움
+      if (o.warning) warnings.push(o.warning);
+    } else if (o.kind === 'HELD') {
       summary.held += 1;
       held.add(o.userId);
     } else {
