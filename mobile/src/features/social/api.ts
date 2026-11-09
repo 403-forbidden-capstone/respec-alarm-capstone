@@ -43,6 +43,8 @@ import {
   type PermissionSet,
   type Person,
   type PersonHit,
+  type AlarmProposal,
+  type ProposalResponse,
   type ReportReason,
   type ReportResult,
   type ReportTarget,
@@ -330,13 +332,14 @@ export async function getGroup(groupId: string, date?: string | null): Promise<G
 // 친구 권한 (F02) — 이 친구가 내 정보에 대해 가진 최종 권한과 출처. 친구가 아니면 null (그룹원 · 나를 주소로 열어도)
 export async function getFriendGrant(
   personId: string,
-): Promise<{ person: Person; final: FinalGrant; groupCount: number } | null> {
+): Promise<{ person: Person; final: FinalGrant; groupCount: number; firstGroupId: string | null } | null> {
   if (!isMock()) return real.getFriendGrant(personId);
   if (!db.friends.includes(personId)) return null;
   return {
     person: person(personId),
     final: givenTo(personId),
     groupCount: Object.values(db.groups).filter((g) => g.members.includes(personId)).length,
+    firstGroupId: Object.values(db.groups).find((g) => g.members.includes(personId))?.id ?? null,
   };
 }
 
@@ -445,22 +448,23 @@ export async function getSharedAlarms(personId: string): Promise<SharedAlarms | 
   };
 }
 
-// 켜기 · 끄기 — 저장되고 주인에게 알림이 갔는지를 돌려줌 (알림이 실패해도 저장은 그대로)
-export async function setSharedAlarmEnabled(personId: string, alarmId: string, enabled: boolean): Promise<SharedChangeResult> {
-  if (!isMock()) return real.setSharedAlarmEnabled(personId, alarmId, enabled);
-  const s = (db.sharedAlarms[alarmId] ??= { on: true, shift: 0 });
-  s.on = enabled;
-  db.shareLog.push({ at: now(), text: `${person(personId).short}님 알람 ${enabled ? '켬' : '끔'}` });
+// 시각 제안 보내기 (G04 [보내기] · [원래대로]) — 제안이 저장되고 상대에게 알림이 갔는지를 돌려줌. 상대 알람은 상대가 [적용]해야 바뀜 (친구 10장)
+export async function proposeSharedAlarm(personId: string, cardId: string, newAt: Date): Promise<SharedChangeResult> {
+  if (!isMock()) return real.proposeSharedAlarm(personId, cardId, newAt);
+  db.shareLog.push({ at: now(), text: `${person(personId).short}님 알람 시각 제안` });
   return { notified: true };
 }
 
-// 공유받은 알람 시각 옮기기 — minutes가 음수면 앞당김
-export async function shiftSharedAlarm(personId: string, alarmId: string, minutes: number): Promise<SharedChangeResult> {
-  if (!isMock()) return real.shiftSharedAlarm(personId, alarmId, minutes);
-  const s = (db.sharedAlarms[alarmId] ??= { on: true, shift: 0 });
-  s.shift += minutes;
-  db.shareLog.push({ at: now(), text: `${person(personId).short}님 알람 ${Math.abs(minutes)}분 ${minutes < 0 ? '앞당김' : '늦춤'}` });
-  return { notified: true };
+// 받은 제안 (홈 카드) — 가짜 모드는 받은 제안이 없음
+export async function listAlarmProposals(): Promise<AlarmProposal[]> {
+  if (!isMock()) return real.listAlarmProposals();
+  return [];
+}
+
+// [적용] · [무시]
+export async function respondAlarmProposal(proposalId: string, apply: boolean): Promise<ProposalResponse> {
+  if (!isMock()) return real.respondAlarmProposal(proposalId, apply);
+  return apply ? 'APPLIED' : 'DISMISSED';
 }
 
 // 공유 알람 변경 기록 — DB에는 저장 자리가 없음 (D9: 저장 없이 주인에게 푸시만, 스키마 보완 3). 실데이터도 이번 실행 동안 바꾼 것만 보임 (D20 열림)

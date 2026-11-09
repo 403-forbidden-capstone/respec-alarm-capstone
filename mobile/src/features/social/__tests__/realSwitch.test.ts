@@ -28,8 +28,9 @@ jest.mock('../real', () => {
     'getReceived',
     'getMemberWake',
     'getSharedAlarms',
-    'setSharedAlarmEnabled',
-    'shiftSharedAlarm',
+    'proposeSharedAlarm',
+    'listAlarmProposals',
+    'respondAlarmProposal',
     'getShareLog',
     'sendWakePing',
     'searchByHandle',
@@ -82,8 +83,9 @@ const CASES: [keyof typeof api, unknown[]][] = [
   ['getReceived', ['group:g1']],
   ['getMemberWake', ['g1', 'u1', '2026-10-20']],
   ['getSharedAlarms', ['u1']],
-  ['setSharedAlarmEnabled', ['u1', 'ap1', false]],
-  ['shiftSharedAlarm', ['u1', 'ap1', -5]],
+  ['proposeSharedAlarm', ['u1', 'ap1', new Date('2026-10-20T00:00:00.000Z')]],
+  ['listAlarmProposals', []],
+  ['respondAlarmProposal', ['pr1', true]],
   ['getShareLog', []],
   ['sendWakePing', ['u1']],
   ['searchByHandle', ['@etion']],
@@ -163,11 +165,12 @@ describe('api.ts 가짜 · 실데이터 나누기 (친구 · 그룹)', () => {
     expect(mockReal).not.toHaveBeenCalled();
   });
 
-  it('가짜 모드의 쓰기도 real을 부르지 않음 (깨우기 · 권한 저장 · 공유 알람 바꾸기)', async () => {
+  it('가짜 모드의 쓰기도 real을 부르지 않음 (깨우기 · 권한 저장 · 시각 제안 · 받은 제안)', async () => {
     await api.sendWakePing('sy');
     await api.saveShareSettings('group:cap', SET);
-    await expect(api.setSharedAlarmEnabled('sy', 's1', false)).resolves.toEqual({ notified: true });
-    await expect(api.shiftSharedAlarm('sy', 's1', 5)).resolves.toEqual({ notified: true });
+    await expect(api.proposeSharedAlarm('sy', 's1', new Date('2026-10-20T00:00:00.000Z'))).resolves.toEqual({ notified: true });
+    await expect(api.listAlarmProposals()).resolves.toEqual([]);
+    await expect(api.respondAlarmProposal('pr1', true)).resolves.toBe('APPLIED');
     expect(mockReal).not.toHaveBeenCalled();
   });
 });

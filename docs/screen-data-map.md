@@ -192,7 +192,8 @@
 
 ### G04 공유받은 알람
 - 친구 알람: `alarms`(주인 = 친구) — DB, 조회 권한은 RLS가 확인. 약속 제목 · 장소까지 보여 주려면 RPC 하나 더 필요(`appointments` RLS는 본인 · 그룹원만) — #46에서
-- 설정 권한이면 켜기 · 끄기 · ±5분: `alarms` — DB → 주인에게 알림 `notify` — Edge → 주인 폰이 다시 예약. RLS는 설정 권한이면 강도 · 소리까지 허용하므로 ±5분 제한은 앱(`shiftSharedAlarm`)에서 지킴: 앞당길 때 옮긴 시각이 지금 + 5분(서버 `PAST_GRACE_MINUTES`)보다 이르게 되는 켜진 알람이 있으면 "곧 울릴 알람이라 앞당길 수 없어요"로 거절 (이미 지난 알람 · 꺼 둔 알람 · 늦추기는 검사 안 함)
+- 설정 권한이면 시각 제안(친구 10장): 바꿀 수 있는 것은 시각뿐(켜기 · 끄기 · 삭제 없음). 5분씩 골라 [보내기] 한 번 = `propose_alarm_time(p_alarm_id = 카드에서 가장 이른 알람, p_new_at)` — RPC. 상태 `OK` · `TOO_SOON`(곧 울릴 알람) · `LIMIT`(원래 시각 기준 ±60분 밖) · `SAME` · `FORBIDDEN`(권한 없음 · 안 보이는 알람, 구분 없음) · `INVALID`를 문구로. 성공하면 주인에게 `notify { kind: 'ALARM_CHANGED', targetUserId, alarmId }`(문구 · 시각은 서버가 제안 기록에서 가져옴, 실패해도 제안은 저장). 상대 알람은 그대로 — 상대가 [적용]해야 바뀜. 카드 한 줄 '제안함 · 8:20'(대기 · 무시) · '반영됨 · 8:20'(적용)은 `sent_alarm_proposals(p_owner_id)`, [원래대로]는 `alarms.original_scheduled_at`(친구가 바꾼 적이 있을 때만)을 제안
+- 받는 쪽 제안 카드(홈 · 알람 탭): `my_alarm_proposals` — RPC → '○○님의 제안 / 기상 알람 7:30 → 7:00 [적용] [무시]'. `respond_alarm_proposal(p_proposal_id, p_apply)`: 적용하면 서버가 알람 카드 전체를 옮기고 앱이 `syncNow()`로 폰 예약을 서버 알람에 맞춤, 무시는 보낸 쪽에 알리지 않음, `EXPIRED`는 '이미 지나간 제안이에요'
 
 ### A02 AI 대화 (실데이터는 텍스트 대화 — 서버 함수 voice-session · voice-turn과 같이 배포돼야 동작)
 - 실패 · 한도 안내 부품 `ChatNotice`(값 · 콜백) — `ai.tsx`가 실패(`unavailable`) · 한도(`limits.reached`)일 때 마지막 말풍선 아래에 붙임

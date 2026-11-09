@@ -4,6 +4,7 @@ import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
 import { EmptyState, Loading, LoadError, Screen, SectionHeader, Text, TopBar, TopBarButton } from '@/components/ui';
 import { listAppointments } from '@/features/alarm/api';
+import { ProposalCards } from '@/features/social/components/ProposalCards';
 import { AppointmentAlarmCard } from '@/features/alarm/components/AppointmentAlarmCard';
 import { TextLink } from '@/features/alarm/components/TextLink';
 import { useAppointmentToggle } from '@/features/alarm/hooks/useAppointmentToggle';
@@ -48,6 +49,8 @@ export default function AlarmsScreen() {
       <Text variant="title" style={styles.title}>
         알람
       </Text>
+      {/* 친구가 보낸 알람 시각 제안 — 푸시를 누르면 여기로 (친구 10장) */}
+      <ProposalCards />
       <Text variant="lead">일정마다 기상 · 준비 · 출발 알람을 계산해 두었어요.</Text>
       <View style={styles.links}>
         <TextLink label="학교 시간표 · 반복 일정 지우기" onPress={() => router.push('/timetable')} />

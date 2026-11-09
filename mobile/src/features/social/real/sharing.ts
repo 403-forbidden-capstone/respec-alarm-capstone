@@ -26,10 +26,11 @@ import { invalidateSnapshot, loadSnapshot } from './load';
 
 // 친구 권한 (F02) — 이 친구가 내 정보에 대해 가진 최종 권한과 출처. 친구가 아니면 null (그룹원 · 나를 주소로 열어도)
 //   방향은 D17 열림이라 가짜 데이터와 같게 "내가 준 권한"
-export async function getFriendGrant(personId: string): Promise<{ person: Person; final: FinalGrant; groupCount: number } | null> {
+export async function getFriendGrant(personId: string): Promise<{ person: Person; final: FinalGrant; groupCount: number; firstGroupId: string | null } | null> {
   const s = await loadSnapshot();
   if (!friendBetween(s, personId)) return null;
-  return { person: personOf(s, personId), final: givenTo(s, personId), groupCount: sharedGroups(s, personId).length };
+  const groups = sharedGroups(s, personId);
+  return { person: personOf(s, personId), final: givenTo(s, personId), groupCount: groups.length, firstGroupId: groups[0]?.group_id ?? null };
 }
 
 // 권한을 줄 관계 고르기 (F03) — 그룹 먼저, 그다음 친구

@@ -110,6 +110,7 @@ export type SharedAlarmRow = {
   sound_key: string | null;
   is_enabled: boolean;
   time_source: Enums<'alarm_value_source'>;
+  original_scheduled_at?: string | null; // 친구 제안을 처음 적용하기 직전의 시각
 };
 
 export type SharedCard = { appointmentId: string; title: string; place: string; appointmentAt: Date; alarms: SharedAlarmRow[] };
@@ -158,6 +159,9 @@ export function toMemberAlarm(card: SharedCard): MemberAlarm {
     levelName: LEVELS[level].name,
     note: noteOf(card),
     enabled: card.alarms.some((a) => a.is_enabled), // 카드 스위치 = 묶음 전체. 하나라도 켜져 있으면 켜짐
+    firstAlarmId: first.alarm_id,
+    originalAt: first.original_scheduled_at ? at(first.original_scheduled_at) : null,
+    proposal: null, // getSharedAlarms가 보낸 제안 상태를 붙임
   };
 }
 

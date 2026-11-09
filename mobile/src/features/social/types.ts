@@ -113,7 +113,18 @@ export type MemberAlarm = {
   levelName: string; // 약 · 중 · 강
   note: string; // 준비 70분 · 이동 70분 · 여유 10분
   enabled: boolean;
+  firstAlarmId?: string; // 제안을 보낼 때 가리키는 알람(카드에서 가장 이른 것) — 실데이터만
+  originalAt?: Date | null; // 친구가 바꾸기 전 원래 시각(합계 ±60분 기준, [원래대로]) — 비어 있으면 아직 바뀐 적 없음
+  proposal?: SentProposal | null; // 내가 보낸 제안의 지금 상태 ('제안함' · '반영됨')
 };
+
+// 내가 이 알람에 보낸 가장 최근 제안 — PENDING · DISMISSED는 '제안함'(무시해도 보낸 쪽에는 안 알림), APPLIED는 '반영됨' (친구 10장 10-파)
+export type SentProposal = { status: 'PENDING' | 'APPLIED' | 'DISMISSED'; toAt: Date };
+
+// 홈에 뜨는 받은 제안 카드 '수연 제안 기상 알람 7:30 → 7:00 [적용] [무시]'
+export type AlarmProposal = { id: string; proposerName: string; kindLabel: string; fromAt: Date; toAt: Date };
+
+export type ProposalResponse = 'APPLIED' | 'DISMISSED' | 'EXPIRED';
 
 // G03 그룹원 기상 상태 — 알람 시각 한 줄 + 확인 시각만. 알람 카드(강도 · 장소 · 준비)는 알람 조회 권한이 있을 때 G04에서 (7-다 · 7-41)
 export type MemberWake = {

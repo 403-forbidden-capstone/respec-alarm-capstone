@@ -68,7 +68,7 @@ export default function FriendPermissionScreen() {
     );
   }
 
-  const { person: p, final, groupCount } = data;
+  const { person: p, final, groupCount, firstGroupId } = data;
   return (
     <Screen>
       <TopBar onBack={backOrHome} screenId="F02" right={<TopBarButton label="···" accessibilityLabel={`${p.name}님 메뉴`} onPress={() => menu.open(p)} />} />
@@ -118,6 +118,29 @@ export default function FriendPermissionScreen() {
         })}
       </Card>
 
+      {/* 알람 · 기상 입구 (친구 10장 10-d5) — 알람 보기 = G04, 기상 확인 = 같이 있는 그룹의 G03 */}
+      <Card>
+        <View style={styles.between}>
+          <View style={styles.grow}>
+            <Text variant="bodyStrong">알람 보기 · 기상 확인</Text>
+            <Text variant="small" tone="sub">
+              {firstGroupId ? '알람은 조회 권한이 있을 때만, 기상은 같은 그룹일 때 볼 수 있어요.' : '알람은 조회 권한이 있을 때만 볼 수 있어요.'}
+            </Text>
+          </View>
+        </View>
+        <View style={styles.tiles}>
+          <Button small variant="ghost" label="알람 보기" onPress={() => router.push({ pathname: '/friends/[id]/alarms', params: { id: p.id } })} />
+          {firstGroupId ? (
+            <Button
+              small
+              variant="ghost"
+              label="기상 확인"
+              onPress={() => router.push({ pathname: '/groups/[id]/members/[userId]', params: { id: firstGroupId, userId: p.id } })}
+            />
+          ) : null}
+        </View>
+      </Card>
+
       <Card>
         <View style={styles.between}>
           <View style={styles.grow}>
@@ -157,5 +180,6 @@ const styles = StyleSheet.create({
   divider: { borderTopWidth: 1, borderTopColor: colors.line },
   sourceLabel: { marginTop: 8, marginBottom: 6 },
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+  tiles: { flexDirection: 'row', gap: 8, marginTop: 12 },
   pressed: { opacity: 0.6 },
 });
