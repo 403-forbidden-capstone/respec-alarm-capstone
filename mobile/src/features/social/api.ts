@@ -707,7 +707,7 @@ export async function setGroupNotificationsOff(groupId: string, off: boolean): P
   notifOff[groupId] = off;
 }
 
-// 이 그룹에 내 기상 상태 공유를 동의 / 취소 (D19 열림 — F03 저장은 이 값을 건드리지 않음)
+// 이 그룹에 내 기상 상태 공유를 동의 / 취소 (F03 그룹 관계의 기상 스위치도 같은 값)
 export async function setWakeShareOptIn(groupId: string, on: boolean) {
   if (!isMock()) return real.setWakeShareOptIn(groupId, on);
   if (!db.groups[groupId]?.members.includes('me')) throw new UserError('참여 중인 그룹이 아니에요');

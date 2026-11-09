@@ -364,7 +364,7 @@ export async function setGroupNotificationsOff(groupId: string, off: boolean): P
 }
 
 // 이 그룹에 내 기상 상태를 공유하는 것에 동의 (group_members.wake_share_opt_in) — 본인 행만 고칠 수 있음 (RLS group_members_update_self)
-//   D19 열림: F03에서 기상 상태 조회를 켤 때 같이 켤지 따로 둘지 정해지기 전이라 F03 저장은 이 값을 건드리지 않음
+//   F03 그룹 관계의 '기상 상태 조회' 스위치도 이 값을 바꿈(real/sharing.ts saveShareSettings), G02 · 그룹 만들기에서도 씀
 export async function setWakeShareOptIn(groupId: string, on: boolean) {
   const me = await requireUserId();
   const { data, error } = await supabase

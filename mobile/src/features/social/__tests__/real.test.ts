@@ -233,6 +233,17 @@ describe('F02 · F03 권한', () => {
     expect(op.payload).toEqual({ wake_share_opt_in: false });
   });
 
+  it('그룹 권한 저장이 실패하면 기상 동의는 바꾸지 않고, 동의만 실패하면 그 사실을 알림 (알람 권한은 저장된 뒤)', async () => {
+    mockFake.answerRpc('save_group_permissions', { data: null, error: new Error('rpc') });
+    await expect(real.saveShareSettings(`group:${GROUP}`, { viewAlarm: true, editAlarm: false, viewWake: false })).rejects.toThrow('rpc');
+    expect(mockFake.opsOf('group_members', 'update')).toHaveLength(0);
+    mockFake.answerRpc('save_group_permissions', ok({ status: 'OK', saved: 3 }));
+    mockFake.answer('group_members.update', { data: null, error: new Error('rls') });
+    await expect(real.saveShareSettings(`group:${GROUP}`, { viewAlarm: true, editAlarm: false, viewWake: false })).rejects.toThrow(
+      new UserError('알람 권한은 저장했지만 기상 공유 동의는 바꾸지 못했어요. 다시 저장해 주세요'),
+    );
+  });
+
   it('친구가 아니거나 참여 중이 아닌 관계에는 저장하지 않고 이유를 알림', async () => {
     await expect(real.saveShareSettings(`friend:${JUNSEONG}`, { viewAlarm: true, editAlarm: false, viewWake: false })).rejects.toThrow(UserError);
     await expect(real.saveShareSettings('group:99999999-0000-4000-8000-000000000000', { viewAlarm: true, editAlarm: false, viewWake: false })).rejects.toThrow(UserError);

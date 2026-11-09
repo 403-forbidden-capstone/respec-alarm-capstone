@@ -6,7 +6,7 @@
 import { UserError } from '@/lib/errors';
 import { supabase } from '@/lib/supabase';
 
-import { NO_MEMBERS } from '../groupTexts';
+import { CONSENT_FAILED, NO_MEMBERS } from '../groupTexts';
 import { parseRelation } from '../permissions';
 import {
   friendBetween,
@@ -97,7 +97,14 @@ export async function saveShareSettings(id: RelationId, next: PermissionSet) {
   if (status === 'NO_MEMBERS') throw new UserError(NO_MEMBERS);
   if (status === 'NOT_FOUND') throw new UserError('참여 중인 그룹을 찾을 수 없어요');
   if (status !== 'OK') throw new Error(`save_group_permissions: 모르는 상태 ${String(status)}`);
-  if (next.viewWake !== myOptIn(s, key)) await setWakeShareOptIn(key, next.viewWake);
+  if (next.viewWake !== myOptIn(s, key)) {
+    // 알람 권한은 이미 저장된 뒤 — 동의만 못 바꿨으면 그 사실을 알리고(다시 저장하면 같은 요청이라 안전), 화면은 저장된 값을 다시 읽게 함
+    try {
+      await setWakeShareOptIn(key, next.viewWake);
+    } catch (e) {
+      throw new UserError(CONSENT_FAILED);
+    }
+  }
 }
 
 // 이 관계에서 받은 권한 (F03 받은 권한) — 효력 있는 값 (동의 안 한 그룹의 기상 조회는 꺼진 것으로)

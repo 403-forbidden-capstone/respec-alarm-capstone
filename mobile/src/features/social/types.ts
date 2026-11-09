@@ -103,7 +103,7 @@ export type GroupDetail = {
   grants: PermissionSet; // 그룹 공유 범위 (내가 준 권한)
   appointments: GroupAppointment[]; // 연결 일정 (여러 개일 수 있음, 오늘부터)
   members: GroupMember[]; // 참여 중인 사람만 (초대 중은 + 초대 시트에서) — 그룹장 표시 없음 (5장)
-  wakeShareOptIn: boolean; // 이 그룹에 내 기상 상태 공유를 동의했는지 (group_members.wake_share_opt_in, D19 열림 — 새 UI용)
+  wakeShareOptIn: boolean; // 이 그룹에 내 기상 상태 공유를 동의했는지 (group_members.wake_share_opt_in — F03 그룹 관계의 기상 스위치와 같은 값)
   notificationsOff: boolean; // 이 그룹에서 오는 알림 끄기 (group_members.notifications_off)
 };
 

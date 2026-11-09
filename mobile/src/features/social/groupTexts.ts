@@ -87,3 +87,5 @@ export const inviteShareMessage = (groupName: string, code: string, expires: str
 
 // F03 혼자인 그룹 저장 (6-18) — 줄 사람이 없어 저장이 안 됨. 가짜 성공을 보이지 않음
 export const NO_MEMBERS = '이 그룹에는 나 말고 멤버가 없어요. 멤버가 들어오면 권한을 줄 수 있어요';
+// F03 그룹 저장 중 알람 권한은 저장됐지만 기상 공유 동의만 바꾸지 못함 — 다시 저장하면 됨
+export const CONSENT_FAILED = '알람 권한은 저장했지만 기상 공유 동의는 바꾸지 못했어요. 다시 저장해 주세요';
