@@ -50,6 +50,18 @@ describe('화면 목록 데이터 (sectionsFor)', () => {
     expect(titles(sectionsFor('real'))).toContain('친구 · 그룹');
   });
 
+  it('가짜 id(sy · cap · a1 · st1 · s1 · 2025-…)를 주소에 쓰는 줄은 모두 fake 표시가 있음 — 빠지면 실데이터에서 빈 화면 줄이 남음', () => {
+    const FAKE_ID = /^(sy|cap|a\d+|st\d+|s\d+|2025-\d{2}-\d{2}|group:cap|a\d+:(WAKE|PREPARE|DEPARTURE))$/;
+    const missing = sectionsFor('mock')
+      .flatMap((s) => s.rows)
+      .filter((r) => {
+        const params = typeof r.href === 'string' ? {} : ((r.href as { params?: Record<string, string> }).params ?? {});
+        return Object.values(params).some((v) => FAKE_ID.test(String(v))) && !r.fake;
+      })
+      .map((r) => `${r.id} ${r.name}`);
+    expect(missing).toEqual([]);
+  });
+
   it('/dev/screens가 쓰는 평평한 rows와 패널이 쓰는 items가 같은 줄을 가짐', () => {
     for (const section of sectionsFor('mock')) {
       const fromItems = section.items.flatMap((item) => (isFold(item) ? item.rows : [item]));
