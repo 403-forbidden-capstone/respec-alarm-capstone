@@ -2713,7 +2713,7 @@ const mkAppt = async (creator, title, { group = null, series = null, on = null, 
 //   11/9부터(친구 15장, 15-타) 친구 · 그룹 참여 · 공유 권한 · 내가 건 차단 · 내가 숨긴 기상도 지움 — 그래서 friends · group_members · sharing_permissions · wake_hides는 지우는 쪽
 //   (user_blocks는 사용자 칸 이름이 blocker_id라 이 가드의 열 목록 밖 — 지움은 friend/ch15.mjs 15-타가 직접 봄)
 const RESET_DELETES = ['alarm_events', 'alarm_suggestions', 'alarms', 'appointment_participants', 'appointments', 'conversation_sessions',
-                       'daily_journals', 'daily_records', 'friends', 'group_members', 'profiles', 'sharing_permissions', 'user_edit_logs', 'wake_hides'];
+                       'daily_journals', 'daily_records', 'friends', 'group_members', 'prepare_ml_verified_profiles', 'profiles', 'sharing_permissions', 'user_edit_logs', 'wake_hides'];
 //   friend_links · rate_limit_events(친구 2장) · groups(남이 있는 그룹은 둠)는 둠, team_members(운영 화면 팀원)도 둠
 const RESET_KEEPS = ['ai_calls', 'alarm_proposals', 'friend_links', 'groups', 'push_tickets', 'push_tokens', 'rate_limit_events', 'roll_attempts', 'routines',
                      'team_members', 'todos', 'user_places', 'user_questions'];
@@ -2738,6 +2738,7 @@ const MINE = {
   roll_attempts: `select * from public.roll_attempts where user_id = $1`,
   user_places: `select * from public.user_places where user_id = $1`,
   profiles: `select * from public.profiles where user_id = $1`,
+  prepare_ml_verified_profiles: `select * from public.prepare_ml_verified_profiles where user_id = $1`,
   friends: `select * from public.friends where $1 in (requester_id, addressee_id)`,
   group_members: `select * from public.group_members where user_id = $1`,
   sharing_permissions: `select * from public.sharing_permissions where $1 in (owner_id, grantee_id)`,
@@ -2784,6 +2785,19 @@ await check('내 시험 데이터 지우기 준비: RA(지우는 사람) · RB(�
                     default_prepare_minutes = 90, default_buffer_minutes = 20, default_transport = 'BUS', intensity_offset = 1,
                     onboarded_at = now(), wake_sensitivity = 'HEAVY', wake_margin = 'LOOSE', privacy_agreed_at = now(), privacy_version = 2,
                     preferred_voice_tone = 'CALM', preferred_sound_key = 'theme_calm' where user_id = $1`, [u, handle]);
+  }
+  // 별도 동의가 있는 ML 자가 응답과 서버만 쓰는 검증행을 두 사람에게 준비.
+  // 시험 초기화는 RA 행만 지워야 하고 RB의 응답·검증행은 그대로여야 함.
+  for (const [u, age] of [[RA, 24], [RB, 25]]) {
+    await q(`update public.profiles
+      set ml_age_years = $2, ml_school_status = 'UNIVERSITY',
+          ml_work_status = 'NOT_WORKING', ml_profile_consented_at = now(),
+          ml_age_code = '2', ml_education_code = '1', ml_economic_code = '3',
+          ml_codes_verified = true
+      where user_id = $1`, [u, age]);
+    await q(`insert into public.prepare_ml_verified_profiles
+      (user_id, ml_age_code, ml_education_code, ml_economic_code, codebook_version, consent_at)
+      values ($1, '2', '1', '3', 'fixture-v1', now())`, [u]);
   }
   // 친구(양쪽 권한) · 그룹 · 푸시 토큰
   const [{ friend_id: fr }] = await q(`insert into public.friends (requester_id, addressee_id, status, accepted_at) values ($1, $2, 'ACCEPTED', now()) returning friend_id`, [RA, RB]);
@@ -2847,6 +2861,26 @@ await check('내 시험 데이터 지우기: RA가 부르면 지운 줄 수를 j
                      daily_journals: 1, conversation_sessions: 1, user_edit_logs: 1, profile: 1,
                      friend_data: { groups_left: 1, sharing_permissions: 2, friends: 1, blocks: 0, wake_hides: 0 } };
   return JSON.stringify(canon(resetResult)) === JSON.stringify(canon(expected)) ? true : resetResult;
+});
+await check('ML 시험 데이터 초기화: RA의 자가응답·동의·구형 코드와 검증행을 모두 삭제', async () => {
+  await su();
+  const [p] = await q(`select ml_age_years, ml_school_status, ml_work_status, ml_profile_consented_at,
+    ml_age_code, ml_education_code, ml_economic_code, ml_codes_verified
+    from public.profiles where user_id = $1`, [RA]);
+  const verified = await countOf(MINE.prepare_ml_verified_profiles, [RA]);
+  return verified === 0 && p.ml_age_years === null && p.ml_school_status === null &&
+    p.ml_work_status === null && p.ml_profile_consented_at === null &&
+    p.ml_age_code === null && p.ml_education_code === null &&
+    p.ml_economic_code === null && p.ml_codes_verified === false ? true : { p, verified };
+});
+await check('ML 시험 데이터 초기화: RB의 자가응답·동의·검증행은 보존', async () => {
+  await su();
+  const [p] = await q(`select ml_age_years, ml_school_status, ml_work_status, ml_profile_consented_at,
+    ml_codes_verified from public.profiles where user_id = $1`, [RB]);
+  const verified = await countOf(MINE.prepare_ml_verified_profiles, [RB]);
+  return verified === 1 && p.ml_age_years === 25 && p.ml_school_status === 'UNIVERSITY' &&
+    p.ml_work_status === 'NOT_WORKING' && p.ml_profile_consented_at !== null &&
+    p.ml_codes_verified === true ? true : { p, verified };
 });
 await check('내 시험 데이터 지우기 ①: RA의 혼자 일정(반복 2회차 포함) · 알람 · 울림 기록 · 기록 · 일기 · 대화 · 제안 · 고친 값 기록이 사라짐', async () => {
   await su();
