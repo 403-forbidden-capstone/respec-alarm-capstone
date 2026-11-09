@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, jest } from '@jest/globals';
 import { createFake, type Op } from '../__fixtures__/fakeSupabase';
 import { F_SUYEON, friends, GROUP, groups, JIHYEONG, JUNSEONG, ME, members, perms, profiles, SUYEON } from '../__fixtures__/seed';
 import { UserError } from '@/lib/errors';
+import { addDays, dayKey } from '@/lib/format';
 
 import * as real from '../real';
 
@@ -103,12 +104,29 @@ describe('G01 · H01 · G02 그룹', () => {
 
   it('기상 신호가 알려 준 날은 그대로 p_date로', async () => {
     mockFake.answerRpc('get_group_wake', ok([]));
-    await real.listGroups('2026-10-20');
-    await real.getGroupSummary(GROUP, '2026-10-20');
-    await real.getGroup(GROUP, '2026-10-20');
-    await real.getMemberWake(GROUP, SUYEON, '2026-10-20');
+    const day = dayKey(new Date());
+    await real.listGroups(day);
+    await real.getGroupSummary(GROUP, day);
+    await real.getGroup(GROUP, day);
+    await real.getMemberWake(GROUP, SUYEON, day);
     const dates = mockFake.rpcCalls.filter((c) => c.name === 'get_group_wake').map((c) => (c.args as { p_date?: string }).p_date);
-    expect(dates).toEqual(['2026-10-20', '2026-10-20', '2026-10-20', '2026-10-20']);
+    expect(dates).toEqual([day, day, day, day]);
+  });
+
+  it('어제 · 내일은 그대로, 그 밖의 날짜는 p_date 없이 — 서버가 어제~내일만 받음', async () => {
+    mockFake.answerRpc('get_group_wake', ok([]));
+    const now = new Date();
+    const yesterday = dayKey(addDays(now, -1));
+    const tomorrow = dayKey(addDays(now, 1));
+    for (const day of [yesterday, tomorrow, dayKey(addDays(now, -2)), dayKey(addDays(now, 2)), '2026-01-01']) await real.getGroupSummary(GROUP, day);
+    const args = mockFake.rpcCalls.filter((c) => c.name === 'get_group_wake').map((c) => c.args);
+    expect(args).toEqual([
+      { p_group_id: GROUP, p_date: yesterday },
+      { p_group_id: GROUP, p_date: tomorrow },
+      { p_group_id: GROUP },
+      { p_group_id: GROUP },
+      { p_group_id: GROUP },
+    ]);
   });
 
   it('홈 요약: 나 먼저, 줄이 없는 멤버는 공유 안 함, 일어난 수는 기상 확인만', async () => {
