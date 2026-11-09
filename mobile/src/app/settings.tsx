@@ -14,8 +14,8 @@ import { locateOnce } from '@/features/location/currentPosition';
 import { HOME_RADIUS_PRESETS } from '@/features/location/radius';
 import { FrequentPlacesSection } from '@/features/location/FrequentPlacesSection';
 import { LocationAutoSection } from '@/features/location/LocationAutoSection';
-import { deleteMyAccount, getDeleteSummary } from '@/features/account/api';
-import { DELETE_ACCOUNT_LABEL, DELETE_FAILED, DELETE_FIRST, DELETE_SECOND, DELETE_SUMMARY_FAILED, DELETED_TOAST } from '@/features/account/texts';
+import { deleteMyAccount, getDeleteSummary, isAccountGone } from '@/features/account/api';
+import { ALREADY_DELETED_TOAST, DELETE_ACCOUNT_LABEL, DELETE_FAILED, DELETE_FIRST, DELETE_SECOND, DELETE_SUMMARY_FAILED, DELETED_TOAST } from '@/features/account/texts';
 import { openAppNotificationSettings } from '@/features/permissions';
 import { homePatchOf } from '@/features/onboarding/home';
 import { saveProfileFields } from '@/features/profile/api';
@@ -75,7 +75,7 @@ export default function SettingsScreen() {
     }, '저장하지 못했어요');
 
   // 계정 삭제 (친구 12장) — 영향 요약을 읽어 확인 두 번, 유예 없이 바로. 확인 창은 한 번에 하나 가드(run) 밖에서
-  //   서버가 먼저 지우고(실패하면 이 기기는 그대로, 다시 누르면 이어서 끝냄) 성공하면 이 기기를 비우고 로그아웃 → 로그인 화면
+  //   서버가 먼저 지우고(실패하면 이 기기는 그대로, 다시 누르면 이어서 끝냄) 성공하거나 로그인 거절(AUTH_REQUIRED = 이미 지워짐)이면 이 기기를 비우고 로그아웃 → 로그인 화면
   const deleteAccount = async () => {
     setError(null);
     let summary;
@@ -88,8 +88,13 @@ export default function SettingsScreen() {
     if (!(await confirm({ ...DELETE_FIRST(summary), destructive: true }))) return;
     if (!(await confirm({ ...DELETE_SECOND, destructive: true }))) return;
     await remove.run(async () => {
-      await deleteMyAccount();
-      toast(DELETED_TOAST);
+      try {
+        await deleteMyAccount();
+        toast(DELETED_TOAST);
+      } catch (e) {
+        if (!isAccountGone(e)) throw e;
+        toast(ALREADY_DELETED_TOAST); // 서버가 이미 지웠거나 로그인이 끝남 — 이 기기를 비우고 로그인 화면으로
+      }
       await cleanupAfterAccountDelete();
     }, DELETE_FAILED);
   };

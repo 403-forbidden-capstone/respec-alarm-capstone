@@ -9,6 +9,9 @@ import { DELETION_MAIL, DELETION_PAGE } from '@/features/account/texts';
 export default function AccountDeletionScreen() {
   return (
     <Screen>
+      <Text variant="label" tone="sub">
+        {DELETION_PAGE.app}
+      </Text>
       <Text variant="title" style={styles.title}>
         {DELETION_PAGE.title}
       </Text>

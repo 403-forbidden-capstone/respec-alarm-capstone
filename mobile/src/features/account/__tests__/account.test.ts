@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, jest } from '@jest/globals';
 
 import { EdgeError } from '@/lib/edge';
 
-import { deleteMyAccount, getDeleteSummary } from '../api';
+import { deleteMyAccount, getDeleteSummary, isAccountGone } from '../api';
 import { DELETE_FIRST, DELETE_SECOND, DELETION_MAIL, DELETION_PAGE, deleteSummaryLines } from '../texts';
 
 // 친구 12장 앱 층 — 확인 문구 · 두 번 확인 · 웹 삭제 요청 안내 (시험케이스 12-20 · 12-21 · 12-25 · 12-26, 세션약속 `my_account_delete_summary` · `account-delete`)
@@ -93,5 +93,13 @@ describe('웹 삭제 요청 안내 (12-26)', () => {
   it('팀 메일 주소는 답을 받을 때까지 비워 둠 (그때까지 준비 중 문구)', () => {
     expect(DELETION_MAIL).toBeNull();
     expect(DELETION_PAGE.mailMissing).toBe('메일 주소를 준비하고 있어요.');
+  });
+});
+
+describe('삭제 중 로그인 거절', () => {
+  it('AUTH_REQUIRED만 이미 지워진 것으로 봄 — 다른 실패는 그대로 실패(이 기기는 그대로)', () => {
+    expect(isAccountGone(new EdgeError('AUTH_REQUIRED', { status: 401 }))).toBe(true);
+    for (const code of ['NETWORK', 'TIMEOUT', 'INTERNAL', 'FORBIDDEN'] as const) expect(isAccountGone(new EdgeError(code))).toBe(false);
+    expect(isAccountGone(new Error('x'))).toBe(false);
   });
 });

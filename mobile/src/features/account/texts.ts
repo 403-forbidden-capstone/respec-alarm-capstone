@@ -31,10 +31,12 @@ export const DELETE_SECOND = {
 export const DELETE_SUMMARY_FAILED = '삭제 전에 확인할 내용을 불러오지 못했어요. 다시 해 주세요';
 export const DELETE_FAILED = '계정을 삭제하지 못했어요. 다시 해 주세요 (중간에 멈췄어도 다시 누르면 이어서 지워요)';
 export const DELETED_TOAST = '계정을 삭제했어요';
+export const ALREADY_DELETED_TOAST = '계정이 이미 삭제됐거나 로그인이 끝났어요';
 
 // 웹 삭제 요청 안내 페이지 — 로그인 없이 보는 안내, 폼 없음. 팀 메일 주소는 답을 받으면 DELETION_MAIL에 적음 (친구 12-사, 지금은 비워 둠)
 export const DELETION_MAIL: string | null = null;
 export const DELETION_PAGE = {
+  app: 'Re:Spec Alarm', // app.json name
   title: '계정 삭제 요청',
   lead: '앱을 쓸 수 있다면 설정 > 계정 삭제에서 바로 지울 수 있어요. 앱을 쓸 수 없을 때는 메일로 요청해 주세요.',
   mailLabel: '요청 메일 주소',
