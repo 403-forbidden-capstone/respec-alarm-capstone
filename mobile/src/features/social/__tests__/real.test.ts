@@ -200,17 +200,48 @@ describe('F02 · F03 권한', () => {
     expect(op.options).toEqual({ onConflict: 'owner_id,grantee_id,source_type,source_id' });
   });
 
-  it('그룹에 저장(D18 열림): 지금 참여 중인 다른 구성원마다 행을 씀, 나는 빼고', async () => {
+  it('그룹에 저장: save_group_permissions 한 번 — 멤버마다 행을 따로 쓰지 않음 (6-14 · 6-15)', async () => {
+    mockFake.answerRpc('save_group_permissions', ok({ status: 'OK', saved: 3 }));
     await real.saveShareSettings(`group:${GROUP}`, { viewAlarm: true, editAlarm: false, viewWake: true });
-    const [op] = mockFake.opsOf('sharing_permissions', 'upsert');
-    const rows = op.payload as { grantee_id: string; source_type: string; source_id: string; can_view_alarm: boolean; can_view_wake: boolean }[];
-    expect(rows.map((r) => r.grantee_id)).toEqual([SUYEON, JUNSEONG, JIHYEONG]);
-    expect(rows.every((r) => r.source_type === 'GROUP' && r.source_id === GROUP && r.can_view_alarm && r.can_view_wake)).toBe(true);
+    expect(mockFake.rpcCalls.filter((c) => c.name === 'save_group_permissions')).toEqual([
+      { name: 'save_group_permissions', args: { p_group_id: GROUP, p_can_view_alarm: true, p_can_edit_alarm: false } },
+    ]);
+    expect(mockFake.opsOf('sharing_permissions', 'upsert')).toHaveLength(0);
   });
 
-  it('저장은 기상 공유 동의를 건드리지 않음 (D19 열림)', async () => {
-    await real.saveShareSettings(`group:${GROUP}`, { viewAlarm: false, editAlarm: false, viewWake: true });
+  it('설정만 켜서 보내도 조회를 같이 켬 (설정만 켠 행은 DB 제약이 거절) · 친구 관계도 같음', async () => {
+    mockFake.answerRpc('save_group_permissions', ok({ status: 'OK', saved: 3 }));
+    await real.saveShareSettings(`group:${GROUP}`, { viewAlarm: false, editAlarm: true, viewWake: true });
+    expect(mockFake.rpcCalls.find((c) => c.name === 'save_group_permissions')?.args).toMatchObject({ p_can_view_alarm: true, p_can_edit_alarm: true });
+    await real.saveShareSettings(`friend:${SUYEON}`, { viewAlarm: false, editAlarm: true, viewWake: false });
+    const [op] = mockFake.opsOf('sharing_permissions', 'upsert');
+    expect(op.payload).toMatchObject({ can_view_alarm: true, can_edit_alarm: true });
+  });
+
+  it('친구 관계는 기상 조회를 켜 보내도 항상 꺼서 씀 (친구 출처에는 기상 조회 없음)', async () => {
+    await real.saveShareSettings(`friend:${SUYEON}`, { viewAlarm: true, editAlarm: false, viewWake: true });
+    expect(mockFake.opsOf('sharing_permissions', 'upsert')[0].payload).toMatchObject({ can_view_wake: false });
+  });
+
+  it('그룹의 기상 스위치는 그룹 기상 공유 동의를 바꿈 — 값이 같으면 안 건드리고, 다르면 내 동의 한 줄만 (6-23)', async () => {
+    mockFake.answerRpc('save_group_permissions', ok({ status: 'OK', saved: 3 }));
+    mockFake.answer('group_members.update', ok([{ group_member_id: 'gm1' }]));
+    await real.saveShareSettings(`group:${GROUP}`, { viewAlarm: true, editAlarm: false, viewWake: true }); // 내 동의가 이미 켜져 있음
     expect(mockFake.opsOf('group_members', 'update')).toHaveLength(0);
+    await real.saveShareSettings(`group:${GROUP}`, { viewAlarm: true, editAlarm: false, viewWake: false });
+    const [op] = mockFake.opsOf('group_members', 'update');
+    expect(op.payload).toEqual({ wake_share_opt_in: false });
+  });
+
+  it('그룹 권한 저장이 실패하면 기상 동의는 바꾸지 않고, 동의만 실패하면 그 사실을 알림 (알람 권한은 저장된 뒤)', async () => {
+    mockFake.answerRpc('save_group_permissions', { data: null, error: new Error('rpc') });
+    await expect(real.saveShareSettings(`group:${GROUP}`, { viewAlarm: true, editAlarm: false, viewWake: false })).rejects.toThrow('rpc');
+    expect(mockFake.opsOf('group_members', 'update')).toHaveLength(0);
+    mockFake.answerRpc('save_group_permissions', ok({ status: 'OK', saved: 3 }));
+    mockFake.answer('group_members.update', { data: null, error: new Error('rls') });
+    await expect(real.saveShareSettings(`group:${GROUP}`, { viewAlarm: true, editAlarm: false, viewWake: false })).rejects.toThrow(
+      new UserError('알람 권한은 저장했지만 기상 공유 동의는 바꾸지 못했어요. 다시 저장해 주세요'),
+    );
   });
 
   it('친구가 아니거나 참여 중이 아닌 관계에는 저장하지 않고 이유를 알림', async () => {
@@ -219,10 +250,19 @@ describe('F02 · F03 권한', () => {
     expect(mockFake.opsOf('sharing_permissions', 'upsert')).toHaveLength(0);
   });
 
-  it('혼자인 그룹은 줄 사람이 없어 아무것도 쓰지 않음', async () => {
-    mockFake.answer('group_members.select', ok(members.filter((m) => m.user_id === ME)));
-    await real.saveShareSettings(`group:${GROUP}`, { viewAlarm: true, editAlarm: false, viewWake: false });
-    expect(mockFake.opsOf('sharing_permissions', 'upsert')).toHaveLength(0);
+  it('혼자인 그룹은 오류(UserError) — 가짜 성공 없음 (6-18)', async () => {
+    mockFake.answerRpc('save_group_permissions', ok({ status: 'NO_MEMBERS' }));
+    await expect(real.saveShareSettings(`group:${GROUP}`, { viewAlarm: true, editAlarm: false, viewWake: false })).rejects.toThrow(
+      new UserError('이 그룹에는 나 말고 멤버가 없어요. 멤버가 들어오면 권한을 줄 수 있어요'),
+    );
+    expect(mockFake.opsOf('group_members', 'update')).toHaveLength(0);
+  });
+
+  it('서버가 모르는 상태를 주면 성공으로 넘기지 않음 · 그룹이 사라졌으면(NOT_FOUND) 이유를 알림', async () => {
+    mockFake.answerRpc('save_group_permissions', ok({ status: 'SOMETHING' }));
+    await expect(real.saveShareSettings(`group:${GROUP}`, { viewAlarm: true, editAlarm: false, viewWake: false })).rejects.toThrow();
+    mockFake.answerRpc('save_group_permissions', ok({ status: 'NOT_FOUND' }));
+    await expect(real.saveShareSettings(`group:${GROUP}`, { viewAlarm: true, editAlarm: false, viewWake: false })).rejects.toBeInstanceOf(UserError);
   });
 
   it('쓰기 오류는 그대로 던짐 (화면은 기본 문구)', async () => {
@@ -230,8 +270,8 @@ describe('F02 · F03 권한', () => {
     await expect(real.saveShareSettings(`friend:${SUYEON}`, { viewAlarm: true, editAlarm: false, viewWake: false })).rejects.toThrow('rls');
   });
 
-  it('받은 권한: 친구는 한 줄, 그룹은 구성원마다 (동의가 꺼진 사람의 기상 조회는 꺼진 값)', async () => {
-    expect(await real.getReceived(`friend:${SUYEON}`)).toEqual([{ person: expect.objectContaining({ name: '수연' }), permissions: { viewAlarm: true, editAlarm: true, viewWake: true } }]);
+  it('받은 권한: 친구는 한 줄(기상 조회 없음), 그룹은 구성원마다 (기상 = 그 사람의 그룹 동의, 동의가 꺼진 사람은 꺼진 값)', async () => {
+    expect(await real.getReceived(`friend:${SUYEON}`)).toEqual([{ person: expect.objectContaining({ name: '수연' }), permissions: { viewAlarm: true, editAlarm: true, viewWake: false } }]);
     expect(await real.getReceived(`friend:${JUNSEONG}`)).toEqual([]);
     const group = await real.getReceived(`group:${GROUP}`);
     expect(group.map((r) => [r.person.name, r.permissions])).toEqual([

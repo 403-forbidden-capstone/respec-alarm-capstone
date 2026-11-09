@@ -173,10 +173,10 @@
 - 오늘 n명 일어남: `get_group_wake` — RPC의 `CONFIRMED` 수(분모 없음). 그 그룹 일정이 있는 날만, 없는 날은 줄을 숨김 (D57 · 친구 7장)
 
 ### F02 친구 권한
-- 관계별 받은 권한: `sharing_permissions`(주는 사람 = 친구, 받는 사람 = 나, 출처 FRIEND · GROUP) — DB → 최종 = 항목별 OR (앱에서 합침)
+- 관계별 받은 권한: `sharing_permissions`(주는 사람 = 친구, 받는 사람 = 나, 출처 FRIEND · GROUP) — DB → 최종 = 항목별 OR (앱에서 합침). 기상 조회는 권한 행의 값이 아니라 그 그룹의 기상 공유 동의 하나(`wake_share_opt_in`)로 계산 — 알람 권한 행이 없어도 동의한 그룹은 줄이 생기고, 친구 출처에는 기상 조회가 없음. 안내 '내가 OO님에게 준 권한을 관계별로 합친 결과예요'
 
 ### F03 공유 권한 설정
-- 내가 주는 권한: `sharing_permissions`(주는 사람 = 나, 출처 = 고른 관계) `can_view_alarm` · `can_edit_alarm` · `can_view_wake` 저장 — DB
+- 내가 주는 권한 저장: 친구 관계 = `sharing_permissions` 내 행 하나 upsert(알람 조회 · 알람 설정 2개만, `can_view_wake`는 항상 꺼서) — DB. 그룹 관계 = `save_group_permissions(p_group_id, p_can_view_alarm, p_can_edit_alarm)` 한 번 — RPC(참여 중 멤버 전원에게 같은 값이 전부 되거나 전부 안 됨, 값이 그대로여도 저장해 나중에 들어온 멤버 몫 설정 행이 생김, 혼자인 그룹은 `NO_MEMBERS` → 오류). 그룹의 기상 상태 조회 스위치 = 이 그룹 기상 공유 동의: `group_members.wake_share_opt_in`을 내 행만 update(값이 바뀐 때만)
 - 받은 권한 보기: `sharing_permissions`(받는 사람 = 나) — DB
 - 설정 권한은 조회 권한이 있어야 실제로 고칠 수 있음 → 화면에서 설정을 켜면 조회도 같이 켬
 

@@ -85,7 +85,7 @@ function Detail({ group: g, stale, onBack, onChanged }: { group: GroupDetail; st
       <Card>
         <View style={[styles.between, styles.label]}>
           <Text variant="label" tone="sub">
-            그룹 공유 범위
+            내가 공유 중
           </Text>
           <TextLink
             label="공유 권한 설정 ›"
