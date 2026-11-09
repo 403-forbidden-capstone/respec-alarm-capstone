@@ -179,6 +179,7 @@
 - 내가 주는 권한: `sharing_permissions`(주는 사람 = 나, 출처 = 고른 관계) `can_view_alarm` · `can_edit_alarm` · `can_view_wake` 저장 — DB
 - 받은 권한 보기: `sharing_permissions`(받는 사람 = 나) — DB
 - 설정 권한은 조회 권한이 있어야 실제로 고칠 수 있음 → 화면에서 설정을 켜면 조회도 같이 켬
+- 알람 조회 줄 아래 안내 '일정 장소도 보여요 · 집 · 출발지는 안 보여요' (친구 13장, 화면 글자만 — 서버는 일정 장소까지만 내려줌)
 
 ### G02 그룹 상세
 - 그룹 · 멤버: `groups` + `group_members` — DB, 기상 공유 동의 `wake_share_opt_in` — DB
@@ -244,6 +245,7 @@
 ### 로그인 · 온보딩 · 설정 (#25)
 - 로그인: Supabase Auth 카카오 · 구글 → 가입하면 `profiles` 자동 생성. 화면 아래의 "알람 테스트" 버튼은 `/dev/alarm-test`로 바로 감 (로그인 전에도 열림, 화면 위 "← 이전"으로 돌아옴, #177)
 - 온보딩: `profiles` 아이디(`handle`) · 닉네임 · 잠귀(`wake_sensitivity`) · 집(`home_name` · `home_lat` · `home_lng`) · 기본 준비 · 여유 시간 · 이동 수단 · 깨우는 여유(`wake_margin`) · 개인정보 동의(`privacy_agreed_at` · `privacy_version`) · 온보딩 끝낸 시각(`onboarded_at`) — DB, 집 검색 `place-search` — Edge
+  - **개인정보 동의 단계** (친구 13장): 항목 5개(위치 · 화면 사용 · 음성 · 기상 공유 · 알람 공유) + '만 14세 이상이에요' 확인(체크 전에는 [다음] 잠김). 안내 판 번호 `PRIVACY_VERSION = 3` — 이 판에 이미 동의한 계정이 온보딩을 다시 열면 체크 없이 통과(다시 저장 안 함), 판이 낮으면 다시 동의. 온보딩을 마친 계정에는 동의 단계가 다시 나오지 않음. 로그아웃 저장본은 친구 읽기 값이 계정별(`me`)로 따로 읽혀 따로 비우지 않음
   - **단계 온보딩** (`lib/flags` `ONBOARDING_IN_FLOW = true`, #25): 순서는 `features/onboarding/steps.ts`, 단계마다 켜고 끄는 표는 `ONBOARDING_STEPS`(아이디 → 닉네임 → 잠귀 → 집 → 아침 준비 → 시간표 → 동의 → 권한 안내 → 기상 공유 → 첫 일정). 집: 장소 검색(`place-search`)으로 고르면 `home_name` · `home_lat` · `home_lng` 저장(좌표 없는 장소는 못 고름, [나중에]는 저장 없이 다음). 시간표(직접 입력 초안, D66-1 B): 수업 줄(과목 · 요일 · 시작 시각 · 장소)마다 차례로 `estimateAppointment` → `createAppointment(…, '온보딩 시간표')`로 반복 일정 + 알람 저장, 실패한 줄만 표시하고 그 단계에 머묾, 첫 저장 뒤 알림 안내. 권한 안내: 알림 · 전체화면 알림 · (꺼졌을 때만)정확한 알람 · 사용 정보 · 배터리 · 삼성 절전 줄의 상태 표 + 사용자가 누르는 [켜기] · [설정 열기]만(`permissionRows`, 자동 시스템 창 없음, 안 켜도 [다음]), 위치 줄(안드로이드 + 실데이터만, `ONBOARDING_LOCATION_ROWS`): 누르면 `LOCATION_DISCLOSURE` 고지 → `requestLocationAccessFlow()`(앱 사용 중 → 항상 허용 설정 화면), 나중에 · 거절은 설정 카드로(`useLocationRow`). 단계마다 [다음]에서 `saveProfileFields`로 저장하고 마지막에 `finishOnboarding`이 `onboarded_at`을 적음. 판정은 `onboarded_at`이 비었는지(`features/auth/onboardingGate.ts`). 가짜 데이터 모드 미리 보기는 저장 없이 단계만 넘김. `/dev/screens`의 "온보딩부터 다시"로 처음부터 다시 봄
   - 개발 화면 목록(`/dev/screens` · 웹 미리보기 패널)에서 단계마다 바로 열기: `/onboarding?step=home` — 가짜 데이터 모드(저장 안 함)에서만, 실데이터는 늘 첫 단계부터 (`steps.ts` `startStep`)
   - 개발 화면 `/dev/screens`의 **내 시험 데이터 지우기** (실데이터 + 로그인 + 모드를 바꿀 수 있는 빌드에서만, 출시 빌드에서는 숨김 D16): 확인 창 → `features/dev/api` `resetMyTestData`(DB 함수 `dev_reset_my_data` — 내 일정 · 알람 · 기록 · 일기 · AI 대화 · 고친 값 기록 · 제안을 지우고 프로필을 온보딩 전으로, 그룹 일정은 내 참여 행만, 친구 · 그룹 · 푸시 토큰 · `ai_calls` · 루틴은 그대로) → `lib/session` `cleanupAfterDataReset`(폰 알람 전부 취소 · 못 올린 울림 기록 버림, 로그아웃 없음) → 프로필 다시 읽기 → 온보딩. 가짜 데이터 모드에서는 "지울 게 없어요"
