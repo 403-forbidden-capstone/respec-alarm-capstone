@@ -62,6 +62,8 @@ export interface PublicCard {
   edit: CardEdit | null;
   appointment_id: string | null;
   error: string | null;
+  /** 카드를 만든 때 — 없으면(예전 카드) null */
+  at: string | null;
 }
 
 export interface PublicFix {
@@ -94,6 +96,7 @@ export function publicCard(c: Card, refs: RefsOut): PublicCard {
     edit,
     appointment_id: c.appointment_id,
     error: c.error,
+    at: c.at ?? null,
   };
 }
 

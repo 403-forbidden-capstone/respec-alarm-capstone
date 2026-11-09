@@ -130,16 +130,22 @@ function accepted<T>(res: T | Rejected): T {
 
 // ───────── 화면 만들기 ─────────
 
+/**
+ * T1 · T2F에 보내는 대화 줄 수 (사용자 · AI 줄 합). 대화당 말 100(MAX_USER_TURNS)이면 줄이 200을 넘어 매 턴 입력 토큰 · 비용이 커지므로 최근 줄만.
+ * 앞 대화의 일정 · 카드 · 처리 결과는 서버 상태(카드 · 서버 처리 결과 블록)로 따로 들어가므로 빠지지 않음. 끝 정리(T2)는 대화 전체를 봄
+ */
+export const TRANSCRIPT_RECENT_LINES = 40;
+
 function screenFast(st: ServerState, nowIso: string, stored: StoredTurn[]): Record<string, unknown> {
   // 기본 화면: 확인할 기록 줄 없음 · 24시간 · "서버 처리 결과 없음" (06-서버지침.md 37번)
   const ctx = ctxOf(st, nowIso, []);
-  return { ...contextVars(ctx), transcript: viewTranscript(turnsOf(stored), { userName: ctx.user.name }) };
+  return { ...contextVars(ctx), transcript: viewTranscript(turnsOf(stored), { userName: ctx.user.name, recent: TRANSCRIPT_RECENT_LINES }) };
 }
 
 function screenT1(st: ServerState, nowIso: string, stored: StoredTurn[], events: ServerEvent[]): { vars: Record<string, unknown>; ctx: Context } {
   // T1 화면: 확인할 기록 줄 + 시각을 말로 + 서버 처리 결과
   const ctx = ctxOf(st, nowIso, events);
-  return { ctx, vars: { ...contextVars(ctx, { confirmFacts: st.confirm, spokenTimes: true }), transcript: viewTranscript(turnsOf(stored), { userName: ctx.user.name }) } };
+  return { ctx, vars: { ...contextVars(ctx, { confirmFacts: st.confirm, spokenTimes: true }), transcript: viewTranscript(turnsOf(stored), { userName: ctx.user.name, recent: TRANSCRIPT_RECENT_LINES }) } };
 }
 
 // ───────── T1 답 + 가드 ─────────
@@ -315,7 +321,7 @@ async function handleText(run: Run, row: SessionRow, st: ServerState, req: Extra
   const { deps } = run;
   const sessionDeps = { userId: deps.userId, userDb: deps.userDb, service: deps.service };
   if (deps.llm === null) throw new HttpError('NOT_CONFIGURED', 'AI가 아직 준비되지 않았어요'); // 말을 쌓지 않고 거절 — 키가 생긴 뒤 같은 요청을 다시 보내면 됨
-  // 상한: 대화당 사용자 말 20 · 하루 AI 호출 300 — LLM을 안 부르고 템플릿 한 줄(저장도 안 함: 말이 쌓이지 않음)
+  // 상한: 대화당 사용자 말 100(대화 길이 TURN) · 하루 AI 호출 300(DAY) — LLM을 안 부르고 템플릿 한 줄(저장도 안 함: 말이 쌓이지 않음)
   const calToday = startOf(seoulLocal(run.nowIso).date);
   const capped = st.counts.user_turns >= MAX_USER_TURNS ? 'TURN' : callsCapReached(await countCallsSince(sessionDeps, calToday)) ? 'DAY' : null;
   if (capped !== null) {
@@ -390,15 +396,17 @@ async function handleText(run: Run, row: SessionRow, st: ServerState, req: Extra
 async function handleResults(run: Run, row: SessionRow, st: ServerState, results: TaskResults, ctid: string, limitsFor: LimitsFor): Promise<VoiceTurnOut> {
   // 기다리던 앱 일이 있으면 그 말 번호로, 없으면(장소 고르기 뒤 results만) 가장 최근 사용자 말 번호로
   const j = st.awaiting?.after_turn ?? st.counts.user_turns;
-  if (j < 1) throw new HttpError('VALIDATION_FAILED', '말이 없는 대화에는 결과를 보낼 수 없어요');
+  // 말이 없는 대화에는 받지 않음 — 같은 방의 앞 구간에서 이어 받은 카드(계산이 안 끝난 채 넘어옴)만 예외
+  if (j < 1 && !st.prev_session_id) throw new HttpError('VALIDATION_FAILED', '말이 없는 대화에는 결과를 보낼 수 없어요');
   const ts0 = toTurnState(st);
   const out = accepted(applyTaskResults(ts0, results, ctxOf(st, run.nowIso, []), j));
   if (out.unknown.length > 0) throw new HttpError('NOT_FOUND', '모르는 카드나 정정 번호예요', { ids: out.unknown });
+  if (j === 0) beforeFirstTurn(out.state);
   const changed = out.cards.length + out.fixes.length > 0;
   const waiting = out.state.awaiting !== null;
   return conclude(
     run, row, st,
-    { ts: out.state, stored: row.turns, userTurns: st.counts.user_turns, j, trigger: 'results', fixes: out.state.fixes.filter((f) => f.status === 'SENT'), needReply: changed && !waiting, preview: null },
+    { ts: out.state, stored: row.turns, userTurns: st.counts.user_turns, j, trigger: 'results', fixes: out.state.fixes.filter((f) => f.status === 'SENT'), needReply: changed && !waiting && j > 0, preview: null },
     ctid, limitsFor,
   );
 }
@@ -409,10 +417,19 @@ async function handleCard(run: Run, row: SessionRow, st: ServerState, action: Ca
   const out = accepted(applyCardAction(ts0, action, ctxOf(st, run.nowIso, []), j));
   if (out.status === 'NOT_FOUND') throw new HttpError('NOT_FOUND', '카드를 찾을 수 없어요');
   if (out.status === 'NOOP') return outOf(st, null, [], await limitsFor(st), false); // 이미 끝난 카드 · 저장 없는 카드 — 바뀐 것 없음
+  if (j === 0) beforeFirstTurn(out.state);
   return conclude(
     run, row, st,
-    { ts: out.state, stored: row.turns, userTurns: st.counts.user_turns, j, trigger: `card:${action.id}`, fixes: [], needReply: out.needsReply && !st.ended, preview: null },
+    { ts: out.state, stored: row.turns, userTurns: st.counts.user_turns, j, trigger: `card:${action.id}`, fixes: [], needReply: out.needsReply && !st.ended && j > 0, preview: null },
     ctid, limitsFor,
   );
+}
+
+/**
+ * 이 구간에 아직 사용자 말이 없는데 카드가 바뀜 (같은 방의 앞 구간에서 이어 받은 카드를 첫 말 전에 저장 · 계산) — 카드 상태만 바꾸고 답(T1)은 안 만듦.
+ * '말 0 뒤' 처리 결과는 모델 화면(사용자 말 번호 1부터)에 놓을 수 없어 지움 — 저장한 일정은 문맥(일정 목록)에 이미 들어감
+ */
+function beforeFirstTurn(ts: TurnState): void {
+  ts.events = ts.events.filter((e) => e.after_turn !== 0);
 }
 

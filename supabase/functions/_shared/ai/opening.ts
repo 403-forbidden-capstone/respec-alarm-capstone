@@ -6,12 +6,16 @@ import type { Act, Context, Fact, ServerQuestion } from './types.ts';
 import { spokenTime } from './view.ts';
 
 /** 대화당 사용자 말 상한 · 하루 대화 수 · 하루 AI 호출 수 (설계 메모 0절 · 3절) */
-export const MAX_USER_TURNS = 20;
+// 대화방은 하루(KST 달력 날짜) 하나를 이어 쓰므로 말 상한이 곧 하루 말 상한 — 20이 실제 이용에 짧아 100으로 (11/9 작업자 결정). T1 · T2F는 최근 줄만 보냄(turn.ts TRANSCRIPT_RECENT_LINES)
+export const MAX_USER_TURNS = 100;
+// 새 대화방을 만드는 횟수만 셈 — 같은 날(KST)은 열린 방을 이어 받고(findOpenSession) 기준일이 바뀐 다음 구간은 안 셈(voice-session). 앱이 방을 지워 상한을 피하는 것을 막는 안전장치로 남김
 export const MAX_SESSIONS_PER_DAY = 5;
 export const MAX_AI_CALLS_PER_DAY = 300;
 
-export const LIMIT_TURN_TEXT = '오늘 대화는 여기까지예요. [완료]를 누르면 정리할게요.';
-export const LIMIT_DAY_TEXT = '오늘 대화는 여기까지예요.';
+/** 대화 길이 상한(MAX_USER_TURNS) — 같은 날은 같은 방이라 내일 새 방에서 이어감 */
+export const LIMIT_TURN_TEXT = '오늘 대화가 길어져서 여기까지예요. [완료]를 누르면 정리하고, 내일 새 대화에서 이어가요.';
+/** 사용자 하루 상한(대화방 수 · AI 호출 수) */
+export const LIMIT_DAY_TEXT = '오늘 AI 대화는 여기까지예요. 내일 다시 이야기해요.';
 /** 앱 전체의 하루 AI 사용량(ai/quota.ts AI_LIMIT_RPD)에 닿음 — 내 탓이 아니라는 걸 알 수 있게 */
 export const LIMIT_AI_DAY_TEXT = '오늘은 AI 대화를 더 할 수 없어요. 일정은 직접 만들 수 있고, 내일 다시 이야기해요.';
 

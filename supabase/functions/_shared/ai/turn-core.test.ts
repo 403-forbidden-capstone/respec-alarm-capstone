@@ -9,7 +9,7 @@ import { datesFor } from "./testing.ts";
 import {
   prepAsked,
   appointmentSummary, applyCardAction as applyCardActionRaw, applyFast, applyTaskResults as applyTaskResultsRaw, checkBasis, checkDigest, dateKo, dayOf, eventAt, expandFast, initTurnState, isoToLocal, itemKey,
-  keywordImportance, needKinds, normTitle, pickServerQuestion, questionSubjectKey, titleMatch,
+  keywordImportance, nearTitle, needKinds, normTitle, pickServerQuestion, questionSubjectKey, titleMatch,
 } from "./turn-core.ts";
 import type { CardOutcome, QuestionHistory, TaskOutcome, TurnState } from "./turn-core.ts";
 import { eventsForView } from "./guards.ts";
@@ -1390,5 +1390,17 @@ describe("prepAsked — 준비시간 변경을 사용자가 청했는지 (11/8 �
     assert.equal(prepAsked([ai("내일 준비시간을 10분 더 늘려 드릴까요?"), u("응")]), true);
     assert.equal(prepAsked([ai("오늘 하루 어땠어요?"), u("응")]), false);
     assert.equal(prepAsked([ai("내일 준비시간을 늘려 드릴까요?"), u("아니"), ai("알겠어요."), u("잘 자")]), true); // 답한 말이 있으면 대화 전체로는 청함(방향은 모델 · DECLINED가 정함)
+  });
+});
+
+describe("nearTitle — 같은 일정 이름(글자 흔들림 한 글자까지)", () => {
+  it("한 글자 차이 · 띄어쓰기 · 포함은 같음, 다른 이름 · 한 글자 이름은 다름", () => {
+    assert.equal(nearTitle("스터디", "스터더"), true); // 11/9 웹 시험
+    assert.equal(nearTitle("도서관 스터디", "도서관스터디"), true);
+    assert.equal(nearTitle("스터디", "스터디 모임"), true); // titleMatch(포함)
+    assert.equal(nearTitle("팀플 회의", "팀플회으"), true);
+    assert.equal(nearTitle("스터디", "치과"), false);
+    assert.equal(nearTitle("스터디", "스케줄"), false); // 두 글자 차이
+    assert.equal(nearTitle("밥", "빵"), false); // 한 글자 이름은 비교 안 함
   });
 });

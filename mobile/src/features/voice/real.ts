@@ -34,7 +34,7 @@ import { currentUserId } from '@/lib/user';
 import type { Weekday } from '@/lib/weekday';
 
 import { applyFix, type Fix } from './fixes';
-import { addPendingCommit, isFinished, markFinished, pendingCommits, removePendingCommit } from './finishedSessions';
+import { addPendingCommit, isFinished, pendingCommits, removePendingCommit } from './finishedSessions';
 import { clearSaved, markSaved, pruneExpired, pruneOtherSessions, readSavedMarks } from './savedMarks';
 import type { ChatMessage, CardAlarm, CardKind, CardStatus, Conversation, ConversationCard, FixResult, Limits, TurnNotice, Unavailable } from './types';
 
@@ -76,6 +76,7 @@ type ServerCard = {
   edit?: ServerEdit | null;
   appointment_id?: string | null; // 저장한 약속 (서버가 SAVED 뒤 채움)
   error?: string | null;
+  at?: string | null; // 카드를 만든 때 — 다시 열 때 그 자리에 놓음 (예전 카드는 없음 → 읽은 때)
 };
 
 type ServerFix = { id: string; fact?: string; kind: string; participant_id: string /* 늘 글자 (모르면 '') */; action: 'CORRECT' | 'DENY'; to: string | null };
@@ -91,6 +92,8 @@ type SessionResponse = {
   messages?: ServerMessage[];
   cards?: ServerCard[];
   limits?: ServerLimits;
+  prev_session_ids?: string[]; // 같은 대화방의 앞 구간 세션(기준일이 달라 기록만 나뉨) — 화면 말 · 카드는 이미 이어서 옴
+  uncommitted_session_ids?: string[]; // 어제 연 방 중 [완료] 없이 넘어와 정리가 안 된 것 — 정리 요청 목록에 넣음
 };
 
 type TurnResponse = {
@@ -267,7 +270,8 @@ function mergeCards(cards: ServerCard[] | undefined, at: Date) {
     const rec = state.cards.get(sc.id);
     if (!rec) {
       state.cards.set(sc.id, { server: sc, status: sc.status, estimate: null, alarms: [], error: null, place: null, appointmentId: null });
-      pushMessage('card', '', at, sc.id);
+      // [저장 안 함]한 카드는 다시 열 때 대화에 다시 그리지 않음 (상태는 남겨 정리 요청의 rejected_cards로 감)
+      if (sc.status !== 'REJECTED') pushMessage('card', '', sc.at ? new Date(sc.at) : at, sc.id);
       continue;
     }
     const done = rec.status === 'SAVED' || rec.status === 'REJECTED';
@@ -502,7 +506,13 @@ async function runTasks(res: TurnResponse): Promise<{ cards: ResultCard[]; fixes
 // 서버 부르기 — 오류 가름
 // ---------------------------------------------------------------------------
 
-const unavailableOf = (e: EdgeError): Unavailable => ({ code: e.code, message: e.message, canRetry: true });
+// 분당 사용량에 막힘(서버 관문 RPM · TPM · 동시 요청, Gemini 429) — LLM_UNAVAILABLE의 details.code RATE_LIMITED
+const unavailableOf = (e: EdgeError): Unavailable => ({
+  code: e.code,
+  message: e.message,
+  canRetry: true,
+  ...((e.details as { code?: unknown } | null | undefined)?.code === 'RATE_LIMITED' ? { rateLimited: true } : {}),
+});
 
 // 오류가 났을 때 — 대화를 남기고 [다시 시도]를 보일 것이면 상태에 적고 돌아옴(그 요청 p는 pending에 남음), 아니면 던짐 (CONFLICT는 세션을 다시 읽은 뒤 던짐)
 //   p = 실패한 요청 (세션 시작이면 없음). unavailable은 p가 pending에 남아 [다시 시도]가 다시 보낼 때만 적음 — 죽은 안내가 남지 않게
@@ -593,9 +603,16 @@ async function submitCard(item: Queued): Promise<void> {
 
 // 저장은 했는데 서버에 SAVED를 못 알린 카드(로컬 '저장됨' 표시)를 저장됨으로 복원 — 서버가 READY · NEEDS_*로 줘도 createAppointment를 또 부르지 않게.
 //   서버가 이미 SAVED · REJECTED로 알면 표시를 지움. renotify(앱을 다시 연 때)면 서버에 SAVED만 다시 알림(큐). 서버가 모르는 카드는 건드리지 않음
-async function restoreSaved(sessionId: string, renotify: boolean): Promise<void> {
+//   prevSessionIds = 같은 대화방의 앞 구간 세션(서버 prev_session_ids) — 그 구간에서 저장하고 못 알린 표시는 지우지 않고 지금 세션으로 옮김 (카드 번호가 구간을 넘어 그대로라)
+async function restoreSaved(sessionId: string, renotify: boolean, prevSessionIds: readonly string[] = []): Promise<void> {
   const userId = state.userId;
   if (!userId) return; // 로그인 전 — 표시를 쓰지 않음 (저장 · 대화는 그대로)
+  for (const prev of prevSessionIds) {
+    const current = await readSavedMarks(userId, sessionId);
+    for (const [cardId, mark] of Object.entries(await readSavedMarks(userId, prev))) {
+      if (!(cardId in current)) await markSaved(userId, sessionId, cardId, mark);
+    }
+  }
   await pruneOtherSessions(userId, sessionId);
   const marks = await readSavedMarks(userId, sessionId);
   for (const [cardId, mark] of Object.entries(marks)) {
@@ -629,7 +646,8 @@ async function restoreSaved(sessionId: string, renotify: boolean): Promise<void>
 // fresh = 앱을 (다시) 열어 시작하는 읽기 — 저장 표시가 남은 카드는 서버에 SAVED를 다시 알림. 오류 뒤 다시 읽기(CONFLICT · NOT_FOUND)는 복원만
 async function readSession(resume: boolean, fresh = false): Promise<void> {
   let res = await callEdge<SessionResponse>('voice-session', { session_type: 'BEFORE_SLEEP', input_mode: 'TEXT', resume });
-  // [완료]한 세션은 서버가 아직 안 끝난 줄로 알아 resume이 또 돌려줌 — 무시하고 새 세션 (완료 없이 나간 세션은 적혀 있지 않아 그대로 이어짐)
+  // 예전 방식으로 [완료]한 세션(정리 실패로 서버에 안 끝난 채 남음)을 resume이 돌려주면 무시하고 새 세션 — 옛 세션을 합치지 않음.
+  //   지금은 [완료]가 완료 표시를 적지 않으므로(같은 날 같은 대화를 이어 씀) 업데이트 전에 적힌 표시에만 걸림
   if (resume && res.resumed && res.session_id && state.userId && (await isFinished(state.userId, res.session_id))) {
     res = await callEdge<SessionResponse>('voice-session', { session_type: 'BEFORE_SLEEP', input_mode: 'TEXT', resume: false });
   }
@@ -645,10 +663,18 @@ async function readSession(resume: boolean, fresh = false): Promise<void> {
   state.messages = [];
   state.cards = new Map();
   for (const m of res.messages ?? []) pushMessage(m.role === 'ai' ? 'ai' : 'me', m.text, m.at ? new Date(m.at) : at);
-  mergeCards(res.cards, at);
+  // 카드는 만든 때(at) 자리로 (같은 때면 말 뒤 — 안정 정렬). 만든 때가 없는 예전 카드는 예전처럼 맨 끝(읽은 때 · 마지막 말 중 늦은 때)
+  const last = state.messages.at(-1)?.at;
+  mergeCards(res.cards, last && last > at ? last : at);
+  state.messages.sort((a, b) => a.at.getTime() - b.at.getTime());
   if (fresh) await pruneExpired(now()); // 앱을 열 때 — 모든 사용자의 7일 지난 표시 · 옛 형식 키 정리
+  // 자정이 지나 [완료] 없이 넘어온 어제 방 — 정리 목록에 없으면 넣음 (있으면 [저장 안 함] 카드 목록을 지키려고 그대로)
+  if (state.userId && res.uncommitted_session_ids?.length) {
+    const queued = new Set((await pendingCommits(state.userId)).map((c) => c.sessionId));
+    for (const id of res.uncommitted_session_ids) if (!queued.has(id)) await addPendingCommit(state.userId, id);
+  }
   if (fresh) void flushCommits(state.userId); // 지난번에 못 보낸 대화 끝 정리
-  if (res.session_id) await restoreSaved(res.session_id, fresh);
+  if (res.session_id) await restoreSaved(res.session_id, fresh, res.prev_session_ids ?? []);
   for (const [id, old] of done) {
     const rec = state.cards.get(id);
     if (rec && res.session_id && rec.status !== 'SAVED' && rec.status !== 'REJECTED') {
@@ -675,7 +701,7 @@ async function continueAfterOpen(): Promise<void> {
   else if (state.queue.length > 0 && !state.pending) await drive();
 }
 
-// 대화 시작 — 오늘 안 끝난 세션이 있으면 그대로(resume), 없으면 새로. 첫 마디는 서버 템플릿이라 messages에 옴. 하루 한도면 세션 없이 limits.reached = DAY
+// 대화 시작 — 오늘(KST) 연 세션이 있으면 그대로(resume, [완료]한 뒤에도), 없으면 새로. 첫 마디는 서버 템플릿이라 messages에 옴. 하루 한도면 세션 없이 limits.reached = DAY
 export async function startConversation(_opts: { type: 'BEFORE_SLEEP' } = { type: 'BEFORE_SLEEP' }): Promise<void> {
   try {
     await readSession(true, true);
@@ -800,6 +826,7 @@ export function retry(): Promise<Conversation> {
 
 // 대화 끝 정리(서버 voice-commit — T2 전체 추출 → 할 일 · 준비물 · 생활 기록 저장, 일정 · 알람은 카드로만) — 적어 둔 세션을 차례로 보냄
 //   DONE · SKIPPED(정리할 것 없음) · 다시 해도 안 되는 오류(NOT_FOUND · VALIDATION_FAILED)면 목록에서 지움. PARTIAL · RUNNING · 실패는 남겨 다음 대화 열기 때 다시 (서버가 한 번만 저장)
+//   STALE(정리하는 사이 같은 대화에 새 말이 들어옴)도 남김 — 다음 열기 때 다시 보내 새 말까지 정리 (이미 저장한 것은 서버가 건너뜀)
 //   서버가 T2를 부르므로(19초 · 다시 시도 1번) 대화 화면의 직렬 큐 밖에서 — 새 대화 열기를 막지 않게. 동시에 두 번 돌지 않음
 export const COMMIT_TIMEOUT_MS = 45_000;
 let flushing: Promise<void> | null = null;
@@ -823,18 +850,18 @@ export function flushCommits(userId: string | null): Promise<void> {
   return flushing;
 }
 
-// [완료] — 지금 세션을 "끝남"으로 로컬에 적고 상태를 비움. 다음 getConversation(= [대화 시작])은 새 세션을 요청함
-//   서버로 가야 할 카드 알림(SAVED 등)이 큐에 남았으면 세션이 바뀌기 전에 한 번 보내 봄 (실패해도 삼킴). 그 뒤 대화 끝 정리(voice-commit)를 기다리지 않고 보냄
+// [완료] — 하루 기록 정리(voice-commit)를 적어 두고 화면 상태를 비움. 세션은 끝내지 않음: 같은 날 다시 열면 서버 resume이 같은 대화(말 · 카드)를 돌려주고,
+//   이어 말한 뒤 다시 [완료]하면 서버가 새 말까지 다시 정리함. 날짜(KST)가 바뀌면 서버가 새 대화를 엶
+//   서버로 가야 할 카드 알림(SAVED 등)이 큐에 남았으면 비우기 전에 한 번 보내 봄 (실패해도 삼킴). 그 뒤 정리를 기다리지 않고 보냄
 export function finishConversation(): Promise<{ recordDate: string | null }> {
   return serial(async () => {
     await guardUser();
     if (!state.started) return { recordDate: null };
-    // 한 마디도 안 한 대화는 끝남으로 적지 않음 — 다음 [대화 시작]이 같은 세션을 이어 받아 하루 5대화 한도만 닳지 않게
+    // 한 마디도 안 한 대화는 정리할 것이 없음
     const spoke = state.messages.some((m) => m.who === 'me');
     if (spoke && state.userId && state.sessionId) {
       // [저장 안 함]한 카드 — 그 알림이 실패했거나 앞 요청([다시 시도] 대기)에 막혀 큐에서 사라져도 정리 요청에 실어 보내 서버가 REJECTED로
       const rejected = [...state.cards].filter(([, rec]) => rec.status === 'REJECTED').map(([id]) => id);
-      await markFinished(state.userId, state.sessionId);
       await addPendingCommit(state.userId, state.sessionId, rejected);
     }
     if (state.sessionId && !state.pending && state.queue.length > 0) {
@@ -844,7 +871,7 @@ export function finishConversation(): Promise<{ recordDate: string | null }> {
         // 이미 앱에서 한 일은 그대로
       }
     }
-    state = freshState(state.userId); // 세션 · 말 · 카드까지 비움 — 다음 열기가 실패해도 끝난 세션으로 말이 가지 않고 [다시 시도]가 새로 읽음
+    state = freshState(state.userId); // 세션 · 말 · 카드까지 비움 — 다음 열기가 서버에서 다시 읽음 (같은 날이면 같은 대화)
     // 카드 알림을 먼저 보낸 뒤(위 drive) 정리 — 정리는 그 순간의 카드 상태로 일정 확인 상태를 정함
     if (spoke) void flushCommits(state.userId);
     return { recordDate: null };

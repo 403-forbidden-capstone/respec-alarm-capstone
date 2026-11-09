@@ -10,6 +10,7 @@ import { useAuth } from '@/features/auth/AuthProvider';
 import { finishConversation, getConversation, getLiveToken, pickCardPlace, rejectCard, retryConversation, saveCard, say, sayVoice } from '@/features/voice/api';
 import { ChatBubble, TypingBubble } from '@/features/voice/components/ChatBubble';
 import { ChatComposer } from '@/features/voice/components/ChatComposer';
+import { noticeCopy } from '@/features/voice/chatNotice';
 import { ChatNotice } from '@/features/voice/components/ChatNotice'; // L5 부품 — 실패 · 한도 안내
 import { FoundScheduleCard } from '@/features/voice/components/FoundScheduleCard';
 import { useLiveVoice } from '@/features/voice/hooks/useLiveVoice';
@@ -24,10 +25,11 @@ import { useLoad } from '@/lib/useLoad';
 const CARD_DRAFTING = '일정 카드를 생성하고 있어요...';
 // 일정일 수도 있는 말을 일정으로 정리하지 못한 까닭 — 모른 채 같은 말을 되풀이하지 않게 짧게 알림 (일반 대화면 알리지 않음)
 const MISSED: Record<'LIMIT' | 'BUSY' | TurnNotice, string> = {
-  LIMIT: '이 대화는 기록 한도에 닿아 더 이상 일정으로 정리되지 않아요. [완료] 후 새 대화에서 말해 주세요.',
+  LIMIT: '오늘 대화 한도에 닿아 더 이상 일정으로 정리되지 않아요. 일정은 직접 만들거나 내일 새 대화에서 말해 주세요.',
   BUSY: '앞의 요청이 실패해 방금 말은 정리되지 않았어요. [다시 시도]를 먼저 눌러 주세요.',
-  RATE_LIMITED: 'AI 요청이 몰려 방금 말한 일정을 확인하지 못했어요. 잠시 뒤 한 번 더 말해 주세요.',
-  EXTRACT_FAILED: '방금 말한 일정을 확인하지 못했어요. 한 번 더 말해 주세요.',
+  // 추출이 실패하면 그 말이 일정이었는지 모름 — 일정이라고 단정하지 않음 (할 일 · 생활 기록은 [완료] 정리가 따로 챙김)
+  RATE_LIMITED: 'AI 요청이 몰려 방금 한 말에서 일정을 찾지 못했어요. 일정이었다면 잠시 뒤 한 번 더 말해 주세요.',
+  EXTRACT_FAILED: '방금 한 말에서 일정을 찾지 못했어요. 일정이었다면 한 번 더 말해 주세요.',
 };
 const explain = (text: string, why: keyof typeof MISSED | null | undefined) => {
   if (why && mightBeSchedule(text)) toast(MISSED[why]);
@@ -36,8 +38,8 @@ const LISTEN_MS = 1100; // 말하기를 누른 뒤 듣는 시간 (목업 chatSpe
 
 // 03 AI 탭 · A02 AI 대화 — 자기 전 대화
 // 가짜 데이터: 목업 대본대로 흘러감 (마이크 · 음성 합성 · 서버 호출 없음). 말하기 = 다음 대본 문장을 말한 것으로 침, 텍스트 = 빈 칸에 쓴 글을 그대로 보냄(AI 답은 대본). 완료하면 하루 기록(A03)으로
-// 실데이터: 글(서버 voice-session · voice-turn)과 실시간 음성(Gemini Live, [말하기])을 한 대화 목록에. 음성은 한 차례(내 말 + Live 답)가 끝나면 같은 서버 대화에 남아(voice-turn spoken_reply) 글과 문맥 · 일정 카드 흐름을 함께 씀 — 못 남긴 말풍선만 화면에 남음. 일정 · 알람을 찾으면 카드가 여러 장 떠서 [저장] · [바꾸기] · [저장 안 함]으로 확인받고, 완료하면 대화를 끝내고(다음에 열면 새 대화) 이전 화면(홈)으로
-//   서버가 답하지 못하면(LLM_UNAVAILABLE · NOT_CONFIGURED …) 대화 · 카드는 두고 마지막 말풍선 아래에 ChatNotice failed, 한도에 닿으면(limits.reached) ChatNotice limit — 입력창은 막음
+// 실데이터: 글(서버 voice-session · voice-turn)과 실시간 음성(Gemini Live, [말하기])을 한 대화 목록에. 음성은 한 차례(내 말 + Live 답)가 끝나면 같은 서버 대화에 남아(voice-turn spoken_reply) 글과 문맥 · 일정 카드 흐름을 함께 씀 — 못 남긴 말풍선만 화면에 남음. 일정 · 알람을 찾으면 카드가 여러 장 떠서 [저장] · [바꾸기] · [저장 안 함]으로 확인받고, 완료하면 하루 기록을 정리하고 이전 화면(홈)으로 — 같은 날 다시 열면 같은 대화(말 · 카드)가 이어지고, 날짜가 바뀌면 새 대화
+//   서버가 답하지 못하면(LLM_UNAVAILABLE · NOT_CONFIGURED …) 대화 · 카드는 두고 마지막 말풍선 아래에 ChatNotice failed(분당 사용량이면 busy), 한도에 닿으면(limits.reached) ChatNotice limit(하루) · turn(대화 길이) — 입력창은 막음
 export default function AiScreen() {
   const { data, error, reload: reloadNow } = useLoad(getConversation);
   // [완료]로 나간 뒤에는 끝나지 않은 저장 · 답이 다시 읽기를 걸어도 새 세션을 열지 않음 — 다시 들어올 때(포커스)만 읽음 (그건 useLoad가 함)
@@ -167,6 +169,9 @@ export default function AiScreen() {
   const { messages, cards, unavailable, limits } = progress ?? data;
   const cardOf = (id?: string) => cards.find((c) => c.id === id);
   const reached = limits?.reached ?? null;
+  // 안내 종류 — 분당 사용량(busy) · 그 밖의 실패(failed) / 대화 길이(turn) · 하루 사용량(limit)
+  const failKind = unavailable?.rateLimited ? 'busy' : 'failed';
+  const limitKind = reached === 'TURN' ? 'turn' : 'limit';
   const waiting = cards.some((c) => c.status === 'READY' || c.status === 'NEEDS_PLACE' || c.status === 'NEEDS_ESTIMATE' || c.status === 'ESTIMATING');
   const textMode = mode === 'text';
   const placeCard = cardOf(placeCardId ?? undefined);
@@ -184,9 +189,9 @@ export default function AiScreen() {
         ? 'AI가 답하고 있어요'
         : 'AI가 정리하고 있어요'
       : unavailable
-        ? 'AI가 답하지 못했어요'
+        ? noticeCopy(failKind).title
         : reached
-          ? '오늘 대화는 여기까지예요'
+          ? noticeCopy(limitKind).title
           : real && live.error
             ? live.error
             : canSay
@@ -221,7 +226,7 @@ export default function AiScreen() {
   }
 
   // 완료 — 가짜: 한 번 묻고 일기를 만들어 하루 기록으로. 내가 아직 한 마디도 안 했으면 완료를 막음 (빈 대화로 기록이 생기지 않게)
-  // 실데이터: 지금 대화를 끝남으로 적고 이전 화면(홈)으로 — 다음 [대화 시작]은 새 대화. 대화 끝 정리(할 일 · 준비물 · 생활 기록)는 api가 서버 voice-commit으로 기다리지 않고 보냄
+  // 실데이터: 이전 화면(홈)으로 — 같은 날 다시 열면 같은 대화가 이어짐. 하루 기록 정리(할 일 · 준비물 · 생활 기록 · 일기)는 api가 서버 voice-commit으로 기다리지 않고 보냄 (다시 완료하면 새 말까지)
   // 정리 중에 끝내면 끝난 대화에 답 · 카드가 붙으므로, 확인창 앞뒤로 두 번 봄 (확인창이 떠 있는 사이 글 모드 보내기로 정리가 시작될 수 있음)
   const started = messages.some((m) => m.who === 'me');
   const finish = async () => {
@@ -231,7 +236,7 @@ export default function AiScreen() {
       // 카드 저장 · 장소 계산이 AI 답을 기다리는 동안(busy)에도 눌려야 함 — 막으면 첫 탭이 먹통. 끝남 표시는 api가 앞 요청 뒤에 차례로 적음
       leftRef.current = true;
       live.stop();
-      live.clear(); // 다음 대화는 새로 — 음성 말풍선은 이 대화에만
+      live.clear(); // 서버에 남긴 음성 차례는 다시 열 때 대화로 돌아옴 — 못 남긴 화면용 말풍선만 지움
       finishConversation().catch(() => {}); // 로컬에 적는 일이라 실패해도 이동은 그대로
       backOrHome();
       return;
@@ -326,9 +331,9 @@ export default function AiScreen() {
           {/* 추출 전 — 일정일 수도 있는 말이면 점 세 개 대신 임시 말풍선 (추출이 일정을 찾으면 카드 자리가 이어받음). Live는 내 말이 확정된 순간부터(차례 끝 전) */}
           {(drafting > 0 || (real && heardSchedule(live.lines))) && !progress ? <ChatBubble who="ai" text={CARD_DRAFTING} at={pendingAt ?? now()} /> : thinking ? <TypingBubble /> : null}
           {unavailable && !thinking ? (
-            <ChatNotice kind="failed" onRetry={unavailable.canRetry ? retry : undefined} onManual={() => router.push('/schedule/new')} onDone={finish} busy={busy} />
+            <ChatNotice kind={failKind} onRetry={unavailable.canRetry ? retry : undefined} onManual={() => router.push('/schedule/new')} onDone={finish} busy={busy} />
           ) : null}
-          {reached && !unavailable ? <ChatNotice kind="limit" onManual={() => router.push('/schedule/new')} onDone={finish} busy={busy} /> : null}
+          {reached && !unavailable ? <ChatNotice kind={limitKind} onManual={() => router.push('/schedule/new')} onDone={finish} busy={busy} /> : null}
         </View>
       </ScrollView>
 

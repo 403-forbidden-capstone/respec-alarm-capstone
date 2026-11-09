@@ -131,6 +131,22 @@ export function titleMatch(a: string, b: string): boolean {
   return Math.min(x.length, y.length) >= 2 && (x.includes(y) || y.includes(x));
 }
 
+/**
+ * 같은 일정 이름으로 볼지 — titleMatch이거나, 정규화한 제목이 한 글자 안팎만 다름(둘 다 2자 이상).
+ * 받아쓰기 · 모델 출력의 글자 흔들림('스터디' ~ '스터더', 11/9 웹 시험)을 같은 일정으로 — 날짜 · 시각이 같을 때만 씀
+ */
+export function nearTitle(a: string, b: string): boolean {
+  if (titleMatch(a, b)) return true;
+  const x = normTitle(a);
+  const y = normTitle(b);
+  if (Math.min(x.length, y.length) < 2 || Math.abs(x.length - y.length) > 1) return false;
+  let i = 0;
+  while (i < x.length && x[i] === y[i]) i++;
+  let j = 0;
+  while (j < x.length - i && j < y.length - i && x[x.length - 1 - j] === y[y.length - 1 - j]) j++;
+  return Math.max(x.length, y.length) - i - j <= 1;
+}
+
 /** 준비물 · 할 일 같은 것 판별 키 — 정규화한 제목 끝의 '챙기기 · 가져가기' 류를 뗌 ('우산 챙기기' = '우산', 059 · 060). 대화 끝 추출(PR 5)이 씀 */
 export function itemKey(title: string): string {
   const t = normTitle(title);
@@ -586,7 +602,7 @@ export function applyFast(state: TurnState, fast: FastExtract, ctx: Context, aft
     let c = cardById(pid);
     const isNew = c === undefined;
     if (c === undefined) {
-      c = emptyCard(pid, kind);
+      c = { ...emptyCard(pid, kind), at: ctx.session.now };
       s.cards.push(c);
     }
     const before = JSON.stringify([c.draft, c.edit, c.summary]);
@@ -737,6 +753,16 @@ export function applyFast(state: TurnState, fast: FastExtract, ctx: Context, aft
       changeAppt({ ...x, ref: same.ref }, key, same.ref);
       return;
     }
+    // 2b) 날짜 · 시각이 같고 제목이 한 글자 안팎만 다른 약속(저장한 카드 포함) · 열린 카드 → 같은 일정을 다시 말했거나 T2F가 앞 말을 다시 뽑으며
+    //     글자를 틀리게 낸 것 — 새 카드를 만들지 않고, 틀린 글자로 고치지도 않음 (11/9 웹 시험: 저장한 '스터디 · 도서관' 뒤 상관없는 말에 '스터더 · 도서간' 카드).
+    //     [저장 안 함]한 카드도 글자만 다르면 같은 일정 — 되살리지 않음 (정확히 같은 제목으로 다시 청하면 아래에서 새 카드: 거절 뒤 '그래도 저장해줘').
+    //     제목이 다른 일정(같은 시각의 '치과')은 그대로 새 카드
+    const near = (t: string, d: string | null, h: string | null): boolean => d === x.date && h === x.time && nearTitle(t, x.title);
+    if (
+      s.appointments.some((a) => near(a.title, a.date, a.time)) ||
+      Object.values(s.pending).some((e) => e.kind === "APPOINTMENT" && near((e.item as XAppt).title, (e.item as XAppt).date, (e.item as XAppt).time)) ||
+      s.cards.some((c) => c.status === "REJECTED" && c.draft !== null && normTitle(c.draft.title) !== normTitle(x.title) && near(c.draft.title, c.draft.date, c.draft.time))
+    ) return;
     // 3) 지난 시각 — 모호 메모보다 먼저. 거절(DECLINED)이면 알릴 것 없음. 같은 일정을 이미 거절했으면 T2 흔들림으로
     //    다시 내지 않고, 사용자가 '그래도 저장해줘'로 확인(CONFIRMED)했을 때만 한 번 더 알림
     if (isPast(xx)) {
