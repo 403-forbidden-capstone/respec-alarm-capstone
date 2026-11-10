@@ -32,10 +32,9 @@ export const EMPTY_PREPARE_ML_SURVEY: PrepareMlSurvey = {
 };
 
 export function isCompletePrepareMlSurvey(value: Pick<PrepareMlSurvey, 'ml_age_years' | 'ml_school_status' | 'ml_work_status'>): boolean {
+  // Education/employment are legacy optional inputs, not required by age-only C1/W4.
   return typeof value.ml_age_years === 'number' && Number.isInteger(value.ml_age_years) &&
-    value.ml_age_years >= 14 && value.ml_age_years <= 100 &&
-    SCHOOL_OPTIONS.some(([code]) => code === value.ml_school_status) &&
-    WORK_OPTIONS.some(([code]) => code === value.ml_work_status);
+    value.ml_age_years >= 14 && value.ml_age_years <= 100;
 }
 
 export function prepareMlSurveySummary(survey: PrepareMlSurvey): string {
