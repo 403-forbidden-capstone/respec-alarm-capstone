@@ -5,6 +5,6 @@ __pycache__/
 .env.*
 !*.env.example
 models/**
-!models/v4/
-!models/v4/C1_optional_profile_mae.cbm
-!models/v4/W4_previous_duration_optional_profile_mae.cbm
+!models/v4_age_only/
+!models/v4_age_only/c1_mae.cbm
+!models/v4_age_only/w4_mae.cbm
