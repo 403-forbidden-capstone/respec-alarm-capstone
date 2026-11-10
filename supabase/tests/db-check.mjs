@@ -279,6 +279,31 @@ await check('연령 ML: 클라이언트 시각과 무관하게 서버가 동의 
   return timeOK && none.n === 0 ? true : { stamped, now, none };
 });
 
+await check('연령 ML: INSERT 시각 서버 보정, UPDATE 동일 동의시각 보존', async () => {
+  const NEW_USER = '66666666-6666-4666-8666-666666666666';
+  const badClock = '2099-01-01T00:00:00.000Z';
+  await as(A);
+  const [prior] = await q(`select ml_profile_consented_at as consent from public.profiles where user_id=$1`, [A]);
+  await q(`update public.profiles set ml_profile_consented_at=$2 where user_id=$1`, [A, prior.consent]);
+  await su();
+  const [same] = await q(`select ml_profile_consented_at as consent from public.profiles where user_id=$1`, [A]);
+  if (Date.parse(same.consent) !== Date.parse(prior.consent)) return { stage: 'same-update', prior, same };
+
+  await as(null, 'supabase_auth_admin');
+  await q(`insert into auth.users (id, email, raw_user_meta_data) values ($1, 'ml-insert@example.com', '{}')`, [NEW_USER]);
+  await su();
+  await q(`delete from public.profiles where user_id=$1`, [NEW_USER]);
+  await as(NEW_USER);
+  await q(`insert into public.profiles (user_id, nickname, ml_age_years, ml_profile_consented_at)
+    values ($1, 'ML INSERT 시험', 24, $2)`, [NEW_USER, badClock]);
+  await su();
+  const [inserted] = await q(`select ml_profile_consented_at as consent from public.profiles where user_id=$1`, [NEW_USER]);
+  const [verified] = await q(`select count(*)::int as n from public.prepare_ml_verified_profiles where user_id=$1`, [NEW_USER]);
+  const ok = Math.abs(Date.now() - Date.parse(inserted.consent)) < 120000 && verified.n === 0;
+  await q(`delete from auth.users where id=$1`, [NEW_USER]);
+  return ok ? true : { stage: 'insert', inserted, verified };
+});
+
 await check('연령 ML: 사용자 변경·철회는 기존 검증 코드를 삭제하고 신규 코드는 만들지 않음', async () => {
   await su();
   await q(`insert into public.prepare_ml_verified_profiles
