@@ -109,5 +109,18 @@ class AlarmCoreModule : Module() {
     AsyncFunction("markEventsUploaded") { clientEventIds: List<String> ->
       AlarmEventLog.acknowledge(context, clientEventIds)
     }
+
+    // AI 음성 브리핑 — 앱이 alarm-briefing 결과를 알람별로 저장 · 폰에 있는 음성 열쇠 읽기 · 지우기 (VoiceBriefing)
+    AsyncFunction("saveVoiceBriefing") { alarmId: String, json: String ->
+      VoiceBriefing.save(context, alarmId, json)
+    }
+
+    AsyncFunction("getVoiceBriefingHashes") { alarmId: String ->
+      VoiceBriefing.hashes(context, alarmId)
+    }
+
+    AsyncFunction("clearVoiceBriefing") { alarmId: String ->
+      VoiceBriefing.clear(context, alarmId)
+    }
   }
 }

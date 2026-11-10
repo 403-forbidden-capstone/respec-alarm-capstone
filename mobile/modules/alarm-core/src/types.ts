@@ -136,6 +136,18 @@ export type RingingAlarm = {
   soundKey: string;
   vibration: AlarmVibration;
   intensity: AlarmIntensity;
+  /** AI 음성 브리핑 문장 (지금 단계) — 음성을 못 틀어도 화면에 일정 안내가 남게. 브리핑이 없으면 null · 예전 APK는 칸 없음 */
+  briefingText?: string | null;
+};
+
+/**
+ * AI 음성 브리핑 저장 값 — 서버 alarm-briefing 응답 그대로 (supabase/functions/_shared/briefing-run.ts BriefingOut)
+ * 네이티브가 알람별 앱 전용 폴더에 단계별 WAV로 저장하고, 울릴 때 미루기 횟수 · 남은 여유로 단계를 골라 틂 (VoiceBriefing.kt)
+ */
+export type VoiceBriefingSave = {
+  rule: { prepMinutes: number; lateBump: boolean; allow4: boolean; maxLevel: number } | null;
+  clips: { level: number; hash: string; text: string }[];
+  audio: { level: number; hash: string; mime?: string; data: string }[];
 };
 
 export type AlarmEventType = 'TRIGGERED' | 'SNOOZED' | 'DISMISSED' | 'ACKNOWLEDGED' | 'ARRIVAL_CONFIRMED';
@@ -189,4 +201,9 @@ export type AlarmBackend = {
   getPendingEvents(): Promise<AlarmEvent[]>;
   markEventsUploaded(clientEventIds: string[]): Promise<void>;
   addEventListener(listener: (event: AlarmEvent) => void): { remove(): void };
+  /** AI 음성 브리핑 저장 — 새 음성은 쓰고, 열쇠가 같은 예전 음성만 남기고, 나머지 단계는 지움 */
+  saveVoiceBriefing(alarmId: string, value: VoiceBriefingSave): Promise<void>;
+  /** 폰에 있는 음성의 열쇠 (서버에 have로 보내 같은 음성을 다시 안 만들게) */
+  getVoiceBriefingHashes(alarmId: string): Promise<string[]>;
+  clearVoiceBriefing(alarmId: string): Promise<void>;
 };

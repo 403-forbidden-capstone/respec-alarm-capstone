@@ -2,7 +2,7 @@
 // 웹 미리보기에서 "약속 만들기 → 알람 예약 → 목록"이 폰 없이 끝까지 보이게 하려는 것
 // 새로고침하면 사라짐. isAvailable은 false로 남아 있어서 화면은 "실제로 울리지 않음"을 알 수 있음
 import { canSnooze, isPastRing, isSnoozeMinutesAllowed, soundKeyOf, vibrationOf } from './plan';
-import type { AlarmBackend, AlarmEvent, RingPackage, RingPlan, ScheduledAlarm, ScheduleStatus } from './types';
+import type { AlarmBackend, AlarmEvent, RingPackage, RingPlan, ScheduledAlarm, ScheduleStatus, VoiceBriefingSave } from './types';
 import { makeUuid } from './uuid';
 
 type Entry = { pkg: RingPackage; plan: RingPlan };
@@ -13,6 +13,8 @@ export function createMemoryBackend(now: () => number = Date.now): AlarmBackend 
   // 울리는 척하는 알람 (ringNow가 소리 나는 알람이면 켜짐) — 미루기 횟수만 셈
   let ringing: (Entry & { snoozeCount: number }) | null = null;
   const listeners = new Set<(event: AlarmEvent) => void>();
+  // AI 음성 브리핑 — 알람별 { 단계: 열쇠 } (네이티브 VoiceBriefing.save와 같은 남기기 규칙, 소리는 안 냄) + 문장
+  const voices = new Map<string, { files: Map<number, string>; clips: VoiceBriefingSave['clips'] }>();
 
   function record(pkg: RingPackage, eventType: AlarmEvent['eventType'], snoozeMinutes?: number) {
     const event: AlarmEvent = {
@@ -41,9 +43,11 @@ export function createMemoryBackend(now: () => number = Date.now): AlarmBackend 
     },
     async cancel(alarmId) {
       entries.delete(alarmId);
+      voices.delete(alarmId);
     },
     async cancelAll() {
       entries.clear();
+      voices.clear();
     },
     async list() {
       return [...entries.values()]
@@ -81,6 +85,7 @@ export function createMemoryBackend(now: () => number = Date.now): AlarmBackend 
         soundKey: soundKeyOf(pkg),
         vibration: vibrationOf(pkg),
         intensity: pkg.intensity,
+        briefingText: voices.get(pkg.alarmId)?.clips[0]?.text ?? null,
       };
     },
     async snooze(minutes) {
@@ -116,6 +121,20 @@ export function createMemoryBackend(now: () => number = Date.now): AlarmBackend 
     async markEventsUploaded(clientEventIds) {
       const done = new Set(clientEventIds);
       events = events.filter((event) => !done.has(event.clientEventId));
+    },
+    async saveVoiceBriefing(alarmId, value) {
+      const old = voices.get(alarmId)?.files ?? new Map<number, string>();
+      const files = new Map<number, string>();
+      for (const clip of value.clips) {
+        if (value.audio.some((a) => a.hash === clip.hash) || old.get(clip.level) === clip.hash) files.set(clip.level, clip.hash);
+      }
+      voices.set(alarmId, { files, clips: value.clips });
+    },
+    async getVoiceBriefingHashes(alarmId) {
+      return [...(voices.get(alarmId)?.files.values() ?? [])];
+    },
+    async clearVoiceBriefing(alarmId) {
+      voices.delete(alarmId);
     },
     addEventListener(listener) {
       listeners.add(listener);

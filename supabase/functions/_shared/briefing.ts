@@ -13,21 +13,18 @@ export type ToneKey = 'GENTLE' | 'NORMAL' | 'FIRM';
 // TTS 모델 — Gemini 3.8 Flash TTS (aistudio.google.com/docs/speech-generation, 11/10 확인: 한국어 지원 · 24kHz WAV · speech_metadata.style로 감정 · 속도 지시)
 export const TTS_MODEL = 'gemini-3.8-flash-tts';
 
-// 고를 수 있는 AI 목소리 — Gemini 기본 음성 30종 중 알람에 맞는 6개 (문서의 성격 설명 그대로)
+// 고를 수 있는 AI 목소리 — Gemini 기본 음성 30종 중 중요도 기본값 3개 (문서의 성격 설명: Sulafat Warm · Zephyr Bright · Kore Firm). 늘리려면 여기만
 export const VOICES: readonly { id: string; label: string }[] = [
   { id: 'Sulafat', label: '따뜻한' },
-  { id: 'Achernar', label: '부드러운' },
   { id: 'Zephyr', label: '밝은' },
-  { id: 'Puck', label: '경쾌한' },
   { id: 'Kore', label: '단호한' },
-  { id: 'Fenrir', label: '활기찬' },
 ];
 
 // 말투 3종 — style은 TTS에 넘기는 지시(영어가 모델에 가장 잘 먹힘, 문서 권장). 1단계(평소 기상)에만 쓰고 2~4단계는 URGENCY_STYLE이 덮음
 export const TONES: Record<ToneKey, { label: string; style: string }> = {
-  GENTLE: { label: '다정하고 차분하게', style: 'warm, gentle and affectionate; relaxed, slow and calm pace, soft delivery' },
-  NORMAL: { label: '밝고 또렷하게', style: 'bright, clear and friendly but proactive; normal pace with crisp articulation' },
-  FIRM: { label: '힘 있고 단호하게', style: 'strong, firm and direct; fast pace with forceful intonation' },
+  GENTLE: { label: '다정하게', style: 'warm, gentle and affectionate; relaxed, slow and calm pace, soft delivery' },
+  NORMAL: { label: '또렷하게', style: 'bright, clear and friendly but proactive; normal pace with crisp articulation' },
+  FIRM: { label: '단호하게', style: 'strong, firm and direct; fast pace with forceful intonation' },
 };
 
 // 중요도별 개발팀 기본값 — 목소리 · 말투 (요구사항 표 그대로). 이 표만 바꾸면 기본값이 바뀜

@@ -45,6 +45,9 @@ class AlarmPlaybackService : Service() {
 
     private const val TAG = "AlarmCore"
 
+    // AI 음성을 읽는 동안 알람음 크기 (플레이어 안의 비율 — 폰 알람 볼륨은 계획대로 그대로)
+    private const val VOICE_DUCK = 0.2f
+
     // 알림 채널 — 진동 없음(NONE)이면 알림이 뜰 때의 진동 한 번도 없애려고 진동이 꺼진 채널을 따로 씀 (채널은 만든 뒤 바꿀 수 없음)
     private const val CHANNEL_ID_NO_VIBRATION = "wake_alarm_native_quiet_v1"
     private val NOTIFICATION_VIBRATION = longArrayOf(700, 300, 700, 300, 700, 900)
@@ -105,6 +108,8 @@ class AlarmPlaybackService : Service() {
   private var remainingSounds: MutableList<Uri> = mutableListOf()
 
   private var mediaPlayer: MediaPlayer? = null
+  // AI 음성 브리핑 (VoiceBriefing) — 알람음 위에 한 번 읽음. 읽는 동안 알람음은 작게(VOICE_DUCK), 끝나면 원래대로
+  private var voicePlayer: MediaPlayer? = null
   private var vibrator: Vibrator? = null
   private var audioManager: AudioManager? = null
   private var audioFocusRequest: AudioFocusRequest? = null
@@ -311,7 +316,44 @@ class AlarmPlaybackService : Service() {
     // 소리가 나기 시작한 뒤에 진동 시작. 진동을 못 켜도(진동 모터 없음 · 제조사 제한) 소리는 계속
     // 진동 없음(NONE)이면 건너뜀 — 볼륨은 진동과 상관없이 계획이 정한 값 그대로
     AlarmVibration.patternFor(alarm.vibration)?.let { pattern -> runCatching { startVibration(pattern) } }
+    // 미리 받아 둔 AI 음성 브리핑을 알람음과 한 흐름으로 — 없거나 못 틀면 알람음 · 진동만 (알람은 멈추지 않음)
+    runCatching { startVoice(alarm) }.onFailure { Log.w(TAG, "AI 음성을 못 틀어 알람음만", it) }
     return true
+  }
+
+  // 지금 미루기 횟수 · 남은 여유로 단계를 골라 그 음성 파일을 한 번 읽음 (네트워크 안 씀)
+  private fun startVoice(alarm: StoredAlarm) {
+    val pick = VoiceBriefing.pick(this, alarm, System.currentTimeMillis()) ?: return
+    val player = MediaPlayer()
+    try {
+      player.setAudioAttributes(
+        AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_ALARM).setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build(),
+      )
+      player.setDataSource(pick.file.absolutePath)
+      player.isLooping = false
+      player.prepare()
+    } catch (e: Exception) {
+      player.release()
+      throw e
+    }
+    player.setOnCompletionListener { stopVoice() }
+    player.setOnErrorListener { _, _, _ ->
+      stopVoice()
+      true
+    }
+    voicePlayer = player
+    mediaPlayer?.let { runCatching { it.setVolume(VOICE_DUCK, VOICE_DUCK) } }
+    player.start()
+    Log.i(TAG, "AI 음성 브리핑 재생: ${pick.level}단계")
+  }
+
+  private fun stopVoice() {
+    voicePlayer?.let { player ->
+      runCatching { if (player.isPlaying) player.stop() }
+      runCatching { player.release() }
+    }
+    voicePlayer = null
+    mediaPlayer?.let { runCatching { it.setVolume(1f, 1f) } }
   }
 
   // 알람음 후보 (앞에서부터 시도). 기본 키(default) · 보통(theme_default) · 모르는 키는 폰 기본 알람음이 먼저, 우리 앱 파일이 그 다음 — 안드로이드 기본 알람처럼
@@ -357,7 +399,8 @@ class AlarmPlaybackService : Service() {
         true
       }
       val playing = runCatching {
-        player.setVolume(1f, 1f)
+        val volume = if (voicePlayer != null) VOICE_DUCK else 1f
+        player.setVolume(volume, volume)
         player.start()
       }.isSuccess
       if (playing) {
@@ -482,6 +525,7 @@ class AlarmPlaybackService : Service() {
   private fun releasePlayback() {
     handler.removeCallbacks(autoStop)
     remainingSounds.clear()
+    stopVoice()
     releasePlayer()
     stopVibration()
 

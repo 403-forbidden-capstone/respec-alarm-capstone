@@ -233,6 +233,8 @@ object AlarmController {
       "soundKey" to alarm.soundKey,
       "vibration" to alarm.vibration,
       "intensity" to alarm.intensity,
+      // AI 음성 브리핑 문장 (지금 단계) — 음성을 못 틀어도 화면에 일정 안내가 남게. 없으면 null
+      "briefingText" to VoiceBriefing.textFor(context, alarm, System.currentTimeMillis()),
     )
   }
 

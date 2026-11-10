@@ -47,5 +47,7 @@ object AlarmStorage {
       .putStringSet(IDS, ids)
       .remove(key(id))
       .commit()
+    // 알람이 없어지면 그 알람의 AI 음성 브리핑 파일도 (해제 · 취소 · 로그아웃 cancelAll 모두 여기를 지남)
+    runCatching { VoiceBriefing.clear(context, id) }
   }
 }

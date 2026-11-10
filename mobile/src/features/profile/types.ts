@@ -1,3 +1,5 @@
+import type { Json } from '@/types/database';
+
 // 내 프로필 — supabase/migrations의 profiles 칼럼과 같은 이름
 // (타입 생성 `npx supabase gen types` 뒤에는 생성된 타입으로 바꿈)
 
@@ -28,6 +30,7 @@ export type Profile = {
   wake_margin: WakeMargin;
   privacy_agreed_at: string | null; // privacy_version과 같이 있거나 같이 없음
   privacy_version: number | null;
+  alarm_voice_prefs?: { [key: string]: Json | undefined }; // 기상 AI 음성 브리핑 수동 설정 — 직접 고른 칸만, 비면 자동(중요도 기본값). 마이그레이션 전 서버면 없음 (@shared/briefing.ts cleanPrefs로 읽음)
   wake_ping_enabled: boolean; // 친구 깨우기 받기 — 기본 켬. 꺼 두면 보낸 쪽에 '지금은 깨울 수 없어요'만 (친구 8장)
 };
 
@@ -48,6 +51,7 @@ export type ProfileFields = Partial<
     | 'privacy_agreed_at'
     | 'privacy_version'
     | 'wake_ping_enabled'
+    | 'alarm_voice_prefs'
   >
 >;
 

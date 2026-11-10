@@ -23,6 +23,10 @@ export type NativeAlarmCore = {
   getPendingEvents(): Promise<AlarmEvent[]>;
   markEventsUploaded(clientEventIds: string[]): Promise<void>;
   addListener(eventName: 'onAlarmEvent', listener: (event: AlarmEvent) => void): { remove(): void };
+  // 아래 셋은 AI 음성 브리핑 칸 — 이 칸이 없는 예전 APK에서는 undefined (createNativeBackend가 조용히 건너뜀)
+  saveVoiceBriefing?(alarmId: string, json: string): Promise<void>;
+  getVoiceBriefingHashes?(alarmId: string): Promise<string[]>;
+  clearVoiceBriefing?(alarmId: string): Promise<void>;
 };
 
 export function createNativeBackend(native: NativeAlarmCore): AlarmBackend {
@@ -45,5 +49,13 @@ export function createNativeBackend(native: NativeAlarmCore): AlarmBackend {
     getPendingEvents: () => native.getPendingEvents(),
     markEventsUploaded: (clientEventIds) => native.markEventsUploaded(clientEventIds),
     addEventListener: (listener) => native.addListener('onAlarmEvent', listener),
+    // 예전 APK(함수 없음)면 저장하지 않음 → 알람은 기본 알람음으로 그대로 울림
+    saveVoiceBriefing: async (alarmId, value) => {
+      await native.saveVoiceBriefing?.(alarmId, JSON.stringify(value));
+    },
+    getVoiceBriefingHashes: async (alarmId) => (await native.getVoiceBriefingHashes?.(alarmId)) ?? [],
+    clearVoiceBriefing: async (alarmId) => {
+      await native.clearVoiceBriefing?.(alarmId);
+    },
   };
 }

@@ -21,6 +21,7 @@ import type {
   ScheduledAlarm,
   ScheduleStatus,
   UsageSpan,
+  VoiceBriefingSave,
 } from './types';
 
 export * from './types';
@@ -192,4 +193,17 @@ export async function markEventsUploaded(clientEventIds: string[]): Promise<void
 /** 앱이 켜져 있는 동안 새 기록이 생기면 알림 (꺼져 있을 때 쌓인 것은 getPendingEvents로 읽음) */
 export function addAlarmEventListener(listener: (event: AlarmEvent) => void): { remove(): void } {
   return backend.addEventListener(listener);
+}
+
+/** AI 음성 브리핑 저장 (lib/alarmSync/briefing.ts가 alarm-briefing 응답을 넘김) */
+export async function saveVoiceBriefing(alarmId: string, value: VoiceBriefingSave): Promise<void> {
+  await backend.saveVoiceBriefing(alarmId, value);
+}
+
+export async function getVoiceBriefingHashes(alarmId: string): Promise<string[]> {
+  return backend.getVoiceBriefingHashes(alarmId);
+}
+
+export async function clearVoiceBriefing(alarmId: string): Promise<void> {
+  await backend.clearVoiceBriefing(alarmId);
 }

@@ -20,6 +20,7 @@ import { openAppNotificationSettings, turnOnNotifications, usePermissions } from
 import { homePatchOf } from '@/features/onboarding/home';
 import { saveProfileFields } from '@/features/profile/api';
 import { EditRow } from '@/features/profile/components/EditRow';
+import { VoiceBriefingSection } from '@/features/profile/components/VoiceBriefingSection';
 import { ChangeHandleSheet } from '@/features/profile/components/ChangeHandleSheet';
 import { NicknameEditor, PrepareEditor, SleepEditor } from '@/features/profile/components/ProfileEditors';
 import { prepareValuesOf } from '@/features/profile/edit';
@@ -141,6 +142,8 @@ export default function SettingsScreen() {
             <EditRow first label="잠귀" value={WAKE_SENSITIVITY_NAME[profile.wake_sensitivity]} onPress={open('sleep')} />
             <EditRow label="깨우는 여유" value={WAKE_MARGIN_NAME[profile.wake_margin]} onPress={open('prepare')} />
           </Card>
+
+          <VoiceBriefingSection value={profile.alarm_voice_prefs} onSave={(next) => void saveEdit({ alarm_voice_prefs: next })} disabled={!canEdit} />
         </>
       ) : null}
 
