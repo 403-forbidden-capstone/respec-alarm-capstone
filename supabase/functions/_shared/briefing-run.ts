@@ -86,16 +86,18 @@ export async function runBriefing(src: BriefingSource, have: ReadonlySet<string>
   let pending = inflight.get(urgent.hash);
   if (!pending) {
     const tts = gemini.tts;
-    // 한도 확인부터 맵에 올려 둠 — 동시에 온 같은 요청이 한도 확인을 따로 통과해 두 번 부르지 않게
+    // 예약부터 맵에 올려 둠 — 같은 인스턴스에 동시에 온 같은 요청은 예약도 한 번 (다른 인스턴스끼리는 DB 잠금이 막음)
     pending = (async () => {
-      if (!(await gemini.quota.allow())) throw new QuotaLimited();
+      // DB가 한도 확인과 예약을 한 번에 — 예약에 성공했을 때만 Gemini를 부름 (예약 실패 · DB 오류 · 한도 초과 → Android TTS)
+      const callId = await gemini.quota.reserve(model).catch(() => null);
+      if (!callId) throw new QuotaLimited();
       const started = Date.now();
       try {
         const a = await tts({ model, text: urgent.text, voice: profile.voice, style: GEMINI_URGENT_STYLE });
-        await gemini.quota.record({ ok: true, errorCode: null, latencyMs: Date.now() - started, model });
+        await gemini.quota.finish(callId, { ok: true, errorCode: null, latencyMs: Date.now() - started }).catch(() => undefined);
         return a;
       } catch (e) {
-        await gemini.quota.record({ ok: false, errorCode: e instanceof LlmClientError ? e.kind : 'unknown', latencyMs: Date.now() - started, model });
+        await gemini.quota.finish(callId, { ok: false, errorCode: e instanceof LlmClientError ? e.kind : 'unknown', latencyMs: Date.now() - started }).catch(() => undefined);
         throw e;
       }
     })();

@@ -52,15 +52,15 @@ describe('prepareBriefings', () => {
     expect(t.saved).toEqual([]);
   });
 
-  it('서버에 없는 알람(NOT_FOUND)이면 지우고, 네트워크 실패는 있던 음성을 그대로 둠', async () => {
-    const gone = deps({ call: async () => Promise.reject(new EdgeError('NOT_FOUND')) });
-    expect((await prepareBriefings(NOW, gone.d)).cleared).toEqual(['w1']);
+  it('네트워크 끊김 · 서버 404(NOT_FOUND)여도 저장된 브리핑을 지우지 않음 (알람 · 오프라인 재생 그대로)', async () => {
     jest.spyOn(console, 'warn').mockImplementation(() => undefined); // 개발 중 경고 한 줄 (의도한 것)
-    const offline = deps({ call: async () => Promise.reject(new EdgeError('NETWORK')) });
-    const s = await prepareBriefings(NOW, offline.d);
-    expect(s.failed).toEqual(['w1']);
-    expect(offline.cleared).toEqual([]);
-    expect(offline.saved).toEqual([]);
+    for (const code of ['NETWORK', 'TIMEOUT', 'NOT_FOUND', 'INTERNAL'] as const) {
+      const t = deps({ call: async () => Promise.reject(new EdgeError(code)) });
+      const s = await prepareBriefings(NOW, t.d);
+      expect(s.failed).toEqual(['w1']);
+      expect(t.cleared).toEqual([]);
+      expect(t.saved).toEqual([]);
+    }
   });
 
   it('Gemini 한도 초과 · 실패여도 문장은 저장 (폰은 Android TTS로 전체 브리핑)', async () => {

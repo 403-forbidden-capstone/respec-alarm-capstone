@@ -41,8 +41,8 @@ function fakes(opts: { allow?: boolean; fail?: unknown } = {}) {
       return { mime: 'audio/wav', data: 'UklGRg==' };
     },
     quota: {
-      allow: async () => (allowChecks++, opts.allow ?? true),
-      record: async (r) => void records.push({ ok: r.ok, errorCode: r.errorCode }),
+      reserve: async () => (allowChecks++, opts.allow ?? true ? 'call-1' : null),
+      finish: async (_id, r) => void records.push({ ok: r.ok, errorCode: r.errorCode }),
     },
   };
   return { deps, calls, records, allowChecks: () => allowChecks };
@@ -126,4 +126,26 @@ test('출발 알람: 그 일정 + 준비물 + 출발 촉구, 긴급 시각에 �
   assert.equal(out.gemini, 'MADE');
   const calm = await runBriefing({ ...dep, scheduledAtMs: kst(9, 10) }, new Set(), fakes().deps); // 여유 10분 = 위험(긴급 아님)
   assert.equal(calm.gemini, 'NOT_NEEDED');
+});
+
+test('예약 함수가 던지거나(DB 오류) null이면 Gemini를 안 부르고 LIMITED — Android TTS 문장은 그대로', async () => {
+  const f = fakes();
+  const out = await runBriefing(source(), new Set(), { ...f.deps, quota: { reserve: async () => Promise.reject(new Error('db down')), finish: async () => undefined } });
+  assert.equal(out.gemini, 'LIMITED');
+  assert.equal(f.calls.length, 0);
+  assert.equal(out.clips.length, 4);
+});
+
+test('여러 사용자 · 알람이 동시에 와도 원자적 예약 한도(분당 2)를 넘겨 부르지 않음', async () => {
+  let reserved = 0;
+  let calls = 0;
+  // DB 함수처럼 확인 + 예약이 한 번에 (await 사이에 끼어들 틈이 없음)
+  const quota = { reserve: async () => (reserved < 2 ? `call-${++reserved}` : null), finish: async () => undefined };
+  const tts = async () => (calls++, await new Promise((r) => setTimeout(r, 5)), { mime: 'audio/wav', data: 'UklGRg==' });
+  const outs = await Promise.all(
+    Array.from({ length: 6 }, (_, i) => runBriefing(source({ appointments: [{ title: `일정${i}`, atMs: kst(10), importance: 'LOW' }] }), new Set(), { tts, quota })),
+  );
+  assert.equal(calls, 2);
+  assert.equal(outs.filter((o) => o.gemini === 'MADE').length, 2);
+  assert.equal(outs.filter((o) => o.gemini === 'LIMITED').length, 4);
 });

@@ -103,14 +103,15 @@ internal object VoiceBriefing {
     val level = SpeechUrgency.level(alarm.snoozeCount, nowMillis, urgentAt, rule.optInt("maxLevel", 1))
     val clips = manifest?.optJSONArray("clips") ?: JSONArray()
     val byLevel = (0 until clips.length()).map { clips.getJSONObject(it) }.associateBy { it.optInt("level") }
-    // 고른 단계 문장, 없으면 그보다 낮은 단계 중 있는 것
-    val clip = (level downTo 1).firstNotNullOfOrNull { byLevel[it] }
-    if (clip == null) {
-      val text = alarm.voiceText?.takeIf { it.isNotBlank() } ?: listOf(alarm.plan.heading, alarm.title).filter { it.isNotBlank() }.joinToString(". ")
-      return@runCatching if (text.isBlank()) null else Speech(1, text, 1f, 1f, 0, null)
+    val clipLevel = BriefingRules.clipLevel(level, byLevel.keys)
+    if (clipLevel == null) {
+      // 서버 브리핑을 한 번도 못 받음(인터넷 없음 등) — 꾸러미 문장으로, 미루기만큼 단계를 올려 읽음
+      val f = BriefingRules.fallback(alarm.type, alarm.voiceText, alarm.plan.heading, alarm.title, alarm.snoozeCount) ?: return@runCatching null
+      return@runCatching Speech(f.level, f.text, f.pitch, f.rate, 0, null)
     }
-    val clipLevel = clip.optInt("level")
-    val wav = if (clipLevel == 4) folder?.let { File(it, "L4.wav") }?.takeIf { it.exists() } else null
+    val clip = byLevel.getValue(clipLevel)
+    val wavFile = folder?.let { File(it, "L4.wav") }
+    val wav = wavFile?.takeIf { BriefingRules.useGemini(clipLevel, it.exists()) }
     Speech(
       level = clipLevel,
       text = clip.optString("text"),

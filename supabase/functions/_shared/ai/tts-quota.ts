@@ -1,51 +1,42 @@
 // 알람 긴급 음성(Gemini TTS) 호출 한도 — 기존 글 대화 · Live 한도(quota.ts · opening.ts)와 따로 셈 (ai_calls.point = 'AV')
-//   무료 한도(11/10 확인: RPM 3 · TPM 10K · RPD 10)보다 보수적으로: 프로젝트 전체 하루 8 · 분당 2, 사용자 하루 2
-//   하루 = 최근 24시간 (Google은 태평양 0시에 초기화 → 24시간 창이 더 보수적). 실패 · 429도 한 번으로 셈
-//   shortcut: 세기와 기록 사이에 다른 서버 인스턴스가 동시에 통과할 수 있음 — 한도를 실제보다 2 낮게 잡아 흡수, 사용자가 늘면 DB 예약 행으로
+//   무료 한도(11/10 확인: RPM 3 · TPM 10K · RPD 10)보다 보수적으로: 프로젝트 전체 하루 8 · 분당 2, 사용자 하루 2. 모델과 상관없이 'AV' 전체로 셈
+//   DB 함수 reserve_alarm_tts가 한도 확인 + 예약 줄 넣기를 한 트랜잭션(전역 잠금)에서 함 → 예약에 성공했을 때만 Gemini를 부름
+//   예약 줄은 실패 · 429여도 남아 한도에 셈. 예약 실패 · DB 오류 · 한도 초과면 null → Gemini 없이 폰의 Android TTS
 import type { Db } from '../supabase.ts';
-import { must } from '../db.ts';
 
 export const TTS_POINT = 'AV';
 export const TTS_LIMITS = { projectPerDay: 8, projectPerMinute: 2, userPerDay: 2 } as const;
 
-export type TtsCounts = { projectDay: number; projectMinute: number; userDay: number };
-
-/** 지금 한 번 더 불러도 되는지 */
-export function ttsAllowed(c: TtsCounts, limits: typeof TTS_LIMITS = TTS_LIMITS): boolean {
-  return c.projectDay < limits.projectPerDay && c.projectMinute < limits.projectPerMinute && c.userDay < limits.userPerDay;
-}
-
 export type TtsQuota = {
-  allow(): Promise<boolean>;
-  record(r: { ok: boolean; errorCode: string | null; latencyMs: number; model: string }): Promise<void>;
+  /** 한 번 부를 자리를 잡음. 못 잡으면(한도 · DB 오류) null */
+  reserve(model: string): Promise<string | null>;
+  /** 예약한 줄을 결과로 고침. 실패해도 던지지 않음 (예약 줄이 남아 한도에는 그대로 셈) */
+  finish(callId: string, r: { ok: boolean; errorCode: string | null; latencyMs: number }): Promise<void>;
 };
 
-// 서비스 키 클라이언트로 셈 · 기록 (사용자 RLS로는 프로젝트 전체를 못 셈). 사용자가 보낸 값으로 쿼리를 만들지 않음 — userId는 로그인 토큰에서
-export function dbTtsQuota(service: Db, userId: string, now: () => Date = () => new Date()): TtsQuota {
-  const count = async (sinceMs: number, user?: string) => {
-    let q = service.from('ai_calls').select('call_id', { count: 'exact', head: true }).eq('point', TTS_POINT).gte('created_at', new Date(sinceMs).toISOString());
-    if (user) q = q.eq('user_id', user);
-    const res = await q;
-    must('ai_calls', { data: null, error: res.error });
-    return res.count ?? 0;
-  };
+// 서비스 키 클라이언트로 (사용자 RLS로는 프로젝트 전체를 못 셈). userId는 로그인 토큰에서 온 값만
+export function dbTtsQuota(service: Db, userId: string): TtsQuota {
   return {
-    async allow() {
-      const t = now().getTime();
-      const [projectDay, projectMinute, userDay] = await Promise.all([count(t - 86_400_000), count(t - 60_000), count(t - 86_400_000, userId)]);
-      return ttsAllowed({ projectDay, projectMinute, userDay });
-    },
-    async record(r) {
-      const res = await service.from('ai_calls').insert({
-        user_id: userId,
-        point: TTS_POINT,
-        prompt_id: 'ALARM_TTS',
-        prompt_version: 'v1',
-        model: r.model,
-        ok: r.ok,
-        error_code: r.errorCode,
-        latency_ms: Math.max(0, Math.round(r.latencyMs)),
+    async reserve(model) {
+      const { data, error } = await service.rpc('reserve_alarm_tts', {
+        p_user_id: userId,
+        p_model: model,
+        p_day_limit: TTS_LIMITS.projectPerDay,
+        p_minute_limit: TTS_LIMITS.projectPerMinute,
+        p_user_day_limit: TTS_LIMITS.userPerDay,
       });
+      if (error) {
+        console.error('[alarm-briefing] 호출 예약 실패 — Gemini 없이', error.message);
+        return null;
+      }
+      return typeof data === 'string' ? data : null;
+    },
+    async finish(callId, r) {
+      const res = await service
+        .from('ai_calls')
+        .update({ ok: r.ok, error_code: r.errorCode, latency_ms: Math.max(0, Math.round(r.latencyMs)), attempts: 1 })
+        .eq('call_id', callId)
+        .eq('point', TTS_POINT);
       if (res.error) console.error('[alarm-briefing] 호출 기록 실패', res.error.message);
     },
   };

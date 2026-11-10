@@ -22,6 +22,9 @@ internal class BriefingSpeaker(
   companion object {
     private const val TAG = "AlarmCore"
     private const val UTTERANCE = "alarm_briefing"
+    // TTS 엔진이 켜지거나 말을 시작하기까지 기다리는 최대 시간 — 넘으면 브리핑 없이 알람음만 (작성자 판단)
+    private const val INIT_TIMEOUT_MILLIS = 8_000L
+    private const val START_TIMEOUT_MILLIS = 8_000L
   }
 
   private val handler = Handler(Looper.getMainLooper())
@@ -29,6 +32,14 @@ internal class BriefingSpeaker(
   private var player: MediaPlayer? = null
   private var tts: TextToSpeech? = null
   private var finished = false
+  private val initTimeout = Runnable {
+    Log.w(TAG, "Android TTS가 켜지지 않음 — 알람음만")
+    finish()
+  }
+  private val startTimeout = Runnable {
+    Log.w(TAG, "Android TTS가 말을 시작하지 않음 — 알람음만")
+    finish()
+  }
 
   fun speak(speech: VoiceBriefing.Speech) {
     val wav = speech.wav
@@ -62,8 +73,10 @@ internal class BriefingSpeaker(
   }
 
   private fun speakAndroid(speech: VoiceBriefing.Speech) {
+    handler.postDelayed(initTimeout, INIT_TIMEOUT_MILLIS)
     tts = TextToSpeech(context.applicationContext) { status ->
       handler.post {
+        handler.removeCallbacks(initTimeout)
         val engine = tts
         if (finished || engine == null) return@post
         if (status != TextToSpeech.SUCCESS) {
@@ -72,16 +85,27 @@ internal class BriefingSpeaker(
           return@post
         }
         runCatching {
-          engine.setLanguage(Locale.KOREAN)
-          // 목소리: 폰에 있는 한국어 목소리(인터넷 필요 없는 것) 중 번호로. 하나뿐이면 높낮이 · 속도로만 달라짐
-          val voices = engine.voices.orEmpty().filter { it.locale.language == "ko" && !it.isNetworkConnectionRequired }.sortedBy { it.name }
-          if (voices.isNotEmpty()) engine.setVoice(voices[speech.voiceIndex.mod(voices.size)])
+          // 오프라인 한국어만: 데이터가 없거나 인터넷이 필요한 목소리뿐이면 읽지 않음(알람음 · 진동은 그대로). 하나뿐이면 높낮이 · 속도로만 달라짐
+          val all = engine.voices.orEmpty()
+          val infos = all.map { BriefingRules.VoiceInfo(it.name, it.locale.language, it.isNetworkConnectionRequired) }
+          when (val choice = BriefingRules.offlineVoice(engine.setLanguage(Locale.KOREAN), infos, speech.voiceIndex)) {
+            is BriefingRules.VoiceChoice.Skip -> {
+              Log.w(TAG, "Android TTS 안 씀(${choice.reason}) — 알람음만")
+              finish()
+              return@post
+            }
+            is BriefingRules.VoiceChoice.Use -> all.firstOrNull { it.name == choice.name }?.let { engine.setVoice(it) }
+            BriefingRules.VoiceChoice.EngineDefault -> Unit
+          }
           engine.setPitch(speech.pitch)
           engine.setSpeechRate(speech.rate)
           engine.setAudioAttributes(attributes)
           engine.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
             override fun onStart(utteranceId: String?) {
-              handler.post { onStart() }
+              handler.post {
+                handler.removeCallbacks(startTimeout)
+                if (!finished) onStart()
+              }
             }
 
             override fun onDone(utteranceId: String?) {
@@ -93,8 +117,13 @@ internal class BriefingSpeaker(
               handler.post { finish() }
             }
           })
-          if (engine.speak(speech.text, TextToSpeech.QUEUE_FLUSH, null, UTTERANCE) != TextToSpeech.SUCCESS) finish()
-          else Log.i(TAG, "브리핑: Android TTS ${speech.level}단계")
+          if (engine.speak(speech.text, TextToSpeech.QUEUE_FLUSH, null, UTTERANCE) != TextToSpeech.SUCCESS) {
+            finish()
+          } else {
+            Log.i(TAG, "브리핑: Android TTS ${speech.level}단계")
+            // 엔진이 말을 시작하지 않고 멈춰 있으면(목록이 틀린 네트워크 목소리 등) 기다리지 않고 끝냄
+            handler.postDelayed(startTimeout, START_TIMEOUT_MILLIS)
+          }
         }.onFailure {
           Log.w(TAG, "Android TTS 실패 — 알람음만", it)
           finish()
@@ -117,6 +146,8 @@ internal class BriefingSpeaker(
   }
 
   private fun release() {
+    handler.removeCallbacks(initTimeout)
+    handler.removeCallbacks(startTimeout)
     player?.let { p ->
       runCatching { if (p.isPlaying) p.stop() }
       runCatching { p.release() }
