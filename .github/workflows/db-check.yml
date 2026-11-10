@@ -196,5 +196,24 @@ jobs:
       - name: 프로젝트 연결
         run: supabase link --project-ref "$PROJECT_REF"
 
-      - name: 적용
-        run: supabase db push
+      - name: 적용 대상 정확히 7개 재확인 후 배포
+        run: |
+          set -euo pipefail
+          # 이미 운영에서 적용한 버전, 새로 추가된 버전, 예상 밖 파일이 하나라도 있으면 중단.
+          supabase db push --include-all --dry-run 2>&1 | tee "$RUNNER_TEMP/remote-db-plan.txt"
+          sed -nE 's/^[[:space:]]*•[[:space:]]*([0-9]{14}_[^[:space:]]+\.sql).*$/\1/p' "$RUNNER_TEMP/remote-db-plan.txt" > "$RUNNER_TEMP/actual.txt"
+          cat > "$RUNNER_TEMP/expected.txt" <<'EXPECTED'
+          20261109090000_friend_explore_fixes.sql
+          20261110100000_prepare_ml_verified_profiles.sql
+          20261110110000_prepare_ml_optional_survey.sql
+          20261110120000_prepare_ml_reset_cleanup.sql
+          20261110130000_prepare_ml_age_only.sql
+          20261110220000_prepare_ml_consented_age_sync.sql
+          20261110224500_prepare_ml_consent_safety.sql
+          EXPECTED
+          diff -u "$RUNNER_TEMP/expected.txt" "$RUNNER_TEMP/actual.txt" || {
+            echo "::error::원격 DB 대상 파일이 사전 검증과 다릅니다. 자동 배포 중단."
+            exit 1
+          }
+          echo "원격 배포 대상 7개 파일 일치 확인. 트랜잭션별 마이그레이션 적용 시작."
+          supabase db push --include-all --yes
