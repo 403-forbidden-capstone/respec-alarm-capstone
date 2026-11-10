@@ -26,9 +26,9 @@ if [[ -z "$PROJECT" ]]; then
   exit 2
 fi
 
-for filename in C1_optional_profile_mae.cbm W4_previous_duration_optional_profile_mae.cbm; do
-  if [[ ! -s "$SOURCE/models/v4/$filename" ]]; then
-    printf 'Missing model: %s\n' "$SOURCE/models/v4/$filename" >&2
+for filename in c1_mae.cbm w4_mae.cbm; do
+  if [[ ! -s "$SOURCE/models/v4_age_only/$filename" ]]; then
+    printf 'Missing model: %s\n' "$SOURCE/models/v4_age_only/$filename" >&2
     exit 2
   fi
 done
