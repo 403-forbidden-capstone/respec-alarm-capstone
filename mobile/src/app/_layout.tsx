@@ -119,7 +119,6 @@ function RootStack() {
       <Stack.Protected guard={ready}>
         <Stack.Screen name="(tabs)" />
         {/* 목업 화면 (M1) — 화면 번호 · 데이터는 docs/screen-data-map.md, 한눈에 보기는 /dev/screens */}
-        <Stack.Screen name="alarms" />
         <Stack.Screen name="alarm/[id]" />
         <Stack.Screen name="schedule/new" />
         <Stack.Screen name="wake" />

@@ -1,9 +1,8 @@
 import { router } from 'expo-router';
-import { useEffect } from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { useCallback, useEffect, useRef } from 'react';
+import { StyleSheet, View } from 'react-native';
 
 import {
-  Avatar,
   Button,
   Card,
   confirm,
@@ -33,36 +32,27 @@ import { isEvening } from '@/features/alarm/schedule';
 import { KIND_LABEL } from '@/features/alarm/types';
 import { DetectionRows } from '@/features/location/DetectionRows';
 import { bannerLines, bannerSummary, PermissionBanner, useFailedAlarmCount, usePermissions } from '@/features/permissions';
-import { getPendingSuggestion } from '@/features/records/api';
+import { RecordsSection, type Register } from '@/features/records/components/RecordsSection';
 import { advanceRoutine, getEveningRoutine, getTodayRoutine, listTodos, toggleTodo } from '@/features/routine/api';
 import { RoutineCard } from '@/features/routine/components/RoutineCard';
 import { TodoList } from '@/features/routine/components/TodoList';
-import { getGroupSummary, listGroups } from '@/features/social/api';
-import { wokeLine } from '@/features/social/wakeTexts';
-import { useWakeLoad } from '@/features/social/hooks/useGroupWake';
 import { now } from '@/lib/clock';
 import { addDays, dayKey, formatDate, formatMinuteOfDay, formatRelative, formatTime, minuteOfDay, startOfDay } from '@/lib/format';
 import { canUseRealData } from '@/lib/mode';
-import { openGroupDetail } from '@/lib/nav';
 import { useAction } from '@/lib/useAction';
-import { colors } from '@/theme';
-
-const GROUP_ROWS = 3; // 홈에 보이는 그룹 줄 수 — 넘으면 "외 N개"
+import { useLoad } from '@/lib/useLoad';
 
 // 저녁(오후 6시부터 · 전날 밤)에는 내일 일정 · 내일 준비물, 낮에는 오늘 일정 · 오늘 루틴
-// date = 그룹 기상 신호가 알려 준 날 (그룹 기상 요약만 씀, 없으면 오늘)
-async function loadHome(date: string | null) {
+// 제안 카드 · 그룹 기상 카드는 그룹 탭으로 옮겨 홈에서는 안 읽음 (D110)
+async function loadHome() {
   const today = startOfDay(now());
   const evening = isEvening(now());
   const target = evening ? addDays(today, 1) : today;
-  const groups = await listGroups(date);
-  const [next, schedule, routine, todos, suggestion, groupSummaries, eveningRoutine, snooze, wake, morning, early] = await Promise.all([
+  const [next, schedule, routine, todos, eveningRoutine, snooze, wake, morning, early] = await Promise.all([
     getNextAlarm(),
     getDaySchedule(target),
     getTodayRoutine(),
     listTodos(target),
-    getPendingSuggestion(),
-    Promise.all(groups.map((g) => getGroupSummary(g.id, date))),
     evening ? getEveningRoutine() : Promise.resolve(null),
     getSnooze(),
     getWakeInProgress(),
@@ -71,8 +61,7 @@ async function loadHome(date: string | null) {
     // [먼저 깼어요] 입구 — 기상 알람 60분 전부터 (11/9 결정표). 덧붙임 카드라 못 읽어도 홈은 그대로
     getEarlyWake().catch(() => null),
   ]);
-  const summaries = groupSummaries.flatMap((g) => (g ? [g] : []));
-  return { evening, target, next, schedule, routine, todos, suggestion, groups: summaries, eveningRoutine, snooze, wake, morning, early };
+  return { evening, target, next, schedule, routine, todos, eveningRoutine, snooze, wake, morning, early };
 }
 
 function greeting(t: Date) {
@@ -81,9 +70,15 @@ function greeting(t: Date) {
   return m < 12 * 60 ? '좋은 아침이에요' : '좋은 오후예요';
 }
 
-// H01 홈 — 다음 알람 · 오늘 일정 · 루틴 · 준비물 · 제안 · 그룹 기상
+// H01 홈 — 다음 알람 · 오늘 일정 · 루틴 · 준비물 · 맨 아래 나의 기록(R02 월간 · 주간 · 일간, D110)
 export default function HomeScreen() {
-  const { data, error, reload } = useWakeLoad(loadHome, (d) => d.groups.map((g) => g.id)); // 그룹 기상 신호가 오면 다시 읽음
+  const { data, error, reload } = useLoad(loadHome);
+  // 당겨서 새로고침 — 홈 내용 + 아래 기록 구역(보이는 월간 · 주간 · 일간)이 맡겨 둔 다시 읽기
+  const recordsReload = useRef<(() => Promise<unknown>) | null>(null);
+  const registerRecords = useCallback<Register>((r) => {
+    recordsReload.current = r;
+  }, []);
+  const refresh = useCallback(() => Promise.all([reload(), recordsReload.current?.()]), [reload]);
   const current = useNow(); // 30초마다 다시 읽음 — "N분 뒤" · 인사말이 열 때 값에 멈춰 있지 않게
   const toggleAppointment = useAppointmentToggle(reload); // 다음 알람 카드 스위치
   const { run } = useAction(); // 루틴 단계 · 준비물 체크는 한 번에 하나씩, 실패하면 토스트 (실데이터는 네트워크 오류가 있음)
@@ -103,7 +98,7 @@ export default function HomeScreen() {
       {error ? <LoadError onRetry={reload} /> : <Loading text="홈을 불러오는 중" />}
     </Screen>
   );
-  const { evening, target, next, schedule, routine, todos, suggestion, groups, eveningRoutine, snooze, wake, morning, early } = data;
+  const { evening, target, next, schedule, routine, todos, eveningRoutine, snooze, wake, morning, early } = data;
   // 추가한 일정이 홈이 보여 주는 날(낮 = 오늘, 저녁 = 내일)에 들어가게 날짜를 넘김
   const newSchedule = () => router.push({ pathname: '/schedule/new', params: { from: 'home', date: dayKey(target) } });
 
@@ -143,26 +138,19 @@ export default function HomeScreen() {
     }, '미루기를 취소하지 못했어요');
   }
 
-  const shownGroups = groups.slice(0, GROUP_ROWS);
-  const moreGroups = groups.length - shownGroups.length;
   const snoozed = snooze != null && snooze.at.getTime() > current.getTime();
   const permissionSummary = bannerSummary(bannerLines(permissions.snapshot, { failedCount: failedAlarms, hasAlarm: next != null }));
 
   return (
-    <Screen onRefresh={reload}>
+    <Screen onRefresh={refresh}>
       <TopBar
         left={
           <Text variant="small" tone="sub">
             {formatDate(current)}
           </Text>
         }
-        right={
-          // D90 기본안 A — 홈 위 오른쪽 '알람 전체' 옆. 설정은 실데이터를 쓸 수 있을 때만 (아니면 _layout에서 settings가 빠져 막다른 길)
-          <View style={styles.topActions}>
-            <TopBarButton label="알람 전체" onPress={() => router.push('/alarms')} />
-            {canUseRealData ? <TopBarButton label="설정" onPress={() => router.push('/settings')} /> : null}
-          </View>
-        }
+        // D90 기본안 A — 홈 위 오른쪽. '알람 전체'는 2번 탭이 되어 뺌 (D110). 설정은 실데이터를 쓸 수 있을 때만 (아니면 _layout에서 settings가 빠져 막다른 길)
+        right={canUseRealData ? <TopBarButton label="설정" onPress={() => router.push('/settings')} /> : undefined}
       />
       <Text variant="title" style={styles.title}>
         {greeting(current)}
@@ -301,65 +289,8 @@ export default function HomeScreen() {
         </>
       ) : null}
 
-      {/* 제안 카드 — 점선은 목업 · 피그마 그대로, 누르면 제안 상세(S01)로 가니 '보기 ›' 꼬리 */}
-      {suggestion ? (
-        <Card variant="dash" onPress={() => router.push({ pathname: '/suggestion/[id]', params: { id: suggestion.id } })}>
-          <View style={styles.banner}>
-            <View style={styles.bannerText}>
-              <Text variant="bodyLarge" weight={600}>
-                {suggestion.title}
-              </Text>
-              <Text variant="small" tone="sub" style={styles.cardSub}>
-                {suggestion.summary}
-              </Text>
-            </View>
-            <Text variant="rowLabel" tone="sub">
-              보기 ›
-            </Text>
-          </View>
-        </Card>
-      ) : null}
-
-      {/* 참여 중인 그룹 전부 (많으면 앞의 몇 개 + 외 N개) */}
-      {!evening && shownGroups.length ? (
-        <Card>
-          {shownGroups.map((group, i) => (
-            <Pressable
-              key={group.id}
-              onPress={() => openGroupDetail(group.id, 'tab')}
-              accessibilityRole="button"
-              accessibilityLabel={[group.name, wokeLine(group.wokeCount)].filter(Boolean).join(', ')}
-              style={({ pressed }) => [styles.group, i > 0 && styles.groupDivider, pressed && styles.pressed]}
-            >
-              <View style={styles.avatars}>
-                {group.members.map(({ person, state }, j) => (
-                  <View key={person.id} style={[styles.avatarRing, j > 0 && styles.avatarOverlap]}>
-                    <Avatar initial={person.initial} small dot={state.dot ?? undefined} />
-                  </View>
-                ))}
-              </View>
-              <View style={styles.bannerText}>
-                <Text variant="bodyStrong">{group.name}</Text>
-                {/* 그 그룹 약속이 없는 날은 그 줄을 숨김 (7-사) */}
-                {group.wokeCount != null ? (
-                  <Text variant="small" tone="sub">
-                    {wokeLine(group.wokeCount)}
-                  </Text>
-                ) : null}
-              </View>
-            </Pressable>
-          ))}
-          {moreGroups > 0 ? (
-            <View style={styles.moreGroups}>
-              <TextLink
-                label={`외 ${moreGroups}개 그룹 보기`}
-                onPress={() => router.navigate({ pathname: '/group', params: { seg: 'group', open: String(Date.now()) } })}
-              />
-            </View>
-          ) : null}
-        </Card>
-      ) : null}
-
+      {/* 나의 기록 (R02) — 기록 탭을 없애고 홈 맨 아래로 (D110) */}
+      <RecordsSection register={registerRecords} />
     </Screen>
   );
 }
@@ -367,17 +298,9 @@ export default function HomeScreen() {
 const styles = StyleSheet.create({
   links: { flexDirection: 'row', gap: 14 },
   title: { marginTop: 8, marginBottom: 4 },
-  topActions: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   ctaText: { marginTop: 4 },
   ctaButton: { marginTop: 12 },
   cardSub: { marginTop: 2 },
   banner: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
   bannerText: { flex: 1 },
-  group: { flexDirection: 'row', alignItems: 'center', gap: 12, minHeight: 44, paddingVertical: 6 },
-  groupDivider: { borderTopWidth: 1, borderTopColor: colors.line },
-  pressed: { opacity: 0.7 },
-  moreGroups: { alignSelf: 'flex-start', paddingTop: 8 },
-  avatars: { flexDirection: 'row' },
-  avatarRing: { borderRadius: 18, borderWidth: 2, borderColor: colors.card },
-  avatarOverlap: { marginLeft: -8 },
 });

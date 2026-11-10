@@ -76,7 +76,7 @@
 | 번호 | 화면 | 경로 | 이슈 |
 |---|---|---|---|
 | H01 | 홈 | `(tabs)/index` | #30 |
-| H02 | 알람 목록 | `alarms` | #30 |
+| H02 | 알람 목록 (02 알람 탭, D110) | `(tabs)/alarms` | #30 |
 | H03 | 알람 설정 | `alarm/[id]` | #30 · #32 |
 | H05 | 새 일정 | `schedule/new` | #31 · #32 |
 | H07 | 알람 울림 | 네이티브 화면 (알람 코어). `ring`은 디자인 · 웹 미리 보기용 | #33 |
@@ -90,7 +90,7 @@
 | A02 | AI 대화 | `(tabs)/ai` | #39 · #42 (AI 대기) |
 | A03 | 하루 기록 · 일기 | `journal/[date]` | #48 (AI 대기) |
 | A04 | 루틴 편집 | `routine/[id]` | #48 |
-| R02 | 나의 기록 | `(tabs)/records` | #38 · #41 |
+| R02 | 나의 기록 (홈 맨 아래, D110) | `(tabs)/index` · `features/records/components/RecordsSection` | #38 · #41 |
 | S01 | 알람 조정 제안 | `suggestion/[id]` | #49 |
 | L01 · L02 · L03 | 로그인 · 온보딩(10단계) · 설정 · 학교 시간표 · 시간표 가져오기 확인 | `login` · `onboarding` · `settings` · `timetable` · `timetable-import` | #25 · #291 |
 | L04 | 알람이 안 울릴 때 | `ring-check` | #210 |
@@ -108,8 +108,6 @@
 - **감지 정정 줄** (이슈 #40, 인사 아래 · 아침 카드 자리 바로 뒤): `listDetections(오늘)` — 오늘 위치로 잡힌 출발 · 도착(`departed_source`/`arrived_source` = LOCATION)만. 없으면 제목도 줄도 안 그림. 줄 글자는 "출발 오전 8:30 · 자동 감지"(지각 문구 없음, D61). 읽기는 홈이 앞에 올 때 · 앱이 다시 앞에 올 때 · 홈이 다시 읽힐 때. [아니에요]: `rejectDetection(screen 'H01')` → 폰 판정 기억 잊음(`forgetGeoDetection`) → 폰 예약 · 감시 계획 다시 맞춤 → 토스트 "출발 오전 8:30 기록을 지웠어요" + [되돌리기](5초, `undoReject` → `restoreGeoDetection`). 지운 순서는 감지 안내(NTF)와 같은 `features/location/fix.ts`. 출발을 지우면 아침 카드가 다시 보일 수 있어 홈도 다시 읽음. 못 읽어도 홈 전체는 그대로. 가짜 모드는 저녁 시나리오(5월 21일)에서만 줄이 보임(아침 시나리오의 오늘은 감지가 없음)
 - 오늘 루틴 · 진행: `routines`(켜짐, 오늘 요일) + 오늘 `alarm_events` ACKNOWLEDGED(단계 알람) — DB
 - 내일 준비물(저녁): `todos`(ITEM, 내일) 읽기 · 체크(`is_done` · `done_at`) — DB
-- 제안 카드: `alarm_suggestions`(PENDING) — DB. `suppress_until`은 "이 시각 전엔 같은 종류 제안을 만들지 않음"이라 `suggestion-generate`에서만 봄
-- 그룹 기상 요약: `get_group_wake(group_id)` — RPC. 그 그룹 일정이 있는 날만 (D57), 약속 없는 날은 '오늘 n명 일어남' 줄을 숨김
 - 미룬 알람 줄의 "취소": 폰 예약을 지움 — 폰. 기상 알람이면 먼저 `alarm_events` `DISMISSED`(`MANUAL`)를 남기고 기상 확인(H08)으로 이어감 (해제로 봄 — 작성자 판단). 기록이 막히면(오프라인) 예약을 그대로 두고 "미루기를 취소하지 못했어요"
 - 오늘 루틴은 알람 단계가 하나라도 있는 루틴만 보임 (확인을 달 알람이 없으면 홈에서 끝낼 수 없음). 마지막 알람 단계까지 확인하면 뒤의 알람 없는 단계도 끝난 것("오늘 루틴을 모두 마쳤어요")
 
@@ -167,6 +165,8 @@
 - 기상 확정 뒤 "오늘 첫 일정" 한 줄 (이슈 #230): `getMorningPlan()`(H01 아침 카드와 같은 함수) — "오늘 첫 일정 오전 10:00 전공 수업 · 세종대학교" · "오전 8:40에 나가면 돼요" · "다음 알림 · 준비 오전 8:10 · 출발 오전 8:40"(아직 안 울린 것만). 일정 줄을 누르면 H03. 켜진 기상 알람이 붙은 일정이 없으면 "오늘은 기상 알람이 걸린 일정이 없어요". 못 읽어도 확정 화면은 그대로 (덧붙임 줄)
 
 ### F01 · G01 친구와 그룹
+- 맨 위 (D110, 홈 아래에서 옮김) — 제안 카드: `alarm_suggestions`(PENDING) — DB. `suppress_until`은 "이 시각 전엔 같은 종류 제안을 만들지 않음"이라 `suggestion-generate`에서만 봄
+- 맨 위 (D110, 홈 아래에서 옮김) — 그룹 기상 요약: `get_group_wake(group_id)` — RPC. 그 그룹 일정이 있는 날만 (D57), 약속 없는 날은 '오늘 n명 일어남' 줄을 숨김
 - 친구 목록: `friends`(ACCEPTED) + 이름 · 사진 `get_public_profiles` — DB · RPC
 - 받은 요청: `friends`(PENDING, 받는 사람 = 나) — DB, 수락 → ACCEPTED — DB
 - 아이디 검색 · 요청: `find_profile_by_handle` — RPC → `friends` PENDING 추가 — DB
@@ -233,6 +233,7 @@
 - 단계 알람: `alarms`(`routine_id` · `step_order`) — DB → 예약 — 폰. 루틴을 끄거나 단계(알람)를 빼면 알람을 지우지 않고 `is_enabled` false (지우면 울림 · 확인 기록 `alarm_events`가 같이 사라짐). 다시 켜면 같은 줄(루틴 · 단계 번호가 하나뿐)을 켬. 폰 맞추기는 저장이 중간에 실패해도 함
 
 ### R02 나의 기록
+- 자리: 기록 탭이 없어지고 홈(H01) 맨 아래 "나의 기록" 구역 (D110). 데이터 · 날짜 이동은 아래 그대로
 - 월간: `daily_records`(그 달) — DB. 달력 점 "완료"(지난 날) = 기상 확인 `wake_confirmed_at` + 준비 실측 `actual_prepare_minutes` (출발 입력 때 `recordParticipantTimes`가 씀). 서버의 예상 준비시간 P80(`v_prepare_time_stats`)도 이 값을 읽음
 - 주간: `daily_records.wake_confirmed_at` + `appointment_participants.is_late` — DB → 평균 기상 · 목표 기상률은 앱에서 계산
 - 일간: 설정값 `alarms`(켜진 것만 — 일정을 통째로 꺼 둔 날은 도착 목표도 없음) + 실제 `alarm_events` — DB

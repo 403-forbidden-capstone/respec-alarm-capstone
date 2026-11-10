@@ -11,13 +11,13 @@ import { useAppointmentToggle } from '@/features/alarm/hooks/useAppointmentToggl
 import { useNow } from '@/features/alarm/hooks/useNow';
 import { dayHeading, groupByDay, seriesInfo, splitUpcoming } from '@/features/alarm/schedule';
 import { formatDateShort } from '@/lib/format';
-import { backOrHome } from '@/lib/nav';
 import { useLoad } from '@/lib/useLoad';
 import { colors } from '@/theme';
 
 const HIGHLIGHT_MS = 2600; // 방금 만든 일정 테두리가 남는 시간
 
-// H02 알람 목록 — 오늘부터의 일정마다 기상 · 준비 · 출발 알람. 지난 일정은 맨 아래에 접어 둠
+// 02 알람 탭 · H02 알람 목록 — 오늘부터의 일정마다 기상 · 준비 · 출발 알람. 지난 일정은 맨 아래에 접어 둠
+// 홈 '알람 전체'로 들어가던 화면을 2번 탭으로 올림 (D110). 주소는 /alarms 그대로라 다른 화면의 링크는 같음
 // 반복 일정은 하나당 한 장 (지금 이후 가장 가까운 회차) — 카드에 "다음 회차 · 반복 요일"만, 회차 목록은 알람 설정(H03)에서
 // ?highlight=<일정 id>: 새 일정(H05)을 저장하고 돌아왔을 때 그 카드에 잠깐 테두리
 export default function AlarmsScreen() {
@@ -43,7 +43,6 @@ export default function AlarmsScreen() {
     <Screen onRefresh={reload} scrollRef={scrollRef}>
       <TopBar
         screenId="H02"
-        onBack={backOrHome}
         right={<TopBarButton label="+ 새 일정" onPress={() => router.push({ pathname: '/schedule/new', params: { from: 'alarms' } })} />}
       />
       <Text variant="title" style={styles.title}>

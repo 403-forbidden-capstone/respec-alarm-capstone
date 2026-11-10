@@ -22,7 +22,7 @@ import { permissionNames } from '@/features/social/permissions';
 import type { GroupDetail, GroupMember, Person } from '@/features/social/types';
 import { WAKE_STALE_TEXT } from '@/features/social/wakeTexts';
 import { formatDateShort, formatTime } from '@/lib/format';
-import { backOrHome } from '@/lib/nav';
+import { backOrHome, openTab } from '@/lib/nav';
 import { colors } from '@/theme';
 
 // G02 그룹 상세 — 내가 이 그룹에 준 공유 범위 · 연결 일정 · 멤버 기상 상태
@@ -60,7 +60,8 @@ function Detail({ group: g, stale, onBack, onChanged }: { group: GroupDetail; st
   const appts = useGroupAppointments(onChanged); // 연결 일정 [내 알람 만들기] · 참여자 · [나는 빠지기] (친구 9장)
 
   // 연결 일정이 여러 개일 수 있어 "내 알람"은 늘 알람 목록으로 (작성자 판단 — 목업은 연결 일정 고정)
-  const openMyAlarms = () => router.push('/alarms');
+  // 알람 목록은 2번 탭 (D110) — 그룹 상세를 걷어 내고 알람 탭으로 (lib/nav openTab)
+  const openMyAlarms = () => openTab('/alarms');
 
   return (
     <Screen>
