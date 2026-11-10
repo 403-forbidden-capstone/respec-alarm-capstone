@@ -3,8 +3,7 @@ import { StyleSheet, View } from 'react-native';
 
 import { Button, Stepper, Text, Toggle, toast } from '@/components/ui';
 import { userMessage } from '@/lib/errors';
-import { ChoiceRow } from '@/features/onboarding/views/ChoiceRow';
-import { SCHOOL_OPTIONS, WORK_OPTIONS, isCompletePrepareMlSurvey, type PrepareMlSurvey, type SchoolStatus, type WorkStatus } from '@/features/profile/prepareMlSurvey';
+import { isCompletePrepareMlSurvey, type PrepareMlSurvey } from '@/features/profile/prepareMlSurvey';
 import type { ProfileFields } from '@/features/profile/types';
 
 type Props = {
@@ -16,12 +15,10 @@ type Props = {
 
 export function PrepareMlSurveyEditor({ initial, onSave, onRevoke, onCancel }: Props) {
   const [age, setAge] = useState(initial.ml_age_years ?? 20);
-  const [school, setSchool] = useState<SchoolStatus | null>(initial.ml_school_status);
-  const [work, setWork] = useState<WorkStatus | null>(initial.ml_work_status);
-  // Consent requires an explicit current opt-in, not a prechecked switch.
+   // Consent requires an explicit current opt-in, not a prechecked switch.
   const [consent, setConsent] = useState(false);
   const [busy, setBusy] = useState(false);
-  const ready = isCompletePrepareMlSurvey({ ml_age_years: age, ml_school_status: school, ml_work_status: work });
+  const ready = isCompletePrepareMlSurvey({ ...initial, ml_age_years: age });
 
   async function save() {
     if (!ready || !consent || busy) return;
@@ -29,8 +26,8 @@ export function PrepareMlSurveyEditor({ initial, onSave, onRevoke, onCancel }: P
     try {
       await onSave({
         ml_age_years: age,
-        ml_school_status: school,
-        ml_work_status: work,
+        ml_school_status: null,
+        ml_work_status: null,
         ml_profile_consented_at: new Date().toISOString(),
       });
     } catch (e) {
@@ -59,19 +56,11 @@ export function PrepareMlSurveyEditor({ initial, onSave, onRevoke, onCancel }: P
         현재 입력값은 CatBoost 모델에 바로 전달되지 않으며, 조사 코드 매핑·검증 후 별도 활성화가 필요해요.
       </Text>
       <Stepper label="만 나이" value={age} onChange={setAge} min={14} max={100} step={1} unit="세" first />
-      <Text variant="bodyStrong">현재 학교 상태</Text>
-      {SCHOOL_OPTIONS.map(([value, label]) => (
-        <ChoiceRow key={value} label={label} selected={school === value} onPress={() => setSchool(value)} />
-      ))}
-      <Text variant="bodyStrong">현재 일하는 상태</Text>
-      {WORK_OPTIONS.map(([value, label]) => (
-        <ChoiceRow key={value} label={label} selected={work === value} onPress={() => setWork(value)} />
-      ))}
       <View style={styles.consent}>
         <View style={styles.consentText}>
           <Text variant="bodyStrong">정보 수집·이용에 동의</Text>
           <Text variant="small">
-            만 나이·학교 상태·경제활동 상태를 개인별 준비시간 예측 모델의 입력 후보로 보관합니다.
+            만 나이를 개인별 준비시간 예측 모델의 입력 후보로 보관합니다.
             알람 추천 목적에만 사용하며, 설정에서 언제든 삭제할 수 있습니다. 친구에게 공유하지 않습니다.
           </Text>
         </View>
