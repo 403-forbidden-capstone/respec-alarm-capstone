@@ -1,4 +1,4 @@
-// AI 음성 브리핑 저장 — 메모리 대체가 네이티브(VoiceBriefing.kt)와 같은 남기기 규칙인지, 네이티브 다리가 JSON 하나로 넘기는지 · 예전 APK에서 조용히 넘어가는지
+// 음성 브리핑 저장 — 메모리 대체가 네이티브(VoiceBriefing.kt)와 같은 남기기 규칙인지, 네이티브 다리가 JSON 하나로 넘기는지 · 예전 APK에서 조용히 넘어가는지
 import { describe, expect, it, jest } from '@jest/globals';
 
 import { createMemoryBackend } from '../memoryBackend';
@@ -9,8 +9,8 @@ import type { RingPackage, VoiceBriefingSave } from '../types';
 const NOW = 1_700_000_000_000;
 const ID = '3f2b1c0e-5a4d-4e8f-9b7a-1c2d3e4f5a6b';
 const pkg: RingPackage = { alarmId: ID, type: 'WAKE', atMillis: NOW + 60_000, title: '회의', intensity: 'NORMAL', snoozeLimit: 3 };
-const rule = { prepMinutes: 40, lateBump: false, allow4: false, maxLevel: 3 };
-const clip = (level: number, hash: string) => ({ level, hash, text: `${level}단계 문장` });
+const rule = { urgentAtMs: NOW + 3_600_000, maxLevel: 4 };
+const clip = (level: number, hash: string) => ({ level, hash, text: `${level}단계 문장`, pitch: 1, rate: 1, voiceIndex: 0 });
 const audio = (level: number, hash: string) => ({ level, hash, mime: 'audio/wav', data: 'UklGRg==' });
 
 describe('메모리 대체 — 음성 캐시', () => {

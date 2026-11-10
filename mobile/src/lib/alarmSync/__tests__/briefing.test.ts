@@ -12,10 +12,10 @@ const NOW = 1_800_000_000_000;
 const alarm = (id: string, type: ScheduledAlarm['type'], inMs: number): ScheduledAlarm => ({ id, type, intensity: 'NORMAL', title: 't', atMillis: NOW + inMs, snoozeCount: 0, nextRingAt: NOW + inMs });
 const OUT: BriefingOut = {
   enabled: true,
-  rule: { prepMinutes: 40, lateBump: false, allow4: false, maxLevel: 3 },
-  clips: [{ level: 1, hash: 'aaaaaaaaaaaaaaaa', text: '좋은 아침이야~' }],
-  audio: [{ level: 1, hash: 'aaaaaaaaaaaaaaaa', mime: 'audio/wav', data: 'UklGRg==' }],
-  failed: [],
+  rule: { urgentAtMs: NOW + 3_600_000, maxLevel: 4 },
+  clips: [{ level: 1, hash: 'aaaaaaaaaaaaaaaa', text: '좋은 아침이야~', pitch: 1, rate: 1, voiceIndex: 0 }],
+  audio: [{ level: 4, hash: 'aaaaaaaaaaaaaaaa', mime: 'audio/wav', data: 'UklGRg==' }],
+  gemini: 'MADE',
 };
 
 function deps(over: Partial<BriefingDeps> = {}, alarms: ScheduledAlarm[] = [alarm('w1', 'WAKE', 3_600_000)]) {
@@ -37,16 +37,16 @@ function deps(over: Partial<BriefingDeps> = {}, alarms: ScheduledAlarm[] = [alar
 }
 
 describe('prepareBriefings', () => {
-  it('다가오는 기상 알람만 — 폰에 있는 열쇠를 have로 보내고 결과를 저장', async () => {
-    const t = deps({}, [alarm('w1', 'WAKE', 3_600_000), alarm('p1', 'PREPARE', 3_600_000), alarm('far', 'WAKE', BRIEFING_WINDOW_MS + 1), alarm('past', 'WAKE', -1)]);
+  it('다가오는 기상 · 출발 알람만 — 폰에 있는 열쇠를 have로 보내고 결과를 저장', async () => {
+    const t = deps({}, [alarm('w1', 'WAKE', 3_600_000), alarm('d1', 'DEPARTURE', 7_200_000), alarm('p1', 'PREPARE', 3_600_000), alarm('far', 'WAKE', BRIEFING_WINDOW_MS + 1), alarm('past', 'WAKE', -1)]);
     const s = await prepareBriefings(NOW, t.d);
-    expect(t.calls).toEqual([{ id: 'w1', have: ['bbbbbbbbbbbbbbbb'] }]);
-    expect(t.saved).toEqual(['w1']);
-    expect(s.saved).toEqual(['w1']);
+    expect(t.calls).toEqual([{ id: 'w1', have: ['bbbbbbbbbbbbbbbb'] }, { id: 'd1', have: ['bbbbbbbbbbbbbbbb'] }]);
+    expect(t.saved).toEqual(['w1', 'd1']);
+    expect(s.saved).toEqual(['w1', 'd1']);
   });
 
   it('사용자가 끄면(enabled false) 그 알람 음성을 지움', async () => {
-    const t = deps({ call: async () => ({ ...OUT, enabled: false, rule: null, clips: [], audio: [] }) });
+    const t = deps({ call: async () => ({ ...OUT, enabled: false, rule: null, clips: [], audio: [], gemini: 'NOT_NEEDED' as const }) });
     await prepareBriefings(NOW, t.d);
     expect(t.cleared).toEqual(['w1']);
     expect(t.saved).toEqual([]);
@@ -63,8 +63,8 @@ describe('prepareBriefings', () => {
     expect(offline.saved).toEqual([]);
   });
 
-  it('TTS 일부 실패여도 받은 것은 저장 (네이티브가 못 받은 단계는 기본 알람음)', async () => {
-    const t = deps({ call: async () => ({ ...OUT, failed: [2] }) });
+  it('Gemini 한도 초과 · 실패여도 문장은 저장 (폰은 Android TTS로 전체 브리핑)', async () => {
+    const t = deps({ call: async () => ({ ...OUT, audio: [], gemini: 'LIMITED' as const }) });
     const s = await prepareBriefings(NOW, t.d);
     expect(t.saved).toEqual(['w1']);
     expect(s.failed).toEqual(['w1']);

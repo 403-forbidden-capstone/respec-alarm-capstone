@@ -7,6 +7,7 @@
 //   · 대화 상태(세션 번호 · rev · 카드 · 계산한 Estimate)는 이 모듈 메모리에만 — 앱을 다시 열면 voice-session resume으로 말 · 카드 상태를 서버에서 받음 (Estimate는 안 남으니 저장 때 다시 계산)
 //     다시 열 때 계산이 안 끝난 카드(NEEDS_ESTIMATE)는 이어서 계산해 results만 보냄. 저장한 카드는 서버에 SAVED를 알리기 전에 로컬(savedMarks.ts)에 적어 두어, 알림이 안 가고 꺼져도 일정이 두 벌 생기지 않게 함
 //   · 서버 요청은 pending 하나 + 카드 요청 큐 — 실패한 요청(pending)이 있으면 카드 동작은 앱 일만 바로 하고 서버 알림은 큐에서 기다렸다가 그 요청이 성공한 뒤 차례로 보냄
+import { autoImportance } from '@shared/calc/importance.ts';
 import { adjustEstimate, orderError } from '@/features/alarm/adjust';
 import { createAppointment, createStandaloneAlarm, estimateAppointment, getAppointment, listPlaces, previewAlarms, saveAlarmSettings } from '@/features/alarm/api';
 import { saveNotice } from '@/features/alarm/saveNotice';
@@ -355,7 +356,7 @@ async function estimateNew(rec: CardRec): Promise<Outcome> {
       placeLat: place.lat,
       placeLng: place.lng,
       transport: d.transport ?? 'TRANSIT',
-      importance: d.importance ?? 'LOW',
+      importance: d.importance ?? autoImportance(d.title), // AI가 중요도를 안 정했으면 제목으로 (시험 · 면접만 중요)
       items: (d.items ?? []).join(','),
       alarms: { ...defaultAlarms(), ...(d.alarms ?? {}) },
     };

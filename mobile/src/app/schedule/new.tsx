@@ -1,3 +1,4 @@
+import { autoImportance } from '@shared/calc/importance.ts';
 import { prepareSourceLabel } from '@shared/calc/prepare.ts';
 import { router, useLocalSearchParams } from 'expo-router';
 import { Fragment, useState } from 'react';
@@ -112,6 +113,8 @@ export default function NewScheduleScreen() {
   const { busy: saving, run: runSave } = useAction();
   const current = useNow();
   const set = <K extends keyof typeof draft>(key: K, value: (typeof draft)[K]) => setDraft((d) => ({ ...d, [key]: value }));
+  // 중요도는 필수가 아님 — 직접 고르기 전까지는 제목으로 자동(시험 · 면접만 중요, 나머지 약). 고르면 그 값이 이김 (처음 값이 자동과 다르면 이미 고른 것으로 봄: AI 카드 등)
+  const [importancePicked, setImportancePicked] = useState(() => initial.importance !== autoImportance(initial.title));
 
   // 뭔가 입력했으면 나갈 때 한 번 물음 (처음 값 그대로면 묻지 않음)
   const dirty =
@@ -252,7 +255,7 @@ export default function NewScheduleScreen() {
           accessibilityLabel="일정명 (필수)"
           value={draft.title}
           onChangeText={(v) => {
-            set('title', v);
+            setDraft((d) => ({ ...d, title: v, ...(importancePicked ? {} : { importance: autoImportance(v) }) }));
             if (v.trim()) setTitleError(false);
           }}
           placeholder="예: 스터디"
@@ -388,7 +391,10 @@ export default function NewScheduleScreen() {
           label="중요도"
           options={IMPORTANCE_OPTIONS}
           value={draft.importance}
-          onChange={(v) => set('importance', v)}
+          onChange={(v) => {
+            setImportancePicked(true);
+            set('importance', v);
+          }}
         />
       </Card>
 

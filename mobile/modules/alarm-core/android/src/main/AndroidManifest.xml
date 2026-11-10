@@ -19,6 +19,13 @@
     android:name="android.permission.PACKAGE_USAGE_STATS"
     tools:ignore="ProtectedPermissions" />
 
+  <!-- 음성 브리핑: 폰의 TTS 엔진을 찾으려면 11(API 30)부터 이 선언이 필요 (패키지 공개 범위) -->
+  <queries>
+    <intent>
+      <action android:name="android.intent.action.TTS_SERVICE" />
+    </intent>
+  </queries>
+
   <application>
     <!-- 울림 길잡이 + 대체 화면 (#332): 앱을 따로 불러 H07을 띄우므로 앱과 다른 작업(task)에 둠 — 앱이 앞에 와도 이 화면이 사라지지 않아 앱이 못 뜰 때 대체 화면을 그릴 수 있음 -->
     <activity
@@ -42,6 +49,12 @@
 
     <service
       android:name=".AlarmPlaybackService"
+      android:exported="false"
+      android:foregroundServiceType="mediaPlayback" />
+
+    <!-- 출발 알람의 음성 브리핑을 한 번 읽고 끝나는 짧은 서비스 -->
+    <service
+      android:name=".BriefingSpeechService"
       android:exported="false"
       android:foregroundServiceType="mediaPlayback" />
 

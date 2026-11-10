@@ -1,96 +1,129 @@
-// alarm-briefing 판단 부분 — 가짜 TTS(Mock)로: 캐시 열쇠가 있으면 안 부름 · 실패해도 던지지 않음 · 끄면 비움 · 전날 대화 끄기
+// alarm-briefing 판단 부분 — 가짜 TTS · 가짜 한도(Mock)로: 긴급일 때만 Gemini · 캐시 · 한도 초과 · 429 · 동시 요청 · 출발 브리핑
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { briefingDays, runBriefing, type BriefingSource } from './briefing-run.ts';
+import { briefingDays, runBriefing, type BriefingSource, type GeminiDeps } from './briefing-run.ts';
+import { LlmClientError } from './ai/llm.ts';
 import type { TtsRequest } from './ai/tts.ts';
 
 const kst = (h: number, m = 0) => Date.UTC(2026, 10, 11, h - 9, m);
 
+// 10시 약속 · 준비 50 · 이동 40 → 긴급 시각 8:24:30. 기상 알람 7:30이면 미루다 긴급이 될 수 있음
 const source = (over: Partial<BriefingSource> = {}): BriefingSource => ({
-  scheduledAtMs: kst(7),
+  kind: 'WAKE',
+  scheduledAtMs: kst(7, 30),
   timeZone: 'Asia/Seoul',
   prefs: {},
-  importance: 'HIGH',
-  prepMinutes: 40,
-  departAtMs: kst(8, 40),
-  lateCount4w: 0,
+  importance: 'LOW',
+  appointmentAtMs: kst(10),
+  prepMinutes: 50,
+  travelMinutes: 40,
+  departAtMs: kst(9, 10),
+  done: false,
   appointments: [
-    { title: '팀플 회의', atMs: kst(15), importance: 'HIGH' },
-    { title: '어제 지난 일', atMs: kst(6), importance: 'NORMAL' }, // 알람보다 앞 — 안 읽음
+    { title: '팀플 회의', atMs: kst(10), importance: 'LOW' },
+    { title: '지난 일', atMs: kst(6), importance: 'NORMAL' },
   ],
   todos: [],
-  sessions: [
-    {
-      schema_version: 'structured.v1',
-      session: { reference_date: '2026-11-10' },
-      goals_routine: { goals: [{ habit: 'irregular_wake', goal_text: '일찍 일어나기', source: 'stated' }] },
-    },
-  ],
+  sessions: [{ schema_version: 'structured.v1', session: { reference_date: '2026-11-10' }, goals_routine: { goals: [{ habit: 'irregular_wake', goal_text: '일찍', source: 'stated' }] } }],
   ...over,
 });
 
-function fakeTts(fail: Set<number> = new Set()) {
+function fakes(opts: { allow?: boolean; fail?: unknown } = {}) {
   const calls: TtsRequest[] = [];
-  const tts = async (req: TtsRequest) => {
-    calls.push(req);
-    if (fail.has(calls.length)) throw new Error('503 overloaded');
-    return { mime: 'audio/wav', data: Buffer.from(`wav:${req.text.length}`).toString('base64') };
+  const records: { ok: boolean; errorCode: string | null }[] = [];
+  let allowChecks = 0;
+  const deps: GeminiDeps = {
+    tts: async (req) => {
+      calls.push(req);
+      await new Promise((r) => setTimeout(r, 5));
+      if (opts.fail) throw opts.fail;
+      return { mime: 'audio/wav', data: 'UklGRg==' };
+    },
+    quota: {
+      allow: async () => (allowChecks++, opts.allow ?? true),
+      record: async (r) => void records.push({ ok: r.ok, errorCode: r.errorCode }),
+    },
   };
-  return { calls, tts };
+  return { deps, calls, records, allowChecks: () => allowChecks };
 }
 
-test('기준일: 11/11 아침 알람 → 전날 밤 대화 기준일 11/10 (자정 넘은 시각도 같은 날 알람)', () => {
+test('기준일: 11/11 아침 알람 → 전날 밤 대화 기준일 11/10', () => {
   assert.deepEqual(briefingDays(kst(7), 'Asia/Seoul'), { day: '2026-11-11', review: '2026-11-10' });
-  assert.deepEqual(briefingDays(Date.UTC(2026, 0, 1, -9 + 6), 'Asia/Seoul'), { day: '2026-01-01', review: '2025-12-31' });
 });
 
-test('단계별 음성을 미리 만듦 — 같은 목소리, 단계마다 다른 발화 지시, 전날 다짐 + 오늘 일정이 한 문장 흐름', async () => {
-  const { calls, tts } = fakeTts();
-  const out = await runBriefing(source({ prefs: { coachMax: 4 } }), new Set(), tts);
-  assert.equal(out.enabled, true);
-  assert.deepEqual(out.audio.map((a) => a.level), [1, 2, 3, 4]);
-  assert.deepEqual(out.failed, []);
-  assert.ok(calls.every((c) => c.voice === 'Kore' && c.model === 'gemini-3.8-flash-tts'));
-  assert.equal(new Set(calls.map((c) => c.style)).size, 4);
-  assert.match(calls[0].text, /어제 오늘부터는 일찍 일어나겠다고 했잖아/);
-  assert.match(calls[0].text, /오후 3시 팀플 회의/);
-  assert.doesNotMatch(calls[0].text, /어제 지난 일/);
-  assert.deepEqual(out.rule, { prepMinutes: 40, lateBump: false, allow4: true, maxLevel: 4 });
+test('긴급이 될 수 있는 기상 알람 → 4단계 문장만 Gemini로 한 번, 1~3단계는 Android TTS 문장', async () => {
+  const f = fakes();
+  const out = await runBriefing(source(), new Set(), f.deps);
+  assert.equal(out.gemini, 'MADE');
+  assert.equal(f.calls.length, 1);
+  assert.match(f.calls[0].style, /shouting/);
+  assert.match(f.calls[0].text, /^야!!!!!!!!!! 지금 안 일어나면 진짜 늦어/);
+  assert.deepEqual(out.audio.map((a) => a.level), [4]);
+  assert.deepEqual(out.clips.map((c) => c.level), [1, 2, 3, 4]);
+  assert.match(out.clips[0].text, /어제 오늘부터는 일찍 일어나겠다고 했잖아/);
+  assert.doesNotMatch(out.clips[0].text, /지난 일/);
+  assert.deepEqual(f.records, [{ ok: true, errorCode: null }]);
 });
 
-test('폰에 이미 있는 열쇠(have)는 다시 안 만듦 — 같은 내용으로 AI 재호출 없음', async () => {
-  const first = await runBriefing(source(), new Set(), fakeTts().tts);
-  const { calls, tts } = fakeTts();
-  const again = await runBriefing(source(), new Set(first.clips.map((c) => c.hash)), tts);
-  assert.equal(calls.length, 0);
-  assert.deepEqual(again.audio, []);
-  assert.deepEqual(again.clips, first.clips);
+test('여유가 많은 알람(긴급 불가) · 준비 · 이동 모름 · 이미 출발 → Gemini 안 부름', async () => {
+  for (const over of [{ scheduledAtMs: kst(6) }, { travelMinutes: null }, { done: true }] as Partial<BriefingSource>[]) {
+    const f = fakes();
+    const out = await runBriefing(source(over), new Set(), f.deps);
+    assert.equal(out.gemini, 'NOT_NEEDED', JSON.stringify(over));
+    assert.equal(f.calls.length + f.allowChecks(), 0);
+    assert.equal(out.clips.length, 4); // Android 브리핑은 그대로
+  }
 });
 
-test('일정이 바뀌면 열쇠가 달라져 새로 만듦 (낡은 일정 안내 방지)', async () => {
-  const first = await runBriefing(source(), new Set(), fakeTts().tts);
-  const { calls, tts } = fakeTts();
-  await runBriefing(source({ appointments: [{ title: '팀플 회의', atMs: kst(16), importance: 'HIGH' }] }), new Set(first.clips.map((c) => c.hash)), tts);
-  assert.equal(calls.length, first.clips.length);
+test('폰에 열쇠가 있으면 다시 안 만듦 (미루기마다 새로 부르지 않음)', async () => {
+  const first = await runBriefing(source(), new Set(), fakes().deps);
+  const f = fakes();
+  const again = await runBriefing(source(), new Set([first.audio[0].hash]), f.deps);
+  assert.equal(again.gemini, 'CACHED');
+  assert.equal(f.calls.length + f.allowChecks(), 0);
 });
 
-test('TTS 일부 실패 · 키 없음 → 던지지 않고 failed로 (폰은 기본 알람음)', async () => {
-  const out = await runBriefing(source(), new Set(), fakeTts(new Set([2])).tts);
-  assert.deepEqual(out.audio.map((a) => a.level), [1, 3]);
-  assert.deepEqual(out.failed, [2]);
-  const none = await runBriefing(source(), new Set(), null);
-  assert.deepEqual(none.audio, []);
-  assert.deepEqual(none.failed, [1, 2, 3]);
-  assert.equal(none.clips.length, 3); // 문장은 줌 — 화면에 일정 표시
+test('한도 초과 → 부르지 않고 LIMITED (폰은 Android TTS로 전체), 429 → 기록하고 LIMITED, 그 밖 실패 → FAILED', async () => {
+  const limited = fakes({ allow: false });
+  const a = await runBriefing(source(), new Set(), limited.deps);
+  assert.equal(a.gemini, 'LIMITED');
+  assert.equal(limited.calls.length, 0);
+  assert.equal(a.clips.find((c) => c.level === 4)?.text.startsWith('야!!!!'), true);
+
+  const r429 = fakes({ fail: new LlmClientError('rate_limit', 'quota', { status: 429 }) });
+  assert.equal((await runBriefing(source(), new Set(), r429.deps)).gemini, 'LIMITED');
+  assert.deepEqual(r429.records, [{ ok: false, errorCode: 'rate_limit' }]);
+
+  const boom = fakes({ fail: new Error('down') });
+  const c = await runBriefing(source(), new Set(), boom.deps);
+  assert.equal(c.gemini, 'FAILED');
+  assert.deepEqual(c.audio, []);
 });
 
-test('사용자가 끄면 아무것도 안 만듦 · 전날 대화 끄기 · 자동 강화 끄기', async () => {
-  const { calls, tts } = fakeTts();
-  assert.deepEqual(await runBriefing(source({ prefs: { enabled: false } }), new Set(), tts), { enabled: false, rule: null, clips: [], audio: [], failed: [] });
-  assert.equal(calls.length, 0);
-  const priv = await runBriefing(source({ prefs: { personal: false } }), new Set(), tts);
-  assert.ok(priv.clips.every((c) => !c.text.includes('어제')));
-  const calm = await runBriefing(source({ prefs: { escalate: false } }), new Set(), tts);
-  assert.deepEqual(calm.clips.map((c) => c.level), [1]);
+test('같은 음성을 동시에 두 번 요청해도 Gemini는 한 번', async () => {
+  const f = fakes();
+  const [x, y] = await Promise.all([runBriefing(source(), new Set(), f.deps), runBriefing(source(), new Set(), f.deps)]);
+  assert.equal(f.calls.length, 1);
+  assert.equal(x.audio[0].hash, y.audio[0].hash);
+});
+
+test('키 없음 → NOT_CONFIGURED, 사용자가 끄면 아무것도 안 만듦, 상한 3이면 Gemini 없음', async () => {
+  assert.equal((await runBriefing(source(), new Set(), { tts: null, quota: fakes().deps.quota })).gemini, 'NOT_CONFIGURED');
+  const f = fakes();
+  assert.deepEqual(await runBriefing(source({ prefs: { enabled: false } }), new Set(), f.deps), { enabled: false, rule: null, clips: [], audio: [], gemini: 'NOT_NEEDED' });
+  const capped = await runBriefing(source({ prefs: { coachMax: 3 } }), new Set(), f.deps);
+  assert.equal(capped.gemini, 'NOT_NEEDED');
+  assert.deepEqual(capped.clips.map((c) => c.level), [1, 2, 3]);
+  assert.equal(f.calls.length, 0);
+});
+
+test('출발 알람: 그 일정 + 준비물 + 출발 촉구, 긴급 시각에 울리면 Gemini', async () => {
+  const f = fakes();
+  const dep = source({ kind: 'DEPARTURE', scheduledAtMs: kst(9, 15), appointments: [{ title: '면접', atMs: kst(10), importance: 'HIGH' }], todos: [{ title: '이력서', type: 'ITEM' }] });
+  const out = await runBriefing(dep, new Set(), f.deps);
+  assert.equal(out.clips[0].text, '오전 10시 면접 갈 시간이야. 챙길 것: 이력서. 이제 출발하자!');
+  assert.equal(out.gemini, 'MADE');
+  const calm = await runBriefing({ ...dep, scheduledAtMs: kst(9, 10) }, new Set(), fakes().deps); // 여유 10분 = 위험(긴급 아님)
+  assert.equal(calm.gemini, 'NOT_NEEDED');
 });

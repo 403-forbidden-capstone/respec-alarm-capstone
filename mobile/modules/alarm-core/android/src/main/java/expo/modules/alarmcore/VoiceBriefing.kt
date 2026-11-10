@@ -6,36 +6,15 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 
-// 기상 알람 AI 음성 브리핑 — 앱이 미리 받아 둔 단계별 음성(WAV)을 알람별로 저장하고, 울릴 때 단계를 골라 파일을 줌
+// 알람 음성 브리핑 저장소 — 앱이 미리 받아 둔 단계별 문장(Android TTS용) · 긴급 Gemini 음성(WAV)을 알람별로 두고, 울릴 때 읽을 것을 고름
 // 저장 위치: 앱 전용 폴더 filesDir/alarm_voice/<알람 id>/ (다른 앱 · 다른 사용자가 못 읽음). 알람이 지워지면(AlarmStorage.remove) 같이 지움
-//   로그아웃은 cancelAll → 모든 알람 remove → 다음 계정에 앞 계정 브리핑이 남지 않음
-// 단계 판단은 공통 TS(_shared/briefing.ts urgencyLevel)와 같은 식 — 고치면 둘 다 (briefing.test.ts가 TS 쪽 경계를 고정)
+//   로그아웃은 cancelAll → clearAll → 다음 계정에 앞 계정 브리핑이 남지 않음
+// 단계 판단은 SpeechUrgency (TS levelAt과 같은 식). 엔진: 4단계이고 Gemini 파일이 있을 때만 Gemini, 아니면 Android TTS로 같은 단계 문장 전체 (한 울림에 한 엔진)
 internal object VoiceBriefing {
   private const val DIR = "alarm_voice"
   private const val MANIFEST = "manifest.json"
   private val ID = Regex("^[0-9A-Za-z_-]{1,64}$")
   private val HASH = Regex("^[0-9a-f]{16}$")
-
-  // _shared/briefing.ts SPARE_* 와 같은 값
-  private const val SPARE_CALM_MIN = 20.0
-  private const val SPARE_PRESS_MIN = 10.0
-  private const val SPARE_EMERGENCY_MIN = 5.0
-
-  data class Rule(val prepMinutes: Int, val lateBump: Boolean, val allow4: Boolean, val maxLevel: Int)
-
-  /** 울릴 때의 발화 긴급도 1~4 — urgencyLevel(TS)과 같은 식 */
-  fun level(rule: Rule, snoozeCount: Int, nowMillis: Long, departAt: Long?): Int {
-    if (rule.maxLevel <= 1) return 1
-    val spare = departAt?.let { (it - nowMillis) / 60_000.0 - rule.prepMinutes }
-    var level = when {
-      spare == null || spare >= SPARE_CALM_MIN -> 1
-      spare >= SPARE_PRESS_MIN -> 2
-      else -> 3
-    }
-    if ((snoozeCount >= 2 || (rule.lateBump && snoozeCount >= 1)) && level < 2) level = 2
-    if (rule.allow4 && snoozeCount >= 2 && spare != null && spare < SPARE_EMERGENCY_MIN) level = 4
-    return minOf(level, rule.maxLevel)
-  }
 
   // 알람 id는 폴더 이름이 되므로 경로 문자를 막음 (../ 등)
   private fun dir(context: Context, alarmId: String): File? =
@@ -45,8 +24,8 @@ internal object VoiceBriefing {
     runCatching { JSONObject(File(dir, MANIFEST).readText()) }.getOrNull()
 
   /**
-   * 앱이 받은 결과 저장. json = { rule, clips: [{level, hash, text}], audio: [{level, hash, data(base64)}] }
-   * 단계마다: 새 음성이 오면 씀, 안 왔으면 열쇠가 같은 예전 파일만 남김(내용이 바뀌었는데 생성이 실패하면 낡은 음성을 지워 기본 알람음으로)
+   * 앱이 받은 결과 저장. json = { rule: {urgentAtMs, maxLevel}, clips: [{level, hash, text, pitch, rate, voiceIndex}], audio: [{level, hash, data(base64)}] }
+   * 단계마다: 새 Gemini 음성이 오면 씀, 안 왔으면 열쇠가 같은 예전 파일만 남김 (내용이 바뀌었는데 못 만들었으면 낡은 음성을 지움 → Android TTS로)
    */
   @Synchronized
   fun save(context: Context, alarmId: String, json: String) {
@@ -61,24 +40,26 @@ internal object VoiceBriefing {
     for (i in 0 until clips.length()) {
       val clip = clips.getJSONObject(i)
       val level = clip.getInt("level").toString()
-      val hash = clip.getString("hash")
+      val hash = clip.optString("hash")
       if (!HASH.matches(hash)) continue
-      keepLevels.add(level)
       val file = File(folder, "L$level.wav")
       val fresh = (0 until audio.length()).map { audio.getJSONObject(it) }.firstOrNull { it.optString("hash") == hash }
       if (fresh != null) {
         val tmp = File(folder, "L$level.tmp")
         tmp.writeBytes(Base64.decode(fresh.getString("data"), Base64.DEFAULT))
-        if (!tmp.renameTo(file)) { file.delete(); tmp.renameTo(file) }
+        if (!tmp.renameTo(file)) {
+          file.delete()
+          tmp.renameTo(file)
+        }
         files.put(level, hash)
+        keepLevels.add(level)
       } else if (old.optString(level) == hash && file.exists()) {
         files.put(level, hash)
-      } else {
-        file.delete()
+        keepLevels.add(level)
       }
     }
     folder.listFiles()?.forEach { f ->
-      val lv = Regex("^L(\\d)\\.wav$").find(f.name)?.groupValues?.get(1)
+      val lv = Regex("^L(\\d)\\.(wav|tmp)$").find(f.name)?.groupValues?.get(1)
       if (lv != null && lv !in keepLevels) f.delete()
     }
     val manifest = JSONObject()
@@ -88,7 +69,7 @@ internal object VoiceBriefing {
     File(folder, MANIFEST).writeText(manifest.toString())
   }
 
-  /** 폰에 있는 음성의 열쇠 — 앱이 서버에 have로 보내 같은 음성을 다시 만들지 않게 */
+  /** 폰에 있는 Gemini 음성의 열쇠 — 앱이 서버에 have로 보내 같은 음성을 다시 안 만들게 */
   @Synchronized
   fun hashes(context: Context, alarmId: String): List<String> {
     val folder = dir(context, alarmId) ?: return emptyList()
@@ -101,32 +82,42 @@ internal object VoiceBriefing {
     dir(context, alarmId)?.deleteRecursively()
   }
 
-  data class Pick(val file: File, val level: Int, val text: String?)
-
-  /** 지금 울림에 틀 음성 — 고른 단계 파일, 없으면 그보다 낮은 단계 중 있는 것. 하나도 없으면 null(기본 알람음만) */
   @Synchronized
-  fun pick(context: Context, alarm: StoredAlarm, nowMillis: Long): Pick? {
-    val folder = dir(context, alarm.alarmId) ?: return null
-    val manifest = readManifest(folder) ?: return null
-    val r = manifest.optJSONObject("rule") ?: JSONObject()
-    val rule = Rule(r.optInt("prepMinutes", 0), r.optBoolean("lateBump", false), r.optBoolean("allow4", false), r.optInt("maxLevel", 1))
-    val wanted = level(rule, alarm.snoozeCount, nowMillis, alarm.departAt)
-    val clips = manifest.optJSONArray("clips") ?: JSONArray()
-    for (lv in wanted downTo 1) {
-      val file = File(folder, "L$lv.wav")
-      if (!file.exists()) continue
-      val text = (0 until clips.length()).map { clips.getJSONObject(it) }.firstOrNull { it.optInt("level") == lv }?.optString("text")
-      return Pick(file, lv, text)
-    }
-    return null
+  fun clearAll(context: Context) {
+    File(context.filesDir, DIR).deleteRecursively()
   }
 
-  /** 화면에 보여 줄 문장 (음성이 없거나 실패해도 일정 안내는 화면에) — 고른 단계 문장 */
-  fun textFor(context: Context, alarm: StoredAlarm, nowMillis: Long): String? = runCatching {
-    pick(context, alarm, nowMillis)?.text ?: run {
-      val folder = dir(context, alarm.alarmId) ?: return@run null
-      val clips = readManifest(folder)?.optJSONArray("clips") ?: return@run null
-      if (clips.length() > 0) clips.getJSONObject(0).optString("text").takeIf { it.isNotEmpty() } else null
+  /** 한 울림에 읽을 것 — wav가 있으면 Gemini 음성, 없으면 text를 Android TTS로 (pitch · rate · voiceIndex) */
+  data class Speech(val level: Int, val text: String, val pitch: Float, val rate: Float, val voiceIndex: Int, val wav: File?)
+
+  /**
+   * 지금 울림에 읽을 브리핑. 저장된 브리핑이 없으면(못 받음 · 네트워크 없음) 꾸러미의 기상 문장(voiceText) 또는 "머리글. 제목"을 Android TTS로 —
+   * 캐시가 없어도 음성 안내는 나옴. 문장이 하나도 없으면 null(알람음만)
+   */
+  @Synchronized
+  fun speechFor(context: Context, alarm: StoredAlarm, nowMillis: Long): Speech? = runCatching {
+    val folder = dir(context, alarm.alarmId)
+    val manifest = folder?.let { readManifest(it) }
+    val rule = manifest?.optJSONObject("rule") ?: JSONObject()
+    val urgentAt = if (rule.has("urgentAtMs") && !rule.isNull("urgentAtMs")) rule.getDouble("urgentAtMs").toLong() else null
+    val level = SpeechUrgency.level(alarm.snoozeCount, nowMillis, urgentAt, rule.optInt("maxLevel", 1))
+    val clips = manifest?.optJSONArray("clips") ?: JSONArray()
+    val byLevel = (0 until clips.length()).map { clips.getJSONObject(it) }.associateBy { it.optInt("level") }
+    // 고른 단계 문장, 없으면 그보다 낮은 단계 중 있는 것
+    val clip = (level downTo 1).firstNotNullOfOrNull { byLevel[it] }
+    if (clip == null) {
+      val text = alarm.voiceText?.takeIf { it.isNotBlank() } ?: listOf(alarm.plan.heading, alarm.title).filter { it.isNotBlank() }.joinToString(". ")
+      return@runCatching if (text.isBlank()) null else Speech(1, text, 1f, 1f, 0, null)
     }
+    val clipLevel = clip.optInt("level")
+    val wav = if (clipLevel == 4) folder?.let { File(it, "L4.wav") }?.takeIf { it.exists() } else null
+    Speech(
+      level = clipLevel,
+      text = clip.optString("text"),
+      pitch = clip.optDouble("pitch", 1.0).toFloat(),
+      rate = clip.optDouble("rate", 1.0).toFloat(),
+      voiceIndex = clip.optInt("voiceIndex", 0),
+      wav = wav,
+    )
   }.getOrNull()
 }

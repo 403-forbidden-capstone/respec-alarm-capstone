@@ -1,4 +1,5 @@
 // alarm-suggest · alarm-commit 요청 읽기 (순수 · node --test). 둘이 같은 초안 모양을 받음 — 필드 이름은 상세설계서 5장 5.4.2를 따름
+import { autoImportance } from './calc/importance.ts';
 import type { EditInput } from './commit-core.ts';
 import { IMPORTANCES, readAlarmFields, readParticipantFields, readPlace, readRecurrence, type AlarmFields } from './draft.ts';
 import type { PlanDraft } from './plan-core.ts';
@@ -25,7 +26,8 @@ function readAppointmentDraft(r: Reader, opts: { titleRequired: boolean }): { dr
     const title = rawNew.string('title', { required: opts.titleRequired, min: 1, max: 100 });
     at = rawNew.date('appointment_at', { required: true });
     destination = readPlace(rawNew, 'destination', { required: true, nameRequired: true, radius: true });
-    importance = rawNew.oneOf('importance', IMPORTANCES);
+    // 고르지 않았으면 제목으로 자동 (시험 · 면접만 HIGH, 나머지 LOW) — 직접 고른 값이 이김
+    importance = rawNew.oneOf('importance', IMPORTANCES) ?? (title ? autoImportance(title) : undefined);
     const groupId = rawNew.uuid('group_id');
     const recurrenceRule = readRecurrence(rawNew);
     if (title) appointment = { title, ...(groupId ? { groupId } : {}), ...(recurrenceRule !== undefined ? { recurrenceRule } : {}) };

@@ -142,7 +142,7 @@ test('저장된 값이 없으면 프로필 기본값 (집 · 기본 이동 수�
   assert.deepEqual(b.origin, { name: '우리 집', lat: 37.5547, lng: 126.9707 });
   assert.equal(b.transport, 'TRANSIT');
   assert.equal(b.bufferMinutes, 10);
-  assert.equal(b.importance, 'NORMAL');
+  assert.equal(b.importance, 'LOW'); // 새 일정 기본 중요도는 약(LOW) — 알람 정책 변경
 });
 
 test('출발지 이름만 오면 같은 이름의 집 · 저장된 출발지 좌표를 씀 (목업의 "집")', () => {
@@ -212,7 +212,7 @@ test('응답 모양: 5.4.1 AlarmSuggestionDTO 칸', () => {
     'appointment_at', 'wake_at', 'prepare_at', 'departure_at', 'arrive_at', 'alarms', 'check', 'travel', 'prepare', 'intensity', 'with_wake', 'same_day_wake', 'confidence', 'warnings',
   ]);
   assert.equal(dto.intensity.level, 'NORMAL');
-  assert.equal(dto.intensity.reason, '중요 일정 → 중');
+  assert.equal(dto.intensity.reason, '평소 일정 → 중');
   assert.deepEqual(dto.alarms.map((a) => a.alarm_type), ['WAKE', 'PREPARE', 'DEPARTURE', 'ARRIVE']);
   assert.equal(dto.confidence, 'MEDIUM');
 });
@@ -220,7 +220,7 @@ test('응답 모양: 5.4.1 AlarmSuggestionDTO 칸', () => {
 test('늦잠 지각이 2회 이상이면 이유 문구에 나옴', () => {
   const dto = toSuggestion(computePlan(base({ lateCount4w: 3 }), api(50)));
   assert.equal(dto.intensity.level, 'STRONG');
-  assert.equal(dto.intensity.reason, '중요 일정 + 최근 4주 늦잠 지각 3회 → 강');
+  assert.equal(dto.intensity.reason, '평소 일정 + 최근 4주 늦잠 지각 3회 → 강');
 });
 
 // ---- 학습 루프 기초 a (이슈 #266) — 5절 시험 표 ----
@@ -429,7 +429,7 @@ test('[5절] 잠귀 가벼움(LIGHT) · 보통(NORMAL) · 칸 없음 + 보통 �
 
 test('잠귀가 무거우면 이유 문구에 나오고, 직접 고른 칸은 잠귀보다 먼저', () => {
   const dto = toSuggestion(computePlan(base({ profile: { ...profile, wake_sensitivity: 'HEAVY' }, lateCount4w: 0 }), api(50)));
-  assert.equal(dto.intensity.reason, '중요 일정 + 잠귀가 무거움 → 강');
+  assert.equal(dto.intensity.reason, '평소 일정 + 잠귀가 무거움 → 강');
   const manual = computePlan(base({ profile: { ...profile, wake_sensitivity: 'HEAVY' }, draft: { at: kst(22, 600), destination: { name: 'x' }, levels: { sound: 0, voice: null, vibration: null } } }), api(50));
   assert.deepEqual([manual.intensity.axes.sound, manual.intensity.axes.voice], [{ level: 0, manual: true }, { level: 2, manual: false }]);
 });

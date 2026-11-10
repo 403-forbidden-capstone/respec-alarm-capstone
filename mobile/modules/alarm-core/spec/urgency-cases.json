@@ -1,0 +1,98 @@
+[
+  {
+    "name": "처음 울림 · 위험 계산 불가(UNKNOWN)",
+    "snoozeCount": 0,
+    "nowMs": 1800000000000,
+    "urgentAtMs": null,
+    "maxLevel": 4,
+    "expected": 1
+  },
+  {
+    "name": "미루기 1번",
+    "snoozeCount": 1,
+    "nowMs": 1800000000000,
+    "urgentAtMs": null,
+    "maxLevel": 4,
+    "expected": 2
+  },
+  {
+    "name": "미루기 2번",
+    "snoozeCount": 2,
+    "nowMs": 1800000000000,
+    "urgentAtMs": null,
+    "maxLevel": 4,
+    "expected": 3
+  },
+  {
+    "name": "미루기 5번이어도 3단계 (미루기만으로 긴급 아님)",
+    "snoozeCount": 5,
+    "nowMs": 1800000000000,
+    "urgentAtMs": null,
+    "maxLevel": 4,
+    "expected": 3
+  },
+  {
+    "name": "긴급 시각과 같은 순간은 아직 아님 (여유 5.5분 → 반올림 6분)",
+    "snoozeCount": 0,
+    "nowMs": 1800003600000,
+    "urgentAtMs": 1800003600000,
+    "maxLevel": 4,
+    "expected": 1
+  },
+  {
+    "name": "긴급 시각을 1ms 넘음 → 미루기 없이도 4",
+    "snoozeCount": 0,
+    "nowMs": 1800003600001,
+    "urgentAtMs": 1800003600000,
+    "maxLevel": 4,
+    "expected": 4
+  },
+  {
+    "name": "미루기 3번 · 긴급 전 (여유 있음) → 3",
+    "snoozeCount": 3,
+    "nowMs": 1800003540000,
+    "urgentAtMs": 1800003600000,
+    "maxLevel": 4,
+    "expected": 3
+  },
+  {
+    "name": "미루기 3번 · 긴급 → 4",
+    "snoozeCount": 3,
+    "nowMs": 1800003660000,
+    "urgentAtMs": 1800003600000,
+    "maxLevel": 4,
+    "expected": 4
+  },
+  {
+    "name": "긴급이지만 사용자 상한 3",
+    "snoozeCount": 0,
+    "nowMs": 1800003600001,
+    "urgentAtMs": 1800003600000,
+    "maxLevel": 3,
+    "expected": 3
+  },
+  {
+    "name": "긴급이지만 상한 2",
+    "snoozeCount": 2,
+    "nowMs": 1800003600001,
+    "urgentAtMs": 1800003600000,
+    "maxLevel": 2,
+    "expected": 2
+  },
+  {
+    "name": "자동 강화 끔(상한 1)",
+    "snoozeCount": 3,
+    "nowMs": 1800003600001,
+    "urgentAtMs": 1800003600000,
+    "maxLevel": 1,
+    "expected": 1
+  },
+  {
+    "name": "긴급 시각이 한참 뒤",
+    "snoozeCount": 0,
+    "nowMs": 1800000000000,
+    "urgentAtMs": 1800086400000,
+    "maxLevel": 4,
+    "expected": 1
+  }
+]

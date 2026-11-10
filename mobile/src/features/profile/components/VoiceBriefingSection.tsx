@@ -13,8 +13,8 @@ const TONE_OPTIONS = [[AUTO, '자동'], ...(Object.keys(TONES) as ToneKey[]).map
 const COACH_OPTIONS = [
   ['1', '부드럽게'],
   ['2', '단호하게'],
-  ['3', '긴급 경고'],
-  ['4', '소리치기'],
+  ['3', '강하게'],
+  ['4', '긴급'],
 ] as const;
 
 type Props = {
@@ -38,7 +38,7 @@ export function VoiceBriefingSection({ value, onSave, disabled }: Props) {
     <>
       <SectionHeader title="AI 음성 브리핑" />
       <Card>
-        <Row label="기상 알람에서 AI가 읽어 주기" note="알람이 울릴 때 오늘 일정과 어제 다짐을 함께 읽어요">
+        <Row label="알람이 울릴 때 읽어 주기" note="기상 알람은 오늘 일정과 어제 다짐을, 출발 알람은 일정 시각과 준비물을 읽어요">
           <Toggle value={enabled} onChange={(on) => set('enabled', on ? undefined : false)} label="AI 음성 브리핑" disabled={disabled} />
         </Row>
         {enabled ? (
@@ -51,7 +51,7 @@ export function VoiceBriefingSection({ value, onSave, disabled }: Props) {
               평소 말투
             </Text>
             <Segmented options={TONE_OPTIONS} value={prefs.tone ?? AUTO} onChange={(v) => set('tone', v === AUTO ? undefined : (v as ToneKey))} disabled={disabled ? TONE_OPTIONS.map(([v]) => v) : undefined} />
-            <Row label="늦을 것 같으면 말투 강하게" note="미루기를 거듭하거나 준비 시간이 모자라면 점점 단호하게 깨워요">
+            <Row label="미루거나 늦을 것 같으면 말투 강하게" note="미룰수록 단호해지고, 지각 위험이 생기면 긴급으로 깨워요">
               <Toggle value={prefs.escalate ?? true} onChange={(on) => set('escalate', on ? undefined : false)} label="말투 자동 강화" disabled={disabled} />
             </Row>
             {prefs.escalate ?? true ? (
@@ -66,7 +66,7 @@ export function VoiceBriefingSection({ value, onSave, disabled }: Props) {
                   disabled={disabled ? COACH_OPTIONS.map(([v]) => v) : undefined}
                 />
                 <Text variant="small" tone="sub" style={styles.label}>
-                  소리치기는 중요한 일정에서 미루기를 거듭해 늦기 직전일 때만 써요
+                  긴급(다급하게 외치는 AI 음성)은 일정 중요도와 상관없이 실제로 늦기 직전(남은 여유 5분 이하)일 때만 나와요
                 </Text>
               </>
             ) : null}

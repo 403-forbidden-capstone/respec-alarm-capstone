@@ -1,59 +1,55 @@
-// 기상 알람 AI 음성 브리핑 — 순수 함수만 (서버 alarm-briefing · 앱 lib/alarmSync/briefing이 같이 씀, 시험: briefing.test.ts)
-//   · 중요도(LOW 약 · NORMAL 중간 · HIGH 중요)별 음성 기본값 + 사용자 수동 설정(profiles.alarm_voice_prefs)이 이김
-//   · 발화 긴급도 1~4단계 (중요도와 별개 — 남은 여유 · 미루기 · 최근 지각으로 울릴 때마다 정함)
-//   · 전날 대화(conversation_sessions.extracted_data, structured.v1)에서 사용자가 직접 말한 다짐 · 반성만 꺼냄 (AI 다시 안 부름)
-//   · 알람이 울릴 때 읽을 문장 = 다짐 + 오늘 일정 브리핑을 단계별로 한 흐름으로
-// 알람 볼륨 · 진동 · 배경음은 여기서 안 정함 — 기존 알람 축(calc/intensity.ts, H03 수동 선택)이 그대로 정하고, 음성 단계가 바꾸지 않음
+// 알람 AI 음성 브리핑 — 순수 함수만 (서버 alarm-briefing · 앱 lib/alarmSync/briefing이 같이 씀, 시험: briefing.test.ts)
+//   · 일정 중요도(LOW 약 · NORMAL 중간 · HIGH 중요)는 목소리 · 말투 기본값만 정함. 사용자 수동 설정(profiles.alarm_voice_prefs)이 이김
+//   · 알람 긴급도 1~4단계는 중요도와 별개: 처음 1 · 미루기 1번 2 · 2번 이상 3 · 실제 지각 위험(여유 5분 이하) 4
+//   · 엔진: 1~3단계는 폰의 Android TTS, 4단계(긴급)만 미리 만든 Gemini 음성 — 없으면 Android TTS로 같은 문장 전체 (한 울림에 한 엔진)
+//   · 기상(WAKE) = 전날 대화 다짐 + 오늘 일정, 출발(DEPARTURE) = 그 일정 시각 + 준비물 + 출발 촉구. 기록에 없는 말은 안 만듦
+// 알람 볼륨 · 진동 · 배경음은 여기서 안 정함 — 기존 알람 축(calc/intensity.ts D69, H03 수동 선택)이 그대로 정함
+import { departSlack } from './calc/depart.ts';
 import { formatKoSpokenTime } from './tz.ts';
 
 export type Importance = 'LOW' | 'NORMAL' | 'HIGH';
 export type UrgencyLevel = 1 | 2 | 3 | 4;
 export type ToneKey = 'GENTLE' | 'NORMAL' | 'FIRM';
+export type BriefKind = 'WAKE' | 'DEPARTURE';
 
-// TTS 모델 — Gemini 3.8 Flash TTS (aistudio.google.com/docs/speech-generation, 11/10 확인: 한국어 지원 · 24kHz WAV · speech_metadata.style로 감정 · 속도 지시)
+// Gemini TTS — 긴급(4단계)에만 (aistudio.google.com/docs/speech-generation 11/10 확인: 한국어 · 24kHz WAV · speech_metadata.style)
 export const TTS_MODEL = 'gemini-3.8-flash-tts';
+export const GEMINI_URGENT_STYLE =
+  'panicked, desperate shouting at the top of the voice; very fast, every phrase strongly stressed, breathless urgent intonation (forceful but never insulting)';
 
-// 고를 수 있는 AI 목소리 — Gemini 기본 음성 30종 중 중요도 기본값 3개 (문서의 성격 설명: Sulafat Warm · Zephyr Bright · Kore Firm). 늘리려면 여기만
+// 고를 수 있는 목소리 — Gemini 이름(Sulafat Warm · Zephyr Bright · Kore Firm). Android TTS는 같은 순서 번호로 폰의 한국어 목소리를 고름
 export const VOICES: readonly { id: string; label: string }[] = [
   { id: 'Sulafat', label: '따뜻한' },
   { id: 'Zephyr', label: '밝은' },
   { id: 'Kore', label: '단호한' },
 ];
 
-// 말투 3종 — style은 TTS에 넘기는 지시(영어가 모델에 가장 잘 먹힘, 문서 권장). 1단계(평소 기상)에만 쓰고 2~4단계는 URGENCY_STYLE이 덮음
-export const TONES: Record<ToneKey, { label: string; style: string }> = {
-  GENTLE: { label: '다정하게', style: 'warm, gentle and affectionate; relaxed, slow and calm pace, soft delivery' },
-  NORMAL: { label: '또렷하게', style: 'bright, clear and friendly but proactive; normal pace with crisp articulation' },
-  FIRM: { label: '단호하게', style: 'strong, firm and direct; fast pace with forceful intonation' },
+export const TONES: Record<ToneKey, { label: string }> = {
+  GENTLE: { label: '다정하게' },
+  NORMAL: { label: '또렷하게' },
+  FIRM: { label: '단호하게' },
 };
 
-// 중요도별 개발팀 기본값 — 목소리 · 말투 (요구사항 표 그대로). 이 표만 바꾸면 기본값이 바뀜
+// 중요도별 개발팀 기본값 — 목소리 · 말투
 export const IMPORTANCE_VOICE: Record<Importance, { voice: string; tone: ToneKey }> = {
   LOW: { voice: 'Sulafat', tone: 'GENTLE' },
   NORMAL: { voice: 'Zephyr', tone: 'NORMAL' },
   HIGH: { voice: 'Kore', tone: 'FIRM' },
 };
 
-// 긴급도 단계별 발화 지시 — 2~4단계는 말투보다 우선 (목소리는 그대로라 같은 사람이 점점 다급해짐)
-export const URGENCY_STYLE: Record<Exclude<UrgencyLevel, 1>, string> = {
-  2: 'clear, firm and insistent; brisk faster pace, no softness',
-  3: 'urgent and tense, raised voice; fast pace with strong emphasis and pressing intonation',
-  4: 'panicked, desperate shouting at the top of the voice; very fast, every phrase strongly stressed, breathless urgent intonation (forceful but never insulting)',
-};
-
 /** profiles.alarm_voice_prefs — 칸이 없으면 자동(개발팀 기본값). 사용자가 고른 칸만 들어 있음 → 지우면 기본값으로 돌아감 */
 export type VoicePrefs = {
   enabled?: boolean; // AI 음성 브리핑 (기본 켬)
-  voice?: string; // AI 목소리 (VOICES id)
-  tone?: ToneKey; // AI 말투
-  coachMax?: UrgencyLevel; // 강한 코칭 상한 — 기본 3. 4(비상 기상: 소리치기)는 사용자가 허용해야만
-  escalate?: boolean; // 늦을 것 같으면 말투를 자동으로 강화 (기본 켬)
+  voice?: string; // 목소리 (VOICES id)
+  tone?: ToneKey; // 말투
+  coachMax?: UrgencyLevel; // 가장 강한 단계 상한 — 기본 4 (긴급은 실제 지각 위험일 때만)
+  escalate?: boolean; // 미루기 · 지각 위험에 따라 말투 강화 (기본 켬). 끄면 늘 1단계
   personal?: boolean; // 전날 대화 내용을 알람에 넣기 (기본 켬)
 };
 
-export const DEFAULT_COACH_MAX: UrgencyLevel = 3;
+export const DEFAULT_COACH_MAX: UrgencyLevel = 4;
 
-/** DB jsonb를 믿지 않고 아는 칸 · 맞는 값만 남김 (모르는 목소리 · 단계는 버려서 자동으로) */
+/** DB jsonb를 믿지 않고 아는 칸 · 맞는 값만 남김 */
 export function cleanPrefs(raw: unknown): VoicePrefs {
   if (!raw || typeof raw !== 'object') return {};
   const r = raw as Record<string, unknown>;
@@ -74,12 +70,12 @@ export type VoiceProfile = {
   coachMax: UrgencyLevel;
   escalate: boolean;
   personal: boolean;
-  manual: { voice: boolean; tone: boolean }; // 화면이 "직접 고름 / 자동" 표시와 [기본값으로]에 씀
+  manual: { voice: boolean; tone: boolean };
 };
 
 /** 사용자 수동 설정 > 중요도별 기본값 */
 export function resolveVoice(importance: Importance, prefs: VoicePrefs = {}): VoiceProfile {
-  const base = IMPORTANCE_VOICE[importance] ?? IMPORTANCE_VOICE.NORMAL;
+  const base = IMPORTANCE_VOICE[importance] ?? IMPORTANCE_VOICE.LOW;
   return {
     enabled: prefs.enabled ?? true,
     voice: prefs.voice ?? base.voice,
@@ -92,53 +88,112 @@ export function resolveVoice(importance: Importance, prefs: VoicePrefs = {}): Vo
 }
 
 // ---------------------------------------------------------------------------
-// 발화 긴급도 — 폰이 울릴 때마다 정함 (네이티브 SpeechUrgency.kt가 urgencyLevel과 같은 식, 고치면 둘 다)
-//   규칙을 두 부분으로 나눔: 알람을 걸 때 정해지는 값(UrgencyRule, 서버가 계산해 폰에 저장) + 울릴 때 값(미루기 수 · 지금 · 출발 시각)
+// 지각 위험 — 기존 출발 여유 계산(calc/depart.ts departSlack: 약속 − 이동 − (지금 + 남은 준비), 분 반올림)을 그대로 씀
+//   기상: 남은 여유 = 약속 − 지금 − 준비 − 이동 / 출발: 약속 − 지금 − 이동
 // ---------------------------------------------------------------------------
 
-// 여유(= 출발까지 남은 분 − 준비에 필요한 분) 경계 — 작성자 판단, 이 표만 바꾸면 됨
-export const SPARE_CALM_MIN = 20; // 이 이상 여유면 1단계
-export const SPARE_PRESS_MIN = 10; // 이 이상이면 2단계, 밑이면 3단계
-export const SPARE_EMERGENCY_MIN = 5; // 4단계 조건: 여유가 이보다 적음 (지각 임박 · 시간 부족)
-export const LATE_BUMP_COUNT = 2; // 최근 4주 지각이 이만큼이면 한 번만 미뤄도 2단계 (calc/intensity LATE_COUNT_THRESHOLD와 같은 값)
+export const SLACK_SAFE_OVER = 30; // 이 분 초과면 여유
+export const SLACK_CAUTION_OVER = 15; // 15 초과 ~ 30 이하 주의
+export const SLACK_DANGER_OVER = 5; // 5 초과 ~ 15 이하 위험, 5 이하 긴급
 
-export type UrgencyRule = {
-  prepMinutes: number; // 준비에 필요한 분 (참여 조건 prepare_minutes). 출발 시각은 이미 이동 · 여유를 뺀 값
-  lateBump: boolean; // 최근 지각이 잦음
-  allow4: boolean; // 4단계 가능 = 중요(HIGH) · 사용자가 4단계 허용 · 자동 강화 켬
-  maxLevel: UrgencyLevel; // 자동 강화를 끄면 1, 아니면 사용자 상한
+export type LateRisk = 'SAFE' | 'CAUTION' | 'DANGER' | 'URGENT' | 'UNKNOWN' | 'DONE';
+
+export type SlackInput = { kind: BriefKind; appointmentAtMs: number | null; prepMinutes: number | null; travelMinutes: number | null };
+
+const known = (n: number | null | undefined): n is number => n != null && Number.isFinite(n) && n >= 0;
+
+/** 남은 여유(분). 약속 시각 · 이동(기상이면 준비도)을 모르면 null = UNKNOWN (임의로 단정하지 않음) */
+export function slackMinutes(s: SlackInput, nowMs: number): number | null {
+  if (s.appointmentAtMs == null || !Number.isFinite(s.appointmentAtMs) || !known(s.travelMinutes)) return null;
+  if (s.kind === 'WAKE' && !known(s.prepMinutes)) return null;
+  return departSlack({
+    appointmentAt: new Date(s.appointmentAtMs),
+    travelMinutes: s.travelMinutes,
+    now: new Date(nowMs),
+    remainingMinutes: s.kind === 'WAKE' ? (s.prepMinutes as number) : 0,
+  }).slackMinutes;
+}
+
+/** done = 이미 출발했거나(출발 기록) 기상 알람인데 이미 기상 확인함 → 지각 위험을 따지지 않음 */
+export function lateRisk(slack: number | null, done = false): LateRisk {
+  if (done) return 'DONE';
+  if (slack == null) return 'UNKNOWN';
+  if (slack > SLACK_SAFE_OVER) return 'SAFE';
+  if (slack > SLACK_CAUTION_OVER) return 'CAUTION';
+  if (slack > SLACK_DANGER_OVER) return 'DANGER';
+  return 'URGENT';
+}
+
+/** 단계 — 실제 긴급이면 4(미루기 없이도), 아니면 미루기로 1 · 2 · 3 (미루기만으로는 4가 안 됨). 사용자 상한을 넘지 않음 */
+export function speechLevel(snoozeCount: number, risk: LateRisk, maxLevel: UrgencyLevel): UrgencyLevel {
+  const level = risk === 'URGENT' ? 4 : Math.min(Math.max(0, snoozeCount) + 1, 3);
+  return Math.max(1, Math.min(level, maxLevel)) as UrgencyLevel;
+}
+
+// ---------------------------------------------------------------------------
+// 폰(네이티브)에 넘기는 규칙 — 울릴 때 네트워크 없이 단계를 정하려고 "긴급이 되는 시각"을 미리 계산
+//   slack(반올림) ≤ 5 ⇔ 정확한 여유 < 5.5분 ⇔ 지금 > urgentAtMs. 네이티브 SpeechUrgency.kt는 이 비교만 함 (spec/urgency-cases.json으로 둘 다 확인)
+// ---------------------------------------------------------------------------
+
+export type UrgencyRule = { urgentAtMs: number | null; maxLevel: UrgencyLevel };
+
+export function urgentAtMs(s: SlackInput): number | null {
+  if (s.appointmentAtMs == null || !Number.isFinite(s.appointmentAtMs) || !known(s.travelMinutes)) return null;
+  if (s.kind === 'WAKE' && !known(s.prepMinutes)) return null;
+  const used = s.travelMinutes + (s.kind === 'WAKE' ? (s.prepMinutes as number) : 0);
+  return s.appointmentAtMs - (used + SLACK_DANGER_OVER + 0.5) * 60_000;
+}
+
+export function urgencyRule(s: SlackInput, profile: Pick<VoiceProfile, 'coachMax' | 'escalate'>): UrgencyRule {
+  return { urgentAtMs: urgentAtMs(s), maxLevel: profile.escalate ? profile.coachMax : 1 };
+}
+
+/** 네이티브와 같은 식 — 미리 계산한 규칙으로 울릴 때의 단계 */
+export function levelAt(rule: UrgencyRule, snoozeCount: number, nowMs: number): UrgencyLevel {
+  const urgent = rule.urgentAtMs != null && nowMs > rule.urgentAtMs;
+  return speechLevel(snoozeCount, urgent ? 'URGENT' : 'SAFE', rule.maxLevel);
+}
+
+/** 한 울림의 엔진 — 긴급이고 Gemini 음성이 준비돼 있을 때만 Gemini, 아니면 Android TTS로 전체 브리핑 */
+export function engineFor(level: UrgencyLevel, hasGeminiClip: boolean): 'GEMINI' | 'ANDROID' {
+  return level === 4 && hasGeminiClip ? 'GEMINI' : 'ANDROID';
+}
+
+// 기상 알람은 미루기(최대 3번 × 15분)와 다시 울림 사이에 긴급이 될 수 있음 → 그 안에 긴급 시각이 있으면 Gemini 음성을 미리 만듦. 출발 알람은 미루기가 없어 울리는 순간만
+export const GEMINI_WINDOW_MIN: Record<BriefKind, number> = { WAKE: 60, DEPARTURE: 1 };
+
+/** Gemini 음성이 필요한지 — 긴급(4단계)이 허용되고, 이 알람이 울리는 동안 실제로 긴급이 될 수 있을 때만 (스누즈 3번이어도 여유가 있으면 안 만듦) */
+export function needsGemini(rule: UrgencyRule, kind: BriefKind, ringAtMs: number): boolean {
+  return rule.maxLevel >= 4 && rule.urgentAtMs != null && rule.urgentAtMs < ringAtMs + GEMINI_WINDOW_MIN[kind] * 60_000;
+}
+
+/** 미리 만들 단계 — 1 ~ 상한 */
+export function levelsToPrepare(rule: UrgencyRule): UrgencyLevel[] {
+  return ([1, 2, 3, 4] as const).filter((l) => l <= rule.maxLevel);
+}
+
+// Android TTS 높낮이 · 속도 (1.0 = 기본) — 말투(중요도 기본값 또는 직접 고름)가 바탕, 단계가 올라갈수록 높고 빠르게
+const TONE_BASE: Record<ToneKey, { pitch: number; rate: number }> = {
+  GENTLE: { pitch: 0.95, rate: 0.9 },
+  NORMAL: { pitch: 1.0, rate: 1.0 },
+  FIRM: { pitch: 1.05, rate: 1.1 },
+};
+const LEVEL_BOOST: Record<UrgencyLevel, { pitch: number; rate: number }> = {
+  1: { pitch: 0, rate: 0 },
+  2: { pitch: 0.05, rate: 0.1 },
+  3: { pitch: 0.1, rate: 0.2 },
+  4: { pitch: 0.15, rate: 0.35 },
 };
 
-export function urgencyRule(args: { importance: Importance; prepMinutes: number | null; lateCount4w: number; profile: Pick<VoiceProfile, 'coachMax' | 'escalate'> }): UrgencyRule {
-  const maxLevel: UrgencyLevel = args.profile.escalate ? args.profile.coachMax : 1;
+export type AndroidVoice = { pitch: number; rate: number; voiceIndex: number };
+
+export function androidVoice(profile: Pick<VoiceProfile, 'voice' | 'tone'>, level: UrgencyLevel): AndroidVoice {
+  const r2 = (n: number) => Math.round(n * 100) / 100;
   return {
-    prepMinutes: Math.max(0, Math.round(args.prepMinutes ?? 0)),
-    lateBump: args.lateCount4w >= LATE_BUMP_COUNT,
-    allow4: args.importance === 'HIGH' && maxLevel >= 4,
-    maxLevel,
+    pitch: r2(TONE_BASE[profile.tone].pitch + LEVEL_BOOST[level].pitch),
+    rate: r2(TONE_BASE[profile.tone].rate + LEVEL_BOOST[level].rate),
+    voiceIndex: Math.max(0, VOICES.findIndex((v) => v.id === profile.voice)),
   };
-}
-
-/** 울릴 때의 단계. departAtMs가 없으면(출발 알람 없음) 시간으로는 판단하지 않고 미루기만 봄 */
-export function urgencyLevel(rule: UrgencyRule, snoozeCount: number, nowMs: number, departAtMs: number | null | undefined): UrgencyLevel {
-  if (rule.maxLevel <= 1) return 1;
-  const spare = departAtMs == null || !Number.isFinite(departAtMs) ? null : (departAtMs - nowMs) / 60_000 - rule.prepMinutes;
-  let level: UrgencyLevel = spare == null || spare >= SPARE_CALM_MIN ? 1 : spare >= SPARE_PRESS_MIN ? 2 : 3;
-  if ((snoozeCount >= 2 || (rule.lateBump && snoozeCount >= 1)) && level < 2) level = 2;
-  // 중요한 일정이고, 미루기를 거듭했고, 여유가 거의 없거나 모자랄 때만 소리침 — 중요해도 여유가 있으면 안 소리침
-  if (rule.allow4 && snoozeCount >= 2 && spare != null && spare < SPARE_EMERGENCY_MIN) level = 4;
-  return Math.min(level, rule.maxLevel) as UrgencyLevel;
-}
-
-/** 미리 만들어 둘 단계 — 1 ~ 상한 (4단계는 allow4일 때만) */
-export function levelsToPrepare(rule: UrgencyRule): UrgencyLevel[] {
-  const top = Math.min(rule.maxLevel, rule.allow4 ? 4 : 3);
-  return ([1, 2, 3, 4] as const).filter((l) => l <= top);
-}
-
-/** 단계별 TTS 발화 지시 — 1단계는 말투, 2~4단계는 긴급도 */
-export function speechStyle(level: UrgencyLevel, tone: ToneKey): string {
-  return level === 1 ? TONES[tone].style : URGENCY_STYLE[level];
 }
 
 // ---------------------------------------------------------------------------
@@ -146,7 +201,6 @@ export function speechStyle(level: UrgencyLevel, tone: ToneKey): string {
 // ---------------------------------------------------------------------------
 
 type Told = { source?: string };
-// structured.v1 중 여기서 읽는 칸만 (final-core.ts Structured와 같은 모양의 일부)
 export type StructuredLike = {
   schema_version?: string;
   session?: { reference_date?: string };
@@ -157,12 +211,7 @@ export type StructuredLike = {
   other?: { safety_flag?: boolean };
 };
 
-export type WakeMemo = {
-  wakeEarly: boolean; // "일찍 일어나고 싶다" 류 다짐
-  overslept: boolean; // 늦잠 이야기
-  lateByOversleep: boolean; // 늦잠으로 지각했다는 반성
-  goals: string[]; // 그 밖의 목표 (사용자 말을 정리한 goal_text, 최대 2개)
-};
+export type WakeMemo = { wakeEarly: boolean; overslept: boolean; lateByOversleep: boolean; goals: string[] };
 
 const WAKE_HABITS = new Set(['snooze_repeat', 'irregular_wake']);
 const GOAL_MAX_CHARS = 30;
@@ -190,7 +239,7 @@ export function wakeMemo(list: readonly StructuredLike[], reviewDate: string): W
 }
 
 // ---------------------------------------------------------------------------
-// 오늘 일정 고르기 · 브리핑 문장
+// 일정 고르기 · 브리핑 문장
 // ---------------------------------------------------------------------------
 
 export type BriefAppointment = { title: string; atMs: number; importance: Importance };
@@ -209,18 +258,19 @@ export function pickAppointments(list: readonly BriefAppointment[], max = MAX_AP
 }
 
 export type BriefingInput = {
-  memo: WakeMemo | null; // 사용자가 전날 대화를 끄면 null로 넘김
-  appointments: readonly BriefAppointment[]; // pickAppointments 결과
-  todos: readonly BriefTodo[];
-  departAtMs: number | null; // 첫 일정 출발 시각 (출발 알람). 고정 시각이라 캐시해도 낡지 않음 — "N분 남음" 같은 움직이는 수는 음성에 안 넣음(화면이 실시간으로 보여 줌)
+  kind: BriefKind;
+  memo: WakeMemo | null; // 기상만. 사용자가 전날 대화를 끄면 null
+  appointments: readonly BriefAppointment[]; // 기상 = 그날 일정(pickAppointments), 출발 = 그 일정 하나
+  todos: readonly BriefTodo[]; // 기상 = 그날 할 일 · 준비물, 출발 = 그 일정의 준비물
+  departAtMs: number | null; // 기상 알람의 같은 약속 출발 시각 (고정 시각이라 캐시해도 낡지 않음)
   timeZone: string;
 };
 
 const MAX_TODOS = 3;
 const list = (xs: readonly string[]) => xs.join(', ');
 const spoken = (ms: number, tz: string) => formatKoSpokenTime(new Date(ms), tz);
-// "오후 3시 팀플 회의" — 시간 없는 할 일에는 시각을 붙이지 않음 (일정은 늘 시각이 있음)
 const apptLine = (a: BriefAppointment, tz: string) => `${spoken(a.atMs, tz)} ${a.title.trim()}`;
+const titles = (todos: readonly BriefTodo[], type: BriefTodo['type']) => todos.filter((t) => t.type === type).map((t) => t.title.trim()).filter(Boolean).slice(0, MAX_TODOS);
 
 function scheduleSentence(input: BriefingInput): string {
   const appts = input.appointments.map((a) => apptLine(a, input.timeZone));
@@ -235,8 +285,8 @@ function importantSentence(input: BriefingInput): string | null {
 }
 
 function todoSentences(input: BriefingInput): string[] {
-  const items = input.todos.filter((t) => t.type === 'ITEM').map((t) => t.title.trim()).filter(Boolean).slice(0, MAX_TODOS);
-  const tasks = input.todos.filter((t) => t.type === 'TASK').map((t) => t.title.trim()).filter(Boolean).slice(0, MAX_TODOS);
+  const items = titles(input.todos, 'ITEM');
+  const tasks = titles(input.todos, 'TASK');
   return [items.length ? `챙길 것: ${list(items)}.` : null, tasks.length ? `오늘 할 일: ${list(tasks)}.` : null].filter((s): s is string => s != null);
 }
 
@@ -274,40 +324,46 @@ function memoShout(m: WakeMemo | null): string[] {
   ].filter((s): s is string => s != null);
 }
 
-// 긴급 단계의 짧은 일정 — 가까운 2개만 "3시 팀플 회의"
 function quickSchedule(input: BriefingInput): string | null {
   const appts = input.appointments.slice(0, 2).map((a) => apptLine(a, input.timeZone));
   return appts.length ? `오늘 ${list(appts)} 있잖아` : null;
 }
 
-/** 단계별 알람 음성 문장 — 알람이 울리는 순간 이 문장 하나가 기상 촉구 + 다짐 + 오늘 일정을 한 흐름으로 읽음 */
-export function briefingText(level: UrgencyLevel, input: BriefingInput): string {
-  const parts: (string | null)[] = [];
+// 2 · 3단계는 상한 때문에 긴급에서 내려온 경우도 있어 "미뤘다" 같은 사실은 단정하지 않음. 4단계는 실제 여유 5분 이하일 때만이라 "늦는다"고 말함
+function wakeText(level: UrgencyLevel, input: BriefingInput): (string | null)[] {
   if (level === 1) {
-    parts.push('좋은 아침이야~', ...memoGentle(input.memo), scheduleSentence(input), importantSentence(input), ...todoSentences(input));
     const depart = departSentence(input, false);
-    parts.push(depart ? `${depart} 슬슬 일어나서 준비해 볼까?` : '슬슬 일어나서 준비해 볼까?');
-  } else if (level === 2) {
-    parts.push('야! 이제 진짜 일어나야 해. 계속 미루면 준비 시간이 모자라.', ...memoFirm(input.memo), scheduleSentence(input), importantSentence(input));
-    const depart = departSentence(input, false);
-    parts.push(depart ? `${depart} 지금 일어나자. 계속 잘 거야?` : '지금 일어나자. 계속 잘 거야?');
-  } else if (level === 3) {
-    parts.push('야!! 이제 시간 진짜 얼마 안 남았어!! 지금 안 일어나면 늦어!!', ...memoFirm(input.memo));
-    const quick = quickSchedule(input);
-    if (quick) parts.push(`${quick}!!`);
-    parts.push(departSentence(input, true), '바로 일어나서 준비해!!');
-  } else {
-    parts.push('야!!!!!!!!!!', ...memoShout(input.memo), '지금 계속 자면 늦는다고!!!!');
-    const quick = quickSchedule(input);
-    if (quick) parts.push(`${quick}!!!!`);
-    parts.push('지금 당장 일어나!!!!!!!');
+    return ['좋은 아침이야~', ...memoGentle(input.memo), scheduleSentence(input), importantSentence(input), ...todoSentences(input), depart ? `${depart} 슬슬 일어나서 준비해 볼까?` : '슬슬 일어나서 준비해 볼까?'];
   }
+  if (level === 2) {
+    return ['야! 이제 진짜 일어나야 해. 더 미루면 준비가 빠듯해져.', ...memoFirm(input.memo), scheduleSentence(input), importantSentence(input), '지금 일어나자. 계속 잘 거야?'];
+  }
+  if (level === 3) {
+    const quick = quickSchedule(input);
+    return ['야!! 이제 정말 일어나!! 더 미루면 안 돼!!', ...memoFirm(input.memo), quick ? `${quick}!!` : null, departSentence(input, true), '바로 일어나서 준비해!!'];
+  }
+  const quick = quickSchedule(input);
+  return ['야!!!!!!!!!! 지금 안 일어나면 진짜 늦어!!!!', ...memoShout(input.memo), quick ? `${quick}!!!!` : null, '지금 당장 일어나!!!!!!!'];
+}
+
+function departureText(level: UrgencyLevel, input: BriefingInput): (string | null)[] {
+  const a = input.appointments[0];
+  const what = a ? apptLine(a, input.timeZone) : null;
+  const items = titles(input.todos, 'ITEM');
+  if (level === 1) return [what ? `${what} 갈 시간이야.` : '나갈 시간이야.', items.length ? `챙길 것: ${list(items)}.` : null, '이제 출발하자!'];
+  if (level === 2) return [what ? `${what}, 늦지 않게 지금 나가야 해!` : '늦지 않게 지금 나가야 해!', items.length ? `챙길 것: ${list(items)}.` : null, '바로 출발해!'];
+  if (level === 3) return ['야!! 지금 바로 나가!!', what ? `${what} 있잖아!!` : null, items.length ? `챙길 것: ${list(items)}!!` : null];
+  return ['야!!!!!!!! 지금 당장 나가!!!!', a ? `이러다 ${a.title.trim()} 늦는다고!!!!` : '이러다 늦는다고!!!!', items.length ? `${list(items)} 챙기고 바로 출발해!!!!!!!` : '바로 출발해!!!!!!!'];
+}
+
+/** 단계별 알람 음성 문장 — 알람이 울리는 동안 이 문장 하나를 읽음 */
+export function briefingText(level: UrgencyLevel, input: BriefingInput): string {
+  const parts = input.kind === 'DEPARTURE' ? departureText(level, input) : wakeText(level, input);
   return parts.filter((s): s is string => !!s).join(' ');
 }
 
 // ---------------------------------------------------------------------------
-// 캐시 열쇠 — 문장 · 목소리 · 지시 · 모델이 같으면 같은 음성이라 다시 만들지 않음. 일정 · 준비물이 바뀌면 문장이 바뀌어 열쇠도 바뀜
-//   서버(Deno) · 앱(Hermes) · 시험(node)에서 같은 값이 나오게 의존성 없는 FNV-1a 64비트
+// 캐시 열쇠 — 문장 · 목소리 · 지시 · 모델이 같으면 같은 음성이라 다시 만들지 않음 (서버 · 앱 · 시험에서 같은 값: FNV-1a 64비트)
 // ---------------------------------------------------------------------------
 
 export function clipHash(parts: { text: string; voice: string; style: string; model: string }): string {
@@ -320,13 +376,12 @@ export function clipHash(parts: { text: string; voice: string; style: string; mo
   return h.toString(16).padStart(16, '0');
 }
 
-export type BriefingClip = { level: UrgencyLevel; text: string; voice: string; style: string; hash: string };
+export type BriefingClip = { level: UrgencyLevel; text: string; hash: string } & AndroidVoice;
 
-/** 만들어 둘 단계별 문장 · 지시 · 열쇠 */
+/** 단계별 문장 + Android TTS 값 + 캐시 열쇠(4단계 Gemini 음성용) */
 export function briefingClips(rule: UrgencyRule, profile: Pick<VoiceProfile, 'voice' | 'tone'>, input: BriefingInput, model = TTS_MODEL): BriefingClip[] {
   return levelsToPrepare(rule).map((level) => {
     const text = briefingText(level, input);
-    const style = speechStyle(level, profile.tone);
-    return { level, text, voice: profile.voice, style, hash: clipHash({ text, voice: profile.voice, style, model }) };
+    return { level, text, hash: clipHash({ text, voice: profile.voice, style: GEMINI_URGENT_STYLE, model }), ...androidVoice(profile, level) };
   });
 }

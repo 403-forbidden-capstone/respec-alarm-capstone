@@ -141,12 +141,14 @@ export type RingingAlarm = {
 };
 
 /**
- * AI 음성 브리핑 저장 값 — 서버 alarm-briefing 응답 그대로 (supabase/functions/_shared/briefing-run.ts BriefingOut)
+ * 음성 브리핑 저장 값 — 서버 alarm-briefing 응답 그대로 (supabase/functions/_shared/briefing-run.ts BriefingOut)
  * 네이티브가 알람별 앱 전용 폴더에 단계별 WAV로 저장하고, 울릴 때 미루기 횟수 · 남은 여유로 단계를 골라 틂 (VoiceBriefing.kt)
  */
 export type VoiceBriefingSave = {
-  rule: { prepMinutes: number; lateBump: boolean; allow4: boolean; maxLevel: number } | null;
-  clips: { level: number; hash: string; text: string }[];
+  /** urgentAtMs = 남은 여유가 5분 이하가 되는 시각(준비 · 이동을 모르면 null), maxLevel = 사용자 상한 — 네이티브 SpeechUrgency가 울릴 때 비교 */
+  rule: { urgentAtMs: number | null; maxLevel: number } | null;
+  /** 단계별 문장 + Android TTS 높낮이 · 속도 · 목소리 번호 */
+  clips: { level: number; hash: string; text: string; pitch: number; rate: number; voiceIndex: number }[];
   audio: { level: number; hash: string; mime?: string; data: string }[];
 };
 

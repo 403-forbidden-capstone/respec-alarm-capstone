@@ -108,8 +108,9 @@ class AlarmPlaybackService : Service() {
   private var remainingSounds: MutableList<Uri> = mutableListOf()
 
   private var mediaPlayer: MediaPlayer? = null
-  // AI 음성 브리핑 (VoiceBriefing) — 알람음 위에 한 번 읽음. 읽는 동안 알람음은 작게(VOICE_DUCK), 끝나면 원래대로
-  private var voicePlayer: MediaPlayer? = null
+  // 음성 브리핑 (BriefingSpeaker: 1~3단계 Android TTS, 긴급 4단계는 미리 만든 Gemini 음성) — 알람음 위에 한 번 읽음. 읽는 동안 알람음은 작게(VOICE_DUCK)
+  private var speaker: BriefingSpeaker? = null
+  private var speaking = false
   private var vibrator: Vibrator? = null
   private var audioManager: AudioManager? = null
   private var audioFocusRequest: AudioFocusRequest? = null
@@ -321,38 +322,23 @@ class AlarmPlaybackService : Service() {
     return true
   }
 
-  // 지금 미루기 횟수 · 남은 여유로 단계를 골라 그 음성 파일을 한 번 읽음 (네트워크 안 씀)
+  // 지금 미루기 횟수 · 지각 위험으로 단계를 골라 브리핑을 한 번 읽음 (네트워크 안 씀). 캐시가 없으면 꾸러미 문장을 Android TTS로
   private fun startVoice(alarm: StoredAlarm) {
-    val pick = VoiceBriefing.pick(this, alarm, System.currentTimeMillis()) ?: return
-    val player = MediaPlayer()
-    try {
-      player.setAudioAttributes(
-        AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_ALARM).setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build(),
-      )
-      player.setDataSource(pick.file.absolutePath)
-      player.isLooping = false
-      player.prepare()
-    } catch (e: Exception) {
-      player.release()
-      throw e
-    }
-    player.setOnCompletionListener { stopVoice() }
-    player.setOnErrorListener { _, _, _ ->
-      stopVoice()
-      true
-    }
-    voicePlayer = player
-    mediaPlayer?.let { runCatching { it.setVolume(VOICE_DUCK, VOICE_DUCK) } }
-    player.start()
-    Log.i(TAG, "AI 음성 브리핑 재생: ${pick.level}단계")
+    val speech = VoiceBriefing.speechFor(this, alarm, System.currentTimeMillis()) ?: return
+    speaker = BriefingSpeaker(
+      this,
+      onStart = {
+        speaking = true
+        mediaPlayer?.let { runCatching { it.setVolume(VOICE_DUCK, VOICE_DUCK) } }
+      },
+      onDone = { stopVoice() },
+    ).also { it.speak(speech) }
   }
 
   private fun stopVoice() {
-    voicePlayer?.let { player ->
-      runCatching { if (player.isPlaying) player.stop() }
-      runCatching { player.release() }
-    }
-    voicePlayer = null
+    speaker?.stop()
+    speaker = null
+    speaking = false
     mediaPlayer?.let { runCatching { it.setVolume(1f, 1f) } }
   }
 
@@ -399,7 +385,7 @@ class AlarmPlaybackService : Service() {
         true
       }
       val playing = runCatching {
-        val volume = if (voicePlayer != null) VOICE_DUCK else 1f
+        val volume = if (speaking) VOICE_DUCK else 1f
         player.setVolume(volume, volume)
         player.start()
       }.isSuccess
