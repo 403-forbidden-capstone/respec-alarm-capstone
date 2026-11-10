@@ -211,9 +211,14 @@ jobs:
           20261110220000_prepare_ml_consented_age_sync.sql
           20261110224500_prepare_ml_consent_safety.sql
           EXPECTED
-          diff -u "$RUNNER_TEMP/expected.txt" "$RUNNER_TEMP/actual.txt" || {
-            echo "::error::원격 DB 대상 파일이 사전 검증과 다릅니다. 자동 배포 중단."
-            exit 1
-          }
-          echo "원격 배포 대상 7개 파일 일치 확인. 트랜잭션별 마이그레이션 적용 시작."
-          supabase db push --include-all --yes
+          if grep -Fxq '20261109090000_friend_explore_fixes.sql' "$RUNNER_TEMP/actual.txt"; then
+            diff -u "$RUNNER_TEMP/expected.txt" "$RUNNER_TEMP/actual.txt" || {
+              echo "::error::원격 DB 대상 파일이 사전 검증과 다릅니다. 자동 배포 중단."
+              exit 1
+            }
+            echo "7개 누락 파일 일치. 이번 한 번만 오래된 마이그레이션을 포함해 적용."
+            supabase db push --include-all --yes
+          else
+            echo "과거 누락 파일이 이미 적용된 상태. 기존 표준 배포 동작 사용."
+            supabase db push --yes
+          fi
