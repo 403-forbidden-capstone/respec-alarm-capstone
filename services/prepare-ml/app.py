@@ -12,10 +12,14 @@ from fastapi import FastAPI, Header, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 
 MODEL_FILES = {
-    "c1_mae": "C1_optional_profile_mae.cbm",
-    "w4_mae": "W4_previous_duration_optional_profile_mae.cbm",
+    "c1_mae": "c1_mae.cbm",
+    "w4_mae": "w4_mae.cbm",
 }
-MODEL_DIR = Path(os.environ.get("CATBOOST_MODEL_DIR", "models/v4")).expanduser().resolve()
+EXPECTED_FEATURES = {
+    "c1_mae": ["weekday_code", "평토일구분코드", "휴일종류코드", "연령코드"],
+    "w4_mae": ["weekday_code", "평토일구분코드", "휴일종류코드", "previous_day_target_minutes", "연령코드"],
+}
+MODEL_DIR = Path(os.environ.get("CATBOOST_MODEL_DIR", "models/v4_age_only")).expanduser().resolve()
 API_TOKEN = os.environ.get("CATBOOST_API_TOKEN", "")
 if not API_TOKEN:
     raise RuntimeError("CATBOOST_API_TOKEN must be set")
@@ -29,8 +33,11 @@ class StoredModel:
         self.model.load_model(str(path))
         self.names = list(self.model.feature_names_)
         self.categorical = set(self.model.get_cat_feature_indices())
-        if not self.names or len(self.names) != len(set(self.names)):
-            raise ValueError(f"Feature names missing or duplicated: {key}")
+        if self.names != EXPECTED_FEATURES[key]:
+            raise ValueError(f"Unexpected model feature order for {key}: {self.names!r}")
+        expected_numeric = {3} if key == "w4_mae" else set()
+        if (set(range(len(self.names))) - self.categorical) != expected_numeric:
+            raise ValueError(f"Unexpected feature types for {key}")
 
     def describe(self) -> dict[str, Any]:
         return {
@@ -89,7 +96,7 @@ class PredictRequest(BaseModel):
     features: dict[str, Any] = Field(default_factory=dict)
 
 
-app = FastAPI(title="Re:Spec C1/W4 Preparation Predictor", version="0.3.0")
+app = FastAPI(title="Re:Spec C1/W4 Preparation Predictor", version="0.4.0")
 
 
 def authorize(key: str | None) -> None:
