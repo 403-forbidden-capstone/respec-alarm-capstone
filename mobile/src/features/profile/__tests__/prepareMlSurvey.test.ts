@@ -12,14 +12,13 @@ describe('voluntary preparation ML survey', () => {
     expect(prepareMlSurveySummary(EMPTY_PREPARE_ML_SURVEY)).toBe('입력 안 함');
   });
 
-  it('requires an integer age in range and explicit categories', () => {
+  it('requires only a valid integer age, not education or employment', () => {
     const complete = { ml_age_years: 24, ml_school_status: 'UNIVERSITY', ml_work_status: 'NOT_WORKING' } as const;
     expect(isCompletePrepareMlSurvey(complete)).toBe(true);
     expect(isCompletePrepareMlSurvey({ ...complete, ml_age_years: 13 })).toBe(false);
     expect(isCompletePrepareMlSurvey({ ...complete, ml_age_years: 101 })).toBe(false);
     expect(isCompletePrepareMlSurvey({ ...complete, ml_age_years: 20.5 })).toBe(false);
-    expect(isCompletePrepareMlSurvey({ ...complete, ml_school_status: null })).toBe(false);
-    expect(isCompletePrepareMlSurvey({ ...complete, ml_work_status: null })).toBe(false);
+    expect(isCompletePrepareMlSurvey({ ...complete, ml_school_status: null, ml_work_status: null })).toBe(true);
   });
 
   it('only reports collection when a consent timestamp exists; never claims model activation', () => {
