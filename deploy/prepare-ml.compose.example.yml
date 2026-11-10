@@ -1,0 +1,27 @@
+# Example for #472 only. Integrate the service with #471's main Compose
+# and nginx stack; do not run a second public reverse proxy here.
+# Required:
+#   PREPARE_ML_MODELS_DIR=/absolute/host/path/with/c1_mae.cbm,w4_mae.cbm
+#   deploy/ml.env (CATBOOST_API_TOKEN=..., chmod 600, never commit)
+services:
+  prepare-ml:
+    build:
+      context: ../services/prepare-ml
+    image: respec-prepare-ml:local
+    restart: unless-stopped
+    env_file:
+      - ./ml.env
+    environment:
+      CATBOOST_MODEL_DIR: /app/models/v4_age_only
+      PORT: "8091"
+    volumes:
+      - type: bind
+        source: ${PREPARE_ML_MODELS_DIR:?absolute model directory required}
+        target: /app/models/v4_age_only
+        read_only: true
+        bind:
+          create_host_path: false
+    ports:
+      - "127.0.0.1:8093:8091"
+    security_opt:
+      - no-new-privileges:true
