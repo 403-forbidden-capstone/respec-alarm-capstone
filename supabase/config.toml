@@ -465,6 +465,9 @@ verify_jwt = false
 [functions.voice-live-token]
 verify_jwt = true
 
+[functions.alarm-briefing]
+verify_jwt = true
+
 # L9 시간표 채우기 — 사진(base64) → Claude → 수업 줄. 앱이 로그인 토큰으로 부름
 [functions.timetable-extract]
 verify_jwt = true
