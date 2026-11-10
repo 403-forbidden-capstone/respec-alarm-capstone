@@ -4,6 +4,8 @@ import { hasEarlierWake, PREPARE_RECORD_MAX, PREPARE_RECORD_MIN, PREPARE_WINDOW,
 import type { TravelSample } from './calc/travel.ts';
 import { dbFail, must } from './db.ts';
 import { HttpError } from './errors.ts';
+import { getEnv } from './env.ts';
+import { approvedMlProfile, buildMlRequest, mayUseMl, previousDateKey, requestMlPrediction, type VerifiedMlProfile, type MlPrediction } from './prepare-ml.ts';
 import { kakaoTravelMinutes, type FetchLike } from './kakao.ts';
 import {
   computePlan,
@@ -218,6 +220,59 @@ export class TravelRequiredError extends HttpError {
   }
 }
 
+// CatBoost is experimental and off by default. Nothing is sent until both the
+// feature flag and verified, persisted survey codes exist. All failures fall
+// back to the original P80-based preparation-time calculation.
+async function optionalMlPrediction(
+  ctx: PlanContext,
+  at: Date,
+  timeZone: string,
+  allow: boolean,
+): Promise<MlPrediction | undefined> {
+  if (!mayUseMl({
+    enabled: getEnv('PREPARE_ML_ENABLED') === '1',
+    allowForPlan: allow,
+    userId: ctx.userId,
+    allowedUserIds: getEnv('PREPARE_ML_ALLOWED_USER_IDS'),
+  })) return undefined;
+  const url = getEnv('PREPARE_ML_URL');
+  const token = getEnv('PREPARE_ML_API_TOKEN');
+  if (!url || !token) return undefined;
+
+  try {
+    // Never trust client-writable profiles.ml_* fields. The separate table
+    // is readable only by service_role; this is reached only after auth +
+    // exact user UUID allowlist. Match an explicitly approved codebook version.
+    // Lazily load Deno's npm: Supabase client only when ML is actually enabled.
+    // Plan calculation and FakeDb regression tests run in Node without npm: support.
+    const { createServiceClient } = await import('./supabase.ts');
+    const { data: row, error: profileError } = await createServiceClient()
+      .from('prepare_ml_verified_profiles')
+      .select('ml_age_code, codebook_version, consent_at, verified_at')
+      .eq('user_id', ctx.userId).maybeSingle();
+    if (profileError || !row) return undefined;
+    const verified = approvedMlProfile(row as VerifiedMlProfile, getEnv('PREPARE_ML_CODEBOOK_VERSION'));
+    if (!verified) return undefined;
+
+    // Crucial: use the record from EXACTLY the preceding local calendar day.
+    // Unlike loadPrepareStats(), it is NOT the latest arbitrary history item.
+    const { data: previous, error: previousError } = await ctx.db.from('daily_records')
+      .select('actual_prepare_minutes')
+      .eq('user_id', ctx.userId)
+      .eq('record_date', previousDateKey(at, timeZone))
+      .maybeSingle();
+    // Do not turn a query failure into a fabricated zero-minute warm-start input.
+    const minutes = previousError || previous?.actual_prepare_minutes == null
+      ? null
+      : Number(previous.actual_prepare_minutes);
+    const request = buildMlRequest({ appointmentAt: at, timezone: timeZone, profile: verified, previousDayMinutes: minutes });
+    if (!request) return undefined;
+    return (await requestMlPrediction(request, { enabled: true, url, token })) ?? undefined;
+  } catch {
+    return undefined; // Missing migration, API offline, timeout etc.
+  }
+}
+
 // wantAutoTravel: 직접 입력한 이동시간이 있어도 자동 값을 같이 구함 (H03 "자동으로 되돌리기" 미리 보기). 호출이 한 번 늘어남
 // mode: 어느 쪽에서 부르는지. preview(alarm-suggest)는 경고를 "저장할 때 …" 말투로, save(alarm-commit, 기본)는 저장한 뒤 말투로
 export async function buildPlan(ctx: PlanContext, draft: PlanDraft, options: { wantAutoTravel?: boolean; mode?: PlanMode } = {}): Promise<BuiltPlan> {
@@ -268,5 +323,9 @@ export async function buildPlan(ctx: PlanContext, draft: PlanDraft, options: { w
 
   // 길찾기도 같은 경로 기록도 근사값도 없음 → 직접 입력하는 흐름으로 (8장 8.2.2)
   if (!travel.chosen) throw new TravelRequiredError(inputs, travel, timeZone);
+  // Keep manual prepare settings and already-awake schedules on the existing path.
+  const allowMl = draft.prepareMinutes == null && draft.withWake !== false &&
+    !(draft.withWake == null && sameDayWake);
+  inputs.mlPrediction = await optionalMlPrediction(ctx, basics.at, timeZone, allowMl);
   return { plan: computePlan(inputs, travel, options.mode), inputs, timeZone };
 }

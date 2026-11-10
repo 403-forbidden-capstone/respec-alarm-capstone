@@ -1,0 +1,10 @@
+.venv/
+__pycache__/
+*.pyc
+.env
+.env.*
+!*.env.example
+models/**
+!models/v4_age_only/
+!models/v4_age_only/c1_mae.cbm
+!models/v4_age_only/w4_mae.cbm

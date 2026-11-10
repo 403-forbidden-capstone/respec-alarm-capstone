@@ -1,0 +1,13 @@
+# Source deploy must include the two .cbm models copied locally by the developer.
+# Keep credentials, data, virtualenv and local artifacts OUT of Cloud Build uploads.
+.gcloudignore
+.git/
+.venv/
+__pycache__/
+*.pyc
+.env
+.env.*
+*.csv
+*.zip
+*.sqlite
+.DS_Store

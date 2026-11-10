@@ -8,7 +8,7 @@ import type { HandleChange } from './handle';
 import type { Profile, ProfileFields } from './types';
 
 const COLUMNS =
-  'user_id, nickname, handle, handle_changed_at, handle_next_change_at, profile_image_url, default_prepare_minutes, default_buffer_minutes, home_name, home_lat, home_lng, home_radius_m, default_transport, timezone, onboarded_at, wake_sensitivity, wake_margin, privacy_agreed_at, privacy_version, wake_ping_enabled';
+  'user_id, nickname, handle, handle_changed_at, handle_next_change_at, profile_image_url, default_prepare_minutes, default_buffer_minutes, home_name, home_lat, home_lng, home_radius_m, default_transport, timezone, onboarded_at, wake_sensitivity, wake_margin, privacy_agreed_at, privacy_version, wake_ping_enabled, ml_age_years, ml_school_status, ml_work_status, ml_profile_consented_at';
 
 // 내 프로필 한 행 — 가입하면 DB 트리거가 만들어 둠
 export async function getMyProfile(userId: string): Promise<Profile | null> {
@@ -65,6 +65,10 @@ export const MOCK_PROFILE: Profile = {
   privacy_agreed_at: null,
   privacy_version: null,
   wake_ping_enabled: true,
+  ml_age_years: null,
+  ml_school_status: null,
+  ml_work_status: null,
+  ml_profile_consented_at: null,
 };
 
 // 온보딩부터 다시 (개발용, /dev/screens) — 내 시험 데이터를 지우고 프로필을 온보딩 전으로 되돌림. 계정은 그대로

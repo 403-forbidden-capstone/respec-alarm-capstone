@@ -394,15 +394,34 @@ isOneToOne: false
       referencedColumns: ["user_id"]
     }
                   ]
-                },"profiles": {
+                },"prepare_ml_verified_profiles": {
                   Row: {
-                    "created_at": string,"default_buffer_minutes": number,"default_prepare_minutes": number,"default_transport": Database["public"]['Enums']["transport_type"],"handle": string | null,"handle_changed_at": string | null,"handle_next_change_at": string | null,"home_lat": number | null,"home_lng": number | null,"home_name": string | null,"home_radius_m": number | null,"intensity_offset": number,"nickname": string,"onboarded_at": string | null,"preferred_sound_key": string | null,"preferred_voice_tone": Database["public"]['Enums']["voice_tone"] | null,"privacy_agreed_at": string | null,"privacy_version": number | null,"profile_image_url": string | null,"timezone": string,"updated_at": string,"user_id": string,"wake_margin": string,"wake_ping_enabled": boolean,"wake_sensitivity": string
+                    "codebook_version": string,"consent_at": string,"ml_age_code": string,"ml_economic_code": string | null,"ml_education_code": string | null,"user_id": string,"verified_at": string
                   }
                   Insert: {
-                    "created_at"?: string,"default_buffer_minutes"?: number,"default_prepare_minutes"?: number,"default_transport"?: Database["public"]['Enums']["transport_type"],"handle"?: string | null,"handle_changed_at"?: string | null,"handle_next_change_at"?: string | null,"home_lat"?: number | null,"home_lng"?: number | null,"home_name"?: string | null,"home_radius_m"?: number | null,"intensity_offset"?: number,"nickname": string,"onboarded_at"?: string | null,"preferred_sound_key"?: string | null,"preferred_voice_tone"?: Database["public"]['Enums']["voice_tone"] | null,"privacy_agreed_at"?: string | null,"privacy_version"?: number | null,"profile_image_url"?: string | null,"timezone"?: string,"updated_at"?: string,"user_id": string,"wake_margin"?: string,"wake_ping_enabled"?: boolean,"wake_sensitivity"?: string
+                    "codebook_version": string,"consent_at": string,"ml_age_code": string,"ml_economic_code"?: string | null,"ml_education_code"?: string | null,"user_id": string,"verified_at"?: string
                   }
                   Update: {
-                    "created_at"?: string,"default_buffer_minutes"?: number,"default_prepare_minutes"?: number,"default_transport"?: Database["public"]['Enums']["transport_type"],"handle"?: string | null,"handle_changed_at"?: string | null,"handle_next_change_at"?: string | null,"home_lat"?: number | null,"home_lng"?: number | null,"home_name"?: string | null,"home_radius_m"?: number | null,"intensity_offset"?: number,"nickname"?: string,"onboarded_at"?: string | null,"preferred_sound_key"?: string | null,"preferred_voice_tone"?: Database["public"]['Enums']["voice_tone"] | null,"privacy_agreed_at"?: string | null,"privacy_version"?: number | null,"profile_image_url"?: string | null,"timezone"?: string,"updated_at"?: string,"user_id"?: string,"wake_margin"?: string,"wake_ping_enabled"?: boolean,"wake_sensitivity"?: string
+                    "codebook_version"?: string,"consent_at"?: string,"ml_age_code"?: string,"ml_economic_code"?: string | null,"ml_education_code"?: string | null,"user_id"?: string,"verified_at"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "prepare_ml_verified_profiles_user_id_fkey"
+      columns: ["user_id"]
+isOneToOne: true
+      referencedRelation: "profiles"
+      referencedColumns: ["user_id"]
+    }
+                  ]
+                },"profiles": {
+                  Row: {
+                    "created_at": string,"default_buffer_minutes": number,"default_prepare_minutes": number,"default_transport": Database["public"]['Enums']["transport_type"],"handle": string | null,"handle_changed_at": string | null,"handle_next_change_at": string | null,"home_lat": number | null,"home_lng": number | null,"home_name": string | null,"home_radius_m": number | null,"intensity_offset": number,"ml_age_code": string | null,"ml_age_years": number | null,"ml_codes_verified": boolean,"ml_economic_code": string | null,"ml_education_code": string | null,"ml_profile_consented_at": string | null,"ml_school_status": string | null,"ml_work_status": string | null,"nickname": string,"onboarded_at": string | null,"preferred_sound_key": string | null,"preferred_voice_tone": Database["public"]['Enums']["voice_tone"] | null,"privacy_agreed_at": string | null,"privacy_version": number | null,"profile_image_url": string | null,"timezone": string,"updated_at": string,"user_id": string,"wake_margin": string,"wake_ping_enabled": boolean,"wake_sensitivity": string
+                  }
+                  Insert: {
+                    "created_at"?: string,"default_buffer_minutes"?: number,"default_prepare_minutes"?: number,"default_transport"?: Database["public"]['Enums']["transport_type"],"handle"?: string | null,"handle_changed_at"?: string | null,"handle_next_change_at"?: string | null,"home_lat"?: number | null,"home_lng"?: number | null,"home_name"?: string | null,"home_radius_m"?: number | null,"intensity_offset"?: number,"ml_age_code"?: string | null,"ml_age_years"?: number | null,"ml_codes_verified"?: boolean,"ml_economic_code"?: string | null,"ml_education_code"?: string | null,"ml_profile_consented_at"?: string | null,"ml_school_status"?: string | null,"ml_work_status"?: string | null,"nickname": string,"onboarded_at"?: string | null,"preferred_sound_key"?: string | null,"preferred_voice_tone"?: Database["public"]['Enums']["voice_tone"] | null,"privacy_agreed_at"?: string | null,"privacy_version"?: number | null,"profile_image_url"?: string | null,"timezone"?: string,"updated_at"?: string,"user_id": string,"wake_margin"?: string,"wake_ping_enabled"?: boolean,"wake_sensitivity"?: string
+                  }
+                  Update: {
+                    "created_at"?: string,"default_buffer_minutes"?: number,"default_prepare_minutes"?: number,"default_transport"?: Database["public"]['Enums']["transport_type"],"handle"?: string | null,"handle_changed_at"?: string | null,"handle_next_change_at"?: string | null,"home_lat"?: number | null,"home_lng"?: number | null,"home_name"?: string | null,"home_radius_m"?: number | null,"intensity_offset"?: number,"ml_age_code"?: string | null,"ml_age_years"?: number | null,"ml_codes_verified"?: boolean,"ml_economic_code"?: string | null,"ml_education_code"?: string | null,"ml_profile_consented_at"?: string | null,"ml_school_status"?: string | null,"ml_work_status"?: string | null,"nickname"?: string,"onboarded_at"?: string | null,"preferred_sound_key"?: string | null,"preferred_voice_tone"?: Database["public"]['Enums']["voice_tone"] | null,"privacy_agreed_at"?: string | null,"privacy_version"?: number | null,"profile_image_url"?: string | null,"timezone"?: string,"updated_at"?: string,"user_id"?: string,"wake_margin"?: string,"wake_ping_enabled"?: boolean,"wake_sensitivity"?: string
                   }
                   Relationships: [
                     
