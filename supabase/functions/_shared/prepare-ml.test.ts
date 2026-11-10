@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { approvedMlProfile, buildMlRequest, calendarFeatures, mayUseMl, previousDateKey, requestMlPrediction, validMlEndpoint } from './prepare-ml.ts';
 
-const profile = { ml_codes_verified: true, ml_age_code: '2', ml_education_code: '1', ml_economic_code: '3' };
+const profile = { ml_codes_verified: true, ml_age_code: '2' };
 const at = new Date('2026-11-09T01:00:00Z');
 
 test('uses appointment local date and previous day', () => {
@@ -21,7 +21,7 @@ test('cold uses C1; consecutive-day warm uses W4', () => {
   const cold = buildMlRequest({ appointmentAt: at, timezone: 'Asia/Seoul', profile, previousDayMinutes: null });
   assert.equal(cold?.model, 'c1_mae');
   assert.deepEqual(Object.keys(cold!.features).sort(), [
-    'weekday_code', '평토일구분코드', '휴일종류코드', '연령코드', '교육재학코드', '경제활동상태코드',
+    'weekday_code', '평토일구분코드', '휴일종류코드', '연령코드',
   ].sort());
   const warm = buildMlRequest({ appointmentAt: at, timezone: 'Asia/Seoul', profile, previousDayMinutes: 87 });
   assert.equal(warm?.model, 'w4_mae');
@@ -62,19 +62,19 @@ test('real ML is denied unless both flag and server-side UUID allowlist permit t
 test('only a service-verified, consented and matching codebook profile can be used', () => {
   const good = {
     ml_age_code: '2',
-    ml_education_code: '1',
-    ml_economic_code: '3',
     codebook_version: 'validated-v1',
     consent_at: '2025-01-01T00:00:00Z',
     verified_at: '2025-01-02T00:00:00Z',
   };
   assert.deepEqual(approvedMlProfile(good, 'validated-v1'), {
-    ml_codes_verified: true, ml_age_code: '2', ml_education_code: '1', ml_economic_code: '3',
+    ml_codes_verified: true, ml_age_code: '2',
   });
   assert.equal(approvedMlProfile(good, ''), null);
   assert.equal(approvedMlProfile(good, 'other-version'), null);
   assert.equal(approvedMlProfile({ ...good, consent_at: null }, 'validated-v1'), null);
   assert.equal(approvedMlProfile({ ...good, verified_at: null }, 'validated-v1'), null);
   assert.equal(approvedMlProfile({ ...good, ml_age_code: '__MISSING__' }, 'validated-v1'), null);
+  assert.equal(approvedMlProfile({ ...good, ml_age_code: '9' }, 'validated-v1'), null);
+  assert.equal(approvedMlProfile({ ...good, ml_age_code: '0' }, 'validated-v1'), null);
   assert.equal(approvedMlProfile({ ...good, consent_at: '3025-01-01T00:00:00Z' }, 'validated-v1'), null);
 });
