@@ -4,6 +4,8 @@ import { StyleSheet, View } from 'react-native';
 
 import { Avatar, Button, Card, Chip, confirm, EmptyState, LoadError, Loading, Screen, SectionHeader, Segmented, Text, toast, TopBar, TopBarButton } from '@/components/ui';
 import { useAuth } from '@/features/auth/AuthProvider';
+import { getPendingSuggestion } from '@/features/records/api';
+import { SuggestionCard } from '@/features/records/components/SuggestionCard';
 import { ChangeHandleSheet } from '@/features/profile/components/ChangeHandleSheet';
 import { handleHint } from '@/features/profile/handle';
 import {
@@ -12,6 +14,7 @@ import {
   cancelFriendRequest,
   declineFriend,
   declineGroupInvite,
+  getGroupSummary,
   listFriendRequests,
   listFriends,
   listGroupInvites,
@@ -25,6 +28,7 @@ import { ActionTile } from '@/features/social/components/ActionTile';
 import { ConsentSheet } from '@/features/social/components/ConsentSheet';
 import { GroupInviteCard } from '@/features/social/components/GroupInviteCard';
 import { GroupIcon } from '@/features/social/components/GroupIcon';
+import { GroupWakeCard } from '@/features/social/components/GroupWakeCard';
 import { MiniButton } from '@/features/social/components/MiniButton';
 import { MyHandleCard } from '@/features/social/components/MyHandleCard';
 import { Note } from '@/features/social/components/Note';
@@ -51,14 +55,24 @@ const TABS = [
   ['group', '그룹'],
 ] as const;
 
-// date = 그룹 기상 신호가 알려 준 날 (오늘 기상 수만 씀, 없으면 오늘)
+// date = 그룹 기상 신호가 알려 준 날 (오늘 기상 수 · 그룹 기상 카드만 씀, 없으면 오늘)
+// 맨 위 제안 카드 · 그룹 기상 카드는 홈 아래에서 옮김 (D110) — 덧붙임이라 못 읽어도 빈 채로 두고 친구 · 그룹 목록은 그대로 보임
 async function loadSocial(date: string | null) {
-  const [friends, requests, sent, groups, invites] = await Promise.all([listFriends(), listFriendRequests(), listSentRequests(), listGroups(date), listGroupInvites()]);
-  return { friends, requests, sent, groups, invites };
+  const [friends, requests, sent, groups, invites, suggestion] = await Promise.all([
+    listFriends(),
+    listFriendRequests(),
+    listSentRequests(),
+    listGroups(date),
+    listGroupInvites(),
+    getPendingSuggestion().catch(() => null),
+  ]);
+  const summaries = (await Promise.all(groups.map((g) => getGroupSummary(g.id, date).catch(() => null)))).flatMap((g) => (g ? [g] : []));
+  return { friends, requests, sent, groups, invites, suggestion, summaries };
 }
 
-// G01 친구와 그룹 — 친구 탭(목업 F01: 요청 수락 · 친구별 권한 수) · 그룹 탭(목업 G01: 참여 중인 그룹 · 오늘 기상 수)
-// 홈 · 기상 확인에서 그룹 상세를 열 때 이 탭이 '그룹' 칸으로 밑에 깔림 (lib/nav openGroupDetail, ?seg=group&open=… — 목업 A.openGroup)
+// G01 친구와 그룹 — 맨 위 알람 조정 제안 · 오늘 그룹 기상 카드(D110, 홈에서 옮김)
+//   친구 탭(목업 F01: 요청 수락 · 친구별 권한 수) · 그룹 탭(목업 G01: 참여 중인 그룹 · 오늘 기상 수)
+// 기상 확인에서 그룹 상세를 열 때 이 탭이 '그룹' 칸으로 밑에 깔림 (lib/nav openGroupDetail, ?seg=group&open=… — 목업 A.openGroup)
 export default function GroupScreen() {
   const { seg, open } = useLocalSearchParams<{ seg?: string; open?: string }>();
   // 직접 고른 칸은 같은 열기 요청일 때만 유지 — 다른 화면이 새로 열면(open 값이 바뀜) 그 칸(seg)으로 (목업 A.openGroup)
@@ -138,6 +152,17 @@ export default function GroupScreen() {
       <Text variant="lead" style={styles.lead}>
         {tab === 'friend' ? '관계를 만들고 서로 공유할 정보를 관리해요.' : '목적에 맞는 그룹을 만들고 공유 범위를 정해요.'}
       </Text>
+      {data?.suggestion ? (
+        <SuggestionCard suggestion={data.suggestion} onPress={(id) => router.push({ pathname: '/suggestion/[id]', params: { id } })} />
+      ) : null}
+      {data ? (
+        <GroupWakeCard
+          groups={data.summaries}
+          onOpen={(id) => router.push({ pathname: '/groups/[id]', params: { id } })}
+          // 이미 '그룹' 칸이면 "외 N개"를 숨김 (눌러도 바뀌는 게 없어서)
+          onMore={tab === 'group' ? undefined : () => setTab('group')}
+        />
+      ) : null}
       <Segmented options={TABS} value={tab} onChange={setTab} />
 
       {!data ? error ? <LoadError onRetry={reload} /> : <Loading /> : null}

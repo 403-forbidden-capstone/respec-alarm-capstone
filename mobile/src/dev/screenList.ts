@@ -70,7 +70,7 @@ const ALL_SECTIONS: ScreenSection[] = [
     issue: '#30',
     rows: [
       { id: 'H01', name: '홈', href: '/' },
-      { id: 'H02', name: '알람 목록', href: '/alarms' },
+      { id: 'H02', name: '알람 목록 (2번 탭)', href: '/alarms' },
       {
         id: 'H03',
         name: '알람 설정 · 팀 주간회의 (매주 · 캡스톤팀 공유)',
@@ -154,7 +154,7 @@ const ALL_SECTIONS: ScreenSection[] = [
     title: '기록 · 제안',
     issue: '#38',
     rows: [
-      { id: 'R02', name: '나의 기록', href: '/records' },
+      { id: 'R02', name: '나의 기록 (홈 맨 아래, D110)', href: '/' },
       { id: 'S01', name: '알람 조정 제안', href: { pathname: '/suggestion/[id]', params: { id: 's1' } }, mockOnly: true },
     ],
   },

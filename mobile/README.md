@@ -30,7 +30,7 @@ PR에서 앱 검사가 자동으로 돌지 않아서(Actions 분량, #134) push�
 | 폴더 | 내용 |
 |---|---|
 | `src/app/` | 화면. 파일 위치가 곧 주소 (Expo Router) |
-| `src/app/(tabs)/` | 탭 4개: 01 홈 · 02 그룹 · 03 AI · 04 기록 (목업 순서) |
+| `src/app/(tabs)/` | 탭 4개: 01 홈 · 02 알람 · 03 그룹 · 04 AI (D110 — 목업의 04 기록은 홈 맨 아래로) |
 | `src/features/alarm/` | ① 약속 기반 알람 |
 | `src/features/social/` | ② 알람 공유 · 기상 확인 |
 | `src/features/voice/` | ③ 수면 전후 음성 AI |

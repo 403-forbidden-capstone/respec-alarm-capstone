@@ -43,8 +43,8 @@ describe('실데이터에서 가짜 id 줄 채우기 (resolveRow)', () => {
   });
 
   it('real이 없는 줄(id 없는 화면)은 실데이터에서도 그대로', () => {
-    const plain = row('R02', '나의 기록', { href: '/records' });
-    expect(resolveRow(plain, 'real', EMPTY_TARGETS)).toMatchObject({ href: '/records', missing: null });
+    const plain = row('H02', '알람 목록', { href: '/alarms' });
+    expect(resolveRow(plain, 'real', EMPTY_TARGETS)).toMatchObject({ href: '/alarms', missing: null });
   });
 });
 
@@ -128,7 +128,8 @@ describe('지금 화면이 속한 절 (currentSectionTitle · pathMatches)', () 
     expect(currentSectionTitle(sections, '/alarm/changed')).toBe('친구 · 그룹');
     // 같은 주소가 두 절에 있으면(새 일정 · 새 공동 약속) 앞 절
     expect(currentSectionTitle(sections, '/schedule/new')).toBe('알람');
-    expect(currentSectionTitle(sections, '/records')).toBe('기록 · 제안');
+    // 기록 탭이 없어져 R02는 홈('/') 맨 아래 (D110) — '/'는 앞 절(알람)이 이기고, 기록 · 제안 절은 제안 화면 주소로 찾음
+    expect(currentSectionTitle(sections, '/suggestion/s1')).toBe('기록 · 제안');
     expect(currentSectionTitle(sections, '/nowhere')).toBeNull();
   });
 });
