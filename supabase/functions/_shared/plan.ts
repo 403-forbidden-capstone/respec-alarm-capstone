@@ -248,7 +248,7 @@ async function optionalMlPrediction(
     const { createServiceClient } = await import('./supabase.ts');
     const { data: row, error: profileError } = await createServiceClient()
       .from('prepare_ml_verified_profiles')
-      .select('ml_age_code, ml_education_code, ml_economic_code, codebook_version, consent_at, verified_at')
+      .select('ml_age_code, codebook_version, consent_at, verified_at')
       .eq('user_id', ctx.userId).maybeSingle();
     if (profileError || !row) return undefined;
     const verified = approvedMlProfile(row as VerifiedMlProfile, getEnv('PREPARE_ML_CODEBOOK_VERSION'));
