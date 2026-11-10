@@ -122,6 +122,48 @@ jobs:
           path: ${{ runner.temp }}/database.ts
           retention-days: 3
 
+  preview_remote:
+    name: PR #479 원격 DB 적용 목록만 확인
+    if: github.event_name == 'pull_request' && github.event.pull_request.number == 479 && github.event.pull_request.head.repo.full_name == github.repository
+    needs: [check, rehearse]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: 배포 자격 증명 존재 확인
+        run: |
+          test -n "$SUPABASE_ACCESS_TOKEN" || { echo "::error::SUPABASE_ACCESS_TOKEN이 설정되지 않았어요"; exit 1; }
+
+      - name: Supabase CLI
+        uses: supabase/setup-cli@v3
+        with:
+          version: ${{ env.SUPABASE_CLI_VERSION }}
+
+      - name: 프로젝트 연결
+        run: supabase link --project-ref "$PROJECT_REF"
+
+      - name: 미적용 7개 목록 확인 (절대 적용하지 않음)
+        run: |
+          set -euo pipefail
+          supabase db push --linked --include-all --dry-run 2>&1 | tee "$RUNNER_TEMP/db-plan.txt"
+          for f in \
+            20261109090000_friend_explore_fixes.sql \
+            20261110100000_prepare_ml_verified_profiles.sql \
+            20261110110000_prepare_ml_optional_survey.sql \
+            20261110120000_prepare_ml_reset_cleanup.sql \
+            20261110130000_prepare_ml_age_only.sql \
+            20261110220000_prepare_ml_consented_age_sync.sql \
+            20261110224500_prepare_ml_consent_safety.sql
+          do
+            grep -Fq "$f" "$RUNNER_TEMP/db-plan.txt" || { echo "::error::사전 검사에 $f 미표시"; exit 1; }
+          done
+          echo "계획한 7개 파일 모두 출력됨. 데이터베이스 변경 없음."
+
   deploy:
     name: 실제 DB에 적용
     needs: [check, rehearse]
