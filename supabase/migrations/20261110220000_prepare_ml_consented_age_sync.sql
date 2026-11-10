@@ -23,8 +23,10 @@ begin
   -- Always revoke the old mapping first; this also handles consent withdrawal.
   delete from public.prepare_ml_verified_profiles where user_id = new.user_id;
 
-  -- Only an explicitly consented, age-in-range row may be mapped.
+  -- Do not auto-approve legacy school/work survey rows. Only the new
+  -- age-only save (which clears these legacy fields) can create a code.
   if new.ml_age_years is null or new.ml_profile_consented_at is null
+     or new.ml_school_status is not null or new.ml_work_status is not null
      or new.ml_profile_consented_at > now()
   then
     return new;
