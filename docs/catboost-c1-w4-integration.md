@@ -1,5 +1,13 @@
 # C1/W4 CatBoost 준비시간 연결 (비활성화 기본값)
 
+## 검증/배포 상태 — 2026-11-10 정정
+
+- **PR #478의 자동 매핑은 안전성 보정 마이그레이션에서 철회한다.** 자가 입력 만 나이/동의만으로 `prepare_ml_verified_profiles`가 채워지지 않는다. 공식 코드북 교차검증 및 별도 신뢰된 서버 승인 프로세스가 필요하다.
+- 선택형 입력을 새로 동의해 저장할 때 `ml_profile_consented_at`은 DB 서버가 시각을 부여한다. 휴대폰 시계가 잘못 설정되어도 감사용 시각에 사용하지 않는다. 동의 철회·정보 변경은 기존 모델 검증행을 삭제한다.
+- `2024-age-decade-observed-v1`은 **공식 승인 버전이 아닌 잠정 관측 매핑**이다. 이 버전으로 생성된 행은 보정 마이그레이션에서 삭제한다. 코드북을 확인한 이후 새 승인 버전과 명시적 재검증 절차가 필요하며 자동 소급 매핑은 하지 않는다.
+- GitHub Actions의 `main` DB 배포는 원격 마이그레이션 이력과 `20261109090000_friend_explore_fixes.sql` 파일의 순서 충돌로 실패했다. **운영 DB 적용 여부를 확인하기 전 `supabase db push --include-all`을 실행하지 않는다.**
+- 모델 C1/W4의 로컬 추론 성공과 실제 앱 활성화는 별개다. `PREPARE_ML_ENABLED=0`을 유지한다.
+
 ## 연결 경로
 - 앱 H05/H03 → `alarm-suggest` / `alarm-commit` → 공통 `buildPlan()`
 - `buildPlan()` → `prepare-ml.ts` (사이드카 /predict) → `computePlan()`
