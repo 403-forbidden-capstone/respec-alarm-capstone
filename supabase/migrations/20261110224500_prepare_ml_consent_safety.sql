@@ -4,7 +4,7 @@
 -- The prior migration is kept unchanged in history.
 
 -- The mobile client can submit its own clock time. Normalize NEW consent
--- timestamps using the database clock before any AFTER UPDATE revocation runs.
+-- timestamps using the database clock on INSERT and before AFTER UPDATE revocation runs.
 create or replace function public.stamp_prepare_ml_consent_at()
 returns trigger
 language plpgsql
@@ -12,10 +12,12 @@ security invoker
 set search_path = ''
 as $$
 begin
-  if new.ml_profile_consented_at is not null
-     and new.ml_profile_consented_at is distinct from old.ml_profile_consented_at
-  then
-    new.ml_profile_consented_at := statement_timestamp();
+  if new.ml_profile_consented_at is not null then
+    if tg_op = 'INSERT' then
+      new.ml_profile_consented_at := statement_timestamp();
+    elsif new.ml_profile_consented_at is distinct from old.ml_profile_consented_at then
+      new.ml_profile_consented_at := statement_timestamp();
+    end if;
   end if;
   return new;
 end;
@@ -25,7 +27,7 @@ revoke all on function public.stamp_prepare_ml_consent_at()
   from public, anon, authenticated;
 
 create trigger profiles_ml_consent_server_timestamp
-  before update of ml_profile_consented_at
+  before insert or update of ml_profile_consented_at
   on public.profiles
   for each row execute function public.stamp_prepare_ml_consent_at();
 
@@ -61,8 +63,8 @@ comment on table public.prepare_ml_verified_profiles is
 comment on column public.prepare_ml_verified_profiles.codebook_version is
   'Version of officially approved survey-to-application mapping, checked against PREPARE_ML_CODEBOOK_VERSION.';
 comment on column public.profiles.ml_profile_consented_at is
-  'Optional ML research-data consent timestamp. Database stamps newly submitted consent with statement_timestamp(); clearing it revokes consent.';
+  'Optional ML research-data consent timestamp. Database stamps initial or renewed consent with statement_timestamp(); timestamp denotes the last consent/save event; clearing it revokes consent.';
 comment on function public.invalidate_prepare_ml_verification_on_survey_change() is
   'On any user survey change or consent revocation, delete stale service-only model verification. Does NOT auto-approve user-supplied age.';
 comment on function public.stamp_prepare_ml_consent_at() is
-  'Before profile consent updates, replace a newly submitted non-null client timestamp with the database server time.';
+  'On profile INSERT or consent UPDATE, stamp newly submitted non-null consent with database server time.';
