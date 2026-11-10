@@ -262,28 +262,44 @@ await check('auth.users에 넣으면 profiles가 생기고 OAuth 메타데이터
     && m[C].nickname === 'cuser' && m[D].nickname === '준성' && m[E].nickname === '범준';
   return ok ? true : r;
 });
-await check('연령 전용 ML: 동의한 만 나이를 보호된 코드로 변환하고 철회 시 즉시 무효화', async () => {
+await check('연령 ML: 클라이언트 시각과 무관하게 서버가 동의 시각 기록, 검증 코드 자동 생성 금지', async () => {
   await as(A);
-  const consent = new Date(Date.now() - 60_000).toISOString();
-  await q(`update public.profiles set ml_age_years=24, ml_profile_consented_at=$1 where user_id=$2`, [consent, A]);
+  const farFuture = '2099-01-01T00:00:00.000Z';
+  await q(`update public.profiles
+    set ml_age_years = 24, ml_profile_consented_at = $1
+    where user_id = $2`, [farFuture, A]);
   await su();
-  const [mapped] = await q(`select ml_age_code, codebook_version, consent_at from public.prepare_ml_verified_profiles where user_id=$1`, [A]);
-  if (!mapped || mapped.ml_age_code !== '2' ||
-      mapped.codebook_version !== '2024-age-decade-observed-v1' ||
-      new Date(mapped.consent_at).getTime() !== new Date(consent).getTime()) return { stage: 'map', mapped };
+  const [profile] = await q(`select ml_profile_consented_at as consent
+    from public.profiles where user_id=$1`, [A]);
+  const [none] = await q(`select count(*)::int as n
+    from public.prepare_ml_verified_profiles where user_id=$1`, [A]);
+  const stamped = Date.parse(profile.consent);
+  const now = Date.now();
+  const timeOK = Math.abs(now - stamped) < 120000;
+  return timeOK && none.n === 0 ? true : { stamped, now, none };
+});
 
+await check('연령 ML: 사용자 변경·철회는 기존 검증 코드를 삭제하고 신규 코드는 만들지 않음', async () => {
+  await su();
+  await q(`insert into public.prepare_ml_verified_profiles
+    (user_id, ml_age_code, codebook_version, consent_at)
+    values ($1, '2', 'fixture-v1', now())`, [A]);
   await as(A);
   await q(`update public.profiles set ml_age_years=84 where user_id=$1`, [A]);
   await su();
-  const [older] = await q(`select ml_age_code from public.prepare_ml_verified_profiles where user_id=$1`, [A]);
-  if (older?.ml_age_code !== '8') return { stage: 'age-change', older };
-
+  const [removedOnChange] = await q(`select count(*)::int as n
+    from public.prepare_ml_verified_profiles where user_id=$1`, [A]);
+  if (removedOnChange.n !== 0) return { stage: 'change', removedOnChange };
   await as(A);
-  await q(`update public.profiles set ml_age_years=null, ml_school_status=null, ml_work_status=null,
-     ml_profile_consented_at=null where user_id=$1`, [A]);
+  await q(`update public.profiles set ml_age_years=null, ml_school_status=null,
+    ml_work_status=null, ml_profile_consented_at=null where user_id=$1`, [A]);
   await su();
-  const [removed] = await q(`select count(*)::int as n from public.prepare_ml_verified_profiles where user_id=$1`, [A]);
-  return removed.n === 0 ? true : { stage: 'revoke', removed };
+  const [profile] = await q(`select ml_age_years, ml_profile_consented_at
+    from public.profiles where user_id=$1`, [A]);
+  const [removedOnRevoke] = await q(`select count(*)::int as n
+    from public.prepare_ml_verified_profiles where user_id=$1`, [A]);
+  return profile.ml_age_years === null && profile.ml_profile_consented_at === null &&
+    removedOnRevoke.n === 0 ? true : { profile, removedOnRevoke };
 });
 
 await check('연령 전용 ML: 본인 외부 역할은 서버 검증 정보를 직접 변경할 수 없음', async () => {
