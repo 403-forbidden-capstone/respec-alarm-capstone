@@ -6,8 +6,6 @@ export type MlPrediction = { model: MlModel; minutes: number };
 export type MlProfile = {
   ml_codes_verified?: boolean | null;
   ml_age_code?: string | null;
-  ml_education_code?: string | null;
-  ml_economic_code?: string | null;
 };
 export type MlRequest = { model: MlModel; features: Record<string, string | number> };
 export type MlConfig = { enabled: boolean; url?: string; token?: string; timeoutMs?: number };
@@ -47,19 +45,17 @@ export function approvedMlProfile(
   const verified = Date.parse(profile.verified_at);
   if (!Number.isFinite(consent) || !Number.isFinite(verified) || consent > Date.now() ||
       verified > Date.now()) return null;
-  if (!validCode(profile.ml_age_code) || !validCode(profile.ml_education_code) ||
-      !validCode(profile.ml_economic_code)) return null;
+  if (!validAgeCode(profile.ml_age_code)) return null;
   return {
     ml_codes_verified: true,
     ml_age_code: profile.ml_age_code,
-    ml_education_code: profile.ml_education_code,
-    ml_economic_code: profile.ml_economic_code,
   };
 }
 
 const MISSING = '__MISSING__';
-const validCode = (value: string | null | undefined): value is string =>
-  typeof value === 'string' && /^[0-9]{1,3}$/.test(value);
+// The training survey records codes 1..8 for 10s, 20s, ... 80+.
+const validAgeCode = (value: string | null | undefined): value is string =>
+  typeof value === 'string' && /^[1-8]$/.test(value);
 
 // The requested date in the user's time zone, not the Edge server's UTC date.
 export function previousDateKey(appointmentAt: Date, timezone: string): string {
@@ -79,8 +75,9 @@ export function calendarFeatures(appointmentAt: Date, timezone: string) {
   };
 }
 
-// No automatic inferences for demographic codes. No model call until these are
-// explicitly verified against the survey codebook and persisted in profiles.
+// Only server-verified age codes may be used; no direct client-supplied codes.
+// The 2024 Time Use Survey age map must be verified and consent recorded by
+// a trusted workflow before any real inference.
 export function buildMlRequest(args: {
   appointmentAt: Date;
   timezone: string;
@@ -88,15 +85,13 @@ export function buildMlRequest(args: {
   previousDayMinutes: number | null;
 }): MlRequest | null {
   if (!args.profile.ml_codes_verified) return null;
-  const { ml_age_code: age, ml_education_code: education, ml_economic_code: economic } = args.profile;
-  if (!validCode(age) || !validCode(education) || !validCode(economic)) return null;
+  const age = args.profile.ml_age_code;
+  if (!validAgeCode(age)) return null;
   const previous = args.previousDayMinutes;
   const isWarm = typeof previous === 'number' && Number.isFinite(previous) && previous >= 10 && previous <= 240;
   const features: Record<string, string | number> = {
     ...calendarFeatures(args.appointmentAt, args.timezone),
     '연령코드': age,
-    '교육재학코드': education,
-    '경제활동상태코드': economic,
   };
   if (isWarm) features.previous_day_target_minutes = previous as number;
   return { model: isWarm ? 'w4_mae' : 'c1_mae', features };
