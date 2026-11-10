@@ -262,6 +262,37 @@ await check('auth.users에 넣으면 profiles가 생기고 OAuth 메타데이터
     && m[C].nickname === 'cuser' && m[D].nickname === '준성' && m[E].nickname === '범준';
   return ok ? true : r;
 });
+await check('연령 전용 ML: 동의한 만 나이를 보호된 코드로 변환하고 철회 시 즉시 무효화', async () => {
+  await as(A);
+  const consent = new Date(Date.now() - 60_000).toISOString();
+  await q(`update public.profiles set ml_age_years=24, ml_profile_consented_at=$1 where user_id=$2`, [consent, A]);
+  await su();
+  const [mapped] = await q(`select ml_age_code, codebook_version, consent_at from public.prepare_ml_verified_profiles where user_id=$1`, [A]);
+  if (!mapped || mapped.ml_age_code !== '2' ||
+      mapped.codebook_version !== '2024-age-decade-observed-v1' ||
+      new Date(mapped.consent_at).getTime() !== new Date(consent).getTime()) return { stage: 'map', mapped };
+
+  await as(A);
+  await q(`update public.profiles set ml_age_years=84 where user_id=$1`, [A]);
+  await su();
+  const [older] = await q(`select ml_age_code from public.prepare_ml_verified_profiles where user_id=$1`, [A]);
+  if (older?.ml_age_code !== '8') return { stage: 'age-change', older };
+
+  await as(A);
+  await q(`update public.profiles set ml_age_years=null, ml_school_status=null, ml_work_status=null,
+     ml_profile_consented_at=null where user_id=$1`, [A]);
+  await su();
+  const [removed] = await q(`select count(*)::int as n from public.prepare_ml_verified_profiles where user_id=$1`, [A]);
+  return removed.n === 0 ? true : { stage: 'revoke', removed };
+});
+
+await check('연령 전용 ML: 본인 외부 역할은 서버 검증 정보를 직접 변경할 수 없음', async () => {
+  await as(A);
+  const blocked = await expectErr(() => q(`insert into public.prepare_ml_verified_profiles
+    (user_id, ml_age_code, codebook_version, consent_at) values ($1, '2', 'forged', now())`, [A]), /permission denied/);
+  return blocked === true ? true : blocked;
+});
+
 await check('트리거 함수는 실행 권한이 없어도 트리거로는 돎 (supabase_auth_admin · authenticated)', async () => {
   const [r] = await q(`select has_function_privilege('supabase_auth_admin', 'public.handle_new_user()', 'execute') as x,
                               has_function_privilege('authenticated', 'public.set_updated_at()', 'execute') as y`);
