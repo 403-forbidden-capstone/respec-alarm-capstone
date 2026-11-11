@@ -100,7 +100,8 @@ class AlarmPlaybackService : Service() {
 
   private val handler = Handler(Looper.getMainLooper())
   private var currentVoiceLevel: Int? = null
-  private var failedVoiceLevel: Int? = null
+  // 이번 울림에서 시작한 가장 높은 음성 단계 — 같은 울림 안에서는 이보다 높을 때만 바꿈(낮추지 않음 · 실패한 단계 재시작 안 함)
+  private var peakVoiceLevel: Int? = null
   private var voiceGeneration = 0
   // 기상 알람이 울리는 동안 현재 시각을 계속 확인하여 5분(3단계)과 0분(4단계)에 음성을 전환.
   // 서버를 호출하지 않고 캐시된 규칙과 음성만 확인. 배경 알람음/진동은 중단하지 않음.
@@ -110,7 +111,7 @@ class AlarmPlaybackService : Service() {
       val alarm = AlarmStorage.get(applicationContext, id) ?: return
       if (alarm.type != "WAKE" || !alarm.ringing) return
       val next = VoiceBriefing.speechFor(applicationContext, alarm, System.currentTimeMillis())
-      if (next != null && next.level != currentVoiceLevel && next.level != failedVoiceLevel) {
+      if (next != null && SpeechUrgency.shouldSwitch(next.level, peakVoiceLevel)) {
         stopVoice()
         runCatching { startVoice(alarm, next) }.onFailure { Log.w(TAG, "알람 음성 단계 변경 실패 — 배경음/진동 유지", it) }
       }
@@ -364,7 +365,7 @@ class AlarmPlaybackService : Service() {
   private fun startVoice(alarm: StoredAlarm, prepared: VoiceBriefing.Speech? = VoiceBriefing.speechFor(this, alarm, System.currentTimeMillis())) {
     val speech = prepared ?: return
     currentVoiceLevel = speech.level
-    failedVoiceLevel = null
+    peakVoiceLevel = maxOf(peakVoiceLevel ?: 0, speech.level)
     voiceLevel = speech.level
     voiceEngine = if (speech.wav != null) "GEMINI" else "ANDROID"
     if (alarm.type == "WAKE") updateStageEffects(alarm, speech.level)
@@ -379,8 +380,7 @@ class AlarmPlaybackService : Service() {
       },
       onDone = {
         if (generation == voiceGeneration) {
-          // 한국어 오프라인 TTS가 없거나 음성 파일이 깨졌을 때 무의미한 2초 간격 재시작을 방지
-          failedVoiceLevel = currentVoiceLevel
+          // 한국어 오프라인 TTS가 없거나 음성 파일이 깨짐 — 같은 단계는 다시 시작 안 함(peakVoiceLevel), 더 높은 단계가 되면 다시 시도
           stopVoice()
         }
       },
@@ -581,7 +581,7 @@ class AlarmPlaybackService : Service() {
   private fun releasePlayback() {
     handler.removeCallbacks(autoStop)
     handler.removeCallbacks(checkWakeStage)
-    failedVoiceLevel = null
+    peakVoiceLevel = null
     remainingSounds.clear()
     stopVoice()
     releasePlayer()

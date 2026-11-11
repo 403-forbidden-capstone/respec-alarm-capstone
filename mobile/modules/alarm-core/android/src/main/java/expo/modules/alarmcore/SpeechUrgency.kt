@@ -13,4 +13,7 @@ object SpeechUrgency {
     }
     return minOf(level, maxLevel).coerceAtLeast(1)
   }
+
+  /** 울리는 중 음성 교체 — 이번 울림에서 이미 시작한 가장 높은 단계(peak)보다 높을 때만. 브리핑이 새로 저장돼 단계가 낮게 나와도 내리지 않음 */
+  fun shouldSwitch(next: Int, peak: Int?): Boolean = peak == null || next > peak
 }
