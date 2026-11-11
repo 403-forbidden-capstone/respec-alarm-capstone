@@ -1,0 +1,70 @@
+# C1/W4: 2024 코드북 시험 계정 승인 운영 절차
+
+## 현재 범위
+- DB 함수: `private.approve_prepare_ml_test_profile(uuid, text)`
+- **자동 승인 없음**. 온보딩/설정의 사용자 입력만으로 보호 테이블에 검증행이 생기지 않음.
+- 허용 대상: 정확한 사용자 UUID와 실제 이메일이 일치하는 `demo-*@example.com` 계정만.
+- `anon`·`authenticated` 실행 금지. 관리자가 명시적으로 승인하여 `service_role` 권한으로만 실행.
+- 새 엔드포인트/사용자 화면 없음, EC2 배포 없음, `PREPARE_ML_ENABLED=0` 유지.
+
+## 코드 변환 (2024 생활시간조사 코드정보 기준)
+
+| 원본 동의 응답 | 검증 대상 모델 입력 |
+|---|---|
+| `ml_age_years` 14~19 | `연령코드='1'` |
+| 20~29 | `'2'` |
+| 30~39 | `'3'` |
+| 40~49 | `'4'` |
+| 50~59 | `'5'` |
+| 60~69 | `'6'` |
+| 70~79 | `'7'` |
+| 80~100 | `'8'` |
+| `ml_holiday_code` 1~6 | `휴일종류코드='1'..'6'` |
+| `ml_holiday_code = NULL` | `휴일종류코드='__MISSING__'` |
+
+`휴일종류코드`는 **평소 휴무 형태**, *약속 당일 공휴일 여부가 아님*.
+코드북 버전: `2024-time-use-age-holiday-v1` (서버의 `PREPARE_ML_CODEBOOK_VERSION`과 정확히 같아야 ML 적용 가능).
+
+## 시험 계정 1명 수동 승인 절차
+
+**사전 조건**
+1. CI의 DB 검사/RLS/앱 타입 통과, 팀 DB 담당자 리뷰·마이그레이션 병합/적용 완료.
+2. 시험 계정에서 **선택형 만 나이·휴무 형태와 별도 ML 동의를 입력하고 저장·재조회**함.
+3. 운영 DB 관리자가 **정확한 UUID와 이메일을 별도 확인**. 일반 사용자·실계정 승인 금지. 자동 배치 승인 금지.
+4. 기존 EC2 구성, 모델 파일(.cbm), ML secret 등 인프라 담당 범위를 임의 변경하지 않음.
+
+관리자 SQL 편집기(관리자 역할에서만, 실제 UUID/이메일은 별도 안전한 경로로 전달):
+
+```sql
+-- 사용자의 입력/동의를 수정하지 않고 현재 기록에서 코드를 재계산.
+-- 정확히 특정 시험 사용자 1명만 승인한다.
+select private.approve_prepare_ml_test_profile(
+  '00000000-0000-4000-8000-000000000000'::uuid, -- 실제 확인된 테스트 UUID로 교체
+  'demo-verified@example.com'::text              -- 같은 테스트 계정의 실제 이메일
+);
+```
+
+함수는 DB 안에서 실제 이메일·동의 상태를 다시 확인하고, 프로필 행을 잠근 후 보호 테이블에 기록.
+**위 샘플 값은 실행 가능 계정이 아니며 반드시 정확한 시험 계정으로 바꿔야 함.**
+
+승인 후 본인 시험 계정 1명의 **코드만** 확인:
+
+```sql
+select user_id,ml_age_code,ml_holiday_code,codebook_version,consent_at,verified_at
+  from public.prepare_ml_verified_profiles
+ where user_id='00000000-0000-4000-8000-000000000000'::uuid;
+```
+
+만 나이·휴무 정보를 바꾸거나 사용자가 동의 철회/정보 삭제를 하면 기존 보호 검증행은 **자동 삭제**됨. 필요 시 다시 동의받고 관리자가 재승인함.
+
+## 실패 조건 및 현재 보류
+- 잘못된 UUID/이메일, 일반 계정, 동의 없음, 비정상 연령·휴무, legacy 학교·근무 응답 → 승인 거부.
+- 사용자가 프로필을 갱신하면 이전 검증행 삭제. 동시 갱신을 막기 위해 트랜잭션 내 프로필 행 잠금 사용.
+- ML 적용은 여전히 `PREPARE_ML_ENABLED=1`, 정확한 UUID allowlist, 같은 `PREPARE_ML_CODEBOOK_VERSION`, HTTPS 모델 URL·토큰·헬스 체크 등이 모두 필요.
+- **현 PR에서는 실제 계정 승인, Edge secrets 변경, 함수 재배포, EC2 연결, 실제 ML 활성화를 하지 않음.**
+- 직전 날짜 `daily_records.actual_prepare_minutes`와 2024 조사 기준 타깃의 불일치는 실제 데이터 평가 필요.
+- 실제 앱 E2E는 EC2 서버 배포 후 허용한 시험 계정으로만 실행하며, C1 및 W4, 과소예측, 실패 시 P80 fallback, preview/save 일치 확인.
+
+## CI
+`supabase/tests/prepare-ml-approval.mjs`: 비허용 사용자 차단·수동 동의 필요·연령/휴무 매핑·변경/철회 시 승인 소멸·80세 경계·관리자 권한 경계 테스트.
+`supabase/tests/db-check.mjs`에서 호출. `DB 검사 · 적용` CI가 모든 마이그레이션과 이 테스트를 함께 수행.
