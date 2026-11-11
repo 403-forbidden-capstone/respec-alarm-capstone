@@ -666,6 +666,7 @@ export async function estimateAppointment(d: AppointmentDraft): Promise<Estimate
     residualP80: prepare.residualP80,
     sameDayWake,
     latePoint: db.lateCount4w >= 2 ? 1 : 0,
+    ...(d.levels ? { levels: d.levels } : {}),
   };
 }
 
@@ -701,6 +702,7 @@ export async function createAppointment(estimate: Estimate, source = '직접 입
     ...(Object.keys(picked).length ? { manual: { times: picked } } : {}),
   };
   db.appointments.push(saved);
+  if (estimate.levels) db.intensityOverrides[saved.id] = { ...estimate.levels };
   for (const alarm of a.alarms) {
     if (!alarm.auto) continue;
     pushEditLog({
