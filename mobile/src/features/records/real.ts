@@ -16,6 +16,7 @@ import {
   actualRows,
   alarmPatch,
   factsOf,
+  isAlarmValueSuggestion,
   isApplicableValue,
   isPlanned,
   isUuid,
@@ -24,6 +25,7 @@ import {
   SUGGESTION_KIND,
   toSuggestion,
   wakeRowsOf,
+  type AlarmValueSuggestionType,
   type JournalDayRow,
   type PlannedAlarmRow,
   type RecordRow,
@@ -273,7 +275,7 @@ async function syncPhone(alarmId: string) {
 const valueOf = (alarm: AlarmValues, column: 'voice_tone' | 'sound_key' | 'intensity') => alarm[column];
 
 // 고친 값 기록에 남기는 값 — 약 · 중 · 강 = 0 · 1 · 2 (features/alarm/types.ts UserEditLog 규칙), 모르는 값이면 값 그대로
-const loggedValue = (type: SuggestionRow['suggestion_type'], value: string | null): Json => {
+const loggedValue = (type: AlarmValueSuggestionType, value: string | null): Json => {
   const level = value == null ? null : SUGGESTION_KIND[type].levelOf(value);
   return level ?? value;
 };
@@ -288,7 +290,7 @@ export async function applySuggestion(id: string, minutes: number) {
   const alarm = found.alarms;
   if (!alarm) throw new UserError('바꿀 알람이 없어졌어요');
   const type = found.suggestion_type;
-  if (!isApplicableValue(type, found.suggested_value)) throw new UserError('이 제안은 적용할 수 없어요');
+  if (!isAlarmValueSuggestion(type) || !isApplicableValue(type, found.suggested_value)) throw new UserError('이 제안은 적용할 수 없어요');
 
   // 알람 값을 먼저 — 제안 기록이 실패해도 다시 눌러 같은 값을 쓰면 되도록
   await updateAlarm(userId, alarm.alarm_id, alarmPatch(type, found.suggested_value, true));
@@ -319,6 +321,7 @@ export async function undoSuggestion(id: string) {
   const alarm = found.alarms;
   if (!alarm) throw new UserError('바꿀 알람이 없어졌어요');
   const type = found.suggestion_type;
+  if (!isAlarmValueSuggestion(type)) throw new UserError('이 제안은 되돌릴 수 없어요');
   const previous = found.current_value;
   // 이전 값이 비어 있어도(null) 배경음은 "기본음이었다"는 뜻이라 되돌릴 수 있음 (alarms.sound_key는 null 허용). 말소리 · 진동은 DB가 늘 값을 가져서 비면 알 수 없음
   if (previous == null && type !== 'SOUND') throw new UserError('이전 값을 알 수 없어 되돌릴 수 없어요');
