@@ -8,7 +8,7 @@
 - 새로운 `profiles.ml_holiday_code`는 **클라이언트가 입력하는 자가 응답**이다. 이 값을 곧바로 모델에 넣지 않는다. 동의 및 변경/철회 시 서버 전용 승인 기록이 무효화된다.
 - 모델 요청 시에는 `prepare_ml_verified_profiles.ml_holiday_code`에서 가져온 **별도 서버 승인값**만 사용한다. 승인값이 없으면 `__MISSING__` 처리하고 C1/W4 구조와 모델 파일은 유지한다.
 - **마이그레이션 선행**: `20261111160000_prepare_ml_holiday_pattern.sql` 적용과 RLS/DB 재확인 **이후** 새 앱을 배포한다. 앱에서 `ml_holiday_code` 컬럼을 SELECT하므로 반대 순서면 프로필 읽기가 실패한다.
-- 새 코드의 서버측 승인 워크플로와 코드북 버전 업그레이드, 동의 문구의 개인정보 검토, 실데이터 E2E는 **별도 승인 전까지 보류**. `PREPARE_ML_ENABLED=0` 유지.
+- PR #493에서 **demo 시험 계정 1명 수동 승인용 DB 함수**를 추가함(운영 적용 여부는 별도 확인). 자동 승인 없음. 연령코드 1~8의 2024년 공식 파일설계서 원본 대조·개인정보 동의 검토·실데이터 E2E는 **별도 승인 전까지 보류**. 절차: `docs/prepare-ml-test-approval.md`. `PREPARE_ML_ENABLED=0` 유지.
 - 기존 C1/W4 실험은 `휴일종류코드`를 사용한다. 제거 실험에서 C1 MAE 45.128(기존 43.163), W4 MAE 29.678(기존 29.417)로 증가. 이는 **조사자료의 실제 휴무값을 사용한 비교**이므로, 서비스 조건에 대한 우월성 입증은 별도 입력분포 평가가 필요하다.
 
 
@@ -38,7 +38,7 @@
 앱의 `actual_prepare_minutes`는 실제/예정 기상 시각→출발의 기록이므로
 훈련 대상과 완전히 같지 않습니다. W4의 서비스 데이터 정확도는 별도 평가가 필요합니다.
 
-코드북 부재로 휴일종류는 `__MISSING__`을 씁니다. 훈련 데이터에서
+2024 코드 기준 선택형 휴무 응답은 신뢰된 수동 승인 프로세스 이후에만 모델 입력으로 사용합니다. 미응답 또는 미승인 휴무는 `__MISSING__`을 씁니다. 훈련 데이터에서
 이 값이 약 31.94%였더라도 임의의 모든 날짜에 이를 쓸 때의 성능은 검증되지 않았습니다.
 프로필 중 새 모델 입력은 `ml_age_code`만 사용합니다.
 원본에서 관측된 연령코드(1:10대, 2:20대, ... 8:80세 이상)를
@@ -99,7 +99,7 @@ node --experimental-strip-types --test supabase/functions/_shared/prepare-ml.tes
 ## 검증된 사용자 입력 저장 경로 (미배포)
 
 - DB 마이그레이션 `20261110100000_prepare_ml_verified_profiles.sql`에 `public.prepare_ml_verified_profiles` 신설. 일반 `authenticated`는 SELECT/INSERT/UPDATE/DELETE 권한 없음. `service_role`만 접근; 프로필 삭제 시 CASCADE.
-- 코드북 확인 + 명시적 동의 후, **별도 신뢰된 서버 워크플로**에서만 연령/교육/경제활동 코드를 이 테이블에 저장. 현재 앱 UI와 검증된 코드 생성/저장 엔드포인트는 아직 구현하지 않음.
+- 공식 코드북 원본 대조와 명시적 동의 후에만 신뢰된 서버 승인값을 생성해야 함. PR #493은 **관리자가 지정한 demo 계정 한 명의 기존 입력을 수동 승인하는 DB 함수**를 추가함(자동 생성 없음). 실제 운영 적용 및 승인 실행은 별도 검토. 자세한 안전 조건: `docs/prepare-ml-test-approval.md`. 모델 피처는 연령·휴무만 사용하고 legacy 교육/경제활동 값을 사용하지 않음.
 - 모델 예측 전 필수 조건: 전역 `PREPARE_ML_ENABLED=1`, 해당 유저가 `PREPARE_ML_ALLOWED_USER_IDS`에 포함, 서버 전용 검증행 존재, `consent_at`/ `verified_at` 유효, `codebook_version === PREPARE_ML_CODEBOOK_VERSION`. 하나라도 빠지면 기존 P80로 복귀.
 - 종전 클라이언트 수정 가능 `profiles.ml_*` 및 `ml_codes_verified`는 **더 이상 모델 요청 경로에서 사용하지 않음**.
 - 실제 앱 요청은 여전히 일정 초안만 제출. 날짜/시간대는 서버에서 달력 피처로, 모델 코드값은 서버 전용 테이블에서, W4 직전 날짜 기록은 `daily_records`에서 읽음.
