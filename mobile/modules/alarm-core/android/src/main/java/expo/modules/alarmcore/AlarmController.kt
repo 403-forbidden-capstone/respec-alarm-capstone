@@ -69,7 +69,22 @@ object AlarmController {
 
   /** 알람 시각이 됨 (AlarmReceiver) — 기록을 남기고 WAKE는 소리 서비스, 나머지는 일정 알림(알림음 · 진동 한 번) */
   fun fire(context: Context, id: String) {
-    val current = AlarmStorage.get(context, id) ?: return
+    val stored = AlarmStorage.get(context, id) ?: return
+    // 업데이트 전에 예약된 옛 출발 알람도 기존 한 번 알림 대신 지속 알람으로 승격.
+    val current = if (stored.type == "DEPARTURE" && !stored.plan.sound) {
+      val baseVolume = when (stored.intensity) { "SOFT" -> 60; "STRONG" -> 100; else -> 80 }
+      val percent = kotlin.math.round(baseVolume * (1.0 + (stored.volumeAdjust ?: 0.0))).toInt().coerceIn(10, 100)
+      stored.copy(plan = stored.plan.copy(
+        sound = true,
+        volumePercent = percent,
+        maxRingMillis = 180_000L,
+        snoozeMillis = 600_000L,
+        snoozeMinutesOptions = SnoozeRules.DEFAULT_OPTIONS,
+        snoozeLimit = stored.snoozeLimit.coerceAtLeast(0),
+        oneTapLabel = null,
+        oneTapEventType = null,
+      ))
+    } else stored
     val plan = current.plan
     val now = System.currentTimeMillis()
     val index = current.seriesIndex

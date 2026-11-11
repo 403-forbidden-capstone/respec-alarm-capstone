@@ -132,8 +132,8 @@ describe('공통 케이스 — 미루기 횟수 한도 · 시간 고르기 (D3 �
     expect(DEFAULT_SNOOZE_LIMIT).toBe(3);
   });
 
-  it('보통 알림은 미루기가 없어 목록 · 한도가 비어 있음', () => {
-    const plan = buildRingPlan({ type: 'DEPARTURE', intensity: 'NORMAL', snoozeLimit: 3 });
+  it('준비 알림은 미루기가 없어 목록 · 한도가 비어 있음', () => {
+    const plan = buildRingPlan({ type: 'PREPARE', intensity: 'NORMAL', snoozeLimit: 3 });
     expect([plan.snoozeMillis, plan.snoozeMinutesOptions, plan.snoozeLimit]).toEqual([0, [], 0]);
   });
 
@@ -185,7 +185,15 @@ describe('알림 문구(notice)', () => {
   it('notice가 있으면 heading이 되고, 알림음 여부 · 원탭 버튼은 종류대로 그대로', () => {
     const plan = buildRingPlan({ type: 'DEPARTURE', intensity: 'NORMAL', notice: '지금 나가면 오전 9:50 도착 · 여유 10분' });
     expect(plan.heading).toBe('지금 나가면 오전 9:50 도착 · 여유 10분');
-    expect([plan.sound, plan.oneTapLabel, plan.oneTapEventType]).toEqual([false, '출발했어요', 'ACKNOWLEDGED']);
+    expect([plan.sound, plan.oneTapLabel, plan.oneTapEventType]).toEqual([true, null, null]);
+    expect([plan.snoozeMillis, plan.snoozeLimit, plan.reRingOffsetsMillis]).toEqual([600_000, 3, []]);
+  });
+
+  it('출발 알람도 기상처럼 배경음·진동·AI 음성을 함께 유지하고, 미루기 설정을 존중', () => {
+    const p = buildRingPlan({ type: 'DEPARTURE', intensity: 'SOFT', snoozeLimit: 2, soundKey: 'theme_calm', volumeAdjust: -0.1 });
+    expect(p).toMatchObject({ sound: true, volumePercent: 54, maxRingMillis: 180_000, soundKey: 'theme_calm', snoozeLimit: 2 });
+    expect(p.reRingOffsetsMillis).toEqual([]);
+    expect(p.snoozeMinutesOptions).toEqual([5, 10, 15]);
   });
 
   it('기상 알람은 서버가 notice를 안 줘서 화면 줄이 그대로 (voiceText는 저장만)', () => {
