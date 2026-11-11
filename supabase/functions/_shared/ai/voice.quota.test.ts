@@ -348,3 +348,98 @@ test('mightBeSchedule: 사고 메시지 · 내일 · 회의는 일정일 수도 
   assert.equal(mightBeSchedule('오늘 좀 피곤했어'), false);
   assert.equal(mightBeSchedule('아무것도 하기 싫어'), false);
 });
+
+// ───────── 준비물 바로 등록 (T2F.v2-d items → todos ITEM, 11/12) ─────────
+// NOW = 10/29(목) 20:30 → 내일 = 10/30
+const withItems = (items: { title: string; date: string }[], over: Record<string, unknown> = {}) => ({ ...T2F_NONE, items, ...over });
+const itemRows = (db: FakeDb) => db.rows('todos').map((t) => [t.title, t.todo_type, t.due_date, t.appointment_id]);
+const oldItem = (title: string) => ({ todo_id: `old-${title}`, user_id: ME, title, todo_type: 'ITEM', due_date: '2026-10-30', appointment_id: null, source_session_id: 'other', is_done: false, created_at: '2026-10-28T10:00:00+09:00' });
+
+test('준비물: "내일 노트북 챙겨야 돼" → 대화 끝을 기다리지 않고 todos에 ITEM(내일)으로 바로 저장, 카드 없음 · T1이 저장된 것을 앎', async () => {
+  const { fake, deps, sid, rev, db } = await start({ T2F: [withItems([{ title: '노트북', date: '2026-10-30' }])], T1: [T1_OK] });
+  const r = (await handleVoiceTurn(deps, text(sid, rev, '내일 노트북 챙겨야 돼'))) as VoiceTurnOut;
+  assert.deepEqual(itemRows(db), [['노트북', 'ITEM', '2026-10-30', null]]);
+  assert.equal(db.rows('todos')[0].source_session_id, sid);
+  assert.deepEqual(r.cards, []); // 일정 변경 카드로 잘못 띄우지 않음
+  assert.equal(r.next, 'USER');
+  assert.deepEqual(fake.order, ['T2F', 'T1']);
+  assert.match(fake.seen.T1[0], /준비물 목록에 추가\(홈 준비물에 보임\): 노트북/);
+});
+
+test('준비물: 내일 일정이 있어도 기존 일정을 바꾸지 않음 (카드 없음 · 약속 행 그대로) — 여러 개는 하나씩', async () => {
+  const { deps, sid, rev, db } = await start({ T2F: [withItems([{ title: '노트북', date: '2026-10-30' }, { title: '충전기', date: '2026-10-30' }])], T1: [T1_OK] });
+  db.rows('appointments').push({ appointment_id: 'ap-t', creator_id: ME, title: '캡스톤 발표', appointment_at: '2026-10-30T10:00:00+09:00', dest_name: '강남역', importance: 'HIGH', recurrence_rule: null });
+  const before = JSON.stringify(db.rows('appointments'));
+  const r = (await handleVoiceTurn(deps, text(sid, rev, '내일 발표 때 노트북이랑 충전기 챙겨야 해'))) as VoiceTurnOut;
+  assert.deepEqual(r.cards, []);
+  assert.equal(JSON.stringify(db.rows('appointments')), before);
+  assert.deepEqual(itemRows(db).map((x) => x[0]), ['노트북', '충전기']);
+});
+
+test('준비물 중복: 다음 말에서 T2F가 같은 준비물을 또 내도 한 번만', async () => {
+  const same = withItems([{ title: '노트북', date: '2026-10-30' }]);
+  const { fake, deps, sid, rev, db } = await start({ T2F: [same, same], T1: [T1_OK, T1_OK] });
+  const r1 = (await handleVoiceTurn(deps, text(sid, rev, '내일 노트북 챙겨야 돼'))) as VoiceTurnOut;
+  await handleVoiceTurn(deps, text(sid, r1.rev, '잊지 말아야지 노트북'));
+  assert.equal(db.rows('todos').filter((t) => t.title === '노트북').length, 1);
+  assert.match(fake.seen.T1[1], /사용자 말 2 뒤:\n- 바뀐 것 없음/); // 두 번째 말에서는 다시 알리지 않음
+});
+
+test('준비물 중복: 다른 대화가 이미 넣은 같은 날 같은 준비물은 다시 안 넣고 "이미 있음"', async () => {
+  const { fake, deps, sid, rev, db } = await start({ T2F: [withItems([{ title: '충전기', date: '2026-10-30' }])], T1: [T1_OK] });
+  db.rows('todos').push(oldItem('충전기'));
+  await handleVoiceTurn(deps, text(sid, rev, '내일 충전기 가져가야 해'));
+  assert.equal(db.rows('todos').length, 1);
+  assert.match(fake.seen.T1[0], /준비물 목록에 이미 있음: 충전기/);
+});
+
+test('준비물 날짜가 모호하면 저장하지 않고 되물음 — 글은 T1 화면에, 음성은 ask로 (Live가 소리로 물음), 같은 대화에서 되풀이하지 않음', async () => {
+  const vague = withItems([{ title: '우산', date: '' }]);
+  const { fake, deps, sid, rev, db } = await start({ T2F: [vague, vague], T1: [T1_OK] });
+  const r = (await handleVoiceTurn(deps, text(sid, rev, '우산 챙겨야 하는데'))) as VoiceTurnOut;
+  assert.equal(db.rows('todos').length, 0);
+  assert.match(fake.seen.T1[0], /'우산' 챙길 날짜/);
+  const v = (await handleVoiceTurn(deps, voiceTurn(sid, r.rev, '우산 챙겨야 하는데 언제였더라', '우산 챙기셔야 하는군요.'))) as VoiceTurnOut;
+  assert.equal(v.ask, undefined);
+  const b = await start({ T2F: [vague], T1: [] });
+  const v2 = (await handleVoiceTurn(b.deps, voiceTurn(b.sid, b.rev, '우산 챙겨야 해', '네.'))) as VoiceTurnOut;
+  assert.deepEqual(v2.ask, ["'우산' 챙길 날짜"]);
+});
+
+test('준비물: 지난 날짜는 넣지 않음 · 저장이 실패해도 대화는 이어짐', async () => {
+  const { deps, sid, rev, db } = await start({ T2F: [withItems([{ title: '노트북', date: '2026-10-28' }])], T1: [T1_OK] });
+  const r = (await handleVoiceTurn(deps, text(sid, rev, '어제 노트북 챙겼어야 했는데'))) as VoiceTurnOut;
+  assert.equal(db.rows('todos').length, 0);
+  assert.ok(r.reply?.text);
+  const b = await start({ T2F: [withItems([{ title: '노트북', date: '2026-10-30' }])], T1: [T1_OK] });
+  const from = b.db.from.bind(b.db);
+  (b.db as unknown as { from: (t: string) => unknown }).from = (t: string) => {
+    if (t === 'todos') throw new Error('db down');
+    return from(t);
+  };
+  const r2 = (await handleVoiceTurn(b.deps, text(b.sid, b.rev, '내일 노트북 챙겨야 돼'))) as VoiceTurnOut;
+  assert.ok(r2.reply?.text);
+});
+
+test('영어 일정 등록: "team meeting next Monday at 10am at the library" → APPT_NEW 카드, 영어 말도 일정일 수도 있는 말', async () => {
+  const { deps, sid, rev } = await start({ T2F: [appt({ title: 'team meeting', date: '2026-11-02', time: '10:00', place: 'library' })], T1: [] });
+  const msg = 'I have a team meeting next Monday at 10am at the library. Please add it.';
+  const r = (await handleVoiceTurn(deps, text(sid, rev, msg))) as VoiceTurnOut;
+  assert.equal(r.next, 'APP_TASKS');
+  const c = r.cards[0];
+  assert.deepEqual([c.kind, c.draft?.title, c.draft?.date, c.draft?.time, c.draft?.place], ['APPT_NEW', 'team meeting', '2026-11-02', '10:00', 'library']);
+  assert.equal(mightBeSchedule(msg), true);
+  assert.equal(mightBeSchedule('I need to bring my charger tomorrow'), true);
+  assert.equal(mightBeSchedule('I feel tired today'), false);
+});
+
+test('영어 일정 추출 시간 초과도 [다시 시도] 안내(extract_failed)', async () => {
+  const { fake, deps, sid, rev } = await start({ T2F: [timeout()], T1: [] });
+  await assert.rejects(handleVoiceTurn(deps, text(sid, rev, 'Dentist appointment tomorrow at 3pm')), (e: HttpError) => (e.details as { extract_failed?: boolean }).extract_failed === true);
+  assert.deepEqual(fake.order, ['T2F']);
+});
+
+test('준비물 말도 일정일 수도 있는 말로 봄 (추출 실패면 [다시 시도])', () => {
+  assert.equal(mightBeSchedule('나가기 전에 충전기 가져가야 해'), true);
+  assert.equal(mightBeSchedule('내일 노트북 챙겨야 돼'), true);
+});

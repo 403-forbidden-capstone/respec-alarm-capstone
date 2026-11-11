@@ -117,7 +117,7 @@ type Basis = { travel_minutes: number; prepare_minutes: number; buffer_minutes: 
 // 상수
 // ---------------------------------------------------------------------------
 
-export const TURN_TIMEOUT_MS = 25_000; // voice-turn — 서버 마감 18초 + 왕복 (설계 11절, lib/edge 기본 20초로는 모자람)
+export const TURN_TIMEOUT_MS = 40_000; // voice-turn — 서버 마감 30초(turn.ts TURN_DEADLINE_MS) + DB 읽기 · 쓰기 · 왕복 여유 10초. 끝없이 기다리지 않음
 const MAX_PREPARE_DELTA = 60; // 이번만 준비 +N 상한 (설계 5절, 실험실 stub 60분)
 const SAVE_SOURCE = '자기 전 대화';
 // 앱이 L1 estimateAppointment에서 "장소 위치를 몰라" 던진 문구를 장소 필요로 가름 (alarm/realPlan.ts) — 그 문구가 바뀌면 같이 고침
@@ -508,7 +508,8 @@ async function runTasks(res: TurnResponse): Promise<{ cards: ResultCard[]; fixes
 // ---------------------------------------------------------------------------
 
 // 분당 사용량에 막힘(서버 관문 RPM · TPM · 동시 요청, Gemini 429) — LLM_UNAVAILABLE의 details.code RATE_LIMITED
-//   details.extract_failed = 일정일 수도 있는 말을 추출하지 못해 서버가 말을 저장하지 않음 — 화면이 "일정을 아직 정리하지 못했어요"로 가름
+//   details.extract_failed = 일정일 수도 있는 말을 추출하지 못해 서버가 말을 저장하지 않음 — 화면이 "일정을 확인하지 못했어요"로 가름
+//   시간 초과(서버 모델 TIMEOUT · 앱이 응답을 못 받음 TIMEOUT)는 사용량 제한과 다른 안내 — timedOut
 const unavailableOf = (e: EdgeError): Unavailable => {
   const d = e.details as { code?: unknown; extract_failed?: unknown } | null | undefined;
   return {
@@ -516,6 +517,7 @@ const unavailableOf = (e: EdgeError): Unavailable => {
     message: e.message,
     canRetry: true,
     ...(d?.code === 'RATE_LIMITED' ? { rateLimited: true } : {}),
+    ...(d?.code === 'TIMEOUT' || e.code === 'TIMEOUT' ? { timedOut: true } : {}),
     ...(d?.extract_failed === true ? { extractFailed: true } : {}),
   };
 };
@@ -953,7 +955,7 @@ export function saveCard(cardId: string): Promise<string> {
       appointmentId = saved.id;
       alarms = saved.alarms;
       level = saved.level;
-      toast = `${saved.title} 알람을 맞췄어요`;
+      toast = `일정이 저장됐어요. ${saved.title} 알람을 맞췄어요`;
       rec.status = 'SAVED'; // 일정은 저장됨 — 아래 두 번째 저장이 실패해도 카드는 저장으로
       rec.appointmentId = saved.id;
       await rememberSaved(cardId, kind, saved.id, alarms, level); // 서버에 알리기 전에 — 앱이 꺼져도 다시 저장되지 않게
@@ -1029,16 +1031,21 @@ async function sendResults(cards: ResultCard[]): Promise<void> {
 }
 
 // 카드 [장소 고르기] — 고른 곳으로 다시 계산해 READY로, 결과를 서버에 알림 (새 client_turn_id로 results만 보냄 — 서버(#265)가 받음)
-export function pickCardPlace(cardId: string, place: { name: string; lat?: number; lng?: number }): Promise<void> {
-  return serial(async () => {
-    const rec = recOf(cardId);
-    if (typeof place.lat !== 'number' || typeof place.lng !== 'number') throw new UserError('이 장소는 위치를 몰라요. 다른 곳을 골라 주세요');
-    rec.place = { name: place.name, lat: place.lat, lng: place.lng };
-    rec.status = 'ESTIMATING';
-    const outcome = await runCard(rec);
-    applyOutcome(rec, outcome);
-    if (!state.sessionId) return;
-    // 서버가 받지 않아도 이 카드는 앱에서 계산한 상태 그대로
-    await sendResults([resultCard(cardId, outcome)]);
-  });
+//   onProgress — 실제 단계마다 대화를 알림: 계산 시작(ESTIMATING) · 계산 끝(READY · FAILED …). 계산 결과는 서버 안내 답(T1)을 기다리지 않고 바로 보임
+//   돌려주는 값 = 계산 결과 상태 (FAILED면 화면이 [다시 시도])
+export function pickCardPlace(cardId: string, place: { name: string; lat?: number; lng?: number }, onProgress?: (c: Conversation) => void): Promise<Outcome['status']> {
+  return serial(() =>
+    withProgress(onProgress, async () => {
+      const rec = recOf(cardId);
+      if (typeof place.lat !== 'number' || typeof place.lng !== 'number') throw new UserError('이 장소는 위치를 몰라요. 다른 곳을 골라 주세요');
+      rec.place = { name: place.name, lat: place.lat, lng: place.lng };
+      rec.status = 'ESTIMATING';
+      report(); // 장소 확정 → "기상 · 준비 · 출발 시간을 계산하고 있어요"
+      const outcome = await runCard(rec);
+      applyOutcome(rec, outcome);
+      report(); // 계산 끝 — 카드에 결과
+      if (state.sessionId) await sendResults([resultCard(cardId, outcome)]); // 서버가 받지 않아도 이 카드는 앱에서 계산한 상태 그대로
+      return outcome.status;
+    }),
+  );
 }

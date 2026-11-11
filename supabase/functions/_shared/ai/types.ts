@@ -253,6 +253,8 @@ export interface FastExtract {
   fact_feedback: Extract["fact_feedback"];
   prep_adjustment: Extract["prep_adjustment"];
   safety_flag: boolean;
+  /** 준비물 (T2F.v2-d · extract-fast.v2, 선택 칸). date "" = 날짜를 모름 → 서버가 되물음 */
+  items?: { title: string; date: string }[];
 }
 
 /** 사실의 출처 — 입력 방식(글 · Live 음성)과 다른 개념. stated 사용자가 직접 말함 · confirmed 확인 질문에 동의 · inferred AI 짐작 */

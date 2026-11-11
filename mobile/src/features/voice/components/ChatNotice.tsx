@@ -6,8 +6,8 @@ import { keepWords } from '@/lib/format';
 import { noticeActions, noticeCopy, primaryAction, type NoticeAction, type NoticeKind } from '../chatNotice';
 
 type Props = {
-  kind: NoticeKind; // failed = AI가 지금 답하지 못함 · extract = 일정 정리 못 함 · busy = 분당 사용량 · limit = 하루 사용량 · turn = 대화 길이 (chatNotice.ts)
-  onRetry?: () => void; // 다시 시도 (failed · extract · busy만)
+  kind: NoticeKind; // failed = AI가 지금 답하지 못함 · timeout = 시간 초과 · extract = 일정 정리 못 함 · busy = 분당 사용량 · limit = 하루 사용량 · turn = 대화 길이 (chatNotice.ts)
+  onRetry?: () => void; // 다시 시도 (failed · timeout · extract · busy만)
   onManual?: () => void; // 직접 일정 만들기
   onDone?: () => void; // 대화 마치기
   busy?: boolean; // 1차 버튼 처리 중 — 1차 버튼이 돌아가고 나머지는 눌리지 않음

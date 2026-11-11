@@ -6,6 +6,7 @@ import assistE4 from './assist-e4.v1.ts';
 import extract from './extract.v1.ts';
 import extractV2 from './extract.v2.ts';
 import extractFast from './extract-fast.v1.ts';
+import extractFastV2 from './extract-fast.v2.ts';
 import t1Reply from './t1-reply.v1.ts';
 import t3Reason from './t3-reason.v1.ts';
 import t4Diary from './t4-diary.v1.ts';
@@ -16,6 +17,7 @@ const ALL = {
   'extract.v1': extract,
   'extract.v2': extractV2, // 서버 판 (T2.v3 — 대화 끝 정리)
   'extract-fast.v1': extractFast,
+  'extract-fast.v2': extractFastV2, // 서버 판 (T2F.v2-d — 준비물 items)
   't3-reason.v1': t3Reason,
   't4-diary.v1': t4Diary,
   't5-journal.v1': t5Journal,

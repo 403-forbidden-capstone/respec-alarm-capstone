@@ -248,15 +248,11 @@ export default function HomeScreen() {
         </>
       ) : null}
 
-      {/* 준비물은 낮에도 보임 — 낮에는 챙길 것이 있을 때만, 저녁에는 비어도 안내 */}
-      {evening || todos.length ? (
-        <>
-          <SectionHeader title={evening ? '내일 준비물' : '오늘 준비물'} right={`${todos.filter((x) => x.done).length}/${todos.length}`} />
-          <Card>
-            <TodoList todos={todos} onToggle={tickTodo} />
-          </Card>
-        </>
-      ) : null}
+      {/* 준비물은 늘 보임 — 비어도 "챙길 준비물이 없어요" (AI 대화에서 말한 준비물이 바로 여기 들어옴) */}
+      <SectionHeader title={evening ? '내일 준비물' : '오늘 준비물'} right={`${todos.filter((x) => x.done).length}/${todos.length}`} />
+      <Card>
+        <TodoList todos={todos} onToggle={tickTodo} />
+      </Card>
 
       {evening ? (
         <>

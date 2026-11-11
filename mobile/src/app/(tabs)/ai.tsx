@@ -26,6 +26,12 @@ import { useLoad } from '@/lib/useLoad';
 const SCHEDULE_CHECKING = '일정이 있는지 확인하고 있어요...';
 // 추출이 일정을 찾아 카드가 생긴 뒤 알람을 계산하는 동안만
 const CARD_DRAFTING = '일정 카드를 만들고 있어요...';
+// 카드 하나에서 도는 일의 단계 — 실제 처리 단계(api의 진행 알림)에 맞춰 바뀜
+const CARD_STEP = {
+  save: '일정을 저장하고 있어요...',
+  place: '장소를 확인하고 있어요...',
+  estimate: '기상·준비·출발 시간을 계산하고 있어요...',
+} as const;
 // 일정일 수도 있는 말을 일정으로 정리하지 못한 까닭 — 모른 채 같은 말을 되풀이하지 않게 짧게 알림 (일반 대화면 알리지 않음)
 const MISSED: Record<'LIMIT' | 'BUSY' | TurnNotice, string> = {
   LIMIT: '오늘 대화 한도에 닿아 더 이상 일정으로 정리되지 않아요. 일정은 직접 만들거나 내일 새 대화에서 말해 주세요.',
@@ -97,6 +103,8 @@ export default function AiScreen() {
   const [pendingText, setPendingText] = useState<string | null>(null); // 보낸 내 말 — 답을 기다리는 동안 먼저 보여 줌
   const [pendingAt, setPendingAt] = useState<Date | null>(null); // 보낸 시각 — 렌더마다 now()가 바뀌지 않게 (실데이터 모드는 지금 시각)
   const [placeCardId, setPlaceCardId] = useState<string | null>(null); // [장소 고르기]를 누른 카드 — 장소 검색 시트
+  const [work, setWork] = useState<{ id: string; step: keyof typeof CARD_STEP } | null>(null); // 카드에서 도는 저장 · 장소 · 계산 — 도는 동안 카드 버튼을 막음(중복 저장 · 선택 막기)
+  const [cardFail, setCardFail] = useState<{ id: string; message: string | null; retry: () => void } | null>(null); // 카드의 저장 · 계산 실패 — 카드에 까닭 + [다시 시도]
   const home = homeOf(useAuth().profile); // 집 좌표 — 있으면 장소 검색을 가까운 순으로
   // 카드 저장 · 완료 같은 버튼은 한 번에 하나씩, 다시 읽기가 끝날 때까지 — 실패하면 토스트 (lib/useAction)
   const { busy, run: act } = useAction();
@@ -172,8 +180,8 @@ export default function AiScreen() {
   const { messages, cards, unavailable, limits } = progress ?? data;
   const cardOf = (id?: string) => cards.find((c) => c.id === id);
   const reached = limits?.reached ?? null;
-  // 안내 종류 — 일정 정리 못 함(extract, 말이 저장 안 됨이 가장 중요해 먼저) · 분당 사용량(busy) · 그 밖의 실패(failed) / 대화 길이(turn) · 하루 사용량(limit)
-  const failKind = unavailable?.extractFailed ? 'extract' : unavailable?.rateLimited ? 'busy' : 'failed';
+  // 안내 종류 — 사용량 제한(busy) · 일정 정리 못 함(extract, 말이 저장 안 됨) · 시간 초과(timeout) · 그 밖의 실패(failed) / 대화 길이(turn) · 하루 사용량(limit)
+  const failKind = unavailable?.rateLimited ? 'busy' : unavailable?.extractFailed ? 'extract' : unavailable?.timedOut ? 'timeout' : 'failed';
   const limitKind = reached === 'TURN' ? 'turn' : 'limit';
   const waiting = cards.some((c) => c.status === 'READY' || c.status === 'NEEDS_PLACE' || c.status === 'NEEDS_ESTIMATE' || c.status === 'ESTIMATING');
   const textMode = mode === 'text';
@@ -185,6 +193,8 @@ export default function AiScreen() {
   const liveStatus = !real ? null : live.phase === 'connecting' ? '음성 대화를 연결하고 있어요…' : live.phase === 'live' ? '듣고 있어요. 편하게 말해 보세요' : null;
   const status = liveStatus
     ? liveStatus
+    : work
+    ? CARD_STEP[work.step]
     : listening
     ? '듣고 있어요…'
     : thinking
@@ -253,15 +263,21 @@ export default function AiScreen() {
     });
   };
 
-  // 카드 저장 · 바꾸기 — 실패하면 토스트(이유는 UserError일 때만), 어느 쪽이든 카드 상태를 다시 읽음
-  const saveFound = (cardId: string) =>
+  // 카드 저장 · 바꾸기 — 누르는 즉시 "일정을 저장하고 있어요...", 성공하면 토스트("일정이 저장됐어요"), 실패하면 카드에 까닭 + [다시 시도]. 어느 쪽이든 카드 상태를 다시 읽음
+  //   두 번 누름은 useAction(act) · 카드 버튼 막기 · saveCard(이미 저장한 카드 거절)가 막음
+  const saveFound = (cardId: string): Promise<void> =>
     act(async () => {
+      setCardFail(null);
+      setWork({ id: cardId, step: 'save' });
       try {
         toast(await saveCard(cardId));
+      } catch (e) {
+        setCardFail({ id: cardId, message: userMessage(e, '일정을 저장하지 못했어요'), retry: () => void saveFound(cardId) });
       } finally {
+        setWork(null);
         await reload();
       }
-    }, '저장하지 못했어요');
+    });
 
   const rejectFound = (cardId: string) =>
     act(async () => {
@@ -269,16 +285,27 @@ export default function AiScreen() {
       await reload();
     });
 
-  // 장소 시트에서 고름 — 그 장소로 카드를 다시 계산
-  const pickPlace = (cardId: string, place: { name: string; lat?: number; lng?: number }) => {
+  // 장소 시트에서 고름 — "장소를 확인하고 있어요..." → (api가 장소를 정하면) "기상·준비·출발 시간을 계산하고 있어요..." → 카드에 결과.
+  //   계산 결과는 서버 안내 답을 기다리지 않고 바로 보임(api 진행 알림). 계산이 실패하면 카드에 까닭 + [다시 시도](같은 장소로)
+  const pickPlace = async (cardId: string, place: { name: string; lat?: number; lng?: number }): Promise<void> => {
     setPlaceCardId(null);
-    return act(async () => {
-      try {
-        await pickCardPlace(cardId, place);
-      } finally {
-        await reload();
-      }
-    }, '장소로 계산하지 못했어요');
+    if (work) return; // 다른 카드 일이 도는 중 — 겹쳐 고르지 않음
+    const retryPlace = () => void pickPlace(cardId, place);
+    setCardFail(null);
+    setWork({ id: cardId, step: 'place' });
+    try {
+      const result = await pickCardPlace(cardId, place, (c) => {
+        setProgress(c);
+        setWork(c.cards.find((x) => x.id === cardId)?.status === 'ESTIMATING' ? { id: cardId, step: 'estimate' } : null);
+      });
+      if (result === 'FAILED') setCardFail({ id: cardId, message: null, retry: retryPlace }); // 까닭은 카드의 error
+    } catch (e) {
+      setCardFail({ id: cardId, message: userMessage(e, '장소로 계산하지 못했어요'), retry: retryPlace });
+    } finally {
+      setWork(null);
+      await reload();
+      setProgress(null);
+    }
   };
 
   return (
@@ -311,10 +338,12 @@ export default function AiScreen() {
             if (!card) return null;
             // 말을 처리하는 도중 앱이 알람을 계산하는 카드 — 카드 대신 임시 말풍선 (끝나면 같은 자리가 카드로 바뀜, 실패하면 카드가 오류 안내)
             //   처리가 끝났는데 계산 전으로 남은 카드(오류 뒤)는 임시 말풍선으로 두지 않고 카드 그대로
-            if ((progress || thinking) && (card.status === 'NEEDS_ESTIMATE' || card.status === 'ESTIMATING')) {
+            if ((progress || thinking) && (card.status === 'NEEDS_ESTIMATE' || card.status === 'ESTIMATING') && work?.id !== card.id) {
               return <ChatBubble key={m.id} who="ai" text={CARD_DRAFTING} at={m.at} />;
             }
             const appointmentId = card.appointmentId;
+            const step = work?.id === card.id ? work.step : null;
+            const fail = cardFail?.id === card.id ? cardFail : null;
             return (
               <FoundScheduleCard
                 key={m.id}
@@ -326,7 +355,11 @@ export default function AiScreen() {
                 onPickPlace={() => setPlaceCardId(card.id)}
                 onOpen={appointmentId ? () => router.push({ pathname: '/alarm/[id]', params: { id: appointmentId } }) : undefined}
                 onManual={() => router.push('/schedule/new')}
-                disabled={busy || thinking}
+                disabled={busy || thinking || !!work}
+                working={step ? CARD_STEP[step] : null}
+                saving={step === 'save'}
+                failure={fail?.message ?? null}
+                onRetry={fail?.retry}
               />
             );
           })}

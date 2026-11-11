@@ -169,8 +169,9 @@ export async function rejectCard(cardId: string): Promise<void> {
 }
 
 // 카드 [장소 고르기]로 고른 곳으로 다시 계산 — 실데이터만 (목업 카드는 장소가 늘 있음)
-export async function pickCardPlace(cardId: string, place: { name: string; lat?: number; lng?: number }): Promise<void> {
-  if (!isMock()) return real.pickCardPlace(cardId, place);
+export async function pickCardPlace(cardId: string, place: { name: string; lat?: number; lng?: number }, onProgress?: (c: Conversation) => void): Promise<'READY' | 'NEEDS_PLACE' | 'FAILED'> {
+  if (!isMock()) return real.pickCardPlace(cardId, place, onProgress);
+  return 'READY';
 }
 
 // [다시 시도] — 서버가 답하지 못했을 때 같은 요청을 다시 (목업은 늘 답함)

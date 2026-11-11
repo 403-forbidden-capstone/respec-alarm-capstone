@@ -370,8 +370,9 @@ export function isDuplicateTodo(
   sessionId: string,
 ): boolean {
   const key = itemKey(t.title);
+  // 같은 대화가 이미 넣은 같은 이름은 약속 · 날짜가 달라도 겹침 — 대화 중(voice-turn)에 바로 넣은 준비물을 끝 정리(T2)가 약속에 붙여 또 넣지 않게
   return existing.some(
-    (e) => itemKey(e.title) === key && (e.appointment_id ?? null) === t.appointment_id && (t.appointment_id !== null || e.due_date === t.due_date || e.source_session_id === sessionId),
+    (e) => itemKey(e.title) === key && (e.source_session_id === sessionId || ((e.appointment_id ?? null) === t.appointment_id && (t.appointment_id !== null || e.due_date === t.due_date))),
   );
 }
 

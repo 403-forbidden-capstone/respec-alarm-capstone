@@ -251,6 +251,12 @@ describe('일정 · 할 일 (기존 카드 흐름과 같이)', () => {
     assert.equal(isDuplicateTodo(t, [{ title: '우산', appointment_id: null, due_date: null, source_session_id: 's1' }], 's1'), true);
     assert.equal(isDuplicateTodo({ ...t, appointment_id: 'ap-new' }, [{ title: '우산', appointment_id: 'ap-new', due_date: null, source_session_id: null }], 's1'), true);
   });
+
+  it('isDuplicateTodo: 대화 중(voice-turn)에 이 대화가 넣은 준비물은 끝 정리가 약속에 붙여 다시 뽑아도 겹침 (11/12)', () => {
+    const fromTurn = [{ title: '노트북', appointment_id: null, due_date: TOMORROW, source_session_id: 's1' }];
+    assert.equal(isDuplicateTodo({ title: '노트북 챙기기', todo_type: 'ITEM', due_date: null, appointment_id: 'ap-1' }, fromTurn, 's1'), true);
+    assert.equal(isDuplicateTodo({ title: '노트북', todo_type: 'ITEM', due_date: null, appointment_id: 'ap-1' }, fromTurn, 's2'), false); // 다른 대화 · 다른 약속은 그대로
+  });
 });
 
 describe('계약 · 스키마', () => {

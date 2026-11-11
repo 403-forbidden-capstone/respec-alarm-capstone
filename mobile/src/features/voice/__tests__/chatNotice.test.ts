@@ -3,7 +3,7 @@ import { describe, expect, it } from '@jest/globals';
 import { noticeActions, noticeCopy, primaryAction, type NoticeKind } from '../chatNotice';
 
 const all = { hasRetry: true, hasManual: true, hasDone: true };
-const KINDS: NoticeKind[] = ['failed', 'extract', 'busy', 'limit', 'turn'];
+const KINDS: NoticeKind[] = ['failed', 'timeout', 'extract', 'busy', 'limit', 'turn'];
 
 describe('noticeCopy', () => {
   it('종류마다 정해진 제목 — 분당 · 하루 · 대화 길이 제한이 서로 다른 글', () => {
@@ -28,6 +28,12 @@ describe('noticeCopy', () => {
     expect(noticeActions('extract', { hasRetry: true })).toEqual(['retry']); // 버튼 [다시 시도]
   });
 
+  it('시간 초과(timeout)는 사용량 제한(busy)과 다른 글 — 늦어진다고 알리고 말은 남아 있음', () => {
+    expect(noticeCopy('timeout').title).toBe('AI 응답이 늦어지고 있어요');
+    expect(noticeCopy('timeout').body).toContain('내가 한 말은 그대로 있어요');
+    expect(noticeCopy('timeout').title).not.toBe(noticeCopy('busy').title);
+  });
+
   it('한도(limit · turn) 본문에 하루 기록을 만든다는 줄이 있음', () => {
     expect(noticeCopy('limit').body).toContain('하루 기록을 만들어요');
     expect(noticeCopy('turn').body).toContain('하루 기록을 만들어요');
@@ -43,7 +49,7 @@ describe('noticeCopy', () => {
 
 describe('noticeActions', () => {
   it('failed · extract · busy — 다시 시도가 1차, 그다음 직접 만들기 · 마치기', () => {
-    for (const kind of ['failed', 'extract', 'busy'] as const) {
+    for (const kind of ['failed', 'timeout', 'extract', 'busy'] as const) {
       expect(noticeActions(kind, all)).toEqual(['retry', 'manual', 'done']);
       expect(primaryAction(kind)).toBe('retry');
     }

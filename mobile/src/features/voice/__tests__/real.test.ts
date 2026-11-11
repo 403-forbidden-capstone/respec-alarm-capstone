@@ -5,6 +5,7 @@ import { createAppointment, createStandaloneAlarm, estimateAppointment, getAppoi
 import type { Estimate } from '@/features/alarm/types';
 import { now } from '@/lib/clock';
 import { EdgeError, callEdge } from '@/lib/edge';
+import { UserError } from '@/lib/errors';
 
 import { applyFix } from '../fixes';
 import { clearSavedMarksForUser, SAVED_MARK_TTL_MS } from '../savedMarks';
@@ -162,7 +163,7 @@ describe('① 세션 시작 · 첫 마디', () => {
 });
 
 describe('② 말 → 일반 답', () => {
-  it('voice-turn에 session · rev · client_turn_id · 글을 보내고(25초) 답을 붙임', async () => {
+  it('voice-turn에 session · rev · client_turn_id · 글을 보내고(40초) 답을 붙임', async () => {
     script = [session(), turn()];
     await getConversation();
     const c = await say('  응 맞아  ');
@@ -171,7 +172,7 @@ describe('② 말 → 일반 답', () => {
     expect(body).toMatchObject({ session_id: 's1', rev: 1, text: '응 맞아' });
     expect(typeof body.client_turn_id).toBe('string');
     expect(options).toEqual({ timeoutMs: TURN_TIMEOUT_MS });
-    expect(TURN_TIMEOUT_MS).toBe(25_000);
+    expect(TURN_TIMEOUT_MS).toBe(40_000); // 서버 마감 30초 + 여유
     expect(c.messages.map((m) => `${m.who}:${m.text}`)).toEqual([expect.stringContaining('ai:'), 'me:응 맞아', 'ai:네, 알겠어요.']);
     // 다음 말은 응답의 rev로
     script = [turn({ rev: 3 })];
@@ -405,6 +406,39 @@ describe('⑤ 장소 필요 → 장소 고르기 → 계산 → 준비', () => {
     await say('발표');
     await expect(pickCardPlace('c1', { name: '어딘가' })).rejects.toThrow('위치를 몰라요');
   });
+
+  it('장소를 고르면 실제 단계마다 알림 — 계산 중(ESTIMATING) → 결과(READY)가 서버 안내 답을 보내기 전에 보이고, 결과 상태를 돌려줌', async () => {
+    mPlaces.mockImplementation(async () => []);
+    script = [session(), turn({ next: 'APP_TASKS', reply: null, cards: [apptCard()] }), turn({ rev: 3, cards: [apptCard({ status: 'NEEDS_PLACE' })] })];
+    await getConversation();
+    await say('내일 10시 학교 도서관에서 팀 회의');
+    const seen: [string, number][] = []; // [카드 상태, 그때까지 보낸 voice-turn 수]
+    script = [turn({ rev: 4, reply: { text: '저장할까요?' }, cards: [apptCard({ status: 'READY' })] })];
+    const result = await pickCardPlace('c1', { name: '학교 도서관', lat: 37.55, lng: 127.07 }, (c) => seen.push([c.cards[0].status, turnBodies().length]));
+    expect(result).toBe('READY');
+    expect(seen).toEqual([['ESTIMATING', 2], ['READY', 2]]); // 결과가 서버 results(3번째 요청)보다 먼저
+    expect(turnBodies()).toHaveLength(3);
+  });
+
+  it('알람 계산이 실패하면 FAILED + 까닭을 돌려주고, 같은 장소로 [다시 시도]하면 READY', async () => {
+    mPlaces.mockImplementation(async () => []);
+    script = [session(), turn({ next: 'APP_TASKS', reply: null, cards: [apptCard()] }), turn({ rev: 3, cards: [apptCard({ status: 'NEEDS_PLACE' })] })];
+    await getConversation();
+    await say('내일 10시 학교 도서관에서 팀 회의');
+    const place = { name: '학교 도서관', lat: 37.55, lng: 127.07 };
+    mEstimate.mockImplementationOnce(async () => {
+      throw new Error('kakao timeout');
+    });
+    script = [turn({ rev: 4, cards: [apptCard({ status: 'FAILED' })] })];
+    expect(await pickCardPlace('c1', place)).toBe('FAILED');
+    let c = await getConversation();
+    expect(c.cards[0].status).toBe('FAILED');
+    expect(c.cards[0].error).toBeTruthy();
+    script = [turn({ rev: 5, reply: { text: '저장할까요?' }, cards: [apptCard({ status: 'READY' })] })];
+    expect(await pickCardPlace('c1', place)).toBe('READY');
+    c = await getConversation();
+    expect(c.cards[0].status).toBe('READY');
+  });
 });
 
 describe('⑥ 카드 저장 → createAppointment → card_action', () => {
@@ -421,7 +455,7 @@ describe('⑥ 카드 저장 → createAppointment → card_action', () => {
     expect(mCreate).toHaveBeenCalledTimes(1);
     expect(mCreate.mock.calls[0][1]).toBe('자기 전 대화');
     expect(mCreate.mock.calls[0][0].appointment.items).toEqual(['노트북']); // 준비물은 Estimate에 담겨 카드와 같이 저장
-    expect(toast).toBe('캡스톤 발표 알람을 맞췄어요');
+    expect(toast).toBe('일정이 저장됐어요. 캡스톤 발표 알람을 맞췄어요');
     const body = turnBodies().at(-1)!;
     expect(body).toMatchObject({ session_id: 's1', rev: 3 });
     expect(body.card_action).toEqual({
@@ -439,6 +473,26 @@ describe('⑥ 카드 저장 → createAppointment → card_action', () => {
     expect(c.messages.at(-1)?.text).toContain('저장했어요');
     await expect(saveCard('c1')).rejects.toThrow('이미 확인한 카드예요'); // 두 번 저장 막음
     expect(mCreate).toHaveBeenCalledTimes(1);
+  });
+
+  it('[저장]을 빠르게 두 번 눌러도(동시에 두 번 불려도) 일정은 한 번만 저장', async () => {
+    await ready();
+    script = [turn({ rev: 4, reply: { text: '저장했어요.' }, cards: [apptCard({ status: 'SAVED' })] })];
+    const [a, b] = await Promise.allSettled([saveCard('c1'), saveCard('c1')]);
+    expect(a).toMatchObject({ status: 'fulfilled', value: '일정이 저장됐어요. 캡스톤 발표 알람을 맞췄어요' });
+    expect(b).toMatchObject({ status: 'rejected' });
+    expect(mCreate).toHaveBeenCalledTimes(1);
+  });
+
+  it('저장이 실패하면 까닭을 던지고 카드는 READY로 남아 [다시 시도]로 다시 저장할 수 있음', async () => {
+    await ready();
+    mCreate.mockImplementationOnce(async () => {
+      throw new UserError('일정을 저장하지 못했어요. 연결을 확인해 주세요');
+    });
+    await expect(saveCard('c1')).rejects.toThrow('연결을 확인해 주세요');
+    expect((await getConversation()).cards[0].status).toBe('READY');
+    script = [turn({ rev: 4, reply: { text: '저장했어요.' }, cards: [apptCard({ status: 'SAVED' })] })];
+    expect(await saveCard('c1')).toBe('일정이 저장됐어요. 캡스톤 발표 알람을 맞췄어요');
   });
 
   it('[저장 안 함]은 REJECTED로만 알리고 답이 없음', async () => {
@@ -700,6 +754,18 @@ describe('⑧ 실패 — 대화 · 카드는 남기고 다시 시도', () => {
     resetVoiceState();
     script = [session(), new EdgeError('LLM_UNAVAILABLE', { details: { code: 'UPSTREAM' } })];
     expect((await say('안녕')).unavailable?.rateLimited).toBeUndefined();
+  });
+
+  it('시간 초과(서버 모델 TIMEOUT · 앱이 응답을 못 받음)는 unavailable.timedOut — 사용량 제한(rateLimited)과 다른 안내', async () => {
+    script = [session(), new EdgeError('LLM_UNAVAILABLE', { details: { code: 'TIMEOUT' } })];
+    expect((await say('안녕')).unavailable).toMatchObject({ timedOut: true, canRetry: true });
+    expect((await getConversation()).unavailable?.rateLimited).toBeUndefined();
+    resetVoiceState();
+    script = [session(), new EdgeError('TIMEOUT')];
+    expect((await say('안녕')).unavailable).toMatchObject({ code: 'TIMEOUT', timedOut: true });
+    resetVoiceState();
+    script = [session(), new EdgeError('LLM_UNAVAILABLE', { details: { code: 'RATE_LIMITED' } })];
+    expect((await say('안녕')).unavailable?.timedOut).toBeUndefined();
   });
 
   it('일정 추출 시간 초과(details.extract_failed)면 unavailable.extractFailed — 말은 남고, [다시 시도]가 같은 요청으로 다시 추출해 장소 못 찾은 카드는 NEEDS_PLACE (11/12 사고)', async () => {
@@ -1060,7 +1126,7 @@ describe('⑫ 저장됨 로컬 표시', () => {
       script = [session(), turn({ next: 'APP_TASKS', reply: null, cards: [apptCard()] }), turn({ rev: 3, cards: [apptCard({ status: 'READY' })] }), turn({ rev: 4, reply: { text: '저장했어요.' } })];
       await getConversation();
       await say('발표 있어');
-      expect(await saveCard('c1')).toBe('캡스톤 발표 알람을 맞췄어요');
+      expect(await saveCard('c1')).toBe('일정이 저장됐어요. 캡스톤 발표 알람을 맞췄어요');
       expect(mCreate).toHaveBeenCalledTimes(1);
       expect(turnBodies().at(-1)?.card_action).toMatchObject({ id: 'c1', action: 'SAVED' });
       expect((await getConversation()).cards[0].status).toBe('SAVED');
@@ -1165,7 +1231,7 @@ describe('⑬ 저장됨 표시: 사용자별 · 7일 정리', () => {
     script = [session(), turn({ next: 'APP_TASKS', reply: null, cards: [apptCard()] }), turn({ rev: 3, cards: [apptCard({ status: 'READY' })] }), turn({ rev: 4, reply: { text: '저장했어요.' } })];
     await getConversation();
     await say('발표 있어');
-    expect(await saveCard('c1')).toBe('캡스톤 발표 알람을 맞췄어요');
+    expect(await saveCard('c1')).toBe('일정이 저장됐어요. 캡스톤 발표 알람을 맞췄어요');
     expect(mCreate).toHaveBeenCalledTimes(1);
     expect(await AsyncStorage.getAllKeys()).toEqual([]);
     expect(turnBodies().at(-1)?.card_action).toMatchObject({ id: 'c1', action: 'SAVED' });
@@ -1241,7 +1307,7 @@ describe('⑮ pending이 있을 때 카드 동작은 큐에서 기다림', () =>
   it('[저장]은 앱 일(createAppointment)을 바로 하고 서버 알림만 큐에 — unavailable · [다시 시도]는 그대로, 성공하면 순서대로 flush', async () => {
     await textFailed();
     const toast = await saveCard('c1');
-    expect(toast).toBe('캡스톤 발표 알람을 맞췄어요');
+    expect(toast).toBe('일정이 저장됐어요. 캡스톤 발표 알람을 맞췄어요');
     expect(mCreate).toHaveBeenCalledTimes(1); // 앱 쪽 일은 바로
     expect(edge).not.toHaveBeenCalled(); // 서버에는 아직 안 보냄 (말 요청을 덮어쓰지 않음)
     let c = await getConversation();

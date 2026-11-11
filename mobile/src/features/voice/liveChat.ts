@@ -27,7 +27,7 @@ export function closeLive(lines: LiveLine[]): LiveLine[] {
 // 일정일 수도 있는 말인지 — 날짜 · 시각 · 일정 낱말이 있으면 true. 서버가 추출(T2F)하기 전에 "일정이 있는지 확인하고 있어요..."를 먼저 띄울지만 정함 (서버 turn.ts mightBeSchedule에 같은 글 — 고치면 둘 다)
 //   자기 전 대화에 흔한 '오늘 · 저녁 · 운동했어 · 만났어'는 넣지 않음 (일반 대화마다 뜨지 않게). 틀려도 괜찮은 어림 — 일정이 아니면 추출 결과가 오는 대로 말풍선을 내리고, 놓친 일정은 추출 뒤 카드 자리의 임시 말풍선으로 보임
 const SCHEDULE_HINT =
-  /내일|모레|글피|이번\s*주|다음\s*주|주말|[월화수목금토일]요일|\d+\s*(?:시|분|일|월)|(?:한|두|세|네|다섯|여섯|일곱|여덟|아홉|열|열한|열두)\s*시|오전|오후|약속|일정|수업|강의|시험|회의|미팅|발표|면접|예약|알람|깨워|출발|모임|만나기로|만날|산책|병원|마감/u;
+  /내일|모레|글피|이번\s*주|다음\s*주|주말|[월화수목금토일]요일|\d+\s*(?:시|분|일|월)|(?:한|두|세|네|다섯|여섯|일곱|여덟|아홉|열|열한|열두)\s*시|오전|오후|약속|일정|수업|강의|시험|회의|미팅|발표|면접|예약|알람|깨워|출발|모임|만나기로|만날|산책|병원|마감|챙겨|챙길|가져가|준비물|tomorrow|tonight|next\s+week|this\s+week|monday|tuesday|wednesday|thursday|friday|saturday|sunday|\d{1,2}(?::\d{2})?\s*(?:am|pm)\b|\d{1,2}:\d{2}|meeting|class|exam|appointment|schedule|remind|bring/iu;
 export const mightBeSchedule = (text: string): boolean => SCHEDULE_HINT.test(text);
 
 // 아직 서버에 보내지 않은 확정 줄을 한 차례로 — 내 말 · AI 답을 각각 이어 붙임. 보낼 게 없으면 null
