@@ -3237,4 +3237,6 @@ await check('user_places: updated_at이 고칠 때 갱신됨 · 계정을 지우
 const FRIEND_CTX = { q, as, su, svc, check, expectErr, PGlite, AUTH_STUBS, MIG_DIR, readFileSync, readdirSync, join };
 for (const ch of ['ch02', 'ch03', 'ch04', 'ch05', 'ch06', 'ch11', 'ch07', 'ch08', 'ch09', 'ch10', 'ch12', 'ch13', 'ch15']) await (await import(`./friend/${ch}.mjs`)).default(FRIEND_CTX);
 
+await (await import('./prepare-ml-approval.mjs')).default(FRIEND_CTX);
+
 report();
