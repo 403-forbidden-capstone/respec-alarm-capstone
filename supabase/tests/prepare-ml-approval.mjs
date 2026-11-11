@@ -78,4 +78,31 @@ export default async function testPrepareMlApproval(ctx) {
     const [r] = await q('select ml_age_code,ml_holiday_code from public.prepare_ml_verified_profiles where user_id=$1',[A]);
     return r.ml_age_code==='8' && r.ml_holiday_code===null ? true : r;
   });
+
+  await check('ML 수동 승인: legacy 학교·근무 응답이 남아 있으면 각각 거부', async () => {
+    await as(A);
+    await q("update public.profiles set ml_age_years=34,ml_holiday_code='3',ml_school_status='UNIVERSITY',ml_work_status=null,ml_profile_consented_at=now() where user_id=$1", [A]);
+    await svc();
+    const school = await expectErr(() => q('select '+fn,[A,'demo-ml-approval@example.com']), /유효한 ML/);
+    await as(A);
+    await q("update public.profiles set ml_school_status=null,ml_work_status='WORKING' where user_id=$1", [A]);
+    await svc();
+    const work = await expectErr(() => q('select '+fn,[A,'demo-ml-approval@example.com']), /유효한 ML/);
+    const [count] = await q('select count(*)::int as n from public.prepare_ml_verified_profiles where user_id=$1',[A]);
+    return school===true && work===true && count.n===0 ? true : {school,work,count};
+  });
+
+  await check('ML 수동 승인: 연령 최저/최고 14→1, 100→8', async () => {
+    const observed = [];
+    for (const [age, expected] of [[14,'1'],[100,'8']]) {
+      await as(A);
+      await q("update public.profiles set ml_age_years=$1,ml_holiday_code='3',ml_school_status=null,ml_work_status=null,ml_profile_consented_at=now() where user_id=$2", [age,A]);
+      await svc();
+      const [approval] = await q('select '+fn+' as ok',[A,'demo-ml-approval@example.com']);
+      const [row] = await q('select ml_age_code,ml_holiday_code from public.prepare_ml_verified_profiles where user_id=$1',[A]);
+      observed.push({age,expected,actual:row?.ml_age_code,holiday:row?.ml_holiday_code,approved:approval?.ok});
+    }
+    return observed.every(x => x.approved===true && x.actual===x.expected && x.holiday==='3')
+      ? true : observed;
+  });
 }
