@@ -3,10 +3,14 @@
 #   (새 브랜치의 첫 push는 비교할 원격 브랜치가 없어 다 돌 수 있음)
 #   타입 · 린트 · 단위 테스트(jest 전체)를 동시에 돌리고, 하나라도 실패하면 push가 막힘
 #   설치: mobile/에서 npm ci(또는 npm install)를 하면 git 훅이 자동으로 깔림
+#   main으로 가는 push는 파일과 상관없이 막힘 — 무료 private 조직이라 GitHub 보호 규칙을 못 써서 대신 (#494)
 #   급할 때 건너뛰기: git push --no-verify (mobile/README.md "push 전 검사")
 pre-push:
   parallel: true
   commands:
+    no-main-push:
+      run: node scripts/block-main-push.mjs
+      use_stdin: true
     typecheck:
       root: mobile/
       glob: '*'

@@ -58,6 +58,10 @@ npm run web
 
 보드 이동은 2단계만 수동입니다. 비어 있는 시작일 · 담당자는 브랜치를 만든 날짜 · 사람으로 채워집니다.
 
+- `Closes #` 없이 연 PR은 PR 자체가 카드로 올라갑니다(초안 = 진행 중). 브랜치 이름에 이슈 번호가 있으면 본문에 `관련 이슈 #12`가 자동으로 달립니다. 이슈까지 닫으려면 `Closes #12`로 바꿉니다.
+- PR 담당자는 작성자로 자동 지정됩니다(초안 포함).
+- 완료 카드의 주차는 끝낸 주로 바뀝니다. 보드의 '한 일' 보기에서 주차별로 봅니다.
+
 ## 이슈
 
 | 틀 | 유형 | 용도 |
@@ -81,7 +85,7 @@ PR 제목   [파트] [유형] 작업 내용             [FE] [FEAT] 알람 목�
 - Squash 머지만 허용합니다. PR 제목이 그대로 `main`의 커밋 한 줄이 됩니다.
 - 승인 1명 · 리뷰 대화 해결 뒤 작성자가 머지합니다. 머지된 브랜치는 자동 삭제됩니다.
 - 리뷰 전 단계의 PR은 제목 앞에 `[WIP]`를 붙입니다.
-- 위 규칙(PR 필수 · 승인 1명 · Squash만 · 강제 push 금지)은 무료 플랜 private 레포라 GitHub가 강제하지 않아 팀 약속으로 지킵니다. 플랜 변경 시 [`.github/rulesets/main.json`](.github/rulesets/main.json)을 Settings → Rules → Rulesets → Import a ruleset으로 적용합니다.
+- 위 규칙(PR 필수 · 승인 1명 · Squash만 · 강제 push 금지)은 무료 플랜 private 레포라 GitHub가 강제하지 않아 팀 약속으로 지킵니다. `main` 직접 push만 push 전 검사([`mobile/README.md`](mobile/README.md#push-전-검사))가 막습니다. 플랜 변경 시 [`.github/rulesets/main.json`](.github/rulesets/main.json)을 Settings → Rules → Rulesets → Import a ruleset으로 적용합니다.
 
 ## 리뷰
 

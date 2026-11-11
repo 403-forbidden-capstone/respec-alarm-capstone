@@ -21,6 +21,7 @@ PR에서 앱 검사가 자동으로 돌지 않아서(Actions 분량, #134) push�
 
 - `mobile/`에서 `npm ci`(또는 `npm install`)를 하면 git 훅이 자동으로 깔립니다. 따로 할 일 없음
 - `mobile/` 안 파일이 들어간 push마다 `npm run typecheck` · `npm run lint` · `npm test`(전체)를 동시에 돌리고, 하나라도 실패하면 push가 막힙니다. 문서만 바꾼 push는 건너뜁니다. 단, 새 브랜치의 첫 push는 비교할 원격 브랜치가 없어 바뀐 파일과 상관없이 다 돌 수 있습니다
+- `main`으로 가는 push는 막힙니다(#494, GitHub 보호 규칙 대신). 브랜치를 만들어 PR로 올립니다
 - 훅이 안 깔린 곳(`npm ci` 전, `CI=true`인 환경)에서는 PR 전에 세 명령을 직접 돌립니다
 - 급할 때 건너뛰기: `git push --no-verify`. 건너뛴 PR은 Actions → 앱 검사 → Run workflow로 서버에서 한 번 돌립니다
 - 커버리지: `npm run test:cov` → 폴더별 줄 · 함수 · 갈래 비율 표 (앱 검사 실행 요약에도 붙음)

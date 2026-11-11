@@ -9,6 +9,10 @@ const PRIORITIES = ['높음', '보통', '낮음'];
 const SIZES = ['S', 'M', 'L'];
 // feat/12-FE-alarm-list 처럼 우리 규칙의 브랜치와, 이슈 사이드바에서 만든 12-alarm-list 둘 다 받는다.
 const BRANCH_ISSUE = /^(?:(?:feat|fix|docs|refactor|chore)\/)?(\d+)-/;
+// PR 제목 머리말 → 보드 파트. ALL(공통)은 보드에 없어 비워 둔다.
+const TITLE_PARTS = { FE: 'FE', BE: 'BE', DB: 'BE', AI: 'AI', DATA: 'DATA', DESIGN: 'DESIGN', PM: 'PM' };
+// PR 틀의 비어 있는 'Closes #' 줄
+const EMPTY_CLOSES = /^[ \t]*(?:closes|fixes|resolves)[ \t]*#[ \t]*$/im;
 
 const STATUS = {
   backlog: '백로그',
@@ -20,7 +24,9 @@ const STATUS = {
 // 이슈를 만들고 바로 브랜치 · PR까지 올리면 늦게 끝난 실행이 카드를 되돌릴 수 있어서다.
 const FLOW = ['백로그', '이번 주', '진행 중', '리뷰', '완료'];
 
-module.exports = async function projectSync({ github, context, core }) {
+// prClient: PR 본문을 고칠 때 쓰는 클라이언트(워크플로의 GITHUB_TOKEN). 이 토큰으로 고치면
+// 다른 워크플로(edited 받는 Claude 리뷰 · 흐름 확인)가 새로 돌지 않는다. 없으면 github으로 고친다.
+module.exports = async function projectSync({ github, context, core, prClient = github }) {
   const board = await loadBoard(github);
   const sync = makeSync({ github, core, board });
   const { eventName, payload } = context;
@@ -41,7 +47,7 @@ module.exports = async function projectSync({ github, context, core }) {
   }
 
   if (eventName === 'pull_request') {
-    return onPullRequest(sync, payload, { github, context });
+    return onPullRequest(sync, payload, { github, context, core, board, prClient });
   }
 };
 
@@ -76,11 +82,12 @@ async function onIssueOpened(sync, issue, { github, context }) {
   if (start || due) await sync.setIteration(itemId, start || due);
 }
 
-// 이슈 닫힘: 완료. Not planned로 닫으면 보드에서 보관(archive)
+// 이슈 닫힘: 완료 + 주차는 끝낸 주('한 일' 보기가 주차로 묶임). Not planned · Duplicate로 닫으면 보드에서 보관(archive)
 async function onIssueClosed(sync, issue) {
   const itemId = await sync.addItem(issue.node_id);
-  if (issue.state_reason === 'not_planned') return sync.archive(itemId);
-  return sync.setStatus(itemId, STATUS.done);
+  if (['not_planned', 'duplicate'].includes(issue.state_reason)) return sync.archive(itemId);
+  await sync.setStatus(itemId, STATUS.done);
+  await sync.setIteration(itemId, todayInSeoul());
 }
 
 // 브랜치 생성: 이름의 이슈 번호로 이슈를 찾아 진행 중, 빈 시작일 · 주차 · 담당자를 채운다
@@ -111,10 +118,39 @@ async function onBranchCreated(sync, payload, { github, context, core }) {
   }
 }
 
-// PR: 연결된 이슈(Closes #번호)를 리뷰 → 머지면 완료, 머지 없이 닫히면 다시 진행 중
-// 리뷰로 옮길 때 이슈의 파트 라벨을 PR에 붙이고, 비어 있는 담당자를 PR 작성자로 채운다
-async function onPullRequest(sync, payload, { github, context }) {
+// PR: 이슈를 닫는 PR(Closes #번호)은 그 이슈 카드를, 아닌 PR은 PR 자체를 카드로 움직인다.
+//   열림 · 다시 열림 · 초안 해제 → 이슈 카드 리뷰 / PR 카드 리뷰(초안이면 진행 중)
+//   머지 → 완료, 머지 없이 닫힘 → 이슈 카드 다시 진행 중 / PR 카드 보관
+// 열 때: 이슈의 파트 라벨을 PR에, 빈 담당자는 PR 작성자(초안 포함),
+//        닫는 이슈가 없으면 브랜치 이름의 이슈 번호를 본문에 '관련 이슈 #번호'로 단다.
+async function onPullRequest(sync, payload, { github, context, core, board, prClient }) {
   const { action, pull_request: pr } = payload;
+  const opening = ['opened', 'reopened', 'ready_for_review'].includes(action) && pr.state === 'open';
+  const closing = action === 'closed';
+  if (!opening && !closing) return;
+
+  const { issues, card } = await loadPullRequest(github, context, board, pr.number);
+  const human = pr.user?.type === 'User';
+
+  let status = null;
+  if (opening && !pr.draft) status = STATUS.review;
+  else if (closing) status = pr.merged ? STATUS.done : STATUS.inProgress;
+  for (const issue of status ? issues : []) {
+    if (status !== STATUS.done && issue.state !== 'OPEN') continue;
+    const itemId = await sync.addItem(issue.id);
+    await sync.setStatus(itemId, status);
+  }
+
+  // PR 카드: 닫는 이슈가 없는 사람 PR. 이미 카드가 있으면(나중에 Closes를 적은 경우 등) 그 카드도 마저 옮긴다.
+  if (human && (issues.length === 0 || card)) await syncPullRequestCard(sync, pr, card, { opening });
+
+  if (opening && human) {
+    await fillPullRequest(pr, issues, { github, context });
+    if (issues.length === 0) await linkBranchIssue(pr, { github, context, core, prClient });
+  }
+}
+
+async function loadPullRequest(github, context, board, number) {
   const { repository } = await github.graphql(
     `query($owner: String!, $repo: String!, $number: Int!) {
       repository(owner: $owner, name: $repo) {
@@ -127,28 +163,66 @@ async function onPullRequest(sync, payload, { github, context }) {
               assignees(first: 1) { totalCount }
             }
           }
+          projectItems(first: 10, includeArchived: true) {
+            nodes { id isArchived project { id } }
+          }
         }
       }
     }`,
-    { ...context.repo, number: pr.number },
+    { ...context.repo, number },
   );
-  const issues = repository.pullRequest.closingIssuesReferences.nodes;
+  const { closingIssuesReferences, projectItems } = repository.pullRequest;
+  const card = projectItems.nodes.find((item) => item.project.id === board.id) ?? null;
+  return { issues: closingIssuesReferences.nodes, card };
+}
 
-  let status = null;
-  if (['opened', 'reopened', 'edited', 'ready_for_review'].includes(action) && pr.state === 'open' && !pr.draft) {
-    status = STATUS.review;
-  } else if (action === 'closed') {
-    status = pr.merged ? STATUS.done : STATUS.inProgress;
+// PR 카드. 처음 올릴 때 파트(제목 머리말) · 시작일(PR 연 날) · 주차를 채우고,
+// 머지되면 완료 + 목표일 · 주차를 머지한 날로('한 일' 보기가 주차로 묶임), 그냥 닫히면 보관.
+async function syncPullRequestCard(sync, pr, card, { opening }) {
+  if (!opening && !pr.merged) {
+    if (card && !card.isArchived) await sync.archive(card.id);
+    return;
   }
-  if (!status) return;
+  const itemId = card?.id ?? (await sync.addItem(pr.node_id));
+  if (card?.isArchived) await sync.unarchive(itemId);
 
-  for (const issue of issues) {
-    if (status !== STATUS.done && issue.state !== 'OPEN') continue;
-    const itemId = await sync.addItem(issue.id);
-    await sync.setStatus(itemId, status);
+  if (!card) {
+    const part = partFromTitle(pr.title);
+    if (part) await sync.setOption(itemId, '파트', (name) => name === part);
+    const start = seoulDate(pr.created_at);
+    await sync.setDate(itemId, '시작일', start);
+    await sync.setIteration(itemId, start);
   }
 
-  if (status === STATUS.review) await fillPullRequest(pr, issues, { github, context });
+  if (opening) return sync.setStatus(itemId, pr.draft ? STATUS.inProgress : STATUS.review);
+  const merged = seoulDate(pr.merged_at);
+  await sync.setStatus(itemId, STATUS.done);
+  await sync.setDate(itemId, '목표일', merged);
+  await sync.setIteration(itemId, merged);
+}
+
+// 닫는 이슈 없이 연 PR: 브랜치 이름(feat/12-...)의 번호가 이슈면 본문에 '관련 이슈 #12'를 단다.
+// Closes는 자동으로 넣지 않는다 — PR 여러 개가 붙는 이슈(#42 등)가 첫 PR 머지 때 닫혀 버려서.
+// 비어 있는 'Closes #' 줄이 있으면 그 줄을 바꾸고, 본문에 이미 그 번호가 있거나 번호가 PR이면 건너뛴다.
+async function linkBranchIssue(pr, { github, context, core, prClient }) {
+  const match = BRANCH_ISSUE.exec(pr.head?.ref ?? '');
+  if (!match) return;
+  const number = Number(match[1]);
+  const body = pr.body ?? '';
+  const mentioned = new RegExp(`#${number}(?!\\d)`);
+  if (mentioned.test(body) || mentioned.test(pr.title)) return;
+
+  let issue;
+  try {
+    ({ data: issue } = await github.rest.issues.get({ ...context.repo, issue_number: number }));
+  } catch {
+    return core.info(`브랜치 ${pr.head.ref} 의 #${number} 를 찾지 못해 연결을 건너뜁니다.`);
+  }
+  if (issue.pull_request) return;
+
+  const line = `관련 이슈 #${number} <!-- 브랜치 이름에서 자동 연결. 이 PR로 이슈를 닫으려면 Closes #${number} 로 바꿔 주세요 -->`;
+  const next = EMPTY_CLOSES.test(body) ? body.replace(EMPTY_CLOSES, line) : `${body.trimEnd()}\n\n${line}`.trimStart();
+  await prClient.rest.pulls.update({ ...context.repo, pull_number: pr.number, body: next });
 }
 
 // 파트 라벨(릴리즈 노트 분류용)과 담당자(보드 카드에 누가 하는지 보이게).
@@ -165,7 +239,6 @@ async function fillPullRequest(pr, issues, { github, context }) {
   const missing = [...parts].filter((name) => !current.includes(name));
   if (missing.length) await github.rest.issues.addLabels({ owner, repo, issue_number: pr.number, labels: missing });
 
-  if (pr.user?.type !== 'User') return;
   const assignees = [pr.user.login];
   if (!pr.assignees?.length) await github.rest.issues.addAssignees({ owner, repo, issue_number: pr.number, assignees });
   for (const issue of ours) {
@@ -279,6 +352,14 @@ function makeSync({ github, core, board }) {
         { projectId: board.id, itemId },
       );
     },
+    async unarchive(itemId) {
+      await github.graphql(
+        `mutation($projectId: ID!, $itemId: ID!) {
+          unarchiveProjectV2Item(input: { projectId: $projectId, itemId: $itemId }) { item { id } }
+        }`,
+        { projectId: board.id, itemId },
+      );
+    },
   };
 }
 
@@ -308,6 +389,15 @@ function partFromIssue(issue) {
   return issue.type?.name === 'Design' ? 'DESIGN' : null;
 }
 
+// "[WIP] [FE] [FEAT] ..." → FE. 머리말이 없거나 [ALL]뿐이면 null
+function partFromTitle(title) {
+  for (const [, tag] of (title ?? '').matchAll(/\[([A-Za-z]+)\]/g)) {
+    const part = TITLE_PARTS[tag.toUpperCase()];
+    if (part) return part;
+  }
+  return null;
+}
+
 // 2026-10-07 · 2026.10.7 · 10/7 · 10.7 · 10월 7일 → 2026-10-07
 function parseDate(text, year = Number(todayInSeoul().slice(0, 4))) {
   const t = (text ?? '').trim();
@@ -331,10 +421,17 @@ function isWithin(date, startDate, durationDays) {
 }
 
 function todayInSeoul() {
-  return new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Seoul' });
+  return seoulDate(new Date());
+}
+
+// ISO 시각(PR created_at · merged_at) → 서울 날짜 YYYY-MM-DD
+function seoulDate(time) {
+  return new Date(time).toLocaleDateString('en-CA', { timeZone: 'Asia/Seoul' });
 }
 
 module.exports.parseForm = parseForm;
 module.exports.parseDate = parseDate;
 module.exports.pick = pick;
+module.exports.partFromTitle = partFromTitle;
+module.exports.seoulDate = seoulDate;
 module.exports.BRANCH_ISSUE = BRANCH_ISSUE;
