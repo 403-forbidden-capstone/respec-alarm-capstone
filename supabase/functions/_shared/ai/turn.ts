@@ -10,7 +10,7 @@
 //   results     앱이 계산한 카드 상태 · 정정 결과 — applyTaskResults → T1 → 가드. 대기 중인 앱 일이 없어도 받음(장소 고르기 뒤 새 client_turn_id)
 //   card_action 카드 [저장] · [저장 안 함] — applyCardAction. 저장(SAVED) 뒤 T1 한 번, REJECTED는 상태만(reply null)
 // 동시 요청 · 재시도: server_state.rev 비교(CONFLICT), client_turn_id가 이미 있으면 저장한 답을 그대로 / 답이 아직 없던 요청이면 T1만 다시 (말이 두 번 쌓이지 않음).
-// 시간: 서버 전체 18초 마감(T2F 9초 · T1 16초 — 둘 다 남은 시간으로 잘림, 다시 부르기는 남은 시간 7초 넘을 때만). T2F가 못 오면 그 턴은 "처리 결과 없음".
+// 시간: 서버 전체 18초 마감(T2F 9초 · T1 16초 — 둘 다 남은 시간으로 잘림, 다시 부르기는 남은 시간 7초 넘을 때만). T2F가 못 오면 그 턴은 "처리 결과 없음" — 단, 일정일 수도 있는 글이면 말을 쌓지 않고 LLM_UNAVAILABLE(details.extract_failed)로 [다시 시도].
 // 모델 호출마다 ai_calls 한 줄(서버 키). 모델 호출 · 키 읽기는 deps.llm(null이면 NOT_CONFIGURED)만 통한다 — 이 파일은 Deno API를 안 써서 node --test로 돈다.
 import { HttpError } from '../errors.ts';
 import type { Db } from '../supabase.ts';
@@ -317,6 +317,11 @@ export function extractNeeded(text: string, _st?: ServerState): boolean {
   return !SMALL_TALK.has(core);
 }
 
+// 일정일 수도 있는 말 — 앱 mobile/src/features/voice/liveChat.ts SCHEDULE_HINT와 같은 글 (고치면 둘 다). 추출 실패를 실패로 알릴지만 정함
+const SCHEDULE_HINT =
+  /내일|모레|글피|이번\s*주|다음\s*주|주말|[월화수목금토일]요일|\d+\s*(?:시|분|일|월)|(?:한|두|세|네|다섯|여섯|일곱|여덟|아홉|열|열한|열두)\s*시|오전|오후|약속|일정|수업|강의|시험|회의|미팅|발표|면접|예약|알람|깨워|출발|모임|만나기로|만날|산책|병원|마감/u;
+export const mightBeSchedule = (text: string): boolean => SCHEDULE_HINT.test(text);
+
 async function handleText(run: Run, row: SessionRow, st: ServerState, req: Extract<TurnRequest, { kind: 'text' }>, limitsFor: LimitsFor): Promise<VoiceTurnOut> {
   const { deps } = run;
   const sessionDeps = { userId: deps.userId, userDb: deps.userDb, service: deps.service };
@@ -356,6 +361,13 @@ async function handleText(run: Run, row: SessionRow, st: ServerState, req: Extra
     extract ? run.call<FastExtract>('T2F', screenFast(st, run.nowIso, stored)) : Promise.resolve(null),
     parallel ? run.call<T1Output>('T1', screenT1(st, run.nowIso, stored, previewEvents).vars) : Promise.resolve(null),
   ]);
+
+  // 일정일 수도 있는 글의 추출 실패 — T1로 넘기면 "내일 챙길 일정 있나요?" 같은 답이 실패를 덮고 일정이 조용히 사라짐(11/12 사고).
+  //   말을 저장하지 않고(rev 그대로) 실패로 돌려줌 → 앱 [다시 시도]가 같은 요청을 보내 추출부터 다시. 일반 말 · 음성 차례는 아래 기존 길 그대로
+  if (fastRes !== null && !fastRes.ok && !voice && mightBeSchedule(req.text)) {
+    await recordCalls(sessionDeps, row.session_id, run.logs, run.nowIso);
+    throw unavailable(fastRes, { extract_failed: true, cards: st.cards.map((c) => publicCard(c, st.refs)), fixes: [], rev: st.rev, turn_seq: st.counts.user_turns, limits: await limitsFor(st) });
+  }
 
   let ts: TurnState = ts0;
   let tasks = false;

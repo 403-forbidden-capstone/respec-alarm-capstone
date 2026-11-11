@@ -24,7 +24,7 @@ export function closeLive(lines: LiveLine[]): LiveLine[] {
   return lines.some((l) => !l.done) ? lines.map((l) => (l.done ? l : { ...l, done: true })) : lines;
 }
 
-// 일정일 수도 있는 말인지 — 날짜 · 시각 · 일정 낱말이 있으면 true. 서버가 추출(T2F)하기 전에 "일정 카드를 생성하고 있어요..."를 먼저 띄울지만 정함
+// 일정일 수도 있는 말인지 — 날짜 · 시각 · 일정 낱말이 있으면 true. 서버가 추출(T2F)하기 전에 "일정이 있는지 확인하고 있어요..."를 먼저 띄울지만 정함 (서버 turn.ts mightBeSchedule에 같은 글 — 고치면 둘 다)
 //   자기 전 대화에 흔한 '오늘 · 저녁 · 운동했어 · 만났어'는 넣지 않음 (일반 대화마다 뜨지 않게). 틀려도 괜찮은 어림 — 일정이 아니면 추출 결과가 오는 대로 말풍선을 내리고, 놓친 일정은 추출 뒤 카드 자리의 임시 말풍선으로 보임
 const SCHEDULE_HINT =
   /내일|모레|글피|이번\s*주|다음\s*주|주말|[월화수목금토일]요일|\d+\s*(?:시|분|일|월)|(?:한|두|세|네|다섯|여섯|일곱|여덟|아홉|열|열한|열두)\s*시|오전|오후|약속|일정|수업|강의|시험|회의|미팅|발표|면접|예약|알람|깨워|출발|모임|만나기로|만날|산책|병원|마감/u;
@@ -42,7 +42,7 @@ export function takeTurn(lines: LiveLine[]): { ids: string[]; me: string; ai: st
 export const askPrompt = (items: string[]): string =>
   `[APP NOTE] 사용자가 방금 말한 일정에서 아직 모르는 것: ${items.join(', ')}. 이것만 짧게 한 번 물어봐 줘. 카드나 저장 이야기는 하지 마.`;
 
-// 확정됐지만 아직 서버에 안 넘긴 내 말이 일정일 수도 있는지 — Live 답이 시작돼 내 말이 확정된 순간부터(차례 끝 전) "일정 카드를 생성하고 있어요..."
+// 확정됐지만 아직 서버에 안 넘긴 내 말이 일정일 수도 있는지 — Live 답이 시작돼 내 말이 확정된 순간부터(차례 끝 전) "일정이 있는지 확인하고 있어요..."
 export const heardSchedule = (lines: LiveLine[]): boolean => lines.some((l) => l.who === 'me' && l.done && !l.sent && mightBeSchedule(l.text));
 
 // 서버 대화 + 음성 말풍선을 시각 순서로 한 목록에. 같은 시각이면 서버 대화 먼저 (정렬은 안정)

@@ -300,7 +300,7 @@ async function absorb(res: TurnResponse, turnId: string): Promise<Pending | null
   if (res.reply?.text) pushMessage('ai', res.reply.text, at);
   mergeCards(res.cards, at);
   if (res.next !== 'APP_TASKS') return null;
-  report(); // 카드 계산 시작 — 화면은 "일정 카드를 생성하고 있어요"
+  report(); // 카드 계산 시작 — 화면은 "일정 카드를 만들고 있어요"
   const results = await runTasks(res);
   report(); // 계산 끝 — 카드를 바로 보여 줌 (안내 답 T1은 results 응답으로 뒤에 옴)
   return { phase: 'RESULTS', turnId, body: { session_id: state.sessionId, rev: res.rev, client_turn_id: turnId, results } };
@@ -508,12 +508,17 @@ async function runTasks(res: TurnResponse): Promise<{ cards: ResultCard[]; fixes
 // ---------------------------------------------------------------------------
 
 // 분당 사용량에 막힘(서버 관문 RPM · TPM · 동시 요청, Gemini 429) — LLM_UNAVAILABLE의 details.code RATE_LIMITED
-const unavailableOf = (e: EdgeError): Unavailable => ({
-  code: e.code,
-  message: e.message,
-  canRetry: true,
-  ...((e.details as { code?: unknown } | null | undefined)?.code === 'RATE_LIMITED' ? { rateLimited: true } : {}),
-});
+//   details.extract_failed = 일정일 수도 있는 말을 추출하지 못해 서버가 말을 저장하지 않음 — 화면이 "일정을 아직 정리하지 못했어요"로 가름
+const unavailableOf = (e: EdgeError): Unavailable => {
+  const d = e.details as { code?: unknown; extract_failed?: unknown } | null | undefined;
+  return {
+    code: e.code,
+    message: e.message,
+    canRetry: true,
+    ...(d?.code === 'RATE_LIMITED' ? { rateLimited: true } : {}),
+    ...(d?.extract_failed === true ? { extractFailed: true } : {}),
+  };
+};
 
 // 오류가 났을 때 — 대화를 남기고 [다시 시도]를 보일 것이면 상태에 적고 돌아옴(그 요청 p는 pending에 남음), 아니면 던짐 (CONFLICT는 세션을 다시 읽은 뒤 던짐)
 //   p = 실패한 요청 (세션 시작이면 없음). unavailable은 p가 pending에 남아 [다시 시도]가 다시 보낼 때만 적음 — 죽은 안내가 남지 않게

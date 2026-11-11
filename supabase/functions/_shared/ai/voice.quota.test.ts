@@ -7,10 +7,11 @@ import { test } from 'node:test';
 import { HttpError } from '../errors.ts';
 import { FakeDb } from '../fake-db.ts';
 import type { Db } from '../supabase.ts';
-import { fakeClaude, type FakeScript } from './fake-claude.ts';
+import { fakeClaude, upstreamError, type FakeScript } from './fake-claude.ts';
+import { LlmClientError } from './llm.ts';
 import { LIMIT_AI_DAY_TEXT } from './opening.ts';
 import { QuotaGate, QuotaLog, type QuotaLimits, type Usage } from './quota.ts';
-import { extractNeeded, handleVoiceTurn, type VoiceDeps, type VoiceTurnOut } from './turn.ts';
+import { extractNeeded, handleVoiceTurn, mightBeSchedule, type VoiceDeps, type VoiceTurnOut } from './turn.ts';
 import { handleVoiceSession, type VoiceSessionOut } from './voice-session.ts';
 
 const DATA = JSON.parse(readFileSync(new URL('./testdata/s3-dev-014.json', import.meta.url), 'utf8')) as {
@@ -256,4 +257,94 @@ test('같은 일정을 다시 말해도 카드는 1장 (중복 생성 없음)', 
   const r1b = (await handleVoiceTurn(deps, results(sid, r1.rev, t1.client_turn_id))) as VoiceTurnOut;
   const r2 = (await handleVoiceTurn(deps, voiceTurn(sid, r1b.rev, '내일 2시에 산책 있다니까', '네, 알고 있어요.'))) as VoiceTurnOut;
   assert.equal(r2.cards.length, 1);
+});
+
+// ───────── 글 차례 일정 등록 — 11/12 사고 ("다음 주 월요일 … 일정에 추가해 줘" → 카드 없이 "내일 챙길 일정 있나요?") ─────────
+// NOW = 10/29(목) 20:30 → 다음 주 월요일 = 11/2, 내일 = 10/30. T2F 출력은 실제 Gemini Flash-Lite가 이 말에 낸 모양 그대로(날짜만 NOW 기준)
+const MEETING = '다음 주 월요일 오전 10시에 캡스톤 팀 회의가 있어. 장소는 학교 도서관이고, 중요한 회의라 늦으면 안 돼. 일정에 추가해 줘.';
+const meeting = (over: Record<string, unknown> = {}) =>
+  appt({ title: '캡스톤 팀 회의', date: '2026-11-02', time: '10:00', place: '학교 도서관', importance: 'HIGH', save: 'CONFIRMED', ...over });
+const needsPlace = (sid: string, rev: number, client_turn_id: string, place: string) => ({
+  session_id: sid, rev, client_turn_id, results: { cards: [{ id: 'c1', status: 'NEEDS_PLACE', estimate: null, error: `'${place}'의 위치를 골라 주세요` }], fixes: [] },
+});
+const timeout = () => new LlmClientError('timeout', '응답이 9000ms 안에 오지 않음');
+
+test('다음 주 일정: 일정명 · 날짜 · 시각 · 장소 · 중요도가 다 있으면 APPT_NEW 카드 (T1은 카드 계산 뒤에만)', async () => {
+  const { fake, deps, sid, rev } = await start({ T2F: [meeting()], T1: [] });
+  const r = (await handleVoiceTurn(deps, text(sid, rev, MEETING))) as VoiceTurnOut;
+  assert.equal(r.next, 'APP_TASKS');
+  assert.equal(r.reply, null); // "내일 일정 있나요?" 같은 일반 답 없음
+  assert.equal(r.cards.length, 1);
+  assert.deepEqual([r.cards[0].kind, r.cards[0].status], ['APPT_NEW', 'NEEDS_ESTIMATE']);
+  assert.deepEqual(
+    { title: r.cards[0].draft?.title, date: r.cards[0].draft?.date, time: r.cards[0].draft?.time, place: r.cards[0].draft?.place, importance: r.cards[0].draft?.importance },
+    { title: '캡스톤 팀 회의', date: '2026-11-02', time: '10:00', place: '학교 도서관', importance: 'HIGH' },
+  );
+  assert.equal(r.cards[0].summary, '11/2(월) 10:00 캡스톤 팀 회의 · 학교 도서관');
+  assert.deepEqual(fake.order, ['T2F']);
+});
+
+test('내일 일정: 같은 흐름으로 내일 날짜 카드', async () => {
+  const { deps, sid, rev } = await start({ T2F: [meeting({ date: '2026-10-30' })], T1: [] });
+  const r = (await handleVoiceTurn(deps, text(sid, rev, '내일 오전 10시에 학교 도서관에서 캡스톤 팀 회의 있어'))) as VoiceTurnOut;
+  assert.equal(r.next, 'APP_TASKS');
+  assert.equal(r.cards[0].draft?.date, '2026-10-30');
+  assert.match(r.cards[0].summary, /^10\/30\(금\) 10:00 캡스톤 팀 회의/);
+});
+
+test('장소를 특정하지 못한 일정: 앱이 NEEDS_PLACE로 알리면 카드는 남고(무시 안 함) T1이 장소 고르기를 안내', async () => {
+  const { fake, deps, sid, rev } = await start({ T2F: [meeting()], T1: [T1_OK] });
+  const t = text(sid, rev, MEETING);
+  const r = (await handleVoiceTurn(deps, t)) as VoiceTurnOut;
+  const r2 = (await handleVoiceTurn(deps, needsPlace(sid, r.rev, t.client_turn_id, '학교 도서관'))) as VoiceTurnOut;
+  assert.equal(r2.next, 'USER');
+  assert.equal(r2.cards.length, 1);
+  assert.equal(r2.cards[0].status, 'NEEDS_PLACE');
+  assert.ok(r2.reply?.text);
+  assert.match(fake.seen.T1[0], /학교 도서관/); // T1 화면에 장소를 골라야 하는 카드가 실림
+  assert.deepEqual(fake.order, ['T2F', 'T1']);
+});
+
+test('추출 시간 초과(일정일 수도 있는 글): T1으로 넘기지 않고 LLM_UNAVAILABLE(extract_failed) — 말 · rev는 그대로, [다시 시도]가 추출부터 다시 해 카드', async () => {
+  const { fake, deps, sid, rev, db } = await start({ T2F: [timeout(), meeting()], T1: [] });
+  const t = text(sid, rev, MEETING);
+  let err: unknown = null;
+  try {
+    await handleVoiceTurn(deps, t);
+  } catch (e) {
+    err = e;
+  }
+  assert.ok(err instanceof HttpError);
+  assert.equal(err.code, 'LLM_UNAVAILABLE');
+  const d = err.details as { code: string; extract_failed: boolean; rev: number; cards: unknown[] };
+  assert.deepEqual([d.code, d.extract_failed, d.rev, d.cards], ['TIMEOUT', true, rev, []]);
+  assert.deepEqual(fake.order, ['T2F']); // T1("내일 챙길 일정 있나요?") 안 부름
+  assert.equal(turnsOf(db).some((x) => x.text === MEETING), false); // 말을 쌓지 않음
+  assert.deepEqual(db.rows('ai_calls').map((c) => [c.point, c.error_code]), [['T2F', 'TIMEOUT']]); // 실패한 호출도 기록
+  const r = (await handleVoiceTurn(deps, t)) as VoiceTurnOut; // [다시 시도] = 같은 client_turn_id · rev
+  assert.equal(r.next, 'APP_TASKS');
+  assert.equal(r.cards[0].draft?.title, '캡스톤 팀 회의');
+  assert.deepEqual(fake.order, ['T2F', 'T2F']);
+  assert.equal(turnsOf(db).filter((x) => x.text === MEETING).length, 1);
+});
+
+test('추출 실패(5xx 두 번)도 같음 — details.code UPSTREAM', async () => {
+  const { fake, deps, sid, rev } = await start({ T2F: [upstreamError(), upstreamError()], T1: [] });
+  await assert.rejects(handleVoiceTurn(deps, text(sid, rev, MEETING)), (e: HttpError) => (e.details as { code: string; extract_failed: boolean }).code === 'UPSTREAM' && (e.details as { extract_failed: boolean }).extract_failed);
+  assert.deepEqual(fake.order, ['T2F', 'T2F']);
+});
+
+test('일정이 아닌 글의 추출 실패는 기존 그대로 T1 답 (대화가 멈추지 않음), 음성 차례도 기존 그대로 notice', async () => {
+  const { fake, deps, sid, rev } = await start({ T2F: [timeout()], T1: [T1_OK] });
+  const r = (await handleVoiceTurn(deps, text(sid, rev, '오늘 좀 피곤했어'))) as VoiceTurnOut;
+  assert.ok(r.reply?.text);
+  assert.equal(r.notice, 'EXTRACT_FAILED');
+  assert.deepEqual(fake.order, ['T2F', 'T1']);
+});
+
+test('mightBeSchedule: 사고 메시지 · 내일 · 회의는 일정일 수도 있음, 일반 말은 아님', () => {
+  assert.equal(mightBeSchedule(MEETING), true);
+  assert.equal(mightBeSchedule('내일 9시 수업'), true);
+  assert.equal(mightBeSchedule('오늘 좀 피곤했어'), false);
+  assert.equal(mightBeSchedule('아무것도 하기 싫어'), false);
 });

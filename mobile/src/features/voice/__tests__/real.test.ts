@@ -702,6 +702,30 @@ describe('⑧ 실패 — 대화 · 카드는 남기고 다시 시도', () => {
     expect((await say('안녕')).unavailable?.rateLimited).toBeUndefined();
   });
 
+  it('일정 추출 시간 초과(details.extract_failed)면 unavailable.extractFailed — 말은 남고, [다시 시도]가 같은 요청으로 다시 추출해 장소 못 찾은 카드는 NEEDS_PLACE (11/12 사고)', async () => {
+    mPlaces.mockImplementation(async () => []);
+    const msg = '다음 주 월요일 오전 10시에 캡스톤 팀 회의가 있어. 장소는 학교 도서관이고, 중요한 회의라 늦으면 안 돼. 일정에 추가해 줘.';
+    const meeting = { draft: draftOf({ title: '캡스톤 팀 회의', date: '2026-11-16', place: '학교 도서관' }) };
+    script = [session(), new EdgeError('LLM_UNAVAILABLE', { details: { code: 'TIMEOUT', extract_failed: true, cards: [], fixes: [], rev: 1 } })];
+    await getConversation();
+    const c = await say(msg);
+    expect(c.unavailable).toMatchObject({ code: 'LLM_UNAVAILABLE', canRetry: true, extractFailed: true });
+    expect(c.messages.map((m) => [m.who, m.text])).toEqual([['ai', expect.any(String)], ['me', msg]]); // 일반 AI 답("내일 일정 있나요?") 없음
+    expect(c.cards).toEqual([]);
+    const failed = turnBodies()[0];
+
+    script = [
+      turn({ next: 'APP_TASKS', reply: null, cards: [apptCard(meeting)] }),
+      turn({ rev: 3, reply: { text: '학교 도서관 위치를 골라 주세요.' }, cards: [apptCard({ ...meeting, status: 'NEEDS_PLACE' })] }),
+    ];
+    const again = await retry();
+    expect(turnBodies()[1]).toEqual(failed); // 같은 client_turn_id · rev · 글
+    expect((turnBodies()[2].results as { cards: { status: string; error: string }[] }).cards[0]).toMatchObject({ status: 'NEEDS_PLACE', error: "'학교 도서관'의 위치를 골라 주세요" });
+    expect(again.unavailable).toBeNull();
+    expect(again.cards[0]).toMatchObject({ status: 'NEEDS_PLACE', title: '캡스톤 팀 회의' });
+    expect(again.messages.filter((m) => m.who === 'me')).toHaveLength(1);
+  });
+
   it('LLM_UNAVAILABLE: 말과 카드를 두고 unavailable, [다시 시도]는 같은 요청', async () => {
     script = [session(), new EdgeError('LLM_UNAVAILABLE', { details: { cards: [apptCard({ status: 'READY' })], fixes: [] } })];
     await getConversation();

@@ -487,6 +487,23 @@ describe('시간 초과 — Promise.race로 직접', () => {
     assert.deepEqual(t.sleeps, []);
   });
 
+  it('deadlineMs: 빨리 온 5xx면 남은 마감만큼 줄인 시간으로 다시 시도 (11/12 T1 UPSTREAM 1.4초 — 시도 시간 = 남은 시간이라 늘 포기했음)', async () => {
+    // T2F 9초 뒤 T1: 시도 시간 = 마감 = 9000. 100ms에 500 → 남은 9000 − 100 − 500 = 8400 ≥ 3000 → 다시
+    const a = setup([server(), response([text(T1_OK)])]);
+    const ra = await callPoint(a.client, 'T1', dummyVars('T1'), { ...a.extra, timeoutMs: 9000, deadlineMs: 9000 });
+    assert.equal(ra.ok, true);
+    assert.equal(ra.call.attempts, 2);
+    // 두 번째 시도는 남은 시간(4000 − 600 = 3400ms)으로 잘림 — 영영 안 오면 그 시간에 끝남
+    const b = setup([server(), 'hang']);
+    const rb = mustFail(await callPoint(b.client, 'T1', dummyVars('T1'), { ...b.extra, timeoutMs: 5000, deadlineMs: 4000 }));
+    assert.equal(rb.code, 'TIMEOUT');
+    assert.equal(rb.call.attempts, 2);
+    assert.match(rb.reason, /3400ms/);
+    // 남은 시간이 최소 시도 시간(3초)보다 짧으면 다시 안 보냄
+    const c = setup([server(), response([text(T1_OK)])]);
+    assert.equal(mustFail(await callPoint(c.client, 'T1', dummyVars('T1'), { ...c.extra, timeoutMs: 9000, deadlineMs: 3500 })).call.attempts, 1);
+  });
+
   it('deadlineMs: 시간이 넉넉하면 다시 시도하고, 없으면 기존 동작 그대로', async () => {
     const a = setup([server(), response([text(T1_OK)])]);
     const ra = await callPoint(a.client, 'T1', dummyVars('T1'), { ...a.extra, timeoutMs: 1000, deadlineMs: 5000 });

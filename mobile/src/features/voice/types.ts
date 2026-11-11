@@ -48,7 +48,8 @@ export type Limits = {
 
 // AI가 지금 답하지 못함 — 대화 · 카드는 남기고 [다시 시도] · [직접 일정 만들기]
 //   rateLimited = 분당 사용량(요청이 몰림) — 잠시 뒤 다시 하면 됨 (서버 details.code RATE_LIMITED)
-export type Unavailable = { code: string; message: string; canRetry: boolean; rateLimited?: boolean };
+// extractFailed = 일정일 수도 있는 말의 추출(T2F)을 못 해 말이 저장되지 않음 — [다시 시도]가 추출부터 다시
+export type Unavailable = { code: string; message: string; canRetry: boolean; rateLimited?: boolean; extractFailed?: boolean };
 
 // 다음 차례 — 내 말(대본 문장, 목업만. 실데이터는 빈 글자) · AI 답 · 못 말함(null)
 export type NextTurn = { who: 'me'; text: string } | { who: 'ai' } | null;

@@ -22,7 +22,10 @@ import { backOrHome } from '@/lib/nav';
 import { useAction } from '@/lib/useAction';
 import { useLoad } from '@/lib/useLoad';
 
-const CARD_DRAFTING = '일정 카드를 생성하고 있어요...';
+// 추출(T2F) 결과 전 — 아직 일정인지 모르므로 '만들고 있어요'라고 하지 않음 (추출이 실패해도 성공처럼 보였음, 11/12)
+const SCHEDULE_CHECKING = '일정이 있는지 확인하고 있어요...';
+// 추출이 일정을 찾아 카드가 생긴 뒤 알람을 계산하는 동안만
+const CARD_DRAFTING = '일정 카드를 만들고 있어요...';
 // 일정일 수도 있는 말을 일정으로 정리하지 못한 까닭 — 모른 채 같은 말을 되풀이하지 않게 짧게 알림 (일반 대화면 알리지 않음)
 const MISSED: Record<'LIMIT' | 'BUSY' | TurnNotice, string> = {
   LIMIT: '오늘 대화 한도에 닿아 더 이상 일정으로 정리되지 않아요. 일정은 직접 만들거나 내일 새 대화에서 말해 주세요.',
@@ -46,7 +49,7 @@ export default function AiScreen() {
   const leftRef = useRef(false);
   // 말 하나를 처리하는 도중의 대화 (api say · sayVoice의 onProgress) — 카드 계산 중 · 계산 끝 카드를 안내 답보다 먼저 그림. 끝나고 다시 읽으면 비움
   const [progress, setProgress] = useState<Conversation | null>(null);
-  // 보낸 말 중 일정일 수도 있는 것(mightBeSchedule)의 수 — 추출(T2F) 결과가 오기 전부터 "일정 카드를 생성하고 있어요..."를 띄움.
+  // 보낸 말 중 일정일 수도 있는 것(mightBeSchedule)의 수 — 추출(T2F) 결과가 오기 전부터 "일정이 있는지 확인하고 있어요..."를 띄움.
   //   추출이 일정을 찾으면(progress) 카드 자리의 임시 말풍선이 이어받고, 아니면 · 실패하면 그 말 처리가 끝날 때 내림
   const [drafting, setDrafting] = useState(0);
   const draft = async <T,>(text: string | undefined, task: () => Promise<T>): Promise<T> => {
@@ -169,8 +172,8 @@ export default function AiScreen() {
   const { messages, cards, unavailable, limits } = progress ?? data;
   const cardOf = (id?: string) => cards.find((c) => c.id === id);
   const reached = limits?.reached ?? null;
-  // 안내 종류 — 분당 사용량(busy) · 그 밖의 실패(failed) / 대화 길이(turn) · 하루 사용량(limit)
-  const failKind = unavailable?.rateLimited ? 'busy' : 'failed';
+  // 안내 종류 — 일정 정리 못 함(extract, 말이 저장 안 됨이 가장 중요해 먼저) · 분당 사용량(busy) · 그 밖의 실패(failed) / 대화 길이(turn) · 하루 사용량(limit)
+  const failKind = unavailable?.extractFailed ? 'extract' : unavailable?.rateLimited ? 'busy' : 'failed';
   const limitKind = reached === 'TURN' ? 'turn' : 'limit';
   const waiting = cards.some((c) => c.status === 'READY' || c.status === 'NEEDS_PLACE' || c.status === 'NEEDS_ESTIMATE' || c.status === 'ESTIMATING');
   const textMode = mode === 'text';
@@ -329,7 +332,7 @@ export default function AiScreen() {
           })}
           {thinking && pendingText && !progress ? <ChatBubble who="me" text={pendingText} at={pendingAt ?? now()} /> : null}
           {/* 추출 전 — 일정일 수도 있는 말이면 점 세 개 대신 임시 말풍선 (추출이 일정을 찾으면 카드 자리가 이어받음). Live는 내 말이 확정된 순간부터(차례 끝 전) */}
-          {(drafting > 0 || (real && heardSchedule(live.lines))) && !progress ? <ChatBubble who="ai" text={CARD_DRAFTING} at={pendingAt ?? now()} /> : thinking ? <TypingBubble /> : null}
+          {(drafting > 0 || (real && heardSchedule(live.lines))) && !progress ? <ChatBubble who="ai" text={SCHEDULE_CHECKING} at={pendingAt ?? now()} /> : thinking ? <TypingBubble /> : null}
           {unavailable && !thinking ? (
             <ChatNotice kind={failKind} onRetry={unavailable.canRetry ? retry : undefined} onManual={() => router.push('/schedule/new')} onDone={finish} busy={busy} />
           ) : null}
