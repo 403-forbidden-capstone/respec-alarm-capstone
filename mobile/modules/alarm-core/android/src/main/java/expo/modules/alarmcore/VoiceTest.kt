@@ -1,0 +1,30 @@
+package expo.modules.alarmcore
+
+// 개발 화면(dev/alarm-test) AI 음성 시험 전용 규칙 — 시험 알람 id 앞머리로만 구분해서 운영 알람에는 적용되지 않음
+//   안드로이드 클래스를 안 써서 JVM 단위 시험으로 확인 (src/test/.../VoiceTestTest.kt)
+object VoiceTest {
+  // 앱 lib/alarmSync/devAlarm.ts DEV_ALARM_ID_PREFIX와 같은 값 — 고치면 둘 다
+  const val ALARM_ID_PREFIX = "de70a1a0-"
+
+  fun isTestAlarm(alarmId: String): Boolean = alarmId.startsWith(ALARM_ID_PREFIX)
+
+  /** 시험에서 끌 수 있는 것 — 알람음(크기만 0, 재생 경로 · 포커스 · 진동 · 음성은 그대로) · AI 음성 */
+  data class Options(val sound: Boolean = true, val voice: Boolean = true)
+
+  /** 운영 알람은 저장된 값이 있어도 늘 켬 (시험 값이 운영 알람을 조용하게 만들지 못하게) */
+  fun options(alarmId: String, sound: Boolean?, voice: Boolean?): Options =
+    if (isTestAlarm(alarmId)) Options(sound ?: true, voice ?: true) else Options()
+
+  data class GeminiCandidate(val alarmId: String, val hasWav: Boolean, val hash: String?, val text: String?)
+
+  /** 4단계 시험에 빌려 올 Gemini 음성 — 실제 알람이 미리 받아 둔 것 중 파일 · 열쇠 · 문장이 다 있는 첫 것. 시험 알람 폴더는 안 봄. 없으면 null(→ Android TTS 대체) */
+  fun pickGeminiSource(candidates: List<GeminiCandidate>): GeminiCandidate? =
+    candidates.sortedBy { it.alarmId }.firstOrNull { !isTestAlarm(it.alarmId) && it.hasWav && !it.hash.isNullOrEmpty() && !it.text.isNullOrBlank() }
+
+  /** 화면에 보일 엔진 — 이번 울림이 실제로 고른 Speech 기준 */
+  fun engine(hasSpeech: Boolean, hasWav: Boolean): String = when {
+    !hasSpeech -> "NONE"
+    hasWav -> "GEMINI"
+    else -> "ANDROID"
+  }
+}

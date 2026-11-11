@@ -27,6 +27,9 @@ object BriefingRules {
     return VoiceChoice.EngineDefault
   }
 
+  /** 해제 전까지 같은 브리핑을 반복하는지 — 기상만. 출발은 알림음 · 진동 한 번 + 브리핑 한 번으로 끝 */
+  fun repeatsBriefing(alarmType: String): Boolean = alarmType == "WAKE"
+
   /** 고른 단계의 문장이 없으면 그보다 낮은 단계 중 있는 것 */
   fun clipLevel(wanted: Int, available: Set<Int>): Int? = (wanted downTo 1).firstOrNull { it in available }
 

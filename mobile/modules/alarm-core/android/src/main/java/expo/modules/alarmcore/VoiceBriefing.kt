@@ -77,6 +77,56 @@ internal object VoiceBriefing {
     return files.keys().asSequence().filter { File(folder, "L$it.wav").exists() }.map { files.getString(it) }.toList()
   }
 
+  /**
+   * 개발 화면 전용 — 시험 알람 폴더를 새로 씀. json = { rule, clips, test: {sound, voice} } (앱이 서버 브리핑 규칙으로 만든 샘플 문장)
+   * 4단계 문장이 있으면 실제 알람이 미리 받아 둔 Gemini 음성을 복사해 씀(원본은 안 건드림, 문장도 그 음성의 실제 문장으로). 없으면 샘플 문장을 Android TTS로
+   * 돌려주는 값 = 음성을 빌려 온 알람 id (없으면 null). 새 Gemini 호출은 없음
+   */
+  @Synchronized
+  fun saveForTest(context: Context, alarmId: String, json: String): String? {
+    require(VoiceTest.isTestAlarm(alarmId)) { "시험 알람 id가 아니에요" }
+    val folder = dir(context, alarmId) ?: throw IllegalArgumentException("알람 id가 이상해요")
+    folder.deleteRecursively()
+    folder.mkdirs()
+    val input = JSONObject(json)
+    val clips = input.optJSONArray("clips") ?: JSONArray()
+    val files = JSONObject()
+    var source: String? = null
+    val urgent = (0 until clips.length()).map { clips.getJSONObject(it) }.firstOrNull { it.optInt("level") == 4 }
+    if (urgent != null) {
+      val root = File(context.filesDir, DIR)
+      val candidates = root.listFiles().orEmpty().filter { it.isDirectory }.map { d ->
+        val manifest = readManifest(d)
+        val clips4 = manifest?.optJSONArray("clips")
+        val clip = clips4?.let { arr -> (0 until arr.length()).map { arr.getJSONObject(it) }.firstOrNull { it.optInt("level") == 4 } }
+        VoiceTest.GeminiCandidate(d.name, File(d, "L4.wav").exists(), manifest?.optJSONObject("files")?.optStringOrNull("4"), clip?.optStringOrNull("text"))
+      }
+      VoiceTest.pickGeminiSource(candidates)?.let { picked ->
+        // 복사가 실패하면 Gemini 없이(→ Android TTS 대체) — 화면이 엔진을 그대로 보여 줌
+        runCatching { File(File(root, picked.alarmId), "L4.wav").copyTo(File(folder, "L4.wav"), overwrite = true) }.onSuccess {
+          urgent.put("text", picked.text).put("hash", picked.hash)
+          files.put("4", picked.hash)
+          source = picked.alarmId
+        }
+      }
+    }
+    val manifest = JSONObject()
+      .put("rule", input.optJSONObject("rule") ?: JSONObject())
+      .put("clips", clips)
+      .put("files", files)
+      .put("test", input.optJSONObject("test") ?: JSONObject())
+    File(folder, MANIFEST).writeText(manifest.toString())
+    return source
+  }
+
+  /** 시험 알람의 소리 · 음성 켜기 (개발 화면이 끈 것만). 운영 알람은 폴더를 안 읽고 늘 켬 */
+  @Synchronized
+  fun testOptions(context: Context, alarmId: String): VoiceTest.Options {
+    if (!VoiceTest.isTestAlarm(alarmId)) return VoiceTest.Options()
+    val test = dir(context, alarmId)?.let { readManifest(it) }?.optJSONObject("test")
+    return VoiceTest.options(alarmId, test?.optBoolean("sound", true), test?.optBoolean("voice", true))
+  }
+
   @Synchronized
   fun clear(context: Context, alarmId: String) {
     dir(context, alarmId)?.deleteRecursively()
@@ -96,6 +146,7 @@ internal object VoiceBriefing {
    */
   @Synchronized
   fun speechFor(context: Context, alarm: StoredAlarm, nowMillis: Long): Speech? = runCatching {
+    if (!testOptions(context, alarm.alarmId).voice) return@runCatching null // 개발 화면 "알람음만 · 진동만" 시험
     val folder = dir(context, alarm.alarmId)
     val manifest = folder?.let { readManifest(it) }
     val rule = manifest?.optJSONObject("rule") ?: JSONObject()

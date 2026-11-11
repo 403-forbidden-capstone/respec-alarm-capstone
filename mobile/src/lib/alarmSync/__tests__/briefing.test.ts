@@ -45,6 +45,14 @@ describe('prepareBriefings', () => {
     expect(s.saved).toEqual(['w1', 'd1']);
   });
 
+  it('개발 화면 시험 알람(de70a1a0-)은 서버를 안 부르고 시험 브리핑도 안 건드림 — 오프라인 시험 · Gemini 재호출 없음', async () => {
+    const t = deps({}, [alarm('de70a1a0-aaaa-4bbb-8ccc-dddddddddddd', 'WAKE', 60_000), alarm('w1', 'WAKE', 3_600_000)]);
+    await prepareBriefings(NOW, t.d);
+    expect(t.calls.map((c) => c.id)).toEqual(['w1']);
+    expect(t.saved).toEqual(['w1']);
+    expect(t.cleared).toEqual([]);
+  });
+
   it('사용자가 끄면(enabled false) 그 알람 음성을 지움', async () => {
     const t = deps({ call: async () => ({ ...OUT, enabled: false, rule: null, clips: [], audio: [], gemini: 'NOT_NEEDED' as const }) });
     await prepareBriefings(NOW, t.d);

@@ -152,6 +152,31 @@ export type VoiceBriefingSave = {
   audio: { level: number; hash: string; mime?: string; data: string }[];
 };
 
+/** 개발 화면 AI 음성 시험 — 샘플 문장 + 끌 것 (sound: 알람음 크기 0, voice: AI 음성 안 읽음). 4단계 Gemini 음성은 네이티브가 실제 알람 캐시에서만 빌려 옴 */
+export type VoiceTestSetup = Pick<VoiceBriefingSave, 'rule' | 'clips'> & { test: { sound: boolean; voice: boolean } };
+
+/** 이번 시험 울림이 고른 음성 (네이티브 VoiceBriefing.speechFor 결과). engine NONE = 음성 없음 */
+export type VoiceTestInfo = {
+  level: number | null;
+  engine: 'GEMINI' | 'ANDROID' | 'NONE';
+  text: string | null;
+  pitch: number | null;
+  rate: number | null;
+  voiceIndex: number | null;
+  /** Gemini 음성을 빌려 온 실제 알람 id (없으면 null) */
+  geminiSourceAlarmId: string | null;
+};
+
+/** 지금 재생 상태 (1초마다 읽음) */
+export type VoiceTestStatus = {
+  ringingAlarmId: string | null;
+  departureSpeakingAlarmId: string | null;
+  /** 마지막으로 튼 알람음 주소 */
+  sound: string | null;
+  /** 마지막 음성 상태 한 줄 (Android TTS 읽는 중 · 캐시된 Gemini 재생 중 · 한국어 TTS 없음 등) */
+  speech: string | null;
+};
+
 export type AlarmEventType = 'TRIGGERED' | 'SNOOZED' | 'DISMISSED' | 'ACKNOWLEDGED' | 'ARRIVAL_CONFIRMED';
 
 /**

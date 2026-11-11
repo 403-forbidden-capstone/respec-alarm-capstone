@@ -11,7 +11,7 @@ import { requireOptionalNativeModule } from 'expo-modules-core';
 
 import { createMemoryBackend } from './memoryBackend';
 import { createNativeBackend, type NativeAlarmCore } from './nativeBackend';
-import { buildRingPlan, validateRingPackage } from './plan';
+import { buildRingPlan, toNativePayload, validateRingPackage } from './plan';
 import type {
   AlarmBackend,
   AlarmEvent,
@@ -22,6 +22,9 @@ import type {
   ScheduleStatus,
   UsageSpan,
   VoiceBriefingSave,
+  VoiceTestInfo,
+  VoiceTestSetup,
+  VoiceTestStatus,
 } from './types';
 
 export * from './types';
@@ -206,4 +209,28 @@ export async function getVoiceBriefingHashes(alarmId: string): Promise<string[]>
 
 export async function clearVoiceBriefing(alarmId: string): Promise<void> {
   await backend.clearVoiceBriefing(alarmId);
+}
+
+// --- 개발 화면(dev/alarm-test) AI 음성 시험 — 네이티브만 (웹 · 메모리 대체는 소리가 없어 지원 안 함) ---
+const VOICE_TEST_MISSING = '이 APK에는 AI 음성 시험 기능이 없음. 새 개발용 APK를 설치해 주세요.';
+
+/**
+ * 시험 알람(id 앞머리 de70a1a0-)에 샘플 브리핑을 쓰고 ringNow와 같은 실제 알람 경로로 바로 울림.
+ * snoozeCount = 미룬 뒤 상태 재현(단계 2 · 3). 네트워크 · Gemini 호출 없음
+ */
+export async function ringVoiceTest(pkg: RingPackage, snoozeCount: number, voice: VoiceTestSetup): Promise<VoiceTestInfo> {
+  validateRingPackage(pkg);
+  if (!nativeModule?.ringVoiceTest) throw new Error(VOICE_TEST_MISSING);
+  const payload = { ...JSON.parse(toNativePayload(pkg, buildRingPlan(pkg))), snoozeCount };
+  return nativeModule.ringVoiceTest(JSON.stringify(payload), JSON.stringify(voice));
+}
+
+/** 시험 재생 상태. 기능이 없으면 null */
+export async function voiceTestStatus(): Promise<VoiceTestStatus | null> {
+  return nativeModule?.voiceTestStatus ? nativeModule.voiceTestStatus() : null;
+}
+
+/** 시험 알람만 즉시 정지 (알람음 · 진동 · 음성 · 다시 울림 · 출발 알림). 운영 알람은 안 건드림 */
+export async function stopVoiceTest(alarmId?: string | null): Promise<void> {
+  await nativeModule?.stopVoiceTest?.(alarmId ?? null);
 }

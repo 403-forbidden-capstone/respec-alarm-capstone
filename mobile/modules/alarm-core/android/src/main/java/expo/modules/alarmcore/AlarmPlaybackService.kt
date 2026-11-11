@@ -65,6 +65,10 @@ class AlarmPlaybackService : Service() {
     @Volatile
     var ringingAlarmId: String? = null
 
+    // 마지막으로 튼 알람음 주소 (개발 화면 표시용)
+    @Volatile
+    var lastSound: String? = null
+
     fun start(context: Context, id: String) {
       val intent = Intent(context, AlarmPlaybackService::class.java).apply {
         putExtra(EXTRA_ID, id)
@@ -111,6 +115,8 @@ class AlarmPlaybackService : Service() {
   // 음성 브리핑 (BriefingSpeaker: 1~3단계 Android TTS, 긴급 4단계는 미리 만든 Gemini 음성) — 해제 전까지 반복. 알람음은 계속 20%로 재생
   private var speaker: BriefingSpeaker? = null
   private var speaking = false
+  // 알람음 크기 비율 — 늘 1. 개발 화면의 "진동만 · AI 음성만" 시험 알람만 0 (재생 경로 · 포커스 · 진동 · 음성은 그대로, VoiceTest)
+  private var soundLevel = 1f
   private var vibrator: Vibrator? = null
   private var audioManager: AudioManager? = null
   private var audioFocusRequest: AudioFocusRequest? = null
@@ -304,6 +310,7 @@ class AlarmPlaybackService : Service() {
   private fun startPlayback(alarm: StoredAlarm): Boolean {
     audioManager = getSystemService(AudioManager::class.java)
     remainingSounds = alarmSounds(alarm.soundKey).toMutableList()
+    soundLevel = if (runCatching { VoiceBriefing.testOptions(this, alarm.alarmId).sound }.getOrDefault(true)) 1f else 0f
 
     // 오디오 포커스나 볼륨 조정이 실패해도(방해 금지 · 제조사 제한 등) 소리는 내야 함 — 소리를 못 트는 것만 실패로 침
     runCatching { requestAudioFocus(audioAttributes) }
@@ -332,17 +339,17 @@ class AlarmPlaybackService : Service() {
       this,
       onStart = {
         speaking = true
-        mediaPlayer?.let { runCatching { it.setVolume(VOICE_DUCK, VOICE_DUCK) } }
+        mediaPlayer?.let { runCatching { it.setVolume(VOICE_DUCK * soundLevel, VOICE_DUCK * soundLevel) } }
       },
       onDone = { stopVoice() },
-    ).also { it.speak(speech, repeat = alarm.type == "WAKE") }
+    ).also { it.speak(speech, repeat = BriefingRules.repeatsBriefing(alarm.type)) }
   }
 
   private fun stopVoice() {
     speaker?.stop()
     speaker = null
     speaking = false
-    mediaPlayer?.let { runCatching { it.setVolume(1f, 1f) } }
+    mediaPlayer?.let { runCatching { it.setVolume(soundLevel, soundLevel) } }
   }
 
   // 알람음 후보 (앞에서부터 시도). 기본 키(default) · 보통(theme_default) · 모르는 키는 폰 기본 알람음이 먼저, 우리 앱 파일이 그 다음 — 안드로이드 기본 알람처럼
@@ -388,12 +395,13 @@ class AlarmPlaybackService : Service() {
         true
       }
       val playing = runCatching {
-        val volume = if (speaking) VOICE_DUCK else 1f
+        val volume = (if (speaking) VOICE_DUCK else 1f) * soundLevel
         player.setVolume(volume, volume)
         player.start()
       }.isSuccess
       if (playing) {
         Log.i(TAG, "알람음 재생: $uri")
+        lastSound = if (soundLevel > 0f) uri.toString() else "$uri (시험: 소리 0)"
         return true
       }
     }

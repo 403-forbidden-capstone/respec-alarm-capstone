@@ -28,6 +28,14 @@ class BriefingSpeechService : Service() {
       val intent = Intent(context, BriefingSpeechService::class.java).putExtra(EXTRA_ALARM, alarm.toJson().toString())
       if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) context.startForegroundService(intent) else context.startService(intent)
     }
+
+    fun stop(context: Context) {
+      context.stopService(Intent(context, BriefingSpeechService::class.java))
+    }
+
+    // 지금 읽는 출발 안내의 알람 id (개발 화면이 시험 안내만 멈추는 데 씀). 안 읽으면 null
+    @Volatile
+    var speakingAlarmId: String? = null
   }
 
   private val handler = Handler(Looper.getMainLooper())
@@ -48,6 +56,7 @@ class BriefingSpeechService : Service() {
     speaker?.stop()
     alarmId?.let { if (it != alarm.alarmId) VoiceBriefing.clear(this, it) }
     alarmId = alarm.alarmId
+    speakingAlarmId = alarm.alarmId
     wakeLock = wakeLock ?: getSystemService(PowerManager::class.java).newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "$packageName:briefing").apply { setReferenceCounted(false) }
     wakeLock?.acquire(MAX_MILLIS + 10_000L)
     val speech = VoiceBriefing.speechFor(this, alarm, System.currentTimeMillis())
@@ -55,7 +64,7 @@ class BriefingSpeechService : Service() {
       stopSelf()
       return START_NOT_STICKY
     }
-    speaker = BriefingSpeaker(this, onStart = {}, onDone = { stopSelf() }).also { it.speak(speech) }
+    speaker = BriefingSpeaker(this, onStart = {}, onDone = { stopSelf() }).also { it.speak(speech, repeat = BriefingRules.repeatsBriefing(alarm.type)) }
     handler.removeCallbacks(timeout)
     handler.postDelayed(timeout, MAX_MILLIS)
     return START_NOT_STICKY
@@ -91,6 +100,7 @@ class BriefingSpeechService : Service() {
     speaker?.stop()
     speaker = null
     alarmId?.let { VoiceBriefing.clear(this, it) }
+    speakingAlarmId = null
     wakeLock?.runCatching { if (isHeld) release() }
     wakeLock = null
     stopForeground(STOP_FOREGROUND_REMOVE)

@@ -77,6 +77,19 @@ class AlarmCoreModule : Module() {
       AlarmController.ringNow(context, payload)
     }
 
+    // 개발 화면 AI 음성 시험 (시험 알람 id만) — 샘플 브리핑을 쓰고 바로 울림 · 지금 상태 · 즉시 정지
+    AsyncFunction("ringVoiceTest") { payload: String, voiceJson: String ->
+      AlarmController.ringVoiceTest(context, payload, voiceJson)
+    }
+
+    AsyncFunction("voiceTestStatus") {
+      AlarmController.voiceTestStatus()
+    }
+
+    AsyncFunction("stopVoiceTest") { alarmId: String? ->
+      AlarmController.stopVoiceTest(context, alarmId)
+    }
+
     AsyncFunction("canScheduleExactAlarms") {
       AlarmScheduler.canScheduleExactAlarms(context)
     }
