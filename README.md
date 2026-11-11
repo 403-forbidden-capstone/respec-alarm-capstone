@@ -148,7 +148,7 @@ git push origin v0.1.0
 | `EXPO_PUBLIC_SUPABASE_URL` · `EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | `mobile/.env` · Cloudflare 변수 · EAS 환경 변수 | Supabase → Project Settings → API Keys |
 | `KAKAO_REST_API_KEY` · `GEMINI_API_KEY` | Supabase Edge Function secrets | 카카오 디벨로퍼스 · Google AI Studio |
 | 카카오 · 구글 로그인 키 | Supabase → Authentication → Providers | 카카오 디벨로퍼스 · Google Cloud Console |
-| `google-services.json` · FCM 서비스 계정 키 | EAS 파일 환경 변수 · credentials | Firebase 콘솔 |
+| `google-services.json` · FCM 서비스 계정 키 | EAS 파일 환경 변수 · credentials, GitHub Secret `GOOGLE_SERVICES_JSON_B64`(base64) | Firebase 콘솔 |
 
 공개 가능한 값은 `EXPO_PUBLIC_`으로 시작하는 두 개뿐입니다. 나머지는 레포와 앱에 넣지 않습니다. 예시 파일: [`mobile/.env.example`](mobile/.env.example) · [`supabase/functions/.env.example`](supabase/functions/.env.example)
 

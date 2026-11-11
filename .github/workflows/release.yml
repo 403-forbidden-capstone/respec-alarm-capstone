@@ -71,6 +71,20 @@ jobs:
           eas-version: latest
           token: ${{ secrets.EXPO_TOKEN }}
 
+      - name: 푸시 설정 파일 꺼내기
+        if: steps.app.outputs.build == 'true'
+        # EAS 빌드 서버의 GOOGLE_SERVICES_JSON 파일과 같은 파일이 여기에도 있어야 runtimeVersion(fingerprint)이 같음. 없으면 Runtime version mismatch로 실패
+        # Secret GOOGLE_SERVICES_JSON_B64 = mobile/google-services.json을 base64로 바꾼 값 (EAS 변수를 바꾸면 같이 바꿈)
+        env:
+          GOOGLE_SERVICES_JSON_B64: ${{ secrets.GOOGLE_SERVICES_JSON_B64 }}
+        run: |
+          if [ -z "$GOOGLE_SERVICES_JSON_B64" ]; then
+            echo "::warning::Secret GOOGLE_SERVICES_JSON_B64가 없어요. 빌드가 Runtime version mismatch로 실패할 수 있어요 (mobile/README.md 환경 변수 절)."
+            exit 0
+          fi
+          printf '%s' "$GOOGLE_SERVICES_JSON_B64" | base64 -d > mobile/google-services.json
+          echo "google-services.json sha1: $(sha1sum mobile/google-services.json | cut -c1-12)"
+
       - name: APK 빌드
         if: steps.app.outputs.build == 'true'
         working-directory: mobile
