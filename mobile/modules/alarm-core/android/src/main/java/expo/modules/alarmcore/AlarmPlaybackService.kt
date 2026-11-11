@@ -25,7 +25,7 @@ import android.os.VibratorManager
 import android.util.Log
 import androidx.core.app.NotificationCompat
 
-// WAKE 알람이 울리는 동안 도는 포그라운드 서비스: 알람 볼륨 스트림으로 소리를 틀고, 계속 진동하고, 잠금화면 위 화면을 띄움
+// WAKE 알람 포그라운드 서비스: 배경음·진동·반복 AI 음성을 사용자가 해제·미루기 할 때까지 함께 유지. DEPARTURE는 기존 1회 알림+1회 브리핑 사용
 // 볼륨 · 한 번 울리는 최대 시간 · 소리는 알람 저장소의 울림 계획(RingPlan)대로. 다시 울림은 AlarmController가 미리 걸어 둠
 class AlarmPlaybackService : Service() {
   companion object {
@@ -108,7 +108,7 @@ class AlarmPlaybackService : Service() {
   private var remainingSounds: MutableList<Uri> = mutableListOf()
 
   private var mediaPlayer: MediaPlayer? = null
-  // 음성 브리핑 (BriefingSpeaker: 1~3단계 Android TTS, 긴급 4단계는 미리 만든 Gemini 음성) — 알람음 위에 한 번 읽음. 읽는 동안 알람음은 작게(VOICE_DUCK)
+  // 음성 브리핑 (BriefingSpeaker: 1~3단계 Android TTS, 긴급 4단계는 미리 만든 Gemini 음성) — 해제 전까지 반복. 알람음은 계속 20%로 재생
   private var speaker: BriefingSpeaker? = null
   private var speaking = false
   private var vibrator: Vibrator? = null
@@ -133,6 +133,7 @@ class AlarmPlaybackService : Service() {
     val previousId = ringingAlarmId
     if (previousId != null && previousId != id) {
       AlarmController.onRingTimeout(applicationContext, previousId, ringToken)
+      releasePlayback() // 이전 알람의 배경음·진동·AI를 멈추고 새 알람으로 교체
     }
     ringingAlarmId = id
     ringToken = alarm?.ringCount ?: 0
@@ -153,7 +154,9 @@ class AlarmPlaybackService : Service() {
     }
 
     val ringMillis = ringMillisOf(alarm)
-    holdWakeLock(ringMillis + WAKE_LOCK_EXTRA_MILLIS)
+    val continuous = alarm.type == "WAKE"
+    // 사용자가 해제·미루기 할 때까지 유지. 종료 시 onDestroy에서 wakeLock을 반드시 해제.
+    holdWakeLock(if (continuous) 0L else ringMillis + WAKE_LOCK_EXTRA_MILLIS)
     if (mediaPlayer == null) {
       if (!startPlayback(alarm)) {
         AlarmController.onRingTimeout(applicationContext, id, ringToken)
@@ -164,9 +167,9 @@ class AlarmPlaybackService : Service() {
       // 울리는 중에 같은 알람의 다음 울림이 시작됨: 소리는 그대로 두고 볼륨만 이번 계획대로 (볼륨을 못 바꿔도 소리는 계속)
       runCatching { setAlarmVolume(alarm.plan.volumePercent) }
     }
-    // 새 울림이 오면 최대 울림 시간을 다시 잼
+    // 기상·출발 알람은 자동 종료하지 않음. 다른 유형만 기존 최대 울림 시간을 적용.
     handler.removeCallbacks(autoStop)
-    handler.postDelayed(autoStop, ringMillis)
+    if (!continuous) handler.postDelayed(autoStop, ringMillis)
     return START_NOT_STICKY
   }
 
@@ -332,7 +335,7 @@ class AlarmPlaybackService : Service() {
         mediaPlayer?.let { runCatching { it.setVolume(VOICE_DUCK, VOICE_DUCK) } }
       },
       onDone = { stopVoice() },
-    ).also { it.speak(speech) }
+    ).also { it.speak(speech, repeat = alarm.type == "WAKE") }
   }
 
   private fun stopVoice() {
@@ -504,7 +507,7 @@ class AlarmPlaybackService : Service() {
       .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "$packageName:alarm")
       .apply { setReferenceCounted(false) }
     wakeLock = lock
-    lock.acquire(timeoutMillis)
+    if (timeoutMillis > 0L) lock.acquire(timeoutMillis) else lock.acquire()
   }
 
   // 해제 · 미루기 · 자동 정지 · 실패 모두 여기서 원래대로 되돌림 (여러 번 불러도 됨)

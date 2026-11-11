@@ -10,7 +10,7 @@ import android.speech.tts.UtteranceProgressListener
 import android.util.Log
 import java.util.Locale
 
-// 브리핑 한 번 읽기 — 기상(AlarmPlaybackService) · 출발(BriefingSpeechService)이 같이 씀
+// 브리핑 재생 — 기상·출발은 사용자가 해제하기 전까지 같은 음성을 로컬에서 반복 (네트워크·Gemini 재호출 없음)
 //   Gemini 음성 파일이 있으면(긴급 4단계) MediaPlayer, 아니면 폰의 Android TTS로 같은 문장 전체 — 한 번 읽는 동안 엔진을 바꾸지 않음
 //   알람 볼륨 스트림(USAGE_ALARM)으로 읽음. 볼륨 크기 자체는 알람 계획 · 폰 설정이 정함
 //   onStart · onDone은 메인 스레드에서 부름 (기상 알람음을 줄였다 되돌리는 데 씀). 어떤 실패든 onDone으로 끝남 — 알람은 멈추지 않음
@@ -25,6 +25,7 @@ internal class BriefingSpeaker(
     // TTS 엔진이 켜지거나 말을 시작하기까지 기다리는 최대 시간 — 넘으면 브리핑 없이 알람음만 (작성자 판단)
     private const val INIT_TIMEOUT_MILLIS = 8_000L
     private const val START_TIMEOUT_MILLIS = 8_000L
+    private const val REPEAT_PAUSE_MILLIS = 1_500L
   }
 
   private val handler = Handler(Looper.getMainLooper())
@@ -32,6 +33,13 @@ internal class BriefingSpeaker(
   private var player: MediaPlayer? = null
   private var tts: TextToSpeech? = null
   private var finished = false
+  private var repeating = false
+  private var currentSpeech: VoiceBriefing.Speech? = null
+  private val repeatSpeech = Runnable {
+    val engine = tts
+    val speech = currentSpeech
+    if (!finished && engine != null && speech != null) speakUtterance(engine, speech)
+  }
   private val initTimeout = Runnable {
     Log.w(TAG, "Android TTS가 켜지지 않음 — 알람음만")
     finish()
@@ -41,7 +49,9 @@ internal class BriefingSpeaker(
     finish()
   }
 
-  fun speak(speech: VoiceBriefing.Speech) {
+  fun speak(speech: VoiceBriefing.Speech, repeat: Boolean = false) {
+    repeating = repeat
+    currentSpeech = speech
     val wav = speech.wav
     if (wav != null && playWav(wav, speech.level)) return
     speakAndroid(speech)
@@ -53,6 +63,7 @@ internal class BriefingSpeaker(
       p.setAudioAttributes(attributes)
       p.setDataSource(file.absolutePath)
       p.prepare()
+      p.isLooping = repeating
       p.setOnCompletionListener { finish() }
       p.setOnErrorListener { _, _, _ ->
         finish()
@@ -109,7 +120,11 @@ internal class BriefingSpeaker(
             }
 
             override fun onDone(utteranceId: String?) {
-              handler.post { finish() }
+              handler.post {
+                handler.removeCallbacks(startTimeout)
+                if (finished) return@post
+                if (repeating) handler.postDelayed(repeatSpeech, REPEAT_PAUSE_MILLIS) else finish()
+              }
             }
 
             @Deprecated("Deprecated in Java")
@@ -117,18 +132,25 @@ internal class BriefingSpeaker(
               handler.post { finish() }
             }
           })
-          if (engine.speak(speech.text, TextToSpeech.QUEUE_FLUSH, null, UTTERANCE) != TextToSpeech.SUCCESS) {
-            finish()
-          } else {
-            Log.i(TAG, "브리핑: Android TTS ${speech.level}단계")
-            // 엔진이 말을 시작하지 않고 멈춰 있으면(목록이 틀린 네트워크 목소리 등) 기다리지 않고 끝냄
-            handler.postDelayed(startTimeout, START_TIMEOUT_MILLIS)
-          }
+          speakUtterance(engine, speech)
         }.onFailure {
           Log.w(TAG, "Android TTS 실패 — 알람음만", it)
           finish()
         }
       }
+    }
+  }
+
+  // 이미 초기화된 오프라인 TTS 엔진을 재사용하여 같은 문장을 반복 (다시 API를 부르지 않음).
+  private fun speakUtterance(engine: TextToSpeech, speech: VoiceBriefing.Speech) {
+    if (finished) return
+    handler.removeCallbacks(startTimeout)
+    handler.postDelayed(startTimeout, START_TIMEOUT_MILLIS)
+    if (engine.speak(speech.text, TextToSpeech.QUEUE_FLUSH, null, UTTERANCE) != TextToSpeech.SUCCESS) {
+      handler.removeCallbacks(startTimeout)
+      finish()
+    } else {
+      Log.i(TAG, "브리핑: Android TTS ${speech.level}단계${if (repeating) " 반복" else ""}")
     }
   }
 
@@ -148,6 +170,8 @@ internal class BriefingSpeaker(
   private fun release() {
     handler.removeCallbacks(initTimeout)
     handler.removeCallbacks(startTimeout)
+    handler.removeCallbacks(repeatSpeech)
+    currentSpeech = null
     player?.let { p ->
       runCatching { if (p.isPlaying) p.stop() }
       runCatching { p.release() }
