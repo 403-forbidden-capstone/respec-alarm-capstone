@@ -69,7 +69,7 @@ test('새 약속: 약속 · 참여 조건 · 알람 4개를 만들고 예약 꾸
   const body = await persistAppointment(ctx, commitArgs(newDraft()));
 
   const [appointment] = db.rows('appointments');
-  assert.deepEqual([appointment.creator_id, appointment.title, appointment.dest_name, appointment.importance, appointment.recurrence_rule, appointment.group_id], [USER, '팀 주간회의', '세종대학교', 'NORMAL', 'FREQ=WEEKLY;BYDAY=TH', null]);
+  assert.deepEqual([appointment.creator_id, appointment.title, appointment.dest_name, appointment.importance, appointment.recurrence_rule, appointment.group_id], [USER, '팀 주간회의', '세종대학교', 'LOW', 'FREQ=WEEKLY;BYDAY=TH', null]); // 중요도를 안 고르면 기본 약(LOW)
   const [participant] = db.rows('appointment_participants');
   assert.deepEqual(
     [participant.appointment_id, participant.user_id, participant.est_travel_minutes, participant.travel_source, participant.prepare_minutes, participant.buffer_minutes, participant.transport_type],

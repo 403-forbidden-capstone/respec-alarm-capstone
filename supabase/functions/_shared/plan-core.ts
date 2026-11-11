@@ -223,7 +223,7 @@ export function resolveBasics(i: Pick<PlanInputs, 'draft' | 'profile' | 'appoint
     origin: { name: origin.name || '집', ...(origin.lat != null && origin.lng != null ? { lat: origin.lat, lng: origin.lng } : {}) },
     transport: draft.transport ?? participant?.transport_type ?? profile.default_transport,
     bufferMinutes: draft.bufferMinutes ?? participant?.buffer_minutes ?? profile.default_buffer_minutes,
-    importance: appointment?.importance ?? draft.importance ?? 'NORMAL',
+    importance: appointment?.importance ?? draft.importance ?? 'LOW', // 새 일정 기본은 약(LOW) — 요청에 없으면 requests.ts가 제목으로 자동
   };
 }
 

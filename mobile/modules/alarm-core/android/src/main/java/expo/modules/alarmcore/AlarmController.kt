@@ -86,8 +86,11 @@ object AlarmController {
 
     if (!plan.sound) {
       // 일정 알림은 한 번 알리면 끝 (미루기 · 다시 울림 없음). 원탭 응답은 알림이 인텐트에 실어 가짐
-      AlarmStorage.remove(context, id)
+      // 출발 알림은 그 일정 시각 · 준비물 · 출발 촉구를 음성으로 읽음 — 읽을 때까지 브리핑 파일을 남겨 두고 서비스가 다 읽은 뒤 지움
+      val speak = current.type == "DEPARTURE"
+      AlarmStorage.remove(context, id, keepVoice = speak)
       AlarmNotifications.showNotice(context, next)
+      if (speak) runCatching { BriefingSpeechService.start(context, next) }.onFailure { VoiceBriefing.clear(context, id) }
       return
     }
 
@@ -199,6 +202,8 @@ object AlarmController {
     // 이미 울려서 저장소에서 지워진 일정 알림도 지움 (로그아웃 정리 뒤 남은 알림의 원탭이 기록을 쌓지 않게)
     AlarmNotifications.cancelAllNotices(context)
     AlarmPlaybackService.stop(context)
+    // 지운 알람에 안 묶인 브리핑(읽다 만 출발 안내 등)까지 — 다음 계정에 남지 않게
+    runCatching { VoiceBriefing.clearAll(context) }
   }
 
   /** JS의 stop — 지금 울리는 알람을 해제 처리 (앱이 이미 열려 있으니 앱은 안 엶) */
@@ -233,6 +238,8 @@ object AlarmController {
       "soundKey" to alarm.soundKey,
       "vibration" to alarm.vibration,
       "intensity" to alarm.intensity,
+      // AI 음성 브리핑 문장 (지금 단계) — 음성을 못 틀어도 화면에 일정 안내가 남게. 없으면 null
+      "briefingText" to VoiceBriefing.speechFor(context, alarm, System.currentTimeMillis())?.text,
     )
   }
 

@@ -67,8 +67,9 @@ export async function getRing(alarmId: string): Promise<RingInfo | null> {
     kind: ringing.type,
     appointment,
     at,
-    voiceTone: '',
-    voiceLine: '',
+    // AI 음성 브리핑이 있으면 지금 단계의 문장 (음성을 못 틀어도 화면에 오늘 일정이 남음). 없으면 안내 칸을 안 그림
+    voiceTone: ringing.briefingText ? 'AI 브리핑' : '',
+    voiceLine: ringing.briefingText ?? '',
     notice: ringing.heading || undefined,
     levelLine: `알람 강도 ${LEVELS[toLevel(ringing.intensity)].name}`,
     important: false,

@@ -1,5 +1,7 @@
 import type { SchoolStatus, WorkStatus } from './prepareMlSurvey';
 
+import type { Json } from '@/types/database';
+
 // 내 프로필 — supabase/migrations의 profiles 칼럼과 같은 이름
 // (타입 생성 `npx supabase gen types` 뒤에는 생성된 타입으로 바꿈)
 
@@ -34,6 +36,7 @@ export type Profile = {
   ml_school_status: SchoolStatus | null;
   ml_work_status: WorkStatus | null;
   ml_profile_consented_at: string | null;
+  alarm_voice_prefs?: { [key: string]: Json | undefined }; // 기상 AI 음성 브리핑 수동 설정 — 직접 고른 칸만, 비면 자동(중요도 기본값). 마이그레이션 전 서버면 없음 (@shared/briefing.ts cleanPrefs로 읽음)
   wake_ping_enabled: boolean; // 친구 깨우기 받기 — 기본 켬. 꺼 두면 보낸 쪽에 '지금은 깨울 수 없어요'만 (친구 8장)
 };
 
@@ -58,6 +61,7 @@ export type ProfileFields = Partial<
     | 'ml_school_status'
     | 'ml_work_status'
     | 'ml_profile_consented_at'
+    | 'alarm_voice_prefs'
   >
 >;
 
