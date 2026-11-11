@@ -26,6 +26,12 @@ test('cold uses C1; consecutive-day warm uses W4', () => {
   const warm = buildMlRequest({ appointmentAt: at, timezone: 'Asia/Seoul', profile, previousDayMinutes: 87 });
   assert.equal(warm?.model, 'w4_mae');
   assert.equal(warm?.features.previous_day_target_minutes, 87);
+  assert.equal(warm?.features['휴일종류코드'], '__MISSING__');
+  const approvedWithHoliday = { ...profile, ml_holiday_code: '5' };
+  const withHoliday = buildMlRequest({ appointmentAt: at, timezone: 'Asia/Seoul', profile: approvedWithHoliday, previousDayMinutes: 87 });
+  assert.equal(withHoliday?.model, 'w4_mae');
+  assert.equal(withHoliday?.features['휴일종류코드'], '5');
+  assert.equal(buildMlRequest({ appointmentAt: at, timezone: 'Asia/Seoul', profile: { ...approvedWithHoliday, ml_holiday_code: '99' }, previousDayMinutes: null })?.features['휴일종류코드'], '__MISSING__');
   assert.deepEqual(Object.keys(warm!.features).sort(), [
     'weekday_code', '평토일구분코드', '휴일종류코드', '연령코드', 'previous_day_target_minutes',
   ].sort());
@@ -65,12 +71,16 @@ test('real ML is denied unless both flag and server-side UUID allowlist permit t
 test('only a service-verified, consented and matching codebook profile can be used', () => {
   const good = {
     ml_age_code: '2',
+    ml_holiday_code: '1',
     codebook_version: 'validated-v1',
     consent_at: '2025-01-01T00:00:00Z',
     verified_at: '2025-01-02T00:00:00Z',
   };
   assert.deepEqual(approvedMlProfile(good, 'validated-v1'), {
-    ml_codes_verified: true, ml_age_code: '2',
+    ml_codes_verified: true, ml_age_code: '2', ml_holiday_code: '1',
+  });
+  assert.deepEqual(approvedMlProfile({ ...good, ml_holiday_code: null }, 'validated-v1'), {
+    ml_codes_verified: true, ml_age_code: '2', ml_holiday_code: null,
   });
   assert.equal(approvedMlProfile(good, ''), null);
   assert.equal(approvedMlProfile(good, 'other-version'), null);
