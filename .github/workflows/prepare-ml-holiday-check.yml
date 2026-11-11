@@ -1,16 +1,6 @@
 name: CatBoost 선택 입력 검증
 
 on:
-  pull_request:
-    paths:
-      - 'mobile/src/features/profile/**'
-      - 'mobile/src/features/onboarding/**'
-      - 'mobile/src/app/onboarding.tsx'
-      - 'mobile/src/types/database.ts'
-      - 'supabase/functions/_shared/prepare-ml*'
-      - 'supabase/functions/_shared/plan.ts'
-      - 'supabase/migrations/*prepare_ml*'
-      - '.github/workflows/prepare-ml-holiday-check.yml'
   workflow_dispatch:
 
 permissions:
