@@ -55,9 +55,14 @@ docker stop respec-prepare-ml-check
 
 A successful health check requires `ok=true` and both model names.
 The image may be built without the models, but the service should not be
-considered ready without the read-only bind mount.
+considered ready without the read-only bind mount. Without both artifacts,
+`GET /health` returns HTTP 503 with `ok=false`.
 
 ## EC2 handoff (#471 / #472)
+
+The legacy Cloud Run deployment helper is disabled and exits before
+creating resources because its source-build design cannot load mounted models.
+The local tunnel helper mounts its model source read-only and checks `ok=true`.
 
 The standalone illustration is
 `deploy/prepare-ml.compose.example.yml`. The #471 owner must integrate its
