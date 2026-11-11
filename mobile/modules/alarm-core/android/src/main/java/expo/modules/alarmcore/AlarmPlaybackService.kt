@@ -25,7 +25,7 @@ import android.os.VibratorManager
 import android.util.Log
 import androidx.core.app.NotificationCompat
 
-// WAKE · DEPARTURE 알람 포그라운드 서비스: 알람음·진동·반복 음성을 해제·미루기 전까지 함께 유지
+// WAKE 알람 포그라운드 서비스: 배경음·진동·반복 AI 음성을 사용자가 해제·미루기 할 때까지 함께 유지. DEPARTURE는 기존 1회 알림+1회 브리핑 사용
 // 볼륨 · 한 번 울리는 최대 시간 · 소리는 알람 저장소의 울림 계획(RingPlan)대로. 다시 울림은 AlarmController가 미리 걸어 둠
 class AlarmPlaybackService : Service() {
   companion object {
@@ -154,7 +154,7 @@ class AlarmPlaybackService : Service() {
     }
 
     val ringMillis = ringMillisOf(alarm)
-    val continuous = alarm.type == "WAKE" || alarm.type == "DEPARTURE"
+    val continuous = alarm.type == "WAKE"
     // 사용자가 해제·미루기 할 때까지 유지. 종료 시 onDestroy에서 wakeLock을 반드시 해제.
     holdWakeLock(if (continuous) 0L else ringMillis + WAKE_LOCK_EXTRA_MILLIS)
     if (mediaPlayer == null) {
@@ -335,7 +335,7 @@ class AlarmPlaybackService : Service() {
         mediaPlayer?.let { runCatching { it.setVolume(VOICE_DUCK, VOICE_DUCK) } }
       },
       onDone = { stopVoice() },
-    ).also { it.speak(speech, repeat = alarm.type == "WAKE" || alarm.type == "DEPARTURE") }
+    ).also { it.speak(speech, repeat = alarm.type == "WAKE") }
   }
 
   private fun stopVoice() {

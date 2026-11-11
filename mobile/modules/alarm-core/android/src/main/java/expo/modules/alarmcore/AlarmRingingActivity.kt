@@ -206,7 +206,7 @@ class AlarmRingingActivity : Activity() {
     }
 
     val heading = TextView(this).apply {
-      text = if (current?.type == "DEPARTURE") "출발 알람" else "기상 알람"
+      text = "기상 알람"
       setTextColor(Color.WHITE)
       textSize = 20f
       gravity = Gravity.CENTER

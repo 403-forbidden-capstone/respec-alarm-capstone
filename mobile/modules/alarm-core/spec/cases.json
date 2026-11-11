@@ -146,17 +146,17 @@
       "name": "출발",
       "input": { "type": "DEPARTURE", "intensity": "NORMAL" },
       "plan": {
-        "sound": true,
-        "volumePercent": 80,
+        "sound": false,
+        "volumePercent": 0,
         "soundKey": "default",
-        "maxRingMillis": 180000,
+        "maxRingMillis": 0,
         "reRingOffsetsMillis": [],
-        "snoozeMillis": 600000,
-        "snoozeMinutesOptions": [5,10,15],
-        "snoozeLimit": 3,
+        "snoozeMillis": 0,
+        "snoozeMinutesOptions": [],
+        "snoozeLimit": 0,
         "heading": "출발할 시간이에요",
-        "oneTapLabel": null,
-        "oneTapEventType": null
+        "oneTapLabel": "출발했어요",
+        "oneTapEventType": "ACKNOWLEDGED"
       }
     },
     {
@@ -214,34 +214,34 @@
       "name": "출발 — notice가 \"지금 나가면 도착 · 여유\" 줄이 됨",
       "input": { "type": "DEPARTURE", "intensity": "NORMAL", "notice": "지금 나가면 오전 9:50 도착 · 여유 10분" },
       "plan": {
-        "sound": true,
-        "volumePercent": 80,
+        "sound": false,
+        "volumePercent": 0,
         "soundKey": "default",
-        "maxRingMillis": 180000,
+        "maxRingMillis": 0,
         "reRingOffsetsMillis": [],
-        "snoozeMillis": 600000,
-        "snoozeMinutesOptions": [5,10,15],
-        "snoozeLimit": 3,
+        "snoozeMillis": 0,
+        "snoozeMinutesOptions": [],
+        "snoozeLimit": 0,
         "heading": "지금 나가면 오전 9:50 도착 · 여유 10분",
-        "oneTapLabel": null,
-        "oneTapEventType": null
+        "oneTapLabel": "출발했어요",
+        "oneTapEventType": "ACKNOWLEDGED"
       }
     },
     {
       "name": "notice가 비었거나 공백이면 종류별 기본 줄",
       "input": { "type": "DEPARTURE", "intensity": "NORMAL", "notice": "  " },
       "plan": {
-        "sound": true,
-        "volumePercent": 80,
+        "sound": false,
+        "volumePercent": 0,
         "soundKey": "default",
-        "maxRingMillis": 180000,
+        "maxRingMillis": 0,
         "reRingOffsetsMillis": [],
-        "snoozeMillis": 600000,
-        "snoozeMinutesOptions": [5,10,15],
-        "snoozeLimit": 3,
+        "snoozeMillis": 0,
+        "snoozeMinutesOptions": [],
+        "snoozeLimit": 0,
         "heading": "출발할 시간이에요",
-        "oneTapLabel": null,
-        "oneTapEventType": null
+        "oneTapLabel": "출발했어요",
+        "oneTapEventType": "ACKNOWLEDGED"
       }
     }
   ],

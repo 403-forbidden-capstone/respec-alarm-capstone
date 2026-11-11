@@ -105,18 +105,17 @@ export function buildRingPlan(
   const soundKey = pkg.soundKey?.trim() || DEFAULT_SOUND_KEY;
   // notice는 서버가 준 JSON 값이라 글자가 아닐 수도 있음(숫자 · null 등) — trim에서 던져 알람이 안 걸리면 안 되므로 글자일 때만 보고, 아니면 기본 줄
   const heading = (fallback: string) => (typeof pkg.notice === 'string' ? pkg.notice.trim() : '') || fallback;
-  // 기상·출발 알람은 사용자가 해제할 때까지 알람음·진동·AI 음성이 함께 반복됩니다.
-  if (pkg.type === 'WAKE' || pkg.type === 'DEPARTURE') {
+  if (pkg.type === 'WAKE') {
     return {
       sound: true,
       volumePercent: volumePercentFor(pkg.intensity, pkg.volumeAdjust),
       soundKey,
       maxRingMillis: MAX_RING_MILLIS,
-      reRingOffsetsMillis: pkg.type === 'WAKE' ? reRingOffsetsFor(pkg.intensity) : [],
+      reRingOffsetsMillis: reRingOffsetsFor(pkg.intensity),
       snoozeMillis: SNOOZE_MILLIS,
       snoozeMinutesOptions: [...SNOOZE_MINUTES_OPTIONS],
       snoozeLimit: Number.isInteger(pkg.snoozeLimit) && (pkg.snoozeLimit as number) >= 0 ? (pkg.snoozeLimit as number) : DEFAULT_SNOOZE_LIMIT,
-      heading: heading(HEADING[pkg.type]),
+      heading: heading(HEADING.WAKE),
       oneTapLabel: null,
       oneTapEventType: null,
     };
