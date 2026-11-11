@@ -5,7 +5,7 @@ import { test } from 'node:test';
 import { assertPersistable, commitStandalone, persistAppointment, type CommitCtx } from './commit.ts';
 import { HttpError } from './errors.ts';
 import { FakeDb } from './fake-db.ts';
-import { computePlan, type AlarmRow, type AppointmentRow, type ParticipantRow, type PlanDraft, type PlanInputs, type ProfileRow } from './plan-core.ts';
+import { computePlan, toSuggestion, type AlarmRow, type AppointmentRow, type ParticipantRow, type PlanDraft, type PlanInputs, type ProfileRow } from './plan-core.ts';
 import type { ResolvedTravel } from './route.ts';
 import type { Db } from './supabase.ts';
 
@@ -359,4 +359,58 @@ test('일정 없는 알람: 시각 없이 강도만 · 켜기만 고치면 저�
   assert.equal(db.rows('alarms')[0].scheduled_at, kst(21, 420).toISOString()); // 거절된 요청은 아무것도 안 바꿈
   await commitStandalone(ctx, { alarm: { alarmId: 'old', scheduledAt: kst(22, 300), isEnabled: false }, edits: [], timeZone: 'Asia/Seoul' });
   assert.equal(db.rows('alarms')[0].is_enabled, false);
+});
+
+
+test('C1/W4/P80: preview -> commit -> persisted alarm rows and participant minutes match', async () => {
+  // This covers the real persistence implementation using FakeDb, unlike
+  // the plan-only equality test. Both calls are given the same model output.
+  // A live network/inference consistency test is still required.
+  const cases: { label: string; mlPrediction: PlanInputs['mlPrediction']; expectedSource: string }[] = [
+    { label: 'C1', mlPrediction: { model: 'c1_mae', minutes: 66 }, expectedSource: 'MODEL' },
+    { label: 'W4', mlPrediction: { model: 'w4_mae', minutes: 58 }, expectedSource: 'MODEL' },
+    { label: 'P80 fallback', mlPrediction: undefined, expectedSource: 'DEFAULT' },
+  ];
+  for (const spec of cases) {
+    const { db, ctx } = setup();
+    const draft = newDraft({
+      prepareMinutes: undefined,  // automatically computed, not manual
+      beforePrepareMinutes: 20,
+      withWake: true,
+    });
+    const inputs = inputsOf(draft, { mlPrediction: spec.mlPrediction });
+    const preview = toSuggestion(computePlan(inputs, api, 'preview'), inputs);
+    const savedPlan = computePlan(inputs, api, 'save');
+    assert.equal(preview.check.ok, true, spec.label);
+    assert.equal(preview.prepare.source, spec.expectedSource, spec.label);
+
+    const response = await persistAppointment(ctx, {
+      plan: savedPlan, inputs,
+      created: { title: 'ML 저장 검증' },
+      draft, replaceExisting: true, edits: [], timeZone: 'Asia/Seoul',
+    });
+    const [storedParticipant] = db.rows('appointment_participants');
+    assert.equal(storedParticipant.prepare_minutes, preview.prepare.minutes, spec.label);
+    assert.equal(response.participant_id, storedParticipant.participant_id, spec.label);
+
+    const fromRows = db.rows('alarms').map((a) => ({
+      alarm_type: a.alarm_type,
+      scheduled_at: a.scheduled_at,
+      is_enabled: a.is_enabled,
+      time_source: a.time_source,
+    })).sort((a, b) => a.alarm_type.localeCompare(b.alarm_type));
+    const fromPreview = preview.alarms.map((a) => ({
+      alarm_type: a.alarm_type,
+      scheduled_at: a.scheduled_at,
+      is_enabled: a.is_enabled,
+      time_source: a.time_source,
+    })).sort((a, b) => a.alarm_type.localeCompare(b.alarm_type));
+    assert.deepEqual(fromRows, fromPreview, spec.label);
+    assert.deepEqual(
+      response.alarms.map((a) => [a.alarm_type, a.scheduled_at, a.time_source]).sort(),
+      fromRows.map((a) => [a.alarm_type, a.scheduled_at, a.time_source]).sort(),
+      spec.label,
+    );
+    assert.equal(db.rows('appointments').length, 1, spec.label);
+  }
 });

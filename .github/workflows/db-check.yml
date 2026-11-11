@@ -122,6 +122,48 @@ jobs:
           path: ${{ runner.temp }}/database.ts
           retention-days: 3
 
+  preview_remote:
+    name: PR #479 원격 DB 적용 목록만 확인
+    if: github.event_name == 'pull_request' && github.event.pull_request.number == 479 && github.event.pull_request.head.repo.full_name == github.repository
+    needs: [check, rehearse]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: 배포 자격 증명 존재 확인
+        run: |
+          test -n "$SUPABASE_ACCESS_TOKEN" || { echo "::error::SUPABASE_ACCESS_TOKEN이 설정되지 않았어요"; exit 1; }
+
+      - name: Supabase CLI
+        uses: supabase/setup-cli@v3
+        with:
+          version: ${{ env.SUPABASE_CLI_VERSION }}
+
+      - name: 프로젝트 연결
+        run: supabase link --project-ref "$PROJECT_REF"
+
+      - name: 미적용 7개 목록 확인 (절대 적용하지 않음)
+        run: |
+          set -euo pipefail
+          supabase db push --linked --include-all --dry-run 2>&1 | tee "$RUNNER_TEMP/db-plan.txt"
+          for f in \
+            20261109090000_friend_explore_fixes.sql \
+            20261110100000_prepare_ml_verified_profiles.sql \
+            20261110110000_prepare_ml_optional_survey.sql \
+            20261110120000_prepare_ml_reset_cleanup.sql \
+            20261110130000_prepare_ml_age_only.sql \
+            20261110220000_prepare_ml_consented_age_sync.sql \
+            20261110224500_prepare_ml_consent_safety.sql
+          do
+            grep -Fq "$f" "$RUNNER_TEMP/db-plan.txt" || { echo "::error::사전 검사에 $f 미표시"; exit 1; }
+          done
+          echo "계획한 7개 파일 모두 출력됨. 데이터베이스 변경 없음."
+
   deploy:
     name: 실제 DB에 적용
     needs: [check, rehearse]
@@ -154,5 +196,29 @@ jobs:
       - name: 프로젝트 연결
         run: supabase link --project-ref "$PROJECT_REF"
 
-      - name: 적용
-        run: supabase db push
+      - name: 적용 대상 정확히 7개 재확인 후 배포
+        run: |
+          set -euo pipefail
+          # 이미 운영에서 적용한 버전, 새로 추가된 버전, 예상 밖 파일이 하나라도 있으면 중단.
+          supabase db push --include-all --dry-run 2>&1 | tee "$RUNNER_TEMP/remote-db-plan.txt"
+          sed -nE 's/^[[:space:]]*•[[:space:]]*([0-9]{14}_[^[:space:]]+\.sql).*$/\1/p' "$RUNNER_TEMP/remote-db-plan.txt" > "$RUNNER_TEMP/actual.txt"
+          cat > "$RUNNER_TEMP/expected.txt" <<'EXPECTED'
+          20261109090000_friend_explore_fixes.sql
+          20261110100000_prepare_ml_verified_profiles.sql
+          20261110110000_prepare_ml_optional_survey.sql
+          20261110120000_prepare_ml_reset_cleanup.sql
+          20261110130000_prepare_ml_age_only.sql
+          20261110220000_prepare_ml_consented_age_sync.sql
+          20261110224500_prepare_ml_consent_safety.sql
+          EXPECTED
+          if grep -Fxq '20261109090000_friend_explore_fixes.sql' "$RUNNER_TEMP/actual.txt"; then
+            diff -u "$RUNNER_TEMP/expected.txt" "$RUNNER_TEMP/actual.txt" || {
+              echo "::error::원격 DB 대상 파일이 사전 검증과 다릅니다. 자동 배포 중단."
+              exit 1
+            }
+            echo "7개 누락 파일 일치. 이번 한 번만 오래된 마이그레이션을 포함해 적용."
+            supabase db push --include-all --yes
+          else
+            echo "과거 누락 파일이 이미 적용된 상태. 기존 표준 배포 동작 사용."
+            supabase db push --yes
+          fi
