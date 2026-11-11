@@ -156,15 +156,19 @@ export function actualRows(events: readonly EventRow[], record?: RecordRow | nul
 }
 
 // ---------------------------------------------------------------------------
-// 알람 조정 제안 (alarm_suggestions) — DB 종류는 말소리 · 배경음 · 진동뿐 (D6 열림)
+// 알람 조정 제안 (alarm_suggestions) — 알람 값 종류(말소리 · 배경음 · 세기) + 준비 알람 당김(PREPARE_ADVANCE, D6 A · 안건 초안 D111)
 // ---------------------------------------------------------------------------
 
 export type SuggestionType = Enums<'alarm_suggestion_type'>;
 
+// 알람 값을 바꾸는 제안 — 준비 알람 당김(PREPARE_ADVANCE)은 값이 아니라 시각이라 따로. 그 화면 · 적용은 다음 PR (S01, #49) — 그때까지 화면에 안 보임
+export type AlarmValueSuggestionType = Exclude<SuggestionType, 'PREPARE_ADVANCE'>;
+export const isAlarmValueSuggestion = (t: SuggestionType): t is AlarmValueSuggestionType => t !== 'PREPARE_ADVANCE';
+
 // 제안 종류 → 화면 이름 · 바뀌는 alarms 칸 · 값 읽기. 알람 세기 = alarms.intensity(전체 세기: 볼륨 · 다시 울림, 진동은 vibration 칸이 따로 — D1 A), 말소리 = voice_tone, 배경음 = sound_key
 //   INTENSITY는 예전엔 "진동"으로 보였지만 적용 칸은 전체 세기라 화면 문구를 "알람 세기"로 맞춤 (지형님 10/30)
 export const SUGGESTION_KIND: Record<
-  SuggestionType,
+  AlarmValueSuggestionType,
   { axis: string; column: 'voice_tone' | 'sound_key' | 'intensity'; levelOf: (v: string | null | undefined) => Level | null; text: (level: Level) => string }
 > = {
   VOICE_TONE: { axis: '말소리', column: 'voice_tone', levelOf: levelOfVoiceTone, text: (l) => LEVELS[l].voice },
@@ -173,7 +177,7 @@ export const SUGGESTION_KIND: Record<
 };
 
 // DB 값 → 화면 글자 (모르는 값이면 값 그대로)
-export function valueText(type: SuggestionType, value: string | null): string {
+export function valueText(type: AlarmValueSuggestionType, value: string | null): string {
   if (value == null) return '정해지지 않음';
   const kind = SUGGESTION_KIND[type];
   const level = kind.levelOf(value);
@@ -181,14 +185,14 @@ export function valueText(type: SuggestionType, value: string | null): string {
 }
 
 // 제안한 값을 알람에 쓸 수 있는지 — 말소리 · 진동은 DB 선택지(enum) 안의 값이어야 하고, 배경음은 이름 아무거나 (알람 코어가 모르면 기본음)
-export function isApplicableValue(type: SuggestionType, value: string): boolean {
+export function isApplicableValue(type: AlarmValueSuggestionType, value: string): boolean {
   if (!value) return false;
   return type === 'SOUND' || SUGGESTION_KIND[type].levelOf(value) != null;
 }
 
 // 제안한 값을 알람에 쓰는 갱신 내용. 적용할 때는 직접 고른 값으로 표시해 서버가 다시 계산해도 덮지 않게 함 (alarms.intensity_source MANUAL — 서버는 저장된 값을 직접 고른 값으로 읽음),
 // 되돌릴 때는 값만 되돌림 (표시는 그대로 — 되돌린 값이 자동 값과 같으면 서버가 직접 고른 값으로 안 봄). isApplicableValue를 통과한 값만 넘길 것
-export function alarmPatch(type: SuggestionType, value: string, markManual: boolean): TablesUpdate<'alarms'> {
+export function alarmPatch(type: AlarmValueSuggestionType, value: string, markManual: boolean): TablesUpdate<'alarms'> {
   const source = markManual ? ({ intensity_source: 'MANUAL' } as const) : {};
   if (type === 'SOUND') return { sound_key: value, ...source };
   if (type === 'VOICE_TONE') return { voice_tone: value as Enums<'voice_tone'>, ...source };
@@ -207,6 +211,7 @@ export const SUGGESTION_REASON = '최근 알람 반응을 바탕으로\n더 잘 
 //   시각 칸은 대상 알람 시각으로 채우고 화면은 change를 봄 (types.ts Suggestion.change)
 export function toSuggestion(row: SuggestionRow, target: SuggestionTarget | null): Suggestion | null {
   if (!target) return null;
+  if (!isAlarmValueSuggestion(row.suggestion_type)) return null; // 준비 알람 당김은 화면이 아직 없음 (S01 다음 PR)
   const kind = SUGGESTION_KIND[row.suggestion_type];
   const at = parseDbTime(target.scheduled_at);
   const appointment = target.appointment_participants?.appointments ?? null;

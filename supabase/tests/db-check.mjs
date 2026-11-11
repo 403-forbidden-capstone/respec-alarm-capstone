@@ -227,17 +227,19 @@ await check('anon은 함수를 실행할 수 없음 (회의 의견 지우기 하
   const bad = r.filter((x) => !MEETING_FN.includes(x.proname));
   return bad.length === 0 && r.length === MEETING_FN.length ? true : r;
 });
-await check('ENUM 21개 값이 4장과 같음 (NORMAL · DEPARTURE · FEEDBACK) + ACKNOWLEDGED + 값 출처 · 기록 출처', async () => {
+await check('ENUM 22개 값이 4장과 같음 (NORMAL · DEPARTURE · FEEDBACK) + ACKNOWLEDGED + 값 출처 · 기록 출처 + 준비 시작 출처 · 준비 알람 당김 제안', async () => {
   const r = await q(`select t.typname, array_agg(e.enumlabel order by e.enumsortorder)::text as v
                      from pg_type t join pg_enum e on e.enumtypid = t.oid group by 1`);
   const m = Object.fromEntries(r.map((x) => [x.typname, x.v]));
-  const ok = Object.keys(m).length === 21
+  const ok = Object.keys(m).length === 22
     && m.importance_level === '{LOW,NORMAL,HIGH}'
     && m.alarm_type === '{WAKE,PREPARE,DEPARTURE,ARRIVE,ROUTINE}'
     && m.alarm_intensity === '{SOFT,NORMAL,STRONG}'
     && m.alarm_event_type === '{TRIGGERED,SNOOZED,DISMISSED,WAKE_CONFIRMED,ARRIVAL_CONFIRMED,MISSED,FEEDBACK,ACKNOWLEDGED}'
     && m.alarm_value_source === '{AUTO,MANUAL}'
-    && m.event_input_source === '{BUTTON,LOCATION,VOICE,MANUAL,USAGE}';
+    && m.event_input_source === '{BUTTON,LOCATION,VOICE,MANUAL,USAGE}'
+    && m.prepare_start_source === '{ROUTINE_STEP,PREPARE_ALARM}'
+    && m.alarm_suggestion_type === '{VOICE_TONE,SOUND,INTENSITY,PREPARE_ADVANCE}';
   return ok ? true : m;
 });
 
@@ -1834,6 +1836,34 @@ await check('출발 · 도착 출처는 시각이 있을 때만: 출처만 있�
     && cleared[0].departed_source === null && cleared[0].arrived_source === null && badEnum === true
     && insSrcOnly === true && insBoth.arrived_source === 'BUTTON' && insBoth.departed_source === null
     ? true : { depSrcOnly, arrSrcOnly, nothing, legacy, both, clearTimeOnly, override, cleared, badEnum, insSrcOnly, insBoth };
+});
+await check('준비 시작 시각 · 출처는 같이만(D111 3번), 적용분은 0~120분, 제안 근거는 배열 — 주인만 고침 (알람 조정 제안 1단계)', async () => {
+  const { part } = await mkPart(A);   // A로 로그인한 상태
+  const upd = (set) => q(`update public.appointment_participants set ${set} where participant_id = $1
+                            returning prepare_started_at, prepare_started_source, prepare_advance_minutes`, [part]);
+  const [fresh] = await q(`select prepare_started_at, prepare_started_source, prepare_advance_minutes from public.appointment_participants where participant_id = $1`, [part]);
+  const srcOnly = await expectErr(() => upd(`prepare_started_source = 'ROUTINE_STEP'`), /appointment_participants_prepare_source_needs_time/);
+  const timeOnly = await expectErr(() => upd(`prepare_started_at = now()`), /appointment_participants_prepare_time_needs_source/);
+  const both = await upd(`prepare_started_at = now(), prepare_started_source = 'PREPARE_ALARM'`);
+  const over = await expectErr(() => upd(`prepare_advance_minutes = 121`), /appointment_participants_prepare_advance_range/);
+  const neg = await expectErr(() => upd(`prepare_advance_minutes = -5`), /appointment_participants_prepare_advance_range/);
+  const adv = await upd(`prepare_advance_minutes = 10`);
+  const badEnum = await expectErr(() => upd(`prepare_started_source = 'ALARM'`), /invalid input value for enum/);
+  await as(B);   // 남의 행은 못 고침 (기존 appointment_participants_update_own)
+  const other = await q(`update public.appointment_participants set prepare_advance_minutes = 30 where participant_id = $1 returning participant_id`, [part]);
+  await su();
+  const [after] = await q(`select prepare_advance_minutes from public.appointment_participants where participant_id = $1`, [part]);
+  // 제안 종류 PREPARE_ADVANCE · 근거는 배열만
+  const badEv = await expectErr(() => q(`insert into public.alarm_suggestions (user_id, suggestion_type, suggested_value, evidence)
+                                         values ($1, 'PREPARE_ADVANCE', '10', '{"a":1}')`, [A]), /alarm_suggestions_evidence_is_array/);
+  const [ev] = await q(`insert into public.alarm_suggestions (user_id, suggestion_type, current_value, suggested_value, evidence)
+                        values ($1, 'PREPARE_ADVANCE', '0', '10', '[10,14,12]') returning suggestion_type, evidence`, [A]);
+  return fresh.prepare_started_at === null && fresh.prepare_started_source === null && fresh.prepare_advance_minutes === 0
+    && srcOnly === true && timeOnly === true && both.length === 1 && both[0].prepare_started_source === 'PREPARE_ALARM'
+    && over === true && neg === true && adv[0].prepare_advance_minutes === 10 && badEnum === true
+    && other.length === 0 && after.prepare_advance_minutes === 10
+    && badEv === true && ev.suggestion_type === 'PREPARE_ADVANCE' && JSON.stringify(ev.evidence) === '[10,14,12]'
+    ? true : { fresh, srcOnly, timeOnly, both, over, neg, adv, badEnum, other, after, badEv, ev };
 });
 await check('반경: 약속 도착지(dest_radius_m)와 집(home_radius_m)은 100~500이고 NULL(기본값)도 받음 — 99 · 501은 거부', async () => {
   const { appt } = await mkPart(A);

@@ -244,6 +244,10 @@ describe('S01 제안 (DB 종류: 말소리 · 배경음 · 진동)', () => {
     ...patch,
   });
 
+  it('준비 알람 당김(PREPARE_ADVANCE)은 화면이 생길 때까지 안 보임 (S01 다음 PR)', () => {
+    expect(toSuggestion(row({ suggestion_type: 'PREPARE_ADVANCE', current_value: '0', suggested_value: '10' }), target({ alarm_type: 'PREPARE' }))).toBeNull();
+  });
+
   it('값은 약 · 중 · 강 글자로, 제목 · 요약은 홈 카드에 그대로 씀', () => {
     const s = toSuggestion(row(), target())!;
     expect(s.title).toBe('기상 알람의 말소리를 바꿔 볼까요?');
