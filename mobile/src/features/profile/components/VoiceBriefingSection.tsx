@@ -5,18 +5,11 @@ import { StyleSheet, View } from 'react-native';
 
 import { Button, Card, SectionHeader, Segmented, Text, Toggle } from '@/components/ui';
 import { size } from '@/theme';
-import { cleanPrefs, DEFAULT_COACH_MAX, TONES, VOICES, type ToneKey, type UrgencyLevel, type VoicePrefs } from '@shared/briefing.ts';
+import { cleanPrefs, TONES, VOICES, type ToneKey, type VoicePrefs } from '@shared/briefing.ts';
 
 const AUTO = 'auto';
 const VOICE_OPTIONS = [[AUTO, '자동'], ...VOICES.map((v) => [v.id, v.label] as const)] as const;
 const TONE_OPTIONS = [[AUTO, '자동'], ...(Object.keys(TONES) as ToneKey[]).map((k) => [k, TONES[k].label] as const)] as const;
-const COACH_OPTIONS = [
-  ['1', '부드럽게'],
-  ['2', '단호하게'],
-  ['3', '강하게'],
-  ['4', '긴급'],
-] as const;
-
 type Props = {
   value: unknown; // profiles.alarm_voice_prefs 그대로 (모르는 칸은 cleanPrefs가 버림)
   onSave: (next: VoicePrefs) => void;
@@ -51,25 +44,9 @@ export function VoiceBriefingSection({ value, onSave, disabled }: Props) {
               평소 말투
             </Text>
             <Segmented options={TONE_OPTIONS} value={prefs.tone ?? AUTO} onChange={(v) => set('tone', v === AUTO ? undefined : (v as ToneKey))} disabled={disabled ? TONE_OPTIONS.map(([v]) => v) : undefined} />
-            <Row label="미루거나 늦을 것 같으면 말투 강하게" note="미룰수록 단호해지고, 지각 위험이 생기면 긴급으로 깨워요">
-              <Toggle value={prefs.escalate ?? true} onChange={(on) => set('escalate', on ? undefined : false)} label="말투 자동 강화" disabled={disabled} />
-            </Row>
-            {prefs.escalate ?? true ? (
-              <>
-                <Text variant="small" tone="sub" style={styles.label}>
-                  가장 강하게는 어디까지
-                </Text>
-                <Segmented
-                  options={COACH_OPTIONS}
-                  value={String(prefs.coachMax ?? DEFAULT_COACH_MAX) as (typeof COACH_OPTIONS)[number][0]}
-                  onChange={(v) => set('coachMax', Number(v) === DEFAULT_COACH_MAX ? undefined : (Number(v) as UrgencyLevel))}
-                  disabled={disabled ? COACH_OPTIONS.map(([v]) => v) : undefined}
-                />
-                <Text variant="small" tone="sub" style={styles.label}>
-                  긴급(다급하게 외치는 AI 음성)은 일정 중요도와 상관없이 실제로 늦기 직전(남은 여유 5분 이하)일 때만 나와요
-                </Text>
-              </>
-            ) : null}
+            <Text variant="small" tone="sub" style={styles.label}>
+              1~3단계는 선택한 Android TTS 목소리·말투를 사용해요. 스누즈하거나 시간이 흐르면 자동으로 강해지고, 여유가 0분이면 4단계 Gemini 긴급 음성으로 바뀝니다. Gemini 목소리는 직접 고를 수 없어요.
+            </Text>
             <Row label="어제 대화 내용 넣기" note="AI 대화에서 직접 말한 다짐 · 목표만 써요. 끄면 일정만 읽어요">
               <Toggle value={prefs.personal ?? true} onChange={(on) => set('personal', on ? undefined : false)} label="어제 대화 내용 넣기" disabled={disabled} />
             </Row>

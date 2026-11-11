@@ -229,7 +229,8 @@ export type AppointmentDraft = {
   originName?: string; // 직접 검색한 출발지 이름. 현재 위치면 비움
   destRadiusM?: number; // 도착 감지 반경(m, 정수 100~500) — 지도 시트에서 고른 값. 없으면 서버 기본값 (요청 destination.radius_m, destinationPick.ts)
   transport: Transport;
-  importance: Importance;
+  importance: Importance; // 제목에서 자동 판단. 일정 생성 화면에서는 직접 고르지 않음
+  levels?: Record<IntensityAxis, Level | null>; // H05 알람 세 축(배경음·말소리·진동), null=자동
   items: string; // 쉼표로 구분
   alarms: Record<RingKind, boolean>; // 만들 알람 종류 (D46) — 모두 끄면 알람 없는 일정
   groupId?: string | null; // 함께할 그룹 — 고르면 공동 약속 (친구 9장, 요청 appointment.group_id). 없으면 개인 일정
@@ -246,6 +247,7 @@ export type Estimate = {
   residualP80: number; // 개인 오차 P80 (분)
   sameDayWake: boolean; // 같은 날 앞선 일정에 기상 알람이 있어 외출 준비만
   latePoint: number; // 최근 4주 늦잠 지각 점수 (강도 계산)
+  levels?: Record<IntensityAxis, Level | null>; // 새 일정 화면에서 고른 축(목업에도 유지)
   // 실데이터 전용 — 서버가 계산한 이동시간의 근거 한 줄 ("길찾기 기준" · "대략적인 값이에요 · 확인이 필요해요")과 확인 필요 여부. 없으면 목업 문구
   travelNote?: string;
   travelNeedsConfirm?: boolean;

@@ -8,7 +8,7 @@ import type { TtsRequest } from './ai/tts.ts';
 
 const kst = (h: number, m = 0) => Date.UTC(2026, 10, 11, h - 9, m);
 
-// 10시 약속 · 준비 50 · 이동 40 → 긴급 시각 8:24:30. 기상 알람 7:30이면 미루다 긴급이 될 수 있음
+// 10시 약속 · 준비 50 · 이동 40 → 8:25는 3단계, 8:30부터는 4단계. 기상 알람이 길어질 때도 전환
 const source = (over: Partial<BriefingSource> = {}): BriefingSource => ({
   kind: 'WAKE',
   scheduledAtMs: kst(7, 30),
@@ -58,6 +58,7 @@ test('긴급이 될 수 있는 기상 알람 → 4단계 문장만 Gemini로 한
   assert.equal(out.gemini, 'MADE');
   assert.equal(f.calls.length, 1);
   assert.match(f.calls[0].style, /shouting/);
+  assert.equal(f.calls[0].voice, 'Kore'); // 4단계 Gemini 목소리는 사용자 Android TTS 선택과 무관하게 고정
   assert.match(f.calls[0].text, /^야!!!!!!!!!! 지금 안 일어나면 진짜 늦어/);
   assert.deepEqual(out.audio.map((a) => a.level), [4]);
   assert.deepEqual(out.clips.map((c) => c.level), [1, 2, 3, 4]);
@@ -67,7 +68,7 @@ test('긴급이 될 수 있는 기상 알람 → 4단계 문장만 Gemini로 한
 });
 
 test('여유가 많은 알람(긴급 불가) · 준비 · 이동 모름 · 이미 출발 → Gemini 안 부름', async () => {
-  for (const over of [{ scheduledAtMs: kst(6) }, { travelMinutes: null }, { done: true }] as Partial<BriefingSource>[]) {
+  for (const over of [{ scheduledAtMs: kst(6) - 24 * 60 * 60_000 }, { travelMinutes: null }, { done: true }] as Partial<BriefingSource>[]) {
     const f = fakes();
     const out = await runBriefing(source(over), new Set(), f.deps);
     assert.equal(out.gemini, 'NOT_NEEDED', JSON.stringify(over));
@@ -112,19 +113,20 @@ test('키 없음 → NOT_CONFIGURED, 사용자가 끄면 아무것도 안 만듦
   assert.equal((await runBriefing(source(), new Set(), { tts: null, quota: fakes().deps.quota })).gemini, 'NOT_CONFIGURED');
   const f = fakes();
   assert.deepEqual(await runBriefing(source({ prefs: { enabled: false } }), new Set(), f.deps), { enabled: false, rule: null, clips: [], audio: [], gemini: 'NOT_NEEDED' });
-  const capped = await runBriefing(source({ prefs: { coachMax: 3 } }), new Set(), f.deps);
-  assert.equal(capped.gemini, 'NOT_NEEDED');
-  assert.deepEqual(capped.clips.map((c) => c.level), [1, 2, 3]);
-  assert.equal(f.calls.length, 0);
+  // 이전 사용자 설정의 상한/자동 강화 끔은 이제 긴급 4단계를 차단하지 않음.
+  const capped = await runBriefing(source({ prefs: { coachMax: 3, escalate: false } }), new Set(), f.deps);
+  assert.equal(capped.gemini, 'MADE');
+  assert.deepEqual(capped.clips.map((c) => c.level), [1, 2, 3, 4]);
+  assert.equal(f.calls.length, 1);
 });
 
-test('출발 알람: 그 일정 + 준비물 + 출발 촉구, 긴급 시각에 울리면 Gemini', async () => {
+test('출발 알람: 그 일정 + 준비물 + 출발 촉구, 여유 0분에만 Gemini', async () => {
   const f = fakes();
-  const dep = source({ kind: 'DEPARTURE', scheduledAtMs: kst(9, 15), appointments: [{ title: '면접', atMs: kst(10), importance: 'HIGH' }], todos: [{ title: '이력서', type: 'ITEM' }] });
+  const dep = source({ kind: 'DEPARTURE', scheduledAtMs: kst(9, 20), appointments: [{ title: '면접', atMs: kst(10), importance: 'HIGH' }], todos: [{ title: '이력서', type: 'ITEM' }] });
   const out = await runBriefing(dep, new Set(), f.deps);
   assert.equal(out.clips[0].text, '오전 10시 면접 갈 시간이야. 챙길 것: 이력서. 이제 출발하자!');
   assert.equal(out.gemini, 'MADE');
-  const calm = await runBriefing({ ...dep, scheduledAtMs: kst(9, 10) }, new Set(), fakes().deps); // 여유 10분 = 위험(긴급 아님)
+  const calm = await runBriefing({ ...dep, scheduledAtMs: kst(9, 15) }, new Set(), fakes().deps); // 여유 5분 = Android 3단계
   assert.equal(calm.gemini, 'NOT_NEEDED');
 });
 

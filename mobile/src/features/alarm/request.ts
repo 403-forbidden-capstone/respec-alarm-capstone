@@ -143,6 +143,7 @@ export function newAppointmentBody(d: AppointmentDraft, at: Date): Body {
     },
     participant: { origin: d.originLocation ? { name: d.originName || '현재 위치', lat: d.originLocation.lat, lng: d.originLocation.lng } : { name: ORIGIN_HOME }, transport_type: d.transport },
     kinds: RING_KINDS.filter((kind) => d.alarms[kind]),
+    ...(d.levels && Object.values(d.levels).some((level) => level != null) ? { levels: d.levels } : {}),
   };
 }
 
@@ -363,6 +364,7 @@ export function toEstimate(s: Suggestion, d: AppointmentDraft, at: Date, body: B
     residualP80: s.prepare.residual_p80,
     sameDayWake: s.same_day_wake,
     latePoint: s.intensity.late_point,
+    ...(d.levels ? { levels: d.levels } : {}),
     ...(s.travel.note ? { travelNote: s.travel.note } : {}),
     travelNeedsConfirm: s.travel.needs_confirmation,
     commit: { body, travelSource: s.travel.source ?? 'MANUAL' },

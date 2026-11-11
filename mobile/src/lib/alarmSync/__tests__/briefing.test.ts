@@ -1,6 +1,7 @@
 // 기상 AI 음성 브리핑 미리 받기 — 가짜 서버(Mock)로: 열쇠 보내기 · 저장 · 끄면 지움 · 없는 알람 지움 · 네트워크 실패에도 있던 음성 유지
 import { describe, expect, it, jest } from '@jest/globals';
 import type { ScheduledAlarm } from '@capstone/alarm-core';
+import { levelAt, resolveVoice, urgencyRule, type UrgencyRule } from '@shared/briefing.ts';
 
 import { BRIEFING_WINDOW_MS, prepareBriefings, type BriefingDeps, type BriefingOut } from '../briefing';
 import { EdgeError } from '../../edge';
@@ -43,6 +44,33 @@ describe('prepareBriefings', () => {
     expect(t.calls).toEqual([{ id: 'w1', have: ['bbbbbbbbbbbbbbbb'] }, { id: 'd1', have: ['bbbbbbbbbbbbbbbb'] }]);
     expect(t.saved).toEqual(['w1', 'd1']);
     expect(s.saved).toEqual(['w1', 'd1']);
+  });
+
+  it('예전 규칙이 저장된 알람도 다시 맞추면 서버의 새 규칙(여유 5분 · 0분 시각)을 그대로 덮어 저장 → 실제 일정 기준 5분 3단계 · 0분 4단계', async () => {
+    // 실제 일정 모양: 오전 10시 약속 · 준비 50분 · 이동 40분 → 서버가 계산한 규칙 (배포된 alarm-briefing과 같은 식)
+    const appointmentAtMs = NOW + 3 * 3_600_000;
+    const rule = urgencyRule({ kind: 'WAKE', appointmentAtMs, prepMinutes: 50, travelMinutes: 40 }, resolveVoice('NORMAL'));
+    const saves: { id: string; rule: unknown }[] = [];
+    const t = deps({
+      getHashes: async () => ['cccccccccccccccc'], // 폰에는 예전 브리핑(예전 규칙 · 예전 긴급 음성)이 있음
+      save: async (id, data) => void saves.push({ id, rule: data.rule }),
+      call: async () => ({ ...OUT, rule }),
+    });
+    await prepareBriefings(NOW, t.d);
+    expect(saves).toEqual([{ id: 'w1', rule }]); // 있던 것과 상관없이 서버를 다시 불러 새 규칙으로 덮어씀
+    const saved = saves[0].rule as UrgencyRule;
+    const slack5 = appointmentAtMs - (50 + 40 + 5) * 60_000;
+    const slack0 = appointmentAtMs - (50 + 40) * 60_000;
+    expect([levelAt(saved, 0, slack5 - 1), levelAt(saved, 0, slack5), levelAt(saved, 0, slack0 - 1), levelAt(saved, 0, slack0)]).toEqual([1, 3, 3, 4]);
+    expect([levelAt(saved, 1, NOW), levelAt(saved, 2, NOW), levelAt(saved, 9, NOW)]).toEqual([2, 3, 3]); // 스누즈만으로는 4 안 됨
+  });
+
+  it('개발 화면 시험 알람(de70a1a0-)은 서버를 안 부르고 시험 브리핑도 안 건드림 — 오프라인 시험 · Gemini 재호출 없음', async () => {
+    const t = deps({}, [alarm('de70a1a0-aaaa-4bbb-8ccc-dddddddddddd', 'WAKE', 60_000), alarm('w1', 'WAKE', 3_600_000)]);
+    await prepareBriefings(NOW, t.d);
+    expect(t.calls.map((c) => c.id)).toEqual(['w1']);
+    expect(t.saved).toEqual(['w1']);
+    expect(t.cleared).toEqual([]);
   });
 
   it('사용자가 끄면(enabled false) 그 알람 음성을 지움', async () => {

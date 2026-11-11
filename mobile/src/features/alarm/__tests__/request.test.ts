@@ -55,6 +55,14 @@ describe('새 일정 요청 (newAppointmentBody)', () => {
     });
   });
 
+  it('새 일정에서 고른 배경음·Android 말소리·진동 강도가 서버 계산과 저장에 실림', () => {
+    const d = draft({ levels: { sound: 0, voice: 2, vibration: 1 } });
+    const body = newAppointmentBody(d, at('10:00')) as { levels: unknown };
+    expect(body.levels).toEqual({ sound: 0, voice: 2, vibration: 1 });
+    const same = newAppointmentBody(draft({ levels: { sound: null, voice: null, vibration: null } }), at('10:00')) as { levels?: unknown };
+    expect(same.levels).toBeUndefined();
+  });
+
   it('고른 장소의 좌표를 담음 (초안의 좌표가 먼저, 없으면 기억해 둔 이름 → 좌표)', () => {
     const withCoords = newAppointmentBody(draft({ placeLat: 37.55, placeLng: 127.07 }), at('10:00')) as { appointment: { destination: unknown } };
     expect(withCoords.appointment.destination).toEqual({ name: '세종대학교', lat: 37.55, lng: 127.07 });

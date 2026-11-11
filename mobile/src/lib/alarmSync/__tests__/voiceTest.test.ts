@@ -1,0 +1,128 @@
+// 개발 화면 AI 음성 시험 — 단계 재현이 실제 판단 식(levelAt)과 같은 단계를 고르는지 · 문장 · 말투가 서버 규칙 그대로인지 · 재생 구성
+import { describe, expect, it } from '@jest/globals';
+import type { VoiceTestSetup } from '@capstone/alarm-core';
+import { androidVoice, briefingText, engineFor, levelAt as sharedLevelAt, resolveVoice, type UrgencyLevel, type UrgencyRule } from '@shared/briefing.ts';
+
+import { isDevAlarmId, isVoiceTestId, makeDevAlarmId, makeVoiceTestAlarmId } from '../devAlarm';
+import {
+  AUTO_STEP_MS,
+  autoStageTest,
+  departureVoiceTest,
+  engineLabel,
+  GEMINI_SAMPLE_TEXT,
+  geminiSampleTest,
+  mixOptions,
+  SAMPLE,
+  wakeVoiceTest,
+  type Stage,
+} from '../voiceTest';
+
+const NOW = Date.UTC(2026, 10, 11, 22, 0); // 서울 11/12 오전 7시
+const ON = { sound: true, voice: true };
+// 네이티브에 넘기는 rule(숫자 상한)을 서버 판단 식에 그대로 넣음
+const levelAt = (rule: VoiceTestSetup['rule'], snoozeCount: number, nowMs: number) => sharedLevelAt(rule as UrgencyRule, snoozeCount, nowMs);
+
+describe('기상 AI 음성 단계 재현', () => {
+  it.each([1, 2, 3, 4] as Stage[])('%i단계 버튼 → 실제 판단 식(levelAt, 네이티브 SpeechUrgency와 같음)이 그 단계를 고름', (stage) => {
+    const { snoozeCount, voice } = wakeVoiceTest(stage, NOW, ON);
+    expect(levelAt(voice.rule!, snoozeCount, NOW)).toBe(stage);
+  });
+
+  it('1~3단계 재현은 긴급 규칙이 없어 실제로 미루면 2 → 3으로만 오르고 긴급(4)은 안 됨', () => {
+    const { voice } = wakeVoiceTest(1, NOW, ON);
+    expect([0, 1, 2, 3].map((n) => levelAt(voice.rule!, n, NOW))).toEqual([1, 2, 3, 3]);
+  });
+
+  it('단계마다 서버 규칙의 문장 · 높낮이 · 속도 · 목소리 그대로 (단계가 오를수록 높고 빠르게)', () => {
+    const { voice } = wakeVoiceTest(1, NOW, ON);
+    const profile = resolveVoice('NORMAL');
+    expect(voice.clips.map((c) => c.level)).toEqual([1, 2, 3, 4]);
+    for (const clip of voice.clips) {
+      expect(clip).toMatchObject(androidVoice(profile, clip.level as UrgencyLevel));
+    }
+    expect(voice.clips[0].text).toContain('좋은 아침이야~');
+    expect(voice.clips[0].text).toContain(SAMPLE.title);
+    expect(voice.clips[0].text).toContain('노트북, 충전기, 필기구');
+    expect(voice.clips[3].text).toBe(
+      briefingText(4, {
+        kind: 'WAKE',
+        memo: null,
+        appointments: [{ title: SAMPLE.title, atMs: Date.UTC(2026, 10, 12, 1, 0), importance: 'NORMAL' }],
+        todos: SAMPLE.items.map((title) => ({ title, type: 'ITEM' as const })),
+        departAtMs: Date.UTC(2026, 10, 12, 0, 10),
+        timeZone: 'Asia/Seoul',
+      }),
+    );
+    const rates = voice.clips.map((c) => c.rate);
+    expect([...rates].sort((a, b) => a - b)).toEqual(rates);
+    expect(rates[3]).toBeGreaterThan(rates[0]);
+  });
+
+  it('4단계 엔진 — Gemini 캐시가 있을 때만 Gemini, 없으면 Android TTS 대체로 표시', () => {
+    expect(engineFor(4, true)).toBe('GEMINI');
+    expect(engineFor(4, false)).toBe('ANDROID');
+    expect(engineFor(3, true)).toBe('ANDROID');
+    expect(engineLabel({ engine: 'ANDROID', level: 4, geminiSourceAlarmId: null })).toContain('대체');
+    expect(engineLabel({ engine: 'GEMINI', level: 4, geminiSourceAlarmId: '11111111-2222' })).toContain('캐시된 Gemini');
+    expect(engineLabel({ engine: 'ANDROID', level: 2, geminiSourceAlarmId: null })).toBe('Android 오프라인 TTS');
+    expect(engineLabel({ engine: 'NONE', level: null, geminiSourceAlarmId: null })).toContain('음성 없음');
+  });
+});
+
+describe('시간 자동 전환 · Gemini 샘플', () => {
+  it('자동 전환 — 미루기 없이 시각만 지나면 1 → 3(여유 5분) → 4(여유 0분), 4단계는 샘플 문장 · 샘플 출처', () => {
+    const { snoozeCount, voice } = autoStageTest(NOW, ON);
+    const at = (ms: number) => levelAt(voice.rule!, snoozeCount, NOW + ms);
+    expect([at(0), at(AUTO_STEP_MS - 1), at(AUTO_STEP_MS), at(2 * AUTO_STEP_MS - 1), at(2 * AUTO_STEP_MS)]).toEqual([1, 1, 3, 3, 4]);
+    expect(voice.clips.find((c) => c.level === 4)?.text).toBe(GEMINI_SAMPLE_TEXT);
+    expect(voice.test.gemini).toBe('SAMPLE');
+  });
+
+  it('샘플 비교 — 같은 문장을 4단계로, 출처만 다름 (Gemini 샘플 / Android TTS)', () => {
+    for (const engine of ['SAMPLE', 'ANDROID'] as const) {
+      const { snoozeCount, voice } = geminiSampleTest(engine, NOW, ON);
+      expect(levelAt(voice.rule!, snoozeCount, NOW)).toBe(4);
+      expect(voice.clips.find((c) => c.level === 4)?.text).toBe(GEMINI_SAMPLE_TEXT);
+      expect(voice.test.gemini).toBe(engine);
+    }
+    // 단계 버튼은 실제 사용자 캐시(CACHE, 기본)만 씀 — 샘플과 섞지 않음
+    expect(wakeVoiceTest(4, NOW, ON).voice.test.gemini).toBeUndefined();
+  });
+
+  it('화면 표시 — Gemini 샘플과 사용자 캐시를 구분', () => {
+    expect(engineLabel({ engine: 'GEMINI', level: 4, geminiSourceAlarmId: 'SAMPLE' })).toContain('사용자 캐시 아님');
+    expect(engineLabel({ engine: 'GEMINI', level: 4, geminiSourceAlarmId: '11111111-2222' })).toContain('캐시된 Gemini');
+  });
+
+  it('음성 시험 알람 id — 개발 알람(서버 맞추기 · 통계 제외)이면서, [즉시 정지]는 음성 시험만 골라 끔', () => {
+    const voiceId = makeVoiceTestAlarmId();
+    expect(voiceId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
+    expect(isDevAlarmId(voiceId)).toBe(true);
+    expect(isVoiceTestId(voiceId)).toBe(true);
+    expect(isVoiceTestId(makeDevAlarmId().replace(/^de70a1a0-a1ce-/, 'de70a1a0-0000-'))).toBe(false);
+  });
+});
+
+describe('출발 AI 브리핑 시험', () => {
+  it('1단계 출발 촉구 한 문장만 — 일정 · 준비물을 서버 규칙대로 읽음', () => {
+    const { snoozeCount, voice } = departureVoiceTest(NOW);
+    expect(voice.clips).toHaveLength(1);
+    expect(levelAt(voice.rule!, snoozeCount, NOW)).toBe(1);
+    expect(voice.clips[0].text).toBe('오전 10시 팀플 회의 갈 시간이야. 챙길 것: 노트북, 충전기, 필기구. 이제 출발하자!');
+    expect(voice.test).toEqual({ sound: true, voice: true });
+  });
+});
+
+describe('재생 구성', () => {
+  it('알람음만 · 진동만 · AI 음성만 · 전체', () => {
+    expect(mixOptions('SOUND', 'STRONG_CONTINUOUS')).toEqual({ sound: true, voice: false, vibration: 'NONE' });
+    expect(mixOptions('VIBRATION', 'SHORT_REPEAT')).toEqual({ sound: false, voice: false, vibration: 'SHORT_REPEAT' });
+    expect(mixOptions('VOICE', 'SHORT_REPEAT')).toEqual({ sound: false, voice: true, vibration: 'NONE' });
+    expect(mixOptions('ALL', 'STRONG_CONTINUOUS')).toEqual({ sound: true, voice: true, vibration: 'STRONG_CONTINUOUS' });
+  });
+
+  it('진동 없음(NONE)을 고르면 전체 함께여도 진동 없음 그대로', () => {
+    expect(mixOptions('ALL', 'NONE').vibration).toBe('NONE');
+    expect(mixOptions('VIBRATION', 'NONE')).toEqual({ sound: false, voice: false, vibration: 'NONE' });
+  });
+});

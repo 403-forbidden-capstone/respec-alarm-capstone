@@ -67,6 +67,55 @@ object AlarmController {
     fire(context, alarm.alarmId)
   }
 
+  // --- 개발 화면(dev/alarm-test) AI 음성 시험 — 시험 알람 id(VoiceTest.ALARM_ID_PREFIX)만 받음. 운영 알람의 단계 · 미루기 판단은 그대로 ---
+
+  /**
+   * 시험 브리핑(앱이 서버 규칙으로 만든 샘플 문장)을 쓰고 ringNow와 같은 길로 바로 울림. 꾸러미의 snoozeCount로 미룬 뒤 상태를 재현
+   * 돌려주는 값 = 이번 울림이 고를 음성 (서비스와 같은 VoiceBriefing.speechFor 결과)
+   */
+  fun ringVoiceTest(context: Context, payload: String, voiceJson: String): Map<String, Any?> {
+    val alarm = StoredAlarm.fromJson(JSONObject(payload))
+    require(VoiceTest.isVoiceTestAlarm(alarm.alarmId)) { "AI 음성 시험 알람 id만 울릴 수 있어요" }
+    stopVoiceTest(context, null) // 앞 시험이 남아 있으면 정리
+    val source = VoiceBriefing.saveForTest(context, alarm.alarmId, voiceJson)
+    val speech = VoiceBriefing.speechFor(context, alarm, System.currentTimeMillis())
+    AlarmPlaybackService.lastSound = null
+    AlarmPlaybackService.voiceLevel = null
+    AlarmPlaybackService.voiceEngine = null
+    BriefingSpeaker.lastStatus = null
+    ringNow(context, payload)
+    return mapOf(
+      "level" to speech?.level,
+      "engine" to VoiceTest.engine(speech != null, speech?.wav != null),
+      "text" to speech?.text,
+      "pitch" to speech?.pitch?.toDouble(),
+      "rate" to speech?.rate?.toDouble(),
+      "voiceIndex" to speech?.voiceIndex,
+      "geminiSourceAlarmId" to source,
+    )
+  }
+
+  /** 시험 화면이 1초마다 읽는 지금 상태 */
+  fun voiceTestStatus(): Map<String, Any?> = mapOf(
+    "ringingAlarmId" to AlarmPlaybackService.ringingAlarmId,
+    "departureSpeakingAlarmId" to BriefingSpeechService.speakingAlarmId,
+    "sound" to AlarmPlaybackService.lastSound,
+    "speech" to BriefingSpeaker.lastStatus,
+    "level" to AlarmPlaybackService.voiceLevel,
+    "engine" to AlarmPlaybackService.voiceEngine,
+  )
+
+  /** AI 음성 시험 알람만 즉시 정지 — 알람음 · 진동 · 음성 · 다시 울림 · 미루기 예약 · 출발 알림까지. 해제 기록은 안 남김. 운영 알람 · 개발 예약 알람은 안 건드림 */
+  fun stopVoiceTest(context: Context, alarmId: String?) {
+    AlarmStorage.all(context).filter { VoiceTest.isVoiceTestAlarm(it.alarmId) }.forEach { cancel(context, it.alarmId) }
+    AlarmPlaybackService.ringingAlarmId?.takeIf { VoiceTest.isVoiceTestAlarm(it) }?.let { AlarmPlaybackService.stop(context) }
+    BriefingSpeechService.speakingAlarmId?.takeIf { VoiceTest.isVoiceTestAlarm(it) }?.let { BriefingSpeechService.stop(context) }
+    alarmId?.takeIf { VoiceTest.isVoiceTestAlarm(it) }?.let { id ->
+      AlarmNotifications.cancelNotice(context, id)
+      VoiceBriefing.clear(context, id)
+    }
+  }
+
   /** 알람 시각이 됨 (AlarmReceiver) — 기록을 남기고 WAKE는 소리 서비스, 나머지는 일정 알림(알림음 · 진동 한 번) */
   fun fire(context: Context, id: String) {
     val current = AlarmStorage.get(context, id) ?: return

@@ -7,6 +7,7 @@ import * as AlarmCore from '@capstone/alarm-core';
 import type { VoiceBriefingSave } from '@capstone/alarm-core';
 
 import { callEdge } from '../edge';
+import { isDevAlarmId } from './devAlarm';
 
 // 이만큼 안에 울릴 기상 · 출발 알람만 미리 만듦 (멀리 있는 알람은 그사이 일정이 바뀔 수 있어 그때 가서) — 작성자 판단
 export const BRIEFING_WINDOW_MS = 36 * 60 * 60 * 1000;
@@ -48,7 +49,10 @@ export function prepareBriefings(nowMs: number = Date.now(), deps: BriefingDeps 
 
 async function prepareOnce(nowMs: number, deps: BriefingDeps): Promise<BriefingSummary> {
   const summary: BriefingSummary = { saved: [], cleared: [], failed: [] };
-  const wakes = (await deps.list()).filter((a) => BRIEFED_TYPES.has(a.type) && a.nextRingAt > nowMs && a.nextRingAt <= nowMs + BRIEFING_WINDOW_MS);
+  // 개발 화면의 시험 알람은 서버에 행이 없고 샘플 브리핑을 폰에서 직접 씀 — 서버 · Gemini를 부르지 않고 시험 브리핑도 덮어쓰지 않게 뺌
+  const wakes = (await deps.list()).filter(
+    (a) => BRIEFED_TYPES.has(a.type) && !isDevAlarmId(a.id) && a.nextRingAt > nowMs && a.nextRingAt <= nowMs + BRIEFING_WINDOW_MS,
+  );
   for (const alarm of wakes) {
     try {
       const out = await deps.call(alarm.id, await deps.getHashes(alarm.id));

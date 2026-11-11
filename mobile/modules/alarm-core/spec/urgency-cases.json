@@ -1,97 +1,145 @@
 [
   {
-    "name": "처음 울림 · 위험 계산 불가(UNKNOWN)",
+    "name": "처음 울림 · 계산 자료 없음",
     "snoozeCount": 0,
     "nowMs": 1800000000000,
+    "dangerAtMs": null,
     "urgentAtMs": null,
     "maxLevel": 4,
     "expected": 1
   },
   {
-    "name": "미루기 1번",
+    "name": "스누즈 1회 → 2단계 Android",
     "snoozeCount": 1,
     "nowMs": 1800000000000,
+    "dangerAtMs": null,
     "urgentAtMs": null,
     "maxLevel": 4,
     "expected": 2
   },
   {
-    "name": "미루기 2번",
+    "name": "스누즈 2회 → 3단계 Android",
     "snoozeCount": 2,
     "nowMs": 1800000000000,
+    "dangerAtMs": null,
     "urgentAtMs": null,
     "maxLevel": 4,
     "expected": 3
   },
   {
-    "name": "미루기 5번이어도 3단계 (미루기만으로 긴급 아님)",
+    "name": "스누즈 5회여도 3단계(Android), Gemini 아님",
     "snoozeCount": 5,
     "nowMs": 1800000000000,
+    "dangerAtMs": null,
     "urgentAtMs": null,
     "maxLevel": 4,
     "expected": 3
   },
   {
-    "name": "긴급 시각과 같은 순간은 아직 아님 (여유 5.5분 → 반올림 6분)",
+    "name": "5분 경계 직전에는 처음 1단계 유지",
     "snoozeCount": 0,
-    "nowMs": 1800003600000,
-    "urgentAtMs": 1800003600000,
+    "nowMs": 1800000299999,
+    "dangerAtMs": 1800000300000,
+    "urgentAtMs": 1800000600000,
     "maxLevel": 4,
     "expected": 1
   },
   {
-    "name": "긴급 시각을 1ms 넘음 → 미루기 없이도 4",
+    "name": "남은 여유 5분 정확히 → 스누즈 없어도 3",
     "snoozeCount": 0,
-    "nowMs": 1800003600001,
-    "urgentAtMs": 1800003600000,
-    "maxLevel": 4,
-    "expected": 4
-  },
-  {
-    "name": "미루기 3번 · 긴급 전 (여유 있음) → 3",
-    "snoozeCount": 3,
-    "nowMs": 1800003540000,
-    "urgentAtMs": 1800003600000,
+    "nowMs": 1800000300000,
+    "dangerAtMs": 1800000300000,
+    "urgentAtMs": 1800000600000,
     "maxLevel": 4,
     "expected": 3
   },
   {
-    "name": "미루기 3번 · 긴급 → 4",
-    "snoozeCount": 3,
-    "nowMs": 1800003660000,
-    "urgentAtMs": 1800003600000,
+    "name": "5분부터 0분 직전까지 계속 3",
+    "snoozeCount": 0,
+    "nowMs": 1800000599999,
+    "dangerAtMs": 1800000300000,
+    "urgentAtMs": 1800000600000,
+    "maxLevel": 4,
+    "expected": 3
+  },
+  {
+    "name": "남은 여유 0분 정확히 → Gemini 긴급 4",
+    "snoozeCount": 0,
+    "nowMs": 1800000600000,
+    "dangerAtMs": 1800000300000,
+    "urgentAtMs": 1800000600000,
     "maxLevel": 4,
     "expected": 4
   },
   {
-    "name": "긴급이지만 사용자 상한 3",
+    "name": "0분을 넘겼을 때도 긴급 4",
     "snoozeCount": 0,
-    "nowMs": 1800003600001,
-    "urgentAtMs": 1800003600000,
+    "nowMs": 1800000600001,
+    "dangerAtMs": 1800000300000,
+    "urgentAtMs": 1800000600000,
+    "maxLevel": 4,
+    "expected": 4
+  },
+  {
+    "name": "스누즈 1회였더라도 여유 5분 → 3",
+    "snoozeCount": 1,
+    "nowMs": 1800000300000,
+    "dangerAtMs": 1800000300000,
+    "urgentAtMs": 1800000600000,
+    "maxLevel": 4,
+    "expected": 3
+  },
+  {
+    "name": "스누즈 2회 뒤 여유 0분 → 4",
+    "snoozeCount": 2,
+    "nowMs": 1800000600000,
+    "dangerAtMs": 1800000300000,
+    "urgentAtMs": 1800000600000,
+    "maxLevel": 4,
+    "expected": 4
+  },
+  {
+    "name": "스누즈 3회 뒤 여유 충분 → 3",
+    "snoozeCount": 3,
+    "nowMs": 1800000000000,
+    "dangerAtMs": 1800000300000,
+    "urgentAtMs": 1800000600000,
+    "maxLevel": 4,
+    "expected": 3
+  },
+  {
+    "name": "구버전 상한3 이면 4 제한(호환성 시험)",
+    "snoozeCount": 0,
+    "nowMs": 1800000600000,
+    "dangerAtMs": 1800000300000,
+    "urgentAtMs": 1800000600000,
     "maxLevel": 3,
     "expected": 3
   },
   {
-    "name": "긴급이지만 상한 2",
-    "snoozeCount": 2,
-    "nowMs": 1800003600001,
-    "urgentAtMs": 1800003600000,
+    "name": "구버전 상한2 이면 4 제한(호환성 시험)",
+    "snoozeCount": 0,
+    "nowMs": 1800000600000,
+    "dangerAtMs": 1800000300000,
+    "urgentAtMs": 1800000600000,
     "maxLevel": 2,
     "expected": 2
   },
   {
-    "name": "자동 강화 끔(상한 1)",
-    "snoozeCount": 3,
-    "nowMs": 1800003600001,
-    "urgentAtMs": 1800003600000,
+    "name": "구버전 상한1 이면 4 제한(호환성 시험)",
+    "snoozeCount": 0,
+    "nowMs": 1800000600000,
+    "dangerAtMs": 1800000300000,
+    "urgentAtMs": 1800000600000,
     "maxLevel": 1,
     "expected": 1
   },
   {
-    "name": "긴급 시각이 한참 뒤",
+    "name": "긴급 시각 한참 뒤이면 처음 1",
     "snoozeCount": 0,
     "nowMs": 1800000000000,
-    "urgentAtMs": 1800086400000,
+    "dangerAtMs": 1800086000000,
+    "urgentAtMs": 1800086300000,
     "maxLevel": 4,
     "expected": 1
   }

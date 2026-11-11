@@ -65,6 +65,17 @@ class AlarmPlaybackService : Service() {
     @Volatile
     var ringingAlarmId: String? = null
 
+    // 마지막으로 튼 알람음 주소 (개발 화면 표시용)
+    @Volatile
+    var lastSound: String? = null
+
+    // 지금 읽는 AI 음성 단계 · 엔진(GEMINI/ANDROID) — 개발 화면이 시간 자동 전환(1 → 3 → 4)을 보여 주는 데만 씀
+    @Volatile
+    var voiceLevel: Int? = null
+
+    @Volatile
+    var voiceEngine: String? = null
+
     fun start(context: Context, id: String) {
       val intent = Intent(context, AlarmPlaybackService::class.java).apply {
         putExtra(EXTRA_ID, id)
@@ -88,6 +99,25 @@ class AlarmPlaybackService : Service() {
   }
 
   private val handler = Handler(Looper.getMainLooper())
+  private var currentVoiceLevel: Int? = null
+  // 이번 울림에서 시작한 가장 높은 음성 단계 — 같은 울림 안에서는 이보다 높을 때만 바꿈(낮추지 않음 · 실패한 단계 재시작 안 함)
+  private var peakVoiceLevel: Int? = null
+  private var voiceGeneration = 0
+  // 기상 알람이 울리는 동안 현재 시각을 계속 확인하여 5분(3단계)과 0분(4단계)에 음성을 전환.
+  // 서버를 호출하지 않고 캐시된 규칙과 음성만 확인. 배경 알람음/진동은 중단하지 않음.
+  private val checkWakeStage = object : Runnable {
+    override fun run() {
+      val id = ringingAlarmId ?: return
+      val alarm = AlarmStorage.get(applicationContext, id) ?: return
+      if (alarm.type != "WAKE" || !alarm.ringing) return
+      val next = VoiceBriefing.speechFor(applicationContext, alarm, System.currentTimeMillis())
+      if (next != null && SpeechUrgency.shouldSwitch(next.level, peakVoiceLevel)) {
+        stopVoice()
+        runCatching { startVoice(alarm, next) }.onFailure { Log.w(TAG, "알람 음성 단계 변경 실패 — 배경음/진동 유지", it) }
+      }
+      handler.postDelayed(this, 2_000L)
+    }
+  }
 
   // 지금 울림의 번호 (StoredAlarm.ringCount). 다음 울림이 시작됐는지 알아보는 데 씀
   private var ringToken: Int = 0
@@ -111,6 +141,8 @@ class AlarmPlaybackService : Service() {
   // 음성 브리핑 (BriefingSpeaker: 1~3단계 Android TTS, 긴급 4단계는 미리 만든 Gemini 음성) — 해제 전까지 반복. 알람음은 계속 20%로 재생
   private var speaker: BriefingSpeaker? = null
   private var speaking = false
+  // 알람음 크기 비율 — 늘 1. 개발 화면의 "진동만 · AI 음성만" 시험 알람만 0 (재생 경로 · 포커스 · 진동 · 음성은 그대로, VoiceTest)
+  private var soundLevel = 1f
   private var vibrator: Vibrator? = null
   private var audioManager: AudioManager? = null
   private var audioFocusRequest: AudioFocusRequest? = null
@@ -164,12 +196,15 @@ class AlarmPlaybackService : Service() {
         return START_NOT_STICKY
       }
     } else {
-      // 울리는 중에 같은 알람의 다음 울림이 시작됨: 소리는 그대로 두고 볼륨만 이번 계획대로 (볼륨을 못 바꿔도 소리는 계속)
-      runCatching { setAlarmVolume(alarm.plan.volumePercent) }
+      // 이미 울리고 있다면 단계별 높인 볼륨을 유지하면서 같은 알람의 재울림 처리
+      if (alarm.type == "WAKE") updateStageEffects(alarm, currentVoiceLevel ?: 1)
+      else runCatching { setAlarmVolume(alarm.plan.volumePercent) }
     }
     // 기상·출발 알람은 자동 종료하지 않음. 다른 유형만 기존 최대 울림 시간을 적용.
     handler.removeCallbacks(autoStop)
     if (!continuous) handler.postDelayed(autoStop, ringMillis)
+    handler.removeCallbacks(checkWakeStage)
+    if (continuous) handler.postDelayed(checkWakeStage, 2_000L)
     return START_NOT_STICKY
   }
 
@@ -304,6 +339,7 @@ class AlarmPlaybackService : Service() {
   private fun startPlayback(alarm: StoredAlarm): Boolean {
     audioManager = getSystemService(AudioManager::class.java)
     remainingSounds = alarmSounds(alarm.soundKey).toMutableList()
+    soundLevel = if (runCatching { VoiceBriefing.testOptions(this, alarm.alarmId).sound }.getOrDefault(true)) 1f else 0f
 
     // 오디오 포커스나 볼륨 조정이 실패해도(방해 금지 · 제조사 제한 등) 소리는 내야 함 — 소리를 못 트는 것만 실패로 침
     runCatching { requestAudioFocus(audioAttributes) }
@@ -325,24 +361,54 @@ class AlarmPlaybackService : Service() {
     return true
   }
 
-  // 지금 미루기 횟수 · 지각 위험으로 단계를 골라 브리핑을 한 번 읽음 (네트워크 안 씀). 캐시가 없으면 꾸러미 문장을 Android TTS로
-  private fun startVoice(alarm: StoredAlarm) {
-    val speech = VoiceBriefing.speechFor(this, alarm, System.currentTimeMillis()) ?: return
+  // 한 번 고른 문장만 반복하지 않고, 체크 루프가 새 시각의 stage를 찾아 음성을 교체함.
+  private fun startVoice(alarm: StoredAlarm, prepared: VoiceBriefing.Speech? = VoiceBriefing.speechFor(this, alarm, System.currentTimeMillis())) {
+    val speech = prepared ?: return
+    currentVoiceLevel = speech.level
+    peakVoiceLevel = maxOf(peakVoiceLevel ?: 0, speech.level)
+    voiceLevel = speech.level
+    voiceEngine = if (speech.wav != null) "GEMINI" else "ANDROID"
+    if (alarm.type == "WAKE") updateStageEffects(alarm, speech.level)
+    val generation = ++voiceGeneration
     speaker = BriefingSpeaker(
       this,
       onStart = {
-        speaking = true
-        mediaPlayer?.let { runCatching { it.setVolume(VOICE_DUCK, VOICE_DUCK) } }
+        if (generation == voiceGeneration) {
+          speaking = true
+          mediaPlayer?.let { runCatching { it.setVolume(VOICE_DUCK * soundLevel, VOICE_DUCK * soundLevel) } }
+        }
       },
-      onDone = { stopVoice() },
-    ).also { it.speak(speech, repeat = alarm.type == "WAKE") }
+      onDone = {
+        if (generation == voiceGeneration) {
+          // 한국어 오프라인 TTS가 없거나 음성 파일이 깨짐 — 같은 단계는 다시 시작 안 함(peakVoiceLevel), 더 높은 단계가 되면 다시 시도
+          stopVoice()
+        }
+      },
+    ).also { it.speak(speech, repeat = BriefingRules.repeatsBriefing(alarm.type)) }
+  }
+
+  // 배경음은 선택한 볼륨에서 단계에 따라 상승(최대 100%). 진동 없음은 존중,
+  // 짧은 반복을 고른 경우에만 3단계부터 강한 연속 패턴으로 변경.
+  private fun updateStageEffects(alarm: StoredAlarm, level: Int) {
+    val boost = when (level) { 2 -> 10; 3 -> 20; 4 -> 30; else -> 0 }
+    runCatching { setAlarmVolume((alarm.plan.volumePercent + boost).coerceAtMost(100)) }
+    if (level >= 3 && alarm.vibration == AlarmVibration.SHORT_REPEAT) {
+      AlarmVibration.patternFor(AlarmVibration.STRONG_CONTINUOUS)?.let { pattern ->
+        runCatching {
+          stopVibration()
+          startVibration(pattern)
+        }
+      }
+    }
   }
 
   private fun stopVoice() {
+    voiceGeneration += 1
     speaker?.stop()
     speaker = null
+    currentVoiceLevel = null
     speaking = false
-    mediaPlayer?.let { runCatching { it.setVolume(1f, 1f) } }
+    mediaPlayer?.let { runCatching { it.setVolume(soundLevel, soundLevel) } }
   }
 
   // 알람음 후보 (앞에서부터 시도). 기본 키(default) · 보통(theme_default) · 모르는 키는 폰 기본 알람음이 먼저, 우리 앱 파일이 그 다음 — 안드로이드 기본 알람처럼
@@ -388,12 +454,13 @@ class AlarmPlaybackService : Service() {
         true
       }
       val playing = runCatching {
-        val volume = if (speaking) VOICE_DUCK else 1f
+        val volume = (if (speaking) VOICE_DUCK else 1f) * soundLevel
         player.setVolume(volume, volume)
         player.start()
       }.isSuccess
       if (playing) {
         Log.i(TAG, "알람음 재생: $uri")
+        lastSound = if (soundLevel > 0f) uri.toString() else "$uri (시험: 소리 0)"
         return true
       }
     }
@@ -513,6 +580,8 @@ class AlarmPlaybackService : Service() {
   // 해제 · 미루기 · 자동 정지 · 실패 모두 여기서 원래대로 되돌림 (여러 번 불러도 됨)
   private fun releasePlayback() {
     handler.removeCallbacks(autoStop)
+    handler.removeCallbacks(checkWakeStage)
+    peakVoiceLevel = null
     remainingSounds.clear()
     stopVoice()
     releasePlayer()

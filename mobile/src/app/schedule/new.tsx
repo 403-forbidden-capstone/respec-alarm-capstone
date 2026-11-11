@@ -1,4 +1,5 @@
 import { autoImportance } from '@shared/calc/importance.ts';
+import { autoLevel } from '@shared/calc/intensity.ts';
 import { prepareSourceLabel } from '@shared/calc/prepare.ts';
 import { router, useLocalSearchParams } from 'expo-router';
 import { Fragment, useState } from 'react';
@@ -26,14 +27,15 @@ import { repeatToRrule } from '@/features/alarm/repeat';
 import { saveNotice } from '@/features/alarm/saveNotice';
 import { addItems, earlierWakeOf, isPassed, parseDayParam, ringingKinds, tomorrow, upcomingAlarms } from '@/features/alarm/schedule';
 import {
-  IMPORTANCE_LABEL,
+  AXES,
   KIND_LABEL,
   LEVELS,
   RING_KINDS,
   TRANSPORT_LABEL,
   TRANSPORT_OPTIONS,
   type Estimate,
-  type Importance,
+  type IntensityAxis,
+  type Level,
   type Place,
   type RingKind,
   type Transport,
@@ -60,7 +62,9 @@ import { listGroups } from '@/features/social/api';
 import { SHARED_APPOINTMENT_NOTE } from '@/features/social/groupTexts';
 import { colors } from '@/theme';
 
-const IMPORTANCE_OPTIONS = (['LOW', 'NORMAL', 'HIGH'] as const).map((v) => [v, IMPORTANCE_LABEL[v]] as const);
+const LEVEL_OPTIONS = LEVELS.map((l, i) => [i as Level, l.name] as const);
+type Levels = Record<IntensityAxis, Level | null>;
+const EMPTY_LEVELS: Levels = { sound: null, voice: null, vibration: null };
 
 type EarlierWake = { title: string; at: Date }; // 같은 날 앞 일정의 기상 알람 (schedule.ts earlierWakeOf)
 
@@ -113,8 +117,11 @@ export default function NewScheduleScreen() {
   const { busy: saving, run: runSave } = useAction();
   const current = useNow();
   const set = <K extends keyof typeof draft>(key: K, value: (typeof draft)[K]) => setDraft((d) => ({ ...d, [key]: value }));
-  // 중요도는 필수가 아님 — 직접 고르기 전까지는 제목으로 자동(시험 · 면접만 중요, 나머지 약). 고르면 그 값이 이김 (처음 값이 자동과 다르면 이미 고른 것으로 봄: AI 카드 등)
-  const [importancePicked, setImportancePicked] = useState(() => initial.importance !== autoImportance(initial.title));
+  // 새 일정의 세 축을 별도 설정. null이면 자동이며, 저장 시 서버 alarm-commit의 levels로 전달됨.
+  const [levels, setLevels] = useState<Levels>(() => ({ ...(initial.levels ?? EMPTY_LEVELS) }));
+  const autoIntensity = autoLevel(draft.importance, 0);
+  const setAxis = (axis: IntensityAxis, level: Level | null) => setLevels((old) => ({ ...old, [axis]: level }));
+  const manualIntensity = AXES.some(([axis]) => levels[axis] != null);
 
   // 뭔가 입력했으면 나갈 때 한 번 물음 (처음 값 그대로면 묻지 않음)
   const dirty =
@@ -128,6 +135,7 @@ export default function NewScheduleScreen() {
     draft.originLocation != null ||
     draft.transport !== initial.transport ||
     draft.importance !== initial.importance ||
+    AXES.some(([axis]) => levels[axis] !== (initial.levels?.[axis] ?? null)) ||
     (draft.groupId ?? null) !== (initial.groupId ?? null) ||
     RING_KINDS.some((kind) => draft.alarms[kind] !== initial.alarms[kind]);
   const { allowLeave } = useLeaveGuard(dirty, '입력한 일정이 사라져요.');
@@ -160,7 +168,7 @@ export default function NewScheduleScreen() {
       setItemList(items);
       setItemText('');
       try {
-        setEstimate(await estimateAppointment({ ...draft, title: draft.title.trim(), items: items.join(',') }));
+        setEstimate(await estimateAppointment({ ...draft, levels, title: draft.title.trim(), items: items.join(',') }));
       } catch (e) {
         // 원인이 집이면 토스트 대신 안내 카드 (장소를 다시 골라도 안 풀림)
         if (!isHomeMissing({ error: e, hasHome: homeJustSaved || home != null || draft.originLocation != null, placeHasCoords: draft.placeLat != null && draft.placeLng != null })) throw e;
@@ -255,7 +263,7 @@ export default function NewScheduleScreen() {
           accessibilityLabel="일정명 (필수)"
           value={draft.title}
           onChangeText={(v) => {
-            setDraft((d) => ({ ...d, title: v, ...(importancePicked ? {} : { importance: autoImportance(v) }) }));
+            setDraft((d) => ({ ...d, title: v, importance: autoImportance(v) }));
             if (v.trim()) setTitleError(false);
           }}
           placeholder="예: 스터디"
@@ -280,7 +288,7 @@ export default function NewScheduleScreen() {
       {!places && placesError ? <LoadError onRetry={reloadPlaces} /> : null}
       <Card>
         <Text variant="label" tone="sub">
-          장소와 중요도
+          장소와 이동 수단
         </Text>
         <KeyValueRow label="출발지" value={draft.originLocation ? (draft.originName || '현재 위치') : (auth.profile?.home_name ?? '집 위치 미설정')} />
         <Text variant="caption" tone="sub">기본 출발지는 집이에요. 다른 위치를 고르면 이 일정에만 적용돼요.</Text>
@@ -384,18 +392,43 @@ export default function NewScheduleScreen() {
           options={TRANSPORT_OPTIONS}
           onChange={(v) => set('transport', v)}
         />
-        <Text variant="rowLabel" tone="sub" style={styles.optLabel}>
-          중요도
+
+      </Card>
+
+      <Card>
+        <Text variant="label" tone="sub">
+          알람 강도
         </Text>
-        <OptionGrid<Importance>
-          label="중요도"
-          options={IMPORTANCE_OPTIONS}
-          value={draft.importance}
-          onChange={(v) => {
-            setImportancePicked(true);
-            set('importance', v);
-          }}
-        />
+        <Text variant="small" tone="sub">
+          배경음 · 말소리(Android TTS) · 진동을 각각 고를 수 있어요. 4단계 Gemini 긴급 음성은 지각 위험이 생길 때 자동으로만 재생돼요.
+        </Text>
+        <Text variant="small" tone="sub">
+          예상 자동 강도: {LEVELS[autoIntensity].name} (저장 시 지각 이력과 잠귀 설정도 반영)
+        </Text>
+        {AXES.map(([axis, name]) => {
+          const selected = levels[axis];
+          const level = selected ?? autoIntensity;
+          return (
+            <View key={axis} style={styles.axisRow}>
+              <View style={styles.axisTitle}>
+                <Text variant="rowLabel" tone="sub">{name}</Text>
+                {selected != null ? <Text variant="caption" tone="sub">직접 고름</Text> : null}
+              </View>
+              <OptionGrid<Level>
+                size="mini"
+                label={`${name} 강도`}
+                options={LEVEL_OPTIONS}
+                value={level}
+                onChange={(next) => setAxis(axis, next)}
+              />
+              <View style={styles.axisDetails}>
+                {selected != null ? <TextLink label="자동으로" onPress={() => setAxis(axis, null)} /> : <View />}
+                <Text variant="caption" tone="faint">{LEVELS[level][axis]}</Text>
+              </View>
+            </View>
+          );
+        })}
+        {manualIntensity ? <TextLink label="모두 자동으로 되돌리기" onPress={() => setLevels({ ...EMPTY_LEVELS })} /> : null}
       </Card>
 
       <Card>
@@ -550,7 +583,7 @@ function CalcSteps({
       `${KIND_LABEL[baseKind]} ${formatTime(base)}`,
       `${formatTime(a.at)} − 여유 ${a.bufferMinutes} − 이동 ${a.travelMinutes} − 준비 ${a.predictedPrepMinutes}`,
     ],
-    [`알람 강도 ${LEVELS[a.level].name}`, `중요도 ${IMPORTANCE_LABEL[a.importance]}${e.latePoint > 0 ? ' · 최근 4주 늦잠 지각 2번 이상' : ''}`],
+    [`알람 강도 ${LEVELS[a.level].name}`, '배경음 · 말소리(Android TTS) · 진동 설정으로 저장'],
   ];
 
   return (
@@ -655,6 +688,9 @@ const styles = StyleSheet.create({
   title: { marginTop: 8, marginBottom: 4 },
   lead: { marginBottom: 18 },
   optLabel: { marginTop: 12, marginBottom: 8 },
+  axisRow: { marginTop: 14 },
+  axisTitle: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 },
+  axisDetails: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 4, marginBottom: 2 },
   groupNote: { marginTop: 6, marginBottom: 4 },
   cardLabel: { marginBottom: 8 },
   alarmNote: { marginTop: 6 },

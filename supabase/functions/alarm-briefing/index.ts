@@ -11,6 +11,7 @@ import { dbTtsQuota } from '../_shared/ai/tts-quota.ts';
 import { requireUser } from '../_shared/auth.ts';
 import type { BriefAppointment, BriefTodo, Importance, StructuredLike } from '../_shared/briefing.ts';
 import { briefingDays, runBriefing } from '../_shared/briefing-run.ts';
+import { LEVEL_FIELDS, levelOfIntensity } from '../_shared/calc/intensity.ts';
 import { must } from '../_shared/db.ts';
 import { getEnv } from '../_shared/env.ts';
 import { HttpError } from '../_shared/errors.ts';
@@ -21,7 +22,7 @@ import { localDayRange, safeTimeZone } from '../_shared/tz.ts';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const HASH = /^[0-9a-f]{16}$/;
 
-type AlarmRow = { alarm_type: string; scheduled_at: string; is_enabled: boolean; participant_id: string | null };
+type AlarmRow = { alarm_type: string; scheduled_at: string; is_enabled: boolean; participant_id: string | null; voice_tone: 'CALM' | 'NEUTRAL' | 'DIRECT' | null; intensity: 'SOFT' | 'NORMAL' | 'STRONG'; intensity_source: 'AUTO' | 'MANUAL' };
 type ParticipantRow = {
   appointment_id: string;
   prepare_minutes: number | null;
@@ -41,7 +42,7 @@ Deno.serve(
 
     const alarm = must<AlarmRow | null>(
       'alarm',
-      await db.from('alarms').select('alarm_type, scheduled_at, is_enabled, participant_id').eq('alarm_id', body.alarm_id).eq('user_id', userId).maybeSingle(),
+      await db.from('alarms').select('alarm_type, scheduled_at, is_enabled, participant_id, voice_tone, intensity, intensity_source').eq('alarm_id', body.alarm_id).eq('user_id', userId).maybeSingle(),
     );
     const kind = alarm?.alarm_type === 'WAKE' || alarm?.alarm_type === 'DEPARTURE' ? alarm.alarm_type : null;
     if (!alarm || !kind || !alarm.is_enabled) throw new HttpError('NOT_FOUND', '기상 · 출발 알람이 없어요');
@@ -120,6 +121,7 @@ Deno.serve(
         timeZone,
         prefs: profile?.alarm_voice_prefs,
         importance: own?.importance ?? 'LOW',
+        voiceTone: alarm.intensity_source === 'MANUAL' && alarm.voice_tone !== LEVEL_FIELDS[levelOfIntensity(alarm.intensity) ?? 1].voiceTone ? alarm.voice_tone : null,
         appointmentAtMs: own?.atMs ?? null,
         prepMinutes: p?.prepare_minutes ?? null,
         travelMinutes: p?.est_travel_minutes ?? null,

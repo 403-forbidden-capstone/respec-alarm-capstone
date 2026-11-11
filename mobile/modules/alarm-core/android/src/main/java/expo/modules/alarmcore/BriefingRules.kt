@@ -27,6 +27,9 @@ object BriefingRules {
     return VoiceChoice.EngineDefault
   }
 
+  /** 해제 전까지 같은 브리핑을 반복하는지 — 기상만. 출발은 알림음 · 진동 한 번 + 브리핑 한 번으로 끝 */
+  fun repeatsBriefing(alarmType: String): Boolean = alarmType == "WAKE"
+
   /** 고른 단계의 문장이 없으면 그보다 낮은 단계 중 있는 것 */
   fun clipLevel(wanted: Int, available: Set<Int>): Int? = (wanted downTo 1).firstOrNull { it in available }
 
@@ -46,7 +49,7 @@ object BriefingRules {
     val base = (if (type == "WAKE") voiceText?.takeIf { it.isNotBlank() } else null)
       ?: listOf(heading, title).filter { it.isNotBlank() }.joinToString(". ")
     if (base.isBlank()) return null
-    val level = SpeechUrgency.level(snoozeCount, 0L, null, 3)
+    val level = SpeechUrgency.level(snoozeCount, 0L, null, null, 3)
     val prefix = when (level) {
       2 -> "알람을 한 번 미뤘어요. 이제 일어나야 해요. "
       3 -> "알람을 여러 번 미뤘어요. 지금 바로 일어나세요! "

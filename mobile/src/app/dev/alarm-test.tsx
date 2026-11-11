@@ -13,7 +13,21 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { TopBar } from '@/components/ui';
-import { makeDevAlarmId } from '@/lib/alarmSync/devAlarm';
+import { makeDevAlarmId, makeVoiceTestAlarmId } from '@/lib/alarmSync/devAlarm';
+import {
+  AUTO_STEP_MS,
+  autoStageTest,
+  departureVoiceTest,
+  engineLabel,
+  GEMINI_SAMPLE_TEXT,
+  geminiSampleTest,
+  mixOptions,
+  SAMPLE,
+  sampleAppointmentAt,
+  wakeVoiceTest,
+  type Mix,
+  type Stage,
+} from '@/lib/alarmSync/voiceTest';
 import { backOrHome } from '@/lib/nav';
 import {
   addAlarmEventListener,
@@ -28,14 +42,22 @@ import {
   markEventsUploaded,
   openUsageAccessSettings,
   ringNow,
+  ringVoiceTest,
   schedule,
+  soundKeyOf,
   stop,
+  stopVoiceTest,
   toUseSpans,
+  voiceTestStatus,
+  volumePercentFor,
   type AlarmEvent,
   type AlarmIntensity,
   type AlarmType,
+  type AlarmVibration,
   type RingPackage,
   type ScheduledAlarm,
+  type VoiceTestInfo,
+  type VoiceTestStatus,
 } from '@capstone/alarm-core';
 
 // 개발용 — 알람 코어를 실기기에서 확인하는 화면 (#26 첫 관문 → #79 새 함수 · #50 시연 버튼 · #35 사용 정보 읽기)
@@ -63,6 +85,42 @@ const INTENSITIES: { value: AlarmIntensity; label: string }[] = [
 
 const USAGE_LOOKBACK_MINUTES = 30;
 
+// AI 음성 시험 (기상 단계 · 소리 조합 · 출발 1회 안내) — 실제 알람 코어 재생 경로(ringNow와 같은 길)로 울림
+const STAGES: Stage[] = [1, 2, 3, 4];
+const STAGE_NOTE: Record<Stage, string> = {
+  1: '기본 기상 브리핑 — 차분한 목소리',
+  2: '첫 번째 스누즈 후 — 조금 빠르고 단호하게 (미루기 1번 상태로 재현)',
+  3: '두 번째 이상 스누즈 후 — 더 빠르고 강하게 (미루기 2번 상태로 재현)',
+  4: '남은 여유 0분 이하 — Gemini 긴급 (없으면 Android TTS 대체)',
+};
+const VIBRATIONS: { value: AlarmVibration; label: string }[] = [
+  { value: 'NONE', label: '진동 없음' },
+  { value: 'SHORT_REPEAT', label: '짧은 반복' },
+  { value: 'STRONG_CONTINUOUS', label: '강한 연속' },
+];
+const MIXES: { value: Mix; label: string }[] = [
+  { value: 'SOUND', label: '알람음만' },
+  { value: 'VIBRATION', label: '진동만' },
+  { value: 'VOICE', label: 'AI 음성만' },
+  { value: 'ALL', label: '전체 함께' },
+];
+const vibrationLabel = (value: AlarmVibration) => VIBRATIONS.find((item) => item.value === value)?.label ?? value;
+
+type VoiceTestSetupResult = ReturnType<typeof wakeVoiceTest>;
+
+type VoiceTestRun = {
+  kind: 'WAKE' | 'DEPARTURE';
+  alarmId: string;
+  stage: Stage;
+  /** 단계를 고른 방법 — 버튼으로 강제 · 시간 자동 전환 · Gemini 샘플 비교 */
+  how: 'STAGE' | 'AUTO' | 'SAMPLE';
+  intensity: AlarmIntensity;
+  vibration: AlarmVibration;
+  sound: boolean;
+  info: VoiceTestInfo | null;
+  error: string | null;
+};
+
 // 웹 · iOS는 메모리 대체(예약 목록 · 기록)를 눌러 볼 수 있고, 모듈이 없는 Android APK만 막음
 const CAN_TRY = isAvailable || Platform.OS !== 'android';
 
@@ -75,6 +133,11 @@ export default function AlarmTestScreen() {
   const [message, setMessage] = useState<string | null>(null);
   // 다시 읽기 실패는 따로 보여 줌 (예약 · 취소 결과 메시지를 덮어쓰지 않게)
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [vibration, setVibration] = useState<AlarmVibration>('SHORT_REPEAT');
+  const [stage, setStage] = useState<Stage>(1);
+  const [mix, setMix] = useState<Mix>('ALL');
+  const [voiceRun, setVoiceRun] = useState<VoiceTestRun | null>(null);
+  const [voiceStatus, setVoiceStatus] = useState<VoiceTestStatus | null>(null);
 
   const refresh = useCallback(async () => {
     try {
@@ -110,6 +173,95 @@ export default function AlarmTestScreen() {
     });
     return () => subscription.remove();
   }, [refresh]);
+
+  // 시험 중에는 1초마다 실제 재생 상태(알람음 주소 · 음성 상태)를 읽음
+  useEffect(() => {
+    if (!voiceRun || !isAvailable) return;
+    const timer = setInterval(() => {
+      voiceTestStatus()
+        .then(setVoiceStatus)
+        .catch(() => setVoiceStatus(null));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [voiceRun]);
+
+  // 기상 시험 — 단계 버튼은 지금 소리 조합으로, 소리 조합 버튼은 지금 단계로 바로 울림
+  async function runWakeVoice(nextStage: Stage, nextMix: Mix) {
+    setStage(nextStage);
+    setMix(nextMix);
+    const options = mixOptions(nextMix, vibration);
+    await ringWake(nextStage, 'STAGE', `AI 음성 시험 ${nextStage}단계`, options, (now) => wakeVoiceTest(nextStage, now, options));
+  }
+
+  // Gemini 긴급 샘플 비교 — 같은 문장을 Gemini 샘플 파일 / Android TTS로 (지금 고른 소리 조합 · 진동 그대로)
+  async function runSample(engine: 'SAMPLE' | 'ANDROID') {
+    const options = mixOptions(mix, vibration);
+    const title = engine === 'SAMPLE' ? 'Gemini 긴급 샘플' : '같은 문장 Android TTS';
+    await ringWake(4, 'SAMPLE', title, options, (now) => geminiSampleTest(engine, now, options));
+  }
+
+  // 시간 자동 전환 — 미루기 없이 울리는 동안 30초 뒤 3단계, 60초 뒤 4단계(Gemini 샘플)로 바뀌는지
+  async function runAutoStage() {
+    const options = mixOptions(mix, vibration);
+    await ringWake(1, 'AUTO', '시간 자동 전환 1 → 3 → 4', options, (now) => autoStageTest(now, options));
+  }
+
+  async function ringWake(
+    runStage: Stage,
+    how: VoiceTestRun['how'],
+    title: string,
+    options: ReturnType<typeof mixOptions>,
+    setup: (now: number) => VoiceTestSetupResult,
+  ) {
+    const now = nowMillis();
+    const { snoozeCount, voice } = setup(now);
+    const pkg: RingPackage = {
+      ...testPackage('WAKE', now, title, intensity),
+      alarmId: makeVoiceTestAlarmId(),
+      subtitle: `테스트 샘플 · 오전 ${SAMPLE.hour}시 ${SAMPLE.title}`,
+      vibration: options.vibration,
+      departAt: sampleAppointmentAt(now) - SAMPLE.travelMinutes * 60_000,
+    };
+    const run = { kind: 'WAKE' as const, alarmId: pkg.alarmId, stage: runStage, how, intensity, vibration: options.vibration, sound: options.sound };
+    await runVoice(run, () => ringVoiceTest(pkg, snoozeCount, voice));
+  }
+
+  // 출발 시험 — 기존 출발 알림 그대로 (알림음 · 진동 한 번 + AI 브리핑 한 번, 기상 배경음 없음, "출발했어요" 버튼)
+  async function runDepartureVoice() {
+    const now = nowMillis();
+    const { snoozeCount, voice } = departureVoiceTest(now);
+    const pkg: RingPackage = {
+      ...testPackage('DEPARTURE', now, `[테스트] ${SAMPLE.title}`, intensity),
+      alarmId: makeVoiceTestAlarmId(),
+      subtitle: '개발 화면 시험 (샘플 일정 · 출발 기록은 서버에 안 남음)',
+    };
+    const run = { kind: 'DEPARTURE' as const, alarmId: pkg.alarmId, stage: 1 as const, how: 'STAGE' as const, intensity, vibration, sound: false };
+    await runVoice(run, () => ringVoiceTest(pkg, snoozeCount, voice));
+  }
+
+  async function runVoice(run: Omit<VoiceTestRun, 'info' | 'error'>, ring: () => Promise<VoiceTestInfo>) {
+    setVoiceStatus(null);
+    try {
+      if (!(await requestNotificationPermission())) {
+        setVoiceRun({ ...run, info: null, error: '알림 권한이 없어 알람 화면 · 알림이 안 뜸. 앱 설정에서 알림을 허용해 주세요.' });
+        return;
+      }
+      setVoiceRun({ ...run, info: await ring(), error: null });
+    } catch (error) {
+      setVoiceRun({ ...run, info: null, error: `재생 못 함: ${errorText(error)}` });
+    }
+    refresh();
+  }
+
+  async function stopVoice() {
+    try {
+      await stopVoiceTest(voiceRun?.alarmId);
+      setVoiceRun((run) => (run ? { ...run, error: '즉시 정지함 (AI 음성 시험 알람의 알람음 · 진동 · AI 음성 · 다시 울림 모두. 개발 예약 알람은 그대로)' } : run));
+    } catch (error) {
+      setMessage(`정지 실패: ${errorText(error)}`);
+    }
+    refresh();
+  }
 
   async function scheduleTest(type: AlarmType, minutes: number) {
     setMessage(null);
@@ -221,8 +373,8 @@ export default function AlarmTestScreen() {
         <TopBar onBack={backOrHome} />
         <Text style={styles.title}>알람 테스트 (개발용)</Text>
         <Text style={styles.body}>
-          예약 → 화면 끄기 → 울리는지 확인. 기상 알람은 해제 또는 미루기(5 · 10 · 15분 중 고르기, 최대 3번). 안 끄면 3분 뒤 멈췄다가 쉬고 다시
-          울림 (약 5분 쉬고 1번 · 보통 5분씩 쉬고 2번 · 강 3분씩 쉬고 3번). 준비 · 출발 · 도착 · 루틴은 보통 알림(알림음 ·
+          예약 → 화면 끄기 → 울리는지 확인. 기상 알람은 해제 또는 미루기(5 · 10 · 15분 중 고르기, 최대 3번) 전까지 계속 울려요. AI는 5분 여유부터 3단계, 0분부터 4단계로 올라가요.
+          준비 · 출발 · 도착 · 루틴은 보통 알림(알림음 ·
           진동 한 번)이고, 버튼 하나(준비 시작 · 출발했어요 · 도착했어요 · 했어요)를 누르면 기록만 남음.
         </Text>
 
@@ -242,6 +394,101 @@ export default function AlarmTestScreen() {
           <Text style={styles.note}>{PERMISSION_NOTE}</Text>
           <Button title="앱 설정 열기" onPress={openSettings} disabled={Platform.OS !== 'android'} />
           <Button title="사용 정보 접근 설정 열기" onPress={openUsageSettings} disabled={!isAvailable} />
+        </View>
+
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>기상 AI 음성 테스트</Text>
+          <Text style={styles.note}>
+            실제 알람 코어로 바로 울림 (배경음 · 진동 · AI 음성 · 잠금화면 화면). 해제 전까지 같은 문장을 다시 읽음. 1~3단계는 Android
+            오프라인 TTS, 4단계는 폰에 미리 받아 둔 Gemini 음성이 있을 때만 그 파일, 없으면 Android TTS로 대체. 서버 · Gemini 호출 없음
+          </Text>
+          <View style={styles.chips}>
+            {STAGES.map((item) => (
+              <Button
+                key={item}
+                title={`${stage === item ? '● ' : ''}${item}단계 듣기`}
+                onPress={() => runWakeVoice(item, mix)}
+                disabled={!isAvailable}
+              />
+            ))}
+          </View>
+          <Text style={styles.note}>{`${stage}단계: ${STAGE_NOTE[stage]}`}</Text>
+        </View>
+
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>시간 자동 전환 (1 → 3 → 4)</Text>
+          <Text style={styles.note}>
+            {`미루기 없이 계속 울리는 동안 남은 여유가 줄어드는 상황을 앞당겨 재현: 처음 1단계 → ${AUTO_STEP_MS / 1000}초 뒤 여유 5분(3단계 Android TTS) → ${(2 * AUTO_STEP_MS) / 1000}초 뒤 여유 0분(4단계 Gemini 샘플). 배경음 · 진동은 끊기지 않고 단계마다 세짐(진동 없음은 그대로). 아래 "지금 단계"로 확인`}
+          </Text>
+          <Button title="자동 전환 시험 시작" onPress={runAutoStage} disabled={!isAvailable} />
+        </View>
+
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Gemini 긴급 샘플 비교</Text>
+          <Text style={styles.note}>
+            {`같은 문장 "${GEMINI_SAMPLE_TEXT}"을 4단계로 재생. Gemini 샘플은 개발자가 실제 Gemini TTS로 한 번 만들어 앱에 넣은 파일이라 재생 때 API를 안 부름. 사용자 알람의 Gemini 캐시와 따로 표시됨`}
+          </Text>
+          <View style={styles.chips}>
+            <Button title="Android TTS로 듣기" onPress={() => runSample('ANDROID')} disabled={!isAvailable} />
+            <Button title="Gemini 샘플 듣기" onPress={() => runSample('SAMPLE')} disabled={!isAvailable} />
+          </View>
+        </View>
+
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>알람 강도 · 진동</Text>
+          <View style={styles.chips}>
+            {INTENSITIES.map((item) => (
+              <Button
+                key={item.value}
+                title={`${intensity === item.value ? '● ' : '○ '}${item.label}`}
+                onPress={() => setIntensity(item.value)}
+              />
+            ))}
+          </View>
+          <View style={styles.chips}>
+            {VIBRATIONS.map((item) => (
+              <Button
+                key={item.value}
+                title={`${vibration === item.value ? '● ' : '○ '}${item.label}`}
+                onPress={() => setVibration(item.value)}
+              />
+            ))}
+          </View>
+          <Text style={styles.note}>
+            {`적용될 알람음: ${soundKeyOf({ intensity })} · 알람 볼륨 ${volumePercentFor(intensity)}% · 진동 ${vibrationLabel(vibration)}. 고른 뒤 단계 · 소리 조합 버튼을 누르면 이 값으로 울림`}
+          </Text>
+        </View>
+
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>소리 조합</Text>
+          <View style={styles.chips}>
+            {MIXES.map((item) => (
+              <Button
+                key={item.value}
+                title={`${mix === item.value ? '● ' : ''}${item.label}`}
+                onPress={() => runWakeVoice(stage, item.value)}
+                disabled={!isAvailable}
+              />
+            ))}
+          </View>
+          <Text style={styles.note}>
+            지금 고른 단계로 울림. 알람음을 빼는 구성은 같은 재생 경로에서 크기만 0으로 둠. 전체 함께에서는 AI가 읽는 동안 배경음이 20%로
+            줄었다가 다 읽으면 원래대로
+          </Text>
+        </View>
+
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>출발 알림 테스트</Text>
+          <Text style={styles.note}>
+            {`테스트 샘플: 오전 ${SAMPLE.hour}시 ${SAMPLE.title} · 준비물 ${SAMPLE.items.join(', ')}. 알림음 · 진동 한 번 + AI 출발 브리핑 한 번(반복 없음, 기상 배경음 없음). 알림의 "출발했어요"는 기존과 같고, 시험 알람은 서버에 행이 없어 출발 기록이 남지 않음`}
+          </Text>
+          <Button title="출발 알림 실제 재생" onPress={runDepartureVoice} disabled={!isAvailable} />
+        </View>
+
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>공통</Text>
+          <Button title="즉시 정지" color="#B42318" onPress={stopVoice} disabled={!isAvailable} />
+          {voiceRun ? <VoiceRunView run={voiceRun} status={voiceStatus} /> : <Text style={styles.note}>아직 시험 안 함</Text>}
         </View>
 
         <View style={styles.section}>
@@ -346,6 +593,45 @@ export default function AlarmTestScreen() {
         </View>
       </ScrollView>
     </SafeAreaView>
+  );
+}
+
+// 시험 상태 — 무엇을 어떤 엔진 · 문장 · 진동 · 알람음으로 울렸는지와 지금 재생 상태
+function VoiceRunView({ run, status }: { run: VoiceTestRun; status: VoiceTestStatus | null }) {
+  const wake = run.kind === 'WAKE';
+  const playing = wake ? status?.ringingAlarmId === run.alarmId : status?.departureSpeakingAlarmId === run.alarmId;
+  const lines = [
+    `알람 종류: ${wake ? '기상(WAKE)' : '출발(DEPARTURE)'}`,
+    wake
+      ? run.how === 'AUTO'
+        ? 'AI 단계: 시간 자동 전환 시험 (1 → 3 → 4, 테스트 화면이 시각을 앞당김)'
+        : `AI 단계: ${run.stage}단계 — 테스트 화면에서 강제 선택${run.stage === 4 ? ' (실제 지각 위험이 아님)' : ''}`
+      : 'AI 단계: 1단계 출발 촉구 (테스트 샘플 일정)',
+    wake && playing && status?.level != null
+      ? `지금 단계: ${status.level}단계 · ${status.engine === 'GEMINI' ? (run.info?.geminiSourceAlarmId === 'SAMPLE' ? 'Gemini 샘플' : '캐시된 Gemini') : 'Android TTS'}`
+      : null,
+    run.info ? `실제 음성 엔진: ${engineLabel(run.info)}` : null,
+    run.info?.text ? `음성 문장: ${run.info.text}` : null,
+    run.info?.engine === 'ANDROID'
+      ? `말하기: 높낮이 ${run.info.pitch} · 속도 ${run.info.rate} · 목소리 번호 ${run.info.voiceIndex} (폰의 오프라인 한국어 목소리 중)`
+      : null,
+    `진동: ${wake ? vibrationLabel(run.vibration) : '알림 진동 한 번 (폰 · 알림 설정에 따름)'}`,
+    wake
+      ? `알람음: ${soundKeyOf({ intensity: run.intensity })} · 알람 볼륨 ${volumePercentFor(run.intensity)}%${run.sound ? '' : ' (시험: 크기 0 — 재생 경로만)'}`
+      : '알람음: 알림음 한 번 (기상 배경음 반복 없음)',
+    status?.sound && wake ? `실제 튼 알람음: ${status.sound}` : null,
+    `재생 상태: ${playing ? (wake ? '울리는 중' : '출발 안내 읽는 중') : '멈춤 또는 끝남'}`,
+    status?.speech ? `음성 상태: ${status.speech}` : null,
+  ].filter((line): line is string => line != null);
+  return (
+    <View style={styles.row}>
+      {lines.map((line) => (
+        <Text key={line} style={styles.body}>
+          {line}
+        </Text>
+      ))}
+      {run.error ? <Text style={styles.error}>{run.error}</Text> : null}
+    </View>
   );
 }
 

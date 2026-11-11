@@ -7,6 +7,7 @@ import {
   needsGemini,
   pickAppointments,
   resolveVoice,
+  GEMINI_URGENT_VOICE,
   urgencyRule,
   wakeMemo,
   GEMINI_URGENT_STYLE,
@@ -29,7 +30,8 @@ export type BriefingSource = {
   scheduledAtMs: number; // 알람 시각
   timeZone: string;
   prefs: unknown; // profiles.alarm_voice_prefs (jsonb 그대로)
-  importance: Importance; // 이 알람이 붙은 일정의 중요도. 일정 없는 알람은 LOW
+  importance: Importance; // 일정의 내부 자동 중요도
+  voiceTone?: 'CALM' | 'NEUTRAL' | 'DIRECT' | null; // 수동으로 고른 '말소리' 축(1~3단계 Android TTS만)
   appointmentAtMs: number | null; // 이 알람이 붙은 일정 시각 (일정 없는 알람은 null → 지각 위험 UNKNOWN)
   prepMinutes: number | null; // 참여 조건의 준비 분
   travelMinutes: number | null; // 참여 조건의 이동 분 (est_travel_minutes)
@@ -64,6 +66,8 @@ class QuotaLimited extends Error {}
 
 export async function runBriefing(src: BriefingSource, have: ReadonlySet<string>, gemini: GeminiDeps): Promise<BriefingOut> {
   const profile = resolveVoice(src.importance, cleanPrefs(src.prefs));
+  const toneMap = { CALM: 'GENTLE', NEUTRAL: 'NORMAL', DIRECT: 'FIRM' } as const;
+  if (src.voiceTone) profile.tone = toneMap[src.voiceTone]; // 일정의 직접 선택이 프로필 자동값보다 우선
   if (!profile.enabled) return { enabled: false, rule: null, clips: [], audio: [], gemini: 'NOT_NEEDED' };
   const rule = urgencyRule({ kind: src.kind, appointmentAtMs: src.done ? null : src.appointmentAtMs, prepMinutes: src.prepMinutes, travelMinutes: src.travelMinutes }, profile);
   const model = gemini.model ?? TTS_MODEL;
@@ -93,7 +97,7 @@ export async function runBriefing(src: BriefingSource, have: ReadonlySet<string>
       if (!callId) throw new QuotaLimited();
       const started = Date.now();
       try {
-        const a = await tts({ model, text: urgent.text, voice: profile.voice, style: GEMINI_URGENT_STYLE });
+        const a = await tts({ model, text: urgent.text, voice: GEMINI_URGENT_VOICE, style: GEMINI_URGENT_STYLE });
         await gemini.quota.finish(callId, { ok: true, errorCode: null, latencyMs: Date.now() - started }).catch(() => undefined);
         return a;
       } catch (e) {

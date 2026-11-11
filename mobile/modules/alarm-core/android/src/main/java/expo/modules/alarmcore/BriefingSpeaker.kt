@@ -26,6 +26,10 @@ internal class BriefingSpeaker(
     private const val INIT_TIMEOUT_MILLIS = 8_000L
     private const val START_TIMEOUT_MILLIS = 8_000L
     private const val REPEAT_PAUSE_MILLIS = 1_500L
+
+    // 마지막 재생 상태 한 줄 (개발 화면 표시용 — 판단에는 안 씀)
+    @Volatile
+    var lastStatus: String? = null
   }
 
   private val handler = Handler(Looper.getMainLooper())
@@ -42,16 +46,19 @@ internal class BriefingSpeaker(
   }
   private val initTimeout = Runnable {
     Log.w(TAG, "Android TTS가 켜지지 않음 — 알람음만")
+    lastStatus = "Android TTS가 켜지지 않음 — 알람음만"
     finish()
   }
   private val startTimeout = Runnable {
     Log.w(TAG, "Android TTS가 말을 시작하지 않음 — 알람음만")
+    lastStatus = "Android TTS가 말을 시작하지 않음 — 알람음만"
     finish()
   }
 
   fun speak(speech: VoiceBriefing.Speech, repeat: Boolean = false) {
     repeating = repeat
     currentSpeech = speech
+    lastStatus = "음성 준비 중"
     val wav = speech.wav
     if (wav != null && playWav(wav, speech.level)) return
     speakAndroid(speech)
@@ -73,10 +80,12 @@ internal class BriefingSpeaker(
       onStart()
       p.start()
       Log.i(TAG, "브리핑: Gemini 음성 ${level}단계")
+      lastStatus = "캐시된 Gemini 음성 ${level}단계 재생 중${if (repeating) " (반복)" else ""}"
       true
     } catch (e: Exception) {
       // 파일이 깨졌으면 같은 문장을 Android TTS로 (아직 아무것도 안 읽었으니 엔진이 섞이지 않음)
       Log.w(TAG, "Gemini 음성을 못 틀어 Android TTS로", e)
+      lastStatus = "Gemini 음성 파일을 못 틀어 Android TTS로 대체"
       p.release()
       player = null
       false
@@ -92,6 +101,7 @@ internal class BriefingSpeaker(
         if (finished || engine == null) return@post
         if (status != TextToSpeech.SUCCESS) {
           Log.w(TAG, "Android TTS를 못 켬 — 알람음만")
+          lastStatus = "Android TTS를 못 켬 — 알람음만"
           finish()
           return@post
         }
@@ -102,6 +112,7 @@ internal class BriefingSpeaker(
           when (val choice = BriefingRules.offlineVoice(engine.setLanguage(Locale.KOREAN), infos, speech.voiceIndex)) {
             is BriefingRules.VoiceChoice.Skip -> {
               Log.w(TAG, "Android TTS 안 씀(${choice.reason}) — 알람음만")
+              lastStatus = "Android TTS 안 씀(${choice.reason}) — 알람음만"
               finish()
               return@post
             }
@@ -123,18 +134,23 @@ internal class BriefingSpeaker(
               handler.post {
                 handler.removeCallbacks(startTimeout)
                 if (finished) return@post
+                lastStatus = if (repeating) "다 읽음 — 해제 전까지 다시 읽음" else "다 읽음 (한 번으로 끝)"
                 if (repeating) handler.postDelayed(repeatSpeech, REPEAT_PAUSE_MILLIS) else finish()
               }
             }
 
             @Deprecated("Deprecated in Java")
             override fun onError(utteranceId: String?) {
-              handler.post { finish() }
+              handler.post {
+                lastStatus = "Android TTS 읽기 오류 — 알람음만"
+                finish()
+              }
             }
           })
           speakUtterance(engine, speech)
         }.onFailure {
           Log.w(TAG, "Android TTS 실패 — 알람음만", it)
+          lastStatus = "Android TTS 실패 — 알람음만"
           finish()
         }
       }
@@ -151,6 +167,7 @@ internal class BriefingSpeaker(
       finish()
     } else {
       Log.i(TAG, "브리핑: Android TTS ${speech.level}단계${if (repeating) " 반복" else ""}")
+      lastStatus = "Android TTS ${speech.level}단계 읽는 중${if (repeating) " (반복)" else ""}"
     }
   }
 
@@ -163,6 +180,7 @@ internal class BriefingSpeaker(
 
   /** 해제 · 미루기 · 서비스 종료 — 읽던 것을 멈춤 (onDone은 안 부름) */
   fun stop() {
+    if (!finished) lastStatus = "멈춤"
     finished = true
     release()
   }

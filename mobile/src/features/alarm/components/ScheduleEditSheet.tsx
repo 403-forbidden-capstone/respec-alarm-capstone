@@ -6,8 +6,7 @@ import { colors } from '@/theme';
 
 import { isEditChanged, type ScheduleEditValue } from '../editSheet';
 import { repeatLabel } from '../repeat';
-import { IMPORTANCE_LABEL, type Importance } from '../types';
-import { OptionGrid } from './OptionGrid';
+
 import { RepeatPicker } from './RepeatPicker';
 
 type Props = {
@@ -26,9 +25,7 @@ type Props = {
   onLeave?: () => void; // [나는 빠지기] — canEdit가 false일 때만 보임
 };
 
-const IMPORTANCE_OPTIONS = (['LOW', 'NORMAL', 'HIGH'] as const).map((v) => [v, IMPORTANCE_LABEL[v]] as const);
-
-// 일정 편집 시트 (U14, H03 연결 일정 카드를 누르면) — 일정명 · 날짜 · 시간 · 장소 · 중요도 · 반복. 맨 아래 진한 버튼은 [저장] 하나, 그 아래 글자 버튼 [일정 삭제]
+// 일정 편집 시트 (U14, H03 연결 일정 카드를 누르면) — 일정명 · 날짜 · 시간 · 장소 · 반복. 알람 강도 3축은 H03의 알람 강도 카드에서 고름. 맨 아래 진한 버튼은 [저장] 하나, 그 아래 글자 버튼 [일정 삭제]
 // 값 · 콜백만 받음 — 저장 · 삭제는 부르는 쪽(features/alarm/hooks/useScheduleEdit)이 함
 export function ScheduleEditSheet({ visible, onClose, initial, value, onChange, onPickPlace, onPickDate, onPickTime, onSave, onDelete, saving, canEdit, onLeave }: Props) {
   return (
@@ -47,10 +44,9 @@ export function ScheduleEditSheet({ visible, onClose, initial, value, onChange, 
           <PickLine label="날짜" value={formatDateShort(value.at)} onPress={onPickDate} />
           <PickLine label="시간" value={formatTime(value.at)} onPress={onPickTime} />
           <PickLine label="장소" value={value.place} placeholder="장소 고르기" onPress={onPickPlace} />
-          <Text variant="rowLabel" tone="sub" style={styles.optLabel}>
-            중요도
+          <Text variant="small" tone="sub" style={styles.optLabel}>
+            알람의 배경음 · 말소리(Android TTS) · 진동은 이 창을 닫고 알람 설정의 「알람 강도」에서 각각 약·중·강으로 고를 수 있어요.
           </Text>
-          <OptionGrid<Importance> label="중요도" options={IMPORTANCE_OPTIONS} value={value.importance} onChange={(importance) => onChange({ importance })} />
           <View style={styles.repeat}>
             <RepeatPicker value={value.repeatDays} onChange={(repeatDays) => onChange({ repeatDays })} />
           </View>
@@ -68,7 +64,7 @@ export function ScheduleEditSheet({ visible, onClose, initial, value, onChange, 
           <KeyValueRow label="날짜" value={formatDateShort(value.at)} />
           <KeyValueRow label="시간" value={formatTime(value.at)} />
           <KeyValueRow label="장소" value={value.place} />
-          <KeyValueRow label="중요도" value={IMPORTANCE_LABEL[value.importance]} />
+
           <KeyValueRow label="반복" value={repeatLabel(value.repeatDays)} />
           {onLeave ? (
             <View style={styles.stack}>
