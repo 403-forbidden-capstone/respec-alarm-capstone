@@ -92,6 +92,24 @@ class AlarmPlaybackService : Service() {
   }
 
   private val handler = Handler(Looper.getMainLooper())
+  private var currentVoiceLevel: Int? = null
+  private var failedVoiceLevel: Int? = null
+  private var voiceGeneration = 0
+  // 기상 알람이 울리는 동안 현재 시각을 계속 확인하여 5분(3단계)과 0분(4단계)에 음성을 전환.
+  // 서버를 호출하지 않고 캐시된 규칙과 음성만 확인. 배경 알람음/진동은 중단하지 않음.
+  private val checkWakeStage = object : Runnable {
+    override fun run() {
+      val id = ringingAlarmId ?: return
+      val alarm = AlarmStorage.get(applicationContext, id) ?: return
+      if (alarm.type != "WAKE" || !alarm.ringing) return
+      val next = VoiceBriefing.speechFor(applicationContext, alarm, System.currentTimeMillis())
+      if (next != null && next.level != currentVoiceLevel && next.level != failedVoiceLevel) {
+        stopVoice()
+        runCatching { startVoice(alarm, next) }.onFailure { Log.w(TAG, "알람 음성 단계 변경 실패 — 배경음/진동 유지", it) }
+      }
+      handler.postDelayed(this, 2_000L)
+    }
+  }
 
   // 지금 울림의 번호 (StoredAlarm.ringCount). 다음 울림이 시작됐는지 알아보는 데 씀
   private var ringToken: Int = 0
@@ -170,12 +188,15 @@ class AlarmPlaybackService : Service() {
         return START_NOT_STICKY
       }
     } else {
-      // 울리는 중에 같은 알람의 다음 울림이 시작됨: 소리는 그대로 두고 볼륨만 이번 계획대로 (볼륨을 못 바꿔도 소리는 계속)
-      runCatching { setAlarmVolume(alarm.plan.volumePercent) }
+      // 이미 울리고 있다면 단계별 높인 볼륨을 유지하면서 같은 알람의 재울림 처리
+      if (alarm.type == "WAKE") updateStageEffects(alarm, currentVoiceLevel ?: 1)
+      else runCatching { setAlarmVolume(alarm.plan.volumePercent) }
     }
     // 기상·출발 알람은 자동 종료하지 않음. 다른 유형만 기존 최대 울림 시간을 적용.
     handler.removeCallbacks(autoStop)
     if (!continuous) handler.postDelayed(autoStop, ringMillis)
+    handler.removeCallbacks(checkWakeStage)
+    if (continuous) handler.postDelayed(checkWakeStage, 2_000L)
     return START_NOT_STICKY
   }
 
@@ -332,22 +353,51 @@ class AlarmPlaybackService : Service() {
     return true
   }
 
-  // 지금 미루기 횟수 · 지각 위험으로 단계를 골라 브리핑을 한 번 읽음 (네트워크 안 씀). 캐시가 없으면 꾸러미 문장을 Android TTS로
-  private fun startVoice(alarm: StoredAlarm) {
-    val speech = VoiceBriefing.speechFor(this, alarm, System.currentTimeMillis()) ?: return
+  // 한 번 고른 문장만 반복하지 않고, 체크 루프가 새 시각의 stage를 찾아 음성을 교체함.
+  private fun startVoice(alarm: StoredAlarm, prepared: VoiceBriefing.Speech? = VoiceBriefing.speechFor(this, alarm, System.currentTimeMillis())) {
+    val speech = prepared ?: return
+    currentVoiceLevel = speech.level
+    failedVoiceLevel = null
+    if (alarm.type == "WAKE") updateStageEffects(alarm, speech.level)
+    val generation = ++voiceGeneration
     speaker = BriefingSpeaker(
       this,
       onStart = {
-        speaking = true
-        mediaPlayer?.let { runCatching { it.setVolume(VOICE_DUCK * soundLevel, VOICE_DUCK * soundLevel) } }
+        if (generation == voiceGeneration) {
+          speaking = true
+          mediaPlayer?.let { runCatching { it.setVolume(VOICE_DUCK * soundLevel, VOICE_DUCK * soundLevel) } }
+        }
       },
-      onDone = { stopVoice() },
+      onDone = {
+        if (generation == voiceGeneration) {
+          // 한국어 오프라인 TTS가 없거나 음성 파일이 깨졌을 때 무의미한 2초 간격 재시작을 방지
+          failedVoiceLevel = currentVoiceLevel
+          stopVoice()
+        }
+      },
     ).also { it.speak(speech, repeat = BriefingRules.repeatsBriefing(alarm.type)) }
   }
 
+  // 배경음은 선택한 볼륨에서 단계에 따라 상승(최대 100%). 진동 없음은 존중,
+  // 짧은 반복을 고른 경우에만 3단계부터 강한 연속 패턴으로 변경.
+  private fun updateStageEffects(alarm: StoredAlarm, level: Int) {
+    val boost = when (level) { 2 -> 10; 3 -> 20; 4 -> 30; else -> 0 }
+    runCatching { setAlarmVolume((alarm.plan.volumePercent + boost).coerceAtMost(100)) }
+    if (level >= 3 && alarm.vibration == AlarmVibration.SHORT_REPEAT) {
+      AlarmVibration.patternFor(AlarmVibration.STRONG_CONTINUOUS)?.let { pattern ->
+        runCatching {
+          stopVibration()
+          startVibration(pattern)
+        }
+      }
+    }
+  }
+
   private fun stopVoice() {
+    voiceGeneration += 1
     speaker?.stop()
     speaker = null
+    currentVoiceLevel = null
     speaking = false
     mediaPlayer?.let { runCatching { it.setVolume(soundLevel, soundLevel) } }
   }
@@ -521,6 +571,8 @@ class AlarmPlaybackService : Service() {
   // 해제 · 미루기 · 자동 정지 · 실패 모두 여기서 원래대로 되돌림 (여러 번 불러도 됨)
   private fun releasePlayback() {
     handler.removeCallbacks(autoStop)
+    handler.removeCallbacks(checkWakeStage)
+    failedVoiceLevel = null
     remainingSounds.clear()
     stopVoice()
     releasePlayer()

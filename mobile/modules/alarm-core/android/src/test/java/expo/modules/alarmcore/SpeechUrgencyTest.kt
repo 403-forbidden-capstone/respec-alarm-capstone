@@ -30,9 +30,11 @@ class SpeechUrgencyTest {
     assertTrue("시험 줄이 비었음", objects.size >= 10)
     for (o in objects) {
       val urgentAt = field(o, "urgentAtMs").let { if (it == "null") null else it.toLong() }
+      val dangerAt = field(o, "dangerAtMs").let { if (it == "null") null else it.toLong() }
       val actual = SpeechUrgency.level(
         snoozeCount = field(o, "snoozeCount").toInt(),
         nowMillis = field(o, "nowMs").toLong(),
+        dangerAt = dangerAt,
         urgentAt = urgentAt,
         maxLevel = field(o, "maxLevel").toInt(),
       )

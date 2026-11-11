@@ -49,7 +49,7 @@ object BriefingRules {
     val base = (if (type == "WAKE") voiceText?.takeIf { it.isNotBlank() } else null)
       ?: listOf(heading, title).filter { it.isNotBlank() }.joinToString(". ")
     if (base.isBlank()) return null
-    val level = SpeechUrgency.level(snoozeCount, 0L, null, 3)
+    val level = SpeechUrgency.level(snoozeCount, 0L, null, null, 3)
     val prefix = when (level) {
       2 -> "알람을 한 번 미뤘어요. 이제 일어나야 해요. "
       3 -> "알람을 여러 번 미뤘어요. 지금 바로 일어나세요! "

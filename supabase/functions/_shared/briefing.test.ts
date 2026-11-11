@@ -10,6 +10,7 @@ import {
   cleanPrefs,
   clipHash,
   engineFor,
+  dangerAtMs,
   lateRisk,
   levelAt,
   levelsToPrepare,
@@ -44,7 +45,7 @@ test('중요도 약 · 중간 · 중요 → 목소리 · 말투 기본값, 긴�
 
 test('사용자 수동 설정 > 기본값, 칸을 지우면 기본값 · 모르는 값은 버림', () => {
   const p = resolveVoice('HIGH', { voice: 'Sulafat', tone: 'GENTLE', escalate: false });
-  assert.deepEqual([p.voice, p.tone, p.escalate], ['Sulafat', 'GENTLE', false]);
+  assert.deepEqual([p.voice, p.tone, p.escalate], ['Sulafat', 'GENTLE', true]);
   assert.deepEqual(p.manual, { voice: true, tone: true });
   assert.equal(resolveVoice('HIGH', {}).voice, 'Kore');
   assert.deepEqual(cleanPrefs({ voice: 'Nope', tone: 'LOUD', coachMax: 9, hack: 1, personal: false }), { personal: false });
@@ -67,9 +68,9 @@ test('기상 여유 = 약속 − 지금 − 준비 − 이동, 출발 여유 = �
   assert.equal(slackMinutes(depart(), kst(9)), 60 - 40);
 });
 
-test('경계: 30 초과 여유 · 15 초과 주의 · 5 초과 위험 · 5 이하 긴급', () => {
+test('경계: 5분 이하(Android 3단계), 0분 이하(Gemini 4단계)', () => {
   const at = (slack: number) => lateRisk(slackMinutes(depart(), kst(10) - (40 + slack) * MIN));
-  assert.deepEqual([31, 30, 16, 15, 6, 5, 0, -3].map(at), ['SAFE', 'CAUTION', 'CAUTION', 'DANGER', 'DANGER', 'URGENT', 'URGENT', 'URGENT']);
+  assert.deepEqual([31, 30, 16, 15, 6, 5, 0, -3].map(at), ['SAFE', 'CAUTION', 'CAUTION', 'DANGER', 'DANGER', 'IMMINENT', 'URGENT', 'URGENT']);
 });
 
 test('준비 · 이동을 모르면 UNKNOWN (단정하지 않음), 이미 출발했으면 DONE', () => {
@@ -86,27 +87,32 @@ test('처음 1 · 미루기 1번 2 · 2번 이상 3 — 미루기만으로는 4�
   assert.deepEqual([0, 1, 2, 3, 9].map((n) => speechLevel(n, 'SAFE', 4)), [1, 2, 3, 3, 3]);
   assert.deepEqual([0, 3].map((n) => speechLevel(n, 'UNKNOWN', 4)), [1, 3]);
   assert.equal(speechLevel(3, 'DANGER', 4), 3);
+  assert.equal(speechLevel(0, 'IMMINENT', 4), 3); // 시간만 흘러도 스누즈 없이 3단계
 });
 
-test('실제 긴급이면 미루기 없이도 4 · LOW와 HIGH 모두 여유 5분 이하면 긴급', () => {
+test('여유 5분이면 미루기 없이 3 · 여유 0분이면 미루기 없이 4', () => {
   assert.equal(speechLevel(0, 'URGENT', 4), 4);
+  assert.equal(speechLevel(0, 'IMMINENT', 4), 3);
   for (const importance of ['LOW', 'HIGH'] as const) {
     const rule = urgencyRule(wake(), resolveVoice(importance));
-    const now = kst(10) - (90 + 5) * MIN; // 여유 정확히 5분
-    assert.equal(lateRisk(slackMinutes(wake(), now)), 'URGENT');
-    assert.equal(levelAt(rule, 0, now), 4, importance);
+    const fiveMinutes = kst(10) - (90 + 5) * MIN;
+    const zeroMinutes = kst(10) - 90 * MIN;
+    assert.equal(lateRisk(slackMinutes(wake(), fiveMinutes)), 'IMMINENT');
+    assert.equal(levelAt(rule, 0, fiveMinutes), 3, importance);
+    assert.equal(lateRisk(slackMinutes(wake(), zeroMinutes)), 'URGENT');
+    assert.equal(levelAt(rule, 0, zeroMinutes), 4, importance);
   }
 });
 
 test('사용자 상한 · 자동 강화 끔을 넘지 않음', () => {
   assert.equal(speechLevel(0, 'URGENT', 3), 3);
   assert.equal(speechLevel(3, 'URGENT', 1), 1);
-  assert.equal(urgencyRule(wake(), { coachMax: 4, escalate: false }).maxLevel, 1);
+  assert.equal(urgencyRule(wake(), { coachMax: 4, escalate: false }).maxLevel, 4); // 긴급 음성을 사용자 설정으로 끄지 못함
 });
 
 test('미리 계산한 긴급 시각(urgentAtMs) 비교 = 지각 위험 계산 그대로 (네이티브가 쓰는 식) — 1분 · 30초 간격으로 모두 같음', () => {
   for (const s of [wake(), depart(), wake({ prepMinutes: 0, travelMinutes: 7 })]) {
-    const rule = { urgentAtMs: urgentAtMs(s), maxLevel: 4 as const };
+    const rule = { dangerAtMs: dangerAtMs(s), urgentAtMs: urgentAtMs(s), maxLevel: 4 as const };
     for (let t = kst(7); t <= kst(10, 5); t += 30_000) {
       for (const snooze of [0, 1, 2, 3]) {
         assert.equal(levelAt(rule, snooze, t), speechLevel(snooze, lateRisk(slackMinutes(s, t)), 4), `${s.kind} ${new Date(t).toISOString()} ${snooze}`);
@@ -117,10 +123,10 @@ test('미리 계산한 긴급 시각(urgentAtMs) 비교 = 지각 위험 계산 �
 
 test('TS · Kotlin 같은 표 (spec/urgency-cases.json — 네이티브는 SpeechUrgencyTest가 같은 표로 확인)', () => {
   const cases = JSON.parse(readFileSync(new URL('../../../mobile/modules/alarm-core/spec/urgency-cases.json', import.meta.url), 'utf8')) as {
-    name: string; snoozeCount: number; nowMs: number; urgentAtMs: number | null; maxLevel: 1 | 2 | 3 | 4; expected: number;
+    name: string; snoozeCount: number; nowMs: number; dangerAtMs?: number | null; urgentAtMs: number | null; maxLevel: 1 | 2 | 3 | 4; expected: number;
   }[];
   assert.ok(cases.length >= 10);
-  for (const c of cases) assert.equal(levelAt({ urgentAtMs: c.urgentAtMs, maxLevel: c.maxLevel }, c.snoozeCount, c.nowMs), c.expected, c.name);
+  for (const c of cases) assert.equal(levelAt({ dangerAtMs: c.dangerAtMs, urgentAtMs: c.urgentAtMs, maxLevel: c.maxLevel }, c.snoozeCount, c.nowMs), c.expected, c.name);
 });
 
 // --- 엔진 · Gemini 필요 판단 ---
@@ -138,17 +144,17 @@ test('스누즈 3번이어도 여유 40분이면 긴급 아님 → Gemini 미사
   const rule = urgencyRule(s, resolveVoice('LOW'));
   assert.equal(levelAt(rule, 3, now), 3);
   assert.equal(engineFor(levelAt(rule, 3, now), true), 'ANDROID');
-  assert.equal(needsGemini(rule, 'WAKE', kst(6)), false); // 6시 알람 · 긴급 시각 8:24 — 미루기 창(60분) 밖
+  assert.equal(needsGemini(rule, 'WAKE', kst(6)), true); // 알람이 해제 전까지 계속 울릴 수 있어 여유 0분 시각을 미리 준비
 });
 
 test('Gemini는 이 알람이 울리는 동안 실제로 긴급이 될 수 있을 때만 미리 만듦', () => {
   const rule = urgencyRule(wake(), resolveVoice('LOW')); // 긴급 시각 = 10시 − 95.5분 = 8:24:30
   assert.equal(needsGemini(rule, 'WAKE', kst(7, 30)), true); // 미루다 보면 긴급
-  assert.equal(needsGemini(rule, 'WAKE', kst(7, 20)), false);
+  assert.equal(needsGemini(rule, 'WAKE', kst(7, 20)), true);
   const d = urgencyRule(depart(), resolveVoice('LOW')); // 긴급 시각 9:14:30
   assert.equal(needsGemini(d, 'DEPARTURE', kst(9, 10)), false); // 출발 알람 9:10 — 여유 10분(위험)이지 긴급 아님
-  assert.equal(needsGemini(d, 'DEPARTURE', kst(9, 15)), true);
-  assert.equal(needsGemini({ ...d, maxLevel: 3 }, 'DEPARTURE', kst(9, 15)), false); // 상한 3 → Gemini 안 씀
+  assert.equal(needsGemini(d, 'DEPARTURE', kst(9, 20)), true);
+  assert.equal(needsGemini({ ...d, maxLevel: 3 }, 'DEPARTURE', kst(9, 20)), false); // 상한 3 → Gemini 안 씀
   assert.equal(needsGemini(urgencyRule(wake({ travelMinutes: null }), resolveVoice('LOW')), 'WAKE', kst(9)), false); // UNKNOWN
 });
 

@@ -43,8 +43,8 @@ function sampleInput(kind: BriefKind, nowMs: number): BriefingInput {
  *   4: 긴급 시각을 지금보다 1분 전으로 → 지각 위험(여유 5분 이하)과 같은 입력
  */
 export function stageSetup(stage: Stage, nowMs: number): { snoozeCount: number; rule: UrgencyRule } {
-  if (stage === 4) return { snoozeCount: 0, rule: { urgentAtMs: nowMs - 60_000, maxLevel: 4 } };
-  return { snoozeCount: stage - 1, rule: { urgentAtMs: null, maxLevel: 4 } };
+  if (stage === 4) return { snoozeCount: 0, rule: { dangerAtMs: nowMs - 6 * 60_000, urgentAtMs: nowMs - 60_000, maxLevel: 4 } };
+  return { snoozeCount: stage - 1, rule: { dangerAtMs: null, urgentAtMs: null, maxLevel: 4 } };
 }
 
 /** 재생 구성 → 알람음 · AI 음성 켜기 + 실제로 쓸 진동 */
@@ -69,7 +69,7 @@ export function wakeVoiceTest(stage: Stage, nowMs: number, opts: { sound: boolea
 
 /** 출발 시험 브리핑 — 1단계(출발 촉구) 한 문장만. 출발은 반복 없이 한 번 읽음 (네이티브 BriefingRules.repeatsBriefing) */
 export function departureVoiceTest(nowMs: number): { snoozeCount: number; voice: VoiceTestSetup } {
-  const rule: UrgencyRule = { urgentAtMs: null, maxLevel: 1 };
+  const rule: UrgencyRule = { dangerAtMs: null, urgentAtMs: null, maxLevel: 1 };
   return { snoozeCount: 0, voice: { rule, clips: briefingClips(rule, PROFILE, sampleInput('DEPARTURE', nowMs)), test: { sound: true, voice: true } } };
 }
 

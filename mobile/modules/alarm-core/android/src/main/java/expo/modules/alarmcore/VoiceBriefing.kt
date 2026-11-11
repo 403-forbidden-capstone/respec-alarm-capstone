@@ -150,8 +150,9 @@ internal object VoiceBriefing {
     val folder = dir(context, alarm.alarmId)
     val manifest = folder?.let { readManifest(it) }
     val rule = manifest?.optJSONObject("rule") ?: JSONObject()
+    val dangerAt = if (rule.has("dangerAtMs") && !rule.isNull("dangerAtMs")) rule.getDouble("dangerAtMs").toLong() else null
     val urgentAt = if (rule.has("urgentAtMs") && !rule.isNull("urgentAtMs")) rule.getDouble("urgentAtMs").toLong() else null
-    val level = SpeechUrgency.level(alarm.snoozeCount, nowMillis, urgentAt, rule.optInt("maxLevel", 1))
+    val level = SpeechUrgency.level(alarm.snoozeCount, nowMillis, dangerAt, urgentAt, rule.optInt("maxLevel", 1))
     val clips = manifest?.optJSONArray("clips") ?: JSONArray()
     val byLevel = (0 until clips.length()).map { clips.getJSONObject(it) }.associateBy { it.optInt("level") }
     val clipLevel = BriefingRules.clipLevel(level, byLevel.keys)
