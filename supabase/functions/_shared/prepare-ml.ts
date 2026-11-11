@@ -6,6 +6,7 @@ export type MlPrediction = { model: MlModel; minutes: number };
 export type MlProfile = {
   ml_codes_verified?: boolean | null;
   ml_age_code?: string | null;
+  ml_holiday_code?: string | null;
 };
 export type MlRequest = { model: MlModel; features: Record<string, string | number> };
 export type MlConfig = { enabled: boolean; url?: string; token?: string; timeoutMs?: number };
@@ -49,11 +50,16 @@ export function approvedMlProfile(
   return {
     ml_codes_verified: true,
     ml_age_code: profile.ml_age_code,
+    // Only the server-owned verified value reaches CatBoost. Missing stays missing.
+    ml_holiday_code: validHolidayCode(profile.ml_holiday_code) ? profile.ml_holiday_code : null,
   };
 }
 
 const MISSING = '__MISSING__';
 // The training survey records codes 1..8 for 10s, 20s, ... 80+.
+const validHolidayCode = (value: string | null | undefined): value is string =>
+  typeof value === 'string' && /^[1-6]$/.test(value);
+
 const validAgeCode = (value: string | null | undefined): value is string =>
   typeof value === 'string' && /^[1-8]$/.test(value);
 
@@ -70,7 +76,8 @@ export function calendarFeatures(appointmentAt: Date, timezone: string) {
   return {
     weekday_code: String(weekday),
     '평토일구분코드': weekday === 0 ? '3' : weekday === 6 ? '2' : '1',
-    // The survey holiday-category codebook is not verified.
+    // This is the RESPONDENT'S regular rest-day pattern, not a public holiday.
+    // A verified personal answer (if any) replaces this fallback in buildMlRequest.
     '휴일종류코드': MISSING,
   };
 }
@@ -92,6 +99,7 @@ export function buildMlRequest(args: {
   const features: Record<string, string | number> = {
     ...calendarFeatures(args.appointmentAt, args.timezone),
     '연령코드': age,
+    '휴일종류코드': validHolidayCode(args.profile.ml_holiday_code) ? args.profile.ml_holiday_code : MISSING,
   };
   if (isWarm) features.previous_day_target_minutes = previous as number;
   return { model: isWarm ? 'w4_mae' : 'c1_mae', features };

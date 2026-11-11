@@ -99,7 +99,7 @@ export default function SettingsScreen() {
   const revokeMlSurvey = async () => {
     if (!(await confirm({
       title: '예측용 프로필 정보를 삭제할까요?',
-      message: '입력한 만 나이와 예측용 정보 동의를 삭제합니다. 기존 알람에는 영향을 주지 않아요.',
+      message: '입력한 만 나이와 평소 휴무 형태, 예측용 정보 동의를 삭제합니다. 기존 알람에는 영향을 주지 않아요.',
       okLabel: '삭제',
       destructive: true,
     }))) return;

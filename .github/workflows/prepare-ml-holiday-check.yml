@@ -1,0 +1,29 @@
+name: CatBoost 선택 입력 검증
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  prepare-ml-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+      - name: Install mobile dependencies
+        working-directory: mobile
+        run: npm ci
+      - name: Mobile typecheck
+        working-directory: mobile
+        run: npx tsc --noEmit
+      - name: Mobile ML survey tests
+        working-directory: mobile
+        run: npx jest --runInBand src/features/profile/__tests__/prepareMlSurvey.test.ts src/features/onboarding/__tests__/steps.test.ts
+      - name: Edge ML adapter tests
+        run: node --experimental-strip-types --test supabase/functions/_shared/prepare-ml.test.ts
