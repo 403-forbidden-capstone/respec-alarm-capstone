@@ -33,7 +33,7 @@ import { cleanHandle, cleanNickname, isHandleFormat, isNicknameOk, NICKNAME_MAX,
 import { ConsentStep } from '@/features/onboarding/views/ConsentStep';
 import { HandleStep } from '@/features/onboarding/views/HandleStep';
 import { NicknameStep } from '@/features/onboarding/views/NicknameStep';
-import { PrepareStep, type PrepareValues } from '@/features/onboarding/views/PrepareStep';
+import { PrepareStep, type PrepareMlDraft, type PrepareValues } from '@/features/onboarding/views/PrepareStep';
 import { ShareStep } from '@/features/onboarding/views/ShareStep';
 import { SleepStep } from '@/features/onboarding/views/SleepStep';
 import {
@@ -94,6 +94,13 @@ export default function OnboardingScreen() {
     buffer: Math.min(60, Math.max(0, profile?.default_buffer_minutes ?? 10)),
     transport: profile?.default_transport ?? 'TRANSIT',
     margin: profile?.wake_margin ?? 'NORMAL',
+  });
+  // Opt-in research survey is staged locally and saved only at the later
+  // privacy-consent step, never automatically on entering morning preparation.
+  const [mlDraft, setMlDraft] = useState<PrepareMlDraft>({
+    age: profile?.ml_age_years ?? 20,
+    holiday: profile?.ml_holiday_code ?? null,
+    consent: false,
   });
   const homeStep = useHomeStep(profile, userId);
   const photoImport = usePhotoImport();
@@ -163,6 +170,16 @@ export default function OnboardingScreen() {
         if (userId && !agreed && !consentSaved) {
           await saveProfileFields(userId, { privacy_agreed_at: new Date().toISOString(), privacy_version: PRIVACY_VERSION });
           setConsentSaved(true);
+        }
+        if (userId && mlDraft.consent) {
+          await saveProfileFields(userId, {
+            ml_age_years: mlDraft.age,
+            ml_holiday_code: mlDraft.holiday,
+            ml_school_status: null,
+            ml_work_status: null,
+            ml_profile_consented_at: new Date().toISOString(),
+          });
+          setMlDraft((prev) => ({ ...prev, consent: false }));
         }
         return true;
       }
@@ -274,7 +291,7 @@ export default function OnboardingScreen() {
     prepare: {
       title: '아침 준비',
       lead: '알람 계산의 처음 값이에요',
-      body: <PrepareStep values={prepare} onChange={(patch) => setPrepare((prev) => ({ ...prev, ...patch }))} />,
+      body: <PrepareStep values={prepare} onChange={(patch) => setPrepare((prev) => ({ ...prev, ...patch }))} ml={mlDraft} onMlChange={(patch) => setMlDraft((prev) => ({ ...prev, ...patch }))} />,
       primaryLabel: '다음',
       onPrimary: next,
     },
