@@ -85,7 +85,7 @@ PR 제목   [파트] [유형] 작업 내용             [FE] [FEAT] 알람 목�
 - Squash 머지만 허용합니다. PR 제목이 그대로 `main`의 커밋 한 줄이 됩니다.
 - 승인 1명 · 리뷰 대화 해결 뒤 작성자가 머지합니다. 머지된 브랜치는 자동 삭제됩니다.
 - 리뷰 전 단계의 PR은 제목 앞에 `[WIP]`를 붙입니다.
-- 위 규칙(PR 필수 · 승인 1명 · Squash만 · 강제 push 금지)은 무료 플랜 private 레포라 GitHub가 강제하지 않아 팀 약속으로 지킵니다. `main` 직접 push만 push 전 검사([`mobile/README.md`](mobile/README.md#push-전-검사))가 막습니다. 플랜 변경 시 [`.github/rulesets/main.json`](.github/rulesets/main.json)을 Settings → Rules → Rulesets → Import a ruleset으로 적용합니다.
+- 위 규칙(PR 필수 · 승인 1명 · Squash만 · 강제 push 금지)은 무료 플랜 private 레포라 GitHub가 강제하지 않아 팀 약속으로 지킵니다. `main` 직접 push는 push 전 검사(레포 맨 위 `lefthook.yml`)가 막습니다. 급할 때만 `git push --no-verify`. 플랜 변경 시 [`.github/rulesets/main.json`](.github/rulesets/main.json)을 Settings → Rules → Rulesets → Import a ruleset으로 적용합니다.
 
 ## 리뷰
 
