@@ -6,6 +6,7 @@ on:
       - 'services/prepare-ml/**'
       - 'deploy/prepare-ml.compose.example.yml'
       - '.github/workflows/prepare-ml-image.yml'
+      - 'scripts/smoke-prepare-ml-arm64.sh'
   workflow_dispatch:
 
 permissions:
@@ -16,6 +17,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+      - name: Validate local ARM64 smoke script syntax
+        run: bash -n scripts/smoke-prepare-ml-arm64.sh
       - name: Build without model artifacts
         run: docker build -t respec-prepare-ml:ci services/prepare-ml
       - name: Verify no .cbm file is bundled
