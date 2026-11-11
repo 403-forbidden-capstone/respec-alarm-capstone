@@ -22,7 +22,7 @@ jobs:
         run: |
           docker run --rm --entrypoint sh respec-prepare-ml:ci -c \
             'test ! -f /app/models/v4_age_only/c1_mae.cbm && test ! -f /app/models/v4_age_only/w4_mae.cbm'
-      - name: Validate app imports using a dummy runtime token
+      - name: Validate empty image startup and readiness failure
         run: |
           docker run --rm -e CATBOOST_API_TOKEN=ci-only --entrypoint python respec-prepare-ml:ci \
-            -c 'import app; assert app.LOAD_ERRORS == {}; assert app.MODELS == {}'
+            -c 'from fastapi import Response; import app; assert app.LOAD_ERRORS == {}; assert app.MODELS == {}; response=Response(); result=app.health(response); assert response.status_code == 503 and result["ok"] is False'
