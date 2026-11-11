@@ -93,7 +93,18 @@ internal object VoiceBriefing {
     val files = JSONObject()
     var source: String? = null
     val urgent = (0 until clips.length()).map { clips.getJSONObject(it) }.firstOrNull { it.optInt("level") == 4 }
-    if (urgent != null) {
+    val mode = VoiceTest.geminiMode(input.optJSONObject("test")?.optStringOrNull("gemini"))
+    if (urgent != null && mode == "SAMPLE") {
+      // 앱에 든 Gemini 긴급 샘플(res/raw, 개발자가 한 번 만들어 둔 파일) — 재생할 때 API를 안 부름. 문장은 화면이 샘플 문장으로 넣어 보냄
+      runCatching {
+        context.resources.openRawResource(R.raw.gemini_urgent_sample).use { raw -> File(folder, "L4.wav").outputStream().use { raw.copyTo(it) } }
+      }.onSuccess {
+        urgent.put("hash", VoiceTest.SAMPLE_SOURCE)
+        files.put("4", VoiceTest.SAMPLE_SOURCE)
+        source = VoiceTest.SAMPLE_SOURCE
+      }
+    }
+    if (urgent != null && mode == "CACHE") {
       val root = File(context.filesDir, DIR)
       val candidates = root.listFiles().orEmpty().filter { it.isDirectory }.map { d ->
         val manifest = readManifest(d)

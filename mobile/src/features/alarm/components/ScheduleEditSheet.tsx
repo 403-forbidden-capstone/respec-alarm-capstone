@@ -45,7 +45,7 @@ export function ScheduleEditSheet({ visible, onClose, initial, value, onChange, 
           <PickLine label="시간" value={formatTime(value.at)} onPress={onPickTime} />
           <PickLine label="장소" value={value.place} placeholder="장소 고르기" onPress={onPickPlace} />
           <Text variant="small" tone="sub" style={styles.optLabel}>
-            알람의 배경음 · 말소리(Android TTS) · 진동은 이 창을 닫고 알람 설정의 '알람 강도'에서 각각 약·중·강으로 고를 수 있어요.
+            알람의 배경음 · 말소리(Android TTS) · 진동은 이 창을 닫고 알람 설정의 「알람 강도」에서 각각 약·중·강으로 고를 수 있어요.
           </Text>
           <View style={styles.repeat}>
             <RepeatPicker value={value.repeatDays} onChange={(repeatDays) => onChange({ repeatDays })} />

@@ -3,7 +3,19 @@ import { describe, expect, it } from '@jest/globals';
 import type { VoiceTestSetup } from '@capstone/alarm-core';
 import { androidVoice, briefingText, engineFor, levelAt as sharedLevelAt, resolveVoice, type UrgencyLevel, type UrgencyRule } from '@shared/briefing.ts';
 
-import { departureVoiceTest, engineLabel, mixOptions, SAMPLE, wakeVoiceTest, type Stage } from '../voiceTest';
+import { isDevAlarmId, isVoiceTestId, makeDevAlarmId, makeVoiceTestAlarmId } from '../devAlarm';
+import {
+  AUTO_STEP_MS,
+  autoStageTest,
+  departureVoiceTest,
+  engineLabel,
+  GEMINI_SAMPLE_TEXT,
+  geminiSampleTest,
+  mixOptions,
+  SAMPLE,
+  wakeVoiceTest,
+  type Stage,
+} from '../voiceTest';
 
 const NOW = Date.UTC(2026, 10, 11, 22, 0); // 서울 11/12 오전 7시
 const ON = { sound: true, voice: true };
@@ -54,6 +66,40 @@ describe('기상 AI 음성 단계 재현', () => {
     expect(engineLabel({ engine: 'GEMINI', level: 4, geminiSourceAlarmId: '11111111-2222' })).toContain('캐시된 Gemini');
     expect(engineLabel({ engine: 'ANDROID', level: 2, geminiSourceAlarmId: null })).toBe('Android 오프라인 TTS');
     expect(engineLabel({ engine: 'NONE', level: null, geminiSourceAlarmId: null })).toContain('음성 없음');
+  });
+});
+
+describe('시간 자동 전환 · Gemini 샘플', () => {
+  it('자동 전환 — 미루기 없이 시각만 지나면 1 → 3(여유 5분) → 4(여유 0분), 4단계는 샘플 문장 · 샘플 출처', () => {
+    const { snoozeCount, voice } = autoStageTest(NOW, ON);
+    const at = (ms: number) => levelAt(voice.rule!, snoozeCount, NOW + ms);
+    expect([at(0), at(AUTO_STEP_MS - 1), at(AUTO_STEP_MS), at(2 * AUTO_STEP_MS - 1), at(2 * AUTO_STEP_MS)]).toEqual([1, 1, 3, 3, 4]);
+    expect(voice.clips.find((c) => c.level === 4)?.text).toBe(GEMINI_SAMPLE_TEXT);
+    expect(voice.test.gemini).toBe('SAMPLE');
+  });
+
+  it('샘플 비교 — 같은 문장을 4단계로, 출처만 다름 (Gemini 샘플 / Android TTS)', () => {
+    for (const engine of ['SAMPLE', 'ANDROID'] as const) {
+      const { snoozeCount, voice } = geminiSampleTest(engine, NOW, ON);
+      expect(levelAt(voice.rule!, snoozeCount, NOW)).toBe(4);
+      expect(voice.clips.find((c) => c.level === 4)?.text).toBe(GEMINI_SAMPLE_TEXT);
+      expect(voice.test.gemini).toBe(engine);
+    }
+    // 단계 버튼은 실제 사용자 캐시(CACHE, 기본)만 씀 — 샘플과 섞지 않음
+    expect(wakeVoiceTest(4, NOW, ON).voice.test.gemini).toBeUndefined();
+  });
+
+  it('화면 표시 — Gemini 샘플과 사용자 캐시를 구분', () => {
+    expect(engineLabel({ engine: 'GEMINI', level: 4, geminiSourceAlarmId: 'SAMPLE' })).toContain('사용자 캐시 아님');
+    expect(engineLabel({ engine: 'GEMINI', level: 4, geminiSourceAlarmId: '11111111-2222' })).toContain('캐시된 Gemini');
+  });
+
+  it('음성 시험 알람 id — 개발 알람(서버 맞추기 · 통계 제외)이면서, [즉시 정지]는 음성 시험만 골라 끔', () => {
+    const voiceId = makeVoiceTestAlarmId();
+    expect(voiceId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
+    expect(isDevAlarmId(voiceId)).toBe(true);
+    expect(isVoiceTestId(voiceId)).toBe(true);
+    expect(isVoiceTestId(makeDevAlarmId().replace(/^de70a1a0-a1ce-/, 'de70a1a0-0000-'))).toBe(false);
   });
 });
 

@@ -702,7 +702,8 @@ export async function createAppointment(estimate: Estimate, source = '직접 입
     ...(Object.keys(picked).length ? { manual: { times: picked } } : {}),
   };
   db.appointments.push(saved);
-  if (estimate.levels) db.intensityOverrides[saved.id] = { ...estimate.levels };
+  // null(자동) 칸은 빼고 직접 고른 축만 (목업 강도 계산 intensityOverrides 모양)
+  if (estimate.levels) db.intensityOverrides[saved.id] = Object.fromEntries(Object.entries(estimate.levels).filter(([, v]) => v != null));
   for (const alarm of a.alarms) {
     if (!alarm.auto) continue;
     pushEditLog({

@@ -75,11 +75,13 @@ object AlarmController {
    */
   fun ringVoiceTest(context: Context, payload: String, voiceJson: String): Map<String, Any?> {
     val alarm = StoredAlarm.fromJson(JSONObject(payload))
-    require(VoiceTest.isTestAlarm(alarm.alarmId)) { "시험 알람 id만 울릴 수 있어요" }
+    require(VoiceTest.isVoiceTestAlarm(alarm.alarmId)) { "AI 음성 시험 알람 id만 울릴 수 있어요" }
     stopVoiceTest(context, null) // 앞 시험이 남아 있으면 정리
     val source = VoiceBriefing.saveForTest(context, alarm.alarmId, voiceJson)
     val speech = VoiceBriefing.speechFor(context, alarm, System.currentTimeMillis())
     AlarmPlaybackService.lastSound = null
+    AlarmPlaybackService.voiceLevel = null
+    AlarmPlaybackService.voiceEngine = null
     BriefingSpeaker.lastStatus = null
     ringNow(context, payload)
     return mapOf(
@@ -99,14 +101,16 @@ object AlarmController {
     "departureSpeakingAlarmId" to BriefingSpeechService.speakingAlarmId,
     "sound" to AlarmPlaybackService.lastSound,
     "speech" to BriefingSpeaker.lastStatus,
+    "level" to AlarmPlaybackService.voiceLevel,
+    "engine" to AlarmPlaybackService.voiceEngine,
   )
 
-  /** 시험 알람만 즉시 정지 — 알람음 · 진동 · 음성 · 다시 울림 · 미루기 예약 · 출발 알림까지. 해제 기록은 안 남김. 운영 알람은 안 건드림 */
+  /** AI 음성 시험 알람만 즉시 정지 — 알람음 · 진동 · 음성 · 다시 울림 · 미루기 예약 · 출발 알림까지. 해제 기록은 안 남김. 운영 알람 · 개발 예약 알람은 안 건드림 */
   fun stopVoiceTest(context: Context, alarmId: String?) {
-    AlarmStorage.all(context).filter { VoiceTest.isTestAlarm(it.alarmId) }.forEach { cancel(context, it.alarmId) }
-    AlarmPlaybackService.ringingAlarmId?.takeIf { VoiceTest.isTestAlarm(it) }?.let { AlarmPlaybackService.stop(context) }
-    BriefingSpeechService.speakingAlarmId?.takeIf { VoiceTest.isTestAlarm(it) }?.let { BriefingSpeechService.stop(context) }
-    alarmId?.takeIf { VoiceTest.isTestAlarm(it) }?.let { id ->
+    AlarmStorage.all(context).filter { VoiceTest.isVoiceTestAlarm(it.alarmId) }.forEach { cancel(context, it.alarmId) }
+    AlarmPlaybackService.ringingAlarmId?.takeIf { VoiceTest.isVoiceTestAlarm(it) }?.let { AlarmPlaybackService.stop(context) }
+    BriefingSpeechService.speakingAlarmId?.takeIf { VoiceTest.isVoiceTestAlarm(it) }?.let { BriefingSpeechService.stop(context) }
+    alarmId?.takeIf { VoiceTest.isVoiceTestAlarm(it) }?.let { id ->
       AlarmNotifications.cancelNotice(context, id)
       VoiceBriefing.clear(context, id)
     }

@@ -146,14 +146,17 @@ export type RingingAlarm = {
  */
 export type VoiceBriefingSave = {
   /** urgentAtMs = 남은 여유가 5분 이하가 되는 시각(준비 · 이동을 모르면 null), maxLevel = 사용자 상한 — 네이티브 SpeechUrgency가 울릴 때 비교 */
-  rule: { urgentAtMs: number | null; maxLevel: number } | null;
+  rule: { dangerAtMs?: number | null; urgentAtMs: number | null; maxLevel: number } | null;
   /** 단계별 문장 + Android TTS 높낮이 · 속도 · 목소리 번호 */
   clips: { level: number; hash: string; text: string; pitch: number; rate: number; voiceIndex: number }[];
   audio: { level: number; hash: string; mime?: string; data: string }[];
 };
 
-/** 개발 화면 AI 음성 시험 — 샘플 문장 + 끌 것 (sound: 알람음 크기 0, voice: AI 음성 안 읽음). 4단계 Gemini 음성은 네이티브가 실제 알람 캐시에서만 빌려 옴 */
-export type VoiceTestSetup = Pick<VoiceBriefingSave, 'rule' | 'clips'> & { test: { sound: boolean; voice: boolean } };
+/**
+ * 개발 화면 AI 음성 시험 — 샘플 문장 + 끌 것 (sound: 알람음 크기 0, voice: AI 음성 안 읽음)
+ * gemini: 4단계 음성 출처 — CACHE(기본) 실제 알람이 받아 둔 Gemini 캐시, 없으면 Android · SAMPLE 앱에 든 Gemini 긴급 샘플 · ANDROID 늘 Android TTS
+ */
+export type VoiceTestSetup = Pick<VoiceBriefingSave, 'rule' | 'clips'> & { test: { sound: boolean; voice: boolean; gemini?: 'CACHE' | 'SAMPLE' | 'ANDROID' } };
 
 /** 이번 시험 울림이 고른 음성 (네이티브 VoiceBriefing.speechFor 결과). engine NONE = 음성 없음 */
 export type VoiceTestInfo = {
@@ -163,7 +166,7 @@ export type VoiceTestInfo = {
   pitch: number | null;
   rate: number | null;
   voiceIndex: number | null;
-  /** Gemini 음성을 빌려 온 실제 알람 id (없으면 null) */
+  /** Gemini 음성을 빌려 온 실제 알람 id, 앱에 든 샘플이면 'SAMPLE' (없으면 null) */
   geminiSourceAlarmId: string | null;
 };
 
@@ -175,6 +178,9 @@ export type VoiceTestStatus = {
   sound: string | null;
   /** 마지막 음성 상태 한 줄 (Android TTS 읽는 중 · 캐시된 Gemini 재생 중 · 한국어 TTS 없음 등) */
   speech: string | null;
+  /** 지금 읽는 AI 음성 단계 · 엔진 (울리는 중 시간이 지나 1 → 3 → 4로 바뀌는 것을 봄). 예전 APK면 없음 */
+  level?: number | null;
+  engine?: 'GEMINI' | 'ANDROID' | null;
 };
 
 export type AlarmEventType = 'TRIGGERED' | 'SNOOZED' | 'DISMISSED' | 'ACKNOWLEDGED' | 'ARRIVAL_CONFIRMED';

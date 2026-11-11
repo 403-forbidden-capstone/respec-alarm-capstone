@@ -69,6 +69,13 @@ class AlarmPlaybackService : Service() {
     @Volatile
     var lastSound: String? = null
 
+    // 지금 읽는 AI 음성 단계 · 엔진(GEMINI/ANDROID) — 개발 화면이 시간 자동 전환(1 → 3 → 4)을 보여 주는 데만 씀
+    @Volatile
+    var voiceLevel: Int? = null
+
+    @Volatile
+    var voiceEngine: String? = null
+
     fun start(context: Context, id: String) {
       val intent = Intent(context, AlarmPlaybackService::class.java).apply {
         putExtra(EXTRA_ID, id)
@@ -358,6 +365,8 @@ class AlarmPlaybackService : Service() {
     val speech = prepared ?: return
     currentVoiceLevel = speech.level
     failedVoiceLevel = null
+    voiceLevel = speech.level
+    voiceEngine = if (speech.wav != null) "GEMINI" else "ANDROID"
     if (alarm.type == "WAKE") updateStageEffects(alarm, speech.level)
     val generation = ++voiceGeneration
     speaker = BriefingSpeaker(

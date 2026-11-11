@@ -8,6 +8,20 @@ object VoiceTest {
 
   fun isTestAlarm(alarmId: String): Boolean = alarmId.startsWith(ALARM_ID_PREFIX)
 
+  // AI 음성 시험 알람만 — 개발 알람 중 앞머리가 더 긴 것. [즉시 정지]가 "1분 뒤 울리기" 같은 개발 예약 알람을 지우지 않게 (앱 devAlarm.ts와 같은 값)
+  const val VOICE_ID_PREFIX = "de70a1a0-a1ce-"
+
+  fun isVoiceTestAlarm(alarmId: String): Boolean = alarmId.startsWith(VOICE_ID_PREFIX)
+
+  /** 4단계 음성 출처 — CACHE: 실제 알람이 받아 둔 Gemini 캐시(없으면 Android) · SAMPLE: 앱에 든 Gemini 샘플 · ANDROID: 늘 Android TTS(비교용) */
+  fun geminiMode(value: String?): String = when (value) {
+    "SAMPLE", "ANDROID" -> value
+    else -> "CACHE"
+  }
+
+  /** ringVoiceTest가 돌려주는 출처 표시 — 샘플은 실제 알람 id와 섞이지 않게 고정 값 */
+  const val SAMPLE_SOURCE = "SAMPLE"
+
   /** 시험에서 끌 수 있는 것 — 알람음(크기만 0, 재생 경로 · 포커스 · 진동 · 음성은 그대로) · AI 음성 */
   data class Options(val sound: Boolean = true, val voice: Boolean = true)
 

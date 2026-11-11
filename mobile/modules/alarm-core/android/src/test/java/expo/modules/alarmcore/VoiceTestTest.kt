@@ -34,6 +34,26 @@ class VoiceTestTest {
   }
 
   @Test
+  fun voiceStopOnlyTouchesVoiceTestAlarms() {
+    val voiceId = VoiceTest.VOICE_ID_PREFIX + "5678-9abc-def012345678"
+    assertTrue(VoiceTest.isVoiceTestAlarm(voiceId))
+    assertTrue(VoiceTest.isTestAlarm(voiceId)) // 음성 시험도 개발 알람이라 서버 맞추기 · 운영 통계에서 빠짐
+    assertFalse(VoiceTest.isVoiceTestAlarm(testId)) // "1분 뒤 울리기" 같은 개발 예약 알람은 [즉시 정지]가 안 지움
+    assertFalse(VoiceTest.isVoiceTestAlarm(realId))
+  }
+
+  @Test
+  fun geminiSampleIsSeparateFromUserCache() {
+    assertEquals("SAMPLE", VoiceTest.geminiMode("SAMPLE"))
+    assertEquals("ANDROID", VoiceTest.geminiMode("ANDROID"))
+    assertEquals("CACHE", VoiceTest.geminiMode(null))
+    assertEquals("CACHE", VoiceTest.geminiMode("이상한 값"))
+    // 샘플을 넣은 시험 폴더는 실제 사용자 캐시 후보가 아님
+    val sampleFolder = VoiceTest.GeminiCandidate(VoiceTest.VOICE_ID_PREFIX + "0000-000000000000", true, VoiceTest.SAMPLE_SOURCE, "야!!!")
+    assertNull(VoiceTest.pickGeminiSource(listOf(sampleFolder)))
+  }
+
+  @Test
   fun engineShownFromActualSpeech() {
     assertEquals("GEMINI", VoiceTest.engine(hasSpeech = true, hasWav = true))
     assertEquals("ANDROID", VoiceTest.engine(hasSpeech = true, hasWav = false))
