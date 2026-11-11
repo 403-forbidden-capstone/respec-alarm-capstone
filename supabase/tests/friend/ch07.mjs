@@ -207,7 +207,14 @@ export default async function ch07({ q, as, su, svc, check, expectErr }) {
     const s3 = of(await rows(A, g, D, at('08:15')), B);
     await ev(al, B, 'WAKE_CONFIRMED', at('08:20'), { src: 'BUTTON' });
     const s4 = of(await rows(A, g, D, at('08:25')), B);
-    const shape = await as(A).then(() => q(`select * from public.get_group_wake($1, $2::date)`, [g, D])).then(async (r) => { await su(); return r; });
+    // Public API permits only yesterday/today/tomorrow. Use a fresh current-day
+    // fixture for its response shape; keep the fixed-date private state timeline.
+    const [{ today: shapeDay }] = await q("select (now() at time zone 'Asia/Seoul')::date::text as today");
+    const shapeGroup = await mkGroup(A, [B], [B]);
+    await appt(A, shapeGroup, at('10:00', shapeDay));
+    await wakeAlarm(A, at('07:00', shapeDay));
+    await wakeAlarm(B, at('08:00', shapeDay));
+    const shape = await as(A).then(() => q(`select * from public.get_group_wake($1, $2::date)`, [shapeGroup, shapeDay])).then(async (r) => { await su(); return r; });
     const cols = Object.keys(shape[0]).sort().join();
     // 알람 전에 일어남(D61): 깬 시각 그대로
     const C = await join_(29, '일찍'); await q(`insert into public.group_members (group_id, user_id, invite_status, joined_at, wake_share_opt_in) values ($1, $2, 'JOINED', now(), true)`, [g, C]);
@@ -307,9 +314,12 @@ export default async function ch07({ q, as, su, svc, check, expectErr }) {
   await check('7-35 · 7-37: 응답에 수면 시간 · 메모 · 위치 · 강도 같은 칸이 없음 — 줄 하나의 칸은 일곱 개뿐', async () => {
     const A = await join_(43, '에이');
     const g = await mkGroup(A, [], [A]);
-    await appt(A, g, at('10:00')); await wakeAlarm(A, at('07:00'));
+    // Public API date range is relative to the viewer's timezone, not the
+    // historical D='2026-11-10' used by private wake-state scenario tests.
+    const [{ today }] = await q("select (now() at time zone 'Asia/Seoul')::date::text as today");
+    await appt(A, g, at('10:00', today)); await wakeAlarm(A, at('07:00', today));
     await as(A);
-    const r = await q(`select * from public.get_group_wake($1, $2::date)`, [g, D]);
+    const r = await q(`select * from public.get_group_wake($1, $2::date)`, [g, today]);
     await su();
     return r.length === 1 && Object.keys(r[0]).sort().join() === 'is_me,nickname,profile_image_url,user_id,wake_alarm_at,wake_confirmed_at,wake_status' ? true : r;
   });
