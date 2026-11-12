@@ -19,7 +19,8 @@ const DEV_VERSION = '0.1.0';
 
 function variantConfig(config) {
   if ((process.env.EXPO_PUBLIC_APP_VARIANT || '').trim() === 'release') return config;
-  return { ...config, name: `${config.name} 개발`, version: DEV_VERSION };
+  // 웹(Cloudflare 빌드에는 이 변수가 없음) 탭 이름 · manifest는 원래 이름 그대로 — 운영 사이트가 "개발"로 바뀌지 않게
+  return { ...config, name: `${config.name} 개발`, version: DEV_VERSION, web: { ...config.web, name: config.web?.name ?? config.name, shortName: config.web?.shortName ?? config.name } };
 }
 
 module.exports = ({ config }) => {
