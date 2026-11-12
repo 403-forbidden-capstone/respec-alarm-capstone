@@ -227,6 +227,7 @@ describe('일간 — 실제로 일어난 일', () => {
 describe('S01 제안 (DB 종류: 말소리 · 배경음 · 진동)', () => {
   const target = (patch: Partial<SuggestionTarget> = {}): SuggestionTarget => ({
     alarm_id: 'alarm-1',
+    participant_id: 'pt-1',
     alarm_type: 'WAKE',
     scheduled_at: '2026-10-18T22:20:00Z',
     appointment_participants: { appointments: { appointment_id: 'appt-1', title: '수업', appointment_at: '2026-10-19T00:00:00Z' } },
@@ -235,6 +236,7 @@ describe('S01 제안 (DB 종류: 말소리 · 배경음 · 진동)', () => {
   });
   const row = (patch: Partial<SuggestionRow> = {}): SuggestionRow => ({
     suggestion_id: 'sug-1',
+    evidence: null,
     suggestion_type: 'VOICE_TONE',
     current_value: 'CALM',
     suggested_value: 'DIRECT',

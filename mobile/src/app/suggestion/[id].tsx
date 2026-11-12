@@ -9,18 +9,19 @@ import { dayWord } from '@/features/records/calendar';
 import { CompareTimes } from '@/features/records/components/CompareTimes';
 import { CompareValues } from '@/features/records/components/CompareValues';
 import { useHoldRepeat } from '@/features/records/hooks/useHoldRepeat';
-import { EDIT_STEP, previewTimes, shiftText, stepMinutes, suggestionPhase } from '@/features/records/suggestion';
+import { EDIT_STEP, previewTimes, shiftText, stepMinutes, suggestionPhase, wakeLine } from '@/features/records/suggestion';
 import type { Suggestion } from '@/features/records/types';
 import { now } from '@/lib/clock';
-import { addMinutes, formatDateShort, formatTime } from '@/lib/format';
+import { formatDateShort, formatTime } from '@/lib/format';
 import { backOrHome } from '@/lib/nav';
 import { useAction } from '@/lib/useAction';
 import { useLoad } from '@/lib/useLoad';
 
-// S01 알람 조정 제안 — 최근 기록으로 고른 앞당김을 적용 · 직접 수정 · 무시, 적용한 뒤에는 다시 수정하거나 이전 값으로 되돌리기
-// 적용하면 그 일정의 예측 준비가 바뀌어 기상 · 준비 알람이 같이 움직임. 출발은 약속에 맞춰 그대로 (실제 저장 · 다시 예약은 #49)
-// 직접 수정(D53) — 1분씩 일찍 · 늦게, 기상 · 준비 · 출발 미리 보기, 적용한 뒤에도 바로 다시 수정
-// 실데이터의 제안은 DB 종류(말소리 · 배경음 · 진동)뿐이라 s.change가 있음 — 시각 비교 대신 값 비교를 보여 주고 직접 수정은 없음 (시각 조정은 D6이 정하면)
+// S01 알람 조정 제안 — 최근 기록으로 고른 준비 알람 앞당김을 적용 · 직접 수정 · 무시, 적용한 뒤에는 다시 수정하거나 이전 값으로 되돌리기
+// 적용하면 그 일정(이번 회차와 이후 회차)의 준비 알람이 당겨지고, 준비 전 활동(기상 → 준비)을 넘는 만큼만 기상도 (안건 D111 1 · 2번). 출발은 그대로
+//   실데이터는 서버 suggestion-apply가 알람을 옮기고 앱이 폰 예약을 맞춤 (records/real.ts)
+// 직접 수정(D53) — 1분씩 더 당기기, 준비 · 기상 · 출발 미리 보기, 적용한 뒤에도 바로 다시 수정
+// 알람 값 제안(말소리 · 배경음 · 진동, 실데이터)은 s.change가 있음 — 시각 비교 대신 값 비교를 보여 주고 직접 수정은 없음
 export default function SuggestionScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { data, error, reload } = useLoad(() => getSuggestion(id));
@@ -66,10 +67,13 @@ function Detail({ suggestion: s, reload }: { suggestion: Suggestion; reload: () 
     act(async () => {
       await applySuggestion(s.id, minutes);
       setEditing(null);
+      const after = previewTimes(s, minutes);
       toast(
         change
           ? `${change.axis} 설정을 바꿨어요 · ${change.suggested}`
-          : `${dayWord(s.currentWake, now())} 기상 알람이 ${formatTime(addMinutes(s.currentWake, -minutes))}에 울려요`,
+          : after.prepare
+            ? `${dayWord(after.prepare, now())} 준비 알람이 ${formatTime(after.prepare)}에 울려요`
+            : `${dayWord(after.wake, now())} 기상 알람이 ${formatTime(after.wake)}에 울려요`,
       );
       await reload();
     });
@@ -99,7 +103,7 @@ function Detail({ suggestion: s, reload }: { suggestion: Suggestion; reload: () 
       {/* 앞 화면이 없으면(주소로 바로 열기) 홈으로 */}
       <TopBar screenId="S01" onBack={backOrHome} />
       <Text variant="title" style={styles.title}>
-        다음 알람을 조정할까요?
+        {change || !s.currentPrepare ? '다음 알람을 조정할까요?' : '준비 알람을 조정할까요?'}
       </Text>
       <Text variant="lead" style={styles.lead}>
         최근 실행 기록을 바탕으로 더 잘 맞는 시간을 찾았어요.
@@ -141,10 +145,13 @@ function Detail({ suggestion: s, reload }: { suggestion: Suggestion; reload: () 
               </>
             ) : (
               <>
-                <CompareTimes before={s.currentWake} after={s.proposedWake} />
-                <Text variant="small" align="center">
-                  준비 알람도 {s.minutes}분 앞당겨져요.
-                </Text>
+                {/* 준비 알람이 주인공 — 기상은 준비 전 활동을 넘을 때만 움직임 (안건 D111) */}
+                <CompareTimes before={s.currentPrepare ?? s.currentWake} after={s.proposedPrepare ?? s.proposedWake} />
+                {s.currentPrepare ? (
+                  <Text variant="small" align="center">
+                    {wakeLine(s.currentWake, s.proposedWake)}
+                  </Text>
+                ) : null}
               </>
             )}
             {alarmLink ? <View style={[styles.link, styles.linkCenter]}>{alarmLink}</View> : null}
@@ -182,7 +189,7 @@ function Detail({ suggestion: s, reload }: { suggestion: Suggestion; reload: () 
                   {s.applied.prepare ? ` · 준비 ${formatTime(s.applied.prepare)}` : ''}
                 </Text>
                 <Text variant="small" style={styles.sub}>
-                  적용 전보다 {shiftText(s.applied.minutes)} 울려요.
+                  {s.applied.prepare ? '준비 알람이 ' : ''}적용 전보다 {shiftText(s.applied.minutes)} 울려요.
                 </Text>
               </>
             )}
@@ -210,7 +217,11 @@ function Detail({ suggestion: s, reload }: { suggestion: Suggestion; reload: () 
         </>
       ) : null}
 
-      <Sheet visible={editing != null} onClose={() => setEditing(null)} title={s.applied ? '기상 시각 다시 정하기' : '기상 시각 직접 정하기'}>
+      <Sheet
+        visible={editing != null}
+        onClose={() => setEditing(null)}
+        title={`${s.currentPrepare ? '준비 알람' : '기상 시각'} ${s.applied ? '다시 정하기' : '직접 정하기'}`}
+      >
         {editing != null ? (
           <EditWake
             suggestion={s}
@@ -235,7 +246,8 @@ type EditProps = {
   busy: boolean; // 적용이 도는 중 — 시트 버튼을 흐리게
 };
 
-// 직접 수정 시트 (D53) — 1분씩 늦게 · 일찍. 기상 시각이 움직이면 준비도 같이, 출발은 약속에 묶여 그대로
+// 직접 수정 시트 (D53) — 준비 알람을 1분씩 (준비 알람 당김은 더 당기는 쪽만, bounds.later 0). 기상은 준비 전 활동을 넘는 만큼만, 출발은 그대로
+//   준비 알람이 없는 일정은 기상을 움직임 (예전 규칙)
 // 지금(적용 전) 시각 그대로(0분)이거나 이미 적용한 값 그대로면 적용할 수 없음
 function EditWake({ suggestion: s, minutes, onStep, onApply, onCancel, busy }: EditProps) {
   const applied = s.applied;
@@ -248,11 +260,13 @@ function EditWake({ suggestion: s, minutes, onStep, onApply, onCancel, busy }: E
     if (atEarliest || atLatest) stop();
   }, [atEarliest, atLatest, stop]);
   const base = applied ? '적용 전' : '지금';
+  // 움직이는 알람 — 준비 알람이 있으면 준비, 없으면 기상
+  const main = s.currentPrepare ? { label: '준비', before: s.currentPrepare, now: applied?.prepare ?? s.currentPrepare, at: preview.prepare ?? preview.wake } : { label: '기상', before: s.currentWake, now: applied?.wake ?? s.currentWake, at: preview.wake };
 
   return (
     <>
       <Text variant="small">
-        {s.appointment.title} · {formatDateShort(s.appointment.at)} · {applied ? `적용 전 ${formatTime(s.currentWake)} · 지금 ${formatTime(applied.wake)}` : `지금 ${formatTime(s.currentWake)}`}
+        {s.appointment.title} · {formatDateShort(s.appointment.at)} · {applied ? `적용 전 ${formatTime(main.before)} · 지금 ${formatTime(main.now)}` : `지금 ${formatTime(main.before)}`}
       </Text>
       <View style={styles.stepper}>
         <TopBarButton
@@ -264,10 +278,10 @@ function EditWake({ suggestion: s, minutes, onStep, onApply, onCancel, busy }: E
         />
         <View style={styles.center}>
           <Text variant="caption" align="center">
-            기상
+            {main.label}
           </Text>
           <Text variant="compare" align="center" accessibilityLiveRegion="polite">
-            {formatTime(preview.wake)}
+            {formatTime(main.at)}
           </Text>
           <Text variant="small" align="center">
             {minutes === 0 ? `${base}과 같아요` : `${base}보다 ${shiftText(minutes)}`}
@@ -282,8 +296,10 @@ function EditWake({ suggestion: s, minutes, onStep, onApply, onCancel, busy }: E
         />
       </View>
       <View style={styles.preview}>
-        {preview.prepare ? <KeyValueRow first label="준비" value={formatTime(preview.prepare)} /> : null}
-        <KeyValueRow first={!preview.prepare} label="출발" value={formatTime(preview.depart)} sub="약속에 맞춰 그대로예요" />
+        {s.currentPrepare ? (
+          <KeyValueRow first label="기상" value={formatTime(preview.wake)} sub={wakeLine(s.currentWake, preview.wake).replace('.', '')} />
+        ) : null}
+        <KeyValueRow first={!s.currentPrepare} label="출발" value={formatTime(preview.depart)} sub="약속에 맞춰 그대로예요" />
       </View>
       <View style={styles.stack}>
         <Button

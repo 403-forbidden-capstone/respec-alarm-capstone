@@ -3,7 +3,7 @@ import { describe, expect, it } from '@jest/globals';
 import { formatTime } from '@/lib/format';
 import { kst } from '@/mocks/data';
 
-import { EDIT_MAX, EDIT_STEP, editBounds, previewTimes, shiftLog, shiftText, stepMinutes, suggestionPhase } from '../suggestion';
+import { EDIT_MAX, EDIT_STEP, editBounds, prepareBounds, previewTimes, shiftLog, shiftText, stepMinutes, suggestionPhase, wakeLine } from '../suggestion';
 
 describe('S01 직접 수정 (D53)', () => {
   const both = { earlier: 30, later: 30 };
@@ -32,16 +32,31 @@ describe('S01 직접 수정 (D53)', () => {
     expect(editBounds(100, 0)).toEqual({ earlier: 30, later: 30 }); // 준비 알람이 없으면 30분 한도만
   });
 
-  it('미리 보기: 기상 · 준비는 같이 움직이고 출발은 그대로', () => {
+  it('미리 보기 (안건 D111): 준비 알람을 당기고, 준비 전 활동(10분)을 넘는 만큼만 기상도. 늦추면 기상 그대로, 출발은 그대로', () => {
     const base = { currentWake: kst(23, 440), currentPrepare: kst(23, 450), depart: kst(23, 480) };
     const show = (minutes: number) => {
       const p = previewTimes(base, minutes);
       return [formatTime(p.wake), p.prepare && formatTime(p.prepare), formatTime(p.depart)];
     };
-    expect(show(10)).toEqual(['오전 7:10', '오전 7:20', '오전 8:00']);
-    expect(show(-5)).toEqual(['오전 7:25', '오전 7:35', '오전 8:00']);
+    expect(show(10)).toEqual(['오전 7:20', '오전 7:20', '오전 8:00']);
+    expect(show(15)).toEqual(['오전 7:15', '오전 7:15', '오전 8:00']);
+    expect(show(7)).toEqual(['오전 7:20', '오전 7:23', '오전 8:00']);
+    expect(show(-5)).toEqual(['오전 7:20', '오전 7:35', '오전 8:00']);
     expect(show(0)).toEqual(['오전 7:20', '오전 7:30', '오전 8:00']);
-    expect(previewTimes({ ...base, currentPrepare: null }, 3).prepare).toBeNull(); // 준비 알람이 없는 일정
+    // 준비 알람이 없는 일정은 기상을 움직임 (예전 규칙)
+    const none = previewTimes({ ...base, currentPrepare: null }, 3);
+    expect([formatTime(none.wake), none.prepare]).toEqual(['오전 7:17', null]);
+  });
+
+  it('준비 알람 당김 범위: 더 당기는 쪽 30분까지, 당김 합 120분까지 · 늦추는 쪽 없음', () => {
+    expect(prepareBounds(0)).toEqual({ earlier: 30, later: 0 });
+    expect(prepareBounds(100)).toEqual({ earlier: 20, later: 0 });
+    expect(prepareBounds(120)).toEqual({ earlier: 0, later: 0 });
+  });
+
+  it('기상 한 줄: 준비 전 활동 안이면 그대로, 넘으면 넘친 분', () => {
+    expect(wakeLine(kst(23, 440), kst(23, 440))).toBe('기상 알람은 그대로예요.');
+    expect(wakeLine(kst(23, 440), kst(23, 435))).toBe('기상 알람도 5분 앞당겨져요.');
   });
 
   it('글자: 일찍 · 늦게 / 앞당김 · 늦춤', () => {

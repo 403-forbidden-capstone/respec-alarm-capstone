@@ -625,3 +625,35 @@ test('missing prediction falls back to existing personal P80 while keeping manua
   assert.equal(manual.prepare.minutes, 75);
   assert.equal(manual.prepare.mlModel, undefined);
 });
+
+// ---- 준비 알람 당김 (#484 · 안건 D111, B안: 준비 전 활동은 저장하지 않고 되찾음) ----
+// 저장된 일정: 출발 9:25(약속 10:00 − 여유 5 − 이동 30), 준비 시간 60 → 기상 8:25, 준비 전 활동 20 → 준비 알람 8:45
+const saved = (adv: number, alarms: AlarmRow[], over: Partial<PlanInputs> = {}) =>
+  computePlan(base({ draft: {}, appointment, participant: { ...participant, prepare_advance_minutes: adv }, existingAlarms: alarms, ...over }), api(30));
+const at = (plan: ReturnType<typeof computePlan>) => text(plan).filter((x) => !x.startsWith('ARRIVE'));
+
+test('준비 전 활동 되찾기: 당김 10(간격 10)이면 20, 당김 25(기상도 5분 당김 · 간격 0)이면 출발 · 준비 시간으로 20, 당김 없으면 간격 그대로', () => {
+  assert.equal(inferBeforePrepare([row('WAKE', 505), row('PREPARE', 515), row('DEPARTURE', 565)], 10, 60), 20);
+  assert.equal(inferBeforePrepare([row('WAKE', 500), row('PREPARE', 500), row('DEPARTURE', 565)], 25, 60), 20);
+  assert.equal(inferBeforePrepare([row('WAKE', 505), row('PREPARE', 525), row('DEPARTURE', 565)]), 20);
+  assert.equal(inferBeforePrepare([row('WAKE', 505), row('PREPARE', 525, { time_source: 'MANUAL' })], 10, 60), undefined);
+});
+
+test('당김을 받은 일정을 다시 계산해도 같은 시각 — 같은 당김이 두 번 들어가지 않음 (10분 · 25분)', () => {
+  const ten = saved(10, [row('WAKE', 505), row('PREPARE', 515), row('DEPARTURE', 565)]);
+  assert.deepEqual(at(ten), ['WAKE 08:25', 'PREPARE 08:35', 'DEPARTURE 09:25']);
+  assert.equal(ten.beforePrepareMinutes, 20); // 계획의 준비 전 활동 · 준비 시간은 원래 값
+  assert.equal(ten.prepare.minutes, 60);
+  assert.deepEqual(at(saved(25, [row('WAKE', 500), row('PREPARE', 500), row('DEPARTURE', 565)])), ['WAKE 08:20', 'PREPARE 08:20', 'DEPARTURE 09:25']);
+});
+
+test('당김을 처음 적용할 때(저장된 알람은 당김 0) — existingAdvanceMinutes로 옛 값을 알려 주면 준비 알람만 10분 당겨짐', () => {
+  const applied = saved(10, [row('WAKE', 505), row('PREPARE', 525), row('DEPARTURE', 565)], { existingAdvanceMinutes: 0 });
+  assert.deepEqual(at(applied), ['WAKE 08:25', 'PREPARE 08:35', 'DEPARTURE 09:25']);
+});
+
+test('준비 알람을 직접 고른 일정은 당기지 않음 — 직접 고른 시각 그대로, 기상도 그대로', () => {
+  const plan = saved(10, [row('WAKE', 505), row('PREPARE', 520, { time_source: 'MANUAL' }), row('DEPARTURE', 565)]);
+  assert.deepEqual(at(plan), ['WAKE 08:25', 'PREPARE 08:40*', 'DEPARTURE 09:25']); // * = 직접 고른 시각
+});
+

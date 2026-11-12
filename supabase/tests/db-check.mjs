@@ -1355,10 +1355,11 @@ await check('서버 전용 함수(can_send_push · find_missed_wake_alarms · �
 });
 
 // 배치 (Q5 A) — pg_cron · pg_net은 PGlite에 없어 cron.schedule · net.http_post 흉내로 확인
-await check('배치 예약: wake-check · alarm-roll(반복 다음 회차)을 5분마다 + voice-auto-commit(하루 기록 자동 정리, 10분마다) + friend-requests-expire(친구 3장, 30일 지난 받은 요청 삭제 — 내용은 friend/ch03.mjs) + friend-records-purge(친구 13장, 매일 새벽 7일 지난 서버 기록 삭제 — 내용은 friend/ch13.mjs) (PGlite에는 pg_cron · pg_net이 없어 확장은 건너뛰고 예약만 흉내에 들어감)', async () => {
+await check('배치 예약: wake-check · alarm-roll(반복 다음 회차)을 5분마다 + voice-auto-commit(하루 기록 자동 정리, 10분마다) + friend-requests-expire(친구 3장, 30일 지난 받은 요청 삭제 — 내용은 friend/ch03.mjs) + friend-records-purge(친구 13장, 매일 새벽 7일 지난 서버 기록 삭제 — 내용은 friend/ch13.mjs) + suggestion-generate(알람 조정 제안, 매일 18:00 KST) (PGlite에는 pg_cron · pg_net이 없어 확장은 건너뛰고 예약만 흉내에 들어감)', async () => {
   const jobs = await q(`select jobname, schedule, command from cron.job order by jobname`);
   const ext = await q(`select extname from pg_extension where extname in ('pg_cron', 'pg_net')`);
-  return jobs.length === 5 && ext.length === 0 && jobs.some((x) => x.jobname === 'friend-requests-expire')
+  return jobs.length === 6 && ext.length === 0 && jobs.some((x) => x.jobname === 'friend-requests-expire')
+    && jobs.some((x) => x.jobname === 'suggestion-generate' && x.schedule === '0 9 * * *' && x.command === `select private.invoke_edge_function('suggestion-generate')`)
     && jobs.some((x) => x.jobname === 'voice-auto-commit' && x.schedule === '*/10 * * * *' && x.command === `select private.invoke_edge_function('voice-commit')`)
     && jobs.some((x) => x.jobname === 'friend-records-purge' && x.schedule === '0 18 * * *' && x.command === 'select private.purge_old_friend_records()')
     && ['wake-check', 'alarm-roll'].every((name) => {
@@ -2314,6 +2315,72 @@ await check('roll_attempts: RLS만 켜고 정책 없음 · 앱(authenticated · 
 
 // ---- ⑥ 지난 회차는 그대로 (설계 메모 M4) -----------------------------------
 
+await check('제안 재료(prepare_suggestion_inputs): 36시간 안 반복 일정의 준비 알람마다 지난 회차 잔차(실제 − 계획 준비) — 예정 출발 ±3분 · 준비 시작 없는 날은 빼고, 대기 중 제안 · 무시 뒤(실측 3번 전) · 7일 안 제안은 후보에서 빠짐, 서버 역할만', async () => {
+  // A의 매일 9시 수업 — 계획: 기상 07:00 · 준비 07:20 · 출발 08:00 (계획 준비 40분). 기준 시각 12-01 18:00
+  await svc();
+  const nowAt = '2026-12-01T18:00:00+09:00';
+  const first = await insAppt(A, { at: '2026-11-24T09:00:00+09:00', title: '제안 시험 수업', rule: 'FREQ=DAILY' });
+  const series = first.series_id;
+  const occ = { '11-24': first };
+  for (const d of ['11-25', '11-26', '11-27', '11-28', '12-02']) occ[d] = await insAppt(A, { at: `2026-${d}T09:00:00+09:00`, title: '제안 시험 수업', series, on: `2026-${d}` });
+  const part = {};
+  const prep = {};
+  // 출발: 11-24는 08:01(예정 출발 ±3분 → 뺌), 11-25 · 26 · 27은 08:10 · 08:14 · 08:12(+10 · +14 · +12), 11-28은 준비 시작 없음(뺌), 12-02는 앞으로
+  const departed = { '11-24': '08:01', '11-25': '08:10', '11-26': '08:14', '11-27': '08:12', '11-28': '08:20', '12-02': null };
+  for (const [d, dep] of Object.entries(departed)) {
+    const started = dep && d !== '11-28' ? `2026-${d}T07:20:00+09:00` : null;
+    [{ participant_id: part[d] }] = await q(`insert into public.appointment_participants (appointment_id, user_id, departed_at, prepare_started_at, prepare_started_source)
+      values ($1, $2, $3, $4, $5) returning participant_id`, [occ[d].appointment_id, A, dep ? `2026-${d}T${dep}:00+09:00` : null, started, started ? 'PREPARE_ALARM' : null]);
+    for (const [type, hhmm] of [['WAKE', '07:00'], ['PREPARE', '07:20'], ['DEPARTURE', '08:00']]) {
+      const [{ alarm_id }] = await q(`insert into public.alarms (participant_id, user_id, alarm_type, scheduled_at) values ($1, $2, $3, $4) returning alarm_id`, [part[d], A, type, `2026-${d}T${hhmm}:00+09:00`]);
+      if (type === 'PREPARE') prep[d] = alarm_id;
+    }
+  }
+  const inputs = () => q(`select participant_id, target_alarm_id, current_advance, before_prepare_minutes, cap_minutes, residuals from public.prepare_suggestion_inputs($1) where user_id = $2`, [nowAt, A]);
+  const base = await inputs();
+  // 대기 중 제안이 있으면 후보에서 빠짐
+  const [{ suggestion_id: sid }] = await q(`insert into public.alarm_suggestions (user_id, target_alarm_id, suggestion_type, current_value, suggested_value, created_at)
+    values ($1, $2, 'PREPARE_ADVANCE', '0', '10', '2026-11-20T18:00:00+09:00') returning suggestion_id`, [A, prep['12-02']]);
+  const pending = await inputs();
+  // 같은 준비 알람에 대기 중 제안 둘은 안 됨 (배치가 겹쳐도 한 줄)
+  const dup = await expectErr(() => q(`insert into public.alarm_suggestions (user_id, target_alarm_id, suggestion_type, current_value, suggested_value) values ($1, $2, 'PREPARE_ADVANCE', '0', '10')`, [A, prep['12-02']]), /alarm_suggestions_one_pending_prepare_advance/);
+  // 11-26 정오에 무시 → 그 뒤 회차(11-27 하나)만 근거라 3개가 안 돼 빠짐 (D24 C)
+  await q(`update public.alarm_suggestions set status = 'IGNORED', responded_at = '2026-11-26T12:00:00+09:00' where suggestion_id = $1`, [sid]);
+  const ignored = await inputs();
+  // 무시가 오래전이어도 7일 안에 만든 제안이 있으면 빠짐 (D62 주 단위)
+  await q(`update public.alarm_suggestions set responded_at = '2026-11-01T12:00:00+09:00', created_at = '2026-11-29T18:00:00+09:00' where suggestion_id = $1`, [sid]);
+  const recent = await inputs();
+  await q(`update public.alarm_suggestions set created_at = '2026-11-01T18:00:00+09:00' where suggestion_id = $1`, [sid]);
+  const again = await inputs();
+  // 준비 알람을 직접 고른 일정은 후보에서 빠짐 (계산이 그 시각을 안 바꿈)
+  await q(`update public.alarms set time_source = 'MANUAL' where alarm_id = $1`, [prep['12-02']]);
+  const manual = await inputs();
+  await q(`update public.alarms set time_source = 'AUTO' where alarm_id = $1`, [prep['12-02']]);
+  await as(A);
+  const app = await expectErr(() => q(`select * from public.prepare_suggestion_inputs($1)`, [nowAt]), /permission denied/);
+  await su();
+  const want = [{ participant_id: part['12-02'], target_alarm_id: prep['12-02'], current_advance: 0, before_prepare_minutes: 20, cap_minutes: 10, residuals: [10, 14, 12] }];
+  return JSON.stringify(base) === JSON.stringify(want) && pending.length === 0 && dup === true && ignored.length === 0 && recent.length === 0
+    && JSON.stringify(again) === JSON.stringify(want) && manual.length === 0 && app === true
+    ? true : { base, pending, dup, ignored, recent, again, manual, app };
+});
+
+await check('새 회차가 당김 분을 이어받음: 반복 묶음의 다음 회차 참여 조건을 넣을 때 값이 0이면 같은 사람의 바로 앞 회차 값, 정해서 넣은 값은 그대로, 묶음 1개짜리 일정은 0', async () => {
+  await svc();
+  const first = await insAppt(A, { at: '2026-12-08T09:00:00+09:00', title: '당김 이어받기 시험', rule: 'FREQ=DAILY' });
+  const series = first.series_id;
+  const second = await insAppt(A, { at: '2026-12-09T09:00:00+09:00', title: '당김 이어받기 시험', series, on: '2026-12-09' });
+  const third = await insAppt(A, { at: '2026-12-10T09:00:00+09:00', title: '당김 이어받기 시험', series, on: '2026-12-10' });
+  const lone = await insAppt(A, { at: '2026-12-08T15:00:00+09:00', title: '한 번짜리' });
+  const ins = async (appointmentId, adv = null) => (await q(
+    `insert into public.appointment_participants (appointment_id, user_id${adv == null ? '' : ', prepare_advance_minutes'}) values ($1, $2${adv == null ? '' : ', $3'}) returning prepare_advance_minutes as adv`,
+    adv == null ? [appointmentId, A] : [appointmentId, A, adv]))[0].adv;
+  const a1 = await ins(first.appointment_id, 10);  // 첫 회차 — 제안을 받아들여 10분
+  const a2 = await ins(second.appointment_id);     // 다음 회차 — 0으로 넣어도 10을 이어받음
+  const a3 = await ins(third.appointment_id, 5);   // 값을 정해서 넣으면 그대로
+  const a4 = await ins(lone.appointment_id);       // 묶음 1개짜리 — 앞 회차가 없어 0
+  return a1 === 10 && a2 === 10 && a3 === 5 && a4 === 0 ? true : { a1, a2, a3, a4 };
+});
 await check('지난 회차가 그대로: 다음 회차(화 11-10)를 만든 뒤에도 MISSED 후보 · 그룹 기상 상태 · R02 계획 쿼리가 지난 회차(화 11-03)의 알람 행을 같은 id · 같은 시각으로 읽고, 새 회차는 새 날짜에만 보임', async () => {
   // 매주 화 10시 수업 — 지난 회차(11-03): 기상 07:30 · 준비 08:30 · 출발 09:10. 기상은 울리고 끄기만 함 (기상 확인 없음)
   await svc();

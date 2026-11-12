@@ -1,6 +1,8 @@
 // ALG-01 알람 역산 — 앱 목업 계산(mobile/src/mocks/calc.ts alarmChain)을 그대로 옮김 (D56 열림 = 목업 규칙 유지)
 //   출발 = 약속 − 여유 − 이동, 기상 = 출발 − 준비(기상~출발), 준비 알람 = 기상 + 준비 전 활동, 도착 목표 = 약속 − 여유
 //   그날 첫 일정이 아니면(기상 알람 없음) 준비 알람만: 출발 − 준비
+//   준비 알람 당김(prepareAdvanceMinutes, 안건 D111 1 · 2번): 준비 알람을 그만큼 앞당김 — 준비 전 활동에서 먼저 가져오고, 모자란 만큼만 기상도 앞당김
+//     준비 전 활동을 다 써도 준비 알람은 남김(기상과 같은 시각) — 준비 시작 기록(#490)과 다음 제안의 대상이 그 알람이라서
 //   kinds가 있으면 H05에서 고른 종류만 — 도착 목표는 울리는 알람이 하나라도 있을 때만, 하나도 없으면 빈 목록(알람 없는 일정)
 //   manualTimes가 있으면 직접 고른 시각이 자동 계산보다 먼저. 직접 고른 알람은 auto에 자동 계산값을 남김
 //     준비 알람의 자동값은 (직접 고른 시각을 포함한) 기상 시각 뒤 — 기상을 옮기면 준비도 같은 간격으로 따라옴
@@ -19,12 +21,14 @@ export function alarmChain(input: ChainInput): ChainAlarm[] {
     return picked != null && !sameTime(picked, auto) ? { kind, at: picked, auto } : { kind, at: auto };
   };
   const list: ChainAlarm[] = [];
+  const advance = Math.max(0, input.prepareAdvanceMinutes ?? 0);
   if (input.withWake) {
-    const wake = alarm('WAKE', addMinutes(depart, -input.prepareMinutes));
+    const fromBefore = Math.min(advance, input.beforePrepareMinutes);
+    const wake = alarm('WAKE', addMinutes(depart, -(input.prepareMinutes + advance - fromBefore)));
     list.push(wake);
-    if (input.beforePrepareMinutes > 0) list.push(alarm('PREPARE', addMinutes(wake.at, input.beforePrepareMinutes)));
+    if (input.beforePrepareMinutes > 0) list.push(alarm('PREPARE', addMinutes(wake.at, input.beforePrepareMinutes - fromBefore)));
   } else {
-    list.push(alarm('PREPARE', addMinutes(depart, -input.prepareMinutes)));
+    list.push(alarm('PREPARE', addMinutes(depart, -(input.prepareMinutes + advance))));
   }
   list.push(alarm('DEPARTURE', depart));
   list.push(alarm('ARRIVE', addMinutes(input.at, -input.bufferMinutes)));
