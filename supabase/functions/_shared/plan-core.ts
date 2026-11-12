@@ -84,6 +84,7 @@ export type ParticipantRow = {
   travel_source: 'API' | 'CACHED' | 'MANUAL';
   prepare_minutes: number;
   buffer_minutes: number;
+  prepare_advance_minutes?: number | null; // 받아들인 준비 알람 당김 분 (#484 · 안건 D111) — 계산이 준비 알람을 그만큼 앞당김. 없으면 0
 };
 
 export type AlarmRow = {
@@ -140,6 +141,8 @@ export type PlanInputs = {
   mlPrediction?: MlPrediction; // 검증된 프로필일 때만 Edge가 조회. 없으면 기존 P80 계산 유지
   // 반복 다음 회차용 — 자동 준비시간이 이 값에서 `within`분 넘게 벗어나면 그 범위로 (D62 처음 2주 몫). 직접 고른 준비시간(draft.prepareMinutes)은 건드리지 않음
   prepareBound?: { around: number; within: number };
+  // 저장된 알람(existingAlarms)을 계산할 때의 당김 분 — 준비 전 활동을 되찾을 때 씀. 당김을 바꾸며 다시 계산할 때(제안 적용, 다음 PR)만 옛 값을 넘김. 없으면 participant의 지금 값
+  existingAdvanceMinutes?: number;
 };
 
 // 기상~출발 첫 값 — 온보딩 값이 있으면 그것, 없으면(null · 프로필 없음 · 범위 밖) 목업의 50
@@ -267,12 +270,25 @@ export function resolveOverrides(draft: PlanDraft['levels'], existing: readonly 
 // 준비 알람이 자동으로 잡힌 약속이면 준비 − 기상 간격을 "준비 전 활동"으로 읽음 (서버가 다시 계산해도 30분 같은 값이 안 바뀌게)
 //   기상을 직접 옮겼어도 자동 준비 알람은 (옮긴) 기상 + 준비 전 활동이라 간격은 그대로 준비 전 활동 (calc/chain.ts) — 기상이 MANUAL인 건 따지지 않음
 //   준비를 직접 옮겼으면 간격이 준비 전 활동이 아니므로 읽지 않음
-export function inferBeforePrepare(existing: readonly AlarmRow[]): number | undefined {
+// 저장된 알람에서 준비 전 활동을 되찾음 (따로 저장하지 않음). advance · prepareMinutes = 그 알람을 계산할 때의 당김 분 · 준비 시간(참여 조건 칸)
+//   당김이 없으면 간격(준비 알람 − 기상) 그대로
+//   당김이 있으면(안건 D111 · B안 — 준비 전 활동을 저장하지 않고 되찾음) 간격 = 준비 전 활동 − min(당김, 준비 전 활동)
+//     간격 > 0: 당김이 준비 전 활동보다 작았음 → 간격 + 당김
+//     간격 = 0: 당김이 준비 전 활동을 다 쓰고 기상도 (당김 − 준비 전 활동)만큼 당겨짐 → 기상이 자동값(출발 − 준비 시간)에서 당겨진 분을 빼서 되찾음
+//       출발 알람이 없거나 기상 · 출발을 직접 골랐으면 당겨진 분을 알 수 없어 간격 + 당김 (몇 분 틀어질 수 있음 — PR 한계)
+export function inferBeforePrepare(existing: readonly AlarmRow[], advance = 0, prepareMinutes?: number | null): number | undefined {
   const wake = existing.find((a) => a.alarm_type === 'WAKE');
   const prepare = existing.find((a) => a.alarm_type === 'PREPARE');
   if (!wake || !prepare || prepare.time_source === 'MANUAL') return undefined;
-  const minutes = Math.round((Date.parse(prepare.scheduled_at) - Date.parse(wake.scheduled_at)) / 60_000);
-  return minutes > 0 && minutes <= 240 ? minutes : undefined;
+  const gap = Math.round((Date.parse(prepare.scheduled_at) - Date.parse(wake.scheduled_at)) / 60_000);
+  if (!(advance > 0)) return gap > 0 && gap <= 240 ? gap : undefined;
+  let wakeShift = 0;
+  const depart = existing.find((a) => a.alarm_type === 'DEPARTURE');
+  if (gap === 0 && depart && depart.time_source !== 'MANUAL' && wake.time_source !== 'MANUAL' && prepareMinutes != null) {
+    wakeShift = Math.max(0, Math.round((Date.parse(depart.scheduled_at) - Number(prepareMinutes) * 60_000 - Date.parse(wake.scheduled_at)) / 60_000));
+  }
+  const base = gap + advance - wakeShift;
+  return base > 0 && base <= 240 ? base : undefined;
 }
 
 // ---- 계획 ----
@@ -310,8 +326,12 @@ export function computePlan(i: PlanInputs, travel: ResolvedTravel, mode: PlanMod
   const chosen = travel.chosen;
   if (!chosen) throw new Error('이동시간 없이 계획을 만들 수 없어요');
 
+  // 받아들인 준비 알람 당김 (#484 · 안건 D111) — 계획의 준비 시간 · 준비 전 활동은 원래 값 그대로 두고 알람 사슬만 당김(calc/chain.ts)
+  const advance = Math.max(0, Number(i.participant?.prepare_advance_minutes ?? 0) || 0);
+  const existingAdvance = Math.max(0, Number(i.existingAdvanceMinutes ?? advance) || 0);
   const derive = (withWake: boolean) => {
-    const beforePrepareMinutes = i.draft.beforePrepareMinutes ?? (withWake ? inferBeforePrepare(i.existingAlarms) ?? DEFAULT_BEFORE_PREPARE_MINUTES : 0);
+    const beforePrepareMinutes =
+      i.draft.beforePrepareMinutes ?? (withWake ? inferBeforePrepare(i.existingAlarms, existingAdvance, i.participant?.prepare_minutes) ?? DEFAULT_BEFORE_PREPARE_MINUTES : 0);
 
     // 기록(stats.p80)은 이미 "기상 ~ 출발"이라 그대로 씀 — 예전에는 준비 전 활동 20분을 또 더해서 기록이 쌓일수록 알람이 일찍 당겨졌음 (학습 루프 기초 2절 1)
     // 개인 보정은 그날 첫 일정(기상 알람 있음)에만 — 두 번째 일정(기상 없음, 공통 15분)에 기상~출발 기록을 붙이면 준비가 부풀어서 15분 그대로 (2절 2, 기록 수와 상관없음)
@@ -377,6 +397,8 @@ export function computePlan(i: PlanInputs, travel: ResolvedTravel, mode: PlanMod
     beforePrepareMinutes,
     withWake,
     manualTimes,
+    // 준비 알람을 직접 고른 일정은 당기지 않음 (그 시각이 먼저, D42 C)
+    prepareAdvanceMinutes: manualTimes.PREPARE ? 0 : advance,
   };
   const fullChain = alarmChain(input);
   const chain = alarmChain({ ...input, kinds });

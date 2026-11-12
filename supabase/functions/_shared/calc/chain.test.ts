@@ -73,3 +73,20 @@ test('출발 시각은 출발 알람을 안 만들어도 구할 수 있음 (단�
   assert.equal(hm(departureAt({ ...A1, kinds: ['WAKE'] })), '09:00');
   assert.equal(hm(departureAt({ ...A1, kinds: [], manualTimes: { DEPARTURE: kst(22, 550) } })), '09:10');
 });
+
+// 준비 알람 당김 (안건 D111 1 · 2번) — a1: 기상 8:00 · 준비 8:30(준비 전 활동 30분) · 출발 9:00
+test('준비 알람 당김: 준비 전 활동 안이면 준비 알람만 앞당기고 기상 · 출발은 그대로', () => {
+  assert.deepEqual(text(alarmChain({ ...A1, prepareAdvanceMinutes: 10 })), ['WAKE 08:00', 'PREPARE 08:20', 'DEPARTURE 09:00', 'ARRIVE 09:50']);
+});
+
+test('준비 알람 당김: 준비 전 활동을 다 쓰면 준비 알람이 기상과 같은 시각으로 남고, 넘는 만큼만 기상도 앞당김', () => {
+  assert.deepEqual(text(alarmChain({ ...A1, prepareAdvanceMinutes: 30 })), ['WAKE 08:00', 'PREPARE 08:00', 'DEPARTURE 09:00', 'ARRIVE 09:50']);
+  assert.deepEqual(text(alarmChain({ ...A1, prepareAdvanceMinutes: 40 })), ['WAKE 07:50', 'PREPARE 07:50', 'DEPARTURE 09:00', 'ARRIVE 09:50']);
+});
+
+test('준비 알람 당김: 기상 알람이 없는 일정은 준비 알람만 앞당김, 0이나 없으면 예전과 같음', () => {
+  assert.deepEqual(text(alarmChain({ ...A2, prepareAdvanceMinutes: 10 })), ['PREPARE 17:00', 'DEPARTURE 17:35', 'ARRIVE 17:55']);
+  assert.deepEqual(text(alarmChain({ ...A1, prepareAdvanceMinutes: 0 })), text(alarmChain(A1)));
+  assert.equal(departureAt({ ...A1, prepareAdvanceMinutes: 40 }).getTime(), departureAt(A1).getTime());
+});
+
