@@ -946,6 +946,11 @@ isOneToOne: false
 "prepare_account_delete":
 { Args: { "p_user_id": string }; Returns: Json
                            },
+"prepare_suggestion_inputs":
+{ Args: { "p_now"?: string }; Returns: {
+              "before_prepare_minutes": number,"cap_minutes": number,"current_advance": number,"participant_id": string,"residuals": (number)[],"target_alarm_id": string,"user_id": string
+            }[]
+                           },
 "preview_group_by_code":
 { Args: { "p_code": string }; Returns: Json
                            },
