@@ -1,7 +1,8 @@
 // 알람 AI 음성 브리핑 — 순수 함수만 (서버 alarm-briefing · 앱 lib/alarmSync/briefing이 같이 씀, 시험: briefing.test.ts)
 //   · 일정 중요도(LOW 약 · NORMAL 중간 · HIGH 중요)는 목소리 · 말투 기본값만 정함. 사용자 수동 설정(profiles.alarm_voice_prefs)이 이김
-//   · 음성 단계: 기본 1, 스누즈 1번 2, 2번 이상 3, 남은 여유 5분 이하면 최소 3(Android), 0분 이하면 4(Gemini 캐시)
-//   · 엔진: 1~3단계는 폰의 Android TTS, 4단계(긴급)만 미리 만든 Gemini 음성 — 없으면 Android TTS로 같은 문장 전체 (한 울림에 한 엔진)
+//   · 음성 단계: 기본 1, 스누즈 1번 2, 2번 이상 3, 남은 여유 5분 이하면 최소 3, 0분 이하면 4
+//   · 엔진: 1 · 2단계는 폰의 Android TTS, 3단계(엄마 Gacrux) · 4단계(긴급 Kore)는 미리 만든 Gemini 음성
+//     — 개인화 캐시가 없으면 앱에 든 단계별 예비 WAV(기상만), 그것도 못 틀면 Android TTS로 같은 단계 문장 전체 (한 울림에 한 엔진)
 //   · 기상(WAKE) = 전날 대화 다짐 + 오늘 일정, 출발(DEPARTURE) = 그 일정 시각 + 준비물 + 출발 촉구. 기록에 없는 말은 안 만듦
 // 알람 볼륨 · 진동 · 배경음은 여기서 안 정함 — 기존 알람 축(calc/intensity.ts D69, H03 수동 선택)이 그대로 정함
 import { formatKoSpokenTime } from './tz.ts';
@@ -11,11 +12,46 @@ export type UrgencyLevel = 1 | 2 | 3 | 4;
 export type ToneKey = 'GENTLE' | 'NORMAL' | 'FIRM';
 export type BriefKind = 'WAKE' | 'DEPARTURE';
 
-// Gemini TTS — 긴급(4단계)에만 (aistudio.google.com/docs/speech-generation 11/10 확인: 한국어 · 24kHz WAV · speech_metadata.style)
+// Gemini TTS — 3 · 4단계 (aistudio.google.com/docs/speech-generation 11/12 확인: 한국어 · 24kHz WAV · speech_metadata.style, 목소리 Gacrux · Kore 있음)
+//   한국어 대사는 text, 감정 · 속도 지시(영어)는 speech_metadata.style로 따로 보냄. 사용자 설정과 별개인 단계별 고정 목소리
 export const TTS_MODEL = 'gemini-3.8-flash-tts';
-export const GEMINI_URGENT_VOICE = 'Kore'; // 사용자 설정과 별개인 자동 긴급 4단계 고정 목소리
-export const GEMINI_URGENT_STYLE =
-  'panicked, desperate shouting at the top of the voice; very fast, every phrase strongly stressed, breathless urgent intonation (forceful but never insulting)';
+export type GeminiLevel = 3 | 4;
+export const GEMINI_STAGE: Record<GeminiLevel, { voice: string; style: string }> = {
+  // 3단계 — 폭발한 한국 엄마 (지시문은 기획 확정본 그대로, 고치지 않음)
+  3: {
+    voice: 'Gacrux',
+    style: [
+      'Perform in natural Korean as a furious, extremely worried Korean mother who has just discovered that her child is still sleeping and is about to miss an important appointment.',
+      'Emotion: explosive anger, panic, desperation, frustration, and extreme urgency.',
+      'Start with an explosive, piercing shout at the top of your voice. The very first word must be exceptionally loud, sharp, and startling, as if a Korean mother has suddenly burst into the bedroom to wake her oversleeping child.',
+      'Use a mature, commanding female voice with powerful vocal projection. Sound like a real Korean mother who has completely lost her patience and is desperately trying to get her child out of bed.',
+      'Speak at an extremely fast pace, significantly faster than normal conversation. Fire off short, forceful commands in rapid succession, with almost no pauses between sentences.',
+      'Strongly emphasize the commands to wake up immediately. Maintain intense urgency and increase the emotional intensity throughout the speech. Sound genuinely furious and desperate, as if there is absolutely no time left to waste.',
+      'Keep the delivery spontaneous, realistic, and overwhelmingly urgent. Do not sound like a professional voice actor, an announcer, or a cartoon character.',
+      'Do not stretch out words, take long breaths, or slow down for dramatic effect. Maintain clear Korean pronunciation even while shouting at high speed.',
+      'Do not read punctuation aloud.',
+      "Deliver the command \"지금 당장 일어나\" with the strongest, most explosive shout in the entire speech, as if this is the mother's final warning. Immediately continue with the next command without slowing down.",
+    ].join('\n\n'),
+  },
+  // 4단계 — 기존 긴급 목소리 · 지시 (앱에 든 gemini_urgent_sample.wav와 같은 설정)
+  4: {
+    voice: 'Kore',
+    style: 'panicked, desperate shouting at the top of the voice; very fast, every phrase strongly stressed, breathless urgent intonation (forceful but never insulting)',
+  },
+};
+export const isGeminiLevel = (level: number): level is GeminiLevel => level === 3 || level === 4;
+
+// 앱에 든 단계별 기본 예비 음성(res/raw) — 파일명은 예전 이름 그대로 두고 단계에 다시 배정 (3단계 ← gemini_stage4_fallback.wav, 4단계 ← gemini_urgent_sample.wav)
+//   개인 정보 없는 일반 문장. 파일은 scripts/make-fallback-voices.ts로 한 번 만든 것 (재생 · 빌드 때 API 호출 없음)
+export const GEMINI_FALLBACK_FILE: Record<GeminiLevel, string> = {
+  3: 'gemini_stage4_fallback.wav',
+  4: 'gemini_urgent_sample.wav',
+};
+// 그 파일의 대사 (4단계 파일은 느낌표를 반복한 원문으로 만들었고, 화면에는 speakable로 정리해 보임)
+export const GEMINI_FALLBACK_TEXT: Record<GeminiLevel, string> = {
+  3: '야! 너 안 일어나?! 지금 몇 시인 줄 알아? 지금 당장 일어나! 빨리 일어나라고!',
+  4: '야!!!!!!!!!! 지금 안 일어나면 진짜 늦어!!!! 지금 당장 일어나!!!!!!!',
+};
 
 // 사용자가 고르는 목소리는 Android 오프라인 TTS 번호(휴대폰마다 실제 음색은 달라질 수 있음). Gemini 4단계는 선택할 수 없음
 export const VOICES: readonly { id: string; label: string }[] = [
@@ -157,17 +193,26 @@ export function levelAt(rule: UrgencyRule, snoozeCount: number, nowMs: number): 
   return speechLevel(snoozeCount, urgent ? 'URGENT' : imminent ? 'IMMINENT' : 'SAFE', rule.maxLevel);
 }
 
-/** 한 울림의 엔진 — 긴급이고 Gemini 음성이 준비돼 있을 때만 Gemini, 아니면 Android TTS로 전체 브리핑 */
+/** 한 울림의 엔진 — 3 · 4단계이고 Gemini 음성(개인화 캐시 또는 예비 WAV)이 있을 때만 Gemini, 아니면 Android TTS로 전체 브리핑 */
 export function engineFor(level: UrgencyLevel, hasGeminiClip: boolean): 'GEMINI' | 'ANDROID' {
-  return level === 4 && hasGeminiClip ? 'GEMINI' : 'ANDROID';
+  return isGeminiLevel(level) && hasGeminiClip ? 'GEMINI' : 'ANDROID';
 }
 
 // 기상 알람은 사용자가 끄지 않으면 계속 울리므로 예약 시 여유 0분 시각이 예상되면 캐시를 준비함. 출발 알림은 한 번 읽고 끝남
 export const GEMINI_WINDOW_MIN: Record<BriefKind, number> = { WAKE: 24 * 60, DEPARTURE: 1 }; // 기상은 해제 전까지 무기한 울릴 수 있어 하루 전부터 캐시 준비 (한도 준수)
 
-/** Gemini 음성이 필요한지 — 긴급(4단계)이 허용되고, 이 알람이 울리는 동안 실제로 긴급이 될 수 있을 때만 (스누즈 3번이어도 여유가 있으면 안 만듦) */
-export function needsGemini(rule: UrgencyRule, kind: BriefKind, ringAtMs: number): boolean {
-  return rule.maxLevel >= 4 && rule.urgentAtMs != null && rule.urgentAtMs < ringAtMs + GEMINI_WINDOW_MIN[kind] * 60_000;
+/**
+ * 그 단계의 개인화 Gemini 음성이 필요한지 — 이 알람이 울리는 동안 실제로 그 단계가 될 수 있을 때만
+ *   4단계: 여유 0분 시각이 울림 안에 올 때만 (스누즈 3번이어도 여유가 있으면 안 만듦)
+ *   3단계: 기상은 스누즈 2번만으로도 오므로 늘, 출발(스누즈 없음)은 여유 5분 시각이 울림 안에 올 때만
+ */
+export function needsGemini(rule: UrgencyRule, kind: BriefKind, ringAtMs: number, level: GeminiLevel = 4): boolean {
+  if (rule.maxLevel < level) return false;
+  const until = ringAtMs + GEMINI_WINDOW_MIN[kind] * 60_000;
+  if (level === 4) return rule.urgentAtMs != null && rule.urgentAtMs < until;
+  if (kind === 'WAKE') return true;
+  const at = rule.dangerAtMs ?? rule.urgentAtMs;
+  return at != null && at < until;
 }
 
 /** 미리 만들 단계 — 1 ~ 상한 */
@@ -175,28 +220,21 @@ export function levelsToPrepare(rule: UrgencyRule): UrgencyLevel[] {
   return ([1, 2, 3, 4] as const).filter((l) => l <= rule.maxLevel);
 }
 
-// Android TTS 높낮이 · 속도 (1.0 = 기본) — 말투(중요도 기본값 또는 직접 고름)가 바탕, 단계가 올라갈수록 높고 빠르게
-const TONE_BASE: Record<ToneKey, { pitch: number; rate: number }> = {
-  GENTLE: { pitch: 0.95, rate: 0.9 },
-  NORMAL: { pitch: 1.0, rate: 1.0 },
-  FIRM: { pitch: 1.05, rate: 1.1 },
-};
-const LEVEL_BOOST: Record<UrgencyLevel, { pitch: number; rate: number }> = {
-  1: { pitch: 0, rate: 0 },
-  2: { pitch: 0.05, rate: 0.1 },
-  3: { pitch: 0.1, rate: 0.2 },
-  4: { pitch: 0.15, rate: 0.35 },
+// Android TTS 높낮이 · 속도 (setPitch · setSpeechRate 값 그대로, 1.0 = 기본) — 단계별 고정값. 말투에 더하지 않음 (기획 확정: 1단계 1.0/1.0, 2단계 1.7/1.5)
+//   3 · 4단계는 Gemini가 기본이고 Android TTS는 대체로 읽을 때만 — 2단계와 같은 강한 값 (작성자 판단)
+//   네이티브 BriefingRules.FALLBACK_VOICE와 같은 값 — 고치면 둘 다
+const LEVEL_VOICE: Record<UrgencyLevel, { pitch: number; rate: number }> = {
+  1: { pitch: 1.0, rate: 1.0 },
+  2: { pitch: 1.7, rate: 1.5 },
+  3: { pitch: 1.7, rate: 1.5 },
+  4: { pitch: 1.7, rate: 1.5 },
 };
 
 export type AndroidVoice = { pitch: number; rate: number; voiceIndex: number };
 
+/** 목소리는 사용자 설정(중요도 기본값 또는 직접 고름) 그대로, 높낮이 · 속도는 단계 고정값 */
 export function androidVoice(profile: Pick<VoiceProfile, 'voice' | 'tone'>, level: UrgencyLevel): AndroidVoice {
-  const r2 = (n: number) => Math.round(n * 100) / 100;
-  return {
-    pitch: r2(TONE_BASE[profile.tone].pitch + LEVEL_BOOST[level].pitch),
-    rate: r2(TONE_BASE[profile.tone].rate + LEVEL_BOOST[level].rate),
-    voiceIndex: Math.max(0, VOICES.findIndex((v) => v.id === profile.voice)),
-  };
+  return { ...LEVEL_VOICE[level], voiceIndex: Math.max(0, VOICES.findIndex((v) => v.id === profile.voice)) };
 }
 
 // ---------------------------------------------------------------------------
@@ -296,7 +334,7 @@ function todoSentences(input: BriefingInput): string[] {
 function departSentence(input: BriefingInput, strong: boolean): string | null {
   if (input.departAtMs == null) return null;
   const t = spoken(input.departAtMs, input.timeZone);
-  return strong ? `${t}에는 나가야 해!!` : `${t}에는 나가야 하니까`;
+  return strong ? `${t}에는 나가야 해!` : `${t}에는 나가야 하니까`;
 }
 
 // 다짐 · 반성 문장 — 사용자가 말한 것만 (memo 칸이 true일 때만 그 문장)
@@ -321,9 +359,9 @@ function memoFirm(m: WakeMemo | null): string[] {
 function memoShout(m: WakeMemo | null): string[] {
   if (!m) return [];
   return [
-    m.wakeEarly ? '너 어제 일찍 일어나고 싶다며!!!!!!!' : null,
-    m.lateByOversleep ? '늦잠 자서 지각했다고 반성했잖아!!!! 또 지각할 거야?!?!' : null,
-    m.lateByOversleep || m.wakeEarly ? '어제 다짐했으면 오늘 실천해야지!!!!!!!' : null,
+    m.wakeEarly ? '너 어제 일찍 일어나고 싶다며!' : null,
+    m.lateByOversleep ? '늦잠 자서 지각했다고 반성했잖아! 또 지각할 거야?' : null,
+    m.lateByOversleep || m.wakeEarly ? '어제 다짐했으면 오늘 실천해야지!' : null,
   ].filter((s): s is string => s != null);
 }
 
@@ -333,20 +371,23 @@ function quickSchedule(input: BriefingInput): string | null {
 }
 
 // 2 · 3단계는 스누즈 없이도 시간만 지나 올라갈 수 있어 "미뤘다"고 단정하지 않음. 4단계는 여유 0분 이하에서만 "늦는다"고 말함
+//   3단계 음성은 미리 한 번 만들어 두고 스누즈로 와도 같은 파일을 틀므로, 시간이 촉박하다고 단정하는 말("지금 일어나야 딱 맞게 도착해")은 안 넣음
+//   감정 · 세기는 Gemini 영어 지시(GEMINI_STAGE)가 맡음 — 느낌표를 여러 개 이어 붙이지 않음
 function wakeText(level: UrgencyLevel, input: BriefingInput): (string | null)[] {
   if (level === 1) {
     const depart = departSentence(input, false);
     return ['좋은 아침이야~', ...memoGentle(input.memo), scheduleSentence(input), importantSentence(input), ...todoSentences(input), depart ? `${depart} 슬슬 일어나서 준비해 볼까?` : '슬슬 일어나서 준비해 볼까?'];
   }
   if (level === 2) {
-    return ['야! 이제 진짜 일어나야 해. 더 미루면 준비가 빠듯해져.', ...memoFirm(input.memo), scheduleSentence(input), importantSentence(input), '지금 일어나자. 계속 잘 거야?'];
+    const quick = quickSchedule(input);
+    return ['야, 이제 진짜 일어나야 해. 더 미루면 준비하기 힘들어.', ...memoFirm(input.memo), quick ? `${quick}.` : null, importantSentence(input), '얼른 일어나.'];
   }
   if (level === 3) {
     const quick = quickSchedule(input);
-    return ['야!! 이제 정말 일어나!! 더 미루면 안 돼!!', ...memoFirm(input.memo), quick ? `${quick}!!` : null, departSentence(input, true), '바로 일어나서 준비해!!'];
+    return ['야, 근데 이제 진짜 일어나야 돼. 계속 자면 안 되잖아.', ...memoFirm(input.memo), quick ? `${quick}.` : null, departSentence(input, true), '얼른 일어나서 준비해!'];
   }
   const quick = quickSchedule(input);
-  return ['야!!!!!!!!!! 지금 안 일어나면 진짜 늦어!!!!', ...memoShout(input.memo), quick ? `${quick}!!!!` : null, '지금 당장 일어나!!!!!!!'];
+  return ['야! 너 안 일어나?! 지금 안 일어나면 진짜 늦어!', ...memoShout(input.memo), quick ? `${quick}!` : null, '지금 당장 일어나! 빨리 일어나라고!'];
 }
 
 function departureText(level: UrgencyLevel, input: BriefingInput): (string | null)[] {
@@ -355,14 +396,19 @@ function departureText(level: UrgencyLevel, input: BriefingInput): (string | nul
   const items = titles(input.todos, 'ITEM');
   if (level === 1) return [what ? `${what} 갈 시간이야.` : '나갈 시간이야.', items.length ? `챙길 것: ${list(items)}.` : null, '이제 출발하자!'];
   if (level === 2) return [what ? `${what}, 늦지 않게 지금 나가야 해!` : '늦지 않게 지금 나가야 해!', items.length ? `챙길 것: ${list(items)}.` : null, '바로 출발해!'];
-  if (level === 3) return ['야!! 지금 바로 나가!!', what ? `${what} 있잖아!!` : null, items.length ? `챙길 것: ${list(items)}!!` : null];
-  return ['야!!!!!!!! 지금 당장 나가!!!!', a ? `이러다 ${a.title.trim()} 늦는다고!!!!` : '이러다 늦는다고!!!!', items.length ? `${list(items)} 챙기고 바로 출발해!!!!!!!` : '바로 출발해!!!!!!!'];
+  if (level === 3) return ['야, 지금 바로 나가야 돼.', what ? `${what} 있잖아.` : null, items.length ? `챙길 것: ${list(items)}.` : null, '얼른 출발해!'];
+  return ['야! 지금 당장 나가!', a ? `이러다 ${a.title.trim()} 늦는다고!` : '이러다 늦는다고!', items.length ? `${list(items)} 챙기고 바로 출발해!` : '바로 출발해!'];
 }
 
-/** 단계별 알람 음성 문장 — 알람이 울리는 동안 이 문장 하나를 읽음 */
+/** 소리 내 읽기 전에 이어 붙은 느낌표 · 물음표만 줄임 ("회의!!!" → "회의!", "진짜???" → "진짜?", "?!?!" → "?!"). 글자 · 뜻은 안 바꿈 */
+export function speakable(s: string): string {
+  return s.replace(/([!?])\1+/g, '$1').replace(/[!?]{3,}/g, (m) => m.slice(0, 2));
+}
+
+/** 단계별 알람 음성 문장 — 알람이 울리는 동안 이 문장 하나를 읽음. 사용자가 적은 일정 · 준비물 · 목표의 반복 부호도 같이 정리 */
 export function briefingText(level: UrgencyLevel, input: BriefingInput): string {
   const parts = input.kind === 'DEPARTURE' ? departureText(level, input) : wakeText(level, input);
-  return parts.filter((s): s is string => !!s).join(' ');
+  return speakable(parts.filter((s): s is string => !!s).join(' '));
 }
 
 // ---------------------------------------------------------------------------
@@ -381,10 +427,11 @@ export function clipHash(parts: { text: string; voice: string; style: string; mo
 
 export type BriefingClip = { level: UrgencyLevel; text: string; hash: string } & AndroidVoice;
 
-/** 단계별 문장 + Android TTS 값 + 캐시 열쇠(4단계 Gemini 음성용) */
+/** 단계별 문장 + Android TTS 값 + 캐시 열쇠 (3 · 4단계는 그 단계의 Gemini 모델 · 목소리 · 지시 · 대사가 다 들어감 → 하나라도 바뀌면 새 음성) */
 export function briefingClips(rule: UrgencyRule, profile: Pick<VoiceProfile, 'voice' | 'tone'>, input: BriefingInput, model = TTS_MODEL): BriefingClip[] {
   return levelsToPrepare(rule).map((level) => {
     const text = briefingText(level, input);
-    return { level, text, hash: clipHash({ text, voice: level === 4 ? GEMINI_URGENT_VOICE : profile.voice, style: GEMINI_URGENT_STYLE, model }), ...androidVoice(profile, level) };
+    const g = isGeminiLevel(level) ? GEMINI_STAGE[level] : { voice: profile.voice, style: '' };
+    return { level, text, hash: clipHash({ text, voice: g.voice, style: g.style, model }), ...androidVoice(profile, level) };
   });
 }

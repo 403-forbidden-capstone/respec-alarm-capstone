@@ -11,6 +11,11 @@ import {
   clipHash,
   engineFor,
   dangerAtMs,
+  GEMINI_FALLBACK_FILE,
+  GEMINI_FALLBACK_TEXT,
+  GEMINI_STAGE,
+  speakable,
+  TTS_MODEL,
   lateRisk,
   levelAt,
   levelsToPrepare,
@@ -130,21 +135,47 @@ test('TS · Kotlin 같은 표 (spec/urgency-cases.json — 네이티브는 Speec
 });
 
 // --- 엔진 · Gemini 필요 판단 ---
-test('엔진: 1~3단계 Android TTS, 4단계는 Gemini 음성이 있을 때만 (없으면 Android로 전체)', () => {
-  assert.deepEqual(([1, 2, 3] as const).map((l) => engineFor(l, true)), ['ANDROID', 'ANDROID', 'ANDROID']);
-  assert.equal(engineFor(4, true), 'GEMINI');
-  assert.equal(engineFor(4, false), 'ANDROID');
-  // 중요도 HIGH라도 긴급이 아니면 Android
-  assert.equal(engineFor(levelAt(urgencyRule(wake(), resolveVoice('HIGH')), 2, kst(7)), true), 'ANDROID');
+test('엔진: 1 · 2단계 Android TTS, 3 · 4단계는 Gemini 음성이 있을 때만 (없으면 Android로 전체)', () => {
+  assert.deepEqual(([1, 2] as const).map((l) => engineFor(l, true)), ['ANDROID', 'ANDROID']);
+  assert.deepEqual(([3, 4] as const).map((l) => engineFor(l, true)), ['GEMINI', 'GEMINI']);
+  assert.deepEqual(([3, 4] as const).map((l) => engineFor(l, false)), ['ANDROID', 'ANDROID']);
+  // 중요도 HIGH라도 2단계면 Android
+  assert.equal(engineFor(levelAt(urgencyRule(wake(), resolveVoice('HIGH')), 1, kst(7)), true), 'ANDROID');
 });
 
-test('스누즈 3번이어도 여유 40분이면 긴급 아님 → Gemini 미사용 · 미리 만들지도 않음', () => {
+test('3단계(엄마) Gacrux · 4단계(긴급) Kore — 목소리 · 지시문이 서로 다르고 확정 지시문 그대로', () => {
+  assert.equal(TTS_MODEL, 'gemini-3.8-flash-tts');
+  assert.equal(GEMINI_STAGE[3].voice, 'Gacrux');
+  assert.equal(GEMINI_STAGE[4].voice, 'Kore');
+  assert.ok(GEMINI_STAGE[3].style.startsWith('Perform in natural Korean as a furious, extremely worried Korean mother'));
+  assert.match(GEMINI_STAGE[3].style, /Deliver the command "지금 당장 일어나" with the strongest, most explosive shout/);
+  assert.equal(
+    GEMINI_STAGE[4].style,
+    'panicked, desperate shouting at the top of the voice; very fast, every phrase strongly stressed, breathless urgent intonation (forceful but never insulting)',
+  );
+  // 앱에 든 예비 파일 — 기존 파일명 그대로 단계에 배정
+  assert.deepEqual(GEMINI_FALLBACK_FILE, { 3: 'gemini_stage4_fallback.wav', 4: 'gemini_urgent_sample.wav' });
+  assert.equal(speakable(GEMINI_FALLBACK_TEXT[4]), '야! 지금 안 일어나면 진짜 늦어! 지금 당장 일어나!');
+});
+
+test('스누즈 3번이어도 여유 40분이면 긴급 아님 → 3단계(Gemini 엄마)이지 4단계 아님', () => {
   const s = wake();
   const now = kst(10) - (90 + 40) * MIN;
   const rule = urgencyRule(s, resolveVoice('LOW'));
   assert.equal(levelAt(rule, 3, now), 3);
-  assert.equal(engineFor(levelAt(rule, 3, now), true), 'ANDROID');
+  assert.equal(engineFor(levelAt(rule, 3, now), true), 'GEMINI');
   assert.equal(needsGemini(rule, 'WAKE', kst(6)), true); // 알람이 해제 전까지 계속 울릴 수 있어 여유 0분 시각을 미리 준비
+});
+
+test('3단계 Gemini: 기상은 스누즈만으로 오므로 늘 준비, 출발은 여유 5분 시각이 울림 안에 올 때만', () => {
+  const unknown = urgencyRule(wake({ travelMinutes: null }), resolveVoice('LOW'));
+  assert.equal(needsGemini(unknown, 'WAKE', kst(6), 3), true); // 지각 위험을 몰라도 스누즈 2번이면 3단계
+  assert.equal(needsGemini(unknown, 'WAKE', kst(6), 4), false);
+  const d = urgencyRule(depart(), resolveVoice('LOW')); // 위험 시각 9:15, 긴급 9:20
+  assert.equal(needsGemini(d, 'DEPARTURE', kst(9, 5), 3), false);
+  assert.equal(needsGemini(d, 'DEPARTURE', kst(9, 15), 3), true);
+  assert.equal(needsGemini(urgencyRule({ kind: 'DEPARTURE', appointmentAtMs: null, prepMinutes: null, travelMinutes: null }, resolveVoice('LOW')), 'DEPARTURE', kst(9), 3), false);
+  assert.equal(needsGemini({ ...d, maxLevel: 2 }, 'DEPARTURE', kst(9, 20), 3), false);
 });
 
 test('Gemini는 이 알람이 울리는 동안 실제로 긴급이 될 수 있을 때만 미리 만듦', () => {
@@ -158,14 +189,13 @@ test('Gemini는 이 알람이 울리는 동안 실제로 긴급이 될 수 있�
   assert.equal(needsGemini(urgencyRule(wake({ travelMinutes: null }), resolveVoice('LOW')), 'WAKE', kst(9)), false); // UNKNOWN
 });
 
-test('Android TTS: 중요도(말투) · 단계마다 높낮이 · 속도 · 목소리가 달라짐', () => {
-  const low = androidVoice(resolveVoice('LOW'), 1);
-  const high = androidVoice(resolveVoice('HIGH'), 1);
-  assert.ok(low.rate < high.rate && low.pitch < high.pitch);
-  assert.notEqual(low.voiceIndex, high.voiceIndex);
-  const rates = ([1, 2, 3, 4] as const).map((l) => androidVoice(resolveVoice('NORMAL'), l).rate);
-  assert.deepEqual(rates, [...rates].sort((a, b) => a - b));
-  assert.equal(new Set(rates).size, 4);
+test('Android TTS: 1단계 높낮이 1.0 · 속도 1.0, 2단계 1.7 · 1.5 고정 (말투에 더하지 않음), 목소리는 사용자 설정', () => {
+  for (const imp of ['LOW', 'NORMAL', 'HIGH'] as const) {
+    assert.deepEqual([androidVoice(resolveVoice(imp), 1).pitch, androidVoice(resolveVoice(imp), 1).rate], [1.0, 1.0], imp);
+    assert.deepEqual([androidVoice(resolveVoice(imp), 2).pitch, androidVoice(resolveVoice(imp), 2).rate], [1.7, 1.5], imp);
+  }
+  assert.notEqual(androidVoice(resolveVoice('LOW'), 1).voiceIndex, androidVoice(resolveVoice('HIGH'), 1).voiceIndex);
+  assert.equal(androidVoice(resolveVoice('HIGH', { voice: 'Sulafat' }), 2).voiceIndex, androidVoice(resolveVoice('LOW'), 1).voiceIndex);
 });
 
 // --- 전날 다짐 ---
@@ -205,16 +235,41 @@ test('많으면 가장 가까운 일정 + 중요한 일정 우선', () => {
 test('기상 2 · 3단계는 "미뤘다" · "늦는다"를 단정하지 않음, 4단계(실제 긴급)만 "늦어"', () => {
   for (const level of [1, 2, 3] as const) assert.doesNotMatch(briefingText(level, input({ appointments: [appt('수업', 10)] })), /늦어|늦는다|미뤘/);
   const t = briefingText(4, input({ memo: { wakeEarly: true, overslept: true, lateByOversleep: true, goals: [] }, appointments: [appt('팀플 회의', 15), appt('저녁 약속', 17), appt('과제', 19)] }));
-  assert.ok(t.startsWith('야!!!!!!!!!! 지금 안 일어나면 진짜 늦어!!!!'));
+  assert.ok(t.startsWith('야! 너 안 일어나?! 지금 안 일어나면 진짜 늦어!'));
   assert.match(t, /너 어제 일찍 일어나고 싶다며/);
+  assert.match(t, /지금 당장 일어나! 빨리 일어나라고!$/);
   assert.doesNotMatch(t, /과제/); // 긴급은 핵심 일정 2개만
+});
+
+test('3단계 대사: 지각을 단정하지 않음 (스누즈로도 와서)', () => {
+  const t = briefingText(3, input({ appointments: [appt('팀플 회의', 10)], departAtMs: kst(9, 10) }));
+  assert.equal(t, '야, 근데 이제 진짜 일어나야 돼. 계속 자면 안 되잖아. 오늘 오전 10시 팀플 회의 있잖아. 오전 9시 10분에는 나가야 해! 얼른 일어나서 준비해!');
+  assert.doesNotMatch(t, /늦|딱 맞게/);
+  assert.equal(briefingText(2, input({ appointments: [appt('팀플 회의', 10)] })), '야, 이제 진짜 일어나야 해. 더 미루면 준비하기 힘들어. 오늘 오전 10시 팀플 회의 있잖아. 얼른 일어나.');
+});
+
+test('느낌표 · 물음표 반복 정리 — 모든 단계 · 종류 문장, 사용자가 적은 제목 · 준비물까지 (글자는 그대로)', () => {
+  assert.equal(speakable('회의!!!! 진짜??? 뭐?!?!?! 좋아!'), '회의! 진짜? 뭐?! 좋아!');
+  const loud = input({
+    memo: { wakeEarly: true, overslept: true, lateByOversleep: true, goals: ['운동!!!'] },
+    appointments: [appt('면접!!!!', 10, 'HIGH')],
+    todos: [{ title: '이력서???', type: 'ITEM' }],
+    departAtMs: kst(9),
+  });
+  for (const kind of ['WAKE', 'DEPARTURE'] as const) {
+    for (const level of [1, 2, 3, 4] as const) {
+      const t = briefingText(level, { ...loud, kind });
+      assert.doesNotMatch(t, /[!?]{3,}|!!|\?\?/, `${kind} ${level}: ${t}`);
+      assert.match(t, /면접/);
+    }
+  }
 });
 
 test('출발 브리핑: 그 일정 시각 + 등록된 준비물 + 출발 촉구 (전날 대화 · 다른 일정은 안 넣음)', () => {
   const d = (level: 1 | 4, todos: BriefingInput['todos'] = [{ title: '노트북', type: 'ITEM' }, { title: '충전기', type: 'ITEM' }]) =>
     briefingText(level, input({ kind: 'DEPARTURE', appointments: [appt('면접', 10, 'HIGH')], todos, memo: { wakeEarly: true, overslept: false, lateByOversleep: false, goals: [] } }));
   assert.equal(d(1), '오전 10시 면접 갈 시간이야. 챙길 것: 노트북, 충전기. 이제 출발하자!');
-  assert.equal(d(4), '야!!!!!!!! 지금 당장 나가!!!! 이러다 면접 늦는다고!!!! 노트북, 충전기 챙기고 바로 출발해!!!!!!!');
+  assert.equal(d(4), '야! 지금 당장 나가! 이러다 면접 늦는다고! 노트북, 충전기 챙기고 바로 출발해!');
   assert.doesNotMatch(d(1, []), /챙길 것/); // 준비물이 없으면 안 만듦
   assert.doesNotMatch(d(1), /어제/);
 });
@@ -229,4 +284,21 @@ test('단계 · 열쇠: 상한까지 문장, 일정이 바뀌면 열쇠가 바�
   assert.ok(a.every((c, i) => c.hash !== b[i].hash));
   assert.deepEqual(levelsToPrepare({ urgentAtMs: null, maxLevel: 2 }), [1, 2]);
   assert.match(clipHash({ text: 'x', voice: 'v', style: 's', model: 'm' }), /^[0-9a-f]{16}$/);
+});
+
+test('캐시 열쇠: 3 · 4단계는 그 단계의 모델 · 목소리 · 지시 · 대사로 — 하나라도 바뀌면 다른 열쇠', () => {
+  const rule: UrgencyRule = { urgentAtMs: null, maxLevel: 4 };
+  const clips = briefingClips(rule, { voice: 'Kore', tone: 'FIRM' }, input({ appointments: [appt('회의', 15)] }));
+  for (const level of [3, 4] as const) {
+    const c = clips.find((x) => x.level === level)!;
+    const g = GEMINI_STAGE[level];
+    assert.equal(c.hash, clipHash({ text: c.text, voice: g.voice, style: g.style, model: TTS_MODEL }));
+    assert.notEqual(c.hash, clipHash({ text: c.text, voice: 'Zephyr', style: g.style, model: TTS_MODEL })); // 목소리 바뀜
+    assert.notEqual(c.hash, clipHash({ text: c.text, voice: g.voice, style: `${g.style} `, model: TTS_MODEL })); // 지시 바뀜
+    assert.notEqual(c.hash, clipHash({ text: c.text, voice: g.voice, style: g.style, model: 'gemini-3.8-flash-lite-tts' })); // 모델 바뀜
+  }
+  assert.equal(new Set(clips.map((c) => c.hash)).size, 4);
+  // 사용자 Android 목소리 선택은 3 · 4단계 Gemini 열쇠에 영향 없음
+  const other = briefingClips(rule, { voice: 'Sulafat', tone: 'GENTLE' }, input({ appointments: [appt('회의', 15)] }));
+  assert.deepEqual(other.filter((c) => c.level >= 3).map((c) => c.hash), clips.filter((c) => c.level >= 3).map((c) => c.hash));
 });

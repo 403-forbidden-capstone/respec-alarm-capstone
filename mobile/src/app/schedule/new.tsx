@@ -400,7 +400,7 @@ export default function NewScheduleScreen() {
           알람 강도
         </Text>
         <Text variant="small" tone="sub">
-          배경음 · 말소리(Android TTS) · 진동을 각각 고를 수 있어요. 4단계 Gemini 긴급 음성은 지각 위험이 생길 때 자동으로만 재생돼요.
+          배경음 · 말소리(Android TTS) · 진동을 각각 고를 수 있어요. 3 · 4단계 Gemini 음성은 두 번 미루거나 지각 위험이 생길 때 자동으로만 재생돼요.
         </Text>
         <Text variant="small" tone="sub">
           예상 자동 강도: {LEVELS[autoIntensity].name} (저장 시 지각 이력과 잠귀 설정도 반영)

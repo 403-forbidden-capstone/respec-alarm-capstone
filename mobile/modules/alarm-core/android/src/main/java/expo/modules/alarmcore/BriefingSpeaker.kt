@@ -3,6 +3,7 @@ package expo.modules.alarmcore
 import android.content.Context
 import android.media.AudioAttributes
 import android.media.MediaPlayer
+import android.net.Uri
 import android.os.Handler
 import android.os.Looper
 import android.speech.tts.TextToSpeech
@@ -11,7 +12,7 @@ import android.util.Log
 import java.util.Locale
 
 // 브리핑 재생 — 기상·출발은 사용자가 해제하기 전까지 같은 음성을 로컬에서 반복 (네트워크·Gemini 재호출 없음)
-//   Gemini 음성 파일이 있으면(긴급 4단계) MediaPlayer, 아니면 폰의 Android TTS로 같은 문장 전체 — 한 번 읽는 동안 엔진을 바꾸지 않음
+//   3 · 4단계: 개인화 Gemini 캐시 → 앱에 든 그 단계 예비 WAV → 폰의 Android TTS로 같은 문장 전체 (MediaPlayer, 앞 것이 못 열리거나 재생 중 오류면 다음 것)
 //   알람 볼륨 스트림(USAGE_ALARM)으로 읽음. 볼륨 크기 자체는 알람 계획 · 폰 설정이 정함
 //   onStart · onDone은 메인 스레드에서 부름 (기상 알람음을 줄였다 되돌리는 데 씀). 어떤 실패든 onDone으로 끝남 — 알람은 멈추지 않음
 internal class BriefingSpeaker(
@@ -30,6 +31,10 @@ internal class BriefingSpeaker(
     // 마지막 재생 상태 한 줄 (개발 화면 표시용 — 판단에는 안 씀)
     @Volatile
     var lastStatus: String? = null
+
+    // 마지막으로 실제 소리를 낸 출처 (BriefingRules.source 값: GEMINI_CACHE · GEMINI_FALLBACK · ANDROID · ANDROID_FALLBACK) — 개발 화면 표시용
+    @Volatile
+    var lastSource: String? = null
   }
 
   private val handler = Handler(Looper.getMainLooper())
@@ -55,41 +60,68 @@ internal class BriefingSpeaker(
     finish()
   }
 
+  private data class WavSource(val source: String, val label: String, val uri: Uri)
+
+  private var wavSources: List<WavSource> = emptyList()
+
   fun speak(speech: VoiceBriefing.Speech, repeat: Boolean = false) {
     repeating = repeat
     currentSpeech = speech
     lastStatus = "음성 준비 중"
-    val wav = speech.wav
-    if (wav != null && playWav(wav, speech.level)) return
+    wavSources = listOfNotNull(
+      speech.wav?.let { WavSource("GEMINI_CACHE", "개인화 Gemini 캐시", Uri.fromFile(it)) },
+      speech.bundled?.let { WavSource("GEMINI_FALLBACK", "Gemini 기본 예비 음성", Uri.parse("android.resource://${context.packageName}/$it")) },
+    )
+    playFrom(speech, 0)
+  }
+
+  // index번째 WAV부터 차례로 — 다 못 틀면 Android TTS로 같은 단계 문장
+  private fun playFrom(speech: VoiceBriefing.Speech, index: Int) {
+    for (i in index until wavSources.size) if (playWav(speech, i)) return
     speakAndroid(speech)
   }
 
-  private fun playWav(file: java.io.File, level: Int): Boolean {
+  private fun playWav(speech: VoiceBriefing.Speech, index: Int): Boolean {
+    val src = wavSources[index]
     val p = MediaPlayer()
     return try {
       p.setAudioAttributes(attributes)
-      p.setDataSource(file.absolutePath)
+      p.setDataSource(context, src.uri)
       p.prepare()
       p.isLooping = repeating
       p.setOnCompletionListener { finish() }
-      p.setOnErrorListener { _, _, _ ->
-        finish()
+      p.setOnErrorListener { _, what, extra ->
+        // 재생 도중 오류 — 다음 출처로 (예비 WAV → Android TTS). 알람음 · 진동은 그대로
+        Log.w(TAG, "${src.label} 재생 오류($what/$extra) — 다음 출처로")
+        releasePlayer()
+        if (!finished) playFrom(speech, index + 1)
         true
       }
       player = p
       onStart()
       p.start()
-      Log.i(TAG, "브리핑: Gemini 음성 ${level}단계")
-      lastStatus = "캐시된 Gemini 음성 ${level}단계 재생 중${if (repeating) " (반복)" else ""}"
+      // 재생 속도만 바꾸고 높낮이는 그대로 (PlaybackParams, API 23+). 못 바꿔도 원래 속도로 계속
+      if (speech.speed != 1f) runCatching { p.playbackParams = p.playbackParams.setSpeed(speech.speed).setPitch(1f) }.onFailure { Log.w(TAG, "재생 속도를 못 바꿈", it) }
+      Log.i(TAG, "브리핑: ${src.label} ${speech.level}단계 ${speech.speed}배")
+      lastSource = src.source
+      lastStatus = "${src.label} ${speech.level}단계 재생 중 · ${speech.speed}배${if (repeating) " (반복)" else ""}"
       true
     } catch (e: Exception) {
-      // 파일이 깨졌으면 같은 문장을 Android TTS로 (아직 아무것도 안 읽었으니 엔진이 섞이지 않음)
-      Log.w(TAG, "Gemini 음성을 못 틀어 Android TTS로", e)
-      lastStatus = "Gemini 음성 파일을 못 틀어 Android TTS로 대체"
-      p.release()
+      // 파일이 깨졌거나 없음 — 다음 출처로 (아직 아무것도 안 읽었으니 엔진이 섞이지 않음)
+      Log.w(TAG, "${src.label}을 못 틀어 다음 출처로", e)
+      lastStatus = "${src.label}을 못 틀어 다음으로 대체"
+      runCatching { p.release() }
       player = null
       false
     }
+  }
+
+  private fun releasePlayer() {
+    player?.let { p ->
+      runCatching { if (p.isPlaying) p.stop() }
+      runCatching { p.release() }
+    }
+    player = null
   }
 
   private fun speakAndroid(speech: VoiceBriefing.Speech) {
@@ -167,7 +199,9 @@ internal class BriefingSpeaker(
       finish()
     } else {
       Log.i(TAG, "브리핑: Android TTS ${speech.level}단계${if (repeating) " 반복" else ""}")
-      lastStatus = "Android TTS ${speech.level}단계 읽는 중${if (repeating) " (반복)" else ""}"
+      lastSource = BriefingRules.source(speech.level, cache = false, bundled = false)
+      val fallback = if (speech.level >= 3) " (Gemini 음성 대체)" else ""
+      lastStatus = "Android TTS ${speech.level}단계 읽는 중$fallback${if (repeating) " (반복)" else ""}"
     }
   }
 
@@ -190,11 +224,7 @@ internal class BriefingSpeaker(
     handler.removeCallbacks(startTimeout)
     handler.removeCallbacks(repeatSpeech)
     currentSpeech = null
-    player?.let { p ->
-      runCatching { if (p.isPlaying) p.stop() }
-      runCatching { p.release() }
-    }
-    player = null
+    releasePlayer()
     tts?.let { t ->
       runCatching { t.stop() }
       runCatching { t.shutdown() }

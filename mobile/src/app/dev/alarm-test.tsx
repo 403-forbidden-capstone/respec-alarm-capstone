@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   AppState,
   Button,
@@ -19,14 +19,18 @@ import {
   autoStageTest,
   departureVoiceTest,
   engineLabel,
-  GEMINI_SAMPLE_TEXT,
-  geminiSampleTest,
   mixOptions,
   SAMPLE,
   sampleAppointmentAt,
+  SEQUENCE,
+  SEQUENCE_STEP_MS,
+  GEMINI_SPEED,
+  spokenText,
+  stageVoice,
   wakeVoiceTest,
   type Mix,
   type Stage,
+  type VoiceOpts,
 } from '@/lib/alarmSync/voiceTest';
 import { backOrHome } from '@/lib/nav';
 import {
@@ -56,6 +60,7 @@ import {
   type AlarmVibration,
   type RingPackage,
   type ScheduledAlarm,
+  type VoiceTestGemini,
   type VoiceTestInfo,
   type VoiceTestStatus,
 } from '@capstone/alarm-core';
@@ -88,11 +93,18 @@ const USAGE_LOOKBACK_MINUTES = 30;
 // AI 음성 시험 (기상 단계 · 소리 조합 · 출발 1회 안내) — 실제 알람 코어 재생 경로(ringNow와 같은 길)로 울림
 const STAGES: Stage[] = [1, 2, 3, 4];
 const STAGE_NOTE: Record<Stage, string> = {
-  1: '기본 기상 브리핑 — 차분한 목소리',
-  2: '첫 번째 스누즈 후 — 조금 빠르고 단호하게 (미루기 1번 상태로 재현)',
-  3: '두 번째 이상 스누즈 후 — 더 빠르고 강하게 (미루기 2번 상태로 재현)',
-  4: '남은 여유 0분 이하 — Gemini 긴급 (없으면 Android TTS 대체)',
+  1: '기본 기상 브리핑',
+  2: '첫 번째 스누즈 후 — 확실히 높고 빠르게 (미루기 1번 상태로 재현)',
+  3: '두 번째 이상 스누즈 또는 여유 5분 이하 — 방문을 열고 소리치는 엄마 (미루기 2번 상태로 재현)',
+  4: '남은 여유 0분 이하 — 다급한 긴급 목소리 (여유 0분 시각이 지난 상태로 재현)',
 };
+// 3 · 4단계 음성 출처 모의 — 어느 것도 Gemini API를 부르지 않음 (미리 받아 둔 · 앱에 든 WAV만)
+const GEMINI_SOURCES: { value: VoiceTestGemini; label: string }[] = [
+  { value: 'CACHE', label: '개인화 캐시 우선 (없으면 예비 WAV)' },
+  { value: 'FALLBACK', label: '캐시 없음 = 한도 초과 · 네트워크 실패 · 비행기 모드 → 예비 WAV' },
+  { value: 'BROKEN', label: '깨진 캐시 파일 → 예비 WAV' },
+  { value: 'ANDROID', label: '예비 WAV도 못 씀 → Android TTS 대체' },
+];
 const VIBRATIONS: { value: AlarmVibration; label: string }[] = [
   { value: 'NONE', label: '진동 없음' },
   { value: 'SHORT_REPEAT', label: '짧은 반복' },
@@ -112,8 +124,9 @@ type VoiceTestRun = {
   kind: 'WAKE' | 'DEPARTURE';
   alarmId: string;
   stage: Stage;
-  /** 단계를 고른 방법 — 버튼으로 강제 · 시간 자동 전환 · Gemini 샘플 비교 */
-  how: 'STAGE' | 'AUTO' | 'SAMPLE';
+  /** 단계를 고른 방법 — 버튼으로 강제 · 시간 자동 전환(1 → 3 → 4) · 차례 시험(1 → 2 → 3 → 4) */
+  how: 'STAGE' | 'AUTO' | 'SEQUENCE';
+  geminiSource: VoiceTestGemini;
   intensity: AlarmIntensity;
   vibration: AlarmVibration;
   sound: boolean;
@@ -138,6 +151,14 @@ export default function AlarmTestScreen() {
   const [mix, setMix] = useState<Mix>('ALL');
   const [voiceRun, setVoiceRun] = useState<VoiceTestRun | null>(null);
   const [voiceStatus, setVoiceStatus] = useState<VoiceTestStatus | null>(null);
+  const [geminiSource, setGeminiSource] = useState<VoiceTestGemini>('CACHE');
+  // 1 → 2 → 3 → 4 차례 시험의 다음 단계 예약 — [즉시 정지] · 다른 시험 · 화면 닫기에서 지움
+  const sequenceTimers = useRef<ReturnType<typeof setTimeout>[]>([]);
+  const clearSequence = () => {
+    sequenceTimers.current.forEach(clearTimeout);
+    sequenceTimers.current = [];
+  };
+  useEffect(() => clearSequence, []);
 
   const refresh = useCallback(async () => {
     try {
@@ -185,25 +206,33 @@ export default function AlarmTestScreen() {
     return () => clearInterval(timer);
   }, [voiceRun]);
 
+  // 시험 옵션 — 소리 조합 + 3 · 4단계 출처 모의
+  const voiceOpts = (options: ReturnType<typeof mixOptions>): VoiceOpts => ({ sound: options.sound, voice: options.voice, gemini: geminiSource });
+
   // 기상 시험 — 단계 버튼은 지금 소리 조합으로, 소리 조합 버튼은 지금 단계로 바로 울림
-  async function runWakeVoice(nextStage: Stage, nextMix: Mix) {
+  async function runWakeVoice(nextStage: Stage, nextMix: Mix, how: VoiceTestRun['how'] = 'STAGE') {
+    if (how === 'STAGE') clearSequence();
     setStage(nextStage);
     setMix(nextMix);
     const options = mixOptions(nextMix, vibration);
-    await ringWake(nextStage, 'STAGE', `AI 음성 시험 ${nextStage}단계`, options, (now) => wakeVoiceTest(nextStage, now, options));
+    const opts = voiceOpts(options);
+    await ringWake(nextStage, how, `AI 음성 시험 ${nextStage}단계`, options, opts, (now) => wakeVoiceTest(nextStage, now, opts));
   }
 
-  // Gemini 긴급 샘플 비교 — 같은 문장을 Gemini 샘플 파일 / Android TTS로 (지금 고른 소리 조합 · 진동 그대로)
-  async function runSample(engine: 'SAMPLE' | 'ANDROID') {
-    const options = mixOptions(mix, vibration);
-    const title = engine === 'SAMPLE' ? 'Gemini 긴급 샘플' : '같은 문장 Android TTS';
-    await ringWake(4, 'SAMPLE', title, options, (now) => geminiSampleTest(engine, now, options));
-  }
-
-  // 시간 자동 전환 — 미루기 없이 울리는 동안 30초 뒤 3단계, 60초 뒤 4단계(Gemini 샘플)로 바뀌는지
+  // 시간 자동 전환 — 미루기 없이 울리는 동안 30초 뒤 3단계, 60초 뒤 4단계로 바뀌는지
   async function runAutoStage() {
+    clearSequence();
     const options = mixOptions(mix, vibration);
-    await ringWake(1, 'AUTO', '시간 자동 전환 1 → 3 → 4', options, (now) => autoStageTest(now, options));
+    const opts = voiceOpts(options);
+    await ringWake(1, 'AUTO', '시간 자동 전환 1 → 3 → 4', options, opts, (now) => autoStageTest(now, opts));
+  }
+
+  // 1 → 2 → 3 → 4 차례 — 단계마다 다시 울림 (각 단계 재현은 단계 버튼과 같음)
+  function runSequence() {
+    clearSequence();
+    SEQUENCE.forEach((item, index) => {
+      sequenceTimers.current.push(setTimeout(() => void runWakeVoice(item, mix, 'SEQUENCE'), index * SEQUENCE_STEP_MS));
+    });
   }
 
   async function ringWake(
@@ -211,6 +240,7 @@ export default function AlarmTestScreen() {
     how: VoiceTestRun['how'],
     title: string,
     options: ReturnType<typeof mixOptions>,
+    opts: VoiceOpts,
     setup: (now: number) => VoiceTestSetupResult,
   ) {
     const now = nowMillis();
@@ -222,12 +252,22 @@ export default function AlarmTestScreen() {
       vibration: options.vibration,
       departAt: sampleAppointmentAt(now) - SAMPLE.travelMinutes * 60_000,
     };
-    const run = { kind: 'WAKE' as const, alarmId: pkg.alarmId, stage: runStage, how, intensity, vibration: options.vibration, sound: options.sound };
+    const run = {
+      kind: 'WAKE' as const,
+      alarmId: pkg.alarmId,
+      stage: runStage,
+      how,
+      intensity,
+      vibration: options.vibration,
+      sound: options.sound,
+      geminiSource: opts.gemini ?? 'CACHE',
+    };
     await runVoice(run, () => ringVoiceTest(pkg, snoozeCount, voice));
   }
 
   // 출발 시험 — 기존 출발 알림 그대로 (알림음 · 진동 한 번 + AI 브리핑 한 번, 기상 배경음 없음, "출발했어요" 버튼)
   async function runDepartureVoice() {
+    clearSequence();
     const now = nowMillis();
     const { snoozeCount, voice } = departureVoiceTest(now);
     const pkg: RingPackage = {
@@ -235,7 +275,7 @@ export default function AlarmTestScreen() {
       alarmId: makeVoiceTestAlarmId(),
       subtitle: '개발 화면 시험 (샘플 일정 · 출발 기록은 서버에 안 남음)',
     };
-    const run = { kind: 'DEPARTURE' as const, alarmId: pkg.alarmId, stage: 1 as const, how: 'STAGE' as const, intensity, vibration, sound: false };
+    const run = { kind: 'DEPARTURE' as const, alarmId: pkg.alarmId, stage: 1 as const, how: 'STAGE' as const, intensity, vibration, sound: false, geminiSource };
     await runVoice(run, () => ringVoiceTest(pkg, snoozeCount, voice));
   }
 
@@ -254,6 +294,7 @@ export default function AlarmTestScreen() {
   }
 
   async function stopVoice() {
+    clearSequence();
     try {
       await stopVoiceTest(voiceRun?.alarmId);
       setVoiceRun((run) => (run ? { ...run, error: '즉시 정지함 (AI 음성 시험 알람의 알람음 · 진동 · AI 음성 · 다시 울림 모두. 개발 예약 알람은 그대로)' } : run));
@@ -399,8 +440,9 @@ export default function AlarmTestScreen() {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>기상 AI 음성 테스트</Text>
           <Text style={styles.note}>
-            실제 알람 코어로 바로 울림 (배경음 · 진동 · AI 음성 · 잠금화면 화면). 해제 전까지 같은 문장을 다시 읽음. 1~3단계는 Android
-            오프라인 TTS, 4단계는 폰에 미리 받아 둔 Gemini 음성이 있을 때만 그 파일, 없으면 Android TTS로 대체. 서버 · Gemini 호출 없음
+            실제 알람 코어로 바로 울림 (배경음 · 진동 · AI 음성 · 잠금화면 화면). 해제 전까지 같은 문장을 다시 읽음. 1 · 2단계는 Android
+            오프라인 TTS, 3 · 4단계는 개인화 Gemini 캐시 → 앱에 든 단계별 예비 WAV → Android TTS 순서. 서버 · Gemini 호출 없음 (비행기 모드에서도 됨).
+            AI 음성만 듣기는 아래 소리 조합에서 &quot;AI 음성만&quot;
           </Text>
           <View style={styles.chips}>
             {STAGES.map((item) => (
@@ -412,26 +454,42 @@ export default function AlarmTestScreen() {
               />
             ))}
           </View>
-          <Text style={styles.note}>{`${stage}단계: ${STAGE_NOTE[stage]}`}</Text>
+          <Text style={styles.note}>{`${stage}단계: ${STAGE_NOTE[stage]} · ${stageVoice(stage)}`}</Text>
+        </View>
+
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>3 · 4단계 Gemini 음성 출처</Text>
+          <Text style={styles.note}>
+            출처 모의는 다음 시험부터 적용. 개인화 캐시는 실제 알람이 미리 받아 둔 파일이 있을 때만 (보통 없으니 예비 WAV가 나옴). 예비 WAV는 개인 정보 없는 일반 문장
+          </Text>
+          <View style={styles.chips}>
+            {GEMINI_SOURCES.map((item) => (
+              <Button
+                key={item.value}
+                title={`${geminiSource === item.value ? '● ' : '○ '}${item.label}`}
+                onPress={() => setGeminiSource(item.value)}
+              />
+            ))}
+          </View>
+          <Text style={styles.note}>
+            {`재생 속도 고정 (높낮이 그대로): 3단계 ${GEMINI_SPEED[3].toFixed(1)}배 · 4단계 ${GEMINI_SPEED[4].toFixed(1)}배 — 실제 알람과 같음`}
+          </Text>
         </View>
 
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>시간 자동 전환 (1 → 3 → 4)</Text>
           <Text style={styles.note}>
-            {`미루기 없이 계속 울리는 동안 남은 여유가 줄어드는 상황을 앞당겨 재현: 처음 1단계 → ${AUTO_STEP_MS / 1000}초 뒤 여유 5분(3단계 Android TTS) → ${(2 * AUTO_STEP_MS) / 1000}초 뒤 여유 0분(4단계 Gemini 샘플). 배경음 · 진동은 끊기지 않고 단계마다 세짐(진동 없음은 그대로). 아래 "지금 단계"로 확인`}
+            {`미루기 없이 계속 울리는 동안 남은 여유가 줄어드는 상황을 앞당겨 재현: 처음 1단계 → ${AUTO_STEP_MS / 1000}초 뒤 여유 5분(3단계 Gemini 엄마) → ${(2 * AUTO_STEP_MS) / 1000}초 뒤 여유 0분(4단계 Gemini 긴급). 배경음 · 진동은 끊기지 않고 단계마다 세짐(진동 없음은 그대로). 아래 "지금 단계"로 확인`}
           </Text>
           <Button title="자동 전환 시험 시작" onPress={runAutoStage} disabled={!isAvailable} />
         </View>
 
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Gemini 긴급 샘플 비교</Text>
+          <Text style={styles.sectionTitle}>차례 시험 (1 → 2 → 3 → 4)</Text>
           <Text style={styles.note}>
-            {`같은 문장 "${GEMINI_SAMPLE_TEXT}"을 4단계로 재생. Gemini 샘플은 개발자가 실제 Gemini TTS로 한 번 만들어 앱에 넣은 파일이라 재생 때 API를 안 부름. 사용자 알람의 Gemini 캐시와 따로 표시됨`}
+            {`단계마다 ${SEQUENCE_STEP_MS / 1000}초씩 울린 뒤 다음 단계로 다시 울림 (2단계는 미루기로만 오므로 단계마다 새로 울림). 앱이 화면에 떠 있어야 다음 단계가 이어짐. [즉시 정지]로 멈춤`}
           </Text>
-          <View style={styles.chips}>
-            <Button title="Android TTS로 듣기" onPress={() => runSample('ANDROID')} disabled={!isAvailable} />
-            <Button title="Gemini 샘플 듣기" onPress={() => runSample('SAMPLE')} disabled={!isAvailable} />
-          </View>
+          <Button title="차례 시험 시작" onPress={runSequence} disabled={!isAvailable} />
         </View>
 
         <View style={styles.section}>
@@ -600,19 +658,24 @@ export default function AlarmTestScreen() {
 function VoiceRunView({ run, status }: { run: VoiceTestRun; status: VoiceTestStatus | null }) {
   const wake = run.kind === 'WAKE';
   const playing = wake ? status?.ringingAlarmId === run.alarmId : status?.departureSpeakingAlarmId === run.alarmId;
+  // 울리는 중이면 지금 실제 단계 · 출처 (시간 전환 · 재생 실패로 바뀜), 아니면 울릴 때 고른 것
+  const level = (playing ? status?.level : null) ?? run.info?.level ?? null;
+  const source = (playing ? status?.source : null) ?? run.info?.source ?? null;
   const lines = [
     `알람 종류: ${wake ? '기상(WAKE)' : '출발(DEPARTURE)'}`,
     wake
       ? run.how === 'AUTO'
         ? 'AI 단계: 시간 자동 전환 시험 (1 → 3 → 4, 테스트 화면이 시각을 앞당김)'
-        : `AI 단계: ${run.stage}단계 — 테스트 화면에서 강제 선택${run.stage === 4 ? ' (실제 지각 위험이 아님)' : ''}`
+        : `AI 단계: ${run.stage}단계 — ${run.how === 'SEQUENCE' ? '차례 시험 (1 → 2 → 3 → 4)' : '테스트 화면에서 강제 선택'}${run.stage === 4 ? ' (실제 지각 위험이 아님)' : ''}`
       : 'AI 단계: 1단계 출발 촉구 (테스트 샘플 일정)',
-    wake && playing && status?.level != null
-      ? `지금 단계: ${status.level}단계 · ${status.engine === 'GEMINI' ? (run.info?.geminiSourceAlarmId === 'SAMPLE' ? 'Gemini 샘플' : '캐시된 Gemini') : 'Android TTS'}`
-      : null,
-    run.info ? `실제 음성 엔진: ${engineLabel(run.info)}` : null,
-    run.info?.text ? `음성 문장: ${run.info.text}` : null,
-    run.info?.engine === 'ANDROID'
+    wake ? `3 · 4단계 출처 모의: ${GEMINI_SOURCES.find((item) => item.value === run.geminiSource)?.label ?? run.geminiSource}` : null,
+    wake && level != null ? `단계 음성: ${stageVoice(level as Stage)}` : null,
+    wake && playing && status?.level != null ? `지금 단계: ${status.level}단계` : null,
+    run.info ? `실제 음성 엔진: ${engineLabel({ ...run.info, level, source })}` : null,
+    // 울리는 중 단계가 바뀌면(자동 전환) 처음 문장은 맞지 않음 — 예비 WAV만 고정 대사라 보여 줌
+    run.info && (level === run.info.level || source === 'GEMINI_FALLBACK') ? `음성 문장: ${spokenText(level, source, run.info.text) ?? '-'}` : null,
+    source === 'GEMINI_CACHE' || source === 'GEMINI_FALLBACK' ? `재생 속도: ${(run.info?.speed ?? 1).toFixed(1)}배 (높낮이 그대로)` : null,
+    run.info && (source === 'ANDROID' || source === 'ANDROID_FALLBACK')
       ? `말하기: 높낮이 ${run.info.pitch} · 속도 ${run.info.rate} · 목소리 번호 ${run.info.voiceIndex} (폰의 오프라인 한국어 목소리 중)`
       : null,
     `진동: ${wake ? vibrationLabel(run.vibration) : '알림 진동 한 번 (폰 · 알림 설정에 따름)'}`,

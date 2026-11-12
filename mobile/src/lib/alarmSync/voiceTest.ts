@@ -1,8 +1,20 @@
 // 개발 화면(dev/alarm-test) AI 음성 시험 — 순수 함수만 (시험: __tests__/voiceTest.test.ts)
 //   샘플 일정으로 서버 브리핑 규칙(@shared/briefing.ts briefingClips)을 그대로 불러 단계별 문장 · 높낮이 · 속도 · 목소리 번호를 만듦
 //   폰에서 바로 만들어서 네트워크 · Supabase · Gemini 호출 없음 (비행기 모드에서도 됨). 실제 사용자 일정 · 대화는 안 씀
-import type { AlarmVibration, VoiceTestInfo, VoiceTestSetup } from '@capstone/alarm-core';
-import { briefingClips, resolveVoice, type BriefingInput, type BriefKind, type UrgencyRule } from '@shared/briefing.ts';
+import type { AlarmVibration, VoiceSource, VoiceTestGemini, VoiceTestInfo, VoiceTestSetup } from '@capstone/alarm-core';
+import {
+  androidVoice,
+  briefingClips,
+  GEMINI_FALLBACK_FILE,
+  GEMINI_FALLBACK_TEXT,
+  GEMINI_STAGE,
+  isGeminiLevel,
+  resolveVoice,
+  speakable,
+  type BriefingInput,
+  type BriefKind,
+  type UrgencyRule,
+} from '@shared/briefing.ts';
 import { localDayRange } from '@shared/tz.ts';
 
 export const SAMPLE_TIME_ZONE = 'Asia/Seoul';
@@ -20,6 +32,18 @@ const PROFILE = resolveVoice('NORMAL');
 
 export type Stage = 1 | 2 | 3 | 4;
 export type Mix = 'SOUND' | 'VIBRATION' | 'VOICE' | 'ALL';
+/** 시험 옵션 — 소리 · 음성 켜기 + 3 · 4단계 출처 모의 */
+export type VoiceOpts = { sound: boolean; voice: boolean; gemini?: VoiceTestGemini };
+
+/** Gemini WAV 재생 속도 — 네이티브 BriefingRules.wavSpeed와 같은 고정값 (실제 알람 · 시험 모두) */
+export const GEMINI_SPEED: Record<3 | 4, number> = { 3: 1.0, 4: 1.2 };
+
+/** 단계별 엔진 · 목소리 · 예비 파일 · 속도 (화면 설명용, 서버 규칙 값 그대로) */
+export function stageVoice(stage: Stage): string {
+  if (isGeminiLevel(stage)) return `Gemini TTS · ${GEMINI_STAGE[stage].voice} 목소리 · 예비 ${GEMINI_FALLBACK_FILE[stage]} · ${GEMINI_SPEED[stage].toFixed(1)}배`;
+  const v = androidVoice(PROFILE, stage);
+  return `Android TTS · 높낮이 ${v.pitch.toFixed(1)} · 속도 ${v.rate.toFixed(1)}`;
+}
 
 export function sampleAppointmentAt(nowMs: number): number {
   return localDayRange(new Date(nowMs), SAMPLE_TIME_ZONE).start.getTime() + SAMPLE.hour * 3_600_000;
@@ -61,29 +85,25 @@ export function mixOptions(mix: Mix, vibration: AlarmVibration): { sound: boolea
   }
 }
 
-/** 기상 시험 브리핑 — 단계 1~4 문장을 다 넣고(실제와 같이 울릴 때 단계를 고름) 미루기 횟수 · 긴급 규칙으로 단계를 재현 */
-export function wakeVoiceTest(stage: Stage, nowMs: number, opts: { sound: boolean; voice: boolean }): { snoozeCount: number; voice: VoiceTestSetup } {
+/**
+ * 기상 시험 브리핑 — 단계 1~4 문장을 다 넣고(실제와 같이 울릴 때 단계를 고름) 미루기 횟수 · 긴급 규칙으로 단계를 재현
+ * 3 · 4단계 음성은 opts.gemini 출처 모의대로 네이티브가 고름 — 개인화 캐시 → 앱에 든 예비 WAV → Android TTS. Gemini API는 안 부름
+ */
+export function wakeVoiceTest(stage: Stage, nowMs: number, opts: VoiceOpts): { snoozeCount: number; voice: VoiceTestSetup } {
   const { snoozeCount, rule } = stageSetup(stage, nowMs);
   return { snoozeCount, voice: { rule, clips: briefingClips(rule, PROFILE, sampleInput('WAKE', nowMs)), test: opts } };
 }
 
-/** 앱에 든 Gemini 긴급 샘플(res/raw/gemini_urgent_sample.wav)의 문장 — 개발자가 실제 Gemini TTS로 한 번 만든 파일. 재생 때 API 호출 없음 */
-export const GEMINI_SAMPLE_TEXT = '야!!!!!!!!!! 지금 안 일어나면 진짜 늦어!!!! 지금 당장 일어나!!!!!!!';
-
-/** 샘플 비교 — 같은 샘플 문장을 4단계로: SAMPLE이면 Gemini 샘플 파일, ANDROID면 Android TTS가 읽음 */
-export function geminiSampleTest(engine: 'SAMPLE' | 'ANDROID', nowMs: number, opts: { sound: boolean; voice: boolean }): { snoozeCount: number; voice: VoiceTestSetup } {
-  const { snoozeCount, voice } = wakeVoiceTest(4, nowMs, opts);
-  const clips = voice.clips.map((c) => (c.level === 4 ? { ...c, text: GEMINI_SAMPLE_TEXT } : c));
-  return { snoozeCount, voice: { ...voice, clips, test: { ...opts, gemini: engine } } };
-}
-
-/** 시간 자동 전환 시험 — 울리기 시작 뒤 30초에 여유 5분(→ 3단계), 60초에 여유 0분(→ 4단계)이 되게. 미루기 없이 울리는 동안 바뀜. 4단계는 Gemini 샘플 */
+/** 시간 자동 전환 시험 — 울리기 시작 뒤 30초에 여유 5분(→ 3단계), 60초에 여유 0분(→ 4단계)이 되게. 미루기 없이 울리는 동안 바뀜 */
 export const AUTO_STEP_MS = 30_000;
-export function autoStageTest(nowMs: number, opts: { sound: boolean; voice: boolean }): { snoozeCount: number; voice: VoiceTestSetup } {
+export function autoStageTest(nowMs: number, opts: VoiceOpts): { snoozeCount: number; voice: VoiceTestSetup } {
   const rule: UrgencyRule = { dangerAtMs: nowMs + AUTO_STEP_MS, urgentAtMs: nowMs + 2 * AUTO_STEP_MS, maxLevel: 4 };
-  const clips = briefingClips(rule, PROFILE, sampleInput('WAKE', nowMs)).map((c) => (c.level === 4 ? { ...c, text: GEMINI_SAMPLE_TEXT } : c));
-  return { snoozeCount: 0, voice: { rule, clips, test: { ...opts, gemini: 'SAMPLE' } } };
+  return { snoozeCount: 0, voice: { rule, clips: briefingClips(rule, PROFILE, sampleInput('WAKE', nowMs)), test: opts } };
 }
+
+/** 1 → 2 → 3 → 4 차례 시험 — 단계마다 이만큼 울린 뒤 다음 단계로 다시 울림 (2단계는 미루기로만 오므로 시각 전환으로는 재현 못 함) */
+export const SEQUENCE_STEP_MS = 20_000;
+export const SEQUENCE: Stage[] = [1, 2, 3, 4];
 
 /** 출발 시험 브리핑 — 1단계(출발 촉구) 한 문장만. 출발은 반복 없이 한 번 읽음 (네이티브 BriefingRules.repeatsBriefing) */
 export function departureVoiceTest(nowMs: number): { snoozeCount: number; voice: VoiceTestSetup } {
@@ -91,10 +111,23 @@ export function departureVoiceTest(nowMs: number): { snoozeCount: number; voice:
   return { snoozeCount: 0, voice: { rule, clips: briefingClips(rule, PROFILE, sampleInput('DEPARTURE', nowMs)), test: { sound: true, voice: true } } };
 }
 
-/** 화면에 보일 음성 엔진 — 4단계인데 Gemini 캐시가 없으면 "대체"라고 분명히 */
-export function engineLabel(info: Pick<VoiceTestInfo, 'engine' | 'level' | 'geminiSourceAlarmId'>): string {
+/** 화면에 보일 음성 출처 — 개인화 캐시 / 기본 예비 WAV / Android TTS 대체를 분명히. source가 없으면(예전 APK) 엔진으로 짐작 */
+export function engineLabel(info: Pick<VoiceTestInfo, 'engine' | 'level' | 'geminiSourceAlarmId'> & { source?: VoiceSource | null }): string {
   if (info.engine === 'NONE') return '음성 없음 (이번 구성에서 AI 음성 끔)';
-  if (info.engine === 'GEMINI' && info.geminiSourceAlarmId === 'SAMPLE') return 'Gemini 긴급 샘플 (앱에 든 파일 · 사용자 캐시 아님)';
-  if (info.engine === 'GEMINI') return `캐시된 Gemini 음성 (실제 알람 ${info.geminiSourceAlarmId?.slice(0, 8) ?? '?'}… 에 미리 받아 둔 파일)`;
-  return info.level === 4 ? 'Android TTS (Gemini 캐시 없음 → 대체)' : 'Android 오프라인 TTS';
+  const source = info.source ?? (info.engine === 'GEMINI' ? 'GEMINI_CACHE' : (info.level ?? 0) >= 3 ? 'ANDROID_FALLBACK' : 'ANDROID');
+  switch (source) {
+    case 'GEMINI_CACHE':
+      return `Gemini 개인화 캐시 (실제 알람 ${info.geminiSourceAlarmId?.slice(0, 8) ?? '?'}… 에 미리 받아 둔 파일)`;
+    case 'GEMINI_FALLBACK':
+      return `Gemini 기본 예비 WAV (앱에 든 ${info.level != null && isGeminiLevel(info.level) ? GEMINI_FALLBACK_FILE[info.level] : `${info.level}단계 파일`} · 개인화 캐시 아님 · 네트워크 없음)`;
+    case 'ANDROID_FALLBACK':
+      return 'Android TTS 대체 재생 (Gemini 음성을 못 씀)';
+    default:
+      return 'Android 오프라인 TTS';
+  }
+}
+
+/** 실제로 들리는 대사 — 예비 WAV면 그 파일의 고정 대사, 아니면 단계 문장 */
+export function spokenText(level: number | null | undefined, source: VoiceSource | null | undefined, clipText: string | null): string | null {
+  return source === 'GEMINI_FALLBACK' && level != null && isGeminiLevel(level) ? speakable(GEMINI_FALLBACK_TEXT[level]) : clipText;
 }
