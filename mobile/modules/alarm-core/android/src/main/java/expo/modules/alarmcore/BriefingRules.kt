@@ -1,7 +1,8 @@
 package expo.modules.alarmcore
 
 // 브리핑을 무엇으로 읽을지 정하는 순수 규칙 — 안드로이드 클래스를 안 써서 JVM 단위 시험으로 확인 (src/test/.../BriefingRulesTest.kt)
-// 우선순위: 기본 알람음(늘, 이 규칙과 무관) > 개인화 브리핑(Android 오프라인 TTS) > Gemini 감정 음성. 어느 단계든 못 하면 알람음 · 진동만
+// 3 · 4단계 음성 우선순위: 그 알람의 개인화 Gemini 캐시(L3/L4.wav) > 앱에 든 그 단계 예비 WAV(기상만) > 같은 단계 문장 Android TTS > 알람음 · 진동만
+// 기본 알람음 · 진동은 늘 (이 규칙과 무관). 1 · 2단계는 Android TTS
 object BriefingRules {
   // TextToSpeech.isLanguageAvailable · setLanguage 결과 값 (안드로이드 상수와 같은 수)
   const val LANG_AVAILABLE = 0
@@ -33,13 +34,32 @@ object BriefingRules {
   /** 고른 단계의 문장이 없으면 그보다 낮은 단계 중 있는 것 */
   fun clipLevel(wanted: Int, available: Set<Int>): Int? = (wanted downTo 1).firstOrNull { it in available }
 
-  /** Gemini 음성은 긴급(4단계) 문장이고 파일이 폰에 있을 때만 — 아니면 같은 문장을 Android TTS로 */
-  fun useGemini(clipLevel: Int, wavExists: Boolean): Boolean = clipLevel == 4 && wavExists
+  /** 개인화 Gemini 음성은 3 · 4단계이고 그 단계 파일이 폰에 있을 때만 */
+  fun useGemini(clipLevel: Int, wavExists: Boolean): Boolean = clipLevel in 3..4 && wavExists
+
+  /**
+   * 앱에 든 예비 WAV를 쓸 단계 — 기상 알람의 3 · 4단계만 (그 단계 번호 그대로, 다른 단계 파일은 안 씀). 출발은 null → Android TTS로 출발 문장
+   * 개인화 캐시가 없거나(한도 초과 · 네트워크 · 생성 실패 · 파일 없음) 못 틀 때 씀. 네트워크 · API 호출 없음
+   */
+  fun fallbackWavLevel(alarmType: String, level: Int): Int? = level.takeIf { alarmType == "WAKE" && it in 3..4 }
+
+  // Gemini WAV 재생 속도 (MediaPlayer PlaybackParams, 높낮이는 1.0 유지) — 3단계 1.0배 · 4단계 1.2배 고정 (개인화 캐시 · 예비 WAV · 개발 화면 모두)
+  const val STAGE4_SPEED = 1.2f
+
+  fun wavSpeed(level: Int): Float = if (level == 4) STAGE4_SPEED else 1f
+
+  /** 이번 울림의 음성 출처 (화면 · 기록 표시용) — 3 · 4단계인데 Android TTS면 대체 */
+  fun source(level: Int, cache: Boolean, bundled: Boolean): String = when {
+    cache -> "GEMINI_CACHE"
+    bundled -> "GEMINI_FALLBACK"
+    level >= 3 -> "ANDROID_FALLBACK"
+    else -> "ANDROID"
+  }
 
   data class Fallback(val level: Int, val text: String, val pitch: Float, val rate: Float)
 
-  // 서버 브리핑이 한 번도 안 왔을 때(인터넷 없음 등)의 높낮이 · 속도 — TS androidVoice의 보통 말투와 같은 값
-  private val FALLBACK_VOICE = mapOf(1 to (1.0f to 1.0f), 2 to (1.05f to 1.1f), 3 to (1.1f to 1.2f))
+  // 서버 브리핑이 한 번도 안 왔을 때(인터넷 없음 등)의 높낮이 · 속도 — TS androidVoice(LEVEL_VOICE)와 같은 단계 고정값
+  private val FALLBACK_VOICE = mapOf(1 to (1.0f to 1.0f), 2 to (1.7f to 1.5f), 3 to (1.7f to 1.5f))
 
   /**
    * 저장된 브리핑이 없을 때 읽을 것 — 기상은 꾸러미의 기상 문장(voiceText, 앱이 오프라인으로 만듦), 출발은 알림 줄(출발 · 도착 안내) + 제목

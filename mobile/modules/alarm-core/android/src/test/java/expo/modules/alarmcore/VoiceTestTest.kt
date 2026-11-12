@@ -43,14 +43,14 @@ class VoiceTestTest {
   }
 
   @Test
-  fun geminiSampleIsSeparateFromUserCache() {
-    assertEquals("SAMPLE", VoiceTest.geminiMode("SAMPLE"))
-    assertEquals("ANDROID", VoiceTest.geminiMode("ANDROID"))
+  fun sourceModesForFallbackTests() {
+    for (mode in listOf("FALLBACK", "BROKEN", "ANDROID")) assertEquals(mode, VoiceTest.geminiMode(mode))
     assertEquals("CACHE", VoiceTest.geminiMode(null))
+    assertEquals("CACHE", VoiceTest.geminiMode("SAMPLE")) // 예전 샘플 모드는 없어짐
     assertEquals("CACHE", VoiceTest.geminiMode("이상한 값"))
-    // 샘플을 넣은 시험 폴더는 실제 사용자 캐시 후보가 아님
-    val sampleFolder = VoiceTest.GeminiCandidate(VoiceTest.VOICE_ID_PREFIX + "0000-000000000000", true, VoiceTest.SAMPLE_SOURCE, "야!!!")
-    assertNull(VoiceTest.pickGeminiSource(listOf(sampleFolder)))
+    // 시험 폴더(깨진 캐시 모의 등)는 실제 사용자 캐시 후보가 아님
+    val testFolder = VoiceTest.GeminiCandidate(VoiceTest.VOICE_ID_PREFIX + "0000-000000000000", true, "aaaaaaaaaaaaaaaa", "야!")
+    assertNull(VoiceTest.pickGeminiSource(listOf(testFolder)))
   }
 
   @Test

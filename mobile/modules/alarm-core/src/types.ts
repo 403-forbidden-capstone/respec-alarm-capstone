@@ -154,9 +154,17 @@ export type VoiceBriefingSave = {
 
 /**
  * 개발 화면 AI 음성 시험 — 샘플 문장 + 끌 것 (sound: 알람음 크기 0, voice: AI 음성 안 읽음)
- * gemini: 4단계 음성 출처 — CACHE(기본) 실제 알람이 받아 둔 Gemini 캐시, 없으면 Android · SAMPLE 앱에 든 Gemini 긴급 샘플 · ANDROID 늘 Android TTS
+ * gemini: 3 · 4단계 음성 출처 모의 (네이티브 VoiceTest.geminiMode) — CACHE(기본) 실제 알람이 받아 둔 개인화 캐시(없으면 예비 WAV)
+ *   · FALLBACK 캐시 없음(한도 초과 · 네트워크 실패 · 비행기 모드와 같음) → 그 단계 예비 WAV · BROKEN 깨진 캐시 → 예비 WAV · ANDROID 예비 WAV도 못 씀 → Android TTS
+ * Gemini WAV 재생 속도는 고정 (3단계 1.0배 · 4단계 1.2배, 네이티브 BriefingRules.wavSpeed)
  */
-export type VoiceTestSetup = Pick<VoiceBriefingSave, 'rule' | 'clips'> & { test: { sound: boolean; voice: boolean; gemini?: 'CACHE' | 'SAMPLE' | 'ANDROID' } };
+export type VoiceTestSetup = Pick<VoiceBriefingSave, 'rule' | 'clips'> & {
+  test: { sound: boolean; voice: boolean; gemini?: VoiceTestGemini };
+};
+export type VoiceTestGemini = 'CACHE' | 'FALLBACK' | 'BROKEN' | 'ANDROID';
+
+/** 음성 출처 (네이티브 BriefingRules.source) — 개인화 Gemini 캐시 · 앱에 든 Gemini 예비 WAV · Android TTS · Android TTS 대체(3 · 4단계) */
+export type VoiceSource = 'GEMINI_CACHE' | 'GEMINI_FALLBACK' | 'ANDROID' | 'ANDROID_FALLBACK';
 
 /** 이번 시험 울림이 고른 음성 (네이티브 VoiceBriefing.speechFor 결과). engine NONE = 음성 없음 */
 export type VoiceTestInfo = {
@@ -166,8 +174,11 @@ export type VoiceTestInfo = {
   pitch: number | null;
   rate: number | null;
   voiceIndex: number | null;
-  /** Gemini 음성을 빌려 온 실제 알람 id, 앱에 든 샘플이면 'SAMPLE' (없으면 null) */
+  /** Gemini 음성을 빌려 온 실제 알람 id (없으면 null) */
   geminiSourceAlarmId: string | null;
+  /** 고른 첫 출처 · WAV 재생 속도. 예전 APK면 없음 */
+  source?: VoiceSource | null;
+  speed?: number | null;
 };
 
 /** 지금 재생 상태 (1초마다 읽음) */
@@ -181,6 +192,8 @@ export type VoiceTestStatus = {
   /** 지금 읽는 AI 음성 단계 · 엔진 (울리는 중 시간이 지나 1 → 3 → 4로 바뀌는 것을 봄). 예전 APK면 없음 */
   level?: number | null;
   engine?: 'GEMINI' | 'ANDROID' | null;
+  /** 실제로 소리를 낸 출처 (재생 실패로 다음 출처로 넘어가면 바뀜) */
+  source?: VoiceSource | null;
 };
 
 export type AlarmEventType = 'TRIGGERED' | 'SNOOZED' | 'DISMISSED' | 'ACKNOWLEDGED' | 'ARRIVAL_CONFIRMED';

@@ -29,10 +29,34 @@ class BriefingRulesTest {
   }
 
   @Test
-  fun geminiOnlyForUrgentClipWithFile() {
+  fun geminiForStage3And4WithFile() {
+    assertTrue(BriefingRules.useGemini(3, true))
     assertTrue(BriefingRules.useGemini(4, true))
-    assertFalse(BriefingRules.useGemini(4, false)) // 음성 미준비 → Android TTS로 같은 4단계 문장
-    for (level in 1..3) assertFalse(BriefingRules.useGemini(level, true))
+    assertFalse(BriefingRules.useGemini(4, false)) // 캐시 없음 → 예비 WAV 또는 Android TTS
+    for (level in 1..2) assertFalse(BriefingRules.useGemini(level, true))
+  }
+
+  @Test
+  fun bundledFallbackIsSameStageWakeOnly() {
+    assertEquals(3, BriefingRules.fallbackWavLevel("WAKE", 3))
+    assertEquals(4, BriefingRules.fallbackWavLevel("WAKE", 4))
+    for (level in 1..2) assertNull(BriefingRules.fallbackWavLevel("WAKE", level))
+    // 출발 알람은 기상용 예비 음성을 안 씀 → Android TTS로 출발 문장
+    for (level in 1..4) assertNull(BriefingRules.fallbackWavLevel("DEPARTURE", level))
+  }
+
+  @Test
+  fun wavSpeedFixedStage3NormalStage4Faster() {
+    assertEquals(1f, BriefingRules.wavSpeed(3), 0f)
+    assertEquals(1.2f, BriefingRules.wavSpeed(4), 0f)
+  }
+
+  @Test
+  fun sourcePriorityCacheThenBundledThenAndroid() {
+    assertEquals("GEMINI_CACHE", BriefingRules.source(4, cache = true, bundled = true))
+    assertEquals("GEMINI_FALLBACK", BriefingRules.source(3, cache = false, bundled = true))
+    assertEquals("ANDROID_FALLBACK", BriefingRules.source(3, cache = false, bundled = false))
+    assertEquals("ANDROID", BriefingRules.source(2, cache = false, bundled = false))
   }
 
   @Test
@@ -53,8 +77,9 @@ class BriefingRulesTest {
     assertEquals(text, f0.text)
     assertTrue(f1.text.startsWith("알람을 한 번 미뤘어요.") && f1.text.endsWith(text))
     assertTrue(f2.text.startsWith("알람을 여러 번 미뤘어요."))
-    assertTrue(f0.rate < f1.rate && f1.rate < f2.rate)
-    assertTrue(f0.pitch < f1.pitch && f1.pitch < f2.pitch)
+    // TS androidVoice와 같은 단계 고정값: 1단계 1.0/1.0, 2단계 이상 1.7/1.5
+    assertEquals(listOf(1.0f, 1.7f, 1.7f), listOf(f0.pitch, f1.pitch, f2.pitch))
+    assertEquals(listOf(1.0f, 1.5f, 1.5f), listOf(f0.rate, f1.rate, f2.rate))
   }
 
   @Test
