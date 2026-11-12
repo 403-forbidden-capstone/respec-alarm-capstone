@@ -39,4 +39,5 @@ export type ChainInput = {
   withWake: boolean; // 그날 첫 일정이라 기상 알람이 있음
   kinds?: readonly RingKind[]; // 만든 알람 종류. 없으면 계산된 알람 전부, 빈 목록이면 알람 없는 일정
   manualTimes?: Partial<Record<RingKind, Date>>; // 직접 고른 알람 시각 (D42 C)
+  prepareAdvanceMinutes?: number; // 받아들인 준비 알람 당김 분 (#484 · 안건 D111) — 준비 알람을 그만큼 앞당기고, 준비 전 활동을 넘는 만큼만 기상도 앞당김. 없으면 0
 };

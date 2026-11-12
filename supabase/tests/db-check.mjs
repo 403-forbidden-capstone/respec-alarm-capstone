@@ -2352,13 +2352,34 @@ await check('제안 재료(prepare_suggestion_inputs): 36시간 안 반복 일�
   const recent = await inputs();
   await q(`update public.alarm_suggestions set created_at = '2026-11-01T18:00:00+09:00' where suggestion_id = $1`, [sid]);
   const again = await inputs();
+  // 준비 알람을 직접 고른 일정은 후보에서 빠짐 (계산이 그 시각을 안 바꿈)
+  await q(`update public.alarms set time_source = 'MANUAL' where alarm_id = $1`, [prep['12-02']]);
+  const manual = await inputs();
+  await q(`update public.alarms set time_source = 'AUTO' where alarm_id = $1`, [prep['12-02']]);
   await as(A);
   const app = await expectErr(() => q(`select * from public.prepare_suggestion_inputs($1)`, [nowAt]), /permission denied/);
   await su();
   const want = [{ participant_id: part['12-02'], target_alarm_id: prep['12-02'], current_advance: 0, before_prepare_minutes: 20, cap_minutes: 10, residuals: [10, 14, 12] }];
   return JSON.stringify(base) === JSON.stringify(want) && pending.length === 0 && dup === true && ignored.length === 0 && recent.length === 0
-    && JSON.stringify(again) === JSON.stringify(want) && app === true
-    ? true : { base, pending, dup, ignored, recent, again, app };
+    && JSON.stringify(again) === JSON.stringify(want) && manual.length === 0 && app === true
+    ? true : { base, pending, dup, ignored, recent, again, manual, app };
+});
+
+await check('새 회차가 당김 분을 이어받음: 반복 묶음의 다음 회차 참여 조건을 넣을 때 값이 0이면 같은 사람의 바로 앞 회차 값, 정해서 넣은 값은 그대로, 묶음 1개짜리 일정은 0', async () => {
+  await svc();
+  const first = await insAppt(A, { at: '2026-12-08T09:00:00+09:00', title: '당김 이어받기 시험', rule: 'FREQ=DAILY' });
+  const series = first.series_id;
+  const second = await insAppt(A, { at: '2026-12-09T09:00:00+09:00', title: '당김 이어받기 시험', series, on: '2026-12-09' });
+  const third = await insAppt(A, { at: '2026-12-10T09:00:00+09:00', title: '당김 이어받기 시험', series, on: '2026-12-10' });
+  const lone = await insAppt(A, { at: '2026-12-08T15:00:00+09:00', title: '한 번짜리' });
+  const ins = async (appointmentId, adv = null) => (await q(
+    `insert into public.appointment_participants (appointment_id, user_id${adv == null ? '' : ', prepare_advance_minutes'}) values ($1, $2${adv == null ? '' : ', $3'}) returning prepare_advance_minutes as adv`,
+    adv == null ? [appointmentId, A] : [appointmentId, A, adv]))[0].adv;
+  const a1 = await ins(first.appointment_id, 10);  // 첫 회차 — 제안을 받아들여 10분
+  const a2 = await ins(second.appointment_id);     // 다음 회차 — 0으로 넣어도 10을 이어받음
+  const a3 = await ins(third.appointment_id, 5);   // 값을 정해서 넣으면 그대로
+  const a4 = await ins(lone.appointment_id);       // 묶음 1개짜리 — 앞 회차가 없어 0
+  return a1 === 10 && a2 === 10 && a3 === 5 && a4 === 0 ? true : { a1, a2, a3, a4 };
 });
 await check('지난 회차가 그대로: 다음 회차(화 11-10)를 만든 뒤에도 MISSED 후보 · 그룹 기상 상태 · R02 계획 쿼리가 지난 회차(화 11-03)의 알람 행을 같은 id · 같은 시각으로 읽고, 새 회차는 새 날짜에만 보임', async () => {
   // 매주 화 10시 수업 — 지난 회차(11-03): 기상 07:30 · 준비 08:30 · 출발 09:10. 기상은 울리고 끄기만 함 (기상 확인 없음)
