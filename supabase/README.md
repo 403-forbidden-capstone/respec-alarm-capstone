@@ -44,6 +44,7 @@ select vault.create_secret('<service_role 키>', 'service_role_key');
 - 둘 중 하나라도 없으면 오류 없이 경고만 남기고 끝남 → 키를 넣기 전에도 배치가 5분마다 돌지만 아무 일도 안 함
 - 예약 확인: `select * from cron.job;` · 실행 기록 `select * from cron.job_run_details order by start_time desc limit 10;`
 - `20261029075743_alarm_roll.sql`(반복 다음 회차)이 같은 방식으로 `alarm-roll`도 5분마다 부르게 예약함. **`alarm-roll` 함수 배포는 앱 맞추기 PR(3b) 머지 뒤** — 그 전엔 호출이 404로 끝남 (해롭지 않음)
+- `20261112090000_suggest_generate.sql`(알람 조정 제안, #49 · 안건 D111)이 `suggestion-generate`를 매일 09:00 UTC(한국 18:00, 저녁 대화 전)에 부르게 예약함. 서비스 키로 오면 `_shared/suggest-run.ts`가 `prepare_suggestion_inputs`로 재료를 읽고 규칙(`calc/suggest.ts`)을 돌려 `alarm_suggestions`에 준비 알람 당김 제안(PENDING)을 넣음 — 앱은 S01 작업 전까지 이 종류를 숨김. 배포 전에는 404 (해롭지 않음)
 - `20261109080000_voice_auto_commit.sql`(하루 기록 자동 정리)이 `voice-commit`을 10분마다 부르게 예약함(`voice-auto-commit`). 서비스 키로 오면 `_shared/ai/auto-commit.ts`가 [완료] 없이 지난 기준일 대화를 정리 — 다음 아침 가장 이른 켜진 기상 알람 2시간 전(없으면 KST 04:00), 마지막 사용자 말 60분 뒤, 한 번에 3개 · 60초. pg_net이 10초만 기다려서 바로 202로 답하고 정리는 `EdgeRuntime.waitUntil`로 뒤에서 — 결과는 함수 로그(`[auto-commit] 시작 · 완료 · 실패`)로 봄. `voice-commit`도 `verify_jwt = false`(alarm-roll과 같이 `isServiceCall` · `requireUser`로 가름) — **마이그레이션 적용 전에 함수를 먼저 배포**
 - `wake-check`는 `config.toml`에서 `verify_jwt = false`로 두고, 코드(`_shared/auth.ts` `requireServiceCall`)가 `apikey` · `Authorization` 머리글의 키를 `SUPABASE_SERVICE_ROLE_KEY`(legacy JWT) 또는 `SUPABASE_SECRET_KEYS`(`sb_secret_…`)와 직접 비교함 → Vault에 어느 형식을 넣어도 됨
 
@@ -66,6 +67,7 @@ select vault.create_secret('<service_role 키>', 'service_role_key');
 | `find_missed_wake_alarms(p_now, p_lookback_hours)` | `wake-check` | 기상 미확인(MISSED)으로 기록할 알람 목록 (미확인 시각 = 마지막으로 울리기 시작한 때 + 30분 — 확인 알림에 답이 없으면 다시 울리지 않으므로 다시 울림 소요를 안 더함, 친구 7장 D2). 폰은 미루면 다시 울림 묶음을 처음부터 새로 시작하므로, 마지막 울림 시작 = 마지막 미루기 시각 + 미루기 시간(미루기가 없으면 알람 시각). 돌려주는 `snooze_minutes`는 미루기 합이라 참고용이고 `missed_at`은 이 합으로 구하지 않음. 기상 확인은 같은 사람의 `WAKE_CONFIRMED`(어느 기상 알람이든) 또는 `daily_records.wake_confirmed_at`이면 인정. 기록은 알람 시각 6시간 전 ~ 18시간 뒤만 봄. 기상 알람은 켜져 있거나, 꺼졌어도 그 구간에 울린 기록(TRIGGERED)이 있으면 셈 — 알람이 울린 뒤 알람만 꺼도 미확인 후보에 남음(`private.wake_alarm_counts`, 11/9 탐색 시험 X-WAKE-04). 돌려주는 `event_key`를 `alarm_events.client_event_id`로 넣고 `on conflict do nothing`하면 같은 알람이 두 번 기록되지 않음 |
 | `roll_insert_occurrence(p_appointment, p_participant, p_alarms, p_items)` | `alarm-roll` (다음 PR) | 반복 회차 하나를 약속 · 참여 조건 · 알람 · 준비물(`todos` ITEM)까지 **한 트랜잭션**으로 씀. 같은 (만든 사람, 묶음, 날짜)가 이미 있으면 아무것도 안 쓰고 `null`(같은 요청 두 번 = 같은 결과), 새로 만들면 `appointment_id`. 넣는 칸은 `alarm-commit`(`_shared/commit.ts` persistAppointment)과 같고 (알람의 `vibration`은 `20261030200000_alarm_vibration.sql`부터 — 직접 고른 진동을 다음 회차가 이어받음) 약속에 `memo` · `dest_radius_m`만 더 이어받음. 입력은 jsonb(`series_id` · `occurrence_on` 필수) |
 | `roll_due_series(p_now, p_limit)` | `alarm-roll` 배치 (다음 PR) | 회차를 넘길 후보 묶음 `(user_id, series_id, kind, template_id)`, 다음 회차가 급한 순 (정말 만들 날짜가 있는지는 `alarm-roll`이 다시 봄). `APPOINTMENT`: 묶음의 **기준 회차**(예외 아닌 회차 중 날짜가 가장 늦은 것, 없으면 이번만 고친 회차 중, 이번만 지운 회차는 기준이 아님)에 읽을 수 있는 `recurrence_rule`(두 모양)이 있고 개인 약속이며 **다음 회차** 시각이 `p_now + 14일` 앞(14일치가 차 있으면 안 줌) · 재시도 대기 아님(`roll_attempts.next_try_at`이 안 온 줄 없음) · 미뤄 둔 날짜의 재시도 때가 지났으면 창 밖이어도 포함. `STANDALONE`: 일정 없는 반복 알람(같은 기준). `ROUTINE`: 켜 둔 루틴(읽을 수 있는 요일)의 켜진 단계 알람 시각이 지난 것. 못 읽는 규칙 · 요일(예전 MONTHLY · INTERVAL 등)은 빼서 매번 앞자리를 차지하지 않게 |
+| `prepare_suggestion_inputs(p_now)` | `suggestion-generate` 배치 | 앞으로 36시간 안 반복 일정의 켜진 준비 알람마다 지난 회차 잔차(실제 준비 − 계획 준비, 분, 오래된 → 최근 최대 10개) · 지금 당김 분 · 준비 전 시간 · 상한(10 / 5분). 예정 출발 ±3분 · 준비 시작 없는 날은 빼고, 대기 중 제안 · 7일 안 제안 · 무시 뒤 실측 3번 전은 후보에서 뺌 (D62 · D24 C). 서버 역할만 |
 
 앱(authenticated)이 부르는 DB 함수 추가분:
 
@@ -365,7 +367,7 @@ npx supabase@2.119.0 functions deploy appointment-edit --project-ref gomrhctwjvt
 npx supabase@2.119.0 functions deploy timetable-extract --project-ref gomrhctwjvttoqifxktt --use-api   # ai_calls_point_timetable 마이그레이션 적용 뒤에 — 먼저 배포하면 호출 기록(TT)이 제약에 걸려 안 쌓이고 하루 한도가 풀림
 ```
 
-- `verify_jwt`는 `config.toml`의 `[functions.<이름>]`이 정함 (`wake-check` · `alarm-roll` 둘만 끔). 배포 때 따라감
+- `verify_jwt`는 `config.toml`의 `[functions.<이름>]`이 정함 (`wake-check` · `alarm-roll` · `suggestion-generate`만 끔). 배포 때 따라감
 - `_shared/`는 함수 폴더 밖이어도 상대 import라 같이 묶임. 공용 파일을 고치면 쓰는 함수를 다시 배포해야 함
 - 배치 키(Vault `project_url` · `service_role_key`)를 만든 뒤 `wake-check`를 배포하면 5분마다 돔. 배포 전에는 404가 나도 정상 ("배치"). `alarm-roll`도 같지만 **앱 맞추기(3b) 머지 뒤에 배포**함
 

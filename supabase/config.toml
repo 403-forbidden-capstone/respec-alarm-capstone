@@ -419,6 +419,9 @@ verify_jwt = false
 [functions.alarm-roll]
 verify_jwt = false
 
+[functions.suggestion-generate]
+verify_jwt = false
+
 [analytics]
 enabled = true
 port = 54327
