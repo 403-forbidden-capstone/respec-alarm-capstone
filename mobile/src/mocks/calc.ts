@@ -26,6 +26,7 @@ export function alarmChain(a: MockAppointment): AlarmTime[] {
     withWake: a.withWake,
     kinds: a.kinds,
     manualTimes: a.manual?.times,
+    prepareAdvanceMinutes: a.manual?.times?.PREPARE ? 0 : (a.prepareAdvanceMinutes ?? 0), // 준비 알람을 직접 고르면 당기지 않음 (서버 plan-core와 같음)
   });
   return chain.map((x) => ({
     id: `${a.id}:${x.kind}`,

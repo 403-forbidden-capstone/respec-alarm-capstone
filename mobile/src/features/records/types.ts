@@ -67,7 +67,7 @@ export type DayRecord = {
 export type SuggestionStatus = Enums<'alarm_suggestion_status'>; // PENDING · APPLIED · EDITED · IGNORED
 
 // 시각이 아닌 제안 — 말소리 · 배경음 · 진동 (DB alarm_suggestion_type VOICE_TONE · SOUND · INTENSITY). 실데이터에서만 있음
-//   시각을 앞당기는 제안은 DB 종류에 아직 없음(D6 열림)이라 가짜 데이터만 시각 칸을 씀
+//   시각 제안은 준비 알람 당김(PREPARE_ADVANCE, #484 · 안건 D111) — change 없이 시각 칸을 씀
 export type SuggestionChange = {
   kind: Enums<'alarm_suggestion_type'>;
   axis: string; // 말소리 · 배경음 · 진동
@@ -85,12 +85,13 @@ export type Suggestion = {
   reason: string; // 최근 3번의 준비가 예상보다 평균 12분 더 걸렸어요.
   deltas: { label: string; value: string }[]; // 1회 전 +10분 …
   appointment: { id: string; title: string; at: Date };
-  minutes: number; // 제안한 앞당김 (분)
+  minutes: number; // 제안한 준비 알람 앞당김 (분) — 준비 알람을 당기고, 준비 전 활동(기상 → 준비)을 넘는 만큼만 기상도 (안건 D111 1 · 2번)
   currentWake: Date; // 지금(적용 뒤에는 적용 전) 기상 알람
   currentPrepare: Date | null; // 지금(적용 뒤에는 적용 전) 준비 알람 — 준비 알람이 없으면 null
   depart: Date; // 출발 알람 — 약속에 맞춰 정해져서 조정해도 그대로
   bounds: EditBounds; // 직접 고를 수 있는 범위 (D53)
-  proposedWake: Date; // 제안(적용 뒤에는 실제로 적용한) 기상 알람
+  proposedWake: Date; // 제안(적용 뒤에는 실제로 적용한) 기상 알람 — 준비 전 활동 안이면 지금과 같음
+  proposedPrepare: Date | null; // 제안(적용 뒤에는 실제로 적용한) 준비 알람
   status: SuggestionStatus;
   applied: { wake: Date; prepare: Date | null; minutes: number } | null; // 적용한 뒤 시각 · 적용 전보다 일찍(+) 늦게(−)
   // 시각이 아닌 제안이면 있음 — 시각 칸(currentWake · proposedWake · bounds 등)은 대상 알람 시각으로 채워 두고 화면은 안 씀 (appointment.id가 빈 글자면 연결된 일정 없음)
