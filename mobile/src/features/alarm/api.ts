@@ -5,6 +5,7 @@ import { DEFAULT_COMMON_P80, personalPrepareOf, predictPrepare, prepareStatsOf, 
 import { hasEarlierWake, isEveningWake } from '@shared/calc/wake.ts';
 import { Platform } from 'react-native';
 
+import { isDevAlarmId } from '@/lib/alarmSync/devAlarm';
 import { now } from '@/lib/clock';
 import { UserError } from '@/lib/errors';
 import { isMock } from '@/lib/mode';
@@ -764,8 +765,12 @@ function findAlarm(alarmId: string) {
 
 // 울림 화면 (H07) — 실제 울림은 알람 코어(네이티브). 이 화면은 디자인 · 웹 미리 보기용
 // 준비 · 출발 알람의 머리글(notice)은 폰 알림과 같은 글자 (서버 알림 문구 함수 — features/alarm/notice.ts)
+// 폰 알람 코어로 처리할 울림인지 — 실데이터, 또는 가짜 데이터 모드라도 개발 화면 시험 알람(폰 코어가 실제로 울림)이면 코어로
+//   예전에는 가짜 모드에서 시험 알람을 열면 가짜 데이터에 없는 id라 "찾을 수 없어요"만 뜨고 화면에서 끌 수 없었음 (11/12)
+const usesCore = (alarmId: string | null | undefined): boolean => !isMock() || (Platform.OS === 'android' && alarmId != null && isDevAlarmId(alarmId));
+
 export async function getRing(alarmId: string): Promise<RingInfo | null> {
-  if (!isMock()) {
+  if (usesCore(alarmId)) {
     const ring = isPreviewAlarmId(alarmId) ? await getPreviewRing(alarmId) : await real.getRing(alarmId); // 웹 미리보기는 저장된 일정으로 (ringPreview.ts), 폰은 코어의 지금 울리는 알람
     // 웹은 폰 알람 코어가 없어 누른 알람을 못 찾을 때가 많음(가짜 데이터 주소 · 주소 없이 열기) → 저장된 알람 중 지금과 가장 가까운 것을 바로 울림
     return ring ?? (Platform.OS === 'web' ? getNearestPreviewRing(alarmId) : null);
@@ -828,20 +833,20 @@ async function previewWakeCheck(alarmId: string): Promise<WakeCheck | null> {
 // 울리기 시작 (H07) — 기상 알람이면 내 상태가 '알람 울리는 중'. 실데이터는 알람 코어(#33) · alarm_events TRIGGERED
 // 이미 기상 확정한 알람이면 판정을 그대로 둠 (목업은 기상 전에만 S.wake를 비움)
 export async function startRing(alarmId: string, at: Date) {
-  if (!isMock()) return real.startRing();
+  if (usesCore(alarmId)) return real.startRing();
   delete db.snoozes[alarmId]; // 다시 울리기 시작하면 미룸 표시는 끝
   if (findAlarm(alarmId)?.alarm.kind !== 'WAKE' || db.wakeConfirmations[alarmId]) return;
   db.wake = { alarmId, phase: 'ringing', ringAt: at, dismissedAt: null, ...NO_USE };
 }
 
 // H07을 띄웠다고 알람 코어의 길잡이 화면에 알림 (실데이터만 — 가짜 데이터는 길잡이 화면이 없음)
-export function ackRing(): void {
-  if (!isMock()) real.ackRing();
+export function ackRing(alarmId?: string | null): void {
+  if (usesCore(alarmId)) real.ackRing();
 }
 
 // 미루기 · 해제 없이 울림 화면을 나감 (뒤로 가기) — 울리는 중 표시만 지우고 기록은 안 남김
 export async function stopRing(alarmId: string) {
-  if (!isMock()) return real.stopRing();
+  if (usesCore(alarmId)) return real.stopRing();
   if (db.wake.alarmId === alarmId && db.wake.phase === 'ringing') db.wake = { ...db.wake, phase: 'idle' };
 }
 
@@ -849,7 +854,7 @@ export async function stopRing(alarmId: string) {
 // 3번까지 (한도에 닿으면 아무것도 안 함 — 화면이 이미 버튼을 끔). 실데이터의 다시 울림 · 한도 · SNOOZED 기록은 알람 코어(#33)
 // 돌려주는 값 = 미뤘는지. 한도 · 이미 멈춤으로 못 미루면 false (화면이 토스트로 알림)
 export async function snoozeRing(alarmId: string, minutes: number, at: Date): Promise<boolean> {
-  if (!isMock()) {
+  if (usesCore(alarmId)) {
     // 웹 미리보기 알람은 코어에 없는 id라 부르지 않음 — 화면(ring.tsx)이 미리보기면 이 함수를 안 부르고 "다시 울리지 않아요"로 안내
     if (isPreviewAlarmId(alarmId)) return false;
     return real.snoozeRing(alarmId, minutes);
@@ -894,7 +899,7 @@ export async function cancelSnooze(alarmId: string): Promise<CancelSnoozeResult>
 // 알람 해제 (H07) — at = 실제로 끈 시각(울린 시각). 기상 알람이면 기상 판정(관찰 중)을 시작
 // 이미 기상 확정한 알람이면 판정 · 기록을 그대로 둠 (해제 기록이 겹치지 않게). 실데이터는 alarm_events DISMISSED
 export async function dismissRing(alarmId: string, at: Date) {
-  if (!isMock()) {
+  if (usesCore(alarmId)) {
     if (!isPreviewAlarmId(alarmId)) return real.dismissRing();
     // 웹 미리보기 — 기상 알람이면 이 탭에서 기상 확인을 처음부터 시작 (끈 시각 = 지금). 확정된 뒤 다시 울려 봐도 시연 버튼이 다시 나옴
     if (parsePreviewAlarmId(alarmId)?.kind === 'WAKE') {

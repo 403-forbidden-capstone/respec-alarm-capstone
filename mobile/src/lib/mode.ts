@@ -12,7 +12,7 @@ import { Platform } from 'react-native';
 
 import { setRealTime } from './clock';
 import { REAL_DATA_READY } from './flags';
-import { modePolicy, resolveMode, showDevLogin, showScreenIds, type DataMode, type ModeEnv } from './modePolicy';
+import { appVariantOf, modePolicy, resolveMode, showDevLogin, showScreenIds, type DataMode, type ModeEnv } from './modePolicy';
 import { isSupabaseConfigured } from './supabase';
 
 export type { DataMode } from './modePolicy';
@@ -21,7 +21,9 @@ type State = { mode: DataMode; ready: boolean }; // ready = 저장된 값을 읽
 
 const KEY = 'respec.dataMode';
 
-const env: ModeEnv = { web: Platform.OS === 'web', dev: __DEV__, configured: isSupabaseConfigured, ready: REAL_DATA_READY };
+// 빌드 종류 (eas.json 프로필 env · app.config.js와 같은 값) — 개발자용 배포 APK면 로그인 화면에 데모 로그인
+export const appVariant = appVariantOf(process.env.EXPO_PUBLIC_APP_VARIANT);
+const env: ModeEnv = { web: Platform.OS === 'web', dev: __DEV__, configured: isSupabaseConfigured, ready: REAL_DATA_READY, devApk: appVariant === 'dev' };
 const policy = modePolicy(env);
 
 // 실데이터를 쓸 수 있는지 — 못 쓰면 주소 ?mode=real · 저장된 real도 가짜로 돎

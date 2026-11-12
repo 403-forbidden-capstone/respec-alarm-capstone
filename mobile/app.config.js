@@ -12,8 +12,19 @@ function googleServicesFile() {
   return fs.existsSync(path.join(__dirname, 'google-services.json')) ? './google-services.json' : undefined;
 }
 
+// 빌드 종류 — EXPO_PUBLIC_APP_VARIANT (eas.json 프로필 env, 앱 안 lib/modePolicy appVariantOf와 같은 규칙)
+//   release = 실배포 APK: app.json 그대로 (이름 Re:Spec Alarm · 버전 1.0.0)
+//   그 밖(dev · 비었음) = 개발자용 배포: 이름 뒤에 "개발", 버전 0.x — 폰에서 어느 쪽인지 바로 보이게. 데모 계정 로그인은 이쪽에만
+const DEV_VERSION = '0.1.0';
+
+function variantConfig(config) {
+  if ((process.env.EXPO_PUBLIC_APP_VARIANT || '').trim() === 'release') return config;
+  return { ...config, name: `${config.name} 개발`, version: DEV_VERSION };
+}
+
 module.exports = ({ config }) => {
+  const base = variantConfig(config);
   const file = googleServicesFile();
-  if (!file) return config;
-  return { ...config, android: { ...config.android, googleServicesFile: file } };
+  if (!file) return base;
+  return { ...base, android: { ...base.android, googleServicesFile: file } };
 };

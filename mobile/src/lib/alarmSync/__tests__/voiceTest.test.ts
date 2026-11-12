@@ -10,6 +10,7 @@ import {
   departureVoiceTest,
   engineLabel,
   GEMINI_SAMPLE_TEXT,
+  sampleAppointmentAt,
   geminiSampleTest,
   mixOptions,
   SAMPLE,
@@ -124,5 +125,19 @@ describe('재생 구성', () => {
   it('진동 없음(NONE)을 고르면 전체 함께여도 진동 없음 그대로', () => {
     expect(mixOptions('ALL', 'NONE').vibration).toBe('NONE');
     expect(mixOptions('VIBRATION', 'NONE')).toEqual({ sound: false, voice: false, vibration: 'NONE' });
+  });
+});
+
+describe('시험 샘플 일정 시각 (sampleAppointmentAt)', () => {
+  // 서울 시각 → epoch ms
+  const seoul = (iso: string) => new Date(`${iso}+09:00`).getTime();
+
+  it('오늘 출발(9:10) 전이면 오늘 10시', () => {
+    expect(sampleAppointmentAt(seoul('2026-11-12T07:00:00'))).toBe(seoul('2026-11-12T10:00:00'));
+  });
+
+  it('출발 시각이 지났으면 내일 10시 — 오후에 시험해도 "499분 늦어요"가 안 뜸', () => {
+    expect(sampleAppointmentAt(seoul('2026-11-12T09:10:00'))).toBe(seoul('2026-11-13T10:00:00'));
+    expect(sampleAppointmentAt(seoul('2026-11-12T17:23:00'))).toBe(seoul('2026-11-13T10:00:00'));
   });
 });

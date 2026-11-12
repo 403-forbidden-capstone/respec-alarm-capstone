@@ -12,7 +12,11 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { router } from 'expo-router';
+
 import { TopBar } from '@/components/ui';
+import { openableHome } from '@/features/alarm/ringExit';
+import { useAuth } from '@/features/auth/AuthProvider';
 import { makeDevAlarmId, makeVoiceTestAlarmId } from '@/lib/alarmSync/devAlarm';
 import {
   AUTO_STEP_MS,
@@ -28,7 +32,6 @@ import {
   type Mix,
   type Stage,
 } from '@/lib/alarmSync/voiceTest';
-import { backOrHome } from '@/lib/nav';
 import {
   addAlarmEventListener,
   cancelAll,
@@ -125,6 +128,12 @@ type VoiceTestRun = {
 const CAN_TRY = isAvailable || Platform.OS !== 'android';
 
 export default function AlarmTestScreen() {
+  const auth = useAuth();
+  // "← 이전" — 앞 화면이 없으면(딥링크 · 울림 화면에서 돌아옴) 지금 열 수 있는 첫 화면. 로그인 전이면 홈이 막혀 있어 로그인 (예전엔 눌러도 그대로였음)
+  function goBack() {
+    if (router.canGoBack()) router.back();
+    else router.replace(openableHome({ enabled: auth.enabled, signedIn: auth.session != null, needsOnboarding: auth.needsOnboarding, needsReconsent: auth.needsReconsent }));
+  }
   const [alarms, setAlarms] = useState<ScheduledAlarm[]>([]);
   const [events, setEvents] = useState<AlarmEvent[]>([]);
   const [permissions, setPermissions] = useState<Permissions | null>(null);
@@ -370,7 +379,7 @@ export default function AlarmTestScreen() {
     <SafeAreaView style={styles.safe}>
       <ScrollView contentContainerStyle={styles.content}>
         {/* 로그인 화면의 "알람 테스트"에서 들어오므로 돌아갈 길을 둠 (안드로이드 뒤로 버튼과 같음). 앞 화면이 없으면 홈 */}
-        <TopBar onBack={backOrHome} />
+        <TopBar onBack={goBack} />
         <Text style={styles.title}>알람 테스트 (개발용)</Text>
         <Text style={styles.body}>
           예약 → 화면 끄기 → 울리는지 확인. 기상 알람은 해제 또는 미루기(5 · 10 · 15분 중 고르기, 최대 3번) 전까지 계속 울려요. AI는 5분 여유부터 3단계, 0분부터 4단계로 올라가요.

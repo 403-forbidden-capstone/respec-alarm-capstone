@@ -17,6 +17,7 @@ export type ModeEnv = {
   dev: boolean; // __DEV__ — 폰 개발용 빌드 (출시용 APK는 false)
   configured: boolean; // Supabase 주소 · 키 값이 이 빌드에 들어 있음
   ready: boolean; // lib/flags REAL_DATA_READY
+  devApk?: boolean; // 개발자용 배포 APK (EXPO_PUBLIC_APP_VARIANT=dev, eas.json preview) — 실데이터 고정은 출시용과 같고 데모 로그인만 보임
 };
 
 export type ModePolicy = {
@@ -45,7 +46,11 @@ export function showScreenIds(env: ModeEnv): boolean {
   return env.web || env.dev;
 }
 
-// 개발 메뉴(/dev/screens)의 이메일 로그인 · 로그아웃 — 시드 계정(supabase/seed)용이라 출시용 폰 빌드에는 안 보임
+// 데모(시드) 계정 이메일 로그인 — 로그인 화면 · 개발 메뉴(/dev/screens). 웹 · 폰 개발용 · 개발자용 배포 APK에서만, 실배포(v1) APK에는 안 보임
 export function showDevLogin(env: ModeEnv): boolean {
-  return env.ready && env.configured && (env.web || env.dev);
+  return env.ready && env.configured && (env.web || env.dev || env.devApk === true);
 }
+
+// 빌드 종류 — EXPO_PUBLIC_APP_VARIANT. 'release'(실배포)만 실배포로 보고, 비었거나 다른 값이면 개발자용 (값을 빠뜨린 빌드가 테스터에게 막히지 않게)
+export type AppVariant = 'dev' | 'release';
+export const appVariantOf = (value: string | undefined): AppVariant => (value?.trim() === 'release' ? 'release' : 'dev');

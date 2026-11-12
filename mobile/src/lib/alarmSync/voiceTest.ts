@@ -21,8 +21,12 @@ const PROFILE = resolveVoice('NORMAL');
 export type Stage = 1 | 2 | 3 | 4;
 export type Mix = 'SOUND' | 'VIBRATION' | 'VOICE' | 'ALL';
 
+// 오늘 출발 시각(9:10)이 이미 지났으면 내일 10시 — 지난 시각이면 울림 화면에 "출발보다 499분 늦어요"처럼 의미 없는 경고가 뜸 (11/12 에뮬레이터)
+//   4단계(여유 0분)는 이 시각이 아니라 VoiceTest가 단계를 강제해서 재현하므로 영향 없음
 export function sampleAppointmentAt(nowMs: number): number {
-  return localDayRange(new Date(nowMs), SAMPLE_TIME_ZONE).start.getTime() + SAMPLE.hour * 3_600_000;
+  const today = localDayRange(new Date(nowMs), SAMPLE_TIME_ZONE).start.getTime() + SAMPLE.hour * 3_600_000;
+  const departToday = today - SAMPLE.travelMinutes * 60_000;
+  return departToday > nowMs ? today : today + 24 * 3_600_000;
 }
 
 function sampleInput(kind: BriefKind, nowMs: number): BriefingInput {

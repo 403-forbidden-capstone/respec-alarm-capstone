@@ -64,12 +64,16 @@ PR에서 앱 검사가 자동으로 돌지 않아서(Actions 분량, #134) push�
 
 ### 앱
 
-APK 두 종류. 둘 다 Expo Go로는 안 되고 EAS 빌드 페이지에서 받음.
+APK 세 종류. 모두 Expo Go로는 안 되고 EAS 빌드 페이지에서 받음.
 
-| 프로필 | 쓰임 | 언제 다시 빌드 |
-|---|---|---|
-| `development` | 개발용. 설치해 두고 `npx expo start`에 붙여 JS 수정을 바로 봄 | 네이티브 모듈 · 플러그인 · 네이티브 패키지 · `app.json`이 바뀔 때 |
-| `preview` | 팀 테스트용. 설치하면 그대로 씀 | 위와 같음. JS만 바뀐 건 빌드 없이 `eas update`로 보냄 |
+| 프로필 | 쓰임 | 폰에 보이는 이름 · 버전 | 언제 다시 빌드 |
+|---|---|---|---|
+| `development` | 개발용. 설치해 두고 `npx expo start`에 붙여 JS 수정을 바로 봄 | Re:Spec Alarm 개발 · 0.1.0 | 네이티브 모듈 · 플러그인 · 네이티브 패키지 · `app.json`이 바뀔 때 |
+| `preview` | 개발자용 배포(팀 테스트 · 데모 릴리스). 설치하면 그대로 씀. 로그인 화면에 데모 계정 로그인 | Re:Spec Alarm 개발 · 0.1.0 | 위와 같음. JS만 바뀐 건 빌드 없이 `eas update`로 보냄 |
+| `production` | 실배포 APK (v1). 데모 로그인 없음 | Re:Spec Alarm · 1.0.0 | 실배포할 때만 |
+
+- 개발자용 · 실배포는 빌드 변수 `EXPO_PUBLIC_APP_VARIANT`(`eas.json` 프로필의 `env`)로 갈림. `release`만 실배포이고 비었거나 다른 값은 개발자용 (`app.config.js` · `src/lib/modePolicy.ts`)
+- 개발자용 APK의 [데모 계정으로 로그인]은 EAS 환경 변수(preview) `EXPO_PUBLIC_DEMO_PASSWORD`(= 시드 `SEED_PASSWORD`)가 있으면 한 번에 `demo-me`로 들어감. 없으면 개발 메뉴의 입력 칸으로 감. 실배포(production) 환경에는 넣지 않음
 
 빌드 시작은 둘 중 하나
 - GitHub: Actions → APK 빌드 → Run workflow → 프로필 선택
@@ -104,5 +108,5 @@ cp .env.example .env
 ### 데이터 모드 · 개발 메뉴 로그인
 
 - 폰 출시용 빌드(`__DEV__` false)는 실데이터만 쓰고 로그인이 필수입니다. Supabase 값이 없으면 "앱 설정이 빠져 있어요" 화면이 뜹니다. 웹 · 폰 개발용은 가짜 데이터로 바꿀 수 있고, 웹은 기본이 가짜 데이터이며 주소 `?mode=real`이면 실데이터입니다 (규칙 표: `src/lib/modePolicy.ts`)
-- 시드 계정으로 실데이터를 시험하려면 `/dev/screens`(웹 · 폰 개발용)의 "개발용 이메일 로그인"에 `demo-me@example.com`과 시드 비밀번호(`SEED_PASSWORD`)를 넣습니다. 비밀번호는 코드에 없고 입력 칸에만 넣습니다. 로그아웃은 폰에 걸린 알람 · 쌓인 기록까지 정리합니다
+- 시드 계정으로 실데이터를 시험하려면 로그인 화면의 [데모 계정으로 로그인](웹 · 폰 개발용 · 개발자용 APK)을 누릅니다. 빌드에 `EXPO_PUBLIC_DEMO_PASSWORD`가 있으면 바로 `demo-me@example.com`으로 들어가고, 없거나 다른 데모 계정이면 `/dev/screens`의 "개발용 이메일 로그인"에 시드 비밀번호(`SEED_PASSWORD`)를 넣습니다. 비밀번호는 코드에 없습니다. 로그아웃은 폰에 걸린 알람 · 쌓인 기록까지 정리합니다
 - 서버 함수와 앱이 같이 쓰는 계산 파일(`supabase/functions/_shared/`)은 경로 별칭 `@shared/*`로 가져옵니다 (`tsconfig.json` paths · `metro.config.js` watchFolders)
