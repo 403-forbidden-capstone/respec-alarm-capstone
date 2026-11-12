@@ -207,8 +207,8 @@ export default async function ch07({ q, as, su, svc, check, expectErr }) {
     const s3 = of(await rows(A, g, D, at('08:15')), B);
     await ev(al, B, 'WAKE_CONFIRMED', at('08:20'), { src: 'BUTTON' });
     const s4 = of(await rows(A, g, D, at('08:25')), B);
-    // Public API permits only yesterday/today/tomorrow. Use a fresh current-day
-    // fixture for its response shape; keep the fixed-date private state timeline.
+    // 공개 함수는 조회자 시간대 기준 어제~내일만 허용하므로 오늘(한국) 데이터로 응답 칸을 확인
+    // 단계 전이는 고정 날짜 D를 쓰는 private 함수 검사로 유지
     const [{ today: shapeDay }] = await q("select (now() at time zone 'Asia/Seoul')::date::text as today");
     const shapeGroup = await mkGroup(A, [B], [B]);
     await appt(A, shapeGroup, at('10:00', shapeDay));
@@ -314,8 +314,8 @@ export default async function ch07({ q, as, su, svc, check, expectErr }) {
   await check('7-35 · 7-37: 응답에 수면 시간 · 메모 · 위치 · 강도 같은 칸이 없음 — 줄 하나의 칸은 일곱 개뿐', async () => {
     const A = await join_(43, '에이');
     const g = await mkGroup(A, [], [A]);
-    // Public API date range is relative to the viewer's timezone, not the
-    // historical D='2026-11-10' used by private wake-state scenario tests.
+    // 공개 함수의 날짜 범위는 조회자 시간대 기준이므로 오늘(한국) 날짜를 사용
+    // private 기상 상태 시나리오의 고정 날짜 D='2026-11-10'은 변경하지 않음
     const [{ today }] = await q("select (now() at time zone 'Asia/Seoul')::date::text as today");
     await appt(A, g, at('10:00', today)); await wakeAlarm(A, at('07:00', today));
     await as(A);
