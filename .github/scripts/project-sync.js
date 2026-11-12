@@ -144,10 +144,8 @@ async function onPullRequest(sync, payload, { github, context, core, board, prCl
   // PR 카드: 닫는 이슈가 없는 사람 PR. 이미 카드가 있으면(나중에 Closes를 적은 경우 등) 그 카드도 마저 옮긴다.
   if (human && (issues.length === 0 || card)) await syncPullRequestCard(sync, pr, card, { opening });
 
-  if (opening && human) {
-    await fillPullRequest(pr, issues, { github, context });
-    if (issues.length === 0) await linkBranchIssue(pr, { github, context, core, prClient });
-  }
+  if (opening) await fillPullRequest(pr, issues, { github, context, human });
+  if (opening && human && issues.length === 0) await linkBranchIssue(pr, { github, context, core, prClient });
 }
 
 async function loadPullRequest(github, context, board, number) {
@@ -204,13 +202,13 @@ async function syncPullRequestCard(sync, pr, card, { opening }) {
 // 닫는 이슈 없이 연 PR: 브랜치 이름(feat/12-...)의 번호가 이슈면 본문에 '관련 이슈 #12'를 단다.
 // Closes는 자동으로 넣지 않는다 — PR 여러 개가 붙는 이슈(#42 등)가 첫 PR 머지 때 닫혀 버려서.
 // 비어 있는 'Closes #' 줄이 있으면 그 줄을 바꾸고, 본문에 이미 그 번호가 있거나 번호가 PR이면 건너뛴다.
+// 본문은 고치기 직전에 다시 읽는다 — 이벤트에 실린 본문은 PR을 연 순간 것이라, 그 사이 작성자가 적은 Closes를 덮어쓸 수 있어서.
 async function linkBranchIssue(pr, { github, context, core, prClient }) {
   const match = BRANCH_ISSUE.exec(pr.head?.ref ?? '');
   if (!match) return;
   const number = Number(match[1]);
-  const body = pr.body ?? '';
   const mentioned = new RegExp(`#${number}(?!\\d)`);
-  if (mentioned.test(body) || mentioned.test(pr.title)) return;
+  if (mentioned.test(pr.body ?? '') || mentioned.test(pr.title)) return;
 
   let issue;
   try {
@@ -220,14 +218,18 @@ async function linkBranchIssue(pr, { github, context, core, prClient }) {
   }
   if (issue.pull_request) return;
 
+  const { data: latest } = await github.rest.pulls.get({ ...context.repo, pull_number: pr.number });
+  const body = latest.body ?? '';
+  if (mentioned.test(body) || mentioned.test(latest.title)) return;
+
   const line = `관련 이슈 #${number} <!-- 브랜치 이름에서 자동 연결. 이 PR로 이슈를 닫으려면 Closes #${number} 로 바꿔 주세요 -->`;
   const next = EMPTY_CLOSES.test(body) ? body.replace(EMPTY_CLOSES, line) : `${body.trimEnd()}\n\n${line}`.trimStart();
   await prClient.rest.pulls.update({ ...context.repo, pull_number: pr.number, body: next });
 }
 
 // 파트 라벨(릴리즈 노트 분류용)과 담당자(보드 카드에 누가 하는지 보이게).
-// 이미 있으면 건드리지 않으므로 PR을 고쳐서 다시 돌아도 같은 결과다.
-async function fillPullRequest(pr, issues, { github, context }) {
+// 이미 있으면 건드리지 않으므로 PR을 고쳐서 다시 돌아도 같은 결과다. 봇 PR은 라벨만.
+async function fillPullRequest(pr, issues, { github, context, human }) {
   const { owner, repo } = context.repo;
   const ours = issues.filter((issue) => issue.repository.nameWithOwner === `${owner}/${repo}`);
 
@@ -239,6 +241,7 @@ async function fillPullRequest(pr, issues, { github, context }) {
   const missing = [...parts].filter((name) => !current.includes(name));
   if (missing.length) await github.rest.issues.addLabels({ owner, repo, issue_number: pr.number, labels: missing });
 
+  if (!human) return;
   const assignees = [pr.user.login];
   if (!pr.assignees?.length) await github.rest.issues.addAssignees({ owner, repo, issue_number: pr.number, assignees });
   for (const issue of ours) {

@@ -1,6 +1,7 @@
 // main 직접 push 막기 (lefthook pre-push, #494)
 // 무료 private 조직이라 GitHub 보호 규칙을 못 써서, push 전 검사에서 main으로 가는 push를 막음.
 // git이 표준 입력으로 "<로컬 ref> <로컬 sha> <원격 ref> <원격 sha>" 줄을 넘김 → 원격 ref가 main이면 실패.
+// lefthook.yml의 scripts로 붙임 (commands는 push 파일이 비면 건너뛰어 HEAD:main push가 빠져나감)
 // 급할 때 건너뛰기: git push --no-verify
 
 let input = '';
