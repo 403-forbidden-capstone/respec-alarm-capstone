@@ -3,10 +3,11 @@
 //   · 읽기 실패는 DB 원문 그대로 던지고(화면이 LoadError로 기본 문구), 이유를 보여 줄 때만 UserError
 //   · 날짜는 lib/format의 한국 시간 하루(0시~24시), 오늘은 lib/clock now()
 //   · 읽고 쓰는 곳은 docs/screen-data-map.md R02 · S01. 쓰기는 DB 직접 → 그 알람만 reconcile (실데이터 연결 규칙)
-import { reconcile } from '@/lib/alarmSync';
+import { applyCommit, reconcile } from '@/lib/alarmSync';
 import { now } from '@/lib/clock';
 import { UserError } from '@/lib/errors';
 import { addDays, dateParts, dayKey, isSameDay, startOfDay } from '@/lib/format';
+import { callEdge } from '@/lib/edge';
 import { supabase } from '@/lib/supabase';
 import { requireUserId } from '@/lib/user';
 import type { Json, Tables, TablesInsert, TablesUpdate } from '@/types/database';
@@ -23,6 +24,7 @@ import {
   latestCoaching,
   plannedRow,
   SUGGESTION_KIND,
+  toPrepareSuggestion,
   toSuggestion,
   wakeRowsOf,
   type AlarmValueSuggestionType,
@@ -212,15 +214,16 @@ export async function getDay(date: Date): Promise<DayRecord> {
 }
 
 // ---------------------------------------------------------------------------
-// S01 알람 조정 제안 — DB 종류는 말소리 · 배경음 · 진동뿐(D6 열림)이라 그것만 다룸
-//   적용 = 그 알람의 값을 DB에 바로 쓰고 → 제안 기록 → 그 알람만 폰에 맞춤 → 고친 값 기록. 되돌림 상태는 D23이 열려 있어 PENDING으로 돌림(가짜와 같음)
+// S01 알람 조정 제안 — 알람 값 제안(말소리 · 배경음 · 진동)과 준비 알람 당김(PREPARE_ADVANCE, 안건 D111)
+//   알람 값: 그 알람의 값을 DB에 바로 쓰고 → 제안 기록 → 그 알람만 폰에 맞춤 → 고친 값 기록. 되돌림 상태는 D23 A — PENDING으로 돌림(가짜와 같음)
+//   준비 알람 당김: 서버 suggestion-apply가 이번 회차와 이후 회차의 당김 분 · 알람을 바꾸고 → 돌려준 꾸러미로 폰 예약을 맞춤
 // ---------------------------------------------------------------------------
 
 type AlarmValues = Pick<Tables<'alarms'>, 'intensity' | 'voice_tone' | 'sound_key'>;
 type SuggestionWithAlarm = SuggestionRow & { alarms: (SuggestionTarget & AlarmValues) | null };
 
 const SUGGESTION_SELECT =
-  'suggestion_id, suggestion_type, current_value, suggested_value, result_value, status, target_alarm_id, alarms(alarm_id, alarm_type, scheduled_at, intensity, voice_tone, sound_key, appointment_participants(appointments(appointment_id, title, appointment_at)), routines(title))';
+  'suggestion_id, suggestion_type, current_value, suggested_value, result_value, status, target_alarm_id, evidence, alarms(alarm_id, participant_id, alarm_type, scheduled_at, intensity, voice_tone, sound_key, appointment_participants(appointments(appointment_id, title, appointment_at)), routines(title))';
 
 async function loadSuggestion(userId: string, id: string): Promise<SuggestionWithAlarm | null> {
   if (!isUuid(id)) return null; // 가짜 데이터 주소(s1)가 남아 있어도 DB 오류 대신 "없음"
@@ -242,12 +245,50 @@ export async function getPendingSuggestion(): Promise<Suggestion | null> {
     .limit(1)
     .maybeSingle();
   if (error) throw error;
-  return data ? toSuggestion(data, data.alarms) : null;
+  return data ? toScreenSuggestion(userId, data) : null;
 }
 
 export async function getSuggestion(id: string): Promise<Suggestion | null> {
-  const found = await loadSuggestion(await requireUserId(), id);
-  return found ? toSuggestion(found, found.alarms) : null;
+  const userId = await requireUserId();
+  const found = await loadSuggestion(userId, id);
+  return found ? toScreenSuggestion(userId, found) : null;
+}
+
+// 준비 알람 당김은 그 회차의 알람(기상 · 준비 · 출발)이 더 필요해서 한 번 더 읽음
+async function toScreenSuggestion(userId: string, row: SuggestionWithAlarm): Promise<Suggestion | null> {
+  if (row.suggestion_type !== 'PREPARE_ADVANCE') return toSuggestion(row, row.alarms);
+  const target = row.alarms;
+  const appointment = target?.appointment_participants?.appointments ?? null;
+  if (!target?.participant_id || !appointment) return null;
+  const { data, error } = await supabase.from('alarms').select('alarm_type, scheduled_at').eq('user_id', userId).eq('participant_id', target.participant_id);
+  if (error) throw error;
+  return toPrepareSuggestion(row, { alarms: data ?? [], appointment });
+}
+
+// 준비 알람 당김 — 서버 suggestion-apply (적용 · 고쳐 적용 · 무시 · 되돌리기) → 돌려준 꾸러미로 폰 예약을 맞춤
+//   서버 저장이 끝났으니 폰 맞추기가 실패해도 화면에는 성공으로 — 앱이 앞에 올 때 다시 맞춤 (syncPhone과 같음)
+type ApplyAction = 'APPLY' | 'EDIT' | 'IGNORE' | 'REVERT';
+async function callApply(id: string, action: ApplyAction, minutes?: number) {
+  const res = await callEdge<{ ring_packages?: Parameters<typeof applyCommit>[0]['ring_packages'] }>('suggestion-apply', {
+    suggestion_id: id,
+    action,
+    ...(action === 'EDIT' ? { minutes } : {}),
+  });
+  if (!res.ring_packages?.length) return;
+  try {
+    await applyCommit({ ring_packages: res.ring_packages, canceled_alarm_ids: [] });
+  } catch (e) {
+    if (__DEV__) console.warn('[records] 폰 예약 맞추기 실패', e);
+  }
+}
+
+// 적용 — 제안대로(minutes = 제안 분)면 APPLY, 다르면 EDIT. 이미 적용한 제안을 다시 고치면 되돌린 뒤 새 값으로 (D53)
+async function applyPrepareAdvance(found: SuggestionWithAlarm, minutes: number) {
+  if (!Number.isInteger(minutes) || minutes <= 0) throw new UserError('당길 시간을 골라 주세요');
+  const suggested = Number(found.suggested_value) - Number(found.current_value ?? 0);
+  if (found.status === 'APPLIED' || found.status === 'EDITED') await callApply(found.suggestion_id, 'REVERT');
+  else if (found.status !== 'PENDING') throw new UserError('기다리는 제안만 적용할 수 있어요');
+  await callApply(found.suggestion_id, minutes === suggested ? 'APPLY' : 'EDIT', minutes);
 }
 
 // 제안 기록 한 줄 갱신 — from 상태인 것만 (화면이 옛 상태로 누르면 거절)
@@ -282,10 +323,10 @@ const loggedValue = (type: AlarmValueSuggestionType, value: string | null): Json
 
 // 적용 — 제안한 값을 대상 알람에 씀. minutes(시각 조정)는 DB 종류에 시각이 없어 안 씀
 export async function applySuggestion(id: string, minutes: number) {
-  void minutes;
   const userId = await requireUserId();
   const found = await loadSuggestion(userId, id);
   if (!found) throw new UserError('제안을 찾을 수 없어요');
+  if (found.suggestion_type === 'PREPARE_ADVANCE') return applyPrepareAdvance(found, minutes);
   if (found.status !== 'PENDING') throw new UserError('기다리는 제안만 적용할 수 있어요');
   const alarm = found.alarms;
   if (!alarm) throw new UserError('바꿀 알람이 없어졌어요');
@@ -318,6 +359,7 @@ export async function undoSuggestion(id: string) {
   const found = await loadSuggestion(userId, id);
   if (!found) throw new UserError('제안을 찾을 수 없어요');
   if (found.status !== 'APPLIED' && found.status !== 'EDITED') throw new UserError('적용한 제안만 되돌릴 수 있어요');
+  if (found.suggestion_type === 'PREPARE_ADVANCE') return callApply(id, 'REVERT');
   const alarm = found.alarms;
   if (!alarm) throw new UserError('바꿀 알람이 없어졌어요');
   const type = found.suggestion_type;
@@ -341,6 +383,7 @@ export async function ignoreSuggestion(id: string) {
   const found = await loadSuggestion(userId, id);
   if (!found) throw new UserError('제안을 찾을 수 없어요');
   if (found.status !== 'PENDING') throw new UserError('기다리는 제안만 무시할 수 있어요');
+  if (found.suggestion_type === 'PREPARE_ADVANCE') return callApply(id, 'IGNORE');
   await updateSuggestion(userId, id, ['PENDING'], { status: 'IGNORED', responded_at: now().toISOString() });
 }
 

@@ -2,10 +2,11 @@
 // 실데이터 구현의 틀(features/alarm/map.ts와 같음): 쿼리는 real.ts에서 얇게, 행 → 화면 모양 변환은 여기서 순수 함수로
 import { KIND_LABEL, LEVELS, type Level } from '@/features/alarm/types';
 import { dbTimeMs, parseDbTime } from '@/lib/dbTime';
-import { dayKey, formatDateShort, josa, minutesBetween, startOfDay } from '@/lib/format';
+import { addMinutes, dayKey, formatDateShort, josa, minutesBetween, startOfDay } from '@/lib/format';
 import type { Enums, Tables, TablesUpdate } from '@/types/database';
 import { levelOfIntensity, levelOfSoundKey, levelOfVoiceTone } from '@shared/calc/intensity.ts';
 
+import { prepareBounds, previewTimes } from './suggestion';
 import { wakeScore, type DayFacts, type WakeRow } from './summary';
 import type { Suggestion, SuggestionChange, TimelineRow } from './types';
 
@@ -199,8 +200,8 @@ export function alarmPatch(type: AlarmValueSuggestionType, value: string, markMa
   return { intensity: value as Enums<'alarm_intensity'>, ...source };
 }
 
-export type SuggestionRow = Pick<Tables<'alarm_suggestions'>, 'suggestion_id' | 'suggestion_type' | 'current_value' | 'suggested_value' | 'result_value' | 'status' | 'target_alarm_id'>;
-export type SuggestionTarget = Pick<Tables<'alarms'>, 'alarm_id' | 'alarm_type' | 'scheduled_at'> & {
+export type SuggestionRow = Pick<Tables<'alarm_suggestions'>, 'suggestion_id' | 'suggestion_type' | 'current_value' | 'suggested_value' | 'result_value' | 'status' | 'target_alarm_id' | 'evidence'>;
+export type SuggestionTarget = Pick<Tables<'alarms'>, 'alarm_id' | 'alarm_type' | 'scheduled_at' | 'participant_id'> & {
   appointment_participants: { appointments: { appointment_id: string; title: string; appointment_at: string } | null } | null;
   routines: { title: string } | null;
 };
@@ -239,9 +240,56 @@ export function toSuggestion(row: SuggestionRow, target: SuggestionTarget | null
     depart: at,
     bounds: { earlier: 0, later: 0 },
     proposedWake: at,
+    proposedPrepare: null,
     status: row.status,
     applied: applied ? { wake: at, prepare: null, minutes: 0 } : null,
     change,
+  };
+}
+
+// 준비 알람 당김 제안 (PREPARE_ADVANCE, #484 · #499 · 안건 D111) → 화면 타입. 시각 칸을 씀 (change 없음)
+//   alarms = 그 회차의 알람(기상 · 준비 · 출발), appointment = 그 회차. 값은 당김 분(글자) — 제안 분 = 제안 값 − 지금 값
+//   적용한 뒤에는 DB 알람이 이미 옮겨져 있어 적용 전 시각을 거꾸로 구함 (준비 = 지금 + 적용 분, 기상 = 기상과 준비 사이가 남아 있으면 그대로)
+export type PrepareParts = {
+  alarms: Pick<Tables<'alarms'>, 'alarm_type' | 'scheduled_at'>[];
+  appointment: { appointment_id: string; title: string; appointment_at: string };
+};
+const toInt = (v: string | null | undefined) => (v != null && /^\d+$/.test(v) ? Number(v) : 0);
+export function toPrepareSuggestion(row: SuggestionRow, parts: PrepareParts): Suggestion | null {
+  if (row.suggestion_type !== 'PREPARE_ADVANCE') return null;
+  const at = (type: string) => {
+    const a = parts.alarms.find((x) => x.alarm_type === type);
+    return a ? parseDbTime(a.scheduled_at) : null;
+  };
+  const prepare = at('PREPARE');
+  if (!prepare) return null; // 준비 알람이 없어졌으면 적용할 수 없음
+  const appointmentAt = parseDbTime(parts.appointment.appointment_at);
+  const wake = at('WAKE') ?? prepare;
+  const depart = at('DEPARTURE') ?? appointmentAt;
+  const current = toInt(row.current_value);
+  const minutes = toInt(row.suggested_value) - current;
+  const applied = row.status === 'APPLIED' || row.status === 'EDITED';
+  const appliedMinutes = applied ? toInt(row.result_value) - current : 0;
+  const beforePrepare = addMinutes(prepare, appliedMinutes);
+  const beforeWake = prepare.getTime() > wake.getTime() ? wake : addMinutes(wake, Math.max(0, appliedMinutes - Math.round((beforePrepare.getTime() - wake.getTime()) / 60_000)));
+  const base = { currentWake: beforeWake, currentPrepare: beforePrepare, depart };
+  const proposed = applied ? { wake, prepare } : previewTimes(base, minutes);
+  const evidence = Array.isArray(row.evidence) ? row.evidence.filter((v): v is number => typeof v === 'number') : [];
+  const avg = evidence.length ? Math.round(evidence.reduce((x, y) => x + y, 0) / evidence.length) : 0;
+  return {
+    id: row.suggestion_id,
+    title: `준비 알람을 ${minutes}분 앞당겨 볼까요?`,
+    summary: `최근 ${evidence.length || 3}번의 준비가 예상보다 오래 걸렸어요.`,
+    reason: evidence.length ? `최근 ${evidence.length}번의 준비가\n예상보다 평균 ${avg}분 더 걸렸어요.` : '최근 준비가\n예상보다 오래 걸렸어요.',
+    deltas: [...evidence].reverse().map((v, i) => ({ label: `${i + 1}회 전`, value: `${v > 0 ? '+' : ''}${v}분` })),
+    appointment: { id: parts.appointment.appointment_id, title: parts.appointment.title, at: appointmentAt },
+    minutes,
+    ...base,
+    bounds: prepareBounds(current),
+    proposedWake: proposed.wake,
+    proposedPrepare: proposed.prepare,
+    status: row.status,
+    applied: applied ? { wake, prepare, minutes: appliedMinutes } : null,
   };
 }
 

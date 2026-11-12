@@ -241,9 +241,10 @@
 
 ### S01 알람 조정 제안
 - 제안: `alarm_suggestions`(PENDING) — DB
-- 적용 · 되돌리기 · 무시: `alarms`(말소리 · 배경음 · 진동 칸) + `status` · `result_value` · `responded_at` — DB → 그 알람만 다시 예약 — 폰. 시각을 바꾸는 제안 종류는 아직 없어 `alarm-commit`은 안 씀 (#49). 배경음 제안은 이전 값이 비어 있어도(기본음) 되돌릴 수 있음(`sound_key` null)
-- 직접 수정 (D53): 앞 · 뒤 1분 단위, 준비 · 출발까지 미리 보기, 적용한 뒤에도 다시 고침 (EDITED · `result_value`). 저장 모양은 D6 · D23 · D25, 고친 값은 `user_edit_logs`(S01) — 가짜 데이터 흐름. 실데이터는 시각 조정 제안 종류가 생기면(#49)
-- 제안 만들기: `suggestion-generate`(매일 배치) — Edge
+- 알람 값 제안(말소리 · 배경음 · 진동) 적용 · 되돌리기 · 무시: `alarms`(그 칸) + `status` · `result_value` · `responded_at` — DB → 그 알람만 다시 예약 — 폰. 배경음 제안은 이전 값이 비어 있어도(기본음) 되돌릴 수 있음(`sound_key` null)
+- 준비 알람 당김(PREPARE_ADVANCE, 안건 D111): 근거 `alarm_suggestions.evidence`, 그 회차 알람(기상 · 준비 · 출발) — DB. 적용 · 고쳐 적용 · 되돌리기 · 무시는 `suggestion-apply`(Edge) — 이번 회차와 이후 회차의 `appointment_participants.prepare_advance_minutes` · 알람 시각을 바꾸고 `ring_packages`로 폰 예약. 되돌리면 대기(D23 A)
+- 직접 수정 (D53): 준비 알람을 1분 단위로 더 당기기(30분까지 · 당김 합 120분까지), 기상 · 출발 미리 보기, 적용한 뒤에도 다시 고침 (EDITED · `result_value` = 당긴 뒤 당김 분 — 실데이터는 되돌린 뒤 새 값으로)
+- 제안 만들기: `suggestion-generate`(매일 18:00 KST 배치) — Edge
 
 ### NTF 감지 안내 알림 · 정정 (`detection`, 목업에 없는 화면)
 - 알림: 위치로 출발이 잡힌 순간(이탈, 확정은 5분 뒤) "출발 오전 8:30 감지", 도착을 서버에 쓴 직후 "도착 오전 9:52 감지" — **폰 안에서 만든 소리 없는 로컬 알림**(채널 `detect_v1`, 서버 푸시 아님). 알림 권한이 없으면 띄우지 않음(권한은 묻지 않음). 5분 안에 돌아와 출발이 취소되면 그 알림을 거둠. 누르면 `respecalarm://detection?kind&participantId&at` — 앱이 꺼진 채여도 열림 (`features/location/notice.ts` · `hooks/useDetectionLinks.ts`)

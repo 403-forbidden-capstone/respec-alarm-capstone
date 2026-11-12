@@ -206,16 +206,16 @@ describe('A03 지난 날 일기', () => {
 });
 
 // S01 — 적용 · 직접 수정(앞뒤 1분) · 다시 수정 · 되돌리기 · 무시 · 다시 보기 (목업 A.sugApply · sugApplyEdit · sugUndo · sugDismiss · sugReopen)
-describe('S01 알람 조정 제안', () => {
+describe('S01 알람 조정 제안 (준비 알람 당김, 안건 D111)', () => {
+  // 수업 a3: 기상 7:20 · 준비 7:30(준비 전 활동 10분) · 출발 8:00. 제안 = 준비 알람 10분 앞당김
   const eventCount = db.events.length;
-  const prep = db.appointments.find((a) => a.id === 'a3')?.predictedPrepMinutes;
-  const prepMinutes = () => db.appointments.find((a) => a.id === 'a3')?.predictedPrepMinutes;
+  const advance = () => db.appointments.find((a) => a.id === 'a3')?.prepareAdvanceMinutes ?? 0;
   // 적용 전 시각 [상태, 기상, 준비, 출발]
   const times = async () => {
     const s = await getSuggestion('s1');
     return s && [s.status, formatTime(s.currentWake), s.currentPrepare && formatTime(s.currentPrepare), formatTime(s.depart)];
   };
-  // 적용한 뒤 [상태, 적용 전보다 일찍(+) 늦게(−) 분, 기상, 준비, 출발]
+  // 적용한 뒤 [상태, 적용한 분, 기상, 준비, 출발]
   const appliedTimes = async () => {
     const s = await getSuggestion('s1');
     return s?.applied && [s.status, s.applied.minutes, formatTime(s.applied.wake), s.applied.prepare && formatTime(s.applied.prepare), formatTime(s.depart)];
@@ -225,101 +225,84 @@ describe('S01 알람 조정 제안', () => {
     db.suggestion.status = 'PENDING';
     db.suggestion.appliedMinutes = 0;
     const a3 = db.appointments.find((a) => a.id === 'a3');
-    if (a3 && prep != null) a3.predictedPrepMinutes = prep;
+    if (a3) a3.prepareAdvanceMinutes = 0;
     db.events.length = eventCount;
   });
 
-  it('기다림: 수업 기상 오전 7:20 → 7:10 제안, 준비 7:30 · 출발 8:00, 30분 일찍 ~ 30분 늦게까지 고름', async () => {
+  it('기다림: 준비 7:30 → 7:20 제안, 기상 7:20 그대로 · 출발 8:00, 더 당기는 쪽으로 30분까지 고름', async () => {
     const s = await getSuggestion('s1');
-    expect(s && [suggestionPhase(s.status), formatTime(s.currentWake), formatTime(s.proposedWake)]).toEqual([
+    expect(s && [suggestionPhase(s.status), s.currentPrepare && formatTime(s.currentPrepare), s.proposedPrepare && formatTime(s.proposedPrepare), formatTime(s.proposedWake)]).toEqual([
       'pending',
+      '오전 7:30',
       '오전 7:20',
-      '오전 7:10',
+      '오전 7:20',
     ]);
     expect(await times()).toEqual(['PENDING', '오전 7:20', '오전 7:30', '오전 8:00']);
-    expect(s?.bounds).toEqual({ earlier: 30, later: 30 });
+    expect(s?.bounds).toEqual({ earlier: 30, later: 0 });
     expect(await getSuggestion('nope')).toBeNull();
   });
 
-  it('제안대로 적용하면 APPLIED, 기상 · 준비가 같이 앞당겨지고(출발은 그대로) 홈 카드에서 빠짐', async () => {
+  it('제안대로 적용하면 APPLIED — 준비 알람만 10분 앞당겨지고(기상 · 출발은 그대로) 홈 카드에서 빠짐', async () => {
     await applySuggestion('s1', 10);
-    const s = await getSuggestion('s1');
-    expect(s?.status).toBe('APPLIED');
-    expect(await appliedTimes()).toEqual(['APPLIED', 10, '오전 7:10', '오전 7:20', '오전 8:00']);
+    expect(await appliedTimes()).toEqual(['APPLIED', 10, '오전 7:20', '오전 7:20', '오전 8:00']);
     expect(await times()).toEqual(['APPLIED', '오전 7:20', '오전 7:30', '오전 8:00']); // 적용 전 시각은 그대로 남음
+    expect(advance()).toBe(10);
     expect(await getPendingSuggestion()).toBeNull();
     expect(db.events.at(-1)?.label).toBe('알람 조정 수락 · 10분 앞당김');
   });
 
-  it('직접 고친 분으로 적용하면 EDITED', async () => {
+  it('준비 전 활동(10분)을 넘게 당기면 넘친 만큼 기상도 — 15분이면 기상 · 준비 7:15, EDITED', async () => {
     await applySuggestion('s1', 15);
-    const s = await getSuggestion('s1');
-    expect([s?.status, s && formatTime(s.proposedWake), s && formatTime(s.currentWake)]).toEqual(['EDITED', '오전 7:05', '오전 7:20']);
+    expect(await appliedTimes()).toEqual(['EDITED', 15, '오전 7:15', '오전 7:15', '오전 8:00']);
   });
 
-  it('1분 단위로 고름 — 7분 일찍', async () => {
+  it('1분 단위로 고름 — 7분이면 준비 7:23, 기상 그대로', async () => {
     await applySuggestion('s1', 7);
-    expect(await appliedTimes()).toEqual(['EDITED', 7, '오전 7:13', '오전 7:23', '오전 8:00']);
+    expect(await appliedTimes()).toEqual(['EDITED', 7, '오전 7:20', '오전 7:23', '오전 8:00']);
     expect(db.events.at(-1)?.label).toBe('알람 조정 수락 · 7분 앞당김');
   });
 
-  it('뒤로 늦춰도 적용됨 — 5분 늦게: 기상 7:25 · 준비 7:35, 출발은 그대로, 적용 전 시각은 7:20', async () => {
-    await applySuggestion('s1', -5);
-    expect(await appliedTimes()).toEqual(['EDITED', -5, '오전 7:25', '오전 7:35', '오전 8:00']);
-    expect(await times()).toEqual(['EDITED', '오전 7:20', '오전 7:30', '오전 8:00']);
-    expect(prepMinutes()).toBe(35);
-    expect(db.events.at(-1)?.label).toBe('알람 조정 수락 · 5분 늦춤');
-    expect(await getPendingSuggestion()).toBeNull();
+  it('늦추는 쪽(음수) · 0분 · 소수 분으로는 적용되지 않음', async () => {
+    await expect(applySuggestion('s1', -5)).rejects.toThrow('당길 시간을 골라 주세요');
+    await expect(applySuggestion('s1', 0)).rejects.toThrow('당길 시간을 골라 주세요');
+    await expect(applySuggestion('s1', 0)).rejects.toBeInstanceOf(UserError); // 화면이 이유를 보여 주려면 UserError
+    await expect(applySuggestion('s1', 1.5)).rejects.toThrow('당길 시간을 골라 주세요');
+    await expect(applySuggestion('nope', 10)).rejects.toThrow('제안을 찾을 수 없어요');
+    expect((await getSuggestion('s1'))?.status).toBe('PENDING');
   });
 
   it('적용한 뒤에도 바로 다시 고침 — 앞서 적용한 만큼은 걷어내고 새 값으로 (다시 고친 건 늘 EDITED)', async () => {
     await applySuggestion('s1', 10);
     await applySuggestion('s1', 7);
-    expect(await appliedTimes()).toEqual(['EDITED', 7, '오전 7:13', '오전 7:23', '오전 8:00']);
-    expect(prepMinutes()).toBe(47); // 원래 40 + 7, 17이 아님
+    expect(await appliedTimes()).toEqual(['EDITED', 7, '오전 7:20', '오전 7:23', '오전 8:00']);
+    expect(advance()).toBe(7); // 17이 아님
     expect(db.events.at(-1)?.label).toBe('알람 조정 수정 · 7분 앞당김');
-
-    await applySuggestion('s1', -3); // 일찍 → 늦게로 넘어가도 됨
-    expect(await appliedTimes()).toEqual(['EDITED', -3, '오전 7:23', '오전 7:33', '오전 8:00']);
-    expect(prepMinutes()).toBe(37);
-    expect(db.events.at(-1)?.label).toBe('알람 조정 수정 · 3분 늦춤');
 
     await applySuggestion('s1', 10); // 제안 값으로 돌아가도 다시 고친 것이라 EDITED
     expect((await getSuggestion('s1'))?.status).toBe('EDITED');
 
-    await undoSuggestion('s1'); // 되돌리기는 지금처럼 기다림 상태로 (D23 열림) — 원래 값
+    await undoSuggestion('s1'); // 되돌리면 기다림 상태로 (D23 A) — 원래 값
     expect(await times()).toEqual(['PENDING', '오전 7:20', '오전 7:30', '오전 8:00']);
-    expect(prepMinutes()).toBe(40);
+    expect(advance()).toBe(0);
   });
 
   it('같은 값으로 두 번 적용되지 않음', async () => {
     await applySuggestion('s1', 15);
     await expect(applySuggestion('s1', 15)).rejects.toThrow('이미 이 시간으로 적용했어요');
-    expect(prepMinutes()).toBe(55);
+    expect(advance()).toBe(15);
   });
 
-  it('범위: 30분 일찍 ~ 30분 늦게 (준비 알람이 출발을 넘지 않게) — 끝 값은 되고 넘으면 이유와 함께 거절', async () => {
-    await applySuggestion('s1', -30);
-    expect(await appliedTimes()).toEqual(['EDITED', -30, '오전 7:50', '오전 8:00', '오전 8:00']); // 기상 ≤ 준비 ≤ 출발
-    await applySuggestion('s1', 30); // 늦춘 뒤에도 범위는 적용 전 기준
-    expect(await appliedTimes()).toEqual(['EDITED', 30, '오전 6:50', '오전 7:00', '오전 8:00']);
-    await expect(applySuggestion('s1', 31)).rejects.toThrow('30분 일찍부터 30분 늦게까지 고를 수 있어요');
-    await expect(applySuggestion('s1', -31)).rejects.toThrow('30분 일찍부터 30분 늦게까지 고를 수 있어요');
+  it('범위: 30분 일찍까지 — 끝 값은 되고(기상도 20분 당겨 7:00) 넘으면 이유와 함께 거절', async () => {
+    await applySuggestion('s1', 30);
+    expect(await appliedTimes()).toEqual(['EDITED', 30, '오전 7:00', '오전 7:00', '오전 8:00']);
+    await expect(applySuggestion('s1', 31)).rejects.toThrow('30분 일찍까지 고를 수 있어요');
   });
 
   it('되돌리면 다시 기다림 · 원래 시각, 되돌림 기록이 남음', async () => {
-    await applySuggestion('s1', 10);
-    await undoSuggestion('s1');
-    const s = await getSuggestion('s1');
-    expect([s?.status, s && formatTime(s.currentWake)]).toEqual(['PENDING', '오전 7:20']);
-    expect(db.events.at(-1)?.label).toBe('알람 조정 되돌림');
-  });
-
-  it('늦춰 적용한 것도 되돌리면 원래 값', async () => {
-    await applySuggestion('s1', -12);
+    await applySuggestion('s1', 15);
     await undoSuggestion('s1');
     expect(await times()).toEqual(['PENDING', '오전 7:20', '오전 7:30', '오전 8:00']);
-    expect(prepMinutes()).toBe(40);
+    expect(db.events.at(-1)?.label).toBe('알람 조정 되돌림');
   });
 
   it('상태에 맞지 않는 되돌리기 · 무시 · 다시 보기는 이유와 함께 거절', async () => {
@@ -330,15 +313,6 @@ describe('S01 알람 조정 제안', () => {
     await undoSuggestion('s1');
   });
 
-  it('0분 · 소수 분으로는 적용되지 않음', async () => {
-    await expect(applySuggestion('s1', 0)).rejects.toThrow('조정할 시간을 골라 주세요');
-    // 화면이 이유를 보여 주려면 UserError여야 함 (그냥 Error면 기본 문구)
-    await expect(applySuggestion('s1', 0)).rejects.toBeInstanceOf(UserError);
-    await expect(applySuggestion('s1', 1.5)).rejects.toThrow('조정할 시간을 골라 주세요');
-    await expect(applySuggestion('nope', 10)).rejects.toThrow('제안을 찾을 수 없어요');
-    expect((await getSuggestion('s1'))?.status).toBe('PENDING');
-  });
-
   it('무시 → 다시 보기', async () => {
     await ignoreSuggestion('s1');
     expect(suggestionPhase((await getSuggestion('s1'))?.status ?? 'PENDING')).toBe('ignored');
@@ -347,9 +321,9 @@ describe('S01 알람 조정 제안', () => {
     expect((await getSuggestion('s1'))?.status).toBe('PENDING');
   });
 
-  it('제안 문구는 늘 앞당김 (직접 늦춰 적용해도 제안 자체는 그대로)', async () => {
-    expect((await getPendingSuggestion())?.title).toBe('다음 알람을 10분 앞당겨 볼까요?');
-    await applySuggestion('s1', -5);
-    expect((await getSuggestion('s1'))?.title).toBe('다음 알람을 10분 앞당겨 볼까요?');
+  it('제안 문구는 준비 알람 기준 (직접 고쳐 적용해도 제안 자체는 그대로)', async () => {
+    expect((await getPendingSuggestion())?.title).toBe('준비 알람을 10분 앞당겨 볼까요?');
+    await applySuggestion('s1', 15);
+    expect((await getSuggestion('s1'))?.title).toBe('준비 알람을 10분 앞당겨 볼까요?');
   });
 });
