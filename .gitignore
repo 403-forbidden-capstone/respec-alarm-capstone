@@ -44,6 +44,9 @@ supabase/.temp/
 .wrangler/
 .dev.vars
 
+# EC2 deploy runtime tokens (never check into source control).
+deploy/*.env
+
 # Trained model artifacts are deployed separately; do not commit model binaries.
 services/prepare-ml/models/
 *.cbm

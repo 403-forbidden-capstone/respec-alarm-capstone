@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from catboost import CatBoostRegressor
-from fastapi import FastAPI, Header, HTTPException
+from fastapi import FastAPI, Header, HTTPException, Response
 from pydantic import BaseModel, ConfigDict, Field
 
 MODEL_FILES = {
@@ -105,8 +105,11 @@ def authorize(key: str | None) -> None:
 
 
 @app.get("/health")
-def health() -> dict[str, Any]:
-    return {"ok": len(MODELS) == 2 and not LOAD_ERRORS, "loaded_models": list(MODELS)}
+def health(response: Response) -> dict[str, Any]:
+    ready = len(MODELS) == 2 and not LOAD_ERRORS
+    if not ready:
+        response.status_code = 503
+    return {"ok": ready, "loaded_models": list(MODELS)}
 
 
 @app.get("/models")
