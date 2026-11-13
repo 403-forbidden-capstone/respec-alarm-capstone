@@ -6,8 +6,8 @@
 //         날짜표(dates)가 record_date와 어긋나거나 record_date가 달력 오늘 · 어제 밖이어도 에러.
 //
 // 이식 때 바꾼 곳(설계 메모 7절):
-//   · 날짜(4.1): 04:00 하루 경계(DAY_BOUNDARY_HOUR)를 뺐다. 저장은 0시이고, 대화 기준일(record_date = 돌아볼 날)은 헤드 H1 규칙으로 turn-core `dayOf`가 정한다.
-//     record_date는 달력 오늘이거나 달력 어제여야 하고, 어제면(자정 뒤 아직 안 잔 대화) 날짜 블록 둘째 줄에 자정 줄이 붙는다.
+//   · 날짜: 대화 기준일(record_date = 돌아볼 날)은 KST 새벽 4시 경계로 turn-core `dayOf`가 정한다(11/13).
+//     record_date는 달력 오늘이거나 달력 어제여야 하고, 어제면(00:00~03:59 대화) 날짜 블록 둘째 줄에 새벽 줄이 붙는다.
 //   · 확인할 기록(4.2): pickConfirmFacts에 fill · kinds 옵션 — 서버는 SERVER_CONFIRM_OPTS(자동 감지 값만, 채우기 없음, 기상 1 + 출발 · 도착 2).
 //   · diaryVars(일기 PR 몫)는 뺐다.
 // 자유 글(제목 · 장소 · 사용자 말 등)은 한 줄로 접는다 — 사용자 말이 '### …' 같은 줄을 새로 만들지 못하게.
@@ -42,7 +42,8 @@ import { IMPORTANCE_LABEL, WEEKDAYS, WEEKDAY_KO } from "./types.ts";
 //   지금보다 이른 일정에 '지남' · 처리 결과에 '새 알람'과 '바뀐 알람' 구분 · '겹침' 줄 · 위기 안내 줄 · 확인할 기록 줄(선택)
 // (E1 10/10: 선택 옵션 spokenTimes 추가 — 기본 끔이라 기본 글은 v4와 바이트까지 같음 → 버전은 그대로. 켠 실행은 대화 파일 harness.view_opts에 남음)
 // v5(L4 10/29, 설계 메모 4.1): 날짜 블록의 새벽(04:00) 줄 → 자정 줄('자정이 지났지만 잠들기 전이라 …'). 기록 날짜가 달력 어제일 때만 붙음. 나머지 글은 v4와 같음.
-export const VIEW_VERSION = "view.v5";
+// v6(11/13): 하루 경계를 KST 새벽 4시로 — 자정 줄 → 새벽 줄('하루는 새벽 4시에 바뀌어 …'). '오늘 · 어제 · 내일 · 모레'는 기준일로, '이따가 · N시간 뒤 · 자고 일어나서'는 지금 시각으로.
+export const VIEW_VERSION = "view.v6";
 
 // ───────── 열거값 → 한국어 ─────────
 
@@ -267,8 +268,8 @@ function checkDates(d: Context["dates"], rec: LocalDate): void {
  * 오늘 2026-10-08(목) · 내일 2026-10-09(금) · 모레 2026-10-10(토)
  * 이번 주: 월 2026-10-05 · … · 일 2026-10-11
  * 다음 주: 월 2026-10-12 · … · 일 2026-10-18
- * 기록 날짜(= 대화 기준일, 돌아볼 날)는 달력 오늘이거나 달력 어제여야 한다(설계 메모 4.1 — 어제면 '자정이 지났지만 아직 안 잔' 대화).
- * 어제일 때는 둘째 줄에 자정 줄이 붙는다(일요일 밤이면 '이번 주'도 확인 필요). 그 밖이면 에러.
+ * 기록 날짜(= 대화 기준일, 돌아볼 날)는 달력 오늘이거나 달력 어제여야 한다(어제면 KST 00:00~03:59 대화 — turn-core dayOf).
+ * 어제일 때는 둘째 줄에 새벽 줄이 붙는다(일요일 밤이면 '이번 주'도 확인 필요). 그 밖이면 에러.
  */
 export function viewDates(ctx: Context): string {
   const now = sessionNow(ctx);
@@ -282,8 +283,12 @@ export function viewDates(ctx: Context): string {
   checkDates(d, rec);
   const lines = [`지금: ${nowLabel(ctx.session.now)} · 기록 날짜 ${rec} · ${pick(SESSION_KO, ctx.session.type, "세션 종류")}`];
   if (midnightPassed) {
-    let night = `자정이 지났지만 잠들기 전이라 '오늘'은 ${fullDate(rec)} · '내일'은 ${fullDate(d.tomorrow)}로 셈 · 이때 말하는 '오늘'이 ${fullDate(rec)}인지 ${fullDate(now.date)}인지는 확인 필요`;
-    // 일요일 밤 → 월요일 자정 뒤: 기록상 '이번 주'는 끝난 주라 '이번 주 수요일'도 어느 주인지 모호
+    // 11/12 01:00 예: '오늘 발표' → 11/11 · '내일 아침 9시' · '이따가 10시' · '자고 일어나서 오후 2시' → 11/12 · '3시간 뒤' → 11/12 04:00
+    let night =
+      `하루는 새벽 4시에 바뀌어 이 대화의 '오늘'은 ${fullDate(rec)} · '어제'는 ${fullDate(addDays(rec, -1))} · '내일'은 ${fullDate(d.tomorrow)} · '모레'는 ${fullDate(d.day_after)}로 셈` +
+      ` · '이따가' · 'N시간 뒤' · '자고 일어나서'처럼 지금부터 앞으로를 말하면 지금 시각(${fullDate(now.date)} ${now.time}) 기준으로 셈` +
+      ` · 날짜나 오전 · 오후가 분명하지 않거나 셈한 일정이 지금보다 이전이면 사용자에게 확인`;
+    // 일요일 밤 → 월요일 새벽: 기록상 '이번 주'는 끝난 주라 '이번 주 수요일'도 어느 주인지 모호
     if (weekdayOf(rec) === "SUN") night += " · 달력으로는 이미 월요일이라 '이번 주'·'다음 주'가 어느 주인지도 확인 필요";
     lines.push(night);
   }

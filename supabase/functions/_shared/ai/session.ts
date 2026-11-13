@@ -77,7 +77,7 @@ export interface ServerState {
   /** 대화 끝 정리(voice-commit) 진행 — 없으면 아직 안 함. 추출 결과를 여기 둬서 저장만 실패했을 때 다시 시도가 T2를 또 부르지 않음 */
   commit?: CommitState | null;
   /**
-   * 같은 대화방(KST 같은 날)의 앞 구간 — 기준일이 달라(0시 ~ 기상 전에 연 방을 기상 뒤에 이어 씀) 기록을 따로 두는 세션.
+   * 같은 대화방의 앞 구간 — 기준일이 달라(새벽 4시 경계 전 규칙으로 기상 전에 연 방을 이어 씀) 기록을 따로 두는 세션.
    * 화면 말은 앞 구간 + 이 세션(roomTurns), 정리(voice-commit)는 앞 구간을 그 기준일로 먼저 정리 — 일기 날짜가 섞이지 않게
    */
   prev_session_id?: string | null;
@@ -132,9 +132,9 @@ export async function loadSession(deps: SessionDeps, sessionId: string): Promise
 }
 
 /**
- * 오늘의 대화방 — sinceIso(KST 달력 오늘 0시) 뒤에 시작했고 아직 안 끝난 것 중 가장 최근 (설계 메모 2.1 resume)
- * [완료](voice-commit)는 세션을 끝내지 않으므로 같은 날 다시 열면 같은 방. 자정이 지나면 sinceIso가 바뀌어 새 방.
- * 기준일이 지금과 다르면(0시 ~ 기상 전에 연 방) 부르는 쪽(voice-session)이 같은 방의 다음 구간을 이음 — 방은 달력 날짜, 기록은 기준일.
+ * 오늘의 대화방 — sinceIso(기준일 KST 새벽 4시, turn-core dayStartIso) 뒤에 시작했고 아직 안 끝난 것 중 가장 최근 (설계 메모 2.1 resume)
+ * [완료](voice-commit)는 세션을 끝내지 않으므로 같은 기준일에 다시 열면 같은 방. 새벽 4시가 지나면 sinceIso가 바뀌어 새 방.
+ * 기준일이 지금과 다르면(새벽 4시 경계 전 규칙으로 연 방) 부르는 쪽(voice-session)이 같은 방의 다음 구간을 이음.
  * ended(예전 방식으로 [완료]한 세션)는 이어 받지 않음 — 옛 세션을 합치지 않음
  */
 export async function findOpenSession(deps: SessionDeps, sinceIso: string): Promise<SessionRow | null> {

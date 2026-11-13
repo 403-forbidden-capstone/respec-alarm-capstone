@@ -20,16 +20,19 @@ Deno.serve(
     const user = await requireUser(req);
     const key = requireEnv('GEMINI_API_KEY');
     let history = '';
+    let day: string | undefined; // 이어 쓰는 대화방의 기준일 — Live 날짜 해석('오늘')도 그 날로
     try {
       const raw = await req.text();
       const sid = raw.trim() ? (JSON.parse(raw) as { session_id?: unknown }).session_id : undefined;
       if (typeof sid === 'string' && UUID.test(sid)) {
         const sd = { userId: user.userId, userDb: user.db, service: user.db };
-        history = liveHistory(await roomTurns(sd, await loadSession(sd, sid))); // 같은 대화방의 앞 구간(기준일이 다른 세션) 말까지
+        const row = await loadSession(sd, sid);
+        day = row.server_state?.day?.review;
+        history = liveHistory(await roomTurns(sd, row)); // 같은 대화방의 앞 구간(기준일이 다른 세션) 말까지
       }
     } catch (e) {
       console.error('[voice-live-token] 앞 대화를 못 읽음 — 없이 시작:', e);
     }
-    return jsonResponse(await createLiveToken(key, { history }));
+    return jsonResponse(await createLiveToken(key, { history, day }));
   }),
 );

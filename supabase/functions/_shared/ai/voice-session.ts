@@ -1,19 +1,19 @@
 // voice-session — 대화 시작 · 이어 받기 (설계 메모 1 · 2.1 · 4절). LLM을 부르지 않는다(첫 마디는 서버 템플릿, ai_calls 0줄) — 그래서 ANTHROPIC_API_KEY가 없어도 동작한다.
-//   1) 문맥 읽기(context.ts, 쿼리 병렬) → 대화 기준일(dayOf) → 2) KST 달력 오늘의 대화방(안 끝난 세션)이 있으면 이어 받음(resume — [완료]해도 안 끝남)
-//      대화방 = KST 달력 날짜, 기록 = 기준일: 방의 기준일이 지금과 같으면 그대로, 다르면(0시 ~ 기상 전에 연 방을 기상 뒤에 엶) 같은 방의 다음 구간 세션을 만듦
+//   1) 문맥 읽기(context.ts, 쿼리 병렬) → 대화 기준일(dayOf, KST 새벽 4시 경계) → 2) 기준일 새벽 4시 뒤에 연 대화방(안 끝난 세션)이 있으면 이어 받음(resume — [완료]해도 안 끝남)
+//      대화방 = 기록 기준일(00:00~03:59는 전날 방): 방의 기준일이 지금과 같으면 그대로, 다르면(4시 경계 전 규칙으로 만든 방) 같은 방의 다음 구간 세션을 만듦
 //      (prev_session_id로 이음 — 화면 말 · 카드는 이어지고, 정리 · 일기는 구간마다 제 기준일로)
 //   3) 하루 5대화(다음 구간은 같은 방이라 안 셈) · 하루 AI 호출 300 넘으면 세션 없이 limits.reached = DAY → 4) context.v1 한 번 만들어 refs와 함께 server_state에 저장(턴마다 다시 안 읽음 — 별칭 번호가 밀리지 않게)
 //   5) 확인할 기록 · 서버 질문 고르기 → 첫 마디 템플릿 → turns[0]
 import { MAX_SESSIONS_PER_DAY } from './opening.ts';
 import { buildContext } from './context-core.ts';
-import { readContextRows, seoulIso, startOf } from './context.ts';
+import { readContextRows, seoulIso } from './context.ts';
 import { openingMessage } from './opening.ts';
 import { POINTS } from '../prompts/index.ts';
 import {
   callsCapReached, countCallsSince, countSessionsSince, createSession, findOpenSession, findUncommitted, limitsOf, recentQuestions, recordQuestion,
   roomRows, type ServerState, type SessionDeps, type SessionRow, type StoredTurn,
 } from './session.ts';
-import { initTurnState, pickServerQuestion } from './turn-core.ts';
+import { dayStartIso, initTurnState, lifeDate, pickServerQuestion } from './turn-core.ts';
 import type { Card, TurnLimits } from './types.ts';
 import type { RefsOut } from './context-core.ts';
 import { readSessionRequest } from './voice-requests.ts';
@@ -37,7 +37,7 @@ export interface VoiceSessionOut {
   limits: TurnLimits;
   /** 같은 대화방의 앞 구간 세션(기준일이 다름) — 앱이 그 구간에서 저장했지만 서버에 못 알린 카드 표시를 이 세션으로 옮김 (카드 번호는 그대로) */
   prev_session_ids: string[];
-  /** 어제(KST) 연 방 중 정리가 안 된 것 — 자정이 지나 [완료] 없이 넘어온 방. 앱이 정리 요청(voice-commit) 목록에 넣음 */
+  /** 전 기준일에 연 방 중 정리가 안 된 것 — 새벽 4시가 지나 [완료] 없이 넘어온 방. 앱이 정리 요청(voice-commit) 목록에 넣음 */
   uncommitted_session_ids: string[];
 }
 
@@ -80,8 +80,8 @@ async function outOfRow(deps: SessionDeps, row: SessionRow, resumed: boolean, se
 export async function handleVoiceSession(deps: VoiceSessionDeps, body: unknown): Promise<VoiceSessionOut> {
   const now = (deps.now ?? (() => new Date()))();
   const out = await openRoom({ ...deps, now: () => now }, body);
-  const today = seoulLocal(seoulIso(now)).date;
-  return { ...out, uncommitted_session_ids: await findUncommitted(deps, startOf(addDays(today, -1)), startOf(today)) };
+  const day = lifeDate(seoulIso(now));
+  return { ...out, uncommitted_session_ids: await findUncommitted(deps, dayStartIso(addDays(day, -1)), dayStartIso(day)) };
 }
 
 async function openRoom(deps: VoiceSessionDeps, body: unknown): Promise<Omit<VoiceSessionOut, 'uncommitted_session_ids'>> {
@@ -90,18 +90,18 @@ async function openRoom(deps: VoiceSessionDeps, body: unknown): Promise<Omit<Voi
   const rows = await readContextRows(deps, now);
   const { nowIso, days } = rows;
 
-  // 이어 받기 — KST 달력 오늘 0시 뒤에 연 대화방 ([완료] 뒤 다시 열어도 같은 날이면 같은 대화). 자정이 지나면 새 대화
+  // 이어 받기 — 기준일 새벽 4시 뒤에 연 대화방 ([완료] 뒤 다시 열어도 같은 기준일이면 같은 대화). 새벽 4시가 지나면 새 대화
   //   기준일이 다르면 같은 방의 다음 구간 — 앞 구간에 내 말이 없으면(첫 마디만) 이을 것이 없어 그냥 새 세션
   let prev: SessionRow | null = null;
   if (req.resume) {
-    const open = await findOpenSession(deps, rows.calendarTodayStart);
-    if (open !== null && open.server_state.day.review === days.review) return outOfRow(deps, open, true, await countSessionsSince(deps, rows.calendarTodayStart));
+    const open = await findOpenSession(deps, rows.dayStart);
+    if (open !== null && open.server_state.day.review === days.review) return outOfRow(deps, open, true, await countSessionsSince(deps, rows.dayStart));
     if (open !== null && open.server_state.counts.user_turns > 0) prev = open;
   }
 
   // 상한 — 오류가 아니라 limits.reached (설계 메모 0 · 2.1). 다음 구간은 새 방이 아니라 대화 수 상한을 안 봄 (AI 호출 상한은 봄)
-  const sessionsToday = await countSessionsSince(deps, rows.calendarTodayStart);
-  if ((prev === null && sessionsToday >= MAX_SESSIONS_PER_DAY) || callsCapReached(await countCallsSince(deps, rows.calendarTodayStart))) {
+  const sessionsToday = await countSessionsSince(deps, rows.dayStart);
+  if ((prev === null && sessionsToday >= MAX_SESSIONS_PER_DAY) || callsCapReached(await countCallsSince(deps, rows.dayStart))) {
     return {
       session_id: null, resumed: false, rev: 0, turn_seq: 0, day: { review: days.review, morning: days.morning },
       messages: [], cards: [], limits: { turns_left: 0, sessions_left_today: 0, reached: 'DAY' }, prev_session_ids: [],

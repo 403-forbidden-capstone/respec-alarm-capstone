@@ -8,7 +8,7 @@ import type { AlarmPlan, Appointment, Card, CardAction, Context, Fact, FastExtra
 import { datesFor } from "./testing.ts";
 import {
   prepAsked,
-  appointmentSummary, applyCardAction as applyCardActionRaw, applyFast, applyTaskResults as applyTaskResultsRaw, checkBasis, checkDigest, dateKo, dayOf, eventAt, expandFast, initTurnState, isoToLocal, itemKey,
+  appointmentSummary, applyCardAction as applyCardActionRaw, applyFast, applyTaskResults as applyTaskResultsRaw, checkBasis, checkDigest, dateKo, dayOf, dayStartIso, eventAt, expandFast, initTurnState, isoToLocal, itemKey, lifeDate,
   keywordImportance, nearTitle, needKinds, normTitle, pickServerQuestion, questionSubjectKey, titleMatch,
 } from "./turn-core.ts";
 import type { CardOutcome, QuestionHistory, TaskOutcome, TurnState } from "./turn-core.ts";
@@ -183,38 +183,40 @@ describe("초기화 · 도우미", () => {
 
 // ───────── 대화 기준일 (설계 메모 4.1, 헤드 H1) ─────────
 
-describe("dayOf — 대화 기준일 (자정 대화)", () => {
-  const days = (now: string, woke: boolean) => {
-    const d = dayOf(now, "Asia/Seoul", woke);
+describe("dayOf — 대화 기준일 (KST 새벽 4시 경계)", () => {
+  const days = (now: string) => {
+    const d = dayOf(now, "Asia/Seoul");
     return [d.review, d.morning];
   };
 
-  it("23:50 자기 전 대화: 오늘 = 달력 오늘, 내일 = 달력 내일", () => {
-    assert.deepEqual(days("2026-10-08T23:50:00+09:00", true), ["2026-10-08", "2026-10-09"]);
-    assert.deepEqual(days("2026-10-08T23:50:00+09:00", false), ["2026-10-08", "2026-10-09"]);
+  it("23:59 → 00:00 → 03:59는 같은 기준일, 04:00에 바뀜", () => {
+    assert.deepEqual(days("2026-11-11T23:59:00+09:00"), ["2026-11-11", "2026-11-12"]);
+    assert.deepEqual(days("2026-11-12T00:00:00+09:00"), ["2026-11-11", "2026-11-12"]);
+    assert.deepEqual(days("2026-11-12T01:00:00+09:00"), ["2026-11-11", "2026-11-12"]);
+    assert.deepEqual(days("2026-11-12T03:59:00+09:00"), ["2026-11-11", "2026-11-12"]);
+    assert.deepEqual(days("2026-11-12T04:00:00+09:00"), ["2026-11-12", "2026-11-13"]);
+    assert.deepEqual(days("2026-11-12T11:00:00+09:00"), ["2026-11-12", "2026-11-13"]);
   });
 
-  it("00:30 자정 뒤 아직 안 잔 대화(오늘 기상 기록 없음): 전날이 '오늘' (H1 A)", () => {
-    assert.deepEqual(days("2026-10-09T00:30:00+09:00", false), ["2026-10-08", "2026-10-09"]);
+  it("기상 여부를 받지 않음 — 아침에 안 일어났어도 04:00 뒤면 달력 오늘", () => {
+    assert.equal(dayOf.length, 2);
+    assert.deepEqual(days("2026-10-09T05:10:00+09:00"), ["2026-10-09", "2026-10-10"]);
   });
 
-  it("00:30에 이미 오늘 기상 기록이 있으면(밤샘 뒤 새 하루) 달력 그대로", () => {
-    assert.deepEqual(days("2026-10-09T00:30:00+09:00", true), ["2026-10-09", "2026-10-10"]);
-  });
-
-  it("정오 경계: 11:59까지는 기상 기록이 없을 때만 같은 밤, 12:00부터는 달력 그대로 — 04:00 상수 없음", () => {
-    assert.deepEqual(days("2026-10-09T05:10:00+09:00", false), ["2026-10-08", "2026-10-09"]);
-    assert.deepEqual(days("2026-10-09T11:59:00+09:00", false), ["2026-10-08", "2026-10-09"]);
-    assert.deepEqual(days("2026-10-09T12:00:00+09:00", false), ["2026-10-09", "2026-10-10"]);
+  it("공통 함수: lifeDate · dayStartIso", () => {
+    assert.equal(lifeDate("2026-11-12T03:59:59+09:00"), "2026-11-11");
+    assert.equal(lifeDate("2026-11-11T19:00:00Z"), "2026-11-12"); // = 11/12 04:00 KST
+    assert.equal(dayStartIso("2026-11-11"), "2026-11-11T04:00:00+09:00");
   });
 
   it("달 · 해 · 일요일 넘김, 다른 시간대는 서울로 보고 경고", () => {
-    assert.deepEqual(days("2027-01-01T00:20:00+09:00", false), ["2026-12-31", "2027-01-01"]);
-    assert.deepEqual(days("2026-10-12T00:30:00+09:00", false), ["2026-10-11", "2026-10-12"]); // 일 → 월 새벽
-    assert.deepEqual(days("2026-10-08T15:30:00Z", false), ["2026-10-08", "2026-10-09"]); // = 10/9 00:30 KST
-    const d = dayOf(NOW, "America/Los_Angeles", false);
-    assert.equal(d.tzSupported, false);
-    assert.equal(dayOf(NOW, "Asia/Seoul", false).tzSupported, true);
+    assert.deepEqual(days("2026-12-01T03:30:00+09:00"), ["2026-11-30", "2026-12-01"]); // 월말
+    assert.deepEqual(days("2027-01-01T00:20:00+09:00"), ["2026-12-31", "2027-01-01"]); // 연말
+    assert.deepEqual(days("2027-01-01T04:00:00+09:00"), ["2027-01-01", "2027-01-02"]);
+    assert.deepEqual(days("2026-10-12T00:30:00+09:00"), ["2026-10-11", "2026-10-12"]); // 일 → 월 새벽
+    assert.deepEqual(days("2026-10-08T15:30:00Z"), ["2026-10-08", "2026-10-09"]); // = 10/9 00:30 KST
+    assert.equal(dayOf(NOW, "America/Los_Angeles").tzSupported, false);
+    assert.equal(dayOf(NOW, "Asia/Seoul").tzSupported, true);
   });
 });
 

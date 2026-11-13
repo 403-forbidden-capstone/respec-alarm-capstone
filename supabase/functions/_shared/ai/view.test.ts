@@ -21,9 +21,9 @@ const event = (after_turn: number, over: Partial<ServerEvent> = {}): ServerEvent
 });
 const block = (out: string, head: string): string => out.split(`### ${head}\n`)[1]!.split("\n\n")[0]!;
 
-describe("view.v5 문구", () => {
+describe("view.v6 문구", () => {
   it("버전 · 어젯밤 취침 · 준비가 예상보다 N분 더 걸림", () => {
-    assert.equal(VIEW_VERSION, "view.v5");
+    assert.equal(VIEW_VERSION, "view.v6");
     const ctx = sampleContext("AFTER_WAKE");
     assert.ok(viewFacts(ctx).includes("[f1] 어젯밤 취침 00:40 (자동)"));
     ctx.today.facts = [fact("f1", "PREP_OVER", { time: null, minutes: 15 }), fact("f2", "PREP_OVER", { time: null })];
@@ -275,29 +275,40 @@ describe("날짜 블록 — 0시 경계와 자정 뒤 대화 (설계 메모 4.1 
     return ctx;
   };
 
-  it("23:50 대화: 기록 날짜 = 달력 오늘이라 자정 줄 없음", () => {
+  it("23:50 대화: 기록 날짜 = 달력 오늘이라 새벽 줄 없음", () => {
     const out = viewDates(at("2026-10-08T23:50:00+09:00", "2026-10-08"));
     assert.ok(out.startsWith("지금: 10월 8일(목) 23:50 · 기록 날짜 2026-10-08 · 자기 전 대화\n오늘 2026-10-08(목) · 내일 2026-10-09(금)"), out);
-    assert.ok(!out.includes("자정이 지났지만"));
+    assert.ok(!out.includes("새벽 4시에 바뀌어"));
   });
 
-  it("00:30 대화(오늘 기상 기록 없음 → 전날이 '오늘'): 자정 줄이 둘째 줄에 붙고 04:00 글자는 없음", () => {
+  it("00:30 대화(새벽 4시 전 → 전날이 '오늘'): 새벽 줄이 둘째 줄에 붙음 — 오늘 · 어제 · 내일 · 모레는 기준일, 이따가 · N시간 뒤는 지금 시각", () => {
     const out = viewDates(at("2026-10-09T00:30:00+09:00", "2026-10-08"));
     const lines = out.split("\n");
     assert.equal(lines[0], "지금: 10월 9일(금) 00:30 · 기록 날짜 2026-10-08 · 자기 전 대화");
     assert.equal(
       lines[1],
-      "자정이 지났지만 잠들기 전이라 '오늘'은 2026-10-08(목) · '내일'은 2026-10-09(금)로 셈 · 이때 말하는 '오늘'이 2026-10-08(목)인지 2026-10-09(금)인지는 확인 필요",
+      "하루는 새벽 4시에 바뀌어 이 대화의 '오늘'은 2026-10-08(목) · '어제'는 2026-10-07(수) · '내일'은 2026-10-09(금) · '모레'는 2026-10-10(토)로 셈 · '이따가' · 'N시간 뒤' · '자고 일어나서'처럼 지금부터 앞으로를 말하면 지금 시각(2026-10-09(금) 00:30) 기준으로 셈 · 날짜나 오전 · 오후가 분명하지 않거나 셈한 일정이 지금보다 이전이면 사용자에게 확인",
     );
     assert.ok(lines[2]!.startsWith("오늘 2026-10-08(목) · 내일 2026-10-09(금) · 모레 2026-10-10(토)"));
-    assert.ok(!out.includes("04:00"));
     assert.equal(contextVars(at("2026-10-09T00:30:00+09:00", "2026-10-08")).is_late_night, true);
     assert.equal(contextVars(at("2026-10-08T23:50:00+09:00", "2026-10-08")).is_late_night, false);
   });
 
-  it("04:00 이후여도 기준일이 전날이면(아직 안 잠) 자정 줄이 계속 붙음 — 04:00 상수 없음", () => {
-    const out = viewDates(at("2026-10-09T05:10:00+09:00", "2026-10-08"));
-    assert.ok(out.includes("자정이 지났지만 잠들기 전이라"), out);
+  it("04:00 뒤에도 그 대화방의 기준일이 전날이면(03:50에 연 방) 새벽 줄이 붙음 — 지금 시각은 그대로 보여 줌", () => {
+    const out = viewDates(at("2026-10-09T04:10:00+09:00", "2026-10-08"));
+    assert.ok(out.includes("이 대화의 '오늘'은 2026-10-08(목)"), out);
+    assert.ok(out.includes("지금 시각(2026-10-09(금) 04:10) 기준으로 셈"), out);
+  });
+
+  it("11/12 01:00 (기준일 11/11): 오늘 11/11 · 어제 11/10 · 내일 11/12 · 모레 11/13, 이따가 · N시간 뒤는 11/12 01:00 기준, 과거 · 모호하면 확인", () => {
+    const out = viewDates(at("2026-11-12T01:00:00+09:00", "2026-11-11"));
+    const line = out.split("\n")[1]!;
+    assert.ok(line.includes("'오늘'은 2026-11-11(수) · '어제'는 2026-11-10(화) · '내일'은 2026-11-12(목) · '모레'는 2026-11-13(금)"), line);
+    assert.ok(line.includes("지금 시각(2026-11-12(목) 01:00) 기준으로 셈"), line);
+    assert.ok(line.includes("셈한 일정이 지금보다 이전이면 사용자에게 확인"), line);
+    // 월말 · 연말
+    assert.ok(viewDates(at("2026-12-01T03:59:00+09:00", "2026-11-30")).includes("'오늘'은 2026-11-30(월) · '어제'는 2026-11-29(일) · '내일'은 2026-12-01(화)"));
+    assert.ok(viewDates(at("2027-01-01T01:00:00+09:00", "2026-12-31")).includes("'내일'은 2027-01-01(금) · '모레'는 2027-01-02(토)"));
   });
 
   it("일요일 밤 → 월요일 00:30: '이번 주'도 확인 필요 줄", () => {
@@ -317,6 +328,6 @@ describe("날짜 블록 — 0시 경계와 자정 뒤 대화 (설계 메모 4.1 
     const ctx = sampleContext("BEFORE_SLEEP", { midnight: true });
     const out = viewContext(ctx, { confirmFacts: true });
     assert.ok(out.includes("### 내일 일정\n[a2] 10-09(금) 10:00 캡스톤 발표"), out);
-    assert.ok(out.includes("자정이 지났지만"));
+    assert.ok(out.includes("새벽 4시에 바뀌어"));
   });
 });

@@ -3,13 +3,14 @@ import { beforeEach, describe, expect, it, jest } from '@jest/globals';
 
 import { createAppointment, createStandaloneAlarm, estimateAppointment, getAppointment, listPlaces, previewAlarms, saveAlarmSettings } from '@/features/alarm/api';
 import type { Estimate } from '@/features/alarm/types';
+import * as clock from '@/lib/clock';
 import { now } from '@/lib/clock';
 import { EdgeError, callEdge } from '@/lib/edge';
 import { UserError } from '@/lib/errors';
 
 import { applyFix } from '../fixes';
 import { clearSavedMarksForUser, SAVED_MARK_TTL_MS } from '../savedMarks';
-import { COMMIT_TIMEOUT_MS, finishConversation, flushCommits, getConversation, liveSessionId, pickCardPlace, rejectCard, resetVoiceState, retry, saveCard, say, sayVoice, TURN_TIMEOUT_MS } from '../real';
+import { beginLive, COMMIT_TIMEOUT_MS, endLive, finishConversation, flushCommits, getConversation, liveSessionId, pickCardPlace, rejectCard, resetVoiceState, retry, saveCard, say, sayVoice, TURN_TIMEOUT_MS } from '../real';
 
 // 실데이터 대화(real.ts)를 가짜 서버 함수(callEdge) + 가짜 L1 · L2 함수로 시험 — 서버 함수 voice-session · voice-turn은 별도 PR(배포 전엔 이 가짜 응답으로 확인)
 jest.mock('@/lib/edge', () => ({ ...jest.requireActual<typeof import('@/lib/edge')>('@/lib/edge'), callEdge: jest.fn() }));
@@ -159,6 +160,86 @@ describe('① 세션 시작 · 첫 마디', () => {
     expect(c.limits).toEqual({ turnsLeft: 20, sessionsLeftToday: 4, reached: null });
     await getConversation(); // 다시 읽어도 서버를 또 부르지 않음 (대화 유지)
     expect(edge).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('①-1 새벽 4시 경계 (KST)', () => {
+  it('앱을 켜 둔 채 03:59 → 04:00이 지나면 다음 읽기에서 voice-session을 다시 불러 새 대화방 · 00:00 넘김은 같은 방', async () => {
+    const t = jest.spyOn(clock, 'now');
+    try {
+      t.mockReturnValue(new Date('2026-11-11T23:59:00+09:00'));
+      script = [session(), session({ session_id: 's2' })];
+      await getConversation();
+      t.mockReturnValue(new Date('2026-11-12T00:00:00+09:00'));
+      await getConversation();
+      t.mockReturnValue(new Date('2026-11-12T03:59:00+09:00'));
+      await getConversation();
+      expect(edge).toHaveBeenCalledTimes(1); // 같은 기준일(11/11) — 서버를 또 부르지 않음
+      t.mockReturnValue(new Date('2026-11-12T04:00:00+09:00'));
+      await getConversation();
+      expect(bodies().map((b) => b.name)).toEqual(['voice-session', 'voice-session']);
+      expect(liveSessionId()).toBe('s2');
+    } finally {
+      t.mockRestore();
+    }
+  });
+
+  it('03:59에 시작한 Live 통화는 04:05에 끝날 때까지 전날 방(s1)에 남기고, 끝난 뒤 읽기에서 새 방(s2)', async () => {
+    const t = jest.spyOn(clock, 'now');
+    try {
+      t.mockReturnValue(new Date('2026-11-12T03:59:00+09:00'));
+      script = [session(), turn({ reply: null }), turn({ rev: 3, reply: null }), session({ session_id: 's2' })];
+      expect(await beginLive()).toBe('s1'); // 토큰은 s1(기준일 11/11)로
+      t.mockReturnValue(new Date('2026-11-12T04:02:00+09:00'));
+      expect((await sayVoice('오늘 발표 끝났어', '수고했어요')).kept).toBe(true);
+      await getConversation(); // 차례마다 화면이 다시 읽어도 통화 중에는 그대로
+      t.mockReturnValue(new Date('2026-11-12T04:05:00+09:00'));
+      expect((await sayVoice('이제 잘게', '잘 자요')).kept).toBe(true);
+      expect(turnBodies().map((b) => b.session_id)).toEqual(['s1', 's1']);
+      expect(bodies().filter((b) => b.name === 'voice-session')).toHaveLength(1);
+      await endLive();
+      await getConversation(); // 통화가 끝난 뒤 새 대화는 새 기준일(11/12) 방
+      expect(liveSessionId()).toBe('s2');
+    } finally {
+      t.mockRestore();
+    }
+  });
+
+  it('04:00 뒤에 시작하는 Live 통화는 앞 방을 붙잡지 않고 새 방에서 — 앱이 끝을 못 알려도 11분 뒤 풀림', async () => {
+    const t = jest.spyOn(clock, 'now');
+    try {
+      t.mockReturnValue(new Date('2026-11-12T03:50:00+09:00'));
+      script = [session(), session({ session_id: 's2' }), session({ session_id: 's3' })];
+      expect(await beginLive()).toBe('s1');
+      t.mockReturnValue(new Date('2026-11-12T04:01:00+09:00'));
+      await getConversation();
+      expect(liveSessionId()).toBe('s2'); // 03:50 통화는 최대 10분 — 04:01이면 풀림
+      t.mockReturnValue(new Date('2026-11-13T04:01:00+09:00'));
+      expect(await beginLive()).toBe('s3'); // 통화 시작 때 기준일이 바뀌었으면 새 방으로 옮긴 뒤 토큰
+    } finally {
+      t.mockRestore();
+    }
+  });
+
+  it('03:59에 보낸 글의 답이 04:01에 와도 전날 방(s1)에 남고, 그 뒤 읽기에서 새 방(s2)', async () => {
+    const t = jest.spyOn(clock, 'now');
+    try {
+      t.mockReturnValue(new Date('2026-11-12T03:59:00+09:00'));
+      script = [session()];
+      await getConversation();
+      edge.mockImplementationOnce(async () => {
+        t.mockReturnValue(new Date('2026-11-12T04:01:00+09:00')); // 답을 기다리는 사이 4시가 지남
+        return turn();
+      });
+      const c = await say('오늘 피곤했어');
+      expect(turnBodies()[0]).toMatchObject({ session_id: 's1', text: '오늘 피곤했어' });
+      expect(c.messages.slice(-2).map((m) => `${m.who}:${m.text}`)).toEqual(['me:오늘 피곤했어', 'ai:네, 알겠어요.']);
+      script = [session({ session_id: 's2' })];
+      await getConversation();
+      expect(liveSessionId()).toBe('s2');
+    } finally {
+      t.mockRestore();
+    }
   });
 });
 

@@ -29,6 +29,7 @@ import {
   type Transport,
 } from '@/features/alarm/types';
 import { now } from '@/lib/clock';
+import { lifeDayKey } from '@/lib/format';
 import { EdgeError, callEdge } from '@/lib/edge';
 import { UserError, userMessage } from '@/lib/errors';
 import { currentUserId } from '@/lib/user';
@@ -159,6 +160,7 @@ type State = {
   sessionId: string | null;
   rev: number;
   started: boolean; // voice-session을 한 번 불렀음 (한도 DAY로 세션이 없어도 true)
+  day: string | null; // voice-session을 부른 때의 기준일(lifeDayKey) — 새벽 4시가 지나면 다음 읽기에서 새 대화방
   messages: ChatMessage[];
   cards: Map<string, CardRec>;
   limits: Limits | null;
@@ -171,14 +173,19 @@ type State = {
 };
 
 function freshState(userId: string | null): State {
-  return { userId, sessionId: null, rev: 0, started: false, messages: [], cards: new Map(), limits: null, unavailable: null, pending: null, queue: [], seq: 0, notice: null, ask: [] };
+  return { userId, sessionId: null, rev: 0, started: false, day: null, messages: [], cards: new Map(), limits: null, unavailable: null, pending: null, queue: [], seq: 0, notice: null, ask: [] };
 }
 
 let state: State = freshState(null);
+// 실시간 음성(Live) 통화가 열려 있는 동안(이 시각까지) 대화방을 붙잡음 — 03:59에 시작한 통화는 04:00이 지나도 끝날 때까지 같은 방 · 같은 기준일
+//   endLive가 0으로 · 앱이 끝을 못 알려도 통화 최대 길이(10분)+1분 뒤 풀림
+const LIVE_HOLD_MS = 11 * 60_000;
+let liveUntil = 0;
 
 // 시험용 — 모듈 상태 비우기
 export function resetVoiceState() {
   state = freshState(null);
+  liveUntil = 0;
   chain = Promise.resolve();
   progress = null;
   flushing = null;
@@ -666,6 +673,7 @@ async function readSession(resume: boolean, fresh = false): Promise<void> {
   state.rev = res.rev ?? 0;
   state.limits = limitsOf(res.limits);
   state.started = true;
+  state.day = lifeDayKey(at);
   state.unavailable = null;
   state.pending = null;
   state.messages = [];
@@ -676,7 +684,7 @@ async function readSession(resume: boolean, fresh = false): Promise<void> {
   mergeCards(res.cards, last && last > at ? last : at);
   state.messages.sort((a, b) => a.at.getTime() - b.at.getTime());
   if (fresh) await pruneExpired(now()); // 앱을 열 때 — 모든 사용자의 7일 지난 표시 · 옛 형식 키 정리
-  // 자정이 지나 [완료] 없이 넘어온 어제 방 — 정리 목록에 없으면 넣음 (있으면 [저장 안 함] 카드 목록을 지키려고 그대로)
+  // 새벽 4시가 지나 [완료] 없이 넘어온 전 기준일 방 — 정리 목록에 없으면 넣음 (있으면 [저장 안 함] 카드 목록을 지키려고 그대로)
   if (state.userId && res.uncommitted_session_ids?.length) {
     const queued = new Set((await pendingCommits(state.userId)).map((c) => c.sessionId));
     for (const id of res.uncommitted_session_ids) if (!queued.has(id)) await addPendingCommit(state.userId, id);
@@ -709,7 +717,7 @@ async function continueAfterOpen(): Promise<void> {
   else if (state.queue.length > 0 && !state.pending) await drive();
 }
 
-// 대화 시작 — 오늘(KST) 연 세션이 있으면 그대로(resume, [완료]한 뒤에도), 없으면 새로. 첫 마디는 서버 템플릿이라 messages에 옴. 하루 한도면 세션 없이 limits.reached = DAY
+// 대화 시작 — 같은 기준일(KST 새벽 4시 경계)에 연 세션이 있으면 그대로(resume, [완료]한 뒤에도), 없으면 새로. 첫 마디는 서버 템플릿이라 messages에 옴. 하루 한도면 세션 없이 limits.reached = DAY
 export async function startConversation(_opts: { type: 'BEFORE_SLEEP' } = { type: 'BEFORE_SLEEP' }): Promise<void> {
   try {
     await readSession(true, true);
@@ -727,6 +735,10 @@ async function guardUser() {
 
 async function ensureSession(): Promise<void> {
   await guardUser();
+  // 앱을 켜 둔 채 새벽 4시(KST)가 지나면 서버에서 다시 읽음 → 새 대화방
+  //   보내는 중인 말 · 카드 요청 · 열린 Live 통화가 있으면 그 대화가 끝날 때까지 시작한 방(기준일)을 그대로 씀
+  const t = now();
+  if (state.started && state.day !== lifeDayKey(t) && !state.pending && state.queue.length === 0 && t.getTime() >= liveUntil) state = freshState(state.userId);
   if (state.started || state.unavailable) return; // 시작 실패는 [다시 시도](retry)만 다시 부름
   await startConversation({ type: 'BEFORE_SLEEP' });
 }
@@ -816,6 +828,23 @@ export function sayVoice(heard: string, spoken: string, onProgress?: (c: Convers
 // 지금 대화방 id — Live 토큰을 받을 때 서버가 앞 대화를 지침에 붙이게 (없으면 null)
 export const liveSessionId = (): string | null => state.sessionId;
 
+// Live 통화 시작(토큰 받기 전) — 기준일이 바뀌었으면 여기서 새 방으로 옮기고, 그 방을 통화가 끝날 때까지 붙잡음. 그 방 id를 돌려줌
+export function beginLive(): Promise<string | null> {
+  return serial(async () => {
+    liveUntil = 0;
+    await ensureSession();
+    liveUntil = now().getTime() + LIVE_HOLD_MS;
+    return state.sessionId;
+  });
+}
+
+// Live 통화 끝 — 마지막 차례(sayVoice)가 앞서 줄 서 있으므로 그 뒤에 풀림. 다음 읽기부터 새 기준일이면 새 방
+export function endLive(): Promise<void> {
+  return serial(async () => {
+    liveUntil = 0;
+  });
+}
+
 // [다시 시도] — 세션을 못 시작했으면 다시 시작, 보낸 요청이 남았으면 같은 요청(같은 client_turn_id)을 다시 (성공하면 뒤에 쌓인 카드 요청도 차례로)
 export function retry(): Promise<Conversation> {
   return serial(async () => {
@@ -859,7 +888,7 @@ export function flushCommits(userId: string | null): Promise<void> {
 }
 
 // [완료] — 하루 기록 정리(voice-commit)를 적어 두고 화면 상태를 비움. 세션은 끝내지 않음: 같은 날 다시 열면 서버 resume이 같은 대화(말 · 카드)를 돌려주고,
-//   이어 말한 뒤 다시 [완료]하면 서버가 새 말까지 다시 정리함. 날짜(KST)가 바뀌면 서버가 새 대화를 엶
+//   이어 말한 뒤 다시 [완료]하면 서버가 새 말까지 다시 정리함. 기준일(KST 새벽 4시)이 바뀌면 서버가 새 대화를 엶
 //   서버로 가야 할 카드 알림(SAVED 등)이 큐에 남았으면 비우기 전에 한 번 보내 봄 (실패해도 삼킴). 그 뒤 정리를 기다리지 않고 보냄
 export function finishConversation(): Promise<{ recordDate: string | null }> {
   return serial(async () => {

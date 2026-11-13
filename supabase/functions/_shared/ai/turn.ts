@@ -18,14 +18,14 @@ import { FAIL_MESSAGES, toHttpError, type LlmClient, type LlmFailure, type LlmRe
 import { POINTS, callPoint, type PointId } from '../prompts/index.ts';
 import { render } from './render.ts';
 import { applyGuards, eventsForView, safetyInfoFrom } from './guards.ts';
-import { seoulIso, startOf } from './context.ts';
+import { seoulIso } from './context.ts';
 import { LIMIT_AI_DAY_TEXT, LIMIT_DAY_TEXT, LIMIT_TURN_TEXT, MAX_USER_TURNS } from './opening.ts';
 import type { QuotaGate } from './quota.ts';
 import {
   callsCapReached, countCallsSince, countSessionsSince, limitsOf, loadSession, recordCalls, recordQuestion, saveSession,
   type CallLog, type ServerState, type SessionRow, type StoredTurn,
 } from './session.ts';
-import { applyCardAction, applyFast, applyTaskResults, dateKo, needKinds, eventAt, itemKey, prepAsked, type Rejected, type TurnState } from './turn-core.ts';
+import { applyCardAction, applyFast, applyTaskResults, dateKo, dayStartIso, lifeDate, needKinds, eventAt, itemKey, prepAsked, type Rejected, type TurnState } from './turn-core.ts';
 import type { TodoPlan } from './final-core.ts';
 import { saveTodos } from './voice-commit.ts';
 import type { Act, CardAction, Context, FastExtract, Fix, ServerEvent, T1Output, TaskResults, TurnLimits } from './types.ts';
@@ -278,9 +278,9 @@ export async function handleVoiceTurn(deps: VoiceDeps, body: unknown): Promise<V
   const row = await loadSession(sessionDeps, req.session_id);
   const st = row.server_state;
   const ctid = req.client_turn_id;
-  const calToday = startOf(seoulLocal(run.nowIso).date);
+  const dayStart = dayStartIso(lifeDate(run.nowIso)); // 하루 상한 = 기준일 새벽 4시부터
 
-  const limitsFor = async (s: ServerState, reached: TurnLimits['reached'] = null): Promise<TurnLimits> => limitsOf(s, await countSessionsSince(sessionDeps, calToday), reached);
+  const limitsFor = async (s: ServerState, reached: TurnLimits['reached'] = null): Promise<TurnLimits> => limitsOf(s, await countSessionsSince(sessionDeps, dayStart), reached);
 
   // 1) 같은 요청이 다시 옴 — 저장한 답을 그대로 (rev는 안 봄: 첫 시도가 이미 rev를 올렸을 수 있음)
   if (Object.hasOwn(st.replies, ctid)) {
@@ -329,8 +329,8 @@ async function handleText(run: Run, row: SessionRow, st: ServerState, req: Extra
   const sessionDeps = { userId: deps.userId, userDb: deps.userDb, service: deps.service };
   if (deps.llm === null) throw new HttpError('NOT_CONFIGURED', 'AI가 아직 준비되지 않았어요'); // 말을 쌓지 않고 거절 — 키가 생긴 뒤 같은 요청을 다시 보내면 됨
   // 상한: 대화당 사용자 말 100(대화 길이 TURN) · 하루 AI 호출 300(DAY) — LLM을 안 부르고 템플릿 한 줄(저장도 안 함: 말이 쌓이지 않음)
-  const calToday = startOf(seoulLocal(run.nowIso).date);
-  const capped = st.counts.user_turns >= MAX_USER_TURNS ? 'TURN' : callsCapReached(await countCallsSince(sessionDeps, calToday)) ? 'DAY' : null;
+  const dayStart = dayStartIso(lifeDate(run.nowIso)); // 하루 상한 = 기준일 새벽 4시부터
+  const capped = st.counts.user_turns >= MAX_USER_TURNS ? 'TURN' : callsCapReached(await countCallsSince(sessionDeps, dayStart)) ? 'DAY' : null;
   if (capped !== null) {
     const text = capped === 'TURN' ? LIMIT_TURN_TEXT : LIMIT_DAY_TEXT;
     return outOf(st, { n: row.turns.length, role: 'ai', text, at: run.nowIso, acts: [], end: false }, [], await limitsFor(st, capped), false);

@@ -219,30 +219,30 @@ describe("날짜표 · 자정 대화 (설계 메모 4.1, 헤드 H1)", () => {
     assert.deepEqual([sun.weekday_today, sun.this_week.SUN, sun.tomorrow], ["SUN", "2026-10-11", "2026-10-12"]);
   });
 
-  it("00:30 대화(오늘 기상 기록 없음): 돌아볼 날 = 전날 — 그날 기록 · 일정이 '오늘'로, 달력 오늘 일정이 '내일'로, 화면이 에러 없이 나옴", () => {
+  it("00:30 대화(새벽 4시 전): 돌아볼 날 = 전날 — 그날 기록 · 일정이 '오늘'로, 달력 오늘 일정이 '내일'로, 화면이 에러 없이 나옴", () => {
     const now = "2026-10-30T00:30:00+09:00";
-    const days = dayOf(now, "Asia/Seoul", false);
+    const days = dayOf(now, "Asia/Seoul");
     assert.deepEqual([days.review, days.morning], ["2026-10-29", "2026-10-30"]);
     const { context } = buildContext({ ...seed(), now, days });
     assert.equal(context.session.record_date, "2026-10-29");
     assert.deepEqual(context.tomorrow.appointments.map((a) => [a.date, a.title]), [["2026-10-30", "캡스톤 발표"]]);
     // 00:30 이후 일정 없는 기상 알람은 '지금 뒤 ~ morning 24시'
     const out = viewContext(context, { confirmFacts: true });
-    assert.ok(out.includes("자정이 지났지만 잠들기 전이라 '오늘'은 2026-10-29(목) · '내일'은 2026-10-30(금)로 셈"), out);
+    assert.ok(out.includes("이 대화의 '오늘'은 2026-10-29(목) · '어제'는 2026-10-28(수) · '내일'은 2026-10-30(금)"), out);
     assert.ok(out.includes("### 내일 일정\n[a2] 10-30(금) 10:00 캡스톤 발표"), out);
   });
 
-  it("23:50 대화: 달력 오늘이 돌아볼 날, 자정 줄 없음", () => {
+  it("23:50 대화: 달력 오늘이 돌아볼 날, 새벽 줄 없음", () => {
     const now = "2026-10-29T23:50:00+09:00";
-    const days = dayOf(now, "Asia/Seoul", true);
+    const days = dayOf(now, "Asia/Seoul");
     const { context } = buildContext({ ...seed(), now, days });
-    assert.ok(!viewContext(context).includes("자정이 지났지만"));
+    assert.ok(!viewContext(context).includes("새벽 4시에 바뀌어"));
     assert.equal(context.dates.tomorrow, "2026-10-30");
   });
 
-  it("00:30에 이미 오늘 기상 기록이 있으면 달력 그대로 — 어제 기록은 '오늘'이 아님", () => {
-    const now = "2026-10-30T00:30:00+09:00";
-    const days = dayOf(now, "Asia/Seoul", true);
+  it("04:00이 지나면 기상 기록이 없어도 달력 그대로 — 어제 기록은 '오늘'이 아님", () => {
+    const now = "2026-10-30T04:00:00+09:00";
+    const days = dayOf(now, "Asia/Seoul");
     assert.deepEqual([days.review, days.morning], ["2026-10-30", "2026-10-31"]);
     const { context } = buildContext({ ...seed(), now, days, wake: null });
     // 10/30이 '오늘'이라 캡스톤 발표가 오늘 일정, 내일(10/31) 일정은 없음
