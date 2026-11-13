@@ -198,6 +198,25 @@ isOneToOne: false
       referencedColumns: ["group_id"]
     }
                   ]
+                },"briefing_devices": {
+                  Row: {
+                    "created_at": string,"device_id": string,"expires_at": string,"last_used_at": string | null,"token_hash": string,"user_id": string
+                  }
+                  Insert: {
+                    "created_at"?: string,"device_id": string,"expires_at": string,"last_used_at"?: string | null,"token_hash": string,"user_id": string
+                  }
+                  Update: {
+                    "created_at"?: string,"device_id"?: string,"expires_at"?: string,"last_used_at"?: string | null,"token_hash"?: string,"user_id"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "briefing_devices_user_id_fkey"
+      columns: ["user_id"]
+isOneToOne: false
+      referencedRelation: "profiles"
+      referencedColumns: ["user_id"]
+    }
+                  ]
                 },"conversation_sessions": {
                   Row: {
                     "apply_status": Database["public"]['Enums']["apply_status"],"created_at": string,"ended_at": string | null,"extracted_data": Json | null,"input_mode": Database["public"]['Enums']["input_mode"],"server_state": NonNullable<Json>,"session_id": string,"session_type": Database["public"]['Enums']["session_type"],"started_at": string,"transcript": string | null,"turns": NonNullable<Json>,"user_id": string
