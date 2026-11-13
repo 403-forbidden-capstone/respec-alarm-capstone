@@ -1,8 +1,9 @@
 // 자동 정리 — [완료]를 안 눌러도 서버가 지난 기준일의 대화를 정리 (voice-commit 배치 길, pg_cron 10분마다). 앱이 꺼져 있어도 돎
 //   대상: 정리 안 됐거나 정리 뒤 말이 는 세션 구간 — findUncommitted와 같은 조건(BEFORE_SLEEP · 안 끝남 · 사용자 말 있음), 최근 8일에 시작한 것
 //   언제: 구간의 기준일(server_state.day.review = D)이 끝난 뒤 = D+1 새벽 4시(KST) — 기상 알람과 상관없음
-//         그리고 마지막 사용자 말 + 60분이 지난 뒤 (대화 중이면 미룸 · 03:50까지 말했으면 04:50 뒤)
-//         Live 음성은 사용자 말마다 voice-turn으로 turns에 쌓이고 한 번이 최대 10분(LIVE_SESSION_MS)이라 60분 안에 듦. 그래도 겹치면 rev 비교로 한쪽만 · 앱은 CONFLICT면 다시 읽음
+//         마지막 말 뒤 기다림 없음 — 03:59까지 말했어도 04:00 실행이 바로 정리
+//   04:00 경계에 아직 들어오는 말(Live · 보내는 중인 글)은 빠지지 않음: 정리 중에 들어오면 그 앞까지 저장(STALE), 정리 뒤면 user_turns가 늘어
+//         needsCommit → 다음 실행(10분 뒤)이 다시 정리. 겹치면 rev 비교로 한쪽만 · 앱은 CONFLICT면 다시 읽음
 //   정리: voice-commit과 같은 commitRoom — 겹침 · 다시 시도 · STALE · 일기 규칙 그대로. 쓰기는 서버 키 + user_id 직접 걸기 (세션 · 저장 함수가 모두 user_id로 좁힘)
 //   한 번에: 정리 3개(T2 + T5 = 최대 6호출, 기본 RPM 8 안) · 새 정리는 60초 안에만 시작 (T2 19초 × 2 + T5 — 함수 시간 150초 안). 남은 것은 다음 실행
 //   실패 · 일부 실패(FAILED · PARTIAL)는 30분 → 1 · 2 · 4 · 8시간 쉬었다 다시 (같은 실패에 Gemini를 계속 부르지 않게). 대상이 없으면 Gemini를 안 부름
@@ -19,7 +20,6 @@ import { dayStartIso } from './turn-core.ts';
 import { addDays } from './view.ts';
 import { COMMIT_STALE_MS, commitRoom, type VoiceCommitOut } from './voice-commit.ts';
 
-export const IDLE_MS = 60 * 60_000;
 export const MAX_COMMITS_PER_RUN = 3;
 export const RUN_BUDGET_MS = 60_000;
 const LOOKBACK_DAYS = 8;
@@ -43,7 +43,7 @@ export interface AutoCommitDeps {
 export interface AutoCommitOut {
   /** 정리가 필요한 구간 수 */
   pending: number;
-  /** 아직 때가 아니거나(기준일 안 끝남 · 대화 중) 다시 시도를 쉬는 중 */
+  /** 아직 때가 아니거나(기준일 안 끝남) 다시 시도를 쉬는 중 */
   waiting: number;
   done: { session_id: string; status: VoiceCommitOut['status'] }[];
   errors: { session_id: string; code: string }[];
@@ -78,8 +78,6 @@ export function retryAt(st: ServerState): number {
   return Date.parse(c.finished_at ?? c.started_at) + wait;
 }
 
-const lastUserAt = (turns: StoredTurn[]): number => Math.max(...turns.filter((t) => t.role === 'user').map((t) => Date.parse(t.at)));
-
 export async function runAutoCommit(deps: AutoCommitDeps): Promise<AutoCommitOut> {
   const out: AutoCommitOut = { pending: 0, waiting: 0, done: [], errors: [], left: 0 };
   if (deps.llm === null) return out;
@@ -105,7 +103,7 @@ export async function runAutoCommit(deps: AutoCommitDeps): Promise<AutoCommitOut
 
   const ready = rows.filter((r) => {
     const st = r.server_state;
-    const at = Math.max(dueAt(st.day.review), lastUserAt(r.turns) + IDLE_MS, retryAt(st));
+    const at = Math.max(dueAt(st.day.review), retryAt(st));
     return now.getTime() >= at;
   });
   out.waiting = rows.length - ready.length;

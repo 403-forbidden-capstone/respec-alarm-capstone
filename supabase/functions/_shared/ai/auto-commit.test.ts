@@ -5,9 +5,9 @@ import { test } from 'node:test';
 
 import { FakeDb } from '../fake-db.ts';
 import type { Db } from '../supabase.ts';
-import { dueAt, IDLE_MS, MAX_COMMITS_PER_RUN, runAutoCommit, startAutoCommit, type AutoCommitDeps } from './auto-commit.ts';
+import * as autoCommit from './auto-commit.ts';
+import { dueAt, MAX_COMMITS_PER_RUN, runAutoCommit, startAutoCommit, type AutoCommitDeps } from './auto-commit.ts';
 import { fakeClaude, upstreamError, type FakeScript } from './fake-claude.ts';
-import { LIVE_SESSION_MS } from './live-token.ts';
 import type { ServerState } from './session.ts';
 import { emptyExtract } from './testing.ts';
 import { handleVoiceTurn, type VoiceTurnOut } from './turn.ts';
@@ -50,6 +50,7 @@ function run(db: FakeDb, at: Date, script: FakeScript = {}, over: Partial<AutoCo
   return { fake, out: runAutoCommit({ service: db as unknown as Db, llm: fake.client, model: 'm', now: () => at, sleep: async () => {}, ...over }) };
 }
 
+const rowOf = (db: FakeDb, sid: string) => db.rows('conversation_sessions').find((s) => s.session_id === sid) as { extracted_data: { session: { reference_date: string } } };
 const stateOf = (db: FakeDb, sid: string) => (db.rows('conversation_sessions').find((s) => s.session_id === sid) as { server_state: ServerState }).server_state;
 const told = (text: string) => emptyExtract({ day_review: { events: [{ text, time: null, important: true, source: 'stated' }], memorable: null } });
 
@@ -59,7 +60,7 @@ test('dueAt: 기준일 다음 날 KST 04:00 — 월말 · 연말도', () => {
   assert.equal(dueAt('2026-10-29'), kst('2026-10-30T04:00:00').getTime());
   assert.equal(dueAt('2026-11-30'), kst('2026-12-01T04:00:00').getTime());
   assert.equal(dueAt('2026-12-31'), kst('2027-01-01T04:00:00').getTime());
-  assert.ok(IDLE_MS > LIVE_SESSION_MS); // Live 한 번(최대 10분)은 60분 기다림 안에 듦
+  assert.equal('IDLE_MS' in autoCommit, false); // 마지막 말 뒤 60분 기다림은 없앰
 });
 
 // ───────── 앱 종료 · 기상 알람과 상관없음 ─────────
@@ -103,13 +104,17 @@ test('기상 알람이 없어도 · 이른 알람(05:00)이 있어도 04:00 정�
 
 // ───────── 대화 중 미룸 · 날짜 ─────────
 
-test('03:50까지 대화하면 04:50 뒤에 정리 (마지막 말 60분 대기) — 기준일은 전날', async () => {
+test('03:59까지 대화해도 04:00 실행이 바로 정리 (마지막 말 뒤 기다림 없음) — T2 · T5, 기준일은 전날', async () => {
   const db = seed();
-  const sid = await chat(db, ['잠이 안 와'], kst('2026-10-30T03:50:00'));
+  const sid = await chat(db, ['잠이 안 와'], kst('2026-10-30T03:59:00'));
   assert.equal(stateOf(db, sid).day.review, '2026-10-29');
-  assert.equal((await run(db, kst('2026-10-30T04:00:00')).out).waiting, 1);
-  assert.equal((await run(db, kst('2026-10-30T04:49:00')).out).waiting, 1);
-  assert.equal((await run(db, kst('2026-10-30T04:50:00'), { T2: [emptyExtract()] }).out).done.length, 1);
+  const early = run(db, kst('2026-10-30T03:59:30'));
+  assert.deepEqual([(await early.out).waiting, early.fake.order], [1, []]); // 04:00 전에는 안 함
+  const due = run(db, kst('2026-10-30T04:00:00'), { T2: [told('잠이 안 옴')], T5: [DIARY] });
+  assert.deepEqual((await due.out).done, [{ session_id: sid, status: 'DONE' }]);
+  assert.deepEqual(due.fake.order, ['T2', 'T5']);
+  assert.equal(rowOf(db, sid).extracted_data.session.reference_date, '2026-10-29'); // T2 구조화 JSON
+  assert.deepEqual(db.rows('daily_journals').map((j) => [j.record_date, j.ai_summary]), [['2026-10-29', DIARY.diary]]);
 });
 
 test('자정 넘은 대화: 23시 방을 00:40에 열면 같은 방(기준일 같음) — 04:00에 한 번 정리, 일기는 그날 한 줄 · 04:00 뒤 대화는 새 방 · 새 기준일이라 안 건드림', async () => {
@@ -144,21 +149,32 @@ test('월말 · 연말 넘김: 11/30 23시 대화는 12/1 04:00, 12/31 대화는
   }
 });
 
-test('Live 음성 대화 중(사용자 말이 방금 들어옴)에는 정리하지 않음', async () => {
+test('04:00 경계에 걸친 Live 대화: 04:00에 바로 정리, 04:03에 같은 방으로 들어온 말은 빠지지 않고 다음 실행(04:10)이 다시 정리 — 60분 안 기다림 · 일기는 전 기준일 한 줄', async () => {
   const db = seed();
-  const at = kst('2026-10-30T06:00:00');
-  db.now = at;
-  const fake = fakeClaude({ T2F: [T2F_NONE] });
-  const deps: CommitDeps = { userId: ME, userDb: db as unknown as Db, service: db as unknown as Db, llm: fake.client, model: 'm', now: () => at, sleep: async () => {} };
-  const s = (await handleVoiceSession(deps, { session_type: 'BEFORE_SLEEP', input_mode: 'TEXT', resume: true })) as VoiceSessionOut; // 글 · Live는 같은 방(input_mode는 TEXT만)
-  await handleVoiceTurn(deps, { session_id: s.session_id, rev: s.rev, client_turn_id: cid(), text: '어제 늦게 잤어', spoken_reply: '그랬군요' }); // Live 한 차례
-  const r = run(db, kst('2026-10-30T06:09:00')); // 04:00은 지났지만 Live 중
-  assert.deepEqual([(await r.out).waiting, r.fake.order], [1, []]);
+  const turnAt = async (sid: string, rev: number, text: string, at: Date) => {
+    db.now = at;
+    const fake = fakeClaude({ T2F: [T2F_NONE] });
+    const deps: CommitDeps = { userId: ME, userDb: db as unknown as Db, service: db as unknown as Db, llm: fake.client, model: 'm', now: () => at, sleep: async () => {} };
+    return ((await handleVoiceTurn(deps, { session_id: sid, rev, client_turn_id: cid(), text, spoken_reply: '그랬군요' })) as VoiceTurnOut).rev; // Live 한 차례
+  };
+  const sid = await chat(db, [], kst('2026-10-30T03:55:00'));
+  await turnAt(sid, stateOf(db, sid).rev, '오늘 발표 끝났어', kst('2026-10-30T03:58:00'));
+
+  const first = run(db, kst('2026-10-30T04:00:00'), { T2: [told('발표를 끝냄')], T5: [DIARY] });
+  assert.deepEqual((await first.out).done, [{ session_id: sid, status: 'DONE' }]);
+
+  await turnAt(sid, stateOf(db, sid).rev, '아 그리고 친구랑 저녁 먹었어', kst('2026-10-30T04:03:00')); // Live가 아직 열려 있던 말
+  assert.equal(stateOf(db, sid).counts.user_turns, 2);
+  const second = run(db, kst('2026-10-30T04:10:00'), { T2: [told('발표를 끝내고 친구와 저녁을 먹음')], T5: [{ diary: '발표 뒤 친구와 저녁을 먹었다.' }] });
+  assert.deepEqual((await second.out).done, [{ session_id: sid, status: 'DONE' }]);
+  assert.equal(second.fake.order[0], 'T2');
+  assert.equal(stateOf(db, sid).commit?.at_turn, 2);
+  assert.deepEqual(db.rows('daily_journals').map((j) => j.record_date), ['2026-10-29']);
 });
 
 // ───────── 추가 발화 · 겹침 · 실패 ─────────
 
-test('정리 중 추가 발화: 그 앞까지 저장(STALE), 새 말은 60분 뒤 다음 실행이 다시 정리 · 할 일 겹침 없음', async () => {
+test('정리 중 추가 발화: 그 앞까지 저장(STALE), 새 말은 다음 실행(10분 뒤)이 바로 다시 정리 · 할 일 겹침 없음', async () => {
   const db = seed();
   const sid = await chat(db, ['내일 우산 챙겨야 해'], kst('2026-10-29T23:00:00'));
   const umbrella = { title: '우산', type: 'ITEM' as const, due_date: null, appointment_ref: null, appointment_title: null };
@@ -169,8 +185,7 @@ test('정리 중 추가 발화: 그 앞까지 저장(STALE), 새 말은 60분 �
     return emptyExtract({ todos: [umbrella] });
   };
   assert.deepEqual((await run(db, kst('2026-10-30T04:00:00'), { T2: [talkMeanwhile] }).out).done, [{ session_id: sid, status: 'STALE' }]);
-  assert.equal((await run(db, kst('2026-10-30T04:30:00')).out).waiting, 1); // 새 말 뒤 60분 안
-  const again = run(db, kst('2026-10-30T05:00:00'), { T2: [emptyExtract({ todos: [umbrella, { ...umbrella, title: '도서관 책' }] })] });
+  const again = run(db, kst('2026-10-30T04:10:00'), { T2: [emptyExtract({ todos: [umbrella, { ...umbrella, title: '도서관 책' }] })] });
   assert.deepEqual((await again.out).done, [{ session_id: sid, status: 'DONE' }]);
   assert.deepEqual(db.rows('todos').map((t) => t.title), ['우산', '도서관 책']);
 });
