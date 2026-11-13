@@ -4,6 +4,9 @@
 -- 효과: wake-check · alarm-roll · suggestion-generate가 private.invoke_edge_function(이름)을 바로 부름 = M1 이전과 똑같음. 제안 안전망 cron(18:15 KST)은 지움
 -- 안 지우는 것: 표 server_routes · server_route_users · server_heartbeat, 함수 get_server_routes · private.run_job (추가만 한 것이라 둬도 해롭지 않음)
 -- voice-auto-commit · friend-requests-expire · friend-records-purge는 M1이 안 건드렸으므로 여기서도 안 건드림
+-- 먼저: 서버 스케줄러가 돌고 있으면(server_routes 작업 줄이 shadow · server) 이 SQL 전에 아래 한 줄로 전부 edge로 — 안 하면 pg_cron이 Edge를 부르는 동안 서버도 같은 일을 함
+--   update public.server_routes set mode = 'edge' where mode <> 'edge';
+-- 끝에 cron.job 목록을 보여 줌: 같은 jobname이 username 다르게 두 줄이면 교체가 아니라 추가된 것 (pg_cron은 jobname + username 쌍으로 찾음) → 알림
 -- 다시 적용: server-switch-reapply.sql
 
 select cron.schedule('wake-check', '*/5 * * * *', $cmd$select private.invoke_edge_function('wake-check')$cmd$);
@@ -17,3 +20,5 @@ begin
   end if;
 end;
 $$;
+
+select jobid, jobname, username, schedule, command, active from cron.job order by jobname;

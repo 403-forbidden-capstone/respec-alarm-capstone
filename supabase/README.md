@@ -88,20 +88,28 @@ update public.server_routes set mode = 'edge'   where kind = 'job' and name = 'w
 update public.server_routes set mode = 'edge' where mode <> 'edge';
 ```
 
-**적용 뒤 확인** (읽기 전용)
+**머지 전 기준선 · 적용 뒤 확인** (전부 읽기 전용, 값은 안 나옴. 머지 전에 한 번, 머지 뒤 30분 안에 같은 조회를 한 번 더)
 
 ```sql
--- 예약: wake-check · alarm-roll · suggestion-generate는 run_job, suggestion-generate-safety가 새로 생김, voice-auto-commit · 친구 cron은 그대로
-select jobid, jobname, schedule, command, active from cron.job order by jobname;
--- 값이 전부 edge인지 · 하트비트
+-- 예약: 머지 전 6개 → 뒤 7개. wake-check · alarm-roll · suggestion-generate는 run_job, suggestion-generate-safety가 새로 생김, voice-auto-commit · 친구 cron은 그대로
+-- username = 그 작업을 예약한 계정. pg_cron은 (작업 이름, 계정) 쌍으로 같은 이름을 찾아 교체함 → 머지 전 6개의 username이 전부 같아야 이번 교체도 제자리 교체가 됨
+--   다르면 머지를 보류하고 알림 (같은 이름 작업이 하나 더 생겨 Edge가 5분마다 두 번 불릴 수 있음). 머지 뒤에도 같은 이름이 두 줄이면 바로 원복
+select jobid, jobname, username, schedule, command, active from cron.job order by jobname;
+-- 값이 전부 edge인지 · 하트비트 (머지 뒤)
 select kind, name, mode from public.server_routes order by kind, name;
 select * from public.server_heartbeat order by job_name;
--- 5분 배치가 Edge까지 닿는지: 적용 30분 안에 응답 200이 줄마다(wake-check · alarm-roll) 쌓여야 함. cron 기록 "성공"은 요청을 줄에 넣었다는 뜻일 뿐
+-- 기준선 (머지 직전 · 보관이 짧음): 지금 5분 배치가 Edge까지 닿는지. 머지 뒤 200이 안 보여도 M1 때문인지 원래 그랬는지(Vault 키 없음 · Edge 401 · 404) 가르려고
+select status_code, count(*) from net._http_response where created > now() - interval '30 minutes' group by status_code order by status_code;
+select name from vault.secrets where name in ('project_url', 'service_role_key');   -- 이름만. 둘 다 나와야 함
+-- 5분 배치가 Edge까지 닿는지 (머지 뒤): 30분 안에 응답 200이 줄마다(wake-check · alarm-roll) 쌓여야 함. cron 기록 "성공"은 요청을 줄에 넣었다는 뜻일 뿐
 select id, status_code, timed_out, error_msg, left(content::text, 80) as body, created from net._http_response order by created desc limit 30;
 select jobid, status, return_message, start_time from cron.job_run_details where start_time > now() - interval '30 minutes' order by start_time desc;
 ```
 
-**원복** — 적용 뒤 30분 안에 `net._http_response`에 `wake-check` · `alarm-roll` 200이 안 보이면 (서버_완결점 10절), SQL 편집기에 `ops/server-switch-rollback.sql`을 통째로 붙여 실행함. `wake-check` · `alarm-roll` · `suggestion-generate`의 예약 명령을 M1 이전 모양(`private.invoke_edge_function(이름)`)으로 되돌리고 `suggestion-generate-safety`를 지움 (여러 번 실행해도 같음). 표 · 함수는 추가만 한 것이라 그대로 둠. 다시 적용은 `ops/server-switch-reapply.sql`. 두 파일은 `tests/db-check.mjs`가 실제로 돌려서 "원복하면 옛 명령 · 다시 적용하면 마이그레이션과 같은 목록"을 확인함.
+**원복** — 적용 뒤 30분 안에 `net._http_response`에 `wake-check` · `alarm-roll` 200이 안 보이면 (서버_완결점 10절), SQL 편집기에 `ops/server-switch-rollback.sql`을 통째로 붙여 실행함. `wake-check` · `alarm-roll` · `suggestion-generate`의 예약 명령을 M1 이전 모양(`private.invoke_edge_function(이름)`)으로 되돌리고 `suggestion-generate-safety`를 지움 (여러 번 실행해도 같음). 끝에 `cron.job` 목록을 보여 주니 `username`이 같은 이름으로 두 줄인지 확인함. 표 · 함수는 추가만 한 것이라 그대로 둠. 다시 적용은 `ops/server-switch-reapply.sql`. 두 파일은 `tests/db-check.mjs`가 실제로 돌려서 "원복하면 옛 명령 · 다시 적용하면 마이그레이션과 같은 목록"을 확인함.
+
+- 서버 스케줄러가 실제로 도는 중에 원복하면(작업 줄이 `shadow` · `server`) pg_cron이 Edge를 부르는 동안 서버도 같은 일을 함 (기록 · 푸시는 한 번만 남아 안전하지만 낭비) → 원복 전에 `update public.server_routes set mode = 'edge' where mode <> 'edge';`를 먼저 실행함
+- `suggestion-generate`를 `edge` → `server`로 바꾸는 일은 18:00 ~ 18:15 KST 사이를 피함 (그날 Edge가 두 번 돌 수 있음. 제안 유일 인덱스로 둘째는 0건이라 안전)
 
 ## 서버 함수가 쓰는 DB 함수 (service_role 전용)
 

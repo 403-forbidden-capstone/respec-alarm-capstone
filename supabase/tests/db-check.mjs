@@ -109,7 +109,7 @@ const PLATFORM_STUBS = `
   grant usage, select on sequence realtime.messages_id_seq to anon, authenticated, service_role;
 
   create schema cron;
-  create table cron.job (jobid bigserial primary key, jobname text unique, schedule text not null, command text not null);
+  create table cron.job (jobid bigserial primary key, jobname text unique, username text not null default current_user, schedule text not null, command text not null, active boolean not null default true);
   create function cron.schedule(job_name text, schedule text, command text) returns bigint language sql
     as $$ insert into cron.job (jobname, schedule, command) values (job_name, schedule, command)
           on conflict (jobname) do update set schedule = excluded.schedule, command = excluded.command returning jobid $$;
