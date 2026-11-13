@@ -7,7 +7,7 @@ import { listPlaces } from '@/features/alarm/api';
 import { PlaceSearchSheet } from '@/features/alarm/components/PlaceSearchSheet';
 import { homeOf } from '@/features/alarm/placeSheet';
 import { useAuth } from '@/features/auth/AuthProvider';
-import { finishConversation, getConversation, getLiveToken, pickCardPlace, rejectCard, retryConversation, saveCard, say, sayVoice } from '@/features/voice/api';
+import { endLiveVoice, finishConversation, getConversation, getLiveToken, pickCardPlace, rejectCard, retryConversation, saveCard, say, sayVoice } from '@/features/voice/api';
 import { ChatBubble, TypingBubble } from '@/features/voice/components/ChatBubble';
 import { ChatComposer } from '@/features/voice/components/ChatComposer';
 import { noticeCopy } from '@/features/voice/chatNotice';
@@ -83,6 +83,10 @@ export default function AiScreen() {
       setProgress(null);
     }
   }));
+  // 통화가 끝나면 붙잡은 대화방을 놓음 — 03:59에 시작한 통화는 끝날 때까지 전날 방, 끝난 뒤 새 대화는 새 기준일 방 (마지막 차례 저장 뒤에 풀림)
+  useEffect(() => {
+    if (live.phase === 'idle') void endLiveVoice();
+  }, [live.phase]);
   const stopLive = useRef(live.stop);
   useEffect(() => {
     stopLive.current = live.stop;

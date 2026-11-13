@@ -93,8 +93,13 @@ export async function getLiveToken(): Promise<{ token: string; model: string }> 
     if (!res?.ok) throw new UserError('로컬 음성 토큰 서버에 연결하지 못했어요. tools/live-token-server.ts가 켜져 있는지 확인해 주세요');
     return (await res.json()) as { token: string; model: string };
   }
-  const sessionId = real.liveSessionId();
+  const sessionId = await real.beginLive(); // 기준일이 바뀌었으면 새 방으로 옮긴 뒤, 통화가 끝날 때까지 그 방을 붙잡음
   return callEdge<{ token: string; model: string }>('voice-live-token', sessionId ? { session_id: sessionId } : undefined);
+}
+
+// Live 통화가 끝남 — 붙잡은 대화방을 놓음 (새벽 4시가 지났으면 다음 읽기부터 새 기준일 방)
+export async function endLiveVoice(): Promise<void> {
+  if (!isMock()) await real.endLive();
 }
 
 // 실시간 음성 한 차례(내 말 + Live 답)를 같은 대화에 남김 — 일정이면 글과 같은 카드 흐름. 목업은 음성이 없어 남기지 않음

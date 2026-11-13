@@ -149,27 +149,50 @@ test('월말 · 연말 넘김: 11/30 23시 대화는 12/1 04:00, 12/31 대화는
   }
 });
 
-test('04:00 경계에 걸친 Live 대화: 04:00에 바로 정리, 04:03에 같은 방으로 들어온 말은 빠지지 않고 다음 실행(04:10)이 다시 정리 — 60분 안 기다림 · 일기는 전 기준일 한 줄', async () => {
+/** 열린 방에 한 차례 — spoken이 있으면 Live 음성(voice-turn spoken_reply), 없으면 글 */
+async function turnAt(db: FakeDb, sid: string, text: string, at: Date, spoken?: string): Promise<VoiceTurnOut> {
+  db.now = at;
+  const fake = fakeClaude({ T2F: [T2F_NONE], T1: [T1_OK] });
+  const deps: CommitDeps = { userId: ME, userDb: db as unknown as Db, service: db as unknown as Db, llm: fake.client, model: 'm', now: () => at, sleep: async () => {} };
+  return (await handleVoiceTurn(deps, { session_id: sid, rev: stateOf(db, sid).rev, client_turn_id: cid(), text, ...(spoken ? { spoken_reply: spoken } : {}) })) as VoiceTurnOut;
+}
+
+test('03:59 Live 시작 → 04:05 끝: 통화 전체가 전날 방 · 전날 기록 — 04:00에 바로 정리, 04:00 뒤 들어온 말은 다음 실행(04:10)이 다시 정리 · 할 일 · 일기 겹침 없음', async () => {
   const db = seed();
-  const turnAt = async (sid: string, rev: number, text: string, at: Date) => {
-    db.now = at;
-    const fake = fakeClaude({ T2F: [T2F_NONE] });
-    const deps: CommitDeps = { userId: ME, userDb: db as unknown as Db, service: db as unknown as Db, llm: fake.client, model: 'm', now: () => at, sleep: async () => {} };
-    return ((await handleVoiceTurn(deps, { session_id: sid, rev, client_turn_id: cid(), text, spoken_reply: '그랬군요' })) as VoiceTurnOut).rev; // Live 한 차례
-  };
-  const sid = await chat(db, [], kst('2026-10-30T03:55:00'));
-  await turnAt(sid, stateOf(db, sid).rev, '오늘 발표 끝났어', kst('2026-10-30T03:58:00'));
+  const sid = await chat(db, [], kst('2026-10-30T03:59:00')); // 통화 시작 때 연 방 (기준일 10/29)
+  await turnAt(db, sid, '내일 우산 챙겨야 해', kst('2026-10-30T03:59:40'), '네 챙겨요');
+  const umbrella = { title: '우산', type: 'ITEM' as const, due_date: null, appointment_ref: null, appointment_title: null };
 
-  const first = run(db, kst('2026-10-30T04:00:00'), { T2: [told('발표를 끝냄')], T5: [DIARY] });
+  const first = run(db, kst('2026-10-30T04:00:00'), { T2: [{ ...told('우산을 챙기기로 함'), todos: [umbrella] }], T5: [DIARY] });
   assert.deepEqual((await first.out).done, [{ session_id: sid, status: 'DONE' }]);
+  assert.deepEqual(first.fake.order, ['T2', 'T5']);
 
-  await turnAt(sid, stateOf(db, sid).rev, '아 그리고 친구랑 저녁 먹었어', kst('2026-10-30T04:03:00')); // Live가 아직 열려 있던 말
-  assert.equal(stateOf(db, sid).counts.user_turns, 2);
-  const second = run(db, kst('2026-10-30T04:10:00'), { T2: [told('발표를 끝내고 친구와 저녁을 먹음')], T5: [{ diary: '발표 뒤 친구와 저녁을 먹었다.' }] });
+  await turnAt(db, sid, '아 그리고 친구랑 저녁 먹었어', kst('2026-10-30T04:03:00'), '좋았겠네요'); // 통화가 아직 열려 있던 말
+  await turnAt(db, sid, '이제 잘게', kst('2026-10-30T04:05:00'), '잘 자요');
+  assert.equal(stateOf(db, sid).day.review, '2026-10-29'); // 기준일 그대로
+  assert.equal(stateOf(db, sid).counts.user_turns, 3);
+
+  const second = run(db, kst('2026-10-30T04:10:00'), { T2: [{ ...told('우산을 챙기고 친구와 저녁을 먹음'), todos: [umbrella] }], T5: [{ diary: '친구와 저녁을 먹었다.' }] }); // 다음 cron
   assert.deepEqual((await second.out).done, [{ session_id: sid, status: 'DONE' }]);
   assert.equal(second.fake.order[0], 'T2');
-  assert.equal(stateOf(db, sid).commit?.at_turn, 2);
-  assert.deepEqual(db.rows('daily_journals').map((j) => j.record_date), ['2026-10-29']);
+  assert.equal(stateOf(db, sid).commit?.status, 'DONE');
+  assert.equal(stateOf(db, sid).commit?.at_turn, 3);
+  assert.deepEqual(db.rows('todos').map((t) => t.title), ['우산']); // 다시 정리해도 겹치지 않음
+  assert.deepEqual(db.rows('daily_journals').map((j) => j.record_date), ['2026-10-29']); // 일기는 전날 한 줄
+  assert.equal(db.rows('conversation_sessions').length, 1); // 새 방으로 옮기지 않음
+});
+
+test('03:59 글 → 04:01 처리: 전날 방에 저장(기준일 10/29) · 그 뒤 새로 열면 새 기준일 방', async () => {
+  const db = seed();
+  const sid = await chat(db, [], kst('2026-10-30T03:59:00'));
+  const r = await turnAt(db, sid, '오늘 피곤했어', kst('2026-10-30T04:01:00')); // 03:59에 보낸 요청이 04:01에 서버에 닿음
+  assert.ok(r.rev > 0);
+  assert.equal(stateOf(db, sid).day.review, '2026-10-29');
+  assert.equal(stateOf(db, sid).counts.user_turns, 1);
+  const next = await chat(db, [], kst('2026-10-30T04:02:00'));
+  assert.notEqual(next, sid);
+  assert.equal(stateOf(db, next).day.review, '2026-10-30');
+  assert.deepEqual((await run(db, kst('2026-10-30T04:10:00'), { T2: [emptyExtract()] }).out).done, [{ session_id: sid, status: 'DONE' }]);
 });
 
 // ───────── 추가 발화 · 겹침 · 실패 ─────────

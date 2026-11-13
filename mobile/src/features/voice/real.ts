@@ -177,10 +177,15 @@ function freshState(userId: string | null): State {
 }
 
 let state: State = freshState(null);
+// 실시간 음성(Live) 통화가 열려 있는 동안(이 시각까지) 대화방을 붙잡음 — 03:59에 시작한 통화는 04:00이 지나도 끝날 때까지 같은 방 · 같은 기준일
+//   endLive가 0으로 · 앱이 끝을 못 알려도 통화 최대 길이(10분)+1분 뒤 풀림
+const LIVE_HOLD_MS = 11 * 60_000;
+let liveUntil = 0;
 
 // 시험용 — 모듈 상태 비우기
 export function resetVoiceState() {
   state = freshState(null);
+  liveUntil = 0;
   chain = Promise.resolve();
   progress = null;
   flushing = null;
@@ -730,8 +735,10 @@ async function guardUser() {
 
 async function ensureSession(): Promise<void> {
   await guardUser();
-  // 앱을 켜 둔 채 새벽 4시(KST)가 지나면 서버에서 다시 읽음 → 새 대화방 (보내는 중인 말 · 카드 요청이 없을 때만)
-  if (state.started && state.day !== lifeDayKey(now()) && !state.pending && state.queue.length === 0) state = freshState(state.userId);
+  // 앱을 켜 둔 채 새벽 4시(KST)가 지나면 서버에서 다시 읽음 → 새 대화방
+  //   보내는 중인 말 · 카드 요청 · 열린 Live 통화가 있으면 그 대화가 끝날 때까지 시작한 방(기준일)을 그대로 씀
+  const t = now();
+  if (state.started && state.day !== lifeDayKey(t) && !state.pending && state.queue.length === 0 && t.getTime() >= liveUntil) state = freshState(state.userId);
   if (state.started || state.unavailable) return; // 시작 실패는 [다시 시도](retry)만 다시 부름
   await startConversation({ type: 'BEFORE_SLEEP' });
 }
@@ -820,6 +827,23 @@ export function sayVoice(heard: string, spoken: string, onProgress?: (c: Convers
 
 // 지금 대화방 id — Live 토큰을 받을 때 서버가 앞 대화를 지침에 붙이게 (없으면 null)
 export const liveSessionId = (): string | null => state.sessionId;
+
+// Live 통화 시작(토큰 받기 전) — 기준일이 바뀌었으면 여기서 새 방으로 옮기고, 그 방을 통화가 끝날 때까지 붙잡음. 그 방 id를 돌려줌
+export function beginLive(): Promise<string | null> {
+  return serial(async () => {
+    liveUntil = 0;
+    await ensureSession();
+    liveUntil = now().getTime() + LIVE_HOLD_MS;
+    return state.sessionId;
+  });
+}
+
+// Live 통화 끝 — 마지막 차례(sayVoice)가 앞서 줄 서 있으므로 그 뒤에 풀림. 다음 읽기부터 새 기준일이면 새 방
+export function endLive(): Promise<void> {
+  return serial(async () => {
+    liveUntil = 0;
+  });
+}
 
 // [다시 시도] — 세션을 못 시작했으면 다시 시작, 보낸 요청이 남았으면 같은 요청(같은 client_turn_id)을 다시 (성공하면 뒤에 쌓인 카드 요청도 차례로)
 export function retry(): Promise<Conversation> {

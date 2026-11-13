@@ -57,4 +57,18 @@ describe('live-token', () => {
     assert.match(liveDateNote(Date.parse('2026-11-12T04:00:00+09:00')), /"today" \(오늘\) is 2026-11-12/);
     assert.match(liveDateNote(Date.parse('2027-01-01T03:59:00+09:00')), /"today" \(오늘\) is 2026-12-31, .* "tomorrow" \(내일\) is 2027-01-01/);
   });
+
+  it('이어 쓰는 대화방의 기준일(day)이 있으면 04:00이 지나도 그 날이 오늘 — 토큰 지침에도 그대로', async () => {
+    const at = Date.parse('2026-11-13T04:05:00+09:00');
+    const n = liveDateNote(at, '2026-11-12');
+    assert.match(n, /Now: 2026-11-13 04:05\./);
+    assert.match(n, /"today" \(오늘\) is 2026-11-12, "yesterday" \(어제\) is 2026-11-11, "tomorrow" \(내일\) is 2026-11-13/);
+    let sent = '';
+    const fetchFn = (async (_u: string, init: { body: string }) => {
+      sent = init.body;
+      return new Response(JSON.stringify({ name: 't' }), { status: 200 });
+    }) as unknown as typeof fetch;
+    await createLiveToken('k', { fetchFn, now: at, day: '2026-11-12' });
+    assert.ok(sent.includes('\\"today\\" (오늘) is 2026-11-12'));
+  });
 });
