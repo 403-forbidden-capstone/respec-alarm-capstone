@@ -83,6 +83,19 @@ class BriefingRulesTest {
   }
 
   @Test
+  fun androidTextDropsExclamationMarks() {
+    // 서버 briefing.ts noExclaim과 같은 결과 — 반각 · 전각 · 연속 느낌표, ?! 조합, 붙은 글자 띄우기, 숫자 속 마침표는 그대로
+    assertEquals("야. 너 일어나.", BriefingRules.androidText("야!!!!너 일어나!"))
+    assertEquals("해? 빨리.", BriefingRules.androidText("해?! 빨리!"))
+    assertEquals("일어나. 빨리.", BriefingRules.androidText("일어나！！ 빨리!"))
+    assertEquals("1.5배.", BriefingRules.androidText("1.5배!"))
+    assertEquals("좋은 아침이야.", BriefingRules.androidText("좋은 아침이야."))
+    // 저장된 브리핑이 없을 때의 3단계 문장도 느낌표 없이 읽힘
+    val f = BriefingRules.fallback("WAKE", "좋은 아침", "", "", 2)!!
+    assertTrue('!' !in BriefingRules.androidText(f.text))
+  }
+
+  @Test
   fun noCacheDepartureReadsNoticeAndTitle() {
     val f = BriefingRules.fallback("DEPARTURE", null, "지금 나가면 오전 9:50 도착 · 여유 10분", "면접", 0)!!
     assertEquals("지금 나가면 오전 9:50 도착 · 여유 10분. 면접", f.text)

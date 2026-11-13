@@ -252,31 +252,26 @@ export type StructuredLike = {
   other?: { safety_flag?: boolean };
 };
 
-export type WakeMemo = { wakeEarly: boolean; overslept: boolean; lateByOversleep: boolean; goals: string[] };
+export type WakeMemo = { wakeEarly: boolean; overslept: boolean; lateByOversleep: boolean; snoozeRepeat: boolean; goals: string[] };
 
 const WAKE_HABITS = new Set(['snooze_repeat', 'irregular_wake']);
-const GOAL_MAX_CHARS = 30;
+const GOAL_MAX_CHARS = 60;
+const GOAL_MAX = 5;
 const told = (x: Told): boolean => x.source === 'stated' || x.source === 'confirmed';
 
-/** 그 기준일(reviewDate = 알람 날 − 1, 대화 기준일 규칙 turn-core dayOf)의 대화들에서 꺼냄. 꺼낼 것이 없으면 null (기본 멘트) */
+/** 그 기준일(reviewDate = 알람 날 − 1, 대화 기준일 규칙 turn-core dayOf)의 대화들에서 꺼냄. 꺼낼 것이 없으면 null (기본 멘트)
+ *  goals = 사용자가 직접 말하거나 확인한 다짐 · 목표 문장 전부 (기상 습관 목표 포함, 너무 긴 문장만 뺌) */
 export function wakeMemo(list: readonly StructuredLike[], reviewDate: string): WakeMemo | null {
   const day = list.filter((s) => s.schema_version === 'structured.v1' && s.session?.reference_date === reviewDate && !s.other?.safety_flag);
   const goals = day.flatMap((s) => (s.goals_routine?.goals ?? []).filter(told));
   const wakeEarly = goals.some((g) => WAKE_HABITS.has(g.habit ?? ''));
-  const overslept =
-    day.some((s) => (s.sleep_wake ?? []).some((w) => told(w) && w.overslept === true)) ||
-    day.some((s) => (s.habit_signals ?? []).some((h) => told(h) && WAKE_HABITS.has(h.habit ?? '')));
+  const habits = day.flatMap((s) => (s.habit_signals ?? []).filter(told));
+  const overslept = day.some((s) => (s.sleep_wake ?? []).some((w) => told(w) && w.overslept === true)) || habits.some((h) => WAKE_HABITS.has(h.habit ?? ''));
+  const snoozeRepeat = habits.some((h) => h.habit === 'snooze_repeat');
   const lateByOversleep = day.some((s) => (s.schedule_outcomes ?? []).some((o) => told(o) && o.is_late === true && (o.causes ?? []).includes('overslept')));
-  const others = [
-    ...new Set(
-      goals
-        .filter((g) => !WAKE_HABITS.has(g.habit ?? ''))
-        .map((g) => (g.goal_text ?? '').trim())
-        .filter((t) => t.length > 0 && t.length <= GOAL_MAX_CHARS),
-    ),
-  ].slice(0, 2);
-  if (!wakeEarly && !overslept && !lateByOversleep && !others.length) return null;
-  return { wakeEarly, overslept: overslept || lateByOversleep, lateByOversleep, goals: others };
+  const texts = [...new Set(goals.map((g) => (g.goal_text ?? '').trim()).filter((t) => t.length > 0 && t.length <= GOAL_MAX_CHARS))].slice(0, GOAL_MAX);
+  if (!wakeEarly && !overslept && !lateByOversleep && !texts.length) return null;
+  return { wakeEarly, overslept: overslept || lateByOversleep, lateByOversleep, snoozeRepeat, goals: texts };
 }
 
 // ---------------------------------------------------------------------------
@@ -286,7 +281,8 @@ export function wakeMemo(list: readonly StructuredLike[], reviewDate: string): W
 export type BriefAppointment = { title: string; atMs: number; importance: Importance };
 export type BriefTodo = { title: string; type: 'TASK' | 'ITEM' };
 
-export const MAX_APPOINTMENTS = 3;
+// 기상 알람은 오늘 일정을 빠짐없이 안내함 (예전 3개 제한 없앰)
+export const MAX_APPOINTMENTS = Number.POSITIVE_INFINITY;
 const IMPORTANCE_RANK: Record<Importance, number> = { HIGH: 2, NORMAL: 1, LOW: 0 };
 
 /** DB에 있는 일정만, 시간순. 많으면 가장 가까운 일정 + 중요한 일정 순으로 max개를 고른 뒤 다시 시간순 */
@@ -307,11 +303,10 @@ export type BriefingInput = {
   timeZone: string;
 };
 
-const MAX_TODOS = 3;
 const list = (xs: readonly string[]) => xs.join(', ');
 const spoken = (ms: number, tz: string) => formatKoSpokenTime(new Date(ms), tz);
 const apptLine = (a: BriefAppointment, tz: string) => `${spoken(a.atMs, tz)} ${a.title.trim()}`;
-const titles = (todos: readonly BriefTodo[], type: BriefTodo['type']) => todos.filter((t) => t.type === type).map((t) => t.title.trim()).filter(Boolean).slice(0, MAX_TODOS);
+const titles = (todos: readonly BriefTodo[], type: BriefTodo['type']) => todos.filter((t) => t.type === type).map((t) => t.title.trim()).filter(Boolean);
 
 function scheduleSentence(input: BriefingInput): string {
   const appts = input.appointments.map((a) => apptLine(a, input.timeZone));
@@ -325,69 +320,67 @@ function importantSentence(input: BriefingInput): string | null {
   return important ? `특히 ${important.title.trim()} 일정은 중요하니까 꼭 챙기자.` : null;
 }
 
-function todoSentences(input: BriefingInput): string[] {
+function itemSentence(input: BriefingInput, strong = false): string | null {
   const items = titles(input.todos, 'ITEM');
+  if (!items.length) return null;
+  return strong ? `${list(items)} 챙겨야지!` : `챙길 것은 ${list(items)}.`;
+}
+
+function taskSentence(input: BriefingInput): string | null {
   const tasks = titles(input.todos, 'TASK');
-  return [items.length ? `챙길 것: ${list(items)}.` : null, tasks.length ? `오늘 할 일: ${list(tasks)}.` : null].filter((s): s is string => s != null);
+  return tasks.length ? `오늘 할 일은 ${list(tasks)}.` : null;
 }
 
 function departSentence(input: BriefingInput, strong: boolean): string | null {
   if (input.departAtMs == null) return null;
   const t = spoken(input.departAtMs, input.timeZone);
-  return strong ? `${t}에는 나가야 해!` : `${t}에는 나가야 하니까`;
+  return strong ? `${t}에는 나가야 해!` : `${t}에는 나가야 해.`;
 }
 
-// 다짐 · 반성 문장 — 사용자가 말한 것만 (memo 칸이 true일 때만 그 문장)
+const quoted = (goals: readonly string[]) => goals.map((g) => `"${g}"`).join(', ');
+
+// 다짐 · 반성 문장 — 사용자가 말한 것만 (memo 칸이 true일 때만 그 문장). 다짐 문장이 있으면 모든 단계에서 빠짐없이
 function memoGentle(m: WakeMemo | null): string[] {
   if (!m) return [];
   return [
-    m.wakeEarly ? '어제 오늘부터는 일찍 일어나겠다고 했잖아.' : null,
+    m.goals.length ? `어제 다짐한 ${quoted(m.goals)}, 오늘 실천해 보자.` : m.wakeEarly ? '어제 오늘부터는 일찍 일어나겠다고 했잖아.' : null,
     m.lateByOversleep ? '늦잠 때문에 지각했던 거, 오늘은 다르게 해 보자.' : m.overslept && !m.wakeEarly ? '요즘 늦잠 때문에 힘들다고 했었지.' : null,
-    ...m.goals.map((g) => `어제 세운 목표, "${g}" 잊지 말자.`),
   ].filter((s): s is string => s != null);
 }
 
 function memoFirm(m: WakeMemo | null): string[] {
   if (!m) return [];
   return [
-    m.wakeEarly ? '어제 일찍 일어나겠다고 했잖아!' : null,
-    m.lateByOversleep ? '또 늦잠 자서 지각할 거야?' : null,
-    !m.wakeEarly && !m.lateByOversleep && m.goals.length ? `어제 세운 목표, "${m.goals[0]}" 기억하지?` : null,
+    m.goals.length ? `어제 ${quoted(m.goals)}, 이렇게 다짐했잖아.` : m.wakeEarly ? '어제 일찍 일어나겠다고 했잖아.' : null,
+    m.lateByOversleep ? '어제처럼 늦잠 자면 안 되잖아.' : null,
   ].filter((s): s is string => s != null);
 }
 
 function memoShout(m: WakeMemo | null): string[] {
   if (!m) return [];
   return [
-    m.wakeEarly ? '너 어제 일찍 일어나고 싶다며!' : null,
-    m.lateByOversleep ? '늦잠 자서 지각했다고 반성했잖아! 또 지각할 거야?' : null,
-    m.lateByOversleep || m.wakeEarly ? '어제 다짐했으면 오늘 실천해야지!' : null,
+    m.lateByOversleep ? '너 어제 늦잠 자서 지각했다며!' : null,
+    m.goals.length ? `어제 ${quoted(m.goals)} 다짐했잖아!` : m.wakeEarly ? '너 어제 일찍 일어나고 싶다며!' : null,
+    m.lateByOversleep || m.wakeEarly || m.goals.length ? '다짐했으면 오늘 실천해야지!' : null,
   ].filter((s): s is string => s != null);
 }
 
-function quickSchedule(input: BriefingInput): string | null {
-  const appts = input.appointments.slice(0, 2).map((a) => apptLine(a, input.timeZone));
-  return appts.length ? `오늘 ${list(appts)} 있잖아` : null;
-}
-
-// 2 · 3단계는 스누즈 없이도 시간만 지나 올라갈 수 있어 "미뤘다"고 단정하지 않음. 4단계는 여유 0분 이하에서만 "늦는다"고 말함
+// 모든 단계에 오늘 전체 일정 · 준비물 · 다짐을 넣음 — 단계마다 말투 · 구성 · 세기만 달라짐 (Gemini 대본이 없을 때의 템플릿)
+// 2 · 3단계는 스누즈 없이도 시간만 지나 올라갈 수 있어 "미뤘다"고 단정하지 않음. 4단계는 여유 0분 이하에서만 울려 "늦는다"고 말함
 //   3단계 음성은 미리 한 번 만들어 두고 스누즈로 와도 같은 파일을 틀므로, 시간이 촉박하다고 단정하는 말("지금 일어나야 딱 맞게 도착해")은 안 넣음
-//   감정 · 세기는 Gemini 영어 지시(GEMINI_STAGE)가 맡음 — 느낌표를 여러 개 이어 붙이지 않음
+//   1 · 2단계는 Android TTS가 읽어 느낌표를 안 씀 (briefingText · briefingClips에서도 한 번 더 지움)
 function wakeText(level: UrgencyLevel, input: BriefingInput): (string | null)[] {
+  const schedule = scheduleSentence(input);
   if (level === 1) {
-    const depart = departSentence(input, false);
-    return ['좋은 아침이야~', ...memoGentle(input.memo), scheduleSentence(input), importantSentence(input), ...todoSentences(input), depart ? `${depart} 슬슬 일어나서 준비해 볼까?` : '슬슬 일어나서 준비해 볼까?'];
+    return ['좋은 아침이야.', schedule, importantSentence(input), itemSentence(input), taskSentence(input), ...memoGentle(input.memo), departSentence(input, false), '슬슬 일어나서 준비해 보자.'];
   }
   if (level === 2) {
-    const quick = quickSchedule(input);
-    return ['야, 이제 진짜 일어나야 해. 더 미루면 준비하기 힘들어.', ...memoFirm(input.memo), quick ? `${quick}.` : null, importantSentence(input), '얼른 일어나.'];
+    return ['이제 정말 일어나야 해.', schedule, itemSentence(input), ...memoFirm(input.memo), departSentence(input, false), '이제 그만 자고 지금 준비를 시작하자.'];
   }
   if (level === 3) {
-    const quick = quickSchedule(input);
-    return ['야, 근데 이제 진짜 일어나야 돼. 계속 자면 안 되잖아.', ...memoFirm(input.memo), quick ? `${quick}.` : null, departSentence(input, true), '얼른 일어나서 준비해!'];
+    return ['야! 이제 진짜 일어나야 돼!', ...memoShout(input.memo), schedule, itemSentence(input, true), departSentence(input, true), '얼른 일어나서 준비해!'];
   }
-  const quick = quickSchedule(input);
-  return ['야! 너 안 일어나?! 지금 안 일어나면 진짜 늦어!', ...memoShout(input.memo), quick ? `${quick}!` : null, '지금 당장 일어나! 빨리 일어나라고!'];
+  return ['야! 너 안 일어나?! 지금 안 일어나면 진짜 늦어!', schedule, itemSentence(input, true), ...memoShout(input.memo), '지금 당장 일어나! 빨리 일어나라고!'];
 }
 
 function departureText(level: UrgencyLevel, input: BriefingInput): (string | null)[] {
@@ -405,10 +398,28 @@ export function speakable(s: string): string {
   return s.replace(/([!?])\1+/g, '$1').replace(/[!?]{3,}/g, (m) => m.slice(0, 2));
 }
 
+/**
+ * Android TTS용 — 느낌표(반각 ! · 전각 ！ · 연속)를 지움. 폰 TTS가 느낌표를 소리 내 읽는 문제 때문 (네이티브 BriefingRules.androidText와 같은 규칙)
+ *   "?!" · "!?"는 "?"로, 나머지 느낌표는 마침표로 바꾸고 바로 뒤에 글자가 붙어 있으면 띄어 씀 ("야!너" → "야. 너"). 이어진 마침표는 하나로
+ */
+export function noExclaim(s: string): string {
+  return s
+    .replace(/[!！]+(?=[?？])|(?<=[?？])[!！]+/g, '')
+    .replace(/[!！]+/g, '.')
+    .replace(/\.(?:\s*\.)+/g, '.')
+    .replace(/([?？])\./g, '$1')
+    .replace(/\.(?=[가-힣A-Za-z])/g, '. ')
+    .trim();
+}
+
+/** 1 · 2단계는 Android TTS가 읽음 — 느낌표 없이. 3 · 4단계는 Gemini TTS용이라 느낌표를 둠 (Android 대체 재생 때는 폰이 지움) */
+export const isAndroidLevel = (level: UrgencyLevel): boolean => level <= 2;
+
 /** 단계별 알람 음성 문장 — 알람이 울리는 동안 이 문장 하나를 읽음. 사용자가 적은 일정 · 준비물 · 목표의 반복 부호도 같이 정리 */
 export function briefingText(level: UrgencyLevel, input: BriefingInput): string {
   const parts = input.kind === 'DEPARTURE' ? departureText(level, input) : wakeText(level, input);
-  return speakable(parts.filter((s): s is string => !!s).join(' '));
+  const text = speakable(parts.filter((s): s is string => !!s).join(' '));
+  return isAndroidLevel(level) ? noExclaim(text) : text;
 }
 
 // ---------------------------------------------------------------------------
@@ -427,10 +438,20 @@ export function clipHash(parts: { text: string; voice: string; style: string; mo
 
 export type BriefingClip = { level: UrgencyLevel; text: string; hash: string } & AndroidVoice;
 
-/** 단계별 문장 + Android TTS 값 + 캐시 열쇠 (3 · 4단계는 그 단계의 Gemini 모델 · 목소리 · 지시 · 대사가 다 들어감 → 하나라도 바뀌면 새 음성) */
-export function briefingClips(rule: UrgencyRule, profile: Pick<VoiceProfile, 'voice' | 'tone'>, input: BriefingInput, model = TTS_MODEL): BriefingClip[] {
+/**
+ * 단계별 문장 + Android TTS 값 + 캐시 열쇠 (3 · 4단계는 그 단계의 Gemini 모델 · 목소리 · 지시 · 대사가 다 들어감 → 하나라도 바뀌면 새 음성)
+ *   texts = 미리 만든 개인화 기상 대본(wake-script.ts finalizeScripts). 없는 단계는 템플릿 문장
+ */
+export function briefingClips(
+  rule: UrgencyRule,
+  profile: Pick<VoiceProfile, 'voice' | 'tone'>,
+  input: BriefingInput,
+  model = TTS_MODEL,
+  texts?: Partial<Record<UrgencyLevel, string>> | null,
+): BriefingClip[] {
   return levelsToPrepare(rule).map((level) => {
-    const text = briefingText(level, input);
+    const given = texts?.[level];
+    const text = given ? (isAndroidLevel(level) ? noExclaim(given) : given) : briefingText(level, input);
     const g = isGeminiLevel(level) ? GEMINI_STAGE[level] : { voice: profile.voice, style: '' };
     return { level, text, hash: clipHash({ text, voice: g.voice, style: g.style, model }), ...androidVoice(profile, level) };
   });

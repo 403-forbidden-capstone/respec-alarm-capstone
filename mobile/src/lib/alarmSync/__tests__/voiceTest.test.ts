@@ -51,7 +51,7 @@ describe('기상 AI 음성 단계 재현', () => {
     for (const clip of voice.clips) {
       expect(clip).toMatchObject(androidVoice(profile, clip.level as UrgencyLevel));
     }
-    expect(voice.clips[0].text).toContain('좋은 아침이야~');
+    expect(voice.clips[0].text).toContain('좋은 아침이야.');
     expect(voice.clips[0].text).toContain(SAMPLE.title);
     expect(voice.clips[0].text).toContain('노트북, 충전기, 필기구');
     expect(voice.clips[3].text).toBe(
@@ -136,7 +136,7 @@ describe('출발 AI 브리핑 시험', () => {
     const { snoozeCount, voice } = departureVoiceTest(NOW);
     expect(voice.clips).toHaveLength(1);
     expect(levelAt(voice.rule!, snoozeCount, NOW)).toBe(1);
-    expect(voice.clips[0].text).toBe('오전 10시 팀플 회의 갈 시간이야. 챙길 것: 노트북, 충전기, 필기구. 이제 출발하자!');
+    expect(voice.clips[0].text).toBe('오전 10시 팀플 회의 갈 시간이야. 챙길 것: 노트북, 충전기, 필기구. 이제 출발하자.'); // 1단계는 Android TTS라 느낌표 없음
     expect(voice.test).toEqual({ sound: true, voice: true });
   });
 });

@@ -56,6 +56,18 @@ object BriefingRules {
     else -> "ANDROID"
   }
 
+  /**
+   * Android TTS가 읽을 문장 — 느낌표(! · ！ · 연속)를 지움. 폰 TTS가 느낌표를 소리 내 읽는 문제 때문 (서버 briefing.ts noExclaim과 같은 규칙)
+   *   1 · 2단계 문장은 서버가 이미 지워서 오고, 3 · 4단계 Gemini 대사를 Android TTS로 대신 읽을 때 · 저장된 브리핑이 없을 때의 문장도 여기서 지움
+   */
+  fun androidText(text: String): String = text
+    .replace(Regex("[!！]+(?=[?？])|(?<=[?？])[!！]+"), "")
+    .replace(Regex("[!！]+"), ".")
+    .replace(Regex("""\.(?:\s*\.)+"""), ".")
+    .replace(Regex("""([?？])\."""), "$1")
+    .replace(Regex("""\.(?=[가-힣A-Za-z])"""), ". ")
+    .trim()
+
   data class Fallback(val level: Int, val text: String, val pitch: Float, val rate: Float)
 
   // 서버 브리핑이 한 번도 안 왔을 때(인터넷 없음 등)의 높낮이 · 속도 — TS androidVoice(LEVEL_VOICE)와 같은 단계 고정값

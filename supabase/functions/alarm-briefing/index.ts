@@ -4,8 +4,12 @@
 //   요청: { alarm_id, have?: string[] }  have = 폰에 이미 있는 Gemini 음성 열쇠
 //   응답: BriefingOut (_shared/briefing-run.ts)
 //   로그인한 본인 알람만 (사용자 DB = RLS + user_id). 한도 셈 · 호출 기록만 서비스 키(프로젝트 전체를 세야 함). 음성은 서버에 저장하지 않음
+//   기상 알람은 Gemini 텍스트로 1~4단계 개인화 대본을 한 번에 만들어 씀 (_shared/wake-script.ts, 같은 입력이면 wake_scripts에 저장된 것)
 import 'jsr:@supabase/functions-js/edge-runtime.d.ts';
 
+import { geminiClient, geminiModel } from '../_shared/ai/gemini.ts';
+import { QuotaGate, quotaFromEnv } from '../_shared/ai/quota.ts';
+import { recordCalls } from '../_shared/ai/session.ts';
 import { createTts } from '../_shared/ai/tts.ts';
 import { dbTtsQuota } from '../_shared/ai/tts-quota.ts';
 import { requireUser } from '../_shared/auth.ts';
@@ -18,6 +22,7 @@ import { HttpError } from '../_shared/errors.ts';
 import { jsonResponse, serve } from '../_shared/http.ts';
 import { createServiceClient } from '../_shared/supabase.ts';
 import { localDayRange, safeTimeZone } from '../_shared/tz.ts';
+import { wakeScriptsFor } from '../_shared/wake-script.ts';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const HASH = /^[0-9a-f]{16}$/;
@@ -114,6 +119,8 @@ Deno.serve(
     }
 
     const key = getEnv('GEMINI_API_KEY');
+    const service = createServiceClient();
+    const alarmId = body.alarm_id;
     const out = await runBriefing(
       {
         kind,
@@ -132,7 +139,23 @@ Deno.serve(
         sessions,
       },
       have,
-      { tts: key ? createTts(key) : null, quota: dbTtsQuota(createServiceClient(), userId) },
+      {
+        tts: key ? createTts(key) : null,
+        quota: dbTtsQuota(service, userId),
+        script: (input) =>
+          wakeScriptsFor(
+            {
+              service,
+              userId,
+              alarmId,
+              client: geminiClient(),
+              model: geminiModel(),
+              gate: new QuotaGate(quotaFromEnv(getEnv)),
+              record: (call) => recordCalls({ userId, userDb: db, service }, null, [{ call, io: null }], new Date().toISOString()),
+            },
+            input,
+          ),
+      },
     );
     return jsonResponse(out);
   }),
