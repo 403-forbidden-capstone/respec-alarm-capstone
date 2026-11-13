@@ -7,10 +7,10 @@ DB 구조는 `migrations/`의 SQL 파일로만 바꾸고, 실제 프로젝트에
 
 1. `npx supabase migration new 이름` → 생긴 `migrations/<시각>_이름.sql`에 SQL 작성
 2. 로컬 확인: `cd supabase/tests && npm ci && npm test` (Docker 없이 PGlite)
-3. PR → Actions가 임시 DB에 먼저 적용해 봄
+3. PR → Actions가 검사 잡 하나에서 임시 DB에 먼저 적용해 봄 (초안 PR은 초안을 풀 때)
    - 마이그레이션 · RLS 검사: PGlite에 적용 → RLS · 권한 · 함수 동작 (`tests/db-check.mjs`)
    - 실제 이미지 적용 · 타입: 실제 Supabase Postgres에 처음부터 적용 → 앱 타입이 스키마와 같은지
-4. 머지 → 같은 검사 뒤 실제 프로젝트에 `supabase db push`
+4. 머지 → PR에서 통과했으므로 검사 없이 실제 프로젝트에 `supabase db push` (Actions 분량, #514)
 
 ## 규칙
 

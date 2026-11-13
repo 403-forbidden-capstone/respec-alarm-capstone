@@ -20,7 +20,7 @@ const STATUS = {
   review: '리뷰',
   done: '완료',
 };
-// 보드 칸 순서. 이슈 작성 · 브랜치 생성은 카드를 앞으로만 옮긴다.
+// 보드 칸 순서. 이슈 작성 · PR을 열 때의 브랜치 이슈는 카드를 앞으로만 옮긴다.
 // 이슈를 만들고 바로 브랜치 · PR까지 올리면 늦게 끝난 실행이 카드를 되돌릴 수 있어서다.
 const FLOW = ['백로그', '이번 주', '진행 중', '리뷰', '완료'];
 
@@ -40,10 +40,6 @@ module.exports = async function projectSync({ github, context, core, prClient = 
       return sync.setStatus(itemId, STATUS.inProgress);
     }
     return;
-  }
-
-  if (eventName === 'create' && payload.ref_type === 'branch') {
-    return onBranchCreated(sync, payload, { github, context, core });
   }
 
   if (eventName === 'pull_request') {
@@ -90,17 +86,18 @@ async function onIssueClosed(sync, issue) {
   await sync.setIteration(itemId, todayInSeoul());
 }
 
-// 브랜치 생성: 이름의 이슈 번호로 이슈를 찾아 진행 중, 빈 시작일 · 주차 · 담당자를 채운다
-async function onBranchCreated(sync, payload, { github, context, core }) {
-  const match = BRANCH_ISSUE.exec(payload.ref);
-  if (!match) return core.info(`브랜치 ${payload.ref} 에 이슈 번호가 없어 건너뜁니다.`);
+// PR을 열 때 브랜치 이름의 이슈 번호로 이슈를 찾아 진행 중, 빈 시작일 · 주차 · 담당자를 채운다
+// (예전엔 브랜치 생성 이벤트에서 했는데, 10초짜리 실행이 브랜치마다 1분씩 청구돼서 PR 열 때로 옮김 #514)
+async function startBranchIssue(sync, ref, sender, { github, context, core }) {
+  const match = BRANCH_ISSUE.exec(ref);
+  if (!match) return core.info(`브랜치 ${ref} 에 이슈 번호가 없어 건너뜁니다.`);
   const number = Number(match[1]);
 
   let issue;
   try {
     ({ data: issue } = await github.rest.issues.get({ ...context.repo, issue_number: number }));
   } catch {
-    return core.warning(`브랜치 ${payload.ref} 의 #${number} 이슈를 찾지 못했어요.`);
+    return core.warning(`브랜치 ${ref} 의 #${number} 이슈를 찾지 못했어요.`);
   }
   if (issue.pull_request || issue.state !== 'open') return;
 
@@ -112,13 +109,13 @@ async function onBranchCreated(sync, payload, { github, context, core }) {
   if (!start) await sync.setDate(itemId, '시작일', today);
   if (!(await sync.readValue(itemId, '주차'))?.iterationId) await sync.setIteration(itemId, start || today);
 
-  const sender = payload.sender;
   if (!issue.assignees?.length && sender?.type === 'User') {
     await github.rest.issues.addAssignees({ ...context.repo, issue_number: number, assignees: [sender.login] });
   }
 }
 
 // PR: 이슈를 닫는 PR(Closes #번호)은 그 이슈 카드를, 아닌 PR은 PR 자체를 카드로 움직인다.
+//   처음 열림 → 브랜치 이름의 이슈를 먼저 진행 중으로(빈 시작일 · 주차 · 담당자 채움)
 //   열림 · 다시 열림 · 초안 해제 → 이슈 카드 리뷰 / PR 카드 리뷰(초안이면 진행 중)
 //   머지 → 완료, 머지 없이 닫힘 → 이슈 카드 다시 진행 중 / PR 카드 보관
 // 열 때: 이슈의 파트 라벨을 PR에, 빈 담당자는 PR 작성자(초안 포함),
@@ -131,6 +128,9 @@ async function onPullRequest(sync, payload, { github, context, core, board, prCl
 
   const { issues, card } = await loadPullRequest(github, context, board, pr.number);
   const human = pr.user?.type === 'User';
+
+  // 리뷰로 옮기기 전에 진행 중을 먼저 거쳐 둠 — 아래에서 닫는 이슈면 리뷰로, 아니면(관련 이슈) 진행 중으로 남음
+  if (action === 'opened' && human) await startBranchIssue(sync, pr.head?.ref ?? '', pr.user, { github, context, core });
 
   let status = null;
   if (opening && !pr.draft) status = STATUS.review;
