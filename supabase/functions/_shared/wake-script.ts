@@ -214,6 +214,13 @@ const sentencesOf = (s: string) => s.split(/(?<=[.!?。！？])\s+/).map((t) => 
 
 // 일정 · 시각 · 준비물 · 출발을 말하는 문장 — Gemini 문장에서는 버리고 DB 값 문장이 대신함 (없는 일정 · 시각 · 준비물이 섞이지 않게)
 const TIME_WORD = /\d+\s*시(?!간)|\d{1,2}:\d{2}|(?:한|두|세|네|다섯|여섯|일곱|여덟|아홉|열|열한|열두)\s?시(?![간작])|정오|자정/;
+// 소요 · 남은 시간("30분 남았어", "두 시간 걸려") — 준비 · 이동 시간은 모델이 계산하지 않음
+const DURATION_WORD = /\d+\s*분|\d+\s*시간|(?:한|두|세|네|반)\s?시간|십\s?분|삼십\s?분/;
+// shortcut: 흔한 일정 · 준비물 낱말 목록 — 입력(일정 · 준비물 · 할 일 · 다짐)에 없는데 모델이 말하면 지어낸 것으로 보고 그 문장을 버림. 새로 자주 보이는 낱말은 여기에 더할 것
+const MADE_UP_NOUNS = [
+  '수업', '강의', '회의', '미팅', '발표', '시험', '면접', '약속', '알바', '아르바이트', '동아리', '스터디', '모임', '병원', '진료', '출근', '등교', '학원', '과외', '세미나', '행사', '마감', '헬스', '운동',
+  '우산', '지갑', '노트북', '충전기', '신분증', '학생증', '수험표', '교재', '필통', '이어폰', '텀블러', '운동복', '서류', '과제', '도시락', '마스크', '열쇠', '보조배터리',
+];
 const FACT_WORD = /챙기|챙겨|준비물|가져가|가져와|일정|약속|출발|나가야/;
 // 1~3단계는 실제 지각 위험이 확인되지 않아 늦는다고 단정하지 않음 (4단계는 여유 0분 이하에서만 울림)
 const LATE_CLAIM = /늦는다|늦어|늦겠|늦을/;
@@ -221,7 +228,12 @@ const LATE_CLAIM = /늦는다|늦어|늦겠|늦을/;
 /** Gemini 문장 하나를 쓸 수 있는지 — 일정 · 준비물 사실은 DB 문장만, 입력에 없는 전날 경험 · 지각 단정은 버림 */
 function usableSentence(sentence: string, level: UrgencyLevel, x: WakeScriptInput): boolean {
   const t = norm(sentence);
-  if (TIME_WORD.test(sentence) || FACT_WORD.test(sentence)) return false;
+  if (TIME_WORD.test(sentence) || DURATION_WORD.test(sentence) || FACT_WORD.test(sentence)) return false;
+  const given = norm([...x.appointments.map((a) => a.title), ...x.items, ...x.tasks, ...x.goals].join(' '));
+  if (MADE_UP_NOUNS.some((w) => t.includes(w) && !given.includes(w))) return false; // 입력에 없는 일정 · 준비물 낱말
+  // 따옴표로 인용한 말은 다짐 그대로일 때만 (모델이 입력에 없는 말을 사용자 말처럼 인용하지 않게)
+  const quotes = [...sentence.matchAll(/["“'‘]([^"”'’]+)["”'’]/g)].map((m) => norm(m[1]));
+  if (quotes.some((q) => !x.goals.some((g) => norm(g).includes(q) || q.includes(norm(g))))) return false;
   if ([...x.appointments.map((a) => a.title), ...x.items, ...x.tasks].some((v) => t.includes(norm(v)))) return false;
   const prev = x.previousDay ?? {};
   if (!prev.overslept && !prev.lateByOversleep && /늦잠|지각했|지각한/.test(sentence)) return false;

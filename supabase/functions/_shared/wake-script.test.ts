@@ -169,6 +169,25 @@ test('4단계 지각 위험은 이 알람이 걸린 일정 (그날 첫 일정이
   assert.ok(finalizeScripts({ level1: 'a', level2: 'b', level3: 'c', level4: '빨리 일어나!' }, wakeScriptInput(b, '2026-11-14'))[4]!.startsWith('야! 지금 안 일어나면 오전 10시 팀플 발표 늦는다고!'));
 });
 
+test('시각 · 일정 낱말이 없어도 지어낸 일정 · 준비물 낱말 · 소요 시간 · 지어낸 인용은 버림, 입력에 있는 낱말은 남김', () => {
+  const x = wakeScriptInput(briefInput({ memo: { wakeEarly: false, overslept: false, lateByOversleep: false, snoozeRepeat: false, goals: ['아침 운동하기'] } }), '2026-11-14');
+  const t = finalizeScripts(
+    {
+      level1: '좋은 아침이야. 동아리도 가야지. 지갑 잊지 마. 준비하는 데 30분이면 돼. 너 "오늘은 쉬고 싶다"고 했잖아. 어제 아침 운동하기로 했지. 상쾌하게 시작하자.',
+      level2: '이제 일어나. 두 시간밖에 안 남았어. 아침 운동하기 잊지 말고. 얼른.',
+      level3: '야! 병원 가야 하잖아! 일어나!',
+      level4: '야! 마스크 챙겨! 지금 당장 일어나!',
+    },
+    x,
+  );
+  const all = Object.values(t).join(' ');
+  for (const fake of ['동아리', '지갑', '30분', '두 시간', '쉬고 싶다', '병원', '마스크']) assert.ok(!all.includes(fake), `${fake}가 남음: ${all}`);
+  // 입력에 있는 낱말(다짐의 "운동", 일정 "팀플 발표"는 DB 문장)은 그대로
+  assert.match(t[1]!, /어제 아침 운동하기로 했지\. 상쾌하게 시작하자\.$/);
+  assert.match(t[2]!, /아침 운동하기 잊지 말고\./);
+  for (const level of [1, 2, 3, 4] as const) assert.ok(t[level]!.includes('팀플 발표') && t[level]!.includes('운동복'), `${level}: ${t[level]}`);
+});
+
 test('다짐 중복 방지: 모델이 같은 다짐을 두 번 말하면 한 번만, 다른 다짐만 빠졌으면 그것만 덧붙임', () => {
   const x = wakeScriptInput(briefInput({ memo: { wakeEarly: true, overslept: false, lateByOversleep: false, snoozeRepeat: false, goals: ['알람 미루지 않고 바로 일어나기', '아침에 물 한 잔 마시기'] } }), '2026-11-14');
   const t = finalizeScripts({ level1: '좋은 아침이야. 어제 알람 미루지 않고 바로 일어나기로 다짐했지. 알람 미루지 않고 일어나기로 했잖아. 일어나자.', level2: 'a', level3: 'b', level4: 'c' }, x)[1]!;
