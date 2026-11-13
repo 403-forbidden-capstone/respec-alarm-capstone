@@ -1,6 +1,6 @@
 // 문맥 모으기 (DB 읽기) — voice-session이 대화 시작 때 한 번 읽는다 (설계 메모 4 · 4.5절). 읽은 행을 해석하는 일은 context-core.ts(순수)가 한다.
 // 읽기는 모두 부른 사람의 RLS 클라이언트(userDb)로 — 남의 일정 · 기록에는 닿지 못한다. 쿼리 모양은 앞 출발만 앱(#240 mobile/src/features/location/real.ts listEarlierDepartures)과 같게 맞춤.
-//   쿼리: ① 프로필(시간대 · 별명) ② 달력 어제 · 오늘 기상 기록(daily_records) ③ 돌아볼 날 ~ 내일 내 참여 약속 ④ 그날 기상 확인 기록(출처) ⑤ 앞 출발(alarm_events) ⑥ 안 끝낸 할 일 · 준비물 ⑦ 내일 알람(참여 행 알람 + 일정 없는 기상)
+//   쿼리: ① 프로필(시간대 · 별명) ② 돌아볼 날 기상 기록(daily_records) ③ 돌아볼 날 ~ 내일 내 참여 약속 ④ 그날 기상 확인 기록(출처) ⑤ 앞 출발(alarm_events) ⑥ 안 끝낸 할 일 · 준비물 ⑦ 내일 알람(참여 행 알람 + 일정 없는 기상)
 // 시각은 서울 +09:00 고정(view.ts와 같음, 설계 메모 11절 "v0 Asia/Seoul만") — 다른 시간대면 서울로 보고 tzSupported false로 알린다.
 import { must } from '../db.ts';
 
@@ -10,8 +10,7 @@ import type { Db } from '../supabase.ts';
 import { safeTimeZone } from '../tz.ts';
 import type { AlarmRow, ContextInput, EarlierRow, InputSource, ParticipantJoin, TodoRow, WakeRecord } from './context-core.ts';
 import { seoulParts } from './context-core.ts';
-import { seoulLocal } from './ko.ts';
-import { dayOf, type ConversationDays } from './turn-core.ts';
+import { dayOf, dayStartIso, type ConversationDays } from './turn-core.ts';
 import { addDays } from './view.ts';
 
 export interface ContextDeps {
@@ -33,8 +32,8 @@ export interface ContextRows {
   days: ConversationDays;
   /** buildContext 입력 (question · confirmFactIds는 부르는 쪽이 채움) */
   input: Omit<ContextInput, 'question' | 'confirmFactIds'>;
-  /** 달력 오늘 0시 — 하루 상한 셈의 시작 */
-  calendarTodayStart: string;
+  /** 대화 기준일(생활 날짜)의 새벽 4시 — 대화방 이어 받기 · 하루 상한 셈의 시작 */
+  dayStart: string;
 }
 
 const PARTICIPANT_COLUMNS =
@@ -45,20 +44,17 @@ type ParticipantRaw = Omit<ParticipantJoin, 'appointment'> & { appointments: Par
 export async function readContextRows(deps: ContextDeps, now: Date): Promise<ContextRows> {
   const { userId, userDb } = deps;
   const nowIso = seoulIso(now);
-  const calToday = seoulLocal(nowIso).date;
-  const calYesterday = addDays(calToday, -1);
+  // 대화 기준일 — 새벽 4시 경계 (시간대는 경고 플래그에만 씀, 계산은 서울)
+  const { review, morning } = dayOf(nowIso, 'Asia/Seoul');
 
-  // ① 프로필 · ② 기상 기록(달력 어제 · 오늘) — 대화 기준일을 정하는 데 필요
+  // ① 프로필 · ② 돌아볼 날 기상 기록
   const [profile, records] = await Promise.all([
     userDb.from('profiles').select('timezone, nickname').eq('user_id', userId).maybeSingle(),
-    userDb.from('daily_records').select('record_date, wake_confirmed_at').eq('user_id', userId).in('record_date', [calYesterday, calToday]),
+    userDb.from('daily_records').select('record_date, wake_confirmed_at').eq('user_id', userId).eq('record_date', review),
   ]);
   const prof = read<{ timezone: string | null; nickname: string | null } | null>('profiles', profile);
   const recs = read<{ record_date: string; wake_confirmed_at: string | null }[]>('daily_records', records) ?? [];
-  const tz = safeTimeZone(prof?.timezone);
-  const wokeToday = recs.some((r) => r.record_date === calToday && r.wake_confirmed_at != null);
-  const days = dayOf(nowIso, tz, wokeToday);
-  const { review, morning } = days;
+  const days = dayOf(nowIso, safeTimeZone(prof?.timezone));
   const reviewStart = startOf(review);
   const reviewEnd = startOf(addDays(review, 1));
   const windowEnd = startOf(addDays(morning, 1));
@@ -121,7 +117,7 @@ export async function readContextRows(deps: ContextDeps, now: Date): Promise<Con
   return {
     nowIso,
     days,
-    calendarTodayStart: startOf(calToday),
+    dayStart: dayStartIso(review),
     input: {
       type: 'BEFORE_SLEEP',
       now: nowIso,

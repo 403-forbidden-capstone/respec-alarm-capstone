@@ -1,6 +1,8 @@
 // Gemini Live 1회용 토큰 만들기 — voice-live-token 함수와 로컬 점검 스크립트(tools/gemini-smoke)가 같은 코드를 씀
 //   순수 TS (fetch를 넣어 줄 수 있음) — node --test · 로컬 스크립트에서 그대로 돎
 import { HttpError } from '../errors.ts';
+import { lifeDate } from './turn-core.ts';
+import { addDays } from './view.ts';
 
 export const LIVE_MODEL = 'gemini-3.8-live';
 export const LIVE_TOKEN_URL = 'https://generativelanguage.googleapis.com/v1beta/auth_tokens';
@@ -33,6 +35,21 @@ export function liveHistory(turns: readonly { role: 'user' | 'ai'; text: string 
   return lines.length === 0 ? '' : `\n\nConversation so far in this chat room (typed or spoken). Continue naturally from it; do not repeat greetings:\n${lines.join('\n')}`;
 }
 
+// 날짜 해석 — 글 대화(view.ts 날짜 블록 · turn-core dayOf)와 같은 KST 새벽 4시 규칙. 토큰을 만드는 때(now) 기준
+export function liveDateNote(now: number): string {
+  const iso = new Date(now).toISOString();
+  const kst = new Date(now + 9 * 3_600_000).toISOString();
+  const today = lifeDate(iso);
+  return (
+    `
+
+Date rule (Korea time). Now: ${kst.slice(0, 10)} ${kst.slice(11, 16)}. The day changes at 4 AM, not at midnight: ` +
+    `"today" (오늘) is ${today}, "yesterday" (어제) is ${addDays(today, -1)}, "tomorrow" (내일) is ${addDays(today, 1)}, "the day after tomorrow" (모레) is ${addDays(today, 2)}. ` +
+    'Expressions counted from now, like "later" (이따가), "in N hours" (N시간 뒤) or "after I wake up" (자고 일어나서), use the current time. Explicit dates are used as said. ' +
+    'If the date or AM/PM is unclear, or a plan would fall before now, ask the user.'
+  );
+}
+
 // 토큰 요청 본문 — 모델 · 응답 형식 · 지침을 토큰에 잠가서 앱이 바꿀 수 없게 함
 export function liveTokenBody(now: number, model = LIVE_MODEL, history = ''): Record<string, unknown> {
   return {
@@ -42,7 +59,7 @@ export function liveTokenBody(now: number, model = LIVE_MODEL, history = ''): Re
     bidiGenerateContentSetup: {
       model: `models/${model}`,
       generationConfig: { responseModalities: ['AUDIO'] },
-      systemInstruction: { parts: [{ text: LIVE_SYSTEM + history }] },
+      systemInstruction: { parts: [{ text: LIVE_SYSTEM + liveDateNote(now) + history }] },
       inputAudioTranscription: {}, // 내 말 · AI 말을 글로도 받아 화면에 보여 줌
       outputAudioTranscription: {},
     },

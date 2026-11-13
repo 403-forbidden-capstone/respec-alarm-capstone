@@ -1,7 +1,7 @@
 // 자동 정리 — [완료]를 안 눌러도 서버가 지난 기준일의 대화를 정리 (voice-commit 배치 길, pg_cron 10분마다). 앱이 꺼져 있어도 돎
 //   대상: 정리 안 됐거나 정리 뒤 말이 는 세션 구간 — findUncommitted와 같은 조건(BEFORE_SLEEP · 안 끝남 · 사용자 말 있음), 최근 8일에 시작한 것
-//   언제: 구간의 기준일(server_state.day.review = D)이 끝난 뒤 — 아침(D+1, KST)에 켜진 기상 알람이 있으면 가장 이른 것의 2시간 전(D+1 0시보다 앞이면 0시), 없으면 D+1 04:00
-//         그리고 마지막 사용자 말 + 60분이 지난 뒤 (대화 중이면 미룸 · 04:00 뒤에 D 대화를 했으면 다음 04:00을 기다리지 않고 60분 뒤)
+//   언제: 구간의 기준일(server_state.day.review = D)이 끝난 뒤 = D+1 새벽 4시(KST) — 기상 알람과 상관없음
+//         그리고 마지막 사용자 말 + 60분이 지난 뒤 (대화 중이면 미룸 · 03:50까지 말했으면 04:50 뒤)
 //         Live 음성은 사용자 말마다 voice-turn으로 turns에 쌓이고 한 번이 최대 10분(LIVE_SESSION_MS)이라 60분 안에 듦. 그래도 겹치면 rev 비교로 한쪽만 · 앱은 CONFLICT면 다시 읽음
 //   정리: voice-commit과 같은 commitRoom — 겹침 · 다시 시도 · STALE · 일기 규칙 그대로. 쓰기는 서버 키 + user_id 직접 걸기 (세션 · 저장 함수가 모두 user_id로 좁힘)
 //   한 번에: 정리 3개(T2 + T5 = 최대 6호출, 기본 RPM 8 안) · 새 정리는 60초 안에만 시작 (T2 19초 × 2 + T5 — 함수 시간 150초 안). 남은 것은 다음 실행
@@ -11,16 +11,15 @@ import { must } from '../db.ts';
 import { HttpError } from '../errors.ts';
 import type { Db } from '../supabase.ts';
 import { seoulIso, startOf } from './context.ts';
-import { dbMs } from './context-core.ts';
 import { seoulLocal } from './ko.ts';
 import type { LlmClient } from './llm.ts';
 import type { QuotaGate } from './quota.ts';
 import type { ServerState, StoredTurn } from './session.ts';
+import { dayStartIso } from './turn-core.ts';
 import { addDays } from './view.ts';
 import { COMMIT_STALE_MS, commitRoom, type VoiceCommitOut } from './voice-commit.ts';
 
 export const IDLE_MS = 60 * 60_000;
-export const WAKE_LEAD_MS = 2 * 60 * 60_000;
 export const MAX_COMMITS_PER_RUN = 3;
 export const RUN_BUDGET_MS = 60_000;
 const LOOKBACK_DAYS = 8;
@@ -60,13 +59,8 @@ interface Row {
   server_state: ServerState;
 }
 
-/** 기준일 review의 정리 시각(ms) — 다음 아침(review + 1)의 가장 이른 켜진 기상 알람 2시간 전, 없으면 그 아침 04:00 (KST) */
-export function dueAt(review: string, wakeAts: string[]): number {
-  const morning = addDays(review, 1);
-  const wakes = wakeAts.map(dbMs).filter((ms) => seoulLocal(seoulIso(new Date(ms))).date === morning);
-  if (wakes.length === 0) return Date.parse(`${morning}T04:00:00+09:00`);
-  return Math.max(Math.min(...wakes) - WAKE_LEAD_MS, Date.parse(startOf(morning)));
-}
+/** 기준일 review의 정리 시각(ms) — 기준일이 끝나는 때 = 다음 날 새벽 4시 (KST) */
+export const dueAt = (review: string): number => Date.parse(dayStartIso(addDays(review, 1)));
 
 /** 정리할 말이 남았는지 — findUncommitted와 같은 판단 */
 export function needsCommit(st: ServerState): boolean {
@@ -109,24 +103,9 @@ export async function runAutoCommit(deps: AutoCommitDeps): Promise<AutoCommitOut
   out.pending = rows.length;
   if (rows.length === 0) return out;
 
-  // 아침마다 켜진 기상 알람 — 대상 사용자 · 대상 아침 날짜 범위만
-  const mornings = rows.map((r) => addDays(r.server_state.day.review, 1)).sort();
-  const alarms = must<{ user_id: string; scheduled_at: string }[]>(
-    'alarms',
-    await deps.service
-      .from('alarms')
-      .select('user_id, scheduled_at')
-      .in('user_id', [...new Set(rows.map((r) => r.user_id))])
-      .eq('alarm_type', 'WAKE')
-      .eq('is_enabled', true)
-      .gte('scheduled_at', startOf(mornings[0]))
-      .lt('scheduled_at', startOf(addDays(mornings[mornings.length - 1], 1))),
-  ) ?? [];
-
   const ready = rows.filter((r) => {
     const st = r.server_state;
-    const wakes = alarms.filter((a) => a.user_id === r.user_id).map((a) => a.scheduled_at);
-    const at = Math.max(dueAt(st.day.review, wakes), lastUserAt(r.turns) + IDLE_MS, retryAt(st));
+    const at = Math.max(dueAt(st.day.review), lastUserAt(r.turns) + IDLE_MS, retryAt(st));
     return now.getTime() >= at;
   });
   out.waiting = rows.length - ready.length;

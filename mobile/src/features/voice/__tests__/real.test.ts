@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, jest } from '@jest/globals';
 
 import { createAppointment, createStandaloneAlarm, estimateAppointment, getAppointment, listPlaces, previewAlarms, saveAlarmSettings } from '@/features/alarm/api';
 import type { Estimate } from '@/features/alarm/types';
+import * as clock from '@/lib/clock';
 import { now } from '@/lib/clock';
 import { EdgeError, callEdge } from '@/lib/edge';
 import { UserError } from '@/lib/errors';
@@ -159,6 +160,28 @@ describe('① 세션 시작 · 첫 마디', () => {
     expect(c.limits).toEqual({ turnsLeft: 20, sessionsLeftToday: 4, reached: null });
     await getConversation(); // 다시 읽어도 서버를 또 부르지 않음 (대화 유지)
     expect(edge).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('①-1 새벽 4시 경계 (KST)', () => {
+  it('앱을 켜 둔 채 03:59 → 04:00이 지나면 다음 읽기에서 voice-session을 다시 불러 새 대화방 · 00:00 넘김은 같은 방', async () => {
+    const t = jest.spyOn(clock, 'now');
+    try {
+      t.mockReturnValue(new Date('2026-11-11T23:59:00+09:00'));
+      script = [session(), session({ session_id: 's2' })];
+      await getConversation();
+      t.mockReturnValue(new Date('2026-11-12T00:00:00+09:00'));
+      await getConversation();
+      t.mockReturnValue(new Date('2026-11-12T03:59:00+09:00'));
+      await getConversation();
+      expect(edge).toHaveBeenCalledTimes(1); // 같은 기준일(11/11) — 서버를 또 부르지 않음
+      t.mockReturnValue(new Date('2026-11-12T04:00:00+09:00'));
+      await getConversation();
+      expect(bodies().map((b) => b.name)).toEqual(['voice-session', 'voice-session']);
+      expect(liveSessionId()).toBe('s2');
+    } finally {
+      t.mockRestore();
+    }
   });
 });
 

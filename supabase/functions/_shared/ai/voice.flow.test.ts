@@ -365,13 +365,16 @@ test('00:30에 연 대화: 오늘 기상 기록이 없으면 전날 밤 — 오�
   assert.equal(same.session_id, s.session_id);
 });
 
-test('00:30인데 오늘 기상 기록이 이미 있으면 달력 그대로 — 오늘 = 10/30, 내일 = 10/31', async () => {
+test('기상 기록과 상관없음: 00:30에 오늘 기상 기록이 있어도 기준일은 전날(10/29), 04:00부터 10/30', async () => {
   const now = new Date('2026-10-30T00:30:00+09:00');
   const db = seed(now);
   db.rows('daily_records').push({ record_id: 'r2', user_id: ME, record_date: '2026-10-30', wake_confirmed_at: '2026-10-30T00:10:00+09:00' });
   const { deps } = depsOf(db, null, { now: () => now });
   const s = await handleVoiceSession(deps, { session_type: 'BEFORE_SLEEP', input_mode: 'TEXT' });
-  assert.deepEqual(s.day, { review: '2026-10-30', morning: '2026-10-31' });
+  assert.deepEqual(s.day, { review: '2026-10-29', morning: '2026-10-30' });
+  const at4 = new Date('2026-10-30T04:00:00+09:00');
+  const s4 = await handleVoiceSession(depsOf(db, null, { now: () => at4 }).deps, { session_type: 'BEFORE_SLEEP', input_mode: 'TEXT' });
+  assert.deepEqual(s4.day, { review: '2026-10-30', morning: '2026-10-31' });
 });
 
 // ───────── 위기 턴 ─────────

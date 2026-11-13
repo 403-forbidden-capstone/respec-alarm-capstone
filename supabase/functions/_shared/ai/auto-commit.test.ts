@@ -55,27 +55,26 @@ const told = (text: string) => emptyExtract({ day_review: { events: [{ text, tim
 
 // ───────── 정리 시각 ─────────
 
-test('dueAt: 다음 아침 가장 이른 기상 알람 2시간 전 · 알람 없으면 04:00 · 다른 날 알람은 안 봄 · 0시보다 앞으로 안 감', () => {
-  assert.equal(dueAt('2026-10-29', []), kst('2026-10-30T04:00:00').getTime());
-  assert.equal(dueAt('2026-10-29', [kst('2026-10-30T09:00:00').toISOString(), '2026-10-29T22:00:00+00:00']), kst('2026-10-30T05:00:00').getTime()); // UTC 22시 = KST 7시
-  assert.equal(dueAt('2026-10-29', [kst('2026-10-31T06:00:00').toISOString(), kst('2026-10-29T07:00:00').toISOString()]), kst('2026-10-30T04:00:00').getTime());
-  assert.equal(dueAt('2026-10-29', [kst('2026-10-30T00:30:00').toISOString()]), kst('2026-10-30T00:00:00').getTime());
+test('dueAt: 기준일 다음 날 KST 04:00 — 월말 · 연말도', () => {
+  assert.equal(dueAt('2026-10-29'), kst('2026-10-30T04:00:00').getTime());
+  assert.equal(dueAt('2026-11-30'), kst('2026-12-01T04:00:00').getTime());
+  assert.equal(dueAt('2026-12-31'), kst('2027-01-01T04:00:00').getTime());
   assert.ok(IDLE_MS > LIVE_SESSION_MS); // Live 한 번(최대 10분)은 60분 기다림 안에 듦
 });
 
-// ───────── 앱 종료 · 알람 ─────────
+// ───────── 앱 종료 · 기상 알람과 상관없음 ─────────
 
-test('앱이 꺼져 있어도: 기상 알람 7시 → 5시에 서버가 정리 (할 일 · 기록 JSON · 일기), [완료] 없이', async () => {
+test('앱이 꺼져 있어도: 04:00에 서버가 정리 (할 일 · 기록 JSON · 일기), [완료] 없이 — 기상 알람 7시가 있어도 2시간 전(05:00)이 아니라 04:00', async () => {
   const db = seed();
   wake(db, '2026-10-30T07:00:00');
   const sid = await chat(db, ['오늘 발표 잘 끝냈어. 내일 우산 챙겨야 해'], kst('2026-10-29T22:30:00'));
 
-  const early = run(db, kst('2026-10-30T04:59:00'));
+  const early = run(db, kst('2026-10-30T03:59:00'));
   assert.deepEqual(await early.out, { pending: 1, waiting: 1, done: [], errors: [], left: 0 });
   assert.deepEqual(early.fake.order, []);
 
   const extract = { ...told('발표를 잘 끝냄'), todos: [{ title: '우산', type: 'ITEM' as const, due_date: '2026-10-30', appointment_ref: null, appointment_title: null }] };
-  const due = run(db, kst('2026-10-30T05:00:00'), { T2: [extract], T5: [DIARY] });
+  const due = run(db, kst('2026-10-30T04:00:00'), { T2: [extract], T5: [DIARY] });
   assert.deepEqual((await due.out).done, [{ session_id: sid, status: 'DONE' }]);
   assert.deepEqual(due.fake.order, ['T2', 'T5']);
   assert.deepEqual(db.rows('todos').map((t) => [t.title, t.user_id]), [['우산', ME]]);
@@ -84,7 +83,7 @@ test('앱이 꺼져 있어도: 기상 알람 7시 → 5시에 서버가 정리 (
   assert.equal(stateOf(db, sid).ended, false); // 대화방은 그대로 (#448)
 
   // 정리한 대화는 다시 안 함 · 앱이 나중에 [완료]를 눌러도 저장한 결과를 그대로 (Gemini 안 부름)
-  const again = run(db, kst('2026-10-30T05:10:00'));
+  const again = run(db, kst('2026-10-30T04:10:00'));
   assert.deepEqual(await again.out, { pending: 0, waiting: 0, done: [], errors: [], left: 0 });
   const tap = fakeClaude({});
   const r = (await handleVoiceCommit({ userId: ME, userDb: db as unknown as Db, service: db as unknown as Db, llm: tap.client, model: 'm', now: () => kst('2026-10-30T08:00:00') }, { session_id: sid })) as VoiceCommitOut;
@@ -92,58 +91,57 @@ test('앱이 꺼져 있어도: 기상 알람 7시 → 5시에 서버가 정리 (
   assert.deepEqual([tap.order, again.fake.order], [[], []]);
 });
 
-test('기상 알람 여러 개: 가장 이른 켜진 알람 기준 (꺼진 알람 · 다른 사람 알람은 안 봄)', async () => {
-  const db = seed();
-  wake(db, '2026-10-30T09:00:00');
-  wake(db, '2026-10-30T07:30:00');
-  wake(db, '2026-10-30T06:00:00', { is_enabled: false });
-  wake(db, '2026-10-30T05:00:00', { user_id: 'u-other' });
-  await chat(db, ['오늘 피곤했어'], kst('2026-10-29T23:00:00'));
-  assert.equal((await run(db, kst('2026-10-30T05:29:00')).out).waiting, 1);
-  assert.equal((await run(db, kst('2026-10-30T05:30:00'), { T2: [emptyExtract()] }).out).done.length, 1);
-});
-
-test('기상 알람 없음: KST 04:00 정리', async () => {
-  const db = seed();
-  await chat(db, ['오늘 피곤했어'], kst('2026-10-29T23:00:00'));
-  assert.equal((await run(db, kst('2026-10-30T03:59:00')).out).waiting, 1);
-  assert.deepEqual((await run(db, kst('2026-10-30T04:00:00'), { T2: [emptyExtract()] }).out).done.map((d) => d.status), ['DONE']);
+test('기상 알람이 없어도 · 이른 알람(05:00)이 있어도 04:00 정리 — 알람을 바꿔도 정리 때는 그대로', async () => {
+  for (const alarmAt of [null, '2026-10-30T05:00:00', '2026-10-30T09:00:00']) {
+    const db = seed();
+    if (alarmAt) wake(db, alarmAt);
+    await chat(db, ['오늘 피곤했어'], kst('2026-10-29T23:00:00'));
+    assert.equal((await run(db, kst('2026-10-30T03:59:00')).out).waiting, 1, String(alarmAt));
+    assert.deepEqual((await run(db, kst('2026-10-30T04:00:00'), { T2: [emptyExtract()] }).out).done.map((d) => d.status), ['DONE'], String(alarmAt));
+  }
 });
 
 // ───────── 대화 중 미룸 · 날짜 ─────────
 
-test('04:00 뒤에 전날(기준일) 대화: 다음 04:00까지 안 기다리고 마지막 말 60분 뒤', async () => {
+test('03:50까지 대화하면 04:50 뒤에 정리 (마지막 말 60분 대기) — 기준일은 전날', async () => {
   const db = seed();
-  const sid = await chat(db, ['어제 늦게 잤어'], kst('2026-10-30T05:00:00')); // 정오 전 · 기상 기록 없음 → 기준일 10/29
+  const sid = await chat(db, ['잠이 안 와'], kst('2026-10-30T03:50:00'));
   assert.equal(stateOf(db, sid).day.review, '2026-10-29');
-  assert.equal((await run(db, kst('2026-10-30T05:59:00')).out).waiting, 1);
-  assert.equal((await run(db, kst('2026-10-30T06:00:00'), { T2: [emptyExtract()] }).out).done.length, 1);
+  assert.equal((await run(db, kst('2026-10-30T04:00:00')).out).waiting, 1);
+  assert.equal((await run(db, kst('2026-10-30T04:49:00')).out).waiting, 1);
+  assert.equal((await run(db, kst('2026-10-30T04:50:00'), { T2: [emptyExtract()] }).out).done.length, 1);
 });
 
-test('알람 2시간 전에도 대화 중이면 마지막 말 60분 뒤까지 미룸', async () => {
-  const db = seed();
-  wake(db, '2026-10-30T07:00:00');
-  await chat(db, ['잠이 안 와'], kst('2026-10-30T04:40:00'));
-  assert.equal((await run(db, kst('2026-10-30T05:00:00')).out).waiting, 1);
-  assert.equal((await run(db, kst('2026-10-30T05:40:00'), { T2: [emptyExtract()] }).out).done.length, 1);
-});
-
-test('자정 넘은 대화: 어제 방 + 오늘 0시 방(기준일 같음) 둘 다 기준일로 정리, 일기는 그날 한 줄 · 오늘 기준일 대화는 안 건드림', async () => {
+test('자정 넘은 대화: 23시 방을 00:40에 열면 같은 방(기준일 같음) — 04:00에 한 번 정리, 일기는 그날 한 줄 · 04:00 뒤 대화는 새 방 · 새 기준일이라 안 건드림', async () => {
   const db = seed();
   const night = await chat(db, ['오늘 발표했어'], kst('2026-10-29T22:30:00'));
   const late = await chat(db, ['아 그리고 저녁에 친구 만났어'], kst('2026-10-30T00:40:00'));
-  assert.notEqual(night, late);
+  assert.equal(late, night);
   assert.equal(stateOf(db, late).day.review, '2026-10-29');
 
-  const r = run(db, kst('2026-10-30T04:00:00'), { T2: [told('발표함'), told('친구를 만남')], T5: [DIARY, { diary: '발표하고 친구를 만났다.' }] });
-  assert.deepEqual((await r.out).done.map((d) => d.session_id), [night, late]);
-  assert.deepEqual(db.rows('daily_journals').map((j) => [j.record_date, j.ai_summary]), [['2026-10-29', '발표하고 친구를 만났다.']]);
+  const r = run(db, kst('2026-10-30T04:00:00'), { T2: [told('발표하고 친구를 만남')], T5: [DIARY] });
+  assert.deepEqual((await r.out).done.map((d) => d.session_id), [night]);
+  assert.deepEqual(db.rows('daily_journals').map((j) => [j.record_date, j.ai_summary]), [['2026-10-29', DIARY.diary]]);
 
-  // 10/30 저녁 대화(기준일 10/30)는 다음 아침 전까지 정리 안 함 — 아직 끝나지 않은 오늘 기록
-  const today = await chat(db, ['오늘은 쉬었어'], kst('2026-10-30T20:00:00'));
+  // 10/30 04:00 뒤 대화(기준일 10/30)는 새 방 · 다음 날 04:00 전까지 정리 안 함
+  const today = await chat(db, ['오늘은 쉬었어'], kst('2026-10-30T05:00:00'));
+  assert.notEqual(today, night);
   assert.equal(stateOf(db, today).day.review, '2026-10-30');
-  const evening = run(db, kst('2026-10-30T23:30:00'));
+  const evening = run(db, kst('2026-10-31T03:59:00'));
   assert.deepEqual([(await evening.out).waiting, evening.fake.order], [1, []]);
+});
+
+test('월말 · 연말 넘김: 11/30 23시 대화는 12/1 04:00, 12/31 대화는 1/1 04:00에 정리 — 기준일은 전날', async () => {
+  for (const [talk, before, at, review] of [
+    ['2026-11-30T23:00:00', '2026-12-01T03:59:00', '2026-12-01T04:00:00', '2026-11-30'],
+    ['2027-01-01T01:00:00', '2027-01-01T03:59:00', '2027-01-01T04:00:00', '2026-12-31'],
+  ]) {
+    const db = seed();
+    const sid = await chat(db, ['오늘 피곤했어'], kst(talk));
+    assert.equal(stateOf(db, sid).day.review, review);
+    assert.equal((await run(db, kst(before)).out).waiting, 1, talk);
+    assert.equal((await run(db, kst(at), { T2: [emptyExtract()] }).out).done.length, 1, talk);
+  }
 });
 
 test('Live 음성 대화 중(사용자 말이 방금 들어옴)에는 정리하지 않음', async () => {

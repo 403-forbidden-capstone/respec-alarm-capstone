@@ -366,7 +366,7 @@ test('표에 같은 순간이 다른 글자 모양(+00:00)으로 있으면 같�
   assert.deepEqual(x.storage.map((s) => [s.column, s.result]), [['sleep_at', 'written']]);
 });
 
-test('자정을 넘긴 대화(10/30 00:40, 아직 기상 기록 없음) → 기준일 10/29: T2 날짜표의 오늘 = 10/29 + 자정 줄, reference_date 10/29, "오늘 수업" 지각은 10/29 수업에 연결', async () => {
+test('자정을 넘긴 대화(10/30 00:40, 새벽 4시 전) → 기준일 10/29: T2 날짜표의 오늘 = 10/29 + 새벽 줄, reference_date 10/29, "오늘 수업" 지각은 10/29 수업에 연결', async () => {
   const db = seed();
   const AFTER = new Date('2026-10-30T00:40:00+09:00');
   db.now = AFTER;
@@ -377,7 +377,7 @@ test('자정을 넘긴 대화(10/30 00:40, 아직 기상 기록 없음) → 기�
   const s = (await handleVoiceSession(deps, { session_type: 'BEFORE_SLEEP', input_mode: 'TEXT', resume: true })) as VoiceSessionOut;
   await handleVoiceTurn(deps, { session_id: s.session_id as string, rev: s.rev, client_turn_id: cid(), text: '오늘 수업에 5분 늦었어' });
   await commit(deps, s.session_id as string);
-  assert.match(fake.seen.T2[0], /자정이 지났지만 잠들기 전이라 '오늘'은 2026-10-29\(목\)/);
+  assert.match(fake.seen.T2[0], /하루는 새벽 4시에 바뀌어 이 대화의 '오늘'은 2026-10-29\(목\)/);
   assert.match(fake.seen.T2[0], /오늘 2026-10-29\(목\) · 내일 2026-10-30\(금\)/);
   const x = rowOf(db, s.session_id as string).extracted_data as Structured;
   assert.equal(x.session.reference_date, REVIEW);
@@ -549,17 +549,19 @@ test('일기: 사용자가 고친 일기는 덮지 않음 (모델도 안 부름)
   assert.deepEqual(journalOf(db).map((j) => [j.ai_summary, j.edited_summary, j.is_edited, j.source_session_id]), [['예전 AI 일기', '내가 고친 일기', true, null]]);
 });
 
-test('일기: 같은 기준일의 두 번째 대화(자정 넘어 새 방, 아직 안 잠) → 두 대화의 사실로 다시 써서 그날 한 줄을 갱신 (근거는 새 대화)', async () => {
+test('일기: [완료] 뒤 자정 넘어 같은 기준일에 다시 열면 같은 방 — 이어 말하고 다시 [완료]하면 대화 전체로 다시 써서 그날 한 줄을 갱신', async () => {
   const db = seed();
-  const first = await chat(db, [['오늘 팀플 발표 끝냈어']], [emptyExtract({ day_review: { events: [{ text: '팀플 발표를 끝냄', time: null, important: true, source: 'stated' }], memorable: null } })]);
+  const ev = (text: string, important: boolean) => ({ text, time: null, important, source: 'stated' as const });
+  const first = await chat(db, [['오늘 팀플 발표 끝냈어']], [emptyExtract({ day_review: { events: [ev('팀플 발표를 끝냄', true)], memorable: null } })]);
   await commit(first.deps, first.sid);
-  db.now = AFTER_MIDNIGHT; // 10/30 00:40 — 달력 날짜가 바뀌어 새 방, 기상 기록이 없어 기준일은 그대로 10/29
-  const second = await chat(db, [['저녁엔 친구랑 떡볶이 먹었어']], [emptyExtract({ day_review: { events: [{ text: '친구와 떡볶이를 먹음', time: null, important: false, source: 'stated' }], memorable: null } })], [{ diary: '팀플 발표를 끝내고 저녁에는 친구와 떡볶이를 먹었다.' }], AFTER_MIDNIGHT);
-  assert.notEqual(second.sid, first.sid);
+  db.now = AFTER_MIDNIGHT; // 10/30 00:40 — 새벽 4시 전이라 기준일 10/29, 같은 방
+  const second = await chat(db, [['저녁엔 친구랑 떡볶이 먹었어']], [emptyExtract({ day_review: { events: [ev('팀플 발표를 끝냄', true), ev('친구와 떡볶이를 먹음', false)], memorable: null } })], [{ diary: '팀플 발표를 끝내고 저녁에는 친구와 떡볶이를 먹었다.' }], AFTER_MIDNIGHT);
+  assert.equal(second.sid, first.sid);
+  assert.equal(second.session.resumed, true);
   await commit(second.deps, second.sid);
   const screen = second.fake.seen.T5[0];
   assert.ok(screen.includes('팀플 발표를 끝냄') && screen.includes('친구와 떡볶이를 먹음'));
-  assert.deepEqual(journalOf(db).map((j) => [j.ai_summary, j.source_session_id]), [['팀플 발표를 끝내고 저녁에는 친구와 떡볶이를 먹었다.', second.sid]]);
+  assert.deepEqual(journalOf(db).map((j) => [j.record_date, j.ai_summary, j.source_session_id]), [[REVIEW, '팀플 발표를 끝내고 저녁에는 친구와 떡볶이를 먹었다.', first.sid]]);
 });
 
 test('일기: 쓸 사실이 없거나 모델이 빈 글이면 만들지 않음', async () => {
@@ -741,32 +743,61 @@ test('정리(T2) 도중 새 말이 오면 STALE — 그 앞까지 저장, 새 �
   assert.equal(fake.order.includes('T2'), false);
 });
 
-test('다음 날(KST 자정 뒤)은 새 대화방 · 예전 방식으로 끝낸 세션은 이어 받지 않음', async () => {
+test('대화방 = 새벽 4시 기준일: 23:59 → 00:40은 [완료] 뒤에도 같은 방, 03:59까지 같은 방, 04:00에 새 방 · 예전 방식으로 끝낸 세션은 이어 받지 않음', async () => {
   const db = seed();
-  const night = await chat(db, [['오늘 피곤했어']], [emptyExtract()]);
+  const night = await chat(db, [['오늘 피곤했어']], [emptyExtract()], undefined, new Date('2026-10-29T23:59:00+09:00'));
   await commit(night.deps, night.sid);
 
-  db.now = AFTER_MIDNIGHT; // 10/30 00:40 — 달력 날짜가 바뀜
+  db.now = AFTER_MIDNIGHT; // 10/30 00:40 — 달력은 바뀌었지만 기준일은 10/29
   const late = await chat(db, [], [], [], AFTER_MIDNIGHT);
-  assert.notEqual(late.sid, night.sid);
-  assert.equal(late.session.day.review, REVIEW); // 아직 안 잠 → 돌아볼 날은 10/29
-  assert.deepEqual(late.session.messages.map((m) => m.role), ['ai']); // 새 첫 마디만 (어제 방을 잇지 않음)
-  assert.equal(rowOf(db, late.sid).server_state.prev_session_id, null);
+  assert.equal(late.sid, night.sid);
+  assert.equal(late.session.resumed, true);
+  assert.equal(late.session.day.review, REVIEW);
+  assert.deepEqual(late.session.messages.filter((m) => m.role === 'user').map((m) => m.text), ['오늘 피곤했어']);
+  const at359 = await chat(db, [], [], [], new Date('2026-10-30T03:59:00+09:00'));
+  assert.equal(at359.sid, night.sid);
 
-  // 예전 방식([완료]가 ended로 끝낸 세션)은 같은 날이어도 새 세션
-  (db.rows('conversation_sessions').find((s) => s.session_id === late.sid) as { server_state: ServerState }).server_state.ended = true;
-  const fresh = await chat(db, [], [], [], new Date('2026-10-30T00:50:00+09:00'));
-  assert.notEqual(fresh.sid, late.sid);
+  const at4 = await chat(db, [], [], [], new Date('2026-10-30T04:00:00+09:00'));
+  assert.notEqual(at4.sid, night.sid);
+  assert.equal(at4.session.resumed, false);
+  assert.equal(at4.session.day.review, TOMORROW);
+  assert.deepEqual(at4.session.messages.map((m) => m.role), ['ai']); // 새 첫 마디만
+  assert.equal(rowOf(db, at4.sid).server_state.prev_session_id, null);
+
+  // 예전 방식([완료]가 ended로 끝낸 세션)은 같은 기준일이어도 새 세션
+  (db.rows('conversation_sessions').find((s) => s.session_id === at4.sid) as { server_state: ServerState }).server_state.ended = true;
+  const fresh = await chat(db, [], [], [], new Date('2026-10-30T04:10:00+09:00'));
+  assert.notEqual(fresh.sid, at4.sid);
 });
 
-// ───────── 같은 날 기준일이 바뀜: 대화방 = KST 달력 날짜, 기록(세션 줄 · 구조화 JSON · 일기) = 기준일 ─────────
+test('기상 확인 · 기상 알람은 대화방을 바꾸지 않음: 01:00 방에서 기상 기록 · 알람이 생겨도 03:00에 같은 방, 09:00에는 기상과 상관없이 새 방', async () => {
+  const db = seed();
+  const night = await chat(db, [['오늘 팀플 발표 끝냈어']], [], [], AT_1AM);
+  db.rows('daily_records').push({ record_id: 'r-wake', user_id: ME, record_date: TOMORROW, wake_confirmed_at: '2026-10-30T02:30:00+09:00', data_source: 'APP' });
+  db.rows('alarms').push({ alarm_id: 'al-w', user_id: ME, participant_id: null, routine_id: null, alarm_type: 'WAKE', scheduled_at: '2026-10-29T21:00:00Z', intensity: 'NORMAL', is_enabled: true });
+  const same = await chat(db, [], [], [], new Date('2026-10-30T03:00:00+09:00'));
+  assert.equal(same.sid, night.sid);
+  assert.equal(same.session.day.review, REVIEW);
+  db.rows('daily_records').length = 0; // 기상 기록이 없어도
+  const day = await chat(db, [], [], [], AT_9AM);
+  assert.notEqual(day.sid, night.sid);
+  assert.equal(day.session.day.review, TOMORROW);
+  assert.equal(rowOf(db, day.sid).server_state.prev_session_id, null);
+  assert.deepEqual(day.session.uncommitted_session_ids, [night.sid]); // 전 기준일 방은 정리 목록으로
+});
+
+// ───────── 예전 규칙으로 만든 방(배포 전: 기상 전 = 전날 기준일)을 04:00 뒤에 엶 — 같은 방의 다음 구간, 기록은 구간마다 제 기준일 ─────────
+//   지금 규칙에서는 방 = 기준일이라 생기지 않지만, 배포 전 아침(기상 전)에 연 방은 이 길로 이어짐 — 앞 구간 started_at을 04:00 뒤로 옮겨 흉내
 
 const AT_1AM = new Date('2026-10-30T01:00:00+09:00'); // 기상 전 → 기준일 10/29
 const AT_9AM = new Date('2026-10-30T09:00:00+09:00'); // 08:30 기상 확인 뒤 → 기준일 10/30
-const woke = (db: FakeDb) => db.rows('daily_records').push({ record_id: 'r-wake', user_id: ME, record_date: TOMORROW, wake_confirmed_at: '2026-10-30T08:30:00+09:00', data_source: 'APP' });
+/** 예전 규칙 방 흉내 — 기준일 10/29인 방을 10/30 08:00에 연 것으로 */
+const legacy = (db: FakeDb, sid: string) => {
+  (db.rows('conversation_sessions').find((x) => x.session_id === sid) as { started_at: string }).started_at = '2026-10-30T08:00:00+09:00';
+};
 const eventsOf = (text: string) => emptyExtract({ day_review: { events: [{ text, time: null, important: true, source: 'stated' }], memorable: null } });
 
-test('오전 1시에 대화 → 오전 9시(기상 뒤) 재접속: 같은 대화방(말 · 카드 이어짐) · 기록은 기준일별 — 01시 말은 10/29, 09시 말은 10/30 일기로', async () => {
+test('예전 규칙 방(기준일 10/29) → 오전 9시 재접속: 같은 대화방(말 · 카드 이어짐) · 기록은 기준일별 — 01시 말은 10/29, 09시 말은 10/30 일기로', async () => {
   const db = seed();
   db.now = AT_1AM;
   const night = await chat(db, [['오늘 팀플 발표 끝냈어'], ['내일 2시에 도서관에서 스터디 있어']], [], [], AT_1AM);
@@ -777,7 +808,7 @@ test('오전 1시에 대화 → 오전 9시(기상 뒤) 재접속: 같은 대화
     { status: 'SAVED', appointment_id: 'ap-team', summary: '팀플' },
   ]);
 
-  woke(db);
+  legacy(db, night.sid);
   db.now = AT_9AM;
   const fake = fakeClaude({ T2F: [T2F_NONE], T1: [T1_OK, T1_OK], T2: [eventsOf('팀플 발표를 끝냄'), eventsOf('아침에 일찍 일어남')], T5: [{ diary: '10/29 일기' }, { diary: '10/30 일기' }] });
   let t = 0;
@@ -828,8 +859,8 @@ test('오전 1시에 대화 → 오전 9시(기상 뒤) 재접속: 같은 대화
   assert.deepEqual(await commit(deps, sid), r);
   assert.equal(fake.order.filter((p) => p === 'T2').length, 2);
 
-  // 다음 날 자정 뒤는 이 방을 잇지 않고 새 방
-  const nextDay = (await handleVoiceSession({ ...deps, now: () => new Date('2026-10-31T00:30:00+09:00') }, { session_type: 'BEFORE_SLEEP', input_mode: 'TEXT', resume: true })) as VoiceSessionOut;
+  // 다음 날 04:00 뒤는 이 방을 잇지 않고 새 방
+  const nextDay = (await handleVoiceSession({ ...deps, now: () => new Date('2026-10-31T04:00:00+09:00') }, { session_type: 'BEFORE_SLEEP', input_mode: 'TEXT', resume: true })) as VoiceSessionOut;
   assert.notEqual(nextDay.session_id, sid);
   assert.equal(rowOf(db, nextDay.session_id as string).server_state.prev_session_id, null);
 });
@@ -838,7 +869,7 @@ test('앞 구간 정리가 실패하면 이 구간 결과는 저장하되 PARTIA
   const db = seed();
   db.now = AT_1AM;
   const night = await chat(db, [['오늘 팀플 발표 끝냈어']], [], [], AT_1AM);
-  woke(db);
+  legacy(db, night.sid);
   db.now = AT_9AM;
   // T2 순서: 앞 구간(실패 · 다시 시도도 실패) → 이 구간 → (다시 보냄) 앞 구간
   const day = await chat(db, [['오늘은 아침에 일찍 일어났어']], [upstreamError(), upstreamError(), eventsOf('아침에 일찍 일어남'), eventsOf('팀플 발표를 끝냄')], [{ diary: '10/30 일기' }, { diary: '10/29 일기' }], AT_9AM);
@@ -858,7 +889,7 @@ test('0시 ~ 기상 전에 첫 마디만 있던 방은 이을 것이 없어 기�
   const db = seed();
   db.now = AT_1AM;
   const night = await chat(db, [], [], [], AT_1AM);
-  woke(db);
+  legacy(db, night.sid);
   db.now = AT_9AM;
   const day = await chat(db, [], [], [], AT_9AM);
   assert.notEqual(day.sid, night.sid);
@@ -937,7 +968,7 @@ test('계산이 안 끝난 채 이어 받은 카드: 새 구간 첫 말 전에 �
   db.now = AT_1AM;
   const night = await chat(db, [['내일 2시에 도서관에서 스터디 있어']], [], [], AT_1AM);
   putCards(db, night.sid, [{ status: 'NEEDS_ESTIMATE', summary: '스터디', draft: { title: '스터디', date: TOMORROW, time: '14:00', place: '도서관', importance: null, transport: null, repeat: [], items: [], alarms: { WAKE: true, PREPARE: true, DEPARTURE: true } } }]);
-  woke(db);
+  legacy(db, night.sid);
   db.now = AT_9AM;
   const day = await chat(db, [], [], [], AT_9AM);
   assert.deepEqual(day.session.cards.map((c) => [c.id, c.status]), [['c1', 'NEEDS_ESTIMATE']]);
@@ -1025,19 +1056,22 @@ test('만든 때가 없는 예전 카드: 다시 열 때 처음 나온 처리 �
   assert.equal(withCardTimes({ ...row.server_state, cards: [{ ...row.server_state.cards[0], at: '2026-10-29T21:00:00+09:00' }] }, [])[0].at, '2026-10-29T21:00:00+09:00');
 });
 
-test('23시 대화를 [완료] 없이 두고 자정 뒤 열면: 새 방 + 어제 방을 정리할 목록(uncommitted_session_ids)으로 알려 줌 — 정리하면 어제 기준일로 기록, 정리 뒤엔 다시 안 알림', async () => {
+test('23시 대화를 [완료] 없이 두고 04:00 뒤 열면: 새 방 + 전 기준일 방을 정리 목록(uncommitted_session_ids)으로 알려 줌 — 정리하면 전 기준일로 기록, 정리 뒤엔 다시 안 알림 · 00:40에는 같은 방이라 안 알림', async () => {
   const db = seed();
   const night = await chat(db, [['오늘 팀플 발표 끝냈어']], [eventsOf('팀플 발표를 끝냄')]); // 22:30, [완료] 안 함
-  db.now = AFTER_MIDNIGHT;
   const late = await chat(db, [], [], [], AFTER_MIDNIGHT);
-  assert.notEqual(late.sid, night.sid); // 자정 뒤 새 방 (요구사항)
-  assert.deepEqual(late.session.uncommitted_session_ids, [night.sid]);
-  assert.equal(rowOf(db, night.sid).server_state.counts.user_turns, 1); // 어제 방 말은 그대로
-  // 앱이 정리 요청을 보냄 → 어제 기준일(10/29)로 저장
-  assert.equal((await commit({ ...night.deps, now: () => AFTER_MIDNIGHT }, night.sid)).status, 'DONE');
+  assert.equal(late.sid, night.sid);
+  assert.deepEqual(late.session.uncommitted_session_ids, []);
+  db.now = AT_9AM;
+  const day = await chat(db, [], [], [], AT_9AM);
+  assert.notEqual(day.sid, night.sid); // 04:00 뒤 새 방 (요구사항)
+  assert.deepEqual(day.session.uncommitted_session_ids, [night.sid]);
+  assert.equal(rowOf(db, night.sid).server_state.counts.user_turns, 1); // 전날 방 말은 그대로
+  // 앱이 정리 요청을 보냄 → 전 기준일(10/29)로 저장
+  assert.equal((await commit({ ...night.deps, now: () => AT_9AM }, night.sid)).status, 'DONE');
   assert.equal(rowOf(db, night.sid).extracted_data.session.reference_date, REVIEW);
-  const again = (await handleVoiceSession({ ...late.deps, now: () => new Date('2026-10-30T00:50:00+09:00') }, { session_type: 'BEFORE_SLEEP', input_mode: 'TEXT', resume: true })) as VoiceSessionOut;
+  const again = (await handleVoiceSession({ ...day.deps, now: () => new Date('2026-10-30T09:10:00+09:00') }, { session_type: 'BEFORE_SLEEP', input_mode: 'TEXT', resume: true })) as VoiceSessionOut;
   assert.deepEqual(again.uncommitted_session_ids, []);
-  // 같은 날 연 방 · 말 없는 방은 알리지 않음
+  // 같은 기준일 방 · 말 없는 방은 알리지 않음
   assert.deepEqual(night.session.uncommitted_session_ids, []);
 });
