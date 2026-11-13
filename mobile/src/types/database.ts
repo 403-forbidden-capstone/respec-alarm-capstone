@@ -795,6 +795,31 @@ isOneToOne: false
       referencedColumns: ["user_id"]
     }
                   ]
+                },"wake_scripts": {
+                  Row: {
+                    "alarm_id": string,"input_hash": string,"model": string,"scripts": Json,"updated_at": string,"user_id": string
+                  }
+                  Insert: {
+                    "alarm_id": string,"input_hash": string,"model": string,"scripts": Json,"updated_at"?: string,"user_id": string
+                  }
+                  Update: {
+                    "alarm_id"?: string,"input_hash"?: string,"model"?: string,"scripts"?: Json,"updated_at"?: string,"user_id"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "wake_scripts_alarm_id_fkey"
+      columns: ["alarm_id"]
+isOneToOne: true
+      referencedRelation: "alarms"
+      referencedColumns: ["alarm_id"]
+    },{
+      foreignKeyName: "wake_scripts_user_id_fkey"
+      columns: ["user_id"]
+isOneToOne: false
+      referencedRelation: "profiles"
+      referencedColumns: ["user_id"]
+    }
+                  ]
                 }
           }
           Views: {
