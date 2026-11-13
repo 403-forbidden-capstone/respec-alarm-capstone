@@ -124,8 +124,11 @@ class AlarmCoreModule : Module() {
     }
 
     // AI 음성 브리핑 — 앱이 alarm-briefing 결과를 알람별로 저장 · 폰에 있는 음성 열쇠 읽기 · 지우기 (VoiceBriefing)
+    // json.refreshAt(ms) = 서버가 "전날 대화가 아직 정리 전"이라고 준 다시 받을 시각 → 백그라운드 갱신 예약에 더함 (#515)
     AsyncFunction("saveVoiceBriefing") { alarmId: String, json: String ->
       VoiceBriefing.save(context, alarmId, json)
+      val refreshAt = org.json.JSONObject(json).optDouble("refreshAt", Double.NaN).takeIf { !it.isNaN() }?.toLong()
+      BriefingRefresh.offer(context, alarmId, refreshAt)
     }
 
     AsyncFunction("getVoiceBriefingHashes") { alarmId: String ->
@@ -134,6 +137,19 @@ class AlarmCoreModule : Module() {
 
     AsyncFunction("clearVoiceBriefing") { alarmId: String ->
       VoiceBriefing.clear(context, alarmId)
+    }
+
+    // 백그라운드 브리핑 갱신(#515)용 기기 키 — 앱이 briefing-device에서 받은 값을 Keystore로 암호화해 저장 · 정보(키 원문 빼고) 읽기 · 지우기 (BriefingCredential)
+    AsyncFunction("setBriefingDevice") { json: String ->
+      BriefingCredential.save(context, json)
+    }
+
+    AsyncFunction("getBriefingDevice") {
+      BriefingCredential.info(context)
+    }
+
+    AsyncFunction("clearBriefingDevice") {
+      BriefingCredential.clear(context)
     }
   }
 }

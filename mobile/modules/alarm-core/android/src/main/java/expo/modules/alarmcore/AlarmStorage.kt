@@ -49,5 +49,7 @@ object AlarmStorage {
       .commit()
     // 알람이 없어지면 그 알람의 AI 음성 브리핑 파일도 (해제 · 취소 · 로그아웃 cancelAll 모두 여기를 지남)
     if (!keepVoice) runCatching { VoiceBriefing.clear(context, id) }
+    // 새벽 브리핑 갱신 예약 · 대기 작업도 (#515) — 지운 · 끈 · 수정 전 알람에 갱신이 남지 않게 (수정은 schedule이 새 시각으로 다시 걺)
+    BriefingRefresh.cancel(context, id)
   }
 }

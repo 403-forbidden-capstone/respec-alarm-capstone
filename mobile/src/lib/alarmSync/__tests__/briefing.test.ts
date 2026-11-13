@@ -46,6 +46,16 @@ describe('prepareBriefings', () => {
     expect(s.saved).toEqual(['w1', 'd1']);
   });
 
+  it('서버 refresh_at(전날 대화가 아직 새벽 정리 전)을 네이티브 저장에 refreshAt으로 넘김 — 백그라운드 갱신 예약 (#515) · 예전 서버(칸 없음)면 null', async () => {
+    const saves: unknown[] = [];
+    const refreshAt = NOW + 5 * 3_600_000;
+    const t = deps({ save: async (_id, data) => void saves.push(data.refreshAt), call: async () => ({ ...OUT, refresh_at: refreshAt }) });
+    await prepareBriefings(NOW, t.d);
+    const old = deps({ save: async (_id, data) => void saves.push(data.refreshAt) });
+    await prepareBriefings(NOW, old.d);
+    expect(saves).toEqual([refreshAt, null]);
+  });
+
   it('예전 규칙이 저장된 알람도 다시 맞추면 서버의 새 규칙(여유 5분 · 0분 시각)을 그대로 덮어 저장 → 실제 일정 기준 5분 3단계 · 0분 4단계', async () => {
     // 실제 일정 모양: 오전 10시 약속 · 준비 50분 · 이동 40분 → 서버가 계산한 규칙 (배포된 alarm-briefing과 같은 식)
     const appointmentAtMs = NOW + 3 * 3_600_000;

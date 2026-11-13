@@ -15,6 +15,8 @@ import { buildRingPlan, toNativePayload, validateRingPackage } from './plan';
 import type {
   AlarmBackend,
   AlarmEvent,
+  BriefingDeviceInfo,
+  BriefingDeviceKey,
   RingingAlarm,
   RingPackage,
   ScheduleOutcome,
@@ -65,6 +67,8 @@ const nativeModule =
 
 /** 이 기기에서 네이티브 알람을 쓸 수 있는지 (Android + 모듈이 들어간 APK). 웹은 false */
 export const isAvailable = nativeModule != null;
+/** 이 APK가 백그라운드 브리핑 갱신(#515)을 할 수 있는지 — 기기 키 함수가 든 네이티브 모듈. 예전 APK면 false (앱을 열 때만 받음) */
+export const canRefreshBriefingInBackground = nativeModule?.setBriefingDevice != null;
 
 function chooseBackend(): AlarmBackend {
   if (nativeModule) return createNativeBackend(nativeModule);
@@ -209,6 +213,20 @@ export async function getVoiceBriefingHashes(alarmId: string): Promise<string[]>
 
 export async function clearVoiceBriefing(alarmId: string): Promise<void> {
   await backend.clearVoiceBriefing(alarmId);
+}
+
+/** 백그라운드 브리핑 갱신(#515)용 기기 키 — 네이티브 Keystore 저장소에 (lib/alarmSync/briefingDevice.ts) */
+export async function setBriefingDevice(value: BriefingDeviceKey): Promise<void> {
+  await backend.setBriefingDevice(value);
+}
+
+/** 저장된 기기 키 정보(키 원문 빼고). 없으면 null */
+export async function getBriefingDevice(): Promise<BriefingDeviceInfo | null> {
+  return backend.getBriefingDevice();
+}
+
+export async function clearBriefingDevice(): Promise<void> {
+  await backend.clearBriefingDevice();
 }
 
 // --- 개발 화면(dev/alarm-test) AI 음성 시험 — 네이티브만 (웹 · 메모리 대체는 소리가 없어 지원 안 함) ---

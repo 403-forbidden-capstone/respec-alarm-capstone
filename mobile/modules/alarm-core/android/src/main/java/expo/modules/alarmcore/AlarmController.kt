@@ -57,6 +57,8 @@ object AlarmController {
       if (existing != null) AlarmStorage.save(context, existing) else AlarmStorage.remove(context, incoming.alarmId)
       throw error
     }
+    // 기상 알람이면 새벽 브리핑 갱신(#515)도 이 시각에 맞춰 다시 정함 — 실패해도 알람 예약에는 영향 없음 (BriefingRefresh 안에서 삼킴)
+    BriefingRefresh.onAlarmScheduled(context, incoming)
     return STATUS_SCHEDULED
   }
 
@@ -337,6 +339,8 @@ object AlarmController {
         return@forEach
       }
       runCatching { AlarmScheduler.schedule(context, alarm) }
+      // 재부팅하면 갱신 정확 알람도 사라짐 → 다시 걺 (#515)
+      if (alarm.ringCount == 0) BriefingRefresh.onAlarmScheduled(context, alarm)
     }
   }
 
