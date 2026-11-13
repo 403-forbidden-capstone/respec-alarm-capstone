@@ -113,6 +113,13 @@ const PLATFORM_STUBS = `
   create function cron.schedule(job_name text, schedule text, command text) returns bigint language sql
     as $$ insert into cron.job (jobname, schedule, command) values (job_name, schedule, command)
           on conflict (jobname) do update set schedule = excluded.schedule, command = excluded.command returning jobid $$;
+  -- 실제 cron.unschedule처럼 없는 작업이면 오류
+  create function cron.unschedule(job_name text) returns boolean language plpgsql as $$
+    begin
+      delete from cron.job where jobname = job_name;
+      if not found then raise exception 'could not find valid entry for job %', job_name; end if;
+      return true;
+    end $$;
 
   create schema vault;
   create table vault.decrypted_secrets (name text primary key, decrypted_secret text);
@@ -164,14 +171,16 @@ const MEETING = ['decision_comments', 'decision_votes', 'decision_states'];
 //   reports = 친구 4장 (신고, 넣기는 DB 함수로만 · 읽기는 운영 화면 몫) — friend/ch04.mjs에서 따로 확인
 //   push_sends = 친구 8장 (깨우기 · 미확인 친구 알림 보낸 기록, DB 함수로만) — friend/ch08.mjs에서 따로 확인
 //   team_members = 친구 4장 꼬리 (운영 화면을 열 수 있는 팀원 목록, 추가는 서버 키로) — friend/ch04.mjs에서 따로 확인
-const SERVER_ONLY = ['roll_attempts', 'rate_limit_events', 'friend_links', 'reports', 'push_tickets', 'push_sends', 'team_members', 'prepare_ml_verified_profiles'];
+//   server_routes · server_route_users · server_heartbeat = 서버 전환 스위치(M1, 앱은 get_server_routes()로만 읽음) — 아래 "서버 전환 스위치"에서 따로 확인
+const SERVER_ONLY = ['roll_attempts', 'rate_limit_events', 'friend_links', 'reports', 'push_tickets', 'push_sends', 'team_members', 'prepare_ml_verified_profiles',
+                     'server_routes', 'server_route_users', 'server_heartbeat'];
 
-await check('모든 public 테이블(앱 31개 — 서버 전용 8개 포함 + 회의 도구 3개)에 RLS가 켜져 있음', async () => {
+await check('모든 public 테이블(앱 34개 — 서버 전용 11개 포함 + 회의 도구 3개)에 RLS가 켜져 있음', async () => {
   const r = await q(`select c.relname, c.relrowsecurity from pg_class c join pg_namespace n on n.oid = c.relnamespace
                      where n.nspname = 'public' and c.relkind = 'r' order by 1`);
   const off = r.filter((x) => !x.relrowsecurity).map((x) => x.relname);
   const app = r.filter((x) => !MEETING.includes(x.relname)).length;
-  return app === 31 && r.length === 34 && off.length === 0 ? true : { count: r.length, app, off };
+  return app === 34 && r.length === 37 && off.length === 0 ? true : { count: r.length, app, off };
 });
 
 await check('검증된 ML 프로필: RLS 켜짐, 사용자 접근 차단, 서비스 역할만 접근 허용', async () => {
@@ -1355,16 +1364,17 @@ await check('서버 전용 함수(can_send_push · find_missed_wake_alarms · �
 });
 
 // 배치 (Q5 A) — pg_cron · pg_net은 PGlite에 없어 cron.schedule · net.http_post 흉내로 확인
-await check('배치 예약: wake-check · alarm-roll(반복 다음 회차)을 5분마다 + voice-auto-commit(하루 기록 자동 정리, 10분마다) + friend-requests-expire(친구 3장, 30일 지난 받은 요청 삭제 — 내용은 friend/ch03.mjs) + friend-records-purge(친구 13장, 매일 새벽 7일 지난 서버 기록 삭제 — 내용은 friend/ch13.mjs) + suggestion-generate(알람 조정 제안, 매일 18:00 KST) (PGlite에는 pg_cron · pg_net이 없어 확장은 건너뛰고 예약만 흉내에 들어감)', async () => {
+await check('배치 예약: wake-check · alarm-roll(반복 다음 회차)을 5분마다 run_job으로 + suggestion-generate(알람 조정 제안, 매일 18:00 KST) run_job primary와 18:15 KST 안전망 run_job safety(M1) + voice-auto-commit(하루 기록 자동 정리, 10분마다 — M1이 안 건드림) + friend-requests-expire(친구 3장, 30일 지난 받은 요청 삭제 — 내용은 friend/ch03.mjs) + friend-records-purge(친구 13장, 매일 새벽 7일 지난 서버 기록 삭제 — 내용은 friend/ch13.mjs) (PGlite에는 pg_cron · pg_net이 없어 확장은 건너뛰고 예약만 흉내에 들어감)', async () => {
   const jobs = await q(`select jobname, schedule, command from cron.job order by jobname`);
   const ext = await q(`select extname from pg_extension where extname in ('pg_cron', 'pg_net')`);
-  return jobs.length === 6 && ext.length === 0 && jobs.some((x) => x.jobname === 'friend-requests-expire')
-    && jobs.some((x) => x.jobname === 'suggestion-generate' && x.schedule === '0 9 * * *' && x.command === `select private.invoke_edge_function('suggestion-generate')`)
+  return jobs.length === 7 && ext.length === 0 && jobs.some((x) => x.jobname === 'friend-requests-expire')
+    && jobs.some((x) => x.jobname === 'suggestion-generate' && x.schedule === '0 9 * * *' && x.command === `select private.run_job('suggestion-generate', 'primary')`)
+    && jobs.some((x) => x.jobname === 'suggestion-generate-safety' && x.schedule === '15 9 * * *' && x.command === `select private.run_job('suggestion-generate', 'safety')`)
     && jobs.some((x) => x.jobname === 'voice-auto-commit' && x.schedule === '*/10 * * * *' && x.command === `select private.invoke_edge_function('voice-commit')`)
     && jobs.some((x) => x.jobname === 'friend-records-purge' && x.schedule === '0 18 * * *' && x.command === 'select private.purge_old_friend_records()')
     && ['wake-check', 'alarm-roll'].every((name) => {
       const j = jobs.find((x) => x.jobname === name);
-      return j && j.schedule === '*/5 * * * *' && j.command === `select private.invoke_edge_function('${name}')`;
+      return j && j.schedule === '*/5 * * * *' && j.command === `select private.run_job('${name}')`;
     })
     ? true : { jobs, ext };
 });
@@ -1398,6 +1408,301 @@ await check('realtime · cron · Vault가 없는 DB에도 마이그레이션이 
     const [{ n }] = (await bare.query(`select count(*)::int as n from pg_trigger where tgname = 'send_wake_signal'`)).rows;
     const [{ r }] = (await bare.query(`select private.invoke_edge_function('wake-check') as r`)).rows;
     return n === 0 && r === null ? true : { n, r };
+  } finally {
+    await bare.close();
+  }
+});
+
+
+// ---------------------------------------------------------------------
+// 서버 전환 스위치 (M1, 이슈 #475 · 서버 완결점 1-8) — server_routes · server_route_users · server_heartbeat · get_server_routes() · private.run_job()
+// ---------------------------------------------------------------------
+// 알람 계산을 Edge 함수에서 FastAPI 서버로 옮기는 동안 "어디서 돌지"를 DB 표 한 줄로 정함. 값은 전부 edge로 시작 → 적용만으로는 동작이 안 바뀜
+// pg_cron · pg_net은 PGlite에 없어, 예약된 명령(cron.job.command)을 그대로 실행하고 net.http_post 흉내(net.calls)에 남은 기록으로 "Edge를 불렀는지"를 봄
+
+const OPS_DIR = fileURLToPath(new URL('../ops/', import.meta.url));
+const ROUTE_TABLES = ['server_routes', 'server_route_users', 'server_heartbeat'];
+const ROUTE_FUNCTIONS = ['alarm-commit', 'alarm-roll', 'alarm-suggest', 'appointment-edit', 'place-reverse', 'place-search'];
+const ROUTE_JOBS = ['alarm-roll', 'suggestion-generate', 'wake-check'];
+const EDGE_BASE = 'https://abc.supabase.co/functions/v1/';
+
+// Vault에 키를 넣고(없으면 Edge를 못 부름) 끝나면 스위치 표를 처음 값(전부 edge · 기록 없음)으로 돌려놓음
+const withRouteSetup = async (fn) => {
+  await su();
+  await q(`insert into vault.decrypted_secrets (name, decrypted_secret) values ('project_url', 'https://abc.supabase.co'), ('service_role_key', 'SECRET-KEY')`);
+  try {
+    return await fn();
+  } finally {
+    await su();
+    await q(`delete from vault.decrypted_secrets`);
+    await q(`truncate net.calls`);
+    await q(`delete from public.server_route_users`);
+    await q(`update public.server_routes set mode = 'edge'`);
+    await q(`update public.server_heartbeat set alive_at = null, last_success_at = null`);
+  }
+};
+
+// 예약 작업의 담당(mode) · 서버 성공 기록(몇 분 전, null = 없음)을 정해 놓고 run_job을 불러 Edge가 불린 횟수를 돌려줌
+const runJob = async (name, role, mode, agoMinutes) => {
+  await su();
+  await q(`update public.server_routes set mode = $2 where kind = 'job' and name = $1`, [name, mode]);
+  await q(`update public.server_heartbeat set last_success_at = case when $2::int is null then null else now() - make_interval(mins => $2::int) end where job_name = $1`, [name, agoMinutes]);
+  await q(`truncate net.calls`);
+  await svc();
+  await q(`select private.run_job($1, $2)`, [name, role]);
+  await su();
+  const [{ n }] = await q(`select count(*)::int as n from net.calls where url = $1`, [EDGE_BASE + name]);
+  return n;
+};
+
+await check('서버 전환 스위치 표: server_routes · server_route_users · server_heartbeat는 RLS가 켜져 있고 정책이 없고, 앱(anon · authenticated)은 읽기 · 쓰기가 모두 막히고 service_role만 허용', async () => {
+  const bad = [];
+  for (const t of ROUTE_TABLES) {
+    const [x] = await q(`select c.relrowsecurity as rls, (select count(*)::int from pg_policy p where p.polrelid = c.oid) as policies,
+      (select bool_or(has_table_privilege(r, c.oid, a)) from unnest(array['anon', 'authenticated']) r, unnest(array['select', 'insert', 'update', 'delete']) a) as app_any,
+      (select bool_and(has_table_privilege('service_role', c.oid, a)) from unnest(array['select', 'insert', 'update', 'delete']) a) as service_all
+      from pg_class c where c.oid = ('public.' || $1)::regclass`, [t]);
+    if (x.rls !== true || x.policies !== 0 || x.app_any !== false || x.service_all !== true) bad.push({ t, x });
+  }
+  await as(A);
+  const read = await expectErr(() => q(`select * from public.server_routes`), /permission denied/);
+  const write = await expectErr(() => q(`update public.server_routes set mode = 'server'`), /permission denied/);
+  const beat = await expectErr(() => q(`select * from public.server_heartbeat`), /permission denied/);
+  return bad.length === 0 && read === true && write === true && beat === true ? true : { bad, read, write, beat };
+});
+
+await check('서버 전환 스위치 초기값: 함수 6줄 · 작업 3줄이 전부 edge이고 하트비트 3줄은 기록이 없음 (적용만으로는 동작이 안 바뀜)', async () => {
+  const routes = await q(`select kind, name, mode from public.server_routes order by kind, name`);
+  const beats = await q(`select job_name, alive_at, last_success_at from public.server_heartbeat order by job_name`);
+  const users = await q(`select 1 from public.server_route_users`);
+  const want = [...ROUTE_FUNCTIONS.map((n) => ['function', n]), ...ROUTE_JOBS.map((n) => ['job', n])];
+  return routes.length === 9 && routes.every((r, i) => r.kind === want[i][0] && r.name === want[i][1] && r.mode === 'edge')
+    && beats.length === 3 && beats.every((b, i) => b.job_name === ROUTE_JOBS[i] && b.alive_at === null && b.last_success_at === null) && users.length === 0
+    ? true : { routes, beats, users };
+});
+
+await check('서버 전환 스위치 제약: 함수 줄은 edge · canary · server, 작업 줄은 edge · shadow · server만 · 이름은 소문자 · 숫자 · - · canary 대상은 함수 줄에만 · 같은 줄 중복 불가', async () => {
+  await svc();
+  const fnShadow = await expectErr(() => q(`update public.server_routes set mode = 'shadow' where kind = 'function' and name = 'place-search'`), /server_routes_mode_by_kind/);
+  const jobCanary = await expectErr(() => q(`update public.server_routes set mode = 'canary' where kind = 'job' and name = 'wake-check'`), /server_routes_mode_by_kind/);
+  const badMode = await expectErr(() => q(`update public.server_routes set mode = 'on' where kind = 'job' and name = 'wake-check'`), /server_routes_mode_by_kind/);
+  const badKind = await expectErr(() => q(`insert into public.server_routes (kind, name) values ('queue', 'x')`), /server_routes_mode_by_kind/);
+  const badName = await expectErr(() => q(`insert into public.server_routes (kind, name) values ('function', 'Place_Search')`), /server_routes_name_shape/);
+  const dup = await expectErr(() => q(`insert into public.server_routes (kind, name) values ('function', 'place-search')`), /duplicate key|server_routes_pkey/);
+  const userOnJob = await expectErr(() => q(`insert into public.server_route_users (name, user_id) values ('wake-check', $1)`, [A]), /server_route_users_route_fkey/);
+  const userJobKind = await expectErr(() => q(`insert into public.server_route_users (kind, name, user_id) values ('job', 'wake-check', $1)`, [A]), /server_route_users_function_only/);
+  const userNoRoute = await expectErr(() => q(`insert into public.server_route_users (name, user_id) values ('no-such-function', $1)`, [A]), /server_route_users_route_fkey/);
+  const beatName = await expectErr(() => q(`insert into public.server_heartbeat (job_name) values ('Bad Name')`), /server_heartbeat_name_shape/);
+  const jobSameName = await q(`select count(*)::int as n from public.server_routes where name = 'alarm-roll'`);   // 함수 · 작업이 같은 이름을 가질 수 있음 (kind로 나뉨)
+  return fnShadow === true && jobCanary === true && badMode === true && badKind === true && badName === true && dup === true
+    && userOnJob === true && userJobKind === true && userNoRoute === true && beatName === true && jobSameName[0].n === 2
+    ? true : { fnShadow, jobCanary, badMode, badKind, badName, dup, userOnJob, userJobKind, userNoRoute, beatName, jobSameName };
+});
+
+await check('get_server_routes(): 앱은 나에게 적용되는 값(edge · server)만 받음 — canary는 대상 계정만 server, 작업 줄 · 대상 목록은 안 보임, 로그인 없으면 canary는 edge, anon은 못 부름', async () => {
+  return withRouteSetup(async () => {
+    await svc();
+    await q(`update public.server_routes set mode = 'canary' where kind = 'function' and name = 'place-search'`);
+    await q(`update public.server_routes set mode = 'server' where kind = 'function' and name = 'alarm-suggest'`);
+    await q(`update public.server_routes set mode = 'server' where kind = 'job' and name = 'alarm-roll'`);   // 작업만 server — 같은 이름 함수 줄 값으로 새면 안 됨
+    await q(`insert into public.server_route_users (name, user_id) values ('place-search', $1)`, [A]);
+    const mapOf = async (uid) => {
+      await as(uid);
+      const rows = await q(`select * from public.get_server_routes()`);
+      return { keys: [...new Set(rows.flatMap((r) => Object.keys(r)))].sort().join(','), n: rows.length, mode: Object.fromEntries(rows.map((r) => [r.name, r.mode])) };
+    };
+    const a = await mapOf(A);
+    const b = await mapOf(B);
+    const none = await mapOf(null);   // 로그인 없는 요청(authenticated지만 uid 없음)
+    await as(null, 'anon');
+    const anon = await expectErr(() => q(`select * from public.get_server_routes()`), /permission denied/);
+    const expectA = { 'alarm-commit': 'edge', 'alarm-roll': 'edge', 'alarm-suggest': 'server', 'appointment-edit': 'edge', 'place-reverse': 'edge', 'place-search': 'server' };
+    const expectB = { ...expectA, 'place-search': 'edge' };
+    return a.keys === 'mode,name' && a.n === 6 && JSON.stringify(a.mode) === JSON.stringify(expectA)
+      && b.n === 6 && JSON.stringify(b.mode) === JSON.stringify(expectB)
+      && JSON.stringify(none.mode) === JSON.stringify(expectB) && anon === true
+      ? true : { a, b, none, anon };
+  });
+});
+
+await check('run_job(poll, 5분 작업): edge · shadow면 항상 Edge를 부름, server면 서버 성공 기록이 12분 안이면 건너뛰고 아니면(13분 전 · 기록 없음) Edge를 부름', async () => {
+  return withRouteSetup(async () => {
+    const r = {};
+    for (const name of ['wake-check', 'alarm-roll']) {
+      r[name] = [
+        await runJob(name, 'poll', 'edge', null),
+        await runJob(name, 'poll', 'edge', 1),         // 서버 성공 기록이 있어도 edge면 부름
+        await runJob(name, 'poll', 'shadow', null),
+        await runJob(name, 'poll', 'shadow', 1),
+        await runJob(name, 'poll', 'server', 1),       // 건너뜀
+        await runJob(name, 'poll', 'server', 11),      // 건너뜀 (12분 안)
+        await runJob(name, 'poll', 'server', 13),      // Edge가 이어받음
+        await runJob(name, 'poll', 'server', null),    // 성공한 적 없음 → Edge
+      ];
+    }
+    const defaultRole = await (async () => {   // 두 번째 인자를 안 주면 poll
+      await su();
+      await q(`update public.server_routes set mode = 'server' where kind = 'job' and name = 'wake-check'`);
+      await q(`update public.server_heartbeat set last_success_at = now() where job_name = 'wake-check'`);
+      await q(`truncate net.calls`);
+      await svc();
+      await q(`select private.run_job('wake-check')`);
+      await su();
+      return (await q(`select count(*)::int as n from net.calls`))[0].n;
+    })();
+    const want = [1, 1, 1, 1, 0, 0, 1, 1];
+    return JSON.stringify(r['wake-check']) === JSON.stringify(want) && JSON.stringify(r['alarm-roll']) === JSON.stringify(want) && defaultRole === 0
+      ? true : { r, defaultRole };
+  });
+});
+
+await check('run_job(primary · safety, 하루 한 번 작업 suggestion-generate): 정시(primary)는 edge · shadow면 Edge를 부르고 server면 건너뜀 / 안전망(safety)은 edge · shadow면 아무것도 안 하고 server면 오늘 서버 성공 기록이 없을 때만 Edge를 부름', async () => {
+  return withRouteSetup(async () => {
+    const name = 'suggestion-generate';
+    const primary = [
+      await runJob(name, 'primary', 'edge', null),
+      await runJob(name, 'primary', 'shadow', null),
+      await runJob(name, 'primary', 'server', null),    // 서버 차례 — 아직 성공 기록이 없어도 안 부름
+      await runJob(name, 'primary', 'server', 2 * 24 * 60),
+    ];
+    const safety = [
+      await runJob(name, 'safety', 'edge', null),
+      await runJob(name, 'safety', 'shadow', null),
+      await runJob(name, 'safety', 'server', 0),                 // 오늘 성공 → 건너뜀
+      await runJob(name, 'safety', 'server', null),              // 서버가 안 했음 → Edge
+      await runJob(name, 'safety', 'server', 25 * 60),           // 어제 이전 성공은 오늘 몫이 아님 → Edge
+    ];
+    const badRole = await expectErr(async () => { await svc(); await q(`select private.run_job('wake-check', 'daily')`); }, /run_job role이 아님/);
+    return JSON.stringify(primary) === JSON.stringify([1, 1, 0, 0]) && JSON.stringify(safety) === JSON.stringify([0, 0, 0, 1, 1]) && badRole === true
+      ? true : { primary, safety, badRole };
+  });
+});
+
+await check('run_job: 같은 이름 함수 줄(alarm-roll)과 작업 줄은 따로 — 함수 줄을 server로 바꿔도 작업은 edge로 돌고, 작업 줄이 없으면 edge로 봄', async () => {
+  return withRouteSetup(async () => {
+    await su();
+    await q(`update public.server_routes set mode = 'server' where kind = 'function' and name = 'alarm-roll'`);
+    await q(`update public.server_heartbeat set last_success_at = now() where job_name = 'alarm-roll'`);
+    const fnServerJobEdge = await runJob('alarm-roll', 'poll', 'edge', 1);   // 작업 줄은 edge → Edge를 부름
+    await su();
+    await q(`delete from public.server_routes where kind = 'job' and name = 'alarm-roll'`);
+    await q(`truncate net.calls`);
+    await svc();
+    await q(`select private.run_job('alarm-roll')`);
+    await su();
+    const missing = (await q(`select count(*)::int as n from net.calls where url = $1`, [EDGE_BASE + 'alarm-roll']))[0].n;
+    await q(`insert into public.server_routes (kind, name) values ('job', 'alarm-roll')`);   // 되돌림 (withRouteSetup이 mode만 edge로 되돌림)
+    return fnServerJobEdge === 1 && missing === 1 ? true : { fnServerJobEdge, missing };
+  });
+});
+
+await check('run_job: 스위치 표를 못 읽으면(표 이름이 없어진 것으로 흉내) edge로 동작 — 정기 호출은 Edge를 부르고 안전망은 쉼 · 하트비트 표를 못 읽어도 같음', async () => {
+  return withRouteSetup(async () => {
+    const count = async (role) => {
+      await svc();
+      await q(`select private.run_job('wake-check', $1)`, [role]);
+      await su();
+      const [{ n }] = await q(`select count(*)::int as n from net.calls where url = $1`, [EDGE_BASE + 'wake-check']);
+      await q(`truncate net.calls`);
+      return n;
+    };
+    const r = {};
+    try {
+      // 읽을 수 있었다면: poll은 server + 방금 성공이라 건너뜀(0), safety는 server + 성공 없음이라 Edge(1) — 못 읽으면 반대로 나와야 함
+      await su();
+      await q(`update public.server_routes set mode = 'server' where kind = 'job' and name = 'wake-check'`);
+      await q(`update public.server_heartbeat set last_success_at = now() where job_name = 'wake-check'`);
+      r.pollOk = await count('poll');
+      await q(`update public.server_heartbeat set last_success_at = null where job_name = 'wake-check'`);
+      r.safetyOk = await count('safety');
+      await q(`update public.server_heartbeat set last_success_at = now() where job_name = 'wake-check'`);
+      await q(`alter table public.server_routes rename to server_routes_gone`);
+      r.pollNoRoutes = await count('poll');
+      r.safetyNoRoutes = await count('safety');
+      await q(`alter table public.server_routes_gone rename to server_routes`);
+      await q(`alter table public.server_heartbeat rename to server_heartbeat_gone`);
+      r.pollNoBeat = await count('poll');     // 서버 담당인데 성공 기록을 못 읽음 → edge로 봄 → Edge
+      await q(`alter table public.server_heartbeat_gone rename to server_heartbeat`);
+    } finally {
+      await su();
+      if ((await q(`select to_regclass('public.server_routes_gone') as t`))[0].t) await q(`alter table public.server_routes_gone rename to server_routes`);
+      if ((await q(`select to_regclass('public.server_heartbeat_gone') as t`))[0].t) await q(`alter table public.server_heartbeat_gone rename to server_heartbeat`);
+    }
+    return r.pollOk === 0 && r.safetyOk === 1 && r.pollNoRoutes === 1 && r.safetyNoRoutes === 0 && r.pollNoBeat === 1 ? true : r;
+  });
+});
+
+await check('run_job · get_server_routes 권한: run_job은 service_role만(앱 · anon은 못 부름), get_server_routes는 로그인한 앱 + service_role만(anon X), 둘 다 search_path가 비어 있음', async () => {
+  const [x] = await q(`select
+    has_function_privilege('anon', 'private.run_job(text, text)', 'execute') as run_anon,
+    has_function_privilege('authenticated', 'private.run_job(text, text)', 'execute') as run_auth,
+    has_function_privilege('service_role', 'private.run_job(text, text)', 'execute') as run_svc,
+    has_function_privilege('anon', 'public.get_server_routes()', 'execute') as get_anon,
+    has_function_privilege('authenticated', 'public.get_server_routes()', 'execute') as get_auth,
+    has_function_privilege('service_role', 'public.get_server_routes()', 'execute') as get_svc`);
+  const cfg = await q(`select p.proname, p.prosecdef, p.proconfig from pg_proc p where p.proname in ('run_job', 'get_server_routes')`);
+  await as(A);
+  const appRun = await expectErr(() => q(`select private.run_job('wake-check')`), /permission denied/);
+  return x.run_anon === false && x.run_auth === false && x.run_svc === true && x.get_anon === false && x.get_auth === true && x.get_svc === true
+    && appRun === true && cfg.length === 2 && cfg.every((f) => f.prosecdef && (f.proconfig || []).some((c) => c === 'search_path=""' || c === 'search_path='))
+    ? true : { x, appRun, cfg };
+});
+
+await check('원복 · 다시 적용 SQL(supabase/ops): 원복하면 wake-check · alarm-roll · suggestion-generate가 M1 이전 명령(invoke_edge_function)으로 돌아가고 안전망 cron이 사라짐(voice · 친구 cron은 그대로) · 두 번 실행해도 같음 · 원복한 동안은 표가 server여도 Edge를 부름 · 다시 적용하면 마이그레이션이 만든 cron 목록과 똑같아짐', async () => {
+  const rollback = readFileSync(join(OPS_DIR, 'server-switch-rollback.sql'), 'utf8');
+  const reapply = readFileSync(join(OPS_DIR, 'server-switch-reapply.sql'), 'utf8');
+  const snap = async () => { await su(); return q(`select jobname, schedule, command from cron.job order by jobname`); };
+  const byName = (rows) => Object.fromEntries(rows.map((j) => [j.jobname, `${j.schedule} | ${j.command}`]));
+  const before = await snap();
+  const calls = async (name) => {   // 예약된 명령을 pg_cron처럼 그대로 실행해 Edge가 불렸는지 봄
+    const job = (await snap()).find((j) => j.jobname === name);
+    await q(`truncate net.calls`);
+    await svc();
+    await q(job.command);
+    await su();
+    return (await q(`select count(*)::int as n from net.calls`))[0].n;
+  };
+  return withRouteSetup(async () => {
+    try {
+      await q(`update public.server_routes set mode = 'server' where kind = 'job' and name = 'wake-check'`);
+      await q(`update public.server_heartbeat set last_success_at = now() where job_name = 'wake-check'`);
+      const withM1 = await calls('wake-check');          // M1 적용 중: server + 방금 성공 → 건너뜀
+      await db.exec(rollback);
+      const rolled = await snap();
+      await db.exec(rollback);                            // 두 번째도 오류 없이 같은 결과 (안전망 cron이 이미 없어도)
+      const rolled2 = await snap();
+      const rolledCall = await calls('wake-check');       // 원복 중: 표를 안 보고 Edge를 바로 부름
+      await db.exec(reapply);
+      const re = await snap();
+      await db.exec(reapply);
+      const re2 = await snap();
+      const reCall = await calls('wake-check');           // 다시 적용: 건너뜀
+      const r = byName(rolled);
+      const b = byName(before);
+      const same = ['voice-auto-commit', 'friend-requests-expire', 'friend-records-purge'].every((n) => r[n] === b[n]);
+      return withM1 === 0 && rolledCall === 1 && reCall === 0
+        && rolled.length === 6 && !('suggestion-generate-safety' in r) && same && JSON.stringify(rolled) === JSON.stringify(rolled2)
+        && r['wake-check'] === `*/5 * * * * | select private.invoke_edge_function('wake-check')`
+        && r['alarm-roll'] === `*/5 * * * * | select private.invoke_edge_function('alarm-roll')`
+        && r['suggestion-generate'] === `0 9 * * * | select private.invoke_edge_function('suggestion-generate')`
+        && JSON.stringify(before) === JSON.stringify(re) && JSON.stringify(re) === JSON.stringify(re2)
+        ? true : { withM1, rolledCall, reCall, rolled, rolled2, re, re2 };
+    } finally {
+      await su();
+      await db.exec(reapply);   // 뒤 검사가 M1 상태를 전제하므로 어떤 경우에도 다시 적용된 상태로 둠
+    }
+  });
+});
+
+await check('cron(pg_cron)이 없는 DB에서도 마이그레이션이 적용되고 스위치 표 · run_job이 동작함 (예약은 건너뜀, Vault가 없으면 Edge 호출은 오류 없이 null)', async () => {
+  const bare = new PGlite();
+  try {
+    await bare.exec(AUTH_STUBS);
+    for (const f of readdirSync(MIG_DIR).filter((x) => x.endsWith('.sql')).sort()) await bare.exec(readFileSync(join(MIG_DIR, f), 'utf8'));
+    const [{ n }] = (await bare.query(`select count(*)::int as n from public.server_routes`)).rows;
+    const [{ r }] = (await bare.query(`select private.run_job('wake-check') as r`)).rows;
+    const [{ s }] = (await bare.query(`select private.run_job('suggestion-generate', 'safety') as s`)).rows;
+    return n === 9 && r === null && s === null ? true : { n, r, s };
   } finally {
     await bare.close();
   }
@@ -2545,17 +2850,17 @@ await check('roll_due_series: 묶음마다 가장 늦은 회차 기준 · 다음
 
 // ---- ⑧ 예약 --------------------------------------------------------------
 
-await check('배치 예약: alarm-roll을 5분마다 부름 (pg_cron은 PGlite에 없어 cron.schedule 흉내에 들어간 것을 봄) — 호출은 /functions/v1/alarm-roll로 서비스 키를 실어 POST', async () => {
+await check('배치 예약: alarm-roll을 5분마다 부름 (pg_cron은 PGlite에 없어 cron.schedule 흉내에 들어간 것을 봄) — 표가 edge이면 예약 명령(run_job)이 /functions/v1/alarm-roll로 서비스 키를 실어 POST', async () => {
   const [job] = await q(`select jobname, schedule, command from cron.job where jobname = 'alarm-roll'`);
   await su();
   await q(`insert into vault.decrypted_secrets (name, decrypted_secret) values ('project_url', 'https://abc.supabase.co'), ('service_role_key', 'SECRET-KEY')`);
   await svc();
-  await q(`select private.invoke_edge_function('alarm-roll')`);
+  await q(job.command);   // pg_cron이 하듯 예약된 명령을 그대로 실행
   await su();
   const calls = await q(`select url, headers from net.calls order by id`);
   await q(`delete from vault.decrypted_secrets`);
   await q(`truncate net.calls`);
-  return job && job.schedule === '*/5 * * * *' && job.command === `select private.invoke_edge_function('alarm-roll')`
+  return job && job.schedule === '*/5 * * * *' && job.command === `select private.run_job('alarm-roll')`
     && calls.length === 1 && calls[0].url === 'https://abc.supabase.co/functions/v1/alarm-roll' && calls[0].headers.Authorization === 'Bearer SECRET-KEY'
     ? true : { job, calls };
 });
@@ -2903,8 +3208,9 @@ const mkAppt = async (creator, title, { group = null, series = null, on = null, 
 const RESET_DELETES = ['alarm_events', 'alarm_suggestions', 'alarms', 'appointment_participants', 'appointments', 'conversation_sessions',
                        'daily_journals', 'daily_records', 'friends', 'group_members', 'prepare_ml_verified_profiles', 'profiles', 'sharing_permissions', 'user_edit_logs', 'wake_hides'];
 //   friend_links · rate_limit_events(친구 2장) · groups(남이 있는 그룹은 둠)는 둠, team_members(운영 화면 팀원)도 둠
+//   server_route_users(서버 전환 스위치 canary 대상)는 시험 데이터가 아니라 운영 설정이라 둠
 const RESET_KEEPS = ['ai_calls', 'alarm_proposals', 'friend_links', 'groups', 'push_tickets', 'push_tokens', 'rate_limit_events', 'roll_attempts', 'routines',
-                     'team_members', 'todos', 'user_places', 'user_questions'];
+                     'server_route_users', 'team_members', 'todos', 'user_places', 'user_questions'];
 const MINE = {
   appointments: `select * from public.appointments where creator_id = $1`,
   appointment_participants: `select * from public.appointment_participants where user_id = $1`,
@@ -2934,6 +3240,7 @@ const MINE = {
   friend_links: `select * from public.friend_links where owner_id = $1`,
   rate_limit_events: `select * from public.rate_limit_events where user_id = $1`,
   team_members: `select * from public.team_members where user_id = $1`,
+  server_route_users: `select * from public.server_route_users where user_id = $1`,
 };
 await check('내 시험 데이터 지우기 가드: 사용자 칸(user_id · creator_id · owner_id · requester_id · addressee_id · grantee_id)이 있는 public 표는 모두 지움/둠 목록에 있음 (새 표를 더하면 실패)', async () => {
   await su();
