@@ -797,13 +797,13 @@ isOneToOne: false
                   ]
                 },"wake_scripts": {
                   Row: {
-                    "alarm_id": string,"input_hash": string,"model": string,"scripts": Json,"updated_at": string,"user_id": string
+                    "alarm_id": string,"input_hash": string,"model": string,"scripts": NonNullable<Json>,"updated_at": string,"user_id": string
                   }
                   Insert: {
-                    "alarm_id": string,"input_hash": string,"model": string,"scripts": Json,"updated_at"?: string,"user_id": string
+                    "alarm_id": string,"input_hash": string,"model": string,"scripts": NonNullable<Json>,"updated_at"?: string,"user_id": string
                   }
                   Update: {
-                    "alarm_id"?: string,"input_hash"?: string,"model"?: string,"scripts"?: Json,"updated_at"?: string,"user_id"?: string
+                    "alarm_id"?: string,"input_hash"?: string,"model"?: string,"scripts"?: NonNullable<Json>,"updated_at"?: string,"user_id"?: string
                   }
                   Relationships: [
                     {
