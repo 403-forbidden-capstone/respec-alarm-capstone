@@ -99,6 +99,7 @@ test('입력 데이터: DB 일정 · 준비물(ITEM만) · 다짐 · 전날 기�
       { title: '헬스장', time: '오후 6시' },
     ],
     items: ['노트북'],
+    tasks: ['과제 제출'],
     goals: ['알람 미루지 않고 바로 일어나기'],
     previousDay: { overslept: true, lateByOversleep: true },
     departureTime: '오전 9시 10분',
@@ -153,6 +154,19 @@ test('모델이 지어낸 일정 · 시각 · 준비물 · 전날 경험 · 지�
   assert.equal(texts[2], '일어나. 오늘 오전 10시 팀플 발표, 오후 2시 전공 수업, 오후 6시 헬스장 일정이 있잖아. 노트북, 발표 자료, 운동복도 챙겨야 해. 오늘은 바로 일어나자. 어제 다짐한 "알람 미루지 않고 바로 일어나기", 꼭 지키자.');
   assert.equal(texts[3], '일어나! 오늘 오전 10시 팀플 발표, 오후 2시 전공 수업, 오후 6시 헬스장 일정 있잖아! 노트북, 발표 자료, 운동복까지 챙겨야지! 지금 당장! 어제 다짐한 "알람 미루지 않고 바로 일어나기", 꼭 지키자!');
   assert.equal(texts[4], undefined);
+});
+
+test('4단계 지각 위험은 이 알람이 걸린 일정 (그날 첫 일정이 아니어도), 할 일은 1단계 DB 문장으로', () => {
+  const b = briefInput({ todos: [...briefInput().todos, { title: '과제 제출', type: 'TASK' }] });
+  const x = wakeScriptInput(b, '2026-11-14', kst(14));
+  assert.deepEqual(x.appointments.map((a) => a.thisAlarm ?? false), [false, true, false]);
+  const t = finalizeScripts({ level1: '좋은 아침이야. 과제 제출도 해야지. 일어나자.', level2: 'b', level3: 'c', level4: '빨리 일어나!' }, x);
+  assert.ok(t[4]!.startsWith('야! 지금 안 일어나면 오후 2시 전공 수업 늦는다고! 오전 10시 팀플 발표, 오후 6시 헬스장도 있잖아!'), t[4]!);
+  assert.match(t[1]!, /운동복 잊지 말고 챙기자\. 오늘 할 일은 과제 제출\./);
+  assert.equal((t[1]!.match(/과제 제출/g) ?? []).length, 1); // 모델이 말한 할 일 문장은 버리고 DB 문장 하나만
+  assert.doesNotMatch(t[2]! + t[3]! + t[4]!, /과제 제출/);
+  // 알람 일정을 모르면(일정 없는 알람 · 이미 출발) 그날 첫 일정
+  assert.ok(finalizeScripts({ level1: 'a', level2: 'b', level3: 'c', level4: '빨리 일어나!' }, wakeScriptInput(b, '2026-11-14'))[4]!.startsWith('야! 지금 안 일어나면 오전 10시 팀플 발표 늦는다고!'));
 });
 
 test('다짐 중복 방지: 모델이 같은 다짐을 두 번 말하면 한 번만, 다른 다짐만 빠졌으면 그것만 덧붙임', () => {
@@ -255,6 +269,7 @@ test('runBriefing: 기상 대본이 clips 1~4단계에 들어가고 3 · 4단계
   assert.equal(out.script, 'MADE');
   assert.deepEqual(seen[0].goals, ['알람 미루지 않고 바로 일어나기']); // 짐작(inferred)은 안 씀
   assert.equal(seen[0].date, '2026-11-14');
+  assert.equal(seen[0].appointments[0].thisAlarm, true); // 이 알람의 일정(10시) 표시
   assert.deepEqual(out.clips.map((c) => c.level), [1, 2, 3, 4]);
   assert.ok(out.clips[0].text.startsWith('좋은 아침이야. 오늘은 오전 10시 팀플 발표,'), out.clips[0].text);
   assert.doesNotMatch(out.clips[1].text, /!/); // 2단계 "해야 해!" → 마침표

@@ -92,8 +92,9 @@ export async function runBriefing(src: BriefingSource, have: ReadonlySet<string>
     timeZone: src.timeZone,
   };
   // 기상만: Gemini 한 번으로 1~4단계 대본 (캐시 · 한도 · 실패는 wakeScriptsFor가 처리, 실패면 템플릿)
-  const script = wake && gemini.script ? await gemini.script(wakeScriptInput(input, days.day)) : null;
-  const texts = script?.scripts ? finalizeScripts(script.scripts, wakeScriptInput(input, days.day)) : null;
+  const scriptInput = wake && gemini.script ? wakeScriptInput(input, days.day, src.done ? null : src.appointmentAtMs) : null;
+  const script = scriptInput && gemini.script ? await gemini.script(scriptInput) : null;
+  const texts = scriptInput && script?.scripts ? finalizeScripts(script.scripts, scriptInput) : null;
   const clips = briefingClips(rule, profile, input, model, texts);
   const out: BriefingOut = { enabled: true, rule, clips, audio: [], gemini: 'NOT_NEEDED', ...(script ? { script: script.status } : {}) };
 

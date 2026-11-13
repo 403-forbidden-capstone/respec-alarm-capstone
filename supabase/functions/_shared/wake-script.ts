@@ -15,8 +15,8 @@ export const WAKE_SCRIPT_PROMPT_ID = 'WAKE_SCRIPT';
 export const WAKE_SCRIPT_PROMPT_VERSION = 'v1';
 // 사용자 하루 생성 상한 — 일정 · 준비물을 자주 고쳐도 Gemini를 계속 부르지 않게 (넘으면 템플릿, 작성자 판단)
 export const WAKE_SCRIPT_USER_PER_DAY = 6;
-// 대본 4개 한 번 — Flash-Lite 정상 응답 1.4~4.6초(llm.ts 11/12 실측)보다 넉넉히. 앱 alarm-briefing 제한 90초 안에 TTS 두 번(30초씩)과 같이 들어감
-export const WAKE_SCRIPT_TIMEOUT_MS = 20_000;
+// 대본 4개 한 번 — Flash-Lite 실측 1.9~4.6초(11/13 기상 대본 3회)보다 넉넉히. 앱 alarm-briefing 제한 90초 안에 TTS 두 번(30초씩) + DB 조회와 같이 들어가게 15초
+export const WAKE_SCRIPT_TIMEOUT_MS = 15_000;
 const SCRIPT_MAX_CHARS = 800;
 
 export const WAKE_SCRIPT_SYSTEM = `너는 사용자의 생활 습관 개선과 정시 기상을 돕는 개인화 AI 기상 알람 비서다.
@@ -130,23 +130,30 @@ export type WakeScripts = { level1: string; level2: string; level3: string; leve
 export type WakeScriptInput = {
   date: string;
   timezone: string;
-  appointments: { title: string; time: string; importance?: 'HIGH' }[];
+  appointments: { title: string; time: string; importance?: 'HIGH'; thisAlarm?: true }[]; // thisAlarm = 이 알람이 걸린 일정 (4단계 지각 위험의 대상)
   items: string[];
+  tasks: string[]; // 오늘 할 일 — 1단계 DB 문장으로만 안내 (템플릿과 같게)
   goals: string[];
   previousDay?: { overslept?: true; lateByOversleep?: true; snoozeRepeat?: true };
   departureTime?: string;
 };
 
-/** 브리핑 입력 → 대본 입력. 사용자가 개인화를 끄면 memo가 null이라 goals · previousDay가 빠짐 */
-export function wakeScriptInput(input: BriefingInput, date: string): WakeScriptInput {
+/** 브리핑 입력 → 대본 입력. 사용자가 개인화를 끄면 memo가 null이라 goals · previousDay가 빠짐. alarmAtMs = 이 알람이 걸린 일정 시각 */
+export function wakeScriptInput(input: BriefingInput, date: string, alarmAtMs: number | null = null): WakeScriptInput {
   const tz = input.timeZone;
   const m = input.memo;
   const prev = m ? { ...(m.overslept ? { overslept: true as const } : {}), ...(m.lateByOversleep ? { lateByOversleep: true as const } : {}), ...(m.snoozeRepeat ? { snoozeRepeat: true as const } : {}) } : {};
   return {
     date,
     timezone: tz,
-    appointments: input.appointments.map((a) => ({ title: a.title.trim(), time: formatKoSpokenTime(new Date(a.atMs), tz), ...(a.importance === 'HIGH' ? { importance: 'HIGH' as const } : {}) })),
+    appointments: input.appointments.map((a) => ({
+      title: a.title.trim(),
+      time: formatKoSpokenTime(new Date(a.atMs), tz),
+      ...(a.importance === 'HIGH' ? { importance: 'HIGH' as const } : {}),
+      ...(alarmAtMs != null && a.atMs === alarmAtMs ? { thisAlarm: true as const } : {}),
+    })),
     items: input.todos.filter((t) => t.type === 'ITEM').map((t) => t.title.trim()).filter(Boolean),
+    tasks: input.todos.filter((t) => t.type === 'TASK').map((t) => t.title.trim()).filter(Boolean),
     goals: m?.goals ?? [],
     ...(Object.keys(prev).length ? { previousDay: prev } : {}),
     ...(input.departAtMs != null ? { departureTime: formatKoSpokenTime(new Date(input.departAtMs), tz) } : {}),
@@ -215,7 +222,7 @@ const LATE_CLAIM = /늦는다|늦어|늦겠|늦을/;
 function usableSentence(sentence: string, level: UrgencyLevel, x: WakeScriptInput): boolean {
   const t = norm(sentence);
   if (TIME_WORD.test(sentence) || FACT_WORD.test(sentence)) return false;
-  if (x.appointments.some((a) => t.includes(norm(a.title))) || x.items.some((i) => t.includes(norm(i)))) return false;
+  if ([...x.appointments.map((a) => a.title), ...x.items, ...x.tasks].some((v) => t.includes(norm(v)))) return false;
   const prev = x.previousDay ?? {};
   if (!prev.overslept && !prev.lateByOversleep && /늦잠|지각했|지각한/.test(sentence)) return false;
   if (!prev.snoozeRepeat && /미뤘|몇\s*번/.test(sentence)) return false;
@@ -225,13 +232,16 @@ function usableSentence(sentence: string, level: UrgencyLevel, x: WakeScriptInpu
 
 /** 오늘 일정 · 준비물 · 출발 시각 안내 — DB 값으로만, 단계 말투에 맞춰 (3 · 4단계만 느낌표) */
 export function factSentences(level: UrgencyLevel, x: WakeScriptInput): string[] {
-  const appts = x.appointments.map((a) => `${a.time} ${a.title}`);
+  const line = (a: WakeScriptInput['appointments'][number]) => `${a.time} ${a.title}`;
+  const appts = x.appointments.map(line);
   const items = joined(x.items);
   const depart = x.departureTime ? `${x.departureTime}에는 나가야 해${level >= 3 ? '!' : '.'}` : null;
   if (level === 4) {
-    const [first, ...rest] = appts;
+    // 4단계는 이 알람이 걸린 일정의 여유가 0분 이하일 때 울림 → 그 일정을 먼저 (모르면 그날 첫 일정)
+    const target = x.appointments.find((a) => a.thisAlarm) ?? x.appointments[0];
+    const rest = x.appointments.filter((a) => a !== target).map(line);
     return [
-      first ? `야! 지금 안 일어나면 ${first} 늦는다고!` : '야! 지금 안 일어나면 늦는다고!',
+      target ? `야! 지금 안 일어나면 ${line(target)} 늦는다고!` : '야! 지금 안 일어나면 늦는다고!',
       rest.length ? `${joined(rest)}도 있잖아!` : null,
       items ? `${items} 챙겨!` : null,
       depart,
@@ -241,7 +251,8 @@ export function factSentences(level: UrgencyLevel, x: WakeScriptInput): string[]
     ? (level === 3 ? '오늘은 등록된 일정은 없어!' : '오늘은 등록된 일정이 없어.')
     : level === 1 ? `오늘은 ${joined(appts)} 일정이 있어.` : level === 2 ? `오늘 ${joined(appts)} 일정이 있잖아.` : `오늘 ${joined(appts)} 일정 있잖아!`;
   const item = !items ? null : level === 1 ? `${items} 잊지 말고 챙기자.` : level === 2 ? `${items}도 챙겨야 해.` : `${items}까지 챙겨야지!`;
-  return [schedule, item, depart].filter((s): s is string => s != null);
+  const task = level === 1 && x.tasks.length ? `오늘 할 일은 ${joined(x.tasks)}.` : null;
+  return [schedule, item, task, depart].filter((s): s is string => s != null);
 }
 
 /**
