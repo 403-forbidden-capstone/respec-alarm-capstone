@@ -1,4 +1,4 @@
-// 이슈 · 브랜치 · PR 이벤트를 조직 보드(Re:Spec Alarm 보드)의 상태와 필드에 반영한다.
+// 이슈 · PR 이벤트를 조직 보드(Re:Spec Alarm 보드)의 상태와 필드에 반영한다.
 // .github/workflows/project-sync.yml 에서 actions/github-script 로 불러 쓴다.
 
 const OWNER = '403-forbidden-capstone';
@@ -130,7 +130,14 @@ async function onPullRequest(sync, payload, { github, context, core, board, prCl
   const human = pr.user?.type === 'User';
 
   // 리뷰로 옮기기 전에 진행 중을 먼저 거쳐 둠 — 아래에서 닫는 이슈면 리뷰로, 아니면(관련 이슈) 진행 중으로 남음
-  if (action === 'opened' && human) await startBranchIssue(sync, pr.head?.ref ?? '', pr.user, { github, context, core });
+  // 예전엔 따로 돌던 실행이라, 여기서 실패해도(담당자 지정 422 등) 아래 PR 처리는 그대로 함
+  if (action === 'opened' && human) {
+    try {
+      await startBranchIssue(sync, pr.head?.ref ?? '', pr.user, { github, context, core });
+    } catch (error) {
+      core.warning(`브랜치 이슈를 진행 중으로 옮기지 못했어요: ${error.message}`);
+    }
+  }
 
   let status = null;
   if (opening && !pr.draft) status = STATUS.review;
