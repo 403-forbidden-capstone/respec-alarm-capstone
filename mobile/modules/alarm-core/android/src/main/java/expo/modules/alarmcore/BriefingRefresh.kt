@@ -51,14 +51,17 @@ object BriefingRefresh {
     runCatching {
       val alarm = AlarmStorage.get(context, alarmId)
       if (alarm == null || alarm.type != "WAKE") return unset(context, alarmId)
-      val stored = prefs(context).getLong(alarmId, 0L).takeIf { it > 0 }
+      // 걸어 둔 시각은 그때의 알람 시각과 같이 둠 — 알람 시각이 바뀌었으면 버림 (예전 날짜에 헛도는 갱신이 없게)
+      val stored = prefs(context).getLong(alarmId, 0L).takeIf { it > 0 && prefs(context).getLong(forKey(alarmId), 0L) == alarm.atMillis }
       val pick = BriefingRules.pickRefresh(listOf(stored, at, BriefingRules.refreshSlot(alarm.atMillis)), System.currentTimeMillis(), BriefingRules.refreshDeadline(alarm.atMillis))
         ?: return unset(context, alarmId)
       if (!AlarmScheduler.canScheduleExactAlarms(context)) return unset(context, alarmId)
       context.getSystemService(AlarmManager::class.java).setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, pick, operation(context, alarmId))
-      prefs(context).edit().putLong(alarmId, pick).commit()
+      prefs(context).edit().putLong(alarmId, pick).putLong(forKey(alarmId), alarm.atMillis).commit()
     }
   }
+
+  private fun forKey(alarmId: String) = "$alarmId.alarmAt"
 
   /** 걸어 둔 갱신 시각 · 대기 중인 작업을 지움 (알람 삭제 · 해제 · 로그아웃 cancelAll — AlarmStorage.remove) */
   fun cancel(context: Context, alarmId: String) {
@@ -69,7 +72,7 @@ object BriefingRefresh {
   // 갱신 시각만 지움 (도는 작업은 그대로 — 작업 자신이 offer를 부르므로 여기서 작업을 지우면 안 됨)
   private fun unset(context: Context, alarmId: String) {
     runCatching { context.getSystemService(AlarmManager::class.java).cancel(operation(context, alarmId)) }
-    prefs(context).edit().remove(alarmId).commit()
+    prefs(context).edit().remove(alarmId).remove(forKey(alarmId)).commit()
   }
 
   fun workName(alarmId: String) = "briefing_refresh_$alarmId"
@@ -80,7 +83,7 @@ object BriefingRefresh {
    * 네트워크 연결 조건 — 인터넷이 없으면 생길 때까지 기다림 (작업이 시작될 때 마감을 다시 봄)
    */
   fun enqueue(context: Context, alarmId: String) {
-    prefs(context).edit().remove(alarmId).commit()
+    prefs(context).edit().remove(alarmId).remove(forKey(alarmId)).commit()
     val request = OneTimeWorkRequestBuilder<BriefingRefreshWorker>()
       .setInputData(workDataOf(EXTRA_ALARM_ID to alarmId))
       .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())

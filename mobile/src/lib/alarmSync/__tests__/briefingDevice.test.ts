@@ -71,6 +71,14 @@ describe('ensureBriefingDevice', () => {
     expect(t.key()?.userId).toBe('u1');
   });
 
+  it('계정 전환 직후 앞 계정 발급이 아직 돌면 그 결과를 받지 않고, 끝난 뒤 새 계정 키를 받음 · 같은 계정은 한 번만', async () => {
+    const t = deps();
+    const [a1, a2, b] = await Promise.all([ensureBriefingDevice('u1', NOW, t.d), ensureBriefingDevice('u1', NOW, t.d), ensureBriefingDevice('u2', NOW, t.d)]);
+    expect([a1, a2, b]).toEqual(['ISSUED', 'ISSUED', 'ISSUED']);
+    expect(t.issued).toEqual(['new-device', 'new-device']); // u1 한 번 + u2 한 번
+    expect(t.key()?.userId).toBe('u2');
+  });
+
   it('예전 APK · 서버 주소 없음이면 아무것도 안 함 · 발급이 실패하면 던지고 저장된 키는 그대로', async () => {
     const old = deps(null, { supported: false });
     expect(await ensureBriefingDevice('u1', NOW, old.d)).toBe('SKIPPED');

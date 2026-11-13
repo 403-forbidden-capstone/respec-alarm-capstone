@@ -93,6 +93,7 @@ object BriefingRules {
 
   // --- 백그라운드 브리핑 갱신 (#515) — BriefingRefresh · BriefingRefreshWorker가 씀. 서버 쪽은 supabase/functions/_shared/briefing-refresh.ts ---
   // 전날 대화 자동 정리(서버 pg_cron)는 KST 새벽 4시 기준 — 그 10분 뒤에 받으러 감 (COMMIT_LAG_MS와 같음). KST는 서머타임이 없어 +9시간 고정으로 셈
+  // 04:10은 "첫 시도" 시각일 뿐 — 정리가 끝났는지는 서버가 보고, 아직이면 refresh_at으로 다음 시각을 정함. 자동 정리 시각 · 주기를 바꾸면 여기와 서버 COMMIT_LAG_MS를 같이
   private const val HOUR = 3_600_000L
   private const val KST_OFFSET = 9 * HOUR
   const val REFRESH_SLOT_OFFSET = 4 * HOUR + 10 * 60_000L

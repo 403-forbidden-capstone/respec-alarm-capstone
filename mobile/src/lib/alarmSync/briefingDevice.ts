@@ -36,15 +36,16 @@ const defaultDeps: BriefingDeviceDeps = {
 
 export type DeviceResult = 'KEPT' | 'ISSUED' | 'SKIPPED';
 
-let inFlight: Promise<DeviceResult> | null = null;
+let inFlight: { userId: string; run: Promise<DeviceResult> } | null = null;
 
-/** 이 계정의 기기 키가 폰에 있게 함. 이미 도는 중이면 그 결과를 같이 기다림 */
+/** 이 계정의 기기 키가 폰에 있게 함. 같은 계정으로 이미 도는 중이면 그 결과를 같이 기다리고, 다른 계정(계정 전환 직후)이면 앞 것이 끝난 뒤 이 계정으로 한 번 더 */
 export function ensureBriefingDevice(userId: string, nowMs: number = Date.now(), deps: BriefingDeviceDeps = defaultDeps): Promise<DeviceResult> {
-  if (inFlight) return inFlight;
-  const run = ensureOnce(userId, nowMs, deps).finally(() => {
-    if (inFlight === run) inFlight = null;
+  if (inFlight?.userId === userId) return inFlight.run;
+  const before = inFlight?.run.catch(() => undefined) ?? Promise.resolve();
+  const run = before.then(() => ensureOnce(userId, nowMs, deps)).finally(() => {
+    if (inFlight?.run === run) inFlight = null;
   });
-  inFlight = run;
+  inFlight = { userId, run };
   return run;
 }
 

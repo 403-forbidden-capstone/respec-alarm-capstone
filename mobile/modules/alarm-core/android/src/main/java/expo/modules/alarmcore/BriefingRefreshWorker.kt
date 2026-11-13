@@ -42,6 +42,9 @@ class BriefingRefreshWorker(context: Context, params: WorkerParameters) : Worker
       null to null
     }
     val deadline = BriefingRules.refreshDeadline(alarm.atMillis)
+    // 응답을 기다리는 사이 알람이 지워졌거나(삭제 · 끔 · 로그아웃) 작업이 취소됐으면 쓰지 않음 — 지운 알람 폴더에 브리핑이 다시 생기지 않게
+    val current = AlarmStorage.get(applicationContext, id)
+    if (isStopped || current == null || current.atMillis != alarm.atMillis) return Result.success()
     return when (BriefingRules.refreshOutcome(status)) {
       BriefingRules.RefreshOutcome.SAVE -> {
         val text = body ?: return retryOrStop(now, deadline)
