@@ -5,12 +5,15 @@ import { AppState, BackHandler, Platform, Pressable, StyleSheet, View } from 're
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ScreenId, Text, toast } from '@/components/ui';
+import { useAuth } from '@/features/auth/AuthProvider';
 import { ackRing, dismissRing, getRing, snoozeRing, startRing, stopRing } from '@/features/alarm/api';
 import { VoiceWave } from '@/features/alarm/components/VoiceWave';
 import { useNextRing } from '@/features/alarm/hooks/useNextRing';
+import { ringExit, type RingExit } from '@/features/alarm/ringExit';
 import { isPreviewAlarmId } from '@/features/alarm/ringPreview';
 import { snoozeView } from '@/features/alarm/snooze';
 import type { Appointment, RingInfo, RingKind } from '@/features/alarm/types';
+import { isDevAlarmId } from '@/lib/alarmSync/devAlarm';
 import { formatTime, timeParts } from '@/lib/format';
 import { isMock } from '@/lib/mode';
 import { backOrHome } from '@/lib/nav';
@@ -63,6 +66,17 @@ export default function RingScreen() {
   const [minutes, setMinutes] = useState<number>(SNOOZE_MINUTES_OPTIONS[0]);
   const [done, setDone] = useState(false); // 준비 · 출발 알람을 끈 뒤 — 안내를 화면에 남김
   const handled = useRef(false); // 두 번 눌러도 해제 · 미루기는 한 번만 기록
+  const [finished, setFinished] = useState(false); // 해제 · 미루기를 마침 — 뒤로 가기를 다시 풂 (이동이 막혀도 화면에 갇히지 않게)
+  const auth = useAuth();
+  // 끈 뒤 갈 곳 — 로그인 전 · 시험 알람이면 홈 · 기상 확인이 막혀 있어 다른 곳으로 (features/alarm/ringExit.ts)
+  const exitFor = (action: 'dismiss' | 'snooze' | 'done', ringKind: RingKind): RingExit =>
+    ringExit(ringKind, action, {
+      devAlarm: isDevAlarmId(alarmId),
+      enabled: auth.enabled,
+      signedIn: auth.session != null,
+      needsOnboarding: auth.needsOnboarding,
+      needsReconsent: auth.needsReconsent,
+    });
 
   // 같은 /ring 화면에 다른 알람의 딥링크가 와서 주소의 alarm만 바뀌면(앞 알람이 낡은 채 남은 경우) 다시 읽음 (#332 로컬 리뷰)
   const lastAlarmId = useRef(alarmId);
@@ -70,11 +84,12 @@ export default function RingScreen() {
     if (lastAlarmId.current === alarmId) return;
     lastAlarmId.current = alarmId;
     handled.current = false;
+    setFinished(false);
     void reload();
   }, [alarmId, reload]);
 
   // 울리는 동안 안드로이드 뒤로 가기는 막음 — 해제 · 미루기 없이 나가면 알람이 그냥 사라짐 (웹은 해당 없음)
-  const ringing = data != null && !done;
+  const ringing = data != null && !done && !finished;
   useEffect(() => {
     if (Platform.OS === 'web' || !ringing) return;
     const sub = BackHandler.addEventListener('hardwareBackPress', () => true);
@@ -97,10 +112,10 @@ export default function RingScreen() {
   const shownId = data?.alarmId ?? null;
   useEffect(() => {
     if (!shownId || isPreviewAlarmId(shownId)) return; // 웹 미리보기는 길잡이 화면이 없음
-    ackRing();
+    ackRing(shownId);
     if (Platform.OS === 'web') return;
     const sub = AppState.addEventListener('change', (state) => {
-      if (state === 'active') ackRing();
+      if (state === 'active') ackRing(shownId);
     });
     return () => sub.remove();
   }, [shownId]);
@@ -132,8 +147,10 @@ export default function RingScreen() {
       return;
     }
     toast(`${minutes}분 뒤 다시 울려요`);
+    setFinished(true);
     // 해제처럼 스택을 홈으로 정리 — 울림 화면 밑에 이전 해제의 기상 확인(H08) 등이 남아 있으면 backOrHome이 그리로 돌아감 (L8 3차)
-    router.dismissTo('/');
+    // 로그인 전 · 시험 알람이면 홈이 막혀 있어 로그인 · 알람 테스트 화면으로 (ringExit)
+    leaveRing(exitFor('snooze', data.kind));
   }
 
   // 기상 알람을 끄면 기상 확인(H08)으로, 준비 · 출발은 결과 안내 화면
@@ -149,10 +166,11 @@ export default function RingScreen() {
       toast('알람을 끄지 못했어요. 다시 눌러 주세요');
       return;
     }
-    if (data.kind === 'WAKE') {
-      // 목업 A.dismiss처럼 [홈, 기상 확인] — 기상 확인에서 뒤로 가면 홈
-      router.dismissTo('/');
-      router.push({ pathname: '/wake', params: { alarm: data.alarmId } });
+    setFinished(true);
+    const exit = exitFor('dismiss', data.kind);
+    if (data.kind === 'WAKE' || exit.href !== '/') {
+      // 목업 A.dismiss처럼 [홈, 기상 확인] — 기상 확인에서 뒤로 가면 홈. 로그인 전 · 시험 알람은 열 수 있는 화면으로 (ringExit)
+      leaveRing(exit, data.alarmId);
       return;
     }
     // 준비 · 출발은 잠깐 뜨는 토스트 대신 화면에 안내를 남기고 "확인"으로 홈에
@@ -163,7 +181,7 @@ export default function RingScreen() {
     <SafeAreaView style={[styles.screen, { backgroundColor: BACKGROUND[kind] }]} edges={['top', 'bottom']}>
       <StatusBar style="light" />
       {data && done && data.kind !== 'WAKE' ? (
-        <DonePanel kind={data.kind} appointment={data.appointment} next={preview ? data.alarmId : null} />
+        <DonePanel kind={data.kind} appointment={data.appointment} next={preview ? data.alarmId : null} onClose={() => leaveRing(exitFor('done', data.kind))} />
       ) : data ? (
         <View style={styles.body} accessibilityRole="alert" accessibilityLabel={data.notice ?? HEAD[kind]}>
           <View style={styles.top}>
@@ -293,7 +311,7 @@ export default function RingScreen() {
           <Text variant="body" tone="inverse" align="center">
             울릴 알람을 찾을 수 없어요
           </Text>
-          <Pressable onPress={backOrHome} accessibilityRole="button" style={[styles.button, styles.closeButton]}>
+          <Pressable onPress={() => leaveRing(exitFor('done', kind))} accessibilityRole="button" style={[styles.button, styles.closeButton]}>
             <Text variant="button" style={{ color: BACKGROUND[kind] }}>
               닫기
             </Text>
@@ -304,9 +322,24 @@ export default function RingScreen() {
   );
 }
 
+// 울림 화면을 떠남 — 홈이면 스택을 홈까지 걷어 냄(+ 기상 확인), 그 밖(로그인 · 온보딩 · 알람 테스트)은 지금 화면을 바꿈
+//   알람 테스트는 보통 울림 화면 바로 밑에 있어 뒤로 감 (바꾸면 같은 화면이 두 번 쌓임)
+function leaveRing(exit: RingExit, wakeAlarmId?: string) {
+  if (exit.href === '/') {
+    router.dismissTo('/');
+    if (exit.openWake && wakeAlarmId) router.push({ pathname: '/wake', params: { alarm: wakeAlarmId } });
+    return;
+  }
+  if (exit.href === '/dev/alarm-test' && router.canGoBack()) {
+    router.back();
+    return;
+  }
+  router.replace(exit.href);
+}
+
 // 준비 · 출발 알람을 끈 뒤 안내 — 준비물 체크(준비) · 이동 시간과 도착 목표(출발), "확인"을 누르면 홈
 // next = 웹 미리보기에서 이어 볼 알람의 기준(지금 끈 알람 id) — 있으면 [다음 알람 울려 보기]
-function DonePanel({ kind, appointment: a, next: from }: { kind: Exclude<RingKind, 'WAKE'>; appointment: Appointment; next: string | null }) {
+function DonePanel({ kind, appointment: a, next: from, onClose }: { kind: Exclude<RingKind, 'WAKE'>; appointment: Appointment; next: string | null; onClose: () => void }) {
   const [checked, setChecked] = useState<string[]>([]);
   const next = useNextRing(from);
   const arrive = a.alarms.find((x) => x.kind === 'ARRIVE');
@@ -384,7 +417,7 @@ function DonePanel({ kind, appointment: a, next: from }: { kind: Exclude<RingKin
             </Text>
           </Pressable>
         ) : null}
-        <Pressable onPress={() => router.dismissTo('/')} accessibilityRole="button" style={[styles.button, styles.closeButton]}>
+        <Pressable onPress={onClose} accessibilityRole="button" style={[styles.button, styles.closeButton]}>
           <Text variant="button" style={{ color: colors.ringWake }}>
             확인
           </Text>

@@ -1,6 +1,6 @@
 import { describe, expect, it } from '@jest/globals';
 
-import { modePolicy, resolveMode, showDevLogin, showScreenIds, type ModeEnv } from '../modePolicy';
+import { appVariantOf, modePolicy, resolveMode, showDevLogin, showScreenIds, type ModeEnv } from '../modePolicy';
 
 const env = (patch: Partial<ModeEnv>): ModeEnv => ({ web: false, dev: false, configured: true, ready: true, ...patch });
 
@@ -61,6 +61,23 @@ describe('데이터 모드 규칙 (modePolicy)', () => {
     expect(showDevLogin(env({}))).toBe(false);
     expect(showDevLogin(env({ web: true, configured: false }))).toBe(false);
     expect(showDevLogin(env({ web: true, ready: false }))).toBe(false);
+  });
+
+  it('개발자용 배포 APK는 출시형(실데이터 고정)이어도 데모 로그인이 보임 · 실배포 APK는 안 보임', () => {
+    expect(showDevLogin(env({ devApk: true }))).toBe(true);
+    expect(modePolicy(env({ devApk: true })).locked).toBe(true); // 가짜 모드로는 못 바꿈 — 로그인만 쉬워짐
+    expect(showDevLogin(env({ devApk: false }))).toBe(false);
+    expect(showDevLogin(env({ devApk: true, configured: false }))).toBe(false);
+  });
+});
+
+describe('빌드 종류 (appVariantOf)', () => {
+  it("'release'만 실배포, 비었거나 다른 값은 개발자용", () => {
+    expect(appVariantOf('release')).toBe('release');
+    expect(appVariantOf(' release ')).toBe('release');
+    expect(appVariantOf('dev')).toBe('dev');
+    expect(appVariantOf(undefined)).toBe('dev');
+    expect(appVariantOf('')).toBe('dev');
   });
 });
 

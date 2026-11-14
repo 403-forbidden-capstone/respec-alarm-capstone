@@ -53,6 +53,7 @@ describe('데이터 모드', () => {
   });
   afterEach(() => {
     g.__DEV__ = DEV;
+    delete process.env.EXPO_PUBLIC_APP_VARIANT;
   });
 
   it('Supabase가 연결 안 됐으면 가짜 모드이고 실데이터로 못 바꿈', async () => {
@@ -122,6 +123,7 @@ describe('데이터 모드', () => {
   });
   it('폰 출시용 빌드(__DEV__ false)는 실데이터 고정 — 저장값을 읽지 않고 가짜로 못 바꿈', async () => {
     g.__DEV__ = false;
+    process.env.EXPO_PUBLIC_APP_VARIANT = 'release'; // 실배포 APK — 데모 로그인 없음
     mockConfigured = true;
     mockStore.set('respec.dataMode', 'mock');
     const { mode, clock } = load();
@@ -135,6 +137,17 @@ describe('데이터 모드', () => {
     expect(mode.setMode('mock')).toBe('real');
     expect(mockStorage.setItem).not.toHaveBeenCalled();
     expect(Math.abs(clock.now().getTime() - Date.now())).toBeLessThan(5_000);
+  });
+
+  it('개발자용 배포 APK(__DEV__ false · 빌드 종류 dev)는 실데이터 고정 그대로, 데모 로그인만 보임', async () => {
+    g.__DEV__ = false;
+    process.env.EXPO_PUBLIC_APP_VARIANT = 'dev';
+    mockConfigured = true;
+    const { mode } = load();
+    expect(mode.appVariant).toBe('dev');
+    expect(mode.modeLocked).toBe(true);
+    expect(mode.devLoginVisible).toBe(true);
+    expect(mode.setMode('mock')).toBe('real');
   });
 
   it('폰 출시용 빌드인데 Supabase 값이 없으면 설정 오류 — 가짜로 돌지 않음', async () => {
