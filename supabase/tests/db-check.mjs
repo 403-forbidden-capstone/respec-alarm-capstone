@@ -171,16 +171,18 @@ const MEETING = ['decision_comments', 'decision_votes', 'decision_states'];
 //   reports = 친구 4장 (신고, 넣기는 DB 함수로만 · 읽기는 운영 화면 몫) — friend/ch04.mjs에서 따로 확인
 //   push_sends = 친구 8장 (깨우기 · 미확인 친구 알림 보낸 기록, DB 함수로만) — friend/ch08.mjs에서 따로 확인
 //   team_members = 친구 4장 꼬리 (운영 화면을 열 수 있는 팀원 목록, 추가는 서버 키로) — friend/ch04.mjs에서 따로 확인
+//   wake_scripts = 알람 기상 대본 캐시 (alarm-briefing만 서버 키로 읽고 씀) — 아래 "기상 대본 캐시"에서 따로 확인
+//   briefing_devices = 백그라운드 브리핑 갱신용 기기 키 해시 (#515, briefing-device · alarm-briefing-device만 서버 키로) — 아래 "기기 키"에서 따로 확인
 //   server_routes · server_route_users · server_heartbeat = 서버 전환 스위치(M1, 앱은 get_server_routes()로만 읽음) — 아래 "서버 전환 스위치"에서 따로 확인
-const SERVER_ONLY = ['roll_attempts', 'rate_limit_events', 'friend_links', 'reports', 'push_tickets', 'push_sends', 'team_members', 'prepare_ml_verified_profiles',
+const SERVER_ONLY = ['roll_attempts', 'rate_limit_events', 'friend_links', 'reports', 'push_tickets', 'push_sends', 'team_members', 'prepare_ml_verified_profiles', 'wake_scripts', 'briefing_devices',
                      'server_routes', 'server_route_users', 'server_heartbeat'];
 
-await check('모든 public 테이블(앱 34개 — 서버 전용 11개 포함 + 회의 도구 3개)에 RLS가 켜져 있음', async () => {
+await check('모든 public 테이블(앱 36개 — 서버 전용 13개 포함 + 회의 도구 3개)에 RLS가 켜져 있음', async () => {
   const r = await q(`select c.relname, c.relrowsecurity from pg_class c join pg_namespace n on n.oid = c.relnamespace
                      where n.nspname = 'public' and c.relkind = 'r' order by 1`);
   const off = r.filter((x) => !x.relrowsecurity).map((x) => x.relname);
   const app = r.filter((x) => !MEETING.includes(x.relname)).length;
-  return app === 34 && r.length === 37 && off.length === 0 ? true : { count: r.length, app, off };
+  return app === 36 && r.length === 39 && off.length === 0 ? true : { count: r.length, app, off };
 });
 
 await check('검증된 ML 프로필: RLS 켜짐, 사용자 접근 차단, 서비스 역할만 접근 허용', async () => {
@@ -196,6 +198,39 @@ await check('검증된 ML 프로필: RLS 켜짐, 사용자 접근 차단, 서비
   const x = r[0];
   return x.rls === true && !x.anon_read && !x.client_read && !x.client_insert &&
     !x.client_update && !x.client_delete && x.server_read && x.server_insert ? true : x;
+});
+
+await check('기상 대본 캐시(wake_scripts): RLS 켜짐, 앱(anon · authenticated)은 못 읽고 못 씀, 서비스 역할만, 알람을 지우면 같이 지워짐 · ai_calls에 AW 지점', async () => {
+  const [x] = await q(`select
+    (select relrowsecurity from pg_class where oid='public.wake_scripts'::regclass) as rls,
+    has_table_privilege('anon', 'public.wake_scripts', 'select') as anon_read,
+    has_table_privilege('authenticated', 'public.wake_scripts', 'select') as client_read,
+    has_table_privilege('authenticated', 'public.wake_scripts', 'insert') as client_insert,
+    has_table_privilege('authenticated', 'public.wake_scripts', 'update') as client_update,
+    has_table_privilege('service_role', 'public.wake_scripts', 'select') as server_read,
+    has_table_privilege('service_role', 'public.wake_scripts', 'insert') as server_insert,
+    (select confdeltype from pg_constraint where conname = 'wake_scripts_alarm_id_fkey') as on_delete,
+    (select pg_get_constraintdef(oid) from pg_constraint where conname = 'ai_calls_point_check') as point_check`);
+  return x.rls === true && !x.anon_read && !x.client_read && !x.client_insert && !x.client_update && x.server_read && x.server_insert
+    && x.on_delete === 'c' && /'AW'/.test(x.point_check) && /'AV'/.test(x.point_check) && /'LV'/.test(x.point_check) ? true : x;
+});
+
+await check('기기 키(briefing_devices): RLS 켜짐, 앱(anon · authenticated)은 못 읽고 못 씀, 서비스 역할만, 계정(profiles)을 지우면 같이 지워짐, 해시 모양만 · 해시 겹침 없음', async () => {
+  const [x] = await q(`select
+    (select relrowsecurity from pg_class where oid='public.briefing_devices'::regclass) as rls,
+    has_table_privilege('anon', 'public.briefing_devices', 'select') as anon_read,
+    has_table_privilege('authenticated', 'public.briefing_devices', 'select') as client_read,
+    has_table_privilege('authenticated', 'public.briefing_devices', 'insert') as client_insert,
+    has_table_privilege('authenticated', 'public.briefing_devices', 'update') as client_update,
+    has_table_privilege('authenticated', 'public.briefing_devices', 'delete') as client_delete,
+    has_table_privilege('service_role', 'public.briefing_devices', 'select') as server_read,
+    has_table_privilege('service_role', 'public.briefing_devices', 'insert') as server_insert,
+    has_table_privilege('service_role', 'public.briefing_devices', 'delete') as server_delete,
+    (select confdeltype from pg_constraint where conname = 'briefing_devices_user_id_fkey') as on_delete,
+    (select count(*) from pg_constraint where conrelid = 'public.briefing_devices'::regclass and contype = 'u') as uniques,
+    (select count(*) from pg_constraint where conrelid = 'public.briefing_devices'::regclass and contype = 'c') as checks`);
+  return x.rls === true && !x.anon_read && !x.client_read && !x.client_insert && !x.client_update && !x.client_delete
+    && x.server_read && x.server_insert && x.server_delete && x.on_delete === 'c' && Number(x.uniques) === 1 && Number(x.checks) >= 1 ? true : x;
 });
 
 await check('선택형 ML 자가응답 컬럼: 모두 선택적이고 신뢰 코드 표와 분리됨', async () => {
@@ -3206,10 +3241,12 @@ const mkAppt = async (creator, title, { group = null, series = null, on = null, 
 //   11/9부터(친구 15장, 15-타) 친구 · 그룹 참여 · 공유 권한 · 내가 건 차단 · 내가 숨긴 기상도 지움 — 그래서 friends · group_members · sharing_permissions · wake_hides는 지우는 쪽
 //   (user_blocks는 사용자 칸 이름이 blocker_id라 이 가드의 열 목록 밖 — 지움은 friend/ch15.mjs 15-타가 직접 봄)
 const RESET_DELETES = ['alarm_events', 'alarm_suggestions', 'alarms', 'appointment_participants', 'appointments', 'conversation_sessions',
-                       'daily_journals', 'daily_records', 'friends', 'group_members', 'prepare_ml_verified_profiles', 'profiles', 'sharing_permissions', 'user_edit_logs', 'wake_hides'];
+                       'daily_journals', 'daily_records', 'friends', 'group_members', 'prepare_ml_verified_profiles', 'profiles', 'sharing_permissions', 'user_edit_logs', 'wake_hides',
+                       'wake_scripts'];   // wake_scripts = 알람이 지워질 때 FK(on delete cascade)로 같이 지워짐 — 함수는 안 고침
 //   friend_links · rate_limit_events(친구 2장) · groups(남이 있는 그룹은 둠)는 둠, team_members(운영 화면 팀원)도 둠
+//   briefing_devices(기기 키)는 둠 — 시험 데이터 지우기는 로그인 그대로라 이 기기의 백그라운드 갱신이 계속 돌아야 함 (push_tokens와 같은 이유)
 //   server_route_users(서버 전환 스위치 canary 대상)는 시험 데이터가 아니라 운영 설정이라 둠
-const RESET_KEEPS = ['ai_calls', 'alarm_proposals', 'friend_links', 'groups', 'push_tickets', 'push_tokens', 'rate_limit_events', 'roll_attempts', 'routines',
+const RESET_KEEPS = ['ai_calls', 'alarm_proposals', 'briefing_devices', 'friend_links', 'groups', 'push_tickets', 'push_tokens', 'rate_limit_events', 'roll_attempts', 'routines',
                      'server_route_users', 'team_members', 'todos', 'user_places', 'user_questions'];
 const MINE = {
   appointments: `select * from public.appointments where creator_id = $1`,
@@ -3227,6 +3264,8 @@ const MINE = {
   user_questions: `select * from public.user_questions where user_id = $1`,
   push_tickets: `select * from public.push_tickets where user_id = $1`,
   wake_hides: `select * from public.wake_hides where $1 in (owner_id, hidden_from_id)`,
+  wake_scripts: `select * from public.wake_scripts where user_id = $1`,
+  briefing_devices: `select * from public.briefing_devices where user_id = $1`,
   alarm_proposals: `select * from public.alarm_proposals where $1 in (owner_id, proposer_id)`,
   push_tokens: `select * from public.push_tokens where user_id = $1`,
   roll_attempts: `select * from public.roll_attempts where user_id = $1`,

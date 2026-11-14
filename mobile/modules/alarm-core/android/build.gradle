@@ -16,6 +16,8 @@ android {
 
 dependencies {
   implementation 'androidx.core:core-ktx:1.15.0'
+  // 백그라운드 기상 브리핑 갱신(#515) — 정확 알람이 깨운 뒤 네트워크 조건 · 다시 시도 · 중복 막기를 WorkManager에 맡김 (BriefingRefreshWorker)
+  implementation 'androidx.work:work-runtime:2.10.1'
   // 음성 단계 판단(SpeechUrgency)이 TS와 같은지 보는 JVM 단위 시험 — 안드로이드 빌드 검사가 돌림
   testImplementation 'junit:junit:4.13.2'
 }

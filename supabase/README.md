@@ -7,10 +7,10 @@ DB 구조는 `migrations/`의 SQL 파일로만 바꾸고, 실제 프로젝트에
 
 1. `npx supabase migration new 이름` → 생긴 `migrations/<시각>_이름.sql`에 SQL 작성
 2. 로컬 확인: `cd supabase/tests && npm ci && npm test` (Docker 없이 PGlite)
-3. PR → Actions가 임시 DB에 먼저 적용해 봄
+3. PR → Actions가 검사 잡 하나에서 임시 DB에 먼저 적용해 봄 (초안 PR은 초안을 풀 때)
    - 마이그레이션 · RLS 검사: PGlite에 적용 → RLS · 권한 · 함수 동작 (`tests/db-check.mjs`)
    - 실제 이미지 적용 · 타입: 실제 Supabase Postgres에 처음부터 적용 → 앱 타입이 스키마와 같은지
-4. 머지 → 같은 검사 뒤 실제 프로젝트에 `supabase db push`
+4. 머지 → PR에서 통과했으므로 검사 없이 실제 프로젝트에 `supabase db push` (Actions 분량, #514)
 
 ## 규칙
 
@@ -49,7 +49,7 @@ select vault.create_secret('<service_role 키>', 'service_role_key');
 - `20261109080000_voice_auto_commit.sql`(하루 기록 자동 정리)이 `voice-commit`을 10분마다 부르게 예약함(`voice-auto-commit`). 서비스 키로 오면 `_shared/ai/auto-commit.ts`가 [완료] 없이 지난 기준일 대화를 정리 — 기준일 다음 날 KST 새벽 4시 뒤 바로(기상 알람 · 마지막 말 뒤 기다림 없음, 11/13 — 4시 뒤 들어온 말은 다음 실행이 다시 정리), 한 번에 3개 · 60초. pg_net이 10초만 기다려서 바로 202로 답하고 정리는 `EdgeRuntime.waitUntil`로 뒤에서 — 결과는 함수 로그(`[auto-commit] 시작 · 완료 · 실패`)로 봄. `voice-commit`도 `verify_jwt = false`(alarm-roll과 같이 `isServiceCall` · `requireUser`로 가름) — **마이그레이션 적용 전에 함수를 먼저 배포**
 - `wake-check`는 `config.toml`에서 `verify_jwt = false`로 두고, 코드(`_shared/auth.ts` `requireServiceCall`)가 `apikey` · `Authorization` 머리글의 키를 `SUPABASE_SERVICE_ROLE_KEY`(legacy JWT) 또는 `SUPABASE_SECRET_KEYS`(`sb_secret_…`)와 직접 비교함 → Vault에 어느 형식을 넣어도 됨
 
-## 서버 전환 스위치 (`20261113100000_server_switch.sql`, M1 · 이슈 #475)
+## 서버 전환 스위치 (`20261114100000_server_switch.sql`, M1 · 이슈 #475)
 
 알람 계산을 Edge 함수에서 FastAPI 서버(EC2)로 옮기는 동안, 어디서 돌지를 DB 표 한 줄로 정하고 언제든 Edge로 되돌리게 하는 스위치. 값은 전부 `edge`로 시작해서 적용만으로는 동작이 안 바뀜. 위 "배치"의 `wake-check` · `alarm-roll` · `suggestion-generate` 예약 명령은 이 파일부터 `private.invoke_edge_function(이름)` 대신 `private.run_job(이름)`을 부름 (`voice-auto-commit` · 친구 cron은 그대로).
 

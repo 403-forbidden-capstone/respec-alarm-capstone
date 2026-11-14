@@ -66,6 +66,11 @@
       android:name=".AlarmActionReceiver"
       android:exported="false" />
 
+    <!-- 백그라운드 기상 브리핑 갱신(#515): 새벽 4:10 · refresh_at 정확 알람 → WorkManager 작업 넣기 (BriefingRefresh.kt) -->
+    <receiver
+      android:name=".BriefingRefreshReceiver"
+      android:exported="false" />
+
     <receiver
       android:name=".AlarmBootReceiver"
       android:enabled="true"

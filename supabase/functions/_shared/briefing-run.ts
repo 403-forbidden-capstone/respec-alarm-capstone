@@ -25,6 +25,7 @@ import { LlmClientError } from './ai/llm.ts';
 import type { Tts, TtsAudio } from './ai/tts.ts';
 import type { TtsQuota } from './ai/tts-quota.ts';
 import { localDateKey } from './tz.ts';
+import { finalizeScripts, wakeScriptInput, type ScriptResult, type ScriptStatus, type WakeScriptInput } from './wake-script.ts';
 
 export type BriefingSource = {
   kind: BriefKind;
@@ -50,6 +51,7 @@ export type BriefingOut = {
   audio: { level: GeminiLevel; hash: string; mime: string; data: string }[]; // 새로 만든 Gemini 음성 (3 · 4단계)
   gemini: GeminiStatus; // 단계 결과 중 가장 나쁜 것 (앱 요약용)
   levels?: Partial<Record<GeminiLevel, GeminiStatus>>; // 단계별 결과 (필요한 단계만)
+  script?: ScriptStatus; // 개인화 기상 대본 결과 (기상만). CACHED · MADE가 아니면 템플릿 문장
 };
 
 export type GeminiStatus = 'NOT_NEEDED' | 'CACHED' | 'MADE' | 'LIMITED' | 'FAILED' | 'NOT_CONFIGURED';
@@ -57,7 +59,8 @@ const WORST_FIRST: GeminiStatus[] = ['FAILED', 'LIMITED', 'NOT_CONFIGURED', 'MAD
 // 한도가 모자랄 때 먼저 만들 단계 — 실제 지각 위험(4)이 먼저
 const GEMINI_ORDER: GeminiLevel[] = [4, 3];
 
-export type GeminiDeps = { tts: Tts | null; quota: TtsQuota; model?: string };
+// script = 개인화 기상 대본 만들기(wake-script.ts wakeScriptsFor). 없으면 템플릿 문장만
+export type GeminiDeps = { tts: Tts | null; quota: TtsQuota; model?: string; script?: ((input: WakeScriptInput) => Promise<ScriptResult>) | null };
 
 // 알람 날짜 · 대화 기준일 — 알람 날 아침의 전날 밤 대화는 기준일 = 알람 날 − 1 (turn-core dayOf: review = morning − 1)
 export function briefingDays(scheduledAtMs: number, timeZone: string): { day: string; review: string } {
@@ -79,15 +82,21 @@ export async function runBriefing(src: BriefingSource, have: ReadonlySet<string>
   const rule = urgencyRule({ kind: src.kind, appointmentAtMs: src.done ? null : src.appointmentAtMs, prepMinutes: src.prepMinutes, travelMinutes: src.travelMinutes }, profile);
   const model = gemini.model ?? TTS_MODEL;
   const wake = src.kind === 'WAKE';
-  const clips = briefingClips(rule, profile, {
+  const days = briefingDays(src.scheduledAtMs, src.timeZone);
+  const input = {
     kind: src.kind,
-    memo: wake && profile.personal ? wakeMemo(src.sessions, briefingDays(src.scheduledAtMs, src.timeZone).review) : null,
+    memo: wake && profile.personal ? wakeMemo(src.sessions, days.review) : null,
     appointments: wake ? pickAppointments(src.appointments.filter((a) => a.atMs >= src.scheduledAtMs)) : src.appointments.slice(0, 1),
     todos: src.todos,
     departAtMs: wake ? src.departAtMs : null,
     timeZone: src.timeZone,
-  }, model);
-  const out: BriefingOut = { enabled: true, rule, clips, audio: [], gemini: 'NOT_NEEDED' };
+  };
+  // 기상만: Gemini 한 번으로 1~4단계 대본 (캐시 · 한도 · 실패는 wakeScriptsFor가 처리, 실패면 템플릿)
+  const scriptInput = wake && gemini.script ? wakeScriptInput(input, days.day, src.done ? null : src.appointmentAtMs) : null;
+  const script = scriptInput && gemini.script ? await gemini.script(scriptInput) : null;
+  const texts = scriptInput && script?.scripts ? finalizeScripts(script.scripts, scriptInput) : null;
+  const clips = briefingClips(rule, profile, input, model, texts);
+  const out: BriefingOut = { enabled: true, rule, clips, audio: [], gemini: 'NOT_NEEDED', ...(script ? { script: script.status } : {}) };
 
   // 4단계 먼저, 차례로 (동시에 부르면 분당 한도를 두 단계가 다퉈 4단계가 밀릴 수 있음)
   const levels: Partial<Record<GeminiLevel, GeminiStatus>> = {};

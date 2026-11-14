@@ -75,7 +75,7 @@ test('긴급이 될 수 있는 기상 알람 → 4단계(긴급 Kore) 먼저, 3�
   assert.deepEqual(level(out), [4, 3]);
   assert.deepEqual(out.audio.map((a) => a.hash), [4, 3].map((l) => out.clips.find((c) => c.level === l)?.hash));
   assert.deepEqual(out.clips.map((c) => c.level), [1, 2, 3, 4]);
-  assert.match(out.clips[0].text, /어제 오늘부터는 일찍 일어나겠다고 했잖아/);
+  assert.match(out.clips[0].text, /어제 다짐한 "일찍", 오늘 실천해 보자/);
   assert.doesNotMatch(out.clips[0].text, /지난 일/);
   assert.deepEqual(f.records, [{ ok: true, errorCode: null }, { ok: true, errorCode: null }]);
 });
@@ -167,7 +167,7 @@ test('출발 알람: 그 일정 + 준비물 + 출발 촉구, 여유 5분 이하�
   const f = fakes();
   const dep = source({ kind: 'DEPARTURE', scheduledAtMs: kst(9, 20), appointments: [{ title: '면접', atMs: kst(10), importance: 'HIGH' }], todos: [{ title: '이력서', type: 'ITEM' }] });
   const out = await runBriefing(dep, new Set(), f.deps);
-  assert.equal(out.clips[0].text, '오전 10시 면접 갈 시간이야. 챙길 것: 이력서. 이제 출발하자!');
+  assert.equal(out.clips[0].text, '오전 10시 면접 갈 시간이야. 챙길 것: 이력서. 이제 출발하자.');
   assert.deepEqual(out.levels, { 4: 'MADE', 3: 'MADE' });
   const tight = await runBriefing({ ...dep, scheduledAtMs: kst(9, 15) }, new Set(), fakes().deps); // 여유 5분 = 3단계만
   assert.deepEqual(tight.levels, { 3: 'MADE' });

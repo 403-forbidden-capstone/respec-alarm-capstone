@@ -150,7 +150,17 @@ export type VoiceBriefingSave = {
   /** 단계별 문장 + Android TTS 높낮이 · 속도 · 목소리 번호 */
   clips: { level: number; hash: string; text: string; pitch: number; rate: number; voiceIndex: number }[];
   audio: { level: number; hash: string; mime?: string; data: string }[];
+  /** 서버 refresh_at — 전날 대화가 아직 새벽 정리 전이면 다시 받을 시각(ms). 네이티브가 백그라운드 갱신 예약에 더함 (#515, BriefingRefresh.kt) */
+  refreshAt?: number | null;
 };
+
+/**
+ * 백그라운드 브리핑 갱신(#515)용 기기 키 — 네이티브가 Android Keystore로 암호화해 둠 (BriefingCredential.kt)
+ * url = alarm-briefing-device 주소, apikey = 공개 키(EXPO_PUBLIC_), token = briefing-device가 준 원문(bdk_…), expiresAt = ms
+ */
+export type BriefingDeviceKey = { url: string; apikey: string; token: string; userId: string; deviceId: string; expiresAt: number };
+/** 앱이 읽는 정보 — 키 원문은 네이티브 밖으로 안 나옴 */
+export type BriefingDeviceInfo = Pick<BriefingDeviceKey, 'userId' | 'deviceId' | 'expiresAt'>;
 
 /**
  * 개발 화면 AI 음성 시험 — 샘플 문장 + 끌 것 (sound: 알람음 크기 0, voice: AI 음성 안 읽음)
@@ -252,4 +262,8 @@ export type AlarmBackend = {
   /** 폰에 있는 음성의 열쇠 (서버에 have로 보내 같은 음성을 다시 안 만들게) */
   getVoiceBriefingHashes(alarmId: string): Promise<string[]>;
   clearVoiceBriefing(alarmId: string): Promise<void>;
+  /** 백그라운드 브리핑 갱신용 기기 키 저장 · 정보 읽기(없으면 null) · 지우기 (#515) */
+  setBriefingDevice(value: BriefingDeviceKey): Promise<void>;
+  getBriefingDevice(): Promise<BriefingDeviceInfo | null>;
+  clearBriefingDevice(): Promise<void>;
 };
