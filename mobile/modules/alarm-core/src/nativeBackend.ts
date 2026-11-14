@@ -1,7 +1,7 @@
 // Android 네이티브 모듈(Kotlin, AlarmCore)과 주고받는 부분
 // 복잡한 값(꾸러미 + 울림 계획)은 JSON 글자 하나로 넘김 — 네이티브가 그 글자를 그대로 저장해 두고 씀
 import { toNativePayload } from './plan';
-import type { AlarmBackend, AlarmEvent, RingingAlarm, ScheduledAlarm, ScheduleStatus, UsageSpan, VoiceTestInfo, VoiceTestStatus } from './types';
+import type { AlarmBackend, AlarmEvent, BriefingDeviceInfo, RingingAlarm, ScheduledAlarm, ScheduleStatus, UsageSpan, VoiceTestInfo, VoiceTestStatus } from './types';
 
 /** Kotlin AlarmCoreModule이 내놓는 함수 모양 (이름이 AsyncFunction 이름과 같아야 함) */
 export type NativeAlarmCore = {
@@ -27,6 +27,10 @@ export type NativeAlarmCore = {
   saveVoiceBriefing?(alarmId: string, json: string): Promise<void>;
   getVoiceBriefingHashes?(alarmId: string): Promise<string[]>;
   clearVoiceBriefing?(alarmId: string): Promise<void>;
+  // 백그라운드 브리핑 갱신(#515) 기기 키 — 예전 APK에서는 undefined (갱신 없이 앱을 열 때만 받음)
+  setBriefingDevice?(json: string): Promise<void>;
+  getBriefingDevice?(): Promise<BriefingDeviceInfo | null>;
+  clearBriefingDevice?(): Promise<void>;
   // 개발 화면 AI 음성 시험 — 예전 APK에서는 undefined (index.ts가 안내 문구로 거절)
   ringVoiceTest?(payload: string, voiceJson: string): Promise<VoiceTestInfo>;
   voiceTestStatus?(): Promise<VoiceTestStatus>;
@@ -60,6 +64,13 @@ export function createNativeBackend(native: NativeAlarmCore): AlarmBackend {
     getVoiceBriefingHashes: async (alarmId) => (await native.getVoiceBriefingHashes?.(alarmId)) ?? [],
     clearVoiceBriefing: async (alarmId) => {
       await native.clearVoiceBriefing?.(alarmId);
+    },
+    setBriefingDevice: async (value) => {
+      await native.setBriefingDevice?.(JSON.stringify(value));
+    },
+    getBriefingDevice: async () => (await native.getBriefingDevice?.()) ?? null,
+    clearBriefingDevice: async () => {
+      await native.clearBriefingDevice?.();
     },
   };
 }

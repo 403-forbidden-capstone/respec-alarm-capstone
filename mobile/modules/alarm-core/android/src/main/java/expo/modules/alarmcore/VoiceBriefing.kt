@@ -26,15 +26,19 @@ internal object VoiceBriefing {
   /**
    * 앱이 받은 결과 저장. json = { rule: {urgentAtMs, maxLevel}, clips: [{level, hash, text, pitch, rate, voiceIndex}], audio: [{level, hash, data(base64)}] }
    * 단계마다: 새 Gemini 음성이 오면 씀, 안 왔으면 열쇠가 같은 예전 파일만 남김 (내용이 바뀌었는데 못 만들었으면 낡은 음성을 지움 → Android TTS로)
+   * 앱 맞추기(prepareBriefings)와 백그라운드 갱신(BriefingRefreshWorker, #515)이 같이 씀 — 받은 값을 먼저 다 풀어 본 뒤에 파일을 바꿈
+   *   (JSON · base64가 깨졌으면 던지고 예전 브리핑은 그대로). manifest는 임시 파일에 쓴 뒤 바꿔 넣음
    */
   @Synchronized
   fun save(context: Context, alarmId: String, json: String) {
     val folder = dir(context, alarmId) ?: throw IllegalArgumentException("알람 id가 이상해요")
     val input = JSONObject(json)
     val old = readManifest(folder)?.optJSONObject("files") ?: JSONObject()
-    folder.mkdirs()
     val audio = input.optJSONArray("audio") ?: JSONArray()
     val clips = input.optJSONArray("clips") ?: JSONArray()
+    val decoded = (0 until audio.length()).map { audio.getJSONObject(it) }.associate { it.optString("hash") to Base64.decode(it.getString("data"), Base64.DEFAULT) }
+    for (i in 0 until clips.length()) clips.getJSONObject(i).getInt("level") // 단계 번호가 없으면 여기서 던짐 (아무것도 안 바꿈)
+    folder.mkdirs()
     val files = JSONObject()
     val keepLevels = mutableSetOf<String>()
     for (i in 0 until clips.length()) {
@@ -43,10 +47,10 @@ internal object VoiceBriefing {
       val hash = clip.optString("hash")
       if (!HASH.matches(hash)) continue
       val file = File(folder, "L$level.wav")
-      val fresh = (0 until audio.length()).map { audio.getJSONObject(it) }.firstOrNull { it.optString("hash") == hash }
+      val fresh = decoded[hash]
       if (fresh != null) {
         val tmp = File(folder, "L$level.tmp")
-        tmp.writeBytes(Base64.decode(fresh.getString("data"), Base64.DEFAULT))
+        tmp.writeBytes(fresh)
         if (!tmp.renameTo(file)) {
           file.delete()
           tmp.renameTo(file)
@@ -66,7 +70,12 @@ internal object VoiceBriefing {
       .put("rule", input.optJSONObject("rule") ?: JSONObject())
       .put("clips", clips)
       .put("files", files)
-    File(folder, MANIFEST).writeText(manifest.toString())
+    val tmpManifest = File(folder, "$MANIFEST.tmp")
+    tmpManifest.writeText(manifest.toString())
+    if (!tmpManifest.renameTo(File(folder, MANIFEST))) {
+      File(folder, MANIFEST).delete()
+      tmpManifest.renameTo(File(folder, MANIFEST))
+    }
   }
 
   /** 폰에 있는 Gemini 음성의 열쇠 — 앱이 서버에 have로 보내 같은 음성을 다시 안 만들게 */

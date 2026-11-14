@@ -12,6 +12,9 @@ const key = process.env.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY ?? '';
 
 // 값이 없으면(웹 미리보기 · 프로젝트 연결 전) 로그인 없이 목업 데이터로 돎
 export const isSupabaseConfigured = Boolean(url && key);
+// 폰 네이티브가 앱 없이 서버 함수를 부를 때 넘기는 공개 값 (백그라운드 브리핑 갱신 #515, lib/alarmSync/briefingDevice.ts)
+export const supabaseUrl = url;
+export const supabasePublicKey = key;
 
 // 폰은 AsyncStorage에 세션 보관, 웹은 supabase-js 기본(localStorage)
 const nativeStorage = Platform.OS === 'web' ? undefined : AsyncStorage;

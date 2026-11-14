@@ -90,4 +90,49 @@ object BriefingRules {
     val (pitch, rate) = FALLBACK_VOICE.getValue(level)
     return Fallback(level, prefix + base, pitch, rate)
   }
+
+  // --- 백그라운드 브리핑 갱신 (#515) — BriefingRefresh · BriefingRefreshWorker가 씀. 서버 쪽은 supabase/functions/_shared/briefing-refresh.ts ---
+  // 전날 대화 자동 정리(서버 pg_cron)는 KST 새벽 4시 기준 — 그 10분 뒤에 받으러 감 (COMMIT_LAG_MS와 같음). KST는 서머타임이 없어 +9시간 고정으로 셈
+  // 04:10은 "첫 시도" 시각일 뿐 — 정리가 끝났는지는 서버가 보고, 아직이면 refresh_at으로 다음 시각을 정함. 자동 정리 시각 · 주기를 바꾸면 여기와 서버 COMMIT_LAG_MS를 같이
+  private const val HOUR = 3_600_000L
+  private const val KST_OFFSET = 9 * HOUR
+  const val REFRESH_SLOT_OFFSET = 4 * HOUR + 10 * 60_000L
+  // 기상 5분 전까지만 받음 — 그 뒤에는 저장된 브리핑으로 울림 (울릴 때는 네트워크를 안 씀)
+  const val REFRESH_DEADLINE_BEFORE = 5 * 60_000L
+  // 다시 시도 횟수 상한 — 서버 · 네트워크가 계속 실패해도 배터리를 계속 쓰지 않게 (WorkManager 지수 대기 30초부터)
+  const val REFRESH_MAX_ATTEMPTS = 8
+
+  /** 이 기상 알람의 새벽 갱신 시각 = 알람 날(KST) 04:10. 알람이 그보다 이르거나(04:15 전 기상) 같으면 null — 기존 브리핑으로 울림 */
+  fun refreshSlot(alarmAtMillis: Long): Long? {
+    val dayStart = Math.floorDiv(alarmAtMillis + KST_OFFSET, 24 * HOUR) * 24 * HOUR - KST_OFFSET
+    val slot = dayStart + REFRESH_SLOT_OFFSET
+    return slot.takeIf { it < refreshDeadline(alarmAtMillis) }
+  }
+
+  fun refreshDeadline(ringAtMillis: Long): Long = ringAtMillis - REFRESH_DEADLINE_BEFORE
+
+  /** 걸어 둘 갱신 시각 — 후보(새벽 4:10 · 서버 refresh_at · 이미 걸린 것) 중 지금 뒤 · 마감 앞인 가장 이른 것. 없으면 null(갱신 예약 지움) */
+  fun pickRefresh(candidates: List<Long?>, nowMillis: Long, deadlineMillis: Long): Long? =
+    candidates.filterNotNull().filter { it > nowMillis && it < deadlineMillis }.minOrNull()
+
+  /** 이 알람을 지금 새로 받아도 되는지 — 기상 · 안 울리는 중 · 안 미룸 · 마감 전 */
+  fun canRefresh(type: String, ringing: Boolean, snoozeCount: Int, seriesIndex: Int, ringAtMillis: Long, nowMillis: Long): Boolean =
+    type == "WAKE" && !ringing && snoozeCount == 0 && seriesIndex == 0 && nowMillis < refreshDeadline(ringAtMillis)
+
+  enum class RefreshOutcome { SAVE, STOP, RETRY }
+
+  /**
+   * alarm-briefing-device 응답 상태 → 할 일. 저장된 브리핑은 SAVE(새 브리핑을 다 받음)일 때만 바뀜
+   *   401(키 만료 · 폐기) · 403 · 404(알람 없음 · 꺼짐) · 400은 다시 해도 같음 → STOP. 408 · 429 · 5xx · 연결 실패(null)는 RETRY
+   */
+  fun refreshOutcome(status: Int?): RefreshOutcome = when {
+    status == null -> RefreshOutcome.RETRY
+    status in 200..299 -> RefreshOutcome.SAVE
+    status == 408 || status == 429 || status >= 500 -> RefreshOutcome.RETRY
+    else -> RefreshOutcome.STOP
+  }
+
+  /** RETRY일 때 다시 시도할지 — 횟수 상한 · 다음 시도가 마감 전일 때만 (backoffMillis = 다음 대기) */
+  fun shouldRetry(attempt: Int, nowMillis: Long, backoffMillis: Long, deadlineMillis: Long): Boolean =
+    attempt + 1 < REFRESH_MAX_ATTEMPTS && nowMillis + backoffMillis < deadlineMillis
 }

@@ -1644,6 +1644,22 @@ describe('⑰ [완료] 뒤 대화 끝 정리(voice-commit)', () => {
     expect(await AsyncStorage.getItem(commitKey)).toBeNull();
   });
 
+  it('정리가 끝나면(DONE) 기상 알람 브리핑을 바로 다시 받음 (#515) — 실패 · 일부 저장이면 안 받음 · 다시 받기가 실패해도 삼킴', async () => {
+    script = [session(), turn()];
+    await getConversation();
+    await say('내일은 꼭 일찍 일어날 거야');
+    const refresh = jest.fn(async () => {
+      throw new Error('네트워크');
+    });
+    commitReplies = [{ status: 'PARTIAL' }];
+    await finishConversation();
+    await flushCommits('user-1', refresh);
+    expect(refresh).not.toHaveBeenCalled();
+    commitReplies = [{ status: 'DONE' }];
+    await flushCommits('user-1', refresh);
+    expect(refresh).toHaveBeenCalledTimes(1);
+  });
+
   it('한 마디도 안 한 대화는 정리를 보내지 않음', async () => {
     script = [session()];
     await getConversation();

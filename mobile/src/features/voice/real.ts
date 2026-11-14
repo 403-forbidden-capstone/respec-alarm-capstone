@@ -30,6 +30,7 @@ import {
 } from '@/features/alarm/types';
 import { now } from '@/lib/clock';
 import { lifeDayKey } from '@/lib/format';
+import { prepareBriefings } from '@/lib/alarmSync/briefing';
 import { EdgeError, callEdge } from '@/lib/edge';
 import { UserError, userMessage } from '@/lib/errors';
 import { currentUserId } from '@/lib/user';
@@ -867,19 +868,23 @@ export function retry(): Promise<Conversation> {
 //   서버가 T2를 부르므로(19초 · 다시 시도 1번) 대화 화면의 직렬 큐 밖에서 — 새 대화 열기를 막지 않게. 동시에 두 번 돌지 않음
 export const COMMIT_TIMEOUT_MS = 45_000;
 let flushing: Promise<void> | null = null;
-export function flushCommits(userId: string | null): Promise<void> {
+//   정리가 끝나면(DONE) 다가오는 기상 알람 브리핑을 바로 다시 받음 — 어제 다짐이 들어간 대본 · 음성으로 (#515, 새벽 백그라운드 갱신을 기다리지 않게). 실패해도 삼킴
+export function flushCommits(userId: string | null, refreshBriefings: () => Promise<unknown> = () => prepareBriefings()): Promise<void> {
   if (!userId) return Promise.resolve();
   flushing ??= (async () => {
+    let committed = false;
     try {
       for (const { sessionId, rejected } of await pendingCommits(userId)) {
         try {
           const body = rejected.length > 0 ? { session_id: sessionId, rejected_cards: rejected } : { session_id: sessionId };
           const res = await callEdge<{ status?: string }>('voice-commit', body, { timeoutMs: COMMIT_TIMEOUT_MS });
+          if (res?.status === 'DONE') committed = true;
           if (res?.status === 'DONE' || res?.status === 'SKIPPED') await removePendingCommit(userId, sessionId);
         } catch (e) {
           if (e instanceof EdgeError && (e.code === 'NOT_FOUND' || e.code === 'VALIDATION_FAILED')) await removePendingCommit(userId, sessionId);
         }
       }
+      if (committed) await refreshBriefings().catch(() => undefined);
     } finally {
       flushing = null;
     }
