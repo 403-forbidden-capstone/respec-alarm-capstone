@@ -82,6 +82,16 @@ describe('서버 오류 → 사용자 문구 (toEdgeError)', () => {
     expect((await toEdgeError(httpError(502, undefined))).code).toBe('INTERNAL');
     expect((await toEdgeError(httpError(404, undefined))).code).toBe('UNKNOWN'); // 함수가 배포 안 됐을 때
     expect((await toEdgeError(httpError(429, undefined))).code).toBe('RATE_LIMITED');
+    // 서버(nginx) 앞단: 504는 늦어서(TIMEOUT), 413은 요청이 너무 커서(입력 문제)
+    expect((await toEdgeError(httpError(504, undefined))).code).toBe('TIMEOUT');
+    expect((await toEdgeError(httpError(413, undefined))).code).toBe('VALIDATION_FAILED');
+  });
+
+  it('서버만 쓰는 코드 AUTH_UNAVAILABLE(공개 키를 못 받음)도 코드 그대로 읽고 문구가 있음', async () => {
+    const e = await toEdgeError(serverError(503, 'AUTH_UNAVAILABLE', '서버 문구'));
+    expect(e.code).toBe('AUTH_UNAVAILABLE');
+    expect(e.message).toBe(EDGE_MESSAGES.AUTH_UNAVAILABLE);
+    expect(e.message).not.toBe(DEFAULT_MESSAGE);
   });
 
   it('네트워크 실패 · 시간 초과 · 중계 실패 · 모르는 오류', async () => {

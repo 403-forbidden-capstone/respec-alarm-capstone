@@ -10,14 +10,25 @@
 //   네트워크 실패는 FunctionsFetchError, Supabase 중계 쪽 실패는 FunctionsRelayError
 //
 // 중복 막는 키: 옵션 idempotencyKey를 주면 헤더 Idempotency-Key로 보냄 (CORS는 허용). 서버가 아직 안 읽음 — 읽게 되면 쓰기 호출(alarm-commit)이 같은 키로 재전송해도 한 번만 저장됨
+//
+// 서버 전환 스위치 (M2, 완결점 1-9) — 함수마다 길이 둘: Edge(위 방식) / 우리 서버(FastAPI)
+//   · 길은 DB 표 server_routes가 정함 (edgeRoutes.ts: get_server_routes() 5분 캐시, 못 읽으면 전부 edge). EXPO_PUBLIC_API_BASE_URL이 없거나 https가 아니면 표를 묻지도 않고 Edge
+//   · server면 POST {EXPO_PUBLIC_API_BASE_URL}/fn/<이름> — 본문 · 응답 · 오류 모양은 Edge와 같음. 로그인 토큰은 호출마다 읽어 Authorization으로 싣고,
+//     401이면 refreshSession 뒤 한 번만 다시. 시간 초과(AbortController) → TIMEOUT, 서버에 못 닿음 → NETWORK
+//   · 읽기 함수(READ_FUNCTIONS: place-search · place-reverse)는 서버가 죽었거나 이상하게 답하면(NETWORK · TIMEOUT · 5xx · AUTH_UNAVAILABLE) Edge로 한 번만 더
+//     = "서버 1번 → Edge 1번"으로 끝(retry 옵션과 합쳐서), 서버가 연속 3번 실패하면 5분 동안은 서버를 건너뛰고 바로 Edge(차단기)
+//   · 못 막는 것: 200인데 내용이 틀린 응답 · 토큰 검사 차이는 계약 시험 · canary가 막음. 쓰기 함수는 서버가 실패해도 Edge로 대신 부르지 않음(이미 처리됐을 수 있어 두 번 쓰면 안 됨)
+//   · 되돌리기: 표의 해당 줄을 edge로 (앱은 다음에 표를 읽을 때 — 최대 5분, 앱을 다시 켜면 바로)
 import { FunctionsFetchError, FunctionsHttpError, FunctionsRelayError } from '@supabase/supabase-js';
 import { ERROR_STATUS, type ErrorCode } from '@shared/errors.ts';
 
+import { breakerOpen, recordServerFailure, recordServerSuccess, routeFor, serverBaseUrl } from './edgeRoutes';
 import { UserError } from './errors';
 import { supabase } from './supabase';
 
 // 서버 코드(ErrorCode) + 앱에서 정한 것: NETWORK = 서버까지 못 감, TIMEOUT = 응답이 너무 늦음, UNKNOWN = 모르는 모양
-export type EdgeFailure = ErrorCode | 'NETWORK' | 'TIMEOUT' | 'UNKNOWN';
+// AUTH_UNAVAILABLE은 우리 서버만 돌려주는 코드(공개 키 목록을 못 받아 토큰을 확인할 수 없음, 503 — 로그인이 틀렸다는 뜻이 아니라 로그아웃시키면 안 됨)
+export type EdgeFailure = ErrorCode | 'AUTH_UNAVAILABLE' | 'NETWORK' | 'TIMEOUT' | 'UNKNOWN';
 
 export const DEFAULT_MESSAGE = '하지 못했어요. 다시 해 주세요';
 
@@ -36,6 +47,7 @@ export const EDGE_MESSAGES: Partial<Record<EdgeFailure, string>> = {
   LLM_UNAVAILABLE: 'AI가 지금 답하지 못해요. 잠시 뒤에 다시 해 주세요',
   VOICE_UNAVAILABLE: '음성 대화를 지금은 쓸 수 없어요. 글로 입력해 주세요',
   NOT_CONFIGURED: '서버 설정이 아직 끝나지 않았어요. 개발자에게 알려 주세요',
+  AUTH_UNAVAILABLE: '로그인 확인이 잠시 안 돼요. 잠시 뒤에 다시 해 주세요',
   NETWORK: '인터넷 연결을 확인해 주세요',
   TIMEOUT: '서버 응답이 늦어요. 잠시 뒤에 다시 해 주세요',
 };
@@ -48,12 +60,14 @@ export const UNPROCESSABLE_MESSAGES: Record<string, string> = {
   PAST_APPOINTMENT: '지난 약속이에요', // 지난 공동 약속은 고치기 · 새 참여 모두 막힘 (친구 9장 9-32)
 };
 
-// 서버 본문 { error: { code, message, details } }이 아닐 때(Supabase 게이트웨이가 토큰을 거절하는 경우 등) HTTP 상태로 짐작
+// 서버 본문 { error: { code, message, details } }이 아닐 때(Supabase 게이트웨이가 토큰을 거절하는 경우 · 우리 서버 앞단 nginx의 502 · 504 · 413 · 429 등) HTTP 상태로 짐작
 export function failureFromStatus(status: number | null): EdgeFailure {
   if (status == null) return 'UNKNOWN';
   if (status === 401) return 'AUTH_REQUIRED';
   if (status === 403) return 'FORBIDDEN';
+  if (status === 413) return 'VALIDATION_FAILED'; // 요청이 너무 큼 — 입력을 줄여야 하는 문제
   if (status === 429) return 'RATE_LIMITED';
+  if (status === 504) return 'TIMEOUT'; // 게이트웨이가 기다리다 포기 — 느린 것
   if (status >= 500) return 'INTERNAL';
   return 'UNKNOWN'; // 404는 함수가 배포되지 않았을 때도 나와서 "찾을 수 없어요"로 보이면 헷갈림
 }
@@ -87,16 +101,36 @@ export class EdgeError extends UserError {
 
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 
-// Response 본문을 { error: { code, message, details } }로 읽음. 아니면 null (본문이 JSON이 아니거나 다른 모양)
-async function readErrorBody(response: unknown): Promise<{ code: string; message: string | null; details: unknown } | null> {
+type ErrorBody = { code: string; message: string | null; details: unknown };
+
+// 우리 서버만 돌려주는 코드 — Edge의 ERROR_STATUS(@shared/errors.ts)에는 없음
+const SERVER_ONLY_CODE = 'AUTH_UNAVAILABLE';
+
+// JSON을 { error: { code, message, details } }로 읽음. 아니면 null (다른 모양)
+function parseErrorBody(json: unknown): ErrorBody | null {
+  const error = isRecord(json) ? json.error : null;
+  if (!isRecord(error) || typeof error.code !== 'string') return null;
+  return { code: error.code, message: typeof error.message === 'string' ? error.message : null, details: error.details };
+}
+
+// Response 본문을 읽음. 본문이 JSON이 아니면 null
+async function readErrorBody(response: unknown): Promise<ErrorBody | null> {
   try {
-    const json: unknown = await (response as { json(): Promise<unknown> }).json();
-    const error = isRecord(json) ? json.error : null;
-    if (!isRecord(error) || typeof error.code !== 'string') return null;
-    return { code: error.code, message: typeof error.message === 'string' ? error.message : null, details: error.details };
+    return parseErrorBody(await (response as { json(): Promise<unknown> }).json());
   } catch {
     return null;
   }
+}
+
+// 상태 · requestId · 읽은 본문 → EdgeError (Edge 응답과 우리 서버 응답이 같이 씀)
+function edgeErrorFrom(status: number | null, requestId: string | null, body: ErrorBody | null): EdgeError {
+  if (body) {
+    // 모르는 code(서버가 새로 더한 것)는 상태로 짐작한 갈래의 문구 — 그래도 모르면 기본 문구
+    const known = Object.hasOwn(ERROR_STATUS, body.code) || body.code === SERVER_ONLY_CODE;
+    const code = known ? (body.code as EdgeFailure) : failureFromStatus(status);
+    return new EdgeError(code, { status, details: body.details, requestId, serverMessage: body.message });
+  }
+  return new EdgeError(failureFromStatus(status), { status, requestId });
 }
 
 // supabase.functions.invoke가 준 error를 EdgeError로 바꿈 (시험에서 가짜 error를 넣어 확인)
@@ -105,13 +139,7 @@ export async function toEdgeError(error: unknown): Promise<EdgeError> {
     const response = error.context as { status?: number; headers?: { get(name: string): string | null } } | undefined;
     const status = typeof response?.status === 'number' ? response.status : null;
     const requestId = response?.headers?.get?.('x-request-id') ?? null;
-    const body = await readErrorBody(response);
-    if (body) {
-      // 모르는 code(서버가 새로 더한 것)는 상태로 짐작한 갈래의 문구 — 그래도 모르면 기본 문구
-      const code = Object.hasOwn(ERROR_STATUS, body.code) ? (body.code as ErrorCode) : failureFromStatus(status);
-      return new EdgeError(code, { status, details: body.details, requestId, serverMessage: body.message });
-    }
-    return new EdgeError(failureFromStatus(status), { status, requestId });
+    return edgeErrorFrom(status, requestId, await readErrorBody(response));
   }
   if (error instanceof FunctionsRelayError) return new EdgeError('INTERNAL');
   if (error instanceof FunctionsFetchError) {
@@ -130,7 +158,135 @@ export type EdgeOptions = {
 const DEFAULT_TIMEOUT_MS = 20_000;
 const RETRYABLE: readonly EdgeFailure[] = ['NETWORK', 'TIMEOUT', 'INTERNAL'];
 
+// 서버가 죽었거나 이상하게 답한 경우 — 읽기 함수의 Edge 대체와 차단기 횟수의 기준. 서버가 정상으로 거절한 것(4xx)은 해당 안 됨(Edge도 같은 결과)
+const SERVER_DOWN: readonly EdgeFailure[] = ['NETWORK', 'TIMEOUT', 'INTERNAL', 'AUTH_UNAVAILABLE'];
+// 부작용이 없어 Edge로 한 번 더 불러도 안전한 함수. 쓰기 함수(alarm-commit · appointment-edit · alarm-roll …)는 넣지 않음.
+// alarm-suggest(미리보기)는 2-6 "미리보기 · 저장 · 장소 전환"에서 서버로 옮길 때 같이 정함
+export const READ_FUNCTIONS: ReadonlySet<string> = new Set(['place-search', 'place-reverse']);
+const SERVER_READ_TIMEOUT_MS = 4_000; // 읽기 함수가 서버를 기다리는 시간(설계 3~5초) — 넘기면 Edge로
+
+const warn = (message: string) => {
+  if (__DEV__) console.warn(message);
+};
+
+// 앱은 이 함수 하나로만 서버 함수를 부름 — 표(edgeRoutes.ts)가 server라고 한 함수는 우리 서버로, 아니면 Edge로
 export async function callEdge<T>(name: string, body?: Record<string, unknown>, options: EdgeOptions = {}): Promise<T> {
+  if ((await routeFor(name)) === 'server') return callServer<T>(name, body, options);
+  return callEdgeFunction<T>(name, body, options);
+}
+
+// ---------- 우리 서버 길 ----------
+
+async function callServer<T>(name: string, body: Record<string, unknown> | undefined, options: EdgeOptions): Promise<T> {
+  const read = READ_FUNCTIONS.has(name);
+  if (read && breakerOpen()) return callEdgeFunction<T>(name, body, { ...options, retry: 0 }); // 차단기가 열림 — 서버는 건너뜀
+
+  const timeoutMs = read ? Math.min(options.timeoutMs ?? SERVER_READ_TIMEOUT_MS, SERVER_READ_TIMEOUT_MS) : (options.timeoutMs ?? DEFAULT_TIMEOUT_MS);
+  const attempts = read ? 1 : 1 + Math.max(0, options.retry ?? 0); // 읽기 함수: 서버 1번 → (실패하면) Edge 1번으로 끝
+  let last: EdgeError | null = null;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      const data = await postServer<T>(name, body, options.idempotencyKey, timeoutMs);
+      recordServerSuccess();
+      return data;
+    } catch (e) {
+      last = e instanceof EdgeError ? e : new EdgeError('UNKNOWN');
+      const wasOpen = breakerOpen();
+      if (SERVER_DOWN.includes(last.code)) recordServerFailure();
+      else if (last.status !== null) recordServerSuccess(); // 서버가 정상으로 답함(4xx) = 살아 있음
+      if (!wasOpen && breakerOpen()) warn('[edge] 서버가 연속 3번 실패 — 5분 동안 읽기 함수는 서버를 건너뛰고 Edge로 바로 보냄');
+      if (!RETRYABLE.includes(last.code)) break;
+    }
+  }
+  if (read && last && SERVER_DOWN.includes(last.code)) {
+    // 로그에는 함수 이름 · 코드 · requestId만 — 요청 내용(검색어 · 좌표)과 토큰은 안 남김
+    warn(`[edge] 서버 실패 → Edge로 한 번 더 name=${name} code=${last.code} requestId=${last.requestId ?? '-'}`);
+    return callEdgeFunction<T>(name, body, { ...options, retry: 0 });
+  }
+  throw last ?? new EdgeError('UNKNOWN');
+}
+
+type ServerReply = { ok: boolean; status: number; requestId: string | null; text: string };
+
+async function accessToken(): Promise<string> {
+  const { data } = await supabase.auth.getSession();
+  const token = data.session?.access_token;
+  if (!token) throw new EdgeError('AUTH_REQUIRED');
+  return token;
+}
+
+async function refreshedToken(): Promise<string | null> {
+  try {
+    const { data, error } = await supabase.auth.refreshSession();
+    return error ? null : (data.session?.access_token ?? null);
+  } catch {
+    return null;
+  }
+}
+
+const isAbort = (error: unknown) => (error as { name?: unknown } | null)?.name === 'AbortError';
+
+// 시간 제한은 응답 본문을 다 읽을 때까지 (헤더만 오고 본문이 멈추는 경우도 TIMEOUT)
+async function fetchServer(url: string, body: Record<string, unknown> | undefined, token: string, idempotencyKey: string | undefined, timeoutMs: number): Promise<ServerReply> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const headers: Record<string, string> = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
+    if (idempotencyKey) headers['Idempotency-Key'] = idempotencyKey;
+    const response = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body ?? {}), signal: controller.signal });
+    const text = await response.text();
+    return { ok: response.ok, status: response.status, requestId: response.headers.get('x-request-id'), text };
+  } catch (error) {
+    throw new EdgeError(isAbort(error) ? 'TIMEOUT' : 'NETWORK');
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+const NOT_JSON = Symbol('not-json');
+
+// JSON이 아니면 NOT_JSON (JSON null 본문과 구분)
+function tryJson(text: string): unknown {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return NOT_JSON;
+  }
+}
+
+const errorJson = (text: string): unknown => {
+  const json = tryJson(text);
+  return json === NOT_JSON ? null : json;
+};
+
+// 서버 한 번 호출 — 401이면 토큰을 갱신해 한 번만 다시. 실패는 EdgeError로 던짐
+async function postServer<T>(name: string, body: Record<string, unknown> | undefined, idempotencyKey: string | undefined, timeoutMs: number): Promise<T> {
+  const base = serverBaseUrl(process.env.EXPO_PUBLIC_API_BASE_URL);
+  if (!base) throw new EdgeError('UNKNOWN'); // routeFor가 이미 걸러서 오지 않음
+  let token = await accessToken();
+  for (let pass = 0; ; pass++) {
+    const reply = await fetchServer(`${base}/fn/${encodeURIComponent(name)}`, body, token, idempotencyKey, timeoutMs);
+    if (reply.ok) {
+      if (!reply.text) return undefined as T;
+      const json = tryJson(reply.text);
+      if (json === NOT_JSON) throw new EdgeError('INTERNAL', { status: reply.status, requestId: reply.requestId }); // 2xx인데 JSON이 아님 — 앞단이 이상함
+      return json as T;
+    }
+    const error = edgeErrorFrom(reply.status, reply.requestId, parseErrorBody(errorJson(reply.text)));
+    if (reply.status === 401 && pass === 0) {
+      const fresh = await refreshedToken();
+      if (fresh) {
+        token = fresh;
+        continue;
+      }
+    }
+    throw error;
+  }
+}
+
+// ---------- Edge 길 (supabase.functions.invoke) ----------
+
+async function callEdgeFunction<T>(name: string, body: Record<string, unknown> | undefined, options: EdgeOptions): Promise<T> {
   const headers = options.idempotencyKey ? { 'Idempotency-Key': options.idempotencyKey } : undefined;
   const attempts = 1 + Math.max(0, options.retry ?? 0);
   let last: EdgeError | null = null;
