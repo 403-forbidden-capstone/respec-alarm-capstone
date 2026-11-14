@@ -70,6 +70,11 @@ jobs:
         working-directory: supabase/tests
         run: npm test
 
+      # 알람 조정 제안 전체 흐름 (기록 → 18:00 제안 → 적용 → 다음 회차 · 다시 계산 → 되돌리기 · 무시 → 다시 제안) — 실제 서버 코드를 같은 PGlite에 붙여 돌림
+      - name: 알람 조정 제안 흐름
+        working-directory: supabase/tests
+        run: npm run e2e:suggest
+
       - name: 마이그레이션 파일 규칙
         if: github.event_name == 'pull_request'
         run: |
