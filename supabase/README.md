@@ -49,6 +49,68 @@ select vault.create_secret('<service_role 키>', 'service_role_key');
 - `20261109080000_voice_auto_commit.sql`(하루 기록 자동 정리)이 `voice-commit`을 10분마다 부르게 예약함(`voice-auto-commit`). 서비스 키로 오면 `_shared/ai/auto-commit.ts`가 [완료] 없이 지난 기준일 대화를 정리 — 기준일 다음 날 KST 새벽 4시 뒤 바로(기상 알람 · 마지막 말 뒤 기다림 없음, 11/13 — 4시 뒤 들어온 말은 다음 실행이 다시 정리), 한 번에 3개 · 60초. pg_net이 10초만 기다려서 바로 202로 답하고 정리는 `EdgeRuntime.waitUntil`로 뒤에서 — 결과는 함수 로그(`[auto-commit] 시작 · 완료 · 실패`)로 봄. `voice-commit`도 `verify_jwt = false`(alarm-roll과 같이 `isServiceCall` · `requireUser`로 가름) — **마이그레이션 적용 전에 함수를 먼저 배포**
 - `wake-check`는 `config.toml`에서 `verify_jwt = false`로 두고, 코드(`_shared/auth.ts` `requireServiceCall`)가 `apikey` · `Authorization` 머리글의 키를 `SUPABASE_SERVICE_ROLE_KEY`(legacy JWT) 또는 `SUPABASE_SECRET_KEYS`(`sb_secret_…`)와 직접 비교함 → Vault에 어느 형식을 넣어도 됨
 
+## 서버 전환 스위치 (`20261114100000_server_switch.sql`, M1 · 이슈 #475)
+
+알람 계산을 Edge 함수에서 FastAPI 서버(EC2)로 옮기는 동안, 어디서 돌지를 DB 표 한 줄로 정하고 언제든 Edge로 되돌리게 하는 스위치. 값은 전부 `edge`로 시작해서 적용만으로는 동작이 안 바뀜. 위 "배치"의 `wake-check` · `alarm-roll` · `suggestion-generate` 예약 명령은 이 파일부터 `private.invoke_edge_function(이름)` 대신 `private.run_job(이름)`을 부름 (`voice-auto-commit` · 친구 cron은 그대로).
+
+| 이름 | 무엇 | 누가 읽고 씀 |
+|---|---|---|
+| 표 `server_routes` | 함수 · 작업별 담당. `kind` = `function`(앱이 부르는 Edge 함수) · `job`(pg_cron 예약 작업), `mode` = 함수 `edge` · `canary` · `server` / 작업 `edge` · `shadow` · `server`. 처음 값: 함수 6줄(`place-search` · `place-reverse` · `alarm-suggest` · `alarm-commit` · `appointment-edit` · `alarm-roll`) · 작업 3줄(`wake-check` · `alarm-roll` · `suggestion-generate`) 전부 `edge`. 줄이 없으면 `edge`로 봄 | 서버(service_role)와 SQL 편집기. 앱은 못 읽음 |
+| 표 `server_route_users` | `canary`(지정한 계정만 서버로) 대상 계정 | 서버 · SQL 편집기. 앱은 못 읽음 |
+| 표 `server_heartbeat` | 작업마다 한 줄. `alive_at` = 스케줄러가 돌았음(감시용), `last_success_at` = 그 작업이 서버에서 `server` 모드로 성공함 | 서버가 씀. `run_job`이 `last_success_at`을 읽음 |
+| RPC `get_server_routes()` | 앱이 로그인한 뒤 부름. 함수 줄마다 부른 사람에게 해당하는 `edge` · `server` 값 하나만 돌려줌 (`canary`는 대상 계정만 `server`). 작업 줄 · 대상 목록은 안 줌 | 앱(authenticated) · service_role. anon 못 부름 |
+| 함수 `private.run_job(이름, role)` | pg_cron이 부름. 아래 표대로 Edge를 부르거나 건너뜀. Edge 호출은 기존 `invoke_edge_function`이 함 | service_role만 |
+
+**`run_job`이 정하는 것** (표를 못 읽거나 작업 줄이 없으면 `edge`로 봄)
+
+| role | 쓰는 곳 | `edge` · `shadow` | `server` |
+|---|---|---|---|
+| `poll`(기본) | 5분마다 도는 `wake-check` · `alarm-roll` | Edge를 부름 | 서버 성공 기록(`last_success_at`)이 12분 안이면 건너뜀, 없으면 Edge를 부름 |
+| `primary` | `suggestion-generate` 정시(18:00 KST) | Edge를 부름 | 건너뜀 (서버가 같은 시각에 하는 중) |
+| `safety` | `suggestion-generate` 안전망(18:15 KST, 새 cron `suggestion-generate-safety`) | 아무것도 안 함 (정시 호출이 이미 Edge를 불렀음) | 오늘(한국 날짜) 서버 성공 기록이 있으면 건너뜀, 없으면 Edge를 부름 |
+
+- Edge가 같은 일을 두 번 해도 기록 · 푸시는 한 번만 남음 (DB 유니크 키 · `claim_wake_nudges` · `roll_insert_occurrence` · 제안 유일 인덱스)
+- 값 바꾸기(전환 · 되돌리기)는 마이그레이션이 아니라 운영 조작 — Supabase SQL 편집기에서 직접. 반영은 앱이 표를 다시 읽을 때(함수), 다음 회차(작업)
+
+```sql
+-- 함수: 내 계정만 서버로 (canary) → 전체 서버 → Edge로 되돌리기
+update public.server_routes set mode = 'canary' where kind = 'function' and name = 'place-search';
+insert into public.server_route_users (name, user_id) values ('place-search', '<내 user_id>') on conflict do nothing;
+update public.server_routes set mode = 'server' where kind = 'function' and name = 'place-search';
+update public.server_routes set mode = 'edge'   where kind = 'function' and name = 'place-search';
+
+-- 작업: 서버가 세기만(shadow) → 서버가 실제로(server) → Edge로 되돌리기
+update public.server_routes set mode = 'shadow' where kind = 'job' and name = 'wake-check';
+update public.server_routes set mode = 'server' where kind = 'job' and name = 'wake-check';
+update public.server_routes set mode = 'edge'   where kind = 'job' and name = 'wake-check';
+
+-- 전부 Edge로 (급할 때)
+update public.server_routes set mode = 'edge' where mode <> 'edge';
+```
+
+**머지 전 기준선 · 적용 뒤 확인** (전부 읽기 전용, 값은 안 나옴. 머지 전에 한 번, 머지 뒤 30분 안에 같은 조회를 한 번 더)
+
+```sql
+-- 예약: 머지 전 6개 → 뒤 7개. wake-check · alarm-roll · suggestion-generate는 run_job, suggestion-generate-safety가 새로 생김, voice-auto-commit · 친구 cron은 그대로
+-- username = 그 작업을 예약한 계정. pg_cron은 (작업 이름, 계정) 쌍으로 같은 이름을 찾아 교체함 → 머지 전 6개의 username이 전부 같아야 이번 교체도 제자리 교체가 됨
+--   다르면 머지를 보류하고 알림 (같은 이름 작업이 하나 더 생겨 Edge가 5분마다 두 번 불릴 수 있음). 머지 뒤에도 같은 이름이 두 줄이면 바로 원복
+select jobid, jobname, username, schedule, command, active from cron.job order by jobname;
+-- 값이 전부 edge인지 · 하트비트 (머지 뒤)
+select kind, name, mode from public.server_routes order by kind, name;
+select * from public.server_heartbeat order by job_name;
+-- 기준선 (머지 직전 · 보관이 짧음): 지금 5분 배치가 Edge까지 닿는지. 머지 뒤 200이 안 보여도 M1 때문인지 원래 그랬는지(Vault 키 없음 · Edge 401 · 404) 가르려고
+select status_code, count(*) from net._http_response where created > now() - interval '30 minutes' group by status_code order by status_code;
+select name from vault.secrets where name in ('project_url', 'service_role_key');   -- 이름만. 둘 다 나와야 함
+-- 5분 배치가 Edge까지 닿는지 (머지 뒤): 30분 안에 응답 200이 줄마다(wake-check · alarm-roll) 쌓여야 함. cron 기록 "성공"은 요청을 줄에 넣었다는 뜻일 뿐
+select id, status_code, timed_out, error_msg, left(content::text, 80) as body, created from net._http_response order by created desc limit 30;
+select jobid, status, return_message, start_time from cron.job_run_details where start_time > now() - interval '30 minutes' order by start_time desc;
+```
+
+**원복** — 적용 뒤 30분 안에 `net._http_response`에 `wake-check` · `alarm-roll` 200이 안 보이면 (서버_완결점 10절), SQL 편집기에 `ops/server-switch-rollback.sql`을 통째로 붙여 실행함. `wake-check` · `alarm-roll` · `suggestion-generate`의 예약 명령을 M1 이전 모양(`private.invoke_edge_function(이름)`)으로 되돌리고 `suggestion-generate-safety`를 지움 (여러 번 실행해도 같음). 끝에 `cron.job` 목록을 보여 주니 `username`이 같은 이름으로 두 줄인지 확인함. 표 · 함수는 추가만 한 것이라 그대로 둠. 다시 적용은 `ops/server-switch-reapply.sql`. 두 파일은 `tests/db-check.mjs`가 실제로 돌려서 "원복하면 옛 명령 · 다시 적용하면 마이그레이션과 같은 목록"을 확인함.
+
+- 서버 스케줄러가 실제로 도는 중에 원복하면(작업 줄이 `shadow` · `server`) pg_cron이 Edge를 부르는 동안 서버도 같은 일을 함 (기록 · 푸시는 한 번만 남아 안전하지만 낭비) → 원복 전에 `update public.server_routes set mode = 'edge' where mode <> 'edge';`를 먼저 실행함
+- `suggestion-generate`를 `edge` → `server`로 바꾸는 일은 18:00 ~ 18:15 KST 사이를 피함 (그날 Edge가 두 번 돌 수 있음. 제안 유일 인덱스로 둘째는 0건이라 안전)
+
 ## 서버 함수가 쓰는 DB 함수 (service_role 전용)
 
 앱(authenticated · anon)은 못 부름. 서버 함수가 `supabase.rpc(...)`로 부름.

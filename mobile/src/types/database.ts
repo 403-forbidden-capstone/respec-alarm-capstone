@@ -614,6 +614,57 @@ isOneToOne: false
       referencedColumns: ["user_id"]
     }
                   ]
+                },"server_heartbeat": {
+                  Row: {
+                    "alive_at": string | null,"job_name": string,"last_success_at": string | null
+                  }
+                  Insert: {
+                    "alive_at"?: string | null,"job_name": string,"last_success_at"?: string | null
+                  }
+                  Update: {
+                    "alive_at"?: string | null,"job_name"?: string,"last_success_at"?: string | null
+                  }
+                  Relationships: [
+                    
+                  ]
+                },"server_route_users": {
+                  Row: {
+                    "kind": string,"name": string,"user_id": string
+                  }
+                  Insert: {
+                    "kind"?: string,"name": string,"user_id": string
+                  }
+                  Update: {
+                    "kind"?: string,"name"?: string,"user_id"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "server_route_users_route_fkey"
+      columns: ["kind","name"]
+isOneToOne: false
+      referencedRelation: "server_routes"
+      referencedColumns: ["kind","name"]
+    },{
+      foreignKeyName: "server_route_users_user_id_fkey"
+      columns: ["user_id"]
+isOneToOne: false
+      referencedRelation: "profiles"
+      referencedColumns: ["user_id"]
+    }
+                  ]
+                },"server_routes": {
+                  Row: {
+                    "kind": string,"mode": string,"name": string,"updated_at": string
+                  }
+                  Insert: {
+                    "kind": string,"mode"?: string,"name": string,"updated_at"?: string
+                  }
+                  Update: {
+                    "kind"?: string,"mode"?: string,"name"?: string,"updated_at"?: string
+                  }
+                  Relationships: [
+                    
+                  ]
                 },"sharing_permissions": {
                   Row: {
                     "can_edit_alarm": boolean,"can_view_alarm": boolean,"can_view_wake": boolean,"created_at": string,"grantee_id": string,"owner_id": string,"permission_id": string,"source_id": string,"source_type": Database["public"]['Enums']["permission_source"],"updated_at": string
@@ -918,6 +969,11 @@ isOneToOne: false
 "get_public_profiles":
 { Args: { "p_user_ids"?: (string)[] }; Returns: {
               "handle": string,"nickname": string,"profile_image_url": string,"user_id": string
+            }[]
+                           },
+"get_server_routes":
+{ Args: Record<PropertyKey, never>; Returns: {
+              "mode": string,"name": string
             }[]
                            },
 "get_shared_alarm_appointments":
