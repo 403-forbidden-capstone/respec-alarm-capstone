@@ -62,9 +62,10 @@ test('기기 길: 본인 기상 알람만 — 남의 알람 · 출발 알람 · 
   assert.equal(scriptCalls, 0);
 });
 
-test('앱 길과 기기 길이 같은 브리핑 · 대본은 한 번만 만들고 다음은 캐시(wake_scripts) · 정리 전이면 refresh_at = 04:10', async () => {
+test('앱 길과 기기 길이 같은 브리핑 · 대본은 한 번만 만들고 다음은 캐시(wake_scripts) · 정리 전이면 refresh_at = 04:10', async (t) => {
   fakeGemini();
   const { db, wake } = seed();
+  t.mock.method(Date, 'now', () => db.now.getTime()); // refresh_at은 지금 시각보다 앞설 수 없어서, 실제 시각이 04:10을 넘으면 기대값이 바뀜 → 시드 시각(전날 23:00)으로 고정
   const app = await briefAlarm({ userId: A, db: db as never, service: db as never, kinds: ['WAKE', 'DEPARTURE'] }, { alarm_id: wake, have: [] });
   assert.equal(app.script, 'MADE');
   assert.equal(scriptCalls, 1);
