@@ -86,7 +86,7 @@ npx eas-cli update --channel preview --message "무엇을 고쳤는지"
 ```
 
 - EAS 무료 플랜은 한 달 Android 빌드 15회. 네이티브가 안 바뀌면 빌드하지 않음
-- 데모 릴리스는 `v0.1.0`처럼 태그를 달면 release.yml이 preview APK를 빌드해 Releases에 QR과 함께 붙임
+- 데모 릴리스는 `v0.1.0`처럼 태그를 달면 release.yml이 preview APK를 빌드해 Releases에 QR과 함께 붙임. 레포 멤버 누구나 GitHub → Actions → 데모 릴리즈 → Run workflow에 다음 태그를 넣어도 됨(Expo 로그인 필요 없음)
 - 처음 한 번은 Expo 조직 Owner가 터미널에서 `development` 빌드를 직접 돌려 키스토어를 만듦(이후 빌드는 버튼으로 됨)
 - 설정값: `eas.json`(프로필 · 채널 · 환경), `app.json`(`runtimeVersion` fingerprint · `owner` · `projectId` · `updates.url`), Secret `EXPO_TOKEN`(Expo 조직 로봇 토큰)
 - Expo 프로젝트: [@respec-alarm-capstone/respec-alarm](https://expo.dev/accounts/respec-alarm-capstone/projects/respec-alarm). 빌드 프로필마다 같은 이름의 EAS 환경(development · preview · production) 변수를 씀
@@ -102,6 +102,7 @@ cp .env.example .env
   - 로컬 빌드(`npx expo run:android`): 받은 파일을 `mobile/google-services.json`에 둠
   - EAS 빌드: 파일 종류 환경 변수 `GOOGLE_SERVICES_JSON`으로 올림 — `eas env:create --name GOOGLE_SERVICES_JSON --type file --value ./google-services.json --environment preview` (development · production도 같은 방식). 이 파일을 넣거나 바꾸면 네이티브 설정이 바뀌어 `runtimeVersion` fingerprint가 달라지므로 새 빌드가 필요함
   - `eas build`를 거는 PC에도 같은 파일을 `mobile/google-services.json`에 둬야 함(EAS 변수와 같은 파일). 빌드 서버는 `GOOGLE_SERVICES_JSON` 파일이 fingerprint에 들어가는데, 이 PC에 파일이 없으면 지문이 달라 `Runtime version mismatch`로 실패함
+  - GitHub 버튼 빌드(release.yml · eas-build.yml)는 Secret `GOOGLE_SERVICES_JSON_B64`(같은 파일을 base64로 바꾼 값)를 빌드 직전에 `mobile/google-services.json`으로 꺼냄. 파일을 바꾸면 EAS 변수와 이 Secret을 같이 바꿈 — `base64 -w0 google-services.json | gh secret set GOOGLE_SERVICES_JSON_B64`
   - `mobile/.gitignore`(expo가 만든 블록 + `/android` `/ios`)는 레포에 올려 둠. 로컬과 EAS 서버에 이 파일이 같이 있어야 fingerprint가 같음(없으면 한쪽만 `bareGitIgnore`로 세어짐). `app.config.js` · `runtimeVersion` 정책은 그대로
 - `EXPO_PUBLIC_` 값은 빌드할 때 번들에 박힘. 로컬은 `.env`, 웹 미리보기는 Cloudflare 변수, APK는 EAS 환경 변수에 같은 값을 넣음
 

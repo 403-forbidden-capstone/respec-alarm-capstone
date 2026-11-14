@@ -1,16 +1,20 @@
 name: DB 검사 · 적용
 
 # DB 구조는 supabase/migrations의 새 파일로만 바꾸고, 실제 프로젝트에는 이 워크플로가 넣습니다 (터미널 db push 안 함).
-#   PR · main  마이그레이션 · RLS 검사: PGlite(WASM Postgres)에 Supabase 흉내를 만들고 적용 → RLS · 권한 · 함수 동작 확인
-#              실제 이미지 적용 · 타입: 실제 Supabase Postgres(supabase db start)에 처음부터 적용
-#                (PR만) 이미 있는 마이그레이션을 고쳤거나 새 파일 이름이 앞서면 실패 · 앱 타입이 스키마와 다르면 실패
-#   main       두 검사가 통과하면 실제 프로젝트에 supabase db push
+#   PR     검사 잡 하나에서 차례로 (잡이 둘이면 잡마다 분 올림이 붙어 Actions 분량이 두 배 가까이 됨, #514)
+#            마이그레이션 · RLS 검사: PGlite(WASM Postgres)에 Supabase 흉내를 만들고 적용 → RLS · 권한 · 함수 동작 확인
+#            실제 이미지 적용 · 타입: 실제 Supabase Postgres(supabase db start)에 처음부터 적용
+#            이미 있는 마이그레이션을 고쳤거나 새 파일 이름이 앞서면 실패 · 앱 타입이 스키마와 다르면 실패
+#          초안 PR에서는 안 돌고, 초안을 풀 때(ready_for_review) 돎
+#   main   PR에서 검사를 통과한 것만 머지되므로 검사 없이 실제 프로젝트에 supabase db push
+#          손으로 돌리면(workflow_dispatch) 검사 뒤 main일 때만 적용
 #   비밀값 SUPABASE_ACCESS_TOKEN 하나 (supabase/README.md)
 
 on:
   # 서버 함수(supabase/functions)와 데모 시드(supabase/seed)만 바꾼 PR · push에는 안 돎 — DB 구조와 상관없고 Actions 분량이 아까워서
   # (그 검사는 node --test로 로컬에서: supabase/README.md "시험")
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
     paths:
       - 'supabase/**'
       - '!supabase/functions/**'
@@ -39,15 +43,17 @@ env:
   PROJECT_REF: gomrhctwjvttoqifxktt
 
 jobs:
-  check:
-    name: 마이그레이션 · RLS 검사
+  verify:
+    name: 마이그레이션 · RLS 검사 · 실제 이미지 적용
+    # main push는 검사 없이 적용만, 초안 PR은 건너뜀 (workflow_dispatch는 pull_request가 비어 있어 돎)
+    if: github.event_name != 'push' && !github.event.pull_request.draft
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: supabase/tests
+    timeout-minutes: 20
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          fetch-depth: 2
 
       - name: Node
         uses: actions/setup-node@v7
@@ -57,20 +63,12 @@ jobs:
           cache-dependency-path: supabase/tests/package-lock.json
 
       - name: 패키지 설치
+        working-directory: supabase/tests
         run: npm ci
 
-      - name: 검사
+      - name: 마이그레이션 · RLS 검사
+        working-directory: supabase/tests
         run: npm test
-
-  rehearse:
-    name: 실제 이미지 적용 · 타입
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-        with:
-          fetch-depth: 2
 
       - name: 마이그레이션 파일 규칙
         if: github.event_name == 'pull_request'
@@ -125,7 +123,7 @@ jobs:
   preview_remote:
     name: PR #479 원격 DB 적용 목록만 확인
     if: github.event_name == 'pull_request' && github.event.pull_request.number == 479 && github.event.pull_request.head.repo.full_name == github.repository
-    needs: [check, rehearse]
+    needs: [verify]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
@@ -166,8 +164,9 @@ jobs:
 
   deploy:
     name: 실제 DB에 적용
-    needs: [check, rehearse]
-    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    needs: [verify]
+    # push에서는 verify가 건너뛰어져도(skipped) 돌아야 해서 !cancelled()로 받고, 손으로 돌린 검사가 실패하면 막음
+    if: ${{ !cancelled() && github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && needs.verify.result != 'failure' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     concurrency:

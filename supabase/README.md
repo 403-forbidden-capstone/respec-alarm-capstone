@@ -7,10 +7,10 @@ DB 구조는 `migrations/`의 SQL 파일로만 바꾸고, 실제 프로젝트에
 
 1. `npx supabase migration new 이름` → 생긴 `migrations/<시각>_이름.sql`에 SQL 작성
 2. 로컬 확인: `cd supabase/tests && npm ci && npm test` (Docker 없이 PGlite)
-3. PR → Actions가 임시 DB에 먼저 적용해 봄
+3. PR → Actions가 검사 잡 하나에서 임시 DB에 먼저 적용해 봄 (초안 PR은 초안을 풀 때)
    - 마이그레이션 · RLS 검사: PGlite에 적용 → RLS · 권한 · 함수 동작 (`tests/db-check.mjs`)
    - 실제 이미지 적용 · 타입: 실제 Supabase Postgres에 처음부터 적용 → 앱 타입이 스키마와 같은지
-4. 머지 → 같은 검사 뒤 실제 프로젝트에 `supabase db push`
+4. 머지 → PR에서 통과했으므로 검사 없이 실제 프로젝트에 `supabase db push` (Actions 분량, #514)
 
 ## 규칙
 
@@ -44,8 +44,72 @@ select vault.create_secret('<service_role 키>', 'service_role_key');
 - 둘 중 하나라도 없으면 오류 없이 경고만 남기고 끝남 → 키를 넣기 전에도 배치가 5분마다 돌지만 아무 일도 안 함
 - 예약 확인: `select * from cron.job;` · 실행 기록 `select * from cron.job_run_details order by start_time desc limit 10;`
 - `20261029075743_alarm_roll.sql`(반복 다음 회차)이 같은 방식으로 `alarm-roll`도 5분마다 부르게 예약함. **`alarm-roll` 함수 배포는 앱 맞추기 PR(3b) 머지 뒤** — 그 전엔 호출이 404로 끝남 (해롭지 않음)
-- `20261109080000_voice_auto_commit.sql`(하루 기록 자동 정리)이 `voice-commit`을 10분마다 부르게 예약함(`voice-auto-commit`). 서비스 키로 오면 `_shared/ai/auto-commit.ts`가 [완료] 없이 지난 기준일 대화를 정리 — 다음 아침 가장 이른 켜진 기상 알람 2시간 전(없으면 KST 04:00), 마지막 사용자 말 60분 뒤, 한 번에 3개 · 60초. pg_net이 10초만 기다려서 바로 202로 답하고 정리는 `EdgeRuntime.waitUntil`로 뒤에서 — 결과는 함수 로그(`[auto-commit] 시작 · 완료 · 실패`)로 봄. `voice-commit`도 `verify_jwt = false`(alarm-roll과 같이 `isServiceCall` · `requireUser`로 가름) — **마이그레이션 적용 전에 함수를 먼저 배포**
+- `20261112090000_suggest_generate.sql`(알람 조정 제안, #49 · 안건 D111)이 `suggestion-generate`를 매일 09:00 UTC(한국 18:00, 저녁 대화 전)에 부르게 예약함. 서비스 키로 오면 `_shared/suggest-run.ts`가 `prepare_suggestion_inputs`로 재료를 읽고 규칙(`calc/suggest.ts`)을 돌려 `alarm_suggestions`에 준비 알람 당김 제안(PENDING)을 넣음 — 앱은 S01 작업 전까지 이 종류를 숨김. 배포 전에는 404 (해롭지 않음)
+- `20261113090000_suggest_advance_plan.sql`(알람 조정 제안 · 당김 계산): 반복 일정의 새 회차 참여 조건이 바로 앞 회차의 당김 분(`prepare_advance_minutes`)을 이어받는 트리거, 제안 재료에서 직접 고른 준비 알람 제외. 계산은 `plan-core` · `calc/chain.ts`가 당김 분만큼 준비 알람을 앞당기고 준비 전 활동을 넘는 만큼만 기상도 앞당김 — 준비 전 활동은 저장하지 않고 저장된 알람에서 되찾음(`inferBeforePrepare`, 안건 D111 · B안)
+- `20261109080000_voice_auto_commit.sql`(하루 기록 자동 정리)이 `voice-commit`을 10분마다 부르게 예약함(`voice-auto-commit`). 서비스 키로 오면 `_shared/ai/auto-commit.ts`가 [완료] 없이 지난 기준일 대화를 정리 — 기준일 다음 날 KST 새벽 4시 뒤 바로(기상 알람 · 마지막 말 뒤 기다림 없음, 11/13 — 4시 뒤 들어온 말은 다음 실행이 다시 정리), 한 번에 3개 · 60초. pg_net이 10초만 기다려서 바로 202로 답하고 정리는 `EdgeRuntime.waitUntil`로 뒤에서 — 결과는 함수 로그(`[auto-commit] 시작 · 완료 · 실패`)로 봄. `voice-commit`도 `verify_jwt = false`(alarm-roll과 같이 `isServiceCall` · `requireUser`로 가름) — **마이그레이션 적용 전에 함수를 먼저 배포**
 - `wake-check`는 `config.toml`에서 `verify_jwt = false`로 두고, 코드(`_shared/auth.ts` `requireServiceCall`)가 `apikey` · `Authorization` 머리글의 키를 `SUPABASE_SERVICE_ROLE_KEY`(legacy JWT) 또는 `SUPABASE_SECRET_KEYS`(`sb_secret_…`)와 직접 비교함 → Vault에 어느 형식을 넣어도 됨
+
+## 서버 전환 스위치 (`20261114100000_server_switch.sql`, M1 · 이슈 #475)
+
+알람 계산을 Edge 함수에서 FastAPI 서버(EC2)로 옮기는 동안, 어디서 돌지를 DB 표 한 줄로 정하고 언제든 Edge로 되돌리게 하는 스위치. 값은 전부 `edge`로 시작해서 적용만으로는 동작이 안 바뀜. 위 "배치"의 `wake-check` · `alarm-roll` · `suggestion-generate` 예약 명령은 이 파일부터 `private.invoke_edge_function(이름)` 대신 `private.run_job(이름)`을 부름 (`voice-auto-commit` · 친구 cron은 그대로).
+
+| 이름 | 무엇 | 누가 읽고 씀 |
+|---|---|---|
+| 표 `server_routes` | 함수 · 작업별 담당. `kind` = `function`(앱이 부르는 Edge 함수) · `job`(pg_cron 예약 작업), `mode` = 함수 `edge` · `canary` · `server` / 작업 `edge` · `shadow` · `server`. 처음 값: 함수 6줄(`place-search` · `place-reverse` · `alarm-suggest` · `alarm-commit` · `appointment-edit` · `alarm-roll`) · 작업 3줄(`wake-check` · `alarm-roll` · `suggestion-generate`) 전부 `edge`. 줄이 없으면 `edge`로 봄 | 서버(service_role)와 SQL 편집기. 앱은 못 읽음 |
+| 표 `server_route_users` | `canary`(지정한 계정만 서버로) 대상 계정 | 서버 · SQL 편집기. 앱은 못 읽음 |
+| 표 `server_heartbeat` | 작업마다 한 줄. `alive_at` = 스케줄러가 돌았음(감시용), `last_success_at` = 그 작업이 서버에서 `server` 모드로 성공함 | 서버가 씀. `run_job`이 `last_success_at`을 읽음 |
+| RPC `get_server_routes()` | 앱이 로그인한 뒤 부름. 함수 줄마다 부른 사람에게 해당하는 `edge` · `server` 값 하나만 돌려줌 (`canary`는 대상 계정만 `server`). 작업 줄 · 대상 목록은 안 줌 | 앱(authenticated) · service_role. anon 못 부름 |
+| 함수 `private.run_job(이름, role)` | pg_cron이 부름. 아래 표대로 Edge를 부르거나 건너뜀. Edge 호출은 기존 `invoke_edge_function`이 함 | service_role만 |
+
+**`run_job`이 정하는 것** (표를 못 읽거나 작업 줄이 없으면 `edge`로 봄)
+
+| role | 쓰는 곳 | `edge` · `shadow` | `server` |
+|---|---|---|---|
+| `poll`(기본) | 5분마다 도는 `wake-check` · `alarm-roll` | Edge를 부름 | 서버 성공 기록(`last_success_at`)이 12분 안이면 건너뜀, 없으면 Edge를 부름 |
+| `primary` | `suggestion-generate` 정시(18:00 KST) | Edge를 부름 | 건너뜀 (서버가 같은 시각에 하는 중) |
+| `safety` | `suggestion-generate` 안전망(18:15 KST, 새 cron `suggestion-generate-safety`) | 아무것도 안 함 (정시 호출이 이미 Edge를 불렀음) | 오늘(한국 날짜) 서버 성공 기록이 있으면 건너뜀, 없으면 Edge를 부름 |
+
+- Edge가 같은 일을 두 번 해도 기록 · 푸시는 한 번만 남음 (DB 유니크 키 · `claim_wake_nudges` · `roll_insert_occurrence` · 제안 유일 인덱스)
+- 값 바꾸기(전환 · 되돌리기)는 마이그레이션이 아니라 운영 조작 — Supabase SQL 편집기에서 직접. 반영은 앱이 표를 다시 읽을 때(함수), 다음 회차(작업)
+
+```sql
+-- 함수: 내 계정만 서버로 (canary) → 전체 서버 → Edge로 되돌리기
+update public.server_routes set mode = 'canary' where kind = 'function' and name = 'place-search';
+insert into public.server_route_users (name, user_id) values ('place-search', '<내 user_id>') on conflict do nothing;
+update public.server_routes set mode = 'server' where kind = 'function' and name = 'place-search';
+update public.server_routes set mode = 'edge'   where kind = 'function' and name = 'place-search';
+
+-- 작업: 서버가 세기만(shadow) → 서버가 실제로(server) → Edge로 되돌리기
+update public.server_routes set mode = 'shadow' where kind = 'job' and name = 'wake-check';
+update public.server_routes set mode = 'server' where kind = 'job' and name = 'wake-check';
+update public.server_routes set mode = 'edge'   where kind = 'job' and name = 'wake-check';
+
+-- 전부 Edge로 (급할 때)
+update public.server_routes set mode = 'edge' where mode <> 'edge';
+```
+
+**머지 전 기준선 · 적용 뒤 확인** (전부 읽기 전용, 값은 안 나옴. 머지 전에 한 번, 머지 뒤 30분 안에 같은 조회를 한 번 더)
+
+```sql
+-- 예약: 머지 전 6개 → 뒤 7개. wake-check · alarm-roll · suggestion-generate는 run_job, suggestion-generate-safety가 새로 생김, voice-auto-commit · 친구 cron은 그대로
+-- username = 그 작업을 예약한 계정. pg_cron은 (작업 이름, 계정) 쌍으로 같은 이름을 찾아 교체함 → 머지 전 6개의 username이 전부 같아야 이번 교체도 제자리 교체가 됨
+--   다르면 머지를 보류하고 알림 (같은 이름 작업이 하나 더 생겨 Edge가 5분마다 두 번 불릴 수 있음). 머지 뒤에도 같은 이름이 두 줄이면 바로 원복
+select jobid, jobname, username, schedule, command, active from cron.job order by jobname;
+-- 값이 전부 edge인지 · 하트비트 (머지 뒤)
+select kind, name, mode from public.server_routes order by kind, name;
+select * from public.server_heartbeat order by job_name;
+-- 기준선 (머지 직전 · 보관이 짧음): 지금 5분 배치가 Edge까지 닿는지. 머지 뒤 200이 안 보여도 M1 때문인지 원래 그랬는지(Vault 키 없음 · Edge 401 · 404) 가르려고
+select status_code, count(*) from net._http_response where created > now() - interval '30 minutes' group by status_code order by status_code;
+select name from vault.secrets where name in ('project_url', 'service_role_key');   -- 이름만. 둘 다 나와야 함
+-- 5분 배치가 Edge까지 닿는지 (머지 뒤): 30분 안에 응답 200이 줄마다(wake-check · alarm-roll) 쌓여야 함. cron 기록 "성공"은 요청을 줄에 넣었다는 뜻일 뿐
+select id, status_code, timed_out, error_msg, left(content::text, 80) as body, created from net._http_response order by created desc limit 30;
+select jobid, status, return_message, start_time from cron.job_run_details where start_time > now() - interval '30 minutes' order by start_time desc;
+```
+
+**원복** — 적용 뒤 30분 안에 `net._http_response`에 `wake-check` · `alarm-roll` 200이 안 보이면 (서버_완결점 10절), SQL 편집기에 `ops/server-switch-rollback.sql`을 통째로 붙여 실행함. `wake-check` · `alarm-roll` · `suggestion-generate`의 예약 명령을 M1 이전 모양(`private.invoke_edge_function(이름)`)으로 되돌리고 `suggestion-generate-safety`를 지움 (여러 번 실행해도 같음). 끝에 `cron.job` 목록을 보여 주니 `username`이 같은 이름으로 두 줄인지 확인함. 표 · 함수는 추가만 한 것이라 그대로 둠. 다시 적용은 `ops/server-switch-reapply.sql`. 두 파일은 `tests/db-check.mjs`가 실제로 돌려서 "원복하면 옛 명령 · 다시 적용하면 마이그레이션과 같은 목록"을 확인함.
+
+- 서버 스케줄러가 실제로 도는 중에 원복하면(작업 줄이 `shadow` · `server`) pg_cron이 Edge를 부르는 동안 서버도 같은 일을 함 (기록 · 푸시는 한 번만 남아 안전하지만 낭비) → 원복 전에 `update public.server_routes set mode = 'edge' where mode <> 'edge';`를 먼저 실행함
+- `suggestion-generate`를 `edge` → `server`로 바꾸는 일은 18:00 ~ 18:15 KST 사이를 피함 (그날 Edge가 두 번 돌 수 있음. 제안 유일 인덱스로 둘째는 0건이라 안전)
 
 ## 서버 함수가 쓰는 DB 함수 (service_role 전용)
 
@@ -66,6 +130,7 @@ select vault.create_secret('<service_role 키>', 'service_role_key');
 | `find_missed_wake_alarms(p_now, p_lookback_hours)` | `wake-check` | 기상 미확인(MISSED)으로 기록할 알람 목록 (미확인 시각 = 마지막으로 울리기 시작한 때 + 30분 — 확인 알림에 답이 없으면 다시 울리지 않으므로 다시 울림 소요를 안 더함, 친구 7장 D2). 폰은 미루면 다시 울림 묶음을 처음부터 새로 시작하므로, 마지막 울림 시작 = 마지막 미루기 시각 + 미루기 시간(미루기가 없으면 알람 시각). 돌려주는 `snooze_minutes`는 미루기 합이라 참고용이고 `missed_at`은 이 합으로 구하지 않음. 기상 확인은 같은 사람의 `WAKE_CONFIRMED`(어느 기상 알람이든) 또는 `daily_records.wake_confirmed_at`이면 인정. 기록은 알람 시각 6시간 전 ~ 18시간 뒤만 봄. 기상 알람은 켜져 있거나, 꺼졌어도 그 구간에 울린 기록(TRIGGERED)이 있으면 셈 — 알람이 울린 뒤 알람만 꺼도 미확인 후보에 남음(`private.wake_alarm_counts`, 11/9 탐색 시험 X-WAKE-04). 돌려주는 `event_key`를 `alarm_events.client_event_id`로 넣고 `on conflict do nothing`하면 같은 알람이 두 번 기록되지 않음 |
 | `roll_insert_occurrence(p_appointment, p_participant, p_alarms, p_items)` | `alarm-roll` (다음 PR) | 반복 회차 하나를 약속 · 참여 조건 · 알람 · 준비물(`todos` ITEM)까지 **한 트랜잭션**으로 씀. 같은 (만든 사람, 묶음, 날짜)가 이미 있으면 아무것도 안 쓰고 `null`(같은 요청 두 번 = 같은 결과), 새로 만들면 `appointment_id`. 넣는 칸은 `alarm-commit`(`_shared/commit.ts` persistAppointment)과 같고 (알람의 `vibration`은 `20261030200000_alarm_vibration.sql`부터 — 직접 고른 진동을 다음 회차가 이어받음) 약속에 `memo` · `dest_radius_m`만 더 이어받음. 입력은 jsonb(`series_id` · `occurrence_on` 필수) |
 | `roll_due_series(p_now, p_limit)` | `alarm-roll` 배치 (다음 PR) | 회차를 넘길 후보 묶음 `(user_id, series_id, kind, template_id)`, 다음 회차가 급한 순 (정말 만들 날짜가 있는지는 `alarm-roll`이 다시 봄). `APPOINTMENT`: 묶음의 **기준 회차**(예외 아닌 회차 중 날짜가 가장 늦은 것, 없으면 이번만 고친 회차 중, 이번만 지운 회차는 기준이 아님)에 읽을 수 있는 `recurrence_rule`(두 모양)이 있고 개인 약속이며 **다음 회차** 시각이 `p_now + 14일` 앞(14일치가 차 있으면 안 줌) · 재시도 대기 아님(`roll_attempts.next_try_at`이 안 온 줄 없음) · 미뤄 둔 날짜의 재시도 때가 지났으면 창 밖이어도 포함. `STANDALONE`: 일정 없는 반복 알람(같은 기준). `ROUTINE`: 켜 둔 루틴(읽을 수 있는 요일)의 켜진 단계 알람 시각이 지난 것. 못 읽는 규칙 · 요일(예전 MONTHLY · INTERVAL 등)은 빼서 매번 앞자리를 차지하지 않게 |
+| `prepare_suggestion_inputs(p_now)` | `suggestion-generate` 배치 | 앞으로 36시간 안 반복 일정의 켜진 준비 알람마다 지난 회차 잔차(실제 준비 − 계획 준비, 분, 오래된 → 최근 최대 10개) · 지금 당김 분 · 준비 전 시간 · 상한(10 / 5분). 예정 출발 ±3분 · 준비 시작 없는 날은 빼고, 대기 중 제안 · 7일 안 제안 · 무시 뒤 실측 3번 전은 후보에서 뺌 (D62 · D24 C). 서버 역할만 |
 
 앱(authenticated)이 부르는 DB 함수 추가분:
 
@@ -233,6 +298,7 @@ create policy wake_signal_receive on realtime.messages
 | `notify` | 다른 사람 폰에 푸시 (종류별 고정 문구 · 권한은 `can_send_push` · 그룹은 `plan_group_push`) | 앱 G04 · G03 · F01 · G02 | 켬 | Expo Push |
 | `account-delete` | 계정 삭제 (친구 12장): 본인만, `prepare_account_delete`(개인 약속 삭제 · 그룹 나가기 · 토큰 삭제) → `auth.admin.deleteUser`. 공동 약속은 만든 사람 칸만 비어 남음 | 앱 설정 > [계정 삭제] (두 번 확인 뒤) | 켬 | — |
 | `appointment-edit` | 일정 수정 · 삭제 (N6, D41): 한 번짜리와 반복의 **이번만 / 이후 모두** 고치기 · 지우기, 이번만 지운 회차 되돌리기, 공동 약속에서 나만 빠지기(만든 사람이 시각 · 장소를 고치면 참여자 알람도 다시 계산하고 푸시 — 친구 9장). 알람은 다시 계산해 `ring_packages` · `canceled_alarm_ids`를 `alarm-commit`과 같은 모양으로 돌려줌(앱이 `applyCommit`에 그대로). 7장 7.1.3: 앞 일정이 바뀌거나 지워지면 같은 날 다른 일정의 기상을 다시 판정. 요청 `{ action: UPDATE|DELETE|RESTORE|LEAVE, appointment_id, scope?: this|following, patch?, confirmed? }`. 이번만 고친 / 지운 회차는 `appointments.exception_kind`(EDITED / CANCELED)로 표시 — alarm-roll이 다시 안 만들고 기준 회차에서 뺌. **배포는 `20261030150000_appointment_edit.sql` 적용 뒤, `alarm-roll` 재배포도 같이** | 앱 H03 편집 시트 (4c 뒤) | 켬 | 카카오 길찾기 (장소를 바꿀 때) |
+| `suggestion-apply` | 알람 조정 제안 적용 · 고쳐 적용 · 무시 · 되돌리기 (지금은 준비 알람 당김만, 안건 D111 · D23 A). 그 일정의 이번 회차와 이후 회차의 당김 분(`prepare_advance_minutes`)을 바꾸고, 알람은 다시 계산하지 않고 당김 차이만큼만 옮김(준비 알람 = 차이, 기상 = 준비 전 활동을 넘는 차이) → `ring_packages`. 되돌리면 제안은 대기로. 본문 `_shared/suggest-apply.ts` |
 | `wake-check` | 기상 미확인(MISSED) 기록 | pg_cron 5분마다 (서비스 키) | 끔 (코드에서 키 비교) | — |
 | `alarm-roll` | 반복 약속 · 일정 없는 반복 알람의 다음 회차를 앞으로 14일치 미리 만들고(회차마다 약속 · 참여 · 알람 새 행, 회차마다 길찾기 1번), 루틴 알람 시각을 다음 발생으로 옮김. 길찾기가 안 되면 1 · 3 · 6시간 뒤 재시도 → 첫 알람 12시간 전까지 안 되면 내 실측 중앙값(`CACHED`) → 직선 근사(`ESTIMATE`). 응답 `{ created, moved_alarm_ids, pending, ring_packages, canceled_alarm_ids, kakao_calls }` (`pending`은 `{ series_id, occurrence_on, reason }` 목록, `reason`은 `ROUTE_RETRY`(길찾기 재시도 대기) · `DAILY_BUDGET`(하루 길찾기 몫) · `ALARM_CAP`(앞으로 켜진 알람 상한) · `RUN_LIMIT`(이번 실행 한도 · 시간)). 길찾기를 쓴 뒤 계산 · 저장이 던져도 재시도 기록(1 · 3 · 6시간)을 남겨서 다음 5분 실행이 같은 회차로 카카오를 또 부르지 않음. **배포는 앱 맞추기(3b) 머지 뒤** | 배치: pg_cron 5분마다 (서비스 키, 길찾기 20번 · 50묶음 · 40초) / 본인: 앱 `syncNow`·반복 일정 저장 직후 (로그인 토큰, 길찾기 최대 4회차) | 끔 (코드에서 길을 가름) | 카카오 길찾기 |
 | `voice-session` | 자기 전 대화 시작 · 이어 받기(텍스트, 첫 마디는 서버 템플릿 — 모델 호출 없어 `ANTHROPIC_API_KEY` 없이도 동작). 오늘 안 끝난 세션은 그대로(resume), 하루 5대화 넘으면 `session_id: null` + `limits.reached: DAY`. L4 AI 묶음 — **첫 배포 전 헤드에 알림** | 앱 A02 | 켬 | — |
@@ -365,7 +431,7 @@ npx supabase@2.119.0 functions deploy appointment-edit --project-ref gomrhctwjvt
 npx supabase@2.119.0 functions deploy timetable-extract --project-ref gomrhctwjvttoqifxktt --use-api   # ai_calls_point_timetable 마이그레이션 적용 뒤에 — 먼저 배포하면 호출 기록(TT)이 제약에 걸려 안 쌓이고 하루 한도가 풀림
 ```
 
-- `verify_jwt`는 `config.toml`의 `[functions.<이름>]`이 정함 (`wake-check` · `alarm-roll` 둘만 끔). 배포 때 따라감
+- `verify_jwt`는 `config.toml`의 `[functions.<이름>]`이 정함 (`wake-check` · `alarm-roll` · `suggestion-generate`만 끔). 배포 때 따라감
 - `_shared/`는 함수 폴더 밖이어도 상대 import라 같이 묶임. 공용 파일을 고치면 쓰는 함수를 다시 배포해야 함
 - 배치 키(Vault `project_url` · `service_role_key`)를 만든 뒤 `wake-check`를 배포하면 5분마다 돔. 배포 전에는 404가 나도 정상 ("배치"). `alarm-roll`도 같지만 **앱 맞추기(3b) 머지 뒤에 배포**함
 

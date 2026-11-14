@@ -130,6 +130,8 @@ export const MAX_ATTEMPTS = 2; // 처음 + 다시 1번
 export const RETRY_DEFAULT_MS = 500;
 export const RETRY_MIN_MS = 200;
 export const RETRY_MAX_MS = 2_000;
+// 마감 안 다시 시도의 최소 시도 시간 — Gemini Flash-Lite 정상 응답 1.4~4.6초(11/12 실측)라 이보다 짧으면 다시 보내도 못 받음
+export const RETRY_MIN_ATTEMPT_MS = 3_000;
 
 // retry-after를 200~2000ms로 자름 (서버가 길게 기다리라고 해도 사용자가 기다리는 요청이라 2초 넘게는 안 기다림), 없으면 500ms
 export function retryDelayMs(e: LlmClientError): number {
@@ -335,6 +337,7 @@ export async function callLlm<T = unknown>(client: LlmClient | null, opts: CallO
   let response: LlmResponse | null = null;
   let lastError: LlmClientError | null = null;
   let blocked: { scope: string; retryAfterS: number } | null = null;
+  let attemptMs = opts.timeoutMs;
   for (;;) {
     if (opts.gate) {
       const v = await opts.gate.acquire();
@@ -345,13 +348,18 @@ export async function callLlm<T = unknown>(client: LlmClient | null, opts: CallO
     }
     attempts++;
     try {
-      response = await attemptOnce(client, request, opts.timeoutMs);
+      response = await attemptOnce(client, request, attemptMs);
       break;
     } catch (e) {
       lastError = asClientError(e);
       if (attempts >= MAX_ATTEMPTS || !isRetryable(lastError, opts.retryOnTimeout)) break;
       const wait = retryDelayMs(lastError);
-      if (opts.deadlineMs !== undefined && now() - t0 + wait + opts.timeoutMs > opts.deadlineMs) break;
+      // 마감이 있으면 다시 시도는 남은 시간만큼만 — 빨리 온 503(11/12 T1 1.4초)에 남은 7초를 버리지 않음. 남은 시간이 너무 짧으면 안 함
+      if (opts.deadlineMs !== undefined) {
+        const left = opts.deadlineMs - (now() - t0) - wait;
+        if (left < Math.min(opts.timeoutMs, RETRY_MIN_ATTEMPT_MS)) break;
+        attemptMs = Math.min(opts.timeoutMs, left);
+      }
       await sleep(wait);
     } finally {
       opts.gate?.release();

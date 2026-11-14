@@ -1,5 +1,5 @@
-# Source deploy must include the two .cbm models copied locally by the developer.
-# Keep credentials, data, virtualenv and local artifacts OUT of Cloud Build uploads.
+# Legacy Cloud Run source deploy is not supported with the EC2 runtime-volume image.
+# Model artifacts are never uploaded to build contexts.
 .gcloudignore
 .git/
 .venv/
@@ -7,7 +7,11 @@ __pycache__/
 *.pyc
 .env
 .env.*
+*.cbm
+models/
 *.csv
+*.parquet
+*.jsonl
 *.zip
 *.sqlite
 .DS_Store

@@ -5,12 +5,13 @@
 //   1. 올리지 못한 울림 기록을 먼저 올려 봄 — 실패해도 로그아웃은 계속
 //   2. 폰 알람 전부 취소 (AlarmCore.cancelAll, 무음 알림 포함, 맞추기와 같은 줄에서 — 앞에 서 있던 맞추기가 끝난 뒤에). 이게 실패하면 로그아웃하지 않음 — 앞 계정의 알람이 폰에 남아 울리면 안 되므로
 //   3. 그래도 폰에 남은 울림 기록은 버림 — 다음 계정에 섞이지 않게 (1에서 못 올린 것도 여기서 버려짐)
-//   4. 푸시 토큰 지우기 (이 기기의 토큰 행, 아래)
+//   4. 푸시 토큰 지우기 (이 기기의 토큰 행, 아래) · 백그라운드 브리핑 갱신 기기 키 지우기 (서버 줄 + 폰 Keystore 저장소, #515)
 //   5. 실시간 구독 끊기 (그룹 기상 신호) · 기능이 onSignOut으로 등록한 메모리 정리
 //   6. 로그아웃 (supabase.auth.signOut)
 // 데이터 모드 저장값은 그대로 둠 (로그아웃해도 모드가 바뀌지 않음)
 // 다시 로그인하면 useAlarmSync가 로그아웃 중 표시를 끄고 reconcile이 서버 알람으로 폰 예약을 다시 채움 (로그아웃이 중간에 멈추면 여기서 바로 끔)
 import { cancelAllPhoneAlarms, discardPendingEvents, setSigningOut, uploadEvents } from './alarmSync';
+import { forgetBriefingDevice } from './alarmSync/briefingDevice';
 import { signOut } from './auth';
 import { UserError } from './errors';
 import { removePushToken } from './push/token';
@@ -40,6 +41,8 @@ async function cleanupLocalUserState(cancelFailed: string, forgetPushToken: bool
   }
   await discardPendingEvents().catch(() => {});
   if (forgetPushToken) await clearPushToken().catch(() => {});
+  // 기기 키는 로그아웃 때만 (시험 데이터 지우기는 로그인 그대로라 새벽 갱신이 계속 돌아야 함). 폰 알람은 위에서 지웠으니 갱신 예약도 이미 없음
+  if (forgetPushToken) await forgetBriefingDevice({ revoke: true }).catch(() => {});
   unsubscribeAll();
   signOutCleanups.forEach((cleanup) => {
     try {
@@ -69,6 +72,8 @@ export async function cleanupAfterAccountDelete(): Promise<void> {
   await cancelAllPhoneAlarms().catch(() => {});
   await discardPendingEvents().catch(() => {});
   // 푸시 토큰 행은 서버가 계정과 함께 지움(prepare_account_delete) — 로그인이 이미 무효라 앱에서 지우려 해도 거절됨
+  // 기기 키 서버 줄도 계정과 같이 지워짐(briefing_devices → profiles cascade) — 폰 키만 지움
+  await forgetBriefingDevice({ revoke: false }).catch(() => {});
   unsubscribeAll();
   signOutCleanups.forEach((cleanup) => {
     try {

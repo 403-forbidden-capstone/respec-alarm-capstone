@@ -1,10 +1,15 @@
+# Only application code and dependencies belong in the build context.
 .venv/
 __pycache__/
 *.pyc
 .env
 .env.*
-!*.env.example
-models/**
-!models/v4_age_only/
-!models/v4_age_only/c1_mae.cbm
-!models/v4_age_only/w4_mae.cbm
+!.env.example
+models/
+*.cbm
+*.csv
+*.parquet
+*.jsonl
+*.sqlite
+*.zip
+.DS_Store

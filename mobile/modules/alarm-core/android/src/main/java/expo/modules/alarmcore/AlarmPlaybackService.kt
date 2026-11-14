@@ -138,7 +138,7 @@ class AlarmPlaybackService : Service() {
   private var remainingSounds: MutableList<Uri> = mutableListOf()
 
   private var mediaPlayer: MediaPlayer? = null
-  // 음성 브리핑 (BriefingSpeaker: 1~3단계 Android TTS, 긴급 4단계는 미리 만든 Gemini 음성) — 해제 전까지 반복. 알람음은 계속 20%로 재생
+  // 음성 브리핑 (BriefingSpeaker: 1 · 2단계 Android TTS, 3 · 4단계는 미리 만든 Gemini 음성 → 예비 WAV → Android TTS) — 해제 전까지 반복. 알람음은 계속 20%로 재생
   private var speaker: BriefingSpeaker? = null
   private var speaking = false
   // 알람음 크기 비율 — 늘 1. 개발 화면의 "진동만 · AI 음성만" 시험 알람만 0 (재생 경로 · 포커스 · 진동 · 음성은 그대로, VoiceTest)
@@ -367,7 +367,7 @@ class AlarmPlaybackService : Service() {
     currentVoiceLevel = speech.level
     peakVoiceLevel = maxOf(peakVoiceLevel ?: 0, speech.level)
     voiceLevel = speech.level
-    voiceEngine = if (speech.wav != null) "GEMINI" else "ANDROID"
+    voiceEngine = if (speech.wav != null || speech.bundled != null) "GEMINI" else "ANDROID"
     if (alarm.type == "WAKE") updateStageEffects(alarm, speech.level)
     val generation = ++voiceGeneration
     speaker = BriefingSpeaker(

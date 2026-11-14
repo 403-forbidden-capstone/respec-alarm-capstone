@@ -1,6 +1,8 @@
 // Gemini Live 1회용 토큰 만들기 — voice-live-token 함수와 로컬 점검 스크립트(tools/gemini-smoke)가 같은 코드를 씀
 //   순수 TS (fetch를 넣어 줄 수 있음) — node --test · 로컬 스크립트에서 그대로 돎
 import { HttpError } from '../errors.ts';
+import { lifeDate } from './turn-core.ts';
+import { addDays } from './view.ts';
 
 export const LIVE_MODEL = 'gemini-3.8-live';
 export const LIVE_TOKEN_URL = 'https://generativelanguage.googleapis.com/v1beta/auth_tokens';
@@ -33,8 +35,24 @@ export function liveHistory(turns: readonly { role: 'user' | 'ai'; text: string 
   return lines.length === 0 ? '' : `\n\nConversation so far in this chat room (typed or spoken). Continue naturally from it; do not repeat greetings:\n${lines.join('\n')}`;
 }
 
+// 날짜 해석 — 글 대화(view.ts 날짜 블록 · turn-core dayOf)와 같은 KST 새벽 4시 규칙. 토큰을 만드는 때(now) 기준
+//   day = 이어 쓰는 대화방의 기준일 — 있으면 '오늘'은 그 날 (03:59에 연 방을 04:00 뒤에 이어 써도 글 대화처럼 그 방 기준일)
+export function liveDateNote(now: number, day?: string): string {
+  const iso = new Date(now).toISOString();
+  const kst = new Date(now + 9 * 3_600_000).toISOString();
+  const today = day ?? lifeDate(iso);
+  return (
+    `
+
+Date rule (Korea time). Now: ${kst.slice(0, 10)} ${kst.slice(11, 16)}. The day changes at 4 AM, not at midnight: ` +
+    `"today" (오늘) is ${today}, "yesterday" (어제) is ${addDays(today, -1)}, "tomorrow" (내일) is ${addDays(today, 1)}, "the day after tomorrow" (모레) is ${addDays(today, 2)}. ` +
+    'Expressions counted from now, like "later" (이따가), "in N hours" (N시간 뒤) or "after I wake up" (자고 일어나서), use the current time. Explicit dates are used as said. ' +
+    'If the date or AM/PM is unclear, or a plan would fall before now, ask the user.'
+  );
+}
+
 // 토큰 요청 본문 — 모델 · 응답 형식 · 지침을 토큰에 잠가서 앱이 바꿀 수 없게 함
-export function liveTokenBody(now: number, model = LIVE_MODEL, history = ''): Record<string, unknown> {
+export function liveTokenBody(now: number, model = LIVE_MODEL, history = '', day?: string): Record<string, unknown> {
   return {
     // uses는 생략하면 1회 (REST에서는 설정과 함께 보내지 않음)
     expireTime: new Date(now + LIVE_SESSION_MS).toISOString(), // 대화 한 번의 최대 길이
@@ -42,7 +60,7 @@ export function liveTokenBody(now: number, model = LIVE_MODEL, history = ''): Re
     bidiGenerateContentSetup: {
       model: `models/${model}`,
       generationConfig: { responseModalities: ['AUDIO'] },
-      systemInstruction: { parts: [{ text: LIVE_SYSTEM + history }] },
+      systemInstruction: { parts: [{ text: LIVE_SYSTEM + liveDateNote(now, day) + history }] },
       inputAudioTranscription: {}, // 내 말 · AI 말을 글로도 받아 화면에 보여 줌
       outputAudioTranscription: {},
     },
@@ -52,13 +70,13 @@ export function liveTokenBody(now: number, model = LIVE_MODEL, history = ''): Re
 // 실패하면 VOICE_UNAVAILABLE. 원인(상태 · 본문)은 서버 로그(log)에만 남김
 export async function createLiveToken(
   apiKey: string,
-  opts: { fetchFn?: typeof fetch; now?: number; model?: string; history?: string; log?: (...a: unknown[]) => void } = {},
+  opts: { fetchFn?: typeof fetch; now?: number; model?: string; history?: string; day?: string; log?: (...a: unknown[]) => void } = {},
 ): Promise<{ token: string; model: string }> {
-  const { fetchFn = fetch, now = Date.now(), model = LIVE_MODEL, history = '', log = console.error } = opts;
+  const { fetchFn = fetch, now = Date.now(), model = LIVE_MODEL, history = '', day, log = console.error } = opts;
   const res = await fetchFn(LIVE_TOKEN_URL, {
     method: 'POST',
     headers: { 'x-goog-api-key': apiKey, 'content-type': 'application/json' },
-    body: JSON.stringify(liveTokenBody(now, model, history)),
+    body: JSON.stringify(liveTokenBody(now, model, history, day)),
   }).catch((e) => {
     log('gemini auth_tokens fetch failed', String(e));
     return null;

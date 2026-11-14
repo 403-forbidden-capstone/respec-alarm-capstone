@@ -10,6 +10,7 @@ import {
   formatTime,
   formatTime24,
   josa,
+  lifeDayKey,
   joinKo,
   keepWords,
   keepWordsIfWrappable,
@@ -129,5 +130,20 @@ describe('formatWait', () => {
 
   it('0 이하도 1초로', () => {
     expect(formatWait(0)).toBe('1초');
+  });
+});
+
+describe('lifeDayKey — AI 대화방 · 하루 기록 기준일 (KST 새벽 4시)', () => {
+  const k = (iso: string) => lifeDayKey(new Date(iso));
+  it('23:59 · 00:00 · 03:59는 전날, 04:00부터 그날', () => {
+    expect(k('2026-11-11T23:59:00+09:00')).toBe('2026-11-11');
+    expect(k('2026-11-12T00:00:00+09:00')).toBe('2026-11-11');
+    expect(k('2026-11-12T03:59:59+09:00')).toBe('2026-11-11');
+    expect(k('2026-11-12T04:00:00+09:00')).toBe('2026-11-12');
+  });
+  it('월말 · 연말', () => {
+    expect(k('2026-12-01T01:00:00+09:00')).toBe('2026-11-30');
+    expect(k('2027-01-01T03:00:00+09:00')).toBe('2026-12-31');
+    expect(k('2027-01-01T04:00:00+09:00')).toBe('2027-01-01');
   });
 });

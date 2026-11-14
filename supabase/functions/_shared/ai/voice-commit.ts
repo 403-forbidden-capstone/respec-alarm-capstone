@@ -95,8 +95,8 @@ async function writeCommit(deps: SessionDeps, sessionId: string, commit: CommitS
 type Storage = Structured['storage'];
 type TodoResult = Structured['todos'][number]['stored'];
 
-/** 할 일 · 준비물 — 이미 있는 것(같은 키 + 같은 약속 · 날짜, 이 대화가 만든 것)은 건너뜀. 계획 순서대로 결과 */
-async function saveTodos(db: Db, userId: string, sessionId: string, todos: TodoPlan[]): Promise<TodoResult[]> {
+/** 할 일 · 준비물 — 이미 있는 것(같은 키 + 같은 약속 · 날짜, 이 대화가 만든 것)은 건너뜀. 계획 순서대로 결과. voice-turn도 대화 중 준비물에 씀 */
+export async function saveTodos(db: Db, userId: string, sessionId: string, todos: TodoPlan[]): Promise<TodoResult[]> {
   if (todos.length === 0) return [];
   // shortcut: 최근 500개와만 비교 — 할 일이 그보다 많아지면 키로 거르는 쿼리로
   const existing = must<{ title: string; appointment_id: string | null; due_date: string | null; source_session_id: string | null }[]>(

@@ -15,7 +15,7 @@ import { schemaOf, type SchemaId } from '../ai/schemas/index.ts';
 import ASSIST_E4 from './ASSIST_E4.v1.1.ts';
 import T1 from './T1.v1.5.ts';
 import T2 from './T2.v3.3.ts';
-import T2F from './T2F.v2-c.ts';
+import T2F from './T2F.v2-d.ts';
 import T3 from './T3.v1.ts';
 import T4 from './T4.v1.1.ts';
 import T5 from './T5.v2.ts';
@@ -47,11 +47,14 @@ export interface PointConfig {
 export const POINTS: Record<PointId, PointConfig> = {
   // 대화 답. 장부 n=1530(Claude, 오류 · 생각 끔 제외): p50 3.9초 / p95 6.5초 → 13초였음
   //   Gemini Flash-Lite 실측(11/7) 4.7 · 11.5 · 12.4초 → 16초. 다시 시도는 원래 18초 마감 안에 안 들어가 일어나지 않으므로 늘려도 호출 수 · 마감은 그대로
-  T1: { prompt: T1, schema: 't1-reply.v1', effort: 'low', maxTokens: 2048, thinking: null, timeoutMs: 16_000, retryOnTimeout: true, cacheSystem: true },
+  //   11/12 다시 잼(Flash-Lite, 모델 그대로): 정상 답 대부분 1.4~4.6초지만 과부하 때 9~23초 꼬리 · 503 — 20초 (턴 마감 30초 안에서 남은 시간으로 잘림)
+  T1: { prompt: T1, schema: 't1-reply.v1', effort: 'low', maxTokens: 2048, thinking: null, timeoutMs: 20_000, retryOnTimeout: true, cacheSystem: true },
   // 빠른 추출. 장부 n=156(Claude Haiku): p50 2.4초 / p95 5.3초. 제한 시간 안에 안 오면 "처리할 게 없음"으로 보고 T1 답을 쓴다
   //   (다음 턴 T2F가 따라잡음). 그래서 다시 시도하지 않음. 적응형 생각 켬(카드 ⑥ 31번, 끄면 오류 3배 — Gemini는 effort low = thinkingLevel low)
   //   Gemini Flash-Lite는 5초에 시간 초과(11/7 실측, 같은 크기 T1이 4.7~11.5초) → 9초. T2F 9초 + T1 9초 남음 = 턴 마감 18초 · REGEN_MIN 7초 안
-  T2F: { prompt: T2F, schema: 'extract-fast.v1', effort: 'low', maxTokens: 4096, thinking: { type: 'adaptive' }, timeoutMs: 9_000, retryOnTimeout: false, cacheSystem: true },
+  //   11/12 실측 17번(정상 답): 1.4 · 1.4 · 1.4 · 1.6 · 1.7 · 1.9 · 2.3 · 2.9 · 4.6 · 9.0 · 9.2 · 9.3 · 11.8 · 18.4 · 20.7 · 22.8초 — 9초면 1/3쯤을 버림 → 15초.
+  //   일정일 수도 있는 말은 실패하면 [다시 시도](turn.ts)라 더 길게 잡지 않음. T2F 15초 + T1 15초 = 턴 마감 30초. v2-d = 준비물(items)도 뽑음
+  T2F: { prompt: T2F, schema: 'extract-fast.v2', effort: 'low', maxTokens: 4096, thinking: { type: 'adaptive' }, timeoutMs: 15_000, retryOnTimeout: false, cacheSystem: true },
   // 대화 끝 전체 추출(voice-commit). 장부 n=724(v2): p50 5.6초 / p95 9.4초 → 19초. v3 = v2 + 행동 · 알람 평가 · 돌아보기 칸(extract.v2), v3.1 = 피로 · 스트레스 점수는 숫자로 말했을 때만, v3.2 = 감정 원인 · 습관 출처는 직접 말한 것만
   T2: { prompt: T2, schema: 'extract.v2', effort: 'medium', maxTokens: 4096, thinking: null, timeoutMs: 19_000, retryOnTimeout: true, cacheSystem: true },
   // 이유 태그. 장부 n=594: p50 1.4초 / p95 1.6초 → ×2는 3.2초지만 네트워크 흔들림 여유로 4초 바닥

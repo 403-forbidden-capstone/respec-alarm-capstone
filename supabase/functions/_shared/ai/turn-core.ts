@@ -104,16 +104,26 @@ export interface ConversationDays {
   tzSupported: boolean;
 }
 
-/**
- * 대화 기준일. 저장은 0시 경계이지만(문서보완_목록 #14) 대화의 '오늘 · 내일'은 아직 안 잔 밤이면 같은 밤으로 본다 (헤드 H1, 7장 7.13.1:
- * 밤은 다가올 기상에 붙음). 04:00 상수 없음.
- *   다가올 아침 morning = (지금 < 12시 ∧ 달력 오늘 기상 기록 없음) ? 달력 오늘 : 달력 내일, 돌아볼 날 review = morning − 1
- * wokeToday = 달력 오늘의 기상 기록(daily_records.wake_confirmed_at)이 이미 있는지.
- */
-export function dayOf(now: string, tz: string, wokeToday: boolean): ConversationDays {
+/** 하루 경계 — KST 새벽 4시. 00:00~03:59는 전날 (대화방 · 기록 기준일 · 날짜 해석 · 자동 정리가 모두 이 값을 씀) */
+export const DAY_START_HOUR = 4;
+
+/** 지금(ISO)의 생활 날짜 — 새벽 4시 전이면 달력 전날 */
+export function lifeDate(now: string): LocalDate {
   const cal = seoulLocal(now);
-  const morning = cal.minutes < 12 * 60 && !wokeToday ? cal.date : addDays(cal.date, 1);
-  return { review: addDays(morning, -1), morning, tz, tzSupported: tz === "Asia/Seoul" };
+  return cal.minutes < DAY_START_HOUR * 60 ? addDays(cal.date, -1) : cal.date;
+}
+
+/** 생활 날짜 date가 시작하는 때 ("2026-11-11" → "2026-11-11T04:00:00+09:00") */
+export const dayStartIso = (date: LocalDate): string => `${date}T0${DAY_START_HOUR}:00:00+09:00`;
+
+/**
+ * 대화 기준일 — KST 새벽 4시 경계 (11/13). 기상 알람 · 기상 확인 여부와 상관없음.
+ *   돌아볼 날 review = 생활 날짜(lifeDate) = '오늘', 다가올 아침 morning = review + 1 = '내일'
+ *   예: 11/12 01:00 → review 11/11 · morning 11/12, 11/12 04:00 → review 11/12 · morning 11/13
+ */
+export function dayOf(now: string, tz: string): ConversationDays {
+  const review = lifeDate(now);
+  return { review, morning: addDays(review, 1), tz, tzSupported: tz === "Asia/Seoul" };
 }
 
 // ───────── 글 도우미 (실험실 stub.ts 그대로) ─────────
@@ -1326,10 +1336,8 @@ export function pickServerQuestion(ctx: Context, history: QuestionHistory, now: 
   if (history.askedInConversation) return null;
   const nowAbs = absMinutes(now);
   const recent = history.recent ?? [];
-  // '하루' = 대화 기준일(같은 밤, 헤드 H1 · 10/30) — 달력 날짜가 아님. 기준일 = 돌아볼 날(ctx.dates.today)의 0시부터 지금까지.
-  //   23:50에 물은 뒤 00:20 같은 밤 대화(기준일 아직 어제)에서도 오늘 몫을 이미 쓴 것이고, 다음 기준일(돌아볼 날이 바뀐 대화)에는 새로 물을 수 있음.
-  //   (자정 뒤에 물은 질문은 그 밤의 기준일에 묶이지 못하고 달력 날짜로 셈 — 다음 날 저녁에 한 번 덜 묻는 쪽으로 틀림, 안전한 쪽)
-  const dayStart = dayNumber(ctx.dates.today) * 1440;
+  // '하루' = 대화 기준일(돌아볼 날 ctx.dates.today)의 새벽 4시부터 지금까지 — 23:50에 물은 뒤 00:20 같은 밤 대화에서도 오늘 몫을 이미 쓴 것
+  const dayStart = dayNumber(ctx.dates.today) * 1440 + DAY_START_HOUR * 60;
   if (recent.filter((q) => absMinutes(q.asked_at) >= dayStart).length >= QUESTION_PER_DAY) return null;
   if (recent.filter((q) => nowAbs - absMinutes(q.asked_at) < 7 * 1440).length >= QUESTION_PER_WEEK) return null;
 

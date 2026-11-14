@@ -13,14 +13,17 @@ object VoiceTest {
 
   fun isVoiceTestAlarm(alarmId: String): Boolean = alarmId.startsWith(VOICE_ID_PREFIX)
 
-  /** 4단계 음성 출처 — CACHE: 실제 알람이 받아 둔 Gemini 캐시(없으면 Android) · SAMPLE: 앱에 든 Gemini 샘플 · ANDROID: 늘 Android TTS(비교용) */
+  /**
+   * 3 · 4단계 음성 출처 모의 — 새 Gemini 호출은 어느 것도 없음
+   *   CACHE: 실제 알람이 받아 둔 개인화 캐시를 빌려 옴(없으면 그 단계 예비 WAV)
+   *   FALLBACK: 캐시 없음 = 한도 초과 · 네트워크 실패 · 비행기 모드와 같은 상태 → 그 단계 예비 WAV
+   *   BROKEN: 깨진 캐시 파일 → 재생 실패 후 예비 WAV로 넘어가는지
+   *   ANDROID: 예비 WAV까지 못 쓰는 상태 → Android TTS 대체
+   */
   fun geminiMode(value: String?): String = when (value) {
-    "SAMPLE", "ANDROID" -> value
+    "FALLBACK", "BROKEN", "ANDROID" -> value
     else -> "CACHE"
   }
-
-  /** ringVoiceTest가 돌려주는 출처 표시 — 샘플은 실제 알람 id와 섞이지 않게 고정 값 */
-  const val SAMPLE_SOURCE = "SAMPLE"
 
   /** 시험에서 끌 수 있는 것 — 알람음(크기만 0, 재생 경로 · 포커스 · 진동 · 음성은 그대로) · AI 음성 */
   data class Options(val sound: Boolean = true, val voice: Boolean = true)
@@ -35,7 +38,7 @@ object VoiceTest {
   fun pickGeminiSource(candidates: List<GeminiCandidate>): GeminiCandidate? =
     candidates.sortedBy { it.alarmId }.firstOrNull { !isTestAlarm(it.alarmId) && it.hasWav && !it.hash.isNullOrEmpty() && !it.text.isNullOrBlank() }
 
-  /** 화면에 보일 엔진 — 이번 울림이 실제로 고른 Speech 기준 */
+  /** 화면에 보일 엔진 — 이번 울림이 실제로 고른 Speech 기준 (hasWav = 개인화 캐시 또는 예비 WAV) */
   fun engine(hasSpeech: Boolean, hasWav: Boolean): String = when {
     !hasSpeech -> "NONE"
     hasWav -> "GEMINI"

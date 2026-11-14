@@ -1,4 +1,4 @@
-// 알람 긴급 음성(Gemini TTS) 호출 한도 — 기존 글 대화 · Live 한도(quota.ts · opening.ts)와 따로 셈 (ai_calls.point = 'AV')
+// 알람 3 · 4단계 음성(Gemini TTS) 호출 한도 — 기존 글 대화 · Live 한도(quota.ts · opening.ts)와 따로 셈 (ai_calls.point = 'AV')
 //   무료 한도(11/10 확인: RPM 3 · TPM 10K · RPD 10)보다 보수적으로: 프로젝트 전체 하루 8 · 분당 2, 사용자 하루 2. 모델과 상관없이 'AV' 전체로 셈
 //   DB 함수 reserve_alarm_tts가 한도 확인 + 예약 줄 넣기를 한 트랜잭션(전역 잠금)에서 함 → 예약에 성공했을 때만 Gemini를 부름
 //   예약 줄은 실패 · 429여도 남아 한도에 셈. 예약 실패 · DB 오류 · 한도 초과면 null → Gemini 없이 폰의 Android TTS

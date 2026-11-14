@@ -207,7 +207,7 @@ test('녹화 한 바퀴: 첫 마디 템플릿 → 새 약속 카드 → 계산 �
     assert.ok((c.input_tokens as number) > 0 && (c.output_tokens as number) > 0, '토큰');
     assert.ok((c.latency_ms as number) > 0, '지연');
     assert.equal(c.io, null);
-    assert.equal(c.prompt_version, c.point === 'T1' ? 'v1.5' : 'v2-c');
+    assert.equal(c.prompt_version, c.point === 'T1' ? 'v1.5' : 'v2-d');
   }
   const flagged = calls.filter((c) => (c.flags as string[]).length > 0);
   assert.ok(flagged.some((c) => (c.flags as string[]).includes('claims_saved_without_event')), '가드에 걸린 호출의 flags');
@@ -365,13 +365,16 @@ test('00:30에 연 대화: 오늘 기상 기록이 없으면 전날 밤 — 오�
   assert.equal(same.session_id, s.session_id);
 });
 
-test('00:30인데 오늘 기상 기록이 이미 있으면 달력 그대로 — 오늘 = 10/30, 내일 = 10/31', async () => {
+test('기상 기록과 상관없음: 00:30에 오늘 기상 기록이 있어도 기준일은 전날(10/29), 04:00부터 10/30', async () => {
   const now = new Date('2026-10-30T00:30:00+09:00');
   const db = seed(now);
   db.rows('daily_records').push({ record_id: 'r2', user_id: ME, record_date: '2026-10-30', wake_confirmed_at: '2026-10-30T00:10:00+09:00' });
   const { deps } = depsOf(db, null, { now: () => now });
   const s = await handleVoiceSession(deps, { session_type: 'BEFORE_SLEEP', input_mode: 'TEXT' });
-  assert.deepEqual(s.day, { review: '2026-10-30', morning: '2026-10-31' });
+  assert.deepEqual(s.day, { review: '2026-10-29', morning: '2026-10-30' });
+  const at4 = new Date('2026-10-30T04:00:00+09:00');
+  const s4 = await handleVoiceSession(depsOf(db, null, { now: () => at4 }).deps, { session_type: 'BEFORE_SLEEP', input_mode: 'TEXT' });
+  assert.deepEqual(s4.day, { review: '2026-10-30', morning: '2026-10-31' });
 });
 
 // ───────── 위기 턴 ─────────

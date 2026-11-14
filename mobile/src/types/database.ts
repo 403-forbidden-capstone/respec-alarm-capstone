@@ -198,6 +198,25 @@ isOneToOne: false
       referencedColumns: ["group_id"]
     }
                   ]
+                },"briefing_devices": {
+                  Row: {
+                    "created_at": string,"device_id": string,"expires_at": string,"last_used_at": string | null,"token_hash": string,"user_id": string
+                  }
+                  Insert: {
+                    "created_at"?: string,"device_id": string,"expires_at": string,"last_used_at"?: string | null,"token_hash": string,"user_id": string
+                  }
+                  Update: {
+                    "created_at"?: string,"device_id"?: string,"expires_at"?: string,"last_used_at"?: string | null,"token_hash"?: string,"user_id"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "briefing_devices_user_id_fkey"
+      columns: ["user_id"]
+isOneToOne: false
+      referencedRelation: "profiles"
+      referencedColumns: ["user_id"]
+    }
+                  ]
                 },"conversation_sessions": {
                   Row: {
                     "apply_status": Database["public"]['Enums']["apply_status"],"created_at": string,"ended_at": string | null,"extracted_data": Json | null,"input_mode": Database["public"]['Enums']["input_mode"],"server_state": NonNullable<Json>,"session_id": string,"session_type": Database["public"]['Enums']["session_type"],"started_at": string,"transcript": string | null,"turns": NonNullable<Json>,"user_id": string
@@ -595,6 +614,57 @@ isOneToOne: false
       referencedColumns: ["user_id"]
     }
                   ]
+                },"server_heartbeat": {
+                  Row: {
+                    "alive_at": string | null,"job_name": string,"last_success_at": string | null
+                  }
+                  Insert: {
+                    "alive_at"?: string | null,"job_name": string,"last_success_at"?: string | null
+                  }
+                  Update: {
+                    "alive_at"?: string | null,"job_name"?: string,"last_success_at"?: string | null
+                  }
+                  Relationships: [
+                    
+                  ]
+                },"server_route_users": {
+                  Row: {
+                    "kind": string,"name": string,"user_id": string
+                  }
+                  Insert: {
+                    "kind"?: string,"name": string,"user_id": string
+                  }
+                  Update: {
+                    "kind"?: string,"name"?: string,"user_id"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "server_route_users_route_fkey"
+      columns: ["kind","name"]
+isOneToOne: false
+      referencedRelation: "server_routes"
+      referencedColumns: ["kind","name"]
+    },{
+      foreignKeyName: "server_route_users_user_id_fkey"
+      columns: ["user_id"]
+isOneToOne: false
+      referencedRelation: "profiles"
+      referencedColumns: ["user_id"]
+    }
+                  ]
+                },"server_routes": {
+                  Row: {
+                    "kind": string,"mode": string,"name": string,"updated_at": string
+                  }
+                  Insert: {
+                    "kind": string,"mode"?: string,"name": string,"updated_at"?: string
+                  }
+                  Update: {
+                    "kind"?: string,"mode"?: string,"name"?: string,"updated_at"?: string
+                  }
+                  Relationships: [
+                    
+                  ]
                 },"sharing_permissions": {
                   Row: {
                     "can_edit_alarm": boolean,"can_view_alarm": boolean,"can_view_wake": boolean,"created_at": string,"grantee_id": string,"owner_id": string,"permission_id": string,"source_id": string,"source_type": Database["public"]['Enums']["permission_source"],"updated_at": string
@@ -795,6 +865,31 @@ isOneToOne: false
       referencedColumns: ["user_id"]
     }
                   ]
+                },"wake_scripts": {
+                  Row: {
+                    "alarm_id": string,"input_hash": string,"model": string,"scripts": NonNullable<Json>,"updated_at": string,"user_id": string
+                  }
+                  Insert: {
+                    "alarm_id": string,"input_hash": string,"model": string,"scripts": NonNullable<Json>,"updated_at"?: string,"user_id": string
+                  }
+                  Update: {
+                    "alarm_id"?: string,"input_hash"?: string,"model"?: string,"scripts"?: NonNullable<Json>,"updated_at"?: string,"user_id"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "wake_scripts_alarm_id_fkey"
+      columns: ["alarm_id"]
+isOneToOne: true
+      referencedRelation: "alarms"
+      referencedColumns: ["alarm_id"]
+    },{
+      foreignKeyName: "wake_scripts_user_id_fkey"
+      columns: ["user_id"]
+isOneToOne: false
+      referencedRelation: "profiles"
+      referencedColumns: ["user_id"]
+    }
+                  ]
                 }
           }
           Views: {
@@ -876,6 +971,11 @@ isOneToOne: false
               "handle": string,"nickname": string,"profile_image_url": string,"user_id": string
             }[]
                            },
+"get_server_routes":
+{ Args: Record<PropertyKey, never>; Returns: {
+              "mode": string,"name": string
+            }[]
+                           },
 "get_shared_alarm_appointments":
 { Args: { "p_owner_id"?: string }; Returns: {
               "alarm_id": string,"appointment_at": string,"appointment_id": string,"dest_name": string,"title": string,"user_id": string
@@ -945,6 +1045,11 @@ isOneToOne: false
                            },
 "prepare_account_delete":
 { Args: { "p_user_id": string }; Returns: Json
+                           },
+"prepare_suggestion_inputs":
+{ Args: { "p_now"?: string }; Returns: {
+              "before_prepare_minutes": number,"cap_minutes": number,"current_advance": number,"participant_id": string,"residuals": (number)[],"target_alarm_id": string,"user_id": string
+            }[]
                            },
 "preview_group_by_code":
 { Args: { "p_code": string }; Returns: Json

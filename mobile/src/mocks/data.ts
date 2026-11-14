@@ -66,6 +66,7 @@ export type MockAppointment = {
   beforePrepMinutes: number;
   prepMinutes: number;
   predictedPrepMinutes: number;
+  prepareAdvanceMinutes?: number; // 받아들인 준비 알람 당김 분 (알람 조정 제안 S01) — 서버 appointment_participants.prepare_advance_minutes
   importance: Importance;
   recurrenceRule: string | null; // 반복 규칙 RRULE (appointments.recurrence_rule) — 없으면 반복 없음
   groupId: string | null;

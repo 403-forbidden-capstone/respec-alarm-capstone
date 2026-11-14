@@ -6,10 +6,10 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 
-// 알람 음성 브리핑 저장소 — 앱이 미리 받아 둔 단계별 문장(Android TTS용) · 긴급 Gemini 음성(WAV)을 알람별로 두고, 울릴 때 읽을 것을 고름
+// 알람 음성 브리핑 저장소 — 앱이 미리 받아 둔 단계별 문장(Android TTS용) · 3 · 4단계 Gemini 음성(L3/L4.wav)을 알람별로 두고, 울릴 때 읽을 것을 고름
 // 저장 위치: 앱 전용 폴더 filesDir/alarm_voice/<알람 id>/ (다른 앱 · 다른 사용자가 못 읽음). 알람이 지워지면(AlarmStorage.remove) 같이 지움
 //   로그아웃은 cancelAll → clearAll → 다음 계정에 앞 계정 브리핑이 남지 않음
-// 단계 판단은 SpeechUrgency (TS levelAt과 같은 식). 엔진: 4단계이고 Gemini 파일이 있을 때만 Gemini, 아니면 Android TTS로 같은 단계 문장 전체 (한 울림에 한 엔진)
+// 단계 판단은 SpeechUrgency (TS levelAt과 같은 식). 3 · 4단계: 그 단계 개인화 캐시 > 앱에 든 그 단계 예비 WAV(기상만) > Android TTS로 같은 단계 문장 (BriefingRules)
 internal object VoiceBriefing {
   private const val DIR = "alarm_voice"
   private const val MANIFEST = "manifest.json"
@@ -26,15 +26,19 @@ internal object VoiceBriefing {
   /**
    * 앱이 받은 결과 저장. json = { rule: {urgentAtMs, maxLevel}, clips: [{level, hash, text, pitch, rate, voiceIndex}], audio: [{level, hash, data(base64)}] }
    * 단계마다: 새 Gemini 음성이 오면 씀, 안 왔으면 열쇠가 같은 예전 파일만 남김 (내용이 바뀌었는데 못 만들었으면 낡은 음성을 지움 → Android TTS로)
+   * 앱 맞추기(prepareBriefings)와 백그라운드 갱신(BriefingRefreshWorker, #515)이 같이 씀 — 받은 값을 먼저 다 풀어 본 뒤에 파일을 바꿈
+   *   (JSON · base64가 깨졌으면 던지고 예전 브리핑은 그대로). manifest는 임시 파일에 쓴 뒤 바꿔 넣음
    */
   @Synchronized
   fun save(context: Context, alarmId: String, json: String) {
     val folder = dir(context, alarmId) ?: throw IllegalArgumentException("알람 id가 이상해요")
     val input = JSONObject(json)
     val old = readManifest(folder)?.optJSONObject("files") ?: JSONObject()
-    folder.mkdirs()
     val audio = input.optJSONArray("audio") ?: JSONArray()
     val clips = input.optJSONArray("clips") ?: JSONArray()
+    val decoded = (0 until audio.length()).map { audio.getJSONObject(it) }.associate { it.optString("hash") to Base64.decode(it.getString("data"), Base64.DEFAULT) }
+    for (i in 0 until clips.length()) clips.getJSONObject(i).getInt("level") // 단계 번호가 없으면 여기서 던짐 (아무것도 안 바꿈)
+    folder.mkdirs()
     val files = JSONObject()
     val keepLevels = mutableSetOf<String>()
     for (i in 0 until clips.length()) {
@@ -43,10 +47,10 @@ internal object VoiceBriefing {
       val hash = clip.optString("hash")
       if (!HASH.matches(hash)) continue
       val file = File(folder, "L$level.wav")
-      val fresh = (0 until audio.length()).map { audio.getJSONObject(it) }.firstOrNull { it.optString("hash") == hash }
+      val fresh = decoded[hash]
       if (fresh != null) {
         val tmp = File(folder, "L$level.tmp")
-        tmp.writeBytes(Base64.decode(fresh.getString("data"), Base64.DEFAULT))
+        tmp.writeBytes(fresh)
         if (!tmp.renameTo(file)) {
           file.delete()
           tmp.renameTo(file)
@@ -66,7 +70,12 @@ internal object VoiceBriefing {
       .put("rule", input.optJSONObject("rule") ?: JSONObject())
       .put("clips", clips)
       .put("files", files)
-    File(folder, MANIFEST).writeText(manifest.toString())
+    val tmpManifest = File(folder, "$MANIFEST.tmp")
+    tmpManifest.writeText(manifest.toString())
+    if (!tmpManifest.renameTo(File(folder, MANIFEST))) {
+      File(folder, MANIFEST).delete()
+      tmpManifest.renameTo(File(folder, MANIFEST))
+    }
   }
 
   /** 폰에 있는 Gemini 음성의 열쇠 — 앱이 서버에 have로 보내 같은 음성을 다시 안 만들게 */
@@ -78,8 +87,9 @@ internal object VoiceBriefing {
   }
 
   /**
-   * 개발 화면 전용 — 시험 알람 폴더를 새로 씀. json = { rule, clips, test: {sound, voice} } (앱이 서버 브리핑 규칙으로 만든 샘플 문장)
-   * 4단계 문장이 있으면 실제 알람이 미리 받아 둔 Gemini 음성을 복사해 씀(원본은 안 건드림, 문장도 그 음성의 실제 문장으로). 없으면 샘플 문장을 Android TTS로
+   * 개발 화면 전용 — 시험 알람 폴더를 새로 씀. json = { rule, clips, test: {sound, voice, gemini} } (앱이 서버 브리핑 규칙으로 만든 샘플 문장)
+   * 3 · 4단계 출처 모의(VoiceTest.geminiMode): CACHE면 실제 알람이 미리 받아 둔 그 단계 Gemini 음성을 복사(원본은 안 건드림, 문장도 그 음성의 실제 문장으로),
+   *   BROKEN이면 깨진 파일을 둠, FALLBACK · ANDROID면 캐시를 안 둠 (→ speechFor가 예비 WAV 또는 Android TTS를 고름)
    * 돌려주는 값 = 음성을 빌려 온 알람 id (없으면 null). 새 Gemini 호출은 없음
    */
   @Synchronized
@@ -92,32 +102,28 @@ internal object VoiceBriefing {
     val clips = input.optJSONArray("clips") ?: JSONArray()
     val files = JSONObject()
     var source: String? = null
-    val urgent = (0 until clips.length()).map { clips.getJSONObject(it) }.firstOrNull { it.optInt("level") == 4 }
     val mode = VoiceTest.geminiMode(input.optJSONObject("test")?.optStringOrNull("gemini"))
-    if (urgent != null && mode == "SAMPLE") {
-      // 앱에 든 Gemini 긴급 샘플(res/raw, 개발자가 한 번 만들어 둔 파일) — 재생할 때 API를 안 부름. 문장은 화면이 샘플 문장으로 넣어 보냄
-      runCatching {
-        context.resources.openRawResource(R.raw.gemini_urgent_sample).use { raw -> File(folder, "L4.wav").outputStream().use { raw.copyTo(it) } }
-      }.onSuccess {
-        urgent.put("hash", VoiceTest.SAMPLE_SOURCE)
-        files.put("4", VoiceTest.SAMPLE_SOURCE)
-        source = VoiceTest.SAMPLE_SOURCE
+    val root = File(context.filesDir, DIR)
+    for (level in 3..4) {
+      val clip = (0 until clips.length()).map { clips.getJSONObject(it) }.firstOrNull { it.optInt("level") == level } ?: continue
+      val target = File(folder, "L$level.wav")
+      if (mode == "BROKEN") {
+        target.writeText("깨진 캐시 시험") // WAV가 아님 → MediaPlayer가 못 열어 예비 WAV로 넘어가야 함
+        files.put(level.toString(), clip.optString("hash"))
       }
-    }
-    if (urgent != null && mode == "CACHE") {
-      val root = File(context.filesDir, DIR)
+      if (mode != "CACHE") continue
       val candidates = root.listFiles().orEmpty().filter { it.isDirectory }.map { d ->
         val manifest = readManifest(d)
-        val clips4 = manifest?.optJSONArray("clips")
-        val clip = clips4?.let { arr -> (0 until arr.length()).map { arr.getJSONObject(it) }.firstOrNull { it.optInt("level") == 4 } }
-        VoiceTest.GeminiCandidate(d.name, File(d, "L4.wav").exists(), manifest?.optJSONObject("files")?.optStringOrNull("4"), clip?.optStringOrNull("text"))
+        val arr = manifest?.optJSONArray("clips")
+        val c = arr?.let { a -> (0 until a.length()).map { a.getJSONObject(it) }.firstOrNull { it.optInt("level") == level } }
+        VoiceTest.GeminiCandidate(d.name, File(d, "L$level.wav").exists(), manifest?.optJSONObject("files")?.optStringOrNull(level.toString()), c?.optStringOrNull("text"))
       }
       VoiceTest.pickGeminiSource(candidates)?.let { picked ->
-        // 복사가 실패하면 Gemini 없이(→ Android TTS 대체) — 화면이 엔진을 그대로 보여 줌
-        runCatching { File(File(root, picked.alarmId), "L4.wav").copyTo(File(folder, "L4.wav"), overwrite = true) }.onSuccess {
-          urgent.put("text", picked.text).put("hash", picked.hash)
-          files.put("4", picked.hash)
-          source = picked.alarmId
+        // 복사가 실패하면 캐시 없이(→ 예비 WAV · Android TTS) — 화면이 출처를 그대로 보여 줌
+        runCatching { File(File(root, picked.alarmId), "L$level.wav").copyTo(target, overwrite = true) }.onSuccess {
+          clip.put("text", picked.text).put("hash", picked.hash)
+          files.put(level.toString(), picked.hash)
+          source = source ?: picked.alarmId
         }
       }
     }
@@ -148,8 +154,29 @@ internal object VoiceBriefing {
     File(context.filesDir, DIR).deleteRecursively()
   }
 
-  /** 한 울림에 읽을 것 — wav가 있으면 Gemini 음성, 없으면 text를 Android TTS로 (pitch · rate · voiceIndex) */
-  data class Speech(val level: Int, val text: String, val pitch: Float, val rate: Float, val voiceIndex: Int, val wav: File?)
+  /**
+   * 한 울림에 읽을 것 — 앞에서부터 시도: wav(개인화 캐시) → bundled(앱에 든 그 단계 예비 WAV 리소스) → text를 Android TTS로 (pitch · rate · voiceIndex)
+   * speed = WAV 재생 속도 (BriefingRules.wavSpeed)
+   */
+  data class Speech(
+    val level: Int,
+    val text: String,
+    val pitch: Float,
+    val rate: Float,
+    val voiceIndex: Int,
+    val wav: File?,
+    val bundled: Int? = null,
+    val speed: Float = 1f,
+  ) {
+    val source: String get() = BriefingRules.source(level, wav != null, bundled != null)
+  }
+
+  // 단계 번호 → 예비 WAV 리소스 (파일명은 예전 이름 그대로, TS GEMINI_FALLBACK_FILE과 같음). 3단계 = 엄마 Gacrux, 4단계 = 긴급 Kore
+  private fun bundledRes(level: Int?): Int? = when (level) {
+    3 -> R.raw.gemini_stage4_fallback
+    4 -> R.raw.gemini_urgent_sample
+    else -> null
+  }
 
   /**
    * 지금 울림에 읽을 브리핑. 저장된 브리핑이 없으면(못 받음 · 네트워크 없음) 꾸러미의 기상 문장(voiceText) 또는 "머리글. 제목"을 Android TTS로 —
@@ -160,6 +187,10 @@ internal object VoiceBriefing {
     if (!testOptions(context, alarm.alarmId).voice) return@runCatching null // 개발 화면 "알람음만 · 진동만" 시험
     val folder = dir(context, alarm.alarmId)
     val manifest = folder?.let { readManifest(it) }
+    // 개발 화면 시험 값 — 시험 알람만 (운영 알람은 저장된 값이 있어도 무시)
+    val test = manifest?.optJSONObject("test")?.takeIf { VoiceTest.isTestAlarm(alarm.alarmId) }
+    val forceAndroid = VoiceTest.geminiMode(test?.optStringOrNull("gemini")) == "ANDROID"
+    val bundledFor = { lv: Int -> if (forceAndroid) null else bundledRes(BriefingRules.fallbackWavLevel(alarm.type, lv)) }
     val rule = manifest?.optJSONObject("rule") ?: JSONObject()
     val dangerAt = if (rule.has("dangerAtMs") && !rule.isNull("dangerAtMs")) rule.getDouble("dangerAtMs").toLong() else null
     val urgentAt = if (rule.has("urgentAtMs") && !rule.isNull("urgentAtMs")) rule.getDouble("urgentAtMs").toLong() else null
@@ -169,12 +200,14 @@ internal object VoiceBriefing {
     val clipLevel = BriefingRules.clipLevel(level, byLevel.keys)
     if (clipLevel == null) {
       // 서버 브리핑을 한 번도 못 받음(인터넷 없음 등) — 꾸러미 문장으로, 미루기만큼 단계를 올려 읽음
+      //   미루기로 3단계가 되면 기상은 3단계 예비 WAV가 먼저 (그것도 못 틀면 이 문장을 Android TTS로)
       val f = BriefingRules.fallback(alarm.type, alarm.voiceText, alarm.plan.heading, alarm.title, alarm.snoozeCount) ?: return@runCatching null
-      return@runCatching Speech(f.level, f.text, f.pitch, f.rate, 0, null)
+      return@runCatching Speech(f.level, f.text, f.pitch, f.rate, 0, null, bundledFor(f.level), BriefingRules.wavSpeed(f.level))
     }
     val clip = byLevel.getValue(clipLevel)
-    val wavFile = folder?.let { File(it, "L4.wav") }
-    val wav = wavFile?.takeIf { BriefingRules.useGemini(clipLevel, it.exists()) }
+    // 그 단계 파일만 봄 (3단계에 4단계 파일을 틀지 않음)
+    val wavFile = folder?.let { File(it, "L$clipLevel.wav") }
+    val wav = wavFile?.takeIf { !forceAndroid && BriefingRules.useGemini(clipLevel, it.exists()) }
     Speech(
       level = clipLevel,
       text = clip.optString("text"),
@@ -182,6 +215,8 @@ internal object VoiceBriefing {
       rate = clip.optDouble("rate", 1.0).toFloat(),
       voiceIndex = clip.optInt("voiceIndex", 0),
       wav = wav,
+      bundled = bundledFor(clipLevel),
+      speed = BriefingRules.wavSpeed(clipLevel),
     )
   }.getOrNull()
 }

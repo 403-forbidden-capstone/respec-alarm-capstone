@@ -29,6 +29,8 @@ import {
   type Transport,
 } from '@/features/alarm/types';
 import { now } from '@/lib/clock';
+import { lifeDayKey } from '@/lib/format';
+import { prepareBriefings } from '@/lib/alarmSync/briefing';
 import { EdgeError, callEdge } from '@/lib/edge';
 import { UserError, userMessage } from '@/lib/errors';
 import { currentUserId } from '@/lib/user';
@@ -117,7 +119,7 @@ type Basis = { travel_minutes: number; prepare_minutes: number; buffer_minutes: 
 // 상수
 // ---------------------------------------------------------------------------
 
-export const TURN_TIMEOUT_MS = 25_000; // voice-turn — 서버 마감 18초 + 왕복 (설계 11절, lib/edge 기본 20초로는 모자람)
+export const TURN_TIMEOUT_MS = 40_000; // voice-turn — 서버 마감 30초(turn.ts TURN_DEADLINE_MS) + DB 읽기 · 쓰기 · 왕복 여유 10초. 끝없이 기다리지 않음
 const MAX_PREPARE_DELTA = 60; // 이번만 준비 +N 상한 (설계 5절, 실험실 stub 60분)
 const SAVE_SOURCE = '자기 전 대화';
 // 앱이 L1 estimateAppointment에서 "장소 위치를 몰라" 던진 문구를 장소 필요로 가름 (alarm/realPlan.ts) — 그 문구가 바뀌면 같이 고침
@@ -159,6 +161,7 @@ type State = {
   sessionId: string | null;
   rev: number;
   started: boolean; // voice-session을 한 번 불렀음 (한도 DAY로 세션이 없어도 true)
+  day: string | null; // voice-session을 부른 때의 기준일(lifeDayKey) — 새벽 4시가 지나면 다음 읽기에서 새 대화방
   messages: ChatMessage[];
   cards: Map<string, CardRec>;
   limits: Limits | null;
@@ -171,14 +174,19 @@ type State = {
 };
 
 function freshState(userId: string | null): State {
-  return { userId, sessionId: null, rev: 0, started: false, messages: [], cards: new Map(), limits: null, unavailable: null, pending: null, queue: [], seq: 0, notice: null, ask: [] };
+  return { userId, sessionId: null, rev: 0, started: false, day: null, messages: [], cards: new Map(), limits: null, unavailable: null, pending: null, queue: [], seq: 0, notice: null, ask: [] };
 }
 
 let state: State = freshState(null);
+// 실시간 음성(Live) 통화가 열려 있는 동안(이 시각까지) 대화방을 붙잡음 — 03:59에 시작한 통화는 04:00이 지나도 끝날 때까지 같은 방 · 같은 기준일
+//   endLive가 0으로 · 앱이 끝을 못 알려도 통화 최대 길이(10분)+1분 뒤 풀림
+const LIVE_HOLD_MS = 11 * 60_000;
+let liveUntil = 0;
 
 // 시험용 — 모듈 상태 비우기
 export function resetVoiceState() {
   state = freshState(null);
+  liveUntil = 0;
   chain = Promise.resolve();
   progress = null;
   flushing = null;
@@ -300,7 +308,7 @@ async function absorb(res: TurnResponse, turnId: string): Promise<Pending | null
   if (res.reply?.text) pushMessage('ai', res.reply.text, at);
   mergeCards(res.cards, at);
   if (res.next !== 'APP_TASKS') return null;
-  report(); // 카드 계산 시작 — 화면은 "일정 카드를 생성하고 있어요"
+  report(); // 카드 계산 시작 — 화면은 "일정 카드를 만들고 있어요"
   const results = await runTasks(res);
   report(); // 계산 끝 — 카드를 바로 보여 줌 (안내 답 T1은 results 응답으로 뒤에 옴)
   return { phase: 'RESULTS', turnId, body: { session_id: state.sessionId, rev: res.rev, client_turn_id: turnId, results } };
@@ -508,12 +516,19 @@ async function runTasks(res: TurnResponse): Promise<{ cards: ResultCard[]; fixes
 // ---------------------------------------------------------------------------
 
 // 분당 사용량에 막힘(서버 관문 RPM · TPM · 동시 요청, Gemini 429) — LLM_UNAVAILABLE의 details.code RATE_LIMITED
-const unavailableOf = (e: EdgeError): Unavailable => ({
-  code: e.code,
-  message: e.message,
-  canRetry: true,
-  ...((e.details as { code?: unknown } | null | undefined)?.code === 'RATE_LIMITED' ? { rateLimited: true } : {}),
-});
+//   details.extract_failed = 일정일 수도 있는 말을 추출하지 못해 서버가 말을 저장하지 않음 — 화면이 "일정을 확인하지 못했어요"로 가름
+//   시간 초과(서버 모델 TIMEOUT · 앱이 응답을 못 받음 TIMEOUT)는 사용량 제한과 다른 안내 — timedOut
+const unavailableOf = (e: EdgeError): Unavailable => {
+  const d = e.details as { code?: unknown; extract_failed?: unknown } | null | undefined;
+  return {
+    code: e.code,
+    message: e.message,
+    canRetry: true,
+    ...(d?.code === 'RATE_LIMITED' ? { rateLimited: true } : {}),
+    ...(d?.code === 'TIMEOUT' || e.code === 'TIMEOUT' ? { timedOut: true } : {}),
+    ...(d?.extract_failed === true ? { extractFailed: true } : {}),
+  };
+};
 
 // 오류가 났을 때 — 대화를 남기고 [다시 시도]를 보일 것이면 상태에 적고 돌아옴(그 요청 p는 pending에 남음), 아니면 던짐 (CONFLICT는 세션을 다시 읽은 뒤 던짐)
 //   p = 실패한 요청 (세션 시작이면 없음). unavailable은 p가 pending에 남아 [다시 시도]가 다시 보낼 때만 적음 — 죽은 안내가 남지 않게
@@ -659,6 +674,7 @@ async function readSession(resume: boolean, fresh = false): Promise<void> {
   state.rev = res.rev ?? 0;
   state.limits = limitsOf(res.limits);
   state.started = true;
+  state.day = lifeDayKey(at);
   state.unavailable = null;
   state.pending = null;
   state.messages = [];
@@ -669,7 +685,7 @@ async function readSession(resume: boolean, fresh = false): Promise<void> {
   mergeCards(res.cards, last && last > at ? last : at);
   state.messages.sort((a, b) => a.at.getTime() - b.at.getTime());
   if (fresh) await pruneExpired(now()); // 앱을 열 때 — 모든 사용자의 7일 지난 표시 · 옛 형식 키 정리
-  // 자정이 지나 [완료] 없이 넘어온 어제 방 — 정리 목록에 없으면 넣음 (있으면 [저장 안 함] 카드 목록을 지키려고 그대로)
+  // 새벽 4시가 지나 [완료] 없이 넘어온 전 기준일 방 — 정리 목록에 없으면 넣음 (있으면 [저장 안 함] 카드 목록을 지키려고 그대로)
   if (state.userId && res.uncommitted_session_ids?.length) {
     const queued = new Set((await pendingCommits(state.userId)).map((c) => c.sessionId));
     for (const id of res.uncommitted_session_ids) if (!queued.has(id)) await addPendingCommit(state.userId, id);
@@ -702,7 +718,7 @@ async function continueAfterOpen(): Promise<void> {
   else if (state.queue.length > 0 && !state.pending) await drive();
 }
 
-// 대화 시작 — 오늘(KST) 연 세션이 있으면 그대로(resume, [완료]한 뒤에도), 없으면 새로. 첫 마디는 서버 템플릿이라 messages에 옴. 하루 한도면 세션 없이 limits.reached = DAY
+// 대화 시작 — 같은 기준일(KST 새벽 4시 경계)에 연 세션이 있으면 그대로(resume, [완료]한 뒤에도), 없으면 새로. 첫 마디는 서버 템플릿이라 messages에 옴. 하루 한도면 세션 없이 limits.reached = DAY
 export async function startConversation(_opts: { type: 'BEFORE_SLEEP' } = { type: 'BEFORE_SLEEP' }): Promise<void> {
   try {
     await readSession(true, true);
@@ -720,6 +736,10 @@ async function guardUser() {
 
 async function ensureSession(): Promise<void> {
   await guardUser();
+  // 앱을 켜 둔 채 새벽 4시(KST)가 지나면 서버에서 다시 읽음 → 새 대화방
+  //   보내는 중인 말 · 카드 요청 · 열린 Live 통화가 있으면 그 대화가 끝날 때까지 시작한 방(기준일)을 그대로 씀
+  const t = now();
+  if (state.started && state.day !== lifeDayKey(t) && !state.pending && state.queue.length === 0 && t.getTime() >= liveUntil) state = freshState(state.userId);
   if (state.started || state.unavailable) return; // 시작 실패는 [다시 시도](retry)만 다시 부름
   await startConversation({ type: 'BEFORE_SLEEP' });
 }
@@ -809,6 +829,23 @@ export function sayVoice(heard: string, spoken: string, onProgress?: (c: Convers
 // 지금 대화방 id — Live 토큰을 받을 때 서버가 앞 대화를 지침에 붙이게 (없으면 null)
 export const liveSessionId = (): string | null => state.sessionId;
 
+// Live 통화 시작(토큰 받기 전) — 기준일이 바뀌었으면 여기서 새 방으로 옮기고, 그 방을 통화가 끝날 때까지 붙잡음. 그 방 id를 돌려줌
+export function beginLive(): Promise<string | null> {
+  return serial(async () => {
+    liveUntil = 0;
+    await ensureSession();
+    liveUntil = now().getTime() + LIVE_HOLD_MS;
+    return state.sessionId;
+  });
+}
+
+// Live 통화 끝 — 마지막 차례(sayVoice)가 앞서 줄 서 있으므로 그 뒤에 풀림. 다음 읽기부터 새 기준일이면 새 방
+export function endLive(): Promise<void> {
+  return serial(async () => {
+    liveUntil = 0;
+  });
+}
+
 // [다시 시도] — 세션을 못 시작했으면 다시 시작, 보낸 요청이 남았으면 같은 요청(같은 client_turn_id)을 다시 (성공하면 뒤에 쌓인 카드 요청도 차례로)
 export function retry(): Promise<Conversation> {
   return serial(async () => {
@@ -831,19 +868,23 @@ export function retry(): Promise<Conversation> {
 //   서버가 T2를 부르므로(19초 · 다시 시도 1번) 대화 화면의 직렬 큐 밖에서 — 새 대화 열기를 막지 않게. 동시에 두 번 돌지 않음
 export const COMMIT_TIMEOUT_MS = 45_000;
 let flushing: Promise<void> | null = null;
-export function flushCommits(userId: string | null): Promise<void> {
+//   정리가 끝나면(DONE) 다가오는 기상 알람 브리핑을 바로 다시 받음 — 어제 다짐이 들어간 대본 · 음성으로 (#515, 새벽 백그라운드 갱신을 기다리지 않게). 실패해도 삼킴
+export function flushCommits(userId: string | null, refreshBriefings: () => Promise<unknown> = () => prepareBriefings()): Promise<void> {
   if (!userId) return Promise.resolve();
   flushing ??= (async () => {
+    let committed = false;
     try {
       for (const { sessionId, rejected } of await pendingCommits(userId)) {
         try {
           const body = rejected.length > 0 ? { session_id: sessionId, rejected_cards: rejected } : { session_id: sessionId };
           const res = await callEdge<{ status?: string }>('voice-commit', body, { timeoutMs: COMMIT_TIMEOUT_MS });
+          if (res?.status === 'DONE') committed = true;
           if (res?.status === 'DONE' || res?.status === 'SKIPPED') await removePendingCommit(userId, sessionId);
         } catch (e) {
           if (e instanceof EdgeError && (e.code === 'NOT_FOUND' || e.code === 'VALIDATION_FAILED')) await removePendingCommit(userId, sessionId);
         }
       }
+      if (committed) await refreshBriefings().catch(() => undefined);
     } finally {
       flushing = null;
     }
@@ -852,7 +893,7 @@ export function flushCommits(userId: string | null): Promise<void> {
 }
 
 // [완료] — 하루 기록 정리(voice-commit)를 적어 두고 화면 상태를 비움. 세션은 끝내지 않음: 같은 날 다시 열면 서버 resume이 같은 대화(말 · 카드)를 돌려주고,
-//   이어 말한 뒤 다시 [완료]하면 서버가 새 말까지 다시 정리함. 날짜(KST)가 바뀌면 서버가 새 대화를 엶
+//   이어 말한 뒤 다시 [완료]하면 서버가 새 말까지 다시 정리함. 기준일(KST 새벽 4시)이 바뀌면 서버가 새 대화를 엶
 //   서버로 가야 할 카드 알림(SAVED 등)이 큐에 남았으면 비우기 전에 한 번 보내 봄 (실패해도 삼킴). 그 뒤 정리를 기다리지 않고 보냄
 export function finishConversation(): Promise<{ recordDate: string | null }> {
   return serial(async () => {
@@ -948,7 +989,7 @@ export function saveCard(cardId: string): Promise<string> {
       appointmentId = saved.id;
       alarms = saved.alarms;
       level = saved.level;
-      toast = `${saved.title} 알람을 맞췄어요`;
+      toast = `일정이 저장됐어요. ${saved.title} 알람을 맞췄어요`;
       rec.status = 'SAVED'; // 일정은 저장됨 — 아래 두 번째 저장이 실패해도 카드는 저장으로
       rec.appointmentId = saved.id;
       await rememberSaved(cardId, kind, saved.id, alarms, level); // 서버에 알리기 전에 — 앱이 꺼져도 다시 저장되지 않게
@@ -1024,16 +1065,21 @@ async function sendResults(cards: ResultCard[]): Promise<void> {
 }
 
 // 카드 [장소 고르기] — 고른 곳으로 다시 계산해 READY로, 결과를 서버에 알림 (새 client_turn_id로 results만 보냄 — 서버(#265)가 받음)
-export function pickCardPlace(cardId: string, place: { name: string; lat?: number; lng?: number }): Promise<void> {
-  return serial(async () => {
-    const rec = recOf(cardId);
-    if (typeof place.lat !== 'number' || typeof place.lng !== 'number') throw new UserError('이 장소는 위치를 몰라요. 다른 곳을 골라 주세요');
-    rec.place = { name: place.name, lat: place.lat, lng: place.lng };
-    rec.status = 'ESTIMATING';
-    const outcome = await runCard(rec);
-    applyOutcome(rec, outcome);
-    if (!state.sessionId) return;
-    // 서버가 받지 않아도 이 카드는 앱에서 계산한 상태 그대로
-    await sendResults([resultCard(cardId, outcome)]);
-  });
+//   onProgress — 실제 단계마다 대화를 알림: 계산 시작(ESTIMATING) · 계산 끝(READY · FAILED …). 계산 결과는 서버 안내 답(T1)을 기다리지 않고 바로 보임
+//   돌려주는 값 = 계산 결과 상태 (FAILED면 화면이 [다시 시도])
+export function pickCardPlace(cardId: string, place: { name: string; lat?: number; lng?: number }, onProgress?: (c: Conversation) => void): Promise<Outcome['status']> {
+  return serial(() =>
+    withProgress(onProgress, async () => {
+      const rec = recOf(cardId);
+      if (typeof place.lat !== 'number' || typeof place.lng !== 'number') throw new UserError('이 장소는 위치를 몰라요. 다른 곳을 골라 주세요');
+      rec.place = { name: place.name, lat: place.lat, lng: place.lng };
+      rec.status = 'ESTIMATING';
+      report(); // 장소 확정 → "기상 · 준비 · 출발 시간을 계산하고 있어요"
+      const outcome = await runCard(rec);
+      applyOutcome(rec, outcome);
+      report(); // 계산 끝 — 카드에 결과
+      if (state.sessionId) await sendResults([resultCard(cardId, outcome)]); // 서버가 받지 않아도 이 카드는 앱에서 계산한 상태 그대로
+      return outcome.status;
+    }),
+  );
 }

@@ -57,6 +57,8 @@ object AlarmController {
       if (existing != null) AlarmStorage.save(context, existing) else AlarmStorage.remove(context, incoming.alarmId)
       throw error
     }
+    // 기상 알람이면 새벽 브리핑 갱신(#515)도 이 시각에 맞춰 다시 정함 — 실패해도 알람 예약에는 영향 없음 (BriefingRefresh 안에서 삼킴)
+    BriefingRefresh.onAlarmScheduled(context, incoming)
     return STATUS_SCHEDULED
   }
 
@@ -83,10 +85,14 @@ object AlarmController {
     AlarmPlaybackService.voiceLevel = null
     AlarmPlaybackService.voiceEngine = null
     BriefingSpeaker.lastStatus = null
+    BriefingSpeaker.lastSource = null
     ringNow(context, payload)
     return mapOf(
       "level" to speech?.level,
-      "engine" to VoiceTest.engine(speech != null, speech?.wav != null),
+      "engine" to VoiceTest.engine(speech != null, speech?.wav != null || speech?.bundled != null),
+      // 고른 첫 출처 (실제로 소리 낸 출처는 voiceTestStatus의 source — 재생 실패로 다음 것으로 넘어갔을 수 있음)
+      "source" to speech?.source,
+      "speed" to speech?.speed?.toDouble(),
       "text" to speech?.text,
       "pitch" to speech?.pitch?.toDouble(),
       "rate" to speech?.rate?.toDouble(),
@@ -103,6 +109,7 @@ object AlarmController {
     "speech" to BriefingSpeaker.lastStatus,
     "level" to AlarmPlaybackService.voiceLevel,
     "engine" to AlarmPlaybackService.voiceEngine,
+    "source" to BriefingSpeaker.lastSource,
   )
 
   /** AI 음성 시험 알람만 즉시 정지 — 알람음 · 진동 · 음성 · 다시 울림 · 미루기 예약 · 출발 알림까지. 해제 기록은 안 남김. 운영 알람 · 개발 예약 알람은 안 건드림 */
@@ -332,6 +339,8 @@ object AlarmController {
         return@forEach
       }
       runCatching { AlarmScheduler.schedule(context, alarm) }
+      // 재부팅하면 갱신 정확 알람도 사라짐 → 다시 걺 (#515)
+      if (alarm.ringCount == 0) BriefingRefresh.onAlarmScheduled(context, alarm)
     }
   }
 

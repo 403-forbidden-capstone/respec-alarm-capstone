@@ -14,7 +14,12 @@ export const BRIEFING_WINDOW_MS = 36 * 60 * 60 * 1000;
 // 긴급 Gemini 음성 하나를 만드는 시간까지 — 기본 20초보다 길게
 const BRIEFING_TIMEOUT_MS = 90_000;
 
-export type BriefingOut = VoiceBriefingSave & { enabled: boolean; gemini: 'NOT_NEEDED' | 'CACHED' | 'MADE' | 'LIMITED' | 'FAILED' | 'NOT_CONFIGURED' };
+// refresh_at = 기상 알람의 전날 대화가 아직 새벽 정리 전이면 다시 받을 시각(ms) — 네이티브 백그라운드 갱신 예약에 넘김 (#515). 예전 서버면 없음
+export type BriefingOut = Omit<VoiceBriefingSave, 'refreshAt'> & {
+  enabled: boolean;
+  gemini: 'NOT_NEEDED' | 'CACHED' | 'MADE' | 'LIMITED' | 'FAILED' | 'NOT_CONFIGURED';
+  refresh_at?: number | null;
+};
 const BRIEFED_TYPES: ReadonlySet<string> = new Set(['WAKE', 'DEPARTURE']);
 
 export type BriefingDeps = {
@@ -61,7 +66,7 @@ async function prepareOnce(nowMs: number, deps: BriefingDeps): Promise<BriefingS
         summary.cleared.push(alarm.id);
         continue;
       }
-      await deps.save(alarm.id, { rule: out.rule, clips: out.clips, audio: out.audio });
+      await deps.save(alarm.id, { rule: out.rule, clips: out.clips, audio: out.audio, refreshAt: out.refresh_at ?? null });
       // 긴급 음성을 못 만들었어도(한도 · 실패) 문장은 저장됨 — 폰은 Android TTS로 전체 브리핑
       (out.gemini === 'FAILED' || out.gemini === 'LIMITED' ? summary.failed : summary.saved).push(alarm.id);
     } catch (e) {

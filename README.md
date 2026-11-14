@@ -52,11 +52,15 @@ npm run web
 |:-:|---|---|
 | 1 | 이슈 틀 선택 후 작성 | 백로그 |
 | 2 | 이번 주 할 일로 이동, 담당자 지정 | 이번 주 |
-| 3 | 브랜치 생성 `feat/12-FE-alarm-list` | 진행 중 |
-| 4 | PR 생성, 본문에 `Closes #12` | 리뷰 |
+| 3 | 브랜치 `feat/12-FE-alarm-list`에서 작업, 초안 PR 생성 | 진행 중 |
+| 4 | PR 생성(또는 초안 해제), 본문에 `Closes #12` | 리뷰 |
 | 5 | 승인 1명 뒤 작성자가 Squash 머지 | 완료 |
 
-보드 이동은 2단계만 수동입니다. 비어 있는 시작일 · 담당자는 브랜치를 만든 날짜 · 사람으로 채워집니다.
+보드 이동은 2단계만 수동입니다. 브랜치를 만들 때는 보드가 움직이지 않고, PR을 열 때 브랜치 이름의 이슈가 진행 중으로 갑니다(Actions 분량 #514). 비어 있는 시작일 · 담당자는 PR을 연 날짜 · 사람으로 채워집니다.
+
+- `Closes #` 없이 연 PR은 PR 자체가 카드로 올라갑니다(초안 = 진행 중). 브랜치 이름에 이슈 번호가 있으면 본문에 `관련 이슈 #12`가 자동으로 달립니다. 이슈까지 닫으려면 `Closes #12`로 바꿉니다.
+- PR 담당자는 작성자로 자동 지정됩니다(초안 포함).
+- 완료 카드의 주차는 끝낸 주로 바뀝니다. 보드의 '한 일' 보기에서 주차별로 봅니다.
 
 ## 이슈
 
@@ -81,7 +85,7 @@ PR 제목   [파트] [유형] 작업 내용             [FE] [FEAT] 알람 목�
 - Squash 머지만 허용합니다. PR 제목이 그대로 `main`의 커밋 한 줄이 됩니다.
 - 승인 1명 · 리뷰 대화 해결 뒤 작성자가 머지합니다. 머지된 브랜치는 자동 삭제됩니다.
 - 리뷰 전 단계의 PR은 제목 앞에 `[WIP]`를 붙입니다.
-- 위 규칙(PR 필수 · 승인 1명 · Squash만 · 강제 push 금지)은 무료 플랜 private 레포라 GitHub가 강제하지 않아 팀 약속으로 지킵니다. 플랜 변경 시 [`.github/rulesets/main.json`](.github/rulesets/main.json)을 Settings → Rules → Rulesets → Import a ruleset으로 적용합니다.
+- 위 규칙(PR 필수 · 승인 1명 · Squash만 · 강제 push 금지)은 무료 플랜 private 레포라 GitHub가 강제하지 않아 팀 약속으로 지킵니다. `main` 직접 push는 push 전 검사(레포 맨 위 `lefthook.yml`)가 막습니다. 급할 때만 `git push --no-verify`. 플랜 변경 시 [`.github/rulesets/main.json`](.github/rulesets/main.json)을 Settings → Rules → Rulesets → Import a ruleset으로 적용합니다.
 
 ## 리뷰
 
@@ -108,10 +112,9 @@ PR 제목   [파트] [유형] 작업 내용             [FE] [FEAT] 알람 목�
 | 시점 | 동작 |
 |---|---|
 | 이슈 생성 | 보드 등록, 이슈 틀 값으로 보드 칸 채움 |
-| 브랜치 생성 | 이슈 → 진행 중, 빈 시작일 · 담당자 채움 |
-| PR 생성 | 이슈 → 리뷰, 파트 라벨 복사, 빈 담당자 채움, Claude 리뷰, 웹 미리보기 주소(검사 목록의 Workers Builds → Details) |
+| PR 생성 | 브랜치 이슈 → 진행 중(빈 시작일 · 담당자 채움), 닫는 이슈 → 리뷰(초안이면 진행 중), 파트 라벨 복사, 빈 담당자 채움, Claude 리뷰, 웹 미리보기 주소(검사 목록의 Workers Builds → Details) |
 | 기능 흐름 PR 판정 | `흐름 확인 필요` 라벨, "흐름 확인" 검사 대기 → 본문 확인 줄 체크 시 통과 |
-| `supabase/` 변경 PR · 머지 | DB 검사, 머지되면 실제 DB에 적용 (서버 함수 · 시드만 바꾼 경우 제외) |
+| `supabase/` 변경 PR · 머지 | DB 검사(초안 PR은 초안을 풀 때), 머지되면 검사 없이 실제 DB에 적용 (서버 함수 · 시드만 바꾼 경우 제외) |
 | 머지 | 이슈 → 완료, 웹 미리보기 고정 주소 갱신 |
 | 매주 월요일 오전 9시 | `주간 요약` 이슈에 지난주 완료 · 머지 · 리뷰 대기 · 정체 작업 정리 |
 | 매주 월요일 오전 10시 | 보안 검사 (비밀값 유출 · 패키지 취약점) |
@@ -148,7 +151,7 @@ git push origin v0.1.0
 | `EXPO_PUBLIC_SUPABASE_URL` · `EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | `mobile/.env` · Cloudflare 변수 · EAS 환경 변수 | Supabase → Project Settings → API Keys |
 | `KAKAO_REST_API_KEY` · `GEMINI_API_KEY` | Supabase Edge Function secrets | 카카오 디벨로퍼스 · Google AI Studio |
 | 카카오 · 구글 로그인 키 | Supabase → Authentication → Providers | 카카오 디벨로퍼스 · Google Cloud Console |
-| `google-services.json` · FCM 서비스 계정 키 | EAS 파일 환경 변수 · credentials | Firebase 콘솔 |
+| `google-services.json` · FCM 서비스 계정 키 | EAS 파일 환경 변수 · credentials, GitHub Secret `GOOGLE_SERVICES_JSON_B64`(base64) | Firebase 콘솔 |
 
 공개 가능한 값은 `EXPO_PUBLIC_`으로 시작하는 두 개뿐입니다. 나머지는 레포와 앱에 넣지 않습니다. 예시 파일: [`mobile/.env.example`](mobile/.env.example) · [`supabase/functions/.env.example`](supabase/functions/.env.example)
 

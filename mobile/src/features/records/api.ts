@@ -5,7 +5,7 @@ import { KIND_LABEL } from '@/features/alarm/types';
 import { getJournal } from '@/features/routine/api';
 import { now } from '@/lib/clock';
 import { UserError } from '@/lib/errors';
-import { addDays, addMinutes, dateParts, dayKey, isSameDay, startOfDay } from '@/lib/format';
+import { addDays, dateParts, dayKey, isSameDay, startOfDay } from '@/lib/format';
 import { isMock } from '@/lib/mode';
 import { alarmChain } from '@/mocks/calc';
 import { db, kst, TODAY } from '@/mocks/data';
@@ -13,7 +13,7 @@ import { pastDay } from '@/mocks/records';
 
 import { leadingBlanks, monthDays, monthTitle, weekDays, weekRelative, weekTitle } from './calendar';
 import * as real from './real';
-import { editBounds, shiftLog } from './suggestion';
+import { prepareBounds, shiftLog } from './suggestion';
 import { buildWeekSummary, dayMark, wakeScore, type WakeRow } from './summary';
 import type { DayMark, DayRecord, MonthRecord, Suggestion, WeekRecord, WeekSummary } from './types';
 
@@ -146,32 +146,40 @@ function buildSuggestion(): Suggestion | null {
   const s = db.suggestion;
   const a = db.appointments.find((x) => x.id === s.appointmentId);
   if (!a) return null;
-  const chain = alarmChain(a);
-  const wake = chain[0].at;
-  const prepare = chain.find((x) => x.kind === 'PREPARE')?.at ?? null;
-  const depart = chain.find((x) => x.kind === 'DEPARTURE')?.at ?? a.at;
+  // 준비 알람 당김 (안건 D111) — 일정의 당김 분(prepareAdvanceMinutes)을 바꿔 서버와 같은 사슬(calc/chain.ts)로 시각을 구함
+  const times = (advance: number) => {
+    const chain = alarmChain({ ...a, prepareAdvanceMinutes: advance });
+    return {
+      wake: chain.find((x) => x.kind === 'WAKE')?.at ?? chain[0].at,
+      prepare: chain.find((x) => x.kind === 'PREPARE')?.at ?? null,
+      depart: chain.find((x) => x.kind === 'DEPARTURE')?.at ?? a.at,
+    };
+  };
+  const advance = a.prepareAdvanceMinutes ?? 0;
   const applied = s.status === 'APPLIED' || s.status === 'EDITED';
-  // 적용 전: 지금 → 제안, 적용 뒤: 적용 전 시각 → 실제로 적용한 시각 (적용 안 했으면 appliedMinutes가 0이라 그대로. 늦춰 적용했으면 적용 전이 더 이른 시각)
-  const back = (at: Date) => addMinutes(at, s.appliedMinutes);
+  // 적용 전: 지금 → 제안, 적용 뒤: 적용 전 시각 → 실제로 적용한 시각
+  const before = times(advance - s.appliedMinutes);
+  const after = times(applied ? advance : advance + s.minutes);
   return {
     id: s.id,
-    title: `다음 알람을 ${s.minutes}분 앞당겨 볼까요?`,
+    title: `준비 알람을 ${s.minutes}분 앞당겨 볼까요?`,
     summary: '최근 3번의 준비가 예상보다 오래 걸렸어요.',
     reason: '최근 3번의 준비가\n예상보다 평균 12분 더 걸렸어요.',
     deltas: [
-      { label: '1회 전', value: '+10분' },
+      { label: '1회 전', value: '+12분' },
       { label: '2회 전', value: '+14분' },
-      { label: '3회 전', value: '+12분' },
+      { label: '3회 전', value: '+10분' },
     ],
     appointment: { id: a.id, title: a.title, at: a.at },
     minutes: s.minutes,
-    currentWake: back(wake),
-    currentPrepare: prepare && back(prepare),
-    depart,
-    bounds: editBounds(a.predictedPrepMinutes - s.appliedMinutes, a.beforePrepMinutes),
-    proposedWake: applied ? wake : addMinutes(wake, -s.minutes),
+    currentWake: before.wake,
+    currentPrepare: before.prepare,
+    depart: before.depart,
+    bounds: prepareBounds(advance - s.appliedMinutes),
+    proposedWake: after.wake,
+    proposedPrepare: after.prepare,
     status: s.status,
-    applied: applied ? { wake, prepare, minutes: s.appliedMinutes } : null,
+    applied: applied ? { wake: after.wake, prepare: after.prepare, minutes: s.appliedMinutes } : null,
   };
 }
 
@@ -186,24 +194,22 @@ export async function getSuggestion(id: string): Promise<Suggestion | null> {
   return db.suggestion.id === id ? buildSuggestion() : null;
 }
 
-// 적용 — 예측 준비를 minutes(적용 전보다 일찍 +, 늦게 −)만큼 바꿔 기상 · 준비 알람이 같이 움직임. 출발은 약속에 묶여 그대로
+// 적용 — 준비 알람을 minutes분 앞당김 (안건 D111): 일정의 당김 분을 바꾸면 사슬이 준비 알람을 당기고 준비 전 활동을 넘는 만큼만 기상도. 출발은 그대로
 // 제안과 다르게 고치면 EDITED. 적용한 뒤에도 다시 고칠 수 있음 — 앞서 적용한 만큼을 걷어내고 새 값으로, 다시 고친 건 늘 EDITED (D53)
-// 다시 고친 값을 어디에 저장하는지는 D6 · D23 · D25가 정한 뒤 (지금은 가짜 데이터)
+// 실데이터는 서버 suggestion-apply (real.ts)
 export async function applySuggestion(id: string, minutes: number) {
   if (!isMock()) return real.applySuggestion(id, minutes);
   const s = db.suggestion;
   const a = db.appointments.find((x) => x.id === s.appointmentId);
   // 거절은 한국어 이유로 던짐 — 화면이 토스트로 보여 주고 성공 안내는 안 띄움
   if (s.id !== id || !a) throw new UserError('제안을 찾을 수 없어요');
-  if (!Number.isInteger(minutes) || minutes === 0) throw new UserError('조정할 시간을 골라 주세요'); // 화면도 0분이면 버튼을 끔
+  if (!Number.isInteger(minutes) || minutes <= 0) throw new UserError('당길 시간을 골라 주세요'); // 화면도 0분이면 버튼을 끔
   const reapply = s.status === 'APPLIED' || s.status === 'EDITED';
   if (reapply && minutes === s.appliedMinutes) throw new UserError('이미 이 시간으로 적용했어요');
-  const bounds = editBounds(a.predictedPrepMinutes - s.appliedMinutes, a.beforePrepMinutes);
-  if (minutes > bounds.earlier || minutes < -bounds.later) {
-    const range = bounds.later ? `${bounds.earlier}분 일찍부터 ${bounds.later}분 늦게까지` : `${bounds.earlier}분 일찍까지`;
-    throw new UserError(`${range} 고를 수 있어요`);
-  }
-  a.predictedPrepMinutes += minutes - s.appliedMinutes;
+  const advance = a.prepareAdvanceMinutes ?? 0;
+  const bounds = prepareBounds(advance - s.appliedMinutes);
+  if (minutes > bounds.earlier) throw new UserError(`${bounds.earlier}분 일찍까지 고를 수 있어요`);
+  a.prepareAdvanceMinutes = advance - s.appliedMinutes + minutes;
   s.appliedMinutes = minutes;
   s.status = reapply || minutes !== s.minutes ? 'EDITED' : 'APPLIED';
   // 편집 기록(고친 값 기록 — 다른 PR)이 머지되면 여기서 screen 'S01'로 같이 남김
@@ -217,7 +223,7 @@ export async function undoSuggestion(id: string) {
   const a = db.appointments.find((x) => x.id === s.appointmentId);
   if (s.id !== id || !a) throw new UserError('제안을 찾을 수 없어요');
   if (s.status !== 'APPLIED' && s.status !== 'EDITED') throw new UserError('적용한 제안만 되돌릴 수 있어요');
-  a.predictedPrepMinutes -= s.appliedMinutes;
+  a.prepareAdvanceMinutes = (a.prepareAdvanceMinutes ?? 0) - s.appliedMinutes;
   s.appliedMinutes = 0;
   s.status = 'PENDING';
   db.events.push({ at: now(), label: '알람 조정 되돌림', source: '직접 입력' });

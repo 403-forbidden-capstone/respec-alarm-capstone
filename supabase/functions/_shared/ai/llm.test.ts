@@ -474,8 +474,8 @@ describe('시간 초과 — Promise.race로 직접', () => {
   it('설정 확인: T1은 시간 초과도 다시 시도하고 T2F는 안 함, 시간은 표대로', () => {
     assert.equal(POINTS.T1.retryOnTimeout, true);
     assert.equal(POINTS.T2F.retryOnTimeout, false);
-    assert.equal(POINTS.T2F.timeoutMs, 9_000);
-    assert.deepEqual(Object.fromEntries(POINT_IDS.map((p) => [p, POINTS[p].timeoutMs])), { T1: 16_000, T2F: 9_000, T2: 19_000, T3: 4_000, T4: 11_000, T5: 9_000, E4: 28_000 });
+    assert.equal(POINTS.T2F.timeoutMs, 15_000);
+    assert.deepEqual(Object.fromEntries(POINT_IDS.map((p) => [p, POINTS[p].timeoutMs])), { T1: 20_000, T2F: 15_000, T2: 19_000, T3: 4_000, T4: 11_000, T5: 9_000, E4: 28_000 });
   });
 
   it('deadlineMs: 다시 시도하면 전체 마감을 넘길 것 같으면 재시도 안 함', async () => {
@@ -485,6 +485,49 @@ describe('시간 초과 — Promise.race로 직접', () => {
     assert.equal(r.code, 'UPSTREAM');
     assert.equal(r.call.attempts, 1);
     assert.deepEqual(t.sleeps, []);
+  });
+
+  it('deadlineMs: 빨리 온 5xx면 남은 마감만큼 줄인 시간으로 다시 시도 (11/12 T1 UPSTREAM 1.4초 — 시도 시간 = 남은 시간이라 늘 포기했음)', async () => {
+    // T2F 9초 뒤 T1: 시도 시간 = 마감 = 9000. 100ms에 500 → 남은 9000 − 100 − 500 = 8400 ≥ 3000 → 다시
+    const a = setup([server(), response([text(T1_OK)])]);
+    const ra = await callPoint(a.client, 'T1', dummyVars('T1'), { ...a.extra, timeoutMs: 9000, deadlineMs: 9000 });
+    assert.equal(ra.ok, true);
+    assert.equal(ra.call.attempts, 2);
+    // 두 번째 시도는 남은 시간(4000 − 600 = 3400ms)으로 잘림 — 영영 안 오면 그 시간에 끝남
+    const b = setup([server(), 'hang']);
+    const rb = mustFail(await callPoint(b.client, 'T1', dummyVars('T1'), { ...b.extra, timeoutMs: 5000, deadlineMs: 4000 }));
+    assert.equal(rb.code, 'TIMEOUT');
+    assert.equal(rb.call.attempts, 2);
+    assert.match(rb.reason, /3400ms/);
+    // 남은 시간이 최소 시도 시간(3초)보다 짧으면 다시 안 보냄
+    const c = setup([server(), response([text(T1_OK)])]);
+    assert.equal(mustFail(await callPoint(c.client, 'T1', dummyVars('T1'), { ...c.extra, timeoutMs: 9000, deadlineMs: 3500 })).call.attempts, 1);
+  });
+
+  it('실제 지연(진짜 타이머): 제한 안에 온 늦은 답은 받고, 넘으면 TIMEOUT — T2F는 시간 초과를 다시 안 보내고 T1은 한 번 더', async () => {
+    // [지연 ms, 응답] 차례로 — setTimeout으로 실제로 기다림 (가짜 시계 아님)
+    const delayed = (steps: [number, LlmResponse | Error][]) => {
+      let n = 0;
+      const client: LlmClient = {
+        create: () => {
+          const [ms, res] = steps[n++];
+          return new Promise((ok, no) => setTimeout(() => (res instanceof Error ? no(res) : ok(res)), ms));
+        },
+      };
+      return { client, calls: () => n };
+    };
+    const t2f = fixture('T2F').response;
+    const a = delayed([[150, t2f]]);
+    assert.equal((await callPoint(a.client, 'T2F', dummyVars('T2F'), { timeoutMs: 400 })).ok, true); // 늦어도 제한 안이면 받음
+    const b = delayed([[400, t2f]]);
+    const rb = mustFail(await callPoint(b.client, 'T2F', dummyVars('T2F'), { timeoutMs: 100 }));
+    assert.deepEqual([rb.code, rb.call.attempts, b.calls()], ['TIMEOUT', 1, 1]); // T2F: 시간 초과는 다시 안 보냄 ([다시 시도]는 화면이)
+    const c = delayed([[400, response([text(T1_OK)])], [20, response([text(T1_OK)])]]);
+    const rc = await callPoint(c.client, 'T1', dummyVars('T1'), { timeoutMs: 100, sleep: async () => {} });
+    assert.deepEqual([rc.ok, rc.call.attempts], [true, 2]); // T1: 시간 초과면 한 번 더 → 빨리 온 두 번째 답
+    const d = delayed([[10, server()], [30, response([text(T1_OK)])]]);
+    const rd = await callPoint(d.client, 'T1', dummyVars('T1'), { timeoutMs: 400, deadlineMs: 5000, sleep: async () => {} });
+    assert.deepEqual([rd.ok, rd.call.attempts], [true, 2]); // 503 · 5xx 뒤 다시 시도
   });
 
   it('deadlineMs: 시간이 넉넉하면 다시 시도하고, 없으면 기존 동작 그대로', async () => {
@@ -713,7 +756,7 @@ describe('call 기록 — ai_calls 표 칸과 같은 이름', () => {
     assert.deepEqual([...POINT_IDS].sort(), [...POINT_CHECK].sort());
     assert.deepEqual(
       Object.fromEntries(POINT_IDS.map((p) => [p, `${POINTS[p].prompt.id}@${POINTS[p].prompt.version}`])),
-      { T1: 'T1@v1.5', T2F: 'T2F@v2-c', T2: 'T2@v3.3', T3: 'T3@v1', T4: 'T4@v1.1', T5: 'T5@v2', E4: 'ASSIST_E4@v1.1' },
+      { T1: 'T1@v1.5', T2F: 'T2F@v2-d', T2: 'T2@v3.3', T3: 'T3@v1', T4: 'T4@v1.1', T5: 'T5@v2', E4: 'ASSIST_E4@v1.1' },
     );
   });
 

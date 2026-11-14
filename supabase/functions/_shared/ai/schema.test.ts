@@ -53,6 +53,7 @@ describe('스키마 7개 — 실험실과 같은 내용인지 지문으로 대�
     't5-journal.v1': 'af6752',
     'assist-e4.v1': '718628',
     't3-reason.v1': '72294f',
+    'extract-fast.v2': '23cc5e', // 서버 판 (extract-fast.v1 + 준비물 items, T2F.v2-d)
     'extract.v2': 'ca990a', // 서버 판 (실험실 장부에 없음 — extract.v1 + 대화 끝 정리 칸)
   };
 

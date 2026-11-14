@@ -1,7 +1,16 @@
 // 개발 화면 AI 음성 시험 — 단계 재현이 실제 판단 식(levelAt)과 같은 단계를 고르는지 · 문장 · 말투가 서버 규칙 그대로인지 · 재생 구성
 import { describe, expect, it } from '@jest/globals';
 import type { VoiceTestSetup } from '@capstone/alarm-core';
-import { androidVoice, briefingText, engineFor, levelAt as sharedLevelAt, resolveVoice, type UrgencyLevel, type UrgencyRule } from '@shared/briefing.ts';
+import {
+  androidVoice,
+  briefingText,
+  engineFor,
+  GEMINI_FALLBACK_TEXT,
+  levelAt as sharedLevelAt,
+  resolveVoice,
+  type UrgencyLevel,
+  type UrgencyRule,
+} from '@shared/briefing.ts';
 
 import { isDevAlarmId, isVoiceTestId, makeDevAlarmId, makeVoiceTestAlarmId } from '../devAlarm';
 import {
@@ -9,11 +18,13 @@ import {
   autoStageTest,
   departureVoiceTest,
   engineLabel,
-  GEMINI_SAMPLE_TEXT,
-  sampleAppointmentAt,
-  geminiSampleTest,
   mixOptions,
   SAMPLE,
+  sampleAppointmentAt,
+  SEQUENCE,
+  GEMINI_SPEED,
+  spokenText,
+  stageVoice,
   wakeVoiceTest,
   type Stage,
 } from '../voiceTest';
@@ -34,14 +45,14 @@ describe('기상 AI 음성 단계 재현', () => {
     expect([0, 1, 2, 3].map((n) => levelAt(voice.rule!, n, NOW))).toEqual([1, 2, 3, 3]);
   });
 
-  it('단계마다 서버 규칙의 문장 · 높낮이 · 속도 · 목소리 그대로 (단계가 오를수록 높고 빠르게)', () => {
+  it('단계마다 서버 규칙의 문장 · 높낮이 · 속도 · 목소리 그대로 (1단계 1.0/1.0, 2단계 1.7/1.5)', () => {
     const { voice } = wakeVoiceTest(1, NOW, ON);
     const profile = resolveVoice('NORMAL');
     expect(voice.clips.map((c) => c.level)).toEqual([1, 2, 3, 4]);
     for (const clip of voice.clips) {
       expect(clip).toMatchObject(androidVoice(profile, clip.level as UrgencyLevel));
     }
-    expect(voice.clips[0].text).toContain('좋은 아침이야~');
+    expect(voice.clips[0].text).toContain('좋은 아침이야.');
     expect(voice.clips[0].text).toContain(SAMPLE.title);
     expect(voice.clips[0].text).toContain('노트북, 충전기, 필기구');
     expect(voice.clips[3].text).toBe(
@@ -54,45 +65,62 @@ describe('기상 AI 음성 단계 재현', () => {
         timeZone: 'Asia/Seoul',
       }),
     );
-    const rates = voice.clips.map((c) => c.rate);
-    expect([...rates].sort((a, b) => a - b)).toEqual(rates);
-    expect(rates[3]).toBeGreaterThan(rates[0]);
+    expect(voice.clips.slice(0, 2).map((c) => [c.pitch, c.rate])).toEqual([
+      [1.0, 1.0],
+      [1.7, 1.5],
+    ]);
+    expect(stageVoice(1)).toBe('Android TTS · 높낮이 1.0 · 속도 1.0');
+    expect(stageVoice(2)).toBe('Android TTS · 높낮이 1.7 · 속도 1.5');
+    expect(stageVoice(3)).toBe('Gemini TTS · Gacrux 목소리 · 예비 gemini_stage4_fallback.wav · 1.0배');
+    expect(stageVoice(4)).toBe('Gemini TTS · Kore 목소리 · 예비 gemini_urgent_sample.wav · 1.2배');
   });
 
-  it('4단계 엔진 — Gemini 캐시가 있을 때만 Gemini, 없으면 Android TTS 대체로 표시', () => {
-    expect(engineFor(4, true)).toBe('GEMINI');
+  it('3 · 4단계 엔진 — 개인화 캐시 · 예비 WAV · Android 대체를 구분해 표시', () => {
+    expect(engineFor(3, true)).toBe('GEMINI');
     expect(engineFor(4, false)).toBe('ANDROID');
-    expect(engineFor(3, true)).toBe('ANDROID');
+    expect(engineFor(2, true)).toBe('ANDROID');
+    expect(engineLabel({ engine: 'GEMINI', level: 4, geminiSourceAlarmId: '11111111-2222', source: 'GEMINI_CACHE' })).toContain('개인화 캐시');
+    expect(engineLabel({ engine: 'GEMINI', level: 3, geminiSourceAlarmId: null, source: 'GEMINI_FALLBACK' })).toContain('gemini_stage4_fallback.wav');
+    expect(engineLabel({ engine: 'GEMINI', level: 4, geminiSourceAlarmId: null, source: 'GEMINI_FALLBACK' })).toContain('gemini_urgent_sample.wav');
+    expect(engineLabel({ engine: 'ANDROID', level: 4, geminiSourceAlarmId: null, source: 'ANDROID_FALLBACK' })).toContain('대체 재생');
+    // 예전 APK(source 없음)는 엔진 · 단계로 짐작
     expect(engineLabel({ engine: 'ANDROID', level: 4, geminiSourceAlarmId: null })).toContain('대체');
-    expect(engineLabel({ engine: 'GEMINI', level: 4, geminiSourceAlarmId: '11111111-2222' })).toContain('캐시된 Gemini');
     expect(engineLabel({ engine: 'ANDROID', level: 2, geminiSourceAlarmId: null })).toBe('Android 오프라인 TTS');
     expect(engineLabel({ engine: 'NONE', level: null, geminiSourceAlarmId: null })).toContain('음성 없음');
   });
+
+  it('보이는 대사 — 예비 WAV면 그 단계 파일의 고정 대사(3은 3, 4는 4), 아니면 단계 문장', () => {
+    expect(spokenText(3, 'GEMINI_FALLBACK', '개인화')).toBe(GEMINI_FALLBACK_TEXT[3]);
+    expect(spokenText(4, 'GEMINI_FALLBACK', '개인화')).toBe('야! 지금 안 일어나면 진짜 늦어! 지금 당장 일어나!'); // 느낌표 정리해 보임
+    expect(spokenText(4, 'ANDROID_FALLBACK', '개인화')).toBe('개인화');
+    expect(spokenText(3, 'GEMINI_CACHE', '개인화')).toBe('개인화');
+  });
 });
 
-describe('시간 자동 전환 · Gemini 샘플', () => {
-  it('자동 전환 — 미루기 없이 시각만 지나면 1 → 3(여유 5분) → 4(여유 0분), 4단계는 샘플 문장 · 샘플 출처', () => {
-    const { snoozeCount, voice } = autoStageTest(NOW, ON);
+describe('시간 자동 전환 · 차례 시험 · 출처 모의', () => {
+  it('자동 전환 — 미루기 없이 시각만 지나면 1 → 3(여유 5분) → 4(여유 0분), 출처 모의는 그대로 넘김', () => {
+    const opts = { ...ON, gemini: 'FALLBACK' as const };
+    const { snoozeCount, voice } = autoStageTest(NOW, opts);
     const at = (ms: number) => levelAt(voice.rule!, snoozeCount, NOW + ms);
     expect([at(0), at(AUTO_STEP_MS - 1), at(AUTO_STEP_MS), at(2 * AUTO_STEP_MS - 1), at(2 * AUTO_STEP_MS)]).toEqual([1, 1, 3, 3, 4]);
-    expect(voice.clips.find((c) => c.level === 4)?.text).toBe(GEMINI_SAMPLE_TEXT);
-    expect(voice.test.gemini).toBe('SAMPLE');
+    expect(voice.test).toEqual(opts);
+    expect(voice.clips.map((c) => c.level)).toEqual([1, 2, 3, 4]);
   });
 
-  it('샘플 비교 — 같은 문장을 4단계로, 출처만 다름 (Gemini 샘플 / Android TTS)', () => {
-    for (const engine of ['SAMPLE', 'ANDROID'] as const) {
-      const { snoozeCount, voice } = geminiSampleTest(engine, NOW, ON);
-      expect(levelAt(voice.rule!, snoozeCount, NOW)).toBe(4);
-      expect(voice.clips.find((c) => c.level === 4)?.text).toBe(GEMINI_SAMPLE_TEXT);
-      expect(voice.test.gemini).toBe(engine);
+  it('차례 시험 1 → 2 → 3 → 4 — 각 단계 재현이 실제 판단 식과 같은 단계', () => {
+    expect(SEQUENCE).toEqual([1, 2, 3, 4]);
+    for (const stage of SEQUENCE) {
+      const { snoozeCount, voice } = wakeVoiceTest(stage, NOW, ON);
+      expect(levelAt(voice.rule!, snoozeCount, NOW)).toBe(stage);
     }
-    // 단계 버튼은 실제 사용자 캐시(CACHE, 기본)만 씀 — 샘플과 섞지 않음
-    expect(wakeVoiceTest(4, NOW, ON).voice.test.gemini).toBeUndefined();
   });
 
-  it('화면 표시 — Gemini 샘플과 사용자 캐시를 구분', () => {
-    expect(engineLabel({ engine: 'GEMINI', level: 4, geminiSourceAlarmId: 'SAMPLE' })).toContain('사용자 캐시 아님');
-    expect(engineLabel({ engine: 'GEMINI', level: 4, geminiSourceAlarmId: '11111111-2222' })).toContain('캐시된 Gemini');
+  it('출처 모의는 네이티브에 그대로, 속도는 고정 3단계 1.0배 · 4단계 1.2배 (API 호출 없음)', () => {
+    expect(GEMINI_SPEED).toEqual({ 3: 1.0, 4: 1.2 });
+    for (const gemini of ['CACHE', 'FALLBACK', 'BROKEN', 'ANDROID'] as const) {
+      expect(wakeVoiceTest(4, NOW, { ...ON, gemini }).voice.test).toEqual({ ...ON, gemini });
+    }
+    expect(wakeVoiceTest(4, NOW, ON).voice.test.gemini).toBeUndefined(); // 기본은 네이티브 CACHE
   });
 
   it('음성 시험 알람 id — 개발 알람(서버 맞추기 · 통계 제외)이면서, [즉시 정지]는 음성 시험만 골라 끔', () => {
@@ -109,7 +137,7 @@ describe('출발 AI 브리핑 시험', () => {
     const { snoozeCount, voice } = departureVoiceTest(NOW);
     expect(voice.clips).toHaveLength(1);
     expect(levelAt(voice.rule!, snoozeCount, NOW)).toBe(1);
-    expect(voice.clips[0].text).toBe('오전 10시 팀플 회의 갈 시간이야. 챙길 것: 노트북, 충전기, 필기구. 이제 출발하자!');
+    expect(voice.clips[0].text).toBe('오전 10시 팀플 회의 갈 시간이야. 챙길 것: 노트북, 충전기, 필기구. 이제 출발하자.'); // 1단계는 Android TTS라 느낌표 없음
     expect(voice.test).toEqual({ sound: true, voice: true });
   });
 });

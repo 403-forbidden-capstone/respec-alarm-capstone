@@ -1,0 +1,31 @@
+name: prepare-ml 이미지 검증
+
+on:
+  pull_request:
+    paths:
+      - 'services/prepare-ml/**'
+      - 'deploy/prepare-ml.compose.example.yml'
+      - '.github/workflows/prepare-ml-image.yml'
+      - 'scripts/smoke-prepare-ml-arm64.sh'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  docker-image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Validate local ARM64 smoke script syntax
+        run: bash -n scripts/smoke-prepare-ml-arm64.sh
+      - name: Build without model artifacts
+        run: docker build -t respec-prepare-ml:ci services/prepare-ml
+      - name: Verify no .cbm file is bundled
+        run: |
+          docker run --rm --entrypoint sh respec-prepare-ml:ci -c \
+            'test ! -f /app/models/v4_age_only/c1_mae.cbm && test ! -f /app/models/v4_age_only/w4_mae.cbm'
+      - name: Validate empty image startup and readiness failure
+        run: |
+          docker run --rm -e CATBOOST_API_TOKEN=ci-only --entrypoint python respec-prepare-ml:ci \
+            -c 'from fastapi import Response; import app; assert app.LOAD_ERRORS == {}; assert app.MODELS == {}; response=Response(); result=app.health(response); assert response.status_code == 503 and result["ok"] is False'

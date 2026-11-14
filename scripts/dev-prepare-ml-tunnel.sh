@@ -56,6 +56,7 @@ fi
 docker run --rm -d --name "$CONTAINER" \
   -p "127.0.0.1:${PORT}:8091" \
   --env-file "$ENV_FILE" \
+  --mount "type=bind,src=$SOURCE/models/v4_age_only,dst=/app/models/v4_age_only,readonly" \
   respec-catboost:tunnel >/dev/null
 
 cleanup() {
@@ -65,8 +66,8 @@ cleanup() {
 trap cleanup EXIT
 
 healthy=0
-for i in {1..15}; do
-  if curl --fail --silent --max-time 2 "http://127.0.0.1:${PORT}/health" >/dev/null; then
+for i in {1..30}; do
+  if curl --fail --silent --max-time 2 "http://127.0.0.1:${PORT}/health" | grep -Eq '"ok"[[:space:]]*:[[:space:]]*true'; then
     healthy=1
     break
   fi

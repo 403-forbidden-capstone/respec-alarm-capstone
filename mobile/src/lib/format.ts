@@ -50,6 +50,12 @@ export function dayKey(date: Date) {
   return `${p.year}-${pad(p.month)}-${pad(p.day)}`;
 }
 
+// AI 대화방 · 하루 기록의 기준일 키 — KST 새벽 4시에 바뀜(00:00~03:59는 전날). 서버 turn-core lifeDate와 같은 규칙
+export const DAY_START_HOUR = 4;
+export function lifeDayKey(date: Date) {
+  return dayKey(addMinutes(date, -DAY_START_HOUR * 60));
+}
+
 export function isSameDay(a: Date, b: Date) {
   return dayKey(a) === dayKey(b);
 }

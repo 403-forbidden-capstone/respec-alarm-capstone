@@ -1,61 +1,110 @@
-# C1/W4 CatBoost service
+# C1/W4 CatBoost service — model artifacts separate from image
 
-Only two age-only models are accepted: `c1_mae` (calendar + age code) and `w4_mae` (calendar + preceding-day minutes + age code).
-Train and verify the artifacts locally in `catboost_261027/models/v4_age_only/`, then copy the two CBM files into the Docker build context. Never commit raw survey datasets.
-Model request schema rejects unexpected or missing features. Actual app inference remains gated by server-verified consent/codebook mapping and user allowlist.
-The entrypoint is `app:app`; environment variables: `CATBOOST_MODEL_DIR`, `CATBOOST_API_TOKEN`, optional `PORT`.
+The FastAPI server accepts only two age-only CatBoost models:
+- `c1_mae`: calendar + verified age code
+- `w4_mae`: same + *immediately preceding local date* preparation minutes
 
-## Local
+The `.cbm` artifacts are **never** committed or copied into Docker images. Both
+model binaries must be provisioned separately and mounted read-only into
+`/app/models/v4_age_only`. The image and its Python dependencies may be
+built on GitHub Actions, GHCR, or an EC2 host without access to model files.
+
+## Verified artifacts (2026-11-11, user's local Mac)
+
+These hashes identify the currently tested version; compare again after
+transferring and update them **if the models are retrained**. They do not
+measure model accuracy.
+
+| file | SHA-256 |
+|---|---|
+| `c1_mae.cbm` | `e8def4a0753a4a5d90472c638ccbe85a3838aa366134c1a279fd1a7f850da7e8` |
+| `w4_mae.cbm` | `16cc8bd739c17caa363ab8b5976fc155b9ce43c92cd1ffd6848999a95c8f77b7` |
+
+## Local Python (already smoke-tested)
+
 ```bash
 cd services/prepare-ml
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
-CATBOOST_MODEL_DIR="$HOME/catboost_261027/models/v4_age_only" CATBOOST_API_TOKEN="set-a-secret" uvicorn app:app --host 127.0.0.1 --port 8091
+CATBOOST_MODEL_DIR="$HOME/catboost_261027/models/v4_age_only" \
+CATBOOST_API_TOKEN=local-test-only uvicorn app:app --host 127.0.0.1 --port 8092
 ```
 
-## Docker / HTTPS deployment
-The Docker build context must be `services/prepare-ml`. Before building, place only these two local model artifacts in `services/prepare-ml/models/v4_age_only/`:
+## Docker smoke test (arm64-capable, no model binaries in image)
 
-- `c1_mae.cbm`
-- `w4_mae.cbm`
-
-These files are **not present in GitHub yet** and the image cannot build until they are supplied. Do not copy any survey microdata into the container or repo. Check the project's model artifact sharing rules before committing generated model binaries.
+From the repository root on the machine with model files:
 
 ```bash
-docker build -t respec-prepare-ml services/prepare-ml
-docker run --rm -p 8091:8091 -e CATBOOST_API_TOKEN="replace-this" respec-prepare-ml
+docker build -t respec-prepare-ml:local services/prepare-ml
+
+docker run -d --name respec-prepare-ml-check --rm \
+  -p 127.0.0.1:8093:8091 \
+  --mount "type=bind,src=$HOME/catboost_261027/models/v4_age_only,dst=/app/models/v4_age_only,readonly" \
+  -e CATBOOST_API_TOKEN=local-test-only \
+  respec-prepare-ml:local
+
+# The model load may take time; do not interpret docker run -d alone as readiness.
+docker inspect -f '{{.State.Health.Status}}' respec-prepare-ml-check
+curl -fsS http://127.0.0.1:8093/health
+curl -sS -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8093/models  # 401
+curl -fsS -H 'x-api-key: local-test-only' http://127.0.0.1:8093/models
+
+docker stop respec-prepare-ml-check
 ```
 
-For hosted Supabase, expose **HTTPS**, configure the endpoint and API token as Edge Function secrets (`PREPARE_ML_URL`, `PREPARE_ML_API_TOKEN`), and enable the flag only after verified survey-code mappings. The Mac localhost address cannot be called from hosted Supabase.
+A successful health check requires `ok=true` and both model names.
+The image may be built without the models, but the service should not be
+considered ready without the read-only bind mount. Without both artifacts,
+`GET /health` returns HTTP 503 with `ok=false`.
 
-Health: `GET /health` (no token); model schema: `GET /models` (token); inference: `POST /predict` (token). Do not put the token in any Expo variable.
+## EC2 handoff (#471 / #472)
 
-## Google Cloud Run — staged deployment
+The legacy Cloud Run deployment helper is disabled and exits before
+creating resources because its source-build design cannot load mounted models.
+The local tunnel helper mounts its model source read-only and checks `ok=true`.
 
-The deployment helper is `scripts/deploy-prepare-ml-cloud-run.sh` from the repo root.
-It asks for the Google Cloud **project ID**, shows the region, and requires typing `DEPLOY`.
-It enables required GCP APIs and creates billable resources. Billing must already be enabled.
-The helper generates a random token at `~/.config/respec-alarm/prepare-ml-api-token` and
-stores it in Secret Manager; never paste it into chat, terminal history, or Git.
-The service runs with minimum instances 0 (cold starts possible), maximum 1.
+The standalone illustration is
+`deploy/prepare-ml.compose.example.yml`. The #471 owner must integrate its
+`prepare-ml` service definition into the single production Compose/nginx setup.
+Avoid publishing port 8091 on all network interfaces.
 
-**Important:** This first deployment uses `--invoker-iam-check` and is **private**.
-It is a secure deployment test and will **not** yet accept requests from Supabase Edge,
-because the current Edge client sends `x-api-key` but not the Google-signed OIDC ID
-token required by Cloud Run IAM. Do not turn `PREPARE_ML_ENABLED=1` on just because
-the Cloud Run URL exists. A later networking/authentication decision is required:
-either implement Google OIDC authentication for the Edge caller, or explicitly opt
-for a publicly invokable endpoint protected by the FastAPI key plus abuse controls.
+1. Provision the two CBM files at an absolute server-side directory, e.g.
+   `/opt/respec/models/v4_age_only`. Transfer them over an authenticated
+   channel (e.g. `scp`) and verify both SHA-256 checksums **on EC2**.
+   The source model files remain in the user's local directory.
+2. Create `deploy/ml.env` **on EC2**, restricted to the deployment user,
+   with `CATBOOST_API_TOKEN=<random-long-secret>` and mode `600`.
+   Do not paste the token into chats, commits, logs, or frontend variables.
+   Use a separately generated token from the local `local-test-only` token.
+3. Export `PREPARE_ML_MODELS_DIR=/opt/respec/models/v4_age_only` and use
+   `docker compose -f deploy/prepare-ml.compose.example.yml up -d --build`
+   as an isolated smoke test. Only port `127.0.0.1:8093` is published.
+   Production Compose should use the integration owned by #471.
+4. Verify `docker compose ... ps` is `healthy`, `GET /health` returns
+   `ok=true`, `POST /predict` with token returns 200, and without token
+   returns 401. Configure nginx so external `/ml/health` and
+   `/ml/predict` work over HTTPS, but `/ml/models` is not exposed
+   (404). Nginx path rewriting must preserve FastAPI's `/health` and
+   `/predict` paths.
+5. Once stable and reachable from hosted Supabase, configure the secret
+   values `PREPARE_ML_URL=https://api.<domain>/ml` and
+   `PREPARE_ML_API_TOKEN` **on Supabase Edge**, not in mobile.
+   **Keep `PREPARE_ML_ENABLED=0`**.
 
-To smoke-test a private endpoint, use an account with Cloud Run Invoker permissions.
-Example (interactive gcloud auth from an account with appropriate role):
+Note: the legacy `scripts/deploy-prepare-ml-cloud-run.sh` assumed
+the former image-embedded-model design. Do not use that helper with this
+EC2 volume-based Dockerfile without adapting its artifact mounting.
 
-```bash
-URL="$(gcloud run services describe respec-prepare-ml --region=asia-northeast3 --format='value(status.url)')"
-curl -fsS -H "Authorization: Bearer $(gcloud auth print-identity-token)" "$URL/health"
-```
+## Operating safety and limitations
 
-The above test checks the IAM identity token for the caller but does not test the
-FastAPI API token or Supabase networking. For `/predict`, both layers of
-authentication are required.
+- A previous one-off Cloudflare tunnel/Edge test with *synthetic*
+  profile codes is not evidence that the current EC2 endpoint is deployed.
+- The official 2024 Time Use Survey codebook mapping and consent/verified
+  profile approval path remain incomplete. Do not mark profiles verified
+  or turn on global inference based on this deployment alone.
+- Production `alarm-suggest` and `alarm-commit` Edge deployments must
+  be checked against GitHub `main` before any authorized test-user E2E.
+- Before accepting an E2E result, verify actual saved alarm and participant
+  records in Supabase and compare UTC timestamps; local Docker health only
+  confirms infrastructure readiness.
