@@ -194,7 +194,8 @@ internal class BriefingSpeaker(
     if (finished) return
     handler.removeCallbacks(startTimeout)
     handler.postDelayed(startTimeout, START_TIMEOUT_MILLIS)
-    if (engine.speak(speech.text, TextToSpeech.QUEUE_FLUSH, null, UTTERANCE) != TextToSpeech.SUCCESS) {
+    // 느낌표는 소리 내 읽히므로 지우고 읽음 (3 · 4단계 Gemini 대사를 대신 읽을 때도). 높낮이 · 속도는 그대로
+    if (engine.speak(BriefingRules.androidText(speech.text), TextToSpeech.QUEUE_FLUSH, null, UTTERANCE) != TextToSpeech.SUCCESS) {
       handler.removeCallbacks(startTimeout)
       finish()
     } else {

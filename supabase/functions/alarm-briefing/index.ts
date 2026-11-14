@@ -4,20 +4,26 @@
 //   요청: { alarm_id, have?: string[] }  have = 폰에 이미 있는 Gemini 음성 열쇠
 //   응답: BriefingOut (_shared/briefing-run.ts)
 //   로그인한 본인 알람만 (사용자 DB = RLS + user_id). 한도 셈 · 호출 기록만 서비스 키(프로젝트 전체를 세야 함). 음성은 서버에 저장하지 않음
+//   기상 알람은 Gemini 텍스트로 1~4단계 개인화 대본을 한 번에 만들어 씀 (_shared/wake-script.ts, 같은 입력이면 wake_scripts에 저장된 것)
 import 'jsr:@supabase/functions-js/edge-runtime.d.ts';
 
+import { geminiClient, geminiModel } from '../_shared/ai/gemini.ts';
+import { QuotaGate, quotaFromEnv } from '../_shared/ai/quota.ts';
+import { recordCalls } from '../_shared/ai/session.ts';
 import { createTts } from '../_shared/ai/tts.ts';
 import { dbTtsQuota } from '../_shared/ai/tts-quota.ts';
 import { requireUser } from '../_shared/auth.ts';
 import type { BriefAppointment, BriefTodo, Importance, StructuredLike } from '../_shared/briefing.ts';
-import { briefingDays, runBriefing } from '../_shared/briefing-run.ts';
+import { loadWakeData } from '../_shared/briefing-load.ts';
+import { runBriefing } from '../_shared/briefing-run.ts';
 import { LEVEL_FIELDS, levelOfIntensity } from '../_shared/calc/intensity.ts';
 import { must } from '../_shared/db.ts';
 import { getEnv } from '../_shared/env.ts';
 import { HttpError } from '../_shared/errors.ts';
 import { jsonResponse, serve } from '../_shared/http.ts';
 import { createServiceClient } from '../_shared/supabase.ts';
-import { localDayRange, safeTimeZone } from '../_shared/tz.ts';
+import { safeTimeZone } from '../_shared/tz.ts';
+import { wakeScriptsFor } from '../_shared/wake-script.ts';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const HASH = /^[0-9a-f]{16}$/;
@@ -31,7 +37,6 @@ type ParticipantRow = {
   arrived_at: string | null;
   appointments: { title: string; appointment_at: string; importance: Importance } | null;
 };
-type DayRow = { appointment_id: string; appointments: { title: string; appointment_at: string; importance: Importance; exception_kind: string | null } };
 
 Deno.serve(
   serve(async (req) => {
@@ -73,47 +78,21 @@ Deno.serve(
     let departAtMs: number | null = null;
 
     if (kind === 'DEPARTURE') {
-      // 그 일정의 준비물만 (안 챙긴 것)
+      // 그 일정의 준비물만 (안 챙긴 것, 개수 제한 없음)
       if (p) {
         todos = must<{ title: string }[]>(
           'items',
-          await db.from('todos').select('title').eq('user_id', userId).eq('appointment_id', p.appointment_id).eq('todo_type', 'ITEM').eq('is_done', false).order('created_at').limit(10),
+          await db.from('todos').select('title').eq('user_id', userId).eq('appointment_id', p.appointment_id).eq('todo_type', 'ITEM').eq('is_done', false).order('created_at'),
         ).map((t): BriefTodo => ({ title: t.title, type: 'ITEM' }));
       }
     } else {
-      const { day, review } = briefingDays(scheduledAtMs, timeZone);
-      const { start, end } = localDayRange(new Date(scheduledAtMs), timeZone);
-      if (alarm.participant_id) {
-        const dep = must<{ scheduled_at: string }[]>(
-          'departure',
-          await db.from('alarms').select('scheduled_at').eq('user_id', userId).eq('participant_id', alarm.participant_id).eq('alarm_type', 'DEPARTURE').eq('is_enabled', true).limit(1),
-        );
-        departAtMs = dep[0] ? Date.parse(dep[0].scheduled_at) : null;
-      }
-      const dayRows = must<DayRow[]>(
-        'day appointments',
-        await db
-          .from('appointment_participants')
-          .select('appointment_id, appointments!inner(title, appointment_at, importance, exception_kind)')
-          .eq('user_id', userId)
-          .gte('appointments.appointment_at', start.toISOString())
-          .lt('appointments.appointment_at', end.toISOString()),
-      ).filter((r) => r.appointments.exception_kind !== 'CANCELED');
-      appointments = dayRows.map((r) => ({ title: r.appointments.title, atMs: Date.parse(r.appointments.appointment_at), importance: r.appointments.importance }));
-      const ids = dayRows.map((r) => r.appointment_id);
-      // 그날 마감인 할 일 + 그날 일정에 붙은 준비물 · 할 일 (안 끝낸 것만)
-      const todoFilter = ids.length ? `due_date.eq.${day},appointment_id.in.(${ids.join(',')})` : `due_date.eq.${day}`;
-      todos = must<{ title: string; todo_type: 'TASK' | 'ITEM' }[]>(
-        'todos',
-        await db.from('todos').select('title, todo_type').eq('user_id', userId).eq('is_done', false).or(todoFilter).order('created_at').limit(20),
-      ).map((t): BriefTodo => ({ title: t.title, type: t.todo_type }));
-      sessions = must<{ extracted_data: StructuredLike | null }[]>(
-        'sessions',
-        await db.from('conversation_sessions').select('extracted_data').eq('user_id', userId).eq('extracted_data->session->>reference_date', review),
-      ).flatMap((s) => (s.extracted_data ? [s.extracted_data] : []));
+      // 그날 일정 · 할 일 · 준비물 · 전날 대화 · 출발 시각 (_shared/briefing-load.ts — 개수 제한 없음, 지운 회차 · 지난 일정의 준비물 제외)
+      ({ appointments, todos, sessions, departAtMs } = await loadWakeData(db, userId, { scheduledAtMs, timeZone, participantId: alarm.participant_id }));
     }
 
     const key = getEnv('GEMINI_API_KEY');
+    const service = createServiceClient();
+    const alarmId = body.alarm_id;
     const out = await runBriefing(
       {
         kind,
@@ -132,7 +111,23 @@ Deno.serve(
         sessions,
       },
       have,
-      { tts: key ? createTts(key) : null, quota: dbTtsQuota(createServiceClient(), userId) },
+      {
+        tts: key ? createTts(key) : null,
+        quota: dbTtsQuota(service, userId),
+        script: (input) =>
+          wakeScriptsFor(
+            {
+              service,
+              userId,
+              alarmId,
+              client: geminiClient(),
+              model: geminiModel(),
+              gate: new QuotaGate(quotaFromEnv(getEnv)),
+              record: (call) => recordCalls({ userId, userDb: db, service }, null, [{ call, io: null }], new Date().toISOString()),
+            },
+            input,
+          ),
+      },
     );
     return jsonResponse(out);
   }),

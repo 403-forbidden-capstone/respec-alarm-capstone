@@ -14,6 +14,7 @@ import {
   GEMINI_FALLBACK_FILE,
   GEMINI_FALLBACK_TEXT,
   GEMINI_STAGE,
+  noExclaim,
   speakable,
   TTS_MODEL,
   lateRisk,
@@ -206,7 +207,7 @@ test('전날 "늦잠 자서 지각 · 일찍 일어나고 싶어" → 다짐 · 
     goals_routine: { goals: [{ habit: 'irregular_wake', goal_text: '일찍 일어나기', source: 'stated' }] },
     schedule_outcomes: [{ is_late: true, causes: ['overslept'], source: 'stated' }],
   });
-  assert.deepEqual(wakeMemo([s], '2026-11-10'), { wakeEarly: true, overslept: true, lateByOversleep: true, goals: [] });
+  assert.deepEqual(wakeMemo([s], '2026-11-10'), { wakeEarly: true, overslept: true, lateByOversleep: true, snoozeRepeat: false, goals: ['일찍 일어나기'] });
   assert.equal(wakeMemo([], '2026-11-10'), null);
   assert.equal(wakeMemo([session({ goals_routine: { goals: [{ habit: 'irregular_wake', goal_text: '일찍', source: 'inferred' }] } })], '2026-11-10'), null);
   assert.equal(wakeMemo([{ ...s, other: { safety_flag: true } }], '2026-11-10'), null);
@@ -219,39 +220,65 @@ const input = (over: Partial<BriefingInput> = {}): BriefingInput => ({ kind: 'WA
 test('기상 브리핑: 다짐 + 오늘 일정 시간순 (0 · 1 · 여러 개), 할 일에 시각을 안 붙임', () => {
   assert.match(briefingText(1, input()), /오늘은 등록된 일정이 없어\./);
   assert.match(briefingText(1, input({ appointments: [appt('팀플 회의', 15)] })), /오늘은 오후 3시 팀플 회의 일정이 있어\./);
-  const memo = { wakeEarly: true, overslept: false, lateByOversleep: false, goals: [] };
+  const memo = { wakeEarly: true, overslept: false, lateByOversleep: false, snoozeRepeat: false, goals: [] };
   assert.equal(
     briefingText(1, input({ memo, appointments: pickAppointments([appt('과제', 19), appt('팀플 회의', 15), appt('저녁 약속', 17)]) })),
-    '좋은 아침이야~ 어제 오늘부터는 일찍 일어나겠다고 했잖아. 오늘은 오후 3시 팀플 회의, 오후 5시 저녁 약속, 오후 7시 과제 순서로 일정이 있어. 슬슬 일어나서 준비해 볼까?',
+    '좋은 아침이야. 오늘은 오후 3시 팀플 회의, 오후 5시 저녁 약속, 오후 7시 과제 순서로 일정이 있어. 어제 오늘부터는 일찍 일어나겠다고 했잖아. 슬슬 일어나서 준비해 보자.',
   );
   const t = briefingText(1, input({ appointments: [appt('수업', 10)], todos: [{ title: '노트북', type: 'ITEM' }, { title: '과제 제출', type: 'TASK' }] }));
   assert.equal((t.match(/(오전|오후) \d+시/g) ?? []).length, 1);
 });
 
-test('많으면 가장 가까운 일정 + 중요한 일정 우선', () => {
-  assert.deepEqual(pickAppointments([appt('E', 20), appt('D', 18, 'HIGH'), appt('A', 9), appt('C', 14), appt('B', 11)]).map((a) => a.title), ['A', 'B', 'D']);
+test('기상 일정은 개수 제한 없이 전부 시간순 (max를 주면 가장 가까운 일정 + 중요한 일정 우선)', () => {
+  const list = [appt('E', 20), appt('D', 18, 'HIGH'), appt('A', 9), appt('C', 14), appt('B', 11)];
+  assert.deepEqual(pickAppointments(list).map((a) => a.title), ['A', 'B', 'C', 'D', 'E']);
+  assert.deepEqual(pickAppointments(list, 3).map((a) => a.title), ['A', 'B', 'D']);
+});
+
+test('기상 템플릿: 모든 단계에 오늘 전체 일정 · 준비물 전부 · 다짐 전부, 1 · 2단계는 느낌표 없음', () => {
+  const full = input({
+    memo: { wakeEarly: true, overslept: true, lateByOversleep: true, snoozeRepeat: true, goals: ['알람 미루지 않고 바로 일어나기', '운동하기'] },
+    appointments: [appt('팀플 발표', 10, 'HIGH'), appt('전공 수업', 14), appt('헬스장', 18), appt('스터디', 20)],
+    todos: ['노트북', '발표 자료', '운동복', '충전기'].map((title) => ({ title, type: 'ITEM' as const })),
+  });
+  const texts = ([1, 2, 3, 4] as const).map((l) => briefingText(l, full));
+  for (const t of texts) {
+    for (const w of ['오전 10시 팀플 발표', '오후 2시 전공 수업', '오후 6시 헬스장', '오후 8시 스터디', '노트북', '발표 자료', '운동복', '충전기', '알람 미루지 않고 바로 일어나기', '운동하기']) assert.ok(t.includes(w), `${w} 없음: ${t}`);
+  }
+  assert.doesNotMatch(texts[0] + texts[1], /[!！]/);
+  assert.match(texts[2] + texts[3], /!/); // 3 · 4단계는 Gemini TTS용이라 느낌표를 둠
+  assert.equal(new Set(texts).size, 4);
+});
+
+test('noExclaim: 반각 · 전각 · 연속 느낌표를 마침표 · 공백으로, ?!는 ?로, 숫자 · 따옴표는 그대로', () => {
+  assert.equal(noExclaim('야!!!!너 일어나!'), '야. 너 일어나.');
+  assert.equal(noExclaim('해?! 빨리!'), '해? 빨리.');
+  assert.equal(noExclaim('일어나！！ 빨리!'), '일어나. 빨리.');
+  assert.equal(noExclaim('1.5배!'), '1.5배.');
+  assert.equal(noExclaim('"운동!" 하자'), '"운동." 하자');
+  assert.equal(noExclaim('좋은 아침이야.'), '좋은 아침이야.');
 });
 
 test('기상 2 · 3단계는 "미뤘다" · "늦는다"를 단정하지 않음, 4단계(실제 긴급)만 "늦어"', () => {
   for (const level of [1, 2, 3] as const) assert.doesNotMatch(briefingText(level, input({ appointments: [appt('수업', 10)] })), /늦어|늦는다|미뤘/);
-  const t = briefingText(4, input({ memo: { wakeEarly: true, overslept: true, lateByOversleep: true, goals: [] }, appointments: [appt('팀플 회의', 15), appt('저녁 약속', 17), appt('과제', 19)] }));
+  const t = briefingText(4, input({ memo: { wakeEarly: true, overslept: true, lateByOversleep: true, snoozeRepeat: false, goals: [] }, appointments: [appt('팀플 회의', 15), appt('저녁 약속', 17), appt('과제', 19)] }));
   assert.ok(t.startsWith('야! 너 안 일어나?! 지금 안 일어나면 진짜 늦어!'));
   assert.match(t, /너 어제 일찍 일어나고 싶다며/);
   assert.match(t, /지금 당장 일어나! 빨리 일어나라고!$/);
-  assert.doesNotMatch(t, /과제/); // 긴급은 핵심 일정 2개만
+  assert.match(t, /과제/); // 긴급에서도 오늘 일정은 전부
 });
 
 test('3단계 대사: 지각을 단정하지 않음 (스누즈로도 와서)', () => {
   const t = briefingText(3, input({ appointments: [appt('팀플 회의', 10)], departAtMs: kst(9, 10) }));
-  assert.equal(t, '야, 근데 이제 진짜 일어나야 돼. 계속 자면 안 되잖아. 오늘 오전 10시 팀플 회의 있잖아. 오전 9시 10분에는 나가야 해! 얼른 일어나서 준비해!');
+  assert.equal(t, '야! 이제 진짜 일어나야 돼! 오늘은 오전 10시 팀플 회의 일정이 있어. 오전 9시 10분에는 나가야 해! 얼른 일어나서 준비해!');
   assert.doesNotMatch(t, /늦|딱 맞게/);
-  assert.equal(briefingText(2, input({ appointments: [appt('팀플 회의', 10)] })), '야, 이제 진짜 일어나야 해. 더 미루면 준비하기 힘들어. 오늘 오전 10시 팀플 회의 있잖아. 얼른 일어나.');
+  assert.equal(briefingText(2, input({ appointments: [appt('팀플 회의', 10)] })), '이제 정말 일어나야 해. 오늘은 오전 10시 팀플 회의 일정이 있어. 이제 그만 자고 지금 준비를 시작하자.');
 });
 
 test('느낌표 · 물음표 반복 정리 — 모든 단계 · 종류 문장, 사용자가 적은 제목 · 준비물까지 (글자는 그대로)', () => {
   assert.equal(speakable('회의!!!! 진짜??? 뭐?!?!?! 좋아!'), '회의! 진짜? 뭐?! 좋아!');
   const loud = input({
-    memo: { wakeEarly: true, overslept: true, lateByOversleep: true, goals: ['운동!!!'] },
+    memo: { wakeEarly: true, overslept: true, lateByOversleep: true, snoozeRepeat: false, goals: ['운동!!!'] },
     appointments: [appt('면접!!!!', 10, 'HIGH')],
     todos: [{ title: '이력서???', type: 'ITEM' }],
     departAtMs: kst(9),
@@ -267,8 +294,8 @@ test('느낌표 · 물음표 반복 정리 — 모든 단계 · 종류 문장, �
 
 test('출발 브리핑: 그 일정 시각 + 등록된 준비물 + 출발 촉구 (전날 대화 · 다른 일정은 안 넣음)', () => {
   const d = (level: 1 | 4, todos: BriefingInput['todos'] = [{ title: '노트북', type: 'ITEM' }, { title: '충전기', type: 'ITEM' }]) =>
-    briefingText(level, input({ kind: 'DEPARTURE', appointments: [appt('면접', 10, 'HIGH')], todos, memo: { wakeEarly: true, overslept: false, lateByOversleep: false, goals: [] } }));
-  assert.equal(d(1), '오전 10시 면접 갈 시간이야. 챙길 것: 노트북, 충전기. 이제 출발하자!');
+    briefingText(level, input({ kind: 'DEPARTURE', appointments: [appt('면접', 10, 'HIGH')], todos, memo: { wakeEarly: true, overslept: false, lateByOversleep: false, snoozeRepeat: false, goals: [] } }));
+  assert.equal(d(1), '오전 10시 면접 갈 시간이야. 챙길 것: 노트북, 충전기. 이제 출발하자.'); // 1 · 2단계는 Android TTS라 느낌표 없음
   assert.equal(d(4), '야! 지금 당장 나가! 이러다 면접 늦는다고! 노트북, 충전기 챙기고 바로 출발해!');
   assert.doesNotMatch(d(1, []), /챙길 것/); // 준비물이 없으면 안 만듦
   assert.doesNotMatch(d(1), /어제/);

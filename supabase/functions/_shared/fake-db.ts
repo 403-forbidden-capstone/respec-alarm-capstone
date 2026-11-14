@@ -33,6 +33,7 @@ const DEFAULTS: Record<string, Row> = {
   alarms: { routine_id: null, step_order: null, snooze_limit: 3, recurrence_rule: null, vibration: null },
   appointments: { memo: null, exception_kind: null },
   daily_journals: { edited_summary: null, is_edited: false },
+  todos: { is_done: false }, // init_schema 기본값 (앱 · voice-commit은 is_done을 안 보냄)
 };
 
 const DAY_MS = 86_400_000;
