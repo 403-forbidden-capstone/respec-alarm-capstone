@@ -665,6 +665,19 @@ isOneToOne: false
                   Relationships: [
                     
                   ]
+                },"server_settings": {
+                  Row: {
+                    "key": string,"updated_at": string,"value": string
+                  }
+                  Insert: {
+                    "key": string,"updated_at"?: string,"value"?: string
+                  }
+                  Update: {
+                    "key"?: string,"updated_at"?: string,"value"?: string
+                  }
+                  Relationships: [
+                    
+                  ]
                 },"sharing_permissions": {
                   Row: {
                     "can_edit_alarm": boolean,"can_view_alarm": boolean,"can_view_wake": boolean,"created_at": string,"grantee_id": string,"owner_id": string,"permission_id": string,"source_id": string,"source_type": Database["public"]['Enums']["permission_source"],"updated_at": string
