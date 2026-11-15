@@ -136,8 +136,12 @@ function travel(add: Add) {
   add('travel', 'medianSameRoute', 'empty', [], origin, dest, 'TRANSIT');
   add('travel', 'medianSameRoute', 'two-only', [sample(1200), sample(1500)], origin, dest, 'TRANSIT');
   add('travel', 'medianSameRoute', 'three-odd', [sample(1200), sample(1800), sample(1500)], origin, dest, 'TRANSIT');
-  add('travel', 'medianSameRoute', 'four-even-half', [sample(1200), sample(1260), sample(1500), sample(1590)], origin, dest, 'TRANSIT');
-  add('travel', 'medianSameRoute', 'four-even-point-five', [sample(60 * 20), sample(60 * 21), sample(60 * 22), sample(60 * 23)], origin, dest, 'TRANSIT');
+  add('travel', 'medianSameRoute', 'four-even-median-23', [sample(1200), sample(1260), sample(1500), sample(1590)], origin, dest, 'TRANSIT');
+  // 중앙값 .5: JS Math.round는 위로(20.5 → 21 · 22.5 → 23), 파이썬 round는 짝수 쪽(20 · 22)이라 갈림
+  add('travel', 'medianSameRoute', 'four-even-median-20.5', [sample(60 * 18), sample(60 * 20), sample(60 * 21), sample(60 * 30)], origin, dest, 'TRANSIT');
+  add('travel', 'medianSameRoute', 'four-even-median-22.5', [sample(60 * 20), sample(60 * 22), sample(60 * 23), sample(60 * 25)], origin, dest, 'TRANSIT');
+  add('travel', 'medianSameRoute', 'four-even-median-21.5', [sample(60 * 20), sample(60 * 21), sample(60 * 22), sample(60 * 23)], origin, dest, 'TRANSIT');
+  add('travel', 'medianSameRoute', 'median-0.4-fraction', [sample(60 * 20 + 24), sample(60 * 20 + 24), sample(60 * 20 + 24)], origin, dest, 'TRANSIT');
   add('travel', 'medianSameRoute', 'filter-short-long', [sample(59), sample(60), sample(18_000), sample(18_001), sample(1200), sample(1300)], origin, dest, 'TRANSIT');
   add('travel', 'medianSameRoute', 'all-filtered', [sample(30), sample(20_000), sample(10)], origin, dest, 'TRANSIT');
   add('travel', 'medianSameRoute', 'transport-mismatch', [sample(1200), sample(1300), sample(1400, origin, dest, 'WALK')], origin, dest, 'TRANSIT');
@@ -145,7 +149,7 @@ function travel(add: Add) {
   add('travel', 'medianSameRoute', 'radius-outside', [sample(1200, shift(350)), sample(1300, shift(-350)), sample(1400)], origin, dest, 'TRANSIT');
   add('travel', 'medianSameRoute', 'radius-edge-299', [sample(1200, shift(299)), sample(1300, shift(-299)), sample(1400)], origin, dest, 'TRANSIT');
   add('travel', 'medianSameRoute', 'radius-edge-301', [sample(1200, shift(301)), sample(1300, shift(-301)), sample(1400)], origin, dest, 'TRANSIT');
-  add('travel', 'medianSameRoute', 'min-round-up-to-1', [sample(60), sample(60), sample(61)], origin, dest, 'TRANSIT');
+  add('travel', 'medianSameRoute', 'median-exactly-1', [sample(60), sample(60), sample(61)], origin, dest, 'TRANSIT');
   for (let i = 0; i < 40; i++) {
     const n = r.int(0, 8);
     const samples = Array.from({ length: n }, () =>

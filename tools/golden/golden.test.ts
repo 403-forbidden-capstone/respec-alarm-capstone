@@ -2,11 +2,12 @@
 //   실행: node --test --disable-warning=MODULE_TYPELESS_PACKAGE_JSON "tools/golden/*.test.ts"
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { readFileSync, readdirSync } from 'node:fs';
+import { mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, test } from 'node:test';
 import { decode, encode } from './codec.ts';
-import { DATA_DIR, FORMAT, ROOT, buildAll, check } from './golden.ts';
+import { DATA_DIR, FORMAT, ROOT, buildAll, check, runOne } from './golden.ts';
 import { MODULES } from './registry.ts';
 import { d, rng } from './scenarios/kit.ts';
 
@@ -114,6 +115,41 @@ describe('결정성', () => {
     for (const tz of ['UTC', 'America/New_York', 'Asia/Seoul', 'Pacific/Kiritimati']) {
       const r = spawnSync(process.execPath, ['--disable-warning=MODULE_TYPELESS_PACKAGE_JSON', join(ROOT, 'tools/golden/golden.ts'), 'check'], { env: { ...process.env, TZ: tz }, encoding: 'utf8' });
       assert.equal(r.status, 0, `TZ=${tz}\n${r.stdout}${r.stderr}`);
+    }
+  });
+});
+
+describe('도구 실행', () => {
+  test('골든에 못 넣는 결과(Map · $ 키 · 잘못된 Date)는 "함수가 던진 오류" 사례가 되지 않고 멈춤', () => {
+    MODULES.__fake = { returnsMap: () => new Map(), returnsDollarKey: () => ({ $x: 1 }), returnsBadDate: () => new Date(Number.NaN), throwsOwn: () => { throw new RangeError('내가 던짐'); }, returnsNothing: () => undefined };
+    try {
+      for (const fn of ['returnsMap', 'returnsDollarKey', 'returnsBadDate']) assert.throws(() => runOne('__fake', fn, []), /골든에 못 넣는|\$로 시작|잘못된 Date/, fn);
+      assert.deepEqual(runOne('__fake', 'throwsOwn', []), { error: { name: 'RangeError', message: '내가 던짐' } });
+      assert.deepEqual(runOne('__fake', 'returnsNothing', []), {});
+    } finally {
+      delete MODULES.__fake;
+    }
+  });
+
+  test('심볼릭 링크 · 정션 경로로 열어도 check가 돌고 결과를 말함 (조용히 통과하지 않음)', (t) => {
+    const dir = mkdtempSync(join(tmpdir(), 'golden-link-'));
+    const link = join(dir, 'golden');
+    try {
+      symlinkSync(join(ROOT, 'tools/golden'), link, 'junction');
+    } catch {
+      rmSync(dir, { recursive: true, force: true });
+      t.skip('이 환경에서는 링크를 못 만듦');
+      return;
+    }
+    try {
+      const r = spawnSync(process.execPath, ['--disable-warning=MODULE_TYPELESS_PACKAGE_JSON', join(link, 'golden.ts'), 'check'], { encoding: 'utf8' });
+      assert.equal(r.status, 0, r.stdout + r.stderr);
+      assert.match(r.stdout, /골든 일치/);
+      const usage = spawnSync(process.execPath, ['--disable-warning=MODULE_TYPELESS_PACKAGE_JSON', join(link, 'golden.ts')], { encoding: 'utf8' });
+      assert.equal(usage.status, 2);
+      assert.match(usage.stderr, /사용법/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
     }
   });
 });

@@ -20,7 +20,7 @@ node --test --disable-warning=MODULE_TYPELESS_PACKAGE_JSON "tools/golden/*.test.
 ```
 
 - `check`는 push 전 검사(`lefthook.yml`)에서도 돎. `supabase/functions/_shared/**` 또는 `tools/golden/**`가 들어간 push만 검사하고 1초쯤 걸림. 급하면 `git push --no-verify`.
-- `generate`는 끝에 **오류로 기록된 사례 목록**을 보여 줌. 일부러 넣은 오류(잘못된 날짜 글자 · 이동시간 없음 · 검증 못 통과한 계획의 저장)여야 하고, 처음 보는 이름이 있으면 시나리오 실수일 수 있음.
+- `generate`는 끝에 **오류로 기록된 사례 목록**을 보여 줌. 일부러 넣은 오류(잘못된 날짜 글자 · 이동시간 없음 · 날짜 · 장소 없음 · 검증 못 통과한 계획의 저장)와 난수 계획 중 출발 시각이 이미 지난 입력의 저장 오류(`commit-core/diffAlarmsOfPlan/rand-N`)여야 하고, 그 밖의 처음 보는 이름이 있으면 시나리오 실수일 수 있음.
 - 시간대와 상관없음: 계산이 서울 등 명시한 시간대로만 도는지 `TZ`를 바꿔 가며 같은 결과가 나오는지 시험이 확인함.
 
 ## 골든 파일 (`data/<모듈>.json`)

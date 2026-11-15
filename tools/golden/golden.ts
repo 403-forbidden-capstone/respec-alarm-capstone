@@ -5,7 +5,7 @@
 //   check는 lefthook push 전 검사에서도 돎 (lefthook.yml). 설명 · 파일 모양은 tools/golden/README.md
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { encode } from './codec.ts';
@@ -32,20 +32,22 @@ function constantsOf(ns: Record<string, unknown>): Record<string, unknown> {
   return out;
 }
 
-function runOne(module: string, fn: string, args: unknown[]): Outcome {
+export function runOne(module: string, fn: string, args: unknown[]): Outcome {
   const ns = MODULES[module];
   if (!ns) throw new Error(`골든 모듈이 없음: ${module}`);
   if (fn === '$constants') return { output: encode(constantsOf(ns), `${module}.$constants`) };
   const f = ns[fn];
   if (typeof f !== 'function') throw new Error(`골든 함수가 없음: ${module}.${fn}`);
+  let result: unknown;
   try {
     // 함수가 인자를 건드려도 기록한 입력과 어긋나지 않게 복제본을 넘김 (Date도 복제됨)
-    const result = f(...structuredClone(args));
-    return result === undefined ? {} : { output: encode(result, `${module}.${fn}`) };
+    result = f(...structuredClone(args));
   } catch (e) {
     if (e instanceof Error) return { error: { name: e.name, message: e.message } };
     throw e;
   }
+  // 부호화는 try 밖: 골든에 못 넣는 값(Map · $ 키 · 잘못된 Date)은 "함수가 던진 오류"로 둔갑하지 않고 generate · check를 멈춤
+  return result === undefined ? {} : { output: encode(result, `${module}.${fn}`) };
 }
 
 // 모든 시나리오를 돌려 모듈별 사례 목록을 만듦 (순서 고정)
@@ -164,7 +166,8 @@ export function check(): number {
   return 1;
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+// 직접 실행했을 때만 (심볼릭 링크 · Windows 정션 경로로 열어도 같게 보려고 양쪽을 realpath로 맞춤 — import.meta.url은 이미 풀린 경로)
+if (process.argv[1] && realpathSync(resolve(process.argv[1])) === realpathSync(fileURLToPath(import.meta.url))) {
   const command = process.argv[2];
   if (command === 'generate') generate();
   else if (command === 'check') process.exitCode = check();

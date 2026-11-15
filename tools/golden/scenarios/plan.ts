@@ -209,7 +209,9 @@ function plans(add: Add) {
     ['new-bound-clamps-high', newAppointmentInputs({ prepareBound: { around: 40, within: 5 } }), travelOf(30)],
     ['new-bound-clamps-low', newAppointmentInputs({ prepareBound: { around: 70, within: 5 } }), travelOf(30)],
     ['new-past-departure', newAppointmentInputs({ now: d('2026-11-16T09:50:00+09:00') }), travelOf(30)],
-    ['new-wake-already-passed', newAppointmentInputs({ now: d('2026-11-16T07:00:00+09:00') }), travelOf(30)],
+    ['new-wake-already-passed', newAppointmentInputs({ now: d('2026-11-16T08:40:00+09:00') }), travelOf(30)],
+    ['new-wake-and-prepare-passed', newAppointmentInputs({ now: d('2026-11-16T08:50:00+09:00') }), travelOf(30)],
+    ['new-wake-passed-manual-wake-kept', newAppointmentInputs({ now: d('2026-11-16T08:40:00+09:00') }, { manualTimes: { WAKE: d('2026-11-16T08:50:00+09:00') } }), travelOf(30)],
     ['new-kinds-empty', newAppointmentInputs({}, { kinds: [] }), travelOf(30)],
     ['new-kinds-departure-only', newAppointmentInputs({}, { kinds: ['DEPARTURE'] }), travelOf(30)],
     ['new-manual-times', newAppointmentInputs({}, { manualTimes: { WAKE: d('2026-11-16T07:00:00+09:00'), DEPARTURE: d('2026-11-16T08:45:00+09:00') } }), travelOf(30)],
@@ -227,7 +229,7 @@ function plans(add: Add) {
     ['existing-edit-transport', existingAppointmentInputs({}, { transport: 'WALK' }), travelOf(55)],
     ['existing-manual-wake-kept', existingAppointmentInputs({}, {}, [alarmRow('WAKE', d('2026-11-16T07:00:00+09:00'), { time_source: 'MANUAL' }), alarmRow('PREPARE', d('2026-11-16T07:20:00+09:00'))]), travelOf(30)],
     ['existing-advance-accepted', existingAppointmentInputs({ participant: participantRow({ prepare_advance_minutes: 10 }) }), travelOf(30)],
-    ['existing-advance-with-existing-advance', existingAppointmentInputs({ participant: participantRow({ prepare_advance_minutes: 10 }), existingAdvanceMinutes: 10 }), travelOf(30)],
+    ['existing-advance-with-existing-advance', existingAppointmentInputs({ participant: participantRow({ prepare_advance_minutes: 10 }), existingAdvanceMinutes: 0 }), travelOf(30)],
     ['existing-friend-times-not-stripped', existingAppointmentInputs({}, {}, [alarmRow('WAKE', d('2026-11-16T07:40:00+09:00'), { original_scheduled_at: '2026-11-16T07:00:00.000Z', original_time_source: 'AUTO' })]), travelOf(30)],
     ['existing-manual-intensity', existingAppointmentInputs({}, {}, [alarmRow('WAKE', d('2026-11-16T07:40:00+09:00'), { intensity_source: 'MANUAL', intensity: 'SOFT', voice_tone: 'CALM', sound_key: 'theme_calm', vibration: 'NONE' })]), travelOf(30)],
     ['existing-routine-row-ignored', existingAppointmentInputs({}, {}, [alarmRow('ROUTINE', d('2026-11-16T06:00:00+09:00'), { alarm_id: 'r1' }), alarmRow('DEPARTURE', d('2026-11-16T08:50:00+09:00'))]), travelOf(30)],
@@ -239,7 +241,7 @@ function plans(add: Add) {
     for (const m of mode ? [mode] : ['preview', 'save']) {
       add('plan-core', 'computePlan', `${name}-${m}`, inputs, travel, m);
       add('plan-core', 'toSuggestionOfPlan', `${name}-${m}`, inputs, travel, m);
-      add('commit-core', 'diffAlarmsOfPlan', `${name}-${m}`, inputs, travel, { now: NOW, replaceExisting: m === 'save' });
+      add('commit-core', 'diffAlarmsOfPlan', `${name}-${m}`, inputs, travel, { now: inputs.now, replaceExisting: m === 'save' });
     }
     add('plan-core', 'toTravelRequiredSuggestion', name, inputs, travel);
   }
@@ -249,11 +251,12 @@ function plans(add: Add) {
   add('plan-core', 'computePlan', 'error-no-destination', { ...newAppointmentInputs(), draft: { at: d('2026-11-16T10:00:00+09:00') } }, travelOf(30), 'save');
   add('commit-core', 'diffAlarmsOfPlan', 'error-plan-not-ok', newAppointmentInputs({ now: d('2026-11-16T09:55:00+09:00') }), travelOf(30), { now: NOW, replaceExisting: true });
   const r = rng(0x91a7);
+  const options = rng(0x0c0117); // commit-core 옵션용 — plan 입력용 난수와 수열을 나눔
   for (let i = 0; i < 60; i++) {
     const { inputs, travel, mode } = randomPlan(r);
     add('plan-core', 'computePlan', `rand-${i}`, inputs, travel, mode);
     add('plan-core', 'toSuggestionOfPlan', `rand-${i}`, inputs, travel, mode);
-    add('commit-core', 'diffAlarmsOfPlan', `rand-${i}`, inputs, travel, { now: inputs.now, replaceExisting: r.chance(0.6), ...(r.chance(0.4) ? { enabled: r.pick([{ WAKE: false }, { PREPARE: true }, { DEPARTURE: false }]) } : {}) });
+    add('commit-core', 'diffAlarmsOfPlan', `rand-${i}`, inputs, travel, { now: inputs.now, replaceExisting: options.chance(0.6), ...(options.chance(0.4) ? { enabled: options.pick([{ WAKE: false }, { PREPARE: true }, { DEPARTURE: false }]) } : {}) });
   }
 }
 
@@ -323,6 +326,28 @@ function planHelpers(add: Add) {
       add('plan-core', 'inferBeforePrepare', `gap${gap}-adv${advance}-prep50-manual-depart`, [...wakePrep(gap), alarmRow('DEPARTURE', d('2026-11-16T08:50:00+09:00'), { time_source: 'MANUAL' })], advance, 50);
     }
   }
+  // 간격 0 · 당김 > 0: 기상이 자동 기상(출발 − 준비)에서 앞당겨진 만큼을 빼서 되찾음 (D111 B안). 숫자 결과가 나오는 사례
+  const wakeAt = (hhmmss: string) => d(`2026-11-16T${hhmmss}+09:00`);
+  const together = (wake: string, over: Record<string, unknown> = {}, departOver: Record<string, unknown> = {}) => [
+    alarmRow('WAKE', wakeAt(wake), over),
+    alarmRow('PREPARE', wakeAt(wake)),
+    alarmRow('DEPARTURE', wakeAt('08:50:00'), departOver),
+  ];
+  add('plan-core', 'inferBeforePrepare', 'regain-wake-moved-5', together('07:55:00'), 25, 50);
+  add('plan-core', 'inferBeforePrepare', 'regain-wake-moved-5-adv30', together('07:55:00'), 30, 50);
+  add('plan-core', 'inferBeforePrepare', 'regain-wake-manual', together('07:55:00', { time_source: 'MANUAL' }), 25, 50);
+  add('plan-core', 'inferBeforePrepare', 'regain-depart-manual', together('07:55:00', {}, { time_source: 'MANUAL' }), 25, 50);
+  add('plan-core', 'inferBeforePrepare', 'regain-no-prepare-minutes', together('07:55:00'), 25);
+  add('plan-core', 'inferBeforePrepare', 'regain-prepare-minutes-null', together('07:55:00'), 25, null);
+  add('plan-core', 'inferBeforePrepare', 'regain-half-minute-4.5', together('07:55:30'), 25, 50);
+  add('plan-core', 'inferBeforePrepare', 'regain-half-minute-5.5', together('07:54:30'), 25, 50);
+  add('plan-core', 'inferBeforePrepare', 'regain-wake-after-auto', together('08:05:00'), 25, 50);
+  add('plan-core', 'inferBeforePrepare', 'regain-exactly-zero-left', together('07:55:00'), 5, 50);
+  add('plan-core', 'inferBeforePrepare', 'regain-gap-rounds-half', [alarmRow('WAKE', wakeAt('07:00:00')), alarmRow('PREPARE', wakeAt('07:20:30'))]);
+  add('plan-core', 'inferBeforePrepare', 'regain-gap-rounds-half-adv', [alarmRow('WAKE', wakeAt('07:00:00')), alarmRow('PREPARE', wakeAt('07:20:30'))], 10);
+  add('plan-core', 'inferBeforePrepare', 'gap210-adv30-is-240', wakePrep(210), 30);
+  add('plan-core', 'inferBeforePrepare', 'gap211-adv30-is-241', wakePrep(211), 30);
+  add('plan-core', 'inferBeforePrepare', 'gap239-adv1-is-240', wakePrep(239), 1);
   add('plan-core', 'inferBeforePrepare', 'manual-prepare', [alarmRow('WAKE', d('2026-11-16T07:00:00+09:00')), alarmRow('PREPARE', d('2026-11-16T07:20:00+09:00'), { time_source: 'MANUAL' })]);
   add('plan-core', 'inferBeforePrepare', 'no-wake', [alarmRow('PREPARE', d('2026-11-16T07:20:00+09:00'))]);
   add('plan-core', 'inferBeforePrepare', 'empty', []);
@@ -383,7 +408,7 @@ function ring(add: Add) {
   for (const [name, row] of [['empty', src()], ['soft', src({ intensity: 'SOFT' })], ['strong', src({ intensity: 'STRONG' })], ['custom', src({ sound_key: 'custom', vibration: 'NONE', voice_tone: 'DIRECT', intensity: 'STRONG' })], ['blank-sound', src({ sound_key: '  ', intensity: 'STRONG' })], ['unknown-vibration', src({ vibration: 'x', intensity: 'SOFT' })], ['undefined-fields', { intensity: 'NORMAL' }]] as const) {
     for (const enabled of [undefined, true, false]) add('ring-package', 'axesOf', `${name}-${enabled}`, row, ...(enabled === undefined ? [] : [enabled]));
   }
-  const titles: [string, string][] = [['수업', 'batchim-ㅂ'], ['회의', 'no-batchim'], ['시험(2차)', 'bracket-after-batchim'], ['미팅(오전)', 'bracket-after-no-batchim'], ['스터디 3', 'digit-3'], ['스터디 2', 'digit-2'], ['스터디 0', 'digit-0'], ['A1', 'digit-1'], ['반6', 'digit-6'], ['반7', 'digit-7'], ['반8', 'digit-8'], ['반9', 'digit-9'], ['  ', 'blank'], ['', 'empty'], ['(점심)', 'only-bracket'], ['수업[ (A) ]', 'nested-brackets'], ['（회의）', 'fullwidth-bracket'], ['점심 약속 ', 'trailing-space'], ['Study', 'latin'], ['한글ABC', 'latin-after-hangul'], ['수업 (1) (2)', 'two-brackets'], ['수업()', 'empty-brackets'], ['(수업', 'unclosed'], ['😀', 'emoji']];
+  const titles: [string, string][] = [['수업', 'batchim-ㅂ'], ['회의', 'no-batchim'], ['시험(2차)', 'bracket-after-batchim'], ['회의(오전)', 'bracket-after-no-batchim'], ['스터디 3', 'digit-3'], ['스터디 2', 'digit-2'], ['스터디 0', 'digit-0'], ['A1', 'digit-1'], ['반6', 'digit-6'], ['반7', 'digit-7'], ['반8', 'digit-8'], ['반9', 'digit-9'], ['  ', 'blank'], ['', 'empty'], ['(점심)', 'only-bracket'], ['수업[ (A) ]', 'nested-brackets'], ['（회의）', 'fullwidth-bracket'], ['점심 약속 ', 'trailing-space'], ['Study', 'latin'], ['한글ABC', 'latin-after-hangul'], ['수업 (1) (2)', 'two-brackets'], ['수업()', 'empty-brackets'], ['(수업', 'unclosed'], ['😀', 'emoji']];
   for (const [title, name] of titles) {
     for (const tone of ['NEUTRAL', 'CALM', 'DIRECT']) add('ring-package', 'wakeVoiceText', `${name}-${tone}`, { title, appointmentAt: appt, departAt: d('2026-11-16T09:20:00+09:00'), timeZone: seoul, voiceTone: tone });
   }
