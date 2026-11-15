@@ -1402,11 +1402,12 @@ await check('서버 전용 함수(can_send_push · find_missed_wake_alarms · �
 await check('배치 예약: wake-check · alarm-roll(반복 다음 회차)을 5분마다 run_job으로 + suggestion-generate(알람 조정 제안, 매일 18:00 KST) run_job primary와 18:15 KST 안전망 run_job safety(M1) + voice-auto-commit(하루 기록 자동 정리, 10분마다 — M1이 안 건드림) + friend-requests-expire(친구 3장, 30일 지난 받은 요청 삭제 — 내용은 friend/ch03.mjs) + friend-records-purge(친구 13장, 매일 새벽 7일 지난 서버 기록 삭제 — 내용은 friend/ch13.mjs) (PGlite에는 pg_cron · pg_net이 없어 확장은 건너뛰고 예약만 흉내에 들어감)', async () => {
   const jobs = await q(`select jobname, schedule, command from cron.job order by jobname`);
   const ext = await q(`select extname from pg_extension where extname in ('pg_cron', 'pg_net')`);
-  return jobs.length === 7 && ext.length === 0 && jobs.some((x) => x.jobname === 'friend-requests-expire')
+  return jobs.length === 8 && ext.length === 0 && jobs.some((x) => x.jobname === 'friend-requests-expire')
     && jobs.some((x) => x.jobname === 'suggestion-generate' && x.schedule === '0 9 * * *' && x.command === `select private.run_job('suggestion-generate', 'primary')`)
     && jobs.some((x) => x.jobname === 'suggestion-generate-safety' && x.schedule === '15 9 * * *' && x.command === `select private.run_job('suggestion-generate', 'safety')`)
     && jobs.some((x) => x.jobname === 'voice-auto-commit' && x.schedule === '*/10 * * * *' && x.command === `select private.invoke_edge_function('voice-commit')`)
     && jobs.some((x) => x.jobname === 'friend-records-purge' && x.schedule === '0 18 * * *' && x.command === 'select private.purge_old_friend_records()')
+    && jobs.some((x) => x.jobname === 'request-keys-purge' && x.schedule === '30 18 * * *' && x.command === 'select private.purge_request_keys()')
     && ['wake-check', 'alarm-roll'].every((name) => {
       const j = jobs.find((x) => x.jobname === name);
       return j && j.schedule === '*/5 * * * *' && j.command === `select private.run_job('${name}')`;
@@ -1714,9 +1715,9 @@ await check('원복 · 다시 적용 SQL(supabase/ops): 원복하면 wake-check 
       const reCall = await calls('wake-check');           // 다시 적용: 건너뜀
       const r = byName(rolled);
       const b = byName(before);
-      const same = ['voice-auto-commit', 'friend-requests-expire', 'friend-records-purge'].every((n) => r[n] === b[n]);
+      const same = ['voice-auto-commit', 'friend-requests-expire', 'friend-records-purge', 'request-keys-purge'].every((n) => r[n] === b[n]);
       return withM1 === 0 && rolledCall === 1 && reCall === 0
-        && rolled.length === 6 && !('suggestion-generate-safety' in r) && same && JSON.stringify(rolled) === JSON.stringify(rolled2)
+        && rolled.length === 7 && !('suggestion-generate-safety' in r) && same && JSON.stringify(rolled) === JSON.stringify(rolled2)
         && r['wake-check'] === `*/5 * * * * | select private.invoke_edge_function('wake-check')`
         && r['alarm-roll'] === `*/5 * * * * | select private.invoke_edge_function('alarm-roll')`
         && r['suggestion-generate'] === `0 9 * * * | select private.invoke_edge_function('suggestion-generate')`
@@ -3651,5 +3652,6 @@ const FRIEND_CTX = { q, as, su, svc, check, expectErr, PGlite, AUTH_STUBS, MIG_D
 for (const ch of ['ch02', 'ch03', 'ch04', 'ch05', 'ch06', 'ch11', 'ch07', 'ch08', 'ch09', 'ch10', 'ch12', 'ch13', 'ch15']) await (await import(`./friend/${ch}.mjs`)).default(FRIEND_CTX);
 
 await (await import('./prepare-ml-approval.mjs')).default(FRIEND_CTX);
+await (await import('./commit-rpc.mjs')).default(FRIEND_CTX);   // 알람 저장 DB 함수 (정할 일 0-10)
 
 report();

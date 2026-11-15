@@ -1,7 +1,7 @@
 // ① 약속 기반 알람 — 실데이터 계산 · 저장 (서버 함수 alarm-suggest · alarm-commit · place-search) + 고친 값 기록
 //   계산(미리 보기)은 DB에 안 쓰고, 저장은 alarm-commit → 응답을 폰에 반영(applyCommit). 요청 · 응답 모양은 request.ts (서버의 H05 초안 모양 하나)
 //   · 고친 값 기록은 따로 insert하지 않고 alarm-commit의 edits로 보냄 — 저장이 성공해야 user_edit_logs에 남음
-//   · 저장은 중복 키를 서버가 아직 안 읽어서(lib/edge) 자동 재시도하지 않음. 읽기(alarm-suggest · place-search)만 한 번 재시도
+//   · 저장은 자동 재시도하지 않음(읽기 alarm-suggest · place-search만 한 번 재시도). 대신 요청 키(commitKey.ts)를 실어 보내서, 응답을 잃고 사용자가 같은 저장을 다시 누르면 서버가 첫 결과를 그대로 돌려줌
 import { applyCommit, reconcile, syncNow } from '@/lib/alarmSync';
 import { now } from '@/lib/clock';
 import { dbTimeMs, parseDbTime } from '@/lib/dbTime';
@@ -12,6 +12,7 @@ import { supabase } from '@/lib/supabase';
 import { requireUserId } from '@/lib/user';
 
 import { manualTimes, orderError, sameEdits } from './adjust';
+import { commitKeyFor, forgetCommitKey } from './commitKey';
 import { forgetDetail, recallDetail, rememberDetail } from './detailCache';
 import { dropEdits, MAX_EDITS_PER_REQUEST, peekEdits, queueEdit } from './editQueue';
 import { createEdits, fromEditRow, settingsEdits, toEditPayloads, type EditLogLine, type SettingsAfter } from './edits';
@@ -177,6 +178,13 @@ export async function checkDepartNow(appointmentId: string): Promise<DepartCheck
 // 저장 (alarm-commit)
 // ---------------------------------------------------------------------------
 
+// alarm-commit 호출 — 같은 본문이면 같은 요청 키(10분), 성공하면 키를 지움. 실패(오류 · 시간 초과)는 키를 남겨 다시 눌러도 한 번만 저장되게
+async function commitCall(body: Record<string, unknown>): Promise<CommitResponse> {
+  const res = await callEdge<CommitResponse>('alarm-commit', body, { timeoutMs: COMMIT_TIMEOUT_MS, idempotencyKey: commitKeyFor(body, now().getTime()) });
+  forgetCommitKey(body);
+  return res;
+}
+
 const warnDev = (what: string, e: unknown) => {
   if (__DEV__) console.warn(`[alarm] ${what}`, e);
 };
@@ -222,7 +230,7 @@ export async function createAppointment(estimate: Estimate, source?: string): Pr
   if (!body) throw new UserError('계산한 값이 없어요. 알람을 다시 계산해 주세요');
   const userId = await requireUserId();
 
-  const res = await callEdge<CommitResponse>('alarm-commit', body, { timeoutMs: COMMIT_TIMEOUT_MS });
+  const res = await commitCall(body);
   const saved = toCreatedAppointment(res, estimate);
 
   const phoneFailed = (await phoneFailedIds({ ...res, appointment_at: a.at.toISOString() })).size; // 약속 시각은 맞춘 뒤 훅(onAlarmsSynced)의 upcoming용
@@ -252,7 +260,7 @@ export async function createAppointment(estimate: Estimate, source?: string): Pr
 export async function joinSharedAppointment(appointmentId: string, choice: JoinChoice): Promise<JoinResult> {
   let res: CommitResponse;
   try {
-    res = await callEdge<CommitResponse>('alarm-commit', joinBody(appointmentId, choice), { timeoutMs: COMMIT_TIMEOUT_MS });
+    res = await commitCall(joinBody(appointmentId, choice));
   } catch (e) {
     const fallback = choice.travelMinutes == null ? travelFallbackOf(e) : null;
     if (fallback) throw new TravelConfirmNeeded(fallback);
@@ -296,7 +304,7 @@ export async function saveAlarmSettings(id: string, draft: AlarmSettingsDraft): 
   const queued = peekEdits(id, MAX_EDITS_PER_REQUEST - lines.length);
   let res: CommitResponse;
   try {
-    res = await callEdge<CommitResponse>('alarm-commit', settingsCommitBody(base, draft, toEditPayloads([...lines, ...queued].slice(0, MAX_EDITS_PER_REQUEST))), { timeoutMs: COMMIT_TIMEOUT_MS });
+    res = await commitCall(settingsCommitBody(base, draft, toEditPayloads([...lines, ...queued].slice(0, MAX_EDITS_PER_REQUEST))));
   } catch (e) {
     // 길찾기를 못 해 서버가 어림값만 가졌으면 저장을 멈추고 화면이 사용자에게 확인받게 함 (7장 7.1.2 "근사값은 사용자 확인 → MANUAL")
     //   확인하면 화면이 그 분을 예상 이동(직접 입력)으로 넣어 다시 부름 → MANUAL로 저장. 이미 직접 입력한 값을 보냈는데도 같은 오류면 멈추지 않고 그대로 던짐(되풀이 방지)
@@ -335,7 +343,7 @@ export async function saveStandaloneAlarm(input: StandaloneInput): Promise<Saved
   if (!input.alarmId && !input.at) throw new UserError('알람 시각을 골라 주세요');
   const queued = peekEdits(null);
   const body = { ...standaloneBody(input), edits: toEditPayloads(queued) };
-  const res = await callEdge<CommitResponse>('alarm-commit', body, { timeoutMs: COMMIT_TIMEOUT_MS });
+  const res = await commitCall(body);
   dropEdits(queued);
   const row = res.alarms[0];
   if (!row) throw new UserError('알람을 저장하지 못했어요. 다시 해 주세요');

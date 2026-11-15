@@ -915,6 +915,9 @@ isOneToOne: false
 "accept_group_invite":
 { Args: { "p_group_id": string,"p_wake_share"?: boolean }; Returns: Json
                            },
+"alarm_commit_apply":
+{ Args: { "p_alarm_inserts": Json,"p_alarm_removes": (string)[],"p_alarm_updates": Json,"p_appointment": Json,"p_appointment_ref": Json,"p_before": Json,"p_edit_logs": Json,"p_key": string,"p_mode": string,"p_participant": Json,"p_request_hash": string,"p_user_id": string }; Returns: Json
+                           },
 "appointment_joiners":
 { Args: { "p_appointment_id": string }; Returns: {
               "hidden": boolean,"joined": boolean,"user_id": string
