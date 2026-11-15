@@ -1,0 +1,9 @@
+{
+  "format": 1,
+  "module": "types",
+  "baseCommit": "b140f701df1018b0cc188d7acbcc9ebce231eb6d",
+  "sourceSha256": "145456f29ace683207000bfa39adbbc05d2c6d122d1979254064eea51953503e",
+  "cases": [
+    {"id":"types/$constants/all","fn":"$constants","args":[],"output":{"ALARM_KINDS":["WAKE","PREPARE","DEPARTURE","ARRIVE"],"INTENSITY_AXES":["sound","voice","vibration"],"KIND_LABEL":{"WAKE":"기상","PREPARE":"준비","DEPARTURE":"출발","ARRIVE":"도착"},"RING_KINDS":["WAKE","PREPARE","DEPARTURE"]}}
+  ]
+}
