@@ -11,8 +11,9 @@
 //   · 로그인이 없으면 edge (표는 로그인한 사람만 읽을 수 있고, 서버도 토큰이 있어야 받음)
 //   · 읽는 데 성공하면 5분, 실패하면 30초 동안 그 결과를 씀 (실패할 때마다 매 호출이 기다리지 않게). 사용자가 바뀌면 바로 다시 읽음
 //
-// 차단기: 서버가 연속 3번 못 쓸 상태(NETWORK · TIMEOUT · 5xx · AUTH_UNAVAILABLE)로 답하면 5분 동안 읽기 함수는 서버를 건너뛰고 바로 Edge.
-//   5분 뒤 한 번 시험해 보고 또 실패하면 바로 다시 열림, 성공하면 풀림. (읽기 함수 판단 · 실제 대체는 edge.ts)
+// 차단기: 서버가 연속 3번 못 쓸 상태(edge.ts의 serverUnusable: 네트워크 · 시간 초과 · 서버 오류 · 서버 설정 안 됨 · AUTH_UNAVAILABLE, 읽기 함수는 경로 없음 404 · 405도)로
+//   답하면 5분 동안 읽기 함수는 서버를 건너뛰고 바로 Edge. 5분이 지나면 **한 건만** 서버로 시험해 보내고(나머지는 그 결과가 나올 때까지 Edge),
+//   성공하면 풀리고 실패하면 바로 다시 5분. (읽기 함수 판단 · 실제 대체는 edge.ts)
 import { supabase } from './supabase';
 
 export type RouteMode = 'edge' | 'server';
@@ -23,6 +24,7 @@ const ROUTES_TIMEOUT_MS = 3_000;
 
 const BREAKER_THRESHOLD = 3;
 const BREAKER_OPEN_MS = 5 * 60_000;
+const BREAKER_PROBE_MS = 10_000; // 시험 한 건이 결과를 기록하지 못해도(예외 등) 이 시간 뒤에는 다음 한 건이 시험
 
 // 서버 주소 — https · origin만 (경로 · 쿼리 · 해시 · 사용자 정보가 붙으면 안 씀). 끝의 / 는 뺌
 export function serverBaseUrl(raw: string | undefined): string | null {
@@ -89,7 +91,8 @@ export async function routeFor(name: string): Promise<RouteMode> {
       if (!loading || loading.userId !== userId) {
         const promise: Promise<RouteCache> = loadRoutes(userId)
           .then((loaded) => {
-            cache = loaded;
+            // 그 사이 다른 사용자가 읽기를 시작했다면(loading이 바뀜) 늦게 끝난 이 결과는 캐시에 쓰지 않음 — 새 사용자의 캐시를 덮어쓰지 않게
+            if (loading?.promise === promise) cache = loaded;
             return loaded;
           })
           .finally(() => {
@@ -110,8 +113,19 @@ export async function routeFor(name: string): Promise<RouteMode> {
 let failures = 0;
 let openUntil = 0;
 
+// 지금 열려 있는지(읽기만). 5분이 지나면 닫힌 것으로 보임 — 시험 호출을 보낼지는 claimServerAttempt가 정함
 export function breakerOpen(): boolean {
-  return Date.now() < openUntil;
+  return failures >= BREAKER_THRESHOLD && Date.now() < openUntil;
+}
+
+// 읽기 함수가 서버로 가도 되는지. 닫혀 있으면 모두 통과, 열려 있으면 막음,
+// 5분이 지났으면 첫 한 건만 통과(시험)시키고 그 결과가 기록될 때까지(또는 10초) 나머지는 막음
+export function claimServerAttempt(): boolean {
+  if (failures < BREAKER_THRESHOLD) return true;
+  const now = Date.now();
+  if (now < openUntil) return false;
+  openUntil = now + BREAKER_PROBE_MS;
+  return true;
 }
 
 export function recordServerSuccess(): void {
@@ -119,13 +133,18 @@ export function recordServerSuccess(): void {
   openUntil = 0;
 }
 
-// 연속 실패 횟수를 세어 임계값에 닿으면 5분 동안 염. 열린 뒤 첫 실패는 횟수가 이미 임계값 이상이라 바로 다시 열림
-export function recordServerFailure(): void {
+// 연속 실패 횟수를 세어 임계값에 닿으면 5분 동안 염. 시험 한 건이 실패하면 횟수가 이미 임계값 이상이라 바로 다시 5분.
+// 닫혀 있다가 열린 순간(또는 시험이 실패해 다시 열린 순간)에만 true — 호출하는 쪽이 로그를 한 번만 남기게
+export function recordServerFailure(): boolean {
+  const wasOpen = breakerOpen();
   failures += 1;
-  if (failures >= BREAKER_THRESHOLD) openUntil = Date.now() + BREAKER_OPEN_MS;
+  if (failures < BREAKER_THRESHOLD) return false;
+  const probing = failures > BREAKER_THRESHOLD && wasOpen && openUntil - Date.now() <= BREAKER_PROBE_MS;
+  openUntil = Date.now() + BREAKER_OPEN_MS;
+  return !wasOpen || probing;
 }
 
-// 시험 · 로그아웃 때 상태를 처음으로
+// 시험 때 상태를 처음으로
 export function resetEdgeRoutes(): void {
   cache = null;
   loading = null;

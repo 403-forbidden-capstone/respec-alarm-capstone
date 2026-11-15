@@ -82,9 +82,9 @@ describe('서버 오류 → 사용자 문구 (toEdgeError)', () => {
     expect((await toEdgeError(httpError(502, undefined))).code).toBe('INTERNAL');
     expect((await toEdgeError(httpError(404, undefined))).code).toBe('UNKNOWN'); // 함수가 배포 안 됐을 때
     expect((await toEdgeError(httpError(429, undefined))).code).toBe('RATE_LIMITED');
-    // 서버(nginx) 앞단: 504는 늦어서(TIMEOUT), 413은 요청이 너무 커서(입력 문제)
-    expect((await toEdgeError(httpError(504, undefined))).code).toBe('TIMEOUT');
-    expect((await toEdgeError(httpError(413, undefined))).code).toBe('VALIDATION_FAILED');
+    // Edge 길은 이 PR 전과 같음 — 504 · 413을 달리 읽는 것은 우리 서버 길에만 (음성 보류 기록 · 사진 문구가 이 코드를 보고 갈리므로)
+    expect((await toEdgeError(httpError(504, undefined))).code).toBe('INTERNAL');
+    expect((await toEdgeError(httpError(413, undefined))).code).toBe('UNKNOWN');
   });
 
   it('서버만 쓰는 코드 AUTH_UNAVAILABLE(공개 키를 못 받음)도 코드 그대로 읽고 문구가 있음', async () => {

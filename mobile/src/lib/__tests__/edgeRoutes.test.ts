@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, jest } from '@jest/globals';
 
-import { breakerOpen, recordServerFailure, recordServerSuccess, resetEdgeRoutes, routeFor, serverBaseUrl } from '../edgeRoutes';
+import { breakerOpen, claimServerAttempt, recordServerFailure, recordServerSuccess, resetEdgeRoutes, routeFor, serverBaseUrl } from '../edgeRoutes';
 
 // 가짜 supabase — 세션(로그인한 사용자) · get_server_routes RPC
 type Rows = { name: string; mode: string }[];
@@ -151,6 +151,21 @@ describe('함수별 길 (routeFor) — 표 get_server_routes()', () => {
     expect(mockRpc).toHaveBeenCalledTimes(2);
   });
 
+  it('표를 읽는 도중 사용자가 바뀌면 늦게 끝난 앞 사용자의 결과가 새 사용자의 캐시를 덮어쓰지 않음', async () => {
+    let resolveA!: (v: { data: Rows; error: null }) => void;
+    mockRpc
+      .mockReturnValueOnce(new Promise((r) => (resolveA = r))) // user-1 (늦게 끝남)
+      .mockResolvedValueOnce({ data: [{ name: 'place-search', mode: 'server' }], error: null }); // user-2
+    const first = routeFor('place-search'); // user-1이 읽는 중
+    await jest.advanceTimersByTimeAsync(0);
+    withSession('user-2');
+    expect(await routeFor('place-search')).toBe('server'); // user-2 값
+    resolveA({ data: [{ name: 'place-search', mode: 'edge' }], error: null }); // 뒤늦게 user-1 결과가 옴
+    await first;
+    expect(await routeFor('place-search')).toBe('server'); // user-2 캐시가 그대로 — 다시 읽지 않음
+    expect(mockRpc).toHaveBeenCalledTimes(2);
+  });
+
   it('동시에 여러 호출이 와도 표는 한 번만 읽음', async () => {
     let resolve!: (v: { data: Rows; error: null }) => void;
     mockRpc.mockReturnValue(new Promise((r) => (resolve = r)));
@@ -190,5 +205,62 @@ describe('차단기 — 서버가 연속 3번 실패하면 5분 동안 읽기 �
     expect(breakerOpen()).toBe(false);
     recordServerFailure();
     expect(breakerOpen()).toBe(true);
+  });
+});
+
+describe('차단기 — 5분 뒤에는 한 건만 서버로 시험하고 나머지는 결과가 나올 때까지 Edge', () => {
+  const trip = () => {
+    for (let i = 0; i < 3; i++) recordServerFailure();
+  };
+
+  it('닫혀 있으면 계속 통과', () => {
+    expect(claimServerAttempt()).toBe(true);
+    expect(claimServerAttempt()).toBe(true);
+  });
+
+  it('열려 있으면 막고, 5분이 지나면 첫 한 건만 통과(시험)하고 결과가 나올 때까지 나머지는 막음', async () => {
+    trip();
+    expect(claimServerAttempt()).toBe(false);
+    await jest.advanceTimersByTimeAsync(5 * 60_000);
+    expect(claimServerAttempt()).toBe(true); // 시험 한 건
+    expect(claimServerAttempt()).toBe(false);
+    expect(claimServerAttempt()).toBe(false);
+  });
+
+  it('시험이 성공하면 닫혀서 다시 모두 통과', async () => {
+    trip();
+    await jest.advanceTimersByTimeAsync(5 * 60_000);
+    expect(claimServerAttempt()).toBe(true);
+    recordServerSuccess();
+    expect(claimServerAttempt()).toBe(true);
+    expect(claimServerAttempt()).toBe(true);
+  });
+
+  it('시험이 실패하면 5분 더 막음', async () => {
+    trip();
+    await jest.advanceTimersByTimeAsync(5 * 60_000);
+    expect(claimServerAttempt()).toBe(true);
+    expect(recordServerFailure()).toBe(true); // 다시 열림
+    await jest.advanceTimersByTimeAsync(4 * 60_000 + 59_000);
+    expect(claimServerAttempt()).toBe(false);
+    await jest.advanceTimersByTimeAsync(2_000);
+    expect(claimServerAttempt()).toBe(true); // 또 한 건 시험
+  });
+
+  it('시험 결과가 기록되지 않아도(예외 등) 10초 뒤에는 다음 한 건이 다시 시험', async () => {
+    trip();
+    await jest.advanceTimersByTimeAsync(5 * 60_000);
+    expect(claimServerAttempt()).toBe(true);
+    await jest.advanceTimersByTimeAsync(9_000);
+    expect(claimServerAttempt()).toBe(false);
+    await jest.advanceTimersByTimeAsync(2_000);
+    expect(claimServerAttempt()).toBe(true);
+  });
+
+  it('recordServerFailure는 닫혀 있다가 열린 순간(또는 시험이 실패한 순간)에만 true', () => {
+    expect(recordServerFailure()).toBe(false);
+    expect(recordServerFailure()).toBe(false);
+    expect(recordServerFailure()).toBe(true); // 3번째에 열림
+    expect(recordServerFailure()).toBe(false); // 이미 열려 있음 — 로그를 또 남기지 않게
   });
 });

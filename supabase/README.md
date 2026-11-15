@@ -88,12 +88,13 @@ update public.server_routes set mode = 'edge'   where kind = 'job' and name = 'w
 update public.server_routes set mode = 'edge' where mode <> 'edge';
 ```
 
-**앱이 표를 쓰는 법** (M2, `mobile/src/lib/edge.ts` · `edgeRoutes.ts` — 앱은 서버 함수를 `callEdge()` 한 곳으로만 부름)
+**앱이 표를 쓰는 법** (M2, `mobile/src/lib/edge.ts` · `edgeRoutes.ts` — 앱 JS는 서버 함수를 `callEdge()` 한 곳으로만 부름. 예외 둘: 폰 네이티브가 새벽에 Edge `alarm-briefing-device`를 직접 부르는 길(`lib/alarmSync/briefingDevice.ts`, 이 스위치 · 표를 안 거침)과 개발 빌드의 로컬 Live 토큰 서버)
 
 - 서버 주소는 앱 빌드에 고정(`EXPO_PUBLIC_API_BASE_URL`, https · origin 하나만). 없거나 모양이 틀리면 표를 묻지도 않고 Edge만 부름 → 표가 잘못 바뀌어도 로그인 토큰이 남의 주소로 가지 않음. 이 값을 EAS 환경 · 웹 빌드에 넣는 것은 서버 배포(완결점 1-7) 뒤
 - 로그인한 뒤 `get_server_routes()`를 읽어 5분 동안 씀(사용자가 바뀌면 바로 다시). 못 읽으면(오류 · 모양 이상 · 3초 넘게 걸림) **전부 `edge`**, 옛 값도 안 씀. 실패하면 30초 동안은 다시 안 물음 → 표를 `edge`로 되돌려도 앱에는 **최대 5분**(앱을 다시 켜면 바로) 뒤에 반영됨. 옛 APK(v0.0.2)는 이 코드가 없어 계속 Edge만 부름
 - `server`인 함수는 `POST {주소}/fn/<이름>`으로 부르고(본문 · 응답 · 오류 모양은 Edge와 같음) 로그인 토큰은 호출마다 새로 읽어 실음. 401이면 토큰을 갱신해 한 번만 다시. 오류는 앱 오류 코드로 그대로 읽음(서버만 쓰는 코드 `AUTH_UNAVAILABLE` = 서버가 공개 키 목록을 못 받아 토큰을 확인할 수 없음, 503 — 로그아웃시키지 않음)
-- 읽기 함수(`place-search` · `place-reverse`)는 서버가 죽었거나 이상하게 답하면(네트워크 · 4초 시간 초과 · 5xx · `AUTH_UNAVAILABLE`) **Edge로 한 번만 더** (서버 1번 → Edge 1번, 앱 로그 한 줄). 서버가 연속 3번 실패하면 5분 동안은 서버를 건너뛰고 바로 Edge. 서버가 정상으로 거절한 응답(4xx)과 쓰기 함수 실패는 Edge로 대신 부르지 않음 — 200인데 내용이 틀린 응답은 이 자동 대체로 못 막고 계약 시험 · canary가 막음
+- 읽기 함수(`place-search` · `place-reverse`)는 서버를 못 쓰는 상태로 답하면 **Edge로 한 번만 더** (서버 1번 → Edge 1번, 앱 로그 한 줄). 못 쓰는 상태 = 네트워크 · 4초 시간 초과 · 서버 오류(`INTERNAL`) · 서버 설정 안 됨(`NOT_CONFIGURED`, 예: 카카오 키가 아직 서버에 없음) · 공개 키를 못 받음(`AUTH_UNAVAILABLE`) · 경로 없음(404 · 405, 서버 이미지를 되돌렸거나 아직 안 올린 경우). 서버가 정상으로 거절한 응답(4xx)과 카카오 같은 바깥 서비스 문제(`PLACE_UNAVAILABLE`)는 Edge로 보내도 같은 결과라 대체하지 않음. 서버가 연속 3번 못 쓸 상태면 5분 동안 서버를 건너뛰고 바로 Edge, 5분 뒤에는 **한 건만** 서버로 시험(나머지는 그 결과가 나올 때까지 Edge). 쓰기 함수 실패는 Edge로 대신 부르지 않음(이미 처리됐을 수 있음) — 200인데 내용이 틀린 응답은 이 자동 대체로 못 막고 계약 시험 · canary가 막음
+- 시간 초과는 폰(Expo)의 fetch가 취소 오류 이름을 `AbortError`로 주지 않아서 "우리 타이머가 취소했는지"로 판정함. 웹에서는 서버 앞단 nginx가 직접 만드는 오류(요청 1MB 초과 413 · 429 · 502 · 504)에 CORS 헤더가 없으면 브라우저가 응답을 못 읽어 `NETWORK`으로 보임(폰은 읽힘) — 완결점 1-9 ③을 웹에서 확인할 때 따로 볼 것
 
 **머지 전 기준선 · 적용 뒤 확인** (전부 읽기 전용, 값은 안 나옴. 머지 전에 한 번, 머지 뒤 30분 안에 같은 조회를 한 번 더)
 

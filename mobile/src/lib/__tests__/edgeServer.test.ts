@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, jest } from '@jest/globals';
 
-import { callEdge, EDGE_MESSAGES } from '../edge';
+import { FunctionsFetchError } from '@supabase/supabase-js';
+
+import { callEdge, EDGE_MESSAGES, READ_FUNCTIONS } from '../edge';
 import { breakerOpen, resetEdgeRoutes } from '../edgeRoutes';
 
 // callEdge가 표가 server라고 한 함수를 우리 서버(fetch)로 부르는 길 — 표 읽기는 진짜 edgeRoutes, supabase만 가짜
@@ -244,6 +246,7 @@ describe('읽기 함수 자동 대체 — 서버 1번 → Edge 1번', () => {
     expect(line).toContain('AUTH_UNAVAILABLE');
     expect(line).toContain('req-s');
     expect(line).not.toContain('비밀검색어');
+    expect(line).not.toContain('서버가 쓴 문구'); // 서버 message는 로그에도 안 남김
     expect(line).not.toContain('token-1');
   });
 
@@ -271,6 +274,9 @@ describe('읽기 함수 자동 대체 — 서버 1번 → Edge 1번', () => {
     ['게이트웨이 시간 초과(504)', () => mockFetch.mockResolvedValue(reply(504, undefined, { raw: '<html>' }))],
     ['공개 키를 못 받음(AUTH_UNAVAILABLE)', () => mockFetch.mockResolvedValue(serverError(503, 'AUTH_UNAVAILABLE'))],
     ['2xx인데 JSON이 아님', () => mockFetch.mockResolvedValue(reply(200, undefined, { raw: '<html>' }))],
+    ['서버 설정이 안 됨(NOT_CONFIGURED 503 — 카카오 키가 빠진 경우)', () => mockFetch.mockResolvedValue(serverError(503, 'NOT_CONFIGURED'))],
+    ['서버에 이 경로가 없음(404 — 이미지를 되돌렸거나 아직 안 올림)', () => mockFetch.mockResolvedValue(serverError(404, 'NOT_FOUND'))],
+    ['서버에 이 방식이 없음(405)', () => mockFetch.mockResolvedValue(serverError(405, 'METHOD_NOT_ALLOWED'))],
   ])('서버가 죽었거나 이상한 응답: %s → Edge', async (_label, arrange) => {
     arrange();
     await expect(callEdge('place-reverse', { lat: 1 })).resolves.toEqual({ from: 'edge' });
@@ -280,8 +286,8 @@ describe('읽기 함수 자동 대체 — 서버 1번 → Edge 1번', () => {
   it.each([
     [400, 'VALIDATION_FAILED'],
     [403, 'FORBIDDEN'],
-    [404, 'NOT_FOUND'],
     [422, 'UNPROCESSABLE'],
+    [429, 'RATE_LIMITED'],
   ])('서버가 정상으로 거절한 것(%i %s)은 Edge로 대신 부르지 않고 그대로 던짐', async (status, code) => {
     mockFetch.mockResolvedValue(serverError(status, code));
     await expect(callEdge('place-search', {})).rejects.toMatchObject({ code });
@@ -356,5 +362,154 @@ describe('차단기 — 서버가 연속 3번 실패하면 5분 동안 읽기 �
     mockFetch.mockResolvedValue(reply(200, { ok: true }));
     await expect(callEdge('alarm-commit', {})).resolves.toEqual({ ok: true });
     expect(breakerOpen()).toBe(false); // 성공하면 풀림
+  });
+});
+
+describe('읽기 함수 대체 · 시간 초과 판정 — 로컬 리뷰 반영', () => {
+  it('읽기 함수 목록은 place-search · place-reverse만 (alarm-suggest는 2-6에서 같이 정함)', () => {
+    expect([...READ_FUNCTIONS].sort()).toEqual(['place-reverse', 'place-search']);
+  });
+
+  it('카카오 같은 바깥 서비스 문제(502 PLACE_UNAVAILABLE)는 서버가 죽은 게 아니라서 Edge로 안 가고 살아 있다고 셈', async () => {
+    mockFetch.mockResolvedValue(serverError(502, 'PLACE_UNAVAILABLE'));
+    for (let i = 0; i < 5; i++) await expect(callEdge('place-search', {})).rejects.toMatchObject({ code: 'PLACE_UNAVAILABLE' });
+    expect(mockInvoke).not.toHaveBeenCalled(); // Edge도 같은 카카오를 부르므로 대신 부를 이유가 없음
+    expect(breakerOpen()).toBe(false);
+  });
+
+  it('쓰기 함수는 404 · 405 · NOT_CONFIGURED여도 Edge로 대신 부르지 않음', async () => {
+    mockFetch
+      .mockResolvedValueOnce(serverError(404, 'NOT_FOUND'))
+      .mockResolvedValueOnce(serverError(405, 'METHOD_NOT_ALLOWED'))
+      .mockResolvedValueOnce(serverError(503, 'NOT_CONFIGURED'));
+    for (let i = 0; i < 3; i++) await expect(callEdge('alarm-commit', {})).rejects.toBeInstanceOf(Error);
+    expect(mockInvoke).not.toHaveBeenCalled();
+  });
+
+  it('쓰기 함수의 404는 차단기 횟수에 안 셈(함수가 정상으로 말한 것일 수 있어서), NOT_CONFIGURED는 셈', async () => {
+    mockFetch.mockResolvedValue(serverError(404, 'NOT_FOUND'));
+    for (let i = 0; i < 3; i++) await expect(callEdge('alarm-commit', {})).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    expect(breakerOpen()).toBe(false);
+    mockFetch.mockResolvedValue(serverError(503, 'NOT_CONFIGURED'));
+    for (let i = 0; i < 3; i++) await expect(callEdge('alarm-commit', {})).rejects.toMatchObject({ code: 'NOT_CONFIGURED' });
+    expect(breakerOpen()).toBe(true);
+  });
+
+  it('서버 설정 안 됨 · 경로 없음이 읽기 함수에서 연속 3번이면 차단기가 열림', async () => {
+    mockFetch
+      .mockResolvedValueOnce(serverError(503, 'NOT_CONFIGURED'))
+      .mockResolvedValueOnce(serverError(404, 'NOT_FOUND'))
+      .mockResolvedValueOnce(serverError(405, 'METHOD_NOT_ALLOWED'));
+    for (let i = 0; i < 3; i++) await expect(callEdge('place-search', {})).resolves.toEqual({ from: 'edge' });
+    expect(breakerOpen()).toBe(true);
+  });
+
+  it('호출하는 쪽이 20초를 줘도 읽기 함수는 서버를 4초만 기다리고 Edge로', async () => {
+    neverResponds();
+    const result = callEdge('place-search', {}, { timeoutMs: 20_000 });
+    await jest.advanceTimersByTimeAsync(3_999);
+    expect(mockInvoke).not.toHaveBeenCalled();
+    await jest.advanceTimersByTimeAsync(1);
+    await expect(result).resolves.toEqual({ from: 'edge' });
+  });
+
+  // 폰(Expo SDK 57)의 fetch는 취소하면 이름이 'Error'인 오류를 던지고, 본문을 읽다 취소되면 받은 만큼의 잘린 본문으로 끝날 수 있음
+  it('취소 오류의 name이 Error여도 우리가 시간 제한으로 취소한 것이면 TIMEOUT', async () => {
+    mockFetch.mockImplementation(
+      (_url, init) =>
+        new Promise((_resolve, reject) => {
+          init.signal.addEventListener('abort', () => reject(new Error('fetch failed'))); // name이 AbortError가 아님
+        }),
+    );
+    const result = expect(callEdge('alarm-commit', {}, { timeoutMs: 1_000 })).rejects.toMatchObject({ code: 'TIMEOUT' });
+    await jest.advanceTimersByTimeAsync(1_000);
+    await result;
+  });
+
+  it('진짜 네트워크 오류는 시간 제한 전이면 NETWORK 그대로', async () => {
+    mockFetch.mockRejectedValue(new Error('Network request failed'));
+    await expect(callEdge('alarm-commit', {}, { timeoutMs: 1_000 })).rejects.toMatchObject({ code: 'NETWORK' });
+  });
+
+  const headersThenStalledBody = (onAbort: 'reject' | 'truncate') =>
+    mockFetch.mockImplementation(async (_url, init) => ({
+      status: 200,
+      ok: true,
+      headers: { get: () => null },
+      text: () =>
+        new Promise<string>((resolve, reject) => {
+          init.signal.addEventListener('abort', () =>
+            onAbort === 'reject' ? reject(Object.assign(new Error('aborted'), { name: 'AbortError' })) : resolve('{"places":[{"na'),
+          );
+        }),
+    }));
+
+  it('응답 헤더는 왔는데 본문이 안 오면 시간 제한 안에서 포기 → TIMEOUT', async () => {
+    headersThenStalledBody('reject');
+    const result = expect(callEdge('alarm-commit', {}, { timeoutMs: 1_000 })).rejects.toMatchObject({ code: 'TIMEOUT' });
+    await jest.advanceTimersByTimeAsync(1_000);
+    await result;
+  });
+
+  it('본문을 읽다 취소돼 잘린 본문으로 끝나도 INTERNAL이 아니라 TIMEOUT', async () => {
+    headersThenStalledBody('truncate');
+    const result = expect(callEdge('alarm-commit', {}, { timeoutMs: 1_000 })).rejects.toMatchObject({ code: 'TIMEOUT' });
+    await jest.advanceTimersByTimeAsync(1_000);
+    await result;
+  });
+
+  it('대체로 부른 Edge도 실패하면 Edge는 한 번만 (retry를 줘도 서버 1 → Edge 1로 끝)', async () => {
+    mockFetch.mockRejectedValue(new TypeError('x'));
+    mockInvoke.mockResolvedValue({ data: null, error: new FunctionsFetchError(new TypeError('x')) });
+    await expect(callEdge('place-search', {}, { retry: 3 })).rejects.toMatchObject({ code: 'NETWORK' });
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+    expect(mockInvoke).toHaveBeenCalledTimes(1);
+  });
+
+  it('차단기가 열린 때 Edge도 실패해도 Edge는 한 번만 (retry를 줘도)', async () => {
+    mockFetch.mockRejectedValue(new TypeError('x'));
+    for (let i = 0; i < 3; i++) await callEdge('place-search', {});
+    expect(breakerOpen()).toBe(true);
+    mockInvoke.mockReset();
+    mockInvoke.mockResolvedValue({ data: null, error: new FunctionsFetchError(new TypeError('x')) });
+    await expect(callEdge('place-search', {}, { retry: 3 })).rejects.toMatchObject({ code: 'NETWORK' });
+    expect(mockInvoke).toHaveBeenCalledTimes(1);
+    expect(mockFetch).toHaveBeenCalledTimes(3); // 서버는 건너뜀
+  });
+});
+
+describe('차단기 — 5분 뒤에는 한 건만 서버로 시험', () => {
+  const read = () => callEdge('place-search', { query: 'x' });
+  const trip = async () => {
+    mockFetch.mockRejectedValue(new TypeError('x'));
+    for (let i = 0; i < 3; i++) await read();
+    await jest.advanceTimersByTimeAsync(5 * 60_000);
+  };
+
+  it('5분 뒤 동시에 읽기 5건이 와도 서버는 1번만 부르고 나머지는 Edge, 시험이 성공하면 다시 서버로', async () => {
+    await trip();
+    mockFetch.mockReset();
+    mockFetch.mockImplementation(() => new Promise((resolve) => setTimeout(() => resolve(reply(200, { places: [] })), 100)));
+    const all = Promise.all([read(), read(), read(), read(), read()]);
+    await jest.advanceTimersByTimeAsync(100);
+    const results = (await all) as { places?: unknown; from?: string }[];
+    expect(results.filter((r) => 'places' in r)).toHaveLength(1);
+    expect(results.filter((r) => r.from === 'edge')).toHaveLength(4);
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+
+    mockFetch.mockReset();
+    mockFetch.mockResolvedValue(reply(200, { places: ['다시 서버'] }));
+    await expect(read()).resolves.toEqual({ places: ['다시 서버'] });
+    expect(breakerOpen()).toBe(false);
+  });
+
+  it('시험 호출이 또 실패하면 그 한 건만 Edge로 가고 다시 5분 동안 서버를 건너뜀', async () => {
+    await trip();
+    mockFetch.mockReset();
+    mockFetch.mockRejectedValue(new TypeError('x'));
+    await expect(read()).resolves.toEqual({ from: 'edge' }); // 시험 1번 실패 → Edge
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+    await expect(read()).resolves.toEqual({ from: 'edge' });
+    expect(mockFetch).toHaveBeenCalledTimes(1); // 서버를 건너뜀
   });
 });
