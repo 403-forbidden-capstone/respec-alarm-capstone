@@ -202,6 +202,7 @@
 
 ### A02 AI 대화 (실데이터는 텍스트 대화 — 서버 함수 voice-session · voice-turn과 같이 배포돼야 동작)
 - 실패 · 한도 안내 부품 `ChatNotice`(값 · 콜백) — `ai.tsx`가 실패(`unavailable`) · 한도(`limits.reached`)일 때 마지막 말풍선 아래에 붙임
+- 알람 조정 제안 카드 `SuggestionPromptCard` (안건 D111 5번 — 저녁 대화에서 묻기): 대화 첫 마디 바로 아래. 대기 중 제안 `alarm_suggestions`(PENDING) — DB(`records/api` getPendingSuggestion, 그룹 탭 카드 · S01과 같음). [적용하기] · [괜찮아요]는 `suggestion-apply`(Edge, 실데이터) → 폰 예약. 대화 서버 상태(`voice-session` · `voice-turn` · 카드 종류)와는 따로라 대화에는 안 남음
 - 가짜 데이터: 목업 대본(`mocks/ai.ts`) 그대로. 카드는 찾은 일정 한 장(`cards[0]`, 번호 c1)
 - 실데이터(`features/voice/real.ts`, 설계 `L4_자기전_설계메모.md` 1 · 2 · 5절): 글로만 대화 — 말하기 버튼 없음("키보드 마이크로 말해도 돼요")
   - 시작: `voice-session {session_type: BEFORE_SLEEP, input_mode: TEXT, resume: true}` — 대화방은 KST 달력 날짜, 기록은 기준일: 오늘 연 대화방이 있으면 이어서([완료] 뒤 다시 열어도 같은 대화 · 카드, 자정이 지나면 새 대화방). 0시 ~ 기상 전에 연 방을 기상 뒤에 열면 같은 방의 다음 구간 세션(`server_state.prev_session_id`)을 만들어 화면 말 · 카드(번호 그대로, 열린 알람 바꾸기 카드만 FAILED)는 이어 주고 기록(구조화 JSON · 일기)은 구간마다 제 기준일로 — 응답 `prev_session_ids`로 앱이 앞 구간의 저장됨 표시를 옮김. 첫 마디는 서버 템플릿. 하루 한도면 `session_id: null` · `limits.reached: DAY`
