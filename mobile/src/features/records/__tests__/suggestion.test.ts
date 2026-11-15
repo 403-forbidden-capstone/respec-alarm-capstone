@@ -3,7 +3,7 @@ import { describe, expect, it } from '@jest/globals';
 import { formatTime } from '@/lib/format';
 import { kst } from '@/mocks/data';
 
-import { EDIT_MAX, EDIT_STEP, editBounds, prepareBounds, previewTimes, shiftLog, shiftText, stepMinutes, suggestionPhase, wakeLine } from '../suggestion';
+import { EDIT_MAX, EDIT_STEP, editBounds, prepareBounds, previewTimes, promptLine, shiftLog, shiftText, stepMinutes, suggestionPhase, wakeLine } from '../suggestion';
 
 describe('S01 직접 수정 (D53)', () => {
   const both = { earlier: 30, later: 30 };
@@ -52,6 +52,13 @@ describe('S01 직접 수정 (D53)', () => {
     expect(prepareBounds(0)).toEqual({ earlier: 30, later: 0 });
     expect(prepareBounds(100)).toEqual({ earlier: 20, later: 0 });
     expect(prepareBounds(120)).toEqual({ earlier: 0, later: 0 });
+  });
+
+  it('대화 카드 한 줄: 준비 알람 기준 + 기상 한 줄, 준비 알람이 없으면 기상', () => {
+    const base = { currentWake: kst(23, 440), currentPrepare: kst(23, 450), proposedWake: kst(23, 440), proposedPrepare: kst(23, 440) };
+    expect(promptLine(base)).toBe('준비 오전 7:30 → 오전 7:20 · 기상 알람은 그대로예요.');
+    expect(promptLine({ ...base, proposedWake: kst(23, 435), proposedPrepare: kst(23, 435) })).toBe('준비 오전 7:30 → 오전 7:15 · 기상 알람도 5분 앞당겨져요.');
+    expect(promptLine({ ...base, currentPrepare: null, proposedPrepare: null, proposedWake: kst(23, 430) })).toBe('기상 오전 7:20 → 오전 7:10');
   });
 
   it('기상 한 줄: 준비 전 활동 안이면 그대로, 넘으면 넘친 분', () => {

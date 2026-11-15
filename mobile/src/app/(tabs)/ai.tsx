@@ -1,5 +1,5 @@
 import { router, useFocusEffect } from 'expo-router';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
 import { ScrollView, StyleSheet, View } from 'react-native';
 
 import { confirm, LoadError, Loading, Screen, Text, toast, TopBar } from '@/components/ui';
@@ -7,6 +7,10 @@ import { listPlaces } from '@/features/alarm/api';
 import { PlaceSearchSheet } from '@/features/alarm/components/PlaceSearchSheet';
 import { homeOf } from '@/features/alarm/placeSheet';
 import { useAuth } from '@/features/auth/AuthProvider';
+import { applySuggestion, getPendingSuggestion, ignoreSuggestion } from '@/features/records/api';
+import { SuggestionPromptCard } from '@/features/records/components/SuggestionPromptCard';
+import { previewTimes } from '@/features/records/suggestion';
+import type { Suggestion } from '@/features/records/types';
 import { endLiveVoice, finishConversation, getConversation, getLiveToken, pickCardPlace, rejectCard, retryConversation, saveCard, say, sayVoice } from '@/features/voice/api';
 import { ChatBubble, TypingBubble } from '@/features/voice/components/ChatBubble';
 import { ChatComposer } from '@/features/voice/components/ChatComposer';
@@ -17,6 +21,7 @@ import { useLiveVoice } from '@/features/voice/hooks/useLiveVoice';
 import { askPrompt, heardSchedule, isNearBottom, mergeLive, mightBeSchedule, type ChatRow } from '@/features/voice/liveChat';
 import type { Conversation, TurnNotice } from '@/features/voice/types';
 import { now } from '@/lib/clock';
+import { formatTime } from '@/lib/format';
 import { userMessage } from '@/lib/errors';
 import { backOrHome } from '@/lib/nav';
 import { useAction } from '@/lib/useAction';
@@ -112,6 +117,37 @@ export default function AiScreen() {
   const home = homeOf(useAuth().profile); // 집 좌표 — 있으면 장소 검색을 가까운 순으로
   // 카드 저장 · 완료 같은 버튼은 한 번에 하나씩, 다시 읽기가 끝날 때까지 — 실패하면 토스트 (lib/useAction)
   const { busy, run: act } = useAction();
+  // 알람 조정 제안 — 저녁 대화에서 카드로 묻기 (안건 D111 5번). 대화(AI) 쪽과 따로 records api로 읽고 처리(대화 서버 상태는 안 건드림)
+  //   들어올 때마다 대기 중인 제안을 다시 읽고, 못 읽으면 카드 없이 대화만
+  const [suggestion, setSuggestion] = useState<Suggestion | null>(null);
+  const [suggestionDone, setSuggestionDone] = useState<string | null>(null);
+  useFocusEffect(
+    useCallback(() => {
+      let alive = true;
+      getPendingSuggestion()
+        .then((s) => {
+          if (!alive) return;
+          setSuggestion(s);
+          setSuggestionDone(null);
+        })
+        .catch(() => {});
+      return () => {
+        alive = false;
+      };
+    }, []),
+  );
+  const applyPrompt = (s: Suggestion) =>
+    act(async () => {
+      await applySuggestion(s.id, s.minutes);
+      const after = previewTimes(s, s.minutes);
+      setSuggestionDone(after.prepare ? `다음 회차부터 준비 알람이 ${formatTime(after.prepare)}에 울려요` : `기상 알람이 ${formatTime(after.wake)}에 울려요`);
+    }, '제안을 적용하지 못했어요');
+  const ignorePrompt = (s: Suggestion) =>
+    act(async () => {
+      await ignoreSuggestion(s.id);
+      setSuggestion(null);
+      toast('같은 제안은 당분간 다시 보이지 않아요');
+    }, '제안을 넘기지 못했어요');
   const scroll = useRef<ScrollView>(null);
   const atBottom = useRef(true); // 맨 아래 근처를 보고 있음 — 이때만 새 말에 맞춰 내림 (위를 읽는 중이면 그대로)
   const thinkingRef = useRef(false); // 정리 중인지 — 확인창이 떠 있는 사이 바뀐 값을 읽어야 해서 렌더 값(thinking) 말고 ref로도 둠
@@ -312,6 +348,39 @@ export default function AiScreen() {
     }
   };
 
+  // 대화 한 줄 — 말풍선이나 카드 (아래 rows.map)
+  const rowView = (m: ChatRow) => {
+    if (m.who !== 'card') return <ChatBubble key={m.id} who={m.who} text={m.text} at={m.at} interim={m.interim} />;
+    const card = cardOf(m.cardId);
+    if (!card) return null;
+    // 말을 처리하는 도중 앱이 알람을 계산하는 카드 — 카드 대신 임시 말풍선 (끝나면 같은 자리가 카드로 바뀜, 실패하면 카드가 오류 안내)
+    //   처리가 끝났는데 계산 전으로 남은 카드(오류 뒤)는 임시 말풍선으로 두지 않고 카드 그대로
+    if ((progress || thinking) && (card.status === 'NEEDS_ESTIMATE' || card.status === 'ESTIMATING') && work?.id !== card.id) {
+      return <ChatBubble key={m.id} who="ai" text={CARD_DRAFTING} at={m.at} />;
+    }
+    const appointmentId = card.appointmentId;
+    const step = work?.id === card.id ? work.step : null;
+    const fail = cardFail?.id === card.id ? cardFail : null;
+    return (
+      <FoundScheduleCard
+        key={m.id}
+        card={card}
+        at={m.at}
+        onSave={() => saveFound(card.id)}
+        onEdit={real ? undefined : () => router.push({ pathname: '/schedule/new', params: { from: 'chat' } })}
+        onReject={() => rejectFound(card.id)}
+        onPickPlace={() => setPlaceCardId(card.id)}
+        onOpen={appointmentId ? () => router.push({ pathname: '/alarm/[id]', params: { id: appointmentId } }) : undefined}
+        onManual={() => router.push('/schedule/new')}
+        disabled={busy || thinking || !!work}
+        working={step ? CARD_STEP[step] : null}
+        saving={step === 'save'}
+        failure={fail?.message ?? null}
+        onRetry={fail?.retry}
+      />
+    );
+  };
+
   return (
     // 키보드를 피하는 일은 Screen이 맡음 (채팅 목록 + 아래 입력 칸 전체를 밀어 올림)
     <Screen scroll={false} contentStyle={styles.screen}>
@@ -336,37 +405,22 @@ export default function AiScreen() {
         <Text variant="lead">기본 AI · 차분한 코치</Text>
 
         <View style={styles.chat} accessibilityLiveRegion="polite">
-          {rows.map((m) => {
-            if (m.who !== 'card') return <ChatBubble key={m.id} who={m.who} text={m.text} at={m.at} interim={m.interim} />;
-            const card = cardOf(m.cardId);
-            if (!card) return null;
-            // 말을 처리하는 도중 앱이 알람을 계산하는 카드 — 카드 대신 임시 말풍선 (끝나면 같은 자리가 카드로 바뀜, 실패하면 카드가 오류 안내)
-            //   처리가 끝났는데 계산 전으로 남은 카드(오류 뒤)는 임시 말풍선으로 두지 않고 카드 그대로
-            if ((progress || thinking) && (card.status === 'NEEDS_ESTIMATE' || card.status === 'ESTIMATING') && work?.id !== card.id) {
-              return <ChatBubble key={m.id} who="ai" text={CARD_DRAFTING} at={m.at} />;
-            }
-            const appointmentId = card.appointmentId;
-            const step = work?.id === card.id ? work.step : null;
-            const fail = cardFail?.id === card.id ? cardFail : null;
-            return (
-              <FoundScheduleCard
-                key={m.id}
-                card={card}
-                at={m.at}
-                onSave={() => saveFound(card.id)}
-                onEdit={real ? undefined : () => router.push({ pathname: '/schedule/new', params: { from: 'chat' } })}
-                onReject={() => rejectFound(card.id)}
-                onPickPlace={() => setPlaceCardId(card.id)}
-                onOpen={appointmentId ? () => router.push({ pathname: '/alarm/[id]', params: { id: appointmentId } }) : undefined}
-                onManual={() => router.push('/schedule/new')}
-                disabled={busy || thinking || !!work}
-                working={step ? CARD_STEP[step] : null}
-                saving={step === 'save'}
-                failure={fail?.message ?? null}
-                onRetry={fail?.retry}
-              />
-            );
-          })}
+          {rows.map((m, i) => (
+            <Fragment key={m.id}>
+              {rowView(m)}
+              {/* 알람 조정 제안 — 대화 첫 마디 바로 아래 (안건 D111 5번) */}
+              {i === 0 && suggestion ? (
+                <SuggestionPromptCard
+                  suggestion={suggestion}
+                  applied={suggestionDone}
+                  busy={busy}
+                  onApply={() => applyPrompt(suggestion)}
+                  onIgnore={() => ignorePrompt(suggestion)}
+                  onOpen={() => router.push({ pathname: '/suggestion/[id]', params: { id: suggestion.id } })}
+                />
+              ) : null}
+            </Fragment>
+          ))}
           {thinking && pendingText && !progress ? <ChatBubble who="me" text={pendingText} at={pendingAt ?? now()} /> : null}
           {/* 추출 전 — 일정일 수도 있는 말이면 점 세 개 대신 임시 말풍선 (추출이 일정을 찾으면 카드 자리가 이어받음). Live는 내 말이 확정된 순간부터(차례 끝 전) */}
           {(drafting > 0 || (real && heardSchedule(live.lines))) && !progress ? <ChatBubble who="ai" text={SCHEDULE_CHECKING} at={pendingAt ?? now()} /> : thinking ? <TypingBubble /> : null}

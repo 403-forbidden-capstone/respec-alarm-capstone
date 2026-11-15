@@ -1,5 +1,5 @@
 // S01 알람 조정 제안 — 화면에서 쓰는 상태 규칙 (목업 SCR.suggestion · A.sug*)
-import { addMinutes } from '@/lib/format';
+import { addMinutes, formatTime } from '@/lib/format';
 
 import type { EditBounds, Suggestion, SuggestionStatus } from './types';
 
@@ -49,6 +49,12 @@ export function prepareBounds(advance: number): EditBounds {
 export function wakeLine(before: Date, after: Date) {
   const minutes = Math.round((before.getTime() - after.getTime()) / 60_000);
   return minutes > 0 ? `기상 알람도 ${minutes}분 앞당겨져요.` : '기상 알람은 그대로예요.';
+}
+
+// 대화 카드 한 줄 (A02 저녁 대화, 안건 D111 5번) — "준비 오전 7:30 → 오전 7:20 · 기상 알람은 그대로예요." 준비 알람이 없으면 기상
+export function promptLine(s: Pick<Suggestion, 'currentWake' | 'currentPrepare' | 'proposedWake' | 'proposedPrepare'>) {
+  if (!s.currentPrepare || !s.proposedPrepare) return `기상 ${formatTime(s.currentWake)} → ${formatTime(s.proposedWake)}`;
+  return `준비 ${formatTime(s.currentPrepare)} → ${formatTime(s.proposedPrepare)} · ${wakeLine(s.currentWake, s.proposedWake)}`;
 }
 
 // 화면 글자 — "10분 일찍" · "5분 늦게" · 0이면 "그대로"
