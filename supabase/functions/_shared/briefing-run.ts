@@ -78,7 +78,7 @@ class QuotaLimited extends Error {}
 export async function runBriefing(src: BriefingSource, have: ReadonlySet<string>, gemini: GeminiDeps): Promise<BriefingOut> {
   const profile = resolveVoice(src.importance, cleanPrefs(src.prefs));
   const toneMap = { CALM: 'GENTLE', NEUTRAL: 'NORMAL', DIRECT: 'FIRM' } as const;
-  if (src.voiceTone) profile.tone = toneMap[src.voiceTone]; // 일정의 직접 선택이 프로필 자동값보다 우선
+  if (src.voiceTone) profile.tone = toneMap[src.voiceTone]; // 알람의 말소리(자동 또는 직접 고름)가 프로필 말투보다 우선 (profile.tone은 표시용, 단계는 startLevel이 정함)
   if (!profile.enabled) return { enabled: false, rule: null, clips: [], audio: [], gemini: 'NOT_NEEDED' };
   const rule = urgencyRule(
     { kind: src.kind, appointmentAtMs: src.done ? null : src.appointmentAtMs, prepMinutes: src.prepMinutes, travelMinutes: src.travelMinutes },

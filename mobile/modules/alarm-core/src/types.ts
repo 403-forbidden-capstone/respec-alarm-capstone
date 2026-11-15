@@ -155,7 +155,7 @@ export type RingingAlarm = {
  * 네이티브가 알람별 앱 전용 폴더에 단계별 WAV로 저장하고, 울릴 때 미루기 횟수 · 남은 여유로 단계를 골라 틂 (VoiceBriefing.kt)
  */
 export type VoiceBriefingSave = {
-  /** urgentAtMs = 남은 여유가 5분 이하가 되는 시각(준비 · 이동을 모르면 null), maxLevel = 사용자 상한 — 네이티브 SpeechUrgency가 울릴 때 비교 */
+  /** urgentAtMs = 남은 여유가 0분이 되는 시각(준비 · 이동을 모르면 null), maxLevel = 상한(늘 4), startLevel = 말소리 시작 단계(예약의 voiceTone이 있으면 그것이 먼저) — 네이티브 SpeechUrgency가 울릴 때 비교 */
   rule: { urgentAtMs: number | null; maxLevel: number; startLevel?: number } | null;
   /** 단계별 문장 + Android TTS 높낮이 · 속도 · 목소리 번호 */
   clips: { level: number; hash: string; text: string; pitch: number; rate: number; voiceIndex: number }[];

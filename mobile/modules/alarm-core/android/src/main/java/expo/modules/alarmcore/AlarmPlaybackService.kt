@@ -103,7 +103,7 @@ class AlarmPlaybackService : Service() {
   // 이번 울림에서 시작한 가장 높은 음성 단계 — 같은 울림 안에서는 이보다 높을 때만 바꿈(낮추지 않음 · 실패한 단계 재시작 안 함)
   private var peakVoiceLevel: Int? = null
   private var voiceGeneration = 0
-  // 기상 알람이 울리는 동안 현재 시각을 계속 확인하여 5분(3단계)과 0분(4단계)에 음성을 전환.
+  // 기상 알람이 울리는 동안 현재 시각을 계속 확인하여 남은 여유 0분(4단계)에 음성을 전환. 1~3단계는 말소리 시작 단계 + 미루기.
   // 서버를 호출하지 않고 캐시된 규칙과 음성만 확인. 배경 알람음/진동은 중단하지 않음.
   private val checkWakeStage = object : Runnable {
     override fun run() {

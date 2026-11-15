@@ -98,7 +98,7 @@ export function wakeVoiceTest(stage: Stage, nowMs: number, opts: VoiceOpts): { s
   return { snoozeCount, voice: { rule, clips: briefingClips(rule, PROFILE, sampleInput('WAKE', nowMs)), test: opts } };
 }
 
-/** 시간 자동 전환 시험 — 울리기 시작 뒤 30초에 여유 5분(→ 3단계), 60초에 여유 0분(→ 4단계)이 되게. 미루기 없이 울리는 동안 바뀜 */
+/** 시간 자동 전환 시험 — 울리기 시작 뒤 60초(2 × AUTO_STEP_MS)에 여유 0분(→ 4단계)이 되게. 미루기 없이 울리는 동안 바뀜 */
 export const AUTO_STEP_MS = 30_000;
 export function autoStageTest(nowMs: number, opts: VoiceOpts): { snoozeCount: number; voice: VoiceTestSetup } {
   // 여유 5분 → 3단계 규칙은 없어짐 — 1단계로 울리다 여유 0분(2 × AUTO_STEP_MS 뒤)에 4단계

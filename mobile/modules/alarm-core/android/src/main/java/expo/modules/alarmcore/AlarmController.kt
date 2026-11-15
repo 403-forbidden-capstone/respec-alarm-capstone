@@ -41,7 +41,12 @@ object AlarmController {
           existing.vibration == incoming.vibration
         if (!alreadyMatches) return STATUS_DEFERRED
         // 미룸 · 다시 울림 대기 중에 말소리만 바뀜 — 미루기 횟수 · 예약 상태는 그대로 두고 말소리 칸만 고침 (다음 울림부터 새 시작 단계)
-        if (incoming.voiceTone != null && existing.voiceTone != incoming.voiceTone) AlarmStorage.save(context, existing.copy(voiceTone = incoming.voiceTone))
+        //   저장소 잠금 안에서 다시 읽고 고침 — 같은 순간의 미루기 · 해제가 저장한 상태를 앞에서 읽은 값으로 되돌리지 않게
+        if (incoming.voiceTone != null && existing.voiceTone != incoming.voiceTone) {
+          synchronized(AlarmStorage) {
+            AlarmStorage.get(context, incoming.alarmId)?.let { AlarmStorage.save(context, it.copy(voiceTone = incoming.voiceTone)) }
+          }
+        }
         return STATUS_SCHEDULED
       }
     }
