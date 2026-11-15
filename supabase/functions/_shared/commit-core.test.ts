@@ -122,8 +122,8 @@ test('예약 꾸러미: 켜진 알람만, 알람 코어 RingPackage 칸 이름, 
   ];
   const pkgs = buildRingPackages({ alarms, title: '팀 주간회의', subtitle: '오전 10:00 · 세종대학교', departAt: kst(22, 540) });
   assert.deepEqual(pkgs, [
-    { alarmId: 'a1', type: 'WAKE', atMillis: kst(22, 480).getTime(), title: '팀 주간회의', subtitle: '오전 10:00 · 세종대학교', intensity: 'STRONG', snoozeLimit: 3, soundKey: 'theme_urgent', vibration: 'STRONG_CONTINUOUS', departAt: kst(22, 540).getTime() },
-    { alarmId: 'a2', type: 'DEPARTURE', atMillis: kst(22, 540).getTime(), title: '팀 주간회의', subtitle: '오전 10:00 · 세종대학교', intensity: 'NORMAL', snoozeLimit: 3, soundKey: 'theme_default', vibration: 'SHORT_REPEAT', departAt: kst(22, 540).getTime() },
+    { alarmId: 'a1', type: 'WAKE', atMillis: kst(22, 480).getTime(), title: '팀 주간회의', subtitle: '오전 10:00 · 세종대학교', intensity: 'STRONG', snoozeLimit: 3, soundKey: 'theme_urgent', vibration: 'STRONG_CONTINUOUS', voiceTone: 'DIRECT', departAt: kst(22, 540).getTime() },
+    { alarmId: 'a2', type: 'DEPARTURE', atMillis: kst(22, 540).getTime(), title: '팀 주간회의', subtitle: '오전 10:00 · 세종대학교', intensity: 'NORMAL', snoozeLimit: 3, soundKey: 'theme_default', vibration: 'SHORT_REPEAT', voiceTone: 'NEUTRAL', departAt: kst(22, 540).getTime() },
   ]);
 });
 

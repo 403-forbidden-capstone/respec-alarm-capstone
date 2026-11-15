@@ -98,11 +98,11 @@ describe('기상 AI 음성 단계 재현', () => {
 });
 
 describe('시간 자동 전환 · 차례 시험 · 출처 모의', () => {
-  it('자동 전환 — 미루기 없이 시각만 지나면 1 → 3(여유 5분) → 4(여유 0분), 출처 모의는 그대로 넘김', () => {
+  it('자동 전환 — 미루기 없이 시각만 지나면 시작 단계(1) 그대로 → 4(여유 0분), 여유 5분 3단계는 없음, 출처 모의는 그대로 넘김', () => {
     const opts = { ...ON, gemini: 'FALLBACK' as const };
     const { snoozeCount, voice } = autoStageTest(NOW, opts);
     const at = (ms: number) => levelAt(voice.rule!, snoozeCount, NOW + ms);
-    expect([at(0), at(AUTO_STEP_MS - 1), at(AUTO_STEP_MS), at(2 * AUTO_STEP_MS - 1), at(2 * AUTO_STEP_MS)]).toEqual([1, 1, 3, 3, 4]);
+    expect([at(0), at(AUTO_STEP_MS - 1), at(AUTO_STEP_MS), at(2 * AUTO_STEP_MS - 1), at(2 * AUTO_STEP_MS)]).toEqual([1, 1, 1, 1, 4]);
     expect(voice.test).toEqual(opts);
     expect(voice.clips.map((c) => c.level)).toEqual([1, 2, 3, 4]);
   });

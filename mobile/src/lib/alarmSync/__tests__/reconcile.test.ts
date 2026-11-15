@@ -47,6 +47,7 @@ describe('서버 행 → 예약 꾸러미 (서버 alarm-commit과 같은 조립)
       snoozeLimit: 3,
       soundKey: 'theme_urgent',
       vibration: 'STRONG_CONTINUOUS', // 칸이 비어 있어 강도에서
+      voiceTone: 'DIRECT', // 말소리 칸이 비어 있어 강도에서 → 시작 3단계
       departAt: Date.parse('2026-10-20T00:00:00.000Z'),
       groupKey: 'p1', // 같은 약속의 알람을 묶는 키 (맞추기 계산용 — planReconcile이 폰에 걸 때 뗌)
       voiceText: '좋은 아침이에요. 오늘 첫 일정은 오전 10시 팀 주간회의예요. 오전 9시에 나가면 돼요.', // 약속 기상 알람이라 출발 알람(9:00)을 읽어 줌
@@ -177,6 +178,34 @@ describe('폰 예약 맞추기 계획 (planReconcile)', () => {
       onPhone('unknown', at(60)),
     ];
     expect(planReconcile({ server, phone, nowMs: NOW }).schedule.map((p) => p.alarmId)).toEqual(['sound', 'vibration']);
+  });
+
+  it('말소리(voiceTone)가 폰과 다르거나 폰에 없던 예약(null)이면 다시 걸고, 칸을 모르는 예전 APK(undefined)는 비교하지 않음', () => {
+    const server = [
+      pkg('changed', at(60), { voiceTone: 'DIRECT' }),
+      pkg('legacy', at(60), { voiceTone: 'NEUTRAL' }),
+      pkg('same', at(60), { voiceTone: 'CALM' }),
+      pkg('old-apk', at(60), { voiceTone: 'DIRECT' }),
+    ];
+    const phone = [
+      onPhone('changed', at(60), { voiceTone: 'CALM' }),
+      onPhone('legacy', at(60), { voiceTone: null }),
+      onPhone('same', at(60), { voiceTone: 'CALM' }),
+      onPhone('old-apk', at(60)),
+    ];
+    const plan = planReconcile({ server, phone, nowMs: NOW });
+    expect(plan.schedule.map((p) => p.alarmId)).toEqual(['changed', 'legacy']);
+    expect(plan.schedule[0].voiceTone).toBe('DIRECT'); // 폰에 실리는 값
+  });
+
+  it('서버 꾸러미에 말소리가 늘 실림 — 약 · 중 · 강 그대로, 비면 전체 세기에서', () => {
+    const rows = [
+      row({ alarm_id: 'c', alarm_type: 'WAKE', scheduled_at: '2026-10-19T22:30:00.000Z', voice_tone: 'CALM' }),
+      row({ alarm_id: 'd', alarm_type: 'DEPARTURE', scheduled_at: '2026-10-20T00:00:00.000Z', voice_tone: 'DIRECT' }),
+      row({ alarm_id: 'n', alarm_type: 'PREPARE', scheduled_at: '2026-10-19T23:00:00.000Z', voice_tone: null, intensity: 'NORMAL' }),
+    ];
+    const byId = Object.fromEntries(buildServerPackages(rows, 'Asia/Seoul').map((p) => [p.alarmId, p.voiceTone]));
+    expect(byId).toEqual({ c: 'CALM', d: 'DIRECT', n: 'NEUTRAL' });
   });
 
   it('울린 뒤 미룬 알람(첫 울림이 지남)은 서버 목록(지금 이후)에 없어도 지우지 않음', () => {

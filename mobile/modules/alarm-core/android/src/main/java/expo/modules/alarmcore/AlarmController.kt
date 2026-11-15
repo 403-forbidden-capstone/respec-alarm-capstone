@@ -39,7 +39,10 @@ object AlarmController {
           existing.intensity == incoming.intensity &&
           existing.soundKey == incoming.soundKey &&
           existing.vibration == incoming.vibration
-        return if (alreadyMatches) STATUS_SCHEDULED else STATUS_DEFERRED
+        if (!alreadyMatches) return STATUS_DEFERRED
+        // 미룸 · 다시 울림 대기 중에 말소리만 바뀜 — 미루기 횟수 · 예약 상태는 그대로 두고 말소리 칸만 고침 (다음 울림부터 새 시작 단계)
+        if (incoming.voiceTone != null && existing.voiceTone != incoming.voiceTone) AlarmStorage.save(context, existing.copy(voiceTone = incoming.voiceTone))
+        return STATUS_SCHEDULED
       }
     }
 
@@ -306,16 +309,18 @@ object AlarmController {
   }
 
   /** JS의 list — 다음 울릴 시각 순 */
-  fun list(context: Context): List<Map<String, Any>> =
+  fun list(context: Context): List<Map<String, Any?>> =
     AlarmStorage.all(context)
       .sortedBy { it.nextRingAt }
       .map { alarm ->
-        mapOf<String, Any>(
+        mapOf<String, Any?>(
           "id" to alarm.alarmId,
           "type" to alarm.type,
           "intensity" to alarm.intensity,
           "soundKey" to alarm.soundKey,
           "vibration" to alarm.vibration,
+          // 칸이 없던 예약은 null — 앱 맞추기가 서버 값과 달라 한 번 다시 걺 (칸이 아예 없으면 예전 APK)
+          "voiceTone" to alarm.voiceTone,
           "title" to alarm.title,
           "atMillis" to alarm.atMillis.toDouble(),
           "snoozeCount" to alarm.snoozeCount,

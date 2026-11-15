@@ -237,7 +237,8 @@ function usableSentence(sentence: string, level: UrgencyLevel, x: WakeScriptInpu
   if ([...x.appointments.map((a) => a.title), ...x.items, ...x.tasks].some((v) => t.includes(norm(v)))) return false;
   const prev = x.previousDay ?? {};
   if (!prev.overslept && !prev.lateByOversleep && /늦잠|지각했|지각한/.test(sentence)) return false;
-  if (!prev.snoozeRepeat && /미뤘|몇\s*번/.test(sentence)) return false;
+  // 2 · 3단계도 말소리 중 · 강이면 미루기 없이 첫 울림부터 나옴 — 오늘 미뤘다는 말은 버리고, 전날 미루기 습관은 지난 일로 말할 때만
+  if (/미뤘|또\s*미루|몇\s*번/.test(sentence) && !(prev.snoozeRepeat && /어제|요즘|평소|전날/.test(sentence))) return false;
   if (level < 4 && LATE_CLAIM.test(sentence)) return false;
   return true;
 }

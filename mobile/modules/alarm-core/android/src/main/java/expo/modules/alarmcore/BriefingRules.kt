@@ -75,17 +75,17 @@ object BriefingRules {
 
   /**
    * 저장된 브리핑이 없을 때 읽을 것 — 기상은 꾸러미의 기상 문장(voiceText, 앱이 오프라인으로 만듦), 출발은 알림 줄(출발 · 도착 안내) + 제목
-   * 미루기 횟수만으로 단계를 올림 (약속 · 이동 정보가 없어 지각 위험은 모름 → 긴급 4단계 없음). "미뤘다"는 미루기로 올라갔을 때만이라 사실
+   * 단계 = 말소리 시작 단계 + 미루기 (약속 · 이동 정보가 없어 지각 위험은 모름 → 긴급 4단계 없음). "미뤘다"는 실제로 미뤘을 때만 (단계가 아니라 미루기 횟수로)
    */
-  fun fallback(type: String, voiceText: String?, heading: String, title: String, snoozeCount: Int): Fallback? {
+  fun fallback(type: String, voiceText: String?, heading: String, title: String, snoozeCount: Int, startLevel: Int = 1): Fallback? {
     val base = (if (type == "WAKE") voiceText?.takeIf { it.isNotBlank() } else null)
       ?: listOf(heading, title).filter { it.isNotBlank() }.joinToString(". ")
     if (base.isBlank()) return null
-    val level = SpeechUrgency.level(snoozeCount, 0L, null, null, 3)
-    val prefix = when (level) {
-      2 -> "알람을 한 번 미뤘어요. 이제 일어나야 해요. "
-      3 -> "알람을 여러 번 미뤘어요. 지금 바로 일어나세요! "
-      else -> ""
+    val level = SpeechUrgency.level(snoozeCount, 0L, null, 3, startLevel)
+    val prefix = when {
+      snoozeCount <= 0 -> ""
+      snoozeCount == 1 -> "알람을 한 번 미뤘어요. 이제 일어나야 해요. "
+      else -> "알람을 여러 번 미뤘어요. 지금 바로 일어나세요! "
     }
     val (pitch, rate) = FALLBACK_VOICE.getValue(level)
     return Fallback(level, prefix + base, pitch, rate)

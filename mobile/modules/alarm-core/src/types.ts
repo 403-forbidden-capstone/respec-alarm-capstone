@@ -11,6 +11,9 @@ export type AlarmIntensity = (typeof ALARM_INTENSITIES)[number];
 export const ALARM_VIBRATIONS = ['NONE', 'SHORT_REPEAT', 'STRONG_CONTINUOUS'] as const;
 export type AlarmVibration = (typeof ALARM_VIBRATIONS)[number];
 
+/** 말소리 3종 — 서버 alarms.voice_tone과 같은 이름 */
+export type VoiceTone = 'CALM' | 'NEUTRAL' | 'DIRECT';
+
 /**
  * 예약 꾸러미 — 서버 alarm-commit이 돌려주는 값을 그대로 폰에 넘기는 모양 (docs/alarm-core.md)
  * 앞 8칸이 alarm-core.md, 그 뒤 3칸이 #79에서 더한 칸, `notice`가 알림 문구 칸, `soundKey` · `vibration`이 축별 강도 칸(D1 A, 서버가 늘 채움), 마지막 칸은 타입 자리만 있고 아직 안 읽음
@@ -50,6 +53,11 @@ export type RingPackage = {
    * (약 NONE · 보통 SHORT_REPEAT · 강 STRONG_CONTINUOUS). 볼륨 · 다시 울림은 이 칸이 아니라 intensity가 정함
    */
   vibration?: AlarmVibration;
+  /**
+   * 말소리 (서버 alarms.voice_tone, 자동 또는 직접 고름) — AI 음성 시작 단계 약 CALM 1 · 중 NEUTRAL 2 · 강 DIRECT 3.
+   * 서버가 늘 채움. 없으면(예전 서버) 저장된 브리핑의 시작 단계, 그것도 없으면 1
+   */
+  voiceTone?: VoiceTone;
   /** 자리만 — 안 읽음. 미루기 시간은 5 · 10 · 15분 고정(D3 기본안 A, SNOOZE_MINUTES_OPTIONS)이라 이 칸으로 바꾸지 않음 */
   snoozeMinutesOptions?: readonly number[];
 };
@@ -103,6 +111,8 @@ export type ScheduledAlarm = {
   /** 폰에 걸린 배경음 · 진동 (서버 꾸러미의 soundKey · vibration). 이 칸을 모르는 예전 APK는 안 돌려줌 → 없으면 강도를 따른 것으로 봄 */
   soundKey?: string;
   vibration?: AlarmVibration;
+  /** 폰에 걸린 말소리 (꾸러미의 voiceTone). 칸이 없던 예약은 null, 이 칸을 모르는 예전 APK는 안 돌려줌(undefined) → 비교하지 않음 */
+  voiceTone?: VoiceTone | null;
   title: string;
   /** 처음 예약한 시각 = 서버 scheduled_at */
   atMillis: number;
@@ -146,7 +156,7 @@ export type RingingAlarm = {
  */
 export type VoiceBriefingSave = {
   /** urgentAtMs = 남은 여유가 5분 이하가 되는 시각(준비 · 이동을 모르면 null), maxLevel = 사용자 상한 — 네이티브 SpeechUrgency가 울릴 때 비교 */
-  rule: { dangerAtMs?: number | null; urgentAtMs: number | null; maxLevel: number } | null;
+  rule: { urgentAtMs: number | null; maxLevel: number; startLevel?: number } | null;
   /** 단계별 문장 + Android TTS 높낮이 · 속도 · 목소리 번호 */
   clips: { level: number; hash: string; text: string; pitch: number; rate: number; voiceIndex: number }[];
   audio: { level: number; hash: string; mime?: string; data: string }[];

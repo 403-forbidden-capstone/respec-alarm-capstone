@@ -12,11 +12,11 @@ import type { BriefAppointment, BriefTodo, Importance, StructuredLike } from './
 import { loadWakeData } from './briefing-load.ts';
 import { briefingRefreshAt } from './briefing-refresh.ts';
 import { type BriefingOut, briefingDays, runBriefing } from './briefing-run.ts';
-import { LEVEL_FIELDS, levelOfIntensity } from './calc/intensity.ts';
 import { must } from './db.ts';
 import { getEnv } from './env.ts';
 import { HttpError } from './errors.ts';
 import type { Db } from './supabase.ts';
+import { voiceToneOf } from './ring-package.ts';
 import { safeTimeZone } from './tz.ts';
 import { wakeScriptsFor } from './wake-script.ts';
 
@@ -106,7 +106,8 @@ export async function briefAlarm(a: { userId: string; db: Db; service: Db; kinds
       timeZone,
       prefs: profile?.alarm_voice_prefs,
       importance: own?.importance ?? 'LOW',
-      voiceTone: alarm.intensity_source === 'MANUAL' && alarm.voice_tone !== LEVEL_FIELDS[levelOfIntensity(alarm.intensity) ?? 1].voiceTone ? alarm.voice_tone : null,
+      // 말소리 칸 = 자동(중요도 · 지각 · 잠귀) 또는 직접 고른 값 → 시작 단계. 폰 예약 꾸러미와 같은 함수
+      voiceTone: voiceToneOf(alarm),
       appointmentAtMs: own?.atMs ?? null,
       prepMinutes: p?.prepare_minutes ?? null,
       travelMinutes: p?.est_travel_minutes ?? null,

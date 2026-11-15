@@ -150,6 +150,14 @@ describe('공통 케이스 — 미루기 횟수 한도 · 시간 고르기 (D3 �
     expect(payload.plan.snoozeMinutesOptions).toEqual([5, 10, 15]);
     expect(payload.departAt).toBe(2_000_000);
   });
+
+  it('말소리(voiceTone)가 네이티브 글자로 그대로 감 — 폰이 브리핑 없이도 시작 단계를 앎. 없으면(예전 서버) 칸 없음', () => {
+    for (const voiceTone of ['CALM', 'NEUTRAL', 'DIRECT'] as const) {
+      const pkg: RingPackage = { ...basePackage, voiceTone };
+      expect(JSON.parse(toNativePayload(pkg, buildRingPlan(pkg))).voiceTone).toBe(voiceTone);
+    }
+    expect('voiceTone' in JSON.parse(toNativePayload(basePackage, buildRingPlan(basePackage)))).toBe(false);
+  });
 });
 
 describe('울림 계획 규칙', () => {

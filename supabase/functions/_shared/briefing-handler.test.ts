@@ -83,3 +83,16 @@ test('앱 길과 기기 길이 같은 브리핑 · 대본은 한 번만 만들�
   st.commit = { status: 'DONE', at_turn: 2, started_at: kst(14, 4), attempts: 1 };
   assert.equal((await briefAlarm(device(db, A), { alarm_id: wake })).refresh_at, null);
 });
+
+test('alarms.voice_tone → 시작 단계 (자동이든 직접 고른 값이든 그 칸 그대로), 칸이 비면 전체 세기를 따름', async () => {
+  fakeGemini();
+  const { db, wake } = seed();
+  const row = db.rows('alarms').find((a) => a.alarm_id === wake)!;
+  const start = async () => (await briefAlarm(device(db, A), { alarm_id: wake })).rule?.startLevel;
+  for (const [voice_tone, source, want] of [['NEUTRAL', 'AUTO', 2], ['DIRECT', 'AUTO', 3], ['CALM', 'MANUAL', 1], ['DIRECT', 'MANUAL', 3]] as const) {
+    Object.assign(row, { voice_tone, intensity_source: source });
+    assert.equal(await start(), want, `${voice_tone} ${source}`);
+  }
+  Object.assign(row, { voice_tone: null, intensity: 'STRONG' });
+  assert.equal(await start(), 3);
+});

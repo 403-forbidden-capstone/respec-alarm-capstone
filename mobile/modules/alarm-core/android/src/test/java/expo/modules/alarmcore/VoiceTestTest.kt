@@ -71,9 +71,9 @@ class VoiceTestTest {
   fun forcedStagesUseRealUrgencyFormula() {
     // 시험 화면의 단계 재현: 1~3 = 미루기 0 · 1 · 2번, 4 = 긴급 시각이 지남 (SpeechUrgency 그대로)
     val now = 1_800_000_000_000L
-    assertEquals(listOf(1, 2, 3), (0..2).map { SpeechUrgency.level(it, now, null, null, 4) })
-    assertEquals(3, SpeechUrgency.level(0, now, now - 60_000L, now + 60_000L, 4)) // 여유 5분 경계 지난 상태
-    assertEquals(4, SpeechUrgency.level(0, now, now - 5 * 60_000L, now - 60_000L, 4)) // 여유 0분 경계 지난 상태
+    assertEquals(listOf(1, 2, 3), (0..2).map { SpeechUrgency.level(it, now, null, 4) })
+    assertEquals(1, SpeechUrgency.level(0, now, now + 60_000L, 4)) // 여유 0분 전 — 여유 5분이어도 시작 단계 그대로
+    assertEquals(4, SpeechUrgency.level(0, now, now - 60_000L, 4)) // 여유 0분 경계 지난 상태
   }
 
   @Test

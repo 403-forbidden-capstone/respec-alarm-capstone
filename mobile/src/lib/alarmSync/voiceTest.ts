@@ -71,8 +71,8 @@ function sampleInput(kind: BriefKind, nowMs: number): BriefingInput {
  *   4: 여유 0분 시각을 지금보다 1분 전으로 → 남은 여유 0분 이하와 같은 입력
  */
 export function stageSetup(stage: Stage, nowMs: number): { snoozeCount: number; rule: UrgencyRule } {
-  if (stage === 4) return { snoozeCount: 0, rule: { dangerAtMs: nowMs - 6 * 60_000, urgentAtMs: nowMs - 60_000, maxLevel: 4 } };
-  return { snoozeCount: stage - 1, rule: { dangerAtMs: null, urgentAtMs: null, maxLevel: 4 } };
+  if (stage === 4) return { snoozeCount: 0, rule: { urgentAtMs: nowMs - 60_000, maxLevel: 4, startLevel: 1 } };
+  return { snoozeCount: stage - 1, rule: { urgentAtMs: null, maxLevel: 4, startLevel: 1 } };
 }
 
 /** 재생 구성 → 알람음 · AI 음성 켜기 + 실제로 쓸 진동 */
@@ -101,7 +101,8 @@ export function wakeVoiceTest(stage: Stage, nowMs: number, opts: VoiceOpts): { s
 /** 시간 자동 전환 시험 — 울리기 시작 뒤 30초에 여유 5분(→ 3단계), 60초에 여유 0분(→ 4단계)이 되게. 미루기 없이 울리는 동안 바뀜 */
 export const AUTO_STEP_MS = 30_000;
 export function autoStageTest(nowMs: number, opts: VoiceOpts): { snoozeCount: number; voice: VoiceTestSetup } {
-  const rule: UrgencyRule = { dangerAtMs: nowMs + AUTO_STEP_MS, urgentAtMs: nowMs + 2 * AUTO_STEP_MS, maxLevel: 4 };
+  // 여유 5분 → 3단계 규칙은 없어짐 — 1단계로 울리다 여유 0분(2 × AUTO_STEP_MS 뒤)에 4단계
+  const rule: UrgencyRule = { urgentAtMs: nowMs + 2 * AUTO_STEP_MS, maxLevel: 4, startLevel: 1 };
   return { snoozeCount: 0, voice: { rule, clips: briefingClips(rule, PROFILE, sampleInput('WAKE', nowMs)), test: opts } };
 }
 
@@ -111,7 +112,7 @@ export const SEQUENCE: Stage[] = [1, 2, 3, 4];
 
 /** 출발 시험 브리핑 — 1단계(출발 촉구) 한 문장만. 출발은 반복 없이 한 번 읽음 (네이티브 BriefingRules.repeatsBriefing) */
 export function departureVoiceTest(nowMs: number): { snoozeCount: number; voice: VoiceTestSetup } {
-  const rule: UrgencyRule = { dangerAtMs: null, urgentAtMs: null, maxLevel: 1 };
+  const rule: UrgencyRule = { urgentAtMs: null, maxLevel: 1, startLevel: 1 };
   return { snoozeCount: 0, voice: { rule, clips: briefingClips(rule, PROFILE, sampleInput('DEPARTURE', nowMs)), test: { sound: true, voice: true } } };
 }
 

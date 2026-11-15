@@ -156,6 +156,22 @@ test('모델이 지어낸 일정 · 시각 · 준비물 · 전날 경험 · 지�
   assert.equal(texts[4], undefined);
 });
 
+test('말소리 중 · 강이면 2 · 3단계가 첫 울림에 나오므로 "오늘 미뤘다"는 말은 전날 미루기 습관이 있어도 버림 — 지난 일로 말할 때만 남김', () => {
+  const x = wakeScriptInput(briefInput({ memo: { wakeEarly: false, overslept: false, lateByOversleep: false, snoozeRepeat: true, goals: [] } }), '2026-11-14');
+  const texts = finalizeScripts(
+    {
+      level1: '좋은 아침이야. 천천히 일어나 보자.',
+      level2: '이제 일어나. 벌써 알람을 미뤘잖아. 어제도 알람을 미뤘잖아. 오늘은 바로 일어나자.',
+      level3: '야! 또 미루려고? 몇 번째야! 얼른 일어나!',
+      level4: '야! 지금 당장 일어나!',
+    },
+    x,
+  );
+  assert.ok(!texts[2]!.includes('벌써 알람을 미뤘'), texts[2]!);
+  assert.ok(texts[2]!.includes('어제도 알람을 미뤘잖아'), texts[2]!);
+  assert.ok(!/또 미루|몇 번/.test(texts[3]!), texts[3]!);
+});
+
 test('4단계 지각 위험은 이 알람이 걸린 일정 (그날 첫 일정이 아니어도), 할 일은 1단계 DB 문장으로', () => {
   const b = briefInput({ todos: [...briefInput().todos, { title: '과제 제출', type: 'TASK' }] });
   const x = wakeScriptInput(b, '2026-11-14', kst(14));
