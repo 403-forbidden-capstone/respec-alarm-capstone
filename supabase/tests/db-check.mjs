@@ -174,15 +174,16 @@ const MEETING = ['decision_comments', 'decision_votes', 'decision_states'];
 //   wake_scripts = 알람 기상 대본 캐시 (alarm-briefing만 서버 키로 읽고 씀) — 아래 "기상 대본 캐시"에서 따로 확인
 //   briefing_devices = 백그라운드 브리핑 갱신용 기기 키 해시 (#515, briefing-device · alarm-briefing-device만 서버 키로) — 아래 "기기 키"에서 따로 확인
 //   server_routes · server_route_users · server_heartbeat = 서버 전환 스위치(M1, 앱은 get_server_routes()로만 읽음) — 아래 "서버 전환 스위치"에서 따로 확인
+//   server_settings = 서버 전용 설정(M7, 예측 켜기 조건 — 서버(service_role)만 읽음) — 아래 "서버 전용 설정 표"에서 따로 확인
 const SERVER_ONLY = ['roll_attempts', 'rate_limit_events', 'friend_links', 'reports', 'push_tickets', 'push_sends', 'team_members', 'prepare_ml_verified_profiles', 'wake_scripts', 'briefing_devices',
-                     'server_routes', 'server_route_users', 'server_heartbeat'];
+                     'server_routes', 'server_route_users', 'server_heartbeat', 'server_settings'];
 
-await check('모든 public 테이블(앱 36개 — 서버 전용 13개 포함 + 회의 도구 3개)에 RLS가 켜져 있음', async () => {
+await check('모든 public 테이블(앱 37개 — 서버 전용 14개 포함 + 회의 도구 3개)에 RLS가 켜져 있음', async () => {
   const r = await q(`select c.relname, c.relrowsecurity from pg_class c join pg_namespace n on n.oid = c.relnamespace
                      where n.nspname = 'public' and c.relkind = 'r' order by 1`);
   const off = r.filter((x) => !x.relrowsecurity).map((x) => x.relname);
   const app = r.filter((x) => !MEETING.includes(x.relname)).length;
-  return app === 36 && r.length === 39 && off.length === 0 ? true : { count: r.length, app, off };
+  return app === 37 && r.length === 40 && off.length === 0 ? true : { count: r.length, app, off };
 });
 
 await check('검증된 ML 프로필: RLS 켜짐, 사용자 접근 차단, 서비스 역할만 접근 허용', async () => {
@@ -1741,6 +1742,84 @@ await check('cron(pg_cron)이 없는 DB에서도 마이그레이션이 적용되
   } finally {
     await bare.close();
   }
+});
+
+
+// ---------------------------------------------------------------------
+// 서버 전용 설정 표 (M7 · 서버 완결점 2-3) — server_settings
+// ---------------------------------------------------------------------
+// 알람 계산이 서버로 넘어간 뒤 예측 켜기 조건(PREPARE_ML_ENABLED · _ALLOWED_USER_IDS · _CODEBOOK_VERSION)을 서버가 이 표에서 읽음.
+// 값은 전부 꺼짐으로 시작 · 키는 목록만 · 값 모양은 Edge 비밀과 같음 · 앱(anon · authenticated)은 읽기 · 쓰기가 모두 막힘
+
+const SETTING_KEYS = ['prepare_ml_allowed_user_ids', 'prepare_ml_codebook_version', 'prepare_ml_enabled'];
+const UUID_ONE = '33333333-3333-4333-8333-333333333333';
+const UUID_TWO = 'AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA';
+
+// 검사가 바꾼 값을 처음 값(꺼짐)으로 되돌림
+const resetSettings = async () => {
+  await su();
+  await q(`update public.server_settings set value = '0' where key = 'prepare_ml_enabled'`);
+  await q(`update public.server_settings set value = '' where key <> 'prepare_ml_enabled'`);
+};
+
+await check('서버 전용 설정 표(server_settings): RLS가 켜져 있고 정책이 없고, 앱(anon · authenticated)은 읽기 · 쓰기가 모두 막히고 service_role만 허용', async () => {
+  const [x] = await q(`select c.relrowsecurity as rls, (select count(*)::int from pg_policy p where p.polrelid = c.oid) as policies,
+    (select bool_or(has_table_privilege(r, c.oid, a)) from unnest(array['anon', 'authenticated']) r, unnest(array['select', 'insert', 'update', 'delete']) a) as app_any,
+    (select bool_and(has_table_privilege('service_role', c.oid, a)) from unnest(array['select', 'insert', 'update', 'delete']) a) as service_all
+    from pg_class c where c.oid = 'public.server_settings'::regclass`);
+  await as(A);
+  const read = await expectErr(() => q(`select * from public.server_settings`), /permission denied/);
+  const write = await expectErr(() => q(`update public.server_settings set value = '1'`), /permission denied/);
+  const insert = await expectErr(() => q(`insert into public.server_settings (key, value) values ('prepare_ml_enabled', '1')`), /permission denied/);
+  await as(null, 'anon');
+  const anonRead = await expectErr(() => q(`select * from public.server_settings`), /permission denied/);
+  await svc();
+  const rows = await q(`select key from public.server_settings order by key`);
+  return x.rls === true && x.policies === 0 && x.app_any === false && x.service_all === true && read === true && write === true && insert === true && anonRead === true && rows.length === 3
+    ? true : { x, read, write, insert, anonRead, rows };
+});
+
+await check('서버 전용 설정 초기값: 세 키(허용 계정 · 코드북 판 · 켜짐)가 전부 꺼짐(빈 글자 · 빈 글자 · 0) — 적용만으로는 동작이 안 바뀜', async () => {
+  const rows = await q(`select key, value from public.server_settings order by key`);
+  return rows.length === 3 && rows.every((r, i) => r.key === SETTING_KEYS[i] && r.value === (r.key === 'prepare_ml_enabled' ? '0' : '')) ? true : rows;
+});
+
+await check('서버 전용 설정 제약: 모르는 키 · 켜짐이 0 · 1이 아님 · 허용 계정이 UUID 목록이 아님 · 코드북 판의 앞뒤 공백 · 65자 · 같은 키 중복은 막고, 올바른 모양은 받음', async () => {
+  await svc();
+  const setValue = (key, value) => q(`update public.server_settings set value = $2 where key = $1`, [key, value]);
+  const known = await expectErr(() => q(`insert into public.server_settings (key, value) values ('prepare_ml_enable', '1')`), /server_settings_known_key/);
+  const dup = await expectErr(() => q(`insert into public.server_settings (key, value) values ('prepare_ml_enabled', '1')`), /duplicate key|server_settings_pkey/);
+  const badEnabled = [];
+  for (const v of ['', '2', 'true', 'on', ' 1', '01']) badEnabled.push(await expectErr(() => setValue('prepare_ml_enabled', v), /server_settings_value_by_key/));
+  const badIds = [];
+  for (const v of ['abc', UUID_ONE + ',', ',' + UUID_ONE, UUID_ONE + ' ' + UUID_TWO, UUID_ONE + ';' + UUID_TWO, '3333333333334333833333333333333333', UUID_ONE + 'x', 'gggggggg-gggg-4ggg-8ggg-gggggggggggg']) {
+    badIds.push(await expectErr(() => setValue('prepare_ml_allowed_user_ids', v), /server_settings_value_by_key/));
+  }
+  const badBook = [];
+  for (const v of [' v1', 'v1 ', 'v1\n', 'x'.repeat(65)]) badBook.push(await expectErr(() => setValue('prepare_ml_codebook_version', v), /server_settings_value_by_key/));
+  const okValues = [['prepare_ml_enabled', '1'], ['prepare_ml_enabled', '0'], ['prepare_ml_allowed_user_ids', ''], ['prepare_ml_allowed_user_ids', UUID_ONE], ['prepare_ml_allowed_user_ids', UUID_TWO],
+    ['prepare_ml_allowed_user_ids', `${UUID_ONE},${UUID_TWO}`], ['prepare_ml_allowed_user_ids', `${UUID_ONE} , ${UUID_TWO}`], ['prepare_ml_allowed_user_ids', ` ${UUID_ONE}`],
+    ['prepare_ml_codebook_version', 'v1'], ['prepare_ml_codebook_version', '2026-11-10 공식 판'], ['prepare_ml_codebook_version', 'x'.repeat(64)], ['prepare_ml_codebook_version', '']];
+  const okFailed = [];
+  for (const [k, v] of okValues) {
+    try {
+      await setValue(k, v);
+    } catch (e) {
+      okFailed.push([k, v, e.message]);
+    }
+  }
+  await resetSettings();
+  return known === true && dup === true && badEnabled.every((r) => r === true) && badIds.every((r) => r === true) && badBook.every((r) => r === true) && okFailed.length === 0
+    ? true : { known, dup, badEnabled, badIds, badBook, okFailed };
+});
+
+await check('서버 전용 설정: 값을 바꾸면 updated_at이 지금으로 갱신되고(손으로 못 속임), 바꾸지 않은 줄은 그대로', async () => {
+  await svc();
+  await q(`update public.server_settings set value = $1, updated_at = '2000-01-01' where key = 'prepare_ml_allowed_user_ids'`, [UUID_ONE]);
+  const [x] = await q(`select value, updated_at > now() - interval '1 minute' as fresh from public.server_settings where key = 'prepare_ml_allowed_user_ids'`);
+  const [y] = await q(`select value, updated_at > now() - interval '1 minute' as fresh from public.server_settings where key = 'prepare_ml_enabled'`);
+  await resetSettings();
+  return x.value === UUID_ONE && x.fresh === true && y.value === '0' ? true : { x, y };
 });
 
 
