@@ -1796,10 +1796,10 @@ await check('서버 전용 설정 제약: 모르는 키 · 켜짐이 0 · 1이 �
     badIds.push(await expectErr(() => setValue('prepare_ml_allowed_user_ids', v), /server_settings_value_by_key/));
   }
   const badBook = [];
-  for (const v of [' v1', 'v1 ', 'v1\n', 'x'.repeat(65)]) badBook.push(await expectErr(() => setValue('prepare_ml_codebook_version', v), /server_settings_value_by_key/));
+  for (const v of [' v1', 'v1 ', 'v1\n', 'x'.repeat(81)]) badBook.push(await expectErr(() => setValue('prepare_ml_codebook_version', v), /server_settings_value_by_key/));
   const okValues = [['prepare_ml_enabled', '1'], ['prepare_ml_enabled', '0'], ['prepare_ml_allowed_user_ids', ''], ['prepare_ml_allowed_user_ids', UUID_ONE], ['prepare_ml_allowed_user_ids', UUID_TWO],
     ['prepare_ml_allowed_user_ids', `${UUID_ONE},${UUID_TWO}`], ['prepare_ml_allowed_user_ids', `${UUID_ONE} , ${UUID_TWO}`], ['prepare_ml_allowed_user_ids', ` ${UUID_ONE}`],
-    ['prepare_ml_codebook_version', 'v1'], ['prepare_ml_codebook_version', '2026-11-10 공식 판'], ['prepare_ml_codebook_version', 'x'.repeat(64)], ['prepare_ml_codebook_version', '']];
+    ['prepare_ml_codebook_version', 'v1'], ['prepare_ml_codebook_version', '2026-11-10 공식 판'], ['prepare_ml_codebook_version', 'x'.repeat(64)], ['prepare_ml_codebook_version', 'x'.repeat(80)], ['prepare_ml_codebook_version', '']];
   const okFailed = [];
   for (const [k, v] of okValues) {
     try {

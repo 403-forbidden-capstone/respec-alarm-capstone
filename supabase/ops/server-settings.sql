@@ -4,6 +4,9 @@
 -- 반영: 서버가 이 표를 읽어 약 1분 안에 반영 (서버 `/health/deep`의 예측 설정 항목에 켜짐 · 코드북 판 · 허용 계정 수가 보임)
 -- 서버로 넘어가기 전에는 이 표를 아무도 안 읽음 (Edge가 계산하는 동안은 Edge 비밀 PREPARE_ML_* 가 기준). 서버로 넘어간 동안은
 --   되돌리기를 대비해 Edge 비밀도 같은 값으로 맞춰 둠 (2-6 복귀 때 확인)
+-- 서버로 넘기기 전에 (server_routes를 canary · server로 바꾸기 전, 2-4 ~ 2-6): 이 표를 지금 Edge 비밀 PREPARE_ML_ENABLED · PREPARE_ML_ALLOWED_USER_IDS · PREPARE_ML_CODEBOOK_VERSION 값으로 채움.
+--   표는 전부 꺼짐으로 시작하므로 안 채우고 넘기면 승인한 계정이 서버 쪽에서만 조용히 P80이 됨(Edge · 서버 응답이 그 계정에서 달라짐).
+--   값은 Edge 비밀을 정한 쪽(혜린님)에게 받아 아래 문장으로 같은 순서(허용 계정 → 판 → 켜짐)로 넣고, 채운 뒤 select로 세 줄이 Edge 비밀과 같은지 확인
 -- 틀린 모양(UUID가 아닌 글자 · enabled가 0 · 1이 아님 · 모르는 키)은 표가 막고 server_settings_* 제약 이름이 오류에 나옴
 
 -- 지금 값 보기 (읽기 전용)
@@ -15,6 +18,7 @@ select key, value, updated_at from public.server_settings order by key;
 --   update public.server_settings set value = '1' where key = 'prepare_ml_enabled';
 
 -- 끄기 (급할 때 이 한 줄이면 서버가 약 1분 안에 예측을 멈추고 P80으로 돌아감)
+--   단, canary 중(계정 일부만 서버)이거나 Edge로 되돌린 뒤에는 Edge 비밀이 기준이라 표만 끄면 Edge 쪽 예측은 계속됨 → Edge 비밀 PREPARE_ML_ENABLED도 0으로 바꿔야 꺼짐
 --   update public.server_settings set value = '0' where key = 'prepare_ml_enabled';
 
 -- 허용 계정을 비움

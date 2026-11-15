@@ -127,10 +127,12 @@ select jobid, status, return_message, start_time from cron.job_run_details where
 |---|---|---|
 | `prepare_ml_enabled` | `PREPARE_ML_ENABLED` | `0` · `1` (처음 `0`) |
 | `prepare_ml_allowed_user_ids` | `PREPARE_ML_ALLOWED_USER_IDS` | 쉼표로 이은 UUID, 비우면 아무도 안 됨 (처음 비어 있음) |
-| `prepare_ml_codebook_version` | `PREPARE_ML_CODEBOOK_VERSION` | 공식 매핑 판 이름, 앞뒤 공백 없이 64자 이하, 비우면 예측 안 함 (처음 비어 있음) |
+| `prepare_ml_codebook_version` | `PREPARE_ML_CODEBOOK_VERSION` | 공식 매핑 판 이름, 앞뒤 공백 없이 80자 이하(프로필 표 `codebook_version`과 같은 상한), 비우면 예측 안 함 (처음 비어 있음) |
 
 - 표 `server_settings(key, value, updated_at)`: RLS가 켜져 있고 정책이 없고 앱(anon · authenticated)은 읽기 · 쓰기가 모두 막힘, service_role(서버)만 읽고 씀. 키는 위 세 개만(오타가 조용히 무시되지 않게 CHECK로 막음, 새 설정은 마이그레이션으로 키를 늘림). 값 모양이 틀려도 막음(UUID가 아닌 글자 · enabled가 0 · 1이 아님). `updated_at`은 값이 바뀔 때 트리거가 지금으로 맞춤
 - 서버가 읽는 규칙은 Edge와 같음: 켜짐이 `1`이고, 허용 계정 목록에 그 사용자 UUID가 정확히 있고, 코드북 판이 사용자 기록의 판과 같을 때만 예측. 비었거나 못 읽으면 꺼짐으로(fail closed). 바꾼 뒤 서버가 약 1분 안에 읽고, 서버 `/health/deep`의 예측 설정 항목(켜짐 · 코드북 판 · 허용 계정 수)에 보임 — 서버 코드(S7a)가 읽기 시작해야 이 반영이 생김
+- **서버로 넘기기 전에 이 표를 지금 Edge 비밀 값으로 채움**(`server_routes`를 canary · server로 바꾸기 전, 2-4 ~ 2-6). 표는 전부 꺼짐으로 시작하므로 안 채우고 넘기면 승인한 계정이 서버 쪽에서만 조용히 P80이 됨(Edge · 서버 응답이 그 계정에서 달라짐). 옮길 것은 Edge 비밀 `PREPARE_ML_ENABLED` · `PREPARE_ML_ALLOWED_USER_IDS` · `PREPARE_ML_CODEBOOK_VERSION` 세 개의 지금 값 — Edge 비밀을 정한 쪽(혜린님)에게 값을 받아 `ops/server-settings.sql`의 문장으로 같은 순서(허용 계정 → 판 → 켜짐)로 넣고, 채운 뒤 `select`로 세 줄이 Edge 비밀과 같은지 확인
+- 끄기: 서버로 넘어간 동안 `prepare_ml_enabled`를 `0`으로 바꾸면 서버가 약 1분 안에 멈춤. 단 canary 중이거나 Edge로 되돌린 뒤에는 Edge 비밀이 기준이라 Edge 비밀 `PREPARE_ML_ENABLED`도 `0`으로 바꿔야 꺼짐
 - 값 바꾸는 SQL(보기 · 허용 계정 하나만 켜기 · 끄기 · 원복)은 `ops/server-settings.sql`. 시험은 `tests/db-check.mjs`의 "서버 전용 설정" 묶음(권한 · 초기값 · 제약 · `updated_at`)
 
 ## 서버 함수가 쓰는 DB 함수 (service_role 전용)

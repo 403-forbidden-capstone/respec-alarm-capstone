@@ -22,9 +22,9 @@ create table public.server_settings (
       -- 비어 있거나(아무도 안 허용) 쉼표로 이은 UUID. 쉼표 앞뒤 공백은 서버가 지우고 읽음
       when 'prepare_ml_allowed_user_ids' then
         value = '' or value ~* '^\s*[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(\s*,\s*[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})*\s*$'
-      -- 앞뒤 공백 없는 64자 이하 글자 (서버가 정확히 같은 글자로 비교함). 비어 있으면 예측 안 함
+      -- 앞뒤 공백 없는 80자 이하 글자 (프로필 표 codebook_version과 같은 상한. 서버가 정확히 같은 글자로 비교함). 비어 있으면 예측 안 함
       when 'prepare_ml_codebook_version' then
-        value !~ '^\s|\s$' and char_length(value) <= 64
+        value !~ '^\s|\s$' and char_length(value) <= 80
       else false
     end)
 );
