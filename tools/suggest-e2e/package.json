@@ -1,0 +1,16 @@
+{
+  "name": "suggest-e2e",
+  "private": true,
+  "type": "module",
+  "description": "알람 조정 제안 실전 시험 — 로컬 Supabase(127.0.0.1)에서 데모 준성이 로그인해 서버 함수까지 전체 흐름, 그리고 실서버 배포 확인(읽기만)",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "start": "node run.mjs",
+    "deploy-check": "node deploy-check.mjs"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.117.3"
+  }
+}
