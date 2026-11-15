@@ -149,6 +149,7 @@ tr.ck-body td{padding:0 14px 18px 14px;background:var(--bg)}
 .conn .cn-box{fill:#fff;stroke:var(--line2)}
 .conn .cn-box.hub{stroke:var(--teal);stroke-width:1.5}
 .conn .cn-box.srv{stroke:var(--teal);stroke-width:1.5;stroke-dasharray:6 4}
+.conn .cn-box.app{fill:#eef7f3;stroke:var(--teal);stroke-width:1.2}
 .conn .cn-t{font-size:13px;font-weight:600;fill:var(--ink)}
 .conn .cn-s{font-size:11px;fill:var(--mute)}
 .conn .cn-g{font-size:11px;font-weight:600;fill:var(--sub)}
@@ -758,10 +759,10 @@ function rChecks() {
 
 // 연결 — 서비스 사이를 무엇으로 이어 놨는지 (11/15 서버 전환 반영). 키는 이름 · 넣은 곳만 적고 값은 적지 않음
 // 상태: done = 됨 · todo = 남음 · later = 나중(AI · iOS · 개발용). 바뀌면 여기 상태만 고침
-const CONN_AS_OF = '11/15';
-// 상자 — box [x, y, 너비, 높이] · 항목 [글, 상태: done 됨 · todo 남음 · later 나중]
+const CONN_AS_OF = '11/16';
+// 상자 — box [x, y, 너비, 높이] · 항목 [글, 상태: done 됨 · todo 남음 · later 나중] · itemsAt = 항목 시작 y(안쪽 상자가 있을 때)
 const CONN_NODES = [
-  { t: 'GitHub', s: '본 레포 · 서버 레포', box: [16, 40, 214, 150], items: [['SUPABASE_ACCESS_TOKEN', 'done'], ['EXPO_TOKEN · PROJECT_TOKEN', 'done'], ['Releases APK · QR', 'done'], ['서버 레포 respec-server', 'done'], ['배포 열쇠 EC2_* (U12)', 'done']] },
+  { t: 'GitHub', s: '본 레포 · 서버 레포', box: [16, 40, 214, 150], items: [['SUPABASE_ACCESS_TOKEN', 'done'], ['EXPO_TOKEN · PROJECT_TOKEN', 'done'], ['Releases APK · QR', 'done'], ['서버 레포 · GHCR 이미지', 'done'], ['배포 열쇠 EC2_* (U12)', 'done']] },
   { t: '각자 PC', s: '로컬 개발 · 시드', box: [16, 214, 214, 114], items: [['mobile/.env · seed/.env', 'done'], ['Android SDK · 에뮬레이터', 'done'], ['서버 로컬 · 격리 Supabase', 'done']] },
   { t: 'Apple Developer', s: 'iOS (#55~#59)', box: [16, 350, 214, 96], items: [['개발자 계정 (연 $99)', 'later'], ['iOS 빌드 · 아이폰 설치', 'later']] },
   { t: 'Cloudflare', s: '웹 배포 · 도메인', box: [300, 40, 220, 132], items: [['respecalarm.com · api DNS', 'done'], ['빌드 변수: 주소 · 공개 키', 'done'], ['빌드 변수: 서버 주소 (T0)', 'todo'], ['카카오 JS 키 · 미리보기 변수', 'todo']] },
@@ -772,30 +773,33 @@ const CONN_NODES = [
     ['Edge 함수 20개', [['알람 8개 → 서버 (테스트 기간)', 'todo'], ['음성 · AI 8개 (0-8 정할 일)', 'later'], ['제안 적용 함수 운영에 없음', 'todo']]],
     ['예약 · 비밀값', [['pg_cron 7개 (서버 안전망)', 'done'], ['Edge 비밀값: 카카오 · AI · 예측', 'done']]],
   ] },
-  { t: '우리 서버 (AWS EC2)', s: 'api.respecalarm.com · 3.38.123.6', box: [600, 340, 240, 186], srv: true, items: [['t4g.small · Ubuntu 26.04', 'done'], ['nginx · ufw · deploy 계정', 'done'], ['HTTPS 인증서 (1-3)', 'done'], ['api · scheduler · 감시 (1-7)', 'done'], ['서버 키 · env (U9 ~ U13)', 'done'], ['알람 8개 서버판 (2 · 3차)', 'done'], ['예측 prepare-ml (1-11 보류)', 'later']] },
+  { t: 'AWS EC2 (서버 컴퓨터)', s: '3.38.123.6 · 서울', box: [600, 330, 240, 264], srv: true, itemsAt: 524, items: [['t4g.small · Ubuntu 26.04', 'done'], ['nginx · HTTPS 인증서 (1-3)', 'done'], ['Docker · ufw · deploy 계정', 'done'], ['예산 알림 · 크레딧 (콘솔)', 'done']] },
+  { t: 'FastAPI 서버 (컨테이너)', s: 'EC2 안에서 도는 우리 코드', box: [612, 384, 216, 120], app: true, items: [['api — 앱 요청 · 알람 8개', 'done'], ['scheduler — 예약 작업 3개', 'done'], ['prepare-ml — 예측 (1-11 보류)', 'later']] },
   { t: '카카오 디벨로퍼스', s: '로그인 · 지도', box: [900, 40, 190, 114], items: [['카카오 로그인', 'done'], ['REST 키 (길찾기 · 장소)', 'done'], ['지도 JS 키 · Web 도메인', 'todo']] },
   { t: 'Google Cloud', s: '구글 로그인', box: [900, 170, 190, 96], items: [['OAuth 클라이언트 (웹)', 'done'], ['테스트 사용자', 'done']] },
   { t: 'Google AI Studio', s: 'Gemini 텍스트 · 음성 · Live', box: [900, 282, 190, 132], items: [['API 키 (Edge 비밀값)', 'done'], ['대화 · 정리 · 기상 대본', 'done'], ['알람 음성 3 · 4단계', 'done'], ['Live — 앱이 직접 연결', 'done']] },
   { t: 'Anthropic', s: '시간표 사진', box: [900, 430, 190, 78], items: [['API 키 (Edge 비밀값)', 'done']] },
+  { t: 'UptimeRobot', s: '서버 감시', box: [900, 524, 190, 78], items: [['/health/deep 5분 · 메일', 'done']] },
 ];
 // [선 경로, 상태, 글자, 글자 x · y, 정렬]
 const CONN_EDGES = [
   ['M116 40 V18 H720 V40', 'done', '머지하면 DB 자동 적용', 418, 13],
   ['M230 82 H300', 'done', 'push → 빌드', 265, 74],
   ['M230 150 L300 226', 'done', '빌드 버튼', 262, 186],
-  ['M16 170 H8 V570 H720 V526', 'done', '서버 레포 머지하면 GHCR → SSH로 서버 배포 · 실패하면 자동 되돌림', 380, 563],
+  ['M16 170 H8 V630 H720 V594', 'done', '서버 레포 머지하면 GHCR 이미지 → SSH로 EC2에 배포 · 실패하면 자동 되돌림', 380, 623],
   ['M520 86 H600', 'done', '주소 · 키', 560, 78],
   ['M520 226 H600', 'done', '로그인 · 조회', 560, 218],
-  ['M520 300 H560 V420 H600', 'todo', '서버 요청', 560, 364],
+  ['M520 300 H560 V430 H612', 'todo', '서버 요청', 560, 372],
   ['M410 342 V362', 'done', 'FCM 키', 418, 356, 'start'],
   ['M230 398 L300 326', 'later', 'iOS 빌드', 236, 382, 'start'],
-  ['M680 340 V312', 'done', 'DB · 토큰 키', 686, 331, 'start'],
-  ['M780 312 V340', 'later', '예측 요청', 786, 331, 'start'],
+  ['M800 384 V312', 'done', 'DB · 서버 키', 806, 326, 'start'],
+  ['M770 312 V384', 'later', '예측 요청', 764, 326, 'end'],
   ['M840 80 H900', 'done', '로그인', 870, 72],
   ['M840 122 H900', 'done', '길찾기', 870, 114],
   ['M840 210 H900', 'done', '로그인', 870, 202],
   ['M840 296 H900', 'done', 'Gemini', 870, 288],
-  ['M840 400 H900', 'later', 'AI 0-8', 870, 392],
+  ['M828 400 H900', 'later', 'AI 0-8', 870, 392],
+  ['M900 560 H840', 'done', '5분마다 확인', 870, 552],
 ];
 // 남은 연결 — [이름, 링크, 설명]. 핵심 기능을 막지 않는 것만 남음 (끝나면 줄을 빼고 그림 항목을 됨으로)
 const CONN_TODO = [
@@ -840,6 +844,7 @@ const CONN_KEYS = [
   ['SUPABASE_SECRET_KEY · SMOKE_*', '서버 api.env · smoke.env (U9 · U10)', '서버가 DB 읽기 · 쓰기 · 배포 점검', '안 줌'],
   ['CATBOOST_API_TOKEN · 모델 파일 2개', '서버 ml.env · models/ (1-11 보류)', '예측 서버', '안 줌 · 파일은 1:1 전달'],
   ['GHCR 받기 토큰', '서버 docker login (U13)', '서버가 이미지 받기', '안 줌'],
+  ['UptimeRobot 계정', 'UptimeRobot (지형 메일)', '서버 감시 · 다운 · 복구 메일', '안 줌 (메일만 지형에게)'],
   ['respec-share (팀 공용 열쇠)', '서버 열쇠 목록 (3-8 때 추가)', '팀원 서버 접속 (ubuntu)', '줌 — 3-8 때 카톡방'],
 ];
 
@@ -847,9 +852,9 @@ function connSvg() {
   const nodes = CONN_NODES.map((n) => {
     const [x, y, w, h] = n.box;
     const line = (txt, st, yy) => `<circle cx="${x + 16}" cy="${yy - 4}" r="4" class="cn-${st}"/><text x="${x + 27}" y="${yy}" class="cn-i${st === 'done' ? '' : ' dim'}">${esc(txt)}</text>`;
-    let out = `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="10" class="cn-box${n.hub ? ' hub' : ''}${n.srv ? ' srv' : ''}"/>
+    let out = `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="10" class="cn-box${n.hub ? ' hub' : ''}${n.srv ? ' srv' : ''}${n.app ? ' app' : ''}"/>
       <text x="${x + 12}" y="${y + 22}" class="cn-t">${esc(n.t)}</text><text x="${x + 12}" y="${y + 38}" class="cn-s">${esc(n.s)}</text>`;
-    let yy = y + 60;
+    let yy = n.itemsAt || (y + 60);
     if (n.groups) {
       for (const [g, items] of n.groups) {
         out += `<text x="${x + 12}" y="${yy}" class="cn-g">${esc(g)}</text>`;
@@ -865,7 +870,7 @@ function connSvg() {
   const edges = CONN_EDGES.map(([d, st, label, lx, ly, anchor]) => `<path d="${d}" class="e ${st}" marker-end="url(#ah-${st})"/>
     <text x="${lx}" y="${ly}" class="el" text-anchor="${anchor || 'middle'}">${esc(label)}</text>`).join('');
   const marker = (st) => `<marker id="ah-${st}" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" class="ah ${st}"/></marker>`;
-  return `<svg class="conn" viewBox="0 0 1100 590" role="img" aria-label="서비스 연결 그림"><defs>${marker('done')}${marker('todo')}${marker('later')}</defs>${edges}${nodes}</svg>`;
+  return `<svg class="conn" viewBox="0 0 1100 650" role="img" aria-label="서비스 연결 그림"><defs>${marker('done')}${marker('todo')}${marker('later')}</defs>${nodes}${edges}</svg>`;
 }
 
 // 화면 × 데이터 표 — 연결 탭 아래에 접어 둠 (개발할 때 봄)
@@ -896,10 +901,10 @@ function rLinks() {
   const todo = CONN_TODO.map(([t, u, d], i) => `<tr><td class="num muted" style="width:1%">${i + 1}</td><td style="white-space:nowrap"><a href="${u}" target="_blank" rel="noopener">${esc(t)}</a></td><td class="muted">${txt(d)}</td></tr>`).join('');
   const keys = CONN_KEYS.map(([n, w, use, share]) => `<tr><td>${/[가-힣]/.test(n) ? esc(n) : `<code>${esc(n)}</code>`}</td><td>${esc(w)}</td><td>${esc(use)}</td><td class="${share.startsWith('줘도') ? '' : 'muted'}">${esc(share)}</td></tr>`).join('');
   return `<div class="card">
-    <div class="row" style="margin-bottom:4px"><h2 style="margin:0">외부 연결 — 서버 전환 (11/15)</h2><span class="muted">${CONN_AS_OF} 확인 · 됨 ${count('done')} · 남음 ${count('todo')} · 나중 ${count('later')}</span></div>
-    <div class="note" style="margin:0 0 6px">로그인 · DB · Edge 함수 · 예약 · 실시간 · 지도 · 푸시는 그대로 Supabase. 우리 서버 <code>api.respecalarm.com</code>(AWS EC2)는 배포 · 감시 · 되돌리기까지 끝, 알람 8개 서버판이 올라가 있고 스위치는 전부 edge — 서버 테스트 기간에 함수마다 켬. 서버가 멈추면 Edge가 이어받음. 예측은 모델 파일 보류, AI는 0-8에서 정함. 서버 자세히 → <a href="https://github.com/403-forbidden-capstone/respec-server#readme" target="_blank" rel="noopener">서버 레포 README</a></div>
+    <div class="row" style="margin-bottom:4px"><h2 style="margin:0">외부 연결 — 서버 전환</h2><span class="muted">${CONN_AS_OF} 확인 · 됨 ${count('done')} · 남음 ${count('todo')} · 나중 ${count('later')}</span></div>
+    <div class="note" style="margin:0 0 6px">로그인 · DB · Edge 함수 · 예약 · 실시간 · 지도 · 푸시는 그대로 Supabase. AWS EC2(빌린 컴퓨터) 위의 FastAPI 서버(우리 코드, <code>api.respecalarm.com</code>)는 배포 · 감시 · 되돌리기까지 끝, 알람 8개 서버판이 올라가 있고 스위치는 전부 edge — 서버 테스트 기간에 함수마다 켬. 서버가 멈추면 Edge가 이어받음. 예측은 모델 파일 보류, AI는 0-8에서 정함. 서버 자세히 → <a href="https://github.com/403-forbidden-capstone/respec-server#readme" target="_blank" rel="noopener">서버 레포 README</a></div>
     <div class="conn-wrap">${connSvg()}</div>
-    <div class="conn-legend"><span><i></i>됨</span><span><i class="todo"></i>남음</span><span><i class="later"></i>나중 (AI · iOS · 개발용)</span><span>틸 테두리 = Supabase · 점선 테두리 = 우리 서버 · 괄호 = 서버 완결점 할 일</span></div>
+    <div class="conn-legend"><span><i></i>됨</span><span><i class="todo"></i>남음</span><span><i class="later"></i>나중 (AI · iOS · 예측 · 개발용)</span><span>틸 테두리 = Supabase · 점선 = AWS EC2(빌린 컴퓨터) · 연한 틸 상자 = 그 안에서 도는 FastAPI 서버 · 괄호 = 서버 완결점 할 일</span></div>
   </div>
   <div class="card" style="margin-top:16px"><h2>다음 — 11/4 분담 뒤 (① 기상 알람 · ② 친구) <span class="muted" style="font-weight:500">날짜 · 상태는 GitHub 보드</span></h2><table>${next}</table></div>
   <div class="card" style="margin-top:12px"><h2>남은 연결 <span class="muted" style="font-weight:500">핵심 기능을 막지 않는 것</span></h2><table>${todo}</table><div class="note">Supabase callback = <code>https://gomrhctwjvttoqifxktt.supabase.co/auth/v1/callback</code></div></div>
