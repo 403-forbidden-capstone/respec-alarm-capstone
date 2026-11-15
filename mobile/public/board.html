@@ -148,6 +148,8 @@ tr.ck-body td{padding:0 14px 18px 14px;background:var(--bg)}
 .conn{display:block;width:100%;min-width:860px;height:auto}
 .conn .cn-box{fill:#fff;stroke:var(--line2)}
 .conn .cn-box.hub{stroke:var(--teal);stroke-width:1.5}
+.conn .cn-box.srv{stroke:var(--teal);stroke-width:1.5;stroke-dasharray:6 4}
+.conn .cn-box.app{fill:#eef7f3;stroke:var(--teal);stroke-width:1.2}
 .conn .cn-t{font-size:13px;font-weight:600;fill:var(--ink)}
 .conn .cn-s{font-size:11px;fill:var(--mute)}
 .conn .cn-g{font-size:11px;font-weight:600;fill:var(--sub)}
@@ -755,45 +757,53 @@ function rChecks() {
   <div class="note">웹 흐름 자동 실행으로 표를 채우는 기능은 아직 없음 — 현재는 10/10 흐름 확인 문서 · 코드 · 이슈를 대조해 수동 작성</div>`;
 }
 
-// 연결 — 서비스 사이를 무엇으로 이어 놨는지 (10/10 확인). 키는 이름 · 넣은 곳만 적고 값은 적지 않음
+// 연결 — 서비스 사이를 무엇으로 이어 놨는지 (11/15 서버 전환 반영). 키는 이름 · 넣은 곳만 적고 값은 적지 않음
 // 상태: done = 됨 · todo = 남음 · later = 나중(AI · iOS · 개발용). 바뀌면 여기 상태만 고침
-const CONN_AS_OF = '11/5';
+const CONN_AS_OF = '11/16';
+// 상자 — box [x, y, 너비, 높이] · 항목 [글, 상태: done 됨 · todo 남음 · later 나중] · itemsAt = 항목 시작 y(안쪽 상자가 있을 때)
 const CONN_NODES = [
-  { t: 'GitHub', s: '레포 · Actions 비밀값 · 릴리스', box: [16, 40, 214, 150], items: [['SUPABASE_ACCESS_TOKEN', 'done'], ['EXPO_TOKEN', 'done'], ['PROJECT_TOKEN', 'done'], ['CLAUDE_CODE_OAUTH_TOKEN', 'done'], ['Releases APK · QR (v0.0.1)', 'done']] },
-  { t: '각자 PC', s: '로컬 개발 · 시드', box: [16, 250, 200, 114], items: [['mobile/.env (주소 · 공개 키)', 'done'], ['seed/.env (서비스 키, 이 PC)', 'done'], ['Android SDK · 에뮬레이터', 'done']] },
-  { t: 'Apple Developer', s: 'iOS (#55~#59)', box: [16, 420, 200, 96], items: [['개발자 계정 (연 $99)', 'later'], ['iOS 빌드 · 아이폰 설치', 'later']] },
-  { t: 'Cloudflare', s: '웹 배포', box: [300, 40, 220, 114], items: [['빌드 변수: 주소 · 공개 키 (배포)', 'done'], ['미리보기 · 카카오 JS 키 변수', 'todo'], ['보드 토큰 (개발용, #102)', 'later']] },
-  { t: 'Expo · EAS', s: '앱 빌드 · 푸시 전달', box: [300, 172, 220, 150], items: [['환경 변수 3곳: 주소 · 공개 키', 'done'], ['Android 서명 키', 'done'], ['릴리스 APK 빌드 (v0.0.1)', 'done'], ['FCM V1 서비스 계정 키 (10/27)', 'done'], ['google-services.json (다시 올림)', 'todo']] },
-  { t: 'Firebase', s: 'Android 푸시 (FCM)', box: [300, 350, 220, 114], items: [['프로젝트 (respec-alarm-b0a1a)', 'done'], ['서비스 계정 키 (EAS에 올림)', 'done'], ['Android 앱 · google-services.json', 'todo']] },
-  { t: 'Supabase', s: 'DB · 로그인 · 서버 함수', box: [600, 40, 240, 410], hub: true, groups: [
-    ['DB', [['마이그레이션 머지하면 자동 적용', 'done'], ['접근 규칙 (RLS)', 'done'], ['회의 도구 표 (/decisions)', 'done']]],
-    ['로그인', [['Redirect URLs', 'done'], ['카카오 공급자', 'done'], ['구글 공급자', 'done'], ['이메일 로그인 (시드 계정만)', 'done']]],
-    ['서버 함수', [['함수 11개 배포 (마지막 11/1)', 'done'], ['비밀값 KAKAO_REST_API_KEY (지도 키)', 'done'], ['비밀값 GEMINI_API_KEY', 'later']]],
-    ['예약 · 실시간 · 시드', [['pg_cron · pg_net 예약 (#160)', 'done'], ['배치 키 2개 (Vault) · 5분 배치 돎', 'done'], ['Realtime 기상 신호 정책 · 트리거', 'done'], ['시드 (데모 계정 4명)', 'done']]],
+  { t: 'GitHub', s: '본 레포 · 서버 레포', box: [16, 40, 214, 150], items: [['SUPABASE_ACCESS_TOKEN', 'done'], ['EXPO_TOKEN · PROJECT_TOKEN', 'done'], ['Releases APK · QR', 'done'], ['서버 레포 · GHCR 이미지', 'done'], ['배포 열쇠 EC2_* (U12)', 'done']] },
+  { t: '각자 PC', s: '로컬 개발 · 시드', box: [16, 214, 214, 114], items: [['mobile/.env · seed/.env', 'done'], ['Android SDK · 에뮬레이터', 'done'], ['서버 로컬 · 격리 Supabase', 'done']] },
+  { t: 'Apple Developer', s: 'iOS (#55~#59)', box: [16, 350, 214, 96], items: [['개발자 계정 (연 $99)', 'later'], ['iOS 빌드 · 아이폰 설치', 'later']] },
+  { t: 'Cloudflare', s: '웹 배포 · 도메인', box: [300, 40, 220, 132], items: [['respecalarm.com · api DNS', 'done'], ['빌드 변수: 주소 · 공개 키', 'done'], ['빌드 변수: 서버 주소 (T0)', 'todo'], ['카카오 JS 키 · 미리보기 변수', 'todo']] },
+  { t: 'Expo · EAS', s: '앱 빌드 · 푸시 전달', box: [300, 192, 220, 150], items: [['환경 변수 3곳 · 서명 키', 'done'], ['릴리스 APK 빌드', 'done'], ['FCM V1 서비스 계정 키', 'done'], ['google-services (빌드 Secret)', 'done'], ['환경 변수: 서버 주소 (T0)', 'todo']] },
+  { t: 'Firebase', s: 'Android 푸시 (FCM)', box: [300, 362, 220, 96], items: [['프로젝트 · 서비스 계정 키', 'done'], ['Android 앱 · google-services', 'done']] },
+  { t: 'Supabase', s: 'DB · 로그인 · Edge (남는 것)', box: [600, 40, 240, 272], hub: true, groups: [
+    ['DB · 로그인', [['마이그레이션 자동 적용', 'done'], ['카카오 · 구글 · 이메일 로그인', 'done'], ['스위치 · 설정 표 · 저장 함수', 'done']]],
+    ['Edge 함수 20개', [['알람 8개 → 서버 (테스트 기간)', 'todo'], ['음성 · AI 8개 (0-8 정할 일)', 'later'], ['제안 적용 함수 운영에 없음', 'todo']]],
+    ['예약 · 비밀값', [['pg_cron 7개 (서버 안전망)', 'done'], ['Edge 비밀값: 카카오 · AI · 예측', 'done']]],
   ] },
-  { t: '카카오 디벨로퍼스', s: '로그인 · 지도는 팀원 앱', box: [900, 40, 190, 114], items: [['카카오 로그인 (실계정 됨)', 'done'], ['지도 키 (10/28, 길찾기 됨)', 'done'], ['지도 JS 키 · Web 도메인', 'todo']] },
-  { t: 'Google Cloud', s: '구글 로그인', box: [900, 184, 190, 96], items: [['OAuth 클라이언트 (웹)', 'done'], ['테스트 사용자', 'done']] },
-  { t: 'Google AI Studio', s: 'Gemini', box: [900, 304, 190, 78], items: [['API 키 (AI 대기)', 'later']] },
+  { t: 'AWS EC2 (서버 컴퓨터)', s: '3.38.123.6 · 서울', box: [600, 330, 240, 264], srv: true, itemsAt: 524, items: [['t4g.small · Ubuntu 26.04', 'done'], ['nginx · HTTPS 인증서 (1-3)', 'done'], ['Docker · ufw · deploy 계정', 'done'], ['예산 알림 · 크레딧 (콘솔)', 'done']] },
+  { t: 'FastAPI 서버 (컨테이너)', s: 'EC2 안에서 도는 우리 코드', box: [612, 384, 216, 120], app: true, items: [['api — 앱 요청 · 알람 8개', 'done'], ['scheduler — 예약 작업 3개', 'done'], ['prepare-ml — 예측 (1-11 보류)', 'later']] },
+  { t: '카카오 디벨로퍼스', s: '로그인 · 지도', box: [900, 40, 190, 114], items: [['카카오 로그인', 'done'], ['REST 키 (길찾기 · 장소)', 'done'], ['지도 JS 키 · Web 도메인', 'todo']] },
+  { t: 'Google Cloud', s: '구글 로그인', box: [900, 170, 190, 96], items: [['OAuth 클라이언트 (웹)', 'done'], ['테스트 사용자', 'done']] },
+  { t: 'Google AI Studio', s: 'Gemini 텍스트 · 음성 · Live', box: [900, 282, 190, 132], items: [['API 키 (Edge 비밀값)', 'done'], ['대화 · 정리 · 기상 대본', 'done'], ['알람 음성 3 · 4단계', 'done'], ['Live — 앱이 직접 연결', 'done']] },
+  { t: 'Anthropic', s: '시간표 사진', box: [900, 430, 190, 78], items: [['API 키 (Edge 비밀값)', 'done']] },
+  { t: 'UptimeRobot', s: '서버 감시', box: [900, 524, 190, 78], items: [['/health/deep 5분 · 메일', 'done']] },
 ];
 // [선 경로, 상태, 글자, 글자 x · y, 정렬]
 const CONN_EDGES = [
   ['M116 40 V18 H720 V40', 'done', '머지하면 DB 자동 적용', 418, 13],
   ['M230 82 H300', 'done', 'push → 빌드', 265, 74],
-  ['M230 150 L300 200', 'done', '빌드 버튼', 262, 190],
+  ['M230 150 L300 226', 'done', '빌드 버튼', 262, 186],
+  ['M16 170 H8 V630 H720 V594', 'done', '서버 레포 머지하면 GHCR 이미지 → SSH로 EC2에 배포 · 실패하면 자동 되돌림', 380, 623],
   ['M520 86 H600', 'done', '주소 · 키', 560, 78],
-  ['M520 214 H600', 'done', '주소 · 키', 560, 206],
-  ['M600 262 H520', 'done', '푸시 요청', 560, 254],
-  ['M410 322 V350', 'done', 'FCM 키', 418, 340, 'start'],
-  ['M216 470 L300 300', 'later', 'iOS 빌드', 222, 446, 'start'],
-  ['M216 289 H280 V560 H720 V450', 'done', '로컬 개발도 같은 Supabase', 500, 553],
+  ['M520 226 H600', 'done', '로그인 · 조회', 560, 218],
+  ['M520 300 H560 V430 H612', 'todo', '서버 요청', 560, 372],
+  ['M410 342 V362', 'done', 'FCM 키', 418, 356, 'start'],
+  ['M230 398 L300 326', 'later', 'iOS 빌드', 236, 382, 'start'],
+  ['M800 384 V312', 'done', 'DB · 서버 키', 806, 326, 'start'],
+  ['M770 312 V384', 'later', '예측 요청', 764, 326, 'end'],
   ['M840 80 H900', 'done', '로그인', 870, 72],
-  ['M840 122 H900', 'done', '지도 검색', 870, 114],
-  ['M840 230 H900', 'done', '로그인', 870, 222],
-  ['M840 343 H900', 'later', 'AI', 870, 335],
+  ['M840 122 H900', 'done', '길찾기', 870, 114],
+  ['M840 210 H900', 'done', '로그인', 870, 202],
+  ['M840 296 H900', 'done', 'Gemini', 870, 288],
+  ['M828 400 H900', 'later', 'AI 0-8', 870, 392],
+  ['M900 560 H840', 'done', '5분마다 확인', 870, 552],
 ];
 // 남은 연결 — [이름, 링크, 설명]. 핵심 기능을 막지 않는 것만 남음 (끝나면 줄을 빼고 그림 항목을 됨으로)
 const CONN_TODO = [
-  ['google-services.json 바꿔 올리기', 'https://expo.dev/accounts/respec-alarm-capstone/projects/respec-alarm/environment-variables', '#213 푸시 붙일 때 — EAS 파일 변수 GOOGLE_SERVICES_JSON(3곳) 보기는 10/29에 비밀로 바뀜(11/5 확인). 10/28엔 서비스 계정 키가 들어 있었고 비밀이라 지금 내용은 못 봄 → Firebase 콘솔 → 프로젝트 설정 → Android 앱(com.forbidden403.respecalarm, 없으면 등록)에서 받은 google-services.json으로 바꿨는지 확인. 서비스 계정 키는 credentials에만'],
+  ['서버 주소 EXPO_PUBLIC_API_BASE_URL (서버 테스트 기간 T0)', 'https://expo.dev/accounts/respec-alarm-capstone/projects/respec-alarm/environment-variables', '앱 · 웹 번들에 서버 주소가 없으면 스위치를 켜도 전부 Edge로 감. 웹 = mobile/.env.production, 앱 = EAS 환경 변수 3곳에 https://api.respecalarm.com (공개 값). 테스트 기간 첫 단계'],
   ['Cloudflare 미리보기 빌드 변수 (Previews Base)', 'https://dash.cloudflare.com/', '11/4 확인 — PR 미리보기 번들이 placeholder.supabase.co라 미리보기에서 로그인 · 실데이터가 안 됨. Settings → Builds → Previews Base → Variables에 EXPO_PUBLIC_SUPABASE_URL · EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY · EXPO_PUBLIC_KAKAO_JS_KEY (열린 PR 브랜치는 각자 설정)'],
   ['카카오 지도 JS 키 EXPO_PUBLIC_KAKAO_JS_KEY', 'https://dash.cloudflare.com/', '11/4 확인 — 배포 웹 번들에 키가 없어 지도 칸이 "지도 준비 중"(EAS 3곳에도 없음, 11/5). Workers → Settings → Builds 변수(프로덕션) · EAS 3곳에 넣고 다시 빌드, 카카오 앱 플랫폼 Web 도메인에 배포 주소'],
   ['보드 토큰 BOARD_GITHUB_TOKEN (개발용)', 'https://dash.cloudflare.com/', '#102 — Workers → Settings → Build → Variables(빌드 변수)에 읽기 전용 GitHub 토큰 → 보드 할 일이 배포 때마다 갱신. 없어도 앱과는 상관없음 (지금은 PR로 스냅샷)'],
@@ -817,28 +827,34 @@ const CONN_NEXT = [
 ];
 // 키가 있는 곳 — [이름, 넣은 곳, 쓰는 곳, 팀원에게]
 const CONN_KEYS = [
-  ['EXPO_PUBLIC_SUPABASE_URL · _PUBLISHABLE_KEY', 'mobile/.env · Cloudflare 빌드 변수 · EAS 3곳', '앱 · 웹이 DB · 로그인', '줘도 됨 (공개 값)'],
-  ['SUPABASE_ACCESS_TOKEN', 'GitHub Actions', '머지 때 DB 적용', '안 줌'],
-  ['EXPO_TOKEN', 'GitHub Actions', 'APK 빌드 버튼 · 데모 릴리즈(v0.0.1)', '안 줌'],
-  ['PROJECT_TOKEN · CLAUDE_CODE_OAUTH_TOKEN', 'GitHub Actions', '보드 연동 · 팀원 PR 자동 리뷰 (지형 PR은 로컬 리뷰)', '안 줌'],
+  ['EXPO_PUBLIC_SUPABASE_URL · _PUBLISHABLE_KEY', 'mobile/.env · .env.production · Cloudflare 빌드 변수 · EAS 3곳', '앱 · 웹이 DB · 로그인', '줘도 됨 (공개 값)'],
+  ['EXPO_PUBLIC_API_BASE_URL (T0)', '아직 없음 (넣을 곳: .env.production · EAS 3곳)', '앱이 서버 주소를 앎 (없으면 전부 Edge)', '줘도 됨 (공개 값)'],
+  ['SUPABASE_ACCESS_TOKEN', '본 레포 GitHub Actions', '머지 때 DB 적용', '안 줌'],
+  ['EXPO_TOKEN · GOOGLE_SERVICES_JSON_B64', '본 레포 GitHub Actions', 'APK 빌드 · 데모 릴리즈', '안 줌'],
+  ['PROJECT_TOKEN · CLAUDE_CODE_OAUTH_TOKEN', '본 레포 GitHub Actions', '보드 연동 · 팀원 PR 리뷰', '안 줌'],
   ['SUPABASE_SERVICE_ROLE_KEY · SEED_PASSWORD', 'supabase/seed/.env (이 PC만)', '데모 시드 넣기 · 지우기', '안 줌 · 레포에 안 넣음'],
-  ['Vault project_url · service_role_key', 'Supabase Vault (10/27)', '배치가 서버 함수를 부를 때', '안 줌'],
-  ['BOARD_GITHUB_TOKEN (아직, #102)', 'Cloudflare 빌드 변수', '보드 할 일 자동 갱신 (읽기 전용)', '안 줌'],
-  ['카카오 REST 키 · Client Secret (내 앱)', 'Supabase 로그인 공급자 (10/27 켜짐)', '카카오 로그인', '안 줌'],
-  ['구글 Client ID · Secret', 'Supabase 로그인 공급자', '구글 로그인', '안 줌'],
-  ['KAKAO_REST_API_KEY (지도 키, 10/28)', 'Supabase Edge 비밀값', '장소 검색 · 길찾기', '안 줌'],
-  ['GEMINI_API_KEY', 'Supabase Edge 비밀값', 'AI (대기)', '안 줌'],
-  ['FCM V1 서비스 계정 키', 'EAS credentials (10/27)', '푸시 전달', '안 줌 · 레포에 안 넣음'],
-  ['google-services.json (지금 다른 파일)', 'EAS 파일 변수 GOOGLE_SERVICES_JSON', '앱 빌드 — FCM 연결', '안 줌 · 레포에 안 넣음'],
+  ['Vault project_url · service_role_key', 'Supabase Vault', 'pg_cron이 Edge를 부를 때 (서버 안전망)', '안 줌 · 값 안 바꿈'],
+  ['카카오 · 구글 Client ID · Secret', 'Supabase 로그인 공급자', '로그인', '안 줌'],
+  ['KAKAO_REST_API_KEY', 'Edge 비밀값 + 서버 api.env', '장소 · 길찾기', '안 줌'],
+  ['EXPO_ACCESS_TOKEN', 'Edge 비밀값 + 서버 api.env', '푸시 보내기', '안 줌'],
+  ['GEMINI_API_KEY · ANTHROPIC_API_KEY', 'Edge 비밀값 (서버는 0-8 정하면)', '음성 · AI · 시간표 사진', '안 줌'],
+  ['예측 켜기 값 3개', 'DB 표 server_settings (2-3, SQL로 바꿈)', '예측 켜기 · 허용 계정 · 모델 판 (지금 꺼짐)', '안 줌'],
+  ['FCM V1 서비스 계정 키 · google-services.json', 'EAS credentials · 파일 변수', '푸시 전달 · 앱 빌드', '안 줌 · 레포에 안 넣음'],
+  ['EC2_HOST · EC2_USER · EC2_SSH_KEY · EC2_KNOWN_HOSTS', '서버 레포 GitHub Secrets (U12)', '머지하면 서버 배포 (열쇠는 배포만 됨)', '안 줌'],
+  ['SUPABASE_SECRET_KEY · SMOKE_*', '서버 api.env · smoke.env (U9 · U10)', '서버가 DB 읽기 · 쓰기 · 배포 점검', '안 줌'],
+  ['CATBOOST_API_TOKEN · 모델 파일 2개', '서버 ml.env · models/ (1-11 보류)', '예측 서버', '안 줌 · 파일은 1:1 전달'],
+  ['GHCR 받기 토큰', '서버 docker login (U13)', '서버가 이미지 받기', '안 줌'],
+  ['UptimeRobot 계정', 'UptimeRobot (지형 메일)', '서버 감시 · 다운 · 복구 메일', '안 줌 (메일만 지형에게)'],
+  ['respec-share (팀 공용 열쇠)', '서버 열쇠 목록 (3-8 때 추가)', '팀원 서버 접속 (ubuntu)', '줌 — 3-8 때 카톡방'],
 ];
 
 function connSvg() {
   const nodes = CONN_NODES.map((n) => {
     const [x, y, w, h] = n.box;
     const line = (txt, st, yy) => `<circle cx="${x + 16}" cy="${yy - 4}" r="4" class="cn-${st}"/><text x="${x + 27}" y="${yy}" class="cn-i${st === 'done' ? '' : ' dim'}">${esc(txt)}</text>`;
-    let out = `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="10" class="cn-box${n.hub ? ' hub' : ''}"/>
+    let out = `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="10" class="cn-box${n.hub ? ' hub' : ''}${n.srv ? ' srv' : ''}${n.app ? ' app' : ''}"/>
       <text x="${x + 12}" y="${y + 22}" class="cn-t">${esc(n.t)}</text><text x="${x + 12}" y="${y + 38}" class="cn-s">${esc(n.s)}</text>`;
-    let yy = y + 60;
+    let yy = n.itemsAt || (y + 60);
     if (n.groups) {
       for (const [g, items] of n.groups) {
         out += `<text x="${x + 12}" y="${yy}" class="cn-g">${esc(g)}</text>`;
@@ -854,7 +870,7 @@ function connSvg() {
   const edges = CONN_EDGES.map(([d, st, label, lx, ly, anchor]) => `<path d="${d}" class="e ${st}" marker-end="url(#ah-${st})"/>
     <text x="${lx}" y="${ly}" class="el" text-anchor="${anchor || 'middle'}">${esc(label)}</text>`).join('');
   const marker = (st) => `<marker id="ah-${st}" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" class="ah ${st}"/></marker>`;
-  return `<svg class="conn" viewBox="0 0 1100 580" role="img" aria-label="서비스 연결 그림"><defs>${marker('done')}${marker('todo')}${marker('later')}</defs>${edges}${nodes}</svg>`;
+  return `<svg class="conn" viewBox="0 0 1100 650" role="img" aria-label="서비스 연결 그림"><defs>${marker('done')}${marker('todo')}${marker('later')}</defs>${nodes}${edges}</svg>`;
 }
 
 // 화면 × 데이터 표 — 연결 탭 아래에 접어 둠 (개발할 때 봄)
@@ -885,10 +901,10 @@ function rLinks() {
   const todo = CONN_TODO.map(([t, u, d], i) => `<tr><td class="num muted" style="width:1%">${i + 1}</td><td style="white-space:nowrap"><a href="${u}" target="_blank" rel="noopener">${esc(t)}</a></td><td class="muted">${txt(d)}</td></tr>`).join('');
   const keys = CONN_KEYS.map(([n, w, use, share]) => `<tr><td>${/[가-힣]/.test(n) ? esc(n) : `<code>${esc(n)}</code>`}</td><td>${esc(w)}</td><td>${esc(use)}</td><td class="${share.startsWith('줘도') ? '' : 'muted'}">${esc(share)}</td></tr>`).join('');
   return `<div class="card">
-    <div class="row" style="margin-bottom:4px"><h2 style="margin:0">외부 연결 — 핵심 기능 전 준비 끝</h2><span class="muted">${CONN_AS_OF} 확인 · 됨 ${count('done')} · 남음 ${count('todo')} · 나중 ${count('later')}</span></div>
-    <div class="note" style="margin:0 0 6px">로그인(카카오 · 구글 · 이메일) · DB · 서버 함수 11개 · 5분 배치 · 실시간 · 시드 · 지도(길찾기) · 푸시 키(FCM)까지 연결됨. 실서버 한 바퀴 됨 — 10/28 에뮬레이터(울림 · 기상 확정까지 서버 기록) · 11/4 웹(이메일 로그인 → 일정 → 알람, 기상 확인은 미리보기) (#212). 남은 큰 것 = 위치 감지 · 푸시 · 친구 (아래 "다음")</div>
+    <div class="row" style="margin-bottom:4px"><h2 style="margin:0">외부 연결 — 서버 전환</h2><span class="muted">${CONN_AS_OF} 확인 · 됨 ${count('done')} · 남음 ${count('todo')} · 나중 ${count('later')}</span></div>
+    <div class="note" style="margin:0 0 6px">로그인 · DB · Edge 함수 · 예약 · 실시간 · 지도 · 푸시는 그대로 Supabase. AWS EC2(빌린 컴퓨터) 위의 FastAPI 서버(우리 코드, <code>api.respecalarm.com</code>)는 배포 · 감시 · 되돌리기까지 끝, 알람 8개 서버판이 올라가 있고 스위치는 전부 edge — 서버 테스트 기간에 함수마다 켬. 서버가 멈추면 Edge가 이어받음. 예측은 모델 파일 보류, AI는 0-8에서 정함. 서버 자세히 → <a href="https://github.com/403-forbidden-capstone/respec-server#readme" target="_blank" rel="noopener">서버 레포 README</a></div>
     <div class="conn-wrap">${connSvg()}</div>
-    <div class="conn-legend"><span><i></i>됨</span><span><i class="todo"></i>남음</span><span><i class="later"></i>나중 (AI · iOS · 개발용)</span><span>틸 테두리 = 가운데 서버 Supabase</span></div>
+    <div class="conn-legend"><span><i></i>됨</span><span><i class="todo"></i>남음</span><span><i class="later"></i>나중 (AI · iOS · 예측 · 개발용)</span><span>틸 테두리 = Supabase · 점선 = AWS EC2(빌린 컴퓨터) · 연한 틸 상자 = 그 안에서 도는 FastAPI 서버 · 괄호 = 서버 완결점 할 일</span></div>
   </div>
   <div class="card" style="margin-top:16px"><h2>다음 — 11/4 분담 뒤 (① 기상 알람 · ② 친구) <span class="muted" style="font-weight:500">날짜 · 상태는 GitHub 보드</span></h2><table>${next}</table></div>
   <div class="card" style="margin-top:12px"><h2>남은 연결 <span class="muted" style="font-weight:500">핵심 기능을 막지 않는 것</span></h2><table>${todo}</table><div class="note">Supabase callback = <code>https://gomrhctwjvttoqifxktt.supabase.co/auth/v1/callback</code></div></div>
