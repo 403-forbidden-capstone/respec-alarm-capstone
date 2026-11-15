@@ -1,0 +1,6 @@
+{
+  "name": "golden",
+  "private": true,
+  "type": "module",
+  "description": "알람 계산 골든 도구 — 서버 TS 결과를 JSON으로 뽑아 Python판과 대조. 외부 패키지 없음 (Node 24 가 .ts를 바로 실행)"
+}
