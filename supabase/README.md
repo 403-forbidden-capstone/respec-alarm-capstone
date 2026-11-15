@@ -488,3 +488,14 @@ npm test                          # 데이터 모양 확인 (제약 · 외래키
 - 알람 시각은 서버 함수와 같은 `_shared/calc`로 만들어 서버 계산과 같은 숫자. 날짜는 한국 시각 오늘 기준 (`--date YYYY-MM-DD`로 바꿈)
 - 나의 오늘 기상 알람 시각이 지난 뒤에 시드하면 다음 `wake-check`가 그 알람을 `MISSED`로 기록함 (실제 동작과 같음)
 - 알람 조정 제안(`alarm_suggestions`, "늦잠 지각 3번 → 10분 앞당김")은 시각 조정 종류가 enum에 없어(D6) 안 넣음
+
+## 알람 저장 DB 함수 · 요청 키 (`20261115120000_alarm_commit_apply.sql`, 정할 일 0-10)
+
+서버(FastAPI) `alarm-commit`이 약속 → 참여 조건 → 알람(고치기 · 만들기 · 지우기) → 고친 값 기록을 PostgREST로 따로 쓰던 것을 `public.alarm_commit_apply(...)` 한 번으로 바꿈. 한 트랜잭션이라 중간에 실패하면 전부 취소됨(전엔 새 약속 · 참여 조건만 지워져 고친 알람이 남았음). Edge `commit.ts`는 되돌리기용으로 그대로 두고 이 함수를 안 부름
+
+- `service_role`만 실행 (`anon` · `authenticated` 불가). 권한 · 입력 검사는 서버가 먼저 하고 함수는 받은 값을 쓰기만 함 — 모든 update · delete에 `user_id = p_user_id`
+- id(약속 · 참여 조건 · 알람)는 서버가 미리 만들어 보냄(고친 값 기록의 `alarm_id`를 서버가 채우려고)
+- 요청 키: `private.request_keys`(PostgREST에 안 보임)에 (사용자, 함수, 키) → 요청 해시 · 결과. 같은 키 · 같은 해시면 첫 결과에 `replayed: true`를 붙여 돌려주고, 같은 키에 다른 해시면 `IDEMPOTENCY_KEY_REUSED`(P0001). 고치려는 알람 · 참여 조건이 없거나 남의 것이면 P0002
+- 결과 `{replayed, appointment: {appointment_id, title, appointment_at} | null, participant_id | null, after: [알람 행…], before}` — 알람 행 시각은 `to_jsonb`라 PostgREST 직접 select와 같은 ISO 글자(칸 순서만 jsonb가 짧은 이름부터로 바꿈)
+- 7일 지난 키는 pg_cron `request-keys-purge`(매일 18:30 UTC = 03:30 KST)가 지움. 서버 · 앱 배포보다 이 마이그레이션이 먼저 적용돼야 함 (서버가 함수를 부르므로)
+- 시험: `tests/commit-rpc.mjs` (한 번에 들어감 · 원자성 · 재전송 · 키 재사용 · 남의 알람 · 권한 · purge)

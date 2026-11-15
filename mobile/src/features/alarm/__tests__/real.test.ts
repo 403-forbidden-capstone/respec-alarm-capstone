@@ -4,6 +4,7 @@ import { EdgeError } from '@/lib/edge';
 import { UserError } from '@/lib/errors';
 import { formatTime } from '@/lib/format';
 
+import { clearCommitKeys } from '../commitKey';
 import { recallDetail } from '../detailCache';
 import { resetAlarmMemory } from '../reset';
 import { clearEdits, peekEdits } from '../editQueue';
@@ -67,6 +68,7 @@ const mockCore = {
   getUsageSpans: jest.fn<(from: number, to: number) => Promise<{ startMillis: number; endMillis: number }[]>>(),
   getPendingEvents: jest.fn<() => Promise<unknown[]>>(),
 };
+let mockUuidSeq = 0; // makeUuid가 부를 때마다 uuid-1, uuid-2…
 jest.mock('@capstone/alarm-core', () => ({
   stop: () => mockCore.stop(),
   getRinging: () => mockCore.getRinging(),
@@ -78,7 +80,7 @@ jest.mock('@capstone/alarm-core', () => ({
   hasUsageAccess: () => mockCore.hasUsageAccess(),
   getUsageSpans: (from: number, to: number) => mockCore.getUsageSpans(from, to),
   getPendingEvents: () => mockCore.getPendingEvents(),
-  makeUuid: () => 'uuid-fixed',
+  makeUuid: () => `uuid-${++mockUuidSeq}`,
   toUseSpans: (spans: { startMillis: number; endMillis: number }[], dismissedAt: number) =>
     spans.map((s) => [(s.startMillis - dismissedAt) / 60_000, (s.endMillis - dismissedAt) / 60_000]),
 }));
@@ -120,6 +122,8 @@ const callsTo = (table: string, op?: FakeCall['op']) => mockCalls.filter((c) => 
 const isCount = (c: FakeCall) => (c.options as { head?: boolean } | undefined)?.head === true;
 
 beforeEach(() => {
+  mockUuidSeq = 0;
+  clearCommitKeys();
   mockRoutes = {};
   mockCalls.length = 0;
   mockNow = null;
@@ -920,7 +924,7 @@ describe('새 일정 계산 · 저장 (H05)', () => {
 
     const [name, body, options] = mockCallEdge.mock.calls[1];
     expect(name).toBe('alarm-commit');
-    expect(options).toEqual({ timeoutMs: 30_000 }); // 쓰기는 자동 재시도 없음 (중복 키를 서버가 아직 안 읽음)
+    expect(options).toEqual({ timeoutMs: 30_000, idempotencyKey: 'uuid-1' }); // 쓰기는 자동 재시도 없음, 요청 키(commitKey.ts)를 실음 (모킹한 makeUuid 값)
     expect(body).toMatchObject({
       participant: { est_travel_minutes: 50, travel_source: 'API', prepare_minutes: 60 },
       manual_times: { WAKE: new Date(kst('07:45')).toISOString() },
@@ -930,6 +934,22 @@ describe('새 일정 계산 · 저장 (H05)', () => {
     expect(callsTo('todos', 'insert')[0].payload).toEqual([{ user_id: 'user-1', appointment_id: 'new-appt', title: '노트북', todo_type: 'ITEM', due_date: '2025-05-23' }]);
     expect(saved.id).toBe('new-appt');
     expect(saved.alarms.map((a) => a.id)).toEqual(['n-wake', 'n-arrive']);
+  });
+
+  it('요청 키: 같은 저장을 실패 뒤 다시 누르면 같은 키 · 성공하면 지워서 다음 저장은 새 키 · 다른 내용은 다른 키 (alarm-commit 4곳이 같은 길)', async () => {
+    const input = { at: new Date(kst('07:00', 23)) };
+    const keyOf = (n: number) => (mockCallEdge.mock.calls[n][2] as { idempotencyKey: string }).idempotencyKey;
+    mockCallEdge.mockRejectedValueOnce(new EdgeError('TIMEOUT')); // 응답을 잃음
+    await expect(real.saveStandaloneAlarm(input)).rejects.toBeInstanceOf(EdgeError);
+    mockCallEdge.mockResolvedValueOnce(commitResponse());
+    await real.saveStandaloneAlarm(input); // 다시 누름 — 같은 본문
+    expect(keyOf(1)).toBe(keyOf(0));
+    mockCallEdge.mockResolvedValueOnce(commitResponse());
+    await real.saveStandaloneAlarm(input); // 성공했으니 새 저장
+    expect(keyOf(2)).not.toBe(keyOf(0));
+    mockCallEdge.mockResolvedValueOnce(commitResponse());
+    await real.saveStandaloneAlarm({ at: new Date(kst('08:00', 23)) }); // 다른 내용
+    expect(keyOf(3)).not.toBe(keyOf(2));
   });
 
   it('createAppointment: 반복 일정이면 준비물 저장 뒤에 그 묶음(= 약속 id)의 회차를 넘기라고 syncNow를 부름, 반복이 아니면 안 부름', async () => {
