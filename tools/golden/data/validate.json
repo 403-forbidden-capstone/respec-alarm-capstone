@@ -1,8 +1,8 @@
 {
   "format": 1,
   "module": "validate",
-  "baseCommit": "b140f701df1018b0cc188d7acbcc9ebce231eb6d",
-  "sourceSha256": "145456f29ace683207000bfa39adbbc05d2c6d122d1979254064eea51953503e",
+  "baseCommit": "d271fb579ab662aecadd8da3228fb39a10b6b00a",
+  "sourceSha256": "7074251ac522a35a01aeb56f36c186f4ae0758ee542dc65d7bbb21752109c4e5",
   "cases": [
     {"id":"validate/$constants/all","fn":"$constants","args":[],"output":{"PAST_GRACE_MINUTES":5}},
     {"id":"validate/checkAlarms/empty","fn":"checkAlarms","args":[[],{"$date":"2026-11-16T00:20:00.000Z"},{"$date":"2026-11-16T01:00:00.000Z"}],"output":{"ok":true,"alarms":[]}},

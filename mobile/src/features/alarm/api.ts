@@ -1,6 +1,7 @@
 // ① 약속 기반 알람 — 데이터 접근은 이 파일에서만 합니다.
 // 지금은 src/mocks의 가짜 데이터를 돌려주고, Supabase가 붙으면 이 파일 안에서만 바꿉니다.
 //   읽기 · 쓰기 위치는 docs/screen-data-map.md (H01 · H02 · H03 · H05 · H07 · H08)
+import { levelOfVoiceTone } from '@shared/calc/intensity.ts';
 import { DEFAULT_COMMON_P80, personalPrepareOf, predictPrepare, prepareStatsOf, recentPrepareOf, wakeMarginOf } from '@shared/calc/prepare.ts';
 import { hasEarlierWake, isEveningWake } from '@shared/calc/wake.ts';
 import { Platform } from 'react-native';
@@ -203,11 +204,12 @@ export async function getAppointment(id: string): Promise<AppointmentDetail | nu
   if (!a || !alarmChain(a).length) return null;
   const auto = autoLevel(a);
   const manual = db.intensityOverrides[a.id] ?? {};
-  const axis = (key: IntensityAxis) => ({ level: manual[key] ?? auto, manual: manual[key] != null });
+  const axis = (key: IntensityAxis) => ({ level: axisLevel(a, key), manual: manual[key] != null }); // 말소리 자동 = 설정의 기본 말소리
   return {
     ...toAppointment(a),
     intensity: {
       auto,
+      voiceAuto: levelOfVoiceTone(db.voiceTone) ?? auto, // 가짜 모드 설정의 기본 말소리
       importancePoint: IMPORTANCE_POINT[a.importance],
       lateCount: db.lateCount4w,
       latePoint: db.lateCount4w >= 2 ? 1 : 0,

@@ -4,7 +4,7 @@
 // 중간에 실패하면 지워서(CASCADE) 되돌림. 같은 요청을 다시 보냈을 때 같은 상태가 되는 건 기존 약속(appointment_id)이 있을 때만 —
 // 새 약속(appointment)은 응답만 잃고 다시 보내면 약속 · 알람이 두 벌 생기고, 일정 없는 알람도 alarm_id 없이 다시 보내면 하나 더 생김 (요청 키는 아직 안 받음).
 // 근본 해결은 DB 함수(RPC)로 묶는 것
-import { autoLevel, resolveIntensity, wakeSensitivityOf } from './calc/index.ts';
+import { autoLevel, AXES_PICKER_ENABLED, levelOfVoiceTone, resolveIntensity, wakeSensitivityOf } from './calc/index.ts';
 import { buildEditLogRows, diffAlarms, type AlarmWrite, type EditInput } from './commit-core.ts';
 import { must } from './db.ts';
 import { HttpError } from './errors.ts';
@@ -225,8 +225,11 @@ export async function commitStandalone(ctx: CommitCtx, args: { alarm: Standalone
 
   // 일정이 없으니 중요도 점수도 늦잠 보정도 없음 → 중(NORMAL)이 자동 값 (작성자 판단 — 화면 입력이 정해지면 바뀔 수 있음). 고른 칸만 직접 값
   //   잠귀(profiles.wake_sensitivity)는 일정이 아니라 사람 기준이라 여기도 적용 — 깊음이면 자동 강 (헤드 확정 10/30, 학습 기초 b)
-  const wakeSensitivity = wakeSensitivityOf((await loadProfile(userDb, userId)).wake_sensitivity);
-  const intensity = resolveIntensity('NORMAL', 0, resolveOverrides(alarm.levels, existing ? [existing] : [], autoLevel('NORMAL', 0, wakeSensitivity)), wakeSensitivity);
+  const profile = await loadProfile(userDb, userId);
+  const wakeSensitivity = wakeSensitivityOf(profile.wake_sensitivity);
+  const auto = autoLevel('NORMAL', 0, wakeSensitivity);
+  const voiceDefault = levelOfVoiceTone(profile.preferred_voice_tone); // 설정의 기본 말소리 — 이 알람에서 직접 안 골랐을 때만
+  const intensity = resolveIntensity('NORMAL', 0, resolveOverrides(alarm.levels, existing ? [existing] : [], auto, AXES_PICKER_ENABLED, voiceDefault ?? auto), wakeSensitivity, voiceDefault);
   const write: AlarmWrite = {
     alarm_type: 'WAKE',
     scheduled_at: scheduledAt.toISOString(),

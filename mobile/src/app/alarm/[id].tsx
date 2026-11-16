@@ -433,7 +433,7 @@ function Detail({ appointment: a, reload }: { appointment: AppointmentDetail; re
         {/* 축별 선택(배경음 · 말소리 · 진동)은 flag로 숨길 수 있음 — 결정 안건(투표) 결과 대기 (lib/flags.ts ALARM_AXES_PICKER) */}
         {(ALARM_AXES_PICKER ? AXES : []).map(([axis, name]) => {
           const picked = levels[axis];
-          const level = picked ?? a.intensity.auto;
+          const level = picked ?? (axis === 'voice' ? a.intensity.voiceAuto : a.intensity.auto); // 말소리 자동 = 설정의 기본 말소리
           return (
             <View key={axis}>
               <View style={styles.axis}>

@@ -72,7 +72,7 @@ export function settingsEdits(saved: AppointmentDetail, draft: AlarmSettingsDraf
   for (const [axis, level] of Object.entries(draft.levels) as [IntensityAxis, Level | null][]) {
     const current = saved.intensity.axes[axis].manual ? saved.intensity.axes[axis].level : null;
     if (current === level) continue;
-    log(LEVEL_FIELD[axis], saved.intensity.auto, level);
+    log(LEVEL_FIELD[axis], axis === 'voice' ? saved.intensity.voiceAuto : saved.intensity.auto, level);
   }
   return lines;
 }

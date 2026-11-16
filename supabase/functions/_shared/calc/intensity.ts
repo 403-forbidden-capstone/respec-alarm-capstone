@@ -78,11 +78,13 @@ export function resolveIntensity(
   lateCount4w: number,
   overrides: IntensityOverrides = {},
   wakeSensitivity?: WakeSensitivity,
+  voiceDefault?: Level | null, // 설정 > AI 음성 브리핑에서 고른 말소리(profiles.preferred_voice_tone). 이 일정에서 말소리를 직접 안 골랐을 때만 자동 대신 씀
 ): ResolvedIntensity {
   const auto = autoLevel(importance, lateCount4w, wakeSensitivity);
   const axis = (a: IntensityAxis) => {
     const picked = overrides[a];
-    return picked != null ? { level: picked, manual: true } : { level: auto, manual: false };
+    const base = a === 'voice' ? (voiceDefault ?? auto) : auto;
+    return picked != null ? { level: picked, manual: true } : { level: base, manual: false };
   };
   const axes = { sound: axis('sound'), voice: axis('voice'), vibration: axis('vibration') };
   return {

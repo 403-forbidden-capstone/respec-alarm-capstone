@@ -7,7 +7,7 @@ import { wakeStateOf, type WakeRow } from '@/features/social/map';
 import type { WakeState } from '@/features/social/types';
 import { minuteOfDay } from '@/lib/format';
 import { alarmChain as sharedAlarmChain } from '@shared/calc/chain.ts';
-import { autoLevel as sharedAutoLevel, resolveIntensity, wakeSensitivityOf } from '@shared/calc/intensity.ts';
+import { autoLevel as sharedAutoLevel, levelOfVoiceTone, resolveIntensity, wakeSensitivityOf } from '@shared/calc/intensity.ts';
 
 import { db, kst, timelines, TODAY, type MockAppointment } from './data';
 
@@ -48,9 +48,9 @@ export function autoLevel(a: MockAppointment): Level {
   return sharedAutoLevel(a.importance, db.lateCount4w, wakeSensitivityOf(db.wakeSensitivity));
 }
 
-// 직접 고른 강도가 있으면 그것, 없으면 자동
+// 직접 고른 강도가 있으면 그것, 없으면 자동 — 말소리는 설정의 기본 말소리(db.voiceTone)가 자동 값을 대신함 (서버 plan-core와 같음)
 export function axisLevel(a: MockAppointment, axis: IntensityAxis): Level {
-  return resolveIntensity(a.importance, db.lateCount4w, db.intensityOverrides[a.id], wakeSensitivityOf(db.wakeSensitivity)).axes[axis].level;
+  return resolveIntensity(a.importance, db.lateCount4w, db.intensityOverrides[a.id], wakeSensitivityOf(db.wakeSensitivity), levelOfVoiceTone(db.voiceTone)).axes[axis].level;
 }
 
 // 내 첫 알람 (팀 주간회의 기상)

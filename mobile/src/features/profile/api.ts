@@ -3,12 +3,14 @@ import { cleanHandle } from '@/features/onboarding/validate';
 import { parseDbTime } from '@/lib/dbTime';
 import { UserError } from '@/lib/errors';
 import { supabase } from '@/lib/supabase';
+import { db } from '@/mocks/data';
+import type { VoiceTone } from '@shared/calc/types.ts';
 
 import type { HandleChange } from './handle';
 import type { Profile, ProfileFields } from './types';
 
 const COLUMNS =
-  'user_id, nickname, handle, handle_changed_at, handle_next_change_at, profile_image_url, default_prepare_minutes, default_buffer_minutes, home_name, home_lat, home_lng, home_radius_m, default_transport, timezone, onboarded_at, wake_sensitivity, wake_margin, privacy_agreed_at, privacy_version, wake_ping_enabled, ml_age_years, ml_school_status, ml_work_status, ml_holiday_code, ml_profile_consented_at';
+  'user_id, nickname, handle, handle_changed_at, handle_next_change_at, profile_image_url, default_prepare_minutes, default_buffer_minutes, home_name, home_lat, home_lng, home_radius_m, default_transport, timezone, onboarded_at, wake_sensitivity, wake_margin, privacy_agreed_at, privacy_version, wake_ping_enabled, ml_age_years, ml_school_status, ml_work_status, ml_holiday_code, ml_profile_consented_at, alarm_voice_prefs, preferred_voice_tone';
 
 // 내 프로필 한 행 — 가입하면 DB 트리거가 만들어 둠
 export async function getMyProfile(userId: string): Promise<Profile | null> {
@@ -94,6 +96,18 @@ async function updateMyProfile(userId: string, values: ProfileFields & { onboard
 export function saveProfileFields(userId: string, fields: ProfileFields): Promise<Profile> {
   return updateMyProfile(userId, fields);
 }
+
+// 설정 > AI 음성 브리핑 말소리 (profiles.preferred_voice_tone, null = 자동) — 새로 계산하는 알람의 말소리 기본값
+//   userId가 없으면 가짜 데이터 모드: 목업 db에만 (mocks/calc의 강도 계산이 읽음)
+export async function saveVoiceTone(userId: string | undefined, tone: VoiceTone | null): Promise<void> {
+  if (!userId) {
+    db.voiceTone = tone;
+    return;
+  }
+  await updateMyProfile(userId, { preferred_voice_tone: tone });
+}
+
+export const mockVoiceTone = (): VoiceTone | null => db.voiceTone;
 
 // 온보딩 끝 — 끝낸 시각만 적음. 이 값이 있어야 온보딩 판정(features/auth/onboardingGate.ts)이 풀림
 export function finishOnboarding(userId: string): Promise<Profile> {

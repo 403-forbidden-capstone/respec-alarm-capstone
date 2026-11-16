@@ -23,6 +23,7 @@ import { EditRow } from '@/features/profile/components/EditRow';
 import { PrepareMlSurveyEditor } from '@/features/profile/components/PrepareMlSurveyEditor';
 import { EMPTY_PREPARE_ML_SURVEY, prepareMlSurveySummary } from '@/features/profile/prepareMlSurvey';
 import { VoiceBriefingSection } from '@/features/profile/components/VoiceBriefingSection';
+import { useVoiceTone } from '@/features/profile/hooks/useVoiceTone';
 import { ChangeHandleSheet } from '@/features/profile/components/ChangeHandleSheet';
 import { NicknameEditor, PrepareEditor, SleepEditor } from '@/features/profile/components/ProfileEditors';
 import { prepareValuesOf } from '@/features/profile/edit';
@@ -60,6 +61,7 @@ export default function SettingsScreen() {
   const provider = (user?.app_metadata?.provider as string | undefined) ?? '';
   const userId = enabled ? user?.id : undefined;
   const canEdit = userId != null && profile != null;
+  const voiceTone = useVoiceTone(userId, profile?.preferred_voice_tone, refreshProfile); // 말소리 — 누르면 바로 표시 · 미리 듣기 · 저장(실패하면 되돌림)
 
   const closeEditor = () => setEditing(null);
   const open = (which: Exclude<Editing, null>) => (canEdit ? () => setEditing(which) : undefined);
@@ -182,7 +184,7 @@ export default function SettingsScreen() {
             <EditRow label="깨우는 여유" value={WAKE_MARGIN_NAME[profile.wake_margin]} onPress={open('prepare')} />
           </Card>
 
-          <VoiceBriefingSection value={profile.alarm_voice_prefs} onSave={(next) => void saveEdit({ alarm_voice_prefs: next })} disabled={!canEdit} />
+          <VoiceBriefingSection value={profile.alarm_voice_prefs} tone={voiceTone.tone} onSave={(next) => void saveEdit(next)} onPickTone={voiceTone.pick} disabled={!canEdit} toneDisabled={enabled && !canEdit} />
         </>
       ) : null}
 

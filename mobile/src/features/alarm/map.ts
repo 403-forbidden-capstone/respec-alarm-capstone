@@ -312,24 +312,28 @@ export function toOccurrences(rows: readonly OccurrenceRow[], nowMs: number): Oc
 // 직접 고른 강도 — 서버 resolveOverrides와 같은 규칙: 저장된 알람 중 기상(없으면 아무거나)이 intensity_source = MANUAL이면
 //   그 알람의 세 칸(배경음 sound_key · 말소리 voice_tone · 진동 vibration)이 자동 값과 다른 칸만 직접 고른 것 (D1 A, 이슈 #312)
 //   intensity는 세 축이 아니라 "전체 세기"(볼륨 · 다시 울림)라 여기서 안 읽음. 진동은 직접 고른 값만 vibration 칸에 있고 NULL이면 강도를 따름 = 자동
-export function storedOverrides(alarms: readonly AlarmRow[], auto: Level, axesEnabled: boolean = AXES_PICKER_ENABLED): Record<IntensityAxis, Level | null> {
+//   voiceAuto = 말소리를 직접 안 골랐을 때 값 (설정의 기본 말소리, 없으면 auto)
+export function storedOverrides(alarms: readonly AlarmRow[], auto: Level, axesEnabled: boolean = AXES_PICKER_ENABLED, voiceAuto: Level = auto): Record<IntensityAxis, Level | null> {
   const stored = manualIntensityRow(alarms);
   if (!axesEnabled || !stored) return { sound: null, voice: null, vibration: null }; // 축별 선택을 끄면 저장된 값은 두되 무시(서버 resolveOverrides와 같게)
-  const pick = (level: Level | null) => (level != null && level !== auto ? level : null);
+  const pick = (level: Level | null, base: Level = auto) => (level != null && level !== base ? level : null);
   return {
     sound: pick(levelOfSoundKey(stored.sound_key)),
-    voice: pick(levelOfVoiceTone(stored.voice_tone)),
+    voice: pick(levelOfVoiceTone(stored.voice_tone), voiceAuto),
     vibration: pick(levelOfVibration(stored.vibration)),
   };
 }
 
 // wakeSensitivity = 내 프로필 잠귀를 wakeSensitivityOf로 읽은 값 (무거움이면 강). 서버 plan-core · realWrite setIntensity · 가짜 모드와 같은 값을 넘김. 안 주면 보통
-export function toIntensity(alarms: readonly AlarmRow[], importance: Importance, lateCount4w: number, wakeSensitivity?: WakeSensitivity): Intensity {
+//   voiceDefault = 설정의 기본 말소리 단계 (profiles.preferred_voice_tone) — 말소리 축의 자동 값을 대신함. 서버 plan-core와 같음
+export function toIntensity(alarms: readonly AlarmRow[], importance: Importance, lateCount4w: number, wakeSensitivity?: WakeSensitivity, voiceDefault?: Level | null): Intensity {
   const auto = autoLevel(importance, lateCount4w, wakeSensitivity);
-  const picked = storedOverrides(alarms, auto);
-  const axis = (key: IntensityAxis) => ({ level: picked[key] ?? auto, manual: picked[key] != null });
+  const voiceAuto = voiceDefault ?? auto;
+  const picked = storedOverrides(alarms, auto, AXES_PICKER_ENABLED, voiceAuto);
+  const axis = (key: IntensityAxis) => ({ level: picked[key] ?? (key === 'voice' ? voiceAuto : auto), manual: picked[key] != null });
   return {
     auto,
+    voiceAuto,
     importancePoint: IMPORTANCE_POINT[importance],
     lateCount: lateCount4w,
     latePoint: lateCount4w >= 2 ? 1 : 0,
@@ -352,11 +356,11 @@ export function toEdits(appointment: Appointment, rows: AppointmentRows): AlarmE
   };
 }
 
-export function toAppointmentDetail(rows: AppointmentRows, lateCount4w: number, wakeSensitivity?: WakeSensitivity): AppointmentDetail {
+export function toAppointmentDetail(rows: AppointmentRows, lateCount4w: number, wakeSensitivity?: WakeSensitivity, voiceDefault?: Level | null): AppointmentDetail {
   const appointment = toAppointment(rows);
   return {
     ...appointment,
-    intensity: toIntensity(rows.alarms, appointment.importance, lateCount4w, wakeSensitivity),
+    intensity: toIntensity(rows.alarms, appointment.importance, lateCount4w, wakeSensitivity, voiceDefault),
     edits: toEdits(appointment, rows),
     // 직접 입력한 이동은 자동값을 모름 — 저장된 값을 자리에 두고, 미리 보기(alarm-suggest)가 오면 서버의 자동값으로 바뀜
     auto: { travelMinutes: appointment.travelMinutes, predictedPrepMinutes: appointment.predictedPrepMinutes },

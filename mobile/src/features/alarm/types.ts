@@ -133,6 +133,7 @@ export type ScheduleItem = {
 
 export type Intensity = {
   auto: Level; // 기본 보통 + 중요도(매우 중요) · 최근 4주 늦잠 지각으로 올린 값 (D69)
+  voiceAuto: Level; // 말소리를 직접 안 골랐을 때 값 — 설정의 기본 말소리(profiles.preferred_voice_tone), 없으면 auto
   importancePoint: number; // 중요도로 올린 단계 (매우 중요면 1)
   lateCount: number; // 최근 4주 늦잠 지각 횟수
   latePoint: number; // 2회 이상이면 1
