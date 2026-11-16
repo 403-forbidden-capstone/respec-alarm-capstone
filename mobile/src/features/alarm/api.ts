@@ -203,7 +203,7 @@ export async function getAppointment(id: string): Promise<AppointmentDetail | nu
   if (!a || !alarmChain(a).length) return null;
   const auto = autoLevel(a);
   const manual = db.intensityOverrides[a.id] ?? {};
-  const axis = (key: IntensityAxis) => ({ level: manual[key] ?? auto, manual: manual[key] != null });
+  const axis = (key: IntensityAxis) => ({ level: axisLevel(a, key), manual: manual[key] != null }); // 말소리 자동 = 설정의 기본 말소리
   return {
     ...toAppointment(a),
     intensity: {

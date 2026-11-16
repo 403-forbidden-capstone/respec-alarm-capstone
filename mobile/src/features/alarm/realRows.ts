@@ -1,13 +1,13 @@
 // ① 약속 기반 알람 — 실데이터 읽기 쿼리 모음 (얇게). 행 → 화면 타입 변환은 map.ts
 //   "내 것"은 호출하는 쪽이 넘긴 userId(lib/user requireUserId)로 한 번 더 좁힘 — RLS는 친구에게 받은 알람 · 같은 그룹 약속도 보여 주므로
 //   읽기 실패는 DB 원문 그대로 던지고(화면은 LoadError로 기본 문구), 이유를 보여 줄 때만 UserError
-import { wakeSensitivityOf, type WakeSensitivity } from '@shared/calc/intensity.ts';
+import { levelOfVoiceTone, wakeSensitivityOf, type WakeSensitivity } from '@shared/calc/intensity.ts';
 
 import { supabase } from '@/lib/supabase';
 import { isUuid } from '@/lib/uuid';
 
 import { toAppointmentDetail, type AlarmRow, type AppointmentRows, type OccurrenceRow, type StandaloneRow } from './map';
-import type { AppointmentDetail } from './types';
+import type { AppointmentDetail, Level } from './types';
 
 // 참여 조건 하나 + 약속 + 그룹 이름 + 이 참여 조건의 알람 전부 (꺼진 것 · 도착 목표 포함). appointments!inner = 약속이 있는 참여 조건만, 약속 날짜로 거를 수 있음
 const PARTICIPANT_SELECT =
@@ -207,15 +207,16 @@ export async function fetchLateCount(userId: string, nowMs: number): Promise<num
 }
 
 // 내 잠귀 (온보딩 한 문항, profiles.wake_sensitivity) — 강도 자동 값에 씀. 서버 plan.ts loadProfile + wakeSensitivityOf와 같은 규칙: 무거움이면 HEAVY, 가벼움 · 보통 · 프로필 없음은 NORMAL
-export async function fetchWakeSensitivity(userId: string): Promise<WakeSensitivity> {
-  const { data, error } = await supabase.from('profiles').select('wake_sensitivity').eq('user_id', userId).maybeSingle();
+//   voiceDefault = 설정의 기본 말소리 (profiles.preferred_voice_tone) 단계, 비면 null(자동) — 서버 plan-core와 같은 규칙
+export async function fetchIntensityPrefs(userId: string): Promise<{ wakeSensitivity: WakeSensitivity; voiceDefault: Level | null }> {
+  const { data, error } = await supabase.from('profiles').select('wake_sensitivity, preferred_voice_tone').eq('user_id', userId).maybeSingle();
   if (error) throw error;
-  return wakeSensitivityOf(data?.wake_sensitivity);
+  return { wakeSensitivity: wakeSensitivityOf(data?.wake_sensitivity), voiceDefault: levelOfVoiceTone(data?.preferred_voice_tone) };
 }
 
 // 알람 설정(H03)이 읽는 약속 하나 — 저장된 값 · 직접 고른 값 · 강도. 약속이 없거나 내 것이 아니면 null (알람이 없는 약속은 호출하는 쪽이 거름)
 export async function loadDetail(appointmentId: string, userId: string, nowMs: number): Promise<AppointmentDetail | null> {
   if (!isUuid(appointmentId)) return null; // 지각 횟수까지 묻기 전에 (loadAppointmentRowsByAppointment도 같은 확인을 함)
-  const [rows, lateCount, wakeSensitivity] = await Promise.all([loadAppointmentRowsByAppointment(appointmentId, userId), fetchLateCount(userId, nowMs), fetchWakeSensitivity(userId)]);
-  return rows ? toAppointmentDetail(rows, lateCount, wakeSensitivity) : null;
+  const [rows, lateCount, prefs] = await Promise.all([loadAppointmentRowsByAppointment(appointmentId, userId), fetchLateCount(userId, nowMs), fetchIntensityPrefs(userId)]);
+  return rows ? toAppointmentDetail(rows, lateCount, prefs.wakeSensitivity, prefs.voiceDefault) : null;
 }

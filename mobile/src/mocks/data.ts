@@ -2,6 +2,7 @@
 // 화면은 이 폴더를 직접 읽지 않고 features/*/api.ts를 거침. 기능별로 실데이터가 붙으면 그 부분을 지움
 // 바꾼 값(알람 켜기 · 권한 등)은 앱을 다시 열 때까지만 남음
 import type { WakeSensitivity } from '@shared/calc/intensity.ts';
+import type { VoiceTone } from '@shared/calc/types.ts';
 import type { WakeMargin } from '@shared/calc/prepare.ts';
 
 import type { Importance, IntensityAxis, Level, Place, RingKind, Transport, UserEditLog, WakePhase } from '@/features/alarm/types';
@@ -160,6 +161,7 @@ export const db = {
   intensityOverrides: {} as Record<string, Partial<Record<IntensityAxis, Level>>>,
   lateCount4w: 1, // 최근 4주 늦잠 지각
   wakeSensitivity: 'NORMAL' as WakeSensitivity, // 가짜 모드 프로필의 잠귀 (MOCK_PROFILE과 같은 보통) — 무거움(HEAVY)이면 강도 자동 값이 강. 서버와 같은 규칙
+  voiceTone: null as VoiceTone | null, // 가짜 모드 설정 > AI 음성 브리핑 말소리 (profiles.preferred_voice_tone) — 비면 자동. 말소리 축의 자동 값을 대신함
   wakeMargin: 'NORMAL' as WakeMargin, // 가짜 모드 프로필의 깨우는 여유 (보통 = 기록의 0.8 분위수)
   wakeThetaMinutes: 1, // 기상 판정 기준 θ
   me: { wakeAt: null as Date | null, departAt: null as Date | null, arriveAt: null as Date | null },

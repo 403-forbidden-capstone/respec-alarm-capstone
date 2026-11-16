@@ -38,6 +38,7 @@ export type Profile = {
   ml_holiday_code: HolidayPatternCode | null;
   ml_profile_consented_at: string | null;
   alarm_voice_prefs?: { [key: string]: Json | undefined }; // 기상 AI 음성 브리핑 수동 설정 — 직접 고른 칸만, 비면 자동(중요도 기본값). 마이그레이션 전 서버면 없음 (@shared/briefing.ts cleanPrefs로 읽음)
+  preferred_voice_tone?: 'CALM' | 'NEUTRAL' | 'DIRECT' | null; // 설정 > AI 음성 브리핑 말소리 약 · 중 · 강 = 새로 계산하는 알람의 말소리 기본값. 비면 자동(강도 단계)
   wake_ping_enabled: boolean; // 친구 깨우기 받기 — 기본 켬. 꺼 두면 보낸 쪽에 '지금은 깨울 수 없어요'만 (친구 8장)
 };
 
@@ -64,6 +65,7 @@ export type ProfileFields = Partial<
     | 'ml_holiday_code'
     | 'ml_profile_consented_at'
     | 'alarm_voice_prefs'
+    | 'preferred_voice_tone'
   >
 >;
 

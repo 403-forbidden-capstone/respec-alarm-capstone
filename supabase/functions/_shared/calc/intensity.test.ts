@@ -137,3 +137,14 @@ test('wakeSensitivityOf: DB 값 HEAVY만 HEAVY, LIGHT · NORMAL · 모르는 값
   // 가벼움 + 보통 일정 → 보통 (약 아님)
   assert.equal(autoLevel('NORMAL', 0, wakeSensitivityOf('LIGHT')), 1);
 });
+
+test('설정의 기본 말소리는 말소리를 직접 안 골랐을 때만 — 다른 축 · 전체 세기는 그대로, 직접 고른 말소리가 이김', () => {
+  const r = resolveIntensity('NORMAL', 0, {}, 'NORMAL', 2);
+  assert.deepEqual(r.axes.voice, { level: 2, manual: false });
+  assert.equal(r.fields.voiceTone, 'DIRECT');
+  assert.equal(r.fields.intensity, 'NORMAL');
+  assert.equal(r.fields.soundKey, 'theme_default');
+  assert.equal(r.manual, false); // 기본 말소리는 직접 고른 값이 아님 → intensity_source AUTO
+  assert.equal(resolveIntensity('NORMAL', 0, { voice: 0 }, 'NORMAL', 2).fields.voiceTone, 'CALM');
+  assert.equal(resolveIntensity('NORMAL', 0, {}, 'NORMAL', null).fields.voiceTone, 'NEUTRAL'); // 비면 자동
+});

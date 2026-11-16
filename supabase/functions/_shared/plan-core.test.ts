@@ -571,6 +571,12 @@ test('축별 선택을 끄면(axesEnabled false) 요청 · 저장된 축 값을 
   assert.notDeepEqual(resolveOverrides(undefined, [stored], 1, true), {}); // 켜면 저장된 직접 값이 살아 있음
 });
 
+test('저장된 말소리가 설정의 기본 말소리와 같으면 직접 고른 값으로 보지 않음 (기본 말소리를 바꾸면 같이 바뀜)', () => {
+  const stored = row('WAKE', 480, { intensity_source: 'MANUAL', sound_key: 'theme_urgent', voice_tone: 'DIRECT' });
+  assert.equal(resolveOverrides(undefined, [stored], 1, true, 2).voice, null);
+  assert.equal(resolveOverrides(undefined, [stored], 1, true).voice, 2); // 기본 말소리 없으면 자동(1)과 달라 직접 고른 값
+});
+
 test('9-05: 같은 약속(11:00)에 사람마다 이동 · 기상~출발이 다르면 알람도 각자 따로 — 서로의 값이 섞이지 않고 한쪽만 바꿔도 다른 쪽은 그대로', () => {
   const at = kst(22, 660); // 11:00 약속, 여유 0
   const mine = (travel: number, prepare: number) =>
