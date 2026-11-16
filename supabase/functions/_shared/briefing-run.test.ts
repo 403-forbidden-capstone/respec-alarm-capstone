@@ -163,16 +163,31 @@ test('키 없음 → NOT_CONFIGURED, 사용자가 끄면 아무것도 안 만듦
   assert.equal(f.calls.length, 2);
 });
 
-test('출발 알람: 그 일정 + 준비물 + 출발 촉구, 여유 5분 이하에 3단계 · 0분 이하에 4단계 Gemini', async () => {
+test('출발 알람: 그 일정 + 준비물 + 출발 촉구, 여유 0분 이하에 4단계 Gemini, 3단계는 말소리 강일 때만', async () => {
   const f = fakes();
-  const dep = source({ kind: 'DEPARTURE', scheduledAtMs: kst(9, 20), appointments: [{ title: '면접', atMs: kst(10), importance: 'HIGH' }], todos: [{ title: '이력서', type: 'ITEM' }] });
+  const dep = source({ kind: 'DEPARTURE', scheduledAtMs: kst(9, 20), voiceTone: 'NEUTRAL', appointments: [{ title: '면접', atMs: kst(10), importance: 'HIGH' }], todos: [{ title: '이력서', type: 'ITEM' }] });
   const out = await runBriefing(dep, new Set(), f.deps);
   assert.equal(out.clips[0].text, '오전 10시 면접 갈 시간이야. 챙길 것: 이력서. 이제 출발하자.');
-  assert.deepEqual(out.levels, { 4: 'MADE', 3: 'MADE' });
-  const tight = await runBriefing({ ...dep, scheduledAtMs: kst(9, 15) }, new Set(), fakes().deps); // 여유 5분 = 3단계만
-  assert.deepEqual(tight.levels, { 3: 'MADE' });
+  assert.deepEqual(out.levels, { 4: 'MADE' });
+  assert.deepEqual((await runBriefing({ ...dep, voiceTone: 'DIRECT' }, new Set(), fakes().deps)).levels, { 4: 'MADE', 3: 'MADE' });
+  // 여유 5분 — 예전엔 3단계였지만 이제 시작 단계 그대로 (중 → Gemini 없음, 강 → 3단계만)
+  assert.equal((await runBriefing({ ...dep, scheduledAtMs: kst(9, 15) }, new Set(), fakes().deps)).gemini, 'NOT_NEEDED');
+  assert.deepEqual((await runBriefing({ ...dep, scheduledAtMs: kst(9, 15), voiceTone: 'DIRECT' }, new Set(), fakes().deps)).levels, { 3: 'MADE' });
   const calm = await runBriefing({ ...dep, scheduledAtMs: kst(9) }, new Set(), fakes().deps); // 여유 20분 = 출발은 한 번 읽고 끝, Gemini 없음
   assert.equal(calm.gemini, 'NOT_NEEDED');
+});
+
+test('말소리(voice_tone) → 저장할 규칙의 시작 단계: 약 1 · 중 2 · 강 3 (폰 manifest에 저장돼 오프라인에도 유지)', async () => {
+  for (const [voiceTone, start] of [['CALM', 1], ['NEUTRAL', 2], ['DIRECT', 3], [null, 2]] as const) {
+    const out = await runBriefing(source({ voiceTone }), new Set(), fakes().deps);
+    assert.equal(out.rule?.startLevel, start, String(voiceTone));
+    assert.equal(out.rule?.urgentAtMs, kst(10) - 90 * 60_000); // 버퍼 없이 약속 − 준비 − 이동
+    assert.equal(out.clips.length, 4); // 문장은 1~4단계 다 — 미루기 · 긴급 전환용
+  }
+  // 말소리만 바꾸면 규칙만 바뀌고 음성 열쇠는 같음 → 다시 받을 때 Gemini를 또 안 부름
+  const a = await runBriefing(source({ voiceTone: 'CALM' }), new Set(), fakes().deps);
+  const b = await runBriefing(source({ voiceTone: 'DIRECT' }), new Set(), fakes().deps);
+  assert.deepEqual(a.clips.map((c) => c.hash), b.clips.map((c) => c.hash));
 });
 
 test('예약 함수가 던지거나(DB 오류) null이면 Gemini를 안 부르고 LIMITED — Android TTS 문장은 그대로', async () => {

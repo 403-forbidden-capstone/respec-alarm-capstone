@@ -192,16 +192,17 @@ internal object VoiceBriefing {
     val forceAndroid = VoiceTest.geminiMode(test?.optStringOrNull("gemini")) == "ANDROID"
     val bundledFor = { lv: Int -> if (forceAndroid) null else bundledRes(BriefingRules.fallbackWavLevel(alarm.type, lv)) }
     val rule = manifest?.optJSONObject("rule") ?: JSONObject()
-    val dangerAt = if (rule.has("dangerAtMs") && !rule.isNull("dangerAtMs")) rule.getDouble("dangerAtMs").toLong() else null
     val urgentAt = if (rule.has("urgentAtMs") && !rule.isNull("urgentAtMs")) rule.getDouble("urgentAtMs").toLong() else null
-    val level = SpeechUrgency.level(alarm.snoozeCount, nowMillis, dangerAt, urgentAt, rule.optInt("maxLevel", 1))
+    // 시작 단계: 예약 꾸러미의 말소리(최신 설정) > 저장된 브리핑의 시작 단계 > 1. 둘 다 폰에 저장돼 있어 오프라인에서도 유지
+    val startLevel = SpeechUrgency.startLevel(alarm.voiceTone, rule.optInt("startLevel", 1))
+    val level = SpeechUrgency.level(alarm.snoozeCount, nowMillis, urgentAt, rule.optInt("maxLevel", 1), startLevel)
     val clips = manifest?.optJSONArray("clips") ?: JSONArray()
     val byLevel = (0 until clips.length()).map { clips.getJSONObject(it) }.associateBy { it.optInt("level") }
     val clipLevel = BriefingRules.clipLevel(level, byLevel.keys)
     if (clipLevel == null) {
-      // 서버 브리핑을 한 번도 못 받음(인터넷 없음 등) — 꾸러미 문장으로, 미루기만큼 단계를 올려 읽음
-      //   미루기로 3단계가 되면 기상은 3단계 예비 WAV가 먼저 (그것도 못 틀면 이 문장을 Android TTS로)
-      val f = BriefingRules.fallback(alarm.type, alarm.voiceText, alarm.plan.heading, alarm.title, alarm.snoozeCount) ?: return@runCatching null
+      // 서버 브리핑을 한 번도 못 받음(인터넷 없음 등) — 꾸러미 문장으로, 말소리 시작 단계 + 미루기만큼 읽음
+      //   3단계가 되면 기상은 3단계 예비 WAV가 먼저 (그것도 못 틀면 이 문장을 Android TTS로)
+      val f = BriefingRules.fallback(alarm.type, alarm.voiceText, alarm.plan.heading, alarm.title, alarm.snoozeCount, startLevel) ?: return@runCatching null
       return@runCatching Speech(f.level, f.text, f.pitch, f.rate, 0, null, bundledFor(f.level), BriefingRules.wavSpeed(f.level))
     }
     val clip = byLevel.getValue(clipLevel)

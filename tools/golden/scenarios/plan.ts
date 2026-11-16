@@ -408,6 +408,10 @@ function ring(add: Add) {
   for (const [name, row] of [['empty', src()], ['soft', src({ intensity: 'SOFT' })], ['strong', src({ intensity: 'STRONG' })], ['custom', src({ sound_key: 'custom', vibration: 'NONE', voice_tone: 'DIRECT', intensity: 'STRONG' })], ['blank-sound', src({ sound_key: '  ', intensity: 'STRONG' })], ['unknown-vibration', src({ vibration: 'x', intensity: 'SOFT' })], ['undefined-fields', { intensity: 'NORMAL' }]] as const) {
     for (const enabled of [undefined, true, false]) add('ring-package', 'axesOf', `${name}-${enabled}`, row, ...(enabled === undefined ? [] : [enabled]));
   }
+  // 말소리 시작 단계 값 — 직접 고른 값 · 빈 칸 · 모르는 값 · 축별 선택 끔
+  for (const [name, row] of [['calm', { voice_tone: 'CALM', intensity: 'STRONG' }], ['direct', { voice_tone: 'DIRECT', intensity: 'SOFT' }], ['null-soft', { voice_tone: null, intensity: 'SOFT' }], ['missing-strong', { intensity: 'STRONG' }], ['unknown', { voice_tone: 'x', intensity: 'NORMAL' }], ['bad-intensity', { voice_tone: null, intensity: 'x' }]] as const) {
+    for (const enabled of [undefined, false]) add('ring-package', 'voiceToneOf', `${name}-${enabled}`, row, ...(enabled === undefined ? [] : [enabled]));
+  }
   const titles: [string, string][] = [['수업', 'batchim-ㅂ'], ['회의', 'no-batchim'], ['시험(2차)', 'bracket-after-batchim'], ['회의(오전)', 'bracket-after-no-batchim'], ['스터디 3', 'digit-3'], ['스터디 2', 'digit-2'], ['스터디 0', 'digit-0'], ['A1', 'digit-1'], ['반6', 'digit-6'], ['반7', 'digit-7'], ['반8', 'digit-8'], ['반9', 'digit-9'], ['  ', 'blank'], ['', 'empty'], ['(점심)', 'only-bracket'], ['수업[ (A) ]', 'nested-brackets'], ['（회의）', 'fullwidth-bracket'], ['점심 약속 ', 'trailing-space'], ['Study', 'latin'], ['한글ABC', 'latin-after-hangul'], ['수업 (1) (2)', 'two-brackets'], ['수업()', 'empty-brackets'], ['(수업', 'unclosed'], ['😀', 'emoji']];
   for (const [title, name] of titles) {
     for (const tone of ['NEUTRAL', 'CALM', 'DIRECT']) add('ring-package', 'wakeVoiceText', `${name}-${tone}`, { title, appointmentAt: appt, departAt: d('2026-11-16T09:20:00+09:00'), timeZone: seoul, voiceTone: tone });

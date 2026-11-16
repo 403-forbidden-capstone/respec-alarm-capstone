@@ -22,10 +22,10 @@ mobile/modules/alarm-core/
 
 | 함수 | 하는 일 |
 |---|---|
-| `schedule(pkg)` | 꾸러미 하나를 폰에 걸음. 같은 `alarmId`면 덮어씀. `'scheduled'` · `'skipped_past'`(시각이 지남, 오류 아님) · `'deferred'`를 돌려줌. 꾸러미가 틀렸거나 정확한 알람 권한이 없으면 reject. 울리는 중이거나 같은 시각이 미룸 · 다시 울림 대기 중이면 건드리지 않음(서버와 맞추려고 다시 넘겨도 미루기가 안 풀림): 시각 · 강도 · `soundKey` · `vibration`이 이미 같으면 `'scheduled'`, 다르면 새 꾸러미를 받지 않았다는 `'deferred'`. **울리거나 미룬 중엔 새 꾸러미를 미루고, 해제 뒤 앱 맞추기(다음 앱 열림)에서 다시 넣음** |
+| `schedule(pkg)` | 꾸러미 하나를 폰에 걸음. 같은 `alarmId`면 덮어씀. `'scheduled'` · `'skipped_past'`(시각이 지남, 오류 아님) · `'deferred'`를 돌려줌. 꾸러미가 틀렸거나 정확한 알람 권한이 없으면 reject. 울리는 중이거나 같은 시각이 미룸 · 다시 울림 대기 중이면 건드리지 않음(서버와 맞추려고 다시 넘겨도 미루기가 안 풀림): 시각 · 강도 · `soundKey` · `vibration`이 이미 같으면 `'scheduled'`(이때 `voiceTone`만 다르면 미루기 상태는 두고 말소리 칸만 고침), 다르면 새 꾸러미를 받지 않았다는 `'deferred'`. **울리거나 미룬 중엔 새 꾸러미를 미루고, 해제 뒤 앱 맞추기(다음 앱 열림)에서 다시 넣음** |
 | `scheduleAll(pkgs)` | 여러 개를 차례로 `schedule`. 하나가 실패해도 계속하고 알람마다 `{ alarmId, status, error? }`를 돌려줌 (`status`는 `'scheduled'` · `'skipped_past'` · `'deferred'` · `'failed'`) |
 | `cancel(alarmId)` · `cancelAll()` | 예약 지우기 (미루기 · 다시 울림 대기 포함). 울리는 중이면 멈춤. 해제 기록은 안 남음. `cancelAll()`은 이미 떠 있는 일정 알림(준비 · 출발 · 도착 · 루틴)도 지워서 로그아웃 뒤 남은 알림의 원탭이 기록을 쌓지 않음 |
-| `list()` | 폰에 걸린 예약. `{ id, type, intensity, soundKey, vibration, title, atMillis, snoozeCount, nextRingAt }` — 서버 `alarms`와 `alarm_id` + `scheduled_at`(=`atMillis`) + `intensity` + `soundKey` + `vibration`으로 맞춤 (`soundKey` · `vibration`은 칸이 없는 예전 저장 알람이면 아래 기본값) |
+| `list()` | 폰에 걸린 예약. `{ id, type, intensity, soundKey, vibration, voiceTone, title, atMillis, snoozeCount, nextRingAt }` — 서버 `alarms`와 `alarm_id` + `scheduled_at`(=`atMillis`) + `intensity` + `soundKey` + `vibration` + `voiceTone`으로 맞춤 (`voiceTone`은 칸이 없던 예약이면 `null`, 예전 APK는 칸 없음 → 비교 안 함) (`soundKey` · `vibration`은 칸이 없는 예전 저장 알람이면 아래 기본값) |
 | `stop()` | 지금 울리는 알람을 해제 처리 (해제 기록이 남고, 앱이 이미 열려 있으니 앱은 안 엶) |
 | `getRinging()` | 지금 울리는 알람 `{ id, type, title, subtitle, atMillis, nextRingAt, snoozeCount, snoozeLimit, snoozeMinutesOptions, departAtMillis, heading, soundKey, vibration, intensity }` 또는 `null`. 앱 H07이 그림. 해제하면 알람이 지워져 다시 읽으면 `null` |
 | `snooze(minutes)` | 지금 울리는 알람을 `minutes`분 미룸 (SNOOZED 기록). 한도(3번) · 허용 분(5 · 10 · 15)은 코어가 검사해 `false`를 줄 수 있음 (이미 멈춤 포함) |
@@ -75,6 +75,7 @@ type RingPackage = {
   volumeAdjust?: number;  // 평가 보정 비율, -0.1 = 볼륨 10% 줄임 (#81)
   departAt?: number;      // 출발 시각 — 미루기 한도 안내 · "이만큼 미루면 늦어요" 판단에 씀 (D3 기본안 A)
   vibration?: 'NONE' | 'SHORT_REPEAT' | 'STRONG_CONTINUOUS'; // 진동 패턴 3개 (D1 A). 칸이 없으면 강도에서: SOFT → NONE · NORMAL → SHORT_REPEAT · STRONG → STRONG_CONTINUOUS
+  voiceTone?: 'CALM' | 'NEUTRAL' | 'DIRECT'; // 말소리 = AI 음성 시작 단계 약 1 · 중 2 · 강 3 (서버 alarms.voice_tone, 늘 채움). 없으면 저장된 브리핑의 시작 단계, 그것도 없으면 1
   snoozeMinutesOptions?: readonly number[];                  // 자리만, 안 읽음 — 미루기 시간은 5 · 10 · 15분 고정(D3 기본안 A)이라 plan이 정함
 };
 ```
@@ -234,7 +235,7 @@ WAKE를 해제하면(알람 화면 · 알림 버튼 모두) 앱을 `respecalarm:
 | 앱 연결 (P6, `lib/alarmSync` `uploadEvents`) | 울림 기록 올리기 | 앱이 켜지면 `getPendingEvents()` → `alarm_events`(`clientEventId`로 중복 방지) → `markEventsUploaded`. 끄거나 재부팅한 동안의 기록도 이 길로 감. 해제 · 놓침을 바로 올리는 폰 스스로의 길(WorkManager)은 토큰 문제로 따로 정함 |
 | 로그아웃 (P6, `lib/session` `signOutAndCleanup`) | 정리 | 로그아웃 중 표시 켜기(`reconcile`이 서버 알람을 폰에 걸지 않게) → 기록 올려 보기 → 맞추기와 같은 한 줄에서 `cancelAll()`(앞에 서 있던 맞추기가 끝난 뒤) → 폰에 남은 기록 지우기 (Q6) → 푸시 토큰 지우기 자리 → 실시간 구독 끊기 · 기능 메모리 정리 → 로그아웃. `cancelAll`이 실패하면 로그아웃을 멈추고 표시를 끔 |
 | 앱 연결 (P6, `useWakeRecheck`) | 기상 판정 다시 보기 | 앱이 앞에 올 때 최근 12시간에 끈 기상 알람 중 확정이 없는 것을 H08과 같은 판정으로 다시 보고 조건을 채웠으면 확정(`USAGE`) 기록 — 위 "앱이 앞에 올 때 다시 판정". 네이티브가 해제 + 10분에 스스로 판정하는 길은 확인 필요 |
-| D1 | 배경음 · 말소리 · 진동 축별 고르기 | **배경음 3개 · 진동 패턴 3개는 반영됨**(#312, D1 A). 말소리(TTS)는 D8 |
+| D1 | 배경음 · 말소리 · 진동 축별 고르기 | **배경음 3개 · 진동 패턴 3개는 반영됨**(#312, D1 A). 말소리는 AI 음성 시작 단계로 반영됨(#532: 약 1 · 중 2 · 강 3) |
 | D2 | 기상 확인 무응답 시 다시 울림 | 지금은 안 만듦 |
 | Q7 | 소리 3종 | **반영됨**(#312): `soundKey`로 앱에 든 파일을 고름 (약 · 강만 앱 파일 먼저, `theme_default` · `default` · 모르는 키는 폰 기본 알람음 먼저). 파일은 지금 합성음이라 나중에 실제 소리로 바꿔도 키 · 이름은 그대로 |
 | D8 | 음성 안내 | 알람 소리 채널로 폰 TTS가 `voiceText`를 읽음 (실패해도 사이렌은 울림). 문장은 지금 서버가 약속의 기상 알람에 채워 둠 — 읽는 것만 네이티브 PR |

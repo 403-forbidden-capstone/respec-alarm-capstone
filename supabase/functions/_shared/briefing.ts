@@ -1,6 +1,6 @@
 // 알람 AI 음성 브리핑 — 순수 함수만 (서버 alarm-briefing · 앱 lib/alarmSync/briefing이 같이 씀, 시험: briefing.test.ts)
 //   · 일정 중요도(LOW 약 · NORMAL 중간 · HIGH 중요)는 목소리 · 말투 기본값만 정함. 사용자 수동 설정(profiles.alarm_voice_prefs)이 이김
-//   · 음성 단계: 기본 1, 스누즈 1번 2, 2번 이상 3, 남은 여유 5분 이하면 최소 3, 0분 이하면 4
+//   · 음성 단계: 말소리(alarms.voice_tone) 시작 단계 약 1 · 중 2 · 강 3에서 미루기 1번마다 +1(상한 3). 남은 여유 0분 이하면 4
 //   · 엔진: 1 · 2단계는 폰의 Android TTS, 3단계(엄마 Gacrux) · 4단계(긴급 Kore)는 미리 만든 Gemini 음성
 //     — 개인화 캐시가 없으면 앱에 든 단계별 예비 WAV(기상만), 그것도 못 틀면 Android TTS로 같은 단계 문장 전체 (한 울림에 한 엔진)
 //   · 기상(WAKE) = 전날 대화 다짐 + 오늘 일정, 출발(DEPARTURE) = 그 일정 시각 + 준비물 + 출발 촉구. 기록에 없는 말은 안 만듦
@@ -123,14 +123,20 @@ export function resolveVoice(importance: Importance, prefs: VoicePrefs = {}): Vo
   };
 }
 
+// 말소리(alarms.voice_tone) → 시작 단계. 자동(중요도 · 지각 이력 · 잠귀) 또는 사용자가 직접 고른 값이 이미 이 칸에 들어 있음 (calc/intensity.ts)
+//   모르는 값 · 빈 값은 DB 기본값 NEUTRAL과 같이 2
+export const START_LEVEL: Record<'CALM' | 'NEUTRAL' | 'DIRECT', UrgencyLevel> = { CALM: 1, NEUTRAL: 2, DIRECT: 3 };
+export const startLevelOf = (voiceTone: string | null | undefined): UrgencyLevel =>
+  START_LEVEL[voiceTone as keyof typeof START_LEVEL] ?? 2;
+
 // ---------------------------------------------------------------------------
-// 남은 여유 = 약속 − 이동 − (현재 시각 + 준비). 정확히 5분/0분 경계를 구분하기 위해 시간 차이를 초 단위로 계산
+// 남은 여유 = 약속 − 이동 − (현재 시각 + 준비). 정확히 0분 경계를 구분하기 위해 시간 차이를 초 단위로 계산
 //   기상: 남은 여유 = 약속 − 지금 − 준비 − 이동 / 출발: 약속 − 지금 − 이동
 // ---------------------------------------------------------------------------
 
 export const SLACK_SAFE_OVER = 30; // 이 분 초과면 여유
 export const SLACK_CAUTION_OVER = 15; // 15 초과 ~ 30 이하 주의
-export const SLACK_DANGER_OVER = 5; // 5분 이하는 Android TTS 3단계
+export const SLACK_DANGER_OVER = 5; // 위험 구분(표시용) — 음성 단계에는 안 씀
 export const SLACK_URGENT_OVER = 0; // 0분 이하는 Gemini 4단계
 
 export type LateRisk = 'SAFE' | 'CAUTION' | 'DANGER' | 'IMMINENT' | 'URGENT' | 'UNKNOWN' | 'DONE';
@@ -158,18 +164,19 @@ export function lateRisk(slack: number | null, done = false): LateRisk {
   return 'URGENT';
 }
 
-/** 여유 5분이면 최소 3, 0분이면 4. 스누즈는 1→2→3. maxLevel은 예전 기기/테스트 호환용. */
-export function speechLevel(snoozeCount: number, risk: LateRisk, maxLevel: UrgencyLevel): UrgencyLevel {
-  const snoozeLevel = Math.min(Math.max(0, snoozeCount) + 1, 3);
-  const level = risk === 'URGENT' ? 4 : risk === 'IMMINENT' ? Math.max(3, snoozeLevel) : snoozeLevel;
+/** 여유 0분 이하면 4, 아니면 시작 단계 + 미루기(상한 3). 미루기만으로는 4가 안 됨. maxLevel은 예전 기기/테스트 호환용. */
+export function speechLevel(snoozeCount: number, risk: LateRisk, maxLevel: UrgencyLevel, startLevel: number = 1): UrgencyLevel {
+  const start = Math.min(Math.max(1, Math.trunc(startLevel) || 1), 3);
+  const level = risk === 'URGENT' ? 4 : Math.min(start + Math.max(0, snoozeCount), 3);
   return Math.max(1, Math.min(level, maxLevel)) as UrgencyLevel;
 }
 
 // ---------------------------------------------------------------------------
-// 폰에서는 예약 시 계산해 저장한 두 시각(여유 5분/0분)과 현재 시간을 비교. 알람 울리는 도중에도 반복 확인함.
+// 폰에서는 예약 시 계산해 저장한 여유 0분 시각과 현재 시간을 비교. 알람 울리는 도중에도 반복 확인함.
+//   startLevel = 말소리 시작 단계 — 폰 manifest에 같이 저장돼 오프라인에서도 유지. 없으면(예전 브리핑) 1
 // ---------------------------------------------------------------------------
 
-export type UrgencyRule = { dangerAtMs?: number | null; urgentAtMs: number | null; maxLevel: UrgencyLevel };
+export type UrgencyRule = { urgentAtMs: number | null; maxLevel: UrgencyLevel; startLevel?: UrgencyLevel };
 
 function thresholdAtMs(s: SlackInput, slack: number): number | null {
   if (s.appointmentAtMs == null || !Number.isFinite(s.appointmentAtMs) || !known(s.travelMinutes)) return null;
@@ -178,19 +185,16 @@ function thresholdAtMs(s: SlackInput, slack: number): number | null {
   return s.appointmentAtMs - (used + slack) * 60_000;
 }
 
-/** 여유가 정확히 5분이 되는 시각. 3단계 Android TTS로 변경 */
-export function dangerAtMs(s: SlackInput): number | null { return thresholdAtMs(s, SLACK_DANGER_OVER); }
 /** 여유가 정확히 0분이 되는 시각. 4단계 Gemini(또는 Android 대체)로 변경 */
 export function urgentAtMs(s: SlackInput): number | null { return thresholdAtMs(s, SLACK_URGENT_OVER); }
 
-export function urgencyRule(s: SlackInput, _profile: Pick<VoiceProfile, 'coachMax' | 'escalate'>): UrgencyRule {
-  return { dangerAtMs: dangerAtMs(s), urgentAtMs: urgentAtMs(s), maxLevel: 4 };
+export function urgencyRule(s: SlackInput, startLevel: UrgencyLevel = 1): UrgencyRule {
+  return { urgentAtMs: urgentAtMs(s), maxLevel: 4, startLevel };
 }
 
 export function levelAt(rule: UrgencyRule, snoozeCount: number, nowMs: number): UrgencyLevel {
   const urgent = rule.urgentAtMs != null && nowMs >= rule.urgentAtMs;
-  const imminent = rule.dangerAtMs != null && nowMs >= rule.dangerAtMs;
-  return speechLevel(snoozeCount, urgent ? 'URGENT' : imminent ? 'IMMINENT' : 'SAFE', rule.maxLevel);
+  return speechLevel(snoozeCount, urgent ? 'URGENT' : 'SAFE', rule.maxLevel, rule.startLevel ?? 1);
 }
 
 /** 한 울림의 엔진 — 3 · 4단계이고 Gemini 음성(개인화 캐시 또는 예비 WAV)이 있을 때만 Gemini, 아니면 Android TTS로 전체 브리핑 */
@@ -204,15 +208,13 @@ export const GEMINI_WINDOW_MIN: Record<BriefKind, number> = { WAKE: 24 * 60, DEP
 /**
  * 그 단계의 개인화 Gemini 음성이 필요한지 — 이 알람이 울리는 동안 실제로 그 단계가 될 수 있을 때만
  *   4단계: 여유 0분 시각이 울림 안에 올 때만 (스누즈 3번이어도 여유가 있으면 안 만듦)
- *   3단계: 기상은 스누즈 2번만으로도 오므로 늘, 출발(스누즈 없음)은 여유 5분 시각이 울림 안에 올 때만
+ *   3단계: 기상은 미루기만으로도 오므로 늘, 출발(미루기 없음)은 말소리 강(시작 3단계)일 때만
  */
 export function needsGemini(rule: UrgencyRule, kind: BriefKind, ringAtMs: number, level: GeminiLevel = 4): boolean {
   if (rule.maxLevel < level) return false;
   const until = ringAtMs + GEMINI_WINDOW_MIN[kind] * 60_000;
   if (level === 4) return rule.urgentAtMs != null && rule.urgentAtMs < until;
-  if (kind === 'WAKE') return true;
-  const at = rule.dangerAtMs ?? rule.urgentAtMs;
-  return at != null && at < until;
+  return kind === 'WAKE' || (rule.startLevel ?? 1) >= 3;
 }
 
 /** 미리 만들 단계 — 1 ~ 상한 */
@@ -366,7 +368,7 @@ function memoShout(m: WakeMemo | null): string[] {
 }
 
 // 모든 단계에 오늘 전체 일정 · 준비물 · 다짐을 넣음 — 단계마다 말투 · 구성 · 세기만 달라짐 (Gemini 대본이 없을 때의 템플릿)
-// 2 · 3단계는 스누즈 없이도 시간만 지나 올라갈 수 있어 "미뤘다"고 단정하지 않음. 4단계는 여유 0분 이하에서만 울려 "늦는다"고 말함
+// 2 · 3단계는 말소리 중 · 강이면 미루기 없이 첫 울림부터 나와 "미뤘다"고 단정하지 않음. 4단계는 여유 0분 이하에서만 울려 "늦는다"고 말함
 //   3단계 음성은 미리 한 번 만들어 두고 스누즈로 와도 같은 파일을 틀므로, 시간이 촉박하다고 단정하는 말("지금 일어나야 딱 맞게 도착해")은 안 넣음
 //   1 · 2단계는 Android TTS가 읽어 느낌표를 안 씀 (briefingText · briefingClips에서도 한 번 더 지움)
 function wakeText(level: UrgencyLevel, input: BriefingInput): (string | null)[] {

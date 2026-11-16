@@ -68,6 +68,25 @@ class BriefingRulesTest {
   }
 
   @Test
+  fun noBriefingStartsFromSpeechTone() {
+    // 브리핑을 한 번도 못 받아도 예약의 말소리로 시작: 약 1 → 2 → 3 → 3 · 중 2 → 3 → 3 → 3 · 강 3 → 3 → 3 → 3
+    val text = "좋은 아침이에요. 오늘 첫 일정은 오전 10시 수업이에요."
+    val levels = { start: Int -> (0..3).map { BriefingRules.fallback("WAKE", text, "일어날 시간이에요", "수업", it, start)!!.level } }
+    assertEquals(listOf(1, 2, 3, 3), levels(1))
+    assertEquals(listOf(2, 3, 3, 3), levels(2))
+    assertEquals(listOf(3, 3, 3, 3), levels(3))
+    // 미루지 않았으면 단계가 2 · 3이어도 "미뤘어요"를 안 붙임
+    for (start in 1..3) assertEquals(text, BriefingRules.fallback("WAKE", text, "일어날 시간이에요", "수업", 0, start)!!.text)
+    assertTrue(BriefingRules.fallback("WAKE", text, "일어날 시간이에요", "수업", 1, 3)!!.text.startsWith("알람을 한 번 미뤘어요."))
+    // 3단계 기상은 앱에 든 3단계 예비 WAV가 먼저 (그다음 Android TTS)
+    assertEquals(3, BriefingRules.fallbackWavLevel("WAKE", BriefingRules.fallback("WAKE", text, "", "", 0, 3)!!.level))
+    // 중 2단계는 Android TTS 높낮이 · 속도 1.7 · 1.5
+    val f = BriefingRules.fallback("WAKE", text, "", "", 0, 2)!!
+    assertEquals(1.7f, f.pitch)
+    assertEquals(1.5f, f.rate)
+  }
+
+  @Test
   fun noCacheWakeStillEscalatesWithSnooze() {
     val text = "좋은 아침이에요. 오늘 첫 일정은 오전 10시 수업이에요."
     val f0 = BriefingRules.fallback("WAKE", text, "일어날 시간이에요", "수업", 0)!!

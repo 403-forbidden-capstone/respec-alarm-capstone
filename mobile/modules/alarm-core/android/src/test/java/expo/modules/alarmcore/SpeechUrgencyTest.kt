@@ -30,13 +30,12 @@ class SpeechUrgencyTest {
     assertTrue("시험 줄이 비었음", objects.size >= 10)
     for (o in objects) {
       val urgentAt = field(o, "urgentAtMs").let { if (it == "null") null else it.toLong() }
-      val dangerAt = field(o, "dangerAtMs").let { if (it == "null") null else it.toLong() }
       val actual = SpeechUrgency.level(
         snoozeCount = field(o, "snoozeCount").toInt(),
         nowMillis = field(o, "nowMs").toLong(),
-        dangerAt = dangerAt,
         urgentAt = urgentAt,
         maxLevel = field(o, "maxLevel").toInt(),
+        startLevel = field(o, "startLevel").toInt(),
       )
       assertEquals(field(o, "name"), field(o, "expected").toInt(), actual)
     }
@@ -44,29 +43,53 @@ class SpeechUrgencyTest {
 
   @Test
   fun ringingTimelineOnlyGoesUp() {
-    // 끄지 않고 울리는 동안 1초씩: 여유 5분(dangerAt)에 3, 0분(urgentAt)에 4. 스누즈 0 · 1 · 2 · 5회 모두 내려가지 않음
-    val dangerAt = 1_800_000_300_000L
+    // 끄지 않고 울리는 동안 1초씩(서비스는 2초마다 확인): 여유 0분(urgentAt)이 되기 전까지 시작 단계 + 미루기, 그때 4. 내려가지 않음
     val urgentAt = 1_800_000_600_000L
-    for (snooze in listOf(0, 1, 2, 5)) {
+    for (start in 1..3) for (snooze in listOf(0, 1, 2, 5)) {
       var peak: Int? = null
       val started = mutableListOf<Int>()
-      for (t in (dangerAt - 10_000L)..(urgentAt + 10_000L) step 1_000L) {
-        val next = SpeechUrgency.level(snooze, t, dangerAt, urgentAt, 4)
+      for (t in (urgentAt - 10_000L)..(urgentAt + 10_000L) step 1_000L) {
+        val next = SpeechUrgency.level(snooze, t, urgentAt, 4, start)
         if (SpeechUrgency.shouldSwitch(next, peak)) {
           started += next
           peak = maxOf(peak ?: 0, next)
         }
       }
-      val first = minOf(snooze + 1, 3)
-      assertEquals("스누즈 $snooze", if (first == 3) listOf(3, 4) else listOf(first, 3, 4), started)
+      assertEquals("시작 $start · 미루기 $snooze", listOf(minOf(start + snooze, 3), 4), started)
     }
   }
 
   @Test
+  fun startLevelBySpeechTone() {
+    // 약 1 → 2 → 3 → 3, 중 2 → 3 → 3 → 3, 강 3 → 3 → 3 → 3 (여유가 남아 있으면)
+    val now = 1_800_000_000_000L
+    val urgentAt = 1_800_000_600_000L
+    assertEquals(listOf(1, 2, 3, 3), (0..3).map { SpeechUrgency.level(it, now, urgentAt, 4, 1) })
+    assertEquals(listOf(2, 3, 3, 3), (0..3).map { SpeechUrgency.level(it, now, urgentAt, 4, 2) })
+    assertEquals(listOf(3, 3, 3, 3), (0..3).map { SpeechUrgency.level(it, now, urgentAt, 4, 3) })
+  }
+
+  @Test
+  fun startLevelFromReservationFirstThenBriefing() {
+    // 예약 꾸러미의 말소리(최신 설정)가 저장된 브리핑의 시작 단계보다 먼저 — 브리핑을 받았든(1 · 2 · 3) 못 받았든(1)
+    for (briefed in listOf(1, 2, 3)) {
+      assertEquals(1, SpeechUrgency.startLevel("CALM", briefed))
+      assertEquals(2, SpeechUrgency.startLevel("NEUTRAL", briefed))
+      assertEquals(3, SpeechUrgency.startLevel("DIRECT", briefed))
+    }
+    // 예약에 말소리가 없음(예전 서버 · 예전 예약) → 저장된 브리핑 값, 브리핑도 없으면 1
+    assertEquals(3, SpeechUrgency.startLevel(null, 3))
+    assertEquals(1, SpeechUrgency.startLevel(null, 1))
+    assertEquals(2, SpeechUrgency.startLevel("이상한 값", 2))
+  }
+
+  @Test
   fun snoozeAloneNeverReachesFour() {
-    for (snooze in 0..10) assertTrue("스누즈 $snooze", SpeechUrgency.level(snooze, 1_800_000_000_000L, null, null, 4) <= 3)
-    // 시각 규칙이 있어도 아직 여유가 남아 있으면 스누즈 횟수와 상관없이 3이 상한
-    for (snooze in 0..10) assertTrue("스누즈 $snooze", SpeechUrgency.level(snooze, 1_800_000_000_000L, 1_800_000_300_000L, 1_800_000_600_000L, 4) <= 3)
+    for (start in 1..3) for (snooze in 0..10) {
+      assertTrue("시작 $start · 미루기 $snooze", SpeechUrgency.level(snooze, 1_800_000_000_000L, null, 4, start) <= 3)
+      // 여유 0분 시각이 있어도 아직 안 왔으면 3이 상한
+      assertTrue("시작 $start · 미루기 $snooze", SpeechUrgency.level(snooze, 1_800_000_000_000L, 1_800_000_600_000L, 4, start) <= 3)
+    }
   }
 
   @Test

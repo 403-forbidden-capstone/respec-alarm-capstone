@@ -254,6 +254,7 @@ export function toNativePayload(pkg: RingPackage, plan: RingPlan): string {
     voiceText: pkg.voiceText,
     soundKey,
     vibration: vibrationOf(pkg),
+    voiceTone: pkg.voiceTone,
     volumeAdjust: pkg.volumeAdjust,
     departAt: pkg.departAt,
     plan: { ...plan, soundKey },

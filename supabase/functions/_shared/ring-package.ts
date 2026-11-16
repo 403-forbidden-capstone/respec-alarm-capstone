@@ -6,9 +6,9 @@
 // 5장 5.4.2는 snake_case 응답이지만 이 꾸러미 안쪽은 알람 코어 타입(camelCase) 그대로 — 앱이 변환 없이 넘기려고
 // 순수 TS — node --test로 시험
 import { departNow } from './calc/depart.ts';
-import { AXES_PICKER_ENABLED, soundKeyOf, vibrationOf } from './calc/intensity.ts';
+import { AXES_PICKER_ENABLED, BASE_LEVEL, LEVEL_FIELDS, levelOfIntensity, levelOfVoiceTone, soundKeyOf, vibrationOf } from './calc/intensity.ts';
 import { minutesBetween } from './calc/time.ts';
-import type { AlarmVibration } from './calc/types.ts';
+import type { AlarmVibration, VoiceTone } from './calc/types.ts';
 import { formatKoDuration, formatKoSpokenTime, formatKoTime } from './tz.ts';
 
 export type RingPackage = {
@@ -24,6 +24,7 @@ export type RingPackage = {
   departAt?: number;
   voiceText?: string; // 기상 알람의 음성 문장 (읽어 주는 것은 D8 · 나중 — 지금은 폰이 저장만 함)
   notice?: string; // 준비 · 출발 알림 한 줄 — 알람 코어가 화면 줄(HEADING) 대신 보여 줌
+  voiceTone: VoiceTone; // 말소리 — 폰 AI 음성 시작 단계 (약 CALM 1 · 중 NEUTRAL 2 · 강 DIRECT 3). 브리핑을 못 받아도 폰이 이 값으로 시작
 };
 
 // 꾸러미를 만들 알람 한 줄 (DB alarms 행에서 필요한 칸)
@@ -125,6 +126,12 @@ export function axesOf(
   };
 }
 
+// 말소리 시작 단계에 쓸 값 — 축별 선택을 끄거나 칸이 비거나 모르는 값이면 전체 세기에서 (briefing-handler도 같은 함수)
+export function voiceToneOf(a: Pick<PackageSource, 'voice_tone' | 'intensity'>, axesEnabled: boolean = AXES_PICKER_ENABLED): VoiceTone {
+  const level = (axesEnabled ? levelOfVoiceTone(a.voice_tone) : null) ?? levelOfIntensity(a.intensity) ?? BASE_LEVEL;
+  return LEVEL_FIELDS[level].voiceTone;
+}
+
 export function wakeVoiceText(args: { title: string; appointmentAt: Date; departAt?: Date; timeZone: string; voiceTone?: string | null }): string {
   const title = args.title.trim() || '일정';
   const tone = args.voiceTone === 'CALM' ? WAKE_TONES.CALM : args.voiceTone === 'DIRECT' ? WAKE_TONES.DIRECT : WAKE_TONES.NEUTRAL;
@@ -199,6 +206,7 @@ export function buildRingPackages(args: {
       snoozeLimit: a.snooze_limit,
       soundKey: axesOf(a).soundKey,
       vibration: axesOf(a).vibration,
+      voiceTone: voiceToneOf(a),
       ...(args.departAt ? { departAt: args.departAt.getTime() } : {}),
       ...textFor(a),
     }))

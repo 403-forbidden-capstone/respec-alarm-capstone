@@ -1,146 +1,236 @@
 [
   {
-    "name": "처음 울림 · 계산 자료 없음",
+    "name": "말소리 약 · 미루기 0회",
     "snoozeCount": 0,
     "nowMs": 1800000000000,
-    "dangerAtMs": null,
     "urgentAtMs": null,
     "maxLevel": 4,
+    "startLevel": 1,
     "expected": 1
   },
   {
-    "name": "스누즈 1회 → 2단계 Android",
+    "name": "말소리 약 · 미루기 1회",
     "snoozeCount": 1,
     "nowMs": 1800000000000,
-    "dangerAtMs": null,
     "urgentAtMs": null,
     "maxLevel": 4,
+    "startLevel": 1,
     "expected": 2
   },
   {
-    "name": "스누즈 2회 → 3단계 Android",
+    "name": "말소리 약 · 미루기 2회",
     "snoozeCount": 2,
     "nowMs": 1800000000000,
-    "dangerAtMs": null,
     "urgentAtMs": null,
     "maxLevel": 4,
+    "startLevel": 1,
     "expected": 3
   },
   {
-    "name": "스누즈 5회여도 3단계(Android), Gemini 아님",
-    "snoozeCount": 5,
-    "nowMs": 1800000000000,
-    "dangerAtMs": null,
-    "urgentAtMs": null,
-    "maxLevel": 4,
-    "expected": 3
-  },
-  {
-    "name": "5분 경계 직전에는 처음 1단계 유지",
-    "snoozeCount": 0,
-    "nowMs": 1800000299999,
-    "dangerAtMs": 1800000300000,
-    "urgentAtMs": 1800000600000,
-    "maxLevel": 4,
-    "expected": 1
-  },
-  {
-    "name": "남은 여유 5분 정확히 → 스누즈 없어도 3",
-    "snoozeCount": 0,
-    "nowMs": 1800000300000,
-    "dangerAtMs": 1800000300000,
-    "urgentAtMs": 1800000600000,
-    "maxLevel": 4,
-    "expected": 3
-  },
-  {
-    "name": "5분부터 0분 직전까지 계속 3",
-    "snoozeCount": 0,
-    "nowMs": 1800000599999,
-    "dangerAtMs": 1800000300000,
-    "urgentAtMs": 1800000600000,
-    "maxLevel": 4,
-    "expected": 3
-  },
-  {
-    "name": "남은 여유 0분 정확히 → Gemini 긴급 4",
-    "snoozeCount": 0,
-    "nowMs": 1800000600000,
-    "dangerAtMs": 1800000300000,
-    "urgentAtMs": 1800000600000,
-    "maxLevel": 4,
-    "expected": 4
-  },
-  {
-    "name": "0분을 넘겼을 때도 긴급 4",
-    "snoozeCount": 0,
-    "nowMs": 1800000600001,
-    "dangerAtMs": 1800000300000,
-    "urgentAtMs": 1800000600000,
-    "maxLevel": 4,
-    "expected": 4
-  },
-  {
-    "name": "스누즈 1회였더라도 여유 5분 → 3",
-    "snoozeCount": 1,
-    "nowMs": 1800000300000,
-    "dangerAtMs": 1800000300000,
-    "urgentAtMs": 1800000600000,
-    "maxLevel": 4,
-    "expected": 3
-  },
-  {
-    "name": "스누즈 2회 뒤 여유 0분 → 4",
-    "snoozeCount": 2,
-    "nowMs": 1800000600000,
-    "dangerAtMs": 1800000300000,
-    "urgentAtMs": 1800000600000,
-    "maxLevel": 4,
-    "expected": 4
-  },
-  {
-    "name": "스누즈 3회 뒤 여유 충분 → 3",
+    "name": "말소리 약 · 미루기 3회",
     "snoozeCount": 3,
     "nowMs": 1800000000000,
-    "dangerAtMs": 1800000300000,
-    "urgentAtMs": 1800000600000,
+    "urgentAtMs": null,
     "maxLevel": 4,
+    "startLevel": 1,
     "expected": 3
   },
   {
-    "name": "구버전 상한3 이면 4 제한(호환성 시험)",
+    "name": "말소리 중 · 미루기 0회",
     "snoozeCount": 0,
-    "nowMs": 1800000600000,
-    "dangerAtMs": 1800000300000,
-    "urgentAtMs": 1800000600000,
-    "maxLevel": 3,
-    "expected": 3
-  },
-  {
-    "name": "구버전 상한2 이면 4 제한(호환성 시험)",
-    "snoozeCount": 0,
-    "nowMs": 1800000600000,
-    "dangerAtMs": 1800000300000,
-    "urgentAtMs": 1800000600000,
-    "maxLevel": 2,
+    "nowMs": 1800000000000,
+    "urgentAtMs": null,
+    "maxLevel": 4,
+    "startLevel": 2,
     "expected": 2
   },
   {
-    "name": "구버전 상한1 이면 4 제한(호환성 시험)",
+    "name": "말소리 중 · 미루기 1회",
+    "snoozeCount": 1,
+    "nowMs": 1800000000000,
+    "urgentAtMs": null,
+    "maxLevel": 4,
+    "startLevel": 2,
+    "expected": 3
+  },
+  {
+    "name": "말소리 중 · 미루기 2회",
+    "snoozeCount": 2,
+    "nowMs": 1800000000000,
+    "urgentAtMs": null,
+    "maxLevel": 4,
+    "startLevel": 2,
+    "expected": 3
+  },
+  {
+    "name": "말소리 중 · 미루기 3회",
+    "snoozeCount": 3,
+    "nowMs": 1800000000000,
+    "urgentAtMs": null,
+    "maxLevel": 4,
+    "startLevel": 2,
+    "expected": 3
+  },
+  {
+    "name": "말소리 강 · 미루기 0회",
     "snoozeCount": 0,
-    "nowMs": 1800000600000,
-    "dangerAtMs": 1800000300000,
+    "nowMs": 1800000000000,
+    "urgentAtMs": null,
+    "maxLevel": 4,
+    "startLevel": 3,
+    "expected": 3
+  },
+  {
+    "name": "말소리 강 · 미루기 1회",
+    "snoozeCount": 1,
+    "nowMs": 1800000000000,
+    "urgentAtMs": null,
+    "maxLevel": 4,
+    "startLevel": 3,
+    "expected": 3
+  },
+  {
+    "name": "말소리 강 · 미루기 2회",
+    "snoozeCount": 2,
+    "nowMs": 1800000000000,
+    "urgentAtMs": null,
+    "maxLevel": 4,
+    "startLevel": 3,
+    "expected": 3
+  },
+  {
+    "name": "말소리 강 · 미루기 3회",
+    "snoozeCount": 3,
+    "nowMs": 1800000000000,
+    "urgentAtMs": null,
+    "maxLevel": 4,
+    "startLevel": 3,
+    "expected": 3
+  },
+  {
+    "name": "미루기 9회여도 3 — 미루기만으로 4 안 됨",
+    "snoozeCount": 9,
+    "nowMs": 1800000000000,
     "urgentAtMs": 1800000600000,
-    "maxLevel": 1,
+    "maxLevel": 4,
+    "startLevel": 3,
+    "expected": 3
+  },
+  {
+    "name": "약 · 여유 0분 직전 1ms → 시작 단계 유지",
+    "snoozeCount": 0,
+    "nowMs": 1800000599999,
+    "urgentAtMs": 1800000600000,
+    "maxLevel": 4,
+    "startLevel": 1,
     "expected": 1
   },
   {
-    "name": "긴급 시각 한참 뒤이면 처음 1",
+    "name": "약 · 여유 정확히 0분 → 4",
+    "snoozeCount": 0,
+    "nowMs": 1800000600000,
+    "urgentAtMs": 1800000600000,
+    "maxLevel": 4,
+    "startLevel": 1,
+    "expected": 4
+  },
+  {
+    "name": "중 · 여유 0분 직전 1ms → 시작 단계 유지",
+    "snoozeCount": 0,
+    "nowMs": 1800000599999,
+    "urgentAtMs": 1800000600000,
+    "maxLevel": 4,
+    "startLevel": 2,
+    "expected": 2
+  },
+  {
+    "name": "중 · 여유 정확히 0분 → 4",
+    "snoozeCount": 0,
+    "nowMs": 1800000600000,
+    "urgentAtMs": 1800000600000,
+    "maxLevel": 4,
+    "startLevel": 2,
+    "expected": 4
+  },
+  {
+    "name": "강 · 여유 0분 직전 1ms → 시작 단계 유지",
+    "snoozeCount": 0,
+    "nowMs": 1800000599999,
+    "urgentAtMs": 1800000600000,
+    "maxLevel": 4,
+    "startLevel": 3,
+    "expected": 3
+  },
+  {
+    "name": "강 · 여유 정확히 0분 → 4",
+    "snoozeCount": 0,
+    "nowMs": 1800000600000,
+    "urgentAtMs": 1800000600000,
+    "maxLevel": 4,
+    "startLevel": 3,
+    "expected": 4
+  },
+  {
+    "name": "약 · 미루기 2회 · 여유 0분 넘김 → 4",
+    "snoozeCount": 2,
+    "nowMs": 1800000600001,
+    "urgentAtMs": 1800000600000,
+    "maxLevel": 4,
+    "startLevel": 1,
+    "expected": 4
+  },
+  {
+    "name": "계산 자료 없음(urgentAt 없음) → 4 안 함",
+    "snoozeCount": 5,
+    "nowMs": 1800000660000,
+    "urgentAtMs": null,
+    "maxLevel": 4,
+    "startLevel": 3,
+    "expected": 3
+  },
+  {
+    "name": "시작 단계 1(예전 브리핑 기본값) · 미루기 1회 → 2",
+    "snoozeCount": 1,
+    "nowMs": 1800000000000,
+    "urgentAtMs": null,
+    "maxLevel": 4,
+    "startLevel": 1,
+    "expected": 2
+  },
+  {
+    "name": "이상한 시작 단계 0 → 1로",
     "snoozeCount": 0,
     "nowMs": 1800000000000,
-    "dangerAtMs": 1800086000000,
-    "urgentAtMs": 1800086300000,
+    "urgentAtMs": null,
     "maxLevel": 4,
+    "startLevel": 0,
+    "expected": 1
+  },
+  {
+    "name": "이상한 시작 단계 9 → 3으로",
+    "snoozeCount": 0,
+    "nowMs": 1800000000000,
+    "urgentAtMs": null,
+    "maxLevel": 4,
+    "startLevel": 9,
+    "expected": 3
+  },
+  {
+    "name": "예전 상한 3이면 4 없음(호환)",
+    "snoozeCount": 0,
+    "nowMs": 1800000600000,
+    "urgentAtMs": 1800000600000,
+    "maxLevel": 3,
+    "startLevel": 2,
+    "expected": 3
+  },
+  {
+    "name": "예전 상한 1이면 1(호환)",
+    "snoozeCount": 0,
+    "nowMs": 1800000600000,
+    "urgentAtMs": 1800000600000,
+    "maxLevel": 1,
+    "startLevel": 3,
     "expected": 1
   }
 ]

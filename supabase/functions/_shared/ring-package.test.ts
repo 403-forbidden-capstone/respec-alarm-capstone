@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import { mock, test } from 'node:test';
 
-import { axesOf, buildRingPackages, departureNotice, prepareNotice, wakeVoiceText, type AppointmentNotice, type PackageSource, type RingPackage } from './ring-package.ts';
+import { axesOf, buildRingPackages, voiceToneOf, departureNotice, prepareNotice, wakeVoiceText, type AppointmentNotice, type PackageSource, type RingPackage } from './ring-package.ts';
 
 const TZ = 'Asia/Seoul';
 // 2025년 5월 22일 한국 시각 minutes분
@@ -154,4 +154,13 @@ test('축별 선택을 끄면(axesEnabled false) 저장된 소리 · 진동 · �
   assert.deepEqual(axesOf(stored, true), { soundKey: 'theme_urgent', vibration: 'NONE', voiceTone: 'DIRECT' });
   assert.deepEqual(axesOf(stored, false), { soundKey: 'theme_default', vibration: 'SHORT_REPEAT', voiceTone: null });
   assert.deepEqual(axesOf({ ...stored, intensity: 'STRONG' }, false), { soundKey: 'theme_urgent', vibration: 'STRONG_CONTINUOUS', voiceTone: null });
+});
+
+test('말소리(voiceTone)가 모든 알람 꾸러미에 실림 — 폰이 브리핑 없이도 시작 단계(약 1 · 중 2 · 강 3)를 앎', () => {
+  const pkgs = build([row('WAKE', 480, { voice_tone: 'CALM' }), row('DEPARTURE', 540, { voice_tone: 'DIRECT' }), row('PREPARE', 510, { voice_tone: null, intensity: 'STRONG' })]);
+  assert.deepEqual(Object.fromEntries(pkgs.map((p) => [p.type, p.voiceTone])), { WAKE: 'CALM', PREPARE: 'DIRECT', DEPARTURE: 'DIRECT' });
+  // 축별 선택을 끄면 · 모르는 값이면 전체 세기에서 (briefing-handler와 같은 함수)
+  assert.equal(voiceToneOf({ voice_tone: 'CALM', intensity: 'NORMAL' }, false), 'NEUTRAL');
+  assert.equal(voiceToneOf({ voice_tone: 'X', intensity: 'SOFT' }), 'CALM');
+  assert.equal(voiceToneOf({ voice_tone: undefined, intensity: 'NORMAL' }), 'NEUTRAL');
 });

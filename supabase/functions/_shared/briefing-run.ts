@@ -8,6 +8,7 @@ import {
   needsGemini,
   pickAppointments,
   resolveVoice,
+  startLevelOf,
   GEMINI_STAGE,
   urgencyRule,
   wakeMemo,
@@ -33,7 +34,7 @@ export type BriefingSource = {
   timeZone: string;
   prefs: unknown; // profiles.alarm_voice_prefs (jsonb 그대로)
   importance: Importance; // 일정의 내부 자동 중요도
-  voiceTone?: 'CALM' | 'NEUTRAL' | 'DIRECT' | null; // 수동으로 고른 '말소리' 축(1~3단계 Android TTS만)
+  voiceTone?: 'CALM' | 'NEUTRAL' | 'DIRECT' | null; // 이 알람의 말소리(자동 또는 직접 고름) → 시작 단계 약 1 · 중 2 · 강 3
   appointmentAtMs: number | null; // 이 알람이 붙은 일정 시각 (일정 없는 알람은 null → 지각 위험 UNKNOWN)
   prepMinutes: number | null; // 참여 조건의 준비 분
   travelMinutes: number | null; // 참여 조건의 이동 분 (est_travel_minutes)
@@ -77,9 +78,12 @@ class QuotaLimited extends Error {}
 export async function runBriefing(src: BriefingSource, have: ReadonlySet<string>, gemini: GeminiDeps): Promise<BriefingOut> {
   const profile = resolveVoice(src.importance, cleanPrefs(src.prefs));
   const toneMap = { CALM: 'GENTLE', NEUTRAL: 'NORMAL', DIRECT: 'FIRM' } as const;
-  if (src.voiceTone) profile.tone = toneMap[src.voiceTone]; // 일정의 직접 선택이 프로필 자동값보다 우선
+  if (src.voiceTone) profile.tone = toneMap[src.voiceTone]; // 알람의 말소리(자동 또는 직접 고름)가 프로필 말투보다 우선 (profile.tone은 표시용, 단계는 startLevel이 정함)
   if (!profile.enabled) return { enabled: false, rule: null, clips: [], audio: [], gemini: 'NOT_NEEDED' };
-  const rule = urgencyRule({ kind: src.kind, appointmentAtMs: src.done ? null : src.appointmentAtMs, prepMinutes: src.prepMinutes, travelMinutes: src.travelMinutes }, profile);
+  const rule = urgencyRule(
+    { kind: src.kind, appointmentAtMs: src.done ? null : src.appointmentAtMs, prepMinutes: src.prepMinutes, travelMinutes: src.travelMinutes },
+    startLevelOf(src.voiceTone),
+  );
   const model = gemini.model ?? TTS_MODEL;
   const wake = src.kind === 'WAKE';
   const days = briefingDays(src.scheduledAtMs, src.timeZone);

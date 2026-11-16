@@ -167,8 +167,10 @@ export function planReconcile(input: {
     if (!existing && p.atMillis > horizon) continue; // 폰에 없는 먼 알람은 안 더함
     const timeChanged = !existing || existing.atMillis !== p.atMillis; // 폰에 없어서 새로 거는 것도 포함
     // 시각 · 강도, 그리고 축별 배경음 · 진동(D1 A)이 달라도 다시 걺. 폰이 안 돌려주는 칸(예전 APK)은 모름이라 비교하지 않음
-    //   말소리(voice_tone)는 폰 list()에 없어 못 비교 — 기상 음성 문장(voiceText)만 달라지고 읽어 주는 것은 D8 · 나중이라, 다른 변경으로 다시 걸 때 함께 바뀜
-    const axesChanged = existing != null && ((existing.soundKey != null && existing.soundKey !== p.soundKey) || (existing.vibration != null && existing.vibration !== p.vibration));
+    //   말소리(voiceTone = AI 음성 시작 단계)도 비교 — 새 APK는 늘 돌려주고(예전에 걸린 예약은 null → 한 번 다시 걺), 예전 APK는 칸이 없어(undefined) 비교 안 함
+    const voiceChanged = existing?.voiceTone !== undefined && p.voiceTone != null && existing.voiceTone !== p.voiceTone;
+    const axesChanged =
+      existing != null && ((existing.soundKey != null && existing.soundKey !== p.soundKey) || (existing.vibration != null && existing.vibration !== p.vibration) || voiceChanged);
     if (timeChanged || existing?.intensity !== p.intensity || axesChanged) picked.add(p.alarmId);
     if (timeChanged && p.type === 'DEPARTURE' && p.groupKey) departureChanged.add(p.groupKey);
   }

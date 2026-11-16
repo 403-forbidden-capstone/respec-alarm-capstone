@@ -115,6 +115,8 @@ data class StoredAlarm(
   // 이번 묶음의 첫 울림이 시작된 시각 — 다시 울림 시각을 여기서부터의 거리로 계산함
   val seriesStartAt: Long = 0L,
   val ringing: Boolean = false,
+  // 말소리(서버 alarms.voice_tone, 꾸러미 voiceTone) — AI 음성 시작 단계. 칸이 없던 예약 · 예전 서버는 null (저장된 브리핑의 시작 단계, 그것도 없으면 1)
+  val voiceTone: String? = null,
 ) {
   // 이번에 울린 것이 묶음의 마지막 울림(더 걸어 둔 다시 울림이 없음)인지
   val isLastRingOfSeries: Boolean
@@ -140,6 +142,7 @@ data class StoredAlarm(
     put("seriesIndex", seriesIndex)
     put("seriesStartAt", seriesStartAt)
     put("ringing", ringing)
+    put("voiceTone", voiceTone ?: JSONObject.NULL)
   }
 
   companion object {
@@ -171,6 +174,7 @@ data class StoredAlarm(
         seriesIndex = json.optInt("seriesIndex", 0),
         seriesStartAt = json.optLong("seriesStartAt", 0L),
         ringing = json.optBoolean("ringing", false),
+        voiceTone = json.optStringOrNull("voiceTone")?.takeIf { SpeechUrgency.startLevelOf(it) != null },
       )
     }
   }
