@@ -472,7 +472,7 @@ const CHECKS = [
   // ── AI · 루틴
   { id: 'C18', area: 'AI · 루틴', name: 'AI 대화 → 일정 추출 → 알람 저장', screens: ['A02', 'H05'], start: '/ai',
     web: { st: 'part', ev: '10/10 흐름 확인 #106 1 · 2 · 3 — 대본 고정, 입력과 무관하게 같은 응답' }, phone: { st: 'part', ev: '10/18 에뮬레이터: 대본 흐름 됨(입력과 무관), "수정"은 새 일정에 값 채움 — 마이크 · 음성은 없음 (AI 대기)' },
-    server: { st: 'part', ev: '11/5 이후 실서버 AI 호출: 일정 추출 T1 68 · T2 24 · T2F 83 · 대화 세션 8(11/16 조회) — 글 대화 → 일정 카드 됨. 실시간 음성은 따로 (#42)' }, test: { st: 'ok', ev: 'voice/api 대본 → 일정 카드 → 저장 · voice/alarmless 알람 일부 · 없이 저장(D46) · voice/real 가짜 서버 응답으로 2단 턴 · 카드 2장 · 장소 고르기 · 저장 · 준비 ±N · 강도 보통으로 · 실패 · 한도 · rev 어긋남 · 재시도 · 저장됨 로컬 표시(사용자별 · 7일 정리) · 이어서 계산 · 요청 큐 · voice/fixes 정정 — 실제 AI 호출 없음' },
+    server: { st: 'part', ev: '11/5 이후 실서버 AI 호출(ai_calls 지점별): T1 68 · T2 24 · 일정 추출 T2F 83 · 대화 세션 8(11/16 조회) — 글 대화 → 일정 카드 됨. 실시간 음성은 따로 (#42)' }, test: { st: 'ok', ev: 'voice/api 대본 → 일정 카드 → 저장 · voice/alarmless 알람 일부 · 없이 저장(D46) · voice/real 가짜 서버 응답으로 2단 턴 · 카드 2장 · 장소 고르기 · 저장 · 준비 ±N · 강도 보통으로 · 실패 · 한도 · rev 어긋남 · 재시도 · 저장됨 로컬 표시(사용자별 · 7일 정리) · 이어서 계산 · 요청 큐 · voice/fixes 정정 — 실제 AI 호출 없음' },
     how: ['"A02 AI 대화" → "말하기" → 내 발화 → AI 응답', '"텍스트" → 보내기 → 카드 "대화에서 찾은 내용" 스터디 · 5월 23일 오후 2:00 · 학교 도서관 · 노트북 충전기', '"저장" → "스터디 알람을 맞췄어요" → 홈 "알람 전체"에 스터디 12:40 · 1:05 / "수정" → 새 일정 화면에 값 채워짐 / "저장 안 함"'],
     issues: [37, 42] },
   { id: 'C19', area: 'AI · 루틴', name: '대화 종료 → 일기 · 오늘의 사실 · 루틴 제안', screens: ['A03', 'A02'], start: '/ai',
@@ -498,7 +498,7 @@ const CHECKS = [
     issues: [210] },
   { id: 'C22', area: '기반 · 서버', name: '서버 저장 · 조회 (Supabase · 우리 서버)', screens: [], start: null,
     web: { st: 'ok', ev: '11/4 배포 웹 ?mode=real — 이메일 로그인 → 일정 · 알람 저장 → 미리보기 울림 (#212 11/5 댓글)' }, phone: { st: 'ok', ev: '10/28 에뮬레이터 개발 빌드 실데이터 — 저장 · 폰 예약 · 울림 기록 · 기상 확정 · 강제 종료 뒤 복구 (#212)' },
-    server: { st: 'ok', ev: 'Supabase 함수 20개(마지막 배포 11/16) · 예약 작업 8개 · 우리 서버 api.respecalarm.com /health/deep 정상(11/16: DB · 로그인 · 스케줄러) · 알람 함수 6개는 지형 계정만 서버로(canary, 테스트 기간 T1) · 예약 작업 3개는 Edge (#476)' }, test: { st: 'ok', ev: 'DB 검사(PGlite 93항목 · 실제 이미지 적용) RLS · 함수 · 기능별 real 테스트(가짜 Supabase) · lib/edge — 앱 쿼리를 실제 DB에 붙이는 테스트 없음' },
+    server: { st: 'ok', ev: 'Supabase 함수 20개(마지막 배포 11/16) · 예약 작업 8개 · 우리 서버 api.respecalarm.com /health/deep 정상(11/16: DB · 로그인 · 스케줄러) · 알람 함수 6개는 지형 계정 1개만 서버로(canary, 테스트 기간 T1) · 예약 작업 3개는 Edge (#476)' }, test: { st: 'ok', ev: 'DB 검사(PGlite 93항목 · 실제 이미지 적용) RLS · 함수 · 기능별 real 테스트(가짜 Supabase) · lib/edge — 앱 쿼리를 실제 DB에 붙이는 테스트 없음' },
     how: ['Supabase 대시보드 → Table Editor · Database Functions 목록', '실데이터 스위치 켜짐(#168) — 로그인 뒤 화면이 Supabase를 부름. 확인 순서: 서버 함수 배포 → 시드 → 이메일 로그인 → 흐름 (#212)'],
     issues: [212, 25] },
   { id: 'C23', area: '기반 · 서버', name: '푸시 알림(깨우기 · 변경 · 기상 미확인)', screens: [], start: null,
@@ -688,9 +688,12 @@ const TABDEF = [['checks', '동작'], ['todo', '할 일'], ['links', '연결'], 
 function render() {
   const p = plan();
   const nx = p.next[0];
-  document.getElementById('meta').innerHTML = [['프로토타입 1차', SITE.proto1], ['대회', SITE.contest]].filter(([, d]) => daysTo(d) >= 0).map(([k, d]) => `${k}(${fmtDate(d)}) <b>D-${daysTo(d)}</b>`).join(' · ')
-    + (nx ? ` · 다음 <a class="in" href="${ghIssue(nx.n)}" target="_blank" rel="noopener">#${nx.n} ${esc(nx.t)}</a> <b>${fmtDate(nx.due)}</b>` : '')
-    + (p.late.length ? ` · <span class="late">지연 ${p.late.length}</span>` : '');
+  // 지난 날짜(프로토타입 1차 11/10)는 빼고, 남은 조각만 ' · '로 이음 (날짜가 다 지나도 앞에 점이 안 붙게)
+  document.getElementById('meta').innerHTML = [
+    ...[['프로토타입 1차', SITE.proto1], ['대회', SITE.contest]].filter(([, d]) => daysTo(d) >= 0).map(([k, d]) => `${k}(${fmtDate(d)}) <b>D-${daysTo(d)}</b>`),
+    ...(nx ? [`다음 <a class="in" href="${ghIssue(nx.n)}" target="_blank" rel="noopener">#${nx.n} ${esc(nx.t)}</a> <b>${fmtDate(nx.due)}</b>`] : []),
+    ...(p.late.length ? [`<span class="late">지연 ${p.late.length}</span>`] : []),
+  ].join(' · ');
   const R = { checks: rChecks, links: rLinks, todo: rTodo, env: rEnv };
   if (!R[tab]) tab = 'checks';
   document.getElementById('tabs').innerHTML = TABDEF.map(([id, name]) => `<button role="tab" aria-selected="${tab === id}" data-tab="${id}" class="${tab === id ? 'on' : ''}">${name}</button>`).join('');
