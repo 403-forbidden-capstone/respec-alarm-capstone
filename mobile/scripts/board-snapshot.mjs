@@ -20,12 +20,13 @@ if (!token) {
 }
 
 // 아래 질의 · 매핑은 mobile/public/board.html의 GQL · sync()와 같은 모양이어야 함 — 한쪽을 고치면 둘 다
-const GQL = `query($org:String!,$repo:String!,$num:Int!){
-  organization(login:$org){ projectV2(number:$num){ items(first:100){ nodes{
+const GQL = `query($org:String!,$num:Int!,$cur:String){
+  organization(login:$org){ projectV2(number:$num){ items(first:100,after:$cur){ pageInfo{ hasNextPage endCursor } nodes{
     fieldValues(first:20){ nodes{
       ... on ProjectV2ItemFieldSingleSelectValue{ field{ ... on ProjectV2FieldCommon{ name } } name }
       ... on ProjectV2ItemFieldDateValue{ field{ ... on ProjectV2FieldCommon{ name } } date } } }
-    content{ ... on Issue{ number title state milestone{ title } labels(first:10){ nodes{ name } } } } } } } }
+    content{ __typename ... on Issue{ number title state milestone{ title } labels(first:10){ nodes{ name } } } } } } } } }`;
+const GQL_PRS = `query($org:String!,$repo:String!){
   repository(owner:$org,name:$repo){ pullRequests(first:50,states:[OPEN],orderBy:{field:UPDATED_AT,direction:DESC}){ nodes{
     number title isDraft headRefName reviewDecision closingIssuesReferences(first:5){ nodes{ number } }
     commits(last:1){ nodes{ commit{ statusCheckRollup{ state } } } } } } } }`;
@@ -33,14 +34,25 @@ const GQL = `query($org:String!,$repo:String!,$num:Int!){
 const headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', 'User-Agent': 'respec-board-snapshot' };
 
 try {
-  const gr = await fetch('https://api.github.com/graphql', {
-    method: 'POST', headers, body: JSON.stringify({ query: GQL, variables: { org: ORG, repo: REPO, num: PROJECT } }),
-  });
-  if (!gr.ok) throw new Error(`GitHub ${gr.status} ${gr.statusText}`);
-  const g = await gr.json();
-  if (g.errors) throw new Error(g.errors.map((e) => e.message).join('; '));
+  const gq = async (query, variables) => {
+    const gr = await fetch('https://api.github.com/graphql', { method: 'POST', headers, body: JSON.stringify({ query, variables }) });
+    if (!gr.ok) throw new Error(`GitHub ${gr.status} ${gr.statusText}`);
+    const g = await gr.json();
+    if (g.errors) throw new Error(g.errors.map((e) => e.message).join('; '));
+    return g.data;
+  };
+  // 카드가 100장을 넘음(11/16 약 340장) → 페이지를 끝까지. PR 카드(이슈 없는 PR)는 할 일에 안 넣음
+  const nodes = [];
+  for (let cur = null, i = 0; i < 30; i++) {
+    const d = await gq(GQL, { org: ORG, num: PROJECT, cur });
+    const p = d.organization.projectV2.items;
+    nodes.push(...p.nodes);
+    if (!p.pageInfo.hasNextPage) break;
+    cur = p.pageInfo.endCursor;
+  }
+  const prData = await gq(GQL_PRS, { org: ORG, repo: REPO });
 
-  const items = g.data.organization.projectV2.items.nodes.map((it) => {
+  const items = nodes.filter((it) => !(it.content && it.content.__typename === 'PullRequest')).map((it) => {
     const fv = {};
     for (const v of it.fieldValues.nodes) if (v.field) fv[v.field.name] = v.name ?? v.date;
     const c = it.content || {};
@@ -49,13 +61,12 @@ try {
       start: fv['시작일'], due: fv['목표일'], part: fv['파트'], labels: c.labels ? c.labels.nodes.map((l) => l.name) : [],
     };
   });
-  const prs = g.data.repository.pullRequests.nodes.map((p) => ({
+  const prs = prData.repository.pullRequests.nodes.map((p) => ({
     number: p.number, title: p.title, state: 'OPEN', draft: p.isDraft, branch: p.headRefName, review: p.reviewDecision,
     closes: p.closingIssuesReferences.nodes.map((x) => x.number),
     checks: p.commits.nodes[0]?.commit?.statusCheckRollup?.state || null,
   }));
 
-  if (items.length >= 100) console.log('board-snapshot: 경고 — 카드가 100개에 닿음. 넘는 카드는 빠짐 (pageInfo 처리 필요, board.html 질의도 같이)');
   // 파일 목록은 못 읽으면 null → 보드에서 "없음"이 아니라 "모름"으로 보임 (브라우저 동기화와 같은 규칙)
   const tr = await fetch(`https://api.github.com/repos/${ORG}/${REPO}/git/trees/main?recursive=1`, { headers });
   const t = tr.ok ? await tr.json() : null;
