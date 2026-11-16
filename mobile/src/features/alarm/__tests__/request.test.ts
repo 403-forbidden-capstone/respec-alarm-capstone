@@ -109,7 +109,7 @@ const saved = (overrides: Partial<AppointmentDetail> = {}): AppointmentDetail =>
     { id: 'a-arrive', kind: 'ARRIVE', at: at('09:50'), enabled: true },
   ],
   level: 1,
-  intensity: { auto: 1, importancePoint: 1, lateCount: 0, latePoint: 0, axes: { sound: { level: 1, manual: false }, voice: { level: 1, manual: false }, vibration: { level: 1, manual: false } } },
+  intensity: { auto: 1, voiceAuto: 1, importancePoint: 1, lateCount: 0, latePoint: 0, axes: { sound: { level: 1, manual: false }, voice: { level: 1, manual: false }, vibration: { level: 1, manual: false } } },
   edits: { bufferMinutes: 10, origin: '집', transport: 'TRANSIT', travelMinutes: null, prepareMinutes: null, times: {} },
   auto: { travelMinutes: 50, predictedPrepMinutes: 60 },
   ...overrides,

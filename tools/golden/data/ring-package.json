@@ -1,8 +1,8 @@
 {
   "format": 1,
   "module": "ring-package",
-  "baseCommit": "df26bfce4f97c831d002b84c4642e596f584c63e",
-  "sourceSha256": "2b313b220051ed5bb9766dca4e47b9f3a6fe77f688e0faf1d03a69f3b1e82618",
+  "baseCommit": "d271fb579ab662aecadd8da3228fb39a10b6b00a",
+  "sourceSha256": "7074251ac522a35a01aeb56f36c186f4ae0758ee542dc65d7bbb21752109c4e5",
   "cases": [
     {"id":"ring-package/$constants/all","fn":"$constants","args":[],"output":{}},
     {"id":"ring-package/subtitleFor/null-Asia/Seoul","fn":"subtitleFor","args":[{"$date":"2026-11-15T23:05:00.000Z"},null,"Asia/Seoul"],"output":"오전 8:05"},

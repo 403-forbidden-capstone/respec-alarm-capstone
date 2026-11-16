@@ -265,6 +265,9 @@ describe('알람 설정 읽기 (toAppointmentDetail · toIntensity)', () => {
     expect(toIntensity([], 'LOW', 0)).toMatchObject({ auto: 1 });
     expect(toAppointmentDetail(meeting(), 0, 'HEAVY').intensity.auto).toBe(2);
     expect(toAppointmentDetail(meeting(), 0).intensity.auto).toBe(1);
+    // 설정의 기본 말소리(강 = 2)는 말소리 축의 자동 값만 바꿈 (H03이 voiceAuto로 그림)
+    expect(toIntensity([], 'NORMAL', 0, 'NORMAL', 2)).toMatchObject({ auto: 1, voiceAuto: 2, axes: { voice: { level: 2, manual: false }, sound: { level: 1, manual: false } } });
+    expect(toIntensity([], 'NORMAL', 0)).toMatchObject({ voiceAuto: 1 });
   });
 
   it('HEAVY인 사람의 저장된 강 칸은 자동 값과 같아서 직접 고름이 아님 (잠귀를 반영한 자동 값과 비교)', () => {

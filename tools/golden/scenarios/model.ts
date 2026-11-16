@@ -31,6 +31,11 @@ function intensity(add: Add) {
   }
   add('intensity', 'resolveIntensity', 'default-overrides', 'HIGH', 3);
   add('intensity', 'resolveIntensity', 'fractional-late-count', 'LOW', 1.5, {}, 'NORMAL');
+  // 설정의 기본 말소리(profiles.preferred_voice_tone 단계) — 말소리를 직접 안 골랐을 때만 말소리 축에 씀
+  for (const def of [null, 0, 1, 2] as const) {
+    add('intensity', 'resolveIntensity', `voice-default${def}`, 'NORMAL', 0, {}, 'NORMAL', def);
+    add('intensity', 'resolveIntensity', `voice-default${def}-picked`, 'HIGH', 2, { voice: 0, sound: 2 }, 'HEAVY', def);
+  }
   for (const fn of ['levelOfIntensity', 'levelOfVoiceTone', 'levelOfSoundKey', 'levelOfVibration'] as const) {
     const values = [null, undefined, '', ' ', 'x', 'soft', 'SOFT', 'NORMAL', 'STRONG', 'CALM', 'NEUTRAL', 'DIRECT', 'theme_calm', 'theme_default', 'theme_urgent', 'NONE', 'SHORT_REPEAT', 'STRONG_CONTINUOUS', ' theme_calm'];
     values.forEach((v, i) => add('intensity', fn, `v${i}`, v));

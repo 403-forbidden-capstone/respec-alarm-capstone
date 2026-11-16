@@ -234,9 +234,13 @@ const LEVEL_VOICE: Record<UrgencyLevel, { pitch: number; rate: number }> = {
 
 export type AndroidVoice = { pitch: number; rate: number; voiceIndex: number };
 
-/** 목소리는 사용자 설정(중요도 기본값 또는 직접 고름) 그대로, 높낮이 · 속도는 단계 고정값 */
-export function androidVoice(profile: Pick<VoiceProfile, 'voice' | 'tone'>, level: UrgencyLevel): AndroidVoice {
-  return { ...LEVEL_VOICE[level], voiceIndex: Math.max(0, VOICES.findIndex((v) => v.id === profile.voice)) };
+// Android 목소리 번호 — 늘 0(폰의 오프라인 한국어 목소리 중 이름순 첫째). 설정 > 말소리 미리 듣기(앱 features/profile/hooks/useVoicePreview)도 같은 목소리를 씀
+//   목소리 고르기 UI는 없어졌고, 예전에 고른 값(따뜻한 · 밝은 · 단호한) · 중요도가 실제 알람 목소리를 미리 듣기와 다르게 바꾸지 않게 고정
+export const ANDROID_VOICE_INDEX = 0;
+
+/** 높낮이 · 속도는 단계 고정값, 목소리 번호는 고정(ANDROID_VOICE_INDEX) */
+export function androidVoice(_profile: Pick<VoiceProfile, 'voice' | 'tone'>, level: UrgencyLevel): AndroidVoice {
+  return { ...LEVEL_VOICE[level], voiceIndex: ANDROID_VOICE_INDEX };
 }
 
 // ---------------------------------------------------------------------------

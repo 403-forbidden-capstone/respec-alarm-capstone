@@ -201,6 +201,7 @@ function plans(add: Add) {
     ['new-draft-with-wake-forced', newAppointmentInputs({ sameDayWake: true }, { withWake: true }), travelOf(30)],
     ['new-high-importance-learned', newAppointmentInputs({ stats: STATS[3], lateCount4w: 2 }, { importance: 'HIGH' }), travelOf(45)],
     ['new-heavy-sleeper', newAppointmentInputs({ profile: profile({ wake_sensitivity: 'HEAVY' }) }), travelOf(30)],
+    ['new-voice-default-direct', newAppointmentInputs({ profile: profile({ preferred_voice_tone: 'DIRECT' }) }), travelOf(30)],
     ['new-tight-margin-learned', newAppointmentInputs({ stats: STATS[4], profile: profile({ wake_margin: 'TIGHT' }) }), travelOf(30)],
     ['new-manual-prepare-minutes', newAppointmentInputs({}, { prepareMinutes: 25 }), travelOf(30)],
     ['new-ml-model', newAppointmentInputs({ mlPrediction: { model: 'c1_mae', minutes: 62 } }), travelOf(30)],
@@ -317,6 +318,8 @@ function planHelpers(add: Add) {
       add('plan-core', 'resolveOverrides', `${name}-auto${auto}`, draft, rows, auto, ...(enabled === undefined ? [] : [enabled]));
     }
   }
+  // 저장된 말소리가 설정의 기본 말소리(voiceAuto)와 같으면 직접 고른 값이 아님
+  for (const voiceAuto of [0, 1, 2]) add('plan-core', 'resolveOverrides', `stored-voice-auto${voiceAuto}`, undefined, levelsExist, 1, true, voiceAuto);
   const wakePrep = (gap: number, over: Record<string, unknown> = {}) => [alarmRow('WAKE', d('2026-11-16T07:00:00+09:00'), over), alarmRow('PREPARE', after(d('2026-11-16T07:00:00+09:00'), gap), over)];
   for (const gap of [-5, 0, 1, 20, 240, 241]) {
     add('plan-core', 'inferBeforePrepare', `gap${gap}`, wakePrep(gap));

@@ -56,6 +56,7 @@ export type ProfileRow = {
   home_lng: number | null;
   default_prepare_minutes?: number | null; // 온보딩에서 답한 "일어나서 나가기까지" — 기상~출발 첫 값 (학습 루프 기초 1절 ①). 없으면 null
   wake_sensitivity?: string | null; // 온보딩 잠귀 'LIGHT' | 'NORMAL' | 'HEAVY' (D69) — 무거움이면 강도 자동 값이 강. 없으면 보통
+  preferred_voice_tone?: string | null; // 설정에서 고른 기본 말소리 CALM · NEUTRAL · DIRECT — 비면 자동(강도 단계). 일정에서 직접 고른 말소리가 이김
   wake_margin?: string | null; // 온보딩 깨우는 여유 'TIGHT' | 'NORMAL' | 'LOOSE' (D63) — 기록의 0.7 · 0.8 · 0.9 분위수. 없으면 보통
 };
 
@@ -253,16 +254,17 @@ export function resolveManualTimes(draft: PlanDraft['manualTimes'], existing: re
   return out;
 }
 
-export function resolveOverrides(draft: PlanDraft['levels'], existing: readonly AlarmRow[], auto: Level, axesEnabled: boolean = AXES_PICKER_ENABLED): IntensityOverrides {
+// voiceAuto = 말소리를 직접 안 골랐을 때 값 (설정의 기본 말소리, 없으면 auto)
+export function resolveOverrides(draft: PlanDraft['levels'], existing: readonly AlarmRow[], auto: Level, axesEnabled: boolean = AXES_PICKER_ENABLED, voiceAuto: Level = auto): IntensityOverrides {
   if (!axesEnabled) return {}; // 축별 선택을 끄면 요청 · 저장된 축 값 모두 계산에서 무시(값은 지우지 않음) — calc/intensity.ts
   if (draft) return draft;
   const stored = existing.find((a) => a.alarm_type === 'WAKE' && a.intensity_source === 'MANUAL') ?? existing.find((a) => a.intensity_source === 'MANUAL');
   if (!stored) return {};
   // 저장돼 있는 값이 자동 값과 같으면 직접 고른 칸으로 보지 않음 (자동 값이 바뀌면 같이 바뀌도록)
-  const pick = (level: Level | null) => (level != null && level !== auto ? level : null);
+  const pick = (level: Level | null, base: Level = auto) => (level != null && level !== base ? level : null);
   return {
     sound: pick(levelOfSoundKey(stored.sound_key)),
-    voice: pick(levelOfVoiceTone(stored.voice_tone)),
+    voice: pick(levelOfVoiceTone(stored.voice_tone), voiceAuto),
     vibration: pick(levelOfVibration(stored.vibration)),
   };
 }
@@ -386,7 +388,15 @@ export function computePlan(i: PlanInputs, travel: ResolvedTravel, mode: PlanMod
   // 잠귀(profiles.wake_sensitivity): 무거움(HEAVY)이면 강, 가벼움 · 보통은 기본 보통 (D69). 앱 map.ts toIntensity · realWrite setIntensity도 같은 값을 넘김
   const wakeSensitivity = wakeSensitivityOf(i.profile.wake_sensitivity);
   const auto = autoLevel(basics.importance, i.lateCount4w, wakeSensitivity);
-  const intensity = resolveIntensity(basics.importance, i.lateCount4w, resolveOverrides(i.draft.levels, i.existingAlarms, auto), wakeSensitivity);
+  // 설정의 기본 말소리 — 이 일정에서 말소리를 직접 고르지 않았을 때만 씀 (이미 저장된 다른 일정 알람은 다시 계산할 때까지 그대로)
+  const voiceDefault = levelOfVoiceTone(i.profile.preferred_voice_tone);
+  const intensity = resolveIntensity(
+    basics.importance,
+    i.lateCount4w,
+    resolveOverrides(i.draft.levels, i.existingAlarms, auto, AXES_PICKER_ENABLED, voiceDefault ?? auto),
+    wakeSensitivity,
+    voiceDefault,
+  );
 
   const kinds = resolveKinds(i.draft.kinds, i.existingAlarms);
   const input = {
