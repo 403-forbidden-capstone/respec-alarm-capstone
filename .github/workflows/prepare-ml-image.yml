@@ -19,7 +19,7 @@ permissions:
 
 jobs:
   docker-image:
-    # Production EC2 is arm64. Validate on that architecture as well.
+    # 운영 EC2와 같은 ARM64 아키텍처에서 검증
     runs-on: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@v7
@@ -40,7 +40,7 @@ jobs:
 
   publish:
     needs: docker-image
-    # Never publish images from pull requests or non-main workflow_dispatch.
+    # PR이나 main 이외 브랜치에서 이미지 게시 금지
     if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-24.04-arm
     permissions:
@@ -64,6 +64,15 @@ jobs:
             --label "org.opencontainers.image.revision=$GITHUB_SHA" \
             -t "$IMAGE" services/prepare-ml
           test "$(docker image inspect -f '{{.Architecture}}' "$IMAGE")" = arm64
+
+          # 실제 GHCR에 올릴 동일 이미지로 보안·기동 조건을 다시 검사
+          docker run --rm --platform linux/arm64 --entrypoint sh "$IMAGE" -c \
+            'test ! -f /app/models/v4_age_only/c1_mae.cbm && test ! -f /app/models/v4_age_only/w4_mae.cbm'
+          docker run --rm --platform linux/arm64 -e CATBOOST_API_TOKEN=ci-only \
+            --entrypoint python "$IMAGE" \
+            -c 'from fastapi import Response; import app; assert app.LOAD_ERRORS == {}; assert app.MODELS == {}; response=Response(); result=app.health(response); assert response.status_code == 503 and result["ok"] is False'
+
+          # 검사한 이미지 자체를 추가 빌드 없이 게시
           docker push "$IMAGE"
 
           echo "Published $IMAGE" >> "$GITHUB_STEP_SUMMARY"
