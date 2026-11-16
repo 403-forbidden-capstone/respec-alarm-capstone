@@ -333,6 +333,7 @@ export function toIntensity(alarms: readonly AlarmRow[], importance: Importance,
   const axis = (key: IntensityAxis) => ({ level: picked[key] ?? (key === 'voice' ? voiceAuto : auto), manual: picked[key] != null });
   return {
     auto,
+    voiceAuto,
     importancePoint: IMPORTANCE_POINT[importance],
     lateCount: lateCount4w,
     latePoint: lateCount4w >= 2 ? 1 : 0,
