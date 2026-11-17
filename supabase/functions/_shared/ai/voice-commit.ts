@@ -143,7 +143,7 @@ async function saveRecords(db: Db, userId: string, plan: FinalPlan, review: stri
 
 /**
  * 하루 일기에 넣을 사실 — 그날(date) 대화들의 structured.v1에서 사용자가 말했거나 확인한 것(inferred 뺌) · 기록된 행동(needs_confirm 뺌) · 날짜가 그날인 것만.
- * 앞으로의 일정(plans — 거절한 카드 뺌, 시각이 애매하면 시각 없이) · 준비물 · 할 일(todos)도 넣음: 일정만 말한 날도 일기가 생김.
+ * 저장된 일정(plans — 카드 [저장]한 것만, 시각이 애매하면 시각 없이) · 저장된 준비물 · 할 일(todos)도 넣음(D31 A): 일정만 저장한 날도 일기가 생김.
  * 날짜는 서버가 '오늘 · 내일'로 바꿔 넣음(모델이 날짜를 세지 않게), 시각은 '오전 10시' 말씨로.
  * 사건 · 기분 · 행동 · 수면 · 일정 결과 · 일정 · 할 일이 하나도 없으면 null (일기를 만들지 않음 — 습관 · 목표만으로는 쓰지 않음)
  */
@@ -173,11 +173,18 @@ export function journalFacts(list: Structured[], date: string): JournalFacts | n
   );
   const habits = day.flatMap((s) => s.habit_signals.filter((h) => told(h) && h.date === date).map(({ habit, note }) => ({ habit, note })));
   const goals = day.flatMap((s) => s.goals_routine.goals.filter(told).map((g) => g.goal_text));
-  const plans = day.flatMap((s) =>
-    s.appointments.filter((a) => told(a) && a.status !== 'declined').map((a) => ({ title: a.title, day: dayLabel(a.date, date), time: a.time && !a.unclear ? spokenOf(a.time) : null })),
+  // D31 A — 실제로 저장된 것만: 일정은 카드 [저장](saved), 할 일 · 준비물은 넣었거나(inserted) 이미 있던 것(duplicate). 여러 대화에 같은 것이 나오면 한 번만
+  const plans = uniq(
+    day.flatMap((s) => s.appointments.filter((a) => told(a) && a.status === 'saved').map((a) => ({ title: a.title, day: dayLabel(a.date, date), time: a.time && !a.unclear ? spokenOf(a.time) : null }))),
+    (p) => `${p.title.replace(/\s+/g, '')}|${p.day}|${p.time}`,
   );
-  const todos = day.flatMap((s) =>
-    s.todos.filter(told).map((t) => ({ title: t.title, kind: t.type === 'ITEM' ? ('준비물' as const) : ('할 일' as const), day: dayLabel(t.due_date, date), for_plan: t.appointment_title })),
+  const todos = uniq(
+    day.flatMap((s) =>
+      s.todos
+        .filter((t) => told(t) && (t.stored === 'inserted' || t.stored === 'duplicate'))
+        .map((t) => ({ title: t.title, kind: t.type === 'ITEM' ? ('준비물' as const) : ('할 일' as const), day: dayLabel(t.due_date, date), for_plan: t.appointment_title })),
+    ),
+    (t) => `${t.title.replace(/\s+/g, '')}|${t.kind}|${t.day}`,
   );
   if (events.length + memorable.length + mood.length + behavior.length + sleep_wake.length + schedule_outcomes.length + plans.length + todos.length === 0) return null;
   return { events, memorable, mood, behavior, sleep_wake, schedule_outcomes, habits, goals, plans, todos };
@@ -194,6 +201,12 @@ export interface JournalFacts {
   goals: string[];
   plans: { title: string; day: string | null; time: string | null }[];
   todos: { title: string; kind: '준비물' | '할 일'; day: string | null; for_plan: string | null }[];
+}
+
+/** 같은 키는 처음 것만 */
+function uniq<T>(xs: T[], key: (x: T) => string): T[] {
+  const seen = new Set<string>();
+  return xs.filter((x) => !seen.has(key(x)) && !!seen.add(key(x)));
 }
 
 /** 일기 날짜 기준 '오늘 · 내일 · 모레' — 그 밖은 날짜 그대로, 모르면 null */

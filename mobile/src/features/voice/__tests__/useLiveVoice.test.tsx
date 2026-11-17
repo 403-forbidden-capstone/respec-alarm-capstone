@@ -42,7 +42,10 @@ async function mount(onTurn: (me: string, ai: string) => Promise<boolean> = asyn
 }
 const frame = () => mockFrames[mockFrames.length - 1] as FrameProps;
 const page = (m: object, f = frame()) => act(() => f.onMessage(JSON.stringify(m)));
-const wait = (ms: number) => act(() => void jest.advanceTimersByTime(ms));
+const wait = (ms: number) =>
+  act(async () => {
+    jest.advanceTimersByTime(ms);
+  });
 const stops = () => mockToPage.filter((d) => JSON.parse(d).type === 'stop').length;
 
 beforeEach(() => {
@@ -74,6 +77,33 @@ describe('30초 무발화 자동 종료', () => {
     await wait(120_000);
     act(() => api().stop()); // 사용자가 [완료]를 같이 눌러도
     expect(log).toEqual(['idle']);
+  });
+
+  it('자동 종료 뒤: 연결 · 마이크는 닫히고 대화 줄은 남고 안내(idleEnded) 표시 — [말하기]를 누르기 전엔 다시 연결하지 않음', async () => {
+    await mount(async () => false); // 서버에 못 남긴 말풍선도 화면에 남는지 보려고
+    await page({ type: 'live' });
+    await page({ type: 'me', text: '오늘 너무 피곤했어' });
+    await wait(30_000);
+    const frames = mockFrames.length;
+    expect([log, api().phase, api().frame, api().idleEnded, stops()]).toEqual([['idle'], 'idle', null, true, 1]);
+    expect(api().lines.map((l) => l.text)).toEqual(['오늘 너무 피곤했어']);
+    act(() => appState?.('background'));
+    act(() => appState?.('active')); // 앱이 돌아와도
+    await wait(5 * 60_000);
+    expect([api().phase, api().frame, mockFrames.length, api().idleEnded]).toEqual(['idle', null, frames, true]);
+    await act(async () => {
+      await api().start(); // 사용자가 [말하기]
+    });
+    expect([api().phase, api().idleEnded]).toEqual(['connecting', false]);
+  });
+
+  it('글을 보내거나 입력 방식을 바꾸면(clearError) 무발화 종료 안내를 내림', async () => {
+    await mount();
+    await page({ type: 'live' });
+    await wait(30_000);
+    expect(api().idleEnded).toBe(true);
+    act(() => api().clearError());
+    expect(api().idleEnded).toBe(false);
   });
 
   it('AI가 40초 말해도 끊지 않고, 말이 끝나 마이크가 다시 열리면 새 30초', async () => {

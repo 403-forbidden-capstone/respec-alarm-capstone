@@ -570,10 +570,17 @@ const plan = (title: string, over: Partial<FinalExtract['appointments'][number]>
 const TIRED: FinalExtract['mood_condition'] = { mood: ['tired'], valence: -1, fatigue: null, stress: null, causes: [], source: 'stated' };
 const facts5 = (fake: { seen: Record<string, string[]> }) => fake.seen.T5?.[0] ?? '';
 
-test('일기: 모델이 빈 글을 줘도 쓸 사실이 있으면 사실 값만으로 대체 문장 저장 (실제 사례 — 감정 · 일정 · 준비물)', async () => {
+/** 카드 [저장]으로 저장한 일정 (D31 — 일기엔 저장한 일정만) */
+const savedCards = (db: FakeDb, sid: string, ...titles: [string, string | null][]) =>
+  putCards(db, sid, titles.map(([title, date], i) => ({
+    status: 'SAVED' as const, appointment_id: `ap-${i + 1}`, draft: { title, date: date ?? TOMORROW, time: '10:00', place: null, importance: null, transport: null, repeat: [], items: [], alarms: { WAKE: true, PREPARE: true, DEPARTURE: true } },
+  })));
+
+test('일기: 모델이 빈 글을 줘도 쓸 사실이 있으면 사실 값만으로 대체 문장 저장 (실제 사례 — 감정 · 저장한 일정 · 준비물)', async () => {
   const db = seed();
   const x = emptyExtract({ mood_condition: TIRED, appointments: [plan('캡스톤 회의')], todos: [todo('노트북', { due_date: TOMORROW, appointment_title: '캡스톤 회의' })] });
   const { deps, sid } = await chat(db, [['오늘 하루 너무 피곤했어'], ['내일 오전 10시에 캡스톤 회의가 있어'], ['내일 나가기 전에 노트북 챙겨야 돼']], [x], [{ diary: '  ' }]);
+  savedCards(db, sid, ['캡스톤 회의', TOMORROW]);
   const r = await commit(deps, sid);
   assert.deepEqual([r.status, r.saved.daily_journals, r.failed], ['DONE', 1, []]);
   assert.deepEqual(journalOf(db).map((j) => j.ai_summary), ['오늘은 피곤한 하루였다. 내일 오전 10시에 캡스톤 회의가 예정되어 있다. 노트북을 챙기기로 했다.']);
@@ -587,9 +594,10 @@ test('일기: 감정만 말해도 일기 (빈 글이면 "오늘은 피곤한 하
   assert.deepEqual(journalOf(db).map((j) => j.ai_summary), ['오늘은 피곤한 하루였다.']);
 });
 
-test('일기: 일정만 말해도 일기 — T5 입력에 내일 · 말씨 시각, 오늘 사건 · 감정은 비어 있음', async () => {
+test('일기: 저장한 일정만 있어도 일기 — T5 입력에 내일 · 말씨 시각, 오늘 사건 · 감정은 비어 있음', async () => {
   const db = seed();
   const { fake, deps, sid } = await chat(db, [['내일 오전 10시에 캡스톤 회의가 있어']], [emptyExtract({ appointments: [plan('캡스톤 회의')] })], [{ diary: '내일 오전 10시에 캡스톤 회의가 예정되어 있어 일정을 정리했다.' }]);
+  savedCards(db, sid, ['캡스톤 회의', TOMORROW]);
   const r = await commit(deps, sid);
   assert.deepEqual([r.status, r.saved.daily_journals], ['DONE', 1]);
   const f = journalFacts([rowOf(db, sid).extracted_data as Structured], REVIEW);
@@ -599,23 +607,58 @@ test('일기: 일정만 말해도 일기 — T5 입력에 내일 · 말씨 시�
   assert.deepEqual(journalOf(db).map((j) => j.ai_summary), ['내일 오전 10시에 캡스톤 회의가 예정되어 있어 일정을 정리했다.']);
 });
 
-test('일기: 감정 + 일정 + 준비물 → T5 입력에 모두 · 할 일은 "하기로 했다"', async () => {
+test('일기(D31): 확인 대기 · 거절한 일정은 넣지 않음 — 그것뿐이면 T5를 안 부르고 일기도 없음', async () => {
   const db = seed();
-  const x = emptyExtract({ mood_condition: TIRED, appointments: [plan('캡스톤 회의')], todos: [todo('노트북', { due_date: TOMORROW }), todo('보고서 제출', { type: 'TASK', due_date: TOMORROW })] });
-  const { fake, deps, sid } = await chat(db, [['피곤했어. 내일 10시 캡스톤 회의 있고 노트북 챙기고 보고서 내야 해']], [x]);
-  await commit(deps, sid);
-  for (const s of ['"tired"', '캡스톤 회의', '"준비물"', '노트북', '"할 일"', '보고서 제출']) assert.ok(facts5(fake).includes(s), `들어가야 함: ${s}`);
-  const f = journalFacts([rowOf(db, sid).extracted_data as Structured], REVIEW);
-  assert.equal(fallbackDiary(f as NonNullable<typeof f>), '오늘은 피곤한 하루였다. 내일 오전 10시에 캡스톤 회의가 예정되어 있다. 노트북을 챙기기로 했다. 보고서 제출을 하기로 했다.');
+  const x = emptyExtract({ appointments: [plan('캡스톤 회의'), plan('알바', { save: 'DECLINED' }), plan('동아리')] });
+  const { fake, deps, sid } = await chat(db, [['내일 10시 캡스톤 회의, 동아리도 있고 알바는 빼 줘']], [x]);
+  putCards(db, sid, [{ status: 'READY', draft: { title: '캡스톤 회의', date: TOMORROW, time: '10:00', place: null, importance: null, transport: null, repeat: [], items: [], alarms: { WAKE: true, PREPARE: true, DEPARTURE: true } } }]);
+  const r = await commit(deps, sid);
+  const s = rowOf(db, sid).extracted_data as Structured;
+  assert.deepEqual(s.appointments.map((a) => [a.title, a.status]), [['캡스톤 회의', 'needs_confirm'], ['알바', 'declined'], ['동아리', 'needs_confirm']]);
+  assert.deepEqual([r.status, r.saved.daily_journals, journalOf(db).length, fake.order.includes('T5')], ['DONE', 0, 0, false]);
+  assert.equal(journalFacts([s], REVIEW), null);
+  // 감정이 같이 있으면 감정만으로 쓰고 확인 대기 일정은 빠짐
+  const f = journalFacts([{ ...s, mood_condition: { ...s.mood_condition, mood: ['tired'] } }], REVIEW) as NonNullable<ReturnType<typeof journalFacts>>;
+  assert.deepEqual([f.plans, fallbackDiary(f)], [[], '오늘은 피곤한 하루였다.']);
 });
 
-test('일기: 날짜 · 시각 표현 — 시각이 애매한 일정은 시각 없이, 날짜 모름은 날짜 없이, 거절한 일정 · 짐작한 할 일은 뺌', async () => {
+test('일기(D31): 할 일 · 준비물은 넣었거나(inserted) 이미 있던 것(duplicate)만 — 저장 실패는 뺌', async () => {
+  const db = seed();
+  const x = emptyExtract({ mood_condition: TIRED, todos: [todo('노트북', { due_date: TOMORROW }), todo('보고서 제출', { type: 'TASK', due_date: TOMORROW })] });
+  const { fake, deps, sid } = await chat(db, [['피곤했어. 내일 노트북 챙기고 보고서 내야 해']], [x]);
+  await commit(deps, sid);
+  for (const w of ['"tired"', '"준비물"', '노트북', '"할 일"', '보고서 제출']) assert.ok(facts5(fake).includes(w), `들어가야 함: ${w}`);
+  const s = rowOf(db, sid).extracted_data as Structured;
+  assert.deepEqual(s.todos.map((t) => t.stored), ['inserted', 'inserted']);
+  const f = journalFacts([s], REVIEW) as NonNullable<ReturnType<typeof journalFacts>>;
+  assert.equal(fallbackDiary(f), '오늘은 피곤한 하루였다. 노트북을 챙기기로 했다. 보고서 제출을 하기로 했다.');
+  type Stored = Structured['todos'][number]['stored'];
+  const titles = (st: Stored[]) => journalFacts([{ ...s, todos: s.todos.map((t, i) => ({ ...t, stored: st[i] as Stored })) }], REVIEW)?.todos.map((t) => t.title);
+  assert.deepEqual(titles(['duplicate', 'failed']), ['노트북']);
+  assert.deepEqual(titles([null, 'failed']), []);
+});
+
+test('일기(D31): 여러 대화에 나온 같은 저장 일정 · 준비물은 한 번만', async () => {
+  const db = seed();
+  const x = emptyExtract({ appointments: [plan('캡스톤 회의')], todos: [todo('노트북', { due_date: TOMORROW })] });
+  const { deps, sid } = await chat(db, [['내일 10시 캡스톤 회의, 노트북 챙겨야 해']], [x]);
+  savedCards(db, sid, ['캡스톤 회의', TOMORROW]);
+  await commit(deps, sid);
+  const s = rowOf(db, sid).extracted_data as Structured;
+  const again = { ...s, session: { ...s.session, session_id: 'other' }, appointments: s.appointments.map((a) => ({ ...a, title: '캡스톤  회의' })), todos: s.todos.map((t) => ({ ...t, stored: 'duplicate' as const })) };
+  const f = journalFacts([s, again], REVIEW) as NonNullable<ReturnType<typeof journalFacts>>;
+  assert.deepEqual([f.plans.length, f.todos.length], [1, 1]);
+  assert.equal(fallbackDiary(f), '내일 오전 10시에 캡스톤 회의가 예정되어 있다. 노트북을 챙기기로 했다.');
+});
+
+test('일기: 날짜 · 시각 표현 — 저장했어도 시각이 애매하면 시각 없이, 날짜 모름은 날짜 없이, 짐작한 것은 뺌', async () => {
   const db = seed();
   const x = emptyExtract({
-    appointments: [plan('동아리', { date: '2026-10-31', time: '07:00', unclear: '오전/오후' }), plan('스터디', { date: null, time: null }), plan('알바', { save: 'DECLINED' })],
+    appointments: [plan('동아리', { date: '2026-10-31', time: '07:00', unclear: '오전/오후' }), plan('스터디', { date: null, time: null })],
     todos: [todo('우산', { due_date: REVIEW })],
   });
-  const { deps, sid } = await chat(db, [['모레 7시 동아리, 스터디도 있어. 알바는 빼 줘. 오늘 우산 챙겨야 해']], [x]);
+  const { deps, sid } = await chat(db, [['모레 7시 동아리, 스터디도 있어. 오늘 우산 챙겨야 해']], [x]);
+  savedCards(db, sid, ['동아리', '2026-10-31'], ['스터디', null]);
   await commit(deps, sid);
   const s = rowOf(db, sid).extracted_data as Structured;
   const f = journalFacts([s], REVIEW) as NonNullable<ReturnType<typeof journalFacts>>;
@@ -634,9 +677,10 @@ test('일기: 쓸 사실이 하나도 없으면 T5를 안 부르고 일기도 �
   assert.deepEqual([r.status, r.saved.daily_journals, journalOf(db).length, fake.order.includes('T5')], ['DONE', 0, 0, false]);
 });
 
-test('일기: 선택 질문에 답하지 않고 바로 끝내도("이제 잘게") 일정만으로 저장', async () => {
+test('일기: 선택 질문에 답하지 않고 바로 끝내도("이제 잘게") 저장한 일정만으로 저장', async () => {
   const db = seed();
   const { deps, sid } = await chat(db, [['내일 오후 1시에 수업 있어'], ['이제 잘게']], [emptyExtract({ appointments: [plan('수업', { time: '13:00' })] })], [{ diary: '' }]);
+  savedCards(db, sid, ['수업', TOMORROW]);
   const r = await commit(deps, sid);
   assert.deepEqual([r.status, r.saved.daily_journals], ['DONE', 1]);
   assert.deepEqual(journalOf(db).map((j) => j.ai_summary), ['내일 오후 1시에 수업이 예정되어 있다.']);

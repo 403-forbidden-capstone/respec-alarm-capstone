@@ -39,6 +39,7 @@ export function useLiveVoice(
   const [lines, setLinesState] = useState<LiveLine[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [micMuted, setMicMuted] = useState(false); // AI 발화 중 자동 음소거 (연결 종료 아님)
+  const [idleEnded, setIdleEnded] = useState(false); // 30초 무발화로 끝남 — 다시 시작하거나 clearError까지 (화면 안내용)
   const run = useRef(0); // 시작 · 끝마다 늘림 — 토큰을 기다리는 사이 끝냈으면 늦게 온 토큰으로 연결하지 않게, 닫은 페이지의 늦은 메시지를 버리게
   const linesRef = useRef<LiveLine[]>([]); // 차례를 넘길 때 지금 줄을 읽으려고 (렌더 값은 늦을 수 있음)
   const sendRef = useRef<((data: string) => void) | null>(null); // Live 페이지로 글 보내기 (LiveFrame이 채움)
@@ -121,6 +122,7 @@ export function useLiveVoice(
       if (!idleExpired(idle.current, t())) return;
       if (inflight.current > 0 || optionsRef.current.isBusy?.()) return rearm();
       end();
+      setIdleEnded(true);
       optionsRef.current.onIdle?.();
     }, IDLE_TICK_MS);
     return () => {
@@ -151,6 +153,7 @@ export function useLiveVoice(
     const mine = ++run.current;
     active.current = true;
     setError(null);
+    setIdleEnded(false);
     setMicMuted(false);
     setPhase('connecting');
     if (Platform.OS === 'android') {
@@ -197,11 +200,16 @@ export function useLiveVoice(
     phase,
     error,
     micMuted,
+    idleEnded,
     lines,
     start,
     stop: end,
     clear: () => setLines(() => []),
-    clearError: () => setError(null), // 글을 보내거나 입력 방식을 바꾸면 지난 음성 오류 문구를 내림
+    // 글을 보내거나 입력 방식을 바꾸면 지난 음성 오류 · 무발화 종료 문구를 내림
+    clearError: () => {
+      setError(null);
+      setIdleEnded(false);
+    },
     frame: page ? <LiveFrame key={page.run} html={page.html} onMessage={(raw) => onPageMessage(raw, page.run)} sendRef={sendRef} /> : null,
   };
 }
