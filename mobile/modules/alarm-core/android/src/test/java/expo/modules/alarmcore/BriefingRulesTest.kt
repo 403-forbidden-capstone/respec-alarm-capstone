@@ -138,6 +138,14 @@ class BriefingRulesTest {
     assertTrue(BriefingRules.repeatsBriefing("WAKE"))
   }
 
+  @Test
+  fun prepareAndDepartureNoticeStartsSpeechServiceOthersDoNot() {
+    // AlarmController.fire: 알람음 없는 알림 뒤 음성 안내 서비스 — 준비 시작 · 출발만 (예전엔 출발만이라 준비 시작은 말이 없었음)
+    assertTrue(BriefingRules.speaksOnNotice("PREPARE"))
+    assertTrue(BriefingRules.speaksOnNotice("DEPARTURE"))
+    for (type in listOf("WAKE", "ARRIVE", "ROUTINE")) assertFalse(BriefingRules.speaksOnNotice(type))
+  }
+
   // --- 백그라운드 브리핑 갱신 (#515) ---
   private val min = 60_000L
   // 2026-11-14 00:00 KST = 2026-11-13 15:00 UTC

@@ -14,7 +14,8 @@ import android.os.PowerManager
 import androidx.core.app.NotificationCompat
 import org.json.JSONObject
 
-// 출발 알람의 음성 안내 — 일정 알림(알림음 · 진동 한 번)을 띄운 뒤 고정 문장("지금 출발해야 해요.", BriefingRules.simple)을 Android TTS로 한 번 읽고 끝나는 짧은 포그라운드 서비스
+// 준비 시작 · 출발 알람의 음성 안내 — 일정 알림(알림음 · 진동 한 번)을 띄운 뒤 고정 문장(BriefingRules.simple)을 Android TTS로 한 번 읽고 끝나는 짧은 포그라운드 서비스
+//   TTS가 안 켜지거나 실패하면 BriefingSpeaker가 끝내고(onDone) 서비스만 멈춤 — 이미 띄운 알림 · 기록은 그대로
 //   알람은 울리자마자 저장소에서 지워지므로(일정 알림은 한 번 알리면 끝) 알람 값은 인텐트에 실어 옴. 음성 파일은 다 읽은 뒤 지움
 //   정확한 알람(AlarmReceiver)에서 시작하므로 백그라운드 시작 제한의 예외. 시작을 못 하면 알림만 남음
 class BriefingSpeechService : Service() {
@@ -72,8 +73,8 @@ class BriefingSpeechService : Service() {
 
   private fun notification(): Notification {
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-      val channel = NotificationChannel(CHANNEL_ID, "출발 음성 안내", NotificationManager.IMPORTANCE_LOW).apply {
-        description = "출발 알람에서 일정 · 준비물을 읽어 주는 동안 표시"
+      val channel = NotificationChannel(CHANNEL_ID, "준비 · 출발 음성 안내", NotificationManager.IMPORTANCE_LOW).apply {
+        description = "준비 시작 · 출발 알림에서 안내 문장을 읽어 주는 동안 표시"
         setSound(null, null)
         enableVibration(false)
       }
@@ -81,7 +82,7 @@ class BriefingSpeechService : Service() {
     }
     return NotificationCompat.Builder(this, CHANNEL_ID)
       .setSmallIcon(android.R.drawable.ic_lock_idle_alarm)
-      .setContentTitle("출발 안내를 읽고 있어요")
+      .setContentTitle("음성 안내를 읽고 있어요")
       .setPriority(NotificationCompat.PRIORITY_LOW)
       .setOngoing(true)
       .build()

@@ -35,6 +35,9 @@ object BriefingRules {
   /** 준비 시작 · 출발이면 읽을 고정 문장, 아니면 null (기상 · 그 밖의 종류는 기존 규칙) */
   fun simple(type: String): Fallback? = SIMPLE_TEXT[type]?.let { Fallback(1, it, 1.0f, 1.0f) }
 
+  /** 알람음 없는 일정 알림(알림음 · 진동 한 번)을 띄운 뒤 음성 안내 서비스(BriefingSpeechService)를 띄울지 — 준비 시작 · 출발 */
+  fun speaksOnNotice(type: String): Boolean = type in SIMPLE_TEXT
+
   /** 해제 전까지 같은 브리핑을 반복하는지 — 기상만. 출발은 알림음 · 진동 한 번 + 브리핑 한 번으로 끝 */
   fun repeatsBriefing(alarmType: String): Boolean = alarmType == "WAKE"
 
