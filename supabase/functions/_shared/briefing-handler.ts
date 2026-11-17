@@ -3,6 +3,7 @@
 //   db = 읽기에 쓰는 클라이언트. 앱 길은 사용자 DB(RLS), 기기 길은 서비스 키 — 그래서 모든 읽기에 user_id 조건을 직접 검 (기기 키로 남의 알람을 못 읽게)
 //   kinds = 이 길로 받을 알람 종류 (기기 길은 기상만)
 //   응답에 refresh_at(ms) — 기상 알람만, 그 아침의 전날 대화가 아직 새벽 정리(구조화) 전이면 다시 받을 시각 (_shared/briefing-refresh.ts). 아니면 null
+//   Gemini 대본 · 음성은 알람 날 새벽 4시 · 정리 뒤에만 (holdGemini) — 알람을 만들 · 고칠 때 미리 만들지 않음
 import { geminiClient, geminiModel } from './ai/gemini.ts';
 import { QuotaGate, quotaFromEnv } from './ai/quota.ts';
 import { recordCalls } from './ai/session.ts';
@@ -10,7 +11,7 @@ import { createTts } from './ai/tts.ts';
 import { dbTtsQuota } from './ai/tts-quota.ts';
 import type { BriefAppointment, BriefTodo, Importance, StructuredLike } from './briefing.ts';
 import { loadWakeData } from './briefing-load.ts';
-import { briefingRefreshAt } from './briefing-refresh.ts';
+import { briefingRefreshAt, COMMIT_LAG_MS, holdGemini } from './briefing-refresh.ts';
 import { type BriefingOut, briefingDays, runBriefing } from './briefing-run.ts';
 import { must } from './db.ts';
 import { getEnv } from './env.ts';
@@ -88,12 +89,14 @@ export async function briefAlarm(a: { userId: string; db: Db; service: Db; kinds
   }
 
   // 브리핑을 만들기 전에 봄 — 만드는 사이에 정리가 끝나도 이번 대본은 정리 전 재료라 한 번 더 받아야 함
-  //   이 확인이 실패해도 브리핑은 그대로 줌 (null = 다시 받을 때 없음, 다음 날 4:10 갱신 · 앱 열기에서 다시)
+  //   이 확인이 실패하면 정리됐는지 모름 → 대본 · 음성은 미루고 10분 뒤 다시 (문장 브리핑은 그대로 줌)
+  const nowMs = Date.now();
+  const { review } = briefingDays(scheduledAtMs, timeZone);
   const refresh_at =
     kind === 'WAKE'
-      ? await briefingRefreshAt(service, userId, briefingDays(scheduledAtMs, timeZone).review, Date.now()).catch((e) => {
+      ? await briefingRefreshAt(service, userId, review, nowMs).catch((e) => {
           console.warn('[alarm-briefing] 정리 확인 실패', e instanceof Error ? e.message : e);
-          return null;
+          return nowMs + COMMIT_LAG_MS;
         })
       : null;
 
@@ -121,6 +124,8 @@ export async function briefAlarm(a: { userId: string; db: Db; service: Db; kinds
     {
       tts: key ? createTts(key) : null,
       quota: dbTtsQuota(service, userId),
+      // 알람 날 4시 · 전날 대화 정리 뒤에만 대본(Flash-Lite) → 음성(Gemini TTS). 그 전(알람을 만들 · 고칠 때)은 문장만
+      hold: holdGemini(review, nowMs, refresh_at),
       script: (input) =>
         wakeScriptsFor(
           {

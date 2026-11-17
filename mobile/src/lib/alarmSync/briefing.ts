@@ -1,5 +1,5 @@
 // 기상 · 출발 알람 음성 브리핑 미리 받기 — 폰 예약을 서버와 맞춘 뒤(onAlarmsSynced, useAlarmSync가 붙임) 다가오는 기상 · 출발 알람마다
-//   서버 alarm-briefing에 "폰에 있는 긴급 음성 열쇠(have)"를 보내고, 단계별 문장(Android TTS) + 필요할 때만 만든 긴급 Gemini 음성을 받아 네이티브에 저장
+//   서버 alarm-briefing에 "폰에 있는 긴급 음성 열쇠(have)"를 보내고, 단계별 문장(Android TTS) + 필요할 때만 만든 긴급 Gemini 음성(알람 날 4시 · 정리 뒤)을 받아 네이티브에 저장
 //   알람이 울릴 때는 네트워크도 Gemini도 안 씀
 //   일정 · 준비물 · 출발 시각 · 설정이 바뀌면 서버 문장이 바뀌어 열쇠가 달라지므로 그 단계만 새로 받음. 같으면 서버가 TTS를 안 부름
 //   실패해도 알람에는 영향 없음 — 있던 브리핑을 그대로 두고 다음 맞추기에서 다시. 브리핑이 없어도 폰은 꾸러미 문장 · 알람음으로 울림
@@ -9,7 +9,9 @@ import type { VoiceBriefingSave } from '@capstone/alarm-core';
 import { callEdge } from '../edge';
 import { isDevAlarmId } from './devAlarm';
 
-// 이만큼 안에 울릴 기상 · 출발 알람만 미리 만듦 (멀리 있는 알람은 그사이 일정이 바뀔 수 있어 그때 가서) — 작성자 판단
+// 이만큼 안에 울릴 기상 · 출발 알람만 문장 브리핑을 미리 받음 (멀리 있는 알람은 그사이 일정이 바뀔 수 있어 그때 가서) — 작성자 판단
+//   Gemini 대본 · 음성을 만들지는 이 창이 아니라 서버가 정함: 알람 날 새벽 4시 · 전날 대화 정리 뒤에만 (_shared/briefing-refresh.ts holdGemini)
+//   그 전에 받으면 템플릿 문장만 → 그날 4:10 백그라운드 갱신(BriefingRefreshWorker) · 그 뒤 앱 맞추기가 음성을 받음
 export const BRIEFING_WINDOW_MS = 36 * 60 * 60 * 1000;
 // 긴급 Gemini 음성 하나를 만드는 시간까지 — 기본 20초보다 길게
 const BRIEFING_TIMEOUT_MS = 90_000;

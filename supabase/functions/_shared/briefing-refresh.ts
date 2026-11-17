@@ -35,3 +35,10 @@ export async function briefingRefreshAt(service: Db, userId: string, review: str
   }
   return at;
 }
+
+/**
+ * 지금 Gemini(대본 · 음성)를 아직 부르지 않을지 — 알람 날 새벽 4시(전날 대화 정리 시각) 전이거나, 정리를 기다리는 대화가 있으면(refreshAt) true
+ *   알람을 만들 · 고칠 때(전날 밤 · 며칠 전)는 문장만 주고, 그날 4:10 백그라운드 갱신 · 그 뒤 앱 맞추기가 대본 · 음성을 만듦
+ *   4시 전에 울리는 알람은 늘 true → 예비 WAV · Android TTS (잘못 만든 새벽 알람이 그날 한도를 쓰지 않게)
+ */
+export const holdGemini = (review: string, nowMs: number, refreshAt: number | null): boolean => nowMs < dueAt(review) || refreshAt != null;
