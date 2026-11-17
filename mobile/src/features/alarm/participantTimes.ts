@@ -22,7 +22,7 @@
 //     (원탭은 자동 값이 없을 때만 대신 쓰는 길 — 원탭 알림 건너뛰기는 PR 6)
 //   · 같은 입력으로 다시 불려도 같은 결과 (onEventsUploaded 훅 · 위치 보관함이 던지면 다시 넘어오므로). 쓰는 순서는 시각 → 준비 실측 · 이동시간 → 위치 기록 (recordParticipantTimes 끝)
 // 판정은 순수 함수(시험: __tests__/participantTimes.test.ts), 아래 recordParticipantTimes · clearLocationTime이 DB를 읽고 씀
-import { PREPARE_RECORD_MAX, PREPARE_RECORD_MIN } from '@shared/calc/prepare.ts';
+import { DEFAULT_BEFORE_PREPARE_MINUTES, PREPARE_RECORD_MAX, PREPARE_RECORD_MIN } from '@shared/calc/prepare.ts';
 import { DETECTION_DELAY_MAX_MINUTES, TRAVEL_CORRECTION_MINUTES } from '@/features/location/constants';
 import { isNearTrip, toLatLng, type LatLng } from '@/features/location/geo';
 import { detectionWindow, plannedDepartAt } from '@/features/location/regions';
@@ -143,7 +143,7 @@ async function loadParticipant(userId: string, participantId: string) {
   const { data, error } = await supabase
     .from('appointment_participants')
     .select(
-      'participant_id, appointment_id, departed_at, departed_source, arrived_at, arrived_source, actual_travel_minutes, origin_lat, origin_lng, est_travel_minutes, buffer_minutes, appointments(appointment_at, dest_lat, dest_lng), alarms(alarm_id, alarm_type, scheduled_at)',
+      'participant_id, appointment_id, departed_at, departed_source, arrived_at, arrived_source, actual_travel_minutes, origin_lat, origin_lng, est_travel_minutes, buffer_minutes, appointments(appointment_at, dest_lat, dest_lng), alarms(alarm_id, alarm_type, scheduled_at, time_source)',
     )
     .eq('participant_id', participantId)
     .eq('user_id', userId)
@@ -155,6 +155,16 @@ type ParticipantRow = NonNullable<Awaited<ReturnType<typeof loadParticipant>>>;
 
 // 이 참여 조건의 알람 사슬에 기상 알람이 있는지 — 알람 행을 못 읽어 비어 있으면(알 수 없음) 있다고 봄
 const chainHasWake = (row: ParticipantRow): boolean => !(row.alarms ?? []).length || (row.alarms ?? []).some((a) => a.alarm_type === 'WAKE');
+
+// 기상과 자동 준비 알람 사이에 할 일이 낀 사슬인지 (calc/day.ts) — 이런 날의 기상~출발에는 회의 같은 할 일이 들어 있어 준비 학습 값이 아님
+//   할 일을 따로 저장하지 않아 간격으로 알아봄: 할 일 없이 만든 자동 준비 알람은 기상 + 준비 전 활동(기본 20분, 당김이 있으면 더 짧게) 안쪽
+//   shortcut: 간격으로 가림 — 할 일 여부를 참여 조건에 저장하게 되면 그 칸으로 바꿈
+export function chainHasHomeActivity(alarms: readonly { alarm_type: string; scheduled_at: string; time_source?: string | null }[]): boolean {
+  const wake = alarms.find((a) => a.alarm_type === 'WAKE');
+  const prepare = alarms.find((a) => a.alarm_type === 'PREPARE');
+  if (!wake || !prepare || prepare.time_source === 'MANUAL') return false;
+  return dbTimeMs(prepare.scheduled_at) - dbTimeMs(wake.scheduled_at) > DEFAULT_BEFORE_PREPARE_MINUTES * 60_000;
+}
 
 const alarmOf = (row: ParticipantRow, kind: TimeKind) => (row.alarms ?? []).find((a) => a.alarm_type === KIND_ALARM[kind]) ?? null;
 
@@ -186,8 +196,9 @@ async function loadPrepareBases(userId: string, departedAtMs: number) {
 }
 
 // 준비 실측을 그날 daily_records에 씀. 쓴 값(분)을 돌려주고, 안 썼으면 null
-async function recordPrepareMinutes(userId: string, departedAtMs: number, previousDepartedAtMs: number | null, hasWake: boolean): Promise<number | null> {
+async function recordPrepareMinutes(userId: string, departedAtMs: number, previousDepartedAtMs: number | null, hasWake: boolean, homeActivity = false): Promise<number | null> {
   if (!hasWake) return null; // 이 일정 사슬에 기상 알람이 없으면(저녁 규칙 · 직접 끔) 기상 → 출발이 아니라서 학습 값이 아님 (#329)
+  if (homeActivity) return null; // 기상과 준비 사이에 할 일이 낀 날 — 기상~출발에 할 일 시간이 들어 있어 학습하지 않음 (기록 뜻은 그대로)
   const departed = new Date(departedAtMs);
   const { record, confirmedMs, scheduledMs } = await loadPrepareBases(userId, departedAtMs);
   const minutes = prepareMinutesOf(departedAtMs, confirmedMs, scheduledMs);
@@ -396,7 +407,7 @@ export async function recordParticipantTimes(input: RecordTimesInput): Promise<R
   //   까닭: 귀가 뒤 재출발(override)은 다시 불렀을 때 저장값 == 새 출발이라 keep이 되어 앞 출발(replacedDepartedMs)을 더는 모름.
   //   위치 기록을 먼저 하다 끊기면 준비 실측이 앞 출발 값으로 남음. 위치 기록은 번호(client_event_id)가 같아 다시 불러도 중복이 안 되므로 마지막에 두면,
   //   끊겨도 다시 불렀을 때 위치 기록만 다시 시도됨 (위 geo.push 조건)
-  if (departedMs != null && finalDepartedMs != null) result.prepareMinutes = await recordPrepareMinutes(userId, finalDepartedMs, replacedDepartedMs, chainHasWake(row));
+  if (departedMs != null && finalDepartedMs != null) result.prepareMinutes = await recordPrepareMinutes(userId, finalDepartedMs, replacedDepartedMs, chainHasWake(row), chainHasHomeActivity(row.alarms ?? []));
   if (finalDepartedMs != null && finalArrivedMs != null && finalDepartedSource != null && finalArrivedSource != null) {
     result.travelMinutes = await recordTravelMinutes(
       userId,

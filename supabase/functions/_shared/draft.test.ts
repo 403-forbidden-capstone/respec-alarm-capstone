@@ -97,3 +97,22 @@ test('반복 규칙 (D44): 요일 칩 · 매일 · 평일 — 앱이 만드는 �
     assert.deepEqual(r.issues.map((i) => i.path), ['recurrence_rule']);
   }
 });
+
+test('할 일 activities: 시작 필수 · 끝 · 준비 전 여부는 모르면 비움, 끝 ≤ 시작은 문제', () => {
+  const r = Reader.root({
+    activities: [
+      { title: '온라인 회의', start: '2026-11-19T10:00:00+09:00', end: '2026-11-19T11:00:00+09:00', before_prepare: true },
+      { start: '2026-11-19T11:10:00+09:00' },
+    ],
+  });
+  assert.deepEqual(readParticipantFields(r), {
+    activities: [
+      { title: '온라인 회의', start: new Date('2026-11-19T01:00:00Z'), end: new Date('2026-11-19T02:00:00Z'), beforePrepare: true },
+      { start: new Date('2026-11-19T02:10:00Z') },
+    ],
+  });
+  assert.equal(r.issues.length, 0);
+  const bad = Reader.root({ activities: [{ start: '2026-11-19T10:00:00+09:00', end: '2026-11-19T10:00:00+09:00' }, { title: '시작 없음' }] });
+  readParticipantFields(bad);
+  assert.deepEqual(bad.issues.map((i) => i.path), ['activities[0].end', 'activities[1].start']);
+});

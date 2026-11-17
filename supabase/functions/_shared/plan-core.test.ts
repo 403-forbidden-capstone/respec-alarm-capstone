@@ -663,3 +663,52 @@ test('준비 알람을 직접 고른 일정은 당기지 않음 — 직접 고�
   assert.deepEqual(at(plan), ['WAKE 08:25', 'PREPARE 08:40*', 'DEPARTURE 09:25']); // * = 직접 고른 시각
 });
 
+
+// ---- 기상과 준비 사이 할 일 (calc/day.ts) — 25년 5월 22일 13시 수업, 10~11시 집에서 온라인 회의 ----
+const meeting = { title: '온라인 회의', start: kst(22, 600), end: kst(22, 660), beforePrepare: true };
+const classDraft = (over: Record<string, unknown> = {}) => ({ at: kst(22, 780), destination: { name: '세종대학교' }, ...over });
+const fresh = (over: Partial<PlanInputs> = {}) => base({ stats: { sampleCount: 0, p80: null }, profile: { ...profile, default_prepare_minutes: 50 }, ...over });
+
+test('할 일: 기상은 회의 20분 전, 준비 · 출발은 수업 기준 (기상 09:40 · 준비 11:40 · 출발 12:10 · 도착 목표 12:50)', () => {
+  const plan = computePlan(fresh({ draft: classDraft({ activities: [meeting] }) }), api(40));
+  assert.deepEqual(text(plan), ['WAKE 09:40', 'PREPARE 11:40', 'DEPARTURE 12:10', 'ARRIVE 12:50']);
+  assert.deepEqual([plan.prepare.minutes, plan.prepare.autoMinutes, plan.beforePrepareMinutes], [150, 50, 120]); // 이날 기상~출발 150, 예측은 50 그대로
+  assert.equal(plan.prepare.source, 'DEFAULT'); // 할 일 때문에 직접 고른 값(MANUAL)이 되지 않음
+  assert.ok(plan.check.ok);
+  assert.equal(toSuggestion(plan).prepare.before_prepare_minutes, 120);
+});
+
+test('할 일 없는 단일 일정은 그대로 (기상 11:20 · 준비 11:40)', () => {
+  const plan = computePlan(fresh({ draft: classDraft() }), api(40));
+  assert.deepEqual(text(plan), ['WAKE 11:20', 'PREPARE 11:40', 'DEPARTURE 12:10', 'ARRIVE 12:50']);
+});
+
+test('6. 개인 기록(P80)이 있어도 회의 시간을 준비에 또 더하지 않음 — 기상은 회의에만, 기록은 외출 준비 길이에만', () => {
+  const stats = prepareStatsOf([80, 80, 80, 80, 80, 80, 80, 80, 80, 80]); // 예측 50 + 보정 15 = 65
+  const plan = computePlan(fresh({ stats, draft: classDraft({ activities: [meeting] }) }), api(40));
+  assert.equal(plan.prepare.autoMinutes, 65);
+  assert.deepEqual(text(plan), ['WAKE 09:40', 'PREPARE 11:25', 'DEPARTURE 12:10', 'ARRIVE 12:50']); // 외출 준비 45 = 65 − 20
+  assert.equal(plan.prepare.minutes, 150); // 65 + 60(회의)이 아니라 이날 실제 기상~출발
+});
+
+test('7. 직접 고른 준비 시간 · 기상 시각이 먼저', () => {
+  const manualPrepare = computePlan(fresh({ draft: classDraft({ activities: [meeting], prepareMinutes: 80 }) }), api(40));
+  assert.deepEqual(text(manualPrepare), ['WAKE 09:40', 'PREPARE 11:10', 'DEPARTURE 12:10', 'ARRIVE 12:50']); // 외출 준비 60 = 80 − 20
+  assert.equal(manualPrepare.prepare.source, 'MANUAL');
+  const manualWake = computePlan(fresh({ draft: classDraft({ activities: [meeting], manualTimes: { WAKE: kst(22, 570) } }) }), api(40));
+  assert.deepEqual(text(manualWake), ['WAKE 09:30*', 'PREPARE 11:30', 'DEPARTURE 12:10', 'ARRIVE 12:50']); // 직접 고른 기상 + 기존 규칙(준비는 기상을 따라옴)
+});
+
+test('4. 회의가 늦게 끝나 준비 시간이 모자라면 알람은 기존 계산 그대로 + 저장 막는 check(ACTIVITY)', () => {
+  const late = { ...meeting, start: kst(22, 660), end: kst(22, 715) };
+  const plan = computePlan(fresh({ draft: classDraft({ activities: [late] }) }), api(40));
+  assert.deepEqual(text(plan), ['WAKE 11:20', 'PREPARE 11:40', 'DEPARTURE 12:10', 'ARRIVE 12:50']); // 기상을 당기지 않음
+  assert.equal(plan.check.ok, false);
+  assert.ok(!plan.check.ok && plan.check.reason === 'ACTIVITY');
+  assert.deepEqual(toSuggestion(plan).check, { ok: false, reason: 'ACTIVITY', message: '할 일이 끝나고 준비할 시간이 15분 모자라요', detail: { activity_reason: 'NO_TIME_TO_PREPARE', index: 0, shortMinutes: 15 } });
+});
+
+test('그날 두 번째 일정(기상 없음)은 할 일 뒤 준비 시작만 — 준비 알람 = 출발 − 외출 준비', () => {
+  const plan = computePlan(fresh({ sameDayWake: true, draft: classDraft({ activities: [meeting] }) }), api(40));
+  assert.deepEqual(text(plan), ['PREPARE 11:55', 'DEPARTURE 12:10', 'ARRIVE 12:50']); // 두 번째 일정 준비 15분 그대로
+});

@@ -12,12 +12,14 @@ import {
   alarmChain,
   autoLevel,
   checkAlarms,
+  dayFailureMessage,
   departureAt,
   isEveningWake,
   levelOfVibration,
   levelOfSoundKey,
   levelOfVoiceTone,
   personalPrepareOf,
+  planDay,
   predictPrepare,
   recentPrepareOf,
   resolveIntensity,
@@ -383,7 +385,31 @@ export function computePlan(i: PlanInputs, travel: ResolvedTravel, mode: PlanMod
       derived = derive(false);
     }
   }
-  const { beforePrepareMinutes, prepare } = derived;
+  let { beforePrepareMinutes, prepare } = derived;
+
+  // 기상 뒤 집에서 하는 할 일이 있으면(calc/day.ts) 할 일 시각으로 기상 · 준비 시작을 정해 역산 입력 두 값만 바꿈
+  //   준비 예측(P80 · CatBoost · 직접 값)은 그대로 넣고, 결과 prepare.minutes = 이날 기상~출발(저장 칸 prepare_minutes 뜻 그대로) · autoMinutes = 예측값
+  //   기상 없는 일정(그날 두 번째 · 저녁)은 준비 시작만 — 준비 전 시간 0으로 계산하고 출발까지 남은 분을 준비 시간으로
+  //   못 정하면(겹침 · 준비 시간 부족 · 빠진 칸) 기존 계산 그대로 두고 check 실패 — 기상을 임의로 앞당기지 않음
+  let activityFailure: CheckResult | undefined;
+  if (i.draft.activities?.length) {
+    const day = planDay({
+      at: basics.at,
+      travelMinutes: chosen.minutes,
+      bufferMinutes: basics.bufferMinutes,
+      prepareMinutes: prepare.minutes,
+      beforePrepareMinutes: withWake ? beforePrepareMinutes : 0,
+      activities: i.draft.activities,
+    });
+    if (day.ok) {
+      const toDepart = Math.round((day.departure.getTime() - day.prepare.getTime()) / 60_000);
+      prepare = { ...prepare, minutes: withWake ? day.prepareMinutes : toDepart };
+      if (withWake) beforePrepareMinutes = day.beforePrepareMinutes;
+    } else {
+      const { ok: _ok, reason, ...rest } = day;
+      activityFailure = { ok: false, reason: 'ACTIVITY', message: dayFailureMessage(day), detail: { activity_reason: reason, ...rest } };
+    }
+  }
 
   // 잠귀(profiles.wake_sensitivity): 무거움(HEAVY)이면 강, 가벼움 · 보통은 기본 보통 (D69). 앱 map.ts toIntensity · realWrite setIntensity도 같은 값을 넘김
   const wakeSensitivity = wakeSensitivityOf(i.profile.wake_sensitivity);
@@ -413,7 +439,7 @@ export function computePlan(i: PlanInputs, travel: ResolvedTravel, mode: PlanMod
   const fullChain = alarmChain(input);
   const chain = alarmChain({ ...input, kinds });
   const departure = departureAt(input);
-  const check = checkAlarms(chain, departure, i.now);
+  const check = activityFailure ?? checkAlarms(chain, departure, i.now);
 
   const warnings = [...travel.warnings];
   if (check.ok) {
@@ -521,7 +547,7 @@ export function toSuggestion(plan: Plan, inputs?: Pick<PlanInputs, 'existingAlar
     })),
     check: plan.check.ok
       ? { ok: true }
-      : { ok: false, reason: plan.check.reason, message: plan.check.message }, // 저장하면 UNPROCESSABLE이 될 입력 (미리 보기는 막지 않고 알려 줌)
+      : { ok: false, reason: plan.check.reason, message: plan.check.message, ...(plan.check.reason === 'ACTIVITY' ? { detail: plan.check.detail } : {}) }, // 저장하면 UNPROCESSABLE이 될 입력 (미리 보기는 막지 않고 알려 줌)
     travel: {
       minutes: plan.travelMinutes,
       source: travel.chosen?.source,
