@@ -1,11 +1,12 @@
 // 알람 3 · 4단계 음성(Gemini TTS) 호출 한도 — 기존 글 대화 · Live 한도(quota.ts · opening.ts)와 따로 셈 (ai_calls.point = 'AV')
-//   무료 한도(11/10 확인: RPM 3 · TPM 10K · RPD 10)보다 보수적으로: 프로젝트 전체 하루 8 · 분당 2, 사용자 하루 2. 모델과 상관없이 'AV' 전체로 셈
+//   자체 제한: 프로젝트 전체 최근 24시간 10회 · 최근 1분 2회 · 사용자별 최근 24시간 10회. 모든 사용자와 알람이 프로젝트 한도를 공유 (Google의 실제 모델별 한도는 AI Studio에서 별도 확인)
+//   기상 및 향후 그룹 알람 모두 'AV' 예약을 공유 — 하루 한도를 늘려도 Google 프로젝트 한도를 넘길 수는 없음
 //   DB 함수 reserve_alarm_tts가 한도 확인 + 예약 줄 넣기를 한 트랜잭션(전역 잠금)에서 함 → 예약에 성공했을 때만 Gemini를 부름
 //   예약 줄은 실패 · 429여도 남아 한도에 셈. 예약 실패 · DB 오류 · 한도 초과면 null → Gemini 없이 폰의 Android TTS
 import type { Db } from '../supabase.ts';
 
 export const TTS_POINT = 'AV';
-export const TTS_LIMITS = { projectPerDay: 8, projectPerMinute: 2, userPerDay: 2 } as const;
+export const TTS_LIMITS = { projectPerDay: 10, projectPerMinute: 2, userPerDay: 10 } as const;
 
 export type TtsQuota = {
   /** 한 번 부를 자리를 잡음. 못 잡으면(한도 · DB 오류) null */
