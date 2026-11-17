@@ -756,7 +756,7 @@ describe('call 기록 — ai_calls 표 칸과 같은 이름', () => {
     assert.deepEqual([...POINT_IDS].sort(), [...POINT_CHECK].sort());
     assert.deepEqual(
       Object.fromEntries(POINT_IDS.map((p) => [p, `${POINTS[p].prompt.id}@${POINTS[p].prompt.version}`])),
-      { T1: 'T1@v1.5', T2F: 'T2F@v2-d', T2: 'T2@v3.3', T3: 'T3@v1', T4: 'T4@v1.1', T5: 'T5@v2', E4: 'ASSIST_E4@v1.1' },
+      { T1: 'T1@v1.6', T2F: 'T2F@v2-d', T2: 'T2@v3.3', T3: 'T3@v1', T4: 'T4@v1.1', T5: 'T5@v3', E4: 'ASSIST_E4@v1.1' },
     );
   });
 

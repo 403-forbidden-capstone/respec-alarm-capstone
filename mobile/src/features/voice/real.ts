@@ -593,7 +593,13 @@ async function drive(): Promise<void> {
     }
     state.unavailable = null;
     state.pending = null;
-    if (p.src?.saved) await clearSaved(p.src.saved.userId, p.src.saved.sessionId, p.src.saved.cardId); // 서버가 SAVED를 받음 — 로컬 표시는 이제 필요 없음
+    if (p.src?.saved) {
+      const { userId, sessionId, cardId } = p.src.saved;
+      await clearSaved(userId, sessionId, cardId); // 서버가 SAVED를 받음 — 로컬 표시는 이제 필요 없음
+      // 이미 정리한 대화(30초 무발화 종료 · [완료] 뒤 같은 날)면 그 일정을 일기에 반영 — 서버가 같은 추출로 다시 나눔(정리 전이면 SKIPPED)
+      await addPendingCommit(userId, sessionId, [], true);
+      void flushCommits(userId);
+    }
     const next = await absorb(res, p.turnId);
     if (next && p.quiet) next.quiet = true;
     state.pending = next;
@@ -868,23 +874,39 @@ export function retry(): Promise<Conversation> {
 //   서버가 T2를 부르므로(19초 · 다시 시도 1번) 대화 화면의 직렬 큐 밖에서 — 새 대화 열기를 막지 않게. 동시에 두 번 돌지 않음
 export const COMMIT_TIMEOUT_MS = 45_000;
 let flushing: Promise<void> | null = null;
+let flushAgain = false; // 보내는 중에 또 불림 — 끝나기 전에 목록을 한 번 더 봄
+// 이번에 아직 안 보낸 것 — 보낸 뒤 다시 적혀 표시(v)가 바뀐 것도 (보내는 중 [완료] · 카드 저장)
+const untried = async (userId: string, tried: Map<string, string | undefined>) =>
+  (await pendingCommits(userId)).find((c) => !tried.has(c.sessionId) || tried.get(c.sessionId) !== c.v);
 //   정리가 끝나면(DONE) 다가오는 기상 알람 브리핑을 바로 다시 받음 — 어제 다짐이 들어간 대본 · 음성으로 (#515, 새벽 백그라운드 갱신을 기다리지 않게). 실패해도 삼킴
 export function flushCommits(userId: string | null, refreshBriefings: () => Promise<unknown> = () => prepareBriefings()): Promise<void> {
   if (!userId) return Promise.resolve();
-  flushing ??= (async () => {
-    let committed = false;
+  if (flushing) {
+    flushAgain = true;
+    return flushing;
+  }
+  flushing = (async () => {
+    // 보내는 사이 새로 적힌 것(카드 저장 뒤 refresh · [완료])도 이번에 보냄 — 같은 표시는 한 번만
+    const tried = new Map<string, string | undefined>();
     try {
-      for (const { sessionId, rejected } of await pendingCommits(userId)) {
-        try {
-          const body = rejected.length > 0 ? { session_id: sessionId, rejected_cards: rejected } : { session_id: sessionId };
-          const res = await callEdge<{ status?: string }>('voice-commit', body, { timeoutMs: COMMIT_TIMEOUT_MS });
-          if (res?.status === 'DONE') committed = true;
-          if (res?.status === 'DONE' || res?.status === 'SKIPPED') await removePendingCommit(userId, sessionId);
-        } catch (e) {
-          if (e instanceof EdgeError && (e.code === 'NOT_FOUND' || e.code === 'VALIDATION_FAILED')) await removePendingCommit(userId, sessionId);
+      do {
+        flushAgain = false;
+        let committed = false;
+        for (let next = await untried(userId, tried); next; next = await untried(userId, tried)) {
+          const { sessionId, rejected, refresh, v } = next;
+          tried.set(sessionId, v);
+          try {
+            const body = { session_id: sessionId, ...(rejected.length > 0 ? { rejected_cards: rejected } : {}), ...(refresh ? { refresh: true } : {}) };
+            const res = await callEdge<{ status?: string }>('voice-commit', body, { timeoutMs: COMMIT_TIMEOUT_MS });
+            if (res?.status === 'DONE') committed = true;
+            // 보내는 사이 다시 적혔으면 지우지 않음 — 표시가 바뀌어 이번에 한 번 더 보냄
+            if (res?.status === 'DONE' || res?.status === 'SKIPPED') await removePendingCommit(userId, sessionId, v);
+          } catch (e) {
+            if (e instanceof EdgeError && (e.code === 'NOT_FOUND' || e.code === 'VALIDATION_FAILED')) await removePendingCommit(userId, sessionId, v);
+          }
         }
-      }
-      if (committed) await refreshBriefings().catch(() => undefined);
+        if (committed) await refreshBriefings().catch(() => undefined);
+      } while (flushAgain);
     } finally {
       flushing = null;
     }

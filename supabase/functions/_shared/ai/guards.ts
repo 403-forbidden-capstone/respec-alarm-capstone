@@ -23,8 +23,8 @@ export function toMinutes(time: string): number {
 
 /** 이 글자 수를 넘으면 너무 김 (프롬프트 기준 80자 안팎 + 여유) */
 export const MAX_REPLY_CHARS = 110;
-/** 자기 전 대화의 REFLECT 상한 (계획 3.1 ★ — 최대 2턴) */
-export const MAX_REFLECT_BEFORE_SLEEP = 2;
+/** 자기 전 대화의 REFLECT 상한 (계획 3.1 ★ 최대 2턴 → #541에서 3턴: 첫 "오늘 어땠어요?" + 선택 질문 1 + 내일 일정 1) */
+export const MAX_REFLECT_BEFORE_SLEEP = 3;
 
 export interface AutoCheckT1 {
   chars: number;
@@ -519,7 +519,18 @@ export type GuardAction =
   | "append_alarm" // 바뀐 기상 알람 시각을 서버 문장으로 덧붙임
   | "spoken_times" // HH:MM → 말로
   | "retract_end" // 서버 질문이 남았는데 end → end 거둠 (지침 19a)
+  | "drop_follow_up" // 사용자가 끝내자고 했는데 선택 질문 → 그 물음 지움
   | "template"; // 템플릿 한 줄로 바꿈 (지침 22)
+
+// 끝내자는 말 — 말 전체가 짧은 끝맺음일 때만 ("시험 끝이야" · "발표 잘 됐어" · "알바 그만둬서 힘들어" 같은 하루 이야기는 아님)
+//   음성 대화는 30초 무발화로 끝나는 게 기본(mobile idle.ts), 이건 글 · 음성 대화에서 사용자가 분명히 끝내자고 한 경우만
+// shortcut: 목록에 있는 말만 봄 — 놓치면 선택 질문이 한 번 더 나갈 뿐(저장 · 종료는 막지 않음), 자주 놓치면 목록을 늘림
+const FINISH_SAID = /^(?:됐어|이제|그럼|나|난|오늘은|오늘|그냥)*(잘게|잘래|자야겠다|자러갈게|잘자|굿나잇|ㅂㅂ|바이|그만|그만할게|그만할래|그만하자|끝내자|끝낼게|대화끝|여기까지|저장해줘|저장해|저장하고끝내줘)(요)?$/u;
+
+/** 사용자가 대화를 끝내자고 했는지 — 공백 · 문장부호 · 끝 이모티콘을 빼고 말 전체가 끝맺음일 때만 */
+export function wantsToFinish(text: string): boolean {
+  return FINISH_SAID.test(text.replace(/[\s.,!?~…ㅎㅋㅠㅜ^]+/gu, ""));
+}
 
 export interface GuardInput {
   reply: string;
@@ -727,6 +738,18 @@ export function applyGuards(input: GuardInput, view: GuardView): GuardResult {
     actions.push("cut_question");
   }
 
+  // 3-1) 끝내자는 말 뒤 선택 질문 — 일정 확인(CONFIRM · CLARIFY)만 남기고 지움 (답을 안 해도 저장 · 종료는 그대로)
+  const lastUser = [...turnsBefore].reverse().find((t) => t.role === "user");
+  const finishing = lastUser !== undefined && wantsToFinish(lastUser.text);
+  if (finishing) {
+    let qi = 0;
+    const kept = sents.filter((s) => !isQuestion(s) || ["CONFIRM", "CLARIFY"].includes(input.acts[qi++]?.type ?? ""));
+    if (kept.length !== sents.length) {
+      actions.push("drop_follow_up");
+      sents = kept.length > 0 ? kept : [fallbackReply(eventsVisible)];
+    }
+  }
+
   // 4) 바뀐 기상 알람 시각 덧붙임 (위기 턴은 알람 이야기를 하지 않는 게 규칙 — 다음 턴에 전함)
   if (!view.safety.latestUser) {
     const missing = relayWithDeferred(sents.join(" "), ctx, eventsVisible, turnsBefore, view.safety.deferredTurns ?? 0);
@@ -755,8 +778,9 @@ export function applyGuards(input: GuardInput, view: GuardView): GuardResult {
   // 6) acts 다시 만들기 · 마무리 조건
   const acts = rebuildActs(reply, input.acts, ctx, eventsVisible, turnsBefore);
   if (!sameActs(acts, input.acts)) actions.push("rebuild_acts");
-  let end = input.end;
-  if (end && ctx.question !== null) {
+  // 끝내자고 했고 남은 물음(일정 확인)이 없으면 바로 마무리 — 모델이 end를 안 줘도 붙잡지 않음
+  let end = input.end || (finishing && acts.length === 0);
+  if (end && ctx.question !== null && !finishing) {
     const asked = turnsBefore.some((t) => t.role === "ai" && (t.acts ?? []).some((a) => a.type === "SERVER_Q")) || acts.some((a) => a.type === "SERVER_Q");
     if (!asked) {
       end = false;

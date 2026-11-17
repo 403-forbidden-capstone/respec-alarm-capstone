@@ -9,6 +9,7 @@ import { EdgeError, callEdge } from '@/lib/edge';
 import { UserError } from '@/lib/errors';
 
 import { applyFix } from '../fixes';
+import { addPendingCommit } from '../finishedSessions';
 import { clearSavedMarksForUser, SAVED_MARK_TTL_MS } from '../savedMarks';
 import { beginLive, COMMIT_TIMEOUT_MS, endLive, finishConversation, flushCommits, getConversation, liveSessionId, pickCardPlace, rejectCard, resetVoiceState, retry, saveCard, say, sayVoice, TURN_TIMEOUT_MS } from '../real';
 
@@ -1107,6 +1108,7 @@ describe('⑫ 저장됨 로컬 표시', () => {
     expect(c.cards[0]).toMatchObject({ id: 'c1', status: 'SAVED', appointmentId: 'ap1' });
     expect(turnBodies()).toHaveLength(1);
     expect(turnBodies()[0]).toMatchObject({ session_id: 's2', rev: 1, card_action: { id: 'c1', action: 'SAVED', appointment_id: 'ap1' } });
+    await flushCommits('user-1'); // 카드 저장 뒤 refresh 정리(서버 DONE이면 목록에서 지움)까지
     expect(await AsyncStorage.getAllKeys()).toEqual([]); // 앞 구간 표시는 정리, 지금 구간 표시는 서버가 받아 지움
     await expect(saveCard('c1')).rejects.toThrow('이미 확인한 카드예요');
     expect(mCreate).toHaveBeenCalledTimes(1);
@@ -1135,6 +1137,7 @@ describe('⑫ 저장됨 로컬 표시', () => {
         { kind: 'DEPARTURE', at: at(9, 0).toISOString(), enabled: true, level: 2 },
       ],
     });
+    await flushCommits('user-1'); // 카드 저장 뒤 refresh 정리(서버 DONE이면 목록에서 지움)까지
     expect(await AsyncStorage.getAllKeys()).toEqual([]); // 서버가 받아 표시를 지움
     await expect(saveCard('c1')).rejects.toThrow('이미 확인한 카드예요');
     expect(mCreate).toHaveBeenCalledTimes(1);
@@ -1152,6 +1155,7 @@ describe('⑫ 저장됨 로컬 표시', () => {
     c = await retry();
     expect(turnBodies()[1]).toEqual(turnBodies()[0]);
     expect(c.unavailable).toBeNull();
+    await flushCommits('user-1'); // 카드 저장 뒤 refresh 정리(서버 DONE이면 목록에서 지움)까지
     expect(await AsyncStorage.getAllKeys()).toEqual([]);
     expect(mCreate).toHaveBeenCalledTimes(1);
   });
@@ -1163,6 +1167,7 @@ describe('⑫ 저장됨 로컬 표시', () => {
     const c = await getConversation();
     expect(c.cards[0].status).toBe('SAVED');
     expect(edge).toHaveBeenCalledTimes(1); // voice-session만
+    await flushCommits('user-1'); // 카드 저장 뒤 refresh 정리(서버 DONE이면 목록에서 지움)까지
     expect(await AsyncStorage.getAllKeys()).toEqual([]);
   });
 
@@ -1171,6 +1176,7 @@ describe('⑫ 저장됨 로컬 표시', () => {
     await getConversation();
     await say('발표 있어');
     await saveCard('c1');
+    await flushCommits('user-1'); // 카드 저장 뒤 refresh 정리(서버 DONE이면 목록에서 지움)까지
     expect(await AsyncStorage.getAllKeys()).toEqual([]);
   });
 
@@ -1180,6 +1186,7 @@ describe('⑫ 저장됨 로컬 표시', () => {
     await say('발표 있어');
     script = [new EdgeError('NOT_FOUND'), session({ resumed: true, rev: 5, cards: [apptCard({ status: 'READY' })] })];
     await saveCard('c1');
+    await flushCommits('user-1'); // 카드 저장 뒤 refresh 정리(서버 DONE이면 목록에서 지움)까지
     expect(await AsyncStorage.getAllKeys()).toEqual([]);
     expect((await getConversation()).cards[0].status).toBe('SAVED');
   });
@@ -1198,6 +1205,7 @@ describe('⑫ 저장됨 로컬 표시', () => {
     script = [session({ resumed: true, rev: 4, cards: [apptCard({ status: 'READY' })] })];
     const c = await getConversation();
     expect(c.cards[0].status).toBe('READY');
+    await flushCommits('user-1'); // 카드 저장 뒤 refresh 정리(서버 DONE이면 목록에서 지움)까지
     expect(await AsyncStorage.getAllKeys()).toEqual([]);
   });
 
@@ -1258,6 +1266,7 @@ describe('⑬ 저장됨 표시: 사용자별 · 7일 정리', () => {
     expect(c.cards[0]).toMatchObject({ status: 'SAVED', appointmentId: 'ap1' });
     expect(turnBodies().at(-1)?.card_action).toMatchObject({ id: 'c1', action: 'SAVED', appointment_id: 'ap1' });
     expect(mCreate).toHaveBeenCalledTimes(1);
+    await flushCommits('user-1'); // 카드 저장 뒤 refresh 정리(서버 DONE이면 목록에서 지움)까지
     expect(await AsyncStorage.getAllKeys()).toEqual([]);
   });
 
@@ -1277,6 +1286,7 @@ describe('⑬ 저장됨 표시: 사용자별 · 7일 정리', () => {
     await put('respec.voice.saved.user-2.nodate', { c1: { ...markOf(1), savedAt: '어제' } });
     await put('respec.voice.saved.user-2.shape', { c1: { appointmentId: 1 } });
     await openEmpty();
+    await flushCommits('user-1'); // 카드 저장 뒤 refresh 정리(서버 DONE이면 목록에서 지움)까지
     expect(await AsyncStorage.getAllKeys()).toEqual([]);
   });
 
@@ -1286,6 +1296,7 @@ describe('⑬ 저장됨 표시: 사용자별 · 7일 정리', () => {
     const c = await getConversation();
     expect(c.cards[0].status).toBe('READY'); // 옛 표시로 복원하지 않음
     expect(edge).toHaveBeenCalledTimes(1);
+    await flushCommits('user-1'); // 카드 저장 뒤 refresh 정리(서버 DONE이면 목록에서 지움)까지
     expect(await AsyncStorage.getAllKeys()).toEqual([]);
   });
 
@@ -1314,6 +1325,7 @@ describe('⑬ 저장됨 표시: 사용자별 · 7일 정리', () => {
     await say('발표 있어');
     expect(await saveCard('c1')).toBe('일정이 저장됐어요. 캡스톤 발표 알람을 맞췄어요');
     expect(mCreate).toHaveBeenCalledTimes(1);
+    await flushCommits('user-1'); // 카드 저장 뒤 refresh 정리(서버 DONE이면 목록에서 지움)까지
     expect(await AsyncStorage.getAllKeys()).toEqual([]);
     expect(turnBodies().at(-1)?.card_action).toMatchObject({ id: 'c1', action: 'SAVED' });
     expect((await getConversation()).cards[0].status).toBe('SAVED');
@@ -1660,6 +1672,21 @@ describe('⑰ [완료] 뒤 대화 끝 정리(voice-commit)', () => {
     expect(refresh).toHaveBeenCalledTimes(1);
   });
 
+  it('음성 30초 무발화 자동 종료: 마지막 차례(sayVoice)를 서버에 넘긴 뒤 정리 — [완료]와 겹쳐 두 번 불려도 정리는 한 번', async () => {
+    script = [session(), turn({ reply: null })];
+    await getConversation();
+    // 훅이 끝내면서 마지막 차례를 넘기고(기다리지 않음) 바로 정리를 부름 + 사용자가 [완료]도 누름
+    const last = sayVoice('오늘 너무 피곤했어', '특별히 힘들었던 일이 있었어요?');
+    const auto = finishConversation();
+    const manual = finishConversation();
+    expect((await last).kept).toBe(true);
+    await Promise.all([auto, manual]);
+    await flushCommits('user-1');
+    expect(edge.mock.calls.map(([name]) => name)).toEqual(['voice-session', 'voice-turn', 'voice-commit']);
+    expect(turnBodies()[0]).toMatchObject({ text: '오늘 너무 피곤했어', spoken_reply: '특별히 힘들었던 일이 있었어요?' });
+    expect(commitBodies().map((c) => c.body)).toEqual([{ session_id: 's1' }]);
+  });
+
   it('한 마디도 안 한 대화는 정리를 보내지 않음', async () => {
     script = [session()];
     await getConversation();
@@ -1675,11 +1702,11 @@ describe('⑰ [완료] 뒤 대화 끝 정리(voice-commit)', () => {
     commitReplies = [new EdgeError('NETWORK')];
     await finishConversation();
     await flushCommits('user-1');
-    expect(JSON.parse((await AsyncStorage.getItem(commitKey)) ?? '[]')).toEqual([{ sessionId: 's1', rejected: [] }]);
+    expect(JSON.parse((await AsyncStorage.getItem(commitKey)) ?? '[]')).toMatchObject([{ sessionId: 's1', rejected: [] }]);
 
     commitReplies = [{ status: 'PARTIAL' }];
     await flushCommits('user-1');
-    expect(JSON.parse((await AsyncStorage.getItem(commitKey)) ?? '[]')).toEqual([{ sessionId: 's1', rejected: [] }]);
+    expect(JSON.parse((await AsyncStorage.getItem(commitKey)) ?? '[]')).toMatchObject([{ sessionId: 's1', rejected: [] }]);
 
     commitReplies = [{ status: 'DONE' }];
     script = [session({ session_id: 's2', rev: 1 })];
@@ -1696,7 +1723,7 @@ describe('⑰ [완료] 뒤 대화 끝 정리(voice-commit)', () => {
     commitReplies = [{ status: 'STALE' }];
     await finishConversation();
     await flushCommits('user-1');
-    expect(JSON.parse((await AsyncStorage.getItem(commitKey)) ?? '[]')).toEqual([{ sessionId: 's1', rejected: [] }]);
+    expect(JSON.parse((await AsyncStorage.getItem(commitKey)) ?? '[]')).toMatchObject([{ sessionId: 's1', rejected: [] }]);
     await flushCommits('user-1');
     expect(commitBodies().map((c) => c.body)).toEqual([{ session_id: 's1' }, { session_id: 's1' }]);
     expect(await AsyncStorage.getItem(commitKey)).toBeNull();
@@ -1775,7 +1802,7 @@ describe('⑱ [저장 안 함]이 서버에 닿을 때까지 (11/8 음성 실사
     commitReplies = [new EdgeError('NETWORK')];
     await finishConversation();
     await flushCommits('user-1');
-    expect(await stored()).toEqual([{ sessionId: 's1', rejected: ['c1'] }]);
+    expect(await stored()).toMatchObject([{ sessionId: 's1', rejected: ['c1'] }]);
     await flushCommits('user-1');
     expect(commitBodies().map((c) => c.body)).toEqual([{ session_id: 's1', rejected_cards: ['c1'] }, { session_id: 's1', rejected_cards: ['c1'] }]);
     expect(await stored()).toEqual([]);
@@ -1803,6 +1830,47 @@ describe('⑱ [저장 안 함]이 서버에 닿을 때까지 (11/8 음성 실사
     expect(commitBodies().map((c) => c.body)).toEqual([{ session_id: 's1', rejected_cards: ['c1'] }]);
   });
 
+  it('[완료] · 30초 무발화 종료 뒤 같은 날 다시 와서 카드를 [저장]하면 새 말 없이 일기 고침 정리(refresh)를 보냄', async () => {
+    await ready();
+    await finishConversation();
+    await flushCommits('user-1');
+    script = [session({ resumed: true, rev: 3, cards: [apptCard({ status: 'READY' })] })];
+    await getConversation();
+    script = [turn({ rev: 4, reply: null, cards: [apptCard({ status: 'SAVED' })] })];
+    await saveCard('c1');
+    await flushCommits('user-1');
+    expect(commitBodies().map((c) => c.body)).toEqual([{ session_id: 's1' }, { session_id: 's1', refresh: true }]);
+    expect(turnBodies().filter((b) => b.text !== undefined).map((b) => b.text)).toEqual(['발표 있어']); // 새 말 없음
+    expect(await stored()).toEqual([]);
+  });
+
+  it('정리 요청이 가 있는 사이 카드를 저장하면 그 답(DONE)으로 지우지 않고 refresh를 한 번 더 보냄', async () => {
+    let release: (v: unknown) => void = () => {};
+    commitReplies = [new Promise((r) => (release = r))];
+    await addPendingCommit('user-1', 's1');
+    const flushed = flushCommits('user-1');
+    for (let i = 0; i < 50 && commitBodies().length === 0; i++) await new Promise((r) => setTimeout(r, 0));
+    await addPendingCommit('user-1', 's1', [], true); // 보내는 중 카드 [저장]
+    release({ status: 'DONE' });
+    await flushed;
+    // 다시 적힌 표시라 한 번 더 — 적혀 있던 [완료] 정리가 refresh를 품음(서버는 저장 카드가 바뀌어 같은 추출로 다시 나눔)
+    expect(commitBodies().map((c) => c.body)).toEqual([{ session_id: 's1' }, { session_id: 's1' }]);
+    expect(await stored()).toEqual([]);
+  });
+
+  it('refresh가 실패하면 남겨 두고 다음에 다시 보냄 · [완료]의 정리와 겹치면 [완료] 쪽(전체 정리)으로', async () => {
+    commitReplies = [new EdgeError('NETWORK')];
+    await addPendingCommit('user-1', 's1', [], true);
+    await flushCommits('user-1');
+    expect(await stored()).toMatchObject([{ sessionId: 's1', refresh: true }]);
+    await addPendingCommit('user-1', 's1', ['c2']); // [완료]가 같은 세션을 적음
+    await addPendingCommit('user-1', 's1', [], true); // 그 뒤 또 카드 저장 — 전체 정리가 이김
+    expect(await stored()).toEqual([{ sessionId: 's1', rejected: ['c2'], v: expect.any(String) }]);
+    await flushCommits('user-1');
+    expect(commitBodies().map((c) => c.body)).toEqual([{ session_id: 's1', refresh: true }, { session_id: 's1', rejected_cards: ['c2'] }]);
+    expect(await stored()).toEqual([]);
+  });
+
   it('[저장]한 카드는 거절로 보내지 않음 (기존 저장 그대로)', async () => {
     await ready();
     script = [turn({ rev: 4, reply: { text: '저장했어요.' }, cards: [apptCard({ status: 'SAVED' })] })];
@@ -1811,6 +1879,7 @@ describe('⑱ [저장 안 함]이 서버에 닿을 때까지 (11/8 음성 실사
     await flushCommits('user-1');
     expect(mCreate).toHaveBeenCalledTimes(1);
     expect(turnBodies().at(-1)?.card_action).toMatchObject({ id: 'c1', action: 'SAVED' });
-    expect(commitBodies().map((c) => c.body)).toEqual([{ session_id: 's1' }]);
+    // 저장 직후 refresh(정리 전이라 서버는 SKIPPED) → [완료]의 정리 — 거절은 안 실림
+    expect(commitBodies().map((c) => c.body)).toEqual([{ session_id: 's1', refresh: true }, { session_id: 's1' }]);
   });
 });

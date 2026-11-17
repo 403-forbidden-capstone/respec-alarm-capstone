@@ -29,7 +29,8 @@ describe('Gemini Live microphone gating', () => {
       createMediaStreamSource() { return { connect: () => {} }; }
       createScriptProcessor() {
         processor = {};
-        return { ...processor, set onaudioprocess(fn: (e: unknown) => void) { processor.onaudioprocess = fn; }, connect: () => {} };
+        const p = processor; // 펼침({...})은 setter를 값으로 바꿔 버려서(Babel) 받는 쪽을 직접 둠
+        return { set onaudioprocess(fn: (e: unknown) => void) { p.onaudioprocess = fn; }, connect: () => {} };
       }
       createBuffer(_channels: number, size: number, rate: number) {
         return { duration: size / rate, getChannelData: () => new Float32Array(size) };
@@ -63,8 +64,16 @@ describe('Gemini Live microphone gating', () => {
     expect(socket).not.toBeNull();
     const ws = socket as unknown as InstanceType<typeof FakeWebSocket>;
     ws.onopen?.();
-    const fromServer = (serverContent: object) => ws.onmessage?.({ data: JSON.stringify({ serverContent }) });
+    // 페이지는 서버 메시지를 Promise로 읽어(onmessage → then) 다음 마이크로태스크에 처리함
+    const settle = async () => {
+      for (let i = 0; i < 3; i++) await Promise.resolve();
+    };
+    const fromServer = async (serverContent: object) => {
+      ws.onmessage?.({ data: JSON.stringify({ serverContent }) });
+      await settle();
+    };
     ws.onmessage?.({ data: JSON.stringify({ setupComplete: {} }) });
+    await settle();
 
     const micFrame = () => processor.onaudioprocess?.({ inputBuffer: { getChannelData: () => new Float32Array([0.1, 0.2]) } });
     micFrame();
@@ -72,12 +81,12 @@ describe('Gemini Live microphone gating', () => {
     expect(initial).toBeGreaterThan(1); // setup + 사용자 PCM
 
     const pcm = Buffer.alloc(8).toString('base64');
-    fromServer({ outputTranscription: { text: '안녕하세요' }, modelTurn: { parts: [{ inlineData: { data: pcm, mimeType: 'audio/pcm;rate=24000' } }] } });
+    await fromServer({ outputTranscription: { text: '안녕하세요' }, modelTurn: { parts: [{ inlineData: { data: pcm, mimeType: 'audio/pcm;rate=24000' } }] } });
     expect(events).toContainEqual({ type: 'mic', muted: true });
     expect(sources).toHaveLength(1);
     micFrame();
     expect(sent).toHaveLength(initial);
-    fromServer({ turnComplete: true });
+    await fromServer({ turnComplete: true });
     expect(events.some((e) => e.type === 'turn')).toBe(false); // 서버의 완료만으로 조기 종료하면 안 됨
     micFrame();
     expect(sent).toHaveLength(initial);

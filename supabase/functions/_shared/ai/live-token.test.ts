@@ -72,3 +72,24 @@ describe('live-token', () => {
     assert.ok(sent.includes('\\"today\\" (오늘) is 2026-11-12'));
   });
 });
+
+it('하루 기록 선택 질문 정책이 글(T1)과 Live 음성에 같음 — 답은 필수 아님 · 주제마다 한 번 · 넘기기 · 끝내기 말 · 일정 확인이 먼저', async () => {
+  const { POINTS } = await import('../prompts/index.ts');
+  const t1 = POINTS.T1.prompt.system;
+  for (const w of ['없어', '모르겠어', '넘어가', '패스', '그냥 저장해']) {
+    assert.ok(t1.includes(w), `T1에 넘기기 말 ${w}`);
+    assert.ok(LIVE_SYSTEM.includes(w), `Live에 넘기기 말 ${w}`);
+  }
+  for (const w of ['잘게', '그만']) assert.ok(t1.includes(w) && LIVE_SYSTEM.includes(w), `끝내기 말 ${w}`);
+  assert.match(t1, /답을 들어야만 저장되는 물음처럼 말하지 마/);
+  assert.match(LIVE_SYSTEM, /answering is never required and you must never say it is needed to save/);
+  assert.match(t1, /같은 주제의 FOLLOW_UP은 대화 전체에서 1번만/);
+  assert.match(LIVE_SYSTEM, /at most one short follow-up per topic[^.]*\. Never ask the same thing twice/);
+  assert.match(t1, /CONFIRM · CLARIFY가 필요한 턴에는 FOLLOW_UP을 하지 마/);
+  assert.match(LIVE_SYSTEM, /When a plan still needs its time or AM\/PM, that question comes first; do not add a day-review question in the same turn/);
+  // 질문 상한 3번 · 답이 없으면 되풀이하지 않음
+  assert.match(t1, /REFLECT · ASK_TOMORROW · FOLLOW_UP을 합쳐 최대 3번/);
+  assert.match(LIVE_SYSTEM, /at most three day-review questions in total/);
+  assert.match(t1, /사용자가 답하지 않았다고 같은 물음을 다시 하지 마/);
+  assert.match(LIVE_SYSTEM, /If the user stays silent, do not repeat or rephrase the question/);
+});

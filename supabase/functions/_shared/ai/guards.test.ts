@@ -5,9 +5,9 @@ import assert from "node:assert/strict";
 import type { Act, Context, ServerEvent, Turn } from "./types.ts";
 import { sampleContext, sampleTranscript } from "./testing.ts";
 import {
-  AUTO_FLAGS, MAX_REPLY_CHARS, actsCodeOf, actsMismatch, alarmRelayMissing, allowedNumbers, applyGuards, autoCheckT1, autoFlags, claimsSaved,
+  AUTO_FLAGS, MAX_REFLECT_BEFORE_SLEEP, MAX_REPLY_CHARS, actsCodeOf, actsMismatch, alarmRelayMissing, allowedNumbers, applyGuards, autoCheckT1, autoFlags, claimsSaved,
   claimsSavedWithoutEvent, eventsForView, fallbackReply, hasHotline, hotlineRepeat, hotlineWithoutRisk, latestEvent, mixedTimeFormat, outstandingPending,
-  promisesSave, rebuildActs, safetyInfoFrom, toMinutes, userTexts, wakeAlarmSentence,
+  promisesSave, rebuildActs, safetyInfoFrom, toMinutes, userTexts, wakeAlarmSentence, wantsToFinish,
 } from "./guards.ts";
 import { questionCount } from "./ko.ts";
 
@@ -156,11 +156,12 @@ describe("actsMismatch", () => {
     assert.deepEqual(actsMismatch("몇 시에 주무실 거예요?", [{ type: "OTHER_Q", ref: null }], bs0(), [], []), ["OTHER_Q"]);
   });
 
-  it("자기 전 REFLECT는 2턴까지, 세 번째는 REFLECT_OVER", () => {
+  it("자기 전 REFLECT는 3턴까지(오늘 어땠어요 · 선택 질문 · 내일 일정), 네 번째는 REFLECT_OVER", () => {
     const r: Act[] = [{ type: "REFLECT", ref: null }];
-    const turns = [ai(0, "오늘 어땠어요?", r), user(1, "그냥"), ai(2, "기분은 어땠어요?", r), user(3, "보통")];
-    assert.deepEqual(actsMismatch("오늘 어땠어요?", r, bs0(), [], turns.slice(0, 2)), []);
-    assert.deepEqual(actsMismatch("오늘 어땠어요?", r, bs0(), [], turns), ["REFLECT_OVER"]);
+    const turns = [ai(0, "오늘 하루는 어땠어요?", r), user(1, "피곤했어"), ai(2, "특별히 힘들었던 일이 있었어요?", r), user(3, "과제"), ai(4, "내일 중요한 일정도 있나요?", r), user(5, "없어")];
+    assert.equal(MAX_REFLECT_BEFORE_SLEEP, 3);
+    assert.deepEqual(actsMismatch("내일 중요한 일정도 있나요?", r, bs0(), [], turns.slice(0, 4)), []);
+    assert.deepEqual(actsMismatch("기분은 어땠어요?", r, bs0(), [], turns), ["REFLECT_OVER"]);
   });
 
   it("한 답 안의 REFLECT 두 개는 한 턴으로 셈", () => {
@@ -799,6 +800,32 @@ describe("applyGuards — 서버 조치", () => {
     const noQ = cardCtx();
     noQ.ctx.question = null;
     assert.equal(run("그럼 푹 쉬세요.", [], noQ, { end: true }).end, true);
+  });
+
+  it("끝내자는 말 뒤 선택 질문(REFLECT · 서버 질문)은 지우고 일정 확인(CONFIRM)은 남김 · 서버 질문이 남아도 end를 거두지 않음", () => {
+    for (const said of ["이제 잘게", "그냥 저장해", "그만할래", "됐어 끝내자"]) assert.equal(wantsToFinish(said), true, said);
+    for (const said of ["잘게요~", "굿나잇!", "오늘은 여기까지"]) assert.equal(wantsToFinish(said), true, said);
+    // 하루 이야기 속 '됐어 · 끝 · 그만 · 잘 자'는 끝냄이 아님 (PR #542 리뷰)
+    for (const said of ["없어", "모르겠어", "넘어가", "과제하느라 힘들었어", "내일 10시 회의 있어", "시험 끝이야", "발표 잘 됐어", "내일 회의 취소됐어", "알바 그만둬서 우울해", "그만큼 피곤했어", "잘 자고 일어났어"]) {
+      assert.equal(wantsToFinish(said), false, said);
+    }
+    const bye = (text: string) => ({ ...cardCtx(), turns: [ai(0, "오늘 하루는 어땠어요?", [{ type: "REFLECT", ref: null }]), user(1, text)] });
+    const r = run("좋아요. 특별히 힘들었던 일이 있었어요?", [{ type: "REFLECT", ref: null }], bye("이제 잘게"), { end: true });
+    assert.deepEqual([r.reply, r.acts, r.end, r.actions.includes("drop_follow_up")], ["좋아요.", [], true, true]);
+    // 물음만 있던 답 → 짧은 마무리 한 줄, 모델이 end를 안 줘도 마무리(end true)
+    const only = run("내일 챙길 준비물도 있어요?", [{ type: "REFLECT", ref: null }], bye("그냥 저장해"));
+    assert.deepEqual([only.reply, only.end], ["카드에서 내용을 확인해 주세요.", true]);
+    // 일정 확인은 지우지 않음 (정확한 일정 · 알람에 필요한 물음)
+    const keep = run("발표라 오전 7시 40분에 강하게 깨우는 알람으로 저장할까요?", [{ type: "CONFIRM", ref: "c1" }], bye("그냥 저장해"));
+    assert.deepEqual([keep.reply, keep.end], ["발표라 오전 7시 40분에 강하게 깨우는 알람으로 저장할까요?", false]); // 확인이 남으면 끝내지 않음
+    // 하루 이야기("시험 끝이야")에는 선택 질문을 지우지 않음
+    assert.equal(run("수고했어요. 시험은 어땠어요?", [{ type: "REFLECT", ref: null }], bye("시험 끝이야")).reply, "수고했어요. 시험은 어땠어요?");
+    // 서버 질문이 남아 있어도 끝내자고 했으면 end 그대로
+    const c = bye("이제 잘게");
+    c.ctx.question = { id: "q1", kind: "PREP_CHECK", text: "준비가 더 걸릴까요?", target_ref: "a1", options: [] };
+    assert.deepEqual([run("편안한 밤 보내세요.", [], c, { end: true }).end], [true]);
+    // "없어"는 끝냄이 아님 — 그 주제만 넘기고 내일 일정 물음은 남음 (넘기기는 T1 · Live 지침이 맡음)
+    assert.equal(run("알겠어요. 내일 일정은 있어요?", [{ type: "REFLECT", ref: null }], bye("없어. 그냥 넘어가자")).reply, "알겠어요. 내일 일정은 있어요?");
   });
 
   it("같은 입력 같은 답 · 입력을 바꾸지 않음", () => {

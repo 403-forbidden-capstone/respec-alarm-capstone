@@ -1,14 +1,16 @@
 // 실시간 음성 대화(Gemini Live) — 마이크 · 재생 · WebSocket을 돌리는 작은 페이지와 그 페이지가 보내는 메시지 모양
 //   앱은 WebView, 웹 미리보기는 iframe으로 이 페이지를 띄움 (마이크 PCM 스트리밍 · 24kHz 재생을 새 네이티브 패키지 없이 하려고)
 //   토큰은 서버(voice-live-token)가 준 1회용 토큰 — 1분 안에 연결, 모델 · 지침은 서버가 잠가 둠
-//   페이지 → 앱: live(연결됨) · me/ai(말을 글로 바꾼 조각) · turn(AI 차례 끝) · error(MIC · NETWORK) · closed(연결 끊김)
+//   페이지 → 앱: live(연결됨) · me/ai(말을 글로 바꾼 조각) · turn(AI 차례 끝) · mic(AI 말 중 전송 막음 · 다시 엶) · vad(사용자 목소리 감지 켜짐 · 꺼짐) · error(MIC · NETWORK) · closed(연결 끊김)
 //   앱 → 페이지: ask(글) — 서버가 찾은 되물을 것을 Live 연결에 글로 넣어 Live가 소리로 물음 (clientContent, 받아쓰기에는 안 나옴)
+//                stop — 앱이 연결을 끝낼 때 페이지를 내리기 전에 마이크 · 연결 · 재생을 먼저 닫게 (여러 번 와도 한 번만)
 
 export type LiveMessage =
   | { type: 'live' }
   | { type: 'me' | 'ai'; text: string }
   | { type: 'turn' }
   | { type: 'mic'; muted: boolean }
+  | { type: 'vad'; active: boolean }
   | { type: 'error'; code: 'MIC' | 'NETWORK'; detail?: string }
   | { type: 'closed'; code: number; reason: string };
 
@@ -34,10 +36,32 @@ export function livePage(token: string, model: string): string {
   // AI 출력 중 PCM 전송만 막음. 마이크 트랙 · WebSocket · 재생은 유지한다.
   var micMuted = false, turnPending = false, resumeTimer = null, closed = false;
   var ECHO_TAIL_MS = 350;
+  // 목소리 감지(30초 무발화 판정용) — 마이크가 열려 있을 때만, 프레임(2048샘플 ≈ 128ms) 소리 크기(RMS)로.
+  //   켜짐: 문턱을 넘는 프레임이 3번 이어짐(≈0.4초, 짧은 잡음 무시) · 꺼짐: 문턱 아래가 6번 이어짐(≈0.8초, 말 사이 숨 고르기)
+  //   문턱 = max(VAD_MIN, 바닥 소음 × 3) — 바닥 소음은 조용하면 바로 내려가고 시끄러우면 천천히 올라가서(약 10초 — 말 사이 쉼에 다시 내려감) 이어지는 소음은 바닥이 됨
+  //   AI 소리는 마이크가 막힌 동안 보지 않음(재입력 방지와 같은 구간)
+  var VAD_MIN = 0.015, VAD_ON = 3, VAD_OFF = 6, vadFloor = VAD_MIN / 3, vadActive = false, vadRun = 0;
+  function vadSet(active) {
+    vadRun = 0;
+    if (vadActive === active) return;
+    vadActive = active;
+    post({ type: 'vad', active: active });
+  }
+  function vadFrame(f) {
+    var sum = 0;
+    for (var i = 0; i < f.length; i++) sum += f[i] * f[i];
+    var rms = Math.sqrt(sum / (f.length || 1));
+    var loud = rms > Math.max(VAD_MIN, vadFloor * 3);
+    vadFloor = rms < vadFloor ? rms : vadFloor + (rms - vadFloor) * 0.005;
+    if (loud === vadActive) { vadRun = 0; return; }
+    vadRun++;
+    if (vadRun >= (loud ? VAD_ON : VAD_OFF)) vadSet(loud);
+  }
   function muteMic() {
     if (resumeTimer !== null) { clearTimeout(resumeTimer); resumeTimer = null; }
     if (micMuted) return;
     micMuted = true;
+    vadSet(false);
     post({ type: 'mic', muted: true });
   }
   function maybeFinishTurn() {
@@ -75,8 +99,9 @@ export function livePage(token: string, model: string): string {
     var src = inCtx.createMediaStreamSource(mic);
     proc = inCtx.createScriptProcessor(2048, 1, 1);
     proc.onaudioprocess = function (e) {
-      if (!ws || ws.readyState !== 1 || micMuted) return;
+      if (closed || !ws || ws.readyState !== 1 || micMuted) return;
       var f = e.inputBuffer.getChannelData(0), pcm = new Int16Array(f.length);
+      vadFrame(f);
       for (var i = 0; i < f.length; i++) { var v = Math.max(-1, Math.min(1, f[i])); pcm[i] = v < 0 ? v * 0x8000 : v * 0x7fff; }
       ws.send(JSON.stringify({ realtimeInput: { audio: { data: toB64(new Uint8Array(pcm.buffer)), mimeType: 'audio/pcm;rate=' + inCtx.sampleRate } } }));
     };
@@ -111,6 +136,7 @@ export function livePage(token: string, model: string): string {
     maybeFinishTurn();
   }
   function onServer(text) {
+    if (closed) return; // 닫은 뒤 늦게 온 응답은 재생 · 전달하지 않음
     var m = JSON.parse(text);
     if (m.setupComplete) { startMic(); post({ type: 'live' }); return; }
     var c = m.serverContent;
@@ -125,12 +151,17 @@ export function livePage(token: string, model: string): string {
     });
     if (c.turnComplete) { turnPending = true; maybeFinishTurn(); }
   }
+  // 마이크 · 연결 · 재생 · 타이머를 모두 닫음 — 여러 번 불려도 한 번만 (앱 stop · pagehide · 연결 끊김)
   function cleanup() {
+    if (closed) return;
     closed = true;
     if (resumeTimer !== null) { clearTimeout(resumeTimer); resumeTimer = null; }
+    if (proc) { proc.onaudioprocess = null; try { proc.disconnect(); } catch (e) {} }
+    playing.forEach(function (s) { try { s.stop(); } catch (e) {} });
+    playing = [];
     try { if (ws) ws.close(); } catch (e) {}
     if (mic) mic.getTracks().forEach(function (t) { t.stop(); });
-    try { if (inCtx) inCtx.close(); if (outCtx) outCtx.close(); } catch (e) {}
+    [inCtx, outCtx].forEach(function (c) { try { if (c) Promise.resolve(c.close()).catch(function () {}); } catch (e) {} });
   }
   window.addEventListener('pagehide', cleanup);
   // 앱이 보낸 글(되물을 것) — 연결돼 있을 때만 Live에 넣고 차례를 넘겨 바로 답하게 (웹은 부모 창 · 앱은 WebView가 보냄)
@@ -138,13 +169,15 @@ export function livePage(token: string, model: string): string {
     if (ev.source && ev.source !== window.parent) return;
     var m;
     try { m = JSON.parse(ev.data); } catch (e) { return; }
-    if (!m || m.type !== 'ask' || typeof m.text !== 'string' || !ws || ws.readyState !== 1) return;
+    if (m && m.type === 'stop') { cleanup(); return; }
+    if (!m || m.type !== 'ask' || typeof m.text !== 'string' || closed || !ws || ws.readyState !== 1) return;
     ws.send(JSON.stringify({ clientContent: { turns: [{ role: 'user', parts: [{ text: m.text }] }], turnComplete: true } }));
   }
   window.addEventListener('message', fromApp);
   document.addEventListener('message', fromApp);
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { post({ type: 'error', code: 'MIC', detail: 'unsupported' }); return; }
   navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true } }).then(function (stream) {
+    if (closed) { stream.getTracks().forEach(function (t) { t.stop(); }); return; } // 권한을 기다리는 사이 앱이 끝냄
     mic = stream;
     inCtx = newCtx(16000);
     outCtx = newCtx(24000);
@@ -156,7 +189,7 @@ export function livePage(token: string, model: string): string {
       (typeof ev.data === 'string' ? Promise.resolve(ev.data) : ev.data.text()).then(onServer).catch(function () {});
     };
     ws.onerror = function () { post({ type: 'error', code: 'NETWORK' }); };
-    ws.onclose = function (e) { cleanup(); post({ type: 'closed', code: e.code, reason: e.reason || '' }); };
+    ws.onclose = function (e) { var mine = !closed; cleanup(); if (mine) post({ type: 'closed', code: e.code, reason: e.reason || '' }); };
   }, function (err) {
     post({ type: 'error', code: 'MIC', detail: String(err && err.name) });
   });

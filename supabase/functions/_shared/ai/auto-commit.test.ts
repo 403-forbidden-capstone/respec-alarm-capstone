@@ -207,8 +207,8 @@ test('정리 중 추가 발화: 그 앞까지 저장(STALE), 새 말은 다음 �
     row.server_state = { ...row.server_state, rev: row.server_state.rev + 1, counts: { ...row.server_state.counts, user_turns: row.server_state.counts.user_turns + 1 } };
     return emptyExtract({ todos: [umbrella] });
   };
-  assert.deepEqual((await run(db, kst('2026-10-30T04:00:00'), { T2: [talkMeanwhile] }).out).done, [{ session_id: sid, status: 'STALE' }]);
-  const again = run(db, kst('2026-10-30T04:10:00'), { T2: [emptyExtract({ todos: [umbrella, { ...umbrella, title: '도서관 책' }] })] });
+  assert.deepEqual((await run(db, kst('2026-10-30T04:00:00'), { T2: [talkMeanwhile], T5: [{ diary: '우산을 챙기기로 했다.' }] }).out).done, [{ session_id: sid, status: 'STALE' }]);
+  const again = run(db, kst('2026-10-30T04:10:00'), { T2: [emptyExtract({ todos: [umbrella, { ...umbrella, title: '도서관 책' }] })], T5: [{ diary: '우산과 도서관 책을 챙기기로 했다.' }] });
   assert.deepEqual((await again.out).done, [{ session_id: sid, status: 'DONE' }]);
   assert.deepEqual(db.rows('todos').map((t) => t.title), ['우산', '도서관 책']);
 });

@@ -26,15 +26,20 @@ export async function isFinished(userId: string, sessionId: string): Promise<boo
 // 대화 정리(voice-commit)를 아직 서버가 끝내지 못한 세션 — [완료] 때 적고, 서버가 DONE을 주면 지움. 못 보냈으면 다음에 대화를 열 때 다시 보냄
 //   키 = respec.voice.commit.<사용자 id>. 서버는 정리한 뒤 새 말이 없으면 다시 저장하지 않으므로 여러 번 보내도 됨 (같은 날 [완료]를 또 누르면 같은 세션이 다시 적힘)
 //   rejected = 그 세션에서 [저장 안 함]을 누른 카드 번호 — 서버에 못 알렸을 수 있어 정리 요청에 실어 보냄(서버가 열린 카드만 REJECTED로). 옛 모양(세션 번호 글자)은 rejected 없음으로 읽음
-export type PendingCommit = { sessionId: string; rejected: string[] };
+//   refresh = 카드 [저장] 뒤 일기만 고치는 정리(서버가 이미 정리한 대화일 때만, T2 없음). [완료]의 정리와 겹치면 [완료] 쪽(refresh 없음)이 이김
+//   v = 적을 때마다 바뀌는 표시 — 보내는 사이 다시 적혔으면(카드 저장 · [완료]) 그 답으로 지우지 않고 한 번 더 보냄
+export type PendingCommit = { sessionId: string; rejected: string[]; refresh?: true; v?: string };
+let stamp = 0;
 const COMMIT_PREFIX = 'respec.voice.commit.';
 const commitMemory = new Map<string, PendingCommit[]>();
 
 function commitOf(v: unknown): PendingCommit | null {
   if (typeof v === 'string') return { sessionId: v, rejected: [] };
-  const o = v as { sessionId?: unknown; rejected?: unknown } | null;
+  const o = v as { sessionId?: unknown; rejected?: unknown; refresh?: unknown; v?: unknown } | null;
   if (!o || typeof o.sessionId !== 'string') return null;
-  return { sessionId: o.sessionId, rejected: Array.isArray(o.rejected) ? o.rejected.filter((r): r is string => typeof r === 'string') : [] };
+  const rejected = Array.isArray(o.rejected) ? o.rejected.filter((r): r is string => typeof r === 'string') : [];
+  const stampOf = typeof o.v === 'string' ? { v: o.v } : {};
+  return o.refresh === true ? { sessionId: o.sessionId, rejected, refresh: true, ...stampOf } : { sessionId: o.sessionId, rejected, ...stampOf };
 }
 
 async function readCommits(userId: string): Promise<PendingCommit[]> {
@@ -61,13 +66,29 @@ async function writeCommits(userId: string, list: PendingCommit[]): Promise<void
 
 export const pendingCommits = (userId: string): Promise<PendingCommit[]> => readCommits(userId);
 
-export async function addPendingCommit(userId: string, sessionId: string, rejected: string[] = []): Promise<void> {
-  await writeCommits(userId, [...(await readCommits(userId)).filter((c) => c.sessionId !== sessionId), { sessionId, rejected }].slice(-KEEP));
+// 적기 · 지우기는 한 번에 하나 — 읽고 쓰는 사이 다른 쪽이 끼면 방금 적은 것이 지워질 수 있어서 (보내는 중 [완료] · 카드 저장)
+let queueLock: Promise<unknown> = Promise.resolve();
+function locked<T>(fn: () => Promise<T>): Promise<T> {
+  const run = queueLock.then(fn, fn);
+  queueLock = run.catch(() => undefined);
+  return run;
 }
 
-export async function removePendingCommit(userId: string, sessionId: string): Promise<void> {
-  await writeCommits(userId, (await readCommits(userId)).filter((c) => c.sessionId !== sessionId));
-}
+export const addPendingCommit = (userId: string, sessionId: string, rejected: string[] = [], refresh = false): Promise<void> =>
+  locked(async () => {
+    const list = await readCommits(userId);
+    const before = list.find((c) => c.sessionId === sessionId);
+    const v = `${Date.now()}-${++stamp}`;
+    const item: PendingCommit =
+      refresh && (!before || before.refresh) ? { sessionId, rejected: before?.rejected ?? rejected, refresh: true, v } : { sessionId, rejected: before && refresh ? before.rejected : rejected, v };
+    await writeCommits(userId, [...list.filter((c) => c.sessionId !== sessionId), item].slice(-KEEP));
+  });
+
+/** v를 주면 그 표시 그대로일 때만 지움 — 보내는 사이 다시 적힌 것은 남김 */
+export const removePendingCommit = (userId: string, sessionId: string, v?: string): Promise<void> =>
+  locked(async () => {
+    await writeCommits(userId, (await readCommits(userId)).filter((c) => c.sessionId !== sessionId || (v !== undefined && c.v !== v)));
+  });
 
 // 시험용 — 이번 실행 메모리 비우기
 export function resetFinishedMemory() {

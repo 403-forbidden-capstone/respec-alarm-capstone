@@ -27,7 +27,7 @@ import { render } from './render.ts';
 import { loadSession, recordCalls, saveSession, type CommitState, type ServerState, type SessionDeps, type SessionRow } from './session.ts';
 import { applyCardAction } from './turn-core.ts';
 import type { FinalExtract } from './types.ts';
-import { contextVars, viewTranscript } from './view.ts';
+import { addDays, contextVars, spokenTime, viewTranscript } from './view.ts';
 import { ctxOf, toTurnState, turnsOf, withTurnState } from './voice-state.ts';
 
 /** RUNNING이 이만큼 지나면 앞 요청이 죽은 것으로 보고 다시 시도를 받음 (T2 19초 × 다시 시도 1번 + 저장) */
@@ -65,10 +65,16 @@ const outOf = (sessionId: string, status: VoiceCommitOut['status']): VoiceCommit
 /** 이 정리 뒤에 사용자 말이 늘었는지 — at_turn이 없는 예전 정리는 세션을 끝냈으므로 늘 수 없음 */
 const behind = (c: CommitState, row: SessionRow): boolean => c.at_turn !== undefined && c.at_turn < row.server_state.counts.user_turns;
 
-/** 이미 끝났거나(그 뒤 새 말 없음) 다른 요청이 처리 중이면 그 답 — 아니면 null(이번 요청이 처리) */
+/** 지금 [저장]된 카드 번호 (정렬) */
+const savedCardIds = (st: ServerState): string[] => st.cards.filter((c) => c.status === 'SAVED').map((c) => c.id).sort();
+
+/** 이 정리 뒤에 카드가 더 저장됐는지 — 무발화 종료 · [완료] 뒤 카드 [저장]을 일기에 반영하려고. saved_cards 없는 예전 정리는 비교 안 함 */
+const cardsMoved = (c: CommitState, st: ServerState): boolean => c.saved_cards !== undefined && savedCardIds(st).join() !== c.saved_cards.join();
+
+/** 이미 끝났거나(그 뒤 새 말 · 새 저장 카드 없음) 다른 요청이 처리 중이면 그 답 — 아니면 null(이번 요청이 처리) */
 function settled(row: SessionRow, nowMs: number): VoiceCommitOut | null {
   const c = row.server_state.commit;
-  if (c?.status === 'DONE' && !behind(c, row)) return c.out as VoiceCommitOut;
+  if (c?.status === 'DONE' && !behind(c, row) && !cardsMoved(c, row.server_state)) return c.out as VoiceCommitOut;
   if (c?.status === 'RUNNING' && nowMs - Date.parse(c.started_at) < COMMIT_STALE_MS) return outOf(row.session_id, 'RUNNING');
   return null;
 }
@@ -143,9 +149,11 @@ async function saveRecords(db: Db, userId: string, plan: FinalPlan, review: stri
 
 /**
  * 하루 일기에 넣을 사실 — 그날(date) 대화들의 structured.v1에서 사용자가 말했거나 확인한 것(inferred 뺌) · 기록된 행동(needs_confirm 뺌) · 날짜가 그날인 것만.
- * 사건 · 기분 · 행동 · 수면 · 일정 결과가 하나도 없으면 null (일기를 만들지 않음 — 습관 · 목표만으로는 쓰지 않음)
+ * 저장된 일정(plans — 카드 [저장]한 것만, 시각이 애매하면 시각 없이) · 저장된 준비물 · 할 일(todos)도 넣음(D31 A): 일정만 저장한 날도 일기가 생김.
+ * 날짜는 서버가 '오늘 · 내일'로 바꿔 넣음(모델이 날짜를 세지 않게), 시각은 '오전 10시' 말씨로.
+ * 사건 · 기분 · 행동 · 수면 · 일정 결과 · 일정 · 할 일이 하나도 없으면 null (일기를 만들지 않음 — 습관 · 목표만으로는 쓰지 않음)
  */
-export function journalFacts(list: Structured[], date: string): Record<string, unknown> | null {
+export function journalFacts(list: Structured[], date: string): JournalFacts | null {
   const told = (x: { source: string }): boolean => x.source !== 'inferred';
   // 위험 판정(other.safety_flag) 대화는 어떤 칸도 일기 입력에 넣지 않음
   const day = list.filter((s) => s.session.reference_date === date && !s.other.safety_flag);
@@ -171,8 +179,74 @@ export function journalFacts(list: Structured[], date: string): Record<string, u
   );
   const habits = day.flatMap((s) => s.habit_signals.filter((h) => told(h) && h.date === date).map(({ habit, note }) => ({ habit, note })));
   const goals = day.flatMap((s) => s.goals_routine.goals.filter(told).map((g) => g.goal_text));
-  if (events.length + memorable.length + mood.length + behavior.length + sleep_wake.length + schedule_outcomes.length === 0) return null;
-  return { events, memorable, mood, behavior, sleep_wake, schedule_outcomes, habits, goals };
+  // D31 A — 실제로 저장된 것만: 일정은 카드 [저장](saved), 할 일 · 준비물은 넣었거나(inserted) 이미 있던 것(duplicate). 여러 대화에 같은 것이 나오면 한 번만
+  const plans = uniq(
+    day.flatMap((s) => s.appointments.filter((a) => told(a) && a.status === 'saved').map((a) => ({ title: a.title, day: dayLabel(a.date, date), time: a.time && !a.unclear ? spokenOf(a.time) : null }))),
+    (p) => `${p.title.replace(/\s+/g, '')}|${p.day}|${p.time}`,
+  );
+  const todos = uniq(
+    day.flatMap((s) =>
+      s.todos
+        .filter((t) => told(t) && (t.stored === 'inserted' || t.stored === 'duplicate'))
+        .map((t) => ({ title: t.title, kind: t.type === 'ITEM' ? ('준비물' as const) : ('할 일' as const), day: dayLabel(t.due_date, date), for_plan: t.appointment_title })),
+    ),
+    (t) => `${t.title.replace(/\s+/g, '')}|${t.kind}|${t.day}`,
+  );
+  if (events.length + memorable.length + mood.length + behavior.length + sleep_wake.length + schedule_outcomes.length + plans.length + todos.length === 0) return null;
+  return { events, memorable, mood, behavior, sleep_wake, schedule_outcomes, habits, goals, plans, todos };
+}
+
+export interface JournalFacts {
+  events: { text: string; time: string | null }[];
+  memorable: string[];
+  mood: { mood: string[]; fatigue: number | null; stress: number | null; causes: string[]; condition_note: string | null }[];
+  behavior: unknown[];
+  sleep_wake: unknown[];
+  schedule_outcomes: unknown[];
+  habits: unknown[];
+  goals: string[];
+  plans: { title: string; day: string | null; time: string | null }[];
+  todos: { title: string; kind: '준비물' | '할 일'; day: string | null; for_plan: string | null }[];
+}
+
+/** 같은 키는 처음 것만 */
+function uniq<T>(xs: T[], key: (x: T) => string): T[] {
+  const seen = new Set<string>();
+  return xs.filter((x) => !seen.has(key(x)) && !!seen.add(key(x)));
+}
+
+/** 일기 날짜 기준 '오늘 · 내일 · 모레' — 그 밖은 날짜 그대로, 모르면 null */
+function dayLabel(d: string | null, date: string): string | null {
+  if (d === null) return null;
+  return { [date]: '오늘', [addDays(date, 1)]: '내일', [addDays(date, 2)]: '모레' }[d] ?? d;
+}
+const spokenOf = (hhmm: string): string => spokenTime(Number(hhmm.slice(0, 2)), Number(hhmm.slice(3, 5)));
+
+const MOOD_KO: Record<string, [string, string]> = {
+  good: ['좋고', '좋은'], calm: ['차분하고', '차분한'], tired: ['피곤하고', '피곤한'], stressed: ['스트레스가 많고', '스트레스가 많은'],
+  anxious: ['불안하고', '불안한'], sad: ['슬프고', '슬픈'], angry: ['화가 나고', '화가 난'], mixed: ['마음이 복잡하고', '마음이 복잡한'],
+};
+/** 받침이 있으면 a, 없으면 b (한글이 아니면 a) */
+const josa = (w: string, a: string, b: string): string => {
+  const c = w.charCodeAt(w.length - 1) - 0xac00;
+  return c >= 0 && c < 11172 && c % 28 === 0 ? b : a;
+};
+
+/**
+ * T5가 쓸 사실이 있는데 빈 글을 줬을 때의 대체 일기 — 사실 목록의 값만 이어 붙임(지어내지 않음).
+ * 오늘 기분 · 사건 → 일정 → 준비물 · 할 일 순, 두세 문장.
+ */
+export function fallbackDiary(f: JournalFacts): string {
+  const out: string[] = [];
+  const moods = [...new Set(f.mood.flatMap((m) => m.mood))].filter((m) => MOOD_KO[m]);
+  if (moods.length > 0) out.push(`오늘은 ${moods.map((m, i) => (MOOD_KO[m] as [string, string])[i === moods.length - 1 ? 1 : 0]).join(' ')} 하루였다.`);
+  if (f.events.length > 0) out.push(`${f.events.map((e) => e.text).join(', ')}.`);
+  for (const p of f.plans.slice(0, 2)) out.push(`${[p.day, p.time && `${p.time}에`].filter(Boolean).join(' ')} ${p.title}${josa(p.title, '이', '가')} 예정되어 있다.`.trimStart());
+  const items = f.todos.filter((t) => t.kind === '준비물').map((t) => t.title);
+  const tasks = f.todos.filter((t) => t.kind === '할 일').map((t) => t.title);
+  if (items.length > 0) out.push(`${items.join(', ')}${josa(items[items.length - 1] as string, '을', '를')} 챙기기로 했다.`);
+  if (tasks.length > 0) out.push(`${tasks.join(', ')}${josa(tasks[tasks.length - 1] as string, '을', '를')} 하기로 했다.`);
+  return out.join(' ');
 }
 
 /**
@@ -181,14 +255,15 @@ export function journalFacts(list: Structured[], date: string): Record<string, u
  * 같은 대화에 말이 늘어 다시 추출했으면 그 전에 만든 이 대화의 일기는 새 말을 모르므로 다시 씀.
  * 모델 실패는 던짐 → 이 단계만 실패(PARTIAL, 다음 대화 열기 때 다시) — 앞 단계 저장 결과는 그대로
  */
-async function saveJournal(deps: CommitDeps, sessionId: string, date: string, nowIso: string, extractedAt: string | null): Promise<number> {
+async function saveJournal(deps: CommitDeps, sessionId: string, date: string, nowIso: string, extractedAt: string | null, force = false): Promise<number> {
   const db = deps.userDb;
   const cur = must<{ journal_id: string; is_edited: boolean; source_session_id: string | null; ai_summary: string | null; generated_at: string | null } | null>(
     'daily_journals',
     await db.from('daily_journals').select('journal_id, is_edited, source_session_id, ai_summary, generated_at').eq('user_id', deps.userId).eq('record_date', date).maybeSingle(),
   );
   // extractedAt 없음 = 예전 정리 — 이 대화의 일기가 있으면 그대로
-  const upToDate = cur?.source_session_id === sessionId && !!cur.ai_summary && (extractedAt === null || (cur.generated_at !== null && dbMs(cur.generated_at) >= Date.parse(extractedAt)));
+  //   force = 정리 뒤 카드가 더 저장됨 — 이 대화의 일기가 있어도 다시 씀(고친 일기는 그대로)
+  const upToDate = !force && cur?.source_session_id === sessionId && !!cur.ai_summary && (extractedAt === null || (cur.generated_at !== null && dbMs(cur.generated_at) >= Date.parse(extractedAt)));
   if (cur?.is_edited || upToDate) return 0;
   const sessions = must<{ extracted_data: Structured }[]>(
     'conversation_sessions',
@@ -201,8 +276,13 @@ async function saveJournal(deps: CommitDeps, sessionId: string, date: string, no
   const fillIo = (deps.ioUserIds ?? []).includes(deps.userId);
   await recordCalls(deps, sessionId, [{ call: res.call, io: fillIo ? { input: render(POINTS.T5.prompt.user, vars).trimEnd(), output: res.ok ? res.data : null, error: res.ok ? null : res.reason } : null }], nowIso);
   if (!res.ok) throw new Error(`T5 실패: ${res.code}`);
-  const diary = res.data.diary.trim();
-  if (diary === '') return 0;
+  let diary = res.data.diary.trim();
+  if (diary === '') {
+    // 쓸 사실이 있는데 빈 글 — 예전엔 0을 돌려 DONE인데 일기가 없었음. 사실 값만으로 만든 문장으로 저장 (로그엔 개수만, 글은 안 남김)
+    diary = fallbackDiary(facts);
+    console.warn('[voice-commit] T5 빈 일기 → 대체 문장', { session_id: sessionId, counts: Object.fromEntries(Object.entries(facts).map(([k, v]) => [k, (v as unknown[]).length])), fallback: diary !== '' });
+    if (diary === '') return 0;
+  }
   const row = { ai_summary: diary, source_session_id: sessionId, generated_at: nowIso };
   // is_edited = false 조건 — 읽은 뒤 사용자가 고쳤으면 덮지 않음(0줄 → 쓴 수 0)
   if (cur) {
@@ -264,8 +344,10 @@ export async function handleVoiceCommit(deps: CommitDeps, body: unknown): Promis
   const r = Reader.root(body);
   const sessionId = r.uuid('session_id', { required: true }) ?? '';
   const rejected = readRejected(r);
+  // refresh — 카드를 [저장]한 뒤 앱이 보냄: 이미 정리한 대화의 일기만 고침. 정리한 적 없거나 그 뒤 새 말이 있으면 SKIPPED(T2를 부르지 않음 — 새 말은 [완료] · 새벽 4시 몫)
+  const refresh = r.bool('refresh') === true;
   r.finish();
-  return commitRoom(deps, sessionId, rejected, (deps.now ?? (() => new Date()))());
+  return commitRoom(deps, sessionId, rejected, (deps.now ?? (() => new Date()))(), refresh);
 }
 
 /**
@@ -273,32 +355,34 @@ export async function handleVoiceCommit(deps: CommitDeps, body: unknown): Promis
  * 앞 구간을 못 끝냈으면 이 세션 결과를 PARTIAL(failed에 previous_session)로 — 앱이 다시 보낼 목록에 남겨 다음에 둘 다 이어서.
  * 카드 번호는 구간을 넘어 그대로라(carryCards) rejected_cards를 앞 구간에도 같이 넘김 (모르는 번호는 건너뜀)
  */
-export async function commitRoom(deps: CommitDeps, sessionId: string, rejected: string[], now: Date): Promise<VoiceCommitOut> {
+export async function commitRoom(deps: CommitDeps, sessionId: string, rejected: string[], now: Date, refresh = false): Promise<VoiceCommitOut> {
   const sd: SessionDeps = { userId: deps.userId, userDb: deps.userDb, service: deps.service };
   const row = await loadSession(sd, sessionId);
   const prevId = row.server_state.prev_session_id;
   let prevDone = true;
   if (prevId) {
     try {
-      const p = await commitRoom(deps, prevId, rejected, now);
+      const p = await commitRoom(deps, prevId, rejected, now, refresh);
       prevDone = p.status === 'DONE' || p.status === 'SKIPPED';
     } catch (e) {
       console.error('[voice-commit] 앞 구간 정리 실패:', e);
       prevDone = false;
     }
   }
-  const out = await commitSession(deps, row, rejected, now);
+  const out = await commitSession(deps, row, rejected, now, refresh);
   if (prevDone || out.status === 'RUNNING') return out;
   return { ...out, status: 'PARTIAL', failed: [...out.failed, 'previous_session'] };
 }
 
-async function commitSession(deps: CommitDeps, row: SessionRow, rejected: string[], now: Date): Promise<VoiceCommitOut> {
+async function commitSession(deps: CommitDeps, row: SessionRow, rejected: string[], now: Date, refresh = false): Promise<VoiceCommitOut> {
   const sessionId = row.session_id;
   const nowIso = seoulIso(now);
   const sd: SessionDeps = { userId: deps.userId, userDb: deps.userDb, service: deps.service };
   const early = settled(row, now.getTime());
   if (early) return early;
   if (row.server_state.counts.user_turns === 0) return outOf(sessionId, 'SKIPPED'); // 첫 마디만 있는 대화 — 끝내지도 않음(다음에 이어 씀)
+  const before = row.server_state.commit;
+  if (refresh && (before?.extract == null || behind(before, row))) return outOf(sessionId, 'SKIPPED');
 
   // 1) 차지하기 — 겹친 요청은 rev 비교에서 하나만 이김. 세션은 끝내지 않음(ended · ended_at 그대로) — 같은 날 이어 말할 수 있게
   const st = withRejected(row.server_state, rejected, nowIso);
@@ -306,6 +390,8 @@ async function commitSession(deps: CommitDeps, row: SessionRow, rejected: string
   const atTurn = st.counts.user_turns; // 이번 정리가 다루는 말 수 — row.turns 그대로 추출하므로 그 뒤 온 말은 다음 정리 몫
   // 앞 시도의 추출은 같은 말까지 뽑은 것일 때만 다시 씀 (at_turn 없는 예전 정리는 끝난 세션이라 말이 늘지 않음)
   const reuse = prev?.extract != null && !behind(prev, row);
+  // 같은 추출을 다시 나누는데 카드가 더 저장됐으면 일기도 새로 — 앞 시도(PARTIAL)가 이미 그 카드로 일기를 썼어도 다시 쓰지만 결과는 같음
+  const cardsSaved = reuse && prev !== null && (cardsMoved(prev, st) || prev.redo_journal === true);
   const commit: CommitState = {
     status: 'RUNNING', attempts: (prev?.attempts ?? 0) + 1, started_at: nowIso, finished_at: null, at_turn: atTurn,
     extracted_at: reuse ? prev?.extracted_at ?? null : null, extract: reuse ? prev?.extract ?? null : null, out: null, error: null,
@@ -394,11 +480,11 @@ async function commitSession(deps: CommitDeps, row: SessionRow, rejected: string
   });
   // 일기는 공개 JSON이 저장된 뒤에만 — 저장 못 했으면 이번엔 만들지 않음(PARTIAL이라 다시 시도 때 만듦)
   // 이번 대화가 위험 판정이면 일기 단계를 건너뜀 — 그 대화로 기존 일기를 다시 쓰지 않음
-  if (structuredSaved && !plan.draft.other.safety_flag) await step('daily_journals', async () => void (saved.daily_journals = await saveJournal(deps, sessionId, st.day.review, nowIso, commit.extracted_at ?? null)));
+  if (structuredSaved && !plan.draft.other.safety_flag) await step('daily_journals', async () => void (saved.daily_journals = await saveJournal(deps, sessionId, st.day.review, nowIso, commit.extracted_at ?? null, cardsSaved)));
 
   // 5) 끝 — 저장한 답은 at_turn까지의 결과. 정리하는 사이 새 말이 왔으면 이 요청에는 STALE (저장 상태는 DONE이지만 at_turn이 뒤처져 다음 요청이 다시 정리)
   const out: VoiceCommitOut = { session_id: sessionId, status: failed.length === 0 ? 'DONE' : 'PARTIAL', saved, pending: plan.draft.pending.map((p) => p.text), failed };
-  await writeCommit(sd, sessionId, { ...commit, status: out.status === 'DONE' ? 'DONE' : 'PARTIAL', finished_at: nowIso, out, error: failed.length === 0 ? null : failed.join(',') });
+  await writeCommit(sd, sessionId, { ...commit, status: out.status === 'DONE' ? 'DONE' : 'PARTIAL', finished_at: nowIso, out, error: failed.length === 0 ? null : failed.join(','), saved_cards: savedCardIds(latest), ...(cardsSaved && (!structuredSaved || failed.includes('daily_journals')) ? { redo_journal: true } : {}) });
   if (out.status === 'DONE' && (await loadSession(sd, sessionId)).server_state.counts.user_turns > atTurn) return { ...out, status: 'STALE' };
   return out;
 }

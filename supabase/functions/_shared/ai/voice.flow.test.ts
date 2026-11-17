@@ -207,7 +207,7 @@ test('녹화 한 바퀴: 첫 마디 템플릿 → 새 약속 카드 → 계산 �
     assert.ok((c.input_tokens as number) > 0 && (c.output_tokens as number) > 0, '토큰');
     assert.ok((c.latency_ms as number) > 0, '지연');
     assert.equal(c.io, null);
-    assert.equal(c.prompt_version, c.point === 'T1' ? 'v1.5' : 'v2-d');
+    assert.equal(c.prompt_version, c.point === 'T1' ? 'v1.6' : 'v2-d');
   }
   const flagged = calls.filter((c) => (c.flags as string[]).length > 0);
   assert.ok(flagged.some((c) => (c.flags as string[]).includes('claims_saved_without_event')), '가드에 걸린 호출의 flags');
@@ -707,10 +707,10 @@ for (const [name, said] of [
   });
 }
 
-// ───────── AI 대화 품질 (T1 v1.5) — 단답에 안 끝냄 · 내일 일정 물음(ASK_TOMORROW = acts REFLECT) · 규칙 문구 ─────────
-test('T1 v1.5 시스템 글: 단답 한 번에 안 끝냄 · 내일 일정 물음 · 확인 문장 반복 금지 · 장소는 카드로 · 근거 줄 규칙이 있음', () => {
+// ───────── AI 대화 품질 (T1 v1.6) — 단답에 안 끝냄 · 내일 일정 물음(ASK_TOMORROW = acts REFLECT) · 규칙 문구 ─────────
+test('T1 v1.6 시스템 글: 단답 한 번에 안 끝냄 · 내일 일정 물음 · 확인 문장 반복 금지 · 장소는 카드로 · 근거 줄 규칙이 있음', () => {
   const sys = POINTS.T1.prompt.system;
-  assert.equal(POINTS.T1.prompt.version, 'v1.5');
+  assert.equal(POINTS.T1.prompt.version, 'v1.6');
   assert.match(sys, /ASK_TOMORROW/);
   assert.match(sys, /단답 한 번으로는 끝내지 마/); // ①
   assert.match(sys, /내일 챙길 일정이 있어요\?/);

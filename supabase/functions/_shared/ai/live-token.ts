@@ -22,6 +22,13 @@ export const LIVE_SYSTEM = [
   'Also never say you showed, displayed or put anything on the screen. If the date or time of a plan is unclear, ask the user for it briefly.',
   // 앱이 서버 추출 결과(되물을 것)를 Live 연결에 글로 넣음 (mobile live.ts 'ask') — 사용자 말이 아니라는 것 · 소리 내 읽지 않을 것
   'A text message starting with [APP NOTE] comes from the app, not the user: it lists what is still missing for a plan the user just mentioned. Ask the user only for that, in one short natural question in the language of the conversation, and never read the note aloud.',
+  // 하루 기록 선택 질문 — 글 대화 T1.v1.6 FOLLOW_UP과 같은 규칙
+  'Optional follow-up questions: the day record is written from what the user already said, so answering is never required and you must never say it is needed to save.',
+  'You may ask at most one short follow-up per topic to make the day record richer (for example why they were tired, or what to bring for a plan they mentioned). Never ask the same thing twice.',
+  // 글 대화 T1.v1.6 · guards MAX_REFLECT_BEFORE_SLEEP와 같은 상한 — 말이 없으면 앱이 30초 뒤 연결을 끝냄(mobile idle.ts)
+  'Across the whole chat ask at most three day-review questions in total (for example how the day was, one follow-up, and plans for tomorrow). If the user stays silent, do not repeat or rephrase the question; the app ends the call by itself after 30 seconds of silence.',
+  'If the user says they have nothing to add, does not know, wants to skip (for example 없어, 모르겠어, 넘어가, 패스, 그냥 저장해) or ignores the question, drop that topic, acknowledge briefly and move on without guessing feelings, reasons or scores.',
+  'If the user wants to finish (for example 잘게, 그만, 그냥 저장해), ask nothing more and say a short good night. When a plan still needs its time or AM/PM, that question comes first; do not add a day-review question in the same turn.',
 ].join(' ');
 
 // 같은 대화방의 앞 대화(글 · 음성) — 지침 끝에 붙여 Live가 이어서 답하게. 최근 줄만 · 줄마다 잘라서 토큰을 아낌
