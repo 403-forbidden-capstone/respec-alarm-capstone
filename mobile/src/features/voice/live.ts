@@ -8,6 +8,7 @@ export type LiveMessage =
   | { type: 'live' }
   | { type: 'me' | 'ai'; text: string }
   | { type: 'turn' }
+  | { type: 'mic'; muted: boolean }
   | { type: 'error'; code: 'MIC' | 'NETWORK'; detail?: string }
   | { type: 'closed'; code: number; reason: string };
 
@@ -30,6 +31,27 @@ export function livePage(token: string, model: string): string {
 (function () {
   var TOKEN = ${js(token)}, MODEL = ${js(model)}, URL = ${js(LIVE_URL)};
   var ws, mic, inCtx, outCtx, proc, playAt = 0, playing = [];
+  // AI 출력 중 PCM 전송만 막음. 마이크 트랙 · WebSocket · 재생은 유지한다.
+  var micMuted = false, turnPending = false, resumeTimer = null, closed = false;
+  var ECHO_TAIL_MS = 350;
+  function muteMic() {
+    if (resumeTimer !== null) { clearTimeout(resumeTimer); resumeTimer = null; }
+    if (micMuted) return;
+    micMuted = true;
+    post({ type: 'mic', muted: true });
+  }
+  function maybeFinishTurn() {
+    // 서버 turnComplete만으로는 실제 스피커 재생이 끝난 게 아니다.
+    if (!turnPending || playing.length || closed || resumeTimer !== null) return;
+    resumeTimer = setTimeout(function () {
+      resumeTimer = null;
+      if (closed || !turnPending || playing.length) return;
+      turnPending = false;
+      micMuted = false;
+      post({ type: 'mic', muted: false });
+      post({ type: 'turn' });
+    }, ECHO_TAIL_MS);
+  }
   function post(m) {
     var s = JSON.stringify(m);
     if (window.ReactNativeWebView) window.ReactNativeWebView.postMessage(s);
@@ -53,7 +75,7 @@ export function livePage(token: string, model: string): string {
     var src = inCtx.createMediaStreamSource(mic);
     proc = inCtx.createScriptProcessor(2048, 1, 1);
     proc.onaudioprocess = function (e) {
-      if (!ws || ws.readyState !== 1) return;
+      if (!ws || ws.readyState !== 1 || micMuted) return;
       var f = e.inputBuffer.getChannelData(0), pcm = new Int16Array(f.length);
       for (var i = 0; i < f.length; i++) { var v = Math.max(-1, Math.min(1, f[i])); pcm[i] = v < 0 ? v * 0x8000 : v * 0x7fff; }
       ws.send(JSON.stringify({ realtimeInput: { audio: { data: toB64(new Uint8Array(pcm.buffer)), mimeType: 'audio/pcm;rate=' + inCtx.sampleRate } } }));
@@ -63,6 +85,7 @@ export function livePage(token: string, model: string): string {
   }
   // AI 목소리(16비트 PCM, 보통 24kHz)를 이어 붙여 재생
   function play(data, mimeType) {
+    muteMic();
     var rate = Number((/rate=(\\d+)/.exec(mimeType || '') || [])[1]) || 24000;
     var u = fromB64(data), pcm = new Int16Array(u.buffer, 0, u.length >> 1);
     var buf = outCtx.createBuffer(1, pcm.length, rate), ch = buf.getChannelData(0);
@@ -74,13 +97,18 @@ export function livePage(token: string, model: string): string {
     s.start(playAt);
     playAt += buf.duration;
     playing.push(s);
-    s.onended = function () { var k = playing.indexOf(s); if (k >= 0) playing.splice(k, 1); };
+    s.onended = function () {
+      var k = playing.indexOf(s);
+      if (k >= 0) playing.splice(k, 1);
+      maybeFinishTurn();
+    };
   }
   // 사용자가 AI 말을 끊으면 남은 소리를 버림
   function hush() {
     playing.forEach(function (s) { try { s.stop(); } catch (e) {} });
     playing = [];
     playAt = 0;
+    maybeFinishTurn();
   }
   function onServer(text) {
     var m = JSON.parse(text);
@@ -88,14 +116,18 @@ export function livePage(token: string, model: string): string {
     var c = m.serverContent;
     if (!c) return;
     if (c.interrupted) hush();
+    // 첫 오디오가 오기 전에도 AI 응답 글이 먼저 도착할 수 있어 선제적으로 음소거한다.
+    if ((c.outputTranscription && c.outputTranscription.text) || (c.modelTurn && c.modelTurn.parts && c.modelTurn.parts.length)) muteMic();
     if (c.inputTranscription && c.inputTranscription.text) post({ type: 'me', text: c.inputTranscription.text });
     if (c.outputTranscription && c.outputTranscription.text) post({ type: 'ai', text: c.outputTranscription.text });
     ((c.modelTurn && c.modelTurn.parts) || []).forEach(function (p) {
       if (p.inlineData && p.inlineData.data) play(p.inlineData.data, p.inlineData.mimeType);
     });
-    if (c.turnComplete) post({ type: 'turn' });
+    if (c.turnComplete) { turnPending = true; maybeFinishTurn(); }
   }
   function cleanup() {
+    closed = true;
+    if (resumeTimer !== null) { clearTimeout(resumeTimer); resumeTimer = null; }
     try { if (ws) ws.close(); } catch (e) {}
     if (mic) mic.getTracks().forEach(function (t) { t.stop(); });
     try { if (inCtx) inCtx.close(); if (outCtx) outCtx.close(); } catch (e) {}
@@ -124,7 +156,7 @@ export function livePage(token: string, model: string): string {
       (typeof ev.data === 'string' ? Promise.resolve(ev.data) : ev.data.text()).then(onServer).catch(function () {});
     };
     ws.onerror = function () { post({ type: 'error', code: 'NETWORK' }); };
-    ws.onclose = function (e) { post({ type: 'closed', code: e.code, reason: e.reason || '' }); };
+    ws.onclose = function (e) { cleanup(); post({ type: 'closed', code: e.code, reason: e.reason || '' }); };
   }, function (err) {
     post({ type: 'error', code: 'MIC', detail: String(err && err.name) });
   });
