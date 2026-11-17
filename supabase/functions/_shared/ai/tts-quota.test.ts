@@ -1,4 +1,4 @@
-// 알람 긴급 음성 Gemini 한도 — DB 함수 reserve_alarm_tts로 원자적 예약 (프로젝트 하루 8 · 분당 2, 사용자 하루 2, 지점 AV)
+// 알람 긴급 음성 Gemini 한도 — DB 함수 reserve_alarm_tts로 원자적 예약 (프로젝트 최근 24시간 10 · 최근 1분 2, 사용자 최근 24시간 10, 지점 AV)
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
@@ -22,12 +22,12 @@ function fakeDb(rpcResult: { data: unknown; error: { message: string } | null })
   return { db: db as unknown as Db, rpcCalls, updates };
 }
 
-test('한도 값은 그대로 · 예약은 DB 함수 하나로 (한도 확인 + 예약 줄을 한 트랜잭션에서)', async () => {
-  assert.deepEqual(TTS_LIMITS, { projectPerDay: 8, projectPerMinute: 2, userPerDay: 2 });
+test('일일 제한 10 · 분당 제한 2를 DB 예약 함수에 전달한다', async () => {
+  assert.deepEqual(TTS_LIMITS, { projectPerDay: 10, projectPerMinute: 2, userPerDay: 10 });
   const { db, rpcCalls } = fakeDb({ data: 'c-1', error: null });
   assert.equal(await dbTtsQuota(db, 'me').reserve('gemini-3.8-flash-tts'), 'c-1');
   assert.deepEqual(rpcCalls, [
-    { fn: 'reserve_alarm_tts', args: { p_user_id: 'me', p_model: 'gemini-3.8-flash-tts', p_day_limit: 8, p_minute_limit: 2, p_user_day_limit: 2 } },
+    { fn: 'reserve_alarm_tts', args: { p_user_id: 'me', p_model: 'gemini-3.8-flash-tts', p_day_limit: 10, p_minute_limit: 2, p_user_day_limit: 10 } },
   ]);
 });
 
