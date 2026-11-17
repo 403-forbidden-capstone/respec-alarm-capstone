@@ -26,6 +26,7 @@ export function useLiveVoice(
   const [page, setPage] = useState<string | null>(null);
   const [lines, setLinesState] = useState<LiveLine[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [micMuted, setMicMuted] = useState(false); // AI 발화 중 자동 음소거 (연결 종료 아님)
   const run = useRef(0); // 시작 · 끝마다 늘림 — 토큰을 기다리는 사이 끝냈으면 늦게 온 토큰으로 연결하지 않게
   const linesRef = useRef<LiveLine[]>([]); // 차례를 넘길 때 지금 줄을 읽으려고 (렌더 값은 늦을 수 있음)
   const sendRef = useRef<((data: string) => void) | null>(null); // Live 페이지로 글 보내기 (LiveFrame이 채움)
@@ -63,6 +64,7 @@ export function useLiveVoice(
     run.current++;
     setPage(null);
     setPhase('idle');
+    setMicMuted(false);
     setLines(closeLive); // 연결이 끝나면 임시 글도 확정
     flush(); // 끊긴 차례도 남김
   };
@@ -89,6 +91,7 @@ export function useLiveVoice(
   async function start() {
     const mine = ++run.current;
     setError(null);
+    setMicMuted(false);
     setPhase('connecting');
     if (Platform.OS === 'android') {
       const granted = await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.RECORD_AUDIO);
@@ -107,6 +110,7 @@ export function useLiveVoice(
     const m = parseLiveMessage(raw);
     if (!m) return;
     if (m.type === 'live') setPhase('live');
+    else if (m.type === 'mic') setMicMuted(m.muted);
     else if (m.type === 'me' || m.type === 'ai') {
       const { type, text } = m;
       setLines((prev) => addLiveChunk(prev, type, text, now()));
@@ -123,6 +127,7 @@ export function useLiveVoice(
   return {
     phase,
     error,
+    micMuted,
     lines,
     start,
     stop: end,
