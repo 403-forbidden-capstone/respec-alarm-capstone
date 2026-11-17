@@ -150,8 +150,8 @@ object AlarmController {
 
     if (!plan.sound) {
       // 일정 알림은 한 번 알리면 끝 (미루기 · 다시 울림 없음). 원탭 응답은 알림이 인텐트에 실어 가짐
-      // 출발 알림은 그 일정 시각 · 준비물 · 출발 촉구를 음성으로 읽음 — 읽을 때까지 브리핑 파일을 남겨 두고 서비스가 다 읽은 뒤 지움
-      val speak = current.type == "DEPARTURE"
+      // 준비 시작 · 출발 알림은 고정 문장을 Android TTS로 한 번 읽음 (BriefingRules.simple) — 서비스를 못 띄우거나 TTS가 실패해도 알림 · 기록은 그대로
+      val speak = BriefingRules.speaksOnNotice(current.type)
       AlarmStorage.remove(context, id, keepVoice = speak)
       AlarmNotifications.showNotice(context, next)
       if (speak) runCatching { BriefingSpeechService.start(context, next) }.onFailure { VoiceBriefing.clear(context, id) }

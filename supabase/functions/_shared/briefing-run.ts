@@ -61,7 +61,8 @@ const WORST_FIRST: GeminiStatus[] = ['FAILED', 'LIMITED', 'NOT_CONFIGURED', 'MAD
 const GEMINI_ORDER: GeminiLevel[] = [4, 3];
 
 // script = 개인화 기상 대본 만들기(wake-script.ts wakeScriptsFor). 없으면 템플릿 문장만
-export type GeminiDeps = { tts: Tts | null; quota: TtsQuota; model?: string; script?: ((input: WakeScriptInput) => Promise<ScriptResult>) | null };
+// hold = 아직 Gemini(대본 · 음성)를 부르지 않음 — 알람 날 새벽 4시 · 전날 대화 정리 전 (briefing-handler.ts). 템플릿 문장만 주고 폰은 예비 WAV · Android TTS
+export type GeminiDeps = { tts: Tts | null; quota: TtsQuota; model?: string; script?: ((input: WakeScriptInput) => Promise<ScriptResult>) | null; hold?: boolean };
 
 // 알람 날짜 · 대화 기준일 — 알람 날 아침의 전날 밤 대화는 기준일 = 알람 날 − 1 (turn-core dayOf: review = morning − 1)
 export function briefingDays(scheduledAtMs: number, timeZone: string): { day: string; review: string } {
@@ -95,13 +96,17 @@ export async function runBriefing(src: BriefingSource, have: ReadonlySet<string>
     departAtMs: wake ? src.departAtMs : null,
     timeZone: src.timeZone,
   };
+  // Gemini(대본 · 음성)는 기상 알람이고, 그날 알람 뒤 일정이 있고, 알람 날 4시 · 정리 뒤(hold 아님)일 때만. 출발 · 일정 없는 날 · 4시 전은 템플릿 문장만
+  //   (일정 없는 기상 = 사용자가 직접 만든 알람 — 지우거나 끄지 않고 Android TTS · 예비 WAV로 그대로 울림)
+  const ai = wake && !gemini.hold && input.appointments.length > 0;
   // 기상만: Gemini 한 번으로 1~4단계 대본 (캐시 · 한도 · 실패는 wakeScriptsFor가 처리, 실패면 템플릿)
-  const scriptInput = wake && gemini.script ? wakeScriptInput(input, days.day, src.done ? null : src.appointmentAtMs) : null;
+  const scriptInput = ai && gemini.script ? wakeScriptInput(input, days.day, src.done ? null : src.appointmentAtMs) : null;
   const script = scriptInput && gemini.script ? await gemini.script(scriptInput) : null;
   const texts = scriptInput && script?.scripts ? finalizeScripts(script.scripts, scriptInput) : null;
   const clips = briefingClips(rule, profile, input, model, texts);
   const out: BriefingOut = { enabled: true, rule, clips, audio: [], gemini: 'NOT_NEEDED', ...(script ? { script: script.status } : {}) };
 
+  if (!ai) return out;
   // 4단계 먼저, 차례로 (동시에 부르면 분당 한도를 두 단계가 다퉈 4단계가 밀릴 수 있음)
   const levels: Partial<Record<GeminiLevel, GeminiStatus>> = {};
   for (const level of GEMINI_ORDER) {

@@ -122,6 +122,30 @@ class BriefingRulesTest {
     assertNull(BriefingRules.fallback("WAKE", "", "", "", 0))
   }
 
+  @Test
+  fun prepareAndDepartureReadFixedSentenceWithoutStages() {
+    // 준비 시작 · 출발 = Android TTS 고정 문장, 1단계 높낮이 · 속도. 미루기 · 지각 위험 인자가 없어 단계가 바뀔 수 없음
+    assertEquals(BriefingRules.Fallback(1, "이제 준비를 시작할 시간이에요.", 1.0f, 1.0f), BriefingRules.simple("PREPARE"))
+    assertEquals(BriefingRules.Fallback(1, "지금 출발해야 해요.", 1.0f, 1.0f), BriefingRules.simple("DEPARTURE"))
+    // Gemini · 예비 WAV · 반복 없음 (예비 WAV는 기상만, 반복은 기상만)
+    for (type in listOf("PREPARE", "DEPARTURE")) {
+      assertFalse(BriefingRules.repeatsBriefing(type))
+      for (level in 1..4) assertNull(BriefingRules.fallbackWavLevel(type, level))
+    }
+    // 기상 · 도착은 기존 규칙 그대로 (기상 1~4단계)
+    assertNull(BriefingRules.simple("WAKE"))
+    assertNull(BriefingRules.simple("ARRIVE"))
+    assertTrue(BriefingRules.repeatsBriefing("WAKE"))
+  }
+
+  @Test
+  fun prepareAndDepartureNoticeStartsSpeechServiceOthersDoNot() {
+    // AlarmController.fire: 알람음 없는 알림 뒤 음성 안내 서비스 — 준비 시작 · 출발만 (예전엔 출발만이라 준비 시작은 말이 없었음)
+    assertTrue(BriefingRules.speaksOnNotice("PREPARE"))
+    assertTrue(BriefingRules.speaksOnNotice("DEPARTURE"))
+    for (type in listOf("WAKE", "ARRIVE", "ROUTINE")) assertFalse(BriefingRules.speaksOnNotice(type))
+  }
+
   // --- 백그라운드 브리핑 갱신 (#515) ---
   private val min = 60_000L
   // 2026-11-14 00:00 KST = 2026-11-13 15:00 UTC

@@ -185,6 +185,8 @@ internal object VoiceBriefing {
   @Synchronized
   fun speechFor(context: Context, alarm: StoredAlarm, nowMillis: Long): Speech? = runCatching {
     if (!testOptions(context, alarm.alarmId).voice) return@runCatching null // 개발 화면 "알람음만 · 진동만" 시험
+    // 준비 시작 · 출발 — 저장된 브리핑(예전에 받은 출발 단계 문장 · Gemini 파일 포함)을 안 보고 고정 문장 한 번
+    BriefingRules.simple(alarm.type)?.let { return@runCatching Speech(it.level, it.text, it.pitch, it.rate, 0, null) }
     val folder = dir(context, alarm.alarmId)
     val manifest = folder?.let { readManifest(it) }
     // 개발 화면 시험 값 — 시험 알람만 (운영 알람은 저장된 값이 있어도 무시)
