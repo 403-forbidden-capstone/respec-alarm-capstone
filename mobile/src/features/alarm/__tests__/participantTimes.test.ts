@@ -211,7 +211,6 @@ describe('DB에 쓰기 (recordParticipantTimes)', () => {
     origin?: { lat: number; lng: number } | null;
     actual_travel_minutes?: number | null;
     alarms?: { alarm_id: string; alarm_type: string; scheduled_at: string }[];
-    activity_plan?: unknown;
   };
   // 출처는 시각이 있으면 주어진 값(기본 BUTTON), 시각이 없으면 비움 — DB 제약과 같은 모양
   const participantRow = (patch: Patch = {}) => ({
@@ -231,7 +230,6 @@ describe('DB에 쓰기 (recordParticipantTimes)', () => {
         ? null
         : { appointment_at: patch.appointment_at ?? new Date(APPOINTMENT).toISOString(), dest_lat: patch.dest?.lat ?? null, dest_lng: patch.dest?.lng ?? null },
     alarms: patch.alarms ?? [],
-    activity_plan: patch.activity_plan ?? null,
   });
   const ALARMS = [
     { alarm_id: 'al-dep', alarm_type: 'DEPARTURE', scheduled_at: iso('08:50') },
@@ -602,39 +600,6 @@ describe('DB에 쓰기 (recordParticipantTimes)', () => {
     it('기상 알람이 있는 오전 일정은 그대로 씀', async () => {
       setup({ participant: participantRow({ alarms: [{ alarm_id: 'al-wake', alarm_type: 'WAKE', scheduled_at: iso('08:00') }, ...ALARMS] }), record: null });
       expect((await run({ departedAt: at('09:00'), source: 'BUTTON' })).prepareMinutes).toBe(60);
-    });
-
-    // 테스트 F · G — 할 일 여부는 알람 간격이 아니라 저장된 할 일 계획(activity_plan)으로 가림
-    const meetingPlan = { lead_minutes: 20, items: [{ title: '온라인 회의', start: iso('07:00'), end: iso('08:00'), before_prepare: true, source: 'USER' }] };
-    it('F. 할 일 없이 준비 전 시간을 30분으로 둔 날(기상 06:00 · 준비 06:30)은 그대로 기록함', async () => {
-      const wake = { alarm_id: 'al-wake', alarm_type: 'WAKE', scheduled_at: iso('06:00') };
-      const prepare = { alarm_id: 'al-prep', alarm_type: 'PREPARE', scheduled_at: iso('06:30') };
-      setup({ participant: participantRow({ alarms: [wake, prepare, ...ALARMS] }), record: null, wakeAt: iso('06:00') });
-      expect((await run({ departedAt: at('07:30'), source: 'BUTTON' })).prepareMinutes).toBe(90);
-      expect(only('daily_records', 'insert')[0].payload).toMatchObject({ actual_prepare_minutes: 90 });
-    });
-
-    it('G. 기상 ~ 출발 사이에 1시간 회의가 든 날은 기록하지 않음 (기상~출발 전체를 준비로 학습하지 않음)', async () => {
-      const wake = { alarm_id: 'al-wake', alarm_type: 'WAKE', scheduled_at: iso('06:40') };
-      const prepare = { alarm_id: 'al-prep', alarm_type: 'PREPARE', scheduled_at: iso('08:30') };
-      setup({ participant: participantRow({ alarms: [wake, prepare, ...ALARMS], activity_plan: meetingPlan }), record: null, wakeAt: iso('06:40') });
-      expect((await run({ departedAt: at('09:00'), source: 'BUTTON' })).prepareMinutes).toBeNull();
-      expect(only('daily_records', 'insert')).toEqual([]);
-      expect(only('daily_records', 'update')).toEqual([]);
-    });
-
-    it('G2. 할 일 계획이 있어도 측정 구간 밖(실제 기상이 회의 끝난 뒤)이면 기록함', async () => {
-      const wake = { alarm_id: 'al-wake', alarm_type: 'WAKE', scheduled_at: iso('06:40') };
-      setup({ participant: participantRow({ alarms: [wake, ...ALARMS], activity_plan: meetingPlan }), record: { record_id: 'r1', wake_confirmed_at: iso('08:10'), actual_prepare_minutes: null }, wakeAt: iso('06:40') });
-      expect((await run({ departedAt: at('09:00'), source: 'BUTTON' })).prepareMinutes).toBe(50);
-    });
-
-    it('prepareMinutesOf: 할 일이 구간에 걸치면 null, 계획이 비었거나 못 읽으면 기존 규칙', () => {
-      const dep = Date.parse(iso('09:00'));
-      const wake = Date.parse(iso('06:40'));
-      expect(prepareMinutesOf(dep, null, wake, meetingPlan)).toBeNull();
-      expect(prepareMinutesOf(dep, null, wake, null)).toBe(140);
-      expect(prepareMinutesOf(dep, null, wake, { items: 'x' })).toBe(140);
     });
 
     it('귀가 뒤 재출발이 기록 범위 밖(250분)이면 앞 출발로 셈한 옛 값을 비움', async () => {

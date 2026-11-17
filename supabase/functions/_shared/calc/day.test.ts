@@ -49,7 +49,7 @@ test('4. 회의가 늦게 끝나 준비할 시간이 모자라면 기상을 당�
   const late = { ...meeting, start: kst(11), end: kst(11, 55) };
   const day = planDay(base({ activities: [late] }));
   assert.deepEqual(day, { ok: false, reason: 'NO_TIME_TO_PREPARE', index: 0, shortMinutes: 15 });
-  assert.equal(dayFailureMessage(day as Exclude<typeof day, { ok: true }>), '할 일이 끝나고 준비할 시간이 15분 모자라요');
+  assert.equal(dayFailureMessage(day as Exclude<typeof day, { ok: true }>), '할 일 끝나는 시각이 외출 준비 시작보다 15분 늦어요. 준비를 할 일 전에 할지, 일정을 조정할지 정해 주세요');
 });
 
 test('5. 기상과 준비 사이에 할 일 여럿: 기상은 가장 이른 할 일에, 준비는 마지막 할 일 뒤', () => {

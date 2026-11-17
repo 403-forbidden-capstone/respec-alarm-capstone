@@ -14,6 +14,7 @@ import {
   activityOrderError,
   activityPlanOf,
   checkAlarms,
+  activityAsk,
   dayFailureMessage,
   departureAt,
   isEveningWake,
@@ -31,6 +32,7 @@ import {
   type AlarmVibration,
   type ChainAlarm,
   type CheckResult,
+  type DayActivity,
   type DayFailure,
   type Importance,
   type IntensityAxis,
@@ -324,10 +326,17 @@ export type Plan = {
   warnings: Warning[];
 };
 
-// 할 일 계산 실패 → check (미리 보기는 이유를 보여 주고, 저장은 UNPROCESSABLE). detail.activity_reason = calc/day.ts 실패 이유
-function activityCheck(f: DayFailure): CheckResult {
+// 할 일 계산 실패 → check (미리 보기는 이유를 보여 주고, 저장은 UNPROCESSABLE)
+//   detail: activity_reason(calc/day.ts 실패 이유) · index · activity_title(겹치는 할 일) · shortMinutes(모자란 분) · ask(사용자에게 확인할 칸 — AI 질문 연동용)
+function activityCheck(f: DayFailure, activities: readonly DayActivity[]): CheckResult {
   const { ok: _ok, reason, ...rest } = f;
-  return { ok: false, reason: 'ACTIVITY', message: dayFailureMessage(f), detail: { activity_reason: reason, ...rest } };
+  const title = 'index' in f ? activities[f.index]?.title : undefined;
+  return {
+    ok: false,
+    reason: 'ACTIVITY',
+    message: dayFailureMessage(f, title),
+    detail: { activity_reason: reason, ...rest, ...(title ? { activity_title: title } : {}), ask: activityAsk(f) },
+  };
 }
 
 // 어느 쪽에서 부르는지 — preview = alarm-suggest(저장하지 않음), save = alarm-commit(저장). 계산은 같고 경고 문구만 다름
@@ -351,9 +360,10 @@ export function computePlan(i: PlanInputs, travel: ResolvedTravel, mode: PlanMod
   const stored = activityPlanOf(i.participant?.activity_plan);
   const activities = i.draft.activities ?? stored?.items ?? [];
   const derive = (withWake: boolean) => {
-    const beforePrepareMinutes =
-      i.draft.beforePrepareMinutes ??
-      (withWake ? (stored ? stored.leadMinutes : inferBeforePrepare(i.existingAlarms, existingAdvance, i.participant?.prepare_minutes) ?? DEFAULT_BEFORE_PREPARE_MINUTES) : 0);
+    // 저장된 할 일 계획이 있으면 그 lead가 준비 전 시간 — 앱이 다시 보내는 값 · 저장된 알람 간격은 할 일이 낀 값이라 쓰지 않음. 계획이 없으면 main 그대로
+    const beforePrepareMinutes = withWake && stored
+      ? stored.leadMinutes
+      : i.draft.beforePrepareMinutes ?? (withWake ? inferBeforePrepare(i.existingAlarms, existingAdvance, i.participant?.prepare_minutes) ?? DEFAULT_BEFORE_PREPARE_MINUTES : 0);
 
     // 기록(stats.p80)은 이미 "기상 ~ 출발"이라 그대로 씀 — 예전에는 준비 전 활동 20분을 또 더해서 기록이 쌓일수록 알람이 일찍 당겨졌음 (학습 루프 기초 2절 1)
     // 개인 보정은 그날 첫 일정(기상 알람 있음)에만 — 두 번째 일정(기상 없음, 공통 15분)에 기상~출발 기록을 붙이면 준비가 부풀어서 15분 그대로 (2절 2, 기록 수와 상관없음)
@@ -389,68 +399,64 @@ export function computePlan(i: PlanInputs, travel: ResolvedTravel, mode: PlanMod
 
   const manualTimes = resolveManualTimes(i.draft.manualTimes, i.existingAlarms);
   const timeZone = safeTimeZone(i.profile.timezone);
-  // 할 일 계산(calc/day.ts) — 할 일 시각으로 기상 · 준비 시작을 정해 역산 입력 두 값만 바꿈. 준비 예측(P80 · CatBoost · 직접 값)은 그대로 넣음
-  //   lead = 첫 할 일 전에 필요한 시간 (저장된 계획 값, 없으면 이번 준비 전 시간). 순수 외출 준비 = 준비 시간 − (요청이 보낸 준비 전 시간 ?? lead)
-  //     요청이 저장된 값(준비 150 · 준비 전 120 = 할 일 포함)을 그대로 보내도 150 − 120 = 30이 나와 같은 시각이 복원됨
-  //   기상 없는 일정(그날 두 번째)은 준비 시작만 — lead 0
-  type Derived = ReturnType<typeof derive>;
-  const leadOf = (d: Derived, wake: boolean) => (wake ? (stored ? stored.leadMinutes : d.beforePrepareMinutes) : 0);
-  const dayOf = (d: Derived, wake: boolean) =>
-    planDay({
-      at: basics.at,
-      travelMinutes: chosen.minutes,
-      bufferMinutes: basics.bufferMinutes,
-      prepareMinutes: d.prepare.minutes,
-      beforePrepareMinutes: wake ? (i.draft.beforePrepareMinutes ?? leadOf(d, wake)) : 0,
-      leadMinutes: leadOf(d, wake),
-      activities,
-    });
-
   // 그날 첫 일정이면 기상 알람 — 단 계산된 기상이 그날 낮 12시 이후(저녁에만 일정이 있는 날)면 기상 없이 준비 · 출발(+ 도착)만 (B1 버그 후보 4, 헤드 10/30)
   //   먼저 기상 있는 계산으로 기상 시각을 구해 보고, 12:00 이후면 기상 없는 계산(준비 15분)으로 다시 함. 둘 다 순수 계산
-  //   할 일이 있으면 할 일 기준 기상으로 판단 — 오전 회의 + 저녁 일정이면 기상은 오전(회의 20분 전)이라 기상을 지우지 않음
   //   직접 정한 값은 존중: 요청의 with_wake · 직접 고른 기상 시각(manualTimes.WAKE)이 있으면 자동 규칙을 건너뜀
   //   L6 안건후보: 저녁 기상 자동 제외와 직접 지정 우선순위 기본안 = with_wake 직접 지정 · 직접 고른 기상 시각은 존중(12시 이후여도 기상 있음), 그 밖은 자동 규칙.
   //     kinds에 WAKE가 들어 있는 것만으로는 존중하지 않음 — 반복 · 일정 수정이 지금 있는 알람 종류를 kinds로 이어받아서 사용자가 고른 것인지 알 수 없고, kinds는 원래 거르기만 할 뿐 기상을 만들지 못함(그날 두 번째 일정과 같음)
   let withWake = i.draft.withWake ?? !i.sameDayWake;
   let derived = derive(withWake);
   if (i.draft.withWake == null && withWake && manualTimes.WAKE == null) {
-    const day = activities.length ? dayOf(derived, true) : undefined;
     const depart = departureAt({ at: basics.at, travelMinutes: chosen.minutes, bufferMinutes: basics.bufferMinutes, prepareMinutes: derived.prepare.minutes, beforePrepareMinutes: derived.beforePrepareMinutes, withWake: true, manualTimes: {} });
-    const wakeAt = day?.ok ? day.wake : new Date(depart.getTime() - derived.prepare.minutes * 60_000);
-    if (isEveningWake(wakeAt, timeZone, basics.at)) {
+    if (isEveningWake(new Date(depart.getTime() - derived.prepare.minutes * 60_000), timeZone, basics.at)) {
       withWake = false;
       derived = derive(false);
     }
   }
-  let { beforePrepareMinutes, prepare } = derived;
+  const { beforePrepareMinutes, prepare } = derived;
 
-  //   못 정하면(겹침 · 준비 시간 부족 · 빠진 칸 · 반복 일정) 할 일 없는 하루처럼 계산해 두고 check 실패 — 기상을 임의로 앞당기지 않음
+  // 기상 뒤 할 일 (calc/day.ts) — 기상 알람을 만들지는 위 기존 규칙 그대로, 만드는 일정이면 그 시각만 첫 할 일에 맞춤
+  //   준비 예측(prepare: P80 · 개인 보정 · CatBoost · 직접 값)과 준비 전 시간은 바꾸지 않음. 알람 역산에만 쓰는 간격(chain…)을 따로 둠
+  //   외출 준비 = 사용자가 말한 외출 준비 분(outing_prepare_minutes) ?? 예측 준비(기상~출발) − 준비 전 시간 (기존 나눔, 앱 H03 "실제 준비"와 같음)
+  //   할 일 시간은 외출 준비에 더하지 않음 → 준비 알람 = 출발 − 외출 준비, 기상 = 첫 할 일 − lead
+  //   못 정하면(겹침 · 준비 시간 부족 · 빠진 칸 · 반복 · 기상 알람 없음) 할 일 없는 계산 그대로 두고 check 실패 — 준비를 줄이거나 기상을 당기지 않음
+  let chainPrepareMinutes = prepare.minutes;
+  let chainBeforePrepareMinutes = beforePrepareMinutes;
   let activityFailure: DayFailure | undefined;
+  const outing = i.draft.outingPrepareMinutes ?? stored?.outingPrepareMinutes;
   const activityPlan: ActivityPlan | null = activities.length
-    ? { leadMinutes: stored?.leadMinutes ?? (withWake ? derived.beforePrepareMinutes : DEFAULT_BEFORE_PREPARE_MINUTES), items: [...activities] }
+    ? {
+        leadMinutes: stored?.leadMinutes ?? (withWake ? beforePrepareMinutes : DEFAULT_BEFORE_PREPARE_MINUTES),
+        ...(outing != null ? { outingPrepareMinutes: outing } : {}),
+        items: [...activities],
+      }
     : null;
-  if (activities.length) {
+  if (activityPlan) {
+    const pure = outing ?? Math.max(0, prepare.minutes - beforePrepareMinutes);
     // 반복 일정은 막음 — 할 일은 그날 시각이라 다음 회차로 옮길 규칙이 아직 없음 (새 반복 일정은 requests.ts가 먼저 막음)
-    const day = i.appointment?.recurrence_rule ? null : dayOf(derived, withWake);
+    const day = i.appointment?.recurrence_rule
+      ? null
+      : planDay({ at: basics.at, travelMinutes: chosen.minutes, bufferMinutes: basics.bufferMinutes, prepareMinutes: pure, beforePrepareMinutes: 0, leadMinutes: withWake ? activityPlan.leadMinutes : 0, activities });
     if (!day) activityFailure = { ok: false, reason: 'RECURRING' };
     else if (!day.ok) activityFailure = day;
-    else {
-      const toDepart = Math.round((day.departure.getTime() - day.prepare.getTime()) / 60_000);
-      prepare = { ...prepare, minutes: withWake ? day.prepareMinutes : toDepart };
-      if (withWake) beforePrepareMinutes = day.beforePrepareMinutes;
-      // 같은 날 앞 약속의 기상(이미 일어나 있음)으로 기상을 하나 더 만들지 않음 — 단 그 기상이 첫 할 일보다 늦으면 알림
+    else if (withWake) {
+      chainPrepareMinutes = day.prepareMinutes;
+      chainBeforePrepareMinutes = day.beforePrepareMinutes;
+    } else {
+      chainPrepareMinutes = Math.round((day.departure.getTime() - day.prepare.getTime()) / 60_000);
+      // 기존 규칙으로 이 일정에 기상 알람이 없음: 새 기상 알람을 만들지 않음
+      //   · 같은 날 앞 일정의 기상이 있으면(이미 일어나 있음) 그 기상이 첫 할 일보다 늦을 때만 확인 필요
+      //   · 저녁 규칙으로 기상이 빠졌는데 준비 전 할 일이 있으면 확인 필요 (with_wake로 답하면 됨). with_wake: false를 직접 보냈으면 그대로
       const firstBefore = activities.filter((a) => a.beforePrepare).sort((x, y) => x.start.getTime() - y.start.getTime())[0];
-      if (!withWake && i.sameDayWakeAt && firstBefore && i.sameDayWakeAt.getTime() > firstBefore.start.getTime()) {
-        activityFailure = { ok: false, reason: 'WAKE_AFTER_ACTIVITY', index: activities.indexOf(firstBefore), shortMinutes: Math.round((i.sameDayWakeAt.getTime() - firstBefore.start.getTime()) / 60_000) };
+      const index = firstBefore ? activities.indexOf(firstBefore) : -1;
+      if (firstBefore && !i.sameDayWake) activityFailure = { ok: false, reason: 'NO_WAKE_ALARM', index, shortMinutes: 0 };
+      else if (firstBefore && i.sameDayWakeAt && i.sameDayWakeAt.getTime() > firstBefore.start.getTime()) {
+        activityFailure = { ok: false, reason: 'WAKE_AFTER_ACTIVITY', index, shortMinutes: Math.round((i.sameDayWakeAt.getTime() - firstBefore.start.getTime()) / 60_000) };
       }
     }
-    if (!day || !day.ok) {
-      // 할 일 없는 하루처럼: 순수 외출 준비 + lead (저장된 할 일 포함 값 150 · 120을 그대로 쓰면 준비가 출발 뒤로 감)
-      const lead = leadOf(derived, withWake);
-      const pure = Math.max(0, prepare.minutes - (withWake ? (i.draft.beforePrepareMinutes ?? lead) : 0));
-      prepare = { ...prepare, minutes: pure + lead };
-      beforePrepareMinutes = lead;
+    if (activityFailure) {
+      chainPrepareMinutes = prepare.minutes;
+      chainBeforePrepareMinutes = beforePrepareMinutes;
     }
   }
 
@@ -472,8 +478,8 @@ export function computePlan(i: PlanInputs, travel: ResolvedTravel, mode: PlanMod
     at: basics.at,
     travelMinutes: chosen.minutes,
     bufferMinutes: basics.bufferMinutes,
-    prepareMinutes: prepare.minutes,
-    beforePrepareMinutes,
+    prepareMinutes: chainPrepareMinutes,
+    beforePrepareMinutes: chainBeforePrepareMinutes,
     withWake,
     manualTimes,
     // 준비 알람을 직접 고른 일정은 당기지 않음 (그 시각이 먼저, D42 C)
@@ -484,7 +490,7 @@ export function computePlan(i: PlanInputs, travel: ResolvedTravel, mode: PlanMod
   const departure = departureAt(input);
   // 직접 고른 시각 · 준비 알람 당김까지 반영한 사슬이 할 일 순서를 지키는지 (당김 · 직접 시각이 준비 알람을 회의 안으로 밀면 실패)
   if (!activityFailure && activities.length) activityFailure = activityOrderError(fullChain, activities) ?? undefined;
-  const check: CheckResult = activityFailure ? activityCheck(activityFailure) : checkAlarms(chain, departure, i.now);
+  const check: CheckResult = activityFailure ? activityCheck(activityFailure, activities) : checkAlarms(chain, departure, i.now);
 
   const warnings = [...travel.warnings];
   if (check.ok) {

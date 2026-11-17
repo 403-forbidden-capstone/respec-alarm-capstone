@@ -22,7 +22,6 @@
 //     (원탭은 자동 값이 없을 때만 대신 쓰는 길 — 원탭 알림 건너뛰기는 PR 6)
 //   · 같은 입력으로 다시 불려도 같은 결과 (onEventsUploaded 훅 · 위치 보관함이 던지면 다시 넘어오므로). 쓰는 순서는 시각 → 준비 실측 · 이동시간 → 위치 기록 (recordParticipantTimes 끝)
 // 판정은 순수 함수(시험: __tests__/participantTimes.test.ts), 아래 recordParticipantTimes · clearLocationTime이 DB를 읽고 씀
-import { activityOverlaps, activityPlanOf } from '@shared/calc/day.ts';
 import { PREPARE_RECORD_MAX, PREPARE_RECORD_MIN } from '@shared/calc/prepare.ts';
 import { DETECTION_DELAY_MAX_MINUTES, TRAVEL_CORRECTION_MINUTES } from '@/features/location/constants';
 import { isNearTrip, toLatLng, type LatLng } from '@/features/location/geo';
@@ -82,15 +81,10 @@ export function decideWrite(kind: TimeKind, incoming: { source: TimeSource; atMs
 
 // 준비 실측(분) = 출발 − max(실제 기상, 예정 기상). 기상 기록이 둘 다 없거나 출발이 기상보다 빠르면 null (비움)
 //   기록 범위(D107, 10~240분) 밖도 null — 통계에서만 거르지 않고 저장 단계에서 거름. 저녁 일정에 560~772분이 저장되던 문제 (#329)
-//   activityPlan = 이 참여 조건의 기상 뒤 할 일 계획(appointment_participants.activity_plan). 할 일이 측정 구간(기상 ~ 출발)에 걸치면 null —
-//     회의 같은 할 일 시간이 든 기상~출발은 준비 학습 값이 아님 (기록 뜻 "기상 ~ 출발"은 그대로, 그런 날만 안 씀). 할 일이 없으면 기존 규칙 그대로
-//     준비 전 시간을 30 · 60분으로 길게 둔 날은 할 일 계획이 없으므로 그대로 기록함 (알람 간격으로 짐작하지 않음)
-export function prepareMinutesOf(departedAtMs: number, confirmedWakeMs: number | null, scheduledWakeMs: number | null, activityPlan?: unknown): number | null {
+export function prepareMinutesOf(departedAtMs: number, confirmedWakeMs: number | null, scheduledWakeMs: number | null): number | null {
   const bases = [confirmedWakeMs, scheduledWakeMs].filter((x): x is number => x != null && Number.isFinite(x));
   if (!bases.length) return null;
-  const from = Math.max(...bases);
-  if (activityOverlaps(activityPlanOf(activityPlan), from, departedAtMs)) return null;
-  const minutes = Math.round((departedAtMs - from) / 60_000);
+  const minutes = Math.round((departedAtMs - Math.max(...bases)) / 60_000);
   return minutes >= PREPARE_RECORD_MIN && minutes <= PREPARE_RECORD_MAX ? minutes : null;
 }
 
@@ -149,7 +143,7 @@ async function loadParticipant(userId: string, participantId: string) {
   const { data, error } = await supabase
     .from('appointment_participants')
     .select(
-      'participant_id, appointment_id, departed_at, departed_source, arrived_at, arrived_source, actual_travel_minutes, origin_lat, origin_lng, est_travel_minutes, buffer_minutes, appointments(appointment_at, dest_lat, dest_lng), activity_plan, alarms(alarm_id, alarm_type, scheduled_at)',
+      'participant_id, appointment_id, departed_at, departed_source, arrived_at, arrived_source, actual_travel_minutes, origin_lat, origin_lng, est_travel_minutes, buffer_minutes, appointments(appointment_at, dest_lat, dest_lng), alarms(alarm_id, alarm_type, scheduled_at)',
     )
     .eq('participant_id', participantId)
     .eq('user_id', userId)
@@ -192,11 +186,11 @@ async function loadPrepareBases(userId: string, departedAtMs: number) {
 }
 
 // 준비 실측을 그날 daily_records에 씀. 쓴 값(분)을 돌려주고, 안 썼으면 null
-async function recordPrepareMinutes(userId: string, departedAtMs: number, previousDepartedAtMs: number | null, hasWake: boolean, activityPlan?: unknown): Promise<number | null> {
+async function recordPrepareMinutes(userId: string, departedAtMs: number, previousDepartedAtMs: number | null, hasWake: boolean): Promise<number | null> {
   if (!hasWake) return null; // 이 일정 사슬에 기상 알람이 없으면(저녁 규칙 · 직접 끔) 기상 → 출발이 아니라서 학습 값이 아님 (#329)
   const departed = new Date(departedAtMs);
   const { record, confirmedMs, scheduledMs } = await loadPrepareBases(userId, departedAtMs);
-  const minutes = prepareMinutesOf(departedAtMs, confirmedMs, scheduledMs, activityPlan); // 할 일이 걸친 날은 null → 아래 '못 셈'과 같이 처리
+  const minutes = prepareMinutesOf(departedAtMs, confirmedMs, scheduledMs);
   const existing = record?.actual_prepare_minutes ?? null;
   const fromPrevious = previousDepartedAtMs == null ? null : prepareMinutesOf(previousDepartedAtMs, confirmedMs, scheduledMs);
   if (minutes == null) {
@@ -402,7 +396,7 @@ export async function recordParticipantTimes(input: RecordTimesInput): Promise<R
   //   까닭: 귀가 뒤 재출발(override)은 다시 불렀을 때 저장값 == 새 출발이라 keep이 되어 앞 출발(replacedDepartedMs)을 더는 모름.
   //   위치 기록을 먼저 하다 끊기면 준비 실측이 앞 출발 값으로 남음. 위치 기록은 번호(client_event_id)가 같아 다시 불러도 중복이 안 되므로 마지막에 두면,
   //   끊겨도 다시 불렀을 때 위치 기록만 다시 시도됨 (위 geo.push 조건)
-  if (departedMs != null && finalDepartedMs != null) result.prepareMinutes = await recordPrepareMinutes(userId, finalDepartedMs, replacedDepartedMs, chainHasWake(row), row.activity_plan);
+  if (departedMs != null && finalDepartedMs != null) result.prepareMinutes = await recordPrepareMinutes(userId, finalDepartedMs, replacedDepartedMs, chainHasWake(row));
   if (finalDepartedMs != null && finalArrivedMs != null && finalDepartedSource != null && finalArrivedSource != null) {
     result.travelMinutes = await recordTravelMinutes(
       userId,

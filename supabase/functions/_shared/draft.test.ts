@@ -122,3 +122,10 @@ test('할 일 지우기: activities null · [] = 지움(빈 목록), 칸이 없�
   assert.deepEqual(readParticipantFields(Reader.root({ activities: [] })), { activities: [] });
   assert.deepEqual(readParticipantFields(Reader.root({ buffer_minutes: 10 })), { bufferMinutes: 10 });
 });
+
+test('외출 준비 직접 입력 outing_prepare_minutes: 0~240 정수만 (준비 예측 prepare_minutes와 따로)', () => {
+  assert.deepEqual(readParticipantFields(Reader.root({ outing_prepare_minutes: 30 })), { outingPrepareMinutes: 30 });
+  const bad = Reader.root({ outing_prepare_minutes: 241 });
+  readParticipantFields(bad);
+  assert.deepEqual(bad.issues.map((i) => i.path), ['outing_prepare_minutes']);
+});

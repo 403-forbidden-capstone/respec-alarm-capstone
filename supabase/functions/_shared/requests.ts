@@ -35,7 +35,7 @@ function readAppointmentDraft(r: Reader, opts: { titleRequired: boolean }): { dr
 
   // participant{origin, transport_type, est_travel_minutes, travel_source, prepare_minutes, buffer_minutes} (+ before_prepare_minutes · with_wake)
   const p = r.object('participant');
-  let participantFields: Pick<PlanDraft, 'origin' | 'transport' | 'bufferMinutes' | 'beforePrepareMinutes' | 'withWake' | 'activities'> = {};
+  let participantFields: Pick<PlanDraft, 'origin' | 'transport' | 'bufferMinutes' | 'beforePrepareMinutes' | 'withWake' | 'activities' | 'outingPrepareMinutes'> = {};
   let travelMinutes: number | undefined;
   let travelSource: 'API' | 'MANUAL' | undefined;
   let prepareMinutes: number | undefined;

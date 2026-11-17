@@ -10,7 +10,7 @@
 //   · 기상 = (가장 이른 준비 전 활동 시작, 없으면 준비 시작) − 할 일 전 시간(lead, 없으면 준비 전 시간). 활동이 없으면 출발 − 준비 시간 (chain.ts와 같은 시각)
 //   · 겹침 · 준비할 시간 부족 · 출발 뒤까지 이어지는 활동은 실패로 돌려줌 — 기상을 임의로 앞당기지 않음
 //   · 끝 시각이나 준비 전 · 후를 모르면 실패(NEEDS_INFO) + 모르는 칸 목록 — 말한 칸은 다시 묻지 않도록 빠진 칸만
-// 저장 모양(appointment_participants.activity_plan): { lead_minutes, items: [{ title, start, end, before_prepare, source }] } — activityPlanJson · activityPlanOf
+// 저장 모양(appointment_participants.activity_plan): { lead_minutes, outing_prepare_minutes?, items: [{ title, start, end, before_prepare, source }] } — activityPlanJson · activityPlanOf
 import { addMinutes } from './time.ts';
 import type { ChainAlarm } from './types.ts';
 
@@ -42,6 +42,7 @@ export type DayFailureReason =
   | 'AFTER_DEPARTURE'
   | 'PREPARE_AFTER_ACTIVITY'
   | 'WAKE_AFTER_ACTIVITY'
+  | 'NO_WAKE_ALARM' // 기존 규칙으로 이 일정에 기상 알람이 없는데 준비 전 할 일이 있음 — 새 기상을 만들지 않고 확인을 받음
   | 'RECURRING';
 
 export type DayFailure =
@@ -126,36 +127,64 @@ export function activityOrderError(chain: readonly Pick<ChainAlarm, 'kind' | 'at
   return null;
 }
 
-// 사용자에게 보일 짧은 이유 (미리 보기 check.message · 저장 UNPROCESSABLE)
-export function dayFailureMessage(f: DayFailure): string {
+// 사용자에게 보일 짧은 이유 (미리 보기 check.message · 저장 UNPROCESSABLE). title = 걸린 할 일 이름(있으면 문구에 넣음)
+export function dayFailureMessage(f: DayFailure, title?: string): string {
+  const what = title ? `'${title}'` : '할 일';
   switch (f.reason) {
     case 'NEEDS_INFO':
       return f.missing.some((m) => m.field === 'end') ? '할 일이 언제 끝나는지 알려 주세요' : '할 일을 준비 전에 할지 준비 뒤에 할지 알려 주세요';
     case 'RECURRING':
       return '반복 일정에는 할 일을 넣을 수 없어요';
     case 'OVERLAP':
-      return '할 일 시간이 서로 겹쳐요';
+      return `${what} 시간이 다른 할 일과 겹쳐요`;
     case 'NO_TIME_TO_PREPARE':
-      return `할 일이 끝나고 준비할 시간이 ${f.shortMinutes}분 모자라요`;
+      return `${what} 끝나는 시각이 외출 준비 시작보다 ${f.shortMinutes}분 늦어요. 준비를 할 일 전에 할지, 일정을 조정할지 정해 주세요`;
     case 'AFTER_DEPARTURE':
-      return `할 일이 출발 시각보다 ${f.shortMinutes}분 늦게 끝나요`;
+      return `${what} 끝나는 시각이 출발보다 ${f.shortMinutes}분 늦어요`;
     case 'PREPARE_AFTER_ACTIVITY':
-      return `준비가 할 일 시작보다 ${f.shortMinutes}분 늦게 시작해요`;
+      return `외출 준비가 ${what} 시작보다 ${f.shortMinutes}분 늦게 시작해요`;
     case 'WAKE_AFTER_ACTIVITY':
-      return `기상이 할 일 시작보다 ${f.shortMinutes}분 늦어요`;
+      return `기상 알람이 ${what} 시작보다 ${f.shortMinutes}분 늦어요`;
+    case 'NO_WAKE_ALARM':
+      return `이 일정에는 기상 알람이 없어서 ${what} 전에 깨워 드리지 않아요. 기상 알람을 만들지 정해 주세요`;
+  }
+}
+
+// 사용자에게 확인받을 칸 (AI 질문 연동용 — 이번엔 응답에 싣기만 함)
+//   before_prepare = 준비를 할 일 전에 할지 · end / start = 할 일 시각 · appointment_at = 일정 시각 · with_wake = 기상 알람을 만들지 · wake = 기상 시각
+export function activityAsk(f: DayFailure): string[] {
+  switch (f.reason) {
+    case 'NEEDS_INFO':
+      return [...new Set(f.missing.map((m) => m.field))];
+    case 'RECURRING':
+      return [];
+    case 'OVERLAP':
+      return ['start', 'end'];
+    case 'NO_TIME_TO_PREPARE':
+      return ['before_prepare', 'end', 'appointment_at'];
+    case 'AFTER_DEPARTURE':
+      return ['end', 'appointment_at'];
+    case 'PREPARE_AFTER_ACTIVITY':
+      return ['before_prepare', 'start'];
+    case 'WAKE_AFTER_ACTIVITY':
+      return ['wake'];
+    case 'NO_WAKE_ALARM':
+      return ['with_wake'];
   }
 }
 
 // ---- 저장 모양 (appointment_participants.activity_plan, jsonb) ----
 //   lead_minutes를 같이 둠 — 저장 뒤 다시 계산할 때 알람 간격(기상~준비 = 할 일 포함)을 준비 전 시간으로 잘못 읽지 않게
 
-export type ActivityPlan = { leadMinutes: number; items: DayActivity[] };
+// outingPrepareMinutes = 사용자가 말한 외출 준비 분(준비 알람 ~ 출발). 없으면 예측 준비 − 준비 전 시간 (plan-core). 모델 예측값과 섞지 않으려고 따로 둠
+export type ActivityPlan = { leadMinutes: number; outingPrepareMinutes?: number; items: DayActivity[] };
 
 // 계산에 쓴 할 일을 저장할 모양으로 — 할 일이 없으면 null (칸을 비움 = 할 일 없음)
 export function activityPlanJson(plan: ActivityPlan | null | undefined): Record<string, unknown> | null {
   if (!plan || !plan.items.length) return null;
   return {
     lead_minutes: plan.leadMinutes,
+    ...(plan.outingPrepareMinutes != null ? { outing_prepare_minutes: plan.outingPrepareMinutes } : {}),
     items: plan.items.map((a) => ({
       title: a.title ?? null,
       start: a.start.toISOString(),
@@ -169,7 +198,7 @@ export function activityPlanJson(plan: ActivityPlan | null | undefined): Record<
 // 저장된 칸 → 계산 모양. 비었거나 못 읽는 칸이면 null (할 일 없음으로 봄 — 옛 행 · 다른 서버가 쓴 행에서 멈추지 않게). 못 읽는 항목만 건너뜀
 export function activityPlanOf(raw: unknown): ActivityPlan | null {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
-  const r = raw as { lead_minutes?: unknown; items?: unknown };
+  const r = raw as { lead_minutes?: unknown; outing_prepare_minutes?: unknown; items?: unknown };
   if (!Array.isArray(r.items)) return null;
   const date = (v: unknown) => {
     const d = typeof v === 'string' ? new Date(v) : null;
@@ -191,13 +220,8 @@ export function activityPlanOf(raw: unknown): ActivityPlan | null {
     });
   }
   const lead = Number(r.lead_minutes);
-  return items.length ? { leadMinutes: Number.isFinite(lead) && lead >= 0 ? Math.round(lead) : 0, items } : null;
-}
-
-// 측정 구간(예: 기상 ~ 출발)에 할 일이 걸치는지 — 준비 실측을 학습에 넣을지 가를 때 씀
-export function activityOverlaps(plan: ActivityPlan | null | undefined, fromMs: number, toMs: number): boolean {
-  return (plan?.items ?? []).some((a) => {
-    const end = a.end ?? a.start;
-    return a.start.getTime() < toMs && end.getTime() > fromMs;
-  });
+  const outing = r.outing_prepare_minutes == null ? NaN : Number(r.outing_prepare_minutes);
+  return items.length
+    ? { leadMinutes: Number.isFinite(lead) && lead >= 0 ? Math.round(lead) : 0, ...(Number.isFinite(outing) && outing >= 0 ? { outingPrepareMinutes: Math.round(outing) } : {}), items }
+    : null;
 }

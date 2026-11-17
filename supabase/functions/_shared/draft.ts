@@ -27,6 +27,8 @@ export type ParticipantFields = {
   // 기상 뒤 출발 전에 하는 할 일 (calc/day.ts) — 칸이 없으면 저장된 할 일(appointment_participants.activity_plan) 그대로,
   //   [] · null = 할 일을 지움(사용자가 명시적으로 삭제), 목록 = 이 목록으로 바꿈
   activities?: DayActivity[];
+  // 사용자가 말한 외출 준비 분(준비 알람 ~ 출발) — 할 일이 있을 때만 씀, 할 일 계획에 같이 저장. 준비 예측(prepare_minutes)과 따로
+  outingPrepareMinutes?: number;
 };
 
 export { MAX_ACTIVITIES };
@@ -57,6 +59,7 @@ export function readParticipantFields(r: Reader): ParticipantFields {
   const bufferMinutes = r.int('buffer_minutes', { min: 0, max: 240 });
   const beforePrepareMinutes = r.int('before_prepare_minutes', { min: 0, max: 240 });
   const withWake = r.bool('with_wake');
+  const outingPrepareMinutes = r.int('outing_prepare_minutes', { min: 0, max: 240 });
   // activities[{ title?, start, end?, before_prepare?, source? }] — end · before_prepare를 모르면 비워 보냄(계산이 NEEDS_INFO로 빠진 칸을 알려 줌)
   //   null · [] = 지움. 칸이 없으면 undefined (저장된 할 일 유지)
   const activities = r.isNull('activities')
@@ -77,6 +80,7 @@ export function readParticipantFields(r: Reader): ParticipantFields {
     ...(beforePrepareMinutes != null ? { beforePrepareMinutes } : {}),
     ...(withWake != null ? { withWake } : {}),
     ...(activities ? { activities } : {}),
+    ...(outingPrepareMinutes != null ? { outingPrepareMinutes } : {}),
   };
 }
 
