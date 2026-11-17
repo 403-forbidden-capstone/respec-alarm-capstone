@@ -230,7 +230,7 @@ export default function AiScreen() {
   const rows: ChatRow[] = real ? mergeLive(messages, live.lines) : messages; // 글 대화 + 음성 말풍선, 시각 순서
 
   // 음성이 켜져 있는 동안만 음성 상태가 앞. 지난 음성 오류는 글 대화 상태(답하는 중 · 실패 · 한도)보다 뒤 — 그 상태들을 가리지 않게
-  const liveStatus = !real ? null : live.phase === 'connecting' ? '음성 대화를 연결하고 있어요…' : live.phase === 'live' ? '듣고 있어요. 편하게 말해 보세요' : null;
+  const liveStatus = !real ? null : live.phase === 'connecting' ? '음성 대화를 연결하고 있어요…' : live.phase === 'live' ? (live.micMuted ? 'AI가 말하고 있어요. 끝나면 자동으로 다시 들어요' : '듣고 있어요. 편하게 말해 보세요') : null;
   const status = liveStatus
     ? liveStatus
     : work
