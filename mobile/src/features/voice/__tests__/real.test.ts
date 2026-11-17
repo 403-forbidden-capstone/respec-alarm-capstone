@@ -1660,6 +1660,21 @@ describe('⑰ [완료] 뒤 대화 끝 정리(voice-commit)', () => {
     expect(refresh).toHaveBeenCalledTimes(1);
   });
 
+  it('음성 30초 무발화 자동 종료: 마지막 차례(sayVoice)를 서버에 넘긴 뒤 정리 — [완료]와 겹쳐 두 번 불려도 정리는 한 번', async () => {
+    script = [session(), turn({ reply: null })];
+    await getConversation();
+    // 훅이 끝내면서 마지막 차례를 넘기고(기다리지 않음) 바로 정리를 부름 + 사용자가 [완료]도 누름
+    const last = sayVoice('오늘 너무 피곤했어', '특별히 힘들었던 일이 있었어요?');
+    const auto = finishConversation();
+    const manual = finishConversation();
+    expect((await last).kept).toBe(true);
+    await Promise.all([auto, manual]);
+    await flushCommits('user-1');
+    expect(edge.mock.calls.map(([name]) => name)).toEqual(['voice-session', 'voice-turn', 'voice-commit']);
+    expect(turnBodies()[0]).toMatchObject({ text: '오늘 너무 피곤했어', spoken_reply: '특별히 힘들었던 일이 있었어요?' });
+    expect(commitBodies().map((c) => c.body)).toEqual([{ session_id: 's1' }]);
+  });
+
   it('한 마디도 안 한 대화는 정리를 보내지 않음', async () => {
     script = [session()];
     await getConversation();

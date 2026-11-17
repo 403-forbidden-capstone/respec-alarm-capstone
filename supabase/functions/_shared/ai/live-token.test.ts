@@ -87,4 +87,9 @@ it('하루 기록 선택 질문 정책이 글(T1)과 Live 음성에 같음 — �
   assert.match(LIVE_SYSTEM, /at most one short follow-up per topic[^.]*\. Never ask the same thing twice/);
   assert.match(t1, /CONFIRM · CLARIFY가 필요한 턴에는 FOLLOW_UP을 하지 마/);
   assert.match(LIVE_SYSTEM, /When a plan still needs its time or AM\/PM, that question comes first; do not add a day-review question in the same turn/);
+  // 질문 상한 3번 · 답이 없으면 되풀이하지 않음
+  assert.match(t1, /REFLECT · ASK_TOMORROW · FOLLOW_UP을 합쳐 최대 3번/);
+  assert.match(LIVE_SYSTEM, /at most three day-review questions in total/);
+  assert.match(t1, /사용자가 답하지 않았다고 같은 물음을 다시 하지 마/);
+  assert.match(LIVE_SYSTEM, /If the user stays silent, do not repeat or rephrase the question/);
 });

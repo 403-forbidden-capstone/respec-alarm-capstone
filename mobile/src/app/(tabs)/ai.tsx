@@ -87,7 +87,18 @@ export default function AiScreen() {
     } finally {
       setProgress(null);
     }
-  }));
+  }), {
+    // 30초 무발화로 음성 대화가 끝남 — 마지막 차례(sayVoice)는 훅이 먼저 넘겼고, 정리는 api가 그 뒤에 차례로 적음 ([완료]와 같은 길, 실패하면 다음 열기 · 새벽 4시에 다시)
+    //   화면에 머묾: 같은 날 대화가 다시 읽혀 이어 말할 수 있음. 내가 한 마디도 안 했으면 정리하지 않음(finishConversation)
+    onIdle: () => {
+      toast('30초 동안 말이 없어 음성 대화를 마쳤어요. 지금까지 이야기로 하루 기록을 정리할게요');
+      finishConversation()
+        .then(() => reload())
+        .catch(() => {});
+    },
+    // 카드 저장 · 장소 계산 · 글 답 · 일정 확인 중에는 끝내지 않음
+    isBusy: () => busy || !!work || thinkingRef.current || drafting > 0,
+  });
   // 통화가 끝나면 붙잡은 대화방을 놓음 — 03:59에 시작한 통화는 끝날 때까지 전날 방, 끝난 뒤 새 대화는 새 기준일 방 (마지막 차례 저장 뒤에 풀림)
   useEffect(() => {
     if (live.phase === 'idle') void endLiveVoice();
