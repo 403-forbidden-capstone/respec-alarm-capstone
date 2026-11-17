@@ -18,6 +18,7 @@ import {
   type RingKind,
   type Transport,
 } from './calc/index.ts';
+import type { ActivityPlan, DayActivity } from './calc/day.ts';
 import { diffAlarms, resolveEnabled, type AlarmWrite } from './commit-core.ts';
 import { dbFail, must } from './db.ts';
 import { pickBaseRow, type ExceptionKind } from './edit.ts';
@@ -159,6 +160,16 @@ export function shiftManualTimes(alarms: readonly AlarmRow[], baseAt: Date, occu
   return out;
 }
 
+// 일정 날짜가 바뀌면 할 일도 같은 날짜 수만큼 옮김 (시:분 그대로) — 직접 고른 알람 시각(shiftManualTimes)과 같은 규칙. 같은 날이면 그대로
+export function shiftActivityDates(plan: ActivityPlan, baseAt: Date, occurrenceDate: string, timeZone: string): DayActivity[] {
+  const baseKey = localDateKey(baseAt, timeZone);
+  const move = (at: Date) => {
+    const offsetDays = Math.round((Date.parse(`${localDateKey(at, timeZone)}T00:00:00Z`) - Date.parse(`${baseKey}T00:00:00Z`)) / DAY_MS);
+    return zonedTime(addDaysToKey(occurrenceDate, offsetDays), localMinuteOfDay(at, timeZone), timeZone);
+  };
+  return plan.items.map((a) => ({ ...a, start: move(a.start), ...(a.end ? { end: move(a.end) } : {}) }));
+}
+
 // 기준 회차의 만든 알람 종류. 기준 회차가 그날 첫 일정이 아니어서 기상이 없던 것이지 사용자가 기상을 안 만든 게 아니라면, 새 회차가 그날 첫 일정일 때 기상을 더함
 //   L6 안건후보: 기준 회차에 기상이 없을 때 기본안 = 기준 회차가 "그날 다른 기상에 밀려" 없던 거면 새 회차가 첫 일정일 때 기상을 만들고, 그 밖(사용자가 안 고름)이면 없는 채로 이어받음
 export function inheritedKinds(alarms: readonly AlarmRow[], options: { withWake: boolean; baseHadEarlierWake: boolean }): RingKind[] {
@@ -206,7 +217,7 @@ export type PlannedOccurrence =
       alarms: AlarmWrite[]; // roll_insert_occurrence의 p_alarms
       payload: { appointment: Record<string, unknown>; participant: Record<string, unknown>; items: { title: string; due_date: string }[] };
     }
-  | { ok: false; reason: 'DEPARTURE_PASSED' | 'ORDER'; plan: Plan };
+  | { ok: false; reason: 'DEPARTURE_PASSED' | 'ORDER' | 'ACTIVITY'; plan: Plan }; // ACTIVITY는 실제로 안 옴 — 반복 일정은 할 일을 받지 않음 (plan-core RECURRING)
 
 // 이동시간 → 계산에 넘기는 모양 (buildPlan이 길찾기 값을 쓸 때와 같음)
 export const resolvedTravelOf = (chosen: TravelChoice): ResolvedTravel => ({ chosen, auto: chosen, warnings: [] });

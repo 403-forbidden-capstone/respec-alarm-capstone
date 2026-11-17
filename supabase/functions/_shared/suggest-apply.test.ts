@@ -105,3 +105,18 @@ test('상태가 안 맞으면 CONFLICT, 없는 제안은 NOT_FOUND, 다른 종�
   other.rows('alarm_suggestions')[0].suggestion_type = 'SOUND';
   await assert.rejects(runSuggestApply(ctxOf(other), { suggestionId: 's1', action: 'APPLY' }), { code: 'UNPROCESSABLE' });
 });
+
+test('할 일이 있는 회차: 당긴 준비 알람이 회의 안으로 들어가면 그 회차는 알람 · 당김 분 모두 그대로, 회의 뒤면 당김 (기상은 안 당김)', async () => {
+  // 24일만 기상 7:25 뒤 7:28~7:40 회의 → 준비 7:45
+  const plan = { lead_minutes: 3, items: [{ title: '회의', start: kst(24, 7, 28), end: kst(24, 7, 40), before_prepare: true, source: 'USER' }] };
+  const db = seed();
+  db.rows('appointment_participants').find((p) => p.participant_id === 'pt24')!.activity_plan = plan;
+  await runSuggestApply(ctxOf(db), { suggestionId: 's1', action: 'APPLY' }); // 10분 → 7:35는 회의 중
+  assert.deepEqual([prepOf(db, 23), advOf(db, 23), prepOf(db, 24), advOf(db, 24)], ['07:35', 10, '07:45', 0]);
+  assert.equal(hm(db.rows('alarms').find((a) => a.alarm_id === 'w24')!.scheduled_at as string), '07:25');
+
+  const db2 = seed();
+  db2.rows('appointment_participants').find((p) => p.participant_id === 'pt24')!.activity_plan = plan;
+  await runSuggestApply(ctxOf(db2), { suggestionId: 's1', action: 'EDIT', minutes: 5 }); // 5분 → 7:40 = 회의 끝, 그대로 당김
+  assert.deepEqual([prepOf(db2, 24), advOf(db2, 24)], ['07:40', 5]);
+});

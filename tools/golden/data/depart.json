@@ -1,8 +1,8 @@
 {
   "format": 1,
   "module": "depart",
-  "baseCommit": "d271fb579ab662aecadd8da3228fb39a10b6b00a",
-  "sourceSha256": "7074251ac522a35a01aeb56f36c186f4ae0758ee542dc65d7bbb21752109c4e5",
+  "baseCommit": "241e9a3a1ed10b14cf8831b28c48d46ab21f1aa0",
+  "sourceSha256": "9d3894d0a080ab89522196a51e635825dc57212756f813759e33fb2ceedd33d0",
   "cases": [
     {"id":"depart/$constants/all","fn":"$constants","args":[],"output":{"DEPART_COMFORT_MIN_SLACK":10,"DEPART_STATUS":{"COMFORT":"COMFORT","TIGHT":"TIGHT","LATE_RISK":"LATE_RISK"},"DEPART_TIGHT_MIN_SLACK":0}},
     {"id":"depart/departStatus/slack-1000000","fn":"departStatus","args":[-1000000],"output":"LATE_RISK"},

@@ -60,6 +60,8 @@ function readAppointmentDraft(r: Reader, opts: { titleRequired: boolean }): { dr
     ...(prepareMinutes != null ? { prepareMinutes } : {}),
     ...readAlarmFields(r),
   };
+  // 반복 + 할 일은 받지 않음 — 할 일은 그날 시각(절대 시각)이라 다음 회차에 옮길 규칙이 아직 없음 (있는 반복 일정은 plan-core가 RECURRING으로 막음)
+  if (appointment?.recurrenceRule && participantFields.activities?.length) r.problemAt('participant.activities', '반복 일정에는 할 일을 넣을 수 없어요');
   return { draft, appointment };
 }
 

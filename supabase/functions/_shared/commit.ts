@@ -4,7 +4,7 @@
 // 중간에 실패하면 지워서(CASCADE) 되돌림. 같은 요청을 다시 보냈을 때 같은 상태가 되는 건 기존 약속(appointment_id)이 있을 때만 —
 // 새 약속(appointment)은 응답만 잃고 다시 보내면 약속 · 알람이 두 벌 생기고, 일정 없는 알람도 alarm_id 없이 다시 보내면 하나 더 생김 (요청 키는 아직 안 받음).
 // 근본 해결은 DB 함수(RPC)로 묶는 것
-import { autoLevel, AXES_PICKER_ENABLED, levelOfVoiceTone, resolveIntensity, wakeSensitivityOf } from './calc/index.ts';
+import { activityPlanJson, autoLevel, AXES_PICKER_ENABLED, levelOfVoiceTone, resolveIntensity, wakeSensitivityOf } from './calc/index.ts';
 import { buildEditLogRows, diffAlarms, type AlarmWrite, type EditInput } from './commit-core.ts';
 import { must } from './db.ts';
 import { HttpError } from './errors.ts';
@@ -132,6 +132,8 @@ export async function persistAppointment(
       travel_source: travel.source,
       prepare_minutes: plan.prepare.minutes,
       buffer_minutes: plan.basics.bufferMinutes,
+      // 기상 뒤 할 일 계획 — 요청에 칸이 없으면 저장된 계획을 그대로 다시 씀(plan-core), [] · null이면 비움
+      activity_plan: activityPlanJson(plan.activityPlan),
     };
     let participantId: string;
     if (inputs.participant) {

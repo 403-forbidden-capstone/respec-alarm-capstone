@@ -229,6 +229,24 @@ export default async function testCommitRpc({ q, as, su, svc, check, expectErr }
       ? true : { p, authed, anon, tbl, svcOk };
   });
 
+  await check('저장 함수: 참여 조건 칸 activity_plan(할 일 계획)도 넘긴 그대로 넣고 고침 — 함수는 안 고침(칸 목록을 그대로 씀) · 안 넘기면 그대로', async () => {
+    const plan = { lead_minutes: 20, items: [{ title: '온라인 회의', start: '2026-11-20T01:00:00.000Z', end: '2026-11-20T02:00:00.000Z', before_prepare: true, source: 'USER' }] };
+    await apply({ key: 'key-actv-0001', hash: 'ha1', appointment: apRow(70), participant: { participant_id: id(71), is_new: true, fields: { ...ptFields, activity_plan: plan } } });
+    await su();
+    const [made] = await q(`select activity_plan from public.appointment_participants where participant_id = $1`, [id(71)]);
+    // 다른 칸만 고치면(activity_plan을 안 넘김) 그대로
+    await apply({ key: 'key-actv-0002', hash: 'ha2', ref: { appointment_id: id(70), title: '새 약속', appointment_at: '2026-11-20T01:00:00+00:00' }, participant: { participant_id: id(71), is_new: false, fields: { prepare_minutes: 150 } } });
+    await su();
+    const [kept] = await q(`select activity_plan, prepare_minutes from public.appointment_participants where participant_id = $1`, [id(71)]);
+    // null을 넘기면 지움
+    await apply({ key: 'key-actv-0003', hash: 'ha3', ref: { appointment_id: id(70), title: '새 약속', appointment_at: '2026-11-20T01:00:00+00:00' }, participant: { participant_id: id(71), is_new: false, fields: { activity_plan: null } } });
+    await su();
+    const [gone] = await q(`select activity_plan from public.appointment_participants where participant_id = $1`, [id(71)]);
+    await clean();
+    return made.activity_plan?.items?.[0]?.title === '온라인 회의' && kept.activity_plan?.lead_minutes === 20 && kept.prepare_minutes === 150 && gone.activity_plan === null
+      ? true : { made, kept, gone };
+  });
+
   await check('저장 함수: 7일 지난 요청 키만 purge가 지움 (다시 돌려도 오류 없음) · pg_cron request-keys-purge는 매일 18:30 UTC', async () => {
     await su();
     await q(`insert into private.request_keys (user_id, fn, key, request_hash, result, created_at) values

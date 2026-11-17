@@ -8,7 +8,7 @@
 //   고치기 = (이후 모두면) 뒤 회차 지우기 → 참여 조건 → 알람 → 약속 행 마지막 / 지우기(이후 모두) = 뒤 회차 → 규칙 비우기 → 이 행 마지막
 //   약속 행을 마지막에 쓰는 이유: 앞에서 실패해도 약속 행이 안 바뀌어 있어 다시 보내면 고칠 것이 그대로 보임
 // 하루 경계는 profiles.timezone(없으면 Asia/Seoul) 0시 (tz.ts)
-import { hasEarlierWake, isEveningWake, type SameDayWake } from './calc/index.ts';
+import { activityPlanJson, activityPlanOf, hasEarlierWake, isEveningWake, type SameDayWake } from './calc/index.ts';
 import { diffAlarms, type AlarmDiff, type AlarmWrite } from './commit-core.ts';
 import { summarize } from './commit.ts';
 import { must } from './db.ts';
@@ -36,7 +36,7 @@ import { computePlan, firstPrepareMinutes, resolveBasics, withoutFriendTimes, ty
 import { buildRingPackages, canceledAlarmIds, subtitleFor, type RingPackage } from './ring-package.ts';
 import { planGroupPush, sendGroupPush, type GroupPlan, type NotifyOptions } from './notify.ts';
 import { resolveTravel, type TravelChoice, type TravelDeps } from './route.ts';
-import { inheritedKinds, resolvedTravelOf, shiftManualTimes } from './roll.ts';
+import { inheritedKinds, resolvedTravelOf, shiftActivityDates, shiftManualTimes } from './roll.ts';
 import type { Db } from './supabase.ts';
 import { localDateKey, localDayRange, safeTimeZone } from './tz.ts';
 
@@ -88,7 +88,7 @@ export type LeaveResponse = Common & { left: boolean };
 
 type EditRow = SeriesAppointmentRow & { exception_kind: ExceptionKind | null };
 const APPOINTMENT_COLUMNS = `${SERIES_APPOINTMENT_COLUMNS}, exception_kind`;
-const PARTICIPANT_COLUMNS = 'participant_id, appointment_id, user_id, origin_name, origin_lat, origin_lng, transport_type, est_travel_minutes, travel_source, prepare_minutes, buffer_minutes, prepare_advance_minutes';
+const PARTICIPANT_COLUMNS = 'participant_id, appointment_id, user_id, origin_name, origin_lat, origin_lng, transport_type, est_travel_minutes, travel_source, prepare_minutes, buffer_minutes, prepare_advance_minutes, activity_plan';
 
 type Target = { appointment: EditRow; participant: ParticipantRow | null; alarms: AlarmRow[] };
 type DayRow = { appointment: EditRow; participant: ParticipantRow; alarms: AlarmRow[] };
@@ -403,6 +403,7 @@ async function replanFor(
   // 친구가 제안해 주인이 적용한 시각(original_scheduled_at 있음)은 약속의 시각 · 장소를 바꾸면 새 계산이 이김 — 친구가 바꾸기 전 모습으로 되돌린 알람을 새 계산의 입력(직접 고른 시각 · 기존 알람 간격)으로 씀.
   //   시각 · 장소가 그대로면(제목 · 중요도만) 이 되돌림을 안 해서 친구 값이 그대로 남음. 변경 비교(diffAlarms)에는 실제 행을 넘김
   const planAlarms = patched.changed.at || patched.changed.place ? withoutFriendTimes(alarms) : alarms;
+  const storedPlan = activityPlanOf(participant.activity_plan);
   const inputs: PlanInputs = {
     now: ctx.now,
     draft: {
@@ -411,6 +412,8 @@ async function replanFor(
       kinds: inheritedKinds(alarms, { withWake: !sameDayWake, baseHadEarlierWake: hadEarlierWake }),
       //   친구가 제안해서 주인이 적용한 시각(original_scheduled_at 있음)은 약속의 시각 · 장소를 바꾸면 새 계산이 이김 — 시각 · 장소가 그대로면(제목 · 중요도만) 이 길이 아예 안 돎 (친구 10-22, D67)
       manualTimes: shiftManualTimes(planAlarms, oldAt, localDateKey(newAt, tz), tz),
+      // 저장된 할 일도 같은 규칙: 같은 날이면 그대로, 날짜가 바뀌면 날짜만 따라감 (없으면 칸을 안 넣어 plan-core가 저장된 계획 그대로 씀)
+      ...(storedPlan ? { activities: shiftActivityDates(storedPlan, oldAt, localDateKey(newAt, tz), tz) } : {}),
     },
     profile,
     appointment: patchedRow,
@@ -512,7 +515,7 @@ async function syncOne(ctx: EditCtx, a: { row: EditRow; patched: ReturnType<type
       'appointment_participants update',
       await ctx.service
         .from('appointment_participants')
-        .update({ est_travel_minutes: made.plan.travelMinutes, travel_source: made.plan.travel.chosen?.source, prepare_minutes: made.plan.prepare.minutes })
+        .update({ est_travel_minutes: made.plan.travelMinutes, travel_source: made.plan.travel.chosen?.source, prepare_minutes: made.plan.prepare.minutes, activity_plan: activityPlanJson(made.plan.activityPlan) })
         .eq('participant_id', p.participant_id)
         .eq('user_id', p.user_id),
     );
@@ -693,7 +696,7 @@ export async function updateAppointment(ctx: EditCtx, req: Extract<EditRequest, 
       'appointment_participants update',
       await ctx.userDb
         .from('appointment_participants')
-        .update({ est_travel_minutes: plan.travelMinutes, travel_source: plan.travel.chosen?.source, prepare_minutes: plan.prepare.minutes })
+        .update({ est_travel_minutes: plan.travelMinutes, travel_source: plan.travel.chosen?.source, prepare_minutes: plan.prepare.minutes, activity_plan: activityPlanJson(plan.activityPlan) })
         .eq('participant_id', participant.participant_id)
         .eq('user_id', ctx.userId),
     );

@@ -102,17 +102,23 @@ test('할 일 activities: 시작 필수 · 끝 · 준비 전 여부는 모르면
   const r = Reader.root({
     activities: [
       { title: '온라인 회의', start: '2026-11-19T10:00:00+09:00', end: '2026-11-19T11:00:00+09:00', before_prepare: true },
-      { start: '2026-11-19T11:10:00+09:00' },
+      { start: '2026-11-19T11:10:00+09:00', source: 'ESTIMATED' },
     ],
   });
   assert.deepEqual(readParticipantFields(r), {
     activities: [
-      { title: '온라인 회의', start: new Date('2026-11-19T01:00:00Z'), end: new Date('2026-11-19T02:00:00Z'), beforePrepare: true },
-      { start: new Date('2026-11-19T02:10:00Z') },
+      { title: '온라인 회의', start: new Date('2026-11-19T01:00:00Z'), end: new Date('2026-11-19T02:00:00Z'), beforePrepare: true, source: 'USER' },
+      { start: new Date('2026-11-19T02:10:00Z'), source: 'ESTIMATED' },
     ],
   });
   assert.equal(r.issues.length, 0);
   const bad = Reader.root({ activities: [{ start: '2026-11-19T10:00:00+09:00', end: '2026-11-19T10:00:00+09:00' }, { title: '시작 없음' }] });
   readParticipantFields(bad);
   assert.deepEqual(bad.issues.map((i) => i.path), ['activities[0].end', 'activities[1].start']);
+});
+
+test('할 일 지우기: activities null · [] = 지움(빈 목록), 칸이 없으면 undefined(저장된 할 일 유지)', () => {
+  assert.deepEqual(readParticipantFields(Reader.root({ activities: null })), { activities: [] });
+  assert.deepEqual(readParticipantFields(Reader.root({ activities: [] })), { activities: [] });
+  assert.deepEqual(readParticipantFields(Reader.root({ buffer_minutes: 10 })), { bufferMinutes: 10 });
 });

@@ -95,7 +95,7 @@ export async function loadParticipant(db: Db, appointmentId: string, userId: str
     'appointment_participants',
     await db
       .from('appointment_participants')
-      .select('participant_id, appointment_id, user_id, origin_name, origin_lat, origin_lng, transport_type, est_travel_minutes, travel_source, prepare_minutes, buffer_minutes, prepare_advance_minutes')
+      .select('participant_id, appointment_id, user_id, origin_name, origin_lat, origin_lng, transport_type, est_travel_minutes, travel_source, prepare_minutes, buffer_minutes, prepare_advance_minutes, activity_plan')
       .eq('appointment_id', appointmentId)
       .eq('user_id', userId)
       .maybeSingle(),
@@ -156,6 +156,32 @@ export async function loadSameDayWake(db: Db, userId: string, at: Date, timeZone
       .lt('appointments.appointment_at', end.toISOString()),
   );
   return hasEarlierWake(at, sameDayWakesFromRows(rows), ownAppointmentId);
+}
+
+// 그날 이 약속보다 앞선 내 약속들의 켜진 기상 알람 중 가장 이른 시각 — 할 일이 있는 그날 두 번째 일정에서만 읽음 (plan-core sameDayWakeAt)
+//   이미 일어나 있을 기상이 첫 할 일보다 늦으면 기상을 더 만들지 않고 계산 실패로 알림. 앞뒤는 loadSameDayWake와 같이 약속 시각으로 가림
+export async function loadSameDayWakeAt(db: Db, userId: string, at: Date, timeZone: string, ownAppointmentId?: string): Promise<Date | undefined> {
+  const { start, end } = localDayRange(at, timeZone);
+  const rows = must<{ appointment_id: string; appointments: { appointment_at: string } | { appointment_at: string }[] | null; alarms: { is_enabled: boolean; scheduled_at: string }[] | { is_enabled: boolean; scheduled_at: string } | null }[]>(
+    'same-day wake at',
+    await db
+      .from('appointment_participants')
+      .select('appointment_id, appointments!inner(appointment_at), alarms!inner(is_enabled, scheduled_at)')
+      .eq('user_id', userId)
+      .eq('alarms.alarm_type', 'WAKE')
+      .gte('appointments.appointment_at', start.toISOString())
+      .lt('appointments.appointment_at', end.toISOString()),
+  );
+  let earliest: number | undefined;
+  for (const r of rows) {
+    const appt = (Array.isArray(r.appointments) ? r.appointments[0] : r.appointments)?.appointment_at;
+    if (!appt || Date.parse(appt) >= at.getTime() || r.appointment_id === ownAppointmentId) continue;
+    for (const a of Array.isArray(r.alarms) ? r.alarms : r.alarms ? [r.alarms] : []) {
+      const t = Date.parse(a.scheduled_at);
+      if (a.is_enabled !== false && Number.isFinite(t) && (earliest == null || t < earliest)) earliest = t;
+    }
+  }
+  return earliest == null ? undefined : new Date(earliest);
 }
 
 // 내 지난 이동 기록 (출발 · 도착이 모두 찍힌 것) — 같은 경로 실측 중앙값용. alarm-suggest · alarm-commit은 읽기만 하고(CACHED로 쓰지 않음, D5),
@@ -298,6 +324,11 @@ export async function buildPlan(ctx: PlanContext, draft: PlanDraft, options: { w
   ]);
 
   const inputs: PlanInputs = { now: ctx.now, draft, profile, appointment, participant, existingAlarms, stats, lateCount4w, sameDayWake };
+  // 할 일이 있는 그날 두 번째 일정이면 이미 있는 기상 시각을 같이 봄 (첫 할 일보다 늦으면 plan-core가 실패로 알림)
+  const hasActivities = draft.activities ? draft.activities.length > 0 : participant?.activity_plan != null;
+  if (sameDayWake && draft.withWake == null && hasActivities) {
+    inputs.sameDayWakeAt = await loadSameDayWakeAt(ctx.db, ctx.userId, basics.at, timeZone, appointment?.appointment_id);
+  }
 
   // 요청에 이동시간이 없고 저장된 게 직접 입력(MANUAL)이면 그대로 이어받음 — 시각 · 강도의 직접 값과 같은 규칙(D42 C). 길찾기를 다시 안 부름
   //   API로 저장된 값은 D5(카카오 응답 저장 · 재사용 불허) 때문에 이어받지 않고 다시 구함

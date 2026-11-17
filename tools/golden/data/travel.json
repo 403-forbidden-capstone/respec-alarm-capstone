@@ -1,8 +1,8 @@
 {
   "format": 1,
   "module": "travel",
-  "baseCommit": "d271fb579ab662aecadd8da3228fb39a10b6b00a",
-  "sourceSha256": "7074251ac522a35a01aeb56f36c186f4ae0758ee542dc65d7bbb21752109c4e5",
+  "baseCommit": "241e9a3a1ed10b14cf8831b28c48d46ab21f1aa0",
+  "sourceSha256": "9d3894d0a080ab89522196a51e635825dc57212756f813759e33fb2ceedd33d0",
   "cases": [
     {"id":"travel/$constants/all","fn":"$constants","args":[],"output":{"AVERAGE_SPEED_KMH":{"WALK":4,"TRANSIT":22,"BUS":22,"SUBWAY":22,"CAR":30},"DETOUR_FACTOR":1.3,"SAME_ROUTE_MIN_SAMPLES":3,"SAME_ROUTE_RADIUS_METERS":300}},
     {"id":"travel/haversineKm/seoul-station-seoul-station","fn":"haversineKm","args":[{"lat":37.5547,"lng":126.9707},{"lat":37.5547,"lng":126.9707}],"output":0},
