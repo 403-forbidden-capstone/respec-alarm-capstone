@@ -27,7 +27,7 @@ import { render } from './render.ts';
 import { loadSession, recordCalls, saveSession, type CommitState, type ServerState, type SessionDeps, type SessionRow } from './session.ts';
 import { applyCardAction } from './turn-core.ts';
 import type { FinalExtract } from './types.ts';
-import { contextVars, viewTranscript } from './view.ts';
+import { addDays, contextVars, spokenTime, viewTranscript } from './view.ts';
 import { ctxOf, toTurnState, turnsOf, withTurnState } from './voice-state.ts';
 
 /** RUNNING이 이만큼 지나면 앞 요청이 죽은 것으로 보고 다시 시도를 받음 (T2 19초 × 다시 시도 1번 + 저장) */
@@ -143,9 +143,11 @@ async function saveRecords(db: Db, userId: string, plan: FinalPlan, review: stri
 
 /**
  * 하루 일기에 넣을 사실 — 그날(date) 대화들의 structured.v1에서 사용자가 말했거나 확인한 것(inferred 뺌) · 기록된 행동(needs_confirm 뺌) · 날짜가 그날인 것만.
- * 사건 · 기분 · 행동 · 수면 · 일정 결과가 하나도 없으면 null (일기를 만들지 않음 — 습관 · 목표만으로는 쓰지 않음)
+ * 앞으로의 일정(plans — 거절한 카드 뺌, 시각이 애매하면 시각 없이) · 준비물 · 할 일(todos)도 넣음: 일정만 말한 날도 일기가 생김.
+ * 날짜는 서버가 '오늘 · 내일'로 바꿔 넣음(모델이 날짜를 세지 않게), 시각은 '오전 10시' 말씨로.
+ * 사건 · 기분 · 행동 · 수면 · 일정 결과 · 일정 · 할 일이 하나도 없으면 null (일기를 만들지 않음 — 습관 · 목표만으로는 쓰지 않음)
  */
-export function journalFacts(list: Structured[], date: string): Record<string, unknown> | null {
+export function journalFacts(list: Structured[], date: string): JournalFacts | null {
   const told = (x: { source: string }): boolean => x.source !== 'inferred';
   // 위험 판정(other.safety_flag) 대화는 어떤 칸도 일기 입력에 넣지 않음
   const day = list.filter((s) => s.session.reference_date === date && !s.other.safety_flag);
@@ -171,8 +173,61 @@ export function journalFacts(list: Structured[], date: string): Record<string, u
   );
   const habits = day.flatMap((s) => s.habit_signals.filter((h) => told(h) && h.date === date).map(({ habit, note }) => ({ habit, note })));
   const goals = day.flatMap((s) => s.goals_routine.goals.filter(told).map((g) => g.goal_text));
-  if (events.length + memorable.length + mood.length + behavior.length + sleep_wake.length + schedule_outcomes.length === 0) return null;
-  return { events, memorable, mood, behavior, sleep_wake, schedule_outcomes, habits, goals };
+  const plans = day.flatMap((s) =>
+    s.appointments.filter((a) => told(a) && a.status !== 'declined').map((a) => ({ title: a.title, day: dayLabel(a.date, date), time: a.time && !a.unclear ? spokenOf(a.time) : null })),
+  );
+  const todos = day.flatMap((s) =>
+    s.todos.filter(told).map((t) => ({ title: t.title, kind: t.type === 'ITEM' ? ('준비물' as const) : ('할 일' as const), day: dayLabel(t.due_date, date), for_plan: t.appointment_title })),
+  );
+  if (events.length + memorable.length + mood.length + behavior.length + sleep_wake.length + schedule_outcomes.length + plans.length + todos.length === 0) return null;
+  return { events, memorable, mood, behavior, sleep_wake, schedule_outcomes, habits, goals, plans, todos };
+}
+
+export interface JournalFacts {
+  events: { text: string; time: string | null }[];
+  memorable: string[];
+  mood: { mood: string[]; fatigue: number | null; stress: number | null; causes: string[]; condition_note: string | null }[];
+  behavior: unknown[];
+  sleep_wake: unknown[];
+  schedule_outcomes: unknown[];
+  habits: unknown[];
+  goals: string[];
+  plans: { title: string; day: string | null; time: string | null }[];
+  todos: { title: string; kind: '준비물' | '할 일'; day: string | null; for_plan: string | null }[];
+}
+
+/** 일기 날짜 기준 '오늘 · 내일 · 모레' — 그 밖은 날짜 그대로, 모르면 null */
+function dayLabel(d: string | null, date: string): string | null {
+  if (d === null) return null;
+  return { [date]: '오늘', [addDays(date, 1)]: '내일', [addDays(date, 2)]: '모레' }[d] ?? d;
+}
+const spokenOf = (hhmm: string): string => spokenTime(Number(hhmm.slice(0, 2)), Number(hhmm.slice(3, 5)));
+
+const MOOD_KO: Record<string, [string, string]> = {
+  good: ['좋고', '좋은'], calm: ['차분하고', '차분한'], tired: ['피곤하고', '피곤한'], stressed: ['스트레스가 많고', '스트레스가 많은'],
+  anxious: ['불안하고', '불안한'], sad: ['슬프고', '슬픈'], angry: ['화가 나고', '화가 난'], mixed: ['마음이 복잡하고', '마음이 복잡한'],
+};
+/** 받침이 있으면 a, 없으면 b (한글이 아니면 a) */
+const josa = (w: string, a: string, b: string): string => {
+  const c = w.charCodeAt(w.length - 1) - 0xac00;
+  return c >= 0 && c < 11172 && c % 28 === 0 ? b : a;
+};
+
+/**
+ * T5가 쓸 사실이 있는데 빈 글을 줬을 때의 대체 일기 — 사실 목록의 값만 이어 붙임(지어내지 않음).
+ * 오늘 기분 · 사건 → 일정 → 준비물 · 할 일 순, 두세 문장.
+ */
+export function fallbackDiary(f: JournalFacts): string {
+  const out: string[] = [];
+  const moods = [...new Set(f.mood.flatMap((m) => m.mood))].filter((m) => MOOD_KO[m]);
+  if (moods.length > 0) out.push(`오늘은 ${moods.map((m, i) => (MOOD_KO[m] as [string, string])[i === moods.length - 1 ? 1 : 0]).join(' ')} 하루였다.`);
+  if (f.events.length > 0) out.push(`${f.events.map((e) => e.text).join(', ')}.`);
+  for (const p of f.plans.slice(0, 2)) out.push(`${[p.day, p.time && `${p.time}에`].filter(Boolean).join(' ')} ${p.title}${josa(p.title, '이', '가')} 예정되어 있다.`.trimStart());
+  const items = f.todos.filter((t) => t.kind === '준비물').map((t) => t.title);
+  const tasks = f.todos.filter((t) => t.kind === '할 일').map((t) => t.title);
+  if (items.length > 0) out.push(`${items.join(', ')}${josa(items[items.length - 1] as string, '을', '를')} 챙기기로 했다.`);
+  if (tasks.length > 0) out.push(`${tasks.join(', ')}${josa(tasks[tasks.length - 1] as string, '을', '를')} 하기로 했다.`);
+  return out.join(' ');
 }
 
 /**
@@ -201,8 +256,13 @@ async function saveJournal(deps: CommitDeps, sessionId: string, date: string, no
   const fillIo = (deps.ioUserIds ?? []).includes(deps.userId);
   await recordCalls(deps, sessionId, [{ call: res.call, io: fillIo ? { input: render(POINTS.T5.prompt.user, vars).trimEnd(), output: res.ok ? res.data : null, error: res.ok ? null : res.reason } : null }], nowIso);
   if (!res.ok) throw new Error(`T5 실패: ${res.code}`);
-  const diary = res.data.diary.trim();
-  if (diary === '') return 0;
+  let diary = res.data.diary.trim();
+  if (diary === '') {
+    // 쓸 사실이 있는데 빈 글 — 예전엔 0을 돌려 DONE인데 일기가 없었음. 사실 값만으로 만든 문장으로 저장 (로그엔 개수만, 글은 안 남김)
+    diary = fallbackDiary(facts);
+    console.warn('[voice-commit] T5 빈 일기 → 대체 문장', { session_id: sessionId, counts: Object.fromEntries(Object.entries(facts).map(([k, v]) => [k, (v as unknown[]).length])), fallback: diary !== '' });
+    if (diary === '') return 0;
+  }
   const row = { ai_summary: diary, source_session_id: sessionId, generated_at: nowIso };
   // is_edited = false 조건 — 읽은 뒤 사용자가 고쳤으면 덮지 않음(0줄 → 쓴 수 0)
   if (cur) {

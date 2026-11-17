@@ -13,12 +13,12 @@ import { callLlm, DEFAULT_MODEL, type CallGate, type Effort, type LlmClient, typ
 import { render } from '../ai/render.ts';
 import { schemaOf, type SchemaId } from '../ai/schemas/index.ts';
 import ASSIST_E4 from './ASSIST_E4.v1.1.ts';
-import T1 from './T1.v1.5.ts';
+import T1 from './T1.v1.6.ts';
 import T2 from './T2.v3.3.ts';
 import T2F from './T2F.v2-d.ts';
 import T3 from './T3.v1.ts';
 import T4 from './T4.v1.1.ts';
-import T5 from './T5.v2.ts';
+import T5 from './T5.v3.ts';
 
 // ai_calls.point 값과 같은 이름 (DB check 제약 'T1' · 'T2F' · 'T2' · 'T3' · 'T4' · 'T5' · 'E4')
 export type PointId = 'T1' | 'T2F' | 'T2' | 'T3' | 'T4' | 'T5' | 'E4';
@@ -61,7 +61,7 @@ export const POINTS: Record<PointId, PointConfig> = {
   T3: { prompt: T3, schema: 't3-reason.v1', effort: 'low', maxTokens: 1024, thinking: null, timeoutMs: 4_000, retryOnTimeout: true, cacheSystem: true },
   // 대화 없는 날 일기. 장부 n=84: p50 2.1초 / p95 5.1초 → ×2는 10.2초를 올려 11초
   T4: { prompt: T4, schema: 't4-diary.v1', effort: 'medium', maxTokens: 4096, thinking: null, timeoutMs: 11_000, retryOnTimeout: true, cacheSystem: true },
-  // 하루 일기(voice-commit 끝, 구조화 JSON → 1~2문장). v1.2(대화 원문 → 일기 · 코칭 · 응원, 26초)는 서버에서 안 씀. v2는 장부 없음 —
+  // 하루 일기(voice-commit 끝, 구조화 JSON → 1~2문장). v3 = v2 + 일정 · 준비물 · 할 일도 쓰고 사실이 있으면 비우지 않음. v1.2(대화 원문 → 일기 · 코칭 · 응원, 26초)는 서버에서 안 씀. v2는 장부 없음 —
   //   출력이 한두 문장이라 T2F와 같은 9초, 다시 시도 안 함(앱 voice-commit 45초 안에 T2와 같이 들어가게. 실패하면 PARTIAL → 다음 대화 열 때 다시)
   T5: { prompt: T5, schema: 't4-diary.v1', effort: 'low', maxTokens: 1024, thinking: null, timeoutMs: 9_000, retryOnTimeout: false, cacheSystem: true },
   // 추천 비서(하루 한 번 밤에 계산해 저장). 장부 n=132: p50 9.1초 / p95 14.2초 → ×2는 28.4초라 28초

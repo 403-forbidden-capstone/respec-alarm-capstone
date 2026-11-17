@@ -519,7 +519,16 @@ export type GuardAction =
   | "append_alarm" // 바뀐 기상 알람 시각을 서버 문장으로 덧붙임
   | "spoken_times" // HH:MM → 말로
   | "retract_end" // 서버 질문이 남았는데 end → end 거둠 (지침 19a)
+  | "drop_follow_up" // 사용자가 끝내자고 했는데 선택 질문 → 그 물음 지움
   | "template"; // 템플릿 한 줄로 바꿈 (지침 22)
+
+// shortcut: 끝내자는 말을 글자로만 봄 — 놓치면 선택 질문이 한 번 더 나갈 뿐(저장 · 종료는 막지 않음), 자주 놓치면 목록을 늘림
+const FINISH_SAID = /(그냥\s*저장|저장해\s*줘|이제\s*잘게|잘게|잘래|자러\s*갈|그만|끝내자|끝낼게|끝이야|됐어|ㅂㅂ|굿나잇|잘\s*자)/u;
+
+/** 사용자가 대화를 끝내자고 했는지 — 그 뒤엔 선택 질문(돌아보기 · 서버 질문)을 하지 않고, 서버 질문이 남아도 끝냄을 막지 않음 */
+export function wantsToFinish(text: string): boolean {
+  return FINISH_SAID.test(text);
+}
 
 export interface GuardInput {
   reply: string;
@@ -727,6 +736,18 @@ export function applyGuards(input: GuardInput, view: GuardView): GuardResult {
     actions.push("cut_question");
   }
 
+  // 3-1) 끝내자는 말 뒤 선택 질문 — 일정 확인(CONFIRM · CLARIFY)만 남기고 지움 (답을 안 해도 저장 · 종료는 그대로)
+  const lastUser = [...turnsBefore].reverse().find((t) => t.role === "user");
+  const finishing = lastUser !== undefined && wantsToFinish(lastUser.text);
+  if (finishing) {
+    let qi = 0;
+    const kept = sents.filter((s) => !isQuestion(s) || ["CONFIRM", "CLARIFY"].includes(input.acts[qi++]?.type ?? ""));
+    if (kept.length !== sents.length) {
+      actions.push("drop_follow_up");
+      sents = kept.length > 0 ? kept : [fallbackReply(eventsVisible)];
+    }
+  }
+
   // 4) 바뀐 기상 알람 시각 덧붙임 (위기 턴은 알람 이야기를 하지 않는 게 규칙 — 다음 턴에 전함)
   if (!view.safety.latestUser) {
     const missing = relayWithDeferred(sents.join(" "), ctx, eventsVisible, turnsBefore, view.safety.deferredTurns ?? 0);
@@ -756,7 +777,7 @@ export function applyGuards(input: GuardInput, view: GuardView): GuardResult {
   const acts = rebuildActs(reply, input.acts, ctx, eventsVisible, turnsBefore);
   if (!sameActs(acts, input.acts)) actions.push("rebuild_acts");
   let end = input.end;
-  if (end && ctx.question !== null) {
+  if (end && ctx.question !== null && !finishing) {
     const asked = turnsBefore.some((t) => t.role === "ai" && (t.acts ?? []).some((a) => a.type === "SERVER_Q")) || acts.some((a) => a.type === "SERVER_Q");
     if (!asked) {
       end = false;
