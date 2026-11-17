@@ -50,6 +50,7 @@ describe('Gemini Live microphone gating', () => {
       send(message: string) { sent.push(JSON.parse(message)); }
       close() { this.readyState = 3; }
     }
+    // eslint-disable-next-line no-new-func -- isolated HTML page runs under a fake browser for this test
     const runScript = new Function('window', 'document', 'navigator', 'AudioContext', 'WebSocket', 'setTimeout', 'clearTimeout', 'btoa', 'atob', script as string);
     runScript(
       win, { addEventListener: () => {} }, navigatorFake, FakeAudioContext, FakeWebSocket,
