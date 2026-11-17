@@ -38,12 +38,13 @@ function deps(over: Partial<BriefingDeps> = {}, alarms: ScheduledAlarm[] = [alar
 }
 
 describe('prepareBriefings', () => {
-  it('다가오는 기상 · 출발 알람만 — 폰에 있는 열쇠를 have로 보내고 결과를 저장', async () => {
+  it('다가오는 기상 알람만 — 준비 시작 · 출발은 서버를 안 부름(Gemini · 한도 0회, 폰이 고정 문장), 폰에 있는 열쇠를 have로 보내고 결과를 저장', async () => {
     const t = deps({}, [alarm('w1', 'WAKE', 3_600_000), alarm('d1', 'DEPARTURE', 7_200_000), alarm('p1', 'PREPARE', 3_600_000), alarm('far', 'WAKE', BRIEFING_WINDOW_MS + 1), alarm('past', 'WAKE', -1)]);
     const s = await prepareBriefings(NOW, t.d);
-    expect(t.calls).toEqual([{ id: 'w1', have: ['bbbbbbbbbbbbbbbb'] }, { id: 'd1', have: ['bbbbbbbbbbbbbbbb'] }]);
-    expect(t.saved).toEqual(['w1', 'd1']);
-    expect(s.saved).toEqual(['w1', 'd1']);
+    expect(t.calls).toEqual([{ id: 'w1', have: ['bbbbbbbbbbbbbbbb'] }]);
+    expect(t.saved).toEqual(['w1']);
+    expect(s.saved).toEqual(['w1']);
+    expect(t.cleared).toEqual([]); // 출발 · 준비 시작 알람 · 저장소는 건드리지 않음
   });
 
   it('서버 refresh_at(전날 대화가 아직 새벽 정리 전)을 네이티브 저장에 refreshAt으로 넘김 — 백그라운드 갱신 예약 (#515) · 예전 서버(칸 없음)면 null', async () => {

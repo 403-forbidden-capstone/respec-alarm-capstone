@@ -274,7 +274,7 @@ export default function AlarmTestScreen() {
     await runVoice(run, () => ringVoiceTest(pkg, snoozeCount, voice));
   }
 
-  // 출발 시험 — 기존 출발 알림 그대로 (알림음 · 진동 한 번 + AI 브리핑 한 번, 기상 배경음 없음, "출발했어요" 버튼)
+  // 출발 시험 — 기존 출발 알림 그대로 (알림음 · 진동 한 번 + 고정 문장 Android TTS 한 번, 기상 배경음 없음, "출발했어요" 버튼)
   async function runDepartureVoice() {
     clearSequence();
     const now = nowMillis();
@@ -547,7 +547,7 @@ export default function AlarmTestScreen() {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>출발 알림 테스트</Text>
           <Text style={styles.note}>
-            {`테스트 샘플: 오전 ${SAMPLE.hour}시 ${SAMPLE.title} · 준비물 ${SAMPLE.items.join(', ')}. 알림음 · 진동 한 번 + AI 출발 브리핑 한 번(반복 없음, 기상 배경음 없음). 알림의 "출발했어요"는 기존과 같고, 시험 알람은 서버에 행이 없어 출발 기록이 남지 않음`}
+            {`테스트 샘플: 오전 ${SAMPLE.hour}시 ${SAMPLE.title} · 준비물 ${SAMPLE.items.join(', ')}. 알림음 · 진동 한 번 + "지금 출발해야 해요." Android TTS 한 번(단계 · Gemini · 반복 없음, 기상 배경음 없음). 알림의 "출발했어요"는 기존과 같고, 시험 알람은 서버에 행이 없어 출발 기록이 남지 않음`}
           </Text>
           <Button title="출발 알림 실제 재생" onPress={runDepartureVoice} disabled={!isAvailable} />
         </View>

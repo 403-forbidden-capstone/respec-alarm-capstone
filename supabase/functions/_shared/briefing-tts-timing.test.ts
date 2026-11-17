@@ -38,7 +38,7 @@ function fakeGemini(ttsOk = true) {
 }
 
 /** 사용자 A · 11/14 07:30 기상 알람(10시 팀플 발표) · 11/13 밤 대화(정리 전). 시각은 at(지금)으로 */
-function seed(t: TestContext, nowIso: string, wakeAt = kst(14, 7, 30)) {
+function seed(t: TestContext, nowIso: string, wakeAt = kst(14, 7, 30), opts: { appointment?: boolean; conversation?: boolean } = {}) {
   const db = new FakeDb();
   const clock = { now: Date.parse(nowIso) };
   db.now = new Date(clock.now);
@@ -50,23 +50,28 @@ function seed(t: TestContext, nowIso: string, wakeAt = kst(14, 7, 30)) {
   let reserves = 0;
   db.rpcHandlers.reserve_alarm_tts = () => `call-${++reserves}`;
   db.rows('profiles').push({ user_id: A, timezone: 'Asia/Seoul', alarm_voice_prefs: null });
-  const appt = db.newId();
   const day = Number(new Date(Date.parse(wakeAt) + 9 * 3_600_000).getUTCDate());
-  db.rows('appointments').push({ appointment_id: appt, creator_id: A, title: '팀플 발표', appointment_at: kst(day, 10), importance: 'HIGH', exception_kind: null });
   const participant = db.newId();
-  db.rows('appointment_participants').push({ participant_id: participant, appointment_id: appt, user_id: A, prepare_minutes: 30, est_travel_minutes: 20, departed_at: null, arrived_at: null, appointments: null });
-  const alarm = (scheduled_at: string) => {
+  if (opts.appointment ?? true) {
+    const appt = db.newId();
+    db.rows('appointments').push({ appointment_id: appt, creator_id: A, title: '팀플 발표', appointment_at: kst(day, 10), importance: 'HIGH', exception_kind: null });
+    db.rows('appointment_participants').push({ participant_id: participant, appointment_id: appt, user_id: A, prepare_minutes: 30, est_travel_minutes: 20, departed_at: null, arrived_at: null, appointments: null });
+  }
+  const alarm = (scheduled_at: string, type = 'WAKE', over: Record<string, unknown> = {}) => {
     const id = db.newId();
-    db.rows('alarms').push({ alarm_id: id, user_id: A, alarm_type: 'WAKE', scheduled_at, is_enabled: true, participant_id: null, voice_tone: 'DIRECT', intensity: 'NORMAL', intensity_source: 'AUTO' });
+    db.rows('alarms').push({ alarm_id: id, user_id: A, alarm_type: type, scheduled_at, is_enabled: true, participant_id: null, voice_tone: 'DIRECT', intensity: 'NORMAL', intensity_source: 'AUTO', ...over });
     return id;
   };
   const review = new Date(Date.parse(wakeAt) + 9 * 3_600_000 - 86_400_000).toISOString().slice(0, 10);
-  db.rows('conversation_sessions').push({ session_id: db.newId(), user_id: A, session_type: 'BEFORE_SLEEP', ended_at: null, server_state: { v: 1, day: { review }, counts: { user_turns: 2, llm_calls: 2 }, ended: false } });
+  if (opts.conversation ?? true) {
+    db.rows('conversation_sessions').push({ session_id: db.newId(), user_id: A, session_type: 'BEFORE_SLEEP', ended_at: null, server_state: { v: 1, day: { review }, counts: { user_turns: 2, llm_calls: 2 }, ended: false } });
+  }
   const structured = () => {
-    const st = db.rows('conversation_sessions')[0].server_state as Record<string, unknown>;
-    st.commit = { status: 'DONE', at_turn: 2, started_at: new Date(clock.now).toISOString(), attempts: 1 };
+    for (const r of db.rows('conversation_sessions')) {
+      (r.server_state as Record<string, unknown>).commit = { status: 'DONE', at_turn: 2, started_at: new Date(clock.now).toISOString(), attempts: 1 };
+    }
   };
-  return { db, wake: alarm(wakeAt), alarm, setNow, structured, reserves: () => reserves };
+  return { db, wake: alarm(wakeAt), alarm, participant, setNow, structured, reserves: () => reserves };
 }
 const app = (db: FakeDb) => ({ userId: A, db: db as never, service: db as never, kinds: ['WAKE', 'DEPARTURE'] as const });
 const device = (db: FakeDb) => ({ userId: A, db: db as never, service: db as never, kinds: ['WAKE'] as const });
@@ -202,3 +207,51 @@ test('정리 확인(DB)이 실패하면 정리됐는지 모름 → 대본 · TTS
   assert.equal(calls.script + calls.tts.length, 0);
   assert.equal(out.refresh_at, Date.parse(kst(14, 4, 10)) + COMMIT_LAG_MS);
 });
+
+test('출발 · 준비 시작 알람 — 앱 길은 기상만 받아 NOT_FOUND, 예전 앱이 출발을 보내도(종류 허용) Gemini 대본 · TTS · 한도 예약 0회', async (t) => {
+  const calls = fakeGemini();
+  const s = seed(t, kst(14, 4, 10));
+  s.structured();
+  const depart = s.alarm(kst(14, 9, 10), 'DEPARTURE', { participant_id: s.participant, voice_tone: 'DIRECT' }); // 여유 0분 이하 · 말소리 강 = 예전엔 3 · 4단계 Gemini
+  const prepare = s.alarm(kst(14, 8, 30), 'PREPARE', { participant_id: s.participant });
+  const live = { userId: A, db: s.db as never, service: s.db as never, kinds: ['WAKE'] as const }; // alarm-briefing/index.ts와 같은 종류
+  for (const id of [depart, prepare]) {
+    await assert.rejects(briefAlarm(live, { alarm_id: id }), (e) => e instanceof HttpError && e.code === 'NOT_FOUND');
+    await assert.rejects(briefAlarm(device(s.db), { alarm_id: id }), (e) => e instanceof HttpError && e.code === 'NOT_FOUND');
+  }
+  const old = await briefAlarm(app(s.db), { alarm_id: depart, have: [] });
+  assert.equal(old.gemini, 'NOT_NEEDED');
+  assert.deepEqual(old.audio, []);
+  assert.equal(calls.script + calls.tts.length, 0);
+  assert.equal(s.reserves(), 0);
+});
+
+test('7 · 12. 오늘 일정이 없는 날 — 전날 대화가 정리돼 있어도 기상 대본 · TTS 0회, 사용자가 만든 기상 알람은 지우거나 끄지 않고 문장 브리핑으로', async (t) => {
+  const calls = fakeGemini();
+  const s = seed(t, kst(14, 4, 10), kst(14, 7, 30), { appointment: false });
+  s.structured();
+  const repeat = s.alarm(kst(14, 6, 30), 'WAKE', { voice_tone: 'CALM' }); // 사용자가 따로 만든 다른 기상 알람
+  const before = JSON.stringify(s.db.rows('alarms'));
+  for (const id of [s.wake, repeat]) {
+    const out = await briefAlarm(device(s.db), { alarm_id: id, have: [] });
+    assert.equal(out.enabled, true);
+    assert.equal(out.script, undefined);
+    assert.deepEqual(out.audio, []);
+    assert.deepEqual(out.clips.map((c) => c.level), [1, 2, 3, 4]); // Android TTS 1 · 2단계 + 3 · 4단계는 예비 WAV · Android TTS
+  }
+  assert.equal(calls.script + calls.tts.length, 0);
+  assert.equal(s.reserves(), 0);
+  assert.equal(JSON.stringify(s.db.rows('alarms')), before); // 알람 행은 그대로 (새로 생기거나 꺼지지 않음)
+});
+
+test('8. 전날 AI 대화가 없어도 오늘 일정이 있으면 4시 뒤 기상 대본 · TTS를 만듦', async (t) => {
+  const calls = fakeGemini();
+  const s = seed(t, kst(14, 4, 10), kst(14, 7, 30), { conversation: false });
+  const out = await briefAlarm(device(s.db), { alarm_id: s.wake, have: [] });
+  assert.equal(out.refresh_at, null); // 기다릴 정리 없음
+  assert.equal(out.script, 'MADE');
+  assert.equal(calls.script, 1);
+  assert.ok(out.audio.length >= 1);
+  for (const c of out.clips) assert.match(c.text, /팀플 발표/);
+});
+

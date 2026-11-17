@@ -110,7 +110,7 @@ export function autoStageTest(nowMs: number, opts: VoiceOpts): { snoozeCount: nu
 export const SEQUENCE_STEP_MS = 20_000;
 export const SEQUENCE: Stage[] = [1, 2, 3, 4];
 
-/** 출발 시험 브리핑 — 1단계(출발 촉구) 한 문장만. 출발은 반복 없이 한 번 읽음 (네이티브 BriefingRules.repeatsBriefing) */
+/** 출발 시험 브리핑 — 저장은 하지만 네이티브는 출발에 고정 문장(BriefingRules.simple)만 읽음. 반복 없이 한 번 (BriefingRules.repeatsBriefing) */
 export function departureVoiceTest(nowMs: number): { snoozeCount: number; voice: VoiceTestSetup } {
   const rule: UrgencyRule = { urgentAtMs: null, maxLevel: 1, startLevel: 1 };
   return { snoozeCount: 0, voice: { rule, clips: briefingClips(rule, PROFILE, sampleInput('DEPARTURE', nowMs)), test: { sound: true, voice: true } } };

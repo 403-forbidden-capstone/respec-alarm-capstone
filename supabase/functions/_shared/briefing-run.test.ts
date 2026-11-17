@@ -163,18 +163,35 @@ test('키 없음 → NOT_CONFIGURED, 사용자가 끄면 아무것도 안 만듦
   assert.equal(f.calls.length, 2);
 });
 
-test('출발 알람: 그 일정 + 준비물 + 출발 촉구, 여유 0분 이하에 4단계 Gemini, 3단계는 말소리 강일 때만', async () => {
-  const f = fakes();
+test('출발 알람: 말소리 · 여유(지각 위험)와 상관없이 Gemini 대본 · TTS · 한도 예약 0회 — 폰은 고정 문장을 Android TTS로', async () => {
   const dep = source({ kind: 'DEPARTURE', scheduledAtMs: kst(9, 20), voiceTone: 'NEUTRAL', appointments: [{ title: '면접', atMs: kst(10), importance: 'HIGH' }], todos: [{ title: '이력서', type: 'ITEM' }] });
-  const out = await runBriefing(dep, new Set(), f.deps);
-  assert.equal(out.clips[0].text, '오전 10시 면접 갈 시간이야. 챙길 것: 이력서. 이제 출발하자.');
-  assert.deepEqual(out.levels, { 4: 'MADE' });
-  assert.deepEqual((await runBriefing({ ...dep, voiceTone: 'DIRECT' }, new Set(), fakes().deps)).levels, { 4: 'MADE', 3: 'MADE' });
-  // 여유 5분 — 예전엔 3단계였지만 이제 시작 단계 그대로 (중 → Gemini 없음, 강 → 3단계만)
-  assert.equal((await runBriefing({ ...dep, scheduledAtMs: kst(9, 15) }, new Set(), fakes().deps)).gemini, 'NOT_NEEDED');
-  assert.deepEqual((await runBriefing({ ...dep, scheduledAtMs: kst(9, 15), voiceTone: 'DIRECT' }, new Set(), fakes().deps)).levels, { 3: 'MADE' });
-  const calm = await runBriefing({ ...dep, scheduledAtMs: kst(9) }, new Set(), fakes().deps); // 여유 20분 = 출발은 한 번 읽고 끝, Gemini 없음
-  assert.equal(calm.gemini, 'NOT_NEEDED');
+  let scripts = 0;
+  // 여유 0분 이하(예전 4단계) · 말소리 강(예전 3단계) · 여유 있음 모두
+  for (const over of [{}, { voiceTone: 'DIRECT' as const }, { scheduledAtMs: kst(9, 15), voiceTone: 'DIRECT' as const }, { scheduledAtMs: kst(9) }]) {
+    const f = fakes();
+    const out = await runBriefing({ ...dep, ...over }, new Set(), { ...f.deps, script: async () => (scripts++, { scripts: null, status: 'MADE' }) });
+    assert.equal(out.gemini, 'NOT_NEEDED');
+    assert.equal(out.levels, undefined);
+    assert.deepEqual(out.audio, []);
+    assert.equal(f.calls.length, 0);
+    assert.equal(f.allowChecks(), 0);
+  }
+  assert.equal(scripts, 0);
+});
+
+test('기상 알람인데 그날 알람 뒤 일정이 없으면(사용자가 직접 만든 알람) 대본 · TTS 0회 — 템플릿 문장 1~4단계는 그대로', async () => {
+  const f = fakes();
+  let scripts = 0;
+  const out = await runBriefing(
+    source({ appointments: [{ title: '지난 일', atMs: kst(6), importance: 'NORMAL' }], appointmentAtMs: null, sessions: [{ goals: ['일찍 일어나기'] } as never] }),
+    new Set(),
+    { ...f.deps, script: async () => (scripts++, { scripts: null, status: 'MADE' }) },
+  );
+  assert.equal(scripts, 0);
+  assert.equal(f.calls.length, 0);
+  assert.equal(f.allowChecks(), 0);
+  assert.equal(out.enabled, true);
+  assert.deepEqual(out.clips.map((c) => c.level), [1, 2, 3, 4]);
 });
 
 test('말소리(voice_tone) → 저장할 규칙의 시작 단계: 약 1 · 중 2 · 강 3 (폰 manifest에 저장돼 오프라인에도 유지)', async () => {

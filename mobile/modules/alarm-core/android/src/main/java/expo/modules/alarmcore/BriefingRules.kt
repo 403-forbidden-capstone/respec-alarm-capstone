@@ -2,7 +2,7 @@ package expo.modules.alarmcore
 
 // 브리핑을 무엇으로 읽을지 정하는 순수 규칙 — 안드로이드 클래스를 안 써서 JVM 단위 시험으로 확인 (src/test/.../BriefingRulesTest.kt)
 // 3 · 4단계 음성 우선순위: 그 알람의 개인화 Gemini 캐시(L3/L4.wav) > 앱에 든 그 단계 예비 WAV(기상만) > 같은 단계 문장 Android TTS > 알람음 · 진동만
-// 기본 알람음 · 진동은 늘 (이 규칙과 무관). 1 · 2단계는 Android TTS
+// 기본 알람음 · 진동은 늘 (이 규칙과 무관). 1 · 2단계는 Android TTS. 단계 · Gemini는 기상만 — 준비 시작 · 출발은 simple(고정 문장)
 object BriefingRules {
   // TextToSpeech.isLanguageAvailable · setLanguage 결과 값 (안드로이드 상수와 같은 수)
   const val LANG_AVAILABLE = 0
@@ -27,6 +27,13 @@ object BriefingRules {
     if (korean.isNotEmpty()) return VoiceChoice.Skip("인터넷이 필요한 한국어 목소리만 있음")
     return VoiceChoice.EngineDefault
   }
+
+  // 준비 시작 · 출발 알람의 음성 — 단계 · Gemini 없이 Android TTS 고정 문장 한 번 (1~4단계 · 개인화 음성은 기상만)
+  //   저장된 브리핑 · 말소리 · 미루기 · 지각 위험을 안 봄 → 늘 1단계 높낮이 · 속도. 못 읽으면 알람음 · 진동만 (BriefingSpeaker)
+  private val SIMPLE_TEXT = mapOf("PREPARE" to "이제 준비를 시작할 시간이에요.", "DEPARTURE" to "지금 출발해야 해요.")
+
+  /** 준비 시작 · 출발이면 읽을 고정 문장, 아니면 null (기상 · 그 밖의 종류는 기존 규칙) */
+  fun simple(type: String): Fallback? = SIMPLE_TEXT[type]?.let { Fallback(1, it, 1.0f, 1.0f) }
 
   /** 해제 전까지 같은 브리핑을 반복하는지 — 기상만. 출발은 알림음 · 진동 한 번 + 브리핑 한 번으로 끝 */
   fun repeatsBriefing(alarmType: String): Boolean = alarmType == "WAKE"

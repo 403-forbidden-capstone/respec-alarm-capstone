@@ -14,7 +14,7 @@ import android.os.PowerManager
 import androidx.core.app.NotificationCompat
 import org.json.JSONObject
 
-// 출발 알람의 음성 브리핑 — 일정 알림(알림음 · 진동 한 번)을 띄운 뒤 그 일정 시각 · 준비물 · 출발 촉구를 한 번 읽고 끝나는 짧은 포그라운드 서비스
+// 출발 알람의 음성 안내 — 일정 알림(알림음 · 진동 한 번)을 띄운 뒤 고정 문장("지금 출발해야 해요.", BriefingRules.simple)을 Android TTS로 한 번 읽고 끝나는 짧은 포그라운드 서비스
 //   알람은 울리자마자 저장소에서 지워지므로(일정 알림은 한 번 알리면 끝) 알람 값은 인텐트에 실어 옴. 음성 파일은 다 읽은 뒤 지움
 //   정확한 알람(AlarmReceiver)에서 시작하므로 백그라운드 시작 제한의 예외. 시작을 못 하면 알림만 남음
 class BriefingSpeechService : Service() {
