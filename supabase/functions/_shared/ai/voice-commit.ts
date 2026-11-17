@@ -65,10 +65,16 @@ const outOf = (sessionId: string, status: VoiceCommitOut['status']): VoiceCommit
 /** 이 정리 뒤에 사용자 말이 늘었는지 — at_turn이 없는 예전 정리는 세션을 끝냈으므로 늘 수 없음 */
 const behind = (c: CommitState, row: SessionRow): boolean => c.at_turn !== undefined && c.at_turn < row.server_state.counts.user_turns;
 
-/** 이미 끝났거나(그 뒤 새 말 없음) 다른 요청이 처리 중이면 그 답 — 아니면 null(이번 요청이 처리) */
+/** 지금 [저장]된 카드 번호 (정렬) */
+const savedCardIds = (st: ServerState): string[] => st.cards.filter((c) => c.status === 'SAVED').map((c) => c.id).sort();
+
+/** 이 정리 뒤에 카드가 더 저장됐는지 — 무발화 종료 · [완료] 뒤 카드 [저장]을 일기에 반영하려고. saved_cards 없는 예전 정리는 비교 안 함 */
+const cardsMoved = (c: CommitState, st: ServerState): boolean => c.saved_cards !== undefined && savedCardIds(st).join() !== c.saved_cards.join();
+
+/** 이미 끝났거나(그 뒤 새 말 · 새 저장 카드 없음) 다른 요청이 처리 중이면 그 답 — 아니면 null(이번 요청이 처리) */
 function settled(row: SessionRow, nowMs: number): VoiceCommitOut | null {
   const c = row.server_state.commit;
-  if (c?.status === 'DONE' && !behind(c, row)) return c.out as VoiceCommitOut;
+  if (c?.status === 'DONE' && !behind(c, row) && !cardsMoved(c, row.server_state)) return c.out as VoiceCommitOut;
   if (c?.status === 'RUNNING' && nowMs - Date.parse(c.started_at) < COMMIT_STALE_MS) return outOf(row.session_id, 'RUNNING');
   return null;
 }
@@ -249,14 +255,15 @@ export function fallbackDiary(f: JournalFacts): string {
  * 같은 대화에 말이 늘어 다시 추출했으면 그 전에 만든 이 대화의 일기는 새 말을 모르므로 다시 씀.
  * 모델 실패는 던짐 → 이 단계만 실패(PARTIAL, 다음 대화 열기 때 다시) — 앞 단계 저장 결과는 그대로
  */
-async function saveJournal(deps: CommitDeps, sessionId: string, date: string, nowIso: string, extractedAt: string | null): Promise<number> {
+async function saveJournal(deps: CommitDeps, sessionId: string, date: string, nowIso: string, extractedAt: string | null, force = false): Promise<number> {
   const db = deps.userDb;
   const cur = must<{ journal_id: string; is_edited: boolean; source_session_id: string | null; ai_summary: string | null; generated_at: string | null } | null>(
     'daily_journals',
     await db.from('daily_journals').select('journal_id, is_edited, source_session_id, ai_summary, generated_at').eq('user_id', deps.userId).eq('record_date', date).maybeSingle(),
   );
   // extractedAt 없음 = 예전 정리 — 이 대화의 일기가 있으면 그대로
-  const upToDate = cur?.source_session_id === sessionId && !!cur.ai_summary && (extractedAt === null || (cur.generated_at !== null && dbMs(cur.generated_at) >= Date.parse(extractedAt)));
+  //   force = 정리 뒤 카드가 더 저장됨 — 이 대화의 일기가 있어도 다시 씀(고친 일기는 그대로)
+  const upToDate = !force && cur?.source_session_id === sessionId && !!cur.ai_summary && (extractedAt === null || (cur.generated_at !== null && dbMs(cur.generated_at) >= Date.parse(extractedAt)));
   if (cur?.is_edited || upToDate) return 0;
   const sessions = must<{ extracted_data: Structured }[]>(
     'conversation_sessions',
@@ -337,8 +344,10 @@ export async function handleVoiceCommit(deps: CommitDeps, body: unknown): Promis
   const r = Reader.root(body);
   const sessionId = r.uuid('session_id', { required: true }) ?? '';
   const rejected = readRejected(r);
+  // refresh — 카드를 [저장]한 뒤 앱이 보냄: 이미 정리한 대화의 일기만 고침. 정리한 적 없거나 그 뒤 새 말이 있으면 SKIPPED(T2를 부르지 않음 — 새 말은 [완료] · 새벽 4시 몫)
+  const refresh = r.bool('refresh') === true;
   r.finish();
-  return commitRoom(deps, sessionId, rejected, (deps.now ?? (() => new Date()))());
+  return commitRoom(deps, sessionId, rejected, (deps.now ?? (() => new Date()))(), refresh);
 }
 
 /**
@@ -346,32 +355,34 @@ export async function handleVoiceCommit(deps: CommitDeps, body: unknown): Promis
  * 앞 구간을 못 끝냈으면 이 세션 결과를 PARTIAL(failed에 previous_session)로 — 앱이 다시 보낼 목록에 남겨 다음에 둘 다 이어서.
  * 카드 번호는 구간을 넘어 그대로라(carryCards) rejected_cards를 앞 구간에도 같이 넘김 (모르는 번호는 건너뜀)
  */
-export async function commitRoom(deps: CommitDeps, sessionId: string, rejected: string[], now: Date): Promise<VoiceCommitOut> {
+export async function commitRoom(deps: CommitDeps, sessionId: string, rejected: string[], now: Date, refresh = false): Promise<VoiceCommitOut> {
   const sd: SessionDeps = { userId: deps.userId, userDb: deps.userDb, service: deps.service };
   const row = await loadSession(sd, sessionId);
   const prevId = row.server_state.prev_session_id;
   let prevDone = true;
   if (prevId) {
     try {
-      const p = await commitRoom(deps, prevId, rejected, now);
+      const p = await commitRoom(deps, prevId, rejected, now, refresh);
       prevDone = p.status === 'DONE' || p.status === 'SKIPPED';
     } catch (e) {
       console.error('[voice-commit] 앞 구간 정리 실패:', e);
       prevDone = false;
     }
   }
-  const out = await commitSession(deps, row, rejected, now);
+  const out = await commitSession(deps, row, rejected, now, refresh);
   if (prevDone || out.status === 'RUNNING') return out;
   return { ...out, status: 'PARTIAL', failed: [...out.failed, 'previous_session'] };
 }
 
-async function commitSession(deps: CommitDeps, row: SessionRow, rejected: string[], now: Date): Promise<VoiceCommitOut> {
+async function commitSession(deps: CommitDeps, row: SessionRow, rejected: string[], now: Date, refresh = false): Promise<VoiceCommitOut> {
   const sessionId = row.session_id;
   const nowIso = seoulIso(now);
   const sd: SessionDeps = { userId: deps.userId, userDb: deps.userDb, service: deps.service };
   const early = settled(row, now.getTime());
   if (early) return early;
   if (row.server_state.counts.user_turns === 0) return outOf(sessionId, 'SKIPPED'); // 첫 마디만 있는 대화 — 끝내지도 않음(다음에 이어 씀)
+  const before = row.server_state.commit;
+  if (refresh && (before?.extract == null || behind(before, row))) return outOf(sessionId, 'SKIPPED');
 
   // 1) 차지하기 — 겹친 요청은 rev 비교에서 하나만 이김. 세션은 끝내지 않음(ended · ended_at 그대로) — 같은 날 이어 말할 수 있게
   const st = withRejected(row.server_state, rejected, nowIso);
@@ -379,6 +390,8 @@ async function commitSession(deps: CommitDeps, row: SessionRow, rejected: string
   const atTurn = st.counts.user_turns; // 이번 정리가 다루는 말 수 — row.turns 그대로 추출하므로 그 뒤 온 말은 다음 정리 몫
   // 앞 시도의 추출은 같은 말까지 뽑은 것일 때만 다시 씀 (at_turn 없는 예전 정리는 끝난 세션이라 말이 늘지 않음)
   const reuse = prev?.extract != null && !behind(prev, row);
+  // 같은 추출을 다시 나누는데 카드가 더 저장됐으면 일기도 새로 — 앞 시도(PARTIAL)가 이미 그 카드로 일기를 썼어도 다시 쓰지만 결과는 같음
+  const cardsSaved = reuse && prev !== null && (cardsMoved(prev, st) || prev.redo_journal === true);
   const commit: CommitState = {
     status: 'RUNNING', attempts: (prev?.attempts ?? 0) + 1, started_at: nowIso, finished_at: null, at_turn: atTurn,
     extracted_at: reuse ? prev?.extracted_at ?? null : null, extract: reuse ? prev?.extract ?? null : null, out: null, error: null,
@@ -467,11 +480,11 @@ async function commitSession(deps: CommitDeps, row: SessionRow, rejected: string
   });
   // 일기는 공개 JSON이 저장된 뒤에만 — 저장 못 했으면 이번엔 만들지 않음(PARTIAL이라 다시 시도 때 만듦)
   // 이번 대화가 위험 판정이면 일기 단계를 건너뜀 — 그 대화로 기존 일기를 다시 쓰지 않음
-  if (structuredSaved && !plan.draft.other.safety_flag) await step('daily_journals', async () => void (saved.daily_journals = await saveJournal(deps, sessionId, st.day.review, nowIso, commit.extracted_at ?? null)));
+  if (structuredSaved && !plan.draft.other.safety_flag) await step('daily_journals', async () => void (saved.daily_journals = await saveJournal(deps, sessionId, st.day.review, nowIso, commit.extracted_at ?? null, cardsSaved)));
 
   // 5) 끝 — 저장한 답은 at_turn까지의 결과. 정리하는 사이 새 말이 왔으면 이 요청에는 STALE (저장 상태는 DONE이지만 at_turn이 뒤처져 다음 요청이 다시 정리)
   const out: VoiceCommitOut = { session_id: sessionId, status: failed.length === 0 ? 'DONE' : 'PARTIAL', saved, pending: plan.draft.pending.map((p) => p.text), failed };
-  await writeCommit(sd, sessionId, { ...commit, status: out.status === 'DONE' ? 'DONE' : 'PARTIAL', finished_at: nowIso, out, error: failed.length === 0 ? null : failed.join(',') });
+  await writeCommit(sd, sessionId, { ...commit, status: out.status === 'DONE' ? 'DONE' : 'PARTIAL', finished_at: nowIso, out, error: failed.length === 0 ? null : failed.join(','), saved_cards: savedCardIds(latest), ...(cardsSaved && (!structuredSaved || failed.includes('daily_journals')) ? { redo_journal: true } : {}) });
   if (out.status === 'DONE' && (await loadSession(sd, sessionId)).server_state.counts.user_turns > atTurn) return { ...out, status: 'STALE' };
   return out;
 }

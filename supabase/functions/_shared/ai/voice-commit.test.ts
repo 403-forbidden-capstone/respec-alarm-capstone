@@ -686,6 +686,95 @@ test('일기: 선택 질문에 답하지 않고 바로 끝내도("이제 잘게"
   assert.deepEqual(journalOf(db).map((j) => j.ai_summary), ['내일 오후 1시에 수업이 예정되어 있다.']);
 });
 
+// ── 정리 뒤 카드 [저장] → 일기 고침 (30초 무발화 종료 · [완료] 뒤 같은 날 다시 와서 저장) — 같은 추출로 다시 나눔(T2 안 부름)
+const readyCard = (db: FakeDb, sid: string, title: string) =>
+  putCards(db, sid, [{ status: 'READY', draft: { title, date: TOMORROW, time: '10:00', place: null, importance: null, transport: null, repeat: [], items: [], alarms: { WAKE: true, PREPARE: true, DEPARTURE: true } } }]);
+/** 앱이 카드를 [저장]하고 서버에 SAVED를 알린 뒤의 상태 (카드 흐름 자체는 voice.flow.test.ts) */
+const saveCardNow = (db: FakeDb, sid: string, id = 'c1') => {
+  const st = rowOf(db, sid).server_state;
+  st.cards = st.cards.map((c) => (c.id === id ? { ...c, status: 'SAVED', appointment_id: 'ap-saved' } : c)) as Card[];
+  st.rev += 1;
+};
+const refresh = (deps: CommitDeps, sid: string) => handleVoiceCommit(deps, { session_id: sid, refresh: true }) as Promise<VoiceCommitOut>;
+const count = (fake: { order: string[] }, p: string) => fake.order.filter((x) => x === p).length;
+
+test('정리 뒤 카드 [저장] → refresh가 같은 추출로 다시 나눠 일기를 고침 (T2 다시 안 부름 · 일기는 한 줄 갱신)', async () => {
+  const db = seed();
+  const x = emptyExtract({ mood_condition: TIRED, appointments: [plan('캡스톤 회의')] });
+  const { fake, deps, sid } = await chat(db, [['오늘 너무 피곤했어. 내일 10시 캡스톤 회의 있어']], [x], [{ diary: '오늘은 피곤한 하루였다.' }, { diary: '오늘은 피곤한 하루였고, 내일 오전 10시에 캡스톤 회의가 예정되어 있다.' }]);
+  readyCard(db, sid, '캡스톤 회의');
+  const first = await commit(deps, sid); // 30초 무발화 종료 · [완료] — 카드는 아직 확인 대기
+  assert.deepEqual([first.status, first.saved.daily_journals, journalOf(db).map((j) => j.ai_summary)], ['DONE', 1, ['오늘은 피곤한 하루였다.']]);
+  assert.deepEqual(rowOf(db, sid).server_state.commit?.saved_cards, []);
+
+  saveCardNow(db, sid);
+  const r = await refresh(deps, sid);
+  assert.deepEqual([r.status, r.saved.daily_journals, r.failed], ['DONE', 1, []]);
+  assert.deepEqual([count(fake, 'T2'), count(fake, 'T5')], [1, 2]);
+  assert.match(fake.seen.T5?.[1] ?? '', /캡스톤 회의/);
+  assert.deepEqual(journalOf(db).map((j) => [j.ai_summary, j.source_session_id]), [['오늘은 피곤한 하루였고, 내일 오전 10시에 캡스톤 회의가 예정되어 있다.', sid]]);
+  const s = rowOf(db, sid).extracted_data as Structured;
+  assert.deepEqual([s.appointments.map((a) => a.status), rowOf(db, sid).server_state.commit?.saved_cards], [['saved'], ['c1']]);
+
+  // 또 보내도(카드 변화 없음) 모델을 안 부르고 그대로
+  assert.equal((await refresh(deps, sid)).status, 'DONE');
+  assert.equal((await commit(deps, sid)).status, 'DONE');
+  assert.deepEqual([count(fake, 'T2'), count(fake, 'T5'), journalOf(db).length], [1, 2, 1]);
+});
+
+test('정리 뒤 카드 [저장]: 일정만 저장한 날도 일기가 새로 생김 (처음 정리 땐 쓸 사실이 없었음)', async () => {
+  const db = seed();
+  const { fake, deps, sid } = await chat(db, [['내일 오전 10시에 캡스톤 회의가 있어']], [emptyExtract({ appointments: [plan('캡스톤 회의')] })], [{ diary: '' }]);
+  readyCard(db, sid, '캡스톤 회의');
+  assert.deepEqual([(await commit(deps, sid)).saved.daily_journals, count(fake, 'T5')], [0, 0]);
+  saveCardNow(db, sid);
+  const r = await refresh(deps, sid);
+  assert.deepEqual([r.status, r.saved.daily_journals, count(fake, 'T2')], ['DONE', 1, 1]);
+  assert.deepEqual(journalOf(db).map((j) => j.ai_summary), ['내일 오전 10시에 캡스톤 회의가 예정되어 있다.']);
+});
+
+test('refresh: 정리한 적이 없거나 그 뒤 새 말이 있으면 SKIPPED — T2를 부르지 않음 (새 말은 [완료] · 새벽 4시 몫)', async () => {
+  const db = seed();
+  const { fake, deps, sid } = await chat(db, [['내일 10시 캡스톤 회의 있어']], [emptyExtract({ appointments: [plan('캡스톤 회의')] })]);
+  readyCard(db, sid, '캡스톤 회의');
+  saveCardNow(db, sid);
+  assert.equal((await refresh(deps, sid)).status, 'SKIPPED'); // 대화 중 카드 저장 — 아직 정리 전
+  assert.deepEqual([count(fake, 'T2'), journalOf(db).length], [0, 0]);
+
+  await commit(deps, sid);
+  const st = rowOf(db, sid).server_state;
+  st.counts = { ...st.counts, user_turns: st.counts.user_turns + 1 }; // 그 뒤 이어 말함
+  assert.equal((await refresh(deps, sid)).status, 'SKIPPED');
+  assert.equal(count(fake, 'T2'), 1);
+});
+
+test('정리 뒤 카드 [저장]: 사용자가 고친 일기는 덮지 않음 (모델도 안 부름)', async () => {
+  const db = seed();
+  const { fake, deps, sid } = await chat(db, [['피곤했어. 내일 10시 캡스톤 회의']], [emptyExtract({ mood_condition: TIRED, appointments: [plan('캡스톤 회의')] })], [{ diary: '오늘은 피곤한 하루였다.' }]);
+  readyCard(db, sid, '캡스톤 회의');
+  await commit(deps, sid);
+  const [j] = journalOf(db);
+  Object.assign(j, { edited_summary: '내가 고친 일기', is_edited: true });
+  saveCardNow(db, sid);
+  const r = await refresh(deps, sid);
+  assert.deepEqual([r.status, r.saved.daily_journals, count(fake, 'T5')], ['DONE', 0, 1]);
+  assert.deepEqual(journalOf(db).map((x) => [x.ai_summary, x.edited_summary, x.is_edited]), [['오늘은 피곤한 하루였다.', '내가 고친 일기', true]]);
+});
+
+test('정리 뒤 카드 [저장]: 일기 저장이 실패하면 PARTIAL — 다시 보내면 T2 없이 일기만 다시 고침', async () => {
+  const db = seed();
+  const { fake, deps, sid } = await chat(db, [['피곤했어. 내일 10시 캡스톤 회의']], [emptyExtract({ mood_condition: TIRED, appointments: [plan('캡스톤 회의')] })], [{ diary: '피곤했다.' }, { diary: '회의 예정.' }, { diary: '피곤했고 내일 회의가 예정되어 있다.' }]);
+  readyCard(db, sid, '캡스톤 회의');
+  await commit(deps, sid);
+  saveCardNow(db, sid);
+  db.failOn.push({ table: 'daily_journals', op: 'update' });
+  const r1 = await refresh(deps, sid);
+  assert.deepEqual([r1.status, r1.failed, journalOf(db).map((j) => j.ai_summary)], ['PARTIAL', ['daily_journals'], ['피곤했다.']]);
+  db.failOn = [];
+  const r2 = await commit(deps, sid); // 다음 열기 · 새벽 4시의 다시 보내기
+  assert.deepEqual([r2.status, count(fake, 'T2'), journalOf(db).map((j) => j.ai_summary)], ['DONE', 1, ['피곤했고 내일 회의가 예정되어 있다.']]);
+});
+
 test('일기: T5 성공 뒤 DB 저장 실패 → PARTIAL, 다시 보내면 T2 없이 일기만 다시 만들어 한 줄', async () => {
   const db = seed();
   const { fake, deps, sid } = await chat(db, [['피곤했어']], [emptyExtract({ mood_condition: TIRED })], [DIARY, DIARY]);

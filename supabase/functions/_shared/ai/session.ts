@@ -94,6 +94,10 @@ export interface CommitState {
   /** extract를 뽑은 시각 — 이보다 먼저 만든 이 대화의 일기는 새 말을 모르므로 다시 씀 */
   extracted_at?: string | null;
   extract: FinalExtract | null;
+  /** 이 정리 때 [저장]된 카드 번호 — 그 뒤 카드가 더 저장되면 다음 요청이 같은 추출로 다시 나눠 일기까지 고침(T2 다시 안 부름). 없으면 예전 정리(비교 안 함) */
+  saved_cards?: string[];
+  /** 카드 저장으로 일기를 고쳐야 했는데 못 함(일기 · 공개 JSON 단계 실패) — 다음 다시 시도가 일기를 꼭 다시 씀 */
+  redo_journal?: boolean;
   out: unknown;
   error: string | null;
 }

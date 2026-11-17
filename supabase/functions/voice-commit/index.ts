@@ -2,7 +2,9 @@
 //   본인 길: 앱 [완료] 뒤 로그인 토큰으로 한 번, 실패하면 같은 요청을 다시 보냄(결과는 한 번만 저장). requireUser(auth.getUser)가 로그인 확인
 //   자동 정리 길: pg_cron이 10분마다 서비스 키로 부름(isServiceCall) — [완료] 없이 지난 기준일 대화를 정리 (_shared/ai/auto-commit.ts). 본문은 안 읽음
 //     pg_net이 10초만 기다려서 바로 202 { accepted, run_id }로 답하고 정리는 EdgeRuntime.waitUntil로 뒤에서 — 결과는 함수 로그([auto-commit] 시작 · 완료 · 실패)
-//   요청: { session_id, rejected_cards?: [카드 번호] } — rejected_cards는 앱이 [저장 안 함]을 눌렀는데 서버에 못 알렸을 수 있는 카드 (서버가 열린 카드만 REJECTED로)
+//   요청: { session_id, rejected_cards?: [카드 번호], refresh?: true } — rejected_cards는 앱이 [저장 안 함]을 눌렀는데 서버에 못 알렸을 수 있는 카드 (서버가 열린 카드만 REJECTED로)
+//     refresh는 앱이 카드 [저장] 뒤 보냄: 이미 정리한 대화면 같은 추출로 다시 나눠 일기를 고침(T2 없음), 정리 전 · 그 뒤 새 말이 있으면 SKIPPED
+//     (refresh 없이 보내도 정리 뒤 카드가 더 저장됐으면 같은 추출로 다시 나눔)
 //   응답: { session_id, status: DONE | PARTIAL | RUNNING | SKIPPED, saved: { todos, daily_records, daily_journals }, pending: [확인이 필요한 것], failed: [실패한 저장 단계] }
 //   T2(대화 전체 추출) 한 번 → 공개 JSON structured.v1(conversation_sessions.extracted_data) + 할 일 · 준비물(todos) · 생활 기록 진술 칸의 빈 칸(daily_records)만 저장.
 //   그 JSON이 저장되면 T5(Flash-Lite) 한 번으로 그날 일기 1~2문장(daily_journals.ai_summary, 사용자가 고친 일기는 그대로)
