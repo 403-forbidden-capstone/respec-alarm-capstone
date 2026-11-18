@@ -380,6 +380,7 @@ export function computePlan(i: PlanInputs, travel: ResolvedTravel, mode: PlanMod
           weight: 0,
           source: 'MODEL',
           confidence: 'LOW',
+          mlModel: adjustment.model,
         }
       : predicted;
     const prepare = i.prepareBound && withWake ? clampPrepareToBound(adjusted, i.prepareBound) : adjusted;
