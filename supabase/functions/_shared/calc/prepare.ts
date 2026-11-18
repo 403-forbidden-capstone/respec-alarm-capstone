@@ -42,7 +42,7 @@ export type PrepareBasis = {
   residualP80: number; // 개인 오차 P80
   source: PrepareSource;
   confidence: Confidence; // 7장 7.2.4 — 기록 수 기준 (최근 14일 조건은 안 봄)
-  mlModel?: 'c1_mae' | 'w4_mae' | 'prep_ratio_v1'; // 명시적으로 활성화된 CatBoost 추론에만 설정
+  mlModel?: 'c1_mae' | 'w4_mae' | 'prep_start_ratio_v2'; // 명시적으로 활성화된 CatBoost 추론에만 설정
 };
 
 export function predictPrepare(input: PrepareInput): PrepareBasis {
