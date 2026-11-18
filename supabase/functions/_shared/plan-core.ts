@@ -44,6 +44,7 @@ import { safeTimeZone } from './tz.ts';
 import type { AlarmFields, ParticipantFields, PlaceInput } from './draft.ts';
 import type { ResolvedTravel, Warning } from './route.ts';
 import type { MlPrediction } from './prepare-ml.ts';
+import type { PrepAdjustment } from './prep-adjust.ts';
 
 // ---- DB에서 읽은 행 (필요한 칸만) ----
 
@@ -140,6 +141,7 @@ export type PlanInputs = {
   lateCount4w: number;
   sameDayWake: boolean;
   mlPrediction?: MlPrediction; // 검증된 프로필일 때만 Edge가 조회. 없으면 기존 P80 계산 유지
+  prepAdjustment?: PrepAdjustment; // EXPERIMENT ONLY: actual preparation-start -> departure duration, not wake-to-departure
   // 반복 다음 회차용 — 자동 준비시간이 이 값에서 `within`분 넘게 벗어나면 그 범위로 (D62 처음 2주 몫). 직접 고른 준비시간(draft.prepareMinutes)은 건드리지 않음
   prepareBound?: { around: number; within: number };
   // 저장된 알람(existingAlarms)을 계산할 때의 당김 분 — 준비 전 활동을 되찾을 때 씀. 당김을 바꾸며 다시 계산할 때(제안 적용, 다음 PR)만 옛 값을 넘김. 없으면 participant의 지금 값
@@ -363,7 +365,24 @@ export function computePlan(i: PlanInputs, travel: ResolvedTravel, mode: PlanMod
           mlModel: ml.model,
         }
       : fallback;
-    const prepare = i.prepareBound && withWake ? clampPrepareToBound(predicted, i.prepareBound) : predicted;
+    // New model predicts only preparation-start -> departure, whereas the existing
+    // prepare.minutes is wake -> departure. Preserve the original 20-minute split.
+    // Never combine with C1/W4: their targets have a different meaning.
+    const adjustment = withWake && i.draft.prepareMinutes == null && !ml
+      ? i.prepAdjustment : undefined;
+    const adjusted: PrepareBasis = adjustment && beforePrepareMinutes >= 0
+      ? {
+          ...predicted,
+          minutes: Math.round(adjustment.minutes + beforePrepareMinutes),
+          autoMinutes: Math.round(adjustment.minutes + beforePrepareMinutes),
+          correction: Math.round(adjustment.minutes + beforePrepareMinutes) - fallback.commonP80,
+          residualP80: 0,
+          weight: 0,
+          source: 'MODEL',
+          confidence: 'LOW',
+        }
+      : predicted;
+    const prepare = i.prepareBound && withWake ? clampPrepareToBound(adjusted, i.prepareBound) : adjusted;
     return { beforePrepareMinutes, prepare };
   };
 
