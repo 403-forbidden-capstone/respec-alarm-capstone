@@ -20,11 +20,17 @@ one calculation.
 - `plan-core.ts`: convert predicted preparation-only duration into existing
   backward-compatible calculation units by adding the unchanged
   `beforePrepareMinutes`. Default 20-minute behavior is intact.
-- `tools/prepare-adjust-sidecar/server.py`: separate API contract.
+- `tools/prepare-adjust-sidecar/server.py`: separate API contract with SHA-256 provenance manifest.
+- 2024 survey bootstrap artifact is available as a separately downloadable research bundle (the binary `.cbm` is not committed in this PR).
 - `tools/prepare-adjust-sidecar/train.py`: future real-data training with
   strictly historical per-user features and user-group splits.
 - Tests ensure no-ML fallback, manual override, old W4 precedence, and
   that late/missing records do not enter history.
+
+## Bootstrap from the existing 2024 time-use survey
+The pre-trained `prep_ratio_survey_proxy.cbm` is packaged together with a SHA-256 manifest and a local HTTP smoke-test server. For initial tests, set the server's `PREP_ADJUST_ALLOW_SURVEY_PROXY=1`, and on the Edge side opt in with `PREP_ADJUST_ALLOW_SURVEY_PROXY=1`. The model response explicitly includes `training_target: "survey_141142_proxy"`. This is only acceptable on allowlisted **research accounts**. It MUST NOT be presented as validated actual preparation-duration prediction.
+
+Once consented actual preparation-start/departure records accumulate, train the sidecar's `train.py` to produce an actual-duration `.cbm` and corresponding `.manifest.json` with `training_target: "actual_start_depart"`. The adapter accepts this target by default; no survey proxy opt-in is needed. Keep old C1/W4 disabled in this mode. **Do not change a manifest target manually** to force a survey model to be treated as a true-duration model.
 
 ## Current data restrictions
 The 2024 time-use survey ratio model from the earlier prototype is trained
@@ -136,6 +142,7 @@ daily; incoming user history updates the baseline at every inference.
 - Current FastAPI execution path is a separate repository; parity is not
   implemented or verified by this PR.
 - Prepare-sidecar and app are NOT deployed. No production model is activated.
+- The sample survey model uses one previous 2-day diary observation as baseline; a 3+ observation baseline in a real app is a different feature distribution and needs real user validation.
 
 ## Tests
 ```bash
