@@ -6,6 +6,7 @@ import { dbFail, must } from './db.ts';
 import { HttpError } from './errors.ts';
 import { getEnv } from './env.ts';
 import { approvedMlProfile, buildMlRequest, mayUseMl, previousDateKey, requestMlPrediction, type VerifiedMlProfile, type MlPrediction } from './prepare-ml.ts';
+import { preparationHistory, buildPrepAdjustRequest, requestPrepAdjustment, type PrepHistoryRow, type PrepAdjustment } from './prep-adjust.ts';
 import { kakaoTravelMinutes, type FetchLike } from './kakao.ts';
 import {
   computePlan,
@@ -273,6 +274,49 @@ async function optionalMlPrediction(
   }
 }
 
+// Preparation-only model. Independent, opt-in, default OFF, approved UUIDs only.
+// The survey's 141+142 proxy model is NOT suitable for live enablement. Only
+// enable once a model trained/validated on actual confirmed preparation durations exists.
+async function optionalPrepAdjustment(
+  ctx: PlanContext, at: Date, timezone: string, allow: boolean,
+): Promise<PrepAdjustment | undefined> {
+  if (!mayUseMl({
+    enabled: getEnv('PREP_ADJUST_ENABLED') === '1',
+    allowForPlan: allow,
+    userId: ctx.userId,
+    allowedUserIds: getEnv('PREP_ADJUST_ALLOWED_USER_IDS'),
+  })) return undefined;
+  const url = getEnv('PREP_ADJUST_URL');
+  const token = getEnv('PREP_ADJUST_API_TOKEN');
+  if (!url || !token) return undefined;
+  try {
+    // Preserve the existing verified consent/codebook gate for all ML paths.
+    const { createServiceClient } = await import('./supabase.ts');
+    const { data: row, error: profileError } = await createServiceClient()
+      .from('prepare_ml_verified_profiles')
+      .select('ml_age_code, ml_holiday_code, codebook_version, consent_at, verified_at')
+      .eq('user_id', ctx.userId).maybeSingle();
+    if (profileError || !row) return undefined;
+    const verified = approvedMlProfile(row as VerifiedMlProfile, getEnv('PREPARE_ML_CODEBOOK_VERSION'));
+    if (!verified) return undefined;
+    const { data, error } = await ctx.db.from('appointment_participants')
+      .select('prepare_started_at, prepare_started_source, departed_at')
+      .eq('user_id', ctx.userId)
+      .not('prepare_started_at', 'is', null)
+      .not('departed_at', 'is', null)
+      .order('departed_at', { ascending: false })
+      .limit(120);
+    if (error || !data) return undefined;
+    // A future appointment must never consume activities recorded after its date.
+    const cutoff = new Date(Math.min(ctx.now.getTime(), at.getTime()));
+    const history = preparationHistory(data as PrepHistoryRow[], cutoff);
+    const request = buildPrepAdjustRequest(at, timezone, verified.ml_age_code, verified.ml_holiday_code, history);
+    return request ? (await requestPrepAdjustment(request, { enabled: true, url, token })) ?? undefined : undefined;
+  } catch {
+    return undefined; // Missing fields, consent, network, invalid response -> unchanged legacy plan
+  }
+}
+
 // wantAutoTravel: 직접 입력한 이동시간이 있어도 자동 값을 같이 구함 (H03 "자동으로 되돌리기" 미리 보기). 호출이 한 번 늘어남
 // mode: 어느 쪽에서 부르는지. preview(alarm-suggest)는 경고를 "저장할 때 …" 말투로, save(alarm-commit, 기본)는 저장한 뒤 말투로
 export async function buildPlan(ctx: PlanContext, draft: PlanDraft, options: { wantAutoTravel?: boolean; mode?: PlanMode } = {}): Promise<BuiltPlan> {
@@ -326,6 +370,12 @@ export async function buildPlan(ctx: PlanContext, draft: PlanDraft, options: { w
   // Keep manual prepare settings and already-awake schedules on the existing path.
   const allowMl = draft.prepareMinutes == null && draft.withWake !== false &&
     !(draft.withWake == null && sameDayWake);
-  inputs.mlPrediction = await optionalMlPrediction(ctx, basics.at, timeZone, allowMl);
+  // Mutually exclusive: old C1/W4 predicts wake->depart; new ratio model predicts
+  // prepare-start->depart. No mixing of these prediction targets.
+  const allowAdjustment = allowMl && getEnv('PREP_ADJUST_ENABLED') === '1' &&
+    getEnv('PREPARE_ML_ENABLED') !== '1' &&
+    draft.manualTimes?.PREPARE == null && draft.manualTimes?.WAKE == null;
+  if (allowAdjustment) inputs.prepAdjustment = await optionalPrepAdjustment(ctx, basics.at, timeZone, true);
+  if (!inputs.prepAdjustment) inputs.mlPrediction = await optionalMlPrediction(ctx, basics.at, timeZone, allowMl);
   return { plan: computePlan(inputs, travel, options.mode), inputs, timeZone };
 }
