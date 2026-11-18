@@ -31,12 +31,13 @@ export type PrepAdjustFetch = (url: string, init: RequestInit) => Promise<Pick<R
 
 const inRange = (n: number) => Number.isFinite(n) && n >= 5 && n <= 240;
 
-// A start from a routine step is closer to explicit action than a fired alarm.
-// PREPARE_ALARM alone is a scheduled signal and is not accepted as truth.
+// PREPARE_ALARM is written on USER DISMISS / one-tap "start preparing" (PR #490),
+// not at the scheduled alarm time. It is imperfect self-reported evidence; never
+// use the scheduled PREPARE alarm itself. ROUTINE_STEP is retained for compatibility.
 export function preparationHistory(rows: readonly PrepHistoryRow[], asOf: Date): PrepHistory | null {
   if (!Number.isFinite(asOf.getTime())) return null;
   const valid = rows.flatMap((r) => {
-    if (r.prepare_started_source !== 'ROUTINE_STEP' || !r.prepare_started_at || !r.departed_at) return [];
+    if (!['PREPARE_ALARM', 'ROUTINE_STEP'].includes(r.prepare_started_source ?? '') || !r.prepare_started_at || !r.departed_at) return [];
     const start = Date.parse(r.prepare_started_at);
     const depart = Date.parse(r.departed_at);
     if (!Number.isFinite(start) || !Number.isFinite(depart) || start >= depart || depart >= asOf.getTime()) return [];
