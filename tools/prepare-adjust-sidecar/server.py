@@ -19,7 +19,7 @@ import pandas as pd
 
 CATS = ["weekday_code", "평토일구분코드", "휴일종류코드", "연령코드"]
 FEATURES = [*CATS, "baseline_observed"]
-MODEL_NAME = "prep_ratio_v1"
+MODEL_NAME = "prep_start_ratio_v2"
 MAX_BODY = 4096
 
 
@@ -75,9 +75,9 @@ def main() -> None:
     if not hmac.compare_digest(str(manifest.get('sha256','')), digest):
         raise SystemExit('Model SHA256 differs from provenance manifest')
     training_target = manifest.get('training_target')
-    if training_target not in ('actual_start_depart', 'survey_141142_proxy'):
+    if training_target not in ('actual_start_depart', 'survey_start_cluster_proxy'):
         raise SystemExit('Unknown verified training target')
-    if training_target == 'survey_141142_proxy' and os.environ.get('PREP_ADJUST_ALLOW_SURVEY_PROXY') != '1':
+    if training_target == 'survey_start_cluster_proxy' and os.environ.get('PREP_ADJUST_ALLOW_SURVEY_PROXY') != '1':
         raise SystemExit('Survey proxy model requires PREP_ADJUST_ALLOW_SURVEY_PROXY=1 for research testing only')
     model = CatBoostRegressor()
     model.load_model(model_path)
