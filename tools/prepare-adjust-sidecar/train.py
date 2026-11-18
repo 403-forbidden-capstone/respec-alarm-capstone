@@ -125,7 +125,7 @@ def main() -> None:
     (out/"prep_ratio_actual_sessions.manifest.json").write_text(json.dumps({
         "training_target":"actual_start_depart",
         "sha256":hashlib.sha256(model_file.read_bytes()).hexdigest(),
-        "model":"prep_ratio_v1",
+        "model":"prep_start_ratio_v2",
         "feature_names":FEATURES,
         "minimum_history":3,
         "user_split":"user-disjoint",
