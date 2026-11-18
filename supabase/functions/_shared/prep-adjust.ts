@@ -6,7 +6,7 @@ import { calendarFeatures, validMlEndpoint } from './prepare-ml.ts';
 
 export const PREP_ADJUST_MIN_RECORDS = 3;
 export const PREP_ADJUST_MAX_RECORDS = 30;
-export const PREP_ADJUST_MODEL = 'prep_ratio_v1' as const;
+export const PREP_ADJUST_MODEL = 'prep_start_ratio_v2' as const;
 
 export type PrepHistoryRow = {
   prepare_started_at: string | null;
@@ -101,7 +101,7 @@ export async function requestPrepAdjustment(
     const v = body as Record<string, unknown>;
     // A survey proxy is never implicitly promoted to a true preparation-duration model.
     if (v.training_target !== 'actual_start_depart' &&
-        !(v.training_target === 'survey_141142_proxy' && config.allowSurveyProxy === true)) return null;
+        !(v.training_target === 'survey_start_cluster_proxy' && config.allowSurveyProxy === true)) return null;
     if (v.model !== PREP_ADJUST_MODEL || v.prediction_type !== 'ratio' ||
         typeof v.ratio !== 'number' || !Number.isFinite(v.ratio) || typeof v.minutes !== 'number' || !Number.isFinite(v.minutes)) return null;
     const ratio = v.ratio as number;
