@@ -311,7 +311,7 @@ async function optionalPrepAdjustment(
     const cutoff = new Date(Math.min(ctx.now.getTime(), at.getTime()));
     const history = preparationHistory(data as PrepHistoryRow[], cutoff);
     const request = buildPrepAdjustRequest(at, timezone, verified.ml_age_code, verified.ml_holiday_code, history);
-    return request ? (await requestPrepAdjustment(request, { enabled: true, url, token })) ?? undefined : undefined;
+    return request ? (await requestPrepAdjustment(request, { enabled: true, url, token, allowSurveyProxy: getEnv('PREP_ADJUST_ALLOW_SURVEY_PROXY') === '1' })) ?? undefined : undefined;
   } catch {
     return undefined; // Missing fields, consent, network, invalid response -> unchanged legacy plan
   }
