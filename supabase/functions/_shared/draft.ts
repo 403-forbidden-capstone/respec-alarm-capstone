@@ -1,8 +1,7 @@
 // 알람 초안 읽기 — alarm-suggest(5.4.1)와 alarm-commit(5.4.2)이 같은 칸을 같은 이름으로 읽음
-//   · 출발 · 이동 · 여유 칸 (readParticipantFields): origin · transport_type · buffer_minutes · before_prepare_minutes · with_wake · activities
+//   · 출발 · 이동 · 여유 칸 (readParticipantFields): origin · transport_type · buffer_minutes · before_prepare_minutes · with_wake
 //   · 알람 칸 (readAlarmFields): kinds · enabled · manual_times · levels
 // 시각은 ISO 8601 + 오프셋, 값 이름은 DB와 같음. 순수 TS — node --test로 시험 (draft.test.ts)
-import { MAX_ACTIVITIES, type DayActivity } from './calc/day.ts';
 import type { Importance, IntensityAxis, Level, RingKind, Transport } from './calc/types.ts';
 import { INTENSITY_AXES, RING_KINDS } from './calc/types.ts';
 import { RRULE_PATTERN } from './calc/recur.ts';
@@ -24,14 +23,7 @@ export type ParticipantFields = {
   bufferMinutes?: number;
   beforePrepareMinutes?: number;
   withWake?: boolean;
-  // 기상 뒤 출발 전에 하는 할 일 (calc/day.ts) — 칸이 없으면 저장된 할 일(appointment_participants.activity_plan) 그대로,
-  //   [] · null = 할 일을 지움(사용자가 명시적으로 삭제), 목록 = 이 목록으로 바꿈
-  activities?: DayActivity[];
-  // 사용자가 말한 외출 준비 분(준비 알람 ~ 출발) — 할 일이 있을 때만 씀, 할 일 계획에 같이 저장. 준비 예측(prepare_minutes)과 따로
-  outingPrepareMinutes?: number;
 };
-
-export { MAX_ACTIVITIES };
 
 export type AlarmFields = {
   kinds?: RingKind[]; // 없음 = 지금 있는 종류 그대로(없으면 계산된 전부), [] = 알람 없는 일정
@@ -59,28 +51,12 @@ export function readParticipantFields(r: Reader): ParticipantFields {
   const bufferMinutes = r.int('buffer_minutes', { min: 0, max: 240 });
   const beforePrepareMinutes = r.int('before_prepare_minutes', { min: 0, max: 240 });
   const withWake = r.bool('with_wake');
-  const outingPrepareMinutes = r.int('outing_prepare_minutes', { min: 0, max: 240 });
-  // activities[{ title?, start, end?, before_prepare?, source? }] — end · before_prepare를 모르면 비워 보냄(계산이 NEEDS_INFO로 빠진 칸을 알려 줌)
-  //   null · [] = 지움. 칸이 없으면 undefined (저장된 할 일 유지)
-  const activities = r.isNull('activities')
-    ? []
-    : r.objects('activities', { max: MAX_ACTIVITIES })?.flatMap((a): DayActivity[] => {
-        const title = a.string('title', { max: 100 });
-        const start = a.date('start', { required: true });
-        const end = a.date('end');
-        const beforePrepare = a.bool('before_prepare');
-        const source = a.oneOf('source', ['USER', 'ESTIMATED'] as const);
-        if (start && end && end.getTime() <= start.getTime()) a.problemAt('end', 'end는 start보다 뒤여야 해요');
-        return start ? [{ ...(title ? { title } : {}), start, ...(end ? { end } : {}), ...(beforePrepare != null ? { beforePrepare } : {}), source: source ?? 'USER' }] : [];
-      });
   return {
     ...(origin ? { origin } : {}),
     ...(transport ? { transport } : {}),
     ...(bufferMinutes != null ? { bufferMinutes } : {}),
     ...(beforePrepareMinutes != null ? { beforePrepareMinutes } : {}),
     ...(withWake != null ? { withWake } : {}),
-    ...(activities ? { activities } : {}),
-    ...(outingPrepareMinutes != null ? { outingPrepareMinutes } : {}),
   };
 }
 

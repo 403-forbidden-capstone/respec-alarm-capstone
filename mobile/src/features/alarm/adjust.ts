@@ -41,6 +41,20 @@ export function moveAlarm(alarms: AlarmTime[], kind: RingKind, to: Date): AlarmT
   return fromChain(sharedMoveAlarm(toChain(alarms), kind, to), alarms);
 }
 
+// 기상만 옮김 — 준비 알람은 지금 시각에 그대로 둠 (AI 대화에서 나가기 전 할 일 때문에 기상만 정한 경우, 2026-11-19 팀 결정)
+//   기존 규칙(moveAlarm)은 기상을 옮기면 준비도 같은 간격으로 따라오는데, 이 흐름에서는 준비 · 출발이 일정 기준 계산 그대로여야 함
+//   준비는 "직접 고름"(지금 시각 고정, 자동값은 기존 규칙대로 기상을 따라간 값)으로 표시 → 저장 · 다시 계산해도 기상을 따라 움직이지 않음
+//   이미 직접 고른 준비 · 출발 시각은 그대로. 순서가 어긋나면(기상이 준비보다 늦음) orderError가 막음
+export function moveWakeOnly(alarms: AlarmTime[], to: Date): AlarmTime[] {
+  const keep = alarms.find((x) => x.kind === 'PREPARE')?.at;
+  return moveAlarm(alarms, 'WAKE', to).map((x) => {
+    if (x.kind !== 'PREPARE' || !keep) return x;
+    const { auto: _followed, ...rest } = x;
+    const auto = autoTime(x); // 기존 규칙대로 기상을 따라간 자동값
+    return auto.getTime() === keep.getTime() ? { ...rest, at: keep } : { ...rest, at: keep, auto };
+  });
+}
+
 // 직접 고른 시각을 자동 계산값으로 되돌림 (기상이면 따라온 준비도 함께 되돌아감)
 export function resetAlarm(alarms: AlarmTime[], kind: RingKind): AlarmTime[] {
   if (!alarms.some((x) => x.kind === kind)) return alarms;

@@ -1883,3 +1883,48 @@ describe('⑱ [저장 안 함]이 서버에 닿을 때까지 (11/8 음성 실사
     expect(commitBodies().map((c) => c.body)).toEqual([{ session_id: 's1', refresh: true }, { session_id: 's1' }]);
   });
 });
+
+describe('⑥-할 일 나가기 전 할 일 → 기상만 정함 · 첫 일정 하나만 저장 (2026-11-19 팀 결정)', () => {
+  // 계산 결과(ringsOf): 기상 7:40 · 준비 8:20 · 출발 9:00
+  async function ready(cards: Record<string, unknown>[]) {
+    script = [session(), turn({ next: 'APP_TASKS', reply: null, cards }), turn({ rev: 3, cards: cards.map((c) => ({ ...c, status: 'READY' })) })];
+    await getConversation();
+    await say('발표 있는데 나가기 전에 과제 해야 돼');
+  }
+  const savedAlarms = () => (mCreate.mock.calls[0][0] as Estimate).appointment.alarms.map((a) => `${a.kind} ${a.at.getHours()}:${String(a.at.getMinutes()).padStart(2, '0')}${a.auto ? ' 직접' : ''}`);
+
+  it('기상을 6:30으로 정하면(SET) 기상만 옮기고 준비 8:20 · 출발 9:00은 그대로 저장', async () => {
+    await ready([apptCard({ edit: { times: { WAKE: at(6, 30).toISOString() } }, pre_task: { title: '과제', wake: 'SET', time: '06:30' }, turn: 1 })]);
+    script = [turn({ rev: 4, cards: [apptCard({ status: 'SAVED' })] })];
+    await saveCard('c1');
+    expect(savedAlarms()).toEqual(['WAKE 6:30 직접', 'PREPARE 8:20 직접', 'DEPARTURE 9:00', 'ARRIVE 10:00']);
+  });
+
+  it('할 일이 없는 기상 고침은 기존 규칙 그대로 — 준비도 같은 간격으로 따라옴 (6:30 → 7:10)', async () => {
+    await ready([apptCard({ edit: { times: { WAKE: at(6, 30).toISOString() } } })]);
+    script = [turn({ rev: 4, cards: [apptCard({ status: 'SAVED' })] })];
+    await saveCard('c1');
+    expect(savedAlarms()).toEqual(['WAKE 6:30 직접', 'PREPARE 7:10', 'DEPARTURE 9:00', 'ARRIVE 10:00']);
+  });
+
+  it('기상 답을 아직 못 받은 카드(ASK)는 저장하지 않음 — 임의의 기상으로 저장 안 함', async () => {
+    await ready([apptCard({ pre_task: { title: '과제', wake: 'ASK', time: null }, turn: 1 })]);
+    await expect(saveCard('c1')).rejects.toThrow('몇 시에 일어날지 먼저 알려 주세요');
+    expect(mCreate).not.toHaveBeenCalled();
+  });
+
+  it('그대로(KEEP)면 계산된 기상으로 저장', async () => {
+    await ready([apptCard({ pre_task: { title: '과제', wake: 'KEEP', time: null }, turn: 1 })]);
+    script = [turn({ rev: 4, cards: [apptCard({ status: 'SAVED' })] })];
+    await saveCard('c1');
+    expect(savedAlarms()).toEqual(['WAKE 7:40', 'PREPARE 8:20', 'DEPARTURE 9:00', 'ARRIVE 10:00']);
+  });
+
+  it('같은 요청(같은 말)에서 만든 일정 카드가 둘이면 하나만 저장 — 둘째는 막음', async () => {
+    await ready([apptCard({ turn: 1 }), apptCard({ id: 'c2', summary: '10/30(금) 17:00 병원', draft: draftOf({ title: '병원', time: '17:00' }), turn: 1 })]);
+    script = [turn({ rev: 4, cards: [apptCard({ status: 'SAVED', turn: 1 })] })];
+    await saveCard('c1');
+    await expect(saveCard('c2')).rejects.toThrow('이번 요청에서는 첫 일정 하나만 저장해요');
+    expect(mCreate).toHaveBeenCalledTimes(1);
+  });
+});

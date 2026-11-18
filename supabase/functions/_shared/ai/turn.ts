@@ -449,11 +449,16 @@ async function handleResults(run: Run, row: SessionRow, st: ServerState, results
   if (j === 0) beforeFirstTurn(out.state);
   const changed = out.cards.length + out.fixes.length > 0;
   const waiting = out.state.awaiting !== null;
-  return conclude(
+  const res = await conclude(
     run, row, st,
     { ts: out.state, stored: row.turns, userTurns: st.counts.user_turns, j, trigger: 'results', fixes: out.state.fixes.filter((f) => f.status === 'SENT'), needReply: changed && !waiting && j > 0, preview: null },
     ctid, limitsFor,
   );
+  // 계산 뒤에 생긴 되물을 것(예: 할 일이 있는 일정의 계산된 기상 시각 확인)도 ask로 — 음성 차례면 앱이 Live에 넣어 소리로 물음 (글 대화는 T1 답이 물음, ask는 안 씀)
+  //   이번 결과로 새로 생긴 줄만 (앞서 물은 줄은 다시 안 넣음). 서버 문구라 모델 원문이 아님
+  const before = new Set(eventAt(ts0.events, j)?.clarify ?? []);
+  const ask = (eventAt(out.state.events, j)?.clarify ?? []).filter((l) => !before.has(l));
+  return ask.length > 0 ? { ...res, ask } : res;
 }
 
 async function handleCard(run: Run, row: SessionRow, st: ServerState, action: CardAction, ctid: string, limitsFor: LimitsFor): Promise<VoiceTurnOut> {

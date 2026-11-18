@@ -6,7 +6,6 @@
 //   무시: 알람은 그대로, 제안만 IGNORED (실측 3번 뒤 다시 후보, D24 C)
 //   되돌리기: 당김을 적용 전 값(current_value)으로, 제안은 대기(PENDING)로 — D23 미정이라 앱의 다른 제안 되돌리기와 같게 (작성자 결정, D23 A)
 //   준비 알람을 직접 고른 일정은 옮기지 않음 (plan-core도 당김을 안 씀)
-import { activityOrderError, activityPlanOf, type AlarmKind } from './calc/index.ts';
 import { must } from './db.ts';
 import { HttpError } from './errors.ts';
 import { loadAlarms } from './plan.ts';
@@ -55,7 +54,7 @@ export function shiftForAdvance(alarms: readonly AlarmRow[], oldAdvance: number,
 
 type SuggestionRow = { suggestion_id: string; user_id: string; target_alarm_id: string | null; suggestion_type: string; status: string; current_value: string | null; suggested_value: string; result_value: string | null };
 type Occurrence = { appointment_id: string; appointment_at: string; title: string; dest_name: string | null };
-type Participant = { participant_id: string; appointment_id: string; prepare_minutes: number; prepare_advance_minutes: number | null; est_travel_minutes: number | null; activity_plan?: unknown };
+type Participant = { participant_id: string; appointment_id: string; prepare_minutes: number; prepare_advance_minutes: number | null; est_travel_minutes: number | null };
 
 export type ApplyCtx = { db: Db; write: Db; userId: string; now: Date };
 export type ApplyResponse = { suggestion_id: string; status: string; advance: number | null; ring_packages: RingPackage[]; moved_alarm_ids: string[] };
@@ -97,7 +96,7 @@ export async function runSuggestApply(ctx: ApplyCtx, req: ApplyRequest): Promise
     : must<Occurrence[]>('appointments', await ctx.db.from('appointments').select('appointment_id, appointment_at, title, dest_name').eq('appointment_id', own.appointment_id));
   const byId = new Map(occurrences.map((o) => [o.appointment_id, o]));
   const participants = byId.size
-    ? must<Participant[]>('appointment_participants', await ctx.db.from('appointment_participants').select('participant_id, appointment_id, prepare_minutes, prepare_advance_minutes, est_travel_minutes, activity_plan').in('appointment_id', [...byId.keys()]).eq('user_id', ctx.userId))
+    ? must<Participant[]>('appointment_participants', await ctx.db.from('appointment_participants').select('participant_id, appointment_id, prepare_minutes, prepare_advance_minutes, est_travel_minutes').in('appointment_id', [...byId.keys()]).eq('user_id', ctx.userId))
     : [];
   const profile = must<{ timezone: string | null } | null>('profiles', await ctx.db.from('profiles').select('timezone').eq('user_id', ctx.userId).maybeSingle());
   const tz = safeTimeZone(profile?.timezone);
@@ -112,16 +111,6 @@ export async function runSuggestApply(ctx: ApplyCtx, req: ApplyRequest): Promise
         const before = alarms.find((a) => a.alarm_id === x.alarm_id);
         return before && Date.parse(before.scheduled_at) > ctx.now.getTime() && Date.parse(x.scheduled_at) > ctx.now.getTime();
       });
-    // 기상 뒤 할 일이 있는 회차: 당긴 준비 알람이 할 일 안으로 들어가면(회의가 끝나기 전) 이 회차는 당기지 않음 — 알람 · 당김 분 모두 그대로
-    //   기상을 임의로 더 당기지도 않음. 다음 계산(plan-core)도 같은 사슬을 실패로 보므로 당김 분을 남기지 않는 쪽
-    const plan = activityPlanOf(p.activity_plan);
-    if (plan) {
-      const next = new Map(shifts.map((x) => [x.alarm_id, x.scheduled_at]));
-      const chain = alarms
-        .filter((a) => a.alarm_type !== 'ARRIVE')
-        .map((a) => ({ kind: a.alarm_type as AlarmKind, at: new Date(next.get(a.alarm_id) ?? a.scheduled_at) }));
-      if (activityOrderError(chain, plan.items)) continue;
-    }
     for (const x of shifts) {
       must('alarms', await ctx.write.from('alarms').update({ scheduled_at: x.scheduled_at, last_calculated_at: at }).eq('alarm_id', x.alarm_id).eq('user_id', ctx.userId));
       moved.push(x.alarm_id);

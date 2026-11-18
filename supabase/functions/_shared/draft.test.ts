@@ -97,35 +97,3 @@ test('반복 규칙 (D44): 요일 칩 · 매일 · 평일 — 앱이 만드는 �
     assert.deepEqual(r.issues.map((i) => i.path), ['recurrence_rule']);
   }
 });
-
-test('할 일 activities: 시작 필수 · 끝 · 준비 전 여부는 모르면 비움, 끝 ≤ 시작은 문제', () => {
-  const r = Reader.root({
-    activities: [
-      { title: '온라인 회의', start: '2026-11-19T10:00:00+09:00', end: '2026-11-19T11:00:00+09:00', before_prepare: true },
-      { start: '2026-11-19T11:10:00+09:00', source: 'ESTIMATED' },
-    ],
-  });
-  assert.deepEqual(readParticipantFields(r), {
-    activities: [
-      { title: '온라인 회의', start: new Date('2026-11-19T01:00:00Z'), end: new Date('2026-11-19T02:00:00Z'), beforePrepare: true, source: 'USER' },
-      { start: new Date('2026-11-19T02:10:00Z'), source: 'ESTIMATED' },
-    ],
-  });
-  assert.equal(r.issues.length, 0);
-  const bad = Reader.root({ activities: [{ start: '2026-11-19T10:00:00+09:00', end: '2026-11-19T10:00:00+09:00' }, { title: '시작 없음' }] });
-  readParticipantFields(bad);
-  assert.deepEqual(bad.issues.map((i) => i.path), ['activities[0].end', 'activities[1].start']);
-});
-
-test('할 일 지우기: activities null · [] = 지움(빈 목록), 칸이 없으면 undefined(저장된 할 일 유지)', () => {
-  assert.deepEqual(readParticipantFields(Reader.root({ activities: null })), { activities: [] });
-  assert.deepEqual(readParticipantFields(Reader.root({ activities: [] })), { activities: [] });
-  assert.deepEqual(readParticipantFields(Reader.root({ buffer_minutes: 10 })), { bufferMinutes: 10 });
-});
-
-test('외출 준비 직접 입력 outing_prepare_minutes: 0~240 정수만 (준비 예측 prepare_minutes와 따로)', () => {
-  assert.deepEqual(readParticipantFields(Reader.root({ outing_prepare_minutes: 30 })), { outingPrepareMinutes: 30 });
-  const bad = Reader.root({ outing_prepare_minutes: 241 });
-  readParticipantFields(bad);
-  assert.deepEqual(bad.issues.map((i) => i.path), ['outing_prepare_minutes']);
-});

@@ -1117,7 +1117,12 @@ describe("분 경계 · 상태 왕복 (리뷰 #261)", () => {
       ],
     })]);
     assert.deepEqual(r.events[0]?.rejected, [{ target: "10/8(목) 23:58 야식", reason: "PAST_TIME" }]);
-    assert.deepEqual(r.state.cards.map((x) => [x.id, x.summary]), [["c1", "10/8(목) 23:59 통화"], ["c2", "10/9(금) 00:00 게임"]]);
+    // 한 번의 요청에서 새 일정 카드는 가장 이른 하나만 (2026-11-19 팀 결정) — 00:00 게임은 이번에 만들지 않고 알림
+    assert.deepEqual(r.state.cards.map((x) => [x.id, x.summary]), [["c1", "10/8(목) 23:59 통화"]]);
+    assert.deepEqual(r.events[0]?.conflicts, ["우선 10/8(목) 23:59 '통화' 일정부터 등록 — 10/9(금) 00:00 '게임'은 이번에 만들지 않음"]);
+    // 자정(00:00)도 지난 시각이 아님 — 그 일정만 말하면 카드
+    const midnight = run(late, [fast({ appointments: [study({ title: "게임", date: "2026-10-09", time: "00:00", place: null })] })]);
+    assert.deepEqual(midnight.state.cards.map((x) => x.summary), ["10/9(금) 00:00 게임"]);
   });
 
   it("자정 뒤 03:59 대화(기준일 전날): 03:58은 지남 · 04:00은 받음, 날짜 없는 알람 변경은 '내일'(10/9) 아침 알람", () => {
@@ -1404,5 +1409,122 @@ describe("nearTitle — 같은 일정 이름(글자 흔들림 한 글자까지)"
     assert.equal(nearTitle("스터디", "치과"), false);
     assert.equal(nearTitle("스터디", "스케줄"), false); // 두 글자 차이
     assert.equal(nearTitle("밥", "빵"), false); // 한 글자 이름은 비교 안 함
+  });
+});
+
+// ───────── 첫 일정 하나 · 나가기 전 할 일 → 기상 확인 (2026-11-19 팀 결정) ─────────
+//   일정 = 13:00 수업(학교). 앱 계산: 기상 11:20 · 준비 11:40 · 출발 12:10
+describe("첫 일정 하나만 · 할 일이 있으면 기상 시각만 확인", () => {
+  const lecture = (over: Partial<XAppt> = {}): XAppt => study({ title: "수업", time: "13:00", place: "학교", ...over });
+  const hospital = (over: Partial<XAppt> = {}): XAppt => study({ title: "병원", time: "17:00", place: "병원", ...over });
+  const est = (id: string, wake: string, prepare = "11:40", depart = "12:10"): TaskResults["cards"][number] => ({
+    id, status: "READY",
+    estimate: {
+      alarms: [
+        { kind: "WAKE", at: iso("2026-10-09", wake), enabled: true }, { kind: "PREPARE", at: iso("2026-10-09", prepare), enabled: true },
+        { kind: "DEPARTURE", at: iso("2026-10-09", depart), enabled: true },
+      ],
+      level: 1, with_wake: true,
+    },
+  });
+  const results = (state: TurnState, c: TaskResults["cards"][number], turn: number) => applyTaskResults(state, { cards: [c], fixes: [] }, ctx(), turn);
+  const QUESTION = "'수업' 기상 알람이 11:20으로 계산됨 — 나가기 전 할 일(과제)이 있다고 했으니 이 시각에 일어날지, 몇 시에 일어날지";
+
+  it("A. 할 일이 없으면 기존대로: 카드 하나, 계산 뒤 저장 확인 줄 · 기상 질문 없음", () => {
+    const r = run(ctx(), [fast({ appointments: [lecture()] })]);
+    assert.deepEqual(r.state.cards.map((c) => [c.id, c.summary, c.pre_task]), [["c1", "10/9(금) 13:00 수업 · 학교", undefined]]);
+    const t = results(r.state, est("c1", "11:20"), 1);
+    assert.deepEqual(t.event.pending.map((p) => p.id), ["c1"]);
+    assert.deepEqual(t.event.clarify, []);
+  });
+
+  it("B. 할 일 → 계산된 기상(11:20)을 묻고 저장 확인을 미룸 → '9시 30분' 답이면 기상만 09:30 → 그때 저장 확인, 카드는 하나", () => {
+    const r1 = run(ctx(), [fast({ appointments: [lecture()], pre_tasks: [{ title: "과제" }] })]);
+    assert.deepEqual(card(r1.state, "c1").pre_task, { title: "과제", wake: "ASK", time: null });
+    const t1 = results(r1.state, est("c1", "11:20"), 1);
+    assert.deepEqual(t1.event.pending, []); // 기상 답 전엔 저장을 권하지 않음
+    assert.deepEqual(t1.event.clarify, [QUESTION]);
+    const r2 = applyFast(t1.state, fast({ appointments: [lecture()], pre_tasks: [{ title: "과제" }], wake_reply: { choice: "TIME", time: "09:30" } }), ctx(), 2);
+    const c = card(r2.state, "c1");
+    assert.deepEqual([c.pre_task, c.status, c.edit?.times], [{ title: "과제", wake: "SET", time: "09:30" }, "NEEDS_ESTIMATE", { WAKE: iso("2026-10-09", "09:30") }]);
+    assert.equal(r2.tasks, true);
+    const t2 = results(r2.state, est("c1", "09:30"), 2);
+    assert.deepEqual(t2.event.pending.map((p) => p.id), ["c1"]);
+    assert.match(t2.event.pending[0]?.summary ?? "", /나가기 전 할 일: 과제 · 기상은 사용자가 정한 시각, 준비 · 출발은 그대로/);
+    assert.equal(t2.state.cards.filter((x) => x.kind === "APPT_NEW").length, 1);
+  });
+
+  it("C. '그대로 일어날게'면 기상 변경 없이 저장 확인 (다시 계산 안 함)", () => {
+    const r1 = run(ctx(), [fast({ appointments: [lecture()], pre_tasks: [{ title: "과제" }] })]);
+    const t1 = results(r1.state, est("c1", "11:20"), 1);
+    const r2 = applyFast(t1.state, fast({ appointments: [lecture()], pre_tasks: [{ title: "과제" }], wake_reply: { choice: "KEEP", time: "" } }), ctx(), 2);
+    const c = card(r2.state, "c1");
+    assert.deepEqual([c.pre_task?.wake, c.status, c.edit], ["KEEP", "READY", null]);
+    assert.deepEqual(r2.event.pending.map((p) => p.id), ["c1"]);
+  });
+
+  it("D. 13시 수업 + 17시 병원(말한 순서와 상관없이): 시각이 이른 수업 카드 하나만, 병원은 알림만 — 다음 말에 다시 뽑혀도 안 만듦", () => {
+    const r = run(ctx(), [fast({ appointments: [hospital(), lecture()] }), fast({ appointments: [hospital(), lecture()] })]);
+    assert.deepEqual(r.state.cards.map((c) => c.summary), ["10/9(금) 13:00 수업 · 학교"]);
+    assert.deepEqual(r.events[0]?.conflicts, ["우선 10/9(금) 13:00 '수업' 일정부터 등록 — 10/9(금) 17:00 '병원'은 이번에 만들지 않음"]);
+    assert.equal(card(r.state, "c1").turn, 1);
+    // 사용자가 병원도 저장해 달라고 하면(CONFIRMED) 그때 카드
+    const r3 = applyFast(r.state, fast({ appointments: [hospital({ save: "CONFIRMED" }), lecture()] }), ctx(), 3);
+    assert.deepEqual(r3.state.cards.map((c) => [c.summary, c.turn]), [["10/9(금) 13:00 수업 · 학교", 1], ["10/9(금) 17:00 병원 · 병원", 3]]);
+  });
+
+  it("D2. 같은 시각 일정이 둘이면 카드를 만들지 않고 어느 것부터인지 물음", () => {
+    const r = run(ctx(), [fast({ appointments: [lecture(), lecture({ title: "면담", place: "연구실" })] })]);
+    assert.deepEqual(r.state.cards, []);
+    assert.deepEqual(r.events[0]?.clarify, ["같은 시각(10/9(금) 13:00)의 일정 '수업' · '면담' 중 어느 일정부터 등록할지"]);
+  });
+
+  it("E. 10~11시 집 온라인 회의(할 일) + 13시 수업: 수업 카드 하나, 회의는 카드가 아니라 기상 확인 계기", () => {
+    const r = run(ctx(), [fast({ appointments: [lecture()], pre_tasks: [{ title: "온라인 회의" }] })]);
+    assert.deepEqual(r.state.cards.map((c) => [c.kind, c.summary, c.pre_task?.title]), [["APPT_NEW", "10/9(금) 13:00 수업 · 학교", "온라인 회의"]]);
+    const t = results(r.state, est("c1", "11:20"), 1);
+    assert.match(t.event.clarify[0] ?? "", /11:20으로 계산됨 — 나가기 전 할 일\(온라인 회의\)/);
+  });
+
+  it("F. '좀 일찍 일어날게'(시각 없음)는 정확한 시각을 다시 물음 — 임의로 당기지 않음", () => {
+    const r1 = run(ctx(), [fast({ appointments: [lecture()], pre_tasks: [{ title: "과제" }] })]);
+    const t1 = results(r1.state, est("c1", "11:20"), 1);
+    const r2 = applyFast(t1.state, fast({ appointments: [lecture()], pre_tasks: [{ title: "과제" }], wake_reply: { choice: "VAGUE", time: "" } }), ctx(), 2);
+    const c = card(r2.state, "c1");
+    assert.deepEqual([c.pre_task?.wake, c.edit, c.status], ["ASK", null, "READY"]);
+    assert.deepEqual(r2.event.clarify, ["'수업' 날 몇 시에 일어날지 (정확한 시각)"]);
+    assert.deepEqual(r2.event.pending, []);
+  });
+
+  it("G. 준비 알람(11:40)보다 늦은 기상(12:00)은 받지 않고 다시 물음 — 카드 시각은 그대로", () => {
+    const r1 = run(ctx(), [fast({ appointments: [lecture()], pre_tasks: [{ title: "과제" }] })]);
+    const t1 = results(r1.state, est("c1", "11:20"), 1);
+    const r2 = applyFast(t1.state, fast({ appointments: [lecture()], pre_tasks: [{ title: "과제" }], wake_reply: { choice: "TIME", time: "12:00" } }), ctx(), 2);
+    const c = card(r2.state, "c1");
+    assert.deepEqual([c.pre_task?.wake, c.edit, c.status], ["ASK", null, "READY"]);
+    assert.deepEqual(r2.event.clarify, ["기상 12:00이 준비 알람 11:40보다 늦어요 — 11:40 전에 일어날 시각"]);
+  });
+
+  it("처음부터 '회의 있으니 9시 30분에 깨워줘': 다시 묻지 않고 그 시각으로 계산 — 알람 변경으로 적혀 와도 따로 기상 알람 카드를 만들지 않음", () => {
+    const told = run(ctx(), [fast({ appointments: [lecture()], pre_tasks: [{ title: "회의" }], wake_reply: { choice: "TIME", time: "09:30" } })]);
+    const asAlarm = run(ctx(), [fast({ appointments: [lecture()], pre_tasks: [{ title: "회의" }], alarm_changes: [alarm({ time: "09:30" })] })]);
+    for (const r of [told, asAlarm]) {
+      assert.deepEqual(r.state.cards.map((c) => [c.kind, c.pre_task, c.edit?.times]), [["APPT_NEW", { title: "회의", wake: "SET", time: "09:30" }, { WAKE: iso("2026-10-09", "09:30") }]]);
+      const t = results(r.state, est("c1", "09:30"), 1);
+      assert.deepEqual([t.event.pending.map((p) => p.id), t.event.clarify], [["c1"], []]);
+    }
+  });
+
+  it("할 일 없이 '9시 30분에 깨워줘'는 기존대로 (있는 기상 알람 고침 카드 — 새 일정 카드의 기상으로 가져가지 않음)", () => {
+    const r = run(ctx(), [fast({ appointments: [lecture()], alarm_changes: [alarm({ time: "09:30" })] })]);
+    assert.deepEqual(r.state.cards.map((c) => [c.kind, c.pre_task]), [["APPT_NEW", undefined], ["ALARM_EDIT", undefined]]);
+  });
+
+  it("기존 규칙상 이 일정에 기상 알람이 없으면(앱 계산에 기상 없음) 물을 기상이 없으니 새 기상을 만들지 않고 저장 확인으로", () => {
+    const r1 = run(ctx(), [fast({ appointments: [lecture()], pre_tasks: [{ title: "과제" }] })]);
+    const noWake = est("c1", "11:20");
+    (noWake.estimate as { alarms: { kind: string }[] }).alarms = (noWake.estimate as { alarms: { kind: string }[] }).alarms.filter((a) => a.kind !== "WAKE");
+    const t = results(r1.state, noWake, 1);
+    assert.deepEqual([t.event.pending.map((p) => p.id), t.event.clarify, card(t.state, "c1").pre_task?.wake], [["c1"], [], "KEEP"]);
   });
 });

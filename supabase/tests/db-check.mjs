@@ -2286,29 +2286,6 @@ await check('준비 시작 시각 · 출처는 같이만(D111 3번), 적용분�
     && badEv === true && ev.suggestion_type === 'PREPARE_ADVANCE' && JSON.stringify(ev.evidence) === '[10,14,12]'
     ? true : { fresh, srcOnly, timeOnly, both, over, neg, adv, badEnum, other, after, badEv, ev };
 });
-await check('기상 뒤 할 일 계획(activity_plan, PR #546 보완): 기본 NULL(기존 행 그대로) · 객체 { lead_minutes 0~240, items 1~5개 }만 · 주인만 고침', async () => {
-  const { part } = await mkPart(A);   // A로 로그인한 상태
-  const set = (v) => q(`update public.appointment_participants set activity_plan = $2::jsonb where participant_id = $1 returning activity_plan`, [part, v]);
-  const [fresh] = await q(`select activity_plan from public.appointment_participants where participant_id = $1`, [part]);
-  const item = { title: '온라인 회의', start: '2026-11-19T01:00:00.000Z', end: '2026-11-19T02:00:00.000Z', before_prepare: true, source: 'USER' };
-  const good = await set(JSON.stringify({ lead_minutes: 20, items: [item] }));
-  const notObject = await expectErr(() => set(JSON.stringify([item])), /appointment_participants_activity_plan_shape/);
-  const empty = await expectErr(() => set(JSON.stringify({ lead_minutes: 20, items: [] })), /appointment_participants_activity_plan_shape/);
-  const six = await expectErr(() => set(JSON.stringify({ lead_minutes: 20, items: Array(6).fill(item) })), /appointment_participants_activity_plan_shape/);
-  const noLead = await expectErr(() => set(JSON.stringify({ items: [item] })), /appointment_participants_activity_plan_shape/);
-  const bigLead = await expectErr(() => set(JSON.stringify({ lead_minutes: 241, items: [item] })), /appointment_participants_activity_plan_shape/);
-  const cleared = await set(null);
-  await set(JSON.stringify({ lead_minutes: 20, items: [item] }));
-  await as(B);   // 남의 행은 못 읽고 못 고침 (기존 appointment_participants 정책)
-  const otherRead = await q(`select activity_plan from public.appointment_participants where participant_id = $1`, [part]);
-  const otherWrite = await q(`update public.appointment_participants set activity_plan = null where participant_id = $1 returning participant_id`, [part]);
-  await su();
-  const [after] = await q(`select activity_plan from public.appointment_participants where participant_id = $1`, [part]);
-  return fresh.activity_plan === null && good[0].activity_plan.items.length === 1 && good[0].activity_plan.lead_minutes === 20
-    && notObject === true && empty === true && six === true && noLead === true && bigLead === true && cleared[0].activity_plan === null
-    && otherRead.length === 0 && otherWrite.length === 0 && after.activity_plan?.items?.[0]?.title === '온라인 회의'
-    ? true : { fresh, good, notObject, empty, six, noLead, bigLead, cleared, otherRead, otherWrite, after };
-});
 await check('반경: 약속 도착지(dest_radius_m)와 집(home_radius_m)은 100~500이고 NULL(기본값)도 받음 — 99 · 501은 거부', async () => {
   const { appt } = await mkPart(A);
   const setAppt = (v) => q(`update public.appointments set dest_radius_m = $1 where appointment_id = $2 returning dest_radius_m`, [v, appt]);

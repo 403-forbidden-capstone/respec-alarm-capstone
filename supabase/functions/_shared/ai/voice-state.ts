@@ -5,7 +5,7 @@
 import type { RefsOut } from './context-core.ts';
 import type { ServerState, StoredTurn } from './session.ts';
 import type { FixRecord, TurnState } from './turn-core.ts';
-import type { ApptDraft, Card, CardEdit, Context, Fix, ServerEvent, Turn } from './types.ts';
+import type { ApptDraft, Card, CardEdit, Context, Fix, PreTask, ServerEvent, Turn } from './types.ts';
 
 // ───────── TurnState ↔ server_state ─────────
 
@@ -64,6 +64,10 @@ export interface PublicCard {
   error: string | null;
   /** 카드를 만든 때 — 없으면(예전 카드) null */
   at: string | null;
+  /** 카드를 만든 사용자 말 번호 — 한 번의 요청에서 일정 카드는 하나만 저장(앱 saveCard). 없으면(예전 카드) null */
+  turn: number | null;
+  /** 나가기 전 할 일 · 기상 확인 — ASK면 앱이 저장하지 않음, SET이면 앱이 기상만 옮김(준비 · 출발 그대로). 없으면 null */
+  pre_task: PreTask | null;
 }
 
 export interface PublicFix {
@@ -97,6 +101,8 @@ export function publicCard(c: Card, refs: RefsOut): PublicCard {
     appointment_id: c.appointment_id,
     error: c.error,
     at: c.at ?? null,
+    turn: c.turn ?? null,
+    pre_task: c.pre_task ? { ...c.pre_task } : null,
   };
 }
 

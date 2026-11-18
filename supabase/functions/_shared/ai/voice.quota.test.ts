@@ -443,3 +443,42 @@ test('준비물 말도 일정일 수도 있는 말로 봄 (추출 실패면 [다
   assert.equal(mightBeSchedule('나가기 전에 충전기 가져가야 해'), true);
   assert.equal(mightBeSchedule('내일 노트북 챙겨야 돼'), true);
 });
+
+// ───────── 나가기 전 할 일 → 계산된 기상 확인 (2026-11-19 팀 결정) — 음성(Live) · 글 같은 길 ─────────
+//   T2F.v2-e가 pre_tasks · wake_reply를 뽑음. 계산 결과(results) 뒤 기상 질문을 ask로 돌려줌 → 앱이 Live에 넣어 소리로 물음
+const withTask = (over: Record<string, unknown> = {}) => ({ ...appt(), pre_tasks: [{ title: '과제' }], ...over });
+
+test('음성: 일정 + 할 일 → 계산 뒤 기상 질문을 ask로(저장 확인은 미룸) → "6시 반에 일어날게"면 기상만 바꿔 다시 계산', async () => {
+  const { deps, sid, rev } = await start({
+    T2F: [withTask(), withTask({ wake_reply: { choice: 'TIME', time: '06:30' } })],
+    T1: [T1_OK, T1_OK],
+  });
+  const t1 = voiceTurn(sid, rev, '내일 2시에 산책 있는데 나가기 전에 과제 해야 돼', '알겠어요.');
+  const r1 = (await handleVoiceTurn(deps, t1)) as VoiceTurnOut;
+  assert.equal(r1.next, 'APP_TASKS');
+  assert.deepEqual(r1.cards.map((c) => [c.kind, c.pre_task]), [['APPT_NEW', { title: '과제', wake: 'ASK', time: null }]]);
+  const r1b = (await handleVoiceTurn(deps, results(sid, r1.rev, t1.client_turn_id))) as VoiceTurnOut;
+  assert.equal(r1b.cards[0].status, 'READY');
+  assert.deepEqual(r1b.ask, ["'산책' 기상 알람이 07:40으로 계산됨 — 나가기 전 할 일(과제)이 있다고 했으니 이 시각에 일어날지, 몇 시에 일어날지"]);
+  const t2 = voiceTurn(sid, r1b.rev, '6시 반에 일어날게', '좋아요.');
+  const r2 = (await handleVoiceTurn(deps, t2)) as VoiceTurnOut;
+  assert.equal(r2.next, 'APP_TASKS');
+  assert.equal(r2.cards.length, 1); // 같은 카드 — 새 카드 없음
+  assert.deepEqual([r2.cards[0].pre_task, r2.cards[0].edit?.times], [{ title: '과제', wake: 'SET', time: '06:30' }, { WAKE: '2026-10-30T06:30:00+09:00' }]);
+});
+
+test('글: 같은 흐름 — 계산 뒤 T1이 글로 묻고(ask는 함께 오지만 글 화면은 안 씀), 시각 없는 답은 다시 물음', async () => {
+  const { fake, deps, sid, rev } = await start({
+    T2F: [withTask(), withTask({ wake_reply: { choice: 'VAGUE', time: '' } })],
+    T1: [T1_OK, T1_OK],
+  });
+  const t1 = text(sid, rev, '내일 2시에 산책 있는데 나가기 전에 과제 해야 돼');
+  const r1 = (await handleVoiceTurn(deps, t1)) as VoiceTurnOut;
+  const r1b = (await handleVoiceTurn(deps, results(sid, r1.rev, t1.client_turn_id))) as VoiceTurnOut;
+  assert.ok(r1b.reply?.text);
+  assert.match(r1b.ask?.[0] ?? '', /07:40으로 계산됨/);
+  const r2 = (await handleVoiceTurn(deps, text(sid, r1b.rev, '좀 일찍 일어날게'))) as VoiceTurnOut;
+  assert.equal(r2.next, 'USER');
+  assert.deepEqual([r2.cards[0].pre_task?.wake, r2.cards[0].edit], ['ASK', null]);
+  assert.deepEqual(fake.order, ['T2F', 'T1', 'T2F', 'T1']);
+});

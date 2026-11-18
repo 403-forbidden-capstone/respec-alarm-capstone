@@ -17,9 +17,9 @@ export type CheckedAlarm = ChainAlarm & {
 
 export type CheckFailure = {
   ok: false;
-  reason: 'ORDER' | 'DEPARTURE_PASSED' | 'ACTIVITY'; // ACTIVITY = 할 일 시각으로 기상 · 준비를 못 정함 (calc/day.ts, plan-core가 만듦)
+  reason: 'ORDER' | 'DEPARTURE_PASSED';
   message: string; // 사용자에게 보일 짧은 이유
-  detail?: { earlier: string; later: string } | Record<string, unknown>;
+  detail?: { earlier: string; later: string };
 };
 
 export type CheckResult = { ok: true; alarms: CheckedAlarm[] } | CheckFailure;

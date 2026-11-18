@@ -207,7 +207,7 @@ test('녹화 한 바퀴: 첫 마디 템플릿 → 새 약속 카드 → 계산 �
     assert.ok((c.input_tokens as number) > 0 && (c.output_tokens as number) > 0, '토큰');
     assert.ok((c.latency_ms as number) > 0, '지연');
     assert.equal(c.io, null);
-    assert.equal(c.prompt_version, c.point === 'T1' ? 'v1.6' : 'v2-d');
+    assert.equal(c.prompt_version, c.point === 'T1' ? 'v1.6' : 'v2-e');
   }
   const flagged = calls.filter((c) => (c.flags as string[]).length > 0);
   assert.ok(flagged.some((c) => (c.flags as string[]).includes('claims_saved_without_event')), '가드에 걸린 호출의 flags');

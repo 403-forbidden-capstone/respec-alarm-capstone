@@ -255,6 +255,23 @@ export interface FastExtract {
   safety_flag: boolean;
   /** 준비물 (T2F.v2-d · extract-fast.v2, 선택 칸). date "" = 날짜를 모름 → 서버가 되물음 */
   items?: { title: string; date: string }[];
+  /** 나가기 전 할 일 (T2F.v2-e · extract-fast.v3, 선택 칸) — 집 · 온라인에서 하는 회의 · 과제 · 공부. 일정 카드를 만들지 않고 기상 시각을 확인하는 계기만 됨. 제목 모르면 "할 일" */
+  pre_tasks?: { title: string }[];
+  /** 기상 시각 답 (T2F.v2-e · extract-fast.v3, 선택 칸) — NONE 말 없음 · KEEP 계산된 시각 그대로 · TIME 정한 시각(time) · VAGUE "좀 일찍"처럼 시각 없음. time "" = 없음 */
+  wake_reply?: { choice: WakeChoice; time: string };
+}
+
+export type WakeChoice = "NONE" | "KEEP" | "TIME" | "VAGUE";
+
+/**
+ * 나가기 전 할 일이 있는 새 일정 카드의 기상 확인 (AI 대화 전용, 서버 · 앱이 같이 읽음)
+ *   ASK = 계산된 기상 시각을 사용자에게 묻는 중 — 답 전에는 저장 안 함 · KEEP = 계산된 기상 그대로 · SET = 사용자가 정한 time(HH:MM)으로 기상만 옮김
+ *   준비 · 출발 알람은 기상을 따라 움직이지 않음 (앱 estimateNew가 기상만 옮김)
+ */
+export interface PreTask {
+  title: string;
+  wake: "ASK" | "KEEP" | "SET";
+  time: LocalTime | null;
 }
 
 /** 사실의 출처 — 입력 방식(글 · Live 음성)과 다른 개념. stated 사용자가 직접 말함 · confirmed 확인 질문에 동의 · inferred AI 짐작 */
@@ -351,6 +368,10 @@ export interface Card {
   error: string | null;
   /** 카드를 처음 만든 때(서울 ISO) — 다시 열 때 앱이 카드를 그 자리에 놓음. 예전 카드는 없음 */
   at?: string;
+  /** 카드를 만든 사용자 말 번호 — 한 번의 요청에서 일정 카드는 하나만 저장 (앱 saveCard가 봄). 예전 카드는 없음 */
+  turn?: number;
+  /** 나가기 전 할 일 · 기상 확인 (새 일정 카드만). 없으면 할 일 말 없음 */
+  pre_task?: PreTask;
 }
 /** 기록 정정 — 앱이 L2 함수로 반영한다(설계 메모 4.5 · 13절 L2-2) */
 export interface Fix {
