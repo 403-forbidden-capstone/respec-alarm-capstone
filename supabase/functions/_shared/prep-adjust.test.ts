@@ -45,14 +45,17 @@ test('sidecar is fail closed on missing config, invalid output, timeout, and net
   let calls = 0;
   const good = async () => {
     calls++;
-    return { ok: true, json: async () => ({ model: 'prep_ratio_v1', prediction_type: 'ratio', minutes: 48, ratio: 1.2 }) };
+    return { ok: true, json: async () => ({ model: 'prep_ratio_v1', prediction_type: 'ratio', training_target: 'actual_start_depart', minutes: 48, ratio: 1.2 }) };
   };
   const config = { enabled: true, url: 'https://example.org', token: 'secret' };
   assert.equal(await requestPrepAdjustment(q, { ...config, enabled: false }, good), null);
   assert.equal(calls, 0);
   assert.equal(await requestPrepAdjustment(q, { ...config, url: 'http://example.org' }, good), null);
-  assert.equal(await requestPrepAdjustment(q, config, good), { model: 'prep_ratio_v1', minutes: 48, ratio: 1.2 }); // valid response
-  assert.equal(await requestPrepAdjustment(q, config, async () => ({ok: true, json: async () => ({model:'c1_mae',prediction_type:'ratio',minutes:48,ratio:1.2})})), null);
-  assert.equal(await requestPrepAdjustment(q, config, async () => ({ok: true, json: async () => ({model:'prep_ratio_v1',prediction_type:'ratio',minutes:200,ratio:1.2})})), null);
+  assert.deepEqual(await requestPrepAdjustment(q, config, good), { model: 'prep_ratio_v1', minutes: 48, ratio: 1.2 }); // valid response
+  assert.equal(await requestPrepAdjustment(q, config, async () => ({ok: true, json: async () => ({model:'c1_mae',prediction_type:'ratio',training_target:'actual_start_depart',minutes:48,ratio:1.2})})), null);
+  assert.equal(await requestPrepAdjustment(q, config, async () => ({ok: true, json: async () => ({model:'prep_ratio_v1',prediction_type:'ratio',training_target:'actual_start_depart',minutes:200,ratio:1.2})})), null);
+  const survey = async () => ({ok:true, json:async()=>({model:'prep_ratio_v1',prediction_type:'ratio',training_target:'survey_141142_proxy',minutes:48,ratio:1.2})});
+  assert.equal(await requestPrepAdjustment(q, config, survey), null);
+  assert.deepEqual(await requestPrepAdjustment(q, {...config, allowSurveyProxy:true}, survey), {model:'prep_ratio_v1',minutes:48,ratio:1.2});
   assert.equal(await requestPrepAdjustment(q, config, async () => { throw Error('offline'); }), null);
 });
