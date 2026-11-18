@@ -7,6 +7,7 @@ prep-start -> departure. Do not use that research .cbm to schedule real alarms.
 from __future__ import annotations
 
 import hmac
+import hashlib
 import json
 import math
 import os
@@ -65,9 +66,17 @@ def main() -> None:
     model_path = os.environ.get("PREP_ADJUST_MODEL_PATH")
     if not token or len(token) < 24 or not model_path or not Path(model_path).is_file():
         raise SystemExit("PREP_ADJUST_API_TOKEN (>=24 characters) and PREP_ADJUST_MODEL_PATH are required")
-    training_target = os.environ.get('PREP_ADJUST_MODEL_TRAINING_TARGET', '')
+    # Trust the model's verified manifest, not an operator-provided label alone.
+    manifest_path = Path(model_path).with_suffix('.manifest.json')
+    if not manifest_path.is_file():
+        raise SystemExit('Missing model provenance manifest: '+str(manifest_path))
+    manifest = json.loads(manifest_path.read_text(encoding='utf-8'))
+    digest = hashlib.sha256(Path(model_path).read_bytes()).hexdigest()
+    if not hmac.compare_digest(str(manifest.get('sha256','')), digest):
+        raise SystemExit('Model SHA256 differs from provenance manifest')
+    training_target = manifest.get('training_target')
     if training_target not in ('actual_start_depart', 'survey_141142_proxy'):
-        raise SystemExit('PREP_ADJUST_MODEL_TRAINING_TARGET must be explicitly declared')
+        raise SystemExit('Unknown verified training target')
     if training_target == 'survey_141142_proxy' and os.environ.get('PREP_ADJUST_ALLOW_SURVEY_PROXY') != '1':
         raise SystemExit('Survey proxy model requires PREP_ADJUST_ALLOW_SURVEY_PROXY=1 for research testing only')
     model = CatBoostRegressor()
