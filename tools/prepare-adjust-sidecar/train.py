@@ -11,6 +11,7 @@ from the same user. Split by user before training; never train on future events.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 from pathlib import Path
 
@@ -119,7 +120,16 @@ def main() -> None:
     }
     out = Path(args.out_dir)
     out.mkdir(parents=True,exist_ok=True)
-    model.save_model(str(out/"prep_ratio_actual_sessions.cbm"))
+    model_file = out/"prep_ratio_actual_sessions.cbm"
+    model.save_model(str(model_file))
+    (out/"prep_ratio_actual_sessions.manifest.json").write_text(json.dumps({
+        "training_target":"actual_start_depart",
+        "sha256":hashlib.sha256(model_file.read_bytes()).hexdigest(),
+        "model":"prep_ratio_v1",
+        "feature_names":FEATURES,
+        "minimum_history":3,
+        "user_split":"user-disjoint",
+    },ensure_ascii=False,indent=2),encoding="utf-8")
     (out/"metrics.json").write_text(json.dumps(metrics,ensure_ascii=False,indent=2),encoding="utf-8")
     print(json.dumps(metrics,ensure_ascii=False,indent=2))
 
