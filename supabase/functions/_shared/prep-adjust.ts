@@ -99,7 +99,7 @@ export async function requestPrepAdjustment(
     if (!body || typeof body !== 'object') return null;
     const v = body as Record<string, unknown>;
     if (v.model !== PREP_ADJUST_MODEL || v.prediction_type !== 'ratio' ||
-        !Number.isFinite(v.ratio) || !Number.isFinite(v.minutes)) return null;
+        typeof v.ratio !== 'number' || !Number.isFinite(v.ratio) || typeof v.minutes !== 'number' || !Number.isFinite(v.minutes)) return null;
     const ratio = v.ratio as number;
     const minutes = v.minutes as number;
     if (ratio < 0.5 || ratio > 2.0 || !inRange(minutes) ||
