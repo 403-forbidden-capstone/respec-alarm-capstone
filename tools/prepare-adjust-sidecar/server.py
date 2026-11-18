@@ -22,7 +22,7 @@ MODEL_NAME = "prep_ratio_v1"
 MAX_BODY = 4096
 
 
-def predict(model: CatBoostRegressor, payload: dict) -> dict:
+def predict(model: CatBoostRegressor, payload: dict, training_target: str) -> dict:
     if payload.get("model") != MODEL_NAME:
         raise ValueError("unexpected model")
     features = payload.get("features")
@@ -55,7 +55,7 @@ def predict(model: CatBoostRegressor, payload: dict) -> dict:
     if not 0.5 <= ratio <= 2.0:
         raise ValueError("ratio outside safety band")
     return {
-        "model": MODEL_NAME, "prediction_type": "ratio",
+        "model": MODEL_NAME, "prediction_type": "ratio", "training_target": training_target,
         "minutes": round(minutes, 3), "ratio": round(ratio, 5),
     }
 
@@ -65,6 +65,11 @@ def main() -> None:
     model_path = os.environ.get("PREP_ADJUST_MODEL_PATH")
     if not token or len(token) < 24 or not model_path or not Path(model_path).is_file():
         raise SystemExit("PREP_ADJUST_API_TOKEN (>=24 characters) and PREP_ADJUST_MODEL_PATH are required")
+    training_target = os.environ.get('PREP_ADJUST_MODEL_TRAINING_TARGET', '')
+    if training_target not in ('actual_start_depart', 'survey_141142_proxy'):
+        raise SystemExit('PREP_ADJUST_MODEL_TRAINING_TARGET must be explicitly declared')
+    if training_target == 'survey_141142_proxy' and os.environ.get('PREP_ADJUST_ALLOW_SURVEY_PROXY') != '1':
+        raise SystemExit('Survey proxy model requires PREP_ADJUST_ALLOW_SURVEY_PROXY=1 for research testing only')
     model = CatBoostRegressor()
     model.load_model(model_path)
 
@@ -93,7 +98,7 @@ def main() -> None:
                 payload = json.loads(self.rfile.read(length))
                 if not isinstance(payload, dict):
                     return self.send_json(400, {"error": "invalid_body"})
-                result = predict(model, payload)
+                result = predict(model, payload, training_target)
                 return self.send_json(200, result)
             except (ValueError, TypeError, KeyError, json.JSONDecodeError):
                 return self.send_json(400, {"error": "invalid_prediction_request"})
