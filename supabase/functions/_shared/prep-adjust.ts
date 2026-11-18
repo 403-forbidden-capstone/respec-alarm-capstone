@@ -26,7 +26,7 @@ export type PrepAdjustRequest = {
   history_count: number; // informational only: not a trained CatBoost feature
 };
 export type PrepAdjustment = { model: typeof PREP_ADJUST_MODEL; minutes: number; ratio: number };
-export type PrepAdjustConfig = { enabled: boolean; url?: string; token?: string; timeoutMs?: number };
+export type PrepAdjustConfig = { enabled: boolean; url?: string; token?: string; timeoutMs?: number; allowSurveyProxy?: boolean };
 export type PrepAdjustFetch = (url: string, init: RequestInit) => Promise<Pick<Response, 'ok' | 'json'>>;
 
 const inRange = (n: number) => Number.isFinite(n) && n >= 5 && n <= 240;
@@ -99,6 +99,9 @@ export async function requestPrepAdjustment(
     const body: unknown = await res.json();
     if (!body || typeof body !== 'object') return null;
     const v = body as Record<string, unknown>;
+    // A survey proxy is never implicitly promoted to a true preparation-duration model.
+    if (v.training_target !== 'actual_start_depart' &&
+        !(v.training_target === 'survey_141142_proxy' && config.allowSurveyProxy === true)) return null;
     if (v.model !== PREP_ADJUST_MODEL || v.prediction_type !== 'ratio' ||
         typeof v.ratio !== 'number' || !Number.isFinite(v.ratio) || typeof v.minutes !== 'number' || !Number.isFinite(v.minutes)) return null;
     const ratio = v.ratio as number;
