@@ -13,7 +13,7 @@ one calculation.
 - `prep-adjust.ts`: inspect actual app session rows from
   `appointment_participants.prepare_started_at` and `departed_at`,
   build a causal recent-30 baseline (>=3 valid completed records), call a
-  separate authenticated `prep_ratio_v1` sidecar, validate response.
+  separate authenticated `prep_start_ratio_v2` sidecar, validate response.
 - `plan.ts`: optional feature flag + exact UUID allowlist + existing verified
   consent and age-code approval, fail closed. Does **not** use
   `daily_records.actual_prepare_minutes`: that is wake -> departure.
@@ -28,7 +28,7 @@ one calculation.
   that late/missing records do not enter history.
 
 ## Bootstrap from the existing 2024 time-use survey
-The pre-trained `prep_ratio_survey_proxy.cbm` is packaged together with a SHA-256 manifest and a local HTTP smoke-test server. For initial tests, set the server's `PREP_ADJUST_ALLOW_SURVEY_PROXY=1`, and on the Edge side opt in with `PREP_ADJUST_ALLOW_SURVEY_PROXY=1`. The model response explicitly includes `training_target: "survey_141142_proxy"`. This is only acceptable on allowlisted **research accounts**. It MUST NOT be presented as validated actual preparation-duration prediction.
+The pre-trained `prep_ratio_survey_proxy.cbm` is packaged together with a SHA-256 manifest and a local HTTP smoke-test server. For initial tests, set the server's `PREP_ADJUST_ALLOW_SURVEY_PROXY=1`, and on the Edge side opt in with `PREP_ADJUST_ALLOW_SURVEY_PROXY=1`. The model response explicitly includes `training_target: "survey_start_cluster_proxy"`. This is only acceptable on allowlisted **research accounts**. It MUST NOT be presented as validated actual preparation-duration prediction.
 
 Once consented actual preparation-start/departure records accumulate, train the sidecar's `train.py` to produce an actual-duration `.cbm` and corresponding `.manifest.json` with `training_target: "actual_start_depart"`. The adapter accepts this target by default; no survey proxy opt-in is needed. Keep old C1/W4 disabled in this mode. **Do not change a manifest target manually** to force a survey model to be treated as a true-duration model.
 
@@ -78,7 +78,7 @@ POST `/predict` JSON:
 
 ```json
 {
-  "model":"prep_ratio_v1",
+  "model":"prep_start_ratio_v2",
   "features":{
     "weekday_code":"4",
     "평토일구분코드":"1",
@@ -90,7 +90,7 @@ POST `/predict` JSON:
 }
 ```
 
-Response `{"model":"prep_ratio_v1","prediction_type":"ratio","minutes":33,"ratio":1.1}`.
+Response `{"model":"prep_start_ratio_v2","prediction_type":"ratio","minutes":33,"ratio":1.1}`.
 Feature schema is exact: old `141/142` observed-on-target-day ORACLE flags
 are forbidden in this path, because they leak future observations.
 
@@ -151,3 +151,17 @@ node --experimental-strip-types --test \
   supabase/functions/_shared/plan-core.test.ts \
   supabase/functions/_shared/prepare-ml.test.ts
 ```
+
+
+## Preparation-start proxy v2 (2026-11-18)
+The original survey ratio model predicted the **SUM** of 141/142 across the morning.
+It is now superseded as a research candidate by a separately trained model:
+- Target: last near-departure preparation cluster's **start time**, encoded as departure minus cluster-start minutes.
+- Label extraction: ten-minute time-use slots; allow at most 10m non-141/142 gap within cluster, and last 141/142 activity must end within 20m of departure; maximum inferred interval 180m.
+- Data: 30,198 eligible survey diary records; 21,850 labels (72.4%); 6,837 two-day persons; train=4,785 / valid=1,026 / test=1,026 persons.
+- Ratio CatBoost test MAE=10.339m vs preceding-day baseline MAE=10.819m, underestimation rate=50.78%. Bootstrap ΔMAE=0.479m, 95% CI [0.117,0.827]m.
+- Quantile (0.80) CatBoost separately trained: MAE=13.72m, underestimation rate=19.10% on the same test set.
+- Sensitivity to proxy labeling thresholds is material, with some definitions showing inconclusive improvements.
+- The **pretrained .cbm** is a downloadable standalone research artifact, not committed to GitHub. Its manifest identifies `survey_start_cluster_proxy` distinctly from `actual_start_depart`.
+- Input features still do NOT include *advance-declared* preparation/activity combinations. In particular, the app's `beforePrepareMinutes` is a separate schedule rule and remains unchanged.
+- No verified real preparation-start ground truth, onboarding self-report evaluation, >=3-session actual-history training, or cross-repo FastAPI parity exists. **Default OFF** remains required until these are addressed.
