@@ -11,19 +11,21 @@ const rec = (before: number, duration: number, source = 'ROUTINE_STEP') => ({
   departed_at: ago(before),
   prepare_started_source: source,
 });
-test('requires >= 3 verified preparation-start -> departure records, never PREPARE_ALARM scheduled times', () => {
+test('requires >= 3 observed preparation-start -> departure records', () => {
   assert.equal(PREP_ADJUST_MIN_RECORDS, 3);
   assert.equal(preparationHistory([rec(30, 30), rec(150, 45)], now), null);
-  const h = preparationHistory([rec(30, 30), rec(150, 45), rec(300, 60), rec(480, 30, 'PREPARE_ALARM')], now);
+  const h = preparationHistory([rec(30, 30), rec(150, 45), rec(300, 60), rec(480, 30, 'UNKNOWN')], now);
   assert.deepEqual(h, { minutes: [30, 45, 60], count: 3, baselineMinutes: 45 });
 });
 test('rejects future, duplicate, reversed, out-of-range, or scheduled-only records', () => {
   const h = preparationHistory([
     rec(30, 30), rec(30, 30), rec(150, 45), rec(300, 60),
-    rec(-5, 40), rec(500, 250), rec(650, 0), rec(700, -5), rec(800, 40, 'PREPARE_ALARM'),
+    rec(-5, 40), rec(500, 250), rec(650, 0), rec(700, -5), rec(800, 40, 'UNKNOWN'),
   ], now);
   assert.equal(h?.count, 3);
   assert.deepEqual(h?.minutes, [30, 45, 60]);
+  const dismiss = preparationHistory([rec(30, 30, 'PREPARE_ALARM'), rec(150, 45, 'PREPARE_ALARM'), rec(300, 60, 'PREPARE_ALARM')], now);
+  assert.equal(dismiss?.count, 3);
 });
 test('request uses only preexisting baseline + calendar + verified demographics; no activities observed on target day', () => {
   const h = preparationHistory([rec(30, 30), rec(150, 45), rec(300, 60)], now);
