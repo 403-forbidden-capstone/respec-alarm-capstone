@@ -8,7 +8,7 @@
 //     다시 열 때 계산이 안 끝난 카드(NEEDS_ESTIMATE)는 이어서 계산해 results만 보냄. 저장한 카드는 서버에 SAVED를 알리기 전에 로컬(savedMarks.ts)에 적어 두어, 알림이 안 가고 꺼져도 일정이 두 벌 생기지 않게 함
 //   · 서버 요청은 pending 하나 + 카드 요청 큐 — 실패한 요청(pending)이 있으면 카드 동작은 앱 일만 바로 하고 서버 알림은 큐에서 기다렸다가 그 요청이 성공한 뒤 차례로 보냄
 import { autoImportance } from '@shared/calc/importance.ts';
-import { adjustEstimate, orderError } from '@/features/alarm/adjust';
+import { adjustEstimate, moveWakeOnly, orderError } from '@/features/alarm/adjust';
 import { createAppointment, createStandaloneAlarm, estimateAppointment, getAppointment, listPlaces, previewAlarms, saveAlarmSettings } from '@/features/alarm/api';
 import { saveNotice } from '@/features/alarm/saveNotice';
 import { draftAt } from '@/features/alarm/schedule';
@@ -80,6 +80,9 @@ type ServerCard = {
   appointment_id?: string | null; // 저장한 약속 (서버가 SAVED 뒤 채움)
   error?: string | null;
   at?: string | null; // 카드를 만든 때 — 다시 열 때 그 자리에 놓음 (예전 카드는 없음 → 읽은 때)
+  turn?: number | null; // 카드를 만든 사용자 말 번호 — 한 번의 요청에서 일정 카드는 하나만 저장 (예전 카드는 없음)
+  // 나가기 전 할 일 · 기상 확인 (서버 types.ts PreTask) — ASK면 기상 답 전이라 저장 안 함, SET이면 기상만 옮기고 준비 · 출발은 그대로
+  pre_task?: { title: string; wake: 'ASK' | 'KEEP' | 'SET'; time: string | null } | null;
 };
 
 type ServerFix = { id: string; fact?: string; kind: string; participant_id: string /* 늘 글자 (모르면 '') */; action: 'CORRECT' | 'DENY'; to: string | null };
@@ -371,7 +374,13 @@ async function estimateNew(rec: CardRec): Promise<Outcome> {
     let estimate = await estimateAppointment(draft);
     for (const kind of RING_KINDS) {
       const to = rec.server.edit?.times?.[kind];
-      if (to) estimate = adjustEstimate(estimate, kind, new Date(to));
+      if (!to) continue;
+      // 나가기 전 할 일 때문에 정한 기상은 기상만 옮김 — 준비 · 출발은 일정 기준 계산 그대로 (2026-11-19 팀 결정). 그 밖의 고침은 기존 규칙
+      if (kind === 'WAKE' && rec.server.pre_task?.wake === 'SET') {
+        estimate = { ...estimate, appointment: { ...estimate.appointment, alarms: moveWakeOnly(estimate.appointment.alarms, new Date(to)) } };
+      } else {
+        estimate = adjustEstimate(estimate, kind, new Date(to));
+      }
     }
     const blocked = orderError(estimate.appointment.alarms); // 순서 뒤집힘(기상 ≤ 준비 ≤ 출발) → 실패 + 이유를 서버에 (처리 결과 "되물을 것")
     if (blocked) return { status: 'FAILED', error: blocked };
@@ -990,6 +999,13 @@ export function saveCard(cardId: string): Promise<string> {
     if (rec.status === 'SAVED' || rec.status === 'REJECTED') throw new UserError('이미 확인한 카드예요');
     if (rec.status !== 'READY') throw new UserError('아직 저장할 수 없는 카드예요');
     const kind = rec.server.kind;
+    // 나가기 전 할 일이 있는데 기상 시각 답을 아직 못 받음 — 임의의 기상으로 저장하지 않음
+    if (kind === 'APPT_NEW' && rec.server.pre_task?.wake === 'ASK') throw new UserError('몇 시에 일어날지 먼저 알려 주세요');
+    // 한 번의 요청(같은 말)에서 일정 카드는 하나만 저장 — 서버도 하나만 만들지만 저장 길에서 한 번 더 막음 (2026-11-19 팀 결정)
+    if (kind === 'APPT_NEW' && rec.server.turn != null) {
+      const twin = [...state.cards.entries()].some(([id, r]) => id !== cardId && r.server.kind === 'APPT_NEW' && r.server.turn === rec.server.turn && r.status === 'SAVED');
+      if (twin) throw new UserError('이번 요청에서는 첫 일정 하나만 저장해요');
+    }
     let appointmentId: string;
     let alarms: { kind: AlarmKind; at: Date; enabled: boolean }[];
     let level: number;

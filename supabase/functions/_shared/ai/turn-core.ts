@@ -11,7 +11,7 @@
 //   · 다른 사람 알람 권한 길은 v0에서 늘 NO_PERMISSION. 준비시간 범위는 day(내일 기상 기준 일정) 고정.
 //   · 할 일 · 준비물 · 이유 태그 · 하루 기록은 T2F가 안 뽑는다 — 대화 끝 추출(applyFinal, PR 5) 몫. itemKey만 미리 옮겨 둠.
 import type {
-  AlarmPlan, AlarmType, Appointment, Basis, Card, CardAction, CardEdit, CardKind, Context, Digest, Extract, FactKind, FastExtract, Fix, Importance, Intensity,
+  AlarmPlan, AlarmType, ApptDraft, Appointment, Basis, Card, CardAction, CardEdit, CardKind, Context, Digest, Extract, FactKind, FastExtract, Fix, Importance, Intensity, PreTask,
   LocalDate, LocalTime, PendingItem, QuestionKind, RejectReason, ServerEvent, ServerQuestion, TaskResults, Weekday,
 } from "./types.ts";
 import { IMPORTANCE_LABEL } from "./types.ts";
@@ -19,6 +19,9 @@ import { FACT_KIND_KO, FIXABLE_FACT_KINDS, addDays, weekdayOf } from "./view.ts"
 import { seoulLocal } from "./ko.ts";
 import { toMinutes } from "./guards.ts";
 import { RING_KINDS } from "../calc/types.ts";
+
+/** HH:MM (24시간) — 기상 답 시각 검사 */
+const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
 
 type XAppt = Extract["appointments"][number];
 type XAlarm = Extract["alarm_changes"][number];
@@ -380,6 +383,7 @@ export function pendingText(c: Card, s: TurnState): string {
       // 알람 근거 — 앱이 준 값을 검사해 통과한 것만 (checkBasis). 기상 알람을 말할 때만 붙임
       if (c.first_of_day && w !== null && c.digest?.basis) parts.push(basisText(c.digest.basis, w, { date: d.date, time: d.time }));
       if (c.edit?.prepare_delta !== undefined) parts.push(c.edit.prepare_delta === 0 ? "내일만 준비시간 원래대로" : `내일만 준비시간 ${signed(c.edit.prepare_delta)}`);
+      if (c.pre_task !== undefined) parts.push(`나가기 전 할 일: ${c.pre_task.title} · ${c.pre_task.wake === "SET" ? "기상은 사용자가 정한 시각, 준비 · 출발은 그대로" : "계산된 기상 그대로"}`);
       parts.push("카드의 [저장]으로 저장");
       return parts.join(" · ");
     }
@@ -401,8 +405,26 @@ export function pendingText(c: Card, s: TurnState): string {
   }
 }
 
-/** 카드가 READY일 때 처리 결과에 '확인 필요' 줄을 (다시) 넣는다 — 같은 c#은 한 줄로 */
+/** 기상 확인 질문 (서버 문구) — 할 일이 있는 새 일정 카드가 계산된 뒤 (T1 · Live가 이 줄로 물음) */
+export function wakeQuestion(c: Card): string | null {
+  const w = wakeOf(c.digest);
+  if (c.pre_task === undefined || c.draft === null || w === null) return null;
+  return `'${c.draft.title}' 기상 알람이 ${w.time}으로 계산됨 — 나가기 전 할 일(${c.pre_task.title})이 있다고 했으니 이 시각에 일어날지, 몇 시에 일어날지`;
+}
+
+/** 카드가 READY일 때 처리 결과에 '확인 필요' 줄을 (다시) 넣는다 — 같은 c#은 한 줄로
+ *   나가기 전 할 일이 있고 기상 답을 아직 못 받았으면(ASK) 저장을 권하지 않고 기상 질문만 (답 전엔 저장 안 함) */
 function pushPending(ev: ServerEvent, c: Card, s: TurnState): void {
+  if (c.pre_task?.wake === "ASK") {
+    const q = wakeQuestion(c);
+    if (q !== null) {
+      if (!ev.clarify.includes(q)) ev.clarify.push(q);
+      ev.pending = ev.pending.filter((p) => p.id !== c.id);
+      return;
+    }
+    // 계산된 사슬에 기상 알람이 없음(기존 규칙 — 그날 앞 일정의 기상이 있음 등): 물을 기상 시각이 없으니 새 기상을 만들지 않고 그대로 진행
+    if (c.digest !== null) c.pre_task = { ...c.pre_task, wake: "KEEP", time: null };
+  }
   const item: PendingItem = { id: c.id, kind: pendingKindOf(c.kind), summary: pendingText(c, s) };
   const at = ev.pending.findIndex((p) => p.id === c.id);
   if (at >= 0) ev.pending[at] = item;
@@ -612,7 +634,7 @@ export function applyFast(state: TurnState, fast: FastExtract, ctx: Context, aft
     let c = cardById(pid);
     const isNew = c === undefined;
     if (c === undefined) {
-      c = { ...emptyCard(pid, kind), at: ctx.session.now };
+      c = { ...emptyCard(pid, kind), at: ctx.session.now, turn: afterTurn };
       s.cards.push(c);
     }
     const before = JSON.stringify([c.draft, c.edit, c.summary]);
@@ -721,6 +743,22 @@ export function applyFast(state: TurnState, fast: FastExtract, ctx: Context, aft
       dropPending(key, reuseId);
       return;
     }
+    // 이번 요청에서 새 일정 카드는 하나만 — 날짜 · 시각이 가장 이른 일정 (2026-11-19 팀 결정). 이어 쓰는 카드(같은 c#)는 그대로
+    //   일정은 시각순으로 처리하므로 먼저 만든 카드가 가장 이른 일정. 나머지는 이번에 만들지 않고 알림 — 같은 말이 다음 말에서 다시 뽑혀도
+    //   once()가 걸러서 사용자가 그 일정을 저장해 달라고(CONFIRMED) 하기 전엔 만들지 않음. 수동 일정 등록 · 다른 화면은 이 규칙과 상관없음
+    if (reuseId === undefined && pendingIdByKey(key) === undefined) {
+      if (tieKeys.has(key)) {
+        const names = extract.appointments.filter((y) => tieKeys.has(apptKey(y))).map((y) => `'${y.title}'`).join(" · ");
+        const line = `같은 시각(${dateKo(x.date)} ${x.time})의 일정 ${names} 중 어느 일정부터 등록할지`;
+        if (!ev.clarify.includes(line)) ev.clarify.push(line);
+        return;
+      }
+      if (madeNew !== null) {
+        ev.conflicts = [...(ev.conflicts ?? []), `우선 ${dateKo(madeNew.date)} ${madeNew.time} '${madeNew.title}' 일정부터 등록 — ${dateKo(x.date)} ${x.time} '${x.title}'은 이번에 만들지 않음`];
+        return;
+      }
+      madeNew = x;
+    }
     const summary = appointmentSummary(x);
     upsertCard(
       { kind: "APPOINTMENT", key, item: x, summary, target_ref: null },
@@ -814,12 +852,85 @@ export function applyFast(state: TurnState, fast: FastExtract, ctx: Context, aft
     newAppt(xx, key);
   };
 
-  for (const x of extract.appointments) {
+  // 이번 말에서 새로 카드를 만들 수 있는 일정 중 가장 이른 시각에 둘 이상이면(같은 시각) 어느 것부터인지 되물음 — 이미 있는 약속 · 열린 카드는 빼고 셈
+  const freshCandidate = (x: XAppt): boolean =>
+    x.ref === null && normTitle(x.title) !== "" && x.date !== null && x.time !== null && x.save !== "DECLINED" && pendingIdByKey(apptKey(x)) === undefined &&
+    !s.appointments.some((a) => a.date === x.date && a.time === x.time && nearTitle(a.title, x.title)) &&
+    minutesBetween(now, { date: x.date, time: x.time }) >= 0;
+  const atOf = (x: XAppt): number => (x.date === null || x.time === null ? Number.MAX_SAFE_INTEGER : dayNumber(x.date) * 1440 + toMinutes(x.time));
+  const fresh = extract.appointments.filter(freshCandidate);
+  const earliest = fresh.length > 0 ? Math.min(...fresh.map(atOf)) : null;
+  const tieGroup = fresh.filter((x) => atOf(x) === earliest);
+  const tieKeys = new Set(tieGroup.length > 1 ? tieGroup.map(apptKey) : []);
+  let madeNew: (XAppt & { date: LocalDate; time: LocalTime }) | null = null;
+
+  for (const x of [...extract.appointments].sort((a, b) => atOf(a) - atOf(b))) {
     const key = apptKey(x);
     const sig = JSON.stringify([x.save, x.date, x.time, x.place, x.importance, x.transport, x.repeat, x.unclear !== null]);
     if (!once(key, sig)) continue;
     if (x.ref) changeAppt(x, key, x.ref);
     else handleNewAppt(x, key);
+  }
+
+  // ── 나가기 전 할 일 · 기상 확인 (2026-11-19 팀 결정) ──
+  //   할 일은 일정 카드를 만들지 않고, 할 일 시각으로 기상을 계산하지도 않음. 이번 대화의 열린 새 일정 카드(가장 이른 것)에 붙여
+  //   앱이 계산한 기상 시각을 사용자에게 묻고(ASK), 답이 오기 전엔 저장하지 않음. 답: 그대로(KEEP) · 시각(SET — 기상만 옮김, 준비 · 출발은 그대로)
+  //   "좀 일찍"처럼 시각이 없으면 다시 물음 — 임의로 당기지 않음
+  const openNew = s.cards
+    .filter((c) => c.kind === "APPT_NEW" && OPEN_STATUS.includes(c.status) && c.draft !== null)
+    .sort((a, b) => dayNumber((a.draft as ApptDraft).date) * 1440 + toMinutes((a.draft as ApptDraft).time) - (dayNumber((b.draft as ApptDraft).date) * 1440 + toMinutes((b.draft as ApptDraft).time)))[0];
+  const taskTitles = [...new Set((fast.pre_tasks ?? []).map((t) => t.title.trim()).filter((t) => t !== ""))];
+  if (openNew !== undefined && taskTitles.length > 0 && openNew.pre_task === undefined) {
+    openNew.pre_task = { title: taskTitles.join(" · "), wake: "ASK", time: null };
+    touched.add(openNew.id);
+    if (openNew.status === "READY") pushPending(ev, openNew, s); // 이미 계산된 카드면 바로 기상 질문
+  }
+  let wakeReply = fast.wake_reply && fast.wake_reply.choice !== "NONE" ? fast.wake_reply : null;
+  // T2F가 기상 답을 알람 변경으로 적은 경우(새 일정의 기상, 약속 번호 없음)도 이 카드의 기상 답으로 — 따로 기상 알람 카드를 만들지 않음
+  const redirected = openNew?.pre_task !== undefined
+    ? extract.alarm_changes.find((c) => c.target === "u0" && c.type === "WAKE" && c.appointment_ref === null && c.time !== null && c.enabled !== false && (c.date === null || c.date === openNew.draft?.date))
+    : undefined;
+  if (redirected !== undefined) {
+    extract.alarm_changes = extract.alarm_changes.filter((c) => c !== redirected);
+    wakeReply ??= { choice: "TIME", time: redirected.time as string };
+  }
+  if (openNew?.pre_task !== undefined && wakeReply !== null && once(`wake:${openNew.id}`, JSON.stringify(wakeReply))) {
+    const card = openNew;
+    const pt = card.pre_task as PreTask;
+    const d = card.draft as ApptDraft;
+    const wakeLine = `'${d.title}' 날 몇 시에 일어날지 (정확한 시각)`;
+    const setEdit = (times: CardEdit["times"] | undefined): void => {
+      const rest = { ...(card.edit ?? {}) };
+      delete rest.times;
+      card.edit = times ? { ...rest, times } : Object.keys(rest).length > 0 ? rest : null;
+      card.status = "NEEDS_ESTIMATE";
+      card.digest = null;
+      card.error = null;
+    };
+    if (wakeReply.choice === "KEEP") {
+      const wasSet = pt.wake === "SET";
+      card.pre_task = { ...pt, wake: "KEEP", time: null };
+      if (wasSet) setEdit(undefined); // 앞서 정한 시각을 거두고 계산된 기상으로
+      else if (card.status === "READY") pushPending(ev, card, s);
+    } else if (wakeReply.choice === "TIME" && TIME_RE.test(wakeReply.time)) {
+      // 약속 시각보다 늦은 시각이면 전날 (새벽 약속의 밤 기상)
+      const date = toMinutes(wakeReply.time) <= toMinutes(d.time) ? d.date : addMinutes(d.date, "00:00", -1).date;
+      const prep = card.digest?.alarms.find((a) => a.kind === "PREPARE" && a.enabled);
+      const prepAt = prep ? isoToLocal(prep.at) : null;
+      if (prepAt !== null && minutesBetween({ date, time: wakeReply.time }, prepAt) <= 0) {
+        // 준비 알람보다 늦거나 같은 기상 — 저장하지 않고 다시 물음
+        card.pre_task = { ...pt, wake: "ASK", time: null };
+        ev.clarify.push(`기상 ${wakeReply.time}이 준비 알람 ${prepAt.time}보다 늦어요 — ${prepAt.time} 전에 일어날 시각`);
+      } else {
+        card.pre_task = { ...pt, wake: "SET", time: wakeReply.time };
+        setEdit({ WAKE: localToIso(date, wakeReply.time) });
+      }
+    } else {
+      // VAGUE(또는 시각을 못 읽음) — 정확한 시각을 다시 물음
+      card.pre_task = { ...pt, wake: "ASK", time: null };
+      if (!ev.clarify.includes(wakeLine)) ev.clarify.push(wakeLine);
+    }
+    touched.add(card.id);
   }
 
   // ── 알람 변경 (본인 알람만) ──
