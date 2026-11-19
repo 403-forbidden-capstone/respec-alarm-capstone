@@ -96,7 +96,7 @@ const BATCHIM_DIGITS = new Set(['0', '1', '3', '6', '7', '8']);
 
 // 받침 있는 말 뒤에는 "이에요", 없으면 "예요". 끝이 숫자면 읽는 소리로("영어 1" → 일 → 이에요), 닫는 괄호면 괄호 앞 글자로. 영문 · 기타는 받침 없음으로 봄
 // 앱 lib/format josa는 한글 끝글자만 보므로 이 규칙이 없음 — 이 문구에는 이 함수를 씀
-function copula(word: string): string {
+export function copula(word: string): string {
   const last = stripTrailingBrackets(word).slice(-1);
   const code = last.charCodeAt(0);
   const hasBatchim = BATCHIM_DIGITS.has(last) || (code >= 0xac00 && code <= 0xd7a3 && (code - 0xac00) % 28 !== 0);

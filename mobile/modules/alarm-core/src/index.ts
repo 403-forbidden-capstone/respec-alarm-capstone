@@ -1,5 +1,5 @@
 // 알람 코어 — 화면은 이 파일의 함수만 부름 (docs/alarm-core.md)
-// 흐름: schedule(꾸러미) → AlarmManager → BroadcastReceiver → (WAKE) 포그라운드 서비스 + 잠금화면 위 화면 / (그 밖) 보통 알림(알림음 · 진동 한 번) + 원탭
+// 흐름: schedule(꾸러미) → AlarmManager → BroadcastReceiver → (기상 · 준비 · 출발) 포그라운드 서비스 + 잠금화면 위 화면 / (그 밖) 보통 알림(알림음 · 진동 한 번) + 원탭
 // 울림 계획(볼륨 · 최대 시간 · 다시 울림 · 미루기 시간)은 plan.ts가 계산해서 넘기고, 네이티브는 받은 대로만 실행함
 //
 // 쓰는 곳에 따라 구현이 갈림 (화면은 모름):
@@ -195,6 +195,11 @@ export async function getPendingEvents(): Promise<AlarmEvent[]> {
 export async function markEventsUploaded(clientEventIds: string[]): Promise<void> {
   if (clientEventIds.length === 0) return;
   await backend.markEventsUploaded(clientEventIds);
+}
+
+/** 기상이 확정되면 부름 — 폰이 띄운 "지금 일어나셨나요?" 알림을 거둠. 실패는 호출하는 쪽에서 삼킴 */
+export async function dismissWakePrompt(alarmId: string): Promise<void> {
+  await backend.dismissWakePrompt(alarmId);
 }
 
 /** 앱이 켜져 있는 동안 새 기록이 생기면 알림 (꺼져 있을 때 쌓인 것은 getPendingEvents로 읽음) */

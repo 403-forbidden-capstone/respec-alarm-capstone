@@ -149,7 +149,7 @@
 - 소리 · 강도 · 미루기 · 해제 — 폰
 - 알림 글자 (이슈 #230): 준비 = `오전 8:40 출발까지 30분`, 출발 = `지금 나가면 오전 9:50 도착 · 여유 10분`을 새 알림 없이 기존 준비 · 출발 알림 한 줄에 합침(D65 기본안) — 서버 `_shared/ring-package.ts`가 만들어 꾸러미 `notice`로 줌. 웹 미리 보기 `ring`은 같은 함수(`features/alarm/notice.ts`)로 머리글을 그림. 기상 알람의 음성 문장(`voiceText`)은 읽어 주기(D8)가 붙기 전까지 폰이 저장만 함
 - 기록: `alarm_events` TRIGGERED · SNOOZED(`snooze_minutes`) · DISMISSED — DB (오프라인이면 폰에 보관 후 다시 보냄). 기록마다 앱이 만든 번호 `client_event_id`(유니크 — 같으면 무시) · 출처 `input_source` (둘 다 #160)
-- 알림 원탭("준비 시작" · "출발했어요" · "도착했어요"): `alarm_events` ACKNOWLEDGED(PREPARE · DEPARTURE) · ARRIVAL_CONFIRMED(ARRIVE) + `appointment_participants.departed_at` · `arrived_at` — DB. 쓰는 곳은 `recordParticipantTimes` 하나이고 지오펜스 자동 수집(#40)도 같은 함수를 `source: LOCATION`으로 부름
+- 준비 · 출발 알람 해제(11/19, 준비 · 출발이 알람이 됨)와 도착 알림 원탭("도착했어요"): `alarm_events` DISMISSED(PREPARE → 준비 시작. DEPARTURE는 위치로 출발을 판단하는 약속이면 해제만, 감지가 꺼진 사람은 ACKNOWLEDGED(DEPARTURE)도 함께 남겨 출발) · ARRIVAL_CONFIRMED(ARRIVE) + `appointment_participants.prepare_started_at` · `departed_at` · `arrived_at` — DB (예전 APK의 원탭 ACKNOWLEDGED도 같은 뜻). 폰이 앱을 안 열고 바로 올리고, 앱은 열릴 때 같은 기록으로 지각 · 준비 실측 · 이동시간을 이어서 셈. 쓰는 곳은 `recordParticipantTimes` 하나이고 지오펜스 자동 수집(#40)도 같은 함수를 `source: LOCATION`으로 부름
   - 위치 자동 우선 (지형님 10/29 흐름 확인 #240 + 7장 A~F 자동 수집 우선): 자동으로 잡은 값은 그대로 확정('확인 중' 상태 없음), 경계가 애매하면 사용자에게 유리한 쪽, 원탭은 자동 값이 없을 때 대신 쓰는 길(원탭 알림 건너뛰기는 PR 6), [아니에요]는 틀렸을 때만 누르는 정정
   - 출처 우선순위: 사용자 응답(원탭 `BUTTON` · 직접 입력 `MANUAL`) > 위치(`LOCATION`). 위치 값이 먼저 있어도 원탭이 덮고(출처도 응답 것으로 바뀜), 응답 값이 있으면 위치는 못 덮음 (응답끼리는 먼저 쓴 값). 위치 출발끼리는 더 늦은 출발로 바꿈 — 귀가 뒤 다시 나가면 그쪽이 출발(7.13.7 "약속 전 마지막 출발"), 앞 출발의 위치 기록 줄은 지우지 않고 '확인할 기록'으로 남겨 자기 전 대화(L4)가 확인. 위치 도착끼리는 먼저 쓴 값. 출발 · 도착이 바뀌면 그 값으로 셈한 `actual_travel_minutes`를 같은 줄에서 비우고 다시 셈. 출발 · 도착이 둘 다 위치(`LOCATION`)로 잰 값이면 도착 − 출발에 반경 보정 4분을 더함(7장 7.13.7 반경 보정, `TRAVEL_CORRECTION_MINUTES`, 실기기 측정으로 조정) — 한쪽이라도 응답이면 안 더함. 지금 값의 출처는 출처 칸 `departed_source` · `arrived_source`로 읽음 — 시각만 있고 출처가 비면 옛 앱 원탭 값이라 `BUTTON`. 위치 값을 쓰면 그 출발 · 도착 알람에 `alarm_events`(`input_source LOCATION`, 번호 고정)를 같이 남겨 기록 화면 "자동 · 지오펜스" 줄이 됨 (알람 행이 없으면 안 남김)
   - 지각(`is_late` · `late_minutes`, D58 · #41): 응답으로 받은 도착은 약속 + 5분 초과면 지각. 위치로 잡은 도착은 바로 판정(보류 없음) — +11분(응답 경계 5분 + 감지 지연 최대 6분) 초과면 지각, 지각 분은 감지 지연 6분을 뺀 값 (D61 감지 지연만큼 넓힘, 지연 빼기는 작성자 판단). 둘 다 NULL은 약속 시각을 못 읽었을 때뿐
@@ -159,7 +159,7 @@
 ### H08 기상 확인
 - 판정(폰 사용 · 버튼) → `alarm_events` WAKE_CONFIRMED + `daily_records.wake_confirmed_at` — DB
 - 확정 시각 = 해제 뒤 누적 화면 사용이 θ를 넘은 시각 (D14) — 판정은 관찰 10분이 끝나야 되고 기록만 그 시각으로 남김. 확인 알림에 직접 응답하면 응답 시각
-- 해제 뒤 H08을 안 열어도 앱이 앞에 올 때 최근 12시간에 끈 기상 알람 중 확정이 없는 것을 같은 판정으로 다시 보고 확정 기록 (`useWakeRecheck`). 네이티브가 해제 + 10분에 스스로 판정하는 길은 확인 필요
+- 해제 뒤 H08을 안 열어도 앱이 앞에 올 때 최근 12시간에 끈 기상 알람 중 확정이 없는 것을 같은 판정으로 다시 보고 확정 기록 (`useWakeRecheck`). 앱을 안 열어도 폰이 해제 + 10분 2초에 정확 알람 → 급한 작업으로 같은 규칙(`WakeJudge.kt`)으로 스스로 판정해 확정이면 `alarm-events-device`로 기록 (정확 알람 권한이 없으면 늦을 수 있음 — 그때는 이 재판정이 같은 번호로 처리, `docs/alarm-core.md`)
 - [먼저 깼어요] (D61 · 친구 7장): 기상 알람 전 60분 안에 울릴 켜진 기상 알람 `alarms`(WAKE · 아직 울림 · 확인 기록 없음) — DB → 누르면 지금 시각으로 WAKE_CONFIRMED(BUTTON) + 하루 기록 — DB. 그룹에는 바로 '일어났어요'. 폰 알람 미리 끄기는 안 함(알람 코어 몫)
 - 확인 알림 원탭 → WAKE_CONFIRMED(알림 응답) — DB, 끝까지 안 깨면 MISSED 기록 + 미확인 푸시 — `wake-check` 배치(아래 표, 기준은 상세설계서 7장 7.9.2). **다시 울림 없음** (D2 = B) — 앱의 가짜 시연 `missWake` · "응답 없이 5분 지나기"는 뺌
 - 기상 확정 뒤 "오늘 첫 일정" 한 줄 (이슈 #230): `getMorningPlan()`(H01 아침 카드와 같은 함수) — "오늘 첫 일정 오전 10:00 전공 수업 · 세종대학교" · "오전 8:40에 나가면 돼요" · "다음 알림 · 준비 오전 8:10 · 출발 오전 8:40"(아직 안 울린 것만). 일정 줄을 누르면 H03. 켜진 기상 알람이 붙은 일정이 없으면 "오늘은 기상 알람이 걸린 일정이 없어요". 못 읽어도 확정 화면은 그대로 (덧붙임 줄)
@@ -184,13 +184,13 @@
 - 알람 조회 줄 아래 안내 '일정 장소도 보여요 · 집 · 출발지는 안 보여요' (친구 13장, 화면 글자만 — 서버는 일정 장소까지만 내려줌)
 
 ### G02 그룹 상세
-- 그룹 · 멤버: `groups` + `group_members` — DB, 기상 공유 동의 `wake_share_opt_in` — DB
+- 그룹 · 멤버: `groups` + `group_members` — DB, 기상 공유 동의 `wake_share_opt_in` · 출발 · 도착 공유 동의 `trip_share_opt_in`(기본 끔, 기상 공유를 켠 사람만 켜지고 기상 공유를 끄면 같이 꺼짐) — DB
 - 연결 일정: `appointments`(`group_id`, 오늘부터, `creator_id`) — DB + 인원수 · 내 참여 `group_appointment_counts` — RPC. 줄을 누르면 참여자(참여 / 알람 없음, 차단 쌍은 이름만) `appointment_joiners` — RPC. [내 알람 만들기] = `alarm-commit`(`appointment_id` + 내 집 · 수단 · 준비 시간) — Edge, [나는 빠지기] = `appointment-edit` LEAVE — Edge. 지난 약속은 '지난 약속이에요'(버튼 숨김) (친구 9장)
-- 멤버 기상 상태: `get_group_wake` — RPC. 그 그룹 일정이 있는 날만 (D57). 6단계를 3단계로 묶음(`SCHEDULED` '오전 8:50 알람' · `RINGING` · `DISMISSED` · `MISSED` '울렸어요' · `CONFIRMED` '일어났어요 오전 8:08', `NO_ALARM` '알람 없음'), 줄이 없는 멤버는 '공유 안 함' (친구 7장). 멤버 메뉴 [이 사람에게 기상 숨기기 / 보이기] `set_wake_hidden` — RPC, 숨긴 목록 `wake_hides` — DB(내 줄만). 누가 일어나면 DB가 그룹 채널에 새로 고침 신호(Realtime 방송, #160) → 앱이 다시 부름 (지형님 10/15 기술 결정 — `capstone/전체작업계획_v1.md` 8절 Q3, 레포 밖)
+- 멤버 기상 상태: `get_group_wake` — RPC. 그 그룹 일정이 있는 날만 (D57). 기상 6단계(`SCHEDULED` '오전 8:50 알람' · `RINGING` · `DISMISSED` · `MISSED` '울렸어요' · `CONFIRMED` '일어났어요 오전 8:08', `NO_ALARM` '알람 없음') + 출발 · 도착 시각 `departed_at` · `arrived_at`(그날 이 그룹 공동 약속, 여럿이면 기록이 가장 최근인 약속, 그 약속 시각 `trip_appointment_at`)과 보임 여부 `trip_visible`(본인 포함 그 멤버가 `group_members.trip_share_opt_in`을 켜고 그날 참여 행이 있음, 아니면 시각은 null) + 준비 칸 `prepare_alarm_at`(같은 약속의 그 사람 켜진 준비 알람 시각, 기상 알람이 없는 오후 · 저녁 약속의 첫 단계) · `prepare_started_at`(준비 알람 해제 시각 = 준비 시작, 11/19) — `trip_visible`이 아니면 둘 다 null. 줄이 없는 멤버는 '공유 안 함' (친구 7장 · D59 11/19 도착까지). 멤버 메뉴 [이 사람에게 기상 숨기기 / 보이기] `set_wake_hidden` — RPC, 숨긴 목록 `wake_hides` — DB(내 줄만). 누가 일어나면 DB가 그룹 채널에 새로 고침 신호(Realtime 방송, #160) → 앱이 다시 부름 (지형님 10/15 기술 결정 — `capstone/전체작업계획_v1.md` 8절 Q3, 레포 밖)
 - 초대: 코드 시트 `my_group_code`(만료됐으면 서버가 새 코드 + 7일) — RPC, [새 코드] `regenerate_invite_code` — RPC, 직접 초대 `invite_to_group` — RPC (친구 5장). 그룹장 없음 — 이름 바꾸기 `groups` update · 나가기 `group_members` JOINED → LEFT · 내보내기 다른 사람 행 delete · 알림 끄기 `group_members.notifications_off` — DB
 
 ### G03 그룹원 기상 상태
-- 기상 상태: `get_group_wake` — RPC (단계 · 알람 시각 · 확인 시각만, 미루기 횟수 · 알람 끈 시각 · 준비 · 출발 · 도착은 본인만 — D59 · 친구 7장). 그 그룹 일정이 있는 날만 (D57). 알람 카드는 알람 조회 권한이 있으면 [알람 보기](G04)로
+- 기상 · 출발 · 도착 상태: `get_group_wake` — RPC (단계 · 알람 시각 · 확인 시각 + 출발 · 도착 시각 `departed_at` · `arrived_at` · `trip_visible` · `trip_appointment_at` — 출발 · 도착 공유를 켠 사람만, 시각만(장소 · 좌표 · 감지 출처 · 지각은 안 내려줌). 미루기 횟수 · 알람 끈 시각은 본인만 — D59 11/19 · 친구 7장. 새 칸 `prepare_alarm_at` · `prepare_started_at`은 `get_group_wake_status`에도 같은 이름으로 끝에 붙음). 준비 시작 · 출발 · 도착이 바뀌거나 공유 설정 · 숨기기 · 나가기 · 약속 시각 변경 · 취소 · 약속에서 빠짐이 있으면 기상 신호와 같은 채널(`group:<id>:wake` · `refresh` · `{date}`)로 새로 고침 신호. 준비 알람 해제 = 준비 시작은 서버가 `alarm_events`(DISMISSED)에서 빈 칸만 채움. 출발은 위치 자동 판단이고 감지가 꺼진 사람만 출발 알람 해제가 대신 — 폰이 해제와 함께 보내는 ACKNOWLEDGED(DEPARTURE)가 출발이 되고, 출발 알람의 DISMISSED는 기록만. 그 그룹 일정이 있는 날만 (D57). 알람 카드는 알람 조회 권한이 있으면 [알람 보기](G04)로
 - 깨우기: `notify`(`{ kind: 'WAKE_PING', targetUserId, groupId }`) — Edge. '울렸어요'일 때만 버튼. 판정 · 횟수(보내는 사람 → 받는 사람 쌍마다 5분 1번 · 하루 3번) · 직전 재확인은 서버가 하고, 응답 `ping.status`로 버튼 아래 한 줄: `OK` '1/3 · 8:15부터 다시' · `WAIT` '8:15부터 다시' · `DAILY_LIMIT` · `OFF`(받기를 껐거나 기상이 안 보임(403) — '지금은 깨울 수 없어요'로 구분 안 함) · `ALREADY_UP`('이미 일어났어요', 상태를 다시 읽음) · `NOT_RINGING`(다시 읽음) · `NO_TOKENS`('지금은 알림이 닿지 않아요', 횟수 안 셈). 상태를 미리 읽는 곳은 없어 보내 본 뒤에 앎 — 보냄 · 기다림 · 한도 · 꺼짐 · 이미 일어남은 버튼을 잠금(다음 가능 시각이 지나면 풀림). 가짜 모드는 막힘
 - 오늘 받은 깨우기: `my_wake_pings` — RPC (`sender_nickname`, `sent_at` 최신 순, 차단한 사람 것 제외) → 홈 · H08 한 줄 '수연님이 7:12에 깨웠어요'(여러 번이면 '· 오늘 n번'). 가짜 모드는 없음
 - 설정 [깨우기 받기]: `profiles.wake_ping_enabled` — DB 직접 update(내 프로필, 기본 켬). 꺼 두면 보낸 쪽에는 `OFF`만 보임
@@ -201,6 +201,7 @@
 - 받는 쪽 제안 카드(홈 · 알람 탭): `my_alarm_proposals` — RPC → '○○님의 제안 / 기상 알람 7:30 → 7:00 [적용] [무시]'. `respond_alarm_proposal(p_proposal_id, p_apply)`: 적용하면 서버가 알람 카드 전체를 옮기고 앱이 `syncNow()`로 폰 예약을 서버 알람에 맞춤, 무시는 보낸 쪽에 알리지 않음, `EXPIRED`는 '이미 지나간 제안이에요'
 
 ### A02 AI 대화 (실데이터는 텍스트 대화 — 서버 함수 voice-session · voice-turn과 같이 배포돼야 동작)
+- 루틴 제안 카드 `RoutinePromptCard` (안건 D114): 알람 조정 제안 카드 아래. 기다리는 제안 `routine_suggestions`(PENDING) — DB(`routine/api` getPendingRoutineSuggestion). [루틴 만들기] → A04 `/routine/new?suggestion=…`, [괜찮아요] → IGNORED + 답한 시각 (기록 있는 아침 3번 뒤 다시, D24 C — 서버가 셈)
 - 실패 · 한도 안내 부품 `ChatNotice`(값 · 콜백) — `ai.tsx`가 실패(`unavailable`) · 한도(`limits.reached`)일 때 마지막 말풍선 아래에 붙임
 - 알람 조정 제안 카드 `SuggestionPromptCard` (안건 D111 5번 — 저녁 대화에서 묻기): 대화 첫 마디 바로 아래. 대기 중 제안 `alarm_suggestions`(PENDING) — DB(`records/api` getPendingSuggestion, 그룹 탭 카드 · S01과 같음). [적용하기] · [괜찮아요]는 `suggestion-apply`(Edge, 실데이터) → 폰 예약. 대화 서버 상태(`voice-session` · `voice-turn` · 카드 종류)와는 따로라 대화에는 안 남음
 - 가짜 데이터: 목업 대본(`mocks/ai.ts`) 그대로. 카드는 찾은 일정 한 장(`cards[0]`, 번호 c1)
@@ -226,10 +227,12 @@
 - 일정 · 알람 저장: 앱이 L1 함수로(`appointments` · `alarms`), 준비물은 카드와 같이. 대화 끝 정리의 할 일 · 준비물(`todos`)은 서버 PR 5 (D32). 일정을 여러 개 찾으면 다 받음 (D36) — 기상과 이어지는 첫 일정(`first_of_day`)만 알람 줄을 자세히, 나머지는 "출발 알림" 한 줄. 카드별 상태는 서버 `server_state.cards`
 
 ### A03 하루 기록 · 일기
+- 루틴 제안 (안건 D114 · D30 B): 일기 줄의 `routine_suggestion` 칸이 비어 있는 오늘 일기에는 루틴 제안 표의 기다리는 제안 카드(A02와 같음). 일기 줄 칸은 옛 흐름(가짜 데이터)만
 - 일기: `daily_journals`(AI 글 · 고친 글 · 코칭 · 격려 · 루틴 제안) 읽기 · 고치기 — DB, 만들기 — Edge(`voice-commit`이 AI 글 `ai_summary`만, 코칭 · 격려 · 루틴 제안은 아직 없음). 날짜별로 엶 (R02 일간에서, D48)
 - 오늘의 사실: `alarm_events` · `appointment_participants`(출발 · 도착 · 지각) · `todos` — DB
 
 ### A04 루틴 편집
+- `/routine/new?suggestion=…` (안건 D114): 루틴 제안 초안 — 이름 · 목표 · 요일 · 단계(기상 기준 분 → 다음 기상 알람 시각, 없으면 7:00 · 밤 루틴은 고정 시각). 저장하면 `routines`(origin AI_SUGGESTED) + 단계 알람 → 그 제안을 ACCEPTED + 만든 루틴
 - 루틴: `routines`(이름 · 목표 · 요일 · 단계 `steps` · 켜짐) — DB
 - 단계 알람: `alarms`(`routine_id` · `step_order`) — DB → 예약 — 폰. 루틴을 끄거나 단계(알람)를 빼면 알람을 지우지 않고 `is_enabled` false (지우면 울림 · 확인 기록 `alarm_events`가 같이 사라짐). 다시 켜면 같은 줄(루틴 · 단계 번호가 하나뿐)을 켬. 폰 맞추기는 저장이 중간에 실패해도 함
 
@@ -299,5 +302,5 @@
 | 2 | H03 강도를 배경음 · 말소리 · 진동 따로 고름 | `intensity`(전체 세기) · `voice_tone`(말소리) · `sound_key`(배경음) · `vibration`(진동, `20261030200000_alarm_vibration.sql` — 직접 고른 값만, NULL = 강도를 따름) | D1 A로 정함 (이슈 #312) |
 | 3 | G04 "변경 기록" | 저장 자리 없음 | 시트를 뺌 (친구 논리설계 10장 · D9 · D20) — 주인에게 푸시만, 보낸 쪽은 카드의 '제안함' · '반영됨' |
 | 4 | — | 카카오 응답은 저장 · 재사용 불가인데 `est_travel_minutes` · `travel_source` CACHED가 있음 | #27에서 계산에 쓴 값만 남기는지 정함 |
-| 5 | G02 · H01 그룹원 상태에 준비 시작 · 출발 · 도착까지 보임 | `get_group_wake_status`는 기상 상태(`wake_status`)와 시각만 돌려줌, MISSED는 목업에 없음 | 기상까지만으로 정함 (D59) — 화면을 실데이터로 바꿀 때 준비 · 출발 · 도착 줄을 뺌 (목업 api는 글자 `WakeState`, 실데이터는 상태 값 + 시각) |
+| 5 | G02 · H01 그룹원 상태에 준비 시작 · 출발 · 도착까지 보임 | `get_group_wake_status`는 기상 상태(`wake_status`)와 시각 + 출발 · 도착 시각(`departed_at` · `arrived_at` · `trip_visible`)을 돌려줌, MISSED는 목업에 없음 | 11/19 D59를 도착까지로 바꿈 — 출발 · 도착 공유(`trip_share_opt_in`)를 켠 사람만 `departed_at` · `arrived_at` 시각이 내려옴. 준비 시작은 준비 알람 해제로 기록되어 `prepare_started_at`으로 같이 내려옴(11/19 추가). 화면은 앱 화면 PR에서 (목업 api는 글자 `WakeState`, 실데이터는 상태 값 + 시각) |
 | 6 | 일정 없는 알람 (D46) · H03 직접 고름 (D42) · 고친 값 기록 (D42 · D43) · 울림 기록 중복 | `alarms_one_source`가 둘 다 NULL을 막음, `alarms.recurrence_rule` · `time_source` · `intensity_source` · `user_edit_logs` · `alarm_events.client_event_id` · `input_source` 없음 | PR #160에서 더함 (제약 풀기 · 칸 · 표 + RLS · `client_event_id` 유니크) |

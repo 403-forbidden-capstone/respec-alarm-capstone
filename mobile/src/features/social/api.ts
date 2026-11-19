@@ -8,11 +8,11 @@ import { now } from '@/lib/clock';
 import { UserError } from '@/lib/errors';
 import { dateParts } from '@/lib/format';
 import { isMock } from '@/lib/mode';
-import { mockWakeRow } from '@/mocks/calc';
-import { db, kst, memberAlarms, people, timelines, type MockMemberAlarm, type MockPerson } from '@/mocks/data';
+import { isTripScenario, mockWakeRow } from '@/mocks/calc';
+import { db, kst, memberAlarms, people, timelines, TRIP_SHARERS, type MockMemberAlarm, type MockPerson } from '@/mocks/data';
 
 import { mergeGrants } from './grants';
-import { NO_APPOINTMENT_STATE, wakeStateOf, wokeCountOf, type WakeRow } from './map';
+import { NO_APPOINTMENT_STATE, tripCountsOf, wakeStateOf, wokeCountOf, type WakeRow } from './map';
 import { CODE_EXPIRED, CODE_NOT_FOUND, GROUP_FULL, GROUP_NOT_MEMBER, GROUP_TOO_MANY, cleanCode, groupNameProblem } from './groupTexts';
 import * as real from './real';
 import { MESSAGE_GONE } from './relationMessages';
@@ -59,7 +59,7 @@ import {
 
 const toPerson = (p: MockPerson): Person => ({ ...p });
 const person = (id: string): Person => toPerson(people[id] ?? { id, name: '알 수 없음', short: '?', initial: '?', handle: null });
-const copy = (s: PermissionSet): PermissionSet => ({ viewAlarm: s.viewAlarm, editAlarm: s.editAlarm, viewWake: s.viewWake });
+const copy = (s: PermissionSet): PermissionSet => ({ viewAlarm: s.viewAlarm, editAlarm: s.editAlarm, viewWake: s.viewWake, ...(s.viewTrip === undefined ? {} : { viewTrip: s.viewTrip }) });
 const none = (): PermissionSet => ({ viewAlarm: false, editAlarm: false, viewWake: false });
 
 // 내가 이 사람에게 준 최종 권한 — 친구 관계 + 같이 있는 모든 그룹을 항목별로 합침
@@ -88,8 +88,11 @@ function mockWakeRows(groupId: string): WakeRow[] {
   if (!g || !db.appointments.some((a) => a.groupId === groupId)) return [];
   const t = now();
   return g.members.flatMap((p) => {
+    const given = db.grants.group[groupId];
     const consent = p === 'me' || (db.received[p] ?? []).some((r) => r.sourceType === 'GROUP' && r.sourceId === groupId && r.viewWake);
-    const row = consent && !blocked.includes(p) ? mockWakeRow(p, t) : null;
+    // 출발 · 도착 공유 — 기상 공유를 켠 사람만 켤 수 있음. 나는 내가 준 값(F03 스위치, 기본 끔), 다른 사람은 '이동 중' · '도착' 시각 장면에서만(수연은 늘) 켠 것으로 (평소 아침 장면은 '일어났어요'에서 멈춤)
+    const tripOn = p === 'me' ? !!given?.viewWake && !!given.viewTrip : isTripScenario() || TRIP_SHARERS.includes(p);
+    const row = consent && !blocked.includes(p) ? mockWakeRow(p, t, tripOn) : null;
     return row ? [row] : [];
   });
 }
@@ -253,6 +256,7 @@ export async function listGroups(date?: string | null): Promise<GroupItem[]> {
     initial: g.initial,
     memberCount: g.members.length,
     wokeCount: wokeCountOf(mockWakeRows(g.id)),
+    trip: tripCountsOf(mockWakeRows(g.id)),
     grants: copy(db.grants.group[g.id] ?? none()),
   }));
 }
@@ -268,6 +272,7 @@ export async function getGroupSummary(groupId: string, date?: string | null): Pr
     name: g.name,
     members: g.members.map((id) => ({ person: person(id), state: mockStateOf(rows, id) })),
     wokeCount: wokeCountOf(rows),
+    trip: tripCountsOf(rows),
   };
 }
 
@@ -329,6 +334,7 @@ export async function getGroup(groupId: string, date?: string | null): Promise<G
       wakeHidden: wakeHides.has(id),
     })),
     wakeShareOptIn: wakeOptIns[g.id] ?? true,
+    tripShareOptIn: !!db.grants.group[g.id]?.viewTrip && (wakeOptIns[g.id] ?? true),
     notificationsOff: notifOff[g.id] ?? false,
   };
 }
@@ -385,7 +391,7 @@ export async function saveShareSettings(id: RelationId, next: PermissionSet) {
   if (!relationOf(id)) return;
   const [kind, key] = id.split(':');
   if (kind === 'friend') db.grants.friend[key] = copy(next);
-  else db.grants.group[key] = copy(next);
+  else db.grants.group[key] = { ...copy(next), viewTrip: next.viewWake && !!next.viewTrip }; // 출발 · 도착 공유는 기상 공유를 켠 사람만 (끄면 같이 꺼짐)
 }
 
 // 이 관계에서 받은 권한 (F03 받은 권한)
@@ -412,7 +418,7 @@ export async function getMemberWake(groupId: string, personId: string, date?: st
   if (!g?.members.includes(personId) || personId === 'me') return null;
   const rows = mockWakeRows(groupId);
   const base = { person: person(personId), groupName: g.name, canViewAlarm: receivedFrom(personId).viewAlarm };
-  if (!rows.length) return { ...base, state: NO_APPOINTMENT_STATE, alarmAt: null, confirmedAt: null, noGroupAppointment: true };
+  if (!rows.length) return { ...base, state: NO_APPOINTMENT_STATE, alarmAt: null, confirmedAt: null, prepareAlarmAt: null, prepareStartedAt: null, departedAt: null, arrivedAt: null, tripVisible: false, noGroupAppointment: true };
   const row = rows.find((r) => r.user_id === personId);
   if (!row) return null;
   return {
@@ -420,6 +426,11 @@ export async function getMemberWake(groupId: string, personId: string, date?: st
     state: wakeStateOf(row, true),
     alarmAt: row.wake_alarm_at ? new Date(row.wake_alarm_at) : null,
     confirmedAt: row.wake_confirmed_at ? new Date(row.wake_confirmed_at) : null,
+    prepareAlarmAt: row.prepare_alarm_at ? new Date(row.prepare_alarm_at) : null,
+    prepareStartedAt: row.prepare_started_at ? new Date(row.prepare_started_at) : null,
+    departedAt: row.departed_at ? new Date(row.departed_at) : null,
+    arrivedAt: row.arrived_at ? new Date(row.arrived_at) : null,
+    tripVisible: !!row.trip_visible,
     noGroupAppointment: false,
   };
 }
@@ -718,4 +729,5 @@ export async function setWakeShareOptIn(groupId: string, on: boolean) {
   if (!isMock()) return real.setWakeShareOptIn(groupId, on);
   if (!db.groups[groupId]?.members.includes('me')) throw new UserError('참여 중인 그룹이 아니에요');
   wakeOptIns[groupId] = on;
+  if (!on && db.grants.group[groupId]) db.grants.group[groupId] = { ...db.grants.group[groupId], viewTrip: false }; // 기상 공유를 끄면 출발 · 도착 공유도 같이 꺼짐
 }

@@ -321,6 +321,7 @@ export type MorningPlan = {
   travelSource: string; // 예상 이동의 출처 글자 (길찾기 · 대략적인 값 · 직접 입력 …)
   wakeConfirmedAt: Date | null; // 이 기상 알람의 기상 확정 시각 — 없으면 아직 확정 전 (카드는 확정을 기다리지 않음)
   departedAt: Date | null; // 출발 기록 (appointment_participants.departed_at) — 있으면 이미 나선 것
+  arrivedAt: Date | null; // 도착 기록 (appointment_participants.arrived_at) — 홈 '이동 중' · '도착했어요' 줄
 };
 
 // 지금 나가면 (홈 아침 카드 [다시 확인]) — 지금 + 이동 = 도착, 여유 · 상태는 서버와 같은 departNow (7장 7.5.2)

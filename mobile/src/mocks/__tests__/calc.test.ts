@@ -46,18 +46,18 @@ describe('그룹원 기상 상태 — 서버 get_group_wake 줄 흉내 (친구 7
   const morning = kst(22, 475); // 오전 7:55
 
   it('오전 7:55 기준 — 기상까지만(준비 시작은 일어남에 머묾), 아직은 알람 시각', () => {
-    expect(memberState('sy', morning).text).toBe('일어났어요 오전 7:35');
-    expect(memberState('jh', morning)).toEqual({ stage: 'WOKE', text: '일어났어요 오전 7:30', dot: 'ok', woke: true });
-    expect(memberState('js', morning)).toEqual({ stage: 'SCHEDULED', text: '오전 8:50 알람', dot: 'zz', woke: false });
-    expect(memberState('me', morning).text).toBe('오전 8:00 알람');
+    expect(memberState('sy', morning).text).toBe('기상 완료 · 오전 7:35');
+    expect(memberState('jh', morning)).toEqual({ stage: 'WOKE', text: '기상 완료 · 오전 7:30', dot: 'ok', woke: true });
+    expect(memberState('js', morning)).toMatchObject({ stage: 'NO_ALARM', text: '알람 없음' }); // 기상 알람을 직접 끈 사람 — 출발 · 도착 공유 전엔 준비 알람 시각도 안 보임
+    expect(memberState('me', morning).text).toBe('취침 중 · 오전 8:00 알람');
   });
 
   it('줄 모양: 미루기 횟수 · 해제 시각 칸 없음, 시나리오가 없는 사람은 null(공유 안 함)', () => {
-    expect(Object.keys(mockWakeRow('sy', morning) ?? {}).sort()).toEqual(['is_me', 'user_id', 'wake_alarm_at', 'wake_confirmed_at', 'wake_status']);
+    expect(Object.keys(mockWakeRow('sy', morning) ?? {}).sort()).toEqual(['arrived_at', 'departed_at', 'is_me', 'prepare_alarm_at', 'prepare_started_at', 'trip_appointment_at', 'trip_visible', 'user_id', 'wake_alarm_at', 'wake_confirmed_at', 'wake_status']);
     expect(mockWakeRow('mom', morning)).toBeNull();
   });
 
   it('전날 밤에는 그날 알람 시각', () => {
-    expect(memberState('sy', kst(21, 1260)).text).toBe('오전 7:30 알람');
+    expect(memberState('sy', kst(21, 1260)).text).toBe('취침 중 · 오전 7:30 알람');
   });
 });

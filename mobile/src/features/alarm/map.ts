@@ -220,6 +220,7 @@ export type DayRow = {
   est_travel_minutes: number | null;
   travel_source: ParticipantRow['travel_source'];
   departed_at: string | null;
+  arrived_at: string | null;
   appointments: Pick<AppointmentRow, 'appointment_id' | 'title' | 'appointment_at' | 'dest_name'>;
   alarms: readonly Pick<AlarmRow, 'alarm_id' | 'alarm_type' | 'scheduled_at' | 'is_enabled'>[];
 };
@@ -239,6 +240,7 @@ export function toMorningSource(row: DayRow): MorningSource {
       return time ? [time] : [];
     }),
     departedAt: row.departed_at ? parseDbTime(row.departed_at) : null,
+    arrivedAt: row.arrived_at ? parseDbTime(row.arrived_at) : null,
   };
 }
 

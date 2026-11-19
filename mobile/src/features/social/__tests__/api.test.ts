@@ -9,8 +9,10 @@ describe('G03 그룹원 기상 상태', () => {
   it('같은 그룹에서 기상을 준 사람이면 그룹 이름 · 단계 · 알람 시각 (오전 7:55 시나리오)', async () => {
     const wake = await getMemberWake('cap', 'sy');
     expect(wake?.groupName).toBe('캡스톤팀');
-    expect(wake?.state.text).toBe('일어났어요 오전 7:35'); // 7:35 기상 확인 — 준비 시작은 안 보임 (D59)
+    expect(wake?.state.text).toBe('준비 중 · 오전 7:38 시작'); // 수연은 출발 · 도착 공유를 켠 사람 — 7:38 준비 시작 체크
+    expect(wake?.prepareStartedAt).not.toBeNull();
     expect(wake?.alarmAt).not.toBeNull();
+    expect((await getMemberWake('cap', 'jh'))?.state.text).toBe('기상 완료 · 오전 7:30'); // 지형은 출발 · 도착 공유 꺼짐 — 기상 완료에서 멈춤
   });
 
   it('그 그룹 구성원이 아니면 null', async () => {

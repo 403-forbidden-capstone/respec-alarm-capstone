@@ -24,7 +24,7 @@ import { getReceived, getShareSettings, listRelations, saveShareSettings } from 
 import { GroupIcon } from '@/features/social/components/GroupIcon';
 import { PersonRow } from '@/features/social/components/PersonRow';
 import { permissionNames, togglePermission } from '@/features/social/permissions';
-import { PERMISSIONS, permissionsFor, VIEW_ALARM_NOTE, type PermissionSet, type Relation, type RelationId } from '@/features/social/types';
+import { permissionsFor, TRIP_NEEDS_WAKE, VIEW_ALARM_NOTE, type PermissionSet, type Relation, type RelationId } from '@/features/social/types';
 import { useLoad } from '@/lib/useLoad';
 import { colors } from '@/theme';
 import { useAction } from '@/lib/useAction';
@@ -110,7 +110,7 @@ function Editor({
   const [draft, setDraft] = useState<PermissionSet | null>(null);
   const current = draft ?? saved;
   // 바꾼 게 없으면(켰다가 다시 꺼도) 저장 버튼을 끄고 나갈 때 묻지 않음
-  const changed = saved != null && draft != null && PERMISSIONS.some(({ key }) => draft[key] !== saved[key]);
+  const changed = saved != null && draft != null && permissionsFor(relation.kind).some(({ key }) => !!draft[key] !== !!saved[key]);
   useLeaveGuard(changed);
 
   // 다시 읽기가 끝난 뒤 초안을 버려야 스위치가 예전 값으로 깜빡이지 않음
@@ -180,13 +180,23 @@ function Editor({
                         {VIEW_ALARM_NOTE}
                       </Text>
                     ) : null}
+                    {key === 'viewTrip' && !current.viewWake ? (
+                      <Text variant="caption" tone="faint" style={styles.description}>
+                        {TRIP_NEEDS_WAKE}
+                      </Text>
+                    ) : null}
                     {key === 'editAlarm' ? (
                       <Text variant="caption" tone="faint" style={styles.description}>
                         알람 설정을 켜면 알람 조회도 같이 켜져요. 알람 조회를 끄면 알람 설정도 꺼져요.
                       </Text>
                     ) : null}
                   </View>
-                  <Toggle value={current[key]} onChange={(next) => setDraft(togglePermission(current, key, next))} label={name} disabled={busy} />
+                  <Toggle
+                    value={!!current[key]}
+                    onChange={(next) => setDraft(togglePermission(current, key, next))}
+                    label={name}
+                    disabled={busy || (key === 'viewTrip' && !current.viewWake)} // 출발 · 도착 공유는 기상 공유를 켠 사람만
+                  />
                 </View>
               ))}
             </Card>

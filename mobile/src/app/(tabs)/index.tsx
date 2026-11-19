@@ -22,12 +22,14 @@ import { ProposalCards } from '@/features/social/components/ProposalCards';
 import { ReceivedWakePingLine } from '@/features/social/components/ReceivedWakePingLine';
 import { AppointmentAlarmCard } from '@/features/alarm/components/AppointmentAlarmCard';
 import { MorningCard } from '@/features/alarm/components/MorningCard';
+import { TripCard } from '@/features/alarm/components/TripCard';
 import { ScheduleList } from '@/features/alarm/components/ScheduleList';
 import { TextLink } from '@/features/alarm/components/TextLink';
 import { useAppointmentToggle } from '@/features/alarm/hooks/useAppointmentToggle';
 import { useDepartCheck } from '@/features/alarm/hooks/useDepartCheck';
 import { useNow } from '@/features/alarm/hooks/useNow';
-import { morningCardVisible } from '@/features/alarm/morning';
+import { useWakeCardRefresh } from '@/features/alarm/hooks/useWakeCardRefresh';
+import { morningCardVisible, tripCardOf } from '@/features/alarm/morning';
 import { isEvening } from '@/features/alarm/schedule';
 import { KIND_LABEL } from '@/features/alarm/types';
 import { DetectionRows } from '@/features/location/DetectionRows';
@@ -38,7 +40,7 @@ import { RoutineCard } from '@/features/routine/components/RoutineCard';
 import { TodoList } from '@/features/routine/components/TodoList';
 import { now } from '@/lib/clock';
 import { addDays, dayKey, formatDate, formatMinuteOfDay, formatRelative, formatTime, minuteOfDay, startOfDay } from '@/lib/format';
-import { canUseRealData } from '@/lib/mode';
+import { canUseRealData, isMock } from '@/lib/mode';
 import { useAction } from '@/lib/useAction';
 import { useLoad } from '@/lib/useLoad';
 
@@ -91,6 +93,9 @@ export default function HomeScreen() {
   useEffect(() => {
     if (stale) void reload();
   }, [stale, reload]);
+
+  // 기상 확인 중 카드가 있는 동안 15초마다 다시 읽음 — 판정은 읽을 때 확정되므로 안 읽으면 상세 화면에 들어가야 카드가 사라짐
+  useWakeCardRefresh(data?.wake != null && !isMock(), reload); // 가짜 데이터는 시연 버튼으로 넘기므로 안 읽음 (H08과 같은 방침)
 
   if (!data) return (
     <Screen>
@@ -168,6 +173,11 @@ export default function HomeScreen() {
           onPress={() => router.push({ pathname: '/alarm/[id]', params: { id: morning.appointmentId } })}
         />
       ) : null}
+      {/* 출발한 뒤 — 아침 카드 자리에 '이동 중 · 도착 예정', 도착하면 '도착했어요' (약속 + 60분까지) */}
+      {(() => {
+        const trip = tripCardOf(morning, current);
+        return trip && morning ? <TripCard view={trip} onPress={() => router.push({ pathname: '/alarm/[id]', params: { id: morning.appointmentId } })} /> : null;
+      })()}
       {/* 위치로 잡은 출발 · 도착 — 출발하면 아침 카드가 빠지고 이 줄이 그 자리를 이음 */}
       <DetectionRows reloadOn={data} onChanged={reload} />
 
@@ -178,7 +188,7 @@ export default function HomeScreen() {
             <View style={styles.bannerText}>
               <Text variant="bodyStrong">기상 확인 중</Text>
               <Text variant="small" tone="sub">
-                {wake.appointmentTitle} · 알람을 끈 뒤 폰 사용을 보고 있어요
+                {wake.appointmentTitle} · {wake.phase === 'prompt' ? '조건을 채우지 못해 확인 알림을 보냈어요' : '알람을 끈 뒤 폰 사용을 보고 있어요'}
               </Text>
             </View>
             <Text variant="rowLabel" weight={700}>

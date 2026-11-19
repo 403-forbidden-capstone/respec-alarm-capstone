@@ -10,11 +10,12 @@ jest.mock('react', () => ({ ...jest.requireActual<typeof import('react')>('react
 
 const mockSync = jest.fn<(options?: { ignoreThrottle?: boolean }) => Promise<void>>();
 const mockClear = jest.fn<() => Promise<void>>();
-jest.mock('../register', () => ({ syncLocation: (options?: { ignoreThrottle?: boolean }) => mockSync(options), clearOnSignOut: () => mockClear() }));
+jest.mock('../register', () => ({ syncLocation: (options?: { ignoreThrottle?: boolean }) => mockSync(options), clearOnSignOut: () => mockClear(), locationTrackedParticipantIds: async () => new Set<string>() }));
 
 let mockAlarmsSynced: (() => Promise<void>) | null = null;
 const mockUnsubscribeAlarms = jest.fn();
 jest.mock('@/lib/alarmSync', () => ({
+  setDepartByLocationProvider: () => {},
   onAlarmsSynced: (handler: () => Promise<void>) => {
     mockAlarmsSynced = handler;
     return mockUnsubscribeAlarms;

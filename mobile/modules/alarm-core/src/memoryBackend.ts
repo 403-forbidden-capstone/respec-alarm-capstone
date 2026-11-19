@@ -53,13 +53,15 @@ export function createMemoryBackend(now: () => number = Date.now): AlarmBackend 
     },
     async list() {
       return [...entries.values()]
-        .map(({ pkg }): ScheduledAlarm => ({
+        .map(({ pkg, plan }): ScheduledAlarm => ({
           id: pkg.alarmId,
           type: pkg.type,
           intensity: pkg.intensity,
           soundKey: soundKeyOf(pkg),
           vibration: vibrationOf(pkg),
           ...(pkg.voiceTone ? { voiceTone: pkg.voiceTone } : {}),
+          sound: plan.sound,
+          ...(plan.departByLocation !== undefined ? { departByLocation: plan.departByLocation } : {}),
           title: pkg.title,
           atMillis: pkg.atMillis,
           snoozeCount: 0,
@@ -125,6 +127,7 @@ export function createMemoryBackend(now: () => number = Date.now): AlarmBackend 
       const done = new Set(clientEventIds);
       events = events.filter((event) => !done.has(event.clientEventId));
     },
+    async dismissWakePrompt() {},
     async saveVoiceBriefing(alarmId, value) {
       const old = voices.get(alarmId)?.files ?? new Map<number, string>();
       const files = new Map<number, string>();

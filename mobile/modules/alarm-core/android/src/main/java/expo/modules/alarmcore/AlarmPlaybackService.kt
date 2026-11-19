@@ -24,8 +24,10 @@ import android.os.Vibrator
 import android.os.VibratorManager
 import android.util.Log
 import androidx.core.app.NotificationCompat
+import java.io.File
 
-// WAKE 알람 포그라운드 서비스: 배경음·진동·반복 AI 음성을 사용자가 해제·미루기 할 때까지 함께 유지. DEPARTURE는 기존 1회 알림+1회 브리핑 사용
+// 알람 포그라운드 서비스: 배경음·진동을 사용자가 해제·미루기 할 때까지 유지. 기상은 반복 AI 음성, 준비 · 출발(11/19부터 같은 알람)은 고정 한 문장 TTS를 울림마다 한 번
+// 기상은 울림마다(첫 울림 · 미루기 뒤 다시 울림) 그룹 상태 안내를 한 번 받아(GroupStatusVoice) 개인화 음성의 다음 문장 · 파일 경계에 끼워 읽음
 // 볼륨 · 한 번 울리는 최대 시간 · 소리는 알람 저장소의 울림 계획(RingPlan)대로. 다시 울림은 AlarmController가 미리 걸어 둠
 class AlarmPlaybackService : Service() {
   companion object {
@@ -111,7 +113,8 @@ class AlarmPlaybackService : Service() {
       val alarm = AlarmStorage.get(applicationContext, id) ?: return
       if (alarm.type != "WAKE" || !alarm.ringing) return
       val next = VoiceBriefing.speechFor(applicationContext, alarm, System.currentTimeMillis())
-      if (next != null && SpeechUrgency.shouldSwitch(next.level, peakVoiceLevel)) {
+      // 그룹 안내를 읽는 중에는 바꾸지 않음 (두 음성이 겹치지 않게 — 끝나면 다음 확인에서 바꿈)
+      if (groupSpeaker == null && next != null && SpeechUrgency.shouldSwitch(next.level, peakVoiceLevel)) {
         stopVoice()
         runCatching { startVoice(alarm, next) }.onFailure { Log.w(TAG, "알람 음성 단계 변경 실패 — 배경음/진동 유지", it) }
       }
@@ -140,7 +143,14 @@ class AlarmPlaybackService : Service() {
   private var mediaPlayer: MediaPlayer? = null
   // 음성 브리핑 (BriefingSpeaker: 1 · 2단계 Android TTS, 3 · 4단계는 미리 만든 Gemini 음성 → 예비 WAV → Android TTS) — 해제 전까지 반복. 알람음은 계속 20%로 재생
   private var speaker: BriefingSpeaker? = null
+  // 지금 speaker가 읽는 것 — 그룹 안내도 같은 단계 · 목소리 · 높낮이 · 속도로 읽으려고
+  private var currentSpeech: VoiceBriefing.Speech? = null
   private var speaking = false
+  // 그룹 상태 안내 (기상만). groupRing = 지금 울림 회차("알람 id#울림 번호")의 기록 — 조회 1번 · 단계마다 음성 생성 1번 · 안내 1번 (GroupStatusRing)
+  // groupGeneration은 울림이 바뀌거나 멈추면 올려서, 늦게 온 앞 울림의 조회 · 음성 응답을 버림
+  private var groupRing: GroupStatusRing? = null
+  private var groupGeneration = 0
+  private var groupSpeaker: BriefingSpeaker? = null
   // 알람음 크기 비율 — 늘 1. 개발 화면의 "진동만 · AI 음성만" 시험 알람만 0 (재생 경로 · 포커스 · 진동 · 음성은 그대로, VoiceTest)
   private var soundLevel = 1f
   private var vibrator: Vibrator? = null
@@ -186,7 +196,8 @@ class AlarmPlaybackService : Service() {
     }
 
     val ringMillis = ringMillisOf(alarm)
-    val continuous = alarm.type == "WAKE"
+    // 기상 · 준비 · 출발은 해제 · 미루기 전까지 유지 (같은 규칙). 도착 · 루틴은 알람음이 없어 이 서비스를 안 탐
+    val continuous = isRingAlarmType(alarm.type)
     // 사용자가 해제·미루기 할 때까지 유지. 종료 시 onDestroy에서 wakeLock을 반드시 해제.
     holdWakeLock(if (continuous) 0L else ringMillis + WAKE_LOCK_EXTRA_MILLIS)
     if (mediaPlayer == null) {
@@ -197,10 +208,16 @@ class AlarmPlaybackService : Service() {
       }
     } else {
       // 이미 울리고 있다면 단계별 높인 볼륨을 유지하면서 같은 알람의 재울림 처리
-      if (alarm.type == "WAKE") updateStageEffects(alarm, currentVoiceLevel ?: 1)
-      else runCatching { setAlarmVolume(alarm.plan.volumePercent) }
+      if (alarm.type == "WAKE") {
+        updateStageEffects(alarm, currentVoiceLevel ?: 1)
+        startGroupStatus(alarm)
+      } else {
+        runCatching { setAlarmVolume(alarm.plan.volumePercent) }
+        // 준비 · 출발 다시 울림 — 앞 울림의 한 문장이 끝났으면 다시 한 번 (읽는 중이면 겹치지 않게 그대로)
+        if (speaker == null) runCatching { startVoice(alarm) }.onFailure { Log.w(TAG, "다시 울림 음성 안내 실패 — 알람음만", it) }
+      }
     }
-    // 기상·출발 알람은 자동 종료하지 않음. 다른 유형만 기존 최대 울림 시간을 적용.
+    // 기상 · 준비 · 출발 알람은 자동 종료하지 않음 (continuous). 그 밖의 유형이 이 서비스를 타면 최대 울림 시간을 적용.
     handler.removeCallbacks(autoStop)
     if (!continuous) handler.postDelayed(autoStop, ringMillis)
     handler.removeCallbacks(checkWakeStage)
@@ -228,10 +245,10 @@ class AlarmPlaybackService : Service() {
     val manager = getSystemService(NotificationManager::class.java)
     val channel = NotificationChannel(
       CHANNEL_ID,
-      "기상 알람",
+      "알람 (기상 · 준비 · 출발)",
       NotificationManager.IMPORTANCE_HIGH,
     ).apply {
-      description = "기상 알람 표시와 진동"
+      description = "울리는 알람 표시와 진동"
       setSound(null, null)
       enableVibration(true)
       vibrationPattern = NOTIFICATION_VIBRATION
@@ -241,10 +258,10 @@ class AlarmPlaybackService : Service() {
     // L6 안건후보: 진동 없음(NONE) 알림 채널 기본안 = 진동이 꺼진 채널을 하나 더 둠(설정 앱에 "기상 알람(진동 없음)"으로 보임). 알림 뜰 때 진동 한 번도 없애려는 것
     val quietChannel = NotificationChannel(
       CHANNEL_ID_NO_VIBRATION,
-      "기상 알람 (진동 없음)",
+      "알람 (진동 없음)",
       NotificationManager.IMPORTANCE_HIGH,
     ).apply {
-      description = "진동 없이 표시만 하는 기상 알람"
+      description = "진동 없이 표시만 하는 알람"
       setSound(null, null)
       enableVibration(false)
       lockscreenVisibility = Notification.VISIBILITY_PUBLIC
@@ -358,12 +375,15 @@ class AlarmPlaybackService : Service() {
     AlarmVibration.patternFor(alarm.vibration)?.let { pattern -> runCatching { startVibration(pattern) } }
     // 미리 받아 둔 AI 음성 브리핑을 알람음과 한 흐름으로 — 없거나 못 틀면 알람음 · 진동만 (알람은 멈추지 않음)
     runCatching { startVoice(alarm) }.onFailure { Log.w(TAG, "AI 음성을 못 틀어 알람음만", it) }
+    // 개인화 음성과 같이 시작 — 조회는 다른 스레드라 알람음 · 음성이 기다리지 않음
+    runCatching { startGroupStatus(alarm) }.onFailure { Log.w(TAG, "그룹 상태 안내 시작 실패 — 개인화 음성만", it) }
     return true
   }
 
   // 한 번 고른 문장만 반복하지 않고, 체크 루프가 새 시각의 stage를 찾아 음성을 교체함.
   private fun startVoice(alarm: StoredAlarm, prepared: VoiceBriefing.Speech? = VoiceBriefing.speechFor(this, alarm, System.currentTimeMillis())) {
     val speech = prepared ?: return
+    currentSpeech = speech
     currentVoiceLevel = speech.level
     peakVoiceLevel = maxOf(peakVoiceLevel ?: 0, speech.level)
     voiceLevel = speech.level
@@ -372,19 +392,123 @@ class AlarmPlaybackService : Service() {
     val generation = ++voiceGeneration
     speaker = BriefingSpeaker(
       this,
-      onStart = {
-        if (generation == voiceGeneration) {
-          speaking = true
-          mediaPlayer?.let { runCatching { it.setVolume(VOICE_DUCK * soundLevel, VOICE_DUCK * soundLevel) } }
-        }
-      },
+      onStart = { if (generation == voiceGeneration) duck(true) },
       onDone = {
         if (generation == voiceGeneration) {
           // 한국어 오프라인 TTS가 없거나 음성 파일이 깨짐 — 같은 단계는 다시 시작 안 함(peakVoiceLevel), 더 높은 단계가 되면 다시 시도
           stopVoice()
+          // 기다리던 그룹 안내가 있으면 개인화 음성 없이 바로
+          queueGroupStatus()
         }
       },
     ).also { it.speak(speech, repeat = BriefingRules.repeatsBriefing(alarm.type)) }
+    // 단계가 바뀌어 새로 시작했으면 아직 못 읽은 그룹 안내를 새 음성의 경계에 다시 걸어 둠
+    queueGroupStatus()
+  }
+
+  // 말하는 동안 알람음을 줄임 (끝나면 되돌림)
+  private fun duck(on: Boolean) {
+    speaking = on
+    val level = (if (on) VOICE_DUCK else 1f) * soundLevel
+    mediaPlayer?.let { runCatching { it.setVolume(level, level) } }
+  }
+
+  // 울림 회차마다 한 번 그룹 상태를 새로 받음 (미루기 뒤 다시 울림 = 새 울림 번호 → 앞 기록을 버리고 새로). 기상 알람 · 음성이 있는 울림만
+  //   같은 회차에서 다시 불려도(서비스 중복 콜백 · 재울림 처리) 조회하지 않음. 실패 · 시간 초과면 이 회차는 안내 없이 (다시 시도 없음)
+  private fun startGroupStatus(alarm: StoredAlarm) {
+    if (alarm.type != "WAKE" || VoiceTest.isVoiceTestAlarm(alarm.alarmId)) return
+    val key = "${alarm.alarmId}#$ringToken"
+    if (groupRing?.key == key) return
+    resetGroupStatus()
+    val level = currentVoiceLevel ?: return
+    val ring = GroupStatusRing(key).also { groupRing = it }
+    if (!ring.startQuery(level)) return
+    val generation = groupGeneration
+    val context = applicationContext
+    Thread {
+      val result = runCatching { GroupStatusVoice.fetch(context, level) }
+        .onFailure { Log.w(TAG, "그룹 상태를 못 받음 — 이번 울림은 개인화 음성만", it) }
+        .getOrNull()
+      val path = result?.wav?.let { GroupStatusVoice.writeWav(context, generation, level, it)?.path }
+      handler.post {
+        if (generation != groupGeneration || groupRing !== ring) return@post
+        ring.onQuery(result?.text, result?.token, level, path)
+        queueGroupStatus()
+      }
+    }.start()
+  }
+
+  // 받은 문장의 이 단계 음성만 서버에 한 번 (단계가 바뀌었을 때 — DB는 다시 안 읽음). 실패해도 결과를 남겨 같은 단계는 다시 안 부르고 Android TTS로
+  private fun requestGroupAudio(ring: GroupStatusRing, level: Int) {
+    val text = ring.text ?: return
+    val token = ring.token
+    val generation = groupGeneration
+    val context = applicationContext
+    Thread {
+      val result = runCatching { GroupStatusVoice.fetch(context, level, text, token) }
+        .onFailure { Log.w(TAG, "그룹 안내 ${level}단계 음성을 못 받음 — Android TTS로", it) }
+        .getOrNull()
+      val path = result?.wav?.let { GroupStatusVoice.writeWav(context, generation, level, it)?.path }
+      handler.post {
+        if (generation != groupGeneration || groupRing !== ring) return@post
+        ring.onAudio(level, path)
+        queueGroupStatus()
+      }
+    }.start()
+  }
+
+  // 지금 울림에 실제로 쓰는 단계의 음성 설정 (개인화 음성이 실패했으면 지금 시각의 단계)
+  private fun groupBase(): VoiceBriefing.Speech? =
+    currentSpeech ?: ringingAlarmId?.let { AlarmStorage.get(this, it) }?.let { VoiceBriefing.speechFor(this, it, System.currentTimeMillis()) }
+
+  // 읽을 준비가 되면 개인화 음성의 다음 경계(문장 끝 · 파일 끝 · 쉬는 중이면 바로)에 — 개인화 음성이 없으면 바로
+  //   개인화 음성 반복 · 단계 변경 · 재생 상태 변경마다 불려도 서버 호출은 GroupStatusRing이 막음 (단계마다 1번)
+  private fun queueGroupStatus() {
+    val ring = groupRing ?: return
+    if (groupSpeaker != null) return
+    val level = groupBase()?.level ?: return
+    if (ring.startAudio(level)) requestGroupAudio(ring, level)
+    if (!ring.ready(level)) return
+    val main = speaker
+    if (main == null) playGroupStatus() else main.holdAtNextBoundary { playGroupStatus() }
+  }
+
+  private fun playGroupStatus() {
+    val ring = groupRing
+    val base = groupBase()
+    val text = ring?.text
+    // 그사이 단계가 바뀌어 그 단계 음성을 기다려야 하면 개인화 음성을 이어 가고, 결과가 오면 다시 걸어 둠
+    if (ring == null || base == null || text == null || !ring.ready(base.level)) {
+      speaker?.resume()
+      return
+    }
+    ring.markPlayed() // 같은 울림에서 한 번만
+    // 그 단계 음성만 — 다른 단계 음성은 틀지 않고 지금 단계의 Android TTS 설정으로
+    val wav = ring.audioFor(base.level)?.let { File(it) }?.takeIf { it.exists() }
+    val speech = base.copy(text = text, wav = wav, bundled = null)
+    val generation = groupGeneration
+    groupSpeaker = BriefingSpeaker(
+      this,
+      onStart = { if (generation == groupGeneration) duck(true) },
+      onDone = {
+        if (generation == groupGeneration) {
+          groupSpeaker = null
+          // 안내가 끝나면 개인화 음성을 이어서 (없으면 알람음을 되돌림)
+          speaker?.resume() ?: duck(false)
+        }
+      },
+    ).also { it.speak(speech) }
+  }
+
+  // 울림이 바뀌거나 멈출 때 — 진행 중인 조회 결과 · 기다리던 안내를 버리고, 읽던 안내는 멈춘 뒤 개인화 음성을 이어 감
+  private fun resetGroupStatus() {
+    groupGeneration += 1
+    groupRing = null
+    groupSpeaker?.let {
+      it.stop()
+      groupSpeaker = null
+      speaker?.resume()
+    }
   }
 
   // 배경음은 선택한 볼륨에서 단계에 따라 상승(최대 100%). 진동 없음은 존중,
@@ -406,9 +530,10 @@ class AlarmPlaybackService : Service() {
     voiceGeneration += 1
     speaker?.stop()
     speaker = null
+    currentSpeech = null
     currentVoiceLevel = null
-    speaking = false
-    mediaPlayer?.let { runCatching { it.setVolume(soundLevel, soundLevel) } }
+    // 그룹 안내를 읽는 중이면 알람음은 줄인 채로 (안내가 끝나면 되돌림)
+    if (groupSpeaker == null) duck(false)
   }
 
   // 알람음 후보 (앞에서부터 시도). 기본 키(default) · 보통(theme_default) · 모르는 키는 폰 기본 알람음이 먼저, 우리 앱 파일이 그 다음 — 안드로이드 기본 알람처럼
@@ -584,6 +709,8 @@ class AlarmPlaybackService : Service() {
     peakVoiceLevel = null
     remainingSounds.clear()
     stopVoice()
+    resetGroupStatus()
+    duck(false)
     releasePlayer()
     stopVibration()
 

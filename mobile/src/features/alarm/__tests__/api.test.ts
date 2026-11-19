@@ -618,7 +618,7 @@ describe('H08 먼저 깼어요 (가짜 모드)', () => {
     const early = await getEarlyWake();
     expect([early?.alarmId, early && formatTime(early.at)]).toEqual([WAKE, '오전 8:00']);
     await confirmEarlyWake(WAKE);
-    expect(me()).toBe('일어났어요 오전 7:55');
+    expect(me()).toBe('기상 완료 · 오전 7:55');
     expect(labels()).toEqual(['오전 7:55 기상 확인']);
     expect(await getEarlyWake()).toBeNull();
     await confirmEarlyWake(WAKE); // 두 번 눌러도 한 번만
@@ -636,20 +636,20 @@ describe('H07 · H08 기상 알람 → 해제 → 확인 알림 → 직접 응�
     const first = await getRing(WAKE);
     expect(formatTime(first!.at)).toBe('오전 8:00');
     await startRing(WAKE, first!.at);
-    expect(me()).toBe('울렸어요');
+    expect(me()).toBe('알람 울리는 중');
 
     await dismissRing(WAKE, first!.at);
-    expect(me()).toBe('울렸어요');
+    expect(me()).toBe('알람 울림 · 기상 확인 전');
     let check = await getWakeCheck(WAKE);
     expect([check!.phase, formatTime(check!.dismissedAt)]).toEqual(['observing', '오전 8:00']);
 
     await promptWake(WAKE, kst(22, 490));
-    expect(me()).toBe('울렸어요');
+    expect(me()).toBe('알람 울림 · 기상 확인 전');
     check = await getWakeCheck();
     expect([check!.phase, formatTime(check!.dismissedAt)]).toEqual(['prompt', '오전 8:00']);
 
     await confirmWake(WAKE, 'self', kst(22, 492));
-    expect(me()).toBe('일어났어요 오전 8:12');
+    expect(me()).toBe('기상 완료 · 오전 8:12');
     expect(db.wake.phase).toBe('confirmed');
     expect(labels()).toEqual(['오전 8:00 기상 알람 해제', '오전 8:10 확인 알림 발송', '오전 8:12 기상 확인']);
   });
@@ -659,7 +659,7 @@ describe('H07 · H08 기상 알람 → 해제 → 확인 알림 → 직접 응�
     await dismissRing(WAKE, kst(22, 480));
     await promptWake(WAKE, kst(22, 490));
     expect(db.wake.phase).toBe('prompt');
-    expect(me()).toBe('울렸어요');
+    expect(me()).toBe('알람 울림 · 기상 확인 전');
     expect((await getWakeCheck())!.phase).toBe('prompt');
     expect(labels()).toEqual(['오전 8:00 기상 알람 해제', '오전 8:10 확인 알림 발송']); // 재알람 기록 없음
   });
@@ -667,7 +667,7 @@ describe('H07 · H08 기상 알람 → 해제 → 확인 알림 → 직접 응�
   it('미루면 울리는 중 표시를 지우고 미루기를 기록 (목업 A.snooze)', async () => {
     await startRing(WAKE, kst(22, 480));
     await snoozeRing(WAKE, 10, kst(22, 480));
-    expect(me()).toBe('오전 8:00 알람');
+    expect(me()).toBe('취침 중 · 오전 8:00 알람');
     expect(labels()).toEqual(['오전 8:00 기상 알람 10분 미루기']);
   });
 
@@ -709,7 +709,7 @@ describe('H07 · H08 기상 알람 → 해제 → 확인 알림 → 직접 응�
   it('미루기 · 해제 없이 나가면 울리는 중 표시만 지우고 기록은 없음', async () => {
     await startRing(WAKE, kst(22, 480));
     await stopRing(WAKE);
-    expect(me()).toBe('오전 8:00 알람');
+    expect(me()).toBe('취침 중 · 오전 8:00 알람');
     expect(db.wake.phase).toBe('idle');
     expect(db.events).toHaveLength(0);
   });
@@ -737,7 +737,7 @@ describe('H07 · H08 기상 알람 → 해제 → 확인 알림 → 직접 응�
     await dismissRing(WAKE, kst(22, 495));
     await snoozeRing(WAKE, 5, kst(22, 495)); // 확정 뒤에 미뤄도 기록이 붙지 않음
     expect(db.wake.phase).toBe('confirmed');
-    expect(me()).toBe('일어났어요 오전 8:01');
+    expect(me()).toBe('기상 완료 · 오전 8:01');
     expect(labels()).toEqual(['오전 8:00 기상 알람 해제', '오전 8:01 기상 확인']);
   });
 
@@ -789,7 +789,7 @@ describe('H08 기상 확인 화면 데이터', () => {
     expect((await getWakeCheck(WAKE))!.confirmed!.at).toEqual(wokeAt);
     expect(db.me.wakeAt).toEqual(wokeAt);
     expect(db.events.find((e) => e.label === '기상 확인')!.at).toEqual(wokeAt);
-    expect(me()).toBe('일어났어요 오전 8:01');
+    expect(me()).toBe('기상 완료 · 오전 8:01');
   });
 
   it('직접 응답은 응답한 시각 그대로', async () => {

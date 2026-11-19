@@ -5,8 +5,8 @@
 ```text
 화면 → alarm-core(JS) → 울림 계획 계산(TS, plan.ts) → 네이티브(Kotlin)는 받은 계획대로만 실행
      → AlarmManager → 시각이 되면 BroadcastReceiver
-        ├ WAKE            → 포그라운드 서비스 → 알람 볼륨 채널로 배경음(soundKey) + 진동(vibration 3종) + 풀스크린 인텐트(→ 앱 H07 /ring, 아래 "울림 화면")
-        └ 그 밖(준비 · 출발 · 도착 · 루틴) → 보통 알림(알림음 · 진동 한 번) + 원탭 버튼
+        ├ WAKE · PREPARE · DEPARTURE → 포그라운드 서비스 → 알람 볼륨 채널로 배경음(soundKey) + 진동(vibration 3종) + 풀스크린 인텐트(→ 앱 H07 /ring, 아래 "울림 화면")
+        └ 그 밖(도착 확인 · 루틴) → 보통 알림(알림음 · 진동 한 번) + 원탭 버튼
 ```
 
 ```text
@@ -25,7 +25,7 @@ mobile/modules/alarm-core/
 | `schedule(pkg)` | 꾸러미 하나를 폰에 걸음. 같은 `alarmId`면 덮어씀. `'scheduled'` · `'skipped_past'`(시각이 지남, 오류 아님) · `'deferred'`를 돌려줌. 꾸러미가 틀렸거나 정확한 알람 권한이 없으면 reject. 울리는 중이거나 같은 시각이 미룸 · 다시 울림 대기 중이면 건드리지 않음(서버와 맞추려고 다시 넘겨도 미루기가 안 풀림): 시각 · 강도 · `soundKey` · `vibration`이 이미 같으면 `'scheduled'`(이때 `voiceTone`만 다르면 미루기 상태는 두고 말소리 칸만 고침), 다르면 새 꾸러미를 받지 않았다는 `'deferred'`. **울리거나 미룬 중엔 새 꾸러미를 미루고, 해제 뒤 앱 맞추기(다음 앱 열림)에서 다시 넣음** |
 | `scheduleAll(pkgs)` | 여러 개를 차례로 `schedule`. 하나가 실패해도 계속하고 알람마다 `{ alarmId, status, error? }`를 돌려줌 (`status`는 `'scheduled'` · `'skipped_past'` · `'deferred'` · `'failed'`) |
 | `cancel(alarmId)` · `cancelAll()` | 예약 지우기 (미루기 · 다시 울림 대기 포함). 울리는 중이면 멈춤. 해제 기록은 안 남음. `cancelAll()`은 이미 떠 있는 일정 알림(준비 · 출발 · 도착 · 루틴)도 지워서 로그아웃 뒤 남은 알림의 원탭이 기록을 쌓지 않음 |
-| `list()` | 폰에 걸린 예약. `{ id, type, intensity, soundKey, vibration, voiceTone, title, atMillis, snoozeCount, nextRingAt }` — 서버 `alarms`와 `alarm_id` + `scheduled_at`(=`atMillis`) + `intensity` + `soundKey` + `vibration` + `voiceTone`으로 맞춤 (`voiceTone`은 칸이 없던 예약이면 `null`, 예전 APK는 칸 없음 → 비교 안 함) (`soundKey` · `vibration`은 칸이 없는 예전 저장 알람이면 아래 기본값) |
+| `list()` | 폰에 걸린 예약. `{ id, type, intensity, soundKey, vibration, voiceTone, sound, title, atMillis, snoozeCount, nextRingAt }` (`sound` = 알람음이 있는 계획인지, 예전 APK는 칸 없음) — 서버 `alarms`와 `alarm_id` + `scheduled_at`(=`atMillis`) + `intensity` + `soundKey` + `vibration` + `voiceTone`으로 맞춤 (`voiceTone`은 칸이 없던 예약이면 `null`, 예전 APK는 칸 없음 → 비교 안 함) (`soundKey` · `vibration`은 칸이 없는 예전 저장 알람이면 아래 기본값) |
 | `stop()` | 지금 울리는 알람을 해제 처리 (해제 기록이 남고, 앱이 이미 열려 있으니 앱은 안 엶) |
 | `getRinging()` | 지금 울리는 알람 `{ id, type, title, subtitle, atMillis, nextRingAt, snoozeCount, snoozeLimit, snoozeMinutesOptions, departAtMillis, heading, soundKey, vibration, intensity }` 또는 `null`. 앱 H07이 그림. 해제하면 알람이 지워져 다시 읽으면 `null` |
 | `snooze(minutes)` | 지금 울리는 알람을 `minutes`분 미룸 (SNOOZED 기록). 한도(3번) · 허용 분(5 · 10 · 15)은 코어가 검사해 `false`를 줄 수 있음 (이미 멈춤 포함) |
@@ -140,15 +140,15 @@ type RingPackage = {
 
 ## 종류별 갈래 (#33)
 
-| 종류 | 울림 | 원탭 버튼 → 남는 기록 |
+| 종류 | 울림 | 해제 · 원탭 → 남는 기록 |
 |---|---|---|
-| WAKE | 알람음 + 계속 진동 + 잠금화면 위 알람 화면 + 알림(해제 · 미루기). `setAlarmClock` | — (해제 · 미루기가 기록) |
-| PREPARE | 보통 알림(알림음 · 진동 한 번). `setExactAndAllowWhileIdle` | "준비 시작" → `ACKNOWLEDGED` |
-| DEPARTURE | 〃 | "출발했어요" → `ACKNOWLEDGED` |
-| ARRIVE | 〃 | "도착했어요" → `ARRIVAL_CONFIRMED` |
+| WAKE | 알람음 + 계속 진동 + 잠금화면 위 알람 화면 + 알림(해제 · 미루기). `setAlarmClock` | 해제 → `DISMISSED`('기상 확인 전', 10분 판정 · 확인 알림 · [일어났어요]는 D61 그대로) |
+| PREPARE | WAKE와 같은 알람 (11/19 지형님: 세 알람이 모두 진짜 알람 — 알람음 · 전체 화면 · 미루기 · 다시 울림 · 강도 규칙 같음). `setExactAndAllowWhileIdle` | 해제 → `DISMISSED` = **준비 시작** (서버가 `prepare_started_at`을 채움) |
+| DEPARTURE | 〃 (안내 한 문장은 알람음 위에 울림마다 한 번). 미루기의 "늦어요" 안내는 H07과 같음 | 해제 → `DISMISSED`. **위치로 출발을 판단하는 약속(권한 · 집 위치 · 감시 대상, 지오펜스를 거는 조건과 같음)이면 해제는 출발이 아님** — 실제 출발은 집 이탈 감지 시각. 감지가 꺼진 사람만 해제 = 출발이라 `DISMISSED`와 함께 `ACKNOWLEDGED`(BUTTON)도 남겨 서버가 `departed_at`을 채움. 앱 맞추기가 출발 알람 계획에 `plan.departByLocation`을 실어 보내 네이티브가 앱이 꺼진 채 해제될 때도 같은 규칙 (권한 · 집 위치가 바뀌면 다음 맞추기에서 다시 걸림) |
+| ARRIVE | 보통 알림(알림음 · 진동 한 번). `setExactAndAllowWhileIdle` | "도착했어요" → `ARRIVAL_CONFIRMED` |
 | ROUTINE | 〃 | "했어요" → `ACKNOWLEDGED` |
 
-알람음은 WAKE만이고 나머지는 보통 알림(알림음 · 진동 한 번) (10/18 지형님 — 보통 푸시처럼. 7장 7.4.1은 루틴도 소리 나는 알람으로 적었지만 이 문서가 기준 — 문서 보완 목록). 알림 채널은 "일정 알림"(기본 알림음 · 기본 진동 · 배너). 일정 알림은 한 번 알리면 끝이고 미루기 · 다시 울림이 없음. 원탭은 앱을 열지 않고 기록만 남김. 원탭 결과를 `appointment_participants`의 출발 · 도착 시각으로 옮기는 것은 앱(screen-data-map의 H07 · H08 참고).
+알람음이 있는 종류는 기상 · 준비 · 출발(`plan.ts` `RING_ALARM_TYPES`)이고 도착 확인 · 루틴은 보통 알림(알림음 · 진동 한 번) (10/18 지형님 — 보통 푸시처럼, 11/19에 준비 · 출발이 알람으로 바뀜. 7장 7.4.1은 루틴도 소리 나는 알람으로 적었지만 이 문서가 기준 — 문서 보완 목록). 알림 채널은 "일정 알림"(기본 알림음 · 기본 진동 · 배너). 일정 알림은 한 번 알리면 끝이고 미루기 · 다시 울림이 없음. 원탭은 앱을 열지 않고 기록만 남김. 준비 · 출발 해제와 원탭 결과를 `appointment_participants`의 준비 시작 · 출발 · 도착 시각으로 옮기는 것은 서버(INSERT 트리거)와 앱(screen-data-map의 H07 · H08 참고). 해제 뒤 앱 열기 · 10분 기상 판정은 기상만. 예전 APK가 알림으로 걸어 둔 준비 · 출발은 `list()`의 `sound=false`로 알아보고 앱 맞추기가 알람으로 다시 걺.
 
 `setExactAndAllowWhileIdle`은 절전(Doze) 중 앱당 약 9분에 한 번으로 제한될 수 있음 — 일정 알림끼리 9분 안에 붙으면 늦을 수 있음 (실기기 확인 6개와 함께 봄).
 
@@ -178,7 +178,7 @@ type RingPackage = {
 
 - 앱이 켜져 있으면 `addAlarmEventListener`로 새 기록을 바로 받음. 꺼져 있을 때 쌓인 것은 `getPendingEvents()`로 읽음 (오래된 순)
 - 올리기에 성공한 것만 `markEventsUploaded(clientEventIds)`로 지움
-- **폰이 스스로 올리는 길(WorkManager + 네트워크 조건)은 아직 없음**: 로그인 토큰이 네이티브에 있어야 하는데 지금은 JS(Supabase 세션)에만 있음. 앱 연결(P6)에서는 앱이 올림 — 앱이 앞에 올 때 · 기상 확인 화면에 들어올 때 `lib/alarmSync`의 `uploadEvents()`가 `alarm_events`로 올리고(`client_event_id` 중복 무시) 올린 것만 `markEventsUploaded`로 지움. 로그아웃 때는 올려 본 뒤 남은 기록을 버림 (아래 "앞으로 더할 것")
+- **폰이 스스로 올리는 길 (`DeviceUpload.kt`, WorkManager + 네트워크 조건)**: 알림 버튼(`ACKNOWLEDGED` 루틴 했어요 · 예전 APK의 준비 시작 · 출발했어요, `ARRIVAL_CONFIRMED` 도착했어요), 기상 · 준비 · 출발 알람 해제(`DISMISSED`), 기상 · 준비 · 출발 · 도착의 울림(`TRIGGERED`) · 미루기(`SNOOZED`, 11/19 — 서버 `alarm-events-device`가 받는 조합과 같고 `DeviceUploadRules.shouldUpload`가 정함)는 기록이 쌓이는 즉시(`AlarmEventLog.append` → `DeviceUpload.onAppended`) 작업을 걸어 서버 함수 `alarm-events-device`로 `alarm_events`에 넣음. 인증은 백그라운드 브리핑 갱신과 같은 기기 키(`BriefingCredential`, `Bearer bdk_…`) — 키가 없거나 만료 · 폐기면(401) 아무것도 안 하고 앱이 열릴 때 올림. 연결 실패 · 408 · 429 · 5xx는 30초부터 늘려 가며 최대 5번, 그 밖의 오류(400 · 401 · 403 · 404)는 다시 안 함. 루틴 알림의 울림은 이 길로 안 올리고 앱이 열릴 때 올림. 폰의 기록은 지우지 않음 — 앱이 열리면 아래 길이 같은 `clientEventId`로 다시 올려도 `alarm_events`가 번호 충돌을 무시해 한 줄이고, 원탭 뒤처리(`onEventsUploaded`: 출발 · 도착 시각 · 준비 실측 반영)도 그때 돎 (서버 INSERT 트리거가 원탭을 `appointment_participants`에 옮기므로 폰은 `alarm_events` 행만 올림). 앱이 올리는 길: 앱이 앞에 올 때 · 기상 확인 화면에 들어올 때 `lib/alarmSync`의 `uploadEvents()`가 `alarm_events`로 올리고(`client_event_id` 중복 무시) 올린 것만 `markEventsUploaded`로 지움. 로그아웃 때는 올려 본 뒤 남은 기록을 버림 (아래 "앞으로 더할 것")
 
 ## 해제 뒤 앱 열기 (#79)
 
@@ -201,7 +201,7 @@ WAKE를 해제하면(알람 화면 · 알림 버튼 모두) 앱을 `respecalarm:
 - OS가 보관한 사용 구간을 읽으므로 앱을 안 열어 둔 사이의 사용도 잡힘. `event_at`은 H08과 같이 누적 사용이 θ를 넘은 시각
 - 조건을 못 채운 것은 아무것도 안 씀 — 확인 알림("일어났어요")은 H08을 열어야 보이고, `MISSED`는 서버 배치가 기록 (`MISSED` 뒤에 확정이 들어오는 것은 막지 않음 — 해제 뒤 49분 넘어 앱을 열었어도 폰을 쓴 사실이 있으면 기록)
 - 쓰기는 H08과 같은 함수 · 같은 번호라 두 곳이 겹쳐도 한 줄. 한 알람이 실패해도 다른 알람은 이어서 판정
-- **네이티브(알람 코어)가 해제 + 10분에 스스로 판정하는 길은 아직 없음** — 확인 필요 (Kotlin 변경 + 새 APK). 만들게 되면 아래 번호 공식을 똑같이 써서 앱의 확정과 한 줄만 남게 함
+- **폰이 해제 + 10분에 스스로 판정함 (`WakeJudgeSchedule` → `WakeJudgeReceiver` → `WakeJudgeWorker`)**: 기상 알람을 끄면(`DISMISSED`) 그 시각 + 10분 2초에 정확 알람(`setExactAndAllowWhileIdle`, Doze에서도 깸)이 울려 리시버가 급한 작업(WorkManager expedited, 네트워크 조건, 할당량이 모자라면 일반 작업)을 넣음. 같은 알람을 또 끄면 나중 해제 기준으로 바뀜. **정확 알람 권한이 없으면 같은 시각의 지연 작업으로 돌아서 절전 · Doze에서 늦을 수 있음** — 늦어도 확정 시각은 사용 기록으로 정해지고, 서버 미확인 배치(울림 + 30분) 뒤에도 확정은 들어올 수 있음(`MISSED` 뒤 확정을 막지 않음). 재부팅하면 정확 알람이 사라져 그 판정은 앱이 열릴 때 재판정이 함. `UsageSpans`로 해제 ~ +10분의 화면 사용을 읽어 `WakeJudge.kt`가 앱 `evaluateWake`와 같은 규칙(θ 1분 · 관찰 10분 · 뒤쪽 5분 사용 > 0 · 확정 시각 = 누적 사용이 θ를 넘은 시각)으로 판정 — 같은 표(`spec/wake-cases.json`)를 앱 `wake.test.ts`와 Kotlin `WakeJudgeTest`가 읽음. 확정이면 `alarm-events-device`에 `wake`(그날 `daily_records` 빈 칸 · 한국 시간 날짜)와 `WAKE_CONFIRMED`(`USAGE`)를 한 요청으로 보냄 — 서버가 앱 `writeConfirmation`과 같은 순서(그날 기록 먼저, 이벤트 마지막)로 쓰고, 번호는 아래 공식(`StableUuid.kt`)이라 앱이 먼저 · 나중에 같은 판정을 해도 한 줄. 확정이 아니면(조건 미달 · 사용 정보 접근 권한 없음 · 안드로이드 9 미만) 아무것도 안 함 — 확인 알림("일어났어요")은 앱 H08 그대로. 앱이 나중에 열려 다시 판정할 때는 서버의 `WAKE_CONFIRMED`를 보고 이미 확정으로 처리해 안 씀
 
 ### 기록 번호 공식 (`client_event_id`)
 
@@ -232,9 +232,9 @@ WAKE를 해제하면(알람 화면 · 알림 버튼 모두) 앱을 `respecalarm:
 | 언제 | 무엇 | 바뀌는 점 |
 |---|---|---|
 | 앱 연결 (P6, `lib/alarmSync` `reconcile` · `applyCommit`) | 서버 알람과 폰 예약을 대조 | 앱을 켤 때 `alarms`(켜짐 · 앞으로)와 `list()`를 `alarm_id` + `scheduled_at` + `intensity`로 비교. 빠진 건 `schedule`, 없는 건 `cancel`, 시각 · 강도가 다르면 다시 `schedule`(친구의 ±5분 · 제안 적용 · 설정 수정 뒤 푸시를 못 받았을 때 대비). 지난 시각은 `skipped_past`로 건너뛰고, `deferred`(울리거나 미룬 중)는 해제 뒤 다음 앱 열림 때 다시 넘김. 첫 울림이 이미 지난 폰 예약(울리는 중 · 미룸 · 다시 울림 대기)은 서버 목록에 없어도 바로 안 지우되, **서버에 켜진 행이 없다고 확인되면**(끄거나 지워짐, 시각은 안 봄) 지움 — 끈 알람이 미룸 중이어도 다시 울리지 않게. 확인에 실패하면 전체 맞추기는 안 지움(지정한 알람 `alarmIds`는 던져서 알림). 서버 알람 목록이 상한(500줄)에서 잘렸으면 "목록에 없음"이 "서버에 없음"이 아니므로 이 확인을 거친 것만 지움 |
-| 앱 연결 (P6, `lib/alarmSync` `uploadEvents`) | 울림 기록 올리기 | 앱이 켜지면 `getPendingEvents()` → `alarm_events`(`clientEventId`로 중복 방지) → `markEventsUploaded`. 끄거나 재부팅한 동안의 기록도 이 길로 감. 해제 · 놓침을 바로 올리는 폰 스스로의 길(WorkManager)은 토큰 문제로 따로 정함 |
+| 앱 연결 (P6, `lib/alarmSync` `uploadEvents`) | 울림 기록 올리기 | 앱이 켜지면 `getPendingEvents()` → `alarm_events`(`clientEventId`로 중복 방지) → `markEventsUploaded`. 끄거나 재부팅한 동안의 기록도 이 길로 감. 알림 버튼 · 기상 해제를 바로 올리는 폰 스스로의 길은 위 `DeviceUpload` (기기 키 → `alarm-events-device`) |
 | 로그아웃 (P6, `lib/session` `signOutAndCleanup`) | 정리 | 로그아웃 중 표시 켜기(`reconcile`이 서버 알람을 폰에 걸지 않게) → 기록 올려 보기 → 맞추기와 같은 한 줄에서 `cancelAll()`(앞에 서 있던 맞추기가 끝난 뒤) → 폰에 남은 기록 지우기 (Q6) → 푸시 토큰 지우기 자리 → 실시간 구독 끊기 · 기능 메모리 정리 → 로그아웃. `cancelAll`이 실패하면 로그아웃을 멈추고 표시를 끔 |
-| 앱 연결 (P6, `useWakeRecheck`) | 기상 판정 다시 보기 | 앱이 앞에 올 때 최근 12시간에 끈 기상 알람 중 확정이 없는 것을 H08과 같은 판정으로 다시 보고 조건을 채웠으면 확정(`USAGE`) 기록 — 위 "앱이 앞에 올 때 다시 판정". 네이티브가 해제 + 10분에 스스로 판정하는 길은 확인 필요 |
+| 앱 연결 (P6, `useWakeRecheck`) | 기상 판정 다시 보기 | 앱이 앞에 올 때 최근 12시간에 끈 기상 알람 중 확정이 없는 것을 H08과 같은 판정으로 다시 보고 조건을 채웠으면 확정(`USAGE`) 기록 — 위 "앱이 앞에 올 때 다시 판정". 네이티브가 해제 + 10분에 스스로 판정하는 길은 위 `WakeJudgeWorker` (앱 `getWakeCheck`는 서버의 확정 기록을 보고 건너뜀) |
 | D1 | 배경음 · 말소리 · 진동 축별 고르기 | **배경음 3개 · 진동 패턴 3개는 반영됨**(#312, D1 A). 말소리는 AI 음성 시작 단계로 반영됨(#532: 약 1 · 중 2 · 강 3) |
 | D2 | 기상 확인 무응답 시 다시 울림 | 지금은 안 만듦 |
 | Q7 | 소리 3종 | **반영됨**(#312): `soundKey`로 앱에 든 파일을 고름 (약 · 강만 앱 파일 먼저, `theme_default` · `default` · 모르는 키는 폰 기본 알람음 먼저). 파일은 지금 합성음이라 나중에 실제 소리로 바꿔도 키 · 이름은 그대로 |

@@ -5,6 +5,7 @@ import type { RingPackage as PhoneRingPackage, ScheduledAlarm } from '@capstone/
 import { buildRingPackages, subtitleFor, type PackageSource } from '@shared/ring-package.ts';
 import { safeTimeZone } from '@shared/tz.ts';
 
+import { isRingAlarmType } from '../../../modules/alarm-core/src/plan'; // 순수 계산 파일만 (index는 네이티브 모듈을 찾음 — features/alarm/snooze.ts와 같은 선례)
 import { dbTimeMs, normalizeDbTime, parseDbTime } from '../dbTime';
 
 // 서버 알람을 폰에 미리 걸어 두는 기간. 이보다 먼 알람은 폰에 없어도 더하지 않음 (이미 폰에 있는 것은 이 기간 밖이어도 시각 · 강도를 맞춤)
@@ -22,9 +23,11 @@ export type SyncRow = PackageSource & {
   routine_title: string | null; // 루틴 알람이면
   departed_at?: string | null; // 약속 알람이면 내 참여 조건의 출발 기록 시각 (dropRecorded가 봄)
   arrived_at?: string | null; // 〃 도착 기록 시각
+  wake_confirmed?: boolean; // 기상(WAKE) 알람이면 이 알람에 기상 확인(WAKE_CONFIRMED) 기록이 있음 — [먼저 깼어요] · 자동 확정 (dropRecorded가 봄)
 };
 
-// 출발 · 도착 기록이 있으면 폰에 걸지 않을 알람 (L2 요청, 원탭 줄이기 #240) — 기상(WAKE)은 그대로
+// 출발 · 도착 기록이 있으면 폰에 걸지 않을 알람 (L2 요청, 원탭 줄이기 #240)
+//   · 기상(WAKE)은 출발 · 도착 기록으로는 안 뺌. 대신 기상 확인 기록(wake_confirmed, [먼저 깼어요] 뒤)이 있으면 뺌 — 안 빼면 폰에서 지워도 앱이 앞에 올 때 다시 걸림
 //   · 출발 기록(departed_at) → 준비 · 출발 알람 (이미 나섰으니 "곧 출발하세요"가 필요 없음)
 //   · 도착 기록(arrived_at) → 준비 · 출발 · 도착 목표 알람
 //   서버 행은 지우지 않고 폰 예약 대상에서만 뺌. 이미 폰에 걸린 것은 "서버에 없음"으로 지워짐 (planReconcile)
@@ -35,7 +38,7 @@ export function dropRecorded(rows: readonly SyncRow[]): { kept: SyncRow[]; dropp
   const kept: SyncRow[] = [];
   const dropped: SyncRow[] = [];
   for (const row of rows) {
-    const done = (row.arrived_at != null && DONE_BY_ARRIVAL.has(row.alarm_type)) || (row.departed_at != null && DONE_BY_DEPARTURE.has(row.alarm_type));
+    const done = (row.alarm_type === 'WAKE' && row.wake_confirmed === true) || (row.arrived_at != null && DONE_BY_ARRIVAL.has(row.alarm_type)) || (row.departed_at != null && DONE_BY_DEPARTURE.has(row.alarm_type));
     (done ? dropped : kept).push(row);
   }
   return { kept, dropped };
@@ -171,7 +174,12 @@ export function planReconcile(input: {
     const voiceChanged = existing?.voiceTone !== undefined && p.voiceTone != null && existing.voiceTone !== p.voiceTone;
     const axesChanged =
       existing != null && ((existing.soundKey != null && existing.soundKey !== p.soundKey) || (existing.vibration != null && existing.vibration !== p.vibration) || voiceChanged);
-    if (timeChanged || existing?.intensity !== p.intensity || axesChanged) picked.add(p.alarmId);
+    // 폰에 알림(sound 없음)으로 걸린 준비 · 출발 — 11/19부터 알람이라 같은 시각 · 강도여도 다시 걸어 알람 계획으로 덮음 (칸을 모르는 예전 APK는 비교 안 함)
+    const soundChanged = existing?.sound !== undefined && existing.sound !== isRingAlarmType(p.type);
+    // 출발 알람의 "위치로 출발 판단" 여부가 폰과 다르면 다시 걺 — 권한 · 집 위치 · 감시 대상이 바뀐 것 (앱이 모르는 값(undefined) · 폰이 안 돌려주는 칸(예전 APK · null)은 비교 안 함)
+    const departModeChanged =
+      p.type === 'DEPARTURE' && typeof p.departByLocation === 'boolean' && typeof existing?.departByLocation === 'boolean' && existing.departByLocation !== p.departByLocation;
+    if (timeChanged || existing?.intensity !== p.intensity || axesChanged || soundChanged || departModeChanged) picked.add(p.alarmId);
     if (timeChanged && p.type === 'DEPARTURE' && p.groupKey) departureChanged.add(p.groupKey);
   }
 

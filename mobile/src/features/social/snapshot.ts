@@ -142,12 +142,17 @@ export function groupShareSet(s: Snapshot, groupId: string): PermissionSet {
   const sets = s.perms
     .filter((p) => p.owner_id === s.me && p.source_type === 'GROUP' && p.source_id === groupId && effectiveOf(p, s.friends, s.members) != null)
     .map(permissionOf);
-  return { ...unionPermissions(sets), viewWake: myOptIn(s, groupId) }; // 기상 조회 = 이 그룹 기상 공유 동의 (권한 행과 따로)
+  return { ...unionPermissions(sets), viewWake: myOptIn(s, groupId), viewTrip: myTripOptIn(s, groupId) }; // 기상 조회 · 출발 · 도착 = 이 그룹 공유 동의 (권한 행과 따로)
 }
 
 // 내 기상 공유 동의 (group_members.wake_share_opt_in)
 export function myOptIn(s: Snapshot, groupId: string): boolean {
   return s.members.some((m) => m.group_id === groupId && m.user_id === s.me && m.wake_share_opt_in);
+}
+
+// 내 출발 · 도착 공유 동의 (group_members.trip_share_opt_in) — 기상 공유가 꺼져 있으면 꺼진 것으로 (서버도 같이 끔)
+export function myTripOptIn(s: Snapshot, groupId: string): boolean {
+  return s.members.some((m) => m.group_id === groupId && m.user_id === s.me && m.wake_share_opt_in && m.trip_share_opt_in);
 }
 
 // 이 그룹에서 오는 알림 끄기 (group_members.notifications_off)

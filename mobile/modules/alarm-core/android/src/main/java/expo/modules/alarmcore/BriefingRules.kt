@@ -30,13 +30,17 @@ object BriefingRules {
 
   // 준비 시작 · 출발 알람의 음성 — 단계 · Gemini 없이 Android TTS 고정 문장 한 번 (1~4단계 · 개인화 음성은 기상만)
   //   저장된 브리핑 · 말소리 · 미루기 · 지각 위험을 안 봄 → 늘 1단계 높낮이 · 속도. 못 읽으면 알람음 · 진동만 (BriefingSpeaker)
+  //   11/19부터 준비 · 출발은 알람이라 이 문장은 알람 서비스(AlarmPlaybackService)가 울림마다 알람음 위에 한 번 읽음
   private val SIMPLE_TEXT = mapOf("PREPARE" to "이제 준비를 시작할 시간이에요.", "DEPARTURE" to "지금 출발해야 해요.")
 
   /** 준비 시작 · 출발이면 읽을 고정 문장, 아니면 null (기상 · 그 밖의 종류는 기존 규칙) */
   fun simple(type: String): Fallback? = SIMPLE_TEXT[type]?.let { Fallback(1, it, 1.0f, 1.0f) }
 
-  /** 알람음 없는 일정 알림(알림음 · 진동 한 번)을 띄운 뒤 음성 안내 서비스(BriefingSpeechService)를 띄울지 — 준비 시작 · 출발 */
-  fun speaksOnNotice(type: String): Boolean = type in SIMPLE_TEXT
+  /**
+   * 알람음 없는 일정 알림(알림음 · 진동 한 번)을 띄운 뒤 음성 안내 서비스(BriefingSpeechService)를 띄울지 — 알람음이 있는 알람(plan.sound)은 알람 서비스가
+   * 같은 문장을 읽으므로 따로 안 띄움 (겹쳐 두 번 읽지 않게). 알람음 없이 오는 준비 · 출발은 예전 APK가 걸어 둔 알림뿐
+   */
+  fun speaksOnNotice(type: String, plansSound: Boolean = false): Boolean = !plansSound && type in SIMPLE_TEXT
 
   /** 해제 전까지 같은 브리핑을 반복하는지 — 기상만. 출발은 알림음 · 진동 한 번 + 브리핑 한 번으로 끝 */
   fun repeatsBriefing(alarmType: String): Boolean = alarmType == "WAKE"
@@ -77,6 +81,13 @@ object BriefingRules {
     .replace(Regex("""([?？])\."""), "$1")
     .replace(Regex("""\.(?=[가-힣A-Za-z])"""), ". ")
     .trim()
+
+  /**
+   * Android TTS가 문장마다 따로 읽을 조각 (androidText를 거친 뒤 마침표 · 물음표 뒤에서 나눔)
+   *   기상 알람 그룹 상태 안내를 개인화 음성의 가장 가까운 문장 경계에 끼우려고 — 문장 가운데서 끊지 않음 (AlarmPlaybackService · BriefingSpeaker)
+   */
+  fun sentences(text: String): List<String> =
+    androidText(text).split(Regex("""(?<=[.?？。])\s+""")).map { it.trim() }.filter { it.isNotEmpty() }
 
   data class Fallback(val level: Int, val text: String, val pitch: Float, val rate: Float)
 

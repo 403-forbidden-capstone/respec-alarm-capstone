@@ -43,6 +43,23 @@ async function check(name, fn) {
   }
 }
 
+// 알려진 한계 — 이미 알고 있는 빈틈(G번호) · 새로 나온 빈틈(NEW-n)을 '원하는 동작'으로 적어 두는 칸. 한계는 db-check를 깨지 않음
+//   fn이 true = 한계가 풀림(PASS로 남기고 check로 바꾸라고 알림), true가 아닌 값 = 기대한 확인이 거짓 → GAP(G번호) · NEW(NEW-n)로 증상과 함께 따로 찍음
+//   예외(SQL 오류 · 함수 없음 · 시드 실패)는 '확인이 거짓'이 아니라 시험이 깨진 것이라 FAIL — 마이그레이션이 바뀌어 한계가 조용히 남은 채 초록이 되는 것을 막음
+async function classifyGap(tag, name, fn) {
+  try {
+    const r = await fn();
+    if (r === true) return ['PASS', `${tag} ${name} (한계가 풀림 — knownGap을 check로 바꿀 것)`, ''];
+    return [/^NEW/.test(tag) ? 'NEW' : 'GAP', `${tag} ${name}`, JSON.stringify(r)];
+  } catch (e) {
+    return ['FAIL', `${tag} ${name}`, '예외: ' + e.message];
+  }
+}
+async function knownGap(tag, name, fn) {
+  results.push(await classifyGap(tag, name, fn));
+  await su();
+}
+
 // 오류가 나야 하는 동작 — 메시지가 맞으면 true
 async function expectErr(fn, re) {
   try {
@@ -55,8 +72,9 @@ async function expectErr(fn, re) {
 
 function report() {
   for (const [s, n, d] of results) console.log(`${s}  ${n}${d ? '  -- ' + d : ''}`);
-  const fails = results.filter((r) => r[0] !== 'PASS').length;
-  console.log(`\n통과 ${results.length - fails} / ${results.length}`);
+  const gap = results.filter((r) => r[0] === 'GAP').length, fresh = results.filter((r) => r[0] === 'NEW').length;   // 알려진 한계 · 새 빈틈은 실패로 안 셈 (knownGap)
+  const fails = results.filter((r) => r[0] !== 'PASS' && r[0] !== 'GAP' && r[0] !== 'NEW').length;
+  console.log(`\n통과 ${results.length - fails - gap - fresh} / ${results.length - gap - fresh}${gap + fresh ? ` · 알려진 한계 ${gap} · 새 빈틈 ${fresh} (실패로 안 셈)` : ''}`);
   process.exit(fails ? 1 : 0);
 }
 
@@ -172,18 +190,18 @@ const MEETING = ['decision_comments', 'decision_votes', 'decision_states'];
 //   push_sends = 친구 8장 (깨우기 · 미확인 친구 알림 보낸 기록, DB 함수로만) — friend/ch08.mjs에서 따로 확인
 //   team_members = 친구 4장 꼬리 (운영 화면을 열 수 있는 팀원 목록, 추가는 서버 키로) — friend/ch04.mjs에서 따로 확인
 //   wake_scripts = 알람 기상 대본 캐시 (alarm-briefing만 서버 키로 읽고 씀) — 아래 "기상 대본 캐시"에서 따로 확인
-//   briefing_devices = 백그라운드 브리핑 갱신용 기기 키 해시 (#515, briefing-device · alarm-briefing-device만 서버 키로) — 아래 "기기 키"에서 따로 확인
+//   briefing_devices = 백그라운드 브리핑 갱신용 기기 키 해시 (#515, briefing-device · alarm-briefing-device · alarm-events-device만 서버 키로) — 아래 "기기 키"에서 따로 확인
 //   server_routes · server_route_users · server_heartbeat = 서버 전환 스위치(M1, 앱은 get_server_routes()로만 읽음) — 아래 "서버 전환 스위치"에서 따로 확인
 //   server_settings = 서버 전용 설정(M7, 예측 켜기 조건 — 서버(service_role)만 읽음) — 아래 "서버 전용 설정 표"에서 따로 확인
 const SERVER_ONLY = ['roll_attempts', 'rate_limit_events', 'friend_links', 'reports', 'push_tickets', 'push_sends', 'team_members', 'prepare_ml_verified_profiles', 'wake_scripts', 'briefing_devices',
                      'server_routes', 'server_route_users', 'server_heartbeat', 'server_settings'];
 
-await check('모든 public 테이블(앱 37개 — 서버 전용 14개 포함 + 회의 도구 3개)에 RLS가 켜져 있음', async () => {
+await check('모든 public 테이블(앱 38개 — 서버 전용 14개 포함 + 회의 도구 3개)에 RLS가 켜져 있음', async () => {
   const r = await q(`select c.relname, c.relrowsecurity from pg_class c join pg_namespace n on n.oid = c.relnamespace
                      where n.nspname = 'public' and c.relkind = 'r' order by 1`);
   const off = r.filter((x) => !x.relrowsecurity).map((x) => x.relname);
   const app = r.filter((x) => !MEETING.includes(x.relname)).length;
-  return app === 37 && r.length === 40 && off.length === 0 ? true : { count: r.length, app, off };
+  return app === 38 && r.length === 41 && off.length === 0 ? true : { count: r.length, app, off };
 });
 
 await check('검증된 ML 프로필: RLS 켜짐, 사용자 접근 차단, 서비스 역할만 접근 허용', async () => {
@@ -272,11 +290,11 @@ await check('anon은 함수를 실행할 수 없음 (회의 의견 지우기 하
   const bad = r.filter((x) => !MEETING_FN.includes(x.proname));
   return bad.length === 0 && r.length === MEETING_FN.length ? true : r;
 });
-await check('ENUM 22개 값이 4장과 같음 (NORMAL · DEPARTURE · FEEDBACK) + ACKNOWLEDGED + 값 출처 · 기록 출처 + 준비 시작 출처 · 준비 알람 당김 제안', async () => {
+await check('ENUM 24개 값이 4장과 같음 (NORMAL · DEPARTURE · FEEDBACK) + ACKNOWLEDGED + 값 출처 · 기록 출처 + 준비 시작 출처 · 준비 알람 당김 제안 + 루틴 제안 원인 · 상태', async () => {
   const r = await q(`select t.typname, array_agg(e.enumlabel order by e.enumsortorder)::text as v
                      from pg_type t join pg_enum e on e.enumtypid = t.oid group by 1`);
   const m = Object.fromEntries(r.map((x) => [x.typname, x.v]));
-  const ok = Object.keys(m).length === 22
+  const ok = Object.keys(m).length === 24
     && m.importance_level === '{LOW,NORMAL,HIGH}'
     && m.alarm_type === '{WAKE,PREPARE,DEPARTURE,ARRIVE,ROUTINE}'
     && m.alarm_intensity === '{SOFT,NORMAL,STRONG}'
@@ -284,7 +302,9 @@ await check('ENUM 22개 값이 4장과 같음 (NORMAL · DEPARTURE · FEEDBACK) 
     && m.alarm_value_source === '{AUTO,MANUAL}'
     && m.event_input_source === '{BUTTON,LOCATION,VOICE,MANUAL,USAGE}'
     && m.prepare_start_source === '{ROUTINE_STEP,PREPARE_ALARM}'
-    && m.alarm_suggestion_type === '{VOICE_TONE,SOUND,INTENSITY,PREPARE_ADVANCE}';
+    && m.alarm_suggestion_type === '{VOICE_TONE,SOUND,INTENSITY,PREPARE_ADVANCE}'
+    && m.routine_suggestion_cause === '{OVERSLEEP,LATE_START,NIGHT_PREP}'
+    && m.routine_suggestion_status === '{PENDING,ACCEPTED,IGNORED}';
   return ok ? true : m;
 });
 
@@ -654,6 +674,19 @@ await check('비구성원은 빈 결과 · 다른 구성원은 본인 + 기상 �
   const e = await wake(E);
   const b = await wake(B);
   return e.length === 0 && b.length === 2 && b[0].user_id === B && b[0].is_me === true && b[1].user_id === D ? true : { e, b };
+});
+await check('기상 알람 그룹 안내(group_wake_for_device): 서버 역할이 넘긴 사람 시점의 get_group_wake와 같은 줄 + 그룹 이름(새 판정 없음, 동의 안 한 C는 안 나옴) · 앱 역할은 못 부름', async () => {
+  const cols = 'user_id, nickname, is_me, wake_alarm_at, wake_confirmed_at, wake_status, departed_at, arrived_at, trip_visible, trip_appointment_at, prepare_alarm_at, prepare_started_at';
+  await as(A);
+  const app = await q(`select ${cols} from public.get_group_wake($1)`, [G]);
+  await svc();
+  const dev = await q(`select group_name, ${cols} from public.group_wake_for_device($1) where group_id = $2`, [A, G]);
+  const [{ name }] = await q(`select group_name as name from public.groups where group_id = $1`, [G]);
+  const same = JSON.stringify(dev.map(({ group_name, ...r }) => r)) === JSON.stringify(app) && dev.every((r) => r.group_name === name);
+  const outsider = await q(`select 1 from public.group_wake_for_device($1) where group_id = $2`, [E, G]);
+  await as(A);
+  const denied = await expectErr(() => q(`select * from public.group_wake_for_device($1)`, [A]), /permission denied/);
+  return same && app.length > 1 && !app.some((r) => r.user_id === C) && outsider.length === 0 && denied === true ? true : { app, dev, outsider, denied };
 });
 await check('함수 밖에서는 B의 alarm_events · daily_records를 못 읽음', async () => {
   await as(B);
@@ -2286,6 +2319,45 @@ await check('준비 시작 시각 · 출처는 같이만(D111 3번), 적용분�
     && badEv === true && ev.suggestion_type === 'PREPARE_ADVANCE' && JSON.stringify(ev.evidence) === '[10,14,12]'
     ? true : { fresh, srcOnly, timeOnly, both, over, neg, adv, badEnum, other, after, badEv, ev };
 });
+await check('루틴 제안(routine_suggestions, 안건 D114 · D30 B): 본인만 읽고 상태 · 답한 시각 · 만든 루틴만 고침 — 만들기는 서버만, 기다리는 제안은 한 사람에 하나, 답하면 답한 시각 같이, 만든 루틴은 본인 루틴이고 받아들였을 때만, 내 시험 데이터 지우기에 지워짐', async () => {
+  await svc();
+  const draft = JSON.stringify({ goal: '다시 잠들지 않기', days: [1, 3, 4], steps: [] });
+  const ins = (u) => q(`insert into public.routine_suggestions (user_id, cause, title, reason, draft) values ($1, 'OVERSLEEP', '일어나자마자 2단계', '최근 아침 7번 중 4번, 기상 알람 뒤 평균 18분 만에 일어났어요', $2) returning suggestion_id`, [u, draft]);
+  const [{ suggestion_id: sid }] = await ins(A);
+  const dupe = await expectErr(() => ins(A), /routine_suggestions_one_pending/);
+  const [{ routine_id: ra }] = await q(`insert into public.routines (user_id, title, repeat_days) values ($1, '제안 시험 루틴 A', 'MON') returning routine_id`, [A]);
+  const [{ routine_id: rb }] = await q(`insert into public.routines (user_id, title, repeat_days) values ($1, '제안 시험 루틴 B', 'MON') returning routine_id`, [B]);
+  const ignoredWithRoutine = await expectErr(() => q(`update public.routine_suggestions set status = 'IGNORED', responded_at = now(), routine_id = $2 where suggestion_id = $1`, [sid, ra]), /routine_suggestions_routine_when_accepted/);
+  await as(B);
+  const seenByB = await q(`select 1 from public.routine_suggestions where suggestion_id = $1`, [sid]);
+  const changedByB = await q(`update public.routine_suggestions set status = 'IGNORED', responded_at = now() where suggestion_id = $1 returning 1`, [sid]);
+  await as(A);
+  const seenByA = await q(`select 1 from public.routine_suggestions where suggestion_id = $1`, [sid]);
+  const appInsert = await expectErr(() => ins(A), /permission denied/);
+  const titleEdit = await expectErr(() => q(`update public.routine_suggestions set title = '바꿈' where suggestion_id = $1`, [sid]), /permission denied/);
+  const noTime = await expectErr(() => q(`update public.routine_suggestions set status = 'IGNORED' where suggestion_id = $1`, [sid]), /routine_suggestions_responded/);
+  const othersRoutine = await expectErr(() => q(`update public.routine_suggestions set status = 'ACCEPTED', responded_at = now(), routine_id = $2 where suggestion_id = $1`, [sid, rb]), /row-level security/);
+  const accepted = await q(`update public.routine_suggestions set status = 'ACCEPTED', responded_at = now(), routine_id = $2 where suggestion_id = $1 returning status`, [sid, ra]);
+  await svc();
+  const [{ suggestion_id: next }] = await ins(A); // 답했으니 새 제안을 다시 기다릴 수 있음
+  // 내 시험 데이터 지우기 — 시험 계정(@example.com)의 루틴 제안만 지움
+  const RS = '5a5a5a5a-5a5a-4a5a-8a5a-5a5a5a5a5a5a';
+  await as(null, 'supabase_auth_admin');
+  await q(`insert into auth.users (id, email, raw_user_meta_data) values ($1, 'routine-suggest@example.com', '{}'::jsonb)`, [RS]);
+  await svc();
+  await ins(RS);
+  await as(RS);
+  await q(`select public.dev_reset_my_data()`);
+  await su();
+  const rsLeft = (await q(`select count(*)::int as n from public.routine_suggestions where user_id = $1`, [RS]))[0].n;
+  const aLeft = (await q(`select count(*)::int as n from public.routine_suggestions where user_id = $1`, [A]))[0].n;
+  await q(`delete from public.routine_suggestions where suggestion_id in ($1, $2)`, [sid, next]);
+  await q(`delete from public.routines where routine_id in ($1, $2)`, [ra, rb]);
+  return dupe === true && ignoredWithRoutine === true && seenByB.length === 0 && changedByB.length === 0 && seenByA.length === 1 && appInsert === true
+    && titleEdit === true && noTime === true && othersRoutine === true && accepted[0]?.status === 'ACCEPTED' && rsLeft === 0 && aLeft === 2
+    ? true : { dupe, ignoredWithRoutine, seenByB, changedByB, seenByA, appInsert, titleEdit, noTime, othersRoutine, accepted, rsLeft, aLeft };
+});
+
 await check('반경: 약속 도착지(dest_radius_m)와 집(home_radius_m)은 100~500이고 NULL(기본값)도 받음 — 99 · 501은 거부', async () => {
   const { appt } = await mkPart(A);
   const setAppt = (v) => q(`update public.appointments set dest_radius_m = $1 where appointment_id = $2 returning dest_radius_m`, [v, appt]);
@@ -2801,6 +2873,48 @@ await check('새 회차가 당김 분을 이어받음: 반복 묶음의 다음 �
   const a4 = await ins(lone.appointment_id);       // 묶음 1개짜리 — 앞 회차가 없어 0
   return a1 === 10 && a2 === 10 && a3 === 5 && a4 === 0 ? true : { a1, a2, a3, a4 };
 });
+await check('루틴 제안 재료(routine_suggestion_inputs): 사람마다 그 사람 시간대 날짜로 아침 한 줄 — 그날 가장 이른 켜진 기상 알람 · 기상 확인 · 미확인 · 준비 알람과 준비 시작 · 준비물(아침에야 챙김), 꺼진 알람 · 지금 뒤는 없음, 서버 역할만', async () => {
+  const RU = '6b6b6b6b-6b6b-4b6b-8b6b-6b6b6b6b6b6b';
+  await as(null, 'supabase_auth_admin');
+  await q(`insert into auth.users (id, email, raw_user_meta_data) values ($1, 'routine-inputs@example.com', '{}'::jsonb)`, [RU]);
+  await svc();
+  const at = (d, hm) => `2026-12-${d}T${hm}:00+09:00`;
+  const alarm = async (type, d, hm, extra = {}) => (await q(
+    `insert into public.alarms (user_id, alarm_type, scheduled_at, is_enabled, participant_id) values ($1, $2, $3, $4, $5) returning alarm_id`,
+    [RU, type, at(d, hm), extra.enabled ?? true, extra.participant ?? null]))[0].alarm_id;
+  const event = (alarmId, type, d, hm) => q(`insert into public.alarm_events (alarm_id, user_id, event_type, event_at) values ($1, $2, $3, $4)`, [alarmId, RU, type, at(d, hm)]);
+  // 12/14(월): 기상 알람 둘(7:00 · 7:30) — 이른 것만, 7:22에 기상 확인
+  const w14 = await alarm('WAKE', '14', '07:00');
+  await alarm('WAKE', '14', '07:30');
+  await event(w14, 'WAKE_CONFIRMED', '14', '07:22');
+  // 12/15(화): 미확인
+  const w15 = await alarm('WAKE', '15', '07:00');
+  await event(w15, 'MISSED', '15', '07:30');
+  // 12/16(수): 7:03 확인, 준비 알람 7:20 · 준비 시작 7:29, 준비물 둘 — 하나는 전날 밤, 하나는 아침에 챙김
+  const w16 = await alarm('WAKE', '16', '07:00');
+  await event(w16, 'WAKE_CONFIRMED', '16', '07:03');
+  const appt = await insAppt(RU, { at: at('16', '09:00'), title: '루틴 재료 시험' });
+  const [{ participant_id: pid }] = await q(`insert into public.appointment_participants (appointment_id, user_id, prepare_started_at, prepare_started_source) values ($1, $2, $3, 'PREPARE_ALARM') returning participant_id`, [appt.appointment_id, RU, at('16', '07:29')]);
+  await alarm('PREPARE', '16', '07:20', { participant: pid });
+  await q(`insert into public.todos (user_id, title, todo_type, due_date, is_done, done_at) values ($1, '노트북', 'ITEM', '2026-12-16', true, $2), ($1, '회의 자료', 'ITEM', '2026-12-16', true, $3)`, [RU, at('15', '22:00'), at('16', '07:40')]);
+  // 12/17(목): 꺼진 기상 알람 — 기록 없는 아침, 12/19(토): 지금(12/18 18:00) 뒤
+  await alarm('WAKE', '17', '07:00', { enabled: false });
+  await alarm('WAKE', '19', '07:00');
+  const rows = await q(`select record_date::text as d, weekday, wake_alarm_at, wake_confirmed_at, wake_missed, prepare_alarm_at, prepare_started_at, items_due, items_late
+                        from public.routine_suggestion_inputs($1) where user_id = $2 order by record_date`, [at('18', '18:00'), RU]);
+  const iso = (v) => (v ? new Date(v).toISOString() : null);
+  const got = rows.map((r) => [r.d, r.weekday, iso(r.wake_alarm_at), iso(r.wake_confirmed_at), r.wake_missed, iso(r.prepare_alarm_at), iso(r.prepare_started_at), r.items_due, r.items_late]);
+  const want = [
+    ['2026-12-14', 1, iso(at('14', '07:00')), iso(at('14', '07:22')), false, null, null, 0, 0],
+    ['2026-12-15', 2, iso(at('15', '07:00')), null, true, null, null, 0, 0],
+    ['2026-12-16', 3, iso(at('16', '07:00')), iso(at('16', '07:03')), false, iso(at('16', '07:20')), iso(at('16', '07:29')), 2, 1],
+  ];
+  await as(A);
+  const app = await expectErr(() => q(`select * from public.routine_suggestion_inputs($1)`, [at('18', '18:00')]), /permission denied/);
+  await su();
+  return JSON.stringify(got) === JSON.stringify(want) && app === true ? true : { got, want, app };
+});
+
 await check('지난 회차가 그대로: 다음 회차(화 11-10)를 만든 뒤에도 MISSED 후보 · 그룹 기상 상태 · R02 계획 쿼리가 지난 회차(화 11-03)의 알람 행을 같은 id · 같은 시각으로 읽고, 새 회차는 새 날짜에만 보임', async () => {
   // 매주 화 10시 수업 — 지난 회차(11-03): 기상 07:30 · 준비 08:30 · 출발 09:10. 기상은 울리고 끄기만 함 (기상 확인 없음)
   await svc();
@@ -3321,7 +3435,7 @@ const mkAppt = async (creator, title, { group = null, series = null, on = null, 
 //   11/9부터(친구 15장, 15-타) 친구 · 그룹 참여 · 공유 권한 · 내가 건 차단 · 내가 숨긴 기상도 지움 — 그래서 friends · group_members · sharing_permissions · wake_hides는 지우는 쪽
 //   (user_blocks는 사용자 칸 이름이 blocker_id라 이 가드의 열 목록 밖 — 지움은 friend/ch15.mjs 15-타가 직접 봄)
 const RESET_DELETES = ['alarm_events', 'alarm_suggestions', 'alarms', 'appointment_participants', 'appointments', 'conversation_sessions',
-                       'daily_journals', 'daily_records', 'friends', 'group_members', 'prepare_ml_verified_profiles', 'profiles', 'sharing_permissions', 'user_edit_logs', 'wake_hides',
+                       'daily_journals', 'daily_records', 'friends', 'group_members', 'prepare_ml_verified_profiles', 'profiles', 'routine_suggestions', 'sharing_permissions', 'user_edit_logs', 'wake_hides',
                        'wake_scripts'];   // wake_scripts = 알람이 지워질 때 FK(on delete cascade)로 같이 지워짐 — 함수는 안 고침
 //   friend_links · rate_limit_events(친구 2장) · groups(남이 있는 그룹은 둠)는 둠, team_members(운영 화면 팀원)도 둠
 //   briefing_devices(기기 키)는 둠 — 시험 데이터 지우기는 로그인 그대로라 이 기기의 백그라운드 갱신이 계속 돌아야 함 (push_tokens와 같은 이유)
@@ -3340,6 +3454,7 @@ const MINE = {
   user_edit_logs: `select * from public.user_edit_logs where user_id = $1`,
   todos: `select * from public.todos where user_id = $1`,
   routines: `select * from public.routines where user_id = $1`,
+  routine_suggestions: `select * from public.routine_suggestions where user_id = $1`,
   ai_calls: `select * from public.ai_calls where user_id = $1`,
   user_questions: `select * from public.user_questions where user_id = $1`,
   push_tickets: `select * from public.push_tickets where user_id = $1`,
@@ -3727,11 +3842,13 @@ await check('user_places: updated_at이 고칠 때 갱신됨 · 계정을 지우
 // 친구 장별 검사 — friend/chNN.mjs (친구_시험케이스.md DB · 함수 층, 항목 이름 앞 번호 = 시험 번호)
 // ---------------------------------------------------------------------
 // 장마다 자기 계정을 새로 만들어 앞 검사의 A~E와 섞이지 않게 함. 장이 늘면 아래 목록에 한 줄씩
-const FRIEND_CTX = { q, as, su, svc, check, expectErr, PGlite, AUTH_STUBS, MIG_DIR, readFileSync, readdirSync, join };
-for (const ch of ['ch02', 'ch03', 'ch04', 'ch05', 'ch06', 'ch11', 'ch07', 'ch08', 'ch09', 'ch10', 'ch12', 'ch13', 'ch15']) await (await import(`./friend/${ch}.mjs`)).default(FRIEND_CTX);
+const FRIEND_CTX = { q, as, su, svc, check, knownGap, classifyGap, expectErr, PGlite, AUTH_STUBS, MIG_DIR, readFileSync, readdirSync, join };
+for (const ch of ['ch02', 'ch03', 'ch04', 'ch05', 'ch06', 'ch11', 'ch07', 'ch08', 'ch09', 'ch10', 'ch12', 'ch13', 'ch15', 'ch16', 'ch17']) await (await import(`./friend/${ch}.mjs`)).default(FRIEND_CTX);
 
 await (await import('./prepare-ml-approval.mjs')).default(FRIEND_CTX);
 await (await import('./commit-rpc.mjs')).default(FRIEND_CTX);   // 알람 저장 DB 함수 (정할 일 0-10)
+await (await import('./device-events.mjs')).default(FRIEND_CTX);   // 폰이 앱 없이 올리는 기록 (alarm-events-device) + DB 트리거
+await (await import('./scenarios/day.mjs')).default(FRIEND_CTX);   // 4명 그룹의 하루 시나리오 (서버 쪽) — 사람 여럿 · 시간 순서 · 설정 변화
 
 
 await check('PURE-PREP-01: 신규 순수 준비시간 필드는 legacy 전체 시간과 독립이며 기존 사용자값은 NULL', async () => {

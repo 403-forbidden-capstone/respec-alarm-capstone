@@ -3,6 +3,7 @@ import { describe, expect, it } from '@jest/globals';
 import { formatTime } from '@/lib/format';
 import { kst } from '@/mocks/data';
 
+import wakeCases from '../../../../modules/alarm-core/spec/wake-cases.json';
 import { evaluateWake, formatUsage, judgeLines, pickAlarmId, pickDismissedAt, thetaReachedAt, usedMinutes, usageSummary, WAKE_THETA_MINUTES, type UseSpan } from '../wake';
 
 const dismissed = kst(22, 480); // 오전 8:00에 해제
@@ -160,4 +161,28 @@ describe('H08 해제 기록이 여러 개일 때 (pickDismissedAt)', () => {
     expect(pickDismissedAt([], null)).toBeNull();
     expect(pickDismissedAt([], t(5))).toBeNull();
   });
+});
+
+// 폰이 해제 10분 뒤 스스로 하는 판정(WakeJudge.kt)이 이 함수와 같은 결과인지 — 같은 표를 네이티브 WakeJudgeTest가 읽음
+//   spans = "시작-끝" 분을 쉼표로 이은 글자 (null = 사용 정보를 못 읽음, 빈 글자 = 사용 없음). reachedMs = 해제 시각부터 확정 시각까지 ms
+describe('공통 케이스 (spec/wake-cases.json) — 기상 판정', () => {
+  const base = new Date(Date.UTC(2026, 10, 19, 6, 0, 0));
+  const toSpans = (text: string): UseSpan[] | null =>
+    text === 'null'
+      ? null
+      : text === ''
+        ? []
+        : text.split(',').map((part) => {
+            const m = /^(-?[\d.]+)-(-?[\d.]+)$/.exec(part)!;
+            return [Number(m[1]), Number(m[2])] as UseSpan;
+          });
+  for (const item of wakeCases) {
+    it(item.name, () => {
+      const result = evaluateWake({ dismissedAt: base, now: new Date(base.getTime() + item.nowMin * 60_000), spans: toSpans(item.spans), theta: item.theta });
+      expect(result.phase).toBe(item.phase);
+      expect(result.usage).toBe(item.usage);
+      expect(result.recent).toBe(item.recent);
+      expect(result.reachedAt ? result.reachedAt.getTime() - base.getTime() : null).toBe(item.reachedMs);
+    });
+  }
 });

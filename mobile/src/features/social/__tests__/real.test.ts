@@ -95,7 +95,8 @@ describe('G01 · H01 · G02 그룹', () => {
         initial: '캡',
         memberCount: 4,
         wokeCount: 2,
-        grants: { viewAlarm: false, editAlarm: false, viewWake: true },
+        trip: null,
+        grants: { viewAlarm: false, editAlarm: false, viewWake: true, viewTrip: false },
       },
     ]);
     // 날짜를 안 주면 p_date 없이 → 함수가 내 시간대의 오늘
@@ -134,10 +135,10 @@ describe('G01 · H01 · G02 그룹', () => {
     const summary = await real.getGroupSummary(GROUP);
     expect(summary?.wokeCount).toBe(2);
     expect(summary?.members.map((m) => [m.person.name, m.state.text])).toEqual([
-      ['나(데모)', '일어났어요 오전 7:35'],
-      ['수연', '일어났어요 오전 7:31'],
+      ['나(데모)', '기상 완료 · 오전 7:35'],
+      ['수연', '기상 완료 · 오전 7:31'],
       ['준성', '공유 안 함'], // 동의가 꺼져 있어 함수가 안 줌
-      ['지형', '울렸어요'],
+      ['지형', '알람 울리는 중'],
     ]);
   });
 
@@ -199,7 +200,7 @@ describe('F02 · F03 권한', () => {
 
   it('내가 공유하는 값', async () => {
     expect(await real.getShareSettings(`friend:${SUYEON}`)).toEqual({ viewAlarm: true, editAlarm: false, viewWake: false });
-    expect(await real.getShareSettings(`group:${GROUP}`)).toEqual({ viewAlarm: false, editAlarm: false, viewWake: true });
+    expect(await real.getShareSettings(`group:${GROUP}`)).toEqual({ viewAlarm: false, editAlarm: false, viewWake: true, viewTrip: false });
     expect(await real.getShareSettings(`friend:${JUNSEONG}`)).toEqual({ viewAlarm: false, editAlarm: false, viewWake: false });
   });
 
@@ -248,7 +249,17 @@ describe('F02 · F03 권한', () => {
     expect(mockFake.opsOf('group_members', 'update')).toHaveLength(0);
     await real.saveShareSettings(`group:${GROUP}`, { viewAlarm: true, editAlarm: false, viewWake: false });
     const [op] = mockFake.opsOf('group_members', 'update');
-    expect(op.payload).toEqual({ wake_share_opt_in: false });
+    expect(op.payload).toEqual({ wake_share_opt_in: false, trip_share_opt_in: false }); // 기상 공유를 끄면 출발 · 도착 공유도 같이 끔
+  });
+
+  it('출발 · 도착 스위치는 내 trip_share_opt_in 한 줄 — 기상 공유를 같이 끄면 한 번에 끄고, 기상이 꺼진 채로는 못 켬', async () => {
+    mockFake.answerRpc('save_group_permissions', ok({ status: 'OK', saved: 3 }));
+    mockFake.answer('group_members.update', ok([{ group_member_id: 'gm1' }]));
+    await real.saveShareSettings(`group:${GROUP}`, { viewAlarm: true, editAlarm: false, viewWake: true, viewTrip: false }); // 이미 꺼져 있음
+    expect(mockFake.opsOf('group_members', 'update')).toHaveLength(0);
+    await real.saveShareSettings(`group:${GROUP}`, { viewAlarm: true, editAlarm: false, viewWake: true, viewTrip: true });
+    expect(mockFake.opsOf('group_members', 'update').map((o) => o.payload)).toEqual([{ trip_share_opt_in: true }]);
+    expect((await real.getGroup(GROUP))?.tripShareOptIn).toBe(false); // 시드의 내 줄은 꺼짐
   });
 
   it('그룹 권한 저장이 실패하면 기상 동의는 바꾸지 않고, 동의만 실패하면 그 사실을 알림 (알람 권한은 저장된 뒤)', async () => {
@@ -308,7 +319,7 @@ describe('G03 그룹원 기상 상태', () => {
     const wake = await real.getMemberWake(GROUP, SUYEON);
     expect(wake).toMatchObject({ groupName: '캡스톤팀', noGroupAppointment: false, canViewAlarm: true });
     expect(wake?.person.name).toBe('수연');
-    expect(wake?.state.text).toBe('일어났어요 오전 7:35');
+    expect(wake?.state.text).toBe('기상 완료 · 오전 7:35');
     expect(wake?.alarmAt?.toISOString()).toBe('2026-10-19T22:30:00.000Z');
     expect(mockFake.opsOf('appointments')).toHaveLength(0);
   });

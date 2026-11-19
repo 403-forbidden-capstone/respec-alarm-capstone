@@ -13,6 +13,7 @@ import { minutesMs } from './constants';
 import { withLock } from './lock';
 import { errorText } from './native';
 import { onDetectionNotice } from './notice';
+import { settlePhoneAlarms } from './settleAlarms';
 import { commit, isWriteAction, loadActions, MAX_QUEUED_ACTIONS, type Change, type WriteAction } from './store';
 import type { GeoAction, StepResult } from './transitions';
 
@@ -39,18 +40,22 @@ type Outcome = 'done' | 'drop' | 'retry';
 // 도착 안내는 감지 뒤 이만큼(분) 안에 쓴 것만 — 오프라인 보관함에서 한참 뒤에 쓰인 도착은 이미 지난 일이라 알리지 않음 (근거 없음 — 작성자 판단)
 const ARRIVE_NOTICE_MAX_DELAY_MINUTES = 60;
 
-async function send(action: WriteAction): Promise<Outcome> {
+// wrote = 서버에 출발 · 도착을 실제로 썼음(새로 쓰거나 바꿈). 이른 위치 출발이라 건너뜀 · 창 밖 · 이미 응답 값이 있어 그대로 둠(keep) · 참여 조건 없음이면 false
+async function send(action: WriteAction): Promise<{ outcome: Outcome; wrote: boolean }> {
   try {
-    if (action.type === 'DEPART') await recordParticipantTimes({ participantId: action.participantId, departedAt: action.at, source: 'LOCATION' });
-    else await recordParticipantTimes({ participantId: action.participantId, arrivedAt: action.at, source: 'LOCATION' });
-    return 'done';
+    const result =
+      action.type === 'DEPART'
+        ? await recordParticipantTimes({ participantId: action.participantId, departedAt: action.at, source: 'LOCATION' })
+        : await recordParticipantTimes({ participantId: action.participantId, arrivedAt: action.at, source: 'LOCATION' });
+    const decision = action.type === 'DEPART' ? result?.departed : result?.arrived;
+    return { outcome: 'done', wrote: decision === 'new' || decision === 'override' };
   } catch (e) {
     if (isPermanentInsertError(e as { code?: string | null })) {
       if (__DEV__) console.warn('[location] 다시 해도 소용없는 오류라 기록을 버림', action.type, errorText(e));
-      return 'drop';
+      return { outcome: 'drop', wrote: false };
     }
     if (__DEV__) console.warn('[location] 기록을 못 써서 보관해 둠 — 다음에 다시', action.type, errorText(e));
-    return 'retry';
+    return { outcome: 'retry', wrote: false };
   }
 }
 
@@ -67,10 +72,12 @@ async function flushPass(): Promise<void> {
     for (let i = 0; i < MAX_QUEUED_ACTIONS * 2; i += 1) {
       const [head] = await withLock(loadActions);
       if (!head) return;
-      const outcome = await send(head);
+      const { outcome, wrote } = await send(head);
       if (outcome === 'retry') return;
       // 쓰기에 성공한 도착만 안내 — 버린 것(drop)은 서버에 없음. 보내고 보관함에서 빼기 전에 앱이 꺼져 다시 보내도 알림 번호가 같아 한 장으로 덮어씀
       if (outcome === 'done' && head.type === 'ARRIVE' && now().getTime() - head.at <= minutesMs(ARRIVE_NOTICE_MAX_DELAY_MINUTES)) announce([head]);
+      // 서버에 실제로 쓴 경우에만(이른 위치 출발 · 창 밖 · 이미 응답 값이 있어 안 쓴 경우는 알람을 그대로 둠) 그 약속의 남은 준비 · 출발(· 도착) 알람을 폰에서 바로 정리 — 이미 나섰는데 "곧 출발하세요"가, 이미 도착했는데 "도착했어요?"가 울리지 않게 (G3). 못 지워도 기록은 그대로
+      if (wrote) await settlePhoneAlarms(head.participantId, head.type);
       await withLock(() => dropHead(head));
     }
   } catch (e) {

@@ -18,6 +18,7 @@ import {
   upcomingNotices,
   wakeAlarmOf,
   type MorningSource,
+  tripCardOf,
 } from '../morning';
 import type { AlarmKind, AlarmTime, MorningPlan } from '../types';
 
@@ -38,6 +39,7 @@ const source = (overrides: Partial<MorningSource> = {}): MorningSource => ({
   travelSource: '길찾기',
   alarms: chain(),
   departedAt: null,
+  arrivedAt: null,
   ...overrides,
 });
 
@@ -188,5 +190,35 @@ describe('카드에 그릴 글자', () => {
   it('출발 알람이 없으면 출발까지 줄이 없음, 장소가 없으면 시각 · 제목만, 이동 출처가 비면 이동분만', () => {
     const view = morningCardView(plan({ departAt: null, place: '', travelSource: '' }), null, at('8:30'));
     expect(view).toMatchObject({ untilDepart: null, summary: '오전 10:00 팀 주간회의', travelLine: '이동 50분' });
+  });
+});
+
+describe('홈 이동 중 · 도착 줄 (tripCardOf, 11/19)', () => {
+  const departed = plan({ departedAt: at('8:55') }); // 이동 50분
+  const arrived = plan({ departedAt: at('8:55'), arrivedAt: at('9:48') });
+
+  it('출발 뒤 도착 전 — 이동 중 · 출발 + 예상 이동분이 도착 예정', () => {
+    expect(tripCardOf(departed, at('9:10'))).toEqual({ stage: 'MOVING', label: '이동 중', title: '오전 9:45 도착 예정', summary: '오전 10:00 팀 주간회의 · 세종대학교' });
+  });
+
+  it('도착하면 도착했어요 + 시각', () => {
+    expect(tripCardOf(arrived, at('9:50'))).toMatchObject({ stage: 'ARRIVED', label: '도착했어요', title: '오전 9:48' });
+  });
+
+  it('출발 기록이 없으면 줄 없음(아침 카드가 보임), 도착 기록만 있어도 도착은 보임', () => {
+    expect(tripCardOf(plan(), at('9:10'))).toBeNull();
+    expect(tripCardOf(plan({ arrivedAt: at('9:48') }), at('9:50'))?.stage).toBe('ARRIVED');
+    expect(tripCardOf(null, at('9:10'))).toBeNull();
+  });
+
+  it('약속 + 60분까지만 — 그 뒤에는 사라짐', () => {
+    expect(tripCardOf(arrived, at('11:00'))).not.toBeNull();
+    expect(tripCardOf(arrived, at('11:01'))).toBeNull();
+    expect(tripCardOf(departed, at('11:01'))).toBeNull();
+  });
+
+  it('출발하면 아침 카드는 빠지고 이 줄이 그 자리를 이음', () => {
+    expect(morningCardVisible(departed, at('9:10'))).toBe(false);
+    expect(tripCardOf(departed, at('9:10'))).not.toBeNull();
   });
 });

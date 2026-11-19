@@ -31,6 +31,8 @@ import { colors } from '@/theme';
 const TIMES = [
   ['morning', '아침 오전 7:55'],
   ['evening', '전날 밤 9:00'],
+  ['moving', '이동 중 오전 9:10'],
+  ['arrived', '도착 오전 9:50'],
 ] as const;
 
 export default function ScreenListScreen() {

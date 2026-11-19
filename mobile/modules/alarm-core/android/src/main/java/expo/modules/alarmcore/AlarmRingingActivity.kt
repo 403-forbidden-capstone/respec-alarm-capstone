@@ -23,7 +23,7 @@ import java.lang.ref.WeakReference
 // 울림 길잡이 + 대체 화면 (#332). 풀스크린 인텐트 · 알림 본문이 이 화면을 열면 앱의 H07(/ring)을 잠금화면 위로 불러 주고,
 //   앱이 ackRingScreen()으로 "H07 떴음"을 알리면 닫힘. 앱이 RING_APP_TIMEOUT_MS 안에 못 띄우면(콜드 스타트 실패 · 로그아웃 등)
 //   아래의 네이티브 컨트롤(해제 · 미루기)을 그려 알람을 끌 수 있게 함. 해제 · 미루기는 알람 코어(AlarmController)가 처리하고,
-//   이 화면에서 해제하면 앱을 기상 확인 화면으로 엶
+//   이 화면에서 기상 알람을 해제하면 앱을 기상 확인 화면으로 엶 (준비 · 출발 알람은 해제 기록만 — 그 해제가 준비 시작 · 출발 체크)
 class AlarmRingingActivity : Activity() {
   companion object {
     const val EXTRA_ALARM_TITLE = "alarm_title"
@@ -193,7 +193,8 @@ class AlarmRingingActivity : Activity() {
     val selected = selectedMinutes?.takeIf { it in options } ?: options.first()
     // 늦어요 표시 — 막지 않고 보여 주기만 함. 고른 분이 늦는지 · 가장 짧은 분(5분)도 늦는지
     val selectedLateMinutes = if (canSnooze) SnoozeRules.lateMinutes(now, selected, departAt) else 0
-    val wakeNow = canSnooze && departAt != null && SnoozeRules.isLate(now, options.first(), departAt)
+    // "지금 일어나야 …" 띠는 기상 알람만 — 앱 H07(snooze.ts wakeNow = kind === 'WAKE')과 같음. 준비 · 출발은 칩 · 경고 줄의 늦어요만
+    val wakeNow = current?.type == "WAKE" && canSnooze && departAt != null && SnoozeRules.isLate(now, options.first(), departAt)
 
     // 칩을 눌러 다시 그릴 때 작은 화면에서 스크롤이 맨 위로 돌아가지 않게 지금 위치를 기억함
     val savedScrollY = scrollView?.scrollY ?: 0
@@ -206,7 +207,11 @@ class AlarmRingingActivity : Activity() {
     }
 
     val heading = TextView(this).apply {
-      text = "기상 알람"
+      text = when (current?.type) {
+        "PREPARE" -> "준비 알람"
+        "DEPARTURE" -> "출발 알람"
+        else -> "기상 알람"
+      }
       setTextColor(Color.WHITE)
       textSize = 20f
       gravity = Gravity.CENTER

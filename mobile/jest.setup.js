@@ -11,3 +11,9 @@ jest.mock('@react-native-async-storage/async-storage', () => require('@react-nat
 if (typeof globalThis.WebSocket !== 'function') {
   globalThis.WebSocket = require('ws');
 }
+
+// Expo SDK 57의 fetch 전역값은 처음 접근할 때 expo-modules-core를 지연 로딩한다.
+// Jest/coverage 종료 처리 중 처음 접근하면 종료된 테스트 환경에서 console.warn이 실행되어
+// "Cannot log after tests are done" 오류가 날 수 있어, 환경이 살아 있는 준비 단계에서 초기화한다.
+// 이 코드는 Jest 설정에서만 실행되며 앱의 실제 네트워크 동작에는 영향을 주지 않는다.
+void globalThis.fetch;

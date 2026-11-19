@@ -223,7 +223,7 @@ export default async function ch07({ q, as, su, svc, check, expectErr }) {
     const early = of(await rows(A, g, D, at('07:45')), C);
     return s0.wake_status === 'SCHEDULED' && iso(s0.wake_alarm_at) === iso(at('08:00')) && s1.wake_status === 'RINGING' && s2.wake_status === 'RINGING' && s3.wake_status === 'DISMISSED'
       && s4.wake_status === 'CONFIRMED' && iso(s4.wake_confirmed_at) === iso(at('08:20'))
-      && cols === 'is_me,nickname,profile_image_url,user_id,wake_alarm_at,wake_confirmed_at,wake_status'
+      && cols === 'arrived_at,departed_at,is_me,nickname,prepare_alarm_at,prepare_started_at,profile_image_url,trip_appointment_at,trip_visible,user_id,wake_alarm_at,wake_confirmed_at,wake_status'
       && early.wake_status === 'CONFIRMED' && iso(early.wake_confirmed_at) === iso(at('07:40')) ? true : { s0, s1, s2, s3, s4, cols, early };
   });
 
@@ -247,7 +247,7 @@ export default async function ch07({ q, as, su, svc, check, expectErr }) {
     const missedMine = of(await q(`select * from public.get_group_wake_status($1, $2::date)`, [g, P]), M);
     await su();
     const cols = Object.keys(old[0]).sort().join();
-    return cols === 'dismissed_at,is_me,missed_at,nickname,profile_image_url,rang_at,snooze_count,user_id,wake_alarm_at,wake_confirmed_at,wake_status'
+    return cols === 'arrived_at,departed_at,dismissed_at,is_me,missed_at,nickname,prepare_alarm_at,prepare_started_at,profile_image_url,rang_at,snooze_count,trip_appointment_at,trip_visible,user_id,wake_alarm_at,wake_confirmed_at,wake_status'
       && me.snooze_count === 1 && iso(me.rang_at) === iso(at('07:00', P)) && iso(me.dismissed_at) === iso(at('07:09', P)) && me.wake_status === 'CONFIRMED'
       && other.rang_at === null && other.dismissed_at === null && other.missed_at === null && other.snooze_count === 0 && other.wake_status === 'CONFIRMED' && iso(other.wake_confirmed_at) === iso(at('07:12', P))
       && missedOther.wake_status === 'MISSED' && missedOther.missed_at === null && missedMine.wake_status === 'MISSED' && iso(missedMine.missed_at) === iso(at('07:30', P)) ? true : { me, other, missedOther, missedMine, cols };
@@ -311,7 +311,7 @@ export default async function ch07({ q, as, su, svc, check, expectErr }) {
       && !cols.includes('rering') ? true : { r, cols };
   });
 
-  await check('7-35 · 7-37: 응답에 수면 시간 · 메모 · 위치 · 강도 같은 칸이 없음 — 줄 하나의 칸은 일곱 개뿐', async () => {
+  await check('7-35 · 7-37: 응답에 수면 시간 · 메모 · 위치 · 강도 같은 칸이 없음 — 줄 하나의 칸은 열세 개뿐(출발 · 도착 시각 + 보임 여부 · 고른 약속 시각 · 준비 알람 · 준비 시작 시각까지)', async () => {
     const A = await join_(43, '에이');
     const g = await mkGroup(A, [], [A]);
     // 공개 함수의 날짜 범위는 조회자 시간대 기준이므로 오늘(한국) 날짜를 사용
@@ -321,7 +321,7 @@ export default async function ch07({ q, as, su, svc, check, expectErr }) {
     await as(A);
     const r = await q(`select * from public.get_group_wake($1, $2::date)`, [g, today]);
     await su();
-    return r.length === 1 && Object.keys(r[0]).sort().join() === 'is_me,nickname,profile_image_url,user_id,wake_alarm_at,wake_confirmed_at,wake_status' ? true : r;
+    return r.length === 1 && Object.keys(r[0]).sort().join() === 'arrived_at,departed_at,is_me,nickname,prepare_alarm_at,prepare_started_at,profile_image_url,trip_appointment_at,trip_visible,user_id,wake_alarm_at,wake_confirmed_at,wake_status' ? true : r;
   });
 
   await check('7-43(대상): 숨기기는 친구이거나 둘 다 참여 중인 그룹원일 때만 — 같은 그룹이 없는 친구도 되고, 초대만 받은 사람 · 나간 사람 · 내가 나간 그룹의 사람은 NOT_FOUND', async () => {

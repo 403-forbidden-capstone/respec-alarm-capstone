@@ -1,5 +1,5 @@
 // 백그라운드 기상 브리핑 갱신(#515)용 기기 키 — 로그인한 앱이 서버(briefing-device)에서 받아 네이티브 Keystore 저장소에 넘김
-//   폰 네이티브(BriefingRefreshWorker)는 새벽에 이 키로 alarm-briefing-device를 불러 본인 기상 알람 브리핑만 받음 — 앱 로그인 토큰은 안 씀(Kotlin이 세션을 갱신하지 않게)
+//   폰 네이티브는 이 키로 새벽에 alarm-briefing-device(BriefingRefreshWorker)를 불러 본인 기상 알람 브리핑을 받고, 알림 버튼 · 기상 해제 · 자동 기상 확정 기록을 alarm-events-device(DeviceUpload)로 올림 — 앱 로그인 토큰은 안 씀(Kotlin이 세션을 갱신하지 않게)
 //   언제: 폰 예약을 맞춘 뒤마다(useAlarmSync) — 키가 없거나 · 다른 계정 키거나 · 만료 7일 전이면 새로 받음. 아니면 서버를 안 부름
 //   로그아웃: 서버 줄 지우기 + 폰 키 지우기 (lib/session). 계정 삭제: 서버 줄은 계정과 같이 지워짐 → 폰 키만 지움
 //   실패해도 알람 · 브리핑에는 영향 없음 — 백그라운드 갱신만 빠지고 앱을 열 때 받는 길은 그대로

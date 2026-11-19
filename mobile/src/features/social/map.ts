@@ -1,12 +1,14 @@
 // DB 행 → 화면 타입(types.ts) 바꾸기 — 순수 함수만 (시험: __tests__/map.test.ts). 쿼리는 real/
-// 그룹 기상 상태는 D59에 따라 기상까지만, 화면은 3단계(아직 · 울렸어요 · 일어남) — 준비 · 출발 · 도착은 실데이터에 없음 (친구 7장)
+// 그룹 기상 상태 — 기상은 3단계(취침 중 · 알람 울림 · 기상 완료), 출발 · 도착 공유를 켠 사람은 준비 시작 · 출발 · 도착까지 (친구 7장, 11/19 D59 범위를 도착까지로 넓힘)
 import { KIND_LABEL, LEVELS, type AlarmKind } from '@/features/alarm/types';
+import { now } from '@/lib/clock';
 import { parseDbTime } from '@/lib/dbTime';
 import { dateParts, formatTime, minutesBetween, startOfDay } from '@/lib/format';
 import type { Enums } from '@/types/database';
 import { levelOfIntensity, levelOfSoundKey } from '@shared/calc/intensity.ts';
+import { isMoving as isMovingAt, MOVING_UNTIL_AFTER_APPOINTMENT_MINUTES, stageOf, wakePhaseOf } from '@shared/group-wake-state.ts';
 
-import type { FriendLink, FriendRelation, HandleSearch, MemberAlarm, OpenedLink, Person, WakeState } from './types';
+import type { FriendLink, FriendRelation, HandleSearch, MemberAlarm, OpenedLink, Person, TripCounts, WakeState } from './types';
 
 // ---------------------------------------------------------------------------
 // 사람
@@ -36,29 +38,26 @@ export function sinceLabel(createdAt: string): string {
 // 그룹 기상 상태 (get_group_wake, 친구 7장)
 // ---------------------------------------------------------------------------
 
-// 함수가 주는 칸 — 단계 · 알람 시각 · 확인 시각만 (미루기 횟수 · 알람 끈 시각 · 울린 시각 · 미확인 시각은 서버가 안 줌, 7-37)
+// 함수가 주는 칸 — 단계 · 알람 시각 · 확인 시각 · 출발 · 도착 시각 (미루기 횟수 · 알람 끈 시각 · 울린 시각 · 미확인 시각 · 장소 · 감지 출처는 서버가 안 줌, 7-37)
+//   departed_at · arrived_at = 그 사람이 이 그룹에 출발 · 도착 공유를 켰고 그 그룹 약속 참여 행일 때만 값이 있음. trip_visible = 출발 · 도착 공유가 켜져 있음(시각이 아직 없어도 true)
 export type WakeRow = {
   user_id: string;
   is_me: boolean;
   wake_alarm_at: string | null; // 그날 첫 켜진 기상 알람 시각
   wake_confirmed_at: string | null;
   wake_status: string; // SCHEDULED · RINGING · DISMISSED · MISSED · CONFIRMED · NO_ALARM
+  departed_at?: string | null;
+  arrived_at?: string | null;
+  trip_visible?: boolean;
+  trip_appointment_at?: string | null; // 출발 · 도착 기록이 가장 최근인 그 그룹 약속의 시각 — '이동 중'은 이 시각 + 60분까지만
+  // 준비 알람 시각 · 준비 시작(= 준비 알람 해제) 시각 — 출발 · 도착 공유(trip_visible)가 아니면 null (11/19 서버 PR). 서버 PR 머지 뒤 생성 타입(database.ts)으로 바꿈
+  prepare_alarm_at?: string | null;
+  prepare_started_at?: string | null;
 };
 
-// 서버 6단계 → 화면 3단계 + 알람 없음. 울림 · 해제 · 미확인은 '울렸어요'로 묶음 (7-아 · 7-바 · D61: 해제만 하면 '울렸어요')
-//   모르는 값은 '울렸어요' — 일어남으로 잘못 보이지 않게
-export function stageOf(status: string): 'SCHEDULED' | 'RANG' | 'WOKE' | 'NO_ALARM' {
-  switch (status) {
-    case 'SCHEDULED':
-      return 'SCHEDULED';
-    case 'CONFIRMED':
-      return 'WOKE';
-    case 'NO_ALARM':
-      return 'NO_ALARM';
-    default:
-      return 'RANG';
-  }
-}
+// 단계 고르기(stageOf · isMoving · 이동 중 60분)는 서버 그룹 안내와 같이 쓰려고 @shared/group-wake-state.ts로 옮김 — 규칙은 그대로
+export { MOVING_UNTIL_AFTER_APPOINTMENT_MINUTES, stageOf };
+export const isMoving = (row: Pick<WakeRow, 'departed_at' | 'arrived_at' | 'trip_appointment_at'>, current: Date) => isMovingAt(row, current, parseDbTime);
 
 export const NO_APPOINTMENT_STATE: WakeState = { stage: 'NO_APPOINTMENT', text: '오늘은 그룹 약속이 없어요', dot: null, woke: false };
 // 약속 있는 날 줄이 없는 멤버 — 동의 안 함 · 나를 숨김 · 차단을 구분하지 않음 (7-06 · 7-10)
@@ -69,27 +68,60 @@ const at = parseDbTime; // DB 시각 글자 (lib/dbTime)
 // '오전 8:50 알람' — 알람 시각 한 줄 (앱 다른 화면처럼 오전 · 오후를 붙임, 11/9 결정표) (G02 아직 단계 · G03, 7-다)
 export const alarmLine = (alarmAt: Date | null) => (alarmAt ? `${formatTime(alarmAt)} 알람` : null);
 
-// 멤버 한 줄의 기상 상태 — 알람 기준 글자만, '취침 중' · 준비 · 출발 · 도착 없음 (7-라 · 7-42). 색 + 글자를 같이 (14-파)
+// 멤버 한 줄의 기상 상태 — 목업 G02 · G03 글자 · 점 그대로(11/19 지형님): 취침 중 · 알람 울리는 중 · 기상 확인 전 · 기상 완료 · 준비 중 · 이동 중 · 출발 · 도착
+//   위가 우선: 도착 · 출발 시각 → 준비 시작 시각(준비 알람 해제 체크) → 알람 기준 글자. '준비 중'은 짐작이 아니라 준비 시작 체크가 있을 때만 —
+//   기상 확인 뒤 준비 시작 체크 전에는 출발 · 도착 공유를 켰어도 '기상 완료'. 출발 · 도착 · 준비 시작은 기상 확인 전이어도 보임. 색 + 글자를 같이 (14-파)
+//   기상 알람이 없는 날(NO_ALARM)은 출발 · 도착 공유를 켠 사람의 준비 알람 시각을 '준비 알람 오후 5:10'(점 없음)으로, 그 밖엔 '알람 없음'
+//   점: 일어나기 전(취침 · 울림 · 확인 전) = 'z', 진행 중(준비 · 출발) = 파랑, 끝(기상 완료 · 도착) = 초록 (목업 memberState)
+//   해제와 미확인은 같은 '알람 울림 · 기상 확인 전' — 미확인 글자 · 미루기 횟수는 본인만 (7-바)
 //   dayHasRows = 함수가 그날 줄을 하나라도 줬는지 (나는 늘 나오니 비었으면 그 그룹 약속이 없는 날, D57)
-export function wakeStateOf(row: WakeRow | undefined, dayHasRows: boolean): WakeState {
+export function wakeStateOf(row: WakeRow | undefined, dayHasRows: boolean, current: Date = now()): WakeState {
   if (!dayHasRows) return NO_APPOINTMENT_STATE;
   if (!row) return NOT_SHARED_STATE;
-  const stage = stageOf(row.wake_status);
-  switch (stage) {
+  const time = (value: string | null | undefined) => (value ? formatTime(at(value)) : '');
+  switch (wakePhaseOf(row, current, at)) {
+    case 'ARRIVED':
+      return { stage: 'ARRIVED', text: `도착 · ${time(row.arrived_at)}`, dot: 'ok', woke: true };
+    case 'MOVING':
+      return { stage: 'DEPARTED', text: `이동 중 · ${time(row.departed_at)} 출발`, dot: 'mid', woke: true };
+    case 'DEPARTED':
+      return { stage: 'DEPARTED', text: `출발 · ${time(row.departed_at)}`, dot: 'mid', woke: true };
+    case 'PREPARING':
+      return { stage: 'PREPARING', text: `준비 중 · ${time(row.prepare_started_at)} 시작`, dot: 'mid', woke: true };
     case 'WOKE':
-      return { stage, text: row.wake_confirmed_at ? `일어났어요 ${formatTime(at(row.wake_confirmed_at))}` : '일어났어요', dot: 'ok', woke: true };
+      return { stage: 'WOKE', text: row.wake_confirmed_at ? `기상 완료 · ${time(row.wake_confirmed_at)}` : '기상 완료', dot: 'ok', woke: true };
+    case 'RINGING':
+      return { stage: 'RANG', text: '알람 울리는 중', dot: 'zz', woke: false };
     case 'RANG':
-      return { stage, text: '울렸어요', dot: 'mid', woke: false };
-    case 'SCHEDULED':
-      return { stage, text: alarmLine(row.wake_alarm_at ? at(row.wake_alarm_at) : null) ?? '알람 전', dot: 'zz', woke: false };
-    default:
-      return { stage, text: '알람 없음', dot: 'zz', woke: false };
+      return { stage: 'RANG', text: '알람 울림 · 기상 확인 전', dot: 'zz', woke: false };
+    case 'SCHEDULED': {
+      const line = alarmLine(row.wake_alarm_at ? at(row.wake_alarm_at) : null);
+      return { stage: 'SCHEDULED', text: line ? `취침 중 · ${line}` : '취침 중', dot: 'zz', woke: false };
+    }
+    case 'PREP_SCHEDULED':
+      return { stage: 'PREP_SCHEDULED', text: `준비 알람 ${time(row.prepare_alarm_at)}`, dot: null, woke: false };
+    case 'NO_ALARM':
+      return { stage: 'NO_ALARM', text: '알람 없음', dot: null, woke: false };
   }
 }
 
-// 오늘 일어난 사람 수 — 약속 없는 날(줄 없음)은 null이라 G01이 그 줄을 숨김 (7-사 · 7-34)
-export const wokeCountOf = (rows: readonly WakeRow[]): number | null =>
-  rows.length ? rows.filter((r) => stageOf(r.wake_status) === 'WOKE').length : null;
+// 일어난 것으로 셈 — 기상 확인 + 준비 시작 · 출발 · 도착 시각이 있는 사람(기상 확인 전이어도)
+const wokeRow = (r: WakeRow) => stageOf(r.wake_status) === 'WOKE' || !!r.prepare_started_at || !!r.departed_at || !!r.arrived_at;
+// 준비 중 = 준비 시작 체크가 있고 아직 출발 · 도착이 없음 (wakeStateOf와 같은 규칙)
+const isPreparing = (r: WakeRow) => !!r.prepare_started_at && !r.departed_at && !r.arrived_at;
+
+// 오늘 일어난 사람 수 — 준비 중 · 출발 · 도착 포함. 약속 없는 날(줄 없음)은 null이라 G01이 그 줄을 숨김 (7-사 · 7-34)
+export const wokeCountOf = (rows: readonly WakeRow[]): number | null => (rows.length ? rows.filter(wokeRow).length : null);
+
+// G01 요약 줄 숫자 — 누군가 도착했거나 이동 중이거나 준비 중일 때만(없으면 null, 줄은 '오늘 n명 기상 완료'). 기상 완료 = 준비 시작 전 + 출발 뒤 이동 중이 끝난 사람
+export function tripCountsOf(rows: readonly WakeRow[], current: Date = now()): TripCounts | null {
+  const arrived = rows.filter((r) => r.arrived_at).length;
+  const moving = rows.filter((r) => isMoving(r, current)).length;
+  const preparing = rows.filter(isPreparing).length;
+  if (arrived + moving + preparing === 0) return null;
+  // 출발했지만 약속 + 60분이 지나도록 도착 기록이 없는 사람은 기상 완료로 셈
+  return { arrived, moving, preparing, woke: rows.filter((r) => wokeRow(r) && !r.arrived_at && !isMoving(r, current) && !isPreparing(r)).length };
+}
 
 // 팀 주간회의 · 세종대학교 · 오전 10:00
 // 장소가 빈 줄(보는 사람이 그룹 멤버가 아니라 서버가 숨긴 공동 약속)은 '그룹 일정 · 오전 10:00'으로 — 빈 칸을 건너뜀

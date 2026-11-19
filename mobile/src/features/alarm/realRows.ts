@@ -125,7 +125,7 @@ async function fetchDayRows(userId: string, from: string, to: string) {
   const { data, error } = await supabase
     .from('appointment_participants')
     .select(
-      'participant_id, est_travel_minutes, travel_source, departed_at, appointments!inner(appointment_id, title, appointment_at, dest_name, importance), alarms(alarm_id, alarm_type, scheduled_at, is_enabled)',
+      'participant_id, est_travel_minutes, travel_source, departed_at, arrived_at, appointments!inner(appointment_id, title, appointment_at, dest_name, importance), alarms(alarm_id, alarm_type, scheduled_at, is_enabled)',
     )
     .eq('user_id', userId)
     .gte('appointments.appointment_at', from)

@@ -127,6 +127,19 @@ async function applyPlan(plan: RegionPlan, force: boolean, epoch: number): Promi
   return commitStep(resolvePending(state, now().getTime()), { regions: registered });
 }
 
+// 위치로 출발을 자동 판단하는 약속(참여 조건 id) — 지오펜스를 거는 조건과 같음: 안드로이드 + 실데이터 + 로그인 + 자동 기록 스위치 + 위치 권한(앱 사용 중 · 항상) + 집(또는 출발지) · 목적지 좌표가 있어 감시 대상(planRegions의 participants).
+//   출발 알람 계획에 실려(alarmSync reconcile) 해제가 출발인지를 가름. 일 안 하는 조건이면 빈 목록. 읽기 실패는 던짐 (부르는 쪽이 "모름"으로 처리)
+export async function locationTrackedParticipantIds(): Promise<ReadonlySet<string>> {
+  if (Platform.OS !== 'android' || isMock()) return new Set();
+  const userId = await currentUserId();
+  if (!userId) return new Set();
+  if (!(await getLocationAuto()) || !(await hasLocationPermissions())) return new Set();
+  const nowMs = now().getTime();
+  const source = await readPlanSource(userId, nowMs);
+  const plan = planRegions({ ...source, now: nowMs, aheadMinutes: PLAN_AHEAD_MINUTES });
+  return new Set(plan.participants.map((p) => p.participantId));
+}
+
 // 폰 OS에 등록한 지오펜스를 끔 (켜진 게 없으면 아무것도 안 함). 줄 안에서 부름. 던질 수 있음 — 부르는 쪽이 잡음
 async function stopNative(): Promise<void> {
   const { hasStartedGeofencingAsync, stopGeofencingAsync } = nativeLocation();

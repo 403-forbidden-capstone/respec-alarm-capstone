@@ -139,11 +139,13 @@ class BriefingRulesTest {
   }
 
   @Test
-  fun prepareAndDepartureNoticeStartsSpeechServiceOthersDoNot() {
-    // AlarmController.fire: 알람음 없는 알림 뒤 음성 안내 서비스 — 준비 시작 · 출발만 (예전엔 출발만이라 준비 시작은 말이 없었음)
+  fun prepareAndDepartureNoticeStartsSpeechServiceOnlyWithoutAlarmSound() {
+    // AlarmController.fire: 알람음 없는 알림 뒤 음성 안내 서비스 — 예전 APK가 걸어 둔 준비 시작 · 출발 알림만
     assertTrue(BriefingRules.speaksOnNotice("PREPARE"))
     assertTrue(BriefingRules.speaksOnNotice("DEPARTURE"))
     for (type in listOf("WAKE", "ARRIVE", "ROUTINE")) assertFalse(BriefingRules.speaksOnNotice(type))
+    // 11/19: 준비 · 출발이 알람음이 있는 알람(plan.sound)이면 알람 서비스가 같은 문장을 읽으므로 음성 서비스를 또 띄우지 않음 (두 번 겹쳐 읽지 않게)
+    for (type in listOf("PREPARE", "DEPARTURE")) assertFalse(BriefingRules.speaksOnNotice(type, plansSound = true))
   }
 
   // --- 백그라운드 브리핑 갱신 (#515) ---
@@ -195,5 +197,14 @@ class BriefingRulesTest {
     assertTrue(BriefingRules.shouldRetry(0, kst(4, 10), 30_000L, deadline))
     assertFalse(BriefingRules.shouldRetry(0, kst(7, 24), 2 * min, deadline)) // 다음 시도가 마감 뒤
     assertFalse(BriefingRules.shouldRetry(BriefingRules.REFRESH_MAX_ATTEMPTS - 1, kst(4, 10), 30_000L, deadline))
+  }
+
+  // 그룹 상태 안내를 끼울 문장 경계 — 문장 가운데서 나누지 않고, 느낌표는 마침표로 바뀐 뒤 나눔
+  @Test
+  fun sentencesSplitAtSentenceEnds() {
+    assertEquals(listOf("좋은 아침이야.", "오늘 오전 10시에 발표가 있어.", "일어날 시간이야?"), BriefingRules.sentences("좋은 아침이야. 오늘 오전 10시에 발표가 있어! 일어날 시간이야?"))
+    assertEquals(listOf("야.", "빨리 일어나."), BriefingRules.sentences("야!빨리 일어나!!"))
+    assertEquals(listOf("마침표 없는 한 문장"), BriefingRules.sentences("마침표 없는 한 문장"))
+    assertEquals(emptyList<String>(), BriefingRules.sentences("  "))
   }
 }
