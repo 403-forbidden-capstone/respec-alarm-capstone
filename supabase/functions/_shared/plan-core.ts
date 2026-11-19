@@ -56,6 +56,8 @@ export type ProfileRow = {
   home_lat: number | null;
   home_lng: number | null;
   default_prepare_minutes?: number | null; // 온보딩에서 답한 "일어나서 나가기까지" — 기상~출발 첫 값 (학습 루프 기초 1절 ①). 없으면 null
+  default_outing_prep_minutes?: number | null; // explicitly supplied pure prepare-start -> departure
+  ml_profile_consented_at?: string | null; // consent for behavioral personalization/history use
   wake_sensitivity?: string | null; // 온보딩 잠귀 'LIGHT' | 'NORMAL' | 'HEAVY' (D69) — 무거움이면 강도 자동 값이 강. 없으면 보통
   preferred_voice_tone?: string | null; // 설정에서 고른 기본 말소리 CALM · NEUTRAL · DIRECT — 비면 자동(강도 단계). 일정에서 직접 고른 말소리가 이김
   wake_margin?: string | null; // 온보딩 깨우는 여유 'TIGHT' | 'NORMAL' | 'LOOSE' (D63) — 기록의 0.7 · 0.8 · 0.9 분위수. 없으면 보통
