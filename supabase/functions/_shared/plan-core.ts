@@ -127,7 +127,8 @@ export type PlanDraft = ParticipantFields &
     importance?: Importance;
     travelMinutes?: number; // 정해진 이동시간 — 직접 입력하거나 앱이 확인 시트에서 보여 준 값
     travelSource?: 'API' | 'MANUAL';
-    prepareMinutes?: number; // 정해진 준비 시간(기상 ~ 출발)
+    prepareMinutes?: number; // EXPLICIT legacy manual override (wake -> departure)
+    autoPrepareSnapshotMinutes?: number; // auto preview value; compare at commit, NEVER feed back as manual override
   };
 
 export type PlanInputs = {
