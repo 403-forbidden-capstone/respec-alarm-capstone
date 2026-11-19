@@ -138,4 +138,29 @@ class DeviceUploadRulesTest {
     assertEquals(dismissed + 600_000L, DeviceUploadRules.observeEndMillis(dismissed))
     assertEquals(dismissed + 602_000L, DeviceUploadRules.judgeAtMillis(dismissed))
   }
+
+  @Test
+  fun wakePromptOnlyWhenAutoCannotDecideAndNotConfirmed() {
+    val dismissed = 1_795_000_000_000L
+    val at11 = dismissed + 11 * 60_000L
+    val spans = WakeJudge.toSpans(dismissed, listOf((dismissed + 30_000) to (dismissed + 90_000), (dismissed + 360_000) to (dismissed + 420_000)))
+    // 사용 정보를 못 읽음(권한 없음) · 사용 적음 → 알림
+    assertTrue(DeviceUploadRules.shouldPromptWake(WakeJudge.evaluate(dismissed, at11, null), false))
+    assertTrue(DeviceUploadRules.shouldPromptWake(WakeJudge.evaluate(dismissed, at11, emptyList()), false))
+    // 자동 확정(AUTO)은 알림 없이 서버로 · 관찰 중도 아직 아님
+    assertFalse(DeviceUploadRules.shouldPromptWake(WakeJudge.evaluate(dismissed, at11, spans), false))
+    assertFalse(DeviceUploadRules.shouldPromptWake(WakeJudge.evaluate(dismissed, dismissed + 6 * 60_000L, emptyList()), false))
+    // 이미 확정(먼저 깼어요 · 앱에서 확정)이면 PROMPT여도 안 띄움
+    assertFalse(DeviceUploadRules.shouldPromptWake(WakeJudge.evaluate(dismissed, at11, null), true))
+  }
+
+  @Test
+  fun confirmedMarkCountsOnlyWithinTwelveHours() {
+    val now = 1_795_000_000_000L
+    assertFalse(DeviceUploadRules.isWakeConfirmedRecently(null, now))
+    assertTrue(DeviceUploadRules.isWakeConfirmedRecently(now - 60_000L, now))
+    assertTrue(DeviceUploadRules.isWakeConfirmedRecently(now - 11 * 3_600_000L, now))
+    assertFalse(DeviceUploadRules.isWakeConfirmedRecently(now - 12 * 3_600_000L, now)) // 어제 같은 알람의 표시에는 안 걸림
+    assertFalse(DeviceUploadRules.isWakeConfirmedRecently(now + 1_000L, now))
+  }
 }

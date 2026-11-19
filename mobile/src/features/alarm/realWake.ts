@@ -296,10 +296,21 @@ async function writeDailyRecord(userId: string, ctx: WakeContext, wokeAt: Date):
   if (updated.error) throw updated.error;
 }
 
+// 확정 기록이 서버에 들어가면 폰이 띄운 "지금 일어나셨나요?" 알림을 거둠 (먼저 깼어요 · H08 [일어났어요] · 자동 판정이 모두 settle을 지남). 실패는 삼킴 — 알림이 남아도 기록에는 영향 없음
+async function dismissWakePrompt(alarmId: string): Promise<void> {
+  try {
+    await AlarmCore.dismissWakePrompt(alarmId);
+  } catch {
+    // 예전 APK · 웹 · iOS는 할 일 없음
+  }
+}
+
 function settle(userId: string, ctx: WakeContext, wokeAt: Date, how: 'self' | 'auto'): Promise<void> {
   const running = writing.get(ctx.alarmId);
   if (running) return running;
-  const task = writeConfirmation(userId, ctx, wokeAt, how).finally(() => writing.delete(ctx.alarmId));
+  const task = writeConfirmation(userId, ctx, wokeAt, how)
+    .then(() => dismissWakePrompt(ctx.alarmId))
+    .finally(() => writing.delete(ctx.alarmId));
   writing.set(ctx.alarmId, task);
   return task;
 }

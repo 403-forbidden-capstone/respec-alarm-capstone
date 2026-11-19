@@ -125,6 +125,7 @@ export function createMemoryBackend(now: () => number = Date.now): AlarmBackend 
       const done = new Set(clientEventIds);
       events = events.filter((event) => !done.has(event.clientEventId));
     },
+    async dismissWakePrompt() {},
     async saveVoiceBriefing(alarmId, value) {
       const old = voices.get(alarmId)?.files ?? new Map<number, string>();
       const files = new Map<number, string>();

@@ -1,6 +1,7 @@
 package expo.modules.alarmcore
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -47,6 +48,9 @@ class WakeJudgeTest {
       val now = base + (field(obj, "nowMin").toDouble() * 60_000).toLong()
       val result = WakeJudge.evaluate(base, now, spans(text(obj, "spans")), field(obj, "theta").toDouble())
       assertEquals(name, text(obj, "phase").uppercase(), result.phase.name)
+      // 확인 알림 규칙: 표에서 prompt인 줄(사용 정보 못 읽음 포함)만 알림, 이미 확정이면 어느 줄이든 안 띄움
+      assertEquals("$name 알림", text(obj, "phase") == "prompt", DeviceUploadRules.shouldPromptWake(result, false))
+      assertFalse("$name 확정됨", DeviceUploadRules.shouldPromptWake(result, true))
       assertEquals("$name 누적", field(obj, "usage").toDouble(), result.usage, 0.0)
       assertEquals("$name 최근", field(obj, "recent").toDouble(), result.recent, 0.0)
       val expected = field(obj, "reachedMs")

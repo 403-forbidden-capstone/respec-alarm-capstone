@@ -58,6 +58,16 @@ object DeviceUploadRules {
   fun usageToMillis(raw: List<Map<String, Any>>): List<Pair<Long, Long>> =
     raw.map { (it["startMillis"] as Number).toLong() to (it["endMillis"] as Number).toLong() }
 
+  /** 확정 표시를 이 시간 안에 남겼으면 이미 확정된 것 — 같은 알람이 반복돼도 어제 표시에 안 걸리게 (앱 findRecentDismissedWake와 같은 12시간) */
+  const val CONFIRMED_WINDOW_MILLIS = 12 * 60 * 60 * 1000L
+
+  fun isWakeConfirmedRecently(confirmedAtMillis: Long?, nowMillis: Long): Boolean =
+    confirmedAtMillis != null && nowMillis - confirmedAtMillis in 0 until CONFIRMED_WINDOW_MILLIS
+
+  /** 해제 10분 뒤 "지금 일어나셨나요?" 알림을 띄울지 — 자동으로 못 정한 경우(PROMPT: 사용 정보 못 읽음 · 사용 적음)만, 이미 확정됐으면 안 띄움. AUTO는 서버로 올리는 작업이 처리 */
+  fun shouldPromptWake(result: WakeJudge.Result, alreadyConfirmed: Boolean): Boolean =
+    !alreadyConfirmed && result.phase == WakeJudge.Phase.PROMPT
+
   /** 서버에 보낼 기상 확정 값 */
   data class WakeConfirmation(val alarmId: String, val eventId: String, val confirmedAtIso: String, val recordDate: String, val reportedAtIso: String)
 

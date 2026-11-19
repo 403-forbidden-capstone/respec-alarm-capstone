@@ -31,6 +31,7 @@ import java.util.concurrent.TimeUnit
 // 앱을 열지 않고 서버로 바로 올리기 (알림 버튼 · 자동 기상 판정) — 기록이 쌓이는 자리(AlarmEventLog.append)가 onAppended를 부름
 //   1) 알림 버튼 · 기상 알람 해제 기록 → WorkManager(네트워크 조건) → alarm-events-device가 alarm_events에 넣음
 //   2) 기상 알람 해제 → 해제 + 10분 2초에 정확 알람(setExactAndAllowWhileIdle, Doze에서도 깸) → WakeJudgeReceiver → 급한 작업(WorkManager expedited) → 화면 사용(UsageSpans)으로 WakeJudge 판정 → 확정이면 daily_records · WAKE_CONFIRMED를 같은 함수로
+//      같은 시각에 폰 안에서만 판정해 자동으로 못 정하면(사용 기록 권한 없음 · 못 읽음 · 사용 적음) "지금 일어나셨나요?" 알림을 띄움 (WakePrompt, 네트워크 · 기기 키 무관)
 //      정확 알람 권한이 없거나 못 걸면 같은 시각의 WorkManager 지연 작업으로 (Doze · 절전에서 늦을 수 있음 — 늦어도 확정 시각은 사용 기록으로 정해지고, 못 돌면 앱이 열릴 때 재판정)
 //   인증은 백그라운드 브리핑 갱신과 같은 기기 키(BriefingCredential, Authorization: Bearer bdk_…). 키가 없거나 만료 · 폐기면 아무것도 안 하고 지금처럼 앱이 열릴 때 JS가 올림
 //   기록은 폰에서 지우지 않음 — 앱이 열리면 JS가 같은 client_event_id로 다시 올리고(충돌 무시) 원탭 뒤처리(출발 · 도착 시각 반영)도 그때 돎. 그래서 다시 올려도 중복이 안 생김
@@ -116,7 +117,19 @@ object WakeJudgeSchedule {
       context.getSystemService(AlarmManager::class.java).setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, operation(context, alarmId, dismissedAt))
       true
     }.getOrDefault(false)
-    if (!exact) enqueue(context, alarmId, dismissedAt, expedited = false)
+    if (!exact) {
+      enqueue(context, alarmId, dismissedAt, expedited = false)
+      enqueuePrompt(context, alarmId, dismissedAt)
+    }
+  }
+
+  /** 정확 알람을 못 걸 때 — 확인 알림용 지연 작업. 네트워크 조건 없음 (오프라인이어도 알림은 떠야 함) */
+  private fun enqueuePrompt(context: Context, alarmId: String, dismissedAt: Long) {
+    val request = OneTimeWorkRequestBuilder<WakePromptWorker>()
+      .setInputData(workDataOf(DeviceUpload.EXTRA_ALARM_ID to alarmId, DeviceUpload.EXTRA_DISMISSED_AT to dismissedAt))
+      .setInitialDelay(DeviceUploadRules.judgeDelayMillis(dismissedAt, System.currentTimeMillis()), TimeUnit.MILLISECONDS)
+      .build()
+    WorkManager.getInstance(context).enqueueUniqueWork("device_wake_prompt_$alarmId", ExistingWorkPolicy.REPLACE, request)
   }
 
   /** 정확 알람이 울림(WakeJudgeReceiver) 또는 지연 작업 예약 — 네트워크 조건. expedited는 Doze 중에도 돌고, 할당량이 모자라면 보통 작업으로 */
@@ -131,12 +144,31 @@ object WakeJudgeSchedule {
   }
 }
 
-// 정확 알람 → 급한 작업 넣기만 (바로 끝남)
+// 정확 알람 → ① 서버로 올리는 급한 작업 넣기 ② 확인 알림 판정 · 표시 (폰 안에서만, 네트워크 · 기기 키 상관없음)
+//   ②는 사용 기록 읽기라 시간이 걸릴 수 있어 goAsync로 별도 스레드에서 — ①의 네트워크 제약 밖
 class WakeJudgeReceiver : BroadcastReceiver() {
   override fun onReceive(context: Context, intent: Intent) {
     val alarmId = intent.getStringExtra(DeviceUpload.EXTRA_ALARM_ID) ?: return
     val dismissedAt = intent.getLongExtra(DeviceUpload.EXTRA_DISMISSED_AT, 0L).takeIf { it > 0 } ?: return
     runCatching { WakeJudgeSchedule.enqueue(context, alarmId, dismissedAt, expedited = true) }
+    val pending = goAsync()
+    Thread {
+      try {
+        runCatching { WakePrompt.promptIfNeeded(context, alarmId, dismissedAt) }
+      } finally {
+        pending.finish()
+      }
+    }.start()
+  }
+}
+
+// 정확 알람을 못 걸 때의 확인 알림 — 같은 판정 · 표시, 네트워크 조건 없음
+class WakePromptWorker(context: Context, params: WorkerParameters) : Worker(context, params) {
+  override fun doWork(): Result {
+    val alarmId = inputData.getString(DeviceUpload.EXTRA_ALARM_ID) ?: return Result.success()
+    val dismissedAt = inputData.getLong(DeviceUpload.EXTRA_DISMISSED_AT, 0L).takeIf { it > 0 } ?: return Result.success()
+    runCatching { WakePrompt.promptIfNeeded(applicationContext, alarmId, dismissedAt) }
+    return Result.success()
   }
 }
 
@@ -153,7 +185,7 @@ class DeviceEventUploadWorker(context: Context, params: WorkerParameters) : Work
   }
 }
 
-// 기상 알람을 끈 10분 뒤 — 화면 사용으로 앱과 같은 규칙(WakeJudge)으로 판정, 확정이면 서버에 기록. 확정이 아니면 아무것도 안 함 (확인 알림 · 놓침은 지금 흐름 그대로)
+// 기상 알람을 끈 10분 뒤 — 화면 사용으로 앱과 같은 규칙(WakeJudge)으로 판정, 확정이면 서버에 기록. 확정이 아니면 이 작업은 아무것도 안 함 (확인 알림은 WakePrompt가 따로 띄움 · 놓침은 서버 배치)
 class WakeJudgeWorker(context: Context, params: WorkerParameters) : Worker(context, params) {
   override fun doWork(): Result {
     val alarmId = inputData.getString(DeviceUpload.EXTRA_ALARM_ID)

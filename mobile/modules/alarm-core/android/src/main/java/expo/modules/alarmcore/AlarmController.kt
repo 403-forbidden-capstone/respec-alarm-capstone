@@ -371,12 +371,15 @@ object AlarmController {
     return settled
   }
 
-  // 해제 뒤 앱 열기: respecalarm://wake?alarmId=<id> (알림 · 알람 화면처럼 사용자가 누른 직후라 막히지 않음)
-  private fun openWakeScreen(context: Context, alarmId: String) {
-    val intent = Intent(Intent.ACTION_VIEW, Uri.parse("$WAKE_LINK?alarmId=${Uri.encode(alarmId)}")).apply {
+  // 기상 확인 화면을 여는 인텐트 (해제 뒤 · 기상 확인 알림을 누를 때)
+  internal fun wakeIntent(context: Context, alarmId: String): Intent =
+    Intent(Intent.ACTION_VIEW, Uri.parse("$WAKE_LINK?alarmId=${Uri.encode(alarmId)}")).apply {
       setPackage(context.packageName)
       addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
     }
-    runCatching { context.startActivity(intent) }
+
+  // 해제 뒤 앱 열기: respecalarm://wake?alarmId=<id> (알림 · 알람 화면처럼 사용자가 누른 직후라 막히지 않음)
+  private fun openWakeScreen(context: Context, alarmId: String) {
+    runCatching { context.startActivity(wakeIntent(context, alarmId)) }
   }
 }
