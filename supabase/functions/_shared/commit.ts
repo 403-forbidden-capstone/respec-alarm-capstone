@@ -131,7 +131,12 @@ export async function persistAppointment(
       est_travel_minutes: plan.travelMinutes,
       travel_source: travel.source,
       prepare_minutes: plan.prepare.minutes,
-      ...(draft.prepareValueSource ? { prepare_value_source: draft.prepareValueSource } : {}),
+      // Old app versions don't send prepare_value_source. If they send a
+      // numeric prepare_minutes, the duration may be an auto snapshot OR a
+      // manual value. Demote provenance to LEGACY rather than falsely retain AUTO.
+      ...(draft.prepareValueSource
+        ? { prepare_value_source: draft.prepareValueSource }
+        : draft.prepareMinutes != null ? { prepare_value_source: 'LEGACY' } : {}),
       buffer_minutes: plan.basics.bufferMinutes,
     };
     let participantId: string;
