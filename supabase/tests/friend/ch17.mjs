@@ -1,5 +1,5 @@
 // 친구 17장 — 그룹 포인트: 준비 · 출발 알람 해제 반영 · 준비 시각 칸 · 새로 고침 신호 (11/19 지형님: 기상 · 준비 · 출발이 모두 진짜 알람)
-//   ① 해제 → 참여 행: 준비 알람 해제 = prepare_started_at, 출발 알람 해제 = departed_at(BUTTON), 빈 칸만 (옛 ACKNOWLEDGED · 위치 우선 규칙 그대로)
+//   ① 해제 → 참여 행: 준비 알람 해제 = prepare_started_at, 출발 알람 해제는 출발을 안 바꿈(출발 = 위치 자동, 감지 꺼진 폰만 ACKNOWLEDGED(DEPARTURE)), 빈 칸만
 //   ② 그룹 조회 새 칸: prepare_alarm_at(켜진 PREPARE 알람 시각) · prepare_started_at — trip_visible일 때만, 같은 약속 고르기 규칙, 기상 없는 날도 있음
 //   ③ 새로 고침 신호: 준비 시작 · 공유 바꿈 · 나가기 / 내보내짐 · 약속에서 빠짐 · 약속 시각 변경 / 취소 · 기상 숨기기 / 보이기 — 값만 바뀐 그룹에, 하나의 변경에 한 번
 //   날짜는 고정 날짜 말고 오늘(한국 시간) 기준. 사람은 이 장 전용 계정. db-check 맨 끝에서 돎
@@ -57,7 +57,7 @@ export default async function ch17({ q, as, su, check }) {
     return out;
   };
 
-  await check('17-01 해제 → 참여 행: 준비 알람 해제 = prepare_started_at(PREPARE_ALARM), 출발 알람 해제 = departed_at(BUTTON) — 빈 칸만(둘째 해제는 안 덮음), 울림 · 미루기 기록은 안 건드림, 기상 알람 해제도 참여 행은 그대로', async () => {
+  await check('17-01 해제 → 참여 행: 준비 알람 해제 = prepare_started_at(PREPARE_ALARM), 출발 알람 해제는 출발을 안 바꿈(출발은 위치 · ACKNOWLEDGED만) — 준비는 빈 칸만(둘째 해제는 안 덮음), 울림 · 미루기 기록은 안 건드림, 기상 알람 해제도 참여 행은 그대로', async () => {
     const W = await setup(100, { wake: at('07:00') });
     await ev(W.AL.B.PREPARE, W.B, 'TRIGGERED', at('08:50'));
     await ev(W.AL.B.PREPARE, W.B, 'SNOOZED', at('08:51'));
@@ -70,7 +70,7 @@ export default async function ch17({ q, as, su, check }) {
     await ev(W.AL.B.DEPARTURE, W.B, 'DISMISSED', at('09:40'));
     const row = await pt(W.P.B);
     return eq([mid.prepare_started_at, mid.departed_at, iso(row.prepare_started_at), row.prepare_started_source, iso(row.departed_at), row.departed_source, row.arrived_at],
-      [null, null, iso(at('08:55')), 'PREPARE_ALARM', iso(at('09:25')), 'BUTTON', null]);
+      [null, null, iso(at('08:55')), 'PREPARE_ALARM', null, null, null]);
   });
 
   await check('17-02 옛 길 그대로: ACKNOWLEDGED(알림 버튼)로도 출발 · 준비 시작이 반영되고, 위치로 이미 잡힌 출발은 해제로 안 덮이며, 이른 위치 출발(출발 예정 − 60분 전)은 그대로 조용히 무시', async () => {
@@ -116,7 +116,8 @@ export default async function ch17({ q, as, su, check }) {
     await ev(W.AL.B.PREPARE, W.B, 'TRIGGERED', at('17:10'));
     await ev(W.AL.B.PREPARE, W.B, 'DISMISSED', at('17:12'));
     const after = of(await rows(W.A, W.g, TODAY, at('17:13')), W.B);
-    await ev(W.AL.B.DEPARTURE, W.B, 'DISMISSED', at('17:31'));
+    await ev(W.AL.B.DEPARTURE, W.B, 'DISMISSED', at('17:30'));   // 해제는 출발이 아님 — 감지가 꺼진 폰만 ACKNOWLEDGED를 함께 보냄
+    await ev(W.AL.B.DEPARTURE, W.B, 'ACKNOWLEDGED', at('17:31'));
     const moving = of(await rows(W.A, W.g, TODAY, at('17:32')), W.B);
     return eq([before.wake_status, iso(before.prepare_alarm_at), before.prepare_started_at, after.wake_status, iso(after.prepare_started_at), moving.wake_status, iso(moving.prepare_started_at), iso(moving.departed_at), moving.arrived_at],
       ['NO_ALARM', iso(at('17:10')), null, 'NO_ALARM', iso(at('17:12')), 'NO_ALARM', iso(at('17:12')), iso(at('17:31')), null]);
@@ -133,7 +134,7 @@ export default async function ch17({ q, as, su, check }) {
     await ev(pr1, B, 'DISMISSED', at('08:55'));
     await ev(pr2, B, 'DISMISSED', at('13:55'));
     const first = of(await rows(A, g), B);
-    await ev(dep2, B, 'DISMISSED', at('14:22'));
+    await ev(dep2, B, 'ACKNOWLEDGED', at('14:22'));
     const second = of(await rows(A, g), B);
     return eq([iso(first.trip_appointment_at), iso(first.prepare_alarm_at), iso(first.prepare_started_at), iso(second.trip_appointment_at), iso(second.prepare_alarm_at), iso(second.prepare_started_at)],
       [iso(at('10:00')), iso(at('08:50')), iso(at('08:55')), iso(at('15:00')), iso(at('13:50')), iso(at('13:55'))]);
@@ -178,7 +179,7 @@ export default async function ch17({ q, as, su, check }) {
     const bulk = await sigs(W.g);
     await q(`update public.group_members set trip_share_opt_in = false where group_id = $1 and user_id = $2`, [W.g, W.B]);
     await clear();
-    await ev(W.AL.B.DEPARTURE, W.B, 'DISMISSED', at('09:25'));   // B는 출발 · 도착 공유를 껐음 — 화면에 안 보이니 신호 없음
+    await ev(W.AL.B.DEPARTURE, W.B, 'ACKNOWLEDGED', at('09:25'));   // B는 출발 · 도착 공유를 껐음 — 화면에 안 보이니 신호 없음
     const off = await sigs(W.g);
     return eq([quiet, first, again, bulk, off, await sigs(g2)], [[], [TODAY], [TODAY], [TODAY], [], []]);
   });

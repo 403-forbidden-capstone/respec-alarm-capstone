@@ -121,7 +121,7 @@ export default async function testDeviceEvents({ q, as, su, svc, check }) {
     return out.stored === 0 && n === 0 ? true : { out, n };
   });
 
-  await check(hasChain ? '기기 키 길 + 해제 반영: 준비 알람 해제 = 준비 시작(PREPARE_ALARM), 출발 알람 해제 = 출발(BUTTON), 둘 다 빈 칸만 — 울림 · 미루기 기록은 참여 행을 안 건드림' : '기기 키 길 + 해제 반영 (트리거 없는 main이라 건너뜀)', async () => {
+  await check(hasChain ? '기기 키 길 + 해제 반영: 준비 알람 해제 = 준비 시작(PREPARE_ALARM), 출발 알람 해제는 출발을 안 바꿈(ACKNOWLEDGED만 출발), 준비는 빈 칸만 — 울림 · 미루기 기록은 참여 행을 안 건드림' : '기기 키 길 + 해제 반영 (트리거 없는 main이라 건너뜀)', async () => {
     if (!hasChain) return true;
     const [ap2] = await q(`insert into public.appointments (creator_id, title, appointment_at, dest_name) values ($1, '해제 시험', '2026-11-20T01:00:00Z', '학교') returning appointment_id`, [U]);
     const [pt2] = await q(`insert into public.appointment_participants (appointment_id, user_id) values ($1, $2) returning participant_id`, [ap2.appointment_id, U]);
@@ -132,12 +132,14 @@ export default async function testDeviceEvents({ q, as, su, svc, check }) {
     const [mid] = await q(`select prepare_started_at, departed_at from public.appointment_participants where participant_id = $1`, [pt2.participant_id]);
     await recordDeviceEvents(service, U, { events: [tap(13, prep, 'DISMISSED', '2026-11-20T00:05:00Z')] });
     await recordDeviceEvents(service, U, { events: [tap(14, prep, 'DISMISSED', '2026-11-20T00:40:00Z'), tap(15, depart, 'DISMISSED', '2026-11-20T00:25:00Z')] }); // 둘째 해제는 처음 값을 안 덮음
-    await recordDeviceEvents(service, U, { events: [tap(16, depart, 'DISMISSED', '2026-11-20T00:50:00Z')] });
+    const [dismissed] = await q(`select departed_at from public.appointment_participants where participant_id = $1`, [pt2.participant_id]);
+    await recordDeviceEvents(service, U, { events: [tap(16, depart, 'ACKNOWLEDGED', '2026-11-20T00:50:00Z')] }); // 감지가 꺼진 폰이 해제와 함께 보내는 것
     const [row] = (await q(`select prepare_started_at, prepare_started_source, departed_at, departed_source from public.appointment_participants where participant_id = $1`, [pt2.participant_id])).map(fix);
     const ok = mid.prepare_started_at === null && mid.departed_at === null
       && row.prepare_started_at === '2026-11-20T00:05:00.000Z' && row.prepare_started_source === 'PREPARE_ALARM'
-      && row.departed_at === '2026-11-20T00:25:00.000Z' && row.departed_source === 'BUTTON';
-    return ok ? true : { mid, row };
+      && dismissed.departed_at === null
+      && row.departed_at === '2026-11-20T00:50:00.000Z' && row.departed_source === 'BUTTON';
+    return ok ? true : { mid, dismissed, row };
   });
 
   await su();

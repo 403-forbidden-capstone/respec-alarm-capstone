@@ -1,75 +1,15 @@
 -- 그룹 포인트 — 준비 · 출발 알람 해제 반영 · 준비 시각 칸 · 새로 고침 신호 (11/19 지형님: 세 알람 모두 진짜 알람)
---   기상 · 준비 · 출발 알람이 모두 진짜 알람(미루기 · 해제). 그룹 포인트 = 알람 뒤 체크 — 준비 알람 해제 = 준비 시작, 출발 알람 해제 = 출발
---   ① 해제 반영             alarm_events DISMISSED가 PREPARE 알람이면 prepare_started_at, DEPARTURE 알람이면 departed_at(+ departed_source BUTTON)을 빈 칸일 때만 채움
---                            기존 ACKNOWLEDGED 반영(옛 앱 · 알림 버튼)은 그대로. 버튼 · 알람 응답이 위치보다 우선(위치 출발은 이 값이 있으면 앱이 덮지 않음 · 서버는 빈 칸만),
---                            이른 위치 출발 막기(BEFORE 트리거)도 그대로
+--   기상 · 준비 · 출발 알람이 모두 진짜 알람(미루기 · 해제). 그룹 포인트 = 알람 뒤 체크 — 준비 알람 해제 = 준비 시작, 출발 = 위치 자동(감지 꺼진 사람만 해제가 대신)
+--   ① 해제 반영             준비 알람 해제 = 준비 시작: 지난 정의(group_trip_stages 4절)가 이미 DISMISSED + PREPARE를 prepare_started_at으로 반영하므로 이 파일은 안 건드림.
+--                            출발은 위치 자동 판단(11/19 지형님) — 감지가 켜진 사람은 출발 알람 해제가 출발이 아님, 감지가 꺼진 폰만 해제와 함께 ACKNOWLEDGED(BUTTON)를 보냄.
+--                            그래서 DISMISSED + DEPARTURE는 기록만 하고 departed_at은 안 바꿈(ACKNOWLEDGED · LOCATION만)
 --   ② 그룹 조회 새 칸        private.group_wake_rows · get_group_wake · get_group_wake_status 끝에 prepare_alarm_at · prepare_started_at
 --                            trip_appointment_at과 같은 약속 고르기 규칙. trip_visible이 아니면 둘 다 null. prepare_alarm_at = 그 사람 그 약속의 켜진 PREPARE 알람 시각
 --   ③ 새로 고침 신호         group:<id>:wake · refresh · {date} (send_wake_signal · send_trip_signal과 같은 모양). 값만 바뀐 그룹에, 하나의 변경에 한 번
 --                            준비 시작 바뀜 · 공유(기상 · 출발 · 도착) 바뀜 · 나가기 / 내보내짐 · 약속에서 빠짐 · 약속 시각 변경 / 취소 · 기상 숨기기 / 보이기
 
 -- ---------------------------------------------------------------------
--- 1. 해제 → 참여 행 반영
--- ---------------------------------------------------------------------
-
--- 지난 정의(group_trip_stages 4절)와 같고 달라진 곳: DISMISSED + DEPARTURE 알람 → departed_at · departed_source (출처 BUTTON이거나 비어 있는 것만, 빈 칸일 때만)
-create or replace function private.apply_participant_times_from_event()
-returns trigger
-language plpgsql
-security definer
-set search_path = ''
-as $$
-declare
-  v_type public.alarm_type;
-  v_pid  uuid;
-begin
-  if new.event_type not in ('ACKNOWLEDGED', 'ARRIVAL_CONFIRMED', 'DISMISSED') then
-    return null;
-  end if;
-
-  select a.alarm_type, a.participant_id into v_type, v_pid
-  from public.alarms a
-  where a.alarm_id = new.alarm_id and a.user_id = new.user_id;
-  if v_pid is null then
-    return null;                                  -- 지워진 알람 · 루틴 · 일정 없는 알람
-  end if;
-
-  if new.event_type in ('ACKNOWLEDGED', 'DISMISSED') and v_type = 'DEPARTURE' and coalesce(new.input_source::text, 'BUTTON') = 'BUTTON' then
-    update public.appointment_participants pt
-    set departed_at = new.event_at,
-        departed_source = 'BUTTON'
-    where pt.participant_id = v_pid and pt.user_id = new.user_id
-      and pt.departed_at is null;
-
-  elsif new.event_type = 'ARRIVAL_CONFIRMED' and v_type = 'ARRIVE' and coalesce(new.input_source::text, 'BUTTON') = 'BUTTON' then
-    update public.appointment_participants pt
-    set arrived_at = new.event_at,
-        arrived_source = 'BUTTON',
-        is_late = (new.event_at - ap.appointment_at > interval '5 minutes'),
-        late_minutes = case
-          when new.event_at - ap.appointment_at > interval '5 minutes'
-            then round(extract(epoch from (new.event_at - ap.appointment_at)) / 60.0)::integer
-          else 0
-        end
-    from public.appointments ap
-    where ap.appointment_id = pt.appointment_id
-      and pt.participant_id = v_pid and pt.user_id = new.user_id
-      and pt.arrived_at is null;
-
-  elsif new.event_type in ('DISMISSED', 'ACKNOWLEDGED') and v_type = 'PREPARE' then
-    update public.appointment_participants pt
-    set prepare_started_at = new.event_at,
-        prepare_started_source = 'PREPARE_ALARM'
-    where pt.participant_id = v_pid and pt.user_id = new.user_id
-      and pt.prepare_started_at is null;
-  end if;
-
-  return null;
-end;
-$$;
-
--- ---------------------------------------------------------------------
--- 2. 그룹 조회에 준비 알람 시각 · 준비 시작 시각 (반환형이 바뀌어 지우고 다시 만듦, 칸 · 순서 그대로 + 끝에 2칸)
+-- 1. 그룹 조회에 준비 알람 시각 · 준비 시작 시각 (반환형이 바뀌어 지우고 다시 만듦, 칸 · 순서 그대로 + 끝에 2칸)
 -- ---------------------------------------------------------------------
 
 drop function public.get_group_wake(uuid, date);
@@ -324,7 +264,7 @@ grant execute on function public.get_group_wake(uuid, date) to authenticated;
 grant execute on function public.get_group_wake_status(uuid, date) to authenticated;
 
 -- ---------------------------------------------------------------------
--- 3. 새로 고침 신호
+-- 2. 새로 고침 신호
 -- ---------------------------------------------------------------------
 
 -- 신호 하나 보내기 — send_wake_signal · send_trip_signal과 같은 채널 · 내용(group:<id>:wake · refresh · {date}). 못 보내도 본 변경은 그대로

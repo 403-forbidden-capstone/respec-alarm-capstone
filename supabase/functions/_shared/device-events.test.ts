@@ -109,7 +109,7 @@ test('받는 조합은 폰이 보내는 것만 — WAKE_CONFIRMED는 WAKE 알람
   assert.equal(deviceEventAllowed('WAKE_CONFIRMED', 'USAGE', 'DEPARTURE'), false);
   assert.equal(deviceEventAllowed('DISMISSED', 'BUTTON', 'WAKE'), true);
   assert.equal(deviceEventAllowed('DISMISSED', 'BUTTON', 'PREPARE'), true); // 준비 알람 해제 = 준비 시작
-  assert.equal(deviceEventAllowed('DISMISSED', 'BUTTON', 'DEPARTURE'), true); // 출발 알람 해제 = 출발
+  assert.equal(deviceEventAllowed('DISMISSED', 'BUTTON', 'DEPARTURE'), true); // 출발 알람 해제는 기록용 (출발은 위치 · ACKNOWLEDGED)
   assert.equal(deviceEventAllowed('DISMISSED', 'BUTTON', 'ARRIVE'), false); // 도착은 알림 버튼(ARRIVAL_CONFIRMED)
   assert.equal(deviceEventAllowed('DISMISSED', 'BUTTON', 'ROUTINE'), false);
   assert.equal(deviceEventAllowed('DISMISSED', 'USAGE', 'WAKE'), false);
