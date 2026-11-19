@@ -772,3 +772,30 @@ test('model provenance is recorded only for actually used real-start model',()=>
   });
   assert.equal(purePrepPersistenceOf(plan,undefined).outing_prep_model,null);
 });
+
+test('previously stored MANUAL whole-duration is not overwritten by pure prep during recurrence/edit',()=>{
+ const candidate={source:'PROFILE' as const, minutes:35};
+ const manual=computePlan(base({
+   participant:{
+     participant_id:'p1',appointment_id:'a1',user_id:'u1',
+     origin_name:'집',origin_lat:null,origin_lng:null,
+     transport_type:'TRANSIT',est_travel_minutes:50,travel_source:'API',
+     prepare_minutes:75,prepare_value_source:'MANUAL',buffer_minutes:10
+   },
+   purePrepCandidate:candidate,stats:{sampleCount:0,p80:null}
+ }),api(50));
+ assert.equal(manual.prepareTarget,'WAKE_TO_DEPART');
+ assert.equal(purePrepPersistenceOf(manual,candidate).outing_prep_minutes,null);
+ const switched=computePlan(base({
+   participant:{
+     participant_id:'p1',appointment_id:'a1',user_id:'u1',
+     origin_name:'집',origin_lat:null,origin_lng:null,
+     transport_type:'TRANSIT',est_travel_minutes:50,travel_source:'API',
+     prepare_minutes:75,prepare_value_source:'MANUAL',buffer_minutes:10
+   },
+   purePrepCandidate:candidate,
+   draft:{at:kst(22,600),destination:{name:'세종대학교'},prepareValueSource:'AUTO'},
+   stats:{sampleCount:0,p80:null}
+ }),api(50));
+ assert.equal(switched.prepareTarget,'PREPARE_START_TO_DEPART');
+});
