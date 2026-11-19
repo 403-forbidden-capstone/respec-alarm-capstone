@@ -1,4 +1,6 @@
-// 원탭 뒤처리 (D58 · #41) — 무음 알림의 "출발했어요" · "도착했어요"를 누르면 폰이 울림 기록(ACKNOWLEDGED DEPARTURE · ARRIVAL_CONFIRMED ARRIVE)을 쌓고,
+// 원탭 뒤처리 (D58 · #41) — 출발 알람을 끄거나(DISMISSED DEPARTURE, 11/19부터 출발은 알람이라 해제가 출발 체크) 알림의 "도착했어요"(ARRIVAL_CONFIRMED ARRIVE)를 누르면 폰이 울림 기록을 쌓고,
+//   예전 APK의 "출발했어요" 원탭(ACKNOWLEDGED DEPARTURE)도 같은 뜻으로 읽음.
+//   서버(alarm-events-device)도 같은 기록에서 departed_at을 빈 칸에 채움 — 앱이 같은 값을 보내도 keep이고, 지각 · 준비 실측 · 이동시간은 여기서 이어서 셈
 // 그 기록이 서버(alarm_events)에 올라간 뒤 이 파일이 출발 · 도착 시각을 participantTimes.ts의 recordParticipantTimes(source BUTTON)에 넘김 (lib/alarmSync onEventsUploaded 훅)
 //   · 어느 참여 조건의 기록인지 찾아 묶는 일까지만 함. 값을 쓰는 규칙(출처 우선순위 · 지각 판정 · 준비 실측)은 위치(지오펜스)도 같이 쓰는 recordParticipantTimes에 있음
 //   · 같은 원탭이 여러 번이면 가장 이른 시각 (먼저 누른 것이 사실)
@@ -14,9 +16,9 @@ import { recordParticipantTimes } from './participantTimes';
 
 export type OneTap = 'DEPARTED' | 'ARRIVED';
 
-// 이 기록이 출발 · 도착 원탭인지 (준비 시작 · 루틴 "했어요"의 ACKNOWLEDGED는 해당 없음)
+// 이 기록이 출발 · 도착 체크인지 (준비 시작 · 루틴 "했어요"의 ACKNOWLEDGED는 해당 없음). 출발 = 출발 알람 해제 또는 예전 원탭
 export function oneTapOf(event: Pick<AlarmEvent, 'eventType' | 'alarmType'>): OneTap | null {
-  if (event.eventType === 'ACKNOWLEDGED' && event.alarmType === 'DEPARTURE') return 'DEPARTED';
+  if ((event.eventType === 'DISMISSED' || event.eventType === 'ACKNOWLEDGED') && event.alarmType === 'DEPARTURE') return 'DEPARTED';
   if (event.eventType === 'ARRIVAL_CONFIRMED' && event.alarmType === 'ARRIVE') return 'ARRIVED';
   return null;
 }

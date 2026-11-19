@@ -12,12 +12,16 @@ object DeviceUploadRules {
   private const val DELAY_MARGIN_MILLIS = 2_000L // 관찰이 끝난 직후가 아니라 조금 뒤에 판정 (끝나는 시각 경계)
 
   /**
-   * 바로 올릴 기록인지 — 알림 버튼(원탭: 준비 시작 · 출발했어요 · 도착했어요 · 루틴 했어요) · 기상 알람 해제
-   * 울림(TRIGGERED) · 미루기(SNOOZED) · 다른 알람의 해제는 앱이 열릴 때 올림
+   * 바로 올릴 기록인지 (서버 alarm-events-device가 받는 조합과 같음, 11/19 서버 PR 약속)
+   *   · 알림 버튼 원탭(도착했어요 · 루틴 했어요) · 예전 준비 시작 · 출발했어요 원탭(ACKNOWLEDGED)
+   *   · 해제(DISMISSED) — 기상 · 준비 · 출발 알람. 준비 해제 = 준비 시작, 출발 해제 = 출발이라 서버가 그 시각을 채움
+   *   · 울림(TRIGGERED) · 미루기(SNOOZED) — 기상 · 준비 · 출발 · 도착. 친구에게 "알람 울리는 중"을 보이고 서버 놓침 계산을 미룸 (G12)
+   * 루틴 알림의 울림은 앱이 열릴 때 올림
    */
   fun shouldUpload(alarmType: String, eventType: String): Boolean = when (eventType) {
     "ACKNOWLEDGED", "ARRIVAL_CONFIRMED" -> true
-    "DISMISSED" -> alarmType == "WAKE"
+    "DISMISSED" -> isRingAlarmType(alarmType)
+    "TRIGGERED", "SNOOZED" -> isRingAlarmType(alarmType) || alarmType == "ARRIVE"
     else -> false
   }
 

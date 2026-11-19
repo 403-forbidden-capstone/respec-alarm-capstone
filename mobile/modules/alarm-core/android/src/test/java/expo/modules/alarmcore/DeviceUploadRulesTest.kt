@@ -25,15 +25,38 @@ class DeviceUploadRulesTest {
   }
 
   @Test
-  fun buttonsAndWakeDismissUploadRightAway() {
-    assertTrue(DeviceUploadRules.shouldUpload("PREPARE", "ACKNOWLEDGED")) // 준비 시작
-    assertTrue(DeviceUploadRules.shouldUpload("DEPARTURE", "ACKNOWLEDGED")) // 출발했어요
+  fun buttonsAndRingAlarmDismissUploadRightAway() {
+    assertTrue(DeviceUploadRules.shouldUpload("PREPARE", "ACKNOWLEDGED")) // 예전 APK의 준비 시작 원탭
+    assertTrue(DeviceUploadRules.shouldUpload("DEPARTURE", "ACKNOWLEDGED")) // 예전 APK의 출발했어요 원탭
     assertTrue(DeviceUploadRules.shouldUpload("ARRIVE", "ARRIVAL_CONFIRMED")) // 도착했어요
     assertTrue(DeviceUploadRules.shouldUpload("ROUTINE", "ACKNOWLEDGED")) // 루틴 했어요
-    assertTrue(DeviceUploadRules.shouldUpload("WAKE", "DISMISSED"))
-    assertFalse(DeviceUploadRules.shouldUpload("PREPARE", "DISMISSED"))
-    assertFalse(DeviceUploadRules.shouldUpload("WAKE", "TRIGGERED"))
-    assertFalse(DeviceUploadRules.shouldUpload("WAKE", "SNOOZED"))
+    // 11/19: 기상 · 준비 · 출발 알람 해제 — 준비 해제 = 준비 시작, 출발 해제 = 출발 (서버가 DISMISSED로 시각을 채움)
+    for (type in listOf("WAKE", "PREPARE", "DEPARTURE")) assertTrue(type, DeviceUploadRules.shouldUpload(type, "DISMISSED"))
+    assertFalse(DeviceUploadRules.shouldUpload("ARRIVE", "DISMISSED"))
+    assertFalse(DeviceUploadRules.shouldUpload("ROUTINE", "DISMISSED"))
+  }
+
+  @Test
+  fun ringAndSnoozeUploadRightAwayForWakePrepareDepartureArrive() {
+    // 서버 alarm-events-device가 받는 조합과 같음 — 친구에게 "알람 울리는 중" · 서버 놓침 계산 (G12)
+    for (type in listOf("WAKE", "PREPARE", "DEPARTURE", "ARRIVE")) {
+      assertTrue(type, DeviceUploadRules.shouldUpload(type, "TRIGGERED"))
+      assertTrue(type, DeviceUploadRules.shouldUpload(type, "SNOOZED"))
+    }
+    // 루틴 알림의 울림은 앱이 열릴 때 올림
+    assertFalse(DeviceUploadRules.shouldUpload("ROUTINE", "TRIGGERED"))
+    assertFalse(DeviceUploadRules.shouldUpload("ROUTINE", "SNOOZED"))
+    // 서버가 안 받는 종류는 안 올림
+    assertFalse(DeviceUploadRules.shouldUpload("WAKE", "MISSED"))
+    assertFalse(DeviceUploadRules.shouldUpload("WAKE", "WAKE_CONFIRMED")) // 확정은 WakeJudgeWorker가 따로 (USAGE)
+  }
+
+  @Test
+  fun ringAlarmTypesAreWakePrepareDeparture() {
+    assertEquals(setOf("WAKE", "PREPARE", "DEPARTURE"), RING_ALARM_TYPES)
+    assertTrue(isRingAlarmType("PREPARE"))
+    assertFalse(isRingAlarmType("ARRIVE"))
+    assertFalse(isRingAlarmType("ROUTINE"))
   }
 
   @Test
