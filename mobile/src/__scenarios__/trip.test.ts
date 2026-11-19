@@ -241,7 +241,11 @@ describe('S16 부팅 직후 이른 위치 출발', () => {
       clock.set('06:20');
       await app.open(); // 대기 중인 출발을 확정하려 함 — 앱이 이른 출발은 거름
     })
-    .expect({ noWrites: ['appointment_participants.update', 'alarm_events.upsert(ACKNOWLEDGED/LOCATION)'], check: () => expect(participant().departed_at).toBeNull() });
+    .expect({
+      noWrites: ['appointment_participants.update', 'alarm_events.upsert(ACKNOWLEDGED/LOCATION)'],
+      phoneAlarms: ['DEPARTURE@09:20', 'ARRIVE@10:00'], // 서버에 안 쓴 이른 출발이라 폰 알람은 그대로 예약 (G3 정리는 실제로 쓴 경우만)
+      check: () => expect(participant().departed_at).toBeNull(),
+    });
 
   booted()
     .news(2)

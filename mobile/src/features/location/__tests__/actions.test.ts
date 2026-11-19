@@ -26,7 +26,7 @@ beforeEach(async () => {
   jest.spyOn(console, 'warn').mockImplementation(() => {}); // 실패 경로의 개발용 로그를 조용히
   mockNotice.mockReset();
   mockRecord.mockReset();
-  mockRecord.mockResolvedValue({});
+  mockRecord.mockImplementation(async (input) => ('departedAt' in input ? { departed: 'new', arrived: null } : { departed: null, arrived: 'new' }));
   mockSettle.mockReset();
   mockSettle.mockResolvedValue(undefined);
   mockNowMs = at('09:53');
@@ -102,6 +102,22 @@ describe('쓴 직후 남은 알람 정리 (G3)', () => {
       ['p1', 'ARRIVE'],
     ]);
     expect(mockRecord.mock.invocationCallOrder[0]).toBeLessThan(mockSettle.mock.invocationCallOrder[0]);
+  });
+
+  it('실제로 안 쓴 경우(이른 위치 출발로 건너뜀 · 이미 응답 값이 있어 keep · 참여 조건 없음)는 정리하지 않음 — 알람이 그대로', async () => {
+    for (const result of [{ departed: null, arrived: null }, { departed: 'keep', arrived: null }]) {
+      mockRecord.mockResolvedValueOnce(result);
+      await commit({ actions: [DEPART] });
+      await flushActions();
+    }
+    mockRecord.mockResolvedValueOnce({ departed: null, arrived: 'keep' });
+    await commit({ actions: [ARRIVE] });
+    await flushActions();
+    expect(mockSettle).not.toHaveBeenCalled();
+    mockRecord.mockResolvedValueOnce({ departed: 'override', arrived: null });
+    await commit({ actions: [DEPART] });
+    await flushActions();
+    expect(mockSettle).toHaveBeenCalledWith('p1', 'DEPART'); // 더 늦은 위치 출발로 바꿈도 쓴 것
   });
 
   it('쓰기에 실패했거나(보관) 버린 기록은 정리하지 않음 — 서버에 아직 없음', async () => {
