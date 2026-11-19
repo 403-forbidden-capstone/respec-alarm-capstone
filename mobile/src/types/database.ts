@@ -365,13 +365,13 @@ isOneToOne: false
                   ]
                 },"group_members": {
                   Row: {
-                    "group_id": string,"group_member_id": string,"invite_status": Database["public"]['Enums']["invite_status"],"invited_at": string | null,"invited_by": string | null,"joined_at": string | null,"notifications_off": boolean,"user_id": string,"wake_share_opt_in": boolean
+                    "group_id": string,"group_member_id": string,"invite_status": Database["public"]['Enums']["invite_status"],"invited_at": string | null,"invited_by": string | null,"joined_at": string | null,"notifications_off": boolean,"trip_share_opt_in": boolean,"user_id": string,"wake_share_opt_in": boolean
                   }
                   Insert: {
-                    "group_id": string,"group_member_id"?: string,"invite_status"?: Database["public"]['Enums']["invite_status"],"invited_at"?: string | null,"invited_by"?: string | null,"joined_at"?: string | null,"notifications_off"?: boolean,"user_id": string,"wake_share_opt_in"?: boolean
+                    "group_id": string,"group_member_id"?: string,"invite_status"?: Database["public"]['Enums']["invite_status"],"invited_at"?: string | null,"invited_by"?: string | null,"joined_at"?: string | null,"notifications_off"?: boolean,"trip_share_opt_in"?: boolean,"user_id": string,"wake_share_opt_in"?: boolean
                   }
                   Update: {
-                    "group_id"?: string,"group_member_id"?: string,"invite_status"?: Database["public"]['Enums']["invite_status"],"invited_at"?: string | null,"invited_by"?: string | null,"joined_at"?: string | null,"notifications_off"?: boolean,"user_id"?: string,"wake_share_opt_in"?: boolean
+                    "group_id"?: string,"group_member_id"?: string,"invite_status"?: Database["public"]['Enums']["invite_status"],"invited_at"?: string | null,"invited_by"?: string | null,"joined_at"?: string | null,"notifications_off"?: boolean,"trip_share_opt_in"?: boolean,"user_id"?: string,"wake_share_opt_in"?: boolean
                   }
                   Relationships: [
                     {
@@ -974,12 +974,12 @@ isOneToOne: false
                            },
 "get_group_wake":
 { Args: { "p_date"?: string,"p_group_id": string }; Returns: {
-              "is_me": boolean,"nickname": string,"profile_image_url": string,"user_id": string,"wake_alarm_at": string,"wake_confirmed_at": string,"wake_status": string
+              "arrived_at": string,"departed_at": string,"is_me": boolean,"nickname": string,"profile_image_url": string,"trip_appointment_at": string,"trip_visible": boolean,"user_id": string,"wake_alarm_at": string,"wake_confirmed_at": string,"wake_status": string
             }[]
                            },
 "get_group_wake_status":
 { Args: { "p_date"?: string,"p_group_id": string }; Returns: {
-              "dismissed_at": string,"is_me": boolean,"missed_at": string,"nickname": string,"profile_image_url": string,"rang_at": string,"snooze_count": number,"user_id": string,"wake_alarm_at": string,"wake_confirmed_at": string,"wake_status": string
+              "arrived_at": string,"departed_at": string,"dismissed_at": string,"is_me": boolean,"missed_at": string,"nickname": string,"profile_image_url": string,"rang_at": string,"snooze_count": number,"trip_appointment_at": string,"trip_visible": boolean,"user_id": string,"wake_alarm_at": string,"wake_confirmed_at": string,"wake_status": string
             }[]
                            },
 "get_public_profiles":
