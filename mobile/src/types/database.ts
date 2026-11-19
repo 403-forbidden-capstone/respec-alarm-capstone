@@ -1032,6 +1032,11 @@ isOneToOne: false
               "appointment_id": string,"i_joined": boolean,"joined_count": number
             }[]
                            },
+"group_wake_for_device":
+{ Args: { "p_user_id": string }; Returns: {
+              "arrived_at": string,"departed_at": string,"group_id": string,"group_name": string,"is_me": boolean,"nickname": string,"prepare_alarm_at": string,"prepare_started_at": string,"trip_appointment_at": string,"trip_visible": boolean,"user_id": string,"wake_alarm_at": string,"wake_confirmed_at": string,"wake_status": string
+            }[]
+                           },
 "invite_to_group":
 { Args: { "p_group_id": string,"p_user_id": string }; Returns: Json
                            },

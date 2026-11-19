@@ -675,6 +675,19 @@ await check('비구성원은 빈 결과 · 다른 구성원은 본인 + 기상 �
   const b = await wake(B);
   return e.length === 0 && b.length === 2 && b[0].user_id === B && b[0].is_me === true && b[1].user_id === D ? true : { e, b };
 });
+await check('기상 알람 그룹 안내(group_wake_for_device): 서버 역할이 넘긴 사람 시점의 get_group_wake와 같은 줄 + 그룹 이름(새 판정 없음, 동의 안 한 C는 안 나옴) · 앱 역할은 못 부름', async () => {
+  const cols = 'user_id, nickname, is_me, wake_alarm_at, wake_confirmed_at, wake_status, departed_at, arrived_at, trip_visible, trip_appointment_at, prepare_alarm_at, prepare_started_at';
+  await as(A);
+  const app = await q(`select ${cols} from public.get_group_wake($1)`, [G]);
+  await svc();
+  const dev = await q(`select group_name, ${cols} from public.group_wake_for_device($1) where group_id = $2`, [A, G]);
+  const [{ name }] = await q(`select group_name as name from public.groups where group_id = $1`, [G]);
+  const same = JSON.stringify(dev.map(({ group_name, ...r }) => r)) === JSON.stringify(app) && dev.every((r) => r.group_name === name);
+  const outsider = await q(`select 1 from public.group_wake_for_device($1) where group_id = $2`, [E, G]);
+  await as(A);
+  const denied = await expectErr(() => q(`select * from public.group_wake_for_device($1)`, [A]), /permission denied/);
+  return same && app.length > 1 && !app.some((r) => r.user_id === C) && outsider.length === 0 && denied === true ? true : { app, dev, outsider, denied };
+});
 await check('함수 밖에서는 B의 alarm_events · daily_records를 못 읽음', async () => {
   await as(B);
   await q(`insert into public.daily_records (user_id, record_date, wake_confirmed_at) values ($1, ${TODAY}, now()) on conflict (user_id, record_date) do nothing`, [B]);   // 기상 확인이 저장되면 하루 기록이 같이 생김(7장)
