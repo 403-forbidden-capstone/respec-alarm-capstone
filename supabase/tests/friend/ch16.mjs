@@ -40,7 +40,7 @@ export default async function ch16({ q, as, su, svc, check, expectErr }) {
   const signals = () => q(`select topic, event, payload from realtime.messages order by id`);
   const clearSignals = () => q(`truncate realtime.messages`);
 
-  await check('16-01 · 16-02: 출발 · 도착 공유 — 끈 사람은 시각이 null · trip_visible false, 켠 사람은 시각이 나오고, 내 줄은 동의와 상관없이 늘 보임', async () => {
+  await check('16-01 · 16-02: 출발 · 도착 공유 — 끈 사람은 시각이 null · trip_visible false, 켠 사람은 시각 · 고른 약속 시각이 나오고, 내 줄도 내 스위치를 따름(내가 끄면 내 줄도 null)', async () => {
     const A = await join_(1, '보는이'), B = await join_(2, '켬'), C = await join_(3, '끔');
     const g = await mkGroup(A, [B, C], { [A]: [true, false], [B]: [true, true], [C]: [true, false] });
     const ap = await appt(A, g, at('10:00'));
@@ -50,7 +50,8 @@ export default async function ch16({ q, as, su, svc, check, expectErr }) {
     await setTimes(pc, `departed_at = '${at('08:20')}', departed_source = 'BUTTON'`);
     const r = await rows(A, g);
     const a = of(r, A), b = of(r, B), c = of(r, C);
-    return a.trip_visible === true && iso(a.departed_at) === iso(at('08:40')) && a.arrived_at == null
+    return a.trip_visible === false && a.departed_at == null && a.arrived_at == null && a.trip_appointment_at == null
+      && iso(b.trip_appointment_at) === iso(at('10:00'))
       && b.trip_visible === true && iso(b.departed_at) === iso(at('08:30')) && iso(b.arrived_at) === iso(at('09:50'))
       && c.trip_visible === false && c.departed_at == null && c.arrived_at == null && c.wake_status === 'NO_ALARM' ? true : { a, b, c };
   });
@@ -94,22 +95,35 @@ export default async function ch16({ q, as, su, svc, check, expectErr }) {
     return of(r, B).departed_at == null && of(r, B).arrived_at == null && of(r, B).trip_visible === true ? true : of(r, B);
   });
 
-  await check('16-05: 같은 날 이 그룹 약속이 여럿이면 — 아직 도착 안 한 것 중 가장 이른 약속, 다 도착했으면 가장 늦은 약속', async () => {
-    const A = await join_(9, '에이'), B = await join_(10, '비');
-    const g = await mkGroup(A, [B], { [A]: [true, true], [B]: [true, true] });
-    const a1 = await appt(A, g, at('09:00')), a2 = await appt(A, g, at('13:00')), a3 = await appt(A, g, at('18:00'));
-    const p1 = await part(a1, B), p2 = await part(a2, B), p3 = await part(a3, B);
-    await setTimes(p1, `departed_at = '${at('08:00')}', departed_source = 'BUTTON', arrived_at = '${at('08:50')}', arrived_source = 'BUTTON'`);
-    await setTimes(p2, `departed_at = '${at('12:10')}', departed_source = 'BUTTON'`);
-    await setTimes(p3, `departed_at = '${at('17:00')}', departed_source = 'BUTTON'`);
-    const mid = of(await rows(A, g), B);                  // 첫 약속은 도착함 → 안 도착한 것 중 이른 13:00 약속(12:10 출발)
-    await setTimes(p2, `arrived_at = '${at('12:55')}', arrived_source = 'BUTTON'`);
-    const later = of(await rows(A, g), B);                // 13:00 도착 → 남은 18:00 약속(17:00 출발)
-    await setTimes(p3, `arrived_at = '${at('17:50')}', arrived_source = 'BUTTON'`);
-    const all = of(await rows(A, g), B);                  // 다 도착 → 가장 늦은 18:00 약속
-    return iso(mid.departed_at) === iso(at('12:10')) && mid.arrived_at == null
-      && iso(later.departed_at) === iso(at('17:00')) && later.arrived_at == null
-      && iso(all.departed_at) === iso(at('17:00')) && iso(all.arrived_at) === iso(at('17:50')) ? true : { mid, later, all };
+  await check('16-05: 같은 날 이 그룹 약속이 여럿이면 출발 · 도착 기록이 가장 최근인 약속 — 10:00 약속 도착 뒤 15:00 약속 출발이면 15:00 약속, 도착까지 하면 그 약속, 기록이 하나도 없으면 시각 null(약속은 가장 이른 것)', async () => {
+    const A = await join_(9, '에이'), B = await join_(10, '비'), E = await join_(31, '기록없음');
+    const g = await mkGroup(A, [B, E], { [A]: [true, true], [B]: [true, true], [E]: [true, true] });
+    const a1 = await appt(A, g, at('10:00')), a2 = await appt(A, g, at('15:00'));
+    const p1 = await part(a1, B), p2 = await part(a2, B);
+    await part(a1, E); await part(a2, E);
+    await setTimes(p1, `departed_at = '${at('09:00')}', departed_source = 'BUTTON', arrived_at = '${at('09:50')}', arrived_source = 'BUTTON'`);
+    const first = of(await rows(A, g), B);
+    await setTimes(p2, `departed_at = '${at('14:10')}', departed_source = 'BUTTON'`);
+    const second = of(await rows(A, g), B);
+    await setTimes(p2, `arrived_at = '${at('14:55')}', arrived_source = 'BUTTON'`);
+    const third = of(await rows(A, g), B);
+    const none = of(await rows(A, g), E);
+    return iso(first.departed_at) === iso(at('09:00')) && iso(first.arrived_at) === iso(at('09:50')) && iso(first.trip_appointment_at) === iso(at('10:00'))
+      && iso(second.departed_at) === iso(at('14:10')) && second.arrived_at == null && iso(second.trip_appointment_at) === iso(at('15:00'))
+      && iso(third.arrived_at) === iso(at('14:55')) && iso(third.trip_appointment_at) === iso(at('15:00'))
+      && none.trip_visible === true && none.departed_at == null && none.arrived_at == null && iso(none.trip_appointment_at) === iso(at('10:00')) ? true : { first, second, third, none };
+  });
+
+  await check('16-05b: 도착 기록이 빠진 채 밤이 된 날 — 출발만 있으면 그 출발이 남고(도착 null), 공유를 켰어도 그날 이 그룹 약속에 참여 행이 없으면 trip_visible false · 시각 · 약속 시각 null', async () => {
+    const A = await join_(32, '에이'), B = await join_(33, '출발만'), C = await join_(34, '참여없음');
+    const g = await mkGroup(A, [B, C], { [A]: [true, true], [B]: [true, true], [C]: [true, true] });
+    const ap = await appt(A, g, at('10:00'));
+    const pb = await part(ap, B);
+    await setTimes(pb, `departed_at = '${at('09:00')}', departed_source = 'BUTTON'`);
+    const night = of(await rows(A, g, D, at('23:30')), B);
+    const none = of(await rows(A, g), C);
+    return night.trip_visible === true && iso(night.departed_at) === iso(at('09:00')) && night.arrived_at == null
+      && none.trip_visible === false && none.departed_at == null && none.arrived_at == null && none.trip_appointment_at == null ? true : { night, none };
   });
 
   await check('16-06: 기상을 숨기거나 차단한 사이, 기상 공유를 끈 사람은 출발 · 도착이 켜져 있어도 줄 자체가 없음', async () => {
@@ -226,32 +240,34 @@ export default async function ch16({ q, as, su, svc, check, expectErr }) {
       && iso(late.arrived_at) === iso(at('10:12', '2026-11-11')) && late.is_late === true && late.late_minutes === 12 ? true : { mid, onTime, late };
   });
 
-  await check('16-12: 원탭 우선순위 · 멱등 — 응답이 위치 값을 덮고(이동시간 비움), 응답끼리는 먼저 쓴 값 유지, 위치 기록 · 준비 해제 · 다른 종류 기록은 건드리지 않고, 같은 기록이 다시 와도 같은 결과', async () => {
+  await check('16-12: 원탭 서버 반영은 빈 칸만 — 위치 값은 응답으로 덮지 않고(이동시간도 그대로, 덮는 일은 앱 follow-up 몫), 응답끼리는 먼저 쓴 값 유지, 위치로 남긴 기록 · 다른 종류 기록은 건드리지 않고, 준비 시작은 처음 한 번만, 같은 기록이 다시 와도 같은 결과', async () => {
     const A = await join_(23, '에이');
     const g = await mkGroup(A, [], {});
     const ap = await appt(A, g, at('10:00'));
     const p = await part(ap, A);
     const pre = await alarm(A, p, 'PREPARE', at('07:30')), dep = await alarm(A, p, 'DEPARTURE', at('08:50')), arr = await alarm(A, p, 'ARRIVE', at('10:00'));
     await setTimes(p, `departed_at = '${at('08:45')}', departed_source = 'LOCATION', arrived_at = '${at('09:58')}', arrived_source = 'LOCATION', actual_travel_minutes = 77`);
-    await ev(dep, A, 'ACKNOWLEDGED', at('08:52'), 'LOCATION');           // 위치로 남긴 기록은 다시 반영 안 함
+    await ev(dep, A, 'ACKNOWLEDGED', at('08:52'), 'LOCATION');
     await ev(arr, A, 'ARRIVAL_CONFIRMED', at('09:58'), 'LOCATION');
     const loc = await pt(p);
-    await ev(dep, A, 'ACKNOWLEDGED', at('08:55'), 'BUTTON');             // 응답이 위치 값을 덮음
+    await ev(dep, A, 'ACKNOWLEDGED', at('08:55'), 'BUTTON');
     await ev(arr, A, 'ARRIVAL_CONFIRMED', at('10:01'), 'BUTTON');
     const over = await pt(p);
-    await ev(dep, A, 'ACKNOWLEDGED', at('08:40'), 'BUTTON');             // 응답끼리는 먼저 쓴 값
-    await ev(arr, A, 'ARRIVAL_CONFIRMED', at('09:30'), 'BUTTON');
-    const keep = await pt(p);
     await ev(pre, A, 'ACKNOWLEDGED', at('07:31'), 'BUTTON');
-    await ev(pre, A, 'DISMISSED', at('07:40'), 'BUTTON');                // 준비 시작은 처음 한 번만
+    await ev(pre, A, 'DISMISSED', at('07:40'), 'BUTTON');
     const once = await pt(p);
-    await ev(arr, A, 'TRIGGERED', at('10:00'), null);                    // 울림은 영향 없음
+    await ev(arr, A, 'TRIGGERED', at('10:00'), null);
     const same = await pt(p);
+    const ap2 = await appt(A, g, at('10:00', '2026-11-11'));
+    const p2 = await part(ap2, A);
+    const dep2 = await alarm(A, p2, 'DEPARTURE', at('08:50', '2026-11-11'));
+    await ev(dep2, A, 'ACKNOWLEDGED', at('08:55', '2026-11-11'), 'BUTTON');
+    await ev(dep2, A, 'ACKNOWLEDGED', at('08:40', '2026-11-11'), 'BUTTON');
+    const first = await pt(p2);
     return loc.departed_source === 'LOCATION' && iso(loc.departed_at) === iso(at('08:45')) && loc.arrived_source === 'LOCATION' && loc.actual_travel_minutes === 77
-      && iso(over.departed_at) === iso(at('08:55')) && over.departed_source === 'BUTTON' && iso(over.arrived_at) === iso(at('10:01')) && over.arrived_source === 'BUTTON'
-      && over.actual_travel_minutes == null && over.is_late === false
-      && iso(keep.departed_at) === iso(at('08:55')) && iso(keep.arrived_at) === iso(at('10:01'))
-      && iso(once.prepare_started_at) === iso(at('07:31')) && JSON.stringify(same) === JSON.stringify(once) ? true : { loc, over, keep, once, same };
+      && over.departed_source === 'LOCATION' && iso(over.departed_at) === iso(at('08:45')) && over.arrived_source === 'LOCATION' && iso(over.arrived_at) === iso(at('09:58')) && over.actual_travel_minutes === 77
+      && iso(once.prepare_started_at) === iso(at('07:31')) && JSON.stringify(same) === JSON.stringify(once)
+      && iso(first.departed_at) === iso(at('08:55', '2026-11-11')) && first.departed_source === 'BUTTON' ? true : { loc, over, once, same, first };
   });
 
   await check('16-13: 원탭 서버 반영은 일정 없는 알람 · 남의 참여 조건 · 응답 값이 이미 있는 칸을 건드리지 않음 — 위치 값도 응답 값도 없는 칸만 채움', async () => {
@@ -293,7 +309,7 @@ export default async function ch16({ q, as, su, svc, check, expectErr }) {
     return ok(s1) && ok(s2) && ok(s3) && s4.length === 0 ? true : { s1, s2, s3, s4 };
   });
 
-  await check('16-15: 신호 조건 — 출발 · 도착 공유를 끈 사람 · 기상 공유를 끈 사람 · 개인 일정 · 그룹을 나간 사람은 신호 없음', async () => {
+  await check('16-15: 신호 조건 — 출발 · 도착 공유를 끈 사람 · 기상 공유를 끈 사람 · 개인 일정 · 그룹을 나간 사람은 신호 없음 (켠 사람은 있음)', async () => {
     const A = await join_(28, '에이'), N = await join_(29, '출발끔'), W = await join_(30, '기상끔');
     const g = await mkGroup(A, [N, W], { [A]: [true, true], [N]: [true, false], [W]: [false, false] });
     const ap = await appt(A, g, at('10:00'));
@@ -303,6 +319,17 @@ export default async function ch16({ q, as, su, svc, check, expectErr }) {
     await clearSignals();
     for (const x of [pn, pw, ps]) await setTimes(x, `departed_at = '${at('09:00')}', departed_source = 'BUTTON'`);
     const none = await signals();
-    return none.length === 0 ? true : none;
+    const L = await join_(35, '나감');
+    await q(`insert into public.group_members (group_id, user_id, invite_status, joined_at, wake_share_opt_in, trip_share_opt_in) values ($1, $2, 'JOINED', now(), true, true)`, [g, L]);
+    await q(`update public.group_members set invite_status = 'LEFT' where group_id = $1 and user_id = $2`, [g, L]);
+    const pl = await part(ap, L);
+    await clearSignals();
+    await setTimes(pl, `departed_at = '${at('09:00')}', departed_source = 'BUTTON'`);
+    const left = await signals();
+    const pa = await part(ap, A);
+    await clearSignals();
+    await setTimes(pa, `departed_at = '${at('09:00')}', departed_source = 'BUTTON'`);
+    const sent = await signals();
+    return none.length === 0 && left.length === 0 && sent.length === 1 ? true : { none, left, sent };
   });
 }

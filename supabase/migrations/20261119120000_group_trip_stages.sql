@@ -3,11 +3,11 @@
 --   ① 출발 · 도착 공유 동의    group_members.trip_share_opt_in (기본 끔). 기상 공유를 켠 사람만 켤 수 있고, 기상 공유를 끄면 같이 꺼짐
 --   ② 그룹 기상 조회             private.group_wake_rows · get_group_wake · get_group_wake_status에 departed_at · arrived_at · trip_visible 추가
 --                                그날 이 그룹 공동 약속 중 그 멤버가 참여한 것. 여러 개면 아직 도착 안 한 것 중 가장 이른 약속, 다 도착했으면 가장 늦은 약속
---                                trip_visible = 본인이거나 그 멤버가 이 그룹에서 출발 · 도착 공유를 켬. false면 시각은 null
+--                                trip_visible = 그 멤버(본인 포함)가 출발 · 도착 공유를 켬 + 그날 참여 행이 있음. false면 시각은 null
 --                                자동 기상 판정의 20분 지연(D61)은 기상에만 그대로 — 출발 · 도착은 버튼 · 위치 모두 바로 보임
 --   ③ 이른 위치 출발 막기        위치(LOCATION)로 들어온 출발이 출발 예정 − 60분보다 이르면 조용히 무시(앞 값 유지). 11/19 시험의 부팅 직후 '3시간 전 출발' 대응
 --   ④ 원탭 서버 반영            alarm_events가 올라오면 서버가 바로 appointment_participants의 출발 · 도착 · 준비 시작을 채움 (알림 버튼이 앱을 안 열고 올라오는 경우)
---                                우선순위 · 지각 판정은 앱 participantTimes.ts decideWrite · judgeArrival과 같음 — 앱이 같은 값으로 나중에 와도 결과가 같음(멱등)
+--                                빈 칸만 채움 · 지각 판정은 앱 judgeArrival과 같음. 위치 값을 응답으로 덮는 일은 앱 follow-up 몫 — 앱이 같은 값으로 나중에 와도 결과가 같음(멱등)
 --   ⑤ 실시간 신호                출발 · 도착이 바뀌면 그 그룹에 '새로 고침' 신호 (send_wake_signal과 같은 채널 · 내용)
 -- 함수 본문은 지난 마이그레이션(wake_status · wake_hardening · explore_fixes)과 같고 위 이유로 달라진 곳에만 주석을 닮
 
@@ -97,7 +97,8 @@ returns table (
   confirm_pending   boolean,      -- 자동 판정 확인이 있는데 아직 20분이 안 지나 다른 사람에게 안 보이는 중 (8장 깨우기가 '이미 일어났어요'로 막을 때 씀)
   departed_at       timestamptz,  -- 그날 이 그룹 약속의 출발 시각 (trip_visible일 때만, 아니면 null)
   arrived_at        timestamptz,  -- 같은 약속의 도착 시각
-  trip_visible      boolean       -- 본인이거나 그 멤버가 이 그룹에서 출발 · 도착 공유를 켬
+  trip_visible      boolean,      -- 그 멤버가 이 그룹에서 출발 · 도착 공유를 켰고(본인도 같음) 그날 이 그룹 공동 약속에 참여 행이 있음
+  trip_appointment_at timestamptz -- 시각을 고른 약속의 appointment_at (trip_visible이 false면 null)
 )
 language plpgsql
 stable
@@ -190,25 +191,24 @@ begin
     group by f.user_id
   ),
   -- 출발 · 도착 = 그날(그 멤버 시간대) 이 그룹 공동 약속 중 그 멤버가 참여한 것. 20분 지연 없음(D61은 기상에만).
-  --   여러 개면 아직 도착 안 한 것 중 가장 이른 약속, 다 도착했으면 가장 늦은 약속. 본인 · 출발 · 도착 공유를 켠 사람만 (아니면 조인이 안 붙어 null)
+  --   여러 개면 출발 · 도착 기록이 가장 최근인 약속(기록이 하나도 없으면 가장 이른 약속, 시각은 null). 본인도 출발 · 도착 공유를 켠 사람만 (아니면 조인이 안 붙어 null)
   trip as (
-    select m.user_id, t.departed_at, t.arrived_at
+    select m.user_id, t.departed_at, t.arrived_at, t.appointment_at
     from members m
     cross join lateral (
-      select pt.departed_at, pt.arrived_at
+      select pt.departed_at, pt.arrived_at, ap.appointment_at
       from public.appointment_participants pt
       join public.appointments ap on ap.appointment_id = pt.appointment_id
       where pt.user_id = m.user_id
         and ap.group_id = p_group_id
         and ap.appointment_at >= m.w_from
         and ap.appointment_at <  m.w_to
-      order by (pt.arrived_at is not null),
-               case when pt.arrived_at is null then ap.appointment_at end,
-               ap.appointment_at desc,
+      order by greatest(pt.departed_at, pt.arrived_at) desc nulls last,
+               ap.appointment_at,
                pt.participant_id
       limit 1
     ) t
-    where m.user_id = p_viewer or m.trip_opt
+    where m.trip_opt
   )
   select m.user_id,
          pr.nickname,
@@ -235,7 +235,8 @@ begin
          coalesce(c.pending, false),
          tr.departed_at,
          tr.arrived_at,
-         (m.user_id = p_viewer or m.trip_opt)
+         (m.trip_opt and tr.user_id is not null),
+         case when m.trip_opt then tr.appointment_at end
   from members m
   join public.profiles pr on pr.user_id = m.user_id
   left join first_alarm f on f.user_id = m.user_id
@@ -261,7 +262,8 @@ returns table (
   wake_status       text,         -- CONFIRMED · MISSED · DISMISSED · RINGING · SCHEDULED · NO_ALARM
   departed_at       timestamptz,  -- 출발 시각 (trip_visible이 false면 null)
   arrived_at        timestamptz,  -- 도착 시각 (trip_visible이 false면 null)
-  trip_visible      boolean       -- 본인이거나 출발 · 도착 공유를 켠 사람
+  trip_visible      boolean,      -- 출발 · 도착 공유를 켰고 그날 이 그룹 약속에 참여함
+  trip_appointment_at timestamptz -- 시각을 고른 약속의 appointment_at (trip_visible이 false면 null)
 )
 language sql
 stable
@@ -269,7 +271,7 @@ security definer
 set search_path = ''
 as $$
   select r.user_id, r.nickname, r.profile_image_url, r.is_me, r.wake_alarm_at, r.wake_confirmed_at, r.wake_status,
-         r.departed_at, r.arrived_at, r.trip_visible
+         r.departed_at, r.arrived_at, r.trip_visible, r.trip_appointment_at
   from private.group_wake_rows((select auth.uid()), p_group_id, p_date) r
   where private.wake_date_in_range(p_date);
 $$;
@@ -290,7 +292,8 @@ returns table (
   wake_status       text,          -- CONFIRMED · MISSED · DISMISSED · RINGING · SCHEDULED · NO_ALARM
   departed_at       timestamptz,   -- 출발 시각 (trip_visible이 false면 null)
   arrived_at        timestamptz,   -- 도착 시각 (trip_visible이 false면 null)
-  trip_visible      boolean
+  trip_visible      boolean,
+  trip_appointment_at timestamptz
 )
 language sql
 stable
@@ -304,7 +307,7 @@ as $$
          r.wake_confirmed_at,
          case when r.is_me then r.missed_at end,
          r.wake_status,
-         r.departed_at, r.arrived_at, r.trip_visible
+         r.departed_at, r.arrived_at, r.trip_visible, r.trip_appointment_at
   from private.group_wake_rows((select auth.uid()), p_group_id, p_date) r
   where private.wake_date_in_range(p_date);
 $$;
@@ -377,7 +380,7 @@ revoke execute on function private.guard_early_location_departure() from public,
 --   · 도착  = ARRIVAL_CONFIRMED + 알람 종류 ARRIVE         → arrived_at · arrived_source BUTTON (+ 지각 판정)
 --   · 준비 시작 = DISMISSED 또는 ACKNOWLEDGED + 알람 종류 PREPARE → prepare_started_at · prepare_started_source PREPARE_ALARM (비어 있을 때만)
 --   출처(input_source)가 BUTTON이거나 비어 있는 것만 — 위치(LOCATION)로 쓴 기록은 앱이 시각을 직접 쓰면서 같이 남기는 것이라 다시 반영하지 않음
--- 우선순위는 participantTimes.ts decideWrite와 같음: 값이 없으면 씀, 위치 값이면 응답이 덮음(이동시간은 비움), 응답 값이면 먼저 쓴 값 유지.
+-- 빈 칸만 채움(departed_at · arrived_at이 null일 때만). 위치 값을 응답으로 덮는 일은 앱 follow-up(decideWrite)에 맡김 — 서버가 덮으면 앱이 준비 실측 · 이동시간을 다시 셈할 수 없음.
 -- 지각은 응답 도착 규칙(약속 + 5분 초과, judgeArrival)대로 같이 씀. 준비 실측 · 이동시간 계산은 안 함 — 앱이 같은 값으로 다시 와도
 --   값이 이미 있어 'keep'이고, 준비 실측 · 이동시간은 앱이 저장된 값을 읽어 셈하므로 결과가 같음(멱등)
 create function private.apply_participant_times_from_event()
@@ -404,10 +407,9 @@ begin
   if new.event_type = 'ACKNOWLEDGED' and v_type = 'DEPARTURE' and coalesce(new.input_source::text, 'BUTTON') = 'BUTTON' then
     update public.appointment_participants pt
     set departed_at = new.event_at,
-        departed_source = 'BUTTON',
-        actual_travel_minutes = case when pt.departed_at is not null then null else pt.actual_travel_minutes end
+        departed_source = 'BUTTON'
     where pt.participant_id = v_pid and pt.user_id = new.user_id
-      and (pt.departed_at is null or pt.departed_source = 'LOCATION');
+      and pt.departed_at is null;
 
   elsif new.event_type = 'ARRIVAL_CONFIRMED' and v_type = 'ARRIVE' and coalesce(new.input_source::text, 'BUTTON') = 'BUTTON' then
     update public.appointment_participants pt
@@ -418,12 +420,11 @@ begin
           when new.event_at - ap.appointment_at > interval '5 minutes'
             then round(extract(epoch from (new.event_at - ap.appointment_at)) / 60.0)::integer
           else 0
-        end,
-        actual_travel_minutes = case when pt.arrived_at is not null then null else pt.actual_travel_minutes end
+        end
     from public.appointments ap
     where ap.appointment_id = pt.appointment_id
       and pt.participant_id = v_pid and pt.user_id = new.user_id
-      and (pt.arrived_at is null or pt.arrived_source = 'LOCATION');
+      and pt.arrived_at is null;
 
   elsif new.event_type in ('DISMISSED', 'ACKNOWLEDGED') and v_type = 'PREPARE' then
     update public.appointment_participants pt

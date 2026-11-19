@@ -155,7 +155,7 @@ export default async function ch13({ q, as, su, svc, check, expectErr }) {
     await groupWake(A, g, today);
     const rows = await readAs(B, `select * from public.get_group_wake($1, $2::date)`, [g, today]);
     const keys = rows[0] ? Object.keys(rows[0]).sort() : [];
-    return rows.length >= 1 && JSON.stringify(keys) === JSON.stringify(['arrived_at', 'departed_at', 'is_me', 'nickname', 'profile_image_url', 'trip_visible', 'user_id', 'wake_alarm_at', 'wake_confirmed_at', 'wake_status'])
+    return rows.length >= 1 && JSON.stringify(keys) === JSON.stringify(['arrived_at', 'departed_at', 'is_me', 'nickname', 'profile_image_url', 'trip_appointment_at', 'trip_visible', 'user_id', 'wake_alarm_at', 'wake_confirmed_at', 'wake_status'])
       ? true : { keys, rows };
   });
 
