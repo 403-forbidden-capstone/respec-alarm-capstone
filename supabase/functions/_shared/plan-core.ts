@@ -371,10 +371,11 @@ export function computePlan(i: PlanInputs, travel: ResolvedTravel, mode: PlanMod
     const pure = i.purePrepCandidate;
     const usePure = pure != null && i.draft.prepareMinutes == null && !ml &&
       manualTimes.WAKE == null && manualTimes.PREPARE == null;
-    const minutes = usePure
-      ? Math.round(pure.minutes + (withWake ? beforePrepareMinutes : 0))
+    const activePure = usePure ? pure : null;
+    const minutes = activePure != null
+      ? Math.round(activePure.minutes + (withWake ? beforePrepareMinutes : 0))
       : null;
-    const pureBasis: PrepareBasis = minutes != null
+    const pureBasis: PrepareBasis = activePure != null && minutes != null
       ? {
           ...fallback,
           minutes,
@@ -382,12 +383,12 @@ export function computePlan(i: PlanInputs, travel: ResolvedTravel, mode: PlanMod
           correction: minutes - fallback.commonP80,
           residualP80: 0,
           weight: 0,
-          sampleCount: pure.sampleCount ?? 0,
-          source: pure.source === 'MANUAL' ? 'MANUAL'
-            : pure.source === 'MODEL' ? 'MODEL'
-            : pure.source === 'HISTORY' ? 'PERSONAL' : 'DEFAULT',
+          sampleCount: activePure.sampleCount ?? 0,
+          source: activePure.source === 'MANUAL' ? 'MANUAL'
+            : activePure.source === 'MODEL' ? 'MODEL'
+            : activePure.source === 'HISTORY' ? 'PERSONAL' : 'DEFAULT',
           confidence: 'LOW',
-          ...(pure.source === 'MODEL' && pure.model === 'prep_start_ratio_v2' ? { mlModel: 'prep_start_ratio_v2' as const } : {}),
+          ...(activePure.source === 'MODEL' && activePure.model === 'prep_start_ratio_v2' ? { mlModel: 'prep_start_ratio_v2' as const } : {}),
         }
       : predicted;
     const prepare = i.prepareBound && withWake ? clampPrepareToBound(pureBasis, i.prepareBound) : pureBasis;
