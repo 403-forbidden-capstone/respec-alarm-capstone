@@ -62,6 +62,7 @@ function readAppointmentDraft(r: Reader, opts: { titleRequired: boolean }): { dr
 
   const draft: PlanDraft = {
     ...(appointmentId ? { appointmentId } : {}),
+    ...(appointment?.groupId ? { groupId: appointment.groupId } : {}),
     ...(at ? { at } : {}),
     ...(destination ? { destination } : {}),
     ...(importance ? { importance } : {}),
