@@ -485,6 +485,34 @@ export function computePlan(i: PlanInputs, travel: ResolvedTravel, mode: PlanMod
   };
 }
 
+// Persist the new duration only when the planner actually USED a pure-prep
+// candidate. A profile value or survey model should never be stamped onto a
+// legacy/malformed alarm plan.
+export type PurePrepPersistence = {
+  outing_prep_minutes: number | null;
+  outing_prep_source: 'PROFILE' | 'HISTORY' | 'MODEL' | 'MANUAL' | null;
+  outing_prep_model: string | null;
+};
+export function purePrepPersistenceOf(
+  plan: Plan,
+  candidate: PlanInputs['purePrepCandidate'],
+): PurePrepPersistence {
+  const unavailable: PurePrepPersistence = {
+    outing_prep_minutes: null,
+    outing_prep_source: null,
+    outing_prep_model: null,
+  };
+  if (plan.prepareTarget !== 'PREPARE_START_TO_DEPART' || !candidate) return unavailable;
+  const minutes = plan.prepare.minutes - (plan.withWake ? plan.beforePrepareMinutes : 0);
+  if (!Number.isFinite(minutes) || !Number.isInteger(minutes) || minutes < 5 || minutes > 240 ||
+      minutes !== Math.round(candidate.minutes)) return unavailable;
+  return {
+    outing_prep_minutes: minutes,
+    outing_prep_source: candidate.source,
+    outing_prep_model: candidate.source === 'MODEL' ? candidate.model ?? null : null,
+  };
+}
+
 // ---- 응답 모양 (alarm-suggest, 5.4.1 AlarmSuggestionDTO) ----
 
 const iso = (d: Date | undefined | null) => (d ? d.toISOString() : null);
