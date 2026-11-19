@@ -1124,6 +1124,11 @@ isOneToOne: false
 "roll_insert_occurrence":
 { Args: { "p_alarms": Json,"p_appointment": Json,"p_items": Json,"p_participant": Json }; Returns: string
                            },
+"routine_suggestion_inputs":
+{ Args: { "p_days"?: number,"p_now"?: string }; Returns: {
+              "items_due": number,"items_late": number,"prepare_alarm_at": string,"prepare_started_at": string,"record_date": string,"user_id": string,"wake_alarm_at": string,"wake_confirmed_at": string,"wake_missed": boolean,"weekday": number
+            }[]
+                           },
 "save_group_permissions":
 { Args: { "p_can_edit_alarm": boolean,"p_can_view_alarm": boolean,"p_group_id": string }; Returns: Json
                            },
