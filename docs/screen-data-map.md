@@ -201,6 +201,7 @@
 - 받는 쪽 제안 카드(홈 · 알람 탭): `my_alarm_proposals` — RPC → '○○님의 제안 / 기상 알람 7:30 → 7:00 [적용] [무시]'. `respond_alarm_proposal(p_proposal_id, p_apply)`: 적용하면 서버가 알람 카드 전체를 옮기고 앱이 `syncNow()`로 폰 예약을 서버 알람에 맞춤, 무시는 보낸 쪽에 알리지 않음, `EXPIRED`는 '이미 지나간 제안이에요'
 
 ### A02 AI 대화 (실데이터는 텍스트 대화 — 서버 함수 voice-session · voice-turn과 같이 배포돼야 동작)
+- 루틴 제안 카드 `RoutinePromptCard` (안건 D114): 알람 조정 제안 카드 아래. 기다리는 제안 `routine_suggestions`(PENDING) — DB(`routine/api` getPendingRoutineSuggestion). [루틴 만들기] → A04 `/routine/new?suggestion=…`, [괜찮아요] → IGNORED + 답한 시각 (기록 있는 아침 3번 뒤 다시, D24 C — 서버가 셈)
 - 실패 · 한도 안내 부품 `ChatNotice`(값 · 콜백) — `ai.tsx`가 실패(`unavailable`) · 한도(`limits.reached`)일 때 마지막 말풍선 아래에 붙임
 - 알람 조정 제안 카드 `SuggestionPromptCard` (안건 D111 5번 — 저녁 대화에서 묻기): 대화 첫 마디 바로 아래. 대기 중 제안 `alarm_suggestions`(PENDING) — DB(`records/api` getPendingSuggestion, 그룹 탭 카드 · S01과 같음). [적용하기] · [괜찮아요]는 `suggestion-apply`(Edge, 실데이터) → 폰 예약. 대화 서버 상태(`voice-session` · `voice-turn` · 카드 종류)와는 따로라 대화에는 안 남음
 - 가짜 데이터: 목업 대본(`mocks/ai.ts`) 그대로. 카드는 찾은 일정 한 장(`cards[0]`, 번호 c1)
@@ -226,10 +227,12 @@
 - 일정 · 알람 저장: 앱이 L1 함수로(`appointments` · `alarms`), 준비물은 카드와 같이. 대화 끝 정리의 할 일 · 준비물(`todos`)은 서버 PR 5 (D32). 일정을 여러 개 찾으면 다 받음 (D36) — 기상과 이어지는 첫 일정(`first_of_day`)만 알람 줄을 자세히, 나머지는 "출발 알림" 한 줄. 카드별 상태는 서버 `server_state.cards`
 
 ### A03 하루 기록 · 일기
+- 루틴 제안 (안건 D114 · D30 B): 일기 줄의 `routine_suggestion` 칸이 비어 있는 오늘 일기에는 루틴 제안 표의 기다리는 제안 카드(A02와 같음). 일기 줄 칸은 옛 흐름(가짜 데이터)만
 - 일기: `daily_journals`(AI 글 · 고친 글 · 코칭 · 격려 · 루틴 제안) 읽기 · 고치기 — DB, 만들기 — Edge(`voice-commit`이 AI 글 `ai_summary`만, 코칭 · 격려 · 루틴 제안은 아직 없음). 날짜별로 엶 (R02 일간에서, D48)
 - 오늘의 사실: `alarm_events` · `appointment_participants`(출발 · 도착 · 지각) · `todos` — DB
 
 ### A04 루틴 편집
+- `/routine/new?suggestion=…` (안건 D114): 루틴 제안 초안 — 이름 · 목표 · 요일 · 단계(기상 기준 분 → 다음 기상 알람 시각, 없으면 7:00 · 밤 루틴은 고정 시각). 저장하면 `routines`(origin AI_SUGGESTED) + 단계 알람 → 그 제안을 ACCEPTED + 만든 루틴
 - 루틴: `routines`(이름 · 목표 · 요일 · 단계 `steps` · 켜짐) — DB
 - 단계 알람: `alarms`(`routine_id` · `step_order`) — DB → 예약 — 폰. 루틴을 끄거나 단계(알람)를 빼면 알람을 지우지 않고 `is_enabled` false (지우면 울림 · 확인 기록 `alarm_events`가 같이 사라짐). 다시 켜면 같은 줄(루틴 · 단계 번호가 하나뿐)을 켬. 폰 맞추기는 저장이 중간에 실패해도 함
 
