@@ -15,6 +15,7 @@ import java.util.Locale
 //   3 · 4단계: 개인화 Gemini 캐시 → 앱에 든 그 단계 예비 WAV → 폰의 Android TTS로 같은 문장 전체 (MediaPlayer, 앞 것이 못 열리거나 재생 중 오류면 다음 것)
 //   알람 볼륨 스트림(USAGE_ALARM)으로 읽음. 볼륨 크기 자체는 알람 계획 · 폰 설정이 정함
 //   onStart · onDone은 메인 스레드에서 부름 (기상 알람음을 줄였다 되돌리는 데 씀). 어떤 실패든 onDone으로 끝남 — 알람은 멈추지 않음
+//   holdAtNextBoundary · resume: 기상 알람 그룹 상태 안내를 끼울 때 — Android TTS는 지금 문장 끝, WAV는 지금 바퀴(파일) 끝, 쉬는 중이면 바로 멈췄다가 이어 읽음
 internal class BriefingSpeaker(
   private val context: Context,
   private val onStart: () -> Unit,
@@ -44,7 +45,15 @@ internal class BriefingSpeaker(
   private var finished = false
   private var repeating = false
   private var currentSpeech: VoiceBriefing.Speech? = null
+  // Android TTS는 문장마다 따로 읽음 — 문장 사이에 그룹 상태 안내를 끼울 수 있게 (BriefingRules.sentences)
+  private var sentences: List<String> = emptyList()
+  private var sentenceIndex = 0
+  // 한 바퀴를 다 읽고 다시 읽기 전 쉬는 중
+  private var pausing = false
+  // 다음 경계에서 멈추고 부를 것 (holdAtNextBoundary). 부르면 비움
+  private var onHold: (() -> Unit)? = null
   private val repeatSpeech = Runnable {
+    pausing = false
     val engine = tts
     val speech = currentSpeech
     if (!finished && engine != null && speech != null) speakUtterance(engine, speech)
@@ -89,7 +98,8 @@ internal class BriefingSpeaker(
       p.setDataSource(context, src.uri)
       p.prepare()
       p.isLooping = repeating
-      p.setOnCompletionListener { finish() }
+      // 반복 중에는 끝나지 않음(isLooping) — 끼울 안내가 있으면 holdAtNextBoundary가 반복을 풀어 이번 바퀴 끝에서 여기로 옴
+      p.setOnCompletionListener { if (!hold()) finish() }
       p.setOnErrorListener { _, what, extra ->
         // 재생 도중 오류 — 다음 출처로 (예비 WAV → Android TTS). 알람음 · 진동은 그대로
         Log.w(TAG, "${src.label} 재생 오류($what/$extra) — 다음 출처로")
@@ -165,9 +175,21 @@ internal class BriefingSpeaker(
             override fun onDone(utteranceId: String?) {
               handler.post {
                 handler.removeCallbacks(startTimeout)
-                if (finished) return@post
+                val current = tts
+                if (finished || current == null) return@post
+                sentenceIndex += 1
+                // 문장 사이 — 끼울 안내가 있으면 여기서 멈춤(다음 문장은 resume에서)
+                if (sentenceIndex < sentences.size) {
+                  if (!hold()) speakUtterance(current, speech)
+                  return@post
+                }
+                sentenceIndex = 0
                 lastStatus = if (repeating) "다 읽음 — 해제 전까지 다시 읽음" else "다 읽음 (한 번으로 끝)"
-                if (repeating) handler.postDelayed(repeatSpeech, REPEAT_PAUSE_MILLIS) else finish()
+                if (!repeating) finish()
+                else if (!hold()) {
+                  pausing = true
+                  handler.postDelayed(repeatSpeech, REPEAT_PAUSE_MILLIS)
+                }
               }
             }
 
@@ -179,6 +201,8 @@ internal class BriefingSpeaker(
               }
             }
           })
+          sentences = BriefingRules.sentences(speech.text)
+          sentenceIndex = 0
           speakUtterance(engine, speech)
         }.onFailure {
           Log.w(TAG, "Android TTS 실패 — 알람음만", it)
@@ -189,21 +213,65 @@ internal class BriefingSpeaker(
     }
   }
 
-  // 이미 초기화된 오프라인 TTS 엔진을 재사용하여 같은 문장을 반복 (다시 API를 부르지 않음).
+  // 이미 초기화된 오프라인 TTS 엔진을 재사용하여 같은 문장을 반복 (다시 API를 부르지 않음). sentenceIndex번째 문장 하나만 읽음
   private fun speakUtterance(engine: TextToSpeech, speech: VoiceBriefing.Speech) {
     if (finished) return
+    // 느낌표는 소리 내 읽히므로 지운 문장(BriefingRules.sentences)으로 (3 · 4단계 Gemini 대사를 대신 읽을 때도). 높낮이 · 속도는 그대로
+    val sentence = sentences.getOrNull(sentenceIndex) ?: return finish()
     handler.removeCallbacks(startTimeout)
     handler.postDelayed(startTimeout, START_TIMEOUT_MILLIS)
-    // 느낌표는 소리 내 읽히므로 지우고 읽음 (3 · 4단계 Gemini 대사를 대신 읽을 때도). 높낮이 · 속도는 그대로
-    if (engine.speak(BriefingRules.androidText(speech.text), TextToSpeech.QUEUE_FLUSH, null, UTTERANCE) != TextToSpeech.SUCCESS) {
+    if (engine.speak(sentence, TextToSpeech.QUEUE_FLUSH, null, UTTERANCE) != TextToSpeech.SUCCESS) {
       handler.removeCallbacks(startTimeout)
       finish()
-    } else {
+    } else if (sentenceIndex == 0) {
       Log.i(TAG, "브리핑: Android TTS ${speech.level}단계${if (repeating) " 반복" else ""}")
       lastSource = BriefingRules.source(speech.level, cache = false, bundled = false)
       val fallback = if (speech.level >= 3) " (Gemini 음성 대체)" else ""
       lastStatus = "Android TTS ${speech.level}단계 읽는 중$fallback${if (repeating) " (반복)" else ""}"
     }
+  }
+
+  /**
+   * 다음 경계에서 멈추고 callback을 부름 (메인 스레드) — Android TTS는 지금 문장 끝, WAV는 지금 바퀴 끝, 다시 읽기 전 쉬는 중이면 바로.
+   * 문장 · 파일을 가운데서 끊지 않음. 이어 읽기는 resume(). 이미 끝났으면 아무것도 안 함 (부른 쪽이 onDone에서 처리)
+   */
+  fun holdAtNextBoundary(callback: () -> Unit) {
+    if (finished) return
+    onHold = callback
+    if (pausing) {
+      handler.removeCallbacks(repeatSpeech)
+      pausing = false
+      hold()
+      return
+    }
+    player?.let { p -> runCatching { p.isLooping = false } }
+  }
+
+  /** holdAtNextBoundary로 멈춘 뒤 이어 읽기 — Android TTS는 다음 문장(바퀴 끝이었으면 처음)부터, WAV는 처음부터 다시 반복 */
+  fun resume() {
+    if (finished) return
+    val p = player
+    if (p != null) {
+      runCatching {
+        p.isLooping = repeating
+        p.seekTo(0)
+        p.start()
+      }.onFailure {
+        Log.w(TAG, "그룹 안내 뒤 음성을 다시 못 틂 — 알람음만", it)
+        finish()
+      }
+      return
+    }
+    val engine = tts
+    val speech = currentSpeech
+    if (engine != null && speech != null) speakUtterance(engine, speech)
+  }
+
+  private fun hold(): Boolean {
+    val callback = onHold ?: return false
+    onHold = null
+    callback()
+    return true
   }
 
   private fun finish() {
@@ -224,6 +292,8 @@ internal class BriefingSpeaker(
     handler.removeCallbacks(initTimeout)
     handler.removeCallbacks(startTimeout)
     handler.removeCallbacks(repeatSpeech)
+    pausing = false
+    onHold = null
     currentSpeech = null
     releasePlayer()
     tts?.let { t ->

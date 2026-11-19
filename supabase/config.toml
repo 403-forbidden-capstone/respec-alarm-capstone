@@ -483,6 +483,10 @@ verify_jwt = false
 [functions.alarm-events-device]
 verify_jwt = false
 
+# 기상 알람이 울릴 때 폰 네이티브가 그룹원 상태 안내를 받는 길 — 같은 기기 키(로그인 토큰 아님)라 게이트웨이 JWT 검사를 끄고 코드에서 확인
+[functions.group-status-device]
+verify_jwt = false
+
 # L9 시간표 채우기 — 사진(base64) → Claude → 수업 줄. 앱이 로그인 토큰으로 부름
 [functions.timetable-extract]
 verify_jwt = true
