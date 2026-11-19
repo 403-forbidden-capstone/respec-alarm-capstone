@@ -72,9 +72,9 @@ describe('G02 연결 일정 줄 (9-03 · 9-23 · 9-27 · 9-32 · 9-42)', () => {
     expect(g?.appointments.every((a) => a.joinedCount === 0 && !a.iJoined)).toBe(true);
   });
 
-  it('줄 글자: 참여는 "참여", 안 누름 · 빠짐 · 끔은 모두 "알람 없음", 지난 약속은 "지난 약속이에요"(버튼 숨김)', () => {
-    expect(appointmentStateText({ iJoined: true, past: false })).toBe('참여');
-    expect(appointmentStateText({ iJoined: false, past: false })).toBe('알람 없음');
+  it('줄 글자: 참여는 "내 알람 켜짐"("4명 참여 · 참여"처럼 겹치지 않게), 안 누름 · 빠짐 · 끔은 모두 "내 알람 없음", 지난 약속은 "지난 약속이에요"(버튼 숨김)', () => {
+    expect(appointmentStateText({ iJoined: true, past: false })).toBe('내 알람 켜짐');
+    expect(appointmentStateText({ iJoined: false, past: false })).toBe('내 알람 없음');
     expect(appointmentStateText({ iJoined: true, past: true })).toBe('지난 약속이에요');
     expect(appointmentStateText({ iJoined: false, past: true })).toBe('지난 약속이에요');
     expect(joinedCountText(3)).toBe('3명 참여');

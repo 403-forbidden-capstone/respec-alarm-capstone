@@ -5,11 +5,12 @@
 import type { AlarmTime, IntensityAxis, Level } from '@/features/alarm/types';
 import { wakeStateOf, type WakeRow } from '@/features/social/map';
 import type { WakeState } from '@/features/social/types';
+import { now as clockNow, scenarioTime } from '@/lib/clock';
 import { minuteOfDay } from '@/lib/format';
 import { alarmChain as sharedAlarmChain } from '@shared/calc/chain.ts';
 import { autoLevel as sharedAutoLevel, levelOfVoiceTone, resolveIntensity, wakeSensitivityOf } from '@shared/calc/intensity.ts';
 
-import { db, kst, timelines, TODAY, type MockAppointment } from './data';
+import { db, kst, ME_TRIP, timelines, TODAY, tripTimelines, type MockAppointment } from './data';
 
 // ALG-01: 출발 = 약속 − 여유 − 이동, 기상 = 출발 − 예측 준비(P80)
 // 그날 첫 일정이 아니면(기상 알람 없음) 준비 알람만. 준비 알람은 기상 뒤 준비 전 활동만큼 뒤
@@ -60,32 +61,53 @@ function myFirstAlarm() {
 }
 
 // 그룹원의 지금 기상 줄 — 시나리오 시각(now)까지 일어난 마지막 일을 서버 get_group_wake 줄 모양으로 (친구 7장)
-//   기상까지만: 준비 · 출발 · 도착은 기상 확인 뒤라 '일어남'에 머묾 (D59). 시나리오가 없는 사람은 null (= 공유 안 함)
-export function mockWakeRow(personId: string, now: Date): WakeRow | null {
+//   출발 · 도착은 그 사람이 출발 · 도착 공유를 켰을 때(tripVisible)만 줌 — 꺼져 있으면 시각 없이 trip_visible false. 시나리오가 없는 사람은 null (= 공유 안 함)
+//   '이동 중' · '도착' 시각(lib/clock)에는 tripTimelines · ME_TRIP, 평소 아침에는 timelines · db.me
+export function mockWakeRow(personId: string, now: Date, tripVisible = false): WakeRow | null {
   const beforeToday = now.getTime() < kst(TODAY, 0).getTime();
   const iso = (d: Date) => d.toISOString();
+  const trip = (departed: Date | null, arrived: Date | null) => ({
+    trip_visible: tripVisible,
+    departed_at: tripVisible && departed ? iso(departed) : null,
+    arrived_at: tripVisible && arrived ? iso(arrived) : null,
+  });
   if (personId === 'me') {
     const first = myFirstAlarm();
-    const base = { user_id: 'me', is_me: true, wake_alarm_at: iso(first), wake_confirmed_at: null as string | null };
+    const base = { user_id: 'me', is_me: true, wake_alarm_at: iso(first), wake_confirmed_at: null as string | null, ...trip(null, null) };
     if (beforeToday) return { ...base, wake_status: 'SCHEDULED' };
-    const { arriveAt, departAt, wakeAt } = db.me;
+    const { arriveAt, departAt, wakeAt } = myTrip(now);
     const woke = wakeAt ?? departAt ?? arriveAt;
-    if (woke) return { ...base, wake_status: 'CONFIRMED', wake_confirmed_at: iso(woke) };
+    const tripRow = trip(departAt, arriveAt);
+    if (woke) return { ...base, ...tripRow, wake_status: 'CONFIRMED', wake_confirmed_at: iso(woke) };
     if (db.wake.phase === 'ringing') return { ...base, wake_status: 'RINGING' };
     if (db.wake.phase === 'observing' || db.wake.phase === 'prompt') return { ...base, wake_status: 'DISMISSED' };
     return { ...base, wake_status: 'SCHEDULED' };
   }
-  const tl = timelines[personId];
+  const tl = (isTripScenario() ? tripTimelines : timelines)[personId];
   if (!tl) return null;
-  const base = { user_id: personId, is_me: false, wake_alarm_at: iso(kst(TODAY, tl[0][0])), wake_confirmed_at: null as string | null };
+  const base = { user_id: personId, is_me: false, wake_alarm_at: iso(kst(TODAY, tl[0][0])), wake_confirmed_at: null as string | null, ...trip(null, null) };
   if (beforeToday) return { ...base, wake_status: 'SCHEDULED' };
   const nowMin = minuteOfDay(now);
   const passed = tl.filter(([m]) => m <= nowMin);
+  const timeOf = (label: string) => {
+    const at = passed.find(([, l]) => l === label);
+    return at ? kst(TODAY, at[0]) : null;
+  };
+  const tripRow = trip(timeOf('출발'), timeOf('도착'));
   const confirmed = passed.find(([, label]) => label === '기상 확인');
-  if (confirmed) return { ...base, wake_status: 'CONFIRMED', wake_confirmed_at: iso(kst(TODAY, confirmed[0])) };
+  if (confirmed) return { ...base, ...tripRow, wake_status: 'CONFIRMED', wake_confirmed_at: iso(kst(TODAY, confirmed[0])) };
   if (passed.some(([, label]) => label === '알람 해제')) return { ...base, wake_status: 'DISMISSED' };
   if (passed.length) return { ...base, wake_status: 'RINGING' };
   return { ...base, wake_status: 'SCHEDULED' };
+}
+
+export const isTripScenario = () => scenarioTime() === 'moving' || scenarioTime() === 'arrived';
+
+// 내 하루의 기상 · 출발 · 도착 시각 — 직접 만든 기록(db.me)이 먼저, 없으면 '이동 중' · '도착' 시각의 시나리오 값. 시나리오 값은 지금(now) 이후면 아직 안 일어난 일이라 뺌 (홈 이동 중 줄 · 그룹 내 줄이 같이 읽음)
+export function myTrip(current: Date = clockNow()): { wakeAt: Date | null; departAt: Date | null; arriveAt: Date | null } {
+  const preset = isTripScenario() ? ME_TRIP : null;
+  const past = (d: Date | null | undefined) => (d && d.getTime() <= current.getTime() ? d : null);
+  return { wakeAt: db.me.wakeAt ?? past(preset?.wakeAt), departAt: db.me.departAt ?? past(preset?.departAt), arriveAt: db.me.arriveAt ?? past(preset?.arriveAt) };
 }
 
 // 그 줄의 화면 글자 (시험이 씀 — 화면은 social/api의 mockWakeRows로 읽음)

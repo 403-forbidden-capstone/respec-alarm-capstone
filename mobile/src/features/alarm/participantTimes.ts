@@ -18,6 +18,8 @@
 //     출발 · 도착이 바뀌면 그 값으로 셈한 이동시간을 같이 비우고 새 값으로 다시 셈 (clearLocationTime과 같은 규칙)
 //     출발지(비면 집) · 목적지 좌표가 없거나 500m 안이면 안 씀 — D68 "500m 안이면 이동 측정을 끄고 기본값" (features/location/geo isNearTrip과 같은 규칙)
 //     출발이 출발 예정 60분 전보다 이르면 안 씀 — 근거 없음, 작성자 판단 (7.13.7 감시 창 W_geo를 표본 범위로 씀. 집 이탈은 오늘 첫 약속에 시간 제한 없이 붙어 출발 · 도착이 몇 시간 떨어질 수 있음)
+//   · 받아들이는 창 — 위치로 잡은 출발이 출발 예정 60분 전(WINDOW_BEFORE_DEPART_MINUTES)보다 이르면 쓰지 않음 (부팅 직후 6:27 '출발'이 약속 3시간 전에 들어간 11/19 아침 시험).
+//     서버(그룹에 출발을 보이는 쪽)도 같은 규칙으로 막음. 응답(원탭 · 직접 입력)은 사용자가 말한 시각이라 이 창을 안 봄. 도착은 그대로
 //   · 위치 값 지우기(clearLocationTime) — 사용자 정정 [아니에요](D61)만 씀. 출처가 LOCATION일 때만. 지운 뒤는 다음 자동 감지를 기다림
 //     (원탭은 자동 값이 없을 때만 대신 쓰는 길 — 원탭 알림 건너뛰기는 PR 6)
 //   · 같은 입력으로 다시 불려도 같은 결과 (onEventsUploaded 훅 · 위치 보관함이 던지면 다시 넘어오므로). 쓰는 순서는 시각 → 준비 실측 · 이동시간 → 위치 기록 (recordParticipantTimes 끝)
@@ -112,6 +114,21 @@ export function travelMinutesOf(t: {
   const minutes = Math.round((t.arrivedAtMs - t.departedAtMs) / 60_000);
   if (minutes <= 0) return null; // 보정은 어긋난 기록(도착이 출발보다 빠름)을 살리지 않음
   return t.departedSource === 'LOCATION' && t.arrivedSource === 'LOCATION' ? minutes + TRAVEL_CORRECTION_MINUTES : minutes;
+}
+
+// 위치로 잡은 출발이 받아들이는 창(출발 예정 − 60분)보다 이른지 — 이르면 출발로 안 씀 (응답 출처는 늘 받음)
+export function isTooEarlyLocationDeparture(source: TimeSource, departedAtMs: number, departAtMs: number, appointmentAtMs: number): boolean {
+  return source === 'LOCATION' && departedAtMs < detectionWindow({ departAt: departAtMs, appointmentAt: appointmentAtMs }).start;
+}
+
+// 출발 예정 = 출발 알람 시각, 없으면 약속 − 여유 − 이동. 약속 시각을 못 읽으면 null
+function plannedDepartOf(row: ParticipantRow): { departAtMs: number; appointmentAtMs: number } | null {
+  const appointmentAt = row.appointments?.appointment_at;
+  if (!appointmentAt) return null;
+  const appointmentAtMs = dbTimeMs(appointmentAt);
+  const alarm = alarmOf(row, 'DEPART');
+  const departAtMs = alarm ? dbTimeMs(alarm.scheduled_at) : plannedDepartAt({ appointmentAt: appointmentAtMs, travelMinutes: row.est_travel_minutes, bufferMinutes: row.buffer_minutes });
+  return { departAtMs, appointmentAtMs };
 }
 
 // 위치 기록(alarm_events)의 번호 — 같은 참여 조건 · 종류 · 시각이면 같은 번호 (다시 불려도 한 줄, 지울 때도 이 번호로 찾음)
@@ -284,10 +301,7 @@ async function recordTravelMinutes(
   if (!dest) return null;
   const origin = toLatLng({ lat: row.origin_lat, lng: row.origin_lng }) ?? (await loadHome(userId));
   const appointmentAtMs = dbTimeMs(appointment.appointment_at);
-  const departureAlarm = alarmOf(row, 'DEPART');
-  const departAtMs = departureAlarm
-    ? dbTimeMs(departureAlarm.scheduled_at)
-    : plannedDepartAt({ appointmentAt: appointmentAtMs, travelMinutes: row.est_travel_minutes, bufferMinutes: row.buffer_minutes });
+  const departAtMs = plannedDepartOf(row)?.departAtMs ?? appointmentAtMs;
   const minutes = travelMinutesOf({ departedAtMs, arrivedAtMs, departedSource: departed.source, arrivedSource: arrived.source, origin, dest, departAtMs, appointmentAtMs });
   if (minutes == null || minutes === currentMinutes) return null;
   const { data, error } = await supabase
@@ -306,13 +320,20 @@ async function recordTravelMinutes(
 // 출발 · 도착 시각 기록. 일시 오류(네트워크 등)는 던짐 — 부르는 쪽이 다시 부를 수 있게 (같은 입력이면 같은 결과)
 export async function recordParticipantTimes(input: RecordTimesInput): Promise<RecordTimesResult> {
   const result: RecordTimesResult = { departed: null, arrived: null, prepareMinutes: null, travelMinutes: null };
-  const departedMs = toMs(input.departedAt);
+  let departedMs = toMs(input.departedAt);
   const arrivedMs = toMs(input.arrivedAt);
   if (departedMs == null && arrivedMs == null) return result;
   const userId = await requireUserId();
 
   const row = await loadParticipant(userId, input.participantId);
   if (!row) return result; // 지워진 참여 조건
+
+  // 너무 이른 위치 출발은 안 씀 (아래 도착은 그대로). 약속 시각을 못 읽으면 창을 못 재므로 받음
+  if (departedMs != null) {
+    const planned = plannedDepartOf(row);
+    if (planned && isTooEarlyLocationDeparture(input.source, departedMs, planned.departAtMs, planned.appointmentAtMs)) departedMs = null;
+  }
+  if (departedMs == null && arrivedMs == null) return result;
 
   const isLocation = input.source === 'LOCATION';
   const geo: { kind: TimeKind; atMs: number }[] = []; // 남길 위치 기록

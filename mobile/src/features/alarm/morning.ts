@@ -32,6 +32,7 @@ export type MorningSource = {
   travelSource: string;
   alarms: readonly AlarmTime[]; // 이 약속의 알람 (꺼진 것 포함)
   departedAt: Date | null;
+  arrivedAt: Date | null;
 };
 
 // 켜진 기상 알람
@@ -63,6 +64,7 @@ export function toMorningPlan(source: MorningSource, wakeConfirmedAt: Date | nul
     travelSource: source.travelSource,
     wakeConfirmedAt,
     departedAt: source.departedAt,
+    arrivedAt: source.arrivedAt,
   };
 }
 
@@ -78,6 +80,25 @@ export function morningCardVisible(plan: MorningPlan | null, current: Date): boo
   if (!plan || isEvening(current) || plan.departedAt != null) return false;
   const started = plan.wakeConfirmedAt != null || current.getTime() >= plan.wakeAt.getTime();
   return started && current.getTime() <= addMinutes(departReference(plan), MORNING_CARD_GRACE_MINUTES).getTime();
+}
+
+// 약속 시각이 지난 뒤에도 '이동 중' · '도착했어요' 줄을 이만큼 더 둠 (작성자 판단 — 11/19 지형님 "약속 + 60분")
+export const TRIP_CARD_AFTER_MINUTES = 60;
+
+export type TripCardView = {
+  stage: 'MOVING' | 'ARRIVED';
+  title: string; // 이동 중 · 오전 9:45 도착 예정 / 도착했어요 오전 9:48
+  summary: string; // 오전 10:00 팀 주간회의 · 세종대학교
+};
+
+// 홈 이동 중 · 도착 줄 — 출발 기록부터 도착 기록까지 '이동 중 · 도착 예정'(출발 + 예상 이동분), 도착하면 '도착했어요'. 둘 다 약속 + 60분까지 (아침 카드는 출발하면 빠지므로 그 자리를 이음)
+//   도착 기록이 있으면 출발 기록이 없어도 도착을 보임. 저녁(다음 날 일정을 보는 때)에는 없음
+export function tripCardOf(plan: MorningPlan | null, current: Date): TripCardView | null {
+  if (!plan || isEvening(current) || current.getTime() > addMinutes(plan.at, TRIP_CARD_AFTER_MINUTES).getTime()) return null;
+  const summary = [`${formatTime(plan.at)} ${plan.title}`, plan.place].filter(Boolean).join(' · ');
+  if (plan.arrivedAt) return { stage: 'ARRIVED', title: `도착했어요 ${formatTime(plan.arrivedAt)}`, summary };
+  if (plan.departedAt) return { stage: 'MOVING', title: `이동 중 · ${formatTime(addMinutes(plan.departedAt, plan.travelMinutes))} 도착 예정`, summary };
+  return null;
 }
 
 // 아직 안 울린 준비 · 출발 알림 (H08 "다음 알림")

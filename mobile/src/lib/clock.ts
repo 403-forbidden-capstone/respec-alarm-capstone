@@ -1,11 +1,14 @@
 // 지금 시각 — 가짜 데이터 모드에서는 목업과 같은 시나리오 시각, 실데이터 모드에서는 실제 시각
 //   아침: 5월 22일 목요일 오전 7:55 (목업 첫 화면) · 저녁: 전날 밤 9:00 (목업 데모 첫 단계)
+//   이동 중: 5월 22일 오전 9:10 · 도착: 오전 9:50 — 출발 · 도착 공유가 그룹 화면과 홈에 보이는 장면 (mocks/data ME_TRIP · tripTimelines)
 // 시나리오는 /dev/screens에서 바꿔 봄. 모드는 lib/mode.ts가 바뀔 때마다 setRealTime으로 알려 줌
-export type ScenarioTime = 'morning' | 'evening';
+export type ScenarioTime = 'morning' | 'evening' | 'moving' | 'arrived';
 
 const SCENARIO: Record<ScenarioTime, Date> = {
   morning: new Date('2025-05-21T22:55:00Z'),
   evening: new Date('2025-05-21T12:00:00Z'),
+  moving: new Date('2025-05-22T00:10:00Z'),
+  arrived: new Date('2025-05-22T00:50:00Z'),
 };
 
 let current: ScenarioTime = 'morning';

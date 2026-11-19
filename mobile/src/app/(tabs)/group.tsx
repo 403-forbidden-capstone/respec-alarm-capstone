@@ -39,7 +39,7 @@ import { INVITES_SHOWN, moreInvitesText } from '@/features/social/groupTexts';
 import { relationFromLists } from '@/features/social/searchView';
 import { SearchBox } from '@/features/social/components/SearchBox';
 import { useWakeLoad } from '@/features/social/hooks/useGroupWake';
-import { wokeLine } from '@/features/social/wakeTexts';
+import { groupWakeLine } from '@/features/social/wakeTexts';
 import { usePersonMenu } from '@/features/social/hooks/usePersonMenu';
 import { shareFriendInvite } from '@/features/social/invite';
 import { friendLinkUrl } from '@/features/social/inviteLink';
@@ -431,7 +431,7 @@ function GroupTab({
               {g.name}
             </Text>
             <Text variant="small" tone="sub" style={styles.groupSub}>
-              {[`${g.memberCount}명`, wokeLine(g.wokeCount)].filter(Boolean).join(' · ')}
+              {[`${g.memberCount}명`, groupWakeLine(g.wokeCount, g.trip)].filter(Boolean).join(' · ')}
             </Text>
             <View style={styles.chips}>
               {(names.length ? names : ['공유 없음']).map((name) => (

@@ -6,6 +6,7 @@ import { filterArgs, type FakeCall, type FakeResult } from '../testkit/fakeSupab
 import {
   decideWrite,
   geoEventId,
+  isTooEarlyLocationDeparture,
   judgeArrival,
   LATE_AFTER_MINUTES,
   LOCATION_LATE_AFTER_MINUTES,
@@ -255,6 +256,44 @@ describe('DB에 쓰기 (recordParticipantTimes)', () => {
   beforeEach(() => {
     mockCalls.length = 0;
     mockRoutes = {};
+  });
+
+  describe('받아들이는 창 — 출발 예정 60분 전보다 이른 위치 출발 (11/19)', () => {
+    it('순수 판정: 위치 출발만, 창 시작(출발 예정 − 60분) 그 시각은 받음', () => {
+      const depart = at('08:50');
+      const appt = at('10:00');
+      expect(isTooEarlyLocationDeparture('LOCATION', at('07:50') - 1000, depart, appt)).toBe(true);
+      expect(isTooEarlyLocationDeparture('LOCATION', at('07:50'), depart, appt)).toBe(false);
+      expect(isTooEarlyLocationDeparture('BUTTON', at('06:27'), depart, appt)).toBe(false); // 응답은 사용자가 말한 시각
+      expect(isTooEarlyLocationDeparture('MANUAL', at('06:27'), depart, appt)).toBe(false);
+    });
+
+    it('너무 이른 위치 출발은 DB에 안 씀 — 시각 쓰기도 위치 기록 줄(alarm_events)도 없음', async () => {
+      setup({ participant: participantRow({ alarms: ALARMS }) });
+      const result = await run({ departedAt: at('06:27'), source: 'LOCATION' });
+      expect(result.departed).toBeNull();
+      expect(only('appointment_participants', 'update')).toEqual([]);
+      expect(only('alarm_events', 'upsert')).toEqual([]);
+      expect(only('daily_records', 'upsert')).toEqual([]);
+    });
+
+    it('출발 알람이 없으면 약속 − 여유 − 이동(9:00) 기준 8:00 전은 안 씀, 도착은 그대로 씀', async () => {
+      setup({ participant: participantRow() });
+      const result = await run({ departedAt: at('07:30'), arrivedAt: min(-6), source: 'LOCATION' });
+      expect(result).toMatchObject({ departed: null, arrived: 'new' });
+      const writes = only('appointment_participants', 'update');
+      expect(writes).toHaveLength(1);
+      expect(writes[0].payload).toMatchObject({ arrived_at: isoMs(min(-6)), arrived_source: 'LOCATION' });
+      expect(writes[0].payload).not.toHaveProperty('departed_at');
+    });
+
+    it('창 안의 위치 출발과 이른 시각의 응답(원탭)은 그대로 씀', async () => {
+      setup({ participant: participantRow({ alarms: ALARMS }) });
+      expect((await run({ departedAt: at('08:52'), source: 'LOCATION' })).departed).toBe('new');
+      mockCalls.length = 0;
+      setup({ participant: participantRow({ alarms: ALARMS }) });
+      expect((await run({ departedAt: at('06:27'), source: 'BUTTON' })).departed).toBe('new');
+    });
   });
 
   describe('출발 · 출처 칸', () => {

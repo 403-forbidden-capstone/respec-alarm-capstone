@@ -7,7 +7,7 @@ import type { Tables } from '@/types/database';
 import type { FinalGrant, GrantRow, PermissionSet } from './types';
 
 export type FriendRow = Pick<Tables<'friends'>, 'friend_id' | 'requester_id' | 'addressee_id' | 'status' | 'requested_at'>;
-export type MemberRow = Pick<Tables<'group_members'>, 'group_id' | 'user_id' | 'invite_status' | 'wake_share_opt_in' | 'joined_at' | 'notifications_off'>;
+export type MemberRow = Pick<Tables<'group_members'>, 'group_id' | 'user_id' | 'invite_status' | 'wake_share_opt_in' | 'trip_share_opt_in' | 'joined_at' | 'notifications_off'>;
 export type PermRow = Pick<
   Tables<'sharing_permissions'>,
   'owner_id' | 'grantee_id' | 'source_type' | 'source_id' | 'can_view_alarm' | 'can_edit_alarm' | 'can_view_wake'

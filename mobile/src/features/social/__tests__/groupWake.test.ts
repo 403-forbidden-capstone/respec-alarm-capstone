@@ -163,6 +163,8 @@ describe('G03 기상 상태 (7-41 · 7-06 · 7-02)', () => {
       state: expect.objectContaining({ stage: 'WOKE', text: '일어났어요 오전 8:08' }),
       alarmAt: new Date('2026-10-19T23:50:00.000Z'),
       confirmedAt: new Date('2026-10-19T23:08:00.000Z'),
+      departedAt: null,
+      arrivedAt: null,
       canViewAlarm: true, // 수연 → 나 친구 출처 조회
       noGroupAppointment: false,
     });

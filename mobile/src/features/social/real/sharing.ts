@@ -18,12 +18,13 @@ import {
   myGroup,
   myGroups,
   myOptIn,
+  myTripOptIn,
   personOf,
   receivedRows,
   sharedGroups,
 } from '../snapshot';
 import type { FinalGrant, PermissionSet, Person, Relation, RelationId } from '../types';
-import { setWakeShareOptIn } from './groups';
+import { setTripShareOptIn, setWakeShareOptIn } from './groups';
 import { invalidateSnapshot, loadSnapshot } from './load';
 
 // 친구 권한 (F02) — 이 친구가 내 정보에 대해 가진 최종 권한과 출처. 친구가 아니면 null (그룹원 · 나를 주소로 열어도)
@@ -69,7 +70,7 @@ export async function getShareSettings(id: RelationId): Promise<PermissionSet> {
 // F03 [변경사항 저장]
 //   친구 관계: 내 행 하나를 upsert — 알람 조회 · 설정만 (기상 조회는 친구 출처에 없음, 서버가 켜도 꺼진 채 저장). 설정을 켜면 조회도 켜서 보냄(설정만 켠 행은 DB 제약이 거절)
 //   그룹 관계: save_group_permissions 한 번 — 참여 중 멤버 전원에게 같은 값이 전부 되거나 전부 안 됨, 값이 그대로여도 저장(나중에 들어온 사람 몫의 설정 행도 이때 생김, 6-15).
-//     기상 조회 스위치 = 이 그룹 기상 공유 동의(wake_share_opt_in) — 권한 행과 따로 저장 (6-23). 혼자인 그룹은 줄 사람이 없어 오류 (6-18)
+//     기상 조회 스위치 = 이 그룹 기상 공유 동의(wake_share_opt_in), 출발 · 도착 스위치 = trip_share_opt_in — 권한 행과 따로 저장 (6-23). 혼자인 그룹은 줄 사람이 없어 오류 (6-18)
 export async function saveShareSettings(id: RelationId, next: PermissionSet) {
   const s = await loadSnapshot();
   const { kind, key } = parseRelation(id);
@@ -102,6 +103,16 @@ export async function saveShareSettings(id: RelationId, next: PermissionSet) {
     // 알람 권한은 이미 저장된 뒤 — 동의만 못 바꿨으면 그 사실을 알리고(다시 저장하면 같은 요청이라 안전), 화면은 저장된 값을 다시 읽게 함
     try {
       await setWakeShareOptIn(key, next.viewWake);
+    } catch (e) {
+      throw new UserError(CONSENT_FAILED);
+    }
+  }
+  // 출발 · 도착 공유 — 기상 공유가 꺼지면 같이 꺼짐 (위에서 기상 동의를 끈 경우 setWakeShareOptIn이 이미 같이 껐으므로 건너뜀)
+  const wantTrip = next.viewWake && !!next.viewTrip;
+  const clearedWithWake = !next.viewWake && myOptIn(s, key);
+  if (wantTrip !== myTripOptIn(s, key) && !clearedWithWake) {
+    try {
+      await setTripShareOptIn(key, wantTrip);
     } catch (e) {
       throw new UserError(CONSENT_FAILED);
     }

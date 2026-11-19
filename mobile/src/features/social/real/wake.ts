@@ -21,7 +21,7 @@ export async function getMemberWake(groupId: string, personId: string, date?: st
 
   const rows = await loadWakeRows(groupId, date);
   const base = { person: personOf(s, personId), groupName: group.group_name, canViewAlarm: receivedFrom(s, personId).viewAlarm };
-  if (!rows.length) return { ...base, state: NO_APPOINTMENT_STATE, alarmAt: null, confirmedAt: null, noGroupAppointment: true };
+  if (!rows.length) return { ...base, state: NO_APPOINTMENT_STATE, alarmAt: null, confirmedAt: null, departedAt: null, arrivedAt: null, noGroupAppointment: true };
   const row = rows.find((r) => r.user_id === personId);
   if (!row) return null;
   return {
@@ -29,6 +29,8 @@ export async function getMemberWake(groupId: string, personId: string, date?: st
     state: wakeStateOf(row, true),
     alarmAt: row.wake_alarm_at ? parseDbTime(row.wake_alarm_at) : null,
     confirmedAt: row.wake_confirmed_at ? parseDbTime(row.wake_confirmed_at) : null,
+    departedAt: row.departed_at ? parseDbTime(row.departed_at) : null,
+    arrivedAt: row.arrived_at ? parseDbTime(row.arrived_at) : null,
     noGroupAppointment: false,
   };
 }
