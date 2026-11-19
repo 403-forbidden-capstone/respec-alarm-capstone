@@ -392,7 +392,7 @@ export function computePlan(i: PlanInputs, travel: ResolvedTravel, mode: PlanMod
         }
       : predicted;
     const prepare = i.prepareBound && withWake ? clampPrepareToBound(pureBasis, i.prepareBound) : pureBasis;
-    return { beforePrepareMinutes, prepare };
+    return { beforePrepareMinutes, prepare, pureApplied: activePure != null };
   };
 
   const manualTimes = resolveManualTimes(i.draft.manualTimes, i.existingAlarms);
@@ -411,7 +411,7 @@ export function computePlan(i: PlanInputs, travel: ResolvedTravel, mode: PlanMod
       derived = derive(false);
     }
   }
-  const { beforePrepareMinutes, prepare } = derived;
+  const { beforePrepareMinutes, prepare, pureApplied } = derived;
 
   // 잠귀(profiles.wake_sensitivity): 무거움(HEAVY)이면 강, 가벼움 · 보통은 기본 보통 (D69). 앱 map.ts toIntensity · realWrite setIntensity도 같은 값을 넘김
   const wakeSensitivity = wakeSensitivityOf(i.profile.wake_sensitivity);
@@ -461,7 +461,7 @@ export function computePlan(i: PlanInputs, travel: ResolvedTravel, mode: PlanMod
     travelMinutes: chosen.minutes,
     prepare,
     // Legacy recent statistics are wake->departure, not pure prep; do not display them when using the new basis.
-    recentPrepare: withWake && i.purePrepCandidate == null ? recentPrepareOf(i.stats) : [],
+    recentPrepare: withWake && !pureApplied ? recentPrepareOf(i.stats) : [],
     intensity,
     kinds,
     manualTimes,
