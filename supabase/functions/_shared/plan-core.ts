@@ -87,6 +87,7 @@ export type ParticipantRow = {
   est_travel_minutes: number | null;
   travel_source: 'API' | 'CACHED' | 'MANUAL';
   prepare_minutes: number;
+  prepare_value_source?: 'LEGACY' | 'AUTO' | 'MANUAL';
   buffer_minutes: number;
   prepare_advance_minutes?: number | null; // 받아들인 준비 알람 당김 분 (#484 · 안건 D111) — 계산이 준비 알람을 그만큼 앞당김. 없으면 0
 };
@@ -376,6 +377,9 @@ export function computePlan(i: PlanInputs, travel: ResolvedTravel, mode: PlanMod
     // Never mix with old C1/W4, or an explicit legacy manual override.
     const pure = i.purePrepCandidate;
     const usePure = pure != null && i.draft.prepareMinutes == null && !ml &&
+      // Explicit legacy manual duration must survive edit/roll/restore
+      // even if these code paths don't submit an override in the draft.
+      !(i.participant?.prepare_value_source === 'MANUAL' && i.draft.prepareValueSource !== 'AUTO') &&
       manualTimes.WAKE == null && manualTimes.PREPARE == null;
     const activePure = usePure ? pure : null;
     const minutes = activePure != null
