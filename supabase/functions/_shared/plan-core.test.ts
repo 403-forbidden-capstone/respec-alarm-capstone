@@ -714,3 +714,27 @@ test('new model provenance is exposed only when explicitly injected (not by name
   assert.equal(plan.prepare.mlModel, 'prep_start_ratio_v2');
   assert.equal(toSuggestion(plan).prepare.model, 'prep_start_ratio_v2');
 });
+
+test('suggestion explicitly distinguishes legacy whole-wake target from new pure-preparation target', () => {
+  const pure = computePlan(base({
+    purePrepCandidate: { source:'PROFILE', minutes:35 },
+    stats:{sampleCount:0,p80:null},
+  }), api(50));
+  const pureDto = toSuggestion(pure);
+  assert.equal(pure.prepareTarget,'PREPARE_START_TO_DEPART');
+  assert.equal(pureDto.prepare.target,'PREPARE_START_TO_DEPART');
+  assert.equal(pureDto.prepare.pure_minutes,35);
+  assert.equal(pureDto.prepare.minutes,55);
+  const legacy = computePlan(base({stats:{sampleCount:0,p80:null}}),api(50));
+  const dto=toSuggestion(legacy);
+  assert.equal(dto.prepare.target,'WAKE_TO_DEPART');
+  assert.equal(dto.prepare.pure_minutes,null);
+});
+test('pure candidate is not clamped to legacy repeated wake-to-departure value',()=>{
+  const plan=computePlan(base({
+     purePrepCandidate:{source:'PROFILE',minutes:35},
+     prepareBound:{around:90,within:10},
+     stats:{sampleCount:0,p80:null},
+  }),api(50));
+  assert.equal(plan.prepare.minutes,55);
+});
