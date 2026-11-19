@@ -18,6 +18,8 @@ import {
   snoozeLateMinutes,
   snoozeLimitNotice,
   snoozeRingAt,
+  isRingAlarmType,
+  RING_ALARM_TYPES,
   soundKeyOf,
   vibrationOf,
   wakeNowBanner,
@@ -132,9 +134,43 @@ describe('공통 케이스 — 미루기 횟수 한도 · 시간 고르기 (D3 �
     expect(DEFAULT_SNOOZE_LIMIT).toBe(3);
   });
 
-  it('보통 알림은 미루기가 없어 목록 · 한도가 비어 있음', () => {
-    const plan = buildRingPlan({ type: 'DEPARTURE', intensity: 'NORMAL', snoozeLimit: 3 });
-    expect([plan.snoozeMillis, plan.snoozeMinutesOptions, plan.snoozeLimit]).toEqual([0, [], 0]);
+  it('도착 확인 · 루틴(보통 알림)은 미루기가 없어 목록 · 한도가 비어 있음', () => {
+    for (const type of ['ARRIVE', 'ROUTINE'] as const) {
+      const plan = buildRingPlan({ type, intensity: 'NORMAL', snoozeLimit: 3 });
+      expect([plan.sound, plan.snoozeMillis, plan.snoozeMinutesOptions, plan.snoozeLimit]).toEqual([false, 0, [], 0]);
+    }
+  });
+
+  it('준비 · 출발도 기상과 같은 알람 — 알람음 · 다시 울림 · 5/10/15분 미루기 · 한도가 같고 문구만 다름 (11/19)', () => {
+    for (const intensity of ['SOFT', 'NORMAL', 'STRONG'] as const) {
+      const wake = buildRingPlan({ type: 'WAKE', intensity, snoozeLimit: 2, volumeAdjust: -0.1 });
+      for (const type of ['PREPARE', 'DEPARTURE'] as const) {
+        const plan = buildRingPlan({ type, intensity, snoozeLimit: 2, volumeAdjust: -0.1 });
+        const { departByLocation, ...rest } = plan; // 출발 알람만 위치 판단 칸이 더 있음 (아래 시험)
+        expect(departByLocation).toBe(type === 'DEPARTURE' ? false : undefined);
+        expect({ ...rest, heading: '' }).toEqual({ ...wake, heading: '' });
+        expect(plan.sound).toBe(true);
+        expect([plan.oneTapLabel, plan.oneTapEventType]).toEqual([null, null]);
+      }
+    }
+    expect(buildRingPlan({ type: 'PREPARE', intensity: 'NORMAL' }).heading).toBe('준비할 시간이에요');
+    expect(buildRingPlan({ type: 'DEPARTURE', intensity: 'NORMAL' }).heading).toBe('출발할 시간이에요');
+  });
+
+  it('출발 알람만 위치로 출발 판단 여부가 계획에 실림 — 기본 false(해제 = 출발), 켜졌을 때만 true. 다른 종류는 칸 없음', () => {
+    expect(buildRingPlan({ type: 'DEPARTURE', intensity: 'NORMAL' }).departByLocation).toBe(false);
+    expect(buildRingPlan({ type: 'DEPARTURE', intensity: 'NORMAL', departByLocation: true }).departByLocation).toBe(true);
+    expect(buildRingPlan({ type: 'DEPARTURE', intensity: 'NORMAL', departByLocation: false }).departByLocation).toBe(false);
+    for (const type of ['WAKE', 'PREPARE', 'ARRIVE', 'ROUTINE'] as const) {
+      expect(buildRingPlan({ type, intensity: 'NORMAL', departByLocation: true })).not.toHaveProperty('departByLocation');
+    }
+    const pkg: RingPackage = { ...basePackage, type: 'DEPARTURE', departByLocation: true };
+    expect(JSON.parse(toNativePayload(pkg, buildRingPlan(pkg))).plan.departByLocation).toBe(true);
+  });
+
+  it('진짜 알람 종류 목록 — 기상 · 준비 · 출발만', () => {
+    expect(RING_ALARM_TYPES).toEqual(['WAKE', 'PREPARE', 'DEPARTURE']);
+    expect(['WAKE', 'PREPARE', 'DEPARTURE', 'ARRIVE', 'ROUTINE'].map((t) => isRingAlarmType(t as AlarmType))).toEqual([true, true, true, false, false]);
   });
 
   it('목록에 없는 분은 못 고름', () => {
@@ -193,7 +229,9 @@ describe('알림 문구(notice)', () => {
   it('notice가 있으면 heading이 되고, 알림음 여부 · 원탭 버튼은 종류대로 그대로', () => {
     const plan = buildRingPlan({ type: 'DEPARTURE', intensity: 'NORMAL', notice: '지금 나가면 오전 9:50 도착 · 여유 10분' });
     expect(plan.heading).toBe('지금 나가면 오전 9:50 도착 · 여유 10분');
-    expect([plan.sound, plan.oneTapLabel, plan.oneTapEventType]).toEqual([false, '출발했어요', 'ACKNOWLEDGED']);
+    expect([plan.sound, plan.oneTapLabel, plan.oneTapEventType]).toEqual([true, null, null]); // 출발은 알람 — 해제가 출발 체크라 원탭 없음
+    const arrive = buildRingPlan({ type: 'ARRIVE', intensity: 'NORMAL' });
+    expect([arrive.sound, arrive.oneTapLabel, arrive.oneTapEventType]).toEqual([false, '도착했어요', 'ARRIVAL_CONFIRMED']);
   });
 
   it('기상 알람은 서버가 notice를 안 줘서 화면 줄이 그대로 (voiceText는 저장만)', () => {

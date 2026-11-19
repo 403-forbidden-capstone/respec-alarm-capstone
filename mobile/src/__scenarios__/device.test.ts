@@ -16,7 +16,6 @@ import { scenario, useWorld } from './testkit/scenario';
 import { alarmIdOf, app, clock, detectTray, regionIds, seedAppointment, seedHome, settle, syncPhone } from './testkit/world';
 
 const WAKE = alarmIdOf('a', 'WAKE');
-const DEPARTURE_T = alarmIdOf('t', 'DEPARTURE');
 
 describe('S31 알림 권한 끔', () => {
   useWorld();
@@ -58,7 +57,7 @@ describe('S31 알림 권한 끔', () => {
     });
 
   denied()
-    .variant('준비 알림도 안 뜸 — 알람 예약과 기록은 그대로')
+    .variant('준비 알람이 울려도 알림창에 안 뜸 — 알람 예약과 기록은 그대로')
     .do(() => {
       clock.set('09:01');
       phone.fireDue();
@@ -100,15 +99,16 @@ describe('S32 위치 권한 끔', () => {
     });
 
   noLocation()
-    .variant('[출발했어요] 버튼으로는 그대로 기록됨')
+    .variant('출발 알람을 끄면(해제 = 출발 체크) 그대로 기록됨')
     .do(async () => {
       await app.kill();
       clock.set('08:40');
       phone.fireDue();
-      phone.tapOneTap(DEPARTURE_T);
+      clock.set('08:41');
+      phone.dismiss();
       await app.open();
     })
-    .expect({ nativeWrites: ['alarm_events.insert(ACKNOWLEDGED/BUTTON)'], writes: ['appointment_participants.update(departed_at'], phoneAlarms: ['ARRIVE@10:00'] });
+    .expect({ nativeWrites: ['alarm_events.insert(DISMISSED/BUTTON)'], writes: ['appointment_participants.update(departed_at'], phoneAlarms: ['ARRIVE@10:00'] });
 });
 
 describe('S33 로그아웃 → 다른 계정', () => {
@@ -196,7 +196,7 @@ describe('S34 정확 알람 권한 끔(안드로이드 12)', () => {
       check: () => expect(phone.events).toEqual([]),
     });
 
-  // 대조: 권한이 있으면 같은 시각에 준비 · 출발 알림이 울림 (위 시험이 항상 통과하는 시험이 아님을 보임)
+  // 대조: 권한이 있으면 같은 시각에 준비 · 출발 알람이 울림 (위 시험이 항상 통과하는 시험이 아님을 보임)
   scenario('S34 정확 알람 권한 끔')
     .variant('대조 — 권한이 있으면 같은 시각에 울림')
     .at('07:00')
@@ -209,7 +209,13 @@ describe('S34 정확 알람 권한 끔(안드로이드 12)', () => {
       clock.set('09:21');
       phone.fireDue();
     })
-    .expect({ tray: [`notice:${alarmIdOf('a', 'PREPARE')}`, `notice:${alarmIdOf('a', 'DEPARTURE')}`] });
+    .expect({
+      tray: [],
+      check: () => {
+        expect(phone.events.filter((e) => e.eventType === 'TRIGGERED').map((e) => e.alarmId)).toEqual([alarmIdOf('a', 'WAKE'), alarmIdOf('a', 'PREPARE'), alarmIdOf('a', 'DEPARTURE')]);
+        expect(phone.ringing).toBe(alarmIdOf('a', 'DEPARTURE'));
+      },
+    });
 
   exactOff()
     .gap('G15')

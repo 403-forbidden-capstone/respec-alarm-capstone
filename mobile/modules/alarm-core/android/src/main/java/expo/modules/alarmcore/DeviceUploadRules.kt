@@ -12,14 +12,24 @@ object DeviceUploadRules {
   private const val DELAY_MARGIN_MILLIS = 2_000L // 관찰이 끝난 직후가 아니라 조금 뒤에 판정 (끝나는 시각 경계)
 
   /**
-   * 바로 올릴 기록인지 — 알림 버튼(원탭: 준비 시작 · 출발했어요 · 도착했어요 · 루틴 했어요) · 기상 알람 해제
-   * 울림(TRIGGERED) · 미루기(SNOOZED) · 다른 알람의 해제는 앱이 열릴 때 올림
+   * 바로 올릴 기록인지 (서버 alarm-events-device가 받는 조합과 같음, 11/19 서버 PR 약속)
+   *   · 알림 버튼 원탭(도착했어요 · 루틴 했어요) · 예전 준비 시작 · 출발했어요 원탭(ACKNOWLEDGED)
+   *   · 해제(DISMISSED) — 기상 · 준비 · 출발 알람. 준비 해제 = 준비 시작, 출발 해제 = 출발이라 서버가 그 시각을 채움
+   *   · 울림(TRIGGERED) · 미루기(SNOOZED) — 기상 · 준비 · 출발 · 도착. 친구에게 "알람 울리는 중"을 보이고 서버 놓침 계산을 미룸 (G12)
+   * 루틴 알림의 울림은 앱이 열릴 때 올림
    */
   fun shouldUpload(alarmType: String, eventType: String): Boolean = when (eventType) {
     "ACKNOWLEDGED", "ARRIVAL_CONFIRMED" -> true
-    "DISMISSED" -> alarmType == "WAKE"
+    "DISMISSED" -> isRingAlarmType(alarmType)
+    "TRIGGERED", "SNOOZED" -> isRingAlarmType(alarmType) || alarmType == "ARRIVE"
     else -> false
   }
+
+  /**
+   * 이 알람을 해제할 때 출발 확인(ACKNOWLEDGED, BUTTON)도 같이 남길지 — 출발 알람이고 위치로 출발을 판단하지 않는 약속(권한 없음 · 집 위치 없음 등)일 때만.
+   * 위치로 판단하는 약속은 해제가 출발이 아니라(DISMISSED만) 실제 출발은 집 이탈 감지 시각. 서버는 ACKNOWLEDGED(DEPARTURE)로 departed_at을 채움
+   */
+  fun dismissAlsoAcknowledges(alarmType: String, departByLocation: Boolean): Boolean = alarmType == "DEPARTURE" && !departByLocation
 
   /** 기상 알람 해제 기록이면 해제 + 10분 판정 작업을 검 */
   fun shouldJudgeWake(alarmType: String, eventType: String): Boolean = alarmType == "WAKE" && eventType == "DISMISSED"

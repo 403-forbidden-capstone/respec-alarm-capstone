@@ -223,9 +223,38 @@ export function applyCommit(result: CommitResult): Promise<SyncSummary> {
   });
 }
 
+// 이 알람들을 폰에서 바로 지움 — 저장소 알람 · 미룬 대기 · 울리는 중 · 이미 알림창에 떠 있는 알림까지 (AlarmCore.cancel). 서버 행은 그대로
+//   위치로 출발 · 도착이 잡힌 약속의 남은 알람 정리 (features/location/settleAlarms, G3). 맞추기와 같은 줄이라 맞추는 도중에 끼어들지 않음. 던지지 않고 결과를 돌려줌 (맞춘 뒤 훅은 안 부름)
+export function cancelPhoneAlarms(ids: readonly string[]): Promise<SyncSummary> {
+  return serial(async () => {
+    const summary = emptySummary();
+    if (isMock() || signingOut) return summary;
+    await cancelAlarms(ids, summary);
+    return summary;
+  });
+}
+
 // 로그아웃 정리용 — 폰 알람을 전부 지움 (무음 알림 포함). 맞추기 · 올리기와 같은 줄이라 앞에 서 있는 맞추기가 다 끝난 뒤에 지움
 export function cancelAllPhoneAlarms(): Promise<void> {
   return serial(() => AlarmCore.cancelAll());
+}
+
+// 위치로 출발을 판단하는 약속(참여 조건 id) 목록을 주는 곳 — features/location이 등록 (권한 + 집 위치 + 그 약속 감시 대상, 지오펜스를 거는 조건과 같은 함수).
+//   lib은 features를 부르지 않으므로 거꾸로 등록받음. 등록이 없거나 읽기에 실패하면 null → 출발 알람 계획의 칸을 안 정함(폰에 이미 걸린 값 그대로, 새로 걸면 해제 = 출발)
+type DepartByLocationProvider = () => Promise<ReadonlySet<string>>;
+let departProvider: DepartByLocationProvider | null = null;
+export function setDepartByLocationProvider(provider: DepartByLocationProvider | null): void {
+  departProvider = provider;
+}
+
+async function locationTrackedIds(): Promise<ReadonlySet<string> | null> {
+  if (!departProvider) return null;
+  try {
+    return await departProvider();
+  } catch (e) {
+    if (__DEV__) console.warn('[alarmSync] 위치 감지 대상을 못 읽음 — 출발 알람은 해제 = 출발로', e);
+    return null;
+  }
 }
 
 const SERVER_ROW_LIMIT = 500; // 서버 알람을 한 번에 읽는 줄 수 — 이만큼 오면 목록이 잘렸을 수 있음 (reconcile)
@@ -345,7 +374,10 @@ export function reconcile(options: ReconcileOptions = {}): Promise<SyncSummary> 
     const { kept: rows, dropped } = dropRecorded(readRows);
     const droppedIds = new Set(dropped.map((row) => row.alarm_id));
     if (options.timeZone) lastTimeZone = options.timeZone;
-    const allServer = buildServerPackages(rows, options.timeZone ?? lastTimeZone ?? undefined);
+    const built = buildServerPackages(rows, options.timeZone ?? lastTimeZone ?? undefined);
+    // 출발 알람 계획에 "위치로 출발 판단" 실음 — 위치 감시 대상 약속이면 해제 ≠ 출발 (네이티브가 앱이 꺼진 채 해제될 때도 같은 규칙)
+    const tracked = built.some((p) => p.type === 'DEPARTURE') ? await locationTrackedIds() : null;
+    const allServer = tracked ? built.map((p) => (p.type === 'DEPARTURE' ? { ...p, departByLocation: p.groupKey != null && tracked.has(p.groupKey) } : p)) : built;
     // 개발 화면의 시험 알람(서버 행 없음)은 맞추기 대상이 아님 — 안 빼면 앱이 앞에 올 때 "서버에 없음"으로 지워져 울림이 1초 만에 끊김
     const allPhone = (await AlarmCore.list()).filter((a) => !isDevAlarmId(a.id));
     const only = options.alarmIds ? new Set(options.alarmIds) : null;
@@ -404,7 +436,7 @@ export type UploadSummary = {
 
 const emptyUpload = (): UploadSummary => ({ uploaded: 0, dropped: 0, kept: 0 });
 
-// 올린 기록의 뒤처리 훅 — 원탭 기록(ACKNOWLEDGED DEPARTURE · ARRIVAL_CONFIRMED)을 appointment_participants의 departed_at · arrived_at으로 옮기는 일 등 (P6-2가 등록)
+// 올린 기록의 뒤처리 훅 — 출발 · 도착 기록(DISMISSED DEPARTURE · 예전 원탭 ACKNOWLEDGED DEPARTURE · ARRIVAL_CONFIRMED)을 appointment_participants의 departed_at · arrived_at으로 옮기는 일 등 (P6-2가 등록)
 //   서버에 올라간 기록만 넘어옴. 던지면 이번에 올린 기록을 폰에 남겨 다음 올리기 때 다시 넘김(서버는 같은 번호를 무시하므로 두 번 저장되지 않음)
 //   → 핸들러는 같은 기록으로 다시 불려도 같은 결과가 되게 쓰고, 다시 해도 소용없는 오류(권한 · 없는 행)는 던지지 말고 삼킬 것
 type UploadedHandler = (events: AlarmEvent[]) => Promise<void> | void;

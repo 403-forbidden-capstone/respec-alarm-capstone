@@ -8,6 +8,7 @@
 //     확정하면 daily_records.wake_confirmed_at(빈 칸만) → alarm_events WAKE_CONFIRMED(event_at = θ를 넘은 시각 · 직접 응답은 응답 시각) 순으로 씀
 //     이벤트가 확정의 표지라(이게 있으면 다시 안 씀) 맨 마지막에 쓰고, 번호(client_event_id)는 그 알람의 그 해제로 정해지는 고정 값 — 중간에 끊겨 다시 눌러도 둘 다 한 번씩만 남음
 //     놓침(MISSED)은 서버 배치(wake-check)가 씀 — 앱은 안 씀
+//     끄지 않고 울림이 끝난 날(해제 기록 없음)도 울린 기록(TRIGGERED) · 놓침이 있으면 확인 화면(확인 알림 단계)을 보여 [일어났어요]로 확정할 수 있음 (G1, 11/19)
 import * as AlarmCore from '@capstone/alarm-core';
 
 import { reconcile, uploadEvents } from '@/lib/alarmSync';
@@ -169,6 +170,7 @@ type WakeContext = {
   groupName: string | null;
   dismissedAt: Date | null; // 판정에 쓸 해제 시각
   confirmed: { at: Date; how: 'self' | 'auto' } | null;
+  rang: boolean; // 해제 기록이 없어도 이 알람이 울린 기록(TRIGGERED)이나 놓침(MISSED)이 있음 — 끄지 않고 울림이 끝난 뒤에도 [일어났어요]를 누를 수 있게 (G1)
 };
 
 // 폰에 아직 못 올린 해제 기록도 같이 봄 (오프라인이거나 올리기가 막 실패했을 때)
@@ -182,9 +184,18 @@ async function pendingDismissals(alarmId?: string): Promise<{ alarmId: string; a
   }
 }
 
+// 폰에 아직 못 올린 울림 기록(TRIGGERED)이 있는지 — 올리기 전에 푸시 · 알림으로 H08에 들어와도 울린 알람으로 봄
+async function pendingRings(alarmId: string): Promise<boolean> {
+  try {
+    return (await AlarmCore.getPendingEvents()).some((e) => e.eventType === 'TRIGGERED' && e.alarmType === 'WAKE' && e.alarmId === alarmId);
+  } catch {
+    return false;
+  }
+}
+
 async function loadWakeContext(userId: string, alarmId: string): Promise<WakeContext | null> {
   if (!isUuid(alarmId)) return null; // 가짜 데이터 시절 주소(a1:WAKE)가 남아 있어도 DB 형식 오류 대신 "없음"
-  const [alarm, events, pending] = await Promise.all([
+  const [alarm, events, pending, pendingRang] = await Promise.all([
     supabase
       .from('alarms')
       .select('alarm_id, alarm_type, appointment_participants(appointments(title, group_id, groups(group_name)))')
@@ -196,9 +207,10 @@ async function loadWakeContext(userId: string, alarmId: string): Promise<WakeCon
       .select('event_type, event_at, input_source')
       .eq('alarm_id', alarmId)
       .eq('user_id', userId)
-      .in('event_type', ['DISMISSED', 'WAKE_CONFIRMED'])
+      .in('event_type', ['DISMISSED', 'WAKE_CONFIRMED', 'TRIGGERED', 'MISSED'])
       .order('event_at'),
     pendingDismissals(alarmId),
+    pendingRings(alarmId),
   ]);
   if (alarm.error) throw alarm.error;
   if (events.error) throw events.error;
@@ -216,6 +228,7 @@ async function loadWakeContext(userId: string, alarmId: string): Promise<WakeCon
     groupName: appointment?.groups?.group_name ?? null,
     dismissedAt: pickDismissedAt(dismissals, confirmed?.at ?? null),
     confirmed,
+    rang: pendingRang || rows.some((r) => r.event_type === 'TRIGGERED' || r.event_type === 'MISSED'),
   };
 }
 
@@ -229,6 +242,32 @@ async function readSpans(dismissedAt: Date, at: Date): Promise<UseSpan[] | null>
   } catch {
     return null;
   }
+}
+
+// 가장 최근에 울린 기상 알람 — 울림(TRIGGERED) · 놓침(MISSED) 기록 중 windowMs 안에서 가장 늦은 것. 끄지 않고 울림이 끝난 날 푸시로 H08을 열면 이 알람을 확인 대상으로 (G1)
+async function findRecentRungWake(userId: string, windowMs: number): Promise<string | null> {
+  const since = new Date(now().getTime() - windowMs);
+  const { data, error } = await supabase
+    .from('alarm_events')
+    .select('alarm_id, event_at, alarms!inner(alarm_type)')
+    .eq('user_id', userId)
+    .in('event_type', ['TRIGGERED', 'MISSED'])
+    .eq('alarms.alarm_type', 'WAKE')
+    .gte('event_at', since.toISOString())
+    .order('event_at', { ascending: false })
+    .limit(1);
+  if (error) throw error;
+  const found = data?.[0] ? { alarmId: data[0].alarm_id, at: parseDbTime(data[0].event_at) } : null;
+  let pendingId: string | null = null;
+  try {
+    const pending = (await AlarmCore.getPendingEvents())
+      .filter((e) => e.eventType === 'TRIGGERED' && e.alarmType === 'WAKE' && e.at >= since.getTime())
+      .sort((x, y) => y.at - x.at)[0];
+    if (pending && (!found || pending.at > found.at.getTime())) pendingId = pending.alarmId;
+  } catch {
+    // 폰 기록을 못 읽으면 서버 것만
+  }
+  return pendingId ?? found?.alarmId ?? null;
 }
 
 // 가장 최근에 끈 기상 알람 — 해제 기록(올린 것 + 폰에 남은 것) 중 windowMs 안에서 가장 늦은 것
@@ -333,7 +372,8 @@ function toCheck(ctx: WakeContext, fields: Pick<WakeCheck, 'phase' | 'usage' | '
 export async function getWakeCheck(alarmId?: string): Promise<WakeCheck | null> {
   await uploadEvents().catch(() => {});
   const userId = await requireUserId();
-  const id = alarmId ?? (await findRecentDismissedWake(userId, 12 * 60 * MINUTE_MS));
+  // 알람 id가 없으면(푸시 · 앱 아이콘으로 엶) 가장 최근에 끈 기상 알람, 없으면 끄지 않고 울림이 끝난(놓친) 기상 알람
+  const id = alarmId ?? (await findRecentDismissedWake(userId, 12 * 60 * MINUTE_MS)) ?? (await findRecentRungWake(userId, 12 * 60 * MINUTE_MS));
   if (!id) return null;
   const ctx = await loadWakeContext(userId, id);
   if (!ctx) return null;
@@ -345,7 +385,11 @@ export async function getWakeCheck(alarmId?: string): Promise<WakeCheck | null> 
     const shown = ctx.dismissedAt && spans ? evaluateWake({ dismissedAt: ctx.dismissedAt, now: current, spans }) : { usage: 0, recent: 0 };
     return toCheck(ctx, { phase: 'observing', usage: shown.usage, recent: shown.recent, confirmed: ctx.confirmed });
   }
-  if (!ctx.dismissedAt) return null; // 아직 안 껐음 (울리기 전 · 울리는 중)
+  if (!ctx.dismissedAt) {
+    // 안 껐어도 이 알람이 울린 기록 · 놓침이 있으면 확인 화면 — 끄지 않고 울림이 끝난 뒤(놓침 푸시) [일어났어요]로 직접 확인할 길 (G1). 판정할 해제가 없으니 확인 알림 단계로
+    //   울리기 전이면 울린 기록이 없어 그대로 null (빈 화면)
+    return ctx.rang ? toCheck(ctx, { phase: 'prompt', usage: 0, recent: 0, confirmed: null }) : null;
+  }
 
   const evaluation = evaluateWake({ dismissedAt: ctx.dismissedAt, now: current, spans: await readSpans(ctx.dismissedAt, current) });
   if (evaluation.phase === 'auto' && evaluation.reachedAt) {

@@ -25,7 +25,7 @@ import android.os.VibratorManager
 import android.util.Log
 import androidx.core.app.NotificationCompat
 
-// WAKE 알람 포그라운드 서비스: 배경음·진동·반복 AI 음성을 사용자가 해제·미루기 할 때까지 함께 유지. DEPARTURE는 기존 1회 알림+1회 브리핑 사용
+// 알람 포그라운드 서비스: 배경음·진동을 사용자가 해제·미루기 할 때까지 유지. 기상은 반복 AI 음성, 준비 · 출발(11/19부터 같은 알람)은 고정 한 문장 TTS를 울림마다 한 번
 // 볼륨 · 한 번 울리는 최대 시간 · 소리는 알람 저장소의 울림 계획(RingPlan)대로. 다시 울림은 AlarmController가 미리 걸어 둠
 class AlarmPlaybackService : Service() {
   companion object {
@@ -186,7 +186,8 @@ class AlarmPlaybackService : Service() {
     }
 
     val ringMillis = ringMillisOf(alarm)
-    val continuous = alarm.type == "WAKE"
+    // 기상 · 준비 · 출발은 해제 · 미루기 전까지 유지 (같은 규칙). 도착 · 루틴은 알람음이 없어 이 서비스를 안 탐
+    val continuous = isRingAlarmType(alarm.type)
     // 사용자가 해제·미루기 할 때까지 유지. 종료 시 onDestroy에서 wakeLock을 반드시 해제.
     holdWakeLock(if (continuous) 0L else ringMillis + WAKE_LOCK_EXTRA_MILLIS)
     if (mediaPlayer == null) {
@@ -198,9 +199,13 @@ class AlarmPlaybackService : Service() {
     } else {
       // 이미 울리고 있다면 단계별 높인 볼륨을 유지하면서 같은 알람의 재울림 처리
       if (alarm.type == "WAKE") updateStageEffects(alarm, currentVoiceLevel ?: 1)
-      else runCatching { setAlarmVolume(alarm.plan.volumePercent) }
+      else {
+        runCatching { setAlarmVolume(alarm.plan.volumePercent) }
+        // 준비 · 출발 다시 울림 — 앞 울림의 한 문장이 끝났으면 다시 한 번 (읽는 중이면 겹치지 않게 그대로)
+        if (speaker == null) runCatching { startVoice(alarm) }.onFailure { Log.w(TAG, "다시 울림 음성 안내 실패 — 알람음만", it) }
+      }
     }
-    // 기상·출발 알람은 자동 종료하지 않음. 다른 유형만 기존 최대 울림 시간을 적용.
+    // 기상 · 준비 · 출발 알람은 자동 종료하지 않음 (continuous). 그 밖의 유형이 이 서비스를 타면 최대 울림 시간을 적용.
     handler.removeCallbacks(autoStop)
     if (!continuous) handler.postDelayed(autoStop, ringMillis)
     handler.removeCallbacks(checkWakeStage)
@@ -228,10 +233,10 @@ class AlarmPlaybackService : Service() {
     val manager = getSystemService(NotificationManager::class.java)
     val channel = NotificationChannel(
       CHANNEL_ID,
-      "기상 알람",
+      "알람 (기상 · 준비 · 출발)",
       NotificationManager.IMPORTANCE_HIGH,
     ).apply {
-      description = "기상 알람 표시와 진동"
+      description = "울리는 알람 표시와 진동"
       setSound(null, null)
       enableVibration(true)
       vibrationPattern = NOTIFICATION_VIBRATION
@@ -241,10 +246,10 @@ class AlarmPlaybackService : Service() {
     // L6 안건후보: 진동 없음(NONE) 알림 채널 기본안 = 진동이 꺼진 채널을 하나 더 둠(설정 앱에 "기상 알람(진동 없음)"으로 보임). 알림 뜰 때 진동 한 번도 없애려는 것
     val quietChannel = NotificationChannel(
       CHANNEL_ID_NO_VIBRATION,
-      "기상 알람 (진동 없음)",
+      "알람 (진동 없음)",
       NotificationManager.IMPORTANCE_HIGH,
     ).apply {
-      description = "진동 없이 표시만 하는 기상 알람"
+      description = "진동 없이 표시만 하는 알람"
       setSound(null, null)
       enableVibration(false)
       lockscreenVisibility = Notification.VISIBILITY_PUBLIC

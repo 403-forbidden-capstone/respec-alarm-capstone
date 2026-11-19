@@ -10,6 +10,8 @@ const mockRecord = jest.fn<(input: Record<string, unknown>) => Promise<unknown>>
 const mockNotice = jest.fn<(action: GeoAction) => void>();
 jest.mock('@/features/alarm/participantTimes', () => ({ recordParticipantTimes: (input: Record<string, unknown>) => mockRecord(input) }));
 jest.mock('../notice', () => ({ onDetectionNotice: (action: GeoAction) => mockNotice(action) }));
+const mockSettle = jest.fn<(participantId: string, kind: string) => Promise<void>>();
+jest.mock('../settleAlarms', () => ({ settlePhoneAlarms: (participantId: string, kind: string) => mockSettle(participantId, kind) }));
 jest.mock('@/lib/mode', () => ({ isMock: () => false }));
 let mockNowMs = 0;
 jest.mock('@/lib/clock', () => ({ now: () => new Date(mockNowMs) }));
@@ -24,7 +26,9 @@ beforeEach(async () => {
   jest.spyOn(console, 'warn').mockImplementation(() => {}); // 실패 경로의 개발용 로그를 조용히
   mockNotice.mockReset();
   mockRecord.mockReset();
-  mockRecord.mockResolvedValue({});
+  mockRecord.mockImplementation(async (input) => ('departedAt' in input ? { departed: 'new', arrived: null } : { departed: null, arrived: 'new' }));
+  mockSettle.mockReset();
+  mockSettle.mockResolvedValue(undefined);
   mockNowMs = at('09:53');
 });
 
@@ -86,6 +90,46 @@ describe('도착 안내 (flushActions)', () => {
     await commit({ actions: [DEPART, ARRIVE, second] });
     await flushActions();
     expect(mockNotice.mock.calls.map(([a]) => a)).toEqual([ARRIVE, second]);
+  });
+});
+
+describe('쓴 직후 남은 알람 정리 (G3)', () => {
+  it('출발 · 도착을 서버에 쓰면 그 약속의 남은 알람을 폰에서 정리 — 쓴 다음에', async () => {
+    await commit({ actions: [DEPART, ARRIVE] });
+    await flushActions();
+    expect(mockSettle.mock.calls).toEqual([
+      ['p1', 'DEPART'],
+      ['p1', 'ARRIVE'],
+    ]);
+    expect(mockRecord.mock.invocationCallOrder[0]).toBeLessThan(mockSettle.mock.invocationCallOrder[0]);
+  });
+
+  it('실제로 안 쓴 경우(이른 위치 출발로 건너뜀 · 이미 응답 값이 있어 keep · 참여 조건 없음)는 정리하지 않음 — 알람이 그대로', async () => {
+    for (const result of [{ departed: null, arrived: null }, { departed: 'keep', arrived: null }]) {
+      mockRecord.mockResolvedValueOnce(result);
+      await commit({ actions: [DEPART] });
+      await flushActions();
+    }
+    mockRecord.mockResolvedValueOnce({ departed: null, arrived: 'keep' });
+    await commit({ actions: [ARRIVE] });
+    await flushActions();
+    expect(mockSettle).not.toHaveBeenCalled();
+    mockRecord.mockResolvedValueOnce({ departed: 'override', arrived: null });
+    await commit({ actions: [DEPART] });
+    await flushActions();
+    expect(mockSettle).toHaveBeenCalledWith('p1', 'DEPART'); // 더 늦은 위치 출발로 바꿈도 쓴 것
+  });
+
+  it('쓰기에 실패했거나(보관) 버린 기록은 정리하지 않음 — 서버에 아직 없음', async () => {
+    await commit({ actions: [DEPART] });
+    mockRecord.mockRejectedValueOnce(new Error('network'));
+    await flushActions();
+    expect(mockSettle).not.toHaveBeenCalled();
+    await commit({ actions: [] });
+    mockRecord.mockReset();
+    mockRecord.mockRejectedValueOnce({ code: '23503', message: 'fk' });
+    await flushActions();
+    expect(mockSettle).not.toHaveBeenCalled();
   });
 });
 

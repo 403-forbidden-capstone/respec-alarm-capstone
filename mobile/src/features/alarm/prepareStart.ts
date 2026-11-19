@@ -1,5 +1,5 @@
 // 준비 시작 기록 (알람 조정 제안 1단계 · 안건 D111 3번) — 준비 알람을 끈 시각을 그 참여 조건의 준비 시작으로 남김
-//   준비 알람(PREPARE)을 끄거나(DISMISSED) 원탭 "준비 시작"을 누르면(ACKNOWLEDGED) 폰이 울림 기록을 쌓고,
+//   준비 알람(PREPARE)을 끄면(DISMISSED — 11/19부터 준비는 알람이라 해제가 준비 시작 체크) 폰이 울림 기록을 쌓고 (예전 APK의 원탭 "준비 시작" ACKNOWLEDGED도 같은 뜻),
 //   그 기록이 서버(alarm_events)에 올라간 뒤 이 파일이 appointment_participants.prepare_started_at · prepare_started_source(PREPARE_ALARM)를 채움 (lib/alarmSync onEventsUploaded 훅)
 //   · 제안의 "실제 준비" = 출발(departed_at) − 준비 시작. 제안을 만드는 쪽(새벽 · 저녁 계산)은 다음 PR
 //   · 처음 한 번만 — 이미 값이 있으면 덮지 않음 (같은 기록으로 다시 불려도 같은 결과, 먼저 끈 것이 사실)

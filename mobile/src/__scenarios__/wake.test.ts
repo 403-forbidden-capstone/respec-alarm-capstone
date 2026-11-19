@@ -186,13 +186,19 @@ describe('S04 먼저 깼어요', () => {
   });
 
   early()
-    .variant('확정 뒤 준비 · 출발 알림은 제때 울림, 확인 알림은 없음')
+    .variant('확정 뒤 준비 · 출발 알람은 제때 울림(알람 화면 — 11/19부터 알림이 아님), 기상 확인 알림은 없음')
     .do(() => {
       clock.set('09:21');
       phone.fireDue();
       phone.runJudges();
     })
-    .expect({ tray: [`notice:${PREPARE}`, `notice:${DEPARTURE}`], check: () => expect(phone.ringing).toBeNull() });
+    .expect({
+      tray: [],
+      check: () => {
+        expect(phone.events.filter((e) => e.eventType === 'TRIGGERED').map((e) => e.alarmId)).toEqual([PREPARE, DEPARTURE]);
+        expect(phone.ringing).toBe(DEPARTURE); // 마지막으로 울린 알람이 지금 울리는 중
+      },
+    });
 
   early()
     .variant('앱이 앞에 다시 올 때도 기상 알람이 되살아나지 않음')
@@ -316,8 +322,7 @@ describe('S07 끄지 않고 울림 끝', () => {
     .expect({ check: () => expect(navLog).toContain('push /wake') });
 
   ringEnd()
-    .gap('G1')
-    .variant('푸시로 연 H08에서 [일어났어요]를 누를 길이 있어야 함 — 지금은 빈 화면')
+    .variant('푸시로 연 H08에서 [일어났어요]를 누를 길이 있음 — 해제 기록이 없어도 울린 기록 · 놓침이 있으면 확인 화면 (G1)')
     .do(async () => {
       phone.tapNotification('missed-push');
       await app.open();
@@ -326,16 +331,42 @@ describe('S07 끄지 않고 울림 끝', () => {
       check: async () => {
         const check = await app.js(() => getWakeCheck());
         expect(check).not.toBeNull();
+        expect([check?.alarmId, check?.phase, check?.confirmed]).toEqual([WAKE, 'prompt', null]);
+      },
+    });
+
+  ringEnd()
+    .variant('[일어났어요]를 누르면 기상 확인이 서버에 기록됨 (BUTTON) — 해제를 안 했어도')
+    .do(async () => {
+      phone.tapNotification('missed-push');
+      await app.open();
+      await app.js(async () => {
+        await getWakeCheck();
+        await confirmWake(WAKE, 'self');
+      });
+    })
+    .expect({ writes: [/WAKE_CONFIRMED\/BUTTON/, 'daily_records.insert('], tray: [] });
+
+  ringEnd()
+    .variant('울린 기록 · 놓침이 아직 폰에만 있어도(앱을 열기 전 푸시) 확인 화면이 열림')
+    .do(async () => {
+      db.remove('alarm_events', { event_type: 'MISSED' }); // 서버에는 놓침도 아직 없는 때 — 폰의 울림 기록(TRIGGERED, 올리기 전)만
+      await app.open();
+    })
+    .expect({
+      check: async () => {
+        const check = await app.js(() => getWakeCheck());
+        expect(check?.alarmId).toBe(WAKE);
       },
     });
 });
 
 describe('S08 앱 안 열고 미루기 2번', () => {
   useWorld();
-  const snoozed = () =>
+  const snoozed = (deviceKey = true) =>
     scenario('S08 앱 안 열고 미루기 2번')
       .at('07:00')
-      .given(() => startDay({ appOpen: false }))
+      .given(() => startDay({ appOpen: false, deviceKey }))
       .do(async () => {
         clock.set('07:30');
         phone.fireDue();
@@ -347,20 +378,30 @@ describe('S08 앱 안 열고 미루기 2번', () => {
         await phone.native.snooze(10);
       });
 
-  snoozed().variant('미룬 기록은 폰에만 쌓이고 서버에는 앱을 열 때 올라감').limit('앱 열림만').expect({
+  snoozed(false).variant('기기 키 없음 — 미룬 기록은 폰에만 쌓이고 서버에는 앱을 열 때 올라감').limit('앱 열림만').expect({
     noNativeWrites: ['alarm_events.insert(SNOOZED'],
     noWrites: ['alarm_events'],
     check: () => expect(phone.events.filter((e) => e.eventType === 'SNOOZED')).toHaveLength(2),
   });
 
-  snoozed()
-    .variant('앱을 열면 미룬 기록이 올라감')
+  snoozed(false)
+    .variant('기기 키 없음 — 앱을 열면 미룬 기록이 올라감')
     .do(async () => {
       await app.open();
     })
     .expect({ writes: ['alarm_events.upsert(', /SNOOZED/] });
 
-  snoozed().gap('G12').variant('앱을 안 열어도 미룬 기록이 서버로 가야 서버 놓침 계산이 밀림').expect({ nativeWrites: [/SNOOZED/] });
+  snoozed()
+    .variant('앱을 안 열어도 울림 · 미룬 기록이 서버로 가서 서버 놓침 계산이 밀림 · 친구에게 알람 울리는 중 (G12)')
+    .expect({
+      nativeWrites: ['alarm_events.insert(TRIGGERED/BUTTON)', 'alarm_events.insert(SNOOZED/BUTTON)'],
+      noWrites: ['alarm_events'], // 앱은 꺼져 있어 쓴 것이 없음
+      check: () => {
+        const rows = db.rows('alarm_events');
+        expect(rows.filter((r) => r.event_type === 'TRIGGERED')).toHaveLength(2);
+        expect(rows.filter((r) => r.event_type === 'SNOOZED').map((r) => r.snooze_minutes)).toEqual([10, 10]);
+      },
+    });
 });
 
 describe('S09 홈에서 미루기 취소', () => {
