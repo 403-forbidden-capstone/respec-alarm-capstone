@@ -20,7 +20,7 @@ export type Profile = {
   handle_next_change_at: string | null; // 다음 변경 가능 시각 — 비어 있으면 언제든
   profile_image_url: string | null;
   default_prepare_minutes: number; // legacy: wake -> departure
-  default_outing_prep_minutes: number | null; // pure preparation start -> departure, separately confirmed
+  default_outing_prep_minutes?: number | null; // pure preparation start -> departure, separately confirmed
   default_buffer_minutes: number;
   home_name: string | null;
   home_lat: number | null;
