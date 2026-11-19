@@ -39,6 +39,7 @@ function readAppointmentDraft(r: Reader, opts: { titleRequired: boolean }): { dr
   let travelMinutes: number | undefined;
   let travelSource: 'API' | 'MANUAL' | undefined;
   let prepareMinutes: number | undefined;
+  let autoPrepareSnapshotMinutes: number | undefined;
   if (p) {
     participantFields = readParticipantFields(p);
     travelMinutes = p.int('est_travel_minutes', { min: 0, max: 600 });
@@ -50,7 +51,7 @@ function readAppointmentDraft(r: Reader, opts: { titleRequired: boolean }): { dr
     if (source === 'AUTO' && prepareMinutes == null) p.problemAt('prepare_minutes', '자동 미리보기의 분 값을 함께 보내 주세요');
     if (source === 'AUTO') {
       // AUTO is a comparison snapshot, not an override in predictPrepare.
-      participantFields = { ...participantFields, autoPrepareSnapshotMinutes: prepareMinutes } as typeof participantFields;
+      autoPrepareSnapshotMinutes = prepareMinutes;
       prepareMinutes = undefined;
     }
     if (travelMinutes != null && !travelSource) p.problemAt('travel_source', 'est_travel_minutes와 같이 API · MANUAL 중 하나를 보내 주세요');
@@ -65,7 +66,7 @@ function readAppointmentDraft(r: Reader, opts: { titleRequired: boolean }): { dr
     ...participantFields,
     ...(travelMinutes != null ? { travelMinutes, travelSource } : {}),
     ...(prepareMinutes != null ? { prepareMinutes } : {}),
-    ...(participantFields as PlanDraft).autoPrepareSnapshotMinutes != null ? { autoPrepareSnapshotMinutes: (participantFields as PlanDraft).autoPrepareSnapshotMinutes } : {},
+    ...(autoPrepareSnapshotMinutes != null ? { autoPrepareSnapshotMinutes } : {}),
     ...readAlarmFields(r),
   };
   return { draft, appointment };
