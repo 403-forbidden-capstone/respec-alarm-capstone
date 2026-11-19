@@ -4,7 +4,7 @@ import { Platform, StyleSheet, View } from 'react-native';
 
 import { Button, Card, Screen, SectionHeader, Stepper, Text, Toggle, TopBar } from '@/components/ui';
 import { useAuth } from '@/features/auth/AuthProvider';
-import { inspectPurePrepDb, type PurePrepDbStatus } from '@/features/dev/purePrepDiagnostics';
+import { inspectMyUpcomingAlarms, inspectPurePrepDb, type LegacyAlarmSnapshot, type PurePrepDbStatus } from '@/features/dev/purePrepDiagnostics';
 import {
   calculatePurePrepScenario, DEFAULT_PURE_SCENARIO, kstHm, type PurePrepScenarioInput,
 } from '@/features/dev/purePrepScenario';
@@ -19,6 +19,8 @@ export default function PurePrepWebTest() {
   const [scenario, setScenario] = useState<PurePrepScenarioInput>(DEFAULT_PURE_SCENARIO);
   const [status, setStatus] = useState<PurePrepDbStatus | null>(null);
   const [loading, setLoading] = useState(false);
+  const [realAlarms, setRealAlarms] = useState<LegacyAlarmSnapshot[] | null>(null);
+  const [realAlarmError, setRealAlarmError] = useState(false);
   const result = calculatePurePrepScenario(scenario);
 
   const setField = (patch: Partial<PurePrepScenarioInput>) =>
@@ -31,6 +33,19 @@ export default function PurePrepWebTest() {
       setStatus(await inspectPurePrepDb(session.user.id));
     } catch {
       setStatus({ kind: 'error', reason: '읽기 전용 진단에서 네트워크 오류가 발생했습니다.' });
+    } finally {
+      setLoading(false);
+    }
+  }
+  async function readExistingAlarms() {
+    if (mode !== 'real' || !session || loading) return;
+    setLoading(true);
+    setRealAlarms(null);
+    setRealAlarmError(false);
+    try {
+      setRealAlarms(await inspectMyUpcomingAlarms(session.user.id));
+    } catch {
+      setRealAlarmError(true);
     } finally {
       setLoading(false);
     }
@@ -84,7 +99,21 @@ export default function PurePrepWebTest() {
         {status?.kind === 'error' ? <Text tone="warn">{status.reason}</Text> : null}
       </Card>
 
-      <SectionHeader title="③ 순수 준비시간 계산 시나리오" />
+      <SectionHeader title="③ 내 실제 저장 알람 · 조회만" />
+      <Card>
+        <Text variant="small" tone="sub">로그인된 본인 계정의 앞으로 예정된 알람 최대 5개를 DB에서 조회합니다. 휴대폰에 실제 예약됐다는 증거는 아닙니다.</Text>
+        <Button label="실제 저장된 알람 읽기" onPress={() => void readExistingAlarms()}
+          disabled={mode !== 'real' || !session || loading} loading={loading} />
+        {realAlarms?.length === 0 ? <Text>예정된 알람이 없습니다.</Text> : null}
+        {realAlarms?.map((item, index) => (
+          <View style={styles.timeRow} key={index}>
+            <Text>{item.kind}{item.enabled ? '' : ' (꺼짐)'}</Text>
+            <Text>{new Date(item.at).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' })}</Text>
+          </View>
+        ))}
+        {realAlarmError ? <Text tone="warn">알람 조회에 실패했습니다. 권한·연결을 확인하세요.</Text> : null}
+      </Card>
+      <SectionHeader title="④ 순수 준비시간 계산 시나리오" />
       <Text variant="small" tone="sub">
         고정된 가상 약속: 2026년 11월 22일 오전 10시 (한국 시간).
         수치는 현재 계정의 값과 무관한 실습 입력입니다.
