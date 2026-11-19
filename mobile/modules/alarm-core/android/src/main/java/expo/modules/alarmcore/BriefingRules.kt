@@ -82,6 +82,13 @@ object BriefingRules {
     .replace(Regex("""\.(?=[가-힣A-Za-z])"""), ". ")
     .trim()
 
+  /**
+   * Android TTS가 문장마다 따로 읽을 조각 (androidText를 거친 뒤 마침표 · 물음표 뒤에서 나눔)
+   *   기상 알람 그룹 상태 안내를 개인화 음성의 가장 가까운 문장 경계에 끼우려고 — 문장 가운데서 끊지 않음 (AlarmPlaybackService · BriefingSpeaker)
+   */
+  fun sentences(text: String): List<String> =
+    androidText(text).split(Regex("""(?<=[.?？。])\s+""")).map { it.trim() }.filter { it.isNotEmpty() }
+
   data class Fallback(val level: Int, val text: String, val pitch: Float, val rate: Float)
 
   // 서버 브리핑이 한 번도 안 왔을 때(인터넷 없음 등)의 높낮이 · 속도 — TS androidVoice(LEVEL_VOICE)와 같은 단계 고정값

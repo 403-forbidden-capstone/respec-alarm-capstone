@@ -6,6 +6,7 @@ import { parseDbTime } from '@/lib/dbTime';
 import { dateParts, formatTime, minutesBetween, startOfDay } from '@/lib/format';
 import type { Enums } from '@/types/database';
 import { levelOfIntensity, levelOfSoundKey } from '@shared/calc/intensity.ts';
+import { isMoving as isMovingAt, MOVING_UNTIL_AFTER_APPOINTMENT_MINUTES, stageOf, wakePhaseOf } from '@shared/group-wake-state.ts';
 
 import type { FriendLink, FriendRelation, HandleSearch, MemberAlarm, OpenedLink, Person, TripCounts, WakeState } from './types';
 
@@ -54,30 +55,9 @@ export type WakeRow = {
   prepare_started_at?: string | null;
 };
 
-// 출발 뒤 이 시간(분)이 지나면 도착 기록이 없어도 '이동 중'을 안 붙임 (약속 + 60분, 홈 이동 중 줄과 같음)
-export const MOVING_UNTIL_AFTER_APPOINTMENT_MINUTES = 60;
-
-// 이동 중 = 출발했고 도착이 없고 약속 + 60분 전. 약속 시각을 모르면(옛 값) 이동 중으로 봄
-export function isMoving(row: Pick<WakeRow, 'departed_at' | 'arrived_at' | 'trip_appointment_at'>, current: Date): boolean {
-  if (!row.departed_at || row.arrived_at) return false;
-  if (!row.trip_appointment_at) return true;
-  return current.getTime() < at(row.trip_appointment_at).getTime() + MOVING_UNTIL_AFTER_APPOINTMENT_MINUTES * 60_000;
-}
-
-// 서버 6단계 → 화면 3단계 + 알람 없음. 울림 · 해제 · 미확인은 단계 하나(RANG)로 묶음 — 글자만 '알람 울리는 중' · '알람 울림 · 기상 확인 전'으로 나눔 (7-아 · 7-바 · D61)
-//   모르는 값은 RANG — 기상 완료로 잘못 보이지 않게
-export function stageOf(status: string): 'SCHEDULED' | 'RANG' | 'WOKE' | 'NO_ALARM' {
-  switch (status) {
-    case 'SCHEDULED':
-      return 'SCHEDULED';
-    case 'CONFIRMED':
-      return 'WOKE';
-    case 'NO_ALARM':
-      return 'NO_ALARM';
-    default:
-      return 'RANG';
-  }
-}
+// 단계 고르기(stageOf · isMoving · 이동 중 60분)는 서버 그룹 안내와 같이 쓰려고 @shared/group-wake-state.ts로 옮김 — 규칙은 그대로
+export { MOVING_UNTIL_AFTER_APPOINTMENT_MINUTES, stageOf };
+export const isMoving = (row: Pick<WakeRow, 'departed_at' | 'arrived_at' | 'trip_appointment_at'>, current: Date) => isMovingAt(row, current, parseDbTime);
 
 export const NO_APPOINTMENT_STATE: WakeState = { stage: 'NO_APPOINTMENT', text: '오늘은 그룹 약속이 없어요', dot: null, woke: false };
 // 약속 있는 날 줄이 없는 멤버 — 동의 안 함 · 나를 숨김 · 차단을 구분하지 않음 (7-06 · 7-10)
@@ -98,27 +78,30 @@ export const alarmLine = (alarmAt: Date | null) => (alarmAt ? `${formatTime(alar
 export function wakeStateOf(row: WakeRow | undefined, dayHasRows: boolean, current: Date = now()): WakeState {
   if (!dayHasRows) return NO_APPOINTMENT_STATE;
   if (!row) return NOT_SHARED_STATE;
-  if (row.arrived_at) return { stage: 'ARRIVED', text: `도착 · ${formatTime(at(row.arrived_at))}`, dot: 'ok', woke: true };
-  if (row.departed_at) {
-    const time = formatTime(at(row.departed_at));
-    return { stage: 'DEPARTED', text: isMoving(row, current) ? `이동 중 · ${time} 출발` : `출발 · ${time}`, dot: 'mid', woke: true };
-  }
-  if (row.prepare_started_at) return { stage: 'PREPARING', text: `준비 중 · ${formatTime(at(row.prepare_started_at))} 시작`, dot: 'mid', woke: true };
-  const stage = stageOf(row.wake_status);
-  switch (stage) {
-    case 'WOKE': {
-      const time = row.wake_confirmed_at ? formatTime(at(row.wake_confirmed_at)) : null;
-      return { stage, text: time ? `기상 완료 · ${time}` : '기상 완료', dot: 'ok', woke: true };
-    }
+  const time = (value: string | null | undefined) => (value ? formatTime(at(value)) : '');
+  switch (wakePhaseOf(row, current, at)) {
+    case 'ARRIVED':
+      return { stage: 'ARRIVED', text: `도착 · ${time(row.arrived_at)}`, dot: 'ok', woke: true };
+    case 'MOVING':
+      return { stage: 'DEPARTED', text: `이동 중 · ${time(row.departed_at)} 출발`, dot: 'mid', woke: true };
+    case 'DEPARTED':
+      return { stage: 'DEPARTED', text: `출발 · ${time(row.departed_at)}`, dot: 'mid', woke: true };
+    case 'PREPARING':
+      return { stage: 'PREPARING', text: `준비 중 · ${time(row.prepare_started_at)} 시작`, dot: 'mid', woke: true };
+    case 'WOKE':
+      return { stage: 'WOKE', text: row.wake_confirmed_at ? `기상 완료 · ${time(row.wake_confirmed_at)}` : '기상 완료', dot: 'ok', woke: true };
+    case 'RINGING':
+      return { stage: 'RANG', text: '알람 울리는 중', dot: 'zz', woke: false };
     case 'RANG':
-      return { stage, text: row.wake_status === 'RINGING' ? '알람 울리는 중' : '알람 울림 · 기상 확인 전', dot: 'zz', woke: false };
+      return { stage: 'RANG', text: '알람 울림 · 기상 확인 전', dot: 'zz', woke: false };
     case 'SCHEDULED': {
       const line = alarmLine(row.wake_alarm_at ? at(row.wake_alarm_at) : null);
-      return { stage, text: line ? `취침 중 · ${line}` : '취침 중', dot: 'zz', woke: false };
+      return { stage: 'SCHEDULED', text: line ? `취침 중 · ${line}` : '취침 중', dot: 'zz', woke: false };
     }
-    default:
-      if (row.trip_visible && row.prepare_alarm_at) return { stage: 'PREP_SCHEDULED', text: `준비 알람 ${formatTime(at(row.prepare_alarm_at))}`, dot: null, woke: false };
-      return { stage, text: '알람 없음', dot: null, woke: false };
+    case 'PREP_SCHEDULED':
+      return { stage: 'PREP_SCHEDULED', text: `준비 알람 ${time(row.prepare_alarm_at)}`, dot: null, woke: false };
+    case 'NO_ALARM':
+      return { stage: 'NO_ALARM', text: '알람 없음', dot: null, woke: false };
   }
 }
 

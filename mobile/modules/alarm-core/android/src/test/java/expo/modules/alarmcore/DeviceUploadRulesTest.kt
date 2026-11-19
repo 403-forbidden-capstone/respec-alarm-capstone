@@ -90,6 +90,12 @@ class DeviceUploadRulesTest {
   }
 
   @Test
+  fun groupStatusUrlFollowsBriefingUrl() {
+    assertEquals("https://x.supabase.co/functions/v1/group-status-device", DeviceUploadRules.groupStatusUrl("https://x.supabase.co/functions/v1/alarm-briefing-device/"))
+    assertNull(DeviceUploadRules.groupStatusUrl("https://x.supabase.co/functions/v1/other"))
+  }
+
+  @Test
   fun retryOnlyForTransientFailuresWithinLimit() {
     assertFalse(DeviceUploadRules.shouldRetry(200, 0))
     for (status in listOf(400, 401, 403, 404)) assertFalse("$status", DeviceUploadRules.shouldRetry(status, 0)) // 키 만료 · 남의 알람 — 앱이 열릴 때 올림
