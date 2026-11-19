@@ -129,6 +129,7 @@ export type PlanDraft = ParticipantFields &
     travelSource?: 'API' | 'MANUAL';
     prepareMinutes?: number; // EXPLICIT legacy manual override (wake -> departure)
     autoPrepareSnapshotMinutes?: number; // auto preview value; compare at commit, NEVER feed back as manual override
+    prepareValueSource?: 'AUTO' | 'MANUAL'; // optional explicit provenance; absent means legacy unknown
   };
 
 export type PlanInputs = {
