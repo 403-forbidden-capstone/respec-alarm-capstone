@@ -147,7 +147,7 @@ export default async function ch13({ q, as, su, svc, check, expectErr }) {
 
   // ---- 13-09: 그룹 기상 응답 ---------------------------------------------------------------------
 
-  await check('13-09: 그룹 기상 응답은 보일 값(단계 · 알람 시각 · 확인 시각)만 — 미루기 횟수 · 해제 시각 칸이 없음', async () => {
+  await check('13-09: 그룹 기상 응답은 보일 값(단계 · 알람 시각 · 확인 시각 · 출발 · 도착 시각)만 — 미루기 횟수 · 해제 시각 · 장소 · 출처 칸이 없음', async () => {
     const A = await join_(10, '주인'), B = await join_(11, '그룹원');
     const g = await mkGroup(A, [B]);
     await q(`update public.group_members set wake_share_opt_in = true where group_id = $1`, [g]);
@@ -155,7 +155,7 @@ export default async function ch13({ q, as, su, svc, check, expectErr }) {
     await groupWake(A, g, today);
     const rows = await readAs(B, `select * from public.get_group_wake($1, $2::date)`, [g, today]);
     const keys = rows[0] ? Object.keys(rows[0]).sort() : [];
-    return rows.length >= 1 && JSON.stringify(keys) === JSON.stringify(['is_me', 'nickname', 'profile_image_url', 'user_id', 'wake_alarm_at', 'wake_confirmed_at', 'wake_status'])
+    return rows.length >= 1 && JSON.stringify(keys) === JSON.stringify(['arrived_at', 'departed_at', 'is_me', 'nickname', 'profile_image_url', 'trip_visible', 'user_id', 'wake_alarm_at', 'wake_confirmed_at', 'wake_status'])
       ? true : { keys, rows };
   });
 
@@ -185,7 +185,7 @@ export default async function ch13({ q, as, su, svc, check, expectErr }) {
       && allOff.wake === 0 && allOff.alarms === 0 && allOff.shared === 0 ? true : { before, wakeOff, allOff };
   });
 
-  await check('13-14(DB): 개인정보 동의는 시각과 판 번호가 같이 기록되고(하나만은 안 됨), 공유 스위치는 켬 · 끔 한 칸뿐 — 따로 동의 시각이 쌓이지 않음', async () => {
+  await check('13-14(DB): 개인정보 동의는 시각과 판 번호가 같이 기록되고(하나만은 안 됨), 공유 스위치는 켬 · 끔 두 칸(기상 · 출발 도착)뿐 — 따로 동의 시각이 쌓이지 않음', async () => {
     const A = await join_(14, '동의');
     await as(A);
     await q(`update public.profiles set privacy_agreed_at = now(), privacy_version = 1 where user_id = $1`, [A]);
@@ -195,7 +195,7 @@ export default async function ch13({ q, as, su, svc, check, expectErr }) {
     const [p] = await q(`select privacy_agreed_at is not null as agreed, privacy_version from public.profiles where user_id = $1`, [A]);
     const cols = (await q(`select column_name from information_schema.columns where table_schema = 'public' and table_name = 'group_members'`)).map((x) => x.column_name);
     const shareCols = cols.filter((c) => /share|consent|agree/.test(c));
-    return half === true && p.agreed === true && p.privacy_version === 2 && JSON.stringify(shareCols) === JSON.stringify(['wake_share_opt_in']) ? true : { half, p, shareCols };
+    return half === true && p.agreed === true && p.privacy_version === 2 && JSON.stringify([...shareCols].sort()) === JSON.stringify(['trip_share_opt_in', 'wake_share_opt_in']) ? true : { half, p, shareCols };
   });
 
   await check('13-16: 친구가 내 알람 · 기상을 읽어도 아무것도 기록되지 않음 — 읽기 전후로 어느 표의 줄 수도 안 변하고, 열람 기록 표 자체가 없음', async () => {

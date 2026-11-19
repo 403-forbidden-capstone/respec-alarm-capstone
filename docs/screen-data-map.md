@@ -184,13 +184,13 @@
 - 알람 조회 줄 아래 안내 '일정 장소도 보여요 · 집 · 출발지는 안 보여요' (친구 13장, 화면 글자만 — 서버는 일정 장소까지만 내려줌)
 
 ### G02 그룹 상세
-- 그룹 · 멤버: `groups` + `group_members` — DB, 기상 공유 동의 `wake_share_opt_in` — DB
+- 그룹 · 멤버: `groups` + `group_members` — DB, 기상 공유 동의 `wake_share_opt_in` · 출발 · 도착 공유 동의 `trip_share_opt_in`(기본 끔, 기상 공유를 켠 사람만 켜지고 기상 공유를 끄면 같이 꺼짐) — DB
 - 연결 일정: `appointments`(`group_id`, 오늘부터, `creator_id`) — DB + 인원수 · 내 참여 `group_appointment_counts` — RPC. 줄을 누르면 참여자(참여 / 알람 없음, 차단 쌍은 이름만) `appointment_joiners` — RPC. [내 알람 만들기] = `alarm-commit`(`appointment_id` + 내 집 · 수단 · 준비 시간) — Edge, [나는 빠지기] = `appointment-edit` LEAVE — Edge. 지난 약속은 '지난 약속이에요'(버튼 숨김) (친구 9장)
-- 멤버 기상 상태: `get_group_wake` — RPC. 그 그룹 일정이 있는 날만 (D57). 6단계를 3단계로 묶음(`SCHEDULED` '오전 8:50 알람' · `RINGING` · `DISMISSED` · `MISSED` '울렸어요' · `CONFIRMED` '일어났어요 오전 8:08', `NO_ALARM` '알람 없음'), 줄이 없는 멤버는 '공유 안 함' (친구 7장). 멤버 메뉴 [이 사람에게 기상 숨기기 / 보이기] `set_wake_hidden` — RPC, 숨긴 목록 `wake_hides` — DB(내 줄만). 누가 일어나면 DB가 그룹 채널에 새로 고침 신호(Realtime 방송, #160) → 앱이 다시 부름 (지형님 10/15 기술 결정 — `capstone/전체작업계획_v1.md` 8절 Q3, 레포 밖)
+- 멤버 기상 상태: `get_group_wake` — RPC. 그 그룹 일정이 있는 날만 (D57). 기상 6단계(`SCHEDULED` '오전 8:50 알람' · `RINGING` · `DISMISSED` · `MISSED` '울렸어요' · `CONFIRMED` '일어났어요 오전 8:08', `NO_ALARM` '알람 없음') + 출발 · 도착 시각 `departed_at` · `arrived_at`(그날 이 그룹 공동 약속, 여럿이면 안 도착한 가장 이른 약속 · 다 도착했으면 가장 늦은 약속)과 보임 여부 `trip_visible`(본인이거나 그 멤버가 `group_members.trip_share_opt_in`을 켬, 아니면 시각은 null). 줄이 없는 멤버는 '공유 안 함' (친구 7장 · D59 11/19 도착까지). 멤버 메뉴 [이 사람에게 기상 숨기기 / 보이기] `set_wake_hidden` — RPC, 숨긴 목록 `wake_hides` — DB(내 줄만). 누가 일어나면 DB가 그룹 채널에 새로 고침 신호(Realtime 방송, #160) → 앱이 다시 부름 (지형님 10/15 기술 결정 — `capstone/전체작업계획_v1.md` 8절 Q3, 레포 밖)
 - 초대: 코드 시트 `my_group_code`(만료됐으면 서버가 새 코드 + 7일) — RPC, [새 코드] `regenerate_invite_code` — RPC, 직접 초대 `invite_to_group` — RPC (친구 5장). 그룹장 없음 — 이름 바꾸기 `groups` update · 나가기 `group_members` JOINED → LEFT · 내보내기 다른 사람 행 delete · 알림 끄기 `group_members.notifications_off` — DB
 
 ### G03 그룹원 기상 상태
-- 기상 상태: `get_group_wake` — RPC (단계 · 알람 시각 · 확인 시각만, 미루기 횟수 · 알람 끈 시각 · 준비 · 출발 · 도착은 본인만 — D59 · 친구 7장). 그 그룹 일정이 있는 날만 (D57). 알람 카드는 알람 조회 권한이 있으면 [알람 보기](G04)로
+- 기상 · 출발 · 도착 상태: `get_group_wake` — RPC (단계 · 알람 시각 · 확인 시각 + 출발 · 도착 시각 `departed_at` · `arrived_at` · `trip_visible` — 출발 · 도착 공유를 켠 사람만, 시각만(장소 · 좌표 · 감지 출처 · 지각은 안 내려줌). 미루기 횟수 · 알람 끈 시각 · 준비 시작은 본인만 — D59 11/19 · 친구 7장). 출발 · 도착이 바뀌면 기상 신호와 같은 채널로 새로 고침 신호. 그 그룹 일정이 있는 날만 (D57). 알람 카드는 알람 조회 권한이 있으면 [알람 보기](G04)로
 - 깨우기: `notify`(`{ kind: 'WAKE_PING', targetUserId, groupId }`) — Edge. '울렸어요'일 때만 버튼. 판정 · 횟수(보내는 사람 → 받는 사람 쌍마다 5분 1번 · 하루 3번) · 직전 재확인은 서버가 하고, 응답 `ping.status`로 버튼 아래 한 줄: `OK` '1/3 · 8:15부터 다시' · `WAIT` '8:15부터 다시' · `DAILY_LIMIT` · `OFF`(받기를 껐거나 기상이 안 보임(403) — '지금은 깨울 수 없어요'로 구분 안 함) · `ALREADY_UP`('이미 일어났어요', 상태를 다시 읽음) · `NOT_RINGING`(다시 읽음) · `NO_TOKENS`('지금은 알림이 닿지 않아요', 횟수 안 셈). 상태를 미리 읽는 곳은 없어 보내 본 뒤에 앎 — 보냄 · 기다림 · 한도 · 꺼짐 · 이미 일어남은 버튼을 잠금(다음 가능 시각이 지나면 풀림). 가짜 모드는 막힘
 - 오늘 받은 깨우기: `my_wake_pings` — RPC (`sender_nickname`, `sent_at` 최신 순, 차단한 사람 것 제외) → 홈 · H08 한 줄 '수연님이 7:12에 깨웠어요'(여러 번이면 '· 오늘 n번'). 가짜 모드는 없음
 - 설정 [깨우기 받기]: `profiles.wake_ping_enabled` — DB 직접 update(내 프로필, 기본 켬). 꺼 두면 보낸 쪽에는 `OFF`만 보임
@@ -299,5 +299,5 @@
 | 2 | H03 강도를 배경음 · 말소리 · 진동 따로 고름 | `intensity`(전체 세기) · `voice_tone`(말소리) · `sound_key`(배경음) · `vibration`(진동, `20261030200000_alarm_vibration.sql` — 직접 고른 값만, NULL = 강도를 따름) | D1 A로 정함 (이슈 #312) |
 | 3 | G04 "변경 기록" | 저장 자리 없음 | 시트를 뺌 (친구 논리설계 10장 · D9 · D20) — 주인에게 푸시만, 보낸 쪽은 카드의 '제안함' · '반영됨' |
 | 4 | — | 카카오 응답은 저장 · 재사용 불가인데 `est_travel_minutes` · `travel_source` CACHED가 있음 | #27에서 계산에 쓴 값만 남기는지 정함 |
-| 5 | G02 · H01 그룹원 상태에 준비 시작 · 출발 · 도착까지 보임 | `get_group_wake_status`는 기상 상태(`wake_status`)와 시각만 돌려줌, MISSED는 목업에 없음 | 기상까지만으로 정함 (D59) — 화면을 실데이터로 바꿀 때 준비 · 출발 · 도착 줄을 뺌 (목업 api는 글자 `WakeState`, 실데이터는 상태 값 + 시각) |
+| 5 | G02 · H01 그룹원 상태에 준비 시작 · 출발 · 도착까지 보임 | `get_group_wake_status`는 기상 상태(`wake_status`)와 시각 + 출발 · 도착 시각(`departed_at` · `arrived_at` · `trip_visible`)을 돌려줌, MISSED는 목업에 없음 | 11/19 D59를 도착까지로 바꿈 — 출발 · 도착 공유(`trip_share_opt_in`)를 켠 사람만 `departed_at` · `arrived_at` 시각이 내려옴. 준비 시작은 본인만. 화면은 앱 화면 PR에서 (목업 api는 글자 `WakeState`, 실데이터는 상태 값 + 시각) |
 | 6 | 일정 없는 알람 (D46) · H03 직접 고름 (D42) · 고친 값 기록 (D42 · D43) · 울림 기록 중복 | `alarms_one_source`가 둘 다 NULL을 막음, `alarms.recurrence_rule` · `time_source` · `intensity_source` · `user_edit_logs` · `alarm_events.client_event_id` · `input_source` 없음 | PR #160에서 더함 (제약 풀기 · 칸 · 표 + RLS · `client_event_id` 유니크) |
