@@ -13,6 +13,7 @@ import {
   WAKE_PING_FAILED,
   WAKE_STALE_TEXT,
   dayLinesOf,
+  wakeScopeOf,
   wakePingLocks,
   wakePingNote,
   wakePingSent,
@@ -53,6 +54,7 @@ export default function MemberWakeScreen() {
   }
 
   const { person: p, groupName, state, canViewAlarm, noGroupAppointment } = data;
+  const scope = wakeScopeOf(p.short, groupName, data.tripVisible);
   const lines = dayLinesOf(data); // 오늘의 흐름 — 알람 · 일어났어요 · 출발 · 도착 중 아는 것만
 
   // 잠금 — 한도 · 꺼짐 · 이미 일어남은 계속, 보냄(OK) · 5분 안 또 누름(WAIT)은 다음 가능 시각까지
@@ -119,9 +121,9 @@ export default function MemberWakeScreen() {
         <Text variant="label" tone="sub" style={styles.label}>
           공유 범위
         </Text>
-        <Text variant="bodyStrong">기상 여부와 알람 시각</Text>
+        <Text variant="bodyStrong">{scope.title}</Text>
         <Text variant="small" tone="sub" style={styles.paragraph}>
-          {`${p.short}님이 '${groupName}' 그룹에 기상 공유를 켠 범위만 보여요. 수면 시간이나 알람 메모는 공유되지 않아요.`}
+          {scope.body}
         </Text>
       </Card>
 

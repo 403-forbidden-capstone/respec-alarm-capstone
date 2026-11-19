@@ -418,7 +418,7 @@ export async function getMemberWake(groupId: string, personId: string, date?: st
   if (!g?.members.includes(personId) || personId === 'me') return null;
   const rows = mockWakeRows(groupId);
   const base = { person: person(personId), groupName: g.name, canViewAlarm: receivedFrom(personId).viewAlarm };
-  if (!rows.length) return { ...base, state: NO_APPOINTMENT_STATE, alarmAt: null, confirmedAt: null, departedAt: null, arrivedAt: null, noGroupAppointment: true };
+  if (!rows.length) return { ...base, state: NO_APPOINTMENT_STATE, alarmAt: null, confirmedAt: null, departedAt: null, arrivedAt: null, tripVisible: false, noGroupAppointment: true };
   const row = rows.find((r) => r.user_id === personId);
   if (!row) return null;
   return {
@@ -428,6 +428,7 @@ export async function getMemberWake(groupId: string, personId: string, date?: st
     confirmedAt: row.wake_confirmed_at ? new Date(row.wake_confirmed_at) : null,
     departedAt: row.departed_at ? new Date(row.departed_at) : null,
     arrivedAt: row.arrived_at ? new Date(row.arrived_at) : null,
+    tripVisible: !!row.trip_visible,
     noGroupAppointment: false,
   };
 }

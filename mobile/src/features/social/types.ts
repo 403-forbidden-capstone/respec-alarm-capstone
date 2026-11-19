@@ -42,7 +42,7 @@ export const TRIP_PERMISSION: { key: 'viewTrip'; name: string; chip: string; des
   key: 'viewTrip',
   name: '출발 · 도착 공유',
   chip: '출발 · 도착',
-  description: '이 그룹 일정의 출발 · 도착 시각이 보여요 · 장소는 안 보여요',
+  description: '이 그룹 일정의 출발 · 도착 시각이 보여요. 장소는 안 보여요.',
 };
 export const TRIP_NEEDS_WAKE = '기상 상태 공유를 켜야 켤 수 있어요';
 
@@ -162,6 +162,7 @@ export type MemberWake = {
   confirmedAt: Date | null;
   departedAt: Date | null; // 출발 · 도착은 상대가 출발 · 도착 공유를 켰을 때만 옴 (장소 · 감지 출처는 안 옴)
   arrivedAt: Date | null;
+  tripVisible: boolean; // 상대가 이 그룹에 출발 · 도착 공유를 켰음 — G03 공유 범위 글자
   canViewAlarm: boolean; // 알람 조회 권한 → [알람 보기] (G04)
   noGroupAppointment: boolean; // 그날 이 그룹 약속이 없어 기상 상태를 주지 않는 날 (D57 — 공유 안 함과 다름)
 };

@@ -7,7 +7,7 @@ import { db, kst } from '@/mocks/data';
 import { tripCountsOf, wakeStateOf, wokeCountOf, type WakeRow } from '../map';
 import { permissionNames, togglePermission } from '../permissions';
 import { permissionsFor, TRIP_PERMISSION } from '../types';
-import { dayLinesOf, groupWakeLine } from '../wakeTexts';
+import { dayLinesOf, groupWakeLine, wakeScopeOf } from '../wakeTexts';
 
 // 시각은 한국 시간 — UTC 22:11 = 다음 날 오전 7:11
 const row = (over: Partial<WakeRow> = {}): WakeRow => ({
@@ -99,7 +99,7 @@ describe('출발 · 도착 공유 스위치 (F03)', () => {
 
   it('그룹 관계에만 있음, 설명 · 칩 글자', () => {
     expect(permissionsFor('friend').some((p) => p.key === 'viewTrip')).toBe(false);
-    expect(permissionsFor('group').at(-1)).toMatchObject({ key: 'viewTrip', name: '출발 · 도착 공유', description: '이 그룹 일정의 출발 · 도착 시각이 보여요 · 장소는 안 보여요' });
+    expect(permissionsFor('group').at(-1)).toMatchObject({ key: 'viewTrip', name: '출발 · 도착 공유', description: '이 그룹 일정의 출발 · 도착 시각이 보여요. 장소는 안 보여요.' });
     expect(permissionNames({ ...base, viewTrip: true })).toEqual(['기상 상태 조회', TRIP_PERMISSION.chip]);
   });
 
@@ -136,5 +136,14 @@ describe('웹 미리보기 이동 중 · 도착 장면 (가짜 데이터)', () =
   it('평소 아침 장면은 그대로 — 일어났어요에서 멈춤', () => {
     expect(db.me.departAt).toBeNull();
     expect(memberState('sy', kst(22, 475)).stage).toBe('WOKE');
+  });
+});
+
+describe('G03 공유 범위 글자 (wakeScopeOf)', () => {
+  it('출발 · 도착이 보이는 사람은 제목 · 설명에 출발 · 도착 범위, 아닌 사람은 지금 그대로', () => {
+    expect(wakeScopeOf('수연', '캡스톤팀', true)).toMatchObject({ title: '기상 여부 · 알람 시각 · 출발 · 도착 시각' });
+    expect(wakeScopeOf('수연', '캡스톤팀', true).body).toContain('출발 · 도착 공유를 켠');
+    expect(wakeScopeOf('수연', '캡스톤팀', false).title).toBe('기상 여부와 알람 시각');
+    expect(wakeScopeOf('수연', '캡스톤팀', false).body).not.toContain('출발');
   });
 });

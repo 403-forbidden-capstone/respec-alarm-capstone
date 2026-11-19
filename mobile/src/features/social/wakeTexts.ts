@@ -31,6 +31,13 @@ export function dayLinesOf(w: { alarmAt: Date | null; confirmedAt: Date | null; 
   return lines.sort((a, b) => a.at.getTime() - b.at.getTime());
 }
 
+// G03 '공유 범위' 카드 — 상대가 출발 · 도착 공유를 켰으면 그 범위까지
+export function wakeScopeOf(name: string, groupName: string, tripVisible: boolean): { title: string; body: string } {
+  return tripVisible
+    ? { title: '기상 여부 · 알람 시각 · 출발 · 도착 시각', body: `${name}님이 '${groupName}' 그룹에 기상 공유와 출발 · 도착 공유를 켠 범위만 보여요. 수면 시간, 장소, 알람 메모는 공유되지 않아요.` }
+    : { title: '기상 여부와 알람 시각', body: `${name}님이 '${groupName}' 그룹에 기상 공유를 켠 범위만 보여요. 수면 시간이나 알람 메모는 공유되지 않아요.` };
+}
+
 // G02 멤버 메뉴 — 숨김은 사람 단위(내가 속한 모든 그룹), 상대는 모름 (7-더 · 7-43)
 export const wakeHideLabel = (hidden: boolean) => (hidden ? '이 사람에게 기상 보이기' : '이 사람에게 기상 숨기기');
 export const wakeHideToast = (name: string, hidden: boolean) =>

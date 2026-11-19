@@ -198,11 +198,11 @@ describe('홈 이동 중 · 도착 줄 (tripCardOf, 11/19)', () => {
   const arrived = plan({ departedAt: at('8:55'), arrivedAt: at('9:48') });
 
   it('출발 뒤 도착 전 — 이동 중 · 출발 + 예상 이동분이 도착 예정', () => {
-    expect(tripCardOf(departed, at('9:10'))).toEqual({ stage: 'MOVING', title: '이동 중 · 오전 9:45 도착 예정', summary: '오전 10:00 팀 주간회의 · 세종대학교' });
+    expect(tripCardOf(departed, at('9:10'))).toEqual({ stage: 'MOVING', label: '이동 중', title: '오전 9:45 도착 예정', summary: '오전 10:00 팀 주간회의 · 세종대학교' });
   });
 
   it('도착하면 도착했어요 + 시각', () => {
-    expect(tripCardOf(arrived, at('9:50'))).toMatchObject({ stage: 'ARRIVED', title: '도착했어요 오전 9:48' });
+    expect(tripCardOf(arrived, at('9:50'))).toMatchObject({ stage: 'ARRIVED', label: '도착했어요', title: '오전 9:48' });
   });
 
   it('출발 기록이 없으면 줄 없음(아침 카드가 보임), 도착 기록만 있어도 도착은 보임', () => {

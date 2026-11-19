@@ -9,9 +9,9 @@ import type { TripCardView } from '../morning';
 export function TripCard({ view, onPress }: { view: TripCardView; onPress: () => void }) {
   return (
     <Card>
-      <Pressable onPress={onPress} accessibilityRole="button" accessibilityLabel={`${view.title}, 일정 열기`} style={({ pressed }) => pressed && styles.pressed}>
+      <Pressable onPress={onPress} accessibilityRole="button" accessibilityLabel={`${view.label} ${view.title}, 일정 열기`} style={({ pressed }) => pressed && styles.pressed}>
         <Text variant="label" tone="sub">
-          {view.stage === 'MOVING' ? '이동 중' : '도착'}
+          {view.label}
         </Text>
         <Text variant="big" style={styles.title}>
           {keepWords(view.title)}
