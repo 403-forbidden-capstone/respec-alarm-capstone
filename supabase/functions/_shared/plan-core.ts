@@ -393,7 +393,12 @@ export function computePlan(i: PlanInputs, travel: ResolvedTravel, mode: PlanMod
           ...(activePure.source === 'MODEL' && activePure.model === 'prep_start_ratio_v2' ? { mlModel: 'prep_start_ratio_v2' as const } : {}),
         }
       : predicted;
-    const prepare = i.prepareBound && withWake ? clampPrepareToBound(pureBasis, i.prepareBound) : pureBasis;
+    // prepareBound is inherited from legacy wake->departure participant.prepare_minutes.
+    // Applying it to a pure prep candidate would clamp values in incompatible units.
+    // New-semantics per-occurrence bounds require their own persisted pure-prep basis.
+    const prepare = i.prepareBound && withWake && activePure == null
+      ? clampPrepareToBound(pureBasis, i.prepareBound)
+      : pureBasis;
     return { beforePrepareMinutes, prepare, pureApplied: activePure != null };
   };
 
