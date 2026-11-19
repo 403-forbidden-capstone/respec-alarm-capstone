@@ -71,6 +71,11 @@
       android:name=".BriefingRefreshReceiver"
       android:exported="false" />
 
+    <!-- 기상 알람 해제 + 10분 자동 기상 판정: 정확 알람 → 급한 작업 넣기 (DeviceUpload.kt WakeJudgeSchedule) -->
+    <receiver
+      android:name=".WakeJudgeReceiver"
+      android:exported="false" />
+
     <receiver
       android:name=".AlarmBootReceiver"
       android:enabled="true"

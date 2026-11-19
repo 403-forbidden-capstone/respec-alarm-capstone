@@ -2,13 +2,15 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { recordDeviceEvents } from './device-events.ts';
+import { deviceEventAllowed, recordDeviceEvents } from './device-events.ts';
 import { HttpError } from './errors.ts';
 import { FakeDb } from './fake-db.ts';
+import type { Db } from './supabase.ts';
 
 const A = '11111111-1111-4111-8111-111111111111';
 const B = '22222222-2222-4222-8222-222222222222';
 const MINE = '00000000-0000-4000-8000-0000000000a1';
+const WAKE = '00000000-0000-4000-8000-0000000000a2';
 const OTHERS = '00000000-0000-4000-8000-0000000000b1';
 const E1 = '4b7f478f-5a2a-542a-92dc-9be071c05742';
 const E2 = '9070d2b1-d569-5c26-acb3-e2e41be9c886';
@@ -16,7 +18,7 @@ const E2 = '9070d2b1-d569-5c26-acb3-e2e41be9c886';
 function seed() {
   const db = new FakeDb();
   for (const u of [A, B]) db.rows('profiles').push({ user_id: u, timezone: 'Asia/Seoul' });
-  db.rows('alarms').push({ alarm_id: MINE, user_id: A, alarm_type: 'DEPARTURE', is_enabled: true }, { alarm_id: OTHERS, user_id: B, alarm_type: 'DEPARTURE', is_enabled: true });
+  db.rows('alarms').push({ alarm_id: MINE, user_id: A, alarm_type: 'DEPARTURE', is_enabled: true }, { alarm_id: WAKE, user_id: A, alarm_type: 'WAKE', is_enabled: true }, { alarm_id: OTHERS, user_id: B, alarm_type: 'DEPARTURE', is_enabled: true });
   return db;
 }
 const tap = (over: Record<string, unknown> = {}) => ({
@@ -51,8 +53,8 @@ test('남의 알람 · 없는 알람의 기록은 건너뜀 (서버 키로 쓰�
 
 test('자동 기상 확정 — 그날 기록의 빈 칸 먼저 · 이벤트는 그 뒤, 이미 있는 값은 덮지 않음', async () => {
   const db = seed();
-  const wake = { alarm_id: MINE, record_date: '2026-11-19', wake_confirmed_at: '2026-11-19T06:31:30.000Z', wake_reported_at: '2026-11-19T06:30:00.000Z' };
-  const event = tap({ event_type: 'WAKE_CONFIRMED', client_event_id: E2, event_at: wake.wake_confirmed_at, input_source: 'USAGE' });
+  const wake = { alarm_id: WAKE, record_date: '2026-11-19', wake_confirmed_at: '2026-11-19T06:31:30.000Z', wake_reported_at: '2026-11-19T06:30:00.000Z' };
+  const event = tap({ alarm_id: WAKE, event_type: 'WAKE_CONFIRMED', client_event_id: E2, event_at: wake.wake_confirmed_at, input_source: 'USAGE' });
   const out = await recordDeviceEvents(db as never, A, { events: [event], wake });
   assert.deepEqual(out, { stored: 1, skipped: 0, wake_recorded: true });
   assert.ok(db.calls.indexOf('upsert alarm_events') > db.calls.indexOf('insert daily_records'), db.calls.join(' | '));
@@ -72,9 +74,9 @@ test('자동 기상 확정 — 그날 기록의 빈 칸 먼저 · 이벤트는 �
 test('앱이 먼저 쓴 확정(같은 번호)이 있으면 폰 기록은 무시 · 해제 시각 칸만 비었으면 그것만 채움', async () => {
   const db = seed();
   db.rows('daily_records').push({ user_id: A, record_date: '2026-11-19', wake_confirmed_at: '2026-11-19T06:31:00.000Z', wake_reported_at: null, data_source: 'ALARM' });
-  db.rows('alarm_events').push({ user_id: A, alarm_id: MINE, client_event_id: E2, event_type: 'WAKE_CONFIRMED', event_at: '2026-11-19T06:31:00.000Z', input_source: 'USAGE' });
-  const wake = { alarm_id: MINE, record_date: '2026-11-19', wake_confirmed_at: '2026-11-19T06:35:00.000Z', wake_reported_at: '2026-11-19T06:30:00.000Z' };
-  await recordDeviceEvents(db as never, A, { events: [tap({ event_type: 'WAKE_CONFIRMED', client_event_id: E2, event_at: wake.wake_confirmed_at, input_source: 'USAGE' })], wake });
+  db.rows('alarm_events').push({ user_id: A, alarm_id: WAKE, client_event_id: E2, event_type: 'WAKE_CONFIRMED', event_at: '2026-11-19T06:31:00.000Z', input_source: 'USAGE' });
+  const wake = { alarm_id: WAKE, record_date: '2026-11-19', wake_confirmed_at: '2026-11-19T06:35:00.000Z', wake_reported_at: '2026-11-19T06:30:00.000Z' };
+  await recordDeviceEvents(db as never, A, { events: [tap({ alarm_id: WAKE, event_type: 'WAKE_CONFIRMED', client_event_id: E2, event_at: wake.wake_confirmed_at, input_source: 'USAGE' })], wake });
   assert.equal(db.rows('alarm_events').length, 1);
   assert.equal(db.rows('alarm_events')[0].event_at, '2026-11-19T06:31:00.000Z');
   assert.equal(db.rows('daily_records')[0].wake_confirmed_at, '2026-11-19T06:31:00.000Z');
@@ -99,4 +101,70 @@ test('모양이 틀리면 400 — 종류 밖 이벤트(TRIGGERED) · 번호 형�
   await bad({});
   await bad({ events: Array.from({ length: 21 }, () => tap()) });
   assert.equal(db.rows('alarm_events').length, 0);
+});
+
+test('받는 조합은 폰이 보내는 것만 — WAKE_CONFIRMED는 WAKE 알람 + USAGE, 해제는 WAKE 알람 + BUTTON, 버튼은 BUTTON (나머지는 건너뜀, 개수에 안 셈)', async () => {
+  assert.equal(deviceEventAllowed('WAKE_CONFIRMED', 'USAGE', 'WAKE'), true);
+  assert.equal(deviceEventAllowed('WAKE_CONFIRMED', 'BUTTON', 'WAKE'), false); // 직접 응답 확정은 앱 화면(로그인 토큰)만
+  assert.equal(deviceEventAllowed('WAKE_CONFIRMED', 'USAGE', 'DEPARTURE'), false);
+  assert.equal(deviceEventAllowed('DISMISSED', 'BUTTON', 'WAKE'), true);
+  assert.equal(deviceEventAllowed('DISMISSED', 'BUTTON', 'PREPARE'), false);
+  assert.equal(deviceEventAllowed('DISMISSED', 'USAGE', 'WAKE'), false);
+  assert.equal(deviceEventAllowed('ACKNOWLEDGED', 'BUTTON', 'PREPARE'), true);
+  assert.equal(deviceEventAllowed('ARRIVAL_CONFIRMED', 'BUTTON', 'ARRIVE'), true);
+  assert.equal(deviceEventAllowed('ACKNOWLEDGED', 'USAGE', 'PREPARE'), false);
+
+  const db = seed();
+  const out = await recordDeviceEvents(db as never, A, {
+    events: [
+      tap(), // 통과
+      tap({ client_event_id: E2, event_type: 'WAKE_CONFIRMED', input_source: 'BUTTON', alarm_id: WAKE }), // 거절 (출처)
+      tap({ client_event_id: '5b7f478f-5a2a-542a-92dc-9be071c05743', event_type: 'WAKE_CONFIRMED', input_source: 'USAGE' }), // 거절 (WAKE 알람 아님)
+      tap({ client_event_id: '6b7f478f-5a2a-542a-92dc-9be071c05744', event_type: 'DISMISSED', alarm_id: MINE }), // 거절 (WAKE 알람 아님)
+    ],
+  });
+  assert.deepEqual(out, { stored: 1, skipped: 0, wake_recorded: false });
+  assert.equal(db.rows('alarm_events').length, 1);
+});
+
+test('wake는 WAKE 알람만 — 다른 종류 알람이면 그날 기록을 안 씀', async () => {
+  const db = seed();
+  const out = await recordDeviceEvents(db as never, A, { wake: { alarm_id: MINE, record_date: '2026-11-19', wake_confirmed_at: '2026-11-19T06:31:00.000Z' } });
+  assert.equal(out.wake_recorded, false);
+  assert.equal(db.rows('daily_records').length, 0);
+});
+
+test('그날 기록 만들기가 겹쳐(23505) 그 사이 다른 곳이 먼저 만들었으면 빈 칸만 채움', async () => {
+  const db = seed();
+  // 읽을 때는 없었는데 쓰려니 이미 있는 상황 — 첫 읽기는 빈 값, 첫 쓰기는 23505 (그 사이 다른 곳이 만든 줄은 해제 시각만 있음)
+  db.rows('daily_records').push({ user_id: A, record_date: '2026-11-19', wake_confirmed_at: null, wake_reported_at: '2026-11-19T06:20:00.000Z', data_source: 'ALARM' });
+  let selects = 0;
+  const racing = {
+    from: (table: string) => {
+      const q = db.from(table) as unknown as Record<string, (...a: unknown[]) => unknown>;
+      if (table !== 'daily_records') return q;
+      return new Proxy(q, {
+        get(target, prop) {
+          if (prop === 'select') {
+            return (...a: unknown[]) => {
+              const r = target.select(...a) as Record<string, unknown>;
+              selects += 1;
+              if (selects === 1) r.maybeSingle = () => Promise.resolve({ data: null, error: null });
+              return r;
+            };
+          }
+          if (prop === 'insert') return () => Promise.resolve({ data: null, error: { code: '23505', message: 'duplicate key' } });
+          return Reflect.get(target, prop);
+        },
+      });
+    },
+    rpc: db.rpc.bind(db),
+  } as unknown as Db;
+  const wake = { alarm_id: WAKE, record_date: '2026-11-19', wake_confirmed_at: '2026-11-19T06:31:00.000Z', wake_reported_at: '2026-11-19T06:30:00.000Z' };
+  const out = await recordDeviceEvents(racing, A, { wake });
+  assert.equal(out.wake_recorded, true);
+  const rows = db.rows('daily_records');
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].wake_confirmed_at, wake.wake_confirmed_at); // 빈 칸이던 확정 시각만 채움
+  assert.equal(rows[0].wake_reported_at, '2026-11-19T06:20:00.000Z'); // 이미 있던 해제 시각은 그대로
 });

@@ -37,9 +37,36 @@ object DeviceUploadRules {
   fun shouldRetry(status: Int?, attempt: Int): Boolean =
     BriefingRules.refreshOutcome(status) == BriefingRules.RefreshOutcome.RETRY && attempt + 1 < MAX_ATTEMPTS
 
-  /** 해제 + 10분 판정을 걸 때까지 기다릴 시간 (이미 지났으면 바로) */
-  fun judgeDelayMillis(dismissedAtMillis: Long, nowMillis: Long): Long =
-    maxOf(0L, dismissedAtMillis + (WakeJudge.OBSERVE_MINUTES * 60_000).toLong() + DELAY_MARGIN_MILLIS - nowMillis)
+  /** 관찰이 끝나는 시각 = 해제 + 10분 */
+  fun observeEndMillis(dismissedAtMillis: Long): Long = dismissedAtMillis + (WakeJudge.OBSERVE_MINUTES * 60_000).toLong()
+
+  /** 판정을 거는 시각 = 해제 + 10분 2초 (끝나는 시각 경계를 넘기려고 조금 뒤) */
+  fun judgeAtMillis(dismissedAtMillis: Long): Long = observeEndMillis(dismissedAtMillis) + DELAY_MARGIN_MILLIS
+
+  /** 판정을 걸 때까지 기다릴 시간 (이미 지났으면 바로) — 정확 알람을 못 걸 때 쓰는 지연 작업용 */
+  fun judgeDelayMillis(dismissedAtMillis: Long, nowMillis: Long): Long = maxOf(0L, judgeAtMillis(dismissedAtMillis) - nowMillis)
+
+  /** 기록 하나 올리는 작업이 부를 주소 — 기록이 없으면(앱이 이미 올리고 지움) · 기기 키가 없으면 · 주소가 이상하면 null = 할 일 없음 */
+  fun eventTarget(recordExists: Boolean, credentialUrl: String?): String? =
+    if (!recordExists || credentialUrl == null) null else eventsUrl(credentialUrl)
+
+  /** 기상 판정 작업이 부를 주소 — 알람 id · 해제 시각이 없거나 기기 키가 없으면 null = 할 일 없음 */
+  fun judgeTarget(alarmId: String?, dismissedAtMillis: Long, credentialUrl: String?): String? =
+    if (alarmId.isNullOrEmpty() || dismissedAtMillis <= 0 || credentialUrl == null) null else eventsUrl(credentialUrl)
+
+  /** UsageSpans.read 결과(시작 · 끝 epoch ms를 숫자로 담은 맵) → 구간 목록 */
+  fun usageToMillis(raw: List<Map<String, Any>>): List<Pair<Long, Long>> =
+    raw.map { (it["startMillis"] as Number).toLong() to (it["endMillis"] as Number).toLong() }
+
+  /** 서버에 보낼 기상 확정 값 */
+  data class WakeConfirmation(val alarmId: String, val eventId: String, val confirmedAtIso: String, val recordDate: String, val reportedAtIso: String)
+
+  /** 판정이 AUTO가 아니면 null (아무것도 안 보냄) */
+  fun wakeConfirmation(alarmId: String, dismissedAtMillis: Long, result: WakeJudge.Result): WakeConfirmation? {
+    val reachedAt = result.reachedAtMillis
+    if (result.phase != WakeJudge.Phase.AUTO || reachedAt == null) return null
+    return WakeConfirmation(alarmId, wakeConfirmedId(alarmId, dismissedAtMillis), isoUtc(reachedAt), kstDay(reachedAt), isoUtc(dismissedAtMillis))
+  }
 
   /** 기상 확정 기록 번호 — 앱 realWake.ts confirmEventId와 같음: 알람 id + 마지막 해제 시각(ms) */
   fun wakeConfirmedId(alarmId: String, dismissedAtMillis: Long): String = StableUuid.of("wake-confirmed", alarmId, dismissedAtMillis)

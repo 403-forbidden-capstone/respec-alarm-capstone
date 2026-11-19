@@ -1,7 +1,7 @@
 package expo.modules.alarmcore
 
 // 앱 lib/uuid.ts stableUuid와 같은 고정 UUID — 같은 입력이면 같은 번호라, 폰이 올린 기록과 앱이 나중에 올리는 같은 기록이 한 줄로 합쳐짐 (docs/alarm-core.md "기록 번호 공식")
-// 공식을 바꾸면 이미 올라간 기록과 번호가 달라지므로 바꾸지 않음 — StableUuidTest가 문서의 시험값을 고정
+// 공식을 바꾸면 이미 올라간 기록과 번호가 달라지므로 바꾸지 않음 — DeviceUploadRulesTest(stableUuidSameAsTypeScript)가 문서의 시험값을 고정
 object StableUuid {
   private val SEEDS = intArrayOf(0x811c9dc5.toInt(), 0x9e3779b1.toInt(), 0x85ebca77.toInt(), 0xc2b2ae3d.toInt())
 

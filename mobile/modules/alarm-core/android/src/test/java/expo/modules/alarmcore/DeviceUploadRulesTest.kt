@@ -76,4 +76,66 @@ class DeviceUploadRulesTest {
     assertEquals("2026-11-19", DeviceUploadRules.kstDay(at))
     assertEquals("2026-11-18", DeviceUploadRules.kstDay(at - 8 * 3_600_000L)) // 한국 시간 전날 밤
   }
+
+  private val url = "https://x.supabase.co/functions/v1/alarm-briefing-device"
+
+  @Test
+  fun eventWorkerDoesNothingWithoutRecordOrKey() {
+    assertEquals("https://x.supabase.co/functions/v1/alarm-events-device", DeviceUploadRules.eventTarget(true, url))
+    assertNull(DeviceUploadRules.eventTarget(false, url)) // 앱이 이미 올리고 지움
+    assertNull(DeviceUploadRules.eventTarget(true, null)) // 기기 키 없음(로그아웃 · 아직 발급 전)
+    assertNull(DeviceUploadRules.eventTarget(true, "https://x.supabase.co/functions/v1/other"))
+  }
+
+  @Test
+  fun judgeWorkerDoesNothingWithoutInputOrKey() {
+    val target = "https://x.supabase.co/functions/v1/alarm-events-device"
+    assertEquals(target, DeviceUploadRules.judgeTarget(alarmId, 1_795_000_000_000L, url))
+    assertNull(DeviceUploadRules.judgeTarget(null, 1_795_000_000_000L, url))
+    assertNull(DeviceUploadRules.judgeTarget("", 1_795_000_000_000L, url))
+    assertNull(DeviceUploadRules.judgeTarget(alarmId, 0L, url))
+    assertNull(DeviceUploadRules.judgeTarget(alarmId, 1_795_000_000_000L, null))
+  }
+
+  @Test
+  fun unauthorizedStopsWithoutRetry() {
+    // 401(키 만료 · 폐기)은 다시 해도 같음 → 작업 끝 (앱이 열릴 때 올림), 서버 오류는 한도까지 다시
+    assertFalse(DeviceUploadRules.shouldRetry(401, 0))
+    assertTrue(DeviceUploadRules.shouldRetry(503, 0))
+    assertFalse(DeviceUploadRules.shouldRetry(503, DeviceUploadRules.MAX_ATTEMPTS - 1))
+  }
+
+  @Test
+  fun usageMapsBecomeMillisPairs() {
+    // UsageSpans.read는 시작 · 끝을 Double로 담음 (JS 브리지용)
+    val raw = listOf<Map<String, Any>>(
+      mapOf("startMillis" to 1_795_000_030_000.0, "endMillis" to 1_795_000_090_000.0),
+      mapOf("startMillis" to 1_795_000_360_000L, "endMillis" to 1_795_000_420_000L),
+    )
+    assertEquals(listOf(1_795_000_030_000L to 1_795_000_090_000L, 1_795_000_360_000L to 1_795_000_420_000L), DeviceUploadRules.usageToMillis(raw))
+    assertEquals(emptyList<Pair<Long, Long>>(), DeviceUploadRules.usageToMillis(emptyList()))
+  }
+
+  @Test
+  fun confirmationOnlyWhenAuto() {
+    val dismissed = 1_747_897_200_000L
+    val spans = WakeJudge.toSpans(dismissed, listOf((dismissed + 30_000) to (dismissed + 90_000), (dismissed + 360_000) to (dismissed + 420_000)))
+    val auto = WakeJudge.evaluate(dismissed, dismissed + 11 * 60_000L, spans)
+    val c = DeviceUploadRules.wakeConfirmation(alarmId, dismissed, auto)!!
+    assertEquals("4b7f478f-5a2a-542a-92dc-9be071c05742", c.eventId) // 앱 번호와 같음
+    assertEquals(DeviceUploadRules.isoUtc(dismissed + 90_000), c.confirmedAtIso)
+    assertEquals(DeviceUploadRules.isoUtc(dismissed), c.reportedAtIso)
+    assertEquals(DeviceUploadRules.kstDay(dismissed + 90_000), c.recordDate)
+    // 관찰 중 · 조건 미달 · 사용 정보 없음은 아무것도 안 보냄
+    assertNull(DeviceUploadRules.wakeConfirmation(alarmId, dismissed, WakeJudge.evaluate(dismissed, dismissed + 6 * 60_000L, spans)))
+    assertNull(DeviceUploadRules.wakeConfirmation(alarmId, dismissed, WakeJudge.evaluate(dismissed, dismissed + 11 * 60_000L, emptyList())))
+    assertNull(DeviceUploadRules.wakeConfirmation(alarmId, dismissed, WakeJudge.evaluate(dismissed, dismissed + 11 * 60_000L, null)))
+  }
+
+  @Test
+  fun judgeIsScheduledTenMinutesTwoSecondsAfterDismiss() {
+    val dismissed = 1_795_000_000_000L
+    assertEquals(dismissed + 600_000L, DeviceUploadRules.observeEndMillis(dismissed))
+    assertEquals(dismissed + 602_000L, DeviceUploadRules.judgeAtMillis(dismissed))
+  }
 }

@@ -2,6 +2,7 @@
 //   인증은 호출하는 쪽(기기 키, _shared/briefing-device.ts deviceUser)이 하고, 여기는 키 주인의 user_id만 받음 (서버 키로 쓰므로 모든 쿼리에 user_id 조건)
 //   앱(lib/alarmSync insertEvents · features/alarm/realWake)이 로그인 토큰으로 쓰는 것과 같은 내용을 같은 순서로 씀 — 나중에 앱이 같은 기록을 올려도 한 줄만 남음
 //     · alarm_events: client_event_id 유일 + 충돌 무시 (앱 upsert와 같음). 그 알람이 키 주인 것이 아니면 건너뜀(앱 쪽은 RLS가 막음)
+//     · 받는 조합은 폰이 실제로 보내는 것만 (deviceEventAllowed): 알림 버튼 ACKNOWLEDGED · ARRIVAL_CONFIRMED = BUTTON, 기상 알람 해제 DISMISSED = WAKE 알람 + BUTTON, 기상 확정 WAKE_CONFIRMED = WAKE 알람 + USAGE. wake도 WAKE 알람만. 나머지는 조용히 건너뜀(stored · skipped에 안 셈)
 //     · wake: daily_records의 빈 칸(기상 확인 · 해제 시각)만 채움 → 그 뒤에 이벤트 (이벤트가 확정의 표지라 맨 마지막, realWake.ts writeConfirmation과 같은 순서)
 //   원탭(출발 · 도착 · 준비 시작)을 appointment_participants에 옮기는 일은 alarm_events INSERT 트리거가 함 — 여기서는 안 건드림
 // 순수 TS (Deno API 없음) — node --test로 시험 (device-events.test.ts)
@@ -15,6 +16,14 @@ export const DEVICE_EVENT_TYPES = ['ACKNOWLEDGED', 'ARRIVAL_CONFIRMED', 'DISMISS
 const INPUT_SOURCES = ['BUTTON', 'USAGE'] as const;
 const MAX_EVENTS = 20;
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
+
+// 이 알람 종류 · 출처 조합을 폰이 보내는지 (키가 새도 이 밖의 기록은 못 만듦 — 예: 남의 알람이 아니어도 MANUAL · VOICE 확정이나 USAGE 해제는 거절)
+export function deviceEventAllowed(eventType: string, inputSource: string, alarmType: string): boolean {
+  if (eventType === 'WAKE_CONFIRMED') return alarmType === 'WAKE' && inputSource === 'USAGE';
+  if (eventType === 'DISMISSED') return alarmType === 'WAKE' && inputSource === 'BUTTON';
+  if (eventType === 'ACKNOWLEDGED' || eventType === 'ARRIVAL_CONFIRMED') return inputSource === 'BUTTON';
+  return false;
+}
 
 export type DeviceEventsResult = { stored: number; skipped: number; wake_recorded: boolean };
 
@@ -59,34 +68,39 @@ function parse(raw: unknown): { events: Omit<EventRow, 'user_id'>[]; wake: Wake 
 export async function recordDeviceEvents(service: Db, userId: string, raw: unknown): Promise<DeviceEventsResult> {
   const { events, wake } = parse(raw);
   const ids = [...new Set([...events.map((e) => e.alarm_id), ...(wake ? [wake.alarm_id] : [])])];
-  const mine = new Set(
-    must<{ alarm_id: string }[]>('device alarms', await service.from('alarms').select('alarm_id').eq('user_id', userId).in('alarm_id', ids)).map((a) => a.alarm_id),
+  const mine = new Map(
+    must<{ alarm_id: string; alarm_type: string }[]>('device alarms', await service.from('alarms').select('alarm_id, alarm_type').eq('user_id', userId).in('alarm_id', ids)).map((a) => [a.alarm_id, a.alarm_type]),
   );
 
   let wakeRecorded = false;
-  if (wake && mine.has(wake.alarm_id)) {
+  if (wake && mine.get(wake.alarm_id) === 'WAKE') {
     await fillDailyRecord(service, userId, wake);
     wakeRecorded = true;
   }
-  const rows: EventRow[] = events.filter((e) => mine.has(e.alarm_id)).map((e) => ({ ...e, user_id: userId }));
+  const owned = events.filter((e) => mine.has(e.alarm_id));
+  const rows: EventRow[] = owned.filter((e) => deviceEventAllowed(e.event_type, e.input_source, mine.get(e.alarm_id)!)).map((e) => ({ ...e, user_id: userId }));
   if (rows.length) {
     must('device events', await service.from('alarm_events').upsert(rows, { onConflict: 'client_event_id', ignoreDuplicates: true }));
   }
-  return { stored: rows.length, skipped: events.length - rows.length, wake_recorded: wakeRecorded };
+  return { stored: rows.length, skipped: events.length - owned.length, wake_recorded: wakeRecorded };
 }
 
 // 그날 기록의 빈 칸만 채움 — 이미 있는 값은 덮지 않음 (앱 realWake.ts writeDailyRecord와 같음)
 async function fillDailyRecord(service: Db, userId: string, wake: Wake): Promise<void> {
-  const record = must<{ wake_confirmed_at: string | null; wake_reported_at: string | null } | null>(
-    'device daily record',
-    await service.from('daily_records').select('wake_confirmed_at, wake_reported_at').eq('user_id', userId).eq('record_date', wake.record_date).maybeSingle(),
-  );
+  type Row = { wake_confirmed_at: string | null; wake_reported_at: string | null };
+  const read = async () =>
+    must<Row | null>(
+      'device daily record',
+      await service.from('daily_records').select('wake_confirmed_at, wake_reported_at').eq('user_id', userId).eq('record_date', wake.record_date).maybeSingle(),
+    );
+  let record = await read();
   if (!record) {
     const inserted = await service
       .from('daily_records')
       .insert({ user_id: userId, record_date: wake.record_date, wake_confirmed_at: wake.wake_confirmed_at, wake_reported_at: wake.wake_reported_at, data_source: 'ALARM' });
     if (!inserted.error) return;
-    if (inserted.error.code !== '23505') must('device daily record insert', inserted); // 그 사이 다른 곳이 만들었으면 아래처럼 빈 칸만 채움
+    if (inserted.error.code !== '23505') must('device daily record insert', inserted);
+    record = await read(); // 그 사이 다른 곳이 만들었으면 그 줄을 다시 읽어 빈 칸만 채움 (처음 읽은 빈 값으로 덮지 않게)
   }
   const patch = {
     ...(record?.wake_confirmed_at ? {} : { wake_confirmed_at: wake.wake_confirmed_at }),

@@ -88,7 +88,7 @@ update public.server_routes set mode = 'edge'   where kind = 'job' and name = 'w
 update public.server_routes set mode = 'edge' where mode <> 'edge';
 ```
 
-**앱이 표를 쓰는 법** (M2, `mobile/src/lib/edge.ts` · `edgeRoutes.ts` — 앱 JS는 서버 함수를 `callEdge()` 한 곳으로만 부름. 예외 둘: 폰 네이티브가 같은 기기 키로 Edge `alarm-briefing-device`(새벽 브리핑 갱신) · `alarm-events-device`(알림 버튼 · 자동 기상 판정을 앱 없이 올림)를 직접 부르는 길(`lib/alarmSync/briefingDevice.ts`, 이 스위치 · 표를 안 거침)과 개발 빌드의 로컬 Live 토큰 서버)
+**앱이 표를 쓰는 법** (M2, `mobile/src/lib/edge.ts` · `edgeRoutes.ts` — 앱 JS는 서버 함수를 `callEdge()` 한 곳으로만 부름. 예외 둘: 폰 네이티브가 같은 기기 키로 Edge `alarm-briefing-device`(새벽 브리핑 갱신) · `alarm-events-device`(알림 버튼 · 자동 기상 판정을 앱 없이 올림)를 직접 부르는 길(`lib/alarmSync/briefingDevice.ts`, 이 스위치 · 표를 안 거침. 기록 올리는 함수 주소는 키에 담긴 `alarm-briefing-device` 주소의 끝만 바꿔 Kotlin `DeviceUploadRules.eventsUrl`이 만듦)과 개발 빌드의 로컬 Live 토큰 서버)
 
 - 서버 주소는 앱 빌드에 고정(`EXPO_PUBLIC_API_BASE_URL`, https · origin 하나만). 없거나 모양이 틀리면 표를 묻지도 않고 Edge만 부름 → 표가 잘못 바뀌어도 로그인 토큰이 남의 주소로 가지 않음. 이 값을 EAS 환경 · 웹 빌드에 넣는 것은 서버 배포(완결점 1-7) 뒤
 - 로그인한 뒤 `get_server_routes()`를 읽어 5분 동안 씀(사용자가 바뀌면 바로 다시). 못 읽으면(오류 · 모양 이상 · 3초 넘게 걸림) **전부 `edge`**, 옛 값도 안 씀. 실패하면 30초 동안은 다시 안 물음 → 표를 `edge`로 되돌려도 앱에는 **최대 5분**(앱을 다시 켜면 바로) 뒤에 반영됨. 옛 APK(v0.0.2)는 이 코드가 없어 계속 Edge만 부름
@@ -324,6 +324,7 @@ create policy wake_signal_receive on realtime.messages
 | `appointment-edit` | 일정 수정 · 삭제 (N6, D41): 한 번짜리와 반복의 **이번만 / 이후 모두** 고치기 · 지우기, 이번만 지운 회차 되돌리기, 공동 약속에서 나만 빠지기(만든 사람이 시각 · 장소를 고치면 참여자 알람도 다시 계산하고 푸시 — 친구 9장). 알람은 다시 계산해 `ring_packages` · `canceled_alarm_ids`를 `alarm-commit`과 같은 모양으로 돌려줌(앱이 `applyCommit`에 그대로). 7장 7.1.3: 앞 일정이 바뀌거나 지워지면 같은 날 다른 일정의 기상을 다시 판정. 요청 `{ action: UPDATE|DELETE|RESTORE|LEAVE, appointment_id, scope?: this|following, patch?, confirmed? }`. 이번만 고친 / 지운 회차는 `appointments.exception_kind`(EDITED / CANCELED)로 표시 — alarm-roll이 다시 안 만들고 기준 회차에서 뺌. **배포는 `20261030150000_appointment_edit.sql` 적용 뒤, `alarm-roll` 재배포도 같이** | 앱 H03 편집 시트 (4c 뒤) | 켬 | 카카오 길찾기 (장소를 바꿀 때) |
 | `suggestion-apply` | 알람 조정 제안 적용 · 고쳐 적용 · 무시 · 되돌리기 (지금은 준비 알람 당김만, 안건 D111 · D23 A). 그 일정의 이번 회차와 이후 회차의 당김 분(`prepare_advance_minutes`)을 바꾸고, 알람은 다시 계산하지 않고 당김 차이만큼만 옮김(준비 알람 = 차이, 기상 = 준비 전 활동을 넘는 차이) → `ring_packages`. 되돌리면 제안은 대기로. 본문 `_shared/suggest-apply.ts` |
 | `wake-check` | 기상 미확인(MISSED) 기록 | pg_cron 5분마다 (서비스 키) | 끔 (코드에서 키 비교) | — |
+| `alarm-events-device` | 폰 네이티브가 앱을 열지 않고 올리는 기록: 알림 버튼(`ACKNOWLEDGED` · `ARRIVAL_CONFIRMED`) · 기상 알람 해제(`DISMISSED`) · 자동 기상 확정(`WAKE_CONFIRMED` + 그날 `daily_records` 빈 칸). 키 주인의 알람만, 폰이 보내는 종류 · 출처 조합만 받고 나머지는 건너뜀. 요청 `{ events?, wake? }` → `{ stored, skipped, wake_recorded }`. 원탭 → `appointment_participants`는 `alarm_events` INSERT 트리거가 함 | 폰 네이티브 WorkManager (기기 키 `Bearer bdk_…`) | 끔 (코드에서 기기 키 확인) | — |
 | `alarm-roll` | 반복 약속 · 일정 없는 반복 알람의 다음 회차를 앞으로 14일치 미리 만들고(회차마다 약속 · 참여 · 알람 새 행, 회차마다 길찾기 1번), 루틴 알람 시각을 다음 발생으로 옮김. 길찾기가 안 되면 1 · 3 · 6시간 뒤 재시도 → 첫 알람 12시간 전까지 안 되면 내 실측 중앙값(`CACHED`) → 직선 근사(`ESTIMATE`). 응답 `{ created, moved_alarm_ids, pending, ring_packages, canceled_alarm_ids, kakao_calls }` (`pending`은 `{ series_id, occurrence_on, reason }` 목록, `reason`은 `ROUTE_RETRY`(길찾기 재시도 대기) · `DAILY_BUDGET`(하루 길찾기 몫) · `ALARM_CAP`(앞으로 켜진 알람 상한) · `RUN_LIMIT`(이번 실행 한도 · 시간)). 길찾기를 쓴 뒤 계산 · 저장이 던져도 재시도 기록(1 · 3 · 6시간)을 남겨서 다음 5분 실행이 같은 회차로 카카오를 또 부르지 않음. **배포는 앱 맞추기(3b) 머지 뒤** | 배치: pg_cron 5분마다 (서비스 키, 길찾기 20번 · 50묶음 · 40초) / 본인: 앱 `syncNow`·반복 일정 저장 직후 (로그인 토큰, 길찾기 최대 4회차) | 끔 (코드에서 길을 가름) | 카카오 길찾기 |
 | `voice-session` | 자기 전 대화 시작 · 이어 받기(텍스트, 첫 마디는 서버 템플릿 — 모델 호출 없어 `ANTHROPIC_API_KEY` 없이도 동작). 오늘 안 끝난 세션은 그대로(resume), 하루 5대화 넘으면 `session_id: null` + `limits.reached: DAY`. L4 AI 묶음 — **첫 배포 전 헤드에 알림** | 앱 A02 | 켬 | — |
 | `voice-turn` | 자기 전 대화 한 턴(`text` · `results` · `card_action`). 빠른 추출(T2F) ∥ 대화 답(T1) → 턴 처리 → 가드, 모델 호출마다 `ai_calls` 한 줄. `rev` 비교(`CONFLICT`) · `client_turn_id` 재시도, 키 없으면 `NOT_CONFIGURED`, T1 실패는 `LLM_UNAVAILABLE`(`details: { cards, fixes }`), 서버 마감 18초(앱 25초). 비밀값 `ANTHROPIC_API_KEY` · `ANTHROPIC_MODEL`(선택) · `AI_LOG_IO_USER_IDS`(선택, 호출 입력 · 출력 글을 `ai_calls.io`에 남길 사용자 id 쉼표 목록 — 비면 아무도 안 남김). L4 AI 묶음 — **첫 배포 전 헤드에 알림** | 앱 A02 | 켬 | Claude |
@@ -449,13 +450,14 @@ npx supabase@2.119.0 functions deploy place-search  --project-ref gomrhctwjvttoq
 npx supabase@2.119.0 functions deploy place-reverse --project-ref gomrhctwjvttoqifxktt --use-api
 npx supabase@2.119.0 functions deploy notify        --project-ref gomrhctwjvttoqifxktt --use-api
 npx supabase@2.119.0 functions deploy wake-check    --project-ref gomrhctwjvttoqifxktt --use-api
+npx supabase@2.119.0 functions deploy alarm-events-device --project-ref gomrhctwjvttoqifxktt --use-api   # 폰이 앱 없이 올리는 기록. briefing_devices 마이그레이션 적용 뒤에 (`briefing-device` · `alarm-briefing-device`와 같은 기기 키). 배포 전에는 폰이 404를 받고 그만둠 — 앱이 열릴 때 올림
 npx supabase@2.119.0 functions deploy alarm-roll    --project-ref gomrhctwjvttoqifxktt --use-api   # 앱 맞추기(3b) 머지 뒤에. appointment_edit 마이그레이션 적용 뒤에 다시 배포
 npx supabase@2.119.0 functions deploy account-delete --project-ref gomrhctwjvttoqifxktt --use-api   # friend_account_delete 마이그레이션 적용 뒤에 (그 전에는 prepare_account_delete가 없어 500)
 npx supabase@2.119.0 functions deploy appointment-edit --project-ref gomrhctwjvttoqifxktt --use-api   # appointment_edit 마이그레이션 적용 뒤에
 npx supabase@2.119.0 functions deploy timetable-extract --project-ref gomrhctwjvttoqifxktt --use-api   # ai_calls_point_timetable 마이그레이션 적용 뒤에 — 먼저 배포하면 호출 기록(TT)이 제약에 걸려 안 쌓이고 하루 한도가 풀림
 ```
 
-- `verify_jwt`는 `config.toml`의 `[functions.<이름>]`이 정함 (`wake-check` · `alarm-roll` · `suggestion-generate`만 끔). 배포 때 따라감
+- `verify_jwt`는 `config.toml`의 `[functions.<이름>]`이 정함 (`wake-check` · `alarm-roll` · `suggestion-generate`와 기기 키로 부르는 `alarm-briefing-device` · `alarm-events-device`만 끔). 배포 때 따라감
 - `_shared/`는 함수 폴더 밖이어도 상대 import라 같이 묶임. 공용 파일을 고치면 쓰는 함수를 다시 배포해야 함
 - 배치 키(Vault `project_url` · `service_role_key`)를 만든 뒤 `wake-check`를 배포하면 5분마다 돔. 배포 전에는 404가 나도 정상 ("배치"). `alarm-roll`도 같지만 **앱 맞추기(3b) 머지 뒤에 배포**함
 
