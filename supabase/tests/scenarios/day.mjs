@@ -11,8 +11,20 @@
 //     알림 5분 배치 wake-check = find_missed_wake_alarms → MISSED 기록 → claim_wake_nudges (_shared/wake.ts와 같은 순서, 푸시 전송만 뺌)
 //   · 알려진 빈틈(G)과 새로 나온 것(NEW-n)은 knownGap으로 '원하는 동작'을 적어 둠 — 지금은 안 맞아 GAP · NEW로 따로 찍히고 db-check는 안 깸. 고치면 '한계가 풀림'으로 바뀜
 // 사람은 이 파일 전용 계정. db-check 맨 끝에서 돎
-export default async function scenarioDay({ q, as, su, svc, check, knownGap }) {
+export default async function scenarioDay({ q, as, su, svc, check, knownGap, classifyGap }) {
   const { deviceEventAllowed } = await import('../../functions/_shared/device-events.ts');
+
+  // knownGap 구분 자체 시험 — 확인이 거짓이면 GAP · NEW, 예외면 FAIL(한계로 안 숨김), 참이면 '풀림'
+  await check('GAP-도우미 · knownGap은 확인이 거짓이면 GAP/NEW, 값이 true면 풀림(PASS), 예외(SQL 오류 등)는 FAIL로 구분함', async () => {
+    const got = [
+      (await classifyGap('G0', 't', async () => ({ x: 1 })))[0],
+      (await classifyGap('NEW-0', 't', async () => false))[0],
+      (await classifyGap('G0', 't', async () => true))[0],
+      (await classifyGap('G0', 't', async () => { await q('select * from public.no_such_table_scn'); }))[0],
+      (await classifyGap('G0', 't', async () => { throw new Error('시드 실패'); }))[0],
+    ];
+    return JSON.stringify(got) === JSON.stringify(['GAP', 'NEW', 'PASS', 'FAIL', 'FAIL']) ? true : got;
+  });
 
   // ---------------------------------------------------------------------
   // 시각 — 오늘(한국 시간) 기준
@@ -301,16 +313,19 @@ export default async function scenarioDay({ q, as, su, svc, check, knownGap }) {
       return bad.length ? bad : true;
     });
 
-    // ----- G6: 자동 판정 확정은 20분 뒤 남에게 공개되는데 그때 또는 기록할 때 새로 고침 신호가 없음
-    await knownGap('G6', '자동 판정(USAGE) 기상이 친구에게 공개되는 때(+20분)까지 새로 고침 신호가 한 번이라도 나가야 함 — 지금은 USAGE 기록 · 공개 시점 모두 신호 0건이라 친구가 화면을 다시 열어야 보임 (MAIN 07:19 구간)', async () => {
+    // ----- G6: 자동 판정 확정은 20분 뒤 남에게 공개되는데 그 시각에 새로 고침 신호가 없음
+    //   +20분 시점에는 DB에 쓰는 일이 없어 신호를 시각별로 나눠 볼 수 없음(PGlite에는 시계 · 스케줄러가 없고 기록 시각은 시험 시계가 아님).
+    //   그래서 가장 가까운 확인 = 그 시각에 신호를 낼 수 있는 장치(pg_cron 작업)가 있는가. 기록 직후 신호는 그 시점에 친구 화면이 안 바뀌어(DISMISSED로 숨김) 충분하지 않음
+    await knownGap('G6', '자동 판정(USAGE) 기상이 친구에게 공개되는 +20분 시점에 새로 고침 신호가 나가야 함 — 지금은 기록 직후도, +20분에 신호를 낼 pg_cron 작업도 없어 친구가 화면을 다시 열어야 보임 (MAIN 07:19 구간)', async () => {
       const w = await world();
       await calm(w, ['B', 'C', 'D']);
       await evApp(w, 'A', w.AL.A.WAKE, 'TRIGGERED', T('07:00'));
       await evApp(w, 'A', w.AL.A.WAKE, 'DISMISSED', T('07:02'), 'BUTTON');
       const n0 = await sigN(w);
       await evDev(w, 'A', w.AL.A.WAKE, 'WAKE_CONFIRMED', T('07:12'), 'USAGE');
-      const got = (await sigN(w)) - n0;
-      return got > 0 ? true : { 'USAGE 기록 뒤 신호 수': got };
+      const atRecord = (await sigN(w)) - n0;
+      const jobs = await q(`select jobname from cron.job where command ilike '%wake%signal%' or command ilike '%realtime.send%' or jobname ilike '%wake%signal%'`);
+      return jobs.length > 0 ? true : { '기록 직후 신호 수(친구 화면은 아직 안 바뀜)': atRecord, '+20분에 신호를 낼 cron 작업': 0 };
     });
   }
 

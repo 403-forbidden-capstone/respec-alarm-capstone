@@ -43,19 +43,21 @@ async function check(name, fn) {
   }
 }
 
-// 알려진 한계 — 이미 알고 있는 빈틈(G번호) · 새로 나온 빈틈(NEW-n)을 '원하는 동작'으로 적어 두는 칸. db-check를 깨지 않음
-//   fn이 true를 돌려주면 한계가 풀린 것(PASS로 남기고 check로 바꾸라고 알림), 아니면 GAP(G번호) · NEW(NEW-n)로 증상과 함께 따로 모아 찍음
-async function knownGap(tag, name, fn) {
-  const kind = /^NEW/.test(tag) ? 'NEW' : 'GAP';
+// 알려진 한계 — 이미 알고 있는 빈틈(G번호) · 새로 나온 빈틈(NEW-n)을 '원하는 동작'으로 적어 두는 칸. 한계는 db-check를 깨지 않음
+//   fn이 true = 한계가 풀림(PASS로 남기고 check로 바꾸라고 알림), true가 아닌 값 = 기대한 확인이 거짓 → GAP(G번호) · NEW(NEW-n)로 증상과 함께 따로 찍음
+//   예외(SQL 오류 · 함수 없음 · 시드 실패)는 '확인이 거짓'이 아니라 시험이 깨진 것이라 FAIL — 마이그레이션이 바뀌어 한계가 조용히 남은 채 초록이 되는 것을 막음
+async function classifyGap(tag, name, fn) {
   try {
     const r = await fn();
-    if (r === true) results.push(['PASS', `${tag} ${name} (한계가 풀림 — knownGap을 check로 바꿀 것)`, '']);
-    else results.push([kind, `${tag} ${name}`, JSON.stringify(r)]);
+    if (r === true) return ['PASS', `${tag} ${name} (한계가 풀림 — knownGap을 check로 바꿀 것)`, ''];
+    return [/^NEW/.test(tag) ? 'NEW' : 'GAP', `${tag} ${name}`, JSON.stringify(r)];
   } catch (e) {
-    results.push([kind, `${tag} ${name}`, '예외: ' + e.message]);
-  } finally {
-    await su();
+    return ['FAIL', `${tag} ${name}`, '예외: ' + e.message];
   }
+}
+async function knownGap(tag, name, fn) {
+  results.push(await classifyGap(tag, name, fn));
+  await su();
 }
 
 // 오류가 나야 하는 동작 — 메시지가 맞으면 true
@@ -3743,7 +3745,7 @@ await check('user_places: updated_at이 고칠 때 갱신됨 · 계정을 지우
 // 친구 장별 검사 — friend/chNN.mjs (친구_시험케이스.md DB · 함수 층, 항목 이름 앞 번호 = 시험 번호)
 // ---------------------------------------------------------------------
 // 장마다 자기 계정을 새로 만들어 앞 검사의 A~E와 섞이지 않게 함. 장이 늘면 아래 목록에 한 줄씩
-const FRIEND_CTX = { q, as, su, svc, check, knownGap, expectErr, PGlite, AUTH_STUBS, MIG_DIR, readFileSync, readdirSync, join };
+const FRIEND_CTX = { q, as, su, svc, check, knownGap, classifyGap, expectErr, PGlite, AUTH_STUBS, MIG_DIR, readFileSync, readdirSync, join };
 for (const ch of ['ch02', 'ch03', 'ch04', 'ch05', 'ch06', 'ch11', 'ch07', 'ch08', 'ch09', 'ch10', 'ch12', 'ch13', 'ch15', 'ch16']) await (await import(`./friend/${ch}.mjs`)).default(FRIEND_CTX);
 
 await (await import('./prepare-ml-approval.mjs')).default(FRIEND_CTX);
