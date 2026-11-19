@@ -38,7 +38,7 @@ import {
   loadTravelSamples,
   type SeriesAppointmentRow,
 } from './plan.ts';
-import { computePlan, resolveBasics, withoutFriendTimes, type AlarmRow, type ParticipantRow, type Plan, type PlanDraft, type PlanInputs, type ProfileRow } from './plan-core.ts';
+import { computePlan, purePrepPersistenceOf, resolveBasics, withoutFriendTimes, type AlarmRow, type ParticipantRow, type Plan, type PlanDraft, type PlanInputs, type ProfileRow } from './plan-core.ts';
 import type { Reader } from './read.ts';
 import { buildRingPackages, subtitleFor, type RingPackage } from './ring-package.ts';
 import { resolveAutoTravel, type ResolvedTravel, type TravelChoice } from './route.ts';
@@ -294,6 +294,8 @@ export function planOccurrence(
         est_travel_minutes: plan.travelMinutes,
         travel_source: resolved.travel.source,
         prepare_minutes: plan.prepare.minutes,
+        ...(plan.prepareTarget === 'PREPARE_START_TO_DEPART' ? { prepare_value_source: 'AUTO' } : {}),
+        ...purePrepPersistenceOf(plan, inputs.purePrepCandidate),
         buffer_minutes: basics.bufferMinutes,
       },
       items: base.items.map((title) => ({ title, due_date: occ.date })),
