@@ -183,7 +183,7 @@ describe('S17 감지 [아니에요] → 되돌리기', () => {
     });
 
   detected()
-    .variant('5초 안 되돌리면 서버 값 · 폰 기억 · 폰 알람이 원래대로')
+    .variant('5초 안에 되돌리면 서버 값 · 폰 기억 · 폰 알람이 원래대로')
     .do(async () => {
       const erased = await erase();
       expect(erased?.snapshot).toBeTruthy();

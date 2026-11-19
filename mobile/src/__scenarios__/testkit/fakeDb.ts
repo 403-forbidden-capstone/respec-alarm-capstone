@@ -119,6 +119,8 @@ export class FakeDb {
   edgeHandlers: Record<string, (body: unknown) => unknown> = {};
   // 시계 — 쓰기 기록에 시각을 남김 (시나리오가 시계를 옮기면 따라감)
   clock: () => number = () => Date.now();
+  // 쓰기가 끝난 직후 부름 — 서버 트리거(예: 나가면 참여 · 알람을 지움)를 쓰기와 같은 순간에 일으키려고 시나리오가 검
+  afterWrite: ((write: WriteLog) => void) | null = null;
   private serial = 0;
 
   reset() {
@@ -131,6 +133,7 @@ export class FakeDb {
     this.offline = false;
     this.rpcHandlers = {};
     this.edgeHandlers = {};
+    this.afterWrite = null;
     this.serial = 0;
   }
 
@@ -228,7 +231,11 @@ export class FakeDb {
       return { data: call.single ? (rows[0] ?? null) : rows, error: null };
     }
 
-    const log = (matched: number) => this.writes.push({ table: call.table, op: call.op as WriteLog['op'], payload: call.payload, matched, filters: call.filters, at: this.clock() });
+    const log = (matched: number) => {
+      const entry: WriteLog = { table: call.table, op: call.op as WriteLog['op'], payload: call.payload, matched, filters: call.filters, at: this.clock() };
+      this.writes.push(entry);
+      this.afterWrite?.(entry);
+    };
     const withId = (row: Row): Row => {
       const copy = { ...row };
       this.serial += 1;

@@ -289,9 +289,12 @@ describe('S07 끄지 않고 울림 끝', () => {
       .at('07:00')
       .given(() => startDay({ appOpen: false }))
       .do(() => {
-        clock.set('07:30');
-        phone.fireDue();
-        clock.set('07:36');
+        // 기본 강도는 첫 울림 뒤 8분 · 16분에 다시 울림 — 마지막 울림(07:46)과 한 번 울림 최대 시간(3분)이 지난 뒤에야 저장소에서 지워짐
+        for (const time of ['07:30', '07:38', '07:46']) {
+          clock.set(time);
+          phone.fireDue();
+        }
+        clock.set('07:50');
         phone.letRingEnd();
         clock.set('08:05');
         db.seed('alarm_events', [{ user_id: ME, alarm_id: WAKE, event_type: 'MISSED', event_at: clock.iso('08:00'), client_event_id: 'missed-2', input_source: 'SYSTEM' }]);
@@ -301,7 +304,7 @@ describe('S07 끄지 않고 울림 끝', () => {
   ringEnd().variant('폰은 저장소에서 지우고 해제 기록은 안 남김, 푸시가 알림창에 뜸').expect({
     phoneAlarms: AFTER_WAKE,
     tray: ['expo:missed-push'],
-    check: () => expect(phone.events.map((e) => e.eventType)).toEqual(['TRIGGERED']),
+    check: () => expect(phone.events.map((e) => e.eventType)).toEqual(['TRIGGERED', 'TRIGGERED', 'TRIGGERED']),
   });
 
   ringEnd()

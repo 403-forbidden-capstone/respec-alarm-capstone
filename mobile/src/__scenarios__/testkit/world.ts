@@ -165,7 +165,7 @@ export async function resetWorld() {
   db.clock = () => Date.now();
   phone.reset();
   phone.now = () => Date.now();
-  phone.jsReceivesPush = () => app.state === 'foreground';
+  phone.jsReceivesPush = () => app.state !== 'off'; // 받음 리스너는 앱 프로세스가 살아 있으면(앞 · 뒤) 불림, 꺼지면 없음 (usePushLinks는 앱 상태를 안 봄)
   db.nativeWrites = [];
   resetNav();
   resetPushLinks();

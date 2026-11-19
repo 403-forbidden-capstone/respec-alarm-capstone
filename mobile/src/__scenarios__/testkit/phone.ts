@@ -5,6 +5,12 @@
 //   · 알림창(tray): 네이티브가 띄운 알림(일정 알림 · 기상 확인 알림)과 expo-notifications가 띄운 알림(감지 안내 · 서버 푸시)을 한 목록으로 — "떠 있는 알림 id"
 //   · 네이티브만 하는 일(DeviceUpload 즉시 올리기 · 해제 + 10분 판정 · 재부팅 복원)은 JS에서 안 보이므로, 하는 일을 nativeLog에 남기고 서버 쓰기는 db.nativeWrites로 따로 남김
 //   서버 쪽(Kotlin)의 기상 판정은 앱과 같은 규칙(features/alarm/wake evaluateWake)을 가져다 씀 — 두 곳이 같은 규칙인지는 Kotlin 시험이 따로 봄
+// 실제 Kotlin과 다른 점 (시험 결과가 바뀌지 않아 맞추지 않은 것)
+//   · schedule: 미루는 중 · 울리는 중인 같은 알람은 시각 · 강도가 같으면 'scheduled', 다르면 'deferred' — Kotlin은 같은 회차(sameOccurrence)일 때만 막고 soundKey · vibration도 비교함
+//   · schedule: 지난 시각이면 저장소에서만 지움 — Kotlin은 cancel로 그 알람의 알림도 지움
+//   · runJudges: 확정 표시(confirmedMarks)가 있으면 서버 쓰기를 건너뜀 — Kotlin WakeJudgeWorker는 표시를 안 보고 같은 번호로 올려 서버의 중복 무시에 기댐
+//   · 알림 띄우기는 알림 id 목록뿐 (소리 · 진동 · 원탭 버튼 인텐트 · TTS · 전체 화면 알람 화면 없음), 한 번 울림 최대 시간(3분)은 시계로 안 셈
+//   · 푸시 도착 알림은 앱 상태와 무관하게 알림창에 뜸, JS 받음 리스너는 앱 프로세스가 살아 있을 때(앞 · 뒤)만 부름 (jsReceivesPush) — 뒤에서 OS가 JS를 얼리는 경우는 못 흉내 냄
 import type { AlarmEvent, AlarmType, RingingAlarm, ScheduledAlarm, ScheduleStatus, UsageSpan } from '@capstone/alarm-core';
 
 import { evaluateWake } from '@/features/alarm/wake';
@@ -35,7 +41,7 @@ type Payload = {
   departAt?: number;
   plan: Plan;
 };
-type Stored = Payload & { ringing: boolean; snoozeCount: number; nextRingAt: number; ringCount: number };
+type Stored = Payload & { ringing: boolean; snoozeCount: number; nextRingAt: number; ringCount: number; seriesIndex: number; seriesStart: number };
 
 export type TrayItem = {
   id: string; // 시험이 보는 이름: notice:<알람 id> · wakeprompt:<알람 id> · expo:<알림 번호>
@@ -56,7 +62,7 @@ const JUDGE_AFTER_MS = 10 * MIN + 2_000;
 
 export class Phone {
   now: () => number = () => Date.now();
-  // 앱 JS가 알림 받음 처리를 할 수 있는 상태인가 (앞에 있을 때) — 뒤 · 꺼짐이면 푸시는 알림창에만 뜨고 JS는 모름
+  // 앱 JS가 알림 받음 처리를 할 수 있는 상태인가 (앞 · 뒤) — 꺼짐이면 푸시는 알림창에만 뜨고 JS는 모름
   jsReceivesPush: () => boolean = () => true;
 
   store = new Map<string, Stored>();
@@ -166,21 +172,24 @@ export class Phone {
     const current = this.store.get(alarmId);
     if (!current) return;
     const ringCount = current.ringCount + 1;
+    const index = current.seriesIndex;
+    const seriesStart = index === 0 ? this.now() : current.seriesStart;
     this.append(current, 'TRIGGERED', ringCount);
     if (!current.plan.sound) {
       this.store.delete(alarmId); // 일정 알림은 한 번 알리면 저장소에서 지움 (AC:155)
       this.showNotice({ ...current, ringCount });
       return;
     }
-    const offset = current.plan.reRingOffsetsMillis[0];
-    this.store.set(alarmId, { ...current, ringCount, ringing: true, nextRingAt: offset != null ? this.now() + offset : this.now() });
+    // 다시 울림 — 첫 울림 시작으로부터 offset 뒤 (AC fire: 이번 울림 중에 다음 울림을 미리 걸어 둠). 마지막 울림이면 더 안 걸림
+    const offset = current.plan.reRingOffsetsMillis[index];
+    this.store.set(alarmId, { ...current, ringCount, ringing: true, seriesIndex: index + 1, seriesStart, nextRingAt: offset != null ? seriesStart + offset : Number.POSITIVE_INFINITY });
     this.ringing = alarmId;
   }
 
   // 지금 시각이 된 예약을 순서대로 울림 — 시계를 옮긴 뒤에 부름
   fireDue() {
     if (this.osAlarmsLost) return;
-    const due = [...this.store.values()].filter((a) => !a.ringing && a.nextRingAt <= this.now()).sort((a, b) => a.nextRingAt - b.nextRingAt);
+    const due = [...this.store.values()].filter((a) => (a.plan.sound || !a.ringing) && a.nextRingAt <= this.now()).sort((a, b) => a.nextRingAt - b.nextRingAt);
     for (const alarm of due) this.fire(alarm.alarmId);
   }
 
@@ -200,9 +209,12 @@ export class Phone {
   }
 
   // 울림을 끝까지 두고 안 끔 (최대 시간 · 다시 울림이 다 지남) — 저장소에서 지움, 해제 기록 없음 (AC:188-190). 놓침은 서버가 판정
+  //   다시 울림이 남아 있는 동안에는 저장소에서 안 지움 (AC onRingTimeout: 마지막 울림일 때만 remove) — 마지막 울림(+ 한 번 울림 최대 시간) 뒤에 부를 것
   letRingEnd() {
     const id = this.ringing;
-    if (!id) return;
+    const alarm = id ? this.store.get(id) : undefined;
+    if (!id || !alarm) return;
+    if (alarm.nextRingAt !== Number.POSITIVE_INFINITY) throw new Error('아직 다시 울림이 남아 있음 — 마지막 울림 뒤에 불러야 함');
     this.store.delete(id);
     this.ringing = null;
   }
@@ -321,7 +333,7 @@ export class Phone {
       if (existing && (existing.ringing || existing.snoozeCount > 0)) {
         return existing.atMillis === p.atMillis && existing.intensity === p.intensity ? 'scheduled' : 'deferred';
       }
-      this.store.set(p.alarmId, { ...p, ringing: false, snoozeCount: 0, nextRingAt: p.atMillis, ringCount: 0 });
+      this.store.set(p.alarmId, { ...p, ringing: false, snoozeCount: 0, nextRingAt: p.atMillis, ringCount: 0, seriesIndex: 0, seriesStart: 0 });
       return 'scheduled';
     },
     cancel: async (alarmId: string) => {
@@ -375,7 +387,7 @@ export class Phone {
     snooze: async (minutes: number) => {
       const a = this.ringing ? this.store.get(this.ringing) : undefined;
       if (!a || !a.ringing || a.snoozeCount >= a.snoozeLimit) return false;
-      this.store.set(a.alarmId, { ...a, ringing: false, snoozeCount: a.snoozeCount + 1, nextRingAt: this.now() + minutes * MIN });
+      this.store.set(a.alarmId, { ...a, ringing: false, snoozeCount: a.snoozeCount + 1, seriesIndex: 0, nextRingAt: this.now() + minutes * MIN });
       this.append(a, 'SNOOZED', a.ringCount, minutes);
       this.ringing = null;
       return true;

@@ -184,7 +184,32 @@ describe('S34 정확 알람 권한 끔(안드로이드 12)', () => {
         await app.foreground();
       });
 
-  exactOff().variant('알람이 울리지 않음 (OS가 예약을 지움)').expect({ phoneAlarms: ['WAKE@07:30', 'PREPARE@09:00', 'DEPARTURE@09:20', 'ARRIVE@10:30'], check: () => expect(phone.tray.size).toBe(0) });
+  exactOff()
+    .variant('알람이 울리지 않음 (OS가 예약을 지움) — 목록에는 그대로 남음')
+    .do(() => {
+      clock.set('09:21');
+      phone.fireDue();
+    })
+    .expect({
+      phoneAlarms: ['WAKE@07:30', 'PREPARE@09:00', 'DEPARTURE@09:20', 'ARRIVE@10:30'],
+      tray: [],
+      check: () => expect(phone.events).toEqual([]),
+    });
+
+  // 대조: 권한이 있으면 같은 시각에 준비 · 출발 알림이 울림 (위 시험이 항상 통과하는 시험이 아님을 보임)
+  scenario('S34 정확 알람 권한 끔')
+    .variant('대조 — 권한이 있으면 같은 시각에 울림')
+    .at('07:00')
+    .given(async () => {
+      seedAppointment({ key: 'a', at: '10:30', alarms: { WAKE: '07:30', PREPARE: '09:00', DEPARTURE: '09:20', ARRIVE: '10:30' } });
+      await app.open();
+      await syncPhone();
+    })
+    .do(() => {
+      clock.set('09:21');
+      phone.fireDue();
+    })
+    .expect({ tray: [`notice:${alarmIdOf('a', 'PREPARE')}`, `notice:${alarmIdOf('a', 'DEPARTURE')}`] });
 
   exactOff()
     .gap('G15')

@@ -49,12 +49,17 @@ describe('S25 그룹 나가기', () => {
         await app.open();
         clock.set('08:10');
         phone.fireDue(); // 준비 알림이 울려 알림창에 뜸
+        // 서버 트리거(M-grp): 내 멤버 줄이 LEFT가 되는 쓰기와 같은 순간 서버가 나간 그룹의 공동 약속 참여 · 알람을 지움
+        //   앱이 나간 직후 맞추기를 하도록 고쳐지면 그 맞추기가 이미 지워진 서버를 읽게 하려고 쓰기 안에서 일으킴
+        db.afterWrite = (write) => {
+          if (write.table === 'group_members' && write.op === 'update' && (write.payload as { invite_status?: string }).invite_status === 'LEFT') {
+            db.remove('alarms', { participant_id: uid('part:g1:user-me') });
+            db.remove('appointment_participants', { participant_id: uid('part:g1:user-me') });
+          }
+        };
       })
       .do(async () => {
         await app.js(() => leaveGroup(uid('group:g')));
-        // 서버 트리거: 나간 그룹의 공동 약속 참여 · 알람을 지움 (M-grp) — 서버가 하는 일이라 시나리오가 직접
-        db.remove('alarms', { participant_id: uid('part:g1:user-me') });
-        db.remove('appointment_participants', { participant_id: uid('part:g1:user-me') });
       });
 
   left().variant('나가기는 내 멤버 줄만 LEFT로 씀').expect({ writes: ['group_members.update(invite_status)'], check: () => expect(myMember().invite_status).toBe('LEFT') });

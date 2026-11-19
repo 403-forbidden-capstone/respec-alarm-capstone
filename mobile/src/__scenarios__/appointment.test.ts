@@ -9,7 +9,7 @@ import { leaveSharedAppointment, updateAppointment } from '@/features/alarm/real
 import { db } from './testkit/fakeDb';
 import { phone } from './testkit/phone';
 import { scenario, useWorld } from './testkit/scenario';
-import { alarmIdOf, app, appointmentIdOf, clock, ME, ringPackage, seedAppointment, seedGroup, uid } from './testkit/world';
+import { alarmIdOf, app, appointmentIdOf, clock, ME, ringPackage, seedAppointment, seedGroup, settle, uid } from './testkit/world';
 
 const ALARMS = { WAKE: '07:30', PREPARE: '09:00', DEPARTURE: '09:20', ARRIVE: '10:00' };
 const OLD = ['WAKE@07:30', 'PREPARE@09:00', 'DEPARTURE@09:20', 'ARRIVE@10:00'];
@@ -86,12 +86,12 @@ describe('S27 남이 공동 약속 시각 변경', () => {
     .expect({ phoneAlarms: NEW });
 
   changed()
-    .gap('G2')
-    .variant('앱이 뒤에 있을 때 받아도 마찬가지')
+    .variant('앱이 뒤에 있어도 JS가 살아 있으면 받음 처리가 돌아 새 시각으로 (usePushLinks는 앱 상태를 안 봄)')
     .do(async () => {
       app.background();
       serverChangedTimes();
       changedPush();
+      await settle();
     })
     .expect({ phoneAlarms: NEW });
 });
