@@ -32,7 +32,9 @@ type ParticipantQueryRow = {
   est_travel_minutes: number | null;
   travel_source: AppointmentRows['participant']['travel_source'];
   prepare_minutes: number;
-  prepare_value_source?: 'LEGACY' | 'AUTO' | 'MANUAL';
+  // PostgREST infers SQL CHECK-constrained text as plain string.
+  // Normalize at the boundary instead of asserting a narrower type.
+  prepare_value_source?: string | null;
   buffer_minutes: number;
   appointments: AppointmentRows['appointment'] & { creator_id?: string | null; group_id?: string | null; groups: { group_name: string } | null };
   alarms: AlarmRow[];
@@ -40,12 +42,17 @@ type ParticipantQueryRow = {
 
 // me = 부른 사람 (쿼리가 이미 내 참여 조건만 읽음). 남이 만든 공동 약속이면 canEdit false — 만든 사람이 탈퇴해 비었으면 참여자 누구나 고침 (친구 9장 9-자 · 9-아)
 export function toRows(row: ParticipantQueryRow, items: ReadonlyMap<string, string[]>, me: string): AppointmentRows {
-  const { appointments: appointment, alarms, ...participant } = row;
+  const { appointments: appointment, alarms, prepare_value_source, ...participant } = row;
+  // Unknown historic/database values are not automatically inferred as AUTO.
+  // Preserve only explicitly known values; fall back to LEGACY otherwise.
+  const safePrepareSource = prepare_value_source === 'AUTO' ||
+    prepare_value_source === 'MANUAL' ||
+    prepare_value_source === 'LEGACY' ? prepare_value_source : 'LEGACY';
   const { groups, creator_id: creatorId, group_id: groupId, ...appointmentColumns } = appointment;
   const othersShared = groupId != null && creatorId != null && creatorId !== me;
   return {
     appointment: appointmentColumns,
-    participant,
+    participant: { ...participant, prepare_value_source: safePrepareSource },
     alarms,
     groupName: groups?.group_name ?? null,
     items: items.get(appointment.appointment_id) ?? [],
