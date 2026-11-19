@@ -785,6 +785,8 @@ test('previously stored MANUAL whole-duration is not overwritten by pure prep du
    purePrepCandidate:candidate,stats:{sampleCount:0,p80:null}
  }),api(50));
  assert.equal(manual.prepareTarget,'WAKE_TO_DEPART');
+ assert.equal(manual.prepare.source,'MANUAL');
+ assert.equal(manual.prepare.minutes,75);
  assert.equal(purePrepPersistenceOf(manual,candidate).outing_prep_minutes,null);
  const switched=computePlan(base({
    participant:{
@@ -798,4 +800,20 @@ test('previously stored MANUAL whole-duration is not overwritten by pure prep du
    stats:{sampleCount:0,p80:null}
  }),api(50));
  assert.equal(switched.prepareTarget,'PREPARE_START_TO_DEPART');
+});
+
+test('stored legacy MANUAL duration overrides former C1/W4 prediction in reschedule',()=>{
+ const p={
+   participant_id:'p2',appointment_id:'a2',user_id:'u1',
+   origin_name:'집',origin_lat:null,origin_lng:null,transport_type:'TRANSIT' as const,
+   est_travel_minutes:30,travel_source:'API' as const,
+   prepare_minutes:85,prepare_value_source:'MANUAL' as const,buffer_minutes:10,
+ };
+ const plan=computePlan(base({
+   participant:p,mlPrediction:{model:'c1_mae',minutes:50},
+   purePrepCandidate:{source:'PROFILE',minutes:35},
+ }),api(30));
+ assert.equal(plan.prepare.source,'MANUAL');
+ assert.equal(plan.prepare.mlModel,undefined);
+ assert.equal(plan.prepare.minutes,85);
 });
