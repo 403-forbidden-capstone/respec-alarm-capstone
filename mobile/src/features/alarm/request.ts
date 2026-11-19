@@ -387,6 +387,8 @@ export function createCommitBody(estimate: Estimate, picked: AlarmEdits['times']
       est_travel_minutes: within(a.travelMinutes, MAX_TRAVEL_MINUTES),
       travel_source: commit.travelSource === 'API' ? 'API' : 'MANUAL',
       prepare_minutes: within(a.predictedPrepMinutes, MAX_PREPARE_MINUTES),
+      // Automatic H05 preview is checked by server on commit, not a manual override.
+      prepare_value_source: 'AUTO',
       before_prepare_minutes: within(a.beforePrepMinutes, MAX_BEFORE_PREPARE_MINUTES),
       with_wake: a.withWake,
     },
