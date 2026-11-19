@@ -147,13 +147,13 @@ describe('S28 남이 공동 약속 취소', () => {
 
 describe('S29 내가 약속에서 빠짐 · 시각을 바꿈', () => {
   useWorld();
-  // 준비 알림(09:00)이 이미 울려 알림창에 남아 있는 상태
+  // 도착 확인 알림(10:00)이 이미 울려 알림창에 남아 있는 상태 (준비 · 출발은 11/19부터 알람이라 알림창이 아니라 울림 — 이미 지난 시각이라 폰에 안 걸림)
   const withNotice = () =>
     scenario('S29 약속 변경')
-      .at('08:50')
+      .at('09:55')
       .given(async () => {
         await sharedDay();
-        clock.set('09:01');
+        clock.set('10:01');
         phone.fireDue();
       });
 
@@ -174,18 +174,17 @@ describe('S29 내가 약속에서 빠짐 · 시각을 바꿈', () => {
       db.offline = true;
       await app.js(() => leaveSharedAppointment(appointmentIdOf('g1')).catch(() => undefined));
     })
-    .expect({ phoneAlarms: ['DEPARTURE@09:20', 'ARRIVE@10:00'], tray: [`notice:${g1('PREPARE')}`] });
+    .expect({ phoneAlarms: [], tray: [`notice:${g1('ARRIVE')}`] });
 
   const retimed = () =>
     withNotice().do(async () => {
       db.edgeHandlers['appointment-edit'] = () => {
-        db.patch('alarms', { alarm_id: g1('DEPARTURE') }, { scheduled_at: clock.iso('09:35') });
         db.patch('alarms', { alarm_id: g1('ARRIVE') }, { scheduled_at: clock.iso('10:15') });
-        return { saved: true, needs_confirm: false, changes: [], ring_packages: [ringPackage(g1('DEPARTURE'), 'DEPARTURE', '09:35'), ringPackage(g1('ARRIVE'), 'ARRIVE', '10:15')], canceled_alarm_ids: [] };
+        return { saved: true, needs_confirm: false, changes: [], ring_packages: [ringPackage(g1('ARRIVE'), 'ARRIVE', '10:15')], canceled_alarm_ids: [] };
       };
       await app.js(() => updateAppointment(appointmentIdOf('g1'), { at: new Date(clock.ms('10:15')) }, 'this'));
     });
 
-  retimed().variant('시각 변경 — 남은 알람은 새 시각으로 걸림').expect({ phoneAlarms: ['DEPARTURE@09:35', 'ARRIVE@10:15'] });
-  retimed().gap('G5').variant('시각 변경 — 이미 울려 남은 옛 준비 알림도 정리돼야 함 (응답에 지울 알람이 없어 남음)').expect({ tray: [] });
+  retimed().variant('시각 변경 — 남은 알람은 새 시각으로 걸림').expect({ phoneAlarms: ['ARRIVE@10:15'] });
+  retimed().gap('G5').variant('시각 변경 — 이미 울려 남은 옛 도착 확인 알림도 정리돼야 함 (응답에 지울 알람이 없어 남음)').expect({ tray: [] });
 });

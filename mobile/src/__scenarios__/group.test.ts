@@ -39,16 +39,17 @@ describe('S21 출발 · 도착 공유를 끈 사람', () => {
 
 describe('S25 그룹 나가기', () => {
   useWorld();
-  // 공동 약속(그룹 g) — 준비 08:05는 이미 울려 알림창에 남아 있고, 출발 08:40 · 도착 10:00은 폰에 걸려 있음
-  const left = () =>
+  // 공동 약속(그룹 g) — 준비 08:05는 이미 울리는 중(11/19부터 알람), 출발 08:40 · 도착 10:00은 폰에 걸려 있음
+  //   alarms로 도착 알림이 이미 울려 알림창에 남은 변형도 만듦 (도착 확인은 알림 — 알람이 아님)
+  const left = (alarms: { PREPARE?: string; DEPARTURE: string; ARRIVE: string } = { PREPARE: '08:05', DEPARTURE: '08:40', ARRIVE: '10:00' }, ringAt = '08:10') =>
     scenario('S25 그룹 나가기')
       .at('07:55')
       .given(async () => {
         seedGroup('g');
-        seedAppointment({ key: 'g1', at: '10:00', group: 'g', alarms: { PREPARE: '08:05', DEPARTURE: '08:40', ARRIVE: '10:00' } });
+        seedAppointment({ key: 'g1', at: '10:00', group: 'g', alarms });
         await app.open();
-        clock.set('08:10');
-        phone.fireDue(); // 준비 알림이 울려 알림창에 뜸
+        clock.set(ringAt);
+        phone.fireDue(); // 시각이 지난 알람이 울림 (준비) · 알림창에 뜸 (도착 확인)
         // 서버 트리거(M-grp): 내 멤버 줄이 LEFT가 되는 쓰기와 같은 순간 서버가 나간 그룹의 공동 약속 참여 · 알람을 지움
         //   앱이 나간 직후 맞추기를 하도록 고쳐지면 그 맞추기가 이미 지워진 서버를 읽게 하려고 쓰기 안에서 일으킴
         db.afterWrite = (write) => {
@@ -76,8 +77,17 @@ describe('S25 그룹 나가기', () => {
     .expect({ phoneAlarms: [] });
 
   left()
+    .variant('울리는 중이던 준비 알람은 앱이 다시 앞에 오면 함께 멈춤 (서버에 켜진 행이 없다고 확인됨)')
+    .do(async () => {
+      app.background();
+      await app.foreground();
+    })
+    .expect({ check: () => expect([phone.ringing, phone.store.size]).toEqual([null, 0]) });
+
+  // 도착 확인 알림(10:00)이 이미 울려 알림창에 남아 있는 때 — 출발 09:20은 울렸다가 해제함
+  left({ DEPARTURE: '09:20', ARRIVE: '10:00' }, '10:05')
     .gap('G5')
-    .variant('이미 울려 알림창에 남은 준비 알림도 정리돼야 함 — 앱이 다시 앞에 와도 남음')
+    .variant('이미 울려 알림창에 남은 도착 확인 알림도 정리돼야 함 — 앱이 다시 앞에 와도 남음')
     .do(async () => {
       app.background();
       await app.foreground();
@@ -113,12 +123,21 @@ describe('S26 내보내짐', () => {
     .expect({ phoneAlarms: [] });
 
   removed()
-    .variant('08:05에 준비 알림이 울린 뒤 열면 그 알림은 남음 (저장소 밖이라 맞추기가 못 거둠)')
+    .variant('08:05에 준비 알람이 울리는 중에 열면 울림도 함께 멈춤 (울리는 중은 저장소에 있어 맞추기가 지움)')
     .do(async () => {
       clock.set('08:06');
       phone.fireDue();
       await app.open();
     })
+    .expect({ phoneAlarms: [], tray: [], check: () => expect(phone.ringing).toBeNull() });
+
+  removed()
+    .variant('10:01에 도착 확인 알림이 울린 뒤 열면 그 알림은 남음 (저장소 밖이라 맞추기가 못 거둠)')
+    .do(async () => {
+      clock.set('10:01');
+      phone.fireDue();
+      await app.open();
+    })
     .limit('알림창은 맞추기 대상 밖')
-    .expect({ phoneAlarms: [], tray: [`notice:${alarmIdOf('g1', 'PREPARE')}`] });
+    .expect({ phoneAlarms: [], tray: [`notice:${alarmIdOf('g1', 'ARRIVE')}`] });
 });

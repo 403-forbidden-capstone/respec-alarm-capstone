@@ -19,6 +19,7 @@ const PREPARE = alarmIdOf('t', 'PREPARE');
 const DEPARTURE = alarmIdOf('t', 'DEPARTURE');
 
 const noticeIds = () => phone.trayIds().filter((id) => id.startsWith('notice:'));
+const triggered = (alarmId: string) => phone.events.some((e) => e.eventType === 'TRIGGERED' && e.alarmId === alarmId);
 const participant = () => db.rows('appointment_participants').find((r) => r.participant_id === PART)!;
 
 // 집에서 약속(10:00)이 있는 날. 앱을 열어 폰 알람을 걸고 지오펜스를 등록한 뒤 앱을 닫음 (위치 신호는 앱 없이 헤드리스 작업이 받음)
@@ -41,33 +42,135 @@ async function leaveAndArrive(regions: { home: string; dest: string }) {
   await settle();
 }
 
-describe('S14 앱 꺼진 채 [출발했어요]', () => {
+describe('S14 앱 꺼진 채 출발 알람 해제 (= 출발 체크)', () => {
   useWorld();
-  const tapped = (deviceKey: boolean) =>
-    scenario('S14 앱 꺼진 채 출발했어요')
+  // 11/19부터 준비 · 출발은 알람 — 준비 알람 해제 = 준비 시작, 출발 알람 해제 = 출발. 둘 다 알람 화면에서 [알람 해제]
+  const dismissed = (deviceKey: boolean) =>
+    scenario('S14 앱 꺼진 채 출발 알람 해제')
       .at('07:55')
       .given(() => startTrip({ PREPARE: '08:05', DEPARTURE: '08:40', ARRIVE: '10:00' }, { deviceKey }))
       .do(() => {
+        clock.set('08:05');
+        phone.fireDue();
+        clock.set('08:06');
+        phone.dismiss(); // 준비 알람 해제 = 준비 시작
         clock.set('08:40');
         phone.fireDue();
         clock.set('08:41');
-        phone.tapOneTap(DEPARTURE);
+        phone.dismiss(); // 출발 알람 해제 = 출발
       });
 
-  tapped(true).variant('기기 키 있음 — 폰이 앱 없이 서버에 바로 올리고 알림이 사라짐').expect({
-    nativeWrites: ['alarm_events.insert(ACKNOWLEDGED/BUTTON)'],
+  dismissed(true).variant('기기 키 있음 — 폰이 앱 없이 준비 · 출발 해제를 서버에 바로 올림 (서버가 준비 시작 · 출발 시각을 채움)').expect({
+    nativeWrites: ['alarm_events.insert(TRIGGERED/BUTTON)', 'alarm_events.insert(DISMISSED/BUTTON)'],
     noWrites: ['alarm_events', 'appointment_participants'],
-    tray: [`notice:${PREPARE}`],
+    tray: [],
+    check: () => {
+      const dismissals = db.rows('alarm_events').filter((r) => r.event_type === 'DISMISSED');
+      expect(dismissals.map((r) => r.alarm_id)).toEqual([PREPARE, DEPARTURE]);
+      expect(phone.ringing).toBeNull();
+      expect(phone.judges).toEqual([]); // 해제 뒤 기상 판정 예약은 기상만
+    },
   });
 
-  tapped(false).variant('기기 키 없음 — 서버에는 앱을 열 때 올라감').limit('앱 열림만').expect({ noNativeWrites: ['alarm_events'], noWrites: ['alarm_events'], tray: [`notice:${PREPARE}`] });
+  dismissed(false).variant('기기 키 없음 — 서버에는 앱을 열 때 올라감').limit('앱 열림만').expect({ noNativeWrites: ['alarm_events'], noWrites: ['alarm_events'], tray: [] });
 
-  tapped(true)
-    .variant('앱을 열면 출발 시각이 참여 기록에 반영되고 폰 알람이 정리됨')
+  dismissed(true)
+    .variant('앱을 열면 준비 시작 · 출발 시각이 참여 기록에 반영되고 폰 알람이 정리됨')
     .do(async () => {
       await app.open();
     })
-    .expect({ writes: ['appointment_participants.update(departed_at'], phoneAlarms: ['ARRIVE@10:00'], check: () => expect(participant().departed_source).toBe('BUTTON') });
+    .expect({
+      writes: ['appointment_participants.update(departed_at', 'appointment_participants.update(prepare_started_at'],
+      phoneAlarms: ['ARRIVE@10:00'],
+      check: () => {
+        expect(participant().departed_source).toBe('BUTTON');
+        expect(participant().prepare_started_source).toBe('PREPARE_ALARM');
+      },
+    });
+
+  scenario('S14 앱 꺼진 채 출발 알람 해제')
+    .variant('울리기만 하고 끄지 않으면 해제 기록이 없어 출발로 안 침 — 울림(TRIGGERED)만 서버로')
+    .at('07:55')
+    .given(() => startTrip({ DEPARTURE: '08:40', ARRIVE: '10:00' }, { deviceKey: true }))
+    .do(() => {
+      clock.set('08:40');
+      phone.fireDue();
+    })
+    .expect({
+      nativeWrites: ['alarm_events.insert(TRIGGERED/BUTTON)'],
+      noNativeWrites: ['alarm_events.insert(DISMISSED'],
+      check: () => {
+        expect(phone.ringing).toBe(DEPARTURE);
+        expect(participant().departed_at ?? null).toBeNull();
+      },
+    });
+});
+
+describe('S35 출발 알람 미루기 · 다시 울림', () => {
+  useWorld();
+  const snoozed = () =>
+    scenario('S35 출발 알람 미루기')
+      .at('07:55')
+      .given(() => startTrip({ DEPARTURE: '08:40', ARRIVE: '10:00' }, { deviceKey: true }))
+      .do(async () => {
+        clock.set('08:40');
+        phone.fireDue();
+        clock.set('08:41');
+        await phone.native.snooze(5); // 출발 미루기 — 한도 안, 앱 H07과 같은 5 · 10 · 15분
+      });
+
+  snoozed().variant('미루면 다시 울릴 때까지 울림이 멈추고, 미루기 기록이 앱 없이 서버로 감 (출발 체크는 아직 아님)').expect({
+    nativeWrites: ['alarm_events.insert(SNOOZED/BUTTON)'],
+    check: () => {
+      expect(phone.ringing).toBeNull();
+      expect(db.rows('alarm_events').find((r) => r.event_type === 'SNOOZED')?.snooze_minutes).toBe(5);
+      expect(db.rows('alarm_events').some((r) => r.event_type === 'DISMISSED')).toBe(false);
+    },
+  });
+
+  snoozed()
+    .variant('다시 울려서 끄면 그때가 출발')
+    .do(() => {
+      clock.set('08:46');
+      phone.fireDue();
+      clock.set('08:47');
+      phone.dismiss();
+    })
+    .expect({ check: () => expect(db.rows('alarm_events').filter((r) => r.event_type === 'DISMISSED').map((r) => r.event_at)).toEqual([clock.iso('08:47')]) });
+});
+
+describe('S36 재부팅 · 준비 · 출발 알람', () => {
+  useWorld();
+  const rebooted = () =>
+    scenario('S36 재부팅 · 준비 · 출발 알람')
+      .at('07:55')
+      .given(() => startTrip({ PREPARE: '08:05', DEPARTURE: '08:40', ARRIVE: '10:00' }, { deviceKey: true }))
+      .do(() => {
+        clock.set('07:58');
+        phone.reboot();
+      });
+
+  rebooted().variant('재부팅 뒤에도 준비 · 출발 알람 예약이 되살아남 (기상과 같은 저장소 · 복원 — AlarmBootReceiver → restoreAll)').expect({ phoneAlarms: ['PREPARE@08:05', 'DEPARTURE@08:40', 'ARRIVE@10:00'] });
+
+  rebooted()
+    .variant('되살아난 준비 알람은 제때 알람으로 울림')
+    .do(() => {
+      clock.set('08:05');
+      phone.fireDue();
+    })
+    .expect({ check: () => expect([phone.ringing, triggered(PREPARE)]).toEqual([PREPARE, true]) });
+
+  scenario('S36 재부팅 · 준비 · 출발 알람')
+    .variant('울리는 중에 재부팅하면 끊긴 울림은 정리되고 남은 다시 울림이 이어짐')
+    .at('07:55')
+    .given(async () => {
+      await startTrip({ DEPARTURE: '08:40', ARRIVE: '10:00' }, { deviceKey: true });
+      clock.set('08:40');
+      phone.fireDue();
+      clock.set('08:41');
+      phone.reboot();
+    })
+    .expect({ check: () => expect([phone.ringing, phone.store.get(DEPARTURE)?.ringing]).toEqual([null, false]) });
 });
 
 describe('S15 위치 출발(정상)', () => {
@@ -86,22 +189,24 @@ describe('S15 위치 출발(정상)', () => {
     .expect({ noWrites: ['appointment_participants'], check: () => expect(detectTray().some((id) => id.startsWith('expo:detect-DEPART-'))).toBe(true) });
 
   leftEarly()
-    .variant('출발 알람 시각(08:40)이 되면 알람 알림이 울림 — 이미 나섰는데도')
+    .variant('출발 알람 시각(08:40)이 되면 알람이 울림 — 이미 나섰는데도 (5분 대기는 다음 신호 · 앱 열림에서 확정이라 그때까지는 모름)')
     .do(() => {
       clock.set('08:41');
       phone.fireDue();
     })
     .limit('위치 출발은 확정 전')
-    .expect({ check: () => expect(noticeIds()).toEqual([`notice:${DEPARTURE}`]) });
+    .expect({ check: () => expect(phone.ringing).toBe(DEPARTURE) });
 
   leftEarly()
-    .gap('G3')
-    .variant('일찍 나선 날 "곧 출발하세요" 알림이 울리면 안 됨')
-    .do(() => {
+    .variant('일찍 나서 일찍 도착한 날 — 위치로 출발 · 도착이 서버에 쓰이면 남은 출발 알람이 폰에서 바로 빠져 안 울림 (G3)')
+    .do(async () => {
+      clock.set('08:34');
+      await phone.geofence('ENTER', regionIds().dest); // 다음 신호가 오며 5분 넘은 출발이 확정되고 도착도 잡힘
+      await settle();
       clock.set('08:41');
       phone.fireDue();
     })
-    .expect({ check: () => expect(noticeIds()).toEqual([]) });
+    .expect({ phoneAlarms: [], check: () => expect([phone.ringing, triggered(DEPARTURE), noticeIds()]).toEqual([null, false, []]) });
 });
 
 describe('S16 부팅 직후 이른 위치 출발', () => {
@@ -226,13 +331,30 @@ describe('S18 도착 감지', () => {
     .expect({ phoneAlarms: [] });
 
   arrived()
-    .gap('G3')
-    .variant('이미 도착했는데 10시에 "도착했어요?" 알림이 울리면 안 됨')
+    .variant('이미 도착했는데 10시에 "도착했어요?" 알림이 울리면 안 됨 — 도착이 잡힌 직후 폰에서 정리됨 (G3)')
     .do(() => {
       clock.set('10:01');
       phone.fireDue();
     })
-    .expect({ check: () => expect(noticeIds()).toEqual([]) });
+    .expect({ phoneAlarms: [], check: () => expect([noticeIds(), triggered(alarmIdOf('t', 'ARRIVE'))]).toEqual([[], false]) });
+
+  scenario('S18 도착 감지')
+    .variant('이미 울려 알림창에 떠 있는 도착 확인 알림도 도착이 잡히면 거둠 (G3)')
+    .at('07:55')
+    .given(async () => {
+      const regions = await startTrip({ ARRIVE: '08:50' });
+      clock.set('08:20');
+      await phone.geofence('EXIT', regions.home);
+      clock.set('08:51');
+      phone.fireDue(); // 도착 확인 알림이 울려 알림창에 뜸 — 아직 도착이 안 잡힌 때
+      expect(noticeIds()).toEqual([`notice:${alarmIdOf('t', 'ARRIVE')}`]);
+    })
+    .do(async () => {
+      clock.set('08:55');
+      await phone.geofence('ENTER', regionIds().dest);
+      await settle();
+    })
+    .expect({ check: () => expect([noticeIds(), participant().arrived_source]).toEqual([[], 'LOCATION']) }); // 도착 감지 안내(expo:detect-…)는 알림창에 남는 게 맞음
 });
 
 describe('S19 도착 감지 놓침', () => {

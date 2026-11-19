@@ -1,7 +1,7 @@
 // 시나리오 시험용 가짜 폰 — 알람 코어(네이티브) · 알림창 · expo-notifications · 지오펜스 등록을 한 곳에서 흉내 냄
 //   앱 쪽은 실제 모듈이 그대로 도는데, 그 바깥(폰 OS · Kotlin)만 이 파일이 대신함
 //   · 알람 코어: NativeAlarmCore를 구현 → alarm-core의 nativeBackend · plan이 실제로 돌고, 예약 목록(store) · 울림 기록(events)을 시험이 들여다봄
-//     울림 규칙은 AlarmController.kt를 따름 — WAKE는 울림 · 다시 울림 예약, 그 밖은 알림을 띄우고 저장소에서 지움(fire), cancel은 그 알람의 알림도 거둠
+//     울림 규칙은 AlarmController.kt를 따름 — 알람음이 있는 계획(기상 · 준비 · 출발, 11/19)은 울림 · 다시 울림 예약, 그 밖(도착 · 루틴)은 알림을 띄우고 저장소에서 지움(fire), cancel은 그 알람의 알림도 거둠
 //   · 알림창(tray): 네이티브가 띄운 알림(일정 알림 · 기상 확인 알림)과 expo-notifications가 띄운 알림(감지 안내 · 서버 푸시)을 한 목록으로 — "떠 있는 알림 id"
 //   · 네이티브만 하는 일(DeviceUpload 즉시 올리기 · 해제 + 10분 판정 · 재부팅 복원)은 JS에서 안 보이므로, 하는 일을 nativeLog에 남기고 서버 쓰기는 db.nativeWrites로 따로 남김
 //   서버 쪽(Kotlin)의 기상 판정은 앱과 같은 규칙(features/alarm/wake evaluateWake)을 가져다 씀 — 두 곳이 같은 규칙인지는 Kotlin 시험이 따로 봄
@@ -157,8 +157,16 @@ export class Phone {
     };
     this.events.push(event);
     this.alarmListeners.forEach((l) => l(event));
-    // DeviceUploadRules.shouldUpload — 원탭 · 기상 해제만 바로 올림
-    if (eventType === 'ACKNOWLEDGED' || eventType === 'ARRIVAL_CONFIRMED' || (eventType === 'DISMISSED' && alarm.type === 'WAKE')) this.uploadNow(event);
+    // DeviceUploadRules.shouldUpload — 원탭(도착 · 루틴 · 예전 준비 · 출발) · 기상 · 준비 · 출발 해제 · 기상 · 준비 · 출발 · 도착의 울림 · 미루기를 바로 올림
+    const ringType = alarm.type === 'WAKE' || alarm.type === 'PREPARE' || alarm.type === 'DEPARTURE';
+    if (
+      eventType === 'ACKNOWLEDGED' ||
+      eventType === 'ARRIVAL_CONFIRMED' ||
+      (eventType === 'DISMISSED' && ringType) ||
+      ((eventType === 'TRIGGERED' || eventType === 'SNOOZED') && (ringType || alarm.type === 'ARRIVE'))
+    ) {
+      this.uploadNow(event);
+    }
     if (eventType === 'DISMISSED' && alarm.type === 'WAKE') {
       // 해제 + 10분 2초에 판정 — 정확 알람 권한이 없으면 지연 작업(여기서는 같은 시각으로 둠)
       this.judges = this.judges.filter((j) => j.alarmId !== alarm.alarmId);
@@ -356,6 +364,7 @@ export class Phone {
           soundKey: a.soundKey,
           vibration: a.vibration,
           voiceTone: a.voiceTone ?? null,
+          sound: a.plan.sound,
           title: a.title,
           atMillis: a.atMillis,
           snoozeCount: a.snoozeCount,
