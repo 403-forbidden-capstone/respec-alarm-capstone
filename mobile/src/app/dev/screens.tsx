@@ -97,7 +97,7 @@ export default function ScreenListScreen() {
           로그인한 내 DB의 스키마를 읽기 전용으로 확인하고, 순수 준비시간의 기상·준비·출발 역산을 직접 시험해요.
           DB 저장이나 실제 폰 알람 예약은 하지 않아요.
         </Text>
-        <Button label="순수 준비시간 테스트 열기" onPress={() => router.push('/dev/pure-prep')} />
+        <Button label="순수 준비시간 테스트 열기" onPress={() => router.push('/dev/pure-prep' as Href)} />
       </Card>
 
       {canUseRealData && !modeLocked ? (
