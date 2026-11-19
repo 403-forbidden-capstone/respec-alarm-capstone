@@ -90,10 +90,10 @@ test('남의 알람의 기상 확정은 그날 기록도 안 씀', async () => {
   assert.equal(db.rows('daily_records').length, 0);
 });
 
-test('모양이 틀리면 400 — 종류 밖 이벤트(TRIGGERED) · 번호 형식 · 시각 형식 · 빈 요청', async () => {
+test('모양이 틀리면 400 — 종류 밖 이벤트(SNOOZE) · 번호 형식 · 시각 형식 · 빈 요청', async () => {
   const db = seed();
   const bad = (body: unknown) => assert.rejects(recordDeviceEvents(db as never, A, body), (e) => e instanceof HttpError && e.code === 'VALIDATION_FAILED');
-  await bad({ events: [tap({ event_type: 'TRIGGERED' })] });
+  await bad({ events: [tap({ event_type: 'SNOOZE' })] });
   await bad({ events: [tap({ client_event_id: 'abc' })] });
   await bad({ events: [tap({ event_at: '내일 아침' })] });
   await bad({ events: [tap({ input_source: 'LOCATION' })] });
@@ -103,16 +103,25 @@ test('모양이 틀리면 400 — 종류 밖 이벤트(TRIGGERED) · 번호 형�
   assert.equal(db.rows('alarm_events').length, 0);
 });
 
-test('받는 조합은 폰이 보내는 것만 — WAKE_CONFIRMED는 WAKE 알람 + USAGE, 해제는 WAKE 알람 + BUTTON, 버튼은 BUTTON (나머지는 건너뜀, 개수에 안 셈)', async () => {
+test('받는 조합은 폰이 보내는 것만 — WAKE_CONFIRMED는 WAKE 알람 + USAGE, 해제는 기상 · 준비 · 출발 알람 + BUTTON, 울림 · 미루기는 네 알람 + BUTTON, 버튼은 BUTTON (나머지는 건너뜀, 개수에 안 셈)', async () => {
   assert.equal(deviceEventAllowed('WAKE_CONFIRMED', 'USAGE', 'WAKE'), true);
   assert.equal(deviceEventAllowed('WAKE_CONFIRMED', 'BUTTON', 'WAKE'), false); // 직접 응답 확정은 앱 화면(로그인 토큰)만
   assert.equal(deviceEventAllowed('WAKE_CONFIRMED', 'USAGE', 'DEPARTURE'), false);
   assert.equal(deviceEventAllowed('DISMISSED', 'BUTTON', 'WAKE'), true);
-  assert.equal(deviceEventAllowed('DISMISSED', 'BUTTON', 'PREPARE'), false);
+  assert.equal(deviceEventAllowed('DISMISSED', 'BUTTON', 'PREPARE'), true); // 준비 알람 해제 = 준비 시작
+  assert.equal(deviceEventAllowed('DISMISSED', 'BUTTON', 'DEPARTURE'), true); // 출발 알람 해제 = 출발
+  assert.equal(deviceEventAllowed('DISMISSED', 'BUTTON', 'ARRIVE'), false); // 도착은 알림 버튼(ARRIVAL_CONFIRMED)
+  assert.equal(deviceEventAllowed('DISMISSED', 'BUTTON', 'ROUTINE'), false);
   assert.equal(deviceEventAllowed('DISMISSED', 'USAGE', 'WAKE'), false);
   assert.equal(deviceEventAllowed('ACKNOWLEDGED', 'BUTTON', 'PREPARE'), true);
   assert.equal(deviceEventAllowed('ARRIVAL_CONFIRMED', 'BUTTON', 'ARRIVE'), true);
   assert.equal(deviceEventAllowed('ACKNOWLEDGED', 'USAGE', 'PREPARE'), false);
+  for (const type of ['TRIGGERED', 'SNOOZED']) {
+    for (const alarm of ['WAKE', 'PREPARE', 'DEPARTURE', 'ARRIVE']) assert.equal(deviceEventAllowed(type, 'BUTTON', alarm), true, `${type} ${alarm}`);
+    assert.equal(deviceEventAllowed(type, 'BUTTON', 'ROUTINE'), false);
+    assert.equal(deviceEventAllowed(type, 'USAGE', 'WAKE'), false);
+    assert.equal(deviceEventAllowed(type, 'LOCATION', 'WAKE'), false);
+  }
 
   const db = seed();
   const out = await recordDeviceEvents(db as never, A, {
@@ -120,7 +129,7 @@ test('받는 조합은 폰이 보내는 것만 — WAKE_CONFIRMED는 WAKE 알람
       tap(), // 통과
       tap({ client_event_id: E2, event_type: 'WAKE_CONFIRMED', input_source: 'BUTTON', alarm_id: WAKE }), // 거절 (출처)
       tap({ client_event_id: '5b7f478f-5a2a-542a-92dc-9be071c05743', event_type: 'WAKE_CONFIRMED', input_source: 'USAGE' }), // 거절 (WAKE 알람 아님)
-      tap({ client_event_id: '6b7f478f-5a2a-542a-92dc-9be071c05744', event_type: 'DISMISSED', alarm_id: MINE }), // 거절 (WAKE 알람 아님)
+      tap({ client_event_id: '6b7f478f-5a2a-542a-92dc-9be071c05744', event_type: 'DISMISSED', alarm_id: MINE, input_source: 'USAGE' }), // 거절 (해제는 BUTTON만)
     ],
   });
   assert.deepEqual(out, { stored: 1, skipped: 0, wake_recorded: false });
@@ -167,4 +176,29 @@ test('그날 기록 만들기가 겹쳐(23505) 그 사이 다른 곳이 먼저 �
   assert.equal(rows.length, 1);
   assert.equal(rows[0].wake_confirmed_at, wake.wake_confirmed_at); // 빈 칸이던 확정 시각만 채움
   assert.equal(rows[0].wake_reported_at, '2026-11-19T06:20:00.000Z'); // 이미 있던 해제 시각은 그대로
+});
+
+test('울림 · 미루기 · 해제 기록 — 준비 · 출발 알람도 받고 snooze_minutes는 미루기에만 · 같은 번호는 한 줄, 해제는 도착 알람이면 건너뜀', async () => {
+  const db = seed();
+  const PREP = '00000000-0000-4000-8000-0000000000a3';
+  const ARR = '00000000-0000-4000-8000-0000000000a4';
+  db.rows('alarms').push({ alarm_id: PREP, user_id: A, alarm_type: 'PREPARE', is_enabled: true }, { alarm_id: ARR, user_id: A, alarm_type: 'ARRIVE', is_enabled: true });
+  const id = (n: number) => `7b7f478f-5a2a-542a-92dc-9be071c057${String(n).padStart(2, '0')}`;
+  const events = [
+    tap({ alarm_id: PREP, client_event_id: id(1), event_type: 'TRIGGERED' }),
+    tap({ alarm_id: PREP, client_event_id: id(2), event_type: 'SNOOZED', snooze_minutes: 5, sequence_no: 2 }),
+    tap({ alarm_id: PREP, client_event_id: id(3), event_type: 'DISMISSED', sequence_no: 3 }),
+    tap({ alarm_id: MINE, client_event_id: id(4), event_type: 'TRIGGERED' }),
+    tap({ alarm_id: MINE, client_event_id: id(5), event_type: 'DISMISSED' }),
+    tap({ alarm_id: ARR, client_event_id: id(6), event_type: 'SNOOZED', snooze_minutes: 5 }),
+    tap({ alarm_id: ARR, client_event_id: id(7), event_type: 'DISMISSED' }), // 거절 (도착 알람 해제는 안 받음)
+    tap({ alarm_id: WAKE, client_event_id: id(8), event_type: 'TRIGGERED', input_source: 'USAGE' }), // 거절 (출처)
+  ];
+  const out = await recordDeviceEvents(db as never, A, { events });
+  assert.deepEqual(out, { stored: 6, skipped: 0, wake_recorded: false });
+  await recordDeviceEvents(db as never, A, { events }); // 같은 번호 다시 — 중복 무시
+  const rows = db.rows('alarm_events');
+  assert.equal(rows.length, 6);
+  assert.deepEqual(rows.find((r) => r.client_event_id === id(2))?.snooze_minutes, 5);
+  assert.equal(rows.find((r) => r.client_event_id === id(1))?.snooze_minutes, null);
 });

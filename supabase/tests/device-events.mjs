@@ -115,10 +115,29 @@ export default async function testDeviceEvents({ q, as, su, svc, check }) {
     return n === 1 && day.wake_confirmed_at === '2026-11-19T00:01:00.000Z' ? true : { n, day };
   });
 
-  await check('기기 키 길: 폰이 안 보내는 조합(WAKE_CONFIRMED + BUTTON · 다른 종류 알람의 해제)은 서비스 키로도 DB에 안 들어감', async () => {
-    const out = await recordDeviceEvents(service, U, { events: [tap(8, departAlarm, 'DISMISSED', '2026-11-19T00:30:00Z'), tap(9, wakeAlarm, 'WAKE_CONFIRMED', '2026-11-19T00:31:00Z', 'BUTTON')] });
+  await check('기기 키 길: 폰이 안 보내는 조합(WAKE_CONFIRMED + BUTTON · 도착 알람의 해제)은 서비스 키로도 DB에 안 들어감', async () => {
+    const out = await recordDeviceEvents(service, U, { events: [tap(8, arriveAlarm, 'DISMISSED', '2026-11-19T00:30:00Z'), tap(9, wakeAlarm, 'WAKE_CONFIRMED', '2026-11-19T00:31:00Z', 'BUTTON')] });
     const n = await count(`select count(*)::int as n from public.alarm_events where client_event_id = any($1)`, [[EV(8), EV(9)]]);
     return out.stored === 0 && n === 0 ? true : { out, n };
+  });
+
+  await check(hasChain ? '기기 키 길 + 해제 반영: 준비 알람 해제 = 준비 시작(PREPARE_ALARM), 출발 알람 해제 = 출발(BUTTON), 둘 다 빈 칸만 — 울림 · 미루기 기록은 참여 행을 안 건드림' : '기기 키 길 + 해제 반영 (트리거 없는 main이라 건너뜀)', async () => {
+    if (!hasChain) return true;
+    const [ap2] = await q(`insert into public.appointments (creator_id, title, appointment_at, dest_name) values ($1, '해제 시험', '2026-11-20T01:00:00Z', '학교') returning appointment_id`, [U]);
+    const [pt2] = await q(`insert into public.appointment_participants (appointment_id, user_id) values ($1, $2) returning participant_id`, [ap2.appointment_id, U]);
+    const prep = await alarm('PREPARE', U, pt2.participant_id);
+    const depart = await alarm('DEPARTURE', U, pt2.participant_id);
+    await recordDeviceEvents(service, U, { events: [tap(10, prep, 'TRIGGERED', '2026-11-20T00:00:00Z'), tap(11, prep, 'SNOOZED', '2026-11-20T00:01:00Z')] });
+    await recordDeviceEvents(service, U, { events: [tap(12, depart, 'TRIGGERED', '2026-11-20T00:20:00Z')] });
+    const [mid] = await q(`select prepare_started_at, departed_at from public.appointment_participants where participant_id = $1`, [pt2.participant_id]);
+    await recordDeviceEvents(service, U, { events: [tap(13, prep, 'DISMISSED', '2026-11-20T00:05:00Z')] });
+    await recordDeviceEvents(service, U, { events: [tap(14, prep, 'DISMISSED', '2026-11-20T00:40:00Z'), tap(15, depart, 'DISMISSED', '2026-11-20T00:25:00Z')] }); // 둘째 해제는 처음 값을 안 덮음
+    await recordDeviceEvents(service, U, { events: [tap(16, depart, 'DISMISSED', '2026-11-20T00:50:00Z')] });
+    const [row] = (await q(`select prepare_started_at, prepare_started_source, departed_at, departed_source from public.appointment_participants where participant_id = $1`, [pt2.participant_id])).map(fix);
+    const ok = mid.prepare_started_at === null && mid.departed_at === null
+      && row.prepare_started_at === '2026-11-20T00:05:00.000Z' && row.prepare_started_source === 'PREPARE_ALARM'
+      && row.departed_at === '2026-11-20T00:25:00.000Z' && row.departed_source === 'BUTTON';
+    return ok ? true : { mid, row };
   });
 
   await su();
