@@ -13,6 +13,7 @@ import { minutesMs } from './constants';
 import { withLock } from './lock';
 import { errorText } from './native';
 import { onDetectionNotice } from './notice';
+import { settlePhoneAlarms } from './settleAlarms';
 import { commit, isWriteAction, loadActions, MAX_QUEUED_ACTIONS, type Change, type WriteAction } from './store';
 import type { GeoAction, StepResult } from './transitions';
 
@@ -71,6 +72,8 @@ async function flushPass(): Promise<void> {
       if (outcome === 'retry') return;
       // 쓰기에 성공한 도착만 안내 — 버린 것(drop)은 서버에 없음. 보내고 보관함에서 빼기 전에 앱이 꺼져 다시 보내도 알림 번호가 같아 한 장으로 덮어씀
       if (outcome === 'done' && head.type === 'ARRIVE' && now().getTime() - head.at <= minutesMs(ARRIVE_NOTICE_MAX_DELAY_MINUTES)) announce([head]);
+      // 서버에 쓴 직후 그 약속의 남은 준비 · 출발(· 도착) 알람을 폰에서 바로 정리 — 이미 나섰는데 "곧 출발하세요"가, 이미 도착했는데 "도착했어요?"가 울리지 않게 (G3). 못 지워도 기록은 그대로
+      if (outcome === 'done') await settlePhoneAlarms(head.participantId, head.type);
       await withLock(() => dropHead(head));
     }
   } catch (e) {

@@ -223,6 +223,17 @@ export function applyCommit(result: CommitResult): Promise<SyncSummary> {
   });
 }
 
+// 이 알람들을 폰에서 바로 지움 — 저장소 알람 · 미룬 대기 · 울리는 중 · 이미 알림창에 떠 있는 알림까지 (AlarmCore.cancel). 서버 행은 그대로
+//   위치로 출발 · 도착이 잡힌 약속의 남은 알람 정리 (features/location/settleAlarms, G3). 맞추기와 같은 줄이라 맞추는 도중에 끼어들지 않음. 던지지 않고 결과를 돌려줌 (맞춘 뒤 훅은 안 부름)
+export function cancelPhoneAlarms(ids: readonly string[]): Promise<SyncSummary> {
+  return serial(async () => {
+    const summary = emptySummary();
+    if (isMock() || signingOut) return summary;
+    await cancelAlarms(ids, summary);
+    return summary;
+  });
+}
+
 // 로그아웃 정리용 — 폰 알람을 전부 지움 (무음 알림 포함). 맞추기 · 올리기와 같은 줄이라 앞에 서 있는 맞추기가 다 끝난 뒤에 지움
 export function cancelAllPhoneAlarms(): Promise<void> {
   return serial(() => AlarmCore.cancelAll());
@@ -404,7 +415,7 @@ export type UploadSummary = {
 
 const emptyUpload = (): UploadSummary => ({ uploaded: 0, dropped: 0, kept: 0 });
 
-// 올린 기록의 뒤처리 훅 — 원탭 기록(ACKNOWLEDGED DEPARTURE · ARRIVAL_CONFIRMED)을 appointment_participants의 departed_at · arrived_at으로 옮기는 일 등 (P6-2가 등록)
+// 올린 기록의 뒤처리 훅 — 출발 · 도착 기록(DISMISSED DEPARTURE · 예전 원탭 ACKNOWLEDGED DEPARTURE · ARRIVAL_CONFIRMED)을 appointment_participants의 departed_at · arrived_at으로 옮기는 일 등 (P6-2가 등록)
 //   서버에 올라간 기록만 넘어옴. 던지면 이번에 올린 기록을 폰에 남겨 다음 올리기 때 다시 넘김(서버는 같은 번호를 무시하므로 두 번 저장되지 않음)
 //   → 핸들러는 같은 기록으로 다시 불려도 같은 결과가 되게 쓰고, 다시 해도 소용없는 오류(권한 · 없는 행)는 던지지 말고 삼킬 것
 type UploadedHandler = (events: AlarmEvent[]) => Promise<void> | void;

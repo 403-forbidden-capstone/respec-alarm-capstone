@@ -10,6 +10,8 @@ const mockRecord = jest.fn<(input: Record<string, unknown>) => Promise<unknown>>
 const mockNotice = jest.fn<(action: GeoAction) => void>();
 jest.mock('@/features/alarm/participantTimes', () => ({ recordParticipantTimes: (input: Record<string, unknown>) => mockRecord(input) }));
 jest.mock('../notice', () => ({ onDetectionNotice: (action: GeoAction) => mockNotice(action) }));
+const mockSettle = jest.fn<(participantId: string, kind: string) => Promise<void>>();
+jest.mock('../settleAlarms', () => ({ settlePhoneAlarms: (participantId: string, kind: string) => mockSettle(participantId, kind) }));
 jest.mock('@/lib/mode', () => ({ isMock: () => false }));
 let mockNowMs = 0;
 jest.mock('@/lib/clock', () => ({ now: () => new Date(mockNowMs) }));
@@ -25,6 +27,8 @@ beforeEach(async () => {
   mockNotice.mockReset();
   mockRecord.mockReset();
   mockRecord.mockResolvedValue({});
+  mockSettle.mockReset();
+  mockSettle.mockResolvedValue(undefined);
   mockNowMs = at('09:53');
 });
 
@@ -86,6 +90,30 @@ describe('도착 안내 (flushActions)', () => {
     await commit({ actions: [DEPART, ARRIVE, second] });
     await flushActions();
     expect(mockNotice.mock.calls.map(([a]) => a)).toEqual([ARRIVE, second]);
+  });
+});
+
+describe('쓴 직후 남은 알람 정리 (G3)', () => {
+  it('출발 · 도착을 서버에 쓰면 그 약속의 남은 알람을 폰에서 정리 — 쓴 다음에', async () => {
+    await commit({ actions: [DEPART, ARRIVE] });
+    await flushActions();
+    expect(mockSettle.mock.calls).toEqual([
+      ['p1', 'DEPART'],
+      ['p1', 'ARRIVE'],
+    ]);
+    expect(mockRecord.mock.invocationCallOrder[0]).toBeLessThan(mockSettle.mock.invocationCallOrder[0]);
+  });
+
+  it('쓰기에 실패했거나(보관) 버린 기록은 정리하지 않음 — 서버에 아직 없음', async () => {
+    await commit({ actions: [DEPART] });
+    mockRecord.mockRejectedValueOnce(new Error('network'));
+    await flushActions();
+    expect(mockSettle).not.toHaveBeenCalled();
+    await commit({ actions: [] });
+    mockRecord.mockReset();
+    mockRecord.mockRejectedValueOnce({ code: '23503', message: 'fk' });
+    await flushActions();
+    expect(mockSettle).not.toHaveBeenCalled();
   });
 });
 
