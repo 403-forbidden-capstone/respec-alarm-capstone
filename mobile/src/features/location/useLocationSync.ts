@@ -1,11 +1,14 @@
 import { useEffect } from 'react';
 import { AppState } from 'react-native';
 
-import { onAlarmsSynced } from '@/lib/alarmSync';
+import { onAlarmsSynced, setDepartByLocationProvider } from '@/lib/alarmSync';
 import { onSignOut } from '@/lib/session';
 
 import { errorText } from './native';
-import { clearOnSignOut, syncLocation } from './register';
+import { clearOnSignOut, locationTrackedParticipantIds, syncLocation } from './register';
+
+// 알람 맞추기가 출발 알람에 "위치로 출발 판단"을 실을 때 부르는 곳 — 불러오기만 해도 등록됨 (맞추기가 이 훅보다 먼저 돌 수 있어 훅 안이 아니라 모듈 위쪽)
+setDepartByLocationProvider(locationTrackedParticipantIds);
 
 // 위치 감지가 앱 전체에 거는 훅 — 루트 레이아웃에서 한 번 (useAlarmSync 옆)
 //   · 로그인한 동안 못 쓴 기록 쓰기 → 지오펜스 등록을 로그인 직후 한 번(바로), 그 뒤 앱이 앞에 올 때마다(5분에 한 번까지) — register.ts syncLocation

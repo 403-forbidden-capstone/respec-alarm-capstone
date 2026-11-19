@@ -146,13 +146,26 @@ describe('공통 케이스 — 미루기 횟수 한도 · 시간 고르기 (D3 �
       const wake = buildRingPlan({ type: 'WAKE', intensity, snoozeLimit: 2, volumeAdjust: -0.1 });
       for (const type of ['PREPARE', 'DEPARTURE'] as const) {
         const plan = buildRingPlan({ type, intensity, snoozeLimit: 2, volumeAdjust: -0.1 });
-        expect({ ...plan, heading: '' }).toEqual({ ...wake, heading: '' });
+        const { departByLocation, ...rest } = plan; // 출발 알람만 위치 판단 칸이 더 있음 (아래 시험)
+        expect(departByLocation).toBe(type === 'DEPARTURE' ? false : undefined);
+        expect({ ...rest, heading: '' }).toEqual({ ...wake, heading: '' });
         expect(plan.sound).toBe(true);
         expect([plan.oneTapLabel, plan.oneTapEventType]).toEqual([null, null]);
       }
     }
     expect(buildRingPlan({ type: 'PREPARE', intensity: 'NORMAL' }).heading).toBe('준비할 시간이에요');
     expect(buildRingPlan({ type: 'DEPARTURE', intensity: 'NORMAL' }).heading).toBe('출발할 시간이에요');
+  });
+
+  it('출발 알람만 위치로 출발 판단 여부가 계획에 실림 — 기본 false(해제 = 출발), 켜졌을 때만 true. 다른 종류는 칸 없음', () => {
+    expect(buildRingPlan({ type: 'DEPARTURE', intensity: 'NORMAL' }).departByLocation).toBe(false);
+    expect(buildRingPlan({ type: 'DEPARTURE', intensity: 'NORMAL', departByLocation: true }).departByLocation).toBe(true);
+    expect(buildRingPlan({ type: 'DEPARTURE', intensity: 'NORMAL', departByLocation: false }).departByLocation).toBe(false);
+    for (const type of ['WAKE', 'PREPARE', 'ARRIVE', 'ROUTINE'] as const) {
+      expect(buildRingPlan({ type, intensity: 'NORMAL', departByLocation: true })).not.toHaveProperty('departByLocation');
+    }
+    const pkg: RingPackage = { ...basePackage, type: 'DEPARTURE', departByLocation: true };
+    expect(JSON.parse(toNativePayload(pkg, buildRingPlan(pkg))).plan.departByLocation).toBe(true);
   });
 
   it('진짜 알람 종류 목록 — 기상 · 준비 · 출발만', () => {

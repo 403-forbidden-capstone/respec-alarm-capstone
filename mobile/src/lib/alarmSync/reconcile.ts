@@ -176,7 +176,10 @@ export function planReconcile(input: {
       existing != null && ((existing.soundKey != null && existing.soundKey !== p.soundKey) || (existing.vibration != null && existing.vibration !== p.vibration) || voiceChanged);
     // 폰에 알림(sound 없음)으로 걸린 준비 · 출발 — 11/19부터 알람이라 같은 시각 · 강도여도 다시 걸어 알람 계획으로 덮음 (칸을 모르는 예전 APK는 비교 안 함)
     const soundChanged = existing?.sound !== undefined && existing.sound !== isRingAlarmType(p.type);
-    if (timeChanged || existing?.intensity !== p.intensity || axesChanged || soundChanged) picked.add(p.alarmId);
+    // 출발 알람의 "위치로 출발 판단" 여부가 폰과 다르면 다시 걺 — 권한 · 집 위치 · 감시 대상이 바뀐 것 (앱이 모르는 값(undefined) · 폰이 안 돌려주는 칸(예전 APK · null)은 비교 안 함)
+    const departModeChanged =
+      p.type === 'DEPARTURE' && typeof p.departByLocation === 'boolean' && typeof existing?.departByLocation === 'boolean' && existing.departByLocation !== p.departByLocation;
+    if (timeChanged || existing?.intensity !== p.intensity || axesChanged || soundChanged || departModeChanged) picked.add(p.alarmId);
     if (timeChanged && p.type === 'DEPARTURE' && p.groupKey) departureChanged.add(p.groupKey);
   }
 

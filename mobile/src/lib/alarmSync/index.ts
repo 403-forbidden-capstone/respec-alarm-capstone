@@ -239,6 +239,24 @@ export function cancelAllPhoneAlarms(): Promise<void> {
   return serial(() => AlarmCore.cancelAll());
 }
 
+// 위치로 출발을 판단하는 약속(참여 조건 id) 목록을 주는 곳 — features/location이 등록 (권한 + 집 위치 + 그 약속 감시 대상, 지오펜스를 거는 조건과 같은 함수).
+//   lib은 features를 부르지 않으므로 거꾸로 등록받음. 등록이 없거나 읽기에 실패하면 null → 출발 알람 계획의 칸을 안 정함(폰에 이미 걸린 값 그대로, 새로 걸면 해제 = 출발)
+type DepartByLocationProvider = () => Promise<ReadonlySet<string>>;
+let departProvider: DepartByLocationProvider | null = null;
+export function setDepartByLocationProvider(provider: DepartByLocationProvider | null): void {
+  departProvider = provider;
+}
+
+async function locationTrackedIds(): Promise<ReadonlySet<string> | null> {
+  if (!departProvider) return null;
+  try {
+    return await departProvider();
+  } catch (e) {
+    if (__DEV__) console.warn('[alarmSync] 위치 감지 대상을 못 읽음 — 출발 알람은 해제 = 출발로', e);
+    return null;
+  }
+}
+
 const SERVER_ROW_LIMIT = 500; // 서버 알람을 한 번에 읽는 줄 수 — 이만큼 오면 목록이 잘렸을 수 있음 (reconcile)
 
 // 내 켜진 알람 중 지금 이후 것을 서버에서 읽음 (RLS가 친구 알람을 줄 수 있어 user_id로 한 번 더 좁힘)
@@ -356,7 +374,10 @@ export function reconcile(options: ReconcileOptions = {}): Promise<SyncSummary> 
     const { kept: rows, dropped } = dropRecorded(readRows);
     const droppedIds = new Set(dropped.map((row) => row.alarm_id));
     if (options.timeZone) lastTimeZone = options.timeZone;
-    const allServer = buildServerPackages(rows, options.timeZone ?? lastTimeZone ?? undefined);
+    const built = buildServerPackages(rows, options.timeZone ?? lastTimeZone ?? undefined);
+    // 출발 알람 계획에 "위치로 출발 판단" 실음 — 위치 감시 대상 약속이면 해제 ≠ 출발 (네이티브가 앱이 꺼진 채 해제될 때도 같은 규칙)
+    const tracked = built.some((p) => p.type === 'DEPARTURE') ? await locationTrackedIds() : null;
+    const allServer = tracked ? built.map((p) => (p.type === 'DEPARTURE' ? { ...p, departByLocation: p.groupKey != null && tracked.has(p.groupKey) } : p)) : built;
     // 개발 화면의 시험 알람(서버 행 없음)은 맞추기 대상이 아님 — 안 빼면 앱이 앞에 올 때 "서버에 없음"으로 지워져 울림이 1초 만에 끊김
     const allPhone = (await AlarmCore.list()).filter((a) => !isDevAlarmId(a.id));
     const only = options.alarmIds ? new Set(options.alarmIds) : null;

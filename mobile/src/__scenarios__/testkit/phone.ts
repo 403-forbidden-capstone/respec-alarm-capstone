@@ -27,6 +27,7 @@ type Plan = {
   oneTapLabel: string | null;
   oneTapEventType: 'ACKNOWLEDGED' | 'ARRIVAL_CONFIRMED' | null;
   maxRingMillis: number;
+  departByLocation?: boolean; // 출발 알람만 — 위치로 출발을 판단함 (없으면 해제 = 출발)
 };
 type Payload = {
   alarmId: string;
@@ -214,6 +215,8 @@ export class Phone {
     this.store.delete(id);
     this.ringing = null;
     this.append(alarm, 'DISMISSED', alarm.ringCount);
+    // DeviceUploadRules.dismissAlsoAcknowledges — 위치로 출발을 판단하지 않는 약속의 출발 알람 해제는 출발 확인(ACKNOWLEDGED)도 남김
+    if (alarm.type === 'DEPARTURE' && !alarm.plan.departByLocation) this.append(alarm, 'ACKNOWLEDGED', alarm.ringCount);
   }
 
   // 울림을 끝까지 두고 안 끔 (최대 시간 · 다시 울림이 다 지남) — 저장소에서 지움, 해제 기록 없음 (AC:188-190). 놓침은 서버가 판정
@@ -365,6 +368,7 @@ export class Phone {
           vibration: a.vibration,
           voiceTone: a.voiceTone ?? null,
           sound: a.plan.sound,
+          ...(a.type === 'DEPARTURE' ? { departByLocation: a.plan.departByLocation === true } : {}),
           title: a.title,
           atMillis: a.atMillis,
           snoozeCount: a.snoozeCount,

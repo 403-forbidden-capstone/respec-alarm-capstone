@@ -144,7 +144,7 @@ type RingPackage = {
 |---|---|---|
 | WAKE | 알람음 + 계속 진동 + 잠금화면 위 알람 화면 + 알림(해제 · 미루기). `setAlarmClock` | 해제 → `DISMISSED`('기상 확인 전', 10분 판정 · 확인 알림 · [일어났어요]는 D61 그대로) |
 | PREPARE | WAKE와 같은 알람 (11/19 지형님: 세 알람이 모두 진짜 알람 — 알람음 · 전체 화면 · 미루기 · 다시 울림 · 강도 규칙 같음). `setExactAndAllowWhileIdle` | 해제 → `DISMISSED` = **준비 시작** (서버가 `prepare_started_at`을 채움) |
-| DEPARTURE | 〃 (안내 한 문장은 알람음 위에 울림마다 한 번). 미루기의 "늦어요" 안내는 H07과 같음 | 해제 → `DISMISSED` = **출발** (서버가 `departed_at`을 채움 — 위치로 먼저 잡혔으면 우선순위 규칙 그대로) |
+| DEPARTURE | 〃 (안내 한 문장은 알람음 위에 울림마다 한 번). 미루기의 "늦어요" 안내는 H07과 같음 | 해제 → `DISMISSED`. **위치로 출발을 판단하는 약속(권한 · 집 위치 · 감시 대상, 지오펜스를 거는 조건과 같음)이면 해제는 출발이 아님** — 실제 출발은 집 이탈 감지 시각. 감지가 꺼진 사람만 해제 = 출발이라 `DISMISSED`와 함께 `ACKNOWLEDGED`(BUTTON)도 남겨 서버가 `departed_at`을 채움. 앱 맞추기가 출발 알람 계획에 `plan.departByLocation`을 실어 보내 네이티브가 앱이 꺼진 채 해제될 때도 같은 규칙 (권한 · 집 위치가 바뀌면 다음 맞추기에서 다시 걸림) |
 | ARRIVE | 보통 알림(알림음 · 진동 한 번). `setExactAndAllowWhileIdle` | "도착했어요" → `ARRIVAL_CONFIRMED` |
 | ROUTINE | 〃 | "했어요" → `ACKNOWLEDGED` |
 

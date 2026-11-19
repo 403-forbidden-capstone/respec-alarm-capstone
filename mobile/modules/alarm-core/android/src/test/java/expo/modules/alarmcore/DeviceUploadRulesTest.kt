@@ -52,6 +52,21 @@ class DeviceUploadRulesTest {
   }
 
   @Test
+  fun departureDismissAlsoAcknowledgesOnlyWithoutLocationDetection() {
+    // 위치로 출발을 판단하지 않는 약속(감지 꺼짐)의 출발 알람 해제 = 출발 → 출발 확인(ACKNOWLEDGED)도 남김
+    assertTrue(DeviceUploadRules.dismissAlsoAcknowledges("DEPARTURE", departByLocation = false))
+    // 위치로 판단하는 약속은 해제만 (실제 출발 = 집 이탈 감지)
+    assertFalse(DeviceUploadRules.dismissAlsoAcknowledges("DEPARTURE", departByLocation = true))
+    // 준비 · 기상 · 도착은 해당 없음 (준비 해제는 DISMISSED 자체가 준비 시작)
+    for (type in listOf("WAKE", "PREPARE", "ARRIVE", "ROUTINE")) {
+      assertFalse(type, DeviceUploadRules.dismissAlsoAcknowledges(type, departByLocation = false))
+    }
+    // 보내는 기록은 둘 다 바로 올림
+    assertTrue(DeviceUploadRules.shouldUpload("DEPARTURE", "DISMISSED"))
+    assertTrue(DeviceUploadRules.shouldUpload("DEPARTURE", "ACKNOWLEDGED"))
+  }
+
+  @Test
   fun ringAlarmTypesAreWakePrepareDeparture() {
     assertEquals(setOf("WAKE", "PREPARE", "DEPARTURE"), RING_ALARM_TYPES)
     assertTrue(isRingAlarmType("PREPARE"))

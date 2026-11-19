@@ -39,6 +39,8 @@ data class RingPlan(
   val heading: String,
   val oneTapLabel: String?,
   val oneTapEventType: String?,
+  // 출발 알람만 — 위치로 출발을 판단하는 약속이면 true (해제는 출발이 아님). 칸이 없던 저장 알람 · 위치 판단 안 하는 사람은 false → 해제 = 출발
+  val departByLocation: Boolean = false,
 ) {
   fun toJson(): JSONObject = JSONObject().apply {
     put("sound", sound)
@@ -52,6 +54,7 @@ data class RingPlan(
     put("heading", heading)
     put("oneTapLabel", oneTapLabel ?: JSONObject.NULL)
     put("oneTapEventType", oneTapEventType ?: JSONObject.NULL)
+    put("departByLocation", departByLocation)
   }
 
   companion object {
@@ -83,6 +86,7 @@ data class RingPlan(
         heading = json.optStringOrNull("heading") ?: "",
         oneTapLabel = json.optStringOrNull("oneTapLabel"),
         oneTapEventType = json.optStringOrNull("oneTapEventType"),
+        departByLocation = json.optBoolean("departByLocation", false),
       )
     }
   }

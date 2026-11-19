@@ -36,8 +36,8 @@ describe('어떤 기록이 원탭 뒤처리 대상인지 (oneTapOf)', () => {
     expect(oneTapOf({ eventType: 'DISMISSED', alarmType: 'WAKE' })).toBeNull();
   });
 
-  it('출발 알람 해제(DISMISSED)도 출발 — 11/19부터 해제가 출발 체크. 준비 · 기상 · 도착 알람의 해제는 해당 없음', () => {
-    expect(oneTapOf({ eventType: 'DISMISSED', alarmType: 'DEPARTURE' })).toBe('DEPARTED');
+  it('출발 알람 해제(DISMISSED)만으로는 출발이 아님 — 위치로 출발을 판단하는 약속은 이탈 감지가 출발. 출발 확인(ACKNOWLEDGED)이 같이 올 때만 출발 (11/19)', () => {
+    expect(oneTapOf({ eventType: 'DISMISSED', alarmType: 'DEPARTURE' })).toBeNull();
     expect(oneTapOf({ eventType: 'DISMISSED', alarmType: 'PREPARE' })).toBeNull();
     expect(oneTapOf({ eventType: 'DISMISSED', alarmType: 'ARRIVE' })).toBeNull();
     // 울림 · 미루기는 출발이 아님
@@ -60,12 +60,10 @@ describe('참여 조건별로 묶기 (planOneTapUpdates)', () => {
     expect(updates).toEqual([{ participantId: 'p-1', departedAt: min(-60), arrivedAt: min(8) }]);
   });
 
-  it('출발 알람 해제 → departedAt (원탭과 같은 뜻 — 둘 다 있으면 가장 이른 시각)', () => {
-    const [update] = planOneTapUpdates(
-      [event('e1', 'dep-alarm', 'DISMISSED', 'DEPARTURE', min(-50)), event('e0', 'dep-alarm', 'ACKNOWLEDGED', 'DEPARTURE', min(-55)), event('e2', 'dep-alarm', 'TRIGGERED', 'DEPARTURE', min(-60))],
-      participantOf,
-    );
-    expect(update.departedAt).toBe(min(-55));
+  it('출발 알람 해제(DISMISSED) · 울림만 있으면 출발이 안 잡힘, 출발 확인(ACKNOWLEDGED)이 있으면 그 시각', () => {
+    expect(planOneTapUpdates([event('e1', 'dep-alarm', 'DISMISSED', 'DEPARTURE', min(-50)), event('e2', 'dep-alarm', 'TRIGGERED', 'DEPARTURE', min(-60))], participantOf)).toEqual([]);
+    const [update] = planOneTapUpdates([event('e1', 'dep-alarm', 'DISMISSED', 'DEPARTURE', min(-50)), event('e0', 'dep-alarm', 'ACKNOWLEDGED', 'DEPARTURE', min(-50))], participantOf);
+    expect(update.departedAt).toBe(min(-50));
   });
 
   it('같은 원탭이 여러 번이면 가장 이른 시각', () => {

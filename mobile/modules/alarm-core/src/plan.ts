@@ -108,7 +108,7 @@ export function volumePercentFor(intensity: AlarmIntensity, volumeAdjust = 0): n
 
 /** 꾸러미 한 개의 울림 계획. 꾸러미에 notice가 있으면 그 글자가 heading, 없거나 비면 종류별 HEADING */
 export function buildRingPlan(
-  pkg: Pick<RingPackage, 'type' | 'intensity'> & Partial<Pick<RingPackage, 'soundKey' | 'volumeAdjust' | 'notice' | 'snoozeLimit'>>,
+  pkg: Pick<RingPackage, 'type' | 'intensity'> & Partial<Pick<RingPackage, 'soundKey' | 'volumeAdjust' | 'notice' | 'snoozeLimit' | 'departByLocation'>>,
 ): RingPlan {
   const soundKey = pkg.soundKey?.trim() || DEFAULT_SOUND_KEY;
   // notice는 서버가 준 JSON 값이라 글자가 아닐 수도 있음(숫자 · null 등) — trim에서 던져 알람이 안 걸리면 안 되므로 글자일 때만 보고, 아니면 기본 줄
@@ -127,6 +127,8 @@ export function buildRingPlan(
       heading: heading(HEADING[pkg.type]),
       oneTapLabel: null,
       oneTapEventType: null,
+      // 출발 알람만: 위치로 출발을 판단하는 약속이면 해제 ≠ 출발 (없으면 해제 = 출발)
+      ...(pkg.type === 'DEPARTURE' ? { departByLocation: pkg.departByLocation === true } : {}),
     };
   }
   const oneTap = ONE_TAP[pkg.type];

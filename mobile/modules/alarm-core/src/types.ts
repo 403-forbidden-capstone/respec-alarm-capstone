@@ -48,6 +48,8 @@ export type RingPackage = {
   volumeAdjust?: number;
   /** 출발 시각 (epoch ms) — 미루기 한도 안내("지금 바로 준비 · 출발 시각")와 "이만큼 미루면 늦어요" 판단에 씀 (D3 기본안 A) */
   departAt?: number;
+  /** 출발 알람만 — 이 약속은 위치(지오펜스)로 출발을 자동 판단함. true면 출발 알람 해제는 출발이 아님(DISMISSED만), false · 없음이면 해제가 출발(ACKNOWLEDGED도 기록). 앱 맞추기가 권한 · 집 위치 · 감시 대상으로 정해 실음 */
+  departByLocation?: boolean;
   /**
    * 진동 — 서버가 `vibration ?? 강도에서`로 풀어 늘 채움. 없거나 모르는 값이면 네이티브에 넘길 때 강도에서 정함
    * (약 NONE · 보통 SHORT_REPEAT · 강 STRONG_CONTINUOUS). 볼륨 · 다시 울림은 이 칸이 아니라 intensity가 정함
@@ -87,6 +89,8 @@ export type RingPlan = {
   oneTapLabel: string | null;
   /** 원탭을 누르면 남기는 기록 종류. 알람음이 나는 알람이면 null */
   oneTapEventType: OneTapEventType | null;
+  /** 출발 알람만 — 위치로 출발을 판단하는 약속인지 (RingPackage.departByLocation). 네이티브가 앱이 꺼진 채 해제될 때 출발 기록을 더할지 가름. 다른 종류는 칸 없음 */
+  departByLocation?: boolean;
 };
 
 /**
@@ -113,6 +117,8 @@ export type ScheduledAlarm = {
   vibration?: AlarmVibration;
   /** 폰에 걸린 말소리 (꾸러미의 voiceTone). 칸이 없던 예약은 null, 이 칸을 모르는 예전 APK는 안 돌려줌(undefined) → 비교하지 않음 */
   voiceTone?: VoiceTone | null;
+  /** 폰에 걸린 출발 알람의 위치 판단 여부 (plan.departByLocation). 다른 종류 · 이 칸을 모르는 예전 APK는 안 돌려줌 → 비교하지 않음 */
+  departByLocation?: boolean;
   /** 폰에 걸린 계획이 알람음이 있는 알람인지 (plan.sound). 이 칸을 모르는 예전 APK는 안 돌려줌 → 비교하지 않음. 예전에 알림으로 걸린 준비 · 출발을 알람으로 다시 걸게 알아보는 데 씀 (11/19) */
   sound?: boolean;
   title: string;

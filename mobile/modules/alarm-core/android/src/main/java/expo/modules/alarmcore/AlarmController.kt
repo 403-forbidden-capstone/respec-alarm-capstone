@@ -240,6 +240,10 @@ object AlarmController {
     if (alarm != null) {
       AlarmStorage.remove(context, id)
       AlarmEventLog.append(context, id, alarm.type, "DISMISSED", sequenceNo = alarm.ringCount)
+      // 위치로 출발을 판단하지 않는 약속의 출발 알람 해제는 출발 — 확인(ACKNOWLEDGED)도 남겨 서버가 departed_at을 채움. 위치로 판단하는 약속은 해제만 (실제 출발 = 집 이탈 감지)
+      if (DeviceUploadRules.dismissAlsoAcknowledges(alarm.type, alarm.plan.departByLocation)) {
+        AlarmEventLog.append(context, id, alarm.type, "ACKNOWLEDGED", sequenceNo = alarm.ringCount)
+      }
     }
     AlarmPlaybackService.stopIfRinging(context, listOf(id))
     if (alarm != null && openApp && alarm.type == "WAKE") openWakeScreen(context, id)
@@ -331,6 +335,8 @@ object AlarmController {
           "voiceTone" to alarm.voiceTone,
           // 알람음이 있는 계획인지 — 예전 APK가 알림으로 걸어 둔 준비 · 출발을 앱 맞추기가 알아보고 다시 걺 (칸이 없으면 예전 APK)
           "sound" to alarm.plan.sound,
+          // 출발 알람이 위치로 출발을 판단하도록 걸렸는지 — 앱 맞추기가 권한 · 집 위치가 바뀌면 다시 걸게 비교 (출발 알람만 칸이 있음)
+          "departByLocation" to (if (alarm.type == "DEPARTURE") alarm.plan.departByLocation else null),
           "title" to alarm.title,
           "atMillis" to alarm.atMillis.toDouble(),
           "snoozeCount" to alarm.snoozeCount,

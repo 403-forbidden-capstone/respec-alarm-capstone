@@ -61,6 +61,7 @@ export function createMemoryBackend(now: () => number = Date.now): AlarmBackend 
           vibration: vibrationOf(pkg),
           ...(pkg.voiceTone ? { voiceTone: pkg.voiceTone } : {}),
           sound: plan.sound,
+          ...(plan.departByLocation !== undefined ? { departByLocation: plan.departByLocation } : {}),
           title: pkg.title,
           atMillis: pkg.atMillis,
           snoozeCount: 0,

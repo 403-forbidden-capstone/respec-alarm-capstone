@@ -25,6 +25,12 @@ object DeviceUploadRules {
     else -> false
   }
 
+  /**
+   * 이 알람을 해제할 때 출발 확인(ACKNOWLEDGED, BUTTON)도 같이 남길지 — 출발 알람이고 위치로 출발을 판단하지 않는 약속(권한 없음 · 집 위치 없음 등)일 때만.
+   * 위치로 판단하는 약속은 해제가 출발이 아니라(DISMISSED만) 실제 출발은 집 이탈 감지 시각. 서버는 ACKNOWLEDGED(DEPARTURE)로 departed_at을 채움
+   */
+  fun dismissAlsoAcknowledges(alarmType: String, departByLocation: Boolean): Boolean = alarmType == "DEPARTURE" && !departByLocation
+
   /** 기상 알람 해제 기록이면 해제 + 10분 판정 작업을 검 */
   fun shouldJudgeWake(alarmType: String, eventType: String): Boolean = alarmType == "WAKE" && eventType == "DISMISSED"
 

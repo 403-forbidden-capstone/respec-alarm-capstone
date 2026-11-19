@@ -156,7 +156,8 @@
         "snoozeLimit": 3,
         "heading": "출발할 시간이에요",
         "oneTapLabel": null,
-        "oneTapEventType": null
+        "oneTapEventType": null,
+        "departByLocation": false
       }
     },
     {
@@ -224,7 +225,26 @@
         "snoozeLimit": 3,
         "heading": "지금 나가면 오전 9:50 도착 · 여유 10분",
         "oneTapLabel": null,
-        "oneTapEventType": null
+        "oneTapEventType": null,
+        "departByLocation": false
+      }
+    },
+    {
+      "name": "출발 — 위치로 출발을 판단하는 약속이면 계획에 실림 (해제 ≠ 출발)",
+      "input": { "type": "DEPARTURE", "intensity": "NORMAL", "departByLocation": true },
+      "plan": {
+        "sound": true,
+        "volumePercent": 80,
+        "soundKey": "default",
+        "maxRingMillis": 180000,
+        "reRingOffsetsMillis": [480000, 960000],
+        "snoozeMillis": 600000,
+        "snoozeMinutesOptions": [5, 10, 15],
+        "snoozeLimit": 3,
+        "heading": "출발할 시간이에요",
+        "oneTapLabel": null,
+        "oneTapEventType": null,
+        "departByLocation": true
       }
     },
     {
@@ -241,7 +261,8 @@
         "snoozeLimit": 3,
         "heading": "출발할 시간이에요",
         "oneTapLabel": null,
-        "oneTapEventType": null
+        "oneTapEventType": null,
+        "departByLocation": false
       }
     }
   ],
