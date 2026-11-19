@@ -383,7 +383,7 @@ async function replanFor(
   ctx: EditCtx,
   env: Env,
   a: { row: EditRow; patched: ReturnType<typeof applyPatch>; participant: ParticipantRow; alarms: AlarmRow[]; snapshot: Snapshot; excluded: ReadonlySet<string>; oldAt: Date; newAt: Date; tz: string },
-): Promise<{ plan: Plan; diff: AlarmDiff; changes: AlarmChangeLine[]; warnings: EditWarning[] }> {
+): Promise<{ plan: Plan; purePrepCandidate?: PlanInputs['purePrepCandidate']; diff: AlarmDiff; changes: AlarmChangeLine[]; warnings: EditWarning[] }> {
   const { row, patched, participant, alarms, snapshot, excluded, oldAt, newAt, tz } = a;
   const warnings: EditWarning[] = [];
   const patchedRow: AppointmentRow = { ...row, ...patched.next, recurrence_rule: row.recurrence_rule };
