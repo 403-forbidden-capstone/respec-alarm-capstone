@@ -32,7 +32,7 @@ import {
 import type { EditRequest } from './edit-request.ts';
 import { HttpError } from './errors.ts';
 import { loadAlarms, loadLateCount, loadParticipant, loadPrepareStats, loadProfile, loadTravelSamples, loadPurePrepCandidate, ALARM_COLUMNS, SERIES_APPOINTMENT_COLUMNS, type SeriesAppointmentRow } from './plan.ts';
-import { computePlan, firstPrepareMinutes, resolveBasics, withoutFriendTimes, type AlarmRow, type AppointmentRow, type ParticipantRow, type Plan, type PlanInputs, type ProfileRow } from './plan-core.ts';
+import { computePlan, purePrepPersistenceOf, firstPrepareMinutes, resolveBasics, withoutFriendTimes, type AlarmRow, type AppointmentRow, type ParticipantRow, type Plan, type PlanInputs, type ProfileRow } from './plan-core.ts';
 import { buildRingPackages, canceledAlarmIds, subtitleFor, type RingPackage } from './ring-package.ts';
 import { planGroupPush, sendGroupPush, type GroupPlan, type NotifyOptions } from './notify.ts';
 import { resolveTravel, type TravelChoice, type TravelDeps } from './route.ts';
@@ -353,7 +353,7 @@ async function replanForWake(
   const diff = diffAlarms(plan, row.alarms, { now: ctx.now, replaceExisting: true });
   must(
     'appointment_participants update',
-    await ctx.userDb.from('appointment_participants').update({ prepare_minutes: plan.prepare.minutes }).eq('participant_id', row.participant.participant_id).eq('user_id', ctx.userId),
+    await ctx.userDb.from('appointment_participants').update({ prepare_minutes: plan.prepare.minutes, ...purePrepPersistenceOf(plan, inputs.purePrepCandidate) }).eq('participant_id', row.participant.participant_id).eq('user_id', ctx.userId),
   );
   const after = await applyAlarmDiff(ctx, row.participant.participant_id, diff, row.alarms);
   return {
@@ -431,7 +431,7 @@ async function replanFor(
   const diff = diffAlarms(plan, alarms, { now: ctx.now, replaceExisting: true });
   const changes = alarmChanges(alarms, [...diff.update.map((u) => u.patch), ...diff.insert]);
   warnings.push(...plan.warnings.filter((w) => w.code === 'PAST_ALARM_DISABLED'));
-  return { plan, diff, changes, warnings };
+  return { plan, purePrepCandidate: inputs.purePrepCandidate, diff, changes, warnings };
 }
 
 // 공동 약속의 시각 · 장소를 만든 사람이 고쳤을 때 다른 참여자들의 알람을 다시 계산해 씀 — 각자의 출발지 · 수단 · 준비 시간으로 (9-14).
@@ -518,7 +518,7 @@ async function syncOne(ctx: EditCtx, a: { row: EditRow; patched: ReturnType<type
       'appointment_participants update',
       await ctx.service
         .from('appointment_participants')
-        .update({ est_travel_minutes: made.plan.travelMinutes, travel_source: made.plan.travel.chosen?.source, prepare_minutes: made.plan.prepare.minutes })
+        .update({ est_travel_minutes: made.plan.travelMinutes, travel_source: made.plan.travel.chosen?.source, prepare_minutes: made.plan.prepare.minutes, ...purePrepPersistenceOf(made.plan, made.purePrepCandidate) })
         .eq('participant_id', p.participant_id)
         .eq('user_id', p.user_id),
     );
@@ -672,10 +672,12 @@ export async function updateAppointment(ctx: EditCtx, req: Extract<EditRequest, 
 
   // ---- 알람 다시 계산 (시각 · 장소 · 중요도가 바뀔 때만) ----
   let plan: Plan | undefined;
+  let purePrepCandidate: PlanInputs['purePrepCandidate'];
   let diff: AlarmDiff | undefined;
   if (participant && patched.affectsAlarms) {
     const made = await replanFor(ctx, env, { row, patched, participant, alarms, snapshot, excluded, oldAt, newAt, tz });
     plan = made.plan;
+    purePrepCandidate = made.purePrepCandidate;
     diff = made.diff;
     result.changes = made.changes;
     result.warnings.push(...made.warnings);
@@ -699,7 +701,7 @@ export async function updateAppointment(ctx: EditCtx, req: Extract<EditRequest, 
       'appointment_participants update',
       await ctx.userDb
         .from('appointment_participants')
-        .update({ est_travel_minutes: plan.travelMinutes, travel_source: plan.travel.chosen?.source, prepare_minutes: plan.prepare.minutes })
+        .update({ est_travel_minutes: plan.travelMinutes, travel_source: plan.travel.chosen?.source, prepare_minutes: plan.prepare.minutes, ...purePrepPersistenceOf(plan, purePrepCandidate) })
         .eq('participant_id', participant.participant_id)
         .eq('user_id', ctx.userId),
     );
@@ -910,6 +912,7 @@ export async function restoreAppointment(ctx: EditCtx, req: Extract<EditRequest,
   const plan = computePlan({ now: ctx.now, draft: {}, profile, appointment: row, participant, existingAlarms, stats, lateCount4w, sameDayWake, purePrepCandidate }, resolvedTravelOf(travel), 'save');
   if (!plan.check.ok) throw new HttpError('UNPROCESSABLE', plan.check.message, { reason: plan.check.reason, ...(plan.check.detail ?? {}) });
   const diff = diffAlarms(plan, existingAlarms, { now: ctx.now, replaceExisting: false });
+  must('appointment_participants restore pure-prep provenance', await ctx.userDb.from('appointment_participants').update(purePrepPersistenceOf(plan, purePrepCandidate)).eq('participant_id', participant.participant_id).eq('user_id', ctx.userId));
   const after = await applyAlarmDiff(ctx, participant.participant_id, diff, existingAlarms);
   await updateRow(ctx, row.appointment_id, { exception_kind: 'EDITED' });
 
