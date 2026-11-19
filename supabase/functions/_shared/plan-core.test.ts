@@ -663,3 +663,54 @@ test('준비 알람을 직접 고른 일정은 당기지 않음 — 직접 고�
   assert.deepEqual(at(plan), ['WAKE 08:25', 'PREPARE 08:40*', 'DEPARTURE 09:25']); // * = 직접 고른 시각
 });
 
+
+test('pure preparation profile basis yields different PREPARE and WAKE, fixed 20min intact', () => {
+  const plan = computePlan(base({
+    stats: { sampleCount: 0, p80: null },
+    purePrepCandidate: { source: 'PROFILE', minutes: 35 },
+    draft: { at: kst(22, 600), destination: { name: '세종대학교' } },
+  }), api(50));
+  assert.equal(plan.prepare.minutes, 55);
+  assert.equal(plan.beforePrepareMinutes, 20);
+  assert.equal(plan.prepare.source, 'DEFAULT');
+  assert.deepEqual(text(plan), ['WAKE 08:05', 'PREPARE 08:25', 'DEPARTURE 09:00', 'ARRIVE 09:50']);
+  assert.deepEqual(plan.recentPrepare, []);
+});
+
+test('pure preparation basis is still applied to same-day second appointment without WAKE', () => {
+  const plan = computePlan(base({
+    sameDayWake: true,
+    purePrepCandidate: { source: 'HISTORY', minutes: 35, sampleCount: 4 },
+    draft: { at: kst(22, 1080), destination: { name: '강남역' }, bufferMinutes: 5 },
+  }), api(20));
+  assert.equal(plan.withWake, false);
+  assert.equal(plan.prepare.minutes, 35);
+  assert.equal(plan.beforePrepareMinutes, 0);
+  assert.deepEqual(text(plan), ['PREPARE 17:00', 'DEPARTURE 17:35', 'ARRIVE 17:55']);
+});
+
+test('legacy explicit override and C1/W4 both remain higher priority than an injected pure candidate', () => {
+  const profilePure = { source: 'PROFILE' as const, minutes: 35 };
+  const manual = computePlan(base({
+    purePrepCandidate: profilePure,
+    draft: { at: kst(22, 600), destination: { name: '세종대학교' }, prepareMinutes: 60 },
+  }), api(50));
+  assert.equal(manual.prepare.source, 'MANUAL');
+  assert.equal(manual.prepare.minutes, 60);
+  const oldMl = computePlan(base({
+    purePrepCandidate: profilePure,
+    mlPrediction: { model: 'c1_mae', minutes: 80 },
+  }), api(50));
+  assert.equal(oldMl.prepare.mlModel, 'c1_mae');
+  assert.equal(oldMl.prepare.minutes, 80);
+});
+
+test('new model provenance is exposed only when explicitly injected (not by name alone)', () => {
+  const plan = computePlan(base({
+    purePrepCandidate: { source: 'MODEL', minutes: 35, model: 'prep_start_ratio_v2' },
+    stats: { sampleCount: 0, p80: null },
+  }), api(50));
+  assert.equal(plan.prepare.source, 'MODEL');
+  assert.equal(plan.prepare.mlModel, 'prep_start_ratio_v2');
+  assert.equal(toSuggestion(plan).prepare.model, 'prep_start_ratio_v2');
+});
