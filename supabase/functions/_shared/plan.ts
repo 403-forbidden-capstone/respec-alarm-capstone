@@ -373,9 +373,13 @@ export async function buildPlan(ctx: PlanContext, draft: PlanDraft, options: { w
   // Keep manual prepare settings and already-awake schedules on the existing path.
   const allowMl = draft.prepareMinutes == null && draft.withWake !== false &&
     !(draft.withWake == null && sameDayWake);
-  inputs.purePrepCandidate = await loadPurePrepCandidate(
-    ctx.db, ctx.userId, profile, ctx.now, basics.at,
-  );
+  // Shared appointments can be edited by other participants. Keep the existing
+  // route until every participant's shared recalc and consent are verified.
+  if (draft.groupId == null && appointment?.group_id == null) {
+    inputs.purePrepCandidate = await loadPurePrepCandidate(
+      ctx.db, ctx.userId, profile, ctx.now, basics.at,
+    );
+  }
   // Old C1/W4 predicts wake->departure; pure prep predicts a different target.
   // They must never compete for the same alarm calculation.
   if (!inputs.purePrepCandidate) {
