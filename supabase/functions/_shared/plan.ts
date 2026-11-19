@@ -366,8 +366,9 @@ export async function buildPlan(ctx: PlanContext, draft: PlanDraft, options: { w
   // 길찾기도 같은 경로 기록도 근사값도 없음 → 직접 입력하는 흐름으로 (8장 8.2.2)
   if (!travel.chosen) throw new TravelRequiredError(inputs, travel, timeZone);
   // Keep manual prepare settings and already-awake schedules on the existing path.
-  const allowMl = draft.prepareMinutes == null && draft.withWake !== false &&
-    !(draft.withWake == null && sameDayWake);
+  const allowMl = draft.prepareMinutes == null &&
+    !(participant?.prepare_value_source === 'MANUAL' && draft.prepareValueSource !== 'AUTO') &&
+    draft.withWake !== false && !(draft.withWake == null && sameDayWake);
   // Shared appointments can be edited by other participants. Keep the existing
   // route until every participant's shared recalc and consent are verified.
   if (draft.groupId == null && appointment?.group_id == null) {
