@@ -2860,6 +2860,48 @@ await check('새 회차가 당김 분을 이어받음: 반복 묶음의 다음 �
   const a4 = await ins(lone.appointment_id);       // 묶음 1개짜리 — 앞 회차가 없어 0
   return a1 === 10 && a2 === 10 && a3 === 5 && a4 === 0 ? true : { a1, a2, a3, a4 };
 });
+await check('루틴 제안 재료(routine_suggestion_inputs): 사람마다 그 사람 시간대 날짜로 아침 한 줄 — 그날 가장 이른 켜진 기상 알람 · 기상 확인 · 미확인 · 준비 알람과 준비 시작 · 준비물(아침에야 챙김), 꺼진 알람 · 지금 뒤는 없음, 서버 역할만', async () => {
+  const RU = '6b6b6b6b-6b6b-4b6b-8b6b-6b6b6b6b6b6b';
+  await as(null, 'supabase_auth_admin');
+  await q(`insert into auth.users (id, email, raw_user_meta_data) values ($1, 'routine-inputs@example.com', '{}'::jsonb)`, [RU]);
+  await svc();
+  const at = (d, hm) => `2026-12-${d}T${hm}:00+09:00`;
+  const alarm = async (type, d, hm, extra = {}) => (await q(
+    `insert into public.alarms (user_id, alarm_type, scheduled_at, is_enabled, participant_id) values ($1, $2, $3, $4, $5) returning alarm_id`,
+    [RU, type, at(d, hm), extra.enabled ?? true, extra.participant ?? null]))[0].alarm_id;
+  const event = (alarmId, type, d, hm) => q(`insert into public.alarm_events (alarm_id, user_id, event_type, event_at) values ($1, $2, $3, $4)`, [alarmId, RU, type, at(d, hm)]);
+  // 12/14(월): 기상 알람 둘(7:00 · 7:30) — 이른 것만, 7:22에 기상 확인
+  const w14 = await alarm('WAKE', '14', '07:00');
+  await alarm('WAKE', '14', '07:30');
+  await event(w14, 'WAKE_CONFIRMED', '14', '07:22');
+  // 12/15(화): 미확인
+  const w15 = await alarm('WAKE', '15', '07:00');
+  await event(w15, 'MISSED', '15', '07:30');
+  // 12/16(수): 7:03 확인, 준비 알람 7:20 · 준비 시작 7:29, 준비물 둘 — 하나는 전날 밤, 하나는 아침에 챙김
+  const w16 = await alarm('WAKE', '16', '07:00');
+  await event(w16, 'WAKE_CONFIRMED', '16', '07:03');
+  const appt = await insAppt(RU, { at: at('16', '09:00'), title: '루틴 재료 시험' });
+  const [{ participant_id: pid }] = await q(`insert into public.appointment_participants (appointment_id, user_id, prepare_started_at, prepare_started_source) values ($1, $2, $3, 'PREPARE_ALARM') returning participant_id`, [appt.appointment_id, RU, at('16', '07:29')]);
+  await alarm('PREPARE', '16', '07:20', { participant: pid });
+  await q(`insert into public.todos (user_id, title, todo_type, due_date, is_done, done_at) values ($1, '노트북', 'ITEM', '2026-12-16', true, $2), ($1, '회의 자료', 'ITEM', '2026-12-16', true, $3)`, [RU, at('15', '22:00'), at('16', '07:40')]);
+  // 12/17(목): 꺼진 기상 알람 — 기록 없는 아침, 12/19(토): 지금(12/18 18:00) 뒤
+  await alarm('WAKE', '17', '07:00', { enabled: false });
+  await alarm('WAKE', '19', '07:00');
+  const rows = await q(`select record_date::text as d, weekday, wake_alarm_at, wake_confirmed_at, wake_missed, prepare_alarm_at, prepare_started_at, items_due, items_late
+                        from public.routine_suggestion_inputs($1) where user_id = $2 order by record_date`, [at('18', '18:00'), RU]);
+  const iso = (v) => (v ? new Date(v).toISOString() : null);
+  const got = rows.map((r) => [r.d, r.weekday, iso(r.wake_alarm_at), iso(r.wake_confirmed_at), r.wake_missed, iso(r.prepare_alarm_at), iso(r.prepare_started_at), r.items_due, r.items_late]);
+  const want = [
+    ['2026-12-14', 1, iso(at('14', '07:00')), iso(at('14', '07:22')), false, null, null, 0, 0],
+    ['2026-12-15', 2, iso(at('15', '07:00')), null, true, null, null, 0, 0],
+    ['2026-12-16', 3, iso(at('16', '07:00')), iso(at('16', '07:03')), false, iso(at('16', '07:20')), iso(at('16', '07:29')), 2, 1],
+  ];
+  await as(A);
+  const app = await expectErr(() => q(`select * from public.routine_suggestion_inputs($1)`, [at('18', '18:00')]), /permission denied/);
+  await su();
+  return JSON.stringify(got) === JSON.stringify(want) && app === true ? true : { got, want, app };
+});
+
 await check('지난 회차가 그대로: 다음 회차(화 11-10)를 만든 뒤에도 MISSED 후보 · 그룹 기상 상태 · R02 계획 쿼리가 지난 회차(화 11-03)의 알람 행을 같은 id · 같은 시각으로 읽고, 새 회차는 새 날짜에만 보임', async () => {
   // 매주 화 10시 수업 — 지난 회차(11-03): 기상 07:30 · 준비 08:30 · 출발 09:10. 기상은 울리고 끄기만 함 (기상 확인 없음)
   await svc();
