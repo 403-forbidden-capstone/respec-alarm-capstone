@@ -310,6 +310,7 @@ export type Plan = {
   travel: ResolvedTravel;
   travelMinutes: number;
   prepare: PrepareBasis;
+  prepareTarget: 'WAKE_TO_DEPART' | 'PREPARE_START_TO_DEPART';
   recentPrepare: number[]; // H03 "최근 5번" — 최신순 최대 5개(분). 그날 두 번째 일정(기록을 안 씀)은 빈 목록
   intensity: ResolvedIntensity;
   kinds: RingKind[] | undefined; // 만든 종류 (undefined = 계산된 전부)
@@ -470,6 +471,7 @@ export function computePlan(i: PlanInputs, travel: ResolvedTravel, mode: PlanMod
     travel,
     travelMinutes: chosen.minutes,
     prepare,
+    prepareTarget: pureApplied ? 'PREPARE_START_TO_DEPART' : 'WAKE_TO_DEPART',
     // Legacy recent statistics are wake->departure, not pure prep; do not display them when using the new basis.
     recentPrepare: withWake && !pureApplied ? recentPrepareOf(i.stats) : [],
     intensity,
@@ -573,6 +575,11 @@ export function toSuggestion(plan: Plan, inputs?: Pick<PlanInputs, 'existingAlar
       corrected_by: null, // 7.3.1 개인 이동 보정은 아직 없음
     },
     prepare: {
+      // Legacy 'minutes' remains whole wake->departure to avoid breaking
+      // mobile clients. New consumers MUST use pure_minutes when target=PURE.
+      target: plan.prepareTarget,
+      pure_minutes: plan.prepareTarget === 'PREPARE_START_TO_DEPART'
+        ? Math.round(prepare.minutes - (plan.withWake ? plan.beforePrepareMinutes : 0)) : null,
       minutes: prepare.minutes,
       auto_minutes: prepare.autoMinutes,
       source: prepare.source,
