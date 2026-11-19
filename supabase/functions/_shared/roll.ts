@@ -294,7 +294,9 @@ export function planOccurrence(
         est_travel_minutes: plan.travelMinutes,
         travel_source: resolved.travel.source,
         prepare_minutes: plan.prepare.minutes,
-        ...(plan.prepareTarget === 'PREPARE_START_TO_DEPART' ? { prepare_value_source: 'AUTO' } : {}),
+        prepare_value_source: plan.prepareTarget === 'PREPARE_START_TO_DEPART'
+          ? 'AUTO'
+          : participant.prepare_value_source ?? 'LEGACY',
         ...purePrepPersistenceOf(plan, inputs.purePrepCandidate),
         buffer_minutes: basics.bufferMinutes,
       },
