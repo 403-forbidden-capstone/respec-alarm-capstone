@@ -66,7 +66,7 @@ export type OneTapEventType = 'ACKNOWLEDGED' | 'ARRIVAL_CONFIRMED';
 
 /** 울림 계획 — 공통(TS)이 계산하고 네이티브는 받은 대로만 실행함 (plan.ts) */
 export type RingPlan = {
-  /** true = 알람음 + 계속 진동 + 잠금화면 위 알람 화면(WAKE), false = 보통 알림(알림음 · 진동 한 번) + 원탭 버튼 */
+  /** true = 알람음 + 계속 진동 + 잠금화면 위 알람 화면(기상 · 준비 · 출발), false = 보통 알림(알림음 · 진동 한 번) + 원탭 버튼(도착 · 루틴) */
   sound: boolean;
   /** 알람 볼륨 최대치의 몇 % (알람음이 나는 알람만, 평가 보정까지 반영, 10~100). 보통 알림이면 0 */
   volumePercent: number;
@@ -113,6 +113,8 @@ export type ScheduledAlarm = {
   vibration?: AlarmVibration;
   /** 폰에 걸린 말소리 (꾸러미의 voiceTone). 칸이 없던 예약은 null, 이 칸을 모르는 예전 APK는 안 돌려줌(undefined) → 비교하지 않음 */
   voiceTone?: VoiceTone | null;
+  /** 폰에 걸린 계획이 알람음이 있는 알람인지 (plan.sound). 이 칸을 모르는 예전 APK는 안 돌려줌 → 비교하지 않음. 예전에 알림으로 걸린 준비 · 출발을 알람으로 다시 걸게 알아보는 데 씀 (11/19) */
+  sound?: boolean;
   title: string;
   /** 처음 예약한 시각 = 서버 scheduled_at */
   atMillis: number;

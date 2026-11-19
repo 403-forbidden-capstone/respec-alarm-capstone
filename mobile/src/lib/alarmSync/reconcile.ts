@@ -5,6 +5,7 @@ import type { RingPackage as PhoneRingPackage, ScheduledAlarm } from '@capstone/
 import { buildRingPackages, subtitleFor, type PackageSource } from '@shared/ring-package.ts';
 import { safeTimeZone } from '@shared/tz.ts';
 
+import { isRingAlarmType } from '../../../modules/alarm-core/src/plan'; // 순수 계산 파일만 (index는 네이티브 모듈을 찾음 — features/alarm/snooze.ts와 같은 선례)
 import { dbTimeMs, normalizeDbTime, parseDbTime } from '../dbTime';
 
 // 서버 알람을 폰에 미리 걸어 두는 기간. 이보다 먼 알람은 폰에 없어도 더하지 않음 (이미 폰에 있는 것은 이 기간 밖이어도 시각 · 강도를 맞춤)
@@ -173,7 +174,9 @@ export function planReconcile(input: {
     const voiceChanged = existing?.voiceTone !== undefined && p.voiceTone != null && existing.voiceTone !== p.voiceTone;
     const axesChanged =
       existing != null && ((existing.soundKey != null && existing.soundKey !== p.soundKey) || (existing.vibration != null && existing.vibration !== p.vibration) || voiceChanged);
-    if (timeChanged || existing?.intensity !== p.intensity || axesChanged) picked.add(p.alarmId);
+    // 폰에 알림(sound 없음)으로 걸린 준비 · 출발 — 11/19부터 알람이라 같은 시각 · 강도여도 다시 걸어 알람 계획으로 덮음 (칸을 모르는 예전 APK는 비교 안 함)
+    const soundChanged = existing?.sound !== undefined && existing.sound !== isRingAlarmType(p.type);
+    if (timeChanged || existing?.intensity !== p.intensity || axesChanged || soundChanged) picked.add(p.alarmId);
     if (timeChanged && p.type === 'DEPARTURE' && p.groupKey) departureChanged.add(p.groupKey);
   }
 

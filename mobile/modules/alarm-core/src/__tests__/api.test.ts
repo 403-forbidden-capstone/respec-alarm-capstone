@@ -33,6 +33,7 @@ describe('웹 대체 (메모리) — #98', () => {
         intensity: 'STRONG',
         soundKey: 'theme_urgent', // 꾸러미에 없으면 강도에서
         vibration: 'STRONG_CONTINUOUS',
+        sound: true, // 알람음이 있는 계획 (기상 · 준비 · 출발)
         title: '캡스톤 회의',
         atMillis: NOW + 120_000,
         snoozeCount: 0,

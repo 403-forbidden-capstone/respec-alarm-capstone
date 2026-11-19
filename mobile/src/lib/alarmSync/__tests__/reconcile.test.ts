@@ -164,6 +164,26 @@ describe('폰 예약 맞추기 계획 (planReconcile)', () => {
     expect(planReconcile({ server, phone, nowMs: NOW }).schedule.map((p) => p.alarmId)).toEqual(['time', 'strong']);
   });
 
+  it('폰에 알림(sound 없음)으로 걸린 준비 · 출발은 같은 시각 · 강도여도 알람으로 다시 걸고, 기상 · 도착 · 칸을 모르는 예전 APK는 그대로 (11/19)', () => {
+    const server = [
+      pkg('prep', at(60), { type: 'PREPARE' }),
+      pkg('dep', at(60), { type: 'DEPARTURE' }),
+      pkg('wake', at(60), { type: 'WAKE' }),
+      pkg('arr', at(60), { type: 'ARRIVE' }),
+      pkg('old-apk', at(60), { type: 'PREPARE' }),
+      pkg('already', at(60), { type: 'DEPARTURE' }),
+    ];
+    const phone = [
+      onPhone('prep', at(60), { type: 'PREPARE', sound: false }),
+      onPhone('dep', at(60), { type: 'DEPARTURE', sound: false }),
+      onPhone('wake', at(60), { type: 'WAKE', sound: true }),
+      onPhone('arr', at(60), { type: 'ARRIVE', sound: false }),
+      onPhone('old-apk', at(60), { type: 'PREPARE' }),
+      onPhone('already', at(60), { type: 'DEPARTURE', sound: true }),
+    ];
+    expect(planReconcile({ server, phone, nowMs: NOW }).schedule.map((p) => p.alarmId)).toEqual(['prep', 'dep']);
+  });
+
   it('배경음 · 진동이 폰과 다르면 다시 걸고, 폰이 안 돌려주는 칸(예전 APK)은 비교하지 않음 (D1 A)', () => {
     const server = [
       pkg('sound', at(60), { soundKey: 'theme_urgent', vibration: 'SHORT_REPEAT' }),

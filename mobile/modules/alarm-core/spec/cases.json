@@ -126,37 +126,37 @@
       }
     },
     {
-      "name": "준비 시작 — 보통 알림 + 원탭 (강도 · 볼륨 보정은 안 씀)",
+      "name": "준비 — 기상과 같은 알람 (강도 · 볼륨 보정 · 다시 울림 · 미루기 모두 같음)",
       "input": { "type": "PREPARE", "intensity": "STRONG", "volumeAdjust": -0.5 },
       "plan": {
-        "sound": false,
-        "volumePercent": 0,
+        "sound": true,
+        "volumePercent": 50,
         "soundKey": "default",
-        "maxRingMillis": 0,
-        "reRingOffsetsMillis": [],
-        "snoozeMillis": 0,
-        "snoozeMinutesOptions": [],
-        "snoozeLimit": 0,
+        "maxRingMillis": 180000,
+        "reRingOffsetsMillis": [360000, 720000, 1080000],
+        "snoozeMillis": 600000,
+        "snoozeMinutesOptions": [5, 10, 15],
+        "snoozeLimit": 3,
         "heading": "준비할 시간이에요",
-        "oneTapLabel": "준비 시작",
-        "oneTapEventType": "ACKNOWLEDGED"
+        "oneTapLabel": null,
+        "oneTapEventType": null
       }
     },
     {
-      "name": "출발",
+      "name": "출발 — 기상과 같은 알람",
       "input": { "type": "DEPARTURE", "intensity": "NORMAL" },
       "plan": {
-        "sound": false,
-        "volumePercent": 0,
+        "sound": true,
+        "volumePercent": 80,
         "soundKey": "default",
-        "maxRingMillis": 0,
-        "reRingOffsetsMillis": [],
-        "snoozeMillis": 0,
-        "snoozeMinutesOptions": [],
-        "snoozeLimit": 0,
+        "maxRingMillis": 180000,
+        "reRingOffsetsMillis": [480000, 960000],
+        "snoozeMillis": 600000,
+        "snoozeMinutesOptions": [5, 10, 15],
+        "snoozeLimit": 3,
         "heading": "출발할 시간이에요",
-        "oneTapLabel": "출발했어요",
-        "oneTapEventType": "ACKNOWLEDGED"
+        "oneTapLabel": null,
+        "oneTapEventType": null
       }
     },
     {
@@ -197,51 +197,51 @@
       "name": "준비 — 꾸러미의 notice가 화면 줄(heading)을 대신함 (서버가 \"출발까지 N분\"을 채움)",
       "input": { "type": "PREPARE", "intensity": "NORMAL", "notice": "오전 8:40 출발까지 30분" },
       "plan": {
-        "sound": false,
-        "volumePercent": 0,
+        "sound": true,
+        "volumePercent": 80,
         "soundKey": "default",
-        "maxRingMillis": 0,
-        "reRingOffsetsMillis": [],
-        "snoozeMillis": 0,
-        "snoozeMinutesOptions": [],
-        "snoozeLimit": 0,
+        "maxRingMillis": 180000,
+        "reRingOffsetsMillis": [480000, 960000],
+        "snoozeMillis": 600000,
+        "snoozeMinutesOptions": [5, 10, 15],
+        "snoozeLimit": 3,
         "heading": "오전 8:40 출발까지 30분",
-        "oneTapLabel": "준비 시작",
-        "oneTapEventType": "ACKNOWLEDGED"
+        "oneTapLabel": null,
+        "oneTapEventType": null
       }
     },
     {
       "name": "출발 — notice가 \"지금 나가면 도착 · 여유\" 줄이 됨",
       "input": { "type": "DEPARTURE", "intensity": "NORMAL", "notice": "지금 나가면 오전 9:50 도착 · 여유 10분" },
       "plan": {
-        "sound": false,
-        "volumePercent": 0,
+        "sound": true,
+        "volumePercent": 80,
         "soundKey": "default",
-        "maxRingMillis": 0,
-        "reRingOffsetsMillis": [],
-        "snoozeMillis": 0,
-        "snoozeMinutesOptions": [],
-        "snoozeLimit": 0,
+        "maxRingMillis": 180000,
+        "reRingOffsetsMillis": [480000, 960000],
+        "snoozeMillis": 600000,
+        "snoozeMinutesOptions": [5, 10, 15],
+        "snoozeLimit": 3,
         "heading": "지금 나가면 오전 9:50 도착 · 여유 10분",
-        "oneTapLabel": "출발했어요",
-        "oneTapEventType": "ACKNOWLEDGED"
+        "oneTapLabel": null,
+        "oneTapEventType": null
       }
     },
     {
       "name": "notice가 비었거나 공백이면 종류별 기본 줄",
       "input": { "type": "DEPARTURE", "intensity": "NORMAL", "notice": "  " },
       "plan": {
-        "sound": false,
-        "volumePercent": 0,
+        "sound": true,
+        "volumePercent": 80,
         "soundKey": "default",
-        "maxRingMillis": 0,
-        "reRingOffsetsMillis": [],
-        "snoozeMillis": 0,
-        "snoozeMinutesOptions": [],
-        "snoozeLimit": 0,
+        "maxRingMillis": 180000,
+        "reRingOffsetsMillis": [480000, 960000],
+        "snoozeMillis": 600000,
+        "snoozeMinutesOptions": [5, 10, 15],
+        "snoozeLimit": 3,
         "heading": "출발할 시간이에요",
-        "oneTapLabel": "출발했어요",
-        "oneTapEventType": "ACKNOWLEDGED"
+        "oneTapLabel": null,
+        "oneTapEventType": null
       }
     }
   ],
@@ -258,7 +258,8 @@
     { "name": "약: 5분 쉬고 1번 (마지막 울림이 끝나기까지 11분)", "type": "WAKE", "intensity": "SOFT", "firstRingAt": 1000000, "starts": [1000000, 1480000], "silenceGapsMillis": [300000], "unansweredSpanMillis": 660000 },
     { "name": "보통: 5분씩 쉬고 2번 (19분)", "type": "WAKE", "intensity": "NORMAL", "firstRingAt": 1000000, "starts": [1000000, 1480000, 1960000], "silenceGapsMillis": [300000, 300000], "unansweredSpanMillis": 1140000 },
     { "name": "강: 3분씩 쉬고 3번 (21분)", "type": "WAKE", "intensity": "STRONG", "firstRingAt": 1000000, "starts": [1000000, 1360000, 1720000, 2080000], "silenceGapsMillis": [180000, 180000, 180000], "unansweredSpanMillis": 1260000 },
-    { "name": "보통 알림은 다시 울림 없음", "type": "PREPARE", "intensity": "STRONG", "firstRingAt": 1000000, "starts": [1000000], "silenceGapsMillis": [], "unansweredSpanMillis": 0 }
+    { "name": "준비 · 출발도 기상과 같은 다시 울림 (강: 3분씩 쉬고 3번)", "type": "PREPARE", "intensity": "STRONG", "firstRingAt": 1000000, "starts": [1000000, 1360000, 1720000, 2080000], "silenceGapsMillis": [180000, 180000, 180000], "unansweredSpanMillis": 1260000 },
+    { "name": "도착 확인은 보통 알림이라 다시 울림 없음", "type": "ARRIVE", "intensity": "STRONG", "firstRingAt": 1000000, "starts": [1000000], "silenceGapsMillis": [], "unansweredSpanMillis": 0 }
   ],
   "snooze": [
     { "name": "분을 안 고르면 기본 10분 뒤 (알림의 미루기 버튼, 강도와 상관없음)", "intensity": "NORMAL", "nowMillis": 1000, "nextRingAt": 601000 },

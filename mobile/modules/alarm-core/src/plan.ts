@@ -82,11 +82,19 @@ const HEADING: Record<AlarmType, string> = {
   ROUTINE: '루틴 할 시간이에요',
 };
 
+/**
+ * 알람음 · 전체 화면 · 미루기 · 다시 울림이 있는 "진짜 알람" 종류 (11/19 지형님: 기상 · 준비 · 출발 세 알람)
+ * 나머지(도착 확인 · 루틴 단계)는 알림음 · 진동 한 번 + 원탭 버튼. 네이티브 AlarmModels.kt RING_ALARM_TYPES와 같은 목록
+ */
+export const RING_ALARM_TYPES: readonly AlarmType[] = ['WAKE', 'PREPARE', 'DEPARTURE'];
+
+export function isRingAlarmType(type: AlarmType): boolean {
+  return RING_ALARM_TYPES.includes(type);
+}
+
 // 일정 알림(알림음 · 진동 한 번)의 원탭 — alarm-core.md 소리 줄 · screen-data-map H07:
-//   준비 시작 · 출발 · 루틴 단계 = ACKNOWLEDGED, 도착 = ARRIVAL_CONFIRMED
-const ONE_TAP: Record<Exclude<AlarmType, 'WAKE'>, { label: string; eventType: OneTapEventType }> = {
-  PREPARE: { label: '준비 시작', eventType: 'ACKNOWLEDGED' },
-  DEPARTURE: { label: '출발했어요', eventType: 'ACKNOWLEDGED' },
+//   루틴 단계 = ACKNOWLEDGED, 도착 = ARRIVAL_CONFIRMED. 준비 시작 · 출발은 알람 해제(DISMISSED)가 그 뜻이라 원탭이 없음
+const ONE_TAP: Record<Exclude<AlarmType, 'WAKE' | 'PREPARE' | 'DEPARTURE'>, { label: string; eventType: OneTapEventType }> = {
   ARRIVE: { label: '도착했어요', eventType: 'ARRIVAL_CONFIRMED' },
   ROUTINE: { label: '했어요', eventType: 'ACKNOWLEDGED' },
 };
@@ -105,7 +113,8 @@ export function buildRingPlan(
   const soundKey = pkg.soundKey?.trim() || DEFAULT_SOUND_KEY;
   // notice는 서버가 준 JSON 값이라 글자가 아닐 수도 있음(숫자 · null 등) — trim에서 던져 알람이 안 걸리면 안 되므로 글자일 때만 보고, 아니면 기본 줄
   const heading = (fallback: string) => (typeof pkg.notice === 'string' ? pkg.notice.trim() : '') || fallback;
-  if (pkg.type === 'WAKE') {
+  if (pkg.type === 'WAKE' || pkg.type === 'PREPARE' || pkg.type === 'DEPARTURE') {
+    // 기상 · 준비 · 출발은 같은 규칙 — 강도별 볼륨 · 다시 울림, 5 · 10 · 15분 미루기 · 한도. 문구만 종류별 (HEADING 또는 서버 notice)
     return {
       sound: true,
       volumePercent: volumePercentFor(pkg.intensity, pkg.volumeAdjust),
@@ -115,7 +124,7 @@ export function buildRingPlan(
       snoozeMillis: SNOOZE_MILLIS,
       snoozeMinutesOptions: [...SNOOZE_MINUTES_OPTIONS],
       snoozeLimit: Number.isInteger(pkg.snoozeLimit) && (pkg.snoozeLimit as number) >= 0 ? (pkg.snoozeLimit as number) : DEFAULT_SNOOZE_LIMIT,
-      heading: heading(HEADING.WAKE),
+      heading: heading(HEADING[pkg.type]),
       oneTapLabel: null,
       oneTapEventType: null,
     };
