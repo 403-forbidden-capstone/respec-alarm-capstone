@@ -1,5 +1,5 @@
-// 기기 전용 키 (#515) — 폰 네이티브가 앱 없이 새벽에 본인 기상 브리핑만 받아 갈 때 쓰는 키
-//   발급 · 폐기: briefing-device (앱 로그인 토큰). 확인: alarm-briefing-device (이 키, Authorization: Bearer bdk_…)
+// 기기 전용 키 (#515) — 폰 네이티브가 앱 없이 새벽에 본인 기상 브리핑을 받고(alarm-briefing-device), 알림 버튼 기록 · 자동 기상 판정을 올릴 때(alarm-events-device) 쓰는 키
+//   발급 · 폐기: briefing-device (앱 로그인 토큰). 확인: alarm-briefing-device · alarm-events-device (이 키, Authorization: Bearer bdk_…)
 //   서버에는 SHA-256 해시만 (briefing_devices.token_hash). 원문은 발급 응답에 한 번만 실리고 폰 Keystore 저장소에만 남음
 //   한 사용자 · 한 기기에 한 줄 — 다시 발급하면 해시가 바뀌어 예전 키는 바로 못 씀. 로그아웃 = 줄 삭제, 계정 삭제 = profiles cascade
 //   앱 로그인 토큰(JWT)을 Kotlin이 갱신하지 않으려고 따로 둠 (refresh token은 한 번 쓰면 바뀌어 JS 세션과 부딪침)

@@ -172,7 +172,7 @@ const MEETING = ['decision_comments', 'decision_votes', 'decision_states'];
 //   push_sends = 친구 8장 (깨우기 · 미확인 친구 알림 보낸 기록, DB 함수로만) — friend/ch08.mjs에서 따로 확인
 //   team_members = 친구 4장 꼬리 (운영 화면을 열 수 있는 팀원 목록, 추가는 서버 키로) — friend/ch04.mjs에서 따로 확인
 //   wake_scripts = 알람 기상 대본 캐시 (alarm-briefing만 서버 키로 읽고 씀) — 아래 "기상 대본 캐시"에서 따로 확인
-//   briefing_devices = 백그라운드 브리핑 갱신용 기기 키 해시 (#515, briefing-device · alarm-briefing-device만 서버 키로) — 아래 "기기 키"에서 따로 확인
+//   briefing_devices = 백그라운드 브리핑 갱신용 기기 키 해시 (#515, briefing-device · alarm-briefing-device · alarm-events-device만 서버 키로) — 아래 "기기 키"에서 따로 확인
 //   server_routes · server_route_users · server_heartbeat = 서버 전환 스위치(M1, 앱은 get_server_routes()로만 읽음) — 아래 "서버 전환 스위치"에서 따로 확인
 //   server_settings = 서버 전용 설정(M7, 예측 켜기 조건 — 서버(service_role)만 읽음) — 아래 "서버 전용 설정 표"에서 따로 확인
 const SERVER_ONLY = ['roll_attempts', 'rate_limit_events', 'friend_links', 'reports', 'push_tickets', 'push_sends', 'team_members', 'prepare_ml_verified_profiles', 'wake_scripts', 'briefing_devices',
@@ -3732,5 +3732,6 @@ for (const ch of ['ch02', 'ch03', 'ch04', 'ch05', 'ch06', 'ch11', 'ch07', 'ch08'
 
 await (await import('./prepare-ml-approval.mjs')).default(FRIEND_CTX);
 await (await import('./commit-rpc.mjs')).default(FRIEND_CTX);   // 알람 저장 DB 함수 (정할 일 0-10)
+await (await import('./device-events.mjs')).default(FRIEND_CTX);   // 폰이 앱 없이 올리는 기록 (alarm-events-device) + DB 트리거
 
 report();
