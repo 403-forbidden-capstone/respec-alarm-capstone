@@ -12,11 +12,28 @@ import type { Profile, ProfileFields } from './types';
 const COLUMNS =
   'user_id, nickname, handle, handle_changed_at, handle_next_change_at, profile_image_url, default_prepare_minutes, default_outing_prep_minutes, default_buffer_minutes, home_name, home_lat, home_lng, home_radius_m, default_transport, timezone, onboarded_at, wake_sensitivity, wake_margin, privacy_agreed_at, privacy_version, wake_ping_enabled, ml_age_years, ml_school_status, ml_work_status, ml_holiday_code, ml_profile_consented_at, alarm_voice_prefs, preferred_voice_tone';
 
-// 내 프로필 한 행 — 가입하면 DB 트리거가 만들어 둠
+// Only this optional additive column may be absent on an older DB.
+// Other schema/auth/RLS failures must remain visible; NEVER silently turn
+// failed writes into successful "legacy" updates.
+const OUTING_COLUMN = 'default_outing_prep_minutes';
+const LEGACY_COLUMNS = COLUMNS.split(', ').filter((column) => column !== OUTING_COLUMN).join(', ');
+export function isMissingOutingColumn(error: { code?: string; message?: string } | null): boolean {
+  return error?.code === '42703' &&
+    typeof error.message === 'string' &&
+    error.message.includes(OUTING_COLUMN);
+}
+
+// 내 프로필 한 행 — 가입하면 DB 트리거가 만들어 둠.
+// In real web mode, the old production DB may not have the additive column yet.
+// Continue reading old profile fields only. A write to the new field still fails
+// until migration; this read-only fallback must not misrepresent an applied migration.
 export async function getMyProfile(userId: string): Promise<Profile | null> {
   const { data, error } = await supabase.from('profiles').select(COLUMNS).eq('user_id', userId).maybeSingle();
-  if (error) throw error;
-  return data as Profile | null;
+  if (!error) return data as Profile | null;
+  if (!isMissingOutingColumn(error)) throw error;
+  const legacy = await supabase.from('profiles').select(LEGACY_COLUMNS).eq('user_id', userId).maybeSingle();
+  if (legacy.error) throw legacy.error;
+  return legacy.data ? { ...(legacy.data as Omit<Profile, 'default_outing_prep_minutes'>), default_outing_prep_minutes: null } : null;
 }
 
 // 내 아이디 바꾸기 — change_my_handle(DB 함수)로만. 앱이 profiles에 직접 쓰면 막힘(42501, 친구 2장)
