@@ -8,7 +8,7 @@ import { autoLevel, AXES_PICKER_ENABLED, levelOfVoiceTone, resolveIntensity, wak
 import { buildEditLogRows, diffAlarms, type AlarmWrite, type EditInput } from './commit-core.ts';
 import { must } from './db.ts';
 import { HttpError } from './errors.ts';
-import { resolveOverrides, type AlarmRow, type AppointmentRow, type Plan, type PlanDraft, type PlanInputs } from './plan-core.ts';
+import { purePrepPersistenceOf, resolveOverrides, type AlarmRow, type AppointmentRow, type Plan, type PlanDraft, type PlanInputs } from './plan-core.ts';
 import { loadProfile } from './plan.ts';
 import type { NewAppointment, StandaloneInput } from './requests.ts';
 import { buildRingPackages, canceledAlarmIds, subtitleFor } from './ring-package.ts';
@@ -131,6 +131,7 @@ export async function persistAppointment(
       est_travel_minutes: plan.travelMinutes,
       travel_source: travel.source,
       prepare_minutes: plan.prepare.minutes,
+      ...purePrepPersistenceOf(plan, inputs.purePrepCandidate),
       // Old app versions don't send prepare_value_source. If they send a
       // numeric prepare_minutes, the duration may be an auto snapshot OR a
       // manual value. Demote provenance to LEGACY rather than falsely retain AUTO.
