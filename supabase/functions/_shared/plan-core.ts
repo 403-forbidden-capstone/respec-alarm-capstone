@@ -349,16 +349,24 @@ export function computePlan(i: PlanInputs, travel: ResolvedTravel, mode: PlanMod
     //   두 번째 일정은 기록 수도 0으로 넘김 → 출처 DEFAULT · 보정 0. 화면 문구는 sameDayWake일 때 기록 줄을 안 보임
     // 깨우는 여유(wake_margin)는 내 기록의 0.7 · 0.8 · 0.9 분위수 — 보통이 예전 P80 고정과 같음. 매우 중요 일정은 한 단계 위(빠듯 → 보통 → 넉넉, calc/prepare.ts marginForImportance). 직접 고른 준비 시간이 있으면 그 값이 먼저
     // 첫 값(공통)은 온보딩 "일어나서 나가기까지" (2절 3). 반복 다음 회차는 prepareBound로 직전 회차 ±10분 안에서만 움직임 (1절 ④)
+    // Persisted manual legacy time must be an actual calculation override,
+    // not merely a gate that blocks the new model. This preserves it in
+    // roll/edit/wake-replan where the request draft has no prepare_minutes.
+    const storedManual = i.draft.prepareMinutes == null &&
+      i.draft.prepareValueSource !== 'AUTO' &&
+      i.participant?.prepare_value_source === 'MANUAL'
+      ? i.participant.prepare_minutes
+      : undefined;
     const fallback = predictPrepare({
       commonP80: withWake ? firstPrepareMinutes(i.profile) : DEFAULT_COMMON_P80.sameDay,
       personalP80: withWake ? personalPrepareOf(i.stats, wakeMarginOf(i.profile.wake_margin), basics.importance) : null,
       sampleCount: withWake ? i.stats.sampleCount : 0,
-      override: i.draft.prepareMinutes,
+      override: i.draft.prepareMinutes ?? storedManual,
     });
     // C1/W4가 적용돼도 직접 지정한 준비시간과 그날 두 번째 일정(기상 없음)은 기존 규칙이 우선.
     // 기존 DTO 필드(commonP80/correction)는 화면 호환을 위해 유지. MODEL일 때 correction은
     // 기존 공통 기준 대비 모델값 차이이며 개인 P80 보정으로 해석하면 안 됨.
-    const ml = withWake && i.draft.prepareMinutes == null ? i.mlPrediction : undefined;
+    const ml = withWake && i.draft.prepareMinutes == null && storedManual == null ? i.mlPrediction : undefined;
     const predicted: PrepareBasis = ml
       ? {
           ...fallback,
