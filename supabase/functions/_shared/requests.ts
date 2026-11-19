@@ -40,6 +40,7 @@ function readAppointmentDraft(r: Reader, opts: { titleRequired: boolean }): { dr
   let travelSource: 'API' | 'MANUAL' | undefined;
   let prepareMinutes: number | undefined;
   let autoPrepareSnapshotMinutes: number | undefined;
+  let prepareValueSource: 'AUTO' | 'MANUAL' | undefined;
   if (p) {
     participantFields = readParticipantFields(p);
     travelMinutes = p.int('est_travel_minutes', { min: 0, max: 600 });
@@ -48,6 +49,7 @@ function readAppointmentDraft(r: Reader, opts: { titleRequired: boolean }): { dr
     travelSource = p.oneOf('travel_source', ['API', 'MANUAL'] as const);
     prepareMinutes = p.int('prepare_minutes', { min: 0, max: 600 });
     const source = p.oneOf('prepare_value_source', ['AUTO', 'MANUAL'] as const);
+    prepareValueSource = source;
     if (source === 'AUTO' && prepareMinutes == null) p.problemAt('prepare_minutes', '자동 미리보기의 분 값을 함께 보내 주세요');
     if (source === 'AUTO') {
       // AUTO is a comparison snapshot, not an override in predictPrepare.
@@ -67,6 +69,7 @@ function readAppointmentDraft(r: Reader, opts: { titleRequired: boolean }): { dr
     ...(travelMinutes != null ? { travelMinutes, travelSource } : {}),
     ...(prepareMinutes != null ? { prepareMinutes } : {}),
     ...(autoPrepareSnapshotMinutes != null ? { autoPrepareSnapshotMinutes } : {}),
+    ...(prepareValueSource ? { prepareValueSource } : {}),
     ...readAlarmFields(r),
   };
   return { draft, appointment };
