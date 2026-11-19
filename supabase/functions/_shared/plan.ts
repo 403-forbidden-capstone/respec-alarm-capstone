@@ -283,8 +283,9 @@ export async function loadPurePrepCandidate(
   db: Db, userId: string, profile: ProfileRow, now: Date, at: Date,
 ): Promise<PurePrepCandidate | undefined> {
   const allowed = mayUseMl({
-    enabled: getEnv('PURE_PREP_APPLY_ENABLED') === '1' &&
-      getEnv('PREPARE_ML_ENABLED') !== '1',
+    // The pure-prep pilot is per-user; C1/W4 may remain enabled for others.
+    // buildPlan never calls the old model for a user with an active pure basis.
+    enabled: getEnv('PURE_PREP_APPLY_ENABLED') === '1',
     allowForPlan: true,
     userId,
     allowedUserIds: getEnv('PURE_PREP_ALLOWED_USER_IDS'),
