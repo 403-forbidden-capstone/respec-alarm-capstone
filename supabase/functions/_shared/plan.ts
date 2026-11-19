@@ -1,6 +1,6 @@
 // 알람 계획 만들기의 DB 쪽 — 읽기는 부른 사람의 RLS 클라이언트로 (남의 일정 · 기록은 애초에 안 보임)
 // 읽어 온 값을 plan-core.ts의 순수 계산에 넘김. alarm-suggest(미리 보기)와 alarm-commit(저장)이 같이 씀
-import { hasEarlierWake, PREPARE_RECORD_MAX, PREPARE_RECORD_MIN, PREPARE_WINDOW, prepareStatsOf } from './calc/index.ts';
+import { hasEarlierWake, PREPARE_RECORD_MAX, PREPARE_RECORD_MIN, PREPARE_WINDOW, prepareStatsOf, choosePurePrepBasis, type PurePrepCandidate } from './calc/index.ts';
 import type { TravelSample } from './calc/travel.ts';
 import { dbFail, must } from './db.ts';
 import { HttpError } from './errors.ts';
@@ -41,6 +41,8 @@ const DEFAULT_PROFILE: ProfileRow = {
   home_lat: null,
   home_lng: null,
   default_prepare_minutes: null,
+  default_outing_prep_minutes: null,
+  ml_profile_consented_at: null,
   wake_sensitivity: 'NORMAL',
   wake_margin: 'NORMAL',
 };
@@ -51,7 +53,7 @@ export const ALARM_COLUMNS =
 export async function loadProfile(db: Db, userId: string): Promise<ProfileRow> {
   const row = must<ProfileRow | null>(
     'profiles',
-    await db.from('profiles').select('timezone, default_buffer_minutes, default_transport, home_name, home_lat, home_lng, default_prepare_minutes, wake_sensitivity, wake_margin, preferred_voice_tone').eq('user_id', userId).maybeSingle(),
+    await db.from('profiles').select('timezone, default_buffer_minutes, default_transport, home_name, home_lat, home_lng, default_prepare_minutes, default_outing_prep_minutes, ml_profile_consented_at, wake_sensitivity, wake_margin, preferred_voice_tone').eq('user_id', userId).maybeSingle(),
   );
   return row ?? DEFAULT_PROFILE;
 }
@@ -273,6 +275,51 @@ async function optionalMlPrediction(
   }
 }
 
+// Opt-in pure-preparation baseline, reusable by preview and commit.
+// Never substitute wake->departure data (daily_records.actual_prepare_minutes).
+// Only explicitly confirmed onboarding is used cold; history is a separate,
+// stronger consent/feature gate until dismissal and location labels are validated.
+export async function loadPurePrepCandidate(
+  db: Db, userId: string, profile: ProfileRow, now: Date, at: Date,
+): Promise<PurePrepCandidate | undefined> {
+  const allowed = mayUseMl({
+    enabled: getEnv('PURE_PREP_APPLY_ENABLED') === '1' &&
+      getEnv('PREPARE_ML_ENABLED') !== '1',
+    allowForPlan: true,
+    userId,
+    allowedUserIds: getEnv('PURE_PREP_ALLOWED_USER_IDS'),
+  });
+  if (!allowed) return undefined;
+  const profileMinutes = profile.default_outing_prep_minutes;
+  if (getEnv('PURE_PREP_HISTORY_ENABLED') !== '1' || !profile.ml_profile_consented_at) {
+    return choosePurePrepBasis({ profileMinutes }) ?? undefined;
+  }
+  try {
+    const cutoff = new Date(Math.min(now.getTime(), at.getTime()));
+    const { data, error } = await db.from('appointment_participants')
+      .select('prepare_started_at, departed_at, prepare_started_source, departed_source')
+      .eq('user_id', userId)
+      .eq('prepare_started_source', 'PREPARE_ALARM')
+      .eq('departed_source', 'LOCATION')
+      .not('prepare_started_at', 'is', null)
+      .not('departed_at', 'is', null)
+      .lt('departed_at', cutoff.toISOString())
+      .order('departed_at', { ascending: false })
+      .limit(100);
+    if (error || !data) return choosePurePrepBasis({ profileMinutes }) ?? undefined;
+    const history = data.flatMap((record) => {
+      const start = Date.parse(record.prepare_started_at ?? '');
+      const end = Date.parse(record.departed_at ?? '');
+      const mins = (end - start) / 60000;
+      return Number.isFinite(mins) && start < end && end <= cutoff.getTime() &&
+        mins >= 5 && mins <= 240 ? [mins] : [];
+    });
+    return choosePurePrepBasis({ profileMinutes, historicalMinutes: history }) ?? undefined;
+  } catch {
+    return choosePurePrepBasis({ profileMinutes }) ?? undefined;
+  }
+}
+
 // wantAutoTravel: 직접 입력한 이동시간이 있어도 자동 값을 같이 구함 (H03 "자동으로 되돌리기" 미리 보기). 호출이 한 번 늘어남
 // mode: 어느 쪽에서 부르는지. preview(alarm-suggest)는 경고를 "저장할 때 …" 말투로, save(alarm-commit, 기본)는 저장한 뒤 말투로
 export async function buildPlan(ctx: PlanContext, draft: PlanDraft, options: { wantAutoTravel?: boolean; mode?: PlanMode } = {}): Promise<BuiltPlan> {
@@ -326,6 +373,13 @@ export async function buildPlan(ctx: PlanContext, draft: PlanDraft, options: { w
   // Keep manual prepare settings and already-awake schedules on the existing path.
   const allowMl = draft.prepareMinutes == null && draft.withWake !== false &&
     !(draft.withWake == null && sameDayWake);
-  inputs.mlPrediction = await optionalMlPrediction(ctx, basics.at, timeZone, allowMl);
+  inputs.purePrepCandidate = await loadPurePrepCandidate(
+    ctx.db, ctx.userId, profile, ctx.now, basics.at,
+  );
+  // Old C1/W4 predicts wake->departure; pure prep predicts a different target.
+  // They must never compete for the same alarm calculation.
+  if (!inputs.purePrepCandidate) {
+    inputs.mlPrediction = await optionalMlPrediction(ctx, basics.at, timeZone, allowMl);
+  }
   return { plan: computePlan(inputs, travel, options.mode), inputs, timeZone };
 }
