@@ -124,6 +124,7 @@ export function withoutFriendTimes(alarms: readonly AlarmRow[]): AlarmRow[] {
 export type PlanDraft = ParticipantFields &
   AlarmFields & {
     appointmentId?: string;
+    groupId?: string; // new shared appointment; pure-prep pilot excludes group until shared edit parity verified
     at?: Date; // 새 약속의 시각 (기존 약속이면 DB 값)
     destination?: PlaceInput; // 새 약속의 장소
     importance?: Importance;
