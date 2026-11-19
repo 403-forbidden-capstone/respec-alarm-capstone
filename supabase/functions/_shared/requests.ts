@@ -46,6 +46,13 @@ function readAppointmentDraft(r: Reader, opts: { titleRequired: boolean }): { dr
     // ESTIMATE(직선거리 근사값)도 확인한 값으로 MANUAL (7장 7.1.2 단계 4)
     travelSource = p.oneOf('travel_source', ['API', 'MANUAL'] as const);
     prepareMinutes = p.int('prepare_minutes', { min: 0, max: 600 });
+    const source = p.oneOf('prepare_value_source', ['AUTO', 'MANUAL'] as const);
+    if (source === 'AUTO' && prepareMinutes == null) p.problemAt('prepare_minutes', '자동 미리보기의 분 값을 함께 보내 주세요');
+    if (source === 'AUTO') {
+      // AUTO is a comparison snapshot, not an override in predictPrepare.
+      participantFields = { ...participantFields, autoPrepareSnapshotMinutes: prepareMinutes } as typeof participantFields;
+      prepareMinutes = undefined;
+    }
     if (travelMinutes != null && !travelSource) p.problemAt('travel_source', 'est_travel_minutes와 같이 API · MANUAL 중 하나를 보내 주세요');
     if (travelSource && travelMinutes == null) p.problemAt('est_travel_minutes', 'travel_source와 같이 보내 주세요');
   }
@@ -58,6 +65,7 @@ function readAppointmentDraft(r: Reader, opts: { titleRequired: boolean }): { dr
     ...participantFields,
     ...(travelMinutes != null ? { travelMinutes, travelSource } : {}),
     ...(prepareMinutes != null ? { prepareMinutes } : {}),
+    ...(participantFields as PlanDraft).autoPrepareSnapshotMinutes != null ? { autoPrepareSnapshotMinutes: (participantFields as PlanDraft).autoPrepareSnapshotMinutes } : {},
     ...readAlarmFields(r),
   };
   return { draft, appointment };
