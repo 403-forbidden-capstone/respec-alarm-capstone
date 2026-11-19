@@ -31,7 +31,7 @@ import {
 } from './edit.ts';
 import type { EditRequest } from './edit-request.ts';
 import { HttpError } from './errors.ts';
-import { loadAlarms, loadLateCount, loadParticipant, loadPrepareStats, loadProfile, loadTravelSamples, ALARM_COLUMNS, SERIES_APPOINTMENT_COLUMNS, type SeriesAppointmentRow } from './plan.ts';
+import { loadAlarms, loadLateCount, loadParticipant, loadPrepareStats, loadProfile, loadTravelSamples, loadPurePrepCandidate, ALARM_COLUMNS, SERIES_APPOINTMENT_COLUMNS, type SeriesAppointmentRow } from './plan.ts';
 import { computePlan, firstPrepareMinutes, resolveBasics, withoutFriendTimes, type AlarmRow, type AppointmentRow, type ParticipantRow, type Plan, type PlanInputs, type ProfileRow } from './plan-core.ts';
 import { buildRingPackages, canceledAlarmIds, subtitleFor, type RingPackage } from './ring-package.ts';
 import { planGroupPush, sendGroupPush, type GroupPlan, type NotifyOptions } from './notify.ts';
@@ -344,6 +344,9 @@ async function replanForWake(
     stats,
     lateCount4w,
     sameDayWake: earlierAfter,
+    purePrepCandidate: row.appointment.group_id == null && row.participant.user_id === ctx.userId
+      ? await loadPurePrepCandidate(ctx.userDb, ctx.userId, profile, ctx.now, new Date(row.appointment.appointment_at))
+      : undefined,
   };
   const plan = computePlan(inputs, resolvedTravelOf(travel), 'save');
   if (!plan.check.ok) return { ok: false, reason: plan.check.reason };
@@ -419,6 +422,9 @@ async function replanFor(
     stats,
     lateCount4w,
     sameDayWake,
+    purePrepCandidate: patchedRow.group_id == null && participant.user_id === ctx.userId
+      ? await loadPurePrepCandidate(ctx.userDb, ctx.userId, profile, ctx.now, newAt)
+      : undefined,
   };
   const plan = computePlan(inputs, resolvedTravelOf(travelled.travel), 'save');
   if (!plan.check.ok) throw new HttpError('UNPROCESSABLE', plan.check.message, { reason: plan.check.reason, ...(plan.check.detail ?? {}) });
@@ -898,7 +904,10 @@ export async function restoreAppointment(ctx: EditCtx, req: Extract<EditRequest,
   const [profile, stats, lateCount4w] = await Promise.all([env.profile(), env.stats(), env.late()]);
   // 지운 알람의 종류 · 직접 고른 시각은 남아 있지 않음 → 계산된 알람 전부를 자동 값으로 다시 만듦
   // 이미 만들다 만 알람이 있으면(알람은 만들었는데 표시 쓰기가 실패한 뒤 다시 보낸 경우) 그 알람을 기준으로 이어서 맞춤 — 없는 것처럼 다시 넣으면 유일 제약에 걸려 영영 CONFLICT
-  const plan = computePlan({ now: ctx.now, draft: {}, profile, appointment: row, participant, existingAlarms, stats, lateCount4w, sameDayWake }, resolvedTravelOf(travel), 'save');
+  const purePrepCandidate = row.group_id == null && participant.user_id === ctx.userId
+    ? await loadPurePrepCandidate(ctx.userDb, ctx.userId, profile, ctx.now, at)
+    : undefined;
+  const plan = computePlan({ now: ctx.now, draft: {}, profile, appointment: row, participant, existingAlarms, stats, lateCount4w, sameDayWake, purePrepCandidate }, resolvedTravelOf(travel), 'save');
   if (!plan.check.ok) throw new HttpError('UNPROCESSABLE', plan.check.message, { reason: plan.check.reason, ...(plan.check.detail ?? {}) });
   const diff = diffAlarms(plan, existingAlarms, { now: ctx.now, replaceExisting: false });
   const after = await applyAlarmDiff(ctx, participant.participant_id, diff, existingAlarms);
