@@ -1,5 +1,5 @@
-// 서버 함수(Edge Function) 호출 — 앱 JS는 이 함수로만 부름 (전체작업계획 7절 "서버 함수 호출"). 예외 둘: 폰 네이티브 BriefingRefreshWorker가 새벽에 Edge alarm-briefing-device를
-// 직접 부르고(lib/alarmSync/briefingDevice.ts — 이 스위치 · 표를 안 거침), 개발 빌드는 EXPO_PUBLIC_LIVE_TOKEN_URL로 로컬 Live 토큰 서버를 직접 부름(features/voice/api.ts)
+// 서버 함수(Edge Function) 호출 — 앱 JS는 이 함수로만 부름 (전체작업계획 7절 "서버 함수 호출"). 예외 둘: 폰 네이티브가 기기 키로 Edge alarm-briefing-device(BriefingRefreshWorker, 새벽 브리핑 갱신) ·
+// alarm-events-device(DeviceUpload, 알림 버튼 · 자동 기상 판정 기록)를 직접 부르고(lib/alarmSync/briefingDevice.ts — 이 스위치 · 표를 안 거침), 개발 빌드는 EXPO_PUBLIC_LIVE_TOKEN_URL로 로컬 Live 토큰 서버를 직접 부름(features/voice/api.ts)
 //   const result = await callEdge<응답 모양>('alarm-commit', { ...요청 })
 //   · 로그인 토큰은 supabase-js가 자동으로 실음 (세션이 없으면 서버가 AUTH_REQUIRED)
 //   · 실패는 늘 EdgeError(= UserError)로 던짐 → useAction이 토스트로 보여 줌. 서버 원문(message)은 쓰지 않고 code로 문구를 고름

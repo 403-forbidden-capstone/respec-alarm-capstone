@@ -296,10 +296,21 @@ async function writeDailyRecord(userId: string, ctx: WakeContext, wokeAt: Date):
   if (updated.error) throw updated.error;
 }
 
+// 확정 기록이 서버에 들어가면 폰이 띄운 "지금 일어나셨나요?" 알림을 거둠 (먼저 깼어요 · H08 [일어났어요] · 자동 판정이 모두 settle을 지남). 실패는 삼킴 — 알림이 남아도 기록에는 영향 없음
+async function dismissWakePrompt(alarmId: string): Promise<void> {
+  try {
+    await AlarmCore.dismissWakePrompt(alarmId);
+  } catch {
+    // 예전 APK · 웹 · iOS는 할 일 없음
+  }
+}
+
 function settle(userId: string, ctx: WakeContext, wokeAt: Date, how: 'self' | 'auto'): Promise<void> {
   const running = writing.get(ctx.alarmId);
   if (running) return running;
-  const task = writeConfirmation(userId, ctx, wokeAt, how).finally(() => writing.delete(ctx.alarmId));
+  const task = writeConfirmation(userId, ctx, wokeAt, how)
+    .then(() => dismissWakePrompt(ctx.alarmId))
+    .finally(() => writing.delete(ctx.alarmId));
   writing.set(ctx.alarmId, task);
   return task;
 }
@@ -361,7 +372,7 @@ export async function getWakeInProgress(): Promise<WakeCheck | null> {
 // 앱이 앞에 올 때 부름 (hooks/useWakeRecheck) — 최근 12시간에 끈 기상 알람 중 아직 확정이 없는 것을 H08과 같은 판정으로 다시 봄.
 //   알람을 끈 뒤 앱을 안 열었어도(7장 A "판정은 해제 10분 뒤에 나고") 열 때 OS가 보관한 사용 구간으로 같은 결과를 내서, 조건을 채웠으면 확정(USAGE)까지 기록
 //   — 판정 · 쓰기는 getWakeCheck와 같은 함수(evaluateWake · thetaReachedAt → settle)라 H08에서 먼저 확정했거나 두 번 불려도 기록은 한 번뿐 (고정 번호).
-//   조건을 못 채운 것은 아무것도 안 씀: 확인 알림 단계는 H08을 열어야 보이고, 놓침(MISSED)은 서버 배치가 기록함. 네이티브(알람 코어)가 해제 + 10분에 스스로 판정하는 길은 따로 정할 일 (docs/alarm-core.md)
+//   조건을 못 채운 것은 아무것도 안 씀: 확인 알림 단계는 H08을 열어야 보이고, 놓침(MISSED)은 서버 배치가 기록함. 네이티브(알람 코어 WakeJudgeWorker)도 해제 + 10분 2초에 같은 규칙 · 같은 번호로 스스로 판정해 서버에 기록하므로 앱이 열려 다시 판정할 때는 서버의 확정 기록을 보고 건너뜀 (docs/alarm-core.md)
 //   한 알람이 실패해도 다른 알람은 이어서 판정하고, 확정한 알람 id를 돌려줌
 const RECHECK_WINDOW_MS = 12 * 60 * MINUTE_MS;
 const RECHECK_LIMIT = 20;

@@ -11,7 +11,7 @@ import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
-// 백그라운드 브리핑 갱신(#515)용 기기 키 보관 — 앱(JS lib/alarmSync/briefingDevice.ts)이 briefing-device에서 받은 키를 넘겨 줌
+// 백그라운드 브리핑 갱신(#515) · 알림 버튼 기록 · 자동 기상 판정 올리기(DeviceUpload)용 기기 키 보관 — 앱(JS lib/alarmSync/briefingDevice.ts)이 briefing-device에서 받은 키를 넘겨 줌
 // 값 = { url(함수 주소), apikey(공개 anon 키), token(bdk_… 원문), userId, deviceId, expiresAt }
 // token이 든 JSON 전체를 Android Keystore의 AES-GCM 키(앱 밖으로 못 꺼냄)로 암호화해 앱 전용 SharedPreferences에 둠
 // 앱 로그인 토큰(JWT)은 여기 두지 않음 — Kotlin이 Supabase 세션을 갱신하면 JS 세션의 refresh token과 부딪쳐 로그아웃될 수 있어서

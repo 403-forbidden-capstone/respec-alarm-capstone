@@ -131,7 +131,7 @@ describe('준 권한 (내가 이 사람에게 준 것)', () => {
   it('F03 내가 공유: 친구는 그 친구에게 준 값, 그룹은 멤버마다 쓴 행의 합집합', () => {
     expect(friendShareSet(s, SUYEON)).toEqual({ viewAlarm: true, editAlarm: false, viewWake: false });
     expect(friendShareSet(s, JIHYEONG)).toEqual({ viewAlarm: false, editAlarm: false, viewWake: false }); // 행 없음 = 공유 없음
-    expect(groupShareSet(s, GROUP)).toEqual({ viewAlarm: false, editAlarm: false, viewWake: true });
+    expect(groupShareSet(s, GROUP)).toEqual({ viewAlarm: false, editAlarm: false, viewWake: true, viewTrip: false });
   });
 
   it('멤버마다 값이 달라도 합집합으로 한 벌', () => {
@@ -141,6 +141,6 @@ describe('준 권한 (내가 이 사람에게 준 것)', () => {
         { owner_id: ME, grantee_id: JIHYEONG, source_type: 'GROUP', source_id: GROUP, can_view_alarm: false, can_edit_alarm: false, can_view_wake: true },
       ],
     });
-    expect(groupShareSet(mixed, GROUP)).toEqual({ viewAlarm: true, editAlarm: false, viewWake: true });
+    expect(groupShareSet(mixed, GROUP)).toEqual({ viewAlarm: true, editAlarm: false, viewWake: true, viewTrip: false });
   });
 });

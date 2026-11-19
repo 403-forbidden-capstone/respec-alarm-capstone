@@ -197,6 +197,11 @@ export async function markEventsUploaded(clientEventIds: string[]): Promise<void
   await backend.markEventsUploaded(clientEventIds);
 }
 
+/** 기상이 확정되면 부름 — 폰이 띄운 "지금 일어나셨나요?" 알림을 거둠. 실패는 호출하는 쪽에서 삼킴 */
+export async function dismissWakePrompt(alarmId: string): Promise<void> {
+  await backend.dismissWakePrompt(alarmId);
+}
+
 /** 앱이 켜져 있는 동안 새 기록이 생기면 알림 (꺼져 있을 때 쌓인 것은 getPendingEvents로 읽음) */
 export function addAlarmEventListener(listener: (event: AlarmEvent) => void): { remove(): void } {
   return backend.addEventListener(listener);

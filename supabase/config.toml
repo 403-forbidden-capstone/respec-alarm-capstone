@@ -479,6 +479,10 @@ verify_jwt = true
 [functions.alarm-briefing-device]
 verify_jwt = false
 
+# 폰 네이티브가 앱을 열지 않고 알림 버튼 기록 · 자동 기상 판정을 올리는 길 — 같은 기기 키(로그인 토큰 아님)라 게이트웨이 JWT 검사를 끄고 코드에서 확인
+[functions.alarm-events-device]
+verify_jwt = false
+
 # L9 시간표 채우기 — 사진(base64) → Claude → 수업 줄. 앱이 로그인 토큰으로 부름
 [functions.timetable-extract]
 verify_jwt = true

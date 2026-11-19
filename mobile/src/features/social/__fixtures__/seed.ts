@@ -35,11 +35,12 @@ export const groups: GroupRow[] = [
   { group_id: GROUP, group_name: '캡스톤팀', created_at: '2026-03-05T00:00:00.000Z' },
 ];
 
-const member = (user_id: string, wake_share_opt_in: boolean, joined_at = '2026-03-05T00:00:00.000Z'): MemberRow => ({
+const member = (user_id: string, wake_share_opt_in: boolean, joined_at = '2026-03-05T00:00:00.000Z', trip_share_opt_in = false): MemberRow => ({
   group_id: GROUP,
   user_id,
   invite_status: 'JOINED',
   wake_share_opt_in,
+  trip_share_opt_in,
   joined_at,
   notifications_off: false,
 });

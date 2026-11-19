@@ -10,32 +10,46 @@ export type Person = {
   handle: string | null; // @etion
 };
 
-// 기상 상태 한 줄 (G01 · G02 멤버 · G03 · H01 그룹 요약) — 서버 6단계를 화면 3단계로 묶은 값 (친구 7장, map.ts wakeStateOf)
-//   SCHEDULED 아직('8:50 알람') · RANG 울렸어요(울림 · 해제 · 미확인) · WOKE 일어남 · NO_ALARM 알람 없음
+// 기상 상태 한 줄 (G01 · G02 멤버 · G03 · H01 그룹 요약) — 서버 기상 6단계를 화면 3단계로 묶고, 출발 · 도착 공유가 보이면 뒤에 3단계를 더함 (친구 7장, map.ts wakeStateOf)
+//   SCHEDULED 취침 중('취침 중 · 오전 8:50 알람') · RANG 알람 울리는 중 · 알람 울림 · 기상 확인 전(울림 · 해제 · 미확인) · WOKE 기상 완료 · NO_ALARM 알람 없음
+//   PREPARING 준비 중(기상 확인 뒤 출발 전, 출발 · 도착 공유를 켠 사람만) · DEPARTED 이동 중 · 출발 · ARRIVED 도착
 //   NOT_SHARED 공유 안 함(동의 안 함 · 숨김 · 차단 구분 없음) · NO_APPOINTMENT 그 그룹 약속이 없는 날
-export type WakeStage = 'SCHEDULED' | 'RANG' | 'WOKE' | 'NO_ALARM' | 'NOT_SHARED' | 'NO_APPOINTMENT';
+export type WakeStage = 'SCHEDULED' | 'RANG' | 'WOKE' | 'PREPARING' | 'DEPARTED' | 'ARRIVED' | 'NO_ALARM' | 'NOT_SHARED' | 'NO_APPOINTMENT';
 export type WakeState = {
   stage: WakeStage;
-  text: string; // 일어났어요 8:08
+  text: string; // 기상 완료 · 오전 8:08
   dot: WakeDot | null; // 색 점 — 공유 안 함 · 약속 없는 날은 없음
   woke: boolean;
 };
 
 // DB sharing_permissions의 can_view_alarm · can_edit_alarm · can_view_wake
-export type Permission = 'viewAlarm' | 'editAlarm' | 'viewWake';
-export type PermissionSet = Record<Permission, boolean>;
+//   viewTrip = 그룹 출발 · 도착 공유 (group_members.trip_share_opt_in) — 그룹 관계에만 있음. 친구 관계 · 권한 행에는 없어 비어 있으면 꺼짐
+export type Permission = 'viewAlarm' | 'editAlarm' | 'viewWake' | 'viewTrip';
+export type PermissionSet = Record<'viewAlarm' | 'editAlarm' | 'viewWake', boolean> & { viewTrip?: boolean };
 
 // 알람 조회를 켤 때 보이는 것 · 안 보이는 것 안내 한 줄 (친구 13-다 · 13-사 — 켤 때 따로 동의를 받지 않으므로 F03에서 미리 알림)
 export const VIEW_ALARM_NOTE = '일정 장소도 보여요 · 집 · 출발지는 안 보여요';
 
-export const PERMISSIONS: readonly { key: Permission; name: string; description: string }[] = [
+export const PERMISSIONS: readonly { key: 'viewAlarm' | 'editAlarm' | 'viewWake'; name: string; description: string }[] = [
   { key: 'viewAlarm', name: '알람 조회', description: '알람 시간 · 일정 · 장소 · 준비 시간을 볼 수 있어요.' },
   { key: 'editAlarm', name: '알람 설정', description: '내 알람을 추가하거나 시간을 바꿀 수 있어요.' },
   { key: 'viewWake', name: '기상 상태 조회', description: '기상 확인 여부와 확인 시각을 볼 수 있어요.' },
 ];
 
+// 그룹 출발 · 도착 공유 — 기상 공유와 따로 한 동의(기본 끔). 기상 공유를 켠 사람만 켤 수 있고 기상 공유를 끄면 같이 꺼짐 (11/19 지형님 결정)
+//   chip = G02 '내가 공유 중' 칩 글자
+export const TRIP_PERMISSION: { key: 'viewTrip'; name: string; chip: string; description: string } = {
+  key: 'viewTrip',
+  name: '출발 · 도착 공유',
+  chip: '출발 · 도착',
+  description: '이 그룹 일정의 출발 · 도착 시각이 보여요. 장소는 안 보여요.',
+};
+export const TRIP_NEEDS_WAKE = '기상 상태 공유를 켜야 켤 수 있어요';
+
 // F03 스위치 목록 — 친구 관계에는 기상 조회가 없음(그룹 기상 공유 동의 하나로만, 친구 6장 6-가). 그룹 관계의 기상 조회는 그 그룹에 내 기상 공유를 켜는 동의
-export const permissionsFor = (kind: 'friend' | 'group') => (kind === 'friend' ? PERMISSIONS.filter((p) => p.key !== 'viewWake') : PERMISSIONS);
+//   출발 · 도착 공유는 그룹 관계에만 (맨 끝)
+export const permissionsFor = (kind: 'friend' | 'group'): readonly { key: Permission; name: string; description: string }[] =>
+  kind === 'friend' ? PERMISSIONS.filter((p) => p.key !== 'viewWake') : [...PERMISSIONS, TRIP_PERMISSION];
 
 // 관계 하나에서 준(받은) 권한 — DB sharing_permissions의 source_type · source_id
 // sourceId: 그룹이면 group_id, 친구면 상대 사람 id (실데이터는 friends.friend_id로 찾아 사람으로 바꿈)
@@ -62,9 +76,13 @@ export type GroupItem = {
   name: string;
   initial: string; // 그룹 아이콘 글자
   memberCount: number;
-  wokeCount: number | null; // 오늘 일어난 사람 수 — 그 그룹 약속이 없는 날은 null (G01 '오늘 n명 일어남' 줄을 숨김)
+  wokeCount: number | null; // 오늘 기상 완료 수(준비 중 · 출발 · 도착 포함) — 그 그룹 약속이 없는 날은 null (G01 '오늘 n명 기상 완료' 줄을 숨김)
+  trip: TripCounts | null; // 출발 · 도착이 보이는 사람이 있을 때만 — G01 요약 줄이 '도착 1 · 이동 중 2 · 기상 완료 1'로 바뀜
   grants: PermissionSet; // 이 그룹에 내가 준 권한
 };
+
+// 그룹 요약 줄 숫자 — 도착 · 이동 중(출발했고 아직 도착 전) · 기상 완료(출발 전, 준비 중 포함)
+export type TripCounts = { arrived: number; moving: number; woke: number };
 
 // 홈(H01)의 그룹 기상 요약
 export type GroupSummary = {
@@ -72,6 +90,7 @@ export type GroupSummary = {
   name: string;
   members: { person: Person; state: WakeState }[];
   wokeCount: number | null; // 약속 없는 날은 null
+  trip: TripCounts | null;
 };
 
 export type GroupMember = {
@@ -107,6 +126,7 @@ export type GroupDetail = {
   appointments: GroupAppointment[]; // 연결 일정 (여러 개일 수 있음, 오늘부터)
   members: GroupMember[]; // 참여 중인 사람만 (초대 중은 + 초대 시트에서) — 그룹장 표시 없음 (5장)
   wakeShareOptIn: boolean; // 이 그룹에 내 기상 상태 공유를 동의했는지 (group_members.wake_share_opt_in — F03 그룹 관계의 기상 스위치와 같은 값)
+  tripShareOptIn: boolean; // 이 그룹에 내 출발 · 도착 공유를 동의했는지 (group_members.trip_share_opt_in, 기본 끔 — 기상 공유가 꺼지면 같이 꺼짐)
   notificationsOff: boolean; // 이 그룹에서 오는 알림 끄기 (group_members.notifications_off)
 };
 
@@ -133,13 +153,16 @@ export type AlarmProposal = { id: string; proposerName: string; kindLabel: strin
 
 export type ProposalResponse = 'APPLIED' | 'DISMISSED' | 'EXPIRED';
 
-// G03 그룹원 기상 상태 — 알람 시각 한 줄 + 확인 시각만. 알람 카드(강도 · 장소 · 준비)는 알람 조회 권한이 있을 때 G04에서 (7-다 · 7-41)
+// G03 그룹원 기상 상태 — 알람 시각 · 확인 시각 · (공유했으면) 출발 · 도착 시각. 알람 카드(강도 · 장소 · 준비)는 알람 조회 권한이 있을 때 G04에서 (7-다 · 7-41)
 export type MemberWake = {
   person: Person;
   groupName: string; // 공유 범위 안내
   state: WakeState;
   alarmAt: Date | null; // 그날 첫 기상 알람 시각
   confirmedAt: Date | null;
+  departedAt: Date | null; // 출발 · 도착은 상대가 출발 · 도착 공유를 켰을 때만 옴 (장소 · 감지 출처는 안 옴)
+  arrivedAt: Date | null;
+  tripVisible: boolean; // 상대가 이 그룹에 출발 · 도착 공유를 켰음 — G03 공유 범위 글자
   canViewAlarm: boolean; // 알람 조회 권한 → [알람 보기] (G04)
   noGroupAppointment: boolean; // 그날 이 그룹 약속이 없어 기상 상태를 주지 않는 날 (D57 — 공유 안 함과 다름)
 };

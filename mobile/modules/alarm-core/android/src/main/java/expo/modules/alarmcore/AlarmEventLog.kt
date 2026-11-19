@@ -5,7 +5,7 @@ import org.json.JSONArray
 
 // 폰에 쌓이는 울림 기록 — 앱이 켜지면 읽어서 alarm_events로 올리고(markEventsUploaded) 지움
 // 앱을 끄거나 재부팅해도 남도록 commit()으로 바로 씀
-// 서버로 올리는 일(WorkManager)은 로그인 토큰이 필요해 여기서 하지 않음 (docs/alarm-core.md)
+// 알림 버튼 · 기상 해제 기록은 쌓이는 즉시 DeviceUpload가 WorkManager로 서버에 바로 올림 (기기 키 — 키가 없으면 앱이 열릴 때 올림). 기록은 지우지 않고 앱이 같은 번호로 다시 올림
 object AlarmEventLog {
   private const val PREFS = "capstone_alarm_core_events"
   private const val KEY = "events"
@@ -40,6 +40,7 @@ object AlarmEventLog {
     )
     store(context, record)
     runCatching { listener?.invoke(record) }
+    runCatching { DeviceUpload.onAppended(context.applicationContext, record) }
   }
 
   // 오래된 순

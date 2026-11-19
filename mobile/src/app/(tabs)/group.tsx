@@ -39,7 +39,7 @@ import { INVITES_SHOWN, moreInvitesText } from '@/features/social/groupTexts';
 import { relationFromLists } from '@/features/social/searchView';
 import { SearchBox } from '@/features/social/components/SearchBox';
 import { useWakeLoad } from '@/features/social/hooks/useGroupWake';
-import { wokeLine } from '@/features/social/wakeTexts';
+import { groupWakeLine } from '@/features/social/wakeTexts';
 import { usePersonMenu } from '@/features/social/hooks/usePersonMenu';
 import { shareFriendInvite } from '@/features/social/invite';
 import { friendLinkUrl } from '@/features/social/inviteLink';
@@ -363,7 +363,7 @@ function FriendTab({
 }
 
 // 그룹 탭 — 받은 초대 · 만들기 · 참여(코드 입력) · 참여 중인 그룹
-// 그룹 카드는 모두 상세로 (5-04). '오늘 n명 일어남'은 그 그룹 약속이 있는 날만 (7-사 · 7-34)
+// 그룹 카드는 모두 상세로 (5-04). '오늘 n명 기상 완료'은 그 그룹 약속이 있는 날만 (7-사 · 7-34)
 function GroupTab({
   groups,
   invites,
@@ -431,7 +431,7 @@ function GroupTab({
               {g.name}
             </Text>
             <Text variant="small" tone="sub" style={styles.groupSub}>
-              {[`${g.memberCount}명`, wokeLine(g.wokeCount)].filter(Boolean).join(' · ')}
+              {[`${g.memberCount}명`, groupWakeLine(g.wokeCount, g.trip)].filter(Boolean).join(' · ')}
             </Text>
             <View style={styles.chips}>
               {(names.length ? names : ['공유 없음']).map((name) => (

@@ -115,6 +115,11 @@ class AlarmCoreModule : Module() {
       UsageSpans.read(context, fromMillis.toLong(), toMillis.toLong())
     }
 
+    // 기상이 확정되면(먼저 깼어요 · 일어났어요 · 자동 판정) 떠 있는 "지금 일어나셨나요?" 알림을 거둠 + 확정 표시 (WakePrompt)
+    AsyncFunction("dismissWakePrompt") { alarmId: String ->
+      WakePrompt.dismiss(context, alarmId)
+    }
+
     AsyncFunction("getPendingEvents") {
       AlarmEventLog.pending(context).map { it.toMap() }
     }

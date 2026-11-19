@@ -13,7 +13,7 @@ async function fetchSnapshot(me: string): Promise<Snapshot> {
   const [friends, groups, members, perms, profiles] = await Promise.all([
     supabase.from('friends').select('friend_id, requester_id, addressee_id, status, requested_at'),
     supabase.from('groups').select('group_id, group_name, created_at').order('created_at'),
-    supabase.from('group_members').select('group_id, user_id, invite_status, wake_share_opt_in, joined_at, notifications_off'),
+    supabase.from('group_members').select('group_id, user_id, invite_status, wake_share_opt_in, trip_share_opt_in, joined_at, notifications_off'),
     supabase.from('sharing_permissions').select('owner_id, grantee_id, source_type, source_id, can_view_alarm, can_edit_alarm, can_view_wake'),
     supabase.rpc('get_public_profiles'),
   ]);

@@ -22,13 +22,14 @@ import { ProposalCards } from '@/features/social/components/ProposalCards';
 import { ReceivedWakePingLine } from '@/features/social/components/ReceivedWakePingLine';
 import { AppointmentAlarmCard } from '@/features/alarm/components/AppointmentAlarmCard';
 import { MorningCard } from '@/features/alarm/components/MorningCard';
+import { TripCard } from '@/features/alarm/components/TripCard';
 import { ScheduleList } from '@/features/alarm/components/ScheduleList';
 import { TextLink } from '@/features/alarm/components/TextLink';
 import { useAppointmentToggle } from '@/features/alarm/hooks/useAppointmentToggle';
 import { useDepartCheck } from '@/features/alarm/hooks/useDepartCheck';
 import { useNow } from '@/features/alarm/hooks/useNow';
 import { useWakeCardRefresh } from '@/features/alarm/hooks/useWakeCardRefresh';
-import { morningCardVisible } from '@/features/alarm/morning';
+import { morningCardVisible, tripCardOf } from '@/features/alarm/morning';
 import { isEvening } from '@/features/alarm/schedule';
 import { KIND_LABEL } from '@/features/alarm/types';
 import { DetectionRows } from '@/features/location/DetectionRows';
@@ -172,6 +173,11 @@ export default function HomeScreen() {
           onPress={() => router.push({ pathname: '/alarm/[id]', params: { id: morning.appointmentId } })}
         />
       ) : null}
+      {/* 출발한 뒤 — 아침 카드 자리에 '이동 중 · 도착 예정', 도착하면 '도착했어요' (약속 + 60분까지) */}
+      {(() => {
+        const trip = tripCardOf(morning, current);
+        return trip && morning ? <TripCard view={trip} onPress={() => router.push({ pathname: '/alarm/[id]', params: { id: morning.appointmentId } })} /> : null;
+      })()}
       {/* 위치로 잡은 출발 · 도착 — 출발하면 아침 카드가 빠지고 이 줄이 그 자리를 이음 */}
       <DetectionRows reloadOn={data} onChanged={reload} />
 

@@ -67,6 +67,7 @@ const mockCore = {
   hasUsageAccess: jest.fn<() => Promise<boolean>>(),
   getUsageSpans: jest.fn<(from: number, to: number) => Promise<{ startMillis: number; endMillis: number }[]>>(),
   getPendingEvents: jest.fn<() => Promise<unknown[]>>(),
+  dismissWakePrompt: jest.fn<(id: string) => Promise<void>>(),
 };
 let mockUuidSeq = 0; // makeUuid가 부를 때마다 uuid-1, uuid-2…
 jest.mock('@capstone/alarm-core', () => ({
@@ -80,6 +81,7 @@ jest.mock('@capstone/alarm-core', () => ({
   hasUsageAccess: () => mockCore.hasUsageAccess(),
   getUsageSpans: (from: number, to: number) => mockCore.getUsageSpans(from, to),
   getPendingEvents: () => mockCore.getPendingEvents(),
+  dismissWakePrompt: (id: string) => mockCore.dismissWakePrompt(id),
   makeUuid: () => `uuid-${++mockUuidSeq}`,
   toUseSpans: (spans: { startMillis: number; endMillis: number }[], dismissedAt: number) =>
     spans.map((s) => [(s.startMillis - dismissedAt) / 60_000, (s.endMillis - dismissedAt) / 60_000]),
@@ -138,6 +140,7 @@ beforeEach(() => {
   mockCore.list.mockResolvedValue([]);
   mockCore.hasUsageAccess.mockResolvedValue(true);
   mockCore.getUsageSpans.mockResolvedValue([]);
+  mockCore.dismissWakePrompt.mockResolvedValue();
   mockCore.getPendingEvents.mockResolvedValue([]);
   forgetPlaces();
   clearEdits();
@@ -1683,6 +1686,31 @@ describe('기상 확인 (H08)', () => {
     expect(writes).toHaveLength(1);
     expect(writes[0].payload).toMatchObject({ event_type: 'WAKE_CONFIRMED', event_at: new Date(min(12)).toISOString(), input_source: 'BUTTON' });
     expect(callsTo('daily_records', 'insert')).toHaveLength(1);
+  });
+
+  it('확정 기록이 들어가면 폰의 확인 알림을 거둠 (일어났어요 · 자동 판정) — 알림을 못 거둬도 확정은 그대로', async () => {
+    const id = '00000000-0000-4000-8000-0000000000b1';
+    setup([{ event_type: 'DISMISSED', event_at: eventAt(0) }]);
+    at(12);
+    mockCore.dismissWakePrompt.mockClear();
+    await real.confirmWake(id, 'self');
+    expect(mockCore.dismissWakePrompt).toHaveBeenCalledWith(id);
+
+    mockCore.dismissWakePrompt.mockClear();
+    mockCore.dismissWakePrompt.mockRejectedValueOnce(new Error('예전 APK'));
+    at(15);
+    mockCore.getUsageSpans.mockResolvedValue([{ startMillis: min(2), endMillis: min(3.5) }]);
+    await expect(real.confirmWake(id, 'auto')).resolves.toBeUndefined();
+    expect(mockCore.dismissWakePrompt).toHaveBeenCalledWith(id);
+  });
+
+  it('확정 기록이 실패하면 알림은 그대로 둠', async () => {
+    setup([{ event_type: 'DISMISSED', event_at: eventAt(0) }]);
+    mockRoutes['daily_records:insert'] = () => ({ error: { code: '42501', message: 'denied' } });
+    at(12);
+    mockCore.dismissWakePrompt.mockClear();
+    await expect(real.confirmWake('00000000-0000-4000-8000-0000000000b1', 'self')).rejects.toBeTruthy();
+    expect(mockCore.dismissWakePrompt).not.toHaveBeenCalled();
   });
 
   it('그날 기록이 이미 있으면 빈 칸(기상 확인 시각)만 채우고 있던 값은 덮지 않음', async () => {
