@@ -66,6 +66,7 @@ object WakePrompt {
   /** 앱(JS)이 기상을 확정하면 부름 — 떠 있는 알림을 거두고 확정 표시를 남김 */
   fun dismiss(context: Context, alarmId: String) {
     preferences(context).edit().putLong("confirmed_$alarmId", System.currentTimeMillis()).apply()
+    WakeJudgeStore.remove(context, alarmId) // 확정됐으니 저장해 둔 판정 예약도 지움 (재부팅 복원 대상에서 뺌)
     NotificationManagerCompat.from(context.applicationContext).cancel(notificationId(alarmId))
   }
 }

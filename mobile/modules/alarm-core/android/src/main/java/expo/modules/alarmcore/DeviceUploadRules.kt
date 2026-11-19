@@ -31,6 +31,15 @@ object DeviceUploadRules {
    */
   fun dismissAlsoAcknowledges(alarmType: String, departByLocation: Boolean): Boolean = alarmType == "DEPARTURE" && !departByLocation
 
+  /** 재부팅 · 시간 변경 뒤 저장해 둔 판정 예약을 어떻게 할지 (G7) — 12시간이 지났으면 버림(DROP), 판정 시각이 이미 지났으면 바로 한 번(RUN_NOW), 아직이면 다시 검(RESCHEDULE) */
+  enum class JudgeRestore { DROP, RUN_NOW, RESCHEDULE }
+
+  fun judgeRestoreAction(dismissedAtMillis: Long, nowMillis: Long): JudgeRestore = when {
+    nowMillis - dismissedAtMillis >= CONFIRMED_WINDOW_MILLIS -> JudgeRestore.DROP
+    judgeAtMillis(dismissedAtMillis) <= nowMillis -> JudgeRestore.RUN_NOW
+    else -> JudgeRestore.RESCHEDULE
+  }
+
   /** 기상 알람 해제 기록이면 해제 + 10분 판정 작업을 검 */
   fun shouldJudgeWake(alarmType: String, eventType: String): Boolean = alarmType == "WAKE" && eventType == "DISMISSED"
 

@@ -109,8 +109,12 @@ object WakeJudgeSchedule {
     return PendingIntent.getBroadcast(context, requestCode(alarmId), intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
   }
 
-  /** 해제 직후 부름. 같은 알람을 또 끄면(미루고 다시 울린 뒤) 나중 해제 기준으로 바뀜 — 앱도 확정 전이면 마지막 해제부터 10분을 봄 (pickDismissedAt) */
+  /**
+   * 해제 직후 부름. 같은 알람을 또 끄면(미루고 다시 울린 뒤) 나중 해제 기준으로 바뀜 — 앱도 확정 전이면 마지막 해제부터 10분을 봄 (pickDismissedAt)
+   * AlarmManager 예약은 재부팅하면 사라지므로 예약을 폰에 저장해 두고(WakeJudgeStore) AlarmBootReceiver가 restore로 복원함 (G7)
+   */
   fun schedule(context: Context, alarmId: String, dismissedAt: Long) {
+    WakeJudgeStore.save(context, alarmId, dismissedAt)
     val at = DeviceUploadRules.judgeAtMillis(dismissedAt)
     val exact = runCatching {
       if (!AlarmScheduler.canScheduleExactAlarms(context)) return@runCatching false
@@ -120,6 +124,25 @@ object WakeJudgeSchedule {
     if (!exact) {
       enqueue(context, alarmId, dismissedAt, expedited = false)
       enqueuePrompt(context, alarmId, dismissedAt)
+    }
+  }
+
+  /**
+   * 재부팅 · 시간 변경 뒤 저장해 둔 판정 예약을 되살림 (AlarmBootReceiver, 백그라운드 스레드에서) — 아직이면 다시 걸고,
+   * 꺼져 있는 사이 판정 시각이 지났으면 바로 한 번 판정(서버로 올리는 작업 + 확인 알림), 12시간이 지난 것은 버림 (G7)
+   */
+  fun restore(context: Context) {
+    val now = System.currentTimeMillis()
+    WakeJudgeStore.all(context).forEach { (alarmId, dismissedAt) ->
+      when (DeviceUploadRules.judgeRestoreAction(dismissedAt, now)) {
+        DeviceUploadRules.JudgeRestore.DROP -> WakeJudgeStore.remove(context, alarmId)
+        DeviceUploadRules.JudgeRestore.RESCHEDULE -> runCatching { schedule(context, alarmId, dismissedAt) }
+        DeviceUploadRules.JudgeRestore.RUN_NOW -> {
+          runCatching { enqueue(context, alarmId, dismissedAt, expedited = true) }
+          runCatching { WakePrompt.promptIfNeeded(context, alarmId, dismissedAt) }
+          WakeJudgeStore.remove(context, alarmId, dismissedAt)
+        }
+      }
     }
   }
 
@@ -151,6 +174,7 @@ class WakeJudgeReceiver : BroadcastReceiver() {
     val alarmId = intent.getStringExtra(DeviceUpload.EXTRA_ALARM_ID) ?: return
     val dismissedAt = intent.getLongExtra(DeviceUpload.EXTRA_DISMISSED_AT, 0L).takeIf { it > 0 } ?: return
     runCatching { WakeJudgeSchedule.enqueue(context, alarmId, dismissedAt, expedited = true) }
+    WakeJudgeStore.remove(context, alarmId, dismissedAt) // 판정이 시작됨 — 재부팅해도 다시 안 함 (이후 올리기는 WorkManager가 이어 감)
     val pending = goAsync()
     Thread {
       try {
@@ -168,6 +192,7 @@ class WakePromptWorker(context: Context, params: WorkerParameters) : Worker(cont
     val alarmId = inputData.getString(DeviceUpload.EXTRA_ALARM_ID) ?: return Result.success()
     val dismissedAt = inputData.getLong(DeviceUpload.EXTRA_DISMISSED_AT, 0L).takeIf { it > 0 } ?: return Result.success()
     runCatching { WakePrompt.promptIfNeeded(applicationContext, alarmId, dismissedAt) }
+    WakeJudgeStore.remove(applicationContext, alarmId, dismissedAt)
     return Result.success()
   }
 }
