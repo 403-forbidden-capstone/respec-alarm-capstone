@@ -97,7 +97,7 @@ internal class BriefingSpeaker(
       p.setAudioAttributes(attributes)
       p.setDataSource(context, src.uri)
       p.prepare()
-      p.isLooping = repeating
+      p.isLooping = repeating && onHold == null
       // 반복 중에는 끝나지 않음(isLooping) — 끼울 안내가 있으면 holdAtNextBoundary가 반복을 풀어 이번 바퀴 끝에서 여기로 옴
       p.setOnCompletionListener { if (!hold()) finish() }
       p.setOnErrorListener { _, what, extra ->
