@@ -88,7 +88,7 @@ update public.server_routes set mode = 'edge'   where kind = 'job' and name = 'w
 update public.server_routes set mode = 'edge' where mode <> 'edge';
 ```
 
-**앱이 표를 쓰는 법** (M2, `mobile/src/lib/edge.ts` · `edgeRoutes.ts` — 앱 JS는 서버 함수를 `callEdge()` 한 곳으로만 부름. 예외 둘: 폰 네이티브가 새벽에 Edge `alarm-briefing-device`를 직접 부르는 길(`lib/alarmSync/briefingDevice.ts`, 이 스위치 · 표를 안 거침)과 개발 빌드의 로컬 Live 토큰 서버)
+**앱이 표를 쓰는 법** (M2, `mobile/src/lib/edge.ts` · `edgeRoutes.ts` — 앱 JS는 서버 함수를 `callEdge()` 한 곳으로만 부름. 예외 둘: 폰 네이티브가 같은 기기 키로 Edge `alarm-briefing-device`(새벽 브리핑 갱신) · `alarm-events-device`(알림 버튼 · 자동 기상 판정을 앱 없이 올림)를 직접 부르는 길(`lib/alarmSync/briefingDevice.ts`, 이 스위치 · 표를 안 거침)과 개발 빌드의 로컬 Live 토큰 서버)
 
 - 서버 주소는 앱 빌드에 고정(`EXPO_PUBLIC_API_BASE_URL`, https · origin 하나만). 없거나 모양이 틀리면 표를 묻지도 않고 Edge만 부름 → 표가 잘못 바뀌어도 로그인 토큰이 남의 주소로 가지 않음. 이 값을 EAS 환경 · 웹 빌드에 넣는 것은 서버 배포(완결점 1-7) 뒤
 - 로그인한 뒤 `get_server_routes()`를 읽어 5분 동안 씀(사용자가 바뀌면 바로 다시). 못 읽으면(오류 · 모양 이상 · 3초 넘게 걸림) **전부 `edge`**, 옛 값도 안 씀. 실패하면 30초 동안은 다시 안 물음 → 표를 `edge`로 되돌려도 앱에는 **최대 5분**(앱을 다시 켜면 바로) 뒤에 반영됨. 옛 APK(v0.0.2)는 이 코드가 없어 계속 Edge만 부름

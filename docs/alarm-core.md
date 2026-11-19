@@ -178,7 +178,7 @@ type RingPackage = {
 
 - 앱이 켜져 있으면 `addAlarmEventListener`로 새 기록을 바로 받음. 꺼져 있을 때 쌓인 것은 `getPendingEvents()`로 읽음 (오래된 순)
 - 올리기에 성공한 것만 `markEventsUploaded(clientEventIds)`로 지움
-- **폰이 스스로 올리는 길(WorkManager + 네트워크 조건)은 아직 없음**: 로그인 토큰이 네이티브에 있어야 하는데 지금은 JS(Supabase 세션)에만 있음. 앱 연결(P6)에서는 앱이 올림 — 앱이 앞에 올 때 · 기상 확인 화면에 들어올 때 `lib/alarmSync`의 `uploadEvents()`가 `alarm_events`로 올리고(`client_event_id` 중복 무시) 올린 것만 `markEventsUploaded`로 지움. 로그아웃 때는 올려 본 뒤 남은 기록을 버림 (아래 "앞으로 더할 것")
+- **폰이 스스로 올리는 길 (`DeviceUpload.kt`, WorkManager + 네트워크 조건)**: 알림 버튼(`ACKNOWLEDGED` 준비 시작 · 출발했어요 · 루틴 했어요, `ARRIVAL_CONFIRMED` 도착했어요)과 기상 알람 해제(`DISMISSED`)는 기록이 쌓이는 즉시(`AlarmEventLog.append` → `DeviceUpload.onAppended`) 작업을 걸어 서버 함수 `alarm-events-device`로 `alarm_events`에 넣음. 인증은 백그라운드 브리핑 갱신과 같은 기기 키(`BriefingCredential`, `Bearer bdk_…`) — 키가 없거나 만료 · 폐기면(401) 아무것도 안 하고 앱이 열릴 때 올림. 연결 실패 · 408 · 429 · 5xx는 30초부터 늘려 가며 최대 5번, 그 밖의 오류(400 · 401 · 403 · 404)는 다시 안 함. 울림(`TRIGGERED`) · 미루기(`SNOOZED`)는 이 길로 안 올리고 앱이 열릴 때 올림. 폰의 기록은 지우지 않음 — 앱이 열리면 아래 길이 같은 `clientEventId`로 다시 올려도 `alarm_events`가 번호 충돌을 무시해 한 줄이고, 원탭 뒤처리(`onEventsUploaded`: 출발 · 도착 시각 · 준비 실측 반영)도 그때 돎 (서버 INSERT 트리거가 원탭을 `appointment_participants`에 옮기므로 폰은 `alarm_events` 행만 올림). 앱이 올리는 길: 앱이 앞에 올 때 · 기상 확인 화면에 들어올 때 `lib/alarmSync`의 `uploadEvents()`가 `alarm_events`로 올리고(`client_event_id` 중복 무시) 올린 것만 `markEventsUploaded`로 지움. 로그아웃 때는 올려 본 뒤 남은 기록을 버림 (아래 "앞으로 더할 것")
 
 ## 해제 뒤 앱 열기 (#79)
 
@@ -201,7 +201,7 @@ WAKE를 해제하면(알람 화면 · 알림 버튼 모두) 앱을 `respecalarm:
 - OS가 보관한 사용 구간을 읽으므로 앱을 안 열어 둔 사이의 사용도 잡힘. `event_at`은 H08과 같이 누적 사용이 θ를 넘은 시각
 - 조건을 못 채운 것은 아무것도 안 씀 — 확인 알림("일어났어요")은 H08을 열어야 보이고, `MISSED`는 서버 배치가 기록 (`MISSED` 뒤에 확정이 들어오는 것은 막지 않음 — 해제 뒤 49분 넘어 앱을 열었어도 폰을 쓴 사실이 있으면 기록)
 - 쓰기는 H08과 같은 함수 · 같은 번호라 두 곳이 겹쳐도 한 줄. 한 알람이 실패해도 다른 알람은 이어서 판정
-- **네이티브(알람 코어)가 해제 + 10분에 스스로 판정하는 길은 아직 없음** — 확인 필요 (Kotlin 변경 + 새 APK). 만들게 되면 아래 번호 공식을 똑같이 써서 앱의 확정과 한 줄만 남게 함
+- **폰이 해제 + 10분에 스스로 판정함 (`WakeJudgeWorker`)**: 기상 알람을 끄면(`DISMISSED`) 그 시각 + 10분 + 2초에 WorkManager 작업이 돎(네트워크 조건, 같은 알람을 또 끄면 나중 해제 기준으로 교체). `UsageSpans`로 해제 ~ +10분의 화면 사용을 읽어 `WakeJudge.kt`가 앱 `evaluateWake`와 같은 규칙(θ 1분 · 관찰 10분 · 뒤쪽 5분 사용 > 0 · 확정 시각 = 누적 사용이 θ를 넘은 시각)으로 판정 — 같은 표(`spec/wake-cases.json`)를 앱 `wake.test.ts`와 Kotlin `WakeJudgeTest`가 읽음. 확정이면 `alarm-events-device`에 `wake`(그날 `daily_records` 빈 칸 · 한국 시간 날짜)와 `WAKE_CONFIRMED`(`USAGE`)를 한 요청으로 보냄 — 서버가 앱 `writeConfirmation`과 같은 순서(그날 기록 먼저, 이벤트 마지막)로 쓰고, 번호는 아래 공식(`StableUuid.kt`)이라 앱이 먼저 · 나중에 같은 판정을 해도 한 줄. 확정이 아니면(조건 미달 · 사용 정보 접근 권한 없음 · 안드로이드 9 미만) 아무것도 안 함 — 확인 알림("일어났어요")은 앱 H08 그대로. 앱이 나중에 열려 다시 판정할 때는 서버의 `WAKE_CONFIRMED`를 보고 이미 확정으로 처리해 안 씀
 
 ### 기록 번호 공식 (`client_event_id`)
 
@@ -232,9 +232,9 @@ WAKE를 해제하면(알람 화면 · 알림 버튼 모두) 앱을 `respecalarm:
 | 언제 | 무엇 | 바뀌는 점 |
 |---|---|---|
 | 앱 연결 (P6, `lib/alarmSync` `reconcile` · `applyCommit`) | 서버 알람과 폰 예약을 대조 | 앱을 켤 때 `alarms`(켜짐 · 앞으로)와 `list()`를 `alarm_id` + `scheduled_at` + `intensity`로 비교. 빠진 건 `schedule`, 없는 건 `cancel`, 시각 · 강도가 다르면 다시 `schedule`(친구의 ±5분 · 제안 적용 · 설정 수정 뒤 푸시를 못 받았을 때 대비). 지난 시각은 `skipped_past`로 건너뛰고, `deferred`(울리거나 미룬 중)는 해제 뒤 다음 앱 열림 때 다시 넘김. 첫 울림이 이미 지난 폰 예약(울리는 중 · 미룸 · 다시 울림 대기)은 서버 목록에 없어도 바로 안 지우되, **서버에 켜진 행이 없다고 확인되면**(끄거나 지워짐, 시각은 안 봄) 지움 — 끈 알람이 미룸 중이어도 다시 울리지 않게. 확인에 실패하면 전체 맞추기는 안 지움(지정한 알람 `alarmIds`는 던져서 알림). 서버 알람 목록이 상한(500줄)에서 잘렸으면 "목록에 없음"이 "서버에 없음"이 아니므로 이 확인을 거친 것만 지움 |
-| 앱 연결 (P6, `lib/alarmSync` `uploadEvents`) | 울림 기록 올리기 | 앱이 켜지면 `getPendingEvents()` → `alarm_events`(`clientEventId`로 중복 방지) → `markEventsUploaded`. 끄거나 재부팅한 동안의 기록도 이 길로 감. 해제 · 놓침을 바로 올리는 폰 스스로의 길(WorkManager)은 토큰 문제로 따로 정함 |
+| 앱 연결 (P6, `lib/alarmSync` `uploadEvents`) | 울림 기록 올리기 | 앱이 켜지면 `getPendingEvents()` → `alarm_events`(`clientEventId`로 중복 방지) → `markEventsUploaded`. 끄거나 재부팅한 동안의 기록도 이 길로 감. 알림 버튼 · 기상 해제를 바로 올리는 폰 스스로의 길은 위 `DeviceUpload` (기기 키 → `alarm-events-device`) |
 | 로그아웃 (P6, `lib/session` `signOutAndCleanup`) | 정리 | 로그아웃 중 표시 켜기(`reconcile`이 서버 알람을 폰에 걸지 않게) → 기록 올려 보기 → 맞추기와 같은 한 줄에서 `cancelAll()`(앞에 서 있던 맞추기가 끝난 뒤) → 폰에 남은 기록 지우기 (Q6) → 푸시 토큰 지우기 자리 → 실시간 구독 끊기 · 기능 메모리 정리 → 로그아웃. `cancelAll`이 실패하면 로그아웃을 멈추고 표시를 끔 |
-| 앱 연결 (P6, `useWakeRecheck`) | 기상 판정 다시 보기 | 앱이 앞에 올 때 최근 12시간에 끈 기상 알람 중 확정이 없는 것을 H08과 같은 판정으로 다시 보고 조건을 채웠으면 확정(`USAGE`) 기록 — 위 "앱이 앞에 올 때 다시 판정". 네이티브가 해제 + 10분에 스스로 판정하는 길은 확인 필요 |
+| 앱 연결 (P6, `useWakeRecheck`) | 기상 판정 다시 보기 | 앱이 앞에 올 때 최근 12시간에 끈 기상 알람 중 확정이 없는 것을 H08과 같은 판정으로 다시 보고 조건을 채웠으면 확정(`USAGE`) 기록 — 위 "앱이 앞에 올 때 다시 판정". 네이티브가 해제 + 10분에 스스로 판정하는 길은 위 `WakeJudgeWorker` (앱 `getWakeCheck`는 서버의 확정 기록을 보고 건너뜀) |
 | D1 | 배경음 · 말소리 · 진동 축별 고르기 | **배경음 3개 · 진동 패턴 3개는 반영됨**(#312, D1 A). 말소리는 AI 음성 시작 단계로 반영됨(#532: 약 1 · 중 2 · 강 3) |
 | D2 | 기상 확인 무응답 시 다시 울림 | 지금은 안 만듦 |
 | Q7 | 소리 3종 | **반영됨**(#312): `soundKey`로 앱에 든 파일을 고름 (약 · 강만 앱 파일 먼저, `theme_default` · `default` · 모르는 키는 폰 기본 알람음 먼저). 파일은 지금 합성음이라 나중에 실제 소리로 바꿔도 키 · 이름은 그대로 |
