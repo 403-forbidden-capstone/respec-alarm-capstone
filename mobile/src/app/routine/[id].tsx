@@ -27,10 +27,10 @@ import { useLeaveGuard } from '@/lib/useLeaveGuard';
 import { useLoad } from '@/lib/useLoad';
 
 // A04 루틴 편집 — 일기(A03)의 루틴 제안을 내 생활에 맞게 고쳐 저장 (저장해야 루틴 · 단계 알람이 생김)
-// /routine/new?journal=2025-05-22 = 그 일기의 제안으로 만든 초안, /routine/r2 = 저장한 루틴
+// /routine/new?journal=2025-05-22 = 그 일기의 제안으로 만든 초안, /routine/new?suggestion=… = 루틴 제안(안건 D114)으로 만든 초안 — 저장하면 그 제안을 받아들임, /routine/r2 = 저장한 루틴
 export default function RoutineScreen() {
-  const { id, journal } = useLocalSearchParams<{ id: string; journal?: string }>();
-  const { data, error, reload } = useLoad(() => getRoutine(id, journal));
+  const { id, journal, suggestion } = useLocalSearchParams<{ id: string; journal?: string; suggestion?: string }>();
+  const { data, error, reload } = useLoad(() => getRoutine(id, journal, suggestion));
 
   if (data === undefined) {
     return (

@@ -39,6 +39,17 @@ export type Routine = {
   steps: RoutineStep[];
   active: boolean;
   sourceJournal: string | null; // 이 루틴을 제안한 일기 날짜 (2025-05-22)
+  sourceSuggestion?: string | null; // 이 루틴을 만든 루틴 제안 (routine_suggestions, 안건 D114) — 저장하면 그 제안이 "받아들임"
+};
+
+// 루틴 제안 (안건 D114 · D30 B, routine_suggestions) — 18:00 서버가 기록으로 만든 초안 (calc/routine.ts)
+export type RoutineSuggestionStep = { name: string; minutes: number; alarm: boolean; offsetFromWake: number | null; at: string | null };
+export type RoutineSuggestion = {
+  id: string;
+  cause: 'OVERSLEEP' | 'LATE_START' | 'NIGHT_PREP'; // 늦잠 · 다시 잠듦 / 준비를 늦게 시작 / 전날 준비 부족
+  title: string; // 일어나자마자 2단계
+  reason: string; // 최근 아침 7번 중 4번, 기상 알람 뒤 평균 18분 만에 일어났어요
+  draft: { goal: string; days: number[]; steps: RoutineSuggestionStep[] }; // days 0 일 ~ 6 토, 단계 시각은 기상 기준 분(D29) · 밤 루틴만 고정 시각
 };
 
 // 홈 저녁 "저녁 루틴" 카드 (H01)

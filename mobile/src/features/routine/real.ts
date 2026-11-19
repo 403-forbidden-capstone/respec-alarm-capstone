@@ -8,7 +8,7 @@ import { loadActualRows } from '@/features/records/real';
 import { reconcile } from '@/lib/alarmSync';
 import { now } from '@/lib/clock';
 import { UserError } from '@/lib/errors';
-import { addDays, dayKey, startOfDay } from '@/lib/format';
+import { addDays, dayKey, minuteOfDay, startOfDay } from '@/lib/format';
 import { supabase } from '@/lib/supabase';
 import { requireUserId } from '@/lib/user';
 
@@ -28,7 +28,8 @@ import {
   weekdayOf,
   type RoutineRow,
 } from './map';
-import type { EveningRoutine, Journal, Routine, RoutineProgress, Todo } from './types';
+import { daysOf, suggestionToRoutine } from './suggestion';
+import type { EveningRoutine, Journal, Routine, RoutineProgress, RoutineSuggestion, Todo } from './types';
 
 const ROUTINE_SELECT = 'routine_id, title, goal, repeat_days, steps, is_active, daily_journals(record_date)';
 
@@ -208,8 +209,76 @@ export async function getEveningRoutine(): Promise<EveningRoutine | null> {
 }
 
 // 루틴 편집 — id가 'new'면 일기의 루틴 제안으로 만든 빈 초안(저장 전), 아니면 저장한 루틴. 내 루틴이 아니거나 없으면 null
-export async function getRoutine(id: string, sourceJournal?: string): Promise<Routine | null> {
+// 루틴 제안 (안건 D114 · D30 B) — routine_suggestions의 기다리는 제안 (한 사람에 하나). 표는 #562, 만드는 건 18:00 서버(#567)
+const ROUTINE_SUGGESTION_SELECT = 'suggestion_id, cause, title, reason, draft';
+type RoutineSuggestionRow = { suggestion_id: string; cause: RoutineSuggestion['cause']; title: string; reason: string; draft: unknown };
+const toRoutineSuggestion = (row: RoutineSuggestionRow): RoutineSuggestion => ({
+  id: row.suggestion_id,
+  cause: row.cause,
+  title: row.title,
+  reason: row.reason,
+  draft: row.draft as RoutineSuggestion['draft'],
+});
+
+export async function getPendingRoutineSuggestion(): Promise<RoutineSuggestion | null> {
   const userId = await requireUserId();
+  const { data, error } = await supabase
+    .from('routine_suggestions')
+    .select(ROUTINE_SUGGESTION_SELECT)
+    .eq('user_id', userId)
+    .eq('status', 'PENDING')
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw error;
+  return data ? toRoutineSuggestion(data as RoutineSuggestionRow) : null;
+}
+
+// 넘김 — 기다리는 제안만 (이미 답했으면 그대로). 다시 제안할 때는 서버가 D24 C로 셈
+export async function ignoreRoutineSuggestion(id: string) {
+  const userId = await requireUserId();
+  const { error } = await supabase
+    .from('routine_suggestions')
+    .update({ status: 'IGNORED', responded_at: now().toISOString() })
+    .eq('user_id', userId)
+    .eq('suggestion_id', id)
+    .eq('status', 'PENDING');
+  if (error) throw error;
+}
+
+// 다음 기상 알람의 시각(0시부터 분) — 루틴 요일 중 가장 가까운 것. 없으면 null (초안이 7:00으로 둠)
+async function nextWakeMinute(userId: string, days: Routine['days']): Promise<number | null> {
+  const { data, error } = await supabase
+    .from('alarms')
+    .select('scheduled_at')
+    .eq('user_id', userId)
+    .eq('alarm_type', 'WAKE')
+    .eq('is_enabled', true)
+    .gt('scheduled_at', now().toISOString())
+    .order('scheduled_at', { ascending: true })
+    .limit(30);
+  if (error) throw error;
+  const hit = (data ?? []).map((a) => new Date(a.scheduled_at)).find((d) => days.includes(weekdayOf(d)));
+  return hit ? minuteOfDay(hit) : null;
+}
+
+export async function getRoutine(id: string, sourceJournal?: string, sourceSuggestion?: string): Promise<Routine | null> {
+  const userId = await requireUserId();
+  if (id === 'new' && sourceSuggestion) {
+    if (!isUuid(sourceSuggestion)) return null;
+    const { data, error } = await supabase
+      .from('routine_suggestions')
+      .select(ROUTINE_SUGGESTION_SELECT)
+      .eq('user_id', userId)
+      .eq('suggestion_id', sourceSuggestion)
+      .eq('status', 'PENDING')
+      .maybeSingle();
+    if (error) throw error;
+    if (!data) return null; // 이미 답한 제안
+    const s = toRoutineSuggestion(data as RoutineSuggestionRow);
+    const night = s.draft.steps.some((x) => x.at != null);
+    return suggestionToRoutine(s, night ? null : await nextWakeMinute(userId, daysOf(s.draft.days)));
+  }
   if (id === 'new') {
     const journal = sourceJournal && parseDayParam(sourceJournal) ? sourceJournal : null; // 날짜가 아닌 주소 값은 일기 없이 연 것으로
     let suggestion: string | null = null;
@@ -280,7 +349,7 @@ export async function saveRoutine(routine: Routine): Promise<Routine> {
   } else {
     const { data, error } = await supabase
       .from('routines')
-      .insert({ ...fields, user_id: userId, source_journal_id: journalId, origin: journalId ? 'AI_SUGGESTED' : 'USER' })
+      .insert({ ...fields, user_id: userId, source_journal_id: journalId, origin: journalId || routine.sourceSuggestion ? 'AI_SUGGESTED' : 'USER' })
       .select('routine_id')
       .single();
     if (error) throw error;
@@ -293,6 +362,16 @@ export async function saveRoutine(routine: Routine): Promise<Routine> {
     await syncStepAlarms(userId, id, draft, now(), touched);
     if (journalId) {
       const { error } = await supabase.from('daily_journals').update({ suggestion_status: 'APPLIED' }).eq('user_id', userId).eq('journal_id', journalId);
+      if (error) throw error;
+    }
+    // 루틴 제안으로 만든 루틴이면 그 제안을 받아들임 (안건 D114) — 기다리는 제안만, 만든 루틴을 붙임
+    if (created && routine.sourceSuggestion && isUuid(routine.sourceSuggestion)) {
+      const { error } = await supabase
+        .from('routine_suggestions')
+        .update({ status: 'ACCEPTED', responded_at: now().toISOString(), routine_id: id })
+        .eq('user_id', userId)
+        .eq('suggestion_id', routine.sourceSuggestion)
+        .eq('status', 'PENDING');
       if (error) throw error;
     }
   } catch (e) {

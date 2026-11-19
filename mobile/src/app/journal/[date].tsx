@@ -6,7 +6,8 @@ import { Button, Card, Chip, confirm, LoadError, Loading, Screen, Text, Timeline
 import { TextLink } from '@/features/alarm/components/TextLink';
 import { parseDayParam } from '@/features/alarm/schedule';
 import { recordToday } from '@/features/records/api';
-import { declineRoutineSuggestion, editJournal, getJournal } from '@/features/routine/api';
+import { declineRoutineSuggestion, editJournal, getJournal, getPendingRoutineSuggestion, ignoreRoutineSuggestion } from '@/features/routine/api';
+import { RoutinePromptCard } from '@/features/routine/components/RoutinePromptCard';
 import type { Journal } from '@/features/routine/types';
 import { dateParts, formatTime, isSameDay } from '@/lib/format';
 import { backOrHome } from '@/lib/nav';
@@ -72,6 +73,27 @@ function EmptyJournal({ date, top }: { date: string | undefined; top: ReactNode 
         )}
       </Card>
     </Screen>
+  );
+}
+
+// 오늘 일기의 루틴 제안 카드 (안건 D114) — 18:00 서버가 만든 기다리는 제안. [루틴 만들기]는 루틴 편집에 초안을 채워 엶
+function TodayRoutineSuggestion() {
+  const { data, reload } = useLoad(getPendingRoutineSuggestion);
+  const { busy, run } = useAction();
+  if (!data) return null;
+  return (
+    <RoutinePromptCard
+      suggestion={data}
+      busy={busy}
+      onCreate={() => router.push({ pathname: '/routine/[id]', params: { id: 'new', suggestion: data.id } })}
+      onIgnore={() =>
+        run(async () => {
+          await ignoreRoutineSuggestion(data.id);
+          toast('기록이 3일 더 쌓이면 다시 볼 수 있어요');
+          await reload();
+        }, '제안을 넘기지 못했어요')
+      }
+    />
   );
 }
 
@@ -180,8 +202,8 @@ function JournalView({ journal: j, reload, top }: { journal: Journal; reload: ()
         </Text>
       </Card>
 
-      {/* 제안 글이 없는 일기(실데이터에서 AI가 루틴을 제안하지 않은 날)는 제안 카드를 접음 — 제목이 빈 글자 */}
-      {j.suggestion.title === '' ? null : j.suggestion.status === 'PENDING' ? (
+      {/* 제안 글이 없는 일기는 일기 줄의 제안 카드를 접음 — 오늘 일기면 대신 루틴 제안 표의 기다리는 제안 (안건 D114 · D30 B) */}
+      {j.suggestion.title === '' ? isToday ? <TodayRoutineSuggestion /> : null : j.suggestion.status === 'PENDING' ? (
         <Card>
           <Text variant="label" tone="sub" style={styles.label}>
             루틴 제안{j.suggestion.reason ? ` · ${j.suggestion.reason}` : ''}
