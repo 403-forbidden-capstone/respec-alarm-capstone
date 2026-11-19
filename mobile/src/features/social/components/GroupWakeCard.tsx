@@ -8,7 +8,7 @@ import { colors } from '@/theme';
 
 const GROUP_ROWS = 3; // 보이는 그룹 줄 수 — 넘으면 "외 N개"
 
-// 오늘 그룹 기상 카드 — 그룹마다 멤버 얼굴(기상 점) · 오늘 기상 수(출발 · 도착이 보이면 '도착 1 · 이동 중 2 · 일어남 1', 그 그룹 약속이 없는 날은 숨김, 7-사). 누르면 그룹 상세(G02)
+// 오늘 그룹 기상 카드 — 그룹마다 멤버 얼굴(기상 점) · 오늘 기상 수(출발 · 도착이 보이면 '도착 1 · 이동 중 2 · 기상 완료 1', 그 그룹 약속이 없는 날은 숨김, 7-사). 누르면 그룹 상세(G02)
 // 홈 아래에 있던 카드를 그룹 탭 위로 옮김 (D110). 그룹이 없으면 아무것도 안 그림
 //   onMore = "외 N개 그룹 보기" — 그룹 탭에서는 '그룹' 칸으로 바꿈. 없으면 링크를 안 그림
 export function GroupWakeCard({ groups, onOpen, onMore }: { groups: GroupSummary[]; onOpen: (id: string) => void; onMore?: () => void }) {

@@ -1,32 +1,37 @@
 // 그룹 기상 상태 문구 (친구 7장) — G01 카드 · G02 멤버 메뉴 · G03 · 옛 값 안내
-//   단계 글자('8:50 알람' · '울렸어요' · '일어났어요 8:08' · '알람 없음' · '공유 안 함')는 map.ts wakeStateOf
+//   단계 글자('취침 중 · 오전 8:50 알람' · '알람 울리는 중' · '기상 완료 · 오전 8:08' · '알람 없음' · '공유 안 함')는 map.ts wakeStateOf (목업 G02 · G03)
+import { now } from '@/lib/clock';
 import { formatTime } from '@/lib/format';
 
 import type { TripCounts, WakePingResult } from './types';
 
-// G01 그룹 카드 '오늘 n명 일어남' — 분모 없음, 약속 없는 날(null)은 줄을 숨김 (7-사 · 7-34)
-export const wokeLine = (n: number | null) => (n == null ? null : `오늘 ${n}명 일어남`);
+// G01 그룹 카드 '오늘 n명 기상 완료'(목업 G01) — 분모 없음, 약속 없는 날(null)은 줄을 숨김 (7-사 · 7-34)
+export const wokeLine = (n: number | null) => (n == null ? null : `오늘 ${n}명 기상 완료`);
 
-// 누군가 출발 · 도착이 보이면 0이 아닌 것만 '도착 1 · 이동 중 2 · 일어남 1', 아니면 '오늘 n명 일어남'. 약속 없는 날(wokeCount null)은 줄 숨김
+// 누군가 출발 · 도착이 보이면 0이 아닌 것만 '도착 1 · 이동 중 2 · 기상 완료 1', 아니면 '오늘 n명 기상 완료'. 약속 없는 날(wokeCount null)은 줄 숨김
 export function groupWakeLine(wokeCount: number | null, trip: TripCounts | null): string | null {
   if (wokeCount == null) return null;
   if (!trip) return wokeLine(wokeCount);
   const parts = [
     trip.arrived ? `도착 ${trip.arrived}` : null,
     trip.moving ? `이동 중 ${trip.moving}` : null,
-    trip.woke ? `일어남 ${trip.woke}` : null,
+    trip.woke ? `기상 완료 ${trip.woke}` : null,
   ].filter(Boolean);
   return parts.join(' · ');
 }
 
-// G03 '오늘의 흐름' 시각 줄 (목업 G03 타임라인) — 아는 것만 시간순: 알람 · 일어났어요 · 출발 · 도착. 출발 · 도착은 상대가 출발 · 도착 공유를 켰을 때만 들어옴
+// G03 '오늘의 흐름' 시각 줄 (목업 G03 타임라인) — 아는 것만 시간순: 알람 울림 · 기상 확인 · 출발 · 도착. 출발 · 도착은 상대가 출발 · 도착 공유를 켰을 때만 들어옴
+//   알람 시각이 아직 안 지났으면 '알람 예정'
 export type DayLine = { label: string; at: Date };
-export function dayLinesOf(w: { alarmAt: Date | null; confirmedAt: Date | null; departedAt: Date | null; arrivedAt: Date | null }): DayLine[] {
+export function dayLinesOf(
+  w: { alarmAt: Date | null; confirmedAt: Date | null; departedAt: Date | null; arrivedAt: Date | null },
+  current: Date = now(),
+): DayLine[] {
   const lines: DayLine[] = [
-    ...(w.alarmAt ? [{ label: '알람', at: w.alarmAt }] : []),
-    ...(w.confirmedAt ? [{ label: '일어났어요', at: w.confirmedAt }] : []),
-    ...(w.departedAt ? [{ label: '출발했어요', at: w.departedAt }] : []),
-    ...(w.arrivedAt ? [{ label: '도착했어요', at: w.arrivedAt }] : []),
+    ...(w.alarmAt ? [{ label: w.alarmAt.getTime() <= current.getTime() ? '알람 울림' : '알람 예정', at: w.alarmAt }] : []),
+    ...(w.confirmedAt ? [{ label: '기상 확인', at: w.confirmedAt }] : []),
+    ...(w.departedAt ? [{ label: '출발', at: w.departedAt }] : []),
+    ...(w.arrivedAt ? [{ label: '도착', at: w.arrivedAt }] : []),
   ];
   return lines.sort((a, b) => a.at.getTime() - b.at.getTime());
 }

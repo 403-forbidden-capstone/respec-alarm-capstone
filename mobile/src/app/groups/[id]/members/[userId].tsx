@@ -23,7 +23,7 @@ import { useAction } from '@/lib/useAction';
 import { backOrHome } from '@/lib/nav';
 import { colors } from '@/theme';
 
-// G03 그룹원 기상 상태 (친구 7장) — 단계 글자 + 오늘의 흐름(알람 · 일어났어요 · 출발 · 도착 시각 줄, 아는 것만), [깨우기]는 '울렸어요'일 때만 (D51)
+// G03 그룹원 기상 상태 (친구 7장) — 단계 글자 + 오늘의 흐름(목업 G03 시각 줄: 알람 울림 · 기상 확인 · 출발 · 도착, 아는 것만), [깨우기]는 알람이 울린 뒤 기상 확인 전에만 (D51)
 //   [깨우기] (친구 8장) — 서버가 판정 · 횟수를 세고 결과를 줌. 버튼 아래 한 줄로 '1/3 · 8:15부터 다시' · '지금은 깨울 수 없어요' · '이미 일어났어요' · '지금은 알림이 닿지 않아요'.
 //   읽기만 하는 상태 조회가 없어서 상태는 보내 본 뒤에 앎 — 잠긴 동안(다음 가능 시각 전 · 한도 · 꺼짐)은 버튼을 막음. 가짜 모드는 막힘(8-16)
 //   알람 카드(강도 · 장소 · 준비)는 기상 공유로는 안 보이고, 알람 조회 권한이 있으면 [알람 보기](G04)로 (7-다 · 7-41)
@@ -55,7 +55,8 @@ export default function MemberWakeScreen() {
 
   const { person: p, groupName, state, canViewAlarm, noGroupAppointment } = data;
   const scope = wakeScopeOf(p.short, groupName, data.tripVisible);
-  const lines = dayLinesOf(data); // 오늘의 흐름 — 알람 · 일어났어요 · 출발 · 도착 중 아는 것만
+  const lines = dayLinesOf(data, current); // 오늘의 흐름 — 알람 울림 · 기상 확인 · 출발 · 도착 중 아는 것만
+  const nowIndex = lines.reduce((last, line, i) => (line.at.getTime() <= current.getTime() ? i : last), -1); // 지난 줄 중 마지막 = 지금(진한 점)
 
   // 잠금 — 한도 · 꺼짐 · 이미 일어남은 계속, 보냄(OK) · 5분 안 또 누름(WAIT)은 다음 가능 시각까지
   const timed = ping && (ping.status === 'OK' || ping.status === 'WAIT');
@@ -107,11 +108,14 @@ export default function MemberWakeScreen() {
             오늘의 흐름
           </Text>
           {lines.map((line, i) => (
-            <View key={line.label} style={[styles.line, i > 0 && styles.lineDivider]}>
+            <View key={line.label} style={styles.line}>
               <Text variant="small" tone="sub" style={styles.lineTime}>
                 {formatTime(line.at)}
               </Text>
-              <Text variant="body">{line.label}</Text>
+              <View style={[styles.lineDot, i === nowIndex && styles.lineDotNow]} />
+              <Text variant="body" tone={i > nowIndex ? 'faint' : undefined}>
+                {line.label}
+              </Text>
             </View>
           ))}
         </Card>
@@ -148,9 +152,11 @@ const styles = StyleSheet.create({
   stale: { marginBottom: 10 },
   row: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   grow: { flex: 1, minWidth: 0 },
-  line: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 9 },
-  lineDivider: { borderTopWidth: 1, borderTopColor: colors.line },
+  // 목업 G03 .tl — 시각 · 작은 점 · 글자, 줄 사이 선 없음, 지금 줄만 진한 점
+  line: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 9 },
   lineTime: { width: 76 },
+  lineDot: { width: 7, height: 7, borderRadius: 4, marginRight: 4, backgroundColor: colors.line },
+  lineDotNow: { backgroundColor: colors.ink },
   label: { marginBottom: 8 },
   paragraph: { marginTop: 4, lineHeight: 20 },
   stack: { gap: 10, marginTop: 16 },

@@ -27,11 +27,11 @@ const ARRIVED = '2026-10-20T00:48:00.000Z'; // 오전 9:48
 
 describe('wakeStateOf — 준비 중 · 출발 · 도착 (11/19)', () => {
   it('도착 시각이 있으면 도착이 먼저', () => {
-    expect(wakeStateOf(row({ departed_at: DEPARTED, arrived_at: ARRIVED, trip_visible: true }), true)).toEqual({ stage: 'ARRIVED', text: '도착했어요 오전 9:48', dot: 'ok', woke: true });
+    expect(wakeStateOf(row({ departed_at: DEPARTED, arrived_at: ARRIVED, trip_visible: true }), true)).toEqual({ stage: 'ARRIVED', text: '도착 · 오전 9:48', dot: 'ok', woke: true });
   });
 
   it('출발 시각만 있으면 이동 중', () => {
-    expect(wakeStateOf(row({ departed_at: DEPARTED, trip_visible: true }), true)).toEqual({ stage: 'DEPARTED', text: '출발했어요 오전 8:15 · 이동 중', dot: 'ok', woke: true });
+    expect(wakeStateOf(row({ departed_at: DEPARTED, trip_visible: true }), true)).toEqual({ stage: 'DEPARTED', text: '이동 중 · 오전 8:15 출발', dot: 'mid', woke: true });
   });
 
   it('기상 확인 전이어도 출발 · 도착 시각이 있으면 그것을 보임', () => {
@@ -39,15 +39,15 @@ describe('wakeStateOf — 준비 중 · 출발 · 도착 (11/19)', () => {
     expect(wakeStateOf(row({ wake_status: 'DISMISSED', wake_confirmed_at: null, arrived_at: ARRIVED }), true).stage).toBe('ARRIVED');
   });
 
-  it('일어났고 출발 · 도착 공유가 켜져 있으면 준비 중, 아니면 일어났어요에서 멈춤', () => {
-    expect(wakeStateOf(row({ trip_visible: true }), true)).toEqual({ stage: 'PREPARING', text: '준비 중 · 오전 7:11 기상', dot: 'ok', woke: true });
-    expect(wakeStateOf(row({ trip_visible: false }), true)).toEqual({ stage: 'WOKE', text: '일어났어요 오전 7:11', dot: 'ok', woke: true });
+  it('일어났고 출발 · 도착 공유가 켜져 있으면 준비 중, 아니면 기상 완료에서 멈춤', () => {
+    expect(wakeStateOf(row({ trip_visible: true }), true)).toEqual({ stage: 'PREPARING', text: '준비 중 · 오전 7:11 기상', dot: 'mid', woke: true });
+    expect(wakeStateOf(row({ trip_visible: false }), true)).toEqual({ stage: 'WOKE', text: '기상 완료 · 오전 7:11', dot: 'ok', woke: true });
     expect(wakeStateOf(row({ trip_visible: true, wake_confirmed_at: null }), true).text).toBe('준비 중');
   });
 
-  it('아직 · 울렸어요는 출발 · 도착 공유와 상관없이 그대로', () => {
-    expect(wakeStateOf(row({ wake_status: 'RINGING', wake_confirmed_at: null, trip_visible: true }), true).text).toBe('울렸어요');
-    expect(wakeStateOf(row({ wake_status: 'SCHEDULED', wake_confirmed_at: null, trip_visible: true }), true).text).toBe('오전 8:50 알람');
+  it('아직 · 알람 울림은 출발 · 도착 공유와 상관없이 그대로', () => {
+    expect(wakeStateOf(row({ wake_status: 'RINGING', wake_confirmed_at: null, trip_visible: true }), true).text).toBe('알람 울리는 중');
+    expect(wakeStateOf(row({ wake_status: 'SCHEDULED', wake_confirmed_at: null, trip_visible: true }), true).text).toBe('취침 중 · 오전 8:50 알람');
   });
 });
 
@@ -56,15 +56,15 @@ describe('이동 중은 약속 + 60분까지만 (trip_appointment_at)', () => {
   const at = (iso: string) => new Date(iso);
   const departed = row({ departed_at: DEPARTED, trip_visible: true, trip_appointment_at: APPT });
 
-  it('약속 + 60분 전에는 이동 중, 그 뒤엔 출발했어요 시각만', () => {
-    expect(wakeStateOf(departed, true, at('2026-10-20T01:59:00.000Z')).text).toBe('출발했어요 오전 8:15 · 이동 중');
-    expect(wakeStateOf(departed, true, at('2026-10-20T02:00:00.000Z')).text).toBe('출발했어요 오전 8:15');
+  it('약속 + 60분 전에는 이동 중, 그 뒤엔 출발 시각만', () => {
+    expect(wakeStateOf(departed, true, at('2026-10-20T01:59:00.000Z')).text).toBe('이동 중 · 오전 8:15 출발');
+    expect(wakeStateOf(departed, true, at('2026-10-20T02:00:00.000Z')).text).toBe('출발 · 오전 8:15');
   });
 
-  it('도착 기록 없이 밤이 된 경우 — 이동 중이 안 붙고, 요약에서는 일어남으로 셈', () => {
+  it('도착 기록 없이 밤이 된 경우 — 이동 중이 안 붙고, 요약에서는 기상 완료로 셈', () => {
     const night = at('2026-10-20T13:00:00.000Z');
-    expect(wakeStateOf(departed, true, night)).toMatchObject({ stage: 'DEPARTED', text: '출발했어요 오전 8:15' });
-    expect(tripCountsOf([departed], night)).toBeNull(); // 도착도 이동 중도 없으니 요약은 오늘 n명 일어남
+    expect(wakeStateOf(departed, true, night)).toMatchObject({ stage: 'DEPARTED', text: '출발 · 오전 8:15' });
+    expect(tripCountsOf([departed], night)).toBeNull(); // 도착도 이동 중도 없으니 요약은 오늘 n명 기상 완료
     expect(tripCountsOf([departed, row({ user_id: 'b', arrived_at: ARRIVED, departed_at: DEPARTED, trip_visible: true })], night)).toEqual({ arrived: 1, moving: 0, woke: 1 });
   });
 
@@ -79,7 +79,7 @@ describe('이동 중은 약속 + 60분까지만 (trip_appointment_at)', () => {
   });
 });
 
-describe('일어남 셈 · G01 요약 줄', () => {
+describe('기상 완료 셈 · G01 요약 줄', () => {
   const rows = [
     row({ user_id: 'a', arrived_at: ARRIVED, departed_at: DEPARTED, trip_visible: true }),
     row({ user_id: 'b', departed_at: DEPARTED, trip_visible: true }),
@@ -88,37 +88,41 @@ describe('일어남 셈 · G01 요약 줄', () => {
     row({ user_id: 'e', wake_status: 'RINGING', wake_confirmed_at: null }),
   ];
 
-  it('준비 중 · 출발 · 도착도 일어남으로 셈', () => {
+  it('준비 중 · 출발 · 도착도 기상 완료로 셈', () => {
     expect(wokeCountOf(rows)).toBe(4);
     expect(wokeCountOf([])).toBeNull();
   });
 
-  it('누군가 출발 · 도착이 보이면 0이 아닌 것만 도착 · 이동 중 · 일어남', () => {
+  it('누군가 출발 · 도착이 보이면 0이 아닌 것만 도착 · 이동 중 · 기상 완료', () => {
     const trip = tripCountsOf(rows);
     expect(trip).toEqual({ arrived: 1, moving: 2, woke: 1 });
-    expect(groupWakeLine(4, trip)).toBe('도착 1 · 이동 중 2 · 일어남 1');
-    expect(groupWakeLine(3, { arrived: 0, moving: 2, woke: 1 })).toBe('이동 중 2 · 일어남 1');
+    expect(groupWakeLine(4, trip)).toBe('도착 1 · 이동 중 2 · 기상 완료 1');
+    expect(groupWakeLine(3, { arrived: 0, moving: 2, woke: 1 })).toBe('이동 중 2 · 기상 완료 1');
     expect(groupWakeLine(2, { arrived: 2, moving: 0, woke: 0 })).toBe('도착 2');
   });
 
-  it('출발 · 도착이 아무도 안 보이면 지금처럼 오늘 n명 일어남, 약속 없는 날은 줄 없음', () => {
+  it('출발 · 도착이 아무도 안 보이면 지금처럼 오늘 n명 기상 완료, 약속 없는 날은 줄 없음', () => {
     const none = [row({ trip_visible: true }), row({ user_id: 'z' })];
     expect(tripCountsOf(none)).toBeNull();
-    expect(groupWakeLine(wokeCountOf(none), tripCountsOf(none))).toBe('오늘 2명 일어남');
+    expect(groupWakeLine(wokeCountOf(none), tripCountsOf(none))).toBe('오늘 2명 기상 완료');
     expect(groupWakeLine(null, null)).toBeNull();
   });
 });
 
 describe('G03 오늘의 흐름 (dayLinesOf)', () => {
   it('아는 것만 시간순', () => {
-    const lines = dayLinesOf({
+    const all = {
       alarmAt: new Date('2026-10-19T23:50:00.000Z'),
       confirmedAt: new Date('2026-10-19T22:11:00.000Z'),
       departedAt: new Date(DEPARTED),
       arrivedAt: new Date(ARRIVED),
-    });
-    expect(lines.map((l) => l.label)).toEqual(['일어났어요', '출발했어요', '알람', '도착했어요']);
-    expect(dayLinesOf({ alarmAt: new Date(DEPARTED), confirmedAt: null, departedAt: null, arrivedAt: null }).map((l) => l.label)).toEqual(['알람']);
+    };
+    const after = new Date('2026-10-20T03:00:00.000Z'); // 알람 시각 이후
+    expect(dayLinesOf(all, after).map((l) => l.label)).toEqual(['기상 확인', '출발', '알람 울림', '도착']);
+    // 알람 시각이 아직 안 지났으면 '알람 예정'
+    const before = new Date('2026-10-19T20:00:00.000Z');
+    expect(dayLinesOf({ ...all, confirmedAt: null, departedAt: null, arrivedAt: null }, before).map((l) => l.label)).toEqual(['알람 예정']);
+    expect(dayLinesOf({ alarmAt: new Date(DEPARTED), confirmedAt: null, departedAt: null, arrivedAt: null }, after).map((l) => l.label)).toEqual(['알람 울림']);
     expect(dayLinesOf({ alarmAt: null, confirmedAt: null, departedAt: null, arrivedAt: null })).toEqual([]);
   });
 });
@@ -140,7 +144,7 @@ describe('출발 · 도착 공유 스위치 (F03)', () => {
 });
 
 describe('웹 미리보기 이동 중 · 도착 장면 (가짜 데이터)', () => {
-  it('도착 09:50 장면 — 내 출발 · 도착 공유를 켜면 나 도착 · 수연 출발 · 지형 준비 중 · 준성 울렸어요', () => {
+  it('도착 09:50 장면 — 내 출발 · 도착 공유를 켜면 나 도착 · 수연 출발 · 지형 준비 중 · 준성 알람 울림', () => {
     setScenarioTime('arrived');
     try {
       const t = kst(22, 590);
@@ -162,7 +166,7 @@ describe('웹 미리보기 이동 중 · 도착 장면 (가짜 데이터)', () =
     }
   });
 
-  it('평소 아침 장면은 그대로 — 일어났어요에서 멈춤', () => {
+  it('평소 아침 장면은 그대로 — 기상 완료에서 멈춤', () => {
     expect(db.me.departAt).toBeNull();
     expect(memberState('sy', kst(22, 475)).stage).toBe('WOKE');
   });

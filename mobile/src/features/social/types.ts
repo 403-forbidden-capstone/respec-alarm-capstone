@@ -11,13 +11,13 @@ export type Person = {
 };
 
 // 기상 상태 한 줄 (G01 · G02 멤버 · G03 · H01 그룹 요약) — 서버 기상 6단계를 화면 3단계로 묶고, 출발 · 도착 공유가 보이면 뒤에 3단계를 더함 (친구 7장, map.ts wakeStateOf)
-//   SCHEDULED 아직('8:50 알람') · RANG 울렸어요(울림 · 해제 · 미확인) · WOKE 일어남 · NO_ALARM 알람 없음
-//   PREPARING 준비 중(기상 확인 뒤 출발 전, 출발 · 도착 공유를 켠 사람만) · DEPARTED 출발했어요 · 이동 중 · ARRIVED 도착했어요
+//   SCHEDULED 취침 중('취침 중 · 오전 8:50 알람') · RANG 알람 울리는 중 · 알람 울림 · 기상 확인 전(울림 · 해제 · 미확인) · WOKE 기상 완료 · NO_ALARM 알람 없음
+//   PREPARING 준비 중(기상 확인 뒤 출발 전, 출발 · 도착 공유를 켠 사람만) · DEPARTED 이동 중 · 출발 · ARRIVED 도착
 //   NOT_SHARED 공유 안 함(동의 안 함 · 숨김 · 차단 구분 없음) · NO_APPOINTMENT 그 그룹 약속이 없는 날
 export type WakeStage = 'SCHEDULED' | 'RANG' | 'WOKE' | 'PREPARING' | 'DEPARTED' | 'ARRIVED' | 'NO_ALARM' | 'NOT_SHARED' | 'NO_APPOINTMENT';
 export type WakeState = {
   stage: WakeStage;
-  text: string; // 일어났어요 8:08
+  text: string; // 기상 완료 · 오전 8:08
   dot: WakeDot | null; // 색 점 — 공유 안 함 · 약속 없는 날은 없음
   woke: boolean;
 };
@@ -76,12 +76,12 @@ export type GroupItem = {
   name: string;
   initial: string; // 그룹 아이콘 글자
   memberCount: number;
-  wokeCount: number | null; // 오늘 일어난 사람 수(준비 중 · 출발 · 도착 포함) — 그 그룹 약속이 없는 날은 null (G01 '오늘 n명 일어남' 줄을 숨김)
-  trip: TripCounts | null; // 출발 · 도착이 보이는 사람이 있을 때만 — G01 요약 줄이 '도착 1 · 이동 중 2 · 일어남 1'로 바뀜
+  wokeCount: number | null; // 오늘 기상 완료 수(준비 중 · 출발 · 도착 포함) — 그 그룹 약속이 없는 날은 null (G01 '오늘 n명 기상 완료' 줄을 숨김)
+  trip: TripCounts | null; // 출발 · 도착이 보이는 사람이 있을 때만 — G01 요약 줄이 '도착 1 · 이동 중 2 · 기상 완료 1'로 바뀜
   grants: PermissionSet; // 이 그룹에 내가 준 권한
 };
 
-// 그룹 요약 줄 숫자 — 도착 · 이동 중(출발했고 아직 도착 전) · 일어남(출발 전, 준비 중 포함)
+// 그룹 요약 줄 숫자 — 도착 · 이동 중(출발했고 아직 도착 전) · 기상 완료(출발 전, 준비 중 포함)
 export type TripCounts = { arrived: number; moving: number; woke: number };
 
 // 홈(H01)의 그룹 기상 요약

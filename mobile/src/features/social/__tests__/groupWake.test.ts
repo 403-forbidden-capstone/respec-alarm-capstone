@@ -48,18 +48,19 @@ beforeEach(() => {
 });
 
 describe('6단계 → 화면 3단계 (7-13 · 7-15 · 7-17 · 7-18 · 7-38 · 7-42)', () => {
-  it('울림 · 해제 · 미확인은 모두 "울렸어요" — 해제만 한 것(7-15)도 일어남이 아님', () => {
+  it('울림 · 해제 · 미확인은 모두 RANG(점 zz) — 울리는 중만 글자가 다르고, 해제만 한 것(7-15)도 기상 완료가 아님', () => {
     expect(['RINGING', 'DISMISSED', 'MISSED'].map(stageOf)).toEqual(['RANG', 'RANG', 'RANG']);
-    for (const wake_status of ['RINGING', 'DISMISSED', 'MISSED']) {
-      expect(wakeStateOf(row(SUYEON, { wake_status }), true)).toMatchObject({ stage: 'RANG', text: '울렸어요', dot: 'mid', woke: false });
+    expect(wakeStateOf(row(SUYEON, { wake_status: 'RINGING' }), true)).toMatchObject({ stage: 'RANG', text: '알람 울리는 중', dot: 'zz', woke: false });
+    for (const wake_status of ['DISMISSED', 'MISSED']) {
+      expect(wakeStateOf(row(SUYEON, { wake_status }), true)).toMatchObject({ stage: 'RANG', text: '알람 울림 · 기상 확인 전', dot: 'zz', woke: false });
     }
   });
 
-  it('아직은 알람 시각 한 줄 "오전 8:50 알람", 일어남은 "일어났어요 오전 8:08"', () => {
-    expect(wakeStateOf(row(SUYEON), true)).toMatchObject({ stage: 'SCHEDULED', text: '오전 8:50 알람', dot: 'zz', woke: false });
+  it('취침 중은 "취침 중 · 오전 8:50 알람"(점 zz), 기상 완료는 "기상 완료 · 오전 8:08"(점 ok)', () => {
+    expect(wakeStateOf(row(SUYEON), true)).toMatchObject({ stage: 'SCHEDULED', text: '취침 중 · 오전 8:50 알람', dot: 'zz', woke: false });
     expect(wakeStateOf(row(SUYEON, { wake_status: 'CONFIRMED', wake_confirmed_at: '2026-10-19T23:08:00.000Z' }), true)).toMatchObject({
       stage: 'WOKE',
-      text: '일어났어요 오전 8:08',
+      text: '기상 완료 · 오전 8:08',
       dot: 'ok',
       woke: true,
     });
@@ -69,15 +70,16 @@ describe('6단계 → 화면 3단계 (7-13 · 7-15 · 7-17 · 7-18 · 7-38 · 7-
     expect(wakeStateOf(row(SUYEON, { wake_status: 'NO_ALARM', wake_alarm_at: null }), true)).toMatchObject({ stage: 'NO_ALARM', text: '알람 없음' });
   });
 
-  it('알 수 없는 단계 값은 "울렸어요"로 — 일어남으로 잘못 보이지 않게', () => {
+  it('알 수 없는 단계 값은 "알람 울림 · 기상 확인 전"으로 — 일어남으로 잘못 보이지 않게', () => {
     expect(wakeStateOf(row(SUYEON, { wake_status: 'SOMETHING_NEW' }), true)).toMatchObject({ stage: 'RANG', woke: false });
   });
 
-  it('줄 글자에 "취침 중" · 미루기 횟수 · 준비 · 출발 · 도착이 없음 (7-42 · 7-d3)', () => {
+  it('줄 글자에 미루기 횟수가 없고, 출발 · 도착 공유가 꺼진 사람에겐 준비 · 출발 · 도착도 없음 (7-42 · 7-d3)', () => {
     const texts = ['SCHEDULED', 'RINGING', 'DISMISSED', 'MISSED', 'CONFIRMED', 'NO_ALARM'].map(
       (wake_status) => wakeStateOf(row(SUYEON, { wake_status, wake_confirmed_at: '2026-10-19T23:08:00.000Z' }), true).text,
     );
-    for (const t of texts) expect(t).not.toMatch(/취침|미루기|준비|출발|도착|미확인|해제/);
+    for (const t of texts) expect(t).not.toMatch(/미루기|준비|출발|도착|이동|해제/);
+    expect(texts[0]).toContain('취침 중');
   });
 
   it('알람 시각 줄', () => {
@@ -101,24 +103,24 @@ describe('공유 안 함 · 약속 없는 날 (7-02 · 7-06)', () => {
     mockFake.answerRpc('get_group_wake', ok([row(ME), row(SUYEON, { wake_status: 'RINGING' })]));
     const g = await real.getGroup(GROUP);
     expect(g?.members.map((m) => [m.person.name, m.state.text])).toEqual([
-      ['나(데모)', '오전 8:50 알람'],
-      ['수연', '울렸어요'],
+      ['나(데모)', '취침 중 · 오전 8:50 알람'],
+      ['수연', '알람 울리는 중'],
       ['준성', '공유 안 함'],
       ['지형', '공유 안 함'],
     ]);
   });
 });
 
-describe('G01 "오늘 n명 일어남" (7-34)', () => {
-  it('약속 있는 날: 일어남 수(분모 없음), 상세의 일어남 수와 같음', async () => {
+describe('G01 "오늘 n명 기상 완료" (7-34)', () => {
+  it('약속 있는 날: 기상 완료 수(분모 없음), 상세의 기상 완료 수와 같음', async () => {
     const rows = [row(ME, { wake_status: 'CONFIRMED', wake_confirmed_at: '2026-10-19T23:00:00.000Z' }), row(SUYEON, { wake_status: 'DISMISSED' })];
     mockFake.answerRpc('get_group_wake', ok(rows));
     const [item] = await real.listGroups();
     expect(item.wokeCount).toBe(1);
     const g = await real.getGroup(GROUP);
     expect(g?.members.filter((m) => m.state.woke)).toHaveLength(1);
-    expect(wokeLine(item.wokeCount)).toBe('오늘 1명 일어남');
-    expect(wokeLine(0)).toBe('오늘 0명 일어남');
+    expect(wokeLine(item.wokeCount)).toBe('오늘 1명 기상 완료');
+    expect(wokeLine(0)).toBe('오늘 0명 기상 완료');
   });
 
   it('약속 없는 날은 null → 그 줄을 숨김', async () => {
@@ -147,9 +149,9 @@ describe('읽기는 get_group_wake (7-39 · 7-37)', () => {
 
   it('정정(잘못 누른 기상 확인을 고침)은 다음 조회 때 그대로 — 앱이 값을 붙잡아 두지 않음', async () => {
     mockFake.answerRpc('get_group_wake', ok([row(ME), row(SUYEON, { wake_status: 'CONFIRMED', wake_confirmed_at: '2026-10-19T23:08:00.000Z' })]));
-    expect((await real.getGroup(GROUP))?.members[1].state.text).toBe('일어났어요 오전 8:08');
+    expect((await real.getGroup(GROUP))?.members[1].state.text).toBe('기상 완료 · 오전 8:08');
     mockFake.answerRpc('get_group_wake', ok([row(ME), row(SUYEON, { wake_status: 'DISMISSED' })]));
-    expect((await real.getGroup(GROUP))?.members[1].state.text).toBe('울렸어요');
+    expect((await real.getGroup(GROUP))?.members[1].state.text).toBe('알람 울림 · 기상 확인 전');
   });
 });
 
@@ -160,7 +162,7 @@ describe('G03 기상 상태 (7-41 · 7-06 · 7-02)', () => {
     expect(w).toEqual({
       person: expect.objectContaining({ name: '수연' }),
       groupName: '캡스톤팀',
-      state: expect.objectContaining({ stage: 'WOKE', text: '일어났어요 오전 8:08' }),
+      state: expect.objectContaining({ stage: 'WOKE', text: '기상 완료 · 오전 8:08' }),
       alarmAt: new Date('2026-10-19T23:50:00.000Z'),
       confirmedAt: new Date('2026-10-19T23:08:00.000Z'),
       departedAt: null,
@@ -175,7 +177,7 @@ describe('G03 기상 상태 (7-41 · 7-06 · 7-02)', () => {
   it('기상 조회만 있는 사람(지형, 그룹 조회 없음 · 친구 조회 있음 → 조회 있음 / 준성은 공유 안 함)', async () => {
     mockFake.answerRpc('get_group_wake', ok([row(ME), row(JIHYEONG, { wake_status: 'RINGING' })]));
     const w = await real.getMemberWake(GROUP, JIHYEONG);
-    expect(w?.state.text).toBe('울렸어요');
+    expect(w?.state.text).toBe('알람 울리는 중');
     expect(await real.getMemberWake(GROUP, JUNSEONG)).toBeNull(); // 약속 있는 날 줄이 없음 = 공유 안 함
   });
 
