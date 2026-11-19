@@ -88,7 +88,7 @@ export type LeaveResponse = Common & { left: boolean };
 
 type EditRow = SeriesAppointmentRow & { exception_kind: ExceptionKind | null };
 const APPOINTMENT_COLUMNS = `${SERIES_APPOINTMENT_COLUMNS}, exception_kind`;
-const PARTICIPANT_COLUMNS = 'participant_id, appointment_id, user_id, origin_name, origin_lat, origin_lng, transport_type, est_travel_minutes, travel_source, prepare_minutes, buffer_minutes, prepare_advance_minutes';
+const PARTICIPANT_COLUMNS = 'participant_id, appointment_id, user_id, origin_name, origin_lat, origin_lng, transport_type, est_travel_minutes, travel_source, prepare_minutes, prepare_value_source, buffer_minutes, prepare_advance_minutes';
 
 type Target = { appointment: EditRow; participant: ParticipantRow | null; alarms: AlarmRow[] };
 type DayRow = { appointment: EditRow; participant: ParticipantRow; alarms: AlarmRow[] };
