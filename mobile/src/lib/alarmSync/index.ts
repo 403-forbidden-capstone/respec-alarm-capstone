@@ -231,6 +231,7 @@ async function fetchServerRows(userId: string, fromMs: number): Promise<{ rows: 
     .order('scheduled_at')
     .limit(SERVER_ROW_LIMIT);
   if (error) throw error;
+  const confirmedWakes = await fetchWakeConfirmed(userId, (data ?? []).filter((row) => row.alarm_type === 'WAKE'));
   const rows = (data ?? []).map((row) => ({
     alarm_id: row.alarm_id,
     alarm_type: row.alarm_type,
@@ -248,8 +249,33 @@ async function fetchServerRows(userId: string, fromMs: number): Promise<{ rows: 
     routine_title: row.routines?.title ?? null,
     departed_at: row.appointment_participants?.departed_at ?? null,
     arrived_at: row.appointment_participants?.arrived_at ?? null,
+    wake_confirmed: confirmedWakes.has(row.alarm_id),
   }));
   return { rows, truncated: rows.length >= SERVER_ROW_LIMIT };
+}
+
+// 기상 알람 중 기상 확인(WAKE_CONFIRMED) 기록이 있는 것의 id — [먼저 깼어요] 뒤 폰에서 지운 알람이 앱이 앞에 올 때 다시 걸리지 않게 (dropRecorded)
+//   기상 알람 행은 약속 참여 하나에 하나(alarms_participant_type_key)라 alarm_id로 그 회차가 정해짐. 다만 시각이 뒤로 옮겨진 행이 옛 확정으로 빠지지 않게 알람 시각 24시간 안의 확정만 셈
+//   읽기에 실패하면 던짐 (기록 없이 걸면 울려야 할 때 안 울리는 것보다 낫지만, 지운 알람이 되살아나므로 다음 맞추기에서 다시 — reconcile 호출자가 처리)
+const WAKE_CONFIRM_WINDOW_MS = 24 * 60 * 60 * 1000;
+
+async function fetchWakeConfirmed(userId: string, wakeRows: readonly { alarm_id: string; scheduled_at: string }[]): Promise<Set<string>> {
+  if (!wakeRows.length) return new Set();
+  const { data, error } = await supabase
+    .from('alarm_events')
+    .select('alarm_id, event_at')
+    .eq('user_id', userId)
+    .eq('event_type', 'WAKE_CONFIRMED')
+    .in('alarm_id', wakeRows.map((row) => row.alarm_id));
+  if (error) throw error;
+  const scheduled = new Map(wakeRows.map((row) => [row.alarm_id, dbTimeMs(row.scheduled_at)]));
+  const confirmed = new Set<string>();
+  for (const event of data ?? []) {
+    const at = scheduled.get(event.alarm_id);
+    const eventMs = dbTimeMs(event.event_at);
+    if (at != null && !Number.isNaN(at) && !Number.isNaN(eventMs) && eventMs > at - WAKE_CONFIRM_WINDOW_MS) confirmed.add(event.alarm_id);
+  }
+  return confirmed;
 }
 
 // 이 알람들 중 서버에 켜진 행이 아직 있는 것의 id — 시각은 안 봄 (미룸 · 울리는 중이라 첫 시각이 지난 알람도 서버에는 켜진 채로 있으므로)

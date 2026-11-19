@@ -2014,10 +2014,21 @@ describe('먼저 깼어요 (H08)', () => {
     expect(callsTo('daily_records', 'insert')[0].payload).toMatchObject({ wake_confirmed_at: new Date(ALARM_AT - 25 * 60_000).toISOString(), wake_reported_at: null });
   });
 
-  it('이미 확인했으면 다시 쓰지 않음', async () => {
+  it('누르면 그 기상 알람만 폰에서 지우도록 reconcile({ alarmIds }) — 맞추기가 실패해도 확정은 그대로', async () => {
+    upcoming();
+    before(25);
+    await real.confirmEarlyWake(ALARM);
+    expect(mockReconcile).toHaveBeenCalledTimes(1);
+    expect(mockReconcile).toHaveBeenCalledWith({ alarmIds: [ALARM] });
+    mockReconcile.mockRejectedValueOnce(new Error('offline'));
+    await expect(real.confirmEarlyWake(ALARM)).resolves.toBeUndefined();
+  });
+
+  it('이미 확인했으면 다시 쓰지 않고 reconcile도 안 부름', async () => {
     upcoming([{ event_type: 'WAKE_CONFIRMED', event_at: new Date(ALARM_AT - 40 * 60_000).toISOString(), input_source: 'BUTTON' }]);
     before(25);
     await real.confirmEarlyWake(ALARM);
     expect(callsTo('alarm_events', 'upsert')).toEqual([]);
+    expect(mockReconcile).not.toHaveBeenCalled();
   });
 });
