@@ -53,7 +53,7 @@ describe('그룹원 기상 상태 — 서버 get_group_wake 줄 흉내 (친구 7
   });
 
   it('줄 모양: 미루기 횟수 · 해제 시각 칸 없음, 시나리오가 없는 사람은 null(공유 안 함)', () => {
-    expect(Object.keys(mockWakeRow('sy', morning) ?? {}).sort()).toEqual(['arrived_at', 'departed_at', 'is_me', 'trip_appointment_at', 'trip_visible', 'user_id', 'wake_alarm_at', 'wake_confirmed_at', 'wake_status']);
+    expect(Object.keys(mockWakeRow('sy', morning) ?? {}).sort()).toEqual(['arrived_at', 'departed_at', 'is_me', 'prepare_alarm_at', 'prepare_started_at', 'trip_appointment_at', 'trip_visible', 'user_id', 'wake_alarm_at', 'wake_confirmed_at', 'wake_status']);
     expect(mockWakeRow('mom', morning)).toBeNull();
   });
 

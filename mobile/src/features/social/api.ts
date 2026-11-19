@@ -9,7 +9,7 @@ import { UserError } from '@/lib/errors';
 import { dateParts } from '@/lib/format';
 import { isMock } from '@/lib/mode';
 import { isTripScenario, mockWakeRow } from '@/mocks/calc';
-import { db, kst, memberAlarms, people, timelines, type MockMemberAlarm, type MockPerson } from '@/mocks/data';
+import { db, kst, memberAlarms, people, timelines, TRIP_SHARERS, type MockMemberAlarm, type MockPerson } from '@/mocks/data';
 
 import { mergeGrants } from './grants';
 import { NO_APPOINTMENT_STATE, tripCountsOf, wakeStateOf, wokeCountOf, type WakeRow } from './map';
@@ -90,8 +90,8 @@ function mockWakeRows(groupId: string): WakeRow[] {
   return g.members.flatMap((p) => {
     const given = db.grants.group[groupId];
     const consent = p === 'me' || (db.received[p] ?? []).some((r) => r.sourceType === 'GROUP' && r.sourceId === groupId && r.viewWake);
-    // 출발 · 도착 공유 — 기상 공유를 켠 사람만 켤 수 있음. 나는 내가 준 값(F03 스위치, 기본 끔), 다른 사람은 '이동 중' · '도착' 시각 장면에서만 켠 것으로 (평소 아침 장면은 '일어났어요'에서 멈춤)
-    const tripOn = p === 'me' ? !!given?.viewWake && !!given.viewTrip : isTripScenario();
+    // 출발 · 도착 공유 — 기상 공유를 켠 사람만 켤 수 있음. 나는 내가 준 값(F03 스위치, 기본 끔), 다른 사람은 '이동 중' · '도착' 시각 장면에서만(수연은 늘) 켠 것으로 (평소 아침 장면은 '일어났어요'에서 멈춤)
+    const tripOn = p === 'me' ? !!given?.viewWake && !!given.viewTrip : isTripScenario() || TRIP_SHARERS.includes(p);
     const row = consent && !blocked.includes(p) ? mockWakeRow(p, t, tripOn) : null;
     return row ? [row] : [];
   });
@@ -418,7 +418,7 @@ export async function getMemberWake(groupId: string, personId: string, date?: st
   if (!g?.members.includes(personId) || personId === 'me') return null;
   const rows = mockWakeRows(groupId);
   const base = { person: person(personId), groupName: g.name, canViewAlarm: receivedFrom(personId).viewAlarm };
-  if (!rows.length) return { ...base, state: NO_APPOINTMENT_STATE, alarmAt: null, confirmedAt: null, departedAt: null, arrivedAt: null, tripVisible: false, noGroupAppointment: true };
+  if (!rows.length) return { ...base, state: NO_APPOINTMENT_STATE, alarmAt: null, confirmedAt: null, prepareAlarmAt: null, prepareStartedAt: null, departedAt: null, arrivedAt: null, tripVisible: false, noGroupAppointment: true };
   const row = rows.find((r) => r.user_id === personId);
   if (!row) return null;
   return {
@@ -426,6 +426,8 @@ export async function getMemberWake(groupId: string, personId: string, date?: st
     state: wakeStateOf(row, true),
     alarmAt: row.wake_alarm_at ? new Date(row.wake_alarm_at) : null,
     confirmedAt: row.wake_confirmed_at ? new Date(row.wake_confirmed_at) : null,
+    prepareAlarmAt: row.prepare_alarm_at ? new Date(row.prepare_alarm_at) : null,
+    prepareStartedAt: row.prepare_started_at ? new Date(row.prepare_started_at) : null,
     departedAt: row.departed_at ? new Date(row.departed_at) : null,
     arrivedAt: row.arrived_at ? new Date(row.arrived_at) : null,
     tripVisible: !!row.trip_visible,

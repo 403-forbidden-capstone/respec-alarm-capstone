@@ -107,8 +107,10 @@ export const ME_TRIP = { wakeAt: kst(22, 431), departAt: kst(22, 535), arriveAt:
 export const tripTimelines: Record<string, [number, string, string?][]> = {
   sy: [[450, '알람 울림'], [452, '알람 해제'], [455, '기상 확인', '본인 응답'], [458, '준비 시작'], [560, '출발'], [610, '도착']],
   jh: [[440, '알람 울림'], [444, '알람 해제'], [450, '기상 확인', '자동 판정'], [480, '준비 시작']],
-  js: [[580, '알람 울림']],
+  js: [[1030, '준비 알람']], // 기상 알람이 없는 날(오후 약속 · 준비 알람 오후 5:10부터) — 알람 울림 대신 준비 알람 (11/19)
 };
+// 출발 · 도착 공유를 늘 켠 그룹원 — 평소 아침 장면에서도 준비 시작 체크가 보임 (나머지는 이동 중 · 도착 장면에서만 켠 것으로)
+export const TRIP_SHARERS = ['sy'];
 
 export const memberAlarms: Record<string, MockMemberAlarm[]> = {
   sy: [
