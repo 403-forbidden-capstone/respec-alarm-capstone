@@ -38,3 +38,27 @@ export async function inspectPurePrepDb(userId: string): Promise<PurePrepDbStatu
     participantProvenance: 'ready',
   };
 }
+
+export type LegacyAlarmSnapshot = {
+  kind: string;
+  at: string;
+  enabled: boolean;
+};
+
+// Read only the authenticated account's next five saved DB alarms.
+// This does not claim that Android has scheduled them; local notification
+// delivery is a separate native E2E.
+export async function inspectMyUpcomingAlarms(userId: string): Promise<LegacyAlarmSnapshot[]> {
+  const { data, error } = await supabase.from('alarms')
+    .select('alarm_type, scheduled_at, is_enabled')
+    .eq('user_id', userId)
+    .gte('scheduled_at', new Date().toISOString())
+    .order('scheduled_at', { ascending: true })
+    .limit(5);
+  if (error) throw error;
+  return (data ?? []).map((row) => ({
+    kind: row.alarm_type,
+    at: row.scheduled_at,
+    enabled: row.is_enabled,
+  }));
+}
