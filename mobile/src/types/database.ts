@@ -589,6 +589,31 @@ isOneToOne: false
       referencedColumns: ["user_id"]
     }
                   ]
+                },"routine_suggestions": {
+                  Row: {
+                    "cause": Database["public"]['Enums']["routine_suggestion_cause"],"created_at": string,"draft": NonNullable<Json>,"evidence": NonNullable<Json>,"reason": string,"responded_at": string | null,"routine_id": string | null,"status": Database["public"]['Enums']["routine_suggestion_status"],"suggestion_id": string,"title": string,"user_id": string
+                  }
+                  Insert: {
+                    "cause": Database["public"]['Enums']["routine_suggestion_cause"],"created_at"?: string,"draft": NonNullable<Json>,"evidence"?: NonNullable<Json>,"reason": string,"responded_at"?: string | null,"routine_id"?: string | null,"status"?: Database["public"]['Enums']["routine_suggestion_status"],"suggestion_id"?: string,"title": string,"user_id": string
+                  }
+                  Update: {
+                    "cause"?: Database["public"]['Enums']["routine_suggestion_cause"],"created_at"?: string,"draft"?: NonNullable<Json>,"evidence"?: NonNullable<Json>,"reason"?: string,"responded_at"?: string | null,"routine_id"?: string | null,"status"?: Database["public"]['Enums']["routine_suggestion_status"],"suggestion_id"?: string,"title"?: string,"user_id"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "routine_suggestions_routine_id_fkey"
+      columns: ["routine_id"]
+isOneToOne: false
+      referencedRelation: "routines"
+      referencedColumns: ["routine_id"]
+    },{
+      foreignKeyName: "routine_suggestions_user_id_fkey"
+      columns: ["user_id"]
+isOneToOne: false
+      referencedRelation: "profiles"
+      referencedColumns: ["user_id"]
+    }
+                  ]
                 },"routines": {
                   Row: {
                     "created_at": string,"goal": string | null,"is_active": boolean,"origin": Database["public"]['Enums']["routine_origin"],"repeat_days": string,"routine_id": string,"source_journal_id": string | null,"steps": NonNullable<Json>,"title": string,"updated_at": string,"user_id": string
@@ -1129,7 +1154,7 @@ isOneToOne: false
                            }
           }
           Enums: {
-            "alarm_event_type": "TRIGGERED"|"SNOOZED"|"DISMISSED"|"WAKE_CONFIRMED"|"ARRIVAL_CONFIRMED"|"MISSED"|"FEEDBACK"|"ACKNOWLEDGED","alarm_feedback_type": "GOOD"|"TOO_LOUD"|"TOO_QUIET"|"VOICE_DISLIKE"|"SOUND_DISLIKE","alarm_intensity": "SOFT"|"NORMAL"|"STRONG","alarm_suggestion_status": "PENDING"|"APPLIED"|"EDITED"|"IGNORED","alarm_suggestion_type": "VOICE_TONE"|"SOUND"|"INTENSITY"|"PREPARE_ADVANCE","alarm_type": "WAKE"|"PREPARE"|"DEPARTURE"|"ARRIVE"|"ROUTINE","alarm_value_source": "AUTO"|"MANUAL","apply_status": "PENDING"|"APPLIED"|"REJECTED","event_input_source": "BUTTON"|"LOCATION"|"VOICE"|"MANUAL"|"USAGE","friend_status": "PENDING"|"ACCEPTED"|"BLOCKED","importance_level": "LOW"|"NORMAL"|"HIGH","input_mode": "VOICE"|"TEXT","invite_status": "INVITED"|"JOINED"|"LEFT","permission_source": "FRIEND"|"GROUP","prepare_start_source": "ROUTINE_STEP"|"PREPARE_ALARM","record_source": "MANUAL"|"ALARM"|"AI","routine_origin": "USER"|"AI_SUGGESTED","session_type": "BEFORE_SLEEP"|"AFTER_WAKE"|"ANYTIME","todo_type": "TASK"|"ITEM","transport_type": "WALK"|"TRANSIT"|"BUS"|"SUBWAY"|"CAR","travel_source": "API"|"CACHED"|"MANUAL"|"ESTIMATE","voice_tone": "CALM"|"NEUTRAL"|"DIRECT"
+            "alarm_event_type": "TRIGGERED"|"SNOOZED"|"DISMISSED"|"WAKE_CONFIRMED"|"ARRIVAL_CONFIRMED"|"MISSED"|"FEEDBACK"|"ACKNOWLEDGED","alarm_feedback_type": "GOOD"|"TOO_LOUD"|"TOO_QUIET"|"VOICE_DISLIKE"|"SOUND_DISLIKE","alarm_intensity": "SOFT"|"NORMAL"|"STRONG","alarm_suggestion_status": "PENDING"|"APPLIED"|"EDITED"|"IGNORED","alarm_suggestion_type": "VOICE_TONE"|"SOUND"|"INTENSITY"|"PREPARE_ADVANCE","alarm_type": "WAKE"|"PREPARE"|"DEPARTURE"|"ARRIVE"|"ROUTINE","alarm_value_source": "AUTO"|"MANUAL","apply_status": "PENDING"|"APPLIED"|"REJECTED","event_input_source": "BUTTON"|"LOCATION"|"VOICE"|"MANUAL"|"USAGE","friend_status": "PENDING"|"ACCEPTED"|"BLOCKED","importance_level": "LOW"|"NORMAL"|"HIGH","input_mode": "VOICE"|"TEXT","invite_status": "INVITED"|"JOINED"|"LEFT","permission_source": "FRIEND"|"GROUP","prepare_start_source": "ROUTINE_STEP"|"PREPARE_ALARM","record_source": "MANUAL"|"ALARM"|"AI","routine_origin": "USER"|"AI_SUGGESTED","routine_suggestion_cause": "OVERSLEEP"|"LATE_START"|"NIGHT_PREP","routine_suggestion_status": "PENDING"|"ACCEPTED"|"IGNORED","session_type": "BEFORE_SLEEP"|"AFTER_WAKE"|"ANYTIME","todo_type": "TASK"|"ITEM","transport_type": "WALK"|"TRANSIT"|"BUS"|"SUBWAY"|"CAR","travel_source": "API"|"CACHED"|"MANUAL"|"ESTIMATE","voice_tone": "CALM"|"NEUTRAL"|"DIRECT"
           }
           CompositeTypes: {
             [_ in never]: never
@@ -1245,7 +1270,7 @@ export type CompositeTypes<
 export const Constants = {
   "public": {
           Enums: {
-            "alarm_event_type": ["TRIGGERED", "SNOOZED", "DISMISSED", "WAKE_CONFIRMED", "ARRIVAL_CONFIRMED", "MISSED", "FEEDBACK", "ACKNOWLEDGED"],"alarm_feedback_type": ["GOOD", "TOO_LOUD", "TOO_QUIET", "VOICE_DISLIKE", "SOUND_DISLIKE"],"alarm_intensity": ["SOFT", "NORMAL", "STRONG"],"alarm_suggestion_status": ["PENDING", "APPLIED", "EDITED", "IGNORED"],"alarm_suggestion_type": ["VOICE_TONE", "SOUND", "INTENSITY", "PREPARE_ADVANCE"],"alarm_type": ["WAKE", "PREPARE", "DEPARTURE", "ARRIVE", "ROUTINE"],"alarm_value_source": ["AUTO", "MANUAL"],"apply_status": ["PENDING", "APPLIED", "REJECTED"],"event_input_source": ["BUTTON", "LOCATION", "VOICE", "MANUAL", "USAGE"],"friend_status": ["PENDING", "ACCEPTED", "BLOCKED"],"importance_level": ["LOW", "NORMAL", "HIGH"],"input_mode": ["VOICE", "TEXT"],"invite_status": ["INVITED", "JOINED", "LEFT"],"permission_source": ["FRIEND", "GROUP"],"prepare_start_source": ["ROUTINE_STEP", "PREPARE_ALARM"],"record_source": ["MANUAL", "ALARM", "AI"],"routine_origin": ["USER", "AI_SUGGESTED"],"session_type": ["BEFORE_SLEEP", "AFTER_WAKE", "ANYTIME"],"todo_type": ["TASK", "ITEM"],"transport_type": ["WALK", "TRANSIT", "BUS", "SUBWAY", "CAR"],"travel_source": ["API", "CACHED", "MANUAL", "ESTIMATE"],"voice_tone": ["CALM", "NEUTRAL", "DIRECT"]
+            "alarm_event_type": ["TRIGGERED", "SNOOZED", "DISMISSED", "WAKE_CONFIRMED", "ARRIVAL_CONFIRMED", "MISSED", "FEEDBACK", "ACKNOWLEDGED"],"alarm_feedback_type": ["GOOD", "TOO_LOUD", "TOO_QUIET", "VOICE_DISLIKE", "SOUND_DISLIKE"],"alarm_intensity": ["SOFT", "NORMAL", "STRONG"],"alarm_suggestion_status": ["PENDING", "APPLIED", "EDITED", "IGNORED"],"alarm_suggestion_type": ["VOICE_TONE", "SOUND", "INTENSITY", "PREPARE_ADVANCE"],"alarm_type": ["WAKE", "PREPARE", "DEPARTURE", "ARRIVE", "ROUTINE"],"alarm_value_source": ["AUTO", "MANUAL"],"apply_status": ["PENDING", "APPLIED", "REJECTED"],"event_input_source": ["BUTTON", "LOCATION", "VOICE", "MANUAL", "USAGE"],"friend_status": ["PENDING", "ACCEPTED", "BLOCKED"],"importance_level": ["LOW", "NORMAL", "HIGH"],"input_mode": ["VOICE", "TEXT"],"invite_status": ["INVITED", "JOINED", "LEFT"],"permission_source": ["FRIEND", "GROUP"],"prepare_start_source": ["ROUTINE_STEP", "PREPARE_ALARM"],"record_source": ["MANUAL", "ALARM", "AI"],"routine_origin": ["USER", "AI_SUGGESTED"],"routine_suggestion_cause": ["OVERSLEEP", "LATE_START", "NIGHT_PREP"],"routine_suggestion_status": ["PENDING", "ACCEPTED", "IGNORED"],"session_type": ["BEFORE_SLEEP", "AFTER_WAKE", "ANYTIME"],"todo_type": ["TASK", "ITEM"],"transport_type": ["WALK", "TRANSIT", "BUS", "SUBWAY", "CAR"],"travel_source": ["API", "CACHED", "MANUAL", "ESTIMATE"],"voice_tone": ["CALM", "NEUTRAL", "DIRECT"]
           }
         }
 } as const
