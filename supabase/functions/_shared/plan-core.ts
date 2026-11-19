@@ -31,6 +31,7 @@ import {
   type IntensityOverrides,
   type Level,
   type PrepareBasis,
+  type PurePrepCandidate,
   type PrepareStats,
   type ResolvedIntensity,
   type RingKind,
@@ -140,6 +141,7 @@ export type PlanInputs = {
   lateCount4w: number;
   sameDayWake: boolean;
   mlPrediction?: MlPrediction; // 검증된 프로필일 때만 Edge가 조회. 없으면 기존 P80 계산 유지
+  purePrepCandidate?: PurePrepCandidate; // opt-in only; pure prep start -> departure, NEVER wake -> departure
   // 반복 다음 회차용 — 자동 준비시간이 이 값에서 `within`분 넘게 벗어나면 그 범위로 (D62 처음 2주 몫). 직접 고른 준비시간(draft.prepareMinutes)은 건드리지 않음
   prepareBound?: { around: number; within: number };
   // 저장된 알람(existingAlarms)을 계산할 때의 당김 분 — 준비 전 활동을 되찾을 때 씀. 당김을 바꾸며 다시 계산할 때(제안 적용, 다음 PR)만 옛 값을 넘김. 없으면 participant의 지금 값
@@ -363,8 +365,39 @@ export function computePlan(i: PlanInputs, travel: ResolvedTravel, mode: PlanMod
           mlModel: ml.model,
         }
       : fallback;
-    const prepare = i.prepareBound && withWake ? clampPrepareToBound(predicted, i.prepareBound) : predicted;
-    return { beforePrepareMinutes, prepare };
+    // New pure-preparation data has DIFFERENT units from the existing
+    // whole morning window. Convert once, before the shared chain calculator.
+    // Never mix with old C1/W4, or an explicit legacy manual override.
+    const pure = i.purePrepCandidate;
+    const usePure = pure != null && i.draft.prepareMinutes == null && !ml &&
+      manualTimes.WAKE == null && manualTimes.PREPARE == null;
+    const activePure = usePure ? pure : null;
+    const minutes = activePure != null
+      ? Math.round(activePure.minutes + (withWake ? beforePrepareMinutes : 0))
+      : null;
+    const pureBasis: PrepareBasis = activePure != null && minutes != null
+      ? {
+          ...fallback,
+          minutes,
+          autoMinutes: minutes,
+          correction: minutes - fallback.commonP80,
+          residualP80: 0,
+          weight: 0,
+          sampleCount: activePure.sampleCount ?? 0,
+          source: activePure.source === 'MANUAL' ? 'MANUAL'
+            : activePure.source === 'MODEL' ? 'MODEL'
+            : activePure.source === 'HISTORY' ? 'PERSONAL' : 'DEFAULT',
+          confidence: 'LOW',
+          ...(activePure.source === 'MODEL' && activePure.model === 'prep_start_ratio_v2' ? { mlModel: 'prep_start_ratio_v2' as const } : {}),
+        }
+      : predicted;
+    // prepareBound is inherited from legacy wake->departure participant.prepare_minutes.
+    // Applying it to a pure prep candidate would clamp values in incompatible units.
+    // New-semantics per-occurrence bounds require their own persisted pure-prep basis.
+    const prepare = i.prepareBound && withWake && activePure == null
+      ? clampPrepareToBound(pureBasis, i.prepareBound)
+      : pureBasis;
+    return { beforePrepareMinutes, prepare, pureApplied: activePure != null };
   };
 
   const manualTimes = resolveManualTimes(i.draft.manualTimes, i.existingAlarms);
@@ -383,7 +416,7 @@ export function computePlan(i: PlanInputs, travel: ResolvedTravel, mode: PlanMod
       derived = derive(false);
     }
   }
-  const { beforePrepareMinutes, prepare } = derived;
+  const { beforePrepareMinutes, prepare, pureApplied } = derived;
 
   // 잠귀(profiles.wake_sensitivity): 무거움(HEAVY)이면 강, 가벼움 · 보통은 기본 보통 (D69). 앱 map.ts toIntensity · realWrite setIntensity도 같은 값을 넘김
   const wakeSensitivity = wakeSensitivityOf(i.profile.wake_sensitivity);
@@ -432,7 +465,8 @@ export function computePlan(i: PlanInputs, travel: ResolvedTravel, mode: PlanMod
     travel,
     travelMinutes: chosen.minutes,
     prepare,
-    recentPrepare: withWake ? recentPrepareOf(i.stats) : [],
+    // Legacy recent statistics are wake->departure, not pure prep; do not display them when using the new basis.
+    recentPrepare: withWake && !pureApplied ? recentPrepareOf(i.stats) : [],
     intensity,
     kinds,
     manualTimes,
