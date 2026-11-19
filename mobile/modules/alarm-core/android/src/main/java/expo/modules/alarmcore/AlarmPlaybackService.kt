@@ -416,7 +416,7 @@ class AlarmPlaybackService : Service() {
   // 울림 회차마다 한 번 그룹 상태를 새로 받음 (미루기 뒤 다시 울림 = 새 울림 번호 → 앞 기록을 버리고 새로). 기상 알람 · 음성이 있는 울림만
   //   같은 회차에서 다시 불려도(서비스 중복 콜백 · 재울림 처리) 조회하지 않음. 실패 · 시간 초과면 이 회차는 안내 없이 (다시 시도 없음)
   private fun startGroupStatus(alarm: StoredAlarm) {
-    if (alarm.type != "WAKE") return
+    if (alarm.type != "WAKE" || VoiceTest.isVoiceTestAlarm(alarm.alarmId)) return
     val key = "${alarm.alarmId}#$ringToken"
     if (groupRing?.key == key) return
     resetGroupStatus()
@@ -429,7 +429,7 @@ class AlarmPlaybackService : Service() {
       val result = runCatching { GroupStatusVoice.fetch(context, level) }
         .onFailure { Log.w(TAG, "그룹 상태를 못 받음 — 이번 울림은 개인화 음성만", it) }
         .getOrNull()
-      val path = result?.wav?.let { GroupStatusVoice.writeWav(context, level, it)?.path }
+      val path = result?.wav?.let { GroupStatusVoice.writeWav(context, generation, level, it)?.path }
       handler.post {
         if (generation != groupGeneration || groupRing !== ring) return@post
         ring.onQuery(result?.text, result?.token, level, path)
@@ -448,7 +448,7 @@ class AlarmPlaybackService : Service() {
       val result = runCatching { GroupStatusVoice.fetch(context, level, text, token) }
         .onFailure { Log.w(TAG, "그룹 안내 ${level}단계 음성을 못 받음 — Android TTS로", it) }
         .getOrNull()
-      val path = result?.wav?.let { GroupStatusVoice.writeWav(context, level, it)?.path }
+      val path = result?.wav?.let { GroupStatusVoice.writeWav(context, generation, level, it)?.path }
       handler.post {
         if (generation != groupGeneration || groupRing !== ring) return@post
         ring.onAudio(level, path)
