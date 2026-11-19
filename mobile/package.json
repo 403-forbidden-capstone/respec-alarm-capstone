@@ -72,6 +72,8 @@
       "<rootDir>/node_modules"
     ],
     "setupFiles": [
+      "<rootDir>/jest.preload.js",
+      "jest-expo/src/preset/setup.js",
       "<rootDir>/jest.setup.js"
     ],
     "collectCoverageFrom": [
