@@ -43,6 +43,21 @@ async function check(name, fn) {
   }
 }
 
+// 알려진 한계 — 이미 알고 있는 빈틈(G번호) · 새로 나온 빈틈(NEW-n)을 '원하는 동작'으로 적어 두는 칸. db-check를 깨지 않음
+//   fn이 true를 돌려주면 한계가 풀린 것(PASS로 남기고 check로 바꾸라고 알림), 아니면 GAP(G번호) · NEW(NEW-n)로 증상과 함께 따로 모아 찍음
+async function knownGap(tag, name, fn) {
+  const kind = /^NEW/.test(tag) ? 'NEW' : 'GAP';
+  try {
+    const r = await fn();
+    if (r === true) results.push(['PASS', `${tag} ${name} (한계가 풀림 — knownGap을 check로 바꿀 것)`, '']);
+    else results.push([kind, `${tag} ${name}`, JSON.stringify(r)]);
+  } catch (e) {
+    results.push([kind, `${tag} ${name}`, '예외: ' + e.message]);
+  } finally {
+    await su();
+  }
+}
+
 // 오류가 나야 하는 동작 — 메시지가 맞으면 true
 async function expectErr(fn, re) {
   try {
@@ -55,8 +70,9 @@ async function expectErr(fn, re) {
 
 function report() {
   for (const [s, n, d] of results) console.log(`${s}  ${n}${d ? '  -- ' + d : ''}`);
-  const fails = results.filter((r) => r[0] !== 'PASS').length;
-  console.log(`\n통과 ${results.length - fails} / ${results.length}`);
+  const gap = results.filter((r) => r[0] === 'GAP').length, fresh = results.filter((r) => r[0] === 'NEW').length;   // 알려진 한계 · 새 빈틈은 실패로 안 셈 (knownGap)
+  const fails = results.filter((r) => r[0] !== 'PASS' && r[0] !== 'GAP' && r[0] !== 'NEW').length;
+  console.log(`\n통과 ${results.length - fails - gap - fresh} / ${results.length - gap - fresh}${gap + fresh ? ` · 알려진 한계 ${gap} · 새 빈틈 ${fresh} (실패로 안 셈)` : ''}`);
   process.exit(fails ? 1 : 0);
 }
 
@@ -3727,11 +3743,12 @@ await check('user_places: updated_at이 고칠 때 갱신됨 · 계정을 지우
 // 친구 장별 검사 — friend/chNN.mjs (친구_시험케이스.md DB · 함수 층, 항목 이름 앞 번호 = 시험 번호)
 // ---------------------------------------------------------------------
 // 장마다 자기 계정을 새로 만들어 앞 검사의 A~E와 섞이지 않게 함. 장이 늘면 아래 목록에 한 줄씩
-const FRIEND_CTX = { q, as, su, svc, check, expectErr, PGlite, AUTH_STUBS, MIG_DIR, readFileSync, readdirSync, join };
+const FRIEND_CTX = { q, as, su, svc, check, knownGap, expectErr, PGlite, AUTH_STUBS, MIG_DIR, readFileSync, readdirSync, join };
 for (const ch of ['ch02', 'ch03', 'ch04', 'ch05', 'ch06', 'ch11', 'ch07', 'ch08', 'ch09', 'ch10', 'ch12', 'ch13', 'ch15', 'ch16']) await (await import(`./friend/${ch}.mjs`)).default(FRIEND_CTX);
 
 await (await import('./prepare-ml-approval.mjs')).default(FRIEND_CTX);
 await (await import('./commit-rpc.mjs')).default(FRIEND_CTX);   // 알람 저장 DB 함수 (정할 일 0-10)
 await (await import('./device-events.mjs')).default(FRIEND_CTX);   // 폰이 앱 없이 올리는 기록 (alarm-events-device) + DB 트리거
+await (await import('./scenarios/day.mjs')).default(FRIEND_CTX);   // 4명 그룹의 하루 시나리오 (서버 쪽) — 사람 여럿 · 시간 순서 · 설정 변화
 
 report();
