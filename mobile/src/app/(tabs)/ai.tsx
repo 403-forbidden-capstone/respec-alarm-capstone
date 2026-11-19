@@ -9,6 +9,9 @@ import { homeOf } from '@/features/alarm/placeSheet';
 import { useAuth } from '@/features/auth/AuthProvider';
 import { applySuggestion, getPendingSuggestion, ignoreSuggestion } from '@/features/records/api';
 import { SuggestionPromptCard } from '@/features/records/components/SuggestionPromptCard';
+import { getPendingRoutineSuggestion, ignoreRoutineSuggestion } from '@/features/routine/api';
+import { RoutinePromptCard } from '@/features/routine/components/RoutinePromptCard';
+import type { RoutineSuggestion } from '@/features/routine/types';
 import { previewTimes } from '@/features/records/suggestion';
 import type { Suggestion } from '@/features/records/types';
 import { endLiveVoice, finishConversation, getConversation, getLiveToken, pickCardPlace, rejectCard, retryConversation, saveCard, say, sayVoice } from '@/features/voice/api';
@@ -136,6 +139,8 @@ export default function AiScreen() {
   //   들어올 때마다 대기 중인 제안을 다시 읽고, 못 읽으면 카드 없이 대화만
   const [suggestion, setSuggestion] = useState<Suggestion | null>(null);
   const [suggestionDone, setSuggestionDone] = useState<string | null>(null);
+  // 루틴 제안 (안건 D114) — 알람 조정 제안 카드 아래. [루틴 만들기]는 루틴 편집에 초안을 채워 엶
+  const [routineSuggestion, setRoutineSuggestion] = useState<RoutineSuggestion | null>(null);
   useFocusEffect(
     useCallback(() => {
       let alive = true;
@@ -144,6 +149,11 @@ export default function AiScreen() {
           if (!alive) return;
           setSuggestion(s);
           setSuggestionDone(null);
+        })
+        .catch(() => {});
+      getPendingRoutineSuggestion()
+        .then((s) => {
+          if (alive) setRoutineSuggestion(s);
         })
         .catch(() => {});
       return () => {
@@ -157,6 +167,12 @@ export default function AiScreen() {
       const after = previewTimes(s, s.minutes);
       setSuggestionDone(after.prepare ? `다음 회차부터 준비 알람이 ${formatTime(after.prepare)}에 울려요` : `기상 알람이 ${formatTime(after.wake)}에 울려요`);
     }, '제안을 적용하지 못했어요');
+  const ignoreRoutinePrompt = (s: RoutineSuggestion) =>
+    act(async () => {
+      await ignoreRoutineSuggestion(s.id);
+      setRoutineSuggestion(null);
+      toast('기록이 3일 더 쌓이면 다시 볼 수 있어요');
+    }, '제안을 넘기지 못했어요');
   const ignorePrompt = (s: Suggestion) =>
     act(async () => {
       await ignoreSuggestion(s.id);
@@ -434,6 +450,15 @@ export default function AiScreen() {
                   onApply={() => applyPrompt(suggestion)}
                   onIgnore={() => ignorePrompt(suggestion)}
                   onOpen={() => router.push({ pathname: '/suggestion/[id]', params: { id: suggestion.id } })}
+                />
+              ) : null}
+              {/* 루틴 제안 — 알람 조정 제안 아래 (안건 D114 4번) */}
+              {i === 0 && routineSuggestion ? (
+                <RoutinePromptCard
+                  suggestion={routineSuggestion}
+                  busy={busy}
+                  onCreate={() => router.push({ pathname: '/routine/[id]', params: { id: 'new', suggestion: routineSuggestion.id } })}
+                  onIgnore={() => ignoreRoutinePrompt(routineSuggestion)}
                 />
               ) : null}
             </Fragment>
