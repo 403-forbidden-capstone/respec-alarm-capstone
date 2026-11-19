@@ -251,10 +251,15 @@ export default async function scenarioDay({ q, as, su, svc, check, knownGap, cla
       at: T('08:25'), act: async () => [await wakeCheck(W, T('08:25')), await wakeCheck(W, T('08:30'))],
       then: ([a, b]) => eq([a, b], [{ self: [], nudge: [], up: ['A>D', 'C>D'] }, { self: [], nudge: [], up: [] }]),
     });
-    await step('MAIN 08:50 · A 준비 알람 해제(BUTTON) — 서버는 준비 시작만 적고(본인 값), 친구 화면 · 신호는 그대로(D59 준비는 본인만)', W, {
-      at: T('08:51'), act: () => evApp(W, 'A', W.AL.A.PREPARE, 'DISMISSED', T('08:50'), 'BUTTON'), sig: 0,
+    await step('MAIN 08:50 · A 준비 알람 해제(BUTTON) = 준비 시작 — 서버가 prepare_started_at을 적고(11/19 지형님), 친구 화면은 단계 그대로 · 준비 칸(prepare_alarm_at · prepare_started_at)만 채워지며 신호 1번(A는 출발 · 도착 공유)', W, {
+      at: T('08:51'), act: () => evApp(W, 'A', W.AL.A.PREPARE, 'DISMISSED', T('08:50'), 'BUTTON'), sig: 1,
       see: S({ A: 'CONFIRMED T', B: 'CONFIRMED', C: 'CONFIRMED', D: 'CONFIRMED T' }),
-      then: async () => { const p = await pt(W.P.A); return iso(p.prepare_started_at) === iso(T('08:50')) ? true : p; },
+      then: async () => {
+        const p = await pt(W.P.A);
+        const a = (await rowsOf(W, 'B', T('08:51'))).find((r) => r.user_id === W.U.A);
+        const c = (await rowsOf(W, 'A', T('08:51'))).find((r) => r.user_id === W.U.C);   // 기상 공유를 끈 C는 A에게 안 보이고, 보여도 준비 칸은 비어 있음
+        return eq([iso(p.prepare_started_at), iso(a.prepare_started_at), iso(a.prepare_alarm_at), c?.prepare_started_at ?? null], [iso(T('08:50')), iso(T('08:50')), iso(T('08:50')), null]);
+      },
     });
     await step('MAIN 09:21 · A가 앱이 꺼진 채 [출발했어요](알림 버튼, 기기 길) — 서버가 바로 출발로 반영, 모두에게 d09:21, 신호 1번 · trip_appointment_at = 10:00', W, {
       at: T('09:22'), act: () => evDev(W, 'A', W.AL.A.DEPARTURE, 'ACKNOWLEDGED', T('09:21')), sig: 1,
@@ -668,14 +673,14 @@ export default async function scenarioDay({ q, as, su, svc, check, knownGap, cla
       act: async () => { const a = await tog('B', 'trip_share_opt_in', true); const b = await tog('B', 'wake_share_opt_in', true); return [a[0].t, b[0].t]; },
       see: S({}), then: (r) => eq(r, [false, false]),
     });
-    await knownGap('G8', '공유(기상 · 출발 · 도착)를 켜거나 끌 때 상대가 열어 둔 그룹 화면을 다시 읽게 하는 신호가 나가야 함 — 지금은 group_members 변경에 신호 트리거가 없어 0건', async () => {
+    await check('G8 · 공유(기상 · 출발 · 도착)를 켜거나 끌 때 상대가 열어 둔 그룹 화면에 새로 고침 신호가 나감 (3번 바꾸면 3번, 11/19 그룹 포인트 서버)', async () => {
       const w = await world();
       const n0 = await sigN(w);
       await app(w.U.B, () => q(`update public.group_members set trip_share_opt_in = true where group_id = $1 and user_id = $2`, [w.g, w.U.B]));
       await app(w.U.A, () => q(`update public.group_members set trip_share_opt_in = false where group_id = $1 and user_id = $2`, [w.g, w.U.A]));
       await app(w.U.A, () => q(`update public.group_members set wake_share_opt_in = false where group_id = $1 and user_id = $2`, [w.g, w.U.A]));
       const got = (await sigN(w)) - n0;
-      return got >= 3 ? true : { '공유 켜기 · 끄기 3번 뒤 신호 수': got };
+      return got === 3 ? true : { '공유 켜기 · 끄기 3번 뒤 신호 수': got };
     });
 
     // S23 기상 숨기기
@@ -693,13 +698,13 @@ export default async function scenarioDay({ q, as, su, svc, check, knownGap, cla
       const [n] = await q(`select count(*)::int as n from public.wake_hides where owner_id = $1 and hidden_from_id = $2`, [W2.U.D, W2.U.B]);
       return eq([shown, r2.status, n.n, (await view(W2, 'B', T('08:00'))).D], ['CONFIRMED T', 'OK', 1, '-']);
     });
-    await knownGap('NEW-2', '기상 숨기기 · 보이기를 할 때 상대가 열어 둔 그룹 화면에 새로 고침 신호가 나가야 함(G8과 같은 계열) — 지금은 wake_hides 변경에 신호가 없어 B가 화면을 다시 열기 전까지 D가 그대로 보임', async () => {
+    await check('NEW-2 · 기상 숨기기 · 보이기를 할 때 상대가 열어 둔 그룹 화면에 새로 고침 신호가 나감 (각 1번)', async () => {
       const w = await world({ hide: false });
       const n0 = await sigN(w);
       await call(w.U.D, 'public.set_wake_hidden($1, $2)', [w.U.B, true]);
       await call(w.U.D, 'public.set_wake_hidden($1, $2)', [w.U.B, false]);
       const got = (await sigN(w)) - n0;
-      return got >= 2 ? true : { '숨기기 · 보이기 뒤 신호 수': got };
+      return got === 2 ? true : { '숨기기 · 보이기 뒤 신호 수': got };
     });
 
     // S24 차단 — 지금 동작을 기록 (G17: 그룹 · 공동 약속에는 남음, 의도 확인 대기)
@@ -762,13 +767,13 @@ export default async function scenarioDay({ q, as, su, svc, check, knownGap, cla
       act: async () => { await evApp(W5, 'A', W5.AL.A.WAKE, 'TRIGGERED', T('07:00')); await evApp(W5, 'A', W5.AL.A.WAKE, 'DISMISSED', T('07:01'), 'BUTTON'); return [await wakeCheck(W5, T('07:31')), await wakeCheck(W5, T('07:45')), await pingS(W5, 'B', 'A', T('07:50'))]; },
       then: ([r, n, p]) => eq([r.self, n.nudge, p], [['A'], ['C>A', 'D>A'], 'FORBIDDEN']),
     });
-    await knownGap('NEW-3', '그룹 나가기 · 내보내짐 때 남은 사람들이 열어 둔 그룹 화면에 새로 고침 신호가 나가야 함 — 지금은 group_members 변경에 신호가 없어 남은 사람 화면에 나간 사람이 다시 읽기 전까지 남음(G8과 같은 계열)', async () => {
+    await check('NEW-3 · 그룹 나가기 · 내보내짐 때 남은 사람들의 그룹 화면에 새로 고침 신호가 나감 (각 1번)', async () => {
       const w = await world();
       const n0 = await sigN(w);
       await leave(w, 'B');
       await app(w.U.A, () => q(`delete from public.group_members where group_id = $1 and user_id = $2`, [w.g, w.U.D]));
       const got = (await sigN(w)) - n0;
-      return got >= 2 ? true : { '나가기 · 내보내기 뒤 신호 수': got };
+      return got === 2 ? true : { '나가기 · 내보내기 뒤 신호 수': got };
     });
 
     // S26 내보내짐
@@ -789,12 +794,12 @@ export default async function scenarioDay({ q, as, su, svc, check, knownGap, cla
       act: async () => { const r = await app(W3.U.B, () => q(`delete from public.appointment_participants where participant_id = $1 and user_id = $2 returning 1`, [W3.P.B, W3.U.B])); return { r: r.length, b: await counts(W3, 'B') }; },
       then: async ({ r, b }) => { const av = await view(W3, 'A', T('10:10')); return eq([r, b, av.B], [1, [0, 0], 'NO_ALARM']); },
     });
-    await knownGap('NEW-4', '약속에서 빠질 때(참여 행 삭제) 열어 둔 그룹 화면에 새로 고침 신호가 나가야 함 — 지금은 참여 행의 신호 트리거가 insert · update뿐이라 삭제는 0건(친구 화면은 다시 읽을 때 NO_ALARM으로 바뀜)', async () => {
+    await check('NEW-4 · 약속에서 빠질 때(참여 행 삭제) 그룹 화면에 새로 고침 신호가 나감', async () => {
       const w = await world();
       const n0 = await sigN(w);
       await app(w.U.B, () => q(`delete from public.appointment_participants where participant_id = $1`, [w.P.B]));
       const got = (await sigN(w)) - n0;
-      return got >= 1 ? true : { '빠진 뒤 신호 수': got };
+      return got === 1 ? true : { '빠진 뒤 신호 수': got };
     });
   }
 
@@ -839,14 +844,14 @@ export default async function scenarioDay({ q, as, su, svc, check, knownGap, cla
         return today.A === '-' && today.D === '-' && tomorrow === true ? true : { 오늘: today, 내일: tomorrow };
       },
     });
-    await knownGap('NEW-1', '약속 시각 변경 · 취소를 할 때 그 그룹 화면을 열어 둔 사람들에게 새로 고침 신호가 나가야 함 — 지금은 appointments 변경 · 삭제에 신호가 없어(기상 알람 시각 줄 · 약속 시각 · 줄 전체가 다시 읽을 때만 바뀜) 0건', async () => {
+    await check('NEW-1 · 약속 시각 변경 · 취소를 할 때 그 그룹 화면에 새로 고침 신호가 나감 (변경 1번, 취소 1번)', async () => {
       const w = await world();
       const n0 = await sigN(w);
       await app(w.U.A, () => q(`update public.appointments set appointment_at = $2::timestamptz where appointment_id = $1`, [w.main.ap, T('11:00')]));
       const afterChange = (await sigN(w)) - n0;
       await app(w.U.A, () => q(`delete from public.appointments where appointment_id = $1`, [w.main.ap]));
       const afterCancel = (await sigN(w)) - n0;
-      return afterChange >= 1 && afterCancel >= 2 ? true : { '변경 뒤 신호': afterChange, '취소까지 누적 신호': afterCancel };
+      return afterChange === 1 && afterCancel === 2 ? true : { '변경 뒤 신호': afterChange, '취소까지 누적 신호': afterCancel };
     });
 
     // S28 취소
