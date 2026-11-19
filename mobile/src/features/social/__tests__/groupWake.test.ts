@@ -165,6 +165,8 @@ describe('G03 기상 상태 (7-41 · 7-06 · 7-02)', () => {
       state: expect.objectContaining({ stage: 'WOKE', text: '기상 완료 · 오전 8:08' }),
       alarmAt: new Date('2026-10-19T23:50:00.000Z'),
       confirmedAt: new Date('2026-10-19T23:08:00.000Z'),
+      prepareAlarmAt: null,
+      prepareStartedAt: null,
       departedAt: null,
       arrivedAt: null,
       tripVisible: false,

@@ -12,9 +12,9 @@ export type Person = {
 
 // 기상 상태 한 줄 (G01 · G02 멤버 · G03 · H01 그룹 요약) — 서버 기상 6단계를 화면 3단계로 묶고, 출발 · 도착 공유가 보이면 뒤에 3단계를 더함 (친구 7장, map.ts wakeStateOf)
 //   SCHEDULED 취침 중('취침 중 · 오전 8:50 알람') · RANG 알람 울리는 중 · 알람 울림 · 기상 확인 전(울림 · 해제 · 미확인) · WOKE 기상 완료 · NO_ALARM 알람 없음
-//   PREPARING 준비 중(기상 확인 뒤 출발 전, 출발 · 도착 공유를 켠 사람만) · DEPARTED 이동 중 · 출발 · ARRIVED 도착
+//   PREPARING 준비 중(준비 알람 해제 = 준비 시작 체크 뒤 출발 전, 출발 · 도착 공유를 켠 사람만) · PREP_SCHEDULED 준비 알람 예정(기상 알람이 없는 날) · DEPARTED 이동 중 · 출발 · ARRIVED 도착
 //   NOT_SHARED 공유 안 함(동의 안 함 · 숨김 · 차단 구분 없음) · NO_APPOINTMENT 그 그룹 약속이 없는 날
-export type WakeStage = 'SCHEDULED' | 'RANG' | 'WOKE' | 'PREPARING' | 'DEPARTED' | 'ARRIVED' | 'NO_ALARM' | 'NOT_SHARED' | 'NO_APPOINTMENT';
+export type WakeStage = 'SCHEDULED' | 'RANG' | 'WOKE' | 'PREPARING' | 'PREP_SCHEDULED' | 'DEPARTED' | 'ARRIVED' | 'NO_ALARM' | 'NOT_SHARED' | 'NO_APPOINTMENT';
 export type WakeState = {
   stage: WakeStage;
   text: string; // 기상 완료 · 오전 8:08
@@ -42,7 +42,7 @@ export const TRIP_PERMISSION: { key: 'viewTrip'; name: string; chip: string; des
   key: 'viewTrip',
   name: '출발 · 도착 공유',
   chip: '출발 · 도착',
-  description: '이 그룹 일정의 출발 · 도착 시각이 보여요. 장소는 안 보여요.',
+  description: '이 그룹 일정의 준비 시작 · 출발 · 도착 시각이 보여요. 장소는 안 보여요.',
 };
 export const TRIP_NEEDS_WAKE = '기상 상태 공유를 켜야 켤 수 있어요';
 
@@ -77,12 +77,12 @@ export type GroupItem = {
   initial: string; // 그룹 아이콘 글자
   memberCount: number;
   wokeCount: number | null; // 오늘 기상 완료 수(준비 중 · 출발 · 도착 포함) — 그 그룹 약속이 없는 날은 null (G01 '오늘 n명 기상 완료' 줄을 숨김)
-  trip: TripCounts | null; // 출발 · 도착이 보이는 사람이 있을 때만 — G01 요약 줄이 '도착 1 · 이동 중 2 · 기상 완료 1'로 바뀜
+  trip: TripCounts | null; // 출발 · 도착이 보이는 사람이 있을 때만 — G01 요약 줄이 '도착 1 · 이동 중 2 · 준비 중 1 · 기상 완료 1'로 바뀜
   grants: PermissionSet; // 이 그룹에 내가 준 권한
 };
 
-// 그룹 요약 줄 숫자 — 도착 · 이동 중(출발했고 아직 도착 전) · 기상 완료(출발 전, 준비 중 포함)
-export type TripCounts = { arrived: number; moving: number; woke: number };
+// 그룹 요약 줄 숫자 — 도착 · 이동 중(출발했고 아직 도착 전) · 준비 중(준비 시작 체크 뒤 출발 전) · 기상 완료(준비 시작 전)
+export type TripCounts = { arrived: number; moving: number; preparing: number; woke: number };
 
 // 홈(H01)의 그룹 기상 요약
 export type GroupSummary = {
@@ -160,6 +160,8 @@ export type MemberWake = {
   state: WakeState;
   alarmAt: Date | null; // 그날 첫 기상 알람 시각
   confirmedAt: Date | null;
+  prepareAlarmAt: Date | null; // 준비 알람 시각 · 준비 시작(준비 알람 해제) 시각 — 출발 · 도착 공유를 켰을 때만 (기상 알람이 없는 날은 준비 알람부터)
+  prepareStartedAt: Date | null;
   departedAt: Date | null; // 출발 · 도착은 상대가 출발 · 도착 공유를 켰을 때만 옴 (장소 · 감지 출처는 안 옴)
   arrivedAt: Date | null;
   tripVisible: boolean; // 상대가 이 그룹에 출발 · 도착 공유를 켰음 — G03 공유 범위 글자
