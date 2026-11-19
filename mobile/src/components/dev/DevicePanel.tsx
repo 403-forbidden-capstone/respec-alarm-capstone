@@ -41,6 +41,8 @@ type Props = {
 const TIMES = [
   ['morning', '아침 07:55'],
   ['evening', '전날 밤 21:00'],
+  ['moving', '이동 중 09:10'],
+  ['arrived', '도착 09:50'],
 ] as const;
 
 // 데이터 모드 고르기 — 웹 기본이 가짜라 가짜가 왼쪽 (/dev/screens 토글은 실데이터가 왼쪽)

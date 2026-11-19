@@ -9,8 +9,8 @@ import { UserError } from '@/lib/errors';
 import { supabase } from '@/lib/supabase';
 import { requireUserId } from '@/lib/user';
 
-import { sinceLabel, wakeStateOf, wokeCountOf, initialOf } from '../map';
-import { friendIds, groupShareSet, joinedIds, myGroup, myGroups, myJoinedAt, myNotificationsOff, myOptIn, personOf, receivedFrom } from '../snapshot';
+import { sinceLabel, tripCountsOf, wakeStateOf, wokeCountOf, initialOf } from '../map';
+import { friendIds, groupShareSet, joinedIds, myGroup, myGroups, myJoinedAt, myNotificationsOff, myOptIn, myTripOptIn, personOf, receivedFrom } from '../snapshot';
 import { mergeGrants } from '../grants';
 import { CODE_EXPIRED, CODE_NOT_FOUND, GROUP_FULL, GROUP_NOT_MEMBER, GROUP_TOO_MANY, cleanCode, groupNameProblem } from '../groupTexts';
 import { MESSAGE_GONE, messageLimit } from '../relationMessages';
@@ -31,6 +31,7 @@ export async function listGroups(date?: string | null): Promise<GroupItem[]> {
     initial: initialOf(g.group_name),
     memberCount: joinedIds(s, g.group_id).length,
     wokeCount: wokeCountOf(wake[i]),
+    trip: tripCountsOf(wake[i]),
     grants: groupShareSet(s, g.group_id),
   }));
 }
@@ -45,6 +46,7 @@ export async function getGroupSummary(groupId: string, date?: string | null): Pr
     name: group.group_name,
     members: joinedIds(s, groupId).map((id) => ({ person: personOf(s, id), state: wakeStateOf(rows.find((r) => r.user_id === id), rows.length > 0) })),
     wokeCount: wokeCountOf(rows),
+    trip: tripCountsOf(rows),
   };
 }
 
@@ -67,6 +69,7 @@ export async function getGroup(groupId: string, date?: string | null): Promise<G
       wakeHidden: hides.has(id),
     })),
     wakeShareOptIn: myOptIn(s, groupId),
+    tripShareOptIn: myTripOptIn(s, groupId),
     notificationsOff: myNotificationsOff(s, groupId),
   };
 }
@@ -375,11 +378,21 @@ export async function setGroupNotificationsOff(groupId: string, off: boolean): P
 
 // 이 그룹에 내 기상 상태를 공유하는 것에 동의 (group_members.wake_share_opt_in) — 본인 행만 고칠 수 있음 (RLS group_members_update_self)
 //   F03 그룹 관계의 '기상 상태 조회' 스위치도 이 값을 바꿈(real/sharing.ts saveShareSettings), G02 · 그룹 만들기에서도 씀
+//   끄면 출발 · 도착 공유도 같이 끔 (서버도 같은 규칙으로 막음)
 export async function setWakeShareOptIn(groupId: string, on: boolean) {
+  await updateMyMember(groupId, on ? { wake_share_opt_in: true } : { wake_share_opt_in: false, trip_share_opt_in: false });
+}
+
+// 이 그룹에 내 출발 · 도착 공유에 동의 (group_members.trip_share_opt_in, 기본 끔) — 기상 공유를 켠 사람만 켤 수 있음(서버가 막음)
+export async function setTripShareOptIn(groupId: string, on: boolean) {
+  await updateMyMember(groupId, { trip_share_opt_in: on });
+}
+
+async function updateMyMember(groupId: string, patch: { wake_share_opt_in?: boolean; trip_share_opt_in?: boolean }) {
   const me = await requireUserId();
   const { data, error } = await supabase
     .from('group_members')
-    .update({ wake_share_opt_in: on })
+    .update(patch)
     .eq('group_id', groupId)
     .eq('user_id', me)
     .eq('invite_status', 'JOINED')

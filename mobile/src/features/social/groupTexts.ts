@@ -49,8 +49,9 @@ export const RENAMED_TOAST = '이름을 바꿨어요';
 // H05 '함께할 그룹'을 고르면 그 줄 아래 — 메모 칸이 아직 없어 그룹원에게 보이는 것을 이 줄로 알림 (9-거, 빈 곳: 메모 칸)
 export const SHARED_APPOINTMENT_NOTE = '일정 이름 · 시각 · 장소는 그룹원 모두에게 보여요. 알람은 각자 [내 알람 만들기]로 만들어요.';
 
-// G02 연결 일정 줄 상태 — 참여 / 알람 없음 두 가지(안 누름 · 빠짐 · 끔은 모두 알람 없음), 지난 약속은 그 한 줄 (9-42 · 9-32)
-export const appointmentStateText = (a: { iJoined: boolean; past: boolean }) => (a.past ? PAST_APPOINTMENT : a.iJoined ? '참여' : '알람 없음');
+// G02 연결 일정 줄 상태 — 내 알람 켜짐 / 내 알람 없음 두 가지(안 누름 · 빠짐 · 끔은 모두 없음), 지난 약속은 그 한 줄 (9-42 · 9-32)
+//   '4명 참여 · 참여'처럼 같은 말이 겹쳐 보이던 것을 '4명 참여 · 내 알람 켜짐'으로 (11/19)
+export const appointmentStateText = (a: { iJoined: boolean; past: boolean }) => (a.past ? PAST_APPOINTMENT : a.iJoined ? '내 알람 켜짐' : '내 알람 없음');
 export const PAST_APPOINTMENT = '지난 약속이에요';
 // 0명은 정말 없는 것일 수도, 차단한 사이라 내게 안 보이는 것일 수도 있어 '없다'고 단정하지 않음 (탐색 시험 ①-17)
 export const joinedCountText = (n: number) => (n > 0 ? `${n}명 참여` : '보이는 참여자가 없어요');

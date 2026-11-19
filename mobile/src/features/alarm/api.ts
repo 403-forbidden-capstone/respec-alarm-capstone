@@ -11,7 +11,7 @@ import { now } from '@/lib/clock';
 import { UserError } from '@/lib/errors';
 import { isMock } from '@/lib/mode';
 import { addMinutes, isSameDay, josa, joinKo, minuteOfDay, minutesBetween, spokenTime, startOfDay } from '@/lib/format';
-import { alarmChain, autoLevel, axisLevel, departAtOf } from '@/mocks/calc';
+import { alarmChain, autoLevel, axisLevel, departAtOf, myTrip } from '@/mocks/calc';
 import { awayFromHomeFactor, db, people, places, recentMockPlaces, timelines, transportFactor, type MockAppointment } from '@/mocks/data';
 
 import {
@@ -180,7 +180,8 @@ export async function getMorningPlan(): Promise<MorningPlan | null> {
       travelMinutes: a.travelMinutes,
       travelSource: a.travelSource,
       alarms: a.enabled ? a.alarms : a.alarms.map((x) => ({ ...x, enabled: false })), // 일정 전체를 끈 가짜 일정은 알람도 꺼진 것으로 (실데이터는 알람마다 꺼짐)
-      departedAt: db.me.departAt,
+      departedAt: myTrip().departAt,
+      arrivedAt: myTrip().arriveAt,
     }));
   const source = pickMorningSource(sources);
   const wake = source ? wakeAlarmOf(source) : undefined;
