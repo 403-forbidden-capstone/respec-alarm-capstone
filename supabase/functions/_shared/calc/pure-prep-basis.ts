@@ -27,7 +27,7 @@ export function choosePurePrepBasis(i: PurePrepBasisInput): PurePrepCandidate | 
   if (i.allowActualModel === true &&
       i.prediction?.trainingTarget === 'actual_start_depart' &&
       valid(i.prediction.minutes) &&
-      history != null && i.prediction.model.trim() !== '') {
+      history != null && i.prediction.model === 'prep_start_ratio_v2') {
     return { source: 'MODEL', minutes: Math.round(i.prediction.minutes),
       model: i.prediction.model, sampleCount: observations.length };
   }
