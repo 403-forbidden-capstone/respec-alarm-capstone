@@ -147,7 +147,7 @@ export default async function ch13({ q, as, su, svc, check, expectErr }) {
 
   // ---- 13-09: 그룹 기상 응답 ---------------------------------------------------------------------
 
-  await check('13-09: 그룹 기상 응답은 보일 값(단계 · 알람 시각 · 확인 시각 · 출발 · 도착 시각)만 — 미루기 횟수 · 해제 시각 · 장소 · 출처 칸이 없음', async () => {
+  await check('13-09: 그룹 기상 응답은 보일 값(단계 · 알람 시각 · 확인 시각 · 출발 · 도착 · 준비 알람 · 준비 시작 시각)만 — 미루기 횟수 · 해제 시각 · 장소 · 출처 칸이 없음', async () => {
     const A = await join_(10, '주인'), B = await join_(11, '그룹원');
     const g = await mkGroup(A, [B]);
     await q(`update public.group_members set wake_share_opt_in = true where group_id = $1`, [g]);
@@ -155,7 +155,7 @@ export default async function ch13({ q, as, su, svc, check, expectErr }) {
     await groupWake(A, g, today);
     const rows = await readAs(B, `select * from public.get_group_wake($1, $2::date)`, [g, today]);
     const keys = rows[0] ? Object.keys(rows[0]).sort() : [];
-    return rows.length >= 1 && JSON.stringify(keys) === JSON.stringify(['arrived_at', 'departed_at', 'is_me', 'nickname', 'profile_image_url', 'trip_appointment_at', 'trip_visible', 'user_id', 'wake_alarm_at', 'wake_confirmed_at', 'wake_status'])
+    return rows.length >= 1 && JSON.stringify(keys) === JSON.stringify(['arrived_at', 'departed_at', 'is_me', 'nickname', 'prepare_alarm_at', 'prepare_started_at', 'profile_image_url', 'trip_appointment_at', 'trip_visible', 'user_id', 'wake_alarm_at', 'wake_confirmed_at', 'wake_status'])
       ? true : { keys, rows };
   });
 
