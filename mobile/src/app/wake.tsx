@@ -10,6 +10,7 @@ import { MorningPlanLine } from '@/features/alarm/components/MorningPlanLine';
 import { WAKE_OBSERVE_MINUTES, WAKE_RECENT_MINUTES, type WakeCheck } from '@/features/alarm/types';
 import { useNextRing } from '@/features/alarm/hooks/useNextRing';
 import { useNow } from '@/features/alarm/hooks/useNow';
+import { WAKE_POLL_MS } from '@/features/alarm/hooks/useWakeCardRefresh';
 import { formatUsage, judgeLines, pickAlarmId, WAKE_RECENT_RANGE } from '@/features/alarm/wake';
 import { uploadEvents } from '@/lib/alarmSync';
 import { addMinutes, formatTime, timeParts } from '@/lib/format';
@@ -25,7 +26,7 @@ type WakeState = { phase: Phase; usage: number; recent: number; at: Date | null;
 type How = WakeState['how'];
 
 const METER_MAX = 5; // 분
-const POLL_MS = 15_000; // 실데이터: 관찰 중에는 이만큼마다 판정을 다시 읽음 (관찰 10분이 끝나면 확정 · 확인 알림으로 넘어감)
+const POLL_MS = WAKE_POLL_MS; // 실데이터: 관찰 중에는 이만큼마다 판정을 다시 읽음 (관찰 10분이 끝나면 확정 · 확인 알림으로 넘어감) — 홈 카드와 같은 값
 
 // 단계 · 사용 시간은 가짜 db에 있음(api) — 시연 값도 api가 정함
 function toState(check: WakeCheck): WakeState {

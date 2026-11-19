@@ -27,6 +27,7 @@ import { TextLink } from '@/features/alarm/components/TextLink';
 import { useAppointmentToggle } from '@/features/alarm/hooks/useAppointmentToggle';
 import { useDepartCheck } from '@/features/alarm/hooks/useDepartCheck';
 import { useNow } from '@/features/alarm/hooks/useNow';
+import { useWakeCardRefresh } from '@/features/alarm/hooks/useWakeCardRefresh';
 import { morningCardVisible } from '@/features/alarm/morning';
 import { isEvening } from '@/features/alarm/schedule';
 import { KIND_LABEL } from '@/features/alarm/types';
@@ -38,7 +39,7 @@ import { RoutineCard } from '@/features/routine/components/RoutineCard';
 import { TodoList } from '@/features/routine/components/TodoList';
 import { now } from '@/lib/clock';
 import { addDays, dayKey, formatDate, formatMinuteOfDay, formatRelative, formatTime, minuteOfDay, startOfDay } from '@/lib/format';
-import { canUseRealData } from '@/lib/mode';
+import { canUseRealData, isMock } from '@/lib/mode';
 import { useAction } from '@/lib/useAction';
 import { useLoad } from '@/lib/useLoad';
 
@@ -91,6 +92,9 @@ export default function HomeScreen() {
   useEffect(() => {
     if (stale) void reload();
   }, [stale, reload]);
+
+  // 기상 확인 중 카드가 있는 동안 15초마다 다시 읽음 — 판정은 읽을 때 확정되므로 안 읽으면 상세 화면에 들어가야 카드가 사라짐
+  useWakeCardRefresh(data?.wake != null && !isMock(), reload); // 가짜 데이터는 시연 버튼으로 넘기므로 안 읽음 (H08과 같은 방침)
 
   if (!data) return (
     <Screen>
@@ -178,7 +182,7 @@ export default function HomeScreen() {
             <View style={styles.bannerText}>
               <Text variant="bodyStrong">기상 확인 중</Text>
               <Text variant="small" tone="sub">
-                {wake.appointmentTitle} · 알람을 끈 뒤 폰 사용을 보고 있어요
+                {wake.appointmentTitle} · {wake.phase === 'prompt' ? '조건을 채우지 못해 확인 알림을 보냈어요' : '알람을 끈 뒤 폰 사용을 보고 있어요'}
               </Text>
             </View>
             <Text variant="rowLabel" weight={700}>
