@@ -18,6 +18,7 @@
 //     출발 · 도착이 바뀌면 그 값으로 셈한 이동시간을 같이 비우고 새 값으로 다시 셈 (clearLocationTime과 같은 규칙)
 //     출발지(비면 집) · 목적지 좌표가 없거나 500m 안이면 안 씀 — D68 "500m 안이면 이동 측정을 끄고 기본값" (features/location/geo isNearTrip과 같은 규칙)
 //     출발이 출발 예정 60분 전보다 이르면 안 씀 — 근거 없음, 작성자 판단 (7.13.7 감시 창 W_geo를 표본 범위로 씀. 집 이탈은 오늘 첫 약속에 시간 제한 없이 붙어 출발 · 도착이 몇 시간 떨어질 수 있음)
+//   · 서버가 원탭 출발 · 도착을 먼저 채울 수 있음 — 그때 앱이 같은 값으로 follow-up을 보내도 keep이지만, 비어 있는 준비 실측 · 이동시간은 저장값으로 셈해 채움
 //   · 받아들이는 창 — 위치로 잡은 출발이 출발 예정 60분 전(WINDOW_BEFORE_DEPART_MINUTES)보다 이르면 쓰지 않음 (부팅 직후 6:27 '출발'이 약속 3시간 전에 들어간 11/19 아침 시험).
 //     서버(그룹에 출발을 보이는 쪽)도 같은 규칙으로 막음. 응답(원탭 · 직접 입력)은 사용자가 말한 시각이라 이 창을 안 봄. 도착은 그대로
 //   · 위치 값 지우기(clearLocationTime) — 사용자 정정 [아니에요](D61)만 씀. 출처가 LOCATION일 때만. 지운 뒤는 다음 자동 감지를 기다림
@@ -417,7 +418,8 @@ export async function recordParticipantTimes(input: RecordTimesInput): Promise<R
   //   까닭: 귀가 뒤 재출발(override)은 다시 불렀을 때 저장값 == 새 출발이라 keep이 되어 앞 출발(replacedDepartedMs)을 더는 모름.
   //   위치 기록을 먼저 하다 끊기면 준비 실측이 앞 출발 값으로 남음. 위치 기록은 번호(client_event_id)가 같아 다시 불러도 중복이 안 되므로 마지막에 두면,
   //   끊겨도 다시 불렀을 때 위치 기록만 다시 시도됨 (위 geo.push 조건)
-  if (departedMs != null && finalDepartedMs != null) result.prepareMinutes = await recordPrepareMinutes(userId, finalDepartedMs, replacedDepartedMs, chainHasWake(row));
+  // 입력이 도착뿐이어도 저장된 출발이 있으면 셈 — 서버가 원탭 출발 · 도착을 먼저 채우면 앱 follow-up이 와도 저장값이 이미 같아 keep이라, 비어 있는 준비 실측을 여기서 채움 (이미 값이 있으면 mayWritePrepare가 막음)
+  if (finalDepartedMs != null) result.prepareMinutes = await recordPrepareMinutes(userId, finalDepartedMs, replacedDepartedMs, chainHasWake(row));
   if (finalDepartedMs != null && finalArrivedMs != null && finalDepartedSource != null && finalArrivedSource != null) {
     result.travelMinutes = await recordTravelMinutes(
       userId,

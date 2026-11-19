@@ -19,6 +19,7 @@ const row = (over: Partial<WakeRow> = {}): WakeRow => ({
   departed_at: null,
   arrived_at: null,
   trip_visible: false,
+  trip_appointment_at: null,
   ...over,
 });
 const DEPARTED = '2026-10-19T23:15:00.000Z'; // 오전 8:15
@@ -47,6 +48,34 @@ describe('wakeStateOf — 준비 중 · 출발 · 도착 (11/19)', () => {
   it('아직 · 울렸어요는 출발 · 도착 공유와 상관없이 그대로', () => {
     expect(wakeStateOf(row({ wake_status: 'RINGING', wake_confirmed_at: null, trip_visible: true }), true).text).toBe('울렸어요');
     expect(wakeStateOf(row({ wake_status: 'SCHEDULED', wake_confirmed_at: null, trip_visible: true }), true).text).toBe('오전 8:50 알람');
+  });
+});
+
+describe('이동 중은 약속 + 60분까지만 (trip_appointment_at)', () => {
+  const APPT = '2026-10-20T01:00:00.000Z'; // 오전 10:00
+  const at = (iso: string) => new Date(iso);
+  const departed = row({ departed_at: DEPARTED, trip_visible: true, trip_appointment_at: APPT });
+
+  it('약속 + 60분 전에는 이동 중, 그 뒤엔 출발했어요 시각만', () => {
+    expect(wakeStateOf(departed, true, at('2026-10-20T01:59:00.000Z')).text).toBe('출발했어요 오전 8:15 · 이동 중');
+    expect(wakeStateOf(departed, true, at('2026-10-20T02:00:00.000Z')).text).toBe('출발했어요 오전 8:15');
+  });
+
+  it('도착 기록 없이 밤이 된 경우 — 이동 중이 안 붙고, 요약에서는 일어남으로 셈', () => {
+    const night = at('2026-10-20T13:00:00.000Z');
+    expect(wakeStateOf(departed, true, night)).toMatchObject({ stage: 'DEPARTED', text: '출발했어요 오전 8:15' });
+    expect(tripCountsOf([departed], night)).toBeNull(); // 도착도 이동 중도 없으니 요약은 오늘 n명 일어남
+    expect(tripCountsOf([departed, row({ user_id: 'b', arrived_at: ARRIVED, departed_at: DEPARTED, trip_visible: true })], night)).toEqual({ arrived: 1, moving: 0, woke: 1 });
+  });
+
+  it('약속 둘인 날 — 기준은 출발 · 도착 기록이 가장 최근인 약속(서버가 준 시각): 오전 약속 도착 뒤 오후 약속으로 출발하면 오후 약속 + 60분', () => {
+    const afternoon = row({ departed_at: '2026-10-20T05:00:00.000Z', trip_visible: true, trip_appointment_at: '2026-10-20T08:00:00.000Z' }); // 오후 2:00 출발 · 오후 5:00 약속
+    expect(wakeStateOf(afternoon, true, at('2026-10-20T07:00:00.000Z')).text).toContain('이동 중'); // 오후 4:00
+    expect(wakeStateOf(afternoon, true, at('2026-10-20T09:10:00.000Z')).text).not.toContain('이동 중'); // 오후 6:10
+  });
+
+  it('약속 시각을 모르면(옛 값) 이동 중으로 봄', () => {
+    expect(wakeStateOf(row({ departed_at: DEPARTED, trip_visible: true }), true, at('2026-10-20T13:00:00.000Z')).text).toContain('이동 중');
   });
 });
 

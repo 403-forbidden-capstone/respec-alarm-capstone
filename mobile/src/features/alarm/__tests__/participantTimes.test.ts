@@ -274,7 +274,10 @@ describe('DB에 쓰기 (recordParticipantTimes)', () => {
       expect(result.departed).toBeNull();
       expect(only('appointment_participants', 'update')).toEqual([]);
       expect(only('alarm_events', 'upsert')).toEqual([]);
-      expect(only('daily_records', 'upsert')).toEqual([]);
+      // 코드는 daily_records에 insert · update로 씀 — 둘 다 없어야 함 (upsert 검사는 늘 통과했음)
+      expect(only('daily_records', 'insert')).toEqual([]);
+      expect(only('daily_records', 'update')).toEqual([]);
+      expect(mockCalls.filter((c) => c.table === 'daily_records' && c.op !== 'select')).toEqual([]);
     });
 
     it('출발 알람이 없으면 약속 − 여유 − 이동(9:00) 기준 8:00 전은 안 씀, 도착은 그대로 씀', async () => {
@@ -775,6 +778,35 @@ describe('DB에 쓰기 (recordParticipantTimes)', () => {
       const result = await run({ arrivedAt: min(-8), source: 'LOCATION' });
       expect(result).toMatchObject({ arrived: 'new', travelMinutes: null });
       expect(only('appointment_participants', 'update')).toHaveLength(2); // 도착 쓰기 + 이동시간 시도
+    });
+  });
+
+  describe('서버가 원탭 출발 · 도착을 먼저 채운 뒤 앱 follow-up (저장값이 이미 같아 keep)', () => {
+    it('입력이 도착뿐이어도 저장된 출발이 있으면 비어 있는 준비 실측을 채움', async () => {
+      setup({ participant: participantRow({ departed_at: iso('09:00'), arrived_at: isoMs(min(8)) }), record: null });
+      const result = await run({ arrivedAt: min(8), source: 'BUTTON' });
+      expect(result).toMatchObject({ departed: null, arrived: 'keep', prepareMinutes: 60 });
+      expect(only('daily_records', 'insert')[0].payload).toEqual({ user_id: 'user-1', record_date: '2025-05-22', actual_prepare_minutes: 60, data_source: 'ALARM' });
+      expect(only('appointment_participants', 'update')).toEqual([]); // 시각은 그대로(keep)
+    });
+
+    it('출발 · 도착이 같은 응답 값으로 또 와도(keep) 비어 있는 준비 실측 · 이동시간을 저장값으로 셈해 채움', async () => {
+      setup({
+        participant: participantRow({ dest: SEJONG, origin: HOME, departed_at: iso('09:00'), arrived_at: isoMs(min(8)) }),
+        record: { record_id: 'r1', wake_confirmed_at: null, actual_prepare_minutes: null },
+      });
+      const result = await run({ departedAt: at('09:00'), arrivedAt: min(8), source: 'BUTTON' });
+      expect(result).toMatchObject({ departed: 'keep', arrived: 'keep', prepareMinutes: 60 });
+      expect(result.travelMinutes).toBe(68); // 9:00 출발 → 10:08 도착
+      const payloads = only('appointment_participants', 'update').map((c) => c.payload);
+      expect(payloads).toEqual([{ actual_travel_minutes: 68 }]);
+      expect(only('daily_records', 'update')[0].payload).toEqual({ actual_prepare_minutes: 60 });
+    });
+
+    it('이미 준비 실측이 있으면 덮지 않음', async () => {
+      setup({ participant: participantRow({ departed_at: iso('09:00'), arrived_at: isoMs(min(8)) }), record: { record_id: 'r1', wake_confirmed_at: null, actual_prepare_minutes: 55 } });
+      expect((await run({ arrivedAt: min(8), source: 'BUTTON' })).prepareMinutes).toBeNull();
+      expect(mockCalls.filter((c) => c.table === 'daily_records' && c.op !== 'select')).toEqual([]);
     });
   });
 

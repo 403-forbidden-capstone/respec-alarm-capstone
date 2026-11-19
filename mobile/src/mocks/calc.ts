@@ -70,6 +70,7 @@ export function mockWakeRow(personId: string, now: Date, tripVisible = false): W
     trip_visible: tripVisible,
     departed_at: tripVisible && departed ? iso(departed) : null,
     arrived_at: tripVisible && arrived ? iso(arrived) : null,
+    trip_appointment_at: tripVisible && (departed || arrived) ? iso(kst(TODAY, 600)) : null, // 시나리오의 그 그룹 약속 (팀 주간회의 10:00)
   });
   if (personId === 'me') {
     const first = myFirstAlarm();
