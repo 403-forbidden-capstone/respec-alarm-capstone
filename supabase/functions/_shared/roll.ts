@@ -27,6 +27,7 @@ import {
   ALARM_COLUMNS,
   SERIES_APPOINTMENT_COLUMNS,
   loadAlarms,
+  loadPurePrepCandidate,
   loadLateCount,
   loadParticipant,
   loadPrepareStats,
@@ -219,7 +220,7 @@ export function planOccurrence(
   ctx: RollPlanCtx,
   base: RollBase,
   occ: Occurrence,
-  resolved: { travel: TravelChoice; sameDayWake: boolean; baseHadEarlierWake?: boolean },
+  resolved: { travel: TravelChoice; sameDayWake: boolean; baseHadEarlierWake?: boolean; purePrepCandidate?: PlanInputs['purePrepCandidate'] },
 ): PlannedOccurrence {
   const { now, profile, timeZone } = ctx;
   const { appointment, participant } = base;
@@ -250,6 +251,7 @@ export function planOccurrence(
       stats: ctx.stats,
       lateCount4w: ctx.lateCount4w,
       sameDayWake: resolved.sameDayWake,
+      purePrepCandidate: resolved.purePrepCandidate,
       ...(prepareBound && Number.isFinite(prepareBound.around) ? { prepareBound } : {}),
     };
     return { inputs, plan: computePlan(inputs, resolvedTravelOf(resolved.travel), 'save') };
@@ -820,7 +822,11 @@ class RollRun {
       !sameDayWake && base.alarms.length && !base.alarms.some((a) => a.alarm_type === 'WAKE')
         ? await loadSameDayWake(read, task.user_id, new Date(base.appointment.appointment_at), ctx.timeZone, base.appointment.appointment_id)
         : false;
-    const planFor = (travel: TravelChoice) => planOccurrence(ctx, base, occ, { travel, sameDayWake, baseHadEarlierWake });
+    // The same pure-preparation choice must drive generated recurring
+    // occurrences; never regress to whole-morning C1/W4 for the next day.
+    const purePrepCandidate = await loadPurePrepCandidate(read, task.user_id, ctx.profile, now, occ.at);
+    const planFor = (travel: TravelChoice) =>
+      planOccurrence(ctx, base, occ, { travel, sameDayWake, baseHadEarlierWake, purePrepCandidate });
 
     // 이동시간 — 직접 입력(MANUAL)은 그 분 그대로(길찾기 없음), 아니면 회차마다 길찾기 1번
     let travel: TravelChoice | null = null;
