@@ -186,6 +186,15 @@ export function existingBody(saved: AppointmentDetail, edits: AlarmEdits): Body 
       buffer_minutes: within(edits.bufferMinutes, MAX_BUFFER_MINUTES),
       ...travel,
       prepare_minutes: within(edits.prepareMinutes ?? saved.predictedPrepMinutes, MAX_PREPARE_MINUTES),
+      // Legacy existing rows have unknown source; do NOT silently reinterpret
+      // them as automatic. Only rows explicitly stored AUTO may use a snapshot.
+      ...(edits.prepareMinutes != null
+        ? { prepare_value_source: 'MANUAL' }
+        : saved.prepareValueSource === 'AUTO'
+          ? { prepare_value_source: 'AUTO' }
+          : saved.prepareValueSource === 'MANUAL'
+            ? { prepare_value_source: 'MANUAL' }
+            : {}),
       ...(saved.beforePrepMinutes > 0 ? { before_prepare_minutes: within(saved.beforePrepMinutes, MAX_BEFORE_PREPARE_MINUTES) } : {}),
     },
     manual_times: manualTimesBody(edits.times),
@@ -387,6 +396,8 @@ export function createCommitBody(estimate: Estimate, picked: AlarmEdits['times']
       est_travel_minutes: within(a.travelMinutes, MAX_TRAVEL_MINUTES),
       travel_source: commit.travelSource === 'API' ? 'API' : 'MANUAL',
       prepare_minutes: within(a.predictedPrepMinutes, MAX_PREPARE_MINUTES),
+      // Automatic H05 preview is checked by server on commit, not a manual override.
+      prepare_value_source: 'AUTO',
       before_prepare_minutes: within(a.beforePrepMinutes, MAX_BEFORE_PREPARE_MINUTES),
       with_wake: a.withWake,
     },

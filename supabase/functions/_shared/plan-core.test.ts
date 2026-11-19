@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
 import { prepareSourceLabel, prepareStatsOf } from './calc/index.ts';
-import { clampPrepareToBound, computePlan, firstPrepareMinutes, inferBeforePrepare, resolveBasics, resolveOverrides, toSuggestion, type AlarmRow, type AppointmentRow, type ParticipantRow, type PlanInputs, type ProfileRow } from './plan-core.ts';
+import { clampPrepareToBound, computePlan, firstPrepareMinutes, inferBeforePrepare, purePrepPersistenceOf, resolveBasics, resolveOverrides, toSuggestion, type AlarmRow, type AppointmentRow, type ParticipantRow, type PlanInputs, type ProfileRow } from './plan-core.ts';
 import type { ResolvedTravel } from './route.ts';
 
 const kst = (day: number, minutes: number) => new Date(Date.UTC(2025, 4, day) + (minutes - 9 * 60) * 60_000);
@@ -713,4 +713,107 @@ test('new model provenance is exposed only when explicitly injected (not by name
   assert.equal(plan.prepare.source, 'MODEL');
   assert.equal(plan.prepare.mlModel, 'prep_start_ratio_v2');
   assert.equal(toSuggestion(plan).prepare.model, 'prep_start_ratio_v2');
+});
+
+test('suggestion explicitly distinguishes legacy whole-wake target from new pure-preparation target', () => {
+  const pure = computePlan(base({
+    purePrepCandidate: { source:'PROFILE', minutes:35 },
+    stats:{sampleCount:0,p80:null},
+  }), api(50));
+  const pureDto = toSuggestion(pure);
+  assert.equal(pure.prepareTarget,'PREPARE_START_TO_DEPART');
+  assert.equal(pureDto.prepare.target,'PREPARE_START_TO_DEPART');
+  assert.equal(pureDto.prepare.pure_minutes,35);
+  assert.equal(pureDto.prepare.minutes,55);
+  const legacy = computePlan(base({stats:{sampleCount:0,p80:null}}),api(50));
+  const dto=toSuggestion(legacy);
+  assert.equal(dto.prepare.target,'WAKE_TO_DEPART');
+  assert.equal(dto.prepare.pure_minutes,null);
+});
+test('pure candidate is not clamped to legacy repeated wake-to-departure value',()=>{
+  const plan=computePlan(base({
+     purePrepCandidate:{source:'PROFILE',minutes:35},
+     prepareBound:{around:90,within:10},
+     stats:{sampleCount:0,p80:null},
+  }),api(50));
+  assert.equal(plan.prepare.minutes,55);
+});
+
+test('persist pure preparation in its own fields, without relabeling the legacy whole window',()=>{
+  const candidate = { source:'PROFILE' as const, minutes:35 };
+  const plan = computePlan(base({purePrepCandidate:candidate,stats:{sampleCount:0,p80:null}}),api(50));
+  assert.equal(plan.prepareTarget,'PREPARE_START_TO_DEPART');
+  assert.equal(plan.prepare.minutes,55);
+  assert.deepEqual(purePrepPersistenceOf(plan,candidate),{
+    outing_prep_minutes:35,outing_prep_source:'PROFILE',outing_prep_model:null
+  });
+  assert.equal(toSuggestion(plan).prepare.pure_minutes,35);
+});
+
+test('non-pure and explicit manual plans clear any old pure metadata',()=>{
+  const candidate={source:'PROFILE' as const,minutes:35};
+  const old=computePlan(base(),api(50));
+  assert.deepEqual(purePrepPersistenceOf(old,candidate),{
+    outing_prep_minutes:null,outing_prep_source:null,outing_prep_model:null
+  });
+  const manual=computePlan(base({
+    purePrepCandidate:candidate,
+    draft:{at:kst(22,600),destination:{name:'세종대학교'},prepareMinutes:70},
+  }),api(50));
+  assert.equal(manual.prepareTarget,'WAKE_TO_DEPART');
+  assert.equal(purePrepPersistenceOf(manual,candidate).outing_prep_source,null);
+});
+
+test('model provenance is recorded only for actually used real-start model',()=>{
+  const c={source:'MODEL' as const,minutes:45,model:'prep_start_ratio_v2'};
+  const plan=computePlan(base({purePrepCandidate:c,stats:{sampleCount:0,p80:null}}),api(50));
+  assert.deepEqual(purePrepPersistenceOf(plan,c),{
+    outing_prep_minutes:45,outing_prep_source:'MODEL',outing_prep_model:'prep_start_ratio_v2'
+  });
+  assert.equal(purePrepPersistenceOf(plan,undefined).outing_prep_model,null);
+});
+
+test('previously stored MANUAL whole-duration is not overwritten by pure prep during recurrence/edit',()=>{
+ const candidate={source:'PROFILE' as const, minutes:35};
+ const manual=computePlan(base({
+   participant:{
+     participant_id:'p1',appointment_id:'a1',user_id:'u1',
+     origin_name:'집',origin_lat:null,origin_lng:null,
+     transport_type:'TRANSIT',est_travel_minutes:50,travel_source:'API',
+     prepare_minutes:75,prepare_value_source:'MANUAL',buffer_minutes:10
+   },
+   purePrepCandidate:candidate,stats:{sampleCount:0,p80:null}
+ }),api(50));
+ assert.equal(manual.prepareTarget,'WAKE_TO_DEPART');
+ assert.equal(manual.prepare.source,'MANUAL');
+ assert.equal(manual.prepare.minutes,75);
+ assert.equal(purePrepPersistenceOf(manual,candidate).outing_prep_minutes,null);
+ const switched=computePlan(base({
+   participant:{
+     participant_id:'p1',appointment_id:'a1',user_id:'u1',
+     origin_name:'집',origin_lat:null,origin_lng:null,
+     transport_type:'TRANSIT',est_travel_minutes:50,travel_source:'API',
+     prepare_minutes:75,prepare_value_source:'MANUAL',buffer_minutes:10
+   },
+   purePrepCandidate:candidate,
+   draft:{at:kst(22,600),destination:{name:'세종대학교'},prepareValueSource:'AUTO'},
+   stats:{sampleCount:0,p80:null}
+ }),api(50));
+ assert.equal(switched.prepareTarget,'PREPARE_START_TO_DEPART');
+});
+
+test('stored legacy MANUAL duration overrides former C1/W4 prediction in reschedule',()=>{
+ const p={
+   participant_id:'p2',appointment_id:'a2',user_id:'u1',
+   origin_name:'집',origin_lat:null,origin_lng:null,transport_type:'TRANSIT' as const,
+   est_travel_minutes:30,travel_source:'API' as const,
+   prepare_minutes:85,prepare_value_source:'MANUAL' as const,buffer_minutes:10,
+ };
+ const plan=computePlan(base({
+   participant:p,mlPrediction:{model:'c1_mae',minutes:50},
+   purePrepCandidate:{source:'PROFILE',minutes:35},
+ }),api(30));
+ assert.equal(plan.prepare.source,'MANUAL');
+ assert.equal(plan.prepare.mlModel,undefined);
+ assert.equal(plan.prepare.minutes,85);
 });

@@ -35,3 +35,36 @@ export function choosePurePrepBasis(i: PurePrepBasisInput): PurePrepCandidate | 
   if (valid(i.profileMinutes)) return { source: 'PROFILE', minutes: i.profileMinutes };
   return null;
 }
+
+export type PrepCompletionRow = {
+  prepare_started_at: string | null;
+  departed_at: string | null;
+  prepare_started_source?: string | null;
+  departed_source?: string | null;
+};
+
+// Histories must be *past* completed real-world events, never time slots,
+// predicted alarm times, scheduled departures, or the target day's outcome.
+export function confirmedPurePrepHistory(
+  records: readonly PrepCompletionRow[], cutoff: Date, maxRecords = 30,
+): number[] {
+  const before = cutoff.getTime();
+  if (!Number.isFinite(before)) return [];
+  const unique = new Set<string>();
+  return records.flatMap((r) => {
+    if (r.prepare_started_source !== 'PREPARE_ALARM' ||
+        r.departed_source !== 'LOCATION' ||
+        !r.prepare_started_at || !r.departed_at) return [];
+    const start = Date.parse(r.prepare_started_at);
+    const depart = Date.parse(r.departed_at);
+    const minutes = (depart - start) / 60000;
+    if (!Number.isFinite(start) || !Number.isFinite(depart) ||
+        depart >= before || depart <= start || !valid(minutes)) return [];
+    const key = start + ':' + depart;
+    if (unique.has(key)) return [];
+    unique.add(key);
+    return [{ depart, minutes }];
+  }).sort((a,b) => b.depart - a.depart)
+    .slice(0, Math.max(0, Math.min(30, maxRecords)))
+    .map(x => x.minutes);
+}

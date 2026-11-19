@@ -31,8 +31,8 @@ import {
 } from './edit.ts';
 import type { EditRequest } from './edit-request.ts';
 import { HttpError } from './errors.ts';
-import { loadAlarms, loadLateCount, loadParticipant, loadPrepareStats, loadProfile, loadTravelSamples, ALARM_COLUMNS, SERIES_APPOINTMENT_COLUMNS, type SeriesAppointmentRow } from './plan.ts';
-import { computePlan, firstPrepareMinutes, resolveBasics, withoutFriendTimes, type AlarmRow, type AppointmentRow, type ParticipantRow, type Plan, type PlanInputs, type ProfileRow } from './plan-core.ts';
+import { loadAlarms, loadLateCount, loadParticipant, loadPrepareStats, loadProfile, loadTravelSamples, loadPurePrepCandidate, ALARM_COLUMNS, SERIES_APPOINTMENT_COLUMNS, type SeriesAppointmentRow } from './plan.ts';
+import { computePlan, purePrepPersistenceOf, firstPrepareMinutes, resolveBasics, withoutFriendTimes, type AlarmRow, type AppointmentRow, type ParticipantRow, type Plan, type PlanInputs, type ProfileRow } from './plan-core.ts';
 import { buildRingPackages, canceledAlarmIds, subtitleFor, type RingPackage } from './ring-package.ts';
 import { planGroupPush, sendGroupPush, type GroupPlan, type NotifyOptions } from './notify.ts';
 import { resolveTravel, type TravelChoice, type TravelDeps } from './route.ts';
@@ -88,7 +88,7 @@ export type LeaveResponse = Common & { left: boolean };
 
 type EditRow = SeriesAppointmentRow & { exception_kind: ExceptionKind | null };
 const APPOINTMENT_COLUMNS = `${SERIES_APPOINTMENT_COLUMNS}, exception_kind`;
-const PARTICIPANT_COLUMNS = 'participant_id, appointment_id, user_id, origin_name, origin_lat, origin_lng, transport_type, est_travel_minutes, travel_source, prepare_minutes, buffer_minutes, prepare_advance_minutes';
+const PARTICIPANT_COLUMNS = 'participant_id, appointment_id, user_id, origin_name, origin_lat, origin_lng, transport_type, est_travel_minutes, travel_source, prepare_minutes, prepare_value_source, buffer_minutes, prepare_advance_minutes';
 
 type Target = { appointment: EditRow; participant: ParticipantRow | null; alarms: AlarmRow[] };
 type DayRow = { appointment: EditRow; participant: ParticipantRow; alarms: AlarmRow[] };
@@ -344,13 +344,16 @@ async function replanForWake(
     stats,
     lateCount4w,
     sameDayWake: earlierAfter,
+    purePrepCandidate: row.appointment.group_id == null && row.participant.user_id === ctx.userId
+      ? await loadPurePrepCandidate(ctx.userDb, ctx.userId, profile, ctx.now, new Date(row.appointment.appointment_at))
+      : undefined,
   };
   const plan = computePlan(inputs, resolvedTravelOf(travel), 'save');
   if (!plan.check.ok) return { ok: false, reason: plan.check.reason };
   const diff = diffAlarms(plan, row.alarms, { now: ctx.now, replaceExisting: true });
   must(
     'appointment_participants update',
-    await ctx.userDb.from('appointment_participants').update({ prepare_minutes: plan.prepare.minutes }).eq('participant_id', row.participant.participant_id).eq('user_id', ctx.userId),
+    await ctx.userDb.from('appointment_participants').update({ prepare_minutes: plan.prepare.minutes, ...purePrepPersistenceOf(plan, inputs.purePrepCandidate) }).eq('participant_id', row.participant.participant_id).eq('user_id', ctx.userId),
   );
   const after = await applyAlarmDiff(ctx, row.participant.participant_id, diff, row.alarms);
   return {
@@ -380,7 +383,7 @@ async function replanFor(
   ctx: EditCtx,
   env: Env,
   a: { row: EditRow; patched: ReturnType<typeof applyPatch>; participant: ParticipantRow; alarms: AlarmRow[]; snapshot: Snapshot; excluded: ReadonlySet<string>; oldAt: Date; newAt: Date; tz: string },
-): Promise<{ plan: Plan; diff: AlarmDiff; changes: AlarmChangeLine[]; warnings: EditWarning[] }> {
+): Promise<{ plan: Plan; purePrepCandidate?: PlanInputs['purePrepCandidate']; diff: AlarmDiff; changes: AlarmChangeLine[]; warnings: EditWarning[] }> {
   const { row, patched, participant, alarms, snapshot, excluded, oldAt, newAt, tz } = a;
   const warnings: EditWarning[] = [];
   const patchedRow: AppointmentRow = { ...row, ...patched.next, recurrence_rule: row.recurrence_rule };
@@ -419,13 +422,16 @@ async function replanFor(
     stats,
     lateCount4w,
     sameDayWake,
+    purePrepCandidate: patchedRow.group_id == null && participant.user_id === ctx.userId
+      ? await loadPurePrepCandidate(ctx.userDb, ctx.userId, profile, ctx.now, newAt)
+      : undefined,
   };
   const plan = computePlan(inputs, resolvedTravelOf(travelled.travel), 'save');
   if (!plan.check.ok) throw new HttpError('UNPROCESSABLE', plan.check.message, { reason: plan.check.reason, ...(plan.check.detail ?? {}) });
   const diff = diffAlarms(plan, alarms, { now: ctx.now, replaceExisting: true });
   const changes = alarmChanges(alarms, [...diff.update.map((u) => u.patch), ...diff.insert]);
   warnings.push(...plan.warnings.filter((w) => w.code === 'PAST_ALARM_DISABLED'));
-  return { plan, diff, changes, warnings };
+  return { plan, purePrepCandidate: inputs.purePrepCandidate, diff, changes, warnings };
 }
 
 // 공동 약속의 시각 · 장소를 만든 사람이 고쳤을 때 다른 참여자들의 알람을 다시 계산해 씀 — 각자의 출발지 · 수단 · 준비 시간으로 (9-14).
@@ -512,7 +518,7 @@ async function syncOne(ctx: EditCtx, a: { row: EditRow; patched: ReturnType<type
       'appointment_participants update',
       await ctx.service
         .from('appointment_participants')
-        .update({ est_travel_minutes: made.plan.travelMinutes, travel_source: made.plan.travel.chosen?.source, prepare_minutes: made.plan.prepare.minutes })
+        .update({ est_travel_minutes: made.plan.travelMinutes, travel_source: made.plan.travel.chosen?.source, prepare_minutes: made.plan.prepare.minutes, ...purePrepPersistenceOf(made.plan, made.purePrepCandidate) })
         .eq('participant_id', p.participant_id)
         .eq('user_id', p.user_id),
     );
@@ -666,10 +672,12 @@ export async function updateAppointment(ctx: EditCtx, req: Extract<EditRequest, 
 
   // ---- 알람 다시 계산 (시각 · 장소 · 중요도가 바뀔 때만) ----
   let plan: Plan | undefined;
+  let purePrepCandidate: PlanInputs['purePrepCandidate'];
   let diff: AlarmDiff | undefined;
   if (participant && patched.affectsAlarms) {
     const made = await replanFor(ctx, env, { row, patched, participant, alarms, snapshot, excluded, oldAt, newAt, tz });
     plan = made.plan;
+    purePrepCandidate = made.purePrepCandidate;
     diff = made.diff;
     result.changes = made.changes;
     result.warnings.push(...made.warnings);
@@ -693,7 +701,7 @@ export async function updateAppointment(ctx: EditCtx, req: Extract<EditRequest, 
       'appointment_participants update',
       await ctx.userDb
         .from('appointment_participants')
-        .update({ est_travel_minutes: plan.travelMinutes, travel_source: plan.travel.chosen?.source, prepare_minutes: plan.prepare.minutes })
+        .update({ est_travel_minutes: plan.travelMinutes, travel_source: plan.travel.chosen?.source, prepare_minutes: plan.prepare.minutes, ...purePrepPersistenceOf(plan, purePrepCandidate) })
         .eq('participant_id', participant.participant_id)
         .eq('user_id', ctx.userId),
     );
@@ -898,9 +906,13 @@ export async function restoreAppointment(ctx: EditCtx, req: Extract<EditRequest,
   const [profile, stats, lateCount4w] = await Promise.all([env.profile(), env.stats(), env.late()]);
   // 지운 알람의 종류 · 직접 고른 시각은 남아 있지 않음 → 계산된 알람 전부를 자동 값으로 다시 만듦
   // 이미 만들다 만 알람이 있으면(알람은 만들었는데 표시 쓰기가 실패한 뒤 다시 보낸 경우) 그 알람을 기준으로 이어서 맞춤 — 없는 것처럼 다시 넣으면 유일 제약에 걸려 영영 CONFLICT
-  const plan = computePlan({ now: ctx.now, draft: {}, profile, appointment: row, participant, existingAlarms, stats, lateCount4w, sameDayWake }, resolvedTravelOf(travel), 'save');
+  const purePrepCandidate = row.group_id == null && participant.user_id === ctx.userId
+    ? await loadPurePrepCandidate(ctx.userDb, ctx.userId, profile, ctx.now, at)
+    : undefined;
+  const plan = computePlan({ now: ctx.now, draft: {}, profile, appointment: row, participant, existingAlarms, stats, lateCount4w, sameDayWake, purePrepCandidate }, resolvedTravelOf(travel), 'save');
   if (!plan.check.ok) throw new HttpError('UNPROCESSABLE', plan.check.message, { reason: plan.check.reason, ...(plan.check.detail ?? {}) });
   const diff = diffAlarms(plan, existingAlarms, { now: ctx.now, replaceExisting: false });
+  must('appointment_participants restore pure-prep provenance', await ctx.userDb.from('appointment_participants').update(purePrepPersistenceOf(plan, purePrepCandidate)).eq('participant_id', participant.participant_id).eq('user_id', ctx.userId));
   const after = await applyAlarmDiff(ctx, participant.participant_id, diff, existingAlarms);
   await updateRow(ctx, row.appointment_id, { exception_kind: 'EDITED' });
 

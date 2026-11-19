@@ -50,6 +50,15 @@ Deno.serve(
       draft,
     );
     assertPersistable(plan);
+    // An AUTO snapshot must NOT silently turn into a manual preparation
+    // duration. If the automatic calculation has changed since preview,
+    // refuse to save the stale preview instead of scheduling a different time.
+    if (draft.autoPrepareSnapshotMinutes != null &&
+        draft.autoPrepareSnapshotMinutes !== plan.prepare.minutes) {
+      throw new HttpError('UNPROCESSABLE',
+        '미리보기 이후 준비시간 계산이 변경됐어요. 알람 시간을 다시 확인해 주세요',
+        { reason: 'PREPARE_SNAPSHOT_CHANGED' });
+    }
 
     return jsonResponse(
       await persistAppointment(ctx, { plan, inputs, created, draft, replaceExisting: request.replaceExisting, edits: request.edits, timeZone }),

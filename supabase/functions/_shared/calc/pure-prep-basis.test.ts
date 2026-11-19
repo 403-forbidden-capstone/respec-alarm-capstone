@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
-import {choosePurePrepBasis} from './pure-prep-basis.ts';
+import {choosePurePrepBasis, confirmedPurePrepHistory} from './pure-prep-basis.ts';
 test('missing pure baseline remains unset',()=>{
  assert.equal(choosePurePrepBasis({}),null);
  assert.equal(choosePurePrepBasis({profileMinutes:null,historicalMinutes:[]}),null);
@@ -27,4 +27,22 @@ test('actual model needs opt-in and valid history',()=>{
 });
 test('bad numeric values ignored',()=>{
  assert.equal(choosePurePrepBasis({profileMinutes:0,historicalMinutes:[0,-1,300,Infinity]}),null);
+});
+
+test('preparation history excludes future data, alarm schedules, location-less departures and duplicates',()=>{
+ const cutoff=new Date('2026-11-19T00:00:00Z');
+ const good=(minutes:number,depart='2026-11-18T09:00:00Z')=>{
+   const date=new Date(depart);
+   return {prepare_started_at:new Date(date.getTime()-minutes*60000).toISOString(),departed_at:depart,
+       prepare_started_source:'PREPARE_ALARM',departed_source:'LOCATION'};
+ };
+ const rows=[
+   good(35),good(35),good(45,'2026-11-17T09:00:00Z'),
+   good(55,'2026-11-20T09:00:00Z'),
+   {...good(20,'2026-11-16T09:00:00Z'),departed_source:'MANUAL'},
+   {...good(25,'2026-11-15T09:00:00Z'),prepare_started_source:'UNKNOWN'},
+   good(241,'2026-11-14T09:00:00Z'),
+ ];
+ assert.deepEqual(confirmedPurePrepHistory(rows,cutoff),[35,45]);
+ assert.deepEqual(confirmedPurePrepHistory(rows,cutoff,1),[35]);
 });

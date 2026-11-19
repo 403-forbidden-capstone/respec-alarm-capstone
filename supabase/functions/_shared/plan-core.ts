@@ -56,6 +56,8 @@ export type ProfileRow = {
   home_lat: number | null;
   home_lng: number | null;
   default_prepare_minutes?: number | null; // 온보딩에서 답한 "일어나서 나가기까지" — 기상~출발 첫 값 (학습 루프 기초 1절 ①). 없으면 null
+  default_outing_prep_minutes?: number | null; // explicitly supplied pure prepare-start -> departure
+  ml_profile_consented_at?: string | null; // consent for behavioral personalization/history use
   wake_sensitivity?: string | null; // 온보딩 잠귀 'LIGHT' | 'NORMAL' | 'HEAVY' (D69) — 무거움이면 강도 자동 값이 강. 없으면 보통
   preferred_voice_tone?: string | null; // 설정에서 고른 기본 말소리 CALM · NEUTRAL · DIRECT — 비면 자동(강도 단계). 일정에서 직접 고른 말소리가 이김
   wake_margin?: string | null; // 온보딩 깨우는 여유 'TIGHT' | 'NORMAL' | 'LOOSE' (D63) — 기록의 0.7 · 0.8 · 0.9 분위수. 없으면 보통
@@ -85,6 +87,7 @@ export type ParticipantRow = {
   est_travel_minutes: number | null;
   travel_source: 'API' | 'CACHED' | 'MANUAL';
   prepare_minutes: number;
+  prepare_value_source?: 'LEGACY' | 'AUTO' | 'MANUAL';
   buffer_minutes: number;
   prepare_advance_minutes?: number | null; // 받아들인 준비 알람 당김 분 (#484 · 안건 D111) — 계산이 준비 알람을 그만큼 앞당김. 없으면 0
 };
@@ -122,12 +125,15 @@ export function withoutFriendTimes(alarms: readonly AlarmRow[]): AlarmRow[] {
 export type PlanDraft = ParticipantFields &
   AlarmFields & {
     appointmentId?: string;
+    groupId?: string; // new shared appointment; pure-prep pilot excludes group until shared edit parity verified
     at?: Date; // 새 약속의 시각 (기존 약속이면 DB 값)
     destination?: PlaceInput; // 새 약속의 장소
     importance?: Importance;
     travelMinutes?: number; // 정해진 이동시간 — 직접 입력하거나 앱이 확인 시트에서 보여 준 값
     travelSource?: 'API' | 'MANUAL';
-    prepareMinutes?: number; // 정해진 준비 시간(기상 ~ 출발)
+    prepareMinutes?: number; // EXPLICIT legacy manual override (wake -> departure)
+    autoPrepareSnapshotMinutes?: number; // auto preview value; compare at commit, NEVER feed back as manual override
+    prepareValueSource?: 'AUTO' | 'MANUAL'; // optional explicit provenance; absent means legacy unknown
   };
 
 export type PlanInputs = {
@@ -305,6 +311,7 @@ export type Plan = {
   travel: ResolvedTravel;
   travelMinutes: number;
   prepare: PrepareBasis;
+  prepareTarget: 'WAKE_TO_DEPART' | 'PREPARE_START_TO_DEPART';
   recentPrepare: number[]; // H03 "최근 5번" — 최신순 최대 5개(분). 그날 두 번째 일정(기록을 안 씀)은 빈 목록
   intensity: ResolvedIntensity;
   kinds: RingKind[] | undefined; // 만든 종류 (undefined = 계산된 전부)
@@ -342,16 +349,24 @@ export function computePlan(i: PlanInputs, travel: ResolvedTravel, mode: PlanMod
     //   두 번째 일정은 기록 수도 0으로 넘김 → 출처 DEFAULT · 보정 0. 화면 문구는 sameDayWake일 때 기록 줄을 안 보임
     // 깨우는 여유(wake_margin)는 내 기록의 0.7 · 0.8 · 0.9 분위수 — 보통이 예전 P80 고정과 같음. 매우 중요 일정은 한 단계 위(빠듯 → 보통 → 넉넉, calc/prepare.ts marginForImportance). 직접 고른 준비 시간이 있으면 그 값이 먼저
     // 첫 값(공통)은 온보딩 "일어나서 나가기까지" (2절 3). 반복 다음 회차는 prepareBound로 직전 회차 ±10분 안에서만 움직임 (1절 ④)
+    // Persisted manual legacy time must be an actual calculation override,
+    // not merely a gate that blocks the new model. This preserves it in
+    // roll/edit/wake-replan where the request draft has no prepare_minutes.
+    const storedManual = i.draft.prepareMinutes == null &&
+      i.draft.prepareValueSource !== 'AUTO' &&
+      i.participant?.prepare_value_source === 'MANUAL'
+      ? i.participant.prepare_minutes
+      : undefined;
     const fallback = predictPrepare({
       commonP80: withWake ? firstPrepareMinutes(i.profile) : DEFAULT_COMMON_P80.sameDay,
       personalP80: withWake ? personalPrepareOf(i.stats, wakeMarginOf(i.profile.wake_margin), basics.importance) : null,
       sampleCount: withWake ? i.stats.sampleCount : 0,
-      override: i.draft.prepareMinutes,
+      override: i.draft.prepareMinutes ?? storedManual,
     });
     // C1/W4가 적용돼도 직접 지정한 준비시간과 그날 두 번째 일정(기상 없음)은 기존 규칙이 우선.
     // 기존 DTO 필드(commonP80/correction)는 화면 호환을 위해 유지. MODEL일 때 correction은
     // 기존 공통 기준 대비 모델값 차이이며 개인 P80 보정으로 해석하면 안 됨.
-    const ml = withWake && i.draft.prepareMinutes == null ? i.mlPrediction : undefined;
+    const ml = withWake && i.draft.prepareMinutes == null && storedManual == null ? i.mlPrediction : undefined;
     const predicted: PrepareBasis = ml
       ? {
           ...fallback,
@@ -370,6 +385,9 @@ export function computePlan(i: PlanInputs, travel: ResolvedTravel, mode: PlanMod
     // Never mix with old C1/W4, or an explicit legacy manual override.
     const pure = i.purePrepCandidate;
     const usePure = pure != null && i.draft.prepareMinutes == null && !ml &&
+      // Explicit legacy manual duration must survive edit/roll/restore
+      // even if these code paths don't submit an override in the draft.
+      !(i.participant?.prepare_value_source === 'MANUAL' && i.draft.prepareValueSource !== 'AUTO') &&
       manualTimes.WAKE == null && manualTimes.PREPARE == null;
     const activePure = usePure ? pure : null;
     const minutes = activePure != null
@@ -465,6 +483,7 @@ export function computePlan(i: PlanInputs, travel: ResolvedTravel, mode: PlanMod
     travel,
     travelMinutes: chosen.minutes,
     prepare,
+    prepareTarget: pureApplied ? 'PREPARE_START_TO_DEPART' : 'WAKE_TO_DEPART',
     // Legacy recent statistics are wake->departure, not pure prep; do not display them when using the new basis.
     recentPrepare: withWake && !pureApplied ? recentPrepareOf(i.stats) : [],
     intensity,
@@ -475,6 +494,34 @@ export function computePlan(i: PlanInputs, travel: ResolvedTravel, mode: PlanMod
     departure,
     check,
     warnings,
+  };
+}
+
+// Persist the new duration only when the planner actually USED a pure-prep
+// candidate. A profile value or survey model should never be stamped onto a
+// legacy/malformed alarm plan.
+export type PurePrepPersistence = {
+  outing_prep_minutes: number | null;
+  outing_prep_source: 'PROFILE' | 'HISTORY' | 'MODEL' | 'MANUAL' | null;
+  outing_prep_model: string | null;
+};
+export function purePrepPersistenceOf(
+  plan: Plan,
+  candidate: PlanInputs['purePrepCandidate'],
+): PurePrepPersistence {
+  const unavailable: PurePrepPersistence = {
+    outing_prep_minutes: null,
+    outing_prep_source: null,
+    outing_prep_model: null,
+  };
+  if (plan.prepareTarget !== 'PREPARE_START_TO_DEPART' || !candidate) return unavailable;
+  const minutes = plan.prepare.minutes - (plan.withWake ? plan.beforePrepareMinutes : 0);
+  if (!Number.isFinite(minutes) || !Number.isInteger(minutes) || minutes < 5 || minutes > 240 ||
+      minutes !== Math.round(candidate.minutes)) return unavailable;
+  return {
+    outing_prep_minutes: minutes,
+    outing_prep_source: candidate.source,
+    outing_prep_model: candidate.source === 'MODEL' ? candidate.model ?? null : null,
   };
 }
 
@@ -568,6 +615,11 @@ export function toSuggestion(plan: Plan, inputs?: Pick<PlanInputs, 'existingAlar
       corrected_by: null, // 7.3.1 개인 이동 보정은 아직 없음
     },
     prepare: {
+      // Legacy 'minutes' remains whole wake->departure to avoid breaking
+      // mobile clients. New consumers MUST use pure_minutes when target=PURE.
+      target: plan.prepareTarget,
+      pure_minutes: plan.prepareTarget === 'PREPARE_START_TO_DEPART'
+        ? Math.round(prepare.minutes - (plan.withWake ? plan.beforePrepareMinutes : 0)) : null,
       minutes: prepare.minutes,
       auto_minutes: prepare.autoMinutes,
       source: prepare.source,
