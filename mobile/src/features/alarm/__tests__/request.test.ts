@@ -433,3 +433,13 @@ describe('저장 결과 → 일정 (toCreatedAppointment)', () => {
     expect(created.enabled).toBe(true);
   });
 });
+
+describe('automatic prepare snapshot contract (H05)', () => {
+  it('marks server-predicted preparation as AUTO, not an explicit manual override', () => {
+    const e = toEstimate(suggestion(), draft(), at('10:00'),
+      newAppointmentBody(draft(), at('10:00')), 1);
+    const body = createCommitBody(e, {}, []) as { participant: Record<string, unknown> };
+    expect(body.participant.prepare_value_source).toBe('AUTO');
+    expect(body.participant.prepare_minutes).toBe(60);
+  });
+});
