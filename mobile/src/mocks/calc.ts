@@ -88,11 +88,6 @@ export function mockWakeRow(personId: string, now: Date, tripVisible = false): W
   }
   const tl = (isTripScenario() ? tripTimelines : timelines)[personId];
   if (!tl) return null;
-  // 기상 알람이 없는 날(오후 · 저녁 일정) — 첫 줄이 준비 알람. 서버처럼 출발 · 도착 공유가 보일 때만 준비 알람 시각을 줌
-  if (tl[0][1] === '준비 알람') {
-    const prep = { ...trip(null, null), prepare_alarm_at: tripVisible ? iso(kst(TODAY, tl[0][0])) : null, prepare_started_at: null as string | null };
-    return { user_id: personId, is_me: false, wake_alarm_at: null, wake_confirmed_at: null, wake_status: 'NO_ALARM', ...prep };
-  }
   const base = { user_id: personId, is_me: false, wake_alarm_at: iso(kst(TODAY, tl[0][0])), wake_confirmed_at: null as string | null, ...trip(null, null) };
   if (beforeToday) return { ...base, wake_status: 'SCHEDULED' };
   const nowMin = minuteOfDay(now);
@@ -103,6 +98,10 @@ export function mockWakeRow(personId: string, now: Date, tripVisible = false): W
   };
   const prepStart = tripVisible ? timeOf('준비 시작') : null; // 준비 알람 해제 = 준비 시작 체크 (출발 · 도착 공유가 보일 때만)
   const tripRow = { ...trip(timeOf('출발'), timeOf('도착')), prepare_started_at: prepStart ? iso(prepStart) : null };
+  // 기상 알람을 직접 끈 사람(그 약속에 기상 알람 없음) — 첫 줄이 준비 알람. 서버처럼 출발 · 도착 공유가 보일 때만 준비 알람 시각을 줌
+  if (tl[0][1] === '준비 알람') {
+    return { user_id: personId, is_me: false, wake_alarm_at: null, wake_confirmed_at: null, wake_status: 'NO_ALARM', ...tripRow, prepare_alarm_at: tripVisible ? iso(kst(TODAY, tl[0][0])) : null };
+  }
   const confirmed = passed.find(([, label]) => label === '기상 확인');
   if (confirmed) return { ...base, ...tripRow, wake_status: 'CONFIRMED', wake_confirmed_at: iso(kst(TODAY, confirmed[0])) };
   if (passed.some(([, label]) => label === '알람 해제')) return { ...base, wake_status: 'DISMISSED' };

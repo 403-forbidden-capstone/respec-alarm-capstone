@@ -2,7 +2,7 @@ import { describe, expect, it } from '@jest/globals';
 
 import { setScenarioTime } from '@/lib/clock';
 import { memberState, mockWakeRow, myTrip } from '@/mocks/calc';
-import { db, kst } from '@/mocks/data';
+import { db, kst, TRIP_SHARERS } from '@/mocks/data';
 
 import { tripCountsOf, wakeStateOf, wokeCountOf, type WakeRow } from '../map';
 import { permissionNames, togglePermission } from '../permissions';
@@ -173,12 +173,12 @@ describe('출발 · 도착 공유 스위치 (F03)', () => {
 });
 
 describe('웹 미리보기 이동 중 · 도착 장면 (가짜 데이터)', () => {
-  it('도착 09:50 장면 — 내 출발 · 도착 공유를 켜면 나 도착 · 수연 출발 · 지형 준비 중 · 준성 준비 알람(기상 없는 날)', () => {
+  it('도착 09:50 장면 — 내 출발 · 도착 공유를 켜면 나 도착 · 수연 출발 · 지형 준비 중 · 준성 이동 중(기상 알람을 직접 끈 사람)', () => {
     setScenarioTime('arrived');
     try {
       const t = kst(22, 590);
       const stage = (id: string, trip: boolean) => wakeStateOf(mockWakeRow(id, t, trip) ?? undefined, true).stage;
-      expect(['me', 'sy', 'jh', 'js'].map((id) => stage(id, true))).toEqual(['ARRIVED', 'DEPARTED', 'PREPARING', 'PREP_SCHEDULED']);
+      expect(['me', 'sy', 'jh', 'js'].map((id) => stage(id, true))).toEqual(['ARRIVED', 'DEPARTED', 'PREPARING', 'DEPARTED']);
       expect(stage('me', false)).toBe('WOKE'); // 내 스위치가 꺼져 있으면 기상에서 멈춤
       expect(myTrip(t).arriveAt).toEqual(kst(22, 588));
     } finally {
@@ -186,18 +186,18 @@ describe('웹 미리보기 이동 중 · 도착 장면 (가짜 데이터)', () =
     }
   });
 
-  it('장면별 멤버 줄 글자 — 아침 7:55 · 이동 중 9:10 · 도착 9:50 (수연은 늘 출발 · 도착 공유, 나머지는 이동 중 · 도착 장면에서만)', () => {
+  it('장면별 멤버 줄 글자 — 아침 7:55 · 이동 중 9:10 · 도착 9:50 (수연 · 준성은 늘 출발 · 도착 공유, 지형은 이동 중 · 도착 장면에서만)', () => {
     const texts = (scene: 'morning' | 'moving' | 'arrived', t: Date) => {
       setScenarioTime(scene);
       try {
-        return ['sy', 'jh', 'js'].map((id) => wakeStateOf(mockWakeRow(id, t, scene !== 'morning' || id === 'sy') ?? undefined, true).text);
+        return ['sy', 'jh', 'js'].map((id) => wakeStateOf(mockWakeRow(id, t, scene !== 'morning' || TRIP_SHARERS.includes(id)) ?? undefined, true).text);
       } finally {
         setScenarioTime('morning');
       }
     };
-    expect(texts('morning', kst(22, 475))).toEqual(['준비 중 · 오전 7:38 시작', '기상 완료 · 오전 7:30', '취침 중 · 오전 8:50 알람']);
-    expect(texts('moving', kst(22, 550))).toEqual(['준비 중 · 오전 7:38 시작', '준비 중 · 오전 8:00 시작', '준비 알람 오후 5:10']);
-    expect(texts('arrived', kst(22, 590))).toEqual(['이동 중 · 오전 9:20 출발', '준비 중 · 오전 8:00 시작', '준비 알람 오후 5:10']);
+    expect(texts('morning', kst(22, 475))).toEqual(['준비 중 · 오전 7:38 시작', '기상 완료 · 오전 7:30', '준비 알람 오전 8:40']);
+    expect(texts('moving', kst(22, 550))).toEqual(['준비 중 · 오전 7:38 시작', '준비 중 · 오전 8:00 시작', '준비 중 · 오전 8:42 시작']);
+    expect(texts('arrived', kst(22, 590))).toEqual(['이동 중 · 오전 9:20 출발', '준비 중 · 오전 8:00 시작', '이동 중 · 오전 9:15 출발']);
   });
 
   it('이동 중 09:10 장면 — 나는 출발했고 아직 도착 전', () => {
