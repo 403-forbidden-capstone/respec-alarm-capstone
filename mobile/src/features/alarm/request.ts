@@ -186,6 +186,15 @@ export function existingBody(saved: AppointmentDetail, edits: AlarmEdits): Body 
       buffer_minutes: within(edits.bufferMinutes, MAX_BUFFER_MINUTES),
       ...travel,
       prepare_minutes: within(edits.prepareMinutes ?? saved.predictedPrepMinutes, MAX_PREPARE_MINUTES),
+      // Legacy existing rows have unknown source; do NOT silently reinterpret
+      // them as automatic. Only rows explicitly stored AUTO may use a snapshot.
+      ...(edits.prepareMinutes != null
+        ? { prepare_value_source: 'MANUAL' }
+        : saved.prepareValueSource === 'AUTO'
+          ? { prepare_value_source: 'AUTO' }
+          : saved.prepareValueSource === 'MANUAL'
+            ? { prepare_value_source: 'MANUAL' }
+            : {}),
       ...(saved.beforePrepMinutes > 0 ? { before_prepare_minutes: within(saved.beforePrepMinutes, MAX_BEFORE_PREPARE_MINUTES) } : {}),
     },
     manual_times: manualTimesBody(edits.times),
