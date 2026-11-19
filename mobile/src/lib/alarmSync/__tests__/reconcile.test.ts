@@ -401,6 +401,15 @@ describe('출발 · 도착 기록이 있는 약속의 알람은 폰 예약 대�
     expect(ids(dropRecorded(withRecord({ departed_at: null, arrived_at: '2026-10-20T00:40:00.000Z' })).kept)).toEqual(['wake']); // 출발 기록 없이 도착만 있어도
   });
 
+  it('기상 확인 기록(wake_confirmed)이 있으면 기상 알람만 뺌 — 확정 없는 기상 · 확정된 날의 준비 · 출발 · 도착 목표는 그대로', () => {
+    const confirmed = rows.map((r) => (r.alarm_type === 'WAKE' ? { ...r, wake_confirmed: true } : { ...r, wake_confirmed: false }));
+    const { kept, dropped } = dropRecorded(confirmed);
+    expect(ids(dropped)).toEqual(['wake']);
+    expect(ids(kept)).toEqual(['prep', 'dep', 'arr']);
+    expect(ids(dropRecorded(rows.map((r) => ({ ...r, wake_confirmed: false }))).dropped)).toEqual([]);
+    expect(ids(dropRecorded(rows.map((r) => ({ ...r, wake_confirmed: true }))).dropped)).toEqual(['wake']); // 준비 알람에 붙은 값은 무시
+  });
+
   it('참여 행마다 따로 — 다른 약속(다른 참여 행)의 알람은 그대로', () => {
     const other = row({ alarm_id: 'other-dep', alarm_type: 'DEPARTURE', scheduled_at: '2026-10-21T00:00:00.000Z', participant_id: 'p2' });
     const mixed = [...withRecord({ departed_at: '2026-10-20T00:01:00.000Z' }), other];

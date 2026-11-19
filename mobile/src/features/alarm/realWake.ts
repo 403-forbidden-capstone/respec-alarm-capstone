@@ -10,7 +10,7 @@
 //     놓침(MISSED)은 서버 배치(wake-check)가 씀 — 앱은 안 씀
 import * as AlarmCore from '@capstone/alarm-core';
 
-import { uploadEvents } from '@/lib/alarmSync';
+import { reconcile, uploadEvents } from '@/lib/alarmSync';
 import { now } from '@/lib/clock';
 import { parseDbTime } from '@/lib/dbTime';
 import { dayKey, startOfDay } from '@/lib/format';
@@ -491,4 +491,6 @@ export async function confirmEarlyWake(alarmId: string): Promise<void> {
   const current = now();
   if (await confirmedOnDay(userId, current)) return;
   await settle(userId, ctx, current, 'self');
+  // 확정했으니 그날 기상 알람은 이제 울리면 안 됨 — 폰 예약을 바로 지움 (서버 행은 그대로, 맞추기가 기상 확인 기록을 보고 뺌 · 앱이 앞에 올 때 되살아나지 않음). 실패해도 확정은 이미 기록됐으니 삼킴
+  await reconcile({ alarmIds: [alarmId] }).catch(() => {});
 }

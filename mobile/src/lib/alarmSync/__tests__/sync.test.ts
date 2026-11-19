@@ -48,7 +48,13 @@ const mockUpsert = jest.fn<(rows: { client_event_id: string }[], options: unknow
 let mockAlarmRows: unknown[] = [];
 let mockEnabledIds: string[] = []; // 지정한 알람 중 서버에 켜진 행이 있는 것 (.in으로 끝나는 쿼리)
 let mockParticipantRows: { alarm_id: string; participant_id: string | null }[] = []; // 지정한 알람의 약속 (participant_id를 고르는 .in 쿼리 — 켜짐 여부와 상관없음)
+let mockWakeConfirmsFail = false; // 기상 확인 읽기 실패
+let mockWakeConfirms: { alarm_id: string; event_at: string }[] = []; // 기상 확인(WAKE_CONFIRMED) 기록 — alarm_events를 읽는 쿼리
 let mockSelected = '';
+const mockEventQuery: Record<string, unknown> = {};
+mockEventQuery.select = jest.fn(() => mockEventQuery);
+mockEventQuery.eq = jest.fn(() => mockEventQuery);
+mockEventQuery.in = jest.fn(async () => (mockWakeConfirmsFail ? { data: null, error: { code: '', message: 'offline' } } : { data: mockWakeConfirms, error: null }));
 const mockAlarmQuery: Record<string, unknown> = {};
 for (const method of ['eq', 'gt', 'order']) mockAlarmQuery[method] = jest.fn(() => mockAlarmQuery);
 mockAlarmQuery.select = jest.fn((columns: string) => {
@@ -63,7 +69,8 @@ mockAlarmQuery.in = jest.fn(async () => ({
 jest.mock('../../supabase', () => ({
   supabase: {
     auth: { getSession: async () => ({ data: { session: mockUser ? { user: { id: mockUser } } : null } }) },
-    from: (table: string) => (table === 'alarms' ? mockAlarmQuery : { upsert: (rows: { client_event_id: string }[], options: unknown) => mockUpsert(rows, options) }),
+    from: (table: string) =>
+      table === 'alarms' ? mockAlarmQuery : { select: (...args: unknown[]) => (mockEventQuery.select as (...a: unknown[]) => unknown)(...args), upsert: (rows: { client_event_id: string }[], options: unknown) => mockUpsert(rows, options) },
   },
 }));
 
@@ -79,6 +86,8 @@ beforeEach(() => {
   mockAlarmRows = [];
   mockEnabledIds = [];
   mockParticipantRows = [];
+  mockWakeConfirms = [];
+  mockWakeConfirmsFail = false;
   setSigningOut(true); // 반복 회차 넘기기 10분 제한 · 시간대를 처음 상태로
   setSigningOut(false);
   mockCallEdge.mockReset();
@@ -136,6 +145,33 @@ describe('applyCommit — 저장 결과를 폰에 반영', () => {
     await applyCommit({});
     expect(mockCore.cancel).not.toHaveBeenCalled();
     expect(mockCore.scheduleAll).not.toHaveBeenCalled();
+  });
+});
+
+describe('applyCommit — 기상 확인이 있는 기상 알람은 다시 저장해도 안 검', () => {
+  const wake = pkg('w-1', NOW + 3_600_000);
+  const prep = { ...pkg('prep-1', NOW + 7_200_000), type: 'PREPARE' as const };
+  const dep = { ...pkg('dep-1', NOW + 10_800_000), type: 'DEPARTURE' as const };
+
+  it('확정된 기상은 빼고 준비 · 출발은 그대로 걺', async () => {
+    mockWakeConfirms = [{ alarm_id: 'w-1', event_at: new Date(NOW - 600_000).toISOString() }];
+    await applyCommit({ ring_packages: [wake, prep, dep] });
+    expect(mockCore.scheduleAll).toHaveBeenCalledWith([prep, dep]);
+  });
+
+  it('시각이 확정보다 24시간 넘게 뒤로 옮겨졌으면 걺', async () => {
+    mockWakeConfirms = [{ alarm_id: 'w-1', event_at: new Date(NOW - 30 * 3_600_000).toISOString() }];
+    await applyCommit({ ring_packages: [wake, prep] });
+    expect(mockCore.scheduleAll).toHaveBeenCalledWith([wake, prep]);
+  });
+
+  it('기상 꾸러미가 없으면 확정을 읽지 않고, 읽기가 실패하면 그대로 검', async () => {
+    await applyCommit({ ring_packages: [prep, dep] });
+    expect(mockEventQuery.in).not.toHaveBeenCalled();
+    jest.spyOn(console, 'warn').mockImplementation(() => {});
+    mockWakeConfirmsFail = true;
+    await applyCommit({ ring_packages: [wake] });
+    expect(mockCore.scheduleAll).toHaveBeenLastCalledWith([wake]);
   });
 });
 
@@ -628,6 +664,46 @@ describe('reconcile — 출발 · 도착 기록이 있는 약속은 알림을 �
     mockAlarmRows = [{ ...dbRow('solo', 'WAKE', WAKE_AT), participant_id: null, appointment_participants: null }];
     expect((await reconcile({ nowMs: NOW })).scheduled).toEqual(['solo']);
     expect(mockAlarmQuery.select).toHaveBeenCalledWith(expect.stringContaining('departed_at, arrived_at'));
+  });
+});
+
+describe('reconcile — 기상 확인이 있는 기상 알람은 폰에서 뺌 ([먼저 깼어요] 뒤)', () => {
+  it('기상 확인 기록이 있으면 기상 알람은 걸지 않고 폰에 있는 것은 지움 — 준비 · 출발은 그대로, 기록은 WAKE 행 id로만 읽음', async () => {
+    mockAlarmRows = fourAlarms({});
+    mockWakeConfirms = [{ alarm_id: 'p1-wake', event_at: '2026-10-19T23:34:00.000Z' }];
+    mockCore.list.mockResolvedValue(phoneFour());
+    const summary = await reconcile({ nowMs: NOW });
+    expect(summary.canceled).toEqual(['p1-wake']);
+    expect(summary.scheduled).toEqual([]);
+    expect(mockEventQuery.in).toHaveBeenCalledWith('alarm_id', ['p1-wake']);
+  });
+
+  it('[먼저 깼어요] 직후처럼 alarmIds로 그 기상 알람만 맞춰도 폰 예약이 지워짐', async () => {
+    mockAlarmRows = fourAlarms({});
+    mockWakeConfirms = [{ alarm_id: 'p1-wake', event_at: '2026-10-19T23:34:00.000Z' }];
+    mockCore.list.mockResolvedValue(phoneFour());
+    const summary = await reconcile({ alarmIds: ['p1-wake'], nowMs: NOW });
+    expect(summary.canceled).toEqual(['p1-wake']);
+  });
+
+  it('기상 확인 읽기가 실패해도 reconcile은 끝나고 기상 알람은 그대로 둠 (alarmIds 맞추기도 같음)', async () => {
+    jest.spyOn(console, 'warn').mockImplementation(() => {});
+    mockAlarmRows = fourAlarms({});
+    mockWakeConfirmsFail = true;
+    mockCore.list.mockResolvedValue(phoneFour());
+    expect((await reconcile({ nowMs: NOW })).canceled).toEqual([]);
+    expect((await reconcile({ alarmIds: ['p1-wake'], nowMs: NOW })).canceled).toEqual([]);
+    mockCore.list.mockResolvedValue([]);
+    await reconcile({ nowMs: NOW });
+    expect(mockCore.scheduleAll.mock.calls.at(-1)?.[0].map((p) => p.alarmId)).toContain('p1-wake');
+  });
+
+  it('기상 확인이 없으면 그대로 걸고, 알람 시각보다 하루 넘게 앞선 옛 확정은 세지 않음 (시각이 뒤로 옮겨진 행)', async () => {
+    mockAlarmRows = fourAlarms({});
+    mockWakeConfirms = [{ alarm_id: 'p1-wake', event_at: '2026-10-10T00:00:00.000Z' }];
+    mockCore.list.mockResolvedValue([]);
+    await reconcile({ nowMs: NOW });
+    expect(mockCore.scheduleAll.mock.calls.at(-1)?.[0].map((p) => p.alarmId)).toContain('p1-wake');
   });
 });
 

@@ -22,9 +22,11 @@ export type SyncRow = PackageSource & {
   routine_title: string | null; // 루틴 알람이면
   departed_at?: string | null; // 약속 알람이면 내 참여 조건의 출발 기록 시각 (dropRecorded가 봄)
   arrived_at?: string | null; // 〃 도착 기록 시각
+  wake_confirmed?: boolean; // 기상(WAKE) 알람이면 이 알람에 기상 확인(WAKE_CONFIRMED) 기록이 있음 — [먼저 깼어요] · 자동 확정 (dropRecorded가 봄)
 };
 
-// 출발 · 도착 기록이 있으면 폰에 걸지 않을 알람 (L2 요청, 원탭 줄이기 #240) — 기상(WAKE)은 그대로
+// 출발 · 도착 기록이 있으면 폰에 걸지 않을 알람 (L2 요청, 원탭 줄이기 #240)
+//   · 기상(WAKE)은 출발 · 도착 기록으로는 안 뺌. 대신 기상 확인 기록(wake_confirmed, [먼저 깼어요] 뒤)이 있으면 뺌 — 안 빼면 폰에서 지워도 앱이 앞에 올 때 다시 걸림
 //   · 출발 기록(departed_at) → 준비 · 출발 알람 (이미 나섰으니 "곧 출발하세요"가 필요 없음)
 //   · 도착 기록(arrived_at) → 준비 · 출발 · 도착 목표 알람
 //   서버 행은 지우지 않고 폰 예약 대상에서만 뺌. 이미 폰에 걸린 것은 "서버에 없음"으로 지워짐 (planReconcile)
@@ -35,7 +37,7 @@ export function dropRecorded(rows: readonly SyncRow[]): { kept: SyncRow[]; dropp
   const kept: SyncRow[] = [];
   const dropped: SyncRow[] = [];
   for (const row of rows) {
-    const done = (row.arrived_at != null && DONE_BY_ARRIVAL.has(row.alarm_type)) || (row.departed_at != null && DONE_BY_DEPARTURE.has(row.alarm_type));
+    const done = (row.alarm_type === 'WAKE' && row.wake_confirmed === true) || (row.arrived_at != null && DONE_BY_ARRIVAL.has(row.alarm_type)) || (row.departed_at != null && DONE_BY_DEPARTURE.has(row.alarm_type));
     (done ? dropped : kept).push(row);
   }
   return { kept, dropped };

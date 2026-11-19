@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, jest } from '@jest/globals';
 
-import { onDetectionNotice } from '../notice';
+import { onDetectionNotice, withdrawDetectionNotice } from '../notice';
 
 // 감지 안내 알림 — expo-notifications는 가짜로 두고 부른 내용만 확인
 let mockOS = 'android';
@@ -123,5 +123,27 @@ describe('감지 안내 알림 (onDetectionNotice)', () => {
     mockPermissions.mockRejectedValue(new Error('native'));
     expect(() => onDetectionNotice({ type: 'ARRIVE', participantId: 'p1', at: at('09:00') })).not.toThrow();
     await settle();
+  });
+});
+
+describe('감지 안내 알림 거두기 (withdrawDetectionNotice, [아니에요] 뒤)', () => {
+  it('출발 · 도착 모두 그 알림 번호로 dismiss + cancel', async () => {
+    withdrawDetectionNotice({ kind: 'DEPART', participantId: 'p1', at: at('08:30') });
+    withdrawDetectionNotice({ kind: 'ARRIVE', participantId: 'p1', at: at('09:52') });
+    await settle();
+    expect(mockDismiss.mock.calls.map(([id]) => id)).toEqual([`detect-DEPART-p1-${at('08:30')}`, `detect-ARRIVE-p1-${at('09:52')}`]);
+    expect(mockCancel.mock.calls.map(([id]) => id)).toEqual([`detect-DEPART-p1-${at('08:30')}`, `detect-ARRIVE-p1-${at('09:52')}`]);
+  });
+
+  it('안드로이드가 아니면 아무것도 안 하고, 실패해도 던지지 않음 (둘 중 하나가 실패해도 다른 하나는 함)', async () => {
+    mockOS = 'ios';
+    withdrawDetectionNotice({ kind: 'DEPART', participantId: 'p1', at: at('08:30') });
+    await settle();
+    expect(mockDismiss).not.toHaveBeenCalled();
+    mockOS = 'android';
+    mockDismiss.mockRejectedValue(new Error('이미 없음'));
+    expect(() => withdrawDetectionNotice({ kind: 'DEPART', participantId: 'p1', at: at('08:30') })).not.toThrow();
+    await settle();
+    expect(mockCancel).toHaveBeenCalledTimes(1);
   });
 });
