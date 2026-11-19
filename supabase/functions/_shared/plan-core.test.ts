@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
 import { prepareSourceLabel, prepareStatsOf } from './calc/index.ts';
-import { clampPrepareToBound, computePlan, firstPrepareMinutes, inferBeforePrepare, resolveBasics, resolveOverrides, toSuggestion, type AlarmRow, type AppointmentRow, type ParticipantRow, type PlanInputs, type ProfileRow } from './plan-core.ts';
+import { clampPrepareToBound, computePlan, firstPrepareMinutes, inferBeforePrepare, purePrepPersistenceOf, resolveBasics, resolveOverrides, toSuggestion, type AlarmRow, type AppointmentRow, type ParticipantRow, type PlanInputs, type ProfileRow } from './plan-core.ts';
 import type { ResolvedTravel } from './route.ts';
 
 const kst = (day: number, minutes: number) => new Date(Date.UTC(2025, 4, day) + (minutes - 9 * 60) * 60_000);
@@ -737,4 +737,38 @@ test('pure candidate is not clamped to legacy repeated wake-to-departure value',
      stats:{sampleCount:0,p80:null},
   }),api(50));
   assert.equal(plan.prepare.minutes,55);
+});
+
+test('persist pure preparation in its own fields, without relabeling the legacy whole window',()=>{
+  const candidate = { source:'PROFILE' as const, minutes:35 };
+  const plan = computePlan(base({purePrepCandidate:candidate,stats:{sampleCount:0,p80:null}}),api(50));
+  assert.equal(plan.prepareTarget,'PREPARE_START_TO_DEPART');
+  assert.equal(plan.prepare.minutes,55);
+  assert.deepEqual(purePrepPersistenceOf(plan,candidate),{
+    outing_prep_minutes:35,outing_prep_source:'PROFILE',outing_prep_model:null
+  });
+  assert.equal(toSuggestion(plan).prepare.pure_minutes,35);
+});
+
+test('non-pure and explicit manual plans clear any old pure metadata',()=>{
+  const candidate={source:'PROFILE' as const,minutes:35};
+  const old=computePlan(base(),api(50));
+  assert.deepEqual(purePrepPersistenceOf(old,candidate),{
+    outing_prep_minutes:null,outing_prep_source:null,outing_prep_model:null
+  });
+  const manual=computePlan(base({
+    purePrepCandidate:candidate,
+    draft:{at:kst(22,600),destination:{name:'세종대학교'},prepareMinutes:70},
+  }),api(50));
+  assert.equal(manual.prepareTarget,'WAKE_TO_DEPART');
+  assert.equal(purePrepPersistenceOf(manual,candidate).outing_prep_source,null);
+});
+
+test('model provenance is recorded only for actually used real-start model',()=>{
+  const c={source:'MODEL' as const,minutes:45,model:'prep_start_ratio_v2'};
+  const plan=computePlan(base({purePrepCandidate:c,stats:{sampleCount:0,p80:null}}),api(50));
+  assert.deepEqual(purePrepPersistenceOf(plan,c),{
+    outing_prep_minutes:45,outing_prep_source:'MODEL',outing_prep_model:'prep_start_ratio_v2'
+  });
+  assert.equal(purePrepPersistenceOf(plan,undefined).outing_prep_model,null);
 });
