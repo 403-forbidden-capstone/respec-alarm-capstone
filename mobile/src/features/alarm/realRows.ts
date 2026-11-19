@@ -32,7 +32,7 @@ type ParticipantQueryRow = {
   est_travel_minutes: number | null;
   travel_source: AppointmentRows['participant']['travel_source'];
   prepare_minutes: number;
-  prepare_value_source: 'LEGACY' | 'AUTO' | 'MANUAL';
+  prepare_value_source?: 'LEGACY' | 'AUTO' | 'MANUAL';
   buffer_minutes: number;
   appointments: AppointmentRows['appointment'] & { creator_id?: string | null; group_id?: string | null; groups: { group_name: string } | null };
   alarms: AlarmRow[];
