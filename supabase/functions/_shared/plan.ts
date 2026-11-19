@@ -1,6 +1,6 @@
 // 알람 계획 만들기의 DB 쪽 — 읽기는 부른 사람의 RLS 클라이언트로 (남의 일정 · 기록은 애초에 안 보임)
 // 읽어 온 값을 plan-core.ts의 순수 계산에 넘김. alarm-suggest(미리 보기)와 alarm-commit(저장)이 같이 씀
-import { hasEarlierWake, PREPARE_RECORD_MAX, PREPARE_RECORD_MIN, PREPARE_WINDOW, prepareStatsOf, choosePurePrepBasis, type PurePrepCandidate } from './calc/index.ts';
+import { hasEarlierWake, PREPARE_RECORD_MAX, PREPARE_RECORD_MIN, PREPARE_WINDOW, prepareStatsOf, choosePurePrepBasis, confirmedPurePrepHistory, type PurePrepCandidate } from './calc/index.ts';
 import type { TravelSample } from './calc/travel.ts';
 import { dbFail, must } from './db.ts';
 import { HttpError } from './errors.ts';
@@ -307,13 +307,7 @@ export async function loadPurePrepCandidate(
       .order('departed_at', { ascending: false })
       .limit(100);
     if (error || !data) return choosePurePrepBasis({ profileMinutes }) ?? undefined;
-    const history = data.flatMap((record) => {
-      const start = Date.parse(record.prepare_started_at ?? '');
-      const end = Date.parse(record.departed_at ?? '');
-      const mins = (end - start) / 60000;
-      return Number.isFinite(mins) && start < end && end <= cutoff.getTime() &&
-        mins >= 5 && mins <= 240 ? [mins] : [];
-    });
+    const history = confirmedPurePrepHistory(data, cutoff);
     return choosePurePrepBasis({ profileMinutes, historicalMinutes: history }) ?? undefined;
   } catch {
     return choosePurePrepBasis({ profileMinutes }) ?? undefined;
