@@ -443,3 +443,28 @@ describe('automatic prepare snapshot contract (H05)', () => {
     expect(body.participant.prepare_minutes).toBe(60);
   });
 });
+
+describe('H03 stored preparation provenance', () => {
+  it('legacy appointments preserve unknown original source without upgrading to AUTO', () => {
+    const body = existingBody(saved({ prepareValueSource: 'LEGACY' }), same(saved())) as { participant: Record<string,unknown> };
+    expect(body.participant).not.toHaveProperty('prepare_value_source');
+    expect(body.participant.prepare_minutes).toBe(60);
+  });
+  it('known AUTO source sends a comparison snapshot, not a manual override', () => {
+    const detail = saved({ prepareValueSource: 'AUTO' });
+    const body = existingBody(detail, same(detail)) as { participant: Record<string,unknown> };
+    expect(body.participant.prepare_value_source).toBe('AUTO');
+    expect(body.participant.prepare_minutes).toBe(60);
+  });
+  it('explicit H03 prepare edit is MANUAL, even when previously AUTO', () => {
+    const detail = saved({ prepareValueSource: 'AUTO' });
+    const body = existingBody(detail, { ...same(detail), prepareMinutes: 45 }) as { participant: Record<string,unknown> };
+    expect(body.participant.prepare_value_source).toBe('MANUAL');
+    expect(body.participant.prepare_minutes).toBe(45);
+  });
+  it('stored MANUAL source persists across reopen/save until changed explicitly', () => {
+    const detail = saved({ prepareValueSource: 'MANUAL' });
+    const body = existingBody(detail, same(detail)) as { participant: Record<string,unknown> };
+    expect(body.participant.prepare_value_source).toBe('MANUAL');
+  });
+});
