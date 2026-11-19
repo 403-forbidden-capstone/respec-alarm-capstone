@@ -38,6 +38,14 @@ async function withdraw(link: DetectionLink): Promise<void> {
   await Promise.allSettled([notifications.dismissNotificationAsync(id), notifications.cancelScheduledNotificationAsync(id)]);
 }
 
+// [아니에요]로 위치 감지를 지운 뒤 — 알림창에 남은 그 감지 안내(출발 · 도착)를 거둠. 이미 사라졌거나 실패해도 던지지 않음 (정정이 이 때문에 막히면 안 됨)
+export function withdrawDetectionNotice(link: DetectionLink): void {
+  if (Platform.OS !== 'android') return;
+  withdraw(link).catch((e) => {
+    if (__DEV__) console.warn('[location] 감지 안내 알림 거두기 실패', errorText(e));
+  });
+}
+
 export function onDetectionNotice(action: GeoAction): void {
   if (Platform.OS !== 'android') return;
   let task: Promise<void>;

@@ -5,6 +5,7 @@ import { syncNow } from '@/lib/alarmSync';
 
 import { rejectDetection, undoReject, type DetectionKind, type RejectScreen, type RejectSnapshot } from './api';
 import { forgetGeoDetection, restoreGeoDetection } from './correct';
+import { withdrawDetectionNotice } from './notice';
 import { syncLocation } from './register';
 
 export const UNDO_SECONDS = 5;
@@ -27,6 +28,8 @@ export async function eraseDetection(target: { participantId: string; kind: Dete
   const at = snapshot ? snapshot.at.getTime() : target.at;
   const forgot = await forgetGeoDetection({ participantId, kind, at }, { voidAlways: snapshot != null });
   if (!snapshot && !forgot) return null;
+  // 알림창에 남은 "출발 · 도착 감지" 안내도 거둠 — 알림 번호의 시각은 폰이 잡은 시각(target.at)이고 서버에 쓴 값(snapshot.at)과 다를 수 있어 둘 다
+  for (const noticeAt of new Set([target.at, at])) withdrawDetectionNotice({ kind, participantId, at: noticeAt });
   resyncLocation();
   return { snapshot, participantId, kind, at };
 }
