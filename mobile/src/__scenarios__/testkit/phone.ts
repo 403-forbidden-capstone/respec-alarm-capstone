@@ -292,7 +292,8 @@ export class Phone {
     this.geofenceRegions = null;
   }
 
-  // 폰 재부팅 — 예약된 알람은 되살아남(지난 것은 지움), 알림창 · 해제 후 판정 예약 · 지오펜스 등록은 사라짐 (AC:342-355, DU:113-124, LR:118)
+  // 폰 재부팅 — 예약된 알람은 되살아남(지난 것은 지움), 알림창 · 지오펜스 등록은 사라짐 (AC:342-355, LR:118)
+  //   해제 + 10분 판정 예약은 폰이 저장해 두었다가 AlarmBootReceiver가 복원함(G7): 아직 안 된 것은 다시 걸고, 이미 지난 시각이면 바로 한 번 판정, 12시간이 지난 것은 버림
   reboot() {
     for (const [id, alarm] of [...this.store]) {
       if (alarm.nextRingAt <= this.now() && !alarm.ringing) this.store.delete(id);
@@ -301,9 +302,10 @@ export class Phone {
     this.ringing = null;
     this.tray.clear();
     this.scheduledNotifications.clear();
-    this.judges = [];
+    this.judges = this.judges.filter((j) => this.now() - j.dismissedAt < 12 * 60 * MIN);
     this.geofenceRegions = null;
     this.nativeLog.push('reboot');
+    this.runJudges(); // 이미 지난 판정은 바로 한 번 (WakeJudgeSchedule.restore)
   }
 
   // 서버 푸시가 도착 — 알림창에는 늘 뜸. 앱 JS가 앞에 있으면(listener가 붙어 있으면) 받음 처리가 돎
@@ -421,8 +423,14 @@ export class Phone {
       const done = new Set(ids);
       this.events = this.events.filter((e) => !done.has(e.clientEventId));
     },
+    scheduleWakeJudge: async (alarmId: string, dismissedAtMillis: number) => {
+      this.nativeLog.push(`scheduleWakeJudge:${alarmId}`);
+      this.judges = this.judges.filter((j) => j.alarmId !== alarmId);
+      this.judges.push({ alarmId, dismissedAt: dismissedAtMillis, at: dismissedAtMillis + JUDGE_AFTER_MS });
+    },
     dismissWakePrompt: async (alarmId: string) => {
       this.nativeLog.push(`dismissWakePrompt:${alarmId}`);
+      this.judges = this.judges.filter((j) => j.alarmId !== alarmId); // 확정되면 저장해 둔 판정 예약도 지움 (WakePrompt.dismiss)
       this.tray.delete(`wakeprompt:${alarmId}`);
       this.confirmedMarks.set(alarmId, this.now()); // 이미 확정됐다고 표시 — 더 안 띄움 (WP:66-70)
     },
@@ -453,6 +461,9 @@ export class Phone {
       return id;
     },
     dismissNotificationAsync: async (id: string) => void this.tray.delete(`expo:${id}`),
+    // 알림창에 떠 있는 expo 알림 (서버 푸시 · 감지 안내) — 깨우기 알림을 거두려고 읽음 (realWake clearWakePingNotices)
+    getPresentedNotificationsAsync: async () =>
+      [...this.tray.values()].filter((t) => t.origin === 'expo').map((t) => ({ request: { identifier: t.id.slice('expo:'.length), content: { data: t.data ?? {} } }, date: this.now() })),
     cancelScheduledNotificationAsync: async (id: string) => void this.scheduledNotifications.delete(id),
     setNotificationChannelAsync: async () => null,
     setNotificationHandler: () => {},

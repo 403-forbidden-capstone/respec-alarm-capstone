@@ -58,6 +58,7 @@ import {
   type JoinDefaults,
   type JoinResult,
   type EarlyWake,
+  type AutoWake,
   EARLY_WAKE_MINUTES,
 } from './types';
 import { manualTimes, orderError } from './adjust';
@@ -1013,6 +1014,18 @@ export async function getEarlyWake(): Promise<EarlyWake | null> {
   if (!wake || db.wakeConfirmations[wake.id] || db.me.wakeAt || db.wake.phase !== 'idle') return null;
   const left = wake.at.getTime() - now().getTime();
   return left > 0 && left <= EARLY_WAKE_MINUTES * 60_000 ? { alarmId: wake.id, at: wake.at } : null;
+}
+
+// 자동 판정으로 확정한 기상 한 건 (홈 카드 · 알림) — 확정 뒤 60분 안, 정정 전인 것. 가짜 모드는 자동 확정이 없어 null
+export async function getAutoWake(): Promise<AutoWake | null> {
+  if (!isMock()) return real.getAutoWake();
+  return null;
+}
+
+// [아니에요] — 자동으로 확정한 기상을 취소하고 H08 확인 단계(확인 알림)로 되돌림. 정정 대상이 아니면 false
+export async function correctAutoWake(alarmId: string): Promise<boolean> {
+  if (!isMock()) return real.correctAutoWake(alarmId);
+  return false;
 }
 
 export async function confirmEarlyWake(alarmId: string): Promise<void> {
