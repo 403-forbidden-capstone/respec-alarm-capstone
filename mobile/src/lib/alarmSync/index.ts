@@ -193,13 +193,27 @@ export type CommitResult = {
   appointment_at?: string | null;
 };
 
+// 기상 확인이 이미 있는 기상 알람은 폰에 안 검 — 확정 뒤 같은 알람을 다시 저장해도 되살아나지 않게 (reconcile의 dropRecorded와 같은 규칙). 기상 꾸러미가 있을 때만 읽고, 못 읽으면 그대로 검
+async function withoutConfirmedWakes(packages: readonly RingPackage[]): Promise<readonly RingPackage[]> {
+  const wakes = packages.filter((p) => p.type === 'WAKE');
+  if (!wakes.length) return packages;
+  try {
+    const userId = await currentUserId();
+    if (!userId) return packages;
+    const confirmed = await fetchWakeConfirmed(userId, wakes.map((p) => ({ alarm_id: p.alarmId, scheduled_at: new Date(p.atMillis).toISOString() })));
+    return confirmed.size ? packages.filter((p) => !(p.type === 'WAKE' && confirmed.has(p.alarmId))) : packages;
+  } catch {
+    return packages; // 세션을 못 읽어도 저장 결과는 그대로 폰에 반영
+  }
+}
+
 // 저장 결과를 폰에 반영 — 약속 알람 만들기 · 시각 바꾸기(alarm-commit)가 성공한 뒤에 부름. 던지지 않고 결과를 돌려줌 (부분 실패도 있음)
 //   deferred(울리거나 미룬 중)는 지금 못 바꾸므로 다음 맞추기에서 서버 값으로 다시 걸림
 export function applyCommit(result: CommitResult): Promise<SyncSummary> {
   return serial(async () => {
     const summary = emptySummary();
     await cancelAlarms(result.canceled_alarm_ids ?? [], summary);
-    await scheduleAlarms(result.ring_packages ?? [], summary);
+    await scheduleAlarms(await withoutConfirmedWakes(result.ring_packages ?? []), summary);
     const nowMs = Date.now();
     // L6 안건후보: 저장 직후 훅의 upcoming 기본안 = 호출하는 쪽이 참여 행 · 약속 시각을 넘긴 저장(약속 알람)이면 그 한 건, 아니면 빈 목록 (alarm-commit 응답에 약속 시각이 없음)
     const appointmentMs = result.appointment_at ? dbTimeMs(result.appointment_at) : NaN;
@@ -256,18 +270,25 @@ async function fetchServerRows(userId: string, fromMs: number): Promise<{ rows: 
 
 // 기상 알람 중 기상 확인(WAKE_CONFIRMED) 기록이 있는 것의 id — [먼저 깼어요] 뒤 폰에서 지운 알람이 앱이 앞에 올 때 다시 걸리지 않게 (dropRecorded)
 //   기상 알람 행은 약속 참여 하나에 하나(alarms_participant_type_key)라 alarm_id로 그 회차가 정해짐. 다만 시각이 뒤로 옮겨진 행이 옛 확정으로 빠지지 않게 알람 시각 24시간 안의 확정만 셈
-//   읽기에 실패하면 던짐 (기록 없이 걸면 울려야 할 때 안 울리는 것보다 낫지만, 지운 알람이 되살아나므로 다음 맞추기에서 다시 — reconcile 호출자가 처리)
+//   읽기에 실패하면 던지지 않고 "확정 없음"으로 봄 — 알람은 그대로 둠 (안 울리는 것보다 한 번 더 울리는 쪽이 안전). reconcile · applyCommit 둘 다 같은 방침
 const WAKE_CONFIRM_WINDOW_MS = 24 * 60 * 60 * 1000;
 
 async function fetchWakeConfirmed(userId: string, wakeRows: readonly { alarm_id: string; scheduled_at: string }[]): Promise<Set<string>> {
   if (!wakeRows.length) return new Set();
-  const { data, error } = await supabase
-    .from('alarm_events')
-    .select('alarm_id, event_at')
-    .eq('user_id', userId)
-    .eq('event_type', 'WAKE_CONFIRMED')
-    .in('alarm_id', wakeRows.map((row) => row.alarm_id));
-  if (error) throw error;
+  let data: { alarm_id: string; event_at: string }[] | null;
+  try {
+    const result = await supabase
+      .from('alarm_events')
+      .select('alarm_id, event_at')
+      .eq('user_id', userId)
+      .eq('event_type', 'WAKE_CONFIRMED')
+      .in('alarm_id', wakeRows.map((row) => row.alarm_id));
+    if (result.error) throw result.error;
+    data = result.data;
+  } catch (e) {
+    if (__DEV__) console.warn('[alarmSync] 기상 확인 기록 읽기 실패 — 확정 없음으로 봄', e);
+    return new Set();
+  }
   const scheduled = new Map(wakeRows.map((row) => [row.alarm_id, dbTimeMs(row.scheduled_at)]));
   const confirmed = new Set<string>();
   for (const event of data ?? []) {
