@@ -131,6 +131,7 @@ export async function persistAppointment(
       est_travel_minutes: plan.travelMinutes,
       travel_source: travel.source,
       prepare_minutes: plan.prepare.minutes,
+      ...(draft.prepareValueSource ? { prepare_value_source: draft.prepareValueSource } : {}),
       buffer_minutes: plan.basics.bufferMinutes,
     };
     let participantId: string;
