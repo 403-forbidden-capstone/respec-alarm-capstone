@@ -48,6 +48,6 @@ internal object GroupStatusVoice {
   }
 
   /** 그 단계 Gemini 음성을 앱 전용 캐시 파일로 (단계마다 따로, 울림마다 덮어씀 — 한 번에 한 울림만 있음). 못 쓰면 null → Android TTS */
-  fun writeWav(context: Context, level: Int, bytes: ByteArray): File? =
-    runCatching { File(context.cacheDir, "group_status_L$level.wav").apply { writeBytes(bytes) } }.getOrNull()
+  fun writeWav(context: Context, generation: Int, level: Int, bytes: ByteArray): File? =
+    runCatching { File(context.cacheDir, "group_status_G${generation}_L$level.wav").apply { writeBytes(bytes) } }.getOrNull()
 }
