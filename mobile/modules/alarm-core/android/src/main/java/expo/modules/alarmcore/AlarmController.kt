@@ -131,7 +131,7 @@ object AlarmController {
     }
   }
 
-  /** 알람 시각이 됨 (AlarmReceiver) — 기록을 남기고 WAKE는 소리 서비스, 나머지는 일정 알림(알림음 · 진동 한 번) */
+  /** 알람 시각이 됨 (AlarmReceiver) — 기록을 남기고 알람음이 있는 알람(기상 · 준비 · 출발)은 소리 서비스, 나머지(도착 · 루틴)는 일정 알림(알림음 · 진동 한 번) */
   fun fire(context: Context, id: String) {
     val current = AlarmStorage.get(context, id) ?: return
     val plan = current.plan
@@ -150,8 +150,8 @@ object AlarmController {
 
     if (!plan.sound) {
       // 일정 알림은 한 번 알리면 끝 (미루기 · 다시 울림 없음). 원탭 응답은 알림이 인텐트에 실어 가짐
-      // 준비 시작 · 출발 알림은 고정 문장을 Android TTS로 한 번 읽음 (BriefingRules.simple) — 서비스를 못 띄우거나 TTS가 실패해도 알림 · 기록은 그대로
-      val speak = BriefingRules.speaksOnNotice(current.type)
+      // 예전 APK가 걸어 둔 준비 시작 · 출발 알림은 고정 문장을 Android TTS로 한 번 읽음 (BriefingRules.simple) — 서비스를 못 띄우거나 TTS가 실패해도 알림 · 기록은 그대로
+      val speak = BriefingRules.speaksOnNotice(current.type, plansSound = plan.sound)
       AlarmStorage.remove(context, id, keepVoice = speak)
       AlarmNotifications.showNotice(context, next)
       if (speak) runCatching { BriefingSpeechService.start(context, next) }.onFailure { VoiceBriefing.clear(context, id) }
@@ -230,7 +230,10 @@ object AlarmController {
   /** 지금 이 알람이 울리는 중인지 (저장된 ringing 값) — 미루기 실패가 "이미 미룸"인지 진짜 실패인지 가릴 때 씀 */
   fun isRinging(context: Context, id: String): Boolean = AlarmStorage.get(context, id)?.ringing == true
 
-  /** 해제 — 소리를 끄고, 걸어 둔 다시 울림을 지우고, 기록을 남김. WAKE는 openApp이면 기상 확인 화면으로 앱을 엶 */
+  /**
+   * 해제 — 소리를 끄고, 걸어 둔 다시 울림을 지우고, 기록을 남김. WAKE는 openApp이면 기상 확인 화면으로 앱을 엶
+   * 준비 · 출발 알람 해제(DISMISSED)는 그대로 체크 — 준비 시작 · 출발 (DeviceUpload가 서버로 바로 올리고 서버가 시각을 채움). 해제 뒤 기상 판정 예약 · 앱 열기는 기상만
+   */
   fun dismiss(context: Context, id: String, openApp: Boolean) {
     val alarm = AlarmStorage.get(context, id)
     AlarmScheduler.cancelPending(context, id)
@@ -326,6 +329,8 @@ object AlarmController {
           "vibration" to alarm.vibration,
           // 칸이 없던 예약은 null — 앱 맞추기가 서버 값과 달라 한 번 다시 걺 (칸이 아예 없으면 예전 APK)
           "voiceTone" to alarm.voiceTone,
+          // 알람음이 있는 계획인지 — 예전 APK가 알림으로 걸어 둔 준비 · 출발을 앱 맞추기가 알아보고 다시 걺 (칸이 없으면 예전 APK)
+          "sound" to alarm.plan.sound,
           "title" to alarm.title,
           "atMillis" to alarm.atMillis.toDouble(),
           "snoozeCount" to alarm.snoozeCount,

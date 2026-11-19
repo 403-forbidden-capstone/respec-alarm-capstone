@@ -139,11 +139,13 @@ class BriefingRulesTest {
   }
 
   @Test
-  fun prepareAndDepartureNoticeStartsSpeechServiceOthersDoNot() {
-    // AlarmController.fire: 알람음 없는 알림 뒤 음성 안내 서비스 — 준비 시작 · 출발만 (예전엔 출발만이라 준비 시작은 말이 없었음)
+  fun prepareAndDepartureNoticeStartsSpeechServiceOnlyWithoutAlarmSound() {
+    // AlarmController.fire: 알람음 없는 알림 뒤 음성 안내 서비스 — 예전 APK가 걸어 둔 준비 시작 · 출발 알림만
     assertTrue(BriefingRules.speaksOnNotice("PREPARE"))
     assertTrue(BriefingRules.speaksOnNotice("DEPARTURE"))
     for (type in listOf("WAKE", "ARRIVE", "ROUTINE")) assertFalse(BriefingRules.speaksOnNotice(type))
+    // 11/19: 준비 · 출발이 알람음이 있는 알람(plan.sound)이면 알람 서비스가 같은 문장을 읽으므로 음성 서비스를 또 띄우지 않음 (두 번 겹쳐 읽지 않게)
+    for (type in listOf("PREPARE", "DEPARTURE")) assertFalse(BriefingRules.speaksOnNotice(type, plansSound = true))
   }
 
   // --- 백그라운드 브리핑 갱신 (#515) ---

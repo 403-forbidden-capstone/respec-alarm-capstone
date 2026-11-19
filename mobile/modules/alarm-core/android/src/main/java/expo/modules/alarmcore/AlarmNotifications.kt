@@ -12,8 +12,9 @@ import android.os.Build
 import android.provider.Settings
 import androidx.core.app.NotificationCompat
 
-// 일정 알림 — WAKE를 뺀 준비 시작 · 출발 · 도착 · 루틴. 보통 푸시처럼 알림음 · 진동 한 번 + 배너 (alarm-core.md 소리 줄, 10/18 지형님)
-// 알림 한 줄에 원탭 버튼 하나("준비 시작" · "출발했어요" · "도착했어요" · "했어요"). 누르면 기록만 남기고 앱은 열지 않음
+// 일정 알림 — 알람(기상 · 준비 · 출발, 11/19부터)이 아닌 도착 확인 · 루틴. 보통 푸시처럼 알림음 · 진동 한 번 + 배너 (alarm-core.md 소리 줄, 10/18 지형님)
+// 알림 한 줄에 원탭 버튼 하나("도착했어요" · "했어요"). 누르면 기록만 남기고 앱은 열지 않음
+// 예전 APK가 걸어 둔 준비 시작 · 출발 알림(원탭 "준비 시작" · "출발했어요")이 남아 있으면 이 경로로 그대로 울림
 object AlarmNotifications {
   // 채널은 한 번 만들면 소리 · 진동 설정을 못 바꾸므로 설정이 바뀌면 새 id로 만들고 옛것은 지움
   private const val NOTICE_CHANNEL_ID = "alarm_notice_v1"
@@ -31,7 +32,7 @@ object AlarmNotifications {
       "일정 알림",
       NotificationManager.IMPORTANCE_HIGH,
     ).apply {
-      description = "준비 시작 · 출발 · 도착 · 루틴을 알려 주는 알림 (알림음 · 진동 한 번)"
+      description = "도착 확인 · 루틴을 알려 주는 알림 (알림음 · 진동 한 번)"
       // 폰의 기본 알림음 + 기본 진동 (보통 푸시와 같음)
       setSound(
         Settings.System.DEFAULT_NOTIFICATION_URI,

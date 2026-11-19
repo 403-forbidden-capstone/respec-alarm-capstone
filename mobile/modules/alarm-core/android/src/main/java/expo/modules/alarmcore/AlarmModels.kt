@@ -14,6 +14,14 @@ internal fun JSONObject.optDoubleOrNull(name: String): Double? =
   if (has(name) && !isNull(name)) getDouble(name) else null
 
 /**
+ * 알람음 · 전체 화면 · 미루기 · 다시 울림이 있는 "진짜 알람" 종류 — 기상 · 준비 · 출발 (11/19). 도착 확인 · 루틴은 보통 알림 + 원탭
+ * 울릴지는 계획(RingPlan.sound)이 정하고, 이 목록은 "이 종류는 알람 화면 · 해제 기록이 알람 규칙을 따름"을 가를 때 씀. TS plan.ts RING_ALARM_TYPES와 같은 목록
+ */
+val RING_ALARM_TYPES: Set<String> = setOf("WAKE", "PREPARE", "DEPARTURE")
+
+fun isRingAlarmType(type: String): Boolean = type in RING_ALARM_TYPES
+
+/**
  * 공통(TS)이 계산해 넘긴 울림 계획. 네이티브는 판단하지 않고 이 값대로만 실행함
  * 칸은 src/plan.ts의 RingPlan과 같음
  * snoozeMinutesOptions · snoozeLimit은 미루기 시간 고르기와 횟수 한도 (D3 기본안 A) — 보통 알림이면 빈 목록 · 0
