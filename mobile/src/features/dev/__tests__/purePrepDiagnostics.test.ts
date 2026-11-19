@@ -7,7 +7,7 @@ jest.mock('@/lib/supabase', () => ({
 }));
 
 import { getMyProfile } from '@/features/profile/api';
-import { inspectPurePrepDb } from '../purePrepDiagnostics';
+import { inspectMyUpcomingAlarms, inspectPurePrepDb } from '../purePrepDiagnostics';
 
 beforeEach(resetFake);
 
@@ -66,5 +66,21 @@ describe('read-only real-data schema diagnostics', () => {
     onCall(() => ({ error: { code: '42703', message: 'column profiles.nickname does not exist' } }));
     await expect(getMyProfile('u1')).rejects.toMatchObject({ code: '42703' });
     expect(calls).toHaveLength(1);
+  });
+});
+
+describe('existing alarms audit is an authenticated read only', () => {
+  it('reads only the current user next five alarms, never schedules or updates', async () => {
+    onCall(() => ({ data: [{
+      alarm_type: 'WAKE', scheduled_at: '2026-11-22T00:25:00Z', is_enabled: true,
+    }] }));
+    const res = await inspectMyUpcomingAlarms('u1');
+    expect(res).toEqual([{ kind: 'WAKE', at: '2026-11-22T00:25:00Z', enabled: true }]);
+    expect(calls).toHaveLength(1);
+    expect(calls[0].table).toBe('alarms');
+    expect(calls[0].op).toBe('select');
+    expect(calls[0].filters.some(f => f.method === 'eq' && f.args[0] === 'user_id' && f.args[1] === 'u1')).toBe(true);
+    expect(calls[0].filters.some(f => f.method === 'limit' && f.args[0] === 5)).toBe(true);
+    expect(calls[0].columns).not.toContain('user_id');
   });
 });
