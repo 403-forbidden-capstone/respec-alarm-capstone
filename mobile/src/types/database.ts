@@ -999,12 +999,12 @@ isOneToOne: false
                            },
 "get_group_wake":
 { Args: { "p_date"?: string,"p_group_id": string }; Returns: {
-              "arrived_at": string,"departed_at": string,"is_me": boolean,"nickname": string,"profile_image_url": string,"trip_appointment_at": string,"trip_visible": boolean,"user_id": string,"wake_alarm_at": string,"wake_confirmed_at": string,"wake_status": string
+              "arrived_at": string,"departed_at": string,"is_me": boolean,"nickname": string,"prepare_alarm_at": string,"prepare_started_at": string,"profile_image_url": string,"trip_appointment_at": string,"trip_visible": boolean,"user_id": string,"wake_alarm_at": string,"wake_confirmed_at": string,"wake_status": string
             }[]
                            },
 "get_group_wake_status":
 { Args: { "p_date"?: string,"p_group_id": string }; Returns: {
-              "arrived_at": string,"departed_at": string,"dismissed_at": string,"is_me": boolean,"missed_at": string,"nickname": string,"profile_image_url": string,"rang_at": string,"snooze_count": number,"trip_appointment_at": string,"trip_visible": boolean,"user_id": string,"wake_alarm_at": string,"wake_confirmed_at": string,"wake_status": string
+              "arrived_at": string,"departed_at": string,"dismissed_at": string,"is_me": boolean,"missed_at": string,"nickname": string,"prepare_alarm_at": string,"prepare_started_at": string,"profile_image_url": string,"rang_at": string,"snooze_count": number,"trip_appointment_at": string,"trip_visible": boolean,"user_id": string,"wake_alarm_at": string,"wake_confirmed_at": string,"wake_status": string
             }[]
                            },
 "get_public_profiles":
@@ -1123,6 +1123,11 @@ isOneToOne: false
                            },
 "roll_insert_occurrence":
 { Args: { "p_alarms": Json,"p_appointment": Json,"p_items": Json,"p_participant": Json }; Returns: string
+                           },
+"routine_suggestion_inputs":
+{ Args: { "p_days"?: number,"p_now"?: string }; Returns: {
+              "items_due": number,"items_late": number,"prepare_alarm_at": string,"prepare_started_at": string,"record_date": string,"user_id": string,"wake_alarm_at": string,"wake_confirmed_at": string,"wake_missed": boolean,"weekday": number
+            }[]
                            },
 "save_group_permissions":
 { Args: { "p_can_edit_alarm": boolean,"p_can_view_alarm": boolean,"p_group_id": string }; Returns: Json

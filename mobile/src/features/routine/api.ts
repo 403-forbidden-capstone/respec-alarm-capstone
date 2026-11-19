@@ -4,11 +4,12 @@
 import { now } from '@/lib/clock';
 import { dateParts } from '@/lib/format';
 import { isMock } from '@/lib/mode';
-import { aiDb, ROUTINE_SUGGESTION, suggestedRoutine } from '@/mocks/ai';
+import { aiDb, MOCK_ROUTINE_SUGGESTION, MOCK_WAKE_MINUTE, ROUTINE_SUGGESTION, suggestedRoutine } from '@/mocks/ai';
 import { db } from '@/mocks/data';
 
 import * as real from './real';
-import type { EveningRoutine, Journal, Routine, RoutineProgress, Todo } from './types';
+import { suggestionToRoutine } from './suggestion';
+import type { EveningRoutine, Journal, Routine, RoutineProgress, RoutineSuggestion, Todo } from './types';
 
 // 오늘 루틴 (H01 아침)
 export async function getTodayRoutine(): Promise<RoutineProgress | null> {
@@ -84,8 +85,24 @@ export async function getEveningRoutine(): Promise<EveningRoutine | null> {
 }
 
 // 루틴 편집 (A04) — id가 'new'면 일기의 루틴 제안으로 만든 초안(저장 전), 아니면 저장한 루틴
-export async function getRoutine(id: string, sourceJournal?: string): Promise<Routine | null> {
-  if (!isMock()) return real.getRoutine(id, sourceJournal);
+// 기다리는 루틴 제안 (안건 D114) — 저녁 AI 대화 화면 · 오늘 일기의 카드. 없으면 null
+export async function getPendingRoutineSuggestion(): Promise<RoutineSuggestion | null> {
+  if (!isMock()) return real.getPendingRoutineSuggestion();
+  return aiDb.routineSuggestion === 'PENDING' ? structuredClone(MOCK_ROUTINE_SUGGESTION) : null;
+}
+
+// 루틴 제안에 "괜찮아요" — 넘김. 같은 원인은 기록이 있는 아침이 3번 더 쌓여야 다시 (D24 C, 서버가 셈)
+export async function ignoreRoutineSuggestion(id: string) {
+  if (!isMock()) return real.ignoreRoutineSuggestion(id);
+  if (id === MOCK_ROUTINE_SUGGESTION.id && aiDb.routineSuggestion === 'PENDING') aiDb.routineSuggestion = 'IGNORED';
+}
+
+// sourceSuggestion = 루틴 제안으로 만드는 초안 (/routine/new?suggestion=…), sourceJournal = 일기의 옛 제안 (/routine/new?journal=…)
+export async function getRoutine(id: string, sourceJournal?: string, sourceSuggestion?: string): Promise<Routine | null> {
+  if (!isMock()) return real.getRoutine(id, sourceJournal, sourceSuggestion);
+  if (id === 'new' && sourceSuggestion) {
+    return sourceSuggestion === MOCK_ROUTINE_SUGGESTION.id && aiDb.routineSuggestion === 'PENDING' ? suggestionToRoutine(MOCK_ROUTINE_SUGGESTION, MOCK_WAKE_MINUTE) : null;
+  }
   if (id === 'new') return suggestedRoutine(sourceJournal ?? null);
   const r = aiDb.routines.find((x) => x.id === id);
   return r ? copy(r) : null;
@@ -105,6 +122,7 @@ export async function saveRoutine(routine: Routine): Promise<Routine> {
   aiDb.routines.push(saved);
   const j = saved.sourceJournal ? aiDb.journals[saved.sourceJournal] : undefined;
   if (j) j.suggestion = 'APPLIED';
+  if (routine.id == null && saved.sourceSuggestion === MOCK_ROUTINE_SUGGESTION.id) aiDb.routineSuggestion = 'ACCEPTED';
   db.events.push({ at: now(), label: `루틴 저장 · ${saved.title}`, source: '직접 입력' });
   return copy(saved);
 }

@@ -2,25 +2,29 @@
 //   인증은 호출하는 쪽(기기 키, _shared/briefing-device.ts deviceUser)이 하고, 여기는 키 주인의 user_id만 받음 (서버 키로 쓰므로 모든 쿼리에 user_id 조건)
 //   앱(lib/alarmSync insertEvents · features/alarm/realWake)이 로그인 토큰으로 쓰는 것과 같은 내용을 같은 순서로 씀 — 나중에 앱이 같은 기록을 올려도 한 줄만 남음
 //     · alarm_events: client_event_id 유일 + 충돌 무시 (앱 upsert와 같음). 그 알람이 키 주인 것이 아니면 건너뜀(앱 쪽은 RLS가 막음)
-//     · 받는 조합은 폰이 실제로 보내는 것만 (deviceEventAllowed): 알림 버튼 ACKNOWLEDGED · ARRIVAL_CONFIRMED = BUTTON, 기상 알람 해제 DISMISSED = WAKE 알람 + BUTTON, 기상 확정 WAKE_CONFIRMED = WAKE 알람 + USAGE. wake도 WAKE 알람만. 나머지는 조용히 건너뜀(stored · skipped에 안 셈)
+//     · 받는 조합은 폰이 실제로 보내는 것만 (deviceEventAllowed): 알림 버튼 ACKNOWLEDGED · ARRIVAL_CONFIRMED = BUTTON, 울림 · 미루기 TRIGGERED · SNOOZED = 기상 · 준비 · 출발 · 도착 알람 + BUTTON(앱이 열릴 때 올리는 alarmSync uploadEvents와 같은 값),
+//       해제 DISMISSED = 기상 · 준비 · 출발 알람 + BUTTON, 기상 확정 WAKE_CONFIRMED = WAKE 알람 + USAGE. wake도 WAKE 알람만. 나머지는 조용히 건너뜀(stored · skipped에 안 셈)
 //     · wake: daily_records의 빈 칸(기상 확인 · 해제 시각)만 채움 → 그 뒤에 이벤트 (이벤트가 확정의 표지라 맨 마지막, realWake.ts writeConfirmation과 같은 순서)
-//   원탭(출발 · 도착 · 준비 시작)을 appointment_participants에 옮기는 일은 alarm_events INSERT 트리거가 함 — 여기서는 안 건드림
+//   원탭(출발 · 도착 · 준비 시작) · 준비 알람 해제(=준비 시작)를 appointment_participants에 옮기는 일은 (출발 알람의 해제는 기록만 — 출발은 위치 자동 · 감지가 꺼진 폰의 ACKNOWLEDGED로) alarm_events INSERT 트리거가 함 — 여기서는 안 건드림
 // 순수 TS (Deno API 없음) — node --test로 시험 (device-events.test.ts)
 import { must } from './db.ts';
 import { HttpError } from './errors.ts';
 import { Reader } from './read.ts';
 import type { Db } from './supabase.ts';
 
-// 폰이 이 길로 올릴 수 있는 종류 — 알림 버튼(ACKNOWLEDGED · ARRIVAL_CONFIRMED) · 기상 알람 해제 · 자동 기상 확정. TRIGGERED · SNOOZED는 앱이 열릴 때 올림
-export const DEVICE_EVENT_TYPES = ['ACKNOWLEDGED', 'ARRIVAL_CONFIRMED', 'DISMISSED', 'WAKE_CONFIRMED'] as const;
+// 폰이 이 길로 올릴 수 있는 종류 — 알림 버튼(ACKNOWLEDGED · ARRIVAL_CONFIRMED) · 울림 · 미루기 · 해제(TRIGGERED · SNOOZED · DISMISSED) · 자동 기상 확정. 11/19부터 기상 · 준비 · 출발 모두 진짜 알람이라 앱을 안 열어도 올림
+export const DEVICE_EVENT_TYPES = ['TRIGGERED', 'SNOOZED', 'ACKNOWLEDGED', 'ARRIVAL_CONFIRMED', 'DISMISSED', 'WAKE_CONFIRMED'] as const;
 const INPUT_SOURCES = ['BUTTON', 'USAGE'] as const;
+const RING_ALARM_TYPES = ['WAKE', 'PREPARE', 'DEPARTURE', 'ARRIVE']; // 울리고 미루는 알람 — 도착도 울림 · 미루기는 올림 (해제는 알림 버튼이라 ARRIVAL_CONFIRMED)
+const DISMISS_ALARM_TYPES = ['WAKE', 'PREPARE', 'DEPARTURE']; // 해제 기록을 올리는 알람 (준비 해제 = 준비 시작, 출발 해제는 기록만)
 const MAX_EVENTS = 20;
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
 
 // 이 알람 종류 · 출처 조합을 폰이 보내는지 (키가 새도 이 밖의 기록은 못 만듦 — 예: 남의 알람이 아니어도 MANUAL · VOICE 확정이나 USAGE 해제는 거절)
 export function deviceEventAllowed(eventType: string, inputSource: string, alarmType: string): boolean {
   if (eventType === 'WAKE_CONFIRMED') return alarmType === 'WAKE' && inputSource === 'USAGE';
-  if (eventType === 'DISMISSED') return alarmType === 'WAKE' && inputSource === 'BUTTON';
+  if (eventType === 'TRIGGERED' || eventType === 'SNOOZED') return inputSource === 'BUTTON' && RING_ALARM_TYPES.includes(alarmType);
+  if (eventType === 'DISMISSED') return inputSource === 'BUTTON' && DISMISS_ALARM_TYPES.includes(alarmType);
   if (eventType === 'ACKNOWLEDGED' || eventType === 'ARRIVAL_CONFIRMED') return inputSource === 'BUTTON';
   return false;
 }

@@ -45,6 +45,54 @@ afterEach(() => {
   jest.restoreAllMocks();
 });
 
+describe('watchGroupWake — 3초 뒤 한 번 더 (약속 변경 · 취소는 알람 재계산이 늦게 옴)', () => {
+  it('신호 뒤 읽고, 3초 뒤 같은 날짜로 한 번 더', () => {
+    const onRefresh = jest.fn<(date: string | null) => void>();
+    watchGroupWake(['g1'], onRefresh);
+    signal('g1', '2026-10-20');
+    jest.advanceTimersByTime(400);
+    expect(onRefresh).toHaveBeenCalledTimes(1);
+    jest.advanceTimersByTime(2999);
+    expect(onRefresh).toHaveBeenCalledTimes(1);
+    jest.advanceTimersByTime(1);
+    expect(onRefresh).toHaveBeenCalledTimes(2);
+    expect(onRefresh).toHaveBeenLastCalledWith('2026-10-20');
+    jest.advanceTimersByTime(10_000);
+    expect(onRefresh).toHaveBeenCalledTimes(2); // 더는 없음
+  });
+
+  it('신호가 연달아 오면 뒤 읽기는 하나로 묶음', () => {
+    const onRefresh = jest.fn<(date: string | null) => void>();
+    watchGroupWake(['g1'], onRefresh);
+    signal('g1', null);
+    jest.advanceTimersByTime(400); // 첫 읽기
+    jest.advanceTimersByTime(1000);
+    signal('g1', null); // 뒤 읽기를 기다리는 중에 새 신호
+    jest.advanceTimersByTime(400); // 두 번째 읽기
+    expect(onRefresh).toHaveBeenCalledTimes(2);
+    jest.advanceTimersByTime(10_000);
+    expect(onRefresh).toHaveBeenCalledTimes(3); // 뒤 읽기는 한 번뿐
+  });
+
+  it('끊으면 기다리던 뒤 읽기도 취소 · 재연결 읽기에는 뒤 읽기 없음', () => {
+    const onRefresh = jest.fn<(date: string | null) => void>();
+    const stop = watchGroupWake(['g1'], onRefresh);
+    signal('g1', null);
+    jest.advanceTimersByTime(400);
+    stop();
+    jest.advanceTimersByTime(10_000);
+    expect(onRefresh).toHaveBeenCalledTimes(1);
+
+    const again = jest.fn<(date: string | null) => void>();
+    watchGroupWake(['g2'], again);
+    mockStatus.get('g2')?.('SUBSCRIBED');
+    mockStatus.get('g2')?.('CLOSED');
+    mockStatus.get('g2')?.('SUBSCRIBED');
+    jest.advanceTimersByTime(10_000);
+    expect(again).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe('watchGroupWake', () => {
   it('신호의 날짜를 그대로 넘겨 다시 읽게 함', () => {
     const onRefresh = jest.fn<(date: string | null) => void>();

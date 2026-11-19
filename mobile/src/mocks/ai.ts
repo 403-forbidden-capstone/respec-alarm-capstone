@@ -3,7 +3,7 @@
 // 화면은 이 파일을 직접 읽지 않고 features/voice/api.ts · features/routine/api.ts를 거침. 바꾼 값은 앱을 다시 열 때까지만 남음
 import { ringingKinds } from '@/features/alarm/schedule';
 import { defaultAlarms, KIND_LABEL, type AlarmTime, type AppointmentDraft } from '@/features/alarm/types';
-import type { ApplyStatus, JournalFact, Routine } from '@/features/routine/types';
+import type { ApplyStatus, JournalFact, Routine, RoutineSuggestion } from '@/features/routine/types';
 import { dateParts, dayKey, formatTime, isSameDay, josa, minutesBetween } from '@/lib/format';
 
 import { kst, TODAY } from './data';
@@ -240,8 +240,26 @@ function pastJournals(): Record<string, MockJournal> {
 }
 
 // 바뀌는 값 — api.ts만 읽고 씀
+// 루틴 제안 (안건 D114, routine_suggestions) — 18:00 서버가 만든 것처럼: 최근 아침 7번 중 4번 늦잠 → 일어나자마자 2단계 (월 · 수 · 목)
+export const MOCK_ROUTINE_SUGGESTION: RoutineSuggestion = {
+  id: 'rs1',
+  cause: 'OVERSLEEP',
+  title: '일어나자마자 2단계',
+  reason: '최근 아침 7번 중 4번, 기상 알람 뒤 평균 18분 만에 일어났어요',
+  draft: {
+    goal: '다시 잠들지 않기',
+    days: [1, 3, 4],
+    steps: [
+      { name: '물 한 잔', minutes: 2, alarm: false, offsetFromWake: 0, at: null },
+      { name: '창문 열고 불 켜기', minutes: 3, alarm: true, offsetFromWake: 3, at: null },
+    ],
+  },
+};
+export const MOCK_WAKE_MINUTE = 7 * 60 + 20; // 목업 수업 기상 알람 7:20
+
 export const aiDb = {
   chat: null as MockChat | null, // AI 탭을 처음 열 때 시작
   journals: pastJournals(), // 날짜(2025-05-22)별 — 오늘 일기는 대화를 마쳐야 생김
   routines: [] as Routine[], // 저장한 루틴 (저녁 루틴)
+  routineSuggestion: 'PENDING' as 'PENDING' | 'ACCEPTED' | 'IGNORED', // MOCK_ROUTINE_SUGGESTION의 상태
 };
