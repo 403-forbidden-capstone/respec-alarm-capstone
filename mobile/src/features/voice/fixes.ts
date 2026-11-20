@@ -5,6 +5,7 @@
 //   · 기상 정정은 L1 정정 함수가 없어(L1 답 L1-3) 서버가 안 보내지만, 오면 "아직 안 됨"
 // 서버에 돌려주는 error는 짧은 이유(T1이 "거절: … (이유)"로 읽음) — 사용자 화면에는 안 보임
 import { readLocationTime, recordParticipantTimes } from '@/features/alarm/participantTimes';
+import { settleCorrectedDetection } from '@/features/location/fix';
 import { supabase } from '@/lib/supabase';
 import { requireUserId } from '@/lib/user';
 import { stableUuid } from '@/lib/uuid';
@@ -44,6 +45,8 @@ export async function applyFix(fix: Fix): Promise<FixResult> {
   const decision = kind === 'DEPART' ? written.departed : written.arrived;
   if (decision == null) return result(false, '대상 없음'); // 지워진 참여 조건
   if (decision === 'keep') return result(false, '이미 확인한 기록');
+  // 알림창의 감지 안내 · 폰 판정 기억 · 폰 예약을 [아니에요]와 같은 정리로 맞춤 (G10) — 못 해도 정정은 그대로
+  await settleCorrectedDetection({ participantId: fix.participantId, kind, serverAt: before?.at ?? null });
 
   if (before) {
     // 기록 실패가 정정을 되돌리지는 않음 — 시각은 이미 고쳐졌으니 성공으로 돌려줌

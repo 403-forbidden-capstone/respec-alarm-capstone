@@ -7,6 +7,7 @@ import { rejectDetection, undoReject, type DetectionKind, type RejectScreen, typ
 import { forgetGeoDetection, restoreGeoDetection } from './correct';
 import { withdrawDetectionNotice } from './notice';
 import { syncLocation } from './register';
+import { loadState } from './store';
 
 export const UNDO_SECONDS = 5;
 
@@ -41,4 +42,23 @@ export async function undoErase(snapshot: RejectSnapshot): Promise<boolean> {
   await restoreGeoDetection({ participantId: snapshot.participantId, kind: snapshot.kind, at: snapshot.at.getTime() });
   resyncLocation(); // 돌아온 값을 계획이 다시 읽도록 — correct.ts restoreGeoDetection 주석
   return true;
+}
+
+// 대화(A02)로 출발 · 도착 시각을 직접 고친 뒤 — [아니에요]와 같은 정리 (감지 안내 거두기 + 폰 판정 기억 맞춤 + 폰 예약 · 감시 계획 다시 맞춤). 던지지 않음 (정정은 이미 서버에 쓰였음)
+//   serverAt = 고치기 전 서버의 위치 값 시각(없으면 null). 폰 기억에 남은 같은 참여 조건 · 종류의 판정(아직 서버에 못 쓴 출발 후보 · 도착)도 같이 정리 — 안내 알림 번호가 폰이 잡은 시각이라 둘 다 찾음
+export async function settleCorrectedDetection(target: { participantId: string; kind: DetectionKind; serverAt: number | null }): Promise<void> {
+  try {
+    const { participantId, kind, serverAt } = target;
+    const state = await loadState();
+    const remembered = (kind === 'DEPART' ? [...state.pending, ...state.departed] : state.arrived).filter((x) => x.participantId === participantId).map((x) => x.at);
+    const ats = new Set<number>(serverAt != null ? [serverAt, ...remembered] : remembered);
+    if (!ats.size) return;
+    for (const at of ats) {
+      await forgetGeoDetection({ participantId, kind, at }, { voidAlways: at === serverAt });
+      withdrawDetectionNotice({ kind, participantId, at });
+    }
+    resyncLocation();
+  } catch (e) {
+    if (__DEV__) console.warn('[location] 대화 정정 뒤 정리 실패', e);
+  }
 }

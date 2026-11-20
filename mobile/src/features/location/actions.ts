@@ -13,6 +13,7 @@ import { minutesMs } from './constants';
 import { withLock } from './lock';
 import { errorText } from './native';
 import { onDetectionNotice } from './notice';
+import { detectionWindow, type RegionPlan } from './regions';
 import { settlePhoneAlarms } from './settleAlarms';
 import { commit, isWriteAction, loadActions, MAX_QUEUED_ACTIONS, type Change, type WriteAction } from './store';
 import type { GeoAction, StepResult } from './transitions';
@@ -22,6 +23,17 @@ import type { GeoAction, StepResult } from './transitions';
 export async function commitStep(result: StepResult, more: Pick<Change, 'plan' | 'regions'> = {}): Promise<GeoAction[]> {
   await commit({ ...more, state: result.state, append: result.actions.filter(isWriteAction) });
   return result.actions.filter((action) => !isWriteAction(action));
+}
+
+// 서버에 출발로 안 쓸 이른 이탈(출발 예정 60분 전보다 이름 — participantTimes isTooEarlyLocationDeparture와 같은 창)의 "출발 감지" 안내는 뺌: 기록 안 하면 안내도 안 띄움 (NEW-2)
+//   해석(transitions)은 그대로 두고 — 이른 출발도 폰 상태에는 후보로 들고 있다가 5분 뒤 확정 시도에서 쓰기만 거름 — 안내만 거름
+export function withoutEarlyDepartNotices(notices: readonly GeoAction[], plan: RegionPlan): GeoAction[] {
+  const tracked = [...plan.participants, ...plan.untracked];
+  return notices.filter((action) => {
+    if (action.type !== 'DEPART_PENDING') return true;
+    const participant = tracked.find((p) => p.participantId === action.participantId);
+    return !participant || action.at >= detectionWindow(participant).start;
+  });
 }
 
 // 안내 알림 부르기 — 안내 실패가 기록을 막지 않게 삼킴
