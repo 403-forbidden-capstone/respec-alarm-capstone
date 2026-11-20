@@ -7,7 +7,7 @@ import assert from "node:assert/strict";
 import type { AlarmPlan, Appointment, Card, CardAction, Context, Fact, FastExtract, ServerEvent, TaskResults } from "./types.ts";
 import { datesFor } from "./testing.ts";
 import {
-  prepAsked,
+  asksWake, prepAsked,
   appointmentSummary, applyCardAction as applyCardActionRaw, applyFast, applyTaskResults as applyTaskResultsRaw, checkBasis, checkDigest, dateKo, dayOf, dayStartIso, eventAt, expandFast, initTurnState, isoToLocal, itemKey, lifeDate,
   keywordImportance, nearTitle, needKinds, normTitle, pickServerQuestion, questionSubjectKey, titleMatch,
 } from "./turn-core.ts";
@@ -1526,5 +1526,28 @@ describe("첫 일정 하나만 · 할 일이 있으면 기상 시각만 확인",
     (noWake.estimate as { alarms: { kind: string }[] }).alarms = (noWake.estimate as { alarms: { kind: string }[] }).alarms.filter((a) => a.kind !== "WAKE");
     const t = results(r1.state, noWake, 1);
     assert.deepEqual([t.event.pending.map((p) => p.id), t.event.clarify, card(t.state, "c1").pre_task?.wake], [["c1"], [], "KEEP"]);
+  });
+});
+
+// PR #580 리뷰: 기상 확인 판정 — 물음 문장 안에 정확한 기상 시각 + 일어나는 말, 출발 · 준비물 물음이 아닐 때만
+describe("asksWake — T1이 기상 확인을 제대로 물었는지", () => {
+  it("물음 문장 안에 정확한 기상 시각과 일어나는 말이 있으면 정상", () => {
+    assert.equal(asksWake("추천 기상 시각은 오전 11시 6분인데, 그대로 일어나실 건가요?", "오전 11시 6분"), true);
+  });
+  it("시각은 말했지만 물음은 준비물 — 기상 질문 누락", () => {
+    assert.equal(asksWake("출발은 오전 11시 6분이에요. 준비물도 있나요?", "오전 11시 6분"), false);
+  });
+  it("기상 오전 1시를 말했어도 물음은 오전 11시 출발 — 기상 질문 아님", () => {
+    assert.equal(asksWake("추천 기상 시각은 오전 1시인데, 오전 11시에 출발할까요?", "오전 1시"), false);
+  });
+  it("다른 시각과 섞이지 않음 — 오전 1시 ≠ 오전 11시 · 오후 1시 · 오전 1시 30분", () => {
+    assert.equal(asksWake("오전 11시에 일어나실 건가요?", "오전 1시"), false);
+    assert.equal(asksWake("오후 1시에 일어나실 건가요?", "오전 1시"), false);
+    assert.equal(asksWake("오전 1시 30분에 일어나실 건가요?", "오전 1시"), false);
+    assert.equal(asksWake("오전 1시에 일어나실 건가요?", "오전 1시"), true);
+  });
+  it("물음이 없거나 시각이 물음 밖에 있으면 누락", () => {
+    assert.equal(asksWake("기상 알람은 오전 11시 6분이에요.", "오전 11시 6분"), false);
+    assert.equal(asksWake("기상 알람은 오전 11시 6분이에요. 그대로 일어나실 건가요?", "오전 11시 6분"), false);
   });
 });
