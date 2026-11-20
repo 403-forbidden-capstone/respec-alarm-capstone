@@ -139,8 +139,8 @@ export default async function ch07({ q, as, su, svc, check, expectErr }) {
   await check('7-02 · 7-03 · 7-27: 그 그룹에 약속이 없는 날(어제 · 내일 · 다른 그룹 약속뿐 · 약속이 한 번도 없음)은 빈 결과, 자정 경계(23:59 · 00:00)가 정확하고 자정을 넘으면 새 날 상태로 시작', async () => {
     const A = await join_(19, '에이'), B = await join_(20, '비');
     const g = await mkGroup(A, [B], [B]), other = await mkGroup(A, [B], [B]), empty = await mkGroup(A, [B], [B]);
-    await appt(A, g, at('00:00', '2026-11-11'));            // 내일 0시 정각 = 내일 약속
-    await appt(A, g, at('23:59', '2026-11-08'));            // 그제 23:59
+    await appt(A, g, at('04:00', '2026-11-11'));            // 내일 새벽 4시 정각 = 내일 약속 (기준일 창 시작)
+    await appt(A, g, at('03:59', '2026-11-09'));            // 어제 새벽 3:59 = 그제 기준일 (창 끝 직전)
     await appt(A, other, at('10:00'));                      // 오늘 약속은 다른 그룹 것
     for (const u of [A, B]) { await wakeAlarm(u, at('08:00')); await wakeAlarm(u, at('08:00', '2026-11-11')); }
     const today = await rows(A, g), tomorrow = await rows(A, g, '2026-11-11'), yesterday = await rows(A, g, '2026-11-09'), twoDays = await rows(A, g, '2026-11-08');
@@ -209,7 +209,7 @@ export default async function ch07({ q, as, su, svc, check, expectErr }) {
     const s4 = of(await rows(A, g, D, at('08:25')), B);
     // 공개 함수는 조회자 시간대 기준 어제~내일만 허용하므로 오늘(한국) 데이터로 응답 칸을 확인
     // 단계 전이는 고정 날짜 D를 쓰는 private 함수 검사로 유지
-    const [{ today: shapeDay }] = await q("select (now() at time zone 'Asia/Seoul')::date::text as today");
+    const [{ today: shapeDay }] = await q("select ((now() at time zone 'Asia/Seoul') - interval '4 hours')::date::text as today");
     const shapeGroup = await mkGroup(A, [B], [B]);
     await appt(A, shapeGroup, at('10:00', shapeDay));
     await wakeAlarm(A, at('07:00', shapeDay));
@@ -316,7 +316,7 @@ export default async function ch07({ q, as, su, svc, check, expectErr }) {
     const g = await mkGroup(A, [], [A]);
     // 공개 함수의 날짜 범위는 조회자 시간대 기준이므로 오늘(한국) 날짜를 사용
     // private 기상 상태 시나리오의 고정 날짜 D='2026-11-10'은 변경하지 않음
-    const [{ today }] = await q("select (now() at time zone 'Asia/Seoul')::date::text as today");
+    const [{ today }] = await q("select ((now() at time zone 'Asia/Seoul') - interval '4 hours')::date::text as today");
     await appt(A, g, at('10:00', today)); await wakeAlarm(A, at('07:00', today));
     await as(A);
     const r = await q(`select * from public.get_group_wake($1, $2::date)`, [g, today]);
@@ -341,11 +341,12 @@ export default async function ch07({ q, as, su, svc, check, expectErr }) {
       const [pt] = await q(`insert into public.appointment_participants (appointment_id, user_id) values ($1, $2) returning participant_id`, [ap, u]);
       await q(`insert into public.alarms (participant_id, user_id, alarm_type, scheduled_at, is_enabled) values ($1, $2, 'WAKE', $3::timestamptz, $4)`, [pt.participant_id, u, when, enabled]);
     };
-    await part(await appt(A, g, '2026-11-11T01:00:00Z'), B, '2026-11-10T23:30:00Z');             // 서울 11/11 10:00 약속 — 유티씨의 기상은 UTC 11/10 밤
-    await part(await appt(A, g2, '2026-11-10T15:30:00Z'), C, '2026-11-10T14:00:00Z', false);     // 서울 11/11 00:30 약속 — 전날 밤 알람은 꺼져 있음
-    const viaB = await rows(A, g, '2026-11-10', '2026-11-11T00:00:00Z');
+    await part(await appt(A, g, '2026-11-10T08:00:00Z'), B, '2026-11-10T02:00:00Z');             // 서울 11/10 17:00 · UTC 11/10 08:00 약속 — 유티씨의 기상은 UTC 11/10 02:00 (둘의 기준일 창 안)
+    await part(await appt(A, g2, '2026-11-10T15:30:00Z'), C, '2026-11-10T14:00:00Z', false);     // 서울 11/11 00:30 약속(= 11/10 기준일) — 전날 밤 알람은 꺼져 있음
+    const viaB = await rows(A, g, '2026-11-10', '2026-11-10T09:00:00Z');
     const viaC = await rows(A, g2, '2026-11-10', '2026-11-11T00:00:00Z');
-    return JSON.stringify(who(viaB)) === JSON.stringify(sorted(A, B)) && iso(of(viaB, B).wake_alarm_at) === '2026-11-10T23:30:00.000Z' && viaC.length === 0 ? true : { viaB, viaC };
+    // 11/20 새벽 4시 기준일: 00:30 약속은 앞날 약속이라 줄이 나오되, 꺼 둔 알람은 안 셈(NO_ALARM)
+    return JSON.stringify(who(viaB)) === JSON.stringify(sorted(A, B)) && iso(of(viaB, B).wake_alarm_at) === '2026-11-10T02:00:00.000Z' && viaC.length === 2 && viaC.every((x) => x.wake_status === 'NO_ALARM') ? true : { viaB, viaC };
   });
 
   await check('7장 기록 구간: 기상 알람의 앞 6시간 ~ 뒤 18시간 안의 울림 · 미루기 · 해제만 그 알람의 것 — 밖의 기록(전날 저녁 · 다음 날 새벽)은 안 셈', async () => {
@@ -423,13 +424,13 @@ export default async function ch07({ q, as, su, svc, check, expectErr }) {
     const a1 = (await q(`insert into public.alarms (participant_id, user_id, alarm_type, scheduled_at) values ($1, $2, 'WAKE', $3::timestamptz) returning alarm_id`, [pt.participant_id, U, '2026-11-10T23:50:00Z']))[0].alarm_id;
     const a2 = await wakeAlarm(U, '2026-11-11T05:00:00Z');
     await clearSignals();
-    await ev(a1, U, 'WAKE_CONFIRMED', '2026-11-11T00:10:00Z', { src: 'BUTTON' });      // 자정을 넘겨 확인 → 알람이 울린 날(11/10)
+    await ev(a1, U, 'WAKE_CONFIRMED', '2026-11-11T00:10:00Z', { src: 'BUTTON' });      // 자정을 넘겨 확인 → (하루 기록은 알람이 울린 날 11/10, 그룹 화면 · 신호는 약속의 기준일 11/11)
     const sig = await signals();
     await ev(a1, U, 'WAKE_CONFIRMED', '2026-11-11T00:20:00Z', { src: 'BUTTON' });      // 같은 기상한 날 둘째 — 버림
     const n1 = await eventCount(U, 'WAKE_CONFIRMED');
     const recs1 = await q(`select record_date::text as d, wake_confirmed_at from public.daily_records where user_id = $1 order by record_date`, [U]);
-    const night = of(await rows(A, g, '2026-11-10', '2026-11-11T00:30:00Z'), U);
-    const morning = of(await rows(A, g, '2026-11-11', '2026-11-11T05:40:00Z'), U);     // 아침 알람은 아직 확인 없음 → 30분 지나 미확인
+    const night = of(await rows(A, g, '2026-11-11', '2026-11-11T00:30:00Z'), U);
+    const morning = of(await rows(A, g, '2026-11-11', '2026-11-11T05:40:00Z'), U);     // 그룹 화면은 약속에 딸린 알람(a1)의 확정을 따름 — 같은 약속 줄이라 아침 알람(a2)이 가리지 않음, a2의 미확인은 서버 배치(find_missed_wake_alarms)가 따로 잡음
     await svc();
     const miss = await q(`select alarm_id from public.find_missed_wake_alarms($1::timestamptz, 24) where user_id = $2`, ['2026-11-11T05:40:00Z', U]);
     await su();
@@ -437,11 +438,11 @@ export default async function ch07({ q, as, su, svc, check, expectErr }) {
     const n2 = await eventCount(U, 'WAKE_CONFIRMED');
     const recs2 = await q(`select record_date::text as d from public.daily_records where user_id = $1 order by record_date`, [U]);
     const after = of(await rows(A, g, '2026-11-11', '2026-11-11T05:40:00Z'), U);
-    return sig.length === 1 && sig[0].topic === `group:${g}:wake` && JSON.stringify(sig[0].payload) === JSON.stringify({ date: '2026-11-10' })
+    return sig.length === 1 && sig[0].topic === `group:${g}:wake` && JSON.stringify(sig[0].payload) === JSON.stringify({ date: '2026-11-11' })
       && n1 === 1 && recs1.length === 1 && recs1[0].d === '2026-11-10' && iso(recs1[0].wake_confirmed_at) === '2026-11-11T00:10:00.000Z'
       && night.wake_status === 'CONFIRMED' && iso(night.wake_confirmed_at) === '2026-11-11T00:10:00.000Z'
-      && morning.wake_status === 'MISSED' && miss.length === 1 && miss[0].alarm_id === a2
-      && n2 === 2 && recs2.map((x) => x.d).join() === '2026-11-10,2026-11-11' && after.wake_status === 'CONFIRMED' && iso(after.wake_confirmed_at) === '2026-11-11T05:05:00.000Z' ? true : { sig, n1, recs1, night, morning, miss, n2, recs2, after };
+      && morning.wake_status === 'CONFIRMED' && miss.length === 1 && miss[0].alarm_id === a2
+      && n2 === 2 && recs2.map((x) => x.d).join() === '2026-11-10,2026-11-11' && after.wake_status === 'CONFIRMED' && iso(after.wake_confirmed_at) === '2026-11-11T00:10:00.000Z' ? true : { sig, n1, recs1, night, morning, miss, n2, recs2, after };
   });
 
   await check('7-21(기상한 날 경계): 확인이 붙은 알람의 앞 6시간 · 뒤 18시간 안이면 알람이 울린 날, 밖이면 확인한 날 — 구간 밖의 옛 확인이 붙어 있어도 하루 한 건이 어긋나지 않음', async () => {
@@ -607,7 +608,7 @@ export default async function ch07({ q, as, su, svc, check, expectErr }) {
       && of(late, B).wake_status === 'MISSED' && iso(of(late, B).missed_at) === iso(at('07:30')) && of(late, C).wake_status === 'NO_ALARM' ? true : { soon, late };
   });
 
-  await check('X-WAKE-04(새벽 약속): 약속이 다음 날 00:30이고 그 전날 기상 알람이 울린 뒤 꺼졌어도 전날 그룹 기상 조회가 비지 않고 그 사람 줄이 남음 — 울리기 전에 끈 알람이면 전날은 약속 없는 날(0행)', async () => {
+  await check('X-WAKE-04(새벽 약속): 약속이 다음 날 00:30이고 그 전날 기상 알람이 울린 뒤 꺼졌어도 전날 그룹 기상 조회가 비지 않고 그 사람 줄이 남음 — 울리기 전에 끈 알람이면 줄은 나오되 NO_ALARM (새벽 4시 기준일, 11/20)', async () => {
     const A = await join_(93, '에이'), B = await join_(94, '끈이'), A2 = await join_(95, '에이2'), C = await join_(96, '미리끈이');
     const g = await mkGroup(A, [B], [B]), g2 = await mkGroup(A2, [C], [C]);
     const addAlarm = async (ap, u) => {
@@ -620,7 +621,8 @@ export default async function ch07({ q, as, su, svc, check, expectErr }) {
     const cAl = await addAlarm(await appt(A2, g2, at('00:30', '2026-11-11')), C);
     await q(`update public.alarms set is_enabled = false where alarm_id = $1`, [cAl]);          // 울리기 전에 꺼 둠
     const eve = await rows(A, g, D, at('23:10')), eveOff = await rows(A2, g2, D, at('23:10'));
-    return JSON.stringify(who(eve)) === JSON.stringify(sorted(A, B)) && of(eve, B).wake_status === 'DISMISSED' && iso(of(eve, B).wake_alarm_at) === iso(at('23:00')) && eveOff.length === 0 ? true : { eve, eveOff };
+    // 11/20 새벽 4시 기준일: 00:30 약속은 앞날 약속이라 전날에도 줄이 나오되 울리기 전에 꺼 둔 알람은 NO_ALARM
+    return JSON.stringify(who(eve)) === JSON.stringify(sorted(A, B)) && of(eve, B).wake_status === 'DISMISSED' && iso(of(eve, B).wake_alarm_at) === iso(at('23:00')) && eveOff.length === 2 && of(eveOff, C).wake_status === 'NO_ALARM' ? true : { eve, eveOff };
   });
 
   await check('X-WAKE-04(미확인 후보): 울린 뒤 알람만 끈 알람도 30분이 지나면 find_missed_wake_alarms에 나옴(미확인 시각 = 울림 + 30분) — 울리기 전에 꺼 둔 알람은 안 나옴', async () => {
