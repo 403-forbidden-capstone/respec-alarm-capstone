@@ -120,6 +120,11 @@ class AlarmCoreModule : Module() {
       WakePrompt.dismiss(context, alarmId)
     }
 
+    // 미루기 취소를 해제로 볼 때 — 해제 + 10분 판정(자동 확정 · 확인 알림)을 폰에 검 (G13, 폰 안에서 해제한 것과 같은 예약)
+    AsyncFunction("scheduleWakeJudge") { alarmId: String, dismissedAtMillis: Double ->
+      WakeJudgeSchedule.schedule(context, alarmId, dismissedAtMillis.toLong())
+    }
+
     AsyncFunction("getPendingEvents") {
       AlarmEventLog.pending(context).map { it.toMap() }
     }

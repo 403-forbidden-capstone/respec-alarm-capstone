@@ -289,6 +289,11 @@ export const WAKE_RECENT_MINUTES = 5; // 최근 사용을 보는 관찰 뒤쪽 �
 export const EARLY_WAKE_MINUTES = 60;
 export type EarlyWake = { alarmId: string; at: Date }; // 곧 울릴 기상 알람과 그 시각
 
+// 자동 판정(화면 사용, USAGE)으로 확정된 기상 — 홈 카드 "기상 오전 7:11 [아니에요]"가 그 자리에서 1탭 정정함 (D61)
+//   친구 화면은 자동 판정을 20분 늦게 공개하므로 그 안에 고치면 친구에게는 안 보이고, 그 뒤 고치면 친구 화면도 다음 읽기에 바뀜. 버튼 · 확인으로 확정한 것은 정정 대상이 아님
+export const AUTO_WAKE_FIX_MINUTES = 60; // 확정 뒤 카드를 보이는 시간
+export type AutoWake = { alarmId: string; at: Date }; // 자동 확정한 기상 알람과 확정 시각
+
 // 기상 확인 (H08) — 기상 알람 하나 기준 (alarm_events.alarm_id에 WAKE_CONFIRMED)
 export type WakeCheck = {
   alarmId: string;

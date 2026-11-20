@@ -5,7 +5,7 @@ import './testkit/install';
 
 import { describe, expect } from '@jest/globals';
 
-import { cancelSnooze, confirmEarlyWake, confirmWake, getEarlyWake, getWakeCheck, snoozeRing } from '@/features/alarm/realWake';
+import { cancelSnooze, confirmEarlyWake, confirmWake, correctAutoWake, getAutoWake, getEarlyWake, getWakeCheck, snoozeRing } from '@/features/alarm/realWake';
 import { updateAppointment } from '@/features/alarm/realEdit';
 import { applyFix } from '@/features/voice/fixes';
 
@@ -420,7 +420,7 @@ describe('S09 홈에서 미루기 취소', () => {
       .do(() => app.js(() => cancelSnooze(WAKE)));
 
   cancelled().variant('해제로 서버에 쓰고 폰 예약을 지움').expect({ phoneAlarms: AFTER_WAKE, writes: ['alarm_events.upsert(', /DISMISSED\/MANUAL/] });
-  cancelled().gap('G13').variant('해제 + 10분 판정 · 확인 알림이 폰에 걸려야 함').expect({ check: () => expect(phone.judges.map((j) => j.alarmId)).toContain(WAKE) });
+  cancelled().variant('해제 + 10분 판정 · 확인 알림이 폰에 걸려야 함').expect({ check: () => expect(phone.judges.map((j) => j.alarmId)).toContain(WAKE) });
 });
 
 describe('S10 해제 직후 재부팅', () => {
@@ -439,15 +439,6 @@ describe('S10 해제 직후 재부팅', () => {
   rebooted().variant('재부팅 뒤에도 남은 알람 예약은 되살아남').expect({ phoneAlarms: AFTER_WAKE });
 
   rebooted()
-    .variant('앱을 열면 다시 판정해 확정 — 폰 안 판정은 사라짐')
-    .limit('앱 열림만')
-    .do(async () => {
-      clock.set('07:42:30');
-      phone.runJudges();
-    })
-    .expect({ noNativeWrites: [/WAKE_CONFIRMED/], tray: [] });
-
-  rebooted()
     .variant('앱을 열면 다시 판정해 확정')
     .do(async () => {
       clock.set('07:50');
@@ -456,13 +447,35 @@ describe('S10 해제 직후 재부팅', () => {
     .expect({ writes: [/WAKE_CONFIRMED\/USAGE/] });
 
   rebooted()
-    .gap('G7')
-    .variant('재부팅 뒤에도 해제 + 10분 판정이 돌아 앱 없이 확정돼야 함')
+    .variant('재부팅 뒤에도 해제 + 10분 판정이 돌아 앱 없이 확정 (G7)')
     .do(() => {
       clock.set('07:42:30');
       phone.runJudges();
     })
-    .expect({ nativeWrites: [/WAKE_CONFIRMED\/USAGE/] });
+    .expect({ nativeWrites: [/WAKE_CONFIRMED\/USAGE/], noWrites: ['alarm_events', 'daily_records'], tray: [] });
+
+  // 꺼져 있는 사이 판정 시각(07:41:02)이 지났으면 켜질 때 바로 한 번 판정
+  rebooted()
+    .variant('판정 시각이 재부팅 중에 지났으면 켜지자마자 한 번 판정해 확정 (G7)')
+    .do(() => {
+      clock.set('07:50');
+      phone.reboot();
+    })
+    .expect({ nativeWrites: [/WAKE_CONFIRMED\/USAGE/], nativeLog: ['reboot', `judge:${WAKE}:AUTO`] });
+
+  // 사용 기록이 없으면 확인 알림이 켜질 때 뜸
+  scenario('S10 해제 직후 재부팅')
+    .variant('사용 기록이 없으면 재부팅 뒤 판정 시각에 확인 알림이 뜸 (G7)')
+    .at('07:00')
+    .given(() => startDay({ usage: 'denied', appOpen: false }))
+    .do(() => {
+      ringAndDismiss();
+      clock.set('07:35');
+      phone.reboot();
+      clock.set('07:42:30');
+      phone.runJudges();
+    })
+    .expect({ tray: [`wakeprompt:${WAKE}`] });
 });
 
 describe('S11 23:50 알람 · 00:10 확인', () => {
@@ -490,29 +503,114 @@ describe('S11 23:50 알람 · 00:10 확인', () => {
 
   const dayOf = (offset: number) => new Date(clock.day + offset * 24 * 3_600_000 + 9 * 3_600_000).toISOString().slice(0, 10);
   midnight().variant('자정 넘겨 확인해도 기록은 남음').expect({ writes: [/WAKE_CONFIRMED\/BUTTON/, 'daily_records.insert('] });
-  midnight().gap('G14').variant('하루 기록은 알람이 울린 날 한 곳이어야 함 — 앱은 확인한 시각의 날짜로 씀').expect({ check: () => expect(db.rows('daily_records').map((r) => r.record_date)).toEqual([dayOf(0)]) });
+  midnight().variant('하루 기록은 알람이 울린 날 한 곳이어야 함 — 앱은 확인한 시각의 날짜로 씀').expect({ check: () => expect(db.rows('daily_records').map((r) => r.record_date)).toEqual([dayOf(0)]) });
 });
 
 describe('S12 잘못 누른 기상 확인 정정', () => {
   useWorld();
-  scenario('S12 기상 정정')
-    .gap('G9')
-    .variant('대화로 "아직 안 일어났어" — 기상 정정 길이 있어야 함 (D61 판정마다 1탭 정정)')
-    .at('08:00')
-    .given(async () => {
-      await startDay();
-    })
+  // 폰 사용으로 자동 확정된 아침 — 앱은 꺼져 있고 폰이 서버에 확정함
+  const autoConfirmed = () =>
+    scenario('S12 기상 정정')
+      .at('07:00')
+      .given(() => startDay({ usage: 'auto', appOpen: false }))
+      .do(async () => {
+        ringAndDismiss();
+        phone.usageSpans = usageAuto(clock.ms('07:31'));
+        judgeTime();
+        await app.open();
+        clock.set('07:45');
+      });
+
+  autoConfirmed()
+    .variant('자동 확정 직후 홈에 기상 카드가 뜸 — 확정 시각과 알람 id (G9)')
+    .expect({
+      check: async () => {
+        const auto = await app.js(() => getAutoWake());
+        expect(auto?.alarmId).toBe(WAKE);
+        expect(auto?.at.toISOString()).toBe(db.rows('alarm_events').find((r) => r.event_type === 'WAKE_CONFIRMED')?.event_at);
+      },
+    });
+
+  autoConfirmed()
+    .variant('[아니에요] — 그 날 기상 확정을 취소하고 하루 기록의 기상 칸도 비움 (G9)')
     .do(async () => {
-      const result = await applyFix({ id: 'x1', kind: 'WAKE', participantId: participantIdOf('a'), action: 'CORRECT', to: new Date(clock.ms('07:20')) });
+      expect(await app.js(async () => correctAutoWake(WAKE, (await getAutoWake())!.at))).toBe(true);
+    })
+    .expect({
+      check: async () => {
+        expect(db.rows('alarm_events').filter((r) => r.event_type === 'WAKE_CONFIRMED')).toHaveLength(0);
+        expect(db.rows('daily_records').map((r) => r.wake_confirmed_at)).toEqual([null]);
+        expect(await app.js(() => getAutoWake())).toBeNull();
+      },
+    });
+
+  autoConfirmed()
+    .variant('[아니에요] 뒤에는 같은 해제로 다시 자동 확정되지 않고 H08 확인 알림 단계로 돌아가 [일어났어요]로 확정 (G9)')
+    .do(async () => {
+      await app.js(async () => correctAutoWake(WAKE, (await getAutoWake())!.at));
+      clock.set('07:50');
+      await app.open(); // 앞에 올 때 다시 판정(recheck)이 돎
+    })
+    .expect({
+      check: async () => {
+        expect(db.rows('alarm_events').filter((r) => r.event_type === 'WAKE_CONFIRMED')).toHaveLength(0);
+        const check = await app.js(() => getWakeCheck(WAKE));
+        expect(check?.phase).toBe('prompt');
+        expect(check?.confirmed).toBeNull();
+        await app.js(() => confirmWake(WAKE, 'self'));
+        const rows = db.rows('alarm_events').filter((r) => r.event_type === 'WAKE_CONFIRMED');
+        expect(rows.map((r) => r.input_source)).toEqual(['BUTTON']);
+        expect(db.rows('daily_records').map((r) => r.wake_confirmed_at)).toEqual([rows[0].event_at]);
+      },
+    });
+
+  autoConfirmed()
+    .variant('[아니에요]는 눌린 확정 기록 한 건만 지움 — 같은 알람 id의 다른 날 자동 확정 기록은 그대로 (리뷰 #572)')
+    .do(async () => {
+      db.nativeInsert('alarm_events', {
+        user_id: ME,
+        alarm_id: WAKE,
+        client_event_id: 'old-day-confirmed',
+        event_type: 'WAKE_CONFIRMED',
+        event_at: new Date(clock.ms('07:20') - 24 * 3_600_000).toISOString(),
+        sequence_no: 1,
+        input_source: 'USAGE',
+      });
+      expect(await app.js(async () => correctAutoWake(WAKE, (await getAutoWake())!.at))).toBe(true);
+    })
+    .expect({ check: () => expect(db.rows('alarm_events').filter((r) => r.event_type === 'WAKE_CONFIRMED').map((r) => r.client_event_id)).toEqual(['old-day-confirmed']) });
+
+  autoConfirmed()
+    .variant('대화로 "아직 안 일어났어"(WAKE · DENY)도 같은 정정')
+    .do(async () => {
+      const result = await app.js(() => applyFix({ id: 'x1', kind: 'WAKE', participantId: participantIdOf('a'), action: 'DENY', to: null }));
       expect(result.ok).toBe(true);
     })
-    .expect({});
+    .expect({ check: () => expect(db.rows('alarm_events').filter((r) => r.event_type === 'WAKE_CONFIRMED')).toHaveLength(0) });
+
+  scenario('S12 기상 정정')
+    .variant('버튼 · 확인으로 확정한 기상은 정정 대상이 아님 — 지우지 않고 카드도 없음 (이번엔 자동 판정만)')
+    .at('07:00')
+    .given(() => startDay({ usage: 'denied' }))
+    .do(async () => {
+      ringAndDismiss();
+      await app.js(async () => {
+        await getWakeCheck(WAKE);
+        await confirmWake(WAKE, 'self');
+      });
+    })
+    .expect({
+      check: async () => {
+        expect(await app.js(() => getAutoWake())).toBeNull();
+        expect(await app.js(() => correctAutoWake(WAKE, new Date(clock.ms('07:45'))))).toBe(false);
+        expect(db.rows('alarm_events').filter((r) => r.event_type === 'WAKE_CONFIRMED')).toHaveLength(1);
+      },
+    });
 });
 
 describe('S13 친구가 깨우기 2번 → 일어남', () => {
   useWorld();
   scenario('S13 깨우기 알림 정리')
-    .news(1)
     .variant('깨우기 알림 2개가 떠 있다가 일어나 확정하면 알림창에서 정리돼야 함 — 지금은 남음')
     .at('07:00')
     .given(() => startDay({ usage: 'denied' }))

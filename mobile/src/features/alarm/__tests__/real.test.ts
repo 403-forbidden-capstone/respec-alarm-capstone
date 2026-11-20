@@ -68,6 +68,7 @@ const mockCore = {
   getUsageSpans: jest.fn<(from: number, to: number) => Promise<{ startMillis: number; endMillis: number }[]>>(),
   getPendingEvents: jest.fn<() => Promise<unknown[]>>(),
   dismissWakePrompt: jest.fn<(id: string) => Promise<void>>(),
+  scheduleWakeJudge: jest.fn<(id: string, dismissedAt: number) => Promise<void>>(),
 };
 let mockUuidSeq = 0; // makeUuid가 부를 때마다 uuid-1, uuid-2…
 jest.mock('@capstone/alarm-core', () => ({
@@ -82,6 +83,7 @@ jest.mock('@capstone/alarm-core', () => ({
   getUsageSpans: (from: number, to: number) => mockCore.getUsageSpans(from, to),
   getPendingEvents: () => mockCore.getPendingEvents(),
   dismissWakePrompt: (id: string) => mockCore.dismissWakePrompt(id),
+  scheduleWakeJudge: (id: string, dismissedAt: number) => mockCore.scheduleWakeJudge(id, dismissedAt),
   makeUuid: () => `uuid-${++mockUuidSeq}`,
   toUseSpans: (spans: { startMillis: number; endMillis: number }[], dismissedAt: number) =>
     spans.map((s) => [(s.startMillis - dismissedAt) / 60_000, (s.endMillis - dismissedAt) / 60_000]),
@@ -141,6 +143,7 @@ beforeEach(() => {
   mockCore.hasUsageAccess.mockResolvedValue(true);
   mockCore.getUsageSpans.mockResolvedValue([]);
   mockCore.dismissWakePrompt.mockResolvedValue();
+  mockCore.scheduleWakeJudge.mockResolvedValue();
   mockCore.getPendingEvents.mockResolvedValue([]);
   forgetPlaces();
   clearEdits();
@@ -1509,6 +1512,8 @@ describe('울림 (H07) — 알람 코어가 지금 울리는 알람을 읽어 �
       };
       expect(await real.cancelSnooze(WAKE_ID)).toEqual({ wakeCheck: true });
       expect(order).toEqual(['record', 'cancel']);
+      // 해제와 같은 길 — 폰에 해제 + 10분 판정을 검 (G13). 해제 시각은 서버에 쓴 DISMISSED의 event_at과 같은 값
+      expect(mockCore.scheduleWakeJudge).toHaveBeenCalledWith(WAKE_ID, Date.parse(kst('08:05')));
       const [recorded] = callsTo('alarm_events', 'upsert');
       expect(recorded.payload).toEqual({
         user_id: 'user-1',

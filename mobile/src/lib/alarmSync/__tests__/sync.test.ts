@@ -26,6 +26,7 @@ const mockCore = {
   list: jest.fn<() => Promise<ScheduledAlarm[]>>(),
   getPendingEvents: jest.fn<() => Promise<AlarmEvent[]>>(),
   markEventsUploaded: jest.fn<(ids: string[]) => Promise<void>>(),
+  canScheduleExactAlarms: jest.fn<() => Promise<boolean>>(),
 };
 jest.mock('@capstone/alarm-core', () => ({
   cancel: (id: string) => mockCore.cancel(id),
@@ -34,6 +35,7 @@ jest.mock('@capstone/alarm-core', () => ({
   list: () => mockCore.list(),
   getPendingEvents: () => mockCore.getPendingEvents(),
   markEventsUploaded: (ids: string[]) => mockCore.markEventsUploaded(ids),
+  canScheduleExactAlarms: () => mockCore.canScheduleExactAlarms(),
 }));
 
 let mockMock = false;
@@ -99,6 +101,7 @@ beforeEach(() => {
   mockCore.list.mockResolvedValue([]);
   mockCore.getPendingEvents.mockResolvedValue([]);
   mockCore.markEventsUploaded.mockResolvedValue();
+  mockCore.canScheduleExactAlarms.mockResolvedValue(true);
   mockUpsert.mockResolvedValue({ error: null });
 });
 
@@ -258,6 +261,31 @@ describe('reconcile — 서버 ↔ 폰 맞추기', () => {
     expect(summary).toMatchObject({ scheduled: ['server-1'], canceled: ['phone-only'], failed: [] });
     const scheduled = mockCore.scheduleAll.mock.calls[0][0];
     expect(scheduled).toEqual([expect.objectContaining({ alarmId: 'server-1', title: '회의', subtitle: '오전 10:00 · 세종대학교' })]);
+  });
+
+  describe('정확 알람 권한이 꺼짐 (안드로이드 12, G15)', () => {
+    const phoneAlarm = (id: string, at: string) => ({ id, type: 'WAKE' as const, intensity: 'NORMAL' as const, title: '회의', atMillis: Date.parse(at), snoozeCount: 0, nextRingAt: Date.parse(at) });
+
+    it('OS가 예약을 지워도 폰 목록은 그대로라 모름 — 아직 안 울린 폰 알람을 "못 건 알람"으로 보고해 홈 빨간 줄이 뜸', async () => {
+      mockAlarmRows = [row('both', '2026-10-19T23:00:00.000Z')];
+      mockCore.list.mockResolvedValue([phoneAlarm('both', '2026-10-19T23:00:00.000Z')]);
+      mockCore.canScheduleExactAlarms.mockResolvedValue(false);
+      const summary = await reconcile({ nowMs: NOW });
+      expect(summary.failed).toEqual([{ alarmId: 'both', error: expect.stringContaining('정확한 알람 권한') }]);
+      expect(failedAlarmCount()).toBe(1);
+    });
+
+    it('이미 울릴 시각이 지난 폰 알람은 세지 않고, 권한이 있으면 아무것도 안 셈, 권한을 못 읽어도 그대로', async () => {
+      mockAlarmRows = [row('both', '2026-10-19T23:00:00.000Z')];
+      mockCore.list.mockResolvedValue([phoneAlarm('both', '2026-10-19T23:00:00.000Z'), phoneAlarm('old', '2026-10-19T11:00:00.000Z')]);
+      mockCore.canScheduleExactAlarms.mockResolvedValue(false);
+      expect((await reconcile({ nowMs: NOW })).failed.map((f) => f.alarmId)).toEqual(['both']);
+      mockCore.canScheduleExactAlarms.mockResolvedValue(true);
+      expect((await reconcile({ nowMs: NOW })).failed).toEqual([]);
+      expect(failedAlarmCount()).toBe(0);
+      mockCore.canScheduleExactAlarms.mockRejectedValue(new Error('옛 APK'));
+      expect((await reconcile({ nowMs: NOW })).failed).toEqual([]);
+    });
   });
 
   it('alarmIds를 주면 그 알람만 맞춤 — 켜기 · 끄기를 DB에 직접 쓴 뒤', async () => {

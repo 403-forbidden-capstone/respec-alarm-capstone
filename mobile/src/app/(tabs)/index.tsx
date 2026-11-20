@@ -16,7 +16,8 @@ import {
   TopBar,
   TopBarButton,
 } from '@/components/ui';
-import { cancelSnooze, getDaySchedule, getEarlyWake, getMorningPlan, getNextAlarm, getSnooze, getWakeInProgress } from '@/features/alarm/api';
+import { cancelSnooze, getAutoWake, getDaySchedule, getEarlyWake, getMorningPlan, getNextAlarm, getSnooze, getWakeInProgress } from '@/features/alarm/api';
+import { AutoWakeCard } from '@/features/alarm/components/AutoWakeCard';
 import { EarlyWakeCard } from '@/features/alarm/components/EarlyWakeCard';
 import { ProposalCards } from '@/features/social/components/ProposalCards';
 import { ReceivedWakePingLine } from '@/features/social/components/ReceivedWakePingLine';
@@ -63,7 +64,9 @@ async function loadHome() {
     // [먼저 깼어요] 입구 — 기상 알람 60분 전부터 (11/9 결정표). 덧붙임 카드라 못 읽어도 홈은 그대로
     getEarlyWake().catch(() => null),
   ]);
-  return { evening, target, next, schedule, routine, todos, eveningRoutine, snooze, wake, morning, early };
+  // 자동 판정으로 확정한 기상 — 확정 뒤 60분 안 [아니에요] 카드 (D61 1탭 정정). 위 getWakeInProgress가 읽으면서 확정하므로 그 뒤에 읽음. 덧붙임 카드라 못 읽어도 홈은 그대로
+  const autoWake = await getAutoWake().catch(() => null);
+  return { evening, target, next, schedule, routine, todos, eveningRoutine, snooze, wake, morning, early, autoWake };
 }
 
 function greeting(t: Date) {
@@ -103,7 +106,7 @@ export default function HomeScreen() {
       {error ? <LoadError onRetry={reload} /> : <Loading text="홈을 불러오는 중" />}
     </Screen>
   );
-  const { evening, target, next, schedule, routine, todos, eveningRoutine, snooze, wake, morning, early } = data;
+  const { evening, target, next, schedule, routine, todos, eveningRoutine, snooze, wake, morning, early, autoWake } = data;
   // 추가한 일정이 홈이 보여 주는 날(낮 = 오늘, 저녁 = 내일)에 들어가게 날짜를 넘김
   const newSchedule = () => router.push({ pathname: '/schedule/new', params: { from: 'home', date: dayKey(target) } });
 
@@ -180,6 +183,9 @@ export default function HomeScreen() {
       })()}
       {/* 위치로 잡은 출발 · 도착 — 출발하면 아침 카드가 빠지고 이 줄이 그 자리를 이음 */}
       <DetectionRows reloadOn={data} onChanged={reload} />
+
+      {/* 자동 판정으로 기상이 확정되면 그 자리에서 1탭 정정 — [아니에요]면 취소하고 H08 확인 단계로 (D61) */}
+      {autoWake ? <AutoWakeCard wake={autoWake} onDone={() => void reload()} /> : null}
 
       {/* 기상 알람을 끈 뒤 판정 중이면 H08로 다시 들어가는 길 */}
       {wake ? (

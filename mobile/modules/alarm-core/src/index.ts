@@ -202,6 +202,11 @@ export async function dismissWakePrompt(alarmId: string): Promise<void> {
   await backend.dismissWakePrompt(alarmId);
 }
 
+/** 해제로 보는 시각부터 10분 뒤 판정을 폰에 검 (미루기 취소 = 해제, G13). 못 걸어도(예전 APK) 호출하는 쪽이 삼킴 */
+export async function scheduleWakeJudge(alarmId: string, dismissedAtMillis: number): Promise<void> {
+  await backend.scheduleWakeJudge(alarmId, dismissedAtMillis);
+}
+
 /** 앱이 켜져 있는 동안 새 기록이 생기면 알림 (꺼져 있을 때 쌓인 것은 getPendingEvents로 읽음) */
 export function addAlarmEventListener(listener: (event: AlarmEvent) => void): { remove(): void } {
   return backend.addEventListener(listener);
