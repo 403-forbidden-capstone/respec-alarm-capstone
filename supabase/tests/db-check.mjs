@@ -290,7 +290,7 @@ await check('anon은 함수를 실행할 수 없음 (회의 의견 지우기 하
   const bad = r.filter((x) => !MEETING_FN.includes(x.proname));
   return bad.length === 0 && r.length === MEETING_FN.length ? true : r;
 });
-await check('ENUM 24개 값이 4장과 같음 (NORMAL · DEPARTURE · FEEDBACK) + ACKNOWLEDGED + 값 출처 · 기록 출처 + 준비 시작 출처 · 준비 알람 당김 제안 + 루틴 제안 원인 · 상태', async () => {
+await check('ENUM 24개 값이 4장과 같음 (NORMAL · DEPARTURE · FEEDBACK) + ACKNOWLEDGED + WAKE_CORRECTED(기상 정정) + 값 출처 · 기록 출처 + 준비 시작 출처 · 준비 알람 당김 제안 + 루틴 제안 원인 · 상태', async () => {
   const r = await q(`select t.typname, array_agg(e.enumlabel order by e.enumsortorder)::text as v
                      from pg_type t join pg_enum e on e.enumtypid = t.oid group by 1`);
   const m = Object.fromEntries(r.map((x) => [x.typname, x.v]));
@@ -298,7 +298,7 @@ await check('ENUM 24개 값이 4장과 같음 (NORMAL · DEPARTURE · FEEDBACK) 
     && m.importance_level === '{LOW,NORMAL,HIGH}'
     && m.alarm_type === '{WAKE,PREPARE,DEPARTURE,ARRIVE,ROUTINE}'
     && m.alarm_intensity === '{SOFT,NORMAL,STRONG}'
-    && m.alarm_event_type === '{TRIGGERED,SNOOZED,DISMISSED,WAKE_CONFIRMED,ARRIVAL_CONFIRMED,MISSED,FEEDBACK,ACKNOWLEDGED}'
+    && m.alarm_event_type === '{TRIGGERED,SNOOZED,DISMISSED,WAKE_CONFIRMED,ARRIVAL_CONFIRMED,MISSED,FEEDBACK,ACKNOWLEDGED,WAKE_CORRECTED}'
     && m.alarm_value_source === '{AUTO,MANUAL}'
     && m.event_input_source === '{BUTTON,LOCATION,VOICE,MANUAL,USAGE}'
     && m.prepare_start_source === '{ROUTINE_STEP,PREPARE_ALARM}'
@@ -3843,7 +3843,7 @@ await check('user_places: updated_at이 고칠 때 갱신됨 · 계정을 지우
 // ---------------------------------------------------------------------
 // 장마다 자기 계정을 새로 만들어 앞 검사의 A~E와 섞이지 않게 함. 장이 늘면 아래 목록에 한 줄씩
 const FRIEND_CTX = { q, as, su, svc, check, knownGap, classifyGap, expectErr, PGlite, AUTH_STUBS, MIG_DIR, readFileSync, readdirSync, join };
-for (const ch of ['ch02', 'ch03', 'ch04', 'ch05', 'ch06', 'ch11', 'ch07', 'ch08', 'ch09', 'ch10', 'ch12', 'ch13', 'ch15', 'ch16', 'ch17']) await (await import(`./friend/${ch}.mjs`)).default(FRIEND_CTX);
+for (const ch of ['ch02', 'ch03', 'ch04', 'ch05', 'ch06', 'ch11', 'ch07', 'ch08', 'ch09', 'ch10', 'ch12', 'ch13', 'ch15', 'ch16', 'ch17', 'ch18']) await (await import(`./friend/${ch}.mjs`)).default(FRIEND_CTX);
 
 await (await import('./prepare-ml-approval.mjs')).default(FRIEND_CTX);
 await (await import('./commit-rpc.mjs')).default(FRIEND_CTX);   // 알람 저장 DB 함수 (정할 일 0-10)

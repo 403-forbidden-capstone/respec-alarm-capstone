@@ -321,7 +321,8 @@ export default async function scenarioDay({ q, as, su, svc, check, knownGap, cla
     // ----- G6: 자동 판정 확정은 20분 뒤 남에게 공개되는데 그 시각에 새로 고침 신호가 없음
     //   +20분 시점에는 DB에 쓰는 일이 없어 신호를 시각별로 나눠 볼 수 없음(PGlite에는 시계 · 스케줄러가 없고 기록 시각은 시험 시계가 아님).
     //   그래서 가장 가까운 확인 = 그 시각에 신호를 낼 수 있는 장치(pg_cron 작업)가 있는가. 기록 직후 신호는 그 시점에 친구 화면이 안 바뀌어(DISMISSED로 숨김) 충분하지 않음
-    await knownGap('G6', '자동 판정(USAGE) 기상이 친구에게 공개되는 +20분 시점에 새로 고침 신호가 나가야 함 — 지금은 기록 직후도, +20분에 신호를 낼 pg_cron 작업도 없어 친구가 화면을 다시 열어야 보임 (MAIN 07:19 구간)', async () => {
+    // 11/20 결정: 서버는 그대로 두고 앱이 그룹 화면을 열어 둔 동안 1분마다 조용히 다시 읽음(useWakeLoad · watchGroupWake) — 그래서 이 knownGap은 서버 기준 그대로, 결과 표에는 '앱이 1분마다 읽어서 해결'로 적음
+    await knownGap('G6', '자동 판정(USAGE) 기상이 친구에게 공개되는 +20분 시점에 새로 고침 신호가 나가야 함 — 지금은 기록 직후도, +20분에 신호를 낼 pg_cron 작업도 없어 친구가 화면을 다시 열어야 보임 (MAIN 07:19 구간). 앱 쪽은 그룹 화면이 열려 있는 동안 1분마다 다시 읽어 해결', async () => {
       const w = await world();
       await calm(w, ['B', 'C', 'D']);
       await evApp(w, 'A', w.AL.A.WAKE, 'TRIGGERED', T('07:00'));
@@ -515,11 +516,14 @@ export default async function scenarioDay({ q, as, su, svc, check, knownGap, cla
       const r = await wakeCheck(W2, T('07:31'));
       return eq(r, { self: ['A'], nudge: [], up: [] });
     });
-    await knownGap('G12', '앱을 안 열고 미룬 사람의 SNOOZED가 07:35에 늦게 올라오면 이미 적힌 MISSED가 풀려 07:36 그룹 화면이 MISSED가 아니어야 함(미루는 중) — 지금은 MISSED 기록이 남아 단계가 MISSED로 굳음', async () => {
+    // G12 (11/20): 11/19 #569 뒤 울림 · 미루기는 폰 기기 열쇠로 그때그때 올라오므로(alarm-events-device) 위 S08(미루기가 놓침 계산을 밂)이 평소 동작이고,
+    //   남는 경우는 폰이 30분 넘게 오프라인이었거나 기기 열쇠가 없는 날처럼 SNOOZED가 늦게 올라오는 것뿐 — 이건 업로드 지연이지 서버 계산 오류가 아님.
+    //   서버는 읽을 때 계산(MISSED 표시)이 늘 맞고, wake-check가 MISSED를 기록 · 본인 푸시를 이미 보낸 뒤에는 되돌릴 수 없는 푸시가 나간 상태라 기록을 지우는 것은 오히려 더 헷갈림 → 빈틈이 아니라 현재 동작으로 박제
+    await check('S08c · (현재 동작 기록, G12 정리) SNOOZED가 07:35에 늦게 올라와도(오프라인 · 기기 열쇠 없음) 이미 적힌 MISSED는 그대로라 07:36 화면은 MISSED — 미루기가 바로 올라오는 평소(S08)에는 07:43:30까지 밀림', async () => {
       await evApp(W2, 'A', W2.AL.A.WAKE, 'SNOOZED', T('07:03'), 'BUTTON', { snooze: 5 });
       await evApp(W2, 'A', W2.AL.A.WAKE, 'SNOOZED', T('07:08:30'), 'BUTTON', { snooze: 5 });
       const v = await view(W2, 'B', T('07:36'));
-      return v.A !== 'MISSED T' ? true : { 'B가 보는 A(07:36)': v.A, 'due 계산': '마지막 미루기 끝 07:13:30 + 30분 = 07:43:30' };
+      return v.A === 'MISSED T' ? true : { 'B가 보는 A(07:36)': v.A };
     });
   }
 
@@ -537,7 +541,8 @@ export default async function scenarioDay({ q, as, su, svc, check, knownGap, cla
       const v = await view(W, 'B', T('00:11', 1), TODAY);
       return v.A === 'CONFIRMED' ? true : v;
     });
-    await knownGap('G14', '23:50 알람 · 00:10 확인이면 하루 기록(daily_records)이 한 곳(알람이 울린 날)에만 생겨야 함 — 지금은 서버 트리거(알람 기준일)와 앱 쓰기(확인한 시각의 한국 날짜)가 두 날에 한 줄씩 만듦', async () => {
+    // 11/20: 폰 기기 길(alarm-events-device)은 이제 wake.record_date를 서버가 알람 기준일로 다시 계산해 씀(supabase/functions/_shared/device-events.test.ts G14). 이 시험은 앱 직접 쓰기(확인한 날짜)를 흉내 내므로 앱 쪽 수정(#572 wakeDay)이 들어가야 풀림
+    await knownGap('G14', '23:50 알람 · 00:10 확인이면 하루 기록(daily_records)이 한 곳(알람이 울린 날)에만 생겨야 함 — 지금은 서버 트리거(알람 기준일)와 앱 쓰기(확인한 시각의 한국 날짜)가 두 날에 한 줄씩 만듦 (기기 길은 서버가 알람 기준일로 고침, 앱 직접 쓰기는 #572)', async () => {
       const [n] = await q(`select count(*)::int as n from public.daily_records where user_id = $1 and wake_confirmed_at is not null`, [W.U.A]);
       return n.n === 1 ? true : { 'daily_records 줄 수': n.n, 날짜: (await q(`select record_date::text as d from public.daily_records where user_id = $1 order by record_date`, [W.U.A])).map((r) => r.d) };
     });

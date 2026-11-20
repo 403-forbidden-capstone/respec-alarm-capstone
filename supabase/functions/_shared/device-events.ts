@@ -5,6 +5,8 @@
 //     · 받는 조합은 폰이 실제로 보내는 것만 (deviceEventAllowed): 알림 버튼 ACKNOWLEDGED · ARRIVAL_CONFIRMED = BUTTON, 울림 · 미루기 TRIGGERED · SNOOZED = 기상 · 준비 · 출발 · 도착 알람 + BUTTON(앱이 열릴 때 올리는 alarmSync uploadEvents와 같은 값),
 //       해제 DISMISSED = 기상 · 준비 · 출발 알람 + BUTTON, 기상 확정 WAKE_CONFIRMED = WAKE 알람 + USAGE. wake도 WAKE 알람만. 나머지는 조용히 건너뜀(stored · skipped에 안 셈)
 //     · wake: daily_records의 빈 칸(기상 확인 · 해제 시각)만 채움 → 그 뒤에 이벤트 (이벤트가 확정의 표지라 맨 마지막, realWake.ts writeConfirmation과 같은 순서)
+//       record_date는 폰이 보낸 값을 안 쓰고 서버가 알람 기준일(DB private.wake_day와 같은 규칙: 확인이 알람 시각 6시간 전 ~ 18시간 뒤면 알람이 울린 날, 아니면 확인한 날)로 다시 계산함 — 자정을 넘긴 확인이 하루 기록을 두 날에 만들지 않게 (G14)
+//     · 정정(WAKE_CORRECTED, 앱 [아니에요])된 알람의 자동 확정(WAKE_CONFIRMED · USAGE)은 거절 — 정정 시각 이전의 확정 시각이면 건너뜀. 같은 해제가 폰 재시도로 다시 자동 확정되지 않게 (G9, DB 트리거 block_confirm_after_correction과 같은 규칙)
 //   원탭(출발 · 도착 · 준비 시작) · 준비 알람 해제(=준비 시작)를 appointment_participants에 옮기는 일은 (출발 알람의 해제는 기록만 — 출발은 위치 자동 · 감지가 꺼진 폰의 ACKNOWLEDGED로) alarm_events INSERT 트리거가 함 — 여기서는 안 건드림
 // 순수 TS (Deno API 없음) — node --test로 시험 (device-events.test.ts)
 import { must } from './db.ts';
@@ -42,6 +44,7 @@ type EventRow = {
   input_source: (typeof INPUT_SOURCES)[number];
 };
 type Wake = { alarm_id: string; record_date: string; wake_confirmed_at: string; wake_reported_at: string | null };
+type AlarmRow = { alarm_id: string; alarm_type: string; scheduled_at?: string | null };
 
 function parse(raw: unknown): { events: Omit<EventRow, 'user_id'>[]; wake: Wake | null } {
   const root = Reader.root(raw);
@@ -72,21 +75,52 @@ function parse(raw: unknown): { events: Omit<EventRow, 'user_id'>[]; wake: Wake 
 export async function recordDeviceEvents(service: Db, userId: string, raw: unknown): Promise<DeviceEventsResult> {
   const { events, wake } = parse(raw);
   const ids = [...new Set([...events.map((e) => e.alarm_id), ...(wake ? [wake.alarm_id] : [])])];
-  const mine = new Map(
-    must<{ alarm_id: string; alarm_type: string }[]>('device alarms', await service.from('alarms').select('alarm_id, alarm_type').eq('user_id', userId).in('alarm_id', ids)).map((a) => [a.alarm_id, a.alarm_type]),
+  const alarms = new Map(
+    must<AlarmRow[]>('device alarms', await service.from('alarms').select('alarm_id, alarm_type, scheduled_at').eq('user_id', userId).in('alarm_id', ids)).map((a) => [a.alarm_id, a]),
   );
+  const mine = new Map([...alarms].map(([id, a]) => [id, a.alarm_type]));
+
+  // 정정된 알람 — 자동 확정(USAGE)이 들어올 알람만 조회 (정정이 없으면 빈 목록)
+  const confirmIds = [...new Set([...events.filter((e) => e.event_type === 'WAKE_CONFIRMED').map((e) => e.alarm_id), ...(wake ? [wake.alarm_id] : [])])].filter((id) => mine.get(id) === 'WAKE');
+  const corrections = confirmIds.length
+    ? must<{ alarm_id: string; event_at: string }[]>('device corrections', await service.from('alarm_events').select('alarm_id, event_at').eq('user_id', userId).eq('event_type', 'WAKE_CORRECTED').in('alarm_id', confirmIds))
+    : [];
+  const corrected = (alarmId: string, confirmedAt: string) => isCorrected(corrections, alarmId, confirmedAt);
 
   let wakeRecorded = false;
-  if (wake && mine.get(wake.alarm_id) === 'WAKE') {
-    await fillDailyRecord(service, userId, wake);
+  if (wake && mine.get(wake.alarm_id) === 'WAKE' && !corrected(wake.alarm_id, wake.wake_confirmed_at)) {
+    const tz = await userTimeZone(service, userId);
+    await fillDailyRecord(service, userId, { ...wake, record_date: wakeDay(alarms.get(wake.alarm_id)?.scheduled_at ?? null, wake.wake_confirmed_at, tz) });
     wakeRecorded = true;
   }
   const owned = events.filter((e) => mine.has(e.alarm_id));
-  const rows: EventRow[] = owned.filter((e) => deviceEventAllowed(e.event_type, e.input_source, mine.get(e.alarm_id)!)).map((e) => ({ ...e, user_id: userId }));
+  const allowed = owned.filter((e) => deviceEventAllowed(e.event_type, e.input_source, mine.get(e.alarm_id)!));
+  const refused = allowed.filter((e) => e.event_type === 'WAKE_CONFIRMED' && corrected(e.alarm_id, e.event_at));
+  const rows: EventRow[] = allowed.filter((e) => !refused.includes(e)).map((e) => ({ ...e, user_id: userId }));
   if (rows.length) {
     must('device events', await service.from('alarm_events').upsert(rows, { onConflict: 'client_event_id', ignoreDuplicates: true }));
   }
-  return { stored: rows.length, skipped: events.length - owned.length, wake_recorded: wakeRecorded };
+  return { stored: rows.length, skipped: events.length - owned.length + refused.length, wake_recorded: wakeRecorded };
+}
+
+// 정정 시각이 확정 시각 이후 1일 안이면 그 확정은 정정된 것 (DB private.block_confirm_after_correction과 같음 — 알람 행이 다음 회차에 재사용돼도 다른 날 확정은 통과)
+function isCorrected(corrections: { alarm_id: string; event_at: string }[], alarmId: string, confirmedAt: string): boolean {
+  const at = Date.parse(confirmedAt);
+  return corrections.some((c) => c.alarm_id === alarmId && Date.parse(c.event_at) >= at && Date.parse(c.event_at) < at + 86_400_000);
+}
+
+async function userTimeZone(service: Db, userId: string): Promise<string> {
+  const row = must<{ timezone: string | null } | null>('device profile', await service.from('profiles').select('timezone').eq('user_id', userId).maybeSingle());
+  return row?.timezone || 'Asia/Seoul';
+}
+
+/** 기상 확인이 어느 '날'의 것인가 — DB private.wake_day와 같은 규칙. 알람 시각 6시간 전 ~ 18시간 뒤면 알람이 울린 날, 아니면(알람 행이 다음 회차로 재사용됐거나 알람 시각을 모르면) 확인한 날. 날짜는 그 사람 시간대 */
+export function wakeDay(alarmAt: string | null, confirmedAt: string, timeZone: string): string {
+  const at = Date.parse(confirmedAt);
+  const alarm = alarmAt ? Date.parse(alarmAt) : NaN;
+  const base = Number.isFinite(alarm) && at >= alarm - 6 * 3_600_000 && at < alarm + 18 * 3_600_000 ? alarm : at;
+  // en-CA는 YYYY-MM-DD
+  return new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(base));
 }
 
 // 그날 기록의 빈 칸만 채움 — 이미 있는 값은 덮지 않음 (앱 realWake.ts writeDailyRecord와 같음)
