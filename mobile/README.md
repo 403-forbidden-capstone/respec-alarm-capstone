@@ -82,8 +82,10 @@ APK 세 종류. 모두 Expo Go로는 안 되고 EAS 빌드 페이지에서 받�
 JS만 바뀐 걸 설치된 preview 앱에 보내기
 
 ```bash
-npx eas-cli update --channel preview --message "무엇을 고쳤는지"
+npx eas-cli update --channel preview --environment preview --message "무엇을 고쳤는지"
 ```
+
+- `--environment preview`: EAS 환경 변수(`KAKAO_NATIVE_APP_KEY` 등)를 읽어 APK와 같은 설정으로 업데이트를 만듦. 빼면 키가 든 APK와 runtimeVersion(fingerprint)이 달라 업데이트가 안 닿음
 
 - EAS 무료 플랜은 한 달 Android 빌드 15회. 네이티브가 안 바뀌면 빌드하지 않음
 - 데모 릴리스는 `v0.1.0`처럼 태그를 달면 release.yml이 preview APK를 빌드해 Releases에 QR과 함께 붙임. 레포 멤버 누구나 GitHub → Actions → 데모 릴리즈 → Run workflow에 다음 태그를 넣어도 됨(Expo 로그인 필요 없음)
@@ -105,6 +107,10 @@ cp .env.example .env
   - GitHub 버튼 빌드(release.yml · eas-build.yml)는 Secret `GOOGLE_SERVICES_JSON_B64`(같은 파일을 base64로 바꾼 값)를 빌드 직전에 `mobile/google-services.json`으로 꺼냄. 파일을 바꾸면 EAS 변수와 이 Secret을 같이 바꿈 — `base64 -w0 google-services.json | gh secret set GOOGLE_SERVICES_JSON_B64`
   - `mobile/.gitignore`(expo가 만든 블록 + `/android` `/ios`)는 레포에 올려 둠. 로컬과 EAS 서버에 이 파일이 같이 있어야 fingerprint가 같음(없으면 한쪽만 `bareGitIgnore`로 세어짐). `app.config.js` · `runtimeVersion` 정책은 그대로
 - `EXPO_PUBLIC_` 값은 빌드할 때 번들에 박힘. 로컬은 `.env`, 웹 미리보기는 Cloudflare 변수, APK는 EAS 환경 변수에 같은 값을 넣음
+- 카카오 SDK 로그인 키 `KAKAO_NATIVE_APP_KEY`(로그인용 카카오 앱의 네이티브 앱 키, `EXPO_PUBLIC_` 아님): 있으면 폰에서 카카오톡 앱으로 바로 로그인, 없으면 브라우저 로그인 (`app.config.js` · `src/lib/kakaoSdk.ts`)
+  - EAS 환경 변수 development · preview · production에 Plain text로 넣음 (Secret이면 `eas build` · `eas update`를 거는 PC가 못 읽어 fingerprint가 갈림)
+  - 개발용 APK에서 시험하려면 `npx expo start`를 띄우는 PC의 `.env`에도 넣음
+  - 키를 넣거나 바꾸면 네이티브 설정이 바뀌어 새 빌드가 필요함. 카카오 디벨로퍼스의 Android 키 해시는 로컬 빌드(RN 기본 debug.keystore)와 EAS 키스토어 둘 다 등록
 
 ### 데이터 모드 · 개발 메뉴 로그인
 
