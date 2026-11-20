@@ -21,7 +21,6 @@ import { useLoad } from '@/lib/useLoad';
 
 export const WAKE_RELOAD_DELAY_MS = 400;
 export const WAKE_RELOAD_AGAIN_MS = 3000; // 신호로 읽은 뒤 한 번 더 읽는 시간
-const SIGNAL_SYNC_THROTTLE_MS = 60_000; // 신호가 연달아 와도 폰 알람 맞추기는 이 시간에 한 번 (근거 없음 — 작성자 판단)
 export const WAKE_POLL_MS = 60_000; // 그룹 화면이 열려 있는 동안 조용히 다시 읽는 간격 (G6: 자동 판정 공개 +20분에는 신호가 없음)
 const SIGNAL_SYNC_THROTTLE_MS = 60_000; // 신호가 연달아 와도 폰 알람 맞추기는 이 시간에 한 번 (근거 없음 — 작성자 판단)
 
