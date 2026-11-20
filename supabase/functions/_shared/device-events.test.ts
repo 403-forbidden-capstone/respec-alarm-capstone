@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { deviceEventAllowed, recordDeviceEvents } from './device-events.ts';
+import { deviceEventAllowed, recordDeviceEvents, wakeDay } from './device-events.ts';
 import { HttpError } from './errors.ts';
 import { FakeDb } from './fake-db.ts';
 import type { Db } from './supabase.ts';
@@ -201,4 +201,65 @@ test('울림 · 미루기 · 해제 기록 — 준비 · 출발 알람도 받고
   assert.equal(rows.length, 6);
   assert.deepEqual(rows.find((r) => r.client_event_id === id(2))?.snooze_minutes, 5);
   assert.equal(rows.find((r) => r.client_event_id === id(1))?.snooze_minutes, null);
+});
+
+// ---- G14 기록일 · G9 정정 ----------------------------------------------------------------------
+
+test('G14 wakeDay — 알람 시각 6시간 전 ~ 18시간 뒤면 알람이 울린 날, 아니면 확인한 날 (한국 시간 기준, DB private.wake_day와 같음)', () => {
+  const alarm = '2026-11-19T14:50:00.000Z'; // 한국 11/19 23:50
+  assert.equal(wakeDay(alarm, '2026-11-19T15:10:00.000Z', 'Asia/Seoul'), '2026-11-19'); // 한국 11/20 00:10 확인 → 알람이 울린 날
+  assert.equal(wakeDay(alarm, '2026-11-19T08:50:00.000Z', 'Asia/Seoul'), '2026-11-19'); // 6시간 전 경계(포함)
+  assert.equal(wakeDay(alarm, '2026-11-20T08:50:00.000Z', 'Asia/Seoul'), '2026-11-20'); // 18시간 뒤 경계(제외) → 확인한 날
+  assert.equal(wakeDay(alarm, '2026-11-20T23:00:00.000Z', 'Asia/Seoul'), '2026-11-21'); // 알람 행이 다음 회차로 재사용된 뒤의 옛 확인 → 확인한 날
+  assert.equal(wakeDay(null, '2026-11-19T15:10:00.000Z', 'Asia/Seoul'), '2026-11-20'); // 알람 시각을 모르면 확인한 날
+  assert.equal(wakeDay(alarm, '2026-11-19T15:10:00.000Z', 'America/New_York'), '2026-11-19'); // 사람 시간대로 날짜를 셈
+});
+
+test('G14 폰이 보낸 record_date는 무시 — 알람 23:50 · 확인 00:10(한국)이면 알람이 울린 날 한 줄만 생김', async () => {
+  const db = seed();
+  const alarmRow = db.rows('alarms').find((a) => a.alarm_id === WAKE)!;
+  alarmRow.scheduled_at = '2026-11-19T14:50:00.000Z';
+  const wake = { alarm_id: WAKE, record_date: '2026-11-20', wake_confirmed_at: '2026-11-19T15:10:00.000Z', wake_reported_at: '2026-11-19T14:51:00.000Z' }; // 폰은 확인한 날(11/20)을 보냄
+  const out = await recordDeviceEvents(db as never, A, { wake });
+  assert.equal(out.wake_recorded, true);
+  const rows = db.rows('daily_records');
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].record_date, '2026-11-19');
+  assert.equal(rows[0].wake_confirmed_at, wake.wake_confirmed_at);
+});
+
+test('G14 사람 시간대가 한국이 아니면 그 시간대의 알람 기준일', async () => {
+  const db = seed();
+  db.rows('profiles')[0].timezone = 'America/New_York';
+  db.rows('alarms').find((a) => a.alarm_id === WAKE)!.scheduled_at = '2026-11-20T04:00:00.000Z'; // 뉴욕 11/19 23:00
+  await recordDeviceEvents(db as never, A, { wake: { alarm_id: WAKE, record_date: '2026-11-20', wake_confirmed_at: '2026-11-20T05:30:00.000Z' } }); // 뉴욕 00:30 확인
+  assert.equal(db.rows('daily_records')[0].record_date, '2026-11-19');
+});
+
+test('G9 정정된 알람의 자동 확정은 거절 — 정정이 확정 시각 뒤에 있으면 이벤트도 하루 기록도 안 씀(skipped로 셈)', async () => {
+  const db = seed();
+  const confirmedAt = '2026-11-19T06:31:30.000Z';
+  db.rows('alarm_events').push({ user_id: A, alarm_id: WAKE, client_event_id: '7b7f478f-5a2a-542a-92dc-9be071c05745', event_type: 'WAKE_CORRECTED', event_at: '2026-11-19T06:40:00.000Z', input_source: 'BUTTON' });
+  const event = tap({ alarm_id: WAKE, event_type: 'WAKE_CONFIRMED', client_event_id: E2, event_at: confirmedAt, input_source: 'USAGE' });
+  const out = await recordDeviceEvents(db as never, A, { events: [event], wake: { alarm_id: WAKE, record_date: '2026-11-19', wake_confirmed_at: confirmedAt } });
+  assert.deepEqual(out, { stored: 0, skipped: 1, wake_recorded: false });
+  assert.equal(db.rows('alarm_events').filter((e) => e.event_type === 'WAKE_CONFIRMED').length, 0);
+  assert.equal(db.rows('daily_records').length, 0);
+});
+
+test('G9 정정 뒤 다시 해제해서 나온 새 판정 · 다음 날 판정은 통과 (정정은 그 확정 시각 뒤 1일 안만 막음)', async () => {
+  const db = seed();
+  db.rows('alarm_events').push({ user_id: A, alarm_id: WAKE, client_event_id: '7b7f478f-5a2a-542a-92dc-9be071c05745', event_type: 'WAKE_CORRECTED', event_at: '2026-11-19T06:40:00.000Z', input_source: 'BUTTON' });
+  const confirm = (id: string, at: string) => tap({ alarm_id: WAKE, event_type: 'WAKE_CONFIRMED', client_event_id: id, event_at: at, input_source: 'USAGE' });
+  const later = await recordDeviceEvents(db as never, A, { events: [confirm(E2, '2026-11-19T06:55:00.000Z')] }); // 정정 뒤 다시 해제 → 새 판정
+  assert.equal(later.stored, 1);
+  const nextDay = await recordDeviceEvents(db as never, A, { events: [confirm(E1, '2026-11-20T06:31:00.000Z')] }); // 알람 행이 다음 회차로 재사용된 다음 날
+  assert.equal(nextDay.stored, 1);
+});
+
+test('G9 정정은 본인 알람의 정정만 봄 — 남의 정정 기록은 내 자동 확정을 막지 않음', async () => {
+  const db = seed();
+  db.rows('alarm_events').push({ user_id: B, alarm_id: WAKE, client_event_id: '7b7f478f-5a2a-542a-92dc-9be071c05745', event_type: 'WAKE_CORRECTED', event_at: '2026-11-19T06:40:00.000Z', input_source: 'BUTTON' });
+  const out = await recordDeviceEvents(db as never, A, { events: [tap({ alarm_id: WAKE, event_type: 'WAKE_CONFIRMED', client_event_id: E2, event_at: '2026-11-19T06:31:30.000Z', input_source: 'USAGE' })] });
+  assert.equal(out.stored, 1);
 });

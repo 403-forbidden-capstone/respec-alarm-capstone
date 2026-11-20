@@ -198,4 +198,13 @@ class BriefingRulesTest {
     assertFalse(BriefingRules.shouldRetry(0, kst(7, 24), 2 * min, deadline)) // 다음 시도가 마감 뒤
     assertFalse(BriefingRules.shouldRetry(BriefingRules.REFRESH_MAX_ATTEMPTS - 1, kst(4, 10), 30_000L, deadline))
   }
+
+  // 그룹 상태 안내를 끼울 문장 경계 — 문장 가운데서 나누지 않고, 느낌표는 마침표로 바뀐 뒤 나눔
+  @Test
+  fun sentencesSplitAtSentenceEnds() {
+    assertEquals(listOf("좋은 아침이야.", "오늘 오전 10시에 발표가 있어.", "일어날 시간이야?"), BriefingRules.sentences("좋은 아침이야. 오늘 오전 10시에 발표가 있어! 일어날 시간이야?"))
+    assertEquals(listOf("야.", "빨리 일어나."), BriefingRules.sentences("야!빨리 일어나!!"))
+    assertEquals(listOf("마침표 없는 한 문장"), BriefingRules.sentences("마침표 없는 한 문장"))
+    assertEquals(emptyList<String>(), BriefingRules.sentences("  "))
+  }
 }

@@ -9,6 +9,7 @@ object DeviceUploadRules {
   const val MAX_ATTEMPTS = 5 // 연결 실패 · 서버 오류 때 다시 시도하는 한도 — 넘으면 포기하고 앱이 열릴 때 올림
   private const val BRIEFING_FUNCTION = "/alarm-briefing-device"
   private const val EVENTS_FUNCTION = "/alarm-events-device"
+  private const val GROUP_STATUS_FUNCTION = "/group-status-device"
   private const val DELAY_MARGIN_MILLIS = 2_000L // 관찰이 끝난 직후가 아니라 조금 뒤에 판정 (끝나는 시각 경계)
 
   /**
@@ -47,9 +48,14 @@ object DeviceUploadRules {
    * 기기 키에 담긴 함수 주소(alarm-briefing-device) → 기록 올리는 함수 주소. 같은 서버 · 같은 키를 씀
    * 주소가 예상한 모양이 아니면 null (아무것도 안 함)
    */
-  fun eventsUrl(briefingUrl: String): String? {
+  fun eventsUrl(briefingUrl: String): String? = siblingUrl(briefingUrl, EVENTS_FUNCTION)
+
+  /** 기상 알람 그룹 상태 안내 함수 주소 (GroupStatusVoice) — 같은 서버 · 같은 기기 키 */
+  fun groupStatusUrl(briefingUrl: String): String? = siblingUrl(briefingUrl, GROUP_STATUS_FUNCTION)
+
+  private fun siblingUrl(briefingUrl: String, function: String): String? {
     val trimmed = briefingUrl.trimEnd('/')
-    return if (trimmed.endsWith(BRIEFING_FUNCTION)) trimmed.removeSuffix(BRIEFING_FUNCTION) + EVENTS_FUNCTION else null
+    return if (trimmed.endsWith(BRIEFING_FUNCTION)) trimmed.removeSuffix(BRIEFING_FUNCTION) + function else null
   }
 
   /** 응답 상태 → 다시 시도할지. 2xx 끝 · 401(키 만료) · 403 · 404 · 400은 다시 해도 같음 → 그만 (앱이 열릴 때 올림) · 408 · 429 · 5xx · 연결 실패(null)는 한도까지 다시 */

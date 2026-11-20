@@ -549,7 +549,9 @@ test('그룹 알림을 둘로 나눠 부를 수 있음: 받는 사람 정하기(
   assert.equal(pushes.length, 0); // 정하기만으로는 안 보냄
   const result = await sendGroupPush(service, req, plan, { fetchImpl: fetchImpl(okAll), sleep: noSleep }, { change: 'CANCELED', perRecipient: new Map([[R2, { needsConfirm: true }]]) });
   assert.deepEqual(result, { sent: 2, failed: 0 });
-  assert.deepEqual(pushes.map((p) => [p.body, p.data.change, p.data.needsConfirm, p.data.recipientUserId]).sort(), [['‘팀 회의’ 약속이 취소됐어요', 'CANCELED', true, R2], ['‘팀 회의’ 약속이 취소됐어요', 'CANCELED', undefined, R1]].sort());
+  const shownPushes = pushes.filter((p) => 'title' in p); // 약속 변경 · 취소는 같은 사람에게 조용한 데이터 푸시도 더 감(G2) — 보이는 것만 봄
+  assert.deepEqual(shownPushes.map((p) => [p.body, p.data.change, p.data.needsConfirm, p.data.recipientUserId]).sort(), [['‘팀 회의’ 약속이 취소됐어요', 'CANCELED', true, R2], ['‘팀 회의’ 약속이 취소됐어요', 'CANCELED', undefined, R1]].sort());
+  assert.equal(pushes.length - shownPushes.length, 2); // 받는 사람 둘 모두에게 조용한 푸시
   assert.equal(db.rpcCalls.length, 1);
   // 권한이 없으면 정하는 데서 403
   const forbidden = groupSetup({ status: 'FORBIDDEN' });
@@ -585,7 +587,7 @@ test('조용한 데이터 푸시: 알림을 끈 멤버 · 차단 쌍(silentRecip
   const T5 = 'ExponentPushToken[eeeeeeeeeeeeeeeeeeeeee]'; // groupSetup이 OTHER에게 둔 토큰
   assert.deepEqual(
     quiet.map((b) => [b.to, b._contentAvailable, (b.data as Record<string, unknown>).recipientUserId, (b.data as Record<string, unknown>).silent, (b.data as Record<string, unknown>).change, (b.data as Record<string, unknown>).needsConfirm]),
-    [[T4, true, R2, true, 'CHANGED', true], [T5, true, OTHER, true, 'CHANGED', undefined]], // perRecipient 값(needsConfirm)은 조용한 쪽에도 실림
+    [[T3, true, R1, true, 'CHANGED', undefined], [T4, true, R2, true, 'CHANGED', true], [T5, true, OTHER, true, 'CHANGED', undefined]], // 보이는 알림을 받는 R1에게도 조용한 푸시(G2). perRecipient 값(needsConfirm)은 조용한 쪽에도 실림
   );
   assert.ok(quiet.every((b) => !('channelId' in b) && !('sound' in b)));
 });
@@ -603,7 +605,7 @@ test('조용한 푸시만 있는 경우(보이는 받는 사람이 없음)에도
   assert.deepEqual(none.pushes, []);
 });
 
-test('조용한 푸시: 이미 보이는 알림을 받는 사람이 조용한 목록에도 있으면 보이는 알림 하나만, 조용한 푸시 실패는 failed에 합침, 목록의 문자열이 아닌 값은 버림', async () => {
+test('조용한 푸시: 이미 보이는 알림을 받는 사람이 조용한 목록에도 있어도 보이는 알림 · 조용한 푸시 각각 하나만, 조용한 푸시 실패는 failed에 합침, 목록의 문자열이 아닌 값은 버림', async () => {
   const dup = groupSetup({ status: 'OK', group_name: '캡스톤팀', appointment_title: '팀 회의', recipients: [R1], silent_recipients: [R1, R2, 5, null] });
   const req = { kind: 'GROUP_APPT_CHANGED' as const, groupId: GROUP, appointmentId: APPT };
   const plan = await planGroupPush(dup.service, SENDER, req);
@@ -614,6 +616,31 @@ test('조용한 푸시: 이미 보이는 알림을 받는 사람이 조용한 �
     wire.push(...body);
     return new Response(JSON.stringify({ data: body.map((b) => ('title' in b ? { status: 'ok', id: 't' } : { status: 'error', message: 'x', details: { error: 'MessageRateExceeded' } })) }));
   }, sleep: noSleep }, { change: 'CHANGED' });
-  assert.equal(wire.filter((b) => (b.data as Record<string, unknown>).recipientUserId === R1).length, 1); // R1은 한 번만
-  assert.deepEqual(result, { sent: 1, failed: 1 }); // 조용한 푸시(R2) 실패가 failed에 합쳐짐
+  const toR1 = wire.filter((b) => (b.data as Record<string, unknown>).recipientUserId === R1);
+  assert.equal(toR1.filter((b) => 'title' in b).length, 1); // 보이는 알림은 R1에게 한 번만 (조용한 목록에도 있어도)
+  assert.equal(toR1.length, 2); // 조용한 푸시도 한 번만 (받는 사람 목록과 조용한 목록에 같이 있어도 겹쳐 보내지 않음)
+  assert.deepEqual(result, { sent: 1, failed: 2 }); // 조용한 푸시(R1 · R2) 실패가 failed에 합쳐짐
+});
+
+test('G2 약속 변경 · 취소는 보이는 알림을 받는 참여자에게도 조용한 데이터 푸시를 같이 보냄 — 앱이 꺼져 있어도 폰이 백그라운드로 알람을 다시 맞추게 (다른 그룹 알림은 안 보냄)', async () => {
+  const wire = async (kind: 'GROUP_APPT_CHANGED' | 'GROUP_MEMBER_JOINED') => {
+    const { service } = groupSetup({ status: 'OK', group_name: '캡스톤팀', appointment_title: '팀 회의', recipients: [R1, R2], silent_recipients: [] });
+    const req = { kind, groupId: GROUP, ...(kind === 'GROUP_APPT_CHANGED' ? { appointmentId: APPT } : {}) } as Parameters<typeof planGroupPush>[2];
+    const plan = await planGroupPush(service, SENDER, req);
+    const out: Record<string, unknown>[] = [];
+    const result = await sendGroupPush(service, req, plan, { fetchImpl: async (_u, init) => {
+      const body = JSON.parse(init?.body as string) as Record<string, unknown>[];
+      out.push(...body);
+      return new Response(JSON.stringify({ data: body.map((_b, i) => ({ status: 'ok', id: `t-${out.length}-${i}` })) }));
+    }, sleep: noSleep }, { change: 'CHANGED', perRecipient: new Map([[R2, { needsConfirm: true }]]) });
+    return { out, result };
+  };
+  const changed = await wire('GROUP_APPT_CHANGED');
+  assert.deepEqual(changed.result, { sent: 2, failed: 0 }); // 보낸 수는 보이는 알림만
+  const quiet = changed.out.filter((b) => !('title' in b));
+  assert.deepEqual(quiet.map((b) => [b.to, (b.data as Record<string, unknown>).recipientUserId, (b.data as Record<string, unknown>).silent, (b.data as Record<string, unknown>).needsConfirm]), [[T3, R1, true, undefined], [T4, R2, true, true]]);
+  assert.ok(quiet.every((b) => b.priority === 'high' && b._contentAvailable === true && !('channelId' in b) && !('sound' in b))); // 문구 · 소리 없는 데이터 푸시
+  assert.equal(changed.out.filter((b) => 'title' in b).length, 2); // 보이는 알림은 그대로
+  const joined = await wire('GROUP_MEMBER_JOINED');
+  assert.equal(joined.out.filter((b) => !('title' in b)).length, 0); // 알람에 닿지 않는 알림에는 조용한 푸시 없음
 });

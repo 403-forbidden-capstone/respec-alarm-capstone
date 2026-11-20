@@ -3,6 +3,7 @@ import * as Linking from 'expo-linking';
 import * as WebBrowser from 'expo-web-browser';
 
 import { UserError } from './errors';
+import { kakaoIdToken, kakaoSdkAvailable, kakaoSdkLogout } from './kakaoSdk';
 import { supabase } from './supabase';
 
 // 웹 팝업의 결과를 원래 창에 넘기는 WebBrowser.maybeCompleteAuthSession()은 app/_layout.tsx에서 부름
@@ -28,9 +29,12 @@ function readTokens(url: string) {
   };
 }
 
-// 카카오 · 구글 로그인 — 브라우저에서 동의 → 앱으로 돌아와 세션 저장
-// 사용자가 창을 닫으면 null
+// 카카오 · 구글 로그인 — 사용자가 창을 닫으면 null
+//   카카오: 키가 든 폰 빌드는 카카오 SDK(카카오톡 앱) → ID 토큰을 Supabase에 넘김 (lib/kakaoSdk). 웹 · 키 없는 빌드는 아래 브라우저 방식
+//   구글: 브라우저에서 동의 → 앱으로 돌아와 세션 저장
 export async function signInWithProvider(provider: OAuthProvider) {
+  if (provider === 'kakao' && kakaoSdkAvailable()) return signInWithKakaoSdk();
+
   const { data, error } = await supabase.auth.signInWithOAuth({
     provider,
     options: { redirectTo: authRedirectUrl, skipBrowserRedirect: true },
@@ -53,6 +57,20 @@ export async function signInWithProvider(provider: OAuthProvider) {
   return sessionData.session;
 }
 
+// 카카오 SDK 로그인 — 브라우저를 안 거쳐 supabase.co 주소가 안 보임. 같은 카카오 앱이라 브라우저로 가입한 사람도 같은 계정으로 들어옴(카카오 회원번호가 같음)
+//   Supabase 대시보드 → Authentication → Providers → Kakao의 REST API Key 칸에 "REST 키,네이티브 앱 키"를 쉼표로 같이 넣어야 함
+//   (웹 로그인은 첫 값을 쓰고, 이 ID 토큰은 네이티브 앱 키로 발급돼서 두 번째 값이 있어야 통과)
+async function signInWithKakaoSdk() {
+  const idToken = await kakaoIdToken();
+  if (!idToken) return null;
+  const { data, error } = await supabase.auth.signInWithIdToken({ provider: 'kakao', token: idToken });
+  if (error) {
+    if (__DEV__) console.warn('[kakao] Supabase가 ID 토큰을 받지 않음:', error.message);
+    throw error;
+  }
+  return data.session;
+}
+
 // 개발 메뉴(/dev/screens)의 이메일 로그인 — 시드 계정(supabase/seed)으로 카카오 · 구글 없이 들어갈 때 (웹 · 폰 개발용, lib/modePolicy.ts showDevLogin)
 // 비밀번호는 코드에 적지 않고 입력 칸에서만 받음. Supabase Auth Providers에서 이메일 로그인이 켜져 있어야 함
 export async function signInWithEmail(email: string, password: string) {
@@ -72,6 +90,7 @@ export async function signInWithEmail(email: string, password: string) {
 export async function signOut() {
   const { error } = await supabase.auth.signOut();
   if (error && (await hasSession())) throw new UserError('로그아웃하지 못했어요. 다시 해 주세요');
+  await kakaoSdkLogout(); // 이 폰에 남은 카카오 토큰 정리 — 실패해도 던지지 않음
 }
 
 // 저장된 로그인(세션)을 읽음 — 앱을 열 때 AuthProvider가 부름

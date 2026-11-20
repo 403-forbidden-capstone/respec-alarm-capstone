@@ -5,6 +5,7 @@ import { Platform } from 'react-native';
 import { syncNow } from '@/lib/alarmSync';
 import { isPushData } from '@/lib/push/kinds';
 
+import { registerPushTask } from './backgroundTask';
 import { needsAlarmSync, needsGroupTabBelow, pushHref } from './link';
 
 // 서버 푸시(친구 · 그룹 알림)를 눌렀을 때 화면 이동 · 받았을 때 폰 알람 맞추기 — 안드로이드만, 웹 · 시험에서는 expo-notifications를 읽지 않음
@@ -71,6 +72,7 @@ export function usePushLinks({ active, userId }: { active: boolean; userId: stri
 
   useEffect(() => {
     if (Platform.OS !== 'android') return;
+    void registerPushTask(); // 앱이 꺼진 채 오는 조용한 데이터 푸시를 받는 백그라운드 작업 등록 (G2) — 실패해도 앱은 그대로
     try {
       // eslint-disable-next-line @typescript-eslint/no-require-imports -- 안드로이드일 때만 읽음
       const notifications = require('expo-notifications') as typeof import('expo-notifications');

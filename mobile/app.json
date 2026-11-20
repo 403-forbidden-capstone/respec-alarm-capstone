@@ -63,6 +63,14 @@
           "microphonePermission": "대화를 음성으로 하려고 마이크를 써요",
           "enableBackgroundPlayback": false
         }
+      ],
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "extraMavenRepos": ["https://devrepo.kakao.com/nexus/content/groups/public/"]
+          }
+        }
       ]
     ],
     "experiments": {

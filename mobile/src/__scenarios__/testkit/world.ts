@@ -11,6 +11,7 @@ import { useOneTapFollowUp } from '@/features/alarm/hooks/useOneTapFollowUp';
 import { useWakeRecheck } from '@/features/alarm/hooks/useWakeRecheck';
 import { currentUserId } from '@/lib/user';
 import type { RingPackage } from '@capstone/alarm-core';
+import '@/features/push/backgroundTask'; // 앱 진입 파일(index.js)이 먼저 불러 헤드리스 푸시 작업을 정의하는 것과 같음
 import { usePushLinks, resetPushLinks } from '@/features/push/usePushLinks';
 import { bumpEpoch } from '@/features/location/lock';
 import { useLocationSync } from '@/features/location/useLocationSync';

@@ -5,7 +5,7 @@
 import { afterEvent } from '@/lib/alarmSync';
 import { now } from '@/lib/clock';
 import { parseDbTime } from '@/lib/dbTime';
-import { startOfDay } from '@/lib/format';
+import { lifeDayStart } from '@/lib/format';
 import { UserError } from '@/lib/errors';
 import { supabase } from '@/lib/supabase';
 import { requireUserId } from '@/lib/user';
@@ -82,7 +82,7 @@ async function loadAppointments(groupId: string, me: string): Promise<GroupDetai
       .from('appointments')
       .select('appointment_id, title, appointment_at, dest_name, importance, creator_id')
       .eq('group_id', groupId)
-      .gte('appointment_at', startOfDay(now()).toISOString())
+      .gte('appointment_at', lifeDayStart(now()).toISOString()) // 그룹 화면의 오늘 = 새벽 4시 기준일 (11/20) — 00:30 약속은 04시까지 '오늘'
       .order('appointment_at')
       .limit(APPOINTMENT_LIMIT),
     supabase.rpc('group_appointment_counts', { p_group_id: groupId }),

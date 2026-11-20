@@ -174,8 +174,13 @@ export async function rejectCard(cardId: string): Promise<void> {
 }
 
 // 카드 [장소 고르기]로 고른 곳으로 다시 계산 — 실데이터만 (목업 카드는 장소가 늘 있음)
-export async function pickCardPlace(cardId: string, place: { name: string; lat?: number; lng?: number }, onProgress?: (c: Conversation) => void): Promise<'READY' | 'NEEDS_PLACE' | 'FAILED'> {
-  if (!isMock()) return real.pickCardPlace(cardId, place, onProgress);
+export async function pickCardPlace(
+  cardId: string,
+  place: { name: string; lat?: number; lng?: number },
+  onProgress?: (c: Conversation) => void,
+  onAsk?: (ask: string[]) => void,
+): Promise<'READY' | 'NEEDS_PLACE' | 'FAILED'> {
+  if (!isMock()) return real.pickCardPlace(cardId, place, onProgress, onAsk);
   return 'READY';
 }
 
