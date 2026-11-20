@@ -273,6 +273,9 @@ object AlarmController {
     // 이미 울려서 저장소에서 지워진 일정 알림도 지움 (로그아웃 정리 뒤 남은 알림의 원탭이 기록을 쌓지 않게)
     AlarmNotifications.cancelAllNotices(context)
     AlarmPlaybackService.stop(context)
+    // 해제 + 10분 판정 예약과 떠 있는 "지금 일어나셨나요?" 알림도 — 앞 계정의 것이 다음 계정에 뜨지 않게
+    runCatching { WakeJudgeLedger.cancelAll(context) }
+    runCatching { WakePrompt.cancelAllPrompts(context) }
     // 지운 알람에 안 묶인 브리핑(읽다 만 출발 안내 등)까지 — 다음 계정에 남지 않게
     runCatching { VoiceBriefing.clearAll(context) }
   }

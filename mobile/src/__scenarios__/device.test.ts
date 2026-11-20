@@ -148,10 +148,9 @@ describe('S33 로그아웃 → 다른 계정', () => {
     },
   });
 
-  loggedOut().gap('G11').variant('앞 계정의 확인 알림 · 감지 안내가 알림창에 남으면 안 됨').expect({ tray: [] });
+  loggedOut().variant('앞 계정의 확인 알림 · 감지 안내가 알림창에 남으면 안 됨').expect({ tray: [] });
 
   loggedOut()
-    .gap('G11')
     .variant('해제 + 10분 판정 예약도 지워져야 함 (다음 계정에 앞 계정 알림이 뜸)')
     .expect({ check: () => expect(phone.judges).toEqual([]) });
 

@@ -355,7 +355,9 @@ export class Phone {
     cancelAll: async () => {
       for (const id of [...this.store.keys()]) this.tray.delete(`notice:${id}`);
       this.store.clear();
-      for (const key of [...this.tray.keys()]) if (key.startsWith('notice:')) this.tray.delete(key); // cancelAllNotices — 일정 알림은 전부, 확인 알림(wakeprompt)은 그대로
+      for (const key of [...this.tray.keys()]) if (key.startsWith('notice:')) this.tray.delete(key); // cancelAllNotices — 일정 알림은 전부
+      for (const key of [...this.tray.keys()]) if (key.startsWith('wakeprompt:')) this.tray.delete(key); // WakePrompt.cancelAllPrompts — 떠 있는 확인 알림
+      this.judges = []; // WakeJudgeLedger.cancelAll — 장부에 적힌 해제 + 10분 판정 예약
       this.ringing = null;
     },
     list: async (): Promise<ScheduledAlarm[]> =>
@@ -454,6 +456,10 @@ export class Phone {
     },
     dismissNotificationAsync: async (id: string) => void this.tray.delete(`expo:${id}`),
     cancelScheduledNotificationAsync: async (id: string) => void this.scheduledNotifications.delete(id),
+    dismissAllNotificationsAsync: async () => {
+      for (const key of [...this.tray.keys()]) if (key.startsWith('expo:')) this.tray.delete(key);
+    },
+    cancelAllScheduledNotificationsAsync: async () => void this.scheduledNotifications.clear(),
     setNotificationChannelAsync: async () => null,
     setNotificationHandler: () => {},
     getExpoPushTokenAsync: async () => ({ data: 'ExponentPushToken[scenario]' }),

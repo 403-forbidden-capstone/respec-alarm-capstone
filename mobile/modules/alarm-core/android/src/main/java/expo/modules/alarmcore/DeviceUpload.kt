@@ -100,7 +100,8 @@ object DeviceUpload {
 object WakeJudgeSchedule {
   private fun requestCode(alarmId: String): Int = "wake_judge_$alarmId".hashCode() and 0x7fffffff
 
-  private fun operation(context: Context, alarmId: String, dismissedAt: Long): PendingIntent {
+  /** 같은 알람 번호면 같은 PendingIntent(extras는 비교하지 않음) — 지울 때는 dismissedAt에 아무 값이나 */
+  fun operation(context: Context, alarmId: String, dismissedAt: Long): PendingIntent {
     val intent = Intent(context, WakeJudgeReceiver::class.java).apply {
       data = Uri.fromParts("alarmcore-wake-judge", alarmId, null) // 알람마다 다른 PendingIntent
       putExtra(DeviceUpload.EXTRA_ALARM_ID, alarmId)
@@ -111,6 +112,7 @@ object WakeJudgeSchedule {
 
   /** 해제 직후 부름. 같은 알람을 또 끄면(미루고 다시 울린 뒤) 나중 해제 기준으로 바뀜 — 앱도 확정 전이면 마지막 해제부터 10분을 봄 (pickDismissedAt) */
   fun schedule(context: Context, alarmId: String, dismissedAt: Long) {
+    runCatching { WakeJudgeLedger.record(context, alarmId, dismissedAt) } // 로그아웃 정리가 지울 수 있게 번호를 적어 둠
     val at = DeviceUploadRules.judgeAtMillis(dismissedAt)
     val exact = runCatching {
       if (!AlarmScheduler.canScheduleExactAlarms(context)) return@runCatching false

@@ -4,6 +4,8 @@
 //   0. 로그아웃 중 표시를 켬 — 이 뒤의 폰 예약 맞추기(reconcile)는 서버 알람을 폰에 걸지 않고 건너뜀 (로그인 상태가 남은 사이에 앞 계정 알람을 다시 걸지 않게)
 //   1. 올리지 못한 울림 기록을 먼저 올려 봄 — 실패해도 로그아웃은 계속
 //   2. 폰 알람 전부 취소 (AlarmCore.cancelAll, 무음 알림 포함, 맞추기와 같은 줄에서 — 앞에 서 있던 맞추기가 끝난 뒤에). 이게 실패하면 로그아웃하지 않음 — 앞 계정의 알람이 폰에 남아 울리면 안 되므로
+//      알람 코어가 알림창 · 예약에 남긴 것도 같이 (일정 알림 · "지금 일어나셨나요?" 확인 알림 · 해제 + 10분 판정 예약 — AlarmCore.cancelAll)
+//      expo 쪽 알림(감지 안내 · 서버 푸시 · 예약해 둔 로컬 알림)은 로그아웃 때 따로 비움 (clearNotificationTray)
 //   3. 그래도 폰에 남은 울림 기록은 버림 — 다음 계정에 섞이지 않게 (1에서 못 올린 것도 여기서 버려짐)
 //   4. 푸시 토큰 지우기 (이 기기의 토큰 행, 아래) · 백그라운드 브리핑 갱신 기기 키 지우기 (서버 줄 + 폰 Keystore 저장소, #515)
 //   5. 실시간 구독 끊기 (그룹 기상 신호) · 기능이 onSignOut으로 등록한 메모리 정리
@@ -15,6 +17,7 @@ import { forgetBriefingDevice } from './alarmSync/briefingDevice';
 import { signOut } from './auth';
 import { UserError } from './errors';
 import { removePushToken } from './push/token';
+import { clearNotificationTray } from './push/tray';
 import { unsubscribeAll } from './realtime';
 
 // 푸시 토큰 지우기 — 로그인 직후 register_push_token으로 등록한 이 기기의 토큰을 push_tokens에서 지움 (세션이 있는 지금이어야 RLS를 통과함)
@@ -40,6 +43,8 @@ async function cleanupLocalUserState(cancelFailed: string, forgetPushToken: bool
     throw new UserError(cancelFailed);
   }
   await discardPendingEvents().catch(() => {});
+  // 로그아웃 때만 — 앞 계정의 알림이 알림창에 남아 다음 계정에서 눌리지 않게 (시험 데이터 지우기는 로그인 그대로라 서버 푸시도 계속 와야 함)
+  if (forgetPushToken) await clearNotificationTray().catch(() => {});
   if (forgetPushToken) await clearPushToken().catch(() => {});
   // 기기 키는 로그아웃 때만 (시험 데이터 지우기는 로그인 그대로라 새벽 갱신이 계속 돌아야 함). 폰 알람은 위에서 지웠으니 갱신 예약도 이미 없음
   if (forgetPushToken) await forgetBriefingDevice({ revoke: true }).catch(() => {});
@@ -71,6 +76,7 @@ export async function cleanupAfterAccountDelete(): Promise<void> {
   setSigningOut(true);
   await cancelAllPhoneAlarms().catch(() => {});
   await discardPendingEvents().catch(() => {});
+  await clearNotificationTray().catch(() => {});
   // 푸시 토큰 행은 서버가 계정과 함께 지움(prepare_account_delete) — 로그인이 이미 무효라 앱에서 지우려 해도 거절됨
   // 기기 키 서버 줄도 계정과 같이 지워짐(briefing_devices → profiles cascade) — 폰 키만 지움
   await forgetBriefingDevice({ revoke: false }).catch(() => {});
