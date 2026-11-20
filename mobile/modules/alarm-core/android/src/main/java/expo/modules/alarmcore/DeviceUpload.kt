@@ -100,7 +100,8 @@ object DeviceUpload {
 object WakeJudgeSchedule {
   private fun requestCode(alarmId: String): Int = "wake_judge_$alarmId".hashCode() and 0x7fffffff
 
-  private fun operation(context: Context, alarmId: String, dismissedAt: Long): PendingIntent {
+  /** 같은 알람 번호면 같은 PendingIntent(extras는 비교하지 않음) — 지울 때는 dismissedAt에 아무 값이나 */
+  fun operation(context: Context, alarmId: String, dismissedAt: Long): PendingIntent {
     val intent = Intent(context, WakeJudgeReceiver::class.java).apply {
       data = Uri.fromParts("alarmcore-wake-judge", alarmId, null) // 알람마다 다른 PendingIntent
       putExtra(DeviceUpload.EXTRA_ALARM_ID, alarmId)

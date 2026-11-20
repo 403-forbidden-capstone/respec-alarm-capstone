@@ -303,8 +303,7 @@ describe('S16 부팅 직후 이른 위치 출발', () => {
     });
 
   booted()
-    .news(2)
-    .variant('서버에 안 쓸 이른 이탈에는 "출발 감지" 안내도 안 떠야 함 — 지금은 이탈 순간 안내가 먼저 뜸')
+    .variant('서버에 안 쓸 이른 이탈에는 "출발 감지" 안내도 안 뜸 (기록과 안내가 같은 창으로 거름)')
     .do(async () => {
       await app.kill();
       clock.set('06:10');
@@ -457,5 +456,8 @@ describe('S20 대화로 시각 정정', () => {
       });
 
   corrected().variant('위치 값을 직접 입력 값으로 덮어 서버에 기록').expect({ writes: ['appointment_participants.update(arrived_at'], check: () => expect(participant().arrived_source).toBe('MANUAL') });
-  corrected().gap('G10').variant('알림창의 "도착 감지" 안내도 거둬져야 함 — 지금은 옛 안내가 그대로').expect({ check: () => expect(detectTray().some((id) => id.startsWith('expo:detect-ARRIVE-'))).toBe(false) });
+  corrected()
+    .variant('폰 판정 기억에서도 옛 도착이 빠짐 (다음 진입이 자동으로 다시 채우도록, [아니에요]와 같은 정리)')
+    .expect({ check: async () => expect((await loadState()).arrived.some((x) => x.participantId === PART)).toBe(false) });
+  corrected().variant('알림창의 "도착 감지" 안내도 거둬짐 (대화 정정도 [아니에요]와 같은 정리)').expect({ check: () => expect(detectTray().some((id) => id.startsWith('expo:detect-ARRIVE-'))).toBe(false) });
 });

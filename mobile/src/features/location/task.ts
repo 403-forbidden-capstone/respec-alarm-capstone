@@ -11,7 +11,7 @@ import { Platform } from 'react-native';
 import { now } from '@/lib/clock';
 import { isMock } from '@/lib/mode';
 
-import { announce, commitStep, flushActions } from './actions';
+import { announce, commitStep, flushActions, withoutEarlyDepartNotices } from './actions';
 import { withLock } from './lock';
 import { errorText, nativeLocation, nativeTasks } from './native';
 import { getLocationAuto, loadPlan, loadState } from './store';
@@ -47,7 +47,7 @@ export async function handleGeofenceEvent({ data, error }: GeofenceTaskBody): Pr
     if (signal && (await getLocationAuto())) {
       const notices = await withLock(async () => {
         const [state, plan] = await Promise.all([loadState(), loadPlan()]);
-        return commitStep(interpretSignals(state, [signal], plan, now().getTime()));
+        return withoutEarlyDepartNotices(await commitStep(interpretSignals(state, [signal], plan, now().getTime())), plan);
       });
       announce(notices);
     }

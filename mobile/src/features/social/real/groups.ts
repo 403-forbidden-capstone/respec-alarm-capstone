@@ -2,6 +2,7 @@
 //   groups · group_members(JOINED) · 연결 일정 appointments.group_id · 기상 공유 동의 wake_share_opt_in (docs/screen-data-map.md G01 · G02)
 //   그룹원 기상 상태는 get_group_wake — 그 그룹 약속이 있는 날만 줄을 줌(D57): 나 + 그 그룹에서 기상 공유에 동의한 멤버 − 나를 숨긴 사람 − 차단 (친구 7장)
 //   date = 기상 신호(lib/realtime)가 알려 준 날. 없으면 함수가 내 시간대의 오늘
+import { afterEvent } from '@/lib/alarmSync';
 import { now } from '@/lib/clock';
 import { parseDbTime } from '@/lib/dbTime';
 import { lifeDayStart } from '@/lib/format';
@@ -336,9 +337,26 @@ export async function renameGroup(groupId: string, name: string): Promise<void> 
   if (!data?.length) throw new UserError(GROUP_NOT_MEMBER);
 }
 
+// 이 그룹 약속에 걸린 내 알람 번호 — 나가면 서버 트리거가 바로 지우므로 나가기 전에 읽어 둠 (이미 울려 알림창에 남은 알림을 거두려고, G4 · G5). 못 읽으면 빈 목록 (나가기를 막지 않음)
+async function myGroupAlarmIds(groupId: string, me: string): Promise<string[]> {
+  try {
+    const { data, error } = await supabase
+      .from('appointment_participants')
+      .select('alarms(alarm_id), appointments!inner(group_id)')
+      .eq('user_id', me)
+      .eq('appointments.group_id', groupId);
+    if (error) return [];
+    return (data ?? []).flatMap((row) => (row.alarms ?? []).map((a) => a.alarm_id));
+  } catch {
+    return [];
+  }
+}
+
 // 나가기 — 내 JOINED 행을 LEFT로만 (공동 약속 정리 · 마지막 사람이면 그룹 삭제는 서버 트리거, 5-21 · 5-44)
+//   나간 뒤 폰 정리(나간 그룹 약속의 알람 · 지오펜스 · 알림창에 남은 알림)는 사건 뒤 정리 한 곳(afterEvent)이 함 — 기다리지 않음
 export async function leaveGroup(groupId: string): Promise<void> {
   const me = await requireUserId();
+  const alarmIds = await myGroupAlarmIds(groupId, me);
   const { data, error } = await supabase
     .from('group_members')
     .update({ invite_status: 'LEFT' })
@@ -349,6 +367,7 @@ export async function leaveGroup(groupId: string): Promise<void> {
   invalidateSnapshot();
   if (error) throw error;
   if (!data?.length) throw new UserError(MESSAGE_GONE);
+  void afterEvent({ noticeAlarmIds: alarmIds });
 }
 
 // 내보내기 — 참여 중 멤버 누구나 다른 사람의 행을 지움 (서버가 코드 교체 · 권한 삭제, 알림 없음, 5-19)

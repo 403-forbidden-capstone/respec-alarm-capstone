@@ -24,6 +24,7 @@ jest.mock('@/lib/realtime', () => ({
 // 훅 파일이 lib/mode · useLoad(expo-router)를 불러옴 — watchGroupWake는 쓰지 않으니 가볍게 막음
 jest.mock('@/lib/mode', () => ({ useMode: () => ({ mode: 'real', ready: true }) }));
 jest.mock('@/lib/useLoad', () => ({ useLoad: jest.fn() }));
+jest.mock('@/lib/alarmSync', () => ({ afterEvent: jest.fn() }));
 
 // 앱이 앞에 오는 것(AppState) — 바꾼 상태를 시험이 직접 보냄
 const appListeners = new Set<(s: AppStateStatus) => void>();
@@ -141,6 +142,21 @@ describe('watchGroupWake', () => {
 });
 
 // 7-30 — 실시간 연결이 끊겼다 돌아오면 · 앱이 앞에 올 때 다시 읽음 (신호를 놓쳤을 수 있으니)
+describe('watchGroupWake — onSignal', () => {
+  it('신호를 받을 때마다 부르고, 다시 연결해서 읽을 때는 안 부름', () => {
+    const onSignal = jest.fn<() => void>();
+    watchGroupWake(['g1'], jest.fn(), { onSignal });
+    mockStatus.get('g1')?.('SUBSCRIBED');
+    signal('g1', '2026-10-20');
+    signal('g1', null);
+    expect(onSignal).toHaveBeenCalledTimes(2);
+    mockStatus.get('g1')?.('CLOSED');
+    mockStatus.get('g1')?.('SUBSCRIBED');
+    jest.advanceTimersByTime(10_000);
+    expect(onSignal).toHaveBeenCalledTimes(2);
+  });
+});
+
 describe('다시 연결 · 앱이 앞에 올 때 (7-30)', () => {
   const status = (groupId: string, s: Status) => mockStatus.get(groupId)?.(s);
 

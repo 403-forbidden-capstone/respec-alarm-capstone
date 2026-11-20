@@ -7,11 +7,14 @@
 //     신호가 연달아 오면 뒤 읽기는 하나로 묶고, 화면을 떠나면 타이머를 정리
 //   · 자동 판정 기상은 20분 뒤부터 다른 사람에게 보이는데 그때 신호는 없음(서버 G6, 11/20 결정: 서버는 그대로) — 그래서 화면이 열려 있는 동안 1분마다 조용히 다시 읽음(pollWhileActive).
 //     화면을 떠나면(탭 이동 · 뒤로) 멈추고, 앱이 뒤로 가면 멈추고 앞으로 오면 다시 시작. '조용히' = 다시 읽기만 하고 로딩 표시는 안 바뀜(useLoad reload는 옛 값을 둔 채 바꿈)
+//   · 신호를 받으면 폰 알람도 맞춤(afterEvent, 1분에 한 번까지) — 그룹이 바뀐 신호(약속 변경 · 취소 · 나가기 · 빠지기 · 내보내짐)를 앱이 앞에 있는 채로 받아도 나간 그룹 약속의 알람이 폰에 남지 않게 (G4)
+//     신호에는 종류가 없어(날짜뿐) 기상 기록 신호를 포함한 모든 그룹 신호에서 돎 — 그래서 1분 제한을 둠. 제한에 걸려 건너뛴 신호의 맞추기는 다음에 앞에 올 때 함
 //   · 가짜 모드에서는 구독하지 않음 (웹 미리보기가 없는 서버에 붙지 않게)
 import { useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { AppState, type AppStateStatus } from 'react-native';
 
+import { afterEvent } from '@/lib/alarmSync';
 import { useMode } from '@/lib/mode';
 import { subscribeGroupWake, type SubscribeStatus } from '@/lib/realtime';
 import { useLoad } from '@/lib/useLoad';
@@ -19,17 +22,19 @@ import { useLoad } from '@/lib/useLoad';
 export const WAKE_RELOAD_DELAY_MS = 400;
 export const WAKE_RELOAD_AGAIN_MS = 3000; // 신호로 읽은 뒤 한 번 더 읽는 시간
 export const WAKE_POLL_MS = 60_000; // 그룹 화면이 열려 있는 동안 조용히 다시 읽는 간격 (G6: 자동 판정 공개 +20분에는 신호가 없음)
+const SIGNAL_SYNC_THROTTLE_MS = 60_000; // 신호가 연달아 와도 폰 알람 맞추기는 이 시간에 한 번 (근거 없음 — 작성자 판단)
 
 type WatchOptions = {
   delayMs?: number;
   againMs?: number;
   onLink?: (up: boolean) => void; // 실시간 연결 상태 — 모든 그룹이 연결돼 있으면 true, 하나라도 끊기면 false
+  onSignal?: () => void; // 신호를 받을 때마다 (다시 연결해서 읽는 것은 아님) — 화면 읽기와 별개로 하는 일
 };
 
 // 그룹들의 신호를 받기 시작 — 돌려주는 함수로 끊음. 신호가 몰리면 마지막 날짜로 한 번만 부름 (시험하기 쉽게 훅 밖에 둠)
 //   끊겼던 채널이 다시 연결되면 그 사이 놓친 신호 대신 한 번 다시 읽음(날짜 없이). 처음 연결은 이미 읽은 뒤라 안 읽음
 export function watchGroupWake(groupIds: readonly string[], onRefresh: (date: string | null) => void, options: WatchOptions = {}): () => void {
-  const { delayMs = WAKE_RELOAD_DELAY_MS, againMs = WAKE_RELOAD_AGAIN_MS, onLink } = options;
+  const { delayMs = WAKE_RELOAD_DELAY_MS, againMs = WAKE_RELOAD_AGAIN_MS, onLink, onSignal } = options;
   let timer: ReturnType<typeof setTimeout> | null = null;
   let againTimer: ReturnType<typeof setTimeout> | null = null;
   let pendingDate: string | null = null;
@@ -65,7 +70,14 @@ export function watchGroupWake(groupIds: readonly string[], onRefresh: (date: st
     }
     onLink?.(down.size === 0);
   };
-  const stops = groupIds.map((groupId) => subscribeGroupWake(groupId, ({ date }) => schedule(date, true), onStatus(groupId)));
+  const stops = groupIds.map((groupId) => subscribeGroupWake(
+      groupId,
+      ({ date }) => {
+        schedule(date, true);
+        onSignal?.();
+      },
+      onStatus(groupId),
+    ));
   return () => {
     if (timer) clearTimeout(timer);
     if (againTimer) clearTimeout(againTimer);
@@ -133,7 +145,7 @@ export function useWakeLoad<T>(load: (date: string | null) => Promise<T>, groupI
         pendingDate.current = date;
         void reload();
       },
-      { onLink: setLinkUp },
+      { onLink: setLinkUp, onSignal: () => void afterEvent({ throttleMs: SIGNAL_SYNC_THROTTLE_MS }) },
     );
     return () => {
       stop();

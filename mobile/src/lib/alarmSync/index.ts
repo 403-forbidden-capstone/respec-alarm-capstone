@@ -3,6 +3,7 @@
 //   · reconcile()          내 켜진 알람을 서버에서 읽어 폰 예약과 맞춤 (없으면 걸고, 다르면 다시 걸고, 서버에 없으면 지움. 출발 알람이 바뀌면 그 약속의 준비 · 기상 글자도 다시 걺). 로그인 직후 · 앱이 앞에 올 때
 //   · uploadEvents()       폰에 쌓인 울림 기록을 alarm_events로 올림. 앱이 앞에 올 때 · 기상 확인 화면에 들어올 때
 //   · syncNow()            기록 올리기 → 내 반복 회차 넘기기(서버 alarm-roll) → 맞추기를 한 묶음으로. 로그인 직후 · 앱이 앞에 올 때 · 반복 일정을 저장한 직후
+//   · afterEvent(options)  사건(그룹 나가기 · 그룹 변경 신호 등) 뒤 정리의 한 곳 — 이미 울려 알림창에 남은 일정 알림 거두기 + 맞추기. 사건마다 따로 부르지 않고 이것을 부름
 //   · cancelAllPhoneAlarms() / setSigningOut(value) / discardPendingEvents() / onEventsUploaded(handler) / onAlarmsSynced(handler)  로그아웃 정리 · 원탭 뒤처리 훅 · 맞춘 뒤 훅 (아래)
 //   · failedAlarmCount() / onFailedAlarmsChange(listener)  폰에 못 건 알람 수 (홈 빨간 줄용, 맞춘 뒤 훅에 붙어 있음)
 // 실데이터 모드에서만 일함 (reconcile · uploadEvents는 가짜 모드면 아무것도 안 함). 이 함수들은 한 줄로 차례대로 돎 — 맞추는 도중에 저장 결과가 끼어들어 방금 건 알람을 지우지 않게
@@ -213,6 +214,8 @@ export function applyCommit(result: CommitResult): Promise<SyncSummary> {
   return serial(async () => {
     const summary = emptySummary();
     await cancelAlarms(result.canceled_alarm_ids ?? [], summary);
+    // 시각이 바뀐 알람의 옛 알림이 알림창에 남아 있으면(이미 울려 저장소에서 지워진 일정 알림) 새 시각을 걸기 전에 거둠
+    await clearFiredNotices((result.ring_packages ?? []).map((p) => p.alarmId));
     await scheduleAlarms(await withoutConfirmedWakes(result.ring_packages ?? []), summary);
     const nowMs = Date.now();
     // L6 안건후보: 저장 직후 훅의 upcoming 기본안 = 호출하는 쪽이 참여 행 · 약속 시각을 넘긴 저장(약속 알람)이면 그 한 건, 아니면 빈 목록 (alarm-commit 응답에 약속 시각이 없음)
@@ -232,6 +235,38 @@ export function cancelPhoneAlarms(ids: readonly string[]): Promise<SyncSummary> 
     await cancelAlarms(ids, summary);
     return summary;
   });
+}
+
+// 이미 울려서 저장소에서 지워진 일정 알림(도착 확인 · 루틴, 원탭 버튼 포함)을 알림창에서 거둠 — 맞추기는 저장소 목록 기준이라 못 거두는 것 (G5)
+//   알림 번호는 알람 id마다 하나(AlarmNotifications.cancelNotice(id))라 저장소에 없어도 그 알람의 알림을 거둘 수 있고, AlarmCore.cancel이 그 일을 함
+//   저장소에 있는 알람은 건드리지 않음 (울리는 중 · 미룬 중 · 새로 걸 것을 지우지 않게). 줄(serial) 안에서 부를 것. 던지지 않음
+async function clearFiredNotices(ids: readonly string[]): Promise<void> {
+  if (!ids.length || signingOut) return;
+  try {
+    const stored = new Set((await AlarmCore.list()).map((a) => a.id));
+    for (const id of new Set(ids)) {
+      if (stored.has(id) || isDevAlarmId(id)) continue;
+      await AlarmCore.cancel(id).catch(() => {});
+    }
+  } catch (e) {
+    if (__DEV__) console.warn('[alarmSync] 남은 알림 거두기 실패', e);
+  }
+}
+
+// 사건 뒤 정리의 한 곳 — 폰 알람 맞추기 + 알림창 정리를 사건마다 따로 부르지 않고 여기서 함 (그룹 나가기 · 그룹 변경 신호 · …)
+//   noticeAlarmIds = 그 사건으로 없어진 알람 중 이미 울려 알림창에 남았을 수 있는 것 (서버에서 지워지기 전에 읽어 둔 번호)
+//   throttleMs = 이 시간 안에 이미 맞췄으면 건너뜀 (신호가 연달아 오는 곳이 너무 자주 맞추지 않게)
+//   던지지 않음 · 맞추기는 기다리지 않아도 됨 (실패는 다음에 앱이 앞에 올 때 다시)
+let lastEventSyncAt = 0;
+export type AfterEventOptions = { noticeAlarmIds?: readonly string[]; throttleMs?: number };
+export async function afterEvent(options: AfterEventOptions = {}): Promise<void> {
+  const { noticeAlarmIds = [], throttleMs } = options;
+  if (isMock() || signingOut) return;
+  if (noticeAlarmIds.length) await serial(() => clearFiredNotices(noticeAlarmIds)).catch(() => {});
+  const nowMs = Date.now();
+  if (throttleMs != null && nowMs - lastEventSyncAt < throttleMs) return;
+  lastEventSyncAt = nowMs;
+  await syncNow();
 }
 
 // 로그아웃 정리용 — 폰 알람을 전부 지움 (무음 알림 포함). 맞추기 · 올리기와 같은 줄이라 앞에 서 있는 맞추기가 다 끝난 뒤에 지움
