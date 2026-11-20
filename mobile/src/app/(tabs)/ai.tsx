@@ -367,10 +367,17 @@ export default function AiScreen() {
     setCardFail(null);
     setWork({ id: cardId, step: 'place' });
     try {
-      const result = await pickCardPlace(cardId, place, (c) => {
-        setProgress(c);
-        setWork(c.cards.find((x) => x.id === cardId)?.status === 'ESTIMATING' ? { id: cardId, step: 'estimate' } : null);
-      });
+      const result = await pickCardPlace(
+        cardId,
+        place,
+        (c) => {
+          setProgress(c);
+          setWork(c.cards.find((x) => x.id === cardId)?.status === 'ESTIMATING' ? { id: cardId, step: 'estimate' } : null);
+        },
+        // 음성 대화 중이면 계산 뒤 되물을 것(할 일이 있는 일정의 기상 확인)을 Live가 소리로 물음 — 연결이 없으면 ask가 false(글 대화는 화면의 AI 답이 물음)
+        //   누른 때의 live.phase가 아니라 지금 연결을 봄 (계산 중에 음성 대화를 켜거나 꺼도 맞게)
+        (ask) => void live.ask(askPrompt(ask)),
+      );
       if (result === 'FAILED') setCardFail({ id: cardId, message: null, retry: retryPlace }); // 까닭은 카드의 error
     } catch (e) {
       setCardFail({ id: cardId, message: userMessage(e, '장소로 계산하지 못했어요'), retry: retryPlace });
