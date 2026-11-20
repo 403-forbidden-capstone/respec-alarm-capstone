@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, jest } from '@jest/globals';
 
 import { UserError } from '@/lib/errors';
-import { dayKey } from '@/lib/format';
+import { lifeDayKey } from '@/lib/format';
 
 import { createFake } from '../__fixtures__/fakeSupabase';
 import { friends, groups, GROUP, JIHYEONG, JUNSEONG, ME, members, perms, profiles, SUYEON } from '../__fixtures__/seed';
@@ -138,7 +138,7 @@ describe('G01 "오늘 n명 기상 완료" (7-34)', () => {
 
 describe('읽기는 get_group_wake (7-39 · 7-37)', () => {
   it('옛 함수(get_group_wake_status)는 안 부르고, 날짜를 주면 p_date로', async () => {
-    const day = dayKey(new Date());
+    const day = lifeDayKey(new Date());
     await real.listGroups(day);
     await real.getGroupSummary(GROUP, day);
     await real.getGroup(GROUP, day);

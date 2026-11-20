@@ -4,7 +4,10 @@
 import { Platform } from 'react-native';
 
 // 공유하는 주소의 origin — 웹이면 지금 열린 주소, 아니면 운영 주소 (features/alarm/mapPicker와 같은 규칙)
-const PRODUCTION_ORIGIN = 'https://respec-alarm-capstone.vmgfh878.workers.dev';
+//   운영 주소 = 우리 도메인. Cloudflare Worker(respec-alarm-capstone)에 Custom Domain으로 붙인 주소라 workers.dev와 같은 사이트를 엶
+//   (옛 workers.dev 주소도 그대로 살아 있어서 이미 보낸 링크는 안 깨짐)
+//   지도 고르기(mapPicker)는 카카오 지도 JS 키에 등록된 사이트 도메인을 따라야 해서 workers.dev 그대로 둠
+export const PRODUCTION_ORIGIN = 'https://respecalarm.com';
 
 export function inviteOrigin(): string {
   if (Platform.OS === 'web' && typeof window !== 'undefined' && window.location?.origin) return window.location.origin;

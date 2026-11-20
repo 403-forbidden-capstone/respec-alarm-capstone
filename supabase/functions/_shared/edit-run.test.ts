@@ -743,16 +743,21 @@ function withGroupPush(env: Env): void {
   };
 }
 
+// sent = 보이는 알림만, quiet = 문구 없는 데이터 푸시(G2: 약속 변경 · 취소는 보이는 알림을 받는 참여자에게도 같이 감), all = 둘 다
 function pushSpy(opts: { fail?: boolean } = {}) {
-  const sent: { to: string; title: string; body: string; data: Record<string, unknown> }[] = [];
+  type Wire = { to: string; title?: string; body?: string; data: Record<string, unknown> };
+  const all: Wire[] = [];
+  const sent = [] as { to: string; title: string; body: string; data: Record<string, unknown> }[];
+  const quiet: Wire[] = [];
   const fetchImpl = async (_url: string, init?: RequestInit) => {
     if (opts.fail) throw new Error('network down');
-    const body = JSON.parse(init?.body as string) as { to: string; title: string; body: string; data: Record<string, unknown> }[];
-    sent.push(...body);
-    return new Response(JSON.stringify({ data: body.map((_b, i) => ({ status: 'ok', id: `ticket-${sent.length}-${i}` })) }));
+    const body = JSON.parse(init?.body as string) as Wire[];
+    all.push(...body);
+    for (const m of body) (m.title === undefined ? quiet : sent).push(m as never);
+    return new Response(JSON.stringify({ data: body.map((_b, i) => ({ status: 'ok', id: `ticket-${all.length}-${i}` })) }));
   };
   const push: NotifyOptions = { fetchImpl, sleep: async () => {} };
-  return { sent, push };
+  return { sent, quiet, all, push };
 }
 
 const P_A = { origin: { name: '집', ...HOME }, transport_type: 'TRANSIT', est_travel_minutes: 50, travel_source: 'API', buffer_minutes: 10, before_prepare_minutes: 30 };
@@ -921,10 +926,14 @@ test('조용한 푸시: 알림을 끈 참여자에게는 보이는 알림 없이
   assert.equal(res.notified, 1);
   const byUser = Object.fromEntries(spy.sent.map((m) => [m.data.recipientUserId as string, m]));
   assert.equal(byUser[B]?.title, '캡스톤팀');
-  assert.equal(byUser['u-mute']?.title, undefined); // 문구 없는 데이터 푸시
-  assert.equal(byUser['u-mute']?.data.silent, true);
-  assert.equal(byUser['u-mute']?.data.needsConfirm, true);
+  assert.equal(byUser['u-mute'], undefined); // 알림을 끈 사람은 보이는 알림 없음
   assert.equal(byUser[B]?.data.needsConfirm, true);
+  const quietBy = Object.fromEntries(spy.quiet.map((m) => [m.data.recipientUserId as string, m])); // 문구 없는 데이터 푸시 — 알림을 끈 사람 + (G2) 보이는 알림을 받는 사람
+  assert.deepEqual(Object.keys(quietBy).sort(), [B, 'u-mute'].sort());
+  assert.equal(quietBy['u-mute']?.data.silent, true);
+  assert.equal(quietBy['u-mute']?.data.needsConfirm, true);
+  assert.equal(quietBy[B]?.data.silent, true);
+  assert.equal(quietBy[B]?.data.needsConfirm, true);
 });
 
 test('9-32: 지난 날의 공동 약속은 고칠 수 없고(PAST_APPOINTMENT), 지난 날로 옮길 수도 없고, 새로 참여할 수도 없음 — 앞으로 약속, 오늘 이미 지난 약속은 오늘 안에는 됨 (하루 경계: 내 폰 시간대 오늘 0시)', async () => {

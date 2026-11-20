@@ -174,8 +174,8 @@ const B = '22222222-2222-4222-8222-222222222222';
 const C = '33333333-3333-4333-8333-333333333333';
 const D = '44444444-4444-4444-8444-444444444444';
 const E = '55555555-5555-4555-8555-555555555555';
-const KST0 = `((now() at time zone 'Asia/Seoul')::date::timestamp at time zone 'Asia/Seoul')`;  // 오늘 0시(한국)
-const TODAY = `(now() at time zone 'Asia/Seoul')::date`;
+const KST0 = `(((now() at time zone 'Asia/Seoul') - interval '4 hours')::date::timestamp at time zone 'Asia/Seoul')`;  // 오늘(그룹 화면의 새벽 4시 기준일, 11/20) 0시(한국) — 0~4시에 돌려도 기준일이 어긋나지 않게
+const TODAY = `((now() at time zone 'Asia/Seoul') - interval '4 hours')::date`;  // 오늘 기준일(KST 지금 − 4시간의 날짜)
 
 
 // ---------------------------------------------------------------------
@@ -290,7 +290,7 @@ await check('anon은 함수를 실행할 수 없음 (회의 의견 지우기 하
   const bad = r.filter((x) => !MEETING_FN.includes(x.proname));
   return bad.length === 0 && r.length === MEETING_FN.length ? true : r;
 });
-await check('ENUM 24개 값이 4장과 같음 (NORMAL · DEPARTURE · FEEDBACK) + ACKNOWLEDGED + 값 출처 · 기록 출처 + 준비 시작 출처 · 준비 알람 당김 제안 + 루틴 제안 원인 · 상태', async () => {
+await check('ENUM 24개 값이 4장과 같음 (NORMAL · DEPARTURE · FEEDBACK) + ACKNOWLEDGED + WAKE_CORRECTED(기상 정정) + 값 출처 · 기록 출처 + 준비 시작 출처 · 준비 알람 당김 제안 + 루틴 제안 원인 · 상태', async () => {
   const r = await q(`select t.typname, array_agg(e.enumlabel order by e.enumsortorder)::text as v
                      from pg_type t join pg_enum e on e.enumtypid = t.oid group by 1`);
   const m = Object.fromEntries(r.map((x) => [x.typname, x.v]));
@@ -298,7 +298,7 @@ await check('ENUM 24개 값이 4장과 같음 (NORMAL · DEPARTURE · FEEDBACK) 
     && m.importance_level === '{LOW,NORMAL,HIGH}'
     && m.alarm_type === '{WAKE,PREPARE,DEPARTURE,ARRIVE,ROUTINE}'
     && m.alarm_intensity === '{SOFT,NORMAL,STRONG}'
-    && m.alarm_event_type === '{TRIGGERED,SNOOZED,DISMISSED,WAKE_CONFIRMED,ARRIVAL_CONFIRMED,MISSED,FEEDBACK,ACKNOWLEDGED}'
+    && m.alarm_event_type === '{TRIGGERED,SNOOZED,DISMISSED,WAKE_CONFIRMED,ARRIVAL_CONFIRMED,MISSED,FEEDBACK,ACKNOWLEDGED,WAKE_CORRECTED}'
     && m.alarm_value_source === '{AUTO,MANUAL}'
     && m.event_input_source === '{BUTTON,LOCATION,VOICE,MANUAL,USAGE}'
     && m.prepare_start_source === '{ROUTINE_STEP,PREPARE_ALARM}'
@@ -696,15 +696,15 @@ await check('함수 밖에서는 B의 alarm_events · daily_records를 못 읽�
   const dr = await q(`select 1 from public.daily_records where user_id = $1`, [B]);
   return ev.length === 0 && dr.length === 0 ? true : { ev, dr };
 });
-await check('하루 경계는 각자 시간대의 0시 (한국 자정 1분 전 기상 알람은 어제 것, 1분 뒤는 오늘 것 — 그날 첫 알람 시각으로 보임)', async () => {
+await check('하루 경계는 각자 시간대의 새벽 4시 (한국 새벽 3:59 기상 알람은 어제 것, 4:01은 오늘 것 — 그날 첫 알람 시각으로 보임, 11/20 그룹 화면 하루 = 새벽 4시 기준일)', async () => {
   await su();
-  await q(`insert into public.alarms (user_id, alarm_type, scheduled_at) values ($1, 'WAKE', ${KST0} - interval '1 minute')`, [A]);
+  await q(`insert into public.alarms (user_id, alarm_type, scheduled_at) values ($1, 'WAKE', ${KST0} + interval '3 hours 59 minutes')`, [A]);
   const r1 = (await wake(A)).find((x) => x.user_id === A);
   await su();
-  await q(`insert into public.alarms (user_id, alarm_type, scheduled_at) values ($1, 'WAKE', ${KST0} + interval '1 minute')`, [A]);
+  await q(`insert into public.alarms (user_id, alarm_type, scheduled_at) values ($1, 'WAKE', ${KST0} + interval '4 hours 1 minute')`, [A]);
   const r2 = (await wake(A)).find((x) => x.user_id === A);
   const [{ exp0700 }] = await q(`select ${KST0} + interval '07:00' as exp0700`);
-  const [{ exp0001 }] = await q(`select ${KST0} + interval '1 minute' as exp0001`);
+  const [{ exp0001 }] = await q(`select ${KST0} + interval '4 hours 1 minute' as exp0001`);
   return new Date(r1.wake_alarm_at).getTime() === new Date(exp0700).getTime() && new Date(r2.wake_alarm_at).getTime() === new Date(exp0001).getTime() ? true : { r1, r2, exp0700, exp0001 };
 });
 await check('저녁에 직접 입력한 하루 기록(daily_records)의 기상 시각은 그룹에 안 띄움 (7장부터 — WAKE_CONFIRMED 기록만 봄)', async () => {
@@ -753,7 +753,7 @@ await check('F4: 약속이 한 번도 없는 그룹 · 다른 그룹의 약속�
   return none.length === 0 && otherGroupOnly.length === 0 && own.length === 1 && own[0].wake_status === 'NO_ALARM'
     ? true : { none, otherGroupOnly, own };
 });
-await check('F4: 약속 날짜는 호출자 시간대 기준 (한국 자정 직전 약속은 그날, 직후 약속은 다음날)', async () => {
+await check('F4: 약속 날짜는 호출자 시간대의 새벽 4시 기준일 (23:59 약속은 그날, 다음 날 00:01 약속은 같은 하루로 앞날 — 11/20)', async () => {
   await as(A);
   await q(`insert into public.appointments (creator_id, group_id, title, appointment_at, dest_name) values
     ($1, $2, '밤 약속', ${KST0} + interval '5 days 23 hours 59 minutes', 's'),
@@ -763,7 +763,7 @@ await check('F4: 약속 날짜는 호출자 시간대 기준 (한국 자정 직�
   const d7 = await wakeOnFar(A, G, `${TODAY} + 7`);
   await as(A);
   await q(`delete from public.appointments where group_id = $1 and title in ('밤 약속', '새벽 약속')`, [G]);
-  return d5.length > 0 && d6.length === 0 && d7.length > 0 ? true : { d5: d5.length, d6: d6.length, d7: d7.length };
+  return d5.length > 0 && d6.length > 0 && d7.length === 0 ? true : { d5: d5.length, d6: d6.length, d7: d7.length };
 });
 
 
@@ -3843,7 +3843,7 @@ await check('user_places: updated_at이 고칠 때 갱신됨 · 계정을 지우
 // ---------------------------------------------------------------------
 // 장마다 자기 계정을 새로 만들어 앞 검사의 A~E와 섞이지 않게 함. 장이 늘면 아래 목록에 한 줄씩
 const FRIEND_CTX = { q, as, su, svc, check, knownGap, classifyGap, expectErr, PGlite, AUTH_STUBS, MIG_DIR, readFileSync, readdirSync, join };
-for (const ch of ['ch02', 'ch03', 'ch04', 'ch05', 'ch06', 'ch11', 'ch07', 'ch08', 'ch09', 'ch10', 'ch12', 'ch13', 'ch15', 'ch16', 'ch17']) await (await import(`./friend/${ch}.mjs`)).default(FRIEND_CTX);
+for (const ch of ['ch02', 'ch03', 'ch04', 'ch05', 'ch06', 'ch11', 'ch07', 'ch08', 'ch09', 'ch10', 'ch12', 'ch13', 'ch15', 'ch16', 'ch17', 'ch18', 'ch19']) await (await import(`./friend/${ch}.mjs`)).default(FRIEND_CTX);
 
 await (await import('./prepare-ml-approval.mjs')).default(FRIEND_CTX);
 await (await import('./commit-rpc.mjs')).default(FRIEND_CTX);   // 알람 저장 DB 함수 (정할 일 0-10)

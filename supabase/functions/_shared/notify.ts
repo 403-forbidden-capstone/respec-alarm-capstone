@@ -181,7 +181,7 @@ async function notifyGroup(service: Db, senderId: string, req: NotifyRequest & {
 }
 
 // 그룹 알림의 받는 사람 · 문구 재료를 DB 함수로 정함 — 권한이 없으면 403. 보내기와 나눈 이유: 약속을 지우기 전에 받는 사람을 정해 두고(지운 뒤엔 약속이 없음) 지운 다음에 보내려고 (9장)
-//   silentRecipients = 보이는 알림이 빠진 참여자(알림 끈 멤버 · 차단 쌍) — 알람만 다시 맞추게 조용한 데이터 푸시를 보냄 (약속 변경만)
+//   silentRecipients = 보이는 알림이 빠진 참여자(알림 끈 멤버 · 차단 쌍) — 알람만 다시 맞추게 조용한 데이터 푸시를 보냄 (약속 변경만). 보이는 알림을 받는 참여자에게도 같은 데이터 푸시를 더 보냄(sendGroupPush)
 export type GroupPlan = { recipients: string[]; silentRecipients: string[]; groupName: string | null; appointmentTitle: string | null };
 export async function planGroupPush(service: Db, senderId: string, req: NotifyRequest & { kind: GroupKind }): Promise<GroupPlan> {
   const planned = await service.rpc('plan_group_push', { p_sender_id: senderId, p_group_id: req.groupId, p_kind: req.kind, p_appointment_id: req.appointmentId ?? null });
@@ -218,8 +218,11 @@ export async function sendGroupPush(service: Db, req: NotifyRequest & { kind: Gr
     .filter((r) => plan.recipients.includes(r.user_id))
     .map((r) => ({ to: r.token, ...copy, channelId: CHANNEL_IDS[req.kind], data: { ...base, ...(extra.perRecipient?.get(r.user_id) ?? {}), recipientUserId: r.user_id } }));
   // 알림을 끈 멤버 · 차단 쌍: 보이는 알림은 없어도 알람은 다시 맞춰야 하므로 문구 없는 데이터 푸시만 (받은 폰이 알림 없이 알람을 맞춤)
+  //   약속 변경 · 취소(GROUP_APPT_CHANGED)는 보이는 알림을 받는 참여자에게도 조용한 데이터 푸시를 같이 보냄 (G2): 앱이 완전히 꺼져 있으면 보이는 알림은 알림창에만 뜰 뿐 앱 코드가 안 도는데,
+  //   데이터 푸시는 폰이 앱을 백그라운드로 깨워(expo-notifications 백그라운드 작업) 알람을 다시 맞추게 함. 보이는 알림은 그대로
+  const silentIds = req.kind === 'GROUP_APPT_CHANGED' ? [...new Set([...plan.recipients, ...quietIds])] : quietIds;
   const quiet: OutgoingMessage[] = rows
-    .filter((r) => quietIds.includes(r.user_id))
+    .filter((r) => silentIds.includes(r.user_id))
     .map((r) => ({ to: r.token, title: '', body: '', silent: true, data: { ...base, ...(extra.perRecipient?.get(r.user_id) ?? {}), silent: true, recipientUserId: r.user_id } }));
 
   const shown = messages.length ? await deliver(service, req.kind, messages, owners, options) : noTokens();

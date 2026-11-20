@@ -92,6 +92,7 @@ export class Phone {
   locationForeground = true;
   locationBackground = true;
   geofenceTasks = new Map<string, (body: unknown) => Promise<void> | void>();
+  pushTasks = new Set<string>(); // Notifications.registerTaskAsync로 등록된 백그라운드 푸시 작업 (앱을 한 번 연 뒤에 생김)
   lastResponse: { notification: { request: { identifier: string; content: { data: Record<string, unknown> } }; date: number } } | null = null;
   receivedListeners = new Set<NotificationListener>();
   responseListeners = new Set<ResponseListener>();
@@ -118,6 +119,7 @@ export class Phone {
     this.locationForeground = true;
     this.locationBackground = true;
     this.lastResponse = null;
+    this.pushTasks.clear();
     this.receivedListeners.clear();
     this.responseListeners.clear();
     this.alarmListeners.clear();
@@ -317,6 +319,21 @@ export class Phone {
     return identifier;
   }
 
+  // 조용한 데이터 푸시(문구 · 알림 없음)가 도착 — 알림창에는 안 뜸. 앱 JS가 앞 · 뒤에 있으면 받음 리스너가, 꺼져 있으면 등록된 백그라운드 푸시 작업이 헤드리스로 돎(앱 화면 없이 JS만)
+  //   작업을 등록한 적이 없으면(앱을 한 번도 안 열었거나 옛 앱) 아무 일도 안 일어남. 끝날 때까지 기다림
+  async receiveSilentPush(data: Record<string, unknown>) {
+    this.shownCount += 1;
+    const n = { request: { identifier: `silent-${this.shownCount}`, content: { data } }, date: this.now() };
+    if (this.jsReceivesPush()) {
+      this.receivedListeners.forEach((l) => l(n));
+      return;
+    }
+    for (const name of this.pushTasks) {
+      const task = this.geofenceTasks.get(name);
+      if (task) await task({ data: { dataString: JSON.stringify({ ...data }), notification: null }, error: null, executionInfo: { eventId: n.request.identifier } });
+    }
+  }
+
   // 알림을 누름 — 앱 JS가 돌고 있으면 응답 처리, 꺼져 있으면 마지막 응답으로 남겨 두고 앱이 열릴 때 읽음
   tapNotification(identifier: string) {
     const item = this.tray.get(`expo:${identifier}`);
@@ -468,6 +485,7 @@ export class Phone {
     setNotificationChannelAsync: async () => null,
     setNotificationHandler: () => {},
     getExpoPushTokenAsync: async () => ({ data: 'ExponentPushToken[scenario]' }),
+    registerTaskAsync: async (name: string) => void this.pushTasks.add(name),
     getLastNotificationResponse: () => this.lastResponse,
     clearLastNotificationResponse: () => {
       this.lastResponse = null;

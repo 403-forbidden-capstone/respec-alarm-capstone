@@ -11,6 +11,7 @@ import {
   formatTime24,
   josa,
   lifeDayKey,
+  lifeDayStart,
   joinKo,
   keepWords,
   keepWordsIfWrappable,
@@ -145,5 +146,15 @@ describe('lifeDayKey — AI 대화방 · 하루 기록 기준일 (KST 새벽 4�
     expect(k('2026-12-01T01:00:00+09:00')).toBe('2026-11-30');
     expect(k('2027-01-01T03:00:00+09:00')).toBe('2026-12-31');
     expect(k('2027-01-01T04:00:00+09:00')).toBe('2027-01-01');
+  });
+});
+
+describe('lifeDayStart — 기준일이 시작되는 시각 (그룹 화면의 오늘, KST 새벽 4시)', () => {
+  const start = (iso: string) => lifeDayStart(new Date(iso)).toISOString();
+  it('낮 · 04:00 이후는 그날 04:00(KST), 00:30 · 03:59는 전날 04:00', () => {
+    expect(start('2026-11-20T01:00:00.000Z')).toBe('2026-11-19T19:00:00.000Z'); // 한국 11/20 10:00 → 11/20 04:00 = 11/19 19:00Z
+    expect(start('2026-11-19T19:00:00.000Z')).toBe('2026-11-19T19:00:00.000Z'); // 한국 11/20 04:00 정각
+    expect(start('2026-11-19T18:59:00.000Z')).toBe('2026-11-18T19:00:00.000Z'); // 한국 11/20 03:59 → 11/19 04:00
+    expect(start('2026-11-19T15:30:00.000Z')).toBe('2026-11-18T19:00:00.000Z'); // 한국 11/20 00:30
   });
 });
