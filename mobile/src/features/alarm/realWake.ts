@@ -9,6 +9,7 @@
 //     이벤트가 확정의 표지라(이게 있으면 다시 안 씀) 맨 마지막에 쓰고, 번호(client_event_id)는 그 알람의 그 해제로 정해지는 고정 값 — 중간에 끊겨 다시 눌러도 둘 다 한 번씩만 남음
 //     놓침(MISSED)은 서버 배치(wake-check)가 씀 — 앱은 안 씀
 //     끄지 않고 울림이 끝난 날(해제 기록 없음)도 울린 기록(TRIGGERED) · 놓침이 있으면 확인 화면(확인 알림 단계)을 보여 [일어났어요]로 확정할 수 있음 (G1, 11/19)
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as AlarmCore from '@capstone/alarm-core';
 
 import { reconcile, uploadEvents } from '@/lib/alarmSync';
@@ -20,7 +21,8 @@ import { supabase } from '@/lib/supabase';
 import { requireUserId } from '@/lib/user';
 
 import { STANDALONE_TITLE } from './map';
-import { EARLY_WAKE_MINUTES, LEVELS, toLevel, WAKE_OBSERVE_MINUTES, type Appointment, type EarlyWake, type CancelSnoozeResult, type RingInfo, type Snooze, type WakeCheck } from './types';
+import { clearWakePingNotices } from './wakePing';
+import { AUTO_WAKE_FIX_MINUTES, EARLY_WAKE_MINUTES, LEVELS, toLevel, WAKE_OBSERVE_MINUTES, type Appointment, type AutoWake, type EarlyWake, type CancelSnoozeResult, type RingInfo, type Snooze, type WakeCheck } from './types';
 import { evaluateWake, pickDismissedAt, thetaReachedAt, WAKE_PROMPT_WINDOW_MINUTES, WAKE_THETA_MINUTES, type UseSpan } from './wake';
 
 // 미룬 알람의 Snooze.minutes에 넣는 참고 값 — 폰 list()는 고른 분을 안 돌려줘서 기본 미루기 시간(10분)을 넣음.
@@ -137,9 +139,11 @@ export async function getSnooze(): Promise<Snooze | null> {
 //   H08 판정이 시작되지 않고 서버가 약 49분 뒤 놓침(MISSED)으로 적음. 그래서 그 알람의 DISMISSED(입력 출처 MANUAL)를 남기고 기상 확인으로 이어가게 알림
 //   순서: 기록 → 폰 예약 지우기. 기록이 막히면(오프라인) 예약을 그대로 두어 알람이 다시 울리게 하고 던짐 — 반대 순서면 예약만 지워진 채 판정이 영영 없음
 //   기록 번호는 그 알람의 그 회차(처음 예약 시각)로 정한 고정 값이라, 지우기가 중간에 끊겨 다시 눌러도 한 줄만 남음. 기상이 아닌 알람은 지금대로 예약만 지움
+//   예약을 지운 뒤 폰에 해제 + 10분 판정을 검 (AlarmCore.scheduleWakeJudge) — 폰 안에서 끈 것과 같은 길이라 앱을 닫아도 10분 뒤 자동 확정 · 확인 알림이 뜸 (G13)
 export async function cancelSnooze(alarmId: string): Promise<CancelSnoozeResult> {
   const scheduled = (await AlarmCore.list()).find((a) => a.id === alarmId);
   const wake = scheduled?.type === 'WAKE';
+  const dismissedAt = now();
   if (scheduled && wake) {
     const userId = await requireUserId();
     const { error } = await supabase.from('alarm_events').upsert(
@@ -147,7 +151,7 @@ export async function cancelSnooze(alarmId: string): Promise<CancelSnoozeResult>
         user_id: userId,
         alarm_id: alarmId,
         event_type: 'DISMISSED',
-        event_at: now().toISOString(),
+        event_at: dismissedAt.toISOString(),
         client_event_id: stableUuid('snooze-cancel-dismissed', alarmId, scheduled.atMillis),
         input_source: 'MANUAL',
       },
@@ -156,6 +160,8 @@ export async function cancelSnooze(alarmId: string): Promise<CancelSnoozeResult>
     if (error) throw error;
   }
   await AlarmCore.cancel(alarmId);
+  // 해제와 같은 길 — 폰이 해제 + 10분 판정(자동 확정 · 확인 알림)을 걸어 앱을 안 열어도 이어짐 (G13). 서버 기록의 해제 시각과 같은 값이라 확정 번호도 같음. 못 걸어도 앱이 열릴 때 재판정
+  if (scheduled && wake) await AlarmCore.scheduleWakeJudge(alarmId, dismissedAt.getTime()).catch(() => {});
   return { wakeCheck: wake };
 }
 
@@ -168,8 +174,10 @@ type WakeContext = {
   title: string;
   groupId: string | null;
   groupName: string | null;
+  alarmAt: Date | null; // 그 기상 알람의 울릴 시각 (서버 alarms.scheduled_at) — 하루 기록의 날짜(알람 기준일)를 정함 (G14)
   dismissedAt: Date | null; // 판정에 쓸 해제 시각
   confirmed: { at: Date; how: 'self' | 'auto' } | null;
+  corrected: boolean; // 자동 확정을 [아니에요]로 취소함 — 같은 해제로는 다시 자동 확정하지 않고 확인 알림 단계로 (G9)
   rang: boolean; // 해제 기록이 없어도 이 알람이 울린 기록(TRIGGERED)이나 놓침(MISSED)이 있음 — 끄지 않고 울림이 끝난 뒤에도 [일어났어요]를 누를 수 있게 (G1)
 };
 
@@ -195,10 +203,10 @@ async function pendingRings(alarmId: string): Promise<boolean> {
 
 async function loadWakeContext(userId: string, alarmId: string): Promise<WakeContext | null> {
   if (!isUuid(alarmId)) return null; // 가짜 데이터 시절 주소(a1:WAKE)가 남아 있어도 DB 형식 오류 대신 "없음"
-  const [alarm, events, pending, pendingRang] = await Promise.all([
+  const [alarm, events, pending, pendingRang, correctedMark] = await Promise.all([
     supabase
       .from('alarms')
-      .select('alarm_id, alarm_type, appointment_participants(appointments(title, group_id, groups(group_name)))')
+      .select('alarm_id, alarm_type, scheduled_at, appointment_participants(appointments(title, group_id, groups(group_name)))')
       .eq('alarm_id', alarmId)
       .eq('user_id', userId)
       .maybeSingle(),
@@ -211,6 +219,7 @@ async function loadWakeContext(userId: string, alarmId: string): Promise<WakeCon
       .order('event_at'),
     pendingDismissals(alarmId),
     pendingRings(alarmId),
+    correctedDismissal(alarmId),
   ]);
   if (alarm.error) throw alarm.error;
   if (events.error) throw events.error;
@@ -221,13 +230,16 @@ async function loadWakeContext(userId: string, alarmId: string): Promise<WakeCon
   const confirmedRow = rows.find((r) => r.event_type === 'WAKE_CONFIRMED');
   const confirmed = confirmedRow ? { at: parseDbTime(confirmedRow.event_at), how: confirmedRow.input_source === 'USAGE' ? ('auto' as const) : ('self' as const) } : null;
   const dismissals = [...rows.filter((r) => r.event_type === 'DISMISSED').map((r) => parseDbTime(r.event_at)), ...pending.map((p) => p.at)];
+  const dismissedAt = pickDismissedAt(dismissals, confirmed?.at ?? null);
   return {
     alarmId,
     title: appointment?.title ?? STANDALONE_TITLE,
     groupId: appointment?.group_id ?? null,
     groupName: appointment?.groups?.group_name ?? null,
-    dismissedAt: pickDismissedAt(dismissals, confirmed?.at ?? null),
+    alarmAt: alarm.data.scheduled_at ? parseDbTime(alarm.data.scheduled_at) : null,
+    dismissedAt,
     confirmed,
+    corrected: isCorrectedFor(correctedMark, dismissedAt),
     rang: pendingRang || rows.some((r) => r.event_type === 'TRIGGERED' || r.event_type === 'MISSED'),
   };
 }
@@ -314,10 +326,19 @@ async function writeConfirmation(userId: string, ctx: WakeContext, wokeAt: Date,
   if (event.error) throw event.error;
 }
 
+// 하루 기록의 날짜 = 알람이 울린 날 — 서버 private.wake_day와 같은 규칙: 확인이 알람 시각의 [6시간 전, 18시간 뒤) 안이면 알람의 한국 날짜, 아니면 확인한 날
+//   자정을 넘겨 확인해도(23:50 알람 → 00:10 확인) 서버 트리거가 만드는 줄과 같은 날이라 하루 기록이 둘로 안 갈림 (G14)
+const WAKE_DAY_BEFORE_MS = 6 * 60 * MINUTE_MS;
+const WAKE_DAY_AFTER_MS = 18 * 60 * MINUTE_MS;
+export function wakeDay(alarmAt: Date | null, wokeAt: Date): string {
+  if (alarmAt && wokeAt.getTime() >= alarmAt.getTime() - WAKE_DAY_BEFORE_MS && wokeAt.getTime() < alarmAt.getTime() + WAKE_DAY_AFTER_MS) return dayKey(alarmAt);
+  return dayKey(wokeAt);
+}
+
 // 그날 기록의 빈 칸(기상 확인 · 해제 시각)만 채움 — 이미 있는 값은 덮지 않아서 몇 번을 불러도 같은 결과
 async function writeDailyRecord(userId: string, ctx: WakeContext, wokeAt: Date): Promise<void> {
   const eventAt = wokeAt.toISOString();
-  const day = dayKey(wokeAt);
+  const day = wakeDay(ctx.alarmAt, wokeAt);
   const record = await supabase.from('daily_records').select('record_id, wake_confirmed_at, wake_reported_at').eq('user_id', userId).eq('record_date', day).maybeSingle();
   if (record.error) throw record.error;
   const reportedAt = ctx.dismissedAt?.toISOString() ?? null;
@@ -349,6 +370,8 @@ function settle(userId: string, ctx: WakeContext, wokeAt: Date, how: 'self' | 'a
   if (running) return running;
   const task = writeConfirmation(userId, ctx, wokeAt, how)
     .then(() => dismissWakePrompt(ctx.alarmId))
+    .then(() => clearWakePingNotices()) // 친구가 보낸 깨우기 알림도 거둠 (NEW-1)
+    .then(() => clearCorrected(ctx.alarmId))
     .finally(() => writing.delete(ctx.alarmId));
   writing.set(ctx.alarmId, task);
   return task;
@@ -392,6 +415,10 @@ export async function getWakeCheck(alarmId?: string): Promise<WakeCheck | null> 
   }
 
   const evaluation = evaluateWake({ dismissedAt: ctx.dismissedAt, now: current, spans: await readSpans(ctx.dismissedAt, current) });
+  // 자동 확정을 [아니에요]로 취소한 알람은 다시 자동 확정하지 않고 확인 알림 단계(직접 [일어났어요])로 (G9)
+  if (ctx.corrected && current.getTime() >= ctx.dismissedAt.getTime() + WAKE_OBSERVE_MINUTES * MINUTE_MS) {
+    return toCheck(ctx, { phase: 'prompt', usage: evaluation.usage, recent: evaluation.recent, confirmed: null });
+  }
   if (evaluation.phase === 'auto' && evaluation.reachedAt) {
     await settle(userId, ctx, evaluation.reachedAt, 'auto');
     return toCheck(ctx, { phase: 'observing', usage: evaluation.usage, recent: evaluation.recent, confirmed: { at: evaluation.reachedAt, how: 'auto' } });
@@ -457,6 +484,107 @@ export async function recheckRecentWakes(): Promise<string[]> {
 // 확인 알림 · 놓침 단계는 시간과 사용 구간으로 정해지고(getWakeCheck), 놓침(MISSED)은 서버 배치가 기록함 — 앱이 따로 남길 것이 없음
 // 확인 알림에도 응답이 없으면 알람을 다시 울리지 않고 MISSED만 (D2 = B)
 export async function promptWake(): Promise<void> {}
+
+// ---------------------------------------------------------------------------
+// 기상 정정 (D61 "판정마다 그 자리에서 1탭 정정", G9)
+// ---------------------------------------------------------------------------
+
+// 자동 확정을 취소했다는 표시 — 폰 저장소. 서버에는 정정 기록을 남길 이벤트 종류가 없어 폰에만 둠 (다른 기기 · 재설치에서는 다시 자동 확정될 수 있음, PR 본문 "서버 필요 사항")
+const CORRECTED_KEY = 'respec.wake.corrected.';
+
+// 표시 값 = 취소한 해제 시각(ms). 같은 알람 id가 다음 회차에 다시 쓰여도 해제 시각이 다르면 막지 않고, 해제 12시간 뒤에는 버림
+const CORRECTED_TTL_MS = 12 * 60 * MINUTE_MS;
+
+async function correctedDismissal(alarmId: string): Promise<number | null> {
+  try {
+    const raw = await AsyncStorage.getItem(CORRECTED_KEY + alarmId);
+    const at = raw == null ? NaN : Number(raw);
+    return Number.isFinite(at) ? at : null;
+  } catch {
+    return null;
+  }
+}
+
+// 이 해제에 대해 취소 표시가 있고 아직 12시간이 안 지났는가
+function isCorrectedFor(marked: number | null, dismissedAt: Date | null): boolean {
+  return marked != null && dismissedAt != null && marked === dismissedAt.getTime() && now().getTime() - marked < CORRECTED_TTL_MS;
+}
+
+async function markCorrected(alarmId: string, dismissedAt: Date): Promise<void> {
+  try {
+    await AsyncStorage.setItem(CORRECTED_KEY + alarmId, String(dismissedAt.getTime()));
+  } catch {
+    // 못 쓰면 이번 실행에만 — 취소 자체는 서버에 이미 반영
+  }
+}
+
+async function clearCorrected(alarmId: string): Promise<void> {
+  try {
+    await AsyncStorage.removeItem(CORRECTED_KEY + alarmId);
+  } catch {
+    // 남아도 확정 뒤에는 쓰이지 않음
+  }
+}
+
+// 자동(USAGE)으로 확정한 기상 가운데 확정 뒤 60분 안인 가장 최근 한 건 — 홈 카드 "기상 오전 7:11 [아니에요]". 취소하면 그 기록이 지워져 이 읽기에 안 나옴
+//   덧붙임 카드라 못 읽어도 홈이 막히지 않게 부르는 쪽이 삼킴
+export async function getAutoWake(): Promise<AutoWake | null> {
+  const userId = await requireUserId();
+  const since = new Date(now().getTime() - AUTO_WAKE_FIX_MINUTES * MINUTE_MS);
+  const { data, error } = await supabase
+    .from('alarm_events')
+    .select('alarm_id, event_at')
+    .eq('user_id', userId)
+    .eq('event_type', 'WAKE_CONFIRMED')
+    .eq('input_source', 'USAGE')
+    .gte('event_at', since.toISOString())
+    .order('event_at', { ascending: false })
+    .limit(1);
+  if (error) throw error;
+  const row = data?.[0];
+  return row ? { alarmId: row.alarm_id, at: parseDbTime(row.event_at) } : null;
+}
+
+// [아니에요] — 자동 확정한 기상을 그 자리에서 취소하고 확인 알림 단계(H08)로 되돌림. at = 홈 카드가 보여 준 그 확정 기록의 시각
+//   알람 id + 확정 시각 + USAGE로 좁혀 그 한 건만 지움 — 같은 알람 행이 다음 회차로 재사용돼도 다른 날 · 다른 기록은 안 지움. 버튼 · 확인으로 확정한 기록은 안 지움(false)
+//   순서: 취소 표시(폰, 해제 시각과 함께) → 그날 하루 기록의 기상 칸 비우기(확정 시각이 그 값 그대로일 때만) → 확정 기록 지우기
+//   확정 기록을 맨 나중에 지우므로 중간에 끊겨도 카드가 남아 다시 눌러 같은 결과로 이어 감. 던지면 호출하는 쪽이 "다시 눌러 주세요"를 안내
+//   확정 번호는 알람 + 해제 시각으로 정한 고정 값이라 다시 [일어났어요]를 눌러도 같은 번호로 새로 들어감(지워진 뒤라 충돌 없음)
+export async function correctAutoWake(alarmId: string, at: Date): Promise<boolean> {
+  const userId = await requireUserId();
+  const ctx = await loadWakeContext(userId, alarmId);
+  if (!ctx) return false;
+  const found = await supabase
+    .from('alarm_events')
+    .select('event_at')
+    .eq('user_id', userId)
+    .eq('alarm_id', alarmId)
+    .eq('event_type', 'WAKE_CONFIRMED')
+    .eq('input_source', 'USAGE')
+    .eq('event_at', at.toISOString())
+    .limit(1);
+  if (found.error) throw found.error;
+  const confirmedAt = found.data?.[0]?.event_at;
+  if (!confirmedAt) return false; // 이미 취소했거나 자동 확정이 아님
+  if (ctx.dismissedAt) await markCorrected(alarmId, ctx.dismissedAt);
+  const cleared = await supabase
+    .from('daily_records')
+    .update({ wake_confirmed_at: null })
+    .eq('user_id', userId)
+    .eq('record_date', wakeDay(ctx.alarmAt, parseDbTime(confirmedAt)))
+    .eq('wake_confirmed_at', confirmedAt);
+  if (cleared.error) throw cleared.error;
+  const removed = await supabase
+    .from('alarm_events')
+    .delete()
+    .eq('user_id', userId)
+    .eq('alarm_id', alarmId)
+    .eq('event_type', 'WAKE_CONFIRMED')
+    .eq('input_source', 'USAGE')
+    .eq('event_at', confirmedAt);
+  if (removed.error) throw removed.error;
+  return true;
+}
 
 // 기상 확정 기록. how = self(확인 알림에 직접 응답) → 응답한 지금 시각, auto → 누적 사용이 θ를 넘은 시각 (D14, 못 구하면 지금)
 //   이미 확정한 알람이면 처음 판정 그대로 (두 번 눌러도 한 번만). 화면이 넘기는 판정 시각(at)은 가짜 시나리오 시각이라 쓰지 않음

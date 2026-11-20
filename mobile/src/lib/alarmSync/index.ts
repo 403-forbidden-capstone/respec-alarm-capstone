@@ -360,6 +360,21 @@ async function executePlan(plan: ReconcilePlan): Promise<SyncSummary> {
   return summary;
 }
 
+async function markUnscheduledWhenExactOff(phone: readonly { id: string; nextRingAt: number }[], plan: ReconcilePlan, summary: SyncSummary, only: ReadonlySet<string> | null, nowMs: number): Promise<void> {
+  let allowed = true;
+  try {
+    allowed = await AlarmCore.canScheduleExactAlarms();
+  } catch {
+    return;
+  }
+  if (allowed) return;
+  const known = new Set([...summary.failed.map((f) => f.alarmId), ...plan.cancel]);
+  for (const a of phone) {
+    if (a.nextRingAt <= nowMs || known.has(a.id) || (only && !only.has(a.id))) continue;
+    summary.failed.push({ alarmId: a.id, error: '정확한 알람 권한이 꺼져 있어 폰이 울리지 못해요' });
+  }
+}
+
 // 서버 ↔ 폰 맞추기 — 로그인 직후 · 앱이 앞에 올 때. 실데이터 모드 + 로그인 상태에서만 (아니면 빈 결과)
 //   읽기에 실패하면 던짐 (호출하는 쪽이 다음에 다시 — 폰 예약은 그대로라 알람은 계속 울림)
 export function reconcile(options: ReconcileOptions = {}): Promise<SyncSummary> {
@@ -417,6 +432,9 @@ export function reconcile(options: ReconcileOptions = {}): Promise<SyncSummary> 
     //   출발 · 도착 기록으로 뺀 알람(droppedIds)은 서버에서 읽은 행이라 없는 게 아니라 일부러 뺀 것 — 잘렸어도 지움
     if (truncated) plan.cancel = plan.cancel.filter((id) => forceCancel?.has(id) === true || droppedIds.has(id));
     const summary = await executePlan(plan);
+    // 정확 알람 권한이 꺼졌으면(안드로이드 12) OS가 예약을 지워도 폰 목록(list)은 저장소 기준이라 그대로임 — 아직 안 울린 폰 알람을 "못 건 알람"으로 보고해 홈 빨간 줄이 뜨게 (G15)
+    //   이번에 새로 걸다 실패한 것은 이미 summary.failed에 있음. 권한을 못 읽으면 안 건드림
+    await markUnscheduledWhenExactOff(allPhone, plan, summary, only, nowMs);
     // 맞춘 뒤 훅 — 기다리지 않음. 전체 맞추기가 아니면(alarmIds) whole = false, upcoming은 이번에 맞춘 알람의 참여 행만
     const scope = scopeIds;
     afterSync({ source: 'reconcile', whole: only == null && !truncated, summary, droppedIds: only ? [...only].filter((id) => !listed.has(id)) : undefined, upcoming: upcomingParticipants(scope ? rows.filter((row) => scope.has(row.alarm_id)) : rows), nowMs });
