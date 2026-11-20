@@ -99,9 +99,10 @@ export default async function ch18({ q, as, su, check }) {
     await ev(W.AL.B, W.B, 'TRIGGERED', at('07:00'));
     await ev(W.AL.B, W.B, 'DISMISSED', at('07:03'));
     await ev(W.AL.B, W.B, 'WAKE_CONFIRMED', at('07:13'), 'USAGE');
+    await ev(W.AL.A, W.A, 'WAKE_CONFIRMED', at('07:12', dayPlus(-2)), 'USAGE'); // 이틀 전 같은 알람 행의 옛 확정 — 정정이 지우지 않음(1일 창)
     await ev(W.AL.A, W.A, 'WAKE_CORRECTED', at('07:25'));
     await ev(W.AL.A, W.A, 'WAKE_CONFIRMED', at('07:12', dayPlus(2)), 'USAGE'); // 이틀 뒤 같은 알람 행의 새 판정
-    return eq([await evCount(W.AL.A, 'WAKE_CONFIRMED'), await evCount(W.AL.B, 'WAKE_CONFIRMED')], [1, 1]);
+    return eq([await evCount(W.AL.A, 'WAKE_CONFIRMED'), await evCount(W.AL.B, 'WAKE_CONFIRMED')], [2, 1]);
   });
 
   await check('18-06 정정은 같은 그룹 친구 화면 새로 고침 신호를 보냄(기상 공유를 켠 그룹 · 약속 있는 날) — 이미 앱이 확정을 지운 뒤 정정만 들어와도 신호는 감, 공유를 끄면 안 감', async () => {

@@ -33,6 +33,7 @@ begin
       and e.alarm_id = new.alarm_id
       and e.event_type = 'WAKE_CONFIRMED'
       and e.event_at <= new.event_at
+      and e.event_at >  new.event_at - interval '1 day' -- 막는 쪽(③)과 같은 1일 창: 알람 행이 다음 회차로 재사용돼도 며칠 전 확정은 안 지움
     returning e.event_at, e.alarm_id
   loop
     v_date := private.wake_day(v_conf.alarm_id, v_conf.event_at, v_tz);
