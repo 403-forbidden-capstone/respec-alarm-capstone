@@ -29,7 +29,10 @@ const serverChangedTimes = () => {
   const times: Record<string, string> = { WAKE: '07:45', PREPARE: '09:15', DEPARTURE: '09:35', ARRIVE: '10:15' };
   for (const [type, time] of Object.entries(times)) db.patch('alarms', { alarm_id: g1(type as 'WAKE') }, { scheduled_at: clock.iso(time) });
 };
-const changedPush = () => phone.receivePush({ kind: 'GROUP_APPT_CHANGED', change: 'CHANGED', needsConfirm: false, appointmentId: appointmentIdOf('g1'), groupId: uid('group:g'), recipientUserId: ME, path: '/group' }, 'chg');
+const changedData = (over: Record<string, unknown> = {}) => ({ kind: 'GROUP_APPT_CHANGED', change: 'CHANGED', needsConfirm: false, appointmentId: appointmentIdOf('g1'), groupId: uid('group:g'), recipientUserId: ME, path: '/group', ...over });
+const changedPush = () => phone.receivePush(changedData(), 'chg');
+// G2: 서버가 보이는 알림과 함께 보내는 문구 없는 데이터 푸시 — 앱이 꺼져 있어도 폰이 백그라운드 작업으로 알람을 다시 맞춤 (supabase notify.ts sendGroupPush)
+const changedSilent = (over: Record<string, unknown> = {}) => phone.receiveSilentPush(changedData({ silent: true, ...over }));
 
 const serverCanceled = () => {
   db.remove('alarms', { participant_id: uid('part:g1:user-me') });
@@ -76,14 +79,42 @@ describe('S27 남이 공동 약속 시각 변경', () => {
     .expect({ phoneAlarms: OLD });
 
   changed()
-    .gap('G2')
-    .variant('앱이 꺼진 채 푸시를 받으면(안 눌러도) 폰 알람이 새 시각으로 맞춰져야 함')
+    .variant('앱이 꺼진 채 푸시를 받으면(안 눌러도) 폰 알람이 새 시각으로 — 보이는 알림 + 조용한 데이터 푸시를 백그라운드 작업이 받아 맞춤 (G2)')
     .do(async () => {
       await app.kill();
       serverChangedTimes();
       changedPush();
+      await changedSilent();
     })
     .expect({ phoneAlarms: NEW });
+
+  changed()
+    .variant('조용한 푸시만 와도(알림을 끈 사람 · 차단 쌍) 앱이 꺼진 채 새 시각으로 맞춰짐 — 알림창에는 아무것도 안 뜸')
+    .do(async () => {
+      await app.kill();
+      serverChangedTimes();
+      await changedSilent();
+    })
+    .expect({ phoneAlarms: NEW, tray: [] });
+
+  changed()
+    .variant('받는 사람이 다른 계정이면(같은 폰의 다른 로그인) 조용한 푸시로 알람을 안 맞춤')
+    .do(async () => {
+      await app.kill();
+      serverChangedTimes();
+      await changedSilent({ recipientUserId: 'someone-else' });
+    })
+    .expect({ phoneAlarms: OLD });
+
+  changed()
+    .variant('조용한 푸시가 와도 알람에 닿지 않는 종류(새 멤버)이거나 확인이 필요한 변경(보류)이면 맞추지 않음 — 확인 화면이 저장해야 바뀜')
+    .do(async () => {
+      await app.kill();
+      serverChangedTimes();
+      await phone.receiveSilentPush({ kind: 'GROUP_MEMBER_JOINED', silent: true, groupId: uid('group:g'), recipientUserId: ME, path: '/group' });
+      await changedSilent({ needsConfirm: true });
+    })
+    .expect({ phoneAlarms: OLD });
 
   changed()
     .variant('앱이 뒤에 있어도 JS가 살아 있으면 받음 처리가 돌아 새 시각으로 (usePushLinks는 앱 상태를 안 봄)')
@@ -135,12 +166,12 @@ describe('S28 남이 공동 약속 취소', () => {
     .expect({ phoneAlarms: OLD });
 
   canceled()
-    .gap('G2')
-    .variant('앱이 꺼진 채 취소 푸시를 받으면 폰 알람이 지워져야 함 — 안 지우면 취소된 약속 알람이 울림')
+    .variant('앱이 꺼진 채 취소 푸시를 받으면 폰 알람이 지워짐 — 취소된 약속 알람이 울리지 않게 조용한 데이터 푸시가 백그라운드 작업으로 맞춤 (G2)')
     .do(async () => {
       await app.kill();
       serverCanceled();
       canceledPush();
+      await phone.receiveSilentPush({ kind: 'GROUP_APPT_CHANGED', change: 'CANCELED', silent: true, appointmentId: appointmentIdOf('g1'), groupId: uid('group:g'), recipientUserId: ME, path: '/group' });
     })
     .expect({ phoneAlarms: [] });
 });

@@ -5,9 +5,11 @@
 //   · 한 사람의 기상 기록이 몇 건 연달아 들어오므로(울림 · 해제 · 확인) 잠깐 모아서 한 번만 다시 읽음
 //   · 신호 뒤 3초 뒤에 한 번 더 읽음 — 약속 시각 변경 · 취소는 약속 행이 먼저 바뀌고 알람 재계산이 따로 와서, 신호 직후엔 새 약속 시각 + 옛 준비 알람 시각이 보일 수 있음.
 //     신호가 연달아 오면 뒤 읽기는 하나로 묶고, 화면을 떠나면 타이머를 정리
-//   · 자동 판정 기상은 20분 뒤부터 다른 사람에게 보이는데 그때 신호는 없음 — 화면을 다시 열 때 읽힘
+//   · 자동 판정 기상은 20분 뒤부터 다른 사람에게 보이는데 그때 신호는 없음(서버 G6, 11/20 결정: 서버는 그대로) — 그래서 화면이 열려 있는 동안 1분마다 조용히 다시 읽음(pollWhileActive).
+//     화면을 떠나면(탭 이동 · 뒤로) 멈추고, 앱이 뒤로 가면 멈추고 앞으로 오면 다시 시작. '조용히' = 다시 읽기만 하고 로딩 표시는 안 바뀜(useLoad reload는 옛 값을 둔 채 바꿈)
 //   · 가짜 모드에서는 구독하지 않음 (웹 미리보기가 없는 서버에 붙지 않게)
-import { useEffect, useRef, useState } from 'react';
+import { useFocusEffect } from 'expo-router';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { AppState, type AppStateStatus } from 'react-native';
 
 import { useMode } from '@/lib/mode';
@@ -16,6 +18,7 @@ import { useLoad } from '@/lib/useLoad';
 
 export const WAKE_RELOAD_DELAY_MS = 400;
 export const WAKE_RELOAD_AGAIN_MS = 3000; // 신호로 읽은 뒤 한 번 더 읽는 시간
+export const WAKE_POLL_MS = 60_000; // 그룹 화면이 열려 있는 동안 조용히 다시 읽는 간격 (G6: 자동 판정 공개 +20분에는 신호가 없음)
 
 type WatchOptions = {
   delayMs?: number;
@@ -83,6 +86,25 @@ export function watchForeground(onActive: () => void): () => void {
   return () => sub.remove();
 }
 
+// 앱이 앞에 있는 동안만 intervalMs마다 tick을 부름 — 앱이 뒤로 가면(background · inactive) 멈추고 앞으로 오면 다시 시작(그때 읽기는 watchForeground가 함, 여기선 부르지 않음).
+//   화면이 열려 있는 동안만 부를 것(useWakeLoad가 포커스 안에서만 붙임). 돌려주는 함수로 끊음
+export function pollWhileActive(tick: () => void, intervalMs: number = WAKE_POLL_MS): () => void {
+  let timer: ReturnType<typeof setInterval> | null = null;
+  const start = () => {
+    if (!timer) timer = setInterval(tick, intervalMs);
+  };
+  const stop = () => {
+    if (timer) clearInterval(timer);
+    timer = null;
+  };
+  if (AppState.currentState === 'active') start();
+  const sub = AppState.addEventListener('change', (next) => (next === 'active' ? start() : stop()));
+  return () => {
+    stop();
+    sub.remove();
+  };
+}
+
 // 옛 값을 최신처럼 보이면 안 되는 때 — 값은 있는데 다시 읽기가 실패했거나 실시간이 끊김 (값이 없으면 오류 화면이 따로)
 export const isWakeStale = ({ hasData, error, linkUp }: { hasData: boolean; error: Error | null; linkUp: boolean }) => hasData && (error != null || !linkUp);
 
@@ -121,6 +143,9 @@ export function useWakeLoad<T>(load: (date: string | null) => Promise<T>, groupI
 
   // 앱이 앞에 오면 오늘 것을 다시 (가짜 모드도 — 시나리오 시각이 흘렀을 수 있음)
   useEffect(() => watchForeground(() => void reload()), [reload]);
+
+  // 화면이 앞에 열려 있는 동안 1분마다 조용히 다시 읽음 (G6) — 신호가 없는 때(자동 판정 +20분 공개)도 따라잡음. 화면을 떠나면(blur) 멈춤, 가짜 모드(key 없음)는 안 읽음
+  useFocusEffect(useCallback(() => (key ? pollWhileActive(() => void reload()) : undefined), [key, reload]));
 
   return { ...result, stale: isWakeStale({ hasData: data != null, error, linkUp }) };
 }
