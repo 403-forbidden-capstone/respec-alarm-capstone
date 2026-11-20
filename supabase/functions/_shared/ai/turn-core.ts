@@ -16,7 +16,7 @@ import type {
 } from "./types.ts";
 import { IMPORTANCE_LABEL } from "./types.ts";
 import { FACT_KIND_KO, FIXABLE_FACT_KINDS, addDays, spokenTime, weekdayOf } from "./view.ts";
-import { seoulLocal } from "./ko.ts";
+import { isQuestion, seoulLocal, splitSentences } from "./ko.ts";
 import { toMinutes } from "./guards.ts";
 import { RING_KINDS } from "../calc/types.ts";
 
@@ -427,6 +427,15 @@ export function wakeAskOf(s: TurnState, j: number): { spoken: string; sentence: 
     return { spoken, sentence: `${(c.draft as ApptDraft).title} 전에 할 일이 있으시군요. 추천 기상 시각은 ${spoken}인데, 그대로 일어나실 건가요, 더 일찍 일어나실 건가요?` };
   }
   return null;
+}
+
+/**
+ * T1 답이 기상 확인을 제대로 물었는지 — 물음 문장 하나 안에 정확한 기상 시각(앞말 포함, 뒤에 다른 분이 붙지 않음)과 일어나는 말이 있고, 출발 · 준비물을 묻지 않을 때만.
+ * 애매하면 false (서버 문장으로 보완). "오전 1시"는 "오전 11시" · "오전 1시 30분"과 맞지 않음
+ */
+export function asksWake(reply: string, spoken: string): boolean {
+  const at = new RegExp(`${spoken}(?!\\s*\\d+분)`, "u");
+  return splitSentences(reply).some((s) => isQuestion(s) && at.test(s) && /일어나|일어날|깨/u.test(s) && !/출발|준비물|챙기|챙길|준비 시작/u.test(s));
 }
 
 /** 카드가 READY일 때 처리 결과에 '확인 필요' 줄을 (다시) 넣는다 — 같은 c#은 한 줄로

@@ -25,14 +25,14 @@ import {
   callsCapReached, countCallsSince, countSessionsSince, limitsOf, loadSession, recordCalls, recordQuestion, saveSession,
   type CallLog, type ServerState, type SessionRow, type StoredTurn,
 } from './session.ts';
-import { applyCardAction, applyFast, applyTaskResults, dateKo, wakeAskOf, dayStartIso, lifeDate, needKinds, eventAt, itemKey, prepAsked, type Rejected, type TurnState } from './turn-core.ts';
+import { applyCardAction, applyFast, applyTaskResults, dateKo, asksWake, wakeAskOf, dayStartIso, lifeDate, needKinds, eventAt, itemKey, prepAsked, type Rejected, type TurnState } from './turn-core.ts';
 import type { TodoPlan } from './final-core.ts';
 import { saveTodos } from './voice-commit.ts';
 import type { Act, CardAction, Context, FastExtract, Fix, ServerEvent, T1Output, TaskResults, TurnLimits } from './types.ts';
 import { readTurnRequest, type TurnRequest } from './voice-requests.ts';
 import { ctxOf, publicCard, publicFix, toTurnState, turnsOf, withTurnState, type PublicCard, type PublicFix } from './voice-state.ts';
 import { contextVars, viewTranscript } from './view.ts';
-import { isQuestion, questionCount, seoulLocal, splitSentences } from './ko.ts';
+import { isQuestion, seoulLocal, splitSentences } from './ko.ts';
 
 /** 서버 전체 마감(ms) · 다시 부르기에 필요한 남은 시간 (설계 메모 6 · 11절) */
 export const TURN_DEADLINE_MS = 30_000; // 11/12: 18초 → 30초 (T2F 15 + T1 15). 앱 TURN_TIMEOUT_MS 40초 · Edge Function 벽시계 150초 안
@@ -186,7 +186,7 @@ async function t1Reply(
   run.flag(res, g.flags);
   // 나가기 전 할 일의 기상 확인 — 답이 오기 전엔 카드를 저장할 수 없어 다른 물음보다 먼저. T1이 이 시각을 묻지 않았으면 물음을 서버 문장으로 바꿈 (위기 턴은 제외)
   const wake = view(false).safety.latestUser ? null : wakeAskOf(ts, j);
-  if (wake !== null && !(g.reply.includes(wake.spoken.slice(wake.spoken.indexOf(' ') + 1)) && questionCount(g.reply) > 0)) {
+  if (wake !== null && !asksWake(g.reply, wake.spoken)) {
     const kept = splitSentences(g.reply).filter((s) => !isQuestion(s));
     g = { ...g, reply: [...kept, wake.sentence].join(' '), acts: [{ type: 'CLARIFY', ref: null }], end: false, actions: [...g.actions, 'ask_wake'] };
   }

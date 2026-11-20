@@ -507,7 +507,7 @@ test('회귀 1: 실제 발화 — 장소 고르기 뒤 계산이 끝나면 T1이
 });
 
 test('회귀 1-1: T1이 기상 시각을 제대로 물으면 그 답을 그대로 둠', async () => {
-  const own = { reply: '추천 기상은 오전 7시 40분이에요. 이 시각에 일어나실 건가요?', acts: [{ type: 'CLARIFY', ref: null }], end: false };
+  const own = { reply: '추천 기상 시각은 오전 7시 40분인데, 그대로 일어나실 건가요?', acts: [{ type: 'CLARIFY', ref: null }], end: false };
   const { db, deps, sid, rev } = await start({ T2F: [lecture()], T1: [own] });
   const t1 = text(sid, rev, INCIDENT);
   const r1 = (await handleVoiceTurn(deps, t1)) as VoiceTurnOut;
@@ -566,4 +566,15 @@ test('회귀 6: 음성(Live) — 장소 고르기 뒤 results에도 기상 질�
   const r3 = (await handleVoiceTurn(deps, results(sid, r2.rev, cid()))) as VoiceTurnOut;
   assert.deepEqual(r3.ask, ["'수업' 기상 알람이 07:40으로 계산됨 — 나가기 전 할 일(할 일)이 있다고 했으니 이 시각에 일어날지, 몇 시에 일어날지"]);
   assert.equal(r3.reply?.text, WAKE_ASK);
+});
+
+test('회귀 7 (PR #580 리뷰): T1이 기상 시각을 말했지만 준비물을 물으면 기상 질문으로 바꿈', async () => {
+  const sneaky = { reply: '출발은 오전 7시 40분이 좋아요. 준비물도 있나요?', acts: [{ type: 'REFLECT', ref: null }], end: false };
+  const { db, deps, sid, rev } = await start({ T2F: [lecture()], T1: [sneaky] });
+  const t1 = text(sid, rev, INCIDENT);
+  const r1 = (await handleVoiceTurn(deps, t1)) as VoiceTurnOut;
+  const r2 = (await handleVoiceTurn(deps, results(sid, r1.rev, t1.client_turn_id))) as VoiceTurnOut;
+  assert.equal(r2.reply?.text, `출발은 오전 7시 40분이 좋아요. ${WAKE_ASK}`);
+  assert.ok(lastAi(db)?.guard?.includes('ask_wake'));
+  assert.match(r2.ask?.[0] ?? '', /07:40으로 계산됨/); // Live 전달은 그대로
 });
