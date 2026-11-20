@@ -5,7 +5,7 @@
 export default async function ch18({ q, as, su, check }) {
   const id = (n) => `b7b00000-0000-4000-8000-${String(n).padStart(12, '0')}`;
   const KST = 9 * 3600_000;
-  const dayPlus = (n) => new Date(Date.parse(`${new Date(Date.now() + KST).toISOString().slice(0, 10)}T00:00:00Z`) + n * 86400_000).toISOString().slice(0, 10);
+  const dayPlus = (n) => new Date(Date.parse(`${new Date(Date.now() + KST - 4 * 3600_000).toISOString().slice(0, 10)}T00:00:00Z`) + n * 86400_000).toISOString().slice(0, 10);
   const TODAY = dayPlus(0);
   const at = (hhmm, day = TODAY) => `${day}T${hhmm}:00+09:00`;
   const eq = (got, want) => (JSON.stringify(got) === JSON.stringify(want) ? true : { got, want });

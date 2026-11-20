@@ -209,7 +209,7 @@ export default async function ch07({ q, as, su, svc, check, expectErr }) {
     const s4 = of(await rows(A, g, D, at('08:25')), B);
     // 공개 함수는 조회자 시간대 기준 어제~내일만 허용하므로 오늘(한국) 데이터로 응답 칸을 확인
     // 단계 전이는 고정 날짜 D를 쓰는 private 함수 검사로 유지
-    const [{ today: shapeDay }] = await q("select (now() at time zone 'Asia/Seoul')::date::text as today");
+    const [{ today: shapeDay }] = await q("select ((now() at time zone 'Asia/Seoul') - interval '4 hours')::date::text as today");
     const shapeGroup = await mkGroup(A, [B], [B]);
     await appt(A, shapeGroup, at('10:00', shapeDay));
     await wakeAlarm(A, at('07:00', shapeDay));
@@ -316,7 +316,7 @@ export default async function ch07({ q, as, su, svc, check, expectErr }) {
     const g = await mkGroup(A, [], [A]);
     // 공개 함수의 날짜 범위는 조회자 시간대 기준이므로 오늘(한국) 날짜를 사용
     // private 기상 상태 시나리오의 고정 날짜 D='2026-11-10'은 변경하지 않음
-    const [{ today }] = await q("select (now() at time zone 'Asia/Seoul')::date::text as today");
+    const [{ today }] = await q("select ((now() at time zone 'Asia/Seoul') - interval '4 hours')::date::text as today");
     await appt(A, g, at('10:00', today)); await wakeAlarm(A, at('07:00', today));
     await as(A);
     const r = await q(`select * from public.get_group_wake($1, $2::date)`, [g, today]);

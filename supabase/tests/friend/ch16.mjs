@@ -5,7 +5,7 @@
 export default async function ch16({ q, as, su, svc, check, expectErr }) {
   const id = (n) => `b6a00000-0000-4000-8000-${String(n).padStart(12, '0')}`;
   const D = '2026-11-10';                    // 고정 날짜(한국 시간). 공개 함수는 오늘 기준이라 따로 TODAY를 씀
-  const TODAY = new Date(Date.now() + 9 * 3600_000).toISOString().slice(0, 10);
+  const TODAY = new Date(Date.now() + 9 * 3600_000 - 4 * 3600_000).toISOString().slice(0, 10);
   const at = (hhmm, day = D) => `${day}T${hhmm}:00+09:00`;
   const iso = (v) => (v == null ? null : new Date(v).toISOString());
 

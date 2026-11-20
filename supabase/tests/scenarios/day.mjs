@@ -30,7 +30,7 @@ export default async function scenarioDay({ q, as, su, svc, check, knownGap, cla
   // 시각 — 오늘(한국 시간) 기준
   // ---------------------------------------------------------------------
   const KST = 9 * 3600_000;
-  const TODAY = new Date(Date.now() + KST).toISOString().slice(0, 10);
+  const TODAY = new Date(Date.now() + KST).toISOString().slice(0, 10); // 달력 오늘 — 시나리오는 기준일을 항상 날짜로 지정해 부르고, 참여 · 알람 정리(private.day_start)는 달력 오늘 0시 기준이라 이 날짜를 씀
   const dayPlus = (n) => new Date(Date.parse(`${TODAY}T00:00:00Z`) + n * 86400_000).toISOString().slice(0, 10);
   const T = (hhmm, off = 0) => `${dayPlus(off)}T${hhmm.length === 5 ? `${hhmm}:00` : hhmm}+09:00`;
   const hm = (v) => (v == null ? null : new Date(new Date(v).getTime() + KST).toISOString().slice(11, 16));

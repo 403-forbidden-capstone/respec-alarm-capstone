@@ -8,7 +8,7 @@
 export default async function ch13({ q, as, su, svc, check, expectErr }) {
   const id = (n) => `bd000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
   const FUTURE = '2099-03-01';
-  const TODAY_KST = () => new Date(Date.now() + 9 * 3600_000).toISOString().slice(0, 10);       // 기상 조회는 어제~내일만 받으므로(이슈 #431) 그룹 기상을 보는 시험은 오늘(한국)로
+  const TODAY_KST = () => new Date(Date.now() + 9 * 3600_000 - 4 * 3600_000).toISOString().slice(0, 10);       // (새벽 4시 기준일) 기상 조회는 어제~내일만 받으므로(이슈 #431) 그룹 기상을 보는 시험은 오늘(한국)로
   const at = (hhmm, day = FUTURE) => `${day}T${hhmm}:00+09:00`;
 
   const join_ = async (n, nickname) => {

@@ -174,8 +174,8 @@ const B = '22222222-2222-4222-8222-222222222222';
 const C = '33333333-3333-4333-8333-333333333333';
 const D = '44444444-4444-4444-8444-444444444444';
 const E = '55555555-5555-4555-8555-555555555555';
-const KST0 = `((now() at time zone 'Asia/Seoul')::date::timestamp at time zone 'Asia/Seoul')`;  // 오늘 0시(한국)
-const TODAY = `(now() at time zone 'Asia/Seoul')::date`;
+const KST0 = `(((now() at time zone 'Asia/Seoul') - interval '4 hours')::date::timestamp at time zone 'Asia/Seoul')`;  // 오늘(그룹 화면의 새벽 4시 기준일, 11/20) 0시(한국) — 0~4시에 돌려도 기준일이 어긋나지 않게
+const TODAY = `((now() at time zone 'Asia/Seoul') - interval '4 hours')::date`;  // 오늘 기준일(KST 지금 − 4시간의 날짜)
 
 
 // ---------------------------------------------------------------------
