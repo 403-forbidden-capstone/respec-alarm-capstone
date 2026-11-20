@@ -186,5 +186,5 @@ describe('S29 내가 약속에서 빠짐 · 시각을 바꿈', () => {
     });
 
   retimed().variant('시각 변경 — 남은 알람은 새 시각으로 걸림').expect({ phoneAlarms: ['ARRIVE@10:15'] });
-  retimed().gap('G5').variant('시각 변경 — 이미 울려 남은 옛 도착 확인 알림도 정리돼야 함 (응답에 지울 알람이 없어 남음)').expect({ tray: [] });
+  retimed().variant('시각 변경 — 이미 울려 남은 옛 도착 확인 알림도 정리됨 (응답에 지울 알람이 없어도, 저장소 밖 알림이라도)').expect({ tray: [] });
 });

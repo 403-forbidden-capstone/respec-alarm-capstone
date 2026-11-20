@@ -15,6 +15,7 @@ jest.mock('@/lib/supabase', () => ({
     rpc: (name: string, args?: unknown) => mockFake.client.rpc(name, args),
   },
 }));
+jest.mock('@/lib/alarmSync', () => ({ afterEvent: async () => {} })); // 그룹 나가기 뒤 폰 정리는 시나리오 시험(__scenarios__)이 봄
 jest.mock('@/lib/user', () => ({ requireUserId: async () => '00000000-0000-4000-8000-000000000001' }));
 jest.mock('@/lib/clock', () => ({ now: () => new Date('2026-10-19T12:00:00.000Z') })); // 한국 시간 21:00
 

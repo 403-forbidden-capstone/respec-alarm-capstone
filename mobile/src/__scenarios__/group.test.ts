@@ -65,7 +65,7 @@ describe('S25 그룹 나가기', () => {
 
   left().variant('나가기는 내 멤버 줄만 LEFT로 씀').expect({ writes: ['group_members.update(invite_status)'], check: () => expect(myMember().invite_status).toBe('LEFT') });
 
-  left().gap('G4').variant('앱을 연 채 나가면 나간 그룹 약속의 폰 알람이 바로 정리돼야 함').expect({ phoneAlarms: [] });
+  left().variant('앱을 연 채 나가면 나간 그룹 약속의 폰 알람이 바로 정리돼야 함').expect({ phoneAlarms: [] });
 
   left()
     .limit('앱 열림만')
@@ -86,8 +86,11 @@ describe('S25 그룹 나가기', () => {
 
   // 도착 확인 알림(10:00)이 이미 울려 알림창에 남아 있는 때 — 출발 09:20은 울렸다가 해제함
   left({ DEPARTURE: '09:20', ARRIVE: '10:00' }, '10:05')
-    .gap('G5')
-    .variant('이미 울려 알림창에 남은 도착 확인 알림도 정리돼야 함 — 앱이 다시 앞에 와도 남음')
+    .variant('이미 울려 알림창에 남은 도착 확인 알림도 나간 직후 정리됨 (앱이 다시 앞에 오기 전에)')
+    .expect({ tray: [] });
+
+  left({ DEPARTURE: '09:20', ARRIVE: '10:00' }, '10:05')
+    .variant('앱이 다시 앞에 와도 그대로 정리돼 있음')
     .do(async () => {
       app.background();
       await app.foreground();
