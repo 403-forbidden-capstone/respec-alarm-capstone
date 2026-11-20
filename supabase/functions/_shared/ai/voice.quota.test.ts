@@ -482,3 +482,88 @@ test('글: 같은 흐름 — 계산 뒤 T1이 글로 묻고(ask는 함께 오지
   assert.deepEqual([r2.cards[0].pre_task?.wake, r2.cards[0].edit], ['ASK', null]);
   assert.deepEqual(fake.order, ['T2F', 'T1', 'T2F', 'T1']);
 });
+
+// ───────── 11/20 회귀: "나가기 전에 뭐 좀 해야 돼" 뒤 T1이 기상 대신 준비물을 물음 → 서버가 기상 질문으로 바꿈 ─────────
+//   기상 시각은 시험 계산 결과(wake_0740: 기상 07:40 · 준비 07:50 · 출발 08:50) 그대로
+const INCIDENT = '내일 1시에 수업이 있어. 아 근데 나가기 전에 뭐 좀 해야 돼.';
+const lecture = (over: Record<string, unknown> = {}) => ({ ...appt({ title: '수업', time: '13:00', place: '세종대학교' }), pre_tasks: [{ title: '할 일' }], ...over });
+const T1_ITEMS = { reply: '수업 준비물도 따로 챙기실 게 있나요?', acts: [{ type: 'REFLECT', ref: null }], end: false };
+const WAKE_ASK = '수업 전에 할 일이 있으시군요. 추천 기상 시각은 오전 7시 40분인데, 그대로 일어나실 건가요, 더 일찍 일어나실 건가요?';
+const lastAi = (db: FakeDb) => (db.rows('conversation_sessions')[0] as { turns: { role: string; guard?: string[] }[] }).turns.filter((t) => t.role === 'ai').at(-1);
+
+test('회귀 1: 실제 발화 — 장소 고르기 뒤 계산이 끝나면 T1이 준비물을 물어도 기상 질문이 나가고, 답 전엔 저장 안 됨', async () => {
+  const { db, deps, sid, rev } = await start({ T2F: [lecture()], T1: [{ reply: '수업 장소는 카드의 장소 고르기를 눌러 주세요.', acts: [{ type: 'CLARIFY', ref: null }], end: false }, T1_ITEMS] });
+  const t1 = text(sid, rev, INCIDENT);
+  const r1 = (await handleVoiceTurn(deps, t1)) as VoiceTurnOut;
+  assert.deepEqual([r1.next, r1.cards.map((c) => [c.kind, c.draft?.title, c.pre_task])], ['APP_TASKS', [['APPT_NEW', '수업', { title: '할 일', wake: 'ASK', time: null }]]]);
+  const r2 = (await handleVoiceTurn(deps, needsPlace(sid, r1.rev, t1.client_turn_id, '세종대학교'))) as VoiceTurnOut;
+  assert.equal(r2.cards[0].status, 'NEEDS_PLACE');
+  // 사용자가 장소를 고름 → 앱이 새 client_turn_id로 results만
+  const r3 = (await handleVoiceTurn(deps, results(sid, r2.rev, cid()))) as VoiceTurnOut;
+  assert.deepEqual([r3.reply?.text, r3.reply?.acts], [WAKE_ASK, [{ type: 'CLARIFY', ref: null }]]);
+  assert.ok(lastAi(db)?.guard?.includes('ask_wake'));
+  assert.match(r3.ask?.[0] ?? '', /07:40으로 계산됨/); // 음성이면 Live로
+  assert.deepEqual([r3.cards[0].status, r3.cards[0].pre_task?.wake], ['READY', 'ASK']); // 저장(SAVED) 아님
+});
+
+test('회귀 1-1: T1이 기상 시각을 제대로 물으면 그 답을 그대로 둠', async () => {
+  const own = { reply: '추천 기상은 오전 7시 40분이에요. 이 시각에 일어나실 건가요?', acts: [{ type: 'CLARIFY', ref: null }], end: false };
+  const { db, deps, sid, rev } = await start({ T2F: [lecture()], T1: [own] });
+  const t1 = text(sid, rev, INCIDENT);
+  const r1 = (await handleVoiceTurn(deps, t1)) as VoiceTurnOut;
+  const r2 = (await handleVoiceTurn(deps, results(sid, r1.rev, t1.client_turn_id))) as VoiceTurnOut;
+  assert.equal(r2.reply?.text, own.reply);
+  assert.ok(!lastAi(db)?.guard?.includes('ask_wake'));
+});
+
+test('회귀 2: "7시에 일어날래" — 기상만 07:00으로, 준비 · 출발은 그대로(앱 재계산에 WAKE만 넘김)', async () => {
+  const { deps, sid, rev } = await start({ T2F: [lecture(), lecture({ wake_reply: { choice: 'TIME', time: '07:00' } })], T1: [T1_ITEMS] });
+  const t1 = text(sid, rev, INCIDENT);
+  const r1 = (await handleVoiceTurn(deps, t1)) as VoiceTurnOut;
+  const r1b = (await handleVoiceTurn(deps, results(sid, r1.rev, t1.client_turn_id))) as VoiceTurnOut;
+  const r2 = (await handleVoiceTurn(deps, text(sid, r1b.rev, '7시에 일어날래'))) as VoiceTurnOut;
+  assert.equal(r2.next, 'APP_TASKS');
+  assert.deepEqual([r2.cards[0].pre_task, r2.cards[0].edit?.times], [{ title: '할 일', wake: 'SET', time: '07:00' }, { WAKE: '2026-10-30T07:00:00+09:00' }]);
+});
+
+test('회귀 3: "그대로 일어날게" — 계산된 기상 유지, 저장 확인으로 넘어감(기상 질문 다시 안 함)', async () => {
+  const { deps, sid, rev } = await start({ T2F: [lecture(), lecture({ wake_reply: { choice: 'KEEP', time: '' } })], T1: [T1_ITEMS, T1_OK] });
+  const t1 = text(sid, rev, INCIDENT);
+  const r1 = (await handleVoiceTurn(deps, t1)) as VoiceTurnOut;
+  const r1b = (await handleVoiceTurn(deps, results(sid, r1.rev, t1.client_turn_id))) as VoiceTurnOut;
+  const r2 = (await handleVoiceTurn(deps, text(sid, r1b.rev, '그대로 일어날게'))) as VoiceTurnOut;
+  assert.deepEqual([r2.next, r2.cards[0].status, r2.cards[0].pre_task?.wake, r2.cards[0].edit], ['USER', 'READY', 'KEEP', null]);
+  assert.notEqual(r2.reply?.text, WAKE_ASK);
+});
+
+test('회귀 4: 할 일이 없으면 기상 질문 없이 기존 흐름 (T1 답 그대로)', async () => {
+  const { db, deps, sid, rev } = await start({ T2F: [appt({ title: '수업', time: '13:00', place: '세종대학교' })], T1: [T1_ITEMS] });
+  const t1 = text(sid, rev, '내일 1시에 수업 있어.');
+  const r1 = (await handleVoiceTurn(deps, t1)) as VoiceTurnOut;
+  const r2 = (await handleVoiceTurn(deps, results(sid, r1.rev, t1.client_turn_id))) as VoiceTurnOut;
+  assert.deepEqual([r2.reply?.text, r2.ask, r2.cards[0].pre_task], [T1_ITEMS.reply, undefined, null]);
+  assert.ok(!lastAi(db)?.guard?.includes('ask_wake'));
+});
+
+test('회귀 5: 과제는 할 일, 노트북은 준비물 — 기상 질문이 먼저, 준비물은 한 번만 저장', async () => {
+  const both = lecture({ pre_tasks: [{ title: '과제' }], items: [{ title: '노트북', date: '2026-10-30' }] });
+  const { db, deps, sid, rev } = await start({ T2F: [both, both], T1: [T1_ITEMS, T1_OK] });
+  const t1 = text(sid, rev, '내일 수업 전에 과제 좀 하고 노트북도 챙겨야 돼.');
+  const r1 = (await handleVoiceTurn(deps, t1)) as VoiceTurnOut;
+  assert.deepEqual(r1.cards.map((c) => [c.draft?.title, c.pre_task?.title]), [['수업', '과제']]);
+  const r1b = (await handleVoiceTurn(deps, results(sid, r1.rev, t1.client_turn_id))) as VoiceTurnOut;
+  assert.equal(r1b.reply?.text, WAKE_ASK);
+  await handleVoiceTurn(deps, text(sid, r1b.rev, '노트북 챙겨야 돼'));
+  assert.deepEqual(db.rows('todos').map((t) => [t.title, t.todo_type]), [['노트북', 'ITEM']]);
+});
+
+test('회귀 6: 음성(Live) — 장소 고르기 뒤 results에도 기상 질문이 ask로 옴 (글과 같은 서버 문구)', async () => {
+  const { deps, sid, rev } = await start({ T2F: [lecture()], T1: [T1_OK, T1_ITEMS] });
+  const t1 = voiceTurn(sid, rev, INCIDENT, '알겠어요.');
+  const r1 = (await handleVoiceTurn(deps, t1)) as VoiceTurnOut;
+  const r2 = (await handleVoiceTurn(deps, needsPlace(sid, r1.rev, t1.client_turn_id, '세종대학교'))) as VoiceTurnOut;
+  assert.equal(r2.ask?.some((l) => l.includes('기상')) ?? false, false);
+  const r3 = (await handleVoiceTurn(deps, results(sid, r2.rev, cid()))) as VoiceTurnOut;
+  assert.deepEqual(r3.ask, ["'수업' 기상 알람이 07:40으로 계산됨 — 나가기 전 할 일(할 일)이 있다고 했으니 이 시각에 일어날지, 몇 시에 일어날지"]);
+  assert.equal(r3.reply?.text, WAKE_ASK);
+});

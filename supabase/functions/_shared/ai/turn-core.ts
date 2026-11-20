@@ -15,7 +15,7 @@ import type {
   LocalDate, LocalTime, PendingItem, QuestionKind, RejectReason, ServerEvent, ServerQuestion, TaskResults, Weekday,
 } from "./types.ts";
 import { IMPORTANCE_LABEL } from "./types.ts";
-import { FACT_KIND_KO, FIXABLE_FACT_KINDS, addDays, weekdayOf } from "./view.ts";
+import { FACT_KIND_KO, FIXABLE_FACT_KINDS, addDays, spokenTime, weekdayOf } from "./view.ts";
 import { seoulLocal } from "./ko.ts";
 import { toMinutes } from "./guards.ts";
 import { RING_KINDS } from "../calc/types.ts";
@@ -410,6 +410,23 @@ export function wakeQuestion(c: Card): string | null {
   const w = wakeOf(c.digest);
   if (c.pre_task === undefined || c.draft === null || w === null) return null;
   return `'${c.draft.title}' 기상 알람이 ${w.time}으로 계산됨 — 나가기 전 할 일(${c.pre_task.title})이 있다고 했으니 이 시각에 일어날지, 몇 시에 일어날지`;
+}
+
+/**
+ * 사용자 말 j 뒤 처리 결과에 기상 질문(wakeQuestion)이 있으면 그 기상 시각(말 표기)과 서버가 직접 물을 문장 — 없으면 null.
+ * T1이 이 질문 대신 준비물 같은 선택 질문을 하면(11/20 "나가기 전에 뭐 좀 해야 돼" → 준비물 질문) turn.ts가 이 문장으로 바꿈
+ */
+export function wakeAskOf(s: TurnState, j: number): { spoken: string; sentence: string } | null {
+  const clarify = eventAt(s.events, j)?.clarify ?? [];
+  for (const c of s.cards) {
+    const q = c.pre_task?.wake === "ASK" ? wakeQuestion(c) : null;
+    const w = wakeOf(c.digest);
+    if (q === null || w === null || !clarify.includes(q)) continue;
+    const [h, m] = w.time.split(":").map(Number) as [number, number];
+    const spoken = spokenTime(h, m);
+    return { spoken, sentence: `${(c.draft as ApptDraft).title} 전에 할 일이 있으시군요. 추천 기상 시각은 ${spoken}인데, 그대로 일어나실 건가요, 더 일찍 일어나실 건가요?` };
+  }
+  return null;
 }
 
 /** 카드가 READY일 때 처리 결과에 '확인 필요' 줄을 (다시) 넣는다 — 같은 c#은 한 줄로

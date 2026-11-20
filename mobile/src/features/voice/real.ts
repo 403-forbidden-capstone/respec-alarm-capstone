@@ -1105,7 +1105,13 @@ async function sendResults(cards: ResultCard[]): Promise<void> {
 // 카드 [장소 고르기] — 고른 곳으로 다시 계산해 READY로, 결과를 서버에 알림 (새 client_turn_id로 results만 보냄 — 서버(#265)가 받음)
 //   onProgress — 실제 단계마다 대화를 알림: 계산 시작(ESTIMATING) · 계산 끝(READY · FAILED …). 계산 결과는 서버 안내 답(T1)을 기다리지 않고 바로 보임
 //   돌려주는 값 = 계산 결과 상태 (FAILED면 화면이 [다시 시도])
-export function pickCardPlace(cardId: string, place: { name: string; lat?: number; lng?: number }, onProgress?: (c: Conversation) => void): Promise<Outcome['status']> {
+//   onAsk — 계산 뒤 서버가 낸 되물을 것(예: 할 일이 있는 일정의 기상 확인). 음성 대화 중이면 화면이 Live에 넣음 (글 대화는 T1 답이 물음)
+export function pickCardPlace(
+  cardId: string,
+  place: { name: string; lat?: number; lng?: number },
+  onProgress?: (c: Conversation) => void,
+  onAsk?: (ask: string[]) => void,
+): Promise<Outcome['status']> {
   return serial(() =>
     withProgress(onProgress, async () => {
       const rec = recOf(cardId);
@@ -1117,6 +1123,7 @@ export function pickCardPlace(cardId: string, place: { name: string; lat?: numbe
       applyOutcome(rec, outcome);
       report(); // 계산 끝 — 카드에 결과
       if (state.sessionId) await sendResults([resultCard(cardId, outcome)]); // 서버가 받지 않아도 이 카드는 앱에서 계산한 상태 그대로
+      if (state.ask.length > 0) onAsk?.(state.ask);
       return outcome.status;
     }),
   );

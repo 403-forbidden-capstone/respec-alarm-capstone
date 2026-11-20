@@ -520,6 +520,7 @@ export type GuardAction =
   | "spoken_times" // HH:MM → 말로
   | "retract_end" // 서버 질문이 남았는데 end → end 거둠 (지침 19a)
   | "drop_follow_up" // 사용자가 끝내자고 했는데 선택 질문 → 그 물음 지움
+  | "ask_wake" // 나가기 전 할 일의 기상 확인을 T1이 안 물음 → 물음을 서버 문장으로 (turn.ts)
   | "template"; // 템플릿 한 줄로 바꿈 (지침 22)
 
 // 끝내자는 말 — 말 전체가 짧은 끝맺음일 때만 ("시험 끝이야" · "발표 잘 됐어" · "알바 그만둬서 힘들어" 같은 하루 이야기는 아님)
