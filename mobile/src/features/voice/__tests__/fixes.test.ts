@@ -81,7 +81,7 @@ describe('applyFix', () => {
     mAuto.mockResolvedValue({ alarmId: 'al-w', at: new Date('2026-10-30T22:11:00Z') });
     mCorrect.mockResolvedValue(true);
     expect(await applyFix(wakeDeny)).toEqual({ id: 'x1', ok: true, error: null });
-    expect(mCorrect).toHaveBeenCalledWith('al-w');
+    expect(mCorrect).toHaveBeenCalledWith('al-w', new Date('2026-10-30T22:11:00Z'));
     mCorrect.mockResolvedValue(false);
     expect(await applyFix(wakeDeny)).toEqual({ id: 'x1', ok: false, error: '대상 없음' });
     mAuto.mockResolvedValue(null);

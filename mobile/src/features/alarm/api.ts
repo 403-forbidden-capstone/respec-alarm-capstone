@@ -1023,8 +1023,8 @@ export async function getAutoWake(): Promise<AutoWake | null> {
 }
 
 // [아니에요] — 자동으로 확정한 기상을 취소하고 H08 확인 단계(확인 알림)로 되돌림. 정정 대상이 아니면 false
-export async function correctAutoWake(alarmId: string): Promise<boolean> {
-  if (!isMock()) return real.correctAutoWake(alarmId);
+export async function correctAutoWake(alarmId: string, at: Date): Promise<boolean> {
+  if (!isMock()) return real.correctAutoWake(alarmId, at);
   return false;
 }
 

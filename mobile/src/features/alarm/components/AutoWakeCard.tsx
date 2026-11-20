@@ -19,7 +19,7 @@ export function AutoWakeCard({ wake, onDone }: { wake: AutoWake; onDone?: () => 
     if (busy) return;
     setBusy(true);
     try {
-      const fixed = await correctAutoWake(wake.alarmId);
+      const fixed = await correctAutoWake(wake.alarmId, wake.at);
       onDone?.();
       if (fixed) router.push({ pathname: '/wake', params: { alarm: wake.alarmId } });
     } catch {

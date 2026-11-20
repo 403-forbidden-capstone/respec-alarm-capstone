@@ -534,7 +534,7 @@ describe('S12 잘못 누른 기상 확인 정정', () => {
   autoConfirmed()
     .variant('[아니에요] — 그 날 기상 확정을 취소하고 하루 기록의 기상 칸도 비움 (G9)')
     .do(async () => {
-      expect(await app.js(() => correctAutoWake(WAKE))).toBe(true);
+      expect(await app.js(async () => correctAutoWake(WAKE, (await getAutoWake())!.at))).toBe(true);
     })
     .expect({
       check: async () => {
@@ -547,7 +547,7 @@ describe('S12 잘못 누른 기상 확인 정정', () => {
   autoConfirmed()
     .variant('[아니에요] 뒤에는 같은 해제로 다시 자동 확정되지 않고 H08 확인 알림 단계로 돌아가 [일어났어요]로 확정 (G9)')
     .do(async () => {
-      await app.js(() => correctAutoWake(WAKE));
+      await app.js(async () => correctAutoWake(WAKE, (await getAutoWake())!.at));
       clock.set('07:50');
       await app.open(); // 앞에 올 때 다시 판정(recheck)이 돎
     })
@@ -563,6 +563,22 @@ describe('S12 잘못 누른 기상 확인 정정', () => {
         expect(db.rows('daily_records').map((r) => r.wake_confirmed_at)).toEqual([rows[0].event_at]);
       },
     });
+
+  autoConfirmed()
+    .variant('[아니에요]는 눌린 확정 기록 한 건만 지움 — 같은 알람 id의 다른 날 자동 확정 기록은 그대로 (리뷰 #572)')
+    .do(async () => {
+      db.nativeInsert('alarm_events', {
+        user_id: ME,
+        alarm_id: WAKE,
+        client_event_id: 'old-day-confirmed',
+        event_type: 'WAKE_CONFIRMED',
+        event_at: new Date(clock.ms('07:20') - 24 * 3_600_000).toISOString(),
+        sequence_no: 1,
+        input_source: 'USAGE',
+      });
+      expect(await app.js(async () => correctAutoWake(WAKE, (await getAutoWake())!.at))).toBe(true);
+    })
+    .expect({ check: () => expect(db.rows('alarm_events').filter((r) => r.event_type === 'WAKE_CONFIRMED').map((r) => r.client_event_id)).toEqual(['old-day-confirmed']) });
 
   autoConfirmed()
     .variant('대화로 "아직 안 일어났어"(WAKE · DENY)도 같은 정정')
@@ -586,7 +602,7 @@ describe('S12 잘못 누른 기상 확인 정정', () => {
     .expect({
       check: async () => {
         expect(await app.js(() => getAutoWake())).toBeNull();
-        expect(await app.js(() => correctAutoWake(WAKE))).toBe(false);
+        expect(await app.js(() => correctAutoWake(WAKE, new Date(clock.ms('07:45'))))).toBe(false);
         expect(db.rows('alarm_events').filter((r) => r.event_type === 'WAKE_CONFIRMED')).toHaveLength(1);
       },
     });

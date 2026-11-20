@@ -203,7 +203,7 @@ async function pendingRings(alarmId: string): Promise<boolean> {
 
 async function loadWakeContext(userId: string, alarmId: string): Promise<WakeContext | null> {
   if (!isUuid(alarmId)) return null; // 가짜 데이터 시절 주소(a1:WAKE)가 남아 있어도 DB 형식 오류 대신 "없음"
-  const [alarm, events, pending, pendingRang, corrected] = await Promise.all([
+  const [alarm, events, pending, pendingRang, correctedMark] = await Promise.all([
     supabase
       .from('alarms')
       .select('alarm_id, alarm_type, scheduled_at, appointment_participants(appointments(title, group_id, groups(group_name)))')
@@ -219,7 +219,7 @@ async function loadWakeContext(userId: string, alarmId: string): Promise<WakeCon
       .order('event_at'),
     pendingDismissals(alarmId),
     pendingRings(alarmId),
-    isCorrected(alarmId),
+    correctedDismissal(alarmId),
   ]);
   if (alarm.error) throw alarm.error;
   if (events.error) throw events.error;
@@ -230,15 +230,16 @@ async function loadWakeContext(userId: string, alarmId: string): Promise<WakeCon
   const confirmedRow = rows.find((r) => r.event_type === 'WAKE_CONFIRMED');
   const confirmed = confirmedRow ? { at: parseDbTime(confirmedRow.event_at), how: confirmedRow.input_source === 'USAGE' ? ('auto' as const) : ('self' as const) } : null;
   const dismissals = [...rows.filter((r) => r.event_type === 'DISMISSED').map((r) => parseDbTime(r.event_at)), ...pending.map((p) => p.at)];
+  const dismissedAt = pickDismissedAt(dismissals, confirmed?.at ?? null);
   return {
     alarmId,
     title: appointment?.title ?? STANDALONE_TITLE,
     groupId: appointment?.group_id ?? null,
     groupName: appointment?.groups?.group_name ?? null,
     alarmAt: alarm.data.scheduled_at ? parseDbTime(alarm.data.scheduled_at) : null,
-    dismissedAt: pickDismissedAt(dismissals, confirmed?.at ?? null),
+    dismissedAt,
     confirmed,
-    corrected,
+    corrected: isCorrectedFor(correctedMark, dismissedAt),
     rang: pendingRang || rows.some((r) => r.event_type === 'TRIGGERED' || r.event_type === 'MISSED'),
   };
 }
@@ -491,17 +492,27 @@ export async function promptWake(): Promise<void> {}
 // 자동 확정을 취소했다는 표시 — 폰 저장소. 서버에는 정정 기록을 남길 이벤트 종류가 없어 폰에만 둠 (다른 기기 · 재설치에서는 다시 자동 확정될 수 있음, PR 본문 "서버 필요 사항")
 const CORRECTED_KEY = 'respec.wake.corrected.';
 
-async function isCorrected(alarmId: string): Promise<boolean> {
+// 표시 값 = 취소한 해제 시각(ms). 같은 알람 id가 다음 회차에 다시 쓰여도 해제 시각이 다르면 막지 않고, 해제 12시간 뒤에는 버림
+const CORRECTED_TTL_MS = 12 * 60 * MINUTE_MS;
+
+async function correctedDismissal(alarmId: string): Promise<number | null> {
   try {
-    return (await AsyncStorage.getItem(CORRECTED_KEY + alarmId)) != null;
+    const raw = await AsyncStorage.getItem(CORRECTED_KEY + alarmId);
+    const at = raw == null ? NaN : Number(raw);
+    return Number.isFinite(at) ? at : null;
   } catch {
-    return false;
+    return null;
   }
 }
 
-async function markCorrected(alarmId: string): Promise<void> {
+// 이 해제에 대해 취소 표시가 있고 아직 12시간이 안 지났는가
+function isCorrectedFor(marked: number | null, dismissedAt: Date | null): boolean {
+  return marked != null && dismissedAt != null && marked === dismissedAt.getTime() && now().getTime() - marked < CORRECTED_TTL_MS;
+}
+
+async function markCorrected(alarmId: string, dismissedAt: Date): Promise<void> {
   try {
-    await AsyncStorage.setItem(CORRECTED_KEY + alarmId, new Date(now().getTime()).toISOString());
+    await AsyncStorage.setItem(CORRECTED_KEY + alarmId, String(dismissedAt.getTime()));
   } catch {
     // 못 쓰면 이번 실행에만 — 취소 자체는 서버에 이미 반영
   }
@@ -534,11 +545,12 @@ export async function getAutoWake(): Promise<AutoWake | null> {
   return row ? { alarmId: row.alarm_id, at: parseDbTime(row.event_at) } : null;
 }
 
-// [아니에요] — 자동 확정한 기상을 그 자리에서 취소하고 확인 알림 단계(H08)로 되돌림
-//   순서: 취소 표시(폰) → 확정 기록(alarm_events WAKE_CONFIRMED USAGE) 지우기 → 그날 하루 기록의 기상 칸 비우기. 끊겨도 다시 눌러 이어 가게 표시가 먼저
-//   하루 기록은 확정 시각이 그 값 그대로일 때만 비움 — 그 사이 다른 확정이 덮었으면 그대로 둠. 버튼 · 확인으로 확정한 기록은 안 지움(false)
+// [아니에요] — 자동 확정한 기상을 그 자리에서 취소하고 확인 알림 단계(H08)로 되돌림. at = 홈 카드가 보여 준 그 확정 기록의 시각
+//   알람 id + 확정 시각 + USAGE로 좁혀 그 한 건만 지움 — 같은 알람 행이 다음 회차로 재사용돼도 다른 날 · 다른 기록은 안 지움. 버튼 · 확인으로 확정한 기록은 안 지움(false)
+//   순서: 취소 표시(폰, 해제 시각과 함께) → 그날 하루 기록의 기상 칸 비우기(확정 시각이 그 값 그대로일 때만) → 확정 기록 지우기
+//   확정 기록을 맨 나중에 지우므로 중간에 끊겨도 카드가 남아 다시 눌러 같은 결과로 이어 감. 던지면 호출하는 쪽이 "다시 눌러 주세요"를 안내
 //   확정 번호는 알람 + 해제 시각으로 정한 고정 값이라 다시 [일어났어요]를 눌러도 같은 번호로 새로 들어감(지워진 뒤라 충돌 없음)
-export async function correctAutoWake(alarmId: string): Promise<boolean> {
+export async function correctAutoWake(alarmId: string, at: Date): Promise<boolean> {
   const userId = await requireUserId();
   const ctx = await loadWakeContext(userId, alarmId);
   if (!ctx) return false;
@@ -549,13 +561,12 @@ export async function correctAutoWake(alarmId: string): Promise<boolean> {
     .eq('alarm_id', alarmId)
     .eq('event_type', 'WAKE_CONFIRMED')
     .eq('input_source', 'USAGE')
+    .eq('event_at', at.toISOString())
     .limit(1);
   if (found.error) throw found.error;
   const confirmedAt = found.data?.[0]?.event_at;
-  if (!confirmedAt) return false; // 자동 확정이 아님 (직접 확정 · 확정 없음)
-  await markCorrected(alarmId);
-  const removed = await supabase.from('alarm_events').delete().eq('user_id', userId).eq('alarm_id', alarmId).eq('event_type', 'WAKE_CONFIRMED').eq('input_source', 'USAGE');
-  if (removed.error) throw removed.error;
+  if (!confirmedAt) return false; // 이미 취소했거나 자동 확정이 아님
+  if (ctx.dismissedAt) await markCorrected(alarmId, ctx.dismissedAt);
   const cleared = await supabase
     .from('daily_records')
     .update({ wake_confirmed_at: null })
@@ -563,6 +574,15 @@ export async function correctAutoWake(alarmId: string): Promise<boolean> {
     .eq('record_date', wakeDay(ctx.alarmAt, parseDbTime(confirmedAt)))
     .eq('wake_confirmed_at', confirmedAt);
   if (cleared.error) throw cleared.error;
+  const removed = await supabase
+    .from('alarm_events')
+    .delete()
+    .eq('user_id', userId)
+    .eq('alarm_id', alarmId)
+    .eq('event_type', 'WAKE_CONFIRMED')
+    .eq('input_source', 'USAGE')
+    .eq('event_at', confirmedAt);
+  if (removed.error) throw removed.error;
   return true;
 }
 

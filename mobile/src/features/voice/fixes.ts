@@ -35,7 +35,7 @@ export async function applyFix(fix: Fix): Promise<FixResult> {
     if (fix.action !== 'DENY') return result(false, NOT_YET);
     const auto = await getAutoWake(); // 자동으로 확정한 가장 최근 기상 (직접 확정한 것은 정정 대상이 아님)
     if (!auto) return result(false, '대상 없음');
-    return (await correctAutoWake(auto.alarmId)) ? result(true) : result(false, '대상 없음');
+    return (await correctAutoWake(auto.alarmId, auto.at)) ? result(true) : result(false, '대상 없음');
   }
   if (fix.kind !== 'DEPART' && fix.kind !== 'ARRIVE') return result(false, NOT_YET);
   const kind = fix.kind;
