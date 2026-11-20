@@ -539,14 +539,15 @@ export default async function scenarioDay({ q, as, su, svc, check, knownGap, cla
       await app(W.U.A, () => q(`insert into public.daily_records (user_id, record_date, wake_confirmed_at, wake_reported_at, data_source) values ($1, $2::date, $3::timestamptz, $4::timestamptz, 'ALARM')`, [W.U.A, dayPlus(1), T('00:10', 1), T('23:51')]));
       await evApp(W, 'A', W.AL.A.WAKE, 'WAKE_CONFIRMED', T('00:10', 1), 'BUTTON');
       const v = await view(W, 'B', T('00:11', 1), TODAY);
-      return v.A === 'CONFIRMED' ? true : v;
+      return v.A.startsWith('CONFIRMED') ? true : v;
     });
     // 11/20: 폰 기기 길(alarm-events-device)은 이제 wake.record_date를 서버가 알람 기준일로 다시 계산해 씀(supabase/functions/_shared/device-events.test.ts G14). 이 시험은 앱 직접 쓰기(확인한 날짜)를 흉내 내므로 앱 쪽 수정(#572 wakeDay)이 들어가야 풀림
     await knownGap('G14', '23:50 알람 · 00:10 확인이면 하루 기록(daily_records)이 한 곳(알람이 울린 날)에만 생겨야 함 — 지금은 서버 트리거(알람 기준일)와 앱 쓰기(확인한 시각의 한국 날짜)가 두 날에 한 줄씩 만듦 (기기 길은 서버가 알람 기준일로 고침, 앱 직접 쓰기는 #572)', async () => {
       const [n] = await q(`select count(*)::int as n from public.daily_records where user_id = $1 and wake_confirmed_at is not null`, [W.U.A]);
       return n.n === 1 ? true : { 'daily_records 줄 수': n.n, 날짜: (await q(`select record_date::text as d from public.daily_records where user_id = $1 order by record_date`, [W.U.A])).map((r) => r.d) };
     });
-    await knownGap('NEW-5', '새벽 약속(00:30) 전날 밤 알람의 확인 직후(00:11) 앱이 날짜 없이 그룹 화면을 열면 A가 CONFIRMED여야 함 — 지금은 날짜가 내일로 바뀌어 알람이 어제인 A · B가 NO_ALARM(알람 없음)으로 보임. 신호가 알려 주는 날짜(어제)로 다시 읽을 때만 맞음', async () => {
+    // NEW-5 (11/20 지형님 결정으로 풀림): 그룹 화면의 하루 = 새벽 4시 기준일이라 00:11은 아직 어제 기준일 — 날짜 없이 열어도 약속(00:30)에 딸린 23:50 알람의 확정이 보임
+    await check('NEW-5 · 새벽 약속(00:30) 전날 밤 알람의 확인 직후(00:11) 앱이 날짜 없이 그룹 화면을 열어도 A가 CONFIRMED (새벽 4시 기준일)', async () => {
       const v = await view(W, 'B', T('00:11', 1));
       return v.A.startsWith('CONFIRMED') ? true : { 'B가 보는 A(날짜 없이 00:11)': v.A, 'B 자신': v.B };
     });

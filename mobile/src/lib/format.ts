@@ -56,6 +56,11 @@ export function lifeDayKey(date: Date) {
   return dayKey(addMinutes(date, -DAY_START_HOUR * 60));
 }
 
+// 기준일(lifeDayKey)이 시작되는 시각 — 그날 새벽 4시(KST). 그룹 화면의 '오늘'(11/20): 서버 private.life_day · group_wake_rows 창(04:00 ~ 다음 날 04:00)과 같음
+export function lifeDayStart(date: Date) {
+  return addMinutes(startOfDay(addMinutes(date, -DAY_START_HOUR * 60)), DAY_START_HOUR * 60);
+}
+
 export function isSameDay(a: Date, b: Date) {
   return dayKey(a) === dayKey(b);
 }

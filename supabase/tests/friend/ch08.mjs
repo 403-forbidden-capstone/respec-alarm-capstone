@@ -425,9 +425,9 @@ export default async function ch08({ q, as, su, svc, check, expectErr }) {
   });
 
   await check('8-31(보강): get_wake_announcement()는 부른 사람(auth.uid()) 시점 — 듣는 사람은 일어난 사람 수를 받고, 같은 그룹이 아닌 사람 · 보이는 사람이 없는 사람은 줄이 없음', async () => {
-    // 이 함수는 지금(now())을 읽으므로 오늘 한국 시간 0시의 기상 알람 · 확인과 오늘 낮 12시 약속으로 만듦 (시계와 무관)
+    // 이 함수는 지금(now())을 읽으므로 오늘 한국 시간 06시의 기상 알람 (그룹 화면 하루 = 새벽 4시 기준일) · 확인과 오늘 낮 12시 약속으로 만듦 (시계와 무관)
     const [{ t: start }] = await q(`select ((now() at time zone 'Asia/Seoul')::date::timestamp at time zone 'Asia/Seoul') as t`);
-    const zero = new Date(start).toISOString(), noon = new Date(new Date(start).getTime() + 12 * 3600_000).toISOString();
+    const zero = new Date(new Date(start).getTime() + 6 * 3600_000).toISOString(), noon = new Date(new Date(start).getTime() + 12 * 3600_000).toISOString();
     const L = await join_(136, '듣는이'), U = await join_(137, '일어남'), X = await join_(138, '남');
     const g = await mkGroup(L, [U], [U]);
     await appt(L, g, noon);

@@ -3,9 +3,10 @@ import { beforeEach, describe, expect, it, jest } from '@jest/globals';
 import { createFake, type Op } from '../__fixtures__/fakeSupabase';
 import { F_SUYEON, friends, GROUP, groups, JIHYEONG, JUNSEONG, ME, members, perms, profiles, SUYEON } from '../__fixtures__/seed';
 import { UserError } from '@/lib/errors';
-import { addDays, dayKey } from '@/lib/format';
+import { addDays, lifeDayKey } from '@/lib/format';
 
 import * as real from '../real';
+import { wakeDateInRange } from '../real/load';
 
 // 쿼리 · 쓰기 순서 시험 — 가짜 supabase로 "어느 표에 무엇을 어떤 조건으로" 읽고 썼는지만 확인 (RLS · 실제 응답 모양은 실제 Supabase에서)
 const mockFake = createFake();
@@ -105,7 +106,7 @@ describe('G01 · H01 · G02 그룹', () => {
 
   it('기상 신호가 알려 준 날은 그대로 p_date로', async () => {
     mockFake.answerRpc('get_group_wake', ok([]));
-    const day = dayKey(new Date());
+    const day = lifeDayKey(new Date());
     await real.listGroups(day);
     await real.getGroupSummary(GROUP, day);
     await real.getGroup(GROUP, day);
@@ -114,12 +115,19 @@ describe('G01 · H01 · G02 그룹', () => {
     expect(dates).toEqual([day, day, day, day]);
   });
 
+  it('날짜 범위는 새벽 4시 기준일 — 한국 03:59(아직 어제 기준일)에는 어제 기준일 · 04:00에는 오늘 날짜가 오늘, 서버 wake_date_in_range와 같은 규칙 (11/20)', () => {
+    const early = new Date('2026-11-19T18:59:00.000Z'); // 한국 11/20 03:59 → 기준일 11/19
+    const later = new Date('2026-11-19T19:00:00.000Z'); // 한국 11/20 04:00 → 기준일 11/20
+    expect([wakeDateInRange('2026-11-18', early), wakeDateInRange('2026-11-17', early), wakeDateInRange('2026-11-21', early)]).toEqual(['2026-11-18', null, null]);
+    expect([wakeDateInRange('2026-11-21', later), wakeDateInRange('2026-11-22', later)]).toEqual(['2026-11-21', null]);
+  });
+
   it('어제 · 내일은 그대로, 그 밖의 날짜는 p_date 없이 — 서버가 어제~내일만 받음', async () => {
     mockFake.answerRpc('get_group_wake', ok([]));
     const now = new Date();
-    const yesterday = dayKey(addDays(now, -1));
-    const tomorrow = dayKey(addDays(now, 1));
-    for (const day of [yesterday, tomorrow, dayKey(addDays(now, -2)), dayKey(addDays(now, 2)), '2026-01-01']) await real.getGroupSummary(GROUP, day);
+    const yesterday = lifeDayKey(addDays(now, -1));
+    const tomorrow = lifeDayKey(addDays(now, 1));
+    for (const day of [yesterday, tomorrow, lifeDayKey(addDays(now, -2)), lifeDayKey(addDays(now, 2)), '2026-01-01']) await real.getGroupSummary(GROUP, day);
     const args = mockFake.rpcCalls.filter((c) => c.name === 'get_group_wake').map((c) => c.args);
     expect(args).toEqual([
       { p_group_id: GROUP, p_date: yesterday },
@@ -166,7 +174,7 @@ describe('G01 · H01 · G02 그룹', () => {
     const [query] = mockFake.opsOf('appointments', 'select');
     expect(query.filters).toEqual([
       ['eq', 'group_id', GROUP],
-      ['gte', 'appointment_at', '2026-10-18T15:00:00.000Z'], // 한국 시간 오늘 0시
+      ['gte', 'appointment_at', '2026-10-18T19:00:00.000Z'], // 한국 시간 오늘 기준일 시작 = 새벽 4시 (11/20)
     ]);
     expect(g?.members.map((m) => [m.person.name, m.isMe, m.received.viewWake])).toEqual([
       ['나(데모)', true, false],
