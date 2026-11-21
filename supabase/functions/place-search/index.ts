@@ -9,6 +9,7 @@ import { getEnv } from '../_shared/env.ts';
 import { HttpError } from '../_shared/errors.ts';
 import { jsonResponse, serve } from '../_shared/http.ts';
 import { KakaoError, searchPlaces } from '../_shared/kakao.ts';
+import { localPurePrepFixtureEnabled, localPurePrepPlaces } from '../_shared/local-pure-prep-fixture.ts';
 import { Reader, readJson } from '../_shared/read.ts';
 
 Deno.serve(
@@ -21,6 +22,11 @@ Deno.serve(
     const limit = root.int('limit', { min: 1, max: 15 });
     if ((lat == null) !== (lng == null)) root.problemAt(lat == null ? 'lat' : 'lng', 'lat · lng는 같이 있어야 해요');
     root.finish();
+
+    // Explicit local-only provider fixture: real Supabase Auth and RLS are still enforced.
+    if (localPurePrepFixtureEnabled()) {
+      return jsonResponse({ places: localPurePrepPlaces(query as string, limit ?? 10) });
+    }
 
     const key = getEnv('KAKAO_REST_API_KEY');
     if (!key) throw new HttpError('NOT_CONFIGURED', '장소 검색 키가 아직 설정되지 않았어요');
