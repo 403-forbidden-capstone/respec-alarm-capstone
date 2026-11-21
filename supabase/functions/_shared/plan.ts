@@ -7,6 +7,7 @@ import { HttpError } from './errors.ts';
 import { getEnv } from './env.ts';
 import { approvedMlProfile, buildMlRequest, mayUseMl, previousDateKey, requestMlPrediction, type VerifiedMlProfile, type MlPrediction } from './prepare-ml.ts';
 import { kakaoTravelMinutes, type FetchLike } from './kakao.ts';
+import { localPurePrepFixtureEnabled, LOCAL_PURE_PREP_TRAVEL_MINUTES } from './local-pure-prep-fixture.ts';
 import {
   computePlan,
   resolveBasics,
@@ -346,7 +347,13 @@ export async function buildPlan(ctx: PlanContext, draft: PlanDraft, options: { w
   const keptManualMinutes = draft.travelMinutes == null && participant?.travel_source === 'MANUAL' ? (participant.est_travel_minutes ?? undefined) : undefined;
 
   let travel: ResolvedTravel;
-  if (draft.travelMinutes != null && draft.travelSource === 'API') {
+  if (draft.travelMinutes == null && keptManualMinutes == null && localPurePrepFixtureEnabled()) {
+    // Only for the local E2E fixture. Synthetic 30 min is MANUAL and MUST NEVER
+    // be misrepresented as a Kakao API estimate or fed into real travel history.
+    const chosen = { minutes: LOCAL_PURE_PREP_TRAVEL_MINUTES, source: 'MANUAL' as const,
+      needsConfirmation: false, note: '로컬 테스트 이동시간 (합성값)' };
+    travel = { chosen, auto: chosen, warnings: [] };
+  } else if (draft.travelMinutes != null && draft.travelSource === 'API') {
     // 앱이 확인 시트에서 보여 준 길찾기 값을 그대로 저장 — 다시 부르지 않음
     const chosen = { minutes: draft.travelMinutes, source: 'API' as const, needsConfirmation: false, note: '길찾기 기준' };
     travel = { chosen, auto: chosen, warnings: [] };
