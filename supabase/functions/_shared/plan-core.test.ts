@@ -663,3 +663,40 @@ test('준비 알람을 직접 고른 일정은 당기지 않음 — 직접 고�
   assert.deepEqual(at(plan), ['WAKE 08:25', 'PREPARE 08:40*', 'DEPARTURE 09:25']); // * = 직접 고른 시각
 });
 
+
+test('준비시간 전용 예측: 준비알람만 순수 준비분으로 역산하고 기존 20분은 보존', () => {
+  const plan = computePlan(base({
+    stats: { sampleCount: 0, p80: null },
+    prepAdjustment: { model: 'prep_start_ratio_v2', minutes: 30, ratio: 1 },
+  }), api(50));
+  assert.equal(plan.prepare.minutes, 50);
+  assert.equal(plan.beforePrepareMinutes, 20);
+  assert.equal(toSuggestion(plan).prepare.model, 'prep_start_ratio_v2');
+  assert.deepEqual(text(plan), ['WAKE 08:10', 'PREPARE 08:30', 'DEPARTURE 09:00', 'ARRIVE 09:50']);
+});
+
+test('기존 C1/W4 또는 직접 입력이 있으면 준비시간 전용 모델과 절대 중복 적용하지 않음', () => {
+  const a = computePlan(base({
+    mlPrediction: { model: 'w4_mae', minutes: 90 },
+    prepAdjustment: { model: 'prep_start_ratio_v2', minutes: 30, ratio: 1 },
+  }), api(50));
+  assert.equal(a.prepare.mlModel, 'w4_mae');
+  assert.equal(a.prepare.minutes, 90);
+  const b = computePlan(base({
+    draft: { at: kst(22, 600), destination: { name: '세종대학교' }, prepareMinutes: 35 },
+    prepAdjustment: { model: 'prep_start_ratio_v2', minutes: 30, ratio: 1 },
+  }), api(50));
+  assert.equal(b.prepare.source, 'MANUAL');
+  assert.equal(b.prepare.minutes, 35);
+});
+
+test('기상 없는 일정에서는 준비시간 전용 모델을 사용하지 않음', () => {
+  const p = computePlan(base({
+    draft: { at: kst(22, 1080), destination: { name: '강남역' }, bufferMinutes: 5 },
+    sameDayWake: true,
+    prepAdjustment: { model: 'prep_start_ratio_v2', minutes: 30, ratio: 1 },
+  }), api(20));
+  assert.equal(p.withWake, false);
+  assert.equal(p.prepare.mlModel, undefined);
+  assert.equal(p.prepare.minutes, 15);
+});
