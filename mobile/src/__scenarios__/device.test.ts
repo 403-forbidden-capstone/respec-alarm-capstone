@@ -148,10 +148,9 @@ describe('S33 로그아웃 → 다른 계정', () => {
     },
   });
 
-  loggedOut().gap('G11').variant('앞 계정의 확인 알림 · 감지 안내가 알림창에 남으면 안 됨').expect({ tray: [] });
+  loggedOut().variant('앞 계정의 확인 알림 · 감지 안내가 알림창에 남으면 안 됨').expect({ tray: [] });
 
   loggedOut()
-    .gap('G11')
     .variant('해제 + 10분 판정 예약도 지워져야 함 (다음 계정에 앞 계정 알림이 뜸)')
     .expect({ check: () => expect(phone.judges).toEqual([]) });
 
@@ -218,7 +217,6 @@ describe('S34 정확 알람 권한 끔(안드로이드 12)', () => {
     });
 
   exactOff()
-    .gap('G15')
     .variant('권한이 꺼졌음을 홈 빨간 줄로 알려야 함 — 지금은 목록이 저장소 기준이라 모르고 줄도 안 뜸')
     .expect({
       check: async () => {

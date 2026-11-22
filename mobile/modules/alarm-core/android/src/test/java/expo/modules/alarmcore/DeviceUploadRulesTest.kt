@@ -207,4 +207,20 @@ class DeviceUploadRulesTest {
     assertFalse(DeviceUploadRules.isWakeConfirmedRecently(now - 12 * 3_600_000L, now)) // 어제 같은 알람의 표시에는 안 걸림
     assertFalse(DeviceUploadRules.isWakeConfirmedRecently(now + 1_000L, now))
   }
+
+  @Test
+  fun restoreAfterRebootRunsOverdueJudgeOnceAndReschedulesTheRest() {
+    val dismissed = 1_747_897_200_000L // 해제 시각
+    val min = 60_000L
+    // 판정 시각(해제 + 10분 2초) 전에 켜짐 → 다시 검
+    assertEquals(DeviceUploadRules.JudgeRestore.RESCHEDULE, DeviceUploadRules.judgeRestoreAction(dismissed, dismissed + 4 * min))
+    assertEquals(DeviceUploadRules.JudgeRestore.RESCHEDULE, DeviceUploadRules.judgeRestoreAction(dismissed, dismissed + 10 * min + 1_999))
+    // 켜지기 전에 판정 시각이 지났음 → 바로 한 번
+    assertEquals(DeviceUploadRules.JudgeRestore.RUN_NOW, DeviceUploadRules.judgeRestoreAction(dismissed, dismissed + 10 * min + 2_000))
+    assertEquals(DeviceUploadRules.JudgeRestore.RUN_NOW, DeviceUploadRules.judgeRestoreAction(dismissed, dismissed + 3 * 60 * min))
+    // 12시간이 지났으면 버림 (어제 해제의 알림이 뜨지 않게)
+    assertEquals(DeviceUploadRules.JudgeRestore.DROP, DeviceUploadRules.judgeRestoreAction(dismissed, dismissed + DeviceUploadRules.CONFIRMED_WINDOW_MILLIS))
+    // 시계가 뒤로 가서 해제가 미래처럼 보여도 다시 걸기만 (버리지 않음)
+    assertEquals(DeviceUploadRules.JudgeRestore.RESCHEDULE, DeviceUploadRules.judgeRestoreAction(dismissed, dismissed - 5 * min))
+  }
 }

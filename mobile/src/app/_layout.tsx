@@ -26,6 +26,8 @@ import { usePushRegistration } from '@/lib/push/usePushRegistration';
 import { colors, fontFiles } from '@/theme';
 // 지오펜스 신호를 받는 작업 정의 — 앱이 꺼진 채 받는 길은 진입 파일(index.js)이 먼저 불러 줌. 여기 import는 같은 모듈이라 한 번만 평가됨 (features/location/task)
 import '@/features/location/task';
+// 조용한 데이터 푸시(공동 약속 변경 · 취소)를 받아 알람을 다시 맞추는 작업 정의 — 마찬가지로 진입 파일(index.js)이 먼저 불러 줌 (features/push/backgroundTask)
+import '@/features/push/backgroundTask';
 
 // 글꼴 · 로그인 상태를 다 읽을 때까지 시작 화면을 유지함
 SplashScreen.preventAutoHideAsync();

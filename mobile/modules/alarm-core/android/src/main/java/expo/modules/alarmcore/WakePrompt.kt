@@ -63,9 +63,21 @@ object WakePrompt {
     runCatching { NotificationManagerCompat.from(app).notify(id, notification) } // 권한 경합 등은 무시
   }
 
+  /** 떠 있는 확인 알림을 모두 거둠 (로그아웃 정리 — 앞 계정의 "지금 일어나셨나요?"가 남지 않게). 알림 번호가 알람 번호의 해시라 알림 목록에서 채널로 찾음 */
+  fun cancelAllPrompts(context: Context) {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return // 채널이 없는 8 미만은 이 알림만 가려낼 수 없음
+    val manager = context.applicationContext.getSystemService(NotificationManager::class.java)
+    runCatching {
+      manager.activeNotifications
+        .filter { it.notification.channelId == CHANNEL_ID }
+        .forEach { manager.cancel(it.tag, it.id) }
+    }
+  }
+
   /** 앱(JS)이 기상을 확정하면 부름 — 떠 있는 알림을 거두고 확정 표시를 남김 */
   fun dismiss(context: Context, alarmId: String) {
     preferences(context).edit().putLong("confirmed_$alarmId", System.currentTimeMillis()).apply()
+    WakeJudgeStore.remove(context, alarmId) // 확정됐으니 저장해 둔 판정 예약도 지움 (재부팅 복원 대상에서 뺌)
     NotificationManagerCompat.from(context.applicationContext).cancel(notificationId(alarmId))
   }
 }

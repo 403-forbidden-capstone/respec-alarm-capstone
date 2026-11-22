@@ -18,6 +18,8 @@ jest.mock('@/lib/supabase', () => ({
     rpc: (name: string, args?: unknown) => mockFake.client.rpc(name, args),
   },
 }));
+const mockAfterEvent = jest.fn<(options?: { noticeAlarmIds?: readonly string[] }) => Promise<void>>(async () => {});
+jest.mock('@/lib/alarmSync', () => ({ afterEvent: (options?: { noticeAlarmIds?: readonly string[] }) => mockAfterEvent(options) }));
 jest.mock('@/lib/user', () => ({ requireUserId: async () => '00000000-0000-4000-8000-000000000001' }));
 
 const ok = (data: unknown) => ({ data, error: null });
@@ -286,6 +288,31 @@ describe('G02 메뉴 — 이름 바꾸기 · 나가기 · 내보내기 · 알림
     ]);
     mockFake.answer('group_members.update', ok([]));
     await expect(real.leaveGroup(GROUP)).rejects.toThrow(new UserError(MESSAGE_GONE));
+  });
+
+  it('나가기: 나가기 전에 이 그룹 약속의 내 알람 번호를 읽어 두고, 나간 뒤 사건 뒤 정리(afterEvent)에 넘김 — 못 나가면 부르지 않음', async () => {
+    mockAfterEvent.mockClear();
+    mockFake.answer('appointment_participants.select', ok([{ alarms: [{ alarm_id: 'a-prepare' }, { alarm_id: 'a-arrive' }], appointments: { group_id: GROUP } }, { alarms: [], appointments: { group_id: GROUP } }]));
+    mockFake.answer('group_members.update', ok([{ group_member_id: 'm1' }]));
+    await real.leaveGroup(GROUP);
+    const [read] = mockFake.opsOf('appointment_participants', 'select');
+    expect(read.filters).toEqual([
+      ['eq', 'user_id', ME],
+      ['eq', 'appointments.group_id', GROUP],
+    ]);
+    expect(mockAfterEvent).toHaveBeenCalledWith({ noticeAlarmIds: ['a-prepare', 'a-arrive'] });
+    mockAfterEvent.mockClear();
+    mockFake.answer('group_members.update', ok([]));
+    await expect(real.leaveGroup(GROUP)).rejects.toThrow(UserError);
+    expect(mockAfterEvent).not.toHaveBeenCalled();
+  });
+
+  it('나가기: 알람 번호를 못 읽어도 나가기는 그대로 되고 afterEvent는 빈 목록으로 불림', async () => {
+    mockAfterEvent.mockClear();
+    mockFake.answer('appointment_participants.select', { data: null, error: { message: '오프라인' } });
+    mockFake.answer('group_members.update', ok([{ group_member_id: 'm1' }]));
+    await real.leaveGroup(GROUP);
+    expect(mockAfterEvent).toHaveBeenCalledWith({ noticeAlarmIds: [] });
   });
 
   it('내보내기: 그 사람의 구성원 행을 지움 (코드 교체 · 권한 삭제는 서버가), 이미 없으면 이유', async () => {

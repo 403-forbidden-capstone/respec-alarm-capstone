@@ -1,8 +1,9 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { beforeEach, describe, expect, it, jest } from '@jest/globals';
 
-import { announce, flushActions } from '../actions';
+import { announce, flushActions, withoutEarlyDepartNotices } from '../actions';
 import { commit, loadActions } from '../store';
+import type { RegionPlan, TrackedParticipant } from '../regions';
 import type { GeoAction } from '../transitions';
 
 // 못 쓴 기록 보내기 뒤 도착 안내 — 서버 쓰기 · 안내는 가짜로 두고 부른 내용만 확인
@@ -141,5 +142,26 @@ describe('안내 부르기 (announce)', () => {
     });
     expect(() => announce([{ type: 'DEPART_PENDING', participantId: 'p1', at: 1 }, { type: 'DEPART_CANCEL', participantId: 'p1', at: 1 }])).not.toThrow();
     expect(mockNotice).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('이른 이탈의 출발 감지 안내 거르기 (withoutEarlyDepartNotices, NEW-2)', () => {
+  // 출발 예정 08:20 → 창은 07:20부터 (출발 예정 60분 전)
+  const tracked = (id: string): TrackedParticipant => ({ participantId: id, appointmentAt: at('09:00'), departAt: at('08:20'), fromHome: true, near: false, departedAt: null, arrivedAt: null });
+  const plan = { participants: [tracked('p1')], untracked: [tracked('p2')], regions: [] } as unknown as RegionPlan;
+  const pending = (participantId: string, hhmm: string): GeoAction => ({ type: 'DEPART_PENDING', participantId, at: at(hhmm) });
+
+  it('창이 열리기 전(07:10) 이탈의 안내는 뺌, 창 시작(07:20) · 그 뒤는 그대로', () => {
+    expect(withoutEarlyDepartNotices([pending('p1', '07:10')], plan)).toEqual([]);
+    expect(withoutEarlyDepartNotices([pending('p1', '07:20'), pending('p1', '08:15')], plan)).toHaveLength(2);
+  });
+
+  it('출발 안내가 아닌 것(취소 · 도착)과 계획에 없는 참여 조건은 그대로 둠', () => {
+    const others: GeoAction[] = [{ type: 'DEPART_CANCEL', participantId: 'p1', at: at('07:10') }, ARRIVE, pending('unknown', '07:10')];
+    expect(withoutEarlyDepartNotices(others, plan)).toEqual(others);
+  });
+
+  it('감지 안 하는 약속(untracked)도 같은 창으로 거름', () => {
+    expect(withoutEarlyDepartNotices([pending('p2', '07:10')], plan)).toEqual([]);
   });
 });

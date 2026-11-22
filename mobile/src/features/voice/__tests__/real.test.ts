@@ -502,6 +502,18 @@ describe('⑤ 장소 필요 → 장소 고르기 → 계산 → 준비', () => {
     expect(turnBodies()).toHaveLength(3);
   });
 
+  it('장소 고른 뒤 서버가 낸 되물을 것(할 일이 있는 일정의 기상 확인)을 onAsk로 넘김 — 음성 대화면 화면이 Live에 넣음', async () => {
+    mPlaces.mockImplementation(async () => []);
+    script = [session(), turn({ next: 'APP_TASKS', reply: null, cards: [apptCard()] }), turn({ rev: 3, cards: [apptCard({ status: 'NEEDS_PLACE' })] })];
+    await getConversation();
+    await say('내일 1시에 수업이 있어. 아 근데 나가기 전에 뭐 좀 해야 돼.');
+    const wake = "'수업' 기상 알람이 11:06으로 계산됨 — 나가기 전 할 일(할 일)이 있다고 했으니 이 시각에 일어날지, 몇 시에 일어날지";
+    script = [turn({ rev: 4, reply: { text: '추천 기상 시각은 오전 11시 6분인데, 그대로 일어나실 건가요?' }, cards: [apptCard({ status: 'READY' })], ask: [wake] })];
+    const asked: string[][] = [];
+    await pickCardPlace('c1', { name: '세종대학교', lat: 37.55, lng: 127.07 }, undefined, (a) => asked.push(a));
+    expect(asked).toEqual([[wake]]);
+  });
+
   it('알람 계산이 실패하면 FAILED + 까닭을 돌려주고, 같은 장소로 [다시 시도]하면 READY', async () => {
     mPlaces.mockImplementation(async () => []);
     script = [session(), turn({ next: 'APP_TASKS', reply: null, cards: [apptCard()] }), turn({ rev: 3, cards: [apptCard({ status: 'NEEDS_PLACE' })] })];

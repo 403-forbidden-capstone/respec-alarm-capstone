@@ -2,7 +2,7 @@
 -- Based on running roll_insert_occurrence function on 2026-11-20;
 -- replace ONLY participant insert projection. Confirm main's latest RPC body
 -- matches before deploying this migration.
--- Depends on 20261121120000 and 20261121121000.
+-- Depends on 20261122120000 and 20261122121000.
 CREATE OR REPLACE FUNCTION public.roll_insert_occurrence(p_appointment jsonb, p_participant jsonb, p_alarms jsonb, p_items jsonb)
  RETURNS uuid
  LANGUAGE plpgsql

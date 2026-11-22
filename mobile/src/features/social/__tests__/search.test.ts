@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, jest } from '@jest/globals';
 
 import { createFake } from '../__fixtures__/fakeSupabase';
 import { JUNSEONG, ME, SUYEON, friends, groups, members, perms, profiles } from '../__fixtures__/seed';
-import { friendInviteMessage, friendLinkUrl, linkTokenOf } from '../inviteLink';
+import { PRODUCTION_ORIGIN, friendInviteMessage, friendLinkUrl, linkTokenOf } from '../inviteLink';
 import * as real from '../real';
 import { relationButton, relationFromLists, searchNotice } from '../searchView';
 import type { PeopleSearch } from '../types';
@@ -254,6 +254,11 @@ describe('inviteLink — 링크 주소 · 초대 메시지', () => {
     expect(linkTokenOf(' abcdefgh2345 ')).toBe('ABCDEFGH2345');
     expect(linkTokenOf(undefined)).toBe('');
     expect(linkTokenOf(['ABC', 'DEF'])).toBe('ABC'); // 같은 이름이 여러 번 오면 첫 값
+  });
+
+  it('폰 앱에서 공유하는 링크는 우리 도메인 (supabase · workers.dev 주소가 보이지 않게)', () => {
+    expect(PRODUCTION_ORIGIN).toBe('https://respecalarm.com');
+    expect(friendLinkUrl('ABC', PRODUCTION_ORIGIN)).toBe('https://respecalarm.com/invite?t=ABC');
   });
 
   it('메시지에 닉네임 + 아이디 (2-44), 링크가 있으면 같이', () => {

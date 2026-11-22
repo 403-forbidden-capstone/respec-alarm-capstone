@@ -276,6 +276,8 @@ export type AlarmBackend = {
   markEventsUploaded(clientEventIds: string[]): Promise<void>;
   /** 기상이 확정됐을 때 부름 — 폰이 띄운 "지금 일어나셨나요?" 알림을 거두고, 이미 확정됐다고 표시해 더 안 띄움 (Android만, iOS · 웹은 아무것도 안 함) */
   dismissWakePrompt(alarmId: string): Promise<void>;
+  /** 해제 시각(dismissedAtMillis)부터 10분 뒤 판정(자동 확정 · 확인 알림)을 폰에 검 — 홈에서 미루기를 취소해 해제로 볼 때(G13). 폰 안에서 해제한 것과 같은 예약 (Android만, iOS · 웹은 아무것도 안 함) */
+  scheduleWakeJudge(alarmId: string, dismissedAtMillis: number): Promise<void>;
   addEventListener(listener: (event: AlarmEvent) => void): { remove(): void };
   /** AI 음성 브리핑 저장 — 새 음성은 쓰고, 열쇠가 같은 예전 음성만 남기고, 나머지 단계는 지움 */
   saveVoiceBriefing(alarmId: string, value: VoiceBriefingSave): Promise<void>;

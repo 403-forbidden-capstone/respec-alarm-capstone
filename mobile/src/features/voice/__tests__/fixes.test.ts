@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, jest } from '@jest/globals';
 
 import { readLocationTime, recordParticipantTimes } from '@/features/alarm/participantTimes';
+import { correctAutoWake, getAutoWake } from '@/features/alarm/realWake';
 
 import { applyFix } from '../fixes';
 
@@ -20,8 +21,11 @@ jest.mock('@/lib/supabase', () => ({
 }));
 jest.mock('@/lib/user', () => ({ requireUserId: async () => 'user-1' }));
 jest.mock('@/features/alarm/participantTimes', () => ({ readLocationTime: jest.fn(), recordParticipantTimes: jest.fn() }));
+jest.mock('@/features/alarm/realWake', () => ({ getAutoWake: jest.fn(), correctAutoWake: jest.fn() }));
 
 const mRead = readLocationTime as unknown as jest.Mock<(id: string, kind: string) => Promise<unknown>>;
+const mAuto = getAutoWake as unknown as jest.Mock<() => Promise<{ alarmId: string; at: Date } | null>>;
+const mCorrect = correctAutoWake as unknown as jest.Mock<(id: string) => Promise<boolean>>;
 const mRecord = recordParticipantTimes as unknown as jest.Mock<(input: Record<string, unknown>) => Promise<unknown>>;
 
 const to = new Date('2026-10-30T01:20:00Z');
@@ -70,6 +74,19 @@ describe('applyFix', () => {
     expect(await applyFix({ ...fix, action: 'DENY', to: null })).toEqual({ id: 'x1', ok: false, error: '아직 안 됨' });
     expect(await applyFix({ ...fix, kind: 'WAKE' })).toEqual({ id: 'x1', ok: false, error: '아직 안 됨' });
     expect(mRecord).not.toHaveBeenCalled();
+  });
+
+  it('기상 부정("아직 안 일어났어")은 자동 확정을 취소하는 같은 함수로 — 대상이 없으면 대상 없음, 새 시각 정정은 아직 안 됨', async () => {
+    const wakeDeny = { ...fix, kind: 'WAKE', action: 'DENY' as const, to: null };
+    mAuto.mockResolvedValue({ alarmId: 'al-w', at: new Date('2026-10-30T22:11:00Z') });
+    mCorrect.mockResolvedValue(true);
+    expect(await applyFix(wakeDeny)).toEqual({ id: 'x1', ok: true, error: null });
+    expect(mCorrect).toHaveBeenCalledWith('al-w', new Date('2026-10-30T22:11:00Z'));
+    mCorrect.mockResolvedValue(false);
+    expect(await applyFix(wakeDeny)).toEqual({ id: 'x1', ok: false, error: '대상 없음' });
+    mAuto.mockResolvedValue(null);
+    expect(await applyFix(wakeDeny)).toEqual({ id: 'x1', ok: false, error: '대상 없음' });
+    expect(await applyFix({ ...wakeDeny, action: 'CORRECT' as never })).toEqual({ id: 'x1', ok: false, error: '아직 안 됨' });
   });
 
   it('새 시각이 없으면 시각 모름', async () => {

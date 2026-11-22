@@ -12,6 +12,7 @@ const mockDiscard = jest.fn<() => Promise<number>>();
 const mockUnsubscribeAll = jest.fn<() => void>();
 const mockSignOut = jest.fn<() => Promise<void>>();
 const mockRemoveToken = jest.fn<() => Promise<void>>();
+const mockClearTray = jest.fn<() => Promise<void>>();
 
 jest.mock('../alarmSync', () => ({
   uploadEvents: () => mockUpload(),
@@ -21,6 +22,7 @@ jest.mock('../alarmSync', () => ({
 }));
 jest.mock('../realtime', () => ({ unsubscribeAll: () => mockUnsubscribeAll() }));
 jest.mock('../push/token', () => ({ removePushToken: () => mockRemoveToken() }));
+jest.mock('../push/tray', () => ({ clearNotificationTray: () => mockClearTray() }));
 jest.mock('../auth', () => ({ signOut: () => mockSignOut() }));
 
 beforeEach(() => {
@@ -36,12 +38,13 @@ beforeEach(() => {
   mockUnsubscribeAll.mockImplementation(() => void mockCalls.push('구독 끊기'));
   mockSignOut.mockImplementation(async () => void mockCalls.push('로그아웃'));
   mockRemoveToken.mockImplementation(async () => void mockCalls.push('푸시 토큰 삭제'));
+  mockClearTray.mockImplementation(async () => void mockCalls.push('알림창 비우기'));
 });
 
 describe('로그아웃 정리', () => {
-  it('로그아웃 중 켜기 → 올려 보기 → 알람 전부 취소 → 남은 기록 버림 → 푸시 토큰 삭제 → 구독 끊기 → 로그아웃 순서 (끝까지 가면 표시는 켜 둠 — 다시 로그인할 때 useAlarmSync가 끔)', async () => {
+  it('로그아웃 중 켜기 → 올려 보기 → 알람 전부 취소 → 남은 기록 버림 → 알림창 비우기 → 푸시 토큰 삭제 → 구독 끊기 → 로그아웃 순서 (끝까지 가면 표시는 켜 둠 — 다시 로그인할 때 useAlarmSync가 끔)', async () => {
     await signOutAndCleanup();
-    expect(mockCalls).toEqual(['로그아웃 중 켜기', '올리기', '알람 취소', '남은 기록 버림', '푸시 토큰 삭제', '구독 끊기', '로그아웃']);
+    expect(mockCalls).toEqual(['로그아웃 중 켜기', '올리기', '알람 취소', '남은 기록 버림', '알림창 비우기', '푸시 토큰 삭제', '구독 끊기', '로그아웃']);
   });
 
   it('푸시 토큰을 못 지워도(오프라인) 로그아웃은 계속 — 다음 로그인이 토큰 주인을 옮김 (11-02 · 11-04)', async () => {
@@ -133,9 +136,9 @@ describe('알람 취소 이후 단계의 예외', () => {
 
 
 describe('계정 삭제 뒤 기기 정리 (친구 12장)', () => {
-  it('폰 알람 취소 → 기록 버림 → 구독 끊기 → 로그아웃 — 올리기는 안 함(서버 계정이 이미 없음)', async () => {
+  it('폰 알람 취소 → 기록 버림 → 알림창 비우기 → 구독 끊기 → 로그아웃 — 올리기는 안 함(서버 계정이 이미 없음)', async () => {
     await cleanupAfterAccountDelete();
-    expect(mockCalls).toEqual(['로그아웃 중 켜기', '알람 취소', '남은 기록 버림', '구독 끊기', '로그아웃']);
+    expect(mockCalls).toEqual(['로그아웃 중 켜기', '알람 취소', '남은 기록 버림', '알림창 비우기', '구독 끊기', '로그아웃']);
     expect(mockUpload).not.toHaveBeenCalled();
   });
 

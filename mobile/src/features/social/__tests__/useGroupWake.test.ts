@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, jest } from '@jest/globals
 
 import { AppState, type AppStateStatus } from 'react-native';
 
-import { isWakeStale, watchForeground, watchGroupWake } from '../hooks/useGroupWake';
+import { isWakeStale, pollWhileActive, watchForeground, watchGroupWake, WAKE_POLL_MS } from '../hooks/useGroupWake';
 
 // 기상 신호 → 화면 다시 읽기. lib/realtime(subscribeGroupWake)은 가짜로 — 채널 자체는 lib/__tests__/realtime.test.ts
 type Listener = (signal: { date: string | null }) => void;
@@ -24,6 +24,7 @@ jest.mock('@/lib/realtime', () => ({
 // 훅 파일이 lib/mode · useLoad(expo-router)를 불러옴 — watchGroupWake는 쓰지 않으니 가볍게 막음
 jest.mock('@/lib/mode', () => ({ useMode: () => ({ mode: 'real', ready: true }) }));
 jest.mock('@/lib/useLoad', () => ({ useLoad: jest.fn() }));
+jest.mock('@/lib/alarmSync', () => ({ afterEvent: jest.fn() }));
 
 // 앱이 앞에 오는 것(AppState) — 바꾼 상태를 시험이 직접 보냄
 const appListeners = new Set<(s: AppStateStatus) => void>();
@@ -141,6 +142,21 @@ describe('watchGroupWake', () => {
 });
 
 // 7-30 — 실시간 연결이 끊겼다 돌아오면 · 앱이 앞에 올 때 다시 읽음 (신호를 놓쳤을 수 있으니)
+describe('watchGroupWake — onSignal', () => {
+  it('신호를 받을 때마다 부르고, 다시 연결해서 읽을 때는 안 부름', () => {
+    const onSignal = jest.fn<() => void>();
+    watchGroupWake(['g1'], jest.fn(), { onSignal });
+    mockStatus.get('g1')?.('SUBSCRIBED');
+    signal('g1', '2026-10-20');
+    signal('g1', null);
+    expect(onSignal).toHaveBeenCalledTimes(2);
+    mockStatus.get('g1')?.('CLOSED');
+    mockStatus.get('g1')?.('SUBSCRIBED');
+    jest.advanceTimersByTime(10_000);
+    expect(onSignal).toHaveBeenCalledTimes(2);
+  });
+});
+
 describe('다시 연결 · 앱이 앞에 올 때 (7-30)', () => {
   const status = (groupId: string, s: Status) => mockStatus.get(groupId)?.(s);
 
@@ -197,5 +213,64 @@ describe('옛 값 표시 (7-36)', () => {
     expect(isWakeStale({ hasData: true, error: null, linkUp: false })).toBe(true);
     expect(isWakeStale({ hasData: true, error: null, linkUp: true })).toBe(false);
     expect(isWakeStale({ hasData: false, error: new Error('offline'), linkUp: false })).toBe(false); // 값이 없으면 오류 화면이 따로
+  });
+});
+
+describe('pollWhileActive — 그룹 화면이 열려 있는 동안 1분마다 조용히 다시 읽음 (G6)', () => {
+  const setAppState = (state: AppStateStatus) => {
+    Object.defineProperty(AppState, 'currentState', { configurable: true, get: () => state });
+    appListeners.forEach((l) => l(state));
+  };
+  beforeEach(() => {
+    Object.defineProperty(AppState, 'currentState', { configurable: true, get: () => 'active' });
+  });
+
+  it('1분마다 부르고, 59초에는 아직 안 부름', () => {
+    const tick = jest.fn();
+    pollWhileActive(tick);
+    jest.advanceTimersByTime(WAKE_POLL_MS - 1);
+    expect(tick).not.toHaveBeenCalled();
+    jest.advanceTimersByTime(1);
+    expect(tick).toHaveBeenCalledTimes(1);
+    jest.advanceTimersByTime(WAKE_POLL_MS * 3);
+    expect(tick).toHaveBeenCalledTimes(4);
+  });
+
+  it('끊으면(화면을 떠나면) 멈추고 앱 상태 구독도 풀림', () => {
+    const tick = jest.fn();
+    const stop = pollWhileActive(tick);
+    jest.advanceTimersByTime(WAKE_POLL_MS);
+    stop();
+    jest.advanceTimersByTime(WAKE_POLL_MS * 5);
+    expect(tick).toHaveBeenCalledTimes(1);
+    expect(appListeners.size).toBe(0);
+  });
+
+  it('앱이 뒤로 가면 멈추고, 앞으로 오면 그 시점부터 다시 1분 (돌아온 순간에는 안 부름 — 그때 읽기는 watchForeground)', () => {
+    const tick = jest.fn();
+    pollWhileActive(tick);
+    jest.advanceTimersByTime(WAKE_POLL_MS);
+    setAppState('background');
+    jest.advanceTimersByTime(WAKE_POLL_MS * 10);
+    expect(tick).toHaveBeenCalledTimes(1); // 뒤에 있는 동안 0번
+    setAppState('active');
+    expect(tick).toHaveBeenCalledTimes(1);
+    jest.advanceTimersByTime(WAKE_POLL_MS);
+    expect(tick).toHaveBeenCalledTimes(2);
+    setAppState('inactive');
+    jest.advanceTimersByTime(WAKE_POLL_MS * 2);
+    expect(tick).toHaveBeenCalledTimes(2);
+  });
+
+  it('처음부터 앱이 뒤에 있으면 앞으로 올 때까지 안 돎, 앞으로 와도 타이머는 하나만(여러 번 active가 와도 겹치지 않음)', () => {
+    Object.defineProperty(AppState, 'currentState', { configurable: true, get: () => 'background' });
+    const tick = jest.fn();
+    pollWhileActive(tick);
+    jest.advanceTimersByTime(WAKE_POLL_MS * 2);
+    expect(tick).not.toHaveBeenCalled();
+    setAppState('active');
+    setAppState('active');
+    jest.advanceTimersByTime(WAKE_POLL_MS);
+    expect(tick).toHaveBeenCalledTimes(1);
   });
 });

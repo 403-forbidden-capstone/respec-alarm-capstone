@@ -204,6 +204,7 @@ export function useLiveVoice(
     lines,
     start,
     stop: end,
+    ask, // 차례 밖(장소 고르기 뒤 계산)에서 생긴 되물을 것도 Live로
     clear: () => setLines(() => []),
     // 글을 보내거나 입력 방식을 바꾸면 지난 음성 오류 · 무발화 종료 문구를 내림
     clearError: () => {

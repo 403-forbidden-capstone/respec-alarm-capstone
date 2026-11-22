@@ -92,6 +92,7 @@ export class Phone {
   locationForeground = true;
   locationBackground = true;
   geofenceTasks = new Map<string, (body: unknown) => Promise<void> | void>();
+  pushTasks = new Set<string>(); // Notifications.registerTaskAsync로 등록된 백그라운드 푸시 작업 (앱을 한 번 연 뒤에 생김)
   lastResponse: { notification: { request: { identifier: string; content: { data: Record<string, unknown> } }; date: number } } | null = null;
   receivedListeners = new Set<NotificationListener>();
   responseListeners = new Set<ResponseListener>();
@@ -118,6 +119,7 @@ export class Phone {
     this.locationForeground = true;
     this.locationBackground = true;
     this.lastResponse = null;
+    this.pushTasks.clear();
     this.receivedListeners.clear();
     this.responseListeners.clear();
     this.alarmListeners.clear();
@@ -292,7 +294,8 @@ export class Phone {
     this.geofenceRegions = null;
   }
 
-  // 폰 재부팅 — 예약된 알람은 되살아남(지난 것은 지움), 알림창 · 해제 후 판정 예약 · 지오펜스 등록은 사라짐 (AC:342-355, DU:113-124, LR:118)
+  // 폰 재부팅 — 예약된 알람은 되살아남(지난 것은 지움), 알림창 · 지오펜스 등록은 사라짐 (AC:342-355, LR:118)
+  //   해제 + 10분 판정 예약은 폰이 저장해 두었다가 AlarmBootReceiver가 복원함(G7): 아직 안 된 것은 다시 걸고, 이미 지난 시각이면 바로 한 번 판정, 12시간이 지난 것은 버림
   reboot() {
     for (const [id, alarm] of [...this.store]) {
       if (alarm.nextRingAt <= this.now() && !alarm.ringing) this.store.delete(id);
@@ -301,9 +304,10 @@ export class Phone {
     this.ringing = null;
     this.tray.clear();
     this.scheduledNotifications.clear();
-    this.judges = [];
+    this.judges = this.judges.filter((j) => this.now() - j.dismissedAt < 12 * 60 * MIN);
     this.geofenceRegions = null;
     this.nativeLog.push('reboot');
+    this.runJudges(); // 이미 지난 판정은 바로 한 번 (WakeJudgeSchedule.restore)
   }
 
   // 서버 푸시가 도착 — 알림창에는 늘 뜸. 앱 JS가 앞에 있으면(listener가 붙어 있으면) 받음 처리가 돎
@@ -313,6 +317,21 @@ export class Phone {
     if (this.notificationsGranted) this.tray.set(`expo:${identifier}`, { id: `expo:${identifier}`, origin: 'expo', kind: 'PUSH', data });
     if (this.jsReceivesPush()) this.receivedListeners.forEach((l) => l(n));
     return identifier;
+  }
+
+  // 조용한 데이터 푸시(문구 · 알림 없음)가 도착 — 알림창에는 안 뜸. 앱 JS가 앞 · 뒤에 있으면 받음 리스너가, 꺼져 있으면 등록된 백그라운드 푸시 작업이 헤드리스로 돎(앱 화면 없이 JS만)
+  //   작업을 등록한 적이 없으면(앱을 한 번도 안 열었거나 옛 앱) 아무 일도 안 일어남. 끝날 때까지 기다림
+  async receiveSilentPush(data: Record<string, unknown>) {
+    this.shownCount += 1;
+    const n = { request: { identifier: `silent-${this.shownCount}`, content: { data } }, date: this.now() };
+    if (this.jsReceivesPush()) {
+      this.receivedListeners.forEach((l) => l(n));
+      return;
+    }
+    for (const name of this.pushTasks) {
+      const task = this.geofenceTasks.get(name);
+      if (task) await task({ data: { dataString: JSON.stringify({ ...data }), notification: null }, error: null, executionInfo: { eventId: n.request.identifier } });
+    }
   }
 
   // 알림을 누름 — 앱 JS가 돌고 있으면 응답 처리, 꺼져 있으면 마지막 응답으로 남겨 두고 앱이 열릴 때 읽음
@@ -355,7 +374,9 @@ export class Phone {
     cancelAll: async () => {
       for (const id of [...this.store.keys()]) this.tray.delete(`notice:${id}`);
       this.store.clear();
-      for (const key of [...this.tray.keys()]) if (key.startsWith('notice:')) this.tray.delete(key); // cancelAllNotices — 일정 알림은 전부, 확인 알림(wakeprompt)은 그대로
+      for (const key of [...this.tray.keys()]) if (key.startsWith('notice:')) this.tray.delete(key); // cancelAllNotices — 일정 알림은 전부
+      for (const key of [...this.tray.keys()]) if (key.startsWith('wakeprompt:')) this.tray.delete(key); // WakePrompt.cancelAllPrompts — 떠 있는 확인 알림
+      this.judges = []; // WakeJudgeStore.cancelAll — 저장해 둔 해제 + 10분 판정 예약을 취소하고 재부팅 복원 대상에서도 뺌
       this.ringing = null;
     },
     list: async (): Promise<ScheduledAlarm[]> =>
@@ -421,8 +442,14 @@ export class Phone {
       const done = new Set(ids);
       this.events = this.events.filter((e) => !done.has(e.clientEventId));
     },
+    scheduleWakeJudge: async (alarmId: string, dismissedAtMillis: number) => {
+      this.nativeLog.push(`scheduleWakeJudge:${alarmId}`);
+      this.judges = this.judges.filter((j) => j.alarmId !== alarmId);
+      this.judges.push({ alarmId, dismissedAt: dismissedAtMillis, at: dismissedAtMillis + JUDGE_AFTER_MS });
+    },
     dismissWakePrompt: async (alarmId: string) => {
       this.nativeLog.push(`dismissWakePrompt:${alarmId}`);
+      this.judges = this.judges.filter((j) => j.alarmId !== alarmId); // 확정되면 저장해 둔 판정 예약도 지움 (WakePrompt.dismiss)
       this.tray.delete(`wakeprompt:${alarmId}`);
       this.confirmedMarks.set(alarmId, this.now()); // 이미 확정됐다고 표시 — 더 안 띄움 (WP:66-70)
     },
@@ -453,10 +480,18 @@ export class Phone {
       return id;
     },
     dismissNotificationAsync: async (id: string) => void this.tray.delete(`expo:${id}`),
+    // 알림창에 떠 있는 expo 알림 (서버 푸시 · 감지 안내) — 깨우기 알림을 거두려고 읽음 (realWake clearWakePingNotices)
+    getPresentedNotificationsAsync: async () =>
+      [...this.tray.values()].filter((t) => t.origin === 'expo').map((t) => ({ request: { identifier: t.id.slice('expo:'.length), content: { data: t.data ?? {} } }, date: this.now() })),
     cancelScheduledNotificationAsync: async (id: string) => void this.scheduledNotifications.delete(id),
+    dismissAllNotificationsAsync: async () => {
+      for (const key of [...this.tray.keys()]) if (key.startsWith('expo:')) this.tray.delete(key);
+    },
+    cancelAllScheduledNotificationsAsync: async () => void this.scheduledNotifications.clear(),
     setNotificationChannelAsync: async () => null,
     setNotificationHandler: () => {},
     getExpoPushTokenAsync: async () => ({ data: 'ExponentPushToken[scenario]' }),
+    registerTaskAsync: async (name: string) => void this.pushTasks.add(name),
     getLastNotificationResponse: () => this.lastResponse,
     clearLastNotificationResponse: () => {
       this.lastResponse = null;
