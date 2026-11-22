@@ -33,7 +33,7 @@ export async function getMyProfile(userId: string): Promise<Profile | null> {
   if (!isMissingOutingColumn(error)) throw error;
   const legacy = await supabase.from('profiles').select(LEGACY_COLUMNS).eq('user_id', userId).maybeSingle();
   if (legacy.error) throw legacy.error;
-  return legacy.data ? { ...(legacy.data as Omit<Profile, 'default_outing_prep_minutes'>), default_outing_prep_minutes: null } : null;
+  return legacy.data ? { ...(legacy.data as unknown as Omit<Profile, 'default_outing_prep_minutes'>), default_outing_prep_minutes: null } : null;
 }
 
 // 내 아이디 바꾸기 — change_my_handle(DB 함수)로만. 앱이 profiles에 직접 쓰면 막힘(42501, 친구 2장)
