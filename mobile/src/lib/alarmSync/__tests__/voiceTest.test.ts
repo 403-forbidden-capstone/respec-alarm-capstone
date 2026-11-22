@@ -45,7 +45,7 @@ describe('기상 AI 음성 단계 재현', () => {
     expect([0, 1, 2, 3].map((n) => levelAt(voice.rule!, n, NOW))).toEqual([1, 2, 3, 3]);
   });
 
-  it('단계마다 서버 규칙의 문장 · 높낮이 · 속도 · 목소리 그대로 (1단계 1.0/1.0, 2단계 1.7/1.5)', () => {
+  it('단계마다 서버 규칙의 문장 · 높낮이 · 속도 · 목소리 그대로 (1 · 2단계 1.0/1.0)', () => {
     const { voice } = wakeVoiceTest(1, NOW, ON);
     const profile = resolveVoice('NORMAL');
     expect(voice.clips.map((c) => c.level)).toEqual([1, 2, 3, 4]);
@@ -67,10 +67,10 @@ describe('기상 AI 음성 단계 재현', () => {
     );
     expect(voice.clips.slice(0, 2).map((c) => [c.pitch, c.rate])).toEqual([
       [1.0, 1.0],
-      [1.7, 1.5],
+      [1.0, 1.0],
     ]);
     expect(stageVoice(1)).toBe('Android TTS · 높낮이 1.0 · 속도 1.0');
-    expect(stageVoice(2)).toBe('Android TTS · 높낮이 1.7 · 속도 1.5');
+    expect(stageVoice(2)).toBe('Android TTS · 높낮이 1.0 · 속도 1.0');
     expect(stageVoice(3)).toBe('Gemini TTS · Gacrux 목소리 · 예비 gemini_stage4_fallback.wav · 1.0배');
     expect(stageVoice(4)).toBe('Gemini TTS · Kore 목소리 · 예비 gemini_urgent_sample.wav · 1.2배');
   });

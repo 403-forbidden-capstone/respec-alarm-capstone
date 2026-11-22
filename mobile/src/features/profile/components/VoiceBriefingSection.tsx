@@ -1,7 +1,8 @@
-// 설정 > AI 음성 브리핑 — 켜기 · 전날 대화 사용(profiles.alarm_voice_prefs) + 말소리 약 · 중 · 강(profiles.preferred_voice_tone)
+// 설정 > AI 음성 브리핑 — 켜기(profiles.alarm_voice_prefs) + 말소리 약 · 중 · 강(profiles.preferred_voice_tone)
 //   말소리 = 기상 알람 AI 음성 시작 단계(약 1 · 중 2 · 강 3)의 기본값. 비면(아무것도 안 고름) 일정 강도대로 자동, 일정에서 직접 고른 말소리가 이김
 //   말투(tone) · 목소리(voice) 선택은 뺌 — 저장돼 있던 값은 cleanPrefs가 그대로 두지만 실제 알람 목소리에 안 씀(briefing.ts ANDROID_VOICE_INDEX)
 //   말소리를 누르면 onPickTone(미리 듣기 + 저장, features/profile/hooks/useVoiceTone). [기본값으로]는 모든 칸을 비움. 값 · 콜백만 받음
+//   어제 대화(직접 말하거나 확인한 다짐 · 목표)는 끄는 설정 없이 늘 기상 브리핑에 넣음 (서버 briefing-run.ts)
 //   알람 소리 · 진동 · 세기(볼륨)는 여기서 안 바꿈 — 알람마다 기존 강도 화면의 축 선택이 맡고, AI 음성이 그 값을 바꾸지 않음
 import { StyleSheet, View } from 'react-native';
 
@@ -46,9 +47,6 @@ export function VoiceBriefingSection({ value, tone, onSave, onPickTone, disabled
             <Text variant="small" tone="sub" style={styles.label}>
               말소리를 선택하면 음성을 미리 들을 수 있어요.
             </Text>
-            <Row label="어제 대화 내용 넣기" note="AI 대화에서 직접 말한 다짐 · 목표만 써요. 끄면 일정만 읽어요">
-              <Toggle value={prefs.personal ?? true} onChange={(on) => set('personal', on ? undefined : false)} label="어제 대화 내용 넣기" disabled={disabled} />
-            </Row>
           </>
         ) : null}
         <Text variant="small" tone="sub" style={styles.label}>

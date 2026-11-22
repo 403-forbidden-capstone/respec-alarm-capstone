@@ -8,8 +8,10 @@ describe('말소리 미리 듣기', () => {
   it('약 = 1단계 Android TTS 기본 높낮이 · 속도', () => {
     expect(voicePreviewOf('CALM', NOW)).toMatchObject({ kind: 'TTS', pitch: 1.0, rate: 1.0, voiceIndex: 0, text: expect.any(String) });
   });
-  it('중 = 2단계 Android TTS 높고 빠르게', () => {
-    expect(voicePreviewOf('NEUTRAL', NOW)).toMatchObject({ kind: 'TTS', pitch: 1.7, rate: 1.5, voiceIndex: 0 });
+  it('중 = 2단계 문장을 약과 같은 기본 높낮이 · 속도로 (기계음 아님)', () => {
+    const mid = voicePreviewOf('NEUTRAL', NOW);
+    expect(mid).toMatchObject({ kind: 'TTS', pitch: 1.0, rate: 1.0, voiceIndex: 0 });
+    expect(mid).not.toEqual(voicePreviewOf('CALM', NOW)); // 문장은 2단계 것
   });
   it('강 = 3단계 Gemini 예비 WAV (API 호출 없음)', () => {
     expect(voicePreviewOf('DIRECT', NOW)).toEqual({ kind: 'GEMINI_WAV' });

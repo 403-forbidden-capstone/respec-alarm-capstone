@@ -90,7 +90,7 @@ export async function runBriefing(src: BriefingSource, have: ReadonlySet<string>
   const days = briefingDays(src.scheduledAtMs, src.timeZone);
   const input = {
     kind: src.kind,
-    memo: wake && profile.personal ? wakeMemo(src.sessions, days.review) : null,
+    memo: wake ? wakeMemo(src.sessions, days.review) : null, // 예전에 저장된 personal: false는 cleanPrefs가 버림 — 늘 넣음
     appointments: wake ? pickAppointments(src.appointments.filter((a) => a.atMs >= src.scheduledAtMs)) : src.appointments.slice(0, 1),
     todos: src.todos,
     departAtMs: wake ? src.departAtMs : null,

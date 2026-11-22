@@ -80,7 +80,6 @@ export type VoicePrefs = {
   tone?: ToneKey; // 말투
   coachMax?: UrgencyLevel; // 예전 저장값 호환용. 긴급 단계는 사용자 설정으로 끌 수 없음
   escalate?: boolean; // 예전 저장값 호환용. 단계 전환은 현재 자동 적용
-  personal?: boolean; // 전날 대화 내용을 알람에 넣기 (기본 켬)
 };
 
 export const DEFAULT_COACH_MAX: UrgencyLevel = 4;
@@ -95,7 +94,6 @@ export function cleanPrefs(raw: unknown): VoicePrefs {
   if (typeof r.tone === 'string' && r.tone in TONES) out.tone = r.tone as ToneKey;
   if (r.coachMax === 1 || r.coachMax === 2 || r.coachMax === 3 || r.coachMax === 4) out.coachMax = r.coachMax;
   if (typeof r.escalate === 'boolean') out.escalate = r.escalate;
-  if (typeof r.personal === 'boolean') out.personal = r.personal;
   return out;
 }
 
@@ -105,7 +103,6 @@ export type VoiceProfile = {
   tone: ToneKey;
   coachMax: UrgencyLevel;
   escalate: boolean;
-  personal: boolean;
   manual: { voice: boolean; tone: boolean };
 };
 
@@ -118,7 +115,6 @@ export function resolveVoice(importance: Importance, prefs: VoicePrefs = {}): Vo
     tone: prefs.tone ?? base.tone,
     coachMax: DEFAULT_COACH_MAX,
     escalate: true,
-    personal: prefs.personal ?? true,
     manual: { voice: prefs.voice != null, tone: prefs.tone != null },
   };
 }
@@ -222,12 +218,12 @@ export function levelsToPrepare(rule: UrgencyRule): UrgencyLevel[] {
   return ([1, 2, 3, 4] as const).filter((l) => l <= rule.maxLevel);
 }
 
-// Android TTS 높낮이 · 속도 (setPitch · setSpeechRate 값 그대로, 1.0 = 기본) — 단계별 고정값. 말투에 더하지 않음 (기획 확정: 1단계 1.0/1.0, 2단계 1.7/1.5)
-//   3 · 4단계는 Gemini가 기본이고 Android TTS는 대체로 읽을 때만 — 2단계와 같은 강한 값 (작성자 판단)
+// Android TTS 높낮이 · 속도 (setPitch · setSpeechRate 값 그대로, 1.0 = 기본) — 단계별 고정값. 말투에 더하지 않음 (1 · 2단계 1.0/1.0 — 2단계 1.7/1.5는 기계음처럼 들려 기본 목소리로 바꿈, 11/23)
+//   3 · 4단계는 Gemini가 기본이고 Android TTS는 대체로 읽을 때만 — 높고 빠른 값 1.7/1.5 그대로 (작성자 판단)
 //   네이티브 BriefingRules.FALLBACK_VOICE와 같은 값 — 고치면 둘 다
 const LEVEL_VOICE: Record<UrgencyLevel, { pitch: number; rate: number }> = {
   1: { pitch: 1.0, rate: 1.0 },
-  2: { pitch: 1.7, rate: 1.5 },
+  2: { pitch: 1.0, rate: 1.0 },
   3: { pitch: 1.7, rate: 1.5 },
   4: { pitch: 1.7, rate: 1.5 },
 };
@@ -302,7 +298,7 @@ export function pickAppointments(list: readonly BriefAppointment[], max = MAX_AP
 
 export type BriefingInput = {
   kind: BriefKind;
-  memo: WakeMemo | null; // 기상만. 사용자가 전날 대화를 끄면 null
+  memo: WakeMemo | null; // 기상만. 전날 대화에서 꺼낼 것이 없으면 null (늘 자동으로 넣음 — 끄는 설정 없앰)
   appointments: readonly BriefAppointment[]; // 기상 = 그날 일정(pickAppointments), 출발 = 그 일정 하나
   todos: readonly BriefTodo[]; // 기상 = 그날 할 일 · 준비물, 출발 = 그 일정의 준비물
   departAtMs: number | null; // 기상 알람의 같은 약속 출발 시각 (고정 시각이라 캐시해도 낡지 않음)
