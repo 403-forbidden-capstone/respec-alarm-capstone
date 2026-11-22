@@ -3,18 +3,17 @@ import { Pressable, StyleSheet, View } from 'react-native';
 
 import { colors, size } from '@/theme';
 
-import { ScreenId } from './ScreenId';
 import { Text } from './Text';
 
 type Props = {
-  screenId?: string; // 목업 화면 번호(H01 등). 개발 중 확인용 — 출시용 폰 빌드에선 숨김(ScreenId), 없으면 안 그림
+  screenId?: string; // 목업 화면 번호(H01 등). 화면을 구분하는 내부 식별자 — 화면에는 그리지 않음
   onBack?: () => void; // 있으면 왼쪽에 "← 이전"
-  left?: ReactNode; // 이전 · 화면 번호 대신 왼쪽에 둘 것 (홈의 날짜)
+  left?: ReactNode; // 이전 대신 왼쪽에 둘 것 (홈의 날짜)
   right?: ReactNode;
 };
 
-// 화면 맨 위 줄 — 왼쪽은 이전 버튼(있으면, 옆에 화면 번호) 또는 화면 번호, 오른쪽은 버튼
-export function TopBar({ screenId, onBack, left, right }: Props) {
+// 화면 맨 위 줄 — 왼쪽은 이전 버튼(있으면), 오른쪽은 버튼
+export function TopBar({ onBack, left, right }: Props) {
   return (
     <View style={styles.row}>
       {onBack ? (
@@ -24,14 +23,9 @@ export function TopBar({ screenId, onBack, left, right }: Props) {
               ← 이전
             </Text>
           </Pressable>
-          {screenId ? <ScreenId id={screenId} /> : null}
         </View>
       ) : left ? (
         left
-      ) : screenId ? (
-        <View>
-          <ScreenId id={screenId} />
-        </View>
       ) : (
         <View />
       )}

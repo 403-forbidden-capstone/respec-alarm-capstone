@@ -41,11 +41,6 @@ export function resolveMode(policy: ModePolicy, input: { url?: DataMode | null; 
   return wanted === 'real' && !policy.canUseReal ? 'mock' : wanted;
 }
 
-// 화면 번호(H01 등) 표시 — 개발용 폰 빌드와 웹 미리보기에서만, 출시용 폰 빌드(__DEV__ false)에선 숨김 (D16 "출시 빌드에 개발용 요소를 숨김"과 같은 판정, 실데이터 · Supabase 값과 상관없음)
-export function showScreenIds(env: ModeEnv): boolean {
-  return env.web || env.dev;
-}
-
 // 데모(시드) 계정 이메일 로그인 — 로그인 화면 · 개발 메뉴(/dev/screens). 웹 · 폰 개발용 · 개발자용 배포 APK에서만, 실배포(v1) APK에는 안 보임
 export function showDevLogin(env: ModeEnv): boolean {
   return env.ready && env.configured && (env.web || env.dev || env.devApk === true);
