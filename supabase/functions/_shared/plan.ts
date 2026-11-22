@@ -297,6 +297,8 @@ export async function loadPurePrepCandidate(
   }
   try {
     const cutoff = new Date(Math.min(now.getTime(), at.getTime()));
+    // Only verified PREPARE_ALARM starts count; a ROUTINE_STEP may be a
+    // pre-preparation task (meal, study), not physical outing preparation.
     const { data, error } = await db.from('appointment_participants')
       .select('prepare_started_at, departed_at, prepare_started_source, departed_source')
       .eq('user_id', userId)
