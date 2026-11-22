@@ -1,6 +1,6 @@
 import { describe, expect, it } from '@jest/globals';
 
-import { appVariantOf, modePolicy, resolveMode, showDevLogin, showScreenIds, type ModeEnv } from '../modePolicy';
+import { appVariantOf, modePolicy, resolveMode, showDevLogin, type ModeEnv } from '../modePolicy';
 
 const env = (patch: Partial<ModeEnv>): ModeEnv => ({ web: false, dev: false, configured: true, ready: true, ...patch });
 
@@ -81,15 +81,3 @@ describe('빌드 종류 (appVariantOf)', () => {
   });
 });
 
-describe('화면 번호 표시 (showScreenIds)', () => {
-  it('웹 미리보기 · 폰 개발용 빌드에선 보이고, 폰 출시용 빌드에선 숨김', () => {
-    expect(showScreenIds(env({ web: true }))).toBe(true);
-    expect(showScreenIds(env({ dev: true }))).toBe(true);
-    expect(showScreenIds(env({ web: false, dev: false }))).toBe(false);
-  });
-
-  it('실데이터 스위치 · Supabase 값과 상관없이 같은 판정', () => {
-    expect(showScreenIds(env({ web: true, ready: false, configured: false }))).toBe(true);
-    expect(showScreenIds(env({ web: false, dev: false, ready: false, configured: false }))).toBe(false);
-  });
-});

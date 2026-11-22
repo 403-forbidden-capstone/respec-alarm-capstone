@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { AppState, BackHandler, Platform, Pressable, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { ScreenId, Text, toast } from '@/components/ui';
+import { Text, toast } from '@/components/ui';
 import { useAuth } from '@/features/auth/AuthProvider';
 import { ackRing, dismissRing, getRing, snoozeRing, startRing, stopRing } from '@/features/alarm/api';
 import { VoiceWave } from '@/features/alarm/components/VoiceWave';
@@ -185,7 +185,7 @@ export default function RingScreen() {
       ) : data ? (
         <View style={styles.body} accessibilityRole="alert" accessibilityLabel={data.notice ?? HEAD[kind]}>
           <View style={styles.top}>
-            <View><ScreenId id="H07" tone="inverse" style={styles.faded45} /></View>
+            <View />
             {preview ? (
               <Text variant="caption" tone="inverse" style={styles.faded65}>
                 미리보기 · 기록 안 남음
@@ -346,7 +346,7 @@ function DonePanel({ kind, appointment: a, next: from, onClose }: { kind: Exclud
   return (
     <View style={styles.body}>
       <View style={styles.top}>
-        <View><ScreenId id="H07" tone="inverse" style={styles.faded45} /></View>
+        <View />
       </View>
       <Text variant="bodyLarge" tone="inverse" align="center" style={styles.head}>
         {kind === 'PREPARE' ? '준비를 시작해요' : '출발해요'}
@@ -477,7 +477,6 @@ const styles = StyleSheet.create({
   checkBox: { width: 22, height: 22, borderRadius: 7, borderWidth: 1.5, borderColor: colors.ringLine, alignItems: 'center', justifyContent: 'center' },
   checkBoxOn: { backgroundColor: colors.inverse, borderColor: colors.inverse },
   checked: { textDecorationLine: 'line-through', opacity: 0.6 },
-  faded45: { opacity: 0.45 },
   faded60: { opacity: 0.6 },
   faded65: { opacity: 0.65 },
   faded70: { opacity: 0.7 },
