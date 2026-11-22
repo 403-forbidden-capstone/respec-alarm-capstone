@@ -168,6 +168,28 @@ describe('기존 약속 요청 (existingBody)', () => {
     expect(noBefore.participant).not.toHaveProperty('before_prepare_minutes');
   });
 
+  it('며칠 전 AUTO로 저장된 일정은 오래된 준비시간을 스냅샷으로 보내지 않아 H03 저장이 막히지 않음', () => {
+    const auto = saved({ prepareValueSource: 'AUTO', predictedPrepMinutes: 60 });
+    const body = existingBody(auto, same(auto)) as { participant: Record<string, unknown> };
+    expect(body.participant).not.toHaveProperty('prepare_minutes');
+    expect(body.participant).not.toHaveProperty('prepare_value_source');
+
+    // AUTO라도 사용자가 새 수동 준비시간을 입력하면 명시적으로 MANUAL.
+    const picked = existingBody(auto, { ...same(auto), prepareMinutes: 45 }) as { participant: Record<string, unknown> };
+    expect(picked.participant).toMatchObject({ prepare_minutes: 45, prepare_value_source: 'MANUAL' });
+
+    // 수동으로 저장된 기존 값은 서버 계산에 의해 조용히 덮이지 않음.
+    const manual = saved({ prepareValueSource: 'MANUAL', predictedPrepMinutes: 65 });
+    const preserved = existingBody(manual, same(manual)) as { participant: Record<string, unknown> };
+    expect(preserved.participant).toMatchObject({ prepare_minutes: 65, prepare_value_source: 'MANUAL' });
+
+    // 출처를 모르는 과거 일정도 AUTO로 재해석하지 않음.
+    const legacy = saved({ prepareValueSource: 'LEGACY', predictedPrepMinutes: 60 });
+    const legacyBody = existingBody(legacy, same(legacy)) as { participant: Record<string, unknown> };
+    expect(legacyBody.participant.prepare_minutes).toBe(60);
+    expect(legacyBody.participant).not.toHaveProperty('prepare_value_source');
+  });
+
   it('직접 고른 알람 시각은 전부 manual_times로 (없는 종류는 자동으로 되돌림)', () => {
     const body = existingBody(saved(), { ...same(saved()), times: { WAKE: at('07:45') } }) as { manual_times: unknown };
     expect(body.manual_times).toEqual({ WAKE: iso('07:45') });
