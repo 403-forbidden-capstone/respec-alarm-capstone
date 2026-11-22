@@ -10,7 +10,7 @@ import type { HandleChange } from './handle';
 import type { Profile, ProfileFields } from './types';
 
 const COLUMNS =
-  'user_id, nickname, handle, handle_changed_at, handle_next_change_at, profile_image_url, default_prepare_minutes, default_buffer_minutes, home_name, home_lat, home_lng, home_radius_m, default_transport, timezone, onboarded_at, wake_sensitivity, wake_margin, privacy_agreed_at, privacy_version, wake_ping_enabled, ml_age_years, ml_school_status, ml_work_status, ml_holiday_code, ml_profile_consented_at, alarm_voice_prefs, preferred_voice_tone';
+  'user_id, nickname, handle, handle_changed_at, handle_next_change_at, profile_image_url, default_prepare_minutes, default_outing_prep_minutes, default_buffer_minutes, home_name, home_lat, home_lng, home_radius_m, default_transport, timezone, onboarded_at, wake_sensitivity, wake_margin, privacy_agreed_at, privacy_version, wake_ping_enabled, ml_age_years, ml_school_status, ml_work_status, ml_holiday_code, ml_profile_consented_at, alarm_voice_prefs, preferred_voice_tone';
 
 // 내 프로필 한 행 — 가입하면 DB 트리거가 만들어 둠
 export async function getMyProfile(userId: string): Promise<Profile | null> {
@@ -53,6 +53,7 @@ export const MOCK_PROFILE: Profile = {
   handle_next_change_at: null,
   profile_image_url: null,
   default_prepare_minutes: 60,
+  default_outing_prep_minutes: null,
   default_buffer_minutes: 10,
   home_name: '집',
   home_lat: null,

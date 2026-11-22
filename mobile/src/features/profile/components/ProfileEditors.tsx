@@ -119,6 +119,7 @@ export function PrepareEditor({ initial, onSave, onCancel }: EditorProps<Prepare
       canSave={isPrepareChanged(initial, draft)}
       fields={() => ({
         default_prepare_minutes: draft.prepare,
+        ...(draft.outingPrep != null ? { default_outing_prep_minutes: draft.outingPrep } : {}),
         default_buffer_minutes: draft.buffer,
         default_transport: draft.transport,
         wake_margin: draft.margin,

@@ -91,6 +91,7 @@ export default function OnboardingScreen() {
   const [sleep, setSleep] = useState<WakeSensitivity>(profile?.wake_sensitivity ?? 'NORMAL');
   const [prepare, setPrepare] = useState<PrepareValues>({
     prepare: Math.min(300, Math.max(5, profile?.default_prepare_minutes ?? 60)),
+    outingPrep: profile?.default_outing_prep_minutes ?? null,
     buffer: Math.min(60, Math.max(0, profile?.default_buffer_minutes ?? 10)),
     transport: profile?.default_transport ?? 'TRANSIT',
     margin: profile?.wake_margin ?? 'NORMAL',
@@ -156,6 +157,7 @@ export default function OnboardingScreen() {
         if (userId) {
           await saveProfileFields(userId, {
             default_prepare_minutes: prepare.prepare,
+            ...(prepare.outingPrep != null ? { default_outing_prep_minutes: prepare.outingPrep } : {}),
             default_buffer_minutes: prepare.buffer,
             default_transport: prepare.transport,
             wake_margin: prepare.margin,

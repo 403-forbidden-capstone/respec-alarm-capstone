@@ -19,7 +19,8 @@ export type Profile = {
   handle_changed_at: string | null; // 직접 바꾼 마지막 시각 — 비어 있으면 자동 아이디 그대로('바꿔 보세요')
   handle_next_change_at: string | null; // 다음 변경 가능 시각 — 비어 있으면 언제든
   profile_image_url: string | null;
-  default_prepare_minutes: number;
+  default_prepare_minutes: number; // legacy: wake -> departure
+  default_outing_prep_minutes?: number | null; // pure preparation start -> departure, separately confirmed
   default_buffer_minutes: number;
   home_name: string | null;
   home_lat: number | null;
@@ -52,6 +53,7 @@ export type ProfileFields = Partial<
     | 'home_lng'
     | 'home_radius_m'
     | 'default_prepare_minutes'
+    | 'default_outing_prep_minutes'
     | 'default_buffer_minutes'
     | 'default_transport'
     | 'wake_sensitivity'
