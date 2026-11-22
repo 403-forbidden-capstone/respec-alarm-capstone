@@ -3850,4 +3850,48 @@ await (await import('./commit-rpc.mjs')).default(FRIEND_CTX);   // 알람 저장
 await (await import('./device-events.mjs')).default(FRIEND_CTX);   // 폰이 앱 없이 올리는 기록 (alarm-events-device) + DB 트리거
 await (await import('./scenarios/day.mjs')).default(FRIEND_CTX);   // 4명 그룹의 하루 시나리오 (서버 쪽) — 사람 여럿 · 시간 순서 · 설정 변화
 
+await check('PURE-PREP-01: 신규 순수 준비시간 필드는 legacy 전체 시간과 독립이며 기존 사용자값은 NULL', async () => {
+  await su();
+  const fields = await q(`
+    select table_name, column_name, is_nullable
+      from information_schema.columns
+     where table_schema='public'
+       and ((table_name='profiles' and column_name='default_outing_prep_minutes')
+         or (table_name='appointment_participants' and column_name in
+             ('outing_prep_minutes','outing_prep_source','outing_prep_model','prepare_value_source')))
+  `);
+  const found = new Set(fields.map((f) => f.table_name + '.' + f.column_name));
+  const required = ['profiles.default_outing_prep_minutes',
+    'appointment_participants.outing_prep_minutes',
+    'appointment_participants.outing_prep_source',
+    'appointment_participants.outing_prep_model',
+    'appointment_participants.prepare_value_source'];
+  const [{ default_value }] = await q(`select column_default as default_value from information_schema.columns
+    where table_schema='public' and table_name='appointment_participants' and column_name='prepare_value_source'`);
+  const [{ legacy_rows }] = await q(`select count(*)::int as legacy_rows from public.profiles
+    where default_prepare_minutes is not null and default_outing_prep_minutes is not null`);
+  return required.every((k) => found.has(k)) && legacy_rows === 0 &&
+      /LEGACY/.test(default_value ?? '') ? true : { fields, default_value, legacy_rows };
+});
+
+await check('PURE-PREP-02: 반복 회차 RPC도 준비시간 출처를 원자적으로 받아야 하며 공개 실행이 금지됨', async () => {
+  await su();
+  const [{ body, auth, anon, svcRole }] = await q(`
+    select pg_get_functiondef('public.roll_insert_occurrence(jsonb,jsonb,jsonb,jsonb)'::regprocedure) as body,
+           has_function_privilege('authenticated',
+             'public.roll_insert_occurrence(jsonb,jsonb,jsonb,jsonb)', 'execute') as auth,
+           has_function_privilege('anon',
+             'public.roll_insert_occurrence(jsonb,jsonb,jsonb,jsonb)', 'execute') as anon,
+           has_function_privilege('service_role',
+             'public.roll_insert_occurrence(jsonb,jsonb,jsonb,jsonb)', 'execute') as "svcRole"
+  `);
+  return body.includes('outing_prep_minutes') &&
+    body.includes('outing_prep_source') &&
+    body.includes('outing_prep_model') &&
+    body.includes('prepare_value_source') &&
+    auth === false && anon === false && svcRole === true
+    ? true : { auth, anon, svcRole, hasPure: body.includes('outing_prep_minutes') };
+});
+
+
 report();

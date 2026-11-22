@@ -5,9 +5,10 @@ import type { PrepareValues } from '@/features/onboarding/views/PrepareStep';
 import type { Profile } from './types';
 
 // 프로필의 아침 준비 값 — 편집기의 처음 값. 범위는 편집기(Stepper)와 같게 맞춤
-export function prepareValuesOf(profile: Pick<Profile, 'default_prepare_minutes' | 'default_buffer_minutes' | 'default_transport' | 'wake_margin'>): PrepareValues {
+export function prepareValuesOf(profile: Pick<Profile, 'default_prepare_minutes' | 'default_outing_prep_minutes' | 'default_buffer_minutes' | 'default_transport' | 'wake_margin'>): PrepareValues {
   return {
     prepare: Math.min(300, Math.max(5, profile.default_prepare_minutes)),
+    outingPrep: profile.default_outing_prep_minutes == null ? null : Math.min(240, Math.max(5, profile.default_outing_prep_minutes)),
     buffer: Math.min(60, Math.max(0, profile.default_buffer_minutes)),
     transport: profile.default_transport,
     margin: profile.wake_margin,
@@ -26,6 +27,6 @@ export function canSaveHandle(initial: string | null, draft: string): boolean {
 
 export function isPrepareChanged(initial: PrepareValues, draft: PrepareValues): boolean {
   return (
-    initial.prepare !== draft.prepare || initial.buffer !== draft.buffer || initial.transport !== draft.transport || initial.margin !== draft.margin
+    initial.prepare !== draft.prepare || initial.outingPrep !== draft.outingPrep || initial.buffer !== draft.buffer || initial.transport !== draft.transport || initial.margin !== draft.margin
   );
 }

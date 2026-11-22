@@ -30,6 +30,13 @@ describe('saveProfileFields', () => {
     expect(filterOf(calls[0], 'eq', 'user_id')).toEqual(['user_id', 'user-1']);
   });
 
+  it('순수 외출 준비시간은 기상~출발 값과 별도 컬럼으로 저장', async () => {
+    onCall(() => ({ data: [row] }));
+    await saveProfileFields('user-1', { default_outing_prep_minutes: 35 });
+    expect(calls[0].payload).toEqual({ default_outing_prep_minutes: 35 });
+    expect(calls[0].columns).toContain('default_outing_prep_minutes');
+  });
+
   it('집과 감지 범위(home_radius_m)를 한 번에 저장하고, 돌려받는 칸에도 읽어 옴', async () => {
     onCall(() => ({ data: [row] }));
     await saveProfileFields('user-1', { home_name: '우리집', home_lat: 37.5, home_lng: 127, home_radius_m: 300 });

@@ -2,6 +2,7 @@
 //   서버가 실제로 이어 부르는 순서(computePlan → toSuggestion, computePlan → diffAlarms)를 합친 함수로도 시험 (registry.ts)
 //   입력은 DB 행 모양(문자열 시각) + Date(`now` · 초안 시각)가 섞여 있음 — 본 레포 plan.ts가 만드는 PlanInputs 그대로
 import { alarmChain } from '../../../supabase/functions/_shared/calc/chain.ts';
+import { computePlan } from '../../../supabase/functions/_shared/plan-core.ts';
 import { predictPrepare, prepareStatsOf } from '../../../supabase/functions/_shared/calc/prepare.ts';
 import { after, d, IMPORTANCES, rng, TRANSPORTS, type Add, type Rng } from './kit.ts';
 
@@ -262,6 +263,39 @@ function plans(add: Add) {
 }
 
 function planHelpers(add: Add) {
+  // Pure preparation provenance: test the real computed Plan rather than
+  // fabricating a Plan object for the persistence adapter.
+  const planned = (input: ReturnType<typeof newAppointmentInputs>) =>
+    computePlan(
+      input as Parameters<typeof computePlan>[0],
+      travelOf(30) as Parameters<typeof computePlan>[1],
+    );
+
+  const profilePure = { source: 'PROFILE' as const, minutes: 35 };
+  const modelPure = {
+    source: 'MODEL' as const,
+    minutes: 45,
+    model: 'prep_start_ratio_v2',
+  };
+
+  add('plan-core', 'purePrepPersistenceOf', 'pure-profile',
+    planned(newAppointmentInputs({ purePrepCandidate: profilePure })),
+    profilePure);
+
+  add('plan-core', 'purePrepPersistenceOf', 'legacy-not-pure',
+    planned(newAppointmentInputs()),
+    profilePure);
+
+  add('plan-core', 'purePrepPersistenceOf', 'manual-legacy-override',
+    planned(newAppointmentInputs(
+      { purePrepCandidate: profilePure },
+      { prepareMinutes: 70 },
+    )),
+    profilePure);
+
+  add('plan-core', 'purePrepPersistenceOf', 'actual-model-source',
+    planned(newAppointmentInputs({ purePrepCandidate: modelPure })),
+    modelPure);
   for (const v of [null, undefined, 4, 4.999, 5, 5.4, 5.5, 45, 50.5, 299.5, 300, 300.4, 301, -1, 0, '45', '45.5', Number.NaN, Infinity]) add('plan-core', 'firstPrepareMinutes', `${String(v)}-${typeof v}`, { default_prepare_minutes: v });
   add('plan-core', 'firstPrepareMinutes', 'missing-field', {});
   const basis = (over: Record<string, unknown> = {}) => predictPrepare({ commonP80: 50, personalP80: 80, sampleCount: 10, ...over });
@@ -394,6 +428,17 @@ function commit(add: Add) {
 }
 
 function ring(add: Add) {
+  for (const [name, word] of [
+    ['hangul-batchim', '수업'],
+    ['hangul-no-batchim', '회의'],
+    ['digit-batchim', '스터디 1'],
+    ['digit-no-batchim', '스터디 2'],
+    ['bracket-ending', '시험(2차)'],
+    ['english', 'Study'],
+    ['empty', ''],
+  ] as const) {
+    add('ring-package', 'copula', name, word);
+  }
   const seoul = 'Asia/Seoul';
   const t = d('2026-11-16T08:05:00+09:00');
   for (const place of [null, undefined, '', '세종대학교 광개토관']) for (const zone of [seoul, 'UTC', 'America/New_York']) add('ring-package', 'subtitleFor', `${place === undefined ? 'undef' : place === null ? 'null' : place || 'empty'}-${zone}`, t, place, zone);

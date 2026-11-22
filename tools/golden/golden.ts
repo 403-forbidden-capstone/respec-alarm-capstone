@@ -126,6 +126,35 @@ export function generate(): void {
   for (const c of errors) console.log(`  ${c.id} → ${c.error!.name}: ${c.error!.message.slice(0, 80)}`);
 }
 
+// 계산 결과의 소수점은 Node/OS의 Math 삼각함수 구현에 따라 마지막 자리가 달라질 수 있음.
+// 정수와 입력/오류는 엄격 비교하고, output의 비정수 값에만 상대 오차 1e-12 허용.
+function sameGoldenOutput(a: unknown, b: unknown): boolean {
+  if (typeof a === 'number' && typeof b === 'number') {
+    if (a === b) return true;
+    if (Number.isInteger(a) || Number.isInteger(b) || !Number.isFinite(a) || !Number.isFinite(b)) return false;
+    return Math.abs(a - b) <= 1e-12 * Math.max(Math.abs(a), Math.abs(b));
+  }
+  if (Array.isArray(a) || Array.isArray(b)) {
+    return Array.isArray(a) && Array.isArray(b) && a.length === b.length && a.every((v, i) => sameGoldenOutput(v, b[i]));
+  }
+  if (a !== null && b !== null && typeof a === 'object' && typeof b === 'object') {
+    const left = a as Record<string, unknown>;
+    const right = b as Record<string, unknown>;
+    const keys = Object.keys(left);
+    return keys.length === Object.keys(right).length && keys.every((key) => Object.hasOwn(right, key) && sameGoldenOutput(left[key], right[key]));
+  }
+  return a === b;
+}
+
+export function sameGoldenCase(expected: GoldenCase, actual: GoldenCase): boolean {
+  return expected.id === actual.id
+    && expected.fn === actual.fn
+    && JSON.stringify(expected.args) === JSON.stringify(actual.args)
+    && sameGoldenOutput(expected.error, actual.error)
+    && Object.hasOwn(expected, 'output') === Object.hasOwn(actual, 'output')
+    && sameGoldenOutput(expected.output, actual.output);
+}
+
 // 커밋된 골든 = 지금 TS 결과인지. 다르면 어느 사례가 어떻게 다른지 보여 주고 1을 돌려줌
 export function check(): number {
   const all = buildAll();
@@ -141,14 +170,14 @@ export function check(): number {
     }
     const file = JSON.parse(readFileSync(path, 'utf8')) as { format?: number; cases?: GoldenCase[] };
     if (file.format !== FORMAT) problems.push(`${name}: 형식 번호가 ${file.format}, 도구는 ${FORMAT}`);
-    const committed = new Map((file.cases ?? []).map((c) => [c.id, JSON.stringify(c)]));
-    const fresh = new Map(cases.map((c) => [c.id, JSON.stringify(c)]));
+    const committed = new Map((file.cases ?? []).map((c) => [c.id, c]));
+    const fresh = new Map(cases.map((c) => [c.id, c]));
     const missing = [...fresh.keys()].filter((id) => !committed.has(id));
     const extra = [...committed.keys()].filter((id) => !fresh.has(id));
-    const changed = [...fresh.keys()].filter((id) => committed.has(id) && committed.get(id) !== fresh.get(id));
+    const changed = [...fresh.keys()].filter((id) => committed.has(id) && !sameGoldenCase(committed.get(id)!, fresh.get(id)!));
     if (missing.length) problems.push(`${name}: 골든에 없는 사례 ${missing.length}건 (예: ${missing[0]})`);
     if (extra.length) problems.push(`${name}: 시나리오에 없는 사례 ${extra.length}건 (예: ${extra[0]})`);
-    for (const id of changed.slice(0, 3)) problems.push(`${name}: 결과가 달라짐 — ${id}\n    골든: ${committed.get(id)!.slice(0, 300)}\n    지금: ${fresh.get(id)!.slice(0, 300)}`);
+    for (const id of changed.slice(0, 3)) problems.push(`${name}: 결과가 달라짐 — ${id}\n    골든: ${JSON.stringify(committed.get(id)!).slice(0, 300)}\n    지금: ${JSON.stringify(fresh.get(id)!).slice(0, 300)}`);
     if (changed.length > 3) problems.push(`${name}: 그 밖에 결과가 달라진 사례 ${changed.length - 3}건`);
   }
   for (const stray of onDisk) problems.push(`${stray}: 모듈 목록에 없는 골든 파일`);

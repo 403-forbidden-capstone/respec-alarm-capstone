@@ -1,6 +1,6 @@
 import { StyleSheet } from 'react-native';
 
-import { Card, SectionHeader, Segmented, Stepper, Text, Toggle } from '@/components/ui';
+import { Button, Card, SectionHeader, Segmented, Stepper, Text, Toggle } from '@/components/ui';
 import { TRANSPORT_NAME, WAKE_MARGIN_NAME } from '@/features/profile/labels';
 import type { TransportType, WakeMargin } from '@/features/profile/types';
 import type { HolidayPatternCode } from '@/features/profile/prepareMlSurvey';
@@ -9,7 +9,8 @@ import { HolidayPatternPicker } from '@/features/profile/components/HolidayPatte
 import { ChoiceChips } from './ChoiceChips';
 
 export type PrepareValues = {
-  prepare: number; // 준비 시간(분)
+  prepare: number; // legacy: wake -> departure (minutes)
+  outingPrep?: number | null; // pure prep start -> actual departure, explicitly answered
   buffer: number; // 여유 시간(분)
   transport: TransportType;
   margin: WakeMargin;
@@ -41,7 +42,7 @@ export function PrepareStep({ values, onChange, ml, onMlChange }: Props) {
       <Card>
         <Stepper
           first
-          label="준비 시간"
+          label="기상~출발 전체 시간"
           value={values.prepare}
           onChange={(prepare) => onChange({ prepare })}
           min={5}
@@ -50,6 +51,29 @@ export function PrepareStep({ values, onChange, ml, onMlChange }: Props) {
           unit="분"
         />
         <Stepper label="여유 시간" value={values.buffer} onChange={(buffer) => onChange({ buffer })} min={0} max={60} step={5} unit="분" />
+      </Card>
+      <SectionHeader title="외출 준비만 걸리는 시간" />
+      <Text variant="small" tone="sub">
+        식사·과제처럼 준비하기 전에 하는 일은 제외하고, 씻고 옷을 입는 등 외출 준비를 시작한 순간부터 집을 나설 때까지의 시간을 입력해 주세요.
+        기존의 기상~출발 시간과 별도로 저장돼요. 새로운 알람 계산에 반영되는지는 테스트 기능 설정에 따라 달라질 수 있어요.
+      </Text>
+      <Card>
+        <Stepper
+          first
+          label="순수 외출 준비시간"
+          value={values.outingPrep ?? 30}
+          onChange={(outingPrep) => onChange({ outingPrep })}
+          min={5}
+          max={240}
+          step={5}
+          unit="분"
+        />
+        {values.outingPrep == null ? (
+          <>
+            <Text variant="caption" style={styles.help}>미설정 — 위 30분은 예시이며 아직 저장되지 않았어요.</Text>
+            <Button label="30분으로 설정" onPress={() => onChange({ outingPrep: 30 })} />
+          </>
+        ) : null}
       </Card>
 
       <SectionHeader title="이동 수단" />

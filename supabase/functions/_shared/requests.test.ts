@@ -196,3 +196,32 @@ test('suggest · commit: 같은 초안을 보내면 같은 계산 입력이 됨 
   const c2 = readCommitRequest(Reader.root(existing));
   assert.deepEqual(readSuggestRequest(Reader.root(existing)), c2.type === 'APPOINTMENT' ? c2.draft : null);
 });
+
+test('AUTO preparation snapshot does not become a manual duration override in preview or commit', () => {
+  const body = { ...NEW_BODY,
+    participant: { ...NEW_BODY.participant, prepare_value_source: 'AUTO' } };
+  const preview = Reader.root(body);
+  const d = readSuggestRequest(preview);
+  preview.finish();
+  assert.equal(d.prepareMinutes, undefined);
+  assert.equal(d.autoPrepareSnapshotMinutes, 60);
+  const commit = Reader.root(body);
+  const c = readCommitRequest(commit);
+  commit.finish();
+  if (c.type !== 'APPOINTMENT') throw Error('unexpected standalone');
+  assert.equal(c.draft.prepareMinutes, undefined);
+  assert.equal(c.draft.autoPrepareSnapshotMinutes, 60);
+});
+
+test('legacy unversioned and explicit MANUAL preparation inputs retain direct override', () => {
+  for (const participant of [
+    NEW_BODY.participant,
+    { ...NEW_BODY.participant, prepare_value_source: 'MANUAL' },
+  ]) {
+    const r = Reader.root({ ...NEW_BODY, participant });
+    const d = readSuggestRequest(r);
+    r.finish();
+    assert.equal(d.prepareMinutes, 60);
+    assert.equal(d.autoPrepareSnapshotMinutes, undefined);
+  }
+});

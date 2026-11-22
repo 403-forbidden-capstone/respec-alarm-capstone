@@ -32,7 +32,7 @@ export type AlarmRow = Pick<Tables<'alarms'>, 'alarm_id' | 'alarm_type' | 'sched
 export type ParticipantRow = Pick<
   Tables<'appointment_participants'>,
   'participant_id' | 'origin_name' | 'transport_type' | 'est_travel_minutes' | 'travel_source' | 'prepare_minutes' | 'buffer_minutes'
->;
+> & { prepare_value_source?: 'LEGACY' | 'AUTO' | 'MANUAL' };
 export type AppointmentRow = Pick<Tables<'appointments'>, 'appointment_id' | 'title' | 'appointment_at' | 'dest_name' | 'importance' | 'recurrence_rule'> & {
   dest_lat?: number | null; // 장소 좌표 — 편집 시트가 되돌리기에 같이 보내려고 읽음(H03만 채움, #275). 안 읽은 쿼리에는 없음
   dest_lng?: number | null;
@@ -363,6 +363,7 @@ export function toAppointmentDetail(rows: AppointmentRows, lateCount4w: number, 
   return {
     ...appointment,
     intensity: toIntensity(rows.alarms, appointment.importance, lateCount4w, wakeSensitivity, voiceDefault),
+    prepareValueSource: rows.participant.prepare_value_source ?? 'LEGACY',
     edits: toEdits(appointment, rows),
     // 직접 입력한 이동은 자동값을 모름 — 저장된 값을 자리에 두고, 미리 보기(alarm-suggest)가 오면 서버의 자동값으로 바뀜
     auto: { travelMinutes: appointment.travelMinutes, predictedPrepMinutes: appointment.predictedPrepMinutes },

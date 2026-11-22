@@ -152,6 +152,7 @@ export type AlarmEdits = {
 };
 
 export type AppointmentDetail = Appointment & {
+  prepareValueSource?: 'LEGACY' | 'AUTO' | 'MANUAL';
   intensity: Intensity;
   edits: AlarmEdits; // 지금 저장된 값 (초안의 처음 모양 · 바뀐 곳 비교)
   auto: { travelMinutes: number; predictedPrepMinutes: number }; // 직접 고른 값이 없을 때의 자동 계산값
