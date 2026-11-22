@@ -1,0 +1,63 @@
+name: 순수 준비시간 · 데모 계정 파일럿 설정
+
+# The first main merge enables only demo-me's verified UUID.
+# Manual dispatch defaults to disable for immediate rollback.
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/pure-prep-demo-pilot.yml'
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'demo-me only: enable or disable'
+        required: true
+        type: choice
+        default: disable
+        options:
+          - disable
+          - enable
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pure-prep-demo-pilot-config
+  cancel-in-progress: false
+
+jobs:
+  configure:
+    name: demo-me UUID only (no model, no history)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      PROJECT_REF: gomrhctwjvttoqifxktt
+      PILOT_USER_ID: f60d371e-63a5-4fb9-9d92-0743392325ec
+      MODE: ${{ github.event_name == 'workflow_dispatch' && inputs.mode || 'enable' }}
+    steps:
+      - name: Verify access token and mode
+        run: |
+          set -euo pipefail
+          test -n "$SUPABASE_ACCESS_TOKEN"
+          case "$MODE" in enable|disable) ;; *) exit 1 ;; esac
+      - name: Install Supabase CLI
+        uses: supabase/setup-cli@v3
+        with:
+          version: 2.119.0
+      - name: Configure pilot flags
+        run: |
+          set -euo pipefail
+          if [ "$MODE" = 'enable' ]; then enabled=1; else enabled=0; fi
+          supabase secrets set --project-ref "$PROJECT_REF" \
+            "PURE_PREP_APPLY_ENABLED=$enabled" \
+            "PURE_PREP_ALLOWED_USER_IDS=$PILOT_USER_ID" \
+            "PURE_PREP_HISTORY_ENABLED=0"
+          echo "Configured pure-prep pilot mode=$MODE; only demo UUID on the allowlist; history disabled"
+      - name: Confirm expected secret names (never print values)
+        run: |
+          set -euo pipefail
+          supabase secrets list --project-ref "$PROJECT_REF" > "$RUNNER_TEMP/secret-names.txt"
+          for key in PURE_PREP_APPLY_ENABLED PURE_PREP_ALLOWED_USER_IDS PURE_PREP_HISTORY_ENABLED; do
+            grep -q "$key" "$RUNNER_TEMP/secret-names.txt"
+          done
