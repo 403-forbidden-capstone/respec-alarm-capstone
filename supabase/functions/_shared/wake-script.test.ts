@@ -309,7 +309,7 @@ test('runBriefing: 기상 대본이 clips 1~4단계에 들어가고 3 · 4단계
   assert.ok(out.clips[0].text.startsWith('좋은 아침이야. 오늘은 오전 10시 팀플 발표,'), out.clips[0].text);
   assert.doesNotMatch(out.clips[1].text, /!/); // 2단계 "해야 해!" → 마침표
   assert.ok(out.clips[2].text.startsWith('야! 오늘 오전 10시 팀플 발표,') && out.clips[2].text.includes('너 어제 늦잠 자서 지각했다며!'), out.clips[2].text); // 전날 기록이 있어 늦잠 문장은 남김
-  assert.deepEqual(out.clips.map((c) => [c.pitch, c.rate]), [[1, 1], [1.7, 1.5], [1.7, 1.5], [1.7, 1.5]]);
+  assert.deepEqual(out.clips.map((c) => [c.pitch, c.rate]), [[1, 1], [1, 1], [1.7, 1.5], [1.7, 1.5]]);
   const template = await runBriefing(source(), new Set(), noTts);
   assert.equal(template.script, undefined);
   assert.notEqual(template.clips[3].hash, out.clips[3].hash);
@@ -324,11 +324,13 @@ test('runBriefing: 대본 실패면 템플릿 — 모든 단계에 전체 일정
   assert.doesNotMatch(out.clips[0].text + out.clips[1].text, /!/);
 });
 
-test('runBriefing: 개인화를 끄면 전날 대화를 대본 입력에 안 넣음 · 출발 알람은 대본을 안 만듦', async () => {
+test('runBriefing: 전날 대화는 늘 대본 입력에 넣음(예전 personal: false 저장값 무시) · 대화가 없으면 빈 다짐 · 출발 알람은 대본을 안 만듦', async () => {
   const seen: WakeScriptInput[] = [];
   const script = async (x: WakeScriptInput) => (seen.push(x), { scripts: null, status: 'FAILED' as const });
   await runBriefing(source({ prefs: { personal: false } }), new Set(), { ...noTts, script });
-  assert.deepEqual([seen[0].goals, seen[0].previousDay], [[], undefined]);
+  assert.ok(seen[0].goals.includes('알람 미루지 않고 바로 일어나기'), JSON.stringify(seen[0].goals));
+  await runBriefing(source({ sessions: [] }), new Set(), { ...noTts, script });
+  assert.deepEqual([seen[1].goals, seen[1].previousDay], [[], undefined]);
   await runBriefing(source({ kind: 'DEPARTURE' }), new Set(), { ...noTts, script });
-  assert.equal(seen.length, 1);
+  assert.equal(seen.length, 2);
 });

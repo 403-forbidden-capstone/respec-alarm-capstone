@@ -92,7 +92,7 @@ object BriefingRules {
   data class Fallback(val level: Int, val text: String, val pitch: Float, val rate: Float)
 
   // 서버 브리핑이 한 번도 안 왔을 때(인터넷 없음 등)의 높낮이 · 속도 — TS androidVoice(LEVEL_VOICE)와 같은 단계 고정값
-  private val FALLBACK_VOICE = mapOf(1 to (1.0f to 1.0f), 2 to (1.7f to 1.5f), 3 to (1.7f to 1.5f))
+  private val FALLBACK_VOICE = mapOf(1 to (1.0f to 1.0f), 2 to (1.0f to 1.0f), 3 to (1.7f to 1.5f))
 
   /**
    * 저장된 브리핑이 없을 때 읽을 것 — 기상은 꾸러미의 기상 문장(voiceText, 앱이 오프라인으로 만듦), 출발은 알림 줄(출발 · 도착 안내) + 제목

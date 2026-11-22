@@ -80,10 +80,10 @@ class BriefingRulesTest {
     assertTrue(BriefingRules.fallback("WAKE", text, "일어날 시간이에요", "수업", 1, 3)!!.text.startsWith("알람을 한 번 미뤘어요."))
     // 3단계 기상은 앱에 든 3단계 예비 WAV가 먼저 (그다음 Android TTS)
     assertEquals(3, BriefingRules.fallbackWavLevel("WAKE", BriefingRules.fallback("WAKE", text, "", "", 0, 3)!!.level))
-    // 중 2단계는 Android TTS 높낮이 · 속도 1.7 · 1.5
+    // 중 2단계는 Android TTS 기본 높낮이 · 속도 1.0 · 1.0
     val f = BriefingRules.fallback("WAKE", text, "", "", 0, 2)!!
-    assertEquals(1.7f, f.pitch)
-    assertEquals(1.5f, f.rate)
+    assertEquals(1.0f, f.pitch)
+    assertEquals(1.0f, f.rate)
   }
 
   @Test
@@ -96,9 +96,9 @@ class BriefingRulesTest {
     assertEquals(text, f0.text)
     assertTrue(f1.text.startsWith("알람을 한 번 미뤘어요.") && f1.text.endsWith(text))
     assertTrue(f2.text.startsWith("알람을 여러 번 미뤘어요."))
-    // TS androidVoice와 같은 단계 고정값: 1단계 1.0/1.0, 2단계 이상 1.7/1.5
-    assertEquals(listOf(1.0f, 1.7f, 1.7f), listOf(f0.pitch, f1.pitch, f2.pitch))
-    assertEquals(listOf(1.0f, 1.5f, 1.5f), listOf(f0.rate, f1.rate, f2.rate))
+    // TS androidVoice와 같은 단계 고정값: 1 · 2단계 1.0/1.0, 3단계 이상 1.7/1.5
+    assertEquals(listOf(1.0f, 1.0f, 1.7f), listOf(f0.pitch, f1.pitch, f2.pitch))
+    assertEquals(listOf(1.0f, 1.0f, 1.5f), listOf(f0.rate, f1.rate, f2.rate))
   }
 
   @Test

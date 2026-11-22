@@ -54,7 +54,7 @@ test('사용자 수동 설정 > 기본값, 칸을 지우면 기본값 · 모르�
   assert.deepEqual([p.voice, p.tone, p.escalate], ['Sulafat', 'GENTLE', true]);
   assert.deepEqual(p.manual, { voice: true, tone: true });
   assert.equal(resolveVoice('HIGH', {}).voice, 'Kore');
-  assert.deepEqual(cleanPrefs({ voice: 'Nope', tone: 'LOUD', coachMax: 9, hack: 1, personal: false }), { personal: false });
+  assert.deepEqual(cleanPrefs({ voice: 'Nope', tone: 'LOUD', coachMax: 9, hack: 1, personal: false }), {}); // personal(어제 대화 끄기)은 없어진 칸
 });
 
 test('배경음 · 진동 · 볼륨은 기존 알람 축 그대로 (D69) — 중요도 HIGH여도 사용자가 끈 진동은 꺼짐', () => {
@@ -210,10 +210,10 @@ test('Gemini는 이 알람이 울리는 동안 실제로 긴급이 될 수 있�
   assert.equal(needsGemini(urgencyRule(wake({ travelMinutes: null }), 3), 'WAKE', kst(9)), false); // UNKNOWN
 });
 
-test('Android TTS: 1단계 높낮이 1.0 · 속도 1.0, 2단계 1.7 · 1.5 고정 (말투에 더하지 않음), 목소리 번호는 늘 0 (설정 미리 듣기와 같게)', () => {
+test('Android TTS: 1 · 2단계 높낮이 1.0 · 속도 1.0 고정 (말투에 더하지 않음), 목소리 번호는 늘 0 (설정 미리 듣기와 같게)', () => {
   for (const imp of ['LOW', 'NORMAL', 'HIGH'] as const) {
     assert.deepEqual([androidVoice(resolveVoice(imp), 1).pitch, androidVoice(resolveVoice(imp), 1).rate], [1.0, 1.0], imp);
-    assert.deepEqual([androidVoice(resolveVoice(imp), 2).pitch, androidVoice(resolveVoice(imp), 2).rate], [1.7, 1.5], imp);
+    assert.deepEqual([androidVoice(resolveVoice(imp), 2).pitch, androidVoice(resolveVoice(imp), 2).rate], [1.0, 1.0], imp);
   }
   // 중요도 · 예전에 고른 목소리(따뜻한 · 밝은 · 단호한)와 상관없이 같은 목소리
   for (const imp of ['LOW', 'NORMAL', 'HIGH'] as const) assert.equal(androidVoice(resolveVoice(imp), 1).voiceIndex, 0, imp);
