@@ -25,6 +25,18 @@ test('actual model needs opt-in and valid history',()=>{
  assert.equal(choosePurePrepBasis(p)?.source,'HISTORY');
  assert.deepEqual(choosePurePrepBasis({...p,allowActualModel:true}),{source:'MODEL',minutes:50,model:'prep_start_ratio_v2',sampleCount:3});
 });
+test('5-9m self-reports may be set, but short observed intervals are excluded from automatic history',()=>{
+ assert.deepEqual(choosePurePrepBasis({profileMinutes:5,historicalMinutes:[5,8,35]}),{source:'PROFILE',minutes:5});
+ const cutoff=new Date('2026-11-19T00:00:00Z');
+ const good=(minutes:number,i:number)=>{
+  const departed=new Date(Date.parse('2026-11-18T09:00:00Z')-i*3600000);
+  return {prepare_started_at:new Date(departed.getTime()-minutes*60000).toISOString(),
+    departed_at:departed.toISOString(),prepare_started_source:'PREPARE_ALARM',departed_source:'LOCATION'};
+ };
+ assert.deepEqual(confirmedPurePrepHistory([good(5,0),good(9,1),good(35,2)],cutoff),[35]);
+ assert.deepEqual(confirmedPurePrepHistory([{...good(40,0),prepare_started_source:'ROUTINE_STEP'}],cutoff),[]);
+});
+
 test('bad numeric values ignored',()=>{
  assert.equal(choosePurePrepBasis({profileMinutes:0,historicalMinutes:[0,-1,300,Infinity]}),null);
 });
