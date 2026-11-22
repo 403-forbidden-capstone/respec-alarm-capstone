@@ -16,9 +16,12 @@ export type PurePrepBasisInput = {
 };
 const valid = (x: unknown): x is number =>
   typeof x === 'number' && Number.isFinite(x) && x >= 5 && x <= 240;
+// 5-9 minutes are valid explicit user input, but too noisy for automatic
+// historical estimates (legacy D107 uses a 10-minute observation floor).
+const validObserved = (x: unknown): x is number => valid(x) && x >= 10;
 export function choosePurePrepBasis(i: PurePrepBasisInput): PurePrepCandidate | null {
   if (valid(i.manualMinutes)) return { source: 'MANUAL', minutes: i.manualMinutes };
-  const observations = (i.historicalMinutes ?? []).filter(valid).slice(0, 30);
+  const observations = (i.historicalMinutes ?? []).filter(validObserved).slice(0, 30);
   const minHistory = Math.max(3, Math.floor(i.minHistory ?? 3));
   const history = observations.length >= minHistory
     ? Math.round(observations.reduce((n, v) => n + v, 0) / observations.length)
@@ -52,6 +55,8 @@ export function confirmedPurePrepHistory(
   if (!Number.isFinite(before)) return [];
   const unique = new Set<string>();
   return records.flatMap((r) => {
+    // ROUTINE_STEP can be breakfast or another pre-prep task; it is not yet
+    // verified as the physical beginning of pure outing preparation.
     if (r.prepare_started_source !== 'PREPARE_ALARM' ||
         r.departed_source !== 'LOCATION' ||
         !r.prepare_started_at || !r.departed_at) return [];
@@ -59,7 +64,7 @@ export function confirmedPurePrepHistory(
     const depart = Date.parse(r.departed_at);
     const minutes = (depart - start) / 60000;
     if (!Number.isFinite(start) || !Number.isFinite(depart) ||
-        depart >= before || depart <= start || !valid(minutes)) return [];
+        depart >= before || depart <= start || !validObserved(minutes)) return [];
     const key = start + ':' + depart;
     if (unique.has(key)) return [];
     unique.add(key);
