@@ -472,11 +472,11 @@ describe('H03 stored preparation provenance', () => {
     expect(body.participant).not.toHaveProperty('prepare_value_source');
     expect(body.participant.prepare_minutes).toBe(60);
   });
-  it('known AUTO source sends a comparison snapshot, not a manual override', () => {
+  it('known AUTO source omits a stale snapshot and allows server-side recalculation', () => {
     const detail = saved({ prepareValueSource: 'AUTO' });
     const body = existingBody(detail, same(detail)) as { participant: Record<string,unknown> };
-    expect(body.participant.prepare_value_source).toBe('AUTO');
-    expect(body.participant.prepare_minutes).toBe(60);
+    expect(body.participant).not.toHaveProperty('prepare_value_source');
+    expect(body.participant).not.toHaveProperty('prepare_minutes');
   });
   it('explicit H03 prepare edit is MANUAL, even when previously AUTO', () => {
     const detail = saved({ prepareValueSource: 'AUTO' });
