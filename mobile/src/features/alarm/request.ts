@@ -174,7 +174,7 @@ export function manualTimesBody(times: AlarmEdits['times']): Partial<Record<Ring
 // 기존 약속 (H03) — 화면이 보여 준 값이 서버 계산과 어긋나 알람이 슬쩍 움직이지 않게 저장돼 있던 값은 그대로 이어 보냄
 //   · 이동시간: 직접 입력(MANUAL)한 값만 그 값으로 보내고, 그 밖에는 안 보내서 서버가 새로 구함 (서버는 직접 입력으로 저장된 것은 스스로 이어받음)
 //     저장된 길찾기(API) 값은 다시 보내지 않음 — 카카오 응답은 저장 · 재사용 불허(D5)라 서버가 매번 새로 구하는 것이 규칙 (supabase/README.md alarm-commit, 서버 plan.ts)
-//   · 준비 시간: 직접 고른 값 → 없으면 저장된 값 (DB에 직접 고름 표시가 없어 저장된 값이 곧 자동 값)
+//   · 준비 시간: AUTO로 저장된 일정은 오래된 숫자 스냅샷을 보내지 않고 서버가 다시 계산함.\n//     수동(MANUAL)·기존(LEGACY) 시간은 직접 고른 값 또는 저장된 시간을 계속 이어 보냄.
 //   · 준비 전 활동: 기상 · 준비 알람이 둘 다 있으면 지금 간격 (서버가 직접 고른 시각이 있는 약속에서 기본 20분으로 다시 읽지 않게)
 export function existingBody(saved: AppointmentDetail, edits: AlarmEdits): Body {
   const travel = edits.travelMinutes != null ? { est_travel_minutes: within(edits.travelMinutes, MAX_TRAVEL_MINUTES), travel_source: 'MANUAL' } : {};
@@ -185,16 +185,16 @@ export function existingBody(saved: AppointmentDetail, edits: AlarmEdits): Body 
       transport_type: edits.transport,
       buffer_minutes: within(edits.bufferMinutes, MAX_BUFFER_MINUTES),
       ...travel,
-      prepare_minutes: within(edits.prepareMinutes ?? saved.predictedPrepMinutes, MAX_PREPARE_MINUTES),
-      // Legacy existing rows have unknown source; do NOT silently reinterpret
-      // them as automatic. Only rows explicitly stored AUTO may use a snapshot.
-      ...(edits.prepareMinutes != null
+      // H03 existing AUTO values are old persisted estimates, NOT a current
+      // H05 preview snapshot. Recompute on commit without a stale equality check.
+      // The saved participant's AUTO provenance remains unchanged on UPDATE.
+      ...(edits.prepareMinutes == null && saved.prepareValueSource === 'AUTO'
+        ? {}
+        : { prepare_minutes: within(edits.prepareMinutes ?? saved.predictedPrepMinutes, MAX_PREPARE_MINUTES) }),
+      // Legacy rows must not silently become AUTO; MANUAL stays manual.
+      ...(edits.prepareMinutes != null || saved.prepareValueSource === 'MANUAL'
         ? { prepare_value_source: 'MANUAL' }
-        : saved.prepareValueSource === 'AUTO'
-          ? { prepare_value_source: 'AUTO' }
-          : saved.prepareValueSource === 'MANUAL'
-            ? { prepare_value_source: 'MANUAL' }
-            : {}),
+        : {}),
       ...(saved.beforePrepMinutes > 0 ? { before_prepare_minutes: within(saved.beforePrepMinutes, MAX_BEFORE_PREPARE_MINUTES) } : {}),
     },
     manual_times: manualTimesBody(edits.times),
