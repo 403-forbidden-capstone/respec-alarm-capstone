@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, test } from 'node:test';
 import { decode, encode } from './codec.ts';
-import { DATA_DIR, FORMAT, ROOT, buildAll, check, runOne } from './golden.ts';
+import { DATA_DIR, FORMAT, ROOT, buildAll, check, runOne, sameGoldenCase } from './golden.ts';
 import { MODULES } from './registry.ts';
 import { d, rng } from './scenarios/kit.ts';
 
@@ -102,6 +102,27 @@ describe('시나리오', () => {
     }
     assert.ok(dates.length > 1000);
     for (const date of dates) assert.match(date, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
+  });
+});
+
+describe('golden comparison', () => {
+  const base = { id: 'travel/haversineKm/sample', fn: 'haversineKm', args: [1, 2], output: { distance: 8009.972817262573 } };
+
+  test('platform-dependent final digits in fractional outputs are tolerated', () => {
+    assert.ok(sameGoldenCase(base, { ...base, output: { distance: 8009.972817262571 } }));
+  });
+
+  test('meaningful fractional changes and integer differences fail', () => {
+    assert.ok(!sameGoldenCase(base, { ...base, output: { distance: 8009.9 } }));
+    assert.ok(!sameGoldenCase({ ...base, output: { minutes: 35 } }, { ...base, output: { minutes: 36 } }));
+  });
+
+  test('arguments, errors, field presence and structure remain strict', () => {
+    assert.ok(!sameGoldenCase(base, { ...base, args: [1, 3] }));
+    assert.ok(!sameGoldenCase(base, { ...base, output: { distance: 8009.972817262573, extra: true } }));
+    assert.ok(!sameGoldenCase(base, { ...base, output: { distance: 8009.972817262573 }, error: { name: 'Error', message: 'x' } }));
+    assert.ok(!sameGoldenCase({ ...base, output: 1 }, { ...base, output: 1.0000000000000002 }));
+    assert.ok(!sameGoldenCase({ ...base, output: { nested: [0.1, 'x'] } }, { ...base, output: { nested: [0.1, 'y'] } }));
   });
 });
 
