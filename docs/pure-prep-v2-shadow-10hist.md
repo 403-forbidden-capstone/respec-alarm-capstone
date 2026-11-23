@@ -12,7 +12,7 @@ The live alarm calculation remains unchanged. This integration works only in `al
 - An eligible sample receives `status: PREDICTED`, `predicted_pure_minutes`, `history_baseline_minutes`, `training_target`, and `applied_to_alarm: false`.
 - Under 10 valid records the preview gets `INSUFFICIENT_HISTORY`; no outbound model API request occurs.
 
-The research sidecar Python files were imported from PR #549, with the **10-record** boundary preserved. Real-session training excludes `ROUTINE_STEP` because activity before pure preparation can be mislabelled as preparation.
+The research sidecar Python files were imported from PR #549, with the **10-record** boundary preserved. Real-session training excludes `ROUTINE_STEP` and departures not labelled `LOCATION` because pre-preparation activity and planned/manual departure timestamps must not be used as ground truth. The training CSV requires both `prepare_started_source` and `departed_source`.
 
 ## Required before live experiment
 
