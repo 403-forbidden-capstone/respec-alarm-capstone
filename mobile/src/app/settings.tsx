@@ -75,7 +75,7 @@ export default function SettingsScreen() {
         fields.default_outing_prep_minutes !== profile?.default_outing_prep_minutes;
       await saveProfileFields(userId, fields);
       if (changedPure) setPurePrepChanged(true);
-      let note = changedPure ? '순수준비시간을 바꿨어요 · 새 알람 계산에 반영돼요' : '바꿨어요';
+      let note = changedPure ? '순수준비시간을 바꿨어요 · 시범 기능 대상은 새 알람에 반영돼요' : '바꿨어요';
       try {
         await refreshProfile();
       } catch {
@@ -172,11 +172,11 @@ export default function SettingsScreen() {
           {purePrepChanged ? (
             <Card>
               <Text variant="small" tone="sub">
-                변경한 순수준비시간은 앞으로 계산하는 개인 일정에 반영돼요.
-                이미 저장된 미래 알람은 자동 변경되지 않으니 알람 목록에서 각 일정을 다시 확인하고 저장해 주세요.
-                직접 고른 알람 시각과 그룹 일정은 유지돼요.
+                순수준비시간 시범 기능이 활성화된 개인 일정의 새 계산에 반영돼요.
+                기존 자동 알람은 변경되지 않으니 알람 상세에서 '최신 기본값으로 알람 다시 계산'을 눌러 주세요.
+                직접 고른 시각과 그룹 일정은 이 동작에서 제외돼요.
               </Text>
-              <Button label="기존 알람 확인하기" onPress={() => router.push('/(tabs)/alarms')} />
+              <Button label="기존 자동 알람 재계산하러 가기" onPress={() => router.push('/(tabs)/alarms')} />
             </Card>
           ) : null}
 
