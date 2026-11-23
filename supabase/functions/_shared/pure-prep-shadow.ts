@@ -12,7 +12,7 @@ import type { Db } from './supabase.ts';
 export const PURE_PREP_SHADOW_MIN_HISTORY = 10;
 export const PURE_PREP_SHADOW_MAX_HISTORY = 30;
 export const PURE_PREP_SHADOW_MODEL = 'prep_start_ratio_v2' as const;
-export type ShadowTarget = 'actual_start_depart' | 'survey_start_cluster_proxy';
+export type ShadowTarget = 'actual_start_depart' | 'survey_start_cluster_proxy' | 'alarm_dismiss_location_proxy';
 
 export type PurePrepShadowRequest = {
   model: typeof PURE_PREP_SHADOW_MODEL;
@@ -95,6 +95,7 @@ export async function requestPurePrepShadow(
     url?: string;
     token?: string;
     allowSurveyProxy?: boolean;
+    allowDismissProxy?: boolean;
     timeoutMs?: number;
   },
   fetchImpl: typeof fetch = fetch,
@@ -120,7 +121,8 @@ export async function requestPurePrepShadow(
     const v = body as Record<string, unknown>;
     const target = v.training_target;
     if (target !== 'actual_start_depart' &&
-        !(target === 'survey_start_cluster_proxy' && config.allowSurveyProxy === true)) return null;
+        !(target === 'survey_start_cluster_proxy' && config.allowSurveyProxy === true) &&
+        !(target === 'alarm_dismiss_location_proxy' && config.allowDismissProxy === true)) return null;
     if (v.model !== PURE_PREP_SHADOW_MODEL || v.prediction_type !== 'ratio' ||
         typeof v.minutes !== 'number' || !Number.isFinite(v.minutes) ||
         typeof v.ratio !== 'number' || !Number.isFinite(v.ratio)) return null;
@@ -207,6 +209,7 @@ export async function runPurePrepShadow(input: {
       url: getEnv('PURE_PREP_SHADOW_URL'),
       token: getEnv('PURE_PREP_SHADOW_API_TOKEN'),
       allowSurveyProxy: getEnv('PURE_PREP_SHADOW_ALLOW_SURVEY_PROXY') === '1',
+      allowDismissProxy: getEnv('PURE_PREP_SHADOW_ALLOW_DISMISS_PROXY') === '1',
     });
     if (!response) return { status: 'MODEL_UNAVAILABLE', valid_records: history.length, required_records: PURE_PREP_SHADOW_MIN_HISTORY };
     return {
