@@ -1037,7 +1037,7 @@ export async function confirmEarlyWake(alarmId: string): Promise<void> {
   db.events.push({ at, label: '기상 확인', source: '먼저 깼어요' });
 }
 
-// 일정 없는 알람 만들기 · 고치기 (D46 · Q10, 알람 목록 "+") — 입력 화면은 새 UI라 아직 없고 api만. 실데이터 전용 (alarm-commit STANDALONE)
+// 일정 없는 알람(기본 알람) 만들기 · 고치기 (D46 · Q10) — 만들기 화면은 알람 탭 "기본 알람 만들기"(components/StandaloneAlarmForm, #588), 고치기 화면은 아직 없음. 실데이터 전용 (alarm-commit STANDALONE)
 //   만들기: 시각(at) 필수, repeat(요일, [] = 반복 없음) · level(강도 한 단계, null = 자동) · enabled는 고르는 것
 //   고치기: 알람 id와 바꿀 것만 — 시각 없이 강도(level) · 켜기(enabled)만도 됨. 돌려주는 값은 목록이 그리는 모양(제목 "알람")
 //   가짜 데이터에는 이 알람을 둘 자리가 없어 실데이터 모드에서만
@@ -1045,11 +1045,11 @@ export type NewStandaloneAlarm = Required<Pick<StandaloneInput, 'at'>> & Omit<St
 export type StandaloneAlarmPatch = Omit<StandaloneInput, 'alarmId'>;
 
 export async function createStandaloneAlarm(input: NewStandaloneAlarm): Promise<SavedAppointment> {
-  if (isMock()) throw new UserError('일정 없는 알람은 실데이터 모드에서만 만들 수 있어요');
+  if (isMock()) throw new UserError('기본 알람은 실데이터 모드에서만 만들 수 있어요');
   return real.saveStandaloneAlarm(input);
 }
 
 export async function updateStandaloneAlarm(alarmId: string, patch: StandaloneAlarmPatch): Promise<SavedAppointment> {
-  if (isMock()) throw new UserError('일정 없는 알람은 실데이터 모드에서만 고칠 수 있어요');
+  if (isMock()) throw new UserError('기본 알람은 실데이터 모드에서만 고칠 수 있어요');
   return real.saveStandaloneAlarm({ ...patch, alarmId });
 }

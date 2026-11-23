@@ -6,6 +6,7 @@ import { EmptyState, Loading, LoadError, Screen, SectionHeader, Text, TopBar, To
 import { listAppointments } from '@/features/alarm/api';
 import { ProposalCards } from '@/features/social/components/ProposalCards';
 import { AppointmentAlarmCard } from '@/features/alarm/components/AppointmentAlarmCard';
+import { StandaloneAlarmForm } from '@/features/alarm/components/StandaloneAlarmForm';
 import { TextLink } from '@/features/alarm/components/TextLink';
 import { useAppointmentToggle } from '@/features/alarm/hooks/useAppointmentToggle';
 import { useNow } from '@/features/alarm/hooks/useNow';
@@ -19,7 +20,7 @@ const HIGHLIGHT_MS = 2600; // 방금 만든 일정 테두리가 남는 시간
 // 02 알람 탭 · H02 알람 목록 — 오늘부터의 일정마다 기상 · 준비 · 출발 알람. 지난 일정은 맨 아래에 접어 둠
 // 홈 '알람 전체'로 들어가던 화면을 2번 탭으로 올림 (D110). 주소는 /alarms 그대로라 다른 화면의 링크는 같음
 // 반복 일정은 하나당 한 장 (지금 이후 가장 가까운 회차) — 카드에 "다음 회차 · 반복 요일"만, 회차 목록은 알람 설정(H03)에서
-// ?highlight=<일정 id>: 새 일정(H05)을 저장하고 돌아왔을 때 그 카드에 잠깐 테두리
+// ?highlight=<일정 id>: 새 일정(H05)을 저장하고 돌아왔을 때 그 카드에 잠깐 테두리. 기본 알람(#588)을 저장했을 때도 같은 주소 값으로
 export default function AlarmsScreen() {
   const { highlight } = useLocalSearchParams<{ highlight?: string }>();
   const { data, error, reload } = useLoad(listAppointments);
@@ -54,6 +55,14 @@ export default function AlarmsScreen() {
       <View style={styles.links}>
         <TextLink label="학교 시간표 · 반복 일정 지우기" onPress={() => router.push('/timetable')} />
       </View>
+      {/* 일정 없이 시각 · 반복만 정하는 알람 (#588) — 저장하면 목록을 다시 읽고 새 카드에 테두리 */}
+      <StandaloneAlarmForm
+        current={current}
+        onSaved={(id) => {
+          void reload();
+          router.setParams({ highlight: id });
+        }}
+      />
       {!data && !error ? <Loading text="알람을 불러오는 중" /> : null}
       {data && !upcoming.length ? (
         <View style={styles.empty}>
