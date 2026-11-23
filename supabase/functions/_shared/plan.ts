@@ -42,6 +42,7 @@ const DEFAULT_PROFILE: ProfileRow = {
   home_lng: null,
   default_prepare_minutes: null,
   default_outing_prep_minutes: null,
+  default_outing_prep_updated_at: null,
   ml_profile_consented_at: null,
   wake_sensitivity: 'NORMAL',
   wake_margin: 'NORMAL',
@@ -53,7 +54,7 @@ export const ALARM_COLUMNS =
 export async function loadProfile(db: Db, userId: string): Promise<ProfileRow> {
   const row = must<ProfileRow | null>(
     'profiles',
-    await db.from('profiles').select('timezone, default_buffer_minutes, default_transport, home_name, home_lat, home_lng, default_prepare_minutes, default_outing_prep_minutes, ml_profile_consented_at, wake_sensitivity, wake_margin, preferred_voice_tone').eq('user_id', userId).maybeSingle(),
+    await db.from('profiles').select('timezone, default_buffer_minutes, default_transport, home_name, home_lat, home_lng, default_prepare_minutes, default_outing_prep_minutes, default_outing_prep_updated_at, ml_profile_consented_at, wake_sensitivity, wake_margin, preferred_voice_tone').eq('user_id', userId).maybeSingle(),
   );
   return row ?? DEFAULT_PROFILE;
 }
@@ -275,42 +276,38 @@ async function optionalMlPrediction(
   }
 }
 
-// Opt-in pure-preparation baseline, reusable by preview and commit.
-// Never substitute wake->departure data (daily_records.actual_prepare_minutes).
-// Only explicitly confirmed onboarding is used cold; history is a separate,
-// stronger consent/feature gate until dismissal and location labels are validated.
+// Explicitly saved pure preparation is the starting point for personal
+// automatic plans. Never substitute legacy wake->departure history.
+// Manual schedule overrides and group appointments remain protected by plan-core.
 export async function loadPurePrepCandidate(
   db: Db, userId: string, profile: ProfileRow, now: Date, at: Date,
 ): Promise<PurePrepCandidate | undefined> {
-  const allowed = mayUseMl({
-    // The pure-prep pilot is per-user; C1/W4 may remain enabled for others.
-    // buildPlan never calls the old model for a user with an active pure basis.
-    enabled: getEnv('PURE_PREP_APPLY_ENABLED') === '1',
-    allowForPlan: true,
-    userId,
-    allowedUserIds: getEnv('PURE_PREP_ALLOWED_USER_IDS'),
-  });
-  if (!allowed) return undefined;
   const profileMinutes = profile.default_outing_prep_minutes;
+  if (profileMinutes == null || !Number.isFinite(profileMinutes) ||
+      profileMinutes < 5 || profileMinutes > 240) return undefined;
+  // Preference takes effect on the next preview regardless of history flags.
   if (getEnv('PURE_PREP_HISTORY_ENABLED') !== '1' || !profile.ml_profile_consented_at) {
     return choosePurePrepBasis({ profileMinutes }) ?? undefined;
   }
   try {
     const cutoff = new Date(Math.min(now.getTime(), at.getTime()));
-    // Only verified PREPARE_ALARM starts count; a ROUTINE_STEP may be a
-    // pre-preparation task (meal, study), not physical outing preparation.
-    const { data, error } = await db.from('appointment_participants')
+    const editedAt = profile.default_outing_prep_updated_at
+      ? new Date(profile.default_outing_prep_updated_at) : undefined;
+    if (editedAt && !Number.isFinite(editedAt.getTime())) {
+      return choosePurePrepBasis({ profileMinutes }) ?? undefined;
+    }
+    let query = db.from('appointment_participants')
       .select('prepare_started_at, departed_at, prepare_started_source, departed_source')
       .eq('user_id', userId)
       .eq('prepare_started_source', 'PREPARE_ALARM')
       .eq('departed_source', 'LOCATION')
       .not('prepare_started_at', 'is', null)
       .not('departed_at', 'is', null)
-      .lt('departed_at', cutoff.toISOString())
-      .order('departed_at', { ascending: false })
-      .limit(100);
+      .lt('departed_at', cutoff.toISOString());
+    if (editedAt) query = query.gte('prepare_started_at', editedAt.toISOString());
+    const { data, error } = await query.order('departed_at', { ascending: false }).limit(100);
     if (error || !data) return choosePurePrepBasis({ profileMinutes }) ?? undefined;
-    const history = confirmedPurePrepHistory(data, cutoff);
+    const history = confirmedPurePrepHistory(data, cutoff, 30, editedAt);
     return choosePurePrepBasis({ profileMinutes, historicalMinutes: history }) ?? undefined;
   } catch {
     return choosePurePrepBasis({ profileMinutes }) ?? undefined;
