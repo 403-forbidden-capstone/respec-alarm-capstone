@@ -13,6 +13,7 @@ import { HttpError } from '../_shared/errors.ts';
 import { jsonResponse, serve } from '../_shared/http.ts';
 import { buildPlan, TravelRequiredError, type BuiltPlan } from '../_shared/plan.ts';
 import { toSuggestion, toTravelRequiredSuggestion } from '../_shared/plan-core.ts';
+import { runPurePrepShadow } from '../_shared/pure-prep-shadow.ts';
 import { Reader, readJson } from '../_shared/read.ts';
 import { readSuggestRequest } from '../_shared/requests.ts';
 
@@ -38,6 +39,20 @@ Deno.serve(
     if (!plan.check.ok && plan.check.reason === 'DEPARTURE_PASSED') {
       throw new HttpError('UNPROCESSABLE', plan.check.message, { reason: plan.check.reason, suggestion });
     }
-    return jsonResponse(suggestion);
+    // Read-only research telemetry is returned ONLY in this authorized user's
+    // preview response. Never changes the plan, commit payload, or alarm times.
+    const shadow = await runPurePrepShadow({
+      userId: user.userId,
+      db: user.db,
+      profile: built.inputs.profile,
+      now: built.inputs.now,
+      appointmentAt: plan.basics.at,
+      timezone: built.timeZone,
+      personalAppointment: draft.groupId == null && built.inputs.appointment?.group_id == null,
+      purePlan: plan.prepareTarget === 'PREPARE_START_TO_DEPART',
+      manualOverride: draft.prepareMinutes != null ||
+        draft.manualTimes?.PREPARE != null || draft.manualTimes?.WAKE != null,
+    });
+    return jsonResponse(shadow ? { ...suggestion, pure_prep_shadow: shadow } : suggestion);
   }),
 );
