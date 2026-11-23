@@ -92,7 +92,7 @@ jobs:
                           raise AssertionError('nine-minute session must not reach ten valid training histories')
                       except ValueError as e:
                           assert '>=11' in str(e),str(e)
-          body={'model':'prep_start_ratio_v2','history_count':9,
+          body={'model':'prep_start_ratio_v2','baseline_definition':serve.BASELINE_DEFINITION,'history_count':9,
                 'features':{'weekday_code':'1','평토일구분코드':'1','휴일종류코드':'__MISSING__','연령코드':'2','baseline_observed':25}}
           class FakeModel:
               def predict(self, data):
@@ -107,5 +107,24 @@ jobs:
           assert result['model']=='prep_start_ratio_v2' and result['minutes']==25
           proxy=serve.predict(FakeModel(),body,'alarm_dismiss_location_proxy')
           assert proxy['training_target']=='alarm_dismiss_location_proxy'
+          assert proxy['baseline_definition']==train.BASELINE_DEFINITION
+          try:
+              serve.predict(FakeModel(),{**body,'baseline_definition':'previous_day_survey_diary'},'alarm_dismiss_location_proxy')
+              raise AssertionError('old baseline was accepted')
+          except ValueError as e:
+              assert 'baseline definition' in str(e)
           print('10-record model gate and causal training boundary: PASS')
           PY
+
+  synthetic-retraining:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install CatBoost training dependencies
+        run: pip install 'catboost>=1.2,<2' 'pandas>=2,<3' 'numpy>=1.26,<3'
+      - name: End-to-end synthetic user-split retraining and model manifest compatibility
+        run: python tools/prepare-adjust-sidecar/synthetic_protocol_test.py
