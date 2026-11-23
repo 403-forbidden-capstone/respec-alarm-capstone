@@ -27,6 +27,22 @@ export async function advanceRoutine(id: string): Promise<RoutineProgress | null
   return getTodayRoutine();
 }
 
+// 아침 루틴 음성 진행(H09) — 그 단계(1부터)를 오늘 끝낸 것으로. 순서는 화면(run.ts)이 지킴, 이미 끝냈으면 그대로
+//   실데이터는 그 단계의 알람에 오늘 확인(ACKNOWLEDGED)을 남김 — 홈 "오늘 루틴" 카드와 같은 기록. 알람이 없는 단계는 남길 자리가 없어 화면에서만 셈
+export async function checkRoutineStep(id: string, step: number, source: 'VOICE' | 'BUTTON'): Promise<RoutineProgress | null> {
+  if (!isMock()) return real.checkRoutineStep(id, step, source);
+  const r = db.morningRoutine;
+  if (r.id !== id || step < 1 || step > r.steps.length) return null;
+  r.done = Math.max(r.done, step);
+  return getTodayRoutine();
+}
+
+// 아침 루틴 음성 진행(Gemini Live) 1회용 토큰 — 서버 routine-live-token (오늘 루틴 · 다음 알람 · 도구가 잠긴 토큰). 가짜 데이터는 대본으로 진행
+export async function getRoutineLiveToken(id: string): Promise<{ token: string; model: string }> {
+  if (isMock()) throw new Error('가짜 데이터에서는 음성 진행 대신 대본으로 보여 줘요');
+  return real.getRoutineLiveToken(id);
+}
+
 // 그날 준비물 (H01 저녁 · 내일 준비물)
 export async function listTodos(day: Date): Promise<Todo[]> {
   if (!isMock()) return real.listTodos(day);

@@ -141,3 +141,15 @@ describe('Gemini Live 페이지 — 끝내기', () => {
     expect(h.events.filter((e) => e.type === 'closed')).toHaveLength(1);
   });
 });
+
+describe('Gemini Live 페이지 — 도구 호출 (아침 루틴)', () => {
+  it('Live가 도구를 부르면 앱에 tool로 넘기고, 앱이 tool_response를 보내면 같은 id로 Live에 답함', async () => {
+    const h = await harness();
+    await h.server({ toolCall: { functionCalls: [{ id: 'c1', name: 'step_done', args: { step: 1 } }, { id: 'c2', name: 'routine_finished' }] } });
+    expect(h.events.filter((e) => e.type === 'tool')).toEqual([
+      { type: 'tool', calls: [{ id: 'c1', name: 'step_done', args: { step: 1 } }, { id: 'c2', name: 'routine_finished', args: {} }] },
+    ]);
+    h.fromApp({ type: 'tool_response', responses: [{ id: 'c1', name: 'step_done', response: { ok: true } }] });
+    expect(h.sent.at(-1)).toEqual({ toolResponse: { functionResponses: [{ id: 'c1', name: 'step_done', response: { ok: true } }] } });
+  });
+});

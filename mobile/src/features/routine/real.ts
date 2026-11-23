@@ -7,6 +7,7 @@ import { EVENING_START_MINUTE, parseDayParam } from '@/features/alarm/schedule';
 import { loadActualRows } from '@/features/records/real';
 import { reconcile } from '@/lib/alarmSync';
 import { now } from '@/lib/clock';
+import { callEdge } from '@/lib/edge';
 import { UserError } from '@/lib/errors';
 import { addDays, dayKey, minuteOfDay, startOfDay } from '@/lib/format';
 import { supabase } from '@/lib/supabase';
@@ -387,4 +388,24 @@ export async function saveRoutine(routine: Routine): Promise<Routine> {
     }
   }
   return { ...draft, id };
+}
+
+// 아침 루틴 음성 진행(H09) — 그 단계(1부터)의 알람에 오늘 확인을 남김. 이미 확인했거나 알람이 없는 단계는 그대로 (화면이 따로 셈)
+//   출처: 음성으로 "했어" = VOICE, 화면 버튼 = BUTTON (홈 카드의 원탭은 MANUAL)
+export async function checkRoutineStep(id: string, step: number, source: 'VOICE' | 'BUTTON'): Promise<RoutineProgress | null> {
+  const userId = await requireUserId();
+  const routine = await loadRoutine(userId, id);
+  if (!routine?.id || step < 1 || step > routine.steps.length) return null;
+  const today = startOfDay(now());
+  const state = await loadStepState(userId, routine.id, today);
+  const alarmId = state.byOrder.get(step);
+  if (!alarmId || state.acked.includes(step)) return routineProgress(routine, state.acked);
+  const { error } = await supabase.from('alarm_events').insert({ alarm_id: alarmId, user_id: userId, event_type: 'ACKNOWLEDGED', event_at: now().toISOString(), input_source: source });
+  if (error) throw error;
+  return routineProgress(routine, [...state.acked, step]);
+}
+
+// 아침 루틴 음성 진행 1회용 토큰 (routine-live-token)
+export async function getRoutineLiveToken(id: string): Promise<{ token: string; model: string }> {
+  return callEdge<{ token: string; model: string }>('routine-live-token', { routine_id: id });
 }

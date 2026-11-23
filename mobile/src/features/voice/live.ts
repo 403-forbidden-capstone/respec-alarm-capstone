@@ -3,6 +3,8 @@
 //   토큰은 서버(voice-live-token)가 준 1회용 토큰 — 1분 안에 연결, 모델 · 지침은 서버가 잠가 둠
 //   페이지 → 앱: live(연결됨) · me/ai(말을 글로 바꾼 조각) · turn(AI 차례 끝) · mic(AI 말 중 전송 막음 · 다시 엶) · vad(사용자 목소리 감지 켜짐 · 꺼짐) · error(MIC · NETWORK) · closed(연결 끊김)
 //   앱 → 페이지: ask(글) — 서버가 찾은 되물을 것을 Live 연결에 글로 넣어 Live가 소리로 물음 (clientContent, 받아쓰기에는 안 나옴)
+//                tool_response(responses) — 도구 호출(아침 루틴 step_done 등)에 앱이 처리한 결과를 Live에 돌려줌 (toolResponse)
+//   페이지 → 앱: tool(calls) — Live가 도구를 불렀을 때 (아침 루틴 routine-live-token만 도구가 있음, 자기 전 대화에는 없음)
 //                stop — 앱이 연결을 끝낼 때 페이지를 내리기 전에 마이크 · 연결 · 재생을 먼저 닫게 (여러 번 와도 한 번만)
 
 export type LiveMessage =
@@ -12,7 +14,12 @@ export type LiveMessage =
   | { type: 'mic'; muted: boolean }
   | { type: 'vad'; active: boolean }
   | { type: 'error'; code: 'MIC' | 'NETWORK'; detail?: string }
-  | { type: 'closed'; code: number; reason: string };
+  | { type: 'closed'; code: number; reason: string }
+  | { type: 'tool'; calls: LiveToolCall[] };
+
+// Live 도구 호출 하나 (toolCall.functionCalls) — 앱이 처리하고 같은 id로 답함
+export type LiveToolCall = { id: string; name: string; args: Record<string, unknown> };
+export type LiveToolResponse = { id: string; name: string; response: Record<string, unknown> };
 
 export function parseLiveMessage(raw: unknown): LiveMessage | null {
   if (typeof raw !== 'string') return null;
@@ -139,6 +146,11 @@ export function livePage(token: string, model: string): string {
     if (closed) return; // 닫은 뒤 늦게 온 응답은 재생 · 전달하지 않음
     var m = JSON.parse(text);
     if (m.setupComplete) { startMic(); post({ type: 'live' }); return; }
+    // 도구 호출 — 앱에 넘기고 앱이 tool_response로 답함 (아침 루틴)
+    if (m.toolCall && m.toolCall.functionCalls) {
+      post({ type: 'tool', calls: m.toolCall.functionCalls.map(function (f) { return { id: f.id || '', name: f.name || '', args: f.args || {} }; }) });
+      return;
+    }
     var c = m.serverContent;
     if (!c) return;
     if (c.interrupted) hush();
@@ -170,6 +182,10 @@ export function livePage(token: string, model: string): string {
     var m;
     try { m = JSON.parse(ev.data); } catch (e) { return; }
     if (m && m.type === 'stop') { cleanup(); return; }
+    if (m && m.type === 'tool_response' && Array.isArray(m.responses)) {
+      if (!closed && ws && ws.readyState === 1) ws.send(JSON.stringify({ toolResponse: { functionResponses: m.responses } }));
+      return;
+    }
     if (!m || m.type !== 'ask' || typeof m.text !== 'string' || closed || !ws || ws.readyState !== 1) return;
     ws.send(JSON.stringify({ clientContent: { turns: [{ role: 'user', parts: [{ text: m.text }] }], turnComplete: true } }));
   }

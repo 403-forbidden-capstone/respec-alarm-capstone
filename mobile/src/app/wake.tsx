@@ -17,11 +17,14 @@ import { addMinutes, formatTime, timeParts } from '@/lib/format';
 import { isPreviewAlarmId } from '@/features/alarm/ringPreview';
 import { isMock } from '@/lib/mode';
 import { backOrHome, openGroupDetail } from '@/lib/nav';
+import { getTodayRoutine } from '@/features/routine/api';
 import { ReceivedWakePingLine } from '@/features/social/components/ReceivedWakePingLine';
 import { useLoad } from '@/lib/useLoad';
 import { colors } from '@/theme';
 
 type Phase = 'observing' | 'prompt' | 'confirmed';
+// 기상 확정 뒤 아침 루틴 화면(H09)으로 넘어가기 전 잠깐 — "기상 확정"을 보고 넘어가게
+const AUTO_ROUTINE_DELAY_MS = 1500;
 type WakeState = { phase: Phase; usage: number; recent: number; at: Date | null; how: 'self' | 'auto' | null };
 type How = WakeState['how'];
 
@@ -139,6 +142,24 @@ function WakeFlow({ check }: { check: WakeCheck }) {
   const preview = !isMock() && isPreviewAlarmId(check.alarmId);
   const mock = isMock() || preview;
   const next = useNextRing(preview ? check.alarmId : null);
+  // 기상 확정 뒤 오늘 아침 루틴이 남아 있으면 루틴 화면(H09)으로 자동으로 — 이 화면에서 확정됐을 때만 (이미 확정된 화면을 다시 열면 그대로)
+  //   루틴 화면에서 [시작]을 한 번 누르면 AI가 단계를 말로 안내 (소리 · 마이크는 한 번 눌러야 켤 수 있음)
+  const openedPhase = useRef(state.phase);
+  useEffect(() => {
+    if (state.phase !== 'confirmed' || openedPhase.current === 'confirmed' || preview) return;
+    let gone = false;
+    const timer = setTimeout(() => {
+      getTodayRoutine()
+        .then((r) => {
+          if (!gone && r && r.done < r.steps.length) router.push('/routine-run');
+        })
+        .catch(() => {}); // 못 읽으면 지금 화면 그대로 — 홈 카드에서 시작할 수 있음
+    }, AUTO_ROUTINE_DELAY_MS);
+    return () => {
+      gone = true;
+      clearTimeout(timer);
+    };
+  }, [state.phase, preview]);
   useEffect(() => {
     if (mock || state.phase !== 'observing') return;
     let stopped = false;
