@@ -12,10 +12,14 @@ import type { Db } from './supabase.ts';
 export const PURE_PREP_SHADOW_MIN_HISTORY = 10;
 export const PURE_PREP_SHADOW_MAX_HISTORY = 30;
 export const PURE_PREP_SHADOW_MODEL = 'prep_start_ratio_v2' as const;
-export type ShadowTarget = 'actual_start_depart' | 'survey_start_cluster_proxy' | 'alarm_dismiss_location_proxy';
+// Must match the trainer manifest and model API. Older 2024 survey weights
+// use a PREVIOUS-DAY baseline and cannot be applied to this recent-history mean.
+export const PURE_PREP_SHADOW_BASELINE_DEFINITION = 'mean_last_30_valid_prep_alarm_location_v1' as const;
+export type ShadowTarget = 'actual_start_depart' | 'alarm_dismiss_location_proxy';
 
 export type PurePrepShadowRequest = {
   model: typeof PURE_PREP_SHADOW_MODEL;
+  baseline_definition: typeof PURE_PREP_SHADOW_BASELINE_DEFINITION;
   features: {
     weekday_code: string;
     '평토일구분코드': string;
@@ -27,6 +31,7 @@ export type PurePrepShadowRequest = {
 };
 export type ShadowPrediction = {
   model: typeof PURE_PREP_SHADOW_MODEL;
+  baseline_definition: typeof PURE_PREP_SHADOW_BASELINE_DEFINITION;
   minutes: number;
   ratio: number;
   training_target: ShadowTarget;
@@ -78,6 +83,7 @@ export function buildPurePrepShadowRequest(input: {
   const baseline = history.reduce((acc, minutes) => acc + minutes, 0) / history.length;
   return {
     model: PURE_PREP_SHADOW_MODEL,
+    baseline_definition: PURE_PREP_SHADOW_BASELINE_DEFINITION,
     features: {
       ...calendarFeatures(input.appointmentAt, input.timezone),
       '연령코드': input.verifiedAgeCode as string,
@@ -94,7 +100,6 @@ export async function requestPurePrepShadow(
   config: {
     url?: string;
     token?: string;
-    allowSurveyProxy?: boolean;
     allowDismissProxy?: boolean;
     timeoutMs?: number;
   },
@@ -102,6 +107,7 @@ export async function requestPurePrepShadow(
 ): Promise<ShadowPrediction | null> {
   const baseline = request.features.baseline_observed;
   if (request.model !== PURE_PREP_SHADOW_MODEL ||
+      request.baseline_definition !== PURE_PREP_SHADOW_BASELINE_DEFINITION ||
       request.history_count < PURE_PREP_SHADOW_MIN_HISTORY ||
       request.history_count > PURE_PREP_SHADOW_MAX_HISTORY ||
       !Number.isFinite(baseline) || baseline < 10 || baseline > 240 ||
@@ -121,15 +127,17 @@ export async function requestPurePrepShadow(
     const v = body as Record<string, unknown>;
     const target = v.training_target;
     if (target !== 'actual_start_depart' &&
-        !(target === 'survey_start_cluster_proxy' && config.allowSurveyProxy === true) &&
         !(target === 'alarm_dismiss_location_proxy' && config.allowDismissProxy === true)) return null;
-    if (v.model !== PURE_PREP_SHADOW_MODEL || v.prediction_type !== 'ratio' ||
+    if (v.model !== PURE_PREP_SHADOW_MODEL ||
+        v.baseline_definition !== PURE_PREP_SHADOW_BASELINE_DEFINITION ||
+        v.prediction_type !== 'ratio' ||
         typeof v.minutes !== 'number' || !Number.isFinite(v.minutes) ||
         typeof v.ratio !== 'number' || !Number.isFinite(v.ratio)) return null;
     if (v.minutes < 5 || v.minutes > 240 || v.ratio < 0.5 || v.ratio > 2 ||
         Math.abs(v.minutes - baseline * v.ratio) > 2) return null;
     return {
       model: PURE_PREP_SHADOW_MODEL,
+      baseline_definition: PURE_PREP_SHADOW_BASELINE_DEFINITION,
       minutes: Math.round(v.minutes),
       ratio: v.ratio,
       training_target: target as ShadowTarget,
@@ -208,7 +216,6 @@ export async function runPurePrepShadow(input: {
     const response = await requestPurePrepShadow(request, {
       url: getEnv('PURE_PREP_SHADOW_URL'),
       token: getEnv('PURE_PREP_SHADOW_API_TOKEN'),
-      allowSurveyProxy: getEnv('PURE_PREP_SHADOW_ALLOW_SURVEY_PROXY') === '1',
       allowDismissProxy: getEnv('PURE_PREP_SHADOW_ALLOW_DISMISS_PROXY') === '1',
     });
     if (!response) return { status: 'MODEL_UNAVAILABLE', valid_records: history.length, required_records: PURE_PREP_SHADOW_MIN_HISTORY };
