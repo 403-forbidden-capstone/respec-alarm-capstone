@@ -10,6 +10,7 @@ on:
       - 'mobile/src/lib/flags.ts'
       - 'supabase/migrations/*self_reported_prep_start*'
       - '.github/workflows/pure-prep-self-report-qa.yml'
+      - '.github/tests/self-reported-prep-*.sql'
 permissions:
   contents: read
 jobs:
@@ -32,3 +33,34 @@ jobs:
       - name: Test self-report and prepare alarm regression
         working-directory: mobile
         run: npx jest --runInBand src/features/alarm/__tests__/selfReportedPrep.test.ts src/features/alarm/__tests__/prepareStart.test.ts
+
+  db-rls:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: ci-only-test-password
+          POSTGRES_DB: self_report_contract
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d self_report_contract"
+          --health-interval 5s --health-timeout 3s --health-retries 12
+    env:
+      PGPASSWORD: ci-only-test-password
+      PGHOST: localhost
+      PGPORT: 5432
+      PGUSER: postgres
+      PGDATABASE: self_report_contract
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install PostgreSQL client
+        run: sudo apt-get update -qq && sudo apt-get install -y postgresql-client
+      - name: Replay real migration against isolated RLS fixture
+        run: |
+          set -euo pipefail
+          psql -v ON_ERROR_STOP=1 -f .github/tests/self-reported-prep-bootstrap.sql
+          psql -v ON_ERROR_STOP=1 -f supabase/migrations/20261123050000_self_reported_prep_start.sql
+          psql -v ON_ERROR_STOP=1 -f .github/tests/self-reported-prep-contract.sql
