@@ -39,6 +39,9 @@ import { RecordsSection, type Register } from '@/features/records/components/Rec
 import { advanceRoutine, getEveningRoutine, getTodayRoutine, listTodos, toggleTodo } from '@/features/routine/api';
 import { RoutineCard } from '@/features/routine/components/RoutineCard';
 import { TodoList } from '@/features/routine/components/TodoList';
+import { SkyBackdrop } from '@/features/sky/components/SkyBackdrop';
+import { useSky } from '@/features/sky/hooks/useSky';
+import { dayPartOfPhase, skyGreeting, type DayPart } from '@/features/sky/sky';
 import { now } from '@/lib/clock';
 import { addDays, dayKey, formatDate, formatMinuteOfDay, formatRelative, formatTime, minuteOfDay, startOfDay } from '@/lib/format';
 import { canUseRealData, isMock } from '@/lib/mode';
@@ -69,10 +72,10 @@ async function loadHome() {
   return { evening, target, next, schedule, routine, todos, eveningRoutine, snooze, wake, morning, early, autoWake };
 }
 
-function greeting(t: Date) {
-  const m = minuteOfDay(t);
-  if (isEvening(t)) return '차분한 저녁이에요';
-  return m < 12 * 60 ? '좋은 아침이에요' : '좋은 오후예요';
+// 인사말의 때 — 저녁 화면이면 저녁, 아니면 정오 앞뒤로 아침 · 오후. 문구는 날씨와 합쳐 features/sky의 skyGreeting이 만듦
+function dayPart(t: Date): DayPart {
+  if (isEvening(t)) return 'evening';
+  return minuteOfDay(t) < 12 * 60 ? 'morning' : 'afternoon';
 }
 
 // H01 홈 — 다음 알람 · 오늘 일정 · 루틴 · 준비물 · 맨 아래 나의 기록(R02 월간 · 주간 · 일간, D110)
@@ -85,6 +88,7 @@ export default function HomeScreen() {
   }, []);
   const refresh = useCallback(() => Promise.all([reload(), recordsReload.current?.()]), [reload]);
   const current = useNow(); // 30초마다 다시 읽음 — "N분 뒤" · 인사말이 열 때 값에 멈춰 있지 않게
+  const sky = useSky(); // 위쪽 하늘 배경 — 날씨 × 시간대
   const toggleAppointment = useAppointmentToggle(reload); // 다음 알람 카드 스위치
   const { run } = useAction(); // 루틴 단계 · 준비물 체크는 한 번에 하나씩, 실패하면 토스트 (실데이터는 네트워크 오류가 있음)
   const permissions = usePermissions(); // 홈 빨간 줄 — 알림 · 전체화면 알림이 꺼짐, 폰에 못 건 알람
@@ -150,18 +154,19 @@ export default function HomeScreen() {
   const permissionSummary = bannerSummary(bannerLines(permissions.snapshot, { failedCount: failedAlarms, hasAlarm: next != null }));
 
   return (
-    <Screen onRefresh={refresh}>
+    <Screen onRefresh={refresh} backdrop={<SkyBackdrop kind={sky.kind} phase={sky.phase} />}>
       <TopBar
         left={
-          <Text variant="small" tone="sub">
+          // 하늘 배경 맨 위라 본문 색 — 보조 색은 대비가 모자람 (features/sky/sky.ts SKY_SUB_TEXT_FROM)
+          <Text variant="small" tone="ink">
             {formatDate(current)}
           </Text>
         }
         // D90 기본안 A — 홈 위 오른쪽. '알람 전체'는 2번 탭이 되어 뺌 (D110). 설정은 실데이터를 쓸 수 있을 때만 (아니면 _layout에서 settings가 빠져 막다른 길)
-        right={canUseRealData ? <TopBarButton label="설정" onPress={() => router.push('/settings')} /> : undefined}
+        right={canUseRealData ? <TopBarButton label="설정" glass onPress={() => router.push('/settings')} /> : undefined}
       />
       <Text variant="title" style={styles.title}>
-        {greeting(current)}
+        {skyGreeting(sky.kind, sky.preview ? dayPartOfPhase(sky.phase) : dayPart(current))}
       </Text>
 
       {permissionSummary ? <PermissionBanner text={permissionSummary} onPress={() => router.push('/ring-check')} /> : null}
