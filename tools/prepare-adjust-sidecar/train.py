@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""Train on actual opt-in user preparation sessions ONLY, not 2024 survey proxy.
+"""Train on opted-in alarm-dismissal -> location-departure PROXY sessions.
 
 Expected CSV columns:
 user_id,prepare_started_at,departed_at,prepare_started_source,departed_source,
 weekday_code,평토일구분코드,휴일종류코드,연령코드
 
+This dataset does not independently verify physical preparation starts.
 Every training row predicts the current session using ONLY previous sessions
 from the same user. Split by user before training; never train on future events.
 """
@@ -36,7 +37,7 @@ def build_samples(path: Path) -> pd.DataFrame:
     df = df[
         df["prepare_started_source"].eq("PREPARE_ALARM")
         & df["departed_source"].eq("LOCATION")
-        & df["minutes"].between(5, 240)
+        & df["minutes"].between(10, 240)
         & df["start"].notna()
         & df["depart"].notna()
         & df["user_id"].notna()
@@ -107,7 +108,7 @@ def main() -> None:
     # Calibration is report-only, never implicitly added by the model server.
     margin = float(np.quantile(yv-vp,.8))
     metrics = {
-        "target": "actual_confirmed_preparation_start_to_departure_minutes",
+        "target": "prepare_alarm_dismiss_to_location_depart_proxy_minutes",
         "minimum_history": 10,
         "user_counts": {"train":len(train_ids),"valid":len(valid_ids),"test":len(test_ids)},
         "train_samples": len(tr),
@@ -117,14 +118,16 @@ def main() -> None:
                  "model":score(yt,tp)},
         "validation_80pct_residual_margin_minutes":round(margin,2),
         "test_with_margin":score(yt,np.clip(tp+margin,5,240)),
-        "warning":"PREPARE_ALARM is user dismissal/one-tap, not guaranteed true physical start; validate reliability",
+        "warning":"Physical start is UNVERIFIED. PREPARE_ALARM is dismissal/one-tap, LOCATION is geofence estimate. Do not claim actual ground truth or apply to live alarms.",
     }
     out = Path(args.out_dir)
     out.mkdir(parents=True,exist_ok=True)
     model_file = out/"prep_ratio_actual_sessions.cbm"
     model.save_model(str(model_file))
     (out/"prep_ratio_actual_sessions.manifest.json").write_text(json.dumps({
-        "training_target":"actual_start_depart",
+        "training_target":"alarm_dismiss_location_proxy",
+        "physical_start_confirmed": False,
+        "target_provenance": "PREPARE_ALARM event timestamp -> LOCATION departure estimate",
         "sha256":hashlib.sha256(model_file.read_bytes()).hexdigest(),
         "model":"prep_start_ratio_v2",
         "feature_names":FEATURES,
