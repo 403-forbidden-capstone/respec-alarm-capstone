@@ -48,12 +48,12 @@ jobs:
               out=importlib.util.module_from_spec(spec);spec.loader.exec_module(out);return out
           train=mod('training','tools/prepare-adjust-sidecar/train.py')
           serve=mod('server','tools/prepare-adjust-sidecar/server.py')
-          cols=['user_id','prepare_started_at','departed_at','prepare_started_source','weekday_code','평토일구분코드','휴일종류코드','연령코드']
+          cols=['user_id','prepare_started_at','departed_at','prepare_started_source','departed_source','weekday_code','평토일구분코드','휴일종류코드','연령코드']
           def records(n):
               for i in range(n):
                   d=datetime(2026,11,1,tzinfo=timezone.utc)+timedelta(days=i)
                   yield dict(user_id='fictional-account',prepare_started_at=(d-timedelta(minutes=20+i)).isoformat(),
-                             departed_at=d.isoformat(),prepare_started_source='PREPARE_ALARM',
+                             departed_at=d.isoformat(),prepare_started_source='PREPARE_ALARM',departed_source='LOCATION',
                              weekday_code='1',평토일구분코드='1',휴일종류코드='__MISSING__',연령코드='2')
           with tempfile.TemporaryDirectory() as folder:
               path=Path(folder)/'sessions.csv'
