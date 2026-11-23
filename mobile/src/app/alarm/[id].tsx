@@ -5,6 +5,7 @@ import { Platform, StyleSheet, View } from 'react-native';
 
 import { Button, Card, Chip, DateSheet, EmptyState, KeyValueRow, Loading, LoadError, Screen, Sheet, Stepper, Text, toast, Toggle, TopBar } from '@/components/ui';
 import { getAppointment, listOccurrences, listPlaces, previewAlarms, saveAlarmSettings } from '@/features/alarm/api';
+import { canConfirmPrepStartAt, confirmPrepStartSelfReport, loadPrepStartSelfReport } from '@/features/alarm/selfReportedPrep';
 import { isManualTime, manualTimes, moveAlarm, orderError, resetAlarm, sameEdits, shownPreview, timeInputsChanged } from '@/features/alarm/adjust';
 import { FormulaBox } from '@/features/alarm/components/FormulaBox';
 import { OccurrenceList } from '@/features/alarm/components/OccurrenceList';
@@ -39,7 +40,8 @@ import {
   type Transport,
 } from '@/features/alarm/types';
 import { now } from '@/lib/clock';
-import { ALARM_AXES_PICKER } from '@/lib/flags';
+import { ALARM_AXES_PICKER, PREP_START_SELF_REPORT_PILOT } from '@/lib/flags';
+import { useAuth } from '@/features/auth/AuthProvider';
 import { addMinutes, formatDateShort, formatTime, startOfDay } from '@/lib/format';
 import { backOrHome } from '@/lib/nav';
 import { useAction } from '@/lib/useAction';
@@ -96,6 +98,14 @@ const savedPreview = (a: AppointmentDetail): AlarmPreview => ({
 });
 
 function Detail({ appointment: a, reload }: { appointment: AppointmentDetail; reload: () => Promise<boolean> }) {
+  const { session } = useAuth();
+  const pilot = PREP_START_SELF_REPORT_PILOT && session?.user.email === 'demo-me@example.com' && a.groupName == null;
+  const { data: prepStartReport, reload: reloadPrepStartReport } = useLoad(() =>
+    pilot ? loadPrepStartSelfReport(a.id) : Promise.resolve(null),
+  );
+  const [reportedAt, setReportedAt] = useState<string | null>(null);
+  const startAlreadyReported = reportedAt ?? prepStartReport?.self_reported_prep_started_at ?? null;
+  const canReportNow = canConfirmPrepStartAt(a.at, now());
   const [edits, setEdits] = useState<AlarmEdits>(a.edits);
   const [kinds, setKinds] = useState(() => savedKinds(a));
   const [levels, setLevels] = useState(() => savedLevels(a));
@@ -231,6 +241,16 @@ function Detail({ appointment: a, reload }: { appointment: AppointmentDetail; re
   // 저장은 화면 아래에 고정 — 폼이 길어 스크롤 끝까지 내려가지 않아도 보이게. 바뀐 게 없거나 순서가 뒤집혔으면 못 누름
   const footer = <Button label="저장" onPress={save} disabled={!dirty || blocked != null} loading={busy && changes == null && travelConfirm == null} />;
 
+  function confirmPhysicalStart() {
+    if (!pilot || startAlreadyReported || !canReportNow || prepStartReport?.departed_at || busy) return;
+    void run(async () => {
+      const timestamp = await confirmPrepStartSelfReport(a.id);
+      setReportedAt(timestamp);
+      await reloadPrepStartReport();
+      toast('준비 시작 확인 시각을 기록했어요');
+    }, '준비 시작 시각을 기록하지 못했어요');
+  }
+
   // 일정을 지운 5초 — 되돌리기 토스트가 떠 있는 동안 지운 일정만 보임 (5초 뒤 · 화면을 떠날 때 실제로 지움)
   if (edit.deleted) {
     return (
@@ -271,6 +291,36 @@ function Detail({ appointment: a, reload }: { appointment: AppointmentDetail; re
           {formatTime(a.at)} · {a.place} · {a.repeatLabel}
         </Text>
       </Card>
+
+      {pilot ? (
+        <Card>
+          <Text variant="label" tone="sub" style={styles.label}>
+            준비 시작 시각 확인 · 연구용
+          </Text>
+          <Text variant="body" tone="sub">
+            실제로 외출 준비를 시작하는 순간 눌러 주세요. 준비 알람을 끈 시각과 별도로 저장하며, 알람 시간은 바뀌지 않아요.
+          </Text>
+          {startAlreadyReported ? (
+            <Text variant="bodyStrong">내가 확인한 준비 시작: {formatTime(new Date(startAlreadyReported))}</Text>
+          ) : (
+            <Button
+              label="지금 실제 준비 시작했어요"
+              variant="ghost"
+              onPress={confirmPhysicalStart}
+              disabled={!canReportNow || prepStartReport?.departed_at != null || prepStartReport === undefined}
+              loading={busy}
+            />
+          )}
+          {!canReportNow && !startAlreadyReported ? (
+            <Text variant="caption" tone="sub">
+              약속 3시간 전부터 약속 1시간 후까지만 기록할 수 있어요.
+            </Text>
+          ) : null}
+          <Text variant="caption" tone="sub">
+            본인이 누른 시각은 자기 보고 자료예요. 별도의 연구·모델 학습 동의가 확인되기 전에는 학습에 사용하지 않아요.
+          </Text>
+        </Card>
+      ) : null}
 
       {occurrences && occurrences.length > 1 ? (
         <OccurrenceList
