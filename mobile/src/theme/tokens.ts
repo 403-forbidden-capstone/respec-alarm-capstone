@@ -7,6 +7,7 @@ export const colors = {
   line: '#E6E6E2', // 테두리 · 구분선
   ink: '#151515', // 본문 · 강조 버튼
   sub: '#6B6B67', // 보조 글자
+  skySub: '#55554F', // 하늘 배경(탭 화면 위쪽) 위의 보조 글자 — sub는 색이 진한 하늘에서 대비가 모자람 (features/sky SKY_LEAD_FROM)
   faint: '#71716C', // 흐린 글자 · 비활성 — 흰 바탕 4.9 : 1 · 화면 바탕(bg) 4.5 : 1 (글자 대비 4.5 : 1 이상). sub보다는 연함
   faintDecor: '#A5A5A0', // 글자가 아닌 장식(점 · 테두리 · 막대)용 연한 색 — 대비 기준이 없어 예전 faint 값
   chip: '#EFEFEC', // 칩 · 세그먼트 바탕
@@ -41,6 +42,19 @@ export const colors = {
   ringButton: 'rgba(255, 255, 255, 0.12)', // 미루기 버튼
   ringLine: 'rgba(255, 255, 255, 0.35)', // 어두운 바탕 위 칩 테두리
   ringWave: 'rgba(255, 255, 255, 0.8)', // 음성 파형
+
+  // 하늘 배경 위에 얹는 것 (홈 위쪽) — 바탕 색은 아래 skyTint, 해 · 구름 등 그림 색은 scripts/make-sky-assets.py
+  glass: 'rgba(255, 255, 255, 0.5)', // 하늘 배경 위 반투명 버튼 바탕
+  glassLine: 'rgba(255, 255, 255, 0.8)', // 반투명 버튼 테두리
+} as const;
+
+// 하늘 배경 맨 위 색 — 날씨 × 시간대. 아래로 갈수록 화면 바탕(bg)으로 풀림 (features/sky/sky.ts의 skyColorAt)
+// 글자 대비를 지키려고 전부 옅은 색. 값을 바꾸면 features/sky/__tests__/sky.test.ts가 대비를 다시 잼
+export const skyTint = {
+  clear: { dawn: '#F9D58A', morning: '#B5D6F3', day: '#9CC8F2', dusk: '#F2A98C', night: '#ACA7DC' },
+  cloudy: { dawn: '#CFC4BF', morning: '#CDCBC2', day: '#BFC6CB', dusk: '#C9BBBB', night: '#B4B4CC' },
+  rain: { dawn: '#A9BACA', morning: '#A6BCCD', day: '#9FB7C9', dusk: '#A9B1C9', night: '#9FA6C6' },
+  snow: { dawn: '#C5CFE6', morning: '#BCD5EC', day: '#B8D4EE', dusk: '#C0C6E2', night: '#B0B9DC' },
 } as const;
 
 export const radius = {

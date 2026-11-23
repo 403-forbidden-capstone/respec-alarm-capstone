@@ -10,6 +10,8 @@ import { TextLink } from '@/features/alarm/components/TextLink';
 import { useAppointmentToggle } from '@/features/alarm/hooks/useAppointmentToggle';
 import { useNow } from '@/features/alarm/hooks/useNow';
 import { dayHeading, groupByDay, seriesInfo, splitUpcoming } from '@/features/alarm/schedule';
+import { SkyBackdrop } from '@/features/sky/components/SkyBackdrop';
+import { useSky } from '@/features/sky/hooks/useSky';
 import { formatDateShort } from '@/lib/format';
 import { useLoad } from '@/lib/useLoad';
 import { colors } from '@/theme';
@@ -37,20 +39,23 @@ export default function AlarmsScreen() {
     return () => clearTimeout(id);
   }, [highlight]);
 
+  const sky = useSky(); // 위쪽 하늘 배경 — 홈과 같은 날씨 × 시간대
   const { upcoming, past } = data ? splitUpcoming(data, current) : { upcoming: [], past: [] };
 
   return (
-    <Screen onRefresh={reload} scrollRef={scrollRef}>
+    <Screen onRefresh={reload} scrollRef={scrollRef} backdrop={<SkyBackdrop kind={sky.kind} phase={sky.phase} />}>
       <TopBar
         screenId="H02"
-        right={<TopBarButton label="+ 새 일정" onPress={() => router.push({ pathname: '/schedule/new', params: { from: 'alarms' } })} />}
+        right={<TopBarButton label="+ 새 일정" glass onPress={() => router.push({ pathname: '/schedule/new', params: { from: 'alarms' } })} />}
       />
       <Text variant="title" style={styles.title}>
         알람
       </Text>
       {/* 친구가 보낸 알람 시각 제안 — 푸시를 누르면 여기로 (친구 10장) */}
       <ProposalCards onChanged={() => void reload()} />
-      <Text variant="lead">일정마다 기상 · 준비 · 출발 알람을 계산해 두었어요.</Text>
+      <Text variant="lead" tone="skySub">
+        일정마다 기상 · 준비 · 출발 알람을 계산해 두었어요.
+      </Text>
       <View style={styles.links}>
         <TextLink label="학교 시간표 · 반복 일정 지우기" onPress={() => router.push('/timetable')} />
       </View>
