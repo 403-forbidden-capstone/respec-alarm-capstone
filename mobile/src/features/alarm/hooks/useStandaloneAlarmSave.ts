@@ -12,8 +12,8 @@ import { saveNotice } from '../saveNotice';
 import { dayHeading } from '../schedule';
 import { firstRingAt } from '../standalone';
 
-// 기본 알람 저장 (H02 알람 탭, #588) — 부품(StandaloneAlarmForm)은 고른 값만 넘기고, 저장 · 토스트 · 알림 권한은 화면이 이 훅으로 함
-//   save는 저장했으면 true — 부품이 칸을 접고 입력을 비울지 정함. 실패는 useAction 규칙대로 토스트
+// 기본 알람 저장 (H02 알람 탭 "+ 새 알람", #588) — 부품(NewAlarmSheet)은 고른 값만 넘기고, 저장 · 토스트 · 알림 권한은 화면이 이 훅으로 함
+//   save는 저장했으면 true — 부품이 시트를 닫고 입력을 비울지 정함. 실패는 useAction 규칙대로 토스트
 export function useStandaloneAlarmSave(onSaved: (id: string) => void) {
   const { busy, run } = useAction();
   const save = useCallback(

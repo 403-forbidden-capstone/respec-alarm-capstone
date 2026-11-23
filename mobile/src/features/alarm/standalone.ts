@@ -1,4 +1,4 @@
-// 기본 알람(일정 없는 알람, D46 · #588) 입력 계산 — 알람 탭의 "기본 알람 만들기"
+// 기본 알람(일정 없는 알람, D46 · #588) 입력 계산 — 알람 탭 "+ 새 알람" 시트
 // 순수 계산만 — 단위 테스트는 __tests__/standalone.test.ts. 저장은 api.ts createStandaloneAlarm
 // 날짜 칸이 없어 시각 · 반복 요일만 고름 → 지금 뒤로 처음 오는 그 시각이 첫 회차. 다음 회차는 서버(alarm-roll)가 만듦
 import { addDays, addMinutes, dateParts, startOfDay } from '@/lib/format';
