@@ -56,6 +56,7 @@ export default function SettingsScreen() {
   const logout = useAction(); // 로그아웃 연타 막기 · 돌아가는 표시 — 프로필 저장 중에 로그아웃 버튼이 같이 돌지 않게 따로
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState<Editing>(null);
+  const [purePrepChanged, setPurePrepChanged] = useState(false);
   const [placeOpen, setPlaceOpen] = useState(false);
   const user = session?.user;
   const provider = (user?.app_metadata?.provider as string | undefined) ?? '';
@@ -70,8 +71,11 @@ export default function SettingsScreen() {
   const saveEdit = (fields: ProfileFields) =>
     run(async () => {
       if (!userId) return;
+      const changedPure = fields.default_outing_prep_minutes !== undefined &&
+        fields.default_outing_prep_minutes !== profile?.default_outing_prep_minutes;
       await saveProfileFields(userId, fields);
-      let note = '바꿨어요';
+      if (changedPure) setPurePrepChanged(true);
+      let note = changedPure ? '순수준비시간을 바꿨어요 · 새 알람 계산에 반영돼요' : '바꿨어요';
       try {
         await refreshProfile();
       } catch {
@@ -165,6 +169,16 @@ export default function SettingsScreen() {
             <EditRow label="이동 수단" value={TRANSPORT_NAME[profile.default_transport]} onPress={open('prepare')} />
             <EditRow label="집(출발지)" value={profile.home_name ?? '정하지 않았어요'} onPress={canEdit ? () => setPlaceOpen(true) : undefined} />
           </Card>
+          {purePrepChanged ? (
+            <Card>
+              <Text variant="small" tone="sub">
+                변경한 순수준비시간은 앞으로 계산하는 개인 일정에 반영돼요.
+                이미 저장된 미래 알람은 자동 변경되지 않으니 알람 목록에서 각 일정을 다시 확인하고 저장해 주세요.
+                직접 고른 알람 시각과 그룹 일정은 유지돼요.
+              </Text>
+              <Button label="기존 알람 확인하기" onPress={() => router.push('/(tabs)/alarms')} />
+            </Card>
+          ) : null}
 
           <SectionHeader title="준비시간 예측 연구정보 (선택)" />
           <Card>
