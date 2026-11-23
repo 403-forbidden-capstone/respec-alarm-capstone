@@ -11,7 +11,7 @@ import { applySuggestion, getPendingSuggestion, ignoreSuggestion } from '@/featu
 import { SuggestionPromptCard } from '@/features/records/components/SuggestionPromptCard';
 import { getPendingRoutineSuggestion, ignoreRoutineSuggestion } from '@/features/routine/api';
 import { RoutinePromptCard } from '@/features/routine/components/RoutinePromptCard';
-import { SkyBackdrop } from '@/features/sky/components/SkyBackdrop';
+import { SkyTone } from '@/features/sky/components/SkyBackdrop';
 import { useSky } from '@/features/sky/hooks/useSky';
 import type { RoutineSuggestion } from '@/features/routine/types';
 import { previewTimes } from '@/features/records/suggestion';
@@ -245,7 +245,7 @@ export default function AiScreen() {
 
   if (!data) {
     return (
-      <Screen backdrop={<SkyBackdrop kind={sky.kind} phase={sky.phase} />}>
+      <Screen backdrop={<SkyTone kind={sky.kind} phase={sky.phase} />}>
         <TopBar screenId="A02" />
         {error ? <LoadError onRetry={reload} /> : <Loading />}
       </Screen>
@@ -426,7 +426,7 @@ export default function AiScreen() {
 
   return (
     // 키보드를 피하는 일은 Screen이 맡음 (채팅 목록 + 아래 입력 칸 전체를 밀어 올림)
-    <Screen scroll={false} contentStyle={styles.screen} backdrop={<SkyBackdrop kind={sky.kind} phase={sky.phase} />}>
+    <Screen scroll={false} contentStyle={styles.screen} backdrop={<SkyTone kind={sky.kind} phase={sky.phase} />}>
       <ScrollView
         ref={scroll}
         style={styles.fill}

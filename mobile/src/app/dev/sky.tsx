@@ -9,7 +9,7 @@ import { SKY_KINDS, SKY_PHASES, skyTop, type SkyKind, type SkyPhase } from '@/fe
 
 // 개발용 하늘 배경 견본 — 탭에는 없고 주소로만 들어옴: /dev/sky (앱은 respecalarm://dev/sky)
 // 홈 위쪽과 같은 배치(날짜 · 설정 버튼 · 인사말 · 카드)에 날씨 × 시간대를 골라 가며 봄. 주소로도 고름: /dev/sky?kind=snow&phase=night
-// 고른 하늘은 탭 화면 네 곳 모두에 입혀짐. 주소에 home=1이면 바로 엶 — to=alarms · group · ai로 그 탭을 엶 (캡처용)
+// 고른 하늘은 탭 화면 네 곳 모두에 입혀짐(그림은 홈만, 나머지는 바탕 톤). 주소에 home=1이면 바로 엶 — to=alarms · group · ai로 그 탭을 엶 (캡처용)
 const KIND_LABEL: Record<SkyKind, string> = { clear: '맑음', cloudy: '흐림', rain: '비', snow: '눈' };
 const TAB_PATH = { home: '/', alarms: '/alarms', group: '/group', ai: '/ai' } as const;
 const PHASE_LABEL: Record<SkyPhase, string> = { dawn: '새벽', morning: '아침', day: '낮', dusk: '해 질 녘', night: '밤' };

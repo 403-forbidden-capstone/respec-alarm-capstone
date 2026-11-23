@@ -28,7 +28,7 @@ import { ActionTile } from '@/features/social/components/ActionTile';
 import { ConsentSheet } from '@/features/social/components/ConsentSheet';
 import { GroupInviteCard } from '@/features/social/components/GroupInviteCard';
 import { GroupIcon } from '@/features/social/components/GroupIcon';
-import { SkyBackdrop } from '@/features/sky/components/SkyBackdrop';
+import { SkyTone } from '@/features/sky/components/SkyBackdrop';
 import { useSky } from '@/features/sky/hooks/useSky';
 import { GroupWakeCard } from '@/features/social/components/GroupWakeCard';
 import { MiniButton } from '@/features/social/components/MiniButton';
@@ -143,7 +143,7 @@ export default function GroupScreen() {
   const cancel = (p: Person) => act(p, () => cancelFriendRequest(p.id), '취소하지 못했어요. 다시 해 주세요');
 
   return (
-    <Screen onRefresh={reload} backdrop={<SkyBackdrop kind={sky.kind} phase={sky.phase} />}>
+    <Screen onRefresh={reload} backdrop={<SkyTone kind={sky.kind} phase={sky.phase} />}>
       <ConsentSheet visible={consentFor != null} busy={workingId != null} onChoose={acceptInvite} onClose={() => setConsentFor(null)} />
       <TopBar
         screenId={tab === 'friend' ? 'F01' : 'G01'}

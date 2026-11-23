@@ -12,7 +12,7 @@ import { useAppointmentToggle } from '@/features/alarm/hooks/useAppointmentToggl
 import { useNow } from '@/features/alarm/hooks/useNow';
 import { useStandaloneAlarmSave } from '@/features/alarm/hooks/useStandaloneAlarmSave';
 import { dayHeading, groupByDay, seriesInfo, splitUpcoming } from '@/features/alarm/schedule';
-import { SkyBackdrop } from '@/features/sky/components/SkyBackdrop';
+import { SkyTone } from '@/features/sky/components/SkyBackdrop';
 import { useSky } from '@/features/sky/hooks/useSky';
 import { formatDateShort } from '@/lib/format';
 import { useLoad } from '@/lib/useLoad';
@@ -51,7 +51,7 @@ export default function AlarmsScreen() {
   const { upcoming, past } = data ? splitUpcoming(data, current) : { upcoming: [], past: [] };
 
   return (
-    <Screen onRefresh={reload} scrollRef={scrollRef} backdrop={<SkyBackdrop kind={sky.kind} phase={sky.phase} />}>
+    <Screen onRefresh={reload} scrollRef={scrollRef} backdrop={<SkyTone kind={sky.kind} phase={sky.phase} />}>
       <TopBar
         screenId="H02"
         right={
