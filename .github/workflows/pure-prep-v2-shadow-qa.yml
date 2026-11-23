@@ -28,6 +28,25 @@ on:
 permissions:
   contents: read
 jobs:
+  mobile-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+      - name: Install dependencies
+        run: npm ci
+      - name: Typecheck mobile application
+        run: npm run typecheck
+      - name: Run onboarding, profile and alarm regression tests
+        run: npm test -- --runInBand --ci --watch=false src/features/profile/__tests__/edit.test.ts src/features/profile/__tests__/api.test.ts src/features/alarm/__tests__/real.test.ts
   shadow-contract:
     runs-on: ubuntu-latest
     timeout-minutes: 8
