@@ -30,7 +30,7 @@ def predict(model: CatBoostRegressor, payload: dict, training_target: str) -> di
     if not isinstance(features, dict) or set(features) != set(FEATURES):
         raise ValueError("invalid feature schema")
     count = payload.get("history_count")
-    if type(count) is not int or count < 3 or count > 30:
+    if type(count) is not int or count < 10 or count > 30:
         raise ValueError("insufficient history")
     baseline = features.get("baseline_observed")
     if type(baseline) not in (int, float) or not math.isfinite(baseline) or not 5 <= baseline <= 240:
