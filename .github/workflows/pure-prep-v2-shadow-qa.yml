@@ -48,7 +48,7 @@ jobs:
       - name: Typecheck mobile application
         run: npm run typecheck
       - name: Run onboarding, profile and alarm regression tests
-        run: npm test -- --runInBand --ci --watch=false src/features/profile/__tests__/edit.test.ts src/features/profile/__tests__/api.test.ts src/features/alarm/__tests__/real.test.ts
+        run: npm test -- --runInBand --ci --watch=false src/features/profile/__tests__/edit.test.ts src/features/profile/__tests__/api.test.ts src/features/alarm/__tests__/real.test.ts src/features/alarm/__tests__/request.test.ts
   shadow-contract:
     runs-on: ubuntu-latest
     timeout-minutes: 8
