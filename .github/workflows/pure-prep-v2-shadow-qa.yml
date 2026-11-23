@@ -80,6 +80,17 @@ jobs:
                       data=train.build_samples(path)
                       assert len(data)==1
                       assert data.iloc[0]['history_count']==10
+                      # A nine-minute observation is valid as a manual input but
+                      # not as an automatically learned historical interval.
+                      altered=list(records(11))
+                      altered[0]['prepare_started_at']=(datetime(2026,11,1,tzinfo=timezone.utc)-timedelta(minutes=9)).isoformat()
+                      with path.open('w',newline='') as f:
+                          w=csv.DictWriter(f,fieldnames=cols);w.writeheader();w.writerows(altered)
+                      try:
+                          train.build_samples(path)
+                          raise AssertionError('nine-minute session must not reach ten valid training histories')
+                      except ValueError as e:
+                          assert '>=11' in str(e),str(e)
           body={'model':'prep_start_ratio_v2','history_count':9,
                 'features':{'weekday_code':'1','평토일구분코드':'1','휴일종류코드':'__MISSING__','연령코드':'2','baseline_observed':25}}
           class FakeModel:
@@ -93,5 +104,7 @@ jobs:
           body['history_count']=10
           result=serve.predict(FakeModel(),body,'survey_start_cluster_proxy')
           assert result['model']=='prep_start_ratio_v2' and result['minutes']==25
+          proxy=serve.predict(FakeModel(),body,'alarm_dismiss_location_proxy')
+          assert proxy['training_target']=='alarm_dismiss_location_proxy'
           print('10-record model gate and causal training boundary: PASS')
           PY
