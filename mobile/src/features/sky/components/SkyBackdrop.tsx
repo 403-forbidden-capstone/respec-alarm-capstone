@@ -243,7 +243,12 @@ const STARS = range(26);
 const FADE_STRIP = 6;
 const FADE = range(20).map((i) => ((i + 1) / 20) ** 1.6);
 
-// 탭 화면 위쪽 하늘 — 맨 위 색이 아래로 풀리는 바탕 + 날씨 그림(해 · 달과 별 · 세 겹 구름 · 두 겹 비 · 두 겹 눈)
+// 바탕 톤만 — 하늘 그림 없이 화면 바탕에 그 하늘 색을 살짝 섞음 (알람 · 친구와 그룹 · AI 탭. 하늘 그림은 홈에만)
+export function SkyTone({ kind, phase }: Props) {
+  return <View style={[StyleSheet.absoluteFill, { backgroundColor: skyBase(skyTop(kind, phase)) }]} pointerEvents="none" />;
+}
+
+// 홈 위쪽 하늘 — 맨 위 색이 아래로 풀리는 바탕 + 날씨 그림(해 · 달과 별 · 세 겹 구름 · 두 겹 비 · 두 겹 눈)
 // 값만 받아 그림. 누르는 것을 가리지 않게 터치는 통과
 export function SkyBackdrop({ kind, phase }: Props) {
   const still = useReduceMotion();
