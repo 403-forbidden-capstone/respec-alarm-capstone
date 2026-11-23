@@ -6,8 +6,8 @@ export const colors = {
   card: '#FFFFFF', // 카드 · 입력칸
   line: '#E6E6E2', // 테두리 · 구분선
   ink: '#151515', // 본문 · 강조 버튼
-  sub: '#6B6B67', // 보조 글자
-  skySub: '#55554F', // 하늘 배경(탭 화면 위쪽) 위의 보조 글자 — sub는 색이 진한 하늘에서 대비가 모자람 (features/sky SKY_LEAD_FROM)
+  sub: '#666662', // 보조 글자 — 하늘 톤이 섞인 화면 바탕(features/sky skyBase)에서도 4.5 : 1 이상
+  skySub: '#52524C', // 하늘 배경(탭 화면 위쪽) 위의 보조 글자 — sub는 색이 진한 하늘에서 대비가 모자람 (features/sky SKY_LEAD_FROM)
   faint: '#71716C', // 흐린 글자 · 비활성 — 흰 바탕 4.9 : 1 · 화면 바탕(bg) 4.5 : 1 (글자 대비 4.5 : 1 이상). sub보다는 연함
   faintDecor: '#A5A5A0', // 글자가 아닌 장식(점 · 테두리 · 막대)용 연한 색 — 대비 기준이 없어 예전 faint 값
   chip: '#EFEFEC', // 칩 · 세그먼트 바탕

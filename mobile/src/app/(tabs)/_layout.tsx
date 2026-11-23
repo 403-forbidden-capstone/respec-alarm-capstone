@@ -3,7 +3,7 @@ import { Tabs } from 'expo-router/js-tabs';
 import { TabBar } from '@/components/ui';
 import { colors } from '@/theme';
 
-// 아래 탭 4개 — 01 홈 · 02 알람 · 03 그룹 · 04 AI (D110 — 목업의 04 기록은 홈 맨 아래로, 알람 목록이 2번 탭)
+// 아래 탭 4개 — 홈 · 알람 · 그룹 · AI, 그림은 TabBar의 ICONS (D110 — 목업의 04 기록은 홈 맨 아래로, 알람 목록이 2번 탭)
 export default function TabsLayout() {
   return (
     <Tabs

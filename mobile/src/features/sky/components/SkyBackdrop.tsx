@@ -1,9 +1,8 @@
 import { useEffect, useState } from 'react';
 import { AccessibilityInfo, Animated, Easing, Platform, StyleSheet, View, type ImageSourcePropType } from 'react-native';
 
-import { colors } from '@/theme';
 
-import { SKY_HEIGHT, skyColorAt, skyTop, type SkyKind, type SkyPhase } from '../sky';
+import { SKY_HEIGHT, skyBase, skyColorAt, skyTop, type SkyKind, type SkyPhase } from '../sky';
 
 type Props = { kind: SkyKind; phase: SkyPhase };
 
@@ -254,43 +253,48 @@ export function SkyBackdrop({ kind, phase }: Props) {
   const night = phase === 'night';
   const clear = kind === 'clear';
   const wet = kind === 'rain' || kind === 'snow';
+  const base = skyBase(top);
   return (
-    <View
-      style={styles.wrap}
-      pointerEvents="none"
-      accessibilityElementsHidden
-      importantForAccessibility="no-hide-descendants"
-      onLayout={(e) => setWidth(e.nativeEvent.layout.width)}
-    >
-      {STRIPS.map((i) => (
-        <View key={i} style={{ height: STRIP, backgroundColor: skyColorAt(top, i * STRIP) }} />
-      ))}
-      <View style={StyleSheet.absoluteFill}>
-        {night && !wet ? STARS.map((i) => <Star key={i} i={i} dim={clear ? 1 : 0.5} still={still} />) : null}
-        {night && clear ? (
-          <>
-            <ShootingStar still={still} />
-            <View style={[styles.abs, styles.moonAt]}>
-              <Animated.Image source={IMG.moonGlow} style={[styles.abs, styles.moonGlow]} />
-              <Animated.Image source={IMG.moon} style={styles.moon} />
-            </View>
-          </>
-        ) : null}
-        {clear && !night ? <Sun low={phase === 'dusk'} still={still} /> : null}
-        {wet ? (kind === 'rain' ? DROPS_FAR.map((i) => <Drop key={i} i={i} layer="far" still={still} />) : FLAKES_FAR.map((i) => <Flake key={i} i={i} layer="far" still={still} />)) : null}
-        {(clear ? CLEAR_CLOUDS : ALL_CLOUDS).map((i) => (
-          <Cloud key={i} i={i} width={width} gray={kind === 'rain'} dim={clear ? 0.7 : night ? 0.8 : 1} still={still} />
+    <>
+      {/* 화면 전체 바탕 — 하늘 색을 살짝 섞은 톤. 카드 · 탭 막대는 그대로 흰색 */}
+      <View style={[StyleSheet.absoluteFill, { backgroundColor: base }]} pointerEvents="none" />
+      <View
+        style={styles.wrap}
+        pointerEvents="none"
+        accessibilityElementsHidden
+        importantForAccessibility="no-hide-descendants"
+        onLayout={(e) => setWidth(e.nativeEvent.layout.width)}
+      >
+        {STRIPS.map((i) => (
+          <View key={i} style={{ height: STRIP, backgroundColor: skyColorAt(top, i * STRIP) }} />
         ))}
-        {kind === 'rain' ? DROPS_NEAR.map((i) => <Drop key={i} i={i} layer="near" still={still} />) : null}
-        {kind === 'snow' ? FLAKES_NEAR.map((i) => <Flake key={i} i={i} layer="near" still={still} />) : null}
+        <View style={StyleSheet.absoluteFill}>
+          {night && !wet ? STARS.map((i) => <Star key={i} i={i} dim={clear ? 1 : 0.5} still={still} />) : null}
+          {night && clear ? (
+            <>
+              <ShootingStar still={still} />
+              <View style={[styles.abs, styles.moonAt]}>
+                <Animated.Image source={IMG.moonGlow} style={[styles.abs, styles.moonGlow]} />
+                <Animated.Image source={IMG.moon} style={styles.moon} />
+              </View>
+            </>
+          ) : null}
+          {clear && !night ? <Sun low={phase === 'dusk'} still={still} /> : null}
+          {wet ? (kind === 'rain' ? DROPS_FAR.map((i) => <Drop key={i} i={i} layer="far" still={still} />) : FLAKES_FAR.map((i) => <Flake key={i} i={i} layer="far" still={still} />)) : null}
+          {(clear ? CLEAR_CLOUDS : ALL_CLOUDS).map((i) => (
+            <Cloud key={i} i={i} width={width} gray={kind === 'rain'} dim={clear ? 0.7 : night ? 0.8 : 1} still={still} />
+          ))}
+          {kind === 'rain' ? DROPS_NEAR.map((i) => <Drop key={i} i={i} layer="near" still={still} />) : null}
+          {kind === 'snow' ? FLAKES_NEAR.map((i) => <Flake key={i} i={i} layer="near" still={still} />) : null}
+        </View>
+        {/* 그림이 아래 끝에서 뚝 끊기지 않게 바탕 색으로 덮어 풀어 줌 */}
+        <View style={styles.fade}>
+          {FADE.map((a, i) => (
+            <View key={i} style={{ height: FADE_STRIP, backgroundColor: base, opacity: a }} />
+          ))}
+        </View>
       </View>
-      {/* 그림이 아래 끝에서 뚝 끊기지 않게 바탕 색으로 덮어 풀어 줌 */}
-      <View style={styles.fade}>
-        {FADE.map((a, i) => (
-          <View key={i} style={{ height: FADE_STRIP, backgroundColor: colors.bg, opacity: a }} />
-        ))}
-      </View>
-    </View>
+    </>
   );
 }
 
