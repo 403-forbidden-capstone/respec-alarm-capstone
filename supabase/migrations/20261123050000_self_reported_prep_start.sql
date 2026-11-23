@@ -62,6 +62,11 @@ begin
 end;
 $guard$;
 
+-- Trigger helper is never a public RPC. A trigger can invoke this function
+-- without granting external users EXECUTE on the helper.
+revoke all on function private.guard_self_reported_prep_start()
+  from public, anon, authenticated;
+
 create trigger guard_self_reported_prep_start
 before insert or update of self_reported_prep_started_at
 on public.appointment_participants
