@@ -12,7 +12,7 @@ one calculation.
 ## What was integrated
 - `prep-adjust.ts`: inspect actual app session rows from
   `appointment_participants.prepare_started_at` and `departed_at`,
-  build a causal recent-30 baseline (>=3 valid completed records), call a
+  build a causal recent-30 baseline (>=10 valid completed records), call a
   separate authenticated `prep_start_ratio_v2` sidecar, validate response.
 - `plan.ts`: optional feature flag + exact UUID allowlist + existing verified
   consent and age-code approval, fail closed. Does **not** use
@@ -51,9 +51,11 @@ proxy for *actual* physical preparation start, so validate with a user study.
 `departed_at` must represent actual departure (and not scheduled departure)
 for the pair to count. Both timestamps must exist and be in order.
 Records from **after** the requested appointment or prediction time are
-excluded. There is no training sample at n<3.
+excluded. There is no training sample at n<10.
 
 ## Explicit enable gates — ALL required
+
+**Safety threshold:** the actual-session model requires 10 verified completed preparation-start → departure pairs before shadow inference. This does not retrain or validate the survey proxy model. The existing `main` PROFILE→HISTORY average fallback remains independently gated at 3 records until changed in a separate product decision.
 1. A **new** service model trained and validated on `prepare_started_at ->
    departed_at` histories (NOT the survey proxy), with held-out user metrics.
 2. `PREP_ADJUST_ENABLED=1` (default unset/off).
@@ -63,7 +65,7 @@ excluded. There is no training sample at n<3.
 5. Server-side `prepare_ml_verified_profiles` row has a valid consent,
    approval timestamp, verified age code, and matching
    `PREPARE_ML_CODEBOOK_VERSION` (legacy gate retained).
-6. Valid history: >=3 user-attested preparation-start / departure pairs.
+6. Valid history: >=10 user-attested preparation-start / departure pairs.
 7. `PREP_ADJUST_URL` is HTTPS (or local-only loopback for development).
    `PREP_ADJUST_API_TOKEN` is stored only in Edge secrets and server env.
 8. First/with-wake automatic appointment only; direct manual prepare or
@@ -86,7 +88,7 @@ POST `/predict` JSON:
     "연령코드":"2",
     "baseline_observed":30
   },
-  "history_count":3
+  "history_count":10
 }
 ```
 
@@ -120,7 +122,7 @@ python tools/prepare-adjust-sidecar/train.py \
   --min-train-users 100
 ```
 
-The trainer requires >=4 valid sessions/user (3 past + 1 next target) and
+The trainer requires >=11 valid sessions/user (10 past + 1 next target) and
 >=100 eligible users by default. It trains a `log((target+10)/(baseline+10))`
 CatBoost model; previous baseline = past **up to 30** actual prep durations.
 User-disjoint train/valid/test, with causal ordering within each user.
@@ -142,7 +144,7 @@ daily; incoming user history updates the baseline at every inference.
 - Current FastAPI execution path is a separate repository; parity is not
   implemented or verified by this PR.
 - Prepare-sidecar and app are NOT deployed. No production model is activated.
-- The sample survey model uses one previous 2-day diary observation as baseline; a 3+ observation baseline in a real app is a different feature distribution and needs real user validation.
+- The sample survey model uses one previous 2-day diary observation as baseline; a 10+ observation baseline in a real app is a different feature distribution and needs real user validation.
 
 ## Tests
 ```bash
@@ -164,4 +166,4 @@ It is now superseded as a research candidate by a separately trained model:
 - Sensitivity to proxy labeling thresholds is material, with some definitions showing inconclusive improvements.
 - The **pretrained .cbm** is a downloadable standalone research artifact, not committed to GitHub. Its manifest identifies `survey_start_cluster_proxy` distinctly from `actual_start_depart`.
 - Input features still do NOT include *advance-declared* preparation/activity combinations. In particular, the app's `beforePrepareMinutes` is a separate schedule rule and remains unchanged.
-- No verified real preparation-start ground truth, onboarding self-report evaluation, >=3-session actual-history training, or cross-repo FastAPI parity exists. **Default OFF** remains required until these are addressed.
+- No verified real preparation-start ground truth, onboarding self-report evaluation, >=10-session actual-history training, or cross-repo FastAPI parity exists. **Default OFF** remains required until these are addressed.
