@@ -7,12 +7,14 @@ The live alarm calculation remains unchanged. This integration works only in `al
 - Consent (`profiles.ml_profile_consented_at`), **10 valid historical** `PREPARE_ALARM` → `LOCATION` completed intervals, and verified server-only age code/codebook required.
 - Histories are read as the authenticated user with RLS. Future, duplicate, reversed, under-10-minute and over-240-minute records are excluded.
 - `PURE_PREP_SHADOW_URL` must point to a secure authenticated HTTPS endpoint. `PURE_PREP_SHADOW_API_TOKEN` lives only in Edge secrets. An unavailable model leaves the alarm unchanged.
+- **Provenance:** `PREPARE_ALARM` is an alarm dismissal / one-tap event; `LOCATION` is a location-transition estimate. Neither directly verifies the physical start or exact departure. Retrained data uses `alarm_dismiss_location_proxy`, **not** `actual_start_depart`.
+- A retrained dismissal proxy requires `PREP_ADJUST_ALLOW_DISMISS_PROXY=1` on the sidecar and `PURE_PREP_SHADOW_ALLOW_DISMISS_PROXY=1` on Edge, independently, for research Shadow Mode only.
 - Survey-proxy weights from the 2024 Time Use Survey are not actual prep-start labels. For research shadow mode only, set `PURE_PREP_SHADOW_ALLOW_SURVEY_PROXY=1` explicitly. Default rejects the survey target, never silently claiming actual-session training.
 - Only `pure_prep_shadow` is added to the **authenticated preview response**; no server-side log of user features or training data and no commit/DB write.
 - An eligible sample receives `status: PREDICTED`, `predicted_pure_minutes`, `history_baseline_minutes`, `training_target`, and `applied_to_alarm: false`.
 - Under 10 valid records the preview gets `INSUFFICIENT_HISTORY`; no outbound model API request occurs.
 
-The research sidecar Python files were imported from PR #549, with the **10-record** boundary preserved. Real-session training excludes `ROUTINE_STEP` and departures not labelled `LOCATION` because pre-preparation activity and planned/manual departure timestamps must not be used as ground truth. The training CSV requires both `prepare_started_source` and `departed_source`.
+The research sidecar Python files were imported from PR #549, with the **10-record** boundary preserved. Proxy-session training excludes `ROUTINE_STEP` and departures not labelled `LOCATION`, and ignores durations outside 10–240 minutes. Neither the alarm dismissal nor the geofence estimate is independently verified ground truth. The training CSV requires both `prepare_started_source` and `departed_source`.
 
 ## Required before live experiment
 
