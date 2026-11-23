@@ -282,6 +282,15 @@ async function optionalMlPrediction(
 export async function loadPurePrepCandidate(
   db: Db, userId: string, profile: ProfileRow, now: Date, at: Date,
 ): Promise<PurePrepCandidate | undefined> {
+  // Keep the existing rollout kill switch: profile edits may change the
+  // user's preference without expanding the set of live-affected accounts.
+  const allowed = mayUseMl({
+    enabled: getEnv('PURE_PREP_APPLY_ENABLED') === '1',
+    allowForPlan: true,
+    userId,
+    allowedUserIds: getEnv('PURE_PREP_ALLOWED_USER_IDS'),
+  });
+  if (!allowed) return undefined;
   const profileMinutes = profile.default_outing_prep_minutes;
   if (profileMinutes == null || !Number.isFinite(profileMinutes) ||
       profileMinutes < 5 || profileMinutes > 240) return undefined;
