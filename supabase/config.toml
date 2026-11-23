@@ -468,6 +468,9 @@ verify_jwt = false
 [functions.voice-live-token]
 verify_jwt = true
 
+[functions.routine-live-token]
+verify_jwt = true
+
 [functions.alarm-briefing]
 verify_jwt = true
 
