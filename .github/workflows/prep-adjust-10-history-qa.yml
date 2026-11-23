@@ -1,0 +1,80 @@
+name: Prep-adjust 10-history QA (Draft PR only)
+on:
+  push:
+    branches: [feat/prepare-duration-personalization-gated]
+    paths:
+      - 'supabase/functions/_shared/prep-adjust*'
+      - 'tools/prepare-adjust-sidecar/**'
+      - '.github/workflows/prep-adjust-10-history-qa.yml'
+permissions:
+  contents: read
+jobs:
+  edge:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Run sidecar protocol unit tests
+        run: node --experimental-strip-types --test supabase/functions/_shared/prep-adjust.test.ts
+  trainer:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install pinned-compatible model requirements
+        run: pip install 'catboost>=1.2,<2' 'numpy>=1.26,<3' 'pandas>=2,<3'
+      - name: Verify trainer uses 10 causal records and server enforces threshold
+        run: |
+          python - <<'PY'
+          import csv
+          import importlib.util
+          import tempfile
+          from datetime import datetime, timedelta, timezone
+          from pathlib import Path
+          root = Path.cwd()
+          spec = importlib.util.spec_from_file_location('trainer', root/'tools/prepare-adjust-sidecar/train.py')
+          m = importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(m)
+          spec2 = importlib.util.spec_from_file_location('server', root/'tools/prepare-adjust-sidecar/server.py')
+          api = importlib.util.module_from_spec(spec2)
+          spec2.loader.exec_module(api)
+          headers=['user_id','prepare_started_at','departed_at','prepare_started_source','weekday_code','평토일구분코드','휴일종류코드','연령코드']
+          def rows(n):
+              for i in range(n):
+                  depart=datetime(2026,11,1,tzinfo=timezone.utc)+timedelta(days=i)
+                  start=depart-timedelta(minutes=20+i)
+                  yield dict(user_id='test-user',prepare_started_at=start.isoformat(),departed_at=depart.isoformat(),prepare_started_source='PREPARE_ALARM',weekday_code='1',평토일구분코드='1',휴일종류코드='__MISSING__',연령코드='2')
+          with tempfile.TemporaryDirectory() as d:
+              path=Path(d)/'data.csv'
+              def write(n):
+                  with path.open('w',newline='') as f:
+                      w=csv.DictWriter(f,fieldnames=headers);w.writeheader();w.writerows(rows(n))
+              write(10)
+              try:
+                  m.build_samples(path)
+                  raise AssertionError('10 total sessions should be insufficient for training example')
+              except ValueError as e:
+                  assert '>=11' in str(e),str(e)
+              write(11)
+              sample=m.build_samples(path)
+              assert len(sample)==1
+              assert sample.iloc[0].history_count==10
+              assert sample.iloc[0].baseline_observed==24.5
+          payload={'model':'prep_start_ratio_v2','features':{'weekday_code':'1','평토일구분코드':'1','휴일종류코드':'__MISSING__','연령코드':'2','baseline_observed':25},'history_count':9}
+          class Stub:
+              def predict(self,df):
+                  return [0.0]
+          try:
+              api.predict(Stub(),payload,'survey_start_cluster_proxy')
+              raise AssertionError('9 prior records must be rejected')
+          except ValueError as e:
+              assert 'insufficient history' in str(e),str(e)
+          payload['history_count']=10
+          result=api.predict(Stub(),payload,'survey_start_cluster_proxy')
+          assert result['minutes']==25 and result['model']=='prep_start_ratio_v2',result
+          print('10-history trainer and server boundaries PASS')
+          PY
