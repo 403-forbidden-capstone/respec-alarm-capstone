@@ -7,6 +7,67 @@ alter table public.appointment_participants
 comment on column public.appointment_participants.self_reported_prep_started_at is
   'Server-received time of user "I am starting preparation now" tap. Self-reported, not device-verified. Independent of PREPARE_ALARM dismissal.';
 
+-- Existing authenticated users can update their own appointment participant
+-- rows through PostgREST. A public RPC alone cannot prevent a direct REST
+-- column update. The trigger protects BOTH RPC and direct writes.
+create or replace function private.guard_self_reported_prep_start()
+returns trigger
+language plpgsql
+security invoker
+set search_path to ''
+as $guard$
+declare
+  v_user uuid := (select auth.uid());
+  v_now timestamptz := now();
+begin
+  if tg_op = 'INSERT' then
+    if new.self_reported_prep_started_at is not null then
+      raise exception 'self_report_insert_not_allowed' using errcode = '42501';
+    end if;
+    return new;
+  end if;
+  if new.self_reported_prep_started_at is not distinct from old.self_reported_prep_started_at then
+    return new;
+  end if;
+  if old.self_reported_prep_started_at is not null then
+    raise exception 'self_report_immutable' using errcode = '42501';
+  end if;
+  if new.self_reported_prep_started_at is null
+    or v_user is null
+    or v_user <> 'f60d371e-63a5-4fb9-9d92-0743392325ec'::uuid
+    or new.user_id <> v_user
+    or old.user_id <> v_user
+    or new.appointment_id <> old.appointment_id
+    or old.departed_at is not null
+    or new.departed_at is not null
+    or not exists (
+      select 1 from public.appointments as a
+      where a.appointment_id = old.appointment_id
+        and a.group_id is null
+        and a.appointment_at between v_now - interval '1 hour' and v_now + interval '3 hours'
+    )
+    or not exists (
+      select 1 from public.alarms as al
+      where al.participant_id = old.participant_id
+        and al.user_id = v_user
+        and al.alarm_type = 'PREPARE'
+        and al.is_enabled
+    )
+  then
+    raise exception 'self_report_not_eligible' using errcode = '42501';
+  end if;
+  -- Any client-supplied timestamp is discarded. Original first tap wins.
+  new.self_reported_prep_started_at := v_now;
+  return new;
+end;
+$guard$;
+
+create trigger guard_self_reported_prep_start
+before insert or update of self_reported_prep_started_at
+on public.appointment_participants
+for each row
+execute function private.guard_self_reported_prep_start();
+
 -- SECURITY INVOKER inherits appointment_participants RLS and never bypasses
 -- participant ownership. Extra pilot UUID restriction is a defense in depth.
 create or replace function public.confirm_prep_start_self_report(
