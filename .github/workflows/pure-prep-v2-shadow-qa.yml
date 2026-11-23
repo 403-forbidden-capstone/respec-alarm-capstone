@@ -42,7 +42,8 @@ jobs:
             supabase/functions/_shared/pure-prep-shadow.test.ts \
             supabase/functions/_shared/pure-prep-shadow.synthetic.test.ts \
             supabase/functions/_shared/calc/pure-prep-basis.test.ts \
-            supabase/functions/_shared/calc/pure-prep.test.ts
+            supabase/functions/_shared/calc/pure-prep.test.ts \
+            supabase/functions/_shared/plan-core.test.ts
   edge-typecheck:
     runs-on: ubuntu-latest
     timeout-minutes: 10
