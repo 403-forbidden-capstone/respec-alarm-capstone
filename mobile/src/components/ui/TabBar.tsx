@@ -37,7 +37,7 @@ export function TabBar({ state, descriptors, navigation, insets }: BottomTabBarP
             accessibilityLabel={label}
           >
             {ICONS[route.name] ? (
-              <SymbolView name={ICONS[route.name]} size={ICON_SIZE} tintColor={focused ? colors.ink : colors.faint} fallback={<View style={styles.icon} />} />
+              <SymbolView name={ICONS[route.name]} size={ICON_SIZE} tintColor={focused ? colors.ink : colors.faint} />
             ) : (
               <View style={styles.icon} />
             )}

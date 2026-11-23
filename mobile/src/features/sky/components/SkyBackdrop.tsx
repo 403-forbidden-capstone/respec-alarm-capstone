@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react';
 import { AccessibilityInfo, Animated, Easing, Platform, StyleSheet, View, type ImageSourcePropType } from 'react-native';
 
-
 import { SKY_HEIGHT, skyBase, skyColorAt, skyTop, type SkyKind, type SkyPhase } from '../sky';
 
 type Props = { kind: SkyKind; phase: SkyPhase };
