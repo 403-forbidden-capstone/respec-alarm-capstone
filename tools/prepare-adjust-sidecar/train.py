@@ -52,7 +52,7 @@ def build_samples(path: Path) -> pd.DataFrame:
         prev: list[float] = []
         for _, cur in group.iterrows():
             # The target day is not available in prev.
-            if len(prev) >= 3:
+            if len(prev) >= 10:
                 recent = prev[-30:]
                 row = {"user_id": uid, **{c: cur[c] for c in CATS},
                        "baseline_observed": float(np.mean(recent)),
@@ -61,7 +61,7 @@ def build_samples(path: Path) -> pd.DataFrame:
                 rows.append(row)
             prev.append(float(cur["minutes"]))
     if not rows:
-        raise ValueError("No trainable sessions: require >=4 real completed prep sessions per user")
+        raise ValueError("No trainable sessions: require >=11 real completed prep sessions per user")
     return pd.DataFrame(rows)
 
 
@@ -81,7 +81,7 @@ def main() -> None:
     samples = build_samples(Path(args.sessions_csv))
     ids = samples["user_id"].unique()
     if len(ids) < args.min_train_users:
-        raise SystemExit(f"Only {len(ids)} users with >=4 records; need {args.min_train_users}")
+        raise SystemExit(f"Only {len(ids)} users with >=11 records; need {args.min_train_users}")
     rng = np.random.default_rng(SEED)
     ids = rng.permutation(ids)
     n = len(ids)
@@ -107,7 +107,7 @@ def main() -> None:
     margin = float(np.quantile(yv-vp,.8))
     metrics = {
         "target": "actual_confirmed_preparation_start_to_departure_minutes",
-        "minimum_history": 3,
+        "minimum_history": 10,
         "user_counts": {"train":len(train_ids),"valid":len(valid_ids),"test":len(test_ids)},
         "train_samples": len(tr),
         "validation": {"baseline":score(yv,va.baseline_observed.to_numpy(float)),
@@ -127,7 +127,7 @@ def main() -> None:
         "sha256":hashlib.sha256(model_file.read_bytes()).hexdigest(),
         "model":"prep_start_ratio_v2",
         "feature_names":FEATURES,
-        "minimum_history":3,
+        "minimum_history":10,
         "user_split":"user-disjoint",
     },ensure_ascii=False,indent=2),encoding="utf-8")
     (out/"metrics.json").write_text(json.dumps(metrics,ensure_ascii=False,indent=2),encoding="utf-8")
