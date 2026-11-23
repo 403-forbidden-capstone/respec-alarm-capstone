@@ -28,6 +28,8 @@ import { ActionTile } from '@/features/social/components/ActionTile';
 import { ConsentSheet } from '@/features/social/components/ConsentSheet';
 import { GroupInviteCard } from '@/features/social/components/GroupInviteCard';
 import { GroupIcon } from '@/features/social/components/GroupIcon';
+import { SkyTone } from '@/features/sky/components/SkyBackdrop';
+import { useSky } from '@/features/sky/hooks/useSky';
 import { GroupWakeCard } from '@/features/social/components/GroupWakeCard';
 import { MiniButton } from '@/features/social/components/MiniButton';
 import { MyHandleCard } from '@/features/social/components/MyHandleCard';
@@ -74,6 +76,7 @@ async function loadSocial(date: string | null) {
 //   친구 탭(목업 F01: 요청 수락 · 친구별 권한 수) · 그룹 탭(목업 G01: 참여 중인 그룹 · 오늘 기상 수)
 // 기상 확인에서 그룹 상세를 열 때 이 탭이 '그룹' 칸으로 밑에 깔림 (lib/nav openGroupDetail, ?seg=group&open=… — 목업 A.openGroup)
 export default function GroupScreen() {
+  const sky = useSky(); // 위쪽 하늘 배경 — 홈과 같은 날씨 × 시간대
   const { seg, open } = useLocalSearchParams<{ seg?: string; open?: string }>();
   // 직접 고른 칸은 같은 열기 요청일 때만 유지 — 다른 화면이 새로 열면(open 값이 바뀜) 그 칸(seg)으로 (목업 A.openGroup)
   const request = `${seg ?? ''}:${open ?? ''}`;
@@ -140,16 +143,16 @@ export default function GroupScreen() {
   const cancel = (p: Person) => act(p, () => cancelFriendRequest(p.id), '취소하지 못했어요. 다시 해 주세요');
 
   return (
-    <Screen onRefresh={reload}>
+    <Screen onRefresh={reload} backdrop={<SkyTone kind={sky.kind} phase={sky.phase} />}>
       <ConsentSheet visible={consentFor != null} busy={workingId != null} onChoose={acceptInvite} onClose={() => setConsentFor(null)} />
       <TopBar
         screenId={tab === 'friend' ? 'F01' : 'G01'}
-        right={<TopBarButton label="권한 관리" onPress={() => router.push('/permissions')} />}
+        right={<TopBarButton label="권한 관리" glass onPress={() => router.push('/permissions')} />}
       />
       <Text variant="title" style={styles.title}>
         친구와 그룹
       </Text>
-      <Text variant="lead" style={styles.lead}>
+      <Text variant="lead" tone="skySub" style={styles.lead}>
         {tab === 'friend' ? '관계를 만들고 서로 공유할 정보를 관리해요.' : '목적에 맞는 그룹을 만들고 공유 범위를 정해요.'}
       </Text>
       {data?.suggestion ? (

@@ -27,3 +27,5 @@
 | 11/18 | #548 | app.config.js를 다시 쓰며 #503 variantConfig가 빠짐 | 고칠 것 | 고침 | 753feae |
 | 11/18 | #548 | .env.example 옛 EXPO_PUBLIC_KAKAO_NATIVE_APP_KEY 설명 | 고칠 것 | 고침 | 753feae |
 | 11/18 | #548 | PR 본문 키 해시가 로컬 debug 하나뿐 (EAS 키스토어 빠짐) | 고칠 것 | 고침 | PR 본문 수정 |
+| 11/23 | #589 | 새 부품(StandaloneAlarmForm)이 저장 api · 토스트 · 권한을 직접 부름 (계층 규칙) | 고칠 것 | 고침 | 5f725fe |
+| 11/23 | #589 | realPlan.ts 주석 · screen-data-map에 "입력 화면 없음"이 남음 | 고칠 것 | 고침 | 5f725fe |

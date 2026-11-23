@@ -5,7 +5,7 @@ import { keepWordsIfWrappable } from '@/lib/format';
 
 import { colors, font, typeScale, type TypeVariant, type Weight } from '@/theme';
 
-type Tone = 'ink' | 'sub' | 'faint' | 'inverse' | 'warn';
+type Tone = 'ink' | 'sub' | 'skySub' | 'faint' | 'inverse' | 'warn';
 
 export type TextProps = RNTextProps & {
   variant?: TypeVariant;
@@ -17,6 +17,7 @@ export type TextProps = RNTextProps & {
 const toneColor: Record<Tone, string> = {
   ink: colors.ink,
   sub: colors.sub,
+  skySub: colors.skySub,
   faint: colors.faint,
   inverse: colors.inverse,
   warn: colors.warn,

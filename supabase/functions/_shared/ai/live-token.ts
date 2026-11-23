@@ -77,13 +77,13 @@ export function liveTokenBody(now: number, model = LIVE_MODEL, history = '', day
 // 실패하면 VOICE_UNAVAILABLE. 원인(상태 · 본문)은 서버 로그(log)에만 남김
 export async function createLiveToken(
   apiKey: string,
-  opts: { fetchFn?: typeof fetch; now?: number; model?: string; history?: string; day?: string; log?: (...a: unknown[]) => void } = {},
+  opts: { fetchFn?: typeof fetch; now?: number; model?: string; history?: string; day?: string; body?: Record<string, unknown>; log?: (...a: unknown[]) => void } = {},
 ): Promise<{ token: string; model: string }> {
-  const { fetchFn = fetch, now = Date.now(), model = LIVE_MODEL, history = '', day, log = console.error } = opts;
+  const { fetchFn = fetch, now = Date.now(), model = LIVE_MODEL, history = '', day, body, log = console.error } = opts;
   const res = await fetchFn(LIVE_TOKEN_URL, {
     method: 'POST',
     headers: { 'x-goog-api-key': apiKey, 'content-type': 'application/json' },
-    body: JSON.stringify(liveTokenBody(now, model, history, day)),
+    body: JSON.stringify(body ?? liveTokenBody(now, model, history, day)), // body = 다른 지침 · 도구의 토큰 (아침 루틴 routine-live.ts)
   }).catch((e) => {
     log('gemini auth_tokens fetch failed', String(e));
     return null;
