@@ -12,7 +12,7 @@ export const SKY_PHASES: readonly SkyPhase[] = ['dawn', 'morning', 'day', 'dusk'
 export type Sky = { kind: SkyKind; sunrise: Date | null; sunset: Date | null };
 export const DEFAULT_SKY: Sky = { kind: 'clear', sunrise: null, sunset: null };
 
-export const SKY_HEIGHT = 300; // 물드는 높이 — 화면 맨 위부터. 이 아래는 원래 바탕
+export const SKY_HEIGHT = 300; // 물드는 높이 — 화면 맨 위부터. 이 아래는 톤만 섞인 화면 바탕(skyBase)
 // 이 높이부터는 보조 글자(sub)를 써도 대비 4.5 : 1 이상. 그 위에는 본문 색(ink) 글자만 둠 (홈의 날짜 · 인사말)
 export const SKY_SUB_TEXT_FROM = 120;
 // 이 높이부터는 하늘 위 보조 글자(skySub)로 대비 4.5 : 1 이상 (알람 · 친구 탭 제목 아래 설명 글)
@@ -63,10 +63,16 @@ export function mixHex(a: string, b: string, t: number): string {
   return `#${x.map((v, i) => Math.round(v + (y[i] - v) * t).toString(16).padStart(2, '0')).join('')}`.toUpperCase();
 }
 
-// 맨 위에서 y만큼 내려온 자리의 바탕 색 — 위에서 빨리 풀리고 아래로 갈수록 천천히 (글자가 놓이는 자리는 거의 원래 바탕)
+// 맨 위에서 y만큼 내려온 자리의 바탕 색 — 위에서 빨리 풀리고 아래로 갈수록 천천히 (글자가 놓이는 자리는 거의 화면 바탕)
 export function skyColorAt(top: string, y: number): string {
   const t = Math.min(1, Math.max(0, y / SKY_HEIGHT));
-  return mixHex(top, colors.bg, 1 - (1 - t) ** 4);
+  return mixHex(top, skyBase(top), 1 - (1 - t) ** 4);
+}
+
+// 화면 전체 바탕 — 원래 바탕에 그 하늘 색을 살짝 섞음 (하늘 아래쪽도 날씨 · 시간대 톤을 따라감)
+export const SKY_TONE = 0.12;
+export function skyBase(top: string): string {
+  return mixHex(colors.bg, top, SKY_TONE);
 }
 
 function luminance(hex: string) {

@@ -2,7 +2,7 @@ import { describe, expect, it } from '@jest/globals';
 
 import { colors } from '@/theme';
 
-import { contrast, dayPartOfPhase, mixHex, skyGreeting, SKY_HEIGHT, SKY_KINDS, SKY_LEAD_FROM, SKY_PHASES, SKY_SUB_TEXT_FROM, skyColorAt, skyKindOf, skyPhase, skyTop } from '../sky';
+import { contrast, dayPartOfPhase, mixHex, skyGreeting, SKY_HEIGHT, SKY_KINDS, SKY_LEAD_FROM, SKY_PHASES, SKY_SUB_TEXT_FROM, skyBase, skyColorAt, skyKindOf, skyPhase, skyTop } from '../sky';
 
 const at = (h: number, m = 0) => new Date(2026, 10, 23, h, m);
 
@@ -62,10 +62,11 @@ describe('skyGreeting', () => {
 });
 
 describe('바탕 색', () => {
-  it('맨 위는 날씨 색, 물드는 높이 끝에서는 원래 바탕', () => {
+  it('맨 위는 날씨 색, 물드는 높이 끝에서는 그 하늘 톤을 섞은 화면 바탕', () => {
     expect(skyColorAt('#C6DEF5', 0)).toBe('#C6DEF5');
-    expect(skyColorAt('#C6DEF5', SKY_HEIGHT)).toBe(colors.bg);
-    expect(skyColorAt('#C6DEF5', SKY_HEIGHT + 200)).toBe(colors.bg);
+    expect(skyColorAt('#C6DEF5', SKY_HEIGHT)).toBe(skyBase('#C6DEF5'));
+    expect(skyColorAt('#C6DEF5', SKY_HEIGHT + 200)).toBe(skyBase('#C6DEF5'));
+    expect(skyBase('#C6DEF5')).not.toBe(colors.bg);
     expect(mixHex('#000000', '#FFFFFF', 0.5)).toBe('#808080');
   });
 
@@ -76,6 +77,8 @@ describe('바탕 색', () => {
         expect(contrast(colors.ink, top)).toBeGreaterThanOrEqual(7);
         expect(contrast(colors.sub, skyColorAt(top, SKY_SUB_TEXT_FROM))).toBeGreaterThanOrEqual(4.5);
         expect(contrast(colors.skySub, skyColorAt(top, SKY_LEAD_FROM))).toBeGreaterThanOrEqual(4.5);
+        // 톤이 섞인 화면 바탕(하늘 아래쪽 전체)에서도 보조 글자가 읽혀야 함
+        expect(contrast(colors.sub, skyBase(top))).toBeGreaterThanOrEqual(4.5);
       }
     }
   });
