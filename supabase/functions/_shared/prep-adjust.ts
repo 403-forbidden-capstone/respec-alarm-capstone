@@ -4,7 +4,7 @@
 // The current 2024 survey CatBoost model is only a proxy, NOT production-validated.
 import { calendarFeatures, validMlEndpoint } from './prepare-ml.ts';
 
-export const PREP_ADJUST_MIN_RECORDS = 3;
+export const PREP_ADJUST_MIN_RECORDS = 10;
 export const PREP_ADJUST_MAX_RECORDS = 30;
 export const PREP_ADJUST_MODEL = 'prep_start_ratio_v2' as const;
 
@@ -66,7 +66,7 @@ export function buildPrepAdjustRequest(
   at: Date, timezone: string, approvedAgeCode: string | null | undefined,
   approvedRestPattern: string | null | undefined, history: PrepHistory | null,
 ): PrepAdjustRequest | null {
-  if (!history || !/^[1-8]$/.test(approvedAgeCode ?? '') || !inRange(history.baselineMinutes)) return null;
+  if (!history || history.count < PREP_ADJUST_MIN_RECORDS || !/^[1-8]$/.test(approvedAgeCode ?? '') || !inRange(history.baselineMinutes)) return null;
   const calendar = calendarFeatures(at, timezone);
   return {
     model: PREP_ADJUST_MODEL,
