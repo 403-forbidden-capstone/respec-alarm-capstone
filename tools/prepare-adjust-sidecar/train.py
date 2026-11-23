@@ -2,7 +2,7 @@
 """Train on actual opt-in user preparation sessions ONLY, not 2024 survey proxy.
 
 Expected CSV columns:
-user_id,prepare_started_at,departed_at,prepare_started_source,
+user_id,prepare_started_at,departed_at,prepare_started_source,departed_source,
 weekday_code,평토일구분코드,휴일종류코드,연령코드
 
 Every training row predicts the current session using ONLY previous sessions
@@ -26,7 +26,7 @@ SEED = 42
 
 def build_samples(path: Path) -> pd.DataFrame:
     df = pd.read_csv(path, dtype=str, encoding="utf-8-sig")
-    required = set(CATS + ["user_id", "prepare_started_at", "departed_at", "prepare_started_source"])
+    required = set(CATS + ["user_id", "prepare_started_at", "departed_at", "prepare_started_source", "departed_source"])
     missing = required - set(df.columns)
     if missing:
         raise ValueError(f"Missing input columns: {sorted(missing)}")
@@ -35,6 +35,7 @@ def build_samples(path: Path) -> pd.DataFrame:
     df["minutes"] = (df["depart"] - df["start"]).dt.total_seconds() / 60
     df = df[
         df["prepare_started_source"].eq("PREPARE_ALARM")
+        & df["departed_source"].eq("LOCATION")
         & df["minutes"].between(5, 240)
         & df["start"].notna()
         & df["depart"].notna()
