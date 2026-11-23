@@ -11,6 +11,8 @@ import { applySuggestion, getPendingSuggestion, ignoreSuggestion } from '@/featu
 import { SuggestionPromptCard } from '@/features/records/components/SuggestionPromptCard';
 import { getPendingRoutineSuggestion, ignoreRoutineSuggestion } from '@/features/routine/api';
 import { RoutinePromptCard } from '@/features/routine/components/RoutinePromptCard';
+import { SkyBackdrop } from '@/features/sky/components/SkyBackdrop';
+import { useSky } from '@/features/sky/hooks/useSky';
 import type { RoutineSuggestion } from '@/features/routine/types';
 import { previewTimes } from '@/features/records/suggestion';
 import type { Suggestion } from '@/features/records/types';
@@ -61,6 +63,7 @@ const LISTEN_MS = 1100; // 말하기를 누른 뒤 듣는 시간 (목업 chatSpe
 const IDLE_ENDED = '말이 없어 음성 대화를 마쳤어요. 하루 기록 저장을 시작했어요';
 
 export default function AiScreen() {
+  const sky = useSky(); // 위쪽 하늘 배경 — 홈과 같은 날씨 × 시간대
   const { data, error, reload: reloadNow } = useLoad(getConversation);
   // [완료]로 나간 뒤에는 끝나지 않은 저장 · 답이 다시 읽기를 걸어도 새 세션을 열지 않음 — 다시 들어올 때(포커스)만 읽음 (그건 useLoad가 함)
   const leftRef = useRef(false);
@@ -242,7 +245,7 @@ export default function AiScreen() {
 
   if (!data) {
     return (
-      <Screen>
+      <Screen backdrop={<SkyBackdrop kind={sky.kind} phase={sky.phase} />}>
         <TopBar screenId="A02" />
         {error ? <LoadError onRetry={reload} /> : <Loading />}
       </Screen>
@@ -423,7 +426,7 @@ export default function AiScreen() {
 
   return (
     // 키보드를 피하는 일은 Screen이 맡음 (채팅 목록 + 아래 입력 칸 전체를 밀어 올림)
-    <Screen scroll={false} contentStyle={styles.screen}>
+    <Screen scroll={false} contentStyle={styles.screen} backdrop={<SkyBackdrop kind={sky.kind} phase={sky.phase} />}>
       <ScrollView
         ref={scroll}
         style={styles.fill}
