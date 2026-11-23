@@ -1,0 +1,87 @@
+name: CatBoost v2 Shadow · 10 history QA
+on:
+  push:
+    branches: [feat/pure-prep-v2-shadow-10hist-20261123]
+    paths:
+      - '.github/workflows/pure-prep-v2-shadow-qa.yml'
+      - 'supabase/functions/_shared/pure-prep-shadow*'
+      - 'supabase/functions/alarm-suggest/index.ts'
+      - 'tools/prepare-adjust-sidecar/**'
+      - 'docs/pure-prep-v2-shadow-10hist.md'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  shadow-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Fail-closed 9/10-history shadow and existing pure prep regression tests
+        run: |
+          node --experimental-strip-types --test \
+            supabase/functions/_shared/pure-prep-shadow.test.ts \
+            supabase/functions/_shared/calc/pure-prep-basis.test.ts \
+            supabase/functions/_shared/calc/pure-prep.test.ts
+  trainer-boundary:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install research trainer dependencies
+        run: pip install 'catboost>=1.2,<2' 'pandas>=2,<3' 'numpy>=1.26,<3'
+      - name: Validate 10-prior→11th training example, 9-prior rejection
+        run: |
+          python - <<'PY'
+          import csv, importlib.util, tempfile
+          from datetime import datetime, timedelta, timezone
+          from pathlib import Path
+          root=Path.cwd()
+          def mod(name,path):
+              spec=importlib.util.spec_from_file_location(name,root/path)
+              out=importlib.util.module_from_spec(spec);spec.loader.exec_module(out);return out
+          train=mod('training','tools/prepare-adjust-sidecar/train.py')
+          serve=mod('server','tools/prepare-adjust-sidecar/server.py')
+          cols=['user_id','prepare_started_at','departed_at','prepare_started_source','weekday_code','평토일구분코드','휴일종류코드','연령코드']
+          def records(n):
+              for i in range(n):
+                  d=datetime(2026,11,1,tzinfo=timezone.utc)+timedelta(days=i)
+                  yield dict(user_id='fictional-account',prepare_started_at=(d-timedelta(minutes=20+i)).isoformat(),
+                             departed_at=d.isoformat(),prepare_started_source='PREPARE_ALARM',
+                             weekday_code='1',평토일구분코드='1',휴일종류코드='__MISSING__',연령코드='2')
+          with tempfile.TemporaryDirectory() as folder:
+              path=Path(folder)/'sessions.csv'
+              for n in (10,11):
+                  with path.open('w',newline='') as f:
+                      writer=csv.DictWriter(f,fieldnames=cols);writer.writeheader();writer.writerows(records(n))
+                  if n==10:
+                      try:
+                          train.build_samples(path)
+                          raise AssertionError('unexpected training sample with only 10 total completed records')
+                      except ValueError as e:
+                          assert '>=11' in str(e),str(e)
+                  else:
+                      data=train.build_samples(path)
+                      assert len(data)==1
+                      assert data.iloc[0]['history_count']==10
+          body={'model':'prep_start_ratio_v2','history_count':9,
+                'features':{'weekday_code':'1','평토일구분코드':'1','휴일종류코드':'__MISSING__','연령코드':'2','baseline_observed':25}}
+          class FakeModel:
+              def predict(self, data):
+                  return [0.]
+          try:
+              serve.predict(FakeModel(),body,'survey_start_cluster_proxy')
+              raise AssertionError('nine records were accepted')
+          except ValueError as e:
+              assert 'insufficient history' in str(e)
+          body['history_count']=10
+          result=serve.predict(FakeModel(),body,'survey_start_cluster_proxy')
+          assert result['model']=='prep_start_ratio_v2' and result['minutes']==25
+          print('10-record model gate and causal training boundary: PASS')
+          PY
