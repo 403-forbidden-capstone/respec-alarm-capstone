@@ -3894,4 +3894,54 @@ await check('PURE-PREP-02: 반복 회차 RPC도 준비시간 출처를 원자적
 });
 
 
+
+await check('PURE-PREP-03: 순수준비시간 변경 시각은 서버만 기록, 값이 그대로면 보존, 임의 시각 쓰기는 무시', async () => {
+  await su();
+  const [profile] = await q(`select user_id, default_outing_prep_minutes from public.profiles order by user_id limit 1`);
+  if (!profile) return '검사할 테스트용 프로필이 없음';
+  // The entire test is rolled back: no other checks or fixtures are changed.
+  await q('begin');
+  try {
+    const initialMinutes = profile.default_outing_prep_minutes === 30 ? 31 : 30;
+    const [changed] = await q(
+      `update public.profiles
+       set default_outing_prep_minutes = $2,
+           default_outing_prep_updated_at = '2001-01-01T00:00:00Z'
+       where user_id = $1 returning default_outing_prep_updated_at as stamped`,
+      [profile.user_id, initialMinutes],
+    );
+    const [same] = await q(
+      `update public.profiles
+       set default_outing_prep_updated_at = '2099-01-01T00:00:00Z'
+       where user_id = $1 returning default_outing_prep_updated_at as stamped`,
+      [profile.user_id],
+    );
+    const [changedAgain] = await q(
+      `update public.profiles
+       set default_outing_prep_minutes = 45,
+           default_outing_prep_updated_at = '2099-01-01T00:00:00Z'
+       where user_id = $1 returning default_outing_prep_updated_at as stamped`,
+      [profile.user_id],
+    );
+    const [permission] = await q(`
+      select has_function_privilege('authenticated',
+               'private.track_outing_prep_preference_epoch()', 'execute') as authenticated,
+             has_function_privilege('anon',
+               'private.track_outing_prep_preference_epoch()', 'execute') as anonymous`);
+    await q('rollback');
+    const first = new Date(changed.stamped).getTime();
+    const second = new Date(changedAgain.stamped).getTime();
+    return Number.isFinite(first) && Number.isFinite(second) &&
+      first === new Date(same.stamped).getTime() &&
+      first > Date.parse('2026-01-01T00:00:00Z') &&
+      second >= first && second < Date.parse('2030-01-01T00:00:00Z') &&
+      permission.authenticated === false && permission.anonymous === false
+      ? true : { changed, same, changedAgain, permission };
+  } catch (e) {
+    await q('rollback');
+    throw e;
+  }
+});
+
+
 report();
