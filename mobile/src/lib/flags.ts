@@ -58,3 +58,6 @@ export const TIMETABLE_PATHS = {
 
 // 권한 안내 단계에 위치 줄(전경 · 항상)을 넣을지 — L2 permissions.ts가 들어와서 켬 (안건 2 A)
 export const ONBOARDING_LOCATION_ROWS = true;
+
+// Optional research pilot. OFF by default and restricted again in the RPC.
+export const PREP_START_SELF_REPORT_PILOT = process.env.EXPO_PUBLIC_PREP_START_SELF_REPORT_PILOT === '1';
