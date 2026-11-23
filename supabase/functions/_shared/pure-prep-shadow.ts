@@ -1,6 +1,6 @@
 // Optional CatBoost v2 shadow evaluation. Read-only, preview-only, default OFF.
 // NEVER use survey proxy predictions to schedule, save, edit, or roll alarms.
-import { confirmedPurePrepHistory, type PrepCompletionRow } from './calc/pure-prep-basis.ts';
+import { choosePurePrepBasis, confirmedPurePrepHistory, type PrepCompletionRow } from './calc/pure-prep-basis.ts';
 import { getEnv } from './env.ts';
 import {
   approvedMlProfile, calendarFeatures, mayUseMl, validMlEndpoint,
@@ -46,6 +46,9 @@ export type PurePrepShadowResult =
       training_target: ShadowTarget;
       predicted_pure_minutes: number;
       history_baseline_minutes: number;
+      personalized_baseline_minutes: number;
+      raw_model_prediction_minutes: number;
+      onboarding_pure_minutes: number | null;
       valid_records: number;
       required_records: 10;
       applied_to_alarm: false;
@@ -149,12 +152,27 @@ export async function requestPurePrepShadow(
   }
 }
 
+// The trained v2 manifest uses observed prior-session mean, not onboarding.
+// Transfer the model's estimated residual onto the preference-anchored basis
+// after inference. This is shadow-only, not an independently trained model.
+export function personalizePurePrepShadow(
+  rawModelMinutes: number, historicalMean: number,
+  profileMinutes: number | null | undefined, historyMinutes: readonly number[],
+): { predictedMinutes: number; personalizedBaseline: number } {
+  const chosen = choosePurePrepBasis({ profileMinutes, historicalMinutes: historyMinutes });
+  const baseline = chosen?.minutes ?? Math.round(historicalMean);
+  return {
+    predictedMinutes: Math.round(Math.min(240, Math.max(5, baseline + rawModelMinutes - historicalMean))),
+    personalizedBaseline: baseline,
+  };
+}
+
 // Reads only the authorized user's *completed past* sessions. Never writes a
 // training row, model output, alarm, or personal profile data.
 export async function runPurePrepShadow(input: {
   userId: string;
   db: Db;
-  profile: Pick<ProfileRow, 'ml_profile_consented_at'>;
+  profile: Pick<ProfileRow, 'ml_profile_consented_at' | 'default_outing_prep_minutes' | 'default_outing_prep_updated_at'>;
   now: Date;
   appointmentAt: Date;
   timezone: string;
@@ -176,18 +194,21 @@ export async function runPurePrepShadow(input: {
   if (!Number.isFinite(cutoffMs)) return null;
   const cutoff = new Date(cutoffMs);
   try {
-    const { data, error } = await input.db.from('appointment_participants')
+    const editedAt = input.profile.default_outing_prep_updated_at
+      ? new Date(input.profile.default_outing_prep_updated_at) : undefined;
+    if (editedAt && !Number.isFinite(editedAt.getTime())) return null;
+    let query = input.db.from('appointment_participants')
       .select('prepare_started_at, departed_at, prepare_started_source, departed_source')
       .eq('user_id', input.userId)
       .eq('prepare_started_source', 'PREPARE_ALARM')
       .eq('departed_source', 'LOCATION')
       .not('prepare_started_at', 'is', null)
       .not('departed_at', 'is', null)
-      .lt('departed_at', cutoff.toISOString())
-      .order('departed_at', { ascending: false })
-      .limit(100);
+      .lt('departed_at', cutoff.toISOString());
+    if (editedAt) query = query.gte('prepare_started_at', editedAt.toISOString());
+    const { data, error } = await query.order('departed_at', { ascending: false }).limit(100);
     if (error || !data) return null;
-    const history = confirmedPurePrepHistory(data as PrepCompletionRow[], cutoff);
+    const history = confirmedPurePrepHistory(data as PrepCompletionRow[], cutoff, 30, editedAt);
     if (history.length < PURE_PREP_SHADOW_MIN_HISTORY) {
       return { status: 'INSUFFICIENT_HISTORY', valid_records: history.length, required_records: PURE_PREP_SHADOW_MIN_HISTORY };
     }
@@ -219,12 +240,17 @@ export async function runPurePrepShadow(input: {
       allowDismissProxy: getEnv('PURE_PREP_SHADOW_ALLOW_DISMISS_PROXY') === '1',
     });
     if (!response) return { status: 'MODEL_UNAVAILABLE', valid_records: history.length, required_records: PURE_PREP_SHADOW_MIN_HISTORY };
+    const calibrated = personalizePurePrepShadow(response.minutes, request.features.baseline_observed,
+      input.profile.default_outing_prep_minutes, history);
     return {
       status: 'PREDICTED',
       model: response.model,
       training_target: response.training_target,
-      predicted_pure_minutes: response.minutes,
+      predicted_pure_minutes: calibrated.predictedMinutes,
       history_baseline_minutes: Math.round(request.features.baseline_observed * 10) / 10,
+      personalized_baseline_minutes: calibrated.personalizedBaseline,
+      raw_model_prediction_minutes: response.minutes,
+      onboarding_pure_minutes: input.profile.default_outing_prep_minutes ?? null,
       valid_records: history.length,
       required_records: PURE_PREP_SHADOW_MIN_HISTORY,
       applied_to_alarm: false,
