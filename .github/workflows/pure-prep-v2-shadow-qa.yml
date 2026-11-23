@@ -13,6 +13,7 @@ on:
       - 'supabase/functions/_shared/plan-core.ts'
       - 'supabase/migrations/*pure_prep*'
       - 'mobile/src/app/settings.tsx'
+      - 'mobile/src/app/alarm/[id].tsx'
       - 'mobile/src/features/onboarding/views/PrepareStep.tsx'
   pull_request:
     paths:
@@ -23,6 +24,7 @@ on:
       - 'supabase/functions/_shared/plan-core.ts'
       - 'supabase/migrations/*pure_prep*'
       - 'mobile/src/app/settings.tsx'
+      - 'mobile/src/app/alarm/[id].tsx'
       - 'mobile/src/features/onboarding/views/PrepareStep.tsx'
   workflow_dispatch:
 permissions:
