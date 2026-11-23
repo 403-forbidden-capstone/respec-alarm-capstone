@@ -55,7 +55,7 @@ export function PrepareStep({ values, onChange, ml, onMlChange }: Props) {
       <SectionHeader title="외출 준비만 걸리는 시간" />
       <Text variant="small" tone="sub">
         식사·과제처럼 준비하기 전에 하는 일은 제외하고, 씻고 옷을 입는 등 외출 준비를 시작한 순간부터 집을 나설 때까지의 시간을 입력해 주세요.
-        기존의 기상~출발 시간과 별도로 저장돼요. 새로운 알람 계산에 반영되는지는 테스트 기능 설정에 따라 달라질 수 있어요.
+        기존 기상~출발 시간과 별도로 저장돼요. 새 개인 일정의 자동 계산에 반영되며, 이후 실제 기록이 쌓이면 점진적으로 보정돼요. 이미 저장된 알람은 다시 확인해 주세요.
       </Text>
       <Card>
         <Stepper
