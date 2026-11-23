@@ -51,7 +51,7 @@ export const colors = {
 // 하늘 배경 맨 위 색 — 날씨 × 시간대. 아래로 갈수록 화면 바탕(bg)으로 풀림 (features/sky/sky.ts의 skyColorAt)
 // 글자 대비를 지키려고 전부 옅은 색. 값을 바꾸면 features/sky/__tests__/sky.test.ts가 대비를 다시 잼
 export const skyTint = {
-  clear: { dawn: '#F9D58A', morning: '#B5D6F3', day: '#9CC8F2', dusk: '#F2A98C', night: '#ACA7DC' },
+  clear: { dawn: '#F9D58A', morning: '#B5D6F3', day: '#9CC8F2', dusk: '#E6C6CF', night: '#ACA7DC' },
   cloudy: { dawn: '#CFC4BF', morning: '#CDCBC2', day: '#BFC6CB', dusk: '#C9BBBB', night: '#B4B4CC' },
   rain: { dawn: '#A9BACA', morning: '#A6BCCD', day: '#9FB7C9', dusk: '#A9B1C9', night: '#9FA6C6' },
   snow: { dawn: '#C5CFE6', morning: '#BCD5EC', day: '#B8D4EE', dusk: '#C0C6E2', night: '#B0B9DC' },

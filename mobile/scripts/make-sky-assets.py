@@ -168,7 +168,7 @@ files = {
     "cloud-gray-2.png": cloud(23, (232, 237, 243), (176, 190, 207)),
     "cloud-gray-3.png": cloud(42, (232, 237, 243), (176, 190, 207)),
     "sun-day.png": sun((255, 226, 130), (255, 205, 96)),
-    "sun-low.png": sun((255, 186, 130), (255, 138, 96)),
+    "sun-low.png": sun((255, 210, 160), (252, 176, 140)),
     "rays.png": rays((255, 232, 170)),
     "moon.png": moon((255, 251, 232)),
     "glow-moon.png": solid(360, (255, 250, 225), falloff(360, 2.4).point(lambda v: int(v * 0.6))),
