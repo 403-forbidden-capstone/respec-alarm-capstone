@@ -1,7 +1,8 @@
 // alarm-suggest · alarm-commit 요청 읽기 (순수 · node --test). 둘이 같은 초안 모양을 받음 — 필드 이름은 상세설계서 5장 5.4.2를 따름
 import { autoImportance } from './calc/importance.ts';
+import type { Importance, Transport } from './calc/types.ts';
 import type { EditInput } from './commit-core.ts';
-import { IMPORTANCES, readAlarmFields, readParticipantFields, readPlace, readRecurrence, type AlarmFields } from './draft.ts';
+import { IMPORTANCES, TRANSPORTS, readAlarmFields, readParticipantFields, readPlace, readRecurrence, type AlarmFields } from './draft.ts';
 import type { PlanDraft } from './plan-core.ts';
 import type { Reader } from './read.ts';
 
@@ -104,8 +105,15 @@ export type CommitRequest =
       appointment?: NewAppointment; // 없으면 draft.appointmentId의 기존 약속
       replaceExisting: boolean;
       edits: EditInput[];
+      linkWakeAlarmId?: string; // 기존 약속 + 사용자가 고른 경우만: 같은 날 일정 없는 기상 알람을 이 약속의 기상 알람으로 옮김 (commit.ts persistAppointment)
     }
-  | { type: 'STANDALONE'; alarm: StandaloneInput; edits: EditInput[] };
+  | { type: 'STANDALONE'; alarm: StandaloneInput; edits: EditInput[] }
+  | { type: 'PLACE_PENDING'; appointment: PlacePendingInput; edits: EditInput[] };
+
+// 장소 미확정 일정 (AI 대화에서 장소를 확인하지 못했을 때) — 제목 · 시각만으로 일정과 내 참여 행을 만들고 알람은 만들지 않음.
+//   장소 · 이동시간을 추측하지 않으므로 기상 · 준비 · 출발은 장소를 정한 뒤 알람 설정에서 확인하고 저장. 개인 · 한 번짜리 일정만
+//   resend: 앱이 같은 본문을 응답 없이 끝난 뒤 다시 보냄(요청 키가 남아 있음) — 이때만 서버가 방금 만든 같은 일정을 찾아 돌려줌. 새 요청은 같은 제목 · 시각이어도 새 일정
+export type PlacePendingInput = { title: string; at: Date; importance: Importance; transport?: Transport; resend?: boolean };
 
 const SCREENS = ['H03', 'H05', 'S01'] as const;
 const ALARM_TYPES = ['WAKE', 'PREPARE', 'DEPARTURE', 'ARRIVE', 'ROUTINE'] as const;
@@ -125,8 +133,22 @@ function readEdits(r: Reader): EditInput[] {
 }
 
 export function readCommitRequest(r: Reader): CommitRequest {
-  const type = r.oneOf('type', ['APPOINTMENT', 'STANDALONE'] as const) ?? 'APPOINTMENT';
+  const type = r.oneOf('type', ['APPOINTMENT', 'STANDALONE', 'PLACE_PENDING'] as const) ?? 'APPOINTMENT';
   const edits = readEdits(r);
+
+  if (type === 'PLACE_PENDING') {
+    const a = r.object('appointment', { required: true });
+    if (!a) return { type, appointment: { title: '', at: new Date(NaN), importance: 'LOW' }, edits };
+    const title = a.string('title', { required: true, min: 1, max: 100 });
+    const at = a.date('appointment_at', { required: true });
+    const importance = a.oneOf('importance', IMPORTANCES) ?? (title ? autoImportance(title) : 'LOW');
+    const transport = a.oneOf('transport_type', TRANSPORTS);
+    // 장소 · 그룹 · 반복 · 알람 칸은 받지 않음 — 보내면 VALIDATION_FAILED (모르는 칸이 조용히 버려지지 않게)
+    for (const key of ['destination', 'group_id', 'recurrence_rule']) if (a.has(key)) a.problemAt(key, '장소 미확정 일정에는 쓸 수 없어요');
+    for (const key of ['appointment_id', 'participant', 'kinds', 'manual_times', 'enabled']) if (r.has(key)) r.problemAt(key, '장소 미확정 일정에는 쓸 수 없어요 (알람은 장소를 정한 뒤)');
+    const resend = r.bool('resend') === true;
+    return { type, appointment: { title: title ?? '', at: at ?? new Date(NaN), importance, ...(transport ? { transport } : {}), ...(resend ? { resend } : {}) }, edits };
+  }
 
   if (type === 'STANDALONE') {
     // 일정 없는 알람 (D46 · Q10 B): 시각 + 반복만. 알람 종류는 기상(소리) 고정, 이름은 '알람' 고정 (F4 ②)
@@ -152,5 +174,7 @@ export function readCommitRequest(r: Reader): CommitRequest {
 
   // 약속 알람: 새 약속(appointment) 또는 기존 약속(appointment_id) 중 하나 — alarm-suggest와 같은 초안 모양
   const { draft, appointment } = readAppointmentDraft(r, { titleRequired: true });
-  return { type: 'APPOINTMENT', draft, appointment, replaceExisting: r.bool('replace_existing') ?? true, edits };
+  const linkWakeAlarmId = r.uuid('link_wake_alarm_id');
+  if (linkWakeAlarmId && !draft.appointmentId) r.problemAt('link_wake_alarm_id', '기존 일정(appointment_id)에만 쓸 수 있어요');
+  return { type: 'APPOINTMENT', draft, appointment, replaceExisting: r.bool('replace_existing') ?? true, edits, ...(linkWakeAlarmId ? { linkWakeAlarmId } : {}) };
 }

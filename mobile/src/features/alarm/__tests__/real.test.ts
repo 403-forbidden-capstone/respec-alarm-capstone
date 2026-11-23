@@ -2065,3 +2065,89 @@ describe('먼저 깼어요 (H08)', () => {
     expect(mockReconcile).not.toHaveBeenCalled();
   });
 });
+
+describe('장소를 나중에 정한 일정 — H03에서 알람 만들기 · 같은 날 일정 없는 기상 합치기', () => {
+  const ID = '00000000-0000-4000-8000-0000000000a1';
+  // 장소 없이 저장 → 장소를 세종대학교로 정함(이동 25분 길찾기) → 알람은 아직 없음
+  const placed = () => participantRow({ est_travel_minutes: 25 }, { title: '캡스톤 회의', appointment_at: kst('13:00', 23), groups: null }, []);
+  const load = () => {
+    mockRoutes['appointment_participants:select'] = (call) => (isCount(call) ? { count: 0 } : { data: placed() });
+  };
+
+  it('getAppointment: 알람 없는 일정은 그대로 null(AI · 미리 울림 등) · withoutAlarms(H03)면 같은 id로 엶', async () => {
+    load();
+    expect(await real.getAppointment(ID)).toBeNull();
+    const d = await real.getAppointment(ID, { withoutAlarms: true });
+    expect([d?.id, d?.title, d?.place, d?.alarms]).toEqual([ID, '캡스톤 회의', '세종대학교', []]);
+  });
+
+  it('listStandaloneWakes: 내 · 켜짐 · 일정 없음 · 반복 아님 기상만, 그날 0시(오늘이면 지금)부터 일정 시각 전까지', async () => {
+    mockRoutes['alarms:select'] = () => ({ data: [{ alarm_id: 'al-8', scheduled_at: kst('08:00', 23) }] });
+    expect(await real.listStandaloneWakes(new Date(kst('13:00', 23)))).toEqual([{ id: 'al-8', at: new Date(kst('08:00', 23)) }]);
+    const [read] = callsTo('alarms', 'select');
+    expect([filterArgs(read, 'eq', 'user_id'), filterArgs(read, 'eq', 'alarm_type'), filterArgs(read, 'eq', 'is_enabled')]).toEqual([['user-1'], ['WAKE'], [true]]);
+    expect([filterArgs(read, 'is', 'participant_id'), filterArgs(read, 'is', 'routine_id'), filterArgs(read, 'is', 'recurrence_rule')]).toEqual([[null], [null], [null]]);
+    expect([filterArgs(read, 'gte', 'scheduled_at'), filterArgs(read, 'lt', 'scheduled_at')]).toEqual([[new Date(kst('00:00', 23)).toISOString()], [new Date(kst('13:00', 23)).toISOString()]]);
+
+    mockCalls.length = 0;
+    await real.listStandaloneWakes(new Date(kst('13:00')));
+    expect(filterArgs(callsTo('alarms', 'select')[0], 'gte', 'scheduled_at')).toEqual([new Date(kst('07:55')).toISOString()]); // 오늘은 이미 지난 알람을 묻지 않음
+  });
+
+  it('saveAlarmSettings: 알람 없는 일정은 고른 종류 없이 보내 서버가 계산한 알람을 모두 만듦 · 합치기를 고르면 그 알람 시각 + link_wake_alarm_id', async () => {
+    load();
+    const d = (await real.getAppointment(ID, { withoutAlarms: true }))!;
+    mockRoutes['alarms:select'] = () => ({ data: [] });
+    mockCallEdge.mockResolvedValueOnce(commitResponse());
+    await real.saveAlarmSettings(ID, { ...d.edits, kinds: {}, levels: { sound: null, voice: null, vibration: null } });
+    expect(mockCallEdge.mock.calls.map(([name]) => name)).toEqual(['alarm-commit']); // 입력을 안 바꿨으면 계산 없이 저장
+    const plain = mockCallEdge.mock.calls[0][1] as Record<string, unknown>;
+    expect([plain.appointment_id, plain.kinds, plain.enabled, plain.link_wake_alarm_id]).toEqual([ID, undefined, {}, undefined]);
+
+    mockCallEdge.mockReset();
+    load();
+    const again = (await real.getAppointment(ID, { withoutAlarms: true }))!;
+    mockCallEdge.mockResolvedValueOnce(suggestion());
+    mockCallEdge.mockResolvedValueOnce(commitResponse({ canceled_alarm_ids: ['al-8'] }));
+    const times = { WAKE: new Date(kst('08:00', 23)), PREPARE: new Date(kst('11:30', 23)) };
+    await real.saveAlarmSettings(ID, { ...again.edits, times, kinds: {}, levels: { sound: null, voice: null, vibration: null }, linkWakeAlarmId: 'al-8' });
+    expect(mockCallEdge.mock.calls.map(([name]) => name)).toEqual(['alarm-suggest', 'alarm-commit']);
+    expect(mockCallEdge.mock.calls[1][1]).toMatchObject({
+      appointment_id: ID,
+      link_wake_alarm_id: 'al-8',
+      manual_times: { WAKE: new Date(kst('08:00', 23)).toISOString(), PREPARE: new Date(kst('11:30', 23)).toISOString() },
+    });
+    expect((mockCallEdge.mock.calls[0][1] as Record<string, unknown>).link_wake_alarm_id).toBeUndefined(); // 미리 보기에는 안 실음
+    expect(mockApplyCommit).toHaveBeenLastCalledWith(expect.objectContaining({ canceled_alarm_ids: ['al-8'] })); // 폰은 합친 알람 예약을 지우고 새 기상을 걺
+  });
+
+  it('합치기 저장은 됐는데 폰 예약(applyCommit)이 실패하면 저장 실패로 돌리지 않고 followUp으로 알림 — 폰은 다음 맞추기(reconcile)가 서버대로 고침', async () => {
+    load();
+    const d = (await real.getAppointment(ID, { withoutAlarms: true }))!;
+    mockRoutes['alarms:select'] = () => ({ data: [] });
+    mockCallEdge.mockResolvedValueOnce(suggestion());
+    mockCallEdge.mockResolvedValueOnce(commitResponse({ canceled_alarm_ids: ['al-8'] }));
+    mockApplyCommit.mockRejectedValueOnce(new Error('native'));
+    const times = { WAKE: new Date(kst('08:00', 23)), PREPARE: new Date(kst('11:30', 23)) };
+    const result = await real.saveAlarmSettings(ID, { ...d.edits, times, kinds: {}, levels: { sound: null, voice: null, vibration: null }, linkWakeAlarmId: 'al-8' });
+    expect(result.followUp?.phoneFailed).toBeGreaterThan(0);
+  });
+});
+
+describe('장소 미정 일정 저장 — 다시 보냄과 새 요청 구분 (createPlacePendingAppointment)', () => {
+  const input = { title: '캡스톤 회의', at: new Date(kst('13:00', 23)), importance: 'NORMAL' as const };
+  const sent = () => mockCallEdge.mock.calls.map(([, body, options]) => [(body as Record<string, unknown>).resend, (options as { idempotencyKey: string }).idempotencyKey]);
+
+  it('응답 없이 실패한 같은 본문을 다시 보내면 같은 요청 키 + resend, 성공한 뒤의 새 요청은 resend 없이 새 키', async () => {
+    mockCallEdge.mockRejectedValueOnce(new EdgeError('TIMEOUT'));
+    await expect(real.createPlacePendingAppointment(input)).rejects.toBeTruthy();
+    mockCallEdge.mockResolvedValueOnce({ ...commitResponse(), appointment_id: 'ap-pp', alarms: [], ring_packages: [] });
+    await expect(real.createPlacePendingAppointment(input)).resolves.toMatchObject({ id: 'ap-pp', alarms: [] });
+    mockCallEdge.mockResolvedValueOnce({ ...commitResponse(), appointment_id: 'ap-pp2', alarms: [], ring_packages: [] });
+    await real.createPlacePendingAppointment(input); // 사용자가 같은 일정을 하나 더 만듦
+    const [first, resent, fresh] = sent();
+    expect([first[0], resent[0], fresh[0]]).toEqual([undefined, true, undefined]);
+    expect(resent[1]).toBe(first[1]);
+    expect(fresh[1]).not.toBe(first[1]);
+  });
+});

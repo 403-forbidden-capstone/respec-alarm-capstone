@@ -327,7 +327,7 @@ export function extractNeeded(text: string, _st?: ServerState): boolean {
 
 // 일정일 수도 있는 말 — 앱 mobile/src/features/voice/liveChat.ts SCHEDULE_HINT와 같은 글 (고치면 둘 다). 추출 실패를 실패로 알릴지만 정함
 const SCHEDULE_HINT =
-  /내일|모레|글피|이번\s*주|다음\s*주|주말|[월화수목금토일]요일|\d+\s*(?:시|분|일|월)|(?:한|두|세|네|다섯|여섯|일곱|여덟|아홉|열|열한|열두)\s*시|오전|오후|약속|일정|수업|강의|시험|회의|미팅|발표|면접|예약|알람|깨워|출발|모임|만나기로|만날|산책|병원|마감|챙겨|챙길|가져가|준비물|tomorrow|tonight|next\s+week|this\s+week|monday|tuesday|wednesday|thursday|friday|saturday|sunday|\d{1,2}(?::\d{2})?\s*(?:am|pm)\b|\d{1,2}:\d{2}|meeting|class|exam|appointment|schedule|remind|bring/iu;
+  /내일|모레|글피|이번\s*주|다음\s*주|주말|[월화수목금토일]요일|\d+\s*(?:시|분|일|월)|(?:한|두|세|네|다섯|여섯|일곱|여덟|아홉|열|열한|열두)\s*시|오전|오후|약속|일정|수업|강의|시험|회의|미팅|발표|면접|예약|알람|깨워|출발|모임|만나기로|만날|산책|병원|마감|챙겨|챙길|가져가|준비물|장소|위치|어디서|tomorrow|tonight|next\s+week|this\s+week|monday|tuesday|wednesday|thursday|friday|saturday|sunday|\d{1,2}(?::\d{2})?\s*(?:am|pm)\b|\d{1,2}:\d{2}|meeting|class|exam|appointment|schedule|remind|bring/iu;
 export const mightBeSchedule = (text: string): boolean => SCHEDULE_HINT.test(text);
 
 async function handleText(run: Run, row: SessionRow, st: ServerState, req: Extract<TurnRequest, { kind: 'text' }>, limitsFor: LimitsFor): Promise<VoiceTurnOut> {
@@ -386,7 +386,7 @@ async function handleText(run: Run, row: SessionRow, st: ServerState, req: Extra
     ts.events = [...ts.events.filter((e) => e.after_turn !== j), emptyEvent(j)];
   } else if (fastRes?.ok) {
     const fast = fastRes.data.prep_adjustment === null || prepAsked(stored) ? fastRes.data : { ...fastRes.data, prep_adjustment: null }; // 청하지 않은 준비시간 변경은 카드로 만들지 않음
-    const fr = applyFast(ts0, fast, ctx, j);
+    const fr = applyFast(ts0, fast, ctx, j, req.text); // 이번 말 — 고칠 대상 찾기 · 바로잡기 (turn-core intentOf)
     ts = fr.state;
     tasks = fr.tasks;
     fixes = fr.fixes;

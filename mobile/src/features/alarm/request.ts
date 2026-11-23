@@ -208,7 +208,13 @@ export function settingsCommitBody(base: Body, draft: AlarmSettingsDraft, edits:
     const on = draft.kinds[kind];
     if (on != null) enabled[kind] = on;
   }
-  return { ...base, enabled, levels: { sound: draft.levels.sound, voice: draft.levels.voice, vibration: draft.levels.vibration }, edits };
+  return {
+    ...base,
+    enabled,
+    levels: { sound: draft.levels.sound, voice: draft.levels.voice, vibration: draft.levels.vibration },
+    edits,
+    ...(draft.linkWakeAlarmId ? { link_wake_alarm_id: draft.linkWakeAlarmId } : {}),
+  };
 }
 
 // 일정 없는 알람 (D46 · Q10) — 만들기는 시각 필수, 고치기는 alarm_id만 있으면 시각 없이 { levels } · { is_enabled }도 됨

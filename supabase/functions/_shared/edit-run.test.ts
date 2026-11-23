@@ -4,7 +4,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { persistAppointment } from './commit.ts';
+import { commitPlacePending, persistAppointment } from './commit.ts';
 import { deleteAppointment, leaveSharedAppointment, restoreAppointment, runEdit, SYNC_CONCURRENCY, updateAppointment, type EditCtx } from './edit-run.ts';
 import type { EditRequest } from './edit-request.ts';
 import type { AppointmentPatch } from './edit.ts';
@@ -1473,4 +1473,34 @@ test('10-23: 주인이 직접 고른 MANUAL(원래 시각 기억 없음)은 약�
   const own = wake.scheduled_at;
   await updateAppointment(ctxFor(env, A), upd(thu.appointment_id as string, { at: kst('2026-10-29T09:30') }, 'this', true));
   assert.deepEqual([wake.scheduled_at, wake.time_source], [own, 'MANUAL']);
+});
+
+// ---- 장소 미확정 일정 (alarm-commit PLACE_PENDING) 고치기 ----
+
+test('장소 미확정 일정: 시각만 고치면 길찾기 없이 저장(ROUTE_UNAVAILABLE 아님) · 알람은 계속 없음', async () => {
+  const env = setup();
+  const db = env.db as unknown as Db;
+  const { appointment_id: id } = await commitPlacePending({ userId: A, userDb: db, service: db, now: MON_10 }, { appointment: { title: '캡스톤 회의', at: kst('2026-10-27T13:00'), importance: 'NORMAL' } });
+  const kakao = fakeKakao();
+  const res = await updateAppointment(ctxFor(env, A, { kakao: kakao.lookup }), upd(id, { at: kst('2026-10-27T15:00') }));
+  assert.equal(res.saved, true);
+  assert.equal(kakao.state.calls, 0);
+  assert.equal(hm(row(env.db, id)!.appointment_at), '15:00');
+  assert.deepEqual([alarmsOf(env.db, id).length, participantOf(env.db, id)!.est_travel_minutes], [0, null]);
+  assert.ok(!res.warnings.some((w) => w.code === 'PLACE_SET_ALARMS_PENDING'));
+});
+
+test('장소 미확정 일정에 장소를 정하면 같은 일정(id 그대로)에 장소 · 이동시간만 저장, 알람은 만들지 않고 알람 설정에서 확인하라고 알림', async () => {
+  const env = setup();
+  const db = env.db as unknown as Db;
+  const { appointment_id: id, participant_id: pid } = await commitPlacePending({ userId: A, userDb: db, service: db, now: MON_10 }, { appointment: { title: '캡스톤 회의', at: kst('2026-10-27T13:00'), importance: 'NORMAL' } });
+  const kakao = fakeKakao(25);
+  const res = await updateAppointment(ctxFor(env, A, { kakao: kakao.lookup }), upd(id, { destination: { name: '세종대학교', ...SCHOOL } }));
+  assert.equal(res.saved, true);
+  assert.equal(kakao.state.calls, 1);
+  assert.deepEqual([row(env.db, id)!.dest_name, row(env.db, id)!.dest_lat], ['세종대학교', SCHOOL.lat]);
+  const part = participantOf(env.db, id)!;
+  assert.deepEqual([part.participant_id, part.est_travel_minutes, part.travel_source], [pid, 25, 'API']);
+  assert.equal(alarmsOf(env.db, id).length, 0, '확인 없이 알람을 만들지 않음');
+  assert.deepEqual(res.warnings.map((w) => w.code), ['PLACE_SET_ALARMS_PENDING']);
 });

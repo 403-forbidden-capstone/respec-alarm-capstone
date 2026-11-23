@@ -12,7 +12,7 @@ import { supabase } from '@/lib/supabase';
 import { requireUserId } from '@/lib/user';
 
 import { manualTimes, orderError, sameEdits } from './adjust';
-import { commitKeyFor, forgetCommitKey } from './commitKey';
+import { commitKeyFor, forgetCommitKey, hasCommitKey } from './commitKey';
 import { forgetDetail, recallDetail, rememberDetail } from './detailCache';
 import { dropEdits, MAX_EDITS_PER_REQUEST, peekEdits, queueEdit } from './editQueue';
 import { createEdits, fromEditRow, settingsEdits, toEditPayloads, type EditLogLine, type SettingsAfter } from './edits';
@@ -46,6 +46,8 @@ import {
   type AlarmSettingsDraft,
   type AppointmentDraft,
   type DepartCheck,
+  type PlacePendingDraft,
+  type PlacePendingSaved,
   type Estimate,
   type JoinChoice,
   type JoinDefaults,
@@ -179,8 +181,9 @@ export async function checkDepartNow(appointmentId: string): Promise<DepartCheck
 // ---------------------------------------------------------------------------
 
 // alarm-commit 호출 — 같은 본문이면 같은 요청 키(10분), 성공하면 키를 지움. 실패(오류 · 시간 초과)는 키를 남겨 다시 눌러도 한 번만 저장되게
-async function commitCall(body: Record<string, unknown>): Promise<CommitResponse> {
-  const res = await callEdge<CommitResponse>('alarm-commit', body, { timeoutMs: COMMIT_TIMEOUT_MS, idempotencyKey: commitKeyFor(body, now().getTime()) });
+//   extra = 키를 찾는 본문에는 넣지 않고 보낼 때만 더하는 칸 (resend)
+async function commitCall(body: Record<string, unknown>, extra: Record<string, unknown> = {}): Promise<CommitResponse> {
+  const res = await callEdge<CommitResponse>('alarm-commit', { ...body, ...extra }, { timeoutMs: COMMIT_TIMEOUT_MS, idempotencyKey: commitKeyFor(body, now().getTime()) });
   forgetCommitKey(body);
   return res;
 }
@@ -252,6 +255,19 @@ export async function createAppointment(estimate: Estimate, source?: string): Pr
   //   묶음 번호(series_id)는 새 약속이면 appointment_id (DB가 채움, 설계메모 1절)
   if (a.recurrenceRule && res.appointment_id) rollSeries(res.appointment_id);
   return { ...saved, ...followUpOf(phoneFailed, itemsFailed) };
+}
+
+// 장소 미확정 일정 저장 (AI 대화 — 장소를 확인하지 못함) — alarm-commit type PLACE_PENDING. 일정 · 내 참여 행만 만들고 알람은 없음(폰에 걸 것 없음)
+//   장소 · 이동시간을 추측하지 않음 — 장소는 나중에 일정 편집에서 고르고, 알람은 알람 설정에서 미리 보고 저장
+//   앞선 같은 본문이 응답 없이 끝났으면 resend를 붙여 보냄 → 서버가 그때 만든 일정을 돌려줌(두 번 만들지 않음). 새 요청은 같은 제목 · 시각이어도 새 일정
+export async function createPlacePendingAppointment(input: PlacePendingDraft): Promise<PlacePendingSaved> {
+  const body = {
+    type: 'PLACE_PENDING',
+    appointment: { title: input.title, appointment_at: input.at.toISOString(), importance: input.importance, ...(input.transport ? { transport_type: input.transport } : {}) },
+  };
+  const res = await commitCall(body, hasCommitKey(body, now().getTime()) ? { resend: true } : {});
+  if (!res.appointment_id) throw new UserError('일정을 저장하지 못했어요');
+  return { id: res.appointment_id, title: input.title, alarms: [], level: 1 };
 }
 
 // 공동 약속 [내 알람 만들기] (친구 9장) — 그룹원이 G02 연결 일정에서 누름. 서버가 내 참여 조건 · 알람을 만들고(이미 있으면 같은 한 줄을 고침), 응답을 폰에 걺

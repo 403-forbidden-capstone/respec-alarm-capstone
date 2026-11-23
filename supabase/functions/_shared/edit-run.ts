@@ -10,7 +10,7 @@
 // 하루 경계는 profiles.timezone(없으면 Asia/Seoul) 0시 (tz.ts)
 import { hasEarlierWake, isEveningWake, type SameDayWake } from './calc/index.ts';
 import { diffAlarms, type AlarmDiff, type AlarmWrite } from './commit-core.ts';
-import { summarize } from './commit.ts';
+import { isPlacePending, summarize } from './commit.ts';
 import { must } from './db.ts';
 import {
   alarmChanges,
@@ -674,7 +674,12 @@ export async function updateAppointment(ctx: EditCtx, req: Extract<EditRequest, 
   let plan: Plan | undefined;
   let purePrepCandidate: PlanInputs['purePrepCandidate'];
   let diff: AlarmDiff | undefined;
-  if (participant && patched.affectsAlarms) {
+  // 장소 미확정 일정(commitPlacePending)은 장소가 정해질 때까지 알람을 계산하지 않음 — 이동시간을 구할 길이 없어 시각만 바꿔도 ROUTE_UNAVAILABLE로 막혔음.
+  //   처음 장소를 정하면 이동시간만 계산해 저장하고(알람 종류는 기존 그대로 = 없음), 알람은 알람 설정에서 미리 보고 저장하게 알림 — 확인 없이 알람을 만들지 않음
+  const pendingNow = isPlacePending({ ...row, ...patched.next }) && participant?.est_travel_minutes == null; // 이동시간을 직접 넣어 둔 일정은 예전처럼 다시 계산
+  const placeFirstSet = isPlacePending(row) && !isPlacePending({ ...row, ...patched.next });
+  if (placeFirstSet) result.warnings.push({ code: 'PLACE_SET_ALARMS_PENDING', message: '장소를 정했어요. 알람 설정에서 기상 · 준비 · 출발 알람을 확인하고 저장해 주세요' });
+  if (participant && patched.affectsAlarms && !pendingNow) {
     const made = await replanFor(ctx, env, { row, patched, participant, alarms, snapshot, excluded, oldAt, newAt, tz });
     plan = made.plan;
     purePrepCandidate = made.purePrepCandidate;

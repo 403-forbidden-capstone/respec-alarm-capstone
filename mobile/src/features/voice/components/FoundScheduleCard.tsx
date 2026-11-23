@@ -15,6 +15,7 @@ type Props = {
   onReject: () => void;
   onEdit?: () => void; // 새 일정(H05)에서 고쳐서 저장 — 목업 카드만 (실데이터는 말로 고침)
   onPickPlace?: () => void; // [장소 고르기] — 장소 검색 시트
+  onSaveWithoutPlace?: () => void; // [장소 없이 저장] — 장소를 확인 못 한 새 일정을 알람 없이 저장 (장소 · 이동시간을 추측하지 않음)
   onOpen?: () => void; // [일정 열기] (APPT_OPEN)
   onManual?: () => void; // [직접 만들기] — 계산이 안 될 때 H05로
   disabled?: boolean; // 저장 · 저장 안 함이 도는 중
@@ -33,7 +34,7 @@ const HEAD: Record<ConversationCard['kind'], string> = {
 
 // 대화에서 찾은 카드 (.xcard) — 여러 장이 대화 줄에 하나씩 놓임. 상태에 따라 계산 중 · 장소 고르기 · 저장 · 바꾸기 · 저장 안 함, 고른 뒤에는 결과만
 // 그날 첫 일정(firstOfDay)만 알람 줄을 자세히, 나머지는 "출발 알림" 한 줄 (D36)
-export function FoundScheduleCard({ card, at, onSave, onReject, onEdit, onPickPlace, onOpen, onManual, disabled, working, saving, failure, onRetry }: Props) {
+export function FoundScheduleCard({ card, at, onSave, onReject, onEdit, onPickPlace, onSaveWithoutPlace, onOpen, onManual, disabled, working, saving, failure, onRetry }: Props) {
   const { status, kind } = card;
   const calculating = status === 'NEEDS_ESTIMATE' || status === 'ESTIMATING';
   const done = status === 'SAVED' || status === 'REJECTED';
@@ -107,6 +108,9 @@ export function FoundScheduleCard({ card, at, onSave, onReject, onEdit, onPickPl
           {status === 'FAILED' && retry ? <Button label="다시 시도" small onPress={onRetry} disabled={blocked} /> : null}
           {status === 'READY' && kind === 'APPT_OPEN' && onOpen ? <Button label="일정 열기" small onPress={onOpen} disabled={blocked} /> : null}
           {status === 'NEEDS_PLACE' && onPickPlace ? <Button label="장소 고르기" small onPress={onPickPlace} disabled={blocked} /> : null}
+          {status === 'NEEDS_PLACE' && kind === 'APPT_NEW' && onSaveWithoutPlace ? (
+            <Button label="장소 없이 저장" small variant="ghost" onPress={onSaveWithoutPlace} disabled={blocked && !saving} loading={saving} />
+          ) : null}
           {status === 'FAILED' && onManual ? <Button label="직접 만들기" small variant="ghost" onPress={onManual} disabled={blocked} /> : null}
           {status === 'READY' && kind === 'APPT_NEW' && onEdit ? <Button label="수정" small variant="ghost" onPress={onEdit} disabled={blocked} /> : null}
           {!calculating ? <Button label={kind === 'APPT_OPEN' ? '닫기' : '저장 안 함'} small variant="plain" onPress={onReject} disabled={blocked} /> : null}

@@ -167,6 +167,12 @@ export async function saveCard(cardId: string): Promise<string> {
   return `${saved.title} 알람을 맞췄어요`;
 }
 
+// 카드 [장소 없이 저장] — 장소를 확인하지 못한 새 일정을 알람 없이 저장. 실데이터만 (목업 카드는 장소가 늘 있음)
+export async function saveCardWithoutPlace(cardId: string): Promise<string> {
+  if (!isMock()) return real.saveCardWithoutPlace(cardId);
+  throw new UserError('장소를 골라야 하는 일정이 없어요');
+}
+
 // 카드 [저장 안 함]
 export async function rejectCard(cardId: string): Promise<void> {
   if (!isMock()) return real.rejectCard(cardId);

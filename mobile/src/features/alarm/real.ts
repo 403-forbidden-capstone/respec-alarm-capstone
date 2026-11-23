@@ -6,6 +6,7 @@
 //   · 쓰기: 일정 전체 켜기 · 끄기 = DB 직접 → 그 알람만 reconcile (realWrite.ts), 계산 · 저장(H03의 종류별 켜기 · 강도 포함, H05) = alarm-suggest · alarm-commit → applyCommit (realPlan.ts),
 //     울림 · 기상 확인 = 알람 코어 + alarm_events (realWake.ts). screen-data-map "실데이터 연결 규칙"
 import { now } from '@/lib/clock';
+import { parseDbTime } from '@/lib/dbTime';
 import { addDays, startOfDay } from '@/lib/format';
 import { supabase } from '@/lib/supabase';
 import { requireUserId } from '@/lib/user';
@@ -13,7 +14,7 @@ import { requireUserId } from '@/lib/user';
 import { rememberDetail } from './detailCache';
 import { byTime, hasAlarms, listOnePerSeries, pickNextAlarm, toAppointment, toOccurrences, toScheduleItem, toStandaloneAppointment } from './map';
 import { loadAppointmentRows, loadAppointmentRowsSince, loadDayRows, loadDetail, loadOccurrenceRows, loadStandaloneRow, loadStandaloneRows } from './realRows';
-import type { Appointment, AppointmentDetail, NextAlarm, Occurrence, ScheduleItem } from './types';
+import type { Appointment, AppointmentDetail, NextAlarm, Occurrence, ScheduleItem, StandaloneWake } from './types';
 
 export * from './realEdit';
 export * from './realMorning';
@@ -75,12 +76,33 @@ export async function getDaySchedule(day: Date): Promise<ScheduleItem[]> {
 }
 
 // 알람 설정 (H03) — 알람 없는 일정 · 일정 없는 알람은 열 알람 설정이 없어 null
-export async function getAppointment(id: string): Promise<AppointmentDetail | null> {
+//   withoutAlarms: H03만 — 알람 없는 일정(장소 미정 · 장소를 나중에 정함)도 열어 장소를 정하고 알람을 만들 수 있게 (D41 A). 다른 곳은 알람 없으면 null 그대로
+export async function getAppointment(id: string, options: { withoutAlarms?: boolean } = {}): Promise<AppointmentDetail | null> {
   const userId = await requireUserId();
   const detail = await loadDetail(id, userId, now().getTime());
-  if (!detail || !detail.alarms.length) return null;
+  if (!detail || (!detail.alarms.length && !options.withoutAlarms)) return null;
   rememberDetail(detail);
   return detail;
+}
+
+// 그날(기기 시간대 0시부터) 이 일정 시각 전에 울릴 일정 없는 기상 알람 — 켜짐 · 아직 안 지남 · 반복 아님(매일 알람 같은 반복은 일부러 둔 것이라 묻지 않음)
+export async function listStandaloneWakes(at: Date): Promise<StandaloneWake[]> {
+  const userId = await requireUserId();
+  const from = Math.max(startOfDay(at).getTime(), now().getTime());
+  const { data, error } = await supabase
+    .from('alarms')
+    .select('alarm_id, scheduled_at')
+    .eq('user_id', userId)
+    .eq('alarm_type', 'WAKE')
+    .eq('is_enabled', true)
+    .is('participant_id', null)
+    .is('routine_id', null)
+    .is('recurrence_rule', null)
+    .gte('scheduled_at', new Date(from).toISOString())
+    .lt('scheduled_at', at.toISOString())
+    .order('scheduled_at');
+  if (error) throw error;
+  return (data ?? []).map((r) => ({ id: r.alarm_id, at: parseDbTime(r.scheduled_at) }));
 }
 
 // 반복 일정의 앞으로 회차 (H03 회차 목록) — 같은 묶음의 지금 이후 회차, 시각 순. 반복이 아니면 빈 목록

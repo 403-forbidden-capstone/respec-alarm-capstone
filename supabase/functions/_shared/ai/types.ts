@@ -53,6 +53,8 @@ export interface Appointment {
   transport: Transport | null;
   travel_minutes: number | null;
   repeat: "NONE" | "WEEKLY";
+  /** 그룹 약속이면 그룹 이름(읽을 수 없으면 ""), 개인 일정이면 칸 없음 — 고칠 알람을 '캡스톤 그룹 알람'처럼 고를 때 씀 */
+  group?: string;
 }
 
 export interface AlarmPlan {
@@ -172,6 +174,8 @@ export interface Context {
     items: string[];
     todos: { title: string; due_date: LocalDate | null }[];
   };
+  /** 내일 뒤 며칠(LATER_DAYS)의 내 약속 · 내 알람 — "25일 알람 바꿔줘"처럼 고칠 대상을 찾을 때만 씀. 예전 대화는 칸 없음 */
+  later?: { appointments: Appointment[]; alarms: AlarmPlan[] };
   question: ServerQuestion | null;
   editable_users: EditableUser[];
   events: ServerEvent[];

@@ -461,6 +461,7 @@ function apptLine(a: Appointment, now?: SeoulTime): string {
   // 시작 시각이 이미 지난 일정 — 기상 후 늦게 일어난 날 · 자기 전의 오늘 일정을 앞일로 안내하지 않게(069 · 048 · 003)
   const past = now !== undefined && isBefore(a.date, hhmm(a.time), now);
   const parts = [past ? `${head} · 지남` : head, place === "" ? "장소 미정" : `장소 ${place}`, importanceText(a), moveText(a)];
+  if (a.group !== undefined) parts.push(a.group === "" ? "그룹 약속" : `그룹 약속(${oneLine(a.group)})`);
   if (a.repeat === "WEEKLY") parts.push("매주 반복");
   else if (a.repeat !== "NONE") throw new Error(`view: 모르는 반복 값 '${String(a.repeat)}'`);
   return parts.join(" · ");
@@ -669,9 +670,9 @@ function eventLines(e: ServerEvent, o: AlarmLineOpts, isNew: (a: AlarmPlan) => b
   return lines;
 }
 
-/** 컨텍스트 알람(오늘 + 내일)의 al# — 여기 없는 알람이 처리 결과에 나오면 대화 중 새로 생긴 것 */
+/** 컨텍스트 알람(오늘 + 내일 + 이후)의 al# — 여기 없는 알람이 처리 결과에 나오면 대화 중 새로 생긴 것 */
 function contextAlarmRefs(ctx: Context): Set<string> {
-  return new Set([...ctx.today.alarms, ...ctx.tomorrow.alarms].map((a) => a.ref));
+  return new Set([...ctx.today.alarms, ...ctx.tomorrow.alarms, ...(ctx.later?.alarms ?? [])].map((a) => a.ref));
 }
 
 /**
@@ -819,11 +820,21 @@ export function viewContext(ctx: Context, opts: ViewOptions = {}): string {
     ["오늘 기록", record],
     [`${dayKo} 일정`, viewAppointments(day.appointments, `${dayKo} 일정`, ctx.session.now)],
     [`${dayKo} 알람`, alarms],
+  ];
+  // 이후 일정 · 알람 — 사용자가 날짜 · 이름으로 고칠 대상을 말할 때만 찾아 쓰는 목록 (있을 때만 붙여 예전 글은 그대로)
+  const later = ctx.later;
+  if (later !== undefined && (later.appointments.length > 0 || later.alarms.length > 0)) {
+    sections.push([
+      "이후 일정·알람 (사용자가 고쳐 달라고 할 때만 참고)",
+      `${viewAppointments(later.appointments, "이후 일정")}\n${viewAlarms(later.alarms, { names: namesOf(ctx), label: "이후 알람" })}`,
+    ]);
+  }
+  sections.push(
     ["준비물·할 일", viewItems(day.items, day.todos, dayKo)],
     ["서버 질문", viewQuestion(ctx)],
     ["알람 바꿀 수 있는 사람", viewEditableUsers(ctx)],
     ["서버 처리 결과", viewEvents(ctx)],
-  ];
+  );
   const text = sections.map(([h, b]) => `### ${h}\n${b}`).join("\n\n");
   // 말로 하는 시각은 모든 검사(날짜표 · 사실 형식 · 알람 …)를 끝낸 글에 마지막으로 바꿈 — 서버 문장(저장됨 · 되물을 것)과 질문 안의 시각도 같이
   return opts.spokenTimes ? spokenizeTimes(text) : text;

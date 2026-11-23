@@ -71,7 +71,7 @@ describe('liveChat', () => {
   });
 
   it('mightBeSchedule: 날짜 · 시각 · 일정 낱말이 있으면 일정일 수도 있는 말 (일반 대화는 아님)', () => {
-    for (const t of ['내일 2시에 초롱이랑 산책 있어.', '모레 오전 9시 수업', '금요일에 발표해', '다음 주 약속 잡혔어', '세 시에 만나기로 했어', '10월 3일 병원'])
+    for (const t of ['내일 2시에 초롱이랑 산책 있어.', '모레 오전 9시 수업', '금요일에 발표해', '다음 주 약속 잡혔어', '세 시에 만나기로 했어', '10월 3일 병원', '장소는 세종대학교야'])
       expect(mightBeSchedule(t)).toBe(true);
     for (const t of ['안녕', '오늘 좀 피곤했어', '저녁에 친구 만났어', '운동하고 왔어', '고마워 잘 자']) expect(mightBeSchedule(t)).toBe(false);
   });

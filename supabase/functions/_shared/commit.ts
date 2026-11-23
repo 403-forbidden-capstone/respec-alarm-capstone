@@ -10,7 +10,7 @@ import { must } from './db.ts';
 import { HttpError } from './errors.ts';
 import { purePrepPersistenceOf, resolveOverrides, type AlarmRow, type AppointmentRow, type Plan, type PlanDraft, type PlanInputs } from './plan-core.ts';
 import { loadProfile } from './plan.ts';
-import type { NewAppointment, StandaloneInput } from './requests.ts';
+import type { NewAppointment, PlacePendingInput, StandaloneInput } from './requests.ts';
 import { buildRingPackages, canceledAlarmIds, subtitleFor } from './ring-package.ts';
 import type { Db } from './supabase.ts';
 import { localDayRange } from './tz.ts';
@@ -78,6 +78,7 @@ export async function persistAppointment(
     replaceExisting: boolean;
     edits: readonly EditInput[];
     timeZone: string;
+    linkWake?: AlarmRow | null; // 이 약속 기상으로 합칠 일정 없는 기상 알람 (loadLinkableWake) — 약속 알람을 다 쓴 뒤 지움
   },
 ) {
   const { service, userId, now } = ctx;
@@ -170,6 +171,10 @@ export async function persistAppointment(
     }
     const untouched = inputs.existingAlarms.filter((a) => !diff.remove.includes(a.alarm_id) && !diff.update.some((u) => u.alarm_id === a.alarm_id));
     const after = [...touched, ...untouched];
+    // 사용자가 합치기로 고른 일정 없는 기상 알람 — 약속 기상(같은 시각)을 쓴 뒤에 지움. 지우기가 실패해도 알람은 둘로 남을 뿐 사라지지 않음
+    if (args.linkWake) {
+      must('alarms delete (합친 기상)', await service.from('alarms').delete().eq('alarm_id', args.linkWake.alarm_id).eq('user_id', userId).is('participant_id', null).is('routine_id', null));
+    }
 
     // 4. 고친 값 기록 (user_edit_logs) — 요청에 담긴 것만. 같은 요청을 다시 보내면 같은 줄이 또 들어감 (멱등 키는 아직 없음)
     await saveEditLogs(ctx, appointment.appointment_id, after, args.edits);
@@ -187,7 +192,7 @@ export async function persistAppointment(
         // 준비 · 출발 알림 문구와 기상 음성 문장 (앱 reconcile이 같은 값으로 같은 문구를 만듦 — 이동은 저장한 est_travel_minutes)
         appointment: { appointmentAt: new Date(appointment.appointment_at), travelMinutes: plan.travelMinutes, timeZone: args.timeZone },
       }),
-      canceled_alarm_ids: canceledAlarmIds({ before: inputs.existingAlarms, after }),
+      canceled_alarm_ids: canceledAlarmIds({ before: args.linkWake ? [...inputs.existingAlarms, args.linkWake] : inputs.existingAlarms, after }),
       warnings: plan.warnings,
     };
   } catch (e) {
@@ -201,6 +206,123 @@ export async function persistAppointment(
     throw e;
   }
 }
+
+// ---------------------------------------------------------------------------
+// 장소 미확정 일정 (AI 대화 — 장소를 확인하지 못함)
+// ---------------------------------------------------------------------------
+
+// 제목 · 시각만으로 일정과 내 참여 행을 만듦. 장소는 빈 이름 · 좌표 없음(DB 스키마 그대로 — dest_name NOT NULL은 '' 허용, 좌표 · est_travel_minutes는 NULL 허용),
+//   이동시간은 NULL(추측 · 기본값을 쓰지 않음), 알람은 하나도 만들지 않음 — 기상 · 준비 · 출발은 장소를 정한 뒤 알람 설정에서 미리 보고 저장.
+//   출발지는 비워 둠(나중에 계산할 때 집이 기본). 참여 행이 실패하면 만든 일정을 지움. 같은 요청의 두 번 저장은 앱의 요청 키(commitCall)가 막음
+export async function commitPlacePending(ctx: CommitCtx, args: { appointment: PlacePendingInput }) {
+  const { service, userId, userDb, now } = ctx;
+  const { appointment: a } = args;
+  if (a.at.getTime() < now.getTime()) throw new HttpError('UNPROCESSABLE', '이미 지난 시각의 일정이에요', { reason: 'PAST_TIME' });
+  // 다시 보낸 요청(resend — 앱이 응답을 잃은 같은 본문을 다시 보냄)만: 방금(요청 키 수명 10분 안) 만든 같은 제목 · 시각의 장소 미정 개인 일정이 있으면 새로 만들지 않고 그 일정을 돌려줌
+  //   새 요청은 같은 제목 · 시각이어도 사용자가 일부러 하나 더 만든 것이라 막지 않음. DB에 요청 번호 칸이 없어 이 판정으로 대신함
+  //   shortcut: 응답을 잃은 첫 요청이 실제로는 저장 전에 실패했고 10분 안에 같은 일정을 따로 만든 적이 있으면 그 일정을 돌려줌 — 정확히 가리려면 요청 번호 칸(마이그레이션)
+  const [same] = a.resend
+    ? must<{ appointment_id: string }[]>(
+        'appointments same place-pending',
+        await userDb
+          .from('appointments')
+          .select('appointment_id')
+          .eq('creator_id', userId)
+          .eq('title', a.title)
+          .eq('appointment_at', a.at.toISOString())
+          .eq('dest_name', '')
+          .is('group_id', null)
+          .gte('created_at', new Date(now.getTime() - RESEND_WINDOW_MS).toISOString())
+          .order('created_at', { ascending: false })
+          .limit(1),
+      )
+    : [];
+  if (same) {
+    const mine = must<{ participant_id: string } | null>(
+      'appointment_participants same place-pending',
+      await userDb.from('appointment_participants').select('participant_id').eq('appointment_id', same.appointment_id).eq('user_id', userId).maybeSingle(),
+    );
+    if (mine) return placePendingResponse(same.appointment_id, mine.participant_id);
+  }
+  const profile = await loadProfile(userDb, userId);
+  const row = must<AppointmentRow>(
+    'appointments insert',
+    await service
+      .from('appointments')
+      .insert({ creator_id: userId, group_id: null, title: a.title, appointment_at: a.at.toISOString(), dest_name: '', dest_lat: null, dest_lng: null, importance: a.importance, recurrence_rule: null, created_at: now.toISOString() })
+      .select(APPOINTMENT_COLUMNS)
+      .single(),
+  );
+  try {
+    const participant = must<{ participant_id: string }>(
+      'appointment_participants insert',
+      await service
+        .from('appointment_participants')
+        .insert({
+          appointment_id: row.appointment_id,
+          user_id: userId,
+          transport_type: a.transport ?? profile.default_transport,
+          est_travel_minutes: null,
+          buffer_minutes: profile.default_buffer_minutes,
+        })
+        .select('participant_id')
+        .single(),
+    );
+    return placePendingResponse(row.appointment_id, participant.participant_id);
+  } catch (e) {
+    try {
+      await service.from('appointments').delete().eq('appointment_id', row.appointment_id);
+    } catch (rollbackError) {
+      console.error('[alarm-commit] 되돌리기 실패', rollbackError);
+    }
+    throw e;
+  }
+}
+
+const RESEND_WINDOW_MS = 10 * 60_000; // 앱 요청 키 수명(commitKey.ts COMMIT_KEY_TTL_MS)과 같음
+
+const placePendingResponse = (appointmentId: string, participantId: string) => ({
+  appointment_id: appointmentId,
+  participant_id: participantId,
+  alarms: [],
+  ring_packages: [],
+  canceled_alarm_ids: [],
+  warnings: [{ code: 'PLACE_PENDING', message: '장소를 정하지 않아 알람은 만들지 않았어요. 장소를 정한 뒤 알람을 확인해 주세요' }],
+});
+
+// 약속 기상으로 합칠 수 있는 일정 없는 기상 알람 — 내 것 · 약속 · 루틴과 연결 안 됨 · 반복 아님. 없으면 null
+//   alarms.participant_id는 keep_keys 트리거가 못 바꾸게 해서(service_role도) 행을 옮기지 않음: 약속 기상을 이 알람 시각(직접 고름)으로 만들고 이 알람은 지움 (persistAppointment linkWake)
+export async function loadLinkableWake(ctx: CommitCtx, alarmId: string): Promise<AlarmRow | null> {
+  return must<AlarmRow | null>(
+    'alarms link wake',
+    await ctx.userDb
+      .from('alarms')
+      .select(ALARM_COLUMNS)
+      .eq('alarm_id', alarmId)
+      .eq('user_id', ctx.userId)
+      .eq('alarm_type', 'WAKE')
+      .is('participant_id', null)
+      .is('routine_id', null)
+      .is('recurrence_rule', null)
+      .maybeSingle(),
+  );
+}
+
+// 합치기 요청 검사 (계산 뒤 · 쓰기 전) — 합칠 알람이 없을 때: 지난 저장에서 이미 합쳐 지웠으면(약속 기상이 있음, 응답을 잃고 다시 보냄) 합치기 없이 그대로 저장, 아니면 NOT_FOUND
+//   이 약속에 기상 알람이 안 생기면(그날 앞 일정에 기상이 있음 · 저녁 기상 · 기상을 끔) 합칠 곳이 없어 UNPROCESSABLE — 일정 없는 알람은 그대로 둠
+export function assertLinkWake(plan: Pick<Plan, 'chain'>, draft: Pick<PlanDraft, 'enabled'>, linkWake: AlarmRow | null, existing: readonly AlarmRow[]): void {
+  if (!linkWake) {
+    if (existing.some((a) => a.alarm_type === 'WAKE')) return;
+    throw new HttpError('NOT_FOUND', '합칠 기상 알람을 찾을 수 없어요. 화면을 다시 열어 확인해 주세요');
+  }
+  if (draft.enabled?.WAKE === false || !plan.chain.some((a) => a.kind === 'WAKE')) {
+    throw new HttpError('UNPROCESSABLE', '이 일정에는 기상 알람이 없어 합칠 수 없어요', { reason: 'NO_WAKE' });
+  }
+}
+
+// 장소 미확정 일정인지 — 장소 이름이 비고 좌표가 없음 (commitPlacePending이 만든 모양). 이동시간을 구할 길이 없어 알람 계산을 건너뜀
+export const isPlacePending = (row: { dest_name: string | null; dest_lat: number | string | null; dest_lng: number | string | null }): boolean =>
+  (row.dest_name ?? '').trim() === '' && row.dest_lat == null && row.dest_lng == null;
 
 // ---------------------------------------------------------------------------
 // 일정 없는 알람 (D46 · Q10 B)

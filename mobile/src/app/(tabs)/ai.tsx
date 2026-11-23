@@ -14,7 +14,7 @@ import { RoutinePromptCard } from '@/features/routine/components/RoutinePromptCa
 import type { RoutineSuggestion } from '@/features/routine/types';
 import { previewTimes } from '@/features/records/suggestion';
 import type { Suggestion } from '@/features/records/types';
-import { endLiveVoice, finishConversation, getConversation, getLiveToken, pickCardPlace, rejectCard, retryConversation, saveCard, say, sayVoice } from '@/features/voice/api';
+import { endLiveVoice, finishConversation, getConversation, getLiveToken, pickCardPlace, rejectCard, retryConversation, saveCard, saveCardWithoutPlace, say, sayVoice } from '@/features/voice/api';
 import { ChatBubble, TypingBubble } from '@/features/voice/components/ChatBubble';
 import { ChatComposer } from '@/features/voice/components/ChatComposer';
 import { noticeCopy } from '@/features/voice/chatNotice';
@@ -338,14 +338,15 @@ export default function AiScreen() {
 
   // 카드 저장 · 바꾸기 — 누르는 즉시 "일정을 저장하고 있어요...", 성공하면 토스트("일정이 저장됐어요"), 실패하면 카드에 까닭 + [다시 시도]. 어느 쪽이든 카드 상태를 다시 읽음
   //   두 번 누름은 useAction(act) · 카드 버튼 막기 · saveCard(이미 저장한 카드 거절)가 막음
-  const saveFound = (cardId: string): Promise<void> =>
+  //   withoutPlace = [장소 없이 저장] — 장소를 확인 못 한 새 일정을 알람 없이 (실패하면 같은 버튼으로 다시)
+  const saveFound = (cardId: string, withoutPlace = false): Promise<void> =>
     act(async () => {
       setCardFail(null);
       setWork({ id: cardId, step: 'save' });
       try {
-        toast(await saveCard(cardId));
+        toast(await (withoutPlace ? saveCardWithoutPlace(cardId) : saveCard(cardId)));
       } catch (e) {
-        setCardFail({ id: cardId, message: userMessage(e, '일정을 저장하지 못했어요'), retry: () => void saveFound(cardId) });
+        setCardFail({ id: cardId, message: userMessage(e, '일정을 저장하지 못했어요'), retry: () => void saveFound(cardId, withoutPlace) });
       } finally {
         setWork(null);
         await reload();
@@ -410,6 +411,7 @@ export default function AiScreen() {
         onEdit={real ? undefined : () => router.push({ pathname: '/schedule/new', params: { from: 'chat' } })}
         onReject={() => rejectFound(card.id)}
         onPickPlace={() => setPlaceCardId(card.id)}
+        onSaveWithoutPlace={real ? () => saveFound(card.id, true) : undefined}
         onOpen={appointmentId ? () => router.push({ pathname: '/alarm/[id]', params: { id: appointmentId } }) : undefined}
         onManual={() => router.push('/schedule/new')}
         disabled={busy || thinking || !!work}

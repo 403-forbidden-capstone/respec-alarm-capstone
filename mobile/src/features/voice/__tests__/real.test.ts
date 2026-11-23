@@ -1,7 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { beforeEach, describe, expect, it, jest } from '@jest/globals';
 
-import { createAppointment, createStandaloneAlarm, estimateAppointment, getAppointment, listPlaces, previewAlarms, saveAlarmSettings } from '@/features/alarm/api';
+import { createAppointment, createPlacePendingAppointment, createStandaloneAlarm, estimateAppointment, getAppointment, listPlaces, previewAlarms, saveAlarmSettings } from '@/features/alarm/api';
 import type { Estimate } from '@/features/alarm/types';
 import * as clock from '@/lib/clock';
 import { now } from '@/lib/clock';
@@ -11,7 +11,7 @@ import { UserError } from '@/lib/errors';
 import { applyFix } from '../fixes';
 import { addPendingCommit } from '../finishedSessions';
 import { clearSavedMarksForUser, SAVED_MARK_TTL_MS } from '../savedMarks';
-import { beginLive, COMMIT_TIMEOUT_MS, endLive, finishConversation, flushCommits, getConversation, liveSessionId, pickCardPlace, rejectCard, resetVoiceState, retry, saveCard, say, sayVoice, TURN_TIMEOUT_MS } from '../real';
+import { beginLive, COMMIT_TIMEOUT_MS, endLive, finishConversation, flushCommits, getConversation, liveSessionId, pickCardPlace, rejectCard, resetVoiceState, retry, saveCard, saveCardWithoutPlace, say, sayVoice, TURN_TIMEOUT_MS } from '../real';
 
 // 실데이터 대화(real.ts)를 가짜 서버 함수(callEdge) + 가짜 L1 · L2 함수로 시험 — 서버 함수 voice-session · voice-turn은 별도 PR(배포 전엔 이 가짜 응답으로 확인)
 jest.mock('@/lib/edge', () => ({ ...jest.requireActual<typeof import('@/lib/edge')>('@/lib/edge'), callEdge: jest.fn() }));
@@ -19,6 +19,7 @@ let mockUser: string | null = 'user-1'; // 로그인한 사용자 (null = 로그
 jest.mock('@/lib/user', () => ({ currentUserId: async () => mockUser, requireUserId: async () => mockUser }));
 jest.mock('@/features/alarm/api', () => ({
   createAppointment: jest.fn(),
+  createPlacePendingAppointment: jest.fn(),
   createStandaloneAlarm: jest.fn(),
   estimateAppointment: jest.fn(),
   getAppointment: jest.fn(),
@@ -35,6 +36,7 @@ const mGet = getAppointment as unknown as jest.Mock<(id: string) => Promise<unkn
 const mPlaces = listPlaces as unknown as jest.Mock<(q?: string) => Promise<unknown[]>>;
 const mPreview = previewAlarms as unknown as jest.Mock<(id: string, edits: Record<string, unknown>) => Promise<unknown>>;
 const mSettings = saveAlarmSettings as unknown as jest.Mock<(id: string, draft: Record<string, unknown>) => Promise<unknown>>;
+const mPending = createPlacePendingAppointment as unknown as jest.Mock<(input: Record<string, unknown>) => Promise<unknown>>;
 const mStandalone = createStandaloneAlarm as unknown as jest.Mock<(input: Record<string, unknown>) => Promise<unknown>>;
 const mFix = applyFix as unknown as jest.Mock<(fix: Record<string, unknown>) => Promise<unknown>>;
 
@@ -410,7 +412,7 @@ describe('③ 2단 턴 — 앱 일 → results → 마지막 답', () => {
       fixes: [],
     });
     // 장소 이름이 내가 쓴 곳에 똑같이 하나라 그 좌표로 계산
-    expect(mPlaces).toHaveBeenCalledWith('강남역');
+    expect(mPlaces).toHaveBeenCalledWith(); // 내가 쓴 곳(최근 장소)에서만 — 카카오 검색으로 확정하지 않음
     expect(mEstimate).toHaveBeenCalledWith(expect.objectContaining({ place: '강남역', placeLat: 37.4979, placeLng: 127.0276, items: '노트북,충전기', importance: 'HIGH', transport: 'TRANSIT' }));
     expect(c.messages.at(-1)?.text).toContain('저장할까요');
     expect(c.cards[0]).toMatchObject({ id: 'c1', status: 'READY', title: '캡스톤 발표', place: '강남역', items: ['노트북', '충전기'] });
@@ -480,6 +482,54 @@ describe('⑤ 장소 필요 → 장소 고르기 → 계산 → 준비', () => {
     c = await getConversation();
     expect(c.cards[0].status).toBe('READY');
     expect(c.messages.at(-1)?.text).toBe('저장할까요?');
+  });
+
+  it("들은 장소('한실')가 내가 쓴 곳에 없으면 검색 결과가 있어도 확정하지 않음 — NEEDS_PLACE, 이동 · 알람 계산 안 함", async () => {
+    // 최근 장소에는 없고, 카카오 검색이었다면 같은 이름 가게가 하나 걸렸을 이름
+    mPlaces.mockImplementation(async (q?: string) => (q ? [{ name: '한실', lat: 35.1, lng: 129.0 }] : [{ name: '학교 도서관', lat: 37.55, lng: 127.07 }]));
+    script = [session(), turn({ next: 'APP_TASKS', reply: null, cards: [apptCard({ draft: { ...draftOf(), place: '한실' } })] }), turn({ rev: 3, cards: [apptCard({ status: 'NEEDS_PLACE' })] })];
+    await getConversation();
+    const c = await say('내일 한실에서 캡스톤 회의가 있어');
+    expect(mPlaces).toHaveBeenCalledWith();
+    expect(mPlaces).not.toHaveBeenCalledWith('한실');
+    expect(mEstimate).not.toHaveBeenCalled();
+    expect((turnBodies()[1].results as { cards: { status: string; error: string }[] }).cards[0]).toMatchObject({ status: 'NEEDS_PLACE', estimate: null, error: "'한실'의 위치를 골라 주세요" });
+    expect(c.cards[0].status).toBe('NEEDS_PLACE');
+  });
+
+  it('[장소 없이 저장] — 장소를 골라야 하는 새 일정을 제목 · 날짜 · 시각만으로 저장(들은 장소 · 이동 · 알람 없음), 저장된 뒤에만 SAVED를 알림', async () => {
+    mPlaces.mockImplementation(async () => []);
+    mPending.mockImplementation(async (input: Record<string, unknown>) => ({ id: 'ap-pp', title: input.title, alarms: [], level: 1 }));
+    script = [session(), turn({ next: 'APP_TASKS', reply: null, cards: [apptCard({ draft: { ...draftOf(), place: '한실' } })] }), turn({ rev: 3, cards: [apptCard({ status: 'NEEDS_PLACE', draft: { ...draftOf(), place: '한실' } })] }), turn({ rev: 4 })];
+    await getConversation();
+    await say('내일 한실에서 캡스톤 발표가 있어');
+    expect(await saveCardWithoutPlace('c1')).toBe('캡스톤 발표 일정을 저장했어요. 장소를 정하면 알람을 맞출 수 있어요');
+    expect(mPending).toHaveBeenCalledWith({ title: '캡스톤 발표', at: at(10, 0), importance: 'HIGH' }); // 들은 장소 '한실'은 보내지 않음
+    expect(mEstimate).not.toHaveBeenCalled();
+    expect(mCreate).not.toHaveBeenCalled();
+    expect(turnBodies().at(-1)?.card_action).toEqual({ id: 'c1', action: 'SAVED', appointment_id: 'ap-pp', alarms: [] });
+    expect((await getConversation()).cards[0].status).toBe('SAVED');
+  });
+
+  it('[장소 없이 저장]이 실패하면 던지고 카드는 장소 필요 그대로(서버에 SAVED 안 알림) · 장소가 정해진 카드에는 쓸 수 없음', async () => {
+    mPlaces.mockImplementation(async () => []);
+    mPending.mockImplementation(async () => {
+      throw new UserError('네트워크 오류');
+    });
+    script = [session(), turn({ next: 'APP_TASKS', reply: null, cards: [apptCard()] }), turn({ rev: 3, cards: [apptCard({ status: 'NEEDS_PLACE' })] })];
+    await getConversation();
+    await say('내일 10시 발표');
+    const sent = turnBodies().length;
+    await expect(saveCardWithoutPlace('c1')).rejects.toThrow('네트워크 오류');
+    expect(turnBodies()).toHaveLength(sent);
+    expect((await getConversation()).cards[0].status).toBe('NEEDS_PLACE');
+
+    resetVoiceState();
+    mPlaces.mockImplementation(async () => [{ name: '강남역', lat: 37.4979, lng: 127.0276 }]);
+    script = [session(), turn({ next: 'APP_TASKS', reply: null, cards: [apptCard()] }), turn({ rev: 3, cards: [apptCard({ status: 'READY' })] })];
+    await getConversation();
+    await say('내일 10시 강남역에서 발표');
+    await expect(saveCardWithoutPlace('c1')).rejects.toThrow('장소를 골라야 하는 새 일정만');
   });
 
   it('좌표가 없는 장소를 고르면 막음', async () => {
@@ -815,7 +865,33 @@ describe('알람 바꾸기 · 알람 만들기 카드', () => {
     await say('9시 반에 깨워줘');
     const result = (turnBodies()[1].results as { cards: { status: string; error: string }[] }).cards[0];
     expect(result.status).toBe('FAILED');
-    expect(result.error).toContain('빠를 수 없어요');
+    expect(result.error).toBe('기상 알람(오전 9:30)이 준비 알람(오전 8:20)보다 늦어요 — 시각을 다시 알려 주세요'); // 준비 +15와 같이 와서 요청이 둘 — 조정안 없이 다시 물음
+  });
+
+  it('기상만 바꾸면 준비 알람은 지금 시각에 둠 — 미리 보기 · 저장 모두 (요청하지 않은 알람을 옮기지 않음)', async () => {
+    mPreview.mockImplementation(async () => ({ alarms: [ring('WAKE', 8, 0), ring('PREPARE', 8, 20), ring('DEPARTURE', 9, 0), ring('ARRIVE', 10, 0)] }));
+    const wakeOnly = editCard({ edit: { appointment_id: 'ap1', times: { WAKE: at(8, 0).toISOString() } } });
+    script = [session(), turn({ next: 'APP_TASKS', reply: null, cards: [wakeOnly] }), turn({ rev: 3, cards: [{ ...wakeOnly, status: 'READY' }] }), turn({ rev: 4 })];
+    await getConversation();
+    await say('기상 알람을 오전 8시로 변경해줘');
+    const edits = mPreview.mock.calls[0][1] as { times: Record<string, Date> };
+    expect(edits.times).toEqual({ WAKE: at(8, 0), PREPARE: at(8, 20) }); // 준비 08:20 그대로 (따라 밀리지 않음)
+    await saveCard('c2');
+    expect(mSettings).toHaveBeenCalledWith('ap1', expect.objectContaining({ times: { WAKE: at(8, 0), PREPARE: at(8, 20) } }));
+  });
+
+  it('기상을 준비보다 늦게 바꾸면 FAILED — 부딪히는 두 시각과 조정안(준비도 같은 만큼)을 알리고 준비는 옮기지 않음', async () => {
+    mPreview.mockImplementation(async () => ({ alarms: [ring('WAKE', 8, 30), ring('PREPARE', 8, 20), ring('DEPARTURE', 9, 0), ring('ARRIVE', 10, 0)] }));
+    const late = editCard({ edit: { appointment_id: 'ap1', times: { WAKE: at(8, 30).toISOString() } } });
+    script = [session(), turn({ next: 'APP_TASKS', reply: null, cards: [late] }), turn({ rev: 3 })];
+    await getConversation();
+    await say('기상 8시 반으로 바꿔줘');
+    const result = (turnBodies()[1].results as { cards: { status: string; error: string }[] }).cards[0];
+    expect(result.status).toBe('FAILED');
+    // 지금 기상 07:40 → 08:30 (+50분) → 준비 08:20 + 50분 = 09:10 안
+    expect(result.error).toBe('기상 알람(오전 8:30)이 준비 알람(오전 8:20)보다 늦어요 — 준비도 오전 9:10에 맞출지 알려 주세요');
+    expect(result.error.length).toBeLessThanOrEqual(80); // 서버가 80자에서 자름
+    expect(mSettings).not.toHaveBeenCalled();
   });
 
   it('약속 없는 알람 카드는 계산 없이 바로 준비 → [저장]이 createStandaloneAlarm', async () => {

@@ -23,6 +23,9 @@ export interface AppointmentRow {
   dest_name: string;
   importance: Importance;
   recurrence_rule: string | null;
+  /** 그룹 약속이면 그룹 id (NULL = 개인 일정) · 그룹 이름은 groups 임베드 — 읽은 쪽이 안 주면 칸 없음 */
+  group_id?: string | null;
+  groups?: { group_name: string } | null;
 }
 
 export interface ParticipantRow {
@@ -264,16 +267,18 @@ export function appointmentOf(j: ParticipantJoin, ref: string): Appointment {
     ref, title: j.appointment.title, date: p.date, time: p.time, place: j.appointment.dest_name === "" ? null : j.appointment.dest_name,
     importance: j.appointment.importance, importance_confirmed: true, transport: j.transport_type, travel_minutes: j.est_travel_minutes,
     repeat: repeatOf(j.appointment.recurrence_rule),
+    ...(j.appointment.group_id ? { group: j.appointment.groups?.group_name ?? "" } : {}),
   };
 }
 
 export interface AlarmsInput {
-  /** 내일(morning) 내 약속 */
+  /** 내일(morning) 내 약속 (+ 고칠 대상 찾기용 이후 약속) */
   tomorrow: { participant_id: string; ref: string }[];
   alarms: AlarmRow[];
   morning: LocalDate;
-  /** 지금(ISO) — 일정 없는 기상은 지금 뒤 ~ morning 24시까지만 */
+  /** 지금(ISO) — 일정 없는 기상은 지금 뒤 ~ until(기본 morning) 24시까지만 */
   now: string;
+  until?: LocalDate;
 }
 
 /**
@@ -284,7 +289,7 @@ export interface AlarmsInput {
 export function alarmsOf(input: AlarmsInput): { alarms: AlarmPlan[]; refs: RefsOut["alarms"] } {
   const refOf = new Map(input.tomorrow.map((t) => [t.participant_id, t.ref] as const));
   const nowMs = dbMs(input.now);
-  const endMs = dbMs(`${addDays(input.morning, 1)}T00:00:00+09:00`);
+  const endMs = dbMs(`${addDays(input.until ?? input.morning, 1)}T00:00:00+09:00`);
   const mine: { row: AlarmRow; appt: string | null; ms: number }[] = [];
   for (const row of input.alarms) {
     if (row.alarm_type === "ROUTINE" || row.routine_id !== null) continue;
@@ -354,6 +359,9 @@ export interface ContextInput {
   confirmFactIds?: string[];
 }
 
+/** 내일 뒤 며칠까지 고칠 대상(약속 · 알람)으로 읽을지 — "25일 알람 바꿔줘"를 찾으려고. 이 날들은 대화 화제가 아니라 찾기용 */
+export const LATER_DAYS = 7;
+
 export interface ContextOut {
   context: Context;
   refs: RefsOut;
@@ -369,9 +377,11 @@ export function buildContext(input: ContextInput): ContextOut {
   const byTime = (a: ParticipantJoin, b: ParticipantJoin): number => dbMs(a.appointment.appointment_at) - dbMs(b.appointment.appointment_at) || (a.participant_id < b.participant_id ? -1 : 1);
   const reviewJoins = input.participants.filter((j) => dayOfJoin(j) === review).sort(byTime);
   const morningJoins = input.participants.filter((j) => dayOfJoin(j) === morning).sort(byTime);
+  const until = addDays(morning, LATER_DAYS);
+  const laterJoins = input.participants.filter((j) => dayOfJoin(j) > morning && dayOfJoin(j) <= until).sort(byTime);
   const refMap = new Map<string, string>();
   const refs: RefsOut = { appointments: {}, alarms: {}, facts: {} };
-  [...reviewJoins, ...morningJoins].forEach((j, i) => {
+  [...reviewJoins, ...morningJoins, ...laterJoins].forEach((j, i) => {
     const ref = `a${i + 1}`;
     refMap.set(j.participant_id, ref);
     refs.appointments[ref] = { appointment_id: j.appointment_id, participant_id: j.participant_id };
@@ -383,8 +393,11 @@ export function buildContext(input: ContextInput): ContextOut {
   const { facts, refs: factRefs } = factsOf({ review, participants: reviewJoins, wake: input.wake, earlier, apptRefOf });
   refs.facts = factRefs;
 
-  const al = alarmsOf({ tomorrow: morningJoins.map((j) => ({ participant_id: j.participant_id, ref: refMap.get(j.participant_id) as string })), alarms: input.alarms, morning, now: input.now });
+  const al = alarmsOf({ tomorrow: [...morningJoins, ...laterJoins].map((j) => ({ participant_id: j.participant_id, ref: refMap.get(j.participant_id) as string })), alarms: input.alarms, morning, now: input.now, until });
   refs.alarms = al.refs;
+  // 이후 약속에 딸린 알람 · 내일 뒤 날짜의 일정 없는 기상은 later로 (내일 블록 · 준비시간 계산에는 안 섞음)
+  const laterRefs = new Set(laterJoins.map((j) => refMap.get(j.participant_id) as string));
+  const isLater = (a: AlarmPlan): boolean => (a.appointment_ref !== null ? laterRefs.has(a.appointment_ref) : a.date > morning);
   const stuff = itemsOf(input.todos, morningJoins.map((j) => j.appointment_id), morning);
   const question = input.question ?? null;
 
@@ -394,7 +407,8 @@ export function buildContext(input: ContextInput): ContextOut {
     dates: datesOf(review),
     user: { alias: "u0", name: userNameOf(input.nickname) },
     today: { facts, appointments: reviewJoins.map(toAppt), alarms: [], items: [], todos: [] },
-    tomorrow: { appointments: morningJoins.map(toAppt), alarms: al.alarms, items: stuff.items, todos: stuff.todos },
+    tomorrow: { appointments: morningJoins.map(toAppt), alarms: al.alarms.filter((a) => !isLater(a)), items: stuff.items, todos: stuff.todos },
+    ...(laterJoins.length > 0 || al.alarms.some(isLater) ? { later: { appointments: laterJoins.map(toAppt), alarms: al.alarms.filter(isLater) } } : {}),
     question,
     editable_users: [], // 친구 알람은 v0 범위 밖 (설계 메모 4절)
     events: [],

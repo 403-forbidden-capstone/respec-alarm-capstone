@@ -5,9 +5,9 @@ import { Text } from '@/components/ui';
 import { timeParts } from '@/lib/format';
 import { colors } from '@/theme';
 
-import { IMPORTANCE_LABEL, type ScheduleItem } from '../types';
+import { IMPORTANCE_LABEL, PLACE_PENDING_LABEL, type ScheduleItem } from '../types';
 
-// 하루 일정 줄 (.srow) — 알람 있는 일정은 진한 막대 · 누르면 알람 설정, 알람 없는 일정은 흐린 막대 · 누를 수 없음 (일정 수정 · 삭제 입구는 D41이 정함)
+// 하루 일정 줄 (.srow) — 알람 있는 일정은 진한 막대, 알람 없는 일정은 흐린 막대. 누르면 알람 설정(H03) — 알람 없는 일정은 알람 칸 없이 열려 장소를 정하고 알람을 만듦 (D41 A)
 export function ScheduleList({ items }: { items: ScheduleItem[] }) {
   if (!items.length) {
     return (
@@ -36,14 +36,14 @@ export function ScheduleList({ items }: { items: ScheduleItem[] }) {
                 {item.title}
               </Text>
               <Text variant="label" tone="sub">
-                {item.hasAlarm ? `${item.place} · ${IMPORTANCE_LABEL[item.importance]}` : `${item.place} · 알람 없는 일정`}
+                {item.hasAlarm ? `${item.place || PLACE_PENDING_LABEL} · ${IMPORTANCE_LABEL[item.importance]}` : `${item.place || PLACE_PENDING_LABEL} · 알람 없는 일정`}
               </Text>
             </View>
           </>
         );
         const style = [styles.row, i > 0 && styles.divider];
         const id = item.appointmentId;
-        return item.hasAlarm ? (
+        return (
           <Pressable
             key={`${id}-${i}`}
             onPress={() => router.push({ pathname: '/alarm/[id]', params: { id } })}
@@ -52,10 +52,6 @@ export function ScheduleList({ items }: { items: ScheduleItem[] }) {
           >
             {inner}
           </Pressable>
-        ) : (
-          <View key={`plain-${id}-${i}`} style={style}>
-            {inner}
-          </View>
         );
       })}
     </View>

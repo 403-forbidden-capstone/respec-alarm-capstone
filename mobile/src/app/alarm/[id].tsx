@@ -4,9 +4,9 @@ import { useEffect, useState } from 'react';
 import { Platform, StyleSheet, View } from 'react-native';
 
 import { Button, Card, Chip, DateSheet, EmptyState, KeyValueRow, Loading, LoadError, Screen, Sheet, Stepper, Text, toast, Toggle, TopBar } from '@/components/ui';
-import { getAppointment, listOccurrences, listPlaces, previewAlarms, saveAlarmSettings } from '@/features/alarm/api';
+import { getAppointment, listOccurrences, listPlaces, listStandaloneWakes, previewAlarms, saveAlarmSettings } from '@/features/alarm/api';
 import { canConfirmPrepStartAt, confirmPrepStartSelfReport, loadPrepStartSelfReport } from '@/features/alarm/selfReportedPrep';
-import { isManualTime, manualTimes, moveAlarm, orderError, resetAlarm, sameEdits, shownPreview, timeInputsChanged } from '@/features/alarm/adjust';
+import { isManualTime, linkWakeTimes, manualTimes, moveAlarm, orderError, resetAlarm, sameEdits, shownPreview, timeInputsChanged } from '@/features/alarm/adjust';
 import { FormulaBox } from '@/features/alarm/components/FormulaBox';
 import { OccurrenceList } from '@/features/alarm/components/OccurrenceList';
 import { OptionGrid } from '@/features/alarm/components/OptionGrid';
@@ -29,6 +29,7 @@ import {
   LEVELS,
   MANUAL_SOURCE,
   ORIGIN_HOME,
+  PLACE_PENDING_LABEL,
   TRANSPORT_OPTIONS,
   type AlarmEdits,
   type AlarmKind,
@@ -37,6 +38,7 @@ import {
   type IntensityAxis,
   type Level,
   type RingKind,
+  type StandaloneWake,
   type Transport,
 } from '@/features/alarm/types';
 import { now } from '@/lib/clock';
@@ -58,7 +60,7 @@ type Levels = Record<IntensityAxis, Level | null>; // null = 자동
 // 모두 초안으로 들고 있다가 "저장"에서 한 번에 반영 (고친 값은 고친 값 기록에 남음)
 export default function AlarmDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
-  const { data, error, reload } = useLoad(() => getAppointment(id));
+  const { data, error, reload } = useLoad(() => getAppointment(id, { withoutAlarms: true })); // 알람 없는 일정도 엶 — 장소를 정하고 알람을 만듦 (D41 A)
 
   if (data === undefined) {
     return (
@@ -113,6 +115,13 @@ function Detail({ appointment: a, reload }: { appointment: AppointmentDetail; re
   const [changes, setChanges] = useState<AlarmChange[] | null>(null); // 확인 시트에 보여 줄 바뀌는 알람
   const [travelConfirm, setTravelConfirm] = useState<TravelFallback | null>(null); // 길찾기를 못 해 어림값을 확인받는 시트 (실데이터)
   const [pickKind, setPickKind] = useState<RingKind | null>(null); // 시각을 고르는 시트가 열린 알람
+  // 알람 없는 일정(장소 미정 · 장소를 나중에 정함 · 알람 없이 저장) — 알람 칸 없이 열고(D41 A), [알람 계산해 보기]를 눌러야 미리 보기 · 저장
+  const noAlarms = !a.alarms.length;
+  const placePending = !a.place; // 장소 미정이면 이동시간을 구할 수 없어 계산하지 않음
+  const [showAlarms, setShowAlarms] = useState(!noAlarms);
+  // 같은 날 일정 없는 기상 알람 — 이 일정에 기상이 새로 생기면 저장 전에 합칠지 따로 둘지 물음. 고른 답: 알람 = 합침, null = 따로 둠, undefined = 아직 안 물음
+  const [wakeDup, setWakeDup] = useState<StandaloneWake[] | null>(null);
+  const [wakeChoice, setWakeChoice] = useState<StandaloneWake | null | undefined>(undefined);
   const { data: places } = useLoad(listPlaces);
   // 반복 일정의 앞으로 회차 — 덧붙임 줄이라 못 읽어도 화면은 그대로 (없는 것으로). 둘 이상일 때만 보임
   const { data: occurrences, reload: reloadOccurrences } = useLoad(() => listOccurrences(a.id));
@@ -125,6 +134,7 @@ function Detail({ appointment: a, reload }: { appointment: AppointmentDetail; re
   const saved = savedKinds(a);
   const savedLv = savedLevels(a);
   const dirty =
+    (noAlarms && preview.alarms.length > 0) || // 알람 없는 일정에 계산한 알람이 있으면 저장(만들기)할 수 있음
     !sameEdits(edits, a.edits) ||
     ringingKinds(a.alarms).some((x) => kinds[x.kind] !== saved[x.kind]) ||
     AXES.some(([axis]) => levels[axis] !== savedLv[axis]);
@@ -132,6 +142,7 @@ function Detail({ appointment: a, reload }: { appointment: AppointmentDetail; re
 
   // 값을 바꾸면 알람 시각을 다시 계산 (저장 전 미리 보기)
   useEffect(() => {
+    if (!showAlarms) return;
     let cancelled = false;
     previewAlarms(a.id, edits)
       .then((next) => {
@@ -142,9 +153,10 @@ function Detail({ appointment: a, reload }: { appointment: AppointmentDetail; re
     return () => {
       cancelled = true;
     };
-  }, [a.id, edits, a.alarms]);
+  }, [a.id, edits, a.alarms, showAlarms]);
 
-  const view = shownPreview(edits, a.edits, savedPreview(a), preview); // 입력을 안 바꿨으면 저장된 알람 시각 (adjust.ts)
+  const view = noAlarms ? preview : shownPreview(edits, a.edits, savedPreview(a), preview); // 입력을 안 바꿨으면 저장된 알람 시각 (adjust.ts). 알람 없는 일정은 계산한 값
+  const wakeAdded = !a.alarms.some((x) => x.kind === 'WAKE') && view.alarms.some((x) => x.kind === 'WAKE') && kinds.WAKE !== false; // 이번 저장으로 기상이 새로 생김
   const first = view.alarms[0] ?? a.alarms[0];
   const blocked = orderError(view.alarms); // 순서가 뒤집히면 저장을 막음
   const manualAny = view.alarms.some(isManualTime);
@@ -162,8 +174,10 @@ function Detail({ appointment: a, reload }: { appointment: AppointmentDetail; re
   const picking = pickKind ? view.alarms.find((x) => x.kind === pickKind) : undefined;
 
   // travelMinutes = 확인 시트에서 사용자가 확인한 어림 이동시간 — 예상 이동에 직접 입력한 값으로 넣어 저장(MANUAL)
-  async function apply(travelMinutes?: number) {
-    const draft = { ...edits, ...(travelMinutes != null ? { travelMinutes } : {}), kinds, levels };
+  //   choice = 같은 날 일정 없는 기상 알람을 합칠지(그 알람) · 따로 둘지(null) — 확인 시트에서 고른 값. 이동시간 · 시각 확인 시트를 거쳐 다시 불려도 고른 값을 씀
+  async function apply(travelMinutes?: number, choice: StandaloneWake | null | undefined = wakeChoice) {
+    const link = choice ? { times: linkWakeTimes(view.alarms, edits.times, choice.at), linkWakeAlarmId: choice.id } : {};
+    const draft = { ...edits, ...(travelMinutes != null ? { travelMinutes } : {}), kinds, levels, ...link };
     const moved = timeInputsChanged(draft, a.edits);
     let result: Awaited<ReturnType<typeof saveAlarmSettings>>;
     try {
@@ -175,23 +189,29 @@ function Detail({ appointment: a, reload }: { appointment: AppointmentDetail; re
         setTravelConfirm({ minutes: e.minutes, source: e.source });
         return;
       }
+      setWakeChoice(undefined); // 저장이 안 됐으면 다음 저장에서 기상 합치기를 다시 물음
       throw e;
     }
     const { turnedOff, turnedOn } = result;
     setChanges(null);
     setTravelConfirm(null);
+    setWakeChoice(undefined);
     // 확인한 이동시간은 이제 직접 입력으로 저장됨 — 화면의 초안도 같은 값으로 맞춰 "저장 전" 표시(저장 버튼 · 나갈 때 묻기)가 남지 않게
     if (travelMinutes != null) setEdit({ travelMinutes });
     // 저장은 됐는데 폰에 못 건 알람이 있으면 그 사실을 먼저 (saveNotice.ts)
     toast(
       saveNotice(result.followUp, '저장했지만') ??
-        (turnedOff
-          ? '알람을 모두 꺼서 이 일정 알람이 꺼졌어요'
-          : turnedOn
-            ? '알람을 켜서 이 일정 알람도 다시 켰어요'
-            : moved
-              ? '알람 시각을 다시 계산했어요'
-              : '저장했어요'),
+        (choice
+          ? `${formatTime(choice.at)} 기상 알람을 이 일정의 기상 알람으로 합쳤어요`
+          : noAlarms
+            ? '알람을 만들었어요'
+            : turnedOff
+              ? '알람을 모두 꺼서 이 일정 알람이 꺼졌어요'
+            : turnedOn
+              ? '알람을 켜서 이 일정 알람도 다시 켰어요'
+              : moved
+                ? '알람 시각을 다시 계산했어요'
+                : '저장했어요'),
     );
     await Promise.all([reload(), reloadOccurrences()]); // 저장으로 알람이 바뀌면 회차 목록의 첫 알람 시각도 다시
   }
@@ -199,17 +219,46 @@ function Detail({ appointment: a, reload }: { appointment: AppointmentDetail; re
   function save() {
     if (!dirty || blocked) return;
     void run(async () => {
-      // 여유 · 출발 위치 · 이동 수단 · 이동 · 준비로 알람 시각이 5분 이상 바뀌면 한 번 더 확인 — 여유를 1분 단위로 고쳐 5분 미만이면 묻지 않고 저장 (D12)
-      //   미리 보기가 늦게 올 수 있어(실데이터는 서버 계산) 저장할 때 다시 계산한 값으로 비교
-      if (timeInputsChanged(edits, a.edits)) {
-        const moved = changedAlarms(a.alarms, (await previewAlarms(a.id, edits)).alarms);
-        if (needsMoveConfirm(moved)) {
-          setChanges(moved);
+      // 새 저장은 이전 저장 흐름의 합치기 선택을 쓰지 않음 — 매번 지금 사용자의 선택으로
+      setWakeChoice(undefined);
+      // 이 저장으로 기상이 새로 생기는데 같은 날 직접 만든 기상 알람이 있으면 먼저 물음 — 묻지 않고 지우거나 합치지 않음
+      if (wakeAdded) {
+        const wakes = await listStandaloneWakes(a.at);
+        if (wakes.length) {
+          setWakeDup(wakes);
           return;
         }
       }
-      await apply();
+      await confirmMoveOrApply(undefined);
     }, '저장하지 못했어요');
+  }
+
+  // 기상 확인 시트 바깥 누름 — 저장하지 않고 닫음, 고른 것 없음
+  function closeWakeDup() {
+    if (busy) return;
+    setWakeDup(null);
+    setWakeChoice(undefined);
+  }
+
+  // 기상 확인 시트에서 고름 — 합치기(그 알람) · 따로 두기(null)
+  function pickWake(choice: StandaloneWake | null) {
+    if (busy) return;
+    setWakeDup(null);
+    setWakeChoice(choice);
+    void run(() => confirmMoveOrApply(choice), '저장하지 못했어요');
+  }
+
+  async function confirmMoveOrApply(choice: StandaloneWake | null | undefined) {
+    // 여유 · 출발 위치 · 이동 수단 · 이동 · 준비로 알람 시각이 5분 이상 바뀌면 한 번 더 확인 — 여유를 1분 단위로 고쳐 5분 미만이면 묻지 않고 저장 (D12)
+    //   미리 보기가 늦게 올 수 있어(실데이터는 서버 계산) 저장할 때 다시 계산한 값으로 비교
+    if (timeInputsChanged(edits, a.edits)) {
+      const moved = changedAlarms(a.alarms, (await previewAlarms(a.id, edits)).alarms);
+      if (needsMoveConfirm(moved)) {
+        setChanges(moved);
+        return;
+      }
+    }
+    await apply(undefined, choice);
   }
 
   // 확인 시트 "바꾸기" — 저장과 같은 잠금으로 연타를 막음
@@ -228,6 +277,7 @@ function Detail({ appointment: a, reload }: { appointment: AppointmentDetail; re
   function editTravel() {
     if (busy) return;
     setTravelConfirm(null);
+    setWakeChoice(undefined); // 이번 저장은 끝남 — 다시 저장하면 합치기도 다시 물음
   }
 
   // 시트 "그대로 두기" · 바깥 누름 — 알람 시각을 밀어 움직이는 입력만 되돌림 (D34). 직접 고른 알람 시각은 그대로
@@ -236,6 +286,7 @@ function Detail({ appointment: a, reload }: { appointment: AppointmentDetail; re
     const { bufferMinutes, origin, transport, travelMinutes, prepareMinutes } = a.edits;
     setEdit({ bufferMinutes, origin, transport, travelMinutes, prepareMinutes });
     setChanges(null);
+    setWakeChoice(undefined); // 저장을 그만둠 — 고른 합치기를 다음 저장에 쓰지 않음
   }
 
   // 저장은 화면 아래에 고정 — 폼이 길어 스크롤 끝까지 내려가지 않아도 보이게. 바뀐 게 없거나 순서가 뒤집혔으면 못 누름
@@ -262,7 +313,7 @@ function Detail({ appointment: a, reload }: { appointment: AppointmentDetail; re
   }
 
   return (
-    <Screen footer={footer}>
+    <Screen footer={showAlarms ? footer : undefined}>
       <TopBar onBack={backOrHome} screenId="H03" />
       <Text variant="title" style={styles.title}>
         알람 설정
@@ -270,7 +321,7 @@ function Detail({ appointment: a, reload }: { appointment: AppointmentDetail; re
       <Text variant="lead" style={styles.lead}>
         {formatDateShort(a.at)} ·{' '}
         <Text variant="lead" tone="ink">
-          {formatTime(first.at)} {KIND_LABEL[first.kind]}
+          {first ? `${formatTime(first.at)} ${KIND_LABEL[first.kind]}` : '알람 없음'}
         </Text>
       </Text>
 
@@ -288,7 +339,7 @@ function Detail({ appointment: a, reload }: { appointment: AppointmentDetail; re
           </View>
         </View>
         <Text variant="small" tone="sub" style={styles.sub}>
-          {formatTime(a.at)} · {a.place} · {a.repeatLabel}
+          {formatTime(a.at)} · {a.place || PLACE_PENDING_LABEL} · {a.repeatLabel}
         </Text>
       </Card>
 
@@ -331,209 +382,229 @@ function Detail({ appointment: a, reload }: { appointment: AppointmentDetail; re
         />
       ) : null}
 
-      <Card>
-        <Text variant="label" tone="sub" style={styles.label}>
-          이동 조건
-        </Text>
-        <SelectRow first label="출발 위치" value={edits.origin} options={originOptions} onChange={(origin) => setEdit({ origin })} />
-        <SelectRow<Transport> label="이동 수단" value={edits.transport} options={TRANSPORT_OPTIONS} onChange={(transport) => setEdit({ transport })} />
-        <Stepper
-          label="예상 이동"
-          value={travel}
-          onChange={(next) => setEdit({ travelMinutes: next === view.autoTravelMinutes ? null : next })}
-          min={1}
-          max={240}
-          step={1}
-          unit="분"
-        />
-        <View style={styles.axisDesc}>
-          <Text variant="caption" tone="faint">
-            {edits.travelMinutes != null ? MANUAL_SOURCE : view.travelSource}
+      {showAlarms ? (
+        <>
+        <Card>
+          <Text variant="label" tone="sub" style={styles.label}>
+            이동 조건
           </Text>
-          {edits.travelMinutes != null ? (
-            <TextLink label="자동으로" accessibilityLabel="예상 이동 자동으로 되돌리기" onPress={() => setEdit({ travelMinutes: null })} />
-          ) : (
-            <View />
-          )}
-        </View>
-        {/* 길찾기를 못 한 미리 보기 (실데이터) — 직접 입력한 값이 있으면 문제가 아님 */}
-        {edits.travelMinutes == null && view.travelProblem ? (
-          <Text variant="caption" tone="warn" style={styles.note} accessibilityLiveRegion="polite">
-            {TRAVEL_PROBLEM_NOTE[view.travelProblem]}
-          </Text>
-        ) : null}
-      </Card>
-
-      <Card>
-        <Text variant="label" tone="sub" style={styles.label}>
-          준비 시간
-        </Text>
-        {a.beforePrepMinutes ? <KeyValueRow first label="준비 전 활동" value={`${a.beforePrepMinutes}분`} /> : null}
-        <KeyValueRow first={!a.beforePrepMinutes} label="실제 준비" value={`${a.prepMinutes}분`} />
-        {/* 실데이터는 실제 준비 = 예측 − 준비 전 활동이라 늘 0 → 더한 게 없으면 줄을 안 보임 */}
-        {margin > 0 ? <KeyValueRow label="넉넉히 더한 시간" value={`+${margin}분`} sub="늦지 않도록 실제 준비에 더했어요" /> : null}
-        <KeyValueRow label="예측 준비" value={`${a.auto.predictedPrepMinutes}분`} sub="내 기록이 쌓일수록 나에게 맞춰져요" />
-        <Stepper
-          label="준비 시간"
-          value={prepare}
-          onChange={(next) => setEdit({ prepareMinutes: next === view.autoPredictedPrepMinutes ? null : next })}
-          min={Math.max(5, a.beforePrepMinutes)}
-          max={240}
-          step={1}
-          unit="분"
-        />
-        {edits.prepareMinutes != null ? (
+          <SelectRow first label="출발 위치" value={edits.origin} options={originOptions} onChange={(origin) => setEdit({ origin })} />
+          <SelectRow<Transport> label="이동 수단" value={edits.transport} options={TRANSPORT_OPTIONS} onChange={(transport) => setEdit({ transport })} />
+          <Stepper
+            label="예상 이동"
+            value={travel}
+            onChange={(next) => setEdit({ travelMinutes: next === view.autoTravelMinutes ? null : next })}
+            min={1}
+            max={240}
+            step={1}
+            unit="분"
+          />
           <View style={styles.axisDesc}>
             <Text variant="caption" tone="faint">
-              직접 고름 · 자동은 {view.autoPredictedPrepMinutes}분
+              {edits.travelMinutes != null ? MANUAL_SOURCE : view.travelSource}
             </Text>
-            <TextLink label="자동으로" accessibilityLabel="준비 시간 자동으로 되돌리기" onPress={() => setEdit({ prepareMinutes: null })} />
+            {edits.travelMinutes != null ? (
+              <TextLink label="자동으로" accessibilityLabel="예상 이동 자동으로 되돌리기" onPress={() => setEdit({ travelMinutes: null })} />
+            ) : (
+              <View />
+            )}
           </View>
-        ) : null}
-        <Stepper
-          label="여유 시간"
-          value={edits.bufferMinutes}
-          onChange={(bufferMinutes) => setEdit({ bufferMinutes })}
-          min={0}
-          max={30}
-          step={1}
-          unit="분"
-        />
-      </Card>
+          {/* 길찾기를 못 한 미리 보기 (실데이터) — 직접 입력한 값이 있으면 문제가 아님 */}
+          {edits.travelMinutes == null && view.travelProblem ? (
+            <Text variant="caption" tone="warn" style={styles.note} accessibilityLiveRegion="polite">
+              {TRAVEL_PROBLEM_NOTE[view.travelProblem]}
+            </Text>
+          ) : null}
+        </Card>
 
-      <Card>
-        <Text variant="label" tone="sub" style={styles.label}>
-          알람 시각
-        </Text>
-        <FormulaBox
-          lines={[
-            `${KIND_LABEL[baseKind]} ${formatTime(base)} = 약속 ${formatTime(a.at)} − 여유 ${edits.bufferMinutes} − 이동 ${travel} − 준비 ${prepare}`,
-            ...(a.withWake && a.beforePrepMinutes ? [`준비 알람은 기상 후 준비 전 활동 ${a.beforePrepMinutes}분 뒤`] : []),
-            // 준비 시간이 어디서 왔는지 한 줄 — 4건까지 "배우는 중 N/5", 5건부터 "내 기록 기반 N건" (학습 루프 기초 ⑦, 통계 식은 안 보임 D47)
-            //   기록으로 맞추는 건 그날 첫 일정(기상 있음)뿐이고, 직접 고른 준비 시간이면 기록 기반이 아니라서 줄을 뺌. 서버가 기록 수를 주기 전(처음 그릴 때)에도 뺌
-            ...(a.withWake && edits.prepareMinutes == null && view.prepareSampleCount != null ? [`준비 ${prepare}분 · ${prepareSourceLabel(view.prepareSampleCount)}`] : []),
-            // 그 아래 한 줄 — 최근 기록 값 (학습 루프 기초 ⑦). 위 줄과 같은 조건이고, 기록이 없으면 줄이 없음
-            ...(a.withWake && edits.prepareMinutes == null && recentLine ? [recentLine] : []),
-          ]}
-        />
-        {view.alarms.map((x, i) => (
-          <KeyValueRow
-            key={x.kind}
-            first={i === 0}
-            label={`${KIND_LABEL[x.kind]}${x.kind === 'ARRIVE' ? ' 목표' : ''}`}
-            sub={isManualTime(x) ? '직접 고름' : undefined}
-            value={
-              x.kind === 'ARRIVE' ? (
-                formatTime(x.at)
-              ) : (
-                <View style={styles.timeRow}>
-                  <TimeButton
-                    label={formatTime(x.at)}
-                    manual={isManualTime(x)}
-                    accessibilityLabel={`${KIND_LABEL[x.kind]} 시각 ${formatTime(x.at)}, 눌러서 고르기`}
-                    onPress={() => setPickKind(x.kind as RingKind)}
-                  />
-                  <Toggle value={kinds[x.kind] ?? x.enabled} onChange={(on) => setKinds((k) => ({ ...k, [x.kind]: on }))} label={`${KIND_LABEL[x.kind]} 알람`} />
-                </View>
-              )
-            }
+        <Card>
+          <Text variant="label" tone="sub" style={styles.label}>
+            준비 시간
+          </Text>
+          {a.beforePrepMinutes ? <KeyValueRow first label="준비 전 활동" value={`${a.beforePrepMinutes}분`} /> : null}
+          <KeyValueRow first={!a.beforePrepMinutes} label="실제 준비" value={`${a.prepMinutes}분`} />
+          {/* 실데이터는 실제 준비 = 예측 − 준비 전 활동이라 늘 0 → 더한 게 없으면 줄을 안 보임 */}
+          {margin > 0 ? <KeyValueRow label="넉넉히 더한 시간" value={`+${margin}분`} sub="늦지 않도록 실제 준비에 더했어요" /> : null}
+          <KeyValueRow label="예측 준비" value={`${a.auto.predictedPrepMinutes}분`} sub="내 기록이 쌓일수록 나에게 맞춰져요" />
+          <Stepper
+            label="준비 시간"
+            value={prepare}
+            onChange={(next) => setEdit({ prepareMinutes: next === view.autoPredictedPrepMinutes ? null : next })}
+            min={Math.max(5, a.beforePrepMinutes)}
+            max={240}
+            step={1}
+            unit="분"
           />
-        ))}
-        {/* 웹은 폰 알람이 울리지 않아 저장된 알람으로 울림 화면을 미리 봄 — 끄면 다음 알람으로 이어짐 (ringPreview.ts) */}
-        {Platform.OS === 'web' ? (
-          <View style={styles.previewRow}>
-            <Text variant="caption" tone="faint">
-              웹 미리보기
-            </Text>
-            {a.alarms
-              .filter((x) => x.kind !== 'ARRIVE' && x.enabled)
-              .map((x) => (
-                <TextLink
-                  key={x.kind}
-                  label={`${KIND_LABEL[x.kind]} 울려 보기`}
-                  onPress={() => router.push({ pathname: '/ring', params: { alarm: previewAlarmId(a.id, x.kind as RingKind) } })}
-                />
-              ))}
-          </View>
-        ) : null}
-        {blocked ? (
-          <Text variant="caption" tone="warn" style={styles.note} accessibilityLiveRegion="polite">
-            {blocked}
-          </Text>
-        ) : null}
-        <Text variant="caption" tone="faint" style={styles.note}>
-          직접 고른 시각은 자동 계산보다 먼저 적용되고, 기상을 옮기면 준비도 같은 만큼 옮겨져요.
-        </Text>
-        {manualAny ? (
-          <View style={styles.reset}>
-            <TextLink label="모두 자동으로 되돌리기" onPress={() => setEdit({ times: {} })} />
-          </View>
-        ) : null}
-      </Card>
-
-      <Card>
-        <Text variant="label" tone="sub" style={styles.label}>
-          알람 강도
-        </Text>
-        {/* 점수 식은 안 보임 — 결과와 쉬운 말만 (H05 계산 근거와 같게, D47) */}
-        <Text variant="small" tone="sub">
-          자동 {LEVELS[a.intensity.auto].name} · 중요도 {IMPORTANCE_LABEL[a.importance]}
-          {a.intensity.latePoint > 0 ? ` · 최근 4주 늦잠 지각 ${a.intensity.lateCount}번` : ''}
-        </Text>
-        {/* 축별 선택(배경음 · 말소리 · 진동)은 flag로 숨길 수 있음 — 결정 안건(투표) 결과 대기 (lib/flags.ts ALARM_AXES_PICKER) */}
-        {(ALARM_AXES_PICKER ? AXES : []).map(([axis, name]) => {
-          const picked = levels[axis];
-          const level = picked ?? (axis === 'voice' ? a.intensity.voiceAuto : a.intensity.auto); // 말소리 자동 = 설정의 기본 말소리
-          return (
-            <View key={axis}>
-              <View style={styles.axis}>
-                <View style={styles.axisName}>
-                  <Text variant="rowLabel" tone="sub">
-                    {name}
-                  </Text>
-                  {picked != null ? (
-                    <Text variant="tiny" tone="sub" style={styles.manual}>
-                      직접 고름
-                    </Text>
-                  ) : null}
-                </View>
-                <OptionGrid
-                  size="mini"
-                  label={`${name} 강도`}
-                  options={LEVEL_OPTIONS}
-                  value={level}
-                  onChange={(next) => setLevels((l) => ({ ...l, [axis]: next }))}
-                />
-              </View>
-              <View style={styles.axisDesc}>
-                {/* 직접 고른 항목만 이 축을 자동으로 되돌리는 링크 */}
-                {picked != null ? (
-                  <TextLink
-                    label="자동으로"
-                    accessibilityLabel={`${name} 자동으로 되돌리기`}
-                    onPress={() => setLevels((l) => ({ ...l, [axis]: null }))}
-                  />
-                ) : (
-                  <View />
-                )}
-                <Text variant="label" tone="faint" align="right" accessibilityLiveRegion="polite">
-                  {LEVELS[level][axis]}
-                </Text>
-              </View>
+          {edits.prepareMinutes != null ? (
+            <View style={styles.axisDesc}>
+              <Text variant="caption" tone="faint">
+                직접 고름 · 자동은 {view.autoPredictedPrepMinutes}분
+              </Text>
+              <TextLink label="자동으로" accessibilityLabel="준비 시간 자동으로 되돌리기" onPress={() => setEdit({ prepareMinutes: null })} />
             </View>
-          );
-        })}
-        {ALARM_AXES_PICKER ? (
-          <Text variant="caption" tone="faint" style={styles.note}>
-            직접 고른 항목은 자동 계산보다 항상 먼저 적용돼요.
+          ) : null}
+          <Stepper
+            label="여유 시간"
+            value={edits.bufferMinutes}
+            onChange={(bufferMinutes) => setEdit({ bufferMinutes })}
+            min={0}
+            max={30}
+            step={1}
+            unit="분"
+          />
+        </Card>
+
+        <Card>
+          <Text variant="label" tone="sub" style={styles.label}>
+            알람 시각
           </Text>
-        ) : null}
-        {ALARM_AXES_PICKER && anyManual ? (
-          <View style={styles.reset}>
-            <TextLink label="모두 자동으로 되돌리기" onPress={() => setLevels({ sound: null, voice: null, vibration: null })} />
-          </View>
-        ) : null}
-      </Card>
+          <FormulaBox
+            lines={[
+              `${KIND_LABEL[baseKind]} ${formatTime(base)} = 약속 ${formatTime(a.at)} − 여유 ${edits.bufferMinutes} − 이동 ${travel} − 준비 ${prepare}`,
+              ...(a.withWake && a.beforePrepMinutes ? [`준비 알람은 기상 후 준비 전 활동 ${a.beforePrepMinutes}분 뒤`] : []),
+              // 준비 시간이 어디서 왔는지 한 줄 — 4건까지 "배우는 중 N/5", 5건부터 "내 기록 기반 N건" (학습 루프 기초 ⑦, 통계 식은 안 보임 D47)
+              //   기록으로 맞추는 건 그날 첫 일정(기상 있음)뿐이고, 직접 고른 준비 시간이면 기록 기반이 아니라서 줄을 뺌. 서버가 기록 수를 주기 전(처음 그릴 때)에도 뺌
+              ...(a.withWake && edits.prepareMinutes == null && view.prepareSampleCount != null ? [`준비 ${prepare}분 · ${prepareSourceLabel(view.prepareSampleCount)}`] : []),
+              // 그 아래 한 줄 — 최근 기록 값 (학습 루프 기초 ⑦). 위 줄과 같은 조건이고, 기록이 없으면 줄이 없음
+              ...(a.withWake && edits.prepareMinutes == null && recentLine ? [recentLine] : []),
+            ]}
+          />
+          {view.alarms.map((x, i) => (
+            <KeyValueRow
+              key={x.kind}
+              first={i === 0}
+              label={`${KIND_LABEL[x.kind]}${x.kind === 'ARRIVE' ? ' 목표' : ''}`}
+              sub={isManualTime(x) ? '직접 고름' : undefined}
+              value={
+                x.kind === 'ARRIVE' ? (
+                  formatTime(x.at)
+                ) : (
+                  <View style={styles.timeRow}>
+                    <TimeButton
+                      label={formatTime(x.at)}
+                      manual={isManualTime(x)}
+                      accessibilityLabel={`${KIND_LABEL[x.kind]} 시각 ${formatTime(x.at)}, 눌러서 고르기`}
+                      onPress={() => setPickKind(x.kind as RingKind)}
+                    />
+                    <Toggle value={kinds[x.kind] ?? x.enabled} onChange={(on) => setKinds((k) => ({ ...k, [x.kind]: on }))} label={`${KIND_LABEL[x.kind]} 알람`} />
+                  </View>
+                )
+              }
+            />
+          ))}
+          {/* 웹은 폰 알람이 울리지 않아 저장된 알람으로 울림 화면을 미리 봄 — 끄면 다음 알람으로 이어짐 (ringPreview.ts) */}
+          {Platform.OS === 'web' ? (
+            <View style={styles.previewRow}>
+              <Text variant="caption" tone="faint">
+                웹 미리보기
+              </Text>
+              {a.alarms
+                .filter((x) => x.kind !== 'ARRIVE' && x.enabled)
+                .map((x) => (
+                  <TextLink
+                    key={x.kind}
+                    label={`${KIND_LABEL[x.kind]} 울려 보기`}
+                    onPress={() => router.push({ pathname: '/ring', params: { alarm: previewAlarmId(a.id, x.kind as RingKind) } })}
+                  />
+                ))}
+            </View>
+          ) : null}
+          {blocked ? (
+            <Text variant="caption" tone="warn" style={styles.note} accessibilityLiveRegion="polite">
+              {blocked}
+            </Text>
+          ) : null}
+          <Text variant="caption" tone="faint" style={styles.note}>
+            직접 고른 시각은 자동 계산보다 먼저 적용되고, 기상을 옮기면 준비도 같은 만큼 옮겨져요.
+          </Text>
+          {manualAny ? (
+            <View style={styles.reset}>
+              <TextLink label="모두 자동으로 되돌리기" onPress={() => setEdit({ times: {} })} />
+            </View>
+          ) : null}
+        </Card>
+
+        <Card>
+          <Text variant="label" tone="sub" style={styles.label}>
+            알람 강도
+          </Text>
+          {/* 점수 식은 안 보임 — 결과와 쉬운 말만 (H05 계산 근거와 같게, D47) */}
+          <Text variant="small" tone="sub">
+            자동 {LEVELS[a.intensity.auto].name} · 중요도 {IMPORTANCE_LABEL[a.importance]}
+            {a.intensity.latePoint > 0 ? ` · 최근 4주 늦잠 지각 ${a.intensity.lateCount}번` : ''}
+          </Text>
+          {/* 축별 선택(배경음 · 말소리 · 진동)은 flag로 숨길 수 있음 — 결정 안건(투표) 결과 대기 (lib/flags.ts ALARM_AXES_PICKER) */}
+          {(ALARM_AXES_PICKER ? AXES : []).map(([axis, name]) => {
+            const picked = levels[axis];
+            const level = picked ?? (axis === 'voice' ? a.intensity.voiceAuto : a.intensity.auto); // 말소리 자동 = 설정의 기본 말소리
+            return (
+              <View key={axis}>
+                <View style={styles.axis}>
+                  <View style={styles.axisName}>
+                    <Text variant="rowLabel" tone="sub">
+                      {name}
+                    </Text>
+                    {picked != null ? (
+                      <Text variant="tiny" tone="sub" style={styles.manual}>
+                        직접 고름
+                      </Text>
+                    ) : null}
+                  </View>
+                  <OptionGrid
+                    size="mini"
+                    label={`${name} 강도`}
+                    options={LEVEL_OPTIONS}
+                    value={level}
+                    onChange={(next) => setLevels((l) => ({ ...l, [axis]: next }))}
+                  />
+                </View>
+                <View style={styles.axisDesc}>
+                  {/* 직접 고른 항목만 이 축을 자동으로 되돌리는 링크 */}
+                  {picked != null ? (
+                    <TextLink
+                      label="자동으로"
+                      accessibilityLabel={`${name} 자동으로 되돌리기`}
+                      onPress={() => setLevels((l) => ({ ...l, [axis]: null }))}
+                    />
+                  ) : (
+                    <View />
+                  )}
+                  <Text variant="label" tone="faint" align="right" accessibilityLiveRegion="polite">
+                    {LEVELS[level][axis]}
+                  </Text>
+                </View>
+              </View>
+            );
+          })}
+          {ALARM_AXES_PICKER ? (
+            <Text variant="caption" tone="faint" style={styles.note}>
+              직접 고른 항목은 자동 계산보다 항상 먼저 적용돼요.
+            </Text>
+          ) : null}
+          {ALARM_AXES_PICKER && anyManual ? (
+            <View style={styles.reset}>
+              <TextLink label="모두 자동으로 되돌리기" onPress={() => setLevels({ sound: null, voice: null, vibration: null })} />
+            </View>
+          ) : null}
+        </Card>
+        </>
+      ) : (
+        <Card>
+          <Text variant="label" tone="sub" style={styles.label}>
+            알람
+          </Text>
+          <Text variant="body" tone="sub">
+            {placePending
+              ? '장소가 정해지지 않아 알람을 계산하지 않았어요. 위의 연결 일정을 눌러 장소를 정해 주세요.'
+              : '아직 알람이 없는 일정이에요. 기상 · 준비 · 출발 알람을 계산해 보고 확인한 뒤 저장할 수 있어요.'}
+          </Text>
+          {placePending ? null : (
+            <View style={styles.stack}>
+              <Button label="알람 계산해 보기" variant="ghost" onPress={() => setShowAlarms(true)} />
+            </View>
+          )}
+        </Card>
+      )}
 
       {/* 알람 시각 직접 고르기 — 기상을 옮기면 준비도 같은 간격으로 따라옴 */}
       <TimeSheet
@@ -547,6 +618,39 @@ function Detail({ appointment: a, reload }: { appointment: AppointmentDetail; re
         note={pickKind === 'WAKE' && view.alarms.some((x) => x.kind === 'PREPARE') ? '준비 알람도 같은 만큼 같이 움직여요' : undefined}
         error={blocked ?? undefined}
       />
+
+      {/* 같은 날 직접 만든 기상 알람이 있으면 — 이 일정 기상으로 합칠지(그 알람은 지워짐) 따로 둘지(둘 다 울림) 고름. 바깥 누름은 저장하지 않고 닫음 */}
+      <Sheet visible={wakeDup != null} onClose={closeWakeDup} title="같은 날 기상 알람이 있어요">
+        <Text variant="small" tone="sub">
+          직접 만든 기상 알람이 있어요. 이 일정의 기상 알람으로 합치면 그 시각에 한 번만 울리고, 따로 두면 둘 다 울려요.
+        </Text>
+        <View style={styles.changes}>
+          {(wakeDup ?? []).map((w) => (
+            <View key={w.id} style={styles.change}>
+              <Text variant="body" tone="sub">
+                직접 만든 기상
+              </Text>
+              <Text variant="bodyStrong">{formatTime(w.at)}</Text>
+            </View>
+          ))}
+          {view.alarms
+            .filter((x) => x.kind === 'WAKE')
+            .map((x) => (
+              <View key={x.kind} style={styles.change}>
+                <Text variant="body" tone="sub">
+                  이 일정의 기상 (계산)
+                </Text>
+                <Text variant="bodyStrong">{formatTime(x.at)}</Text>
+              </View>
+            ))}
+        </View>
+        <View style={styles.stack}>
+          {(wakeDup ?? []).map((w) => (
+            <Button key={w.id} label={`${formatTime(w.at)} 알람을 이 일정 기상으로 합치기`} onPress={() => pickWake(w)} loading={busy} />
+          ))}
+          <Button label="따로 두기 (둘 다 울림)" variant="ghost" onPress={() => pickWake(null)} />
+        </View>
+      </Sheet>
 
       {/* 길찾기를 못 해 어림값만 있을 때 — 사용자가 확인한 값만 직접 입력(MANUAL)으로 저장 (7장 7.1.2) */}
       <Sheet visible={travelConfirm != null} onClose={editTravel} title="이동시간을 확인해 주세요">
