@@ -23,6 +23,10 @@ from catboost import CatBoostRegressor
 CATS = ["weekday_code", "평토일구분코드", "휴일종류코드", "연령코드"]
 FEATURES = [*CATS, "baseline_observed"]
 SEED = 42
+# Shared with Edge preview + model-serving protocol. The value in
+# baseline_observed is the MEAN of the last min(30, available) past,
+# completed PREPARE_ALARM -> LOCATION intervals, with >=10 verified pairs.
+BASELINE_DEFINITION = "mean_last_30_valid_prep_alarm_location_v1"
 
 
 def build_samples(path: Path) -> pd.DataFrame:
@@ -43,7 +47,7 @@ def build_samples(path: Path) -> pd.DataFrame:
         & df["user_id"].notna()
     ].copy()
     # Same completion should never occur twice for one user.
-    df = df.drop_duplicates(["user_id", "depart"], keep="first")
+    df = df.drop_duplicates(["user_id", "start", "depart"], keep="first")
     for c in CATS:
         df[c] = df[c].fillna("__MISSING__").replace("", "__MISSING__")
     invalid_age = ~df["연령코드"].isin([str(i) for i in range(1, 9)])
@@ -109,6 +113,7 @@ def main() -> None:
     margin = float(np.quantile(yv-vp,.8))
     metrics = {
         "target": "prepare_alarm_dismiss_to_location_depart_proxy_minutes",
+        "baseline_definition": BASELINE_DEFINITION,
         "minimum_history": 10,
         "user_counts": {"train":len(train_ids),"valid":len(valid_ids),"test":len(test_ids)},
         "train_samples": len(tr),
@@ -122,10 +127,12 @@ def main() -> None:
     }
     out = Path(args.out_dir)
     out.mkdir(parents=True,exist_ok=True)
-    model_file = out/"prep_ratio_actual_sessions.cbm"
+    model_file = out/"prep_ratio_dismiss_location_proxy.cbm"
     model.save_model(str(model_file))
-    (out/"prep_ratio_actual_sessions.manifest.json").write_text(json.dumps({
+    (out/"prep_ratio_dismiss_location_proxy.manifest.json").write_text(json.dumps({
         "training_target":"alarm_dismiss_location_proxy",
+        "baseline_definition": BASELINE_DEFINITION,
+        "history_window": 30,
         "physical_start_confirmed": False,
         "target_provenance": "PREPARE_ALARM event timestamp -> LOCATION departure estimate",
         "sha256":hashlib.sha256(model_file.read_bytes()).hexdigest(),
