@@ -71,6 +71,13 @@ test('shadow response checks model identity, versioned target, safety range, and
     training_target: 'actual_start_depart', minutes: 32, ratio: 32/29.5,
   }) });
   assert.equal((await requestPurePrepShadow(request, cfg, actual as any))?.training_target, 'actual_start_depart');
+  const dismissProxy=async()=>({ok:true,json:async()=>({
+    model:'prep_start_ratio_v2',prediction_type:'ratio',
+    training_target:'alarm_dismiss_location_proxy',minutes:29.5,ratio:1,
+  })});
+  // A trained dismissal-to-location model is still not actual preparation ground truth.
+  assert.equal(await requestPurePrepShadow(request,cfg,dismissProxy as any),null);
+  assert.equal((await requestPurePrepShadow(request,{...cfg,allowDismissProxy:true},dismissProxy as any))?.training_target,'alarm_dismiss_location_proxy');
   assert.equal(await requestPurePrepShadow(request, cfg, async () => { throw Error('offline'); }), null);
 });
 
