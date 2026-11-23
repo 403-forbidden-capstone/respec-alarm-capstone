@@ -4,9 +4,14 @@ from __future__ import annotations
 import csv
 import importlib.util
 import json
+import os
+import socket
 import subprocess
 import sys
 import tempfile
+import time
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -21,6 +26,118 @@ def module(name, file):
     out = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(out)
     return out
+
+
+def http_test(model_path: Path, request: dict, target: str, working: Path) -> dict:
+    """Live loopback HTTP subprocess with a real synthetically trained model."""
+    assert target == 'alarm_dismiss_location_proxy'
+    key = 'local-qa-only-model-auth-key-strong'
+    with socket.socket() as sock:
+        sock.bind(('127.0.0.1', 0))
+        port = sock.getsockname()[1]
+
+    env = {**os.environ,
+           'PREP_ADJUST_HOST':'127.0.0.1',
+           'PREP_ADJUST_PORT':str(port),
+           'PREP_ADJUST_API_TOKEN':key,
+           'PREP_ADJUST_MODEL_PATH':str(model_path),
+           'PREP_ADJUST_ALLOW_DISMISS_PROXY':'1'}
+    endpoint = f'http://127.0.0.1:{port}'
+
+    def request_json(path: str, payload=None, auth: str | None=None, raw=None):
+        headers = {}
+        if auth is not None:
+            headers['x-api-key'] = auth
+        if payload is not None or raw is not None:
+            headers['Content-Type'] = 'application/json'
+            body = json.dumps(payload).encode() if raw is None else raw
+            req = Request(endpoint+path, data=body, headers=headers, method='POST')
+        else:
+            req = Request(endpoint+path,headers=headers,method='GET')
+        try:
+            with urlopen(req,timeout=4) as response:
+                return response.status, json.loads(response.read().decode())
+        except HTTPError as error:
+            return error.code, json.loads(error.read().decode())
+
+    def blocked_startup(override: dict, filename: str):
+        new_path=working/f'{filename}.cbm'
+        new_path.write_bytes(model_path.read_bytes())
+        manifest=json.loads(model_path.with_suffix('.manifest.json').read_text())
+        manifest.update(override)
+        new_path.with_suffix('.manifest.json').write_text(json.dumps(manifest))
+        bad_env={**env,'PREP_ADJUST_MODEL_PATH':str(new_path)}
+        with (working/f'{filename}.log').open('w') as log:
+            p=subprocess.Popen([sys.executable,str(ROOT/'server.py')],
+                               env=bad_env,stdout=log,stderr=subprocess.STDOUT)
+            try:
+                p.wait(timeout=12)
+            except subprocess.TimeoutExpired:
+                p.kill();p.wait()
+                raise AssertionError('server started with incompatible model manifest')
+            assert p.returncode != 0, f'accepted manifest override: {override}'
+
+    blocked_startup({'baseline_definition':'previous_day_survey_diary'},'bad-baseline')
+    blocked_startup({'sha256':'0'*64},'bad-hash')
+    blocked_startup({'training_target':'survey_start_cluster_proxy'},'bad-target')
+    blocked_startup({'feature_names':['weekday_code']},'bad-features')
+
+    with (working/'http-server.log').open('w') as log:
+        proc=subprocess.Popen([sys.executable,str(ROOT/'server.py')],
+                              env=env,stdout=log,stderr=subprocess.STDOUT)
+        try:
+            until=time.monotonic()+20
+            while time.monotonic()<until:
+                if proc.poll() is not None:
+                    raise AssertionError('model sidecar exited early: '+(working/'http-server.log').read_text()[-1200:])
+                try:
+                    status,body=request_json('/health')
+                    if status==200 and body.get('ok') is True:
+                        break
+                except (URLError,ConnectionError,TimeoutError):
+                    time.sleep(.2)
+            else:
+                raise AssertionError('model sidecar HTTP startup exceeded 20 seconds')
+
+            status,body=request_json('/predict',request)
+            assert status==401,('auth missing',status,body)
+            status,body=request_json('/predict',request,auth='wrong-token')
+            assert status==401,('auth wrong',status,body)
+            status,body=request_json('/predict',request,auth=key)
+            assert status==200,('valid request failed',status,body)
+            assert body['model']=='prep_start_ratio_v2'
+            assert body['baseline_definition']==request['baseline_definition']
+            assert body['training_target']=='alarm_dismiss_location_proxy'
+            assert body['prediction_type']=='ratio'
+            assert 5<=body['minutes']<=240
+
+            for invalid in [
+                {**request,'history_count':9},
+                {**request,'history_count':31},
+                {**request,'baseline_definition':'previous_day_survey_diary'},
+                {**request,'model':'unapproved_model'},
+                {**request,'features':{**request['features'],'baseline_observed':-1}},
+            ]:
+                status, _=request_json('/predict',invalid,auth=key)
+                assert status==400,('bad request should fail',invalid,status)
+            status,_=request_json('/predict',auth=key,raw=b'{"invalid":')
+            assert status==400,('malformed JSON should fail',status)
+            status,_=request_json('/predict',auth=key,raw=b'x'*4097)
+            assert status==413,('oversized payload should fail',status)
+            status,_=request_json('/wrong',request,auth=key)
+            assert status==404,('unknown route should fail',status)
+            status,_=request_json('/health')
+            assert status==200
+            return {'http_200_valid':True,'unauthenticated_401':True,
+                    'invalid_400':True,'oversized_413':True,
+                    'unknown_route_404':True,'tampered_manifest_blocked':4,
+                    'preview_only':True}
+        finally:
+            proc.terminate()
+            try:
+                proc.wait(timeout=8)
+            except subprocess.TimeoutExpired:
+                proc.kill();proc.wait()
 
 def main():
     train = module('train_qa','train.py')
@@ -84,6 +201,7 @@ def main():
                 raise AssertionError('incompatible request accepted')
             except ValueError:
                 pass
+        http_result=http_test(model_path,request,target,base)
         metrics=json.loads((out/'metrics.json').read_text(encoding='utf-8'))
         assert sum(metrics['user_counts'].values())==120
         print('SYNTHETIC_PROTOCOL_PASS',json.dumps({
@@ -92,6 +210,7 @@ def main():
             'test_model_MAE':metrics['test']['model']['MAE'],
             'underprediction_rate':metrics['test']['model']['under_rate'],
             'old_survey_manifest':'blocked','incompatible_requests':'blocked',
+            'http_contract':http_result,
         }))
 if __name__=='__main__':
     main()
