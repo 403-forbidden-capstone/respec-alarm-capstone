@@ -21,11 +21,35 @@ CATS = ["weekday_code", "평토일구분코드", "휴일종류코드", "연령�
 FEATURES = [*CATS, "baseline_observed"]
 MODEL_NAME = "prep_start_ratio_v2"
 MAX_BODY = 4096
+# Strict model/feature protocol. Survey-v2 trained with a previous-day
+# baseline is NOT compatible with this 10–30-session historical mean.
+BASELINE_DEFINITION = "mean_last_30_valid_prep_alarm_location_v1"
+
+def verify_manifest(manifest: dict, model_path: Path) -> str:
+    if not isinstance(manifest, dict):
+        raise ValueError("invalid manifest")
+    if manifest.get("model") != MODEL_NAME:
+        raise ValueError("wrong model")
+    if manifest.get("baseline_definition") != BASELINE_DEFINITION:
+        raise ValueError("wrong baseline definition; legacy survey model is incompatible")
+    if manifest.get("minimum_history") != 10 or manifest.get("history_window") != 30:
+        raise ValueError("wrong history window")
+    if manifest.get("feature_names") != FEATURES:
+        raise ValueError("wrong features")
+    digest = hashlib.sha256(model_path.read_bytes()).hexdigest()
+    if not hmac.compare_digest(str(manifest.get("sha256", "")), digest):
+        raise ValueError("model hash mismatch")
+    target = manifest.get("training_target")
+    if target not in ("actual_start_depart", "alarm_dismiss_location_proxy"):
+        raise ValueError("unverified or incompatible training target")
+    return target
 
 
 def predict(model: CatBoostRegressor, payload: dict, training_target: str) -> dict:
     if payload.get("model") != MODEL_NAME:
         raise ValueError("unexpected model")
+    if payload.get("baseline_definition") != BASELINE_DEFINITION:
+        raise ValueError("incompatible baseline definition")
     features = payload.get("features")
     if not isinstance(features, dict) or set(features) != set(FEATURES):
         raise ValueError("invalid feature schema")
@@ -58,6 +82,7 @@ def predict(model: CatBoostRegressor, payload: dict, training_target: str) -> di
         raise ValueError("ratio outside safety band")
     return {
         "model": MODEL_NAME, "prediction_type": "ratio", "training_target": training_target,
+        "baseline_definition": BASELINE_DEFINITION,
         "minutes": round(minutes, 3), "ratio": round(ratio, 5),
     }
 
@@ -72,14 +97,10 @@ def main() -> None:
     if not manifest_path.is_file():
         raise SystemExit('Missing model provenance manifest: '+str(manifest_path))
     manifest = json.loads(manifest_path.read_text(encoding='utf-8'))
-    digest = hashlib.sha256(Path(model_path).read_bytes()).hexdigest()
-    if not hmac.compare_digest(str(manifest.get('sha256','')), digest):
-        raise SystemExit('Model SHA256 differs from provenance manifest')
-    training_target = manifest.get('training_target')
-    if training_target not in ('actual_start_depart', 'survey_start_cluster_proxy', 'alarm_dismiss_location_proxy'):
-        raise SystemExit('Unknown verified training target')
-    if training_target == 'survey_start_cluster_proxy' and os.environ.get('PREP_ADJUST_ALLOW_SURVEY_PROXY') != '1':
-        raise SystemExit('Survey proxy model requires PREP_ADJUST_ALLOW_SURVEY_PROXY=1 for research testing only')
+    try:
+        training_target = verify_manifest(manifest, Path(model_path))
+    except ValueError as exc:
+        raise SystemExit(f'Model manifest rejected: {exc}') from exc
     if training_target == 'alarm_dismiss_location_proxy' and os.environ.get('PREP_ADJUST_ALLOW_DISMISS_PROXY') != '1':
         raise SystemExit('Alarm dismissal proxy model requires PREP_ADJUST_ALLOW_DISMISS_PROXY=1 for research testing only')
     model = CatBoostRegressor()
