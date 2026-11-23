@@ -35,7 +35,7 @@ jobs:
         with:
           deno-version: v2.x
       - name: Typecheck deployed alarm-suggest Edge entrypoint and dependencies
-        run: deno check supabase/functions/alarm-suggest/index.ts
+        run: deno check --node-modules-dir=auto supabase/functions/alarm-suggest/index.ts
   trainer-boundary:
     runs-on: ubuntu-latest
     timeout-minutes: 10
