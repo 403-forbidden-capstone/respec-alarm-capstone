@@ -677,6 +677,30 @@ test('pure preparation profile basis yields different PREPARE and WAKE, fixed 20
   assert.deepEqual(plan.recentPrepare, []);
 });
 
+test('editing pure preparation from 30 to 45 moves only automatic personal alarms', () => {
+  const mk=(minutes:number)=>computePlan(base({
+    stats:{sampleCount:0,p80:null},
+    purePrepCandidate:{source:'PROFILE',minutes},
+    draft:{at:kst(22,600),destination:{name:'세종대학교'}},
+  }),api(50));
+  const oldPlan=mk(30),newPlan=mk(45);
+  assert.equal(oldPlan.prepareTarget,'PREPARE_START_TO_DEPART');
+  assert.equal(newPlan.prepareTarget,'PREPARE_START_TO_DEPART');
+  assert.equal(oldPlan.prepare.minutes,50);
+  assert.equal(newPlan.prepare.minutes,65);
+  assert.equal(newPlan.beforePrepareMinutes,20);
+  const before=text(oldPlan),after=text(newPlan);
+  assert.equal(before.find(x=>x.startsWith('DEPARTURE')),after.find(x=>x.startsWith('DEPARTURE')));
+  assert.notEqual(before.find(x=>x.startsWith('PREPARE')),after.find(x=>x.startsWith('PREPARE')));
+  assert.notEqual(before.find(x=>x.startsWith('WAKE')),after.find(x=>x.startsWith('WAKE')));
+  const manuallySet=computePlan(base({
+    purePrepCandidate:{source:'PROFILE',minutes:45},
+    draft:{at:kst(22,600),destination:{name:'세종대학교'},prepareMinutes:70},
+  }),api(50));
+  assert.equal(manuallySet.prepare.source,'MANUAL');
+  assert.equal(manuallySet.prepare.minutes,70);
+});
+
 test('pure preparation basis is still applied to same-day second appointment without WAKE', () => {
   const plan = computePlan(base({
     sameDayWake: true,

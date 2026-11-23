@@ -1,17 +1,54 @@
 name: CatBoost v2 Shadow · 10 history QA
 on:
   push:
-    branches: [feat/pure-prep-v2-shadow-main-qa-20261123]
+    branches: [feat/pure-prep-v2-shadow-main-qa-20261123, fix/pure-prep-onboarding-edit-rebaseline-20261123]
     paths:
       - '.github/workflows/pure-prep-v2-shadow-qa.yml'
       - 'supabase/functions/_shared/pure-prep-shadow*'
       - 'supabase/functions/alarm-suggest/index.ts'
       - 'tools/prepare-adjust-sidecar/**'
       - 'docs/pure-prep-v2-shadow-10hist.md'
+      - 'supabase/functions/_shared/calc/pure-prep-basis*'
+      - 'supabase/functions/_shared/plan.ts'
+      - 'supabase/functions/_shared/plan-core.ts'
+      - 'supabase/migrations/*pure_prep*'
+      - 'mobile/src/app/settings.tsx'
+      - 'mobile/src/app/alarm/[id].tsx'
+      - 'mobile/src/features/onboarding/views/PrepareStep.tsx'
+  pull_request:
+    paths:
+      - '.github/workflows/pure-prep-v2-shadow-qa.yml'
+      - 'supabase/functions/_shared/pure-prep-shadow*'
+      - 'supabase/functions/_shared/calc/pure-prep-basis*'
+      - 'supabase/functions/_shared/plan.ts'
+      - 'supabase/functions/_shared/plan-core.ts'
+      - 'supabase/migrations/*pure_prep*'
+      - 'mobile/src/app/settings.tsx'
+      - 'mobile/src/app/alarm/[id].tsx'
+      - 'mobile/src/features/onboarding/views/PrepareStep.tsx'
   workflow_dispatch:
 permissions:
   contents: read
 jobs:
+  mobile-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+      - name: Install dependencies
+        run: npm ci
+      - name: Typecheck mobile application
+        run: npm run typecheck
+      - name: Run onboarding, profile and alarm regression tests
+        run: npm test -- --runInBand --ci --watch=false src/features/profile/__tests__/edit.test.ts src/features/profile/__tests__/api.test.ts src/features/alarm/__tests__/real.test.ts src/features/alarm/__tests__/request.test.ts
   shadow-contract:
     runs-on: ubuntu-latest
     timeout-minutes: 8
@@ -26,7 +63,8 @@ jobs:
             supabase/functions/_shared/pure-prep-shadow.test.ts \
             supabase/functions/_shared/pure-prep-shadow.synthetic.test.ts \
             supabase/functions/_shared/calc/pure-prep-basis.test.ts \
-            supabase/functions/_shared/calc/pure-prep.test.ts
+            supabase/functions/_shared/calc/pure-prep.test.ts \
+            supabase/functions/_shared/plan-core.test.ts
   edge-typecheck:
     runs-on: ubuntu-latest
     timeout-minutes: 10

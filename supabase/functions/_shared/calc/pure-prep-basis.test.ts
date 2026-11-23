@@ -9,7 +9,7 @@ test('onboarding baseline used before 3 valid records',()=>{
  assert.deepEqual(choosePurePrepBasis({profileMinutes:30,historicalMinutes:[35,45]}),{source:'PROFILE',minutes:30});
 });
 test('history uses actual preparation intervals and requires three completed records',()=>{
- assert.deepEqual(choosePurePrepBasis({profileMinutes:30,historicalMinutes:[45,35,40]}),{source:'HISTORY',minutes:40,sampleCount:3});
+ assert.deepEqual(choosePurePrepBasis({profileMinutes:30,historicalMinutes:[45,35,40]}),{source:'HISTORY',minutes:32,sampleCount:3});
  assert.deepEqual(choosePurePrepBasis({profileMinutes:30,historicalMinutes:[45,300,40]}),{source:'PROFILE',minutes:30});
 });
 test('explicit pure manual override wins over history and model',()=>{
@@ -57,4 +57,32 @@ test('preparation history excludes future data, alarm schedules, location-less d
  ];
  assert.deepEqual(confirmedPurePrepHistory(rows,cutoff),[35,45]);
  assert.deepEqual(confirmedPurePrepHistory(rows,cutoff,1),[35]);
+});
+
+test('editing onboarding pure time 30→45 resets old history; later sessions gradually correct it',()=>{
+ const observed=[20,25,30,20,25,30];
+ assert.deepEqual(choosePurePrepBasis({profileMinutes:30,historicalMinutes:observed}),
+   {source:'HISTORY',minutes:28,sampleCount:6});
+ assert.deepEqual(choosePurePrepBasis({profileMinutes:45,historicalMinutes:[]}),
+   {source:'PROFILE',minutes:45});
+ assert.deepEqual(choosePurePrepBasis({profileMinutes:45,historicalMinutes:[30,30,30]}),
+   {source:'HISTORY',minutes:42,sampleCount:3});
+ assert.deepEqual(choosePurePrepBasis({historicalMinutes:[20,25,30]}),
+   {source:'HISTORY',minutes:25,sampleCount:3});
+});
+test('new preference epoch excludes earlier or overlapping departure observations',()=>{
+ const row=(start:string,depart:string)=>({
+   prepare_started_at:start,departed_at:depart,
+   prepare_started_source:'PREPARE_ALARM',departed_source:'LOCATION',
+ });
+ const records=[
+   row('2026-11-20T08:00:00Z','2026-11-20T08:30:00Z'),
+   row('2026-11-21T08:00:00Z','2026-11-21T08:40:00Z'),
+   row('2026-11-22T07:50:00Z','2026-11-22T08:20:00Z'),
+   row('2026-11-22T09:00:00Z','2026-11-22T09:50:00Z'),
+ ];
+ const until=new Date('2026-11-23T00:00:00Z');
+ const changedAt=new Date('2026-11-22T08:00:00Z');
+ assert.deepEqual(confirmedPurePrepHistory(records,until,30,changedAt),[50]);
+ assert.deepEqual(confirmedPurePrepHistory(records,until,30,new Date('invalid')),[]);
 });
