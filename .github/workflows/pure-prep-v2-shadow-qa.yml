@@ -24,6 +24,7 @@ jobs:
         run: |
           node --experimental-strip-types --test \
             supabase/functions/_shared/pure-prep-shadow.test.ts \
+            supabase/functions/_shared/pure-prep-shadow.synthetic.test.ts \
             supabase/functions/_shared/calc/pure-prep-basis.test.ts \
             supabase/functions/_shared/calc/pure-prep.test.ts
   edge-typecheck:
