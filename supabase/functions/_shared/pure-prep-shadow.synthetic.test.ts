@@ -6,7 +6,7 @@ import {
   type PrepCompletionRow,
 } from './calc/pure-prep-basis.ts';
 import {
-  buildPurePrepShadowRequest, requestPurePrepShadow,
+  PURE_PREP_SHADOW_BASELINE_DEFINITION, buildPurePrepShadowRequest, requestPurePrepShadow,
 } from './pure-prep-shadow.ts';
 
 const durations = [20, 19, 23, 25, 21, 22, 18, 26, 24, 20, 25, 22, 24, 27, 19];
@@ -70,18 +70,20 @@ test('mock model API is never called for nine, but only shadow-predicts at ten',
     const payload = JSON.parse(opts.body);
     assert.equal(payload.model, 'prep_start_ratio_v2');
     assert.equal(payload.history_count, 10);
+    assert.equal(payload.baseline_definition,PURE_PREP_SHADOW_BASELINE_DEFINITION);
     const baseline = payload.features.baseline_observed;
     return {
       ok: true,
       json: async () => ({
         model: 'prep_start_ratio_v2',
         prediction_type: 'ratio',
-        training_target: 'survey_start_cluster_proxy',
+        training_target: 'alarm_dismiss_location_proxy',
+        baseline_definition: PURE_PREP_SHADOW_BASELINE_DEFINITION,
         minutes: baseline * 1.05, ratio: 1.05,
       }),
     };
   }) as any;
-  const config = {url:'https://example.org',token:'synthetic-do-not-use',allowSurveyProxy:true};
+  const config = {url:'https://example.org',token:'synthetic-do-not-use',allowDismissProxy:true};
   const blocked = buildPurePrepShadowRequest({...base,historyMinutes:historyNine});
   assert.equal(blocked,null);
   assert.equal(await requestPurePrepShadow({...reqTen,history_count:9},config,fakeFetch),null);
@@ -91,8 +93,9 @@ test('mock model API is never called for nine, but only shadow-predicts at ten',
   const after = choosePurePrepBasis({profileMinutes:15,historicalMinutes:historyTen});
   assert.equal(calls,1);
   assert.equal(output?.model,'prep_start_ratio_v2');
-  assert.equal(output?.training_target,'survey_start_cluster_proxy');
+  assert.equal(output?.training_target,'alarm_dismiss_location_proxy');
+  assert.equal(output?.baseline_definition,PURE_PREP_SHADOW_BASELINE_DEFINITION);
   assert.deepEqual(after,before); // The research model never changes the alarm.
   assert.equal(after?.source,'HISTORY');
-  assert.equal(await requestPurePrepShadow(reqTen,{...config,allowSurveyProxy:false},fakeFetch),null);
+  assert.equal(await requestPurePrepShadow(reqTen,{...config,allowDismissProxy:false},fakeFetch),null);
 });
