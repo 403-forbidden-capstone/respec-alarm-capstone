@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
-  PURE_PREP_SHADOW_MIN_HISTORY, buildPurePrepShadowRequest,
+  PURE_PREP_SHADOW_BASELINE_DEFINITION, PURE_PREP_SHADOW_MIN_HISTORY, buildPurePrepShadowRequest,
   eligibleForPurePrepShadow, requestPurePrepShadow, runPurePrepShadow,
 } from './pure-prep-shadow.ts';
 
@@ -17,6 +17,7 @@ test('10 complete past records, never 9, allow a v2 shadow request', () => {
   assert.equal(buildPurePrepShadowRequest({ ...base, historyMinutes: history.slice(0, 9) }), null);
   const request = buildPurePrepShadowRequest({ ...base, historyMinutes: history });
   assert.equal(request?.model, 'prep_start_ratio_v2');
+  assert.equal(request?.baseline_definition, PURE_PREP_SHADOW_BASELINE_DEFINITION);
   assert.equal(request?.history_count, 10);
   assert.equal(request?.features.baseline_observed, 29.5);
   assert.equal(request?.features['휴일종류코드'], '__MISSING__');
@@ -48,36 +49,44 @@ test('shadow response checks model identity, versioned target, safety range, and
     assert.equal(options.method, 'POST');
     const body = JSON.parse(options.body);
     assert.equal(body.history_count, 10);
+    assert.equal(body.baseline_definition, PURE_PREP_SHADOW_BASELINE_DEFINITION);
     return {
       ok: true,
       json: async () => ({
         model: 'prep_start_ratio_v2', prediction_type: 'ratio',
-        training_target: 'survey_start_cluster_proxy', minutes: 30, ratio: 30/29.5,
+        training_target: 'survey_start_cluster_proxy', baseline_definition: PURE_PREP_SHADOW_BASELINE_DEFINITION, minutes: 30, ratio: 30/29.5,
       }),
     };
   };
   const cfg = { url: 'https://model.example.org', token: 'test-token-not-for-production' };
   assert.equal(await requestPurePrepShadow({ ...request, history_count: 9 }, cfg, fake as any), null);
   assert.equal(calls, 0);
-  assert.equal(await requestPurePrepShadow(request, cfg, fake as any), null); // proxy must explicitly opt in
-  assert.equal(calls, 1);
-  assert.deepEqual(await requestPurePrepShadow(request, { ...cfg, allowSurveyProxy: true }, fake as any), {
-    model: 'prep_start_ratio_v2', minutes: 30, ratio: 30/29.5, training_target: 'survey_start_cluster_proxy',
-  });
+  assert.equal(await requestPurePrepShadow(request, cfg, fake as any), null);
+  assert.equal(calls, 1); // Survey proxy is rejected even if a model lies about the baseline definition.
   assert.equal(await requestPurePrepShadow(request, { ...cfg, url: 'http://model.example.org' }, fake as any), null);
-  assert.equal(calls, 2);
+  assert.equal(calls, 1);
+  assert.equal(await requestPurePrepShadow({ ...request, baseline_definition: 'previous_day_survey_diary' as any }, cfg, fake as any), null);
+  assert.equal(calls, 1);
   const actual = async () => ({ ok: true, json: async () => ({
     model: 'prep_start_ratio_v2', prediction_type: 'ratio',
-    training_target: 'actual_start_depart', minutes: 32, ratio: 32/29.5,
+    training_target: 'actual_start_depart', baseline_definition: PURE_PREP_SHADOW_BASELINE_DEFINITION, minutes: 32, ratio: 32/29.5,
   }) });
   assert.equal((await requestPurePrepShadow(request, cfg, actual as any))?.training_target, 'actual_start_depart');
   const dismissProxy=async()=>({ok:true,json:async()=>({
     model:'prep_start_ratio_v2',prediction_type:'ratio',
-    training_target:'alarm_dismiss_location_proxy',minutes:29.5,ratio:1,
+    training_target:'alarm_dismiss_location_proxy',baseline_definition:PURE_PREP_SHADOW_BASELINE_DEFINITION,minutes:29.5,ratio:1,
   })});
   // A trained dismissal-to-location model is still not actual preparation ground truth.
   assert.equal(await requestPurePrepShadow(request,cfg,dismissProxy as any),null);
-  assert.equal((await requestPurePrepShadow(request,{...cfg,allowDismissProxy:true},dismissProxy as any))?.training_target,'alarm_dismiss_location_proxy');
+  assert.deepEqual(await requestPurePrepShadow(request,{...cfg,allowDismissProxy:true},dismissProxy as any),{
+    model:'prep_start_ratio_v2',baseline_definition:PURE_PREP_SHADOW_BASELINE_DEFINITION,
+    minutes:30,ratio:1,training_target:'alarm_dismiss_location_proxy',
+  });
+  const incompatible=async()=>({ok:true,json:async()=>({
+    model:'prep_start_ratio_v2',prediction_type:'ratio',training_target:'actual_start_depart',
+    baseline_definition:'previous_day_survey_diary',minutes:29.5,ratio:1,
+  })});
+  assert.equal(await requestPurePrepShadow(request,cfg,incompatible as any),null);
   assert.equal(await requestPurePrepShadow(request, cfg, async () => { throw Error('offline'); }), null);
 });
 
