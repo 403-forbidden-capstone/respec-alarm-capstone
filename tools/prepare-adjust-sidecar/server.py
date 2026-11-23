@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Research/QA-only server for an eventual real-duration CatBoost model.
+"""Research/QA-only inference server for provenance-labelled CatBoost models.
 
 IMPORTANT: The 2024 survey 141+142 proxy is NOT validated against actual user
 prep-start -> departure. Do not use that research .cbm to schedule real alarms.
@@ -50,7 +50,8 @@ def predict(model: CatBoostRegressor, payload: dict, training_target: str) -> di
     log_ratio = float(model.predict(x[FEATURES])[0])
     if not math.isfinite(log_ratio):
         raise ValueError("nonfinite prediction")
-    # The training target MUST be log((actual-preparation + 10)/(baseline + 10)).
+    # The model target is a provenance-labelled interval, potentially only a proxy.
+    # Ratio conversion must match the training code regardless of label source.
     minutes = min(240, max(5, (baseline + 10) * math.exp(max(-1.5, min(1.5, log_ratio))) - 10))
     ratio = minutes / baseline
     if not 0.5 <= ratio <= 2.0:
@@ -75,10 +76,12 @@ def main() -> None:
     if not hmac.compare_digest(str(manifest.get('sha256','')), digest):
         raise SystemExit('Model SHA256 differs from provenance manifest')
     training_target = manifest.get('training_target')
-    if training_target not in ('actual_start_depart', 'survey_start_cluster_proxy'):
+    if training_target not in ('actual_start_depart', 'survey_start_cluster_proxy', 'alarm_dismiss_location_proxy'):
         raise SystemExit('Unknown verified training target')
     if training_target == 'survey_start_cluster_proxy' and os.environ.get('PREP_ADJUST_ALLOW_SURVEY_PROXY') != '1':
         raise SystemExit('Survey proxy model requires PREP_ADJUST_ALLOW_SURVEY_PROXY=1 for research testing only')
+    if training_target == 'alarm_dismiss_location_proxy' and os.environ.get('PREP_ADJUST_ALLOW_DISMISS_PROXY') != '1':
+        raise SystemExit('Alarm dismissal proxy model requires PREP_ADJUST_ALLOW_DISMISS_PROXY=1 for research testing only')
     model = CatBoostRegressor()
     model.load_model(model_path)
 
