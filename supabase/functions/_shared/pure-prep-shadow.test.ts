@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
   PURE_PREP_SHADOW_MIN_HISTORY, buildPurePrepShadowRequest,
-  eligibleForPurePrepShadow, requestPurePrepShadow,
+  eligibleForPurePrepShadow, requestPurePrepShadow, runPurePrepShadow,
 } from './pure-prep-shadow.ts';
 
 const at = new Date('2026-11-25T01:00:00Z');
@@ -72,4 +72,37 @@ test('shadow response checks model identity, versioned target, safety range, and
   }) });
   assert.equal((await requestPurePrepShadow(request, cfg, actual as any))?.training_target, 'actual_start_depart');
   assert.equal(await requestPurePrepShadow(request, cfg, async () => { throw Error('offline'); }), null);
+});
+
+test('enabled demo preview with zero verified sessions never calls model or privileged profile lookup', async () => {
+  const original = (globalThis as any).Deno;
+  const env: Record<string,string> = {
+    PURE_PREP_SHADOW_ENABLED:'1',
+    PURE_PREP_SHADOW_ALLOWED_USER_IDS:userId,
+    // No model URL and no model API token should ever be needed below threshold.
+  };
+  (globalThis as any).Deno={env:{get:(k:string)=>env[k]}};
+  let queried = 0;
+  const query:any = {
+    select:(_s:string)=>query,
+    eq:(_k:string,_v:string)=>query,
+    not:(_k:string,_op:string,_v:null)=>query,
+    lt:(_k:string,_v:string)=>query,
+    order:(_k:string,_o:any)=>query,
+    limit:async (_n:number)=>({data:[],error:null}),
+  };
+  const fakeDb:any = {from:(table:string)=>{assert.equal(table,'appointment_participants');queried++;return query;}};
+  try {
+    const result=await runPurePrepShadow({
+      userId,db:fakeDb,
+      profile:{ml_profile_consented_at:'2026-11-20T00:00:00Z'},
+      now:new Date('2026-11-23T00:00:00Z'),appointmentAt:at,timezone:'Asia/Seoul',
+      personalAppointment:true,purePlan:true,manualOverride:false,
+    });
+    assert.deepEqual(result,{status:'INSUFFICIENT_HISTORY',valid_records:0,required_records:10});
+    assert.equal(queried,1);
+  } finally {
+    if(original===undefined) delete (globalThis as any).Deno;
+    else (globalThis as any).Deno=original;
+  }
 });
