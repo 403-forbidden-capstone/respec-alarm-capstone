@@ -10,6 +10,7 @@ import { StandaloneAlarmForm } from '@/features/alarm/components/StandaloneAlarm
 import { TextLink } from '@/features/alarm/components/TextLink';
 import { useAppointmentToggle } from '@/features/alarm/hooks/useAppointmentToggle';
 import { useNow } from '@/features/alarm/hooks/useNow';
+import { useStandaloneAlarmSave } from '@/features/alarm/hooks/useStandaloneAlarmSave';
 import { dayHeading, groupByDay, seriesInfo, splitUpcoming } from '@/features/alarm/schedule';
 import { formatDateShort } from '@/lib/format';
 import { useLoad } from '@/lib/useLoad';
@@ -26,6 +27,11 @@ export default function AlarmsScreen() {
   const { data, error, reload } = useLoad(listAppointments);
   const current = useNow();
   const toggleAppointment = useAppointmentToggle(reload);
+  // 기본 알람(#588)을 저장하면 목록을 다시 읽고 새 카드에 테두리
+  const standalone = useStandaloneAlarmSave((id) => {
+    void reload();
+    router.setParams({ highlight: id });
+  });
   const [showPast, setShowPast] = useState(false);
   const [expired, setExpired] = useState<string | null>(null);
   const lit = highlight && highlight !== expired ? highlight : null;
@@ -55,14 +61,8 @@ export default function AlarmsScreen() {
       <View style={styles.links}>
         <TextLink label="학교 시간표 · 반복 일정 지우기" onPress={() => router.push('/timetable')} />
       </View>
-      {/* 일정 없이 시각 · 반복만 정하는 알람 (#588) — 저장하면 목록을 다시 읽고 새 카드에 테두리 */}
-      <StandaloneAlarmForm
-        current={current}
-        onSaved={(id) => {
-          void reload();
-          router.setParams({ highlight: id });
-        }}
-      />
+      {/* 일정 없이 시각 · 반복만 정하는 알람 (#588) */}
+      <StandaloneAlarmForm current={current} busy={standalone.busy} onSave={standalone.save} />
       {!data && !error ? <Loading text="알람을 불러오는 중" /> : null}
       {data && !upcoming.length ? (
         <View style={styles.empty}>
