@@ -1,0 +1,34 @@
+name: Preparation Start Self-Report Pilot QA
+on:
+  push:
+    branches: [feat/pure-prep-self-report-pilot-20261123]
+    paths:
+      - 'mobile/src/features/alarm/selfReportedPrep*'
+      - 'mobile/src/features/alarm/__tests__/selfReportedPrep.test.ts'
+      - 'mobile/src/app/alarm/**'
+      - 'mobile/src/types/database.ts'
+      - 'mobile/src/lib/flags.ts'
+      - 'supabase/migrations/*self_reported_prep_start*'
+      - '.github/workflows/pure-prep-self-report-qa.yml'
+permissions:
+  contents: read
+jobs:
+  mobile:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+      - name: Install dependencies
+        working-directory: mobile
+        run: npm ci
+      - name: Typecheck app UI and typed RPC
+        working-directory: mobile
+        run: npm run typecheck
+      - name: Test self-report and prepare alarm regression
+        working-directory: mobile
+        run: npx jest --runInBand src/features/alarm/__tests__/selfReportedPrep.test.ts src/features/alarm/__tests__/prepareStart.test.ts
