@@ -978,11 +978,11 @@ isOneToOne: false
               "event_key": string,"group_id": string,"kind": string,"recipient_id": string,"sleeper_id": string
             }[]
                            },
-"decline_friend_request":
-{ Args: { "p_requester_id": string }; Returns: Json
-                           },
 "confirm_prep_start_self_report":
 { Args: { "p_appointment_id": string }; Returns: string
+                           },
+"decline_friend_request":
+{ Args: { "p_requester_id": string }; Returns: Json
                            },
 "delete_decision_comment":
 { Args: { "p_author": string,"p_id": number }; Returns: boolean
