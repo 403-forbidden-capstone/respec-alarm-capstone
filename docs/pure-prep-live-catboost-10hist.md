@@ -19,11 +19,11 @@
 
 ## Runtime settings (Supabase Edge secrets; never expose API tokens in an app)
 
-- `PURE_PREP_MODEL_LIVE_ENABLED=0` is the emergency kill switch (without it, the code attempts inference when all other conditions pass). It is not an activation switch that fabricates an available model service.
-- `PURE_PREP_MODEL_LIVE_URL`: deployed authenticated HTTPS v2 model sidecar. When absent, the existing `PURE_PREP_SHADOW_URL` can be used if that endpoint is a genuine v2 model server.
-- `PURE_PREP_MODEL_LIVE_API_TOKEN`: matching server-side key; falls back to `PURE_PREP_SHADOW_API_TOKEN` if available. Never put this value in mobile code.
-- `PURE_PREP_MODEL_LIVE_ALLOWED_USER_IDS`: optional UUID allowlist (when unset, the signed-in user may qualify automatically, subject to all consent/model criteria).
-- `PURE_PREP_MODEL_LIVE_ALLOW_PROXY=0`: rejects model outputs trained on dismissal→location proxy. The sidecar separately requires `PREP_ADJUST_ALLOW_DISMISS_PROXY=1` to intentionally serve a provenance-labeled proxy model.
+- `PURE_PREP_MODEL_LIVE_ENABLED=1` must be explicitly set to enable live inference. Unset, `0`, or any other value means OFF.
+- `PURE_PREP_MODEL_LIVE_URL`: required deployed authenticated HTTPS v2 model sidecar. No fallback to a Shadow endpoint.
+- `PURE_PREP_MODEL_LIVE_API_TOKEN`: required matching server-side key; no fallback to Shadow credentials. Never put this value in mobile code.
+- `PURE_PREP_MODEL_LIVE_ALLOWED_USER_IDS`: required exact UUID allowlist. Missing/empty list means no user qualifies.
+- `PURE_PREP_MODEL_LIVE_ALLOW_PROXY=1` must be explicitly set to accept dismissal→location proxy models (default OFF). This is not actual physical preparation ground truth; the sidecar additionally requires `PREP_ADJUST_ALLOW_DISMISS_PROXY=1`.
 - `PREPARE_ML_CODEBOOK_VERSION`: must match the server-approved verified user row. Shadow Mode's own flags and result remain separate.
 - Model HTTP request times out and validates model, ratio, baseline definition, training target and 5–240 minute bounds before returning an applied prediction.
 
@@ -41,3 +41,8 @@
 - **Causal features:** only prior completed sessions can construct the prediction for the next appointment. Never leak the target day's departure.
 - **Target semantics:** a wake→departure duration and a preparation-start→departure duration are different labels; never substitute one as the other.
 - **Graceful degradation:** prediction failures preserve the existing known user preference/history-based alarm rather than preventing scheduling.
+
+### Integration invariants
+
+- `loadPurePrepCandidate` is shared by `alarm-suggest`, `alarm-commit`, appointment edit/restore/replan, and recurring `alarm-roll`. This preserves MODEL provenance across automatic recalculation paths.
+- The live model uses distinct HTTPS endpoint/token, explicit enable/allowlist and separate explicit proxy approval; Shadow settings cannot silently activate production alarms.
