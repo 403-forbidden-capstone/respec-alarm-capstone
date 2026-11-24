@@ -39,7 +39,7 @@ export function PrepareStep({ values, onChange, ml, onMlChange }: Props) {
       </Text>
       <Text variant="small" tone="sub">
         식사·과제처럼 준비하기 전에 하는 일은 제외하고, 씻고 옷을 입는 등 외출 준비를 시작한 순간부터 집을 나설 때까지의 시간을 입력해 주세요.
-        입력한 시간을 초기 기준으로 사용해요. 시범 기능이 활성화된 개인 일정에서는 기록이 쌓이면 이 준비시간만 보정해요.
+        입력한 순수준비시간을 새 개인·그룹 자동 알람의 초기값으로 사용해요. 동의와 시범 조건이 충족되면 실제 기록으로 순수준비시간만 보정해요.
       </Text>
       <Card>
         <Stepper
