@@ -9,6 +9,7 @@
 // 하루 경계는 profiles.timezone(없으면 Asia/Seoul) 0시. 한국 · Android만이라 앱 기기 시간대(R02 계획 줄)와 같다고 봄 (10/29 헤드)
 import {
   RING_KINDS,
+  choosePurePrepBasis,
   addDaysToKey,
   nextOccurrences,
   nextRoutineAt,
@@ -828,7 +829,15 @@ class RollRun {
         : false;
     // The same pure-preparation choice must drive generated recurring
     // occurrences; never regress to whole-morning C1/W4 for the next day.
-    const purePrepCandidate = await loadPurePrepCandidate(read, task.user_id, ctx.profile, now, occ.at);
+    // Recurring individual AUTO alarms use the same live model selection.
+    // Group alarms and manual overrides keep their existing semantics.
+    const purePrepCandidate = base.appointment.group_id != null
+      ? choosePurePrepBasis({ profileMinutes: ctx.profile.default_outing_prep_minutes }) ?? undefined
+      : await loadPurePrepCandidate(read, task.user_id, ctx.profile, now, occ.at, {
+          allowLiveModel: base.participant.prepare_value_source !== 'MANUAL' &&
+            !base.alarms.some(a => (a.alarm_type === 'WAKE' || a.alarm_type === 'PREPARE') &&
+              a.time_source === 'MANUAL'),
+        });
     const planFor = (travel: TravelChoice) =>
       planOccurrence(ctx, base, occ, { travel, sameDayWake, baseHadEarlierWake, purePrepCandidate });
 
