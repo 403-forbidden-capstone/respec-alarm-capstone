@@ -440,3 +440,68 @@ test('group participant AUTO uses only their profile pure time, without group hi
   assert.equal(manual.plan.prepare.source, 'MANUAL');
   assert.equal(manual.plan.prepare.minutes, 85);
 });
+
+
+test('E2E simulation: onboarding 30m -> commit -> settings 45m -> preview -> explicit recommit -> reread', async () => {
+  const env = setup();
+  const profile = env.db.rows('profiles')[0];
+  // New onboarded users never supply the former wake-to-departure estimate.
+  Object.assign(profile, { default_outing_prep_minutes: 30, default_prepare_minutes: 150 });
+  const first = await previewAndSave(env, FULL);
+  assert.deepEqual(first.saved, first.shown);
+  const savedBefore = env.db.rows('alarms').filter(a => a.participant_id ===
+    env.db.rows('appointment_participants').find(p => p.appointment_id === first.appointmentId)?.participant_id)
+    .map(a => ({ kind: a.alarm_type, at: a.scheduled_at }));
+  assert.equal(savedBefore.find(a => a.kind === 'WAKE')?.at, new Date(iso(22, 480)).toISOString());
+  assert.equal(savedBefore.find(a => a.kind === 'PREPARE')?.at, new Date(iso(22, 510)).toISOString());
+
+  // Settings changed, but previously stored alarms must NOT be auto-mutated.
+  profile.default_outing_prep_minutes = 45;
+  const originalPersisted = env.db.rows('alarms').filter(a => a.participant_id ===
+    env.db.rows('appointment_participants').find(p => p.appointment_id === first.appointmentId)?.participant_id)
+    .map(a => ({ kind: a.alarm_type, at: a.scheduled_at }));
+  assert.deepEqual(originalPersisted, savedBefore);
+
+  const body = {
+    appointment_id: first.appointmentId,
+    participant: { est_travel_minutes: 50, travel_source: 'API' as const },
+  };
+  const preview = await buildPlan(env.ctx, draftOf(body), { wantAutoTravel: true, mode: 'preview' });
+  assert.equal(preview.plan.prepareTarget, 'PREPARE_START_TO_DEPART');
+  assert.equal(preview.plan.prepare.minutes, 75);
+  assert.deepEqual(preview.plan.chain.map(a => a.kind + ' ' + hm(a.at.toISOString())),
+    ['WAKE 07:45', 'PREPARE 08:15', 'DEPARTURE 09:00', 'ARRIVE 09:50']);
+
+  // A conscious resave through alarm-commit applies precisely the previewed schedule.
+  const second = await previewAndSave(env, body);
+  assert.deepEqual(second.saved, second.shown);
+  const participant = env.db.rows('appointment_participants').find(p => p.appointment_id === first.appointmentId);
+  assert.equal(participant?.outing_prep_minutes, 45);
+  assert.equal(participant?.outing_prep_source, 'PROFILE');
+  assert.equal(participant?.prepare_minutes, 75);
+  const actual = env.db.rows('alarms').filter(a => a.participant_id === participant?.participant_id);
+  assert.equal(hm(actual.find(a => a.alarm_type === 'WAKE')?.scheduled_at), '07:45');
+  assert.equal(hm(actual.find(a => a.alarm_type === 'PREPARE')?.scheduled_at), '08:15');
+  assert.equal(hm(actual.find(a => a.alarm_type === 'DEPARTURE')?.scheduled_at), '09:00');
+  assert.equal(env.db.rows('appointments').length, 1, 'resave must not duplicate appointments');
+  assert.equal(env.db.rows('appointment_participants').length, 1, 'resave must not duplicate participants');
+});
+
+test('E2E simulation: pre-pure legacy profile retains its old wake-to-departure time on save', async () => {
+  const env = setup();
+  Object.assign(env.db.rows('profiles')[0], {
+    default_prepare_minutes: 70,
+    default_outing_prep_minutes: null,
+  });
+  const first = await previewAndSave(env, FULL);
+  assert.deepEqual(first.saved, first.shown);
+  const row = env.db.rows('appointment_participants')[0];
+  assert.equal(row.prepare_minutes, 70);
+  assert.equal(row.outing_prep_minutes, null);
+  const next = await previewAndSave(env, {
+    appointment_id: first.appointmentId,
+    participant: { est_travel_minutes: 50, travel_source: 'API' },
+  });
+  assert.deepEqual(next.saved, next.shown);
+  assert.equal(env.db.rows('appointment_participants')[0].prepare_minutes, 70);
+});
