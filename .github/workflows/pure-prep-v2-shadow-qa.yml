@@ -1,7 +1,7 @@
 name: CatBoost v2 Shadow · 10 history QA
 on:
   push:
-    branches: [feat/pure-prep-v2-shadow-main-qa-20261123, fix/pure-prep-onboarding-edit-rebaseline-20261123, fix/pure-prep-only-onboarding-20261124]
+    branches: [feat/pure-prep-v2-shadow-main-qa-20261123, fix/pure-prep-onboarding-edit-rebaseline-20261123, fix/pure-prep-only-onboarding-20261124, test/pure-prep-save-reload-e2e-20261124]
     paths:
       - '.github/workflows/pure-prep-v2-shadow-qa.yml'
       - 'supabase/functions/_shared/pure-prep-shadow*'
@@ -10,6 +10,7 @@ on:
       - 'docs/pure-prep-v2-shadow-10hist.md'
       - 'supabase/functions/_shared/calc/pure-prep-basis*'
       - 'supabase/functions/_shared/plan.ts'
+      - 'supabase/functions/_shared/plan.test.ts'
       - 'supabase/functions/_shared/plan-core.ts'
       - 'supabase/migrations/*pure_prep*'
       - 'mobile/src/app/settings.tsx'
@@ -28,6 +29,7 @@ on:
       - 'supabase/functions/_shared/pure-prep-shadow*'
       - 'supabase/functions/_shared/calc/pure-prep-basis*'
       - 'supabase/functions/_shared/plan.ts'
+      - 'supabase/functions/_shared/plan.test.ts'
       - 'supabase/functions/_shared/plan-core.ts'
       - 'supabase/migrations/*pure_prep*'
       - 'mobile/src/app/settings.tsx'
