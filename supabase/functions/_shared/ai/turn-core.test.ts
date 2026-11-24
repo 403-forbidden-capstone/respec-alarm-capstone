@@ -2017,4 +2017,57 @@ describe("그룹 일정 고르기", () => {
     assert.equal(live(applyFast(rej.state, fast({ appointments: [{ ...sueop, save: "CONFIRMED" }] }), c, 2, "그래도 저장해줘").state), 1);
     assert.equal(live(applyFast(rej.state, fast({ appointments: [{ ...sueop, importance: "HIGH" }] }), c, 2, "오늘 피곤하다").state), 0);
   });
+
+  it("없는 그룹 뒤의 실제 '가족 여행'은 그룹 이름으로 잘라 내지 않는다", () => {
+    const c: Context = { ...ctx({ tomorrow: [] }), groups: [{ id: "g-team", name: "캡스톤팀" }] };
+    const old = study({ title: "가족 약속", time: "10:30", place: null });
+    const first = applyFast(initTurnState(c), fast({ appointments: [old] }), c, 1, "가족 그룹 내일 10시 반에 약속 잡아줘");
+    assert.equal(card(first.state, "c1").draft?.title, "약속");
+    assert.equal(card(first.state, "c1").group?.missing, "가족");
+    const trip = study({ title: "가족 여행", date: "2026-10-10", time: "10:00", place: "학교" });
+    // 이전 말을 T2F가 다시 뽑아도, 새로운 '가족 여행'은 정확한 제목을 지킨다.
+    const next = applyFast(first.state, fast({ appointments: [old, trip] }), c, 2, "토요일 10시에 가족 여행 있어");
+    assert.ok(next.state.cards.some((x) => x.draft?.title === "가족 여행" && x.draft.date === "2026-10-10"));
+    assert.equal(next.state.cards.some((x) => x.draft?.title === "여행"), false);
+  });
+
+  it("띄어쓰기·숫자가 포함된 실제 가입 그룹을 없는 그룹으로 잘못 기록하지 않는다", () => {
+    const mobile = { id: "g-mobile", name: "모바일 앱팀" };
+    const numbered = { id: "g-numbered", name: "403팀" };
+    assert.equal(missingGroup([mobile], "모바일 앱팀 그룹 회의 내일 3시"), null);
+    assert.equal(missingGroup([numbered], "403팀 그룹 회의 내일 3시"), null);
+    const a: Context = { ...ctx({ tomorrow: [] }), groups: [mobile] };
+    const b: Context = { ...ctx({ tomorrow: [] }), groups: [numbered] };
+    const one = applyFast(initTurnState(a), fast({ appointments: [study({ title: "모바일 앱팀 그룹 회의", time: "15:00" })] }), a, 1, "모바일 앱팀 그룹 회의 내일 3시");
+    const two = applyFast(initTurnState(b), fast({ appointments: [study({ title: "403팀 그룹 회의", time: "15:00" })] }), b, 1, "403팀 그룹 회의 내일 3시");
+    assert.deepEqual([card(one.state, "c1").group?.choice, card(one.state, "c1").group?.id], ["GROUP", "g-mobile"]);
+    assert.deepEqual([card(two.state, "c1").group?.choice, card(two.state, "c1").group?.id], ["GROUP", "g-numbered"]);
+    assert.equal(card(one.state, "c1").draft?.title, "모바일 앱팀 그룹 회의");
+    assert.equal(card(two.state, "c1").draft?.title, "403팀 그룹 회의");
+  });
+
+  it("'수업 말고 치과'는 거절한 수업을 다시 만들지 않고 치과 카드만 추가한다", () => {
+    const c = ctx({ tomorrow: [] });
+    const lesson = study({ title: "수업", time: "10:30", place: "학교" });
+    const first = applyFast(initTurnState(c), fast({ appointments: [lesson] }), c, 1, "내일 10시 반 수업");
+    const cancelled = applyCardAction(first.state, { id: "c1", action: "REJECTED" }, c, 1);
+    const dentist = study({ title: "치과", time: "10:30", place: "병원" });
+    const second = applyFast(cancelled.state, fast({ appointments: [{ ...lesson, save: "CONFIRMED" }, dentist] }), c, 2, "수업 말고 내일 10시 반에 치과 예약 있어");
+    assert.deepEqual(second.state.cards.filter((x) => x.status !== "REJECTED").map((x) => x.draft?.title), ["치과"]);
+    assert.equal(card(second.state, "c1").status, "REJECTED");
+    assert.ok(!second.event.clarify.some((x) => x.includes("같은 시각")));
+  });
+
+  it("날짜 없는 그룹 요청의 제목이 구체화되면 오래된 그룹 질문을 정리한다", () => {
+    const c: Context = { ...ctx({ tomorrow: [] }), groups: [{ id: "g1", name: "캡스톤팀" }, { id: "g2", name: "스터디팀" }] };
+    const incomplete = study({ title: "약속", date: null, time: "10:30", place: null });
+    const first = applyFast(initTurnState(c), fast({ appointments: [incomplete] }), c, 1, "그룹 알람 10시 반에 약속 잡아줘");
+    assert.ok(first.event.clarify.some((x) => x.startsWith("그룹 선택:") && x.includes("'약속'")));
+    const complete = study({ title: "점심 약속", time: "10:30", place: "학교" });
+    const second = applyFast(first.state, fast({ appointments: [incomplete, complete] }), c, 2, "내일 10시 반에 점심 약속 잡아줘");
+    const questions = second.state.events.flatMap((e) => e.clarify).filter((x) => x.startsWith("그룹 선택:"));
+    assert.ok(questions.some((x) => x.includes("'점심 약속'")), questions.join(" | "));
+    assert.equal(questions.some((x) => x.includes("'약속'")), false, questions.join(" | "));
+    assert.deepEqual(card(second.state, "c1").group?.candidates.map((x) => x.id), ["g1", "g2"]);
+  });
 });
