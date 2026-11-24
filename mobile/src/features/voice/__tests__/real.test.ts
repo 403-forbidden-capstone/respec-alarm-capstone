@@ -497,7 +497,7 @@ describe('⑤ 장소 필요 → 장소 고르기 → 계산 → 준비', () => {
     expect(mPlaces).toHaveBeenCalledWith();
     expect(mPlaces).not.toHaveBeenCalledWith('한실');
     expect(mEstimate).not.toHaveBeenCalled();
-    expect((turnBodies()[1].results as { cards: { status: string; error: string }[] }).cards[0]).toMatchObject({ status: 'NEEDS_PLACE', estimate: null, error: "'한실'의 위치를 골라 주세요" });
+    expect((turnBodies()[1].results as { cards: { status: string; error: string }[] }).cards[0]).toMatchObject({ status: 'NEEDS_PLACE', estimate: null, error: "'한실'의 정확한 위치를 확인하기 어려워요. 장소를 골라 주세요" });
     expect(c.cards[0].status).toBe('NEEDS_PLACE');
   });
 
@@ -996,7 +996,7 @@ describe('⑧ 실패 — 대화 · 카드는 남기고 다시 시도', () => {
     ];
     const again = await retry();
     expect(turnBodies()[1]).toEqual(failed); // 같은 client_turn_id · rev · 글
-    expect((turnBodies()[2].results as { cards: { status: string; error: string }[] }).cards[0]).toMatchObject({ status: 'NEEDS_PLACE', error: "'학교 도서관'의 위치를 골라 주세요" });
+    expect((turnBodies()[2].results as { cards: { status: string; error: string }[] }).cards[0]).toMatchObject({ status: 'NEEDS_PLACE', error: "'학교 도서관'의 정확한 위치를 확인하기 어려워요. 장소를 골라 주세요" });
     expect(again.unavailable).toBeNull();
     expect(again.cards[0]).toMatchObject({ status: 'NEEDS_PLACE', title: '캡스톤 팀 회의' });
     expect(again.messages.filter((m) => m.who === 'me')).toHaveLength(1);

@@ -59,7 +59,7 @@ export function FoundScheduleCard({ card, at, onSave, onReject, onEdit, onPickPl
         <>
           <Row label="일정" value={card.title} />
           {card.at ? <Row label="날짜 · 시간" value={`${formatDateParen(card.at)} ${formatTime(card.at)}`} /> : null}
-          {card.place ? <Row label="장소" value={card.place} /> : null}
+          {card.place ? <Row label="장소" value={card.place} note={status === 'NEEDS_PLACE' ? '미확정' : undefined} /> : status === 'NEEDS_PLACE' ? <Row label="장소" value="미확정" /> : null}
           {card.importance && card.importance !== 'LOW' ? <Row label="중요도" value={IMPORTANCE_LABEL[card.importance]} /> : null}
           {card.items.length ? <Row label="준비물" value={card.items.join(', ')} note="같이 저장" /> : null}
           {done && groupName ? <Row label="그룹" value={groupName} note="내 알람만" /> : null}

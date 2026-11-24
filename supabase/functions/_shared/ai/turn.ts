@@ -25,7 +25,7 @@ import {
   callsCapReached, countCallsSince, countSessionsSince, limitsOf, loadSession, recordCalls, recordQuestion, saveSession,
   type CallLog, type ServerState, type SessionRow, type StoredTurn,
 } from './session.ts';
-import { applyCardAction, applyFast, applyTaskResults, dateKo, asksWake, wakeAskOf, serverAskOf, dayStartIso, lifeDate, needKinds, eventAt, itemKey, prepAsked, type Rejected, type TurnState } from './turn-core.ts';
+import { applyCardAction, applyFast, applyTaskResults, dateKo, asksWake, wakeAskOf, serverAskOf, placeSayOf, dayStartIso, lifeDate, needKinds, eventAt, itemKey, prepAsked, type Rejected, type TurnState } from './turn-core.ts';
 import type { TodoPlan } from './final-core.ts';
 import { saveTodos } from './voice-commit.ts';
 import type { Act, CardAction, Context, FastExtract, Fix, ServerEvent, T1Output, TaskResults, TurnLimits } from './types.ts';
@@ -189,6 +189,16 @@ async function t1Reply(
   if (wake !== null && !asksWake(g.reply, wake.spoken)) {
     const kept = splitSentences(g.reply).filter((s) => !isQuestion(s));
     g = { ...g, reply: [...kept, wake.sentence].join(' '), acts: [{ type: 'CLARIFY', ref: null }], end: false, actions: [...g.actions, 'ask_wake'] };
+  }
+  // 장소를 못 정한 카드 — T1의 [장소 고르기] 안내 문장을 이유가 든 서버 문장으로 바꿈. T1이 안내를 안 했어도 다른 물음이 없으면 덧붙임 (위기 턴 제외)
+  const place = wake === null && !view(false).safety.latestUser ? placeSayOf(ts, j) : null;
+  if (place !== null) {
+    const sents = splitSentences(g.reply);
+    const rest = sents.filter((s) => !/장소\s*고르기/u.test(s));
+    if (rest.length !== sents.length || !sents.some((s) => isQuestion(s))) {
+      const kept = g.actions.includes('template') ? [] : rest.filter((x) => x !== fallbackReply([]));
+      g = { ...g, reply: [...kept, place].join(' '), end: false, actions: [...g.actions, 'ask_place'] };
+    }
   }
   // 서버가 물어야 할 것(이번 말의 되물을 것 — 부족한 날짜 · 시각 · 이름, 그룹 선택)이 남았는데 답에 물음이 없음(가드가 지움 · "네, 알겠어요.") → 서버 문장으로 물음
   const say = wake === null && !view(false).safety.latestUser ? serverAskOf(ts, j) : null;

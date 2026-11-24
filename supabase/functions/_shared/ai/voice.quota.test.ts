@@ -300,7 +300,7 @@ test('장소를 특정하지 못한 일정: 앱이 NEEDS_PLACE로 알리면 카�
   assert.equal(r2.next, 'USER');
   assert.equal(r2.cards.length, 1);
   assert.equal(r2.cards[0].status, 'NEEDS_PLACE');
-  assert.ok(r2.reply?.text);
+  assert.match(r2.reply?.text ?? '', /'학교 도서관'이 정확히 어디인지 확인하기 어려워요\. 카드의 '장소 고르기'를 눌러 캡스톤 팀 회의 장소를 직접 선택해 주세요\.$/); // 버튼만 누르라고 하지 않고 이유를 말함
   assert.match(fake.seen.T1[0], /학교 도서관/); // T1 화면에 장소를 골라야 하는 카드가 실림
   assert.deepEqual(fake.order, ['T2F', 'T1']);
 });
@@ -500,6 +500,7 @@ test('회귀 1: 실제 발화 — 장소 고르기 뒤 계산이 끝나면 T1이
   assert.deepEqual([r1.next, r1.cards.map((c) => [c.kind, c.draft?.title, c.pre_task])], ['APP_TASKS', [['APPT_NEW', '수업', { title: '할 일', wake: 'ASK', time: null }]]]);
   const r2 = (await handleVoiceTurn(deps, needsPlace(sid, r1.rev, t1.client_turn_id, '세종대학교'))) as VoiceTurnOut;
   assert.equal(r2.cards[0].status, 'NEEDS_PLACE');
+  assert.equal(r2.reply?.text, "'세종대학교'가 정확히 어디인지 확인하기 어려워요. 카드의 '장소 고르기'를 눌러 수업 장소를 직접 선택해 주세요."); // T1의 버튼 안내를 이유가 든 문장으로
   // 사용자가 장소를 고름 → 앱이 새 client_turn_id로 results만
   const r3 = (await handleVoiceTurn(deps, results(sid, r2.rev, cid()))) as VoiceTurnOut;
   assert.deepEqual([r3.reply?.text, r3.reply?.acts], [WAKE_ASK, [{ type: 'CLARIFY', ref: null }]]);
