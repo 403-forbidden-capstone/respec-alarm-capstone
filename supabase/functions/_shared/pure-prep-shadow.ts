@@ -52,7 +52,7 @@ export type PurePrepShadowResult =
       onboarding_pure_minutes: number | null;
       valid_records: number;
       required_records: 10;
-      applied_to_alarm: false;
+      applied_to_alarm: boolean;
     };
 
 export function eligibleForPurePrepShadow(input: {
@@ -272,7 +272,7 @@ export async function runPurePrepShadow(input: {
       onboarding_pure_minutes: input.profile.default_outing_prep_minutes ?? null,
       valid_records: history.length,
       required_records: PURE_PREP_SHADOW_MIN_HISTORY,
-      applied_to_alarm: false,
+      applied_to_alarm: live,
     };
   } catch {
     return null; // Both paths preserve an existing calculation on any failure.
