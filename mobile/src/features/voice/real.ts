@@ -32,7 +32,7 @@ import {
   type Transport,
 } from '@/features/alarm/types';
 import { now } from '@/lib/clock';
-import { formatTime, lifeDayKey } from '@/lib/format';
+import { formatTime, josa, lifeDayKey } from '@/lib/format';
 import { prepareBriefings } from '@/lib/alarmSync/briefing';
 import { EdgeError, callEdge } from '@/lib/edge';
 import { UserError, userMessage } from '@/lib/errors';
@@ -360,6 +360,12 @@ function basisOf(a: { travelMinutes?: unknown; prepMinutes?: unknown; beforePrep
 function groupIdOf(card: ServerCard): string | null {
   const g = card.group;
   return g?.choice === 'GROUP' && g.id && g.candidates.some((c) => c.id === g.id) ? g.id : null;
+}
+
+// 저장 안내에 쓸 그룹 이름 — 그룹 일정으로 고른 때만
+function groupNameOf(card: ServerCard): string | null {
+  const id = groupIdOf(card);
+  return id ? (card.group?.candidates.find((c) => c.id === id)?.name ?? null) : null;
 }
 
 // 새 약속 카드 계산 — 좌표를 풀고 estimateAppointment, 카드의 시각 고침(times)은 adjustEstimate로
@@ -1070,7 +1076,9 @@ export function saveCard(cardId: string): Promise<string> {
       appointmentId = saved.id;
       alarms = saved.alarms;
       level = saved.level;
-      toast = `일정이 저장됐어요. ${saved.title} 알람을 맞췄어요`;
+      // 그룹 일정이면 실제로 걸린 그룹을 알림 — 알람은 내 것만 맞춤 (다른 그룹원 알람은 건드리지 않음)
+      const groupName = groupNameOf(rec.server);
+      toast = groupName ? `${josa(saved.title, '이', '가')} ${groupName} 그룹 일정으로 저장됐어요. 내 알람을 맞췄어요` : `일정이 저장됐어요. ${saved.title} 알람을 맞췄어요`;
       rec.status = 'SAVED'; // 일정은 저장됨 — 아래 두 번째 저장이 실패해도 카드는 저장으로
       rec.appointmentId = saved.id;
       await rememberSaved(cardId, kind, saved.id, alarms, level); // 서버에 알리기 전에 — 앱이 꺼져도 다시 저장되지 않게

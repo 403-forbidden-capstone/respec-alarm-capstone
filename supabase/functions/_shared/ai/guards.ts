@@ -693,6 +693,22 @@ export function wakeAlarmSentence(hhmm: string): string {
  *   서버 질문이 남았는데 end → end 거둠
  *   해요체 아님 · 너무 김 → 기록만 (지침 21)
  */
+/** 처리 결과 되물을 것의 그룹 질문 줄 머리 (turn-core groupQuestion) · 장소 고르기 버튼 이름 (placeAskLine) */
+export const GROUP_ASK_HEAD = "그룹 선택:";
+export const PLACE_PICK = "[장소 고르기]";
+
+/**
+ * 이미 풀린 질문 · 안내 문장 — T1이 보는 처리 결과에 장소 고르기 줄(장소를 정해야 하는 카드)이 없는데 '장소 고르기'를 안내하거나,
+ * 그룹 선택 줄(그룹 · 개인 일정을 아직 안 고른 카드)이 없는데 그룹 · 개인 일정을 묻는 문장. 저장 · 선택이 끝난 뒤 되풀이를 막음
+ */
+export function staleAsk(sentence: string, events: ServerEvent[]): boolean {
+  const lines = events.flatMap((e) => e.clarify);
+  const placeOpen = lines.some((l) => l.includes(PLACE_PICK));
+  const groupOpen = lines.some((l) => l.startsWith(GROUP_ASK_HEAD));
+  if (!placeOpen && /장소\s*고르기/u.test(sentence)) return true;
+  return !groupOpen && isQuestion(sentence) && /개인\s*일정/u.test(sentence) && /그룹/u.test(sentence);
+}
+
 export function applyGuards(input: GuardInput, view: GuardView): GuardResult {
   const { ctx, eventsVisible, turnsBefore } = view;
   const retried = view.retried === true;
@@ -709,11 +725,12 @@ export function applyGuards(input: GuardInput, view: GuardView): GuardResult {
   const redo = (): GuardResult => ({ reply: input.reply, acts: input.acts, end: input.end, actions: ["regen"], redo: true, ...base });
   const template = (): GuardResult => ({ reply: fallbackReply(eventsVisible), acts: [], end: false, actions: [...actions, "template"], redo: false, ...base });
 
-  // 1) 문장 지우기 — 저장 주장 · 저장 약속 · 카드 없는 저장 요청 · 109
+  // 1) 문장 지우기 — 저장 주장 · 저장 약속 · 카드 없는 저장 요청 · 109 · 이미 풀린 장소 고르기 · 그룹 선택 안내
   let sents = splitSentences(input.reply);
   const hot = check.hotline_repeat || check.hotline_without_risk;
   const kept = sents.filter(
-    (s) => !((check.claims_saved_without_event && claimsSaved(s)) || (check.promises_save && promisesSave(s)) || (check.asks_save_without_card && asksSave(s)) || (hot && hasHotline(s))),
+    (s) =>
+      !((check.claims_saved_without_event && claimsSaved(s)) || (check.promises_save && promisesSave(s)) || (check.asks_save_without_card && asksSave(s)) || (hot && hasHotline(s)) || staleAsk(s, eventsVisible)),
   );
   if (kept.length !== sents.length) {
     actions.push("drop_sentence");

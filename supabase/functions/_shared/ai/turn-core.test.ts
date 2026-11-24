@@ -1750,7 +1750,7 @@ describe("그룹 일정 고르기", () => {
   const gctx = (groups = [CAP]): Context => ({ ...ctx(), groups });
   const meeting = (over: Partial<XAppt> = {}): XAppt => study({ title: "캡스톤 회의", time: "10:30", place: "학교", ...over });
   const est = (id: string): TaskResults["cards"][number] => ready(id, "08:00", { depart: "09:50" });
-  const ASK = "가입한 '캡스톤' 그룹이 있음 — '캡스톤 회의'을 캡스톤 그룹 일정으로 등록할지, 개인 일정으로 등록할지 (카드에서 골라도 됨)";
+  const ASK = "그룹 선택: 가입한 '캡스톤' 그룹이 있음 — '캡스톤 회의'을 캡스톤 그룹 일정으로 등록할지, 개인 일정으로 등록할지 (카드의 그룹 · 개인 일정 칩으로 골라도 됨)";
 
   it("groupOf: 이름만 → 물음 · '그룹'이라고 함 → 그 그룹 · '개인' → 개인 · 후보 여럿 → 물음 · 말 없음 → 없음", () => {
     assert.deepEqual(groupOf([CAP], "내일 10시 반에 캡스톤 회의 잡아줘"), { choice: "ASK", id: null, candidates: [CAP] });
@@ -1811,7 +1811,7 @@ describe("그룹 일정 고르기", () => {
   it("후보가 여럿이면 어느 그룹인지 묻고, 카드 칩(GROUP)으로 고름 — 개인(null) · 후보 밖 그룹은 거절", () => {
     const c = gctx([CAP, STUDY]);
     const r1 = applyFast(initTurnState(c), fast({ appointments: [meeting({ title: "회의" })] }), c, 1, "그룹 회의 잡아줘");
-    assert.deepEqual(r1.event.clarify, ["가입한 그룹 중 '회의'이 어느 그룹(캡스톤 · 알고리즘 스터디) 일정인지 먼저 고르기 — 그룹 일정이 아니면 개인 일정 (카드에서 골라도 됨)"]);
+    assert.deepEqual(r1.event.clarify, ["그룹 선택: 가입한 그룹 중 '회의'이 어느 그룹(캡스톤 · 알고리즘 스터디) 일정인지 먼저 고르기 — 그룹 일정이 아니면 개인 일정 (카드의 그룹 · 개인 일정 칩으로 골라도 됨)"]);
     const t1 = applyTaskResults(r1.state, { cards: [est("c1")], fixes: [] }, c, 1);
     assert.equal(applyCardActionRaw(t1.state, { id: "c1", action: "GROUP", group_id: "g-other" }, c, 1).ok, false);
     const picked = applyCardAction(t1.state, { id: "c1", action: "GROUP", group_id: "g-study" }, c, 1);
@@ -1859,8 +1859,53 @@ describe("그룹 일정 고르기", () => {
   it("'캡스톤 회의 잡아줘' + 가입 '캡스톤팀' → '가입한 캡스톤팀 그룹이 있음' 질문, 카드 후보는 가입 그룹만", () => {
     const c = { ...ctx(), groups: [{ id: "g-team", name: "캡스톤팀" }] };
     const r = applyFast(initTurnState(c), fast({ appointments: [study({ title: "캡스톤 회의", time: "10:30", place: "학교" })] }), c, 1, "내일 10시 반에 캡스톤 회의 잡아줘");
-    assert.deepEqual(r.event.clarify, ["가입한 '캡스톤팀' 그룹이 있음 — '캡스톤 회의'을 캡스톤팀 그룹 일정으로 등록할지, 개인 일정으로 등록할지 (카드에서 골라도 됨)"]);
+    assert.deepEqual(r.event.clarify, ["그룹 선택: 가입한 '캡스톤팀' 그룹이 있음 — '캡스톤 회의'을 캡스톤팀 그룹 일정으로 등록할지, 개인 일정으로 등록할지 (카드의 그룹 · 개인 일정 칩으로 골라도 됨)"]);
     assert.deepEqual(card(r.state, "c1").group?.candidates, [{ id: "g-team", name: "캡스톤팀" }]);
+  });
+
+  it("고르면 그룹 질문 줄이 지난 처리 결과에서도 사라짐 — 말로 고르든 칩으로 고르든, 같은 질문을 다시 쓰지 않음", () => {
+    const c = gctx();
+    const asked = (st: TurnState): string[] => st.events.flatMap((e) => e.clarify).filter((l) => l.startsWith("그룹 선택:"));
+    const r1 = applyFast(initTurnState(c), fast({ appointments: [meeting()] }), c, 1, "내일 10시 반에 캡스톤 회의 잡아줘");
+    const t1 = applyTaskResults(r1.state, { cards: [est("c1")], fixes: [] }, c, 1);
+    assert.equal(asked(t1.state).length, 1);
+    const said = applyFast(t1.state, fast({ appointments: [meeting()] }), c, 2, "캡스톤 그룹으로 해줘");
+    assert.deepEqual(asked(said.state), []);
+    const tapped = applyCardAction(t1.state, { id: "c1", action: "GROUP", group_id: null }, c, 1);
+    assert.deepEqual(asked(tapped.state), []);
+    // 고른 뒤 같은 일정이 다시 뽑혀도 다시 묻지 않음
+    const again = applyFast(said.state, fast({ appointments: [meeting({ importance: "HIGH" })] }), c, 3, "중요한 회의야");
+    assert.deepEqual(asked(again.state), []);
+  });
+
+  it("그룹 일정 저장 → 저장 안내에 실제 결과(캡스톤 그룹 일정 · 내 알람만), 카드의 질문(그룹 · 장소)은 모두 지움 · 두 번 저장 안 됨", () => {
+    const c = gctx();
+    const lines = (st: TurnState): string[] => st.events.flatMap((e) => e.clarify);
+    const r1 = applyFast(initTurnState(c), fast({ appointments: [meeting({ place: "한실" })] }), c, 1, "내일 10시 반에 한실에서 캡스톤 회의 잡아줘");
+    const t1 = applyTaskResults(r1.state, { cards: [{ id: "c1", status: "NEEDS_PLACE" }], fixes: [] }, c, 1);
+    assert.deepEqual(lines(t1.state).map((l) => l.slice(0, 6)), ["그룹 선택:", "'캡스톤 회"]); // 그룹 질문 · 장소 고르기 — 서로 다른 줄
+    // 장소를 고르면 장소 줄은 풀림 — 남은 건 그룹 질문뿐
+    const t2 = applyTaskResults(t1.state, { cards: [est("c1")], fixes: [] }, c, 1);
+    assert.equal(lines(t2.state).some((l) => l.includes("[장소 고르기]")), false);
+    const picked = applyCardAction(t2.state, { id: "c1", action: "GROUP", group_id: "g-cap" }, c, 1);
+    const saved = applyCardAction(picked.state, { id: "c1", action: "SAVED", appointment_id: "00000000-0000-4000-8000-000000000001", alarms: [] }, c, 1);
+    assert.deepEqual(lines(saved.state), []);
+    assert.ok(saved.event.applied.some((l) => /^일정 저장: .*캡스톤 회의.* · 캡스톤 그룹 일정으로 저장 \(알람은 내 것만\)$/.test(l)), saved.event.applied.join(" | "));
+    assert.equal(applyCardAction(saved.state, { id: "c1", action: "SAVED", appointment_id: "00000000-0000-4000-8000-000000000001", alarms: [] }, c, 1).status, "NOOP");
+    assert.equal(saved.state.appointments.filter((a) => a.title === "캡스톤 회의").length, 1);
+  });
+
+  it("개인 일정 저장 · 장소 없이 저장 · 거절해도 남은 질문이 없음, 저장 안내는 결과대로", () => {
+    const c = gctx();
+    const lines = (st: TurnState): string[] => st.events.flatMap((e) => e.clarify);
+    const r1 = applyFast(initTurnState(c), fast({ appointments: [meeting({ place: "한실" })] }), c, 1, "내일 10시 반에 한실에서 캡스톤 회의 잡아줘");
+    const t1 = applyTaskResults(r1.state, { cards: [{ id: "c1", status: "NEEDS_PLACE" }], fixes: [] }, c, 1);
+    const personal = applyCardAction(t1.state, { id: "c1", action: "GROUP", group_id: null }, c, 1);
+    const saved = applyCardAction(personal.state, { id: "c1", action: "SAVED", appointment_id: "00000000-0000-4000-8000-000000000002", alarms: [] }, c, 1);
+    assert.deepEqual(lines(saved.state), []);
+    assert.ok(saved.event.applied.some((l) => /장소 미정이라 알람은 아직 없음.* · 개인 일정으로 저장$/.test(l)), saved.event.applied.join(" | "));
+    const rejected = applyCardAction(t1.state, { id: "c1", action: "REJECTED" }, c, 1);
+    assert.deepEqual(lines(rejected.state), []);
   });
 
   it("요청 검사: card_action GROUP은 group_id(uuid · null = 개인)만 받음", () => {
