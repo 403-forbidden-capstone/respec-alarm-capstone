@@ -134,3 +134,30 @@ test('enabled demo preview with zero verified sessions never calls model or priv
     else (globalThis as any).Deno=original;
   }
 });
+
+test('survey pilot rejects multi-UUID allowlists before querying any user data', async () => {
+  const original = (globalThis as any).Deno;
+  const env: Record<string,string> = {
+    PURE_PREP_MODEL_LIVE_ENABLED: '0',
+    PURE_PREP_SURVEY_V2_PILOT_ENABLED: '1',
+    PURE_PREP_SURVEY_V2_PILOT_ALLOW_ALARM: '1',
+    PURE_PREP_SURVEY_V2_PILOT_ALLOWED_USER_IDS:
+      userId + ',22222222-2222-4222-8222-222222222222',
+  };
+  (globalThis as any).Deno={env:{get:(k:string)=>env[k]}};
+  const db:any={from:()=>{throw Error('should not reach the DB')}};
+  try {
+    const result=await runPurePrepShadow({
+      userId, db,
+      profile:{ml_profile_consented_at:'2026-11-20T00:00:00Z'},
+      now:new Date('2026-11-25T00:00:00Z'),
+      appointmentAt:new Date('2026-11-26T00:00:00Z'),
+      timezone:'Asia/Seoul',personalAppointment:true,
+      purePlan:true,manualOverride:false,mode:'live',
+    });
+    assert.equal(result,null);
+  } finally {
+    if(original===undefined) delete (globalThis as any).Deno;
+    else (globalThis as any).Deno=original;
+  }
+});
