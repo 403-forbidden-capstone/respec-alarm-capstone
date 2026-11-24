@@ -7,7 +7,7 @@ import assert from "node:assert/strict";
 import type { AlarmPlan, Appointment, Card, CardAction, Context, Fact, FastExtract, ServerEvent, TaskResults } from "./types.ts";
 import { datesFor } from "./testing.ts";
 import {
-  asksWake, prepAsked, groupAnswer, groupOf, missingGroup, serverAskOf, stripGroupName,
+  asksWake, prepAsked, groupAnswer, groupOf, missingGroup, serverAskOf, placeSayOf, stripGroupName,
   appointmentSummary, applyCardAction as applyCardActionRaw, applyFast, applyTaskResults as applyTaskResultsRaw, checkBasis, checkDigest, dateKo, dayOf, dayStartIso, eventAt, expandFast, initTurnState, isoToLocal, itemKey, lifeDate,
   apptName, intentOf, keywordImportance, mentionedAppts, nearTitle, needKinds, normTitle, pickServerQuestion, questionSubjectKey, titleMatch,
 } from "./turn-core.ts";
@@ -1727,12 +1727,14 @@ describe("장소 없이 저장 (alarm-commit PLACE_PENDING)", () => {
     assert.deepEqual(r.cards.map((x) => [x.id, x.kind, x.draft?.place]), [["c1", "APPT_NEW", "한실"]]);
     const t = applyTaskResults(r.state, { cards: [{ id: "c1", status: "NEEDS_PLACE", error: "'한실'의 위치를 골라 주세요" }], fixes: [] }, c, 1);
     assert.deepEqual(t.event.clarify, ["'회의' 장소 (카드의 [장소 고르기])"]);
+    assert.equal(placeSayOf(t.state, 1), "'한실'이 정확히 어디인지 확인하기 어려워요. 카드의 '장소 고르기'를 눌러 회의 장소를 직접 선택해 주세요.");
 
     const saved = applyCardAction(t.state, { id: "c1", action: "SAVED", appointment_id: "ap-uuid", alarms: [] }, c, 2);
     assert.equal(card(saved.state, "c1").status, "SAVED");
     assert.deepEqual(saved.event.applied, ["일정 저장: 10/9(금) 13:00 회의 · 장소 미정이라 알람은 아직 없음 (장소를 정한 뒤 알람 설정에서)"]);
     assert.deepEqual(saved.event.alarms, []);
     assert.ok(saved.state.events.every((e) => !e.clarify.includes("'회의' 장소 (카드의 [장소 고르기])")), "장소를 더 묻지 않음");
+    assert.equal(placeSayOf(saved.state, 1), null, "저장 뒤엔 장소 이유 문장도 없음");
     const appt = saved.state.appointments.find((a) => a.title === "회의");
     assert.deepEqual([appt?.place, saved.state.bound[appt?.ref as string]], [null, "ap-uuid"]);
 

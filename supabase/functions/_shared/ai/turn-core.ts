@@ -625,6 +625,17 @@ export function groupQuestion(c: Card): string | null {
 /** 장소 고르기 줄 — 장소를 정해야 하는(NEEDS_PLACE) 새 일정 카드만 냄 */
 export const placeAskLine = (title: string): string => `'${title}' 장소 (카드의 ${PLACE_PICK})`;
 
+/** 이번 말(j)에 장소 고르기 줄이 남은 카드가 있으면 왜 못 정했는지 + 고르라는 서버 문장 — 없으면 null (단순히 버튼만 누르라고 하지 않게) */
+export function placeSayOf(s: TurnState, j: number): string | null {
+  const e = eventAt(s.events, j);
+  const c = s.cards.find((x) => x.status === "NEEDS_PLACE" && x.draft !== null && e?.clarify.includes(placeAskLine(x.draft.title)));
+  if (c?.draft == null) return null;
+  const { title } = c.draft;
+  const heard = c.draft.place?.trim() ?? "";
+  const what = heard ? `'${heard}'${josa(heard, "이", "가")}` : `'${title}' 장소가`;
+  return `${what} 정확히 어디인지 확인하기 어려워요. 카드의 '장소 고르기'를 눌러 ${title} 장소를 직접 선택해 주세요.`;
+}
+
 /** 카드가 낸 되물을 것 줄 (그룹 선택 · 장소 고르기 · 알람 계산 · 계산 실패 문구 · 기상 확인) — 저장 · 거절한 카드의 질문을 다시 쓰지 않게 지울 때 */
 function cardAskLines(c: Card): string[] {
   const title = c.draft?.title ?? c.summary;

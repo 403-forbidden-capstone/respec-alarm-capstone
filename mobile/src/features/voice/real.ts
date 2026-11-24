@@ -378,7 +378,7 @@ async function estimateNew(rec: CardRec): Promise<Outcome> {
     // 장소를 못 들었으면('') 찾아 보지 않고 바로 장소 필요
     const heard = d.place.trim();
     const place = rec.place ?? (heard ? await placeByName(heard) : null);
-    if (!place) return { status: 'NEEDS_PLACE', error: heard ? `'${heard}'의 위치를 골라 주세요` : '장소를 골라 주세요' };
+    if (!place) return { status: 'NEEDS_PLACE', error: heard ? `'${heard}'의 정확한 위치를 확인하기 어려워요. 장소를 골라 주세요` : '장소를 골라 주세요' };
     const draft: AppointmentDraft = {
       title: d.title,
       date: day,
