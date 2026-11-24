@@ -9,6 +9,9 @@ import {
 } from './prepare-ml.ts';
 import type { ProfileRow } from './plan-core.ts';
 import type { Db } from './supabase.ts';
+import { localDateKey } from './tz.ts';
+import { previousDateKey } from './prepare-ml.ts';
+import { buildSurveyV2PilotRequest, requestSurveyV2Pilot } from './survey-v2-pilot.ts';
 
 export const PURE_PREP_SHADOW_MIN_HISTORY = 10;
 export const PURE_PREP_SHADOW_MAX_HISTORY = 30;
@@ -43,8 +46,8 @@ export type PurePrepShadowResult =
   | { status: 'MODEL_UNAVAILABLE'; valid_records: number; required_records: 10 }
   | {
       status: 'PREDICTED';
-      model: typeof PURE_PREP_SHADOW_MODEL;
-      training_target: ShadowTarget;
+      model: typeof PURE_PREP_SHADOW_MODEL | 'prep_start_ratio_v2_survey_pilot';
+      training_target: ShadowTarget | 'survey_start_cluster_proxy';
       predicted_pure_minutes: number;
       history_baseline_minutes: number;
       personalized_baseline_minutes: number;
@@ -187,12 +190,25 @@ export async function runPurePrepShadow(input: {
   const live = input.mode === 'live';
   // Explicit opt-in protects production alarms. Ten records never implicitly
   // turn a research endpoint into a production dependency without rollout.
-  const enabled = live
+  // Survey-v2 was learned from diary clusters, not the app's real preparation
+  // intervals. It is a separately authorized, user-isolated transfer pilot.
+  // Never silently repurpose the existing production CatBoost live URL/token.
+  const surveyPilot = live &&
+    getEnv('PURE_PREP_MODEL_LIVE_ENABLED') !== '1' &&
+    getEnv('PURE_PREP_SURVEY_V2_PILOT_ENABLED') === '1' &&
+    getEnv('PURE_PREP_SURVEY_V2_PILOT_ALLOW_ALARM') === '1';
+  const enabled = surveyPilot || (live
     ? getEnv('PURE_PREP_MODEL_LIVE_ENABLED') === '1'
-    : getEnv('PURE_PREP_SHADOW_ENABLED') === '1';
-  const allowedUserIds = live
-    ? getEnv('PURE_PREP_MODEL_LIVE_ALLOWED_USER_IDS')
+    : getEnv('PURE_PREP_SHADOW_ENABLED') === '1');
+  const allowedUserIds = surveyPilot
+    ? getEnv('PURE_PREP_SURVEY_V2_PILOT_ALLOWED_USER_IDS')
+    : live ? getEnv('PURE_PREP_MODEL_LIVE_ALLOWED_USER_IDS')
     : getEnv('PURE_PREP_SHADOW_ALLOWED_USER_IDS');
+  // Research pilot is deliberately limited to exactly one UUID, even if an
+  // operator accidentally supplies a multi-user allowlist.
+  if (surveyPilot && !/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(
+    allowedUserIds?.trim() ?? '',
+  )) return null;
   if (!eligibleForPurePrepShadow({
     enabled, allowedUserIds,
     userId: input.userId,
@@ -238,6 +254,44 @@ export async function runPurePrepShadow(input: {
       verifiedRow as VerifiedMlProfile | null, getEnv('PREPARE_ML_CODEBOOK_VERSION'),
     );
     if (!verified) return { status: 'UNVERIFIED_PROFILE', valid_records: history.length, required_records: PURE_PREP_SHADOW_MIN_HISTORY };
+    if (surveyPilot) {
+      // The *single preceding LOCAL calendar day's* completed session is the
+      // nearest available app-side proxy to the survey model's training input.
+      // Never substitute onboarding minutes or the mean of the latest ten.
+      const previousKey = previousDateKey(input.appointmentAt, input.timezone);
+      const previousDay = confirmedPurePrepHistory(
+        (data as PrepCompletionRow[]).filter(row =>
+          row.departed_at != null &&
+          localDateKey(new Date(row.departed_at), input.timezone) === previousKey),
+        cutoff, 1, editedAt,
+      )[0];
+      const surveyRequest = buildSurveyV2PilotRequest({
+        appointmentAt: input.appointmentAt, timezone: input.timezone,
+        verifiedAgeCode: verified.ml_age_code,
+        verifiedHolidayCode: verified.ml_holiday_code,
+        validHistoryCount: history.length, previousLocalDayMinutes: previousDay,
+      });
+      if (!surveyRequest) return { status: 'MODEL_UNAVAILABLE', valid_records: history.length, required_records: PURE_PREP_SHADOW_MIN_HISTORY };
+      const surveyResponse = await requestSurveyV2Pilot(surveyRequest, {
+        url: getEnv('PURE_PREP_SURVEY_V2_PILOT_URL'),
+        token: getEnv('PURE_PREP_SURVEY_V2_PILOT_API_TOKEN'),
+      });
+      if (!surveyResponse) return { status: 'MODEL_UNAVAILABLE', valid_records: history.length, required_records: PURE_PREP_SHADOW_MIN_HISTORY };
+      return {
+        status: 'PREDICTED',
+        // Distinct DB provenance: do not label a survey model as a validated
+        // app-start predictor under the same deployment model identifier.
+        model: 'prep_start_ratio_v2_survey_pilot',
+        training_target: 'survey_start_cluster_proxy',
+        predicted_pure_minutes: surveyResponse.minutes,
+        history_baseline_minutes: previousDay,
+        personalized_baseline_minutes: previousDay,
+        raw_model_prediction_minutes: surveyResponse.minutes,
+        onboarding_pure_minutes: input.profile.default_outing_prep_minutes ?? null,
+        valid_records: history.length, required_records: PURE_PREP_SHADOW_MIN_HISTORY,
+        applied_to_alarm: true,
+      };
+    }
     const request = buildPurePrepShadowRequest({
       appointmentAt: input.appointmentAt,
       timezone: input.timezone,
@@ -249,9 +303,6 @@ export async function runPurePrepShadow(input: {
     const response = await requestPurePrepShadow(request, {
       url: live ? getEnv('PURE_PREP_MODEL_LIVE_URL') : getEnv('PURE_PREP_SHADOW_URL'),
       token: live ? getEnv('PURE_PREP_MODEL_LIVE_API_TOKEN') : getEnv('PURE_PREP_SHADOW_API_TOKEN'),
-      // The observed training label is a dismissal→location proxy, NOT
-      // verified physical preparation. Live use of that label is separately
-      // opt-in and never inferred from a Shadow Mode setting.
       allowDismissProxy: live ? getEnv('PURE_PREP_MODEL_LIVE_ALLOW_PROXY') === '1'
         : getEnv('PURE_PREP_SHADOW_ALLOW_DISMISS_PROXY') === '1',
     });
