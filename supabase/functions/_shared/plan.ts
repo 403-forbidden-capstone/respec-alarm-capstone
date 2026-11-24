@@ -23,6 +23,7 @@ import {
 } from './plan-core.ts';
 import { resolveTravel, type ResolvedTravel, type TravelDeps } from './route.ts';
 import type { Db } from './supabase.ts';
+import { runPurePrepShadow, PURE_PREP_SHADOW_MIN_HISTORY } from './pure-prep-shadow.ts';
 import { localDayRange, safeTimeZone } from './tz.ts';
 
 export type PlanContext = {
@@ -31,6 +32,9 @@ export type PlanContext = {
   now: Date;
   kakaoKey?: string; // KAKAO_REST_API_KEY. 없으면 길찾기 단계를 건너뜀 (F10)
   fetchImpl?: FetchLike;
+  // Injectable solely for deterministic planner regression tests. Production
+  // contexts always use the authenticated, consented CatBoost v2 runner.
+  purePrepModelRunner?: typeof runPurePrepShadow;
 };
 
 const DEFAULT_PROFILE: ProfileRow = {
@@ -383,8 +387,48 @@ export async function buildPlan(ctx: PlanContext, draft: PlanDraft, options: { w
   inputs.purePrepCandidate = inGroup
     ? choosePurePrepBasis({ profileMinutes: profile.default_outing_prep_minutes }) ?? undefined
     : await loadPurePrepCandidate(ctx.db, ctx.userId, profile, ctx.now, basics.at);
-  // Old C1/W4 predicts wake->departure; pure prep predicts a different target.
-  // They must never compete for the same alarm calculation.
+  // For the user's own AUTO personal appointment, ten (or more) trusted,
+  // completed post-edit sessions unlock live CatBoost v2 prediction. The
+  // runner verifies consent, server-owned demographics, model provenance,
+  // exact feature protocol and model availability. Any failure keeps the
+  // previously selected PROFILE/HISTORY baseline without blocking the alarm.
+  // Never use it for group/shared times, manual preparation or manual WAKE /
+  // PREPARE alarms. An already-awake schedule may still adjust its pure PREPARE
+  // time; its whole-day legacy C1/W4 semantics are not involved.
+  const manualTime = draft.manualTimes?.PREPARE != null ||
+    draft.manualTimes?.WAKE != null ||
+    existingAlarms.some(a => (a.alarm_type === 'PREPARE' || a.alarm_type === 'WAKE') &&
+      a.time_source === 'MANUAL' && draft.manualTimes?.[a.alarm_type] !== null);
+  const manualPrep = draft.prepareMinutes != null ||
+    (participant?.prepare_value_source === 'MANUAL' && draft.prepareValueSource !== 'AUTO');
+  if (inputs.purePrepCandidate && !inGroup && !manualPrep && !manualTime) {
+    const result = await (ctx.purePrepModelRunner ?? runPurePrepShadow)({
+      mode: 'live',
+      userId: ctx.userId,
+      db: ctx.db,
+      profile,
+      now: ctx.now,
+      appointmentAt: basics.at,
+      timezone: timeZone,
+      personalAppointment: true,
+      purePlan: true,
+      manualOverride: false,
+    });
+    if (result?.status === 'PREDICTED' &&
+        result.valid_records >= PURE_PREP_SHADOW_MIN_HISTORY &&
+        result.model === 'prep_start_ratio_v2' &&
+        Number.isInteger(result.predicted_pure_minutes) &&
+        result.predicted_pure_minutes >= 5 && result.predicted_pure_minutes <= 240) {
+      inputs.purePrepCandidate = {
+        source: 'MODEL',
+        model: 'prep_start_ratio_v2',
+        minutes: result.predicted_pure_minutes,
+        sampleCount: result.valid_records,
+      };
+    }
+  }
+  // Older C1/W4 predicts wake->departure, a different target. Never compare
+  // or add its output to the pure preparation candidate.
   if (!inputs.purePrepCandidate) {
     inputs.mlPrediction = await optionalMlPrediction(ctx, basics.at, timeZone, allowMl);
   }
