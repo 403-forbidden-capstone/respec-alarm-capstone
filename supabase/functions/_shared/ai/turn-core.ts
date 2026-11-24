@@ -505,7 +505,10 @@ const NOT_GROUP_NAME = new Set(["우리", "내", "제", "저", "이", "그", "�
 
 /** 말에서 'X 그룹'의 X가 가입한 그룹(정확히 · 이름 앞부분)이 아니면 X — 없는 그룹을 말함. 그런 말이 없으면 null ('그룹 알람'처럼 이름 없이 '그룹'만이면 null) */
 export function missingGroup(groups: GroupRef[], text: string): string | null {
-  for (const m of text.matchAll(/([가-힣A-Za-z]+?)\s*그룹/gu)) {
+  // '모바일 앱팀' · '403팀'처럼 띄어쓰기나 숫자가 있는 가입 그룹도 먼저 확인한다.
+  // 정규식으로 끝 낱말('앱팀' · '팀')만 잡아 존재하지 않는 그룹으로 오인하지 않도록 한다.
+  if (readGroups(groups, text).named.length > 0) return null;
+  for (const m of text.matchAll(/([가-힣A-Za-z0-9]+?)\s*그룹/gu)) {
     const w = m[1] as string;
     if (NOT_GROUP_NAME.has(w) || COMMON_WORDS.has(w)) continue;
     if (readGroups(groups, w).named.length > 0 || partialGroups(groups, w).length > 0) continue;
@@ -876,11 +879,27 @@ export function applyFast(state: TurnState, fast: FastExtract, ctx: Context, aft
   const hits = intent === null ? null : mentionedAppts(s.appointments, intent.text);
   const ev = newEvent(afterTurn);
   const seen0 = { ...s.seen }; // 이번 말 전 처리 기록 — 거절한 일정을 다시 청했는지(저장해 달라는 말이 새로 생김) 볼 때
-  // 없는 그룹 이름('가족 그룹')은 일정 제목이 아님 — 이번 말에서 찾으면 기억해 두고 새 일정 제목에서 뺌 (T2F가 앞 말을 다시 뽑아도 같은 제목)
-  const missingNow = userText === undefined || ctx.groups === undefined ? null : missingGroup(ctx.groups, userText);
-  if (missingNow !== null) s.seen[`group-missing:${missingNow}`] = "1";
-  const missingNames = Object.keys(s.seen).filter((k) => k.startsWith("group-missing:")).map((k) => k.slice("group-missing:".length));
-  for (const x of extract.appointments) if (x.ref === null) x.title = missingNames.reduce(stripGroupName, x.title);
+  // 없는 그룹 명칭은 그 요청에서 추출한 일정에만 적용한다. 지난 대화의 '가족 그룹' 때문에
+  // 다음 말의 실제 일정 '가족 여행'까지 '여행'으로 바뀌면 안 된다.
+  // T2F가 이전 요청을 다시 뽑을 때만 같은 원문 제목 · 날짜 · 시각에 기록한 변환을 재사용한다.
+  const missingNow = userText === undefined ? null : groupOf(ctx.groups, userText)?.missing ?? null;
+  for (const x of extract.appointments) {
+    if (x.ref !== null) continue;
+    const key = `group-missing-title:${normTitle(x.title)}|${x.date ?? "?"}|${x.time ?? "?"}`;
+    const savedName = s.seen[key];
+    if (savedName !== undefined) {
+      x.title = stripGroupName(x.title, savedName);
+    } else if (missingNow !== null) {
+      const clean = stripGroupName(x.title, missingNow);
+      // 같은 발화의 일정만 정리: '가족 그룹 약속'은 명시적 표기이거나,
+      // '가족 약속'처럼 T2F가 '그룹'을 뺀 경우에는 나머지 제목이 최신 말에 있어야 한다.
+      const explicit = squash(x.title).includes(`${squash(missingNow)}그룹`);
+      if (clean !== x.title && (explicit || (userText !== undefined && squash(userText).includes(squash(clean))))) {
+        s.seen[key] = missingNow;
+        x.title = clean;
+      }
+    }
+  }
   const touched = new Set<string>();
   const now = isoToLocal(ctx.session.now);
   const isPast = (at: LocalDateTime): boolean => minutesBetween(now, at) < 0;
@@ -1075,8 +1094,23 @@ export function applyFast(state: TurnState, fast: FastExtract, ctx: Context, aft
         c.edit = c.edit?.prepare_delta !== undefined ? { prepare_delta: c.edit.prepare_delta } : null;
         // 그룹 선택은 카드를 처음 만든 말 · 제목으로 한 번만 — 재료가 바뀌어도 고른 값 유지
         if (c.group === undefined) {
-          const g = groupOf(ctx.groups, `${userText ?? ""} ${s.seen[`group-text:${normTitle(x.title)}`] ?? ""} ${x.title}`);
+          // 날짜 없는 그룹 요청의 제목이 '약속' → '점심 약속'으로 구체화되어도
+          // 같은 요청의 그룹 후보를 이어받되, 다른 일정('수업')으로 흘리지 않는다.
+          const normalized = normTitle(x.title);
+          const carried = Object.entries(s.seen).find(([k]) => {
+            if (!k.startsWith("group-text:")) return false;
+            const prior = k.slice("group-text:".length);
+            return prior.length >= 2 && (normalized === prior || normalized.includes(prior) || prior.includes(normalized));
+          });
+          const g = groupOf(ctx.groups, `${userText ?? ""} ${carried?.[1] ?? ""} ${x.title}`);
           if (g !== undefined) c.group = g;
+          if (carried !== undefined) {
+            const priorTitle = carried[0].slice("group-text:".length);
+            // 카드가 없는 시점의 오래된 질문은 이제 새 제목의 카드가 대신한다.
+            forgetLines(s, s.events.flatMap((e) => e.clarify.filter((line) =>
+              line.startsWith(GROUP_ASK_HEAD) && line.includes(`'${priorTitle}'`))));
+            delete s.seen[carried[0]];
+          }
         }
       },
       x.save,
@@ -1181,13 +1215,17 @@ export function applyFast(state: TurnState, fast: FastExtract, ctx: Context, aft
    */
   const rejectedTwin = (x: XAppt): boolean =>
     s.cards.some((c) => c.kind === "APPT_NEW" && c.status === "REJECTED" && c.draft !== null && c.draft.date === x.date && c.draft.time === x.time && nearTitle(c.draft.title, x.title));
-  /** 거절한 일정을 이번 말에서 다시 청함 — 이번 말에 제목이 나오거나, 저장해 달라는 말('그래도 저장해줘')이 이번에 새로 생김 */
+  /** 거절한 일정을 다시 청함. 새 일정이 함께 나오면 '수업 말고 치과'의 '수업'은 취소 대상이지 재등록이 아니다. */
   const askedAgain = (x: XAppt, key: string): boolean => {
-    if (userText !== undefined && normTitle(x.title) !== "" && squash(userText).includes(squash(x.title))) return true;
-    // 이번 말에 처음 나온 다른 일정이 있으면 새 일정을 청한 말 — T2F가 거절한 일정의 저장 표시를 바꿔 낸 것은 다시 청한 게 아님
     const brandNew = extract.appointments.some((y) => y !== x && y.ref === null && seen0[apptKey(y)] === undefined && !rejectedTwin(y));
+    if (brandNew) return false;
+    if (userText !== undefined && normTitle(x.title) !== "" && squash(userText).includes(squash(x.title))) {
+      // 부정/대체 말에 등장한 옛 제목은 재등록 요청으로 취급하지 않는다.
+      const afterTitle = squash(userText).split(squash(x.title))[1] ?? "";
+      if (!/^(말고|대신|빼고|취소|안|하지마)/u.test(afterTitle)) return true;
+    }
     const before = seen0[key];
-    return !brandNew && x.save === "CONFIRMED" && before !== undefined && (JSON.parse(before) as unknown[])[0] !== "CONFIRMED";
+    return x.save === "CONFIRMED" && before !== undefined && (JSON.parse(before) as unknown[])[0] !== "CONFIRMED";
   };
 
   // 이번 말에서 새로 카드를 만들 수 있는 일정 중 가장 이른 시각에 둘 이상이면(같은 시각) 어느 것부터인지 되물음 — 이미 있는 약속 · 열린 카드는 빼고 셈
