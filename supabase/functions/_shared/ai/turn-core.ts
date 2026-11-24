@@ -501,7 +501,7 @@ const COMMON_WORDS = new Set([
 ]);
 
 // 'X 그룹'의 X가 그룹 이름이 아닌 말 ('우리 그룹' · '어느 그룹')
-const NOT_GROUP_NAME = new Set(["우리", "내", "제", "저", "이", "그", "어느", "무슨", "다른", "같은", "새", "새로운", "전체", "단체"]);
+const NOT_GROUP_NAME = new Set(["우리", "내", "제", "저", "이", "그", "어느", "무슨", "다른", "같은", "새", "새로운", "전체", "단체", "반", "시", "분"]);
 
 /** 말에서 'X 그룹'의 X가 가입한 그룹(정확히 · 이름 앞부분)이 아니면 X — 없는 그룹을 말함. 그런 말이 없으면 null ('그룹 알람'처럼 이름 없이 '그룹'만이면 null) */
 export function missingGroup(groups: GroupRef[], text: string): string | null {
@@ -510,7 +510,8 @@ export function missingGroup(groups: GroupRef[], text: string): string | null {
   if (readGroups(groups, text).named.length > 0) return null;
   for (const m of text.matchAll(/([가-힣A-Za-z0-9]+?)\s*그룹/gu)) {
     const w = m[1] as string;
-    if (NOT_GROUP_NAME.has(w) || COMMON_WORDS.has(w)) continue;
+    // "내일 3시 그룹 회의" / "10시 반 그룹"의 시각 표현은 그룹명이 아니다.
+    if (NOT_GROUP_NAME.has(w) || COMMON_WORDS.has(w) || /^\d+(?:시|분)$/u.test(w)) continue;
     if (readGroups(groups, w).named.length > 0 || partialGroups(groups, w).length > 0) continue;
     return w;
   }
@@ -1100,7 +1101,9 @@ export function applyFast(state: TurnState, fast: FastExtract, ctx: Context, aft
           const carried = Object.entries(s.seen).find(([k]) => {
             if (!k.startsWith("group-text:")) return false;
             const prior = k.slice("group-text:".length);
-            return prior.length >= 2 && (normalized === prior || normalized.includes(prior) || prior.includes(normalized));
+            const priorTime = s.seen[`group-time:${prior}`];
+            return prior.length >= 2 && (priorTime === undefined || priorTime === x.time) &&
+              (normalized === prior || normalized.includes(prior) || prior.includes(normalized));
           });
           const g = groupOf(ctx.groups, `${userText ?? ""} ${carried?.[1] ?? ""} ${x.title}`);
           if (g !== undefined) c.group = g;
@@ -1110,6 +1113,7 @@ export function applyFast(state: TurnState, fast: FastExtract, ctx: Context, aft
             forgetLines(s, s.events.flatMap((e) => e.clarify.filter((line) =>
               line.startsWith(GROUP_ASK_HEAD) && line.includes(`'${priorTitle}'`))));
             delete s.seen[carried[0]];
+            delete s.seen[`group-time:${priorTitle}`];
           }
         }
       },
@@ -1129,7 +1133,10 @@ export function applyFast(state: TurnState, fast: FastExtract, ctx: Context, aft
       let note = "";
       if (g !== undefined && userText !== undefined) {
         const title = normTitle(x.title) === "" ? "이 일정" : x.title;
-        if (normTitle(x.title) !== "") s.seen[`group-text:${normTitle(x.title)}`] = userText;
+        if (normTitle(x.title) !== "") {
+          s.seen[`group-text:${normTitle(x.title)}`] = userText;
+          s.seen[`group-time:${normTitle(x.title)}`] = x.time ?? "";
+        }
         const names = g.candidates.map((c) => c.name);
         const gq = groupQuestion({ draft: { title }, group: g } as unknown as Card);
         if (gq !== null) ask(ev, gq, null);
@@ -1222,7 +1229,8 @@ export function applyFast(state: TurnState, fast: FastExtract, ctx: Context, aft
     if (userText !== undefined && normTitle(x.title) !== "" && squash(userText).includes(squash(x.title))) {
       // 부정/대체 말에 등장한 옛 제목은 재등록 요청으로 취급하지 않는다.
       const afterTitle = squash(userText).split(squash(x.title))[1] ?? "";
-      if (/^(말고|대신|빼고|취소|안|하지마)/u.test(afterTitle)) return false;
+      // "수업은 취소야"처럼 조사 뒤에 취소 의사를 밝힌 말은 재등록이 아니다.
+      if (/^(?:은|는|이|가|을|를|도|만)?(말고|대신|빼고|취소|안|하지마)/u.test(afterTitle)) return false;
       return true;
     }
     const before = seen0[key];
