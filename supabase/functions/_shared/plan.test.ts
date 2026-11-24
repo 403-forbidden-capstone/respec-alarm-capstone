@@ -5,7 +5,7 @@ import { test } from 'node:test';
 import { assertPersistable, persistAppointment, type CommitCtx } from './commit.ts';
 import { HttpError } from './errors.ts';
 import { FakeDb } from './fake-db.ts';
-import { buildPlan, loadPrepareStats, loadProfile, loadSameDayWake, TravelRequiredError, type PlanContext } from './plan.ts';
+import { buildPlan, loadPurePrepCandidate, loadPrepareStats, loadProfile, loadSameDayWake, TravelRequiredError, type PlanContext } from './plan.ts';
 import { toSuggestion, toTravelRequiredSuggestion } from './plan-core.ts';
 import { Reader } from './read.ts';
 import { readCommitRequest, readSuggestRequest } from './requests.ts';
@@ -586,4 +586,53 @@ test('9 observations, unavailable model and malformed prediction all fall back; 
   const group = await buildPlan(env.ctx, {...draftOf(FULL), groupId: 'g1'});
   assert.equal(group.plan.prepare.source, 'DEFAULT');
   assert.equal(calls, 2);
+});
+
+
+test('shared pure-prep loader: ten valid model results work across build, edit and roll callers', async () => {
+  const env = setup();
+  const profile = {
+    ...env.db.rows('profiles')[0],
+    default_outing_prep_minutes: 40,
+    default_outing_prep_updated_at: null,
+  };
+  let calls=0;
+  const runner: NonNullable<PlanContext['purePrepModelRunner']> = async (input) => {
+    calls++;
+    assert.equal(input.mode,'live');
+    return {
+      status:'PREDICTED', model:'prep_start_ratio_v2',
+      training_target:'alarm_dismiss_location_proxy',
+      predicted_pure_minutes:55,
+      history_baseline_minutes:42,
+      personalized_baseline_minutes:40,
+      raw_model_prediction_minutes:57,
+      onboarding_pure_minutes:40,
+      valid_records:10,
+      required_records:10,
+      applied_to_alarm:true,
+    };
+  };
+  const at=kst(22,600);
+  const candidate=await loadPurePrepCandidate(env.ctx.db, USER, profile, env.ctx.now, at, {modelRunner:runner});
+  assert.deepEqual(candidate,{source:'MODEL',model:'prep_start_ratio_v2',minutes:55,sampleCount:10});
+  assert.equal(calls,1);
+  const protectedManual=await loadPurePrepCandidate(env.ctx.db,USER,profile,env.ctx.now,at,
+    {allowLiveModel:false,modelRunner:runner});
+  assert.deepEqual(protectedManual,{source:'PROFILE',minutes:40});
+  assert.equal(calls,1,'MANUAL path must not invoke model');
+  const fallback=await loadPurePrepCandidate(env.ctx.db,USER,profile,env.ctx.now,at,{
+    modelRunner:async()=>({status:'MODEL_UNAVAILABLE',valid_records:10,required_records:10}),
+  });
+  assert.deepEqual(fallback,{source:'PROFILE',minutes:40});
+  const notApplied=await loadPurePrepCandidate(env.ctx.db,USER,profile,env.ctx.now,at,{
+    modelRunner:async()=>({
+      status:'PREDICTED',model:'prep_start_ratio_v2',
+      training_target:'alarm_dismiss_location_proxy',
+      predicted_pure_minutes:55,
+      history_baseline_minutes:42,personalized_baseline_minutes:40,raw_model_prediction_minutes:57,
+      onboarding_pure_minutes:40,valid_records:10,required_records:10,applied_to_alarm:false,
+    }),
+  });
+  assert.deepEqual(notApplied,{source:'PROFILE',minutes:40});
 });
