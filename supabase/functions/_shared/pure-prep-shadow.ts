@@ -204,6 +204,11 @@ export async function runPurePrepShadow(input: {
     ? getEnv('PURE_PREP_SURVEY_V2_PILOT_ALLOWED_USER_IDS')
     : live ? getEnv('PURE_PREP_MODEL_LIVE_ALLOWED_USER_IDS')
     : getEnv('PURE_PREP_SHADOW_ALLOWED_USER_IDS');
+  // Research pilot is deliberately limited to exactly one UUID, even if an
+  // operator accidentally supplies a multi-user allowlist.
+  if (surveyPilot && !/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(
+    allowedUserIds?.trim() ?? '',
+  )) return null;
   if (!eligibleForPurePrepShadow({
     enabled, allowedUserIds,
     userId: input.userId,
