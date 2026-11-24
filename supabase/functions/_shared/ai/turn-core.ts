@@ -896,7 +896,7 @@ export function applyFast(state: TurnState, fast: FastExtract, ctx: Context, aft
     const original = x.title;
     const oldKey = `appt:${normTitle(original)}|${x.date ?? "?"}|${x.time ?? "?"}`;
     const rememberedKey = `group-missing-title:${normTitle(original)}|${x.date ?? "?"}|${x.time ?? "?"}`;
-    const sameRetry = latestMissing?.draft?.date === x.date && latestMissing.draft.time === x.time;
+    const sameRetry = latestMissing?.draft?.date === x.date && latestMissing?.draft?.time === x.time;
     // T2F는 앞 대화까지 다시 뽑는다. 이미 처리한 과거 일정은 이번 말의 재요청이 아니면 손대지 않는다.
     if (seen0[oldKey] !== undefined && !sameRetry) continue;
     const name = s.seen[rememberedKey] ?? missingNow ?? knownNamed?.name;
@@ -908,8 +908,7 @@ export function applyFast(state: TurnState, fast: FastExtract, ctx: Context, aft
     if (title === original) continue;
     x.title = title;
     if (missingNow !== null) s.seen[rememberedKey] = name;
-    if (sameRetry && title !== "" && latestMissing?.draft !== null &&
-        nearTitle(latestMissing.draft.title, title)) {
+    if (sameRetry && title !== "" && latestMissing?.draft && nearTitle(latestMissing.draft.title, title)) {
       delete s.seen[`appt:${normTitle(title)}|${x.date ?? "?"}|${x.time ?? "?"}`];
     }
   }
