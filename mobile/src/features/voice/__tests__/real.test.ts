@@ -1,7 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { beforeEach, describe, expect, it, jest } from '@jest/globals';
 
-import { createAppointment, createPlacePendingAppointment, createStandaloneAlarm, estimateAppointment, getAppointment, listPlaces, previewAlarms, saveAlarmSettings, searchPlaces } from '@/features/alarm/api';
+import { createAppointment, createPlacePendingAppointment, createStandaloneAlarm, estimateAppointment, getAppointment, listPlaces, previewAlarms, saveAlarmSettings, searchPlaces, updateAppointment } from '@/features/alarm/api';
 import type { Estimate } from '@/features/alarm/types';
 import * as clock from '@/lib/clock';
 import { now } from '@/lib/clock';
@@ -27,6 +27,7 @@ jest.mock('@/features/alarm/api', () => ({
   previewAlarms: jest.fn(),
   saveAlarmSettings: jest.fn(),
   searchPlaces: jest.fn(),
+  updateAppointment: jest.fn(),
 }));
 jest.mock('../fixes', () => ({ applyFix: jest.fn() }));
 
@@ -40,6 +41,7 @@ const mPreview = previewAlarms as unknown as jest.Mock<(id: string, edits: Recor
 const mSettings = saveAlarmSettings as unknown as jest.Mock<(id: string, draft: Record<string, unknown>) => Promise<unknown>>;
 const mPending = createPlacePendingAppointment as unknown as jest.Mock<(input: Record<string, unknown>) => Promise<unknown>>;
 const mStandalone = createStandaloneAlarm as unknown as jest.Mock<(input: Record<string, unknown>) => Promise<unknown>>;
+const mUpdate = updateAppointment as unknown as jest.Mock<(id: string, patch: Record<string, unknown>, scope: string, options?: Record<string, unknown>) => Promise<unknown>>;
 const mFix = applyFix as unknown as jest.Mock<(fix: Record<string, unknown>) => Promise<unknown>>;
 
 // 저장소 함수를 throw하게 만들고 되돌리는 함수를 돌려줌 (가짜 저장소의 함수는 이미 jest.fn이라 mockRestore는 원래 구현까지 지워 버림 — 구현을 따로 챙겨 둠)
@@ -792,6 +794,77 @@ describe('⑦ 준비 +N · 강도 — 바뀐 때만 두 번째 저장', () => {
     await saveWith({ prepare_delta: 10 });
     expect(mCreate).toHaveBeenCalledTimes(1);
     expect((await getConversation()).cards[0].status).toBe('SAVED');
+  });
+});
+
+describe('일정 변경 카드 (APPT_OPEN) — [변경하기]면 그 일정을 고침', () => {
+  const openCard = (over: Record<string, unknown> = {}) => ({
+    id: 'c2',
+    kind: 'APPT_OPEN',
+    status: 'READY',
+    first_of_day: false,
+    highlight: false,
+    summary: '변경: 10/30(금) 10:00 캡스톤 발표 · 강남역 → 10/30(금) 11:00',
+    draft: null,
+    edit: { appointment_id: 'ap1', changes: { time: '11:00' }, before: { title: '캡스톤 발표', time: '10:00' } },
+    ...over,
+  });
+  beforeEach(() => {
+    mUpdate.mockImplementation(async () => ({ changes: [], needsConfirm: false }));
+  });
+
+  async function open(card = openCard(), more: unknown[] = []) {
+    script = [session(), turn({ cards: [card] }), ...more];
+    await getConversation();
+    return say('발표 11시로 바꿔줘');
+  }
+
+  it('지금 → 바뀔 값을 보여 주고, [변경하기]는 새 일정 없이 updateAppointment(확인 끝남) → 서버에 SAVED', async () => {
+    const c = await open(openCard(), [turn({ rev: 3, reply: { text: '11시로 바꿨어요.' } })]);
+    expect(c.cards[0].change).toEqual({ before: { title: '캡스톤 발표', time: '10:00' }, after: { time: '11:00' } });
+    expect(await saveCard('c2')).toBe('일정을 바꿨어요. 알람도 다시 맞췄어요');
+    expect(mUpdate).toHaveBeenCalledWith('ap1', { at: at(11, 0) }, 'this', { confirmed: true });
+    expect(mCreate).not.toHaveBeenCalled();
+    expect(turnBodies().at(-1)?.card_action).toMatchObject({ id: 'c2', action: 'SAVED', appointment_id: 'ap1' });
+    expect((await getConversation()).cards[0].status).toBe('SAVED');
+  });
+
+  it('고치기가 실패하면 서버에 SAVED를 안 알리고 카드는 그대로 (AI가 바꿨다고 말하지 않음)', async () => {
+    mUpdate.mockImplementation(async () => {
+      throw new UserError('이동시간을 알 수 없어 알람을 다시 만들지 못했어요');
+    });
+    await open();
+    const sent = turnBodies().length;
+    await expect(saveCard('c2')).rejects.toThrow('이동시간');
+    expect(turnBodies()).toHaveLength(sent);
+    expect((await getConversation()).cards[0].status).toBe('READY');
+  });
+
+  it('남이 만든 그룹 일정도 그룹원이면 고침 (#619 — 그룹 밖이면 서버가 거절, 위 실패 시험과 같은 길)', async () => {
+    mGet.mockImplementation(async () => detailOf({ groupName: '캡스톤' }));
+    await open(openCard(), [turn({ rev: 3, reply: null })]);
+    expect(await saveCard('c2')).toBe('일정을 바꿨어요. 알람도 다시 맞췄어요');
+    expect(mUpdate).toHaveBeenCalledWith('ap1', { at: at(11, 0) }, 'this', { confirmed: true });
+  });
+
+  it('[변경 안 함]은 일정 · 알람을 건드리지 않음', async () => {
+    await open(openCard(), [turn({ rev: 3, reply: null })]);
+    await rejectCard('c2');
+    expect(mUpdate).not.toHaveBeenCalled();
+    expect(mSettings).not.toHaveBeenCalled();
+    expect(turnBodies().at(-1)?.card_action).toEqual({ id: 'c2', action: 'REJECTED' });
+  });
+
+  it('모호한 장소면 [장소 고르기] — 고른 곳의 좌표로 고침', async () => {
+    const card = openCard({ status: 'NEEDS_ESTIMATE', edit: { appointment_id: 'ap1', changes: { place: '한실' }, before: { title: '캡스톤 발표', place: '강남역' } } });
+    script = [session(), turn({ next: 'APP_TASKS', reply: null, cards: [card] }), turn({ rev: 3, cards: [{ ...card, status: 'NEEDS_PLACE' }] }), turn({ rev: 4 }), turn({ rev: 5 })];
+    await getConversation();
+    const c = await say('발표 장소 한실로 바꿔줘');
+    expect(c.cards[0].status).toBe('NEEDS_PLACE');
+    expect(turnBodies().at(-1)?.results).toMatchObject({ cards: [{ id: 'c2', status: 'NEEDS_PLACE' }] });
+    await pickCardPlace('c2', { name: '한실 강남점', lat: 37.5, lng: 127.0 });
+    await saveCard('c2');
+    expect(mUpdate).toHaveBeenCalledWith('ap1', { place: '한실 강남점', placeLat: 37.5, placeLng: 127.0 }, 'this', { confirmed: true });
   });
 });
 

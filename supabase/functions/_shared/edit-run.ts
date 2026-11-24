@@ -3,7 +3,7 @@
 //   Deno.serve 없이 모듈로 빼서 가짜 DB로 시험함 (edit-run.test.ts)
 // 읽기 · 쓰기 모두 부른 사람의 RLS 클라이언트(userDb)로 함 — 남의 약속은 애초에 안 보이고 못 고침. service 클라이언트는 셋뿐:
 //   (1) roll_attempts 정리 (service 전용 표) (2) 공동 약속을 지울 때 다른 참여자의 출발 · 도착 기록 확인 (RLS로는 내 참여만 보임)
-//   (3) 공동 약속의 시각 · 장소를 만든 사람이 고칠 때 다른 참여자의 참여 조건 · 알람을 읽고 다시 계산해 씀(참여자별 userId로 좁혀서) + 푸시 (9장)
+//   (3) 공동 약속의 시각 · 장소를 그룹원이 고칠 때 다른 참여자의 참여 조건 · 알람을 읽고 다시 계산해 씀(참여자별 userId로 좁혀서) + 푸시 (9장)
 // supabase-js에는 트랜잭션이 없어 같은 요청을 다시 보내면 이어서 맞춰지는 순서로 씀:
 //   고치기 = (이후 모두면) 뒤 회차 지우기 → 참여 조건 → 알람 → 약속 행 마지막 / 지우기(이후 모두) = 뒤 회차 → 규칙 비우기 → 이 행 마지막
 //   약속 행을 마지막에 쓰는 이유: 앞에서 실패해도 약속 행이 안 바뀌어 있어 다시 보내면 고칠 것이 그대로 보임
@@ -227,7 +227,7 @@ async function updateRow(ctx: EditCtx, appointmentId: string, patch: Record<stri
   if (done.length !== 1) throw new HttpError('NOT_FOUND', '일정을 찾을 수 없어요');
 }
 
-// 공동 약속을 고치거나 지우려면 지금 그 그룹에 참여 중이어야 함. 나갔거나 내보내진 만든 사람은 만든 사람 경로로 약속이 아직 보이고 editorVerdict도 통과하는데,
+// 공동 약속을 고치거나 지우려면 지금 그 그룹에 참여 중이어야 함 (#619 — 그룹원 누구나, 나간 사람은 못 함). 나갔거나 내보내진 만든 사람은 만든 사람 경로로 약속이 아직 보이고 editorVerdict도 통과하는데,
 //   약속 행 쓰기는 RLS가 막으므로(is_group_member) 그 전에 service로 다른 참여자의 알람을 먼저 바꾸는 일이 없게 쓰기 전에 확인함 (9장 PR 리뷰)
 async function assertGroupMember(ctx: EditCtx, row: { group_id: string | null }): Promise<void> {
   if (row.group_id == null) return;
@@ -239,7 +239,7 @@ async function assertGroupMember(ctx: EditCtx, row: { group_id: string | null })
 }
 
 // 약속 행들을 지움 (참여 조건 · 알람은 CASCADE). 돌려주는 값 = 지워지는 내 알람 id (폰에서 지울 예약)
-//   creatorId = 지울 행의 만든 사람 — 내가 만든 약속은 내 id, 만든 사람이 비어 있는(탈퇴한) 공동 약속은 null (참여자가 지움, DB 정책 appointments_delete_creator가 참여 중인 그룹원에게만 열어 둠)
+//   creatorId = 지울 행의 만든 사람(기록 칸 — 같은 행을 정확히 집으려고 조건에 씀). 남이 만든 · 만든 사람이 빈 공동 약속은 DB 정책 appointments_delete_creator가 참여 중인 그룹원에게 열어 둠
 async function deleteRows(ctx: EditCtx, appointmentIds: readonly string[], creatorId: string | null = ctx.userId): Promise<string[]> {
   if (!appointmentIds.length) return [];
   const list = [...appointmentIds];
@@ -248,12 +248,12 @@ async function deleteRows(ctx: EditCtx, appointmentIds: readonly string[], creat
     ? ids(must<{ alarm_id: string }[]>('alarms', await ctx.userDb.from('alarms').select('alarm_id').eq('user_id', ctx.userId).in('participant_id', participants.map((p) => p.participant_id))))
     : [];
   const del = ctx.userDb.from('appointments').delete().in('appointment_id', list);
-  if (creatorId == null) {
-    // 만든 사람이 빈 약속은 RLS 정책(참여자 · 안 지난 약속)만이 조건을 걸어 막혀도 오류 없이 0행 — 지운 줄 알고 성공으로 돌려주지 않게 지운 행 수를 확인
-    const gone = must<{ appointment_id: string }[]>('appointments delete', await del.is('creator_id', null).select('appointment_id'));
-    if (gone.length !== list.length) throw new HttpError('FORBIDDEN', '이 약속은 지울 수 없어요');
-  } else {
+  if (creatorId === ctx.userId) {
     must('appointments delete', await del.eq('creator_id', creatorId));
+  } else {
+    // 남이 만든 · 만든 사람이 빈 공동 약속은 RLS 정책(그룹원 · 안 지난 약속)이 막아도 오류 없이 0행 — 지운 줄 알고 성공으로 돌려주지 않게 지운 행 수를 확인
+    const gone = must<{ appointment_id: string }[]>('appointments delete', await (creatorId == null ? del.is('creator_id', null) : del.eq('creator_id', creatorId)).select('appointment_id'));
+    if (gone.length !== list.length) throw new HttpError('FORBIDDEN', '이 약속은 지울 수 없어요');
   }
   return alarmIds;
 }
@@ -378,16 +378,11 @@ function allowLivePureModel(participant: ParticipantRow, alarms: readonly AlarmR
 // 고치기
 // ---------------------------------------------------------------------------
 
-function assertEditor(target: Target | null, ctx: EditCtx, verb: '고칠' | '지울'): asserts target is Target {
-  const verdict = editorVerdict({ row: target?.appointment ?? null, userId: ctx.userId, participating: target?.participant != null });
-  if (verdict === 'NOT_VISIBLE') throw new HttpError('NOT_FOUND', '일정을 찾을 수 없어요');
-  if (verdict === 'NOT_CREATOR') {
-    // L6 안건후보: 공동 약속을 참여만 한 사람이 고치기 · 지우기를 하면 기본안 = 거절 (만든 사람만). 참여자는 "나는 빠지기"(LEAVE)
-    throw new HttpError('FORBIDDEN', `공동 약속은 만든 사람만 ${verb} 수 있어요. 나는 빠지기를 써 주세요`);
-  }
+function assertEditor(target: Target | null, ctx: EditCtx): asserts target is Target {
+  if (editorVerdict({ row: target?.appointment ?? null, userId: ctx.userId }) === 'NOT_VISIBLE') throw new HttpError('NOT_FOUND', '일정을 찾을 수 없어요');
 }
 
-// 고친 약속으로 한 참여자의 알람을 다시 계산함 (쓰지는 않음). 부른 사람(만든 사람)과 공동 약속의 다른 참여자가 같은 계산을 씀 — 다른 참여자는 ctx를 그 사람 몫(userId · userDb)으로 바꿔서 부름
+// 고친 약속으로 한 참여자의 알람을 다시 계산함 (쓰지는 않음). 부른 사람(고친 그룹원)과 공동 약속의 다른 참여자가 같은 계산을 씀 — 다른 참여자는 ctx를 그 사람 몫(userId · userDb)으로 바꿔서 부름
 //   장소가 바뀌면 길찾기를 새로 부르고 안 되면 ROUTE_UNAVAILABLE을 던짐(호출한 쪽이 처리)
 async function replanFor(
   ctx: EditCtx,
@@ -446,7 +441,7 @@ async function replanFor(
   return { plan, purePrepCandidate: inputs.purePrepCandidate, diff, changes, warnings };
 }
 
-// 공동 약속의 시각 · 장소를 만든 사람이 고쳤을 때 다른 참여자들의 알람을 다시 계산해 씀 — 각자의 출발지 · 수단 · 준비 시간으로 (9-14).
+// 공동 약속의 시각 · 장소를 그룹원이 고쳤을 때 다른 참여자들의 알람을 다시 계산해 씀 — 각자의 출발지 · 수단 · 준비 시간으로 (9-14).
 //   앞당김과 5분 미만 늦춤은 바로 쓰고, 5분 이상 늦춰지면 그 사람이 확인할 때까지 보류(D67, 9-11 · 9-12 — 그 사람 앱이 푸시의 needsConfirm을 보고 alarm-commit 미리 보기로 다시 계산해 묻고 저장)
 //   이미 울린 알람은 안 건드림(9-16). 계산을 못 한 사람(길찾기 안 됨 · 계산 불가)은 약속 시각이 안 바뀌었거나 5분 이상 늦춰지면 기존 알람을 그대로 두고 경고 · 확인 알림만(9-17), 앞당김 · 5분 미만 늦춤이면 알람을 약속이 옮겨진 만큼 같이 옮김(약속 행을 쓴 뒤, X-APPT-03). 사람 이름은 응답에 넣지 않음
 //   service 클라이언트로 읽고 쓰되 모든 조회를 그 참여자의 user_id로 좁힘(ctx를 그 사람 몫으로 바꿔서 같은 함수를 부름). DB 오류는 올리고(같은 요청을 다시 보내면 이어서 맞춰짐), 계산 못 하는 사람만 건너뜀
@@ -610,7 +605,7 @@ async function syncOtherParticipants(
   return { summary, held, warnings, finish };
 }
 
-// 공동 약속 푸시(GROUP_APPT_CHANGED) — 받는 사람은 DB 함수 plan_group_push가 정함(보낸 사람이 만든 사람이고 아직 안 지난 약속일 때만). 푸시가 안 가도 고치기 · 지우기는 이미 끝난 일이라 오류로 만들지 않고 경고만
+// 공동 약속 푸시(GROUP_APPT_CHANGED) — 받는 사람은 DB 함수 plan_group_push가 정함(보낸 사람이 그 그룹에 참여 중이고 아직 안 지난 약속일 때만). 푸시가 안 가도 고치기 · 지우기는 이미 끝난 일이라 오류로 만들지 않고 경고만
 async function planGroupPushSafe(ctx: EditCtx, row: EditRow): Promise<{ plan?: GroupPlan; warnings: EditWarning[] }> {
   try {
     return { plan: await planGroupPush(ctx.service, ctx.userId, { kind: 'GROUP_APPT_CHANGED', groupId: row.group_id as string, appointmentId: row.appointment_id }), warnings: [] };
@@ -642,7 +637,7 @@ async function pushGroupChange(
 
 export async function updateAppointment(ctx: EditCtx, req: Extract<EditRequest, { action: 'UPDATE' }>): Promise<UpdateResponse> {
   const target = await loadTarget(ctx, req.appointmentId);
-  assertEditor(target, ctx, '고칠');
+  assertEditor(target, ctx);
   await assertGroupMember(ctx, target.appointment);
   const { appointment: row, participant, alarms } = target;
   if (row.exception_kind === 'CANCELED') throw new HttpError('NOT_FOUND', '일정을 찾을 수 없어요'); // 이번만 지운 회차 — 고치려면 되돌리기(RESTORE)가 먼저
@@ -726,7 +721,7 @@ export async function updateAppointment(ctx: EditCtx, req: Extract<EditRequest, 
     canceled.push(...canceledAlarmIds({ before: alarms, after }));
   }
 
-  // 공동 약속: 만든 사람이 시각 · 장소를 고치면 다른 참여자의 알람도 다시 계산함. 약속 행을 쓰기 전에 해서 실패해도 같은 요청을 다시 보내면 이어서 맞춰지게 함 (9-10 ~ 9-17 · 9-43)
+  // 공동 약속: 그룹원이 시각 · 장소를 고치면 다른 참여자의 알람도 다시 계산함. 약속 행을 쓰기 전에 해서 실패해도 같은 요청을 다시 보내면 이어서 맞춰지게 함 (9-10 ~ 9-17 · 9-43)
   const sync = group && (patched.changed.at || patched.changed.place) ? await syncOtherParticipants(ctx, { row, patched, oldAt, newAt }) : undefined;
 
   const rowPatch: Record<string, unknown> = { ...patched.next };
@@ -824,7 +819,7 @@ export async function deleteAppointment(ctx: EditCtx, req: Extract<EditRequest, 
   const target = await loadTarget(ctx, req.appointmentId);
   // 없는 행(이미 지움 · 남의 개인 약속)은 성공 — 같은 요청을 두 번 보내면 같은 결과. 남의 것은 RLS로 안 보여서 건드릴 것이 애초에 없음
   if (!target) return { ...common(req.appointmentId), deleted: false, mode: 'NONE', deleted_appointment_ids: [] };
-  assertEditor(target, ctx, '지울');
+  assertEditor(target, ctx);
   await assertGroupMember(ctx, target.appointment);
   const { appointment: row, alarms } = target;
 
@@ -840,8 +835,8 @@ export async function deleteAppointment(ctx: EditCtx, req: Extract<EditRequest, 
 
   const env = new Env(ctx);
   const at = new Date(row.appointment_at);
-  // 만든 사람이 비어 있는 공동 약속은 안 지난 약속만 지움 (DB 정책 appointments_delete_creator · 고치기와 같은 하루 경계, X-APPT-01). 정책이 막으면 0행이라 오류 없이 성공처럼 보이므로 먼저 거절
-  if (group && row.creator_id == null && at.getTime() < localDayRange(ctx.now, await env.tz()).start.getTime()) {
+  // 공동 약속은 안 지난 약속만 지움 (DB 정책 appointments_delete_creator · 고치기와 같은 하루 경계, X-APPT-01 · #619). 정책이 막으면 0행이라 오류 없이 성공처럼 보이므로 먼저 거절
+  if (group && at.getTime() < localDayRange(ctx.now, await env.tz()).start.getTime()) {
     throw new HttpError('UNPROCESSABLE', '지난 약속이에요', { reason: 'PAST_APPOINTMENT' });
   }
   const canceled: string[] = [];
@@ -868,8 +863,8 @@ export async function deleteAppointment(ctx: EditCtx, req: Extract<EditRequest, 
     result.deleted_appointment_ids = [...laterIds, row.appointment_id];
     await clearAttempts(ctx, row, 'all');
   } else {
-    // 한 번짜리 · 공동 약속(만든 사람) — 약속 + 참여 + 알람. 공동 약속은 다른 참여자의 참여 · 알람도 같이 사라짐(CASCADE)
-    //   L6 안건후보: 공동 약속 지우기 기본안 = 만든 사람이 지우면 약속 전체가 지워짐. 다른 참여자의 폰 예약은 그 사람의 다음 맞추기(reconcile)에서 정리 (변경 알림은 L3 S2 뒤)
+    // 한 번짜리 · 공동 약속 — 약속 + 참여 + 알람. 공동 약속은 다른 참여자의 참여 · 알람도 같이 사라짐(CASCADE)
+    //   공동 약속은 그룹원 누구나 지우고(#619) 지우면 약속 전체가 지워짐. 다른 참여자의 폰 예약은 그 사람의 다음 맞추기(reconcile)에서 정리 (변경 알림은 L3 S2 뒤)
     //   공동 약속의 받는 사람(참여자)은 지우기 전에 정해 두고 지운 뒤에 '취소됐어요' 푸시를 보냄 — 받은 폰이 그 약속의 알람을 지움 (9-20). 지난 약속은 알릴 일이 없음
     const planned = group && Date.parse(row.appointment_at) >= localDayRange(ctx.now, await env.tz()).start.getTime() ? await planGroupPushSafe(ctx, row) : undefined;
     canceled.push(...(await deleteRows(ctx, [row.appointment_id], row.creator_id)));
@@ -900,7 +895,7 @@ export async function deleteAppointment(ctx: EditCtx, req: Extract<EditRequest, 
 export async function restoreAppointment(ctx: EditCtx, req: Extract<EditRequest, { action: 'RESTORE' }>): Promise<RestoreResponse> {
   const target = await loadTarget(ctx, req.appointmentId);
   if (!target) return { ...common(req.appointmentId), restored: false, reason: 'NOT_FOUND' };
-  assertEditor(target, ctx, '고칠');
+  assertEditor(target, ctx);
   const { appointment: row, participant, alarms: existingAlarms } = target;
   if (row.exception_kind !== 'CANCELED') return { ...common(row.appointment_id), restored: false, reason: 'NOT_DELETED' }; // 지운 적 없음 — 아무것도 안 함 (같은 요청을 두 번 보내면 두 번째)
 
@@ -946,14 +941,12 @@ export async function restoreAppointment(ctx: EditCtx, req: Extract<EditRequest,
 // 공동 약속에서 나만 빠지기
 // ---------------------------------------------------------------------------
 
-// 내 참여 조건과 내 알람만 지움 — 약속은 다른 참여자에게 그대로. 만든 사람은 못 빠짐(지워야 함). 되살리기 없음
+// 내 참여 조건과 내 알람만 지움 — 약속은 다른 참여자에게 그대로. 만든 사람도 빠질 수 있음(#619 — 만든 사람은 기록일 뿐). 되살리기 없음
 export async function leaveSharedAppointment(ctx: EditCtx, req: Extract<EditRequest, { action: 'LEAVE' }>): Promise<LeaveResponse> {
   const target = await loadTarget(ctx, req.appointmentId);
   if (!target) return { ...common(req.appointmentId), left: false };
   const { appointment: row, participant, alarms } = target;
   if (row.group_id == null) throw new HttpError('UNPROCESSABLE', '공동 약속이 아니에요', { reason: 'NOT_SHARED' });
-  // L6 안건후보: 만든 사람이 빠지려 할 때 기본안 = 막고 "지워 주세요" 안내 (앱 가짜 모드와 같음)
-  if (row.creator_id === ctx.userId) throw new HttpError('UNPROCESSABLE', '내가 만든 공동 약속은 빠질 수 없어요. 지워 주세요', { reason: 'CREATOR_CANNOT_LEAVE' });
   if (!participant) return { ...common(row.appointment_id), left: true }; // 이미 빠짐 — 같은 요청을 두 번 보내면 두 번째
   if ((await recordIdsOf(ctx, [row.appointment_id])).has(row.appointment_id)) throw new HttpError('UNPROCESSABLE', '출발 · 도착 기록이 있는 일정에서는 빠질 수 없어요', { reason: 'HAS_RECORDS' });
 

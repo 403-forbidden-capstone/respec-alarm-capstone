@@ -48,7 +48,7 @@ export function AppointmentJoinersSheet({ appointment: a, joiners, onClose, onJo
               {PAST_APPOINTMENT}
             </Text>
           ) : a.iJoined ? (
-            a.mine ? null : <Button variant="ghost" label="나는 빠지기" onPress={() => onLeave(a)} />
+            <Button variant="ghost" label="나는 빠지기" onPress={() => onLeave(a)} />
           ) : (
             <Button label="내 알람 만들기" onPress={() => onJoin(a)} />
           )}

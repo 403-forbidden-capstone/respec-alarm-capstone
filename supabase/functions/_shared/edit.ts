@@ -4,7 +4,7 @@
 //   · 알람 시각이 어떻게 바뀌는지 (alarmChanges) · 확인이 먼저인지 (needsConfirm, D67)
 //   · 이후 모두 고치기 · 지우기에서 지울 뒤 회차 (laterRowsToDelete)
 //   · 앞 일정이 바뀌거나 지워질 때 같은 날 다음 일정의 기상 알람을 다시 판정 (wakeAction, 7장 7.1.3 — hasEarlierWake 그대로)
-//   · 만든 사람만 고치기 · 지우기 (editorVerdict)
+//   · 고칠 수 있는 사람 (editorVerdict — 개인 약속은 만든 사람, 공동 약속은 그룹원 누구나)
 // 읽고 쓰는 쪽은 edit-run.ts, 요청 읽기는 edit-request.ts. 앱 가짜 모드(mobile/src/features/alarm/api.ts updateAppointment · deleteAppointment)가 돌려주는 것과 같은 의미로 맞춤
 import { hasEarlierWake, type Importance, type SameDayWake } from './calc/index.ts';
 import type { AlarmWrite } from './commit-core.ts';
@@ -58,17 +58,15 @@ export function deleteMode(args: { recurring: boolean; group: boolean; scope: Ed
 }
 
 // ---------------------------------------------------------------------------
-// 만든 사람만
+// 고칠 수 있는 사람
 // ---------------------------------------------------------------------------
 
-// 약속을 고치거나 지울 수 있는 사람. 개인 약속은 RLS가 이미 만든 사람에게만 보여 주고, 공동 약속은 참여 중인 그룹원도 RLS로 고칠 수 있어서 코드로 막음
-//   NOT_VISIBLE = 못 찾음(없거나 남의 개인 약속), NOT_CREATOR = 공동 약속의 참여만 한 사람(빠지기만 가능)
-//   만든 사람이 비어 있는(탈퇴한) 공동 약속은 그 약속에 참여한 사람이 고치고 지움 (9장 9-아 · 9-카, DB 정책 appointments_update · appointments_delete_creator와 같은 규칙 — 지우기는 탐색 시험 X-APPT-01 뒤에 열림)
-export function editorVerdict(args: { row: { creator_id: string | null; group_id: string | null } | null; userId: string; participating?: boolean }): 'OK' | 'NOT_VISIBLE' | 'NOT_CREATOR' {
+// 약속을 고치거나 지울 수 있는 사람. 개인 약속은 RLS가 만든 사람에게만 보여 주고, 공동 약속은 그 그룹에 참여 중인 그룹원 누구나 (#619 — 만든 사람(creator_id)은 기록일 뿐 권한 판단에 안 씀)
+//   그룹 참여 여부는 edit-run.ts assertGroupMember · DB 정책 appointments_update · appointments_delete_creator가 봄. NOT_VISIBLE = 못 찾음(없거나 남의 개인 약속)
+export function editorVerdict(args: { row: { creator_id: string | null; group_id: string | null } | null; userId: string }): 'OK' | 'NOT_VISIBLE' {
   if (!args.row) return 'NOT_VISIBLE';
-  if (args.row.creator_id === args.userId) return 'OK';
-  if (args.row.creator_id == null && args.row.group_id != null && args.participating) return 'OK';
-  return 'NOT_CREATOR';
+  if (args.row.group_id != null || args.row.creator_id === args.userId) return 'OK';
+  return 'NOT_VISIBLE';
 }
 
 // ---------------------------------------------------------------------------

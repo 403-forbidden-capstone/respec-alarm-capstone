@@ -336,7 +336,7 @@ export interface FinalExtract extends Omit<Extract, "todos"> {
 
 // ───────── 자기 전 대화 카드 · 정정 · 앱 일 (설계 메모 2.2 · 5절) ─────────
 
-/** 카드 종류 — APPT_NEW 새 약속(앱이 계산 · 저장) · ALARM_EDIT 있는 약속 알람 고침 · ALARM_NEW 약속 없는 알람 · APPT_OPEN 있는 약속 변경(저장 없이 [일정 열기]만) */
+/** 카드 종류 — APPT_NEW 새 약속(앱이 계산 · 저장) · ALARM_EDIT 있는 약속 알람 고침 · ALARM_NEW 약속 없는 알람 · APPT_OPEN 있는 약속 변경(앱이 appointment-edit로 저장, [변경하기]) */
 export type CardKind = "APPT_NEW" | "ALARM_EDIT" | "ALARM_NEW" | "APPT_OPEN";
 /** NEEDS_ESTIMATE → READY | NEEDS_PLACE | FAILED → SAVED | REJECTED */
 export type CardStatus = "NEEDS_ESTIMATE" | "READY" | "NEEDS_PLACE" | "FAILED" | "SAVED" | "REJECTED";
@@ -364,6 +364,8 @@ export interface CardEdit {
   level?: number | null;
   /** APPT_OPEN — 바뀔 값 */
   changes?: Partial<Pick<ApptDraft, "title" | "date" | "time" | "place" | "importance" | "transport">>;
+  /** APPT_OPEN — 지금 값 (제목 + 바뀌는 칸만) — 카드가 변경 전 · 후를 나란히 보임 */
+  before?: Partial<Pick<ApptDraft, "title" | "date" | "time" | "place" | "importance" | "transport">>;
 }
 /** 앱이 보낸 계산 요약 — 알람 시각 · 켜짐 · 강도만. 이동 분은 안 남긴다(D5) */
 export interface Digest {

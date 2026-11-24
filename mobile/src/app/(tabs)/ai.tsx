@@ -409,7 +409,6 @@ export default function AiScreen() {
     if ((progress || thinking) && (card.status === 'NEEDS_ESTIMATE' || card.status === 'ESTIMATING') && work?.id !== card.id) {
       return <ChatBubble key={m.id} who="ai" text={CARD_DRAFTING} at={m.at} />;
     }
-    const appointmentId = card.appointmentId;
     const step = work?.id === card.id ? work.step : null;
     const fail = cardFail?.id === card.id ? cardFail : null;
     return (
@@ -422,7 +421,6 @@ export default function AiScreen() {
         onReject={() => rejectFound(card.id)}
         onPickPlace={() => setPlaceCardId(card.id)}
         onSaveWithoutPlace={real ? () => saveFound(card.id, true) : undefined}
-        onOpen={appointmentId ? () => router.push({ pathname: '/alarm/[id]', params: { id: appointmentId } }) : undefined}
         onManual={() => router.push('/schedule/new')}
         disabled={busy || thinking || !!work}
         working={step ? CARD_STEP[step] : null}

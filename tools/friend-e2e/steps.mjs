@@ -799,9 +799,9 @@ export const STEPS = [
       must(r.length === 1, '약속이 안 바뀜');
       const seen = ok(await ctx.b.from('appointments').select('appointment_at, dest_name').eq('appointment_id', ctx.s.appt), 'B가 본 약속');
       must(new Date(seen[0]?.appointment_at).getTime() === new Date(newAt).getTime() && seen[0].dest_name === '강남역 2번출구', 'B 화면 약속이 안 바뀜');
-      // 9장: 공동 약속은 만든 사람만 고침 — 참여자 B는 못 고침 (오류가 나거나 0행)
-      const bTry = await ctx.b.from('appointments').update({ dest_name: 'B가 몰래 바꿈' }).eq('appointment_id', ctx.s.appt).select();
-      must(bTry.error || (bTry.data ?? []).length === 0, '만든 사람이 아닌 B가 공동 약속을 고침');
+      // #619: 공동 약속은 그룹원 누구나 고침 — 만든 사람이 아닌 B도 (알람에 안 닿는 메모만 바꿔 뒤 단계에 영향 없게)
+      const bTry = await ctx.b.from('appointments').update({ memo: 'B가 고침' }).eq('appointment_id', ctx.s.appt).select();
+      must(!bTry.error && (bTry.data ?? []).length === 1, '만든 사람이 아닌 그룹원 B가 공동 약속을 못 고침');
       // 변경 푸시 받는 사람 = 그 약속에 참여한 그룹원 (B), 보낸 A 제외
       const to = await groupPush(ctx, ctx.ids.A, 'GROUP_APPT_CHANGED', ctx.s.appt);
       if (to) must(to.includes(ctx.ids.B) && !to.includes(ctx.ids.A), `약속 변경 푸시 받는 사람에 B가 없음: ${to.length}명`);

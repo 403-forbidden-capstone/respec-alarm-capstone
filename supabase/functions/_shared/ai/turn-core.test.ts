@@ -475,30 +475,59 @@ describe("새 약속 카드 (APPT_NEW)", () => {
 
 // ───────── 있는 약속 변경 카드 (APPT_OPEN) ─────────
 
-describe("약속 변경 카드 (APPT_OPEN) — 저장 없이 [일정 열기]만", () => {
-  it("저장한 뒤 시각을 바꾸면 '변경' 카드 — 확인 필요 줄에 [일정 열기]", () => {
+describe("약속 변경 카드 (APPT_OPEN) — [변경하기]로 그 약속을 고침", () => {
+  it("저장한 뒤 시각을 바꾸면 '변경' 카드 — [변경하기]면 새 약속 없이 그 약속을 바꾸고 알람을 고침, [변경 안 함]이면 그대로", () => {
     const c = ctx({ tomorrow: [] });
     const cap = study({ title: "캡스톤 발표", time: "10:00", place: "강남역" });
     let s = applyFast(initTurnState(c), fast({ appointments: [cap] }), c, 1).state;
     s = applyTaskResults(s, { cards: [ready("c1", "07:40")], fixes: [] }, c, 1).state;
     s = applyCardAction(s, { id: "c1", action: "SAVED", appointment_id: "u1", alarms: [{ kind: "WAKE", at: iso("2026-10-09", "07:40"), enabled: true, level: 2 }] }, c, 2).state;
     const r = applyFast(s, fast({ appointments: [{ ...cap, time: "11:00" }] }), c, 3);
-    assert.equal(r.tasks, false, "저장 없는 카드는 앱 계산이 필요 없음");
-    assert.deepEqual(r.event.pending, [{ id: "c2", kind: "APPOINTMENT", summary: "변경: 10/9(금) 10:00 캡스톤 발표 · 강남역 → 10/9(금) 11:00 · 카드의 [일정 열기]로" }]);
+    assert.equal(r.tasks, false, "시각만 바꾸면 앱 계산이 필요 없음");
+    assert.deepEqual(r.event.pending, [{ id: "c2", kind: "APPOINTMENT", summary: "변경: 10/9(금) 10:00 캡스톤 발표 · 강남역 → 10/9(금) 11:00 · 카드의 [변경하기]로" }]);
     assert.deepEqual(r.cards.map((x) => [x.id, x.kind, x.status]), [["c2", "APPT_OPEN", "READY"]]);
-    assert.deepEqual(r.cards[0]?.edit, { appointment_id: "a1", changes: { time: "11:00" } });
-    assert.equal(r.state.appointments.find((a) => a.ref === "a1")?.time, "10:00", "서버가 약속을 고치지 않음 (D41)");
-    // 저장 버튼은 의미 없음
-    assert.equal(applyCardAction(r.state, { id: "c2", action: "SAVED" }, c, 3).status, "NOOP");
+    assert.deepEqual(r.cards[0]?.edit, { appointment_id: "a1", changes: { time: "11:00" }, before: { title: "캡스톤 발표", time: "10:00" } });
+    assert.equal(r.state.appointments.find((a) => a.ref === "a1")?.time, "10:00", "[변경하기] 전에는 그대로");
+    // [변경하기] — 앱이 appointment-edit로 고친 뒤 SAVED: 같은 약속이 바뀌고(새 약속 없음) 기상 알람도 새 시각으로
+    const n = r.state.appointments.length;
+    const saved = applyCardAction(r.state, { id: "c2", action: "SAVED", appointment_id: "u1", alarms: [{ kind: "WAKE", at: iso("2026-10-09", "08:40"), enabled: true, level: 2 }] }, c, 3);
+    assert.ok(saved.ok);
+    if (!saved.ok) return;
+    assert.deepEqual([saved.status, saved.needsReply, saved.invalid], ["OK", true, null]);
+    assert.equal(saved.state.appointments.length, n, "새 약속을 만들지 않음");
+    assert.equal(saved.state.appointments.find((a) => a.ref === "a1")?.time, "11:00");
+    assert.deepEqual(saved.event.applied, ["일정 변경: 10/9(금) 10:00 캡스톤 발표 · 강남역 → 10/9(금) 11:00"]);
+    assert.deepEqual(saved.event.alarms.map((a) => [a.type, a.time, a.change]), [["WAKE", "08:40", "CHANGED"]]);
+    // [변경 안 함] — 약속 · 알람 그대로
+    const no = applyCardAction(r.state, { id: "c2", action: "REJECTED" }, c, 3);
+    assert.ok(no.ok);
+    if (!no.ok) return;
+    assert.equal(no.state.appointments.find((a) => a.ref === "a1")?.time, "10:00");
+    assert.deepEqual(no.state.alarms, r.state.alarms);
+  });
+
+  it("장소를 바꾸면 앱이 장소를 확인 (NEEDS_ESTIMATE) — 모호하면 [장소 고르기]로 되물음", () => {
+    const c = ctx({ tomorrow: [] });
+    const cap = study({ title: "캡스톤 발표", time: "10:00", place: "강남역" });
+    let s = applyFast(initTurnState(c), fast({ appointments: [cap] }), c, 1).state;
+    s = applyTaskResults(s, { cards: [ready("c1", "07:40")], fixes: [] }, c, 1).state;
+    s = applyCardAction(s, { id: "c1", action: "SAVED", appointment_id: "u1", alarms: [] }, c, 2).state;
+    const r = applyFast(s, fast({ appointments: [{ ...cap, place: "한실" }] }), c, 3);
+    assert.equal(r.tasks, true);
+    assert.deepEqual(r.cards.map((x) => [x.kind, x.status, x.edit?.changes]), [["APPT_OPEN", "NEEDS_ESTIMATE", { place: "한실" }]]);
+    const asked = applyTaskResults(r.state, { cards: [{ id: "c2", status: "NEEDS_PLACE" }], fixes: [] }, c, 3);
+    assert.ok(asked.ok);
+    if (!asked.ok) return;
+    assert.ok(asked.event.clarify.some((l) => l.includes("캡스톤 발표") && l.includes("[장소 고르기]")), asked.event.clarify.join(" / "));
   });
 
   it("기존 약속(ref)의 시각 · 날짜 변경도 카드 — 알람 재계산은 안 함", () => {
     const r = applyFast(initTurnState(ctx()), fast({ appointments: [study({ ref: "a1", title: "알고리즘 수업", time: "09:00", place: null, save: "CONFIRMED" })] }), ctx(), 1);
-    assert.deepEqual(r.event.pending.map((p) => p.summary), ["변경: 10/9(금) 10:00 알고리즘 수업 · 공학관 → 10/9(금) 09:00 · 카드의 [일정 열기]로"]);
+    assert.deepEqual(r.event.pending.map((p) => p.summary), ["변경: 10/9(금) 10:00 알고리즘 수업 · 공학관 → 10/9(금) 09:00 · 카드의 [변경하기]로"]);
     assert.deepEqual(r.event.alarms, []);
     assert.equal(r.state.alarms.length, 4);
     const moved = applyFast(initTurnState(ctx()), fast({ appointments: [study({ ref: "a1", title: "알고리즘 수업", date: "2026-10-10", time: null, place: null, save: "CONFIRMED" })] }), ctx(), 1);
-    assert.equal(moved.event.pending[0]?.summary, "변경: 10/9(금) 10:00 알고리즘 수업 · 공학관 → 10/10(토) 10:00 · 카드의 [일정 열기]로");
+    assert.equal(moved.event.pending[0]?.summary, "변경: 10/9(금) 10:00 알고리즘 수업 · 공학관 → 10/10(토) 10:00 · 카드의 [변경하기]로");
   });
 
   it("바뀐 시각을 모름(ref · time null · 모호 메모)이면 옛 값으로 묻지 않고 빈 칸을 되물음 (원문 안 넘김)", () => {
@@ -509,7 +538,7 @@ describe("약속 변경 카드 (APPT_OPEN) — 저장 없이 [일정 열기]만"
 
   it("중요도만 바뀌는 변경은 요약에 중요도를 보여 줌", () => {
     const { events } = run(ctx(), [fast({ appointments: [study({ title: "알고리즘 수업", time: "10:00", place: "공학관", importance: "HIGH" })] })]);
-    assert.deepEqual(events[0]?.pending.map((p) => p.summary), ["변경: 10/9(금) 10:00 알고리즘 수업 · 공학관 → 중요도 매우 중요 · 카드의 [일정 열기]로"]);
+    assert.deepEqual(events[0]?.pending.map((p) => p.summary), ["변경: 10/9(금) 10:00 알고리즘 수업 · 공학관 → 중요도 매우 중요 · 카드의 [변경하기]로"]);
   });
 
   /** 스터디 카드를 만들어 저장까지 마친 상태 (a2로 저장됨, 다음 말은 3번째) */
@@ -525,9 +554,9 @@ describe("약속 변경 카드 (APPT_OPEN) — 저장 없이 [일정 열기]만"
     const s0 = withSaved(c);
     assert.equal(s0.appointments.find((a) => a.ref === "a2")?.title, "스터디");
     const b = step(s0, c, 3, study({ time: "15:00" }));
-    assert.deepEqual(b.event.pending, [{ id: "c2", kind: "APPOINTMENT", summary: "변경: 10/9(금) 14:00 스터디 · 학교 도서관 → 10/9(금) 15:00 · 카드의 [일정 열기]로" }]);
+    assert.deepEqual(b.event.pending, [{ id: "c2", kind: "APPOINTMENT", summary: "변경: 10/9(금) 14:00 스터디 · 학교 도서관 → 10/9(금) 15:00 · 카드의 [변경하기]로" }]);
     const cc = step(b.state, c, 4, study({ time: "16:00" }));
-    assert.deepEqual(cc.event.pending.map((p) => [p.id, p.summary]), [["c2", "변경: 10/9(금) 14:00 스터디 · 학교 도서관 → 10/9(금) 16:00 · 카드의 [일정 열기]로"]]);
+    assert.deepEqual(cc.event.pending.map((p) => [p.id, p.summary]), [["c2", "변경: 10/9(금) 14:00 스터디 · 학교 도서관 → 10/9(금) 16:00 · 카드의 [변경하기]로"]]);
     const back = step(cc.state, c, 5, study({ save: "CONFIRMED" }));
     assert.deepEqual(back.state.pending, {}, "되돌렸으니 '변경: 16:00' 카드는 없어야 함");
     assert.equal(card(back.state, "c2").status, "REJECTED");
@@ -955,7 +984,7 @@ describe("모호 메모 · 지난 시각 순서 · 겹침 거절", () => {
     // 기존 약속 변경 + 메모: 변경 카드 → 확인(응)이어도 메모가 남아도 같은 카드 (test-019)
     const move = (save: XAppt["save"], unclear: string): XAppt => study({ ref: "a1", title: "알고리즘 수업", time: "11:00", place: null, save, unclear });
     const chg = run(ctx(), [fast({ appointments: [move("UNCONFIRMED", "'열한시'를 11:00으로 봄")] }), fast({ appointments: [move("CONFIRMED", "사용자가 확인함")] })]);
-    assert.deepEqual(chg.events[0]?.pending.map((p) => p.summary), ["변경: 10/9(금) 10:00 알고리즘 수업 · 공학관 → 10/9(금) 11:00 · 카드의 [일정 열기]로"]);
+    assert.deepEqual(chg.events[0]?.pending.map((p) => p.summary), ["변경: 10/9(금) 10:00 알고리즘 수업 · 공학관 → 10/9(금) 11:00 · 카드의 [변경하기]로"]);
     assert.deepEqual(chg.events[1]?.pending.map((p) => p.id), ["c1"]);
     assert.equal(chg.state.cards.length, 1);
   });
@@ -1658,7 +1687,7 @@ describe("고칠 대상 찾기 (applyFast userText)", () => {
   it("고치라는 말인데 추출이 새 일정으로 냄: 있는 일정이면 변경 카드(APPT_OPEN, 지금 → 바뀔 값), 없으면 만들지 않고 '대상 없음' — '새로 추가해줘'면 그때 만듦", () => {
     const c = c24();
     const moved = say(c, fast({ appointments: [apptX({ title: "스터디", date: D24, time: "15:00" })] }), "내일 스터디 3시로 옮겨줘");
-    assert.deepEqual(moved.cards.map((x) => [x.kind, x.summary, x.edit]), [["APPT_OPEN", "변경: 11/24(화) 13:00 스터디 → 11/24(화) 15:00", { appointment_id: "a2", changes: { time: "15:00" } }]]);
+    assert.deepEqual(moved.cards.map((x) => [x.kind, x.summary, x.edit]), [["APPT_OPEN", "변경: 11/24(화) 13:00 스터디 → 11/24(화) 15:00", { appointment_id: "a2", changes: { time: "15:00" }, before: { title: "스터디", time: "13:00" } }]]);
     // 그룹 일정은 그룹을 같이 보여 줌, 같은 이름이 여러 날이면 그날 것
     const g = say(c, fast({ appointments: [apptX({ title: "캡스톤 회의", date: D25, time: "15:00" })] }), "25일 캡스톤 회의 3시로 미뤄줘");
     assert.equal(g.cards[0]?.summary, "변경: 11/25(수) 14:00 캡스톤 회의 (그룹 캡스톤) → 11/25(수) 15:00");
@@ -1750,7 +1779,7 @@ describe("장소 없이 저장 (alarm-commit PLACE_PENDING)", () => {
     const appt = saved.state.appointments.find((a) => a.title === "회의");
     assert.deepEqual([appt?.place, saved.state.bound[appt?.ref as string]], [null, "ap-uuid"]);
 
-    // 장소를 나중에 말함 — 새 일정이 아니라 저장한 그 일정의 변경 카드(APPT_OPEN, [일정 열기]에서 장소를 골라 저장)
+    // 장소를 나중에 말함 — 새 일정이 아니라 저장한 그 일정의 변경 카드(APPT_OPEN, 앱이 장소를 확인한 뒤 [변경하기])
     const later = applyFast(saved.state, fast({ appointments: [{ ...heard, place: "세종대학교" }] }), c, 3, "장소는 세종대학교야");
     assert.deepEqual(later.cards.map((x) => [x.kind, x.edit?.appointment_id, x.summary]), [["APPT_OPEN", appt?.ref, "변경: 10/9(금) 13:00 회의 → 장소 세종대학교"]]);
   });

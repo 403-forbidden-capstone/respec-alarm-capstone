@@ -1,6 +1,6 @@
 // ③ 수면 전후 음성 AI — 이 기능에서 쓰는 타입
 // 이름은 DB(conversation_sessions)를 따르고, 화면에 바로 쓰기 좋게 모양만 바꿈
-import type { AlarmKind, Importance } from '@/features/alarm/types';
+import type { AlarmKind, Importance, Transport } from '@/features/alarm/types';
 
 // 대화 한 줄 — card = AI가 대화에서 찾은 카드 (내용은 Conversation.cards에서 cardId로 찾음)
 export type ChatMessage = {
@@ -12,7 +12,7 @@ export type ChatMessage = {
 };
 
 // 카드 종류 (서버 voice-turn cards[].kind, 설계 메모 2.2)
-//   APPT_NEW = 새 약속 + 알람 · ALARM_EDIT = 있는 약속의 알람 바꾸기 · ALARM_NEW = 약속 없는 알람 · APPT_OPEN = 있는 약속 고치기(일정 열기만)
+//   APPT_NEW = 새 약속 + 알람 · ALARM_EDIT = 있는 약속의 알람 바꾸기 · ALARM_NEW = 약속 없는 알람 · APPT_OPEN = 있는 약속 고치기([변경하기] = appointment-edit)
 export type CardKind = 'APPT_NEW' | 'ALARM_EDIT' | 'ALARM_NEW' | 'APPT_OPEN';
 
 // 카드 상태 — 대기(NEEDS_ESTIMATE) → 계산 중(ESTIMATING, 앱 안에서만) → 준비(READY) | 장소 필요(NEEDS_PLACE) | 실패(FAILED) → 저장(SAVED) | 저장 안 함(REJECTED)
@@ -38,6 +38,17 @@ export type ConversationCard = {
   error: string | null; // 실패 · 장소 필요 이유 (사용자에게 보일 글)
   appointmentId: string | null; // 저장한 뒤 · 알람 바꾸기 대상
   group: CardGroup | null; // 그룹 · 개인 일정 고르기 (새 일정 카드, 말에 가입한 그룹 이름이 나올 때만). 없으면 개인 일정
+  change?: { before: ApptChanges; after: ApptChanges }; // 약속 변경 카드 — 바뀌는 칸의 지금 값 · 바뀔 값 (예전 카드는 없음 → 한 줄 요약만)
+};
+
+// 약속 변경 카드의 칸 (서버 types.ts CardEdit.changes · before) — date 2026-10-30 · time 10:00. 바뀌는 칸만 들어 있음 (before는 제목도)
+export type ApptChanges = {
+  title?: string;
+  date?: string;
+  time?: string;
+  place?: string | null;
+  importance?: Importance | null;
+  transport?: Transport | null;
 };
 
 // 새 일정 카드를 그룹 일정으로 걸지 (서버 types.ts CardGroup) — ASK면 고르기 전이라 저장 안 함. candidates = 고를 수 있는 가입 그룹

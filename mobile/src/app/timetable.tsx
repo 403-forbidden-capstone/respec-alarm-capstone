@@ -36,7 +36,7 @@ export default function TimetableScreen() {
   });
   const canImport = enabled && session != null && (TIMETABLE_PATHS.photo || TIMETABLE_PATHS.calendar);
   const series = data ? classSeriesOf(data) : [];
-  const deletable = series.filter((s) => s.canDelete && !s.shared);
+  const deletable = series.filter((s) => !s.shared);
 
   // 하나씩 차례로 지움 — 중간에 실패해도 그때까지 지운 것이 목록에 반영되게 끝나면 늘 다시 읽음
   const remove = (targets: ClassSeries[], title: string, message = KEEP_NOTE) =>
@@ -104,13 +104,7 @@ export default function TimetableScreen() {
                   {seriesLine(s)}
                 </Text>
               </View>
-              {s.canDelete ? (
-                <Button variant="ghost" small label="삭제" onPress={() => remove([s], `'${s.title}' 일정을 지울까요?`, s.shared ? SHARED_NOTE : KEEP_NOTE)} disabled={busy} />
-              ) : (
-                <Text variant="small" tone="sub">
-                  공동 약속
-                </Text>
-              )}
+              <Button variant="ghost" small label="삭제" onPress={() => remove([s], `'${s.title}' 일정을 지울까요?`, s.shared ? SHARED_NOTE : KEEP_NOTE)} disabled={busy} />
             </View>
           ))}
         </Card>

@@ -56,20 +56,13 @@ test('deleteMode: 반복 + 이번만 = 알람만 지움(행은 둠), 반복 + �
   assert.equal(deleteMode({ recurring: true, group: true, scope: 'following' }), 'ROW');
 });
 
-test('editorVerdict: 만든 사람만 · 못 찾음 · 공동 약속의 참여만 한 사람', () => {
+test('editorVerdict (#619): 개인 약속은 만든 사람만, 공동 약속은 만든 사람과 상관없이 OK (그룹 참여는 assertGroupMember · RLS가 봄)', () => {
   assert.equal(editorVerdict({ row: null, userId: 'a' }), 'NOT_VISIBLE');
   assert.equal(editorVerdict({ row: { creator_id: 'a', group_id: null }, userId: 'a' }), 'OK');
+  assert.equal(editorVerdict({ row: { creator_id: 'a', group_id: null }, userId: 'b' }), 'NOT_VISIBLE');
   assert.equal(editorVerdict({ row: { creator_id: 'a', group_id: 'g' }, userId: 'a' }), 'OK');
-  assert.equal(editorVerdict({ row: { creator_id: 'a', group_id: 'g' }, userId: 'b' }), 'NOT_CREATOR');
-});
-
-test('X-APPT-01 editorVerdict: 만든 사람이 비어 있는 공동 약속은 참여한 그룹원이 고치고 지움 — 참여 안 한 사람 · 개인 약속은 거절', () => {
-  const orphan = { creator_id: null, group_id: 'g' };
-  assert.equal(editorVerdict({ row: orphan, userId: 'b', participating: true }), 'OK');
-  assert.equal(editorVerdict({ row: orphan, userId: 'b', participating: false }), 'NOT_CREATOR');
-  assert.equal(editorVerdict({ row: orphan, userId: 'b' }), 'NOT_CREATOR');
-  assert.equal(editorVerdict({ row: { creator_id: null, group_id: null }, userId: 'b', participating: true }), 'NOT_CREATOR');
-  assert.equal(editorVerdict({ row: { creator_id: 'a', group_id: 'g' }, userId: 'b', participating: true }), 'NOT_CREATOR');   // 만든 사람이 있으면 참여자도 못 지움
+  assert.equal(editorVerdict({ row: { creator_id: 'a', group_id: 'g' }, userId: 'b' }), 'OK');
+  assert.equal(editorVerdict({ row: { creator_id: null, group_id: 'g' }, userId: 'b' }), 'OK');
 });
 
 // ---- 고친 값 반영 ----

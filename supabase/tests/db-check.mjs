@@ -771,14 +771,13 @@ await check('F4: 약속 날짜는 호출자 시간대의 새벽 4시 기준일 (
 // 12. 공동 약속
 // ---------------------------------------------------------------------
 
-await check('공동 약속: 그룹원은 조회만, 수정 · 삭제는 등록자만(9장에서 수정을 좁힘, 오류 없이 0행) · 등록자 · 그룹 변경 거부 · 개인 일정 비공개 · 참여 조건은 본인 행만', async () => {
+await check('공동 약속: 그룹원 누구나 조회 · 수정 · 삭제(#619, 만든 사람은 기록만) · 그룹 밖 사람은 못 고침(오류 없이 0행) · 등록자 · 그룹 변경 거부 · 개인 일정 비공개 · 참여 조건은 본인 행만', async () => {
   await as(A);
   const [{ appointment_id: GA }] = await q(`insert into public.appointments (creator_id, group_id, title, appointment_at, dest_name)
      values ($1, $2, '팀 주간회의', now() + interval '1 day', '세종대학교') returning appointment_id`, [A, G]);   // 지난 공동 약속에는 참여 조건을 못 넣으므로(9장) 시계가 가도 안 지나게
   await as(B);
   const read = await q(`select 1 from public.appointments where appointment_id = $1`, [GA]);
   const upd = await q(`update public.appointments set memo = '자료 챙기기' where appointment_id = $1 returning 1`, [GA]);
-  const del = await q(`delete from public.appointments where appointment_id = $1 returning 1`, [GA]);
   const personal = await q(`select 1 from public.appointments where appointment_id = $1`, [ids[A].appt]);
   const join = await q(`insert into public.appointment_participants (appointment_id, user_id) values ($1, $2) returning 1`, [GA, B]);
   const joinPersonal = await expectErr(() => q(`insert into public.appointment_participants (appointment_id, user_id) values ($1, $2)`, [ids[A].appt, B]),
@@ -789,9 +788,13 @@ await check('공동 약속: 그룹원은 조회만, 수정 · 삭제는 등록�
   const parts = await q(`select user_id from public.appointment_participants where appointment_id = $1`, [GA]);
   await as(E);
   const outsider = await q(`select 1 from public.appointments where appointment_id = $1`, [GA]);
-  return read.length === 1 && upd.length === 0 && del.length === 0 && steal === true && moveGroup === true && personal.length === 0
-    && join.length === 1 && joinPersonal === true && parts.length === 0 && outsider.length === 0
-    ? true : { read, upd, del, steal, moveGroup, personal, join, joinPersonal, parts, outsider };
+  const outsiderUpd = await q(`update public.appointments set memo = '남이 고침' where appointment_id = $1 returning 1`, [GA]);
+  const outsiderDel = await q(`delete from public.appointments where appointment_id = $1 returning 1`, [GA]);
+  await as(B);
+  const del = await q(`delete from public.appointments where appointment_id = $1 returning 1`, [GA]);
+  return read.length === 1 && upd.length === 1 && del.length === 1 && steal === true && moveGroup === true && personal.length === 0
+    && join.length === 1 && joinPersonal === true && parts.length === 0 && outsider.length === 0 && outsiderUpd.length === 0 && outsiderDel.length === 0
+    ? true : { read, upd, del, steal, moveGroup, personal, join, joinPersonal, parts, outsider, outsiderUpd, outsiderDel };
 });
 await check('등록자도 약속을 다른 그룹으로 못 옮김 (group_id 고정)', async () => {
   await as(E);
