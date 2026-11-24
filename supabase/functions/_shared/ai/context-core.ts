@@ -6,7 +6,7 @@
 //     지각은 DB 판정 그대로 is_late === true만 (NULL = 지각 아님, #240 judgeArrival · 설계 메모 13절 L2-3). 취침 · 미루기 사실은 아예 안 넣음(고칠 길이 없음).
 //   · 앞 출발(earlierDeparturesOf, 4.5 · 13절 L2-1): #240 listEarlierDepartures(mobile/src/features/location/real.ts)와 같은 규칙 — 앱과 서버가 따로 갖는 규칙이라 시험 사례도 같음.
 //   · 내일 알람: 내일 참여 행의 기상 · 준비 · 출발 · 도착 + 일정 없는 기상. 루틴 알람 뺌. 강도는 대표 강도(설계 판단).
-import type { AlarmPlan, AlarmType, Appointment, Context, Fact, Importance, LocalDate, Opening, ServerQuestion, SessionType, Transport } from "./types.ts";
+import type { AlarmPlan, AlarmType, Appointment, Context, Fact, GroupRef, Importance, LocalDate, Opening, ServerQuestion, SessionType, Transport } from "./types.ts";
 import { seoulLocal } from "./ko.ts";
 import { addDays, weekdayOf } from "./view.ts";
 import { WEEKDAYS } from "./types.ts";
@@ -361,6 +361,11 @@ export interface ContextInput {
   groups?: { group_id: string; groups: { group_name: string } | null }[];
 }
 
+/** 가입한(JOINED) 그룹 행 → 그룹 후보 — 이름을 못 읽은 그룹은 말과 맞춰 볼 수 없어 뺌 */
+export function groupsOf(rows: NonNullable<ContextInput["groups"]>): GroupRef[] {
+  return rows.filter((g) => (g.groups?.group_name ?? "").trim() !== "").map((g) => ({ id: g.group_id, name: (g.groups as { group_name: string }).group_name.trim() }));
+}
+
 /** 내일 뒤 며칠까지 고칠 대상(약속 · 알람)으로 읽을지 — "25일 알람 바꿔줘"를 찾으려고. 이 날들은 대화 화제가 아니라 찾기용 */
 export const LATER_DAYS = 7;
 
@@ -403,7 +408,7 @@ export function buildContext(input: ContextInput): ContextOut {
   const stuff = itemsOf(input.todos, morningJoins.map((j) => j.appointment_id), morning);
   const question = input.question ?? null;
   // 이름을 못 읽은 그룹은 말과 맞춰 볼 수 없어 뺌
-  const groups = (input.groups ?? []).filter((g) => (g.groups?.group_name ?? "").trim() !== "").map((g) => ({ id: g.group_id, name: (g.groups as { group_name: string }).group_name.trim() }));
+  const groups = groupsOf(input.groups ?? []);
 
   const context: Context = {
     context_version: "context.v1",

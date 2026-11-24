@@ -281,6 +281,13 @@ class FakeQuery implements PromiseLike<Result> {
 
   // alarm_events를 읽을 때 `alarms(…, appointment_participants(…))` 왼쪽 임베드 — 없는 쪽은 null (PostgREST 왼쪽 조인). 거른 뒤에 붙임
   private withLeftEmbeds(rows: Row[]): Row[] {
+    // 가입 그룹 읽기(group_members → groups(group_name)) — 그룹이 없으면 null
+    if (this.table === 'group_members' && /(^|[,\s])groups\(/.test(this.columns)) {
+      return rows.map((r) => {
+        const g = this.db.rows('groups').find((x) => x.group_id === r.group_id);
+        return { ...r, groups: g ? { ...g } : null };
+      });
+    }
     if (this.table !== 'alarm_events' || !/(^|[,\s])alarms\(/.test(this.columns)) return rows;
     const nested = /appointment_participants\(/.test(this.columns);
     return rows.map((r) => {

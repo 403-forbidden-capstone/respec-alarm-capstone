@@ -592,6 +592,13 @@ export async function listPlaces(query?: string, near?: LatLng): Promise<Place[]
   return filterPlaces(places, text, near).map((p) => ({ ...p }));
 }
 
+// 장소 검색 결과 그대로 — 같은 이름도 합치지 않음 (AI 대화가 들은 이름을 확정해도 되는지 볼 때). 가짜 모드는 목업 장소에서 거름
+export async function searchPlaces(query: string): Promise<Place[]> {
+  if (!isMock()) return real.searchPlaces(query);
+  const text = query.trim();
+  return text ? filterPlaces(places, text).map((p) => ({ ...p })) : [];
+}
+
 // 지도 핀 자리의 주소 (지도 고르기 시트) — 핀이 멈춘 뒤 부름. 못 구하면 null (바다 · 해외), 서버 오류는 던짐 (실데이터는 place-reverse 카카오 좌표→주소, 저장 안 함)
 //   가짜 모드는 좌표로 만든 그럴듯한 광진구 주소 (같은 좌표면 같은 주소)
 export async function reverseAddress(lat: number, lng: number): Promise<PinAddress | null> {

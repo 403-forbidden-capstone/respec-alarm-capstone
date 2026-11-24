@@ -18,7 +18,7 @@ import { FAIL_MESSAGES, toHttpError, type LlmClient, type LlmFailure, type LlmRe
 import { POINTS, callPoint, type PointId } from '../prompts/index.ts';
 import { render } from './render.ts';
 import { applyGuards, eventsForView, safetyInfoFrom } from './guards.ts';
-import { seoulIso } from './context.ts';
+import { readJoinedGroups, seoulIso } from './context.ts';
 import { LIMIT_AI_DAY_TEXT, LIMIT_DAY_TEXT, LIMIT_TURN_TEXT, MAX_USER_TURNS } from './opening.ts';
 import type { QuotaGate } from './quota.ts';
 import {
@@ -349,6 +349,15 @@ async function handleText(run: Run, row: SessionRow, st: ServerState, req: Extra
   const ctx = ctxOf(st, run.nowIso, []);
   const voice = req.spoken_reply !== undefined;
   let extract = extractNeeded(req.text, st);
+  // 가입 그룹은 말마다 새로 — 대화 시작 때 저장한 목록이 오래됐거나 예전 대화(그룹 칸 없음)를 이어 써도 지금 JOINED 그룹으로 후보를 찾음.
+  //   못 읽으면 저장된 목록 그대로 (그룹 고르기 때문에 대화를 막지 않음)
+  if (extract) {
+    try {
+      ctx.groups = await readJoinedGroups(deps.userDb, deps.userId);
+    } catch {
+      // 저장된 목록 그대로
+    }
+  }
   let blocked = false; // 음성 차례인데 사용량 관문에 막혀 추출을 건너뜀 — 위험 판단 '모름'
   const parallel = extract && !voice && deps.parallelPreview === true;
 

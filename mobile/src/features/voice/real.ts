@@ -9,7 +9,8 @@
 //   · 서버 요청은 pending 하나 + 카드 요청 큐 — 실패한 요청(pending)이 있으면 카드 동작은 앱 일만 바로 하고 서버 알림은 큐에서 기다렸다가 그 요청이 성공한 뒤 차례로 보냄
 import { autoImportance } from '@shared/calc/importance.ts';
 import { adjustEstimate, moveWakeOnly, orderError, orderPair } from '@/features/alarm/adjust';
-import { createAppointment, createPlacePendingAppointment, createStandaloneAlarm, estimateAppointment, getAppointment, listPlaces, previewAlarms, saveAlarmSettings } from '@/features/alarm/api';
+import { createAppointment, createPlacePendingAppointment, createStandaloneAlarm, estimateAppointment, getAppointment, listPlaces, previewAlarms, saveAlarmSettings, searchPlaces } from '@/features/alarm/api';
+import { clearPlace } from '@/features/alarm/places';
 import { saveNotice } from '@/features/alarm/saveNotice';
 import { draftAt } from '@/features/alarm/schedule';
 import {
@@ -327,14 +328,17 @@ async function absorb(res: TurnResponse, turnId: string): Promise<Pending | null
 
 type Outcome = { status: 'READY' | 'NEEDS_PLACE' | 'FAILED'; estimate?: Estimate; alarms?: CardAlarm[]; level?: number; withWake?: boolean; basis?: Basis; error?: string };
 
-// 장소 이름이 내가 쓴 곳(최근 장소 — listPlaces를 검색어 없이)에 똑같이 하나면 그 좌표 (L1 답 L1-6) — 아니면 null (카드의 [장소 고르기])
-//   검색어를 주면 카카오 장소 검색이 되어 전국의 같은 이름 가게('한실' 등)를 그대로 확정해 버림 — 들은 이름은 사용자가 [장소 고르기]에서 직접 골라야 확정
+// 장소 이름이 내가 쓴 곳(최근 장소 — listPlaces를 검색어 없이)에 똑같이 하나면 그 좌표 (L1 답 L1-6)
+//   없으면 카카오 장소 검색 결과에서 확실한 곳(clearPlace: 같은 이름 하나 · 학교 · 역 같은 대표 시설 · 3글자 이상, '세종대학교')만 — 그 밖('한실' 같은 가게 · 여러 곳)은 null (카드의 [장소 고르기])
+//   검색이 실패해도 null — 장소 고르기로 넘어가고 대화는 막지 않음. 좌표는 검색 결과 그대로
 async function placeByName(name: string): Promise<ResolvedPlace | null> {
   const wanted = name.trim();
   if (!wanted) return null;
   const same = (await listPlaces()).filter((p) => p.name.trim() === wanted);
   const only = same.length === 1 ? same[0] : null;
-  return only && typeof only.lat === 'number' && typeof only.lng === 'number' ? { name: only.name, lat: only.lat, lng: only.lng } : null;
+  if (only) return typeof only.lat === 'number' && typeof only.lng === 'number' ? { name: only.name, lat: only.lat, lng: only.lng } : null;
+  const sure = clearPlace(wanted, await searchPlaces(wanted).catch(() => []));
+  return sure && sure.lat != null && sure.lng != null ? { name: sure.name, lat: sure.lat, lng: sure.lng } : null;
 }
 
 const toLevel = (n: unknown): Level | null => (n === 0 || n === 1 || n === 2 ? n : null);

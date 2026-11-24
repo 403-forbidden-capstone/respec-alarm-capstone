@@ -788,3 +788,19 @@ test('T2F v2-b: 애매해서 날짜 · 시각이 null + unclear면 카드 없이
   assert.equal(r.cards.length, 0);
   assert.match(claude!.seen.T1[1], /되물을 것: '저녁'의 정확한 날짜·시각 · 장소/);
 });
+
+test('그룹: 대화를 연 뒤 가입한 그룹도 말마다 새로 읽어 후보로 — 이름 일부("캡스톤" ↔ "캡스톤팀")는 묻기만, 가입 안 한 그룹은 후보 아님', async () => {
+  const db = seed();
+  const meeting = { appointments: [{ ref: null, title: '캡스톤 회의', date: '2026-10-30', time: '10:30', place: '세종대학교', importance: null, transport: null, repeat: null, save: 'UNCONFIRMED', unclear: null }], alarm_changes: [], fact_feedback: [], prep_adjustment: null, safety_flag: false };
+  const { deps } = depsOf(db, { T2F: [meeting], T1: [t1('preview')] });
+  const s = (await handleVoiceSession(deps, { session_type: 'BEFORE_SLEEP', input_mode: 'TEXT', resume: true })) as VoiceSessionOut;
+  const sid = s.session_id as string;
+  assert.equal(stateOf(db, sid).ctx.groups, undefined); // 대화를 열 때는 가입 그룹 없음
+
+  // 대화를 연 뒤 '캡스톤팀'에 가입 · '캡스톤 디자인'은 초대만 받음(INVITED)
+  db.rows('groups').push({ group_id: 'g-cap', group_name: '캡스톤팀', owner_id: OTHER }, { group_id: 'g-inv', group_name: '캡스톤 디자인', owner_id: OTHER });
+  db.rows('group_members').push({ group_member_id: 'gm1', group_id: 'g-cap', user_id: ME, invite_status: 'JOINED' }, { group_member_id: 'gm2', group_id: 'g-inv', user_id: ME, invite_status: 'INVITED' });
+
+  const r = (await handleVoiceTurn(deps, text(sid, s.rev, '내일 10시 반에 캡스톤 회의 잡아줘'))) as VoiceTurnOut;
+  assert.deepEqual(r.cards.map((c) => c.group), [{ choice: 'ASK', id: null, candidates: [{ id: 'g-cap', name: '캡스톤팀' }] }]);
+});
