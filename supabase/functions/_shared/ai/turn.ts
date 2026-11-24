@@ -193,7 +193,11 @@ async function t1Reply(
   // 서버가 물어야 할 것(이번 말의 되물을 것 — 부족한 날짜 · 시각 · 이름, 그룹 선택)이 남았는데 답에 물음이 없음(가드가 지움 · "네, 알겠어요.") → 서버 문장으로 물음
   const say = wake === null && !view(false).safety.latestUser ? serverAskOf(ts, j) : null;
   if (say !== null && !splitSentences(g.reply).some((s) => isQuestion(s))) {
-    const kept = g.actions.includes('template') ? [] : splitSentences(g.reply).filter((x) => x !== fallbackReply([])); // 빈 맞장구("네, 알겠어요.")는 뺌
+    const kept = g.actions.includes('template') ? [] : splitSentences(g.reply).filter((x) =>
+      x !== fallbackReply([]) &&
+      // 같은 "그룹을 찾을 수 없음" 안내를 T1과 서버 문장으로 연달아 말하지 않는다.
+      !(say.includes('그룹을 찾을 수 없어요') && /그룹을 찾을 수 없/u.test(x))
+    );
     g = { ...g, reply: [...kept, say].join(' '), acts: [{ type: 'CLARIFY', ref: null }], end: false, actions: [...g.actions, 'ask_server'] };
   }
   return { ok: true, line: { role: 'ai', after_turn: j, source, trigger, text: g.reply, acts: g.acts, end: g.end, flags: g.flags, guard: redone && !g.actions.includes('regen') ? ['regen', ...g.actions] : g.actions } };
@@ -360,6 +364,9 @@ async function handleText(run: Run, row: SessionRow, st: ServerState, req: Extra
   if (extract) {
     try {
       ctx.groups = await readJoinedGroups(deps.userDb, deps.userId);
+      // 그룹 탭에서 대화 도중 새 그룹을 만들면 이 턴의 추출(T2F) · 안내(T1) · 저장된 세션 모두 같은 최신 목록을 본다.
+      // ctx만 갱신하면 뒤의 screenFast/screenT1이 옛 st.ctx.groups를 계속 사용한다.
+      st.ctx.groups = structuredClone(ctx.groups);
     } catch {
       // 저장된 목록 그대로
     }
