@@ -9,8 +9,7 @@ import { HolidayPatternPicker } from '@/features/profile/components/HolidayPatte
 import { ChoiceChips } from './ChoiceChips';
 
 export type PrepareValues = {
-  prepare: number; // legacy: wake -> departure (minutes)
-  outingPrep?: number | null; // pure prep start -> actual departure, explicitly answered
+  outingPrep: number | null; // explicitly entered pure preparation start -> departure, never wake -> departure
   buffer: number; // 여유 시간(분)
   transport: TransportType;
   margin: WakeMargin;
@@ -35,27 +34,12 @@ const MARGINS = MARGIN_ORDER.map((v) => [v, WAKE_MARGIN_NAME[v]] as const);
 export function PrepareStep({ values, onChange, ml, onMlChange }: Props) {
   return (
     <>
-      {/* Stepper 줄은 라벨이 줄어들지 않아 긴 질문은 줄 위에 따로 적음 */}
       <Text variant="bodyStrong" style={styles.question}>
-        일어나서 집을 나서기까지 보통 몇 분?
+        외출 준비를 시작해서 집을 나서기까지 보통 몇 분?
       </Text>
-      <Card>
-        <Stepper
-          first
-          label="기상~출발 전체 시간"
-          value={values.prepare}
-          onChange={(prepare) => onChange({ prepare })}
-          min={5}
-          max={300}
-          step={5}
-          unit="분"
-        />
-        <Stepper label="여유 시간" value={values.buffer} onChange={(buffer) => onChange({ buffer })} min={0} max={60} step={5} unit="분" />
-      </Card>
-      <SectionHeader title="외출 준비만 걸리는 시간" />
       <Text variant="small" tone="sub">
         식사·과제처럼 준비하기 전에 하는 일은 제외하고, 씻고 옷을 입는 등 외출 준비를 시작한 순간부터 집을 나설 때까지의 시간을 입력해 주세요.
-        기상~출발 시간과 별도로 저장돼요. 순수준비시간 시범 기능이 활성화된 개인 일정에서 사용하며, 이후 기록이 쌓이면 보정돼요.
+        입력한 시간을 초기 기준으로 사용해요. 시범 기능이 활성화된 개인 일정에서는 기록이 쌓이면 이 준비시간만 보정해요.
       </Text>
       <Card>
         <Stepper
@@ -74,6 +58,11 @@ export function PrepareStep({ values, onChange, ml, onMlChange }: Props) {
             <Button label="30분으로 설정" onPress={() => onChange({ outingPrep: 30 })} />
           </>
         ) : null}
+      </Card>
+
+      <SectionHeader title="여유 시간" />
+      <Card>
+        <Stepper first label="여유 시간" value={values.buffer} onChange={(buffer) => onChange({ buffer })} min={0} max={60} step={5} unit="분" />
       </Card>
 
       <SectionHeader title="이동 수단" />
