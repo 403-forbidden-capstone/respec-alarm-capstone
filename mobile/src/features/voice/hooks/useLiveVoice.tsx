@@ -6,7 +6,7 @@ import { userMessage } from '@/lib/errors';
 
 import { LiveFrame } from '../components/LiveFrame';
 import { idleArm, idleExpired, idleHeard, idleOff, idleVad, type IdleWatch } from '../idle';
-import { livePage, parseLiveMessage } from '../live';
+import { livePage, parseLiveMessage, type LiveToolCall, type LiveToolResponse } from '../live';
 import { addLiveChunk, closeLive, takeTurn, type LiveLine } from '../liveChat';
 
 const CONNECT_TIMEOUT_MS = 15000; // 이 안에 연결(setupComplete)이 안 되면 실패로 봄
@@ -20,6 +20,10 @@ export interface LiveVoiceOptions {
   onIdle?: () => void;
   /** 화면 쪽 처리(카드 저장 · 장소 계산 · 글 답 대기)가 도는 중이면 true — 그동안은 끝내지 않고, 끝나면 새 30초 */
   isBusy?: () => boolean;
+  /** 30초 무발화로 끝낼지 (기본 켬). 아침 루틴은 단계를 하는 동안 몇 분씩 말이 없어서 끔 — 10분 상한은 그대로 */
+  idle?: boolean;
+  /** Live가 도구를 불렀을 때 (아침 루틴) — 처리한 결과를 돌려주면 같은 id로 Live에 답함. 없으면 ok로 답함 */
+  onTool?: (calls: LiveToolCall[]) => LiveToolResponse[];
 }
 
 // 실시간 음성 대화(Gemini Live) — start하면 마이크 권한을 묻고 토큰을 받아 연결, 말하면 AI가 목소리로 답함. stop하면 페이지를 내려 마이크 · 연결을 모두 닫음
@@ -119,7 +123,7 @@ export function useLiveVoice(
     const timer = setTimeout(() => fail('10분이 지나 음성 대화를 마쳤어요. 이어서 말하려면 다시 시작해 주세요'), LIVE_MAX_MS);
     // 30초 무발화 — 서버 처리(넘긴 차례 · 화면 작업) 중이면 끝내지 않고 새 30초
     const tick = setInterval(() => {
-      if (!idleExpired(idle.current, t())) return;
+      if (optionsRef.current.idle === false || !idleExpired(idle.current, t())) return;
       if (inflight.current > 0 || optionsRef.current.isBusy?.()) return rearm();
       end();
       setIdleEnded(true);
@@ -186,6 +190,9 @@ export function useLiveVoice(
       const { type, text } = m;
       if (type === 'me') idle.current = idleHeard(idle.current, t());
       setLines((prev) => addLiveChunk(prev, type, text, now()));
+    } else if (m.type === 'tool') {
+      const answer = optionsRef.current.onTool?.(m.calls) ?? m.calls.map((c) => ({ id: c.id, name: c.name, response: { ok: true } }));
+      sendRef.current?.(JSON.stringify({ type: 'tool_response', responses: answer }));
     } else if (m.type === 'turn') {
       setLines(closeLive);
       flush();

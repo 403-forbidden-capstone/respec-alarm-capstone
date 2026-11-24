@@ -95,6 +95,7 @@ const ALL_SECTIONS: ScreenSection[] = [
         href: { pathname: '/wake', params: { alarm: 'a1:WAKE' } },
         real: { needs: needs('alarm'), href: (t) => ({ pathname: '/wake', params: { alarm: t.alarmId as string } }) },
       },
+      { id: 'H09', name: '아침 루틴 음성 진행', href: '/routine-run' },
       { id: 'L04', name: '알람 점검표 (웹은 샘플 권한 상태를 골라야 보임)', href: '/ring-check' },
     ],
   },
