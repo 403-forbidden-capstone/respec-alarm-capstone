@@ -507,3 +507,80 @@ test('E2E simulation: pre-pure legacy profile retains its old wake-to-departure 
   assert.deepEqual(next.saved, next.shown);
   assert.equal(env.db.rows('appointment_participants')[0].prepare_minutes, 70);
 });
+
+
+test('10 verified CatBoost v2 observations change the actual AUTO alarm and persisted preparation provenance', async () => {
+  const { db, ctx, commitCtx } = setup();
+  Object.assign(db.rows('profiles')[0], { default_outing_prep_minutes: 40, default_prepare_minutes: 120 });
+  let calls = 0;
+  ctx.purePrepModelRunner = async (input) => {
+    calls++;
+    assert.equal(input.mode, 'live');
+    assert.equal(input.purePlan, true);
+    assert.equal(input.personalAppointment, true);
+    assert.equal(input.manualOverride, false);
+    return {
+      status: 'PREDICTED', model: 'prep_start_ratio_v2',
+      training_target: 'alarm_dismiss_location_proxy',
+      predicted_pure_minutes: 55, history_baseline_minutes: 42,
+      personalized_baseline_minutes: 40, raw_model_prediction_minutes: 57,
+      onboarding_pure_minutes: 40,
+      valid_records: 10, required_records: 10, applied_to_alarm: true,
+    };
+  };
+  const draft = draftOf(FULL);
+  const shown = await buildPlan(ctx, draft, { mode: 'preview' });
+  const save = await buildPlan(ctx, draft, { mode: 'save' });
+  assert.equal(calls, 2);
+  assert.equal(shown.plan.prepareTarget, 'PREPARE_START_TO_DEPART');
+  assert.equal(shown.plan.prepare.source, 'MODEL');
+  assert.equal(shown.plan.prepare.mlModel, 'prep_start_ratio_v2');
+  assert.equal(shown.plan.prepare.minutes, 85); // pure 55 + fixed 30 before prep
+  assert.deepEqual(shown.plan.chain, save.plan.chain);
+  assert.deepEqual(shown.plan.chain.map(a => a.kind + ' ' + hm(a.at.toISOString())),
+    ['WAKE 07:35', 'PREPARE 08:05', 'DEPARTURE 09:00', 'ARRIVE 09:50']);
+  const committed = await persistAppointment(commitCtx, {
+    plan: save.plan, inputs: save.inputs, created: { title: FULL.appointment.title },
+    draft, timeZone: 'Asia/Seoul',
+  });
+  assert.ok(committed.participant_id);
+  const row = db.rows('appointment_participants').find(p => p.participant_id === committed.participant_id);
+  assert.equal(row?.outing_prep_source, 'MODEL');
+  assert.equal(row?.outing_prep_model, 'prep_start_ratio_v2');
+  assert.equal(row?.outing_prep_minutes, 55);
+  assert.equal(row?.prepare_minutes, 85);
+  assert.equal(db.rows('alarms').find(a=>a.participant_id===committed.participant_id && a.alarm_type==='PREPARE')?.scheduled_at,
+    new Date(iso(22, 485)).toISOString());
+});
+
+test('9 observations, unavailable model and malformed prediction all fall back; manual and group bypass the runner', async () => {
+  const env = setup();
+  Object.assign(env.db.rows('profiles')[0], { default_outing_prep_minutes: 40 });
+  let calls = 0;
+  env.ctx.purePrepModelRunner = async () => {
+    calls++;
+    return {
+      status: 'PREDICTED', model: 'prep_start_ratio_v2', training_target: 'alarm_dismiss_location_proxy',
+      predicted_pure_minutes: 55, history_baseline_minutes: 42,
+      personalized_baseline_minutes: 40, raw_model_prediction_minutes: 57,
+      onboarding_pure_minutes: 40, valid_records: 9, required_records: 10, applied_to_alarm: false,
+    };
+  };
+  const underTen = await buildPlan(env.ctx, draftOf(FULL));
+  assert.equal(underTen.plan.prepare.source, 'DEFAULT');
+  assert.equal(underTen.plan.prepare.minutes, 70);
+  env.ctx.purePrepModelRunner = async () => {
+    calls++;
+    return { status: 'MODEL_UNAVAILABLE', valid_records: 10, required_records: 10 };
+  };
+  const offline = await buildPlan(env.ctx, draftOf(FULL));
+  assert.equal(offline.plan.prepare.minutes, 70);
+  const manual = await buildPlan(env.ctx, draftOf({
+    ...FULL, participant: {...FULL.participant, prepare_minutes: 80},
+  }));
+  assert.equal(manual.plan.prepare.source, 'MANUAL');
+  assert.equal(calls, 2);
+  const group = await buildPlan(env.ctx, {...draftOf(FULL), groupId: 'g1'});
+  assert.equal(group.plan.prepare.source, 'DEFAULT');
+  assert.equal(calls, 2);
+});
