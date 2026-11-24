@@ -407,7 +407,7 @@ export function computePlan(i: PlanInputs, travel: ResolvedTravel, mode: PlanMod
             : activePure.source === 'MODEL' ? 'MODEL'
             : activePure.source === 'HISTORY' ? 'PERSONAL' : 'DEFAULT',
           confidence: 'LOW',
-          ...(activePure.source === 'MODEL' && activePure.model === 'prep_start_ratio_v2' ? { mlModel: 'prep_start_ratio_v2' as const } : {}),
+          ...(activePure.source === 'MODEL' && (activePure.model === 'prep_start_ratio_v2' || activePure.model === 'prep_start_ratio_v2_survey_pilot') ? { mlModel: activePure.model } : {}),
         }
       : predicted;
     // prepareBound is inherited from legacy wake->departure participant.prepare_minutes.
