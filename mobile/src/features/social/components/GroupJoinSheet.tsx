@@ -37,7 +37,7 @@ function Body({ defaults, busy, onJoin }: { defaults: JoinDefaults; busy: boolea
         이동 수단
       </Text>
       <OptionGrid<Transport> label="이동 수단" options={TRANSPORT_OPTIONS} value={transport} onChange={setTransport} />
-      <KeyValueRow label="순수 외출 준비시간" value={defaults.purePrepMinutes == null ? '미설정' : `${defaults.purePrepMinutes}분`} />
+      <KeyValueRow label="순수 외출 준비시간" value={defaults.purePrepMinutes == null ? '미설정 · 기존 방식 사용' : `${defaults.purePrepMinutes}분`} />
       <Text variant="small" tone="sub" style={styles.note}>
         준비시간은 온보딩·설정에서 입력한 값을 사용해요. 내 출발지·이동 수단과 개인 준비시간으로 알람을 계산하며 다른 참여자에게 표시되지 않아요.
       </Text>
