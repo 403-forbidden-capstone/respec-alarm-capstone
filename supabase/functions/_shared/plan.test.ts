@@ -636,3 +636,38 @@ test('shared pure-prep loader: ten valid model results work across build, edit a
   });
   assert.deepEqual(notApplied,{source:'PROFILE',minutes:40});
 });
+
+
+test('survey v2 transfer pilot is attributed distinctly in preview and persisted AUTO alarm',async()=>{
+  const {db,ctx,commitCtx}=setup();
+  Object.assign(db.rows('profiles')[0],{default_outing_prep_minutes:40});
+  ctx.purePrepModelRunner=async()=>({
+    status:'PREDICTED',
+    model:'prep_start_ratio_v2_survey_pilot',
+    training_target:'survey_start_cluster_proxy',
+    predicted_pure_minutes:55,
+    history_baseline_minutes:50,
+    personalized_baseline_minutes:50,
+    raw_model_prediction_minutes:55,
+    onboarding_pure_minutes:40,
+    valid_records:10,required_records:10,applied_to_alarm:true,
+  });
+  const draft=draftOf(FULL);
+  const preview=await buildPlan(ctx,draft,{mode:'preview'});
+  const save=await buildPlan(ctx,draft,{mode:'save'});
+  assert.deepEqual(preview.plan.chain,save.plan.chain);
+  assert.equal(save.plan.prepare.source,'MODEL');
+  assert.equal(save.plan.prepare.mlModel,'prep_start_ratio_v2_survey_pilot');
+  assert.equal(save.plan.prepare.minutes,85);
+  const req=readCommitRequest(Reader.root(FULL));
+  assert.equal(req.type,'APPOINTMENT');
+  if(req.type!=='APPOINTMENT')throw Error('invalid fixture');
+  const committed=await persistAppointment(commitCtx,{
+    plan:save.plan,inputs:save.inputs,created:req.appointment,
+    draft,edits:[],timeZone:'Asia/Seoul',
+  });
+  const row=db.rows('appointment_participants').find(x=>x.participant_id===committed.participant_id);
+  assert.equal(row?.outing_prep_source,'MODEL');
+  assert.equal(row?.outing_prep_model,'prep_start_ratio_v2_survey_pilot');
+  assert.equal(row?.outing_prep_minutes,55);
+});
