@@ -163,8 +163,7 @@ export default function SettingsScreen() {
         <>
           <SectionHeader title="아침 준비 기본값" />
           <Card>
-            <EditRow first label="기상~출발 시간" value={`${profile.default_prepare_minutes}분`} onPress={open('prepare')} />
-            <EditRow label="순수 외출 준비시간" value={profile.default_outing_prep_minutes == null ? "미설정" : `${profile.default_outing_prep_minutes}분`} onPress={open('prepare')} />
+            <EditRow first label="순수 외출 준비시간" value={profile.default_outing_prep_minutes == null ? "미설정" : `${profile.default_outing_prep_minutes}분`} onPress={open('prepare')} />
             <EditRow label="여유 시간" value={`${profile.default_buffer_minutes}분`} onPress={open('prepare')} />
             <EditRow label="이동 수단" value={TRANSPORT_NAME[profile.default_transport]} onPress={open('prepare')} />
             <EditRow label="집(출발지)" value={profile.home_name ?? '정하지 않았어요'} onPress={canEdit ? () => setPlaceOpen(true) : undefined} />
