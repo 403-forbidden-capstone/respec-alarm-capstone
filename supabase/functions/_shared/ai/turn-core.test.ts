@@ -2070,4 +2070,36 @@ describe("그룹 일정 고르기", () => {
     assert.equal(questions.some((x) => x.includes("'약속'")), false, questions.join(" | "));
     assert.deepEqual(card(second.state, "c1").group?.candidates.map((x) => x.id), ["g1", "g2"]);
   });
+
+  it("시각 말 '3시 그룹' · '10시 반 그룹'은 없는 그룹명으로 오인하지 않는다", () => {
+    const groups = [{ id: "g-team", name: "캡스톤팀" }, { id: "g-study", name: "스터디팀" }];
+    assert.equal(missingGroup(groups, "내일 3시 그룹 회의 잡아줘"), null);
+    assert.equal(missingGroup(groups, "내일 10시 반 그룹 스터디"), null);
+    assert.deepEqual(groupOf(groups, "내일 3시 그룹 회의 잡아줘")?.candidates, groups);
+    assert.deepEqual(groupOf(groups, "내일 10시 반 그룹 스터디")?.candidates, groups);
+    // 숫자가 든 실제 그룹 이름은 여전히 가입한 그룹으로 인식한다.
+    assert.equal(missingGroup([{ id: "g403", name: "403팀" }], "403팀 그룹 회의 잡아줘"), null);
+  });
+
+  it("날짜 없는 그룹 '약속'의 시각과 다른 '치과 약속'에는 그룹 후보를 전파하지 않는다", () => {
+    const groups = [{ id: "g-team", name: "캡스톤팀" }, { id: "g-study", name: "스터디팀" }];
+    const c: Context = { ...ctx({ tomorrow: [] }), groups };
+    const earlier = study({ title: "약속", date: null, time: "10:30", place: null });
+    const first = applyFast(initTurnState(c), fast({ appointments: [earlier] }), c, 1, "그룹 알람 10시 반에 약속 잡아줘");
+    const dentist = study({ title: "치과 약속", date: "2026-10-10", time: "16:00", place: "병원" });
+    const second = applyFast(first.state, fast({ appointments: [earlier, dentist] }), c, 2, "토요일 4시에 치과 약속 있어");
+    assert.equal(card(second.state, "c1").draft?.title, "치과 약속");
+    assert.equal(card(second.state, "c1").group, undefined);
+    assert.ok(second.state.events.flatMap((e) => e.clarify).some((x) => x.startsWith("그룹 선택:") && x.includes("'약속'")));
+  });
+
+  it("거절한 '수업' 뒤 '수업은 취소야'는 재등록이 아니다", () => {
+    const c = ctx({ tomorrow: [] });
+    const lesson = study({ title: "수업", time: "10:30", place: "학교" });
+    const first = applyFast(initTurnState(c), fast({ appointments: [lesson] }), c, 1, "내일 10시 반 수업");
+    const reject = applyCardAction(first.state, { id: "c1", action: "REJECTED" }, c, 1);
+    const second = applyFast(reject.state, fast({ appointments: [{ ...lesson, save: "CONFIRMED" }] }), c, 2, "수업은 취소야");
+    assert.equal(card(second.state, "c1").status, "REJECTED");
+    assert.equal(second.state.cards.filter((x) => x.status !== "REJECTED").length, 0);
+  });
 });
