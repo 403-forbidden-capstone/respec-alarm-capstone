@@ -17,7 +17,10 @@ const card = (over: Partial<ConversationCard> = {}): ConversationCard => ({
 function render(c: ConversationCard, onPickGroup = jest.fn<(id: string | null) => void>()) {
   let r!: ReactTestRenderer;
   act(() => {
-    r = create(createElement(FoundScheduleCard, { card: c, at: new Date(2026, 9, 29, 22, 0), onSave: () => {}, onReject: () => {}, onPickGroup }));
+    r = create(createElement(FoundScheduleCard, {
+      card: c, at: new Date(2026, 9, 29, 22, 0), onSave: () => {}, onReject: () => {}, onPickGroup,
+      onPickPlace: () => {}, onSaveWithoutPlace: () => {},
+    }));
   });
   // Text가 한국어 줄바꿈용으로 끼우는 U+2060을 빼고 화면 글 전체를 한 줄로
   const textOf = (n: ReactTestInstance): string => n.findAllByType(RNText).flatMap((t) => [t.props.children].flat()).filter((x) => typeof x === 'string').join('').replace(/⁠/g, '');
@@ -40,6 +43,12 @@ describe('FoundScheduleCard 그룹 칩', () => {
     expect(saved.text).toContain('그룹캡스톤 내 알람만');
     expect(saved.text).not.toContain('캡스톤 그룹');
     expect(render(card({ group: null })).text).not.toContain('개인 일정');
+  });
+
+  it('장소를 못 찾은 일정에서는 장소 고르기만 보여 주고 장소 없이 저장은 숨긴다', () => {
+    const v = render(card({ status: 'NEEDS_PLACE', place: '' }));
+    expect(v.text).toContain('장소 고르기');
+    expect(v.text).not.toContain('장소 없이 저장');
   });
 
   it('없는 그룹(가족)이면 찾을 수 없다는 안내와 개인 일정 칩만 — 다른 그룹 칩 없음', () => {

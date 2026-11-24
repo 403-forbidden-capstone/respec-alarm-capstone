@@ -476,7 +476,9 @@ export function pendingText(c: Card, s: TurnState): string {
 
 // ───────── 그룹 일정 고르기 ─────────
 
-const squash = (t: string): string => t.replace(/\s+/gu, "").toLowerCase();
+// 음성 인식 문자열에 섞인 WORD JOINER(\u2060) · 제로폭 문자는 사람이 보는 그룹명을 바꾸지 않지만 문자열 비교를 깨뜨린다.
+const INVISIBLE = /[\u200B-\u200D\u2060\uFEFF]/gu;
+const squash = (t: string): string => t.replace(INVISIBLE, "").replace(/\s+/gu, "").toLowerCase();
 // '개인 과제'처럼 일정 종류가 아닌 '개인'은 고른 말로 보지 않음
 const PERSONAL_RE = /개인(일정|으로|약속)|혼자|나만/u;
 
@@ -508,7 +510,7 @@ export function missingGroup(groups: GroupRef[], text: string): string | null {
   // '모바일 앱팀' · '403팀'처럼 띄어쓰기나 숫자가 있는 가입 그룹도 먼저 확인한다.
   // 정규식으로 끝 낱말('앱팀' · '팀')만 잡아 존재하지 않는 그룹으로 오인하지 않도록 한다.
   if (readGroups(groups, text).named.length > 0) return null;
-  for (const m of text.matchAll(/([가-힣A-Za-z0-9]+?)\s*그룹/gu)) {
+  for (const m of text.replace(INVISIBLE, "").matchAll(/([가-힣A-Za-z0-9]+?)\s*그룹/gu)) {
     const w = m[1] as string;
     // "내일 3시 그룹 회의" / "10시 반 그룹"의 시각 표현은 그룹명이 아니다.
     if (NOT_GROUP_NAME.has(w) || COMMON_WORDS.has(w) || /^\d+(?:시|분)$/u.test(w)) continue;
@@ -874,34 +876,79 @@ const toFix = (f: FixRecord): Fix => ({ id: f.id, fact: f.fact, kind: f.kind, pa
  */
 export function applyFast(state: TurnState, fast: FastExtract, ctx: Context, afterTurn: number, userText?: string): FastResult {
   const s: TurnState = structuredClone(state);
-  const extract = expandFast(fast);
+  // T2F 결과는 다음 턴 · 시험에서 재사용될 수 있으므로 입력 객체를 변경하지 않는다.
+  const extract = expandFast(structuredClone(fast));
   const intent = userText === undefined ? null : intentOf(userText);
   // 말에 나온 일정 (최신 말이 앞 대화 · 추출의 약속 번호보다 우선)
   const hits = intent === null ? null : mentionedAppts(s.appointments, intent.text);
   const ev = newEvent(afterTurn);
   const seen0 = { ...s.seen }; // 이번 말 전 처리 기록 — 거절한 일정을 다시 청했는지(저장해 달라는 말이 새로 생김) 볼 때
-  // 없는 그룹 명칭은 그 요청에서 추출한 일정에만 적용한다. 지난 대화의 '가족 그룹' 때문에
-  // 다음 말의 실제 일정 '가족 여행'까지 '여행'으로 바뀌면 안 된다.
-  // T2F가 이전 요청을 다시 뽑을 때만 같은 원문 제목 · 날짜 · 시각에 기록한 변환을 재사용한다.
-  const missingNow = userText === undefined ? null : groupOf(ctx.groups, userText)?.missing ?? null;
+  // 새로 가입한 그룹은 현재 턴의 ctx.groups에 반영된다.
+  // 이전 카드의 "없는 그룹" 판정과 seen 중복 기록 때문에 동일한 요청을 영원히 막지 않도록 한다.
+  const mentionedGroup = userText === undefined ? undefined : groupOf(ctx.groups, userText);
+  const missingNow = mentionedGroup?.missing ?? null;
+  const knownNamed = userText === undefined ? undefined : ctx.groups?.find((g) =>
+    squash(userText).includes(`${squash(g.name)}그룹`));
+  const latestMissing = [...s.cards].reverse().find((c) =>
+    c.kind === "APPT_NEW" && c.status === "REJECTED" && c.draft !== null && c.group?.missing !== undefined &&
+    knownNamed !== undefined && squash(knownNamed.name) === squash(c.group.missing as string));
+  // 아직 열려 있는 카드도 그룹 탭에서 새로 만든 그룹을 적용할 수 있도록 같은 카드를 재사용한다.
+  const openMissing = [...s.cards].reverse().find((c) =>
+    c.kind === "APPT_NEW" && OPEN_STATUS.includes(c.status) && c.draft !== null &&
+    c.group?.choice === "ASK" && c.group.missing !== undefined && knownNamed !== undefined &&
+    squash(c.group.missing) === squash(knownNamed.name));
   for (const x of extract.appointments) {
     if (x.ref !== null) continue;
-    const key = `group-missing-title:${normTitle(x.title)}|${x.date ?? "?"}|${x.time ?? "?"}`;
-    const savedName = s.seen[key];
-    if (savedName !== undefined) {
-      x.title = stripGroupName(x.title, savedName);
-    } else if (missingNow !== null) {
-      const clean = stripGroupName(x.title, missingNow);
-      // 같은 발화의 일정만 정리: '가족 그룹 약속'은 명시적 표기이거나,
-      // '가족 약속'처럼 T2F가 '그룹'을 뺀 경우에는 나머지 제목이 최신 말에 있어야 한다.
-      const explicit = squash(x.title).includes(`${squash(missingNow)}그룹`);
-      if (clean !== x.title && (explicit || (userText !== undefined && squash(userText).includes(squash(clean))))) {
-        s.seen[key] = missingNow;
-        x.title = clean;
-      }
+    if (openMissing?.draft && knownNamed && x.date === openMissing.draft.date && x.time === openMissing.draft.time &&
+      squash(x.title).startsWith(`${squash(knownNamed.name)}그룹`)) {
+      x.title = openMissing.draft.title;
+      continue;
+    }
+    const original = x.title;
+    const oldKey = `appt:${normTitle(original)}|${x.date ?? "?"}|${x.time ?? "?"}`;
+    const rememberedKey = `group-missing-title:${normTitle(original)}|${x.date ?? "?"}|${x.time ?? "?"}`;
+    const finalTitleKey = `group-missing-final:${normTitle(original)}|${x.date ?? "?"}|${x.time ?? "?"}`;
+    const sameRetry = latestMissing?.draft?.date === x.date && latestMissing?.draft?.time === x.time;
+    // T2F는 앞 대화까지 다시 뽑는다. 이미 처리한 과거 일정은 이번 말의 재요청이 아니면 손대지 않는다.
+    if (seen0[oldKey] !== undefined && !sameRetry) continue;
+    const name = s.seen[rememberedKey] ?? missingNow ?? knownNamed?.name;
+    if (name === undefined || name === null) continue;
+    const prefix = `${squash(name)}그룹`;
+    const explicit = squash(original).startsWith(prefix);
+    const cleaned = stripGroupName(original.replace(INVISIBLE, ""), name);
+    // T2F가 "가족 그룹 약속" 대신 "가족 약속"으로 뽑아도 사용자 말에 '약속'이 있으면 정상 제목으로 바꾼다.
+    // 하지만 지난 대화에서 나온 '가족 여행'처럼 전혀 다른 제목은 손대지 않는다.
+    const implied = cleaned !== original && cleaned !== "" && userText !== undefined &&
+      squash(userText).includes(squash(cleaned)) &&
+      (missingNow !== null || (sameRetry && latestMissing?.draft && nearTitle(latestMissing.draft.title, cleaned)));
+    if (!explicit && !implied) continue;
+    // 가입한 정상 그룹의 '모바일 앱팀 그룹 회의'처럼 제목이 붙은 경우는 기존 제목을 유지한다.
+    // 그룹 이름만 제목이 됐거나, 과거 '없는 그룹'을 같은 일정으로 다시 청한 경우만 정정한다.
+    if (missingNow === null && !sameRetry && squash(original) !== prefix && s.seen[rememberedKey] === undefined) continue;
+    // 최초 요청에서 정한 제목을 다음 턴에도 재사용한다. "고마워"에는 "약속"이 없더라도 제목을 비우지 않는다.
+    // 그룹을 이미 가입한 상태에서 일정 제목을 말하지 않았다면 원래 제목을 유지한다.
+    const title = cleaned || s.seen[finalTitleKey] ||
+      (userText !== undefined && /약속/u.test(squash(userText)) ? "약속" : missingNow !== null ? "" : original);
+    if (title === original) continue;
+    x.title = title;
+    // 그룹이 이미 가입돼 있더라도 원래 T2F 제목을 바꿨다면 대응 관계를 기억해야 한다.
+    // 안 그러면 다음 턴 "고마워"에서 옛 제목이 새 일정으로 재생성된다.
+    // 변경 전 T2F 제목과 날짜·시각으로만 기억해 무관한 "가족 여행"에 전파하지 않는다.
+    if (title !== "") {
+      s.seen[rememberedKey] = name;
+      s.seen[finalTitleKey] = title;
+    }
+    if (sameRetry && title !== "" && latestMissing?.draft && nearTitle(latestMissing.draft.title, title)) {
+      delete s.seen[`appt:${normTitle(title)}|${x.date ?? "?"}|${x.time ?? "?"}`];
     }
   }
   const touched = new Set<string>();
+  if (openMissing !== undefined && knownNamed !== undefined) {
+    forgetLines(s, [groupQuestion(openMissing)]); // 이미 풀린 '없는 그룹' 질문을 다시 꺼내지 않는다
+    openMissing.group = { choice: "GROUP", id: knownNamed.id, candidates: [knownNamed] };
+    touched.add(openMissing.id);
+    if (openMissing.status === "READY") pushPending(ev, openMissing, s);
+  }
   const now = isoToLocal(ctx.session.now);
   const isPast = (at: LocalDateTime): boolean => minutesBetween(now, at) < 0;
 

@@ -2102,4 +2102,104 @@ describe("그룹 일정 고르기", () => {
     assert.equal(card(second.state, "c1").status, "REJECTED");
     assert.equal(second.state.cards.filter((x) => x.status !== "REJECTED").length, 0);
   });
+
+  it("음성 입력의 보이지 않는 문자에도 가입한 '가족' 그룹을 인식한다", () => {
+    const family = { id: "g-family", name: "가족" };
+    const spoken = "가\u2060족 그\u2060룹 내\u2060일 1시 반\u2060에 약\u2060속 잡\u2060아\u2060줘";
+    assert.equal(groupOf([family], spoken)?.choice, "GROUP");
+    assert.equal(groupOf([family], spoken)?.id, family.id);
+    assert.equal(missingGroup([family], spoken), null);
+    assert.equal(missingGroup([], spoken), "가족");
+  });
+
+  it("대화 도중 '가족' 그룹을 만든 뒤 같은 요청을 다시 말하면 새 카드에 새 그룹을 붙인다", () => {
+    const base = ctx({ tomorrow: [] });
+    const firstContext: Context = { ...base, groups: [{ id: "g-cap", name: "캡스톤팀" }] };
+    const joinedContext: Context = { ...base, groups: [...(firstContext.groups ?? []), { id: "g-family", name: "가족" }] };
+    const spoken = "가\u2060족 그\u2060룹 내\u2060일 1시 반\u2060에 약\u2060속 잡\u2060아\u2060줘";
+    const extracted = study({ title: "가족 그룹", time: "13:30", place: null });
+    const first = applyFast(initTurnState(firstContext), fast({ appointments: [extracted] }), firstContext, 1, spoken);
+    const old = card(first.state, "c1");
+    assert.equal(old.group?.missing, "가족");
+    assert.equal(old.draft?.title, "약속");
+    const rejected = applyCardAction(first.state, { id: "c1", action: "REJECTED" }, firstContext, 1);
+    const retried = applyFast(rejected.state, fast({ appointments: [extracted] }), joinedContext, 2, spoken);
+    const next = card(retried.state, "c2");
+    assert.equal(card(retried.state, "c1").status, "REJECTED");
+    assert.equal(next.draft?.title, "약속");
+    assert.equal(next.group?.choice, "GROUP");
+    assert.equal(next.group?.id, "g-family");
+    assert.equal(retried.state.cards.length, 2);
+  });
+
+  it("새 그룹이 등록되어도 과거에 거절한 다른 시각의 가족 일정은 되살리지 않는다", () => {
+    const base = ctx({ tomorrow: [] });
+    const oldContext: Context = { ...base, groups: [{ id: "g-cap", name: "캡스톤팀" }] };
+    const newContext: Context = { ...base, groups: [...(oldContext.groups ?? []), { id: "g-family", name: "가족" }] };
+    const old = study({ title: "가족 그룹", time: "10:30", place: null });
+    const recent = study({ title: "가족 그룹", time: "13:30", place: null });
+    const first = applyFast(initTurnState(oldContext), fast({ appointments: [old] }), oldContext, 1, "가족 그룹 내일 10시 반에 약속 잡아줘");
+    const r1 = applyCardAction(first.state, { id: "c1", action: "REJECTED" }, oldContext, 1);
+    const second = applyFast(r1.state, fast({ appointments: [old, recent] }), oldContext, 2, "가족 그룹 내일 1시 반에 약속 잡아줘");
+    const r2 = applyCardAction(second.state, { id: "c2", action: "REJECTED" }, oldContext, 2);
+    const again = applyFast(r2.state, fast({ appointments: [old, recent] }), newContext, 3, "가족 그룹 내일 1시 반에 약속 잡아줘");
+    const open = again.state.cards.filter((c) => c.status !== "REJECTED");
+    assert.equal(open.length, 1);
+    assert.equal(open[0]?.draft?.time, "13:30");
+    assert.equal(open[0]?.group?.id, "g-family");
+  });
+
+  it("열려 있는 카드도 대화 중 그룹 생성 후 같은 카드에 그룹을 다시 붙인다", () => {
+    const base = ctx({ tomorrow: [] });
+    const oldContext: Context = { ...base, groups: [{ id: "g-cap", name: "캡스톤팀" }] };
+    const newContext: Context = { ...base, groups: [...(oldContext.groups ?? []), { id: "g-family", name: "가족" }] };
+    const spoken = "가\u2060족 그\u2060룹 내\u2060일 1시 반\u2060에 약\u2060속 잡\u2060아\u2060줘";
+    const x = study({ title: "가족 그룹", time: "13:30", place: null });
+    const first = applyFast(initTurnState(oldContext), fast({ appointments: [x] }), oldContext, 1, spoken);
+    assert.equal(card(first.state, "c1").group?.missing, "가족");
+    const second = applyFast(first.state, fast({ appointments: [x] }), newContext, 2, spoken);
+    assert.equal(second.state.cards.length, 1);
+    assert.equal(card(second.state, "c1").group?.choice, "GROUP");
+    assert.equal(card(second.state, "c1").group?.id, "g-family");
+    assert.equal(second.state.events.flatMap((e) => e.clarify).some((x) => x.includes("그룹을 찾을 수 없음")), false);
+  });
+
+  it("없는 그룹 요청을 추출한 다음 '고마워'만 말해도 이전 일정의 이름을 다시 묻지 않는다", () => {
+    const c: Context = { ...ctx({ tomorrow: [] }), groups: [{ id: "g-cap", name: "캡스톤팀" }] };
+    const extracted = study({ title: "가족 그룹", time: "10:30", place: null });
+    const first = applyFast(initTurnState(c), fast({ appointments: [extracted] }), c, 1, "가족 그룹 내일 10시 반에 약속 잡아줘");
+    assert.equal(card(first.state, "c1").draft?.title, "약속");
+    assert.equal(extracted.title, "가족 그룹", "사용자가 준 추출 객체를 직접 바꾸지 않음");
+    const second = applyFast(first.state, fast({ appointments: [extracted] }), c, 2, "고마워");
+    assert.equal(second.state.cards.length, 1);
+    assert.equal(second.event.clarify.some((line) => line.includes("일정의 이름")), false);
+  });
+
+  it("이미 가입한 캡스톤팀 그룹 이름만 추출되면 제목을 빈 문자열로 바꾸지 않는다", () => {
+    const c: Context = { ...ctx({ tomorrow: [] }), groups: [{ id: "g-cap", name: "캡스톤팀" }] };
+    const x = study({ title: "캡스톤팀 그룹", time: "15:00", place: null });
+    const result = applyFast(initTurnState(c), fast({ appointments: [x] }), c, 1, "캡스톤팀 그룹 내일 3시에 잡아줘");
+    assert.equal(card(result.state, "c1").draft?.title, "캡스톤팀 그룹");
+    assert.equal(card(result.state, "c1").group?.id, "g-cap");
+    assert.equal(result.event.clarify.some((line) => line.includes("일정의 이름")), false);
+  });
+
+  it("가입한 캡스톤팀의 '약속' 일정은 다음 말에서 중복 카드를 만들지 않는다", () => {
+    const c: Context = { ...ctx({ tomorrow: [] }), groups: [{ id: "g-cap", name: "캡스톤팀" }] };
+    const extracted = study({ title: "캡스톤팀 그룹", time: "15:00", place: null });
+    const first = applyFast(initTurnState(c), fast({ appointments: [extracted] }), c, 1, "캡스톤팀 그룹 내일 3시에 약속 잡아줘");
+    assert.equal(card(first.state, "c1").draft?.title, "약속");
+    assert.equal(card(first.state, "c1").group?.id, "g-cap");
+    const second = applyFast(first.state, fast({ appointments: [extracted] }), c, 2, "고마워");
+    assert.equal(second.state.cards.length, 1);
+    assert.equal(second.event.clarify.some((line) => line.includes("일정의 이름")), false);
+  });
+
+  it("가입하지 않은 그룹만 말하고 제목을 주지 않으면 그룹명을 일정 제목으로 사용하지 않는다", () => {
+    const c: Context = { ...ctx({ tomorrow: [] }), groups: [{ id: "g-cap", name: "캡스톤팀" }] };
+    const x = study({ title: "가족 그룹", time: "18:00", place: null });
+    const result = applyFast(initTurnState(c), fast({ appointments: [x] }), c, 1, "가족 그룹 내일 6시에 잡아줘");
+    assert.equal(result.state.cards.length, 0);
+    assert.ok(result.event.clarify.some((line) => line.includes("일정의 이름")));
+  });
 });
