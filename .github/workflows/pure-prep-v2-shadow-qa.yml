@@ -5,6 +5,7 @@ on:
     paths:
       - '.github/workflows/pure-prep-v2-shadow-qa.yml'
       - 'supabase/functions/_shared/pure-prep-shadow*'
+      - 'supabase/functions/_shared/survey-v2-pilot*'
       - 'supabase/functions/alarm-suggest/index.ts'
       - 'supabase/functions/alarm-commit/index.ts'
       - 'tools/prepare-adjust-sidecar/**'
@@ -33,6 +34,7 @@ on:
     paths:
       - '.github/workflows/pure-prep-v2-shadow-qa.yml'
       - 'supabase/functions/_shared/pure-prep-shadow*'
+      - 'supabase/functions/_shared/survey-v2-pilot*'
       - 'supabase/functions/_shared/calc/pure-prep-basis*'
       - 'supabase/functions/_shared/plan.ts'
       - 'supabase/functions/_shared/plan.test.ts'
@@ -89,6 +91,7 @@ jobs:
           node --experimental-strip-types --test \
             supabase/functions/_shared/pure-prep-shadow.test.ts \
             supabase/functions/_shared/pure-prep-shadow.synthetic.test.ts \
+            supabase/functions/_shared/survey-v2-pilot.test.ts \
             supabase/functions/_shared/calc/pure-prep-basis.test.ts \
             supabase/functions/_shared/calc/pure-prep.test.ts \
             supabase/functions/_shared/plan-core.test.ts \
@@ -200,3 +203,5 @@ jobs:
         run: pip install 'catboost>=1.2,<2' 'pandas>=2,<3' 'numpy>=1.26,<3'
       - name: End-to-end synthetic user-split retraining and model manifest compatibility
         run: python tools/prepare-adjust-sidecar/synthetic_protocol_test.py
+      - name: Survey v2 original-model provenance protocol test
+        run: python -m unittest discover -s tools/prepare-adjust-sidecar -p 'test_survey_v2_pilot.py' -v
