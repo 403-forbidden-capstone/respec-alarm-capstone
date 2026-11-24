@@ -7,7 +7,7 @@ import { sampleContext, sampleTranscript } from "./testing.ts";
 import {
   AUTO_FLAGS, MAX_REFLECT_BEFORE_SLEEP, MAX_REPLY_CHARS, actsCodeOf, actsMismatch, alarmRelayMissing, allowedNumbers, applyGuards, autoCheckT1, autoFlags, claimsSaved,
   claimsSavedWithoutEvent, eventsForView, fallbackReply, hasHotline, hotlineRepeat, hotlineWithoutRisk, latestEvent, mixedTimeFormat, outstandingPending,
-  promisesSave, rebuildActs, safetyInfoFrom, toMinutes, userTexts, wakeAlarmSentence, wantsToFinish,
+  promisesSave, rebuildActs, safetyInfoFrom, staleAsk, toMinutes, userTexts, wakeAlarmSentence, wantsToFinish,
 } from "./guards.ts";
 import { questionCount } from "./ko.ts";
 
@@ -545,6 +545,14 @@ describe("applyGuards — 서버 조치", () => {
   const run = (reply: string, acts: Act[], c = cardCtx(), over: { end?: boolean; retried?: boolean } = {}) =>
     applyGuards({ reply, acts, end: over.end ?? false }, { ctx: c.ctx, eventsVisible: c.events, turnsBefore: c.turns, safety: safetyInfoFrom(c.events, c.turns.filter((t) => t.role === "user").length), retried: over.retried ?? false });
 
+  it("풀린 질문: 장소 고르기 줄이 없으면 [장소 고르기] 안내를, 그룹 선택 줄이 없으면 그룹 · 개인 일정 질문을 지움 (저장 안내는 남김)", () => {
+    const saved = cardCtx();
+    saved.events[0] = { ...saved.events[0], pending: [], applied: ["일정 저장: 10/9(금) 10:00 캡스톤 회의 · 학교 · 캡스톤팀 그룹 일정으로 저장 (알람은 내 것만)"] };
+    const r = run("캡스톤 회의를 캡스톤팀 그룹 일정으로 저장했어요. 카드의 장소 고르기를 눌러 주세요. 그룹 일정으로 할까요, 개인 일정으로 할까요?", [], saved);
+    assert.equal(r.reply, "캡스톤 회의를 캡스톤팀 그룹 일정으로 저장했어요.");
+    assert.ok(r.actions.includes("drop_sentence"));
+  });
+
   it("깨끗한 답은 그대로 (조치 없음, acts 같음)", () => {
     const r = run("발표라 오전 7시 40분에 강하게 깨우는 알람으로 저장할까요?", [{ type: "CONFIRM", ref: "c1" }]);
     assert.deepEqual(r.flags, []);
@@ -900,5 +908,22 @@ describe("저장 주장 · 약속 패턴 보강 (리뷰 #261)", () => {
     assert.equal(r.reply, "내일 일정은 오전 10시에 있어요. 기상 알람은 오전 7시 40분이에요.");
     // 원래 flags에는 안 걸렸던 것 (덧붙이기 전 답은 한 가지 표기)
     assert.ok(!r.flags.includes("mixed_time_format"));
+  });
+});
+
+describe("staleAsk — 이미 풀린 질문 · 안내", () => {
+  const PLACE = "'캡스톤 회의' 장소 (카드의 [장소 고르기])";
+  const GROUP = "그룹 선택: 가입한 '캡스톤팀' 그룹이 있음 — '캡스톤 회의'을 캡스톤팀 그룹 일정으로 등록할지, 개인 일정으로 등록할지 (카드의 그룹 · 개인 일정 칩으로 골라도 됨)";
+  const at = (clarify: string[]): ServerEvent[] => [ev({ after_turn: 1, clarify })];
+  it("장소를 정해야 하는 카드(장소 고르기 줄)가 있을 때만 [장소 고르기] 안내", () => {
+    assert.equal(staleAsk("카드의 장소 고르기를 눌러 주세요.", at([PLACE])), false);
+    assert.equal(staleAsk("카드의 장소 고르기를 눌러 주세요.", at([GROUP])), true); // 그룹 질문만 남음 — 장소 안내 아님
+    assert.equal(staleAsk("카드의 [장소 고르기]를 눌러 주세요.", at([])), true);
+  });
+  it("그룹 선택 줄이 있을 때만 그룹 · 개인 일정 질문 — 저장 결과 문장(물음 아님)은 그대로", () => {
+    assert.equal(staleAsk("캡스톤팀 그룹 일정으로 할까요, 개인 일정으로 할까요?", at([GROUP])), false);
+    assert.equal(staleAsk("캡스톤팀 그룹 일정으로 할까요, 개인 일정으로 할까요?", at([PLACE])), true);
+    assert.equal(staleAsk("캡스톤 회의를 캡스톤팀 그룹 일정으로 저장했어요.", at([])), false);
+    assert.equal(staleAsk("개인 일정으로 저장했어요.", at([])), false);
   });
 });

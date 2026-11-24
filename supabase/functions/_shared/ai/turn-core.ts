@@ -17,7 +17,7 @@ import type {
 import { IMPORTANCE_LABEL } from "./types.ts";
 import { FACT_KIND_KO, FIXABLE_FACT_KINDS, addDays, spokenTime, weekdayOf } from "./view.ts";
 import { isQuestion, seoulLocal, splitSentences } from "./ko.ts";
-import { toMinutes } from "./guards.ts";
+import { GROUP_ASK_HEAD, PLACE_PICK, toMinutes } from "./guards.ts";
 import { RING_KINDS } from "../calc/types.ts";
 
 /** HH:MM (24시간) — 기상 답 시각 검사 */
@@ -560,9 +560,35 @@ const groupName = (g: CardGroup): string => g.candidates.find((x) => x.id === g.
 export function groupQuestion(c: Card): string | null {
   if (c.group?.choice !== "ASK" || c.draft === null) return null;
   const names = c.group.candidates.map((g) => g.name);
+  // '그룹 선택'으로 시작 — 장소 고르기 줄과 섞이지 않게 (이 줄에는 '장소'라는 말을 쓰지 않음: T1은 '장소'가 든 되물을 것에 [장소 고르기]를 안내함)
   return names.length === 1
-    ? `가입한 '${names[0]}' 그룹이 있음 — '${c.draft.title}'을 ${names[0]} 그룹 일정으로 등록할지, 개인 일정으로 등록할지 (카드에서 골라도 됨)`
-    : `가입한 그룹 중 '${c.draft.title}'이 어느 그룹(${names.join(" · ")}) 일정인지 먼저 고르기 — 그룹 일정이 아니면 개인 일정 (카드에서 골라도 됨)`;
+    ? `${GROUP_ASK_HEAD} 가입한 '${names[0]}' 그룹이 있음 — '${c.draft.title}'을 ${names[0]} 그룹 일정으로 등록할지, 개인 일정으로 등록할지 (카드의 그룹 · 개인 일정 칩으로 골라도 됨)`
+    : `${GROUP_ASK_HEAD} 가입한 그룹 중 '${c.draft.title}'이 어느 그룹(${names.join(" · ")}) 일정인지 먼저 고르기 — 그룹 일정이 아니면 개인 일정 (카드의 그룹 · 개인 일정 칩으로 골라도 됨)`;
+}
+
+/** 장소 고르기 줄 — 장소를 정해야 하는(NEEDS_PLACE) 새 일정 카드만 냄 */
+export const placeAskLine = (title: string): string => `'${title}' 장소 (카드의 ${PLACE_PICK})`;
+
+/** 카드가 낸 되물을 것 줄 (그룹 선택 · 장소 고르기 · 알람 계산 · 계산 실패 문구 · 기상 확인) — 저장 · 거절한 카드의 질문을 다시 쓰지 않게 지울 때 */
+function cardAskLines(c: Card): string[] {
+  const title = c.draft?.title ?? c.summary;
+  const group = c.group ? groupQuestion({ ...c, group: { ...c.group, choice: "ASK" } }) : null;
+  const lines = [group, placeAskLine(title), `'${title}' 알람 계산`, c.error, wakeQuestion(c), `'${title}' 날 몇 시에 일어날지 (정확한 시각)`];
+  return lines.filter((l): l is string => typeof l === "string" && l !== "");
+}
+
+/** 지난 처리 결과의 되물을 것에서 풀린 줄을 지움 — 남겨 두면 T1이 이미 끝난 질문 · 안내를 되풀이함 */
+function forgetLines(s: TurnState, lines: readonly (string | null)[]): void {
+  const gone = new Set(lines.filter((l): l is string => l !== null));
+  if (gone.size === 0) return;
+  for (const e of s.events) e.clarify = e.clarify.filter((l) => !gone.has(l));
+}
+
+/** 저장 안내에 붙일 그룹 결과 — 그룹 말이 있던 카드만 */
+function groupSavedText(c: Card): string | null {
+  if (c.group?.choice === "GROUP") return `${groupName(c.group)} 그룹 일정으로 저장 (알람은 내 것만)`;
+  if (c.group?.choice === "PERSONAL") return "개인 일정으로 저장";
+  return null;
 }
 
 /** 기상 확인 질문 (서버 문구) — 할 일이 있는 새 일정 카드가 계산된 뒤 (T1 · Live가 이 줄로 물음) */
@@ -1113,6 +1139,7 @@ export function applyFast(state: TurnState, fast: FastExtract, ctx: Context, aft
   if (asking !== undefined) {
     const g = groupAnswer(asking.group as CardGroup, userText as string);
     if (g !== null) {
+      forgetLines(s, [groupQuestion(asking)]); // 고른 뒤엔 그룹 질문을 다시 쓰지 않음
       asking.group = g;
       groupAnswered = true;
       touched.add(asking.id);
@@ -1559,7 +1586,7 @@ export function applyTaskResults(state: TurnState, results: TaskResults, ctx: Co
     c.first_of_day = c.kind === "APPT_NEW" ? isFirstOfDay(s, c) : c.first_of_day;
     const title = c.draft?.title ?? c.summary;
     // 이 카드가 앞서 낸 "되물을 것"(장소 · 계산 실패)은 새 결과로 풀렸거나 바뀌었으므로 지움 — 안 지우면 장소를 고른 뒤에도 T1이 장소를 또 물음 (L8 버그 1)
-    const stale = new Set([`'${title}' 장소 (카드의 [장소 고르기])`, `'${title}' 알람 계산`, ...(typeof c.error === "string" ? [c.error] : [])]);
+    const stale = new Set([placeAskLine(title), `'${title}' 알람 계산`, ...(typeof c.error === "string" ? [c.error] : [])]);
     for (const e of s.events) e.clarify = e.clarify.filter((l) => !stale.has(l));
     if (r.status === "READY") {
       const reason = checkDigest(r.estimate as RawDigest | null | undefined, now, apptAtOf(c, s)) ?? checkAgainstCard(c, (r.estimate as RawDigest).alarms);
@@ -1581,7 +1608,7 @@ export function applyTaskResults(state: TurnState, results: TaskResults, ctx: Co
     } else if (r.status === "NEEDS_PLACE") {
       c.status = "NEEDS_PLACE";
       c.error = null;
-      ev.clarify.push(`'${title}' 장소 (카드의 [장소 고르기])`);
+      ev.clarify.push(placeAskLine(title));
     } else if (r.status === "FAILED") {
       c.status = "FAILED";
       const msg = cleanAppError(r.error) ?? `'${title}' 알람 계산`;
@@ -1659,6 +1686,7 @@ export function applyCardAction(state: TurnState, action: CardAction, ctx: Conte
   if (!OPEN_STATUS.includes(c.status)) return none("NOOP");
 
   if (action.action === "REJECTED") {
+    forgetLines(s, cardAskLines(c)); // 거절한 카드의 질문은 다시 묻지 않음
     c.status = "REJECTED";
     c.highlight = false;
     delete s.pending[c.id];
@@ -1671,6 +1699,7 @@ export function applyCardAction(state: TurnState, action: CardAction, ctx: Conte
     const id = action.group_id ?? null;
     const pick = id === null ? undefined : c.group.candidates.find((g) => g.id === id);
     if (id !== null && pick === undefined) return { ok: false, reason: "card_action.group_id가 고를 수 있는 그룹이 아님" };
+    forgetLines(s, [groupQuestion(c)]); // 고른 뒤엔 그룹 질문을 다시 쓰지 않음
     c.group = { ...c.group, choice: pick ? "GROUP" : "PERSONAL", id: pick?.id ?? null };
     const ev = eventFor(s, afterTurn);
     if (c.status === "READY") pushPending(ev, c, s);
@@ -1701,7 +1730,8 @@ export function applyCardAction(state: TurnState, action: CardAction, ctx: Conte
     const ref = `a${++s.apptSeq}`;
     // 장소를 고르기 전에 저장함([장소 없이 저장], alarm-commit PLACE_PENDING) — 들은 장소('한실')는 저장되지 않았으니 장소 미정으로 적고 알람 없음을 알림
     const placePending = c.status === "NEEDS_PLACE";
-    if (placePending) for (const e of s.events) e.clarify = e.clarify.filter((l) => l !== `'${d.title}' 장소 (카드의 [장소 고르기])`); // 장소를 더 묻지 않음 — 사용자가 장소 없이 저장을 골랐음
+    // 저장한 카드의 질문(그룹 선택 · 장소 고르기 · 기상 확인 …)은 모두 풀림 — 장소 없이 저장했어도 장소를 더 묻지 않음
+    forgetLines(s, cardAskLines(c));
     s.appointments.push({
       ref, title: d.title, date: d.date, time: d.time, place: placePending ? null : d.place, importance: d.importance,
       importance_confirmed: d.importance !== null, transport: d.transport, travel_minutes: null, repeat: d.repeat.length > 0 ? "WEEKLY" : "NONE",
@@ -1710,7 +1740,10 @@ export function applyCardAction(state: TurnState, action: CardAction, ctx: Conte
     s.createdKeys[ref] = entry?.key ?? `appt:${normTitle(d.title)}|${d.date}|${d.time}`;
     if (action.appointment_id) s.bound[ref] = action.appointment_id;
     c.appointment_id = action.appointment_id ?? null;
-    ev.applied.push(placePending ? `일정 저장: ${appointmentSummary({ ...d, place: null })} · 장소 미정이라 알람은 아직 없음 (장소를 정한 뒤 알람 설정에서)` : `일정 저장: ${base}`);
+    const grouped = groupSavedText(c);
+    ev.applied.push(
+      (placePending ? `일정 저장: ${appointmentSummary({ ...d, place: null })} · 장소 미정이라 알람은 아직 없음 (장소를 정한 뒤 알람 설정에서)` : `일정 저장: ${base}`) + (grouped ? ` · ${grouped}` : ""),
+    );
     const others: string[] = [];
     for (const a of alarms) {
       const plan = addAlarm({ ...a, level: a.level ?? null }, ref);

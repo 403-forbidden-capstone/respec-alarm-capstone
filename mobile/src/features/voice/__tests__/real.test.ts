@@ -2083,7 +2083,7 @@ describe('⑥-그룹 AI 대화 일정을 그룹 · 개인 일정으로', () => {
     await chooseCardGroup('c1', 'g-study');
     expect(turnBodies().at(-1)?.card_action).toEqual({ id: 'c1', action: 'GROUP', group_id: 'g-study' });
     script = [turn({ rev: 5, cards: [apptCard({ status: 'SAVED', group: picked })] })];
-    await saveCard('c1');
+    expect(await saveCard('c1')).toBe('캡스톤 발표가 알고리즘 스터디 그룹 일정으로 저장됐어요. 내 알람을 맞췄어요'); // 실제로 걸린 그룹
     expect(estimatedGroups()).toEqual([null, 'g-study']); // 처음 계산은 개인, 고른 뒤 그룹으로 다시 계산
     expect(mCreate).toHaveBeenCalledTimes(1);
   });
@@ -2097,7 +2097,7 @@ describe('⑥-그룹 AI 대화 일정을 그룹 · 개인 일정으로', () => {
     await chooseCardGroup('c1', null);
     expect(turnBodies().at(-1)?.card_action).toEqual({ id: 'c1', action: 'GROUP', group_id: null });
     script = [turn({ rev: 5, cards: [apptCard({ status: 'SAVED' })] })];
-    await saveCard('c1');
+    expect(await saveCard('c1')).toBe('일정이 저장됐어요. 캡스톤 발표 알람을 맞췄어요'); // 개인 일정 — 그룹 말 없음
     expect(estimatedGroups().at(-1)).toBeNull();
   });
 
