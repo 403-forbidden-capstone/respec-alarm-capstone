@@ -106,8 +106,9 @@ export type Appointment = {
 //   itemsFailed = 준비물(todos)을 못 넣음 (다시 넣는 길이 없음)
 export type SaveFollowUp = { phoneFailed: number; itemsFailed: boolean };
 
-// 공동 약속 [내 알람 만들기] 확인 시트 (친구 9장) — 출발지는 내 집, 수단 · 준비 시간 기본값은 프로필(온보딩 값), 시트에서 고침
-export type JoinDefaults = { homeName: string | null; transport: Transport; prepareMinutes: number };
+// 공동 약속 [내 알람 만들기] — 순수준비시간은 온보딩/설정에서만 변경.
+// 개인 기본값은 표시용이며, 실제 AUTO 계산은 서버가 현재 프로필에서 읽음.
+export type JoinDefaults = { homeName: string | null; transport: Transport; purePrepMinutes: number | null };
 // prepareMinutes null = 기본값 그대로(서버가 내 기록으로 계산). travelMinutes = 길찾기를 못 해 사용자가 확인한 이동시간(MANUAL), 보통은 없음(서버가 길찾기)
 export type JoinChoice = { transport: Transport; prepareMinutes: number | null; travelMinutes?: number | null };
 export type JoinResult = { phoneFailed: number }; // 폰에 못 건 알람 수

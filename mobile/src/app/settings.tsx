@@ -75,7 +75,7 @@ export default function SettingsScreen() {
         fields.default_outing_prep_minutes !== profile?.default_outing_prep_minutes;
       await saveProfileFields(userId, fields);
       if (changedPure) setPurePrepChanged(true);
-      let note = changedPure ? '순수준비시간을 바꿨어요 · 시범 기능 대상은 새 알람에 반영돼요' : '바꿨어요';
+      let note = changedPure ? '순수준비시간을 바꿨어요 · 새 자동 알람에 반영돼요' : '바꿨어요';
       try {
         await refreshProfile();
       } catch {
@@ -163,8 +163,7 @@ export default function SettingsScreen() {
         <>
           <SectionHeader title="아침 준비 기본값" />
           <Card>
-            <EditRow first label="기상~출발 시간" value={`${profile.default_prepare_minutes}분`} onPress={open('prepare')} />
-            <EditRow label="순수 외출 준비시간" value={profile.default_outing_prep_minutes == null ? "미설정" : `${profile.default_outing_prep_minutes}분`} onPress={open('prepare')} />
+            <EditRow first label="순수 외출 준비시간" value={profile.default_outing_prep_minutes == null ? "미설정" : `${profile.default_outing_prep_minutes}분`} onPress={open('prepare')} />
             <EditRow label="여유 시간" value={`${profile.default_buffer_minutes}분`} onPress={open('prepare')} />
             <EditRow label="이동 수단" value={TRANSPORT_NAME[profile.default_transport]} onPress={open('prepare')} />
             <EditRow label="집(출발지)" value={profile.home_name ?? '정하지 않았어요'} onPress={canEdit ? () => setPlaceOpen(true) : undefined} />
@@ -172,8 +171,8 @@ export default function SettingsScreen() {
           {purePrepChanged ? (
             <Card>
               <Text variant="small" tone="sub">
-                순수준비시간 시범 기능이 활성화된 개인 일정의 새 계산에 반영돼요.
-                기존 자동 알람은 변경되지 않으니 알람 상세에서 '최신 기본값으로 알람 다시 계산'을 눌러 주세요.
+                변경한 순수준비시간은 새 자동 일정의 알람 계산에 반영돼요.
+                기존 자동 알람은 자동 변경되지 않으니 알람 상세에서 '최신 기본값으로 알람 다시 계산'을 눌러 주세요.
                 직접 고른 시각과 그룹 일정은 이 동작에서 제외돼요.
               </Text>
               <Button label="기존 자동 알람 재계산하러 가기" onPress={() => router.push('/(tabs)/alarms')} />

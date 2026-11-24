@@ -90,7 +90,6 @@ export default function OnboardingScreen() {
   const [nickname, setNickname] = useState(profile?.nickname ?? '');
   const [sleep, setSleep] = useState<WakeSensitivity>(profile?.wake_sensitivity ?? 'NORMAL');
   const [prepare, setPrepare] = useState<PrepareValues>({
-    prepare: Math.min(300, Math.max(5, profile?.default_prepare_minutes ?? 60)),
     outingPrep: profile?.default_outing_prep_minutes ?? null,
     buffer: Math.min(60, Math.max(0, profile?.default_buffer_minutes ?? 10)),
     transport: profile?.default_transport ?? 'TRANSIT',
@@ -154,10 +153,12 @@ export default function OnboardingScreen() {
         await homeStep.save();
         return true;
       case 'prepare':
+        // Never complete onboarding with a visually displayed but unsaved
+        // example. Only the explicitly selected pure preparation duration counts.
+        if (prepare.outingPrep == null) return false;
         if (userId) {
           await saveProfileFields(userId, {
-            default_prepare_minutes: prepare.prepare,
-            ...(prepare.outingPrep != null ? { default_outing_prep_minutes: prepare.outingPrep } : {}),
+            default_outing_prep_minutes: prepare.outingPrep!,
             default_buffer_minutes: prepare.buffer,
             default_transport: prepare.transport,
             wake_margin: prepare.margin,
@@ -292,9 +293,10 @@ export default function OnboardingScreen() {
     },
     prepare: {
       title: '아침 준비',
-      lead: '알람 계산의 처음 값이에요',
+      lead: '준비시간을 입력하면 이후 기록으로 정확도를 높여요',
       body: <PrepareStep values={prepare} onChange={(patch) => setPrepare((prev) => ({ ...prev, ...patch }))} ml={mlDraft} onMlChange={(patch) => setMlDraft((prev) => ({ ...prev, ...patch }))} />,
       primaryLabel: '다음',
+      primaryDisabled: prepare.outingPrep == null,
       onPrimary: next,
     },
     timetable: {
