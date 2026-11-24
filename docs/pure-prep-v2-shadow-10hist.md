@@ -35,3 +35,36 @@ To test the deterministic logic locally:
 node --experimental-strip-types --test supabase/functions/_shared/pure-prep-shadow.test.ts supabase/functions/_shared/pure-prep-shadow.synthetic.test.ts
 python tools/prepare-adjust-sidecar/synthetic_protocol_test.py
 ```
+
+## Onboarding edit rebaseline
+
+- `profiles.default_outing_prep_minutes` is the user-entered pure preparation
+  duration and is used immediately for **new personal automatic** previews and
+  commits **only for an explicit `PURE_PREP_APPLY_ENABLED=1` and UUID allowlisted
+  pilot user**. This existing kill switch remains intact; no model is needed. Unset values, groups and manual times retain
+  their existing behavior.
+- A server-owned `profiles.default_outing_prep_updated_at` timestamp identifies
+  the current preference epoch. Historical intervals whose starts precede the
+  timestamp are excluded from personalized calibration and Shadow Mode.
+- After three new completed observations, the blended HISTORY estimate is
+  `round((10 * currentPreference + sum(validPostEditMinutes)) / (10+n))`
+  where n is at most 30. The profile remains the fallback when data is absent.
+- The v2 CatBoost server is **still trained and queried on the historical
+  mean of 10–30 intervals**, not the onboarding value. A separate shadow-only
+  correction transfers its residual (`rawModel - historicalMean`) onto the
+  preference-anchored estimate. This is an experimental post-hoc adjustment,
+  **not** a newly trained feature or a validated live model.
+- After an edit, at least ten new qualifying events are needed to request
+  CatBoost; previous records cannot cross the threshold. Shadow predictions
+  never schedule alarms or persist to the database.
+- Existing saved future alarms are not silently rewritten, because some have
+  manually chosen times, shared participants or prior manual overrides.
+  Settings links to H03, where eligible existing AUTO personal alarms now
+  have a separate **explicit recalculate** action. That action previews the new
+  times and requests confirmation when the normal move rule requires it.
+  MANUAL, shared and legacy alarm times are not silently overwritten.
+- Safe rollout: apply the additive DB migration before deploying an Edge
+  function that selects the new timestamp. Merging this PR can trigger the
+  repository's automatic production DB migration workflow, so verify its plan
+  separately. The pure-prep enable/allowlist switch must remain untouched. Do not enable production model
+  flags or deploy any synthetic weights. Rollout needs auth E2E verification.

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
   PURE_PREP_SHADOW_BASELINE_DEFINITION, PURE_PREP_SHADOW_MIN_HISTORY, buildPurePrepShadowRequest,
-  eligibleForPurePrepShadow, requestPurePrepShadow, runPurePrepShadow,
+  eligibleForPurePrepShadow, personalizePurePrepShadow, requestPurePrepShadow, runPurePrepShadow,
 } from './pure-prep-shadow.ts';
 
 const at = new Date('2026-11-25T01:00:00Z');
@@ -88,6 +88,18 @@ test('shadow response checks model identity, versioned target, safety range, and
   })});
   assert.equal(await requestPurePrepShadow(request,cfg,incompatible as any),null);
   assert.equal(await requestPurePrepShadow(request, cfg, async () => { throw Error('offline'); }), null);
+});
+
+test('onboarding edit changes personalized shadow prediction without breaking v2 manifest',()=>{
+  const history = Array.from({length:10},(_,i)=>25+i);
+  const historyMean=history.reduce((a,b)=>a+b,0)/history.length;
+  const oldResult=personalizePurePrepShadow(32,historyMean,30,history);
+  const editedResult=personalizePurePrepShadow(32,historyMean,45,history);
+  assert.equal(oldResult.personalizedBaseline,30);
+  assert.equal(editedResult.personalizedBaseline,37);
+  assert.equal(oldResult.predictedMinutes,33);
+  assert.equal(editedResult.predictedMinutes,40);
+  assert.equal(personalizePurePrepShadow(28,historyMean,null,history).personalizedBaseline,30);
 });
 
 test('enabled demo preview with zero verified sessions never calls model or privileged profile lookup', async () => {

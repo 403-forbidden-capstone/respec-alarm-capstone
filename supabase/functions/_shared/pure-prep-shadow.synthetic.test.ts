@@ -33,7 +33,8 @@ test('fictional 0/2/3/9/10/15 records retain the existing PROFILE/HISTORY schedu
     assert.equal(valid.length, n);
     const basis = choosePurePrepBasis({ profileMinutes: 15, historicalMinutes: valid });
     assert.equal(basis?.source, n >= 3 ? 'HISTORY' : 'PROFILE');
-    assert.equal(basis?.minutes, n < 3 ? 15 : Math.round(valid.reduce((a,b)=>a+b,0)/n));
+    assert.equal(basis?.minutes, n < 3 ? 15 :
+      Math.round((10*15+valid.reduce((a,b)=>a+b,0))/(10+n)));
     const request = buildPurePrepShadowRequest({ ...base, historyMinutes: valid });
     assert.equal(request !== null, n >= 10);
     if (n >= 10) {

@@ -261,6 +261,23 @@ function Detail({ appointment: a, reload }: { appointment: AppointmentDetail; re
     await apply(undefined, choice);
   }
 
+  // A saved AUTO schedule can be recomputed after the user's pure-prep
+  // preference changes, even when none of the H03 form controls changed.
+  // Never silently alter shared, legacy/manual or individually moved alarms.
+  function recalculatePureAuto() {
+    if (busy || dirty || a.groupName != null || a.prepareValueSource !== 'AUTO' ||
+        edits.prepareMinutes != null || manualAny) return;
+    void run(async () => {
+      const next = await previewAlarms(a.id, edits);
+      const moved = changedAlarms(a.alarms, next.alarms);
+      if (needsMoveConfirm(moved)) {
+        setChanges(moved);
+        return;
+      }
+      await apply(); // alarm-commit recalculates AUTO inputs even if draft is unchanged
+    }, '자동 알람을 다시 계산하지 못했어요');
+  }
+
   // 확인 시트 "바꾸기" — 저장과 같은 잠금으로 연타를 막음
   function confirmApply() {
     void run(() => apply(), '저장하지 못했어요');
@@ -442,6 +459,14 @@ function Detail({ appointment: a, reload }: { appointment: AppointmentDetail; re
               </Text>
               <TextLink label="자동으로" accessibilityLabel="준비 시간 자동으로 되돌리기" onPress={() => setEdit({ prepareMinutes: null })} />
             </View>
+          ) : null}
+          {a.groupName == null && a.prepareValueSource === 'AUTO' && edits.prepareMinutes == null && !manualAny ? (
+            <Button
+              label="최신 기본값으로 알람 다시 계산"
+              onPress={recalculatePureAuto}
+              disabled={busy || dirty}
+              loading={busy}
+            />
           ) : null}
           <Stepper
             label="여유 시간"

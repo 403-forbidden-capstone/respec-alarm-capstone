@@ -19,12 +19,18 @@ const valid = (x: unknown): x is number =>
 // 5-9 minutes are valid explicit user input, but too noisy for automatic
 // historical estimates (legacy D107 uses a 10-minute observation floor).
 const validObserved = (x: unknown): x is number => valid(x) && x >= 10;
+export const PURE_PREP_PROFILE_PRIOR = 10;
+// Preserve the user's explicitly updated expectation as a prior, instead of
+// silently replacing it with pre-edit historical observations.
 export function choosePurePrepBasis(i: PurePrepBasisInput): PurePrepCandidate | null {
   if (valid(i.manualMinutes)) return { source: 'MANUAL', minutes: i.manualMinutes };
   const observations = (i.historicalMinutes ?? []).filter(validObserved).slice(0, 30);
   const minHistory = Math.max(3, Math.floor(i.minHistory ?? 3));
+  const profile = valid(i.profileMinutes) ? i.profileMinutes : null;
+  const sum = observations.reduce((n, v) => n + v, 0);
   const history = observations.length >= minHistory
-    ? Math.round(observations.reduce((n, v) => n + v, 0) / observations.length)
+    ? Math.round(profile == null ? sum / observations.length :
+      (PURE_PREP_PROFILE_PRIOR * profile + sum) / (PURE_PREP_PROFILE_PRIOR + observations.length))
     : null;
   // A research survey proxy must never silently control real alarm times.
   if (i.allowActualModel === true &&
@@ -50,9 +56,13 @@ export type PrepCompletionRow = {
 // predicted alarm times, scheduled departures, or the target day's outcome.
 export function confirmedPurePrepHistory(
   records: readonly PrepCompletionRow[], cutoff: Date, maxRecords = 30,
+  // Any preference edit begins a new observation epoch. Old sessions may not
+  // erase a newly saved pure-preparation estimate.
+  since?: Date,
 ): number[] {
   const before = cutoff.getTime();
-  if (!Number.isFinite(before)) return [];
+  const after = since?.getTime();
+  if (!Number.isFinite(before) || (since != null && !Number.isFinite(after))) return [];
   const unique = new Set<string>();
   return records.flatMap((r) => {
     // ROUTINE_STEP can be breakfast or another pre-prep task; it is not yet
@@ -64,7 +74,8 @@ export function confirmedPurePrepHistory(
     const depart = Date.parse(r.departed_at);
     const minutes = (depart - start) / 60000;
     if (!Number.isFinite(start) || !Number.isFinite(depart) ||
-        depart >= before || depart <= start || !validObserved(minutes)) return [];
+        depart >= before || depart <= start || (after != null && start < after) ||
+        !validObserved(minutes)) return [];
     const key = start + ':' + depart;
     if (unique.has(key)) return [];
     unique.add(key);
