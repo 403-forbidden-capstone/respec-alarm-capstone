@@ -927,12 +927,17 @@ export function applyFast(state: TurnState, fast: FastExtract, ctx: Context, aft
     if (missingNow === null && !sameRetry && squash(original) !== prefix && s.seen[rememberedKey] === undefined) continue;
     // 최초 요청에서 정한 제목을 다음 턴에도 재사용한다. "고마워"에는 "약속"이 없더라도 제목을 비우지 않는다.
     // 그룹을 이미 가입한 상태에서 일정 제목을 말하지 않았다면 원래 제목을 유지한다.
-    const title = cleaned || s.seen[finalTitleKey] || (userText !== undefined && /약속/u.test(squash(userText)) ? "약속" : original);
+    const title = cleaned || s.seen[finalTitleKey] ||
+      (userText !== undefined && /약속/u.test(squash(userText)) ? "약속" : missingNow !== null ? "" : original);
     if (title === original) continue;
     x.title = title;
-    if (missingNow !== null) s.seen[rememberedKey] = name;
+    // 그룹이 이미 가입돼 있더라도 원래 T2F 제목을 바꿨다면 대응 관계를 기억해야 한다.
+    // 안 그러면 다음 턴 "고마워"에서 옛 제목이 새 일정으로 재생성된다.
     // 변경 전 T2F 제목과 날짜·시각으로만 기억해 무관한 "가족 여행"에 전파하지 않는다.
-    if (s.seen[rememberedKey] !== undefined) s.seen[finalTitleKey] = title;
+    if (title !== "") {
+      s.seen[rememberedKey] = name;
+      s.seen[finalTitleKey] = title;
+    }
     if (sameRetry && title !== "" && latestMissing?.draft && nearTitle(latestMissing.draft.title, title)) {
       delete s.seen[`appt:${normTitle(title)}|${x.date ?? "?"}|${x.time ?? "?"}`];
     }
