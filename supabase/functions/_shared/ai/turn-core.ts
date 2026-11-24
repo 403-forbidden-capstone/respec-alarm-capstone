@@ -901,8 +901,12 @@ export function applyFast(state: TurnState, fast: FastExtract, ctx: Context, aft
     if (seen0[oldKey] !== undefined && !sameRetry) continue;
     const name = s.seen[rememberedKey] ?? missingNow ?? knownNamed?.name;
     if (name === undefined || name === null) continue;
-    const explicit = squash(original).startsWith(`${squash(name)}그룹`);
+    const prefix = `${squash(name)}그룹`;
+    const explicit = squash(original).startsWith(prefix);
     if (!explicit) continue;
+    // 가입한 정상 그룹의 '모바일 앱팀 그룹 회의'처럼 제목이 붙은 경우는 기존 제목을 유지한다.
+    // 그룹 이름만 제목이 됐거나, 과거 '없는 그룹'을 같은 일정으로 다시 청한 경우만 정정한다.
+    if (missingNow === null && !sameRetry && squash(original) !== prefix) continue;
     const cleaned = stripGroupName(original.replace(INVISIBLE, ""), name);
     const title = cleaned || (userText !== undefined && /약속/u.test(squash(userText)) ? "약속" : "");
     if (title === original) continue;
