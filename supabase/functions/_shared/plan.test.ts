@@ -442,7 +442,7 @@ test('group participant AUTO uses only their profile pure time, without group hi
 });
 
 
-test('E2E simulation: onboarding 30m -> commit -> settings 45m -> preview -> explicit recommit -> reread', async () => {
+test('FakeDb scenario: profile 30m -> commit -> value 45m -> preview -> explicit recommit -> reread', async () => {
   const env = setup();
   const profile = env.db.rows('profiles')[0];
   // New onboarded users never supply the former wake-to-departure estimate.
@@ -455,7 +455,9 @@ test('E2E simulation: onboarding 30m -> commit -> settings 45m -> preview -> exp
   assert.equal(savedBefore.find(a => a.kind === 'WAKE')?.at, new Date(iso(22, 480)).toISOString());
   assert.equal(savedBefore.find(a => a.kind === 'PREPARE')?.at, new Date(iso(22, 510)).toISOString());
 
-  // Settings changed, but previously stored alarms must NOT be auto-mutated.
+  // This is an in-memory profile-value change, NOT the mobile settings-save API
+  // or PostgreSQL preference-epoch trigger. It verifies that unchanged alarm
+  // rows are not rewritten merely by mutating the FakeDb profile object.
   profile.default_outing_prep_minutes = 45;
   const originalPersisted = env.db.rows('alarms').filter(a => a.participant_id ===
     env.db.rows('appointment_participants').find(p => p.appointment_id === first.appointmentId)?.participant_id)
