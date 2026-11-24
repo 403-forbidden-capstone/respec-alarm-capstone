@@ -45,6 +45,7 @@ export type CardGroup = {
   choice: 'ASK' | 'GROUP' | 'PERSONAL';
   id: string | null;
   candidates: { id: string; name: string }[];
+  missing?: string; // 말한 그룹이 가입한 그룹에 없음('가족') — 후보 없이 개인 일정만 고를 수 있음
 };
 
 // 남은 대화 한도 — reached가 있으면 오류가 아니라 "오늘 대화는 여기까지"

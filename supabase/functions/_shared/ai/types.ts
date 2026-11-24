@@ -139,6 +139,8 @@ export interface ServerEvent {
   risk_unknown?: boolean;
   /** 서버가 센 무음(받아쓰기가 빈 글) — 연속 1번째 · 2번째. 텍스트 대화에서는 안 씀(E5 기본안 A) */
   silence?: 1 | 2;
+  /** 되물을 것 줄 → 사용자에게 할 말(서버 문장). T1 답에 물음이 없으면 이 문장으로 물음 (turn.ts) — 줄이 풀리면(clarify에서 지워지면) 안 씀 */
+  say?: Record<string, string>;
 }
 
 export interface Context {
@@ -294,6 +296,8 @@ export interface CardGroup {
   choice: "ASK" | "GROUP" | "PERSONAL";
   id: string | null;
   candidates: GroupRef[];
+  /** 말한 그룹 이름이 가입한 그룹에 없음('가족 그룹') — 후보 없이 묻고, 다른 그룹 · 개인 일정으로 정하지 않음 (없으면 칸 없음) */
+  missing?: string;
 }
 
 /** 사실의 출처 — 입력 방식(글 · Live 음성)과 다른 개념. stated 사용자가 직접 말함 · confirmed 확인 질문에 동의 · inferred AI 짐작 */

@@ -520,6 +520,7 @@ export type GuardAction =
   | "spoken_times" // HH:MM → 말로
   | "retract_end" // 서버 질문이 남았는데 end → end 거둠 (지침 19a)
   | "drop_follow_up" // 사용자가 끝내자고 했는데 선택 질문 → 그 물음 지움
+  | "ask_server" // 서버가 물어야 할 것(부족한 일정 정보 · 그룹 선택)을 T1 답이 안 물음 → 서버 문장으로 (turn.ts)
   | "ask_wake" // 나가기 전 할 일의 기상 확인을 T1이 안 물음 → 물음을 서버 문장으로 (turn.ts)
   | "template"; // 템플릿 한 줄로 바꿈 (지침 22)
 

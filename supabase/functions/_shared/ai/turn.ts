@@ -17,7 +17,7 @@ import type { Db } from '../supabase.ts';
 import { FAIL_MESSAGES, toHttpError, type LlmClient, type LlmFailure, type LlmResult } from './llm.ts';
 import { POINTS, callPoint, type PointId } from '../prompts/index.ts';
 import { render } from './render.ts';
-import { applyGuards, eventsForView, safetyInfoFrom } from './guards.ts';
+import { applyGuards, eventsForView, fallbackReply, safetyInfoFrom } from './guards.ts';
 import { readJoinedGroups, seoulIso } from './context.ts';
 import { LIMIT_AI_DAY_TEXT, LIMIT_DAY_TEXT, LIMIT_TURN_TEXT, MAX_USER_TURNS } from './opening.ts';
 import type { QuotaGate } from './quota.ts';
@@ -25,7 +25,7 @@ import {
   callsCapReached, countCallsSince, countSessionsSince, limitsOf, loadSession, recordCalls, recordQuestion, saveSession,
   type CallLog, type ServerState, type SessionRow, type StoredTurn,
 } from './session.ts';
-import { applyCardAction, applyFast, applyTaskResults, dateKo, asksWake, wakeAskOf, dayStartIso, lifeDate, needKinds, eventAt, itemKey, prepAsked, type Rejected, type TurnState } from './turn-core.ts';
+import { applyCardAction, applyFast, applyTaskResults, dateKo, asksWake, wakeAskOf, serverAskOf, dayStartIso, lifeDate, needKinds, eventAt, itemKey, prepAsked, type Rejected, type TurnState } from './turn-core.ts';
 import type { TodoPlan } from './final-core.ts';
 import { saveTodos } from './voice-commit.ts';
 import type { Act, CardAction, Context, FastExtract, Fix, ServerEvent, T1Output, TaskResults, TurnLimits } from './types.ts';
@@ -189,6 +189,12 @@ async function t1Reply(
   if (wake !== null && !asksWake(g.reply, wake.spoken)) {
     const kept = splitSentences(g.reply).filter((s) => !isQuestion(s));
     g = { ...g, reply: [...kept, wake.sentence].join(' '), acts: [{ type: 'CLARIFY', ref: null }], end: false, actions: [...g.actions, 'ask_wake'] };
+  }
+  // 서버가 물어야 할 것(이번 말의 되물을 것 — 부족한 날짜 · 시각 · 이름, 그룹 선택)이 남았는데 답에 물음이 없음(가드가 지움 · "네, 알겠어요.") → 서버 문장으로 물음
+  const say = wake === null && !view(false).safety.latestUser ? serverAskOf(ts, j) : null;
+  if (say !== null && !splitSentences(g.reply).some((s) => isQuestion(s))) {
+    const kept = g.actions.includes('template') ? [] : splitSentences(g.reply).filter((x) => x !== fallbackReply([])); // 빈 맞장구("네, 알겠어요.")는 뺌
+    g = { ...g, reply: [...kept, say].join(' '), acts: [{ type: 'CLARIFY', ref: null }], end: false, actions: [...g.actions, 'ask_server'] };
   }
   return { ok: true, line: { role: 'ai', after_turn: j, source, trigger, text: g.reply, acts: g.acts, end: g.end, flags: g.flags, guard: redone && !g.actions.includes('regen') ? ['regen', ...g.actions] : g.actions } };
 }
