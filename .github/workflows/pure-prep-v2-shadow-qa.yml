@@ -12,7 +12,11 @@ on:
       - 'supabase/functions/_shared/calc/pure-prep-basis*'
       - 'supabase/functions/_shared/plan.ts'
       - 'supabase/functions/_shared/plan.test.ts'
+      - 'supabase/functions/_shared/edit-run.test.ts'
+      - 'supabase/functions/_shared/roll.test.ts'
       - 'supabase/functions/_shared/plan-core.ts'
+      - 'supabase/functions/_shared/edit-run.ts'
+      - 'supabase/functions/_shared/roll.ts'
       - 'supabase/migrations/*pure_prep*'
       - 'mobile/src/app/settings.tsx'
       - 'mobile/src/app/alarm/[id].tsx'
@@ -32,7 +36,11 @@ on:
       - 'supabase/functions/_shared/calc/pure-prep-basis*'
       - 'supabase/functions/_shared/plan.ts'
       - 'supabase/functions/_shared/plan.test.ts'
+      - 'supabase/functions/_shared/edit-run.test.ts'
+      - 'supabase/functions/_shared/roll.test.ts'
       - 'supabase/functions/_shared/plan-core.ts'
+      - 'supabase/functions/_shared/edit-run.ts'
+      - 'supabase/functions/_shared/roll.ts'
       - 'supabase/migrations/*pure_prep*'
       - 'mobile/src/app/settings.tsx'
       - 'mobile/src/app/alarm/[id].tsx'
@@ -84,7 +92,9 @@ jobs:
             supabase/functions/_shared/calc/pure-prep-basis.test.ts \
             supabase/functions/_shared/calc/pure-prep.test.ts \
             supabase/functions/_shared/plan-core.test.ts \
-            supabase/functions/_shared/plan.test.ts
+            supabase/functions/_shared/plan.test.ts \
+            supabase/functions/_shared/roll.test.ts \
+            supabase/functions/_shared/edit-run.test.ts
   edge-typecheck:
     runs-on: ubuntu-latest
     timeout-minutes: 10
