@@ -55,6 +55,22 @@ export function filterPlaces(list: readonly Place[], query: string, near?: LatLn
     .map((x) => x.p);
 }
 
+// 이름만 듣고 자동으로 확정해도 되는 대표 시설 — 학교 · 역 · 공항 · 터미널 · 공공기관 · 공원 · 도서관 · 종합병원 · 관광지 (카카오 category_name)
+//   음식점 · 카페 · 가게처럼 같은 이름이 흔하고 잘못 들은 말('한실')과 겹치기 쉬운 곳은 자동으로 정하지 않음
+const LANDMARK = /학교|지하철|기차역|공항|터미널|공공기관|행정기관|공원|도서관|종합병원|관광/;
+const MIN_SURE_NAME = 3;
+
+// AI 대화에서 들은 장소 이름을 검색 결과로 확정해도 되는지 — 띄어쓰기를 뺀 이름이 똑같은 결과가 하나뿐이고, 좌표가 있고,
+//   대표 시설이며, 들은 이름이 3글자 이상일 때만 그 곳. 아니면 null (사용자가 [장소 고르기]에서 고름). 좌표는 검색 결과 그대로 — 만들지 않음
+export function clearPlace(heard: string, found: readonly Place[]): Place | null {
+  const key = squash(heard);
+  if ([...key].length < MIN_SURE_NAME) return null;
+  const same = found.filter((p) => squash(p.name) === key);
+  const only = same.length === 1 ? same[0] : null;
+  if (!only || only.lat == null || only.lng == null) return null;
+  return LANDMARK.test(only.category ?? '') ? only : null;
+}
+
 // 같은 이름은 먼저 나온 것만 (화면 칸이 이름을 키로 씀)
 export function uniqueByName(places: readonly Place[]): Place[] {
   const seen = new Set<string>();

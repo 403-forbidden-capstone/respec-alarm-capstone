@@ -97,6 +97,13 @@ export async function listPlaces(query?: string, near?: LatLng): Promise<Place[]
   return places;
 }
 
+// 장소 검색 결과 그대로 (place-search 카카오 키워드) — 이름으로 합치지 않음: AI 대화가 들은 이름이 하나뿐인지(clearPlace) 봐야 해서. 기억(rememberPlaces)도 안 함
+export async function searchPlaces(query: string): Promise<Place[]> {
+  const text = query.trim();
+  if (!text) return [];
+  return ((await callEdge<{ places: PlaceDto[] }>('place-search', { query: text, limit: 10 }, { retry: 1 })).places ?? []).map(toPlace);
+}
+
 // 지도 핀 자리의 주소 (place-reverse, 카카오 좌표 → 주소) — 도로명 주소 우선. 주소를 못 구한 자리(바다 · 해외)는 null. 카카오 응답은 저장하지 않음 (rememberPlaces에도 안 넣음)
 export async function reverseAddress(lat: number, lng: number): Promise<PinAddress | null> {
   if (!validNear({ lat, lng })) return null; // 서버는 범위 안 좌표만 받음

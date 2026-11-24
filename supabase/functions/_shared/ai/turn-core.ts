@@ -489,28 +489,64 @@ function readGroups(groups: GroupRef[], text: string): { named: GroupRef[]; rest
   return { named, rest };
 }
 
+// 그룹 이름 끝의 묶음 말 — '캡스톤팀'의 핵심은 '캡스톤'
+const GROUP_TAIL = /(팀|조|그룹|모임|소모임|동아리|반)$/u;
+// 낱말 끝 조사 — '캡스톤이랑' → '캡스톤'
+const PARTICLE = /(으로|에서|이랑|하고|까지|부터|랑|은|는|이|가|을|를|에|의|로|과|와|도|만)$/u;
+// 일정 · 날짜 · 요청 말처럼 흔한 낱말은 그룹 이름 일부와 같아도 후보로 안 봄 ('알고리즘 스터디' 그룹 ↔ "스터디 잡아줘")
+const COMMON_WORDS = new Set([
+  "회의", "미팅", "모임", "스터디", "수업", "강의", "과제", "프로젝트", "발표", "시험", "면접", "약속", "일정", "그룹", "팀", "동아리", "개인",
+  "내일", "오늘", "모레", "글피", "이번", "다음", "주말", "오전", "오후", "아침", "점심", "저녁", "새벽", "밤",
+  "학교", "회사", "알람", "잡아줘", "잡아", "해줘", "넣어줘", "추가", "등록", "만들어줘", "있어", "있어요",
+]);
+
 /**
- * 새 일정의 그룹 선택 — 말 · 제목에 가입한 그룹 이름이나 '그룹'이 나올 때만 (없으면 undefined = 개인 일정, 묻지 않음).
- * '개인'이라고 말함 → PERSONAL · '그룹'이라고 말했고 후보가 하나 → GROUP · 그 밖(이름만 나옴 · 후보 여럿) → ASK
- * 후보는 말에 나온 그룹, 이름 없이 '그룹'만 말했으면 가입한 그룹 모두. 새 그룹을 만들거나 이름만 적지 않음
+ * 이름을 정확히 말하지 않았을 때의 후보 — 말의 낱말(조사를 떼고 2글자 이상, 숫자 · 흔한 말 제외)이 그룹 이름 앞부분과 같고,
+ * 그 낱말이 이름 핵심(끝의 팀 · 조 · 그룹 … 뺀 것)의 절반 이상일 때만 ('캡스톤' → '캡스톤팀' O, '캡' · '디자인' → '캡스톤디자인팀' X)
+ * 부분 일치는 후보를 찾는 데만 씀 — 이걸로 그룹을 확정하지 않음
+ */
+function partialGroups(groups: GroupRef[], text: string): GroupRef[] {
+  const words = text
+    .split(/[\s,.!?·~]+/u)
+    .map((w) => squash(w).replace(PARTICLE, ""))
+    .filter((w) => [...w].length >= 2 && !/\d/u.test(w) && !COMMON_WORDS.has(w));
+  return groups.filter((g) => {
+    const name = squash(g.name);
+    const core = name.replace(GROUP_TAIL, "") || name;
+    return words.some((w) => core.startsWith(w) && [...w].length * 2 >= [...core].length);
+  });
+}
+
+/**
+ * 새 일정의 그룹 선택 — 말 · 제목에 가입한 그룹 이름(일부)이나 '그룹'이 나올 때만 (없으면 undefined = 개인 일정, 묻지 않음).
+ * '개인'이라고 말함 → PERSONAL · 이름을 정확히(띄어쓰기 무시) 말하고 '그룹'이라고 함, 또는 이름 없이 '그룹'이라고 했는데 가입 그룹이 하나 → GROUP
+ * 그 밖(이름 일부만 · 이름만 · 후보 여럿) → ASK. 후보는 정확히 맞은 그룹 → 없으면 부분 일치 그룹 → 없으면 가입한 그룹 모두
+ * 가입한(JOINED) 그룹 밖에서 고르거나 새 그룹을 만들지 않음
  */
 export function groupOf(groups: GroupRef[] | undefined, text: string): CardGroup | undefined {
   if (groups === undefined || groups.length === 0) return undefined;
   const { named, rest } = readGroups(groups, text);
+  const partial = named.length === 0 ? partialGroups(groups, text) : [];
   const saidGroup = rest.includes("그룹");
-  if (named.length === 0 && !saidGroup) return undefined;
-  const candidates = named.length > 0 ? named : groups;
+  if (named.length === 0 && partial.length === 0 && !saidGroup) return undefined;
+  const candidates = named.length > 0 ? named : partial.length > 0 ? partial : groups;
   if (PERSONAL_RE.test(rest)) return { choice: "PERSONAL", id: null, candidates };
-  if (saidGroup && candidates.length === 1) return { choice: "GROUP", id: (candidates[0] as GroupRef).id, candidates };
+  if (saidGroup && candidates.length === 1 && partial.length === 0) return { choice: "GROUP", id: (candidates[0] as GroupRef).id, candidates };
   return { choice: "ASK", id: null, candidates };
 }
 
 /** 그룹 질문(ASK)에 대한 사용자 답 — 후보 이름 하나 · '개인' · (후보가 하나면) '그룹'. 둘 다 말했거나 못 알아들으면 null (다시 물음) */
 export function groupAnswer(g: CardGroup, text: string): CardGroup | null {
-  const { named: mentioned, rest } = readGroups(g.candidates, text);
+  const { rest } = readGroups(g.candidates, text);
   // 이름 뒤에 고르는 말이 붙어야 답 — '캡스톤 회의 11시로 바꿔줘'의 '캡스톤'은 고른 것이 아님
+  //   이미 물은 후보 안에서 고르는 답이라 이름 핵심('캡스톤팀' → '캡스톤')으로 답해도 받음
   const said = squash(text);
-  const named = mentioned.filter((c) => ["그룹", "으로", "로", "일정"].some((x) => said.includes(squash(c.name) + x)));
+  const keys = (c: GroupRef): string[] => {
+    const name = squash(c.name);
+    const core = name.replace(GROUP_TAIL, "");
+    return [...core].length >= 2 ? [name, core] : [name];
+  };
+  const named = g.candidates.filter((c) => keys(c).some((k) => ["그룹", "으로", "로", "일정"].some((x) => said.includes(k + x))));
   const personal = PERSONAL_RE.test(rest);
   if (personal && named.length === 0) return { ...g, choice: "PERSONAL", id: null };
   if (personal) return null;
@@ -525,8 +561,8 @@ export function groupQuestion(c: Card): string | null {
   if (c.group?.choice !== "ASK" || c.draft === null) return null;
   const names = c.group.candidates.map((g) => g.name);
   return names.length === 1
-    ? `'${c.draft.title}'을 ${names[0]} 그룹 일정으로 등록할지, 개인 일정으로 등록할지 (카드에서 골라도 됨)`
-    : `'${c.draft.title}'을 어느 그룹(${names.join(" · ")}) 일정으로 등록할지, 개인 일정으로 등록할지 (카드에서 골라도 됨)`;
+    ? `가입한 '${names[0]}' 그룹이 있음 — '${c.draft.title}'을 ${names[0]} 그룹 일정으로 등록할지, 개인 일정으로 등록할지 (카드에서 골라도 됨)`
+    : `가입한 그룹 중 '${c.draft.title}'이 어느 그룹(${names.join(" · ")}) 일정인지 먼저 고르기 — 그룹 일정이 아니면 개인 일정 (카드에서 골라도 됨)`;
 }
 
 /** 기상 확인 질문 (서버 문구) — 할 일이 있는 새 일정 카드가 계산된 뒤 (T1 · Live가 이 줄로 물음) */

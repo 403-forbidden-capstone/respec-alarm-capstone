@@ -1,7 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { beforeEach, describe, expect, it, jest } from '@jest/globals';
 
-import { createAppointment, createPlacePendingAppointment, createStandaloneAlarm, estimateAppointment, getAppointment, listPlaces, previewAlarms, saveAlarmSettings } from '@/features/alarm/api';
+import { createAppointment, createPlacePendingAppointment, createStandaloneAlarm, estimateAppointment, getAppointment, listPlaces, previewAlarms, saveAlarmSettings, searchPlaces } from '@/features/alarm/api';
 import type { Estimate } from '@/features/alarm/types';
 import * as clock from '@/lib/clock';
 import { now } from '@/lib/clock';
@@ -26,6 +26,7 @@ jest.mock('@/features/alarm/api', () => ({
   listPlaces: jest.fn(),
   previewAlarms: jest.fn(),
   saveAlarmSettings: jest.fn(),
+  searchPlaces: jest.fn(),
 }));
 jest.mock('../fixes', () => ({ applyFix: jest.fn() }));
 
@@ -34,6 +35,7 @@ const mEstimate = estimateAppointment as unknown as jest.Mock<(d: Record<string,
 const mCreate = createAppointment as unknown as jest.Mock<(e: Estimate, source?: string) => Promise<unknown>>;
 const mGet = getAppointment as unknown as jest.Mock<(id: string) => Promise<unknown>>;
 const mPlaces = listPlaces as unknown as jest.Mock<(q?: string) => Promise<unknown[]>>;
+const mSearch = searchPlaces as unknown as jest.Mock<(q: string) => Promise<unknown[]>>;
 const mPreview = previewAlarms as unknown as jest.Mock<(id: string, edits: Record<string, unknown>) => Promise<unknown>>;
 const mSettings = saveAlarmSettings as unknown as jest.Mock<(id: string, draft: Record<string, unknown>) => Promise<unknown>>;
 const mPending = createPlacePendingAppointment as unknown as jest.Mock<(input: Record<string, unknown>) => Promise<unknown>>;
@@ -146,6 +148,7 @@ beforeEach(async () => {
   mEstimate.mockImplementation(async () => estimateOf());
   mCreate.mockImplementation(async () => savedOf());
   mPlaces.mockImplementation(async () => [{ name: '강남역', lat: 37.4979, lng: 127.0276 }]);
+  mSearch.mockImplementation(async () => []);
   mGet.mockImplementation(async () => detailOf());
   mSettings.mockImplementation(async () => ({ turnedOff: false, turnedOn: false }));
   mFix.mockImplementation(async (fix) => ({ id: fix.id as string, ok: true, error: null }));
@@ -485,8 +488,9 @@ describe('⑤ 장소 필요 → 장소 고르기 → 계산 → 준비', () => {
   });
 
   it("들은 장소('한실')가 내가 쓴 곳에 없으면 검색 결과가 있어도 확정하지 않음 — NEEDS_PLACE, 이동 · 알람 계산 안 함", async () => {
-    // 최근 장소에는 없고, 카카오 검색이었다면 같은 이름 가게가 하나 걸렸을 이름
+    // 최근 장소에는 없고, 카카오 검색에서는 같은 이름 가게가 하나 걸리는 이름 — 가게는 자동으로 정하지 않음
     mPlaces.mockImplementation(async (q?: string) => (q ? [{ name: '한실', lat: 35.1, lng: 129.0 }] : [{ name: '학교 도서관', lat: 37.55, lng: 127.07 }]));
+    mSearch.mockImplementation(async () => [{ name: '한실', lat: 35.1, lng: 129.0, category: '음식점 > 한식' }]);
     script = [session(), turn({ next: 'APP_TASKS', reply: null, cards: [apptCard({ draft: { ...draftOf(), place: '한실' } })] }), turn({ rev: 3, cards: [apptCard({ status: 'NEEDS_PLACE' })] })];
     await getConversation();
     const c = await say('내일 한실에서 캡스톤 회의가 있어');
@@ -495,6 +499,42 @@ describe('⑤ 장소 필요 → 장소 고르기 → 계산 → 준비', () => {
     expect(mEstimate).not.toHaveBeenCalled();
     expect((turnBodies()[1].results as { cards: { status: string; error: string }[] }).cards[0]).toMatchObject({ status: 'NEEDS_PLACE', estimate: null, error: "'한실'의 위치를 골라 주세요" });
     expect(c.cards[0].status).toBe('NEEDS_PLACE');
+  });
+
+  it("명확한 장소('세종대학교')는 카카오 검색 결과의 좌표로 바로 계산 — 같은 이름이 여럿이거나 검색이 실패하면 장소 고르기", async () => {
+    const SEJONG = { name: '세종대학교', lat: 37.5509, lng: 127.0736, category: '교육,학문 > 학교 > 대학교' };
+    mPlaces.mockImplementation(async () => []);
+    mSearch.mockImplementation(async () => [SEJONG, { name: '세종대학교 광개토관', lat: 37.55, lng: 127.07, category: '교육,학문 > 학교 > 대학교' }]);
+    script = [session(), turn({ next: 'APP_TASKS', reply: null, cards: [apptCard({ draft: { ...draftOf(), place: '세종대학교' } })] }), turn({ rev: 3 })];
+    await getConversation();
+    await say('내일 10시 세종대학교에서 캡스톤 발표');
+    expect(mSearch).toHaveBeenCalledWith('세종대학교');
+    expect(mEstimate.mock.calls[0][0]).toMatchObject({ place: '세종대학교', placeLat: 37.5509, placeLng: 127.0736 });
+    expect((turnBodies()[1].results as { cards: { status: string }[] }).cards[0].status).toBe('READY');
+
+    // 전국에 같은 이름 학교가 둘 — 자동으로 정하지 않음
+    resetVoiceState();
+    mEstimate.mockClear();
+    mSearch.mockImplementation(async () => [
+      { name: '중앙초등학교', lat: 37.5, lng: 127.0, category: '교육,학문 > 학교 > 초등학교' },
+      { name: '중앙초등학교', lat: 35.1, lng: 129.0, category: '교육,학문 > 학교 > 초등학교' },
+    ]);
+    script = [session(), turn({ next: 'APP_TASKS', reply: null, cards: [apptCard({ draft: { ...draftOf(), place: '중앙초등학교' } })] }), turn({ rev: 3 })];
+    await getConversation();
+    await say('내일 10시 중앙초등학교');
+    expect(mEstimate).not.toHaveBeenCalled();
+    expect((turnBodies().at(-1)?.results as { cards: { status: string }[] }).cards[0].status).toBe('NEEDS_PLACE');
+
+    // 검색 실패 — 대화를 막지 않고 장소 고르기
+    resetVoiceState();
+    mSearch.mockImplementation(async () => {
+      throw new Error('네트워크');
+    });
+    script = [session(), turn({ next: 'APP_TASKS', reply: null, cards: [apptCard({ draft: { ...draftOf(), place: '세종대학교' } })] }), turn({ rev: 3 })];
+    await getConversation();
+    await say('내일 10시 세종대학교');
+    expect(mEstimate).not.toHaveBeenCalled();
+    expect((turnBodies().at(-1)?.results as { cards: { status: string }[] }).cards[0].status).toBe('NEEDS_PLACE');
   });
 
   it('[장소 없이 저장] — 장소를 골라야 하는 새 일정을 제목 · 날짜 · 시각만으로 저장(들은 장소 · 이동 · 알람 없음), 저장된 뒤에만 SAVED를 알림', async () => {

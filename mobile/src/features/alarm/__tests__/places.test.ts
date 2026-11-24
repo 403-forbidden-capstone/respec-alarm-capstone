@@ -3,7 +3,7 @@ import { describe, expect, it } from '@jest/globals';
 import { places as catalog, recentMockPlaces } from '@/mocks/data';
 
 import { listPlaces } from '../api';
-import { distanceMeters, toPlace, validNear } from '../places';
+import { clearPlace, distanceMeters, toPlace, validNear } from '../places';
 
 const names = (list: { name: string }[]) => list.map((p) => p.name);
 
@@ -75,5 +75,24 @@ describe('장소 도우미', () => {
     const m = distanceMeters({ lat: 37.5509, lng: 127.0736 }, { lat: 37.5409, lng: 127.0794 });
     expect(m).toBeGreaterThan(1000);
     expect(m).toBeLessThan(2000);
+  });
+});
+
+// AI 대화에서 들은 장소 이름을 검색 결과로 자동 확정해도 되는지
+describe('clearPlace', () => {
+  const school = { name: '세종대학교', lat: 37.5509, lng: 127.0736, category: '교육,학문 > 학교 > 대학교' };
+  it('같은 이름(띄어쓰기 무시)이 하나뿐인 대표 시설이면 그 곳 — 이름이 다른 결과는 세지 않음', () => {
+    expect(clearPlace('세종대학교', [school, { ...school, name: '세종대학교 광개토관' }])).toEqual(school);
+    expect(clearPlace('세종 대학교', [school])).toEqual(school);
+    expect(clearPlace('강남역', [{ name: '강남역', lat: 37.49, lng: 127.02, category: '교통,수송 > 지하철,전철 > 수도권2호선' }])?.name).toBe('강남역');
+  });
+  it('가게 · 같은 이름 여럿 · 좌표 없음 · 짧은 이름 · 결과 없음이면 null', () => {
+    expect(clearPlace('한실', [{ name: '한실', lat: 35.1, lng: 129.0, category: '음식점 > 한식' }])).toBeNull();
+    expect(clearPlace('스타벅스 강남점', [{ name: '스타벅스 강남점', lat: 37.5, lng: 127.0, category: '음식점 > 카페' }])).toBeNull();
+    expect(clearPlace('세종대학교', [school, { ...school, lat: 36.0 }])).toBeNull();
+    expect(clearPlace('세종대학교', [{ name: '세종대학교', category: school.category }])).toBeNull();
+    expect(clearPlace('세종대', [{ ...school, name: '세종대' }])?.name).toBe('세종대');
+    expect(clearPlace('시청', [{ name: '시청', lat: 37.5, lng: 126.9, category: '사회,공공기관 > 행정기관' }])).toBeNull(); // 2글자
+    expect(clearPlace('세종대학교', [])).toBeNull();
   });
 });

@@ -1750,7 +1750,7 @@ describe("그룹 일정 고르기", () => {
   const gctx = (groups = [CAP]): Context => ({ ...ctx(), groups });
   const meeting = (over: Partial<XAppt> = {}): XAppt => study({ title: "캡스톤 회의", time: "10:30", place: "학교", ...over });
   const est = (id: string): TaskResults["cards"][number] => ready(id, "08:00", { depart: "09:50" });
-  const ASK = "'캡스톤 회의'을 캡스톤 그룹 일정으로 등록할지, 개인 일정으로 등록할지 (카드에서 골라도 됨)";
+  const ASK = "가입한 '캡스톤' 그룹이 있음 — '캡스톤 회의'을 캡스톤 그룹 일정으로 등록할지, 개인 일정으로 등록할지 (카드에서 골라도 됨)";
 
   it("groupOf: 이름만 → 물음 · '그룹'이라고 함 → 그 그룹 · '개인' → 개인 · 후보 여럿 → 물음 · 말 없음 → 없음", () => {
     assert.deepEqual(groupOf([CAP], "내일 10시 반에 캡스톤 회의 잡아줘"), { choice: "ASK", id: null, candidates: [CAP] });
@@ -1811,7 +1811,7 @@ describe("그룹 일정 고르기", () => {
   it("후보가 여럿이면 어느 그룹인지 묻고, 카드 칩(GROUP)으로 고름 — 개인(null) · 후보 밖 그룹은 거절", () => {
     const c = gctx([CAP, STUDY]);
     const r1 = applyFast(initTurnState(c), fast({ appointments: [meeting({ title: "회의" })] }), c, 1, "그룹 회의 잡아줘");
-    assert.deepEqual(r1.event.clarify, ["'회의'을 어느 그룹(캡스톤 · 알고리즘 스터디) 일정으로 등록할지, 개인 일정으로 등록할지 (카드에서 골라도 됨)"]);
+    assert.deepEqual(r1.event.clarify, ["가입한 그룹 중 '회의'이 어느 그룹(캡스톤 · 알고리즘 스터디) 일정인지 먼저 고르기 — 그룹 일정이 아니면 개인 일정 (카드에서 골라도 됨)"]);
     const t1 = applyTaskResults(r1.state, { cards: [est("c1")], fixes: [] }, c, 1);
     assert.equal(applyCardActionRaw(t1.state, { id: "c1", action: "GROUP", group_id: "g-other" }, c, 1).ok, false);
     const picked = applyCardAction(t1.state, { id: "c1", action: "GROUP", group_id: "g-study" }, c, 1);
@@ -1820,6 +1820,47 @@ describe("그룹 일정 고르기", () => {
     const personal = applyCardAction(picked.state, { id: "c1", action: "GROUP", group_id: null }, c, 1);
     assert.deepEqual([card(personal.state, "c1").group?.choice, card(personal.state, "c1").group?.id], ["PERSONAL", null]);
     assert.match(personal.event.pending.find((p) => p.id === "c1")?.summary ?? "", /개인 일정/);
+  });
+
+  it("부분 일치: '캡스톤' ↔ '캡스톤팀' · '캡스톤 팀'은 후보로만(그룹이라고 해도 확정 안 함), 정확한 이름 + 그룹이면 확정", () => {
+    const TEAM = { id: "g-team", name: "캡스톤팀" };
+    const SPACED = { id: "g-sp", name: "캡스톤 팀" };
+    assert.deepEqual(groupOf([TEAM], "캡스톤 회의 잡아줘"), { choice: "ASK", id: null, candidates: [TEAM] });
+    assert.deepEqual(groupOf([TEAM], "캡스톤이랑 회의 잡아줘"), { choice: "ASK", id: null, candidates: [TEAM] }); // 조사를 뗌
+    assert.deepEqual(groupOf([TEAM], "캡스톤 그룹 일정으로 잡아줘"), { choice: "ASK", id: null, candidates: [TEAM] }); // 부분 일치는 확정 안 함
+    assert.deepEqual(groupOf([TEAM], "캡스톤팀 그룹 일정으로 잡아줘"), { choice: "GROUP", id: "g-team", candidates: [TEAM] });
+    assert.deepEqual(groupOf([SPACED], "캡스톤팀 그룹 일정으로 잡아줘"), { choice: "GROUP", id: "g-sp", candidates: [SPACED] }); // 띄어쓰기 무시
+    assert.deepEqual(groupOf([TEAM], "캡스톤 팀 그룹 일정으로 잡아줘"), { choice: "GROUP", id: "g-team", candidates: [TEAM] });
+    assert.deepEqual(groupOf([TEAM], "캡스톤 회의 개인 일정으로"), { choice: "PERSONAL", id: null, candidates: [TEAM] });
+  });
+
+  it("부분 일치 안전 기준: 짧은 말 · 흔한 말 · 숫자 · 이름 핵심의 절반 미만은 후보 아님, 여럿이면 모두 후보로 물음", () => {
+    const DESIGN = { id: "g-d", name: "캡스톤디자인팀" };
+    const ALGO = { id: "g-a", name: "알고리즘 스터디" };
+    assert.equal(groupOf([DESIGN], "캡 회의 잡아줘"), undefined); // 한 글자
+    assert.equal(groupOf([DESIGN], "디자인 회의 잡아줘"), undefined); // 핵심(캡스톤디자인)의 절반 미만
+    assert.equal(groupOf([ALGO], "내일 스터디 잡아줘"), undefined); // 흔한 말
+    assert.equal(groupOf([{ id: "g-n", name: "2024 동기" }], "2024 회의"), undefined); // 숫자
+    assert.equal(groupOf([{ id: "g-m", name: "회의팀" }], "내일 회의 잡아줘"), undefined); // 흔한 말이 이름이어도 정확히 말하지 않으면
+    assert.deepEqual(groupOf([ALGO], "알고리즘 모임 잡아줘")?.candidates, [ALGO]);
+    const two = groupOf([{ id: "g1", name: "캡스톤팀" }, { id: "g2", name: "캡스톤 2조" }], "캡스톤 회의 잡아줘");
+    assert.deepEqual([two?.choice, two?.candidates.map((g) => g.id)], ["ASK", ["g1", "g2"]]);
+  });
+
+  it("부분 일치로 물은 뒤 '캡스톤으로'(이름 핵심) 답도 받음 · 후보가 여럿이면 어느 것인지 정확히", () => {
+    const g = { choice: "ASK" as const, id: null, candidates: [{ id: "g-team", name: "캡스톤팀" }] };
+    assert.deepEqual(groupAnswer(g, "캡스톤으로 해줘")?.id, "g-team");
+    assert.deepEqual(groupAnswer(g, "캡스톤팀 그룹")?.id, "g-team");
+    const two = { choice: "ASK" as const, id: null, candidates: [{ id: "g1", name: "캡스톤팀" }, { id: "g2", name: "알고리즘 스터디" }] };
+    assert.equal(groupAnswer(two, "알고리즘 스터디로")?.id, "g2");
+    assert.equal(groupAnswer(two, "그룹으로"), null);
+  });
+
+  it("'캡스톤 회의 잡아줘' + 가입 '캡스톤팀' → '가입한 캡스톤팀 그룹이 있음' 질문, 카드 후보는 가입 그룹만", () => {
+    const c = { ...ctx(), groups: [{ id: "g-team", name: "캡스톤팀" }] };
+    const r = applyFast(initTurnState(c), fast({ appointments: [study({ title: "캡스톤 회의", time: "10:30", place: "학교" })] }), c, 1, "내일 10시 반에 캡스톤 회의 잡아줘");
+    assert.deepEqual(r.event.clarify, ["가입한 '캡스톤팀' 그룹이 있음 — '캡스톤 회의'을 캡스톤팀 그룹 일정으로 등록할지, 개인 일정으로 등록할지 (카드에서 골라도 됨)"]);
+    assert.deepEqual(card(r.state, "c1").group?.candidates, [{ id: "g-team", name: "캡스톤팀" }]);
   });
 
   it("요청 검사: card_action GROUP은 group_id(uuid · null = 개인)만 받음", () => {

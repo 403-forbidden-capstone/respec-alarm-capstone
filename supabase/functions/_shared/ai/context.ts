@@ -10,7 +10,8 @@ const read = <T>(context: string, res: unknown): T => must<T>(context, res as { 
 import type { Db } from '../supabase.ts';
 import { safeTimeZone } from '../tz.ts';
 import type { AlarmRow, ContextInput, EarlierRow, InputSource, ParticipantJoin, TodoRow, WakeRecord } from './context-core.ts';
-import { LATER_DAYS, seoulParts } from './context-core.ts';
+import { LATER_DAYS, groupsOf, seoulParts } from './context-core.ts';
+import type { GroupRef } from './types.ts';
 import { dayOf, dayStartIso, type ConversationDays } from './turn-core.ts';
 import { addDays } from './view.ts';
 
@@ -134,4 +135,13 @@ export async function readContextRows(deps: ContextDeps, now: Date): Promise<Con
       groups: read<NonNullable<ContextInput['groups']>>('group_members', groupRes) ?? [],
     },
   };
+}
+
+/**
+ * 지금 가입한(JOINED) 그룹 — 대화 시작 때 읽어 둔 목록이 오래됐거나(그 뒤 가입 · 탈퇴) 예전 대화(그룹 칸 없음)를 이어 쓸 때 voice-turn이 말마다 다시 읽음.
+ * 부른 사람의 RLS 클라이언트로 — 남의 가입 정보에는 닿지 못함
+ */
+export async function readJoinedGroups(userDb: Db, userId: string): Promise<GroupRef[]> {
+  const res = await userDb.from('group_members').select('group_id, groups(group_name)').eq('user_id', userId).eq('invite_status', 'JOINED');
+  return groupsOf(read<NonNullable<ContextInput['groups']>>('group_members', res) ?? []);
 }
