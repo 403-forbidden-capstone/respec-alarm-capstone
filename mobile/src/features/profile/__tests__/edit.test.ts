@@ -37,9 +37,10 @@ describe('prepareValuesOf', () => {
   it('프로필 값을 그대로, 편집기 범위 밖이면 범위 안으로', () => {
     const profile = { default_prepare_minutes: 45, default_outing_prep_minutes: null, default_buffer_minutes: 10, default_transport: 'BUS', wake_margin: 'TIGHT' } as const;
     expect(prepareValuesOf(profile)).toEqual({ outingPrep: null, buffer: 10, transport: 'BUS', margin: 'TIGHT' });
-    expect(prepareValuesOf({ ...profile, default_prepare_minutes: 2, default_buffer_minutes: 90 })).toMatchObject({ buffer: 60 });
+    expect(prepareValuesOf({ ...profile, default_buffer_minutes: 90 })).toMatchObject({ buffer: 60 });
     expect(prepareValuesOf({ ...profile, default_outing_prep_minutes: 35 })).toMatchObject({ outingPrep: 35 });
     // Legacy wake→departure must never be read back into the new form.
-    expect(prepareValuesOf({ ...profile, default_prepare_minutes: 180 })).toEqual(prepareValuesOf(profile));
+    const changedLegacy = { ...profile, default_prepare_minutes: 180 };
+    expect(prepareValuesOf(changedLegacy)).toEqual(prepareValuesOf(profile));
   });
 });
