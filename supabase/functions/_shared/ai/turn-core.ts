@@ -1222,7 +1222,8 @@ export function applyFast(state: TurnState, fast: FastExtract, ctx: Context, aft
     if (userText !== undefined && normTitle(x.title) !== "" && squash(userText).includes(squash(x.title))) {
       // 부정/대체 말에 등장한 옛 제목은 재등록 요청으로 취급하지 않는다.
       const afterTitle = squash(userText).split(squash(x.title))[1] ?? "";
-      if (!/^(말고|대신|빼고|취소|안|하지마)/u.test(afterTitle)) return true;
+      if (/^(말고|대신|빼고|취소|안|하지마)/u.test(afterTitle)) return false;
+      return true;
     }
     const before = seen0[key];
     return x.save === "CONFIRMED" && before !== undefined && (JSON.parse(before) as unknown[])[0] !== "CONFIRMED";
