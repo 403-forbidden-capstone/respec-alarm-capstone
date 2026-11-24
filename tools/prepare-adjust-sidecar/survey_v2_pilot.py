@@ -20,6 +20,8 @@ from catboost import CatBoostRegressor
 
 MODEL = "prep_start_ratio_v2"
 TARGET = "survey_start_cluster_proxy"
+# Pin the model binary from the verified 2024 survey research bundle.
+ORIGINAL_SURVEY_SHA256 = "90f559120f9be9745013d47e7ae3fac3e76b4c32835d3cb40918c8c4c748ee91"
 BASELINE = "survey_previous_day_app_proxy_transfer_v1"
 FEATURES = ["weekday_code", "평토일구분코드", "휴일종류코드", "연령코드", "baseline_observed"]
 CATS = FEATURES[:4]
@@ -29,8 +31,8 @@ def load_verified_model(model_path: Path):
     manifest_path = model_path.with_suffix(".manifest.json")
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     digest = hashlib.sha256(model_path.read_bytes()).hexdigest()
-    if not hmac.compare_digest(str(manifest.get("sha256", "")), digest):
-        raise ValueError("Model hash mismatch")
+    if not hmac.compare_digest(str(manifest.get("sha256", "")), digest) or not hmac.compare_digest(digest, ORIGINAL_SURVEY_SHA256):
+        raise ValueError("Original survey v2 model hash mismatch")
     if (manifest.get("model") != MODEL or
             manifest.get("training_target") != TARGET or
             manifest.get("actual_app_start_confirmed") is not False or
