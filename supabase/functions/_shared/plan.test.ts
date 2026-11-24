@@ -539,8 +539,11 @@ test('10 verified CatBoost v2 observations change the actual AUTO alarm and pers
   assert.deepEqual(shown.plan.chain, save.plan.chain);
   assert.deepEqual(shown.plan.chain.map(a => a.kind + ' ' + hm(a.at.toISOString())),
     ['WAKE 07:35', 'PREPARE 08:05', 'DEPARTURE 09:00', 'ARRIVE 09:50']);
+  const request = readCommitRequest(Reader.root(FULL));
+  assert.equal(request.type, 'APPOINTMENT');
+  if (request.type !== 'APPOINTMENT') throw new Error('not an appointment');
   const committed = await persistAppointment(commitCtx, {
-    plan: save.plan, inputs: save.inputs, created: { title: FULL.appointment.title },
+    plan: save.plan, inputs: save.inputs, created: request.appointment,
     draft, timeZone: 'Asia/Seoul',
   });
   assert.ok(committed.participant_id);
