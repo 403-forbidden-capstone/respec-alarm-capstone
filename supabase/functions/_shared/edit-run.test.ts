@@ -985,25 +985,95 @@ test('9-32(고치기 하루 경계): 오늘 안으로 옮기기는 지난 약속
   await expectHttp(() => updateAppointment(ctxFor(seoul.env, A, { now: new Date('2026-10-29T16:00:00Z'), kakao: fakeKakao().lookup }), upd(seoul.id, { title: '서울 사람' }, 'this', true)), 'UNPROCESSABLE', 'PAST_APPOINTMENT');
 });
 
-test('#619: 약속 행 쓰기가 DB 정책에 막히면(서버 검사와 어긋남) 아무 알람도 안 바뀜 — 다른 참여자 알람만 먼저 바뀌지 않음, 알림도 없음', async () => {
-  const { env, id } = await groupCase([A, B, 'u-c']);
-  const before = snap(env.db);
-  const spy = pushSpy();
-  const ctx = ctxFor(env, B, { kakao: fakeKakao().lookup, push: spy.push });
-  const base = ctx.userDb;
-  const blocked = {
+// 약속 행 쓰기를 처음 okUpdates번만 통과시키고 그 뒤로는 0행(RLS가 막거나 그사이 지워진 것처럼)으로 만드는 RLS 껍데기
+function appointmentUpdatesFailAfter(base: Db, okUpdates: number): Db {
+  let n = 0;
+  return {
     from(table: string) {
       const q = base.from(table) as unknown as { update: (p: unknown) => { in: (c: string, v: string[]) => unknown } };
       if (table !== 'appointments') return q;
       const update = q.update.bind(q);
-      q.update = (p: unknown) => update(p).in('appointment_id', []) as ReturnType<typeof update>; // RLS가 막은 것처럼 0행
+      q.update = (p: unknown) => (n++ < okUpdates ? update(p) : update(p).in('appointment_id', [])) as ReturnType<typeof update>;
       return q;
     },
     rpc: base.rpc,
-  } as unknown as typeof base;
-  await expectHttp(() => updateAppointment({ ...ctx, userDb: blocked }, upd(id, { at: kst('2026-10-29T08:30') }, 'this', true)), 'NOT_FOUND');
-  assert.equal(snap(env.db), before);
-  assert.equal(spy.sent.length, 0);
+  } as unknown as Db;
+}
+// 참여 칸 · 알람의 비교용 모습 (다시 넣은 행은 칼럼 순서가 달라질 수 있어 칸을 골라 정렬)
+const stateOf = (db: FakeDb) =>
+  JSON.stringify([
+    db.rows('appointments').map((r) => [r.appointment_id, r.appointment_at, r.title]),
+    db.rows('appointment_participants').map((r) => [r.participant_id, r.est_travel_minutes, r.travel_source, r.prepare_minutes]).sort(),
+    db.rows('alarms').map((r) => [r.alarm_id, r.user_id, r.alarm_type, r.scheduled_at, r.is_enabled, r.intensity]).sort(),
+  ]);
+
+test('#619: 약속 행 쓰기가 실패하면 아무 알람도 안 바뀜 — 권한 확인에서 막힘(알람 쓰기 전) · 확인은 통과했는데 실제 쓰기가 실패(쓴 알람을 되돌림) 둘 다, 알림도 없음', async () => {
+  for (const okUpdates of [0, 1]) {
+    const { env, id } = await groupCase([A, B, 'u-c']);
+    const before = stateOf(env.db);
+    const spy = pushSpy();
+    const ctx = ctxFor(env, B, { kakao: fakeKakao().lookup, push: spy.push });
+    await expectHttp(() => updateAppointment({ ...ctx, userDb: appointmentUpdatesFailAfter(ctx.userDb, okUpdates) }, upd(id, { at: kst('2026-10-29T08:30') }, 'this', true)), 'NOT_FOUND');
+    assert.equal(stateOf(env.db), before, `okUpdates=${okUpdates}`);
+    assert.equal(spy.sent.length, 0);
+    // 같은 요청을 막힘 없이 다시 보내면 정상으로 끝남 (되돌린 뒤라 처음부터 다시 맞춤)
+    const aBefore = times(env.db, id, A);
+    const ok = await updateAppointment(ctx, upd(id, { at: kst('2026-10-29T08:30') }, 'this', true));
+    assert.ok(ok.saved);
+    assert.deepEqual(times(env.db, id, A), aBefore.map((t) => t - min(30)));
+  }
+});
+
+test('#619: 두 그룹원이 동시에 고치면 늦게 쓴 쪽은 CONFLICT — 먼저 고친 약속을 덮지 않고, 늦은 쪽이 쓴 알람은 되돌림', async () => {
+  const { env, id } = await groupCase([A, B, 'u-c']);
+  const ctx = ctxFor(env, B, { kakao: fakeKakao().lookup, push: pushSpy().push });
+  let n = 0;
+  const racing = {
+    from(table: string) {
+      const q = ctx.userDb.from(table) as unknown as { update: (p: unknown) => unknown };
+      if (table === 'appointments') {
+        const update = q.update.bind(q);
+        q.update = (p: unknown) => {
+          if (++n === 2) row(env.db, id)!.appointment_at = iso('2026-10-29T10:00'); // B가 확인한 뒤 · 쓰기 전에 A가 10:00으로 고침
+          return update(p);
+        };
+      }
+      return q;
+    },
+    rpc: ctx.userDb.rpc,
+  } as unknown as Db;
+  const alarmsAndParts = () => JSON.parse(stateOf(env.db)).slice(1);
+  const before = alarmsAndParts();
+  await expectHttp(() => updateAppointment({ ...ctx, userDb: racing }, upd(id, { at: kst('2026-10-29T08:30') }, 'this', true)), 'CONFLICT');
+  assert.equal(hm(row(env.db, id)!.appointment_at), '10:00'); // 먼저 고친 값 그대로
+  assert.deepEqual(alarmsAndParts(), before); // 알람은 B가 고치기 전 그대로 (A의 고침이 맞춘 알람은 이 시험 밖)
+});
+
+test('#619: 다른 참여자 한 명을 맞추다 DB 오류가 나면 이미 맞춘 사람 · 나의 알람도 되돌림 — 약속 · 알람 모두 그대로', async () => {
+  const { env, id } = await groupCase([A, B, 'u-c']);
+  const before = stateOf(env.db);
+  const ctx = ctxFor(env, B, { kakao: fakeKakao().lookup, push: pushSpy().push });
+  let calls = 0;
+  const service = {
+    from(table: string) {
+      // u-c의 참여 칸 쓰기에서 DB 오류 (A는 먼저 맞춰질 수 있음)
+      if (table === 'appointment_participants') {
+        const q = ctx.service.from(table) as unknown as { update: (p: unknown) => { eq: (c: string, v: string) => unknown } };
+        const update = q.update.bind(q);
+        q.update = (p: unknown) => {
+          const u = update(p) as { eq: (c: string, v: string) => unknown };
+          const eq = u.eq.bind(u);
+          u.eq = (c: string, v: string) => (c === 'user_id' && v === 'u-c' && 'est_travel_minutes' in (p as object) && ++calls === 1 ? Promise.resolve({ data: null, error: { message: 'boom', code: 'XX000' } }) : eq(c, v));
+          return u as ReturnType<typeof update>;
+        };
+        return q;
+      }
+      return ctx.service.from(table);
+    },
+    rpc: ctx.service.rpc,
+  } as unknown as Db;
+  await assert.rejects(() => updateAppointment({ ...ctx, service }, upd(id, { at: kst('2026-10-29T08:30') }, 'this', true)));
+  assert.equal(stateOf(env.db), before);
 });
 
 test('9-38 · #619: 만든 사람이 없는(탈퇴한) 공동 약속도 그룹원이 고침 — 참여 안 한 그룹원도 고치고, 그룹 밖 사람은 NOT_FOUND, 알림은 고친 사람 제외 다른 참여자에게 (지우기는 X-APPT-01)', async () => {

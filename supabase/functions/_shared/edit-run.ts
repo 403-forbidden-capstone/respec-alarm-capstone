@@ -220,11 +220,54 @@ async function applyAlarmDiff(ctx: EditCtx, participantId: string, diff: AlarmDi
   return [...touched, ...existing.filter((a) => !diff.remove.includes(a.alarm_id) && !diff.update.some((u) => u.alarm_id === a.alarm_id))];
 }
 
+// 한 참여자의 참여 칸 · 알람을 쓰기 전 모습으로 되돌리는 함수 (#619) — 공동 약속 고치기에서 알람을 쓴 뒤 약속 행 쓰기(또는 다른 참여자 맞추기)가 실패하면,
+//   약속은 그대로인데 알람만 바뀐 채 남지 않게 함. service로 쓰되 그 사람의 user_id로 좁힘. 쓰기 전에 만들어 둠(참여 칸을 지금 읽음)
+type Undo = () => Promise<void>;
+const UNDO_PARTICIPANT_COLUMNS = 'est_travel_minutes, travel_source, prepare_minutes, outing_prep_minutes, outing_prep_source, outing_prep_model';
+async function undoFor(db: Db, participantId: string, userId: string, before: readonly AlarmRow[]): Promise<Undo> {
+  const fields = must<Record<string, unknown> | null>(
+    'participant snapshot',
+    await db.from('appointment_participants').select(UNDO_PARTICIPANT_COLUMNS).eq('participant_id', participantId).eq('user_id', userId).maybeSingle(),
+  );
+  return async () => {
+    if (fields) must('participant restore', await db.from('appointment_participants').update(fields).eq('participant_id', participantId).eq('user_id', userId));
+    const now = await loadAlarms(db, participantId, userId);
+    const keep = new Set(before.map((x) => x.alarm_id));
+    const added = now.filter((x) => !keep.has(x.alarm_id)).map((x) => x.alarm_id);
+    if (added.length) must('alarms restore delete', await db.from('alarms').delete().in('alarm_id', added).eq('user_id', userId)); // 새로 넣은 것부터 지워야 종류별 유일 제약에 안 걸림
+    const present = new Set(now.map((x) => x.alarm_id));
+    for (const x of before) {
+      if (present.has(x.alarm_id)) must('alarms restore', await db.from('alarms').update({ ...x }).eq('alarm_id', x.alarm_id).eq('user_id', userId));
+      else must('alarms restore insert', await db.from('alarms').insert({ ...x }));
+    }
+  };
+}
+
+// 되돌리기는 끝까지 해 봄 — 한 사람이 실패해도 나머지는 되돌리고, 원래 오류를 올리게 여기서는 던지지 않음 (로그만)
+async function rollback(undos: readonly Undo[]): Promise<void> {
+  for (const undo of undos) {
+    try {
+      await undo();
+    } catch (e) {
+      console.error('[appointment-edit] 알람 되돌리기 실패', e instanceof Error ? e.message : String(e));
+    }
+  }
+}
+
 // 약속 행 고치기 — 내가 만든 행 하나가 정확히 고쳐져야 함
-async function updateRow(ctx: EditCtx, appointmentId: string, patch: Record<string, unknown>, creatorId: string | null = ctx.userId) {
-  const query = ctx.userDb.from('appointments').update(patch).eq('appointment_id', appointmentId);
+//   unchanged = 읽은 뒤 그사이 안 바뀌었어야 하는 칸 (공동 약속 — 그룹원 여럿이 동시에 고칠 때 남의 고침을 덮지 않게, #619). 안 맞으면 CONFLICT
+async function updateRow(ctx: EditCtx, appointmentId: string, patch: Record<string, unknown>, creatorId: string | null = ctx.userId, unchanged?: Pick<EditRow, 'appointment_at' | 'dest_name'>) {
+  let query = ctx.userDb.from('appointments').update(patch).eq('appointment_id', appointmentId);
+  if (unchanged) query = query.eq('appointment_at', unchanged.appointment_at).eq('dest_name', unchanged.dest_name);
   const done = must<{ appointment_id: string }[]>('appointments update', await (creatorId == null ? query.is('creator_id', null) : query.eq('creator_id', creatorId)).select('appointment_id'));
-  if (done.length !== 1) throw new HttpError('NOT_FOUND', '일정을 찾을 수 없어요');
+  if (done.length === 1) return;
+  if (unchanged) {
+    const now = must<Pick<EditRow, 'appointment_at' | 'dest_name'> | null>('appointments reread', await ctx.userDb.from('appointments').select('appointment_at, dest_name').eq('appointment_id', appointmentId).maybeSingle());
+    if (now && (Date.parse(now.appointment_at) !== Date.parse(unchanged.appointment_at) || now.dest_name !== unchanged.dest_name)) {
+      throw new HttpError('CONFLICT', '다른 그룹원이 방금 이 약속을 고쳤어요. 새로 불러온 뒤 다시 해 주세요');
+    }
+  }
+  throw new HttpError('NOT_FOUND', '일정을 찾을 수 없어요');
 }
 
 // 공동 약속을 고치거나 지우려면 지금 그 그룹에 참여 중이어야 함 (#619 — 그룹원 누구나, 나간 사람은 못 함). 나갔거나 내보내진 만든 사람은 만든 사람 경로로 약속이 아직 보이고 editorVerdict도 통과하는데,
@@ -497,7 +540,7 @@ function planShift(
 // 참여자를 몇 명씩 한꺼번에 맞출지 — 참여자 한 명마다 DB 약 12번 + 길찾기 1번이라 20명을 하나씩 하면 길찾기가 느린 순간 앱 제한(30초)을 넘음
 export const SYNC_CONCURRENCY = 4;
 
-async function syncOne(ctx: EditCtx, a: { row: EditRow; patched: ReturnType<typeof applyPatch>; oldAt: Date; newAt: Date }, p: ParticipantRow): Promise<SyncOutcome> {
+async function syncOne(ctx: EditCtx, a: { row: EditRow; patched: ReturnType<typeof applyPatch>; oldAt: Date; newAt: Date }, p: ParticipantRow, undos: Undo[]): Promise<SyncOutcome> {
   const { row, patched, oldAt, newAt } = a;
   const pctx: EditCtx = { ...ctx, userId: p.user_id, userDb: ctx.service };
   let loaded: { alarms: AlarmRow[]; rung: ReadonlySet<string> } | undefined;
@@ -521,6 +564,7 @@ async function syncOne(ctx: EditCtx, a: { row: EditRow; patched: ReturnType<type
     const diff: AlarmDiff = { insert: made.diff.insert, update: made.diff.update.filter((u) => !rung.has(u.alarm_id)), remove: made.diff.remove.filter((id) => !rung.has(id)) };
     const changes = alarmChanges(alarms.filter((x) => !rung.has(x.alarm_id)), [...diff.update.map((u) => u.patch), ...diff.insert]);
     if (needsConfirm(changes)) return { userId: p.user_id, kind: 'HELD' };
+    undos.push(await undoFor(ctx.service, p.participant_id, p.user_id, alarms)); // 쓰기 전 모습 — 요청이 뒤에서 실패하면 되돌림 (#619)
     must(
       'appointment_participants update',
       await ctx.service
@@ -533,7 +577,7 @@ async function syncOne(ctx: EditCtx, a: { row: EditRow; patched: ReturnType<type
     return { userId: p.user_id, kind: 'UPDATED' };
   } catch (e) {
     // 계산을 못 하는 사람(길찾기 장애 · 계산 결과가 맞지 않음)은 알람을 같이 옮기거나(shifted) 그대로 두고 경고. DB 오류 같은 나머지는 요청 전체를 실패로 올림 —
-    //   이 시점에 약속 행은 아직 안 바뀌어 있어 같은 요청을 다시 보내면 이어서 맞춰짐 (이미 맞춘 사람은 바뀔 것이 없음 — 같이 옮기는 쓰기는 약속 행 뒤에 해서 이 약속을 깨지 않음)
+    //   updateAppointment가 그때까지 쓴 알람(나 · 이미 맞춘 참여자)을 되돌리므로 약속 · 알람 모두 고치기 전 그대로 (#619). 같은 요청을 다시 보내면 처음부터 다시 맞춤
     if (!(e instanceof HttpError) || (e.code !== 'ROUTE_UNAVAILABLE' && e.code !== 'UNPROCESSABLE')) throw e;
     const moved = shifted();   // 약속 시각이 바뀌었으면 알람을 같이 옮김 — 약속을 앞당겼는데 알람이 새 약속 뒤에 남지 않게 (X-APPT-03)
     if (moved) return moved;
@@ -550,6 +594,7 @@ async function syncOne(ctx: EditCtx, a: { row: EditRow; patched: ReturnType<type
 async function syncOtherParticipants(
   ctx: EditCtx,
   a: { row: EditRow; patched: ReturnType<typeof applyPatch>; oldAt: Date; newAt: Date },
+  undos: Undo[],
 ): Promise<{ summary: ParticipantSync; held: Set<string>; warnings: EditWarning[]; finish: () => Promise<void> }> {
   const { row } = a;
   const summary: ParticipantSync = { updated: 0, held: 0, skipped: 0 };
@@ -565,7 +610,7 @@ async function syncOtherParticipants(
   const outcomes: SyncOutcome[] = [];
   for (let i = 0; i < others.length; i += SYNC_CONCURRENCY) {
     // allSettled: 한 명이 실패해도 같은 묶음의 쓰기가 끝난 뒤에 오류를 올림 (요청이 끝난 뒤에 남은 쓰기가 돌지 않게)
-    const settled = await Promise.allSettled(others.slice(i, i + SYNC_CONCURRENCY).map((p) => syncOne(ctx, a, p)));
+    const settled = await Promise.allSettled(others.slice(i, i + SYNC_CONCURRENCY).map((p) => syncOne(ctx, a, p, undos)));
     const failed = settled.find((r): r is PromiseRejectedResult => r.status === 'rejected');
     if (failed) throw failed.reason;
     outcomes.push(...settled.map((r) => (r as PromiseFulfilledResult<SyncOutcome>).value));
@@ -711,35 +756,44 @@ export async function updateAppointment(ctx: EditCtx, req: Extract<EditRequest, 
   }
 
   let after = alarms;
-  if (participant && plan && diff) {
-    must(
-      'appointment_participants update',
-      await ctx.userDb
-        .from('appointment_participants')
-        .update({ est_travel_minutes: plan.travelMinutes, travel_source: plan.travel.chosen?.source, prepare_minutes: plan.prepare.minutes, ...purePrepPersistenceOf(plan, purePrepCandidate) })
-        .eq('participant_id', participant.participant_id)
-        .eq('user_id', ctx.userId),
-    );
-    after = await applyAlarmDiff(ctx, participant.participant_id, diff, alarms);
-    canceled.push(...canceledAlarmIds({ before: alarms, after }));
-  }
+  // 공동 약속: 아래 알람 쓰기 뒤 어디서든 실패하면(다른 참여자 맞추기 · 약속 행 쓰기) 내 것과 다른 참여자 것을 모두 쓰기 전으로 되돌림 (#619)
+  const undos: Undo[] = [];
+  if (group && participant && plan && diff) undos.push(await undoFor(ctx.service, participant.participant_id, ctx.userId, alarms));
+  let sync: Awaited<ReturnType<typeof syncOtherParticipants>> | undefined;
+  try {
+    if (participant && plan && diff) {
+      must(
+        'appointment_participants update',
+        await ctx.userDb
+          .from('appointment_participants')
+          .update({ est_travel_minutes: plan.travelMinutes, travel_source: plan.travel.chosen?.source, prepare_minutes: plan.prepare.minutes, ...purePrepPersistenceOf(plan, purePrepCandidate) })
+          .eq('participant_id', participant.participant_id)
+          .eq('user_id', ctx.userId),
+      );
+      after = await applyAlarmDiff(ctx, participant.participant_id, diff, alarms);
+      canceled.push(...canceledAlarmIds({ before: alarms, after }));
+    }
 
-  // 공동 약속: 그룹원이 시각 · 장소를 고치면 다른 참여자의 알람도 다시 계산함. 약속 행을 쓰기 전에 해서 실패해도 같은 요청을 다시 보내면 이어서 맞춰지게 함 (9-10 ~ 9-17 · 9-43)
-  const sync = group && (patched.changed.at || patched.changed.place) ? await syncOtherParticipants(ctx, { row, patched, oldAt, newAt }) : undefined;
+    // 공동 약속: 그룹원이 시각 · 장소를 고치면 다른 참여자의 알람도 다시 계산함. 약속 행을 쓰기 전에 함 — 실패하면 아래 catch가 쓴 것을 되돌림 (9-10 ~ 9-17 · 9-43 · #619)
+    sync = group && (patched.changed.at || patched.changed.place) ? await syncOtherParticipants(ctx, { row, patched, oldAt, newAt }, undos) : undefined;
 
-  const rowPatch: Record<string, unknown> = { ...patched.next };
-  if (effect.mark === 'EDITED') rowPatch.exception_kind = 'EDITED';
-  if (effect.mark === 'CLEAR') rowPatch.exception_kind = null;
-  if (effect.rule.kind === 'SET') rowPatch.recurrence_rule = effect.rule.value;
-  if (effect.rule.kind === 'CLEAR_ALL') {
-    // 반복 끔: 앞 회차가 기준이 되어 roll이 다시 만들지 않도록 묶음 모든 행의 규칙을 비움 (지난 행은 기록으로 남음)
-    must(
-      'appointments rule clear',
-      await ctx.userDb.from('appointments').update({ recurrence_rule: null }).eq('creator_id', ctx.userId).eq('series_id', row.series_id).not('recurrence_rule', 'is', null),
-    );
-    rowPatch.recurrence_rule = null;
+    const rowPatch: Record<string, unknown> = { ...patched.next };
+    if (effect.mark === 'EDITED') rowPatch.exception_kind = 'EDITED';
+    if (effect.mark === 'CLEAR') rowPatch.exception_kind = null;
+    if (effect.rule.kind === 'SET') rowPatch.recurrence_rule = effect.rule.value;
+    if (effect.rule.kind === 'CLEAR_ALL') {
+      // 반복 끔: 앞 회차가 기준이 되어 roll이 다시 만들지 않도록 묶음 모든 행의 규칙을 비움 (지난 행은 기록으로 남음)
+      must(
+        'appointments rule clear',
+        await ctx.userDb.from('appointments').update({ recurrence_rule: null }).eq('creator_id', ctx.userId).eq('series_id', row.series_id).not('recurrence_rule', 'is', null),
+      );
+      rowPatch.recurrence_rule = null;
+    }
+    await updateRow(ctx, row.appointment_id, rowPatch, row.creator_id, group ? row : undefined);
+  } catch (e) {
+    await rollback(undos);
+    throw e;
   }
-  await updateRow(ctx, row.appointment_id, rowPatch, row.creator_id);
   if (sync) await sync.finish();   // 계산을 못 한 참여자의 알람을 약속이 옮겨진 만큼 같이 옮김 — 약속 행 뒤에 해야 요청을 다시 보내도 두 번 안 옮겨짐 (X-APPT-03)
 
   if (effect.deleteLater) await clearAttempts(ctx, row, { after: row.occurrence_on });
