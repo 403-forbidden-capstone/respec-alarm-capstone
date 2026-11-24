@@ -903,11 +903,16 @@ export function applyFast(state: TurnState, fast: FastExtract, ctx: Context, aft
     if (name === undefined || name === null) continue;
     const prefix = `${squash(name)}그룹`;
     const explicit = squash(original).startsWith(prefix);
-    if (!explicit) continue;
+    const cleaned = stripGroupName(original.replace(INVISIBLE, ""), name);
+    // T2F가 "가족 그룹 약속" 대신 "가족 약속"으로 뽑아도 사용자 말에 '약속'이 있으면 정상 제목으로 바꾼다.
+    // 하지만 지난 대화에서 나온 '가족 여행'처럼 전혀 다른 제목은 손대지 않는다.
+    const implied = cleaned !== original && cleaned !== "" && userText !== undefined &&
+      squash(userText).includes(squash(cleaned)) &&
+      (missingNow !== null || (sameRetry && latestMissing?.draft && nearTitle(latestMissing.draft.title, cleaned)));
+    if (!explicit && !implied) continue;
     // 가입한 정상 그룹의 '모바일 앱팀 그룹 회의'처럼 제목이 붙은 경우는 기존 제목을 유지한다.
     // 그룹 이름만 제목이 됐거나, 과거 '없는 그룹'을 같은 일정으로 다시 청한 경우만 정정한다.
     if (missingNow === null && !sameRetry && squash(original) !== prefix) continue;
-    const cleaned = stripGroupName(original.replace(INVISIBLE, ""), name);
     const title = cleaned || (userText !== undefined && /약속/u.test(squash(userText)) ? "약속" : "");
     if (title === original) continue;
     x.title = title;
