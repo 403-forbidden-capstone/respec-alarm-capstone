@@ -265,7 +265,7 @@ export default function HomeScreen() {
       {!evening && routine ? (
         <>
           <SectionHeader title="오늘 루틴" right={`${routine.done}/${routine.steps.length} 완료`} />
-          <RoutineCard routine={routine} onPress={tickRoutine} />
+          <RoutineCard routine={routine} onPress={tickRoutine} onVoice={() => router.push('/routine-run')} />
         </>
       ) : null}
 
