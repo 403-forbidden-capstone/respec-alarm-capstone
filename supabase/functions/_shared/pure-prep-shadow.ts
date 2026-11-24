@@ -185,13 +185,13 @@ export async function runPurePrepShadow(input: {
   mode?: 'live' | 'shadow';
 }): Promise<PurePrepShadowResult | null> {
   const live = input.mode === 'live';
+  // Explicit opt-in protects production alarms. Ten records never implicitly
+  // turn a research endpoint into a production dependency without rollout.
   const enabled = live
-    ? getEnv('PURE_PREP_MODEL_LIVE_ENABLED') !== '0'
+    ? getEnv('PURE_PREP_MODEL_LIVE_ENABLED') === '1'
     : getEnv('PURE_PREP_SHADOW_ENABLED') === '1';
-  // For live scheduling, any authenticated, consented UUID may qualify.
-  // An optional allowlist can constrain rollout; the switch above is a kill switch.
   const allowedUserIds = live
-    ? (getEnv('PURE_PREP_MODEL_LIVE_ALLOWED_USER_IDS') ?? input.userId)
+    ? getEnv('PURE_PREP_MODEL_LIVE_ALLOWED_USER_IDS')
     : getEnv('PURE_PREP_SHADOW_ALLOWED_USER_IDS');
   if (!eligibleForPurePrepShadow({
     enabled, allowedUserIds,
@@ -247,15 +247,12 @@ export async function runPurePrepShadow(input: {
     });
     if (!request) return null;
     const response = await requestPurePrepShadow(request, {
-      url: live ? (getEnv('PURE_PREP_MODEL_LIVE_URL') ?? getEnv('PURE_PREP_SHADOW_URL'))
-        : getEnv('PURE_PREP_SHADOW_URL'),
-      token: live ? (getEnv('PURE_PREP_MODEL_LIVE_API_TOKEN') ?? getEnv('PURE_PREP_SHADOW_API_TOKEN'))
-        : getEnv('PURE_PREP_SHADOW_API_TOKEN'),
-      // This v2 is trained on PREPARE_ALARM-dismissal→LOCATION observations.
-      // Explicit live integration accepts that declared provenance; the response
-      // still needs the exact SHA-backed model protocol and valid ratio.
-      // Disable the proxy entirely with PURE_PREP_MODEL_LIVE_ALLOW_PROXY=0.
-      allowDismissProxy: live ? getEnv('PURE_PREP_MODEL_LIVE_ALLOW_PROXY') !== '0'
+      url: live ? getEnv('PURE_PREP_MODEL_LIVE_URL') : getEnv('PURE_PREP_SHADOW_URL'),
+      token: live ? getEnv('PURE_PREP_MODEL_LIVE_API_TOKEN') : getEnv('PURE_PREP_SHADOW_API_TOKEN'),
+      // The observed training label is a dismissal→location proxy, NOT
+      // verified physical preparation. Live use of that label is separately
+      // opt-in and never inferred from a Shadow Mode setting.
+      allowDismissProxy: live ? getEnv('PURE_PREP_MODEL_LIVE_ALLOW_PROXY') === '1'
         : getEnv('PURE_PREP_SHADOW_ALLOW_DISMISS_PROXY') === '1',
     });
     if (!response) return { status: 'MODEL_UNAVAILABLE', valid_records: history.length, required_records: PURE_PREP_SHADOW_MIN_HISTORY };
