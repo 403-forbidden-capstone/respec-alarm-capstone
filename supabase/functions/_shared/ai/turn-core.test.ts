@@ -2183,4 +2183,23 @@ describe("그룹 일정 고르기", () => {
     assert.equal(card(result.state, "c1").group?.id, "g-cap");
     assert.equal(result.event.clarify.some((line) => line.includes("일정의 이름")), false);
   });
+
+  it("가입한 캡스톤팀의 '약속' 일정은 다음 말에서 중복 카드를 만들지 않는다", () => {
+    const c: Context = { ...ctx({ tomorrow: [] }), groups: [{ id: "g-cap", name: "캡스톤팀" }] };
+    const extracted = study({ title: "캡스톤팀 그룹", time: "15:00", place: null });
+    const first = applyFast(initTurnState(c), fast({ appointments: [extracted] }), c, 1, "캡스톤팀 그룹 내일 3시에 약속 잡아줘");
+    assert.equal(card(first.state, "c1").draft?.title, "약속");
+    assert.equal(card(first.state, "c1").group?.id, "g-cap");
+    const second = applyFast(first.state, fast({ appointments: [extracted] }), c, 2, "고마워");
+    assert.equal(second.state.cards.length, 1);
+    assert.equal(second.event.clarify.some((line) => line.includes("일정의 이름")), false);
+  });
+
+  it("가입하지 않은 그룹만 말하고 제목을 주지 않으면 그룹명을 일정 제목으로 사용하지 않는다", () => {
+    const c: Context = { ...ctx({ tomorrow: [] }), groups: [{ id: "g-cap", name: "캡스톤팀" }] };
+    const x = study({ title: "가족 그룹", time: "18:00", place: null });
+    const result = applyFast(initTurnState(c), fast({ appointments: [x] }), c, 1, "가족 그룹 내일 6시에 잡아줘");
+    assert.equal(result.state.cards.length, 0);
+    assert.ok(result.event.clarify.some((line) => line.includes("일정의 이름")));
+  });
 });
