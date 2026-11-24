@@ -1,5 +1,6 @@
-// Optional CatBoost v2 shadow evaluation. Read-only, preview-only, default OFF.
-// NEVER use survey proxy predictions to schedule, save, edit, or roll alarms.
+// CatBoost v2 inference shared by the research-only shadow view and live
+// personal AUTO scheduling. Valid, consented 10+ sessions are required.
+// Unavailable or incompatible models always fall back to the existing plan.
 import { choosePurePrepBasis, confirmedPurePrepHistory, type PrepCompletionRow } from './calc/pure-prep-basis.ts';
 import { getEnv } from './env.ts';
 import {
@@ -51,7 +52,7 @@ export type PurePrepShadowResult =
       onboarding_pure_minutes: number | null;
       valid_records: number;
       required_records: 10;
-      applied_to_alarm: false;
+      applied_to_alarm: boolean;
     };
 
 export function eligibleForPurePrepShadow(input: {
@@ -179,10 +180,21 @@ export async function runPurePrepShadow(input: {
   personalAppointment: boolean;
   purePlan: boolean;
   manualOverride: boolean;
+  // "live" is called only by buildPlan for a user's own automatic alarms.
+  // "shadow" retains the existing OFF-by-default read-only preview behavior.
+  mode?: 'live' | 'shadow';
 }): Promise<PurePrepShadowResult | null> {
+  const live = input.mode === 'live';
+  // Explicit opt-in protects production alarms. Ten records never implicitly
+  // turn a research endpoint into a production dependency without rollout.
+  const enabled = live
+    ? getEnv('PURE_PREP_MODEL_LIVE_ENABLED') === '1'
+    : getEnv('PURE_PREP_SHADOW_ENABLED') === '1';
+  const allowedUserIds = live
+    ? getEnv('PURE_PREP_MODEL_LIVE_ALLOWED_USER_IDS')
+    : getEnv('PURE_PREP_SHADOW_ALLOWED_USER_IDS');
   if (!eligibleForPurePrepShadow({
-    enabled: getEnv('PURE_PREP_SHADOW_ENABLED') === '1',
-    allowedUserIds: getEnv('PURE_PREP_SHADOW_ALLOWED_USER_IDS'),
+    enabled, allowedUserIds,
     userId: input.userId,
     profileConsentedAt: input.profile.ml_profile_consented_at,
     personalAppointment: input.personalAppointment,
@@ -235,9 +247,13 @@ export async function runPurePrepShadow(input: {
     });
     if (!request) return null;
     const response = await requestPurePrepShadow(request, {
-      url: getEnv('PURE_PREP_SHADOW_URL'),
-      token: getEnv('PURE_PREP_SHADOW_API_TOKEN'),
-      allowDismissProxy: getEnv('PURE_PREP_SHADOW_ALLOW_DISMISS_PROXY') === '1',
+      url: live ? getEnv('PURE_PREP_MODEL_LIVE_URL') : getEnv('PURE_PREP_SHADOW_URL'),
+      token: live ? getEnv('PURE_PREP_MODEL_LIVE_API_TOKEN') : getEnv('PURE_PREP_SHADOW_API_TOKEN'),
+      // The observed training label is a dismissal→location proxy, NOT
+      // verified physical preparation. Live use of that label is separately
+      // opt-in and never inferred from a Shadow Mode setting.
+      allowDismissProxy: live ? getEnv('PURE_PREP_MODEL_LIVE_ALLOW_PROXY') === '1'
+        : getEnv('PURE_PREP_SHADOW_ALLOW_DISMISS_PROXY') === '1',
     });
     if (!response) return { status: 'MODEL_UNAVAILABLE', valid_records: history.length, required_records: PURE_PREP_SHADOW_MIN_HISTORY };
     const calibrated = personalizePurePrepShadow(response.minutes, request.features.baseline_observed,
@@ -253,9 +269,9 @@ export async function runPurePrepShadow(input: {
       onboarding_pure_minutes: input.profile.default_outing_prep_minutes ?? null,
       valid_records: history.length,
       required_records: PURE_PREP_SHADOW_MIN_HISTORY,
-      applied_to_alarm: false,
+      applied_to_alarm: live,
     };
   } catch {
-    return null; // shadow path NEVER fails or changes a valid alarm preview
+    return null; // Both paths preserve an existing calculation on any failure.
   }
 }

@@ -1,17 +1,22 @@
 name: CatBoost v2 Shadow · 10 history QA
 on:
   push:
-    branches: [main, test/pure-prep-android-scheduling-20261124]
+    branches: [main, feat/live-catboost-pure-prep-after-ten-20261124]
     paths:
       - '.github/workflows/pure-prep-v2-shadow-qa.yml'
       - 'supabase/functions/_shared/pure-prep-shadow*'
       - 'supabase/functions/alarm-suggest/index.ts'
+      - 'supabase/functions/alarm-commit/index.ts'
       - 'tools/prepare-adjust-sidecar/**'
       - 'docs/pure-prep-v2-shadow-10hist.md'
       - 'supabase/functions/_shared/calc/pure-prep-basis*'
       - 'supabase/functions/_shared/plan.ts'
       - 'supabase/functions/_shared/plan.test.ts'
+      - 'supabase/functions/_shared/edit-run.test.ts'
+      - 'supabase/functions/_shared/roll.test.ts'
       - 'supabase/functions/_shared/plan-core.ts'
+      - 'supabase/functions/_shared/edit-run.ts'
+      - 'supabase/functions/_shared/roll.ts'
       - 'supabase/migrations/*pure_prep*'
       - 'mobile/src/app/settings.tsx'
       - 'mobile/src/app/alarm/[id].tsx'
@@ -31,7 +36,11 @@ on:
       - 'supabase/functions/_shared/calc/pure-prep-basis*'
       - 'supabase/functions/_shared/plan.ts'
       - 'supabase/functions/_shared/plan.test.ts'
+      - 'supabase/functions/_shared/edit-run.test.ts'
+      - 'supabase/functions/_shared/roll.test.ts'
       - 'supabase/functions/_shared/plan-core.ts'
+      - 'supabase/functions/_shared/edit-run.ts'
+      - 'supabase/functions/_shared/roll.ts'
       - 'supabase/migrations/*pure_prep*'
       - 'mobile/src/app/settings.tsx'
       - 'mobile/src/app/alarm/[id].tsx'
@@ -83,7 +92,9 @@ jobs:
             supabase/functions/_shared/calc/pure-prep-basis.test.ts \
             supabase/functions/_shared/calc/pure-prep.test.ts \
             supabase/functions/_shared/plan-core.test.ts \
-            supabase/functions/_shared/plan.test.ts
+            supabase/functions/_shared/plan.test.ts \
+            supabase/functions/_shared/roll.test.ts \
+            supabase/functions/_shared/edit-run.test.ts
   edge-typecheck:
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -93,7 +104,11 @@ jobs:
         with:
           deno-version: v2.x
       - name: Typecheck deployed alarm-suggest Edge entrypoint and dependencies
-        run: deno check --node-modules-dir=auto supabase/functions/alarm-suggest/index.ts
+        run: |
+          deno check --node-modules-dir=auto supabase/functions/alarm-suggest/index.ts
+          deno check --node-modules-dir=auto supabase/functions/alarm-commit/index.ts
+          deno check --node-modules-dir=auto supabase/functions/appointment-edit/index.ts
+          deno check --node-modules-dir=auto supabase/functions/alarm-roll/index.ts
   trainer-boundary:
     runs-on: ubuntu-latest
     timeout-minutes: 10

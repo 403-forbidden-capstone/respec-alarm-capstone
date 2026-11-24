@@ -1039,6 +1039,34 @@ const baseOf = (alarms: AlarmRow[]): RollBase => ({ appointment: baseAppointment
 const API_50 = { minutes: 50, source: 'API' as const, needsConfirmation: false, note: '' };
 const THU = { date: '2026-10-29', at: kst('2026-10-29T09:00') };
 
+test('personal recurring occurrence persists the exact live MODEL pure minutes and source', () => {
+  const base=baseOf(fullAlarms());
+  const model=planOccurrence(ctxAt(MON_10),base,THU,{
+    travel:API_50,sameDayWake:false,
+    purePrepCandidate:{source:'MODEL',minutes:45,model:'prep_start_ratio_v2',sampleCount:10},
+  });
+  assert.ok(model.ok);
+  if(!model.ok)return;
+  assert.equal(model.plan.prepareTarget,'PREPARE_START_TO_DEPART');
+  assert.equal(model.plan.prepare.source,'MODEL');
+  assert.equal(model.payload.participant.outing_prep_source,'MODEL');
+  assert.equal(model.payload.participant.outing_prep_model,'prep_start_ratio_v2');
+  assert.equal(model.payload.participant.outing_prep_minutes,45);
+  const profile=planOccurrence(ctxAt(MON_10),base,THU,{
+    travel:API_50,sameDayWake:false,
+    purePrepCandidate:{source:'PROFILE',minutes:30},
+  });
+  assert.ok(profile.ok);
+  if(!profile.ok)return;
+  assert.equal(profile.payload.participant.outing_prep_source,'PROFILE');
+  assert.equal(model.plan.departure.getTime(),profile.plan.departure.getTime());
+  assert.equal(
+    new Date(model.alarms.find(a=>a.alarm_type==='PREPARE')!.scheduled_at).getTime()-
+    new Date(profile.alarms.find(a=>a.alarm_type==='PREPARE')!.scheduled_at).getTime(),
+    -15*60_000,
+  );
+});
+
 test('planOccurrence: 이동시간만 주면 자동 시각 · 켜진 알람 4개 · 준비물 제목, 참여 칸은 기준 회차에서', () => {
   const planned = planOccurrence(ctxAt(MON_10), baseOf(fullAlarms()), THU, { travel: API_50, sameDayWake: false });
   assert.ok(planned.ok);

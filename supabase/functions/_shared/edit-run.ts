@@ -345,7 +345,9 @@ async function replanForWake(
     lateCount4w,
     sameDayWake: earlierAfter,
     purePrepCandidate: row.appointment.group_id == null && row.participant.user_id === ctx.userId
-      ? await loadPurePrepCandidate(ctx.userDb, ctx.userId, profile, ctx.now, new Date(row.appointment.appointment_at))
+      ? await loadPurePrepCandidate(ctx.userDb, ctx.userId, profile, ctx.now, new Date(row.appointment.appointment_at), {
+        allowLiveModel: allowLivePureModel(row.participant, row.alarms),
+      })
       : undefined,
   };
   const plan = computePlan(inputs, resolvedTravelOf(travel), 'save');
@@ -362,6 +364,14 @@ async function replanForWake(
     ring_packages: packagesOf({ alarms: after, appointment: row.appointment, at: new Date(row.appointment.appointment_at), tz, travelMinutes: plan.travelMinutes, departAt: plan.departure }),
     canceled_alarm_ids: canceledAlarmIds({ before: row.alarms, after }),
   };
+}
+
+// Keep the same live-MODEL guard in appointment edit, wake replan and restore.
+// A user's manual preparation or manually placed WAKE/PREPARE alarm always wins.
+function allowLivePureModel(participant: ParticipantRow, alarms: readonly AlarmRow[]): boolean {
+  return participant.prepare_value_source !== 'MANUAL' &&
+    !alarms.some(a => (a.alarm_type === 'WAKE' || a.alarm_type === 'PREPARE') &&
+      a.time_source === 'MANUAL');
 }
 
 // ---------------------------------------------------------------------------
@@ -423,7 +433,9 @@ async function replanFor(
     lateCount4w,
     sameDayWake,
     purePrepCandidate: patchedRow.group_id == null && participant.user_id === ctx.userId
-      ? await loadPurePrepCandidate(ctx.userDb, ctx.userId, profile, ctx.now, newAt)
+      ? await loadPurePrepCandidate(ctx.userDb, ctx.userId, profile, ctx.now, newAt, {
+        allowLiveModel: allowLivePureModel(participant, planAlarms),
+      })
       : undefined,
   };
   const plan = computePlan(inputs, resolvedTravelOf(travelled.travel), 'save');
@@ -912,7 +924,9 @@ export async function restoreAppointment(ctx: EditCtx, req: Extract<EditRequest,
   // 지운 알람의 종류 · 직접 고른 시각은 남아 있지 않음 → 계산된 알람 전부를 자동 값으로 다시 만듦
   // 이미 만들다 만 알람이 있으면(알람은 만들었는데 표시 쓰기가 실패한 뒤 다시 보낸 경우) 그 알람을 기준으로 이어서 맞춤 — 없는 것처럼 다시 넣으면 유일 제약에 걸려 영영 CONFLICT
   const purePrepCandidate = row.group_id == null && participant.user_id === ctx.userId
-    ? await loadPurePrepCandidate(ctx.userDb, ctx.userId, profile, ctx.now, at)
+    ? await loadPurePrepCandidate(ctx.userDb, ctx.userId, profile, ctx.now, at, {
+      allowLiveModel: allowLivePureModel(participant, existingAlarms),
+    })
     : undefined;
   const plan = computePlan({ now: ctx.now, draft: {}, profile, appointment: row, participant, existingAlarms, stats, lateCount4w, sameDayWake, purePrepCandidate }, resolvedTravelOf(travel), 'save');
   if (!plan.check.ok) throw new HttpError('UNPROCESSABLE', plan.check.message, { reason: plan.check.reason, ...(plan.check.detail ?? {}) });

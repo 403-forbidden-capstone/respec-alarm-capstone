@@ -23,6 +23,7 @@ import {
 } from './plan-core.ts';
 import { resolveTravel, type ResolvedTravel, type TravelDeps } from './route.ts';
 import type { Db } from './supabase.ts';
+import { runPurePrepShadow, PURE_PREP_SHADOW_MIN_HISTORY } from './pure-prep-shadow.ts';
 import { localDayRange, safeTimeZone } from './tz.ts';
 
 export type PlanContext = {
@@ -31,6 +32,9 @@ export type PlanContext = {
   now: Date;
   kakaoKey?: string; // KAKAO_REST_API_KEY. 없으면 길찾기 단계를 건너뜀 (F10)
   fetchImpl?: FetchLike;
+  // Injectable solely for deterministic planner regression tests. Production
+  // contexts always use the authenticated, consented CatBoost v2 runner.
+  purePrepModelRunner?: typeof runPurePrepShadow;
 };
 
 const DEFAULT_PROFILE: ProfileRow = {
@@ -279,15 +283,25 @@ async function optionalMlPrediction(
 // Explicitly saved pure preparation is the starting point for personal
 // automatic plans. Never substitute legacy wake->departure history.
 // Manual schedule overrides and group appointments remain protected by plan-core.
+export type PurePrepLoadOptions = {
+  // Explicitly exclude group, manual-preparation and manually shifted alarms.
+  allowLiveModel?: boolean;
+  // Dependency injection for deterministic planner and recurrence tests.
+  modelRunner?: typeof runPurePrepShadow;
+  timezone?: string;
+};
+
 export async function loadPurePrepCandidate(
   db: Db, userId: string, profile: ProfileRow, now: Date, at: Date,
+  options: PurePrepLoadOptions = {},
 ): Promise<PurePrepCandidate | undefined> {
   const profileMinutes = profile.default_outing_prep_minutes;
   const direct = choosePurePrepBasis({ profileMinutes });
   if (!direct) return undefined;
-  // The explicit user-entered pure preparation duration is a normal input,
-  // NOT an ML prediction: always use it for a new automatic alarm.
-  // Keep the original rollout gate for behavioral history corrections only.
+  let fallback = direct;
+
+  // The manual preference applies immediately. HISTORY corrections remain
+  // behind the original pilot/consent gate and never mix with legacy data.
   const historyAllowed = mayUseMl({
     enabled: getEnv('PURE_PREP_APPLY_ENABLED') === '1' &&
       getEnv('PURE_PREP_HISTORY_ENABLED') === '1',
@@ -295,30 +309,61 @@ export async function loadPurePrepCandidate(
     userId,
     allowedUserIds: getEnv('PURE_PREP_ALLOWED_USER_IDS'),
   });
-  if (!historyAllowed || !profile.ml_profile_consented_at) return direct;
-  try {
-    const cutoff = new Date(Math.min(now.getTime(), at.getTime()));
-    const editedAt = profile.default_outing_prep_updated_at
-      ? new Date(profile.default_outing_prep_updated_at) : undefined;
-    if (editedAt && !Number.isFinite(editedAt.getTime())) {
-      return choosePurePrepBasis({ profileMinutes }) ?? undefined;
+  if (historyAllowed && profile.ml_profile_consented_at) {
+    try {
+      const cutoff = new Date(Math.min(now.getTime(), at.getTime()));
+      const editedAt = profile.default_outing_prep_updated_at
+        ? new Date(profile.default_outing_prep_updated_at) : undefined;
+      if (!editedAt || Number.isFinite(editedAt.getTime())) {
+        let query = db.from('appointment_participants')
+          .select('prepare_started_at, departed_at, prepare_started_source, departed_source')
+          .eq('user_id', userId)
+          .eq('prepare_started_source', 'PREPARE_ALARM')
+          .eq('departed_source', 'LOCATION')
+          .not('prepare_started_at', 'is', null)
+          .not('departed_at', 'is', null)
+          .lt('departed_at', cutoff.toISOString());
+        if (editedAt) query = query.gte('prepare_started_at', editedAt.toISOString());
+        const { data, error } = await query.order('departed_at', { ascending: false }).limit(100);
+        if (!error && data) {
+          const history = confirmedPurePrepHistory(data, cutoff, 30, editedAt);
+          fallback = choosePurePrepBasis({ profileMinutes, historicalMinutes: history }) ?? direct;
+        }
+      }
+    } catch {
+      // Never let a history read failure prevent a valid alarm.
     }
-    let query = db.from('appointment_participants')
-      .select('prepare_started_at, departed_at, prepare_started_source, departed_source')
-      .eq('user_id', userId)
-      .eq('prepare_started_source', 'PREPARE_ALARM')
-      .eq('departed_source', 'LOCATION')
-      .not('prepare_started_at', 'is', null)
-      .not('departed_at', 'is', null)
-      .lt('departed_at', cutoff.toISOString());
-    if (editedAt) query = query.gte('prepare_started_at', editedAt.toISOString());
-    const { data, error } = await query.order('departed_at', { ascending: false }).limit(100);
-    if (error || !data) return choosePurePrepBasis({ profileMinutes }) ?? undefined;
-    const history = confirmedPurePrepHistory(data, cutoff, 30, editedAt);
-    return choosePurePrepBasis({ profileMinutes, historicalMinutes: history }) ?? undefined;
-  } catch {
-    return choosePurePrepBasis({ profileMinutes }) ?? undefined;
   }
+
+  // The same v2 candidate is used by suggest/commit, appointment edit and
+  // recurring alarm-roll. Model inference is optional, but after 10 trusted
+  // completed post-edit sessions it replaces the pure preparation baseline.
+  // All provenance, consent, codebook, protocol and model API checks happen
+  // inside the runner. Failures or missing credentials retain the fallback.
+  if (options.allowLiveModel !== false) {
+    try {
+      const result = await (options.modelRunner ?? runPurePrepShadow)({
+        mode: 'live', userId, db, profile, now, appointmentAt: at,
+        timezone: options.timezone ?? safeTimeZone(profile.timezone),
+        personalAppointment: true, purePlan: true, manualOverride: false,
+      });
+      if (result?.status === 'PREDICTED' &&
+          result.applied_to_alarm &&
+          result.valid_records >= PURE_PREP_SHADOW_MIN_HISTORY &&
+          result.model === 'prep_start_ratio_v2' &&
+          Number.isInteger(result.predicted_pure_minutes) &&
+          result.predicted_pure_minutes >= 5 && result.predicted_pure_minutes <= 240) {
+        return {
+          source: 'MODEL', model: 'prep_start_ratio_v2',
+          minutes: result.predicted_pure_minutes,
+          sampleCount: result.valid_records,
+        };
+      }
+    } catch {
+      // Network faults or model exceptions cannot block alarm persistence.
+    }
+  }
+  return fallback;
 }
 
 // wantAutoTravel: 직접 입력한 이동시간이 있어도 자동 값을 같이 구함 (H03 "자동으로 되돌리기" 미리 보기). 호출이 한 번 늘어남
@@ -380,11 +425,21 @@ export async function buildPlan(ctx: PlanContext, draft: PlanDraft, options: { w
   // NOT consume behavioral history or CatBoost and never alter other members.
   // Existing manual alarm and preparation overrides remain protected by plan-core.
   const inGroup = draft.groupId != null || appointment?.group_id != null;
+  const manualTime = draft.manualTimes?.PREPARE != null ||
+    draft.manualTimes?.WAKE != null ||
+    existingAlarms.some(a => (a.alarm_type === 'PREPARE' || a.alarm_type === 'WAKE') &&
+      a.time_source === 'MANUAL' && draft.manualTimes?.[a.alarm_type] !== null);
+  const manualPrep = draft.prepareMinutes != null ||
+    (participant?.prepare_value_source === 'MANUAL' && draft.prepareValueSource !== 'AUTO');
   inputs.purePrepCandidate = inGroup
     ? choosePurePrepBasis({ profileMinutes: profile.default_outing_prep_minutes }) ?? undefined
-    : await loadPurePrepCandidate(ctx.db, ctx.userId, profile, ctx.now, basics.at);
-  // Old C1/W4 predicts wake->departure; pure prep predicts a different target.
-  // They must never compete for the same alarm calculation.
+    : await loadPurePrepCandidate(ctx.db, ctx.userId, profile, ctx.now, basics.at, {
+      allowLiveModel: !manualPrep && !manualTime,
+      modelRunner: ctx.purePrepModelRunner,
+      timezone: timeZone,
+    });
+  // Older C1/W4 predicts wake->departure, a different target. Never compare
+  // or add its output to the pure preparation candidate.
   if (!inputs.purePrepCandidate) {
     inputs.mlPrediction = await optionalMlPrediction(ctx, basics.at, timeZone, allowMl);
   }
