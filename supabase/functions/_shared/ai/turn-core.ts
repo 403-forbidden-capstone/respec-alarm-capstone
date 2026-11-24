@@ -876,7 +876,8 @@ const toFix = (f: FixRecord): Fix => ({ id: f.id, fact: f.fact, kind: f.kind, pa
  */
 export function applyFast(state: TurnState, fast: FastExtract, ctx: Context, afterTurn: number, userText?: string): FastResult {
   const s: TurnState = structuredClone(state);
-  const extract = expandFast(fast);
+  // T2F 결과는 다음 턴 · 시험에서 재사용될 수 있으므로 입력 객체를 변경하지 않는다.
+  const extract = expandFast(structuredClone(fast));
   const intent = userText === undefined ? null : intentOf(userText);
   // 말에 나온 일정 (최신 말이 앞 대화 · 추출의 약속 번호보다 우선)
   const hits = intent === null ? null : mentionedAppts(s.appointments, intent.text);
@@ -906,6 +907,7 @@ export function applyFast(state: TurnState, fast: FastExtract, ctx: Context, aft
     const original = x.title;
     const oldKey = `appt:${normTitle(original)}|${x.date ?? "?"}|${x.time ?? "?"}`;
     const rememberedKey = `group-missing-title:${normTitle(original)}|${x.date ?? "?"}|${x.time ?? "?"}`;
+    const finalTitleKey = `group-missing-final:${normTitle(original)}|${x.date ?? "?"}|${x.time ?? "?"}`;
     const sameRetry = latestMissing?.draft?.date === x.date && latestMissing?.draft?.time === x.time;
     // T2F는 앞 대화까지 다시 뽑는다. 이미 처리한 과거 일정은 이번 말의 재요청이 아니면 손대지 않는다.
     if (seen0[oldKey] !== undefined && !sameRetry) continue;
@@ -922,11 +924,15 @@ export function applyFast(state: TurnState, fast: FastExtract, ctx: Context, aft
     if (!explicit && !implied) continue;
     // 가입한 정상 그룹의 '모바일 앱팀 그룹 회의'처럼 제목이 붙은 경우는 기존 제목을 유지한다.
     // 그룹 이름만 제목이 됐거나, 과거 '없는 그룹'을 같은 일정으로 다시 청한 경우만 정정한다.
-    if (missingNow === null && !sameRetry && squash(original) !== prefix) continue;
-    const title = cleaned || (userText !== undefined && /약속/u.test(squash(userText)) ? "약속" : "");
+    if (missingNow === null && !sameRetry && squash(original) !== prefix && s.seen[rememberedKey] === undefined) continue;
+    // 최초 요청에서 정한 제목을 다음 턴에도 재사용한다. "고마워"에는 "약속"이 없더라도 제목을 비우지 않는다.
+    // 그룹을 이미 가입한 상태에서 일정 제목을 말하지 않았다면 원래 제목을 유지한다.
+    const title = cleaned || s.seen[finalTitleKey] || (userText !== undefined && /약속/u.test(squash(userText)) ? "약속" : original);
     if (title === original) continue;
     x.title = title;
     if (missingNow !== null) s.seen[rememberedKey] = name;
+    // 변경 전 T2F 제목과 날짜·시각으로만 기억해 무관한 "가족 여행"에 전파하지 않는다.
+    if (s.seen[rememberedKey] !== undefined) s.seen[finalTitleKey] = title;
     if (sameRetry && title !== "" && latestMissing?.draft && nearTitle(latestMissing.draft.title, title)) {
       delete s.seen[`appt:${normTitle(title)}|${x.date ?? "?"}|${x.time ?? "?"}`];
     }
