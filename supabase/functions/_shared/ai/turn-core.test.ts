@@ -1720,6 +1720,18 @@ describe("고칠 대상 찾기 (applyFast userText)", () => {
 // ───────── 장소 미확정 일정 — [장소 없이 저장] 뒤 장소를 말하면 그 일정의 변경 카드 ─────────
 
 describe("장소 없이 저장 (alarm-commit PLACE_PENDING)", () => {
+  it("두 카드가 같은 결과에서 함께 장소 필요 → 카드마다 이유 문장 (첫 카드만 남기지 않음)", () => {
+    const c = ctx({ tomorrow: [] });
+    const r1 = applyFast(initTurnState(c), fast({ appointments: [study({ title: "회의", time: "13:00", place: "한실" })] }), c, 1, "내일 1시 한실에서 회의");
+    const r2 = applyFast(r1.state, fast({ appointments: [study({ title: "스터디", time: "15:00", place: "별관" })] }), c, 2, "3시엔 별관에서 스터디");
+    const ids = r2.state.cards.map((x) => x.id);
+    assert.equal(ids.length, 2);
+    const t = applyTaskResults(r2.state, { cards: ids.map((id) => ({ id, status: "NEEDS_PLACE" as const, error: null })), fixes: [] }, c, 2);
+    assert.equal(
+      placeSayOf(t.state, 2),
+      "'한실'이 정확히 어디인지 확인하기 어려워요. 카드의 '장소 고르기'를 눌러 회의 장소를 직접 선택해 주세요. '별관'이 정확히 어디인지 확인하기 어려워요. 카드의 '장소 고르기'를 눌러 스터디 장소를 직접 선택해 주세요.",
+    );
+  });
   it("'내일 한실에서 회의' → 장소 필요 카드를 [장소 없이 저장] → 장소 미정 · 알람 없음으로 적고 장소 되물음을 거둠 → '장소는 세종대학교야'면 그 일정의 변경 카드", () => {
     const c = ctx({ tomorrow: [] });
     const heard = study({ title: "회의", time: "13:00", place: "한실" });
