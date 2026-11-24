@@ -179,6 +179,13 @@ export interface Context {
   question: ServerQuestion | null;
   editable_users: EditableUser[];
   events: ServerEvent[];
+  /** 내가 가입한(JOINED) 그룹 — 새 일정을 그룹 일정으로 걸지 고를 때만 씀(서버 전용, 화면 글 view.ts는 안 읽음). 없으면 칸 없음 */
+  groups?: GroupRef[];
+}
+
+export interface GroupRef {
+  id: string; // groups.group_id
+  name: string;
 }
 
 // ───────── 대화 ─────────
@@ -276,6 +283,17 @@ export interface PreTask {
   title: string;
   wake: "ASK" | "KEEP" | "SET";
   time: LocalTime | null;
+}
+
+/**
+ * 새 일정 카드를 그룹 일정으로 걸지 (AI 대화 전용, 서버 · 앱이 같이 읽음) — 말이나 제목에 가입한 그룹 이름 · '그룹'이 나올 때만 붙음
+ *   ASK = 그룹 일정인지 개인 일정인지(후보가 여럿이면 어느 그룹인지) 묻는 중 — 답 전에는 저장 안 함
+ *   GROUP = id 그룹 일정으로 저장 · PERSONAL = 그룹 없이 저장. candidates = 고를 수 있는 가입 그룹(앱 칩)
+ */
+export interface CardGroup {
+  choice: "ASK" | "GROUP" | "PERSONAL";
+  id: string | null;
+  candidates: GroupRef[];
 }
 
 /** 사실의 출처 — 입력 방식(글 · Live 음성)과 다른 개념. stated 사용자가 직접 말함 · confirmed 확인 질문에 동의 · inferred AI 짐작 */
@@ -376,6 +394,8 @@ export interface Card {
   turn?: number;
   /** 나가기 전 할 일 · 기상 확인 (새 일정 카드만). 없으면 할 일 말 없음 */
   pre_task?: PreTask;
+  /** 그룹 일정 선택 (새 일정 카드만). 없으면 그룹 말 없음 = 개인 일정 */
+  group?: CardGroup;
 }
 /** 기록 정정 — 앱이 L2 함수로 반영한다(설계 메모 4.5 · 13절 L2-2) */
 export interface Fix {
@@ -397,10 +417,11 @@ export interface TaskResults {
   }[];
   fixes: { id: string; ok: boolean; error?: string | null }[];
 }
-/** 카드 버튼(voice-turn `card_action`) */
+/** 카드 버튼(voice-turn `card_action`) — GROUP = 그룹 · 개인 일정 칩 (group_id null = 개인) */
 export interface CardAction {
   id: string;
-  action: "SAVED" | "REJECTED";
+  action: "SAVED" | "REJECTED" | "GROUP";
+  group_id?: string | null;
   appointment_id?: string | null;
   alarms?: { kind: AlarmType; at: string; enabled: boolean; level: number | null }[];
 }

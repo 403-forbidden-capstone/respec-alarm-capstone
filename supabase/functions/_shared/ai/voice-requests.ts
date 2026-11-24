@@ -92,14 +92,15 @@ function readResults(r: Reader): TaskResults {
 
 function readCardAction(r: Reader): CardAction {
   const id = r.string('id', { required: true, pattern: CARD_ID });
-  const action = r.oneOf('action', ['SAVED', 'REJECTED'] as const, { required: true });
+  const action = r.oneOf('action', ['SAVED', 'REJECTED', 'GROUP'] as const, { required: true });
+  const groupId = r.uuid('group_id') ?? null; // GROUP — null = 개인 일정
   const appointmentId = r.uuid('appointment_id') ?? null;
   const alarms: NonNullable<CardAction['alarms']> = [];
   for (const a of r.objects('alarms', { max: 8 }) ?? []) {
     const e = readAlarmEntry(a);
     if (e) alarms.push(e);
   }
-  return { id: id ?? '', action: action ?? 'REJECTED', appointment_id: appointmentId, alarms };
+  return { id: id ?? '', action: action ?? 'REJECTED', appointment_id: appointmentId, alarms, ...(action === 'GROUP' ? { group_id: groupId } : {}) };
 }
 
 export function readTurnRequest(body: unknown): TurnRequest {

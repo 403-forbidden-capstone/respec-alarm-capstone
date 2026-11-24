@@ -11,8 +11,8 @@
 //   · 다른 사람 알람 권한 길은 v0에서 늘 NO_PERMISSION. 준비시간 범위는 day(내일 기상 기준 일정) 고정.
 //   · 할 일 · 준비물 · 이유 태그 · 하루 기록은 T2F가 안 뽑는다 — 대화 끝 추출(applyFinal, PR 5) 몫. itemKey만 미리 옮겨 둠.
 import type {
-  AlarmPlan, AlarmType, ApptDraft, Appointment, Basis, Card, CardAction, CardEdit, CardKind, Context, Digest, Extract, FactKind, FastExtract, Fix, Importance, Intensity, PreTask,
-  LocalDate, LocalTime, PendingItem, QuestionKind, RejectReason, ServerEvent, ServerQuestion, TaskResults, Weekday,
+  AlarmPlan, AlarmType, ApptDraft, Appointment, Basis, Card, CardAction, CardEdit, CardGroup, CardKind, Context, Digest, Extract, FactKind, FastExtract, Fix, Importance, Intensity, PreTask,
+  GroupRef, LocalDate, LocalTime, PendingItem, QuestionKind, RejectReason, ServerEvent, ServerQuestion, TaskResults, Weekday,
 } from "./types.ts";
 import { IMPORTANCE_LABEL } from "./types.ts";
 import { FACT_KIND_KO, FIXABLE_FACT_KINDS, addDays, spokenTime, weekdayOf } from "./view.ts";
@@ -444,6 +444,7 @@ export function pendingText(c: Card, s: TurnState): string {
       if (c.first_of_day && w !== null && c.digest?.basis) parts.push(basisText(c.digest.basis, w, { date: d.date, time: d.time }));
       if (c.edit?.prepare_delta !== undefined) parts.push(c.edit.prepare_delta === 0 ? "내일만 준비시간 원래대로" : `내일만 준비시간 ${signed(c.edit.prepare_delta)}`);
       if (c.pre_task !== undefined) parts.push(`나가기 전 할 일: ${c.pre_task.title} · ${c.pre_task.wake === "SET" ? "기상은 사용자가 정한 시각, 준비 · 출발은 그대로" : "계산된 기상 그대로"}`);
+      if (c.group !== undefined && c.group.choice !== "ASK") parts.push(c.group.choice === "GROUP" ? `${groupName(c.group)} 그룹 일정 (알람은 본인 것만)` : "개인 일정");
       parts.push("카드의 [저장]으로 저장");
       return parts.join(" · ");
     }
@@ -471,6 +472,61 @@ export function pendingText(c: Card, s: TurnState): string {
     case "APPT_OPEN":
       return `${c.summary} · 카드의 [일정 열기]로`;
   }
+}
+
+// ───────── 그룹 일정 고르기 ─────────
+
+const squash = (t: string): string => t.replace(/\s+/gu, "").toLowerCase();
+// '개인 과제'처럼 일정 종류가 아닌 '개인'은 고른 말로 보지 않음
+const PERSONAL_RE = /개인(일정|으로|약속)|혼자|나만/u;
+
+/** 말에 나온 그룹 이름(더 긴 이름에 들어 있는 짧은 이름은 뺌)과 이름을 지운 나머지 말 — 그룹 이름 안의 '그룹'을 '그룹이라고 말함'으로 치지 않게 */
+function readGroups(groups: GroupRef[], text: string): { named: GroupRef[]; rest: string } {
+  const said = squash(text);
+  const hit = groups.filter((g) => squash(g.name) !== "" && said.includes(squash(g.name)));
+  const named = hit.filter((g) => !hit.some((o) => squash(o.name) !== squash(g.name) && squash(o.name).includes(squash(g.name))));
+  const rest = named.reduce((t, g) => t.split(squash(g.name)).join(" "), said);
+  return { named, rest };
+}
+
+/**
+ * 새 일정의 그룹 선택 — 말 · 제목에 가입한 그룹 이름이나 '그룹'이 나올 때만 (없으면 undefined = 개인 일정, 묻지 않음).
+ * '개인'이라고 말함 → PERSONAL · '그룹'이라고 말했고 후보가 하나 → GROUP · 그 밖(이름만 나옴 · 후보 여럿) → ASK
+ * 후보는 말에 나온 그룹, 이름 없이 '그룹'만 말했으면 가입한 그룹 모두. 새 그룹을 만들거나 이름만 적지 않음
+ */
+export function groupOf(groups: GroupRef[] | undefined, text: string): CardGroup | undefined {
+  if (groups === undefined || groups.length === 0) return undefined;
+  const { named, rest } = readGroups(groups, text);
+  const saidGroup = rest.includes("그룹");
+  if (named.length === 0 && !saidGroup) return undefined;
+  const candidates = named.length > 0 ? named : groups;
+  if (PERSONAL_RE.test(rest)) return { choice: "PERSONAL", id: null, candidates };
+  if (saidGroup && candidates.length === 1) return { choice: "GROUP", id: (candidates[0] as GroupRef).id, candidates };
+  return { choice: "ASK", id: null, candidates };
+}
+
+/** 그룹 질문(ASK)에 대한 사용자 답 — 후보 이름 하나 · '개인' · (후보가 하나면) '그룹'. 둘 다 말했거나 못 알아들으면 null (다시 물음) */
+export function groupAnswer(g: CardGroup, text: string): CardGroup | null {
+  const { named: mentioned, rest } = readGroups(g.candidates, text);
+  // 이름 뒤에 고르는 말이 붙어야 답 — '캡스톤 회의 11시로 바꿔줘'의 '캡스톤'은 고른 것이 아님
+  const said = squash(text);
+  const named = mentioned.filter((c) => ["그룹", "으로", "로", "일정"].some((x) => said.includes(squash(c.name) + x)));
+  const personal = PERSONAL_RE.test(rest);
+  if (personal && named.length === 0) return { ...g, choice: "PERSONAL", id: null };
+  if (personal) return null;
+  const pick = named.length === 1 ? named[0] : named.length === 0 && rest.includes("그룹") && g.candidates.length === 1 ? g.candidates[0] : undefined;
+  return pick === undefined ? null : { ...g, choice: "GROUP", id: pick.id };
+}
+
+const groupName = (g: CardGroup): string => g.candidates.find((x) => x.id === g.id)?.name ?? "";
+
+/** 그룹 질문 (서버 문구) — 그룹 · 개인 일정을 아직 안 고른(ASK) 새 일정 카드. T1이 이 줄로 묻고, 답 전엔 저장을 권하지 않음 */
+export function groupQuestion(c: Card): string | null {
+  if (c.group?.choice !== "ASK" || c.draft === null) return null;
+  const names = c.group.candidates.map((g) => g.name);
+  return names.length === 1
+    ? `'${c.draft.title}'을 ${names[0]} 그룹 일정으로 등록할지, 개인 일정으로 등록할지 (카드에서 골라도 됨)`
+    : `'${c.draft.title}'을 어느 그룹(${names.join(" · ")}) 일정으로 등록할지, 개인 일정으로 등록할지 (카드에서 골라도 됨)`;
 }
 
 /** 기상 확인 질문 (서버 문구) — 할 일이 있는 새 일정 카드가 계산된 뒤 (T1 · Live가 이 줄로 물음) */
@@ -509,6 +565,13 @@ export function asksWake(reply: string, spoken: string): boolean {
 /** 카드가 READY일 때 처리 결과에 '확인 필요' 줄을 (다시) 넣는다 — 같은 c#은 한 줄로
  *   나가기 전 할 일이 있고 기상 답을 아직 못 받았으면(ASK) 저장을 권하지 않고 기상 질문만 (답 전엔 저장 안 함) */
 function pushPending(ev: ServerEvent, c: Card, s: TurnState): void {
+  // 그룹 · 개인 일정을 아직 안 골랐으면 저장을 권하지 않고 그 질문만 (답 전엔 저장 안 함)
+  const gq = groupQuestion(c);
+  if (gq !== null) {
+    if (!ev.clarify.includes(gq)) ev.clarify.push(gq);
+    ev.pending = ev.pending.filter((p) => p.id !== c.id);
+    return;
+  }
   if (c.pre_task?.wake === "ASK") {
     const q = wakeQuestion(c);
     if (q !== null) {
@@ -649,7 +712,8 @@ function resultsShapeProblem(results: unknown): string | null {
 
 function actionShapeProblem(action: unknown): string | null {
   if (!isObj(action) || typeof action["id"] !== "string") return "card_action이 id 있는 객체가 아님";
-  if (action["action"] !== "SAVED" && action["action"] !== "REJECTED") return "card_action.action이 SAVED · REJECTED가 아님";
+  if (action["action"] !== "SAVED" && action["action"] !== "REJECTED" && action["action"] !== "GROUP") return "card_action.action이 SAVED · REJECTED · GROUP이 아님";
+  if (action["group_id"] !== undefined && action["group_id"] !== null && typeof action["group_id"] !== "string") return "card_action.group_id가 글자가 아님";
   if (action["alarms"] !== undefined && !Array.isArray(action["alarms"])) return "card_action.alarms가 배열이 아님";
   return null;
 }
@@ -865,7 +929,7 @@ export function applyFast(state: TurnState, fast: FastExtract, ctx: Context, aft
       madeNew = x;
     }
     const summary = appointmentSummary(x);
-    upsertCard(
+    const card = upsertCard(
       { kind: "APPOINTMENT", key, item: x, summary, target_ref: null },
       "APPT_NEW",
       (c) => {
@@ -878,10 +942,18 @@ export function applyFast(state: TurnState, fast: FastExtract, ctx: Context, aft
         };
         // 앞서 붙은 준비시간 가감(prepare_delta)은 새 약속 재료가 바뀌어도 유지
         c.edit = c.edit?.prepare_delta !== undefined ? { prepare_delta: c.edit.prepare_delta } : null;
+        // 그룹 선택은 카드를 처음 만든 말 · 제목으로 한 번만 — 재료가 바뀌어도 고른 값 유지
+        if (c.group === undefined) {
+          const g = groupOf(ctx.groups, `${userText ?? ""} ${x.title}`);
+          if (g !== undefined) c.group = g;
+        }
       },
       x.save,
       reuseId,
     );
+    // 계산(장소)을 기다리는 카드라도 그룹 질문은 바로
+    const gq = groupQuestion(card);
+    if (gq !== null && !ev.clarify.includes(gq)) ev.clarify.push(gq);
   };
 
   const handleNewAppt = (x: XAppt, key: string): void => {
@@ -999,7 +1071,22 @@ export function applyFast(state: TurnState, fast: FastExtract, ctx: Context, aft
     extract.alarm_changes.some((c) => c.time === x.time) &&
     (x.ref !== null || s.appointments.some((a) => nearTitle(a.title, x.title)));
 
+  // ── 그룹 · 개인 일정 답 ── 앞 말에서 물은(ASK) 가장 최근 새 일정 카드에 이번 말이 그룹 이름 · '개인'으로 답하면 고름
+  let groupAnswered = false;
+  const asking = userText === undefined ? undefined : s.cards.filter((c) => c.kind === "APPT_NEW" && OPEN_STATUS.includes(c.status) && c.group?.choice === "ASK" && c.turn !== afterTurn).at(-1);
+  if (asking !== undefined) {
+    const g = groupAnswer(asking.group as CardGroup, userText as string);
+    if (g !== null) {
+      asking.group = g;
+      groupAnswered = true;
+      touched.add(asking.id);
+      if (asking.status === "READY") pushPending(ev, asking, s);
+    }
+  }
+
   for (const x of [...extract.appointments].sort((a, b) => atOf(a) - atOf(b))) {
+    // "캡스톤 그룹으로"라는 답을 T2F가 날짜 · 시각 없는 새 일정으로 뽑은 것 — 되묻지 않음
+    if (groupAnswered && x.ref === null && (x.date === null || x.time === null)) continue;
     const key = apptKey(x);
     const sig = JSON.stringify([x.save, x.date, x.time, x.place, x.importance, x.transport, x.repeat, x.unclear !== null]);
     if (!once(key, sig)) continue;
@@ -1542,6 +1629,17 @@ export function applyCardAction(state: TurnState, action: CardAction, ctx: Conte
     // 같은 말(T2F가 현재 상태를 되풀이)이 다시 와도 카드를 또 만들지 않음 — seen 서명이 같으면 건너뛰고, 재료가 바뀌면 새 카드
     return { ok: true, state: s, event: eventFor(s, afterTurn), card: c, needsReply: false, status: "OK", invalid: null };
   }
+  if (action.action === "GROUP") {
+    // 그룹 · 개인 일정 칩 — 고를 수 있는 그룹(가입한 그룹 중 카드 후보)만. 저장은 여전히 [저장]으로
+    if (c.kind !== "APPT_NEW" || c.group === undefined) return none("NOOP");
+    const id = action.group_id ?? null;
+    const pick = id === null ? undefined : c.group.candidates.find((g) => g.id === id);
+    if (id !== null && pick === undefined) return { ok: false, reason: "card_action.group_id가 고를 수 있는 그룹이 아님" };
+    c.group = { ...c.group, choice: pick ? "GROUP" : "PERSONAL", id: pick?.id ?? null };
+    const ev = eventFor(s, afterTurn);
+    if (c.status === "READY") pushPending(ev, c, s);
+    return { ok: true, state: s, event: ev, card: c, needsReply: false, status: "OK", invalid: null };
+  }
   if (c.kind === "APPT_OPEN") return none("NOOP"); // 저장 없는 카드 — [일정 열기]만
 
   const ev = eventFor(s, afterTurn);
@@ -1571,6 +1669,7 @@ export function applyCardAction(state: TurnState, action: CardAction, ctx: Conte
     s.appointments.push({
       ref, title: d.title, date: d.date, time: d.time, place: placePending ? null : d.place, importance: d.importance,
       importance_confirmed: d.importance !== null, transport: d.transport, travel_minutes: null, repeat: d.repeat.length > 0 ? "WEEKLY" : "NONE",
+      ...(c.group?.choice === "GROUP" ? { group: groupName(c.group) } : {}),
     });
     s.createdKeys[ref] = entry?.key ?? `appt:${normTitle(d.title)}|${d.date}|${d.time}`;
     if (action.appointment_id) s.bound[ref] = action.appointment_id;

@@ -60,8 +60,8 @@ export async function readContextRows(deps: ContextDeps, now: Date): Promise<Con
   const reviewEnd = startOf(addDays(review, 1));
   const windowEnd = startOf(addDays(morning, 1 + LATER_DAYS));
 
-  // ③ 참여 약속(돌아볼 날 ~ 내일) · ④ 기상 확인 출처 · ⑤ 앞 출발 · ⑥ 할 일
-  const [parts, wakeEvents, earlier, todoRes] = await Promise.all([
+  // ③ 참여 약속(돌아볼 날 ~ 내일) · ④ 기상 확인 출처 · ⑤ 앞 출발 · ⑥ 할 일 · ⑧ 가입한 그룹(새 일정을 그룹 일정으로 걸 후보)
+  const [parts, wakeEvents, earlier, todoRes, groupRes] = await Promise.all([
     userDb
       .from('appointment_participants')
       .select(PARTICIPANT_COLUMNS)
@@ -85,6 +85,7 @@ export async function readContextRows(deps: ContextDeps, now: Date): Promise<Con
       .gte('event_at', reviewStart)
       .lt('event_at', reviewEnd),
     userDb.from('todos').select('todo_id, appointment_id, title, todo_type, due_date, is_done').eq('user_id', userId).eq('is_done', false),
+    userDb.from('group_members').select('group_id, groups(group_name)').eq('user_id', userId).eq('invite_status', 'JOINED'),
   ]);
   const participants = (read<ParticipantRaw[]>('appointment_participants', parts) ?? []).map((p): ParticipantJoin => {
     const { appointments, ...rest } = p;
@@ -130,6 +131,7 @@ export async function readContextRows(deps: ContextDeps, now: Date): Promise<Con
       earlierRows: read<EarlierRow[]>('alarm_events', earlier) ?? [],
       earlierRange: { from: reviewStart, to: reviewEnd },
       todos: read<TodoRow[]>('todos', todoRes) ?? [],
+      groups: read<NonNullable<ContextInput['groups']>>('group_members', groupRes) ?? [],
     },
   };
 }

@@ -41,7 +41,7 @@ import type { Weekday } from '@/lib/weekday';
 import { applyFix, type Fix } from './fixes';
 import { addPendingCommit, isFinished, pendingCommits, removePendingCommit } from './finishedSessions';
 import { clearSaved, markSaved, pruneExpired, pruneOtherSessions, readSavedMarks } from './savedMarks';
-import type { ChatMessage, CardAlarm, CardKind, CardStatus, Conversation, ConversationCard, FixResult, Limits, TurnNotice, Unavailable } from './types';
+import type { ChatMessage, CardAlarm, CardGroup, CardKind, CardStatus, Conversation, ConversationCard, FixResult, Limits, TurnNotice, Unavailable } from './types';
 
 // ---------------------------------------------------------------------------
 // 서버 응답 모양 (설계 메모 2절 · 14절) — 서버: supabase/functions/_shared/ai/voice-state.ts(응답) · voice-requests.ts(요청 검사)
@@ -85,6 +85,7 @@ type ServerCard = {
   turn?: number | null; // 카드를 만든 사용자 말 번호 — 한 번의 요청에서 일정 카드는 하나만 저장 (예전 카드는 없음)
   // 나가기 전 할 일 · 기상 확인 (서버 types.ts PreTask) — ASK면 기상 답 전이라 저장 안 함, SET이면 기상만 옮기고 준비 · 출발은 그대로
   pre_task?: { title: string; wake: 'ASK' | 'KEEP' | 'SET'; time: string | null } | null;
+  group?: CardGroup | null; // 그룹 · 개인 일정 고르기 — ASK면 고르기 전이라 저장 안 함, GROUP이면 그 그룹 id로 저장
 };
 
 type ServerFix = { id: string; fact?: string; kind: string; participant_id: string /* 늘 글자 (모르면 '') */; action: 'CORRECT' | 'DENY'; to: string | null };
@@ -255,6 +256,7 @@ function cardView(id: string, rec: CardRec): ConversationCard {
     question: null,
     error: rec.error ?? s.error ?? null,
     appointmentId: rec.appointmentId ?? s.appointment_id ?? s.edit?.appointment_id ?? null,
+    group: s.group ?? null,
   };
 }
 
@@ -350,6 +352,12 @@ function basisOf(a: { travelMinutes?: unknown; prepMinutes?: unknown; beforePrep
   return { travel_minutes: travel, prepare_minutes: prep + before, buffer_minutes: buffer };
 }
 
+// 카드에서 고른 그룹 id — 그룹 일정으로 고른 때만, 그 밖(개인 · 고르기 전 · 그룹 말 없음)은 개인 일정
+function groupIdOf(card: ServerCard): string | null {
+  const g = card.group;
+  return g?.choice === 'GROUP' && g.id && g.candidates.some((c) => c.id === g.id) ? g.id : null;
+}
+
 // 새 약속 카드 계산 — 좌표를 풀고 estimateAppointment, 카드의 시각 고침(times)은 adjustEstimate로
 async function estimateNew(rec: CardRec): Promise<Outcome> {
   const d = rec.server.draft;
@@ -373,6 +381,7 @@ async function estimateNew(rec: CardRec): Promise<Outcome> {
       importance: d.importance ?? autoImportance(d.title), // AI가 중요도를 안 정했으면 제목으로 (시험 · 면접만 중요)
       items: (d.items ?? []).join(','),
       alarms: { ...defaultAlarms(), ...(d.alarms ?? {}) },
+      groupId: groupIdOf(rec.server), // 고른 그룹 — 저장 때 서버가 가입 여부를 다시 확인. 알람은 본인 기준 계산 그대로
     };
     let estimate = await estimateAppointment(draft);
     for (const kind of RING_KINDS) {
@@ -1029,6 +1038,8 @@ export function saveCard(cardId: string): Promise<string> {
     const kind = rec.server.kind;
     // 나가기 전 할 일이 있는데 기상 시각 답을 아직 못 받음 — 임의의 기상으로 저장하지 않음
     if (kind === 'APPT_NEW' && rec.server.pre_task?.wake === 'ASK') throw new UserError('몇 시에 일어날지 먼저 알려 주세요');
+    // 그룹 일정인지 개인 일정인지 아직 안 고름 — 임의로 정해 저장하지 않음
+    if (kind === 'APPT_NEW' && rec.server.group?.choice === 'ASK') throw new UserError('그룹 일정인지 개인 일정인지 먼저 골라 주세요');
     // 한 번의 요청(같은 말)에서 일정 카드는 하나만 저장 — 서버도 하나만 만들지만 저장 길에서 한 번 더 막음 (2026-11-19 팀 결정)
     if (kind === 'APPT_NEW' && rec.server.turn != null) {
       const twin = [...state.cards.entries()].some(([id, r]) => id !== cardId && r.server.kind === 'APPT_NEW' && r.server.turn === rec.server.turn && r.status === 'SAVED');
@@ -1122,6 +1133,9 @@ export function saveCardWithoutPlace(cardId: string): Promise<string> {
     const rec = recOf(cardId);
     if (rec.status === 'SAVED' || rec.status === 'REJECTED') throw new UserError('이미 확인한 카드예요');
     if (rec.server.kind !== 'APPT_NEW' || rec.status !== 'NEEDS_PLACE') throw new UserError('장소를 골라야 하는 새 일정만 장소 없이 저장할 수 있어요');
+    // 장소 미정 일정은 그룹에 걸 수 없음(alarm-commit PLACE_PENDING) — 그룹을 몰래 빼고 저장하지 않음
+    if (rec.server.group?.choice === 'ASK') throw new UserError('그룹 일정인지 개인 일정인지 먼저 골라 주세요');
+    if (groupIdOf(rec.server)) throw new UserError('그룹 일정은 장소를 골라야 저장할 수 있어요');
     const d = rec.server.draft;
     const day = d ? dayOf(d.date) : null;
     if (!d || !day || !TIME.test(d.time)) throw new UserError('날짜나 시각을 알 수 없어요');
@@ -1139,6 +1153,21 @@ export function saveCardWithoutPlace(cardId: string): Promise<string> {
     await rememberSaved(cardId, 'APPT_NEW', saved.id, [], saved.level);
     await notifyCard({ id: cardId, action: 'SAVED', appointment_id: saved.id, alarms: [] }, { cardId });
     return `${saved.title} 일정을 저장했어요. 장소를 정하면 알람을 맞출 수 있어요`;
+  });
+}
+
+// 카드 그룹 · 개인 일정 칩 — groupId null = 개인 일정. 카드 후보(가입한 그룹)만 고를 수 있고, 저장은 여전히 [저장]으로
+//   앱 상태를 먼저 바꾸고 서버에 알림 (서버는 T1을 안 부름). 계산 결과는 버림 — 저장 요청에 그룹이 들어가야 해서 [저장] 때 다시 계산
+export function chooseCardGroup(cardId: string, groupId: string | null): Promise<void> {
+  return serial(async () => {
+    const rec = recOf(cardId);
+    const g = rec.server.group;
+    if (rec.status === 'SAVED' || rec.status === 'REJECTED') throw new UserError('이미 확인한 카드예요');
+    if (rec.server.kind !== 'APPT_NEW' || !g) throw new UserError('그룹을 고를 수 없는 카드예요');
+    if (groupId !== null && !g.candidates.some((c) => c.id === groupId)) throw new UserError('참여 중인 그룹만 고를 수 있어요');
+    rec.server = { ...rec.server, group: { ...g, choice: groupId ? 'GROUP' : 'PERSONAL', id: groupId } };
+    rec.estimate = null;
+    await notifyCard({ id: cardId, action: 'GROUP', group_id: groupId });
   });
 }
 
