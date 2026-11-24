@@ -350,11 +350,12 @@ export async function loadPurePrepCandidate(
       if (result?.status === 'PREDICTED' &&
           result.applied_to_alarm &&
           result.valid_records >= PURE_PREP_SHADOW_MIN_HISTORY &&
-          result.model === 'prep_start_ratio_v2' &&
+          (result.model === 'prep_start_ratio_v2' ||
+           result.model === 'prep_start_ratio_v2_survey_pilot') &&
           Number.isInteger(result.predicted_pure_minutes) &&
           result.predicted_pure_minutes >= 5 && result.predicted_pure_minutes <= 240) {
         return {
-          source: 'MODEL', model: 'prep_start_ratio_v2',
+          source: 'MODEL', model: result.model,
           minutes: result.predicted_pure_minutes,
           sampleCount: result.valid_records,
         };
