@@ -701,6 +701,9 @@ export async function updateAppointment(ctx: EditCtx, req: Extract<EditRequest, 
   }
 
   // ---- 쓰기 ----
+  // 공동 약속은 알람(내 것 · 다른 참여자 것)을 쓰기 전에 약속 행을 고칠 수 있는지 RLS로 먼저 확인 — 같은 값으로 고쳐 보는 것이라 바뀌는 것 없음.
+  //   위 검사(그룹 참여 · 하루 경계)와 DB 정책이 어긋나도 약속은 그대로인데 다른 참여자의 알람만 바뀌는 일이 없게 (#619)
+  if (group) await updateRow(ctx, row.appointment_id, { title: row.title }, row.creator_id);
   const canceled: string[] = [];
   if (laterIds.length) {
     canceled.push(...(await deleteRows(ctx, laterIds)));

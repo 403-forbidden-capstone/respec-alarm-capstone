@@ -985,6 +985,27 @@ test('9-32(고치기 하루 경계): 오늘 안으로 옮기기는 지난 약속
   await expectHttp(() => updateAppointment(ctxFor(seoul.env, A, { now: new Date('2026-10-29T16:00:00Z'), kakao: fakeKakao().lookup }), upd(seoul.id, { title: '서울 사람' }, 'this', true)), 'UNPROCESSABLE', 'PAST_APPOINTMENT');
 });
 
+test('#619: 약속 행 쓰기가 DB 정책에 막히면(서버 검사와 어긋남) 아무 알람도 안 바뀜 — 다른 참여자 알람만 먼저 바뀌지 않음, 알림도 없음', async () => {
+  const { env, id } = await groupCase([A, B, 'u-c']);
+  const before = snap(env.db);
+  const spy = pushSpy();
+  const ctx = ctxFor(env, B, { kakao: fakeKakao().lookup, push: spy.push });
+  const base = ctx.userDb;
+  const blocked = {
+    from(table: string) {
+      const q = base.from(table) as unknown as { update: (p: unknown) => { in: (c: string, v: string[]) => unknown } };
+      if (table !== 'appointments') return q;
+      const update = q.update.bind(q);
+      q.update = (p: unknown) => update(p).in('appointment_id', []) as ReturnType<typeof update>; // RLS가 막은 것처럼 0행
+      return q;
+    },
+    rpc: base.rpc,
+  } as unknown as typeof base;
+  await expectHttp(() => updateAppointment({ ...ctx, userDb: blocked }, upd(id, { at: kst('2026-10-29T08:30') }, 'this', true)), 'NOT_FOUND');
+  assert.equal(snap(env.db), before);
+  assert.equal(spy.sent.length, 0);
+});
+
 test('9-38 · #619: 만든 사람이 없는(탈퇴한) 공동 약속도 그룹원이 고침 — 참여 안 한 그룹원도 고치고, 그룹 밖 사람은 NOT_FOUND, 알림은 고친 사람 제외 다른 참여자에게 (지우기는 X-APPT-01)', async () => {
   const { env, id } = await groupCase([A, B, 'u-c']);
   row(env.db, id)!.creator_id = null;
