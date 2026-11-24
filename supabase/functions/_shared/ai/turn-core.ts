@@ -500,6 +500,26 @@ const COMMON_WORDS = new Set([
   "학교", "회사", "알람", "잡아줘", "잡아", "해줘", "넣어줘", "추가", "등록", "만들어줘", "있어", "있어요",
 ]);
 
+// 'X 그룹'의 X가 그룹 이름이 아닌 말 ('우리 그룹' · '어느 그룹')
+const NOT_GROUP_NAME = new Set(["우리", "내", "제", "저", "이", "그", "어느", "무슨", "다른", "같은", "새", "새로운", "전체", "단체"]);
+
+/** 말에서 'X 그룹'의 X가 가입한 그룹(정확히 · 이름 앞부분)이 아니면 X — 없는 그룹을 말함. 그런 말이 없으면 null ('그룹 알람'처럼 이름 없이 '그룹'만이면 null) */
+export function missingGroup(groups: GroupRef[], text: string): string | null {
+  for (const m of text.matchAll(/([가-힣A-Za-z]+?)\s*그룹/gu)) {
+    const w = m[1] as string;
+    if (NOT_GROUP_NAME.has(w) || COMMON_WORDS.has(w)) continue;
+    if (readGroups(groups, w).named.length > 0 || partialGroups(groups, w).length > 0) continue;
+    return w;
+  }
+  return null;
+}
+
+/** 일정 제목에 섞인 없는 그룹 이름을 뺌 — '가족 그룹 약속' · '가족 약속' → '약속' (그룹 이름을 제목으로 쓰지 않음) */
+export function stripGroupName(title: string, name: string): string {
+  const t = title.replace(new RegExp(`${name}\\s*그룹\\s*`, "gu"), "").trim();
+  return t.startsWith(`${name} `) ? t.slice(name.length).trim() : t;
+}
+
 /**
  * 이름을 정확히 말하지 않았을 때의 후보 — 말의 낱말(조사를 떼고 2글자 이상, 숫자 · 흔한 말 제외)이 그룹 이름 앞부분과 같고,
  * 그 낱말이 이름 핵심(끝의 팀 · 조 · 그룹 … 뺀 것)의 절반 이상일 때만 ('캡스톤' → '캡스톤팀' O, '캡' · '디자인' → '캡스톤디자인팀' X)
@@ -524,9 +544,13 @@ function partialGroups(groups: GroupRef[], text: string): GroupRef[] {
  * 가입한(JOINED) 그룹 밖에서 고르거나 새 그룹을 만들지 않음
  */
 export function groupOf(groups: GroupRef[] | undefined, text: string): CardGroup | undefined {
-  if (groups === undefined || groups.length === 0) return undefined;
+  if (groups === undefined) return undefined;
   const { named, rest } = readGroups(groups, text);
   const partial = named.length === 0 ? partialGroups(groups, text) : [];
+  // 가입하지 않은 그룹 이름('가족 그룹') — 다른 그룹이나 개인 일정으로 정하지 않고 묻기만 ('개인'이라고 같이 말했으면 개인)
+  const missing = named.length === 0 && partial.length === 0 ? missingGroup(groups, text) : null;
+  if (missing !== null) return { choice: PERSONAL_RE.test(rest) ? "PERSONAL" : "ASK", id: null, candidates: [], missing };
+  if (groups.length === 0) return undefined;
   const saidGroup = rest.includes("그룹");
   if (named.length === 0 && partial.length === 0 && !saidGroup) return undefined;
   const candidates = named.length > 0 ? named : partial.length > 0 ? partial : groups;
@@ -556,10 +580,36 @@ export function groupAnswer(g: CardGroup, text: string): CardGroup | null {
 
 const groupName = (g: CardGroup): string => g.candidates.find((x) => x.id === g.id)?.name ?? "";
 
+/** 받침에 맞는 조사 — '약속'을 · '회의'를 */
+const josa = (word: string, withFinal: string, without: string): string => {
+  const code = (word.trim().at(-1) ?? "").charCodeAt(0) - 0xac00;
+  return code >= 0 && code <= 11171 && code % 28 !== 0 ? withFinal : without;
+};
+
+/** 그룹 질문을 사용자에게 할 말 (T1이 물음을 안 냈을 때 서버가 그대로 씀) */
+export function groupSay(c: Card): string | null {
+  if (c.group?.choice !== "ASK" || c.draft === null) return null;
+  const t = c.draft.title;
+  const names = c.group.candidates.map((g) => g.name);
+  if (names.length === 0) return `${c.group.missing ?? ""} 그룹을 찾을 수 없어요. 그룹을 만들거나 '${t}'${josa(t, "을", "를")} 개인 일정으로 등록할까요?`;
+  return names.length === 1
+    ? `'${t}'${josa(t, "을", "를")} ${names[0]} 그룹 일정으로 등록할까요, 개인 일정으로 등록할까요?`
+    : `'${t}'${josa(t, "은", "는")} ${names.join(", ")} 중 어느 그룹 일정인가요, 아니면 개인 일정인가요?`;
+}
+
+/** 되물을 것 줄과 사용자에게 할 말을 같이 넣음 (같은 줄은 한 번) */
+function ask(ev: ServerEvent, line: string, say: string | null): void {
+  if (!ev.clarify.includes(line)) ev.clarify.push(line);
+  if (say !== null) ev.say = { ...(ev.say ?? {}), [line]: say };
+}
+
 /** 그룹 질문 (서버 문구) — 그룹 · 개인 일정을 아직 안 고른(ASK) 새 일정 카드. T1이 이 줄로 묻고, 답 전엔 저장을 권하지 않음 */
 export function groupQuestion(c: Card): string | null {
   if (c.group?.choice !== "ASK" || c.draft === null) return null;
   const names = c.group.candidates.map((g) => g.name);
+  if (names.length === 0) {
+    return `${GROUP_ASK_HEAD} '${c.group.missing ?? ""}' 그룹을 찾을 수 없음(가입한 그룹이 아님) — 그룹을 먼저 만들지, '${c.draft.title}'을 개인 일정으로 등록할지 (AI는 그룹을 만들지 않음 · 다른 그룹으로 정하지 않음 · 카드의 개인 일정 칩으로 골라도 됨)`;
+  }
   // '그룹 선택'으로 시작 — 장소 고르기 줄과 섞이지 않게 (이 줄에는 '장소'라는 말을 쓰지 않음: T1은 '장소'가 든 되물을 것에 [장소 고르기]를 안내함)
   return names.length === 1
     ? `${GROUP_ASK_HEAD} 가입한 '${names[0]}' 그룹이 있음 — '${c.draft.title}'을 ${names[0]} 그룹 일정으로 등록할지, 개인 일정으로 등록할지 (카드의 그룹 · 개인 일정 칩으로 골라도 됨)`
@@ -589,6 +639,13 @@ function groupSavedText(c: Card): string | null {
   if (c.group?.choice === "GROUP") return `${groupName(c.group)} 그룹 일정으로 저장 (알람은 내 것만)`;
   if (c.group?.choice === "PERSONAL") return "개인 일정으로 저장";
   return null;
+}
+
+/** 이번 말(j)의 되물을 것 중 아직 남은 줄의 서버 문장 (첫 줄) — 없으면 null */
+export function serverAskOf(s: TurnState, j: number): string | null {
+  const e = eventAt(s.events, j);
+  const line = e?.clarify.find((l) => e.say?.[l] !== undefined);
+  return line === undefined ? null : (e?.say?.[line] as string);
 }
 
 /** 기상 확인 질문 (서버 문구) — 할 일이 있는 새 일정 카드가 계산된 뒤 (T1 · Live가 이 줄로 물음) */
@@ -630,7 +687,7 @@ function pushPending(ev: ServerEvent, c: Card, s: TurnState): void {
   // 그룹 · 개인 일정을 아직 안 골랐으면 저장을 권하지 않고 그 질문만 (답 전엔 저장 안 함)
   const gq = groupQuestion(c);
   if (gq !== null) {
-    if (!ev.clarify.includes(gq)) ev.clarify.push(gq);
+    ask(ev, gq, groupSay(c));
     ev.pending = ev.pending.filter((p) => p.id !== c.id);
     return;
   }
@@ -818,6 +875,12 @@ export function applyFast(state: TurnState, fast: FastExtract, ctx: Context, aft
   // 말에 나온 일정 (최신 말이 앞 대화 · 추출의 약속 번호보다 우선)
   const hits = intent === null ? null : mentionedAppts(s.appointments, intent.text);
   const ev = newEvent(afterTurn);
+  const seen0 = { ...s.seen }; // 이번 말 전 처리 기록 — 거절한 일정을 다시 청했는지(저장해 달라는 말이 새로 생김) 볼 때
+  // 없는 그룹 이름('가족 그룹')은 일정 제목이 아님 — 이번 말에서 찾으면 기억해 두고 새 일정 제목에서 뺌 (T2F가 앞 말을 다시 뽑아도 같은 제목)
+  const missingNow = userText === undefined || ctx.groups === undefined ? null : missingGroup(ctx.groups, userText);
+  if (missingNow !== null) s.seen[`group-missing:${missingNow}`] = "1";
+  const missingNames = Object.keys(s.seen).filter((k) => k.startsWith("group-missing:")).map((k) => k.slice("group-missing:".length));
+  for (const x of extract.appointments) if (x.ref === null) x.title = missingNames.reduce(stripGroupName, x.title);
   const touched = new Set<string>();
   const now = isoToLocal(ctx.session.now);
   const isPast = (at: LocalDateTime): boolean => minutesBetween(now, at) < 0;
@@ -882,6 +945,12 @@ export function applyFast(state: TurnState, fast: FastExtract, ctx: Context, aft
   const presentKeys = new Set(extract.appointments.map(apptKey));
 
   /** 되물을 것 — T2 unclear 원문(내부 메모 · '오후 18:30' 같은 말)은 넘기지 않고 빈 칸으로 서버 문구를 만든다 */
+  /** 되물을 것을 사용자에게 할 말 */
+  const apptSay = (x: XAppt): string => {
+    if (normTitle(x.title) === "") return "어떤 일정인지 이름을 알려 주시겠어요?";
+    const miss = x.date === null && x.time === null ? "날짜와 시각을" : x.date === null ? "날짜를" : "시각을";
+    return `'${x.title}' 일정의 ${miss} 알려 주시겠어요?`;
+  };
   const clarifyAppt = (x: XAppt): string => {
     if (normTitle(x.title) === "") return `${x.date ? `${dateKo(x.date)} ` : ""}${x.time ? `${x.time} ` : ""}일정의 이름`;
     const miss = [x.date === null ? "날짜" : null, x.time === null ? "시각" : null].filter((v): v is string => v !== null);
@@ -1006,7 +1075,7 @@ export function applyFast(state: TurnState, fast: FastExtract, ctx: Context, aft
         c.edit = c.edit?.prepare_delta !== undefined ? { prepare_delta: c.edit.prepare_delta } : null;
         // 그룹 선택은 카드를 처음 만든 말 · 제목으로 한 번만 — 재료가 바뀌어도 고른 값 유지
         if (c.group === undefined) {
-          const g = groupOf(ctx.groups, `${userText ?? ""} ${x.title}`);
+          const g = groupOf(ctx.groups, `${userText ?? ""} ${s.seen[`group-text:${normTitle(x.title)}`] ?? ""} ${x.title}`);
           if (g !== undefined) c.group = g;
         }
       },
@@ -1015,13 +1084,28 @@ export function applyFast(state: TurnState, fast: FastExtract, ctx: Context, aft
     );
     // 계산(장소)을 기다리는 카드라도 그룹 질문은 바로
     const gq = groupQuestion(card);
-    if (gq !== null && !ev.clarify.includes(gq)) ev.clarify.push(gq);
+    if (gq !== null) ask(ev, gq, groupSay(card));
   };
 
   const handleNewAppt = (x: XAppt, key: string): void => {
     // 이름 · 날짜 · 시각이 비면 되묻기 (모호 메모만 있고 다 채워진 일정은 아래에서 카드로)
     if (normTitle(x.title) === "" || x.date === null || x.time === null) {
-      ev.clarify.push(clarifyAppt(x));
+      // 그룹을 말했으면(없는 그룹 포함) 카드가 생길 때 쓰려고 이 말을 기억하고, 부족한 정보와 같이 그룹도 알림 — 카드는 만들지 않음
+      const g = groupOf(ctx.groups, `${userText ?? ""} ${x.title}`);
+      let note = "";
+      if (g !== undefined && userText !== undefined) {
+        const title = normTitle(x.title) === "" ? "이 일정" : x.title;
+        if (normTitle(x.title) !== "") s.seen[`group-text:${normTitle(x.title)}`] = userText;
+        const names = g.candidates.map((c) => c.name);
+        const gq = groupQuestion({ draft: { title }, group: g } as unknown as Card);
+        if (gq !== null) ask(ev, gq, null);
+        note = names.length === 0
+          ? `${g.missing ?? ""} 그룹을 찾을 수 없어요. 그룹을 만들거나 개인 일정으로 등록할 수 있어요. `
+          : g.choice === "GROUP"
+          ? `${names[0]} 그룹 일정으로 만들고, 카드에서 개인 일정으로 바꿀 수 있어요. `
+          : `가입한 그룹은 ${names.join(", ")}${josa(names.at(-1) as string, "이에요", "예요")}. 일정이 정해지면 카드에서 그룹 일정인지 개인 일정인지 골라 주세요. `;
+      }
+      ask(ev, clarifyAppt(x), `${note}${apptSay(x)}`);
       return;
     }
     const xx = { ...x, date: x.date, time: x.time };
@@ -1048,7 +1132,7 @@ export function applyFast(state: TurnState, fast: FastExtract, ctx: Context, aft
     if (
       s.appointments.some((a) => near(a.title, a.date, a.time)) ||
       Object.values(s.pending).some((e) => e.kind === "APPOINTMENT" && near((e.item as XAppt).title, (e.item as XAppt).date, (e.item as XAppt).time)) ||
-      s.cards.some((c) => c.status === "REJECTED" && c.draft !== null && normTitle(c.draft.title) !== normTitle(x.title) && near(c.draft.title, c.draft.date, c.draft.time))
+      (rejectedTwin(x) && !askedAgain(x, key))
     ) return;
     // 3) 지난 시각 — 모호 메모보다 먼저. 거절(DECLINED)이면 알릴 것 없음. 같은 일정을 이미 거절했으면 T2 흔들림으로
     //    다시 내지 않고, 사용자가 '그래도 저장해줘'로 확인(CONFIRMED)했을 때만 한 번 더 알림
@@ -1091,10 +1175,26 @@ export function applyFast(state: TurnState, fast: FastExtract, ctx: Context, aft
     newAppt(xx, key);
   };
 
+  /**
+   * [저장 안 함]한 새 일정 카드와 같은 일정(같은 날짜 · 시각, 제목이 같거나 한 글자 안팎) — T2F가 대화 전체를 다시 뽑으며 낸 것이라 새 일정이 아님.
+   * 날짜 · 시각이 같아도 제목이 다른 일정('수업' 거절 뒤 같은 시각 '약속')은 다른 일정
+   */
+  const rejectedTwin = (x: XAppt): boolean =>
+    s.cards.some((c) => c.kind === "APPT_NEW" && c.status === "REJECTED" && c.draft !== null && c.draft.date === x.date && c.draft.time === x.time && nearTitle(c.draft.title, x.title));
+  /** 거절한 일정을 이번 말에서 다시 청함 — 이번 말에 제목이 나오거나, 저장해 달라는 말('그래도 저장해줘')이 이번에 새로 생김 */
+  const askedAgain = (x: XAppt, key: string): boolean => {
+    if (userText !== undefined && normTitle(x.title) !== "" && squash(userText).includes(squash(x.title))) return true;
+    // 이번 말에 처음 나온 다른 일정이 있으면 새 일정을 청한 말 — T2F가 거절한 일정의 저장 표시를 바꿔 낸 것은 다시 청한 게 아님
+    const brandNew = extract.appointments.some((y) => y !== x && y.ref === null && seen0[apptKey(y)] === undefined && !rejectedTwin(y));
+    const before = seen0[key];
+    return !brandNew && x.save === "CONFIRMED" && before !== undefined && (JSON.parse(before) as unknown[])[0] !== "CONFIRMED";
+  };
+
   // 이번 말에서 새로 카드를 만들 수 있는 일정 중 가장 이른 시각에 둘 이상이면(같은 시각) 어느 것부터인지 되물음 — 이미 있는 약속 · 열린 카드는 빼고 셈
   const freshCandidate = (x: XAppt): boolean =>
     x.ref === null && normTitle(x.title) !== "" && x.date !== null && x.time !== null && x.save !== "DECLINED" && pendingIdByKey(apptKey(x)) === undefined &&
     !s.appointments.some((a) => a.date === x.date && a.time === x.time && nearTitle(a.title, x.title)) &&
+    !(rejectedTwin(x) && !askedAgain(x, apptKey(x))) &&
     minutesBetween(now, { date: x.date, time: x.time }) >= 0;
   const atOf = (x: XAppt): number => (x.date === null || x.time === null ? Number.MAX_SAFE_INTEGER : dayNumber(x.date) * 1440 + toMinutes(x.time));
   const fresh = extract.appointments.filter(freshCandidate);

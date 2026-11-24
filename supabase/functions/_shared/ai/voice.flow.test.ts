@@ -804,3 +804,16 @@ test('그룹: 대화를 연 뒤 가입한 그룹도 말마다 새로 읽어 후�
   const r = (await handleVoiceTurn(deps, text(sid, s.rev, '내일 10시 반에 캡스톤 회의 잡아줘'))) as VoiceTurnOut;
   assert.deepEqual(r.cards.map((c) => c.group), [{ choice: 'ASK', id: null, candidates: [{ id: 'g-cap', name: '캡스톤팀' }] }]);
 });
+
+test('그룹 · 날짜를 물어야 하는데 T1이 "네, 알겠어요."만 하면 서버 문장으로 물음 — 카드는 안 만듦', async () => {
+  const db = seed();
+  db.rows('groups').push({ group_id: 'g-cap', group_name: '캡스톤팀', owner_id: OTHER }, { group_id: 'g-algo', group_name: '알고리즘 스터디', owner_id: OTHER });
+  db.rows('group_members').push({ group_member_id: 'gm1', group_id: 'g-cap', user_id: ME, invite_status: 'JOINED' }, { group_member_id: 'gm2', group_id: 'g-algo', user_id: ME, invite_status: 'JOINED' });
+  const noDate = { appointments: [{ ref: null, title: '약속', date: null, time: '10:30', place: null, importance: null, transport: null, repeat: null, save: 'CONFIRMED', unclear: null }], alarm_changes: [], fact_feedback: [], prep_adjustment: null, safety_flag: false };
+  const { deps } = depsOf(db, { T2F: [noDate], T1: [t1('preview'), t1('preview')] });
+  const s = (await handleVoiceSession(deps, { session_type: 'BEFORE_SLEEP', input_mode: 'TEXT', resume: true })) as VoiceSessionOut;
+  const r = (await handleVoiceTurn(deps, text(s.session_id as string, s.rev, '그룹 알람 10시 반에 약속 잡아줘'))) as VoiceTurnOut;
+  assert.deepEqual(r.cards, []);
+  assert.equal(r.reply?.text, "가입한 그룹은 캡스톤팀, 알고리즘 스터디예요. 일정이 정해지면 카드에서 그룹 일정인지 개인 일정인지 골라 주세요. '약속' 일정의 날짜를 알려 주시겠어요?");
+  assert.deepEqual(r.reply?.acts, [{ type: 'CLARIFY', ref: null }]);
+});

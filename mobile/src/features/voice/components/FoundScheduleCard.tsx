@@ -88,7 +88,11 @@ export function FoundScheduleCard({ card, at, onSave, onReject, onEdit, onPickPl
       {group && !done && onPickGroup ? (
         <View style={styles.group}>
           <Text variant="small" tone="sub" style={styles.groupNote}>
-            {group.choice === 'ASK' ? '그룹 일정인지 개인 일정인지 골라 주세요' : '알람은 내 것만 맞춰요'}
+            {group.missing && group.choice === 'ASK'
+              ? `${group.missing} 그룹을 찾을 수 없어요. 그룹을 만들거나 개인 일정으로 등록해 주세요`
+              : group.choice === 'ASK'
+                ? '그룹 일정인지 개인 일정인지 골라 주세요'
+                : '알람은 내 것만 맞춰요'}
           </Text>
           <Segmented
             options={groupOptions}

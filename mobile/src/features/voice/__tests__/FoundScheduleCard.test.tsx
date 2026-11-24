@@ -41,4 +41,12 @@ describe('FoundScheduleCard 그룹 칩', () => {
     expect(saved.text).not.toContain('캡스톤 그룹');
     expect(render(card({ group: null })).text).not.toContain('개인 일정');
   });
+
+  it('없는 그룹(가족)이면 찾을 수 없다는 안내와 개인 일정 칩만 — 다른 그룹 칩 없음', () => {
+    const v = render(card({ group: { choice: 'ASK', id: null, candidates: [], missing: '가족' } }));
+    expect(v.text).toContain('가족 그룹을 찾을 수 없어요. 그룹을 만들거나 개인 일정으로 등록해 주세요');
+    expect(v.text).not.toContain('캡스톤 그룹');
+    v.press('개인 일정');
+    expect(v.onPickGroup.mock.calls).toEqual([[null]]);
+  });
 });

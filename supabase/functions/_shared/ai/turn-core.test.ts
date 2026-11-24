@@ -7,7 +7,7 @@ import assert from "node:assert/strict";
 import type { AlarmPlan, Appointment, Card, CardAction, Context, Fact, FastExtract, ServerEvent, TaskResults } from "./types.ts";
 import { datesFor } from "./testing.ts";
 import {
-  asksWake, prepAsked, groupAnswer, groupOf,
+  asksWake, prepAsked, groupAnswer, groupOf, missingGroup, serverAskOf, stripGroupName,
   appointmentSummary, applyCardAction as applyCardActionRaw, applyFast, applyTaskResults as applyTaskResultsRaw, checkBasis, checkDigest, dateKo, dayOf, dayStartIso, eventAt, expandFast, initTurnState, isoToLocal, itemKey, lifeDate,
   apptName, intentOf, keywordImportance, mentionedAppts, nearTitle, needKinds, normTitle, pickServerQuestion, questionSubjectKey, titleMatch,
 } from "./turn-core.ts";
@@ -1760,7 +1760,9 @@ describe("그룹 일정 고르기", () => {
     assert.deepEqual(groupOf([CAP], "캡스톤 회의 개인 일정으로"), { choice: "PERSONAL", id: null, candidates: [CAP] });
     assert.equal(groupOf([CAP], "내일 병원 잡아줘"), undefined);
     assert.equal(groupOf(undefined, "캡스톤 회의"), undefined);
-    assert.equal(groupOf([], "캡스톤 그룹 회의"), undefined);
+    // 가입한 그룹이 없는데 'X 그룹'이라고 함 → 없는 그룹으로 물음 (개인 일정으로 정하지 않음)
+    assert.deepEqual(groupOf([], "캡스톤 그룹 회의"), { choice: "ASK", id: null, candidates: [], missing: "캡스톤" });
+    assert.equal(groupOf([], "내일 회의 잡아줘"), undefined);
     // 그룹 이름 안의 '그룹'은 그룹이라고 말한 것이 아님 · 띄어쓰기 달라도 이름으로 봄
     const named = { id: "g-x", name: "코딩그룹" };
     assert.equal(groupOf([named], "코딩 그룹 회의 잡아줘")?.choice, "ASK");
@@ -1925,5 +1927,94 @@ describe("그룹 일정 고르기", () => {
     assert.equal(card(r2.state, "c1").group, undefined);
     // 그룹을 안 붙인 카드에 칩을 눌러도 바뀌는 것 없음
     assert.equal(applyCardAction(r2.state, { id: "c1", action: "GROUP", group_id: null }, ctx(), 1).status, "NOOP");
+  });
+
+  it("없는 그룹: 'X 그룹'의 X가 가입한 그룹이 아니면 그 이름 · 제목에서 뺌", () => {
+    const TEAM = { id: "g-team", name: "캡스톤팀" };
+    assert.equal(missingGroup([TEAM], "가족 그룹 내일 10시 반에 약속 잡아줘"), "가족");
+    assert.equal(missingGroup([TEAM], "가족그룹 약속"), "가족");
+    assert.equal(missingGroup([TEAM], "캡스톤팀 그룹 회의"), null);
+    assert.equal(missingGroup([TEAM], "캡스톤 그룹 회의"), null); // 이름 앞부분 — 후보로 물음
+    assert.equal(missingGroup([TEAM], "그룹 알람 10시 반에 약속 잡아줘"), null);
+    assert.equal(missingGroup([TEAM], "우리 그룹 회의"), null);
+    assert.equal(stripGroupName("가족 그룹 약속", "가족"), "약속");
+    assert.equal(stripGroupName("가족 약속", "가족"), "약속");
+    assert.equal(stripGroupName("가족여행", "가족"), "가족여행");
+  });
+
+  it("한 대화: 없는 그룹 안내 → 그룹 · 날짜 질문 → 새 카드 → 거절 뒤 같은 시각 다른 일정 → 캡스톤팀 그룹 저장", () => {
+    const TEAM = { id: "g-team", name: "캡스톤팀" };
+    const OTHER = { id: "g-other", name: "알고리즘 스터디" };
+    const c: Context = { ...ctx({ tomorrow: [] }), groups: [TEAM, OTHER] };
+    const lines = (st: TurnState): string[] => st.events.flatMap((e) => e.clarify);
+    const open = (st: TurnState): Card[] => st.cards.filter((x) => x.status !== "REJECTED" && x.status !== "SAVED");
+
+    // 1) "가족 그룹 내일 10시 반에 약속 잡아줘" — 없는 그룹: 제목은 '약속', 후보 없이 물음, 다른 그룹 · 개인으로 정하지 않음
+    const yaksok = study({ title: "가족 그룹 약속", time: "10:30", place: null, save: "CONFIRMED" });
+    const t1 = applyFast(initTurnState(c), fast({ appointments: [yaksok] }), c, 1, "가족 그룹 내일 10시 반에 약속 잡아줘");
+    const c1 = card(t1.state, "c1");
+    assert.equal(c1.draft?.title, "약속");
+    assert.deepEqual(c1.group, { choice: "ASK", id: null, candidates: [], missing: "가족" });
+    assert.equal(serverAskOf(t1.state, 1), "가족 그룹을 찾을 수 없어요. 그룹을 만들거나 '약속'을 개인 일정으로 등록할까요?");
+    assert.ok(lines(t1.state).some((l) => l.startsWith("그룹 선택:") && l.includes("'가족' 그룹을 찾을 수 없음")));
+
+    // 2) "그룹 알람 10시 반에 약속 잡아줘" — 날짜 없음: 카드는 안 만들고 날짜와 그룹(여럿 → 고르기)을 같이 물음
+    const later = study({ title: "약속", date: null, time: "10:30", place: null, save: "CONFIRMED" });
+    const t2 = applyFast(t1.state, fast({ appointments: [yaksok, later] }), c, 2, "그룹 알람 10시 반에 약속 잡아줘");
+    assert.equal(t2.state.cards.length, 1);
+    const say2 = serverAskOf(t2.state, 2) ?? "";
+    assert.ok(say2.includes("캡스톤팀, 알고리즘 스터디") && say2.endsWith("'약속' 일정의 날짜를 알려 주시겠어요?"), say2);
+    assert.ok(eventAt(t2.state.events, 2)?.clarify.some((l) => l.startsWith("그룹 선택:")));
+
+    // 3) "내일 10시 반에 수업이 있어" — 새 카드 (앞 말의 일정은 다시 묻지도 만들지도 않음)
+    const sueop = study({ title: "수업", time: "10:30", place: "학교" });
+    const t3 = applyFast(t2.state, fast({ appointments: [yaksok, later, sueop] }), c, 3, "내일 10시 반에 수업이 있어");
+    assert.deepEqual(open(t3.state).map((x) => x.draft?.title), ["약속", "수업"]);
+    assert.equal(card(t3.state, "c2").group, undefined);
+    assert.equal(serverAskOf(t3.state, 3), null);
+
+    // 4) 수업 카드 [저장 안 함] → 다른 일정 요청(같은 날 같은 시각 '치과'). T2F가 거절한 수업을 저장 표시만 바꿔 다시 뽑아도 되살리지 않고 겹침 질문도 없음
+    const rej = applyCardAction(t3.state, { id: "c2", action: "REJECTED" }, c, 3);
+    const chigwa = study({ title: "치과", time: "10:30", place: null });
+    const t4 = applyFast(rej.state, fast({ appointments: [yaksok, later, { ...sueop, save: "CONFIRMED" }, chigwa] }), c, 4, "내일 10시 반에 치과 예약 있어");
+    assert.deepEqual(open(t4.state).map((x) => x.draft?.title), ["약속", "치과"]);
+    assert.equal(card(t4.state, "c2").status, "REJECTED");
+    assert.ok(!lines(t4.state).some((l) => l.includes("같은 시각")), lines(t4.state).join(" | "));
+    // 연속으로 또 거절하고 또 새 일정
+    const rej2 = applyCardAction(t4.state, { id: "c3", action: "REJECTED" }, c, 4);
+    const gym = study({ title: "헬스", date: "2026-10-10", time: "09:00", place: null });
+    const t5 = applyFast(rej2.state, fast({ appointments: [yaksok, later, sueop, chigwa, gym] }), c, 5, "모레 9시에 헬스 잡아줘");
+    assert.deepEqual(open(t5.state).map((x) => x.draft?.title), ["약속", "헬스"]);
+
+    // 5) 가입한 캡스톤팀 지정 → 그룹 고르기 카드
+    const meet = study({ title: "캡스톤 회의", date: "2026-10-10", time: "15:00", place: "학교" });
+    const t6 = applyFast(t5.state, fast({ appointments: [yaksok, later, sueop, chigwa, gym, meet] }), c, 6, "캡스톤팀 회의 모레 3시 잡아줘");
+    const meetCard = t6.state.cards.find((x) => x.draft?.title === "캡스톤 회의") as Card;
+    assert.deepEqual(meetCard.group, { choice: "ASK", id: null, candidates: [TEAM] });
+    assert.match(serverAskOf(t6.state, 6) ?? "", /캡스톤팀 그룹 일정으로 등록할까요, 개인 일정으로 등록할까요\?$/);
+
+    // 6) 개인 → 캡스톤팀으로 바꾼 뒤 저장 — 한 번만 저장, 그룹 안내 정확, 같은 말이 다시 와도 새 카드 없음
+    const toPersonal = applyCardAction(t6.state, { id: meetCard.id, action: "GROUP", group_id: null }, c, 6);
+    const toTeam = applyCardAction(toPersonal.state, { id: meetCard.id, action: "GROUP", group_id: "g-team" }, c, 6);
+    const calc = applyTaskResults(toTeam.state, { cards: [ready(meetCard.id, "12:00", { date: "2026-10-10" })], fixes: [] }, c, 6);
+    const saved = applyCardAction(calc.state, { id: meetCard.id, action: "SAVED", appointment_id: "00000000-0000-4000-8000-0000000000aa", alarms: [] }, c, 6);
+    assert.ok(saved.event.applied.some((l) => l.includes("캡스톤팀 그룹 일정으로 저장")), saved.event.applied.join(" | "));
+    assert.ok(!saved.event.applied.some((l) => l.includes("개인 일정")));
+    assert.ok(!lines(saved.state).some((l) => l.includes("캡스톤 회의") && l.startsWith("그룹 선택:")));
+    const again = applyFast(saved.state, fast({ appointments: [yaksok, later, sueop, chigwa, gym, meet] }), c, 7, "고마워 다 됐어");
+    assert.equal(again.state.cards.length, saved.state.cards.length);
+    assert.equal(again.state.appointments.filter((a) => a.title === "캡스톤 회의").length, 1);
+    assert.equal(applyCardAction(saved.state, { id: meetCard.id, action: "SAVED", alarms: [] }, c, 7).status, "NOOP");
+  });
+
+  it("거절한 일정은 다시 청하면(제목을 말함 · '그래도 저장해줘') 새 카드, 상관없는 말에는 안 되살림", () => {
+    const c = ctx({ tomorrow: [] });
+    const sueop = study({ title: "수업", time: "10:30" });
+    const t1 = applyFast(initTurnState(c), fast({ appointments: [sueop] }), c, 1, "내일 10시 반 수업");
+    const rej = applyCardAction(t1.state, { id: "c1", action: "REJECTED" }, c, 1);
+    const live = (st: TurnState): number => st.cards.filter((x) => x.status !== "REJECTED").length;
+    assert.equal(live(applyFast(rej.state, fast({ appointments: [{ ...sueop, importance: "HIGH" }] }), c, 2, "아니 수업 다시 넣어줘").state), 1);
+    assert.equal(live(applyFast(rej.state, fast({ appointments: [{ ...sueop, save: "CONFIRMED" }] }), c, 2, "그래도 저장해줘").state), 1);
+    assert.equal(live(applyFast(rej.state, fast({ appointments: [{ ...sueop, importance: "HIGH" }] }), c, 2, "오늘 피곤하다").state), 0);
   });
 });
