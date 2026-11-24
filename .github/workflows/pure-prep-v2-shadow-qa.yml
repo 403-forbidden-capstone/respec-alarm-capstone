@@ -1,7 +1,7 @@
 name: CatBoost v2 Shadow · 10 history QA
 on:
   push:
-    branches: [feat/pure-prep-v2-shadow-main-qa-20261123, fix/pure-prep-onboarding-edit-rebaseline-20261123]
+    branches: [feat/pure-prep-v2-shadow-main-qa-20261123, fix/pure-prep-onboarding-edit-rebaseline-20261123, fix/pure-prep-only-onboarding-20261124]
     paths:
       - '.github/workflows/pure-prep-v2-shadow-qa.yml'
       - 'supabase/functions/_shared/pure-prep-shadow*'
@@ -15,6 +15,10 @@ on:
       - 'mobile/src/app/settings.tsx'
       - 'mobile/src/app/alarm/[id].tsx'
       - 'mobile/src/features/onboarding/views/PrepareStep.tsx'
+      - 'mobile/src/app/onboarding.tsx'
+      - 'mobile/src/features/profile/edit.ts'
+      - 'mobile/src/features/profile/components/ProfileEditors.tsx'
+      - 'mobile/src/features/profile/__tests__/edit.test.ts'
   pull_request:
     paths:
       - '.github/workflows/pure-prep-v2-shadow-qa.yml'
@@ -26,6 +30,10 @@ on:
       - 'mobile/src/app/settings.tsx'
       - 'mobile/src/app/alarm/[id].tsx'
       - 'mobile/src/features/onboarding/views/PrepareStep.tsx'
+      - 'mobile/src/app/onboarding.tsx'
+      - 'mobile/src/features/profile/edit.ts'
+      - 'mobile/src/features/profile/components/ProfileEditors.tsx'
+      - 'mobile/src/features/profile/__tests__/edit.test.ts'
   workflow_dispatch:
 permissions:
   contents: read
