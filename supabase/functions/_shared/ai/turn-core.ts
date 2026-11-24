@@ -891,8 +891,18 @@ export function applyFast(state: TurnState, fast: FastExtract, ctx: Context, aft
   const latestMissing = [...s.cards].reverse().find((c) =>
     c.kind === "APPT_NEW" && c.status === "REJECTED" && c.draft !== null && c.group?.missing !== undefined &&
     knownNamed !== undefined && squash(knownNamed.name) === squash(c.group.missing as string));
+  // 아직 열려 있는 카드도 그룹 탭에서 새로 만든 그룹을 적용할 수 있도록 같은 카드를 재사용한다.
+  const openMissing = [...s.cards].reverse().find((c) =>
+    c.kind === "APPT_NEW" && OPEN_STATUS.includes(c.status) && c.draft !== null &&
+    c.group?.choice === "ASK" && c.group.missing !== undefined && knownNamed !== undefined &&
+    squash(c.group.missing) === squash(knownNamed.name));
   for (const x of extract.appointments) {
     if (x.ref !== null) continue;
+    if (openMissing?.draft && knownNamed && x.date === openMissing.draft.date && x.time === openMissing.draft.time &&
+      squash(x.title).startsWith(`${squash(knownNamed.name)}그룹`)) {
+      x.title = openMissing.draft.title;
+      continue;
+    }
     const original = x.title;
     const oldKey = `appt:${normTitle(original)}|${x.date ?? "?"}|${x.time ?? "?"}`;
     const rememberedKey = `group-missing-title:${normTitle(original)}|${x.date ?? "?"}|${x.time ?? "?"}`;
@@ -922,6 +932,12 @@ export function applyFast(state: TurnState, fast: FastExtract, ctx: Context, aft
     }
   }
   const touched = new Set<string>();
+  if (openMissing !== undefined && knownNamed !== undefined) {
+    forgetLines(s, [groupQuestion(openMissing)]); // 이미 풀린 '없는 그룹' 질문을 다시 꺼내지 않는다
+    openMissing.group = { choice: "GROUP", id: knownNamed.id, candidates: [knownNamed] };
+    touched.add(openMissing.id);
+    if (openMissing.status === "READY") pushPending(ev, openMissing, s);
+  }
   const now = isoToLocal(ctx.session.now);
   const isPast = (at: LocalDateTime): boolean => minutesBetween(now, at) < 0;
 
