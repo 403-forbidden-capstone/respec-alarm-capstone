@@ -2201,5 +2201,9 @@ describe("그룹 일정 고르기", () => {
     const result = applyFast(initTurnState(c), fast({ appointments: [x] }), c, 1, "가족 그룹 내일 6시에 잡아줘");
     assert.equal(result.state.cards.length, 0);
     assert.ok(result.event.clarify.some((line) => line.includes("일정의 이름")));
+    // T2F가 이전 말의 '가족 그룹'을 다시 추출해도, 제목이 없는 과거 요청은 카드로 부활하지 않는다.
+    const next = applyFast(result.state, fast({ appointments: [x] }), c, 2, "고마워");
+    assert.equal(next.state.cards.length, 0);
+    assert.equal(next.event.clarify.some((line) => line.includes("가족 그룹을 찾을 수 없음")), false);
   });
 });
