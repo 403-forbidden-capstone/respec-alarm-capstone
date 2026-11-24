@@ -544,7 +544,7 @@ test('10 verified CatBoost v2 observations change the actual AUTO alarm and pers
   if (request.type !== 'APPOINTMENT') throw new Error('not an appointment');
   const committed = await persistAppointment(commitCtx, {
     plan: save.plan, inputs: save.inputs, created: request.appointment,
-    draft, timeZone: 'Asia/Seoul',
+    draft, edits: [], timeZone: 'Asia/Seoul',
   });
   assert.ok(committed.participant_id);
   const row = db.rows('appointment_participants').find(p => p.participant_id === committed.participant_id);
