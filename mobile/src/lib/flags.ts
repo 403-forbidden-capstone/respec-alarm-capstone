@@ -60,4 +60,6 @@ export const TIMETABLE_PATHS = {
 export const ONBOARDING_LOCATION_ROWS = true;
 
 // Optional research pilot. OFF by default and restricted again in the RPC.
-export const PREP_START_SELF_REPORT_PILOT = process.env.EXPO_PUBLIC_PREP_START_SELF_REPORT_PILOT === '1';
+// PREVIEW-ONLY BRANCH. NEVER MERGE THIS BRANCH: enables the UI for the demo
+// account, while DB RPC checks the exact demo UUID and grants no other access.
+export const PREP_START_SELF_REPORT_PILOT = true;
