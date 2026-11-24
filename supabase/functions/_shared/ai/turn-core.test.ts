@@ -2148,4 +2148,19 @@ describe("그룹 일정 고르기", () => {
     assert.equal(open[0]?.draft?.time, "13:30");
     assert.equal(open[0]?.group?.id, "g-family");
   });
+
+  it("열려 있는 카드도 대화 중 그룹 생성 후 같은 카드에 그룹을 다시 붙인다", () => {
+    const base = ctx({ tomorrow: [] });
+    const oldContext: Context = { ...base, groups: [{ id: "g-cap", name: "캡스톤팀" }] };
+    const newContext: Context = { ...base, groups: [...(oldContext.groups ?? []), { id: "g-family", name: "가족" }] };
+    const spoken = "가\u2060족 그\u2060룹 내\u2060일 1시 반\u2060에 약\u2060속 잡\u2060아\u2060줘";
+    const x = study({ title: "가족 그룹", time: "13:30", place: null });
+    const first = applyFast(initTurnState(oldContext), fast({ appointments: [x] }), oldContext, 1, spoken);
+    assert.equal(card(first.state, "c1").group?.missing, "가족");
+    const second = applyFast(first.state, fast({ appointments: [x] }), newContext, 2, spoken);
+    assert.equal(second.state.cards.length, 1);
+    assert.equal(card(second.state, "c1").group?.choice, "GROUP");
+    assert.equal(card(second.state, "c1").group?.id, "g-family");
+    assert.equal(second.state.events.flatMap((e) => e.clarify).some((x) => x.includes("그룹을 찾을 수 없음")), false);
+  });
 });
