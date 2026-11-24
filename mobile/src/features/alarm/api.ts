@@ -35,6 +35,8 @@ import {
   type DepartCheck,
   type EditScope,
   type Estimate,
+  type PlacePendingDraft,
+  type PlacePendingSaved,
   type IntensityAxis,
   type LatLng,
   type Level,
@@ -48,6 +50,7 @@ import {
   type SavedAppointment,
   type ScheduleItem,
   type SettingsSaveResult,
+  type StandaloneWake,
   type Snooze,
   type Transport,
   type UpdateOptions,
@@ -199,11 +202,11 @@ export async function checkDepartNow(appointmentId: string): Promise<DepartCheck
   return toDepartCheck({ appointmentAt: view.at, travelMinutes: view.travelMinutes, source: view.travelSource, now: now() });
 }
 
-// 알람 설정 (H03) — 알람 없는 일정은 열 알람이 없어 null (일정 수정 · 삭제를 어디서 할지는 D41이 정함)
-export async function getAppointment(id: string): Promise<AppointmentDetail | null> {
-  if (!isMock()) return real.getAppointment(id);
+// 알람 설정 (H03) — 알람 없는 일정은 열 알람이 없어 null. withoutAlarms(H03만)면 알람 없는 일정도 엶 — 장소를 정하고 알람을 만들 수 있게 (D41 A)
+export async function getAppointment(id: string, options: { withoutAlarms?: boolean } = {}): Promise<AppointmentDetail | null> {
+  if (!isMock()) return real.getAppointment(id, options);
   const a = find(id);
-  if (!a || !alarmChain(a).length) return null;
+  if (!a || (!alarmChain(a).length && !options.withoutAlarms)) return null;
   const auto = autoLevel(a);
   const manual = db.intensityOverrides[a.id] ?? {};
   const axis = (key: IntensityAxis) => ({ level: axisLevel(a, key), manual: manual[key] != null }); // 말소리 자동 = 설정의 기본 말소리
@@ -241,6 +244,9 @@ function mockTravel(placeName: string, transport: Transport, origin: string): nu
 // 고친 값(초안)을 반영한 일정 (H03) — 저장 전 미리 보기와 저장이 같은 계산을 씀
 //   출발 위치 · 이동 수단이 바뀌면 이동시간을 다시 계산(자동값), 직접 입력한 이동 · 준비 · 알람 시각은 자동 계산보다 먼저
 //   자동 계산값과 같은 값은 직접 고른 것이 아니라 자동으로 둠
+// 알람 없는 일정에 장소가 있으면 H03 미리 보기 · 저장이 계산된 알람을 모두 만듦 (서버: kinds 없음 + 알람 없음 = 계산된 전부). 장소 미정이면 계속 없음
+const makesAlarms = (a: MockAppointment) => a.kinds?.length === 0 && a.place !== '';
+
 function withEdits(a: MockAppointment, e: AlarmEdits) {
   const moved = e.origin !== a.origin || e.transport !== a.transport;
   const autoTravel = moved ? (mockTravel(a.place, e.transport, e.origin) ?? a.travelMinutes) : a.travelMinutes;
@@ -256,6 +262,7 @@ function withEdits(a: MockAppointment, e: AlarmEdits) {
     travelMinutes: autoTravel,
     travelSource: moved ? '길찾기' : a.travelSource,
     manual: { ...manual, times: e.times },
+    kinds: makesAlarms(a) ? undefined : a.kinds,
   };
   const times = manualTimes(alarmChain(edited)); // 자동값과 같아진 시각은 뺌
   const kept = { ...manual, ...(Object.keys(times).length ? { times } : {}) };
@@ -284,6 +291,12 @@ export async function previewAlarms(id: string, edits: AlarmEdits): Promise<Alar
     prepareSampleCount: appointment.withWake ? MOCK_PREPARE_STATS.sampleCount : 0,
     prepareRecent: appointment.withWake ? recentPrepareOf(MOCK_PREPARE_STATS) : [],
   };
+}
+
+// 그날 이 일정 시각 전에 울릴 일정 없는 기상 알람 (H03 합치기 확인) — 가짜 데이터에는 일정 없는 알람이 없어 늘 빈 목록
+export async function listStandaloneWakes(at: Date): Promise<StandaloneWake[]> {
+  if (!isMock()) return real.listStandaloneWakes(at);
+  return [];
 }
 
 // 고친 값 기록 (user_edit_logs) — 사용자가 자동 값을 직접 고치면 한 줄씩 남김. 개인화(계산 · 제안)에 쓸 자료라 H03 · H05 확인 시트 · S01이 같이 부름
@@ -364,6 +377,7 @@ export async function saveAlarmSettings(id: string, draft: AlarmSettingsDraft): 
   }
 
   Object.assign(a, {
+    kinds: next.kinds,
     bufferMinutes: next.bufferMinutes,
     origin: next.origin,
     transport: next.transport,
@@ -673,6 +687,19 @@ export async function estimateAppointment(d: AppointmentDraft): Promise<Estimate
     latePoint: db.lateCount4w >= 2 ? 1 : 0,
     ...(d.levels ? { levels: d.levels } : {}),
   };
+}
+
+// 장소 미확정 일정 저장 (AI 대화 — 장소를 확인하지 못함) — 일정만, 알람 없음. 장소 · 이동시간을 추측하지 않음
+//   실데이터는 alarm-commit type PLACE_PENDING. 가짜 모드는 장소 빈칸 · 알람 없는 일정(kinds [])
+export async function createPlacePendingAppointment(input: PlacePendingDraft): Promise<PlacePendingSaved> {
+  if (!isMock()) return real.createPlacePendingAppointment(input);
+  const id = `pp-${db.appointments.length + 1}-${input.at.getTime()}`;
+  db.appointments.push({
+    id, title: input.title, at: input.at, place: '', origin: '집', transport: input.transport ?? 'TRANSIT',
+    travelMinutes: 0, travelSource: '', bufferMinutes: 10, beforePrepMinutes: 0, prepMinutes: 0, predictedPrepMinutes: 0,
+    importance: input.importance, recurrenceRule: null, groupId: null, items: [], withWake: false, kinds: [],
+  });
+  return { id, title: input.title, alarms: [], level: 1 };
 }
 
 // 계산한 일정을 저장 — 실데이터는 alarm-commit (일정 · 참여 조건 · 알람 4개를 한 번에)

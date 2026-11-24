@@ -18,6 +18,7 @@ jest.mock('../real', () => {
     'listAppointments',
     'getDaySchedule',
     'getAppointment',
+    'listStandaloneWakes',
     'previewAlarms',
     'recordEdit',
     'listEditLogs',
@@ -86,7 +87,9 @@ describe('실데이터 모드: 알람 api 전부가 real.ts로 넘어감', () =>
   const cases: [string, () => Promise<unknown>, string, unknown[]][] = [
     ['listAppointments', () => api.listAppointments(), 'listAppointments', [{}]],
     ['getDaySchedule', () => api.getDaySchedule(at), 'getDaySchedule', [at]],
-    ['getAppointment', () => api.getAppointment('a1'), 'getAppointment', ['a1']],
+    ['getAppointment', () => api.getAppointment('a1'), 'getAppointment', ['a1', {}]],
+    ['getAppointment (H03)', () => api.getAppointment('a1', { withoutAlarms: true }), 'getAppointment', ['a1', { withoutAlarms: true }]],
+    ['listStandaloneWakes', () => api.listStandaloneWakes(at), 'listStandaloneWakes', [at]],
     ['previewAlarms', () => api.previewAlarms('a1', edits), 'previewAlarms', ['a1', edits]],
     ['recordEdit', () => api.recordEdit({ screen: 'S01', field: 'scheduled_at', autoValue: 1, editedValue: 2 }), 'recordEdit', [{ screen: 'S01', field: 'scheduled_at', autoValue: 1, editedValue: 2 }]],
     ['listEditLogs', () => api.listEditLogs(), 'listEditLogs', []],

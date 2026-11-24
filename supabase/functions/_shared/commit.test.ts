@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { assertPersistable, commitStandalone, persistAppointment, type CommitCtx } from './commit.ts';
+import { assertLinkWake, assertPersistable, commitPlacePending, commitStandalone, isPlacePending, loadLinkableWake, persistAppointment, type CommitCtx } from './commit.ts';
 import { HttpError } from './errors.ts';
 import { FakeDb } from './fake-db.ts';
 import { computePlan, toSuggestion, type AlarmRow, type AppointmentRow, type ParticipantRow, type PlanDraft, type PlanInputs, type ProfileRow } from './plan-core.ts';
@@ -413,4 +413,156 @@ test('C1/W4/P80: preview -> commit -> persisted alarm rows and participant minut
     );
     assert.equal(db.rows('appointments').length, 1, spec.label);
   }
+});
+
+// ---- 장소 미확정 일정 (AI 대화 — 장소를 확인하지 못함) ----
+
+test('장소 미확정 일정: 장소 빈칸 · 좌표 없음 · 이동시간 NULL로 일정과 내 참여 행만, 알람 · 예약 꾸러미 없음', async () => {
+  const { db, ctx } = setup();
+  db.rows('profiles').push({ user_id: USER, ...profile, default_transport: 'SUBWAY', default_buffer_minutes: 15 });
+  const body = await commitPlacePending(ctx, { appointment: { title: '캡스톤 회의', at: kst(23, 780), importance: 'NORMAL' } });
+  const [appointment] = db.rows('appointments');
+  assert.deepEqual(
+    [appointment.creator_id, appointment.title, appointment.dest_name, appointment.dest_lat, appointment.dest_lng, appointment.group_id, appointment.recurrence_rule, appointment.importance, hm(appointment.appointment_at)],
+    [USER, '캡스톤 회의', '', null, null, null, null, 'NORMAL', '13:00'],
+  );
+  const [participant] = db.rows('appointment_participants');
+  assert.deepEqual(
+    [participant.appointment_id, participant.user_id, participant.est_travel_minutes, participant.transport_type, participant.buffer_minutes, participant.origin_name ?? null],
+    [appointment.appointment_id, USER, null, 'SUBWAY', 15, null], // 이동시간을 추측하지 않음 · 출발지는 비움(나중에 집이 기본)
+  );
+  assert.equal(db.rows('alarms').length, 0);
+  assert.deepEqual([body.appointment_id, body.alarms, body.ring_packages, body.canceled_alarm_ids], [appointment.appointment_id, [], [], []]);
+  assert.deepEqual(body.warnings.map((w) => w.code), ['PLACE_PENDING']);
+  assert.equal(isPlacePending(appointment as { dest_name: string; dest_lat: null; dest_lng: null }), true);
+  assert.equal(isPlacePending({ dest_name: '세종대학교', dest_lat: 37.55, dest_lng: 127.07 }), false);
+  assert.equal(isPlacePending({ dest_name: '세종대학교', dest_lat: null, dest_lng: null }), false, '이름만 있는 장소(좌표 없음)는 미확정이 아님 — 기존 직접 입력 흐름');
+});
+
+test('장소 미확정 일정: 지난 시각은 거절하고 아무것도 안 씀 · 참여 행을 못 만들면 만든 일정을 지움', async () => {
+  const past = setup();
+  await assert.rejects(commitPlacePending(past.ctx, { appointment: { title: '회의', at: kst(22, 300), importance: 'LOW' } }), (e: unknown) => e instanceof HttpError && e.code === 'UNPROCESSABLE');
+  assert.equal(past.db.rows('appointments').length, 0);
+
+  const broken = setup();
+  broken.db.failOn = [{ table: 'appointment_participants', op: 'insert' }];
+  await quiet(() => assert.rejects(commitPlacePending(broken.ctx, { appointment: { title: '회의', at: kst(23, 780), importance: 'LOW' } })));
+  assert.equal(broken.db.rows('appointments').length, 0, '되돌림');
+});
+
+test('장소 미확정 일정: 다시 보낸 요청(resend)만 방금 만든 같은 일정을 돌려줌 — 새 요청은 같은 제목 · 시각이어도 새 일정, 10분이 지났거나 처음 요청이 저장 전에 실패했으면 새로 만듦', async () => {
+  const { db, ctx } = setup();
+  db.rows('profiles').push({ user_id: USER, ...profile });
+  const meeting = { title: '캡스톤 회의', at: kst(23, 780), importance: 'NORMAL' as const };
+  const first = await commitPlacePending(ctx, { appointment: meeting });
+  // 응답을 잃고 같은 본문을 다시 보냄 → 같은 일정 · 같은 참여 행, 더 만들지 않음
+  const again = await commitPlacePending(ctx, { appointment: { ...meeting, resend: true } });
+  assert.deepEqual([again.appointment_id, again.participant_id], [first.appointment_id, first.participant_id]);
+  assert.deepEqual([db.rows('appointments').length, db.rows('appointment_participants').length], [1, 1]);
+  // 사용자가 같은 제목 · 시각으로 하나 더 만듦(새 요청) → 막지 않음
+  const minuteLater: CommitCtx = { ...ctx, now: new Date(NOW.getTime() + 60_000) };
+  const second = await commitPlacePending(minuteLater, { appointment: meeting });
+  assert.notEqual(second.appointment_id, first.appointment_id);
+  assert.equal(db.rows('appointments').length, 2);
+  // 다시 보냄은 가장 최근 것을 돌려줌 · 제목이나 시각이 다르면 새로
+  assert.equal((await commitPlacePending(minuteLater, { appointment: { ...meeting, resend: true } })).appointment_id, second.appointment_id);
+  await commitPlacePending(ctx, { appointment: { ...meeting, at: kst(23, 840), resend: true } });
+  assert.equal(db.rows('appointments').length, 3);
+
+  // 10분이 지난 다시 보냄(앱 요청 키도 이미 사라짐) → 새로 만듦
+  const later: CommitCtx = { ...ctx, now: new Date(NOW.getTime() + 12 * 60_000) }; // 마지막으로 만든 지 11분 뒤
+  await commitPlacePending(later, { appointment: { ...meeting, resend: true } });
+  assert.equal(db.rows('appointments').length, 4);
+
+  // 처음 요청이 저장 전에 실패 → 다시 보내면 찾을 일정이 없어 새로 만듦
+  const fresh = setup();
+  fresh.db.rows('profiles').push({ user_id: USER, ...profile });
+  await commitPlacePending(fresh.ctx, { appointment: { ...meeting, resend: true } });
+  assert.equal(fresh.db.rows('appointments').length, 1);
+});
+
+// ---- 일정 없는 기상 알람 → 약속 기상으로 합치기 (장소를 나중에 정한 일정, H03에서 사용자가 고름) ----
+
+function placeSetWithStandaloneWake() {
+  const { db, ctx } = setup();
+  db.rows('appointments').push({ appointment_id: 'ap-cap', creator_id: USER, group_id: null, title: '캡스톤 회의', appointment_at: kst(23, 780).toISOString(), dest_name: '세종대학교', dest_lat: 37.55, dest_lng: 127.07, importance: 'NORMAL' });
+  db.rows('appointment_participants').push({ participant_id: 'pt-cap', appointment_id: 'ap-cap', user_id: USER, est_travel_minutes: 50, travel_source: 'API', buffer_minutes: 10 });
+  db.rows('alarms').push(
+    { alarm_id: 'al-8', user_id: USER, participant_id: null, routine_id: null, alarm_type: 'WAKE', scheduled_at: kst(23, 480).toISOString(), is_enabled: true, recurrence_rule: null, time_source: 'MANUAL', intensity: 'NORMAL', voice_tone: 'NEUTRAL', sound_key: 'basic', vibration: null, intensity_source: 'AUTO' },
+    { alarm_id: 'al-daily', user_id: USER, participant_id: null, routine_id: null, alarm_type: 'WAKE', scheduled_at: kst(23, 450).toISOString(), is_enabled: true, recurrence_rule: 'FREQ=DAILY', time_source: 'MANUAL' },
+    { alarm_id: 'al-other', user_id: 'u-other', participant_id: null, routine_id: null, alarm_type: 'WAKE', scheduled_at: kst(23, 480).toISOString(), is_enabled: true, recurrence_rule: null },
+  );
+  const appointment = db.rows('appointments')[0] as unknown as AppointmentRow;
+  const participant = db.rows('appointment_participants')[0] as unknown as ParticipantRow;
+  // alarm-commit/index.ts와 같은 순서: 합칠 알람 읽기 → 약속 기상 = 그 시각(직접 고름) → 계산 → 검사 → 쓰기
+  const save = async (linkId: string | null, over: Partial<PlanDraft> = {}) => {
+    const linkWake = linkId ? await loadLinkableWake(ctx, linkId) : null;
+    const draft: PlanDraft = { appointmentId: 'ap-cap', prepareMinutes: 60, beforePrepareMinutes: 30, ...over };
+    if (linkWake) draft.manualTimes = { ...draft.manualTimes, WAKE: new Date(linkWake.scheduled_at) };
+    const inputs = inputsOf(draft, { appointment, participant, existingAlarms: db.rows('alarms').filter((a) => a.participant_id === 'pt-cap') as unknown as AlarmRow[] });
+    const plan = computePlan(inputs, api);
+    if (linkId) assertLinkWake(plan, draft, linkWake, inputs.existingAlarms);
+    return persistAppointment(ctx, { plan, inputs, draft, replaceExisting: true, edits: [], timeZone: 'Asia/Seoul', linkWake });
+  };
+  return { db, ctx, save };
+}
+
+test('합치기: 약속 기상을 일정 없는 기상 시각(8:00, 직접 고름)으로 만들고 그 알람은 지움 — 폰은 옛 알람 취소 · 새 기상 예약, 준비는 고른 대로', async () => {
+  const { db, save } = placeSetWithStandaloneWake();
+  // 앱은 기상만 옮겨 준비가 따라오지 않게 준비 자동 시각(기상 11:00 + 30 = 11:30)을 같이 보냄 — 기상도 그 알람 시각으로 같이 보냄 (H03 linkTimes)
+  const body = await save('al-8', { manualTimes: { WAKE: kst(23, 480), PREPARE: kst(23, 690) } });
+  const mine = db.rows('alarms').filter((a) => a.participant_id === 'pt-cap');
+  assert.deepEqual(mine.map((a) => [a.alarm_type, hm(a.scheduled_at)]), [['WAKE', '08:00'], ['PREPARE', '11:30'], ['DEPARTURE', '12:00'], ['ARRIVE', '12:50']]);
+  assert.equal(mine[0].time_source, 'MANUAL');
+  assert.equal(db.rows('alarms').some((a) => a.alarm_id === 'al-8'), false, '합친 알람은 지움');
+  assert.deepEqual(db.rows('alarms').filter((a) => a.participant_id == null).map((a) => a.alarm_id), ['al-daily', 'al-other'], '반복 · 남의 알람은 그대로');
+  assert.deepEqual(body.canceled_alarm_ids, ['al-8']);
+  assert.deepEqual(body.ring_packages.filter((p) => p.type === 'WAKE').map((p) => [p.title, hm(new Date(p.atMillis).toISOString())]), [['캡스톤 회의', '08:00']]);
+});
+
+test('따로 두기(합치기 없음): 일정 없는 기상은 그대로 · 약속 기상은 자동 시각으로 따로 — 지우거나 취소하지 않음', async () => {
+  const { db, save } = placeSetWithStandaloneWake();
+  const body = await save(null);
+  assert.deepEqual(db.rows('alarms').filter((a) => a.alarm_type === 'WAKE' && a.user_id === USER).map((a) => [a.participant_id, hm(a.scheduled_at)]), [
+    [null, '08:00'],
+    [null, '07:30'],
+    ['pt-cap', '11:00'],
+  ]);
+  assert.deepEqual(body.canceled_alarm_ids, []);
+});
+
+test('합치기 검사: 반복 · 남의 알람은 못 고름, 이미 합쳐 지웠으면(다시 보냄) 그대로 저장, 이 약속에 기상이 안 생기면 거절', async () => {
+  const { ctx, db, save } = placeSetWithStandaloneWake();
+  assert.equal(await loadLinkableWake(ctx, 'al-daily'), null);
+  assert.equal(await loadLinkableWake(ctx, 'al-other'), null);
+  await assert.rejects(save('al-daily'), (e: unknown) => e instanceof HttpError && e.code === 'NOT_FOUND');
+  assert.equal(db.rows('alarms').filter((a) => a.participant_id === 'pt-cap').length, 0, '거절하면 아무것도 안 씀');
+
+  await save('al-8', { manualTimes: { WAKE: kst(23, 480), PREPARE: kst(23, 690) } });
+  const again = await save('al-8', { manualTimes: { WAKE: kst(23, 480), PREPARE: kst(23, 690) } }); // 응답을 잃고 같은 저장을 다시
+  assert.deepEqual(db.rows('alarms').filter((a) => a.participant_id === 'pt-cap' && a.alarm_type === 'WAKE').map((a) => hm(a.scheduled_at)), ['08:00'], '기상은 하나');
+  assert.deepEqual(again.canceled_alarm_ids, []);
+
+  const off = placeSetWithStandaloneWake();
+  await assert.rejects(off.save('al-8', { enabled: { WAKE: false } }), (e: unknown) => e instanceof HttpError && e.code === 'UNPROCESSABLE');
+  assert.equal(off.db.rows('alarms').some((a) => a.alarm_id === 'al-8'), true, '거절하면 일정 없는 알람은 그대로');
+  assert.throws(() => assertLinkWake({ chain: [] }, {}, { alarm_id: 'al-8' } as AlarmRow, []), (e: unknown) => e instanceof HttpError && e.code === 'UNPROCESSABLE');
+});
+
+test('합치기 도중 실패해도 기존 알람은 사라지지 않음 — 약속 알람 쓰기 실패면 독립 알람 그대로, 독립 알람 지우기 실패면 둘 다 남고 다시 저장하면 기상 하나로', async () => {
+  const insertFails = placeSetWithStandaloneWake();
+  insertFails.db.failOn = [{ table: 'alarms', op: 'insert' }];
+  await quiet(() => assert.rejects(insertFails.save('al-8', { manualTimes: { WAKE: kst(23, 480), PREPARE: kst(23, 690) } })));
+  assert.equal(insertFails.db.rows('alarms').some((a) => a.alarm_id === 'al-8'), true, '약속 알람을 못 썼으면 독립 알람은 안 지움');
+
+  const deleteFails = placeSetWithStandaloneWake();
+  deleteFails.db.failOn = [{ table: 'alarms', op: 'delete' }];
+  await quiet(() => assert.rejects(deleteFails.save('al-8', { manualTimes: { WAKE: kst(23, 480), PREPARE: kst(23, 690) } })));
+  const wakes = () => deleteFails.db.rows('alarms').filter((a) => a.alarm_type === 'WAKE' && a.user_id === USER && a.recurrence_rule == null).map((a) => [a.participant_id, hm(a.scheduled_at)]);
+  assert.deepEqual(wakes(), [[null, '08:00'], ['pt-cap', '08:00']], '둘 다 남음 (유실 없음)');
+
+  deleteFails.db.failOn = [];
+  const retry = await deleteFails.save('al-8', { manualTimes: { WAKE: kst(23, 480), PREPARE: kst(23, 690) } }); // 같은 저장을 다시
+  assert.deepEqual(wakes(), [['pt-cap', '08:00']]);
+  assert.deepEqual(retry.canceled_alarm_ids, ['al-8']);
 });

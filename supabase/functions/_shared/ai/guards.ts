@@ -328,7 +328,7 @@ export function alarmRelayMissing(reply: string, ctx: Context, eventsVisible: Se
   const first = dueEvents[0];
   if (!first || dueEvents.every((e) => e.alarms.length === 0)) return [];
   const prev = new Map<string, AlarmPlan>();
-  for (const a of [...ctx.today.alarms, ...ctx.tomorrow.alarms]) prev.set(a.ref, a);
+  for (const a of [...ctx.today.alarms, ...ctx.tomorrow.alarms, ...(ctx.later?.alarms ?? [])]) prev.set(a.ref, a);
   for (const e of sorted.slice(0, sorted.length - dueEvents.length)) for (const a of e.alarms) prev.set(a.ref, a);
   // 전할 알람 = 전할 처리 결과들의 바뀐 알람 (같은 알람이 또 바뀌었으면 나중 값)
   const cur = new Map<string, AlarmPlan>();
@@ -481,8 +481,8 @@ export function allowedNumbers(ctx: Context, events: ServerEvent[], userTexts: s
       else durations.push(f.minutes);
     }
   }
-  for (const a of [...ctx.today.appointments, ...ctx.tomorrow.appointments]) { addT(a.time); dates.push(a.date); if (a.travel_minutes) durations.push(a.travel_minutes); }
-  for (const a of [...ctx.today.alarms, ...ctx.tomorrow.alarms]) { addT(a.time); dates.push(a.date); }
+  for (const a of [...ctx.today.appointments, ...ctx.tomorrow.appointments, ...(ctx.later?.appointments ?? [])]) { addT(a.time); dates.push(a.date); if (a.travel_minutes) durations.push(a.travel_minutes); }
+  for (const a of [...ctx.today.alarms, ...ctx.tomorrow.alarms, ...(ctx.later?.alarms ?? [])]) { addT(a.time); dates.push(a.date); }
   for (const e of events) for (const a of e.alarms) { addT(a.time); dates.push(a.date); }
   for (const e of events) for (const s of [...e.applied, ...e.pending.map((p) => p.summary), ...e.clarify, ...(e.conflicts ?? [])]) {
     for (const m of findTimeMentions(s)) collect(m);

@@ -24,6 +24,12 @@ export function commitKeyFor(body: unknown, atMs: number): string {
   return key;
 }
 
+// 같은 본문의 키가 아직 있음 = 앞선 같은 저장이 응답 없이 끝남(실패 · 시간 초과) — 이번은 다시 보냄 (서버가 요청 키를 아직 안 읽어 본문에 resend로 알림)
+export function hasCommitKey(body: unknown, atMs: number): boolean {
+  const saved = keys.get(bodyId(body));
+  return saved != null && atMs - saved.at < COMMIT_KEY_TTL_MS;
+}
+
 // 저장이 성공한 뒤 그 본문의 키를 지움
 export function forgetCommitKey(body: unknown): void {
   keys.delete(bodyId(body));

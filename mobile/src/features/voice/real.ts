@@ -8,16 +8,18 @@
 //     다시 열 때 계산이 안 끝난 카드(NEEDS_ESTIMATE)는 이어서 계산해 results만 보냄. 저장한 카드는 서버에 SAVED를 알리기 전에 로컬(savedMarks.ts)에 적어 두어, 알림이 안 가고 꺼져도 일정이 두 벌 생기지 않게 함
 //   · 서버 요청은 pending 하나 + 카드 요청 큐 — 실패한 요청(pending)이 있으면 카드 동작은 앱 일만 바로 하고 서버 알림은 큐에서 기다렸다가 그 요청이 성공한 뒤 차례로 보냄
 import { autoImportance } from '@shared/calc/importance.ts';
-import { adjustEstimate, moveWakeOnly, orderError } from '@/features/alarm/adjust';
-import { createAppointment, createStandaloneAlarm, estimateAppointment, getAppointment, listPlaces, previewAlarms, saveAlarmSettings } from '@/features/alarm/api';
+import { adjustEstimate, moveWakeOnly, orderError, orderPair } from '@/features/alarm/adjust';
+import { createAppointment, createPlacePendingAppointment, createStandaloneAlarm, estimateAppointment, getAppointment, listPlaces, previewAlarms, saveAlarmSettings } from '@/features/alarm/api';
 import { saveNotice } from '@/features/alarm/saveNotice';
 import { draftAt } from '@/features/alarm/schedule';
 import {
+  KIND_LABEL,
   RING_KINDS,
   defaultAlarms,
   type AlarmEdits,
   type AlarmKind,
   type AlarmSettingsDraft,
+  type AlarmTime,
   type AppointmentDetail,
   type AppointmentDraft,
   type Estimate,
@@ -29,7 +31,7 @@ import {
   type Transport,
 } from '@/features/alarm/types';
 import { now } from '@/lib/clock';
-import { lifeDayKey } from '@/lib/format';
+import { formatTime, lifeDayKey } from '@/lib/format';
 import { prepareBriefings } from '@/lib/alarmSync/briefing';
 import { EdgeError, callEdge } from '@/lib/edge';
 import { UserError, userMessage } from '@/lib/errors';
@@ -323,11 +325,12 @@ async function absorb(res: TurnResponse, turnId: string): Promise<Pending | null
 
 type Outcome = { status: 'READY' | 'NEEDS_PLACE' | 'FAILED'; estimate?: Estimate; alarms?: CardAlarm[]; level?: number; withWake?: boolean; basis?: Basis; error?: string };
 
-// 장소 이름이 내가 쓴 곳(listPlaces)에 똑같이 하나면 그 좌표 (L1 답 L1-6) — 아니면 null (카드의 [장소 고르기])
+// 장소 이름이 내가 쓴 곳(최근 장소 — listPlaces를 검색어 없이)에 똑같이 하나면 그 좌표 (L1 답 L1-6) — 아니면 null (카드의 [장소 고르기])
+//   검색어를 주면 카카오 장소 검색이 되어 전국의 같은 이름 가게('한실' 등)를 그대로 확정해 버림 — 들은 이름은 사용자가 [장소 고르기]에서 직접 골라야 확정
 async function placeByName(name: string): Promise<ResolvedPlace | null> {
   const wanted = name.trim();
   if (!wanted) return null;
-  const same = (await listPlaces(wanted)).filter((p) => p.name.trim() === wanted);
+  const same = (await listPlaces()).filter((p) => p.name.trim() === wanted);
   const only = same.length === 1 ? same[0] : null;
   return only && typeof only.lat === 'number' && typeof only.lng === 'number' ? { name: only.name, lat: only.lat, lng: only.lng } : null;
 }
@@ -430,6 +433,12 @@ function editsOf(
       timesChanged = true;
     }
   }
+  // 기상만 바꿔 달라고 했으면 준비 알람은 지금 시각에 둠 — 공용 계산은 기상을 옮기면 준비가 같은 간격으로 따라와서(calc/chain.ts),
+  //   기상을 많이 늦추면 준비가 출발보다 늦어져 "출발 시각이 준비보다 빠를 수 없어요"로 막혔음. 요청하지 않은 알람은 옮기지 않음 (moveWakeOnly와 같은 규칙)
+  //   준비시간 가감(prepare_delta)이 같이 오면 준비가 움직이는 게 요청이라 고정하지 않음
+  const pinPrepare = edit?.times?.WAKE && !edit.times.PREPARE && edit.prepare_delta == null && !times.PREPARE;
+  const prepNow = pinPrepare ? detail.alarms.find((a) => a.kind === 'PREPARE')?.at : undefined;
+  if (prepNow) times.PREPARE = prepNow;
   const prepareMinutes = prepareOf(detail, prepDeltaOf(edit));
   const levels = {} as AlarmSettingsDraft['levels'];
   let levelChanged = false;
@@ -445,6 +454,25 @@ function editsOf(
   return { edits, draft: { ...edits, kinds: { ...(edit?.enabled ?? {}) }, levels }, changed, levelChanged };
 }
 
+// 알람 순서가 어긋나면(기상 ≤ 준비 ≤ 출발 ≤ 도착 목표) 어느 두 알람이 몇 시로 부딪히는지 + 조정안 — 맞으면 null
+//   다른 알람을 몰래 옮기지 않고 사용자에게 물음: 요청한 알람이 하나면 상대 알람을 같은 만큼 옮기는 안을 붙임 (서버가 '되물을 것'으로 T1 · Live에 넘김, 80자 안)
+export function conflictText(after: readonly AlarmTime[], before: readonly AlarmTime[], edit: ServerEdit | null | undefined): string | null {
+  const pair = orderPair([...after]);
+  if (!pair) return null;
+  const at = (list: readonly AlarmTime[], k: AlarmKind) => list.find((a) => a.kind === k)?.at;
+  const show = (k: AlarmKind) => `${KIND_LABEL[k]} 알람(${at(after, k) ? formatTime(at(after, k) as Date) : '?'})`;
+  const head = `${show(pair.earlier)}이 ${show(pair.later)}보다 늦어요`;
+  const asked = RING_KINDS.filter((k) => edit?.times?.[k]);
+  const mine = asked.length === 1 && edit?.prepare_delta == null ? asked[0] : null; // 준비 가감이 같이 오면 준비가 움직이는 게 요청이라 안을 내지 않음
+  const other = mine === pair.earlier ? pair.later : mine === pair.later ? pair.earlier : null;
+  const moved = mine ? at(after, mine) : undefined;
+  const was = mine ? at(before, mine) : undefined;
+  const otherWas = other ? at(before, other) : undefined;
+  if (!other || other === 'ARRIVE' || !moved || !was || !otherWas) return `${head} — 시각을 다시 알려 주세요`;
+  const proposed = new Date(otherWas.getTime() + (moved.getTime() - was.getTime()));
+  return `${head} — ${KIND_LABEL[other]}도 ${formatTime(proposed)}에 맞출지 알려 주세요`;
+}
+
 // 있는 약속의 알람 고치기 카드 계산 — 시각 · 준비가 바뀔 때만 previewAlarms (길찾기를 불러서), 켜기 · 강도만이면 지금 알람 그대로
 async function previewEdit(rec: CardRec): Promise<Outcome> {
   const edit = rec.server.edit;
@@ -457,7 +485,7 @@ async function previewEdit(rec: CardRec): Promise<Outcome> {
     let alarms = detail.alarms;
     if (changed) {
       alarms = (await previewAlarms(id, edits)).alarms;
-      const blocked = orderError(alarms);
+      const blocked = conflictText(alarms, detail.alarms, edit);
       if (blocked) return { status: 'FAILED', error: blocked };
     }
     const shown = ringAlarms(alarms).map((a) => (edit?.enabled && typeof edit.enabled[a.kind as RingKind] === 'boolean' ? { ...a, enabled: edit.enabled[a.kind as RingKind] as boolean } : a));
@@ -1083,6 +1111,34 @@ export function saveCard(cardId: string): Promise<string> {
     // 한 문구만 보이면 다른 쪽(폰에 못 건 알람 · 준비 시간 · 강도 못 바꿈)을 모르므로 둘 다 나면 이어 붙임
     if (notice && partial) return `${notice}. 준비 시간 · 강도도 바꾸지 못했어요. 알람 설정에서 바꿔 주세요`;
     return notice ?? partial ?? toast;
+  });
+}
+
+// 카드 [장소 없이 저장] — 장소를 확인하지 못한 새 일정 카드(NEEDS_PLACE)를 제목 · 날짜 · 시각만으로 저장 (alarm-commit PLACE_PENDING)
+//   들은 장소('한실')는 저장하지 않고, 이동시간 · 알람도 만들지 않음 — 장소는 나중에 일정 편집에서, 알람은 알람 설정에서 확인하고 저장
+//   저장이 성공한 뒤에만 SAVED로 바꾸고 서버에 알림 (실패면 던지고 카드는 그대로 — 다시 누르면 같은 요청 키라 두 번 안 만들어짐)
+export function saveCardWithoutPlace(cardId: string): Promise<string> {
+  return serial(async () => {
+    const rec = recOf(cardId);
+    if (rec.status === 'SAVED' || rec.status === 'REJECTED') throw new UserError('이미 확인한 카드예요');
+    if (rec.server.kind !== 'APPT_NEW' || rec.status !== 'NEEDS_PLACE') throw new UserError('장소를 골라야 하는 새 일정만 장소 없이 저장할 수 있어요');
+    const d = rec.server.draft;
+    const day = d ? dayOf(d.date) : null;
+    if (!d || !day || !TIME.test(d.time)) throw new UserError('날짜나 시각을 알 수 없어요');
+    if (rec.server.turn != null && [...state.cards.entries()].some(([id, r]) => id !== cardId && r.server.kind === 'APPT_NEW' && r.server.turn === rec.server.turn && r.status === 'SAVED')) {
+      throw new UserError('이번 요청에서는 첫 일정 하나만 저장해요');
+    }
+    const saved = await createPlacePendingAppointment({
+      title: d.title,
+      at: draftAt(day, d.time),
+      importance: d.importance ?? autoImportance(d.title),
+      ...(d.transport ? { transport: d.transport } : {}),
+    });
+    rec.status = 'SAVED';
+    rec.appointmentId = saved.id;
+    await rememberSaved(cardId, 'APPT_NEW', saved.id, [], saved.level);
+    await notifyCard({ id: cardId, action: 'SAVED', appointment_id: saved.id, alarms: [] }, { cardId });
+    return `${saved.title} 일정을 저장했어요. 장소를 정하면 알람을 맞출 수 있어요`;
   });
 }
 

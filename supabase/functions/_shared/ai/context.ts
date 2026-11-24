@@ -1,6 +1,7 @@
 // 문맥 모으기 (DB 읽기) — voice-session이 대화 시작 때 한 번 읽는다 (설계 메모 4 · 4.5절). 읽은 행을 해석하는 일은 context-core.ts(순수)가 한다.
 // 읽기는 모두 부른 사람의 RLS 클라이언트(userDb)로 — 남의 일정 · 기록에는 닿지 못한다. 쿼리 모양은 앞 출발만 앱(#240 mobile/src/features/location/real.ts listEarlierDepartures)과 같게 맞춤.
-//   쿼리: ① 프로필(시간대 · 별명) ② 돌아볼 날 기상 기록(daily_records) ③ 돌아볼 날 ~ 내일 내 참여 약속 ④ 그날 기상 확인 기록(출처) ⑤ 앞 출발(alarm_events) ⑥ 안 끝낸 할 일 · 준비물 ⑦ 내일 알람(참여 행 알람 + 일정 없는 기상)
+//   쿼리: ① 프로필(시간대 · 별명) ② 돌아볼 날 기상 기록(daily_records) ③ 돌아볼 날 ~ 내일 + LATER_DAYS일 내 참여 약속(그룹 이름 포함) ④ 그날 기상 확인 기록(출처) ⑤ 앞 출발(alarm_events) ⑥ 안 끝낸 할 일 · 준비물
+//         ⑦ 내일 ~ LATER_DAYS일 내 알람(참여 행 알람 + 일정 없는 기상) — 내일 뒤는 고칠 대상 찾기용(context-core later)
 // 시각은 서울 +09:00 고정(view.ts와 같음, 설계 메모 11절 "v0 Asia/Seoul만") — 다른 시간대면 서울로 보고 tzSupported false로 알린다.
 import { must } from '../db.ts';
 
@@ -9,7 +10,7 @@ const read = <T>(context: string, res: unknown): T => must<T>(context, res as { 
 import type { Db } from '../supabase.ts';
 import { safeTimeZone } from '../tz.ts';
 import type { AlarmRow, ContextInput, EarlierRow, InputSource, ParticipantJoin, TodoRow, WakeRecord } from './context-core.ts';
-import { seoulParts } from './context-core.ts';
+import { LATER_DAYS, seoulParts } from './context-core.ts';
 import { dayOf, dayStartIso, type ConversationDays } from './turn-core.ts';
 import { addDays } from './view.ts';
 
@@ -37,7 +38,7 @@ export interface ContextRows {
 }
 
 const PARTICIPANT_COLUMNS =
-  'participant_id, appointment_id, user_id, transport_type, est_travel_minutes, departed_at, departed_source, arrived_at, arrived_source, is_late, late_minutes, appointments!inner(appointment_id, title, appointment_at, dest_name, importance, recurrence_rule)';
+  'participant_id, appointment_id, user_id, transport_type, est_travel_minutes, departed_at, departed_source, arrived_at, arrived_source, is_late, late_minutes, appointments!inner(appointment_id, title, appointment_at, dest_name, importance, recurrence_rule, group_id, groups(group_name))';
 
 type ParticipantRaw = Omit<ParticipantJoin, 'appointment'> & { appointments: ParticipantJoin['appointment'] };
 
@@ -57,7 +58,7 @@ export async function readContextRows(deps: ContextDeps, now: Date): Promise<Con
   const days = dayOf(nowIso, safeTimeZone(prof?.timezone));
   const reviewStart = startOf(review);
   const reviewEnd = startOf(addDays(review, 1));
-  const windowEnd = startOf(addDays(morning, 1));
+  const windowEnd = startOf(addDays(morning, 1 + LATER_DAYS));
 
   // ③ 참여 약속(돌아볼 날 ~ 내일) · ④ 기상 확인 출처 · ⑤ 앞 출발 · ⑥ 할 일
   const [parts, wakeEvents, earlier, todoRes] = await Promise.all([
@@ -90,8 +91,8 @@ export async function readContextRows(deps: ContextDeps, now: Date): Promise<Con
     return { ...rest, appointment: appointments };
   });
 
-  // ⑦ 내일 알람 — 내일 참여 행의 알람 + 일정 없는 기상(지금 뒤 ~ 내일 24시)
-  const morningIds = participants.filter((p) => seoulParts(p.appointment.appointment_at).date === morning).map((p) => p.participant_id);
+  // ⑦ 내일 ~ 이후 알람 — 내일 · 이후 참여 행의 알람 + 일정 없는 기상(지금 뒤 ~ 창 끝)
+  const morningIds = participants.filter((p) => seoulParts(p.appointment.appointment_at).date >= morning).map((p) => p.participant_id);
   const [partAlarms, soloAlarms] = await Promise.all([
     morningIds.length === 0
       ? Promise.resolve({ data: [] as AlarmRow[], error: null })

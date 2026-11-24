@@ -112,6 +112,12 @@ export type JoinDefaults = { homeName: string | null; transport: Transport; prep
 export type JoinChoice = { transport: Transport; prepareMinutes: number | null; travelMinutes?: number | null };
 export type JoinResult = { phoneFailed: number }; // 폰에 못 건 알람 수
 export type SavedAppointment = Appointment & { followUp?: SaveFollowUp };
+
+// 장소 미확정 일정 (AI 대화 — 장소를 확인하지 못함, alarm-commit PLACE_PENDING) — 제목 · 시각만, 알람 없음
+export type PlacePendingDraft = { title: string; at: Date; importance: Importance; transport?: Transport };
+export type PlacePendingSaved = { id: string; title: string; alarms: AlarmTime[]; level: Level };
+// 장소가 빈 일정(장소 미확정)의 장소 자리 글자
+export const PLACE_PENDING_LABEL = '장소 미정';
 export type SettingsSaveResult = { turnedOff: boolean; turnedOn: boolean; followUp?: SaveFollowUp };
 
 // 반복 일정의 앞으로 회차 한 줄 (H03 회차 목록) — 같은 묶음(series_id)의 지금 이후 회차, 시각 순
@@ -198,7 +204,11 @@ export type AlarmPreview = {
 export type AlarmSettingsDraft = AlarmEdits & {
   kinds: Partial<Record<AlarmKind, boolean>>; // 종류별 켜기 (기상 · 준비 · 출발)
   levels: Record<IntensityAxis, Level | null>; // null = 자동
+  linkWakeAlarmId?: string; // 같은 날 일정 없는 기상 알람을 이 일정 기상으로 합침 — 사용자가 H03 확인 시트에서 고른 경우만 (서버가 그 알람을 지움)
 };
+
+// 같은 날 일정 없는 기상 알람 (알람 목록 "+" · AI "8시에 깨워줘") — 장소를 나중에 정한 일정의 기상과 겹치는지 H03이 물어볼 때
+export type StandaloneWake = { id: string; at: Date };
 
 export type NextAlarm = { appointment: Appointment; alarm: AlarmTime };
 

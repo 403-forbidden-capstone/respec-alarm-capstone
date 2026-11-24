@@ -339,3 +339,47 @@ describe("buildContext — 한 바퀴 (설계 메모 8절 시드)", () => {
     assert.equal(buildContext({ ...seed(), confirmFactIds: [], question: q }).context.session.opening, "QUESTION_FIRST");
   });
 });
+
+describe("이후 일정 · 알람 (고칠 대상 찾기용 ctx.later) · 그룹 약속", () => {
+  // 시드 + 모레 10/31 그룹 약속(캡스톤 팀) · 그 알람 · 10/31 일정 없는 기상 / 창(내일 + LATER_DAYS일) 밖 11/8 약속
+  function withLater(): Parameters<typeof buildContext>[0] {
+    const base = seed();
+    const part = (pid: string, aid: string, title: string, at: string, group: { group_id: string; groups: { group_name: string } | null } | null) => ({
+      participant_id: pid, appointment_id: aid, user_id: "me", transport_type: "TRANSIT" as const, est_travel_minutes: 30,
+      departed_at: null, departed_source: null, arrived_at: null, arrived_source: null, is_late: null, late_minutes: null,
+      appointment: { appointment_id: aid, title, appointment_at: at, dest_name: "", importance: "NORMAL" as const, recurrence_rule: null, ...(group ?? { group_id: null }) },
+    });
+    base.participants.push(
+      part("p3", "ap-3", "캡스톤 회의", "2026-10-31T14:00:00+09:00", { group_id: "g1", groups: { group_name: "캡스톤 팀" } }),
+      part("p4", "ap-4", "먼 약속", "2026-11-08T10:00:00+09:00", null),
+    );
+    base.alarms.push(
+      { alarm_id: "al-3w", participant_id: "p3", routine_id: null, alarm_type: "WAKE", scheduled_at: "2026-10-31T11:00:00+09:00", intensity: "NORMAL", is_enabled: true, time_source: "AUTO" },
+      { alarm_id: "al-solo", participant_id: null, routine_id: null, alarm_type: "WAKE", scheduled_at: "2026-10-31T09:00:00+09:00", intensity: "NORMAL", is_enabled: true, time_source: "MANUAL" },
+    );
+    return base;
+  }
+
+  it("내일 뒤 약속 · 알람은 later로 (내일 블록 · 준비물은 그대로), 별칭은 이어서, 그룹 약속은 그룹 이름, 창 밖은 뺌", () => {
+    const { context, refs } = buildContext(withLater());
+    assert.deepEqual(context.tomorrow.appointments.map((a) => a.ref), ["a2"]);
+    assert.deepEqual(context.tomorrow.alarms.map((a) => a.ref), ["al1", "al2", "al3"]);
+    assert.deepEqual(context.later?.appointments.map((a) => [a.ref, a.title, a.date, a.group]), [["a3", "캡스톤 회의", "2026-10-31", "캡스톤 팀"]]);
+    assert.deepEqual(context.later?.alarms.map((a) => [a.ref, a.type, a.date, a.time, a.appointment_ref]), [["al4", "WAKE", "2026-10-31", "09:00", null], ["al5", "WAKE", "2026-10-31", "11:00", "a3"]]);
+    assert.deepEqual(refs.appointments["a3"], { appointment_id: "ap-3", participant_id: "p3" });
+    assert.equal(refs.appointments["a4"], undefined, "11/8은 창 밖");
+    assert.equal("group" in (context.tomorrow.appointments[0] ?? {}), false, "개인 일정은 group 칸 없음");
+    // 그룹 이름을 못 읽으면(그룹을 나감 등) 빈 이름 — 그룹 약속인 것은 남김
+    const hidden = withLater();
+    (hidden.participants[2] as { appointment: { groups: unknown } }).appointment.groups = null;
+    assert.equal(buildContext(hidden).context.later?.appointments[0]?.group, "");
+  });
+
+  it("화면: later가 있으면 '이후 일정·알람' 블록 · 그룹 약속 표시, 없으면 블록 없음(예전 글 그대로)", () => {
+    const out = viewContext(buildContext(withLater()).context);
+    assert.ok(out.includes("### 이후 일정·알람 (사용자가 고쳐 달라고 할 때만 참고)"), out);
+    assert.ok(out.includes("[a3] 10-31(토) 14:00 캡스톤 회의 · 장소 미정 · 중요도 중요(NORMAL) · 이동 대중교통 30분 · 그룹 약속(캡스톤 팀)"), out);
+    assert.ok(out.includes("[al5] 기상 10-31(토) 11:00 · 보통(NORMAL) · a3 기준"), out);
+    assert.ok(!viewContext(buildContext(seed()).context).includes("이후 일정"));
+  });
+});

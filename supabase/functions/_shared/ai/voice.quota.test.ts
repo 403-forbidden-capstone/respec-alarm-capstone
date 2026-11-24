@@ -345,6 +345,8 @@ test('일정이 아닌 글의 추출 실패는 기존 그대로 T1 답 (대화�
 test('mightBeSchedule: 사고 메시지 · 내일 · 회의는 일정일 수도 있음, 일반 말은 아님', () => {
   assert.equal(mightBeSchedule(MEETING), true);
   assert.equal(mightBeSchedule('내일 9시 수업'), true);
+  assert.equal(mightBeSchedule('장소는 세종대학교야'), true); // 저장한 일정에 장소를 알려 주는 말 — 추출이 실패하면 버리지 않고 [다시 시도] (실제 Gemini 503 때 장소가 빠졌던 것)
+  assert.equal(mightBeSchedule('어디서 만나기로 했냐면 강남역'), true);
   assert.equal(mightBeSchedule('오늘 좀 피곤했어'), false);
   assert.equal(mightBeSchedule('아무것도 하기 싫어'), false);
 });

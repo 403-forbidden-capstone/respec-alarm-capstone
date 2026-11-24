@@ -3,7 +3,7 @@ import { describe, expect, it } from '@jest/globals';
 import { formatTime } from '@/lib/format';
 import { kst } from '@/mocks/data';
 
-import { adjustEstimate, autoTime, isManualTime, manualTimes, moveAlarm, orderError, resetAlarm, sameEdits, shownPreview, timeInputsChanged } from '../adjust';
+import { adjustEstimate, autoTime, isManualTime, linkWakeTimes, manualTimes, moveAlarm, orderError, resetAlarm, sameEdits, shownPreview, timeInputsChanged } from '../adjust';
 import type { AlarmEdits, AlarmKind, AlarmPreview, AlarmTime, Estimate } from '../types';
 
 const at = (minutes: number) => kst(22, minutes);
@@ -132,5 +132,24 @@ describe('H03에 보일 알람 — 입력을 안 바꾸면 저장된 값', () =>
   it('입력을 바꾸면 다시 계산한 값을 보임', () => {
     expect(shownPreview({ ...edits, bufferMinutes: 5 }, edits, saved, recalculated)).toBe(recalculated);
     expect(shownPreview({ ...edits, times: { WAKE: at(450) } }, edits, saved, recalculated)).toBe(recalculated);
+  });
+});
+
+describe('같은 날 일정 없는 기상 합치기 (linkWakeTimes)', () => {
+  const chain = (): AlarmTime[] => [
+    { id: 'w', kind: 'WAKE', at: kst(23, 660), enabled: true },
+    { id: 'p', kind: 'PREPARE', at: kst(23, 690), enabled: true },
+    { id: 'd', kind: 'DEPARTURE', at: kst(23, 720), enabled: true },
+  ];
+
+  it('기상 = 그 알람 시각, 준비는 보이던 시각에 고정 — 오후 1시 약속의 준비가 아침으로 당겨지지 않음 · 다른 직접 고른 시각은 그대로', () => {
+    const times = linkWakeTimes(chain(), { DEPARTURE: kst(23, 715) }, kst(23, 480));
+    expect(times).toEqual({ WAKE: kst(23, 480), PREPARE: kst(23, 690), DEPARTURE: kst(23, 715) });
+    expect(orderError(chain().map((x) => ({ ...x, at: (times as Record<string, Date>)[x.kind] ?? x.at })))).toBeNull(); // 기상 8:00 ≤ 준비 11:30 ≤ 출발
+  });
+
+  it('합칠 기상이 준비보다 늦으면 준비는 고정하지 않음 (기상 뒤로 따라옴) · 준비가 없으면 기상만', () => {
+    expect(linkWakeTimes(chain(), {}, kst(23, 700))).toEqual({ WAKE: kst(23, 700) });
+    expect(linkWakeTimes(chain().filter((x) => x.kind !== 'PREPARE'), {}, kst(23, 480))).toEqual({ WAKE: kst(23, 480) });
   });
 });

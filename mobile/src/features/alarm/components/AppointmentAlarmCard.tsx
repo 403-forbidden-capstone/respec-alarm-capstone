@@ -6,7 +6,7 @@ import { formatDateShort, formatTime, timeParts } from '@/lib/format';
 import { colors, radius, space } from '@/theme';
 
 import { chainLabel, pickCardAlarm, ringingKinds, seriesLines } from '../schedule';
-import { KIND_LABEL, LEVELS, type Appointment } from '../types';
+import { KIND_LABEL, LEVELS, PLACE_PENDING_LABEL, type Appointment } from '../types';
 
 type Props = {
   appointment: Appointment;
@@ -38,7 +38,7 @@ export function AppointmentAlarmCard({ appointment: a, current, onToggle, highli
         ...(a.standalone ? [] : [`준비 ${a.predictedPrepMinutes}분 · 이동 ${a.travelMinutes}분 · 여유 ${a.bufferMinutes}분`]),
         ...seriesLines({ nextOccurrence, repeatSummary, ahead }),
       ]}
-      foot={a.standalone ? `${a.title} · ${a.repeatLabel} · ${formatTime(a.at)}` : `${a.title} · ${a.place} · ${formatTime(a.at)}`}
+      foot={a.standalone ? `${a.title} · ${a.repeatLabel} · ${formatTime(a.at)}` : `${a.title} · ${a.place || PLACE_PENDING_LABEL} · ${formatTime(a.at)}`}
       enabled={a.enabled}
       onToggle={onToggle}
       toggleLabel={`${a.title} 알람`}

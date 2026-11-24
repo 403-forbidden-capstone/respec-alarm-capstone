@@ -86,6 +86,12 @@ export function adjustEstimate(estimate: Estimate, kind: RingKind, to: Date | nu
   return { ...estimate, appointment: { ...estimate.appointment, alarms } };
 }
 
+// 순서가 어긋난 두 알람 종류 (earlier가 later보다 늦게 울림) — 맞으면 null. AI 대화가 어느 시각끼리 부딪히는지 말할 때 씀
+export function orderPair(alarms: AlarmTime[]): { earlier: AlarmTime['kind']; later: AlarmTime['kind'] } | null {
+  const error = sharedOrderError(toChain(alarms));
+  return error ? { earlier: error.earlier, later: error.later } : null;
+}
+
 // H03 초안 비교 — 직접 고른 시각은 종류별로 같은 시각인지까지 봄
 const sameTimes = (x: AlarmEdits['times'], y: AlarmEdits['times']) =>
   (['WAKE', 'PREPARE', 'DEPARTURE'] as const).every((kind) => x[kind]?.getTime() === y[kind]?.getTime());
@@ -110,4 +116,11 @@ export function sameEdits(x: AlarmEdits, y: AlarmEdits) {
 // 다시 계산해야 아는 것(기록 기반 준비 줄 · 길찾기 안내)만 다시 계산한 값에서 가져옴
 export function shownPreview(edits: AlarmEdits, savedEdits: AlarmEdits, saved: AlarmPreview, recalculated: AlarmPreview): AlarmPreview {
   return sameEdits(edits, savedEdits) ? { ...recalculated, ...saved } : recalculated;
+}
+
+// 같은 날 일정 없는 기상 알람을 이 일정 기상으로 합칠 때의 직접 고른 시각 — 기상 = 그 알람 시각. 지금 보이는 준비가 그보다 뒤면 준비는 그 자리에 고정
+//   (기상을 옮기면 준비가 같은 간격으로 따라오는 규칙 때문에 오후 1시 약속의 준비가 아침 8:20으로 당겨지지 않게). 준비가 더 앞이면 고정하지 않음 — 기상 뒤로 따라옴
+export function linkWakeTimes(alarms: AlarmTime[], times: AlarmEdits['times'], wakeAt: Date): AlarmEdits['times'] {
+  const prepare = alarms.find((x) => x.kind === 'PREPARE');
+  return { ...times, WAKE: wakeAt, ...(prepare && prepare.at.getTime() > wakeAt.getTime() ? { PREPARE: prepare.at } : {}) };
 }

@@ -217,6 +217,12 @@ describe('H03 저장 요청 (settingsCommitBody)', () => {
       levels: { sound: 2, voice: null, vibration: null },
       edits: [{ screen: 'H03', field: 'alarm_enabled', alarm_type: 'WAKE', auto_value: true, edited_value: false }],
     });
+    expect(body).not.toHaveProperty('link_wake_alarm_id');
+  });
+
+  it('같은 날 일정 없는 기상 알람을 합치기로 골랐을 때만 link_wake_alarm_id', () => {
+    const draft = { ...same(saved()), kinds: {}, levels: { sound: null, voice: null, vibration: null }, linkWakeAlarmId: 'al-8' };
+    expect(settingsCommitBody(existingBody(saved(), draft), draft, [])).toMatchObject({ appointment_id: 'appt-1', link_wake_alarm_id: 'al-8' });
   });
 });
 

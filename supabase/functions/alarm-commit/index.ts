@@ -2,13 +2,15 @@
 //   약속 알람:   새 약속(appointment) 또는 기존 약속(appointment_id)에 내 참여 조건과 알람을 만들거나 고침.
 //               기존 약속의 제목 · 시각 · 장소 · 중요도는 이 함수가 고치지 않음 (D41). 공동 약속은 멤버가 각자 appointment_id로 불러 자기 몫을 계산 (#46)
 //   일정 없는 알람(type STANDALONE): 시각 + 반복(RRULE)만으로 기상 알람 하나 (D46 · Q10 B). 약속 · 루틴과 연결하지 않음
+//   기존 약속 + link_wake_alarm_id: 같은 날 일정 없는 기상 알람을 이 약속 기상(같은 시각)으로 합치고 그 알람은 지움 — 사용자가 H03에서 고른 경우만 (commit.ts loadLinkableWake)
+//   장소 미확정 일정(type PLACE_PENDING): 제목 · 시각만으로 일정 + 내 참여 행, 장소 빈칸 · 이동시간 NULL · 알람 없음 (commit.ts commitPlacePending)
 //   응답: 저장된 알람 + ring_packages(폰에 걸 예약 꾸러미, 알람 코어 RingPackage) + canceled_alarm_ids(폰에서 지울 예약, 반드시 같이 줌)
 //   오류: VALIDATION_FAILED · NOT_FOUND · FORBIDDEN · UNPROCESSABLE(출발 시각까지 지남 · 알람 순서 어긋남) · ROUTE_UNAVAILABLE(이동시간을 정할 수 없음)
 // 쓰기는 service_role로 하되, 읽기(약속 · 내 기록)는 부른 사람의 RLS로 해서 남의 일정에는 닿지 못함. 쓰는 순서 · 되돌리기는 _shared/commit.ts
 import 'jsr:@supabase/functions-js/edge-runtime.d.ts';
 
 import { requireUser } from '../_shared/auth.ts';
-import { assertPersistable, commitStandalone, persistAppointment, type CommitCtx } from '../_shared/commit.ts';
+import { assertLinkWake, assertPersistable, commitPlacePending, commitStandalone, loadLinkableWake, persistAppointment, type CommitCtx } from '../_shared/commit.ts';
 import { must } from '../_shared/db.ts';
 import { getEnv } from '../_shared/env.ts';
 import { HttpError } from '../_shared/errors.ts';
@@ -33,6 +35,9 @@ Deno.serve(
       return jsonResponse(await commitStandalone(ctx, { alarm: request.alarm, edits: request.edits, timeZone }));
     }
 
+    // 장소 미확정 일정 — 길찾기 · 알람 계산 없이 일정만 (AI 대화에서 장소를 확인하지 못했을 때)
+    if (request.type === 'PLACE_PENDING') return jsonResponse(await commitPlacePending(ctx, { appointment: request.appointment }));
+
     const { draft, appointment: created } = request;
 
     // 새 공동 약속이면 내가 그 그룹에 참여 중이어야 함 (appointments RLS의 insert 조건과 같음)
@@ -44,12 +49,17 @@ Deno.serve(
       if (!member) throw new HttpError('FORBIDDEN', '이 그룹에 참여 중이 아니라서 공동 약속을 만들 수 없어요');
     }
 
+    // 같은 날 일정 없는 기상 알람을 이 약속 기상으로 합침 (H03에서 사용자가 고름) — 약속 기상은 그 알람 시각 그대로(직접 고름)
+    const linkWake = request.linkWakeAlarmId ? await loadLinkableWake(ctx, request.linkWakeAlarmId) : null;
+    if (linkWake) draft.manualTimes = { ...draft.manualTimes, WAKE: new Date(linkWake.scheduled_at) };
+
     // 계산 + 검증 (alarm-suggest와 같은 계산). 기존 약속이 내게 안 보이면 NOT_FOUND
     const { plan, inputs, timeZone } = await buildPlan(
       { userId: user.userId, db: user.db, now: ctx.now, kakaoKey: getEnv('KAKAO_REST_API_KEY') },
       draft,
     );
     assertPersistable(plan);
+    if (request.linkWakeAlarmId) assertLinkWake(plan, draft, linkWake, inputs.existingAlarms);
     // An AUTO snapshot must NOT silently turn into a manual preparation
     // duration. If the automatic calculation has changed since preview,
     // refuse to save the stale preview instead of scheduling a different time.
@@ -61,7 +71,7 @@ Deno.serve(
     }
 
     return jsonResponse(
-      await persistAppointment(ctx, { plan, inputs, created, draft, replaceExisting: request.replaceExisting, edits: request.edits, timeZone }),
+      await persistAppointment(ctx, { plan, inputs, created, draft, replaceExisting: request.replaceExisting, edits: request.edits, timeZone, linkWake }),
     );
   }),
 );

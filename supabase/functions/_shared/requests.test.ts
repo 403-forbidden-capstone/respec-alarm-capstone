@@ -225,3 +225,49 @@ test('legacy unversioned and explicit MANUAL preparation inputs retain direct ov
     assert.equal(d.autoPrepareSnapshotMinutes, undefined);
   }
 });
+
+test('commit PLACE_PENDING: 제목 · 시각만 읽음(중요도는 제목으로 자동), 장소 · 그룹 · 반복 · 알람 칸은 VALIDATION_FAILED', () => {
+  const ok = Reader.root({ type: 'PLACE_PENDING', appointment: { title: '캡스톤 회의', appointment_at: '2026-11-24T13:00:00+09:00', transport_type: 'WALK' } });
+  const req = readCommitRequest(ok);
+  ok.finish();
+  assert.equal(req.type, 'PLACE_PENDING');
+  if (req.type !== 'PLACE_PENDING') return;
+  assert.deepEqual([req.appointment.title, req.appointment.at.toISOString(), req.appointment.importance, req.appointment.transport], ['캡스톤 회의', '2026-11-24T04:00:00.000Z', 'LOW', 'WALK']);
+  assert.equal(req.appointment.resend, undefined);
+  const resent = readCommitRequest(Reader.root({ type: 'PLACE_PENDING', appointment: { title: '회의', appointment_at: '2026-11-24T13:00:00+09:00' }, resend: true }));
+  assert.equal(resent.type === 'PLACE_PENDING' && resent.appointment.resend, true);
+
+  const issuesOf = (body: Record<string, unknown>): string => {
+    const r = Reader.root(body);
+    readCommitRequest(r);
+    try {
+      r.finish();
+      return '';
+    } catch (e) {
+      assert.ok(e instanceof HttpError && e.code === 'VALIDATION_FAILED');
+      return (e.details as { issues: { path: string }[] }).issues.map((i) => i.path).join();
+    }
+  };
+  const appt = { title: '회의', appointment_at: '2026-11-24T13:00:00+09:00' };
+  assert.equal(issuesOf({ type: 'PLACE_PENDING', appointment: { ...appt, destination: { name: '한실' } } }), 'appointment.destination');
+  assert.equal(issuesOf({ type: 'PLACE_PENDING', appointment: { ...appt, recurrence_rule: 'FREQ=WEEKLY;BYDAY=TU' } }), 'appointment.recurrence_rule');
+  assert.equal(issuesOf({ type: 'PLACE_PENDING', appointment: appt, kinds: ['WAKE'] }), 'kinds');
+  assert.equal(issuesOf({ type: 'PLACE_PENDING', appointment: { appointment_at: appt.appointment_at } }), 'appointment.title');
+  // 기존 모양(장소 필수)은 그대로 — 장소 없이 보내면 여전히 거절
+  assert.equal(issuesOf({ appointment: appt, kinds: ['WAKE'] }), 'appointment.destination');
+});
+
+test('commit link_wake_alarm_id: 기존 일정(appointment_id)에만 — 새 일정이나 uuid가 아니면 VALIDATION_FAILED', () => {
+  const ok = Reader.root({ appointment_id: ID, link_wake_alarm_id: '22222222-2222-4222-8222-222222222222' });
+  const req = readCommitRequest(ok);
+  ok.finish();
+  assert.equal(req.type === 'APPOINTMENT' && req.linkWakeAlarmId, '22222222-2222-4222-8222-222222222222');
+  const plain = readCommitRequest(Reader.root({ appointment_id: ID }));
+  assert.equal(plain.type === 'APPOINTMENT' && plain.linkWakeAlarmId, undefined);
+
+  for (const body of [{ ...NEW_BODY, link_wake_alarm_id: '22222222-2222-4222-8222-222222222222' }, { appointment_id: ID, link_wake_alarm_id: 'al-8' }]) {
+    const r = Reader.root(body);
+    readCommitRequest(r);
+    assert.throws(() => r.finish(), (e: unknown) => e instanceof HttpError && e.code === 'VALIDATION_FAILED');
+  }
+});

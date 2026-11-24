@@ -13,6 +13,7 @@ import {
   confirmWake,
   getEarlyWake,
   createAppointment,
+  createPlacePendingAppointment,
   defaultDraft,
   dismissRing,
   draftAt,
@@ -27,6 +28,7 @@ import {
   listAppointments,
   listEditLogs,
   listOccurrences,
+  listStandaloneWakes,
   previewAlarms,
   reverseAddress,
   promptWake,
@@ -35,6 +37,7 @@ import {
   snoozeRing,
   startRing,
   stopRing,
+  updateAppointment,
 } from '../api';
 import { adjustEstimate } from '../adjust';
 import { EVERY_DAY, WEEKDAYS_ONLY } from '../repeat';
@@ -882,5 +885,27 @@ describe('반복 묶음 (가짜 데이터: 매주 월 · 수 영어 스터디 4�
     for (const id of ['a1', 'a2', 'a3']) db.disabledAppointments.add(id);
     const next = await getNextAlarm();
     expect([next!.appointment.id, next!.alarm.kind, formatTime(next!.alarm.at), next!.alarm.at.getTime() === kst(26, 445).getTime()]).toEqual(['st1', 'WAKE', '오전 7:25', true]);
+  });
+});
+
+describe('장소 없이 저장한 일정 → 장소를 정함 → H03에서 알람 확인 후 저장 (가짜 모드)', () => {
+  it('같은 일정 id 그대로 · 장소 미정이면 계산 안 함 · 장소를 정해도 알람은 저장을 눌러야 생김 · 저장된 알람 = 미리 본 알람', async () => {
+    const saved = await createPlacePendingAppointment({ title: '캡스톤 회의', at: kst(23, 780), importance: 'NORMAL' });
+    expect(await getAppointment(saved.id)).toBeNull(); // H03 밖(AI · 미리 울림)은 알람 없는 일정을 그대로 없음으로
+    const pending = (await getAppointment(saved.id, { withoutAlarms: true }))!;
+    expect([pending.id, pending.place, pending.alarms]).toEqual([saved.id, '', []]);
+    expect((await previewAlarms(saved.id, pending.edits)).alarms).toEqual([]); // 장소 미정 — 이동시간을 추측하지 않음
+
+    await updateAppointment(saved.id, { place: '세종대학교', placeLat: 37.55, placeLng: 127.07 }, 'this', { confirmed: true });
+    const placed = (await getAppointment(saved.id, { withoutAlarms: true }))!;
+    expect([placed.id, placed.place, placed.alarms]).toEqual([saved.id, '세종대학교', []]); // 장소만 · 알람은 아직
+
+    const preview = await previewAlarms(saved.id, placed.edits);
+    expect(preview.alarms.map((x) => x.kind)).toContain('DEPARTURE');
+    await saveAlarmSettings(saved.id, { ...placed.edits, kinds: {}, levels: { sound: null, voice: null, vibration: null } });
+    const after = (await getAppointment(saved.id))!;
+    expect(after.id).toBe(saved.id);
+    expect(after.alarms.map((x) => [x.kind, formatTime(x.at)])).toEqual(preview.alarms.map((x) => [x.kind, formatTime(x.at)]));
+    expect(await listStandaloneWakes(kst(23, 780))).toEqual([]); // 가짜 데이터에는 일정 없는 알람이 없음
   });
 });
