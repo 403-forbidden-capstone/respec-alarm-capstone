@@ -114,6 +114,40 @@ describe('applyCommit — 저장 결과를 폰에 반영', () => {
     expect(summary).toMatchObject({ canceled: ['old-1', 'old-2'], scheduled: ['new-1'], failed: [] });
   });
 
+  it('순수준비시간 30→45분 재저장: 동일 alarmId의 기상·준비만 15분 앞당겨 네이티브 예약을 갱신', async () => {
+    const departure = NOW + 2 * 60 * 60_000;
+    const oldPackages: RingPackage[] = [
+      { ...pkg('wake-auto', departure - 50 * 60_000), type: 'WAKE' },
+      { ...pkg('prepare-auto', departure - 30 * 60_000), type: 'PREPARE' },
+      { ...pkg('departure-auto', departure), type: 'DEPARTURE' },
+    ];
+    const updatedPackages: RingPackage[] = [
+      { ...pkg('wake-auto', departure - 65 * 60_000), type: 'WAKE' },
+      { ...pkg('prepare-auto', departure - 45 * 60_000), type: 'PREPARE' },
+      { ...pkg('departure-auto', departure), type: 'DEPARTURE' },
+    ];
+    const first = await applyCommit({ ring_packages: oldPackages });
+    // Native list() returns the packages already scheduled by the first save.
+    mockCore.list.mockResolvedValue(oldPackages.map(p => ({
+      id: p.alarmId,
+      type: p.type,
+      atMillis: p.atMillis,
+      intensity: p.intensity,
+      title: p.title,
+      snoozeCount: 0,
+      nextRingAt: p.atMillis,
+    })));
+    const second = await applyCommit({ ring_packages: updatedPackages });
+    expect(mockCore.scheduleAll).toHaveBeenNthCalledWith(1, oldPackages);
+    expect(mockCore.scheduleAll).toHaveBeenNthCalledWith(2, updatedPackages);
+    expect(first.failed).toEqual([]);
+    expect(second.failed).toEqual([]);
+    expect(second.scheduled).toEqual(['wake-auto', 'prepare-auto', 'departure-auto']);
+    expect(updatedPackages[0].atMillis - oldPackages[0].atMillis).toBe(-15 * 60_000);
+    expect(updatedPackages[1].atMillis - oldPackages[1].atMillis).toBe(-15 * 60_000);
+    expect(updatedPackages[2].atMillis - oldPackages[2].atMillis).toBe(0);
+  });
+
   it('deferred · skipped_past · failed를 나눠 돌려주고 던지지 않음', async () => {
     mockCore.cancel.mockRejectedValueOnce(new Error('취소 실패'));
     mockCore.scheduleAll.mockResolvedValue([
