@@ -37,6 +37,14 @@ export type ConversationCard = {
   question: string | null; // 목업: 내일 오후 2시 스터디로 저장할까요?
   error: string | null; // 실패 · 장소 필요 이유 (사용자에게 보일 글)
   appointmentId: string | null; // 저장한 뒤 · 알람 바꾸기 대상
+  group: CardGroup | null; // 그룹 · 개인 일정 고르기 (새 일정 카드, 말에 가입한 그룹 이름이 나올 때만). 없으면 개인 일정
+};
+
+// 새 일정 카드를 그룹 일정으로 걸지 (서버 types.ts CardGroup) — ASK면 고르기 전이라 저장 안 함. candidates = 고를 수 있는 가입 그룹
+export type CardGroup = {
+  choice: 'ASK' | 'GROUP' | 'PERSONAL';
+  id: string | null;
+  candidates: { id: string; name: string }[];
 };
 
 // 남은 대화 한도 — reached가 있으면 오류가 아니라 "오늘 대화는 여기까지"

@@ -11,7 +11,7 @@ import { UserError } from '@/lib/errors';
 import { applyFix } from '../fixes';
 import { addPendingCommit } from '../finishedSessions';
 import { clearSavedMarksForUser, SAVED_MARK_TTL_MS } from '../savedMarks';
-import { beginLive, COMMIT_TIMEOUT_MS, endLive, finishConversation, flushCommits, getConversation, liveSessionId, pickCardPlace, rejectCard, resetVoiceState, retry, saveCard, saveCardWithoutPlace, say, sayVoice, TURN_TIMEOUT_MS } from '../real';
+import { beginLive, chooseCardGroup, COMMIT_TIMEOUT_MS, endLive, finishConversation, flushCommits, getConversation, liveSessionId, pickCardPlace, rejectCard, resetVoiceState, retry, saveCard, saveCardWithoutPlace, say, sayVoice, TURN_TIMEOUT_MS } from '../real';
 
 // 실데이터 대화(real.ts)를 가짜 서버 함수(callEdge) + 가짜 L1 · L2 함수로 시험 — 서버 함수 voice-session · voice-turn은 별도 PR(배포 전엔 이 가짜 응답으로 확인)
 jest.mock('@/lib/edge', () => ({ ...jest.requireActual<typeof import('@/lib/edge')>('@/lib/edge'), callEdge: jest.fn() }));
@@ -2014,5 +2014,66 @@ describe('⑥-할 일 나가기 전 할 일 → 기상만 정함 · 첫 일정 �
     await saveCard('c1');
     await expect(saveCard('c2')).rejects.toThrow('이번 요청에서는 첫 일정 하나만 저장해요');
     expect(mCreate).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('⑥-그룹 AI 대화 일정을 그룹 · 개인 일정으로', () => {
+  const CAP = { id: 'g-cap', name: '캡스톤' };
+  const STUDY = { id: 'g-study', name: '알고리즘 스터디' };
+  const asking = (candidates = [CAP]) => ({ choice: 'ASK', id: null, candidates });
+  async function ready(group: Record<string, unknown>) {
+    const card = apptCard({ group, turn: 1 });
+    script = [session(), turn({ next: 'APP_TASKS', reply: null, cards: [card] }), turn({ rev: 3, cards: [{ ...card, status: 'READY' }] })];
+    await getConversation();
+    await say('내일 10시 캡스톤 회의 잡아줘');
+  }
+  const estimatedGroups = () => mEstimate.mock.calls.map(([d]) => d.groupId);
+
+  it('그룹 · 개인을 아직 안 고른 카드(ASK)는 저장하지 않음 — 카드에 후보가 보임', async () => {
+    await ready(asking());
+    expect((await getConversation()).cards[0].group).toEqual(asking());
+    await expect(saveCard('c1')).rejects.toThrow('그룹 일정인지 개인 일정인지 먼저 골라 주세요');
+    expect(mCreate).not.toHaveBeenCalled();
+  });
+
+  it('칩으로 그룹을 고르면 서버에 GROUP을 알리고, [저장]은 그 그룹 id로 다시 계산해 저장 (알람은 본인 기준 계산 그대로)', async () => {
+    await ready(asking([CAP, STUDY]));
+    const picked = { ...asking([CAP, STUDY]), choice: 'GROUP', id: 'g-study' };
+    script = [turn({ rev: 4, cards: [apptCard({ status: 'READY', group: picked, turn: 1 })] })];
+    await chooseCardGroup('c1', 'g-study');
+    expect(turnBodies().at(-1)?.card_action).toEqual({ id: 'c1', action: 'GROUP', group_id: 'g-study' });
+    script = [turn({ rev: 5, cards: [apptCard({ status: 'SAVED', group: picked })] })];
+    await saveCard('c1');
+    expect(estimatedGroups()).toEqual([null, 'g-study']); // 처음 계산은 개인, 고른 뒤 그룹으로 다시 계산
+    expect(mCreate).toHaveBeenCalledTimes(1);
+  });
+
+  it('개인 일정(null)을 고르면 그룹 없이 저장 · 후보 밖 그룹은 막음(서버에 안 보냄)', async () => {
+    await ready(asking());
+    const sent = turnBodies().length;
+    await expect(chooseCardGroup('c1', 'g-other')).rejects.toThrow('참여 중인 그룹만 고를 수 있어요');
+    expect(turnBodies()).toHaveLength(sent);
+    script = [turn({ rev: 4, cards: [apptCard({ status: 'READY', group: { ...asking(), choice: 'PERSONAL' }, turn: 1 })] })];
+    await chooseCardGroup('c1', null);
+    expect(turnBodies().at(-1)?.card_action).toEqual({ id: 'c1', action: 'GROUP', group_id: null });
+    script = [turn({ rev: 5, cards: [apptCard({ status: 'SAVED' })] })];
+    await saveCard('c1');
+    expect(estimatedGroups().at(-1)).toBeNull();
+  });
+
+  it("말로 그룹을 밝힌 카드(GROUP)는 묻지 않고 그 그룹으로 계산 · 저장 — 그룹 일정은 [장소 없이 저장] 불가", async () => {
+    await ready({ choice: 'GROUP', id: 'g-cap', candidates: [CAP] });
+    script = [turn({ rev: 4, cards: [apptCard({ status: 'SAVED' })] })];
+    await saveCard('c1');
+    expect(estimatedGroups()).toEqual(['g-cap']);
+
+    resetVoiceState();
+    mPlaces.mockImplementation(async () => []);
+    const card = apptCard({ group: { choice: 'GROUP', id: 'g-cap', candidates: [CAP] }, draft: { ...draftOf(), place: '한실' } });
+    script = [session(), turn({ next: 'APP_TASKS', reply: null, cards: [card] }), turn({ rev: 3, cards: [{ ...card, status: 'NEEDS_PLACE' }] })];
+    await getConversation();
+    await say('내일 한실에서 캡스톤 그룹 회의');
+    await expect(saveCardWithoutPlace('c1')).rejects.toThrow('그룹 일정은 장소를 골라야 저장할 수 있어요');
+    expect(mPending).not.toHaveBeenCalled();
   });
 });

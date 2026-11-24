@@ -5,7 +5,7 @@
 import type { RefsOut } from './context-core.ts';
 import type { ServerState, StoredTurn } from './session.ts';
 import type { FixRecord, TurnState } from './turn-core.ts';
-import type { ApptDraft, Card, CardEdit, Context, Fix, PreTask, ServerEvent, Turn } from './types.ts';
+import type { ApptDraft, Card, CardEdit, CardGroup, Context, Fix, PreTask, ServerEvent, Turn } from './types.ts';
 
 // ───────── TurnState ↔ server_state ─────────
 
@@ -68,6 +68,7 @@ export interface PublicCard {
   turn: number | null;
   /** 나가기 전 할 일 · 기상 확인 — ASK면 앱이 저장하지 않음, SET이면 앱이 기상만 옮김(준비 · 출발 그대로). 없으면 null */
   pre_task: PreTask | null;
+  group: CardGroup | null;
 }
 
 export interface PublicFix {
@@ -103,6 +104,7 @@ export function publicCard(c: Card, refs: RefsOut): PublicCard {
     at: c.at ?? null,
     turn: c.turn ?? null,
     pre_task: c.pre_task ? { ...c.pre_task } : null,
+    group: c.group ? structuredClone(c.group) : null,
   };
 }
 

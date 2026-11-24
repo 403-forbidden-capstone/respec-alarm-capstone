@@ -1,6 +1,6 @@
 import { StyleSheet, View } from 'react-native';
 
-import { Button, Text } from '@/components/ui';
+import { Button, Segmented, Text } from '@/components/ui';
 import { IMPORTANCE_LABEL, KIND_LABEL } from '@/features/alarm/types';
 import { formatDateParen, formatTime } from '@/lib/format';
 import { colors } from '@/theme';
@@ -23,7 +23,12 @@ type Props = {
   saving?: boolean; // [저장]이 도는 중 — 그 버튼에 돌아가는 표시
   failure?: string | null; // 이 카드의 저장 · 계산이 실패한 까닭 — onRetry가 있으면 [다시 시도]
   onRetry?: () => void;
+  onPickGroup?: (groupId: string | null) => void; // 그룹 · 개인 일정 칩 (null = 개인) — 새 일정 카드에 그룹 고르기가 붙었을 때만
 };
+
+// 그룹 칩 값 — 개인 일정은 빈 글자, 아직 안 고름(ASK)은 어느 칩에도 안 맞는 값
+const PERSONAL = '';
+const UNPICKED = '?';
 
 const HEAD: Record<ConversationCard['kind'], string> = {
   APPT_NEW: '대화에서 찾은 내용',
@@ -34,13 +39,16 @@ const HEAD: Record<ConversationCard['kind'], string> = {
 
 // 대화에서 찾은 카드 (.xcard) — 여러 장이 대화 줄에 하나씩 놓임. 상태에 따라 계산 중 · 장소 고르기 · 저장 · 바꾸기 · 저장 안 함, 고른 뒤에는 결과만
 // 그날 첫 일정(firstOfDay)만 알람 줄을 자세히, 나머지는 "출발 알림" 한 줄 (D36)
-export function FoundScheduleCard({ card, at, onSave, onReject, onEdit, onPickPlace, onSaveWithoutPlace, onOpen, onManual, disabled, working, saving, failure, onRetry }: Props) {
+export function FoundScheduleCard({ card, at, onSave, onReject, onEdit, onPickPlace, onSaveWithoutPlace, onOpen, onManual, disabled, working, saving, failure, onRetry, onPickGroup }: Props) {
   const { status, kind } = card;
   const calculating = status === 'NEEDS_ESTIMATE' || status === 'ESTIMATING';
   const done = status === 'SAVED' || status === 'REJECTED';
   const departure = card.alarms.find((a) => a.kind === 'DEPARTURE' && a.enabled);
   const blocked = disabled || !!working;
   const retry = !!onRetry && !working;
+  const group = kind === 'APPT_NEW' ? card.group : null;
+  const groupName = group?.choice === 'GROUP' ? (group.candidates.find((g) => g.id === group.id)?.name ?? null) : null;
+  const groupOptions = group ? ([[PERSONAL, '개인 일정'], ...group.candidates.map((g) => [g.id, `${g.name} 그룹`] as const)] as const) : [];
 
   return (
     <Bubble who="ai" wide>
@@ -54,6 +62,7 @@ export function FoundScheduleCard({ card, at, onSave, onReject, onEdit, onPickPl
           {card.place ? <Row label="장소" value={card.place} /> : null}
           {card.importance && card.importance !== 'LOW' ? <Row label="중요도" value={IMPORTANCE_LABEL[card.importance]} /> : null}
           {card.items.length ? <Row label="준비물" value={card.items.join(', ')} note="같이 저장" /> : null}
+          {done && groupName ? <Row label="그룹" value={groupName} note="내 알람만" /> : null}
           {status === 'READY' || status === 'SAVED' ? (
             card.firstOfDay && card.alarms.length ? (
               card.alarms.filter((a) => a.enabled).map((a) => <Row key={a.kind} label={`${KIND_LABEL[a.kind]} 알람`} value={formatTime(a.at)} />)
@@ -75,6 +84,19 @@ export function FoundScheduleCard({ card, at, onSave, onReject, onEdit, onPickPl
         <Text variant="bodyStrong" style={styles.question}>
           “{card.question}”
         </Text>
+      ) : null}
+      {group && !done && onPickGroup ? (
+        <View style={styles.group}>
+          <Text variant="small" tone="sub" style={styles.groupNote}>
+            {group.choice === 'ASK' ? '그룹 일정인지 개인 일정인지 골라 주세요' : '알람은 내 것만 맞춰요'}
+          </Text>
+          <Segmented
+            options={groupOptions}
+            value={group.choice === 'GROUP' ? (group.id ?? UNPICKED) : group.choice === 'PERSONAL' ? PERSONAL : UNPICKED}
+            onChange={(v) => onPickGroup(v === PERSONAL ? null : v)}
+            disabled={blocked ? groupOptions.map(([v]) => v) : undefined}
+          />
+        </View>
       ) : null}
       {working || calculating ? (
         <Text variant="small" tone="sub" style={styles.note} accessibilityLiveRegion="polite">
@@ -156,4 +178,6 @@ const styles = StyleSheet.create({
   note: { marginTop: 8 },
   buttons: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 8 },
   result: { marginTop: 6 },
+  group: { marginTop: 8 },
+  groupNote: { marginBottom: 6 },
 });

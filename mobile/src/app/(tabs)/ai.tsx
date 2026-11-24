@@ -16,7 +16,7 @@ import { useSky } from '@/features/sky/hooks/useSky';
 import type { RoutineSuggestion } from '@/features/routine/types';
 import { previewTimes } from '@/features/records/suggestion';
 import type { Suggestion } from '@/features/records/types';
-import { endLiveVoice, finishConversation, getConversation, getLiveToken, pickCardPlace, rejectCard, retryConversation, saveCard, saveCardWithoutPlace, say, sayVoice } from '@/features/voice/api';
+import { chooseCardGroup, endLiveVoice, finishConversation, getConversation, getLiveToken, pickCardPlace, rejectCard, retryConversation, saveCard, saveCardWithoutPlace, say, sayVoice } from '@/features/voice/api';
 import { ChatBubble, TypingBubble } from '@/features/voice/components/ChatBubble';
 import { ChatComposer } from '@/features/voice/components/ChatComposer';
 import { noticeCopy } from '@/features/voice/chatNotice';
@@ -362,6 +362,13 @@ export default function AiScreen() {
       await reload();
     });
 
+  // 카드 그룹 · 개인 일정 칩 (null = 개인) — 저장은 [저장]으로. 실패는 useAction 토스트
+  const pickGroup = (cardId: string, groupId: string | null) =>
+    act(async () => {
+      await chooseCardGroup(cardId, groupId);
+      await reload();
+    });
+
   // 장소 시트에서 고름 — "장소를 확인하고 있어요..." → (api가 장소를 정하면) "기상·준비·출발 시간을 계산하고 있어요..." → 카드에 결과.
   //   계산 결과는 서버 안내 답을 기다리지 않고 바로 보임(api 진행 알림). 계산이 실패하면 카드에 까닭 + [다시 시도](같은 장소로)
   const pickPlace = async (cardId: string, place: { name: string; lat?: number; lng?: number }): Promise<void> => {
@@ -422,6 +429,7 @@ export default function AiScreen() {
         saving={step === 'save'}
         failure={fail?.message ?? null}
         onRetry={fail?.retry}
+        onPickGroup={(groupId) => pickGroup(card.id, groupId)}
       />
     );
   };

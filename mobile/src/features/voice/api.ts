@@ -60,6 +60,7 @@ function cardsOf(c: MockChat): ConversationCard[] {
       question: FOUND_QUESTION,
       error: null,
       appointmentId: null,
+      group: null,
     },
   ];
 }
@@ -171,6 +172,12 @@ export async function saveCard(cardId: string): Promise<string> {
 export async function saveCardWithoutPlace(cardId: string): Promise<string> {
   if (!isMock()) return real.saveCardWithoutPlace(cardId);
   throw new UserError('장소를 골라야 하는 일정이 없어요');
+}
+
+// 카드 그룹 · 개인 일정 칩 (groupId null = 개인) — 실데이터만 (목업 카드는 그룹 말이 없음)
+export async function chooseCardGroup(cardId: string, groupId: string | null): Promise<void> {
+  if (!isMock()) return real.chooseCardGroup(cardId, groupId);
+  throw new UserError('그룹을 고를 수 없는 카드예요');
 }
 
 // 카드 [저장 안 함]

@@ -357,6 +357,8 @@ export interface ContextInput {
   question?: ServerQuestion | null;
   /** 뽑은 확인할 기록(f#) — 여는 방식 계산용 */
   confirmFactIds?: string[];
+  /** 내가 가입한(JOINED) 그룹 행 — 새 일정을 그룹 일정으로 걸 후보 */
+  groups?: { group_id: string; groups: { group_name: string } | null }[];
 }
 
 /** 내일 뒤 며칠까지 고칠 대상(약속 · 알람)으로 읽을지 — "25일 알람 바꿔줘"를 찾으려고. 이 날들은 대화 화제가 아니라 찾기용 */
@@ -400,6 +402,8 @@ export function buildContext(input: ContextInput): ContextOut {
   const isLater = (a: AlarmPlan): boolean => (a.appointment_ref !== null ? laterRefs.has(a.appointment_ref) : a.date > morning);
   const stuff = itemsOf(input.todos, morningJoins.map((j) => j.appointment_id), morning);
   const question = input.question ?? null;
+  // 이름을 못 읽은 그룹은 말과 맞춰 볼 수 없어 뺌
+  const groups = (input.groups ?? []).filter((g) => (g.groups?.group_name ?? "").trim() !== "").map((g) => ({ id: g.group_id, name: (g.groups as { group_name: string }).group_name.trim() }));
 
   const context: Context = {
     context_version: "context.v1",
@@ -412,6 +416,7 @@ export function buildContext(input: ContextInput): ContextOut {
     question,
     editable_users: [], // 친구 알람은 v0 범위 밖 (설계 메모 4절)
     events: [],
+    ...(groups.length > 0 ? { groups } : {}),
   };
   return { context, refs };
 }

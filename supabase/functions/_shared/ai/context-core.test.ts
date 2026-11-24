@@ -140,6 +140,12 @@ describe("출처 · 사실 (설계 메모 4 · 4.2)", () => {
     assert.deepEqual(refs["f2"], { kind: "WAKE", record_date: "2026-10-29" });
   });
 
+  it("가입한 그룹: 이름 있는 것만 id · 이름으로, 없으면 칸 없음 (새 일정을 그룹 일정으로 걸 후보)", () => {
+    const groups = [{ group_id: "g1", groups: { group_name: " 캡스톤 " } }, { group_id: "g2", groups: null }];
+    assert.deepEqual(buildContext({ ...seed(), groups }).context.groups, [{ id: "g1", name: "캡스톤" }]);
+    assert.equal(buildContext(seed()).context.groups, undefined);
+  });
+
   it("확인할 기록은 서버 규칙(채우기 없음): 자동 값만, 출발 → 도착 → 앞 출발 3개 상한, 기상은 안 읽음 (헤드 10/30)", () => {
     const ctx = buildContext(seed()).context;
     // 앞 출발(f1) · 기상(f2) · 출발(f3) · 도착(f4): 기상은 빠지고 셋 다 들어감(앞 출발이 도착을 밀어내지 않음)

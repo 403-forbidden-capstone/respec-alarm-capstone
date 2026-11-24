@@ -172,7 +172,7 @@ export default function SettingsScreen() {
             <Card>
               <Text variant="small" tone="sub">
                 변경한 순수준비시간은 새 자동 일정의 알람 계산에 반영돼요.
-                기존 자동 알람은 자동 변경되지 않으니 알람 상세에서 '최신 기본값으로 알람 다시 계산'을 눌러 주세요.
+                기존 자동 알람은 자동 변경되지 않으니 알람 상세에서 {"'최신 기본값으로 알람 다시 계산'"}을 눌러 주세요.
                 직접 고른 시각과 그룹 일정은 이 동작에서 제외돼요.
               </Text>
               <Button label="기존 자동 알람 재계산하러 가기" onPress={() => router.push('/(tabs)/alarms')} />
