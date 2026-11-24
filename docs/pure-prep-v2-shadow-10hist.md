@@ -1,5 +1,9 @@
 # CatBoost v2: 10-record shadow preview integration
 
+> This document describes the original **Shadow-only** implementation and historical rollout.
+> For the updated **live AUTO alarm** integration (10+ completed records, source MODEL, fallback and deployment dependencies), see [pure-prep-live-catboost-10hist.md](pure-prep-live-catboost-10hist.md).
+
+
 The live alarm calculation remains unchanged. This integration works only in `alarm-suggest` (preview), and is **OFF by default**.
 
 - `PURE_PREP_SHADOW_ENABLED=1`, plus exact `PURE_PREP_SHADOW_ALLOWED_USER_IDS` allowlist.
