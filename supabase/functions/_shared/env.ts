@@ -6,7 +6,9 @@ import { HttpError } from './errors.ts';
 import { parseKeyDictionary } from './keys.ts';
 
 export function getEnv(name: string): string | undefined {
-  const value = Deno.env.get(name);
+  // Node-based pure function / FakeDb tests have no Deno global. Treat all
+  // flags as disabled there, without reading unrelated process.env secrets.
+  const value = typeof Deno === 'undefined' ? undefined : Deno.env.get(name);
   return value && value.trim() ? value.trim() : undefined;
 }
 

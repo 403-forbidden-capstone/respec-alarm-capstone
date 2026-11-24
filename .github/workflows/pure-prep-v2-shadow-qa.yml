@@ -1,7 +1,7 @@
 name: CatBoost v2 Shadow · 10 history QA
 on:
   push:
-    branches: [feat/pure-prep-v2-shadow-main-qa-20261123, fix/pure-prep-onboarding-edit-rebaseline-20261123]
+    branches: [feat/pure-prep-v2-shadow-main-qa-20261123, fix/pure-prep-onboarding-edit-rebaseline-20261123, fix/pure-prep-only-onboarding-20261124]
     paths:
       - '.github/workflows/pure-prep-v2-shadow-qa.yml'
       - 'supabase/functions/_shared/pure-prep-shadow*'
@@ -15,6 +15,13 @@ on:
       - 'mobile/src/app/settings.tsx'
       - 'mobile/src/app/alarm/[id].tsx'
       - 'mobile/src/features/onboarding/views/PrepareStep.tsx'
+      - 'mobile/src/app/onboarding.tsx'
+      - 'mobile/src/features/profile/edit.ts'
+      - 'mobile/src/features/profile/components/ProfileEditors.tsx'
+      - 'mobile/src/features/profile/__tests__/edit.test.ts'
+      - 'mobile/src/features/alarm/realPlan.ts'
+      - 'mobile/src/features/alarm/types.ts'
+      - 'mobile/src/features/social/components/GroupJoinSheet.tsx'
   pull_request:
     paths:
       - '.github/workflows/pure-prep-v2-shadow-qa.yml'
@@ -26,6 +33,13 @@ on:
       - 'mobile/src/app/settings.tsx'
       - 'mobile/src/app/alarm/[id].tsx'
       - 'mobile/src/features/onboarding/views/PrepareStep.tsx'
+      - 'mobile/src/app/onboarding.tsx'
+      - 'mobile/src/features/profile/edit.ts'
+      - 'mobile/src/features/profile/components/ProfileEditors.tsx'
+      - 'mobile/src/features/profile/__tests__/edit.test.ts'
+      - 'mobile/src/features/alarm/realPlan.ts'
+      - 'mobile/src/features/alarm/types.ts'
+      - 'mobile/src/features/social/components/GroupJoinSheet.tsx'
   workflow_dispatch:
 permissions:
   contents: read
@@ -48,7 +62,7 @@ jobs:
       - name: Typecheck mobile application
         run: npm run typecheck
       - name: Run onboarding, profile and alarm regression tests
-        run: npm test -- --runInBand --ci --watch=false src/features/profile/__tests__/edit.test.ts src/features/profile/__tests__/api.test.ts src/features/alarm/__tests__/real.test.ts src/features/alarm/__tests__/request.test.ts
+        run: npm test -- --runInBand --ci --watch=false src/features/profile/__tests__/edit.test.ts src/features/profile/__tests__/api.test.ts src/features/alarm/__tests__/real.test.ts src/features/alarm/__tests__/request.test.ts src/features/alarm/__tests__/shared.test.ts
   shadow-contract:
     runs-on: ubuntu-latest
     timeout-minutes: 8
@@ -64,7 +78,8 @@ jobs:
             supabase/functions/_shared/pure-prep-shadow.synthetic.test.ts \
             supabase/functions/_shared/calc/pure-prep-basis.test.ts \
             supabase/functions/_shared/calc/pure-prep.test.ts \
-            supabase/functions/_shared/plan-core.test.ts
+            supabase/functions/_shared/plan-core.test.ts \
+            supabase/functions/_shared/plan.test.ts
   edge-typecheck:
     runs-on: ubuntu-latest
     timeout-minutes: 10

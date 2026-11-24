@@ -392,3 +392,51 @@ test('buildPlan: 프로필의 두 칸이 계산에 닿음 — 잠귀 깊음 → 
   assert.deepEqual(tuned.prepare.recent, [70, 100, 40, 80, 45]);
   assert.equal((await run({ wake_margin: 'TIGHT' })).prepare.minutes, 61);
 });
+
+
+test('onboarding pure prep is the only new automatic preparation baseline, independent of pilot flags', async () => {
+  const input = draftOf(FULL);
+  const check = async (pure: number | null, legacy: number) => {
+    const { db, ctx } = setup();
+    Object.assign(db.rows('profiles')[0], {
+      default_outing_prep_minutes: pure,
+      default_prepare_minutes: legacy,
+    });
+    return (await buildPlan(ctx, input)).plan;
+  };
+  const first = await check(30, 120);
+  const edited = await check(45, 120);
+  assert.equal(first.prepareTarget, 'PREPARE_START_TO_DEPART');
+  assert.equal(edited.prepareTarget, 'PREPARE_START_TO_DEPART');
+  assert.equal(first.prepare.minutes, 60); // pure 30 + explicit 30 min before-prep
+  assert.equal(edited.prepare.minutes, 75); // only pure duration is changed
+  assert.deepEqual(first.chain.map(a => a.kind + ' ' + hm(a.at.toISOString())),
+    ['WAKE 08:00', 'PREPARE 08:30', 'DEPARTURE 09:00', 'ARRIVE 09:50']);
+  assert.deepEqual(edited.chain.map(a => a.kind + ' ' + hm(a.at.toISOString())),
+    ['WAKE 07:45', 'PREPARE 08:15', 'DEPARTURE 09:00', 'ARRIVE 09:50']);
+  const changedOldLegacy = await check(45, 180);
+  assert.deepEqual(changedOldLegacy.chain, edited.chain);
+  // Legacy accounts with no explicit pure time retain existing fallback.
+  const legacy = await check(null, 70);
+  assert.equal(legacy.prepareTarget, 'WAKE_TO_DEPART');
+  assert.equal(legacy.prepare.minutes, 70);
+});
+
+test('group participant AUTO uses only their profile pure time, without group history inference', async () => {
+  const { db, ctx } = setup();
+  Object.assign(db.rows('profiles')[0], {
+    default_outing_prep_minutes: 40,
+    default_prepare_minutes: 130,
+  });
+  const groupDraft = { ...draftOf(FULL), groupId: 'g1' };
+  const result = await buildPlan(ctx, groupDraft);
+  assert.equal(result.plan.prepareTarget, 'PREPARE_START_TO_DEPART');
+  assert.equal(result.plan.prepare.minutes, 70);
+  assert.equal(result.plan.prepare.source, 'DEFAULT');
+  const override = draftOf({ ...FULL, participant: { ...FULL.participant, prepare_minutes: 85 } });
+  override.groupId = 'g1';
+  const manual = await buildPlan(ctx, override);
+  assert.equal(manual.plan.prepareTarget, 'WAKE_TO_DEPART');
+  assert.equal(manual.plan.prepare.source, 'MANUAL');
+  assert.equal(manual.plan.prepare.minutes, 85);
+});

@@ -288,12 +288,14 @@ export async function joinSharedAppointment(appointmentId: string, choice: JoinC
   return { phoneFailed: (await phoneFailedIds(res)).size };
 }
 
-// [내 알람 만들기] 시트 기본값 — 내 프로필(온보딩 값): 집 이름 · 기본 수단 · 기본 준비 시간
+// [내 알람 만들기] always displays the user's single PURE preparation
+// preference; the server independently resolves this participant's AUTO plan.
+// Never reinterpret a former wake→departure default as pure preparation.
 export async function getJoinDefaults(): Promise<JoinDefaults> {
   const userId = await requireUserId();
-  const { data, error } = await supabase.from('profiles').select('home_name, default_transport, default_prepare_minutes').eq('user_id', userId).maybeSingle();
+  const { data, error } = await supabase.from('profiles').select('home_name, default_transport, default_outing_prep_minutes').eq('user_id', userId).maybeSingle();
   if (error) throw error;
-  return { homeName: data?.home_name ?? null, transport: data?.default_transport ?? 'TRANSIT', prepareMinutes: data?.default_prepare_minutes ?? 60 };
+  return { homeName: data?.home_name ?? null, transport: data?.default_transport ?? 'TRANSIT', purePrepMinutes: data?.default_outing_prep_minutes ?? null };
 }
 
 // 알람 설정 저장 (H03) — 여유 · 출발 위치 · 이동 수단 · 이동 · 준비 · 알람 시각 · 종류별 켜기 · 강도를 한 번에

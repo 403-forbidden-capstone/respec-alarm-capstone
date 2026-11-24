@@ -564,7 +564,7 @@ export async function joinSharedAppointment(id: string, choice: JoinChoice): Pro
 
 export async function getJoinDefaults(): Promise<JoinDefaults> {
   if (!isMock()) return real.getJoinDefaults();
-  return { homeName: '집', transport: 'TRANSIT', prepareMinutes: 60 };
+  return { homeName: '집', transport: 'TRANSIT', purePrepMinutes: null };
 }
 
 // 공동 약속에서 나만 빠지기 ([나는 빠지기]) — 내 참여 행 · 알람만 사라지고 약속은 다른 참여자에게 그대로 (가짜 모드는 내 목록에서만 뺌, 되살리기 없음)
