@@ -2163,4 +2163,24 @@ describe("그룹 일정 고르기", () => {
     assert.equal(card(second.state, "c1").group?.id, "g-family");
     assert.equal(second.state.events.flatMap((e) => e.clarify).some((x) => x.includes("그룹을 찾을 수 없음")), false);
   });
+
+  it("없는 그룹 요청을 추출한 다음 '고마워'만 말해도 이전 일정의 이름을 다시 묻지 않는다", () => {
+    const c: Context = { ...ctx({ tomorrow: [] }), groups: [{ id: "g-cap", name: "캡스톤팀" }] };
+    const extracted = study({ title: "가족 그룹", time: "10:30", place: null });
+    const first = applyFast(initTurnState(c), fast({ appointments: [extracted] }), c, 1, "가족 그룹 내일 10시 반에 약속 잡아줘");
+    assert.equal(card(first.state, "c1").draft?.title, "약속");
+    assert.equal(extracted.title, "가족 그룹", "사용자가 준 추출 객체를 직접 바꾸지 않음");
+    const second = applyFast(first.state, fast({ appointments: [extracted] }), c, 2, "고마워");
+    assert.equal(second.state.cards.length, 1);
+    assert.equal(second.event.clarify.some((line) => line.includes("일정의 이름")), false);
+  });
+
+  it("이미 가입한 캡스톤팀 그룹 이름만 추출되면 제목을 빈 문자열로 바꾸지 않는다", () => {
+    const c: Context = { ...ctx({ tomorrow: [] }), groups: [{ id: "g-cap", name: "캡스톤팀" }] };
+    const x = study({ title: "캡스톤팀 그룹", time: "15:00", place: null });
+    const result = applyFast(initTurnState(c), fast({ appointments: [x] }), c, 1, "캡스톤팀 그룹 내일 3시에 잡아줘");
+    assert.equal(card(result.state, "c1").draft?.title, "캡스톤팀 그룹");
+    assert.equal(card(result.state, "c1").group?.id, "g-cap");
+    assert.equal(result.event.clarify.some((line) => line.includes("일정의 이름")), false);
+  });
 });
