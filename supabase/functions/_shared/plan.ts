@@ -282,22 +282,20 @@ async function optionalMlPrediction(
 export async function loadPurePrepCandidate(
   db: Db, userId: string, profile: ProfileRow, now: Date, at: Date,
 ): Promise<PurePrepCandidate | undefined> {
-  // Keep the existing rollout kill switch: profile edits may change the
-  // user's preference without expanding the set of live-affected accounts.
-  const allowed = mayUseMl({
-    enabled: getEnv('PURE_PREP_APPLY_ENABLED') === '1',
+  const profileMinutes = profile.default_outing_prep_minutes;
+  const direct = choosePurePrepBasis({ profileMinutes });
+  if (!direct) return undefined;
+  // The explicit user-entered pure preparation duration is a normal input,
+  // NOT an ML prediction: always use it for a new automatic alarm.
+  // Keep the original rollout gate for behavioral history corrections only.
+  const historyAllowed = mayUseMl({
+    enabled: getEnv('PURE_PREP_APPLY_ENABLED') === '1' &&
+      getEnv('PURE_PREP_HISTORY_ENABLED') === '1',
     allowForPlan: true,
     userId,
     allowedUserIds: getEnv('PURE_PREP_ALLOWED_USER_IDS'),
   });
-  if (!allowed) return undefined;
-  const profileMinutes = profile.default_outing_prep_minutes;
-  if (profileMinutes == null || !Number.isFinite(profileMinutes) ||
-      profileMinutes < 5 || profileMinutes > 240) return undefined;
-  // Preference takes effect on the next preview regardless of history flags.
-  if (getEnv('PURE_PREP_HISTORY_ENABLED') !== '1' || !profile.ml_profile_consented_at) {
-    return choosePurePrepBasis({ profileMinutes }) ?? undefined;
-  }
+  if (!historyAllowed || !profile.ml_profile_consented_at) return direct;
   try {
     const cutoff = new Date(Math.min(now.getTime(), at.getTime()));
     const editedAt = profile.default_outing_prep_updated_at
@@ -377,13 +375,14 @@ export async function buildPlan(ctx: PlanContext, draft: PlanDraft, options: { w
   const allowMl = draft.prepareMinutes == null &&
     !(participant?.prepare_value_source === 'MANUAL' && draft.prepareValueSource !== 'AUTO') &&
     draft.withWake !== false && !(draft.withWake == null && sameDayWake);
-  // Shared appointments can be edited by other participants. Keep the existing
-  // route until every participant's shared recalc and consent are verified.
-  if (draft.groupId == null && appointment?.group_id == null) {
-    inputs.purePrepCandidate = await loadPurePrepCandidate(
-      ctx.db, ctx.userId, profile, ctx.now, basics.at,
-    );
-  }
+  // Every user-entered pure-prep duration controls that user's own AUTO alarm,
+  // including their participant row in a group appointment. Group plans do
+  // NOT consume behavioral history or CatBoost and never alter other members.
+  // Existing manual alarm and preparation overrides remain protected by plan-core.
+  const inGroup = draft.groupId != null || appointment?.group_id != null;
+  inputs.purePrepCandidate = inGroup
+    ? choosePurePrepBasis({ profileMinutes: profile.default_outing_prep_minutes }) ?? undefined
+    : await loadPurePrepCandidate(ctx.db, ctx.userId, profile, ctx.now, basics.at);
   // Old C1/W4 predicts wake->departure; pure prep predicts a different target.
   // They must never compete for the same alarm calculation.
   if (!inputs.purePrepCandidate) {
