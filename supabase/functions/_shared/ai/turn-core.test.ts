@@ -2102,4 +2102,50 @@ describe("그룹 일정 고르기", () => {
     assert.equal(card(second.state, "c1").status, "REJECTED");
     assert.equal(second.state.cards.filter((x) => x.status !== "REJECTED").length, 0);
   });
+
+  it("음성 입력의 보이지 않는 문자에도 가입한 '가족' 그룹을 인식한다", () => {
+    const family = { id: "g-family", name: "가족" };
+    const spoken = "가\u2060족 그\u2060룹 내\u2060일 1시 반\u2060에 약\u2060속 잡\u2060아\u2060줘";
+    assert.equal(groupOf([family], spoken)?.choice, "GROUP");
+    assert.equal(groupOf([family], spoken)?.id, family.id);
+    assert.equal(missingGroup([family], spoken), null);
+    assert.equal(missingGroup([], spoken), "가족");
+  });
+
+  it("대화 도중 '가족' 그룹을 만든 뒤 같은 요청을 다시 말하면 새 카드에 새 그룹을 붙인다", () => {
+    const base = ctx({ tomorrow: [] });
+    const firstContext: Context = { ...base, groups: [{ id: "g-cap", name: "캡스톤팀" }] };
+    const joinedContext: Context = { ...base, groups: [...(firstContext.groups ?? []), { id: "g-family", name: "가족" }] };
+    const spoken = "가\u2060족 그\u2060룹 내\u2060일 1시 반\u2060에 약\u2060속 잡\u2060아\u2060줘";
+    const extracted = study({ title: "가족 그룹", time: "13:30", place: null });
+    const first = applyFast(initTurnState(firstContext), fast({ appointments: [extracted] }), firstContext, 1, spoken);
+    const old = card(first.state, "c1");
+    assert.equal(old.group?.missing, "가족");
+    assert.equal(old.draft?.title, "약속");
+    const rejected = applyCardAction(first.state, { id: "c1", action: "REJECTED" }, firstContext, 1);
+    const retried = applyFast(rejected.state, fast({ appointments: [extracted] }), joinedContext, 2, spoken);
+    const next = card(retried.state, "c2");
+    assert.equal(card(retried.state, "c1").status, "REJECTED");
+    assert.equal(next.draft?.title, "약속");
+    assert.equal(next.group?.choice, "GROUP");
+    assert.equal(next.group?.id, "g-family");
+    assert.equal(retried.state.cards.length, 2);
+  });
+
+  it("새 그룹이 등록되어도 과거에 거절한 다른 시각의 가족 일정은 되살리지 않는다", () => {
+    const base = ctx({ tomorrow: [] });
+    const oldContext: Context = { ...base, groups: [{ id: "g-cap", name: "캡스톤팀" }] };
+    const newContext: Context = { ...base, groups: [...(oldContext.groups ?? []), { id: "g-family", name: "가족" }] };
+    const old = study({ title: "가족 그룹", time: "10:30", place: null });
+    const recent = study({ title: "가족 그룹", time: "13:30", place: null });
+    const first = applyFast(initTurnState(oldContext), fast({ appointments: [old] }), oldContext, 1, "가족 그룹 내일 10시 반에 약속 잡아줘");
+    const r1 = applyCardAction(first.state, { id: "c1", action: "REJECTED" }, oldContext, 1);
+    const second = applyFast(r1.state, fast({ appointments: [old, recent] }), oldContext, 2, "가족 그룹 내일 1시 반에 약속 잡아줘");
+    const r2 = applyCardAction(second.state, { id: "c2", action: "REJECTED" }, oldContext, 2);
+    const again = applyFast(r2.state, fast({ appointments: [old, recent] }), newContext, 3, "가족 그룹 내일 1시 반에 약속 잡아줘");
+    const open = again.state.cards.filter((c) => c.status !== "REJECTED");
+    assert.equal(open.length, 1);
+    assert.equal(open[0]?.draft?.time, "13:30");
+    assert.equal(open[0]?.group?.id, "g-family");
+  });
 });
