@@ -1372,12 +1372,13 @@ export function applyFast(state: TurnState, fast: FastExtract, ctx: Context, aft
     if (groupAnswered && x.ref === null && (x.date === null || x.time === null)) continue;
     const key = apptKey(x);
     // 알람을 당기는 말을 일정 변경으로 잘못 뽑은 것 — 버리고 표시(#alarm)만 남김. 다음 말에 T2F가 다시 적어도 처리하지 않고, 알람 말 없이 일정 이름을 대며 고쳐 달라고 하면 처리
-    //   (열린 알람 카드를 확인하는 "응 그렇게 바꿔줘"도 '바꿔'가 있어 이름을 봄)
+    //   (열린 알람 카드를 확인하는 "응 그렇게 바꿔줘" · 다른 일정을 고치는 말도 '바꿔'가 있어, 버린 그 일정의 이름을 말했는지 봄)
     if (alarmShiftTurn && (x.ref !== null || (intent as Intent).edit)) {
       if (s.seen[key] !== apptSig(x)) s.seen[key] = `${apptSig(x)}#alarm`;
       continue;
     }
-    if (s.seen[key] === `${apptSig(x)}#alarm` && !(intent !== null && intent.edit && !intent.alarm && hits !== null)) continue;
+    const namedThis = hits !== null && (x.ref !== null ? hits.all.has(x.ref) : nameWords(x.title).some((w) => normTitle((intent as Intent).text).includes(w)));
+    if (s.seen[key] === `${apptSig(x)}#alarm` && !(intent !== null && intent.edit && !intent.alarm && namedThis)) continue;
     if (!once(key, apptSig(x))) continue;
     if (alarmEcho(x)) continue;
     if (x.ref) changeAppt(x, key, x.ref);
