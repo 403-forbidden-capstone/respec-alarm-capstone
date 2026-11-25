@@ -9,7 +9,18 @@
 //   · 서버 요청은 pending 하나 + 카드 요청 큐 — 실패한 요청(pending)이 있으면 카드 동작은 앱 일만 바로 하고 서버 알림은 큐에서 기다렸다가 그 요청이 성공한 뒤 차례로 보냄
 import { autoImportance } from '@shared/calc/importance.ts';
 import { adjustEstimate, moveWakeOnly, orderError, orderPair } from '@/features/alarm/adjust';
-import { createAppointment, createPlacePendingAppointment, createStandaloneAlarm, estimateAppointment, getAppointment, listPlaces, previewAlarms, saveAlarmSettings, searchPlaces } from '@/features/alarm/api';
+import {
+  createAppointment,
+  createPlacePendingAppointment,
+  createStandaloneAlarm,
+  estimateAppointment,
+  getAppointment,
+  listPlaces,
+  previewAlarms,
+  saveAlarmSettings,
+  searchPlaces,
+  updateAppointment,
+} from '@/features/alarm/api';
 import { clearPlace } from '@/features/alarm/places';
 import { saveNotice } from '@/features/alarm/saveNotice';
 import { draftAt } from '@/features/alarm/schedule';
@@ -23,6 +34,7 @@ import {
   type AlarmTime,
   type AppointmentDetail,
   type AppointmentDraft,
+  type AppointmentPatch,
   type Estimate,
   type Importance,
   type IntensityAxis,
@@ -32,7 +44,7 @@ import {
   type Transport,
 } from '@/features/alarm/types';
 import { now } from '@/lib/clock';
-import { formatTime, josa, lifeDayKey } from '@/lib/format';
+import { formatTime, formatTime24, josa, lifeDayKey } from '@/lib/format';
 import { prepareBriefings } from '@/lib/alarmSync/briefing';
 import { EdgeError, callEdge } from '@/lib/edge';
 import { UserError, userMessage } from '@/lib/errors';
@@ -42,7 +54,7 @@ import type { Weekday } from '@/lib/weekday';
 import { applyFix, type Fix } from './fixes';
 import { addPendingCommit, isFinished, pendingCommits, removePendingCommit } from './finishedSessions';
 import { clearSaved, markSaved, pruneExpired, pruneOtherSessions, readSavedMarks } from './savedMarks';
-import type { ChatMessage, CardAlarm, CardGroup, CardKind, CardStatus, Conversation, ConversationCard, FixResult, Limits, TurnNotice, Unavailable } from './types';
+import type { ApptChanges, ChatMessage, CardAlarm, CardGroup, CardKind, CardStatus, Conversation, ConversationCard, FixResult, Limits, TurnNotice, Unavailable } from './types';
 
 // ---------------------------------------------------------------------------
 // 서버 응답 모양 (설계 메모 2절 · 14절) — 서버: supabase/functions/_shared/ai/voice-state.ts(응답) · voice-requests.ts(요청 검사)
@@ -69,6 +81,8 @@ type ServerEdit = {
   prepare_delta?: number | null; // 더 = +분, 덜 = −분, 원래대로 = 0, 없음 · null = 준비시간 말 없음
   at?: string; // ALARM_NEW
   level?: number | null; // ALARM_NEW
+  changes?: ApptChanges; // APPT_OPEN — 바뀔 값
+  before?: ApptChanges; // APPT_OPEN — 지금 값 (제목 + 바뀌는 칸만)
 };
 
 type ServerCard = {
@@ -258,6 +272,7 @@ function cardView(id: string, rec: CardRec): ConversationCard {
     error: rec.error ?? s.error ?? null,
     appointmentId: rec.appointmentId ?? s.appointment_id ?? s.edit?.appointment_id ?? null,
     group: s.group ?? null,
+    ...(s.kind === 'APPT_OPEN' && s.edit?.changes && s.edit.before ? { change: { before: s.edit.before, after: rec.place ? { ...s.edit.changes, place: rec.place.name } : s.edit.changes } } : {}),
   };
 }
 
@@ -515,10 +530,25 @@ async function previewEdit(rec: CardRec): Promise<Outcome> {
   }
 }
 
+// 약속 변경 카드 — 장소를 바꾸면 새 일정과 같은 규칙(placeByName)으로 확인하고, 모호하면 [장소 고르기]. 알람은 [변경하기] 때 서버(appointment-edit)가 다시 계산
+async function checkNewPlace(rec: CardRec): Promise<Outcome> {
+  const heard = rec.server.edit?.changes?.place;
+  if (typeof heard !== 'string' || rec.place) return { status: 'READY' };
+  try {
+    const place = await placeByName(heard);
+    if (!place) return { status: 'NEEDS_PLACE', error: `'${heard}'의 정확한 위치를 확인하기 어려워요. 장소를 골라 주세요` };
+    rec.place = place;
+    return { status: 'READY' };
+  } catch (e) {
+    return { status: 'FAILED', error: userMessage(e, '장소를 확인하지 못했어요') };
+  }
+}
+
 async function runCard(rec: CardRec): Promise<Outcome> {
   if (rec.server.kind === 'APPT_NEW') return estimateNew(rec);
   if (rec.server.kind === 'ALARM_EDIT') return previewEdit(rec);
-  return { status: 'READY' }; // ALARM_NEW · APPT_OPEN — 계산 없음
+  if (rec.server.kind === 'APPT_OPEN') return checkNewPlace(rec);
+  return { status: 'READY' }; // ALARM_NEW — 계산 없음
 }
 
 function resultCard(id: string, o: Outcome): ResultCard {
@@ -1126,6 +1156,51 @@ export function saveCard(cardId: string): Promise<string> {
       rec.status = 'SAVED';
       rec.appointmentId = saved.id;
       await rememberSaved(cardId, kind, saved.id, alarms, level);
+    } else if (kind === 'APPT_OPEN') {
+      // 있는 일정 고치기 — 일정 편집(H03)과 같은 updateAppointment: 서버가 바뀐 칸만 고치고 알람을 다시 계산(그룹이면 참여자마다), 폰 예약도 그 응답으로 맞춤
+      //   권한도 일정 편집과 같음 — 공동 일정은 그룹원 누구나(#619), 그룹 밖이면 서버가 거절
+      const id = rec.server.edit?.appointment_id;
+      const ch = rec.server.edit?.changes ?? {};
+      const detail = id ? await getAppointment(id) : null;
+      if (!id || !detail) throw new UserError('바꿀 일정을 찾지 못했어요');
+      if (ch.place === null) throw new UserError('장소를 비우는 건 일정 화면에서 해 주세요');
+      const patch: AppointmentPatch = {};
+      if (ch.date || ch.time) {
+        // 날짜 · 시각은 서버가 정한 값(새벽 4시 기준 포함) 그대로, 말 안 한 쪽은 지금 값
+        const day = ch.date ? dayOf(ch.date) : detail.at;
+        const time = ch.time ?? formatTime24(detail.at);
+        if (!day || !TIME.test(time)) throw new UserError('날짜나 시각을 알 수 없어요');
+        patch.at = draftAt(day, time);
+      }
+      if (typeof ch.place === 'string') {
+        const place = rec.place ?? (await placeByName(ch.place).catch(() => null));
+        if (!place) {
+          rec.status = 'NEEDS_PLACE'; // 앱을 다시 열어 고른 장소가 없음 — 다시 고르게
+          throw new UserError('바꿀 장소를 골라 주세요');
+        }
+        Object.assign(patch, { place: place.name, placeLat: place.lat, placeLng: place.lng });
+      }
+      if (ch.importance) patch.importance = ch.importance;
+      const transport = ch.transport && ch.transport !== detail.transport ? ch.transport : null;
+      if (!Object.keys(patch).length && !transport) throw new UserError('바꿀 내용이 없어요');
+      // 카드 [변경하기]가 확인이라 늦춤 확인(D67)을 다시 묻지 않음
+      if (Object.keys(patch).length) await updateAppointment(id, patch, 'this', { confirmed: true });
+      rec.status = 'SAVED'; // 일정은 바뀜 — 아래 이동 수단 저장이 실패해도 카드는 저장으로
+      rec.appointmentId = id;
+      if (transport) {
+        try {
+          const cur = (await getAppointment(id)) ?? detail;
+          await saveAlarmSettings(id, { ...editsOf(cur, null).draft, transport }); // 이동 수단은 내 알람 설정 칸
+        } catch {
+          partial = '일정은 바꿨지만 이동 방법은 바꾸지 못했어요. 알람 설정에서 바꿔 주세요';
+        }
+      }
+      const after = await getAppointment(id).catch(() => null); // 이미 바뀜 — 못 읽어도 서버에 알림
+      appointmentId = id;
+      alarms = after?.alarms ?? [];
+      level = after?.level ?? detail.level;
+      toast = '일정을 바꿨어요. 알람도 다시 맞췄어요';
+      await rememberSaved(cardId, kind, id, alarms, level);
     } else {
       throw new UserError('이 카드는 저장할 게 없어요');
     }

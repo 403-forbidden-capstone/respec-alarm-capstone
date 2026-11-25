@@ -77,25 +77,25 @@ export default async function ch09({ q, as, su, svc, check, expectErr }) {
       && mineOnly.length === 1 && mineOnly[0].user_id === B && touchA.length === 0 && dup === true && aAlarm.length === 0 ? true : { outRead, outInsert, memo, others, alarmsSeen, mineOnly, touchA, dup, aAlarm };
   });
 
-  // ---- 고치기 · 지우기는 만든 사람만 ------------------------------------------------------------
+  // ---- 고치기 · 지우기는 그룹원 누구나 (#619 — 만든 사람은 기록일 뿐) ---------------------------
 
-  await check('9-18 · 9-19 · 9-31: 공동 약속은 만든 사람만 고치고 지움 — 참여자 · 다른 그룹원의 고치기와 지우기는 오류 없이 0행, 만든 사람도 그룹(group_id)은 못 바꿈', async () => {
+  await check('9-18 · 9-19 · 9-31 · #619: 공동 약속은 그룹원 누구나 고치고 지움 — 참여자 · 참여 안 한 그룹원도 됨, 만든 사람 칸은 그대로, 그룹(group_id)은 아무도 못 바꿈', async () => {
     const A = await join_(8, '만든이'), B = await join_(9, '참여'), C = await join_(10, '그룹원');
     const g = await mkGroup(A, [B, C]), other = await mkGroup(A, []);
     const ap = await appt(A, g, at('10:00'), '원래 제목');
     await part(A, ap); await part(B, ap);
     const upd = async (u, title) => { await as(u); const r = await q(`update public.appointments set title = $2, appointment_at = appointment_at + interval '10 minutes' where appointment_id = $1 returning appointment_id`, [ap, title]); await su(); return r.length; };
-    const byB = await upd(B, 'B가 고침'), byC = await upd(C, 'C가 고침'), byA = await upd(A, 'A가 고침');
-    const del = async (u) => { await as(u); const r = await q(`delete from public.appointments where appointment_id = $1 returning appointment_id`, [ap]); await su(); return r.length; };
-    const delB = await del(B), delC = await del(C);
-    await as(A);
+    const byA = await upd(A, 'A가 고침'), byC = await upd(C, 'C가 고침'), byB = await upd(B, 'B가 고침');
+    await as(B);
     const moveGroup = await expectErr(() => q(`update public.appointments set group_id = $2 where appointment_id = $1`, [ap, other]), /바꿀 수 없음/);
     await su();
-    const title = (await q(`select title from public.appointments where appointment_id = $1`, [ap]))[0].title;
-    return byB === 0 && byC === 0 && byA === 1 && delB === 0 && delC === 0 && moveGroup === true && title === 'A가 고침' ? true : { byB, byC, byA, delB, delC, moveGroup, title };
+    const [{ title, creator_id: creator }] = await q(`select title, creator_id from public.appointments where appointment_id = $1`, [ap]);
+    const del = async (u) => { await as(u); const r = await q(`delete from public.appointments where appointment_id = $1 returning appointment_id`, [ap]); await su(); return r.length; };
+    const delB = await del(B);
+    return byB === 1 && byC === 1 && byA === 1 && delB === 1 && moveGroup === true && title === 'B가 고침' && creator === A ? true : { byB, byC, byA, delB, moveGroup, title, creator };
   });
 
-  await check('9-38: 만든 사람이 없는 약속은 그 약속에 참여한 사람이 고침 — 참여 안 한 그룹원 · 만든 사람이 있는 다른 약속은 거절 (지우기는 아래 X-APPT-01)', async () => {
+  await check('9-38 · #619: 만든 사람이 없는 약속 · 있는 약속 모두 그룹원이 고침 — 참여 안 한 그룹원도 (지우기는 아래 X-APPT-01)', async () => {
     const A = await join_(11, '남은만든이'), B = await join_(12, '참여자'), C = await join_(13, '참여안함');
     const g = await mkGroup(A, [B, C]);
     const orphan = await appt(A, g, at('10:00'), '주인 없는 약속'), alive = await appt(A, g, at('14:00'), '주인 있는 약속');
@@ -108,10 +108,10 @@ export default async function ch09({ q, as, su, svc, check, expectErr }) {
     }
     const upd = async (u, ap) => { await as(u); const r = await q(`update public.appointments set title = '고침' where appointment_id = $1 returning appointment_id`, [ap]); await su(); return r.length; };
     const r = { bOrphan: await upd(B, orphan), cOrphan: await upd(C, orphan), bAlive: await upd(B, alive) };
-    return r.bOrphan === 1 && r.cOrphan === 0 && r.bAlive === 0 ? true : r;
+    return r.bOrphan === 1 && r.cOrphan === 1 && r.bAlive === 1 ? true : r;
   });
 
-  await check('X-APPT-01: 만든 사람이 없는(탈퇴한) 공동 약속은 그 약속에 참여한 그룹원이 지움 — 참여 안 한 그룹원 · 만든 사람이 있는 약속의 참여자 · 지난 약속은 0행, 지우면 참여 조건 · 알람도 같이 사라지고 만든 사람이 있는 약속은 그대로', async () => {
+  await check('X-APPT-01 · #619: 공동 약속은 그룹원이 지움(만든 사람이 없거나 남이어도, 참여 안 한 그룹원도) — 지난 약속은 0행, 지우면 참여 조건 · 알람도 같이 사라짐', async () => {
     const A = await join_(47, '남은만든이'), B = await join_(48, '참여자'), C = await join_(49, '참여안함');
     const g = await mkGroup(A, [B, C]);
     const orphan = await appt(A, g, at('10:00'), '주인 없는 약속'), alive = await appt(A, g, at('14:00'), '주인 있는 약속'), past = await appt(A, g, at('10:00', PAST), '지난 주인 없는 약속');
@@ -124,11 +124,9 @@ export default async function ch09({ q, as, su, svc, check, expectErr }) {
       await q(`alter table public.appointments enable trigger keep_keys`);
     }
     const del = async (u, ap) => { await as(u); const r = await q(`delete from public.appointments where appointment_id = $1 returning appointment_id`, [ap]); await su(); return r.length; };
-    const r = { cOrphan: await del(C, orphan), bAlive: await del(B, alive), bPast: await del(B, past) };
-    const stillThere = await n(`select 1 from public.appointments where appointment_id = any($1::uuid[])`, [[orphan, alive, past]]);
-    r.bOrphan = await del(B, orphan);
+    const r = { bPast: await del(B, past), cPast: await del(C, past), cOrphan: await del(C, orphan), bAlive: await del(B, alive) };
     const left = { orphan: await n(`select 1 from public.appointments where appointment_id = $1`, [orphan]), parts: await partRows(B, orphan), alarms: await alarmRows(B), alive: await n(`select 1 from public.appointments where appointment_id = $1`, [alive]), past: await n(`select 1 from public.appointments where appointment_id = $1`, [past]) };
-    return r.cOrphan === 0 && r.bAlive === 0 && r.bPast === 0 && stillThere === 3 && r.bOrphan === 1 && left.orphan === 0 && left.parts === 0 && left.alarms === 0 && left.alive === 1 && left.past === 1 ? true : { r, stillThere, left };
+    return r.bPast === 0 && r.cPast === 0 && r.cOrphan === 1 && r.bAlive === 1 && left.orphan === 0 && left.parts === 0 && left.alarms === 0 && left.alive === 0 && left.past === 1 ? true : { r, left };
   });
 
   await check('9-20: 만든 사람이 지우면 모든 참여자의 참여 조건 · 알람이 같이 지워짐 — 다른 약속은 그대로', async () => {

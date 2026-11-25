@@ -97,7 +97,6 @@ function toAppointment(a: MockAppointment): Appointment {
     repeatLabel: repeatLabel(rruleToRepeat(a.recurrenceRule)),
     recurrenceRule: a.recurrenceRule,
     groupName: a.groupId ? (db.groups[a.groupId]?.name ?? null) : null,
-    ...(a.groupId && !isMine(a) ? { canEdit: false as const } : {}),
     items: [...a.items],
     withWake: a.withWake,
     enabled: !db.disabledAppointments.has(a.id),
@@ -416,15 +415,6 @@ export async function saveAlarmSettings(id: string, draft: AlarmSettingsDraft): 
 // ── 일정 수정 · 삭제 (H03 편집 시트 · 이슈 #211 · D41 A · N6) ──
 //   가짜 모드만 — 실서버는 4b(서버 함수 appointment-edit)에서 realEdit.ts를 채움. 화면(L5)은 이 4개 함수와 types.ts의 AppointmentPatch · EditScope · UpdateResult만 앎
 
-const NOT_CREATOR = '공동 약속은 만든 사람만 고칠 수 있어요';
-
-// 공동 약속은 만든 사람만 고치고 지움 (N6). 만든 사람 칸이 없으면 나
-const isMine = (a: MockAppointment) => (a.creatorId ?? 'me') === 'me';
-
-function assertEditable(a: MockAppointment) {
-  if (a.groupId && !isMine(a)) throw new UserError(NOT_CREATOR);
-}
-
 // 고치기 · 지우기가 닿는 일정들 — this = 그 일정만, following = 같은 반복 묶음(seriesId)의 이 일정과 그 뒤 일정. 묶음이 없으면(반복이 아니거나 가짜 데이터에 묶음이 없음) scope와 상관없이 그 일정 하나
 function scopeTargets(a: MockAppointment, scope: EditScope): MockAppointment[] {
   if (scope === 'this' || !a.seriesId) return [a];
@@ -492,12 +482,11 @@ function applyPatch(a: MockAppointment, patch: AppointmentPatch, delta: number, 
 //   changes = 시각이 바뀌는 기상 · 준비 · 출발의 전 → 후 (제목만 바꾸면 빈 목록)
 //   needsConfirm = 5분(CONFIRM_MOVE_MINUTES) 이상 늦춰지는 알람이 있음 (D67, 앞당김은 묻지 않음 — H03 기존 확인 시트 needsMoveConfirm은 앞당김도 묻는 쪽이라 다름). true면 저장하지 않고 돌려줌 → 화면이 기존 확인 시트로 묻고, 확인하면 { confirmed: true }로 같은 값을 다시 부름
 //   앞당김 · 5분 미만 늦춤은 바로 저장하고 needsConfirm false → 화면이 토스트 [되돌리기]. 되돌리기 = 이전 값을 { confirmed: true }로 넣어 같은 함수를 다시 부름 (늦춤이어도 묻지 않게)
-//   공동 약속은 만든 사람만 (UserError). 알람 순서(기상 ≤ 준비 ≤ 출발 ≤ 도착 목표)가 뒤집히면 저장하지 않고 UserError — saveAlarmSettings와 같은 검사
+//   공동 약속은 그룹원 누구나 (#619 — 서버가 그룹 참여를 봄). 알람 순서(기상 ≤ 준비 ≤ 출발 ≤ 도착 목표)가 뒤집히면 저장하지 않고 UserError — saveAlarmSettings와 같은 검사
 export async function updateAppointment(id: string, patch: AppointmentPatch, scope: EditScope, options: UpdateOptions = {}): Promise<UpdateResult> {
   if (!isMock()) return real.updateAppointment(id, patch, scope, options);
   const a = find(id);
   if (!a) throw new UserError('일정을 찾을 수 없어요');
-  assertEditable(a);
   if (patch.title !== undefined && !patch.title.trim()) throw new UserError('일정 이름을 입력해 주세요');
 
   const targets = scopeTargets(a, scope);
@@ -524,12 +513,11 @@ let trashBatch = 0; // 한 번에 지운 일정들을 묶는 번호
 
 // 일정 지우기 (H03 · H01) — 가짜 db에서 숨김(휴지통)으로 옮겨 목록 · 하루 일정 · 다음 알람에서 안 보임. restoreAppointment로 되살림
 //   scope: 반복이면 this = 이번 회차만 · following = 이번 회차와 그 뒤 모두. 반복이 아니면 scope를 안 봄 (그 일정 하나)
-//   지운 일정이 그날 첫 일정이었으면 그날 다음 일정에 기상 알람이 붙음. 공동 약속은 만든 사람만 (UserError)
+//   지운 일정이 그날 첫 일정이었으면 그날 다음 일정에 기상 알람이 붙음. 공동 약속은 그룹원 누구나 (#619)
 export async function deleteAppointment(id: string, scope: EditScope): Promise<void> {
   if (!isMock()) return real.deleteAppointment(id, scope);
   const a = find(id);
   if (!a) throw new UserError('일정을 찾을 수 없어요');
-  assertEditable(a);
   const targets = scopeTargets(a, scope);
   const batch = ++trashBatch;
   const rows = targets.map((t) => ({ batch, index: db.appointments.indexOf(t), appointment: t }));
@@ -568,14 +556,12 @@ export async function getJoinDefaults(): Promise<JoinDefaults> {
 }
 
 // 공동 약속에서 나만 빠지기 ([나는 빠지기]) — 내 참여 행 · 알람만 사라지고 약속은 다른 참여자에게 그대로 (가짜 모드는 내 목록에서만 뺌, 되살리기 없음)
-//   공동 약속이 아니거나 내가 만든 약속이면 UserError (만든 사람은 지우기를 써야 함)
-//   // L6 안건후보: 만든 사람이 빠지려 할 때 기본안 = 막고 "지워 주세요" 안내
+//   공동 약속이 아니면 UserError. 만든 사람도 빠질 수 있음 (#619)
 export async function leaveSharedAppointment(id: string): Promise<void> {
   if (!isMock()) return real.leaveSharedAppointment(id);
   const a = find(id);
   if (!a) throw new UserError('일정을 찾을 수 없어요');
   if (!a.groupId) throw new UserError('공동 약속이 아니에요');
-  if (isMine(a)) throw new UserError('내가 만든 공동 약속은 빠질 수 없어요. 지워 주세요');
   db.appointments.splice(db.appointments.indexOf(a), 1);
   db.left.push(a);
   reassignWake([a.at]);

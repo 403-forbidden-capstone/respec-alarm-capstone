@@ -218,7 +218,7 @@ export default async function ch11({ q, as, su, svc, check, expectErr }) {
     return ok.status === 'OK' && late.status === 'FORBIDDEN' && forbidden.every((x) => x.status === 'FORBIDDEN' && Object.keys(x).join() === 'status') ? true : { ok, late, forbidden };
   });
 
-  await check('11-15(약속): 공동 약속 변경 알림 — 그 그룹의 아직 안 지난 약속을 만든 사람이 보낼 때만(다른 그룹 약속 · 개인 일정 · 없는 약속 · 지난 약속 · 만든 사람이 아닌 멤버는 FORBIDDEN), 받는 사람은 그 약속의 참여자에서 보낸 사람 · 알림 끈 멤버 · 차단 쌍 제외, 약속 제목을 같이 돌려줌', async () => {
+  await check('11-15(약속): 공동 약속 변경 알림 — 그 그룹의 아직 안 지난 약속을 참여 중인 그룹원이 보낼 때(#619 — 만든 사람이 아니어도 됨. 다른 그룹 약속 · 개인 일정 · 없는 약속 · 지난 약속 · 그룹 밖 사람은 FORBIDDEN), 받는 사람은 그 약속의 참여자에서 보낸 사람 · 알림 끈 멤버 · 차단 쌍 제외, 약속 제목을 같이 돌려줌', async () => {
     const S = await join_(23, '보낸이'), M1 = await join_(24, '참여자'), M2 = await join_(25, '알림끔'), M3 = await join_(26, '차단함'), O = await join_(27, '다른그룹주인'), M4 = await join_(36, '참여안함');
     const g = await mkGroup(S, [M1, M2, M3, M4]);
     const g2 = await mkGroup(O, [], '다른 그룹');
@@ -236,7 +236,7 @@ export default async function ch11({ q, as, su, svc, check, expectErr }) {
     const ok = await planGroup(S, g, 'GROUP_APPT_CHANGED', ap);
     const other = await planGroup(S, g, 'GROUP_APPT_CHANGED', ap2), per = await planGroup(S, g, 'GROUP_APPT_CHANGED', personal), none = await planGroup(S, g, 'GROUP_APPT_CHANGED', NOBODY), missing = await planGroup(S, g, 'GROUP_APPT_CHANGED', null);
     const outsider = await planGroup(O, g, 'GROUP_APPT_CHANGED', ap);
-    const notCreator = [await planGroup(M1, g, 'GROUP_APPT_CHANGED', ap), await planGroup(M4, g, 'GROUP_APPT_CHANGED', ap)];   // 참여자도 · 참여 안 한 멤버도 남의 약속은 못 보냄
+    const byMember = [await planGroup(M1, g, 'GROUP_APPT_CHANGED', ap), await planGroup(M4, g, 'GROUP_APPT_CHANGED', ap)];   // #619: 그룹원 누구나 고치므로 남이 만든 약속도 보냄 — 받는 사람 = 보낸 사람을 뺀 참여자
     const pastOne = await planGroup(S, g, 'GROUP_APPT_CHANGED', past);
     const todayOk = await planGroup(S, g, 'GROUP_APPT_CHANGED', todayEarly);                                                    // 오늘 이미 지난 약속은 오늘 안에는 알림을 보낼 수 있음 (9-러 하루 경계)
     const byParticipant = await planGroup(M1, g, 'GROUP_APPT_CHANGED', byM1);                                                   // 자기가 만든 약속이면 받는 사람 = 다른 참여자(S)
@@ -244,8 +244,9 @@ export default async function ch11({ q, as, su, svc, check, expectErr }) {
     return ok.status === 'OK' && ok.appointment_title === '팀 회의' && ok.group_name === '푸시그룹' && ids(ok).join() === [M1].join()
       && [...ok.silent_recipients].sort().join() === [M2, M3].sort().join()                                                    // 알림 끈 멤버 · 차단 쌍은 보이는 알림만 빠지고 조용한 데이터 푸시 대상
       && todayOk.status === 'OK' && ids(todayOk).join() === [M1].join() && todayOk.silent_recipients.length === 0
-      && [other, per, none, missing, outsider, ...notCreator, pastOne, ...wrongKind].every((x) => x.status === 'FORBIDDEN')
-      && byParticipant.status === 'OK' && ids(byParticipant).join() === [S].join() ? true : { ok, other, per, none, missing, outsider, notCreator, pastOne, todayOk, byParticipant, wrongKind };
+      && [other, per, none, missing, outsider, pastOne, ...wrongKind].every((x) => x.status === 'FORBIDDEN')
+      && byMember.every((x) => x.status === 'OK') && ids(byMember[0]).join() === [S, M3].sort().join() && ids(byMember[1]).join() === [S, M1, M3].sort().join()
+      && byParticipant.status === 'OK' && ids(byParticipant).join() === [S].join() ? true : { ok, other, per, none, missing, outsider, byMember, pastOne, todayOk, byParticipant, wrongKind };
   });
 
   await check('11-12(창): 요청 푸시는 요청한 지 1시간 안(59분 O · 61분 X), 수락 푸시는 수락한 지 1시간 안(59분 O · 61분 X) — 오래된 대기 요청 · 오래된 수락으로 다시 보내지 못함', async () => {

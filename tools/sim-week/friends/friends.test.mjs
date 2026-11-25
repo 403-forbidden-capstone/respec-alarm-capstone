@@ -149,13 +149,11 @@ test('알람 바꾸기 제안: 설정 권한 없이 OK면 위반, 차단 쌍이�
   assert.equal(checkProposal({ proposer: A, owner: B, status: 'OK', perms, blocks: [{ blocker_id: A, blocked_id: B }] }).length, 1);
 });
 
-test('공동 약속 고치기: 만든 사람 아닌데 고쳐지면 위반 (만든 사람이 비면 참여자는 가능)', () => {
-  assert.equal(checkApptEdit({ editor: A, creatorId: A, rowsChanged: true }).length, 0);
-  assert.equal(checkApptEdit({ editor: B, creatorId: A, rowsChanged: true }).length, 1);
-  assert.equal(checkApptEdit({ editor: B, creatorId: A, rowsChanged: false }).length, 0);
-  assert.equal(checkApptEdit({ editor: B, creatorId: null, rowsChanged: true, isParticipant: true }).length, 0);
-  assert.equal(checkApptEdit({ editor: B, creatorId: null, rowsChanged: true, isParticipant: false }).length, 1);
-  assert.equal(checkApptEdit({ editor: A, creatorId: A, rowsChanged: true, editorJoined: false }).length, 1); // 그룹을 나간 만든 사람도 못 고침
+test('공동 약속 고치기 (#619): 그룹원 누구나 — 그룹 밖(나간) 사람이 고쳤을 때만 위반', () => {
+  assert.equal(checkApptEdit({ editor: A, rowsChanged: true }).length, 0);
+  assert.equal(checkApptEdit({ editor: B, rowsChanged: true }).length, 0); // 만든 사람이 아니어도
+  assert.equal(checkApptEdit({ editor: B, rowsChanged: false, editorJoined: false }).length, 0);
+  assert.equal(checkApptEdit({ editor: A, rowsChanged: true, editorJoined: false }).length, 1); // 그룹을 나간 사람은 못 고침
 });
 
 test('정적 규칙: 기상 확인 하루 한 건 · 그룹 나간 사람의 앞으로 약속 참여 · 제안 합계 ±60분', () => {

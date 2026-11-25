@@ -863,19 +863,19 @@ export default async function scenarioDay({ q, as, su, svc, check, knownGap, cla
     // S28 취소
     const W2 = await world();
     await calm(W2, ['A', 'B', 'C', 'D']);
-    await check('S28 · 만든 사람이 아닌 B가 약속을 지우려 해도 0행(RLS) — 약속 · 모든 알람 그대로', async () => {
-      const r = await app(W2.U.B, () => q(`delete from public.appointments where appointment_id = $1 returning 1`, [W2.main.ap]));
+    await check('S28 · 만든 사람이 아닌 B도 약속을 고침(#619) — 제목만 바꾸면 알람 그대로', async () => {
+      const r = await app(W2.U.B, () => q(`update public.appointments set memo = 'B가 고침' where appointment_id = $1 returning 1`, [W2.main.ap]));
       const [n] = await q(`select count(*)::int as n from public.alarms where participant_id = $1`, [W2.P.B]);
-      return eq([r.length, n.n], [0, 4]);
+      return eq([r.length, n.n], [1, 4]);
     });
-    await check('S28 · 만든 A가 취소 — 푸시 대상은 지우기 전에 B · C · D로 정해지고, 지운 뒤 모든 참여자 알람이 서버에서 사라져 모두의 화면이 줄 없음, 놓침 · 친구 알림 대상도 없음(취소된 약속에 놓침 푸시가 안 감)', async () => {
+    await check('S28 · 만든 사람이 아닌 B가 취소(#619) — 푸시 대상은 지우기 전에 A · C · D로 정해지고, 지운 뒤 모든 참여자 알람이 서버에서 사라져 모두의 화면이 줄 없음, 놓침 · 친구 알림 대상도 없음(취소된 약속에 놓침 푸시가 안 감)', async () => {
       await su();
-      const plan = (await q(`select public.plan_group_push($1, $2, 'GROUP_APPT_CHANGED', $3) as r`, [W2.U.A, W2.g, W2.main.ap]))[0].r;
-      const del = await app(W2.U.A, () => q(`delete from public.appointments where appointment_id = $1 returning 1`, [W2.main.ap]));
+      const plan = (await q(`select public.plan_group_push($1, $2, 'GROUP_APPT_CHANGED', $3) as r`, [W2.U.B, W2.g, W2.main.ap]))[0].r;
+      const del = await app(W2.U.B, () => q(`delete from public.appointments where appointment_id = $1 returning 1`, [W2.main.ap]));
       const rows = {}; for (const v of LET) rows[v] = (await rowsOf(W2, v, T('07:45'))).length;
       const [al] = await q(`select count(*)::int as n from public.alarms where user_id = any($1::uuid[])`, [Object.values(W2.U)]);
       const wc = await wakeCheck(W2, T('08:45'));
-      return eq([plan.recipients.map((u) => W2.who[u]).sort(), del.length, rows, al.n, wc], [['B', 'C', 'D'], 1, { A: 0, B: 0, C: 0, D: 0 }, 0, { self: [], nudge: [], up: [] }]);
+      return eq([plan.recipients.map((u) => W2.who[u]).sort(), del.length, rows, al.n, wc], [['A', 'C', 'D'], 1, { A: 0, B: 0, C: 0, D: 0 }, 0, { self: [], nudge: [], up: [] }]);
     });
     await check('S28 · (G5 서버 쪽) 취소된 약속의 [출발했어요] — 기기 길은 지워진 알람이라 건너뛰고(기록 0), 앱 직접 쓰기는 RLS가 막아 서버에 기록이 안 쌓임', async () => {
       const dev = await evDev(W2, 'B', W2.AL.B.DEPARTURE, 'ACKNOWLEDGED', T('09:24'));

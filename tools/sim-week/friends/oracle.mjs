@@ -179,13 +179,10 @@ export function checkProposal({ proposer, owner, status, perms, blocks = [] }) {
   return granted && !blocked ? [] : [{ kind: 'VIOLATION', rule: 'A-설정 권한이 없거나 차단 쌍인데 알람 변경 제안이 됨', detail: `${proposer} → ${owner} (권한 ${granted}, 차단 ${blocked})` }];
 }
 
-// 공동 약속 고치기: 만든 사람만(만든 사람이 비면 참여자). 다른 사람이 고쳐졌으면 위반
-export function checkApptEdit({ editor, creatorId, rowsChanged, isParticipant, editorJoined = true }) {
-  if (!rowsChanged) return [];
-  if (!editorJoined) return [{ kind: 'VIOLATION', rule: 'P9-그룹에 참여 중이 아닌 사람이 공동 약속을 고침', detail: `${editor}` }];
-  if (creatorId === editor) return [];
-  if (creatorId == null && isParticipant) return [];
-  return [{ kind: 'VIOLATION', rule: 'P9-만든 사람이 아닌데 공동 약속이 고쳐짐', detail: `${editor} (만든 사람 ${creatorId})` }];
+// 공동 약속 고치기: 그룹에 참여 중인 그룹원 누구나 (#619 — 만든 사람은 기록일 뿐). 그룹 밖 사람이 고쳤으면 위반
+export function checkApptEdit({ editor, rowsChanged, editorJoined = true }) {
+  if (!rowsChanged || editorJoined) return [];
+  return [{ kind: 'VIOLATION', rule: 'P9-그룹에 참여 중이 아닌 사람이 공동 약속을 고침', detail: `${editor}` }];
 }
 
 const kstDate = (iso) => new Date(new Date(iso).getTime() + 9 * 3600e3).toISOString().slice(0, 10);

@@ -31,7 +31,7 @@ export type EditStep = 'edit' | 'date' | 'time' | 'place' | 'scopeSave' | 'scope
 type PendingMove = { patch: AppointmentPatch; undo: AppointmentPatch; scope: EditScope; changes: AlarmChange[] };
 
 type Args = {
-  appointment: Pick<Appointment, 'id' | 'title' | 'at' | 'place' | 'importance' | 'recurrenceRule' | 'groupName' | 'canEdit'>;
+  appointment: Pick<Appointment, 'id' | 'title' | 'at' | 'place' | 'importance' | 'recurrenceRule' | 'groupName'>;
   reload: () => Promise<unknown>; // 저장 · 되돌리기 뒤 화면 다시 읽기
 };
 
@@ -51,7 +51,6 @@ export function useScheduleEdit({ appointment: a, reload }: Args) {
   const home = homeOf(useAuth().profile);
 
   const shared = a.groupName != null;
-  const canEdit = a.canEdit !== false;
   const repeated = initial.repeatDays.length > 0;
 
   const id = a.id; // 화면은 일정마다 새로 뜸 (key) — 바뀌지 않음
@@ -111,7 +110,7 @@ export function useScheduleEdit({ appointment: a, reload }: Args) {
   }
 
   function save() {
-    if (!canEdit || !isEditChanged(initial, value)) return;
+    if (!isEditChanged(initial, value)) return;
     if (!value.title.trim()) {
       toast('일정명을 입력해 주세요');
       return;
@@ -149,7 +148,6 @@ export function useScheduleEdit({ appointment: a, reload }: Args) {
 
   // ── 삭제 ──
   function startDelete() {
-    if (!canEdit) return;
     if (needsScope(repeated)) setStep('scopeDelete');
     else void confirmDelete('this');
   }
@@ -215,7 +213,6 @@ export function useScheduleEdit({ appointment: a, reload }: Args) {
     initial,
     value,
     saving: busy,
-    canEdit,
     shared,
     deleted,
     undoDelete,

@@ -59,3 +59,22 @@ describe('FoundScheduleCard 그룹 칩', () => {
     expect(v.onPickGroup.mock.calls).toEqual([[null]]);
   });
 });
+
+describe('FoundScheduleCard 일정 변경 카드 (APPT_OPEN)', () => {
+  const change = (over: Partial<ConversationCard> = {}) =>
+    card({ kind: 'APPT_OPEN', group: null, change: { before: { title: '캡스톤 회의', time: '10:30', place: '학교' }, after: { time: '11:00', place: '강남역' } }, ...over });
+
+  it('지금 → 바뀔 값 줄과 [변경하기] · [변경 안 함] — [일정 열기]는 없음', () => {
+    const v = render(change());
+    expect(v.text).toContain('캡스톤 회의');
+    expect(v.text).toContain('학교 → 강남역');
+    expect(v.text).toContain('변경하기');
+    expect(v.text).toContain('변경 안 함');
+    expect(v.text).not.toContain('일정 열기');
+  });
+
+  it('끝난 뒤에는 결과만', () => {
+    expect(render(change({ status: 'SAVED' })).text).toContain('일정을 바꿨어요');
+    expect(render(change({ status: 'REJECTED' })).text).toContain('바꾸지 않았어요');
+  });
+});

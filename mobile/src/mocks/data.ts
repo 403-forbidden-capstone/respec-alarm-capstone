@@ -71,7 +71,7 @@ export type MockAppointment = {
   importance: Importance;
   recurrenceRule: string | null; // 반복 규칙 RRULE (appointments.recurrence_rule) — 없으면 반복 없음
   groupId: string | null;
-  creatorId?: string; // 공동 약속을 만든 사람 (people의 id) — 없으면 나. 만든 사람만 고치고 지울 수 있음 (N6)
+  creatorId?: string; // 공동 약속을 만든 사람 (people의 id) — 없으면 나. 기록일 뿐 권한 판단에 안 씀 (#619)
   items: string[];
   withWake: boolean;
   // 사용자가 직접 고른 값 (H03 · H05 확인 시트, D42 C) — 있으면 위의 자동 계산값보다 먼저 씀 (강도 intensityOverrides와 같은 규칙)

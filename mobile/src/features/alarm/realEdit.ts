@@ -94,16 +94,15 @@ export function toAlarmChanges(changes: EditUpdateResponse['changes']): AlarmCha
 
 // UNPROCESSABLE의 details.reason별 문구. 출발 시각 지남 · 순서 어긋남(DEPARTURE_PASSED · ORDER) · 지난 시각(PAST_TIME) · 지난 약속(PAST_APPOINTMENT)은 lib/edge의 문구를 그대로 씀
 const EDIT_REASONS: Record<string, string> = {
-  GROUP_RECURRENCE_LATER: '공동 약속의 반복은 아직 고칠 수 없어요', // 시각 · 장소는 만든 사람이 고치면 서버가 참여자마다 다시 계산 (친구 9장)
+  GROUP_RECURRENCE_LATER: '공동 약속의 반복은 아직 고칠 수 없어요', // 시각 · 장소는 그룹원이 고치면 서버가 참여자마다 다시 계산 (친구 9장 · #619)
   HAS_RECORDS: '출발 · 도착 기록이 있는 일정은 지우거나 빠질 수 없어요',
   NOT_SHARED: '공동 약속이 아니에요',
-  CREATOR_CANNOT_LEAVE: '내가 만든 공동 약속은 빠질 수 없어요. 지워 주세요',
   TRAVEL_REQUIRED: '이동시간을 알 수 없어 알람을 다시 만들지 못했어요. 장소를 검색해서 골라 주세요',
 };
 
 const EDIT_CODES: Partial<Record<EdgeError['code'], string>> = {
   NOT_FOUND: '일정을 찾을 수 없어요. 이미 지워졌을 수 있어요',
-  FORBIDDEN: '공동 약속은 만든 사람만 고치거나 지울 수 있어요. "나는 빠지기"를 써 주세요',
+  FORBIDDEN: '이 공동 약속은 지금 고치거나 지울 수 없어요. 그룹에 참여 중인지 확인해 주세요', // 공동 약속은 그룹원 누구나(#619) — 그룹을 나갔거나 지난 약속이면 DB 정책이 막음
   // 고치기 화면에는 이동시간 직접 입력 칸이 없어 lib/edge의 "직접 입력해 주세요" 문구는 맞지 않음
   ROUTE_UNAVAILABLE: '새 장소까지 이동시간을 구하지 못했어요. 장소를 검색해서 골라 주세요',
 };

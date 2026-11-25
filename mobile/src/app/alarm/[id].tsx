@@ -701,7 +701,6 @@ function Detail({ appointment: a, reload }: { appointment: AppointmentDetail; re
         onSave={edit.save}
         onDelete={edit.startDelete}
         saving={edit.saving}
-        canEdit={edit.canEdit}
         onLeave={edit.shared ? edit.leave : undefined}
       />
       <DateSheet visible={edit.step === 'date'} onClose={edit.back} title="날짜" value={edit.value.at} onChange={(at) => edit.change({ at })} minDate={startOfDay(now())} />

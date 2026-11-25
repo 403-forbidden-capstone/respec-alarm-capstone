@@ -111,8 +111,8 @@ export type GroupAppointment = {
   joinedCount: number; // 알람이 하나라도 켜진 참여 수
   iJoined: boolean; // 내가 참여(알람 켜짐) — 아니면 '알람 없음'
   past: boolean; // 이미 지난 약속 — [내 알람 만들기] · 고치기 막힘('지난 약속이에요')
-  mine: boolean; // 내가 만든 약속 (고치기 · 지우기는 만든 사람만)
-  creatorUnknown: boolean; // 만든 사람이 탈퇴함 — 참여자 누구나 고침 (9-아 · 9-27)
+  mine: boolean; // 내가 만든 약속 — 기록일 뿐 권한 판단에 안 씀 (#619, 고치기 · 지우기 · 빠지기는 그룹원 누구나)
+  creatorUnknown: boolean; // 만든 사람이 탈퇴함 (9-아 · 9-27)
 };
 
 // G02 연결 일정 참여자 줄 — 참여 / 알람 없음 두 가지, 차단 쌍은 이름만(HIDDEN) (9-42 · 9-33)

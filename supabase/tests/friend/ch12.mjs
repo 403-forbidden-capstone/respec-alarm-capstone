@@ -190,7 +190,7 @@ export default async function ch12({ q, as, su, svc, check, expectErr }) {
     return r.status === 'OK' && (await q(`select handle from public.profiles where user_id = $1`, [B]))[0].handle === old ? true : r;
   });
 
-  await check('12-28 · 9-아: 만든 사람이 탈퇴한 공동 약속은 참여자 누구나 고치고(시각 변경 가능), 참여 안 한 그룹원은 못 고침', async () => {
+  await check('12-28 · 9-아 · #619: 만든 사람이 탈퇴한 공동 약속은 그룹원 누구나 고침(시각 변경 가능) — 참여 안 한 그룹원도', async () => {
     const A = await join_(22, '만든이'), B = await join_(23, '참여'), C = await join_(24, '참여안함');
     const { g } = await mkGroup(A, [B, C]);
     const ap = await appt(A, g, at('10:00')); await part(A, ap); await part(B, ap);
@@ -200,7 +200,7 @@ export default async function ch12({ q, as, su, svc, check, expectErr }) {
     await su(); await as(C);
     const byOther = await q(`update public.appointments set title = '남의 약속' where appointment_id = $1 returning appointment_id`, [ap]);
     await su();
-    return (await creatorOf(ap)) === null && byParticipant.length === 1 && byOther.length === 0 ? true : { byParticipant, byOther };
+    return (await creatorOf(ap)) === null && byParticipant.length === 1 && byOther.length === 1 ? true : { byParticipant, byOther };
   });
 
   // ---- 탈퇴가 아니라 그룹만 나갈 때 (11/9 헤드 결정) ----------------------------------------------

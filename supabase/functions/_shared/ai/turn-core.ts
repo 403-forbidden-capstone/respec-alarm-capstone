@@ -406,9 +406,10 @@ function emptyCard(id: string, kind: CardKind): Card {
   return { id, kind, status: "NEEDS_ESTIMATE", first_of_day: false, highlight: false, summary: "", draft: null, edit: null, digest: null, items: [], appointment_id: null, error: null };
 }
 
-/** 앱이 계산해야 하는 카드인지 — 새 약속 · 시각이나 준비를 바꾸는 알람 고침. 강도 · 켜고 끄기만이거나 약속 열기 · 알람 추가는 서버가 바로 READY */
+/** 앱이 계산해야 하는 카드인지 — 새 약속 · 시각이나 준비를 바꾸는 알람 고침 · 장소를 바꾸는 약속 변경(앱이 장소를 확인, 모호하면 [장소 고르기]). 그 밖은 서버가 바로 READY */
 function needsEstimate(c: Card): boolean {
   if (c.kind === "APPT_NEW") return true;
+  if (c.kind === "APPT_OPEN") return typeof c.edit?.changes?.place === "string";
   if (c.kind === "ALARM_EDIT") return c.edit?.times !== undefined || c.edit?.prepare_delta !== undefined;
   return false;
 }
@@ -470,7 +471,7 @@ export function pendingText(c: Card, s: TurnState): string {
     case "ALARM_NEW":
       return `${c.summary} · 카드의 [저장]으로`;
     case "APPT_OPEN":
-      return `${c.summary} · 카드의 [일정 열기]로`;
+      return `${c.summary} · 카드의 [변경하기]로`;
   }
 }
 
@@ -640,7 +641,7 @@ export function placeSayOf(s: TurnState, j: number): string | null {
 
 /** 카드가 낸 되물을 것 줄 (그룹 선택 · 장소 고르기 · 알람 계산 · 계산 실패 문구 · 기상 확인) — 저장 · 거절한 카드의 질문을 다시 쓰지 않게 지울 때 */
 function cardAskLines(c: Card): string[] {
-  const title = c.draft?.title ?? c.summary;
+  const title = c.draft?.title ?? c.edit?.before?.title ?? c.summary;
   const group = c.group ? groupQuestion({ ...c, group: { ...c.group, choice: "ASK" } }) : null;
   const lines = [group, placeAskLine(title), `'${title}' 알람 계산`, c.error, wakeQuestion(c), `'${title}' 날 몇 시에 일어날지 (정확한 시각)`];
   return lines.filter((l): l is string => typeof l === "string" && l !== "");
@@ -1037,7 +1038,7 @@ export function applyFast(state: TurnState, fast: FastExtract, ctx: Context, aft
     return `'${x.title}'의 정확한 ${miss.join("·")}${x.place === null ? " · 장소" : ""}`;
   };
 
-  /** 기존 약속(targetRef)을 x 값으로 고치는 카드(APPT_OPEN) — 저장 없이 [일정 열기]만 (D41: 알람 저장은 약속 칸을 안 고침) */
+  /** 기존 약속(targetRef)을 x 값으로 고치는 카드(APPT_OPEN) — [변경하기]면 앱이 appointment-edit로 그 약속을 고치고 알람을 다시 맞춤 (새 약속을 만들지 않음) */
   const changeAppt = (x: XAppt, key: string, targetRef: string, reuseId?: string): void => {
     const cur = apptByRef(targetRef);
     if (!cur) {
@@ -1099,18 +1100,19 @@ export function applyFast(state: TurnState, fast: FastExtract, ctx: Context, aft
     const group = cur.group === undefined ? "" : cur.group === "" ? " (그룹)" : ` (그룹 ${cur.group})`;
     const line = `${appointmentSummary(cur)}${group} → ${moved.join(" · ")}`;
     const changes: NonNullable<CardEdit["changes"]> = {};
-    if (next.date !== cur.date) changes.date = next.date;
-    if (next.time !== cur.time) changes.time = next.time;
-    if (next.place !== cur.place) changes.place = next.place;
-    if (next.importance !== cur.importance) changes.importance = next.importance;
-    if (next.transport !== cur.transport) changes.transport = next.transport;
+    const before: NonNullable<CardEdit["before"]> = { title: cur.title };
+    for (const f of ["date", "time", "place", "importance", "transport"] as const) {
+      if (next[f] === cur[f]) continue;
+      (changes as Record<string, unknown>)[f] = next[f];
+      (before as Record<string, unknown>)[f] = cur[f];
+    }
     upsertCard(
       { kind: "APPOINTMENT", key, item: x, summary: `변경: ${line}`, target_ref: cur.ref },
       "APPT_OPEN",
       (c) => {
         c.summary = `변경: ${line}`;
         c.draft = null;
-        c.edit = { appointment_id: cur.ref, changes };
+        c.edit = { appointment_id: cur.ref, changes, before };
       },
       x.save,
       reuseId,
@@ -1762,7 +1764,10 @@ function apptAtOf(c: Card, s: TurnState): LocalDateTime | null {
   if (c.kind === "APPT_NEW" && c.draft) return { date: c.draft.date, time: c.draft.time };
   const ref = c.edit?.appointment_id;
   const a = ref ? s.appointments.find((x) => x.ref === ref) : undefined;
-  return a ? { date: a.date, time: a.time } : null;
+  if (!a) return null;
+  // 약속 변경 카드의 알람은 바뀐 날짜 · 시각 기준
+  const ch = c.kind === "APPT_OPEN" ? c.edit?.changes : undefined;
+  return { date: ch?.date ?? a.date, time: ch?.time ?? a.time };
 }
 
 /**
@@ -1791,7 +1796,7 @@ export function applyTaskResults(state: TurnState, results: TaskResults, ctx: Co
     if (!OPEN_STATUS.includes(c.status)) continue; // 이미 저장 · 거절한 카드
     touchedCards.push(c);
     c.first_of_day = c.kind === "APPT_NEW" ? isFirstOfDay(s, c) : c.first_of_day;
-    const title = c.draft?.title ?? c.summary;
+    const title = c.draft?.title ?? c.edit?.before?.title ?? c.summary;
     // 이 카드가 앞서 낸 "되물을 것"(장소 · 계산 실패)은 새 결과로 풀렸거나 바뀌었으므로 지움 — 안 지우면 장소를 고른 뒤에도 T1이 장소를 또 물음 (L8 버그 1)
     const stale = new Set([placeAskLine(title), `'${title}' 알람 계산`, ...(typeof c.error === "string" ? [c.error] : [])]);
     for (const e of s.events) e.clarify = e.clarify.filter((l) => !stale.has(l));
@@ -1912,7 +1917,6 @@ export function applyCardAction(state: TurnState, action: CardAction, ctx: Conte
     if (c.status === "READY") pushPending(ev, c, s);
     return { ok: true, state: s, event: ev, card: c, needsReply: false, status: "OK", invalid: null };
   }
-  if (c.kind === "APPT_OPEN") return none("NOOP"); // 저장 없는 카드 — [일정 열기]만
 
   const ev = eventFor(s, afterTurn);
   const now = isoToLocal(ctx.session.now);
@@ -1959,8 +1963,18 @@ export function applyCardAction(state: TurnState, action: CardAction, ctx: Conte
     }
     if (others.length > 0) ev.applied.push(`그 밖의 알람(${others.join(" · ")})도 같이 맞춤`);
     if (c.edit?.prepare_delta !== undefined) ev.applied.push(c.edit.prepare_delta === 0 ? "내일만 준비시간 원래대로" : `내일만 준비시간 원래보다 ${signed(c.edit.prepare_delta)}`);
-  } else if (c.kind === "ALARM_EDIT") {
+  } else if (c.kind === "ALARM_EDIT" || c.kind === "APPT_OPEN") {
     const apptRef = c.edit?.appointment_id ?? null;
+    if (c.kind === "APPT_OPEN") {
+      // 앱이 appointment-edit로 이미 고침 — 대화 상태의 그 약속도 바뀐 값으로 (같은 약속을 새로 만들지 않음)
+      const a = s.appointments.find((x) => x.ref === apptRef);
+      const ch = c.edit?.changes ?? {};
+      if (a) {
+        for (const [k, v] of Object.entries(ch)) if (v !== undefined) (a as unknown as Record<string, unknown>)[k] = v;
+        if (ch.importance !== undefined) a.importance_confirmed = true;
+      }
+      forgetLines(s, cardAskLines(c));
+    }
     const asked = new Set<AlarmType>([...(Object.keys(c.edit?.times ?? {}) as AlarmType[]), ...(Object.keys(c.edit?.enabled ?? {}) as AlarmType[])]);
     const others: string[] = [];
     for (const a of alarms) {
@@ -1976,7 +1990,7 @@ export function applyCardAction(state: TurnState, action: CardAction, ctx: Conte
       if (a.kind === "WAKE" || asked.has(a.kind)) ev.alarms.push({ ...plan });
       else if (OTHER_LABEL[a.kind] !== undefined && !others.includes(OTHER_LABEL[a.kind] as string)) others.push(OTHER_LABEL[a.kind] as string);
     }
-    ev.applied.push(`알람 변경: ${base}`);
+    ev.applied.push(c.kind === "APPT_OPEN" ? `일정 변경: ${base.replace(/^변경: /u, "")}` : `알람 변경: ${base}`);
     if (others.length > 0) ev.applied.push(`그 밖의 알람(${others.join(" · ")})도 같이 맞춤`);
   } else if (c.kind === "ALARM_NEW") {
     const first = alarms[0];

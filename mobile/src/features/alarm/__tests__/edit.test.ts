@@ -230,13 +230,12 @@ describe('공동 약속', () => {
     db.appointments.find((a) => a.id === ID)!.creatorId = 'sy'; // 수연이 만든 캡스톤팀 약속
   };
 
-  it('남이 만든 공동 약속은 고치지도 지우지도 못함', async () => {
+  it('남이 만든 공동 약속도 고치고 지움 (#619 — 만든 사람은 기록일 뿐)', async () => {
     theirs();
-    await expect(updateAppointment(ID, { title: '바꿈' }, 'this')).rejects.toThrow('공동 약속은 만든 사람만 고칠 수 있어요');
-    await expect(updateAppointment(ID, { title: '바꿈' }, 'this')).rejects.toBeInstanceOf(UserError);
-    await expect(deleteAppointment(ID, 'this')).rejects.toThrow('공동 약속은 만든 사람만 고칠 수 있어요');
-    expect((await getAppointment(ID))!.title).toBe('팀 주간회의');
-    expect(await listed()).toContain(ID);
+    await updateAppointment(ID, { title: '바꿈' }, 'this');
+    expect((await getAppointment(ID))!.title).toBe('바꿈');
+    await deleteAppointment(ID, 'this');
+    expect(await listed()).not.toContain(ID);
   });
 
   it('내가 만든 공동 약속은 고치고 지울 수 있음', async () => {
@@ -258,10 +257,11 @@ describe('공동 약속', () => {
     expect(await listed()).not.toContain(ID);
   });
 
-  it('공동 약속이 아니거나 내가 만든 약속이면 빠질 수 없음', async () => {
+  it('공동 약속이 아니면 빠질 수 없음, 내가 만든 약속은 빠질 수 있음 (#619)', async () => {
     await expect(leaveSharedAppointment('a2')).rejects.toThrow('공동 약속이 아니에요');
-    await expect(leaveSharedAppointment(ID)).rejects.toBeInstanceOf(UserError); // 내가 만듦
     await expect(leaveSharedAppointment('nope')).rejects.toBeInstanceOf(UserError);
+    await leaveSharedAppointment(ID); // 내가 만듦
+    expect(await listed()).not.toContain(ID);
   });
 });
 

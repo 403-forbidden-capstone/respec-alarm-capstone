@@ -6,12 +6,11 @@ import { groupChangeAction, settingsDraftOf } from '../groupChange';
 import { editError } from '../realEdit';
 import * as real from '../real';
 import { joinBody, newAppointmentBody } from '../request';
-import { toRows } from '../realRows';
 import { TravelConfirmNeeded } from '../travelConfirm';
 import type { AppointmentDraft } from '../types';
 
 // 친구 9장 앱 층 — 공동 약속의 알람 쪽 (시험케이스 9-03 · 9-21 · 9-27 · 9-32 · 9-35 · 9-36, 세션약속 2절 11/9 9장 줄)
-//   H05 '함께할 그룹' · [내 알람 만들기](alarm-commit appointment_id) · 고치기는 만든 사람만 · 거절 사유 문구 · 공동 약속 변경 푸시 처리
+//   H05 '함께할 그룹' · [내 알람 만들기](alarm-commit appointment_id) · 거절 사유 문구 · 공동 약속 변경 푸시 처리
 const mockCallEdge = jest.fn<(name: string, body?: Record<string, unknown>, options?: unknown) => Promise<unknown>>();
 jest.mock('@/lib/edge', () => {
   const actual = jest.requireActual<typeof import('@/lib/edge')>('@/lib/edge');
@@ -114,37 +113,6 @@ describe('지난 약속 · 거절 사유 (9-32 · 9-36)', () => {
   it('오프라인에서 고치기는 통신 오류 그대로(값은 화면에 남음)', () => {
     const e = new EdgeError('NETWORK');
     expect(editError(e)).toBe(e);
-  });
-});
-
-describe('고치기는 만든 사람만 (9-자 · 9-27)', () => {
-  const row = (creator_id: string | null, group_id: string | null) => ({
-    participant_id: 'p1',
-    origin_name: null,
-    transport_type: 'TRANSIT' as const,
-    est_travel_minutes: 30,
-    travel_source: 'API' as const,
-    prepare_minutes: 60,
-    buffer_minutes: 10,
-    appointments: {
-      appointment_id: 'ap1',
-      title: '팀 주간회의',
-      appointment_at: '2026-10-20T01:00:00.000Z',
-      dest_name: '세종대학교',
-      importance: 'NORMAL' as const,
-      recurrence_rule: null,
-      creator_id,
-      group_id,
-      groups: group_id ? { group_name: '캡스톤팀' } : null,
-    },
-    alarms: [],
-  });
-
-  it('남이 만든 공동 약속은 canEdit false, 내가 만든 것 · 개인 일정 · 만든 사람이 탈퇴한 약속은 고칠 수 있음', () => {
-    expect(toRows(row('other', 'g1'), new Map(), ME).canEdit).toBe(false);
-    expect(toRows(row(ME, 'g1'), new Map(), ME).canEdit).toBeUndefined();
-    expect(toRows(row(ME, null), new Map(), ME).canEdit).toBeUndefined();
-    expect(toRows(row(null, 'g1'), new Map(), ME).canEdit).toBeUndefined(); // 만든 사람 알 수 없음 → 참여자 누구나 (9-아)
   });
 });
 
