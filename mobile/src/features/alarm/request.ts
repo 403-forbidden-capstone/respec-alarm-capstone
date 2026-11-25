@@ -326,6 +326,7 @@ export function toPreview(s: Suggestion, saved: AppointmentDetail, edits: AlarmE
     prepareSampleCount: s.prepare.sample_count,
     ...(s.prepare.recent ? { prepareRecent: s.prepare.recent } : {}),
     ...(problem ? { travelProblem: problem } : {}),
+    withWake: s.with_wake,
   };
 }
 

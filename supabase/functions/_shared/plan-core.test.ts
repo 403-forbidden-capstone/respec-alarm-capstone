@@ -576,6 +576,13 @@ test('#624 그룹 일정 참여: 앞 일정에 기상이 있어 자동 기상이
   assert.ok(!text(moved).slice(1).some((x) => x.endsWith('*')), '준비 · 출발은 자동(고정 안 됨)');
   assert.notDeepEqual(text(autoAt16), text(auto), '일정 시각을 따라 움직임');
 
+  // 그룹 일정은 프로필 순수 준비시간 후보를 받음 — 기상을 골라도 준비 · 출발은 후보로 계산한 자동값 그대로
+  const pure = { purePrepCandidate: { source: 'PROFILE' as const, minutes: 40 } };
+  const pureAuto = computePlan(inputs({ ...pure, draft: { appointmentId: 'ap1' } }), api(30));
+  const purePicked = computePlan(inputs({ ...pure, draft: { appointmentId: 'ap1', manualTimes: { WAKE: kst(22, 480) } } }), api(30));
+  assert.notDeepEqual(text(pureAuto), text(auto), '후보가 계산에 들어감');
+  assert.deepEqual(text(purePicked), ['WAKE 08:00*', ...text(pureAuto)]);
+
   // with_wake false(직접 끔)는 여전히 기상 없음, 알람 없는 일정([])은 기상을 더하지 않음
   assert.equal(computePlan(inputs({ draft: { appointmentId: 'ap1', withWake: false, manualTimes: { WAKE: kst(22, 480) } } }), api(30)).withWake, false);
   assert.deepEqual(computePlan(inputs({ draft: { appointmentId: 'ap1', kinds: [], manualTimes: { WAKE: kst(22, 480) } } }), api(30)).chain, []);

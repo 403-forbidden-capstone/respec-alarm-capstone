@@ -341,9 +341,11 @@ export function computePlan(i: PlanInputs, travel: ResolvedTravel, mode: PlanMod
   // 받아들인 준비 알람 당김 (#484 · 안건 D111) — 계획의 준비 시간 · 준비 전 활동은 원래 값 그대로 두고 알람 사슬만 당김(calc/chain.ts)
   const advance = Math.max(0, Number(i.participant?.prepare_advance_minutes ?? 0) || 0);
   const existingAdvance = Math.max(0, Number(i.existingAdvanceMinutes ?? advance) || 0);
-  const derive = (withWake: boolean) => {
-    const beforePrepareMinutes =
-      i.draft.beforePrepareMinutes ?? (withWake ? inferBeforePrepare(i.existingAlarms, existingAdvance, i.participant?.prepare_minutes) ?? DEFAULT_BEFORE_PREPARE_MINUTES : 0);
+  // ignoreWake: 고른 기상이 준비를 끌지 않는 계산(기상 없는 계산 · 자동 규칙의 12시 판정) — 고른 기상이 순수 준비시간을 막지 않음 (#624)
+  const derive = (withWake: boolean, ignoreWake = !withWake) => {
+    // 기상이 없거나 따로 울리는 기상이면 준비 전 활동은 없음 — 요청 값도 안 씀(앱은 DB 행만으로 따로 울리는 기상을 못 알아봐 기상 − 준비 간격을 보낼 수 있음, #624)
+    const beforePrepareMinutes = !withWake ? 0 :
+      i.draft.beforePrepareMinutes ?? inferBeforePrepare(i.existingAlarms, existingAdvance, i.participant?.prepare_minutes) ?? DEFAULT_BEFORE_PREPARE_MINUTES;
 
     // 기록(stats.p80)은 이미 "기상 ~ 출발"이라 그대로 씀 — 예전에는 준비 전 활동 20분을 또 더해서 기록이 쌓일수록 알람이 일찍 당겨졌음 (학습 루프 기초 2절 1)
     // 개인 보정은 그날 첫 일정(기상 알람 있음)에만 — 두 번째 일정(기상 없음, 공통 15분)에 기상~출발 기록을 붙이면 준비가 부풀어서 15분 그대로 (2절 2, 기록 수와 상관없음)
@@ -389,7 +391,7 @@ export function computePlan(i: PlanInputs, travel: ResolvedTravel, mode: PlanMod
       // Explicit legacy manual duration must survive edit/roll/restore
       // even if these code paths don't submit an override in the draft.
       !(i.participant?.prepare_value_source === 'MANUAL' && i.draft.prepareValueSource !== 'AUTO') &&
-      manualTimes.WAKE == null && manualTimes.PREPARE == null;
+      (ignoreWake || manualTimes.WAKE == null) && manualTimes.PREPARE == null;
     const activePure = usePure ? pure : null;
     const minutes = activePure != null
       ? Math.round(activePure.minutes + (withWake ? beforePrepareMinutes : 0))
@@ -431,8 +433,9 @@ export function computePlan(i: PlanInputs, travel: ResolvedTravel, mode: PlanMod
   let withWake = i.draft.withWake ?? !i.sameDayWake;
   let derived = derive(withWake);
   if (i.draft.withWake == null && withWake) {
-    const depart = departureAt({ at: basics.at, travelMinutes: chosen.minutes, bufferMinutes: basics.bufferMinutes, prepareMinutes: derived.prepare.minutes, beforePrepareMinutes: derived.beforePrepareMinutes, withWake: true, manualTimes: {} });
-    if (isEveningWake(new Date(depart.getTime() - derived.prepare.minutes * 60_000), timeZone, basics.at)) {
+    const judge = manualTimes.WAKE == null ? derived : derive(true, true); // 12시 판정은 자동일 때와 같은 계산으로
+    const depart = departureAt({ at: basics.at, travelMinutes: chosen.minutes, bufferMinutes: basics.bufferMinutes, prepareMinutes: judge.prepare.minutes, beforePrepareMinutes: judge.beforePrepareMinutes, withWake: true, manualTimes: {} });
+    if (isEveningWake(new Date(depart.getTime() - judge.prepare.minutes * 60_000), timeZone, basics.at)) {
       withWake = false;
       derived = derive(false);
     }
@@ -469,7 +472,7 @@ export function computePlan(i: PlanInputs, travel: ResolvedTravel, mode: PlanMod
     // 준비 알람을 직접 고른 일정은 당기지 않음 (그 시각이 먼저, D42 C)
     prepareAdvanceMinutes: manualTimes.PREPARE ? 0 : advance,
   };
-  // 따로 울리는 기상 — 늘 직접 고른 값(MANUAL)이라 auto를 둠(자동값 = 기상 없는 계산의 준비 알람 시각, 되돌리면 기상 없이 준비부터)
+  // 따로 울리는 기상 — 늘 직접 고른 값(MANUAL)이라 auto를 둠(자동값 = 기상 없는 계산의 첫 준비 알람 시각, 되돌리면 자동이 되어 다음 재계산에서 기상 없이 준비부터)
   const withAdded = (list: ChainAlarm[]): ChainAlarm[] => {
     if (!addedWake || pickedWake == null) return list;
     const first = list.find((x) => x.kind !== 'ARRIVE');

@@ -291,6 +291,11 @@ describe('H03 미리 보기 읽기 (toPreview)', () => {
     expect(toPreview(withCount(12), saved(), same(saved())).prepareSampleCount).toBe(12);
   });
 
+  it('준비가 기상을 따라가는지(with_wake)를 실음 — 따로 울리는 기상(#624)은 WAKE 행이 있어도 false라 H03 계산식이 준비 기준', () => {
+    expect(toPreview(suggestion({ with_wake: false }), saved(), same(saved())).withWake).toBe(false);
+    expect(toPreview(suggestion({}), saved(), same(saved())).withWake).toBe(true);
+  });
+
   it('서버가 준 최근 기록 값(최신순 최대 5개)을 그대로 실음 — 없으면(옛 서버) 칸 자체가 없음', () => {
     const base = suggestion({});
     const withRecent = (recent?: number[]) => suggestion({ prepare: { ...base.prepare, ...(recent ? { recent } : {}) } });

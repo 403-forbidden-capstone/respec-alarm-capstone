@@ -426,9 +426,11 @@ export async function buildPlan(ctx: PlanContext, draft: PlanDraft, options: { w
   // NOT consume behavioral history or CatBoost and never alter other members.
   // Existing manual alarm and preparation overrides remain protected by plan-core.
   const inGroup = draft.groupId != null || appointment?.group_id != null;
+  // 그날 앞 일정에 기상이 있어 자동 기상이 없는 일정의 고른 기상은 따로 울려 준비를 끌지 않음 — 실시간 모델을 끄지 않음 (#624)
+  const wakeMoves = !(draft.withWake == null && sameDayWake);
   const manualTime = draft.manualTimes?.PREPARE != null ||
-    draft.manualTimes?.WAKE != null ||
-    existingAlarms.some(a => (a.alarm_type === 'PREPARE' || a.alarm_type === 'WAKE') &&
+    (wakeMoves && draft.manualTimes?.WAKE != null) ||
+    existingAlarms.some(a => (a.alarm_type === 'PREPARE' || (wakeMoves && a.alarm_type === 'WAKE')) &&
       a.time_source === 'MANUAL' && draft.manualTimes?.[a.alarm_type] !== null);
   const manualPrep = draft.prepareMinutes != null ||
     (participant?.prepare_value_source === 'MANUAL' && draft.prepareValueSource !== 'AUTO');
