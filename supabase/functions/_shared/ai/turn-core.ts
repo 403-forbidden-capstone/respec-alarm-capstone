@@ -1514,17 +1514,51 @@ export function applyFast(state: TurnState, fast: FastExtract, ctx: Context, aft
   //   T2F가 기본 알람을 알람 변경으로 적은 것(바꾸라는 말 · 일정 이름 없는 일정 없는 기상 시각)과 일정 카드 없는 기상 답도 여기로 —
   //   그날 일정의 기상 알람을 고친 것으로 보지 않음. 기존 알람은 '바꿔 · 변경 …'이라고 말할 때만 고침 (아래 알람 변경)
   //   한 번 새 알람으로 본 항목은 다음 말("고마워" · "응")에 다시 적혀도 새 알람 — 바꾸라는 말을 새로 해야 기존 알람을 고침
+  //   기존 알람을 콕 집은 말("기상 알람 7시로 해줘")은 '바꿔'가 없어도 고침 · '추가 · 새로'라고 하면 새 알람
+  //   만들지 바꿀지 모호한 말("알람 7시로 해줘")은 그날 본인 알람이 있으면 되물음 (임의로 정하지 않음)
+  const namesAlarm = intent !== null && !intent.add && /기상\s*알람/u.test(intent.text);
+  const toForm = intent !== null && !intent.add && !intent.edit && !namesAlarm && /(시|분|반)\s*으?로/u.test(intent.text);
   const newWakeKey = (c: XAlarm): string => `alarmnew~:${c.date ?? ""}|${c.time ?? ""}`;
   const asNew = (c: XAlarm): boolean =>
-    c.target === "u0" && c.type === "WAKE" && c.appointment_ref === null && c.time !== null && c.enabled !== false && !(c.shift ?? 0) &&
+    c.target === "u0" && c.type === "WAKE" && c.appointment_ref === null && c.time !== null && c.enabled !== false && !(c.shift ?? 0) && !namesAlarm &&
     (intent !== null && intent.alarm && !intent.edit && hits === null || s.seen[newWakeKey(c)] !== undefined && intent?.edit !== true);
-  const alarmNew = [
-    ...(fast.alarm_new ?? []).map((a) => ({ ...a, level: null as number | null })),
-    ...extract.alarm_changes.filter(asNew).map((c) => ({ date: c.date ?? "", time: c.time as string, ampm: true, after: 0, save: c.save, level: c.intensity === null ? null : levelOfIntensity(c.intensity) })),
-  ];
-  for (const c of extract.alarm_changes) if (asNew(c)) s.seen[newWakeKey(c)] = "1";
+  const memoOf = (a: { date: string; time: string; ampm: boolean }): string => `alarmnew=:${a.date}|${a.time}|${a.ampm}`;
+  const alarmNew: { date: string; time: string; ampm: boolean; after: number; save: XAlarm["save"]; level: number | null }[] = [];
+  for (const a of fast.alarm_new ?? []) {
+    // 처음 보는 기본 알람 항목인데 기존 알람을 고치는 말이면 기상 알람 변경으로 (앞서 처리한 항목은 다시 적혀도 그대로)
+    if ((namesAlarm || intent?.edit === true) && Math.round(a.after) === 0 && TIME_RE.test(a.time) && s.seen[memoOf(a)] === undefined) {
+      extract.alarm_changes.push({ target: "u0", appointment_ref: null, type: "WAKE", date: a.date === "" ? null : a.date, time: a.time, intensity: null, enabled: null, save: a.save });
+    } else alarmNew.push({ ...a, level: null });
+  }
+  for (const c of extract.alarm_changes) {
+    if (!asNew(c)) continue;
+    alarmNew.push({ date: c.date ?? "", time: c.time as string, ampm: true, after: 0, save: c.save, level: c.intensity === null ? null : levelOfIntensity(c.intensity) });
+    s.seen[newWakeKey(c)] = "1";
+  }
   extract.alarm_changes = extract.alarm_changes.filter((c) => !asNew(c));
-  if (wakeReply?.choice === "TIME" && openNew === undefined && intent?.alarm === true) alarmNew.push({ date: "", time: wakeReply.time, ampm: true, after: 0, save: "UNCONFIRMED", level: null });
+  // 기상 답(시각)은 대화 문맥으로 가름 — 열린 일정 카드가 없거나 '추가 · 새로'면 기본 알람, 그 일정을 말했거나(이름 · '그날 · 일정' · 같은 말에서 만든 카드)
+  //   다른 날이 아니면 그 일정 카드의 기상 시각(앱이 기상을 옮겨 다시 계산), 그 밖에 같은 날이면 어느 쪽인지 되물음. 나가기 전 할 일 카드는 위에서 처리
+  if (wakeReply?.choice === "TIME" && TIME_RE.test(wakeReply.time) && openNew?.pre_task === undefined && intent?.alarm === true) {
+    const d = openNew?.draft ?? null;
+    const wakeAt = (date: LocalDate): LocalDateTime => ({ date: toMinutes(wakeReply.time) <= toMinutes((d as ApptDraft).time) ? date : addMinutes(date, "00:00", -1).date, time: wakeReply.time });
+    const namesAppt = d !== null && (openNew?.turn === afterTurn || /(그날|일정|약속)/u.test(intent.text) || nameWords(d.title).some((w) => normTitle(intent.text).includes(w)));
+    const soon = minutesBetween(now, { date: now.date, time: wakeReply.time }) > 0 ? now.date : addDays(now.date, 1);
+    if (d === null || intent.add || (!namesAppt && wakeAt(d.date).date !== soon)) {
+      alarmNew.push({ date: "", time: wakeReply.time, ampm: true, after: 0, save: "UNCONFIRMED", level: null });
+    } else if (namesAppt && openNew !== undefined) {
+      if (once(`wake:${openNew.id}`, JSON.stringify(wakeReply))) {
+        const at = wakeAt(d.date);
+        const rest = openNew.edit ?? {};
+        openNew.edit = { ...rest, times: { ...rest.times, WAKE: localToIso(at.date, at.time) } };
+        openNew.status = "NEEDS_ESTIMATE";
+        openNew.digest = null;
+        openNew.error = null;
+        touched.add(openNew.id);
+      }
+    } else if (once(`wakeask:${openNew?.id}|${wakeReply.time}`, "ask")) {
+      ev.clarify.push(`'${d.title}'(${dateKo(d.date)}) 기상 시각을 ${wakeReply.time}으로 정할지, 따로 울릴 알람을 하나 더 만들지`);
+    }
+  }
   for (const a of alarmNew) {
     const after = Math.round(a.after);
     // 상대 시각은 이번 말이 청한 것만 — T2F가 앞 말의 "30분 뒤"를 다시 적으면 지금 기준으로 또 셈하게 됨
@@ -1535,7 +1569,7 @@ export function applyFast(state: TurnState, fast: FastExtract, ctx: Context, aft
       // 말한 날짜 · 오전/오후가 먼저. 깨워 · 일어나 · 기상처럼 기상이 분명하면 오전, 그 밖에 오전 · 오후를 말하지 않았으면 두 쪽 중,
       //   날짜를 말하지 않았으면 오늘 · 내일(달력 날짜) 중 지금 뒤 가장 가까운 시각 (지난 시각이면 아래 PAST_TIME)
       //   처음 정한 시각을 기억 — 다음 말에 다시 적힌 같은 항목을 그 말 · 그때 시각으로 다시 풀면 다른 시각 카드가 생김
-      const memo = `alarmnew=:${a.date}|${a.time}|${a.ampm}`;
+      const memo = memoOf(a);
       const was = s.seen[memo];
       if (was !== undefined) at = { date: was.slice(0, 10), time: was.slice(11) };
       else {
@@ -1555,6 +1589,14 @@ export function applyFast(state: TurnState, fast: FastExtract, ctx: Context, aft
     }
     const key = `alarmnew:${at.date} ${at.time}`;
     alarmKeys.add(key); // 바로잡는 말 정리가 이번 추출에 있는 요청으로 봄
+    const askKey = `alarmnew?~:${key}`;
+    const asked = s.seen[askKey] !== undefined && intent?.add !== true; // 물은 뒤엔 '새로 · 추가' 답이 와야 만듦 ('바꿔'는 위에서 변경으로)
+    if (after === 0 && s.seen[key] === undefined && (asked || toForm && s.alarms.some((x) => x.owner === "u0" && x.enabled && (x.date === at.date || alarmDay(x) === at.date)))) {
+      // 답("새로 만들어줘" · "바꿔줘")이 같은 항목으로 와도 다시 가르게 처음 본 항목으로 되돌림
+      delete s.seen[memoOf(a)];
+      if (once(askKey, "ask")) ev.clarify.push(`그날 알람을 ${at.time}으로 바꿀지, 새 알람을 하나 더 만들지`);
+      continue;
+    }
     if (after === 0 && !once(key, a.save)) continue;
     const label = `${dateKo(at.date)} ${at.time} 알람 추가`;
     if (a.save === "DECLINED") {
