@@ -36,7 +36,7 @@ type ParticipantQueryRow = {
   // Normalize at the boundary instead of asserting a narrower type.
   prepare_value_source?: string | null;
   buffer_minutes: number;
-  wake_detached?: boolean; // 따로 울리는 기상(#624). 다른 쿼리(목록 등)는 안 읽음
+  wake_detached?: boolean; // 따로 울리는 기상(#624). 이 쿼리를 쓰는 화면(H01 다음 알람 · H02 목록 · H03) 모두 읽음 — 마이그레이션 #632 적용 전 DB에 붙으면 모르는 칸이라 오류
   appointments: AppointmentRows['appointment'] & { groups: { group_name: string } | null };
   alarms: AlarmRow[];
 };

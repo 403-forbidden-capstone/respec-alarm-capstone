@@ -34,7 +34,7 @@ export type ParticipantRow = Pick<
   'participant_id' | 'origin_name' | 'transport_type' | 'est_travel_minutes' | 'travel_source' | 'prepare_minutes' | 'buffer_minutes'
 > & {
   prepare_value_source?: 'LEGACY' | 'AUTO' | 'MANUAL';
-  wake_detached?: boolean; // 따로 울리는 기상(#624) — 준비가 기상을 따라가지 않음 (H03 쿼리만 읽음, 없으면 false)
+  wake_detached?: boolean; // 따로 울리는 기상(#624) — 준비가 기상을 따라가지 않음 (H01 · H02 · H03이 같이 쓰는 참여 쿼리가 읽음, 없으면 false)
 };
 export type AppointmentRow = Pick<Tables<'appointments'>, 'appointment_id' | 'title' | 'appointment_at' | 'dest_name' | 'importance' | 'recurrence_rule'> & {
   dest_lat?: number | null; // 장소 좌표 — 편집 시트가 되돌리기에 같이 보내려고 읽음(H03만 채움, #275). 안 읽은 쿼리에는 없음
