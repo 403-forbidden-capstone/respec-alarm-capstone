@@ -168,13 +168,13 @@
 
 ### H09 아침 루틴 음성 진행 (`app/routine-run.tsx`)
 - 오늘 아침 루틴: `routines` + 단계 알람의 오늘 확인(ACKNOWLEDGED) — `routine/api` getTodayRoutine (홈 "오늘 루틴" 카드와 같음). 없으면 "오늘 아침 루틴이 없어요"
-- [시작] → 실데이터: 서버 `routine-live-token`(지침 · 오늘 루틴 · 다음 알람 · 도구 잠김)으로 Gemini Live 연결(`useLiveVoice`, 30초 무발화 끔 · 10분 상한). AI가 단계를 한 번에 하나씩 말하고, 도구 `step_done` · `step_skipped` · `routine_finished`로 앱에 알림 → `routine/run.ts` applyTool로 화면 · `checkRoutineStep`(그 단계 알람에 오늘 확인, 출처 VOICE)
+- 열리면 저절로 시작 (UI 단순화 — [시작] 버튼 없음, 연결 페이지는 누르지 않아도 소리를 냄) → 실데이터: 서버 `routine-live-token`(지침 · 오늘 루틴 · 다음 알람 · 도구 잠김)으로 Gemini Live 연결(`useLiveVoice`, 30초 무발화 끔 · 10분 상한). AI가 단계를 한 번에 하나씩 말하고, 도구 `step_done` · `step_skipped` · `routine_finished`로 앱에 알림 → `routine/run.ts` applyTool로 화면 · `checkRoutineStep`(그 단계 알람에 오늘 확인, 출처 VOICE)
 - [했어] · [건너뛰기] → 같은 기록(출처 BUTTON) + Live에 앱 글(buttonNote)을 넣어 AI가 다음 단계로. 연결이 끊기면 "음성 다시 켜기"
 - 알람이 없는 단계는 확인을 남길 자리가 없어 화면에서만 셈 (홈 카드와 같은 한계)
 - 가짜 데이터: 음성 대신 대본(coachLine)으로 AI가 할 말을 보여 주고 버튼으로 진행
 - 들어오는 길: 기상 확정 뒤 자동(H08) · 홈(H01) 오늘 루틴 카드 아래 "음성으로 진행 ›"(남은 단계가 있을 때, 카드 밖 — 카드는 누르면 다음 단계를 끝내는 버튼)
 ### F01 · G01 친구와 그룹
-- 맨 위 (D110, 홈 아래에서 옮김) — 제안 카드: `alarm_suggestions`(PENDING) — DB. `suppress_until`은 "이 시각 전엔 같은 종류 제안을 만들지 않음"이라 `suggestion-generate`에서만 봄
+- 맨 위 (D110, 홈 아래에서 옮김) — 알람 조정 제안 카드는 뺌 (UI 단순화: 제안은 A02 저녁 AI 대화 카드 한 곳, 자세히는 S01). `suppress_until`은 "이 시각 전엔 같은 종류 제안을 만들지 않음"이라 `suggestion-generate`에서만 봄
 - 맨 위 (D110, 홈 아래에서 옮김) — 그룹 기상 요약: `get_group_wake(group_id)` — RPC. 그 그룹 일정이 있는 날만 (D57), 약속 없는 날은 '오늘 n명 일어남' 줄을 숨김
 - 친구 목록: `friends`(ACCEPTED) + 이름 · 사진 `get_public_profiles` — DB · RPC
 - 받은 요청: `friends`(PENDING, 받는 사람 = 나) — DB, 수락 → ACCEPTED — DB
@@ -210,9 +210,9 @@
 - 받는 쪽 제안 카드(홈 · 알람 탭): `my_alarm_proposals` — RPC → '○○님의 제안 / 기상 알람 7:30 → 7:00 [적용] [무시]'. `respond_alarm_proposal(p_proposal_id, p_apply)`: 적용하면 서버가 알람 카드 전체를 옮기고 앱이 `syncNow()`로 폰 예약을 서버 알람에 맞춤, 무시는 보낸 쪽에 알리지 않음, `EXPIRED`는 '이미 지나간 제안이에요'
 
 ### A02 AI 대화 (실데이터는 텍스트 대화 — 서버 함수 voice-session · voice-turn과 같이 배포돼야 동작)
-- 루틴 제안 카드 `RoutinePromptCard` (안건 D114): 알람 조정 제안 카드 아래. 기다리는 제안 `routine_suggestions`(PENDING) — DB(`routine/api` getPendingRoutineSuggestion). [루틴 만들기] → A04 `/routine/new?suggestion=…`, [괜찮아요] → IGNORED + 답한 시각 (기록 있는 아침 3번 뒤 다시, D24 C — 서버가 셈)
+- 루틴 제안 카드 `RoutinePromptCard` (안건 D114): 알람 조정 제안 카드가 없을 때만 (UI 단순화: 한 번에 카드 하나, 제목 · 이유 한 줄 · 버튼 둘). 기다리는 제안 `routine_suggestions`(PENDING) — DB(`routine/api` getPendingRoutineSuggestion). [만들기] → `acceptRoutineSuggestion` = 초안(다음 기상 알람 시각에서 시작) 그대로 저장 · 제안 ACCEPTED, 토스트 [고치기] → A04 `/routine/[id]`. [괜찮아요] → IGNORED + 답한 시각 (기록 있는 아침 3번 뒤 다시, D24 C — 서버가 셈)
 - 실패 · 한도 안내 부품 `ChatNotice`(값 · 콜백) — `ai.tsx`가 실패(`unavailable`) · 한도(`limits.reached`)일 때 마지막 말풍선 아래에 붙임
-- 알람 조정 제안 카드 `SuggestionPromptCard` (안건 D111 5번 — 저녁 대화에서 묻기): 대화 첫 마디 바로 아래. 대기 중 제안 `alarm_suggestions`(PENDING) — DB(`records/api` getPendingSuggestion, 그룹 탭 카드 · S01과 같음). [적용하기] · [괜찮아요]는 `suggestion-apply`(Edge, 실데이터) → 폰 예약. 대화 서버 상태(`voice-session` · `voice-turn` · 카드 종류)와는 따로라 대화에는 안 남음
+- 알람 조정 제안 카드 `SuggestionPromptCard` (안건 D111 5번 — 저녁 대화에서 묻기): 대화 첫 마디 바로 아래, 제목 · 바뀌는 시각 한 줄 · [적용하기] [괜찮아요] 나란히 · 오른쪽 위 "자세히 ›"(S01). 대기 중 제안 `alarm_suggestions`(PENDING) — DB(`records/api` getPendingSuggestion, S01과 같음 — 제안이 보이는 곳은 이 카드 한 곳). [적용하기] · [괜찮아요]는 `suggestion-apply`(Edge, 실데이터) → 폰 예약. 대화 서버 상태(`voice-session` · `voice-turn` · 카드 종류)와는 따로라 대화에는 안 남음
 - 가짜 데이터: 목업 대본(`mocks/ai.ts`) 그대로. 카드는 찾은 일정 한 장(`cards[0]`, 번호 c1)
 - 실데이터(`features/voice/real.ts`, 설계 `L4_자기전_설계메모.md` 1 · 2 · 5절): 글로만 대화 — 말하기 버튼 없음("키보드 마이크로 말해도 돼요")
   - 시작: `voice-session {session_type: BEFORE_SLEEP, input_mode: TEXT, resume: true}` — 대화방은 KST 달력 날짜, 기록은 기준일: 오늘 연 대화방이 있으면 이어서([완료] 뒤 다시 열어도 같은 대화 · 카드, 자정이 지나면 새 대화방). 0시 ~ 기상 전에 연 방을 기상 뒤에 열면 같은 방의 다음 구간 세션(`server_state.prev_session_id`)을 만들어 화면 말 · 카드(번호 그대로, 열린 알람 바꾸기 카드만 FAILED)는 이어 주고 기록(구조화 JSON · 일기)은 구간마다 제 기준일로 — 응답 `prev_session_ids`로 앱이 앞 구간의 저장됨 표시를 옮김. 첫 마디는 서버 템플릿. 하루 한도면 `session_id: null` · `limits.reached: DAY`
@@ -236,12 +236,12 @@
 - 일정 · 알람 저장: 앱이 L1 함수로(`appointments` · `alarms`), 준비물은 카드와 같이. 대화 끝 정리의 할 일 · 준비물(`todos`)은 서버 PR 5 (D32). 일정을 여러 개 찾으면 다 받음 (D36) — 기상과 이어지는 첫 일정(`first_of_day`)만 알람 줄을 자세히, 나머지는 "출발 알림" 한 줄. 카드별 상태는 서버 `server_state.cards`
 
 ### A03 하루 기록 · 일기
-- 루틴 제안 (안건 D114 · D30 B): 일기 줄의 `routine_suggestion` 칸이 비어 있는 오늘 일기에는 루틴 제안 표의 기다리는 제안 카드(A02와 같음). 일기 줄 칸은 옛 흐름(가짜 데이터)만
+- 루틴 제안 (안건 D114 · D30 B): 오늘 일기에는 루틴 제안 카드를 두지 않음 (UI 단순화 — A02 저녁 AI 대화 한 곳). 일기 줄의 `routine_suggestion` 칸은 옛 흐름(가짜 데이터)만
 - 일기: `daily_journals`(AI 글 · 고친 글 · 코칭 · 격려 · 루틴 제안) 읽기 · 고치기 — DB, 만들기 — Edge(`voice-commit`이 AI 글 `ai_summary`만, 코칭 · 격려 · 루틴 제안은 아직 없음). 날짜별로 엶 (R02 일간에서, D48)
 - 오늘의 사실: `alarm_events` · `appointment_participants`(출발 · 도착 · 지각) · `todos` — DB
 
 ### A04 루틴 편집
-- `/routine/new?suggestion=…` (안건 D114): 루틴 제안 초안 — 이름 · 목표 · 요일 · 단계(기상 기준 분 → 다음 기상 알람 시각, 없으면 7:00 · 밤 루틴은 고정 시각). 저장하면 `routines`(origin AI_SUGGESTED) + 단계 알람 → 그 제안을 ACCEPTED + 만든 루틴
+- `/routine/new?suggestion=…` (안건 D114): 루틴 제안 초안 — 이름 · 목표 · 요일 · 단계(기상 기준 분 → 다음 기상 알람 시각, 없으면 7:00 · 밤 루틴은 고정 시각). 저장하면 `routines`(origin AI_SUGGESTED) + 단계 알람 → 그 제안을 ACCEPTED + 만든 루틴 — 제안 카드의 [만들기]는 이 초안을 열지 않고 바로 저장함(UI 단순화), 이 주소는 고치고 싶을 때만
 - 루틴: `routines`(이름 · 목표 · 요일 · 단계 `steps` · 켜짐) — DB
 - 단계 알람: `alarms`(`routine_id` · `step_order`) — DB → 예약 — 폰. 루틴을 끄거나 단계(알람)를 빼면 알람을 지우지 않고 `is_enabled` false (지우면 울림 · 확인 기록 `alarm_events`가 같이 사라짐). 다시 켜면 같은 줄(루틴 · 단계 번호가 하나뿐)을 켬. 폰 맞추기는 저장이 중간에 실패해도 함
 

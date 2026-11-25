@@ -2,6 +2,7 @@
 // 가짜 데이터(src/mocks)는 그대로 두고, 실데이터 모드면 함수 맨 앞에서 real.ts(Supabase)로 넘김 (docs/screen-data-map.md "실데이터 연결 규칙")
 //   읽기 · 쓰기 위치는 docs/screen-data-map.md (H01 오늘 루틴 · 내일 준비물 · A03 하루 기록 · A04 루틴 편집)
 import { now } from '@/lib/clock';
+import { UserError } from '@/lib/errors';
 import { dateParts } from '@/lib/format';
 import { isMock } from '@/lib/mode';
 import { aiDb, MOCK_ROUTINE_SUGGESTION, MOCK_WAKE_MINUTE, ROUTINE_SUGGESTION, suggestedRoutine } from '@/mocks/ai';
@@ -111,6 +112,14 @@ export async function getPendingRoutineSuggestion(): Promise<RoutineSuggestion |
 export async function ignoreRoutineSuggestion(id: string) {
   if (!isMock()) return real.ignoreRoutineSuggestion(id);
   if (id === MOCK_ROUTINE_SUGGESTION.id && aiDb.routineSuggestion === 'PENDING') aiDb.routineSuggestion = 'IGNORED';
+}
+
+// 루틴 제안 받아들이기를 한 번에 (UI 단순화) — 초안(다음 기상 알람 시각에서 시작) 그대로 저장하고 제안은 받아들임. 고치기는 저장한 루틴 편집에서
+//   이미 답한 제안이면 초안이 없어 오류 (화면은 카드를 지움)
+export async function acceptRoutineSuggestion(id: string): Promise<Routine> {
+  const draft = await getRoutine('new', undefined, id);
+  if (!draft) throw new UserError('이미 답한 제안이에요');
+  return saveRoutine(draft);
 }
 
 // sourceSuggestion = 루틴 제안으로 만드는 초안 (/routine/new?suggestion=…), sourceJournal = 일기의 옛 제안 (/routine/new?journal=…)
