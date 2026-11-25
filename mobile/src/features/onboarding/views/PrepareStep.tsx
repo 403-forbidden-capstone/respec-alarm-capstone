@@ -39,7 +39,7 @@ export function PrepareStep({ values, onChange, ml, onMlChange }: Props) {
       </Text>
       <Text variant="small" tone="sub">
         식사 · 과제처럼 준비 전에 하는 일은 빼고 입력해 주세요.
-        기록이 쌓이면 내 실제 준비 시간에 맞춰 조금씩 고쳐요.
+        연구에 동의하면 기록이 쌓일수록 실제 준비 시간에 맞춰 조금씩 고칠 수 있어요.
       </Text>
       <Card>
         <Stepper

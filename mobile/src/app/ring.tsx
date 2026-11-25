@@ -27,6 +27,7 @@ import { colors } from '@/theme';
 // 알람 코어의 순수 계산 파일만 직접 가져옴 (index는 네이티브 모듈을 찾으므로 — 같은 선례: lib/alarmSync 시험)
 import {
   canSnooze,
+  SNOOZE_LATE_CHIP,
   SNOOZE_MINUTES_OPTIONS,
   snoozeButtonLabel,
   snoozeCountLabel,
@@ -265,12 +266,18 @@ export default function RingScreen() {
                     disabled={!snoozeAllowed}
                     accessibilityRole="radio"
                     accessibilityState={{ selected: on, disabled: !snoozeAllowed }}
-                    accessibilityHint={late ? '출발에 늦어요' : undefined}
+                    accessibilityHint={late ? SNOOZE_LATE_CHIP : undefined}
                     style={[styles.option, late ? (on ? styles.optionLateOn : styles.optionLate) : on && styles.optionOn, !snoozeAllowed && styles.disabled]}
                   >
                     <Text variant="body" weight={on || late ? 600 : 400} style={{ color: textColor }}>
                       {m}분
                     </Text>
+                    {/* 칩 안 '늦어요'는 폰 알람 화면(네이티브 AlarmRingingActivity)과 같게 둠 — 글자만 12로 (C-05) */}
+                    {late ? (
+                      <Text variant="label" weight={700} style={{ color: textColor }}>
+                        {SNOOZE_LATE_CHIP}
+                      </Text>
+                    ) : null}
                   </Pressable>
                 );
               })}
@@ -291,7 +298,7 @@ export default function RingScreen() {
                 style={[styles.button, styles.snooze, selectedLate > 0 && styles.snoozeLate, !snoozeAllowed && styles.disabled]}
               >
                 <Text variant="button" tone="inverse">
-                  {snoozeButtonLabel(minutes, false) /* 늦어요는 위 경고 줄 한 곳에만 */}
+                  {snoozeButtonLabel(minutes, selectedLate > 0)}
                 </Text>
               </Pressable>
               <Pressable onPress={dismiss} accessibilityRole="button" style={[styles.button, styles.main]}>

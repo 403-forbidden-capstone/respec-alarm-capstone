@@ -94,7 +94,7 @@ export default function GroupChangeScreen() {
         {rows.map((kind) => {
           const b = before(kind);
           const a = after(kind);
-          const same = b != null && a != null && b.at.getTime() === a.at.getTime(); // 약속이 바뀌어도 이 알람은 그대로
+          const same = b != null && a != null && b.at.getTime() === a.at.getTime() && b.enabled === a.enabled; // 약속이 바뀌어도 이 알람은 그대로 (켜짐만 바뀌어도 '그대로'가 아님)
           return (
             <View key={kind} style={[styles.row, same && styles.same]}>
               <Text variant="body" style={styles.kind}>

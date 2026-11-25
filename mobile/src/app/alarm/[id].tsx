@@ -666,7 +666,7 @@ function Detail({ appointment: a, reload, changedKinds }: { appointment: Appoint
       <TimeSheet
         visible={pickKind != null}
         onClose={() => setPickKind(null)}
-        // 새 기상은 "확인"을 눌러야 켜짐 — 시각을 안 건드리고 확인만 눌러도 보이던 시각으로 (닫기 · 바깥 누름은 그대로 미설정)
+        // 새 기상은 "확인"을 누르면 켜짐 — 시각을 안 건드리고 확인만 눌러도 보이던 시각으로. 시각을 돌린 뒤 닫아도 그 시각으로 켜짐(onChange), 안 건드리고 닫으면 그대로 미설정
         onConfirm={(at) => pickingNewWake && edits.times.WAKE == null && setEdit({ times: { ...edits.times, WAKE: at } })}
         title={pickKind ? `${KIND_LABEL[pickKind]} 시각` : ''}
         value={picking?.at ?? (pickingNewWake ? newWakeAt : undefined) ?? a.at}

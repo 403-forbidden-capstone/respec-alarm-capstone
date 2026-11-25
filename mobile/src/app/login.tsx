@@ -97,7 +97,7 @@ export default function LoginScreen() {
           <Button
             variant="plain"
             small
-            label={devOpen ? '접기' : devLoginVisible && enabled ? '다른 데모 계정 · 개발 메뉴' : '개발 메뉴'}
+            label={devOpen ? '접기' : devLoginVisible && enabled ? '다른 데모 계정 · 개발 메뉴' : '알람 테스트'}
             onPress={() => setDevOpen((v) => !v)}
           />
           {devOpen ? (
