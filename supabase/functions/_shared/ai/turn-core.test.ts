@@ -541,6 +541,30 @@ describe("약속 변경 카드 (APPT_OPEN) — [변경하기]로 그 약속을 �
     assert.deepEqual(events[0]?.pending.map((p) => p.summary), ["변경: 10/9(금) 10:00 알고리즘 수업 · 공학관 → 중요도 매우 중요 · 카드의 [변경하기]로"]);
   });
 
+  it("같은 일정을 연달아 바꿈 (개인 · 그룹, 추출이 ref를 주든 안 주든) — 저장한 변경 카드는 다시 쓰지 않고 매번 새 카드, 변경 전 = 마지막 저장 값", () => {
+    for (const group of [undefined, "캡스톤"]) {
+      const c = ctx({ tomorrow: [appt({ title: "캡스톤 회의", time: "10:30", place: null, ...(group ? { group } : {}) })], alarms: [al("al1", "WAKE", "08:00", "NORMAL")] });
+      let s = initTurnState(c);
+      const times = ["13:00", "14:00", "15:00", "13:00"]; // 되돌리기(A → B → C → A)도 새 요청
+      times.forEach((to, i) => {
+        const from = i === 0 ? "10:30" : (times[i - 1] as string);
+        const x = study({ ref: i % 2 === 0 ? "a1" : null, title: "캡스톤 회의", time: to, place: null });
+        const r = applyFast(s, fast({ appointments: [x] }), c, i + 1, `캡스톤 회의 시간을 ${to}로 바꿔줘`);
+        const label = `${group ?? "개인"} ${from}→${to}`;
+        const wake = `${String(8 + i).padStart(2, "0")}:00`;
+        assert.deepEqual(r.cards.map((k) => [k.id, k.kind, k.status]), [[`c${i + 1}`, "APPT_OPEN", "READY"]], label);
+        assert.deepEqual(r.cards[0]?.edit, { appointment_id: "a1", changes: { time: to }, before: { title: "캡스톤 회의", time: from } }, label);
+        if (group) assert.match(r.cards[0]?.summary ?? "", /\(그룹 캡스톤\)/);
+        const saved = applyCardAction(r.state, { id: `c${i + 1}`, action: "SAVED", appointment_id: "u1", alarms: [{ kind: "WAKE", at: iso("2026-10-09", wake), enabled: true, level: 1 }] }, c, i + 1);
+        s = saved.state;
+        assert.deepEqual(s.appointments.map((a) => [a.ref, a.time, a.group]), [["a1", to, group]], label);
+        assert.deepEqual(s.alarms.filter((a) => a.type === "WAKE").map((a) => [a.ref, a.time]), [["al1", wake]], `${label} 같은 기상 알람을 다시 맞춤`);
+        // 같은 말이 다음 말에서 되풀이돼도(추출 흔들림) 카드를 또 만들지 않음
+        assert.deepEqual(applyFast(s, fast({ appointments: [x] }), c, i + 2, "고마워").cards, [], label);
+      });
+    }
+  });
+
   /** 스터디 카드를 만들어 저장까지 마친 상태 (a2로 저장됨, 다음 말은 3번째) */
   function withSaved(c: Context): TurnState {
     let s = applyFast(initTurnState(c), fast({ appointments: [study()] }), c, 1).state;
@@ -1682,6 +1706,70 @@ describe("고칠 대상 찾기 (applyFast userText)", () => {
     const c = c24();
     const r = say(c, fast({ appointments: [apptX({ title: "회의", date: D24, time: "13:00" })] }), "내일 오후 1시에 새로운 회의 추가해줘");
     assert.deepEqual(r.cards.map((x) => [x.kind, x.summary]), [["APPT_NEW", "11/24(화) 13:00 회의"]]);
+  });
+
+  it("바꿔 달라는데 추출이 변경을 못 뽑음: 대상이 하나면 지금 값과 함께 되물음, 모르면 일정 · 값을 되물음 — '네, 알겠어요.'로 끝내지 않음", () => {
+    const c = c24();
+    const one = say(c, fast(), "스터디 시간 좀 바꿔줘");
+    assert.deepEqual(one.cards, []);
+    assert.deepEqual(one.event.clarify, ["'스터디'(지금 11/24(화) 13:00) 일정을 무엇으로 바꿀지 — 바뀔 날짜 · 시각 · 장소"]);
+    assert.equal(serverAskOf(one.state, 1), "지금 '스터디' 일정은 11/24(화) 오후 1시예요. 언제로 바꿀까요?");
+    assert.equal(one.event.note, undefined);
+    // 같은 이름이 여러 날(캡스톤 회의 24 · 25일)이거나 이름이 없으면 어느 일정인지부터
+    for (const text of ["캡스톤 회의 시간 바꿔줘", "그거 좀 바꿔줘"]) {
+      const r = say(c, fast(), text);
+      assert.deepEqual([r.cards, r.event.clarify], [[], ["바꿀 일정이 어느 것인지와 바뀔 날짜 · 시각"]], text);
+      assert.equal(serverAskOf(r.state, 1), "어떤 일정을 언제로 바꿀지 알려 주시겠어요?");
+    }
+  });
+
+  it("바꿔 달라는 값이 이미 지금 값: 카드 없이 지금 설정을 알림 (note) — 개인 · 그룹, ref 있든 없든", () => {
+    const c = c24();
+    const study = say(c, fast({ appointments: [apptX({ title: "스터디", date: D24, time: "13:00" })] }), "스터디 1시로 바꿔줘");
+    assert.deepEqual([study.cards, study.event.clarify, study.event.pending], [[], [], []]);
+    assert.equal(study.event.note, "'스터디' 일정은 이미 11/24(화) 오후 1시로 되어 있어요.");
+    const group = say(c, fast({ appointments: [apptX({ ref: "a1", title: "캡스톤 회의", date: D24, time: "10:00", place: null })] }), "내일 캡스톤 회의 10시로 바꿔줘");
+    assert.equal(group.event.note, "'캡스톤 회의' 일정은 이미 11/24(화) 오전 10시로 되어 있어요.");
+    assert.deepEqual(group.state.appointments, initTurnState(c).appointments, "아무것도 바꾸지 않음");
+    // 저장한 변경 뒤 같은 값을 또 청함(once()가 거른 되풀이)도 지금 설정을 알림
+    const moved = say(c, fast({ appointments: [apptX({ ref: "a2", title: "스터디", date: D24, time: "15:00" })] }), "스터디 3시로 바꿔줘");
+    const saved = applyCardAction(moved.state, { id: "c1", action: "SAVED", appointment_id: "u2", alarms: [] }, c, 1).state;
+    const again = say(c, fast({ appointments: [apptX({ ref: "a2", title: "스터디", date: D24, time: "15:00" })] }), "스터디 3시로 바꿔줘", saved, 2);
+    assert.deepEqual(again.cards, []);
+    assert.equal(again.event.note, "'스터디' 일정은 이미 11/24(화) 오후 3시로 되어 있어요.");
+  });
+
+  it("[변경하기] 전인 변경 카드를 같은 말로 또 청함: 새 카드 · 되물음 없이 그 카드를 다시 안내", () => {
+    const c = c24();
+    const x = apptX({ ref: "a2", title: "스터디", date: D24, time: "15:00" });
+    const first = say(c, fast({ appointments: [x] }), "스터디 3시로 바꿔줘");
+    const again = say(c, fast({ appointments: [x] }), "스터디 3시로 바꿔줘", first.state, 2);
+    assert.deepEqual(again.cards.map((k) => [k.id, k.status]), [["c1", "READY"]]);
+    assert.deepEqual(again.event.pending.map((p) => p.id), ["c1"]);
+    assert.deepEqual([again.event.clarify, again.event.note], [[], undefined]);
+  });
+
+  it("[변경 안 함]한 변경을 같은 말로 다시 청함: 지금 값을 되묻지 않고 새 변경 카드 (거절한 카드는 그대로)", () => {
+    const c = c24();
+    const x = apptX({ ref: "a2", title: "스터디", date: D24, time: "15:00" });
+    const first = say(c, fast({ appointments: [x] }), "스터디 3시로 바꿔줘");
+    const no = applyCardAction(first.state, { id: "c1", action: "REJECTED" }, c, 1).state;
+    const again = say(c, fast({ appointments: [x] }), "스터디 3시로 바꿔줘", no, 2);
+    assert.deepEqual(again.cards.map((k) => [k.id, k.kind, k.status, k.edit?.changes]), [["c2", "APPT_OPEN", "READY", { time: "15:00" }]]);
+    assert.deepEqual([again.event.clarify, again.event.note], [[], undefined]);
+    assert.equal(card(again.state, "c1").status, "REJECTED");
+    // 같은 말이 또 와도(추출 되풀이) 열린 c2를 다시 안내할 뿐 — 카드가 늘지 않음
+    const third = say(c, fast({ appointments: [x] }), "스터디 3시로 바꿔줘", again.state, 3);
+    assert.deepEqual([third.state.cards.length, third.event.pending.map((p) => p.id)], [2, ["c2"]]);
+  });
+
+  it("바꿔 달라는 말이 아니거나 알람 · 준비시간 · 새 일정 말이면 되묻지 않음 (기존 흐름 그대로)", () => {
+    const c = c24();
+    for (const text of ["고마워", "내일 오후 1시에 새로운 회의 추가해줘", "캡스톤 회의 기상 알람 바꿔줘", "준비시간 좀 바꿔줘"]) {
+      const r = say(c, fast(), text);
+      assert.equal(r.event.note, undefined, text);
+      assert.ok(!r.event.clarify.some((l) => l.includes("무엇으로 바꿀지") || l.startsWith("바꿀 일정이 어느 것인지와")), `${text}: ${r.event.clarify.join(" / ")}`);
+    }
   });
 
   it("고치라는 말인데 추출이 새 일정으로 냄: 있는 일정이면 변경 카드(APPT_OPEN, 지금 → 바뀔 값), 없으면 만들지 않고 '대상 없음' — '새로 추가해줘'면 그때 만듦", () => {

@@ -1356,12 +1356,13 @@ export function applyFast(state: TurnState, fast: FastExtract, ctx: Context, aft
     }
   }
 
+  /** 같은 일정 추출의 처리 기록 서명 — 같으면 이미 처리함(once) */
+  const apptSig = (x: XAppt): string => JSON.stringify([x.save, x.date, x.time, x.place, x.importance, x.transport, x.repeat, x.unclear !== null]);
   for (const x of [...extract.appointments].sort((a, b) => atOf(a) - atOf(b))) {
     // "캡스톤 그룹으로"라는 답을 T2F가 날짜 · 시각 없는 새 일정으로 뽑은 것 — 되묻지 않음
     if (groupAnswered && x.ref === null && (x.date === null || x.time === null)) continue;
     const key = apptKey(x);
-    const sig = JSON.stringify([x.save, x.date, x.time, x.place, x.importance, x.transport, x.repeat, x.unclear !== null]);
-    if (!once(key, sig)) continue;
+    if (!once(key, apptSig(x))) continue;
     if (alarmEcho(x)) continue;
     if (x.ref) changeAppt(x, key, x.ref);
     else if (intent !== null && intent.edit && !intent.add && normTitle(x.title) !== "") editExisting(x, key);
@@ -1721,6 +1722,45 @@ export function applyFast(state: TurnState, fast: FastExtract, ctx: Context, aft
   if (crisis) {
     s.crisisNotified = true;
     ev.crisis = true;
+  }
+
+  // ── 일정을 바꿔 달라는 말인데 이번 말로 바뀐 게 없음 (2026-11-25) ──
+  //   T2F가 변경을 못 뽑았거나 지금 값 · 이미 처리한 값을 되풀이하면 처리 결과가 비어 "네, 알겠어요."로 끝났음.
+  //   열린 변경 카드가 있으면 그 카드를 다시 안내, 이미 그 값이면 지금 설정을 알림(note), 그 밖은 바꿀 일정 · 값을 되물음.
+  //   알람 · 준비시간 말(intent.alarm · typeNamed)은 알람 쪽이 맡음. 위기 턴은 위기 안내가 먼저라 건너뜀
+  const quiet = touched.size === 0 && s.fixes.length === state.fixes.length && ev.applied.length + ev.pending.length + ev.clarify.length + ev.rejected.length + ev.alarms.length + (ev.conflicts ?? []).length === 0;
+  if (quiet && intent !== null && intent.edit && !intent.add && !intent.alarm && !intent.typeNamed && extract.prep_adjustment === null && !extract.safety_flag) {
+    const targetOf = (x: XAppt): Appointment | undefined => {
+      if (x.ref) return apptByRef(x.ref);
+      const found = normTitle(x.title) === "" ? [] : existingFor(x);
+      return found.length === 1 ? found[0] : undefined;
+    };
+    const named = hits === null ? [] : s.appointments.filter((a) => hits.best.has(a.ref));
+    const said = extract.appointments.map((x) => ({ x, a: targetOf(x) })).find((p) => p.a !== undefined);
+    const target = said?.a ?? (named.length === 1 ? named[0] : undefined);
+    const when = (a: Appointment): string => `${dateKo(a.date)} ${spokenTime(Math.floor(toMinutes(a.time) / 60), toMinutes(a.time) % 60)}`;
+    const open = target === undefined ? undefined : s.cards.find((c) => c.kind === "APPT_OPEN" && OPEN_STATUS.includes(c.status) && c.edit?.appointment_id === target.ref);
+    const unchanged = said !== undefined && target !== undefined && said.x.unclear === null &&
+      (["date", "time", "place", "importance", "transport", "repeat"] as const).every((f) => (said.x[f] ?? target[f]) === target[f]);
+    if (open !== undefined) {
+      // 같은 변경을 다시 청함 — 아직 [변경하기] 전인 그 카드로 (저장한 카드는 열린 카드가 아니라 여기 안 옴)
+      touched.add(open.id);
+      if (open.status === "READY") pushPending(ev, open, s);
+    } else if (said !== undefined && target !== undefined && !unchanged) {
+      // 지금 값과 다른 변경인데 처리 기록(seen)이 걸러 냄 — [변경 안 함]한 카드를 같은 말로 다시 청함. 되묻지 않고 이번 말로 다시 처리
+      const key = apptKey(said.x);
+      s.seen[key] = apptSig(said.x);
+      changeAppt({ ...said.x, ref: target.ref }, key, target.ref);
+    } else if (unchanged && target !== undefined) {
+      const w = when(target);
+      const place = said?.x.place && target.place ? `, 장소는 ${target.place}` : "";
+      ev.note = `'${target.title}' 일정은 이미 ${w}${place}${josa(place === "" ? w : target.place as string, "으로", "로")} 되어 있어요.`;
+    } else if (target !== undefined) {
+      const w = when(target);
+      ask(ev, `'${target.title}'(지금 ${dateKo(target.date)} ${target.time}) 일정을 무엇으로 바꿀지 — 바뀔 날짜 · 시각 · 장소`, `지금 '${target.title}' 일정은 ${w}${josa(w, "이에요", "예요")}. 언제로 바꿀까요?`);
+    } else {
+      ask(ev, "바꿀 일정이 어느 것인지와 바뀔 날짜 · 시각", "어떤 일정을 언제로 바꿀지 알려 주시겠어요?");
+    }
   }
 
   // ── 앱 일 ── (위기 턴은 앱 일을 다음 턴으로 미룸 — 위기 안내가 먼저, 지침 12)

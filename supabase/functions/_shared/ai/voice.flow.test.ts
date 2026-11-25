@@ -215,6 +215,86 @@ test('녹화 한 바퀴: 첫 마디 템플릿 → 새 약속 카드 → 계산 �
   assert.equal(claude!.left('T2F'), 0);
 });
 
+// ───────── 같은 일정 연속 변경 ─────────
+
+test('대화에서 만든 일정을 연달아 바꿈: 모델 화면(T2F · T1)이 방금 바꾼 값을 보고, 바꿀 때마다 새 변경 카드(변경 전 = 마지막 저장 값) · 같은 일정 id 유지', async () => {
+  const db = new FakeDb();
+  db.now = NOW;
+  db.rows('profiles').push({ user_id: ME, nickname: '지민', timezone: 'Asia/Seoul' });
+  const appt = (ref: string | null, time: string) => ({
+    appointments: [{ ref, title: '캡스톤 회의', date: '2026-10-30', time, place: null, importance: null, transport: null, repeat: null, save: 'UNCONFIRMED', unclear: null }],
+    alarm_changes: [], fact_feedback: [], prep_adjustment: null, safety_flag: false,
+  });
+  const ok = { reply: '네.', acts: [], end: false };
+  const { deps, claude } = depsOf(db, { T2F: [appt(null, '10:30'), appt('a1', '13:00'), appt('a1', '14:00'), appt('a1', '15:00')], T1: Array(8).fill(ok) }, { parallelPreview: false });
+  const s = await handleVoiceSession(deps, { session_type: 'BEFORE_SLEEP', input_mode: 'TEXT' });
+  const sid = s.session_id as string;
+  const apptId = '22222222-2222-4222-8222-222222222222';
+  const save = (rev: number, id: string, wake: string) =>
+    handleVoiceTurn(deps, { session_id: sid, rev, client_turn_id: cid(), card_action: { id, action: 'SAVED', appointment_id: apptId, alarms: [{ kind: 'WAKE', at: `2026-10-30T${wake}:00+09:00`, enabled: true, level: 1 }] } });
+
+  // 1) 새 일정 → 계산 → 저장 (a1)
+  const id1 = cid();
+  let r = await handleVoiceTurn(deps, text(sid, s.rev, '내일 캡스톤 회의 10시 반에 있어', id1));
+  r = await handleVoiceTurn(deps, { session_id: sid, rev: r.rev, client_turn_id: id1, results: { cards: [{ id: 'c1', status: 'READY', estimate: { alarms: [{ kind: 'WAKE', at: '2026-10-30T08:00:00+09:00', enabled: true }], level: 1, with_wake: true } }], fixes: [] } });
+  r = await save(r.rev, 'c1', '08:00');
+  assert.match(claude!.seen.T2F[0] as string, /### 내일 일정\n내일 일정 없음/);
+
+  // 2) ~ 4) 같은 일정을 세 번 바꿈 — 횟수 제한 없음
+  const steps = [['오후 1시', '10:30', '13:00', '10:30'], ['오후 2시', '13:00', '14:00', '11:00'], ['오후 3시', '14:00', '15:00', '12:00']] as const;
+  for (const [i, [say, from, to, wake]] of steps.entries()) {
+    r = await handleVoiceTurn(deps, text(sid, r.rev, `방금 만든 캡스톤 회의 시간을 ${say}로 바꿔줘`));
+    // T2F는 세션 시작 스냅숏이 아니라 대화의 지금 일정(마지막 저장 값 · 같은 별칭)을 봄
+    const screen = claude!.seen.T2F[i + 1] as string;
+    assert.match(screen, new RegExp(`\\[a1\\] 10-30\\(금\\) ${from} 캡스톤 회의`), screen);
+    const open = r.cards.filter((c) => c.status === 'READY');
+    assert.equal(open.length, 1, `${say}: 변경 카드가 하나 생겨야 함`);
+    const card = open[0] as (typeof r.cards)[number];
+    assert.deepEqual([card.id, card.kind], [`c${i + 2}`, 'APPT_OPEN']);
+    assert.deepEqual(card.edit, { appointment_id: apptId, changes: { time: to }, before: { title: '캡스톤 회의', time: from } });
+    assert.notEqual(r.reply?.text, '네, 알겠어요.');
+    r = await save(r.rev, card.id, wake);
+    const st = stateOf(db, sid);
+    assert.deepEqual(st.core.appointments.map((a) => [a.ref, a.time]), [['a1', to]], '새 일정 없이 같은 일정만 바뀜');
+    assert.deepEqual(st.core.alarms.filter((a) => a.type === 'WAKE').map((a) => [a.appointment_ref, a.time]), [['a1', wake]], '알람도 같은 일정에 다시 맞춤');
+    assert.equal(st.refs.appointments['a1']?.appointment_id, apptId);
+    // 저장 뒤 T1도 바뀐 값을 봄
+    assert.match(claude!.seen.T1.at(-1) as string, new RegExp(`\\[a1\\][^\\n]*캡스톤 회의`));
+  }
+  assert.equal(claude!.left('T2F'), 0);
+});
+
+test('바꿔 달라는데 바뀐 게 없음: 답은 "네, 알겠어요." · "바꿨어요"가 아니라 서버가 되묻거나(값 모름) 지금 설정을 알림(이미 그 값)', async () => {
+  const db = new FakeDb();
+  db.now = NOW;
+  db.rows('profiles').push({ user_id: ME, nickname: '지민', timezone: 'Asia/Seoul' });
+  const none = { appointments: [], alarm_changes: [], fact_feedback: [], prep_adjustment: null, safety_flag: false };
+  const appt = (time: string) => ({ ...none, appointments: [{ ref: null, title: '캡스톤 회의', date: '2026-10-30', time, place: null, importance: null, transport: null, repeat: null, save: 'UNCONFIRMED', unclear: null }] });
+  const say = (reply: string) => ({ reply, acts: [], end: false });
+  const { deps } = depsOf(db, { T2F: [appt('10:30'), none, appt('10:30'), { ...appt('10:30'), items: [{ title: '노트북', date: '2026-10-30' }] }], T1: [say('네.'), say('네.'), say('네, 바꿨어요.'), say('네, 바꿨어요.'), say('네, 알겠어요.'), say('노트북은 준비물 목록에 넣었어요.')] }, { parallelPreview: false });
+  const s = await handleVoiceSession(deps, { session_type: 'BEFORE_SLEEP', input_mode: 'TEXT' });
+  const sid = s.session_id as string;
+  const id1 = cid();
+  let r = await handleVoiceTurn(deps, text(sid, s.rev, '내일 캡스톤 회의 10시 반에 있어', id1));
+  r = await handleVoiceTurn(deps, { session_id: sid, rev: r.rev, client_turn_id: id1, results: { cards: [{ id: 'c1', status: 'READY', estimate: { alarms: [{ kind: 'WAKE', at: '2026-10-30T08:00:00+09:00', enabled: true }], level: 1, with_wake: true } }], fixes: [] } });
+  r = await handleVoiceTurn(deps, { session_id: sid, rev: r.rev, client_turn_id: cid(), card_action: { id: 'c1', action: 'SAVED', appointment_id: '33333333-3333-4333-8333-333333333333', alarms: [] } });
+
+  // 추출이 변경을 못 뽑음 — T1의 "바꿨어요"(처리 결과 없음)는 지우고 서버가 지금 값과 함께 되물음
+  r = await handleVoiceTurn(deps, text(sid, r.rev, '방금 만든 캡스톤 회의 시간 바꿔줘'));
+  assert.equal(r.reply?.text, "지금 '캡스톤 회의' 일정은 10/30(금) 오전 10시 30분이에요. 언제로 바꿀까요?");
+  assert.deepEqual(r.cards.filter((c) => c.status === 'READY'), []);
+
+  // 이미 그 값 — 카드 없이 지금 설정
+  r = await handleVoiceTurn(deps, text(sid, r.rev, '캡스톤 회의 10시 반으로 바꿔줘'));
+  assert.equal(r.reply?.text, "'캡스톤 회의' 일정은 이미 10/30(금) 오전 10시 30분으로 되어 있어요.");
+  assert.deepEqual(r.cards.filter((c) => c.status === 'READY'), []);
+  assert.deepEqual(stateOf(db, sid).core.appointments.map((a) => [a.ref, a.time]), [['a1', '10:30']]);
+
+  // 같은 말에 준비물도 있음 — 지금 설정 알림을 앞에 붙이고 T1의 준비물 안내는 남김
+  r = await handleVoiceTurn(deps, text(sid, r.rev, '캡스톤 회의 10시 반으로 바꿔줘, 노트북도 챙겨야 해'));
+  assert.equal(r.reply?.text, "'캡스톤 회의' 일정은 이미 10/30(금) 오전 10시 30분으로 되어 있어요. 노트북은 준비물 목록에 넣었어요.");
+});
+
 // ───────── rev 충돌 · 재시도 ─────────
 
 test('rev가 다르면 CONFLICT, 같은 client_turn_id는 저장한 답을 그대로 (말이 두 번 쌓이지 않음 · 모델 안 부름)', async () => {

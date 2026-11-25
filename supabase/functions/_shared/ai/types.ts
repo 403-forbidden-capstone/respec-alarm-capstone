@@ -141,6 +141,8 @@ export interface ServerEvent {
   silence?: 1 | 2;
   /** 되물을 것 줄 → 사용자에게 할 말(서버 문장). T1 답에 물음이 없으면 이 문장으로 물음 (turn.ts) — 줄이 풀리면(clarify에서 지워지면) 안 씀 */
   say?: Record<string, string>;
+  /** 사용자에게 알릴 서버 문장 — 일정을 바꿔 달라는데 이미 그 값일 때 지금 설정 (turn.ts가 T1 답 대신 씀, 없으면 칸 없음) */
+  note?: string;
 }
 
 export interface Context {
