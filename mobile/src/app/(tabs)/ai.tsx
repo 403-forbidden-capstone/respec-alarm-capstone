@@ -17,7 +17,7 @@ import { previewTimes } from '@/features/records/suggestion';
 import type { Suggestion } from '@/features/records/types';
 import { chooseCardGroup, endLiveVoice, finishConversation, getConversation, getLiveToken, pickCardPlace, rejectCard, retryConversation, saveCard, saveCardWithoutPlace, say, sayVoice } from '@/features/voice/api';
 import { ChatBubble, TypingBubble } from '@/features/voice/components/ChatBubble';
-import { ChatComposer } from '@/features/voice/components/ChatComposer';
+import { ChatComposer, type VoiceState } from '@/features/voice/components/ChatComposer';
 import { noticeCopy } from '@/features/voice/chatNotice';
 import { ChatNotice } from '@/features/voice/components/ChatNotice'; // L5 부품 — 실패 · 한도 안내
 import { FoundScheduleCard } from '@/features/voice/components/FoundScheduleCard';
@@ -276,33 +276,39 @@ export default function AiScreen() {
   const liveOn = real && live.phase !== 'idle';
   const rows: ChatRow[] = real ? mergeLive(messages, live.lines) : messages; // 글 대화 + 음성 말풍선, 시각 순서
 
-  // 음성이 켜져 있는 동안만 음성 상태가 앞. 지난 음성 오류는 글 대화 상태(답하는 중 · 실패 · 한도)보다 뒤 — 그 상태들을 가리지 않게
-  const liveStatus = !real ? null : live.phase === 'connecting' ? '음성 대화를 연결하고 있어요…' : live.phase === 'live' ? (live.micMuted ? 'AI가 말하고 있어요. 끝나면 자동으로 다시 들어요' : '듣고 있어요. 편하게 말해 보세요') : null;
-  const status = liveStatus
-    ? liveStatus
-    : work
-    ? CARD_STEP[work.step]
+  // 음성 모드 파형 · 마이크 아래 글 — 실데이터는 Live 연결 상태, 가짜는 듣기 타이머 · 대본 답 기다림
+  const voice: VoiceState = liveOn
+    ? live.phase === 'live'
+      ? live.micMuted
+        ? 'speaking'
+        : 'listening'
+      : 'idle'
     : listening
-    ? '듣고 있어요…'
-    : thinking
-      ? real
-        ? 'AI가 답하고 있어요'
-        : 'AI가 정리하고 있어요'
-      : unavailable
-        ? noticeCopy(failKind).title
-        : reached
-          ? noticeCopy(limitKind).title
-          : real && live.error
-            ? live.error
-            : real && live.idleEnded
-            ? IDLE_ENDED
-            : canSay
-            ? textMode
-              ? '보낼 메시지를 입력해 주세요'
-              : '말할 준비가 됐어요'
-            : waiting
-              ? '찾은 내용을 확인해 주세요'
-              : '대화를 마치려면 완료를 눌러 주세요';
+      ? 'listening'
+      : thinking && !real
+        ? 'speaking'
+        : 'idle';
+  // 입력 칸 위 한 줄 — 알릴 일이 있을 때만. 지난 음성 오류는 글 대화 상태(답하는 중 · 실패 · 한도)보다 뒤 — 그 상태들을 가리지 않게
+  const notice =
+    real && live.phase === 'connecting'
+      ? '음성 대화를 연결하고 있어요…'
+      : work
+        ? CARD_STEP[work.step]
+        : thinking && textMode
+          ? real
+            ? 'AI가 답하고 있어요'
+            : 'AI가 정리하고 있어요'
+          : unavailable
+            ? noticeCopy(failKind).title
+            : reached
+              ? noticeCopy(limitKind).title
+              : real && live.error
+                ? live.error
+                : real && live.idleEnded
+                  ? IDLE_ENDED
+                  : !canSay && waiting
+                    ? '찾은 내용을 확인해 주세요'
+                    : null;
 
   // 말하기 — 가짜: 대본 한 문장을 들은 것으로. 실데이터: 실시간 음성 대화를 켜고 끔 (켜져 있는 동안 계속 주고받음)
   function speak() {
@@ -327,10 +333,9 @@ export default function AiScreen() {
     setMode((m) => (m === 'text' ? 'voice' : 'text'));
   }
 
-  // 완료 — 가짜: 한 번 묻고 일기를 만들어 하루 기록으로. 내가 아직 한 마디도 안 했으면 완료를 막음 (빈 대화로 기록이 생기지 않게)
+  // 완료 — 가짜: 한 번 묻고 일기를 만들어 하루 기록으로 (입력 칸의 [완료]는 없어졌고, 지금은 실패 · 한도 안내의 [대화 마치기]가 부름)
   // 실데이터: 이전 화면(홈)으로 — 같은 날 다시 열면 같은 대화가 이어짐. 하루 기록 정리(할 일 · 준비물 · 생활 기록 · 일기)는 api가 서버 voice-commit으로 기다리지 않고 보냄 (다시 완료하면 새 말까지)
   // 정리 중에 끝내면 끝난 대화에 답 · 카드가 붙으므로, 확인창 앞뒤로 두 번 봄 (확인창이 떠 있는 사이 글 모드 보내기로 정리가 시작될 수 있음)
-  const started = messages.some((m) => m.who === 'me');
   const finish = async () => {
     if (thinkingRef.current) return;
     setListening(false); // 듣는 중이면 멈춤 — 확인창이 떠 있는 사이 듣기 타이머가 터져 말을 보내지 않게
@@ -512,20 +517,18 @@ export default function AiScreen() {
         {/* 실시간 음성 대화(Gemini Live)의 소리 페이지 — 보이지 않음 */}
         {live.frame}
         <ChatComposer
-          status={status}
+          notice={notice}
           mode={textMode ? 'text' : 'voice'}
+          onToggleMode={toggleMode}
+          voice={voice}
+          micOn={liveOn}
+          micDisabled={real ? false : !canSay} // 실데이터 음성 대화는 글 대화와 따로 돌아 언제든 켜고 끔
+          onSpeak={speak}
           inputVisible={next?.who === 'me'}
           canSay={canSay}
-          listening={real ? liveOn : listening}
-          micLabel={liveOn ? '끝내기' : undefined}
-          micDisabled={real ? false : undefined}
           text={draftText}
           onChangeText={setDraftText}
           onSend={send}
-          onToggleMode={toggleMode}
-          onSpeak={speak}
-          onDone={finish}
-          doneDisabled={thinking || listening || (!real && (busy || !started))}
         />
       </View>
       <PlaceSearchSheet
