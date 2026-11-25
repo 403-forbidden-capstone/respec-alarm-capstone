@@ -1,5 +1,6 @@
 import { StyleSheet, View } from 'react-native';
 
+import { useAccent } from '@/lib/skyTone';
 import { colors } from '@/theme';
 
 type Props = {
@@ -11,11 +12,12 @@ type Props = {
 
 // 진행 막대 (.prog · .meter) — 루틴 진행, 화면 사용 시간 등
 export function ProgressBar({ value, threshold, thick, flush }: Props) {
+  const accent = useAccent(); // 채운 부분 — 포인트 색 (lib/skyTone)
   const pct = `${Math.max(0, Math.min(1, value)) * 100}%` as const;
   const h = thick ? 8 : 6;
   return (
     <View style={[styles.track, { height: h, borderRadius: h / 2 }, flush && styles.flush]}>
-      <View style={[styles.fill, { width: pct, borderRadius: h / 2 }]} />
+      <View style={[styles.fill, { backgroundColor: accent, width: pct, borderRadius: h / 2 }]} />
       {threshold != null ? (
         <View style={[styles.threshold, { left: `${Math.max(0, Math.min(1, threshold)) * 100}%` }]} />
       ) : null}

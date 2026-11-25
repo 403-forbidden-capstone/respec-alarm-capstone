@@ -21,6 +21,7 @@ import { getTodayRoutine } from '@/features/routine/api';
 import { ReceivedWakePingLine } from '@/features/social/components/ReceivedWakePingLine';
 import { useLoad } from '@/lib/useLoad';
 import { colors } from '@/theme';
+import { useAccent } from '@/lib/skyTone';
 
 type Phase = 'observing' | 'prompt' | 'confirmed';
 // 기상 확정 뒤 아침 루틴 화면(H09)으로 넘어가기 전 잠깐 — "기상 확정"을 보고 넘어가게
@@ -92,6 +93,7 @@ function EarlyWake() {
 
 // 단계는 가짜 db에 남아 있어서(api) 화면을 나갔다 와도 이어짐 — 확인 알림 단계면 확인 알림부터
 function WakeFlow({ check }: { check: WakeCheck }) {
+  const accent = useAccent(); // 포인트 색 — 그 시각 하늘과 같은 계열 (lib/skyTone)
   const [state, setState] = useState(() => toState(check));
   // 두 번 눌러도 한 단계에서 한 번만 기록 (H07 handled와 같음) — 단계가 바뀌면 다시 누를 수 있음
   const handled = useRef<Phase | null>(null);
@@ -255,7 +257,7 @@ function WakeFlow({ check }: { check: WakeCheck }) {
       {state.phase === 'confirmed' && state.at ? (
         <>
           <View style={styles.done}>
-            <View style={styles.check}>
+            <View style={[styles.check, { backgroundColor: accent }]}>
               <Text variant="stat" tone="inverse">
                 ✓
               </Text>
@@ -302,6 +304,7 @@ function MorningLine() {
 // 판정 단계 (.flow) — 해제됨 → 관찰 중 → (확인 알림) → 기상 확정
 // idle(끈 알람 없음)은 목업 그대로 해제됨 · 관찰 중을 지난 단계로 그림
 function Flow({ phase, how }: { phase: Phase | 'idle'; how: How }) {
+  const accent = useAccent(); // 포인트 색 — 그 시각 하늘과 같은 계열 (lib/skyTone)
   const steps: { label: string; mode: 'done' | 'on' | 'todo' }[] = [
     { label: '해제됨', mode: 'done' },
     { label: '관찰 중', mode: phase === 'observing' ? 'on' : 'done' },
@@ -320,7 +323,7 @@ function Flow({ phase, how }: { phase: Phase | 'idle'; how: How }) {
               →
             </Text>
           ) : null}
-          <View style={[styles.flowStep, step.mode === 'on' && styles.flowOn]}>
+          <View style={[styles.flowStep, step.mode === 'on' && [styles.flowOn, { backgroundColor: accent, borderColor: accent }]]}>
             <Text variant="label" tone={step.mode === 'on' ? 'inverse' : step.mode === 'done' ? 'ink' : 'faint'}>
               {step.label}
             </Text>

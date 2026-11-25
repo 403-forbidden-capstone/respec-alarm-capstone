@@ -7,6 +7,7 @@ import { useEffect } from 'react';
 
 import { DeviceFrame } from '@/components/dev/DeviceFrame';
 import { ConfirmHost, SheetHost, ToastHost } from '@/components/ui';
+import { SkySync } from '@/features/sky/components/SkySync';
 import { useOneTapFollowUp } from '@/features/alarm/hooks/useOneTapFollowUp';
 import { useWakeRecheck } from '@/features/alarm/hooks/useWakeRecheck';
 import { AuthProvider, useAuth } from '@/features/auth/AuthProvider';
@@ -49,6 +50,7 @@ export default function RootLayout() {
     <AuthProvider>
       <DeviceFrame>
         <StatusBar style="dark" />
+        <SkySync />
         <RootStack />
         <SheetHost />
         <PermissionPromptHost />

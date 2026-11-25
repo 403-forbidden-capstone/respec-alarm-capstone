@@ -1,6 +1,7 @@
 import { StyleSheet, View } from 'react-native';
 
 import { Text } from '@/components/ui';
+import { useAccent } from '@/lib/skyTone';
 import { colors, radius } from '@/theme';
 
 type Props = {
@@ -11,8 +12,9 @@ type Props = {
 
 // 그룹 아이콘 (.gico) — 둥근 네모에 그룹 이름 앞 글자
 export function GroupIcon({ label, light, small }: Props) {
+  const accent = useAccent(); // 포인트 색 (lib/skyTone)
   return (
-    <View style={[styles.box, small && styles.small, light && styles.light]}>
+    <View style={[styles.box, { backgroundColor: accent }, small && styles.small, light && styles.light]}>
       <Text variant="note" tone={light ? 'ink' : 'inverse'} weight={600}>
         {label}
       </Text>

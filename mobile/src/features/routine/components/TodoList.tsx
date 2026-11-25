@@ -4,9 +4,11 @@ import { Text } from '@/components/ui';
 import { colors, size } from '@/theme';
 
 import type { Todo } from '../types';
+import { useAccent } from '@/lib/skyTone';
 
 // 준비물 체크 (.todo) — 챙긴 것은 흐리게 줄을 그음
 export function TodoList({ todos, onToggle }: { todos: Todo[]; onToggle: (id: string) => void }) {
+  const accent = useAccent(); // 포인트 색 — 그 시각 하늘과 같은 계열 (lib/skyTone)
   if (!todos.length) {
     return (
       <Text variant="note" tone="sub" style={styles.empty}>
@@ -24,7 +26,7 @@ export function TodoList({ todos, onToggle }: { todos: Todo[]; onToggle: (id: st
           accessibilityState={{ checked: todo.done }}
           style={[styles.row, i > 0 && styles.divider]}
         >
-          <View style={[styles.box, todo.done && styles.boxOn]}>
+          <View style={[styles.box, todo.done && [styles.boxOn, { backgroundColor: accent, borderColor: accent }]]}>
             {todo.done ? (
               <Text variant="label" tone="inverse">
                 ✓

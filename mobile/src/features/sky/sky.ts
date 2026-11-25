@@ -39,6 +39,11 @@ export function skyPhase(at: Date, sunrise: Date | null = null, sunset: Date | n
   return 'day';
 }
 
+// 해 뜨기 전인지 — 자정부터 해 뜰 때까지는 인사말이 '새벽' (겨울 7시는 새벽, 여름 5시 반은 아침)
+export function isBeforeSunrise(at: Date, sunrise: Date | null = null): boolean {
+  return minuteOf(at) < (sunrise ? minuteOf(sunrise) : FALLBACK_SUNRISE);
+}
+
 // WMO 날씨 코드(Open-Meteo weather_code) → 종류. 모르는 코드는 맑음
 //   0 · 1 맑음 / 2 · 3 구름 · 45 · 48 안개 / 51~67 · 80~82 비 · 95~99 뇌우 / 71~77 · 85 · 86 눈
 export function skyKindOf(code: number): SkyKind {
@@ -75,6 +80,29 @@ export function skyBase(top: string): string {
   return mixHex(colors.bg, top, SKY_TONE);
 }
 
+// 포인트 색 — 하늘 색에서 색상(hue)만 가져와 진하게. 켜진 스위치 · 채운 버튼 · 글자 버튼이 그 시각 하늘과 같은 계열이 됨
+//   채도 36% · 밝기 33% 고정이라 어느 하늘에서도 흰 바탕 · 흰 글자와 대비 4.5 : 1 이상 (시험으로 확인)
+const ACCENT_S = 0.36;
+const ACCENT_L = 0.33;
+export function skyAccent(top: string): string {
+  const [r, g, b] = channels(top).map((v) => v / 255);
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  let h = 0;
+  if (max !== min) {
+    const d = max - min;
+    h = max === r ? ((g - b) / d + (g < b ? 6 : 0)) / 6 : max === g ? ((b - r) / d + 2) / 6 : ((r - g) / d + 4) / 6;
+  }
+  const q = ACCENT_L + ACCENT_S * ACCENT_L; // 밝기 0.5 미만일 때의 식
+  const p = 2 * ACCENT_L - q;
+  const part = (t: number) => {
+    const x = t < 0 ? t + 1 : t > 1 ? t - 1 : t;
+    const v = x < 1 / 6 ? p + (q - p) * 6 * x : x < 1 / 2 ? q : x < 2 / 3 ? p + (q - p) * (2 / 3 - x) * 6 : p;
+    return Math.round(v * 255).toString(16).padStart(2, '0');
+  };
+  return `#${part(h + 1 / 3)}${part(h)}${part(h - 1 / 3)}`.toUpperCase();
+}
+
 function luminance(hex: string) {
   const [r, g, b] = channels(hex).map((v) => {
     const c = v / 255;
@@ -90,10 +118,10 @@ export function contrast(a: string, b: string): number {
   return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05);
 }
 
-// 홈 인사말 — 하루 중 때(아침 · 오후 · 저녁)에 날씨를 얹음. 맑으면 원래 인사말 그대로
-export type DayPart = 'morning' | 'afternoon' | 'evening';
-const PART_WORD: Record<DayPart, string> = { morning: '아침이에요', afternoon: '오후예요', evening: '저녁이에요' };
-const CLEAR_GREETING: Record<DayPart, string> = { morning: '좋은 아침이에요', afternoon: '좋은 오후예요', evening: '차분한 저녁이에요' };
+// 홈 인사말 — 하루 중 때(새벽 · 아침 · 오후 · 저녁)에 날씨를 얹음. 맑으면 원래 인사말 그대로
+export type DayPart = 'dawn' | 'morning' | 'afternoon' | 'evening';
+const PART_WORD: Record<DayPart, string> = { dawn: '새벽이에요', morning: '아침이에요', afternoon: '오후예요', evening: '저녁이에요' };
+const CLEAR_GREETING: Record<DayPart, string> = { dawn: '고요한 새벽이에요', morning: '좋은 아침이에요', afternoon: '좋은 오후예요', evening: '차분한 저녁이에요' };
 const KIND_WORD: Record<Exclude<SkyKind, 'clear'>, string> = { cloudy: '흐린', rain: '비 오는', snow: '눈 오는' };
 
 export function skyGreeting(kind: SkyKind, part: DayPart): string {
@@ -102,7 +130,7 @@ export function skyGreeting(kind: SkyKind, part: DayPart): string {
 
 // 미리 보기(/dev/sky)에서 고른 시간대에 맞는 인사말 때
 export function dayPartOfPhase(phase: SkyPhase): DayPart {
-  return phase === 'dawn' || phase === 'morning' ? 'morning' : phase === 'day' ? 'afternoon' : 'evening';
+  return phase === 'dawn' ? 'dawn' : phase === 'morning' ? 'morning' : phase === 'day' ? 'afternoon' : 'evening';
 }
 
 // 날씨를 다시 읽는 간격

@@ -2,6 +2,7 @@ import { Pressable, StyleSheet, View } from 'react-native';
 
 import { Text } from '@/components/ui';
 import { dateParts } from '@/lib/format';
+import { useAccent } from '@/lib/skyTone';
 import { colors, size } from '@/theme';
 
 import type { WeekBar } from '../types';
@@ -13,6 +14,7 @@ type Props = {
 
 // 주간 실행 흐름 막대 (.bar) — 날마다 실행 점수 0~100. 날짜 칩처럼 누를 수 있음
 export function ScoreBars({ bars, onPressDay }: Props) {
+  const accent = useAccent(); // 채운 막대 — 포인트 색 (lib/skyTone)
   return (
     <View>
       {bars.map((b) => {
@@ -29,7 +31,7 @@ export function ScoreBars({ bars, onPressDay }: Props) {
               {b.label}
             </Text>
             <View style={styles.track}>
-              <View style={[styles.fill, { width: `${Math.max(0, Math.min(100, b.score))}%` }]} />
+              <View style={[styles.fill, { backgroundColor: accent, width: `${Math.max(0, Math.min(100, b.score))}%` }]} />
             </View>
             <Text variant="note" tone="sub" align="right" style={styles.score}>
               {b.score}

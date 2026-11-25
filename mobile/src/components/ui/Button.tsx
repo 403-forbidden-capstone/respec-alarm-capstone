@@ -1,5 +1,6 @@
 import { ActivityIndicator, Pressable, StyleSheet } from 'react-native';
 
+import { useAccent } from '@/lib/skyTone';
 import { colors, radius, size } from '@/theme';
 
 import { Text } from './Text';
@@ -7,7 +8,7 @@ import { Text } from './Text';
 type Props = {
   label: string;
   onPress?: () => void;
-  variant?: 'primary' | 'ghost' | 'plain' | 'danger'; // 검은 버튼 · 흰 테두리 버튼 · 글자만 · 붉은 버튼(되돌릴 수 없는 행동)
+  variant?: 'primary' | 'ghost' | 'plain' | 'danger'; // 포인트 색 버튼 · 흰 테두리 버튼 · 글자만 · 붉은 버튼(되돌릴 수 없는 행동)
   small?: boolean;
   disabled?: boolean;
   loading?: boolean; // 저장 중 — 글자 대신 돌아가는 표시, 누를 수 없음
@@ -19,6 +20,7 @@ const SMALL_SLOP = { top: (size.touch - size.buttonSm) / 2, bottom: (size.touch 
 
 // 버튼 (.btn) — 한 화면의 주된 행동은 primary 하나
 export function Button({ label, onPress, variant = 'primary', small, disabled, loading, selected }: Props) {
+  const accent = useAccent(); // 채운 버튼은 포인트 색 — 그 시각 하늘과 같은 계열 (lib/skyTone)
   const blocked = disabled || loading;
   const filled = variant === 'primary' || variant === 'danger';
   return (
@@ -32,6 +34,7 @@ export function Button({ label, onPress, variant = 'primary', small, disabled, l
       style={({ pressed }) => [
         styles.base,
         styles[variant],
+        variant === 'primary' && { backgroundColor: accent },
         small && styles.small,
         pressed && !blocked && styles.pressed,
         loading && !disabled && styles.loading,

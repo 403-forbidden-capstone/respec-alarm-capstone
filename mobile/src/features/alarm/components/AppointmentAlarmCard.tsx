@@ -18,11 +18,13 @@ type Props = {
   nextOccurrence?: string; // 다음 회차 날짜 · 시각 (5월 26일 (월) 오전 9:00)
   repeatSummary?: string; // 반복 요일 (매주 월 · 수)
   ahead?: boolean; // 앞으로 회차가 폰에 미리 걸려 있음 — 작은 글자 한 줄
+  variant?: 'full' | 'flow' | 'compact'; // 홈 다음 알람은 flow, 알람 목록은 compact (components/ui AlarmCard)
+  together?: { faces: string[]; line: string } | null; // flow — 같이 준비하는 그룹 줄 (홈이 읽어서 넘김)
 };
 
 // 일정 하나의 알람 카드 (홈 · 알람 목록) — 카드를 누르면 알람 설정(H03)
 // 일정 없는 알람(실데이터, D46)은 이동 · 준비 줄이 없고 알람 설정(H03)이 아직 없어 눌러도 안 열림
-export function AppointmentAlarmCard({ appointment: a, current, onToggle, highlight, showDate = true, nextOccurrence, repeatSummary, ahead }: Props) {
+export function AppointmentAlarmCard({ appointment: a, current, onToggle, highlight, showDate = true, nextOccurrence, repeatSummary, ahead, variant, together }: Props) {
   const list = ringingKinds(a.alarms);
   // 큰 시각 = 앞으로 울릴 첫 알람 (홈 "다음 알람"과 같은 것을 가리키게). 다 지났으면 지남으로, 다 껐으면 첫 알람
   const { alarm: first, passed } = pickCardAlarm(a.alarms, current);
@@ -33,13 +35,19 @@ export function AppointmentAlarmCard({ appointment: a, current, onToggle, highli
       time={timeParts(first.at)}
       kindLabel={`${KIND_LABEL[first.kind]}${passed ? ' · 지남' : ''}`}
       chain={list.map((x) => chainLabel(x, current, formatTime(x.at)))}
+      // 알람 목록(compact)은 반복 줄만 — 강도 · 준비 시간은 눌러서 알람 설정에서 봄
       meta={[
-        `알람 강도 · ${LEVELS[a.level].name}`,
-        ...(a.standalone ? [] : [`준비 ${a.predictedPrepMinutes}분 · 이동 ${a.travelMinutes}분 · 여유 ${a.bufferMinutes}분`]),
+        ...(variant === 'compact' ? [] : [`알람 강도 · ${LEVELS[a.level].name}`]),
+        ...(variant === 'compact' || a.standalone ? [] : [`준비 ${a.predictedPrepMinutes}분 · 이동 ${a.travelMinutes}분 · 여유 ${a.bufferMinutes}분`]),
         ...seriesLines({ nextOccurrence, repeatSummary, ahead }),
       ]}
       foot={a.standalone ? `${a.title} · ${a.repeatLabel} · ${formatTime(a.at)}` : `${a.title} · ${a.place || PLACE_PENDING_LABEL} · ${formatTime(a.at)}`}
       enabled={a.enabled}
+      variant={variant}
+      // 일정 없는 알람은 at이 알람 시각이라 '일정' 점을 안 붙임
+      steps={[...list.map((x) => ({ label: KIND_LABEL[x.kind], time: formatTime(x.at) })), ...(a.standalone ? [] : [{ label: '일정', time: formatTime(a.at) }])]}
+      activeStep={Math.max(0, list.indexOf(first))}
+      together={together}
       onToggle={onToggle}
       toggleLabel={`${a.title} 알람`}
       onPress={a.standalone ? undefined : () => router.push({ pathname: '/alarm/[id]', params: { id: a.id } })}

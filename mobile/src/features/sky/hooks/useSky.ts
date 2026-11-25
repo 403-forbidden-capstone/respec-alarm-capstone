@@ -5,12 +5,13 @@ import { useNow } from '@/features/alarm/hooks/useNow';
 
 import { getSky } from '../api';
 import { skyPreview } from '../preview';
-import { DEFAULT_SKY, SKY_REFRESH_MS, skyPhase, type Sky, type SkyKind, type SkyPhase } from '../sky';
+import { DEFAULT_SKY, isBeforeSunrise, SKY_REFRESH_MS, skyPhase, type Sky, type SkyKind, type SkyPhase } from '../sky';
 
 // 화면에 떠 있는 동안의 하늘 — 날씨는 30분마다 다시 읽고(탭끼리 같은 값을 나눠 씀), 시간대는 30초마다 지금 시각으로 판정
 // 날씨를 읽기 전 · 못 읽었을 때는 맑음 (시간대 색만)
 // preview: 개발용 미리 보기 값인지 — 맞으면 홈이 인사말도 그 시간대에 맞춤
-export function useSky(): { kind: SkyKind; phase: SkyPhase; preview: boolean } {
+// beforeSunrise: 해 뜨기 전인지 — 홈 인사말이 '새벽'
+export function useSky(): { kind: SkyKind; phase: SkyPhase; preview: boolean; beforeSunrise: boolean } {
   const current = useNow();
   const [sky, setSky] = useState<Sky>(DEFAULT_SKY);
   useFocusEffect(
@@ -26,6 +27,6 @@ export function useSky(): { kind: SkyKind; phase: SkyPhase; preview: boolean } {
     }, []),
   );
   const preview = skyPreview(); // 개발용 — /dev/sky에서 고른 값이 있으면 그걸 그림
-  if (preview) return { ...preview, preview: true };
-  return { kind: sky.kind, phase: skyPhase(current, sky.sunrise, sky.sunset), preview: false };
+  if (preview) return { ...preview, preview: true, beforeSunrise: preview.phase === 'dawn' };
+  return { kind: sky.kind, phase: skyPhase(current, sky.sunrise, sky.sunset), preview: false, beforeSunrise: isBeforeSunrise(current, sky.sunrise) };
 }

@@ -22,6 +22,7 @@ import { formatTime } from '@/lib/format';
 import { useAction } from '@/lib/useAction';
 import { backOrHome } from '@/lib/nav';
 import { colors } from '@/theme';
+import { useAccent } from '@/lib/skyTone';
 
 // G03 그룹원 기상 상태 (친구 7장) — 단계 글자 + 오늘의 흐름(목업 G03 시각 줄: 알람 울림 · 기상 확인 · 출발 · 도착, 아는 것만), [깨우기]는 알람이 울린 뒤 기상 확인 전에만 (D51)
 //   [깨우기] (친구 8장) — 서버가 판정 · 횟수를 세고 결과를 줌. 버튼 아래 한 줄로 '1/3 · 8:15부터 다시' · '지금은 깨울 수 없어요' · '이미 일어났어요' · '지금은 알림이 닿지 않아요'.
@@ -29,6 +30,7 @@ import { colors } from '@/theme';
 //   알람 카드(강도 · 장소 · 준비)는 기상 공유로는 안 보이고, 알람 조회 권한이 있으면 [알람 보기](G04)로 (7-다 · 7-41)
 //   미루기 횟수 · 알람 끈 시각은 본인만 — 서버가 안 줌 (7-거)
 export default function MemberWakeScreen() {
+  const accent = useAccent(); // 포인트 색 — 그 시각 하늘과 같은 계열 (lib/skyTone)
   const { id, userId } = useLocalSearchParams<{ id: string; userId: string }>();
   // 그룹 기상 신호 · 다시 연결 · 앱이 앞에 올 때 다시 읽음
   const { data, error, reload, stale } = useWakeLoad((date) => getMemberWake(id, userId, date), () => [id]);
@@ -112,7 +114,7 @@ export default function MemberWakeScreen() {
               <Text variant="small" tone="sub" style={styles.lineTime}>
                 {formatTime(line.at)}
               </Text>
-              <View style={[styles.lineDot, i === nowIndex && styles.lineDotNow]} />
+              <View style={[styles.lineDot, i === nowIndex && [styles.lineDotNow, { backgroundColor: accent }]]} />
               <Text variant="body" tone={i > nowIndex ? 'faint' : undefined}>
                 {line.label}
               </Text>

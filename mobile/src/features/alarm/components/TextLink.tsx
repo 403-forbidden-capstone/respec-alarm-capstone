@@ -1,6 +1,7 @@
 import { Pressable } from 'react-native';
 
 import { Text } from '@/components/ui';
+import { useAccent } from '@/lib/skyTone';
 
 type Props = {
   label: string;
@@ -15,6 +16,7 @@ const HIT_SLOP = { top: 13, bottom: 13, left: 12, right: 12 } as const;
 
 // 글자만 있는 작은 버튼 (.tlink) — 섹션 제목 오른쪽 "+ 새 일정" 등. 섹션 제목 안에서는 굵게(strong)
 export function TextLink({ label, onPress, strong, accessibilityLabel, disabled }: Props) {
+  const accent = useAccent(); // 글자 버튼은 포인트 색 (lib/skyTone)
   return (
     <Pressable
       onPress={onPress}
@@ -25,7 +27,7 @@ export function TextLink({ label, onPress, strong, accessibilityLabel, disabled 
       accessibilityState={{ disabled }}
       style={({ pressed }) => (disabled ? { opacity: 0.4 } : pressed && { opacity: 0.6 })}
     >
-      <Text variant="rowLabel" tone="sub" weight={strong ? 700 : 400}>
+      <Text variant="rowLabel" tone="sub" weight={strong ? 700 : 600} style={{ color: accent }}>
         {label}
       </Text>
     </Pressable>

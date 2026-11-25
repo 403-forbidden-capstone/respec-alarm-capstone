@@ -1,3 +1,4 @@
+import { SymbolView, type SymbolViewProps } from 'expo-symbols';
 import type { ReactNode } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 
@@ -67,6 +68,31 @@ export function TopBarButton({ label, onPress, onLongPress, onPressOut, disabled
   );
 }
 
+type IconButtonProps = {
+  icon: SymbolViewProps['name']; // expo-symbols 이름 — iOS는 SF Symbols, Android · 웹은 Material Symbols
+  accessibilityLabel: string; // 그림뿐이라 화면 읽기 도구가 부를 이름이 꼭 필요
+  onPress?: () => void;
+  glass?: boolean; // 하늘 배경 위 — 바탕이 비치는 유리 버튼
+};
+
+const ICON_BUTTON = 38;
+
+// 위 줄 오른쪽의 둥근 그림 버튼 (홈의 설정 · 알람 탭의 "+" · 친구 탭의 권한 관리) — 오른쪽 위에는 이 버튼 하나만 — 모양은 38 원, 누르는 칸은 44
+export function TopBarIconButton({ icon, accessibilityLabel, onPress, glass }: IconButtonProps) {
+  return (
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={accessibilityLabel}
+      style={({ pressed }) => [styles.tbtnHit, pressed && styles.pressed]}
+    >
+      <View style={[styles.ibtn, glass && styles.glass]}>
+        <SymbolView name={icon} size={20} tintColor={colors.ink} />
+      </View>
+    </Pressable>
+  );
+}
+
 const styles = StyleSheet.create({
   row: { minHeight: size.topBar, marginTop: 2, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   left: { flexDirection: 'row', alignItems: 'center', gap: 10 },
@@ -83,5 +109,6 @@ const styles = StyleSheet.create({
     backgroundColor: colors.card,
     justifyContent: 'center',
   },
-  glass: { borderColor: colors.glassLine, backgroundColor: colors.glass },
+  glass: { borderColor: colors.glassLine, backgroundColor: colors.glass, boxShadow: colors.glassShadow },
+  ibtn: { width: ICON_BUTTON, height: ICON_BUTTON, borderRadius: ICON_BUTTON / 2, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: colors.line, backgroundColor: colors.card },
 });

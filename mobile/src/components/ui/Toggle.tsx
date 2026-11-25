@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Animated, Pressable, StyleSheet } from 'react-native';
 
+import { useAccent } from '@/lib/skyTone';
 import { colors, size } from '@/theme';
 
 type Props = {
@@ -16,6 +17,7 @@ const TRAVEL = size.switchW - KNOB - 6;
 // 켜기 · 끄기 스위치 (.sw) — 기본 Switch 대신 목업 모양으로
 export function Toggle({ value, onChange, label, disabled }: Props) {
   // 움직임 값은 처음 한 번만 만듦 (React Compiler 규칙상 렌더 중 ref 읽기 대신 state 초기값)
+  const accent = useAccent(); // 켜진 색 — 포인트 색 (lib/skyTone)
   const [x] = useState(() => new Animated.Value(value ? TRAVEL : 0));
 
   useEffect(() => {
@@ -30,7 +32,7 @@ export function Toggle({ value, onChange, label, disabled }: Props) {
       accessibilityRole="switch"
       accessibilityLabel={label}
       accessibilityState={{ checked: value, disabled }}
-      style={[styles.track, { backgroundColor: value ? colors.ink : colors.switchOff }, disabled && styles.disabled]}
+      style={[styles.track, { backgroundColor: value ? accent : colors.switchOff }, disabled && styles.disabled]}
     >
       <Animated.View style={[styles.knob, { transform: [{ translateX: x }] }]} />
     </Pressable>

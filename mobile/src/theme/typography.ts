@@ -26,6 +26,7 @@ export function font(weight: Weight = 400): Pick<TextStyle, 'fontFamily'> {
 // 목업 CSS의 글자 크기 · 굵기 · 줄 간격 · 자간(em → px)
 export const typeScale = {
   screenId: { ...font(400), fontSize: 11.5, letterSpacing: 0.7 }, // .sid
+  display: { ...font(700), fontSize: 25, lineHeight: 33, letterSpacing: -0.7 }, // 탭 화면 맨 위 큰 제목 (홈 인사말 등) — 줄 높이는 한글 기준 크기의 약 1.3배
   title: { ...font(700), fontSize: 23, lineHeight: 30, letterSpacing: -0.6 }, // .ttl
   lead: { ...font(400), fontSize: 13.5, lineHeight: 20 }, // .lead
   section: { ...font(700), fontSize: 15.5, lineHeight: 22 }, // .h2

@@ -2,7 +2,7 @@ import { describe, expect, it } from '@jest/globals';
 
 import { colors } from '@/theme';
 
-import { contrast, dayPartOfPhase, mixHex, skyGreeting, SKY_HEIGHT, SKY_KINDS, SKY_LEAD_FROM, SKY_PHASES, SKY_SUB_TEXT_FROM, skyBase, skyColorAt, skyKindOf, skyPhase, skyTop } from '../sky';
+import { contrast, dayPartOfPhase, isBeforeSunrise, mixHex, skyGreeting, SKY_HEIGHT, SKY_KINDS, SKY_LEAD_FROM, SKY_PHASES, SKY_SUB_TEXT_FROM, skyAccent, skyBase, skyColorAt, skyKindOf, skyPhase, skyTop } from '../sky';
 
 const at = (h: number, m = 0) => new Date(2026, 10, 23, h, m);
 
@@ -47,17 +47,28 @@ describe('skyKindOf', () => {
   });
 });
 
+describe('isBeforeSunrise', () => {
+  it('자정부터 해 뜰 때까지 — 모르면 6:30 기준', () => {
+    expect(isBeforeSunrise(new Date(2026, 10, 24, 3, 0))).toBe(true);
+    expect(isBeforeSunrise(new Date(2026, 10, 24, 6, 30))).toBe(false);
+    expect(isBeforeSunrise(new Date(2026, 10, 24, 7, 0), new Date(2026, 10, 24, 7, 20))).toBe(true);
+    expect(isBeforeSunrise(new Date(2026, 6, 1, 5, 30), new Date(2026, 6, 1, 5, 15))).toBe(false);
+  });
+});
+
 describe('skyGreeting', () => {
   it('맑으면 원래 인사말, 아니면 날씨를 얹음', () => {
     expect(skyGreeting('clear', 'morning')).toBe('좋은 아침이에요');
     expect(skyGreeting('clear', 'evening')).toBe('차분한 저녁이에요');
+    expect(skyGreeting('clear', 'dawn')).toBe('고요한 새벽이에요');
+    expect(skyGreeting('rain', 'dawn')).toBe('비 오는 새벽이에요');
     expect(skyGreeting('cloudy', 'afternoon')).toBe('흐린 오후예요');
     expect(skyGreeting('rain', 'morning')).toBe('비 오는 아침이에요');
     expect(skyGreeting('snow', 'evening')).toBe('눈 오는 저녁이에요');
   });
 
   it('미리 보기 시간대 → 인사말 때', () => {
-    expect(SKY_PHASES.map(dayPartOfPhase)).toEqual(['morning', 'morning', 'afternoon', 'evening', 'evening']);
+    expect(SKY_PHASES.map(dayPartOfPhase)).toEqual(['dawn', 'morning', 'afternoon', 'evening', 'evening']);
   });
 });
 
@@ -79,6 +90,25 @@ describe('바탕 색', () => {
         expect(contrast(colors.skySub, skyColorAt(top, SKY_LEAD_FROM))).toBeGreaterThanOrEqual(4.5);
         // 톤이 섞인 화면 바탕(하늘 아래쪽 전체)에서도 보조 글자가 읽혀야 함
         expect(contrast(colors.sub, skyBase(top))).toBeGreaterThanOrEqual(4.5);
+      }
+    }
+  });
+});
+
+describe('포인트 색', () => {
+  it('하늘 색의 색상만 가져와 진하게 만든다', () => {
+    expect(skyAccent('#B5D6F3')).toBe('#365672'); // 맑은 아침 — 짙은 파랑
+    expect(skyAccent('#808080')).toMatch(/^#[0-9A-F]{6}$/); // 색상이 없는 회색도 값이 나옴
+  });
+
+  it('20가지 하늘 모두 흰 글자 · 흰 카드 · 바탕 톤과 대비 4.5 : 1 이상', () => {
+    for (const kind of SKY_KINDS) {
+      for (const phase of SKY_PHASES) {
+        const top = skyTop(kind, phase);
+        const accent = skyAccent(top);
+        expect(contrast(accent, colors.inverse)).toBeGreaterThanOrEqual(4.5); // 채운 버튼의 흰 글자
+        expect(contrast(accent, colors.card)).toBeGreaterThanOrEqual(4.5); // 흰 카드 위 글자 버튼
+        expect(contrast(accent, skyBase(top))).toBeGreaterThanOrEqual(4.5); // 바탕 위 글자 버튼
       }
     }
   });

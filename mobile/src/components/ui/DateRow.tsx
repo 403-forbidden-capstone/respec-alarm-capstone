@@ -7,6 +7,7 @@ import { colors, size } from '@/theme';
 
 import { Sheet } from './Sheet';
 import { Text } from './Text';
+import { useAccent } from '@/lib/skyTone';
 
 type Props = {
   label: string;
@@ -76,6 +77,7 @@ export function DateSheet({ visible, onClose, title, ...calendar }: SheetProps) 
 
 // 시트 안에서 그려지는 달력 — 시트가 열릴 때마다 새로 떠서 고른 날이 든 달부터 보임 (보는 달은 이 안에서 들고 있음)
 function Calendar({ value, onChange, onClose, minDate, maxDate }: Omit<SheetProps, 'visible' | 'title'>) {
+  const accent = useAccent(); // 포인트 색 — 그 시각 하늘과 같은 계열 (lib/skyTone)
   const picked = dateParts(value);
   const [view, setView] = useState({ year: picked.year, month: picked.month });
 
@@ -135,7 +137,7 @@ function Calendar({ value, onChange, onClose, minDate, maxDate }: Omit<SheetProp
                 accessibilityState={{ selected, disabled }}
                 style={styles.cell}
               >
-                <View style={[styles.num, today && !selected && styles.today, selected && styles.selected]}>
+                <View style={[styles.num, today && !selected && styles.today, selected && [styles.selected, { backgroundColor: accent }]]}>
                   <Text
                     variant="note"
                     tone={selected ? 'inverse' : disabled ? 'faint' : 'ink'}

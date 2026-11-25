@@ -4,6 +4,7 @@ import { Text } from '@/components/ui';
 import { colors, radius, size } from '@/theme';
 
 import type { UserPlace } from '../userPlaces';
+import { useAccent } from '@/lib/skyTone';
 
 type Props = {
   places: UserPlace[]; // 자주 가는 곳 (api.ts listUserPlaces). 비었으면 아무것도 그리지 않음
@@ -15,6 +16,7 @@ type Props = {
 // 값 · 콜백만 받음 (api.ts는 부르는 쪽이 부름)
 // <FrequentPlaceChips places={places} onPick={(p) => setPlace({ name: p.name, lat: p.lat, lng: p.lng })} />
 export function FrequentPlaceChips({ places, onPick, selectedLabel }: Props) {
+  const accent = useAccent(); // 포인트 색 — 그 시각 하늘과 같은 계열 (lib/skyTone)
   if (!places.length) return null;
   return (
     <View style={styles.row}>
@@ -28,7 +30,7 @@ export function FrequentPlaceChips({ places, onPick, selectedLabel }: Props) {
             accessibilityLabel={`${place.label}로 정하기`}
             accessibilityState={{ selected: on }}
             hitSlop={{ top: 8, bottom: 8 }}
-            style={({ pressed }) => [styles.chip, on && styles.chipOn, pressed && styles.pressed]}
+            style={({ pressed }) => [styles.chip, on && [styles.chipOn, { backgroundColor: accent, borderColor: accent }], pressed && styles.pressed]}
           >
             <Text variant="label" tone={on ? 'inverse' : 'ink'} numberOfLines={1}>
               {place.label}

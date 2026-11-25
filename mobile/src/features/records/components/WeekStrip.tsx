@@ -6,6 +6,7 @@ import { colors } from '@/theme';
 import type { WeekDay, WeekRecord } from '../types';
 
 import { CalendarHeader } from './CalendarHeader';
+import { useAccent } from '@/lib/skyTone';
 
 type Props = {
   record: WeekRecord;
@@ -29,11 +30,12 @@ export function WeekStrip({ record, onPrev, onNext, onPressDay }: Props) {
 }
 
 function DayChip({ day: d, onPress }: { day: WeekDay; onPress: () => void }) {
+  const accent = useAccent(); // 포인트 색 — 그 시각 하늘과 같은 계열 (lib/skyTone)
   return (
     <Pressable
       onPress={onPress}
       disabled={d.isFuture}
-      style={({ pressed }) => [styles.day, d.isToday && styles.on, d.isFuture && styles.future, pressed && styles.pressed]}
+      style={({ pressed }) => [styles.day, d.isToday && [styles.on, { backgroundColor: accent }], d.isFuture && styles.future, pressed && styles.pressed]}
       accessibilityRole="button"
       accessibilityState={{ disabled: d.isFuture, selected: d.isToday }}
       accessibilityLabel={`${d.weekday}요일 ${d.day}일${d.isToday ? ' 오늘' : ''}${d.isFuture ? ' 아직 오지 않은 날' : ''}${d.recorded ? ' 기록 있음' : ''}`}
@@ -44,7 +46,7 @@ function DayChip({ day: d, onPress }: { day: WeekDay; onPress: () => void }) {
       <Text variant="bodyStrong" tone={d.isToday ? 'inverse' : 'ink'} style={styles.num}>
         {d.day}
       </Text>
-      <View style={[styles.dot, d.recorded && (d.isToday ? styles.dotOn : styles.dotInk)]} />
+      <View style={[styles.dot, d.recorded && (d.isToday ? styles.dotOn : [styles.dotInk, { backgroundColor: accent }])]} />
     </Pressable>
   );
 }

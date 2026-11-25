@@ -6,9 +6,11 @@ import { timeParts } from '@/lib/format';
 import { colors } from '@/theme';
 
 import { IMPORTANCE_LABEL, PLACE_PENDING_LABEL, type ScheduleItem } from '../types';
+import { useAccent } from '@/lib/skyTone';
 
 // 하루 일정 줄 (.srow) — 알람 있는 일정은 진한 막대, 알람 없는 일정은 흐린 막대. 누르면 알람 설정(H03) — 알람 없는 일정은 알람 칸 없이 열려 장소를 정하고 알람을 만듦 (D41 A)
 export function ScheduleList({ items }: { items: ScheduleItem[] }) {
+  const accent = useAccent(); // 포인트 색 — 그 시각 하늘과 같은 계열 (lib/skyTone)
   if (!items.length) {
     return (
       <Text variant="note" tone="sub" style={styles.empty}>
@@ -30,7 +32,7 @@ export function ScheduleList({ items }: { items: ScheduleItem[] }) {
                 {t.hm}
               </Text>
             </View>
-            <View style={[styles.bar, !item.hasAlarm && styles.barPlain]} />
+            <View style={[[styles.bar, { backgroundColor: accent }], !item.hasAlarm && styles.barPlain]} />
             <View style={styles.text}>
               <Text variant="listTitle">
                 {item.title}

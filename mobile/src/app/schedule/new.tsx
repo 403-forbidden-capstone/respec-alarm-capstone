@@ -61,6 +61,7 @@ import { useLoad } from '@/lib/useLoad';
 import { listGroups } from '@/features/social/api';
 import { SHARED_APPOINTMENT_NOTE } from '@/features/social/groupTexts';
 import { colors } from '@/theme';
+import { useAccent } from '@/lib/skyTone';
 
 const LEVEL_OPTIONS = LEVELS.map((l, i) => [i as Level, l.name] as const);
 type Levels = Record<IntensityAxis, Level | null>;
@@ -563,6 +564,7 @@ function CalcSteps({
   onSave: () => void;
   onEdit: () => void;
 }) {
+  const accent = useAccent(); // 포인트 색 — 그 시각 하늘과 같은 계열 (lib/skyTone)
   const a = e.appointment;
   const arrive = a.alarms.find((x) => x.kind === 'ARRIVE');
   const rings = ringingKinds(a.alarms);
@@ -657,7 +659,7 @@ function CalcSteps({
             <View style={styles.steps}>
               {steps.map(([head, detail], i) => (
                 <View key={head} style={styles.step}>
-                  <View style={styles.num}>
+                  <View style={[styles.num, { backgroundColor: accent }]}>
                     <Text variant="caption" tone="inverse" weight={600}>
                       {i + 1}
                     </Text>
