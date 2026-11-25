@@ -98,12 +98,15 @@ function levelOf(rows: readonly AlarmRow[]): Level {
 
 // 준비 전 활동(기상 뒤 준비 알람까지) — DB에 따로 저장하지 않아 두 알람의 간격으로 읽음. 기상 · 준비가 둘 다 있을 때만
 //   준비 알람 시각을 직접 골랐으면 간격이 준비 전 활동이 아니라서 기본값(20분)으로 봄 (서버 inferBeforePrepare도 직접 고른 쪽은 기본값을 씀)
+const MAX_BEFORE_PREPARE_MINUTES = 240;
 export function beforePrepareOf(alarms: readonly AlarmRow[]): number {
   const wake = alarms.find((x) => x.alarm_type === 'WAKE');
   const prepare = alarms.find((x) => x.alarm_type === 'PREPARE');
   if (!wake || !prepare) return 0;
   if (prepare.time_source === 'MANUAL') return DEFAULT_BEFORE_PREPARE_MINUTES;
-  return Math.max(0, minutesBetween(parseDbTime(wake.scheduled_at), parseDbTime(prepare.scheduled_at)));
+  const gap = Math.max(0, minutesBetween(parseDbTime(wake.scheduled_at), parseDbTime(prepare.scheduled_at)));
+  // 240분을 넘는 간격은 준비 전 활동이 아님 — 따로 울리는 기상(#624, 준비가 기상을 따라가지 않음)의 간격 (서버 inferBeforePrepare와 같은 상한)
+  return gap <= MAX_BEFORE_PREPARE_MINUTES ? gap : 0;
 }
 
 // 직접 고른 시각(time_source = MANUAL)의 자동 계산값 — 공용 역산(서버와 같은 파일)에 직접 고른 시각을 넣어 auto를 받음

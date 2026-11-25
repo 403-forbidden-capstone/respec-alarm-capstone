@@ -344,7 +344,8 @@ export function computePlan(i: PlanInputs, travel: ResolvedTravel, mode: PlanMod
   // ignoreWake: 고른 기상이 준비를 끌지 않는 계산(기상 없는 계산 · 자동 규칙의 12시 판정) — 고른 기상이 순수 준비시간을 막지 않음 (#624)
   const derive = (withWake: boolean, ignoreWake = !withWake) => {
     // 기상이 없거나 따로 울리는 기상이면 준비 전 활동은 없음 — 요청 값도 안 씀(앱은 DB 행만으로 따로 울리는 기상을 못 알아봐 기상 − 준비 간격을 보낼 수 있음, #624)
-    const beforePrepareMinutes = !withWake ? 0 :
+    //   고른 기상을 빼고 보는 12시 판정(withWake · ignoreWake)은 자동일 때처럼 기본값 — 요청 값 · 저장된 직접 기상과 준비 간격으로 판정이 뒤집히지 않게
+    const beforePrepareMinutes = !withWake ? 0 : ignoreWake ? DEFAULT_BEFORE_PREPARE_MINUTES :
       i.draft.beforePrepareMinutes ?? inferBeforePrepare(i.existingAlarms, existingAdvance, i.participant?.prepare_minutes) ?? DEFAULT_BEFORE_PREPARE_MINUTES;
 
     // 기록(stats.p80)은 이미 "기상 ~ 출발"이라 그대로 씀 — 예전에는 준비 전 활동 20분을 또 더해서 기록이 쌓일수록 알람이 일찍 당겨졌음 (학습 루프 기초 2절 1)

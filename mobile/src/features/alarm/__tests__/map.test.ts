@@ -195,6 +195,12 @@ describe('직접 고른 알람 시각의 자동값 (공용 역산으로 채움)'
     expect(autoTimesOf(meeting())).toEqual({});
   });
 
+  it('간격이 240분을 넘으면 준비 전 활동이 아님 — 따로 울리는 기상(#624: 기상 08:00 직접 고름, 준비 13:45 자동)', () => {
+    const lone = [alarmRow('a-wake', 'WAKE', '08:00', { time_source: 'MANUAL' }), alarmRow('a-prep', 'PREPARE', '13:45')];
+    expect(beforePrepareOf(lone)).toBe(0);
+    expect(beforePrepareOf([alarmRow('a-wake', 'WAKE', '08:00'), alarmRow('a-prep', 'PREPARE', '12:00')])).toBe(240);
+  });
+
   it('기상 · 준비 중 하나만 있으면 준비 전 활동 0', () => {
     expect(beforePrepareOf([alarmRow('a-wake', 'WAKE', '08:00')])).toBe(0);
     expect(beforePrepareOf([alarmRow('a-prep', 'PREPARE', '08:30')])).toBe(0);
