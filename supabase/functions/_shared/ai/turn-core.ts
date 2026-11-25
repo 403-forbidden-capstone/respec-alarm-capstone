@@ -203,6 +203,12 @@ export function intentOf(text: string): Intent {
   };
 }
 
+/** 상대 시간 변경 말 — "10분 당겨" · "십 분만 늦춰" · "한 시간 뒤로" (분 · 시간 + 방향) */
+export function shiftSaid(text: string): boolean {
+  return /(분|시간)/u.test(text) && /(당겨|당기|앞당|일찍|빨리|늦춰|늦추|늦게|미뤄|미루|뒤로)/u.test(text);
+}
+const TYPE_WORDS: Record<AlarmType, RegExp> = { WAKE: /(기상|일어나|깨워|깨우)/u, PREPARE: /준비/u, DEPARTURE: /(출발|나가는)/u, ARRIVE: /도착/u };
+
 /** 이름 비교에서 빼는 흔한 낱말 — '동아리 회의'가 '캡스톤 회의'로 잡히지 않게 */
 const GENERIC_WORDS = new Set(["회의", "미팅", "약속", "일정", "모임", "수업", "강의", "그룹", "알람"]);
 /** 일정 · 그룹 이름의 낱말 (2자 이상, 흔한 낱말 뺌) */
@@ -250,7 +256,7 @@ const PREP_QUESTION = /준비[^?]*(\?|까요)/u;
  * 모델(T2F · T2)이 지난 일 · 목표를 변경 요청으로 읽어도 서버가 거름 (11/8 음성 '준비하는데 15분 더 걸렸고 … 일찍 일어나고 싶어' → '+10분' 카드)
  */
 export function prepAsked(turns: readonly { role: string; text: string }[]): boolean {
-  return turns.some((t, i) => t.role === "user" && ((PREP_TOPIC.test(t.text) && PREP_CHANGE.test(t.text)) || (turns[i - 1]?.role === "ai" && PREP_QUESTION.test(turns[i - 1].text))));
+  return turns.some((t, i) => t.role === "user" && ((PREP_TOPIC.test(t.text) && PREP_CHANGE.test(t.text) && !/알람/u.test(t.text)) || (turns[i - 1]?.role === "ai" && PREP_QUESTION.test(turns[i - 1].text))));
 }
 
 /** 준비시간 가감 분 (부호 포함): '좀 더'(분 없음) 10, 상한 60, 원래대로 0 */
@@ -896,6 +902,9 @@ export function applyFast(state: TurnState, fast: FastExtract, ctx: Context, aft
   // 말에 나온 일정 (최신 말이 앞 대화 · 추출의 약속 번호보다 우선)
   const hits = intent === null ? null : mentionedAppts(s.appointments, intent.text);
   const ev = newEvent(afterTurn);
+  // 이번 말이 알람 상대 변경("준비 알람 10분 당겨줘" · 이어서 "5분 더") — 일정 시각 · 준비시간 변경으로 처리하지 않음
+  const alarmShiftTurn = intent !== null && shiftSaid(intent.text) &&
+    (intent.alarm || intent.typeNamed || extract.alarm_changes.some((c) => (c.shift ?? 0) !== 0));
   const seen0 = { ...s.seen }; // 이번 말 전 처리 기록 — 거절한 일정을 다시 청했는지(저장해 달라는 말이 새로 생김) 볼 때
   // 새로 가입한 그룹은 현재 턴의 ctx.groups에 반영된다.
   // 이전 카드의 "없는 그룹" 판정과 seen 중복 기록 때문에 동일한 요청을 영원히 막지 않도록 한다.
@@ -1362,6 +1371,15 @@ export function applyFast(state: TurnState, fast: FastExtract, ctx: Context, aft
     // "캡스톤 그룹으로"라는 답을 T2F가 날짜 · 시각 없는 새 일정으로 뽑은 것 — 되묻지 않음
     if (groupAnswered && x.ref === null && (x.date === null || x.time === null)) continue;
     const key = apptKey(x);
+    // 알람을 당기는 말을 일정 변경으로 잘못 뽑은 것 — 버리고 표시(#alarm)만 남김. 다음 말에 T2F가 다시 적어도 처리하지 않고, 알람 말 없이 일정 이름을 대며 고쳐 달라고 하면 처리
+    //   (열린 알람 카드를 확인하는 "응 그렇게 바꿔줘" · 다른 일정을 고치는 말도 '바꿔'가 있어, 버린 그 일정의 이름을 말했는지 봄)
+    if (alarmShiftTurn && (x.ref !== null || (intent as Intent).edit)) {
+      if (s.seen[key] !== apptSig(x)) s.seen[key] = `${apptSig(x)}#alarm`;
+      continue;
+    }
+    // 그 일정만 가장 많이 걸려야 함 — 이름 낱말 하나 · '그룹'만 겹치는 다른 일정('알고리즘 수업' · '알고리즘 스터디')을 고치는 말은 아님
+    const namedThis = hits !== null && (x.ref !== null ? hits.best.size === 1 && hits.best.has(x.ref) : nameWords(x.title).some((w) => normTitle((intent as Intent).text).includes(w)));
+    if (s.seen[key] === `${apptSig(x)}#alarm` && !(intent !== null && intent.edit && !intent.alarm && namedThis)) continue;
     if (!once(key, apptSig(x))) continue;
     if (alarmEcho(x)) continue;
     if (x.ref) changeAppt(x, key, x.ref);
@@ -1463,7 +1481,7 @@ export function applyFast(state: TurnState, fast: FastExtract, ctx: Context, aft
    * 종류를 말하지 않고 바꿀 값도 없으면("25일 알람 수정해줘") 그날 모든 종류가 후보. ask = 말한 날짜에 그 일정이 없어 되물어야 함
    */
   const resolveAlarm = (c: XAlarm, day: LocalDate): { cands: AlarmPlan[]; ask: boolean } => {
-    const anyType = intent !== null && !intent.typeNamed && c.time === null && c.intensity === null && c.enabled === null;
+    const anyType = intent !== null && !intent.typeNamed && c.time === null && c.intensity === null && c.enabled === null && !c.shift;
     const mine = s.alarms.filter((a) => a.owner === c.target && (anyType || a.type === c.type));
     if (hits !== null && !(c.appointment_ref !== null && hits.all.has(c.appointment_ref))) {
       const pool = mine.filter((a) => a.appointment_ref !== null && hits.best.has(a.appointment_ref));
@@ -1488,17 +1506,42 @@ export function applyFast(state: TurnState, fast: FastExtract, ctx: Context, aft
     return `${dateKo(cur.date)} ${apptName(cur.appointment_ref === null ? undefined : apptByRef(cur.appointment_ref))}${parts.join(" · ")}`;
   };
 
-  for (const c of extract.alarm_changes) {
+  // 이어진 상대 변경("5분 더 당겨줘")이 일정을 말하지 않으면 이 대화에서 마지막으로 시각을 고친 알람 카드의 일정
+  //   날짜를 말한 요청("내일 준비 알람 10분 당겨")은 이어진 말이 아니라 따르지 않음, [변경 안 함]한 카드도 기준이 아님
+  const lastTimedAppt = s.cards.filter((k) => k.kind === "ALARM_EDIT" && k.status !== "REJECTED" && k.edit?.times !== undefined && k.edit.appointment_id).at(-1)?.edit?.appointment_id ?? null;
+  for (const c0 of extract.alarm_changes) {
+    const shift = Math.round(c0.shift ?? 0);
+    const c: XAlarm = shift !== 0 && c0.appointment_ref === null && c0.date === null && hits === null && lastTimedAppt !== null ? { ...c0, appointment_ref: lastTimedAppt } : c0;
     const key = `alarm:${c.target}|${c.type}|${c.appointment_ref ?? ""}|${c.date ?? ""}`;
     alarmKeys.add(key); // 바로잡는 말 정리(아래)가 이번 추출에 있는 요청으로 봄 — 건너뛰는 같은 요청도
+    // 상대 변경은 이번 말이 청한 것만 — T2F는 대화 전체의 현재 상태를 내서 앞 말의 "10분 당겨"를 다시 적음(이미 처리함).
+    //   종류를 말했으면 그 종류만 ("출발 알람도 5분 늦춰"에 다시 적힌 준비 −10은 건너뜀)
+    // 열린 알람 고침 카드를 말로 확인 · 거절("응 그렇게 바꿔줘" · "아니 하지 마") — 상대 변경은 바뀔 시각이 없어 T2F가 shift 0(또는 앞 shift를 다시)으로 적음.
+    //   후보를 다시 찾으면 종류를 안 말한 말이라 그날 알람 전부가 후보가 되어 카드가 거둬지므로, 그 카드에만 save를 반영
+    if (intent !== null && !shiftSaid(intent.text) && c.time === null && c.intensity === null && c.enabled === null) {
+      const open = s.cards.filter((k) => k.kind === "ALARM_EDIT" && OPEN_STATUS.includes(k.status) && k.edit?.times?.[c.type] !== undefined &&
+        (c.appointment_ref === null || k.edit.appointment_id === c.appointment_ref)).at(-1);
+      if (open !== undefined) {
+        touched.add(open.id);
+        if (c.save === "DECLINED") dropPending(s.pending[open.id]?.key ?? "", open.id);
+        else if (c.save === "CONFIRMED") {
+          open.highlight = true;
+          if (open.status === "READY") pushPending(ev, open, s);
+        }
+        continue;
+      }
+    }
+    if (shift !== 0 && intent !== null && !(shiftSaid(intent.text) && (!intent.typeNamed || TYPE_WORDS[c.type].test(intent.text)))) continue;
     const day = changeDay(c);
     const { cands, ask } = resolveAlarm(c, day);
-    // 후보가 바뀌면(정정한 말로 대상을 좁힘) 같은 추출이어도 다시 처리
-    if (!once(key, JSON.stringify([c.time, c.intensity, c.enabled, c.save, cands.map((a) => a.ref)]))) continue;
+    // 후보가 바뀌면(정정한 말로 대상을 좁힘) 같은 추출이어도 다시 처리. 상대 변경은 말마다 새 요청(거절 뒤 같은 말 · 연속 "5분 더")
+    if (!once(key, JSON.stringify([c.time, c.intensity, c.enabled, c.save, cands.map((a) => a.ref), ...(shift !== 0 ? [shift, afterTurn] : [])]))) continue;
     const self = c.target === "u0";
     const eu = self ? null : ctx.editable_users.find((u) => u.alias === c.target) ?? null;
     const who = self ? "" : `${eu ? `${eu.name}(${c.target})` : c.target} `;
     const cur = cands.length === 1 && !ask ? (cands[0] as AlarmPlan) : null;
+    // 상대 변경 — 마지막 저장 알람 시각(대화 중 바꾼 값 포함)에서 서버가 계산. 자정을 넘으면 날짜도 바뀜
+    const shiftAt = shift !== 0 && cur !== null ? addMinutes(cur.date, cur.time, shift) : null;
     // 카드 키 = 추출 키 + 고를 알람 — 바로잡아 다른 알람을 가리키면 앞 카드를 다시 쓰지 않고 거둔 뒤 새 카드
     const pkey = cur ? `${key}#${cur.ref}` : key;
     /** 이 요청의 열린 알람 카드를 거둠 (keep = 남길 카드 키) */
@@ -1510,11 +1553,11 @@ export function applyFast(state: TurnState, fast: FastExtract, ctx: Context, aft
     };
     // 지금 값과 같은 칸은 바꿀 것이 아님 — AI가 전한 결과를 T2가 되받아 적은 것(019)이 '변경'으로 다시 적용되지 않게
     const sameTime = cur !== null && c.time !== null && c.time === cur.time && (c.date === null || c.date === cur.date);
-    const wantTime = sameTime ? null : c.time;
+    const wantTime = shiftAt !== null ? shiftAt.time : sameTime ? null : c.time;
     const wantIntensity = cur !== null && c.intensity === cur.intensity ? null : c.intensity;
     const wantEnabled = cur !== null && c.enabled === cur.enabled ? null : c.enabled;
     // 일정에 딸린 알람은 날짜를 말해도 그 알람의 날(전날 밤 기상 등)을 지킴 — 말한 날짜는 일정 날짜일 수 있음
-    const newAt: LocalDateTime | null = wantTime === null ? null : { date: cur?.appointment_ref ? cur.date : c.date ?? cur?.date ?? day, time: wantTime };
+    const newAt: LocalDateTime | null = shiftAt ?? (wantTime === null ? null : { date: cur?.appointment_ref ? cur.date : c.date ?? cur?.date ?? day, time: wantTime });
     // 카드 · 확인 줄: 있는 알람이면 지금 값 → 바꿀 값
     const changes = [
       wantTime !== null && newAt !== null ? (cur ? `${cur.time} → ${newAt.date !== cur.date ? `${dateKo(newAt.date)} ` : ""}${wantTime}` : `${wantTime}으로`) : null,
@@ -1552,7 +1595,12 @@ export function applyFast(state: TurnState, fast: FastExtract, ctx: Context, aft
       ev.clarify.push(`바꿀 알람이 어느 것인지 — ${cands.slice(0, 5).map(alarmText).join(" · ")}`);
       continue;
     }
-    if (c.time === null && c.intensity === null && c.enabled === null) {
+    // 상대 변경인데 기준이 될 본인 알람이 없음 — 새 알람을 만들지 않음 (꺼진 알람도 시각은 있어 기준이 됨)
+    if (shift !== 0 && cur === null) {
+      reject(`${who}${dateKo(day)} ${TYPE_KO[c.type]} 알람 (바꿀 알람 없음)`, "NOT_FOUND");
+      continue;
+    }
+    if (shiftAt === null && c.time === null && c.intensity === null && c.enabled === null) {
       if (cur) ev.clarify.push(`${who}${dateKo(cur.date)} ${apptName(cur.appointment_ref === null ? undefined : apptByRef(cur.appointment_ref))}${TYPE_KO[cur.type]} 알람(지금 ${cur.time})을 어떻게 바꿀지`);
       else if (intent !== null && (c.date !== null || c.appointment_ref !== null)) reject(`${dateKo(day)} 알람 (바꿀 알람 없음)`, "NOT_FOUND");
       else ev.clarify.push(`${who}${TYPE_KO[c.type]} 알람을 어떻게 바꿀지`);
@@ -1650,7 +1698,12 @@ export function applyFast(state: TurnState, fast: FastExtract, ctx: Context, aft
 
   // ── 내일만 준비시간 가감 ── (준비시간 범위는 day 고정: 내일 기상 기준 일정 — 그날 가장 이른 켜진 기상 알람의 약속)
   const pa = extract.prep_adjustment;
-  if (pa && once("prep", JSON.stringify([pa.direction, pa.minutes, pa.save ?? null]))) {
+  // 알람 상대 변경 말에서 뽑힌 준비시간 가감은 버리고 표시(#alarm)만 남김 ("준비 알람 10분 당겨" ≠ 준비시간 10분 줄임) — 다음 말에 다시 적혀도 처리하지 않고,
+  //   알람 말 없이 준비시간을 바꿔 달라고 하면(prepAsked와 같은 기준) 같은 값이어도 처리
+  const prepSig = pa ? JSON.stringify([pa.direction, pa.minutes, pa.save ?? null]) : "";
+  if (pa && alarmShiftTurn && s.seen.prep !== prepSig) s.seen.prep = `${prepSig}#alarm`;
+  const prepEcho = pa !== null && s.seen.prep === `${prepSig}#alarm` && intent !== null && !prepAsked([{ role: "user", text: intent.text }]);
+  if (pa && !alarmShiftTurn && !prepEcho && once("prep", prepSig)) {
     const delta = prepDeltaOf(pa);
     const tomorrowWake = prepAnchorWake();
     // 저장 전 카드가 내일 첫 일정이면 그 카드에 붙인다 (저장 뒤 앱이 saveAlarmSettings로 한 번 더, 설계 메모 5절)
@@ -1729,7 +1782,10 @@ export function applyFast(state: TurnState, fast: FastExtract, ctx: Context, aft
   //   열린 변경 카드가 있으면 그 카드를 다시 안내, 이미 그 값이면 지금 설정을 알림(note), 그 밖은 바꿀 일정 · 값을 되물음.
   //   알람 · 준비시간 말(intent.alarm · typeNamed)은 알람 쪽이 맡음. 위기 턴은 위기 안내가 먼저라 건너뜀
   const quiet = touched.size === 0 && s.fixes.length === state.fixes.length && ev.applied.length + ev.pending.length + ev.clarify.length + ev.rejected.length + ev.alarms.length + (ev.conflicts ?? []).length === 0;
-  if (quiet && intent !== null && intent.edit && !intent.add && !intent.alarm && !intent.typeNamed && extract.prep_adjustment === null && !extract.safety_flag) {
+  // 알람을 몇 분 당기 · 늦추라는 말("5분 더 당겨줘" 포함)인데 바꿀 알람을 못 뽑음 — 일정 변경으로 되묻지 않고 알람을 되물음
+  const shiftAsk = quiet && intent !== null && shiftSaid(intent.text) && (intent.alarm || intent.typeNamed || lastTimedAppt !== null) && !extract.safety_flag;
+  if (shiftAsk) ask(ev, "바꿀 알람이 어느 일정의 어떤 알람(기상 · 준비 · 출발)인지와 몇 분 바꿀지", "어느 일정의 어떤 알람을 몇 분 바꿀까요?");
+  if (!shiftAsk && quiet && intent !== null && intent.edit && !intent.add && !intent.alarm && !intent.typeNamed && extract.prep_adjustment === null && !extract.safety_flag) {
     const targetOf = (x: XAppt): Appointment | undefined => {
       if (x.ref) return apptByRef(x.ref);
       const found = normTitle(x.title) === "" ? [] : existingFor(x);

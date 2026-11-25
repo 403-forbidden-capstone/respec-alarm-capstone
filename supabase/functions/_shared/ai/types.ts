@@ -247,6 +247,8 @@ export interface Extract {
     intensity: Intensity | null;
     enabled: boolean | null;
     save: SaveStatus;
+    /** 상대 변경 분(부호 포함, "10분 당겨" → -10). 0 · 없음 = 상대 변경 아님 — 서버가 지금 알람 시각에서 계산 (T2F.v2-f부터, 예전 출력은 칸 없음) */
+    shift?: number;
   }[];
   fact_feedback: {
     fact_id: string;

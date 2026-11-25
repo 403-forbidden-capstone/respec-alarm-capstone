@@ -2338,3 +2338,142 @@ describe("그룹 일정 고르기", () => {
     assert.equal(next.event.clarify.some((line) => line.includes("가족 그룹을 찾을 수 없음")), false);
   });
 });
+
+describe("알람 상대 시간 변경 (alarm_changes.shift, #625) — 서버가 지금 알람 시각에서 계산", () => {
+  const shiftOf = (type: XAlarm["type"], shift: number, over: Partial<XAlarm> = {}): XAlarm =>
+    alarm({ type, appointment_ref: "a1", date: null, save: "UNCONFIRMED", shift, ...over });
+  const prepAt = (time: string): CardAction["alarms"] => [{ kind: "PREPARE", at: iso("2026-10-09", time), enabled: true, level: null }];
+
+  it("'준비 알람 10분 당겨줘': 일정 시각 변경 · 준비시간 가감으로 잘못 뽑혀도 알람 카드 하나만 (기존 → 변경)", () => {
+    const c = ctx();
+    const r = applyFast(initTurnState(c), fast({
+      appointments: [{ ...study(), ref: "a1", title: "알고리즘 수업", time: "09:50", place: null }],
+      alarm_changes: [shiftOf("PREPARE", -10)],
+      prep_adjustment: { direction: "LESS", minutes: 10 },
+    }), c, 1, "알고리즘 수업 준비 알람 10분 당겨줘");
+    assert.deepEqual(r.cards.map((x) => [x.kind, x.summary]), [["ALARM_EDIT", "10/9(금) '알고리즘 수업' 준비 알람 08:10 → 08:00"]]);
+    assert.deepEqual(r.cards[0]?.edit, { appointment_id: "a1", times: { PREPARE: iso("2026-10-09", "08:00") } });
+    assert.equal(r.state.appointments[0]?.time, "10:00", "일정 시각은 그대로");
+  });
+
+  it("기상 · 출발도 됨, 자정을 넘으면 날짜까지 바뀜", () => {
+    const c = ctx({ alarms: [al("al1", "WAKE", "00:05", "NORMAL"), al("al2", "PREPARE", "08:10", "NORMAL"), al("al3", "DEPARTURE", "09:00", "NORMAL")] });
+    const wake = applyFast(initTurnState(c), fast({ alarm_changes: [shiftOf("WAKE", -10)] }), c, 1, "기상 알람 10분 일찍");
+    assert.equal(wake.cards[0]?.summary, "10/9(금) '알고리즘 수업' 기상 알람 00:05 → 10/8(목) 23:55");
+    assert.deepEqual(wake.cards[0]?.edit?.times, { WAKE: iso("2026-10-08", "23:55") });
+    const dep = applyFast(initTurnState(c), fast({ alarm_changes: [shiftOf("DEPARTURE", 15)] }), c, 1, "출발 알람 15분 늦춰줘");
+    assert.deepEqual(dep.cards[0]?.edit?.times, { DEPARTURE: iso("2026-10-09", "09:15") });
+  });
+
+  it("연속 변경: 저장한 시각에서 다시 계산, 이어진 말은 앞 일정 · 종류 유지, 다음 말에 다시 적힌 shift는 건너뜀", () => {
+    const c = ctx();
+    const r1 = applyFast(initTurnState(c), fast({ alarm_changes: [shiftOf("PREPARE", -10)] }), c, 1, "알고리즘 수업 준비 알람 10분 당겨줘");
+    const t1 = applyTaskResults(r1.state, { cards: [{ id: "c1", status: "READY", estimate: { alarms: [{ kind: "PREPARE", at: iso("2026-10-09", "08:00"), enabled: true }], level: null, with_wake: true } }], fixes: [] }, c, 1);
+    const s1 = applyCardAction(t1.state, { id: "c1", action: "SAVED", alarms: prepAt("08:00") }, c, 1);
+    // T2F가 일정을 비워 냄 → 마지막으로 고친 알람 카드의 일정
+    const r2 = applyFast(s1.state, fast({ alarm_changes: [shiftOf("PREPARE", -5, { appointment_ref: null })] }), c, 2, "5분 더 당겨줘");
+    const c2 = r2.cards.find((x) => x.id !== "c1");
+    assert.equal(c2?.summary, "10/9(금) '알고리즘 수업' 준비 알람 08:00 → 07:55");
+    const r3 = applyFast(r2.state, fast({ alarm_changes: [shiftOf("PREPARE", -5)] }), c, 3, "고마워");
+    assert.ok(isEmpty(r3.event), "앞 말의 상대 변경을 다시 적용하지 않음");
+    assert.equal(r3.state.cards.length, 2);
+  });
+
+  it("[변경 안 함] 뒤 같은 말을 다시 하면 새 카드 · 같은 말 다시 처리(같은 턴)는 한 번만", () => {
+    const c = ctx();
+    const f = fast({ alarm_changes: [shiftOf("PREPARE", -10)] });
+    const r1 = applyFast(initTurnState(c), f, c, 1, "준비 알람 10분 당겨줘");
+    assert.equal(applyFast(r1.state, f, c, 1, "준비 알람 10분 당겨줘").state.cards.length, 1, "같은 턴 다시 처리는 무시");
+    const no = applyCardAction(r1.state, { id: "c1", action: "REJECTED" }, c, 1);
+    const r2 = applyFast(no.state, f, c, 2, "준비 알람 10분 당겨줘");
+    assert.deepEqual(r2.cards.map((x) => [x.id, x.status, x.summary]), [["c2", "NEEDS_ESTIMATE", "10/9(금) '알고리즘 수업' 준비 알람 08:10 → 08:00"]]);
+  });
+
+  it("종류를 말하면 그 종류만 — '출발 알람도 5분 늦춰'에 다시 적힌 준비 −10은 건너뜀", () => {
+    const c = ctx();
+    const r1 = applyFast(initTurnState(c), fast({ alarm_changes: [shiftOf("PREPARE", -10)] }), c, 1, "준비 알람 10분 당겨줘");
+    const r2 = applyFast(r1.state, fast({ alarm_changes: [shiftOf("PREPARE", -10), shiftOf("DEPARTURE", 5)] }), c, 2, "출발 알람도 5분 늦춰줘");
+    assert.deepEqual(r2.cards.map((x) => Object.keys(x.edit?.times ?? {}).sort()), [["DEPARTURE", "PREPARE"]], "열린 준비 카드에 출발을 합침 (준비는 다시 계산 안 함)");
+    assert.equal(r2.cards[0]?.edit?.times?.PREPARE, iso("2026-10-09", "08:00"));
+  });
+
+  it("대상이 정말 모호할 때만 되물음 · 알람이 없으면 대상 없음 · 못 뽑으면 알람을 되물음", () => {
+    const two = ctx({
+      tomorrow: [appt(), appt({ ref: "a2", title: "캡스톤 회의", time: "15:00" })],
+      alarms: [al("al1", "PREPARE", "08:10", "NORMAL"), al("al2", "PREPARE", "13:10", "NORMAL", { appointment_ref: "a2" })],
+    });
+    const amb = applyFast(initTurnState(two), fast({ alarm_changes: [shiftOf("PREPARE", -10, { appointment_ref: null, date: "2026-10-09" })] }), two, 1, "준비 알람 10분 당겨줘");
+    assert.equal(amb.cards.length, 0);
+    assert.ok(amb.event.clarify[0]?.startsWith("바꿀 알람이 어느 것인지"));
+    const named = applyFast(initTurnState(two), fast({ alarm_changes: [shiftOf("PREPARE", -10, { appointment_ref: null, date: "2026-10-09" })] }), two, 1, "캡스톤 회의 준비 알람 10분 당겨줘");
+    assert.equal(named.cards[0]?.summary, "10/9(금) '캡스톤 회의' 준비 알람 13:10 → 13:00");
+    const none = ctx({ alarms: [al("al1", "WAKE", "08:00", "NORMAL")] });
+    assert.deepEqual(applyFast(initTurnState(none), fast({ alarm_changes: [shiftOf("DEPARTURE", 10)] }), none, 1, "출발 알람 10분 늦춰줘").event.rejected.map((x) => x.reason), ["NOT_FOUND"]);
+    const missed = applyFast(initTurnState(none), fast(), none, 1, "준비 알람 10분 당겨줘");
+    assert.ok(missed.event.clarify.some((l) => l.includes("몇 분")));
+  });
+
+  it("그룹 일정: 본인 알람만 고침 (그룹원 알람 · 일정은 그대로)", () => {
+    const c = ctx({
+      tomorrow: [appt({ title: "캡스톤 회의", group: "캡스톤" })],
+      alarms: [al("al1", "PREPARE", "08:10", "NORMAL"), al("al9", "PREPARE", "08:20", "NORMAL", { owner: "u2" })],
+    });
+    const r = applyFast(initTurnState(c), fast({ alarm_changes: [shiftOf("PREPARE", -10)] }), c, 1, "캡스톤 그룹 회의 준비 알람 10분 당겨줘");
+    assert.deepEqual(r.cards.map((x) => [x.kind, x.summary]), [["ALARM_EDIT", "10/9(금) '캡스톤 회의'(그룹 캡스톤) 준비 알람 08:10 → 08:00"]]);
+    assert.deepEqual(r.cards[0]?.edit?.times, { PREPARE: iso("2026-10-09", "08:00") });
+  });
+
+  it("열린 카드를 말로 확인 · 거절 — shift 0이든 앞 shift를 다시 적든 그 카드에만 반영 (되묻지 않음)", () => {
+    const c = ctx();
+    const r1 = applyFast(initTurnState(c), fast({ alarm_changes: [shiftOf("PREPARE", -10)] }), c, 1, "준비 알람 10분 당겨줘");
+    for (const again of [0, -10]) {
+      const yes = applyFast(r1.state, fast({ alarm_changes: [shiftOf("PREPARE", again, { save: "CONFIRMED" })] }), c, 2, "응 그렇게 바꿔줘");
+      assert.deepEqual(yes.state.cards.map((x) => [x.id, x.status, x.highlight]), [["c1", "NEEDS_ESTIMATE", true]]);
+      assert.deepEqual([yes.event.clarify, yes.event.rejected], [[], []]);
+      const no = applyFast(r1.state, fast({ alarm_changes: [shiftOf("PREPARE", again, { save: "DECLINED" })] }), c, 2, "아니 하지 마");
+      assert.deepEqual(no.state.cards.map((x) => [x.id, x.status]), [["c1", "REJECTED"]]);
+      assert.deepEqual(no.event.clarify, []);
+    }
+  });
+
+  it("날짜를 말한 요청 · [변경 안 함]한 카드는 앞 카드 일정을 따르지 않음 — 알람이 둘이면 되물음", () => {
+    const two = ctx({
+      tomorrow: [appt(), appt({ ref: "a2", title: "캡스톤 회의", time: "15:00" })],
+      alarms: [al("al1", "PREPARE", "08:10", "NORMAL"), al("al2", "PREPARE", "13:10", "NORMAL", { appointment_ref: "a2" })],
+    });
+    const r1 = applyFast(initTurnState(two), fast({ alarm_changes: [shiftOf("PREPARE", -10, { appointment_ref: "a2" })] }), two, 1, "캡스톤 회의 준비 알람 10분 당겨줘");
+    const dated = applyFast(r1.state, fast({ alarm_changes: [shiftOf("PREPARE", -10, { appointment_ref: null, date: "2026-10-09" })] }), two, 2, "내일 준비 알람 10분 당겨줘");
+    assert.ok(dated.event.clarify[0]?.startsWith("바꿀 알람이 어느 것인지"));
+    const no = applyCardAction(r1.state, { id: "c1", action: "REJECTED" }, two, 1);
+    const after = applyFast(no.state, fast({ alarm_changes: [shiftOf("PREPARE", -5, { appointment_ref: null })] }), two, 2, "5분 당겨줘");
+    assert.ok(after.event.clarify[0]?.startsWith("바꿀 알람이 어느 것인지"));
+  });
+
+  it("알람 말에서 버린 준비시간 가감 · 일정 변경: 다음 말에 다시 적혀도 처리 안 함, 알람 말 없이 청하면 같은 값이어도 처리", () => {
+    const c = ctx();
+    const wrongAppt = { ...study(), ref: "a1", title: "알고리즘 수업", time: "09:50", place: null };
+    const less = { direction: "LESS" as const, minutes: 10 };
+    const r1 = applyFast(initTurnState(c), fast({ appointments: [wrongAppt], alarm_changes: [shiftOf("PREPARE", -10)], prep_adjustment: less }), c, 1, "준비 알람 10분 당겨줘");
+    const echo = applyFast(r1.state, fast({ appointments: [wrongAppt], prep_adjustment: less }), c, 2, "고마워");
+    assert.deepEqual(echo.state.cards.map((x) => x.kind), ["ALARM_EDIT"], "다시 적힌 것은 처리 안 함");
+    const yes = applyFast(echo.state, fast({ appointments: [wrongAppt], alarm_changes: [shiftOf("PREPARE", 0, { save: "CONFIRMED" })], prep_adjustment: less }), c, 3, "응 그렇게 바꿔줘");
+    assert.deepEqual(yes.state.cards.map((x) => x.kind), ["ALARM_EDIT"], "알람 카드 확인 말에 다시 적힌 일정 변경 · 준비시간은 살리지 않음");
+    const two = ctx({ tomorrow: [appt(), appt({ ref: "a2", title: "캡스톤 회의", time: "15:00" })] });
+    const r2 = applyFast(initTurnState(two), fast({ appointments: [wrongAppt], alarm_changes: [shiftOf("PREPARE", -10)] }), two, 1, "알고리즘 수업 준비 알람 10분 당겨줘");
+    const other = applyFast(r2.state, fast({ appointments: [wrongAppt, { ...study(), ref: "a2", title: "캡스톤 회의", time: "16:00", place: null }] }), two, 2, "캡스톤 회의 4시로 바꿔줘");
+    assert.deepEqual(other.state.cards.filter((x) => x.kind === "APPT_OPEN").map((x) => x.edit?.appointment_id), ["a2"], "다른 일정 이름으로는 버린 일정 변경을 살리지 않음");
+    const near = ctx({ tomorrow: [appt(), appt({ ref: "a2", title: "알고리즘 스터디", time: "15:00" })] });
+    const r3 = applyFast(initTurnState(near), fast({ appointments: [wrongAppt], alarm_changes: [shiftOf("PREPARE", -10)] }), near, 1, "알고리즘 수업 준비 알람 10분 당겨줘");
+    const shared = applyFast(r3.state, fast({ appointments: [wrongAppt, { ...study(), ref: "a2", title: "알고리즘 스터디", time: "16:00", place: null }] }), near, 2, "알고리즘 스터디 4시로 바꿔줘");
+    assert.deepEqual(shared.state.cards.filter((x) => x.kind === "APPT_OPEN").map((x) => x.edit?.appointment_id), ["a2"], "이름 낱말이 겹치는 다른 일정도 아님");
+    const prep = applyFast(echo.state, fast({ prep_adjustment: less }), c, 3, "준비 시간 10분 줄여줘");
+    assert.ok(prep.state.cards.some((x) => x.edit?.prepare_delta === -10), "진짜 준비시간 요청은 처리");
+    const appt2 = applyFast(echo.state, fast({ appointments: [wrongAppt] }), c, 3, "알고리즘 수업 9시 50분으로 바꿔줘");
+    assert.ok(appt2.state.cards.some((x) => x.kind === "APPT_OPEN"), "진짜 일정 변경은 처리");
+  });
+
+  it("prepAsked: 알람 말은 준비시간 변경 요청이 아님", () => {
+    assert.equal(prepAsked([{ role: "user", text: "캡스톤 회의 준비 알람 10분 당겨줘" }]), false);
+    assert.equal(prepAsked([{ role: "user", text: "준비 시간 10분 늘려줘" }]), true);
+  });
+});
