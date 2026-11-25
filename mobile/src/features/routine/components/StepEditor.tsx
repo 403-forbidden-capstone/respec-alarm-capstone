@@ -7,17 +7,17 @@ import type { RoutineStep } from '../types';
 type Props = {
   step: RoutineStep;
   time: string; // 시작 시각 21:30
-  index: number;
+  index?: number; // (안 씀 — 순서는 단계 줄 ▲▼, 호출부 정리 전까지 받기만)
+  onMove?: (by: -1 | 1) => void; // (안 씀)
   count: number; // 전체 단계 수
   focusName?: boolean; // 새로 추가한 단계라 열자마자 이름 칸에 커서
   onChange: (patch: Partial<Omit<RoutineStep, 'id'>>) => void;
-  onMove: (by: -1 | 1) => void;
   onRemove: () => void;
   onClose: () => void;
 };
 
-// 단계 편집 시트 내용 — 이름 · 걸리는 시간 · 알람 · 순서 바꾸기 · 빼기 (마지막 한 단계는 못 뺌)
-export function StepEditor({ step, time, index, count, focusName, onChange, onMove, onRemove, onClose }: Props) {
+// 단계 편집 시트 내용 — 이름 · 걸리는 시간 · 알람 · 빼기 (순서는 단계 줄의 ▲▼) (마지막 한 단계는 못 뺌)
+export function StepEditor({ step, time, count, focusName, onChange, onRemove, onClose }: Props) {
   return (
     <>
       <Text variant="small" tone="sub">
@@ -41,8 +41,6 @@ export function StepEditor({ step, time, index, count, focusName, onChange, onMo
         />
       </View>
       <View style={styles.row}>
-        <Button label="위로" small variant="ghost" onPress={() => onMove(-1)} disabled={index === 0} />
-        <Button label="아래로" small variant="ghost" onPress={() => onMove(1)} disabled={index === count - 1} />
         <Button label="단계 빼기" small variant="plain" onPress={onRemove} disabled={count <= 1} />
       </View>
       {count <= 1 ? (

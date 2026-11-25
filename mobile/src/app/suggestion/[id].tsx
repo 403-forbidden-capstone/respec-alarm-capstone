@@ -47,6 +47,9 @@ export default function SuggestionScreen() {
   return <Detail suggestion={data} reload={reload} />;
 }
 
+// 적용 뒤 자동 되돌림 안내 — 무엇이(이번 시각) 언제(다음 기록에서) 돌아가는지
+const REVERT_LINE = '다음 기록에서 이 시각이 더 어긋나면 적용 전 시각으로 자동으로 돌아와요.';
+
 function Detail({ suggestion: s, reload }: { suggestion: Suggestion; reload: () => Promise<boolean> }) {
   const [editing, setEditing] = useState<number | null>(null); // 직접 수정 시트에서 고른 값(적용 전보다 일찍 +, 늦게 − 분), 닫혀 있으면 null
   // 버튼은 한 번에 하나씩, 다시 읽기가 끝날 때까지 잠금 — 연타 · 옛 화면에서 다시 누르기를 막음 (lib/useAction)
@@ -56,8 +59,21 @@ function Detail({ suggestion: s, reload }: { suggestion: Suggestion; reload: () 
   const target = change ? change.target : `${formatDateShort(s.appointment.at)} ${s.appointment.title}`;
 
   // 제안이 바꾸는 알람을 확인하러 (H03) — 연결된 일정이 없는 알람(일정 없는 알람 · 루틴)은 열 곳이 없음
+  //   ?changed= 는 이 제안이 움직인 알람 종류만 — 알람 설정 쪽이 그 줄을 표시함 (시각 제안만, 값 제안은 붙이지 않음)
+  const movedKinds = [
+    s.currentWake.getTime() !== s.proposedWake.getTime() ? 'WAKE' : null,
+    s.currentPrepare && s.proposedPrepare && s.currentPrepare.getTime() !== s.proposedPrepare.getTime() ? 'PREPARE' : null,
+  ].filter((k): k is string => k != null);
   const alarmLink = s.appointment.id ? (
-    <TextLink label="알람 설정 보기 ›" onPress={() => router.push({ pathname: '/alarm/[id]', params: { id: s.appointment.id } })} />
+    <TextLink
+      label="알람 설정 보기 ›"
+      onPress={() =>
+        router.push({
+          pathname: '/alarm/[id]',
+          params: { id: s.appointment.id, ...(!change && movedKinds.length ? { changed: movedKinds.join(',') } : {}) },
+        })
+      }
+    />
   ) : null;
 
   // 시트의 1분 버튼 — 길게 누르면 반복하므로 최신 값에서 이어 가게 함수형 갱신
@@ -178,24 +194,23 @@ function Detail({ suggestion: s, reload }: { suggestion: Suggestion; reload: () 
                   {change.axis} {change.result}
                 </Text>
                 <Text variant="small" style={styles.sub}>
-                  적용 전 값: {change.current}
+                  적용 전 값은 {change.current}이었어요. {REVERT_LINE}
                 </Text>
               </>
             ) : (
               <>
                 <Text variant="big">
                   {target}
-                  {'\n'}기상 {formatTime(s.applied.wake)}
-                  {s.applied.prepare ? ` · 준비 ${formatTime(s.applied.prepare)}` : ''}
+                  {'\n'}
+                  {s.applied.prepare && formatTime(s.applied.prepare) === formatTime(s.applied.wake)
+                    ? `기상 · 준비 ${formatTime(s.applied.wake)}`
+                    : `기상 ${formatTime(s.applied.wake)}${s.applied.prepare ? ` · 준비 ${formatTime(s.applied.prepare)}` : ''}`}
                 </Text>
                 <Text variant="small" style={styles.sub}>
-                  {s.applied.prepare ? '준비 알람이 ' : ''}적용 전보다 {shiftText(s.applied.minutes)} 울려요.
+                  {s.applied.prepare ? '준비 알람이 ' : ''}적용 전보다 {shiftText(s.applied.minutes)} 울려요. {REVERT_LINE}
                 </Text>
               </>
             )}
-            <Text variant="small" style={styles.sub}>
-              다음 기록에서 성능이 나빠지면 이전 값으로 되돌려요.
-            </Text>
             {alarmLink ? <View style={styles.link}>{alarmLink}</View> : null}
           </Card>
           <View style={styles.stack}>

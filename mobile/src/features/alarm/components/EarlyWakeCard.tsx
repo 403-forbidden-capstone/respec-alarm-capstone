@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
-import { Text, toast } from '@/components/ui';
+import { confirm, Text, toast } from '@/components/ui';
 import { formatTime } from '@/lib/format';
 
 import { confirmEarlyWake } from '../api';
@@ -29,6 +29,13 @@ export function EarlyWakeCard({ early, onDone }: { early: EarlyWake; onDone?: ()
 
   const press = async () => {
     if (busy) return;
+    // 누르면 오늘 기상 알람이 꺼지고 그룹에도 바로 보여서 되돌릴 수 없음 — 누르기 전에 알림
+    const ok = await confirm({
+      title: '먼저 깼다고 기록할까요?',
+      message: '오늘 기상 알람이 꺼지고, 그룹에도 바로 일어났어요로 보여요.',
+      okLabel: '기록',
+    });
+    if (!ok) return;
     setBusy(true);
     try {
       await confirmEarlyWake(early.alarmId);
