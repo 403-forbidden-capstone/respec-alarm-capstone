@@ -17,7 +17,7 @@ import { previewTimes } from '@/features/records/suggestion';
 import type { Suggestion } from '@/features/records/types';
 import { chooseCardGroup, endLiveVoice, finishConversation, getConversation, getLiveToken, pickCardPlace, rejectCard, retryConversation, saveCard, saveCardWithoutPlace, say, sayVoice } from '@/features/voice/api';
 import { ChatBubble, TypingBubble } from '@/features/voice/components/ChatBubble';
-import { ChatComposer } from '@/features/voice/components/ChatComposer';
+import { ChatComposer, type VoiceState } from '@/features/voice/components/ChatComposer';
 import { noticeCopy } from '@/features/voice/chatNotice';
 import { ChatNotice } from '@/features/voice/components/ChatNotice'; // L5 부품 — 실패 · 한도 안내
 import { FoundScheduleCard } from '@/features/voice/components/FoundScheduleCard';
@@ -55,15 +55,15 @@ const explain = (text: string, why: keyof typeof MISSED | null | undefined) => {
 const LISTEN_MS = 1100; // 말하기를 누른 뒤 듣는 시간 (목업 chatSpeak). AI가 답하는 시간은 api(say)가 기다림
 
 // 03 AI 탭 · A02 AI 대화 — 자기 전 대화
-// 가짜 데이터: 목업 대본대로 흘러감 (마이크 · 음성 합성 · 서버 호출 없음). 말하기 = 다음 대본 문장을 말한 것으로 침, 텍스트 = 빈 칸에 쓴 글을 그대로 보냄(AI 답은 대본). 완료하면 하루 기록(A03)으로
-// 실데이터: 글(서버 voice-session · voice-turn)과 실시간 음성(Gemini Live, [말하기])을 한 대화 목록에. 음성은 한 차례(내 말 + Live 답)가 끝나면 같은 서버 대화에 남아(voice-turn spoken_reply) 글과 문맥 · 일정 카드 흐름을 함께 씀 — 못 남긴 말풍선만 화면에 남음. 일정 · 알람을 찾으면 카드가 여러 장 떠서 [저장] · [바꾸기] · [저장 안 함]으로 확인받고, 완료하면 하루 기록을 정리하고 이전 화면(홈)으로 — 같은 날 다시 열면 같은 대화(말 · 카드)가 이어지고, 날짜가 바뀌면 새 대화
+// 가짜 데이터: 목업 대본대로 흘러감 (마이크 · 음성 합성 · 서버 호출 없음). 말하기 = 다음 대본 문장을 말한 것으로 침, 텍스트 = 빈 칸에 쓴 글을 그대로 보냄(AI 답은 대본). 화면을 떠나면 하루 기록(A03)을 만들어 둠
+// 실데이터: 글(서버 voice-session · voice-turn)과 실시간 음성(Gemini Live, [말하기])을 한 대화 목록에. 음성은 한 차례(내 말 + Live 답)가 끝나면 같은 서버 대화에 남아(voice-turn spoken_reply) 글과 문맥 · 일정 카드 흐름을 함께 씀 — 못 남긴 말풍선만 화면에 남음. 일정 · 알람을 찾으면 카드가 여러 장 떠서 [저장] · [바꾸기] · [저장 안 함]으로 확인받고, 화면을 떠나면 하루 기록을 정리함 — 같은 날 다시 열면 같은 대화(말 · 카드)가 이어지고, 날짜가 바뀌면 새 대화
 //   서버가 답하지 못하면(LLM_UNAVAILABLE · NOT_CONFIGURED …) 대화 · 카드는 두고 마지막 말풍선 아래에 ChatNotice failed(분당 사용량이면 busy), 한도에 닿으면(limits.reached) ChatNotice limit(하루) · turn(대화 길이) — 입력창은 막음
 // 30초 무발화로 음성 대화가 끝났을 때 — 저장을 시작했다는 것까지만 (끝났는지는 하루 기록 화면에서 봄)
 const IDLE_ENDED = '말이 없어 음성 대화를 마쳤어요. 하루 기록 저장을 시작했어요';
 
 export default function AiScreen() {
   const { data, error, reload: reloadNow } = useLoad(getConversation);
-  // [완료]로 나간 뒤에는 끝나지 않은 저장 · 답이 다시 읽기를 걸어도 새 세션을 열지 않음 — 다시 들어올 때(포커스)만 읽음 (그건 useLoad가 함)
+  // 화면을 떠난 뒤에는 끝나지 않은 저장 · 답이 다시 읽기를 걸어도 새 세션을 열지 않음 — 다시 들어올 때(포커스)만 읽음 (그건 useLoad가 함)
   const leftRef = useRef(false);
   // 말 하나를 처리하는 도중의 대화 (api say · sayVoice의 onProgress) — 카드 계산 중 · 계산 끝 카드를 안내 답보다 먼저 그림. 끝나고 다시 읽으면 비움
   const [progress, setProgress] = useState<Conversation | null>(null);
@@ -111,14 +111,24 @@ export default function AiScreen() {
   useEffect(() => {
     if (live.phase === 'idle') void endLiveVoice();
   }, [live.phase]);
-  const stopLive = useRef(live.stop);
+  // 화면을 떠나면 마이크 · 연결을 닫고, 내가 한 마디라도 했으면 하루 기록 정리를 보냄 (예전 [완료] 버튼이 하던 일 — 이동 없이)
+  //   실데이터: 같은 날 다시 들어오면 서버가 같은 대화를 돌려주고, 이어 말한 뒤 다시 떠나면 새 말까지 다시 정리. 끝남 표시는 api가 앞 요청 뒤에 차례로 적음
+  //   가짜: 하루 기록(A03)을 만들어 둠 — 기록 탭에서 봄
+  const leaveRef = useRef(() => {});
   useEffect(() => {
-    stopLive.current = live.stop;
+    const spoke = !!data?.messages.some((m) => m.who === 'me');
+    leaveRef.current = () => {
+      live.stop();
+      if (!spoke) return;
+      leftRef.current = true; // 끝나지 않은 저장 · 답이 다시 읽기로 새 세션을 열지 않게 — 다시 들어올 때(포커스) useLoad가 읽음
+      live.clear(); // 서버에 남긴 음성 차례는 다시 열 때 대화로 돌아옴 — 못 남긴 화면용 말풍선만 지움
+      finishConversation().catch(() => {}); // 로컬에 적는 일이라 실패해도 그대로
+    };
   });
   useFocusEffect(
     useCallback(() => {
       leftRef.current = false;
-      return () => stopLive.current(); // 화면을 떠나면 마이크 · 연결을 닫음 (탭 화면은 내려가지 않고 남아 있어서)
+      return () => leaveRef.current(); // 탭 화면은 내려가지 않고 남아 있어서 포커스를 잃을 때 정리
     }, []),
   );
   const reload = async () => {
@@ -276,33 +286,39 @@ export default function AiScreen() {
   const liveOn = real && live.phase !== 'idle';
   const rows: ChatRow[] = real ? mergeLive(messages, live.lines) : messages; // 글 대화 + 음성 말풍선, 시각 순서
 
-  // 음성이 켜져 있는 동안만 음성 상태가 앞. 지난 음성 오류는 글 대화 상태(답하는 중 · 실패 · 한도)보다 뒤 — 그 상태들을 가리지 않게
-  const liveStatus = !real ? null : live.phase === 'connecting' ? '음성 대화를 연결하고 있어요…' : live.phase === 'live' ? (live.micMuted ? 'AI가 말하고 있어요. 끝나면 자동으로 다시 들어요' : '듣고 있어요. 편하게 말해 보세요') : null;
-  const status = liveStatus
-    ? liveStatus
-    : work
-    ? CARD_STEP[work.step]
+  // 음성 모드 파형 · 마이크 아래 글 — 실데이터는 Live 연결 상태, 가짜는 듣기 타이머 · 대본 답 기다림
+  const voice: VoiceState = liveOn
+    ? live.phase === 'live'
+      ? live.micMuted
+        ? 'speaking'
+        : 'listening'
+      : 'idle'
     : listening
-    ? '듣고 있어요…'
-    : thinking
-      ? real
-        ? 'AI가 답하고 있어요'
-        : 'AI가 정리하고 있어요'
-      : unavailable
-        ? noticeCopy(failKind).title
-        : reached
-          ? noticeCopy(limitKind).title
-          : real && live.error
-            ? live.error
-            : real && live.idleEnded
-            ? IDLE_ENDED
-            : canSay
-            ? textMode
-              ? '보낼 메시지를 입력해 주세요'
-              : '말할 준비가 됐어요'
-            : waiting
-              ? '찾은 내용을 확인해 주세요'
-              : '대화를 마치려면 완료를 눌러 주세요';
+      ? 'listening'
+      : thinking && !real
+        ? 'speaking'
+        : 'idle';
+  // 입력 칸 위 한 줄 — 알릴 일이 있을 때만. 지난 음성 오류는 글 대화 상태(답하는 중 · 실패 · 한도)보다 뒤 — 그 상태들을 가리지 않게
+  const notice =
+    real && live.phase === 'connecting'
+      ? '음성 대화를 연결하고 있어요…'
+      : work
+        ? CARD_STEP[work.step]
+        : thinking && textMode
+          ? real
+            ? 'AI가 답하고 있어요'
+            : 'AI가 정리하고 있어요'
+          : unavailable
+            ? noticeCopy(failKind).title
+            : reached
+              ? noticeCopy(limitKind).title
+              : real && live.error
+                ? live.error
+                : real && live.idleEnded
+                  ? IDLE_ENDED
+                  : !canSay && waiting
+                    ? '찾은 내용을 확인해 주세요'
+                    : null;
 
   // 말하기 — 가짜: 대본 한 문장을 들은 것으로. 실데이터: 실시간 음성 대화를 켜고 끔 (켜져 있는 동안 계속 주고받음)
   function speak() {
@@ -327,10 +343,9 @@ export default function AiScreen() {
     setMode((m) => (m === 'text' ? 'voice' : 'text'));
   }
 
-  // 완료 — 가짜: 한 번 묻고 일기를 만들어 하루 기록으로. 내가 아직 한 마디도 안 했으면 완료를 막음 (빈 대화로 기록이 생기지 않게)
+  // 대화 마치기 (실패 · 한도 안내의 버튼) — 가짜: 한 번 묻고 일기를 만들어 하루 기록으로. 입력 칸의 [완료]는 없어지고 화면을 떠날 때 정리함(leaveRef)
   // 실데이터: 이전 화면(홈)으로 — 같은 날 다시 열면 같은 대화가 이어짐. 하루 기록 정리(할 일 · 준비물 · 생활 기록 · 일기)는 api가 서버 voice-commit으로 기다리지 않고 보냄 (다시 완료하면 새 말까지)
   // 정리 중에 끝내면 끝난 대화에 답 · 카드가 붙으므로, 확인창 앞뒤로 두 번 봄 (확인창이 떠 있는 사이 글 모드 보내기로 정리가 시작될 수 있음)
-  const started = messages.some((m) => m.who === 'me');
   const finish = async () => {
     if (thinkingRef.current) return;
     setListening(false); // 듣는 중이면 멈춤 — 확인창이 떠 있는 사이 듣기 타이머가 터져 말을 보내지 않게
@@ -512,20 +527,18 @@ export default function AiScreen() {
         {/* 실시간 음성 대화(Gemini Live)의 소리 페이지 — 보이지 않음 */}
         {live.frame}
         <ChatComposer
-          status={status}
+          notice={notice}
           mode={textMode ? 'text' : 'voice'}
+          onToggleMode={toggleMode}
+          voice={voice}
+          micOn={liveOn}
+          micDisabled={real ? false : !canSay} // 실데이터 음성 대화는 글 대화와 따로 돌아 언제든 켜고 끔
+          onSpeak={speak}
           inputVisible={next?.who === 'me'}
           canSay={canSay}
-          listening={real ? liveOn : listening}
-          micLabel={liveOn ? '끝내기' : undefined}
-          micDisabled={real ? false : undefined}
           text={draftText}
           onChangeText={setDraftText}
           onSend={send}
-          onToggleMode={toggleMode}
-          onSpeak={speak}
-          onDone={finish}
-          doneDisabled={thinking || listening || (!real && (busy || !started))}
         />
       </View>
       <PlaceSearchSheet
