@@ -3,7 +3,7 @@ FROM python:3.11-slim
 WORKDIR /app
 COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
-COPY app.py ./
+COPY app.py survey_v2_model.py ./
 
 # Ship application code only. Provision C1/W4 .cbm artifacts on the host and
 # mount /app/models/v4_age_only read-only at runtime (no binaries in GHCR/Git).

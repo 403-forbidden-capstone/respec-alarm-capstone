@@ -29,6 +29,13 @@ jobs:
         run: |
           docker build --platform linux/arm64 -t respec-prepare-ml:ci services/prepare-ml
           test "$(docker image inspect -f '{{.Architecture}}' respec-prepare-ml:ci)" = arm64
+      - name: Test survey-v2 research request contract inside ARM64 image
+        run: |
+          docker run --rm --platform linux/arm64 -e CATBOOST_API_TOKEN=ci-only \
+            -e PYTHONPATH=/app \
+            -v "$PWD/services/prepare-ml/test_survey_v2.py:/tmp/test_survey_v2.py:ro" \
+            --entrypoint python respec-prepare-ml:ci /tmp/test_survey_v2.py
+
       - name: Verify no .cbm file is bundled
         run: |
           docker run --rm --entrypoint sh respec-prepare-ml:ci -c \
