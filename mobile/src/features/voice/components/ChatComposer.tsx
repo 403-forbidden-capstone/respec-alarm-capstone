@@ -1,5 +1,15 @@
 import { useEffect, useRef, useState } from 'react';
-import { Animated, Pressable, StyleSheet, TextInput, View } from 'react-native';
+import {
+  Animated,
+  type NativeSyntheticEvent,
+  Platform,
+  Pressable,
+  Text as RNText,
+  StyleSheet,
+  TextInput,
+  type TextInputKeyPressEventData,
+  View,
+} from 'react-native';
 
 import { Button, Text } from '@/components/ui';
 import { colors, typeScale } from '@/theme';
@@ -41,11 +51,20 @@ export function ChatComposer({
 }: Props) {
   const input = useRef<TextInput>(null);
   const sendable = canSay && text.trim().length > 0; // 빈 글 · 공백만은 못 보냄
+  const [textHeight, setTextHeight] = useState(0); // 숨은 글로 잰 입력 글 높이
 
   function send() {
     if (!sendable) return;
     onSend();
     input.current?.focus(); // 버튼을 눌러도 키보드가 닫히지 않게
+  }
+
+  // 웹(react-native-web)은 여러 줄 칸에서 submitBehavior를 몰라 Enter가 줄바꿈이 됨 — Enter는 보내기, Shift+Enter · 한글 조합 중 Enter는 그대로
+  function sendOnEnter(e: NativeSyntheticEvent<TextInputKeyPressEventData>) {
+    const key = e.nativeEvent as unknown as KeyboardEvent; // 웹에선 DOM 키 이벤트
+    if (key.key !== 'Enter' || key.shiftKey || key.isComposing) return;
+    e.preventDefault();
+    send();
   }
 
   return (
@@ -55,23 +74,42 @@ export function ChatComposer({
       </Text>
       {mode === 'text' && inputVisible ? (
         <View style={styles.inputRow}>
-          <TextInput
-            ref={input}
-            value={text}
-            onChangeText={onChangeText}
-            multiline // 칸 너비를 넘으면 줄바꿈하고 높이가 늘어남 — 보낸 뒤 빈칸이 되면 한 줄로 돌아감
-            scrollEnabled
-            onSubmitEditing={send}
-            submitBehavior="submit"
-            returnKeyType="send"
-            placeholder="메시지를 입력하세요"
-            accessibilityLabel="보낼 메시지"
-            maxLength={1000} // 서버가 받는 한 말의 최대 글자 수 (voice-turn MAX_TEXT_CHARS)
-            placeholderTextColor={colors.faint}
-            maxFontSizeMultiplier={1.3}
-            style={styles.input}
-          />
-          <Button label="보내기" small onPress={send} disabled={!sendable} />
+          <View style={styles.inputWrap}>
+            {/* 높이 재기용 숨은 글 — 웹 textarea는 글이 늘어도 스스로 커지지 않아서, 같은 너비 · 글꼴로 줄 수를 재 칸 높이로 씀.
+                keepWords(어절 단위)가 칸과 다르게 줄을 바꾸므로 공용 Text 대신 RN Text */}
+            <RNText
+              aria-hidden
+              importantForAccessibility="no-hide-descendants"
+              accessibilityElementsHidden
+              pointerEvents="none"
+              maxFontSizeMultiplier={1.3}
+              onLayout={(e) => setTextHeight(e.nativeEvent.layout.height)}
+              style={[styles.inputText, styles.measure]}
+            >
+              {!text || text.endsWith('\n') ? `${text} ` : text}
+            </RNText>
+            <TextInput
+              ref={input}
+              value={text}
+              onChangeText={onChangeText}
+              multiline // 칸 너비를 넘으면 줄바꿈 — 높이는 위 숨은 글로 잼
+              scrollEnabled
+              onSubmitEditing={send}
+              onKeyPress={Platform.OS === 'web' ? sendOnEnter : undefined}
+              submitBehavior="submit"
+              returnKeyType="send"
+              placeholder="메시지를 입력하세요"
+              accessibilityLabel="보낼 메시지"
+              maxLength={1000} // 서버가 받는 한 말의 최대 글자 수 (voice-turn MAX_TEXT_CHARS)
+              placeholderTextColor={colors.faint}
+              maxFontSizeMultiplier={1.3}
+              style={[styles.inputText, styles.input, { height: Math.min(Math.max(textHeight + INPUT_CHROME, 38), INPUT_MAX) }]}
+            />
+          </View>
+          <View>
+            {/* 작은 Button은 스스로 위에 붙어서(alignSelf) 한 겹 싸야 줄의 아래 맞춤을 따름 */}
+            <Button label="보내기" small onPress={send} disabled={!sendable} />
+          </View>
         </View>
       ) : null}
       <View style={styles.buttons}>
@@ -145,7 +183,10 @@ function MicButton({ label, listening, disabled, onPress }: { label: string; lis
 
 const MIC = 58;
 const INPUT_LINES = 5; // 입력칸이 늘어나는 최대 줄 수
-const INPUT_PAD = 9; // 한 줄(20)일 때 높이 38 — 보내기 버튼과 같게
+const INPUT_PAD = 8; // 한 줄(20) + 여백 8×2 + 테두리 1×2 = 38 — 보내기 버튼과 같게
+const INPUT_BORDER = 1;
+const INPUT_CHROME = (INPUT_PAD + INPUT_BORDER) * 2; // 글 높이 밖 위아래 여백 · 테두리
+const INPUT_MAX = INPUT_CHROME + typeScale.body.lineHeight * INPUT_LINES; // 넘으면 칸 안에서 세로 스크롤
 
 const styles = StyleSheet.create({
   box: {
@@ -160,21 +201,11 @@ const styles = StyleSheet.create({
   },
   status: { marginBottom: 8 },
   inputRow: { flexDirection: 'row', alignItems: 'flex-end', gap: 6, marginBottom: 10 }, // 칸이 늘어나도 보내기는 아래 줄에 붙어 있게
-  input: {
-    ...typeScale.body,
-    flex: 1,
-    minWidth: 0,
-    minHeight: 38,
-    maxHeight: INPUT_PAD * 2 + typeScale.body.lineHeight * INPUT_LINES, // 넘으면 칸 안에서 세로 스크롤
-    paddingTop: INPUT_PAD,
-    paddingBottom: INPUT_PAD,
-    textAlignVertical: 'top',
-    paddingHorizontal: 12,
-    borderWidth: 1,
-    borderColor: colors.line,
-    borderRadius: 12,
-    color: colors.ink,
-  },
+  inputWrap: { flex: 1, minWidth: 0 },
+  // 칸과 숨은 글이 같이 쓰는 글꼴 · 가로 여백 — 둘이 같은 자리에서 줄이 바뀌어야 높이가 맞음
+  inputText: { ...typeScale.body, paddingHorizontal: 12, borderWidth: INPUT_BORDER, borderColor: colors.line },
+  input: { paddingTop: INPUT_PAD, paddingBottom: INPUT_PAD, textAlignVertical: 'top', borderRadius: 12, color: colors.ink },
+  measure: { position: 'absolute', left: 0, right: 0, top: 0, opacity: 0, paddingVertical: 0, borderTopWidth: 0, borderBottomWidth: 0 }, // 가로 테두리는 남겨 칸과 너비를 맞추고, 잰 높이엔 글만
   buttons: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 16 },
   pill: { minHeight: 38, paddingHorizontal: 16, borderRadius: 19, borderWidth: 1, borderColor: colors.chip, backgroundColor: colors.chip, justifyContent: 'center' },
   pillOn: { backgroundColor: colors.card, borderColor: colors.ink },
