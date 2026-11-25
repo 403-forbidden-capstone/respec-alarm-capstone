@@ -1788,15 +1788,18 @@ await check('cron(pg_cron)이 없는 DB에서도 마이그레이션이 적용되
 // 알람 계산이 서버로 넘어간 뒤 예측 켜기 조건(PREPARE_ML_ENABLED · _ALLOWED_USER_IDS · _CODEBOOK_VERSION)을 서버가 이 표에서 읽음.
 // 값은 전부 꺼짐으로 시작 · 키는 목록만 · 값 모양은 Edge 비밀과 같음 · 앱(anon · authenticated)은 읽기 · 쓰기가 모두 막힘
 
-const SETTING_KEYS = ['prepare_ml_allowed_user_ids', 'prepare_ml_codebook_version', 'prepare_ml_enabled'];
+const SETTING_KEYS = [
+  'prepare_ml_allowed_user_ids', 'prepare_ml_codebook_version', 'prepare_ml_enabled',
+  'pure_prep_allowed_user_ids', 'pure_prep_apply_enabled',
+  'pure_prep_survey_allowed_user_ids', 'pure_prep_survey_enabled',
+];
 const UUID_ONE = '33333333-3333-4333-8333-333333333333';
 const UUID_TWO = 'AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA';
 
 // 검사가 바꾼 값을 처음 값(꺼짐)으로 되돌림
 const resetSettings = async () => {
   await su();
-  await q(`update public.server_settings set value = '0' where key = 'prepare_ml_enabled'`);
-  await q(`update public.server_settings set value = '' where key <> 'prepare_ml_enabled'`);
+  await q(`update public.server_settings set value = case when key in ('prepare_ml_enabled', 'pure_prep_apply_enabled', 'pure_prep_survey_enabled') then '0' else '' end`);
 };
 
 await check('서버 전용 설정 표(server_settings): RLS가 켜져 있고 정책이 없고, 앱(anon · authenticated)은 읽기 · 쓰기가 모두 막히고 service_role만 허용', async () => {
@@ -1812,13 +1815,13 @@ await check('서버 전용 설정 표(server_settings): RLS가 켜져 있고 정
   const anonRead = await expectErr(() => q(`select * from public.server_settings`), /permission denied/);
   await svc();
   const rows = await q(`select key from public.server_settings order by key`);
-  return x.rls === true && x.policies === 0 && x.app_any === false && x.service_all === true && read === true && write === true && insert === true && anonRead === true && rows.length === 3
+  return x.rls === true && x.policies === 0 && x.app_any === false && x.service_all === true && read === true && write === true && insert === true && anonRead === true && rows.length === SETTING_KEYS.length
     ? true : { x, read, write, insert, anonRead, rows };
 });
 
 await check('서버 전용 설정 초기값: 세 키(허용 계정 · 코드북 판 · 켜짐)가 전부 꺼짐(빈 글자 · 빈 글자 · 0) — 적용만으로는 동작이 안 바뀜', async () => {
   const rows = await q(`select key, value from public.server_settings order by key`);
-  return rows.length === 3 && rows.every((r, i) => r.key === SETTING_KEYS[i] && r.value === (r.key === 'prepare_ml_enabled' ? '0' : '')) ? true : rows;
+  return rows.length === SETTING_KEYS.length && rows.every((r, i) => r.key === SETTING_KEYS[i] && r.value === (['prepare_ml_enabled', 'pure_prep_apply_enabled', 'pure_prep_survey_enabled'].includes(r.key) ? '0' : '')) ? true : rows;
 });
 
 await check('서버 전용 설정 제약: 모르는 키 · 켜짐이 0 · 1이 아님 · 허용 계정이 UUID 목록이 아님 · 코드북 판의 앞뒤 공백 · 65자 · 같은 키 중복은 막고, 올바른 모양은 받음', async () => {
