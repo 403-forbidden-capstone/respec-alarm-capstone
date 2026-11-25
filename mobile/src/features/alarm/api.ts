@@ -1080,8 +1080,8 @@ export async function editStandaloneAlarm(alarmId: string, input: NewStandaloneA
   return real.replaceStandaloneAlarm(alarmId, input);
 }
 
-// 지우기 — 반복이면 모든 회차, 폰 예약도 바로 거둠
-export async function deleteStandaloneAlarm(alarmId: string): Promise<void> {
+// 지우기 — 반복이면 모든 회차, 폰 예약도 바로 거둠. 돌려주는 값 = 폰에서 못 지운 수 (지우기 자체는 됨)
+export async function deleteStandaloneAlarm(alarmId: string): Promise<number> {
   if (isMock()) throw new UserError('기본 알람은 실데이터 모드에서만 지울 수 있어요');
   return real.deleteStandaloneAlarm(alarmId);
 }

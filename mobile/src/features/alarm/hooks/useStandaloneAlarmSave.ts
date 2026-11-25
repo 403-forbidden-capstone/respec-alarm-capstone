@@ -53,7 +53,8 @@ export function useStandaloneAlarmEdit(onDone: () => void) {
       let ok = false;
       await run(async () => {
         const at = firstRingAt(minuteOfDay, repeat, now());
-        const saved = await editStandaloneAlarm(a.id, { at, repeat, level, enabled: a.enabled });
+        // 강도는 바꿨을 때만 보냄 — 안 바꿨으면 원래 강도(자동이면 자동)를 그대로 (보내면 직접 고름으로 저장됨)
+        const saved = await editStandaloneAlarm(a.id, { at, repeat, level: level === a.level ? undefined : level, enabled: a.enabled });
         toast(saveNotice(saved.followUp, '알람은 고쳤지만') ?? `알람을 고쳤어요 · ${dayHeading(at, now())} ${formatTime(at)}`);
         ok = true;
         onDone();
@@ -73,8 +74,8 @@ export function useStandaloneAlarmEdit(onDone: () => void) {
       if (!sure) return false;
       let ok = false;
       await run(async () => {
-        await deleteStandaloneAlarm(a.id);
-        toast('알람을 삭제했어요');
+        const phoneFailed = await deleteStandaloneAlarm(a.id);
+        toast(phoneFailed ? '알람은 지웠지만 폰 예약을 다 지우지 못했어요. 앱을 다시 열면 정리돼요' : '알람을 삭제했어요');
         ok = true;
         onDone();
       }, '알람을 삭제하지 못했어요');

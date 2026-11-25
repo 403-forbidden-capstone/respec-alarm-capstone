@@ -1381,7 +1381,7 @@ describe('일정 없는 알람 (D46)', () => {
   const orOf = (call: FakeCall) => call.filters.find(([m]) => m === 'or');
 
   // 옛 알람 한 줄 + 묶음 끄기 결과 + 기록 있는 회차
-  function oldAlarm(row: { scheduled_at: string; recurrence_rule: string | null }, series = [{ alarm_id: OLD, scheduled_at: row.scheduled_at }], logged: string[] = []) {
+  function oldAlarm(row: { scheduled_at: string; recurrence_rule: string | null; intensity?: string; sound_key?: string; intensity_source?: string }, series = [{ alarm_id: OLD, scheduled_at: row.scheduled_at }], logged: string[] = []) {
     mockRoutes['alarms:select'] = (call) => ({ data: { series_id: filterArgs(call, 'eq', 'alarm_id')?.[0], ...row } });
     mockRoutes['alarms:update'] = (call) => ({ data: String(orOf(call)?.[1]).includes(OLD) ? series : [{ alarm_id: NEW, scheduled_at: at(60 * 24) }] });
     mockRoutes['alarm_events:select'] = () => ({ data: logged.map((alarm_id) => ({ alarm_id })) });
@@ -1405,14 +1405,27 @@ describe('일정 없는 알람 (D46)', () => {
     expect(mockCancelPhone).toHaveBeenCalledWith([OLD, NEXT, LOGGED]); // 사흘 전 회차는 폰에 없음
   });
 
-  it('지우기: 일정 알람 · 남의 알람이면(찾지 못함) UserError, 폰에서 못 지우면 UserError', async () => {
+  it('지우기: 일정 알람 · 남의 알람이면(찾지 못함) UserError, 폰에서만 못 지웠으면 던지지 않고 못 지운 수 (화면이 안내만 바꿈)', async () => {
     mockRoutes['alarms:select'] = () => ({ data: null });
     await expect(real.deleteStandaloneAlarm(OLD)).rejects.toBeInstanceOf(UserError);
     expect(callsTo('alarms', 'update')).toEqual([]);
     mockNow = new Date(Date.parse(kst('08:00')));
     oldAlarm({ scheduled_at: at(60), recurrence_rule: null });
     mockCancelPhone.mockResolvedValueOnce({ failed: [{ alarmId: OLD, error: 'x' }] });
-    await expect(real.deleteStandaloneAlarm(OLD)).rejects.toBeInstanceOf(UserError);
+    await expect(real.deleteStandaloneAlarm(OLD)).resolves.toBe(1);
+    await expect(real.deleteStandaloneAlarm(OLD)).resolves.toBe(0);
+  });
+
+  it('지우기: 끈 뒤 안 울린 회차 지우기(기록 읽기 · 행 삭제)가 실패해도 던지지 않음 — 이미 꺼져서 안 울림', async () => {
+    mockNow = new Date(Date.parse(kst('08:00')));
+    oldAlarm({ scheduled_at: at(60), recurrence_rule: 'FREQ=DAILY' }, [{ alarm_id: OLD, scheduled_at: at(60) }]);
+    mockRoutes['alarms:delete'] = () => ({ error: { code: '', message: 'offline' } });
+    await expect(real.deleteStandaloneAlarm(OLD)).resolves.toBe(0);
+    mockRoutes['alarm_events:select'] = () => ({ error: { code: '', message: 'offline' } });
+    mockCalls.length = 0;
+    await expect(real.deleteStandaloneAlarm(OLD)).resolves.toBe(0);
+    expect(callsTo('alarms', 'delete')).toEqual([]); // 기록을 못 읽으면 지우지 않음 (기록 보존)
+    expect(mockCancelPhone).toHaveBeenCalledWith([OLD]);
   });
 
   it('고치기: 반복 아님 → 반복 아님 · 아직 안 울림이면 제자리에서 고침 (알람 id · 기록 그대로, 켜짐도 보낸 그대로)', async () => {
@@ -1443,7 +1456,24 @@ describe('일정 없는 알람 (D46)', () => {
     expect((mockCallEdge.mock.calls[0][1] as { alarm: Record<string, unknown> }).alarm).not.toHaveProperty('alarm_id');
   });
 
-  it('고치기: 옛 알람을 못 거두면 새 알람을 되돌리고 던짐 · 폰에서만 못 지웠으면 저장은 성공하고 followUp', async () => {
+  it('고치기: 강도를 안 보내면 옛 강도 그대로 — 직접 고른 강도는 같은 단계로 새 알람에, 자동이면 새 알람도 자동(levels 없음)', async () => {
+    mockNow = new Date(Date.parse(kst('08:00')));
+    mockCallEdge.mockResolvedValue(standaloneResponse());
+    const sentAlarm = () => (mockCallEdge.mock.calls.at(-1)?.[1] as { alarm: Record<string, unknown> }).alarm;
+    oldAlarm({ scheduled_at: at(60), recurrence_rule: 'FREQ=DAILY', intensity: 'STRONG', sound_key: 'theme_urgent', intensity_source: 'MANUAL' });
+    await real.replaceStandaloneAlarm(OLD, { at: new Date(at(120)), repeat: ['월'] });
+    expect(sentAlarm().levels).toEqual({ sound: 2, voice: 2, vibration: 2 });
+    oldAlarm({ scheduled_at: at(60), recurrence_rule: 'FREQ=DAILY', intensity: 'STRONG', sound_key: 'theme_urgent', intensity_source: 'AUTO' });
+    await real.replaceStandaloneAlarm(OLD, { at: new Date(at(120)), repeat: ['월'] });
+    expect(sentAlarm()).not.toHaveProperty('levels');
+    oldAlarm({ scheduled_at: at(60), recurrence_rule: null }); // 제자리 고침 — 안 보내면 서버가 저장된 강도를 그대로 씀
+    await real.replaceStandaloneAlarm(OLD, { at: new Date(at(120)), repeat: [] });
+    expect(sentAlarm()).not.toHaveProperty('levels');
+    await real.replaceStandaloneAlarm(OLD, { at: new Date(at(120)), repeat: ['월'], level: 0 }); // 바꿨으면 그 값
+    expect(sentAlarm().levels).toEqual({ sound: 0, voice: 0, vibration: 0 });
+  });
+
+  it('고치기: 옛 알람을 못 끄면(거두기 ①) 새 알람을 되돌리고 던짐 — ② 실패는 되돌리지 않음 · 폰에서만 못 지웠으면 저장은 성공하고 followUp', async () => {
     mockNow = new Date(Date.parse(kst('08:00')));
     mockCallEdge.mockResolvedValue(standaloneResponse());
     oldAlarm({ scheduled_at: at(60), recurrence_rule: 'FREQ=DAILY' });
@@ -1454,6 +1484,12 @@ describe('일정 없는 알람 (D46)', () => {
       ['or', `alarm_id.eq.${OLD},series_id.eq.${OLD}`],
       ['or', `alarm_id.eq.${NEW},series_id.eq.${NEW}`], // 새 알람 되돌림
     ]);
+
+    oldAlarm({ scheduled_at: at(60), recurrence_rule: 'FREQ=DAILY' });
+    mockRoutes['alarms:delete'] = () => ({ error: { code: '', message: 'offline' } });
+    mockCalls.length = 0;
+    await expect(real.replaceStandaloneAlarm(OLD, { at: new Date(at(120)), repeat: ['월'] })).resolves.toMatchObject({ id: NEW });
+    expect(callsTo('alarms', 'update').map(orOf)).toEqual([['or', `alarm_id.eq.${OLD},series_id.eq.${OLD}`]]); // 새 알람은 그대로
 
     oldAlarm({ scheduled_at: at(60), recurrence_rule: 'FREQ=DAILY' });
     mockCancelPhone.mockResolvedValueOnce({ failed: [{ alarmId: OLD, error: 'x' }] });
