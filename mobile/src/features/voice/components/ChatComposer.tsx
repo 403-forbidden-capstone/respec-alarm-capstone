@@ -59,6 +59,8 @@ export function ChatComposer({
             ref={input}
             value={text}
             onChangeText={onChangeText}
+            multiline // 칸 너비를 넘으면 줄바꿈하고 높이가 늘어남 — 보낸 뒤 빈칸이 되면 한 줄로 돌아감
+            scrollEnabled
             onSubmitEditing={send}
             submitBehavior="submit"
             returnKeyType="send"
@@ -142,6 +144,8 @@ function MicButton({ label, listening, disabled, onPress }: { label: string; lis
 }
 
 const MIC = 58;
+const INPUT_LINES = 5; // 입력칸이 늘어나는 최대 줄 수
+const INPUT_PAD = 9; // 한 줄(20)일 때 높이 38 — 보내기 버튼과 같게
 
 const styles = StyleSheet.create({
   box: {
@@ -155,13 +159,16 @@ const styles = StyleSheet.create({
     boxShadow: `0 10px 30px -18px ${colors.shadow}40`,
   },
   status: { marginBottom: 8 },
-  inputRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 10 },
+  inputRow: { flexDirection: 'row', alignItems: 'flex-end', gap: 6, marginBottom: 10 }, // 칸이 늘어나도 보내기는 아래 줄에 붙어 있게
   input: {
     ...typeScale.body,
     flex: 1,
     minWidth: 0,
     minHeight: 38,
-    paddingVertical: 0,
+    maxHeight: INPUT_PAD * 2 + typeScale.body.lineHeight * INPUT_LINES, // 넘으면 칸 안에서 세로 스크롤
+    paddingTop: INPUT_PAD,
+    paddingBottom: INPUT_PAD,
+    textAlignVertical: 'top',
     paddingHorizontal: 12,
     borderWidth: 1,
     borderColor: colors.line,
