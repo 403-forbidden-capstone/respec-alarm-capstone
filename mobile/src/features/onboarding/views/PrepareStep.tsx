@@ -1,4 +1,4 @@
-import { StyleSheet } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 
 import { Button, Card, SectionHeader, Segmented, Stepper, Text, Toggle } from '@/components/ui';
 import { TRANSPORT_NAME, WAKE_MARGIN_NAME } from '@/features/profile/labels';
@@ -38,8 +38,8 @@ export function PrepareStep({ values, onChange, ml, onMlChange }: Props) {
         외출 준비를 시작해서 집을 나서기까지 보통 몇 분?
       </Text>
       <Text variant="small" tone="sub">
-        식사·과제처럼 준비하기 전에 하는 일은 제외하고, 씻고 옷을 입는 등 외출 준비를 시작한 순간부터 집을 나설 때까지의 시간을 입력해 주세요.
-        입력한 순수준비시간을 새 개인·그룹 자동 알람의 초기값으로 사용해요. 동의와 시범 조건이 충족되면 실제 기록으로 순수준비시간만 보정해요.
+        식사 · 과제처럼 준비 전에 하는 일은 빼고 입력해 주세요.
+        기록이 쌓이면 내 실제 준비 시간에 맞춰 조금씩 고쳐요.
       </Text>
       <Card>
         <Stepper
@@ -54,7 +54,7 @@ export function PrepareStep({ values, onChange, ml, onMlChange }: Props) {
         />
         {values.outingPrep == null ? (
           <>
-            <Text variant="caption" style={styles.help}>미설정 — 위 30분은 예시이며 아직 저장되지 않았어요.</Text>
+            <Text variant="small" tone="sub" style={styles.help}>아직 정하지 않았어요. 위 30분은 예시예요.</Text>
             <Button label="30분으로 설정" onPress={() => onChange({ outingPrep: 30 })} />
           </>
         ) : null}
@@ -70,7 +70,7 @@ export function PrepareStep({ values, onChange, ml, onMlChange }: Props) {
 
       <SectionHeader title="깨우는 여유" />
       <Segmented options={MARGINS} value={values.margin} onChange={(margin) => onChange({ margin })} />
-      <Text variant="caption" style={styles.help}>
+      <Text variant="small" tone="sub" style={styles.help}>
         10번 중 7 · 8 · 9번 안 늦게
       </Text>
       {ml && onMlChange ? (
@@ -81,11 +81,16 @@ export function PrepareStep({ values, onChange, ml, onMlChange }: Props) {
           </Text>
           <Stepper label="만 나이" value={ml.age} onChange={(age) => onMlChange({ age })} min={14} max={100} step={1} unit="세" />
           <HolidayPatternPicker value={ml.holiday} onChange={(holiday) => onMlChange({ holiday })} />
-          <Toggle
-            value={ml.consent}
-            onChange={(consent) => onMlChange({ consent })}
-            label="만 나이와 선택한 휴무 형태의 예측 연구용 수집·이용에 동의"
-          />
+          <View style={styles.consentRow}>
+            <Text variant="bodyStrong" style={styles.consentName}>
+              준비시간 연구에 내 기록 쓰기
+            </Text>
+            <Toggle
+              value={ml.consent}
+              onChange={(consent) => onMlChange({ consent })}
+              label="준비시간 연구에 내 기록 쓰기 — 만 나이와 선택한 휴무 형태의 수집 · 이용에 동의"
+            />
+          </View>
           <Text variant="small" tone="sub">동의한 경우에만 온보딩의 개인정보 안내 단계에서 저장하며, 설정에서 언제든 삭제할 수 있어요.</Text>
         </>
       ) : null}
@@ -96,4 +101,6 @@ export function PrepareStep({ values, onChange, ml, onMlChange }: Props) {
 const styles = StyleSheet.create({
   question: { marginBottom: 10 },
   help: { marginHorizontal: 4 },
+  consentRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginTop: 8 },
+  consentName: { flex: 1, minWidth: 0 },
 });

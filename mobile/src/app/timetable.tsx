@@ -57,7 +57,7 @@ export default function TimetableScreen() {
         학교 시간표
       </Text>
       <Text variant="lead" tone="sub" style={styles.lead}>
-        매주 반복하는 일정이에요. 수업마다 알람이 따로 맞춰져요
+        매주 반복하는 일정(수업 포함)이에요. 일정마다 알람이 따로 맞춰져요
       </Text>
 
       {canImport ? (

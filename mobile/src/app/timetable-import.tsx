@@ -1,5 +1,6 @@
+import { router } from 'expo-router';
 import { useState } from 'react';
-import { StyleSheet } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 
 import { Button, Screen, Text, toast, TopBar } from '@/components/ui';
 import { listPlaces } from '@/features/alarm/api';
@@ -51,9 +52,12 @@ export default function TimetableImportScreen() {
       </Text>
       {timetable.notice ? <ImportNoticeCard notice={timetable.notice} onDismiss={timetable.dismissNotice} /> : null}
       {noHome ? (
-        <Text variant="small" tone="warn" style={styles.noHome}>
-          집 위치를 정하지 않아서 이동시간을 구하지 못해요. 설정에서 집을 먼저 정해 주세요
-        </Text>
+        <View style={styles.noHome}>
+          <Text variant="small" tone="warn">
+            집 위치를 정하지 않아서 이동시간을 구하지 못해요. 설정에서 집을 먼저 정해 주세요
+          </Text>
+          <Button variant="ghost" small label="설정에서 집 정하기" onPress={() => router.push('/settings')} />
+        </View>
       ) : null}
       {timetable.missingCoords > 0 ? (
         <Text variant="small" tone="warn" style={styles.noHome}>
@@ -101,5 +105,5 @@ export default function TimetableImportScreen() {
 const styles = StyleSheet.create({
   title: { marginTop: 8 },
   lead: { marginTop: 4, marginBottom: 16 },
-  noHome: { marginBottom: 12 },
+  noHome: { marginBottom: 12, gap: 8, alignItems: 'flex-start' },
 });

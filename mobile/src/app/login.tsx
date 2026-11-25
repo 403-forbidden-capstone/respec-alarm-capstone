@@ -15,6 +15,7 @@ export default function LoginScreen() {
   const { enabled } = useAuth();
   const [busy, setBusy] = useState<OAuthProvider | 'demo' | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [devOpen, setDevOpen] = useState(false); // 알람 테스트 · 개발 메뉴 접힌 칸
 
   async function login(provider: OAuthProvider) {
     // 가짜 데이터 모드에서는 화면만 열어 봄 (주소로 연 경우) — 로그인해도 가짜 프로필이 쓰이므로 막음
@@ -82,19 +83,27 @@ export default function LoginScreen() {
               {error}
             </Text>
           ) : null}
-          {/* 알람 테스트 바로 가기 — 로그인 전에도 알람이 울리는지 시험해 볼 수 있게 (/dev/alarm-test, 루트 레이아웃 가드 밖). 출시용 APK에도 보임 (10/18 지형님, #177)
-              D16(출시 빌드에서 개발 메뉴를 보일지)이 정해지면 개발 메뉴 버튼과 같이 숨길 대상 */}
-          <Button variant="plain" small label="알람 테스트" onPress={() => router.push('/dev/alarm-test')} />
-          {/* 데모(시드) 계정 로그인 — 웹 · 폰 개발용 · 개발자용 배포 APK에서만 (실배포 APK는 안 보임). 다른 데모 계정은 개발 메뉴 입력 칸에서 */}
+          {/* 알람 테스트 바로 가기 — 로그인 전에도 알람이 울리는지 시험해 볼 수 있게 (/dev/alarm-test, 루트 레이아웃 가드 밖). 출시용 APK에도 있음 (10/18 지형님, #177)
+              첫 화면에서는 누를 것을 줄이려 접힌 칸 안에 둠 (UX A-08). D16(출시 빌드에서 개발 메뉴를 보일지)이 정해지면 이 칸째 숨길 대상 */}
           {devLoginVisible && enabled ? (
+            // 데모(시드) 계정 로그인 — 웹 · 폰 개발용 · 개발자용 배포 APK에서만 (실배포 APK는 안 보임). 다른 데모 계정은 개발 메뉴 입력 칸에서
+            <Button
+              variant="ghost"
+              label={busy === 'demo' ? '데모 계정으로 로그인 중…' : DEMO_PASSWORD ? `데모 계정으로 로그인 (${DEMO_ACCOUNTS[0].split('@')[0]})` : '데모 계정으로 로그인'}
+              disabled={busy !== null}
+              onPress={demoLogin}
+            />
+          ) : null}
+          <Button
+            variant="plain"
+            small
+            label={devOpen ? '접기' : devLoginVisible && enabled ? '다른 데모 계정 · 개발 메뉴' : '개발 메뉴'}
+            onPress={() => setDevOpen((v) => !v)}
+          />
+          {devOpen ? (
             <>
-              <Button
-                variant="ghost"
-                label={busy === 'demo' ? '데모 계정으로 로그인 중…' : DEMO_PASSWORD ? `데모 계정으로 로그인 (${DEMO_ACCOUNTS[0].split('@')[0]})` : '데모 계정으로 로그인'}
-                disabled={busy !== null}
-                onPress={demoLogin}
-              />
-              <Button variant="plain" small label="다른 데모 계정 · 개발 메뉴" onPress={() => router.push('/dev/screens')} />
+              <Button variant="plain" small label="알람 테스트" onPress={() => router.push('/dev/alarm-test')} />
+              {devLoginVisible && enabled ? <Button variant="plain" small label="개발 메뉴" onPress={() => router.push('/dev/screens')} /> : null}
             </>
           ) : null}
         </View>

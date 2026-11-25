@@ -10,7 +10,7 @@ export const BLOCK_TEXT = {
     '상대에게는 알리지 않아요.',
   ],
   ok: '차단',
-  toast: '차단했어요',
+  toast: '차단했어요 · 설정 › 차단한 사람에서 풀 수 있어요',
 } as const;
 
 export const UNBLOCK_TEXT = {

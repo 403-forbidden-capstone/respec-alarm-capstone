@@ -55,8 +55,7 @@ export function PrepareMlSurveyEditor({ initial, onSave, onRevoke, onCancel }: P
   return (
     <View style={styles.body}>
       <Text variant="small">
-        준비시간 예측 연구를 위한 선택 입력이에요. 입력하지 않아도 기존 알람을 그대로 사용할 수 있어요.
-        현재 입력값은 CatBoost 모델에 바로 전달되지 않으며, 조사 코드 매핑·검증 후 별도 활성화가 필요해요.
+        준비시간 연구를 위한 선택 입력이에요. 입력하지 않아도 알람을 그대로 쓸 수 있고, 지금은 알람 계산에 쓰지 않아요.
       </Text>
       <Stepper label="만 나이" value={age} onChange={setAge} min={14} max={100} step={1} unit="세" first />
       <HolidayPatternPicker value={holiday} onChange={setHoliday} />
