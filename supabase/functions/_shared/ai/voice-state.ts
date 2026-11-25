@@ -45,6 +45,31 @@ export function ctxOf(st: ServerState, nowIso: string, events: ServerEvent[]): C
   return { ...structuredClone(st.ctx), session: { ...st.ctx.session, now: nowIso }, events: structuredClone(events) };
 }
 
+/**
+ * 모델 화면(T2F · T1)의 일정 · 알람을 대화의 지금 상태(카드로 저장 · 변경한 값)로 바꿔 끼움.
+ * 세션 시작 스냅숏(st.ctx)만 보여 주면 대화 중 만든 일정은 '일정 없음', 바꾼 일정은 옛 시각으로 보여
+ * 같은 일정의 두 번째 변경('오후 2시로 바꿔줘')을 T2F가 대화 글만으로 짐작해야 함 — 별칭(a#)도 상태와 같게.
+ */
+export function withSchedule(ctx: Context, s: Pick<TurnState, 'appointments' | 'alarms'>): Context {
+  const { today, tomorrow } = ctx.dates;
+  const dayOf = (date: string): 'today' | 'tomorrow' | 'later' => (date <= today ? 'today' : date === tomorrow ? 'tomorrow' : 'later');
+  const apptDay = new Map(s.appointments.map((a) => [a.ref, dayOf(a.date)]));
+  const pick = <T>(xs: T[], day: (x: T) => string) => ({
+    today: xs.filter((x) => day(x) === 'today'),
+    tomorrow: xs.filter((x) => day(x) === 'tomorrow'),
+    later: xs.filter((x) => day(x) === 'later'),
+  });
+  const ap = pick(structuredClone(s.appointments), (a) => dayOf(a.date));
+  const al = pick(structuredClone(s.alarms), (a) => (a.appointment_ref !== null && apptDay.get(a.appointment_ref)) || dayOf(a.date));
+  const { later: _old, ...rest } = ctx;
+  return {
+    ...rest,
+    today: { ...ctx.today, appointments: ap.today, alarms: al.today },
+    tomorrow: { ...ctx.tomorrow, appointments: ap.tomorrow, alarms: al.tomorrow },
+    ...(ap.later.length > 0 || al.later.length > 0 ? { later: { appointments: ap.later, alarms: al.later } } : {}),
+  };
+}
+
 export function turnsOf(stored: StoredTurn[]): Turn[] {
   return stored.map((t, i): Turn => ({ index: i, role: t.role, text: t.text, ...(t.role === 'ai' ? { acts: t.acts ?? [] } : {}) }));
 }
