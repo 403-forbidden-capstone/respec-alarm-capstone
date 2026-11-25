@@ -1371,12 +1371,13 @@ export function applyFast(state: TurnState, fast: FastExtract, ctx: Context, aft
     // "캡스톤 그룹으로"라는 답을 T2F가 날짜 · 시각 없는 새 일정으로 뽑은 것 — 되묻지 않음
     if (groupAnswered && x.ref === null && (x.date === null || x.time === null)) continue;
     const key = apptKey(x);
-    // 알람을 당기는 말을 일정 변경으로 잘못 뽑은 것 — 버리고 표시(#alarm)만 남김. 다음 말에 T2F가 다시 적어도 처리하지 않고, 알람 말 없이 일정을 고쳐 달라고 하면 처리
+    // 알람을 당기는 말을 일정 변경으로 잘못 뽑은 것 — 버리고 표시(#alarm)만 남김. 다음 말에 T2F가 다시 적어도 처리하지 않고, 알람 말 없이 일정 이름을 대며 고쳐 달라고 하면 처리
+    //   (열린 알람 카드를 확인하는 "응 그렇게 바꿔줘"도 '바꿔'가 있어 이름을 봄)
     if (alarmShiftTurn && (x.ref !== null || (intent as Intent).edit)) {
       if (s.seen[key] !== apptSig(x)) s.seen[key] = `${apptSig(x)}#alarm`;
       continue;
     }
-    if (s.seen[key] === `${apptSig(x)}#alarm` && !(intent !== null && intent.edit && !intent.alarm)) continue;
+    if (s.seen[key] === `${apptSig(x)}#alarm` && !(intent !== null && intent.edit && !intent.alarm && hits !== null)) continue;
     if (!once(key, apptSig(x))) continue;
     if (alarmEcho(x)) continue;
     if (x.ref) changeAppt(x, key, x.ref);
