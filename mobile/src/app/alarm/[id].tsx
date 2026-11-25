@@ -160,7 +160,7 @@ function Detail({ appointment: a, reload }: { appointment: AppointmentDetail; re
   //   아니면 기상 − 준비 간격은 준비 전 활동이 아님 → 준비 시간 카드 · 계산식은 준비 전 활동 0, 실제 준비 = 준비 시간 전체
   const followsWake = view.withWake ?? a.withWake;
   const beforePrep = followsWake ? a.beforePrepMinutes : 0;
-  const realPrep = followsWake ? a.prepMinutes : a.predictedPrepMinutes;
+  const realPrep = followsWake ? a.prepMinutes : a.prepMinutes + a.beforePrepMinutes; // 잘못 읽은 준비 전 활동만큼 되돌림 (기상 없는 일정은 그대로)
   const wakeAdded = !a.alarms.some((x) => x.kind === 'WAKE') && view.alarms.some((x) => x.kind === 'WAKE') && kinds.WAKE !== false; // 이번 저장으로 기상이 새로 생김
   const first = view.alarms[0] ?? a.alarms[0];
   const missingWake = !view.alarms.some((x) => x.kind === 'WAKE') && view.alarms.some((x) => x.kind !== 'ARRIVE'); // 울릴 알람은 있는데 기상만 없음
