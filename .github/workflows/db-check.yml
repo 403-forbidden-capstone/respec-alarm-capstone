@@ -222,9 +222,10 @@ jobs:
             }
             echo "7개 누락 파일 일치. 이번 한 번만 오래된 마이그레이션을 포함해 적용."
             supabase db push --include-all --yes
-          elif [ "$(wc -l < "$RUNNER_TEMP/actual.txt" | tr -d '[:space:]')" = "1" ] && \
-               grep -Fxq '20261125060000_pure_prep_multi_allowlists.sql' "$RUNNER_TEMP/actual.txt"; then
-            echo "검증된 순수준비시간 허용목록 마이그레이션 1개만 적용 (--include-all)."
+          elif [ "$(wc -l < "$RUNNER_TEMP/actual.txt" | tr -d '[:space:]')" = "2" ] && \
+               grep -Fxq '20261125060000_pure_prep_multi_allowlists.sql' "$RUNNER_TEMP/actual.txt" && \
+               grep -Fxq '20261125070000_fix_pure_prep_allowlist_regex.sql' "$RUNNER_TEMP/actual.txt"; then
+            echo "정확히 검증된 순수준비시간 설정 및 정규식 보정 마이그레이션 2개만 적용."
             supabase db push --include-all --yes
           else
             echo "과거 누락 파일이 이미 적용된 상태. 기존 표준 배포 동작 사용."
