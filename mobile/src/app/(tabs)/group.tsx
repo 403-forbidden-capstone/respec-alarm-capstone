@@ -4,8 +4,6 @@ import { StyleSheet, View } from 'react-native';
 
 import { Avatar, Button, Card, Chip, confirm, EmptyState, LoadError, Loading, Screen, SectionHeader, Segmented, Text, toast, TopBar, TopBarButton } from '@/components/ui';
 import { useAuth } from '@/features/auth/AuthProvider';
-import { getPendingSuggestion } from '@/features/records/api';
-import { SuggestionCard } from '@/features/records/components/SuggestionCard';
 import { ChangeHandleSheet } from '@/features/profile/components/ChangeHandleSheet';
 import { handleHint } from '@/features/profile/handle';
 import {
@@ -58,21 +56,21 @@ const TABS = [
 ] as const;
 
 // date = 그룹 기상 신호가 알려 준 날 (오늘 기상 수 · 그룹 기상 카드만 씀, 없으면 오늘)
-// 맨 위 제안 카드 · 그룹 기상 카드는 홈 아래에서 옮김 (D110) — 덧붙임이라 못 읽어도 빈 채로 두고 친구 · 그룹 목록은 그대로 보임
+// 그룹 기상 카드는 홈 아래에서 옮김 (D110) — 덧붙임이라 못 읽어도 빈 채로 두고 친구 · 그룹 목록은 그대로 보임
+// 알람 조정 제안 카드는 뺌 (UI 단순화 — 제안은 저녁 AI 대화 화면 한 곳에서, 자세히는 S01)
 async function loadSocial(date: string | null) {
-  const [friends, requests, sent, groups, invites, suggestion] = await Promise.all([
+  const [friends, requests, sent, groups, invites] = await Promise.all([
     listFriends(),
     listFriendRequests(),
     listSentRequests(),
     listGroups(date),
     listGroupInvites(),
-    getPendingSuggestion().catch(() => null),
   ]);
   const summaries = (await Promise.all(groups.map((g) => getGroupSummary(g.id, date).catch(() => null)))).flatMap((g) => (g ? [g] : []));
-  return { friends, requests, sent, groups, invites, suggestion, summaries };
+  return { friends, requests, sent, groups, invites, summaries };
 }
 
-// G01 친구와 그룹 — 맨 위 알람 조정 제안 · 오늘 그룹 기상 카드(D110, 홈에서 옮김)
+// G01 친구와 그룹 — 맨 위 오늘 그룹 기상 카드(D110, 홈에서 옮김)
 //   친구 탭(목업 F01: 요청 수락 · 친구별 권한 수) · 그룹 탭(목업 G01: 참여 중인 그룹 · 오늘 기상 수)
 // 기상 확인에서 그룹 상세를 열 때 이 탭이 '그룹' 칸으로 밑에 깔림 (lib/nav openGroupDetail, ?seg=group&open=… — 목업 A.openGroup)
 export default function GroupScreen() {
@@ -155,9 +153,6 @@ export default function GroupScreen() {
       <Text variant="lead" tone="skySub" style={styles.lead}>
         {tab === 'friend' ? '관계를 만들고 서로 공유할 정보를 관리해요.' : '목적에 맞는 그룹을 만들고 공유 범위를 정해요.'}
       </Text>
-      {data?.suggestion ? (
-        <SuggestionCard suggestion={data.suggestion} onPress={(id) => router.push({ pathname: '/suggestion/[id]', params: { id } })} />
-      ) : null}
       {data ? (
         <GroupWakeCard
           groups={data.summaries}
