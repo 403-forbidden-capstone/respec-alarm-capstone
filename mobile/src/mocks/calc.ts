@@ -18,7 +18,9 @@ import { db, kst, ME_TRIP, timelines, TODAY, tripTimelines, type MockAppointment
 // a.manual이 있으면 직접 고른 이동 · 준비 시간 · 알람 시각이 자동 계산보다 먼저 (D42 C). 직접 고른 알람은 auto에 자동 계산값을 남김
 //   준비 알람은 (직접 고른 시각을 포함한) 기상 시각 뒤 — 기상을 옮기면 준비도 같은 간격으로 따라옴
 export function alarmChain(a: MockAppointment): AlarmTime[] {
-  const chain = sharedAlarmChain({
+  // 기상이 없던 일정에 기상 시각을 직접 고르면 기상은 그 시각에 따로, 준비 · 출발은 기상 없는 계산 그대로 — 서버 plan-core computePlan과 같은 규칙 (#624)
+  const pickedWake = !a.withWake && (a.kinds == null || a.kinds.length > 0) ? a.manual?.times?.WAKE : undefined;
+  const base = sharedAlarmChain({
     at: a.at,
     travelMinutes: a.manual?.travelMinutes ?? a.travelMinutes,
     bufferMinutes: a.bufferMinutes,
@@ -29,6 +31,8 @@ export function alarmChain(a: MockAppointment): AlarmTime[] {
     manualTimes: a.manual?.times,
     prepareAdvanceMinutes: a.manual?.times?.PREPARE ? 0 : (a.prepareAdvanceMinutes ?? 0), // 준비 알람을 직접 고르면 당기지 않음 (서버 plan-core와 같음)
   });
+  const first = base.find((x) => x.kind !== 'ARRIVE');
+  const chain = pickedWake ? [{ kind: 'WAKE' as const, at: pickedWake, auto: first?.auto ?? first?.at ?? pickedWake }, ...base] : base;
   return chain.map((x) => ({
     id: `${a.id}:${x.kind}`,
     kind: x.kind,

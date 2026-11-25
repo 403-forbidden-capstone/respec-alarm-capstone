@@ -426,9 +426,11 @@ export function computePlan(i: PlanInputs, travel: ResolvedTravel, mode: PlanMod
   //   직접 정한 값은 존중: 요청의 with_wake · 직접 고른 기상 시각(manualTimes.WAKE)이 있으면 자동 규칙을 건너뜀
   //   L6 안건후보: 저녁 기상 자동 제외와 직접 지정 우선순위 기본안 = with_wake 직접 지정 · 직접 고른 기상 시각은 존중(12시 이후여도 기상 있음), 그 밖은 자동 규칙.
   //     kinds에 WAKE가 들어 있는 것만으로는 존중하지 않음 — 반복 · 일정 수정이 지금 있는 알람 종류를 kinds로 이어받아서 사용자가 고른 것인지 알 수 없고, kinds는 원래 거르기만 할 뿐 기상을 만들지 못함(그날 두 번째 일정과 같음)
+  //   #624: 자동으로는 기상이 없는 일정(그날 앞 일정에 기상 · 12시 이후 기상)에 기상 시각을 직접 고르면(addedWake) 기상은 고른 시각에 따로 울리고,
+  //     준비 · 출발은 기상 없는 계산 그대로 — 일정 시각이 바뀌면 준비 · 출발은 다시 계산되고 기상만 고른 시각에 남음 (준비가 기상을 따라 아침으로 끌려가지 않게)
   let withWake = i.draft.withWake ?? !i.sameDayWake;
   let derived = derive(withWake);
-  if (i.draft.withWake == null && withWake && manualTimes.WAKE == null) {
+  if (i.draft.withWake == null && withWake) {
     const depart = departureAt({ at: basics.at, travelMinutes: chosen.minutes, bufferMinutes: basics.bufferMinutes, prepareMinutes: derived.prepare.minutes, beforePrepareMinutes: derived.beforePrepareMinutes, withWake: true, manualTimes: {} });
     if (isEveningWake(new Date(depart.getTime() - derived.prepare.minutes * 60_000), timeZone, basics.at)) {
       withWake = false;
@@ -450,7 +452,12 @@ export function computePlan(i: PlanInputs, travel: ResolvedTravel, mode: PlanMod
     voiceDefault,
   );
 
-  const kinds = resolveKinds(i.draft.kinds, i.existingAlarms);
+  // 기상이 없던 일정(지금 종류를 이어받음)에 기상 시각을 직접 고르면 기상 종류를 더함 — 종류는 거르기만 해서 안 더하면 고른 기상이 빠짐 (#624). [](알람 없는 일정)은 그대로
+  const resolvedKinds = resolveKinds(i.draft.kinds, i.existingAlarms);
+  const pickedWake = i.draft.withWake == null && !withWake && manualTimes.WAKE != null ? manualTimes.WAKE : null;
+  const addedWake = pickedWake != null && (resolvedKinds == null || resolvedKinds.length > 0);
+  const kinds: RingKind[] | undefined =
+    addedWake && resolvedKinds && !resolvedKinds.includes('WAKE') ? ['WAKE', ...resolvedKinds] : resolvedKinds;
   const input = {
     at: basics.at,
     travelMinutes: chosen.minutes,
@@ -462,8 +469,14 @@ export function computePlan(i: PlanInputs, travel: ResolvedTravel, mode: PlanMod
     // 준비 알람을 직접 고른 일정은 당기지 않음 (그 시각이 먼저, D42 C)
     prepareAdvanceMinutes: manualTimes.PREPARE ? 0 : advance,
   };
-  const fullChain = alarmChain(input);
-  const chain = alarmChain({ ...input, kinds });
+  // 따로 울리는 기상 — 늘 직접 고른 값(MANUAL)이라 auto를 둠(자동값 = 기상 없는 계산의 준비 알람 시각, 되돌리면 기상 없이 준비부터)
+  const withAdded = (list: ChainAlarm[]): ChainAlarm[] => {
+    if (!addedWake || pickedWake == null) return list;
+    const first = list.find((x) => x.kind !== 'ARRIVE');
+    return [{ kind: 'WAKE', at: pickedWake, auto: first?.auto ?? first?.at ?? pickedWake }, ...list];
+  };
+  const fullChain = withAdded(alarmChain(input));
+  const chain = withAdded(alarmChain({ ...input, kinds }));
   const departure = departureAt(input);
   const check = checkAlarms(chain, departure, i.now);
 

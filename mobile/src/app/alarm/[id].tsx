@@ -158,6 +158,7 @@ function Detail({ appointment: a, reload }: { appointment: AppointmentDetail; re
   const view = noAlarms ? preview : shownPreview(edits, a.edits, savedPreview(a), preview); // 입력을 안 바꿨으면 저장된 알람 시각 (adjust.ts). 알람 없는 일정은 계산한 값
   const wakeAdded = !a.alarms.some((x) => x.kind === 'WAKE') && view.alarms.some((x) => x.kind === 'WAKE') && kinds.WAKE !== false; // 이번 저장으로 기상이 새로 생김
   const first = view.alarms[0] ?? a.alarms[0];
+  const missingWake = !view.alarms.some((x) => x.kind === 'WAKE') && view.alarms.some((x) => x.kind !== 'ARRIVE'); // 울릴 알람은 있는데 기상만 없음
   const blocked = orderError(view.alarms); // 순서가 뒤집히면 저장을 막음
   const manualAny = view.alarms.some(isManualTime);
   const anyManual = AXES.some(([axis]) => levels[axis] != null);
@@ -494,10 +495,19 @@ function Detail({ appointment: a, reload }: { appointment: AppointmentDetail; re
               ...(a.withWake && edits.prepareMinutes == null && recentLine ? [recentLine] : []),
             ]}
           />
+          {/* 자동으로 기상이 안 생긴 일정(그날 앞 일정에 기상 · 낮 12시 이후 기상)도 기상 줄은 꺼짐으로 보이고, 켜면 시각을 골라 직접 만듦 (#624) */}
+          {missingWake ? (
+            <KeyValueRow
+              first
+              label={KIND_LABEL.WAKE}
+              sub="미설정"
+              value={<Toggle value={false} onChange={(on) => on && setPickKind('WAKE')} label={`${KIND_LABEL.WAKE} 알람`} />}
+            />
+          ) : null}
           {view.alarms.map((x, i) => (
             <KeyValueRow
               key={x.kind}
-              first={i === 0}
+              first={i === 0 && !missingWake}
               label={`${KIND_LABEL[x.kind]}${x.kind === 'ARRIVE' ? ' 목표' : ''}`}
               sub={isManualTime(x) ? '직접 고름' : undefined}
               value={
@@ -636,11 +646,12 @@ function Detail({ appointment: a, reload }: { appointment: AppointmentDetail; re
         visible={picking != null}
         onClose={() => setPickKind(null)}
         title={pickKind ? `${KIND_LABEL[pickKind]} 시각` : ''}
-        value={picking?.at ?? a.at}
-        onChange={(to) => pickKind && setEdit({ times: manualTimes(moveAlarm(view.alarms, pickKind, to)) })}
+        value={picking?.at ?? (pickKind === 'WAKE' ? first?.at : undefined) ?? a.at}
+        // 없던 기상을 새로 만들면 기상 시각만 보냄 — 서버가 기상은 따로 두고 준비 · 출발은 일정 기준으로 계산 (준비를 고정하지 않아 일정 시각이 바뀌면 다시 계산됨)
+        onChange={(to) => pickKind && setEdit({ times: pickKind === 'WAKE' && missingWake ? { ...edits.times, WAKE: to } : manualTimes(moveAlarm(view.alarms, pickKind, to)) })}
         autoAt={picking && isManualTime(picking) ? picking.auto : undefined}
         onReset={() => pickKind && setEdit({ times: manualTimes(resetAlarm(view.alarms, pickKind)) })}
-        note={pickKind === 'WAKE' && view.alarms.some((x) => x.kind === 'PREPARE') ? '준비 알람도 같은 만큼 같이 움직여요' : undefined}
+        note={pickKind === 'WAKE' && !missingWake && view.alarms.some((x) => x.kind === 'PREPARE') ? '준비 알람도 같은 만큼 같이 움직여요' : undefined}
         error={blocked ?? undefined}
       />
 
