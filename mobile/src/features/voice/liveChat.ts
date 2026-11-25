@@ -61,3 +61,10 @@ export const NEAR_BOTTOM_PX = 80;
 export function isNearBottom(e: { contentOffset: { y: number }; layoutMeasurement: { height: number }; contentSize: { height: number } }): boolean {
   return e.contentOffset.y + e.layoutMeasurement.height >= e.contentSize.height - NEAR_BOTTOM_PX;
 }
+
+// 스크롤 한 번 뒤에도 맨 아래를 따라갈지 — 바닥 근처면 따라가고, 사용자가 위로 올렸을 때만 놓음
+//   scrollToEnd 애니메이션은 아래로만 움직이므로, 내려가는 도중(아직 바닥 아님)에 따라가기가 풀리지 않음
+export function keepFollowing(follow: boolean, prevY: number, e: Parameters<typeof isNearBottom>[0]): boolean {
+  const near = isNearBottom(e);
+  return near || e.contentOffset.y < prevY ? near : follow;
+}
