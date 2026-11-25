@@ -31,6 +31,7 @@ const LEDGER: Record<string, string> = {
   'T2F.v2-c': 'T2F@v2-c#f51a263e', // v2-b + 지난 일 · 바라는 목표는 준비시간 변경이 아님 (11/8 음성 실제 호출에서 '15분 더 걸렸고 … 일찍 일어나고 싶어' → +10분 카드)
   'T2F.v2-d': 'T2F@v2-d#63864e3b', // v2-c + 준비물(items, extract-fast.v2) — 대화 중에 바로 todos ITEM으로 (11/12)
   'T2F.v2-e': 'T2F@v2-e#a6814d54', // 서버에서 더한 판: v2-d + 나가기 전 할 일(pre_tasks) · 기상 답(wake_reply), extract-fast.v3 (11/19 팀 결정) — 실험실 장부에 없음
+  'T2F.v2-f': 'T2F@v2-f#a324e2d6', // 서버에서 더한 판: v2-e + 알람 상대 변경 분(alarm_changes.shift), extract-fast.v4 (#625) — 실험실 장부에 없음
   'T4.v1.1': 'T4@v1.1#b597fc65',
   'T5.v1.2': 'T5@v1.2#d792df8d',
   'T5.v2': 'T5@v2#abf0a650', // 서버에서 더한 판(구조화 JSON → 1~2문장 일기) — 실험실 장부에 없음
@@ -40,12 +41,12 @@ const LEDGER: Record<string, string> = {
 };
 
 // 지점이 더는 안 쓰는 옛 판 (파일은 남김 — index.ts 머리 주석 2번)
-const SUPERSEDED = ['T1.v1.3', 'T1.v1.4', 'T2F.v2-a', 'T2F.v2-b', 'T2F.v2-c', 'T2.v2', 'T2.v3', 'T2.v3.1', 'T2.v3.2', 'T5.v1.2', 'T1.v1.5', 'T5.v2', 'T2F.v2-d'];
+const SUPERSEDED = ['T1.v1.3', 'T1.v1.4', 'T2F.v2-a', 'T2F.v2-b', 'T2F.v2-c', 'T2.v2', 'T2.v3', 'T2.v3.1', 'T2.v3.2', 'T5.v1.2', 'T1.v1.5', 'T5.v2', 'T2F.v2-d', 'T2F.v2-e'];
 
 // 지점 → 파일 이름
 const FILE_OF: Record<PointId, string> = {
   T1: 'T1.v1.6',
-  T2F: 'T2F.v2-e',
+  T2F: 'T2F.v2-f',
   T2: 'T2.v3.3',
   T3: 'T3.v1',
   T4: 'T4.v1.1',
@@ -146,8 +147,8 @@ describe('지점 설정(index.ts)', () => {
   it('모든 판 파일이 지점 하나씩에 쓰임, 쓰는 스키마 7개 = 생성기 목록', () => {
     const used = ids.map((p) => FILE_OF[p]).sort();
     assert.deepEqual(used, (PROMPTS as string[]).filter((n) => !SUPERSEDED.includes(n)).sort());
-    // 생성기 목록(실험실 스키마) 중 extract.v1은 T2.v3 뒤로, t5-journal.v1은 T5.v2 뒤로, extract-fast.v1은 T2F.v2-d 뒤로 안 씀(T5.v2는 t4-diary.v1을 같이 씀), extract.v2 · extract-fast.v3은 서버 판이라 생성기 목록에 없음 (extract-fast.v2는 T2F.v2-e 뒤로 안 씀)
-    const usedSchemas = [...(GEN_SCHEMAS as string[]).filter((id) => id !== 'extract.v1' && id !== 't5-journal.v1' && id !== 'extract-fast.v1'), 'extract.v2', 'extract-fast.v3'];
+    // 생성기 목록(실험실 스키마) 중 extract.v1은 T2.v3 뒤로, t5-journal.v1은 T5.v2 뒤로, extract-fast.v1은 T2F.v2-d 뒤로 안 씀(T5.v2는 t4-diary.v1을 같이 씀), extract.v2 · extract-fast.v4는 서버 판이라 생성기 목록에 없음 (extract-fast.v2 · v3은 T2F.v2-e · v2-f 뒤로 안 씀)
+    const usedSchemas = [...(GEN_SCHEMAS as string[]).filter((id) => id !== 'extract.v1' && id !== 't5-journal.v1' && id !== 'extract-fast.v1'), 'extract.v2', 'extract-fast.v4'];
     assert.deepEqual([...new Set(ids.map((p) => POINTS[p].schema))].sort(), usedSchemas.sort());
   });
 
@@ -157,7 +158,7 @@ describe('지점 설정(index.ts)', () => {
       return [c.prompt.id, c.prompt.version, c.schema, c.effort, c.maxTokens, c.thinking?.type ?? null, c.timeoutMs, c.retryOnTimeout];
     };
     assert.deepEqual(row('T1'), ['T1', 'v1.6', 't1-reply.v1', 'low', 2048, null, 20_000, true]);
-    assert.deepEqual(row('T2F'), ['T2F', 'v2-e', 'extract-fast.v3', 'low', 4096, 'adaptive', 15_000, false]);
+    assert.deepEqual(row('T2F'), ['T2F', 'v2-f', 'extract-fast.v4', 'low', 4096, 'adaptive', 15_000, false]);
     assert.deepEqual(row('T2'), ['T2', 'v3.3', 'extract.v2', 'medium', 4096, null, 19_000, true]);
     assert.deepEqual(row('T3'), ['T3', 'v1', 't3-reason.v1', 'low', 1024, null, 4_000, true]);
     assert.deepEqual(row('T4'), ['T4', 'v1.1', 't4-diary.v1', 'medium', 4096, null, 11_000, true]);
