@@ -300,6 +300,7 @@ export function planOccurrence(
           : participant.prepare_value_source ?? 'LEGACY',
         ...purePrepPersistenceOf(plan, inputs.purePrepCandidate),
         buffer_minutes: basics.bufferMinutes,
+        wake_detached: !plan.withWake && plan.chain.some((x) => x.kind === 'WAKE'), // 따로 울리는 기상(#624)
       },
       items: base.items.map((title) => ({ title, due_date: occ.date })),
     },

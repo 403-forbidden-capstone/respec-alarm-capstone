@@ -89,6 +89,7 @@ export type ParticipantRow = {
   travel_source: 'API' | 'CACHED' | 'MANUAL';
   prepare_minutes: number;
   prepare_value_source?: 'LEGACY' | 'AUTO' | 'MANUAL';
+  wake_detached?: boolean; // 따로 울리는 기상(#624) — 기상 − 준비 간격은 준비 전 활동이 아님 (저장할 때는 !plan.withWake && 기상 알람 있음)
   buffer_minutes: number;
   prepare_advance_minutes?: number | null; // 받아들인 준비 알람 당김 분 (#484 · 안건 D111) — 계산이 준비 알람을 그만큼 앞당김. 없으면 0
 };
@@ -341,9 +342,15 @@ export function computePlan(i: PlanInputs, travel: ResolvedTravel, mode: PlanMod
   // 받아들인 준비 알람 당김 (#484 · 안건 D111) — 계획의 준비 시간 · 준비 전 활동은 원래 값 그대로 두고 알람 사슬만 당김(calc/chain.ts)
   const advance = Math.max(0, Number(i.participant?.prepare_advance_minutes ?? 0) || 0);
   const existingAdvance = Math.max(0, Number(i.existingAdvanceMinutes ?? advance) || 0);
-  const derive = (withWake: boolean) => {
-    const beforePrepareMinutes =
-      i.draft.beforePrepareMinutes ?? (withWake ? inferBeforePrepare(i.existingAlarms, existingAdvance, i.participant?.prepare_minutes) ?? DEFAULT_BEFORE_PREPARE_MINUTES : 0);
+  // ignoreWake: 고른 기상이 준비를 끌지 않는 계산(기상 없는 계산 · 자동 규칙의 12시 판정) — 고른 기상이 순수 준비시간을 막지 않음 (#624)
+  const derive = (withWake: boolean, ignoreWake = !withWake) => {
+    // 기상이 없거나 따로 울리는 기상이면 준비 전 활동은 없음 — 요청 값도 안 씀(앱은 DB 행만으로 따로 울리는 기상을 못 알아봐 기상 − 준비 간격을 보낼 수 있음, #624)
+    //   고른 기상을 빼고 보는 12시 판정(withWake · ignoreWake)은 자동일 때처럼 기본값 — 요청 값 · 저장된 직접 기상과 준비 간격으로 판정이 뒤집히지 않게
+    const beforePrepareMinutes = !withWake ? 0 : ignoreWake ? DEFAULT_BEFORE_PREPARE_MINUTES :
+      i.draft.beforePrepareMinutes ??
+      // 따로 울리던 기상이면 저장된 기상 − 준비 간격은 준비 전 활동이 아님 (일정을 오전으로 옮겨 기상이 준비를 끌게 된 경우 — 기본값으로)
+      (i.participant?.wake_detached ? undefined : inferBeforePrepare(i.existingAlarms, existingAdvance, i.participant?.prepare_minutes)) ??
+      DEFAULT_BEFORE_PREPARE_MINUTES;
 
     // 기록(stats.p80)은 이미 "기상 ~ 출발"이라 그대로 씀 — 예전에는 준비 전 활동 20분을 또 더해서 기록이 쌓일수록 알람이 일찍 당겨졌음 (학습 루프 기초 2절 1)
     // 개인 보정은 그날 첫 일정(기상 알람 있음)에만 — 두 번째 일정(기상 없음, 공통 15분)에 기상~출발 기록을 붙이면 준비가 부풀어서 15분 그대로 (2절 2, 기록 수와 상관없음)
@@ -389,7 +396,7 @@ export function computePlan(i: PlanInputs, travel: ResolvedTravel, mode: PlanMod
       // Explicit legacy manual duration must survive edit/roll/restore
       // even if these code paths don't submit an override in the draft.
       !(i.participant?.prepare_value_source === 'MANUAL' && i.draft.prepareValueSource !== 'AUTO') &&
-      manualTimes.WAKE == null && manualTimes.PREPARE == null;
+      (ignoreWake || manualTimes.WAKE == null) && manualTimes.PREPARE == null;
     const activePure = usePure ? pure : null;
     const minutes = activePure != null
       ? Math.round(activePure.minutes + (withWake ? beforePrepareMinutes : 0))
@@ -426,11 +433,14 @@ export function computePlan(i: PlanInputs, travel: ResolvedTravel, mode: PlanMod
   //   직접 정한 값은 존중: 요청의 with_wake · 직접 고른 기상 시각(manualTimes.WAKE)이 있으면 자동 규칙을 건너뜀
   //   L6 안건후보: 저녁 기상 자동 제외와 직접 지정 우선순위 기본안 = with_wake 직접 지정 · 직접 고른 기상 시각은 존중(12시 이후여도 기상 있음), 그 밖은 자동 규칙.
   //     kinds에 WAKE가 들어 있는 것만으로는 존중하지 않음 — 반복 · 일정 수정이 지금 있는 알람 종류를 kinds로 이어받아서 사용자가 고른 것인지 알 수 없고, kinds는 원래 거르기만 할 뿐 기상을 만들지 못함(그날 두 번째 일정과 같음)
+  //   #624: 자동으로는 기상이 없는 일정(그날 앞 일정에 기상 · 12시 이후 기상)에 기상 시각을 직접 고르면(addedWake) 기상은 고른 시각에 따로 울리고,
+  //     준비 · 출발은 기상 없는 계산 그대로 — 일정 시각이 바뀌면 준비 · 출발은 다시 계산되고 기상만 고른 시각에 남음 (준비가 기상을 따라 아침으로 끌려가지 않게)
   let withWake = i.draft.withWake ?? !i.sameDayWake;
   let derived = derive(withWake);
-  if (i.draft.withWake == null && withWake && manualTimes.WAKE == null) {
-    const depart = departureAt({ at: basics.at, travelMinutes: chosen.minutes, bufferMinutes: basics.bufferMinutes, prepareMinutes: derived.prepare.minutes, beforePrepareMinutes: derived.beforePrepareMinutes, withWake: true, manualTimes: {} });
-    if (isEveningWake(new Date(depart.getTime() - derived.prepare.minutes * 60_000), timeZone, basics.at)) {
+  if (i.draft.withWake == null && withWake) {
+    const judge = manualTimes.WAKE == null ? derived : derive(true, true); // 12시 판정은 자동일 때와 같은 계산으로
+    const depart = departureAt({ at: basics.at, travelMinutes: chosen.minutes, bufferMinutes: basics.bufferMinutes, prepareMinutes: judge.prepare.minutes, beforePrepareMinutes: judge.beforePrepareMinutes, withWake: true, manualTimes: {} });
+    if (isEveningWake(new Date(depart.getTime() - judge.prepare.minutes * 60_000), timeZone, basics.at)) {
       withWake = false;
       derived = derive(false);
     }
@@ -450,7 +460,12 @@ export function computePlan(i: PlanInputs, travel: ResolvedTravel, mode: PlanMod
     voiceDefault,
   );
 
-  const kinds = resolveKinds(i.draft.kinds, i.existingAlarms);
+  // 기상이 없던 일정(지금 종류를 이어받음)에 기상 시각을 직접 고르면 기상 종류를 더함 — 종류는 거르기만 해서 안 더하면 고른 기상이 빠짐 (#624). [](알람 없는 일정)은 그대로
+  const resolvedKinds = resolveKinds(i.draft.kinds, i.existingAlarms);
+  const pickedWake = i.draft.withWake == null && !withWake && manualTimes.WAKE != null ? manualTimes.WAKE : null;
+  const addedWake = pickedWake != null && (resolvedKinds == null || resolvedKinds.length > 0);
+  const kinds: RingKind[] | undefined =
+    addedWake && resolvedKinds && !resolvedKinds.includes('WAKE') ? ['WAKE', ...resolvedKinds] : resolvedKinds;
   const input = {
     at: basics.at,
     travelMinutes: chosen.minutes,
@@ -462,8 +477,14 @@ export function computePlan(i: PlanInputs, travel: ResolvedTravel, mode: PlanMod
     // 준비 알람을 직접 고른 일정은 당기지 않음 (그 시각이 먼저, D42 C)
     prepareAdvanceMinutes: manualTimes.PREPARE ? 0 : advance,
   };
-  const fullChain = alarmChain(input);
-  const chain = alarmChain({ ...input, kinds });
+  // 따로 울리는 기상 — 늘 직접 고른 값(MANUAL)이라 auto를 둠(자동값 = 기상 없는 계산의 첫 준비 알람 시각, 되돌리면 자동이 되어 다음 재계산에서 기상 없이 준비부터)
+  const withAdded = (list: ChainAlarm[]): ChainAlarm[] => {
+    if (!addedWake || pickedWake == null) return list;
+    const first = list.find((x) => x.kind !== 'ARRIVE');
+    return [{ kind: 'WAKE', at: pickedWake, auto: first?.auto ?? first?.at ?? pickedWake }, ...list];
+  };
+  const fullChain = withAdded(alarmChain(input));
+  const chain = withAdded(alarmChain({ ...input, kinds }));
   const departure = departureAt(input);
   const check = checkAlarms(chain, departure, i.now);
 

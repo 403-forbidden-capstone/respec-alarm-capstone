@@ -88,7 +88,7 @@ export type LeaveResponse = Common & { left: boolean };
 
 type EditRow = SeriesAppointmentRow & { exception_kind: ExceptionKind | null };
 const APPOINTMENT_COLUMNS = `${SERIES_APPOINTMENT_COLUMNS}, exception_kind`;
-const PARTICIPANT_COLUMNS = 'participant_id, appointment_id, user_id, origin_name, origin_lat, origin_lng, transport_type, est_travel_minutes, travel_source, prepare_minutes, prepare_value_source, buffer_minutes, prepare_advance_minutes';
+const PARTICIPANT_COLUMNS = 'participant_id, appointment_id, user_id, origin_name, origin_lat, origin_lng, transport_type, est_travel_minutes, travel_source, prepare_minutes, prepare_value_source, buffer_minutes, prepare_advance_minutes, wake_detached';
 
 type Target = { appointment: EditRow; participant: ParticipantRow | null; alarms: AlarmRow[] };
 type DayRow = { appointment: EditRow; participant: ParticipantRow; alarms: AlarmRow[] };
@@ -223,7 +223,7 @@ async function applyAlarmDiff(ctx: EditCtx, participantId: string, diff: AlarmDi
 // 한 참여자의 참여 칸 · 알람을 쓰기 전 모습으로 되돌리는 함수 (#619) — 공동 약속 고치기에서 알람을 쓴 뒤 약속 행 쓰기(또는 다른 참여자 맞추기)가 실패하면,
 //   약속은 그대로인데 알람만 바뀐 채 남지 않게 함. service로 쓰되 그 사람의 user_id로 좁힘. 쓰기 전에 만들어 둠(참여 칸을 지금 읽음)
 type Undo = () => Promise<void>;
-const UNDO_PARTICIPANT_COLUMNS = 'est_travel_minutes, travel_source, prepare_minutes, outing_prep_minutes, outing_prep_source, outing_prep_model';
+const UNDO_PARTICIPANT_COLUMNS = 'est_travel_minutes, travel_source, prepare_minutes, outing_prep_minutes, outing_prep_source, outing_prep_model, wake_detached';
 async function undoFor(db: Db, participantId: string, userId: string, before: readonly AlarmRow[]): Promise<Undo> {
   const fields = must<Record<string, unknown> | null>(
     'participant snapshot',
@@ -398,7 +398,7 @@ async function replanForWake(
   const diff = diffAlarms(plan, row.alarms, { now: ctx.now, replaceExisting: true });
   must(
     'appointment_participants update',
-    await ctx.userDb.from('appointment_participants').update({ prepare_minutes: plan.prepare.minutes, ...purePrepPersistenceOf(plan, inputs.purePrepCandidate) }).eq('participant_id', row.participant.participant_id).eq('user_id', ctx.userId),
+    await ctx.userDb.from('appointment_participants').update({ prepare_minutes: plan.prepare.minutes, ...purePrepPersistenceOf(plan, inputs.purePrepCandidate), wake_detached: !plan.withWake && plan.chain.some((x) => x.kind === 'WAKE') }).eq('participant_id', row.participant.participant_id).eq('user_id', ctx.userId),
   );
   const after = await applyAlarmDiff(ctx, row.participant.participant_id, diff, row.alarms);
   return {
@@ -569,7 +569,7 @@ async function syncOne(ctx: EditCtx, a: { row: EditRow; patched: ReturnType<type
       'appointment_participants update',
       await ctx.service
         .from('appointment_participants')
-        .update({ est_travel_minutes: made.plan.travelMinutes, travel_source: made.plan.travel.chosen?.source, prepare_minutes: made.plan.prepare.minutes, ...purePrepPersistenceOf(made.plan, made.purePrepCandidate) })
+        .update({ est_travel_minutes: made.plan.travelMinutes, travel_source: made.plan.travel.chosen?.source, prepare_minutes: made.plan.prepare.minutes, ...purePrepPersistenceOf(made.plan, made.purePrepCandidate), wake_detached: !made.plan.withWake && made.plan.chain.some((x) => x.kind === 'WAKE') })
         .eq('participant_id', p.participant_id)
         .eq('user_id', p.user_id),
     );
@@ -766,7 +766,7 @@ export async function updateAppointment(ctx: EditCtx, req: Extract<EditRequest, 
         'appointment_participants update',
         await ctx.userDb
           .from('appointment_participants')
-          .update({ est_travel_minutes: plan.travelMinutes, travel_source: plan.travel.chosen?.source, prepare_minutes: plan.prepare.minutes, ...purePrepPersistenceOf(plan, purePrepCandidate) })
+          .update({ est_travel_minutes: plan.travelMinutes, travel_source: plan.travel.chosen?.source, prepare_minutes: plan.prepare.minutes, ...purePrepPersistenceOf(plan, purePrepCandidate), wake_detached: !plan.withWake && plan.chain.some((x) => x.kind === 'WAKE') })
           .eq('participant_id', participant.participant_id)
           .eq('user_id', ctx.userId),
       );
@@ -983,7 +983,7 @@ export async function restoreAppointment(ctx: EditCtx, req: Extract<EditRequest,
   const plan = computePlan({ now: ctx.now, draft: {}, profile, appointment: row, participant, existingAlarms, stats, lateCount4w, sameDayWake, purePrepCandidate }, resolvedTravelOf(travel), 'save');
   if (!plan.check.ok) throw new HttpError('UNPROCESSABLE', plan.check.message, { reason: plan.check.reason, ...(plan.check.detail ?? {}) });
   const diff = diffAlarms(plan, existingAlarms, { now: ctx.now, replaceExisting: false });
-  must('appointment_participants restore pure-prep provenance', await ctx.userDb.from('appointment_participants').update(purePrepPersistenceOf(plan, purePrepCandidate)).eq('participant_id', participant.participant_id).eq('user_id', ctx.userId));
+  must('appointment_participants restore pure-prep provenance', await ctx.userDb.from('appointment_participants').update({ ...purePrepPersistenceOf(plan, purePrepCandidate), wake_detached: !plan.withWake && plan.chain.some((x) => x.kind === 'WAKE') }).eq('participant_id', participant.participant_id).eq('user_id', ctx.userId));
   const after = await applyAlarmDiff(ctx, participant.participant_id, diff, existingAlarms);
   await updateRow(ctx, row.appointment_id, { exception_kind: 'EDITED' });
 

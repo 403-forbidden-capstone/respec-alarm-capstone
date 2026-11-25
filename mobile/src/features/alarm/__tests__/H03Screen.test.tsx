@@ -245,3 +245,46 @@ describe('H03 — 같은 날 일정 없는 기상 알람 합치기 시트', () =
     expect(mockToast).toHaveBeenCalledWith('오전 8:00 기상 알람을 이 일정의 기상 알람으로 합쳤어요');
   });
 });
+
+describe('H03 — 자동으로 안 생긴 기상 알람을 직접 켜기 (#624)', () => {
+  // a2 = 오후 6시 저녁약속, 계산된 기상이 낮 12시 이후라 기상 없이 준비 · 출발 · 도착 (그룹 일정 참여 · 그날 두 번째 일정도 같은 모양)
+  const wakeToggle = () => renderer.root.findAll((n) => n.props.label === '기상 알람' && typeof n.props.onChange === 'function')[0];
+  const wakeSheet = () => renderer.root.findAll((n) => n.props.title === '기상 시각' && typeof n.props.onChange === 'function')[0];
+
+  it('기상 줄은 "미설정" · 꺼짐으로 보이고, 켜서 시각을 고르면 기상이 생김 — 준비는 고정하지 않고 일정 기준 자동, 저장 뒤 다시 열어도 남음', async () => {
+    await open('a2');
+    expect(screenText()).toContain('미설정');
+    expect(wakeToggle().props.value).toBe(false);
+
+    await act(async () => wakeToggle().props.onChange(true));
+    await flush();
+    expect(wakeSheet()).toBeDefined();
+    await act(async () => wakeSheet().props.onChange(kst(22, 600)));
+    await flush();
+    expect(screenText()).not.toContain('미설정');
+    expect(screenText()).toContain('10:00'); // 기상 줄에 고른 시각
+
+    await press('저장');
+    expect(mockSave).toHaveBeenCalledTimes(1);
+    const draft = mockSave.mock.calls[0][1];
+    expect(draft.times.WAKE).toEqual(kst(22, 600));
+    expect(draft.times.PREPARE).toBeUndefined(); // 준비는 직접 고른 값으로 고정하지 않음 — 일정 시각이 바뀌면 다시 계산
+    expect(screenText()).toContain('5:10'); // 준비 17:10 그대로 — 기상을 따라 10:20으로 당겨지지 않음
+
+    act(() => renderer.unmount());
+    await open('a2');
+    const saved = (await api.getAppointment('a2'))?.alarms.map((x) => x.kind);
+    expect(saved).toEqual(['WAKE', 'PREPARE', 'DEPARTURE', 'ARRIVE']);
+    expect(screenText()).not.toContain('미설정');
+  });
+
+  it('켜기를 눌러도 시각을 안 고르고 닫으면 그대로 미설정 · 저장할 것 없음', async () => {
+    await open('a2');
+    await act(async () => wakeToggle().props.onChange(true));
+    await flush();
+    await act(async () => wakeSheet().props.onClose());
+    await flush();
+    expect(screenText()).toContain('미설정');
+    expect(button('저장').props.disabled).toBe(true);
+  });
+});

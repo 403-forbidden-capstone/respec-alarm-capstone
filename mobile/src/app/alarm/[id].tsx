@@ -156,27 +156,35 @@ function Detail({ appointment: a, reload }: { appointment: AppointmentDetail; re
   }, [a.id, edits, a.alarms, showAlarms]);
 
   const view = noAlarms ? preview : shownPreview(edits, a.edits, savedPreview(a), preview); // 입력을 안 바꿨으면 저장된 알람 시각 (adjust.ts). 알람 없는 일정은 계산한 값
+  // 준비가 기상을 따라가는 일정인지 — 서버 미리 보기가 알려 줌(따로 울리는 기상이면 false, #624). DB 행만으로는 알 수 없어 저장된 값은 대신 씀
+  //   아니면 기상 − 준비 간격은 준비 전 활동이 아님 → 준비 시간 카드 · 계산식은 준비 전 활동 0, 실제 준비 = 준비 시간 전체
+  const followsWake = view.withWake ?? a.withWake;
+  const beforePrep = followsWake ? a.beforePrepMinutes : 0;
+  const realPrep = followsWake ? a.prepMinutes : a.prepMinutes + a.beforePrepMinutes; // 잘못 읽은 준비 전 활동만큼 되돌림 (기상 없는 일정은 그대로)
   const wakeAdded = !a.alarms.some((x) => x.kind === 'WAKE') && view.alarms.some((x) => x.kind === 'WAKE') && kinds.WAKE !== false; // 이번 저장으로 기상이 새로 생김
   const first = view.alarms[0] ?? a.alarms[0];
+  const missingWake = !view.alarms.some((x) => x.kind === 'WAKE') && view.alarms.some((x) => x.kind !== 'ARRIVE'); // 울릴 알람은 있는데 기상만 없음
   const blocked = orderError(view.alarms); // 순서가 뒤집히면 저장을 막음
   const manualAny = view.alarms.some(isManualTime);
   const anyManual = AXES.some(([axis]) => levels[axis] != null);
   const travel = edits.travelMinutes ?? view.autoTravelMinutes;
   const prepare = edits.prepareMinutes ?? view.autoPredictedPrepMinutes;
   const recentLine = view.prepareSampleCount != null ? prepareRecentLabel(view.prepareRecent ?? []) : null;
-  const margin = a.auto.predictedPrepMinutes - a.beforePrepMinutes - a.prepMinutes;
+  const margin = a.auto.predictedPrepMinutes - beforePrep - realPrep;
   const originOptions = [ORIGIN_HOME, ...(places ?? []).map((p) => p.name), edits.origin]
     .filter((name, i, all) => all.indexOf(name) === i)
     .map((name) => [name, name] as const);
   // 계산식의 기준 알람 — 그날 첫 일정이면 기상, 아니면 준비. 직접 고른 알람 시각이 있어도 식은 자동 계산 그대로
-  const baseKind: AlarmKind = a.withWake ? 'WAKE' : 'PREPARE';
+  const baseKind: AlarmKind = followsWake ? 'WAKE' : 'PREPARE';
   const base = addMinutes(a.at, -(edits.bufferMinutes + travel + prepare));
   const picking = pickKind ? view.alarms.find((x) => x.kind === pickKind) : undefined;
 
   // travelMinutes = 확인 시트에서 사용자가 확인한 어림 이동시간 — 예상 이동에 직접 입력한 값으로 넣어 저장(MANUAL)
   //   choice = 같은 날 일정 없는 기상 알람을 합칠지(그 알람) · 따로 둘지(null) — 확인 시트에서 고른 값. 이동시간 · 시각 확인 시트를 거쳐 다시 불려도 고른 값을 씀
   async function apply(travelMinutes?: number, choice: StandaloneWake | null | undefined = wakeChoice) {
-    const link = choice ? { times: linkWakeTimes(view.alarms, edits.times, choice.at), linkWakeAlarmId: choice.id } : {};
+    // 미설정 기상을 켜서 생긴 기상(따로 울림, #624)이면 준비를 고정하지 않음 — 일정 시각이 바뀌면 준비 · 출발은 다시 계산
+    const pickedWake = edits.times.WAKE != null && !a.alarms.some((x) => x.kind === 'WAKE');
+    const link = choice ? { times: pickedWake ? { ...edits.times, WAKE: choice.at } : linkWakeTimes(view.alarms, edits.times, choice.at), linkWakeAlarmId: choice.id } : {};
     const draft = { ...edits, ...(travelMinutes != null ? { travelMinutes } : {}), kinds, levels, ...link };
     const moved = timeInputsChanged(draft, a.edits);
     let result: Awaited<ReturnType<typeof saveAlarmSettings>>;
@@ -438,8 +446,8 @@ function Detail({ appointment: a, reload }: { appointment: AppointmentDetail; re
           <Text variant="label" tone="sub" style={styles.label}>
             준비 시간
           </Text>
-          {a.beforePrepMinutes ? <KeyValueRow first label="준비 전 활동" value={`${a.beforePrepMinutes}분`} /> : null}
-          <KeyValueRow first={!a.beforePrepMinutes} label="실제 준비" value={`${a.prepMinutes}분`} />
+          {beforePrep ? <KeyValueRow first label="준비 전 활동" value={`${beforePrep}분`} /> : null}
+          <KeyValueRow first={!beforePrep} label="실제 준비" value={`${realPrep}분`} />
           {/* 실데이터는 실제 준비 = 예측 − 준비 전 활동이라 늘 0 → 더한 게 없으면 줄을 안 보임 */}
           {margin > 0 ? <KeyValueRow label="넉넉히 더한 시간" value={`+${margin}분`} sub="늦지 않도록 실제 준비에 더했어요" /> : null}
           <KeyValueRow label="예측 준비" value={`${a.auto.predictedPrepMinutes}분`} sub="내 기록이 쌓일수록 나에게 맞춰져요" />
@@ -447,7 +455,7 @@ function Detail({ appointment: a, reload }: { appointment: AppointmentDetail; re
             label="준비 시간"
             value={prepare}
             onChange={(next) => setEdit({ prepareMinutes: next === view.autoPredictedPrepMinutes ? null : next })}
-            min={Math.max(5, a.beforePrepMinutes)}
+            min={Math.max(5, beforePrep)}
             max={240}
             step={1}
             unit="분"
@@ -486,18 +494,27 @@ function Detail({ appointment: a, reload }: { appointment: AppointmentDetail; re
           <FormulaBox
             lines={[
               `${KIND_LABEL[baseKind]} ${formatTime(base)} = 약속 ${formatTime(a.at)} − 여유 ${edits.bufferMinutes} − 이동 ${travel} − 준비 ${prepare}`,
-              ...(a.withWake && a.beforePrepMinutes ? [`준비 알람은 기상 후 준비 전 활동 ${a.beforePrepMinutes}분 뒤`] : []),
+              ...(beforePrep ? [`준비 알람은 기상 후 준비 전 활동 ${beforePrep}분 뒤`] : []),
               // 준비 시간이 어디서 왔는지 한 줄 — 4건까지 "배우는 중 N/5", 5건부터 "내 기록 기반 N건" (학습 루프 기초 ⑦, 통계 식은 안 보임 D47)
               //   기록으로 맞추는 건 그날 첫 일정(기상 있음)뿐이고, 직접 고른 준비 시간이면 기록 기반이 아니라서 줄을 뺌. 서버가 기록 수를 주기 전(처음 그릴 때)에도 뺌
-              ...(a.withWake && edits.prepareMinutes == null && view.prepareSampleCount != null ? [`준비 ${prepare}분 · ${prepareSourceLabel(view.prepareSampleCount)}`] : []),
+              ...(followsWake && edits.prepareMinutes == null && view.prepareSampleCount != null ? [`준비 ${prepare}분 · ${prepareSourceLabel(view.prepareSampleCount)}`] : []),
               // 그 아래 한 줄 — 최근 기록 값 (학습 루프 기초 ⑦). 위 줄과 같은 조건이고, 기록이 없으면 줄이 없음
-              ...(a.withWake && edits.prepareMinutes == null && recentLine ? [recentLine] : []),
+              ...(followsWake && edits.prepareMinutes == null && recentLine ? [recentLine] : []),
             ]}
           />
+          {/* 자동으로 기상이 안 생긴 일정(그날 앞 일정에 기상 · 낮 12시 이후 기상)도 기상 줄은 꺼짐으로 보이고, 켜면 시각을 골라 직접 만듦 (#624) */}
+          {missingWake ? (
+            <KeyValueRow
+              first
+              label={KIND_LABEL.WAKE}
+              sub="미설정"
+              value={<Toggle value={false} onChange={(on) => on && setPickKind('WAKE')} label={`${KIND_LABEL.WAKE} 알람`} />}
+            />
+          ) : null}
           {view.alarms.map((x, i) => (
             <KeyValueRow
               key={x.kind}
-              first={i === 0}
+              first={i === 0 && !missingWake}
               label={`${KIND_LABEL[x.kind]}${x.kind === 'ARRIVE' ? ' 목표' : ''}`}
               sub={isManualTime(x) ? '직접 고름' : undefined}
               value={
@@ -636,11 +653,13 @@ function Detail({ appointment: a, reload }: { appointment: AppointmentDetail; re
         visible={picking != null}
         onClose={() => setPickKind(null)}
         title={pickKind ? `${KIND_LABEL[pickKind]} 시각` : ''}
-        value={picking?.at ?? a.at}
-        onChange={(to) => pickKind && setEdit({ times: manualTimes(moveAlarm(view.alarms, pickKind, to)) })}
+        value={picking?.at ?? (pickKind === 'WAKE' ? first?.at : undefined) ?? a.at}
+        // 없던 기상을 새로 만들면 기상 시각만 보냄 — 서버가 기상은 따로 두고 준비 · 출발은 일정 기준으로 계산 (준비를 고정하지 않아 일정 시각이 바뀌면 다시 계산됨)
+        onChange={(to) => pickKind && setEdit({ times: pickKind === 'WAKE' && missingWake ? { ...edits.times, WAKE: to } : manualTimes(moveAlarm(view.alarms, pickKind, to)) })}
         autoAt={picking && isManualTime(picking) ? picking.auto : undefined}
         onReset={() => pickKind && setEdit({ times: manualTimes(resetAlarm(view.alarms, pickKind)) })}
-        note={pickKind === 'WAKE' && view.alarms.some((x) => x.kind === 'PREPARE') ? '준비 알람도 같은 만큼 같이 움직여요' : undefined}
+        // 준비가 기상을 따라가는 일정만 (따로 울리는 기상 · 미설정 기상은 준비가 그대로)
+        note={pickKind === 'WAKE' && followsWake && !missingWake && view.alarms.some((x) => x.kind === 'PREPARE') ? '준비 알람도 같은 만큼 같이 움직여요' : undefined}
         error={blocked ?? undefined}
       />
 

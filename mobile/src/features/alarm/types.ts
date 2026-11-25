@@ -198,6 +198,8 @@ export type AlarmPreview = {
   prepareRecent?: number[]; // 준비 시간 계산에 쓴 내 기록 중 최근 값, 최신순 최대 5개(분) — "최근 5번 48 · 55 · 62 · 70 · 75분" 줄 (calc prepareRecentLabel). 없거나 비면 줄을 안 보임
   // 실데이터 전용 — 길찾기를 못 해 저장하면 이동시간 확인이 필요한 상태 (ESTIMATE = 직선거리 어림, CACHED = 내 지난 이동 중앙값) 또는 직접 입력이 필요한 상태 (좌표 없음). 없으면 문제 없음
   travelProblem?: TravelProblem;
+  // 실데이터 전용 — 서버 계산에서 준비 알람이 기상을 따라가는지. 따로 울리는 기상(자동으로는 기상이 없는 일정에 직접 고른 기상, #624)이면 false. 없으면 저장된 일정 값
+  withWake?: boolean;
 };
 
 // 알람 설정(H03)에서 저장 전까지 들고 있는 값 — 저장할 때 한 번에 반영

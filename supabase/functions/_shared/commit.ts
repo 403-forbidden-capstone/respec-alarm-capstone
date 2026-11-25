@@ -140,6 +140,8 @@ export async function persistAppointment(
         ? { prepare_value_source: draft.prepareValueSource }
         : draft.prepareMinutes != null ? { prepare_value_source: 'LEGACY' } : {}),
       buffer_minutes: plan.basics.bufferMinutes,
+      // 따로 울리는 기상(#624) — 준비가 기상을 따라가지 않음 (앱 H03 · 다음 재계산이 읽음)
+      wake_detached: !plan.withWake && plan.chain.some((x) => x.kind === 'WAKE'),
     };
     let participantId: string;
     if (inputs.participant) {
