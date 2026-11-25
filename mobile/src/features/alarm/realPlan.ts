@@ -58,6 +58,7 @@ import {
   type SavedAppointment,
   type SaveFollowUp,
   type SettingsSaveResult,
+  type Transport,
   type UserEditLog,
 } from './types';
 
@@ -292,7 +293,21 @@ export async function joinSharedAppointment(appointmentId: string, choice: JoinC
     throw e;
   }
   forgetDetail(appointmentId); // 이미 읽어 둔 H03 상세(알람 없음 · 꺼짐)를 버림 — 다음에 새 값으로
-  return { phoneFailed: (await phoneFailedIds(res)).size };
+  const phoneFailed = (await phoneFailedIds(res)).size;
+  // 토스트에 만든 시각을 보이기 위해 기상 · 출발 알람 시각을 같이 돌려줌 (D-16) — 없으면 키를 안 넣음
+  const timeOf = (kind: 'WAKE' | 'DEPARTURE') => {
+    const at = res.alarms?.find((x) => x.alarm_type === kind && x.is_enabled)?.scheduled_at;
+    return at ? parseDbTime(at) : null;
+  };
+  const wakeAt = timeOf('WAKE');
+  const departAt = timeOf('DEPARTURE');
+  return { phoneFailed, ...(wakeAt ? { wakeAt } : {}), ...(departAt ? { departAt } : {}) };
+}
+
+// 프로필 기본 이동 수단을 시트 선택지(대중교통 · 자차 · 도보)로 — DB 값 BUS · SUBWAY는 선택지에 없어 아무것도 안 골라진 채 열렸음 (D-15)
+export function selectableTransport(t: Transport | null | undefined): Transport {
+  if (t === 'CAR' || t === 'WALK') return t;
+  return 'TRANSIT'; // TRANSIT · BUS · SUBWAY · 값 없음
 }
 
 // [내 알람 만들기] always displays the user's single PURE preparation
@@ -302,7 +317,7 @@ export async function getJoinDefaults(): Promise<JoinDefaults> {
   const userId = await requireUserId();
   const { data, error } = await supabase.from('profiles').select('home_name, default_transport, default_outing_prep_minutes').eq('user_id', userId).maybeSingle();
   if (error) throw error;
-  return { homeName: data?.home_name ?? null, transport: data?.default_transport ?? 'TRANSIT', purePrepMinutes: data?.default_outing_prep_minutes ?? null };
+  return { homeName: data?.home_name ?? null, transport: selectableTransport(data?.default_transport), purePrepMinutes: data?.default_outing_prep_minutes ?? null };
 }
 
 // 알람 설정 저장 (H03) — 여유 · 출발 위치 · 이동 수단 · 이동 · 준비 · 알람 시각 · 종류별 켜기 · 강도를 한 번에

@@ -23,12 +23,12 @@ export function MyHandleCard({ handle, highlight, onChange, onShare, onRenew }: 
           </Text>
           <Text variant="bodyStrong">{handle ? `@${handle}` : '-'}</Text>
           {highlight ? (
-            <Text variant="caption" tone="warn" style={styles.nudge}>
+            <Text variant="label" tone="sub" style={styles.nudge}>
               바꿔 보세요
             </Text>
           ) : null}
         </View>
-        {onChange ? <Button small variant={highlight ? 'primary' : 'ghost'} label="바꾸기" onPress={onChange} /> : null}
+        {onChange ? <Button small variant="ghost" label="바꾸기" onPress={onChange} /> : null}
       </View>
       <View style={[styles.row, styles.link]}>
         <View style={styles.grow}>

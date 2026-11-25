@@ -42,15 +42,15 @@ export function dayLinesOf(
 // G03 '공유 범위' 카드 — 상대가 출발 · 도착 공유를 켰으면 그 범위까지
 export function wakeScopeOf(name: string, groupName: string, tripVisible: boolean): { title: string; body: string } {
   return tripVisible
-    ? { title: '기상 여부 · 알람 시각 · 준비 시작 · 출발 · 도착 시각', body: `${name}님이 '${groupName}' 그룹에 기상 공유와 출발 · 도착 공유를 켠 범위만 보여요. 수면 시간, 장소, 알람 메모는 공유되지 않아요.` }
-    : { title: '기상 여부와 알람 시각', body: `${name}님이 '${groupName}' 그룹에 기상 공유를 켠 범위만 보여요. 수면 시간이나 알람 메모는 공유되지 않아요.` };
+    ? { title: '기상 여부 · 알람 시각 · 준비 시작 · 출발 · 도착 시각', body: `${name}님이 '${groupName}'에 공개한 범위만 보여요. 수면 시간 · 장소 · 메모는 안 보여요.` }
+    : { title: '기상 여부와 알람 시각', body: `${name}님이 '${groupName}'에 공개한 범위만 보여요. 수면 시간 · 메모는 안 보여요.` };
 }
 
 // G02 멤버 메뉴 — 숨김은 사람 단위(내가 속한 모든 그룹), 상대는 모름 (7-더 · 7-43)
-export const wakeHideLabel = (hidden: boolean) => (hidden ? '이 사람에게 기상 보이기' : '이 사람에게 기상 숨기기');
+export const wakeHideLabel = (hidden: boolean) => (hidden ? '이 사람에게 내 기상 보이기' : '이 사람에게 내 기상 숨기기');
 export const wakeHideToast = (name: string, hidden: boolean) =>
   hidden ? `${name}님에게 내 기상을 숨겼어요. 상대에게는 알리지 않아요` : `${name}님에게 내 기상이 다시 보여요`;
-export const WAKE_HIDE_FAILED = '이 사람에게는 기상 숨기기를 바꿀 수 없어요'; // set_wake_hidden NOT_FOUND (관계가 끊김 등)
+export const WAKE_HIDE_FAILED = '이 사람에게는 내 기상 공개를 바꿀 수 없어요'; // set_wake_hidden NOT_FOUND (관계가 끊김 등)
 
 // 다시 읽기가 실패했거나 실시간이 끊겼을 때 — 옛 값을 최신처럼 보이지 않게 (7-36)
 export const WAKE_STALE_TEXT = '연결이 끊겨 최신 상태가 아닐 수 있어요';
