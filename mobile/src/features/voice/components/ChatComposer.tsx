@@ -65,22 +65,23 @@ function VoiceRow({ voice, micOn, micDisabled, onSpeak, onToggleMode }: Props) {
             <Pressable
               onPress={onSpeak}
               disabled={micDisabled}
+              hitSlop={HALO_PAD} // 누르는 칸은 둘레 원까지
               accessibilityRole="button"
               accessibilityLabel={micOn ? '음성 대화 끝내기' : '말하기'}
               accessibilityState={{ disabled: micDisabled, busy: voice !== 'idle' }}
               style={({ pressed }) => [styles.mic, { backgroundColor: accent }, micDisabled && voice === 'idle' && styles.off, pressed && styles.pressed]}
             >
-              <SymbolView name={{ ios: 'mic.fill', android: 'mic', web: 'mic' }} size={26} tintColor={colors.inverse} />
+              <SymbolView name={{ ios: 'mic.fill', android: 'mic', web: 'mic' }} size={22} tintColor={colors.inverse} />
             </Pressable>
           </View>
           <Wave state={voice} mirror />
         </View>
-        <Text variant="small" tone="sub" weight={600} accessibilityLiveRegion="polite">
+        <Text variant="caption" tone="sub" weight={600} accessibilityLiveRegion="polite">
           {VOICE_LABEL[voice]}
         </Text>
       </View>
       {/* 가운데 칸(flex 1) 뒤에 그려야 위에 놓여 눌림 */}
-      <RoundButton icon={{ ios: 'keyboard', android: 'keyboard', web: 'keyboard' }} label="글로 쓰기" onPress={onToggleMode} style={styles.side} />
+      <RoundButton icon={{ ios: 'keyboard', android: 'keyboard', web: 'keyboard' }} label="글로 쓰기" onPress={onToggleMode} small style={styles.side} />
     </View>
   );
 }
@@ -152,18 +153,19 @@ function TextRow({ inputVisible, canSay, text, onChangeText, onSend, onToggleMod
   );
 }
 
-// 둥근 아이콘 버튼 (44) — fill이 있으면 포인트 색으로 채움(보내기)
-function RoundButton({ icon, label, onPress, disabled, fill, style }: { icon: SymbolViewProps['name']; label: string; onPress: () => void; disabled?: boolean; fill?: string; style?: object }) {
+// 둥근 아이콘 버튼 (44) — fill이 있으면 포인트 색으로 채움(보내기). small(38, 음성 모드)은 hitSlop으로 누르는 칸 44를 지킴
+function RoundButton({ icon, label, onPress, disabled, fill, small, style }: { icon: SymbolViewProps['name']; label: string; onPress: () => void; disabled?: boolean; fill?: string; small?: boolean; style?: object }) {
   return (
     <Pressable
       onPress={onPress}
       disabled={disabled}
+      hitSlop={small ? (BTN - BTN_SMALL) / 2 : undefined}
       accessibilityRole="button"
       accessibilityLabel={label}
       accessibilityState={{ disabled }}
-      style={({ pressed }) => [styles.round, fill ? { backgroundColor: fill, borderColor: fill } : null, disabled && styles.off, pressed && styles.pressed, style]}
+      style={({ pressed }) => [styles.round, fill ? { backgroundColor: fill, borderColor: fill } : null, small && styles.roundSmall, disabled && styles.off, pressed && styles.pressed, style]}
     >
-      <SymbolView name={icon} size={22} tintColor={fill ? colors.inverse : colors.ink} />
+      <SymbolView name={icon} size={small ? 19 : 22} tintColor={fill ? colors.inverse : colors.ink} />
     </Pressable>
   );
 }
@@ -210,8 +212,10 @@ function Wave({ state, mirror }: { state: VoiceState; mirror?: boolean }) {
 }
 
 const BTN = 44; // 둥근 버튼 · 한 줄 입력칸 높이
-const MIC = 54;
-const HALO = 64; // 마이크 둘레 원 — 음성 칸 높이 112 → 94
+const BTN_SMALL = 38; // 음성 모드 키보드 버튼
+const MIC = 44;
+const HALO_PAD = 4; // 마이크 둘레 원 두께
+const HALO = MIC + HALO_PAD * 2; // 음성 칸 높이 = 테두리 2 + 여백 4×2 + 원 52 + 글 16 = 78
 const INPUT_LINES = 5; // 입력칸이 늘어나는 최대 줄 수
 const INPUT_BORDER = 1;
 const INPUT_PAD = (BTN - typeScale.body.lineHeight) / 2 - INPUT_BORDER; // 한 줄일 때 칸 높이 = 버튼(44)
@@ -231,16 +235,17 @@ const styles = StyleSheet.create({
   notice: { marginBottom: 8 },
   voiceRow: { flexDirection: 'row', alignItems: 'center' },
   side: { position: 'absolute', left: 0 }, // 키보드 버튼은 왼쪽, 마이크는 칸 한가운데
-  boxVoice: { paddingVertical: 6 }, // 음성 모드는 낮게 — 글 모드 여백(12)은 그대로
+  boxVoice: { paddingVertical: 4, borderRadius: 22 }, // 음성 모드는 낮게 — 글 모드 여백(12) · 곡률(26)은 그대로
   center: { flex: 1, alignItems: 'center' }, // 마이크 원 바로 아래 글
-  micLine: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  micLine: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   micWrap: { width: HALO, height: HALO, alignItems: 'center', justifyContent: 'center' },
   halo: { position: 'absolute', width: HALO, height: HALO, borderRadius: HALO / 2 },
-  haloRing: { borderWidth: 1.5 },
+  haloRing: { borderWidth: 1 },
   mic: { width: MIC, height: MIC, borderRadius: MIC / 2, alignItems: 'center', justifyContent: 'center' },
-  wave: { flexDirection: 'row', alignItems: 'center', gap: 3, height: 28 },
-  bar: { width: 3, height: 28, borderRadius: 1.5 },
+  wave: { flexDirection: 'row', alignItems: 'center', gap: 2.5, height: 22 },
+  bar: { width: 2.5, height: 22, borderRadius: 1.25 },
   textRow: { flexDirection: 'row', alignItems: 'flex-end', gap: 8 }, // 칸이 늘어나도 양쪽 버튼은 아래 줄에 붙어 있게
+  roundSmall: { width: BTN_SMALL, height: BTN_SMALL, borderRadius: BTN_SMALL / 2 },
   round: {
     width: BTN,
     height: BTN,
