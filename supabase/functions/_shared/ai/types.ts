@@ -276,6 +276,8 @@ export interface FastExtract {
   pre_tasks?: { title: string }[];
   /** 기상 시각 답 (T2F.v2-e · extract-fast.v3, 선택 칸) — NONE 말 없음 · KEEP 계산된 시각 그대로 · TIME 정한 시각(time) · VAGUE "좀 일찍"처럼 시각 없음. time "" = 없음 */
   wake_reply?: { choice: WakeChoice; time: string };
+  /** 기본 알람 만들기 (T2F.v2-g · extract-fast.v5, 선택 칸) — 일정 없이 울릴 알람. date "" = 말 없음 · time "" = 시각 없음 · ampm false = 오전 · 오후 말 없음 · after = 지금부터 분(0 = 상대 시각 아님) */
+  alarm_new?: { date: string; time: string; ampm: boolean; after: number; save: SaveStatus }[];
 }
 
 export type WakeChoice = "NONE" | "KEEP" | "TIME" | "VAGUE";
