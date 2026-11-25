@@ -34,7 +34,8 @@ export function AppointmentAlarmCard({ appointment: a, current, onToggle, highli
       dateLabel={[showDate ? formatDateShort(a.at) : '', a.groupName ? `${a.groupName} 공유` : ''].filter(Boolean).join(' · ')}
       time={timeParts(first.at)}
       kindLabel={`${KIND_LABEL[first.kind]}${passed ? ' · 지남' : ''}`}
-      chain={list.map((x) => chainLabel(x, current, formatTime(x.at)))}
+      // 알람 목록(compact)은 큰 시각이 첫 알람이라 같은 시각을 줄에서 또 보이지 않음 (B-11)
+      chain={(variant === 'compact' ? list.filter((x) => x.kind !== first.kind) : list).map((x) => chainLabel(x, current, formatTime(x.at)))}
       meta={[
         `알람 강도 · ${LEVELS[a.level].name}`,
         ...(a.standalone ? [] : [`준비 ${a.predictedPrepMinutes}분 · 이동 ${a.travelMinutes}분 · 여유 ${a.bufferMinutes}분`]),

@@ -15,6 +15,7 @@ type Props = {
   unit?: string; // 값 뒤 글자 (예: "분")
   first?: boolean;
   typeable?: boolean; // 숫자를 눌러 직접 적기 (기본 켬)
+  typeExact?: boolean; // 직접 적은 값은 step 칸에 맞추지 않고 범위 안에서 그대로 (분 [+]는 5분씩이어도 7분을 적을 수 있게)
   wrap?: boolean; // 끝에서 반대쪽으로 넘어감 (시 23→0, 분 59→0). 기본은 끝에서 멈춤
 };
 
@@ -41,7 +42,7 @@ function snapValue(raw: number, { step, min, max }: Range) {
 
 // 숫자 줄이기 · 늘리기 (.stepper) — 준비 시간 · 여유 시간처럼 정해진 단위로 바꾸는 값
 // −/+를 길게 누르면 계속 바뀌고(1초 뒤 더 빨라짐), 숫자를 누르면 직접 적을 수 있음
-export function Stepper({ label, value, onChange, step = 5, min = 0, max = 600, unit = '', first, typeable = true, wrap = false }: Props) {
+export function Stepper({ label, value, onChange, step = 5, min = 0, max = 600, unit = '', first, typeable = true, typeExact = false, wrap = false }: Props) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState('');
   const range: Range = { step, min, max, wrap };
@@ -83,7 +84,7 @@ export function Stepper({ label, value, onChange, step = 5, min = 0, max = 600, 
     setEditing(false);
     const n = Number.parseInt(draft, 10);
     if (Number.isNaN(n)) return; // 비우거나 숫자가 아니면 그대로
-    const next = snapValue(n, range);
+    const next = typeExact ? Math.min(max, Math.max(min, n)) : snapValue(n, range);
     if (next !== value) onChange(next);
   }
 
@@ -180,7 +181,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   valueBox: { minWidth: 56, minHeight: size.touch, flexDirection: 'row', alignItems: 'center', justifyContent: 'center' },
-  value: { minWidth: 48, textAlign: 'center', fontVariant: ['tabular-nums'] },
+  value: { minWidth: 48, textAlign: 'center', fontVariant: ['tabular-nums'], textDecorationLine: 'underline', textDecorationColor: colors.faint }, // 밑줄 = 눌러서 직접 적을 수 있음 (B-07)
   input: {
     ...typeScale.bodyStrong,
     width: 48,

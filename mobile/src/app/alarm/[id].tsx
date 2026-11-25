@@ -51,6 +51,7 @@ import { useLeaveGuard } from '@/lib/useLeaveGuard';
 import { useLoad } from '@/lib/useLoad';
 import { colors } from '@/theme';
 
+const NB = ' '; // 붙임 공백 — 이 자리에서는 줄이 안 바뀜
 const LEVEL_OPTIONS = LEVELS.map((l, i) => [i as Level, l.name] as const);
 
 type Levels = Record<IntensityAxis, Level | null>; // null = 자동
@@ -59,7 +60,7 @@ type Levels = Record<IntensityAxis, Level | null>; // null = 자동
 // 출발 위치 · 이동 수단 · 이동 · 준비 시간 · 알람 시각은 직접 고를 수 있고(D42 C), 직접 고른 값은 "직접 고름"으로 표시하며 자동 계산보다 먼저 씀
 // 모두 초안으로 들고 있다가 "저장"에서 한 번에 반영 (고친 값은 고친 값 기록에 남음)
 export default function AlarmDetailScreen() {
-  const { id } = useLocalSearchParams<{ id: string }>();
+  const { id, changed } = useLocalSearchParams<{ id: string; changed?: string }>(); // changed = 약속 변경 확인 화면이 넘기는 바뀐 알람 종류 (WAKE,PREPARE,DEPART)
   const { data, error, reload } = useLoad(() => getAppointment(id, { withoutAlarms: true })); // 알람 없는 일정도 엶 — 장소를 정하고 알람을 만듦 (D41 A)
 
   if (data === undefined) {
@@ -80,7 +81,7 @@ export default function AlarmDetailScreen() {
       </Screen>
     );
   }
-  return <Detail key={data.id} appointment={data} reload={reload} />;
+  return <Detail key={data.id} appointment={data} reload={reload} changedKinds={changed ? changed.split(',') : []} />;
 }
 
 // 저장된 값에서 초안의 처음 모양을 만듦
@@ -99,7 +100,7 @@ const savedPreview = (a: AppointmentDetail): AlarmPreview => ({
   autoPredictedPrepMinutes: a.auto.predictedPrepMinutes,
 });
 
-function Detail({ appointment: a, reload }: { appointment: AppointmentDetail; reload: () => Promise<boolean> }) {
+function Detail({ appointment: a, reload, changedKinds }: { appointment: AppointmentDetail; reload: () => Promise<boolean>; changedKinds: string[] }) {
   const { session } = useAuth();
   const pilot = PREP_START_SELF_REPORT_PILOT && session?.user.email === 'demo-me@example.com' && a.groupName == null;
   const { data: prepStartReport, reload: reloadPrepStartReport } = useLoad(() =>
@@ -177,7 +178,23 @@ function Detail({ appointment: a, reload }: { appointment: AppointmentDetail; re
   // 계산식의 기준 알람 — 그날 첫 일정이면 기상, 아니면 준비. 직접 고른 알람 시각이 있어도 식은 자동 계산 그대로
   const baseKind: AlarmKind = followsWake ? 'WAKE' : 'PREPARE';
   const base = addMinutes(a.at, -(edits.bufferMinutes + travel + prepare));
+  // 계산식 아래 보조 글 — 준비 알람 간격 · 준비 시간 출처 · 최근 기록 (학습 루프 기초 ⑦, 통계 식은 안 보임 D47)
+  //   기상 · 준비 시각이 같으면 "기상 후 준비 전 활동 N분 뒤" 줄은 모순이라 뺌. 기록으로 맞추는 건 그날 첫 일정(기상 있음)뿐이고 직접 고른 준비 시간이면 기록 기반이 아니라서 뺌
+  const wakeAlarm = view.alarms.find((x) => x.kind === 'WAKE');
+  const prepareAlarm = view.alarms.find((x) => x.kind === 'PREPARE');
+  const sameWakePrepare = wakeAlarm != null && prepareAlarm != null && wakeAlarm.at.getTime() === prepareAlarm.at.getTime();
+  const formulaNotes = [
+    ...(beforePrep && !sameWakePrepare ? [`준비 알람은 기상 후 준비 전 활동 ${beforePrep}분 뒤`] : []),
+    ...(followsWake && edits.prepareMinutes == null && view.prepareSampleCount != null ? [`준비 ${prepare}분 · ${prepareSourceLabel(view.prepareSampleCount)}`] : []),
+    ...(followsWake && edits.prepareMinutes == null && recentLine ? [recentLine] : []),
+  ];
+  // 준비 시간 아래 보조 한 줄 — 예측값 · 최근 기록 (용어집: "내 기록 예측 N분 · 최근 N분")
+  const prepareHelper = [`내 기록 예측 ${a.auto.predictedPrepMinutes}분`, view.prepareRecent?.length ? `최근 ${Math.round(view.prepareRecent[0])}분` : null].filter(Boolean).join(' · ');
   const picking = pickKind ? view.alarms.find((x) => x.kind === pickKind) : undefined;
+  // 기상이 없던 일정에서 기상을 새로 켜는 중 — 시각을 고르면 이 기상만 따로 만들어짐(#624). 미리 보기가 돌아와 기상 줄이 생겨도 이 시트가 열려 있는 동안은 같은 동작
+  const pickingNewWake = pickKind === 'WAKE' && !a.alarms.some((x) => x.kind === 'WAKE');
+  // 새 기상 시트의 처음 시각 — 준비 알람보다 이르게 (30분 전)
+  const newWakeAt = first ? addMinutes(first.at, -30) : a.at;
 
   // travelMinutes = 확인 시트에서 사용자가 확인한 어림 이동시간 — 예상 이동에 직접 입력한 값으로 넣어 저장(MANUAL)
   //   choice = 같은 날 일정 없는 기상 알람을 합칠지(그 알람) · 따로 둘지(null) — 확인 시트에서 고른 값. 이동시간 · 시각 확인 시트를 거쳐 다시 불려도 고른 값을 씀
@@ -411,97 +428,15 @@ function Detail({ appointment: a, reload }: { appointment: AppointmentDetail; re
         <>
         <Card>
           <Text variant="label" tone="sub" style={styles.label}>
-            이동 조건
-          </Text>
-          <SelectRow first label="출발 위치" value={edits.origin} options={originOptions} onChange={(origin) => setEdit({ origin })} />
-          <SelectRow<Transport> label="이동 수단" value={edits.transport} options={TRANSPORT_OPTIONS} onChange={(transport) => setEdit({ transport })} />
-          <Stepper
-            label="예상 이동"
-            value={travel}
-            onChange={(next) => setEdit({ travelMinutes: next === view.autoTravelMinutes ? null : next })}
-            min={1}
-            max={240}
-            step={1}
-            unit="분"
-          />
-          <View style={styles.axisDesc}>
-            <Text variant="caption" tone="faint">
-              {edits.travelMinutes != null ? MANUAL_SOURCE : view.travelSource}
-            </Text>
-            {edits.travelMinutes != null ? (
-              <TextLink label="자동으로" accessibilityLabel="예상 이동 자동으로 되돌리기" onPress={() => setEdit({ travelMinutes: null })} />
-            ) : (
-              <View />
-            )}
-          </View>
-          {/* 길찾기를 못 한 미리 보기 (실데이터) — 직접 입력한 값이 있으면 문제가 아님 */}
-          {edits.travelMinutes == null && view.travelProblem ? (
-            <Text variant="caption" tone="warn" style={styles.note} accessibilityLiveRegion="polite">
-              {TRAVEL_PROBLEM_NOTE[view.travelProblem]}
-            </Text>
-          ) : null}
-        </Card>
-
-        <Card>
-          <Text variant="label" tone="sub" style={styles.label}>
-            준비 시간
-          </Text>
-          {beforePrep ? <KeyValueRow first label="준비 전 활동" value={`${beforePrep}분`} /> : null}
-          <KeyValueRow first={!beforePrep} label="실제 준비" value={`${realPrep}분`} />
-          {/* 실데이터는 실제 준비 = 예측 − 준비 전 활동이라 늘 0 → 더한 게 없으면 줄을 안 보임 */}
-          {margin > 0 ? <KeyValueRow label="넉넉히 더한 시간" value={`+${margin}분`} sub="늦지 않도록 실제 준비에 더했어요" /> : null}
-          <KeyValueRow label="예측 준비" value={`${a.auto.predictedPrepMinutes}분`} sub="내 기록이 쌓일수록 나에게 맞춰져요" />
-          <Stepper
-            label="준비 시간"
-            value={prepare}
-            onChange={(next) => setEdit({ prepareMinutes: next === view.autoPredictedPrepMinutes ? null : next })}
-            min={Math.max(5, beforePrep)}
-            max={240}
-            step={1}
-            unit="분"
-          />
-          {edits.prepareMinutes != null ? (
-            <View style={styles.axisDesc}>
-              <Text variant="caption" tone="faint">
-                직접 고름 · 자동은 {view.autoPredictedPrepMinutes}분
-              </Text>
-              <TextLink label="자동으로" accessibilityLabel="준비 시간 자동으로 되돌리기" onPress={() => setEdit({ prepareMinutes: null })} />
-            </View>
-          ) : null}
-          {a.groupName == null && a.prepareValueSource === 'AUTO' && edits.prepareMinutes == null && !manualAny ? (
-            <Button
-              label="최신 기본값으로 알람 다시 계산"
-              onPress={recalculatePureAuto}
-              disabled={busy || dirty}
-              loading={busy}
-            />
-          ) : null}
-          <Stepper
-            label="여유 시간"
-            value={edits.bufferMinutes}
-            onChange={(bufferMinutes) => setEdit({ bufferMinutes })}
-            min={0}
-            max={30}
-            step={1}
-            unit="분"
-          />
-        </Card>
-
-        <Card>
-          <Text variant="label" tone="sub" style={styles.label}>
             알람 시각
           </Text>
-          <FormulaBox
-            lines={[
-              `${KIND_LABEL[baseKind]} ${formatTime(base)} = 약속 ${formatTime(a.at)} − 여유 ${edits.bufferMinutes} − 이동 ${travel} − 준비 ${prepare}`,
-              ...(beforePrep ? [`준비 알람은 기상 후 준비 전 활동 ${beforePrep}분 뒤`] : []),
-              // 준비 시간이 어디서 왔는지 한 줄 — 4건까지 "배우는 중 N/5", 5건부터 "내 기록 기반 N건" (학습 루프 기초 ⑦, 통계 식은 안 보임 D47)
-              //   기록으로 맞추는 건 그날 첫 일정(기상 있음)뿐이고, 직접 고른 준비 시간이면 기록 기반이 아니라서 줄을 뺌. 서버가 기록 수를 주기 전(처음 그릴 때)에도 뺌
-              ...(followsWake && edits.prepareMinutes == null && view.prepareSampleCount != null ? [`준비 ${prepare}분 · ${prepareSourceLabel(view.prepareSampleCount)}`] : []),
-              // 그 아래 한 줄 — 최근 기록 값 (학습 루프 기초 ⑦). 위 줄과 같은 조건이고, 기록이 없으면 줄이 없음
-              ...(followsWake && edits.prepareMinutes == null && recentLine ? [recentLine] : []),
-            ]}
-          />
+          {/* 계산식은 항목 안에서 줄이 안 끊기게(붙임 공백) 단위(분)까지. 설명 줄은 상자 밖 보조 글 (B-09) */}
+          <FormulaBox lines={[`${KIND_LABEL[baseKind]}${NB}${formatTime(base)} = 약속${NB}${formatTime(a.at)} − 여유${NB}${edits.bufferMinutes}분 − 이동${NB}${travel}분 − 준비${NB}${prepare}분`]} />
+          {formulaNotes.map((line) => (
+            <Text key={line} variant="caption" tone="faint" style={styles.formulaNote}>
+              {line}
+            </Text>
+          ))}
           {/* 자동으로 기상이 안 생긴 일정(그날 앞 일정에 기상 · 낮 12시 이후 기상)도 기상 줄은 꺼짐으로 보이고, 켜면 시각을 골라 직접 만듦 (#624) */}
           {missingWake ? (
             <KeyValueRow
@@ -516,7 +451,7 @@ function Detail({ appointment: a, reload }: { appointment: AppointmentDetail; re
               key={x.kind}
               first={i === 0 && !missingWake}
               label={`${KIND_LABEL[x.kind]}${x.kind === 'ARRIVE' ? ' 목표' : ''}`}
-              sub={isManualTime(x) ? '직접 고름' : undefined}
+              sub={[changedKinds.includes(x.kind) ? '바뀜' : null, isManualTime(x) ? '직접 고름' : null].filter(Boolean).join(' · ') || undefined}
               value={
                 x.kind === 'ARRIVE' ? (
                   formatTime(x.at)
@@ -557,13 +492,92 @@ function Detail({ appointment: a, reload }: { appointment: AppointmentDetail; re
             </Text>
           ) : null}
           <Text variant="caption" tone="faint" style={styles.note}>
-            직접 고른 시각은 자동 계산보다 먼저 적용되고, 기상을 옮기면 준비도 같은 만큼 옮겨져요.
+            {followsWake ? '직접 고른 시각은 자동 계산보다 먼저 적용되고, 기상을 옮기면 준비도 같은 만큼 옮겨져요.' : '직접 고른 시각은 자동 계산보다 먼저 적용돼요.'}
           </Text>
           {manualAny ? (
             <View style={styles.reset}>
               <TextLink label="모두 자동으로 되돌리기" onPress={() => setEdit({ times: {} })} />
             </View>
           ) : null}
+        </Card>
+
+        <Card>
+          <Text variant="label" tone="sub" style={styles.label}>
+            이동 조건
+          </Text>
+          <SelectRow first label="출발 위치" value={edits.origin} options={originOptions} onChange={(origin) => setEdit({ origin })} />
+          <SelectRow<Transport> label="이동 수단" value={edits.transport} options={TRANSPORT_OPTIONS} onChange={(transport) => setEdit({ transport })} />
+          <Stepper
+            label="예상 이동"
+            value={travel}
+            onChange={(next) => setEdit({ travelMinutes: next === view.autoTravelMinutes ? null : next })}
+            min={1}
+            max={240}
+            step={1}
+            unit="분"
+          />
+          <View style={styles.axisDesc}>
+            <Text variant="caption" tone="faint">
+              {edits.travelMinutes != null ? MANUAL_SOURCE : view.travelSource}
+            </Text>
+            {edits.travelMinutes != null ? (
+              <TextLink label="자동으로" accessibilityLabel="예상 이동 자동으로 되돌리기" onPress={() => setEdit({ travelMinutes: null })} />
+            ) : (
+              <View />
+            )}
+          </View>
+          {/* 길찾기를 못 한 미리 보기 (실데이터) — 직접 입력한 값이 있으면 문제가 아님 */}
+          {edits.travelMinutes == null && view.travelProblem ? (
+            <Text variant="caption" tone="warn" style={styles.note} accessibilityLiveRegion="polite">
+              {TRAVEL_PROBLEM_NOTE[view.travelProblem]}
+            </Text>
+          ) : null}
+        </Card>
+
+        <Card>
+          <Text variant="label" tone="sub" style={styles.label}>
+            준비 시간
+          </Text>
+          {/* 계산에 쓰는 값 "준비 시간" 한 줄(고치는 −/+) + 보조 한 줄. 같은 값을 '예측 준비'로 또 보여 주지 않음 (용어집) */}
+          <Stepper
+            first
+            label="준비 시간"
+            value={prepare}
+            onChange={(next) => setEdit({ prepareMinutes: next === view.autoPredictedPrepMinutes ? null : next })}
+            min={Math.max(5, beforePrep)}
+            max={240}
+            step={1}
+            unit="분"
+          />
+          <View style={styles.axisDesc}>
+            <Text variant="caption" tone="faint" style={styles.descText}>
+              {edits.prepareMinutes != null ? `직접 고름 · 자동은 ${view.autoPredictedPrepMinutes}분` : prepareHelper}
+            </Text>
+            {edits.prepareMinutes != null ? (
+              <TextLink label="자동으로" accessibilityLabel="준비 시간 자동으로 되돌리기" onPress={() => setEdit({ prepareMinutes: null })} />
+            ) : null}
+          </View>
+          {/* 준비 시간이 나뉘어 있을 때만 구성을 보여 줌 — 나뉘지 않으면 위 준비 시간과 같은 값이라 안 보임. 실데이터는 실제 준비 = 예측 − 준비 전 활동이라 늘 0 → 더한 게 없으면 줄을 안 보임 */}
+          {beforePrep ? <KeyValueRow label="준비 전 활동" value={`${beforePrep}분`} /> : null}
+          {beforePrep || margin > 0 ? <KeyValueRow label="실제 준비" value={`${realPrep}분`} /> : null}
+          {margin > 0 ? <KeyValueRow label="넉넉히 더한 시간" value={`+${margin}분`} sub="늦지 않도록 실제 준비에 더했어요" /> : null}
+          {a.groupName == null && a.prepareValueSource === 'AUTO' && edits.prepareMinutes == null && !manualAny ? (
+            <Button
+              label="최신 기본값으로 알람 다시 계산"
+              onPress={recalculatePureAuto}
+              disabled={busy || dirty}
+              loading={busy}
+            />
+          ) : null}
+          <Stepper
+            label="여유 시간"
+            value={edits.bufferMinutes}
+            onChange={(bufferMinutes) => setEdit({ bufferMinutes })}
+            min={0}
+            max={30}
+            step={1}
+            unit="분"
+          />
         </Card>
 
         <Card>
@@ -650,16 +664,18 @@ function Detail({ appointment: a, reload }: { appointment: AppointmentDetail; re
 
       {/* 알람 시각 직접 고르기 — 기상을 옮기면 준비도 같은 간격으로 따라옴 */}
       <TimeSheet
-        visible={picking != null}
+        visible={pickKind != null}
         onClose={() => setPickKind(null)}
+        // 새 기상은 "확인"을 눌러야 켜짐 — 시각을 안 건드리고 확인만 눌러도 보이던 시각으로 (닫기 · 바깥 누름은 그대로 미설정)
+        onConfirm={(at) => pickingNewWake && edits.times.WAKE == null && setEdit({ times: { ...edits.times, WAKE: at } })}
         title={pickKind ? `${KIND_LABEL[pickKind]} 시각` : ''}
-        value={picking?.at ?? (pickKind === 'WAKE' ? first?.at : undefined) ?? a.at}
+        value={picking?.at ?? (pickingNewWake ? newWakeAt : undefined) ?? a.at}
         // 없던 기상을 새로 만들면 기상 시각만 보냄 — 서버가 기상은 따로 두고 준비 · 출발은 일정 기준으로 계산 (준비를 고정하지 않아 일정 시각이 바뀌면 다시 계산됨)
-        onChange={(to) => pickKind && setEdit({ times: pickKind === 'WAKE' && missingWake ? { ...edits.times, WAKE: to } : manualTimes(moveAlarm(view.alarms, pickKind, to)) })}
+        onChange={(to) => pickKind && setEdit({ times: pickingNewWake ? { ...edits.times, WAKE: to } : manualTimes(moveAlarm(view.alarms, pickKind, to)) })}
         autoAt={picking && isManualTime(picking) ? picking.auto : undefined}
         onReset={() => pickKind && setEdit({ times: manualTimes(resetAlarm(view.alarms, pickKind)) })}
         // 준비가 기상을 따라가는 일정만 (따로 울리는 기상 · 미설정 기상은 준비가 그대로)
-        note={pickKind === 'WAKE' && followsWake && !missingWake && view.alarms.some((x) => x.kind === 'PREPARE') ? '준비 알람도 같은 만큼 같이 움직여요' : undefined}
+        note={pickKind === 'WAKE' && followsWake && !pickingNewWake && view.alarms.some((x) => x.kind === 'PREPARE') ? '준비 알람도 같은 만큼 같이 움직여요' : undefined}
         error={blocked ?? undefined}
       />
 
@@ -787,6 +803,8 @@ const styles = StyleSheet.create({
   manual: { backgroundColor: colors.chip, borderRadius: 8, paddingHorizontal: 6, overflow: 'hidden' },
   axisDesc: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 4 },
   note: { marginTop: 10 },
+  formulaNote: { marginBottom: 2 },
+  descText: { flexShrink: 1 },
   reset: { marginTop: 6, alignSelf: 'flex-start' },
   stack: { gap: 10, marginTop: 16 },
   changes: { marginTop: 12 },

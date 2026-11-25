@@ -30,7 +30,9 @@ export async function toggleAppointment(a: Appointment, next: boolean, saving: S
     saving.add(a.id);
     try {
       await setAppointmentEnabled(a.id, next);
-      toast(next ? '이 일정의 알람을 켰어요' : '이 일정의 알람을 껐어요');
+      // 반복 일정은 그 회차 한 줄의 알람만 바뀜(회차마다 일정 한 줄, realWrite setAppointmentEnabled) — 매주 꺼진 줄로 읽히지 않게 범위를 말함 (B-12)
+      const series = a.recurrenceRule != null && a.recurrenceRule !== '';
+      toast(series ? (next ? '이번 회차 알람을 켰어요' : '이번 회차 알람만 껐어요') : next ? '이 일정의 알람을 켰어요' : '이 일정의 알람을 껐어요');
     } catch (e) {
       // 서버 · DB 오류 원문은 보여 주지 않음 — 이유는 api.ts가 UserError로 던짐 (lib/useAction과 같음)
       toast(userMessage(e, '알람을 켜고 끄지 못했어요'));

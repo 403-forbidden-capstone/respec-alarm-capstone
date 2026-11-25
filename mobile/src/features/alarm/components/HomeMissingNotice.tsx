@@ -9,7 +9,7 @@ type Props = {
 };
 
 // 새 일정 계산이 집 위치를 몰라 막혔을 때 (H05) — 이유 + 집 정하기. 점선 카드 방식은 LoadError와 같음
-// 진한 버튼은 화면 아래 [알람 계산하기] 하나만 두려고 ghost 버튼
+// 진한 버튼은 화면 아래 [알람 미리 보기] 하나만 두려고 ghost 버튼
 // <HomeMissingNotice onPickHome={() => setHomeSheetOpen(true)} busy={saving} />
 export function HomeMissingNotice({ onPickHome, busy }: Props) {
   return (
