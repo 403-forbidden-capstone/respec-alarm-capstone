@@ -1,10 +1,10 @@
-import { router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import { useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 
 import { Button, Card, confirm, KeyValueRow, Screen, SectionHeader, Sheet, Text, toast, Toggle, TopBar } from '@/components/ui';
 import { TextLink } from '@/features/alarm/components/TextLink';
-import { listPlaces, reverseAddress } from '@/features/alarm/api';
+import { listAppointments, listPlaces, reverseAddress } from '@/features/alarm/api';
 import { MapPlaceSheet } from '@/features/alarm/components/MapPlaceSheet';
 import { homeOf } from '@/features/alarm/placeSheet';
 import type { PickedPlace } from '@/features/alarm/mapPicker';
@@ -27,11 +27,12 @@ import { useVoiceTone } from '@/features/profile/hooks/useVoiceTone';
 import { ChangeHandleSheet } from '@/features/profile/components/ChangeHandleSheet';
 import { NicknameEditor, PrepareEditor, SleepEditor } from '@/features/profile/components/ProfileEditors';
 import { prepareValuesOf } from '@/features/profile/edit';
-import { TRANSPORT_NAME, WAKE_MARGIN_NAME, WAKE_SENSITIVITY_NAME } from '@/features/profile/labels';
+import { WAKE_MARGIN_NAME, WAKE_SENSITIVITY_NAME } from '@/features/profile/labels';
 import type { ProfileFields } from '@/features/profile/types';
 import { userMessage } from '@/lib/errors';
 import { registerPushToken } from '@/lib/push/token';
-import { canUseRealData } from '@/lib/mode';
+import { now } from '@/lib/clock';
+import { canUseRealData, isMock } from '@/lib/mode';
 import { backOrHome } from '@/lib/nav';
 import { cleanupAfterAccountDelete, signOutAndCleanup } from '@/lib/session';
 import { listBlocks } from '@/features/social/api';
@@ -56,6 +57,38 @@ function LinkRow({ label, value, onPress, first }: { label: string; value?: stri
   );
 }
 
+// 값 줄 안에 보조 글 한 줄이 붙는 EditRow — 이름 아래 작은 글 (연구 정보 줄)
+function EditRowNote({ label, note, value, onPress, first }: { label: string; note: string; value: string; onPress?: () => void; first?: boolean }) {
+  return (
+    <Pressable
+      onPress={onPress}
+      disabled={!onPress}
+      accessibilityRole="button"
+      accessibilityLabel={`${label} 바꾸기, 지금 ${value}. ${note}`}
+      style={({ pressed }) => [styles.noteRow, !first && styles.linkDivider, pressed && styles.pressed]}
+    >
+      <View style={styles.pingText}>
+        <Text variant="body" tone="sub" style={styles.noteLabel}>
+          {label}
+        </Text>
+        <Text variant="small" tone="sub">
+          {note}
+        </Text>
+      </View>
+      <View style={styles.noteValue}>
+        <Text variant="bodyStrong" numberOfLines={1} style={styles.noteValueText}>
+          {value}
+        </Text>
+        {onPress ? (
+          <Text variant="bodyStrong" tone="faint">
+            ›
+          </Text>
+        ) : null}
+      </View>
+    </Pressable>
+  );
+}
+
 const PROVIDER_NAME: Record<string, string> = { kakao: '카카오', google: 'Google' };
 
 // 열려 있는 편집 시트 — 집은 지도 고르기 시트(placeOpen)가 따로 맡음
@@ -73,8 +106,13 @@ export default function SettingsScreen() {
   const logout = useAction(); // 로그아웃 연타 막기 · 돌아가는 표시 — 프로필 저장 중에 로그아웃 버튼이 같이 돌지 않게 따로
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState<Editing>(null);
-  const [purePrepChanged, setPurePrepChanged] = useState(false);
+  const { preview } = useLocalSearchParams<{ preview?: string }>(); // 가짜 데이터 모드에서만: /settings?preview=recalc로 다시 계산 시트를 바로 열어 봄 (시안 확인용)
+  const [recalcOpen, setRecalcOpen] = useState(() => isMock() && preview === 'recalc'); // 아침 준비 기본값을 바꾼 뒤 "내 자동 알람도 다시 계산할까요?" 시트
   const [placeOpen, setPlaceOpen] = useState(false);
+  const appointments = useLoad(listAppointments); // 시트에 적을 내 자동 알람 수 — 일정 알람(공동 약속 · 알람 없는 일정 제외)
+  // 앞으로 울릴 알람(켜짐 · 아직 안 지남)이 있는 일정만 셈 — 지난 일정은 다시 계산할 게 없음
+  const autoCount = (appointments.data ?? []).filter((a) => !a.standalone && a.groupName == null && a.alarms.some((al) => al.enabled && al.at.getTime() > now().getTime())).length;
+  const offCount = phone?.supported ? [phone.notifications, phone.fullScreen, phone.exactAlarm, phone.usageAccess].filter((v) => v === 'off').length : null; // 알람 권한 점검이 읽는 값 그대로
   const user = session?.user;
   const provider = (user?.app_metadata?.provider as string | undefined) ?? '';
   const userId = enabled ? user?.id : undefined;
@@ -90,18 +128,35 @@ export default function SettingsScreen() {
       if (!userId) return;
       const changedPure = fields.default_outing_prep_minutes !== undefined &&
         fields.default_outing_prep_minutes !== profile?.default_outing_prep_minutes;
+      const changedPrepare = profile != null && (changedPure ||
+        (fields.default_buffer_minutes !== undefined && fields.default_buffer_minutes !== profile.default_buffer_minutes) ||
+        (fields.default_transport !== undefined && fields.default_transport !== profile.default_transport) ||
+        (fields.wake_margin !== undefined && fields.wake_margin !== profile.wake_margin));
       await saveProfileFields(userId, fields);
-      if (changedPure) setPurePrepChanged(true);
       let note = changedPure ? '순수준비시간을 바꿨어요 · 새 자동 알람에 반영돼요' : '바꿨어요';
       try {
         await refreshProfile();
       } catch {
         note = '바꿨어요 · 화면을 새로 불러오지 못했어요'; // 저장은 됐음 — 실패로 보이지 않게
       }
+      const fromPrepare = editing === 'prepare';
       closeEditor();
       setPlaceOpen(false);
       toast(note);
+      if (fromPrepare && changedPrepare && autoCount > 0) setRecalcOpen(true); // 기존 자동 알람은 자동으로 안 바뀌므로 한 번 물음
     }, '저장하지 못했어요');
+
+  // [다시 계산] — 알람 설정 화면의 "최신 기본값으로 알람 다시 계산"은 알람 하나 단위(미리 보기 → 확인 시트 → 저장)라 여러 개를 여기서 차례로 부르지 않음
+  //   가짜 데이터 모드에서만 이 자리에서 끝난 것으로 보여 주고, 실데이터는 알람 목록으로 보냄 (실데이터 연결 남음)
+  const recalculate = () => {
+    setRecalcOpen(false);
+    if (isMock()) {
+      toast(`자동 알람 ${autoCount}개를 새 값으로 다시 계산했어요`);
+      return;
+    }
+    toast('알람마다 "최신 기본값으로 알람 다시 계산"을 눌러 주세요');
+    router.push('/(tabs)/alarms');
+  };
 
   // This editor must receive the real write result. useAction swallows errors, so
   // using saveEdit here could falsely report a consent/save or revocation success.
@@ -167,6 +222,22 @@ export default function SettingsScreen() {
       <TopBar onBack={backOrHome} screenId="L03" />
       <Text variant="title">설정</Text>
 
+      <Card style={styles.top}>
+        <EditRow
+          first
+          label="알람이 울릴 준비"
+          value={offCount == null ? '점검하기' : offCount > 0 ? `${offCount}개 꺼짐` : '모두 켜짐'}
+          onPress={() => router.push('/ring-check')}
+        />
+        {profile ? (
+          <EditRow
+            label="아침 준비 기본값"
+            value={`준비 ${profile.default_outing_prep_minutes == null ? '미설정' : `${profile.default_outing_prep_minutes}분`} · 여유 ${profile.default_buffer_minutes}분`}
+            onPress={open('prepare')}
+          />
+        ) : null}
+      </Card>
+
       <SectionHeader title="계정" />
       <Card>
         <KeyValueRow first label="로그인" value={enabled ? (PROVIDER_NAME[provider] ?? (provider || '-')) : '가짜 데이터 모드'} />
@@ -180,26 +251,10 @@ export default function SettingsScreen() {
         <>
           <SectionHeader title="준비 기본값" />
           <Card>
-            <EditRow first label="순수 외출 준비시간" value={profile.default_outing_prep_minutes == null ? '미설정' : `${profile.default_outing_prep_minutes}분`} onPress={open('prepare')} />
-            <EditRow label="여유 시간" value={`${profile.default_buffer_minutes}분`} onPress={open('prepare')} />
-            <EditRow label="이동 수단" value={TRANSPORT_NAME[profile.default_transport]} onPress={open('prepare')} />
-            <EditRow label="집(출발지)" value={profile.home_name ?? '정하지 않았어요'} onPress={canEdit ? () => setPlaceOpen(true) : undefined} />
-            {/* 연구용 정보는 한 줄로 합침 (이름 · 안내 문구는 main의 #638 문구) */}
-            <EditRow label="준비시간 연구 정보(선택)" value={prepareMlSurveySummary(profile)} onPress={open('prepareMlSurvey')} />
-            <Text variant="small" tone="sub">
-              선택으로 받는 정보예요. 지금은 알람 계산에 쓰지 않아요.
-            </Text>
+            <EditRow first label="집(출발지)" value={profile.home_name ?? '정하지 않았어요'} onPress={canEdit ? () => setPlaceOpen(true) : undefined} />
+            {/* 연구용 정보는 한 줄로 합침 (이름은 main의 #638 문구) — 안내는 줄 안 보조 글 한 줄 */}
+            <EditRowNote label="준비시간 연구 정보(선택)" note="지금은 알람 계산에 쓰지 않아요" value={prepareMlSurveySummary(profile)} onPress={open('prepareMlSurvey')} />
           </Card>
-          {purePrepChanged ? (
-            <Card>
-              <Text variant="small" tone="sub">
-                변경한 순수준비시간은 새 자동 일정의 알람 계산에 반영돼요.
-                기존 자동 알람은 자동 변경되지 않으니 알람 상세에서 {"'최신 기본값으로 알람 다시 계산'"}을 눌러 주세요.
-                직접 고른 시각과 그룹 일정은 이 동작에서 제외돼요.
-              </Text>
-              <Button label="기존 자동 알람 재계산하러 가기" onPress={() => router.push('/(tabs)/alarms')} />
-            </Card>
-          ) : null}
 
           <SectionHeader title="알람 · 음성" />
           <Card>
@@ -224,7 +279,7 @@ export default function SettingsScreen() {
 
       {profile ? <FrequentPlacesSection center={homeOf(profile)} /> : null}
 
-      {/* 그 밖 — 알람이 잘 울리게 하는 폰 설정 · 차단 목록. 가짜 모드에서도 보임 */}
+      {/* 그 밖 — 알림 설정 · 차단 목록 (알람 권한 점검은 맨 위 줄로 올림). 가짜 모드에서도 보임 */}
       <SectionHeader title="그 밖" />
       <Card>
         {profile && notifyOff ? (
@@ -242,23 +297,7 @@ export default function SettingsScreen() {
         ) : profile ? (
           <LinkRow first label="알림 설정 열기" onPress={() => void openAppNotificationSettings()} />
         ) : null}
-        <Pressable
-          onPress={() => router.push('/ring-check')}
-          accessibilityRole="button"
-          accessibilityLabel="알람 권한 점검"
-          style={({ pressed }) => [styles.linkRow, profile && styles.linkDivider, pressed && styles.pressed]}
-        >
-          <View style={styles.pingText}>
-            <Text variant="body">알람 권한 점검</Text>
-            <Text variant="small" tone="sub">
-              알림 · 전체 화면 · 배터리
-            </Text>
-          </View>
-          <Text variant="body" tone="sub">
-            ›
-          </Text>
-        </Pressable>
-        <LinkRow label="차단한 사람" value={blocks.data ? `${blocks.data.length}명` : undefined} onPress={() => router.push('/blocks')} />
+        <LinkRow first={!profile} label="차단한 사람" value={blocks.data ? `${blocks.data.length}명` : undefined} onPress={() => router.push('/blocks')} />
       </Card>
 
       {enabled && user ? (
@@ -308,6 +347,19 @@ export default function SettingsScreen() {
           </Sheet>
         </>
       ) : null}
+      {/* 아침 준비 기본값을 저장한 뒤 한 번 — 기존 자동 알람은 따로 다시 계산해야 새 값이 반영됨 (직접 고른 시각 · 공동 약속은 제외) */}
+      <Sheet visible={recalcOpen} onClose={() => setRecalcOpen(false)} title="알람도 다시 계산할까요?">
+        <Text variant="body" style={styles.recalcBody}>
+          내 자동 알람 {autoCount}개도 새 값으로 다시 계산할까요?
+        </Text>
+        <Text variant="small" tone="sub" style={styles.recalcBody}>
+          직접 고른 시각은 그대로 둬요
+        </Text>
+        <View style={styles.recalcButtons}>
+          <Button label={isMock() ? '다시 계산' : '알람 탭에서 다시 계산'} onPress={recalculate} />
+          <Button variant="plain" label="새 일정부터" onPress={() => setRecalcOpen(false)} />
+        </View>
+      </Sheet>
       {/* 집 — 지도에서 핀으로 고름 (검색 · 현재 위치도 됨). 첫 중심은 지금 집, 없으면 서울 시청 */}
       <MapPlaceSheet
         visible={placeOpen}
@@ -327,6 +379,13 @@ export default function SettingsScreen() {
 }
 
 const styles = StyleSheet.create({
+  top: { marginTop: 16 },
+  noteRow: { minHeight: size.touch, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, paddingVertical: 8 },
+  noteLabel: { fontSize: 13.5 },
+  noteValue: { flexDirection: 'row', alignItems: 'center', gap: 8, flexShrink: 1 },
+  noteValueText: { flexShrink: 1 },
+  recalcBody: { marginBottom: 6 },
+  recalcButtons: { marginTop: 14, gap: 4 },
   stack: { gap: 8, marginTop: 16 },
   pingRow: { minHeight: size.touch, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
   pingText: { flex: 1, minWidth: 0 },

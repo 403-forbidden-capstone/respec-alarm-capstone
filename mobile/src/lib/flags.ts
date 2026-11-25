@@ -40,7 +40,7 @@ export const ONBOARDING_STEPS: Record<OnboardingStepId, boolean> = {
   sleep: true,
   home: true,
   prepare: true,
-  timetable: true,
+  timetable: false,
   consent: true,
   permissions: true,
   share: true,

@@ -6,13 +6,13 @@ import { colors } from '@/theme';
 
 type Props = {
   handle: string | null;
-  highlight: boolean; // 자동 아이디 그대로 — '바꿔 보세요'로 강조 (2-50)
+  highlight: boolean; // 자동 아이디 그대로 — 같은 줄 끝에 '바꿔 보세요' (2-50)
   onChange?: () => void; // [바꾸기] — 없으면(가짜 모드 · 프로필 없음) 줄만 보임
   onShare: () => void; // 내 친구 링크 공유
   onRenew: () => void; // 링크 다시 만들기 — 옛 링크는 바로 무효
 };
 
-// 친구 탭 맨 위 '내 아이디 [바꾸기]' 줄 + 친구 링크 (친구 2장) — 아이디 줄은 늘 보이고, 자동 아이디일 때만 강조
+// 친구 탭 맨 아래 '내 아이디 [바꾸기]' 줄 + 친구 링크 (친구 2장) — 아이디 줄은 늘 보이고, 자동 아이디일 때만 같은 줄에 안내. 아이디가 없으면(가짜 모드 · 프로필 없음) 안내 한 줄
 export function MyHandleCard({ handle, highlight, onChange, onShare, onRenew }: Props) {
   return (
     <Card style={styles.card}>
@@ -21,12 +21,20 @@ export function MyHandleCard({ handle, highlight, onChange, onShare, onRenew }: 
           <Text variant="caption" tone="sub">
             내 아이디
           </Text>
-          <Text variant="bodyStrong">{handle ? `@${handle}` : '-'}</Text>
-          {highlight ? (
-            <Text variant="label" tone="sub" style={styles.nudge}>
-              바꿔 보세요
+          {handle ? (
+            <View style={styles.handleLine}>
+              <Text variant="bodyStrong">{`@${handle}`}</Text>
+              {highlight ? (
+                <Text variant="label" tone="sub">
+                  · 바꿔 보세요
+                </Text>
+              ) : null}
+            </View>
+          ) : (
+            <Text variant="small" tone="sub">
+              로그인하면 내 아이디가 생겨요
             </Text>
-          ) : null}
+          )}
         </View>
         {onChange ? <Button small variant="ghost" label="바꾸기" onPress={onChange} /> : null}
       </View>
@@ -47,10 +55,10 @@ export function MyHandleCard({ handle, highlight, onChange, onShare, onRenew }: 
 }
 
 const styles = StyleSheet.create({
-  card: { marginTop: 14 },
+  card: { marginTop: 4 },
+  handleLine: { flexDirection: 'row', alignItems: 'baseline', gap: 6 },
   row: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   grow: { flex: 1, minWidth: 0 },
-  nudge: { marginTop: 2 },
   link: { marginTop: 12, paddingTop: 12, borderTopWidth: 1, borderTopColor: colors.line },
   actions: { flexDirection: 'row', alignItems: 'center', gap: 14 },
 });

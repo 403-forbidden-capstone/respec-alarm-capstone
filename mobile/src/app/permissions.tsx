@@ -24,17 +24,22 @@ import { getReceived, getShareSettings, listRelations, saveShareSettings } from 
 import { GroupIcon } from '@/features/social/components/GroupIcon';
 import { PersonRow } from '@/features/social/components/PersonRow';
 import { permissionNames, togglePermission } from '@/features/social/permissions';
-import { permissionsFor, TRIP_NEEDS_WAKE, type PermissionSet, type Relation, type RelationId } from '@/features/social/types';
+import { permissionsFor, TRIP_NEEDS_WAKE, type Permission, type PermissionSet, type Relation, type RelationId } from '@/features/social/types';
 import { useLoad } from '@/lib/useLoad';
 import { colors } from '@/theme';
 import { useAction } from '@/lib/useAction';
 import { useLeaveGuard } from '@/lib/useLeaveGuard';
 import { backOrHome } from '@/lib/nav';
 
-// 그룹 관계의 기상 상태 스위치 = 이 그룹에 내 기상 공유 동의 (친구 6장 — 기상은 권한 행이 아니라 그룹 동의 하나)
-const WAKE_CONSENT_DESCRIPTION = '기상 확인 여부와 시각이 이 그룹에 보여요.';
+// 스위치마다 보이는 설명은 한 줄 — 그룹 관계의 기상 상태 스위치 = 이 그룹에 내 기상 공유 동의 (친구 6장 — 기상은 권한 행이 아니라 그룹 동의 하나)
+const ONE_LINE: Record<Permission, string> = {
+  viewAlarm: '알람 시각 · 일정 · 장소',
+  editAlarm: '내 알람 추가 · 시간 변경',
+  viewWake: '기상 확인 여부 · 시각이 이 그룹에 보여요',
+  viewTrip: '준비 시작 · 출발 · 도착 시각',
+};
 
-// 알람 조회 · 설정이 엮인 규칙 — 항목마다 풀어 쓰지 않고 한 번만
+// 알람 조회 · 설정이 엮인 규칙 + 공유 범위 — 항목마다 풀어 쓰지 않고 맨 아래 한 줄 (#638 문구)
 const ALARM_RULE = '알람 설정을 켜면 알람 조회도 같이 켜져요. 집 · 출발지는 안 보여요.';
 
 type Side = 'give' | 'recv';
@@ -56,9 +61,6 @@ export default function PermissionSettingsScreen() {
       <TopBar onBack={backOrHome} screenId="F03" />
       <Text variant="title" style={styles.title}>
         공유 권한 설정
-      </Text>
-      <Text variant="lead" style={styles.lead}>
-        관계별로 내가 공유할 정보와 허용할 행동을 정해요.
       </Text>
     </>
   );
@@ -171,18 +173,13 @@ function Editor({
         ) : (
           <>
             <Card>
-              {permissionsFor(relation.kind).map(({ key, name, description }, i) => (
+              {permissionsFor(relation.kind).map(({ key, name }, i) => (
                 <View key={key} style={[styles.toggleRow, i > 0 && styles.divider]}>
                   <View style={styles.grow}>
                     <Text variant="bodyStrong">{name}</Text>
-                    <Text variant="small" tone="sub" style={styles.description}>
-                      {key === 'viewWake' ? WAKE_CONSENT_DESCRIPTION : description}
+                    <Text variant="small" tone="sub" style={styles.description} numberOfLines={1}>
+                      {key === 'viewTrip' && !current.viewWake ? TRIP_NEEDS_WAKE : ONE_LINE[key]}
                     </Text>
-                    {key === 'viewTrip' && !current.viewWake ? (
-                      <Text variant="label" tone="sub" style={styles.description}>
-                        {TRIP_NEEDS_WAKE}
-                      </Text>
-                    ) : null}
                   </View>
                   <Toggle
                     value={!!current[key]}
@@ -193,17 +190,9 @@ function Editor({
                 </View>
               ))}
             </Card>
-            <Card variant="dash">
-              <Text variant="label" tone="sub" style={styles.label}>
-                적용 방식
-              </Text>
-              <Text variant="small" tone="sub" style={styles.paragraph}>
-                {ALARM_RULE}{' '}
-                {relation.kind === 'group'
-                  ? '이 설정은 그룹에서 주는 권한만 바꿔요. 멤버별 최종 권한은 친구와 모든 그룹의 허용을 합쳐 정해져요.'
-                  : '이 설정은 친구에게 주는 권한만 바꿔요. 같은 그룹에서 준 권한은 그대로 남아요.'}
-              </Text>
-            </Card>
+            <Text variant="small" tone="sub" style={styles.rule}>
+              {ALARM_RULE}
+            </Text>
           </>
         )
       ) : (
@@ -275,8 +264,7 @@ function ReceivedList({ relationId }: { relationId: RelationId }) {
 }
 
 const styles = StyleSheet.create({
-  title: { marginTop: 8, marginBottom: 4 },
-  lead: { marginBottom: 18 },
+  title: { marginTop: 8, marginBottom: 18 },
   label: { marginBottom: 8 },
   between: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10 },
   relation: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 12 },
@@ -285,5 +273,6 @@ const styles = StyleSheet.create({
   divider: { borderTopWidth: 1, borderTopColor: colors.line },
   description: { marginTop: 2 },
   paragraph: { lineHeight: 20 },
+  rule: { lineHeight: 20, marginTop: 4, marginBottom: 12 },
   empty: { marginVertical: 6 },
 });

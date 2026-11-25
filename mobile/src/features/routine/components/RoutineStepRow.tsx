@@ -39,21 +39,23 @@ export function RoutineStepRow({ step, time, first, canUp, canDown, onPress, onM
           </Text>
         </View>
       </Pressable>
+      <Toggle value={step.alarm} onChange={onToggleAlarm} label={`${step.name} 알람`} />
+      {/* ▲▼ — 줄 오른쪽 끝에 작게 (끌어 옮기기는 아직 없음) */}
       <View style={styles.arrows}>
         <Arrow glyph="▲" label={`${step.name} 위로 옮기기`} disabled={!canUp} onPress={() => onMove(-1)} />
         <Arrow glyph="▼" label={`${step.name} 아래로 옮기기`} disabled={!canDown} onPress={() => onMove(1)} />
       </View>
-      <Toggle value={step.alarm} onChange={onToggleAlarm} label={`${step.name} 알람`} />
     </View>
   );
 }
 
-// 순서 옮기기 버튼 — 모양은 작게, 누르는 칸은 44 × 44
+// 순서 옮기기 버튼 — 모양은 작게(폭 26), 누르는 칸은 옆으로 넓혀 44 × 44
 function Arrow({ glyph, label, disabled, onPress }: { glyph: string; label: string; disabled: boolean; onPress: () => void }) {
   return (
     <Pressable
       onPress={onPress}
       disabled={disabled}
+      hitSlop={{ left: 8, right: 8 }}
       accessibilityRole="button"
       accessibilityLabel={label}
       accessibilityState={{ disabled }}
@@ -72,8 +74,8 @@ const styles = StyleSheet.create({
   main: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8, minHeight: size.touch },
   time: { width: 44, fontVariant: ['tabular-nums'] },
   text: { flex: 1 },
-  arrows: { flexDirection: 'row' },
-  arrow: { width: size.touch, height: size.touch, alignItems: 'center', justifyContent: 'center' },
+  arrows: { flexDirection: 'row', marginLeft: 2 },
+  arrow: { width: 26, height: size.touch, alignItems: 'center', justifyContent: 'center' },
   arrowOff: { opacity: 0.3 },
   pressed: { opacity: 0.6 },
 });

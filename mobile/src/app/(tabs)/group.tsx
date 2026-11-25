@@ -1,11 +1,12 @@
 import { router, useLocalSearchParams } from 'expo-router';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { SymbolView, type SymbolViewProps } from 'expo-symbols';
 import { Pressable, StyleSheet, View } from 'react-native';
 
 import { useAccent } from '@/lib/skyTone';
+import { colors } from '@/theme';
 
-import { Avatar, Button, Card, Chip, confirm, EmptyState, LoadError, Loading, Screen, SectionHeader, Segmented, Text, toast, TopBar, TopBarIconButton } from '@/components/ui';
+import { Avatar, Button, Card, Chip, confirm, EmptyState, LoadError, Loading, Screen, SectionHeader, Text, toast, TopBar, TopBarIconButton } from '@/components/ui';
 import { useAuth } from '@/features/auth/AuthProvider';
 import { ChangeHandleSheet } from '@/features/profile/components/ChangeHandleSheet';
 import { handleHint } from '@/features/profile/handle';
@@ -28,7 +29,7 @@ import {
 import { ConsentSheet } from '@/features/social/components/ConsentSheet';
 import { GroupInviteCard } from '@/features/social/components/GroupInviteCard';
 import { GroupIcon } from '@/features/social/components/GroupIcon';
-import { GroupWakeCard } from '@/features/social/components/GroupWakeCard';
+import { BadgeSegmented } from '@/features/social/components/BadgeSegmented';
 import { MiniButton } from '@/features/social/components/MiniButton';
 import { MyHandleCard } from '@/features/social/components/MyHandleCard';
 import { PeopleSearchResults } from '@/features/social/components/PeopleSearchResults';
@@ -38,12 +39,13 @@ import { INVITES_SHOWN, moreInvitesText } from '@/features/social/groupTexts';
 import { relationFromLists } from '@/features/social/searchView';
 import { SearchBox } from '@/features/social/components/SearchBox';
 import { useWakeLoad } from '@/features/social/hooks/useGroupWake';
+import { setSocialBadge } from '@/features/social/hooks/useSocialBadge';
 import { groupWakeLine } from '@/features/social/wakeTexts';
 import { usePersonMenu } from '@/features/social/hooks/usePersonMenu';
 import { shareFriendInvite } from '@/features/social/invite';
 import { friendLinkUrl } from '@/features/social/inviteLink';
 import { permissionNames } from '@/features/social/permissions';
-import type { FriendItem, GroupInvite, GroupItem, PeopleSearch, Person } from '@/features/social/types';
+import type { FriendItem, GroupInvite, GroupItem, GroupSummary, PeopleSearch, Person } from '@/features/social/types';
 import { now } from '@/lib/clock';
 import { useAction } from '@/lib/useAction';
 
@@ -55,7 +57,7 @@ const TABS = [
 ] as const;
 
 // date = 그룹 기상 신호가 알려 준 날 (오늘 기상 수 · 그룹 기상 카드만 씀, 없으면 오늘)
-// 그룹 기상 카드는 홈 아래에서 옮김 (D110) — 덧붙임이라 못 읽어도 빈 채로 두고 친구 · 그룹 목록은 그대로 보임
+// 그룹 기상 줄(멤버 얼굴 · 오늘 기상 수)은 그룹 칸의 그룹 카드에 붙음 (D110 홈에서 옮긴 카드를 D-01로 그룹 칸에 합침) — 덧붙임이라 못 읽어도 빈 채로 두고 친구 · 그룹 목록은 그대로 보임
 // 알람 조정 제안 카드는 뺌 (UI 단순화 — 제안은 저녁 AI 대화 화면 한 곳에서, 자세히는 S01)
 async function loadSocial(date: string | null) {
   const [friends, requests, sent, groups, invites] = await Promise.all([
@@ -69,8 +71,9 @@ async function loadSocial(date: string | null) {
   return { friends, requests, sent, groups, invites, summaries };
 }
 
-// G01 친구와 그룹 — 맨 위 오늘 그룹 기상 카드(D110, 홈에서 옮김)
-//   친구 탭(목업 F01: 요청 수락 · 친구별 권한 수) · 그룹 탭(목업 G01: 참여 중인 그룹 · 오늘 기상 수)
+// G01 친구와 그룹 — [친구 | 그룹] 칸 이름 옆에 받은 친구 요청 · 그룹 초대 수 배지 (D-03)
+//   친구 칸(목업 F01) = 친구 찾기 → 받은 요청 → 보낸 요청 → 내 친구 → 내 아이디 · 링크 (D-01)
+//   그룹 칸(목업 G01) = 받은 초대 → 참여 중인 그룹(카드에 얼굴 · 오늘 기상 수)
 // 기상 확인에서 그룹 상세를 열 때 이 탭이 '그룹' 칸으로 밑에 깔림 (lib/nav openGroupDetail, ?seg=group&open=… — 목업 A.openGroup)
 export default function GroupScreen() {
   const { seg, open } = useLocalSearchParams<{ seg?: string; open?: string }>();
@@ -80,6 +83,9 @@ export default function GroupScreen() {
   const tab: Tab = picked && picked.request === request ? picked.tab : seg === 'group' ? 'group' : 'friend';
   const setTab = (next: Tab) => setPicked({ request, tab: next });
   const { data, error, reload } = useWakeLoad(loadSocial, (d) => d.groups.map((g) => g.id)); // 그룹 기상 신호가 오면 오늘 기상 수를 다시 읽음
+  useEffect(() => {
+    if (data) setSocialBadge(data.requests.length + data.invites.length); // 아래 탭 '그룹' 배지도 같은 수
+  }, [data]);
   const { run } = useAction();
   const [workingId, setWorkingId] = useState<string | null>(null); // 수락 · 거절 · 취소 처리 중인 사람 — 그 줄 버튼에만 돌아가는 표시
 
@@ -148,15 +154,7 @@ export default function GroupScreen() {
       <Text variant="display" style={styles.title}>
         친구와 그룹
       </Text>
-      {data ? (
-        <GroupWakeCard
-          groups={data.summaries}
-          onOpen={(id) => router.push({ pathname: '/groups/[id]', params: { id } })}
-          // 이미 '그룹' 칸이면 "외 N개"를 숨김 (눌러도 바뀌는 게 없어서)
-          onMore={tab === 'group' ? undefined : () => setTab('group')}
-        />
-      ) : null}
-      <Segmented options={TABS} value={tab} onChange={setTab} />
+      <BadgeSegmented options={TABS} value={tab} onChange={setTab} badges={{ friend: data?.requests.length ?? 0, group: data?.invites.length ?? 0 }} />
 
       {!data ? error ? <LoadError onRetry={reload} /> : <Loading /> : null}
       {data && tab === 'friend' ? (
@@ -174,13 +172,13 @@ export default function GroupScreen() {
         />
       ) : null}
       {data && tab === 'group' ? (
-        <GroupTab groups={data.groups} invites={data.invites} workingId={workingId} onAccept={setConsentFor} onDecline={declineInvite} />
+        <GroupTab groups={data.groups} summaries={data.summaries} invites={data.invites} workingId={workingId} onAccept={setConsentFor} onDecline={declineInvite} />
       ) : null}
     </Screen>
   );
 }
 
-// 친구 탭 — 내 아이디 · 친구 링크 · 검색 · 받은 요청 · 내 친구(내가 준 권한 수)
+// 친구 탭 — 친구 찾기(검색) · 받은 요청 · 보낸 요청 · 내 친구(내가 준 권한 수) · 맨 아래 내 아이디 · 친구 링크
 function FriendTab({
   friends,
   requests,
@@ -260,13 +258,6 @@ function FriendTab({
 
   return (
     <>
-      <MyHandleCard
-        handle={profile?.handle ?? null}
-        highlight={hint?.highlight ?? false}
-        onChange={canEditHandle ? () => setHandleOpen(true) : undefined}
-        onShare={shareLink}
-        onRenew={renewLink}
-      />
       <ChangeHandleSheet visible={handleOpen} onClose={() => setHandleOpen(false)} />
       <PersonMenuSheet {...menu.sheetProps} />
 
@@ -351,6 +342,14 @@ function FriendTab({
           action={requests.length || sent.length ? undefined : { label: '친구 찾기', onPress: () => setFocusSearch((n) => n + 1) }} // 친구 0 · 요청 0일 때만 (3-21)
         />
       )}
+
+      <MyHandleCard
+        handle={profile?.handle ?? null}
+        highlight={hint?.highlight ?? false}
+        onChange={canEditHandle ? () => setHandleOpen(true) : undefined}
+        onShare={shareLink}
+        onRenew={renewLink}
+      />
     </>
   );
 }
@@ -359,12 +358,14 @@ function FriendTab({
 // 그룹 카드는 모두 상세로 (5-04). '오늘 n명 기상 완료'은 그 그룹 약속이 있는 날만 (7-사 · 7-34)
 function GroupTab({
   groups,
+  summaries,
   invites,
   workingId,
   onAccept,
   onDecline,
 }: {
   groups: GroupItem[];
+  summaries: GroupSummary[];
   invites: GroupInvite[];
   workingId: string | null;
   onAccept: (i: GroupInvite) => void;
@@ -404,6 +405,8 @@ function GroupTab({
       {groups.length ? null : <EmptyState title="아직 참여한 그룹이 없어요" body="새 그룹을 만들거나 초대 코드로 참여해 보세요." />}
       {groups.map((g) => {
         const names = permissionNames(g.grants);
+        const wakeLine = groupWakeLine(g.wokeCount, g.trip); // 그 그룹 약속이 있는 날만 — 없으면 얼굴 · 기상 줄을 안 그림
+        const faces = summaries.find((x) => x.id === g.id)?.members ?? [];
         return (
           <Card key={g.id} onPress={() => router.push({ pathname: '/groups/[id]', params: { id: g.id } })}>
             <View style={styles.between}>
@@ -416,8 +419,22 @@ function GroupTab({
               {g.name}
             </Text>
             <Text variant="small" tone="sub" style={styles.groupSub}>
-              {[`${g.memberCount}명`, groupWakeLine(g.wokeCount, g.trip)].filter(Boolean).join(' · ')}
+              {`${g.memberCount}명`}
             </Text>
+            {wakeLine && faces.length ? (
+              <View style={styles.wakeRow}>
+                <View style={styles.avatars}>
+                  {faces.map(({ person, state }, j) => (
+                    <View key={person.id} style={[styles.avatarRing, j > 0 && styles.avatarOverlap]}>
+                      <Avatar initial={person.initial} small dot={state.dot ?? undefined} />
+                    </View>
+                  ))}
+                </View>
+                <Text variant="small" style={styles.grow} numberOfLines={1}>
+                  {wakeLine}
+                </Text>
+              </View>
+            ) : null}
             <View style={styles.chips}>
               {(names.length ? names : ['공유 없음']).map((name) => (
                 <Chip key={name} label={name} />
@@ -469,5 +486,9 @@ const styles = StyleSheet.create({
   links: { flexDirection: 'row', alignItems: 'center', gap: 16 },
   groupNameTop: { marginTop: 10 },
   groupSub: { marginTop: 2, marginBottom: 10 },
+  wakeRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 10 },
+  avatars: { flexDirection: 'row' },
+  avatarRing: { borderRadius: 18, borderWidth: 2, borderColor: colors.card },
+  avatarOverlap: { marginLeft: -8 },
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
 });

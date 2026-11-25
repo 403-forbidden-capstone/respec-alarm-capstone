@@ -1,14 +1,16 @@
-import { StyleSheet, View } from 'react-native';
+import { useState } from 'react';
+import { Pressable, StyleSheet, View } from 'react-native';
 
-import { Button, Chip, Text } from '@/components/ui';
-import { colors } from '@/theme';
+import { Button, Text } from '@/components/ui';
+import { useAccent } from '@/lib/skyTone';
+import { colors, size } from '@/theme';
 
 import type { Allowed } from '../types';
 
 type Props = {
   name: string;
-  reason: string; // 한 줄 이유
-  state?: Allowed; // 있으면 이름 옆에 허용 / 꺼짐 / 모름 칩 (글만 있는 줄은 생략)
+  reason: string; // 이유 — 한 줄만 보이고 눌러서 펼침
+  state?: Allowed; // 있으면 줄 앞에 됨(체크) / 안 됨(느낌표) 아이콘, 모름 · 글만 있는 줄은 빈 동그라미
   actionLabel?: string; // 있으면 아래에 버튼
   onAction?: () => void;
   busy?: boolean; // 버튼이 일하는 중
@@ -16,22 +18,47 @@ type Props = {
 };
 
 const STATE_LABEL: Record<Allowed, string> = { on: '허용', off: '꺼짐', unknown: '모름' };
-// Chip에 경고색이 없어 꺼짐은 검은 칩으로 눈에 띄게
-const STATE_VARIANT: Record<Allowed, 'fill' | 'ink' | 'outline'> = { on: 'fill', off: 'ink', unknown: 'outline' };
 
-// 점검표(L04) 한 줄 — 이름 · 상태 칩 · 이유 · 설정 버튼
+// 점검표(L04) 한 줄 — 상태 아이콘 · 이름 · 이유 한 줄(눌러 펼침) · 설정 버튼
 export function CheckRow({ name, reason, state, actionLabel, onAction, busy, first }: Props) {
+  const accent = useAccent();
+  const [open, setOpen] = useState(false);
   return (
     <View style={[styles.row, !first && styles.divider]}>
-      <View style={styles.head}>
-        <Text variant="bodyStrong" style={styles.name}>
-          {name}
+      <Pressable
+        onPress={() => setOpen((v) => !v)}
+        accessibilityRole="button"
+        accessibilityState={{ expanded: open }}
+        accessibilityLabel={`${name}${state ? `, ${STATE_LABEL[state]}` : ''}`}
+        style={styles.head}
+      >
+        <View
+          style={[
+            styles.icon,
+            state === 'on' && { backgroundColor: accent, borderColor: accent },
+            state === 'off' && styles.iconOff,
+          ]}
+        >
+          {state === 'on' ? (
+            <Text variant="label" tone="inverse" weight={700}>
+              ✓
+            </Text>
+          ) : state === 'off' ? (
+            <Text variant="label" weight={700} style={styles.bang}>
+              !
+            </Text>
+          ) : null}
+        </View>
+        <View style={styles.text}>
+          <Text variant="bodyStrong">{name}</Text>
+          <Text variant="small" tone="sub" numberOfLines={open ? undefined : 1}>
+            {reason}
+          </Text>
+        </View>
+        <Text variant="small" tone="faint">
+          {open ? '˄' : '˅'}
         </Text>
-        {state ? <Chip label={STATE_LABEL[state]} variant={STATE_VARIANT[state]} /> : null}
-      </View>
-      <Text variant="small" tone="sub" style={styles.reason}>
-        {reason}
-      </Text>
+      </Pressable>
       {actionLabel && onAction ? (
         <View style={styles.action}>
           <Button small variant="ghost" label={actionLabel} onPress={onAction} loading={busy} />
@@ -42,10 +69,12 @@ export function CheckRow({ name, reason, state, actionLabel, onAction, busy, fir
 }
 
 const styles = StyleSheet.create({
-  row: { paddingVertical: 11 },
+  row: { paddingVertical: 4 },
   divider: { borderTopWidth: 1, borderTopColor: colors.line },
-  head: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
-  name: { flex: 1 },
-  reason: { marginTop: 2 },
-  action: { marginTop: 8 },
+  head: { minHeight: size.touch, flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 6 },
+  text: { flex: 1, minWidth: 0 },
+  icon: { width: 22, height: 22, borderRadius: 11, borderWidth: 1.5, borderColor: colors.faintDecor, alignItems: 'center', justifyContent: 'center' },
+  iconOff: { borderColor: colors.warn },
+  bang: { color: colors.warn }, // 경고는 글자에만 빨강 — 채움 없음
+  action: { paddingLeft: 34, paddingBottom: 8 },
 });

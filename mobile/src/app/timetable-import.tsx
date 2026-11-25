@@ -1,8 +1,9 @@
 import { router } from 'expo-router';
 import { useState } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { StyleSheet } from 'react-native';
 
-import { Button, Screen, Text, toast, TopBar } from '@/components/ui';
+import { Button, Card, Screen, Text, toast, TopBar } from '@/components/ui';
+import { TextLink } from '@/features/alarm/components/TextLink';
 import { listPlaces } from '@/features/alarm/api';
 import { PlaceSearchSheet } from '@/features/alarm/components/PlaceSearchSheet';
 import { TimeSheet } from '@/features/alarm/components/TimePicker';
@@ -51,18 +52,23 @@ export default function TimetableImportScreen() {
         맞는 줄만 저장해요. 저장하면 수업 전 알람이 자동으로 맞춰져요
       </Text>
       {timetable.notice ? <ImportNoticeCard notice={timetable.notice} onDismiss={timetable.dismissNotice} /> : null}
-      {noHome ? (
-        <View style={styles.noHome}>
-          <Text variant="small" tone="warn">
-            집 위치를 정하지 않아서 이동시간을 구하지 못해요. 설정에서 집을 먼저 정해 주세요
-          </Text>
-          <Button variant="ghost" small label="설정에서 집 정하기" onPress={() => router.push('/settings')} />
-        </View>
-      ) : null}
-      {timetable.missingCoords > 0 ? (
-        <Text variant="small" tone="warn" style={styles.noHome}>
-          {timetable.campus ? '장소를 못 찾은 줄이 있어요. 그 줄의 [장소]에서 직접 골라 주세요' : '학교를 먼저 정해 주세요. 이동시간을 구하려면 수업 장소의 위치가 필요해요'}
-        </Text>
+      {noHome || timetable.missingCoords > 0 ? (
+        // 빨간 글 두 줄 대신 안내 카드 한 장
+        <Card style={styles.notice}>
+          {noHome ? (
+            <>
+              <Text variant="small" tone="sub">
+                집 위치를 정하지 않아서 이동시간을 구하지 못해요. 설정에서 집을 먼저 정해 주세요
+              </Text>
+              <TextLink label="설정에서 집 정하기 ›" onPress={() => router.push('/settings')} />
+            </>
+          ) : null}
+          {timetable.missingCoords > 0 ? (
+            <Text variant="small" tone="sub">
+              {timetable.campus ? '장소를 못 찾은 줄이 있어요. 그 줄의 [장소]에서 직접 골라 주세요' : '학교를 먼저 정해 주세요. 이동시간을 구하려면 수업 장소의 위치가 필요해요'}
+            </Text>
+          ) : null}
+        </Card>
       ) : null}
       <CampusCard campus={timetable.campus} onOpen={timetable.openCampus} disabled={busy} />
       <TimetableStep
@@ -105,5 +111,5 @@ export default function TimetableImportScreen() {
 const styles = StyleSheet.create({
   title: { marginTop: 8 },
   lead: { marginTop: 4, marginBottom: 16 },
-  noHome: { marginBottom: 12, gap: 8, alignItems: 'flex-start' },
+  notice: { gap: 8, alignItems: 'flex-start' },
 });

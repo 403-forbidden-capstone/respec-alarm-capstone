@@ -169,7 +169,14 @@ export function useTimetableStep(transport: Transport, initial?: ImportBatch | n
         return;
       }
       seq.current += 1;
-      setRows((list) => [...list, { id: `class-${seq.current}`, name: '', days: [], startMinutes: null, place: '' }]);
+      const id = `class-${seq.current}`;
+      // 학교를 이미 골랐으면 새 줄은 그 학교 위치를 씀 (줄마다 장소를 안 골라도 됨)
+      const at = campusCoords(campus);
+      setRows((list) => [...list, { id, name: '', days: [], startMinutes: null, place: at && campus ? campus.name : '' }]);
+      if (at) {
+        setCoords((all) => ({ ...all, [id]: at }));
+        setFromCampus((set) => new Set([...set, id]));
+      }
     },
     onRemoveRow: (id: string) => {
       if (locked(id)) {

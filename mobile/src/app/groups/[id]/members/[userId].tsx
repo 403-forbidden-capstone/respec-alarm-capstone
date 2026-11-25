@@ -7,13 +7,13 @@ import { getMemberWake, sendWakePing } from '@/features/social/api';
 import { useNow } from '@/features/alarm/hooks/useNow';
 import { useWakeLoad } from '@/features/social/hooks/useGroupWake';
 import type { WakePingResult } from '@/features/social/types';
+import { wakePingLocked, wakePingTimed } from '@/features/social/wakePingLock';
 import {
   WAKE_NOT_SHARED_BODY,
   WAKE_NOT_SHARED_TITLE,
   WAKE_PING_FAILED,
   WAKE_STALE_TEXT,
   dayLinesOf,
-  wakePingLocks,
   wakePingNote,
   wakePingSent,
   wakeScopeOf,
@@ -60,10 +60,8 @@ export default function MemberWakeScreen() {
   const lines = dayLinesOf(data, current); // 오늘의 흐름 — 알람 울림 · 기상 확인 · 출발 · 도착 중 아는 것만
   const nowIndex = lines.reduce((last, line, i) => (line.at.getTime() <= current.getTime() ? i : last), -1); // 지난 줄 중 마지막 = 지금(진한 점)
 
-  // 잠금 — 한도 · 꺼짐 · 이미 일어남은 계속, 보냄(OK) · 5분 안 또 누름(WAIT)은 다음 가능 시각까지
-  const timed = ping && (ping.status === 'OK' || ping.status === 'WAIT');
-  const spent = ping?.status === 'OK' && ping.count >= ping.limit; // 마지막 보냄 — 시간이 지나도 오늘은 더 못 보냄
-  const locked = ping != null && wakePingLocks(ping) && (spent || !(timed && ping.nextAt != null && current >= ping.nextAt));
+  // 잠금 — 한도 · 꺼짐 · 이미 일어남은 계속, 보냄(OK) · 5분 안 또 누름(WAIT)은 다음 가능 시각까지 (features/social/wakePingLock, 그룹 상세와 같이 씀)
+  const locked = wakePingLocked(ping, current);
   const sendPing = () =>
     run(async () => {
       const result = await sendWakePing(id, p.id);
@@ -71,7 +69,7 @@ export default function MemberWakeScreen() {
       if (result.status === 'OK') toast(wakePingSent(p.short));
       if (result.status === 'ALREADY_UP' || result.status === 'NOT_RINGING') void reload(); // 판정이 바뀐 것 — 상태를 다시 읽음
     }, WAKE_PING_FAILED);
-  const pingNote = ping && !(timed && !locked) ? wakePingNote(ping) : null; // 풀린 뒤에는 옛 '다시' 안내를 지움
+  const pingNote = ping && !(wakePingTimed(ping) && !locked) ? wakePingNote(ping) : null; // 풀린 뒤에는 옛 '다시' 안내를 지움
 
   return (
     <Screen>

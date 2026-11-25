@@ -98,9 +98,6 @@ function RoutineEditor({ initial }: { initial: Routine }) {
       <Text variant="title" style={styles.title}>
         {routine.title}
       </Text>
-      <Text variant="lead" style={styles.lead}>
-        제안된 루틴을 확인하고 내 생활에 맞게 조정하세요.
-      </Text>
 
       <Card>
         <Text variant="label" tone="sub" style={styles.label}>
@@ -175,8 +172,7 @@ function RoutineEditor({ initial }: { initial: Routine }) {
 }
 
 const styles = StyleSheet.create({
-  title: { marginTop: 8, marginBottom: 4 },
-  lead: { marginBottom: 18 },
+  title: { marginTop: 8, marginBottom: 16 },
   label: { marginBottom: 8 },
   between: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10 },
   flex: { flex: 1 },

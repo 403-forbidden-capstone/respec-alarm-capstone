@@ -4,7 +4,7 @@ import { formatTime } from '@/lib/format';
 import { kst } from '@/mocks/data';
 
 import wakeCases from '../../../../modules/alarm-core/spec/wake-cases.json';
-import { evaluateWake, formatUsage, judgeLines, pickAlarmId, pickDismissedAt, thetaReachedAt, usedMinutes, usageSummary, WAKE_THETA_MINUTES, type UseSpan } from '../wake';
+import { evaluateWake, pickAlarmId, pickDismissedAt, thetaReachedAt, usedMinutes, usageSummary, WAKE_THETA_MINUTES, type UseSpan } from '../wake';
 
 const dismissed = kst(22, 480); // 오전 8:00에 해제
 const demo: UseSpan[] = [
@@ -58,27 +58,6 @@ describe('H08 기상 확정 시각 = 누적 사용이 θ를 넘은 시각 (D14)'
   it('구간 순서가 섞여도 이른 구간부터 셈', () => {
     const at = thetaReachedAt(dismissed, [[3, 4], [1, 1.5]], 1);
     expect(at!.getTime() - dismissed.getTime()).toBe(3.5 * 60_000);
-  });
-});
-
-describe('H08 화면 글자 — 소수 분 대신 분 · 초, 내부 용어 대신 일상 말', () => {
-  it('사용 시간은 초까지 자연수로', () => {
-    expect(formatUsage(3.2)).toBe('3분 12초');
-    expect(formatUsage(1.4)).toBe('1분 24초');
-    expect(formatUsage(0.4)).toBe('24초');
-    expect(formatUsage(0)).toBe('0초');
-    expect(formatUsage(2)).toBe('2분');
-  });
-
-  it('판정 조건 — 채웠으면 썼어요, 아직이면 써야 해요', () => {
-    expect(judgeLines(3.2, 1.4, 1)).toEqual(['알람 뒤 1분 넘게 폰을 썼어요', '알람 끈 뒤 5~10분 사이에도 폰을 썼어요']);
-    expect(judgeLines(0.4, 0, 1)).toEqual(['알람 뒤 1분 넘게 폰을 써야 해요', '알람 끈 뒤 5~10분 사이에도 폰을 써야 해요']);
-  });
-
-  it('θ · 소수 분 같은 내부 표기가 글자에 없음', () => {
-    for (const line of [...judgeLines(0.4, 0, 1), ...judgeLines(3.2, 1.4, 1), formatUsage(3.2)]) {
-      expect(line).not.toMatch(/θ|\d\.\d|뒤쪽/);
-    }
   });
 });
 

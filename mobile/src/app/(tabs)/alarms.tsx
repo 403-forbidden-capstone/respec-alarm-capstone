@@ -7,7 +7,6 @@ import { listAppointments } from '@/features/alarm/api';
 import { ProposalCards } from '@/features/social/components/ProposalCards';
 import { AppointmentAlarmCard } from '@/features/alarm/components/AppointmentAlarmCard';
 import { NewAlarmSheet } from '@/features/alarm/components/NewAlarmSheet';
-import { TextLink } from '@/features/alarm/components/TextLink';
 import { useAppointmentToggle } from '@/features/alarm/hooks/useAppointmentToggle';
 import { useNow } from '@/features/alarm/hooks/useNow';
 import { useStandaloneAlarmEdit, useStandaloneAlarmSave } from '@/features/alarm/hooks/useStandaloneAlarmSave';
@@ -63,9 +62,6 @@ export default function AlarmsScreen() {
       </Text>
       {/* 친구가 보낸 알람 시각 제안 — 푸시를 누르면 여기로 (친구 10장) */}
       <ProposalCards onChanged={() => void reload()} />
-      <View style={styles.links}>
-        <TextLink label="학교 시간표" onPress={() => router.push('/timetable')} />
-      </View>
       {!data && !error ? <Loading text="알람을 불러오는 중" /> : null}
       {data && !upcoming.length ? (
         <View style={styles.empty}>
@@ -156,7 +152,6 @@ export default function AlarmsScreen() {
 }
 
 const styles = StyleSheet.create({
-  links: { alignSelf: 'flex-start' },
   title: { marginTop: 4, marginBottom: 12 }, // 설명 글 없이 바로 가기 줄 · 첫 구역으로 이어짐
   empty: { marginTop: 18 },
   pastToggle: {

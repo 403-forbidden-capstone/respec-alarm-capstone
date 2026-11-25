@@ -1,10 +1,11 @@
 import { router, useLocalSearchParams } from 'expo-router';
+import { useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 
 import { Avatar, Button, Card, Chip, LoadError, Loading, Screen, SectionHeader, Text, toast, TopBar } from '@/components/ui';
 import { IMPORTANCE_LABEL } from '@/features/alarm/types';
 import { TextLink } from '@/features/alarm/components/TextLink';
-import { getGroup } from '@/features/social/api';
+import { getGroup, sendWakePing } from '@/features/social/api';
 import { AppointmentJoinersSheet } from '@/features/social/components/AppointmentJoinersSheet';
 import { GroupCodeSheet } from '@/features/social/components/GroupCodeSheet';
 import { GroupJoinSheet } from '@/features/social/components/GroupJoinSheet';
@@ -18,9 +19,13 @@ import { useWakeLoad } from '@/features/social/hooks/useGroupWake';
 import { usePersonMenu } from '@/features/social/hooks/usePersonMenu';
 import { MiniButton } from '@/features/social/components/MiniButton';
 import { permissionNames } from '@/features/social/permissions';
-import type { GroupDetail, GroupMember, Person } from '@/features/social/types';
-import { WAKE_STALE_TEXT } from '@/features/social/wakeTexts';
-import { formatDateShort, formatTime } from '@/lib/format';
+import type { GroupDetail, GroupMember, Person, WakePingResult } from '@/features/social/types';
+import { wakePingLocked } from '@/features/social/wakePingLock';
+import { WAKE_PING_FAILED, WAKE_STALE_TEXT, wakePingNote, wakePingSent, wokeLine } from '@/features/social/wakeTexts';
+import { useNow } from '@/features/alarm/hooks/useNow';
+import { now } from '@/lib/clock';
+import { formatDateShort, formatTime, isSameDay } from '@/lib/format';
+import { useAction } from '@/lib/useAction';
 import { backOrHome, openTab } from '@/lib/nav';
 import { colors } from '@/theme';
 
@@ -62,6 +67,28 @@ function Detail({ group: g, stale, onBack, onChanged }: { group: GroupDetail; st
   // 알람 목록은 2번 탭 (D110) — 그룹 상세를 걷어 내고 알람 탭으로 (lib/nav openTab)
   const openMyAlarms = () => openTab('/alarms');
 
+  // [깨우기] — 그룹원 기상 상태 화면(G03)과 같은 함수로 보냄. 서버가 판정 · 횟수를 세고 결과를 줌, 가짜 모드는 막힘(8-16)
+  //   사람별 마지막 결과를 들고 있다가 G03과 같은 규칙(wakePingLocked)으로 잠금 — OK · WAIT는 다음 가능 시각까지, 한도 · 꺼짐 · 이미 일어남은 계속
+  const { run } = useAction();
+  const [pings, setPings] = useState<Record<string, WakePingResult>>({});
+  const current = useNow(15_000);
+  const wake = (p: Person) =>
+    run(async () => {
+      const result = await sendWakePing(g.id, p.id);
+      setPings((prev) => ({ ...prev, [p.id]: result }));
+      if (result.status === 'OK') {
+        toast(wakePingSent(p.short));
+      } else {
+        toast(wakePingNote(result));
+        if (result.status === 'ALREADY_UP' || result.status === 'NOT_RINGING') onChanged(); // 판정이 바뀐 것 — 상태를 다시 읽음
+      }
+    }, WAKE_PING_FAILED);
+
+  // 멤버 상태 요약 — 일어난 사람 · 알람이 울렸는데 아직인 사람(깨우기 대상). 둘 다 없으면 줄을 숨김
+  const woke = g.members.filter((m) => m.state.woke).length;
+  const waiting = g.members.filter((m) => m.state.stage === 'RANG').length;
+  const faces = g.members.map((m) => m.person.initial);
+
   return (
     <Screen>
       <PersonMenuSheet {...menu.sheetProps} />
@@ -82,11 +109,12 @@ function Detail({ group: g, stale, onBack, onChanged }: { group: GroupDetail; st
         {g.members.length}명 · {g.since}
       </Text>
 
+      <SectionHeader
+        title="연결 일정"
+        right={<TextLink label="+ 새 공동 약속" onPress={() => router.push({ pathname: '/schedule/new', params: { groupId: g.id } })} strong />}
+      />
       {g.appointments.length ? (
         <Card>
-          <Text variant="label" tone="sub" style={styles.label}>
-            연결 일정
-          </Text>
           {g.appointments.map((a, i) => (
             <View key={a.id} style={[styles.linked, i > 0 && styles.divider]}>
               {/* 줄 위쪽만 누르면 참여자 시트 — [내 알람 만들기] · 내 알람 보기는 줄 밖(버튼 안에 버튼을 넣지 않음) */}
@@ -109,6 +137,23 @@ function Detail({ group: g, stale, onBack, onChanged }: { group: GroupDetail; st
                 <Text variant="small" tone={a.iJoined && !a.past ? undefined : 'sub'} style={styles.sub}>
                   {[a.past ? null : joinedCountText(a.joinedCount), appointmentStateText(a), a.creatorUnknown ? CREATOR_UNKNOWN : null].filter(Boolean).join(' · ')}
                 </Text>
+                {/* 같이 준비하는 사람 줄 — 홈 흐름 카드와 같은 얼굴 줄 + 그룹 · 오늘 기상 수(오늘 약속만) */}
+                {a.past ? null : (
+                  <View style={styles.together}>
+                    <View style={styles.faces}>
+                      {faces.map((n, j) => (
+                        <View key={`${j}-${n}`} style={[styles.face, j > 0 && styles.faceNext]}>
+                          <Text variant="caption" tone="ink" weight={600}>
+                            {n}
+                          </Text>
+                        </View>
+                      ))}
+                    </View>
+                    <Text variant="caption" tone="sub" style={styles.grow} numberOfLines={1}>
+                      {isSameDay(a.at, now()) ? `${g.name} · ${wokeLine(woke)}` : g.name}
+                    </Text>
+                  </View>
+                )}
               </Pressable>
               {a.past ? null : a.iJoined ? (
                 <View style={styles.joinButton}>
@@ -122,9 +167,18 @@ function Detail({ group: g, stale, onBack, onChanged }: { group: GroupDetail; st
             </View>
           ))}
         </Card>
-      ) : null}
+      ) : (
+        <Text variant="small" tone="sub" style={styles.stale}>
+          아직 연결된 일정이 없어요
+        </Text>
+      )}
 
       <SectionHeader title="멤버 · 기상 상태" right={<TextLink label="+ 초대" onPress={groupMenu.openInvite} strong />} />
+      {woke || waiting ? (
+        <Text variant="small" tone="sub" style={styles.stale}>
+          {`기상 ${woke} · 아직 ${waiting}`}
+        </Text>
+      ) : null}
       {stale ? (
         <Text variant="small" tone="warn" style={styles.stale} accessibilityLiveRegion="polite">
           {WAKE_STALE_TEXT}
@@ -132,7 +186,7 @@ function Detail({ group: g, stale, onBack, onChanged }: { group: GroupDetail; st
       ) : null}
       <Card>
         {g.members.map((m, i) => (
-          <MemberRow key={m.person.id} member={m} groupId={g.id} first={i === 0} onMyAlarm={openMyAlarms} onMenu={menu.open} />
+          <MemberRow key={m.person.id} member={m} groupId={g.id} first={i === 0} onMyAlarm={openMyAlarms} onMenu={menu.open} onWake={wake} ping={wakePingLocked(pings[m.person.id], current) ? (pings[m.person.id]?.status === 'OK' ? 'sent' : 'locked') : null} />
         ))}
       </Card>
 
@@ -157,21 +211,9 @@ function Detail({ group: g, stale, onBack, onChanged }: { group: GroupDetail; st
   );
 }
 
-// 멤버 한 줄 — 얼굴 · 이름 · 상태 글자(오른쪽 작게) + 한 줄 상태, 오른쪽 끝은 [···] 하나
+// 멤버 한 줄 — 얼굴 · 이름 + 한 줄 상태, 오른쪽 끝은 [···] 하나
 // 줄 전체를 누르면 기상 상태(G03). 공유 안 함이면 이유 없이 볼 수 없다고만 알림 (상대가 왜 안 보이는지 드러내지 않음)
 // [알람 보기]는 기상 상태 화면에 있어 줄에서는 뺌
-const STAGE_LABEL: Record<GroupMember['state']['stage'], string> = {
-  SCHEDULED: '취침 중',
-  RANG: '알람 울림',
-  WOKE: '기상 완료',
-  PREPARING: '준비 중',
-  PREP_SCHEDULED: '준비 전',
-  DEPARTED: '출발',
-  ARRIVED: '도착',
-  NO_ALARM: '알람 없음',
-  NOT_SHARED: '공유 안 함',
-  NO_APPOINTMENT: '약속 없음',
-};
 
 function MemberRow({
   member: m,
@@ -179,12 +221,16 @@ function MemberRow({
   first,
   onMyAlarm,
   onMenu,
+  onWake,
+  ping,
 }: {
   member: GroupMember;
   groupId: string;
   first: boolean;
   onMyAlarm: () => void;
   onMenu: (p: Person) => void; // [···] 기상 숨기기 · 신고 · 차단
+  onWake: (p: Person) => void; // [깨우기] — 알람이 울렸는데 아직 안 일어난 줄에만
+  ping: 'sent' | 'locked' | null; // 잠금 중 — sent = 방금 보냄(다음 가능 시각 전), locked = 한도 · 꺼짐 · 이미 일어남 · 5분 안 또 누름
 }) {
   const shared = m.state.stage !== 'NOT_SHARED';
   const name = m.person.short;
@@ -199,9 +245,6 @@ function MemberRow({
         <View style={styles.memberTop}>
           <Text variant="bodyStrong" numberOfLines={1} style={styles.grow}>
             {m.person.name}
-          </Text>
-          <Text variant="caption" tone="sub">
-            {STAGE_LABEL[m.state.stage]}
           </Text>
         </View>
         <Text variant="small" tone="sub" numberOfLines={1}>
@@ -228,7 +271,12 @@ function MemberRow({
       {m.isMe ? (
         <MiniButton label="내 알람" onPress={onMyAlarm} />
       ) : (
-        <MiniButton label="···" accessibilityLabel={`${m.person.name}님 메뉴`} onPress={() => onMenu(m.person)} />
+        <>
+          {m.state.stage === 'RANG' ? (
+            <TextLink label={ping === 'sent' ? '보냄' : '깨우기'} accessibilityLabel={`${m.person.name}님 깨우기`} disabled={ping != null} onPress={() => onWake(m.person)} />
+          ) : null}
+          <MiniButton label="···" accessibilityLabel={`${m.person.name}님 메뉴`} onPress={() => onMenu(m.person)} />
+        </>
       )}
     </View>
   );
@@ -251,4 +299,8 @@ const styles = StyleSheet.create({
   memberText: { flex: 1, minWidth: 0 },
   memberTop: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   stale: { marginBottom: 8 },
+  together: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 10 },
+  faces: { flexDirection: 'row' },
+  face: { width: 22, height: 22, borderRadius: 11, backgroundColor: colors.card, borderWidth: 1, borderColor: colors.line, alignItems: 'center', justifyContent: 'center' },
+  faceNext: { marginLeft: -6 },
 });

@@ -92,7 +92,7 @@ export default function OnboardingScreen() {
   const [nickname, setNickname] = useState(profile?.nickname ?? '');
   const [sleep, setSleep] = useState<WakeSensitivity>(profile?.wake_sensitivity ?? 'NORMAL');
   const [prepare, setPrepare] = useState<PrepareValues>({
-    outingPrep: profile?.default_outing_prep_minutes ?? null,
+    outingPrep: profile?.default_outing_prep_minutes ?? (userId == null ? 30 : null), // 가짜 데이터 모드만 — 보이는 기본값 30분이 그대로 저장값 (실데이터는 직접 정해야 [다음]이 켜짐, 혜린님 확인 필요)
     buffer: Math.min(60, Math.max(0, profile?.default_buffer_minutes ?? 10)),
     transport: profile?.default_transport ?? 'TRANSIT',
     margin: profile?.wake_margin ?? 'NORMAL',
@@ -311,6 +311,7 @@ export default function OnboardingScreen() {
               집 위치를 정하지 않아서 이동시간을 구하지 못해요. 이전으로 돌아가 집을 정하거나 건너뛰어 주세요
             </Text>
           ) : null}
+          <CampusCard campus={timetable.campus} onOpen={timetable.openCampus} disabled={busy} />
           <ImportEntryCard
             onPhoto={
               TIMETABLE_PATHS.photo
@@ -338,7 +339,6 @@ export default function OnboardingScreen() {
               {timetable.campus ? '장소를 못 찾은 줄이 있어요. 그 줄의 [장소]에서 직접 골라 주세요' : '학교를 먼저 정해 주세요. 이동시간을 구하려면 수업 장소의 위치가 필요해요'}
             </Text>
           ) : null}
-          {timetable.imported && timetable.rows.length > 0 ? <CampusCard campus={timetable.campus} onOpen={timetable.openCampus} disabled={busy} /> : null}
           <TimetableStep
             rows={timetable.rows}
             onChangeRow={timetable.onChangeRow}
@@ -348,6 +348,7 @@ export default function OnboardingScreen() {
             onPickTime={timetable.onPickTime}
             onToggleExisting={timetable.onToggleExisting}
             saving={busy || importing}
+            campusName={timetable.campus?.name ?? null}
           />
           <PlaceSearchSheet
             visible={timetable.campusOpen}

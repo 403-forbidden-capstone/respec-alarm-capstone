@@ -60,26 +60,6 @@ export function thetaReachedAt(
   return null;
 }
 
-// 사용 시간을 초 단위로 읽기 쉽게 (3.2분 → 3분 12초, 0.4분 → 24초) — 소수 분은 화면에 쓰지 않음
-export function formatUsage(minutes: number) {
-  const total = Math.max(0, Math.round(minutes * 60));
-  const m = Math.floor(total / 60);
-  const s = total % 60;
-  if (!m && !s) return '0초';
-  return [m ? `${m}분` : '', s ? `${s}초` : ''].filter(Boolean).join(' ');
-}
-
-// 최근 사용을 보는 구간 글자 — 관찰 뒤쪽 5분 = 해제 5~10분 뒤 (#225). H08 막대 이름과 판정 문구가 같이 씀
-export const WAKE_RECENT_RANGE = `${WAKE_OBSERVE_MINUTES - WAKE_RECENT_MINUTES}~${WAKE_OBSERVE_MINUTES}`;
-
-// 기상 확정 조건을 일상 말로 — 채웠으면 "썼어요", 아직이면 "써야 해요" (조건: 누적 사용 ≥ θ 그리고 뒤쪽 5분 사용 > 0)
-export function judgeLines(usage: number, recent: number, thetaMinutes: number): string[] {
-  return [
-    usage >= thetaMinutes ? `알람 뒤 ${thetaMinutes}분 넘게 폰을 썼어요` : `알람 뒤 ${thetaMinutes}분 넘게 폰을 써야 해요`,
-    recent > 0 ? `알람 끈 뒤 ${WAKE_RECENT_RANGE}분 사이에도 폰을 썼어요` : `알람 끈 뒤 ${WAKE_RECENT_RANGE}분 사이에도 폰을 써야 해요`,
-  ];
-}
-
 // ---------------------------------------------------------------------------
 // 실데이터 판정 (H08) — 사용 구간(알람 코어 getUsageSpans)과 지금 시각으로 단계를 정함. 순수 함수
 // ---------------------------------------------------------------------------

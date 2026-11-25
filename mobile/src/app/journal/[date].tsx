@@ -2,7 +2,7 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { useState, type ReactNode } from 'react';
 import { StyleSheet, TextInput, View } from 'react-native';
 
-import { Button, Card, Chip, confirm, LoadError, Loading, Screen, Text, Timeline, toast, TopBar } from '@/components/ui';
+import { Button, Card, Chip, confirm, LoadError, Loading, Screen, Text, toast, TopBar } from '@/components/ui';
 import { TextLink } from '@/features/alarm/components/TextLink';
 import { parseDayParam } from '@/features/alarm/schedule';
 import { recordToday } from '@/features/records/api';
@@ -10,6 +10,7 @@ import { declineRoutineSuggestion, editJournal, getJournal } from '@/features/ro
 import type { Journal } from '@/features/routine/types';
 import { dateParts, formatTime, isSameDay } from '@/lib/format';
 import { backOrHome } from '@/lib/nav';
+import { useAccent } from '@/lib/skyTone';
 import { useAction } from '@/lib/useAction';
 import { useLeaveGuard } from '@/lib/useLeaveGuard';
 import { useLoad } from '@/lib/useLoad';
@@ -76,6 +77,7 @@ function EmptyJournal({ date, top }: { date: string | undefined; top: ReactNode 
 }
 
 function JournalView({ journal: j, reload, top }: { journal: Journal; reload: () => Promise<boolean>; top: ReactNode }) {
+  const accent = useAccent(); // 가장 최근 단계 점 — 포인트 색 (lib/skyTone)
   const [editing, setEditing] = useState<string | null>(null); // 고치는 중인 글 (null = 읽기)
   const { busy, run } = useAction(); // 저장 · 괜찮아요는 한 번에 하나씩, 실패하면 토스트
   const { month, day } = dateParts(j.date);
@@ -157,7 +159,26 @@ function JournalView({ journal: j, reload, top }: { journal: Journal; reload: ()
           {isToday ? '오늘' : '그날'}의 사실
         </Text>
         {j.facts.length ? (
-          <Timeline items={j.facts.map((f) => ({ time: formatTime(f.at), label: f.label, source: f.source }))} />
+          // 홈 다음 알람 카드와 같은 가로 점 줄 — 각 점 아래 시각 · 이름, 가장 최근 단계만 포인트 색
+          <View style={styles.steps}>
+            {j.facts.map((f, i) => {
+              const last = i === j.facts.length - 1;
+              return (
+                <View key={`${i}-${f.label}`} style={styles.step}>
+                  <View style={styles.stepRail}>
+                    <View style={[styles.stepDot, styles.stepDotDone, last && { backgroundColor: accent, borderColor: accent }]} />
+                    {!last ? <View style={styles.stepBar} /> : null}
+                  </View>
+                  <Text variant="label" tone="ink" weight={last ? 700 : 400}>
+                    {formatTime(f.at)}
+                  </Text>
+                  <Text variant="caption" tone="sub">
+                    {f.label}
+                  </Text>
+                </View>
+              );
+            })}
+          </View>
         ) : (
           <Text variant="body" tone="sub">
             기록된 사실이 없어요.
@@ -198,7 +219,9 @@ function JournalView({ journal: j, reload, top }: { journal: Journal; reload: ()
               small
               onPress={() => router.push({ pathname: '/routine/[id]', params: { id: 'new', journal: j.recordDate } })}
             />
-            <Button label="괜찮아요" small variant="ghost" onPress={decline} disabled={busy} />
+            <View style={styles.decline}>
+              <TextLink label="괜찮아요" onPress={decline} disabled={busy} />
+            </View>
           </View>
         </Card>
       ) : (
@@ -242,6 +265,13 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     color: colors.ink,
   },
-  row: { flexDirection: 'row', gap: 8, marginTop: 12 },
+  row: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 12 },
+  decline: { marginLeft: 12 },
+  steps: { flexDirection: 'row' },
+  step: { flex: 1, gap: 1 },
+  stepRail: { flexDirection: 'row', alignItems: 'center', height: 14, marginBottom: 4 },
+  stepDot: { width: 10, height: 10, borderRadius: 5, borderWidth: 1.5, borderColor: colors.faint, backgroundColor: colors.card },
+  stepDotDone: { backgroundColor: colors.faint },
+  stepBar: { flex: 1, height: 1.5, backgroundColor: colors.line, marginHorizontal: 4 },
   stack: { gap: 10, marginTop: 16 },
 });

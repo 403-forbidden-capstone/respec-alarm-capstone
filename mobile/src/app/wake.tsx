@@ -1,18 +1,16 @@
 import { router, useLocalSearchParams } from 'expo-router';
-import { Fragment, useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
-import { Button, Card, LoadError, Loading, ProgressBar, Screen, Text, toast, TopBar } from '@/components/ui';
+import { Button, Card, LoadError, Loading, Screen, Text, toast, TopBar } from '@/components/ui';
 import { confirmWake, getEarlyWake, getMorningPlan, getWakeCheck, promptWake } from '@/features/alarm/api';
 import { EarlyWakeCard } from '@/features/alarm/components/EarlyWakeCard';
-import { FormulaBox } from '@/features/alarm/components/FormulaBox';
-import { TextLink } from '@/features/alarm/components/TextLink';
-import { MorningPlanLine } from '@/features/alarm/components/MorningPlanLine';
-import { WAKE_OBSERVE_MINUTES, WAKE_RECENT_MINUTES, type WakeCheck } from '@/features/alarm/types';
-import { useNextRing } from '@/features/alarm/hooks/useNextRing';
 import { useNow } from '@/features/alarm/hooks/useNow';
+import { MorningPlanLine } from '@/features/alarm/components/MorningPlanLine';
+import { WAKE_OBSERVE_MINUTES, type WakeCheck } from '@/features/alarm/types';
+import { useNextRing } from '@/features/alarm/hooks/useNextRing';
 import { WAKE_POLL_MS } from '@/features/alarm/hooks/useWakeCardRefresh';
-import { formatUsage, judgeLines, pickAlarmId, WAKE_RECENT_RANGE } from '@/features/alarm/wake';
+import { pickAlarmId } from '@/features/alarm/wake';
 import { uploadEvents } from '@/lib/alarmSync';
 import { addMinutes, formatTime, timeParts } from '@/lib/format';
 import { isPreviewAlarmId } from '@/features/alarm/ringPreview';
@@ -30,7 +28,6 @@ const AUTO_ROUTINE_DELAY_MS = 1500;
 type WakeState = { phase: Phase; usage: number; recent: number; at: Date | null; how: 'self' | 'auto' | null };
 type How = WakeState['how'];
 
-const METER_MAX = 5; // 분
 const POLL_MS = WAKE_POLL_MS; // 실데이터: 관찰 중에는 이만큼마다 판정을 다시 읽음 (관찰 10분이 끝나면 확정 · 확인 알림으로 넘어감) — 홈 카드와 같은 값
 
 // 단계 · 사용 시간은 가짜 db에 있음(api) — 시연 값도 api가 정함
@@ -69,13 +66,10 @@ export default function WakeScreen() {
         <Text variant="title" style={styles.title}>
           기상 확인
         </Text>
-        <Text variant="lead" style={styles.lead}>
-          알람을 끈 것만으로는 기상으로 보지 않아요.
-        </Text>
         <Flow phase="idle" how={null} />
         <Card>
           <Text variant="body" tone="sub">
-            기상 알람을 해제하면 여기서 기상을 판정해요.
+            알람을 끄면 여기서 기상을 판정해요.
           </Text>
         </Card>
         <ReceivedWakePingLine />
@@ -102,15 +96,11 @@ function WakeFlow({ check }: { check: WakeCheck }) {
   // 실제로 끈 시각부터 10분 — 미룬 뒤 다시 울려 끄면 그 시각부터. 판정 시점(확정 · 확인 알림)으로만 씀
   // 자동 판정의 기록 시각은 api가 누적 사용이 θ를 넘은 시각으로 남김 (D14)
   const observeEnd = addMinutes(check.dismissedAt, WAKE_OBSERVE_MINUTES);
-  // 두 번째 막대 구간(해제 5~10분 뒤)이 아직 안 왔으면 0초 대신 "아직" (#225)
-  const current = useNow(POLL_MS);
-  const recentPending = state.phase === 'observing' && state.recent === 0 && current < addMinutes(check.dismissedAt, WAKE_OBSERVE_MINUTES - WAKE_RECENT_MINUTES);
   // 그룹 일정이 아니면 공유 문구 · 그룹 버튼을 뺌
   //   자동 판정은 친구 화면에 20분 늦게 공개됨(그 안에 고치면 안 보임) — 직접 응답은 바로 보임
   const sharedName = check.groupName ?? '그룹';
   const shared = check.groupId != null ? ` · ${sharedName}에 공유했어요` : '';
   const sharedAuto = check.groupId != null ? ` · ${sharedName}에는 20분 뒤에 보여요` : '';
-  const [showWhy, setShowWhy] = useState(false); // 확정 뒤 판정 근거 펼침
 
   function first() {
     if (handled.current === state.phase) return false;
@@ -192,14 +182,6 @@ function WakeFlow({ check }: { check: WakeCheck }) {
     await promptWake(check.alarmId, observeEnd);
     await refresh();
   }
-  const meters = (
-    <>
-      <Meter label={`알람 끈 뒤 ${WAKE_OBSERVE_MINUTES}분 동안 폰 사용`} value={state.usage} threshold={check.thetaMinutes} />
-      <Meter label={`알람 끈 뒤 ${WAKE_RECENT_RANGE}분 폰 사용`} value={state.recent} pending={recentPending} />
-      <FormulaBox lines={judgeLines(state.usage, state.recent, check.thetaMinutes)} />
-    </>
-  );
-
   return (
     <Screen>
       <TopBar onBack={backOrHome} screenId="H08" />
@@ -207,18 +189,14 @@ function WakeFlow({ check }: { check: WakeCheck }) {
       <Text variant="title" style={styles.title}>
         기상 확인
       </Text>
-      <Text variant="lead" style={styles.lead}>
-        알람을 끈 것만으로는 기상으로 보지 않아요.
-      </Text>
-      <Flow phase={state.phase} how={state.how} />
+      <Flow phase={state.phase} how={state.how} times={[formatTime(check.dismissedAt), null, state.phase !== 'observing' ? timeParts(observeEnd).hm : null, state.at ? timeParts(state.at).hm : null]} />
 
       {state.phase === 'observing' ? (
         <>
           <Card>
             <Text variant="label" tone="sub">
-              {formatTime(check.dismissedAt)}에 알람을 껐어요 · {WAKE_OBSERVE_MINUTES}분 동안 폰 사용을 보고 있어요
+              {formatTime(check.dismissedAt)}에 알람을 껐어요 · 폰 사용을 보는 중
             </Text>
-            {meters}
           </Card>
           {mock ? (
             <View style={styles.sim}>
@@ -255,7 +233,6 @@ function WakeFlow({ check }: { check: WakeCheck }) {
             <Text variant="label" tone="sub">
               조건을 채우지 못해 확인 알림을 보냈어요
             </Text>
-            {meters}
           </Card>
         </>
       ) : null}
@@ -270,16 +247,10 @@ function WakeFlow({ check }: { check: WakeCheck }) {
             </View>
             <Text variant="sheetTitle">기상 확정 · {formatTime(state.at)}</Text>
             <Text variant="small" tone="sub" align="center" style={styles.doneText}>
-              {state.how === 'self'
-                ? '확인 알림에 직접 응답했어요'
-                : `폰 사용으로 자동 판정했어요 · 폰을 ${check.thetaMinutes}분 넘게 쓴 시각으로 기록했어요`}
+              {state.how === 'self' ? '확인 알림에 직접 응답했어요' : '폰 사용으로 자동 판정했어요'}
               {state.how === 'self' ? shared : sharedAuto}
             </Text>
           </View>
-          <View style={styles.why}>
-            <TextLink label={showWhy ? '판정 근거 접기 ˄' : '판정 근거 보기 ˅'} onPress={() => setShowWhy((v) => !v)} />
-          </View>
-          {showWhy ? <Card>{meters}</Card> : null}
           <MorningLine />
           <View style={styles.stack}>
             {next ? <Button label={next.label} onPress={next.open} /> : null}
@@ -310,71 +281,56 @@ function MorningLine() {
   return <MorningPlanLine plan={data} current={current} onPress={open} />;
 }
 
-// 판정 단계 (.flow) — 해제됨 → 관찰 중 → (확인 알림) → 기상 확정
+// 판정 단계 (.flow) — 해제됨 → 관찰 중 → (확인 알림) → 기상 확정. 홈 흐름 카드와 같은 가로 점 줄 — 지난 단계는 채움, 지금 단계만 포인트 색
 // idle(끈 알람 없음)은 목업 그대로 해제됨 · 관찰 중을 지난 단계로 그림
-function Flow({ phase, how }: { phase: Phase | 'idle'; how: How }) {
+//   times — 단계별 시각 (없으면 점 아래 이름만). 확인 알림을 거치지 않은 줄은 그 자리를 건너뜀
+function Flow({ phase, how, times }: { phase: Phase | 'idle'; how: How; times?: (string | null)[] }) {
   const accent = useAccent(); // 포인트 색 — 그 시각 하늘과 같은 계열 (lib/skyTone)
-  const steps: { label: string; mode: 'done' | 'on' | 'todo' }[] = [
-    { label: '해제됨', mode: 'done' },
-    { label: '관찰 중', mode: phase === 'observing' ? 'on' : 'done' },
+  const steps: { label: string; mode: 'done' | 'on' | 'todo'; time: string | null }[] = [
+    { label: '해제됨', mode: 'done', time: times?.[0] ?? null },
+    { label: '관찰 중', mode: phase === 'observing' ? 'on' : 'done', time: times?.[1] ?? null },
   ];
-  if (phase === 'prompt') steps.push({ label: '확인 알림', mode: 'on' });
+  if (phase === 'prompt') steps.push({ label: '확인 알림', mode: 'on', time: times?.[2] ?? null });
   else if (phase === 'confirmed' && how === 'self') {
-    steps.push({ label: '확인 알림', mode: 'done' }, { label: '기상 확정', mode: 'on' });
-  } else steps.push({ label: '기상 확정', mode: phase === 'confirmed' ? 'on' : 'todo' });
+    steps.push({ label: '확인 알림', mode: 'done', time: times?.[2] ?? null }, { label: '기상 확정', mode: 'on', time: times?.[3] ?? null });
+  } else steps.push({ label: '기상 확정', mode: phase === 'confirmed' ? 'on' : 'todo', time: phase === 'confirmed' ? (times?.[3] ?? null) : null });
 
   return (
     <View style={styles.flow} accessibilityLabel="판정 단계">
       {steps.map((step, i) => (
-        <Fragment key={step.label}>
-          {i > 0 ? (
-            <Text variant="label" tone="faint">
-              →
+        <View key={step.label} style={styles.step}>
+          <View style={styles.stepRail}>
+            <View
+              style={[
+                styles.stepDot,
+                step.mode === 'done' && styles.stepDotDone,
+                step.mode === 'on' && { backgroundColor: accent, borderColor: accent },
+              ]}
+            />
+            {i < steps.length - 1 ? <View style={styles.stepBar} /> : null}
+          </View>
+          <Text variant="label" tone={step.mode === 'todo' ? 'faint' : 'ink'} weight={step.mode === 'on' ? 700 : 400}>
+            {step.label}
+          </Text>
+          {step.time ? (
+            <Text variant="caption" tone="sub">
+              {step.time}
             </Text>
           ) : null}
-          <View style={[styles.flowStep, step.mode === 'on' && [styles.flowOn, { backgroundColor: accent, borderColor: accent }]]}>
-            <Text variant="label" tone={step.mode === 'on' ? 'inverse' : step.mode === 'done' ? 'ink' : 'faint'}>
-              {step.label}
-            </Text>
-          </View>
-        </Fragment>
+        </View>
       ))}
-    </View>
-  );
-}
-
-// 사용 시간 막대 (.meter) — threshold는 기상 판정 기준 θ
-function Meter({ label, value, threshold, pending }: { label: string; value: number; threshold?: number; pending?: boolean }) {
-  return (
-    <View style={styles.meter}>
-      <View style={styles.meterHead}>
-        <Text variant="note">
-          {label}
-        </Text>
-        <Text variant="note" weight={600} tone={pending ? 'faint' : undefined}>
-          {pending ? '아직' : formatUsage(value)}
-        </Text>
-      </View>
-      <ProgressBar value={value / METER_MAX} threshold={threshold != null ? threshold / METER_MAX : undefined} thick />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   title: { marginTop: 8, marginBottom: 4 },
-  lead: { marginBottom: 18 },
-  flow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 6, marginBottom: 14 },
-  flowStep: {
-    paddingVertical: 4,
-    paddingHorizontal: 10,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: colors.line,
-    backgroundColor: colors.card,
-  },
-  flowOn: { backgroundColor: colors.ink, borderColor: colors.ink },
-  meter: { marginVertical: 12 },
-  meterHead: { flexDirection: 'row', justifyContent: 'space-between' },
+  flow: { flexDirection: 'row', marginTop: 14, marginBottom: 18 },
+  step: { flex: 1, gap: 1 },
+  stepRail: { flexDirection: 'row', alignItems: 'center', height: 14, marginBottom: 4 },
+  stepDot: { width: 10, height: 10, borderRadius: 5, borderWidth: 1.5, borderColor: colors.faint, backgroundColor: colors.card },
+  stepDotDone: { backgroundColor: colors.faint },
+  stepBar: { flex: 1, height: 1.5, backgroundColor: colors.line, marginHorizontal: 4 },
   sim: { borderWidth: 1, borderStyle: 'dashed', borderColor: colors.faintDecor, borderRadius: 18, padding: 14, marginTop: 14 },
   simText: { marginBottom: 10 },
   simButtons: { gap: 8 },
@@ -401,6 +357,5 @@ const styles = StyleSheet.create({
     marginBottom: 14,
   },
   doneText: { marginTop: 4 },
-  why: { alignItems: 'center', marginBottom: 12 },
   stack: { gap: 10, marginTop: 16 },
 });
