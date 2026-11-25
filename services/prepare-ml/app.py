@@ -22,7 +22,7 @@ EXPECTED_FEATURES = {
     "w4_mae": ["weekday_code", "평토일구분코드", "휴일종류코드", "previous_day_target_minutes", "연령코드"],
 }
 MODEL_DIR = Path(os.environ.get("CATBOOST_MODEL_DIR", "models/v4_age_only")).expanduser().resolve()
-SURVEY_V2_PATH = Path(os.environ.get("SURVEY_V2_MODEL_PATH", "/app/models/survey_v2/prep_start_ratio_v2.cbm"))
+SURVEY_V2_PATH = Path(os.environ.get("SURVEY_V2_MODEL_PATH", str(MODEL_DIR / "prep_start_ratio_v2.cbm")))
 API_TOKEN = os.environ.get("CATBOOST_API_TOKEN", "")
 if not API_TOKEN:
     raise RuntimeError("CATBOOST_API_TOKEN must be set")
