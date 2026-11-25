@@ -34,7 +34,7 @@ export function ScoreBars({ bars, onPressDay }: Props) {
               <View style={[styles.fill, { backgroundColor: accent, width: `${Math.max(0, Math.min(100, b.score))}%` }]} />
             </View>
             <Text variant="note" tone="sub" align="right" style={styles.score}>
-              {b.score}
+              {b.score}점
             </Text>
           </Pressable>
         );
@@ -49,5 +49,5 @@ const styles = StyleSheet.create({
   label: { width: 48 },
   track: { flex: 1, height: 8, borderRadius: 4, backgroundColor: colors.chip, overflow: 'hidden' },
   fill: { height: '100%', borderRadius: 4, backgroundColor: colors.ink },
-  score: { width: 28, fontVariant: ['tabular-nums'] },
+  score: { width: 40, fontVariant: ['tabular-nums'] },
 });

@@ -31,8 +31,11 @@ export function RoutineStepRow({ step, time, first, canUp, canDown, onPress, onM
         </Text>
         <View style={styles.text}>
           <Text variant="bodyStrong">{step.name}</Text>
-          <Text variant="caption" tone="faint">
-            {step.minutes}분 · 알람 {step.alarm ? '있음' : '없음'}
+          <Text variant="label" tone="sub">
+            {step.minutes}분 ·{' '}
+            <Text variant="label" tone={step.alarm ? 'ink' : 'faint'} weight={step.alarm ? 700 : 400}>
+              알람 {step.alarm ? '있음' : '없음'}
+            </Text>
           </Text>
         </View>
       </Pressable>
