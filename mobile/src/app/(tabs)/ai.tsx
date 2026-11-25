@@ -22,7 +22,7 @@ import { noticeCopy } from '@/features/voice/chatNotice';
 import { ChatNotice } from '@/features/voice/components/ChatNotice'; // L5 부품 — 실패 · 한도 안내
 import { FoundScheduleCard } from '@/features/voice/components/FoundScheduleCard';
 import { useLiveVoice } from '@/features/voice/hooks/useLiveVoice';
-import { askPrompt, heardSchedule, isNearBottom, mergeLive, mightBeSchedule, type ChatRow } from '@/features/voice/liveChat';
+import { askPrompt, heardSchedule, keepFollowing, mergeLive, mightBeSchedule, type ChatRow } from '@/features/voice/liveChat';
 import type { Conversation, TurnNotice } from '@/features/voice/types';
 import { now } from '@/lib/clock';
 import { formatTime } from '@/lib/format';
@@ -188,7 +188,16 @@ export default function AiScreen() {
       toast('같은 제안은 당분간 다시 보이지 않아요');
     }, '제안을 넘기지 못했어요');
   const scroll = useRef<ScrollView>(null);
-  const atBottom = useRef(true); // 맨 아래 근처를 보고 있음 — 이때만 새 말에 맞춰 내림 (위를 읽는 중이면 그대로)
+  const atBottom = useRef(true); // 맨 아래를 따라가는 중 — 길어지는 답 · 키보드에 맞춰 내림 (위를 읽는 중이면 그대로)
+  const lastY = useRef(0);
+  // 새 줄(내 말 · AI 답 · 카드 · 음성 줄 · 답 기다림 · 안내)이 붙으면 위를 읽던 중이어도 맨 아래로. 실제 높이가 바뀌면 onContentSizeChange가 마저 내림
+  const shown = progress ?? data;
+  const lastId = (xs?: { id: string }[]) => xs?.[xs.length - 1]?.id;
+  const newest = [shown?.messages.length, lastId(shown?.messages), live.lines.length, lastId(live.lines), thinking, drafting > 0, !!shown?.unavailable, !!shown?.limits?.reached].join('|');
+  useEffect(() => {
+    atBottom.current = true;
+    scroll.current?.scrollToEnd({ animated: true });
+  }, [newest]);
   const thinkingRef = useRef(false); // 정리 중인지 — 확인창이 떠 있는 사이 바뀐 값을 읽어야 해서 렌더 값(thinking) 말고 ref로도 둠
 
   const next = data?.next ?? null;
@@ -200,7 +209,6 @@ export default function AiScreen() {
   async function talk(text?: string) {
     thinkingRef.current = true;
     live.clearError();
-    atBottom.current = true; // 내가 보냈으면 맨 아래로
     setPendingText(text?.trim() || (next?.who === 'me' ? next.text : null));
     setPendingAt(now());
     setThinking(true);
@@ -448,10 +456,15 @@ export default function AiScreen() {
         keyboardShouldPersistTaps="handled"
         scrollEventThrottle={16}
         onScroll={(e) => {
-          atBottom.current = isNearBottom(e.nativeEvent);
+          atBottom.current = keepFollowing(atBottom.current, lastY.current, e.nativeEvent);
+          lastY.current = e.nativeEvent.contentOffset.y;
         }}
         onContentSizeChange={() => {
           if (atBottom.current) scroll.current?.scrollToEnd({ animated: true });
+        }}
+        // 키보드가 올라와 목록이 줄어도 맨 아래를 보던 중이면 최신 줄을 그대로 보이게 (애니메이션 없이 — 키보드와 겹쳐 흔들리지 않게)
+        onLayout={() => {
+          if (atBottom.current) scroll.current?.scrollToEnd({ animated: false });
         }}
       >
         <TopBar screenId="A02" />

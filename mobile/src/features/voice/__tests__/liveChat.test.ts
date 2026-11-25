@@ -1,6 +1,6 @@
 import { describe, expect, it } from '@jest/globals';
 
-import { addLiveChunk, askPrompt, closeLive, heardSchedule, isNearBottom, mergeLive, mightBeSchedule, takeTurn, type LiveLine } from '../liveChat';
+import { addLiveChunk, askPrompt, closeLive, heardSchedule, isNearBottom, keepFollowing, mergeLive, mightBeSchedule, takeTurn, type LiveLine } from '../liveChat';
 import type { ChatMessage } from '../types';
 
 const t = (min: number) => new Date(2026, 10, 6, 21, min);
@@ -47,6 +47,14 @@ describe('liveChat', () => {
     expect(isNearBottom(at(500))).toBe(true);
     expect(isNearBottom(at(430))).toBe(true);
     expect(isNearBottom(at(200))).toBe(false);
+  });
+
+  it('keepFollowing: 내려가는 도중엔 따라가기 유지, 위로 올리면 놓음, 바닥에 닿으면 다시 따라감', () => {
+    const at = (y: number) => ({ contentOffset: { y }, layoutMeasurement: { height: 500 }, contentSize: { height: 1000 } });
+    expect(keepFollowing(true, 100, at(200))).toBe(true); // scrollToEnd 애니메이션 중
+    expect(keepFollowing(true, 300, at(200))).toBe(false); // 사용자가 위로
+    expect(keepFollowing(false, 100, at(200))).toBe(false); // 위를 읽다 조금 내림 — 아직 놓은 채
+    expect(keepFollowing(false, 400, at(480))).toBe(true); // 바닥까지 내림
   });
 
   it('takeTurn: 확정된 새 줄만 한 차례로 — 내 말 · AI 답을 각각 이어 붙이고, 넘긴 줄 · 임시 줄은 뺌', () => {
