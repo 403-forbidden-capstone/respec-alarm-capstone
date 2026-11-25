@@ -604,6 +604,27 @@ test('#624 12시 이후라 기상이 없던 그룹 일정: 따로 고른 기상�
   }
 });
 
+test('#624 따로 울리던 기상(wake_detached)이 있는 일정을 오전으로 옮기면 저장된 기상 − 준비 간격을 준비 전 활동으로 읽지 않음 (수정 실패 없음)', () => {
+  const group: AppointmentRow = { ...appointment, group_id: 'g1', appointment_at: kst(22, 900).toISOString() };
+  const saved = [row('WAKE', 690, { time_source: 'MANUAL' }), row('PREPARE', 825), row('DEPARTURE', 865), row('ARRIVE', 895)]; // 기상 11:30 직접 · 준비 13:45 (간격 135분)
+  const inputs = (at: number, detached: boolean) => base({
+    appointment: { ...group, appointment_at: kst(22, at).toISOString() }, participant: { ...participant, wake_detached: detached },
+    existingAlarms: saved, sameDayWake: false, stats: { sampleCount: 0, p80: null }, purePrepCandidate: { source: 'PROFILE', minutes: 40 }, draft: { appointmentId: 'ap1' },
+  });
+  // 오후 3시 그대로면 따로 울리는 기상 그대로
+  const stay = computePlan(inputs(900, true), api(30));
+  assert.equal(stay.withWake, false);
+  assert.ok(stay.check.ok);
+  for (const at of [750, 780]) { // 12:30 · 13:00 — 그날 첫 오전 일정이라 기상이 준비를 끔
+    const moved = computePlan(inputs(at, true), api(30));
+    assert.equal(moved.withWake, true);
+    assert.ok(moved.check.ok, `${at}: 수정 실패 없음`);
+    assert.equal(moved.beforePrepareMinutes, 20, '저장된 135분이 아니라 기본값');
+  }
+  // 표시가 없으면(준비가 기상을 따라가던 일정) 예전처럼 간격을 준비 전 활동으로 읽음
+  assert.equal(computePlan(inputs(780, false), api(30)).beforePrepareMinutes, 135);
+});
+
 test('kinds에 WAKE가 있어도 저녁이면 기상은 안 만들어짐 (kinds는 거르기만, L6 안건후보 기본안)', () => {
   const plan = computePlan(base({ draft: { at: kst(22, 1080), destination: { name: '강남역' }, kinds: ['WAKE', 'PREPARE', 'DEPARTURE'] }, now: kst(22, 400) }), api(30));
   assert.equal(plan.withWake, false);

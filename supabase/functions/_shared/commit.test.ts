@@ -169,6 +169,16 @@ test('replace_existing false면 고르지 않은 종류를 지우지 않음', as
   assert.deepEqual(body.canceled_alarm_ids, []);
 });
 
+test('#624 따로 울리는 기상: 그날 앞 기상이 있는 일정에 기상을 직접 고르면 참여 행에 wake_detached, 그 밖은 false', async () => {
+  const plain = setup();
+  await persistAppointment(plain.ctx, commitArgs(newDraft()));
+  assert.equal(plain.db.rows('appointment_participants')[0]?.wake_detached, false);
+  const lone = setup();
+  await persistAppointment(lone.ctx, commitArgs(newDraft({ manualTimes: { WAKE: kst(22, 360) } }), {}, { sameDayWake: true }));
+  assert.equal(lone.db.rows('appointment_participants')[0]?.wake_detached, true);
+  assert.deepEqual(lone.db.rows('alarms').map((a) => `${a.alarm_type} ${a.time_source}`).slice(0, 2), ['WAKE MANUAL', 'PREPARE AUTO']);
+});
+
 test('알람 없는 일정: 약속 · 참여 조건만 만들고 알람은 없음', async () => {
   const { db, ctx } = setup();
   const body = await persistAppointment(ctx, commitArgs(newDraft({ kinds: [] })));

@@ -195,6 +195,17 @@ describe('직접 고른 알람 시각의 자동값 (공용 역산으로 채움)'
     expect(autoTimesOf(meeting())).toEqual({});
   });
 
+  it('따로 울리는 기상(wake_detached, #624): 준비가 기상을 따라가지 않는 일정 — 간격이 240분 안쪽이어도 준비 전 활동 0, 기상은 직접 고름', () => {
+    const base = meeting();
+    const rows = { ...base, participant: { ...base.participant, wake_detached: true }, alarms: [alarmRow('a-wake', 'WAKE', '06:30', { time_source: 'MANUAL' }), alarmRow('a-prep', 'PREPARE', '08:00'), alarmRow('a-dep', 'DEPARTURE', '09:00')] };
+    const a = toAppointment(rows);
+    expect(a.withWake).toBe(false);
+    expect(a.beforePrepMinutes).toBe(0);
+    expect(a.prepMinutes).toBe(60);
+    expect(hm(atOf(a, 'WAKE')?.auto)).toBe('오전 8:00'); // 기상 없는 계산의 준비 시각 — 직접 고른 기상으로 남음
+    expect(toAppointment({ ...rows, participant: base.participant }).beforePrepMinutes).toBe(90); // 표시가 없으면 간격을 준비 전 활동으로
+  });
+
   it('간격이 240분을 넘으면 준비 전 활동이 아님 — 따로 울리는 기상(#624: 기상 08:00 직접 고름, 준비 13:45 자동)', () => {
     const lone = [alarmRow('a-wake', 'WAKE', '08:00', { time_source: 'MANUAL' }), alarmRow('a-prep', 'PREPARE', '13:45')];
     expect(beforePrepareOf(lone)).toBe(0);

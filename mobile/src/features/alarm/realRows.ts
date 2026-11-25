@@ -11,7 +11,7 @@ import type { AppointmentDetail, Level } from './types';
 
 // 참여 조건 하나 + 약속 + 그룹 이름 + 이 참여 조건의 알람 전부 (꺼진 것 · 도착 목표 포함). appointments!inner = 약속이 있는 참여 조건만, 약속 날짜로 거를 수 있음
 const PARTICIPANT_SELECT =
-  'participant_id, origin_name, transport_type, est_travel_minutes, travel_source, prepare_minutes, prepare_value_source, buffer_minutes, appointments!inner(appointment_id, series_id, title, appointment_at, dest_name, dest_lat, dest_lng, importance, recurrence_rule, groups(group_name)), alarms(alarm_id, alarm_type, scheduled_at, intensity, voice_tone, sound_key, vibration, is_enabled, time_source, intensity_source)';
+  'participant_id, origin_name, transport_type, est_travel_minutes, travel_source, prepare_minutes, prepare_value_source, buffer_minutes, wake_detached, appointments!inner(appointment_id, series_id, title, appointment_at, dest_name, dest_lat, dest_lng, importance, recurrence_rule, groups(group_name)), alarms(alarm_id, alarm_type, scheduled_at, intensity, voice_tone, sound_key, vibration, is_enabled, time_source, intensity_source)';
 
 // 이번만 지운 회차(appointments.exception_kind = 'CANCELED', 서버 appointment-edit)는 행은 남아 있고 알람만 지워져 있음 — H01 하루 일정(알람 없는 일정 줄) · H02 · 회차 목록에 안 보여야 함.
 //   NULL은 `neq`에 안 걸려서 is.null을 같이 씀. 약속 쪽 칸이라 `appointments!inner` 임베드에 referencedTable로 걺 (그래야 참여 조건 줄이 통째로 빠짐).
@@ -36,6 +36,7 @@ type ParticipantQueryRow = {
   // Normalize at the boundary instead of asserting a narrower type.
   prepare_value_source?: string | null;
   buffer_minutes: number;
+  wake_detached?: boolean; // 따로 울리는 기상(#624). 다른 쿼리(목록 등)는 안 읽음
   appointments: AppointmentRows['appointment'] & { groups: { group_name: string } | null };
   alarms: AlarmRow[];
 };

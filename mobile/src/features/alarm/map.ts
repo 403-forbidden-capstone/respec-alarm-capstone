@@ -32,7 +32,10 @@ export type AlarmRow = Pick<Tables<'alarms'>, 'alarm_id' | 'alarm_type' | 'sched
 export type ParticipantRow = Pick<
   Tables<'appointment_participants'>,
   'participant_id' | 'origin_name' | 'transport_type' | 'est_travel_minutes' | 'travel_source' | 'prepare_minutes' | 'buffer_minutes'
-> & { prepare_value_source?: 'LEGACY' | 'AUTO' | 'MANUAL' };
+> & {
+  prepare_value_source?: 'LEGACY' | 'AUTO' | 'MANUAL';
+  wake_detached?: boolean; // 따로 울리는 기상(#624) — 준비가 기상을 따라가지 않음 (H03 쿼리만 읽음, 없으면 false)
+};
 export type AppointmentRow = Pick<Tables<'appointments'>, 'appointment_id' | 'title' | 'appointment_at' | 'dest_name' | 'importance' | 'recurrence_rule'> & {
   dest_lat?: number | null; // 장소 좌표 — 편집 시트가 되돌리기에 같이 보내려고 읽음(H03만 채움, #275). 안 읽은 쿼리에는 없음
   dest_lng?: number | null;
@@ -113,6 +116,7 @@ export function beforePrepareOf(alarms: readonly AlarmRow[]): number {
 //   자동값과 같은 시각이면 직접 고른 것으로 안 침 (alarmChain이 auto를 안 줌)
 export function autoTimesOf(rows: AppointmentRows): Partial<Record<RingKind, Date>> {
   const { appointment, participant } = rows;
+  const detached = participant.wake_detached === true;
   const manualTimes: Partial<Record<RingKind, Date>> = {};
   for (const row of rows.alarms) if (isRingRow(row) && row.time_source === 'MANUAL') manualTimes[row.alarm_type] = parseDbTime(row.scheduled_at);
   if (!Object.keys(manualTimes).length) return {};
@@ -121,12 +125,15 @@ export function autoTimesOf(rows: AppointmentRows): Partial<Record<RingKind, Dat
     travelMinutes: participant.est_travel_minutes ?? 0,
     bufferMinutes: participant.buffer_minutes,
     prepareMinutes: participant.prepare_minutes,
-    beforePrepareMinutes: beforePrepareOf(rows.alarms),
-    withWake: rows.alarms.some((x) => x.alarm_type === 'WAKE'),
+    beforePrepareMinutes: detached ? 0 : beforePrepareOf(rows.alarms),
+    withWake: rows.alarms.some((x) => x.alarm_type === 'WAKE') && !detached,
     manualTimes,
   });
   const autos: Partial<Record<RingKind, Date>> = {};
   for (const x of chain) if (x.kind !== 'ARRIVE' && x.auto && manualTimes[x.kind]) autos[x.kind] = x.auto;
+  // 따로 울리는 기상의 자동값 = 기상 없는 계산의 첫 준비(없으면 출발) 알람 시각 — 서버 plan-core와 같음 (직접 고른 기상으로 남게)
+  const first = chain.find((x) => x.kind !== 'ARRIVE');
+  if (detached && manualTimes.WAKE && first) autos.WAKE = first.auto ?? first.at;
   return autos;
 }
 
@@ -139,7 +146,8 @@ export function toAppointment(rows: AppointmentRows): Appointment {
       .map((row) => toAlarmTime(row, kind === 'ARRIVE' ? undefined : autos[kind]))
       .filter((x): x is AlarmTime => x != null),
   );
-  const before = beforePrepareOf(rows.alarms);
+  const detached = participant.wake_detached === true; // 따로 울리는 기상 — 기상 − 준비 간격은 준비 전 활동이 아님
+  const before = detached ? 0 : beforePrepareOf(rows.alarms);
   const predicted = participant.prepare_minutes; // 약속 시점에 정해진 기상 ~ 출발 (DB에는 직접 고름 표시가 없어 이 값을 자동 값으로 봄)
   return {
     id: appointment.appointment_id,
@@ -160,7 +168,7 @@ export function toAppointment(rows: AppointmentRows): Appointment {
     recurrenceRule: appointment.recurrence_rule,
     groupName: rows.groupName,
     items: [...rows.items],
-    withWake: alarms.some((x) => x.kind === 'WAKE'),
+    withWake: alarms.some((x) => x.kind === 'WAKE') && !detached, // 준비가 기상을 따라가는 일정인지
     enabled: alarms.some((x) => x.kind !== 'ARRIVE' && x.enabled), // 일정 전체 켜기는 DB에 따로 없음 — 울리는 알람이 하나라도 켜져 있으면 켜짐
     alarms,
     level: levelOf(rows.alarms),

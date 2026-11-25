@@ -102,7 +102,7 @@ export async function loadParticipant(db: Db, appointmentId: string, userId: str
     'appointment_participants',
     await db
       .from('appointment_participants')
-      .select('participant_id, appointment_id, user_id, origin_name, origin_lat, origin_lng, transport_type, est_travel_minutes, travel_source, prepare_minutes, prepare_value_source, buffer_minutes, prepare_advance_minutes')
+      .select('participant_id, appointment_id, user_id, origin_name, origin_lat, origin_lng, transport_type, est_travel_minutes, travel_source, prepare_minutes, prepare_value_source, buffer_minutes, prepare_advance_minutes, wake_detached')
       .eq('appointment_id', appointmentId)
       .eq('user_id', userId)
       .maybeSingle(),
