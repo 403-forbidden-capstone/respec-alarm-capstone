@@ -40,7 +40,7 @@ const VOICE_LABEL: Record<VoiceState, string> = { idle: '말하기', listening: 
 // 대화 아래 입력 칸 — 음성 모드(키보드 · 파형 · 큰 마이크)와 글 모드(마이크 · 입력칸 · 보내기)
 export function ChatComposer(p: Props) {
   return (
-    <View style={styles.box}>
+    <View style={[styles.box, p.mode === 'voice' && styles.boxVoice]}>
       {p.notice ? (
         <Text variant="small" tone="sub" align="center" style={styles.notice} accessibilityLiveRegion="polite">
           {p.notice}
@@ -58,16 +58,21 @@ function VoiceRow({ voice, micOn, micDisabled, onSpeak, onToggleMode }: Props) {
       <View style={styles.center} pointerEvents="box-none">
         <View style={styles.micLine}>
           <Wave state={voice} />
-          <Pressable
-            onPress={onSpeak}
-            disabled={micDisabled}
-            accessibilityRole="button"
-            accessibilityLabel={micOn ? '음성 대화 끝내기' : '말하기'}
-            accessibilityState={{ disabled: micDisabled, busy: voice !== 'idle' }}
-            style={({ pressed }) => [styles.mic, { backgroundColor: accent }, micDisabled && voice === 'idle' && styles.off, pressed && styles.pressed]}
-          >
-            <SymbolView name={{ ios: 'mic.fill', android: 'mic', web: 'mic' }} size={30} tintColor={colors.inverse} />
-          </Pressable>
+          <View style={styles.micWrap}>
+            {/* 마이크 둘레 — 포인트 색을 옅게 깐 원 + 테두리. 기본에도 은은하게, 듣거나 말하는 중엔 조금 짙게 */}
+            <View style={[styles.halo, { backgroundColor: accent, opacity: voice === 'idle' ? 0.14 : 0.22 }]} />
+            <View style={[styles.halo, styles.haloRing, { borderColor: accent, opacity: voice === 'idle' ? 0.3 : 0.5 }]} />
+            <Pressable
+              onPress={onSpeak}
+              disabled={micDisabled}
+              accessibilityRole="button"
+              accessibilityLabel={micOn ? '음성 대화 끝내기' : '말하기'}
+              accessibilityState={{ disabled: micDisabled, busy: voice !== 'idle' }}
+              style={({ pressed }) => [styles.mic, { backgroundColor: accent }, micDisabled && voice === 'idle' && styles.off, pressed && styles.pressed]}
+            >
+              <SymbolView name={{ ios: 'mic.fill', android: 'mic', web: 'mic' }} size={26} tintColor={colors.inverse} />
+            </Pressable>
+          </View>
           <Wave state={voice} mirror />
         </View>
         <Text variant="small" tone="sub" weight={600} accessibilityLiveRegion="polite">
@@ -205,7 +210,8 @@ function Wave({ state, mirror }: { state: VoiceState; mirror?: boolean }) {
 }
 
 const BTN = 44; // 둥근 버튼 · 한 줄 입력칸 높이
-const MIC = 64;
+const MIC = 54;
+const HALO = 64; // 마이크 둘레 원 — 음성 칸 높이 112 → 94
 const INPUT_LINES = 5; // 입력칸이 늘어나는 최대 줄 수
 const INPUT_BORDER = 1;
 const INPUT_PAD = (BTN - typeScale.body.lineHeight) / 2 - INPUT_BORDER; // 한 줄일 때 칸 높이 = 버튼(44)
@@ -225,8 +231,12 @@ const styles = StyleSheet.create({
   notice: { marginBottom: 8 },
   voiceRow: { flexDirection: 'row', alignItems: 'center' },
   side: { position: 'absolute', left: 0 }, // 키보드 버튼은 왼쪽, 마이크는 칸 한가운데
-  center: { flex: 1, alignItems: 'center', gap: 6 },
+  boxVoice: { paddingVertical: 6 }, // 음성 모드는 낮게 — 글 모드 여백(12)은 그대로
+  center: { flex: 1, alignItems: 'center' }, // 마이크 원 바로 아래 글
   micLine: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  micWrap: { width: HALO, height: HALO, alignItems: 'center', justifyContent: 'center' },
+  halo: { position: 'absolute', width: HALO, height: HALO, borderRadius: HALO / 2 },
+  haloRing: { borderWidth: 1.5 },
   mic: { width: MIC, height: MIC, borderRadius: MIC / 2, alignItems: 'center', justifyContent: 'center' },
   wave: { flexDirection: 'row', alignItems: 'center', gap: 3, height: 28 },
   bar: { width: 3, height: 28, borderRadius: 1.5 },
