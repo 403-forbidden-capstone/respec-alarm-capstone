@@ -56,6 +56,7 @@ describe('스키마 7개 — 실험실과 같은 내용인지 지문으로 대�
     'extract-fast.v2': '23cc5e', // 서버 판 (extract-fast.v1 + 준비물 items, T2F.v2-d)
     'extract-fast.v3': 'c6f404', // 서버 판 (extract-fast.v2 + 나가기 전 할 일 pre_tasks · 기상 답 wake_reply, T2F.v2-e)
     'extract-fast.v4': '958771', // 서버 판 (extract-fast.v3 + 알람 상대 변경 분 alarm_changes.shift, T2F.v2-f)
+    'extract-fast.v5': '867712', // 서버 판 (extract-fast.v4 + 기본 알람 만들기 alarm_new, T2F.v2-g)
     'extract.v2': 'ca990a', // 서버 판 (실험실 장부에 없음 — extract.v1 + 대화 끝 정리 칸)
   };
 

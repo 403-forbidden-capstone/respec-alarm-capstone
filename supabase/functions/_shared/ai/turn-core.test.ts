@@ -2477,3 +2477,86 @@ describe("알람 상대 시간 변경 (alarm_changes.shift, #625) — 서버가 
     assert.equal(prepAsked([{ role: "user", text: "준비 시간 10분 늘려줘" }]), true);
   });
 });
+
+describe("기본 알람 만들기 (alarm_new, T2F.v2-g) — 일정 · 준비 · 출발 없이 정한 시각의 알람만", () => {
+  type XNew = NonNullable<FastExtract["alarm_new"]>[number];
+  const nw = (over: Partial<XNew> = {}): XNew => ({ date: "", time: "", ampm: true, after: 0, save: "UNCONFIRMED", ...over });
+  const newCards = (cards: Card[]): [string, string, string | undefined, string][] => cards.map((x) => [x.kind, x.status, x.edit?.at, x.summary]);
+
+  it("내일 일정이 있어도 '내일 7시에 알람 맞춰줘'는 새 알람 카드 하나 — 일정 · 기존 알람은 그대로, 저장 전엔 저장됨 줄 없음", () => {
+    const c = ctx(); // 10/9 알고리즘 수업 · 기상 08:00
+    const r = applyFast(initTurnState(c), fast({ alarm_new: [nw({ date: "2026-10-09", time: "07:00" })] }), c, 1, "내일 7시에 알람 맞춰줘");
+    assert.deepEqual(newCards(r.cards), [["ALARM_NEW", "READY", iso("2026-10-09", "07:00"), "10/9(금) 07:00 알람 추가"]]);
+    assert.deepEqual(r.event.pending, [{ id: "c1", kind: "ALARM_CHANGE", summary: "10/9(금) 07:00 알람 추가 · 카드의 [저장]으로" }]);
+    assert.deepEqual([r.event.applied, r.event.alarms], [[], []], "저장은 [저장] 뒤에만");
+    assert.deepEqual(times(r.state.alarms), times(c.tomorrow.alarms));
+  });
+
+  it("T2F가 기본 알람을 알람 변경으로 적어도 바꾸라는 말이 없으면 그날 일정의 기상 알람을 고치지 않음 · '바꿔줘'면 고침", () => {
+    const c = ctx();
+    const add = applyFast(initTurnState(c), fast({ alarm_changes: [alarm({ time: "07:00", save: "UNCONFIRMED" })] }), c, 1, "내일 7시에 깨워줘");
+    assert.deepEqual(newCards(add.cards), [["ALARM_NEW", "READY", iso("2026-10-09", "07:00"), "10/9(금) 07:00 알람 추가"]]);
+    const edit = applyFast(initTurnState(c), fast({ alarm_changes: [alarm({ time: "07:00", save: "UNCONFIRMED" })] }), c, 1, "내일 기상 알람 7시로 바꿔줘");
+    assert.deepEqual(edit.cards.map((x) => x.kind), ["ALARM_EDIT"]);
+  });
+
+  it("일정 카드 없이 온 기상 답('9시 반에 깨워줘')도 새 알람 — 버리지 않음", () => {
+    const c = ctx({ tomorrow: [] });
+    const r = applyFast(initTurnState(c), fast({ wake_reply: { choice: "TIME", time: "09:30" } }), c, 1, "9시 반에 깨워줘");
+    assert.deepEqual(newCards(r.cards), [["ALARM_NEW", "READY", iso("2026-10-09", "09:30"), "10/9(금) 09:30 알람 추가"]]);
+  });
+
+  it("여러 개는 카드 여러 장 · 다음 말에 다시 적혀도 한 번만", () => {
+    const c = ctx();
+    const f = fast({ alarm_new: [nw({ time: "06:30" }), nw({ time: "06:40" }), nw({ time: "06:50" })] });
+    const r1 = applyFast(initTurnState(c), f, c, 1, "6시 반 6시 40분 6시 50분에 알람 세 개");
+    assert.deepEqual(r1.cards.map((x) => [x.id, x.edit?.at]), [["c1", iso("2026-10-09", "06:30")], ["c2", iso("2026-10-09", "06:40")], ["c3", iso("2026-10-09", "06:50")]]);
+    const r2 = applyFast(r1.state, f, c, 2, "고마워");
+    assert.ok(isEmpty(r2.event));
+    assert.equal(r2.state.cards.length, 3);
+  });
+
+  it("지금 기준 상대 시각: '30분 뒤' = 지금 + 30분, 다음 말에 다시 적혀도 다시 셈하지 않음", () => {
+    const c = ctx(); // 10/8 22:30
+    const f = fast({ alarm_new: [nw({ after: 30 })] });
+    const r1 = applyFast(initTurnState(c), f, c, 1, "30분 뒤에 알람 맞춰줘");
+    assert.deepEqual(newCards(r1.cards), [["ALARM_NEW", "READY", iso("2026-10-08", "23:00"), "10/8(목) 23:00 알람 추가"]]);
+    const r2 = applyFast(r1.state, f, c, 2, "고마워");
+    assert.ok(isEmpty(r2.event));
+    assert.equal(r2.state.cards.length, 1);
+  });
+
+  it("날짜 · 오전/오후를 말하지 않으면 지금 뒤 가장 가까운 시각 — 새벽 대화는 달력 날짜 기준 (새벽 4시 기준 정책 그대로)", () => {
+    const night = ctx(); // 10/8 22:30
+    assert.equal(applyFast(initTurnState(night), fast({ alarm_new: [nw({ time: "07:00", ampm: false })] }), night, 1, "7시에 알람").cards[0]?.edit?.at, iso("2026-10-09", "07:00"));
+    const day = ctx({ now: "2026-10-08T14:00:00+09:00" });
+    assert.equal(applyFast(initTurnState(day), fast({ alarm_new: [nw({ time: "07:00", ampm: false })] }), day, 1, "7시에 알람").cards[0]?.edit?.at, iso("2026-10-08", "19:00"));
+    const dawn = ctx({ now: "2026-10-09T01:00:00+09:00" }); // 기록 날짜 10/8, 달력 10/9 새벽
+    assert.equal(applyFast(initTurnState(dawn), fast({ alarm_new: [nw({ time: "07:00" })] }), dawn, 1, "7시에 깨워줘").cards[0]?.edit?.at, iso("2026-10-09", "07:00"));
+    // 새벽의 '내일'은 날짜표(기록 날짜 + 1 = 10/9)로 T2F가 바꿔 줌 — 달력으로도 같은 날 아침이라 새벽 4시 기준과 어긋나지 않음
+    assert.equal(applyFast(initTurnState(dawn), fast({ alarm_new: [nw({ date: "2026-10-09", time: "07:00", ampm: false })] }), dawn, 1, "내일 7시 알람").cards[0]?.edit?.at, iso("2026-10-09", "07:00"));
+  });
+
+  it("기상이 분명하면 오전 우선 · 말한 오전/오후 · 날짜가 먼저", () => {
+    const day = ctx({ now: "2026-10-08T14:00:00+09:00" });
+    const at = (x: XNew, text: string): string | undefined => applyFast(initTurnState(day), fast({ alarm_new: [x] }), day, 1, text).cards[0]?.edit?.at;
+    assert.equal(at(nw({ time: "07:00", ampm: false }), "7시에 깨워줘"), iso("2026-10-09", "07:00"), "오후 2시에 '7시에 깨워줘' = 내일 오전 7시 (오늘 저녁 7시 아님)");
+    assert.equal(at(nw({ date: "2026-10-09", time: "08:30", ampm: false }), "내일 8시 반에 깨워줘"), iso("2026-10-09", "08:30"));
+    assert.equal(at(nw({ time: "08:00", ampm: false }), "8시에 알람"), iso("2026-10-08", "20:00"), "기상 말이 없으면 가장 가까운 미래");
+    assert.equal(at(nw({ time: "20:00" }), "오후 8시에 깨워줘"), iso("2026-10-08", "20:00"), "말한 오후가 기상 말보다 먼저");
+  });
+
+  it("시각이 없으면 되묻고 카드 없음 · 지난 시각은 PAST_TIME · 같은 분 알람이 있으면 겹침 · 거절하면 카드 거둠", () => {
+    const c = ctx();
+    const ask = applyFast(initTurnState(c), fast({ alarm_new: [nw()] }), c, 1, "알람 하나 맞춰줘");
+    assert.deepEqual([ask.cards, ask.event.clarify], [[], ["몇 시에 알람을 맞출지 (정확한 시각)"]]);
+    const past = applyFast(initTurnState(c), fast({ alarm_new: [nw({ date: "2026-10-08", time: "21:00" })] }), c, 1, "오늘 밤 9시에 알람");
+    assert.deepEqual([past.cards, past.event.rejected], [[], [{ target: "10/8(목) 21:00 알람 추가", reason: "PAST_TIME" }]]);
+    const twin = applyFast(initTurnState(c), fast({ alarm_new: [nw({ date: "2026-10-09", time: "08:00" })] }), c, 1, "내일 8시 알람");
+    assert.deepEqual(twin.cards, []);
+    assert.equal(twin.event.conflicts?.length, 1);
+    const r1 = applyFast(initTurnState(c), fast({ alarm_new: [nw({ time: "07:00" })] }), c, 1, "7시에 알람");
+    const no = applyFast(r1.state, fast({ alarm_new: [nw({ time: "07:00", save: "DECLINED" })] }), c, 2, "아니 하지 마");
+    assert.equal(card(no.state, "c1").status, "REJECTED");
+  });
+});

@@ -1509,6 +1509,66 @@ export function applyFast(state: TurnState, fast: FastExtract, ctx: Context, aft
   // 이어진 상대 변경("5분 더 당겨줘")이 일정을 말하지 않으면 이 대화에서 마지막으로 시각을 고친 알람 카드의 일정
   //   날짜를 말한 요청("내일 준비 알람 10분 당겨")은 이어진 말이 아니라 따르지 않음, [변경 안 함]한 카드도 기준이 아님
   const lastTimedAppt = s.cards.filter((k) => k.kind === "ALARM_EDIT" && k.status !== "REJECTED" && k.edit?.times !== undefined && k.edit.appointment_id).at(-1)?.edit?.appointment_id ?? null;
+
+  // ── 기본 알람 만들기 (alarm_new, T2F.v2-g) ── 일정 · 장소 · 준비 · 출발 없이 정한 시각의 알람 하나씩 ALARM_NEW 카드로 (저장은 앱 createStandaloneAlarm)
+  //   T2F가 기본 알람을 알람 변경으로 적은 것(바꾸라는 말 · 일정 이름 없는 일정 없는 기상 시각)과 일정 카드 없는 기상 답도 여기로 —
+  //   그날 일정의 기상 알람을 고친 것으로 보지 않음. 기존 알람은 '바꿔 · 변경 …'이라고 말할 때만 고침 (아래 알람 변경)
+  const asNew = (c: XAlarm): boolean =>
+    intent !== null && intent.alarm && !intent.edit && hits === null && c.target === "u0" && c.type === "WAKE" &&
+    c.appointment_ref === null && c.time !== null && c.enabled !== false && !(c.shift ?? 0);
+  const alarmNew = [
+    ...(fast.alarm_new ?? []).map((a) => ({ ...a, level: null as number | null })),
+    ...extract.alarm_changes.filter(asNew).map((c) => ({ date: c.date ?? "", time: c.time as string, ampm: true, after: 0, save: c.save, level: c.intensity === null ? null : levelOfIntensity(c.intensity) })),
+  ];
+  extract.alarm_changes = extract.alarm_changes.filter((c) => !asNew(c));
+  if (wakeReply?.choice === "TIME" && openNew === undefined && intent?.alarm === true) alarmNew.push({ date: "", time: wakeReply.time, ampm: true, after: 0, save: "UNCONFIRMED", level: null });
+  for (const a of alarmNew) {
+    const after = Math.round(a.after);
+    // 상대 시각은 이번 말이 청한 것만 — T2F가 앞 말의 "30분 뒤"를 다시 적으면 지금 기준으로 또 셈하게 됨
+    if (after > 0 && (intent === null || !/(뒤|후|있다가|이따)/u.test(intent.text) || !once(`alarmnew+:${afterTurn}|${after}`, "1"))) continue;
+    let at: LocalDateTime | undefined;
+    if (after > 0) at = addMinutes(now.date, now.time, after);
+    else if (TIME_RE.test(a.time)) {
+      // 말한 날짜 · 오전/오후가 먼저. 깨워 · 일어나 · 기상처럼 기상이 분명하면 오전, 그 밖에 오전 · 오후를 말하지 않았으면 두 쪽 중,
+      //   날짜를 말하지 않았으면 오늘 · 내일(달력 날짜) 중 지금 뒤 가장 가까운 시각 (지난 시각이면 아래 PAST_TIME)
+      const h = Number(a.time.slice(0, 2));
+      const wakeSaid = intent !== null && TYPE_WORDS.WAKE.test(intent.text);
+      const times = a.ampm || wakeSaid || h >= 12 ? [a.time] : [a.time, `${h + 12}${a.time.slice(2)}`];
+      const days = a.date !== "" ? [a.date] : [now.date, addDays(now.date, 1)];
+      const all = days.flatMap((date) => times.map((time) => ({ date, time })));
+      at = all.filter((x) => minutesBetween(now, x) > 0).sort((x, y) => minutesBetween(now, x) - minutesBetween(now, y))[0] ?? all[0];
+    }
+    if (at === undefined) {
+      // 시각도 상대 시각도 없음 — 몇 시인지 되물음 (같은 요청에 한 번)
+      if (once(`alarmnew?:${a.date}`, "ask")) ev.clarify.push("몇 시에 알람을 맞출지 (정확한 시각)");
+      continue;
+    }
+    const key = `alarmnew:${at.date} ${at.time}`;
+    alarmKeys.add(key); // 바로잡는 말 정리가 이번 추출에 있는 요청으로 봄
+    if (after === 0 && !once(key, a.save)) continue;
+    const label = `${dateKo(at.date)} ${at.time} 알람 추가`;
+    if (a.save === "DECLINED") {
+      dropPending(key);
+      continue;
+    }
+    if (minutesBetween(now, at) <= 0) {
+      reject(label, "PAST_TIME");
+      continue;
+    }
+    const twin = sameMinuteAlarm(at);
+    if (twin) {
+      dropPending(key);
+      ev.conflicts = [...(ev.conflicts ?? []), `${dateKo(twin.date)} ${twin.time} 알람 안 만듦 — 같은 시각 ${TYPE_KO[twin.type]} 알람이 이미 있음`];
+      continue;
+    }
+    const item: XAlarm = { target: "u0", appointment_ref: null, type: "WAKE", date: at.date, time: at.time, intensity: null, enabled: null, save: a.save };
+    const edit: CardEdit = { at: localToIso(at.date, at.time), level: a.level };
+    upsertCard({ kind: "ALARM_CHANGE", key, item, summary: label, target_ref: null }, "ALARM_NEW", (card) => {
+      card.summary = label;
+      card.draft = null;
+      card.edit = edit;
+    }, a.save);
+  }
   for (const c0 of extract.alarm_changes) {
     const shift = Math.round(c0.shift ?? 0);
     const c: XAlarm = shift !== 0 && c0.appointment_ref === null && c0.date === null && hits === null && lastTimedAppt !== null ? { ...c0, appointment_ref: lastTimedAppt } : c0;

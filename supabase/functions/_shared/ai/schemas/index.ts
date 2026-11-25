@@ -9,6 +9,7 @@ import extractFast from './extract-fast.v1.ts';
 import extractFastV2 from './extract-fast.v2.ts';
 import extractFastV3 from './extract-fast.v3.ts';
 import extractFastV4 from './extract-fast.v4.ts';
+import extractFastV5 from './extract-fast.v5.ts';
 import t1Reply from './t1-reply.v1.ts';
 import t3Reason from './t3-reason.v1.ts';
 import t4Diary from './t4-diary.v1.ts';
@@ -20,6 +21,7 @@ const ALL = {
   'extract.v2': extractV2, // 서버 판 (T2.v3 — 대화 끝 정리)
   'extract-fast.v1': extractFast,
   'extract-fast.v2': extractFastV2, // 서버 판 (T2F.v2-d — 준비물 items)
+  'extract-fast.v5': extractFastV5, // 서버 판 (T2F.v2-g — 기본 알람 만들기 alarm_new)
   'extract-fast.v4': extractFastV4, // 서버 판 (T2F.v2-f — 알람 상대 변경 분 alarm_changes.shift)
   'extract-fast.v3': extractFastV3, // 서버 판 (T2F.v2-e — 나가기 전 할 일 pre_tasks · 기상 답 wake_reply)
   't3-reason.v1': t3Reason,
