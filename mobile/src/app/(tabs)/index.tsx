@@ -23,6 +23,7 @@ import { getGroupSummary, listGroups } from '@/features/social/api';
 import { ProposalCards } from '@/features/social/components/ProposalCards';
 import { ReceivedWakePingLine } from '@/features/social/components/ReceivedWakePingLine';
 import { AppointmentAlarmCard } from '@/features/alarm/components/AppointmentAlarmCard';
+import { NewAlarmSheet } from '@/features/alarm/components/NewAlarmSheet';
 import { MorningCard } from '@/features/alarm/components/MorningCard';
 import { TripCard } from '@/features/alarm/components/TripCard';
 import { ScheduleList } from '@/features/alarm/components/ScheduleList';
@@ -30,6 +31,7 @@ import { TextLink } from '@/features/alarm/components/TextLink';
 import { useAppointmentToggle } from '@/features/alarm/hooks/useAppointmentToggle';
 import { useDepartCheck } from '@/features/alarm/hooks/useDepartCheck';
 import { useNow } from '@/features/alarm/hooks/useNow';
+import { useStandaloneAlarmEdit } from '@/features/alarm/hooks/useStandaloneAlarmSave';
 import { useWakeCardRefresh } from '@/features/alarm/hooks/useWakeCardRefresh';
 import { morningCardVisible, tripCardOf } from '@/features/alarm/morning';
 import { isEvening } from '@/features/alarm/schedule';
@@ -106,6 +108,7 @@ export default function HomeScreen() {
   const current = useNow(); // 30초마다 다시 읽음 — "N분 뒤" · 인사말이 열 때 값에 멈춰 있지 않게
   const sky = useSky(); // 위쪽 하늘 배경 — 날씨 × 시간대
   const toggleAppointment = useAppointmentToggle(reload); // 다음 알람 카드 스위치
+  const edit = useStandaloneAlarmEdit(reload); // 다음 알람이 기본 알람이면 카드를 눌러 고치기 · 삭제 (알람 탭과 같은 시트)
   const { run } = useAction(); // 루틴 단계 · 준비물 체크는 한 번에 하나씩, 실패하면 토스트 (실데이터는 네트워크 오류가 있음)
   const permissions = usePermissions(); // 홈 빨간 줄 — 알림 · 전체화면 알림이 꺼짐, 폰에 못 건 알람
   const failedAlarms = useFailedAlarmCount();
@@ -248,7 +251,7 @@ export default function HomeScreen() {
 
       <SectionHeader title="다음 알람" right={next ? formatRelative(current, next.alarm.at) : undefined} />
       {next ? (
-        <AppointmentAlarmCard appointment={next.appointment} current={current} onToggle={(on) => toggleAppointment(next.appointment, on)} variant="flow" together={together} />
+        <AppointmentAlarmCard appointment={next.appointment} current={current} onToggle={(on) => toggleAppointment(next.appointment, on)} onEditStandalone={() => edit.open(next.appointment)} variant="flow" together={together} />
       ) : (
         <EmptyState
           title="예정된 알람이 없어요"
@@ -327,6 +330,7 @@ export default function HomeScreen() {
 
       {/* 나의 기록 (R02) — 기록 탭을 없애고 홈 맨 아래로 (D110) */}
       <RecordsSection register={registerRecords} />
+      {edit.sheet ? <NewAlarmSheet key={edit.id} {...edit.sheet} current={current} /> : null}
     </Screen>
   );
 }

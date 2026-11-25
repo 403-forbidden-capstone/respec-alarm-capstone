@@ -20,11 +20,12 @@ type Props = {
   ahead?: boolean; // 앞으로 회차가 폰에 미리 걸려 있음 — 작은 글자 한 줄
   variant?: 'full' | 'flow' | 'compact'; // 홈 다음 알람은 flow, 알람 목록은 compact (components/ui AlarmCard)
   together?: { faces: string[]; line: string } | null; // flow — 같이 준비하는 그룹 줄 (홈이 읽어서 넘김)
+  onEditStandalone?: () => void; // 일정 없는 알람 카드를 누름 — 고치기 시트는 화면이 띄움 (H02). 없으면 눌러도 안 열림
 };
 
 // 일정 하나의 알람 카드 (홈 · 알람 목록) — 카드를 누르면 알람 설정(H03)
-// 일정 없는 알람(실데이터, D46)은 이동 · 준비 줄이 없고 알람 설정(H03)이 아직 없어 눌러도 안 열림
-export function AppointmentAlarmCard({ appointment: a, current, onToggle, highlight, showDate = true, nextOccurrence, repeatSummary, ahead, variant, together }: Props) {
+// 일정 없는 알람(실데이터, D46)은 이동 · 준비 줄이 없고, 누르면 알람 설정(H03) 대신 화면이 준 고치기 시트(onEditStandalone)
+export function AppointmentAlarmCard({ appointment: a, current, onToggle, highlight, showDate = true, nextOccurrence, repeatSummary, ahead, variant, together, onEditStandalone }: Props) {
   const list = ringingKinds(a.alarms);
   // 큰 시각 = 앞으로 울릴 첫 알람 (홈 "다음 알람"과 같은 것을 가리키게). 다 지났으면 지남으로, 다 껐으면 첫 알람
   const { alarm: first, passed } = pickCardAlarm(a.alarms, current);
@@ -50,8 +51,8 @@ export function AppointmentAlarmCard({ appointment: a, current, onToggle, highli
       together={together}
       onToggle={onToggle}
       toggleLabel={`${a.title} 알람`}
-      onPress={a.standalone ? undefined : () => router.push({ pathname: '/alarm/[id]', params: { id: a.id } })}
-      pressLabel={a.standalone ? undefined : `${a.title} 알람 설정 열기`}
+      onPress={a.standalone ? onEditStandalone : () => router.push({ pathname: '/alarm/[id]', params: { id: a.id } })}
+      pressLabel={a.standalone ? (onEditStandalone ? `${formatTime(first.at)} 알람 수정 열기` : undefined) : `${a.title} 알람 설정 열기`}
     />
   );
   if (!highlight) return card;

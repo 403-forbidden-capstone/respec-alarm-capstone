@@ -31,6 +31,8 @@ jest.mock('../real', () => {
     'estimateAppointment',
     'createAppointment',
     'saveStandaloneAlarm',
+    'replaceStandaloneAlarm',
+    'deleteStandaloneAlarm',
     'getRing',
     'startRing',
     'stopRing',
@@ -118,6 +120,8 @@ describe('실데이터 모드: 알람 api 전부가 real.ts로 넘어감', () =>
     ['checkDepartNow', () => api.checkDepartNow('a1'), 'checkDepartNow', ['a1']],
     ['createStandaloneAlarm', () => api.createStandaloneAlarm({ at, level: 1 }), 'saveStandaloneAlarm', [{ at, level: 1 }]],
     ['updateStandaloneAlarm', () => api.updateStandaloneAlarm('s1', { enabled: false }), 'saveStandaloneAlarm', [{ enabled: false, alarmId: 's1' }]],
+    ['editStandaloneAlarm', () => api.editStandaloneAlarm('s1', { at, level: 2 }), 'replaceStandaloneAlarm', ['s1', { at, level: 2 }]],
+    ['deleteStandaloneAlarm', () => api.deleteStandaloneAlarm('s1'), 'deleteStandaloneAlarm', ['s1']],
   ];
 
   it.each(cases)('%s', async (_name, invoke, realName, realArgs) => {
@@ -158,6 +162,8 @@ describe('실데이터 모드: 알람 api 전부가 real.ts로 넘어감', () =>
   it('일정 없는 알람은 가짜 데이터에 둘 자리가 없어 이유를 알림', async () => {
     await expect(api.createStandaloneAlarm({ at })).rejects.toBeInstanceOf(UserError);
     await expect(api.updateStandaloneAlarm('s1', { enabled: false })).rejects.toBeInstanceOf(UserError);
+    await expect(api.editStandaloneAlarm('s1', { at })).rejects.toBeInstanceOf(UserError);
+    await expect(api.deleteStandaloneAlarm('s1')).rejects.toBeInstanceOf(UserError);
     expect(mockReal).not.toHaveBeenCalled();
   });
 });

@@ -613,6 +613,7 @@ export async function getEarlyWake(): Promise<EarlyWake | null> {
     .select('alarm_id, scheduled_at')
     .eq('user_id', userId)
     .eq('alarm_type', 'WAKE')
+    .not('participant_id', 'is', null) // 일정(약속)에 이어진 기상 알람만 — 일반 알람(일정 없음, D46)도 종류가 WAKE라 이름이 아닌 연결로 거름
     .eq('is_enabled', true)
     .gt('scheduled_at', current.toISOString())
     .lte('scheduled_at', new Date(current.getTime() + EARLY_WAKE_MINUTES * MINUTE_MS).toISOString())
