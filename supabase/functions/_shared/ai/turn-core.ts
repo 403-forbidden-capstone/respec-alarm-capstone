@@ -1377,7 +1377,8 @@ export function applyFast(state: TurnState, fast: FastExtract, ctx: Context, aft
       if (s.seen[key] !== apptSig(x)) s.seen[key] = `${apptSig(x)}#alarm`;
       continue;
     }
-    const namedThis = hits !== null && (x.ref !== null ? hits.all.has(x.ref) : nameWords(x.title).some((w) => normTitle((intent as Intent).text).includes(w)));
+    // 그 일정만 가장 많이 걸려야 함 — 이름 낱말 하나 · '그룹'만 겹치는 다른 일정('알고리즘 수업' · '알고리즘 스터디')을 고치는 말은 아님
+    const namedThis = hits !== null && (x.ref !== null ? hits.best.size === 1 && hits.best.has(x.ref) : nameWords(x.title).some((w) => normTitle((intent as Intent).text).includes(w)));
     if (s.seen[key] === `${apptSig(x)}#alarm` && !(intent !== null && intent.edit && !intent.alarm && namedThis)) continue;
     if (!once(key, apptSig(x))) continue;
     if (alarmEcho(x)) continue;

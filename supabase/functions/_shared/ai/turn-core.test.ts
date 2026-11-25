@@ -2462,6 +2462,10 @@ describe("알람 상대 시간 변경 (alarm_changes.shift, #625) — 서버가 
     const r2 = applyFast(initTurnState(two), fast({ appointments: [wrongAppt], alarm_changes: [shiftOf("PREPARE", -10)] }), two, 1, "알고리즘 수업 준비 알람 10분 당겨줘");
     const other = applyFast(r2.state, fast({ appointments: [wrongAppt, { ...study(), ref: "a2", title: "캡스톤 회의", time: "16:00", place: null }] }), two, 2, "캡스톤 회의 4시로 바꿔줘");
     assert.deepEqual(other.state.cards.filter((x) => x.kind === "APPT_OPEN").map((x) => x.edit?.appointment_id), ["a2"], "다른 일정 이름으로는 버린 일정 변경을 살리지 않음");
+    const near = ctx({ tomorrow: [appt(), appt({ ref: "a2", title: "알고리즘 스터디", time: "15:00" })] });
+    const r3 = applyFast(initTurnState(near), fast({ appointments: [wrongAppt], alarm_changes: [shiftOf("PREPARE", -10)] }), near, 1, "알고리즘 수업 준비 알람 10분 당겨줘");
+    const shared = applyFast(r3.state, fast({ appointments: [wrongAppt, { ...study(), ref: "a2", title: "알고리즘 스터디", time: "16:00", place: null }] }), near, 2, "알고리즘 스터디 4시로 바꿔줘");
+    assert.deepEqual(shared.state.cards.filter((x) => x.kind === "APPT_OPEN").map((x) => x.edit?.appointment_id), ["a2"], "이름 낱말이 겹치는 다른 일정도 아님");
     const prep = applyFast(echo.state, fast({ prep_adjustment: less }), c, 3, "준비 시간 10분 줄여줘");
     assert.ok(prep.state.cards.some((x) => x.edit?.prepare_delta === -10), "진짜 준비시간 요청은 처리");
     const appt2 = applyFast(echo.state, fast({ appointments: [wrongAppt] }), c, 3, "알고리즘 수업 9시 50분으로 바꿔줘");
