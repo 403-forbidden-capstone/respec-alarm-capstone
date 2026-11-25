@@ -64,8 +64,8 @@ async function loadTogether(groupName: string | null): Promise<string | null> {
 //   앱이 못 뜨면 코어의 네이티브 대체 화면이 해제 · 미루기를 함. 웹 · 가짜 데이터: /ring?alarm=a1:WAKE (가짜 데이터가 값을 채움)
 // 미루기 규칙(D3 기본안 A)은 네이티브 화면과 같음 — 5 · 10 · 15분 중 고르기, 알람 한 개당 3번까지 ("미루기 N/3회"),
 //   한도에 닿으면 미루기를 끄고 "지금 바로 준비 · 출발 시각".
-//   늦어요는 막지 않고 보여 주기만 함: 늦는 칩은 경고색 + 칩 안 "늦어요", 고른 칩이 늦으면 미루기 버튼 위에 경고 한 줄 · 버튼 "N분 미루기 · 늦어요",
-//   5분만 미뤄도 늦으면 시각 위에 "지금 일어나야 9:00 출발에 맞아요" 띠 (계산은 알람 코어의 순수 함수 → features/alarm/snooze.ts)
+//   웹 화면은 칩 한 줄 — 칩을 누르면 바로 미룸(고르기 + 버튼 두 단계 없음). 늦어요는 막지 않고 보여 주기만 함: 늦는 칩 안 "늦어요"(흐린 흰 글자),
+//   가장 짧은 칩도 늦으면 칩 아래 경고 한 줄만 경고색. 폰의 네이티브 대체 화면(AlarmRingingActivity)은 아직 고르기 + 버튼 모양 (계산은 알람 코어의 순수 함수 → features/alarm/snooze.ts)
 // 준비 · 출발 알람의 머리글은 폰 알림과 같은 글자(data.notice, 서버 알림 문구 함수) — 없으면 종류별 기본 머리글
 export default function RingScreen() {
   const params = useLocalSearchParams<{ alarm?: string }>();

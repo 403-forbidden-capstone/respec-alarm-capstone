@@ -16,6 +16,7 @@ import {
   wakePingLocks,
   wakePingNote,
   wakePingSent,
+  wakeScopeOf,
 } from '@/features/social/wakeTexts';
 import { formatTime } from '@/lib/format';
 import { useAction } from '@/lib/useAction';
@@ -55,7 +56,7 @@ export default function MemberWakeScreen() {
   }
 
   const { person: p, groupName, state, canViewAlarm, noGroupAppointment } = data;
-  const scopeText = data.tripVisible ? '기상 · 출발 · 도착 시각만 보여요' : '기상 시각만 보여요'; // 공유 범위 한 줄
+  const scope = wakeScopeOf(p.short, groupName, data.tripVisible); // 공유 범위 — 문구는 #638 그대로
   const lines = dayLinesOf(data, current); // 오늘의 흐름 — 알람 울림 · 기상 확인 · 출발 · 도착 중 아는 것만
   const nowIndex = lines.reduce((last, line, i) => (line.at.getTime() <= current.getTime() ? i : last), -1); // 지난 줄 중 마지막 = 지금(진한 점)
 
@@ -141,7 +142,10 @@ export default function MemberWakeScreen() {
         <Text variant="label" tone="sub" style={styles.label}>
           공유 범위
         </Text>
-        <Text variant="bodyStrong">{scopeText}</Text>
+        <Text variant="bodyStrong">{scope.title}</Text>
+        <Text variant="small" tone="sub" style={styles.scopeBody}>
+          {scope.body}
+        </Text>
       </Card>
     </Screen>
   );
@@ -161,6 +165,7 @@ const styles = StyleSheet.create({
   stepBar: { flex: 1, height: 1.5, backgroundColor: colors.line, marginHorizontal: 4 },
   label: { marginBottom: 8 },
   paragraph: { marginTop: 4, lineHeight: 20 },
+  scopeBody: { marginTop: 4 },
   stack: { gap: 10, marginTop: 4, marginBottom: 12 },
   pingNote: { textAlign: 'center' },
 });

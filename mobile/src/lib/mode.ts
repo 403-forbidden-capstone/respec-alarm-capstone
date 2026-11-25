@@ -3,7 +3,7 @@
 //     · 폰 + 출시용 빌드(__DEV__ false): 실데이터 고정 — 가짜로 못 바꿈, 로그인해야만 탭, Supabase 값이 없으면 설정 오류 화면 (configError)
 //     · 폰 개발용(__DEV__ true) · 웹: 바꿀 수 있음. 웹 기본은 가짜이고 주소 ?mode=real이면 실데이터, 폰 개발용 기본은 실데이터
 //     · 실데이터를 못 쓰면(Supabase 값 없음 · lib/flags REAL_DATA_READY = false) 늘 가짜, real로 못 바꿈
-//   바꾸는 곳: /dev/screens 맨 위 · 설정 화면 개발 절 · 웹 미리보기 왼쪽 패널 "데이터 모드" (모두 잠긴 빌드에선 안 보임) · 웹 주소 ?mode=mock 또는 ?mode=real (보드 패널 버튼)
+//   바꾸는 곳: /dev/screens 맨 위 · 웹 미리보기 왼쪽 패널 "데이터 모드" (모두 잠긴 빌드에선 안 보임) · 웹 주소 ?mode=mock 또는 ?mode=real (보드 패널 버튼)
 //   저장: 폰 AsyncStorage, 웹 localStorage — 앱을 다시 열어도 유지. 로그아웃해도 그대로
 //   api.ts는 함수마다 isMock()으로 가짜 · Supabase를 고름 (기능을 붙일 때 그 함수만 바꿈)
 import AsyncStorage from '@react-native-async-storage/async-storage';
