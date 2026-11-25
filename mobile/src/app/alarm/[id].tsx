@@ -451,7 +451,7 @@ function Detail({ appointment: a, reload, changedKinds }: { appointment: Appoint
               key={x.kind}
               first={i === 0 && !missingWake}
               label={`${KIND_LABEL[x.kind]}${x.kind === 'ARRIVE' ? ' 목표' : ''}`}
-              sub={[changedKinds.includes(x.kind) ? '바뀜' : null, isManualTime(x) ? '직접 고름' : null].filter(Boolean).join(' · ') || undefined}
+              sub={[changedKinds.includes(x.kind) || (x.kind === 'DEPARTURE' && changedKinds.includes('DEPART')) ? '바뀜' : null, isManualTime(x) ? '직접 고름' : null].filter(Boolean).join(' · ') || undefined}
               value={
                 x.kind === 'ARRIVE' ? (
                   formatTime(x.at)
