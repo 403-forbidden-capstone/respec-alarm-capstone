@@ -1,16 +1,18 @@
-import { useCallback } from 'react';
+import { useCallback, useState } from 'react';
 
-import { toast } from '@/components/ui';
+import { confirm, toast } from '@/components/ui';
 import { askNotifications } from '@/features/permissions';
 import { now } from '@/lib/clock';
 import { formatTime } from '@/lib/format';
 import { useAction } from '@/lib/useAction';
 import type { Weekday } from '@/lib/weekday';
 
-import { createStandaloneAlarm } from '../api';
+import { createStandaloneAlarm, deleteStandaloneAlarm, editStandaloneAlarm } from '../api';
 import { saveNotice } from '../saveNotice';
 import { dayHeading } from '../schedule';
 import { firstRingAt } from '../standalone';
+import { rruleToRepeat } from '../repeat';
+import type { Appointment, Level } from '../types';
 
 // 기본 알람 저장 (H02 알람 탭 "+ 새 알람", #588) — 부품(NewAlarmSheet)은 고른 값만 넘기고, 저장 · 토스트 · 알림 권한은 화면이 이 훅으로 함
 //   save는 저장했으면 true — 부품이 시트를 닫고 입력을 비울지 정함. 실패는 useAction 규칙대로 토스트
@@ -38,4 +40,55 @@ export async function saveStandaloneAlarm(minuteOfDay: number, repeat: readonly 
   toast(saveNotice(saved.followUp, '알람은 저장했지만') ?? `알람을 만들었어요 · ${dayHeading(at, now())} ${formatTime(at)}`);
   void askNotifications('alarm');
   onSaved(saved.id);
+}
+
+// 기본 알람 고치기 · 지우기 (H02 알람 카드 · 홈 다음 알람 카드를 누름) — 시트는 고른 값만 넘기고, 저장 · 확인 팝업 · 토스트는 이 훅이 함
+//   open(카드의 일정 모양)으로 열고, sheet는 고치기 시트(NewAlarmSheet)에 그대로 넘길 값 (닫혀 있으면 null). 끝나면 onDone으로 다시 읽음
+//   켜짐은 고르지 않음 — 꺼 둔 알람을 고쳐도 꺼진 채
+export function useStandaloneAlarmEdit(onDone: () => void) {
+  const { busy, run } = useAction();
+  const [editing, setEditing] = useState<Appointment | null>(null);
+  const save = useCallback(
+    async (a: Appointment, minuteOfDay: number, repeat: readonly Weekday[], level: Level) => {
+      let ok = false;
+      await run(async () => {
+        const at = firstRingAt(minuteOfDay, repeat, now());
+        const saved = await editStandaloneAlarm(a.id, { at, repeat, level, enabled: a.enabled });
+        toast(saveNotice(saved.followUp, '알람은 고쳤지만') ?? `알람을 고쳤어요 · ${dayHeading(at, now())} ${formatTime(at)}`);
+        ok = true;
+        onDone();
+      }, '알람을 고치지 못했어요');
+      return ok;
+    },
+    [run, onDone],
+  );
+  const remove = useCallback(
+    async (a: Appointment) => {
+      const sure = await confirm({
+        title: '알람을 삭제할까요?',
+        message: a.recurrenceRule ? '반복되는 모든 회차가 함께 지워지고 다시 울리지 않아요.' : '지운 알람은 다시 울리지 않아요.',
+        okLabel: '삭제',
+        destructive: true,
+      });
+      if (!sure) return false;
+      let ok = false;
+      await run(async () => {
+        await deleteStandaloneAlarm(a.id);
+        toast('알람을 삭제했어요');
+        ok = true;
+        onDone();
+      }, '알람을 삭제하지 못했어요');
+      return ok;
+    },
+    [run, onDone],
+  );
+  const sheet = editing && {
+    visible: true,
+    busy,
+    onClose: () => setEditing(null),
+    editing: { at: editing.alarms[0]?.at ?? editing.at, repeat: rruleToRepeat(editing.recurrenceRule), level: editing.level },
+    onSave: (minute: number, repeat: readonly Weekday[], level: Level) => save(editing, minute, repeat, level),
+    onDelete: () => remove(editing),
+  };
+  return { open: setEditing, sheet, id: editing?.id }; // id = 시트의 key — 알람이 바뀌면 입력을 새로 채움 (key는 펼쳐 넘기면 React가 경고)
 }

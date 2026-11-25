@@ -10,7 +10,7 @@ import { NewAlarmSheet } from '@/features/alarm/components/NewAlarmSheet';
 import { TextLink } from '@/features/alarm/components/TextLink';
 import { useAppointmentToggle } from '@/features/alarm/hooks/useAppointmentToggle';
 import { useNow } from '@/features/alarm/hooks/useNow';
-import { useStandaloneAlarmSave } from '@/features/alarm/hooks/useStandaloneAlarmSave';
+import { useStandaloneAlarmEdit, useStandaloneAlarmSave } from '@/features/alarm/hooks/useStandaloneAlarmSave';
 import { dayHeading, groupByDay, seriesInfo, splitUpcoming } from '@/features/alarm/schedule';
 import { formatDateShort } from '@/lib/format';
 import { useLoad } from '@/lib/useLoad';
@@ -32,6 +32,7 @@ export default function AlarmsScreen() {
     void reload();
     router.setParams({ highlight: id });
   });
+  const edit = useStandaloneAlarmEdit(reload); // 기본 알람 카드를 누르면 고치기 · 삭제
   const [showPast, setShowPast] = useState(false);
   const [newAlarm, setNewAlarm] = useState(false);
   const [adding, setAdding] = useState(false); // "+" — 새 알람 · 새 일정 고르기
@@ -88,7 +89,7 @@ export default function AlarmsScreen() {
           <SectionHeader title={dayHeading(day[0].at, current)} />
           {/* 날짜는 섹션 제목에 있으니 카드 머리줄에는 안 보임 */}
           {day.map((a) => (
-            <AppointmentAlarmCard key={a.id} appointment={a} current={current} onToggle={(on) => toggleAppointment(a, on)} highlight={a.id === lit} showDate={false} variant="compact" {...seriesInfo(a, current)} />
+            <AppointmentAlarmCard key={a.id} appointment={a} current={current} onToggle={(on) => toggleAppointment(a, on)} onEditStandalone={() => edit.open(a)} highlight={a.id === lit} showDate={false} variant="compact" {...seriesInfo(a, current)} />
           ))}
         </View>
       ))}
@@ -149,6 +150,7 @@ export default function AlarmsScreen() {
         </Card>
       </Sheet>
       <NewAlarmSheet visible={newAlarm} onClose={() => setNewAlarm(false)} current={current} busy={standalone.busy} onSave={standalone.save} />
+      {edit.sheet ? <NewAlarmSheet key={edit.id} {...edit.sheet} current={current} /> : null}
     </Screen>
   );
 }
