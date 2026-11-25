@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it } from '@jest/globals';
 import { aiDb, MOCK_ROUTINE_SUGGESTION } from '@/mocks/ai';
 import { db } from '@/mocks/data';
 
-import { getPendingRoutineSuggestion, getRoutine, ignoreRoutineSuggestion, saveRoutine } from '../api';
+import { acceptRoutineSuggestion, getPendingRoutineSuggestion, getRoutine, ignoreRoutineSuggestion, saveRoutine } from '../api';
 import { daysOf, suggestionSummary, suggestionToRoutine } from '../suggestion';
 import type { RoutineSuggestion } from '../types';
 
@@ -64,6 +64,14 @@ describe('가짜 데이터 흐름', () => {
     expect(await getPendingRoutineSuggestion()).toBeNull();
     expect(await getRoutine('new', undefined, 'rs1')).toBeNull(); // 이미 답한 제안은 다시 못 엶
     expect(aiDb.routines.at(-1)?.title).toBe('일어나자마자 2단계');
+  });
+
+  it('한 번에 받아들이기(UI 단순화) — 초안 그대로 저장, 제안은 받아들임, 두 번째는 오류', async () => {
+    const saved = await acceptRoutineSuggestion('rs1');
+    expect([saved.title, saved.days, saved.startMinute, saved.id != null]).toEqual(['일어나자마자 2단계', ['월', '수', '목'], 440, true]);
+    expect(aiDb.routineSuggestion).toBe('ACCEPTED');
+    expect(await getPendingRoutineSuggestion()).toBeNull();
+    await expect(acceptRoutineSuggestion('rs1')).rejects.toThrow('이미 답한 제안이에요');
   });
 
   it('괜찮아요 → 넘김, 카드에서 사라짐', async () => {

@@ -151,7 +151,7 @@ function WakeFlow({ check }: { check: WakeCheck }) {
   const mock = isMock() || preview;
   const next = useNextRing(preview ? check.alarmId : null);
   // 기상 확정 뒤 오늘 아침 루틴이 남아 있으면 루틴 화면(H09)으로 자동으로 — 이 화면에서 확정됐을 때만 (이미 확정된 화면을 다시 열면 그대로)
-  //   루틴 화면에서 [시작]을 한 번 누르면 AI가 단계를 말로 안내 (소리 · 마이크는 한 번 눌러야 켤 수 있음)
+  //   루틴 화면이 열리면 AI가 저절로 단계를 말로 안내 (UI 단순화: [시작] 없음)
   const openedPhase = useRef(state.phase);
   useEffect(() => {
     if (state.phase !== 'confirmed' || openedPhase.current === 'confirmed' || preview) return;
