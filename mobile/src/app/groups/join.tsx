@@ -59,7 +59,7 @@ export default function JoinGroupScreen() {
 
   return (
     <Screen footer={primary}>
-      <ConsentSheet visible={consent} busy={busy} onChoose={join} onClose={() => setConsent(false)} />
+      <ConsentSheet visible={consent} groupName={found?.name} busy={busy} onChoose={join} onClose={() => setConsent(false)} />
       <TopBar onBack={backOrHome} />
       <Text variant="title" style={styles.title}>
         그룹 참여하기

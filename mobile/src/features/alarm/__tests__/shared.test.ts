@@ -5,6 +5,7 @@ import { EdgeError, messageFor } from '@/lib/edge';
 import { groupChangeAction, settingsDraftOf } from '../groupChange';
 import { editError } from '../realEdit';
 import * as real from '../real';
+import { selectableTransport } from '../realPlan';
 import { joinBody, newAppointmentBody } from '../request';
 import { TravelConfirmNeeded } from '../travelConfirm';
 import type { AppointmentDraft } from '../types';
@@ -63,6 +64,28 @@ describe('[내 알람 만들기] (9-03 · 9-35)', () => {
       kinds: ['WAKE', 'PREPARE', 'DEPARTURE'],
     });
     expect((joinBody('ap1', { transport: 'TRANSIT', prepareMinutes: 50 }).participant as Record<string, unknown>).prepare_minutes).toBe(50);
+  });
+
+  it('토스트에 쓸 기상 · 출발 알람 시각을 같이 돌려줌 (D-16)', async () => {
+    const alarm = (alarm_type: string, scheduled_at: string, is_enabled = true) => ({ alarm_id: alarm_type, alarm_type, scheduled_at, is_enabled });
+    mockCallEdge.mockResolvedValue({
+      appointment_id: 'ap1',
+      alarms: [alarm('WAKE', '2026-10-20T07:20:00+09:00'), alarm('PREPARE', '2026-10-20T07:40:00+09:00'), alarm('DEPARTURE', '2026-10-20T08:30:00+09:00')],
+      ring_packages: [],
+      canceled_alarm_ids: [],
+    });
+    const r = await real.joinSharedAppointment('ap1', { transport: 'TRANSIT', prepareMinutes: null });
+    expect((r as { wakeAt?: Date }).wakeAt?.getTime()).toBe(new Date('2026-10-20T07:20:00+09:00').getTime());
+    expect((r as { departAt?: Date }).departAt?.getTime()).toBe(new Date('2026-10-20T08:30:00+09:00').getTime());
+  });
+
+  it('프로필 기본 이동 수단을 시트 선택지(대중교통 · 자차 · 도보)로 맞춤 (D-15)', () => {
+    expect(selectableTransport('SUBWAY')).toBe('TRANSIT');
+    expect(selectableTransport('BUS')).toBe('TRANSIT');
+    expect(selectableTransport('TRANSIT')).toBe('TRANSIT');
+    expect(selectableTransport('CAR')).toBe('CAR');
+    expect(selectableTransport('WALK')).toBe('WALK');
+    expect(selectableTransport(null)).toBe('TRANSIT');
   });
 
   it('저장하면 폰에 걺(applyCommit) — 폰에 못 건 알람 수만 돌려줌', async () => {

@@ -3,6 +3,9 @@ import { formatWait } from '@/lib/format';
 
 import type { FriendRelation, PeopleSearch, PersonHit } from './types';
 
+// 못 찾았을 때 먼저 — 이름은 이미 친구 · 같은 그룹인 사람 안에서만 찾아서, 앱을 쓰는 친구는 아이디로 찾아야 함 (D-04)
+export const SEARCH_SCOPE_HINT = '이름은 친구와 같은 그룹 사람 중에서만 찾아요. 앱을 쓰는 친구는 아이디로 찾아 보세요.';
+
 export type SearchNotice = { text: string; invite: boolean }; // invite = [카톡으로 초대]를 같이 보일지
 
 // 결과 위에 보일 한 줄. 제한이 가장 먼저 — 누구를 찾든 같은 문구라 "찾을 수 없어요"와 섞이지 않음 (2-37)

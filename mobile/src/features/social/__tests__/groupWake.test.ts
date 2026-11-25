@@ -229,8 +229,8 @@ describe('이 사람에게 기상 숨기기 (7-43 · 7-06)', () => {
   });
 
   it('메뉴 글자 · 토스트 — 상대에게 알리지 않는다는 말', () => {
-    expect(wakeHideLabel(false)).toBe('이 사람에게 기상 숨기기');
-    expect(wakeHideLabel(true)).toBe('이 사람에게 기상 보이기');
+    expect(wakeHideLabel(false)).toBe('이 사람에게 내 기상 숨기기');
+    expect(wakeHideLabel(true)).toBe('이 사람에게 내 기상 보이기');
     expect(wakeHideToast('지형', true)).toBe('지형님에게 내 기상을 숨겼어요. 상대에게는 알리지 않아요');
     expect(wakeHideToast('지형', false)).toBe('지형님에게 내 기상이 다시 보여요');
   });

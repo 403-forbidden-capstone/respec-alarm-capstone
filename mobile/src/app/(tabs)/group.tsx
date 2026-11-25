@@ -140,7 +140,7 @@ export default function GroupScreen() {
 
   return (
     <Screen onRefresh={reload}>
-      <ConsentSheet visible={consentFor != null} busy={workingId != null} onChoose={acceptInvite} onClose={() => setConsentFor(null)} />
+      <ConsentSheet visible={consentFor != null} groupName={consentFor?.name} busy={workingId != null} onChoose={acceptInvite} onClose={() => setConsentFor(null)} />
       <TopBar
         screenId={tab === 'friend' ? 'F01' : 'G01'}
         right={<TopBarIconButton icon={{ ios: 'slider.horizontal.3', android: 'tune', web: 'tune' }} accessibilityLabel="권한 관리" glass onPress={() => router.push('/permissions')} />}
@@ -294,6 +294,7 @@ function FriendTab({
         />
       ) : null}
 
+      {requests.length ? <SectionHeader title="받은 요청" right={`${requests.length}명`} /> : null}
       {requests.map((p) => (
         <Card key={p.id}>
           <View style={styles.row}>
@@ -341,7 +342,7 @@ function FriendTab({
               icon={<Avatar initial={p.initial} />}
               title={p.name}
               sub={p.handle ?? undefined}
-              right={<Trailing label={grantCount ? `권한 ${grantCount}개` : '공유 없음'} />}
+              right={<Trailing label={grantCount ? `내가 준 권한 ${grantCount}개` : '공유 없음'} />}
               onPress={() => router.push({ pathname: '/friends/[id]', params: { id: p.id } })}
             />
           ))}

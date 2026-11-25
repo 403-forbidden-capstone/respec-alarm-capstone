@@ -4,7 +4,7 @@ import { UserError } from '@/lib/errors';
 
 import { createFake } from '../__fixtures__/fakeSupabase';
 import { friends, groups, GROUP, JIHYEONG, JUNSEONG, ME, members, perms, profiles, SUYEON } from '../__fixtures__/seed';
-import { CODE_EXPIRED, CODE_NOT_FOUND, GROUP_FULL, expiresLabel, inviteShareMessage, GROUP_NOT_MEMBER, GROUP_TOO_MANY, cleanCode, groupNameProblem, leaveText, previewProblem, removeMemberText } from '../groupTexts';
+import { consentTitle, joinedToastText, sharedSavedToast, CODE_EXPIRED, CODE_NOT_FOUND, GROUP_FULL, expiresLabel, inviteShareMessage, GROUP_NOT_MEMBER, GROUP_TOO_MANY, cleanCode, groupNameProblem, leaveText, previewProblem, removeMemberText } from '../groupTexts';
 import { MESSAGE_GONE } from '../relationMessages';
 import * as real from '../real';
 
@@ -396,5 +396,19 @@ describe('확인창 문구 — 5-19 · 5-44 · 5-47', () => {
 
   it('내보내기: 코드가 바뀌고 상대에게 알리지 않음', () => {
     expect(removeMemberText('준성')).toEqual({ title: '준성님을 내보낼까요?', body: '그룹 코드가 새로 바뀌어요. 상대에게는 알리지 않아요.', ok: '내보내기' });
+  });
+});
+
+describe('11/25 UX 일괄 문구 (D-10 · D-13 · D-16)', () => {
+  it('동의 시트 제목에 그룹 이름 (D-10)', () => {
+    expect(consentTitle('캡스톤팀')).toBe('캡스톤팀에 내 기상을 공개할까요?');
+    expect(consentTitle(null)).toBe('그룹에 내 기상을 공개할까요?');
+  });
+  it('[내 알람 만들기] 토스트에 만든 시각, 없으면 옛 문구 (D-16)', () => {
+    expect(joinedToastText({ wakeAt: new Date('2026-10-20T07:20:00+09:00'), departAt: new Date('2026-10-20T08:30:00+09:00') })).toBe('내 알람을 맞췄어요 · 기상 오전 7:20 · 출발 오전 8:30');
+    expect(joinedToastText({})).toBe('내 알람을 만들었어요');
+  });
+  it('공동 약속 저장 토스트 끝에 그룹 안내 (D-13)', () => {
+    expect(sharedSavedToast('알람 2개를 맞췄어요')).toBe('알람 2개를 맞췄어요 · 그룹에도 보여요. 그룹원은 각자 [내 알람 만들기]를 해요');
   });
 });

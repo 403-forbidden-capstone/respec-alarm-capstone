@@ -50,7 +50,7 @@ export default function NewGroupScreen() {
 
   return (
     <Screen footer={<Button label="만들기" onPress={create} disabled={!trimmed || created != null} loading={busy && created == null} />}>
-      <ConsentSheet visible={created != null} busy={busy} onChoose={choose} onClose={() => void choose(false)} />
+      <ConsentSheet visible={created != null} groupName={created?.name} busy={busy} onChoose={choose} onClose={() => void choose(false)} />
       <TopBar onBack={backOrHome} />
       <Text variant="title" style={styles.title}>
         새 그룹

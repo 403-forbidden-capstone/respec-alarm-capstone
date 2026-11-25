@@ -31,9 +31,9 @@ export type PermissionSet = Record<'viewAlarm' | 'editAlarm' | 'viewWake', boole
 export const VIEW_ALARM_NOTE = '일정 장소도 보여요 · 집 · 출발지는 안 보여요';
 
 export const PERMISSIONS: readonly { key: 'viewAlarm' | 'editAlarm' | 'viewWake'; name: string; description: string }[] = [
-  { key: 'viewAlarm', name: '알람 조회', description: '알람 시간 · 일정 · 장소 · 준비 시간을 볼 수 있어요.' },
+  { key: 'viewAlarm', name: '알람 조회', description: '알람 시각 · 일정 · 장소를 볼 수 있어요.' },
   { key: 'editAlarm', name: '알람 설정', description: '내 알람을 추가하거나 시간을 바꿀 수 있어요.' },
-  { key: 'viewWake', name: '기상 상태 조회', description: '기상 확인 여부와 확인 시각을 볼 수 있어요.' },
+  { key: 'viewWake', name: '내 기상 공개', description: '기상 확인 여부와 시각이 보여요.' },
 ];
 
 // 그룹 출발 · 도착 공유 — 기상 공유와 따로 한 동의(기본 끔). 기상 공유를 켠 사람만 켤 수 있고 기상 공유를 끄면 같이 꺼짐 (11/19 지형님 결정)
@@ -42,9 +42,9 @@ export const TRIP_PERMISSION: { key: 'viewTrip'; name: string; chip: string; des
   key: 'viewTrip',
   name: '출발 · 도착 공유',
   chip: '출발 · 도착',
-  description: '이 그룹 일정의 준비 시작 · 출발 · 도착 시각이 보여요. 장소는 안 보여요.',
+  description: '준비 시작 · 출발 · 도착 시각이 보여요.',
 };
-export const TRIP_NEEDS_WAKE = '기상 상태 공유를 켜야 켤 수 있어요';
+export const TRIP_NEEDS_WAKE = '내 기상 공개를 켜야 켤 수 있어요';
 
 // F03 스위치 목록 — 친구 관계에는 기상 조회가 없음(그룹 기상 공유 동의 하나로만, 친구 6장 6-가). 그룹 관계의 기상 조회는 그 그룹에 내 기상 공유를 켜는 동의
 //   출발 · 도착 공유는 그룹 관계에만 (맨 끝)
