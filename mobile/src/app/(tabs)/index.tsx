@@ -16,7 +16,7 @@ import {
   TopBar,
   TopBarIconButton,
 } from '@/components/ui';
-import { cancelSnooze, getAppointment, getAutoWake, getDaySchedule, getEarlyWake, getMorningPlan, getNextAlarm, getSnooze, getWakeInProgress } from '@/features/alarm/api';
+import { cancelSnooze, getAppointment, listAppointments, getAutoWake, getDaySchedule, getEarlyWake, getMorningPlan, getNextAlarm, getSnooze, getWakeInProgress } from '@/features/alarm/api';
 import { AutoWakeCard } from '@/features/alarm/components/AutoWakeCard';
 import { EarlyWakeCard } from '@/features/alarm/components/EarlyWakeCard';
 import { getGroupSummary, listGroups } from '@/features/social/api';
@@ -79,7 +79,9 @@ async function loadHome() {
   // 다음 알람이 그룹 약속이면 흐름 카드 아래 "같이 준비하는 사람" 줄 — 덧붙임 줄이라 못 읽어도 홈은 그대로
   const together = await loadTogether(next?.appointment.groupName ?? null, next != null && isSameDay(next.appointment.at, today)).catch(() => null);
   const attention = await loadAttention(today).catch(() => null);
-  return { evening, target, next, schedule, routine, todos, eveningRoutine, snooze, wake, morning, early, autoWake, together, attention };
+  // 첫 일정 안내 — 다음 알람도 그날 일정도 없을 때만 알람 목록(알람 탭이 쓰는 읽기)으로 한 번 세어, 일정이 정말 하나도 없을 때만 true. 못 읽으면 false(잘못 띄우는 것보다 안 띄움)
+  const noAppointments = next == null && schedule.length === 0 ? await listAppointments().then((list) => list.length === 0, () => false) : false;
+  return { evening, target, next, schedule, routine, todos, eveningRoutine, snooze, wake, morning, early, autoWake, together, attention, noAppointments };
 }
 
 // 확인할 일 한 줄 (UX K4) — 한 번에 하나, 약속이 바뀜 > 알람 조정 제안 > 오늘 하루 기록 순
@@ -190,8 +192,8 @@ export default function HomeScreen() {
   const { evening, target, routine, todos, eveningRoutine, snooze, wake, morning, early, autoWake, together } = data;
   const next = noSchedulePreview ? null : data.next;
   const schedule = noSchedulePreview ? [] : data.schedule;
-  // 일정(약속)이 하나도 없으면 — 홈이 이미 읽은 다음 알람 · 오늘(내일) 일정으로 판단, 새 호출 없음. 일정을 만들면 저절로 사라짐
-  const firstGuide = next == null && schedule.length === 0;
+  // 일정(약속)이 실제로 하나도 없을 때만 — 다음 알람 · 그날 일정이 없고 알람 목록도 비었을 때(loadHome의 noAppointments). 일정을 만들면 저절로 사라짐
+  const firstGuide = noSchedulePreview || (next == null && schedule.length === 0 && data.noAppointments);
   const attention: Attention | null = noSchedulePreview ? null : data.attention;
   const topLine: Attention | null = attention ?? (firstGuide ? { kind: 'first', text: '첫 일정을 만들어 볼까요?' } : null);
   // 추가한 일정이 홈이 보여 주는 날(낮 = 오늘, 저녁 = 내일)에 들어가게 날짜를 넘김

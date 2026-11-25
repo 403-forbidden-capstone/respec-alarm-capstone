@@ -31,6 +31,7 @@ import { WAKE_MARGIN_NAME, WAKE_SENSITIVITY_NAME } from '@/features/profile/labe
 import type { ProfileFields } from '@/features/profile/types';
 import { userMessage } from '@/lib/errors';
 import { registerPushToken } from '@/lib/push/token';
+import { now } from '@/lib/clock';
 import { canUseRealData, isMock } from '@/lib/mode';
 import { backOrHome } from '@/lib/nav';
 import { cleanupAfterAccountDelete, signOutAndCleanup } from '@/lib/session';
@@ -109,7 +110,8 @@ export default function SettingsScreen() {
   const [recalcOpen, setRecalcOpen] = useState(() => isMock() && preview === 'recalc'); // 아침 준비 기본값을 바꾼 뒤 "내 자동 알람도 다시 계산할까요?" 시트
   const [placeOpen, setPlaceOpen] = useState(false);
   const appointments = useLoad(listAppointments); // 시트에 적을 내 자동 알람 수 — 일정 알람(공동 약속 · 알람 없는 일정 제외)
-  const autoCount = (appointments.data ?? []).filter((a) => !a.standalone && a.groupName == null && a.alarms.length > 0).length;
+  // 앞으로 울릴 알람(켜짐 · 아직 안 지남)이 있는 일정만 셈 — 지난 일정은 다시 계산할 게 없음
+  const autoCount = (appointments.data ?? []).filter((a) => !a.standalone && a.groupName == null && a.alarms.some((al) => al.enabled && al.at.getTime() > now().getTime())).length;
   const offCount = phone?.supported ? [phone.notifications, phone.fullScreen, phone.exactAlarm, phone.usageAccess].filter((v) => v === 'off').length : null; // 알람 권한 점검이 읽는 값 그대로
   const user = session?.user;
   const provider = (user?.app_metadata?.provider as string | undefined) ?? '';
@@ -354,7 +356,7 @@ export default function SettingsScreen() {
           직접 고른 시각은 그대로 둬요
         </Text>
         <View style={styles.recalcButtons}>
-          <Button label="다시 계산" onPress={recalculate} />
+          <Button label={isMock() ? '다시 계산' : '알람 탭에서 다시 계산'} onPress={recalculate} />
           <Button variant="plain" label="새 일정부터" onPress={() => setRecalcOpen(false)} />
         </View>
       </Sheet>

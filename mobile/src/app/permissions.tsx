@@ -32,13 +32,15 @@ import { useLeaveGuard } from '@/lib/useLeaveGuard';
 import { backOrHome } from '@/lib/nav';
 
 // 스위치마다 보이는 설명은 한 줄 — 그룹 관계의 기상 상태 스위치 = 이 그룹에 내 기상 공유 동의 (친구 6장 — 기상은 권한 행이 아니라 그룹 동의 하나)
-// 알람 설정을 켜면 조회도 같이 켜지는 규칙은 스위치 동작(togglePermission)이 보여 주므로 글로 안 풀어 씀
 const ONE_LINE: Record<Permission, string> = {
   viewAlarm: '알람 시각 · 일정 · 장소',
   editAlarm: '내 알람 추가 · 시간 변경',
-  viewWake: '기상 확인 여부 · 시각',
+  viewWake: '기상 확인 여부 · 시각이 이 그룹에 보여요',
   viewTrip: '준비 시작 · 출발 · 도착 시각',
 };
+
+// 알람 조회 · 설정이 엮인 규칙 + 공유 범위 — 항목마다 풀어 쓰지 않고 맨 아래 한 줄 (#638 문구)
+const ALARM_RULE = '알람 설정을 켜면 알람 조회도 같이 켜져요. 집 · 출발지는 안 보여요.';
 
 type Side = 'give' | 'recv';
 
@@ -188,6 +190,9 @@ function Editor({
                 </View>
               ))}
             </Card>
+            <Text variant="small" tone="sub" style={styles.rule}>
+              {ALARM_RULE}
+            </Text>
           </>
         )
       ) : (
@@ -268,5 +273,6 @@ const styles = StyleSheet.create({
   divider: { borderTopWidth: 1, borderTopColor: colors.line },
   description: { marginTop: 2 },
   paragraph: { lineHeight: 20 },
+  rule: { lineHeight: 20, marginTop: 4, marginBottom: 12 },
   empty: { marginVertical: 6 },
 });

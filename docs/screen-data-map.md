@@ -103,6 +103,10 @@
 - 나의 기록은 접힌 요약(이번 주 `getWeek`: 날짜 줄 · 평균 기상 · 목표 기상률 · AI 코칭) 한 카드, "자세히"를 누르면 그 자리에서 월간 · 주간 · 일간(R02)
 - 다음 알람: `alarms`(내 것, 켜짐, 지금 이후 가장 이른 것) → `appointment_participants` → `appointments`(제목 · 장소 · 시각) — DB. 루틴 알람이면 `participant_id`가 NULL이라 `routines.title`을 씀. 일정 없는 알람(D46)은 둘 다 NULL(#160) → 제목 "알람"
 - 오늘 일정(저녁엔 내일): `appointment_participants`(나) + `appointments.appointment_at` 날짜 — DB
+- 확인할 일 한 줄 (인사 바로 아래, 한 번에 하나): 약속이 바뀜(가짜 모드만) > 알람 조정 제안 `getPendingSuggestion` > 오늘 하루 기록 `getJournal` 순, 없으면 첫 일정 안내 줄. 못 읽으면 줄만 없음
+- 첫 일정 안내 줄 '첫 일정을 만들어 볼까요? [만들기 ›]': 다음 알람도 그날 일정도 없고 알람 목록 `listAppointments`도 빈 때만 — 목록을 못 읽으면 안 띄움. 일정을 만들면 사라짐
+- 맨 위 오른쪽 [기록] 버튼 = 홈 맨 아래 나의 기록으로 스크롤 (설정 버튼 옆). 일정 머리 오른쪽은 [+ 새 일정]만 — 학교 시간표 링크 없음 (시간표 화면은 새 일정에서만 열림)
+- 오늘 루틴 · 준비물은 한 카드 안 두 구역(저녁엔 내일 준비물만). 준비물은 늘 보임 — 비면 '챙길 준비물이 없어요'
 - **아침 카드** (기상 알람 시각 ~ 출발 + 30분, 이슈 #230): `getMorningPlan()` — 오늘(저녁엔 내일) 첫 일정 = 켜진 기상 알람이 붙은 가장 이른 약속(서버 `calc/wake.ts` `hasEarlierWake`와 같은 기준). 하루 일정과 **같은 읽기**(`realRows loadDayRows`, 동시에 부르면 쿼리 한 번)에서 약속 · 알람(준비 · 출발 · 도착 목표 시각, 꺼진 알람은 빈 값) · `est_travel_minutes` · `travel_source` · `departed_at`을 읽고, 기상 확인은 그 기상 알람의 `alarm_events` `WAKE_CONFIRMED` — DB. 가짜 모드는 `db.wakeConfirmations` · `db.me.departAt`
   - 보이는 때 (`features/alarm/morning.ts` `morningCardVisible`): 저녁(18시~)이 아님 · 기상 알람 시각이 지남(기상 확정을 기다리지 않음 — 원탭 확인 줄이기, #240) · 출발 알람 시각 + 30분까지(출발 알람이 없으면 약속 − 이동) · 출발 기록(`departed_at`)이 없음. 못 읽으면 카드만 없음(홈 전체는 그대로)
   - 글자: 첫 일정 · "출발까지 1시간 10분" · "지금 나가면 오전 9:47 도착 · 여유 13분" · 여유 / 빠듯 / 지각 위험 · 이동 출처. 도착 · 여유는 늘 지금 시각 기준으로 다시 셈 (`departNow`, 7장 7.5.2). 카드를 누르면 H03
@@ -167,6 +171,7 @@
 - [먼저 깼어요] (D61 · 친구 7장): 기상 알람 전 60분 안에 울릴 켜진 기상 알람 `alarms`(WAKE · 아직 울림 · 확인 기록 없음) — DB → 누르면 지금 시각으로 WAKE_CONFIRMED(BUTTON) + 하루 기록 — DB. 그룹에는 바로 '일어났어요'. 폰 알람 미리 끄기는 안 함(알람 코어 몫)
 - 확인 알림 원탭 → WAKE_CONFIRMED(알림 응답) — DB, 끝까지 안 깨면 MISSED 기록 + 미확인 푸시 — `wake-check` 배치(아래 표, 기준은 상세설계서 7장 7.9.2). **다시 울림 없음** (D2 = B) — 앱의 가짜 시연 `missWake` · "응답 없이 5분 지나기"는 뺌
 - 기상 확정 뒤 "오늘 첫 일정" 한 줄 (이슈 #230): `getMorningPlan()`(H01 아침 카드와 같은 함수) — "오늘 첫 일정 오전 10:00 전공 수업 · 세종대학교" · "오전 8:40에 나가면 돼요" · "다음 알림 · 준비 오전 8:10 · 출발 오전 8:40"(아직 안 울린 것만). 일정 줄을 누르면 H03. 켜진 기상 알람이 붙은 일정이 없으면 "오늘은 기상 알람이 걸린 일정이 없어요". 못 읽어도 확정 화면은 그대로 (덧붙임 줄)
+- 폰 사용 막대 · 판정 조건 줄 없음 — 판정 규칙은 위 그대로, 화면에는 단계 글자와 버튼만
 
 
 ### H09 아침 루틴 음성 진행 (`app/routine-run.tsx`)
@@ -178,7 +183,9 @@
 - 들어오는 길: 기상 확정 뒤 자동(H08) · 홈(H01) 오늘 루틴 카드 아래 "음성으로 진행 ›"(남은 단계가 있을 때, 카드 밖 — 카드는 누르면 다음 단계를 끝내는 버튼)
 ### F01 · G01 친구와 그룹
 - 맨 위 (D110, 홈 아래에서 옮김) — 알람 조정 제안 카드는 뺌 (UI 단순화: 제안은 A02 저녁 AI 대화 카드 한 곳, 자세히는 S01). `suppress_until`은 "이 시각 전엔 같은 종류 제안을 만들지 않음"이라 `suggestion-generate`에서만 봄
-- 맨 위 (D110, 홈 아래에서 옮김) — 그룹 기상 요약: `get_group_wake(group_id)` — RPC. 그 그룹 일정이 있는 날만 (D57), 약속 없는 날은 '오늘 n명 일어남' 줄을 숨김
+- 그룹 칸 카드 안 줄 (D110 홈에서 옮긴 그룹 기상 요약을 D-01로 카드에 합침): 멤버 얼굴 + '오늘 n명 기상 완료' — `get_group_wake(group_id)`(`getGroupSummary`) RPC. 그 그룹 일정이 있는 날만 (D57), 약속 없는 날은 기상 수를 숨김. 덧붙임이라 못 읽으면 줄만 빔
+- 칸 순서 (D-01): 친구 칸 = 친구 찾기 → 받은 요청 → 보낸 요청 → 내 친구 → 내 아이디 · 링크, 그룹 칸 = 받은 초대 → 참여 중인 그룹
+- 배지 (D-03): [친구 | 그룹] 칸 이름 옆 + 아래 탭 '그룹' 아이콘에 받은 친구 요청 + 받은 그룹 초대 수 (`listFriendRequests` · `listGroupInvites`). 탭 막대가 열릴 때 읽고, 그룹 탭 화면이 목록을 읽을 때 · 수락 · 거절할 때 새 값을 넣음(`setSocialBadge`). 로그아웃 정리(`onSignOut`)에서 0, 못 읽어도 0
 - 친구 목록: `friends`(ACCEPTED) + 이름 · 사진 `get_public_profiles` — DB · RPC
 - 받은 요청: `friends`(PENDING, 받는 사람 = 나) — DB, 수락 → ACCEPTED — DB
 - 아이디 검색 · 요청: `find_profile_by_handle` — RPC → `friends` PENDING 추가 — DB
@@ -188,22 +195,26 @@
 
 ### F02 친구 권한
 - 관계별 받은 권한: `sharing_permissions`(주는 사람 = 친구, 받는 사람 = 나, 출처 FRIEND · GROUP) — DB → 최종 = 항목별 OR (앱에서 합침). 기상 조회는 권한 행의 값이 아니라 그 그룹의 기상 공유 동의 하나(`wake_share_opt_in`)로 계산 — 알람 권한 행이 없어도 동의한 그룹은 줄이 생기고, 친구 출처에는 기상 조회가 없음. 안내 '내가 OO님에게 준 권한을 관계별로 합친 결과예요'
+- 내가 준 권한 스위치는 바로 저장 — 누르면 `saveShareSettings('friend:<id>')`(F03과 같은 함수) 후 토스트 '○○님과의 공유 권한을 저장했어요', 실패하면 스위치를 원래대로 (저장 버튼 없음). 알람 설정을 켜면 조회도 같이 켬
 
 ### F03 공유 권한 설정
 - 내가 주는 권한 저장: 친구 관계 = `sharing_permissions` 내 행 하나 upsert(알람 조회 · 알람 설정 2개만, `can_view_wake`는 항상 꺼서) — DB. 그룹 관계 = `save_group_permissions(p_group_id, p_can_view_alarm, p_can_edit_alarm)` 한 번 — RPC(참여 중 멤버 전원에게 같은 값이 전부 되거나 전부 안 됨, 값이 그대로여도 저장해 나중에 들어온 멤버 몫 설정 행이 생김, 혼자인 그룹은 `NO_MEMBERS` → 오류). 그룹의 기상 상태 조회 스위치 = 이 그룹 기상 공유 동의: `group_members.wake_share_opt_in`을 내 행만 update(값이 바뀐 때만)
 - 받은 권한 보기: `sharing_permissions`(받는 사람 = 나) — DB
 - 설정 권한은 조회 권한이 있어야 실제로 쓸 수 있음(= 시각 제안을 보낼 수 있음) → 화면에서 설정을 켜면 조회도 같이 켬
-- 알람 조회 줄 아래 안내 '일정 장소도 보여요 · 집 · 출발지는 안 보여요' (친구 13장, 화면 글자만 — 서버는 일정 장소까지만 내려줌)
+- 맨 아래 한 줄 '알람 설정을 켜면 알람 조회도 같이 켜져요. 집 · 출발지는 안 보여요.' (친구 13장, 화면 글자만 — 서버는 일정 장소까지만 내려줌). 그룹의 기상 스위치 설명은 '이 그룹에 보여요'까지 한 줄. 적용 방식 안내 카드는 없음
 
 ### G02 그룹 상세
 - 그룹 · 멤버: `groups` + `group_members` — DB, 기상 공유 동의 `wake_share_opt_in` · 출발 · 도착 공유 동의 `trip_share_opt_in`(기본 끔, 기상 공유를 켠 사람만 켜지고 기상 공유를 끄면 같이 꺼짐) — DB
 - 연결 일정: `appointments`(`group_id`, 오늘부터, `creator_id`) — DB + 인원수 · 내 참여 `group_appointment_counts` — RPC. 줄을 누르면 참여자(참여 / 알람 없음, 차단 쌍은 이름만) `appointment_joiners` — RPC. [내 알람 만들기] = `alarm-commit`(`appointment_id` + 내 집 · 수단 · 준비 시간) — Edge, [나는 빠지기] = `appointment-edit` LEAVE — Edge. 지난 약속은 '지난 약속이에요'(버튼 숨김) (친구 9장)
+- 연결 일정 머리 [+ 새 공동 약속] → 새 일정(H05, `groupId`). 연결 일정 줄 아래 같이 준비하는 사람 얼굴 줄 (오늘 약속은 '그룹 이름 · 오늘 n명 기상 완료')
+- 요약 줄: 멤버 머리 아래 '기상 n · 아직 m' (둘 다 0이면 숨김)
+- [깨우기] (멤버 줄, '울렸어요'인 사람만): G03과 같은 `sendWakePing` · 같은 잠금 규칙(`features/social/wakePingLock`) — 사람별 마지막 결과를 들고 있다가 보냄(OK) · 5분 안 또 누름(WAIT)은 다음 가능 시각까지, 한도 · 꺼짐 · 이미 일어남은 계속 비활성(보낸 직후 줄 글자 '보냄'). 결과 안내는 토스트. 가짜 모드는 막힘
 - 멤버 기상 상태: `get_group_wake` — RPC. 그 그룹 일정이 있는 날만 (D57). 그룹 화면 하루 = 새벽 4시 기준일(11/20, 04:00 ~ 다음 날 04:00 · 앱 `lifeDayKey`). 기상 6단계(`SCHEDULED` '오전 8:50 알람' · `RINGING` · `DISMISSED` · `MISSED` '울렸어요' · `CONFIRMED` '일어났어요 오전 8:08', `NO_ALARM` '알람 없음') + 출발 · 도착 시각 `departed_at` · `arrived_at`(그날 이 그룹 공동 약속, 여럿이면 기록이 가장 최근인 약속, 그 약속 시각 `trip_appointment_at`)과 보임 여부 `trip_visible`(본인 포함 그 멤버가 `group_members.trip_share_opt_in`을 켜고 그날 참여 행이 있음, 아니면 시각은 null) + 준비 칸 `prepare_alarm_at`(같은 약속의 그 사람 켜진 준비 알람 시각, 기상 알람이 없는 오후 · 저녁 약속의 첫 단계) · `prepare_started_at`(준비 알람 해제 시각 = 준비 시작, 11/19) — `trip_visible`이 아니면 둘 다 null. 줄이 없는 멤버는 '공유 안 함' (친구 7장 · D59 11/19 도착까지). 멤버 메뉴 [이 사람에게 기상 숨기기 / 보이기] `set_wake_hidden` — RPC, 숨긴 목록 `wake_hides` — DB(내 줄만). 누가 일어나면 DB가 그룹 채널에 새로 고침 신호(Realtime 방송, #160) → 앱이 다시 부름 (지형님 10/15 기술 결정 — `capstone/전체작업계획_v1.md` 8절 Q3, 레포 밖)
 - 초대: 코드 시트 `my_group_code`(만료됐으면 서버가 새 코드 + 7일) — RPC, [새 코드] `regenerate_invite_code` — RPC, 직접 초대 `invite_to_group` — RPC (친구 5장). 그룹장 없음 — 이름 바꾸기 `groups` update · 나가기 `group_members` JOINED → LEFT · 내보내기 다른 사람 행 delete · 알림 끄기 `group_members.notifications_off` — DB
 
 ### G03 그룹원 기상 상태
 - 기상 · 출발 · 도착 상태: `get_group_wake` — RPC (단계 · 알람 시각 · 확인 시각 + 출발 · 도착 시각 `departed_at` · `arrived_at` · `trip_visible` · `trip_appointment_at` — 출발 · 도착 공유를 켠 사람만, 시각만(장소 · 좌표 · 감지 출처 · 지각은 안 내려줌). 미루기 횟수 · 알람 끈 시각은 본인만 — D59 11/19 · 친구 7장. 새 칸 `prepare_alarm_at` · `prepare_started_at`은 `get_group_wake_status`에도 같은 이름으로 끝에 붙음). 준비 시작 · 출발 · 도착이 바뀌거나 공유 설정 · 숨기기 · 나가기 · 약속 시각 변경 · 취소 · 약속에서 빠짐이 있으면 기상 신호와 같은 채널(`group:<id>:wake` · `refresh` · `{date}`)로 새로 고침 신호. 준비 알람 해제 = 준비 시작은 서버가 `alarm_events`(DISMISSED)에서 빈 칸만 채움. 출발은 위치 자동 판단이고 감지가 꺼진 사람만 출발 알람 해제가 대신 — 폰이 해제와 함께 보내는 ACKNOWLEDGED(DEPARTURE)가 출발이 되고, 출발 알람의 DISMISSED는 기록만. 그 그룹 일정이 있는 날만 (D57). 알람 카드는 알람 조회 권한이 있으면 [알람 보기](G04)로
-- 깨우기: `notify`(`{ kind: 'WAKE_PING', targetUserId, groupId }`) — Edge. '울렸어요'일 때만 버튼. 판정 · 횟수(보내는 사람 → 받는 사람 쌍마다 5분 1번 · 하루 3번) · 직전 재확인은 서버가 하고, 응답 `ping.status`로 버튼 아래 한 줄: `OK` '1/3 · 8:15부터 다시' · `WAIT` '8:15부터 다시' · `DAILY_LIMIT` · `OFF`(받기를 껐거나 기상이 안 보임(403) — '지금은 깨울 수 없어요'로 구분 안 함) · `ALREADY_UP`('이미 일어났어요', 상태를 다시 읽음) · `NOT_RINGING`(다시 읽음) · `NO_TOKENS`('지금은 알림이 닿지 않아요', 횟수 안 셈). 상태를 미리 읽는 곳은 없어 보내 본 뒤에 앎 — 보냄 · 기다림 · 한도 · 꺼짐 · 이미 일어남은 버튼을 잠금(다음 가능 시각이 지나면 풀림). 가짜 모드는 막힘
+- 깨우기: `notify`(`{ kind: 'WAKE_PING', targetUserId, groupId }`) — Edge. '울렸어요'일 때만 버튼. 판정 · 횟수(보내는 사람 → 받는 사람 쌍마다 5분 1번 · 하루 3번) · 직전 재확인은 서버가 하고, 응답 `ping.status`로 버튼 아래 한 줄: `OK` '1/3 · 8:15부터 다시' · `WAIT` '8:15부터 다시' · `DAILY_LIMIT` · `OFF`(받기를 껐거나 기상이 안 보임(403) — '지금은 깨울 수 없어요'로 구분 안 함) · `ALREADY_UP`('이미 일어났어요', 상태를 다시 읽음) · `NOT_RINGING`(다시 읽음) · `NO_TOKENS`('지금은 알림이 닿지 않아요', 횟수 안 셈). 상태를 미리 읽는 곳은 없어 보내 본 뒤에 앎 — 보냄 · 기다림 · 한도 · 꺼짐 · 이미 일어남은 버튼을 잠금(다음 가능 시각이 지나면 풀림, 그룹 상세와 같은 `wakePingLock`). 가짜 모드는 막힘
 - 오늘 받은 깨우기: `my_wake_pings` — RPC (`sender_nickname`, `sent_at` 최신 순, 차단한 사람 것 제외) → 홈 · H08 한 줄 '수연님이 7:12에 깨웠어요'(여러 번이면 '· 오늘 n번'). 가짜 모드는 없음
 - 설정 [깨우기 받기]: `profiles.wake_ping_enabled` — DB 직접 update(내 프로필, 기본 켬). 꺼 두면 보낸 쪽에는 `OFF`만 보임
 
@@ -270,12 +281,15 @@
 - 로그인: Supabase Auth 카카오 · 구글 → 가입하면 `profiles` 자동 생성. 화면 아래의 "알람 테스트" 버튼은 `/dev/alarm-test`로 바로 감 (로그인 전에도 열림, 화면 위 "← 이전"으로 돌아옴, #177)
 - 온보딩: `profiles` 아이디(`handle`) · 닉네임 · 잠귀(`wake_sensitivity`) · 집(`home_name` · `home_lat` · `home_lng`) · 기본 준비 · 여유 시간 · 이동 수단 · 깨우는 여유(`wake_margin`) · 개인정보 동의(`privacy_agreed_at` · `privacy_version`) · 온보딩 끝낸 시각(`onboarded_at`) — DB, 집 검색 `place-search` — Edge
   - **개인정보 동의 단계** (친구 13장): 항목 5개(위치 · 화면 사용 · 음성 · 기상 공유 · 알람 공유) + '만 14세 이상이에요' 확인(체크 전에는 [다음] 잠김). 안내 판 번호 `PRIVACY_VERSION = 3` — 이 판에 이미 동의한 계정이 온보딩을 다시 열면 체크 없이 통과(다시 저장 안 함), 판이 낮으면 다시 동의. 온보딩을 마친 계정은 앱을 열 때 `privacy_version < PRIVACY_VERSION`이면 `/reconsent`(동의 항목 + 만 14세 확인만)가 먼저 뜨고, 동의하면 판 · 시각(`privacy_agreed_at`)을 저장하고 프로필을 다시 읽어 홈으로 (`needsReconsent`, `features/auth/onboardingGate.ts`). 오프라인 · 읽기 실패 때는 묻지 않음. 로그아웃 저장본은 친구 읽기 값이 계정별(`me`)로 따로 읽혀 따로 비우지 않음
-  - **단계 온보딩** (`lib/flags` `ONBOARDING_IN_FLOW = true`, #25): 순서는 `features/onboarding/steps.ts`, 단계마다 켜고 끄는 표는 `ONBOARDING_STEPS`(아이디 → 닉네임 → 잠귀 → 집 → 아침 준비 → 시간표 → 동의 → 권한 안내 → 기상 공유 → 첫 일정). 집: 장소 검색(`place-search`)으로 고르면 `home_name` · `home_lat` · `home_lng` 저장(좌표 없는 장소는 못 고름, [나중에]는 저장 없이 다음). 시간표(직접 입력 초안, D66-1 B): 수업 줄(과목 · 요일 · 시작 시각 · 장소)마다 차례로 `estimateAppointment` → `createAppointment(…, '온보딩 시간표')`로 반복 일정 + 알람 저장, 실패한 줄만 표시하고 그 단계에 머묾, 첫 저장 뒤 알림 안내. 권한 안내: 알림 · 전체화면 알림 · (꺼졌을 때만)정확한 알람 · 사용 정보 · 배터리 · 삼성 절전 줄의 상태 표 + 사용자가 누르는 [켜기] · [설정 열기]만(`permissionRows`, 자동 시스템 창 없음, 안 켜도 [다음]), 위치 줄(안드로이드 + 실데이터만, `ONBOARDING_LOCATION_ROWS`): 누르면 `LOCATION_DISCLOSURE` 고지 → `requestLocationAccessFlow()`(앱 사용 중 → 항상 허용 설정 화면), 나중에 · 거절은 설정 카드로(`useLocationRow`). 단계마다 [다음]에서 `saveProfileFields`로 저장하고 마지막에 `finishOnboarding`이 `onboarded_at`을 적음. 판정은 `onboarded_at`이 비었는지(`features/auth/onboardingGate.ts`). 가짜 데이터 모드 미리 보기는 저장 없이 단계만 넘김. `/dev/screens`의 "온보딩부터 다시"로 처음부터 다시 봄
+  - **단계 온보딩** (`lib/flags` `ONBOARDING_IN_FLOW = true`, #25): 순서는 `features/onboarding/steps.ts`, 단계마다 켜고 끄는 표는 `ONBOARDING_STEPS`(아이디 → 닉네임 → 잠귀 → 집 → 아침 준비 → 동의 → 권한 안내 → 기상 공유 → 첫 일정, 9단계 — 시간표 단계는 끔 `timetable: false`, 켜면 아래 시간표 줄이 들어감). 집: 장소 검색(`place-search`)으로 고르면 `home_name` · `home_lat` · `home_lng` 저장(좌표 없는 장소는 못 고름, [나중에]는 저장 없이 다음). 시간표(끔 — 켰을 때, 직접 입력 초안, D66-1 B): 수업 줄(과목 · 요일 · 시작 시각 · 장소)마다 차례로 `estimateAppointment` → `createAppointment(…, '온보딩 시간표')`로 반복 일정 + 알람 저장, 실패한 줄만 표시하고 그 단계에 머묾, 첫 저장 뒤 알림 안내. 권한 안내: 알림 · 전체화면 알림 · (꺼졌을 때만)정확한 알람 · 사용 정보 · 배터리 · 삼성 절전 줄의 상태 표 + 사용자가 누르는 [켜기] · [설정 열기]만(`permissionRows`, 자동 시스템 창 없음, 안 켜도 [다음]), 위치 줄(안드로이드 + 실데이터만, `ONBOARDING_LOCATION_ROWS`): 누르면 `LOCATION_DISCLOSURE` 고지 → `requestLocationAccessFlow()`(앱 사용 중 → 항상 허용 설정 화면), 나중에 · 거절은 설정 카드로(`useLocationRow`). 단계마다 [다음]에서 `saveProfileFields`로 저장하고 마지막에 `finishOnboarding`이 `onboarded_at`을 적음. 판정은 `onboarded_at`이 비었는지(`features/auth/onboardingGate.ts`). 가짜 데이터 모드 미리 보기는 저장 없이 단계만 넘김. `/dev/screens`의 "온보딩부터 다시"로 처음부터 다시 봄
   - 개발 화면 목록(`/dev/screens` · 웹 미리보기 패널)에서 단계마다 바로 열기: `/onboarding?step=home` — 가짜 데이터 모드(저장 안 함)에서만, 실데이터는 늘 첫 단계부터 (`steps.ts` `startStep`)
+  - 아침 준비 단계 이동 수단 칩은 3개(대중교통 · 자동차 · 도보)
   - 개발 화면 `/dev/screens`의 **내 시험 데이터 지우기** (실데이터 + 로그인 + 모드를 바꿀 수 있는 빌드에서만, 출시 빌드에서는 숨김 D16): 확인 창 → `features/dev/api` `resetMyTestData`(DB 함수 `dev_reset_my_data` — 내 일정 · 알람 · 기록 · 일기 · AI 대화 · 고친 값 기록 · 제안을 지우고 프로필을 온보딩 전으로, 그룹 일정은 내 참여 행만, 친구 · 그룹 · 푸시 토큰 · `ai_calls` · 루틴은 그대로) → `lib/session` `cleanupAfterDataReset`(폰 알람 전부 취소 · 못 올린 울림 기록 버림, 로그아웃 없음) → 프로필 다시 읽기 → 온보딩. 가짜 데이터 모드에서는 "지울 게 없어요"
   - 가입 직후 프로필: 닉네임 = 카카오 · 구글에서 가져온 값(DB 트리거), 준비 60분 · 여유 10분 · 이동 수단 대중교통 · 잠귀 보통 · 깨우는 여유 보통 = DB 기본값(온보딩 입력칸 처음 값), 집 · 아이디 = 비어 있음
 - 온보딩 단계 부품 초안(`features/onboarding/components/`): `OnboardingFrame`(틀) · `HomePlaceStep` · `TimetableStep` · `PermissionsStep` · `OnboardingDoneStep` — 값 · 콜백만 받고 api · 라우터를 부르지 않음(L7이 함수를 붙임). `/dev/onboarding?mode=mock`에서 가짜 값으로 넘겨 봄 (`/dev/screens` 목록에는 없음, #116)
 - 설정에서 값 바꾸기: 닉네임 · 아이디 · 잠귀 · 깨우는 여유 · 준비 시간 · 여유 시간 · 이동 수단 · 집 줄을 누르면 편집 시트(`features/profile/components/ProfileEditors`, 온보딩 단계 부품 재사용) → [저장]이 `saveProfileFields` → `profiles` — DB. 집은 지도 고르기 시트(아래). 실데이터 + 로그인일 때만 열리고 가짜 모드는 보기만. 아이디는 중복 확인(`isHandleTaken`) 뒤 저장 (L3 `changeHandle`이 오면 교체)
+- 설정 맨 위 카드 두 줄: '알람이 울릴 준비'(꺼진 권한 수 · 모두 켜짐 · 점검하기, 누르면 `/ring-check`) · '아침 준비 기본값'(준비 · 여유, 누르면 편집 시트)
+- 아침 준비 기본값을 저장한 뒤 한 번 시트 '알람도 다시 계산할까요?': N = 앞으로 울릴 알람(켜짐 · 아직 안 지남)이 있는 내 일정만 (공동 약속 · 일정 없는 알람 · 지난 일정 제외, `listAppointments`). 가짜 모드는 [다시 계산]이 이 자리에서 끝난 것으로 보임, 실데이터는 [알람 탭에서 다시 계산] — 안내 토스트 후 알람 탭으로 (알람마다 '최신 기본값으로 알람 다시 계산', 여러 개 한 번에는 실데이터 연결 남음)
 - 지도 고르기 시트(`features/alarm/components/MapPlaceSheet`, 지금은 설정의 집 바꾸기에서 열림): 카카오맵 지도(`public/map-picker.html`을 웹은 iframe · 앱은 WebView로 열고 JavaScript 키 `EXPO_PUBLIC_KAKAO_JS_KEY`는 공개 값) + 검색 `listPlaces`(`place-search` — Edge) + 핀 자리 주소 `reverseAddress`(`place-reverse` — Edge, 핀이 멈춘 0.4초 뒤) + 폰 위치 한 번 `locateOnce`(앞 권한만, 폰). 고른 값은 시트가 저장하지 않고 `onPick`으로 돌려줌(집은 `profiles` — DB). 카카오 응답은 저장하지 않음(D5). 키가 없으면 지도 칸이 "지도 준비 중"이고 검색 결과로만 정함
 - 자주 가는 곳 (설정 "자주 가는 곳" 절, 지도에서 위치 고르기 ②, 이슈 #31): 학교 · 회사 · 알바 등 최대 5개 — `user_places`(이름표 `label` · 장소 이름 `name` · `address` · 좌표 · 반경 `radius_m`) — DB. 집은 위 `profiles` 그대로. **본인만 읽고 씀, 친구 · 그룹에 공유하지 않음**(Q13 · D59), 한 사람 5개까지(DB 트리거 + 앱 `UserError`). 함수: `features/location/api.ts` `listUserPlaces()` · `saveUserPlace({ label, name, address?, lat, lng, radiusM? })`(같은 이름표면 덮어씀) · `deleteUserPlace(label)`. 저장 규칙: 지도 시트 "이름" 칸이 이름표, 장소 이름은 핀 자리 주소(없으면 검색 이름). 칩 부품 `features/location/components/FrequentPlaceChips`(값 `places` + `onPick`만 받음)은 새 일정 장소 줄(H05)과 온보딩 시간표 장소 기본값(L7) 위에 꽂아 씀 — 이 PR은 부품만 내보냄. 가짜 모드는 메모리 배열(학교 · 회사)
 - 시간표 가져오기 확인(`app/timetable-import.tsx`, 목업 번호 없음, D66-1, #291): 사진(A) · 폰 캘린더(D)에서 읽어 온 수업을 줄마다 고치고 빼고 → [수업 N개 저장]. 줄 편집 · 저장은 온보딩 시간표 단계와 같은 `TimetableStep` · `useTimetableStep`(줄마다 `estimateAppointment` → `createAppointment(…, '온보딩 시간표')`), 가져온 수업은 `lib/importHandoff`로 받음. 학교 위치를 한 번 정하면 좌표 없는 모든 줄에 적용(`CampusCard`). 길 입구는 `lib/flags` `TIMETABLE_PATHS`(photo · calendar 켬 — 온보딩 시간표 단계 · 학교 시간표(`app/timetable.tsx`) 입구, 끄면 입구 · 동의 항목 · 이 화면 진입이 함께 사라짐). 사진 읽기는 서버 함수 `timetable-extract`(Claude), 캘린더는 폰 안에서만(`expo-calendar`, 앞으로 2주 매주 반복 일정 후보)

@@ -19,8 +19,10 @@ import { useWakeLoad } from '@/features/social/hooks/useGroupWake';
 import { usePersonMenu } from '@/features/social/hooks/usePersonMenu';
 import { MiniButton } from '@/features/social/components/MiniButton';
 import { permissionNames } from '@/features/social/permissions';
-import type { GroupDetail, GroupMember, Person } from '@/features/social/types';
+import type { GroupDetail, GroupMember, Person, WakePingResult } from '@/features/social/types';
+import { wakePingLocked } from '@/features/social/wakePingLock';
 import { WAKE_PING_FAILED, WAKE_STALE_TEXT, wakePingNote, wakePingSent, wokeLine } from '@/features/social/wakeTexts';
+import { useNow } from '@/features/alarm/hooks/useNow';
 import { now } from '@/lib/clock';
 import { formatDateShort, formatTime, isSameDay } from '@/lib/format';
 import { useAction } from '@/lib/useAction';
@@ -66,14 +68,15 @@ function Detail({ group: g, stale, onBack, onChanged }: { group: GroupDetail; st
   const openMyAlarms = () => openTab('/alarms');
 
   // [깨우기] — 그룹원 기상 상태 화면(G03)과 같은 함수로 보냄. 서버가 판정 · 횟수를 세고 결과를 줌, 가짜 모드는 막힘(8-16)
-  //   보낸 줄은 이 화면에서 '보냄'으로 바꿔 연달아 누르지 않게 (남은 횟수 · 다음 가능 시각은 기상 상태 화면에서)
+  //   사람별 마지막 결과를 들고 있다가 G03과 같은 규칙(wakePingLocked)으로 잠금 — OK · WAIT는 다음 가능 시각까지, 한도 · 꺼짐 · 이미 일어남은 계속
   const { run } = useAction();
-  const [pinged, setPinged] = useState<string[]>([]);
+  const [pings, setPings] = useState<Record<string, WakePingResult>>({});
+  const current = useNow(15_000);
   const wake = (p: Person) =>
     run(async () => {
       const result = await sendWakePing(g.id, p.id);
+      setPings((prev) => ({ ...prev, [p.id]: result }));
       if (result.status === 'OK') {
-        setPinged((ids) => [...ids, p.id]);
         toast(wakePingSent(p.short));
       } else {
         toast(wakePingNote(result));
@@ -183,7 +186,7 @@ function Detail({ group: g, stale, onBack, onChanged }: { group: GroupDetail; st
       ) : null}
       <Card>
         {g.members.map((m, i) => (
-          <MemberRow key={m.person.id} member={m} groupId={g.id} first={i === 0} onMyAlarm={openMyAlarms} onMenu={menu.open} onWake={wake} pinged={pinged.includes(m.person.id)} />
+          <MemberRow key={m.person.id} member={m} groupId={g.id} first={i === 0} onMyAlarm={openMyAlarms} onMenu={menu.open} onWake={wake} ping={wakePingLocked(pings[m.person.id], current) ? (pings[m.person.id]?.status === 'OK' ? 'sent' : 'locked') : null} />
         ))}
       </Card>
 
@@ -219,7 +222,7 @@ function MemberRow({
   onMyAlarm,
   onMenu,
   onWake,
-  pinged,
+  ping,
 }: {
   member: GroupMember;
   groupId: string;
@@ -227,7 +230,7 @@ function MemberRow({
   onMyAlarm: () => void;
   onMenu: (p: Person) => void; // [···] 기상 숨기기 · 신고 · 차단
   onWake: (p: Person) => void; // [깨우기] — 알람이 울렸는데 아직 안 일어난 줄에만
-  pinged: boolean; // 이 화면에서 이미 보냄
+  ping: 'sent' | 'locked' | null; // 잠금 중 — sent = 방금 보냄(다음 가능 시각 전), locked = 한도 · 꺼짐 · 이미 일어남 · 5분 안 또 누름
 }) {
   const shared = m.state.stage !== 'NOT_SHARED';
   const name = m.person.short;
@@ -270,7 +273,7 @@ function MemberRow({
       ) : (
         <>
           {m.state.stage === 'RANG' ? (
-            <TextLink label={pinged ? '보냄' : '깨우기'} accessibilityLabel={`${m.person.name}님 깨우기`} disabled={pinged} onPress={() => onWake(m.person)} />
+            <TextLink label={ping === 'sent' ? '보냄' : '깨우기'} accessibilityLabel={`${m.person.name}님 깨우기`} disabled={ping != null} onPress={() => onWake(m.person)} />
           ) : null}
           <MiniButton label="···" accessibilityLabel={`${m.person.name}님 메뉴`} onPress={() => onMenu(m.person)} />
         </>
