@@ -145,9 +145,11 @@ function screenFast(st: ServerState, nowIso: string, stored: StoredTurn[]): Reco
 }
 
 function screenT1(st: ServerState, ts: TurnState, nowIso: string, stored: StoredTurn[], events: ServerEvent[]): { vars: Record<string, unknown>; ctx: Context } {
-  // T1 화면: 확인할 기록 줄 + 시각을 말로 + 서버 처리 결과. 일정 · 알람은 이번 처리까지 반영한 상태(ts)
-  const ctx = withSchedule(ctxOf(st, nowIso, events), ts);
-  return { ctx, vars: { ...contextVars(ctx, { confirmFacts: st.confirm, spokenTimes: true }), transcript: viewTranscript(turnsOf(stored), { userName: ctx.user.name, recent: TRANSCRIPT_RECENT_LINES }) } };
+  // T1 화면: 확인할 기록 줄 + 시각을 말로 + 서버 처리 결과. 화면의 일정 · 알람은 이번 처리까지 반영한 상태(ts)
+  //   돌려주는 ctx(가드용)는 대화 시작 값 그대로 — 가드 · 알람 목록이 'ctx = 앞 상태'로 새 알람 · 바뀐 강도를 가름 (guards alarmRelayMissing · view contextAlarmRefs)
+  const ctx = ctxOf(st, nowIso, events);
+  const screen = withSchedule(ctx, ts);
+  return { ctx, vars: { ...contextVars(screen, { confirmFacts: st.confirm, spokenTimes: true }), transcript: viewTranscript(turnsOf(stored), { userName: ctx.user.name, recent: TRANSCRIPT_RECENT_LINES }) } };
 }
 
 // ───────── T1 답 + 가드 ─────────
@@ -210,9 +212,14 @@ async function t1Reply(
     );
     g = { ...g, reply: [...kept, say].join(' '), acts: [{ type: 'CLARIFY', ref: null }], end: false, actions: [...g.actions, 'ask_server'] };
   }
-  // 일정을 바꿔 달라는데 이미 그 값 — "네, 알겠어요." · 바꿨다는 말 대신 지금 설정을 서버 문장으로 (이번 말에 다른 처리 결과가 없을 때만 생김)
-  const note = view(false).safety.latestUser ? undefined : eventAt(ts.events, j)?.note;
-  if (note !== undefined) g = { ...g, reply: note, acts: [], end: false, actions: [...g.actions, 'server_note'] };
+  // 일정을 바꿔 달라는데 이미 그 값 — "네, 알겠어요." · 바꿨다는 말 대신 지금 설정을 서버 문장으로 (그 말에 대한 답에서만).
+  //   같은 말 뒤에 준비물 저장 · 되물음 같은 다른 처리 결과가 붙었으면 T1 답을 지우지 않고 앞에 붙임
+  const evj = eventAt(ts.events, j);
+  const note = trigger === 'text' && !view(false).safety.latestUser ? evj?.note : undefined;
+  if (note !== undefined) {
+    const rest = needKinds(evj).length > 0 ? splitSentences(g.reply).filter((x) => x !== fallbackReply([])) : [];
+    g = { ...g, reply: [note, ...rest].join(' '), ...(rest.length === 0 ? { acts: [], end: false } : {}), actions: [...g.actions, 'server_note'] };
+  }
   return { ok: true, line: { role: 'ai', after_turn: j, source, trigger, text: g.reply, acts: g.acts, end: g.end, flags: g.flags, guard: redone && !g.actions.includes('regen') ? ['regen', ...g.actions] : g.actions } };
 }
 
@@ -446,7 +453,7 @@ async function handleText(run: Run, row: SessionRow, st: ServerState, req: Extra
     req.client_turn_id, limitsFor,
   );
   const evj = eventAt(ts.events, j);
-  // 서버가 만든 문구('산책'의 정확한 날짜 · 이미 그 값인 일정의 지금 설정) — 모델 원문 아님
+  // 서버가 만든 문구('산책'의 정확한 날짜 · 이미 그 값인 일정의 지금 설정 — note는 물음이 아닌 알림) — 모델 원문 아님
   const ask = voice && !tasks ? [...(evj?.clarify ?? []), ...(evj?.note ? [evj.note] : [])] : [];
   return { ...out, ...(notice ? { notice } : {}), ...(ask.length > 0 ? { ask } : {}) };
 }

@@ -271,7 +271,7 @@ test('바꿔 달라는데 바뀐 게 없음: 답은 "네, 알겠어요." · "바
   const none = { appointments: [], alarm_changes: [], fact_feedback: [], prep_adjustment: null, safety_flag: false };
   const appt = (time: string) => ({ ...none, appointments: [{ ref: null, title: '캡스톤 회의', date: '2026-10-30', time, place: null, importance: null, transport: null, repeat: null, save: 'UNCONFIRMED', unclear: null }] });
   const say = (reply: string) => ({ reply, acts: [], end: false });
-  const { deps } = depsOf(db, { T2F: [appt('10:30'), none, appt('10:30')], T1: [say('네.'), say('네.'), say('네, 바꿨어요.'), say('네, 바꿨어요.'), say('네, 알겠어요.')] }, { parallelPreview: false });
+  const { deps } = depsOf(db, { T2F: [appt('10:30'), none, appt('10:30'), { ...appt('10:30'), items: [{ title: '노트북', date: '2026-10-30' }] }], T1: [say('네.'), say('네.'), say('네, 바꿨어요.'), say('네, 바꿨어요.'), say('네, 알겠어요.'), say('노트북은 준비물 목록에 넣었어요.')] }, { parallelPreview: false });
   const s = await handleVoiceSession(deps, { session_type: 'BEFORE_SLEEP', input_mode: 'TEXT' });
   const sid = s.session_id as string;
   const id1 = cid();
@@ -289,6 +289,10 @@ test('바꿔 달라는데 바뀐 게 없음: 답은 "네, 알겠어요." · "바
   assert.equal(r.reply?.text, "'캡스톤 회의' 일정은 이미 10/30(금) 오전 10시 30분으로 되어 있어요.");
   assert.deepEqual(r.cards.filter((c) => c.status === 'READY'), []);
   assert.deepEqual(stateOf(db, sid).core.appointments.map((a) => [a.ref, a.time]), [['a1', '10:30']]);
+
+  // 같은 말에 준비물도 있음 — 지금 설정 알림을 앞에 붙이고 T1의 준비물 안내는 남김
+  r = await handleVoiceTurn(deps, text(sid, r.rev, '캡스톤 회의 10시 반으로 바꿔줘, 노트북도 챙겨야 해'));
+  assert.equal(r.reply?.text, "'캡스톤 회의' 일정은 이미 10/30(금) 오전 10시 30분으로 되어 있어요. 노트북은 준비물 목록에 넣었어요.");
 });
 
 // ───────── rev 충돌 · 재시도 ─────────

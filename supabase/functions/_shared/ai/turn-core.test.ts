@@ -1749,6 +1749,20 @@ describe("고칠 대상 찾기 (applyFast userText)", () => {
     assert.deepEqual([again.event.clarify, again.event.note], [[], undefined]);
   });
 
+  it("[변경 안 함]한 변경을 같은 말로 다시 청함: 지금 값을 되묻지 않고 새 변경 카드 (거절한 카드는 그대로)", () => {
+    const c = c24();
+    const x = apptX({ ref: "a2", title: "스터디", date: D24, time: "15:00" });
+    const first = say(c, fast({ appointments: [x] }), "스터디 3시로 바꿔줘");
+    const no = applyCardAction(first.state, { id: "c1", action: "REJECTED" }, c, 1).state;
+    const again = say(c, fast({ appointments: [x] }), "스터디 3시로 바꿔줘", no, 2);
+    assert.deepEqual(again.cards.map((k) => [k.id, k.kind, k.status, k.edit?.changes]), [["c2", "APPT_OPEN", "READY", { time: "15:00" }]]);
+    assert.deepEqual([again.event.clarify, again.event.note], [[], undefined]);
+    assert.equal(card(again.state, "c1").status, "REJECTED");
+    // 같은 말이 또 와도(추출 되풀이) 열린 c2를 다시 안내할 뿐 — 카드가 늘지 않음
+    const third = say(c, fast({ appointments: [x] }), "스터디 3시로 바꿔줘", again.state, 3);
+    assert.deepEqual([third.state.cards.length, third.event.pending.map((p) => p.id)], [2, ["c2"]]);
+  });
+
   it("바꿔 달라는 말이 아니거나 알람 · 준비시간 · 새 일정 말이면 되묻지 않음 (기존 흐름 그대로)", () => {
     const c = c24();
     for (const text of ["고마워", "내일 오후 1시에 새로운 회의 추가해줘", "캡스톤 회의 기상 알람 바꿔줘", "준비시간 좀 바꿔줘"]) {
