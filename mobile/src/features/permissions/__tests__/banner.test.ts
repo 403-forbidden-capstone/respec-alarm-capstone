@@ -34,7 +34,7 @@ describe('bannerLines — 홈 빨간 줄', () => {
   });
 
   it('전체화면 알림이 꺼져 있으면 줄', () => {
-    expect(bannerLines(snapshot({ fullScreen: 'off' }), ctx())).toEqual([{ key: 'fullScreen', text: '전체화면 알림이 꺼져 있어 알람 화면이 안 떠요' }]);
+    expect(bannerLines(snapshot({ fullScreen: 'off' }), ctx())).toEqual([{ key: 'fullScreen', text: '전체 화면 알림이 꺼져 있어 알람 화면이 안 떠요' }]);
   });
 
   it("'unknown'은 줄이 없음", () => {

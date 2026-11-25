@@ -44,7 +44,8 @@ export default function GroupChangeScreen() {
   const { saved, next } = data;
   const before = (kind: string) => saved.alarms.find((x) => x.kind === kind);
   const after = (kind: string) => next.alarms.find((x) => x.kind === kind);
-  const rows = RING_KINDS.filter((kind) => before(kind)?.enabled || after(kind)?.enabled);
+  // 울리는 알람 + 도착 목표(약속 시각이 바뀐 만큼 같이 움직임 — 원래 시각 → 새 시각이 여기서 보임)
+  const rows = [...RING_KINDS, 'ARRIVE' as const].filter((kind) => (kind === 'ARRIVE' ? before(kind) && after(kind) : before(kind)?.enabled || after(kind)?.enabled));
 
   // 길찾기를 못 해 서버가 어림값만 가졌으면(이동시간을 못 구해 보류된 참여자) 어림 분을 보여 주고, 확인하면 그 분을 직접 정한 값(MANUAL)으로 다시 저장 — H03 저장과 같은 길
   //   확인 창은 한 번에 하나 가드(run) 밖에서
@@ -93,10 +94,11 @@ export default function GroupChangeScreen() {
         {rows.map((kind) => {
           const b = before(kind);
           const a = after(kind);
+          const same = b != null && a != null && b.at.getTime() === a.at.getTime() && b.enabled === a.enabled; // 약속이 바뀌어도 이 알람은 그대로 (켜짐만 바뀌어도 '그대로'가 아님)
           return (
-            <View key={kind} style={styles.row}>
+            <View key={kind} style={[styles.row, same && styles.same]}>
               <Text variant="body" style={styles.kind}>
-                {KIND_LABEL[kind]}
+                {kind === 'ARRIVE' ? '도착 목표' : KIND_LABEL[kind]}
               </Text>
               <Text variant="body" tone="sub">
                 {b ? formatTime(b.at) : '—'}
@@ -104,7 +106,13 @@ export default function GroupChangeScreen() {
               <Text variant="body" tone="sub">
                 →
               </Text>
-              <Text variant="bodyStrong">{a ? formatTime(a.at) : '—'}</Text>
+              {same ? (
+                <Text variant="body" tone="sub">
+                  그대로
+                </Text>
+              ) : (
+                <Text variant="bodyStrong">{a ? formatTime(a.at) : '—'}</Text>
+              )}
             </View>
           );
         })}
@@ -121,7 +129,8 @@ const styles = StyleSheet.create({
   lead: { marginBottom: 18 },
   label: { marginBottom: 8 },
   row: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 6 },
-  kind: { width: 44 },
+  kind: { width: 68 },
+  same: { opacity: 0.55 },
   note: { marginTop: 12, lineHeight: 20 },
   footer: { gap: 8 },
 });

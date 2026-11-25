@@ -1,7 +1,7 @@
 import { StyleSheet, View } from 'react-native';
 
 import { Avatar, Button, Card, Text } from '@/components/ui';
-import { relationButton, searchNotice } from '../searchView';
+import { relationButton, SEARCH_SCOPE_HINT, searchNotice } from '../searchView';
 import type { PeopleSearch, Person } from '../types';
 import { MiniButton } from './MiniButton';
 import { PersonRow } from './PersonRow';
@@ -27,6 +27,9 @@ export function PeopleSearchResults({ search, busyId, onRequest, onAccept, onInv
           </Text>
           {notice.invite ? (
             <View style={styles.invite}>
+              <Text variant="note" tone="sub">
+                {SEARCH_SCOPE_HINT}
+              </Text>
               <Text variant="note" tone="sub">
                 아직 앱을 안 쓰는 친구라면 카톡으로 초대해 보세요.
               </Text>

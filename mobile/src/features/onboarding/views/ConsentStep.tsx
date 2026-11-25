@@ -14,7 +14,6 @@ type Props = {
 
 // 개인정보 안내 단계 (L02-7) — 항목마다 읽는 것 / 안 읽는 것 / 친구에게 보이는 것. 동의 저장은 부르는 화면이 함
 export function ConsentStep({ items, ageChecked, onAgeChange }: Props) {
-  const accent = useAccent(); // 포인트 색 — 그 시각 하늘과 같은 계열 (lib/skyTone)
   return (
     <>
       {items.map((item) => (
@@ -25,26 +24,32 @@ export function ConsentStep({ items, ageChecked, onAgeChange }: Props) {
           <Line label="친구에게 보이는 것" text={item.friends} />
         </Card>
       ))}
-      {onAgeChange ? (
-        <Pressable
-          onPress={() => onAgeChange(!ageChecked)}
-          accessibilityRole="checkbox"
-          accessibilityState={{ checked: !!ageChecked }}
-          accessibilityLabel={AGE_CHECK_LABEL}
-          style={styles.age}
-        >
-          <View style={[styles.box, ageChecked && [styles.boxOn, { backgroundColor: accent }]]}>{ageChecked ? <Text variant="small" style={styles.tick}>✓</Text> : null}</View>
-          <View style={styles.ageText}>
-            <Text variant="bodyStrong">{AGE_CHECK_LABEL}</Text>
-            {!ageChecked ? (
-              <Text variant="small" tone="sub">
-                {AGE_CHECK_HINT}
-              </Text>
-            ) : null}
-          </View>
-        </Pressable>
-      ) : null}
+      {onAgeChange ? <AgeCheck checked={!!ageChecked} onChange={onAgeChange} /> : null}
     </>
+  );
+}
+
+// 만 14세 이상 확인 줄 — 온보딩은 이걸 틀(OnboardingFrame)의 aboveFooter로 [동의하고 계속] 바로 위에 둠. 다시 동의 화면(reconsent)은 ConsentStep 안에 그림
+export function AgeCheck({ checked, onChange, showHint = true }: { checked: boolean; onChange: (next: boolean) => void; showHint?: boolean }) {
+  const accent = useAccent(); // 포인트 색 — 그 시각 하늘과 같은 계열 (lib/skyTone)
+  return (
+    <Pressable
+      onPress={() => onChange(!checked)}
+      accessibilityRole="checkbox"
+      accessibilityState={{ checked }}
+      accessibilityLabel={AGE_CHECK_LABEL}
+      style={styles.age}
+    >
+      <View style={[styles.box, checked && [styles.boxOn, { backgroundColor: accent }]]}>{checked ? <Text variant="small" style={styles.tick}>✓</Text> : null}</View>
+      <View style={styles.ageText}>
+        <Text variant="bodyStrong">{AGE_CHECK_LABEL}</Text>
+        {!checked && showHint ? (
+          <Text variant="small" tone="sub">
+            {AGE_CHECK_HINT}
+          </Text>
+        ) : null}
+      </View>
+    </Pressable>
   );
 }
 

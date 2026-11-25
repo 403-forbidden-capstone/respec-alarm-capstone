@@ -63,7 +63,7 @@ export default function AlarmsScreen() {
       {/* 친구가 보낸 알람 시각 제안 — 푸시를 누르면 여기로 (친구 10장) */}
       <ProposalCards onChanged={() => void reload()} />
       <View style={styles.links}>
-        <TextLink label="학교 시간표 · 반복 일정 지우기" onPress={() => router.push('/timetable')} />
+        <TextLink label="학교 시간표" onPress={() => router.push('/timetable')} />
       </View>
       {!data && !error ? <Loading text="알람을 불러오는 중" /> : null}
       {data && !upcoming.length ? (

@@ -161,8 +161,8 @@ describe('출발 · 도착 공유 스위치 (F03)', () => {
 
   it('그룹 관계에만 있음, 설명 · 칩 글자', () => {
     expect(permissionsFor('friend').some((p) => p.key === 'viewTrip')).toBe(false);
-    expect(permissionsFor('group').at(-1)).toMatchObject({ key: 'viewTrip', name: '출발 · 도착 공유', description: '이 그룹 일정의 준비 시작 · 출발 · 도착 시각이 보여요. 장소는 안 보여요.' });
-    expect(permissionNames({ ...base, viewTrip: true })).toEqual(['기상 상태 조회', TRIP_PERMISSION.chip]);
+    expect(permissionsFor('group').at(-1)).toMatchObject({ key: 'viewTrip', name: '출발 · 도착 공유', description: '준비 시작 · 출발 · 도착 시각이 보여요.' });
+    expect(permissionNames({ ...base, viewTrip: true })).toEqual(['내 기상 공개', TRIP_PERMISSION.chip]);
   });
 
   it('기상 공유가 꺼져 있으면 못 켬, 기상 공유를 끄면 같이 꺼짐', () => {
@@ -218,7 +218,7 @@ describe('웹 미리보기 이동 중 · 도착 장면 (가짜 데이터)', () =
 describe('G03 공유 범위 글자 (wakeScopeOf)', () => {
   it('출발 · 도착이 보이는 사람은 제목 · 설명에 출발 · 도착 범위, 아닌 사람은 지금 그대로', () => {
     expect(wakeScopeOf('수연', '캡스톤팀', true)).toMatchObject({ title: '기상 여부 · 알람 시각 · 준비 시작 · 출발 · 도착 시각' });
-    expect(wakeScopeOf('수연', '캡스톤팀', true).body).toContain('출발 · 도착 공유를 켠');
+    expect(wakeScopeOf('수연', '캡스톤팀', true).body).toContain('공개한 범위');
     expect(wakeScopeOf('수연', '캡스톤팀', false).title).toBe('기상 여부와 알람 시각');
     expect(wakeScopeOf('수연', '캡스톤팀', false).body).not.toContain('출발');
   });

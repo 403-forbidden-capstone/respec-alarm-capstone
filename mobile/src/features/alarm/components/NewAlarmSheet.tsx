@@ -36,7 +36,10 @@ export function NewAlarmSheet({ visible, onClose, current, busy, onSave }: Props
 
   return (
     <Sheet visible={visible} onClose={onClose} title="새 알람">
-      <TimePicker value={time} onChange={setPicked} />
+      <TimePicker value={time} onChange={setPicked} minuteStep={5} />
+      <Text variant="caption" tone="faint" align="center" style={styles.typeHint}>
+        분 버튼은 5분씩 움직여요 · 숫자를 누르면 직접 적을 수 있어요
+      </Text>
       <View style={styles.repeat}>
         <RepeatPicker value={repeat} onChange={setRepeat} />
       </View>
@@ -49,6 +52,7 @@ export function NewAlarmSheet({ visible, onClose, current, busy, onSave }: Props
 }
 
 const styles = StyleSheet.create({
+  typeHint: { marginTop: 6 },
   repeat: { marginTop: 16 },
   next: { marginTop: 12, marginBottom: 14 },
 });

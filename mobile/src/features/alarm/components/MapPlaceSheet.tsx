@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Keyboard, Platform, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 
 import { Button, EmptyState, LoadError, Loading, Sheet, Text, toast } from '@/components/ui';
-import { DESTINATION_RADIUS_PRESETS, initialRadius, radiusAfterPick } from '@/features/location/radius';
+import { DESTINATION_RADIUS_PRESETS, initialRadius, presetName, radiusAfterPick } from '@/features/location/radius';
 import { userMessage } from '@/lib/errors';
 import { colors, radius, size, typeScale } from '@/theme';
 
@@ -53,6 +53,13 @@ type Props = {
   initialQuery?: string; // 처음부터 채워 둘 검색어 (예: 캠퍼스 이름으로 건물 다시 찾기) — 있으면 결과 목록이 바로 열림
 };
 
+// 접힌 줄 요약 — '보통(200m)'처럼, 직접 정한 값이면 m만
+function radiusSummary(meters: number, presets: readonly number[]): string {
+  const i = presets.indexOf(meters);
+  const n = i >= 0 ? presetName(i, presets.length) : null;
+  return n ? `${n}(${meters}m)` : `${meters}m`;
+}
+
 // 지도에서 위치 고르기 시트 — 맨 위 검색 칸, 가운데 카카오맵(핀 고정, 지도를 끌어 맞춤) + [현재 위치], 아래 핀 자리 주소 · 이름 · [이 위치로 정하기]
 // 키가 없어 지도가 안 떠도 검색 결과를 누르면 그 좌표로 정할 수 있음
 // <MapPlaceSheet visible={open} onClose={…} onPick={…} search={…} reverse={reverseAddress} locate={locateOnce} center={home} title="집 찾기" />
@@ -79,6 +86,7 @@ function MapPlaceBody({ onPick, search, reverse, locate, center, suggestedNames,
   const [mapStatus, setMapStatus] = useState<'loading' | 'ready' | 'error'>('loading');
   const [pinResult, setPinResult] = useState<PinResult | null>(null);
   const [name, setName] = useState(''); // 직접 쓴 이름 · 칩
+  const [more, setMore] = useState(false); // 감지 범위 · 이름 펼침 (A-05)
   const [locating, setLocating] = useState(false);
   const [locateFailed, setLocateFailed] = useState(false);
   const presets = radiusOption?.presets ?? DESTINATION_RADIUS_PRESETS;
@@ -249,18 +257,6 @@ function MapPlaceBody({ onPick, search, reverse, locate, center, suggestedNames,
         )}
       </View>
 
-      {radiusM != null ? (
-        <RadiusPicker
-          value={radiusM}
-          presets={presets}
-          hint={radiusOption?.hint ?? DEFAULT_RADIUS_HINT}
-          onChange={(meters) => {
-            radiusTouched.current = true;
-            setRadiusM(meters);
-          }}
-        />
-      ) : null}
-
       <View style={styles.pin} accessibilityLiveRegion="polite">
         <Text variant="label">핀 자리</Text>
         {point == null ? (
@@ -290,41 +286,71 @@ function MapPlaceBody({ onPick, search, reverse, locate, center, suggestedNames,
         ) : null}
       </View>
 
-      <Text variant="label" style={styles.nameLabel}>
-        이름
-      </Text>
-      <View style={styles.chips}>
-        {names.map((label) => {
-          const on = name === label;
-          return (
-            <Pressable
-              key={label}
-              onPress={() => setName(on ? '' : label)}
-              accessibilityRole="button"
-              accessibilityLabel={label}
-              accessibilityState={{ selected: on }}
-              hitSlop={{ top: 8, bottom: 8 }}
-              style={[styles.nameChip, on && [styles.nameChipOn, { backgroundColor: accent, borderColor: accent }]]}
-            >
-              <Text variant="label" tone={on ? 'inverse' : 'ink'}>
-                {label}
-              </Text>
-            </Pressable>
-          );
-        })}
-      </View>
-      <View style={styles.nameBox}>
-        <TextInput
-          value={name}
-          onChangeText={setName}
-          maxLength={40}
-          returnKeyType="done"
-          placeholder="이름 (비우면 검색한 이름이나 주소로 저장)"
-          placeholderTextColor={colors.faint}
-          accessibilityLabel="장소 이름"
-          style={styles.input}
-        />
-      </View>
+      {/* 감지 범위 · 이름은 기본값으로 충분해서 접어 둠 — 핀 자리 다음 한 줄, 누르면 펼침 (A-05) */}
+      <Pressable
+        onPress={() => setMore((v) => !v)}
+        accessibilityRole="button"
+        accessibilityState={{ expanded: more }}
+        accessibilityLabel="감지 범위 · 이름 더 정하기"
+        style={styles.moreRow}
+      >
+        <Text variant="body" tone="sub" style={styles.moreText} numberOfLines={1}>
+          {[radiusM != null ? `감지 범위 ${radiusSummary(radiusM, presets)}` : null, `이름 ${name.trim() || '자동'}`].filter(Boolean).join(' · ')}
+        </Text>
+        <Text variant="label" tone="ink">
+          {more ? '접기' : '더 정하기 ›'}
+        </Text>
+      </Pressable>
+      {more ? (
+        <>
+          {radiusM != null ? (
+            <RadiusPicker
+              value={radiusM}
+              presets={presets}
+              hint={radiusOption?.hint ?? DEFAULT_RADIUS_HINT}
+              onChange={(meters) => {
+                radiusTouched.current = true;
+                setRadiusM(meters);
+              }}
+            />
+          ) : null}
+          <Text variant="label" style={styles.nameLabel}>
+            이름
+          </Text>
+          <View style={styles.chips}>
+            {names.map((label) => {
+              const on = name === label;
+              return (
+                <Pressable
+                  key={label}
+                  onPress={() => setName(on ? '' : label)}
+                  accessibilityRole="button"
+                  accessibilityLabel={label}
+                  accessibilityState={{ selected: on }}
+                  hitSlop={{ top: 8, bottom: 8 }}
+                  style={[styles.nameChip, on && [styles.nameChipOn, { backgroundColor: accent, borderColor: accent }]]}
+                >
+                  <Text variant="label" tone={on ? 'inverse' : 'ink'}>
+                    {label}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+          <View style={styles.nameBox}>
+            <TextInput
+              value={name}
+              onChangeText={setName}
+              maxLength={40}
+              returnKeyType="done"
+              placeholder="이름 (비우면 검색한 이름이나 주소로 저장)"
+              placeholderTextColor={colors.faint}
+              accessibilityLabel="장소 이름"
+              style={styles.input}
+            />
+          </View>
+        </>
+      ) : null}
 
       <Button label={waitingAddress ? '주소 찾는 중…' : '이 위치로 정하기'} onPress={confirm} disabled={!point || waitingAddress} />
     </>
@@ -408,6 +434,8 @@ const styles = StyleSheet.create({
   pin: { marginTop: 12, gap: 2 },
   warn: { marginTop: 4 },
   nameLabel: { marginTop: 14 },
+  moreRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, minHeight: 44, marginTop: 8 },
+  moreText: { flex: 1 },
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 6, marginBottom: 8 },
   nameChip: {
     height: size.chip + 6,

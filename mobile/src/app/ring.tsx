@@ -7,6 +7,10 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Text, toast } from '@/components/ui';
 import { useAuth } from '@/features/auth/AuthProvider';
 import { ackRing, dismissRing, getRing, snoozeRing, startRing, stopRing } from '@/features/alarm/api';
+import { getLocationStatus } from '@/features/location/permissions';
+import { getLocationAuto } from '@/features/location/store';
+import { listTodos, toggleTodo } from '@/features/routine/api';
+import type { Todo } from '@/features/routine/types';
 import { VoiceWave } from '@/features/alarm/components/VoiceWave';
 import { useNextRing } from '@/features/alarm/hooks/useNextRing';
 import { ringExit, type RingExit } from '@/features/alarm/ringExit';
@@ -225,7 +229,7 @@ export default function RingScreen() {
           {/* 알람 코어는 음성 문장을 안 가져서(실데이터) 비어 있으면 안내 칸을 그리지 않음 */}
           {data.voiceLine ? (
             <View style={styles.voice}>
-              <Text variant="caption" tone="inverse" style={styles.faded60}>
+              <Text variant="label" tone="inverse" style={styles.faded65}>
                 음성 안내 · {data.voiceTone}
               </Text>
               <Text variant="reading" tone="inverse" style={styles.voiceText}>
@@ -268,8 +272,9 @@ export default function RingScreen() {
                     <Text variant="body" weight={on || late ? 600 : 400} style={{ color: textColor }}>
                       {m}분
                     </Text>
+                    {/* 칩 안 '늦어요'는 폰 알람 화면(네이티브 AlarmRingingActivity)과 같게 둠 — 글자만 12로 (C-05) */}
                     {late ? (
-                      <Text variant="caption" weight={700} style={{ color: textColor }}>
+                      <Text variant="label" weight={700} style={{ color: textColor }}>
                         {SNOOZE_LATE_CHIP}
                       </Text>
                     ) : null}
@@ -342,6 +347,25 @@ function leaveRing(exit: RingExit, wakeAlarmId?: string) {
 function DonePanel({ kind, appointment: a, next: from, onClose }: { kind: Exclude<RingKind, 'WAKE'>; appointment: Appointment; next: string | null; onClose: () => void }) {
   const [checked, setChecked] = useState<string[]>([]);
   const next = useNextRing(from);
+  // 홈 '오늘 준비물'과 같은 할 일(todos)을 씀 — 여기서 체크하면 홈에도 체크됨. 못 읽거나 비었으면 일정에 적은 준비물 이름으로
+  const { data: todos, reload: reloadTodos } = useLoad(() => (kind === 'PREPARE' ? listTodos(a.at) : Promise.resolve<Todo[]>([])));
+  // 출발 안내는 위치 감지가 켜져 있을 때만 "자동으로 기록돼요"라고 말함
+  const { data: locationOn } = useLoad(async () => {
+    if (kind !== 'DEPARTURE') return false;
+    return (await getLocationStatus()) === 'on' && (await getLocationAuto().catch(() => false));
+  });
+  const toggleItem = (todo: Todo) => {
+    void toggleTodo(todo.id)
+      .then(() => reloadTodos())
+      .catch(() => toast('체크하지 못했어요. 다시 눌러 주세요'));
+  };
+  const rows: { key: string; name: string; on: boolean; press: () => void }[] =
+    todos && todos.length > 0
+      ? todos.map((t) => ({ key: t.id, name: t.title, on: t.done, press: () => toggleItem(t) }))
+      : a.items.map((name) => {
+          const on = checked.includes(name);
+          return { key: name, name, on, press: () => setChecked((list) => (on ? list.filter((x) => x !== name) : [...list, name])) };
+        });
   const arrive = a.alarms.find((x) => x.kind === 'ARRIVE');
   return (
     <View style={styles.body}>
@@ -361,16 +385,15 @@ function DonePanel({ kind, appointment: a, next: from, onClose }: { kind: Exclud
       <View style={styles.voice}>
         {kind === 'PREPARE' ? (
           <>
-            <Text variant="caption" tone="inverse" style={styles.faded60}>
+            <Text variant="label" tone="inverse" style={styles.faded65}>
               챙길 준비물
             </Text>
-            {a.items.length ? (
-              a.items.map((name) => {
-                const on = checked.includes(name);
+            {rows.length ? (
+              rows.map(({ key, name, on, press }) => {
                 return (
                   <Pressable
-                    key={name}
-                    onPress={() => setChecked((list) => (on ? list.filter((x) => x !== name) : [...list, name]))}
+                    key={key}
+                    onPress={press}
                     accessibilityRole="checkbox"
                     accessibilityState={{ checked: on }}
                     style={styles.checkRow}
@@ -396,14 +419,14 @@ function DonePanel({ kind, appointment: a, next: from, onClose }: { kind: Exclud
           </>
         ) : (
           <>
-            <Text variant="caption" tone="inverse" style={styles.faded60}>
+            <Text variant="label" tone="inverse" style={styles.faded65}>
               이동
             </Text>
             <Text variant="reading" tone="inverse" style={styles.voiceText}>
               이동 {a.travelMinutes}분{arrive ? ` · 도착 목표 ${formatTime(arrive.at)}` : ''}
             </Text>
             <Text variant="note" tone="inverse" style={[styles.voiceText, styles.faded65]}>
-              집을 벗어나면 출발이 자동으로 기록돼요.
+              {locationOn ? '집을 벗어나면 출발이 자동으로 기록돼요.' : '위치 감지를 켜 두면 집을 벗어날 때 출발이 자동으로 기록돼요.'}
             </Text>
           </>
         )}
@@ -456,7 +479,7 @@ const styles = StyleSheet.create({
   disabled: { opacity: 0.35 },
   option: {
     flex: 1,
-    minHeight: 42,
+    minHeight: 44,
     paddingVertical: 4,
     borderRadius: 14,
     borderWidth: 2,

@@ -31,6 +31,11 @@ describe('toggleAppointment', () => {
     expect(onChanged).toHaveBeenCalledTimes(1);
   });
 
+  it('반복 일정 끄기 — 그 회차만 꺼진다고 알림 (B-12)', async () => {
+    await toggleAppointment({ ...appointment('a2'), recurrenceRule: 'FREQ=WEEKLY;BYDAY=FR' } as Appointment, false, new Set(), jest.fn());
+    expect(mockToast).toHaveBeenCalledWith('이번 회차 알람만 껐어요');
+  });
+
   it('공유 일정 켜기 — 켤 때는 확인창 없음', async () => {
     await toggleAppointment(appointment('a1', '캡스톤팀'), true, new Set(), jest.fn());
     expect(mockConfirm).not.toHaveBeenCalled();

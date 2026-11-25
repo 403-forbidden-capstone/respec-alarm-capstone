@@ -18,26 +18,26 @@ const LOCATION_ACTION: Partial<Record<LocationStatus, string>> = { off: '켜기'
 export function permissionRows(snapshot: PermissionSnapshot | null, location?: LocationStatus | null): PermissionRow[] {
   const read = snapshot?.supported ? snapshot : null;
   const rows: PermissionRow[] = [
-    { key: 'notifications', label: '알림', why: '알람 화면과 준비 · 출발 알림이 떠요', state: read ? STATE[read.notifications] : 'unknown' },
-    { key: 'fullScreen', label: '전체화면 알림', why: '잠금화면 위에 알람 화면을 띄워요', state: read ? STATE[read.fullScreen] : 'unknown' },
+    { key: 'notifications', label: '알림', why: '알람 화면과 준비 · 출발 알림이 뜨려면 필요해요', state: read ? STATE[read.notifications] : 'unknown' },
+    { key: 'fullScreen', label: '전체 화면 알림', why: '잠금화면 위에 알람 화면을 띄워요', state: read ? STATE[read.fullScreen] : 'unknown' },
   ];
   // 정확한 알람은 보통 켜져 있어서(소음) 꺼졌을 때만 줄을 넣음
   if (read?.exactAlarm === 'off') {
-    rows.push({ key: 'exactAlarm', label: '정확한 알람', why: '정해진 시각에 정확히 울려요', state: 'off' });
+    rows.push({ key: 'exactAlarm', label: '정확한 알람', why: '정해진 시각에 정확히 울리게 해요', state: 'off' });
   }
   rows.push(
     {
       key: 'usageAccess',
       label: '사용 정보 접근',
-      why: '알람을 끈 뒤 폰을 쓰는지로 기상을 자동 확인해요 · 안 켜면 직접 눌러요',
+      why: '알람을 끈 뒤 폰을 쓰는지로 기상을 자동 확인해요 (안 켜면 직접 눌러요)',
       state: read ? STATE[read.usageAccess] : 'unknown',
     },
   );
   if (ONBOARDING_LOCATION_ROWS && location && location !== 'unsupported') {
     rows.push({
       key: 'location',
-      label: '위치 (출발 · 도착 자동 기록)',
-      why: '집을 나서거나 도착한 시각만 기록해요 · 경로는 저장하지 않아요',
+      label: '위치',
+      why: '집을 나서거나 도착한 시각만 기록하고 경로는 저장하지 않아요',
       state: location === 'on' ? 'ok' : 'off',
       actionLabel: LOCATION_ACTION[location],
     });
@@ -46,15 +46,15 @@ export function permissionRows(snapshot: PermissionSnapshot | null, location?: L
     // 배터리 · 삼성 절전은 앱이 상태를 못 읽음(PR 6 네이티브 전) → 늘 '확인 전'. 배터리만 설정 열기 버튼, 삼성은 글 안내만
     {
       key: 'battery',
-      label: '배터리',
-      why: "배터리 절약이 알람 앱을 멈추지 않게 해요 · 목록에서 이 앱을 '제한 없음'으로",
+      label: '배터리 사용 제한 없음',
+      why: '배터리 절약이 알람 앱을 멈추지 않게 해요',
       state: 'unknown',
       actionLabel: read ? '설정 열기' : undefined,
     },
     {
       key: 'samsung',
-      label: '삼성 절전',
-      why: "삼성 폰은 설정 › 배터리 › 백그라운드 사용 제한에서 '사용하지 않는 앱 절전'을 끄고 이 앱을 '절전 예외 앱'에 넣어 주세요",
+      label: '삼성 절전 예외',
+      why: "삼성 폰은 설정 › 배터리에서 이 앱을 '절전 예외 앱'에 넣어 주세요",
       state: 'unknown',
     },
   );

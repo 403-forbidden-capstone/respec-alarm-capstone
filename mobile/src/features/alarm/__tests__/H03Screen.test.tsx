@@ -259,6 +259,7 @@ describe('H03 — 자동으로 안 생긴 기상 알람을 직접 켜기 (#624)'
     await act(async () => wakeToggle().props.onChange(true));
     await flush();
     expect(wakeSheet()).toBeDefined();
+    expect(wakeSheet().props.visible).toBe(true); // 기상 줄이 아직 없어도 시각 창이 뜸 (B-18)
     await act(async () => wakeSheet().props.onChange(kst(22, 600)));
     await flush();
     expect(screenText()).not.toContain('미설정');
@@ -286,5 +287,15 @@ describe('H03 — 자동으로 안 생긴 기상 알람을 직접 켜기 (#624)'
     await flush();
     expect(screenText()).toContain('미설정');
     expect(button('저장').props.disabled).toBe(true);
+  });
+
+  it('시각을 안 건드리고 [확인]만 눌러도 그 시각으로 기상이 켜짐', async () => {
+    await open('a2');
+    await act(async () => wakeToggle().props.onChange(true));
+    await flush();
+    await act(async () => wakeSheet().props.onConfirm(kst(22, 600)));
+    await flush();
+    expect(screenText()).not.toContain('미설정');
+    expect(button('저장').props.disabled).toBe(false);
   });
 });

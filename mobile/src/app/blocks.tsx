@@ -10,7 +10,7 @@ import { backOrHome } from '@/lib/nav';
 import { useAction } from '@/lib/useAction';
 import { useLoad } from '@/lib/useLoad';
 
-// 설정 > 차단 목록 (새 화면, 친구 4장) — 내가 차단한 사람만. 줄 = 닉네임 · 아이디 + [풀기]. 횟수 제한 없음
+// 설정 > 차단한 사람 (새 화면, 친구 4장) — 내가 차단한 사람만. 줄 = 닉네임 · 아이디 + [풀기]. 횟수 제한 없음
 //   탈퇴한 사람은 서버가 빼고 아이디를 바꾸면 새 아이디가 보임. 풀어도 친구는 새 요청부터, 상대에게 알리지 않음
 export default function BlocksScreen() {
   const { data, error, reload } = useLoad(listBlocks);
@@ -32,7 +32,7 @@ export default function BlocksScreen() {
     <Screen onRefresh={reload}>
       <TopBar onBack={backOrHome} />
       <Text variant="title" style={styles.title}>
-        차단 목록
+        차단한 사람
       </Text>
       <Text variant="lead" style={styles.lead}>
         차단하면 서로 검색 · 요청 · 그룹 기상 · 깨우기에서 빠져요.

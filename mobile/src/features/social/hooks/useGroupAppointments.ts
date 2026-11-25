@@ -9,7 +9,7 @@ import { userMessage } from '@/lib/errors';
 import { useAction } from '@/lib/useAction';
 
 import { getAppointmentJoiners } from '../api';
-import { HOME_MISSING_JOIN_ACTION, HOME_MISSING_JOIN_TOAST, JOINED_TOAST, LEFT_APPOINTMENT_TOAST, leaveAppointmentText } from '../groupTexts';
+import { HOME_MISSING_JOIN_ACTION, HOME_MISSING_JOIN_TOAST, joinedToastText, LEFT_APPOINTMENT_TOAST, leaveAppointmentText } from '../groupTexts';
 import type { AppointmentJoiner, GroupAppointment } from '../types';
 
 // G02 연결 일정 (친구 9장) — [내 알람 만들기] 시트 · 참여자 시트 · [나는 빠지기]. 시트는 값 · 콜백만 받음 (그리기는 루트 SheetHost)
@@ -85,7 +85,8 @@ export function useGroupAppointments(onChanged: () => void) {
       joinTarget.current = null;
       setJoinFor(null);
     }
-    toast(result.phoneFailed ? `${JOINED_TOAST}. 폰에 못 건 알람은 앱을 다시 열면 걸어요` : JOINED_TOAST);
+    const done = joinedToastText(result as typeof result & { wakeAt?: Date; departAt?: Date }); // 실데이터는 만든 기상 · 출발 시각이 같이 옴(JoinResult 타입은 alarm/types.ts라 여기서 넓힘)
+    toast(result.phoneFailed ? `${done}. 폰에 못 건 알람은 앱을 다시 열면 걸어요` : done);
     onChanged();
   };
 

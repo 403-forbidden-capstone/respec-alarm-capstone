@@ -74,7 +74,7 @@ export default function FriendPermissionScreen() {
       <TopBar onBack={backOrHome} screenId="F02" right={<TopBarButton label="···" accessibilityLabel={`${p.name}님 메뉴`} onPress={() => menu.open(p)} />} />
       <PersonMenuSheet {...menu.sheetProps} />
       <Text variant="title" style={styles.title}>
-        {p.name}님의 권한
+        {p.name}님에게 준 권한
       </Text>
       <Text variant="lead" style={styles.lead}>
         {`내가 ${p.short}님에게 준 권한을 관계별로 합친 결과예요. 하나라도 허용하면 허용돼요. (함께하는 그룹 ${groupCount}개)`}

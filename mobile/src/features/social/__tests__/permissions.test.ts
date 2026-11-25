@@ -32,7 +32,7 @@ describe('F03 권한 스위치', () => {
 
 describe('권한 이름', () => {
   it('켜진 것만 화면 순서대로', () => {
-    expect(permissionNames(set(true, false, true))).toEqual(['알람 조회', '기상 상태 조회']);
+    expect(permissionNames(set(true, false, true))).toEqual(['알람 조회', '내 기상 공개']);
     expect(permissionNames(set(false, false, false))).toEqual([]);
   });
 });
@@ -51,6 +51,6 @@ describe('F03 스위치 목록 · 문구 (6-30 · 6-41)', () => {
   });
 
   it("알람 조회 문구는 '알람 시간 · 일정 · 장소 · 준비 시간을 볼 수 있어요' (6-d7)", () => {
-    expect(PERMISSIONS.find((p) => p.key === 'viewAlarm')?.description).toBe('알람 시간 · 일정 · 장소 · 준비 시간을 볼 수 있어요.');
+    expect(PERMISSIONS.find((p) => p.key === 'viewAlarm')?.description).toBe('알람 시각 · 일정 · 장소를 볼 수 있어요.');
   });
 });

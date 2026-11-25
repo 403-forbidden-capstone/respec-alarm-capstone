@@ -55,7 +55,7 @@ export function PermissionsStep({ rows, onAction, onOpenChecklist }: Props) {
       ) : null}
       {onOpenChecklist ? (
         <View style={styles.link}>
-          <TextLink label="알람이 안 울릴 때 점검표 보기" onPress={onOpenChecklist} />
+          <TextLink label="알람 권한 점검 보기" onPress={onOpenChecklist} />
         </View>
       ) : null}
     </View>

@@ -17,7 +17,7 @@ export function bannerLines(snapshot: PermissionSnapshot | null, { failedCount, 
       lines.push({ key: 'notifications', text: '알림이 꺼져 있어 알람이 잠금화면에 안 떠요' });
     }
     if (snapshot.fullScreen === 'off') {
-      lines.push({ key: 'fullScreen', text: '전체화면 알림이 꺼져 있어 알람 화면이 안 떠요' });
+      lines.push({ key: 'fullScreen', text: '전체 화면 알림이 꺼져 있어 알람 화면이 안 떠요' });
     }
   }
   if (failedCount > 0) lines.push({ key: 'failed', text: `알람 ${failedCount}개를 폰에 걸지 못했어요` });

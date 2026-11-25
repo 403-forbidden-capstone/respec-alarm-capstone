@@ -24,7 +24,7 @@ import { getReceived, getShareSettings, listRelations, saveShareSettings } from 
 import { GroupIcon } from '@/features/social/components/GroupIcon';
 import { PersonRow } from '@/features/social/components/PersonRow';
 import { permissionNames, togglePermission } from '@/features/social/permissions';
-import { permissionsFor, TRIP_NEEDS_WAKE, VIEW_ALARM_NOTE, type PermissionSet, type Relation, type RelationId } from '@/features/social/types';
+import { permissionsFor, TRIP_NEEDS_WAKE, type PermissionSet, type Relation, type RelationId } from '@/features/social/types';
 import { useLoad } from '@/lib/useLoad';
 import { colors } from '@/theme';
 import { useAction } from '@/lib/useAction';
@@ -32,7 +32,10 @@ import { useLeaveGuard } from '@/lib/useLeaveGuard';
 import { backOrHome } from '@/lib/nav';
 
 // 그룹 관계의 기상 상태 스위치 = 이 그룹에 내 기상 공유 동의 (친구 6장 — 기상은 권한 행이 아니라 그룹 동의 하나)
-const WAKE_CONSENT_DESCRIPTION = '이 그룹 멤버가 내 기상 확인 여부와 확인 시각을 볼 수 있어요. 켜면 이 그룹에 기상 공유를 동의한 것이에요.';
+const WAKE_CONSENT_DESCRIPTION = '기상 확인 여부와 시각이 이 그룹에 보여요.';
+
+// 알람 조회 · 설정이 엮인 규칙 — 항목마다 풀어 쓰지 않고 한 번만
+const ALARM_RULE = '알람 설정을 켜면 알람 조회도 같이 켜져요. 집 · 출발지는 안 보여요.';
 
 type Side = 'give' | 'recv';
 
@@ -175,19 +178,9 @@ function Editor({
                     <Text variant="small" tone="sub" style={styles.description}>
                       {key === 'viewWake' ? WAKE_CONSENT_DESCRIPTION : description}
                     </Text>
-                    {key === 'viewAlarm' ? (
-                      <Text variant="caption" tone="faint" style={styles.description}>
-                        {VIEW_ALARM_NOTE}
-                      </Text>
-                    ) : null}
                     {key === 'viewTrip' && !current.viewWake ? (
-                      <Text variant="caption" tone="faint" style={styles.description}>
+                      <Text variant="label" tone="sub" style={styles.description}>
                         {TRIP_NEEDS_WAKE}
-                      </Text>
-                    ) : null}
-                    {key === 'editAlarm' ? (
-                      <Text variant="caption" tone="faint" style={styles.description}>
-                        알람 설정을 켜면 알람 조회도 같이 켜져요. 알람 조회를 끄면 알람 설정도 꺼져요.
                       </Text>
                     ) : null}
                   </View>
@@ -205,9 +198,10 @@ function Editor({
                 적용 방식
               </Text>
               <Text variant="small" tone="sub" style={styles.paragraph}>
+                {ALARM_RULE}{' '}
                 {relation.kind === 'group'
-                  ? '이 설정은 그룹 관계에서 주는 권한만 바꿔요. 멤버별 최종 권한은 친구 관계와 참여 중인 모든 그룹의 허용 권한을 합쳐 결정돼요.'
-                  : '이 설정은 친구 관계에서 주는 권한만 바꿔요. 같은 그룹에 있다면 그룹에서 준 권한은 그대로 남아요.'}
+                  ? '이 설정은 그룹에서 주는 권한만 바꿔요. 멤버별 최종 권한은 친구와 모든 그룹의 허용을 합쳐 정해져요.'
+                  : '이 설정은 친구에게 주는 권한만 바꿔요. 같은 그룹에서 준 권한은 그대로 남아요.'}
               </Text>
             </Card>
           </>

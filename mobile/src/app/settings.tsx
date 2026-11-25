@@ -183,12 +183,12 @@ export default function SettingsScreen() {
           <Card>
             <EditRow
               first
-              label="사용자 정보"
+              label="준비시간 연구 정보"
               value={prepareMlSurveySummary(profile)}
               onPress={open('prepareMlSurvey')}
             />
             <Text variant="small" tone="sub">
-              선택적으로 수집하며, 현재 CatBoost 예측에는 사용되지 않아요.
+              선택으로 받는 정보예요. 지금은 알람 계산에 쓰지 않아요.
             </Text>
           </Card>
 
@@ -221,6 +221,22 @@ export default function SettingsScreen() {
           </Card>
         </>
       ) : null}
+
+      {/* 친구 · 공유 — 차단한 사람 (친구 4장). 친구 알림 가까이에 둠 (UX D-24) */}
+      <SectionHeader title="친구 · 공유" />
+      <Card>
+        <Pressable
+          onPress={() => router.push('/blocks')}
+          accessibilityRole="button"
+          accessibilityLabel="차단한 사람"
+          style={({ pressed }) => [styles.linkRow, pressed && styles.pressed]}
+        >
+          <Text variant="body">차단한 사람</Text>
+          <Text variant="body" tone="sub">
+            {blocks.data ? `${blocks.data.length}명 ›` : '›'}
+          </Text>
+        </Pressable>
+      </Card>
 
       {/* 알람이 잘 울리게 하는 폰 설정 — 값이 아니라 길이라 프로필 값(위 "알람" 절)과 나눔. 가짜 모드에서도 보임 */}
       <SectionHeader title="알람 점검" />
@@ -255,28 +271,17 @@ export default function SettingsScreen() {
         <Pressable
           onPress={() => router.push('/ring-check')}
           accessibilityRole="button"
-          accessibilityLabel="알람이 안 울릴 때"
+          accessibilityLabel="알람 권한 점검"
           style={({ pressed }) => [styles.linkRow, profile && styles.linkDivider, pressed && styles.pressed]}
         >
-          <Text variant="body">알람이 안 울릴 때</Text>
+          <View style={styles.pingText}>
+            <Text variant="body">알람 권한 점검</Text>
+            <Text variant="small" tone="sub">
+              알림 · 전체 화면 · 배터리
+            </Text>
+          </View>
           <Text variant="body" tone="sub">
             ›
-          </Text>
-        </Pressable>
-      </Card>
-
-      {/* 개인정보 — 차단 목록 (친구 4장) */}
-      <SectionHeader title="개인정보" />
-      <Card>
-        <Pressable
-          onPress={() => router.push('/blocks')}
-          accessibilityRole="button"
-          accessibilityLabel="차단 목록"
-          style={({ pressed }) => [styles.linkRow, pressed && styles.pressed]}
-        >
-          <Text variant="body">차단 목록</Text>
-          <Text variant="body" tone="sub">
-            {blocks.data ? `${blocks.data.length}명 ›` : '›'}
           </Text>
         </Pressable>
       </Card>

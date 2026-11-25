@@ -104,6 +104,18 @@ export default function MemberWakeScreen() {
         </Card>
       )}
 
+      <View style={styles.stack}>
+        {state.stage === 'RANG' ? <Button label="깨우기" loading={busy} disabled={locked} onPress={sendPing} /> : null}
+        {pingNote ? (
+          <Text variant="small" tone="sub" style={styles.pingNote} accessibilityLiveRegion="polite">
+            {pingNote}
+          </Text>
+        ) : null}
+        {canViewAlarm ? (
+          <Button label="알람 보기" variant="ghost" onPress={() => router.push({ pathname: '/friends/[id]/alarms', params: { id: p.id } })} />
+        ) : null}
+      </View>
+
       {!noGroupAppointment && lines.length ? (
         <Card>
           <Text variant="label" tone="sub" style={styles.label}>
@@ -132,18 +144,6 @@ export default function MemberWakeScreen() {
           {scope.body}
         </Text>
       </Card>
-
-      <View style={styles.stack}>
-        {state.stage === 'RANG' ? <Button label="깨우기" loading={busy} disabled={locked} onPress={sendPing} /> : null}
-        {pingNote ? (
-          <Text variant="small" tone="sub" style={styles.pingNote} accessibilityLiveRegion="polite">
-            {pingNote}
-          </Text>
-        ) : null}
-        {canViewAlarm ? (
-          <Button label="알람 보기" variant="ghost" onPress={() => router.push({ pathname: '/friends/[id]/alarms', params: { id: p.id } })} />
-        ) : null}
-      </View>
     </Screen>
   );
 }
@@ -161,6 +161,6 @@ const styles = StyleSheet.create({
   lineDotNow: { backgroundColor: colors.ink },
   label: { marginBottom: 8 },
   paragraph: { marginTop: 4, lineHeight: 20 },
-  stack: { gap: 10, marginTop: 16 },
+  stack: { gap: 10, marginTop: 4, marginBottom: 12 },
   pingNote: { textAlign: 'center' },
 });

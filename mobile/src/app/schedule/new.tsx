@@ -3,9 +3,9 @@ import { autoLevel } from '@shared/calc/intensity.ts';
 import { prepareSourceLabel } from '@shared/calc/prepare.ts';
 import { router, useLocalSearchParams } from 'expo-router';
 import { Fragment, useState } from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { Pressable, StyleSheet, TextInput, View } from 'react-native';
 
-import { Button, Card, DateRow, Field, KeyValueRow, LoadError, Screen, Sheet, Text, toast, Toggle, TopBar } from '@/components/ui';
+import { Button, Card, DateRow, KeyValueRow, LoadError, Screen, Sheet, Text, toast, Toggle, TopBar } from '@/components/ui';
 import { createAppointment, defaultDraft, draftAt, estimateAppointment, listAppointments, listPlaces, reverseAddress } from '@/features/alarm/api';
 import { adjustEstimate, isManualTime, orderError } from '@/features/alarm/adjust';
 import { useNow } from '@/features/alarm/hooks/useNow';
@@ -59,8 +59,8 @@ import { requireUserId } from '@/lib/user';
 import { useLeaveGuard } from '@/lib/useLeaveGuard';
 import { useLoad } from '@/lib/useLoad';
 import { listGroups } from '@/features/social/api';
-import { SHARED_APPOINTMENT_NOTE } from '@/features/social/groupTexts';
-import { colors } from '@/theme';
+import { SHARED_APPOINTMENT_NOTE, sharedSavedToast } from '@/features/social/groupTexts';
+import { colors, font } from '@/theme';
 import { useAccent } from '@/lib/skyTone';
 
 const LEVEL_OPTIONS = LEVELS.map((l, i) => [i as Level, l.name] as const);
@@ -221,14 +221,14 @@ export default function NewScheduleScreen() {
       const rings = upcomingAlarms(saved.alarms, now()).length;
       const skipped = ringingKinds(saved.alarms).filter((x) => isPassed(x, now())).length;
       // 저장은 됐는데 폰 예약 · 준비물이 못 한 것이 있으면 "맞췄어요" 대신 그 사실을 (saveNotice.ts)
-      toast(
-        saveNotice(saved.followUp) ??
-          (!saved.alarms.length
-            ? '일정을 알람 없이 저장했어요'
-            : rings
-              ? `알람 ${rings}개를 맞췄어요${skipped ? ` · 지난 알람 ${skipped}개는 울리지 않아요` : ''}`
-              : '일정을 저장했어요 · 울릴 알람이 없어요'),
-      );
+      const notice = saveNotice(saved.followUp);
+      const done = !saved.alarms.length
+        ? '일정을 알람 없이 저장했어요'
+        : rings
+          ? `알람 ${rings}개를 맞췄어요${skipped ? ` · 지난 알람 ${skipped}개는 울리지 않아요` : ''}`
+          : '일정을 저장했어요 · 울릴 알람이 없어요';
+      // 공동 약속이면 그룹에 보였다는 것 · 그룹원은 각자 내 알람을 만든다는 것까지 (D-13)
+      toast(notice ?? (draft.groupId ? sharedSavedToast(done) : done));
       // N3: 첫 알람 저장 직후 알림 안내 (한 번만, 거절 뒤엔 홈 빨간 줄 · 점검표) — L7
       // 울릴 알람이 없는 저장(전부 지난 알람)에는 안 물음 — 답이 결과를 안 바꿈(#240 원칙 ④)
       if (rings > 0) void askNotifications('alarm');
@@ -239,7 +239,7 @@ export default function NewScheduleScreen() {
   }
 
   // 계산 버튼은 화면 아래에 고정 — 폼이 길어 스크롤 끝까지 내려가지 않아도 보이게 (H03 저장과 같음). 키보드가 올라오면 같이 올라감
-  const footer = <Button label={anyAlarm ? '알람 계산하기' : '일정만 저장하기'} onPress={calculate} loading={calculating} disabled={past || locatingOrigin} />;
+  const footer = <Button label={anyAlarm ? '알람 미리 보기' : '일정만 저장하기'} onPress={calculate} loading={calculating} disabled={past || locatingOrigin} />;
 
   return (
     <Screen footer={footer}>
@@ -251,16 +251,18 @@ export default function NewScheduleScreen() {
         약속 정보를 바탕으로 필요한 알람을 계산해요.
       </Text>
       <View style={styles.timetableLink}>
-        <TextLink label="수업이면 학교 시간표로 한 번에 넣기" onPress={() => router.push('/timetable')} />
+        <TextLink label="수업은 학교 시간표에서 한 번에 넣어요 ›" onPress={() => router.push('/timetable')} />
       </View>
 
       <Card>
         <Text variant="label" tone="sub">
           일정 정보
         </Text>
-        <Field
-          first
-          label="일정명 *"
+        {/* 일정명 — 라벨 아래 테두리 칸(왼쪽 정렬)이라 빈 칸임이 보임. 오른쪽 정렬 줄은 값이 들어간 것처럼 보였음 (B-04) */}
+        <Text variant="body" tone="sub" style={styles.titleLabel}>
+          일정명 *
+        </Text>
+        <TextInput
           accessibilityLabel="일정명 (필수)"
           value={draft.title}
           onChangeText={(v) => {
@@ -268,7 +270,10 @@ export default function NewScheduleScreen() {
             if (v.trim()) setTitleError(false);
           }}
           placeholder="예: 스터디"
+          placeholderTextColor={colors.faint}
           maxLength={30}
+          maxFontSizeMultiplier={1.3}
+          style={[styles.titleInput, font(draft.title ? 600 : 400), titleError && styles.titleInputError]}
         />
         {titleError ? (
           <Text variant="caption" tone="warn" align="right" style={styles.error} accessibilityLiveRegion="polite">
@@ -282,6 +287,48 @@ export default function NewScheduleScreen() {
           onChange={(next) => set('time', formatTime24(next))}
           error={past ? '이미 지난 시각이에요' : undefined}
         />
+        {/* SelectRow와 같은 모양 — 누르면 목록 대신 검색 시트. 실데이터는 고른 장소의 좌표도 초안에 담아 계산 · 저장 요청까지 가져감 (가짜 데이터는 좌표가 없음) */}
+        <Pressable
+          onPress={() => {
+            setPlaceQuery('');
+            setPlaceOpen(true);
+          }}
+          accessibilityRole="button"
+          accessibilityLabel={`장소 ${draft.place || '고르기'}`}
+          style={({ pressed }) => [styles.placeRow, pressed && styles.pressed]}
+        >
+          <Text variant="rowLabel" tone="sub">
+            장소
+          </Text>
+          <View style={styles.placeValue}>
+            <Text variant="bodyStrong" tone={draft.place ? 'ink' : 'faint'} numberOfLines={1} style={styles.placeName}>
+              {draft.place || '장소 고르기'}
+            </Text>
+            <Text variant="bodyStrong" tone="faint">
+              ›
+            </Text>
+          </View>
+        </Pressable>
+        {areaPlace ? (
+          <AreaPlaceNote
+            onSearch={() => {
+              setPlaceQuery(draft.place);
+              setPlaceOpen(true);
+            }}
+          />
+        ) : null}
+        {/* 함께할 그룹을 장소 바로 아래 — 반복 요일 칩 · 출발지 버튼 아래로 밀려 첫 화면 밖이던 것 (D-12) */}
+        {groupOptions.length > 1 ? (
+          <>
+            {/* 함께할 그룹 — 고르면 공동 약속, 그룹원은 G02 연결 일정에서 보고 각자 [내 알람 만들기] (친구 9장) */}
+            <SelectRow<string> label="함께할 그룹" value={draft.groupId ?? ''} options={groupOptions} onChange={(v) => set('groupId', v || null)} />
+            {draft.groupId ? (
+              <Text variant="small" tone="sub" style={styles.groupNote}>
+                {SHARED_APPOINTMENT_NOTE}
+              </Text>
+            ) : null}
+          </>
+        ) : null}
         <RepeatPicker value={draft.repeat} onChange={(next) => set('repeat', next)} />
       </Card>
 
@@ -289,7 +336,7 @@ export default function NewScheduleScreen() {
       {!places && placesError ? <LoadError onRetry={reloadPlaces} /> : null}
       <Card>
         <Text variant="label" tone="sub">
-          장소와 이동 수단
+          출발지와 이동 수단
         </Text>
         <KeyValueRow label="출발지" value={draft.originLocation ? (draft.originName || '현재 위치') : (auth.profile?.home_name ?? '집 위치 미설정')} />
         <Text variant="caption" tone="sub">기본 출발지는 집이에요. 다른 위치를 고르면 이 일정에만 적용돼요.</Text>
@@ -330,36 +377,6 @@ export default function NewScheduleScreen() {
             <FrequentPlaceChips places={userPlaces} selectedLabel={selectedUserPlaceLabel(draft, userPlaces)} onPick={(p) => setDraft((d) => withUserPlace(d, p))} />
           </View>
         ) : null}
-        {/* SelectRow와 같은 모양 — 누르면 목록 대신 검색 시트. 실데이터는 고른 장소의 좌표도 초안에 담아 계산 · 저장 요청까지 가져감 (가짜 데이터는 좌표가 없음) */}
-        <Pressable
-          onPress={() => {
-            setPlaceQuery('');
-            setPlaceOpen(true);
-          }}
-          accessibilityRole="button"
-          accessibilityLabel={`장소 ${draft.place || '고르기'}`}
-          style={({ pressed }) => [styles.placeRow, pressed && styles.pressed]}
-        >
-          <Text variant="rowLabel" tone="sub">
-            장소
-          </Text>
-          <View style={styles.placeValue}>
-            <Text variant="bodyStrong" tone={draft.place ? 'ink' : 'faint'} numberOfLines={1} style={styles.placeName}>
-              {draft.place || '장소 고르기'}
-            </Text>
-            <Text variant="bodyStrong" tone="faint">
-              ›
-            </Text>
-          </View>
-        </Pressable>
-        {areaPlace ? (
-          <AreaPlaceNote
-            onSearch={() => {
-              setPlaceQuery(draft.place);
-              setPlaceOpen(true);
-            }}
-          />
-        ) : null}
         <MapPlaceSheet
           visible={placeOpen}
           onClose={() => setPlaceOpen(false)}
@@ -376,17 +393,6 @@ export default function NewScheduleScreen() {
             setPlaceOpen(false);
           }}
         />
-        {groupOptions.length > 1 ? (
-          <>
-            {/* 함께할 그룹 — 고르면 공동 약속, 그룹원은 G02 연결 일정에서 보고 각자 [내 알람 만들기] (친구 9장) */}
-            <SelectRow<string> label="함께할 그룹" value={draft.groupId ?? ''} options={groupOptions} onChange={(v) => set('groupId', v || null)} />
-            {draft.groupId ? (
-              <Text variant="small" tone="sub" style={styles.groupNote}>
-                {SHARED_APPOINTMENT_NOTE}
-              </Text>
-            ) : null}
-          </>
-        ) : null}
         <SelectRow<Transport>
           label="이동 수단"
           value={draft.transport}
@@ -401,7 +407,7 @@ export default function NewScheduleScreen() {
           알람 강도
         </Text>
         <Text variant="small" tone="sub">
-          배경음 · 말소리(Android TTS) · 진동을 각각 고를 수 있어요. 3 · 4단계 Gemini 음성은 두 번 미루거나 지각 위험이 생길 때 자동으로만 재생돼요.
+          배경음 · 말소리 · 진동을 각각 골라요. 두 번 미루거나 늦을 것 같으면 AI 목소리로 한 번 더 깨워요.
         </Text>
         <Text variant="small" tone="sub">
           예상 자동 강도: {LEVELS[autoIntensity].name} (저장 시 지각 이력과 잠귀 설정도 반영)
@@ -510,6 +516,7 @@ export default function NewScheduleScreen() {
             estimate={estimate}
             current={current}
             earlierWake={appointments ? earlierWakeOf(estimate.appointment.at, appointments) : null}
+            wakeOn={draft.alarms.WAKE}
             saving={saving}
             showCalc={showCalc}
             onToggleCalc={() => setShowCalc((v) => !v)}
@@ -547,6 +554,7 @@ function CalcSteps({
   estimate: e,
   current,
   earlierWake,
+  wakeOn,
   saving,
   showCalc,
   onToggleCalc,
@@ -557,6 +565,7 @@ function CalcSteps({
   estimate: Estimate;
   current: Date;
   earlierWake: EarlierWake | null; // 기상 칩이 빠진 이유에 넣을 앞 일정 (목록을 못 읽었으면 null — 이유는 일반 문구로)
+  wakeOn: boolean; // 폼의 기상 스위치가 켜져 있었음 — 켰는데 결과에 기상이 없으면 이유를 한 줄로
   saving: boolean;
   showCalc: boolean;
   onToggleCalc: () => void;
@@ -585,7 +594,7 @@ function CalcSteps({
       `${KIND_LABEL[baseKind]} ${formatTime(base)}`,
       `${formatTime(a.at)} − 여유 ${a.bufferMinutes} − 이동 ${a.travelMinutes} − 준비 ${a.predictedPrepMinutes}`,
     ],
-    [`알람 강도 ${LEVELS[a.level].name}`, '배경음 · 말소리(Android TTS) · 진동 설정으로 저장'],
+    [`알람 강도 ${LEVELS[a.level].name}`, '배경음 · 말소리 · 진동을 각각 골라 저장'],
   ];
 
   return (
@@ -618,6 +627,12 @@ function CalcSteps({
           {e.sameDayWake ? (
             <Text variant="caption" tone="faint" style={styles.passedNote}>
               {earlierWake ? wakeNote(earlierWake) : '같은 날 앞 일정의 기상 알람으로 깨워요'}
+            </Text>
+          ) : null}
+          {/* 기상을 켰는데 결과에 기상이 없고 앞 일정 기상 때문도 아니면 — 오후 일정이라 따로 만들지 않은 것. 알람 설정에서 켤 수 있음 (B-19) */}
+          {wakeOn && !e.sameDayWake && !a.alarms.some((x) => x.kind === 'WAKE') ? (
+            <Text variant="caption" tone="faint" style={styles.passedNote}>
+              오후 일정이라 기상 알람은 따로 만들지 않았어요 · 알람 설정에서 켤 수 있어요
             </Text>
           ) : null}
           {anyPassed ? (
@@ -686,6 +701,9 @@ function CalcSteps({
 }
 
 const styles = StyleSheet.create({
+  titleLabel: { marginTop: 10, marginBottom: 6, fontSize: 13.5 },
+  titleInput: { fontSize: 15, color: colors.ink, textAlign: 'left', backgroundColor: colors.chip, borderRadius: 12, borderWidth: 1, borderColor: colors.line, paddingVertical: 10, paddingHorizontal: 12, marginBottom: 4 },
+  titleInputError: { borderColor: colors.warn },
   timetableLink: { marginBottom: 12, alignSelf: 'flex-start' },
   title: { marginTop: 8, marginBottom: 4 },
   lead: { marginBottom: 18 },

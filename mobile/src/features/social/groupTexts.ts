@@ -1,5 +1,5 @@
 // 그룹 5장 문구 · 상태 → 문구 (친구_논리설계.md 5장, 시험: __tests__/groups.test.ts)
-import { dateParts } from '@/lib/format';
+import { dateParts, formatTime } from '@/lib/format';
 
 import { messageLimit } from './relationMessages';
 import type { GroupPreview } from './types';
@@ -35,11 +35,13 @@ export function previewProblem(p: GroupPreview): string | null {
 
 // 참여 · 수락 동의 시트 — 참여할 때 한 번 묻고, 그룹 상세에서 바꿀 수 있음 (5-09 · 5-10)
 export const CONSENT_TEXT = {
-  title: '기상 상태를 그룹에 공유할까요?',
+  title: '그룹에 내 기상을 공개할까요?', // 그룹 이름을 알면 consentTitle로 '{그룹 이름}에 …'
   body: '그룹 사람들이 내가 일어났는지 볼 수 있어요. 알람 내용은 공유되지 않아요.',
-  share: '공유',
+  share: '공개',
   later: '나중에',
 };
+
+export const consentTitle = (groupName?: string | null) => (groupName ? `${groupName}에 내 기상을 공개할까요?` : CONSENT_TEXT.title);
 
 export const LEFT_TOAST = '그룹에서 나왔어요';
 export const MEMBER_REMOVED_TOAST = '그룹에서 내보냈어요';
@@ -63,6 +65,13 @@ export const INVITES_SHOWN = 3;
 export const moreInvitesText = (n: number) => `초대 ${n}개 더 보기`;
 export const CREATOR_UNKNOWN = '만든 사람 알 수 없음'; // 9-27 — 참여한 사람 누구나 고칠 수 있음
 export const JOINED_TOAST = '내 알람을 만들었어요';
+// [내 알람 만들기] 뒤 토스트 — 만든 기상 · 출발 시각이 있으면 같이 (D-16: '내 알람을 맞췄어요 · 기상 7:20 · 출발 8:30')
+export function joinedToastText(result: { wakeAt?: Date | null; departAt?: Date | null }): string {
+  const parts = [result.wakeAt ? `기상 ${formatTime(result.wakeAt)}` : null, result.departAt ? `출발 ${formatTime(result.departAt)}` : null].filter(Boolean);
+  return parts.length ? `내 알람을 맞췄어요 · ${parts.join(' · ')}` : JOINED_TOAST;
+}
+// 공동 약속을 저장한 뒤 토스트 끝에 붙임 (D-13) — 그룹에 보인다는 것 · 그룹원은 각자 알람을 만든다는 것
+export const sharedSavedToast = (base: string) => `${base} · 그룹에도 보여요. 그룹원은 각자 [내 알람 만들기]를 해요`;
 export const LEFT_APPOINTMENT_TOAST = '이 약속에서 빠졌어요';
 export const leaveAppointmentText = (title: string) => ({
   title: `${title}에서 빠질까요?`,
