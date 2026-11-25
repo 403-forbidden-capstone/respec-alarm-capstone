@@ -59,7 +59,7 @@ import { requireUserId } from '@/lib/user';
 import { useLeaveGuard } from '@/lib/useLeaveGuard';
 import { useLoad } from '@/lib/useLoad';
 import { listGroups } from '@/features/social/api';
-import { SHARED_APPOINTMENT_NOTE } from '@/features/social/groupTexts';
+import { SHARED_APPOINTMENT_NOTE, sharedSavedToast } from '@/features/social/groupTexts';
 import { colors, font } from '@/theme';
 import { useAccent } from '@/lib/skyTone';
 
@@ -221,14 +221,14 @@ export default function NewScheduleScreen() {
       const rings = upcomingAlarms(saved.alarms, now()).length;
       const skipped = ringingKinds(saved.alarms).filter((x) => isPassed(x, now())).length;
       // 저장은 됐는데 폰 예약 · 준비물이 못 한 것이 있으면 "맞췄어요" 대신 그 사실을 (saveNotice.ts)
-      toast(
-        saveNotice(saved.followUp) ??
-          (!saved.alarms.length
-            ? '일정을 알람 없이 저장했어요'
-            : rings
-              ? `알람 ${rings}개를 맞췄어요${skipped ? ` · 지난 알람 ${skipped}개는 울리지 않아요` : ''}`
-              : '일정을 저장했어요 · 울릴 알람이 없어요'),
-      );
+      const notice = saveNotice(saved.followUp);
+      const done = !saved.alarms.length
+        ? '일정을 알람 없이 저장했어요'
+        : rings
+          ? `알람 ${rings}개를 맞췄어요${skipped ? ` · 지난 알람 ${skipped}개는 울리지 않아요` : ''}`
+          : '일정을 저장했어요 · 울릴 알람이 없어요';
+      // 공동 약속이면 그룹에 보였다는 것 · 그룹원은 각자 내 알람을 만든다는 것까지 (D-13)
+      toast(notice ?? (draft.groupId ? sharedSavedToast(done) : done));
       // N3: 첫 알람 저장 직후 알림 안내 (한 번만, 거절 뒤엔 홈 빨간 줄 · 점검표) — L7
       // 울릴 알람이 없는 저장(전부 지난 알람)에는 안 물음 — 답이 결과를 안 바꿈(#240 원칙 ④)
       if (rings > 0) void askNotifications('alarm');

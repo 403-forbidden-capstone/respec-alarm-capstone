@@ -47,8 +47,8 @@ export default function SuggestionScreen() {
   return <Detail suggestion={data} reload={reload} />;
 }
 
-// 적용 뒤 자동 되돌림 안내 — 무엇이(이번 시각) 언제(다음 기록에서) 돌아가는지
-const REVERT_LINE = '다음 기록에서 이 시각이 더 어긋나면 적용 전 시각으로 자동으로 돌아와요.';
+// 적용 뒤 되돌림 안내 — 자동 되돌림은 없음(docs/decisions.md S01: 스키마에 자리 없음), 아래 [이전 값으로 되돌리기]로 직접 (C-15)
+const REVERT_LINE = '아래에서 언제든 이전 값으로 되돌릴 수 있어요.';
 
 function Detail({ suggestion: s, reload }: { suggestion: Suggestion; reload: () => Promise<boolean> }) {
   const [editing, setEditing] = useState<number | null>(null); // 직접 수정 시트에서 고른 값(적용 전보다 일찍 +, 늦게 − 분), 닫혀 있으면 null
